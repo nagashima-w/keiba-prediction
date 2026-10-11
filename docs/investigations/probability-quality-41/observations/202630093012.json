@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202630093012",
+  "region": "nar",
+  "requestedDate": "20260930",
+  "kaisaiDate": "20260930",
+  "venueCode": "30",
+  "raceNumber": 12,
+  "raceName": "サンライズカップ〔...(2歳)",
+  "listedEntryCount": 12,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1800,
+  "runnerCount": 12,
+  "placedCount": 3,
+  "oddsStatus": "middle",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "ミッションフェロー",
+      "prior": 0.1776334192213097,
+      "placeOddsMin": 17.8,
+      "placeOddsMax": 36.7,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 8
+    },
+    {
+      "umaban": 2,
+      "horseName": "シフトチェンジ",
+      "prior": 0.24799645592457506,
+      "placeOddsMin": 2,
+      "placeOddsMax": 3.7,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 3
+    },
+    {
+      "umaban": 3,
+      "horseName": "ライトビーンズ",
+      "prior": 0.37241459104782804,
+      "placeOddsMin": 10.7,
+      "placeOddsMax": 21.9,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 8
+    },
+    {
+      "umaban": 4,
+      "horseName": "カンベイ",
+      "prior": 0.2274117087467084,
+      "placeOddsMin": 10.3,
+      "placeOddsMax": 21.1,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    },
+    {
+      "umaban": 5,
+      "horseName": "ゴーゴーミツヒコ",
+      "prior": 0.24053076884320418,
+      "placeOddsMin": 3.9,
+      "placeOddsMax": 7.7,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    },
+    {
+      "umaban": 6,
+      "horseName": "ソルデイスター",
+      "prior": 0.2309267728946981,
+      "placeOddsMin": 2,
+      "placeOddsMax": 3.6,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 3
+    },
+    {
+      "umaban": 7,
+      "horseName": "プライベートセクタ",
+      "prior": 0.2058597187332817,
+      "placeOddsMin": 3.4,
+      "placeOddsMax": 6.7,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    },
+    {
+      "umaban": 8,
+      "horseName": "ニュースタンダード",
+      "prior": 0.32437605456673635,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 9,
+      "horseName": "イケメンモンスター",
+      "prior": 0.31872859333380077,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 10,
+      "horseName": "ブラックタイクーン",
+      "prior": 0.21062905069469443,
+      "placeOddsMin": 25.2,
+      "placeOddsMax": 51.9,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 11,
+      "horseName": "スカイビュー",
+      "prior": 0.13804124973096227,
+      "placeOddsMin": 9.5,
+      "placeOddsMax": 19.3,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 12,
+      "horseName": "タルマエドン",
+      "prior": 0.305451616262201,
+      "placeOddsMin": 1,
+      "placeOddsMax": 1.2,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/30",
+      "totalResultCount": 73,
+      "removedCount": 12,
+      "removedByCutoffCount": 12,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:47:15.594Z"
+}

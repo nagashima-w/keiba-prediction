@@ -39,7 +39,6 @@ describe("prior較正(既定重みでの過剰補正防止)", () => {
         restRunNumber: 1,
         stableLocation: "栗東",
         kinryo: 56,
-        bodyWeightDiff: 2,
       },
       fieldSize: 16,
     });
@@ -80,7 +79,6 @@ describe("prior較正(既定重みでの過剰補正防止)", () => {
         restRunNumber: null,
         stableLocation: "美浦",
         kinryo: 55,
-        bodyWeightDiff: 0,
       },
       fieldSize: 12,
     });
@@ -103,7 +101,6 @@ describe("prior較正(既定重みでの過剰補正防止)", () => {
         restRunNumber: null,
         stableLocation: "美浦",
         kinryo: 55,
-        bodyWeightDiff: null,
       },
       fieldSize: 16,
     });
@@ -187,7 +184,6 @@ const NEUTRAL_TODAY: TodayRaceConditions = {
   restRunNumber: null,
   stableLocation: "美浦",
   kinryo: 55,
-  bodyWeightDiff: null,
 };
 
 /** 近走重みを極端に大きくして raw を天井超過させる設定(正規化テスト用)。 */

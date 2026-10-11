@@ -399,7 +399,7 @@ describe("summarizeSameDayTrend", () => {
 /**
  * collectSameDayTrend(タスク#27-C: 当日・同一場・同一面の確定済み結果を集める収集ヘルパー)のテスト。
  *
- * 「兄弟レースID列挙(先頭10桁+01〜12、自番号除外)→lookupで確定済み詳細を引く→面フィルタ
+ * 「先行レースID列挙(先頭10桁+自番号より小さい番号。Issue #153)→lookupで確定済み詳細を引く→面フィルタ
  * (対象面一致・非null のみ)→finishPosition変換(number→{kind:"順位"}、null→null)→
  * summarizeSameDayTrend呼び出し」の配線を検証する。summarizeSameDayTrend自体の閾値・境界値は
  * 上記の summarizeSameDayTrend テストで検証済みのため、ここでは収集・変換・フィルタの正しさに絞る。
@@ -446,8 +446,8 @@ describe("collectSameDayTrend(当日・同一場・同一面の確定済み結�
     ]);
   }
 
-  describe("観点1: 兄弟レースID列挙(先頭10桁+01〜12、自番号除外)", () => {
-    it("中央: lookupを兄弟レースID11件(自番号11を除く01〜12)にちょうど1回ずつ呼ぶこと", () => {
+  describe("観点1: 先行レースID列挙(先頭10桁+自番号より小さい番号のみ。後続レースは先読みリークになるため見ない。Issue #153)", () => {
+    it("中央: lookupを先行レースID10件(自番号11より小さい01〜10)にちょうど1回ずつ呼び、後続の12は呼ばないこと", () => {
       const calledWith: string[] = [];
       collectSameDayTrend(TARGET_CENTRAL, "芝", (raceId) => {
         calledWith.push(raceId);
@@ -464,11 +464,11 @@ describe("collectSameDayTrend(当日・同一場・同一面の確定済み結�
         "202605020808",
         "202605020809",
         "202605020810",
-        "202605020812",
       ]);
+      expect(calledWith).not.toContain("202605020812");
     });
 
-    it("地方: lookupを兄弟レースID11件(自番号10を除く01〜12)にちょうど1回ずつ呼ぶこと", () => {
+    it("地方: lookupを先行レースID9件(自番号10より小さい01〜09)にちょうど1回ずつ呼び、後続の11・12は呼ばないこと", () => {
       const calledWith: string[] = [];
       collectSameDayTrend(TARGET_NAR, "ダ", (raceId) => {
         calledWith.push(raceId);
@@ -484,9 +484,56 @@ describe("collectSameDayTrend(当日・同一場・同一面の確定済み結�
         "202654071207",
         "202654071208",
         "202654071209",
-        "202654071211",
-        "202654071212",
       ]);
+      expect(calledWith).not.toContain("202654071211");
+      expect(calledWith).not.toContain("202654071212");
+    });
+
+    it("自番号が01のレースでは lookup を一度も呼ばず、null を返すこと(先行レースが無い境界)", () => {
+      const calledWith: string[] = [];
+      const result = collectSameDayTrend(parseRaceId("202605020801"), "芝", (raceId) => {
+        calledWith.push(raceId);
+        return frontLeaningRace();
+      });
+      expect(calledWith).toEqual([]);
+      expect(result).toBeNull();
+    });
+
+    it("自番号01〜12のどれでも、lookup に渡るレース番号はすべて自番号より小さいこと(自番号・後続を見ない)", () => {
+      for (let n = 1; n <= 12; n++) {
+        const own = parseRaceId(`2026050208${String(n).padStart(2, "0")}`);
+        const calledNumbers: number[] = [];
+        collectSameDayTrend(own, "芝", (raceId) => {
+          calledNumbers.push(Number(raceId.slice(10, 12)));
+          return undefined;
+        });
+        // 前提: 呼び出し件数は n-1(0件のまま全称が空振りしないよう件数を固定する)。
+        expect(calledNumbers).toHaveLength(n - 1);
+        expect(calledNumbers.every((x) => x < n)).toBe(true);
+      }
+    });
+
+    it("後続レースに確定結果が取り込まれていても集計に入らないこと(先行2本+後続2本が全て芝なら、レース数は先行の2のまま)", () => {
+      const target = parseRaceId("202605020805"); // 自番号05
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020801": frontLeaningRace(), // 先行→対象
+        "202605020802": frontLeaningRace(), // 先行→対象
+        "202605020806": frontLeaningRace(), // 後続→見ない
+        "202605020807": frontLeaningRace(), // 後続→見ない
+      };
+      const result = collectSameDayTrend(target, "芝", lookupFromMap(map));
+      expect(result).not.toBeNull();
+      expect(result!.サンプル数).toEqual({ レース数: 2, 複勝圏内馬数: 6 });
+    });
+
+    it("取り込み済みが後続レースだけのとき(先行が空)は、芝で全件一致していても null を返すこと", () => {
+      const target = parseRaceId("202605020805");
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020806": frontLeaningRace(),
+        "202605020807": frontLeaningRace(),
+        "202605020808": frontLeaningRace(),
+      };
+      expect(collectSameDayTrend(target, "芝", lookupFromMap(map))).toBeNull();
     });
   });
 

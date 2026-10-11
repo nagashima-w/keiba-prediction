@@ -64,6 +64,10 @@ const validUpdate: SettingsUpdate = {
   includeComboOdds: false,
   includeWideInAllocation: true,
   includeTrioInAllocation: true,
+  includeQuinellaInAllocation: true,
+  includeExactaInAllocation: true,
+  includeTrifectaInAllocation: true,
+  includeBracketQuinellaInAllocation: true,
 };
 
 /** 登録済みハンドラを取得する。 */

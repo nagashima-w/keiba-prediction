@@ -38,6 +38,14 @@
  * 表示に使う場合は、出馬表側(build-prompt.ts の race.raceName。ユーザーが見ている画面と
  * 一致する)を正とし、API側の名称とは混在させないこと。
  *
+ * 先読みリークの除外(Issue #153): 過去のレースを後から分析するとき、APIの応答には当該回自身と
+ * 当該回より後の回が含まれうる(実測: 地方は、実測した2本〈同じ大井の同一重賞シリーズ〉では race_id に
+ * 依らず同じ応答を返した。2023年の回を要求しても2026〜2017年が返る。別シリーズの地方重賞は未確認。
+ * 中央は当該年より前の10年を返し、含まれない。詳細は
+ * docs/grade-winner-lookahead-investigation.md)。集計の前に excludeLookaheadEntries で
+ * それらを除く(collectGradeWinnerTrend が呼ぶ)。summarizeGradeWinnerTrend 自体は除外を行わない
+ * (渡された配列をそのまま集計する純関数のまま)。
+ *
  * 標本数の食い違いについて(2026-07-28 小改善・プロンプト誤読解消): 複勝圏内馬数(延べ頭数)は
  * 人気サンプル数・複勝配当サンプル数と必ずしも一致しない。食い違いが実在する条件:
  * (a) 7頭以下等でfuku_pay3が欠損する回、(b) 複勝非発売でfuku_pay1〜3が全欠の回、
@@ -59,6 +67,18 @@ import type {
   GradeWinnerResultHorse,
 } from "../scraper/parse-grade-winner.js";
 import type { CourseType } from "../scraper/types.js";
+import type {
+  GradeWinnerRange,
+  GradeWinnerTrendSummary,
+  GradeWinnerValueCount,
+} from "./grade-winner-trend-types.js";
+
+// 集計結果の型は node 依存の無い `grade-winner-trend-types.ts` に置いている(Issue #201。切り出した理由はそのファイルの先頭)。既存の import のため、ここから再 export する。
+export type {
+  GradeWinnerRange,
+  GradeWinnerTrendSummary,
+  GradeWinnerValueCount,
+} from "./grade-winner-trend-types.js";
 
 /** 条件フィルタに使う、分析対象レース自身の条件。 */
 export interface GradeWinnerConditions {
@@ -86,83 +106,6 @@ function trackCodeOfEntryRaceId(raceId: string | null): string | null {
     return null;
   }
   return raceId.slice(4, 6);
-}
-
-/** 値ごとの出現回数(馬場内訳・柵内訳に使う)。 */
-export interface GradeWinnerValueCount {
-  readonly 値: string;
-  readonly 回数: number;
-}
-
-/** 最小〜最大のレンジ。 */
-export interface GradeWinnerRange {
-  readonly min: number;
-  readonly max: number;
-}
-
-/** summarizeGradeWinnerTrend の出力。常に同じキー構成の構造化オブジェクトに固定する。 */
-export interface GradeWinnerTrendSummary {
-  /** APIから取得できた過去回の総数(条件一致・除外を問わない。10とは限らない)。 */
-  readonly 対象回数: number;
-  /** jyo+track+kyoriが一致した回数。 */
-  readonly 条件一致回数: number;
-  /** 条件不一致で除外した回数(= 対象回数 - 条件一致回数)。 */
-  readonly 条件除外回数: number;
-  /** 条件一致した回の出走頭数レンジ。集計対象が無ければ null。 */
-  readonly 頭数レンジ: GradeWinnerRange | null;
-  /** 条件一致した回の馬場状態の内訳。 */
-  readonly 馬場内訳: readonly GradeWinnerValueCount[];
-  /** 条件一致した回の柵の内訳(フィルタには使わず材料として提示するのみ)。 */
-  readonly 柵内訳: readonly GradeWinnerValueCount[];
-  /** 条件一致した回の複勝圏内(確定着順3着以内、降着は確定着順で判定)馬の延べ頭数。 */
-  readonly 複勝圏内馬数: number;
-  /** 複勝圏内馬の単勝人気レンジ。算出不能なら null。 */
-  readonly 人気レンジ: GradeWinnerRange | null;
-  /**
-   * 人気レンジの算出に使えたサンプル数(プロンプト誤読解消。2026-07-28小改善)。
-   * 複勝圏内馬数(延べ頭数)と食い違うことがある(複勝圏内馬のninkiがnull/0の場合等)ため、
-   * 「複勝圏内(延べN頭)」のNとは別に、人気側自身のサンプル数を持たせて誤読を防ぐ。
-   * レンジが null のときは常に 0。
-   */
-  readonly 人気サンプル数: number;
-  /** 複勝圏内馬のうち単勝人気が二桁(10番人気以上)だった延べ頭数。 */
-  readonly 二桁人気頭数: number;
-  /** 複勝配当(fuku_pay1〜3)のレンジ。算出不能なら null。 */
-  readonly 複勝配当レンジ: GradeWinnerRange | null;
-  /** 複勝配当(fuku_pay1〜3)の中央値。算出不能なら null。 */
-  readonly 複勝配当中央値: number | null;
-  /**
-   * 複勝配当レンジ・中央値の算出に使えたサンプル数(プロンプト誤読解消。2026-07-28小改善)。
-   * 複勝圏内馬数(延べ頭数)と食い違うことがある。食い違いが起きる実在条件:
-   * (a) 7頭以下等で fuku_pay3 が欠損する回、(b) 複勝非発売で fuku_pay1〜3 が全欠の回、
-   * (c) 3着同着で複勝圏内は4頭だが payback は3枠のみの回、(d) payback 自体が null の回、
-   * (e) fuku_pay が0または非有限値の回。レンジが null のときは常に 0。
-   */
-  readonly 複勝配当サンプル数: number;
-  /**
-   * 複勝圏内馬の平均通過順相対(コーナー通過順の平均÷頭数。leg-style.ts の
-   * classifyRunLegStyleFull による算出を再利用)。ラベル化はしない(参考値)。算出不能なら null。
-   */
-  readonly 平均通過順相対: number | null;
-  /** 平均通過順相対の算出に使えたサンプル数。 */
-  readonly 通過順相対サンプル数: number;
-  /** 複勝圏内馬の平均上がり3F(秒)。算出不能なら null。 */
-  readonly 平均上がり: number | null;
-  /** 平均上がりの算出に使えたサンプル数。 */
-  readonly 上がりサンプル数: number;
-  /**
-   * 複勝圏内馬の平均馬番相対(umaban÷頭数。ラベル化はしない=内有利/外有利という判定値を持たない)。
-   *
-   * 命名について(code-reviewer指摘・要修正1対応): 当初「平均枠相対」としていたが、実装は
-   * wakuban(枠番。1〜8)ではなく umaban(馬番)を使っている。日本の競馬用語で「枠」と「馬番」は
-   * 別概念(既存の scorer 側「枠順バイアス」は実際の枠番ベース)であり、「枠」を名乗ると
-   * LLMや将来の読者が実際の枠番グループのバイアスと誤読するため、名称を実装(umaban)に
-   * 合わせて「馬番相対」へ改称した(wakuban側の実装への変更は行わない: 頭数が少ないレースでは
-   * 枠番と馬番がほぼ一致し、かつ馬番の方が粒度が細かく相対位置の指標として情報量が多いため)。
-   */
-  readonly 平均馬番相対: number | null;
-  /** 平均馬番相対の算出に使えたサンプル数。 */
-  readonly 馬番相対サンプル数: number;
 }
 
 /** 条件一致とみなす最小回数未満ならブロック全体を非表示にする閾値。 */
@@ -336,26 +279,105 @@ export function summarizeGradeWinnerTrend(
 // same-day-trend.ts の collectSameDayTrend(収集+集計をまとめた関数)と同じ役割分担の考え方。
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 先読みリークの除外(Issue #153)
+// ---------------------------------------------------------------------------
+
+/** excludeLookaheadEntries に渡す、分析対象レースの識別と基準日。 */
+export interface LookaheadGuard {
+  /** 分析対象のレースID。これと一致する raceId の回(=当該回自身)は日付に依らず除外する。 */
+  readonly raceId: RaceId;
+  /**
+   * 基準日。この日と同日以降の回を除外する。`YYYY/MM/DD`・`YYYYMMDD`・`YYYY-MM-DD` のいずれでもよく、
+   * 数字だけを取り出して(ゼロ埋め8桁を要求する)比較する。形式が不正なら例外を投げる(契約違反)。
+   */
+  readonly cutoffDate: string;
+}
+
+/** 日付文字列から数字だけを取り出し、実在しうる月日のゼロ埋め8桁(YYYYMMDD)だけを返す。それ以外は null。 */
+function digitsOfDate(raw: string | null): string | null {
+  if (raw === null) {
+    return null;
+  }
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length !== 8) {
+    return null;
+  }
+  const month = Number(digits.slice(4, 6));
+  const day = Number(digits.slice(6, 8));
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+  return digits;
+}
+
 /**
- * 指定レースの過去10年結果を取得し、分析対象レース自身の条件で集計する(タスク機能B)。
+ * 過去回配列から、分析対象レースの時点では存在しなかった(先読みになる)回を除く(Issue #153)。
+ *
+ * 過去のレースを後から分析すると、APIの応答(地方は、実測した大井のシリーズでは race_id に依らず同じ応答)に、当該回自身と
+ * 当該回より後の回が含まれ、LLMプロンプトの「同レース過去10年結果傾向」に混入する。
+ * 次のいずれかの回を除外する(#39 の戦績の遮断と同じ保守側の方針):
+ * - `raceId` が対象レースと一致する回(日付に依らず。基準日が実行日で近似される過去分析でも
+ *   当該回は日付だけでは残るため)。
+ * - `raceDate` が基準日と**同日以降**の回(同日は当該回の可能性が高い)。
+ * - `raceDate` が null・不正(ゼロ埋め8桁の実在しうる日付でない)の回(判定不能。未来の回を混ぜない側に倒す)。
+ *
+ * 日付は数字だけにそろえて(`2026-07-01` → `20260701`)比較する。入力は破壊せず、新しい配列を返す
+ * (何も除外されないときも同じ内容の新しい配列)。
+ *
+ * @throws Error 基準日がゼロ埋め8桁の日付として解釈できない場合(呼び出し側の契約違反)
+ */
+export function excludeLookaheadEntries(
+  entries: readonly GradeWinnerEntry[],
+  guard: LookaheadGuard,
+): GradeWinnerEntry[] {
+  const cutoff = digitsOfDate(guard.cutoffDate);
+  if (cutoff === null) {
+    throw new Error(
+      `基準日をYYYYMMDD(ゼロ埋め8桁)として解釈できません(入力: "${guard.cutoffDate}")`,
+    );
+  }
+  return entries.filter((e) => {
+    if (e.raceId === guard.raceId) {
+      return false;
+    }
+    const entryDate = digitsOfDate(e.raceDate);
+    return entryDate !== null && entryDate < cutoff;
+  });
+}
+
+/**
+ * 指定レースの過去10年結果を取得し、先読みになる回を除いたうえで、分析対象レース自身の条件で
+ * 集計する(タスク機能B。Issue #153 で先読みリークの除外を追加)。
+ *
+ * 取得した過去回配列から、`excludeLookaheadEntries` で当該回自身・基準日以降の回・日付不明の回を
+ * 除いてから集計する。したがって `対象回数` は**除外した後の件数**で、リークで除いた回を数えない。
+ * 当日運用(基準日が分析対象の開催日で、過去回がすべてそれより前)では何も除かれず、従来と同じ結果になる。
  *
  * @param raceId 分析対象のレースID(検証済み)
  * @param conditions 分析対象レース自身の条件(trackCode/track/kyori)。summarizeGradeWinnerTrend の
  *   フィルタにそのまま使われる
+ * @param cutoffDate 基準日(分析日。analysis-pipeline.ts の `analysisDate`。`YYYY/MM/DD` 等、
+ *   `excludeLookaheadEntries` が解釈できる形式)。この日と同日以降の回は集計に使わない
  * @param deps 注入依存(fetcher。通常は CachedFetcher)
- * @returns 非重賞・対象データなし(fetchGradeWinnerEntriesがnullを返す)、または条件一致が
+ * @returns 非重賞・対象データなし(fetchGradeWinnerEntriesがnullを返す)、または(除外後の)条件一致が
  *   3回未満なら null(呼び出し側はこれを異常とみなさず静かにスキップすること)。中央・地方
  *   (NAR)いずれのraceIdでも動作する(fetchGradeWinnerEntriesがホストを自動選択する)。
  * @throws GradeWinnerParseError status:OKであるにもかかわらず応答構造が壊れている場合
+ * @throws Error 基準日が解釈できない場合(excludeLookaheadEntries の契約違反)
  */
 export async function collectGradeWinnerTrend(
   raceId: RaceId,
   conditions: GradeWinnerConditions,
+  cutoffDate: string,
   deps: FetchGradeWinnerDeps,
 ): Promise<GradeWinnerTrendSummary | null> {
   const entries = await fetchGradeWinnerEntries(raceId, deps);
   if (entries === null) {
     return null;
   }
-  return summarizeGradeWinnerTrend(entries, conditions);
+  return summarizeGradeWinnerTrend(
+    excludeLookaheadEntries(entries, { raceId, cutoffDate }),
+    conditions,
+  );
 }

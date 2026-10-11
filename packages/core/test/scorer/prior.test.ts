@@ -62,7 +62,6 @@ const NEUTRAL_TODAY: TodayRaceConditions = {
   restRunNumber: null,
   stableLocation: "美浦",
   kinryo: 55,
-  bodyWeightDiff: null,
 };
 
 describe("computePrior(prior合成式)", () => {
@@ -128,7 +127,7 @@ describe("computePrior(prior合成式)", () => {
       "上がり3F",
       "コース・距離適性",
       "騎手当該コース",
-      "斤量・馬体重",
+      "斤量",
       "コース枠順バイアス",
       "馬場状態適性",
       "競馬場適性",
@@ -203,7 +202,7 @@ describe("computePrior(prior合成式)", () => {
       "上がり3F",
       "コース・距離適性",
       "騎手当該コース",
-      "斤量・馬体重",
+      "斤量",
       "馬場状態適性",
       "季節適性",
       "夏負けフラグ",
@@ -291,9 +290,54 @@ describe("buildPriorInput(scraper出力からの組み立て)", () => {
     expect(input.today.season).toBe("夏"); // 7月 → 夏
     expect(input.today.stableLocation).toBe("栗東");
     expect(input.today.kinryo).toBe(57);
-    expect(input.today.bodyWeightDiff).toBe(-4);
+    // 馬体重の増減は prior の入力に含めない(Issue #213。LLM が実績と照らして判断するため scorer では使わない)。
+    expect("bodyWeightDiff" in input.today).toBe(false);
     expect(input.today.venueKind).toBe("central");
     expect(input.fieldSize).toBe(12);
+  });
+
+  it("出馬表の馬体重増減(-20kg でも +20kg でも発表前でも)は prior に影響しないこと(Issue #213)", () => {
+    const base: ShutubaHorse = {
+      wakuban: 4,
+      umaban: 7,
+      name: "体重テスト馬",
+      horseId: "2020100002" as ShutubaHorse["horseId"],
+      sex: "牡",
+      age: 4,
+      kinryo: 57,
+      jockeyName: "騎手",
+      jockeyId: null,
+      stableLocation: "栗東",
+      trainerName: "調教師",
+      trainerId: null,
+      bodyWeight: null,
+    };
+    const raceResults = [
+      makeResult({ date: "2025/06/01", finishPosition: rank(3), kinryo: 55 }),
+      makeResult({ date: "2025/05/01", finishPosition: rank(1), kinryo: 55 }),
+    ];
+    const race = {
+      courseType: "芝" as const,
+      distance: 2000,
+      venueName: "東京",
+      isWet: false,
+      date: "2025/07/06",
+      venueKind: "central" as const,
+    };
+    const priorOf = (bodyWeight: ShutubaHorse["bodyWeight"]) =>
+      computePrior(
+        buildPriorInput({ horse: { ...base, bodyWeight }, raceResults, race, fieldSize: 12 }),
+      );
+    const none = priorOf(null);
+    const drop = priorOf({ weight: 460, diff: -20 });
+    const gain = priorOf({ weight: 500, diff: 20 });
+    // 比較の前提: 斤量(前走55→今回57)の項が非ゼロで、prior が中立確率からずれている。
+    const kin = none.contributions.find((c) => c.biasName === "斤量");
+    expect(kin?.applied).toBe(true);
+    expect(kin?.correction).not.toBe(0);
+    expect(drop.prior).toBe(none.prior);
+    expect(gain.prior).toBe(none.prior);
+    expect(drop.contributions).toEqual(none.contributions);
   });
 
   it("venueKind: nar のレース条件を渡すと today.venueKind に nar が伝播すること(地方の所属会場名をstableLocationに持つ馬)", () => {
@@ -353,7 +397,6 @@ describe("computePrior 実フィクスチャ(ウィンターガーデン23走)",
         restRunNumber: 1,
         stableLocation: "栗東",
         kinryo: 56,
-        bodyWeightDiff: 2,
       },
       fieldSize: 16,
     });

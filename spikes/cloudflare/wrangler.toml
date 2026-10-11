@@ -1,0 +1,28 @@
+# Cloudflare 移行スパイク(Issue #159〈#21-A〉)の Worker 設定。
+# name は実行ごとに `wrangler deploy --name keiba-cf-spike-<run_id>-<attempt>` で上書きする。
+name = "keiba-cf-spike"
+main = "src/worker.ts"
+# nodejs_compat: iconv-lite が Buffer に依存するため(2026-08-04 以降の互換日付では既定で有効だが、明示する)。
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = false
+
+# SQLite バックエンドの Durable Object(Free プランで使えるのは SQLite バックエンドだけ)。
+# limits.cpu_ms は設定しない(既定の上限を測るため)。
+[[durable_objects.bindings]]
+name = "SPIKE_DO"
+class_name = "SpikeDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SpikeDO"]
+
+# core(workspace の外)をそのままバンドルするための解決。CI では packages/core/node_modules が無いので、
+# 依存はこのディレクトリの node_modules から解決させる。undici はスタブに差し替える(src/undici-stub.ts)。
+[alias]
+undici = "./src/undici-stub.ts"
+iconv-lite = "./node_modules/iconv-lite"
+cheerio = "./node_modules/cheerio"
+"@keiba/core/ev/combo-bet-allocation" = "../../packages/core/src/ev/combo-bet-allocation.ts"
+"@keiba/core/ev/bet-allocation" = "../../packages/core/src/ev/bet-allocation.ts"

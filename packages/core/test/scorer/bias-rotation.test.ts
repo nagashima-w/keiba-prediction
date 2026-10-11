@@ -322,26 +322,47 @@ describe("computeRotationBias(符号保証・仕様の補正方向をクラン�
   });
 });
 
-describe("computeRotationBias(休み明け実績2走未満の弱いマイナス)", () => {
-  const penalty = DEFAULT_SCORER_CONFIG.rotation.unknownRestPenalty;
-  const weight = DEFAULT_SCORER_CONFIG.weights.rotation;
-
-  it("休み明け実績1走かつ今回休み明けなら弱いマイナス補正のみになること", () => {
+describe("computeRotationBias(休み明け実績2走未満は補正なし。一律の弱いマイナスは Issue #213 で撤去)", () => {
+  it("休み明け実績1走かつ今回休み明けでも、一律の減点はせず補正なし(0)になること", () => {
+    // 前提: 休み明け(N=1)の実績は1走だけ(2走未満)。
     const features = [rotFeat(1, 5), rotFeat(2, 3)];
+    const curve = buildRotationCurve(features);
+    expect(curve.n1.sampleCount).toBe(1);
     const c = computeRotationBias(features, { restRunNumber: 1 });
-    expect(c.applied).toBe(true);
-    expect(c.correction).toBeCloseTo(-penalty * weight, 10);
-    expect(c.correction).toBeLessThan(0);
+    expect(c.applied).toBe(false);
+    expect(c.correction).toBe(0);
+    expect(c.reason).toContain("2走未満");
   });
 
-  it("休み明け実績不足でも今回が2走目以降なら弱いマイナスは適用されず0になること", () => {
+  it("休み明け実績が0走(叩き2走目以降だけ)でも今回休み明けなら補正なし(0)になること", () => {
+    const features = [rotFeat(2, 3), rotFeat(2, 1), rotFeat(3, 8)];
+    expect(buildRotationCurve(features).n1.sampleCount).toBe(0);
+    const c = computeRotationBias(features, { restRunNumber: 1 });
+    expect(c.applied).toBe(false);
+    expect(c.correction).toBe(0);
+    expect(c.reason).toContain("2走未満");
+  });
+
+  it("重みを大きくしても(rotation 重み 10)、休み明け実績2走未満の補正は 0 のままであること", () => {
+    // 旧実装は -penalty × 重み だったので、重みを上げれば 0 でなくなる。重みに比例する減点が無いことを固定する。
+    const features = [rotFeat(1, 5), rotFeat(2, 3)];
+    const heavy = {
+      ...DEFAULT_SCORER_CONFIG,
+      weights: { ...DEFAULT_SCORER_CONFIG.weights, rotation: 10 },
+    };
+    const c = computeRotationBias(features, { restRunNumber: 1 }, heavy);
+    expect(c.weight).toBe(10);
+    expect(c.correction).toBe(0);
+  });
+
+  it("休み明け実績不足でも今回が2走目以降なら補正なし(0)になること", () => {
     const features = [rotFeat(1, 5), rotFeat(2, 3)];
     const c = computeRotationBias(features, { restRunNumber: 2 });
     expect(c.applied).toBe(false);
     expect(c.correction).toBe(0);
   });
 
-  it("休み明け実績2走ちょうどならタイプ分類が発動し弱いマイナスにはならないこと", () => {
+  it("休み明け実績2走ちょうどならタイプ分類が発動し、鉄砲型として補正なしの理由が出ること", () => {
     // N1:2走(1圏内)、N2:2走(1圏内)、N3:2走(1圏内)。fresh/改善どちらでもない中庸 → 補正0。
     const features = [
       rotFeat(1, 1),
@@ -352,9 +373,27 @@ describe("computeRotationBias(休み明け実績2走未満の弱いマイナス)
       rotFeat(3, 8),
     ];
     const c = computeRotationBias(features, { restRunNumber: 1 });
-    // n1率=0.5 = n2plus率0.5 → 鉄砲型(同等以上)。弱いマイナスではない。
-    expect(c.correction).not.toBeCloseTo(-penalty * weight, 10);
+    // n1率=0.5 = n2plus率0.5 → 鉄砲型(同等以上)。
     expect(c.types.freshHorse).toBe(true);
+    expect(c.correction).toBe(0);
+    // 実績2走ちょうどはサンプル不足の分岐に入らない(理由が「2走未満」ではない)。
+    expect(c.reason).not.toContain("2走未満");
+  });
+
+  it("休み明け実績が2走以上ある叩き良化型×休み明けのマイナス補正は残ること(実績に基づく補正。Issue #213 の対象外)", () => {
+    // N1:2走0圏内、N2〜3:4走4圏内 → 叩き良化型。(n1率 − 全体率) = 0 − 4/6 のマイナス × 重み。
+    const features = [
+      rotFeat(1, 8),
+      rotFeat(1, 9),
+      rotFeat(2, 1),
+      rotFeat(2, 2),
+      rotFeat(3, 1),
+      rotFeat(3, 2),
+    ];
+    const c = computeRotationBias(features, { restRunNumber: 1 });
+    expect(c.types.improveWithRacing).toBe(true);
+    expect(c.applied).toBe(true);
+    expect(c.correction).toBeCloseTo(0 - 4 / 6, 10);
   });
 
   it("今回の走目が不明(null)なら補正なしになること", () => {

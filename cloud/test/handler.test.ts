@@ -1,0 +1,1169 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import type { GatePostRequest, GateResult, GateStatus } from "../src/gate-core";
+import { D1_HEALTH_SQL } from "../src/d1-health";
+import { handle, type Env, type GateNamespaceLike, type GateStubLike } from "../src/handler";
+import { validateRaceId } from "../src/netkeiba-check";
+import { CLIENT_JS } from "../src/client-bundle.generated";
+import { CHECK_DEFAULT_RACE_ID, renderCheckPage, renderPage } from "../src/page";
+import { AUD, EMAIL, GOOD_ENV, localKeys, makeKey, NOW, signToken, TEAM } from "./helpers";
+
+const EMPTY_STATUS: GateStatus = { consecutiveRefusals: 0, blockedUntil: null, postBlockedUntil: null, lastStartAt: null, pending: 0 };
+
+function gate(ping: () => Promise<{ sqlite: boolean }>, extra: Partial<GateStubLike> = {}): GateNamespaceLike {
+  const stub: GateStubLike = {
+    ping,
+    fetchRaw: async () => {
+      throw new Error("fetchRaw は呼ばれない想定");
+    },
+    postRaw: async () => {
+      throw new Error("postRaw は呼ばれない想定");
+    },
+    status: async () => EMPTY_STATUS,
+    ...extra,
+  };
+  return { idFromName: (name: string) => name, get: () => stub };
+}
+
+const HEALTHY = gate(async () => ({ sqlite: true }));
+
+/** D1 の疎通確認(`D1_HEALTH_SQL`。analyses の detail_key・llm_note・llm_calls_json と、馬の列を読む)の偽物。発行された文を記録する。 */
+function d1(first: () => Promise<unknown>, prepared: string[] = [], binds: unknown[][] = []): Env["DB"] {
+  return {
+    prepare: (sql: string) => {
+      prepared.push(sql);
+      return {
+        bind: (...values: unknown[]) => {
+          binds.push(values);
+          return { first };
+        },
+        first,
+      };
+    },
+  } as unknown as Env["DB"];
+}
+
+const HEALTHY_D1 = d1(async () => null);
+
+/** R2 の偽物: 呼ばれたら失敗する(health・一覧など、R2 に触れないルートが R2 を呼ばないことの確認に使う)。 */
+const R2_NOT_CALLED = {
+  get: async () => {
+    throw new Error("R2 の get は呼ばれない想定");
+  },
+  put: async () => {
+    throw new Error("R2 の put は呼ばれない想定");
+  },
+} as unknown as Env["ANALYSIS_DETAIL"];
+
+/** 日単位の DO の偽物: 呼ばれたら失敗する(このファイルのルートは RaceDay に触れない。RaceDay のルートは handler-run.test.ts)。 */
+const RACE_DAY_NOT_CALLED: Env["RACE_DAY"] = {
+  idFromName: () => {
+    throw new Error("RACE_DAY は呼ばれない想定");
+  },
+  get: () => {
+    throw new Error("RACE_DAY は呼ばれない想定");
+  },
+};
+
+function envOf(overrides: Partial<Env> = {}): Env {
+  return { ...GOOD_ENV, NETKEIBA_GATE: HEALTHY, DB: HEALTHY_D1, ANALYSIS_DETAIL: R2_NOT_CALLED, RACE_DAY: RACE_DAY_NOT_CALLED, ...overrides };
+}
+
+async function setup() {
+  const key = await makeKey("k1");
+  const lines: string[] = [];
+  const deps = { keys: () => localKeys(key), now: () => NOW, log: (line: string) => void lines.push(line) };
+  const token = await signToken(key);
+  return { key, deps, lines, token };
+}
+
+function req(path: string, init: RequestInit & { token?: string } = {}): Request {
+  const { token, ...rest } = init;
+  const headers = new Headers(rest.headers);
+  if (token !== undefined) {
+    headers.set("Cf-Access-Jwt-Assertion", token);
+  }
+  return new Request(`https://cloud.invalid${path}`, { ...rest, headers });
+}
+
+async function snapshot(response: Response) {
+  return { status: response.status, body: await response.text(), headers: [...response.headers].sort() };
+}
+
+describe("認証の関門(すべてのルートの前。認証できなければ何もせず 403)", () => {
+  it("正しい JWT なら通る(以降の否定テストの前提)", async () => {
+    const { deps, token } = await setup();
+    expect((await handle(req("/", { token }), envOf(), {}, deps)).status).toBe(200);
+  });
+
+  it.each([["GET", "/"], ["GET", "/api/health"], ["GET", "/no-such-path"], ["POST", "/"], ["GET", "/cdn-cgi/anything"]])(
+    "JWT なしの %s %s は 403(404・405 にならない。ルートの存在を教えない)",
+    async (method, path) => {
+      const { deps } = await setup();
+      const response = await handle(req(path, { method }), envOf(), {}, deps);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("forbidden");
+    },
+  );
+
+  it("拒否の原因が違っても、応答(ステータス・本文・ヘッダ)は完全に同じで、設定の有無や理由は一切含まれない", async () => {
+    const { key, deps, token } = await setup();
+    const expired = await signToken(key, { exp: 1 });
+    // Issue #238(契約変更): 旧「別のメール」の行は拒否ではなくなった(別のメールは閲覧者として通る。下の「閲覧者」のテストと handler-roles.test.ts で固定)。
+    const cases: Array<[string, Request, Env]> = [
+      ["JWT なし", req("/"), envOf()],
+      ["壊れた JWT", req("/", { token: "a.b.c" }), envOf()],
+      ["期限切れ", req("/", { token: expired }), envOf()],
+      ["チーム名が未設定", req("/", { token }), envOf({ ACCESS_TEAM_NAME: undefined })],
+      ["AUD が未設定", req("/", { token }), envOf({ ACCESS_AUD: undefined })],
+      ["許可メールが未設定", req("/", { token }), envOf({ ACCESS_ALLOWED_EMAIL: undefined })],
+      ["チーム名が不正", req("/", { token }), envOf({ ACCESS_TEAM_NAME: "A/B" })],
+    ];
+    // 前提: 正常な JWT と完全な設定なら 200 になる(拒否が設定・JWT の差で起きていることの確認)
+    expect((await handle(req("/", { token }), envOf(), {}, deps)).status).toBe(200);
+    const snapshots = [];
+    for (const [, request, env] of cases) {
+      snapshots.push(await snapshot(await handle(request, env, {}, deps)));
+    }
+    expect(snapshots).toHaveLength(7);
+    for (const s of snapshots) {
+      expect(s.status).toBe(403);
+      expect(s.body).toBe("forbidden");
+      expect(s).toEqual(snapshots[0]);
+    }
+    const text = JSON.stringify(snapshots[0]);
+    for (const secret of [TEAM, AUD, EMAIL, "config", "aud", "email", "expired", "token"]) {
+      expect(text.toLowerCase()).not.toContain(secret.toLowerCase());
+    }
+  });
+
+  // 前提(正しい JWT で / は 200)は上のテストで固定済み。未認証なら、メソッド・パスの正規化の癖に関わらず同一の 403
+  it.each([
+    ["HEAD", "/", "HEAD /"],
+    ["OPTIONS", "/", "OPTIONS /"],
+    ["GET", "//api/health", "二重スラッシュ"],
+    ["GET", "/api/health/", "末尾スラッシュ"],
+    ["GET", "/%61pi/health", "パーセントエンコードされた api"],
+    ["GET", "/api/health?x=1", "クエリ付き"],
+    ["DELETE", "/api/health", "DELETE"],
+  ])("JWT なしの %s %s(%s)は、ルートの有無によらず他の拒否と同一の 403(本文とヘッダ)", async (method, path) => {
+    const { deps, token } = await setup();
+    expect((await handle(req("/", { token }), envOf(), {}, deps)).status).toBe(200);
+    const reference = await snapshot(await handle(req("/"), envOf(), {}, deps));
+    expect(reference.status).toBe(403);
+    expect(reference.body).toBe("forbidden");
+    const actual = await snapshot(await handle(req(path, { method }), envOf(), {}, deps));
+    expect(actual).toEqual(reference);
+  });
+
+  it("handler の catch を通る経路(ctx.access の参照が例外)でも、同一の 403 を返し、ログは reason=error だけ", async () => {
+    const { deps, lines } = await setup();
+    const reference = await snapshot(await handle(req("/"), envOf(), {}, deps));
+    lines.length = 0;
+    const exploding = {
+      get access(): never {
+        throw new Error("boom with secret detail");
+      },
+    };
+    const response = await handle(req("/"), envOf(), exploding, deps);
+    expect(await snapshot(response)).toEqual(reference);
+    expect(lines).toEqual(["access: denied reason=error"]);
+    expect(lines.join("\n")).not.toContain("boom");
+  });
+
+  it("鍵の取得が例外になっても 403(例外を外へ出さない)", async () => {
+    const { deps, token } = await setup();
+    const failing = {
+      ...deps,
+      keys: () => async () => {
+        throw new Error("network down");
+      },
+    };
+    const response = await handle(req("/", { token }), envOf(), {}, failing as never);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("forbidden");
+  });
+
+  it("認証の処理で想定外の例外が出ても 403(フェイルクローズ)", async () => {
+    const { deps, token } = await setup();
+    const exploding = {
+      ...deps,
+      keys: () => {
+        throw new Error("boom");
+      },
+    };
+    expect((await handle(req("/", { token }), envOf(), {}, exploding)).status).toBe(403);
+  });
+
+  it("クッキーの JWT でも通る", async () => {
+    const { deps, token } = await setup();
+    const request = req("/", { headers: { cookie: `CF_Authorization=${token}` } });
+    expect((await handle(request, envOf(), {}, deps)).status).toBe(200);
+  });
+
+  it("不正な JWT が付いていれば、ctx.access が正しくても 403(別の経路で救わない)", async () => {
+    const { deps, lines } = await setup();
+    const good = { access: { aud: AUD, getIdentity: async () => ({ email: EMAIL }) } };
+    expect((await handle(req("/"), envOf(), good, deps)).status).toBe(200);
+    const response = await handle(req("/", { token: "a.b.c" }), envOf(), good, deps);
+    expect(response.status).toBe(403);
+    expect(lines.at(-1)).toBe("access: denied reason=header:malformed");
+  });
+
+  it("JWT が無くても、ctx.access が aud・メールがそろえば通る。aud が違えば 403。管理者でないメールは閲覧者として通る(Issue #238。旧: 一致しなければ 403)", async () => {
+    const { deps } = await setup();
+    const good = { access: { aud: AUD, getIdentity: async () => ({ email: EMAIL }) } };
+    const badAud = { access: { aud: "other", getIdentity: async () => ({ email: EMAIL }) } };
+    const badEmail = { access: { aud: AUD, getIdentity: async () => ({ email: "stranger@example.com" }) } };
+    expect((await handle(req("/"), envOf(), good, deps)).status).toBe(200);
+    expect((await handle(req("/"), envOf(), badAud, deps)).status).toBe(403);
+    // Issue #238(契約変更): 管理者でないメールは 403 ではなく、閲覧者として画面を見られる(管理者専用は handler-roles.test.ts)
+    const viewerResponse = await handle(req("/"), envOf(), badEmail, deps);
+    expect(viewerResponse.status).toBe(200);
+    expect(await viewerResponse.text()).toContain('data-role="viewer"');
+    // 設定が欠けていれば ctx.access が正しくても 403
+    expect((await handle(req("/"), envOf({ ACCESS_AUD: undefined }), good, deps)).status).toBe(403);
+  });
+});
+
+describe("ルート(認証後)", () => {
+  it("GET / はログイン中のメールを表示する HTML を返す(スマホ幅の viewport・キャッシュ禁止)", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/", { token }), envOf(), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
+    const html = await response.text();
+    expect(html).toContain(EMAIL);
+    expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+    expect(html).toContain('<html lang="ja">');
+  });
+
+  it("HEAD / は本文なしの 200", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/", { token, method: "HEAD" }), envOf(), {}, deps);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("");
+  });
+
+  it("GET /api/health は DO の SQLite と D1 の疎通を返す", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/api/health", { token }), envOf(), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false, appBaseUrl: false } });
+  });
+
+  describe("Issue #194: secrets.anthropic(API キーが登録されているか。存在だけを返し、値は返さない。ok の判定には含めない)", () => {
+    const KEY = "sk-ant-api03-THIS-IS-A-FAKE-KEY-VALUE";
+
+    it.each([[undefined], [""], ["   "], ["\n"]])("キーが %j(未登録・空)なら anthropic:false。ok は true のまま(キーが無くても分析は LLM なしで動く)", async (key) => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: key }), {}, deps);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false, appBaseUrl: false } });
+    });
+
+    it("キーが登録されていれば anthropic:true。応答のどこにもキーの値(の一部も)が出ない。ok は DO・D1 だけで決まる", async () => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: KEY }), {}, deps);
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: true, discord: false, appBaseUrl: false } });
+      expect(text).not.toContain("sk-ant");
+      expect(text).not.toContain("FAKE-KEY");
+      // 対照: DO が落ちていれば、キーがあっても 503(ok にキーの有無は効かない)。キーがあるだけでは ok にならない
+      const down = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: KEY, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
+      expect(down.status).toBe(503);
+      expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: true, discord: false, appBaseUrl: false } });
+    });
+
+    it("キーが文字列でない(設定の取り違えで object など)ときは、false(値の型を信用しない)", async () => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: { toString: () => KEY } as unknown as string }), {}, deps);
+      expect(await response.json()).toMatchObject({ secrets: { anthropic: false, discord: false, appBaseUrl: false } });
+    });
+
+    it("認証できなければ、secrets の有無も含めて何も返さない(これまでどおり 403・本文は固定)", async () => {
+      const { deps } = await setup();
+      const response = await handle(req("/api/health"), envOf({ ANTHROPIC_API_KEY: KEY }), {}, deps);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("forbidden");
+    });
+  });
+
+  describe("Issue #205: secrets.discord(Webhook が通知に使える形で登録されているか。真偽だけを返し、値・長さ・一部は返さない。ok の判定には含めない)", () => {
+    const URL_OK = "https://discord.com/api/webhooks/123456789012345678/dummy-token-for-tests_ABC";
+
+    it.each([[undefined], [""], ["   "], ["\n"]])("未登録・空(%j)なら discord:false。ok は true のまま(通知が無くても分析は動く)", async (value) => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: value }), {}, deps);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false, appBaseUrl: false } });
+    });
+
+    it.each([["https://discord.com/api/webhooks/1/abc"], ["https://discordapp.com/api/webhooks/1/abc"], [`  ${URL_OK}\n`]])("通知に使える形(%j)なら discord:true。応答のどこにも値(の一部も)が出ない", async (value) => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: value }), {}, deps);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: true, appBaseUrl: false } });
+      expect(text).not.toContain("webhooks");
+      expect(text).not.toContain("dummy-token");
+      expect(text).not.toContain("discord.com");
+    });
+
+    it.each([["http://discord.com/api/webhooks/1/abc"], ["https://example.com/api/webhooks/1/abc"], ["not a url"], ["xhttps://discord.com/api/webhooks/1/abc"]])(
+      "登録されていても、形式が Discord の Webhook でない(%j)なら discord:false(通知は送られないので、使えないものを true にしない)",
+      async (value) => {
+        const { deps, token } = await setup();
+        const response = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: value }), {}, deps);
+        expect(await response.json()).toMatchObject({ secrets: { discord: false, appBaseUrl: false } });
+      },
+    );
+
+    it("文字列でない値(設定の取り違え)は false。DO が落ちていれば、Webhook があっても 503(ok に影響しない)", async () => {
+      const { deps, token } = await setup();
+      const odd = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: { toString: () => URL_OK } as unknown as string }), {}, deps);
+      expect(await odd.json()).toMatchObject({ secrets: { discord: false, appBaseUrl: false } });
+      const down = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: URL_OK, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
+      expect(down.status).toBe(503);
+      expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: false, discord: true, appBaseUrl: false } });
+    });
+
+    it("認証できなければ、Webhook の有無も含めて何も返さない(403・本文は固定)", async () => {
+      const { deps } = await setup();
+      const response = await handle(req("/api/health"), envOf({ DISCORD_WEBHOOK_URL: URL_OK }), {}, deps);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("forbidden");
+    });
+  });
+
+  describe("Issue #230: secrets.appBaseUrl(通知のリンクに使える形で登録されているか。真偽だけを返し、値・長さ・一部は返さない。ok の判定には含めない)", () => {
+    const BASE = "https://keiba.example.test";
+
+    it.each([[undefined], [""], ["   "], ["\n"]])("未登録・空(%j)なら appBaseUrl:false。ok は true のまま(リンクが無くても通知は送られる)", async (value) => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ APP_BASE_URL: value }), {}, deps);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false, appBaseUrl: false } });
+    });
+
+    it.each([[BASE], [`${BASE}/`], [`  ${BASE}\n`], ["https://keiba.example.test:8443"]])("リンクに使える形(%j)なら appBaseUrl:true。応答のどこにも値(の一部も)が出ない", async (value) => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ APP_BASE_URL: value }), {}, deps);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false, appBaseUrl: true } });
+      expect(text).not.toContain("keiba.example.test");
+      expect(text).not.toContain("https");
+    });
+
+    it.each([["http://keiba.example.test"], ["keiba.example.test"], ["https://keiba.example.test/app"], ["https://user:pass@example.com"], ["javascript:alert(1)"], ["https://keiba.example.test/?x=1"]])(
+      "登録されていても、形式が https のオリジンでない(%j)なら appBaseUrl:false(リンクに使われないものを true にしない)",
+      async (value) => {
+        const { deps, token } = await setup();
+        const response = await handle(req("/api/health", { token }), envOf({ APP_BASE_URL: value }), {}, deps);
+        expect(await response.json()).toMatchObject({ secrets: { appBaseUrl: false } });
+      },
+    );
+
+    it("文字列でない値(設定の取り違え)は false。DO が落ちていれば、登録済みでも 503(ok に影響しない)", async () => {
+      const { deps, token } = await setup();
+      const odd = await handle(req("/api/health", { token }), envOf({ APP_BASE_URL: { toString: () => BASE } as unknown as string }), {}, deps);
+      expect(await odd.json()).toMatchObject({ secrets: { appBaseUrl: false } });
+      const down = await handle(req("/api/health", { token }), envOf({ APP_BASE_URL: BASE, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
+      expect(down.status).toBe(503);
+      expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: false, discord: false, appBaseUrl: true } });
+    });
+
+    it("認証できなければ、登録の有無も含めて何も返さない(403・本文は固定)", async () => {
+      const { deps } = await setup();
+      const response = await handle(req("/api/health"), envOf({ APP_BASE_URL: BASE }), {}, deps);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("forbidden");
+    });
+  });
+
+  it("DO が sqlite=false を返したら 503(ok:false)。DO が例外でも 503 で、例外の中身は返さない。D1 の結果は独立に報告する", async () => {
+    const { deps, token } = await setup();
+    const down = await handle(req("/api/health", { token }), envOf({ NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
+    expect(down.status).toBe(503);
+    expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: false, discord: false, appBaseUrl: false } });
+    const throwing = gate(async () => {
+      throw new Error("internal detail");
+    });
+    const failed = await handle(req("/api/health", { token }), envOf({ NETKEIBA_GATE: throwing }), {}, deps);
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).not.toContain("internal detail");
+  });
+
+  it("D1 の確認が失敗したら 503(ok:false)で、例外の中身は返さない。DO の結果は独立に報告する", async () => {
+    const { deps, token } = await setup();
+    const broken = d1(async () => {
+      throw new Error("D1_ERROR: no such table: analyses");
+    });
+    const response = await handle(req("/api/health", { token }), envOf({ DB: broken }), {}, deps);
+    expect(response.status).toBe(503);
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false }, secrets: { anthropic: false, discord: false, appBaseUrl: false } });
+    expect(text).not.toContain("no such table");
+    // DO も D1 も駄目なら、両方 false
+    const both = await handle(req("/api/health", { token }), envOf({ DB: broken, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
+    expect(both.status).toBe(503);
+    expect(await both.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: false }, secrets: { anthropic: false, discord: false, appBaseUrl: false } });
+  });
+
+  it("D1 の binding が無い(設定漏れ)でも例外を外へ投げず、503 の d1.ok:false で返す", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/api/health", { token }), envOf({ DB: undefined as unknown as Env["DB"] }), {}, deps);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false }, secrets: { anthropic: false, discord: false, appBaseUrl: false } });
+  });
+
+  it("D1 の疎通確認は、読み取り専用の1文(bind なし)を1回だけ発行する(health のたびに書き込み行を増やさない)", async () => {
+    const { deps, token } = await setup();
+    const prepared: string[] = [];
+    const binds: unknown[][] = [];
+    await handle(req("/api/health", { token }), envOf({ DB: d1(async () => null, prepared, binds) }), {}, deps);
+    expect(prepared).toEqual([D1_HEALTH_SQL]);
+    expect(D1_HEALTH_SQL).toBe("SELECT detail_key, llm_note, llm_calls_json, (SELECT highlights_json FROM analysis_horses LIMIT 1) AS highlights_json, (SELECT concerns_json FROM analysis_horses LIMIT 1) AS concerns_json, start_time FROM analyses LIMIT 1"); // migration 0002(detail_key)・0005(llm_note)・0006(馬の highlights_json・concerns_json)・0007(llm_calls_json)・0009(start_time)の適用済みを確かめる(Issue #194・#197・#219)
+    expect(binds).toEqual([]);
+  });
+
+  it("認証に失敗したときは、D1 に触れない(関門の前に何もしない)", async () => {
+    const prepared: string[] = [];
+    const { deps } = await setup();
+    const response = await handle(req("/api/health"), envOf({ DB: d1(async () => null, prepared) }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(prepared).toEqual([]);
+  });
+
+  it("未知のパスは 404、GET/HEAD 以外は 405(Allow 付き)", async () => {
+    const { deps, token } = await setup();
+    expect((await handle(req("/nope", { token }), envOf(), {}, deps)).status).toBe(404);
+    const post = await handle(req("/", { token, method: "POST" }), envOf(), {}, deps);
+    expect(post.status).toBe(405);
+    expect(post.headers.get("allow")).toBe("GET, HEAD");
+  });
+});
+
+describe("renderPage・renderCheckPage(メールの HTML エスケープ)", () => {
+  const renders: readonly (readonly [string, (email: string) => string])[] = [
+    ["renderPage(admin)", (email) => renderPage(email, "admin")],
+    ["renderPage(viewer)", (email) => renderPage(email, "viewer")],
+    ["renderCheckPage", renderCheckPage],
+  ];
+  for (const [name, render] of renders) {
+    it(`${name}: 特殊文字をエスケープする(メールの中の <script> が要素にならない)`, () => {
+      const html = render(`"><script>alert(1)</script>&'@example.com`);
+      expect(html).not.toContain("<script>");
+      expect(html).toContain("&lt;script&gt;");
+      expect(html).toContain("&amp;");
+      expect(html).toContain("&quot;");
+      expect(html).toContain("&#39;");
+    });
+  }
+});
+
+describe("ログ(経路名と理由コードだけ。値は出さない)", () => {
+  it("成功時は経路名(header / cookie / ctx-access)だけが出る", async () => {
+    const { deps, lines, token } = await setup();
+    await handle(req("/", { token }), envOf(), {}, deps);
+    await handle(req("/", { headers: { cookie: `CF_Authorization=${token}` } }), envOf(), {}, deps);
+    await handle(req("/"), envOf(), { access: { aud: AUD, getIdentity: async () => ({ email: EMAIL }) } }, deps);
+    // Issue #238: 経路名に加えて、役割と管理者の出どころの固定トークンが付く(アドレスは出ない)
+    expect(lines).toEqual([
+      "access: ok via=header role=admin admins=fallback",
+      "access: ok via=cookie role=admin admins=fallback",
+      "access: ok via=ctx-access role=admin admins=fallback",
+    ]);
+  });
+
+  it("拒否時は理由コードだけが出る。トークン・メール・チーム名・AUD は出ない", async () => {
+    const { key, deps, lines, token } = await setup();
+    const stranger = await signToken(key, { email: "stranger@example.com" });
+    const expired = await signToken(key, { exp: 1 });
+    await handle(req("/", { token: expired }), envOf(), {}, deps);
+    await handle(req("/", { token }), envOf({ ACCESS_AUD: undefined }), {}, deps);
+    await handle(req("/"), envOf(), {}, deps);
+    // Issue #238(契約変更): 旧 `header:email-mismatch` の行は、別のメールが閲覧者として通るようになったので無い(ok の行になる)
+    await handle(req("/", { token: stranger }), envOf(), {}, deps);
+    expect(lines).toEqual([
+      "access: denied reason=header:expired",
+      "access: denied reason=config-missing",
+      "access: denied reason=no-credentials",
+      "access: ok via=header role=viewer admins=fallback",
+    ]);
+    const all = lines.join("\n");
+    for (const secret of [token, stranger, EMAIL, "stranger@example.com", TEAM, AUD]) {
+      expect(all).not.toContain(secret);
+    }
+  });
+});
+
+
+const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
+const fixtureBytes = (name: string): Uint8Array => new Uint8Array(readFileSync(`${FIXTURES}${name}`));
+
+function responseOf(body: Uint8Array, init: { status?: number; queuedMs?: number; elapsedMs?: number } = {}): GateResult {
+  const copy = new Uint8Array(body.length);
+  copy.set(body);
+  return {
+    kind: "response",
+    status: init.status ?? 200,
+    contentType: "text/html; charset=UTF-8",
+    body: copy.buffer,
+    queuedMs: init.queuedMs ?? 0,
+    elapsedMs: init.elapsedMs ?? 1,
+  };
+}
+
+/** 取得の呼び出しを控える偽のゲート。 */
+function checkGate(
+  handler: (url: string) => GateResult | Promise<GateResult>,
+  status: () => Promise<GateStatus> = async () => EMPTY_STATUS,
+  postHandler: (request: GatePostRequest) => GateResult | Promise<GateResult> = () => {
+    throw new Error("postRaw は呼ばれない想定");
+  },
+) {
+  const urls: string[] = [];
+  const posts: GatePostRequest[] = [];
+  let statusCalls = 0;
+  const namespace = gate(async () => ({ sqlite: true }), {
+    fetchRaw: async (url) => {
+      urls.push(url);
+      return handler(url);
+    },
+    postRaw: async (request) => {
+      posts.push(request);
+      return postHandler(request);
+    },
+    status: async () => {
+      statusCalls += 1;
+      return status();
+    },
+  });
+  return { namespace, urls, posts, statusCalls: () => statusCalls };
+}
+
+const CENTRAL_ID = "202603020211";
+const NAR_ID = "202654071210";
+const CHECK = (raceId: string): string => `/api/netkeiba/check?race_id=${raceId}`;
+
+describe("GET /api/netkeiba/check(Issue #162 段階2b。AC-14)", () => {
+  it("認証の関門のあとに置く: JWT なしは 403(本文は forbidden)で、ゲートを 1 回も呼ばない(HEAD・POST も同じ)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    // 前提: 正しい JWT なら同じ要求が通る(拒否が認証によるものだという確認)
+    expect((await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps)).status).toBe(200);
+    expect(g.urls).toHaveLength(1);
+    const before = g.urls.length;
+    for (const method of ["GET", "HEAD", "POST"]) {
+      const response = await handle(req(CHECK(CENTRAL_ID), { method }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("forbidden");
+    }
+    expect(g.urls).toHaveLength(before);
+  });
+
+  it("中央: 出馬表を 1 回取得し、ok・status・頭数(16)・kind・queuedMs・elapsedMs・ゲートの状態を JSON で返す", async () => {
+    const { deps, token } = await setup();
+    const status: GateStatus = { consecutiveRefusals: 0, blockedUntil: null, postBlockedUntil: null, lastStartAt: 1234, pending: 0 };
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html"), { queuedMs: 2000, elapsedMs: 431 }), async () => status);
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(g.urls).toEqual(["https://race.netkeiba.com/race/shutuba.html?race_id=202603020211"]);
+    expect(await response.json()).toEqual({
+      ok: true,
+      kind: "central",
+      raceId: CENTRAL_ID,
+      status: 200,
+      horses: 16,
+      queuedMs: 2000,
+      elapsedMs: 431,
+      gate: status,
+    });
+    expect(g.statusCalls()).toBe(1);
+  });
+
+  it("地方: nar のホストで取得し、kind=nar・頭数(12)を返す", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("nar_shutuba_202654071210.html")));
+    const response = await handle(req(CHECK(NAR_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(g.urls).toEqual(["https://nar.netkeiba.com/race/shutuba.html?race_id=202654071210"]);
+    expect(await response.json()).toMatchObject({ ok: true, kind: "nar", horses: 12 });
+  });
+
+  it.each([
+    ["race_id が無い", "/api/netkeiba/check"],
+    ["race_id が空", "/api/netkeiba/check?race_id="],
+    ["11 桁", CHECK("20260302021")],
+    ["13 桁", CHECK("2026030202111")],
+    ["英字", CHECK("abcdefghijkl")],
+    ["帯広(場コード 65)", CHECK("202665010101")],
+    ["地方で実在しない日付", CHECK("202642023001")],
+    ["クエリの注入(エンコードした &)", "/api/netkeiba/check?race_id=202603020211%26x%3D1"],
+    ["別名のパラメータだけ", `/api/netkeiba/check?raceid=${CENTRAL_ID}`],
+    ["パラメータ名の大文字小文字違い", `/api/netkeiba/check?RACE_ID=${CENTRAL_ID}`],
+    ["race_id が 2 つ", `/api/netkeiba/check?race_id=${CENTRAL_ID}&race_id=${CENTRAL_ID}`],
+    ["余計なパラメータつき", `/api/netkeiba/check?race_id=${CENTRAL_ID}&url=https://example.com/`],
+  ])("無効な入力は 400 で、ゲートを呼ばない: %s", async (_label, path) => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    const response = await handle(req(path, { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(400);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    const body = (await response.json()) as { ok: boolean; error: { type: string; message: string } };
+    expect(body.ok).toBe(false);
+    expect(body.error.type).toBe("bad-request");
+    expect(body.error.message).toBeTruthy();
+    expect(g.urls).toHaveLength(0);
+    expect(g.statusCalls()).toBe(0);
+  });
+
+  it("パスは厳密(末尾スラッシュ・接頭辞つきは 404。ゲートを呼ばない)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    for (const path of [`/api/netkeiba/check/?race_id=${CENTRAL_ID}`, `/api/netkeiba/checkx?race_id=${CENTRAL_ID}`, `/api/netkeiba?race_id=${CENTRAL_ID}`]) {
+      expect((await handle(req(path, { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps)).status).toBe(404);
+    }
+    expect(g.urls).toHaveLength(0);
+  });
+
+  it("HEAD は取得を起こさない(405・Allow: GET)。netkeiba へ出る経路は GET だけ", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    const response = await handle(req(CHECK(CENTRAL_ID), { token, method: "HEAD" }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET");
+    expect(g.urls).toHaveLength(0);
+  });
+
+  it("ゲートがブレーカーで拒否したら 503(ok:false・gate-refused・reason)で、ゲートの状態も添える", async () => {
+    const { deps, token } = await setup();
+    const status: GateStatus = { consecutiveRefusals: 2, blockedUntil: 999, postBlockedUntil: null, lastStartAt: 1, pending: 0 };
+    const g = checkGate(() => ({ kind: "refused", reason: "blocked", message: "止めています", blockedUntil: 999, retryAfterMs: 5 }), async () => status);
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ ok: false, kind: "central", error: { type: "gate-refused", reason: "blocked" }, gate: status });
+  });
+
+  it("netkeiba が 403 を返したら 502(ok:false・http-error・status 403)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(new Uint8Array(), { status: 403 }));
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ ok: false, status: 403, error: { type: "http-error" } });
+    expect(g.urls).toHaveLength(1); // 再試行しない
+  });
+
+  it("ゲートの status() が失敗しても、確認の結果は返す(gate を省く)。例外の中身は返さない", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(
+      () => responseOf(fixtureBytes("shutuba_202603020211.html")),
+      async () => {
+        throw new Error("internal detail");
+      },
+    );
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({ ok: true, horses: 16 });
+    expect(JSON.parse(text).gate).toBeUndefined();
+    expect(text).not.toContain("internal detail");
+  });
+
+  it("ゲートの取得そのものが例外になっても、502 の JSON で返し、例外を外へ投げない", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => {
+      throw new Error("DO が落ちた");
+    });
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ ok: false, error: { type: "fetch-failed" } });
+  });
+
+  it("全取得は DO の単一インスタンス(固定名 gate)を通る: health と check が同じ名前でスタブを取る", async () => {
+    const { deps, token } = await setup();
+    const names: string[] = [];
+    const stub = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html"))).namespace.get(null);
+    const namespace: GateNamespaceLike = {
+      idFromName: (name: string) => {
+        names.push(name);
+        return name;
+      },
+      get: () => stub,
+    };
+    await handle(req("/api/health", { token }), envOf({ NETKEIBA_GATE: namespace }), {}, deps);
+    await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: namespace }), {}, deps);
+    expect(names).toEqual(["gate", "gate"]);
+  });
+
+  it("1 回の確認でゲートへ出す取得は 1 回だけ", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(g.urls).toHaveLength(1);
+  });
+});
+
+const CHECK_POST = (raceId: string): string => `/api/netkeiba/check?race_id=${raceId}&type=grade-winner`;
+const GRADE_ID = "202603020211";
+const NAR_GRADE_ID = "202644070111";
+
+describe("GET /api/netkeiba/check?type=grade-winner(Issue #181。POST を1本試す)", () => {
+  it("中央: POST を 1 回だけ送り(GET は使わない)、ok・target・status・過去回の数(10)・kind・時間・ゲートの状態を JSON で返す", async () => {
+    const { deps, token } = await setup();
+    const status: GateStatus = { consecutiveRefusals: 0, blockedUntil: null, postBlockedUntil: null, lastStartAt: 99, pending: 0 };
+    const g = checkGate(
+      () => {
+        throw new Error("GET は使わない");
+      },
+      async () => status,
+      () => responseOf(fixtureBytes("grade_winner_202603020211.json"), { queuedMs: 2000, elapsedMs: 312 }),
+    );
+    const response = await handle(req(CHECK_POST(GRADE_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(g.urls).toHaveLength(0);
+    expect(g.posts).toEqual([
+      {
+        url: "https://race.netkeiba.com/race_api/",
+        referer: "https://race.netkeiba.com/race/past10.html?race_id=202603020211",
+        origin: "https://race.netkeiba.com",
+        body: "input=UTF-8&output=json&class=AplGradeWinner&method=get&compress=1&race_id=202603020211",
+      },
+    ]);
+    expect(await response.json()).toEqual({
+      ok: true,
+      kind: "central",
+      raceId: GRADE_ID,
+      target: "grade-winner",
+      status: 200,
+      entries: 10,
+      queuedMs: 2000,
+      elapsedMs: 312,
+      gate: status,
+    });
+    expect(g.statusCalls()).toBe(1);
+  });
+
+  it("地方: nar のホストへ POST し、kind=nar を返す", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(new Uint8Array()), undefined, () => responseOf(fixtureBytes("grade_winner_nar_202644070111.json")));
+    const response = await handle(req(CHECK_POST(NAR_GRADE_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(g.posts.map((p) => p.url)).toEqual(["https://nar.netkeiba.com/race_api/"]);
+    expect(await response.json()).toMatchObject({ ok: true, kind: "nar", target: "grade-winner" });
+  });
+
+  it("type=shutuba を明示しても、これまでどおり出馬表を GET で取得する(POST は使わない)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    const response = await handle(req(`${CHECK(CENTRAL_ID)}&type=shutuba`, { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(200);
+    expect(g.urls).toHaveLength(1);
+    expect(g.posts).toHaveLength(0);
+    expect(await response.json()).toMatchObject({ ok: true, horses: 16 });
+  });
+
+  it("type を付けない確認は、これまでどおり GET だけ(POST は使わない)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(g.posts).toHaveLength(0);
+  });
+
+  it.each([
+    ["type が未知の値", `${CHECK(CENTRAL_ID)}&type=bogus`],
+    ["type が空", `${CHECK(CENTRAL_ID)}&type=`],
+    ["type が 2 つ", `${CHECK(CENTRAL_ID)}&type=grade-winner&type=shutuba`],
+    ["type が 2 つ(同じ値)", `${CHECK(CENTRAL_ID)}&type=grade-winner&type=grade-winner`],
+    ["type の大文字小文字違い", `${CHECK(CENTRAL_ID)}&type=Grade-Winner`],
+    ["パラメータ名 TYPE", `${CHECK(CENTRAL_ID)}&TYPE=grade-winner`],
+    ["type だけで race_id が無い", "/api/netkeiba/check?type=grade-winner"],
+    ["type と余計なパラメータ", `${CHECK_POST(GRADE_ID)}&url=https://example.com/`],
+    ["race_id が無効(POST でも検証する)", CHECK_POST("20260302021")],
+  ])("無効な入力は 400 で、ゲートを呼ばない(GET も POST も): %s", async (_label, path) => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")), undefined, () => responseOf(fixtureBytes("grade_winner_202603020211.json")));
+    const response = await handle(req(path, { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { type: string } }).error.type).toBe("bad-request");
+    expect(g.urls).toHaveLength(0);
+    expect(g.posts).toHaveLength(0);
+    expect(g.statusCalls()).toBe(0);
+  });
+
+  it("認証の関門のあとに置く: JWT なしは 403 で、POST を 1 回も送らない(前提: 正しい JWT なら通る)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(new Uint8Array()), undefined, () => responseOf(fixtureBytes("grade_winner_202603020211.json")));
+    expect((await handle(req(CHECK_POST(GRADE_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps)).status).toBe(200);
+    expect(g.posts).toHaveLength(1);
+    const response = await handle(req(CHECK_POST(GRADE_ID)), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(g.posts).toHaveLength(1);
+  });
+
+  it("HEAD・HTTP の POST のメソッドでは、POST の確認を起こさない(どちらも 405。HEAD はこのエンドポイントの Allow: GET)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(new Uint8Array()), undefined, () => responseOf(fixtureBytes("grade_winner_202603020211.json")));
+    const head = await handle(req(CHECK_POST(GRADE_ID), { token, method: "HEAD" }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(head.status).toBe(405);
+    expect(head.headers.get("allow")).toBe("GET");
+    const post = await handle(req(CHECK_POST(GRADE_ID), { token, method: "POST" }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(post.status).toBe(405);
+    expect(g.posts).toHaveLength(0);
+  });
+
+  it("POST のブレーカーが開いていれば 503(gate-refused・post-blocked)。ゲートの状態(postBlockedUntil)も添える", async () => {
+    const { deps, token } = await setup();
+    const status: GateStatus = { consecutiveRefusals: 0, blockedUntil: null, postBlockedUntil: 5_000_000, lastStartAt: 1, pending: 0 };
+    const g = checkGate(
+      () => responseOf(new Uint8Array()),
+      async () => status,
+      () => ({ kind: "refused", reason: "post-blocked", message: "POST を止めています", blockedUntil: 5_000_000, retryAfterMs: 1000 }),
+    );
+    const response = await handle(req(CHECK_POST(GRADE_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ ok: false, target: "grade-winner", error: { type: "gate-refused", reason: "post-blocked" }, gate: status });
+  });
+
+  it("netkeiba が POST を 403 で拒否したら 502(http-error・status 403)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(new Uint8Array()), undefined, () => responseOf(new Uint8Array(), { status: 403 }));
+    const response = await handle(req(CHECK_POST(GRADE_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ ok: false, target: "grade-winner", status: 403, error: { type: "http-error" } });
+  });
+
+  it("ゲートの POST そのものが例外になっても、502 の JSON で返し、例外を外へ投げない", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(new Uint8Array()), undefined, () => {
+      throw new Error("DO が落ちた");
+    });
+    const response = await handle(req(CHECK_POST(GRADE_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ ok: false, error: { type: "fetch-failed" } });
+  });
+
+  it("1 回の確認でゲートへ出す POST は 1 回だけ", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(new Uint8Array()), undefined, () => responseOf(fixtureBytes("grade_winner_202603020211.json")));
+    await handle(req(CHECK_POST(GRADE_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(g.posts).toHaveLength(1);
+    expect(g.urls).toHaveLength(0);
+  });
+});
+
+describe("GET /check の確認フォーム(Issue #162 段階2b。Issue #184 で `/` から `/check` へ移した)", () => {
+  it("race_id を入れて GET で /api/netkeiba/check へ送るフォームがあり、初期値は 202603020211", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/check", { token }), envOf(), {}, deps);
+    const html = await response.text();
+    expect(html).toContain('<form method="get" action="/api/netkeiba/check">');
+    expect(html).toContain('name="race_id"');
+    expect(html).toContain(`value="${CHECK_DEFAULT_RACE_ID}"`);
+    expect(CHECK_DEFAULT_RACE_ID).toBe("202603020211");
+    expect(html).toContain('type="submit"');
+  });
+
+  it("POST を試すフォームもある: 同じ /api/netkeiba/check へ GET で送り、type=grade-winner を隠しフィールドで固定する。初期の race_id は重賞(fixture のあるレース)", async () => {
+    const { deps, token } = await setup();
+    const html = await (await handle(req("/check", { token }), envOf(), {}, deps)).text();
+    const forms = [...html.matchAll(/<form\b[^>]*>[\s\S]*?<\/form>/g)].map((m) => m[0]);
+    expect(forms).toHaveLength(2);
+    const postForm = forms.find((f) => f.includes('name="type"'))!;
+    expect(postForm).toContain('<form method="get" action="/api/netkeiba/check">');
+    expect(postForm).toContain('<input type="hidden" name="type" value="grade-winner">');
+    expect(postForm).toContain('name="race_id"');
+    expect(postForm).toContain('type="submit"');
+    // 出馬表のフォームには type が無い(これまでの確認はそのまま)
+    expect(forms.find((f) => !f.includes('name="type"'))).toContain(`value="${CHECK_DEFAULT_RACE_ID}"`);
+  });
+
+  it("フォームの初期値は、チェックの検証を通る(中央の実在の race_id)", () => {
+    expect(validateRaceId(CHECK_DEFAULT_RACE_ID)).toMatchObject({ ok: true, kind: "central" });
+  });
+
+  it("CSP は旧 `/` のまま(form-action 'self' を持ち、script-src・connect-src は無い)", async () => {
+    const { deps, token } = await setup();
+    const csp = (await handle(req("/check", { token }), envOf(), {}, deps)).headers.get("content-security-policy");
+    expect(csp).toBe("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+  });
+
+  it("確認の使い方(初回は実在の ID で。実在しない ID はブレーカーを開きうる)の注意書きがある", async () => {
+    const { deps, token } = await setup();
+    const html = await (await handle(req("/check", { token }), envOf(), {}, deps)).text();
+    expect(html).toContain("実在");
+    expect(html).toContain("30 分");
+  });
+});
+
+/**
+ * Issue #175: 読み取り専用の `GET /api/analyses`(分析の要約の一覧。D1 だけ。R2 には触れない)。
+ * 認証の関門の後ろ(JWT なしは 403)。保存の経路は本番にまだ無い(#164 が呼び出し元になる)。
+ */
+describe("GET /api/analyses(Issue #175)", () => {
+  interface FakeD1 {
+    readonly db: Env["DB"];
+    readonly prepared: string[];
+    readonly binds: unknown[][];
+    readonly batches: number[];
+  }
+  /** batch が [分析の行, 馬の行] を返す偽の D1。発行された文・束縛値・batch の文の数を記録する。 */
+  function listDb(analysisRows: unknown[], horseRows: unknown[], failure?: Error): FakeD1 {
+    const prepared: string[] = [];
+    const binds: unknown[][] = [];
+    const batches: number[] = [];
+    const db = {
+      prepare(sql: string) {
+        prepared.push(sql);
+        return {
+          bind(...values: unknown[]) {
+            binds.push(values);
+            return this;
+          },
+        };
+      },
+      async batch(statements: unknown[]) {
+        batches.push(statements.length);
+        if (failure !== undefined) {
+          throw failure;
+        }
+        return [{ results: analysisRows }, { results: horseRows }];
+      },
+    } as unknown as Env["DB"];
+    return { db, prepared, binds, batches };
+  }
+
+  const ROW = { id: 7, raceId: "202603020211", analyzedAt: "2026-10-06T09:00:00.000Z", evEstimated: 0, promptVersion: "v1", additionalInstruction: null, kaisaiDate: "20261006", model: "m", rawResponse: null, raceSnapshotJson: null, historyCutoffDate: null, promptLookaheadGuarded: 1, hasDetail: 1 };
+  const HORSE = { analysisId: 7, umaban: 1, prior: 0.3, adjusted_prob: 0.25, place_odds_min: 1.5, ev: 1.1, is_positive: 1, contributions_json: null, mark: "◎", reason: "根拠" };
+
+  it("認証できなければ 403 で、D1 にも R2 にも触れない(関門の前に何もしない)", async () => {
+    const { deps } = await setup();
+    const fake = listDb([], []);
+    const response = await handle(req("/api/analyses"), envOf({ DB: fake.db }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(fake.prepared).toEqual([]);
+    expect(fake.batches).toEqual([]);
+  });
+
+  it("200 で { ok: true, analyses: [...] } を返す。要約(大きな列なし・hasDetail あり)を、D1 の batch 1 回(2 文)だけで取り、R2 には触れない", async () => {
+    const { deps, token } = await setup();
+    const fake = listDb([ROW], [HORSE]);
+    const response = await handle(req("/api/analyses", { token }), envOf({ DB: fake.db }), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as { ok: boolean; analyses: Array<Record<string, unknown>> };
+    expect(body.ok).toBe(true);
+    expect(body.analyses).toHaveLength(1);
+    const a = body.analyses[0]!;
+    expect(a["id"]).toBe(7);
+    expect(a["hasDetail"]).toBe(true);
+    expect(a["promptLookaheadGuarded"]).toBe(true);
+    expect("rawResponse" in a).toBe(false);
+    expect("raceSnapshot" in a).toBe(false);
+    expect((a["horses"] as Array<Record<string, unknown>>)[0]).toEqual({ umaban: 1, prior: 0.3, adjustedProb: 0.25, placeOddsMin: 1.5, ev: 1.1, isPositive: true, mark: "◎", reason: "根拠" });
+    expect(fake.batches).toEqual([2]);
+    // R2_NOT_CALLED は呼ばれれば例外になる。200 で返ったことが、R2 に触れていないことの証拠
+  });
+
+  it("絞り込みの値は SQL に埋め込まず bind で渡す(race_id・kaisai_date・limit)。limit を省くと既定の 50", async () => {
+    const { deps, token } = await setup();
+    const fake = listDb([], []);
+    await handle(req("/api/analyses?race_id=202603020211&kaisai_date=20261006&limit=7", { token }), envOf({ DB: fake.db }), {}, deps);
+    expect(fake.binds).toEqual([
+      ["202603020211", "20261006", 7],
+      ["202603020211", "20261006", 7],
+    ]);
+    for (const sql of fake.prepared) {
+      expect(sql).not.toContain("202603020211");
+      expect(sql).not.toContain("20261006");
+    }
+    const none = listDb([], []);
+    await handle(req("/api/analyses", { token }), envOf({ DB: none.db }), {}, deps);
+    expect(none.binds).toEqual([[50], [50]]);
+  });
+
+  it.each([
+    ["race_id が不正", "?race_id=abc"],
+    ["race_id が空", "?race_id="],
+    ["kaisai_date が 8 桁でない", "?kaisai_date=2026-10-06"],
+    ["kaisai_date が空", "?kaisai_date="],
+    ["limit が 0", "?limit=0"],
+    ["limit が 201(上限を超える)", "?limit=201"],
+    ["limit が数でない", "?limit=abc"],
+    ["limit が小数", "?limit=1.5"],
+    ["limit が負", "?limit=-1"],
+    ["未知のパラメータ", "?foo=1"],
+    ["同じパラメータの重複", "?limit=1&limit=2"],
+  ])("400(%s): D1 に触れない", async (_name, query) => {
+    const { deps, token } = await setup();
+    const fake = listDb([], []);
+    const response = await handle(req(`/api/analyses${query}`, { token }), envOf({ DB: fake.db }), {}, deps);
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { ok: boolean; error: { type: string; message: string } };
+    expect(body.ok).toBe(false);
+    expect(body.error.type).toBe("bad-request");
+    expect(fake.prepared).toEqual([]);
+    expect(fake.batches).toEqual([]);
+  });
+
+  it("limit は 1 と 200 を受け付ける(境界)", async () => {
+    const { deps, token } = await setup();
+    for (const limit of ["1", "200"]) {
+      const fake = listDb([], []);
+      const response = await handle(req(`/api/analyses?limit=${limit}`, { token }), envOf({ DB: fake.db }), {}, deps);
+      expect(response.status, `limit=${limit}`).toBe(200);
+      expect(fake.binds[0]).toEqual([Number(limit)]);
+    }
+  });
+
+  it("D1 が失敗したら 503({ ok: false, error: { type: d1-error } })。例外の文面・SQL は返さない", async () => {
+    const { deps, token } = await setup();
+    const fake = listDb([], [], new Error("D1_ERROR: no such table: analyses SECRET-DETAIL"));
+    const response = await handle(req("/api/analyses", { token }), envOf({ DB: fake.db }), {}, deps);
+    expect(response.status).toBe(503);
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({ ok: false, error: { type: "d1-error" } });
+    expect(text).not.toContain("SECRET-DETAIL");
+    expect(text).not.toContain("no such table");
+  });
+
+  it("GET だけ(HEAD・POST は 405・Allow: GET)。パスは厳密(末尾スラッシュ・下位パスは 404)", async () => {
+    const { deps, token } = await setup();
+    const fake = listDb([], []);
+    // POST は共通の関門(GET・HEAD 以外は 405・Allow: GET, HEAD)。HEAD はこの経路が拒否する(D1 を引かない)
+    const post = await handle(req("/api/analyses", { token, method: "POST" }), envOf({ DB: fake.db }), {}, deps);
+    expect(post.status).toBe(405);
+    expect(post.headers.get("allow")).toBe("GET, HEAD");
+    const head = await handle(req("/api/analyses", { token, method: "HEAD" }), envOf({ DB: fake.db }), {}, deps);
+    expect(head.status).toBe(405);
+    expect(head.headers.get("allow")).toBe("GET");
+    // `/api/analyses/1` は Issue #183 で有効なパス(分析1件。handler-analysis-detail.test.ts)になったので、ここからは外した
+    for (const path of ["/api/analyses/", "/api/analyses/1/", "/api/analysesx"]) {
+      expect((await handle(req(path, { token }), envOf({ DB: fake.db }), {}, deps)).status, path).toBe(404);
+    }
+    expect(fake.batches).toEqual([]);
+  });
+});
+
+/**
+ * Issue #184(#165-b): スマホ画面の配信。`GET /`(ページ)・`GET /app.js`(クライアントのバンドル)・`GET /check`(旧 `/` の確認フォーム)。
+ * すべて Access の関門の後ろ(Worker の中で配る。`[assets]` は使わない=認証を素通りする配信の経路を作らない)。
+ * CSP: インラインスクリプト禁止(`script-src 'self'`)・fetch は同じオリジンだけ(`connect-src 'self'`)・`default-src 'none'`。
+ */
+describe("GET /(新しいページ。Issue #184)", () => {
+  // Issue #244: 見出しの画像(同じオリジンの /icons/…)のために img-src 'self' を足した。default-src 'none' のままだと <img> は表示されない。
+  const APP_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
+  it("CSP は script-src 'self'・connect-src 'self'・img-src 'self'・default-src 'none'(指令の完全一致)。script に unsafe-inline・unsafe-eval が無く、img-src に data:・* が無い", async () => {
+    const { deps, token } = await setup();
+    const csp = (await handle(req("/", { token }), envOf(), {}, deps)).headers.get("content-security-policy");
+    expect(csp).toBe(APP_CSP);
+    const directive = (name: string): string => csp!.split(";").map((d) => d.trim()).find((d) => d.startsWith(`${name} `)) ?? "";
+    expect(directive("script-src")).toBe("script-src 'self'");
+    expect(directive("connect-src")).toBe("connect-src 'self'");
+    expect(directive("img-src")).toBe("img-src 'self'");
+    expect(csp).not.toContain("data:");
+    expect(csp).not.toContain("unsafe-eval");
+  });
+
+  it("スクリプトは <script src=\"/app.js\" defer> の 1 本だけで、インラインのスクリプトが無い(すべての script 要素が src を持ち、本文が空)", async () => {
+    const { deps, token } = await setup();
+    const html = await (await handle(req("/", { token }), envOf(), {}, deps)).text();
+    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+    expect(scripts).toHaveLength(1); // 前提: script 要素が実際にある(空振りでない)
+    expect(scripts[0]![1]).toContain('src="/app.js"');
+    expect(scripts[0]![1]).toContain("defer");
+    expect(scripts[0]![2]).toBe("");
+    // on* 属性・javascript: の URL も無い
+    expect(html).not.toMatch(/\son[a-z]+\s*=/i);
+    expect(html).not.toMatch(/javascript:/i);
+  });
+
+  it("描画先(#app)・スマホ幅の viewport・ログイン中のメール(エスケープ済み)・noscript の案内がある。旧ページの確認フォームは無い", async () => {
+    const { deps, token } = await setup();
+    const html = await (await handle(req("/", { token }), envOf(), {}, deps)).text();
+    expect(html).toContain('id="app"');
+    expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+    expect(html).toContain(EMAIL);
+    expect(html).toContain("<noscript>");
+    expect(html).not.toContain("/api/netkeiba/check");
+  });
+
+  it("認証なし・壊れた JWT は 403(本文は forbidden だけ)", async () => {
+    const { deps } = await setup();
+    for (const path of ["/", "/app.js", "/check"]) {
+      const none = await handle(req(path), envOf(), {}, deps);
+      expect(none.status, path).toBe(403);
+      expect(await none.text()).toBe("forbidden");
+      const bad = await handle(req(path, { token: "aaa.bbb.ccc" }), envOf(), {}, deps);
+      expect(bad.status, path).toBe(403);
+      expect(await bad.text()).toBe("forbidden");
+    }
+  });
+});
+
+describe("GET /app.js(Issue #184)", () => {
+  it("認証後は、生成物(CLIENT_JS)をそのまま返す。text/javascript・no-store・nosniff", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/app.js", { token }), envOf(), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    const body = await response.text();
+    expect(CLIENT_JS.length).toBeGreaterThan(1000); // 前提: 生成物が空でない
+    expect(body).toBe(CLIENT_JS);
+  });
+
+  it("HEAD は本文なしの 200。POST は 405(Allow: GET, HEAD)", async () => {
+    const { deps, token } = await setup();
+    const head = await handle(req("/app.js", { token, method: "HEAD" }), envOf(), {}, deps);
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    const post = await handle(req("/app.js", { token, method: "POST" }), envOf(), {}, deps);
+    expect(post.status).toBe(405);
+    expect(post.headers.get("allow")).toBe("GET, HEAD");
+  });
+
+  it("末尾のスラッシュ・別の名前のスクリプトは 404(配るのはこの 1 本だけ)", async () => {
+    const { deps, token } = await setup();
+    for (const path of ["/app.js/", "/app.js.map", "/main.js", "/client-bundle.generated.js"]) {
+      expect((await handle(req(path, { token }), envOf(), {}, deps)).status, path).toBe(404);
+    }
+  });
+
+  it("認証に失敗したときは、D1・DO に触れない(関門の前に何もしない)", async () => {
+    const prepared: string[] = [];
+    const { deps } = await setup();
+    const response = await handle(req("/app.js"), envOf({ DB: d1(async () => null, prepared) }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(prepared).toEqual([]);
+  });
+});
+
+describe("GET /check(旧 `/` の確認フォーム。Issue #184 で移した)", () => {
+  it("認証後は 200 の HTML(メール・確認フォーム)。旧 CSP のまま、スクリプトは無い。HEAD は本文なし", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/check", { token }), envOf(), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("content-security-policy")).not.toContain("script-src");
+    const html = await response.text();
+    expect(html).toContain(EMAIL);
+    expect(html).toContain('<form method="get" action="/api/netkeiba/check">');
+    expect(html).not.toMatch(/<script\b/i);
+    const head = await handle(req("/check", { token, method: "HEAD" }), envOf(), {}, deps);
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+  });
+});

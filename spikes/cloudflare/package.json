@@ -1,0 +1,36 @@
+{
+  "name": "keiba-cf-spike",
+  "private": true,
+  "type": "module",
+  "//": "Issue #159(#21-A)の Cloudflare 移行スパイク専用。pnpm workspace の外(ルートの pnpm-workspace.yaml は packages/* のみ)に置き、`pnpm install --ignore-workspace` で独立にインストールする。既存 CI(windows-latest の pnpm install --frozen-lockfile)に wrangler / workerd の巨大な依存を持ち込まないため。",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.node.json",
+    "driver": "tsx --tsconfig tsconfig.run.json driver.ts",
+    "deploy:dry": "wrangler deploy --dry-run --outdir dist-dry",
+    "smoke": "tsx smoke.ts"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "iconv-lite": "^0.6.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261004.1",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "^6.0.3",
+    "wrangler": "4.147.0"
+  },
+  "//deps": {
+    "wrangler": "デプロイ(--secrets-file / delete)とローカル検証(wrangler dev)。バージョン固定(予備実験で確認した版)",
+    "cheerio / iconv-lite": "core のパーサが使う。core の node_modules は CI に無いため wrangler.toml の alias でここから解決させる(バージョン範囲は packages/core/package.json と同じ)",
+    "@cloudflare/workers-types": "Worker / Durable Object の型検査",
+    "@types/node": "ドライバ・スモークテスト(Node で動く)の型検査と、core の http-client.ts が使う Buffer の型",
+    "tsx": "ドライバ・スモークテスト・プリフライトを TypeScript のまま実行する"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
+  }
+}

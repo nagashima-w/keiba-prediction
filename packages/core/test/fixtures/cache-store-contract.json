@@ -1,0 +1,76 @@
+{
+  "//": "CacheStore(取得結果の保存先)の契約(Issue #177〈#164-b〉・#170 の AC-c1)。exe の ScrapeCache(better-sqlite3。core のテスト)と、クラウド版の DoSqlCacheStore(Durable Object の SQLite。cloud のテスト)が、同じこのファイルを読み、同じ期待値に一致する。steps を順に実行する: set は at の時刻で保存、get は at の時刻で読み(maxAgeMs は省略可)、expect が null ならミス・オブジェクトならヒット(value と fetchedAt)。鮮度の規則は「保存からの経過(at - fetchedAt)が maxAgeMs を超えたらミス」(ちょうどは、ヒット)。期限切れの行は消えない(鮮度は読み取り側の判定。別の maxAgeMs なら読める)。",
+  "cases": [
+    {
+      "name": "未保存のキーはミス",
+      "steps": [{ "op": "get", "key": "k", "at": 1000, "expect": null }]
+    },
+    {
+      "name": "maxAgeMs を省略すると、何年経ってもヒットする(確定済みデータ向け)。fetchedAt は保存時刻",
+      "steps": [
+        { "op": "set", "key": "k", "value": "v", "at": 1000 },
+        { "op": "get", "key": "k", "at": 1000, "expect": { "value": "v", "fetchedAt": 1000 } },
+        { "op": "get", "key": "k", "at": 315360000000, "expect": { "value": "v", "fetchedAt": 1000 } }
+      ]
+    },
+    {
+      "name": "maxAgeMs の境界: 経過が maxAgeMs ちょうどはヒット、1ms 超えたらミス",
+      "steps": [
+        { "op": "set", "key": "k", "value": "v", "at": 1000 },
+        { "op": "get", "key": "k", "at": 1599, "maxAgeMs": 600, "expect": { "value": "v", "fetchedAt": 1000 } },
+        { "op": "get", "key": "k", "at": 1600, "maxAgeMs": 600, "expect": { "value": "v", "fetchedAt": 1000 } },
+        { "op": "get", "key": "k", "at": 1601, "maxAgeMs": 600, "expect": null }
+      ]
+    },
+    {
+      "name": "maxAgeMs が 0: 保存と同じ時刻はヒット、1ms 後はミス",
+      "steps": [
+        { "op": "set", "key": "k", "value": "v", "at": 1000 },
+        { "op": "get", "key": "k", "at": 1000, "maxAgeMs": 0, "expect": { "value": "v", "fetchedAt": 1000 } },
+        { "op": "get", "key": "k", "at": 1001, "maxAgeMs": 0, "expect": null }
+      ]
+    },
+    {
+      "name": "期限切れの行は消えない: 短い maxAgeMs ではミスでも、長い maxAgeMs なら同じ行を読める(鮮度は読み取り側の判定)",
+      "steps": [
+        { "op": "set", "key": "k", "value": "v", "at": 1000 },
+        { "op": "get", "key": "k", "at": 5000, "maxAgeMs": 100, "expect": null },
+        { "op": "get", "key": "k", "at": 5000, "maxAgeMs": 10000, "expect": { "value": "v", "fetchedAt": 1000 } },
+        { "op": "get", "key": "k", "at": 5000, "expect": { "value": "v", "fetchedAt": 1000 } }
+      ]
+    },
+    {
+      "name": "同じキーへの set は値と取得時刻を上書きする(鮮度は新しい時刻から数える)",
+      "steps": [
+        { "op": "set", "key": "k", "value": "古い", "at": 1000 },
+        { "op": "set", "key": "k", "value": "新しい", "at": 5000 },
+        { "op": "get", "key": "k", "at": 5500, "maxAgeMs": 600, "expect": { "value": "新しい", "fetchedAt": 5000 } },
+        { "op": "get", "key": "k", "at": 5601, "maxAgeMs": 600, "expect": null }
+      ]
+    },
+    {
+      "name": "キーは独立している(URL と cacheKey が別の行になる)",
+      "steps": [
+        { "op": "set", "key": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211", "value": "出馬表", "at": 1000 },
+        { "op": "set", "key": "race_api#AplGradeWinner#202603020211", "value": "重賞", "at": 1000 },
+        { "op": "get", "key": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211", "at": 1000, "expect": { "value": "出馬表", "fetchedAt": 1000 } },
+        { "op": "get", "key": "race_api#AplGradeWinner#202603020211", "at": 1000, "expect": { "value": "重賞", "fetchedAt": 1000 } },
+        { "op": "get", "key": "race_api#AplGradeWinner#202603020212", "at": 1000, "expect": null }
+      ]
+    },
+    {
+      "name": "空文字の本文も、ミスではなくヒット(値がある)として返す",
+      "steps": [
+        { "op": "set", "key": "k", "value": "", "at": 1000 },
+        { "op": "get", "key": "k", "at": 1000, "expect": { "value": "", "fetchedAt": 1000 } }
+      ]
+    },
+    {
+      "name": "日本語・改行・引用符を含む本文が、そのまま往復する",
+      "steps": [
+        { "op": "set", "key": "k", "value": "ラジオNIKKEI賞\n\"福島\" '芝1800'\t🐎", "at": 1000 },
+        { "op": "get", "key": "k", "at": 1000, "expect": { "value": "ラジオNIKKEI賞\n\"福島\" '芝1800'\t🐎", "fetchedAt": 1000 } }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,195 @@
+# Cloudflare 移行(#21)の実測スパイク(Issue #159〈#21-A〉・#160〈#21-B〉)。
+#
+# 実行ごとに、使い捨ての Worker(+ SQLite バックエンドの Durable Object)をデプロイし、
+#  - reachability: Workers とランナーから netkeiba へ届くか(#159 の到達性。netkeiba へ 10 本)
+#  - origin: Workers からだけ HTTP 400 になる原因の切り分け(#160。E0〜E3。netkeiba へ 6 本)
+#  - socket-matrix: DO の中のソケットでの取得(#162 段階1。取得先の網羅・gzip・再現性。netkeiba へ 9 本。
+#    このほかに netkeiba へ出ない、Worker から DO を繰り返し呼ぶ試験がある)
+#  - cpu: Free プランの CPU 制約の中で処理が成り立つか(普通の Worker と Durable Object の両方)
+# のうち、**選んだ実験だけ**を測り(SPIKE_EXPERIMENTS)、最後に必ず Worker を削除する。
+# 選び方: workflow_dispatch の入力 experiments(カンマ区切り。既定は socket-matrix)。push で起動したとき(入力は空)も socket-matrix
+# (#162 で既定を origin から変更した。印付きの push で、完了済みの origin の 6 本を再実行しないため)。
+# netkeiba へ出る実験(reachability・origin・socket-matrix)は、合計 10 本以内の守りのため、どの2つも同時には選べない(ドライバが拒否する)。
+# 結果の全文は、前後を印で挟んだ1行としてジョブログに出す
+# (メインが読めるのはジョブログ本文だけのため)。詳細: spikes/cloudflare/ と scripts/cloudflare-spike/。
+#
+# ★起動条件(印のない push では何もしない):
+#   - push は作業ブランチだけで、先端コミットのメッセージが [CF-SPIKE] で**始まる**ときだけ実行する
+#     (startsWith。印は件名の先頭に置いたときだけ有効)
+#   - workflow_dispatch(手動実行)は常に実行する
+#   ワークフロー自体を追加・変更するコミットには印を付けない(印を付けた別のコミットで起動する)。
+#   **部分一致(contains)にしない理由**: 以前は contains だったため、コミットメッセージの本文に
+#   「このコミットには [CF-SPIKE] を付けていない」と書いただけで文字列が一致し、意図しない実測が
+#   起動した(0c47222)。説明文・引用に印を書いても起動しないよう、先頭一致にしている。
+#   残存リスク: Actions の式の文字列比較(startsWith を含む)は大文字小文字を区別しないため、
+#   `[cf-spike]` で始まるメッセージでも起動する。
+#
+# ★公開 URL の悪用防止: スパイクの Worker は「netkeiba へリクエストを出す公開 URL」になるため、
+#   実行ごとにランダムな共有秘密を生成して Worker に渡し、一致しないリクエストは 403 にする。
+#   さらに、ジョブの最後に(失敗時も)Worker を削除し、残っていないことを一覧で確認する。
+#
+# ★ほかの CI(ci.yml・deploy-cloud.yml)とは独立: このワークフローは ubuntu-latest で動き、wrangler / workerd
+#   などの依存は spikes/cloudflare/(pnpm workspace の外)にだけ入れる。
+name: Cloudflare 移行スパイク
+
+on:
+  push:
+    branches:
+      - claude/issue-order-processing-wjgpdd
+  workflow_dispatch:
+    inputs:
+      experiments:
+        description: "実行する実験(カンマ区切り): socket-matrix / origin / reachability / cpu。netkeiba へ出る3つ(socket-matrix・origin・reachability)は、どの2つも同時に選べない"
+        required: false
+        default: socket-matrix
+        type: string
+
+# リポジトリへは何も書き戻さない。
+permissions:
+  contents: read
+
+# 同時実行は1本に絞る。実行中の run を途中で打ち切ると Worker が残るため、cancel-in-progress は false。
+concurrency:
+  group: cloudflare-spike
+  cancel-in-progress: false
+
+jobs:
+  spike:
+    # 印のない push では、このジョブは実行されない(スキップされる)。
+    # 注意: Actions の式の文字列比較は大文字小文字を区別しない(startsWith も同様)。
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, '[CF-SPIKE]')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      # 最初の関門: Secrets の存在。未登録の Secret は Actions では空文字になる。
+      # 値は出力しない。足りなければ何が足りないかを名指しして止まる。
+      - name: Secrets の存在を確認
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error title=Secret が未登録::リポジトリの Secrets に CLOUDFLARE_API_TOKEN が登録されていません"
+            missing=1
+          fi
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error title=Secret が未登録::リポジトリの Secrets に CLOUDFLARE_ACCOUNT_ID が登録されていません"
+            missing=1
+          fi
+          if [ "$missing" != "0" ]; then
+            exit 1
+          fi
+          echo "Secrets は2つとも登録されています(値は表示しません)"
+
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      # pnpm はバージョン未指定にして、ルートの package.json の packageManager フィールドに従わせる。
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@v4
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: spikes/cloudflare/pnpm-lock.yaml
+
+      # spikes/cloudflare は pnpm workspace の外。ロックファイルで固定し、独立にインストールする。
+      - name: 依存をインストール(spikes/cloudflare)
+        working-directory: spikes/cloudflare
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      # デプロイせずに、型検査とバンドル(core をそのまま Worker に束ねられるか)を確かめる。
+      - name: 型検査とバンドルの確認(デプロイしない)
+        working-directory: spikes/cloudflare
+        run: |
+          pnpm run typecheck
+          pnpm run deploy:dry
+
+      # 2番目の関門: トークンの有効性と Workers の権限を、実際の API 呼び出し(一覧・サブドメイン・
+      # 最小 Worker の作成と削除)で確かめる。足りなければ何が足りないかを出して止まる。
+      - name: トークンと権限の検査
+        working-directory: spikes/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec tsx preflight-run.ts
+
+      # 実デプロイの前に、ローカル(workerd)で配線(共有秘密の 403・各エンドポイント・DO 経由の呼び出し)を
+      # 確かめ、1 reps あたり ms を測る(本番の CPU 制限とは別物の目安)。netkeiba へは出ない。
+      - name: ローカル(workerd)での配線スモークテスト
+        working-directory: spikes/cloudflare
+        run: pnpm run smoke
+
+      - name: Worker をデプロイ
+        working-directory: spikes/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          NAME="keiba-cf-spike-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SECRET="$(openssl rand -hex 32)"
+          # マスクを先に登録してから、秘密を書く。
+          echo "::add-mask::$SECRET"
+          SECRETS_FILE="$RUNNER_TEMP/spike-secrets.json"
+          printf '{"SPIKE_SECRET":"%s"}' "$SECRET" > "$SECRETS_FILE"
+          {
+            echo "SPIKE_WORKER_NAME=$NAME"
+            echo "SPIKE_SECRET=$SECRET"
+          } >> "$GITHUB_ENV"
+          rc=0
+          pnpm exec wrangler deploy --name "$NAME" --secrets-file "$SECRETS_FILE" || rc=$?
+          # 秘密のファイルは、成否にかかわらずデプロイの直後に削除する。
+          rm -f "$SECRETS_FILE"
+          exit "$rc"
+
+      # ステップに timeout を付ける(ジョブの 60 分に達するとキャンセル扱いになり、always() の後片付けに
+      # 使える猶予が限られるため)。ドライバ自身も、これより短い壁時計の上限(DRIVER_WALL_MS)で探索を打ち切り、
+      # それまでの結果を書き出す。
+      # Worker の URL(workers.dev のサブドメインを含む)は、ステップの env に展開しない(リポジトリは public で、
+      # ジョブログは誰でも読める)。ドライバが SPIKE_WORKER_NAME と CF_SUBDOMAIN(GITHUB_ENV。マスク済み)から組み立てる。
+      - name: 測定を実行
+        timeout-minutes: 45
+        working-directory: spikes/cloudflare
+        env:
+          RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          # 選ぶ実験。push で起動したときは inputs が空なので、`|| 'socket-matrix'` で socket-matrix になる。
+          # 入力は env 経由でだけ使い、run のシェルには直接展開しない(スクリプト注入の防止)。
+          SPIKE_EXPERIMENTS: ${{ inputs.experiments || 'socket-matrix' }}
+        run: pnpm exec tsx --tsconfig tsconfig.run.json driver.ts
+
+      # 失敗しても・キャンセルされても、必ず Worker を消す。**API の DELETE を主にする**: `wrangler delete` は
+      # Worker を消した後に KV 名前空間の確認で認証エラー(code 10000。このトークンは KV の権限を持たない)になって
+      # exit 1 となり、手順が赤くなった(第1ラウンド)。消えたかどうかは、次のステップが Worker の一覧で確かめる。
+      - name: Worker を削除(API の DELETE)
+        if: ${{ always() }}
+        continue-on-error: true
+        working-directory: spikes/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec tsx delete-run.ts
+
+      # 削除の確認(接頭辞付きの Worker が残っていないこと・DO の名前空間の状態)と、結果の出力
+      # (step summary と、結果の全文を印で挟んだ1行のジョブログ)。残っていればジョブを失敗させる。
+      - name: 削除の確認と結果の出力
+        if: ${{ always() }}
+        working-directory: spikes/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec tsx cleanup-run.ts
+
+      - name: 結果を artifact に保存
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-spike-result
+          path: |
+            spikes/cloudflare/spike-result.json
+            spikes/cloudflare/local-calibration.json
+          if-no-files-found: ignore

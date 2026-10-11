@@ -8,7 +8,12 @@ import {
   type BetAllocationConfig,
   type PlaceJointModel,
   type PlaceOutcome,
+  type SkipReasonCode,
 } from "../../src/ev/bet-allocation.js";
+import { computeRaceEv, type HorsePrior } from "../../src/ev/expected-value.js";
+import type { OddsSnapshot } from "../../src/scraper/types.js";
+import { PLACKETT_LUCE_MODEL } from "../../src/ev/plackett-luce-model.js";
+import { fitPlackettLuceStrengths } from "../../src/ev/plackett-luce-strength.js";
 
 /** 候補馬(EVプラス・オッズあり)を組み立てる補助関数。 */
 function candidate(
@@ -247,16 +252,22 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       // 比率保持を検証できていなかった(code-reviewer指摘)。placeCount=2・3頭構成に差し替え、
       // 2頭以上が正のcontinuousFractionを持つことを無条件expectで先に固定してから比率を比較する。
       // perRaceCap=800はtsx実測で校正した値(2頭ともbetUnit切り捨て後も正のstakeを維持する)。
+      // AC-B3'(D)(b)裁定(#81): このフィクスチャはPLで`not-converged`(θ推定の非収束)により
+      // throwするモデル非依存の不変条件テストのため、CONDITIONAL_BERNOULLI_MODELを明示的に
+      // 渡して主張を保存する(#81で既定がPLになったことの影響を受けないようにする)。
+      // PL版の同じ不変条件は下記「AC-B3'(b): PL版」に別途追加する。
       const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.5, 2.2), candidate(3, 0.1, 5)];
       const wide = allocateBets(
         horses,
         2,
         config({ bankroll: 1000000, perRaceCap: 10000000, kellyFraction: 1 }),
+        CONDITIONAL_BERNOULLI_MODEL,
       );
       const narrow = allocateBets(
         horses,
         2,
         config({ bankroll: 1000000, perRaceCap: 800, kellyFraction: 1 }),
+        CONDITIONAL_BERNOULLI_MODEL,
       );
 
       // 前提(無条件expect): 2頭以上が正のcontinuousFractionを持つこと。
@@ -479,6 +490,122 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       // 上界は実測値(≈0.00101)から意味のある距離に設定する(約5倍の余裕。旧AC7の閾値0.01は
       // 実測1e-16から6.0e+13倍も離れており無意味だった。同じ轍を踏まない)。
       expect(cost).toBeLessThan(0.005);
+    });
+  });
+
+  /**
+   * AC-B5'(Issue #81・#78-Bレビュー指摘の是正): 直前の「受け入れ条件7」describe(CB明示・
+   * 変更禁止)のPL版双子。production の既定モデルはPLになったため、比例縮小の代償が
+   * PLの下でも(CBと同様に)正であることを別途固定する。
+   *
+   * **このフィクスチャでは PL の marginalDeviationMax(0.1333)が CB(0.1532)より小さいが、
+   * これは少数派であり一般的な優劣を意味しない。** 実測(`scripts/bench-joint-model.ts`)では
+   * PL が CB より悪化するレースが default 58.8%(117/199)・wide15 71.5%(143/200)を占め、
+   * marginalDeviationMax の中央値も PL 0.061835 / CB 0.046275 で PL の方が悪い。本テストの
+   * cost(比例縮小の代償)がCBよりPLの方が小さい(=良い)という結果も、上記と同じ「このフィクスチャ
+   * 固有の少数派の配置」であり、PLの方が優れているという一般的な結論は一切導けない(#81は
+   * 精度改善ではなく、#23-B/#25で1レース内に2モデルが混在するのを避けるための技術的前提)。
+   */
+  describe("AC-B5': 受け入れ条件7のPL版(比例縮小の代償の定量化。#81)", () => {
+    it("capApplied===trueのとき、比例縮小は制約付き最適(cap内で貪欲打ち切り)よりF値が実測差だけ劣ること(PL)", () => {
+      // 受け入れ条件7(CB版)と同一のフィクスチャ・同一の設定。modelだけをPLへ差し替える。
+      const candidates = [candidate(1, 0.4, 3), candidate(2, 0.35, 3.2)];
+      const model = PLACKETT_LUCE_MODEL;
+      const placeCount = 1;
+      const bankroll = 10000;
+      const perRaceCap = 3000;
+      const steps = 200;
+      const delta = 1 / steps;
+
+      // 前提(無条件expect): このフィクスチャがPLでdegenerateFixedCount===0
+      // (縮退せずθフィットを実際に解いている)こと。自分で実測して0であることを確認済み。
+      const jointHorses0 = candidates.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
+      const fit = fitPlackettLuceStrengths(jointHorses0, placeCount);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      expect(fit.degenerateFixedCount).toBe(0);
+
+      const result = allocateBets(
+        candidates,
+        placeCount,
+        config({ bankroll, perRaceCap, kellyFraction: 1, betUnit: 1, greedySteps: steps }),
+        model,
+      );
+
+      // 前提(無条件expect): キャップが実際に拘束していること。拘束していなければ
+      // 比例縮小のs=1となり、以降の比較はAC-B5'が測ろうとしている代償を何も検証しない。
+      expect(result.capApplied).toBe(true);
+
+      const jointHorses = candidates.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
+      const distribution = model.buildDistribution(jointHorses, placeCount);
+      const odds = [candidates[0]!.placeOddsMin!, candidates[1]!.placeOddsMin!];
+
+      function objective(x1: number, x2: number): number | null {
+        let total = 0;
+        for (const outcome of distribution) {
+          const has1 = outcome.placed.includes(1);
+          const has2 = outcome.placed.includes(2);
+          const wealth = 1 - x1 - x2 + (has1 ? x1 * odds[0]! : 0) + (has2 ? x2 * odds[1]! : 0);
+          if (wealth <= 0) {
+            return null;
+          }
+          total += outcome.probability * Math.log(wealth);
+        }
+        return total;
+      }
+
+      // (A) 実装が実際に出力したstakeを、バンクロール比率(fraction)へ変換する。
+      const propX1 = result.allocations.find((a) => a.umaban === 1)!.stake / result.resolvedBankroll;
+      const propX2 = result.allocations.find((a) => a.umaban === 2)!.stake / result.resolvedBankroll;
+      const propF = objective(propX1, propX2);
+      expect(propF).not.toBeNull();
+
+      // (B) 参照実装: capFraction(=perRaceCap/bankroll)を超えないよう打ち切る制約付き貪欲
+      // (CB版と同一ロジック。テスト内実装で可であることはCB版と同じboss許可に基づく)。
+      const capFraction = perRaceCap / bankroll;
+      const greedyX = [0, 0];
+      let sumX = 0;
+      let currentF = objective(0, 0)!;
+      for (let step = 0; step < steps; step++) {
+        const trialSumX = sumX + delta;
+        if (trialSumX > capFraction + 1e-12) {
+          break;
+        }
+        let bestIdx = -1;
+        let bestIncrement = 0;
+        for (let i = 0; i < 2; i++) {
+          const trialX = greedyX.slice();
+          trialX[i] = trialX[i]! + delta;
+          const f = objective(trialX[0]!, trialX[1]!);
+          if (f === null) {
+            continue;
+          }
+          const increment = f - currentF;
+          if (increment > bestIncrement) {
+            bestIncrement = increment;
+            bestIdx = i;
+          }
+        }
+        if (bestIdx === -1) {
+          break;
+        }
+        greedyX[bestIdx] = greedyX[bestIdx]! + delta;
+        sumX = trialSumX;
+        currentF = objective(greedyX[0]!, greedyX[1]!)!;
+      }
+      const constrainedGreedyF = objective(greedyX[0]!, greedyX[1]!);
+      expect(constrainedGreedyF).not.toBeNull();
+
+      // 実測(自分で実行して確認。CB版の同一構成に対する実測cost≈0.0010101201357806122とは
+      // 別に、PLではcost≈0.00026427344172264になる〈CBの約1/3.82〉。この差自体もモデル固有の
+      // 数値であり「PLの方が優れている」ことの根拠ではない(上記JSDoc参照)。
+      const cost = constrainedGreedyF! - propF!;
+      expect(cost).toBeCloseTo(0.00026427344172264, 10);
+      expect(cost).toBeGreaterThan(0);
+      // 上界は実測値(0.00026427344172264)の2倍以内(実測値×2=0.00052854688344528。
+      // 0.00052はその約1.9677倍で2倍未満。旧CB版の値0.00101をそのまま流用しない。
+      // boss着手前ゲート指摘・#81再レビュー指摘で是正)。
+      expect(cost).toBeLessThan(0.00052);
     });
   });
 
@@ -718,6 +845,82 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
     });
   });
 
+  describe("Issue #58: skipReasonCodeがskipReason(日本語文言)と独立に見送り理由を表すこと(AC3)", () => {
+    /**
+     * 6分類それぞれについて、skipReasonの文言に加えてskipReasonCodeが対応するコード値を
+     * 持つことをテーブル駆動で固定する。文言とコードが同じ入力から独立に導出されることの
+     * 構造的検証(AC3(b))。テーブルの各行は「受け入れ条件9」の同一入力を流用する。
+     */
+    const table: {
+      readonly label: string;
+      readonly horses: readonly AllocationHorse[];
+      readonly config: BetAllocationConfig;
+      readonly model?: PlaceJointModel;
+      readonly expectedCode: SkipReasonCode;
+    }[] = [
+      {
+        label: "① bankroll未設定",
+        horses: [candidate(1, 0.6, 3)],
+        config: config({ bankroll: 0, perRaceCap: 10000 }),
+        expectedCode: "bankroll-unset",
+      },
+      {
+        label: "② perRaceCap未設定",
+        horses: [candidate(1, 0.6, 3)],
+        config: config({ bankroll: 10000, perRaceCap: 0 }),
+        expectedCode: "cap-unset",
+      },
+      {
+        label: "③ 実効上限がbetUnit未満",
+        horses: [candidate(1, 0.6, 3)],
+        config: config({ bankroll: 10000, perRaceCap: 50 }),
+        expectedCode: "cap-too-small",
+      },
+      {
+        label: "④ ケリー係数0",
+        horses: [candidate(1, 0.6, 3)],
+        config: config({ bankroll: 10000, perRaceCap: 10000, kellyFraction: 0 }),
+        expectedCode: "kelly-zero",
+      },
+      {
+        label: "⑤ 候補0頭",
+        horses: [nonCandidate(1, 0.3, 2)],
+        config: config({ bankroll: 10000, perRaceCap: 10000 }),
+        expectedCode: "no-candidates",
+      },
+      {
+        label: "⑥ 連続最適解ゼロ(妙味が極小)",
+        horses: [{ umaban: 1, placeProb: 0.5, placeOddsMin: 1.0000001, ev: 1.00000005, isPositive: true }],
+        config: config({ bankroll: 10000, perRaceCap: 10000 }),
+        model: stubModel([
+          { placed: [], probability: 0.5 },
+          { placed: [1], probability: 0.5 },
+        ]),
+        expectedCode: "no-edge",
+      },
+    ];
+
+    it.each(table)("$label はskipReasonCode=$expectedCode になること", ({ horses, config: cfg, model, expectedCode }) => {
+      const result = allocateBets(horses, 1, cfg, model);
+      // 前提固定(空振り防止): このテーブルは見送りケースだけを扱う。
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReasonCode).toBe(expectedCode);
+    });
+
+    it("6分類のskipReasonCodeが互いに異なる値であること(集合サイズで機械的に固定)", () => {
+      const codes = table.map((t) => t.expectedCode);
+      expect(new Set(codes).size).toBe(6);
+    });
+
+    it("見送りでなければskipReasonCode===nullであること(skipReasonと対称)", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.isSkip).toBe(false);
+      expect(result.skipReason).toBeNull();
+      expect(result.skipReasonCode).toBeNull();
+    });
+  });
+
   describe("受け入れ条件10: 旧「丸めでゼロ」が到達不能であることの証明", () => {
     it("C-1で「⑤丸めでゼロ」だった入力が、改訂後はtotalStake===betUnit・minimumStakeApplied===trueになること", () => {
       // C-1旧テスト「⑤ 連続最適解は正だが100円単位への丸めで全て0になる場合」の入力をそのまま
@@ -938,11 +1141,14 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       });
 
       it("2点以上配分されるときはnotDiversified=falseであること", () => {
+        // AC-B3'(D)(b)裁定(#81): このフィクスチャはPLで`not-converged`によりthrowするため
+        // CONDITIONAL_BERNOULLI_MODELを明示的に渡す(PL版は下記「AC-B3'(b): PL版」参照)。
         const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.5, 2.2), candidate(3, 0.1, 5)];
         const result = allocateBets(
           horses,
           2,
           config({ bankroll: 100000, perRaceCap: 100000, kellyFraction: 1 }),
+          CONDITIONAL_BERNOULLI_MODEL,
         );
         expect(result.betCount).toBeGreaterThanOrEqual(2);
         expect(result.notDiversified).toBe(false);
@@ -956,11 +1162,14 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       // 「丸めが起きた証拠」ではなく「一度も起きていない証拠」だった)。placeCount=2の非退化
       // フィクスチャ(頭数>複勝人数)に差し替え、2頭が正のcontinuousFractionを持ち、かつ
       // 丸めが実際に発生する(差が0でない)ことを無条件expectで先に固定してから検証する。
+      // AC-B3'(D)(b)裁定(#81): このフィクスチャはPLで`not-converged`によりthrowするため
+      // CONDITIONAL_BERNOULLI_MODELを明示的に渡す(PL版は下記「AC-B3'(b): PL版」参照)。
       const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.5, 2.2), candidate(3, 0.1, 5)];
       const result = allocateBets(
         horses,
         2,
         config({ bankroll: 10000, perRaceCap: 100000000, kellyFraction: 1 }),
+        CONDITIONAL_BERNOULLI_MODEL,
       );
 
       // 前提1(無条件expect): 剰余が複数馬にまたがる状況であること(2頭以上に配分)。
@@ -1004,20 +1213,73 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       expect(actual).toBeCloseTo(analytic, 2);
     });
 
-    it("modelId/modelApproximateが結果に載ること(既定モデル)", () => {
+    it("modelId/modelApproximateが結果に載ること(既定モデル。Issue #81で既定がplackett-luceになった)", () => {
       const horses = [candidate(1, 0.6, 3)];
       const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
-      expect(result.modelId).toBe(CONDITIONAL_BERNOULLI_MODEL.id);
-      expect(result.modelApproximate).toBe(true);
+      expect(result.modelId).toBe(PLACKETT_LUCE_MODEL.id);
+      expect(result.modelApproximate).toBe(false);
+    });
+
+    /**
+     * AC-B9(Issue #81): `PLACKETT_LUCE_MODEL.approximate===false`は「精度が高い」ことを
+     * 一切意味しない、ことを実行可能な形で残す。
+     *
+     * `plackett-luce-model.ts`のJSDoc(`approximate`フィールド)が主張する「入力の周辺確率を
+     * 厳密に再現する」は**Σp=kちょうどのときに限る**。production ではΣp≠kの入力が大半
+     * (p=0を含むレースが98.5%。`scripts/bench-joint-model.ts`参照)で、再スケールが常時
+     * 働くため、再現されるのは入力のplaceProbではなく再スケール後の目標qである。
+     * このテストは、実際に再スケールが働く(`fitPlackettLuceStrengths`の`rescaleApplied===true`)
+     * フィクスチャに対して、`modelApproximate===false`でありながら`marginalDeviationMax`が
+     * CONDITIONAL_BERNOULLI_MODEL(approximate===true)より**大きい**(=悪化する)ことを
+     * 同一it内でリテラル固定する。
+     */
+    it("AC-B9: 再スケールが働くフィクスチャで、modelApproximate===falseがCBよりmarginalDeviationMaxが悪化することを妨げないこと(falseは精度が高いという意味ではない)", () => {
+      const horses = [
+        candidate(1, 0.55, 2.0),
+        candidate(2, 0.35, 3.2),
+        candidate(3, 0.3, 3.8),
+        candidate(4, 0.25, 4.6),
+        candidate(5, 0.2, 6.0),
+        candidate(6, 0.15, 8.0),
+        candidate(7, 0.12, 10.0),
+        candidate(8, 0.08, 15.0),
+      ];
+      const placeCount = 3;
+
+      // 前提(無条件expect): このフィクスチャで実際に再スケールが働いていること
+      // (rescaleApplied===false のフィクスチャで検証しても本テストの主張は成立しない)。
+      const jointHorses = horses.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
+      const fit = fitPlackettLuceStrengths(jointHorses, placeCount);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      expect(fit.rescaleApplied).toBe(true);
+
+      const cfg = config({ bankroll: 500000, kellyFraction: 0.5, betUnit: 100, greedySteps: 1000, perRaceCap: 1000000 });
+      const plResult = allocateBets(horses, placeCount, cfg, PLACKETT_LUCE_MODEL);
+      const cbResult = allocateBets(horses, placeCount, cfg, CONDITIONAL_BERNOULLI_MODEL);
+
+      expect(plResult.modelApproximate).toBe(false);
+      expect(cbResult.modelApproximate).toBe(true);
+      // 実測値(自分で実行して確認。model-characterization.test.tsのF3と同一フィクスチャ)。
+      expect(plResult.diagnostics.marginalDeviationMax).toBe(0.27500069958051765);
+      expect(cbResult.diagnostics.marginalDeviationMax).toBe(0.19507729125133355);
+      // false(PL)の方がtrue(CB)より数値として悪化している(falseは精度が高いという意味ではない)。
+      expect(plResult.diagnostics.marginalDeviationMax).toBeGreaterThan(cbResult.diagnostics.marginalDeviationMax);
     });
 
     it("差し替えたモデルのid/approximateが反映されること(C-1由来の回帰テスト。model引数を無視して既定値をハードコードで返す退行の検出)", () => {
-      // 既定(CONDITIONAL_BERNOULLI_MODEL: id="conditional-bernoulli"・approximate=true)とは
-      // 異なるid・approximateを持つスタブモデルを注入し、結果にそのまま反映されることを確認する。
+      // 現在の既定(PLACKETT_LUCE_MODEL: id="plackett-luce"・approximate=false。#81で既定に
+      // 採用)とは異なるid・approximateを持つスタブモデルを注入し、結果にそのまま反映される
+      // ことを確認する。approximateはbooleanで値が2つしかないため、CONDITIONAL_BERNOULLI_MODEL
+      // (approximate=true)の値と同時に「両既定と異なる」ことは表現できない。この`it`の契約は
+      // 「model引数を無視して既定値をハードコードで返す退行の検出」であり、「既定」とは現在の
+      // 既定(PL)を指すため、スタブのapproximateはPLと異なる値(true)に固定し、比較対象もPLに
+      // 揃える(#81メタレビュー差し戻し: 旧版はスタブがapproximate=falseで新既定PLと同値になり、
+      // PLへのハードコード退行がapproximate軸で検出できていなかった)。
       const horses = [candidate(1, 0.6, 3)];
       const swappedModel: PlaceJointModel = {
         id: "exact-future-model",
-        approximate: false,
+        approximate: true,
         buildDistribution: () => [
           { placed: [], probability: 0.4 },
           { placed: [1], probability: 0.6 },
@@ -1030,10 +1292,11 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
         swappedModel,
       );
       expect(result.modelId).toBe("exact-future-model");
-      expect(result.modelApproximate).toBe(false);
-      // 既定モデルの値と異なることも積極的に確認する(既定へのハードコード退行の直接検出)。
-      expect(result.modelId).not.toBe(CONDITIONAL_BERNOULLI_MODEL.id);
-      expect(result.modelApproximate).not.toBe(CONDITIONAL_BERNOULLI_MODEL.approximate);
+      expect(result.modelApproximate).toBe(true);
+      // 現在の既定モデル(PL)の値と異なることも積極的に確認する(既定へのハードコード退行の
+      // 直接検出)。
+      expect(result.modelId).not.toBe(PLACKETT_LUCE_MODEL.id);
+      expect(result.modelApproximate).not.toBe(PLACKETT_LUCE_MODEL.approximate);
     });
 
     it("診断値(placeProbSum等)が見送り時も含め算出されること", () => {
@@ -1097,14 +1360,23 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
     });
 
     it("placeCount=NaNでもNaNが一切露出しないこと(C-1で実際に発生したバグの回帰テスト。Math.max(0,NaN)がNaNを素通りしてcombos=[]になり見送り理由が誤分類されていた)", () => {
+      // AC-B3'(D)(a)裁定(#81): PLの`validatePlaceCountOrThrow`は非有限なplaceCountを
+      // throwする(`reason:"invalid-place-count"`)ため、CBの契約(NaNを許容しk=0扱いにする)を
+      // 検証するにはCONDITIONAL_BERNOULLI_MODELを明示的に渡す(PL側の契約は下記
+      // 「AC-B3'(a): PLはinvalid-place-countをthrowすること」で別途固定する)。
       const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
-      const result = allocateBets(horses, Number.NaN, {
-        bankroll: 10000,
-        perRaceCap: 10000,
-        kellyFraction: 1,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
+      const result = allocateBets(
+        horses,
+        Number.NaN,
+        {
+          bankroll: 10000,
+          perRaceCap: 10000,
+          kellyFraction: 1,
+          betUnit: 100,
+          greedySteps: 1000,
+        },
+        CONDITIONAL_BERNOULLI_MODEL,
+      );
       expect(Number.isNaN(result.totalStake)).toBe(false);
       expect(Number.isNaN(result.diagnostics.placeProbSumTarget)).toBe(false);
       expect(Number.isNaN(result.diagnostics.placeProbSumDeviation)).toBe(false);
@@ -1119,6 +1391,173 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       expect(result.skipReason).toBe(
         "妙味が小さく、賭ける価値のある配分が見つかりませんでした",
       );
+    });
+
+    it("AC-B3'(a)(#81): PLはplaceCount=NaNをinvalid-place-countとしてthrowすること(CBは許容する契約と対比)", () => {
+      // CB版(直前のテスト)はNaNをk=0扱いに丸めて許容するが、PL版
+      // (validatePlaceCountOrThrow)は非有限/負/非整数のplaceCountをthrowする契約。
+      // 「フィクスチャを書き換えて通す」のではなく、この契約差そのものを固定する。
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+      expect(() =>
+        allocateBets(
+          horses,
+          Number.NaN,
+          { bankroll: 10000, perRaceCap: 10000, kellyFraction: 1, betUnit: 100, greedySteps: 1000 },
+          PLACKETT_LUCE_MODEL,
+        ),
+      ).toThrowError(
+        expect.objectContaining({ name: "PlackettLuceFitError", reason: "invalid-place-count" }),
+      );
+    });
+  });
+
+  /**
+   * AC-B3'(b)(#81): PLでフィット可能なフィクスチャで、モデルに依存しない配分アルゴリズムの
+   * 不変条件(受け入れ条件6・13)を検査する。CB版(直前の describe)は明示的にCBへ固定した
+   * ため、既定切替の影響を受けなくなった。しかし production の既定はPLになったため、
+   * これらの不変条件をPLの下でも誰かが検査していないと「production の既定の下でこれらの
+   * 不変条件を検査するテストが無い」状態になる(boss裁定)。
+   *
+   * フィクスチャは p=[0.5,0.4,0.3]・odds=[2.5,2.2,5]・k=2 に統一した(#81着手前ゲートで
+   * boss が実現可能性を実測: 0.05刻みの3頭組走査でAC6相当を満たす組は多数存在する)。
+   * 元のCBフィクスチャ(p=[0.6,0.5,0.1])はPLで`not-converged`の崖に乗るため使えない。
+   */
+  describe("AC-B3'(b): PL版(受け入れ条件6・13の不変条件をPLの下でも検査する。#81)", () => {
+    const horses = [candidate(1, 0.5, 2.5), candidate(2, 0.4, 2.2), candidate(3, 0.3, 5)];
+
+    // 前提(無条件expect・describe共通): このフィクスチャがPLで実際にθフィットの自由集合を
+    // 解いている(縮退経路に落ちていない)こと。
+    it("前提: このフィクスチャがPLでdegenerateFixedCount===0(縮退せずθフィットを実際に解く)であること", () => {
+      const fit = fitPlackettLuceStrengths(
+        horses.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb })),
+        2,
+      );
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      expect(fit.degenerateFixedCount).toBe(0);
+    });
+
+    it("受け入れ条件6相当: capを絞ると、2頭以上の正のcontinuousFraction比を保ったまま比例縮小されること(PL)", () => {
+      const wide = allocateBets(
+        horses,
+        2,
+        config({ bankroll: 1000000, perRaceCap: 10000000, kellyFraction: 1 }),
+        PLACKETT_LUCE_MODEL,
+      );
+      const narrow = allocateBets(
+        horses,
+        2,
+        config({ bankroll: 1000000, perRaceCap: 800, kellyFraction: 1 }),
+        PLACKETT_LUCE_MODEL,
+      );
+
+      // 前提(無条件expect。元のCB版と同じ主張をすべて引き継ぐ): 2頭以上が正の
+      // continuousFractionを持つこと。
+      const positiveFractionCount = wide.allocations.filter((a) => a.continuousFraction > 0).length;
+      expect(positiveFractionCount).toBeGreaterThanOrEqual(2);
+      for (let i = 0; i < wide.allocations.length; i++) {
+        expect(narrow.allocations[i]!.continuousFraction).toBe(wide.allocations[i]!.continuousFraction);
+      }
+
+      expect(narrow.minimumStakeApplied).toBe(false);
+      expect(narrow.capApplied).toBe(true);
+      expect(narrow.totalStake).toBeLessThanOrEqual(800);
+      const wideStakeSum = wide.allocations.reduce((acc, a) => acc + a.stake, 0);
+      expect(wideStakeSum).toBeGreaterThan(800);
+
+      const kellyTargetStake = narrow.kellyTargetStake;
+      const s = kellyTargetStake > 0 ? Math.min(1, narrow.effectivePerRaceCap / kellyTargetStake) : 0;
+      for (const a of narrow.allocations.filter((x) => x.excludedReason === null)) {
+        const expected =
+          Math.floor((s * a.scaledFraction * narrow.resolvedBankroll) / DEFAULT_BET_ALLOCATION_CONFIG.betUnit) *
+          DEFAULT_BET_ALLOCATION_CONFIG.betUnit;
+        const expectedFloored = expected < DEFAULT_BET_ALLOCATION_CONFIG.betUnit ? 0 : expected;
+        expect(a.stake).toBe(expectedFloored);
+      }
+
+      // 前提(無条件expect。元のCB版「受け入れ条件6」が持つ主張をそのまま引き継ぐ。boss差し戻し
+      // #81 AC-B3'(D)(b)③): 正のcontinuousFractionを持つ2頭が、丸め後もどちらも正のstakeを
+      // 維持していること(退化解〈1頭だけに全額集中〉ではないことの直接証拠)。上のformula検証
+      // (計算式そのものの再計算)はstakeの値がscaledFractionと内部的に整合していることしか見ず、
+      // scaledFraction自体が1頭に退化していても機械的に成立してしまうため、この2行は独立した
+      // 保証として必要(このテストを cap=250 に変えて実行すると、stakeが[100,0,0]に退化して
+      // withStakeが1頭になり、下のtoHaveLength(2)が落ちることで直接確認できる)。
+      const positiveNarrow = narrow.allocations.filter((a) => a.continuousFraction > 0);
+      expect(positiveNarrow).toHaveLength(2);
+      const withStake = positiveNarrow.filter((a) => a.stake > 0);
+      expect(withStake).toHaveLength(2);
+
+      // 比率保持の直接検証: stake比がcontinuousFraction比とbetUnitの丸め誤差程度で一致すること。
+      // このテストを実行すると narrow.allocations の stake は [umaban1: 500, umaban2: 0,
+      // umaban3: 200] になり(continuousFractionが正の2頭はumaban1・3)、continuousFraction比
+      // (約0.667/0.333≈2.003)に対しstake比(500/200=2.5)の相対誤差は約24.8%になる
+      // (このファイルの `allocateBets` を同じ引数〈horses・placeCount=2・perRaceCap=800・
+      // bankroll=1000000・PLACKETT_LUCE_MODEL〉で呼べば再現できる)。CB版(受け入れ条件6)の
+      // 相対誤差は、CB版自身のフィクスチャ(p=[0.6,0.5,0.1])で測ると同じ計算で約8.5%であり、
+      // CB版の閾値0.15はPL版のこのフィクスチャでは小さすぎる。
+      // ★ただし、この差はモデル固有の丸め特性に帰属するものではない(#81メタレビュー差し戻し
+      // で判明): 本テストと同じPLフィクスチャ(p=[0.5,0.4,0.3]・odds=[2.5,2.2,5]・
+      // placeCount=2・perRaceCap=800)を、第4引数だけCONDITIONAL_BERNOULLI_MODELに差し替えて
+      // 測ると、relativeErrorは0.19315141787051907になり、CB版自身の閾値0.15を既に上回る
+      // (このファイルの`allocateBets`を本テストと同じ引数・model引数のみCB差し替えで呼べば
+      // 再現できる)。つまり0.15→0.3への引き上げが必要になった主因は、モデル(CB/PL)の
+      // 丸め特性差ではなく、フィクスチャを差し替えたことでcontinuousFraction比が
+      // 0.15の閾値では収まらない値(約2.003)になったことである。
+      // 実測値(約0.248)に安全マージンを載せた0.3を、PL版の閾値として採用する。
+      const [first, second] = withStake;
+      const actualRatio = first!.stake / second!.stake;
+      const expectedRatio = first!.continuousFraction / second!.continuousFraction;
+      const relativeError = Math.abs(actualRatio - expectedRatio) / expectedRatio;
+      // 実測値そのものもリテラルで固定する(code-reviewer提案・boss採用指示): 上界
+      // toBeLessThan(0.3)だけだと、この閾値がCB版0.15から緩められた経緯(このdescribe冒頭
+      // コメント参照)が「緩めた上界」のままテストに残り、将来さらに緩めても検出できない。
+      // 実測値0.24812593703148436(このファイルのallocateBetsを本テストと同じ引数で呼べば
+      // 再現できる。手元のtsxスクリプトでも独立に算出し一致を確認済み)をtoBeCloseToで固定する
+      // ことで、この値そのものが特性化され、閾値0.3への変更もこの値からの乖離としてテストが
+      // 検出できるようになる(殺す変異: DEFAULT_BET_ALLOCATION_CONFIG.betUnitを100→150に
+      // 変えるとrelativeErrorは0.49775112443778124になり、下のtoBeCloseToが落ちることを
+      // 確認済み)。
+      expect(relativeError).toBeCloseTo(0.24812593703148436, 10);
+      expect(relativeError).toBeLessThan(0.3);
+    });
+
+    it("受け入れ条件13相当: 2点以上配分されるときはnotDiversified=falseであること(PL)", () => {
+      const result = allocateBets(
+        horses,
+        2,
+        config({ bankroll: 100000, perRaceCap: 100000, kellyFraction: 1 }),
+        PLACKETT_LUCE_MODEL,
+      );
+      expect(result.betCount).toBeGreaterThanOrEqual(2);
+      expect(result.notDiversified).toBe(false);
+    });
+
+    it("受け入れ条件13相当: 剰余の再配分を行わないこと(PL)", () => {
+      const result = allocateBets(
+        horses,
+        2,
+        config({ bankroll: 10000, perRaceCap: 100000000, kellyFraction: 1 }),
+        PLACKETT_LUCE_MODEL,
+      );
+
+      expect(result.betCount).toBeGreaterThanOrEqual(2);
+
+      const withPositiveContinuous = result.allocations.filter((a) => a.continuousFraction > 0);
+      const diffs = withPositiveContinuous.map((a) => ({
+        umaban: a.umaban,
+        diff: a.continuousFraction * result.kellyFraction * result.resolvedBankroll - a.stake,
+      }));
+
+      // 前提(無条件expect): 少なくとも1頭で丸めが実際に発生していること(CB版と同じ空振り防止)。
+      expect(diffs.some((d) => d.diff > 1e-9)).toBe(true);
+
+      const expectedStakeSum = result.allocations.reduce((acc, a) => acc + a.stake, 0);
+      expect(result.totalStake).toBe(expectedStakeSum);
+      for (const a of result.allocations) {
+        const continuous = a.continuousFraction * result.kellyFraction * result.resolvedBankroll;
+        expect(continuous - a.stake).toBeLessThan(DEFAULT_BET_ALLOCATION_CONFIG.betUnit);
+        expect(continuous - a.stake).toBeGreaterThanOrEqual(-1e-6);
+      }
     });
   });
 
@@ -1257,6 +1696,286 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
         expect(result.advisory).toBeNull();
         expect(result.skipReason).toBe("1レースの上限が未設定のため配分を提案していません");
       }
+    });
+  });
+
+  describe("不正なオッズ値の候補外化(Issue #31)", () => {
+    // 背景: 候補選定が `h.isPositive && h.placeOddsMin !== null` のみで、値が「使える値か」を
+    // 検証していなかった。無関係な1頭に NaN/Infinity が混じると `runGreedyAllocation` の
+    // payout計算(`trialX[idx] * odds[idx]`)がNaN汚染され、健全な他の馬の配分まで巻き添えで
+    // 消えて「妙味が小さく…」という誤った見送り理由に化けていた(#31再現ログ)。
+    // 判定基準は allocation-primitives.ts の isUsableOdds(1.0以上の有限値。#74で`>0`から
+    // 引き上げ)に委譲する(combo-bet-allocation.ts の validateCandidates/resolveComboOdds と
+    // 同一基準を共有)。
+
+    describe("候補選定・excludedReasonのテーブル駆動検証", () => {
+      const excludedTable: Array<{ name: string; value: number }> = [
+        { name: "NaN", value: Number.NaN },
+        { name: "+Infinity", value: Number.POSITIVE_INFINITY },
+        { name: "-Infinity", value: Number.NEGATIVE_INFINITY },
+        { name: "0(境界。>=1.0を満たさない)", value: 0 },
+        { name: "負値(-1)", value: -1 },
+      ];
+      it.each(excludedTable)(
+        "placeOddsMin=$name の馬はisPositive===trueであっても候補外になり、新設の「不正な値」理由が付くこと(AC2)",
+        ({ value }) => {
+          const horses: AllocationHorse[] = [
+            candidate(1, 0.6, 3),
+            // isPositive:true を明示的に与える(#31再現の核心: 実運用でこの組み合わせが起き得るかに
+            // 関わらず、候補フィルタが isPositive だけを見て通してしまわないことを検証する)。
+            { umaban: 2, placeProb: 0.35, placeOddsMin: value, ev: 1.5, isPositive: true },
+          ];
+          const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+          const excluded = result.allocations.find((a) => a.umaban === 2)!;
+          expect(excluded.stake).toBe(0);
+          expect(excluded.excludedReason).toBe("複勝オッズ下限が不正な値のため対象外");
+        },
+      );
+
+      const retainedTable: Array<{ name: string; value: number }> = [
+        // #74でisUsableOddsの基準が`>0`から`>=1.0`へ引き上げられたため、1e-9(旧基準では
+        // 過剰除外の否定側の境界だった)はもう妥当値ではない。境界の採用側である1.0に置換する
+        // (このテストの意図=過剰除外しないことの固定は維持する)。
+        { name: "境界ちょうど(1.0)", value: 1.0 },
+        { name: "Number.MAX_VALUE(有限の最大値)", value: Number.MAX_VALUE },
+      ];
+      it.each(retainedTable)(
+        "placeOddsMin=$name の馬は候補として残ること(過剰除外の否定側)",
+        ({ value }) => {
+          const horses: AllocationHorse[] = [
+            { umaban: 1, placeProb: 0.6, placeOddsMin: value, ev: 1.5, isPositive: true },
+          ];
+          const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+          expect(result.allocations[0]!.excludedReason).toBeNull();
+          expect(result.diagnostics.candidateCount).toBe(1);
+        },
+      );
+
+      it("placeOddsMin===null(未確定)は従来どおり既存文言のままであること(AC1・非破壊の明示的固定)", () => {
+        const horses: AllocationHorse[] = [
+          candidate(1, 0.6, 3),
+          { umaban: 2, placeProb: 0.35, placeOddsMin: null, ev: null, isPositive: false },
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+        const excluded = result.allocations.find((a) => a.umaban === 2)!;
+        expect(excluded.excludedReason).toBe("複勝オッズ下限が未確定のため対象外");
+      });
+
+      it("不正な値かつisPositive===falseの馬は「EVがプラスではない」に誤ラベルされず「不正な値」と報告されること" +
+        "(boss拘束力のある補足2: #31が直そうとした誤ラベルの再生産防止)", () => {
+        const horses: AllocationHorse[] = [
+          candidate(1, 0.6, 3),
+          { umaban: 2, placeProb: 0.35, placeOddsMin: Number.NaN, ev: null, isPositive: false },
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+        const excluded = result.allocations.find((a) => a.umaban === 2)!;
+        expect(excluded.excludedReason).toBe("複勝オッズ下限が不正な値のため対象外");
+        expect(excluded.excludedReason).not.toBe("EVがプラスではないため対象外");
+      });
+
+      it("通常値(2.2)の候補は引き続き候補になること(過剰除外の否定・回帰)", () => {
+        const horses = [candidate(1, 0.6, 2.2)];
+        const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+        expect(result.allocations[0]!.excludedReason).toBeNull();
+      });
+    });
+
+    describe("診断値(oddsMalformedCount)の整合(AC4)", () => {
+      it("不正値2頭を含むレースでoddsMalformedCount=2、かつcandidateCount+excludedCount=全出走頭数を崩さないこと", () => {
+        const horses: AllocationHorse[] = [
+          candidate(1, 0.6, 3),
+          { umaban: 2, placeProb: 0.15, placeOddsMin: Number.NaN, ev: 1.5, isPositive: true },
+          { umaban: 3, placeProb: 0.15, placeOddsMin: Number.POSITIVE_INFINITY, ev: 1.5, isPositive: true },
+          nonCandidate(4, 0.1, 2), // 通常のEVマイナス候補外(不正値ではない)との混在
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+        expect(result.diagnostics.candidateCount).toBe(1);
+        expect(result.diagnostics.excludedCount).toBe(3);
+        expect(result.diagnostics.candidateCount + result.diagnostics.excludedCount).toBe(horses.length);
+        expect(result.diagnostics.oddsMalformedCount).toBe(2);
+        // boss拘束力のある補足2: oddsMalformedCountはexcludedCountの内訳(部分集合)であって
+        // 別枠ではないことの不変条件。
+        expect(result.diagnostics.oddsMalformedCount).toBeGreaterThanOrEqual(0);
+        expect(result.diagnostics.oddsMalformedCount).toBeLessThanOrEqual(result.diagnostics.excludedCount);
+      });
+
+      it("正常系(全馬健全)ではoddsMalformedCountが0であること(ノイズを出さない側の固定)", () => {
+        const horses = [candidate(1, 0.6, 3), candidate(2, 0.3, 4), nonCandidate(3, 0.1)];
+        const result = allocateBets(horses, 3, config({ bankroll: 10000, perRaceCap: 10000 }));
+        expect(result.diagnostics.oddsMalformedCount).toBe(0);
+      });
+
+      it("除外馬が全員不正値(未確定・EVマイナスがゼロ)のとき、oddsMalformedCountがexcludedCountの" +
+        "上端に張り付く(等号成立)こと(code-reviewer指摘・境界値)", () => {
+        const horses: AllocationHorse[] = [
+          candidate(1, 0.6, 3),
+          { umaban: 2, placeProb: 0.2, placeOddsMin: Number.NaN, ev: 1.5, isPositive: true },
+          { umaban: 3, placeProb: 0.2, placeOddsMin: Number.POSITIVE_INFINITY, ev: 1.5, isPositive: true },
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+        // 前提固定: 除外馬(umaban 2・3)がplaceOddsMin===null・EVマイナスのいずれでもなく、
+        // 「全員不正値」であることをまず確定させる(空振り防止)。
+        expect(result.diagnostics.excludedCount).toBe(2);
+        expect(result.diagnostics.oddsMalformedCount).toBe(2);
+        // 【本題】上端の等号: oddsMalformedCount === excludedCount。
+        expect(result.diagnostics.oddsMalformedCount).toBe(result.diagnostics.excludedCount);
+      });
+    });
+
+    describe(
+      "HorseEv層とBetAllocation層の二重の記録(Issue #74【最重要の裁定】: " +
+        "HorseEv.excludedReasonは「EVを計算しなかった理由」、BetAllocation.excludedReasonは" +
+        "「配分候補にしなかった理由」であり、allocateBetsはHorseEvを経由しない直接呼び出しも" +
+        "受ける公開関数なので、上流を信用せず自分の入力に対して独立に判定する〈#31の門番の原則〉)",
+      () => {
+        it(
+          "computeRaceEvがplaceOddsMin=0(値域外)で返すHorseEvをそのままAllocationHorseへ" +
+            "橋渡しすると、HorseEv側の新文言とBetAllocation側のEXCLUDED_ODDS_MALFORMED/" +
+            "oddsMalformedCountが同時に立つこと(AC-4d: #74引き上げ後もbet-allocation.ts側の" +
+            "値は変更前〈isUsableOdds(0)は#74前後どちらでもfalse〉と同じ)",
+          () => {
+            const priors: HorsePrior[] = [{ umaban: 2, placeProb: 0.35 }];
+            const odds: OddsSnapshot = {
+              officialDatetime: null,
+              oddsStatus: "result",
+              win: {},
+              place: { 2: { oddsMin: 0, oddsMax: 0, ninki: null } },
+            };
+            const [horseEv] = computeRaceEv(priors, odds);
+
+            // 層1(HorseEv): placeOddsMinは生の値(0)のまま保持され、evのみnullになること。
+            expect(horseEv!.placeOddsMin).toBe(0);
+            expect(horseEv!.ev).toBeNull();
+            expect(horseEv!.excludedReason).toBe(
+              "複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外",
+            );
+
+            // 層2(BetAllocation): HorseEvをAllocationHorseへ橋渡しした入力で確認する
+            // (analysis-pipeline.ts:620のAnalysisRow生成と同じ「1箇所でのみ生成される」経路を
+            // 模す)。
+            const horses: AllocationHorse[] = [
+              candidate(1, 0.6, 3),
+              {
+                umaban: horseEv!.umaban,
+                placeProb: horseEv!.placeProb,
+                placeOddsMin: horseEv!.placeOddsMin,
+                ev: horseEv!.ev,
+                isPositive: horseEv!.isPositive,
+              },
+            ];
+            const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+            const allocation = result.allocations.find((a) => a.umaban === 2)!;
+            expect(allocation.excludedReason).toBe("複勝オッズ下限が不正な値のため対象外");
+            expect(result.diagnostics.oddsMalformedCount).toBe(1);
+          },
+        );
+      },
+    );
+
+    describe("AC3(#31の本丸): 無関係な1頭の不正値が健全な馬の配分を巻き添えにしないこと", () => {
+      it("不正値の馬を、同じplaceProbを持つ候補外の馬(placeOddsMin=null・isPositive=false)に" +
+        "差し替えた対照レースと、totalStake・健全な馬のstake/continuousFractionが完全一致すること", () => {
+        const healthy = candidate(1, 0.6, 3);
+        const contaminated: AllocationHorse[] = [
+          healthy,
+          { umaban: 2, placeProb: 0.35, placeOddsMin: Number.NaN, ev: 1.5, isPositive: true },
+        ];
+        const control: AllocationHorse[] = [
+          healthy,
+          { umaban: 2, placeProb: 0.35, placeOddsMin: null, ev: null, isPositive: false },
+        ];
+        const cfg = config({ bankroll: 10000, perRaceCap: 10000 });
+        const contaminatedResult = allocateBets(contaminated, 2, cfg);
+        const controlResult = allocateBets(control, 2, cfg);
+
+        // 前提固定(空振り防止): 健全な馬は両レースでisSkip=false・stake>0であること。
+        expect(contaminatedResult.isSkip).toBe(false);
+        expect(controlResult.isSkip).toBe(false);
+        const contaminatedHealthy = contaminatedResult.allocations.find((a) => a.umaban === 1)!;
+        const controlHealthy = controlResult.allocations.find((a) => a.umaban === 1)!;
+        expect(contaminatedHealthy.stake).toBeGreaterThan(0);
+        expect(controlHealthy.stake).toBeGreaterThan(0);
+
+        // 一致すべきフィールド(boss拘束力のある補足3のスコープ)。結果オブジェクト全体の
+        // toEqualは使わない(差し替えた1頭のexcludedReason/placeOddsMin・
+        // diagnostics.oddsMalformedCountは意図的に差が出るため)。
+        expect(contaminatedResult.totalStake).toBe(controlResult.totalStake);
+        expect(contaminatedResult.skipReason).toBe(controlResult.skipReason);
+        expect(contaminatedResult.kellyTargetStake).toBe(controlResult.kellyTargetStake);
+        expect(contaminatedResult.capApplied).toBe(controlResult.capApplied);
+        expect(contaminatedResult.minimumStakeApplied).toBe(controlResult.minimumStakeApplied);
+        expect(contaminatedResult.betCount).toBe(controlResult.betCount);
+        expect(contaminatedResult.notDiversified).toBe(controlResult.notDiversified);
+        expect(contaminatedHealthy.stake).toBe(controlHealthy.stake);
+        expect(contaminatedHealthy.continuousFraction).toBe(controlHealthy.continuousFraction);
+        expect(contaminatedHealthy.scaledFraction).toBe(controlHealthy.scaledFraction);
+        expect(contaminatedResult.diagnostics.placeProbSum).toBe(controlResult.diagnostics.placeProbSum);
+        expect(contaminatedResult.diagnostics.marginalDeviationMax).toBe(
+          controlResult.diagnostics.marginalDeviationMax,
+        );
+        expect(contaminatedResult.diagnostics.candidateCount).toBe(controlResult.diagnostics.candidateCount);
+        expect(contaminatedResult.diagnostics.excludedCount).toBe(controlResult.diagnostics.excludedCount);
+
+        // 一致しなくてよい(むしろ差が出るのが正しい)側の明示的な固定(boss拘束力のある補足3)。
+        const contaminatedRow = contaminatedResult.allocations.find((a) => a.umaban === 2)!;
+        const controlRow = controlResult.allocations.find((a) => a.umaban === 2)!;
+        expect(contaminatedRow.excludedReason).toBe("複勝オッズ下限が不正な値のため対象外");
+        expect(controlRow.excludedReason).toBe("複勝オッズ下限が未確定のため対象外");
+        expect(Number.isNaN(contaminatedRow.placeOddsMin as number)).toBe(true);
+        expect(controlRow.placeOddsMin).toBeNull();
+        expect(contaminatedResult.diagnostics.oddsMalformedCount).toBe(1);
+        expect(controlResult.diagnostics.oddsMalformedCount).toBe(0);
+      });
+    });
+
+    describe("skipReasonの特性化(boss差し戻し・要修正1)", () => {
+      // 【この経路が偽の原因を報告する現状(本タスクでは是正しない)】
+      // isPositive===trueと判定された馬(ev = prob × odds なので、oddsがInfinityならev=Infinity
+      // > 閾値でisPositive=trueになりうる。#31本文が挙げている組み合わせ)が、不正なオッズのため
+      // 候補フィルタで全頭除外されると、candidateHorses.length===0になり、
+      // determineSkipReasonCode(allocation-primitives.ts)は「候補0頭」を無条件に
+      // no-candidates(文言「EVプラスの馬がいないため見送りです」)へ分類する。
+      // しかし実際には「EVプラスと判定した馬は存在した(isPositive===trueだった)」のであり、
+      // 見送りの真の原因は「そのオッズが判定不能(不正な値)だった」ことである。
+      // 同じ BetAllocationResult の中で、skipReason(「EVプラスの馬がいない」)と
+      // allocations[].excludedReason(「オッズ下限が不正な値のため対象外」)が矛盾した説明を
+      // 同時に返す状態は本テスト作成時点で解消されていない。
+      //
+      // 【今回是正しない理由(boss指示・記録用)】
+      // 1. #31の処方箋(boss着手前ゲートで合意したブリーフ)に専用skipReasonの新設は無い。
+      // 2. 文言の出し分けはUI側の受け皿設計(見送り理由をどう表示し直すか)と一緒に決めるべきで、
+      //    本タスク単独で先取りすると設計の手戻りを招く(後続タスクで扱う)。
+      // 3. 修正前(#31着手前)は同じ入力が「妙味が小さく…」(#31再現ログと同じ偽の理由)に
+      //    化けていたため、本タスクの変更は「偽の理由を出す」という状態を悪化させてはいない
+      //    (原因の文言は変わったが、依然として偽である点は変わらない)。
+      //
+      // 本テストは「現状の挙動を変えない」ことを保証する特性化テストであり、上記の矛盾が
+      // 解消されていないことを可視化する目的で残す(将来この経路を直す際の回帰検出にもなる)。
+      it("EVプラス判定の馬が全員不正オッズのとき、skipReasonは真の原因(判定不能)を名指しせず" +
+        "「EVプラスの馬がいない」という判定結果の文言になること(現状の固定・是正は別タスク)", () => {
+        const horses: AllocationHorse[] = [
+          // isPositive===trueだがplaceOddsMin=Infinityで不正(#31本文が挙げた組み合わせ)。
+          { umaban: 1, placeProb: 0.5, placeOddsMin: Number.POSITIVE_INFINITY, ev: Number.POSITIVE_INFINITY, isPositive: true },
+          nonCandidate(2, 0.3, 2), // 通常のEVマイナス(不正値ではない)
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+
+        // 前提固定: 候補が実際に0頭になり、見送りになること(空振り防止)。
+        expect(result.diagnostics.candidateCount).toBe(0);
+        expect(result.diagnostics.excludedCount).toBe(2);
+        expect(result.isSkip).toBe(true);
+
+        // 【本題】skipReasonは「EVプラスの馬がいない」という判定結果の文言になる
+        // (真の原因=判定不能ではない。矛盾の固定)。
+        expect(result.skipReason).toBe("EVプラスの馬がいないため見送りです");
+
+        // 真の原因を示す情報はdiagnostics.oddsMalformedCountとexcludedReasonにのみ残る
+        // (skipReasonからは読み取れないことの対比)。
+        expect(result.diagnostics.oddsMalformedCount).toBe(1);
+        expect(result.allocations.find((a) => a.umaban === 1)!.excludedReason).toBe(
+          "複勝オッズ下限が不正な値のため対象外",
+        );
+      });
     });
   });
 });

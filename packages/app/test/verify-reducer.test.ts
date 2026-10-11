@@ -19,6 +19,8 @@ const sampleReport: VerifyReportView = {
   excludedAnalysisCount: 0,
   supersededAnalysisCount: 0,
   excludedEstimatedCount: 0,
+  excludedLookaheadSuspectCount: 0,
+  excludedLookaheadUnknownCount: 0,
   bet: {
     betCount: 2,
     totalStake: 200,
@@ -32,6 +34,19 @@ const sampleReport: VerifyReportView = {
     directionGroups: [],
     calibrationBias: [],
     markStats: [],
+  },
+  proposedBet: {
+    population: { allocated: 0, skipped: 0, unreached: 0, noRecord: 0 },
+    overall: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    place: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    win: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    wide: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    trio: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    quinella: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    exacta: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    trifecta: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    bracketQuinella: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    unknownBetType: { count: 0, totalStake: 0, betTypes: [] },
   },
 };
 
@@ -60,6 +75,7 @@ const sampleRaceLedger: RaceLedgerView[] = [
     totalReturn: 300,
     recoveryRate: 3.0,
     betCount: 1,
+    allocation: null,
   },
 ];
 

@@ -1,0 +1,284 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+/**
+ * #159 スパイクのワークフロー(.github/workflows/cloudflare-spike.yml)の静的検査。
+ *
+ * **限界**: これは yml のテキストへの検査であり、GitHub Actions の式が実際にどう評価されるかは
+ * 検証できない(`if:` の評価は Actions 上でしか行われない)。ここで固定するのは「印のない push では
+ * 何もしない」「共有秘密をログに出さない」「失敗時も Worker を消す」といった、人が yml を書き換える
+ * ときに壊しやすい安全装置が、文面として残っていることだけである。
+ */
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+/**
+ * ファイルを読み、改行を LF に正規化する。Windows のチェックアウト(core.autocrlf)では改行が CRLF に
+ * なり、`\n` 前提の正規表現が一致しなくなる(Windows CI で実際に失敗した)。既存の
+ * `release-workflow-gate.test.ts` / `version-policy.test.ts` と同じ対処。
+ */
+function readTextLf(...segments: string[]): string {
+  return readFileSync(path.join(ROOT, ...segments), "utf-8").replace(/\r\n/g, "\n");
+}
+
+const yml = readTextLf(".github", "workflows", "cloudflare-spike.yml");
+
+/** `- name: <名前>` で始まるステップの本文(次のステップ直前まで)を返す。 */
+function stepBody(nameFragment: string): string {
+  const lines = yml.split("\n");
+  const start = lines.findIndex((l) => /^\s+- name:/.test(l) && l.includes(nameFragment));
+  expect(start, `ステップ『${nameFragment}』が見つかる`).toBeGreaterThanOrEqual(0);
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\s+- name:/.test(lines[i]!)) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+function stepIndex(nameFragment: string): number {
+  return yml.split("\n").findIndex((l) => /^\s+- name:/.test(l) && l.includes(nameFragment));
+}
+
+describe("起動条件(印のない push では何もしない)", () => {
+  it("push の対象ブランチは作業ブランチ1本だけで、タグやワイルドカードは含まない", () => {
+    const m = /\n  push:\n    branches:\n((?:      - .+\n)+)/.exec(yml);
+    expect(m).not.toBeNull();
+    const branches = m![1]!.trim().split("\n").map((l) => l.replace(/^\s*-\s*/, "").trim());
+    expect(branches).toEqual(["claude/issue-order-processing-wjgpdd"]);
+    expect(yml).not.toMatch(/\n    tags:/);
+    expect(yml).toContain("workflow_dispatch:");
+  });
+
+  it("ジョブの if は『workflow_dispatch』または『push かつ先端コミットメッセージが [CF-SPIKE] で始まる』だけを通す", () => {
+    const m = /\n    if: (.+)\n/.exec(yml);
+    expect(m).not.toBeNull();
+    const cond = m![1]!;
+    expect(cond).toContain("github.event_name == 'workflow_dispatch'");
+    expect(cond).toContain("github.event_name == 'push'");
+    expect(cond).toContain("startsWith(github.event.head_commit.message, '[CF-SPIKE]')");
+    // 部分一致(contains)は使わない: コミットメッセージの本文に印の文字列が書かれただけ(「[CF-SPIKE] を付けていない」
+    // という説明を含む)で実測が起動してしまった事故(0c47222)の再発防止。印は件名の先頭に置いたときだけ有効。
+    expect(cond).not.toContain("contains(");
+    // 条件式の構造: A || (B && C)。印のない push を通す形(印の否定だけ・印の判定が無い等)になっていない
+    expect(cond).toMatch(/^\$\{\{ github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'push' && startsWith\(github\.event\.head_commit\.message, '\[CF-SPIKE\]'\)\) \}\}$/);
+  });
+
+  it("同時実行は1本に絞り、実行中の run を途中で打ち切らない(打ち切ると Worker が残る)", () => {
+    expect(yml).toMatch(/concurrency:\n\s+group: cloudflare-spike\n\s+cancel-in-progress: false/);
+  });
+
+  it("権限は contents: read のみ(リポジトリへ書き戻さない)", () => {
+    expect(yml).toMatch(/permissions:\n\s+contents: read/);
+    expect(yml).not.toMatch(/contents: write/);
+  });
+});
+
+describe("Secrets とトークンの関門が、依存のインストールやデプロイより前にある", () => {
+  it("Secrets の存在確認 → 依存インストール → トークン・権限の検査 → デプロイ の順", () => {
+    const secrets = stepIndex("Secrets の存在");
+    const install = stepIndex("依存をインストール");
+    const preflight = stepIndex("トークンと権限の検査");
+    const deploy = stepIndex("Worker をデプロイ");
+    expect(secrets).toBeGreaterThanOrEqual(0);
+    expect(install).toBeGreaterThan(secrets);
+    expect(preflight).toBeGreaterThan(install);
+    expect(deploy).toBeGreaterThan(preflight);
+  });
+
+  it("Secrets の存在確認は2つの Secret 名を名指しして、空なら exit 1 で止まる", () => {
+    const body = stepBody("Secrets の存在");
+    expect(body).toContain("CLOUDFLARE_API_TOKEN");
+    expect(body).toContain("CLOUDFLARE_ACCOUNT_ID");
+    expect(body).toContain("exit 1");
+  });
+
+  it("依存のインストールは spikes/cloudflare で、ワークスペース外・ロックファイル固定", () => {
+    const body = stepBody("依存をインストール");
+    expect(body).toContain("pnpm install --ignore-workspace --frozen-lockfile");
+    expect(body).toContain("spikes/cloudflare");
+  });
+});
+
+describe("共有秘密をログに出さない", () => {
+  it("add-mask でマスクし、--secrets-file に渡したファイルは、デプロイの直後(成否にかかわらず)に削除する", () => {
+    expect(yml).toContain("::add-mask::");
+    const body = stepBody("Worker をデプロイ");
+    const passed = /--secrets-file "(\$\w+)"/.exec(body);
+    expect(passed, "--secrets-file に変数でファイルを渡している").not.toBeNull();
+    const fileVar = passed![1]!;
+    const rm = body.indexOf(`rm -f "${fileVar}"`);
+    expect(rm).toBeGreaterThan(body.indexOf("--secrets-file"));
+    // デプロイの失敗(終了コード)で rm が飛ばされないよう、rc に退避してから rm し、最後に exit "$rc" で返す
+    expect(body).toMatch(/\|\| rc=\$\?/);
+    expect(body.indexOf('exit "$rc"')).toBeGreaterThan(rm);
+    // マスクは、秘密をファイルや GITHUB_ENV に書くより前に登録する
+    expect(body.indexOf("::add-mask::")).toBeLessThan(body.indexOf("printf"));
+    expect(body.indexOf("::add-mask::")).toBeLessThan(body.indexOf("GITHUB_ENV"));
+  });
+
+  it("set -x(コマンドのエコー)を一切使わない", () => {
+    expect(yml).not.toMatch(/set\s+-[a-z]*x/);
+    expect(yml).not.toMatch(/\bxtrace\b/);
+  });
+
+  it("使う Secrets は CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID の2つだけ(実 Claude API のキー等を使わない)", () => {
+    const used = [...yml.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((m) => m[1]!);
+    expect(used.length).toBeGreaterThan(0);
+    expect(new Set(used)).toEqual(new Set(["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"]));
+    expect(yml).not.toMatch(/ANTHROPIC/);
+  });
+});
+
+describe("後片付け(失敗時も Worker を消す)と結果の出力", () => {
+  it("削除のステップは always() で実行され、API の DELETE(delete-run.ts)を主にする。wrangler delete には頼らない", () => {
+    const body = stepBody("Worker を削除");
+    expect(body).toMatch(/if: \$\{\{ always\(\) \}\}/);
+    expect(body).toContain("delete-run.ts");
+    // wrangler delete は、Worker を消した後に KV の確認で認証エラー(code 10000)になって赤くなるため使わない
+    expect(yml.split("\n").filter((l) => !l.trim().startsWith("#") && l.includes("wrangler delete"))).toEqual([]);
+  });
+
+  it("削除の確認(残存 Worker の一覧検査と結果ブロックの出力)も always() で、削除より後ろにある", () => {
+    const del = stepIndex("Worker を削除");
+    const verify = stepIndex("削除の確認");
+    expect(verify).toBeGreaterThan(del);
+    expect(stepBody("削除の確認")).toMatch(/if: \$\{\{ always\(\) \}\}/);
+  });
+
+  it("結果の全文は、ジョブログ(印で挟んだ1行)・step summary・artifact の3か所に出す。ログへの出力は失敗通知より後(末尾)", () => {
+    expect(stepBody("削除の確認")).toContain("cleanup-run.ts");
+    expect(yml).toContain("actions/upload-artifact");
+    // 出力の実体は cleanup-run.ts(配線は fake の Cloudflare API サーバに向けて実行して確認済み。ここは静的な固定)
+    const src = readTextLf("spikes", "cloudflare", "cleanup-run.ts");
+    expect(src).toContain("GITHUB_STEP_SUMMARY");
+    expect(src).toContain("console.log(formatResultBlock(result))");
+    expect(src.indexOf("::error")).toBeGreaterThan(-1);
+    expect(src.indexOf("console.log(formatResultBlock(result))")).toBeGreaterThan(src.indexOf("::error"));
+  });
+
+  it("ジョブにタイムアウトがある(Durable Object の探索が暴走しても止まる)", () => {
+    expect(yml).toMatch(/timeout-minutes: \d+/);
+  });
+
+  it("『測定を実行』のステップはジョブより短い timeout-minutes を持つ(ジョブの時間切れで、後続の削除と確認の猶予が無くなるのを防ぐ)", () => {
+    const job = /\n    timeout-minutes: (\d+)\n/.exec(yml);
+    const step = /timeout-minutes: (\d+)/.exec(stepBody("測定を実行"));
+    expect(job).not.toBeNull();
+    expect(step).not.toBeNull();
+    const jobMinutes = Number(job![1]);
+    const stepMinutes = Number(step![1]);
+    expect(stepMinutes).toBeGreaterThan(0);
+    // 削除・確認・artifact に十分な時間(10分以上)が残る
+    expect(jobMinutes - stepMinutes).toBeGreaterThanOrEqual(10);
+  });
+
+  it("ドライバは壁時計の上限を持ち、ステップの timeout より前に打ち切って、それまでの結果を書き出す", () => {
+    const src = readTextLf("spikes", "cloudflare", "driver.ts");
+    const wall = /DRIVER_WALL_MS = (\d+) \* 60_000/.exec(src);
+    expect(wall).not.toBeNull();
+    const step = /timeout-minutes: (\d+)/.exec(stepBody("測定を実行"));
+    expect(Number(wall![1])).toBeLessThan(Number(step![1]));
+    expect(src).toContain("shouldStop");
+  });
+});
+
+describe("ジョブログに workers.dev のサブドメインを出さない(リポジトリは public)", () => {
+  it("測定とスモークの実行(tsx)は、core の依存をこのディレクトリの node_modules から解決する tsconfig を使う", () => {
+    const body = stepBody("測定を実行");
+    expect(body).toMatch(/tsx --tsconfig tsconfig\.run\.json driver\.ts/);
+  });
+
+  it("ステップの env に URL を展開しない(SPIKE_URL を使わない。ドライバが Worker 名とサブドメインから組み立てる)", () => {
+    expect(yml).not.toMatch(/SPIKE_URL/);
+    const code = yml.split("\n").filter((l) => !l.trim().startsWith("#"));
+    expect(code.filter((l) => l.includes("workers.dev"))).toEqual([]);
+    expect(code.filter((l) => /echo .*CF_SUBDOMAIN/.test(l))).toEqual([]);
+  });
+});
+
+describe("実験の選択(#160。SPIKE_EXPERIMENTS)", () => {
+  it("workflow_dispatch に experiments の入力があり、既定は socket-matrix(文字列。#162 で origin から変更)", () => {
+    const m = /\n  workflow_dispatch:\n    inputs:\n      experiments:\n((?:        .+\n)+)/.exec(yml);
+    expect(m).not.toBeNull();
+    const block = m![1]!;
+    expect(block).toMatch(/default: ['"]?socket-matrix['"]?\n/);
+    // 入力の説明に、選べる実験の名前がそろっている(socket-matrix を含む)。
+    for (const name of ["origin", "reachability", "socket-matrix", "cpu"]) {
+      expect(block).toContain(name);
+    }
+    expect(block).toMatch(/type: string/);
+  });
+
+  it("『測定を実行』の env の SPIKE_EXPERIMENTS は、入力が空(push で起動したとき)でも socket-matrix になる(origin の 6 本を再実行しない)", () => {
+    const body = stepBody("測定を実行");
+    // push のとき `inputs` は空なので、`inputs.experiments` は null になる。`|| 'socket-matrix'` で socket-matrix に落とす。
+    expect(body).toContain("SPIKE_EXPERIMENTS: ${{ inputs.experiments || 'socket-matrix' }}");
+    expect(body).not.toContain("|| 'origin'");
+  });
+
+  it("入力(inputs)は env 経由でだけ使い、run のシェルには直接展開しない(スクリプト注入の防止)", () => {
+    const uses = yml.split("\n").filter((l) => l.includes("inputs.") && !l.trim().startsWith("#"));
+    expect(uses.length).toBeGreaterThan(0);
+    for (const line of uses) {
+      expect(line.trim()).toMatch(/^SPIKE_EXPERIMENTS: \$\{\{ inputs\.experiments \|\| 'socket-matrix' \}\}$/);
+    }
+  });
+
+  it("ドライバは SPIKE_EXPERIMENTS を parseExperiments で解釈する(未設定・未知はエラー)", () => {
+    const src = readTextLf("spikes", "cloudflare", "driver.ts");
+    expect(src).toContain('parseExperiments(process.env["SPIKE_EXPERIMENTS"])');
+  });
+
+  it("ドライバは、選んだ実験だけを実行する(reachability・origin・socket-matrix・cpu をそれぞれ includes で分岐する)", () => {
+    const src = readTextLf("spikes", "cloudflare", "driver.ts");
+    expect(src).toMatch(/experiments\.includes\("reachability"\)/);
+    expect(src).toMatch(/experiments\.includes\("origin"\)/);
+    expect(src).toMatch(/experiments\.includes\("socket-matrix"\)/);
+    expect(src).toMatch(/experiments\.includes\("cpu"\)/);
+  });
+
+  it("起動条件の if と、共有秘密・削除・残存確認のステップは、#159 のまま維持されている", () => {
+    expect(yml).toContain("startsWith(github.event.head_commit.message, '[CF-SPIKE]')");
+    expect(stepBody("Worker を削除")).toContain("delete-run.ts");
+    expect(stepBody("削除の確認")).toContain("cleanup-run.ts");
+    expect(stepBody("Worker をデプロイ")).toContain("::add-mask::$SECRET");
+  });
+});
+
+describe("socket-matrix の配線(#162 段階1)", () => {
+  const driver = readTextLf("spikes", "cloudflare", "driver.ts");
+
+  it("ドライバは、DO の中のソケットの取得(/do/netkeiba-socket)と、DO を繰り返し呼ぶ試験(/subrequest-probe)を呼ぶ", () => {
+    expect(driver).toContain('"/do/netkeiba-socket"');
+    expect(driver).toContain("/subrequest-probe");
+  });
+
+  it("ローカルの配線確認(SPIKE_LOCAL_DRYRUN=1)では、netkeiba へ出る socket-matrix の送信を行わない", () => {
+    const m = /if \(experiments\.includes\("socket-matrix"\)\) \{([\s\S]*?)\n    \}\n    if \(experiments\.includes\("cpu"\)\)/.exec(driver);
+    expect(m).not.toBeNull();
+    expect(m![1]).toContain("LOCAL_DRYRUN");
+  });
+
+  it("結果は SpikeResult.socketMatrix に保存する(途中経過も保存する)", () => {
+    expect(driver).toMatch(/result\.socketMatrix = /);
+    expect(driver).toContain("onUpdate");
+  });
+
+  it("送るヘッダは #160 E3 と同じ集合(STATIC_SOCKET_HEADERS)を使う", () => {
+    expect(driver).toContain("STATIC_SOCKET_HEADERS");
+  });
+
+  it("DO への送信の本文は buildMatrixSocketBody で組み立てる(gzip の opt-in を決めるのは、単体テスト済みのこの関数だけ。ドライバは自前で acceptEncoding を足さない)", () => {
+    expect(driver).toContain('buildMatrixSocketBody(step, STATIC_SOCKET_HEADERS)');
+    expect(driver).not.toMatch(/acceptEncoding/);
+  });
+
+  it("公開される出力(コンソール)には、結論の件数だけを出す(IP・サブドメインなどの生の値を出さない)", () => {
+    const m = /console\.log\(\s*`socket-matrix:[^`]*`/.exec(driver);
+    expect(m).not.toBeNull();
+  });
+});

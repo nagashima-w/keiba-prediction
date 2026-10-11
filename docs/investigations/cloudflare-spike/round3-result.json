@@ -1,0 +1,516 @@
+{
+ "schemaVersion": 1,
+ "runId": "37349098565-1",
+ "startedAt": "2026-10-05T17:32:24.174Z",
+ "finishedAt": "2026-10-05T17:32:39.918Z",
+ "netkeiba": {
+  "records": [],
+  "requestCount": 0,
+  "stoppedReason": null,
+  "stoppedBySource": {
+   "worker": null,
+   "runner": null
+  }
+ },
+ "selftest": {
+  "eucJpRoundTrip": true,
+  "detail": "往復一致"
+ },
+ "cpu": {
+  "worker": {
+   "parse": null,
+   "score": null,
+   "alloc": null,
+   "allocFull": null
+  },
+  "durableObject": {
+   "parse": null,
+   "score": null,
+   "alloc": null,
+   "allocFull": null
+  },
+  "samples": []
+ },
+ "local": {
+  "entries": [
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     16.2,
+     17.4,
+     18.8
+    ]
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     0.2,
+     0.2,
+     0.3
+    ]
+   },
+   {
+    "runtime": "worker",
+    "work": "alloc",
+    "reps": 3,
+    "runs": 3,
+    "perRepMsSorted": [
+     68,
+     68.33333333333333,
+     68.33333333333333
+    ]
+   },
+   {
+    "runtime": "worker",
+    "work": "allocFull",
+    "reps": 2,
+    "runs": 3,
+    "perRepMsSorted": [
+     257.5,
+     258,
+     259.5
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     16.5,
+     16.8,
+     17.2
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     0.2,
+     0.2,
+     0.2
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 3,
+    "runs": 3,
+    "perRepMsSorted": [
+     67.33333333333333,
+     67.33333333333333,
+     67.33333333333333
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 2,
+    "runs": 3,
+    "perRepMsSorted": [
+     258,
+     262.5,
+     267.5
+    ]
+   }
+  ]
+ },
+ "cleanup": {
+  "leftoverWorkers": [],
+  "deletedByFallback": [],
+  "durableObjectNamespaces": "removed",
+  "ok": true,
+  "listUnavailable": false
+ },
+ "notes": [
+  "Worker が応答するまで 2 回の /ping を要した",
+  "Durable Object の /do/ping: HTTP 200 {\"ok\":true,\"runtime\":\"durableObject\",\"sqliteOk\":true}"
+ ],
+ "experiments": [
+  "origin"
+ ],
+ "origin": {
+  "echo": {
+   "requestCount": 2,
+   "attempts": [
+    {
+     "place": "worker",
+     "service": "peet",
+     "ok": true,
+     "status": 200,
+     "error": null,
+     "cloudflareHosted": true
+    },
+    {
+     "place": "runner",
+     "service": "peet",
+     "ok": true,
+     "status": 200,
+     "error": null,
+     "cloudflareHosted": false
+    }
+   ],
+   "serviceUsed": "peet",
+   "worker": {
+    "service": "peet",
+    "httpVersion": "h2",
+    "tlsJa3Hash": "67560f98d68783bd640246df3052c151",
+    "tlsJa4": "t13d1312h2_a44d0ee8b3cc_e381dae6da6b",
+    "h2Fingerprint": "175a6d4585f5a5c52b0f6fcca2977cd0",
+    "headers": [
+     {
+      "name": "x-forwarded-for",
+      "value": "<ip>"
+     },
+     {
+      "name": "cf-ray",
+      "value": "<ray>-ATL"
+     },
+     {
+      "name": "cf-ew-via",
+      "value": "15"
+     },
+     {
+      "name": "cdn-loop",
+      "value": "cloudflare; loops=1"
+     },
+     {
+      "name": "user-agent",
+      "value": "keiba-ev-tool/0.1 (personal-use research; +https://github.com/keiba-ev-tool)"
+     },
+     {
+      "name": "cf-worker",
+      "value": "<subdomain>.workers.dev"
+     },
+     {
+      "name": "cf-visitor",
+      "value": "{\"scheme\":\"https\"}"
+     },
+     {
+      "name": "x-forwarded-proto",
+      "value": "https"
+     },
+     {
+      "name": "accept-encoding",
+      "value": "gzip, br"
+     }
+    ]
+   },
+   "runner": {
+    "service": "peet",
+    "httpVersion": "HTTP/1.1",
+    "tlsJa3Hash": "d67b094811e5145139d7cea5f014309f",
+    "tlsJa4": "t13d5212h1_b262b3658495_8e6e362c5eac",
+    "h2Fingerprint": null,
+    "headers": [
+     {
+      "name": "host",
+      "value": "tls.peet.ws"
+     },
+     {
+      "name": "connection",
+      "value": "keep-alive"
+     },
+     {
+      "name": "User-Agent",
+      "value": "keiba-ev-tool/0.1 (personal-use research; +https://github.com/keiba-ev-tool)"
+     },
+     {
+      "name": "accept",
+      "value": "*/*"
+     },
+     {
+      "name": "accept-language",
+      "value": "*"
+     },
+     {
+      "name": "sec-fetch-mode",
+      "value": "cors"
+     },
+     {
+      "name": "accept-encoding",
+      "value": "br, gzip, deflate"
+     }
+    ]
+   },
+   "diff": {
+    "workerOnly": [
+     {
+      "name": "x-forwarded-for",
+      "value": "<ip>"
+     },
+     {
+      "name": "cf-ray",
+      "value": "<ray>-ATL"
+     },
+     {
+      "name": "cf-ew-via",
+      "value": "15"
+     },
+     {
+      "name": "cdn-loop",
+      "value": "cloudflare; loops=1"
+     },
+     {
+      "name": "cf-worker",
+      "value": "<subdomain>.workers.dev"
+     },
+     {
+      "name": "cf-visitor",
+      "value": "{\"scheme\":\"https\"}"
+     },
+     {
+      "name": "x-forwarded-proto",
+      "value": "https"
+     }
+    ],
+    "runnerOnly": [
+     "connection",
+     "accept",
+     "accept-language",
+     "sec-fetch-mode"
+    ],
+    "valueDiffers": [
+     {
+      "name": "accept-encoding",
+      "workerValue": "gzip, br",
+      "runnerValue": "br, gzip, deflate"
+     }
+    ]
+   },
+   "warnings": [
+    "エコー(peet)の応答に Cloudflare 上にある疑い(cf-ray または server: cloudflare)があった(worker 側)。Workers の振る舞いが CloudFront 宛てと変わりうる"
+   ]
+  },
+  "e2": {
+   "ran": true,
+   "sent": [
+    {
+     "name": "x-forwarded-for",
+     "value": "<ip>"
+    },
+    {
+     "name": "cf-ray",
+     "value": "<ray>-ATL"
+    },
+    {
+     "name": "cf-ew-via",
+     "value": "15"
+    },
+    {
+     "name": "cdn-loop",
+     "value": "cloudflare; loops=1"
+    },
+    {
+     "name": "cf-worker",
+     "value": "<subdomain>.workers.dev"
+    },
+    {
+     "name": "cf-visitor",
+     "value": "{\"scheme\":\"https\"}"
+    },
+    {
+     "name": "x-forwarded-proto",
+     "value": "https"
+    }
+   ],
+   "skipped": [],
+   "note": null
+  },
+  "e3": {
+   "headerSource": "runner-echo",
+   "headers": [
+    {
+     "name": "User-Agent",
+     "value": "keiba-ev-tool/0.1 (personal-use research; +https://github.com/keiba-ev-tool)"
+    },
+    {
+     "name": "accept",
+     "value": "*/*"
+    },
+    {
+     "name": "accept-language",
+     "value": "*"
+    },
+    {
+     "name": "sec-fetch-mode",
+     "value": "cors"
+    }
+   ]
+  },
+  "records": [
+   {
+    "targetId": "central-shutuba",
+    "url": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "status": 400,
+    "bodyLength": 0,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": null,
+    "parseError": null,
+    "replacementChars": null,
+    "headers": {
+     "server": "cloudflare",
+     "cf-ray": "<ray>-ATL",
+     "content-type": "text/html; charset=UTF-8",
+     "content-length": "0",
+     "via": "1.1 70c810063b65e1c91ad44e2953c358b8.cloudfront.net (CloudFront)",
+     "x-cache": "Error from cloudfront"
+    },
+    "bodyHead": "",
+    "error": "HTTPエラー(400)が発生しました: https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "experiment": "E0",
+    "place": "worker",
+    "via": "fetch",
+    "sourceKey": "worker:fetch"
+   },
+   {
+    "targetId": "central-shutuba",
+    "url": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "status": 200,
+    "bodyLength": 276708,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": 16,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "via": "1.1 caa0030d22a6085f61962306be552c66.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "experiment": "E0",
+    "place": "runner",
+    "via": "fetch",
+    "sourceKey": "runner:fetch"
+   },
+   {
+    "targetId": "central-shutuba",
+    "url": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "status": 200,
+    "bodyLength": 276708,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": 16,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "via": "1.1 4e507040ab4f37aa800200326c819efe.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "experiment": "E3",
+    "place": "worker",
+    "via": "socket",
+    "sourceKey": "worker:socket"
+   },
+   {
+    "targetId": "db-horse-page",
+    "url": "https://db.netkeiba.com/horse/2021105857/",
+    "status": 200,
+    "bodyLength": 83984,
+    "charset": "EUC-JP",
+    "parsedKind": "horse-page",
+    "parsedCount": 1,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=EUC-JP",
+     "via": "1.1 8895861a0024c7dc7c7ff4c21c4701fe.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "experiment": "E3",
+    "place": "worker",
+    "via": "socket",
+    "sourceKey": "worker:socket"
+   },
+   {
+    "targetId": "central-shutuba",
+    "url": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "status": 400,
+    "bodyLength": 0,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": null,
+    "parseError": null,
+    "replacementChars": null,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "content-length": "0",
+     "via": "1.1 0424dcdedb0e45d57a9099e5691e583a.cloudfront.net (CloudFront)",
+     "x-cache": "Error from cloudfront"
+    },
+    "bodyHead": "",
+    "error": "HTTPエラー(400)が発生しました: https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "experiment": "E2",
+    "place": "runner",
+    "via": "fetch+worker-headers",
+    "sourceKey": "runner:fetch+worker-headers"
+   },
+   {
+    "targetId": "db-horse-page",
+    "url": "https://db.netkeiba.com/horse/2021105857/",
+    "status": 400,
+    "bodyLength": 0,
+    "charset": "EUC-JP",
+    "parsedKind": "horse-page",
+    "parsedCount": null,
+    "parseError": null,
+    "replacementChars": null,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=EUC-JP",
+     "content-length": "0",
+     "via": "1.1 7e11fce307a1590ea1b307907edfdf96.cloudfront.net (CloudFront)",
+     "x-cache": "Error from cloudfront"
+    },
+    "bodyHead": "",
+    "error": "HTTPエラー(400)が発生しました: https://db.netkeiba.com/horse/2021105857/",
+    "experiment": "E2",
+    "place": "runner",
+    "via": "fetch+worker-headers",
+    "sourceKey": "runner:fetch+worker-headers"
+   }
+  ],
+  "netkeibaRequestCount": 6,
+  "stoppedReason": null,
+  "stoppedBySource": {
+   "worker:fetch": null,
+   "runner:fetch": null,
+   "runner:fetch+worker-headers": "consecutive-blocks",
+   "worker:socket": null
+  },
+  "baselineReproduced": true,
+  "outcomes": {
+   "e2": "bad",
+   "e3": "good"
+  },
+  "conclusion": "header-suspected",
+  "reading": {
+   "summary": "ヘッダが原因の疑いが強い(送信元をランナーのまま、Workers 風のヘッダを付けただけで拒否された)。",
+   "limitations": [
+    "E2 は送信元(ランナー)を変えずに、Worker にだけ現れたヘッダをまとめて足した実験で、拒否された。どのヘッダ(CF-Worker・CF-Connecting-IP・CDN-Loop など)が効いたかは分離できない。",
+    "各実験の対象は2対象(race の出馬表と db の馬ページ。E0 は race の1対象)で、標本が小さい。",
+    "E1 はエコーサービス宛ての Worker の fetch が見せるヘッダ・TLS であり、CloudFront 宛てでも同じとは限らない。"
+   ]
+  }
+ }
+}

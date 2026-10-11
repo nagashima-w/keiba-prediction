@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest";
 import { parseHorseId, parseRaceId } from "../../src/scraper/ids.js";
 import type { RaceData, RaceHorseData } from "../../src/scraper/scrape-race.js";
 import type { ShutubaHorse } from "../../src/scraper/types.js";
-import { filterRaceDataBefore } from "../../src/scorer/snapshot-filter.js";
+import {
+  excludeOwnRaceResults,
+  filterRaceDataBefore,
+} from "../../src/scorer/snapshot-filter.js";
 import { makeResult } from "./helpers.js";
 
 /**
  * snapshot-filter — 先読みリーク防止のための基準日切り出し(#40「#35-1a」)。
  *
- * `filterRaceDataBefore` は `packages/app/src/main/analysis-pipeline.ts` の先読みリーク
- * (戦績を日付でフィルタせず prior に渡してしまう欠陥)を、計測用の入力データに限定して
- * 遮断するための純関数。本番側の是正(#39)はスコープ外。
+ * `filterRaceDataBefore` は先読みリーク(戦績を日付でフィルタせず prior に渡してしまう欠陥)を
+ * 遮断するための純関数。#40 は計測用の入力データの遮断に使い、#39 で production の
+ * `analysis-pipeline.ts`(`runAnalysis` の scrape 直後)も同じ関数を使うようになった
+ * (production 側の配線は `packages/app/test/analysis-pipeline-no-lookahead.test.ts` で固定)。
  */
 
 /** 出馬表1頭分を最小構成で組み立てる。 */
@@ -175,5 +179,114 @@ describe("filterRaceDataBefore", () => {
     expect(filtered.horses[2]!.results).toHaveLength(1);
     expect(diagnostics.removedByCutoffCount).toBe(3);
     expect(diagnostics.removedCount).toBe(3);
+  });
+});
+
+/**
+ * excludeOwnRaceResults — 当該レース自身の走を日付に依らず除外する(#39 是正方式B)。
+ *
+ * `filterRaceDataBefore`(日付で絞る)は、`dateApproximate=true`(基準日が実行日になる)の過去レース
+ * では当該レース自身の走を「実行日より前」として残してしまう。そこで raceId 一致による除外を
+ * 別の純関数として持ち、pipeline で合成する(`filterRaceDataBefore` は #40 の恒等式を守るため無改変)。
+ * 比較は `HorseRaceResult.raceIdRaw`(中央・地方とも12桁の生値が入る)で行う。`raceId` フィールドは
+ * 地方では常に null なので、それに頼ると地方では一切効かない。
+ */
+describe("excludeOwnRaceResults", () => {
+  const OWN = parseRaceId("202603020211");
+
+  it("中央: raceIdRaw が対象 raceId と一致する走を日付に依らず除外し、他のレースの走は残す", () => {
+    const raceData = makeRaceData([
+      makeHorse(1, [
+        makeResult({ date: "2026/06/28", raceId: OWN, raceIdRaw: "202603020211" }), // 自走
+        makeResult({ date: "2026/06/20", raceId: parseRaceId("202603020111"), raceIdRaw: "202603020111" }), // 別レース
+      ]),
+    ]);
+    const { raceData: filtered, removedCount } = excludeOwnRaceResults(raceData, OWN);
+    expect(raceData.horses[0]!.results).toHaveLength(2); // 前提
+    expect(filtered.horses[0]!.results).toHaveLength(1);
+    expect(filtered.horses[0]!.results![0]!.raceIdRaw).toBe("202603020111");
+    expect(removedCount).toBe(1);
+  });
+
+  it("日付に依らない: 自走の日付が過去日(基準日近似のずれ)でも、未来日でも、欠損でも除外する", () => {
+    const raceData = makeRaceData([
+      makeHorse(1, [
+        makeResult({ date: "2020/01/01", raceIdRaw: "202603020211" }),
+        makeResult({ date: "2030/01/01", raceIdRaw: "202603020211" }),
+        makeResult({ date: null, raceIdRaw: "202603020211" }),
+        makeResult({ date: "2026/06/01", raceIdRaw: "202603020199" }),
+      ]),
+    ]);
+    const { raceData: filtered, removedCount } = excludeOwnRaceResults(raceData, OWN);
+    expect(raceData.horses[0]!.results).toHaveLength(4); // 前提
+    expect(removedCount).toBe(3);
+    expect(filtered.horses[0]!.results).toHaveLength(1);
+    expect(filtered.horses[0]!.results![0]!.date).toBe("2026/06/01");
+  });
+
+  it("地方: raceId フィールドが null で raceIdRaw にだけ値がある走も除外する(raceId 比較への取り違えを検出する)", () => {
+    const narOwn = parseRaceId("202654071210");
+    const raceData = makeRaceData([
+      makeHorse(1, [
+        makeResult({ date: "2026/07/12", raceId: null, raceIdRaw: "202654071210", venueKind: "地方" }),
+        makeResult({ date: "2026/07/01", raceId: null, raceIdRaw: "202654070110", venueKind: "地方" }),
+      ]),
+    ]);
+    const { raceData: filtered, removedCount } = excludeOwnRaceResults(raceData, narOwn);
+    // 前提: 自走は raceId が null(=raceId で比較する実装では一致0件になる)。
+    expect(raceData.horses[0]!.results![0]!.raceId).toBeNull();
+    expect(removedCount).toBe(1);
+    expect(filtered.horses[0]!.results).toHaveLength(1);
+    expect(filtered.horses[0]!.results![0]!.raceIdRaw).toBe("202654070110");
+  });
+
+  it("raceIdRaw が null の走(海外・リンク欠損)は誤って除外しない", () => {
+    const raceData = makeRaceData([
+      makeHorse(1, [makeResult({ date: "2026/06/28", raceId: null, raceIdRaw: null, venueKind: "海外" })]),
+    ]);
+    const { raceData: filtered, removedCount } = excludeOwnRaceResults(raceData, OWN);
+    expect(filtered.horses[0]!.results).toHaveLength(1);
+    expect(removedCount).toBe(0);
+  });
+
+  it("results が null(戦績取得失敗)の馬は null のまま通し、0走([])とは区別する", () => {
+    const raceData = makeRaceData([
+      makeHorse(1, null),
+      makeHorse(2, [makeResult({ date: "2026/06/28", raceIdRaw: "202603020211" })]),
+    ]);
+    const { raceData: filtered } = excludeOwnRaceResults(raceData, OWN);
+    expect(filtered.horses[0]!.results).toBeNull();
+    expect(filtered.horses[1]!.results).toEqual([]);
+  });
+
+  it("複数頭の合計を removedCount に計上する(頭ごとに1走ずつ自走)", () => {
+    const raceData = makeRaceData([
+      makeHorse(1, [makeResult({ date: "2026/06/28", raceIdRaw: "202603020211" })]),
+      makeHorse(2, [makeResult({ date: "2026/06/28", raceIdRaw: "202603020211" }), makeResult({ date: "2026/06/01", raceIdRaw: "202603020101" })]),
+      makeHorse(3, [makeResult({ date: "2026/06/01", raceIdRaw: "202603020101" })]),
+    ]);
+    const { removedCount } = excludeOwnRaceResults(raceData, OWN);
+    expect(removedCount).toBe(2);
+  });
+
+  it("自走が無ければ戦績の中身は不変で removedCount は0", () => {
+    const results = [makeResult({ date: "2026/06/01", raceIdRaw: "202603020101" })];
+    const raceData = makeRaceData([makeHorse(1, results)]);
+    const { raceData: filtered, removedCount } = excludeOwnRaceResults(raceData, OWN);
+    expect(removedCount).toBe(0);
+    expect(filtered.horses[0]!.results).toEqual(results);
+  });
+
+  it("元スナップショットを破壊的に変更しない", () => {
+    const originalResults = [
+      makeResult({ date: "2026/06/28", raceIdRaw: "202603020211" }),
+      makeResult({ date: "2026/06/01", raceIdRaw: "202603020101" }),
+    ];
+    const raceData = makeRaceData([makeHorse(1, originalResults)]);
+    const before = JSON.parse(JSON.stringify(raceData)) as unknown;
+    excludeOwnRaceResults(raceData, OWN);
+    expect(raceData.horses[0]!.results).toBe(originalResults);
+    expect(raceData.horses[0]!.results).toHaveLength(2);
+    expect(JSON.parse(JSON.stringify(raceData))).toEqual(before);
   });
 });

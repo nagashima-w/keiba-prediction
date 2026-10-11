@@ -93,6 +93,27 @@ function extractVersionMentions(text: string, baseVersion: string): string[] {
   return [...text.matchAll(pattern)].map((m) => m[0]);
 }
 
+/**
+ * docs/versioning.md に、与えられた版数に対応する「次の正式版が X.Y.Z である根拠」見出しが
+ * 存在するかを判定する(code-reviewer 一次レビュー 提案1 の一般化採用)。
+ *
+ * literal な版数(例 "1.2.1")を直接ピン留めするテストは、版を上げるたびに専用テストが
+ * 積み上がり将来誰も読まなくなるため採らない。代わりにこの汎用の不変条件を EXPECTED_APP_VERSION
+ * と組み合わせて使うことで、「版を上げたら根拠セクションを書く」ことを機械的に強制する
+ * (docs/versioning.md の同時更新チェックリストが既に持つ「意図的な摩擦」と同じ設計思想)。
+ *
+ * 検出パターンは docs/versioning.md に実在する見出しの字句
+ * (`## 次の正式版が 1.2.0 である根拠(...)`・`## 次の正式版が 1.2.1 である根拠(...)`)に
+ * 合わせている。見出し記号(`## `)や末尾の丸括弧注記までは要求せず、版数の前後の空白は
+ * `\s+` で許容する(表記ゆれによる偽陰性を避ける一方、"次の正式版が…である根拠" という
+ * 核となる字句は固定する)。
+ */
+function hasVersionRationaleSection(doc: string, version: string): boolean {
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`次の正式版が\\s+${escaped}\\s+である根拠`);
+  return pattern.test(doc);
+}
+
 // ---------------------------------------------------------------------------
 // 純関数のテスト(異常系を先に固定する)
 // ---------------------------------------------------------------------------
@@ -160,12 +181,41 @@ describe("純関数: extractVersionMentions(単語境界つき版数抽出)", ()
   });
 });
 
+describe("純関数: hasVersionRationaleSection(版数根拠セクションの検出。code-reviewer 一次レビュー 提案1)", () => {
+  const doc =
+    "## 次の正式版が 1.2.0 である根拠(本タスクでの是正)\n\n1.1.0 以降...\n\n" +
+    "## 次の正式版が 1.2.1 である根拠(Issue #45 での是正)\n\nIssue #45 の変更は...";
+
+  it("存在する版数(過去分・最新分の両方)の見出しを検出できる", () => {
+    // 前提固定: 合成テキストに2つの見出しが両方含まれていること(以降のアサーションが
+    // 「常に false」の縮退実装でも通ってしまう空振りを避けるため、まず存在を保証する)。
+    expect(doc).toContain("次の正式版が 1.2.0 である根拠");
+    expect(doc).toContain("次の正式版が 1.2.1 である根拠");
+
+    expect(hasVersionRationaleSection(doc, "1.2.0")).toBe(true);
+    expect(hasVersionRationaleSection(doc, "1.2.1")).toBe(true);
+  });
+
+  it("正の対照: 存在しない版数(9.9.9)を渡すと見つからない(常に true を返す検出器を排除する)", () => {
+    // m7 で実証された空振り(検出器を無害化しても偶然辻褄が合って緑になる)と同型の穴を
+    // 塞ぐ。この検出器が「常に true を返す」縮退実装であっても、上のテストだけでは
+    // 見抜けない。
+    expect(hasVersionRationaleSection(doc, "9.9.9")).toBe(false);
+  });
+
+  it("部分一致誤判定を避ける(1.2.10 の見出しは 1.2.1 に一致しない)", () => {
+    const docWithLongerVersion =
+      "## 次の正式版が 1.2.10 である根拠(仮想の将来版)\n\n本文...";
+    expect(hasVersionRationaleSection(docWithLongerVersion, "1.2.1")).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 配線テスト(実ファイルへの適用)
 // ---------------------------------------------------------------------------
 
-/** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.2.0";
+/** exe の最終版の版数。Issue #248 で凍結した(以後は上げない)。版を上げる運用に戻すときに限って更新する。 */
+const EXPECTED_APP_VERSION = "1.44.0";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -184,8 +234,15 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.2.0(本タスクの是正先)である", () => {
-    // 是正そのものの直接検証。1.1.0 のまま据え置かれていないことを固定する。
+  it("root と app の version が 1.44.0(exe の最終版)で凍結されている(Issue #248: exe の公開を止めた。以後は上げない)", () => {
+    // Issue #248 で exe 版をアーカイブし、版数を exe の最終版 1.44.0 で凍結した(利用者の決定・2026-10-10)。
+    // 凍結の理由: 版数の用途は exe のファイル名(electron-builder.yml の artifactName)と、その公開の関門
+    // (version-bump-check・tag-version)だった。web(cloud)は自分の版数を持たず、公開の区別はコミットと Issue 番号で行う。
+    // この検査は、凍結が破られていない(誰かが版を上げて、チェックリストの同時更新を始めていない)ことを固定する。
+    // 版を再び上げる運用に戻すときは、EXPECTED_APP_VERSION と docs/versioning.md の凍結節を、決定とともに改める。
+    // 1.44.0 までの各版の区分(major/minor/patch)の判断根拠は、docs/versioning.md の「次の正式版が X.Y.Z である根拠」節に残してある
+    // (1.32.0 から 1.44.0 までの各節がある。以前はこの it 名に履歴を積んでいたが、版を上げない運用では更新されないため、
+    // 履歴は versioning.md だけに置く)。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);
     expect(appPkg.version).toBe(EXPECTED_APP_VERSION);
   });
@@ -211,8 +268,9 @@ describe("配線: electron-builder.yml の artifactName(版数が exe 名に出�
       throw new Error("artifactName の定義行が見つかりません");
     }
 
-    // ここがベタ書きの exe 名に変えられると、版数運用そのものと CI の孤児掃除ステップ
-    // (現行ファイル名以外を削除する)の前提が静かに死ぬ。
+    // ここがベタ書きの exe 名に変えられると、版数と exe 名の対応(最後の exe が
+    // keiba-ev-tool-1.44.0-portable.exe であること)が静かに崩れる。exe 専用のコードは削除せず残す
+    // 方針(Issue #248)のため、この前提のピン留めも残してある。
     expect(captured.trim()).toBe(
       "keiba-ev-tool-${version}-portable.${ext}",
     );
@@ -288,6 +346,25 @@ describe("配線: docs/versioning.md(版数運用規約)", () => {
     expect(doc).toMatch(/(coerceSettings|ALTER TABLE)/);
   });
 
+  it("EXPECTED_APP_VERSION に対応する『次の正式版が…である根拠』セクションが存在する(code-reviewer 一次レビュー 提案1の一般化採用)", () => {
+    // literal な版数(例 "1.2.1")を直接ピン留めするのではなく、EXPECTED_APP_VERSION を
+    // 介した汎用の不変条件にすることで、将来の版上げでは「根拠セクションを書く」ことが
+    // 機械的に強制される(同時更新チェックリストの「意図的な摩擦」と同じ設計思想)。
+    const doc = readNormalized(VERSIONING_DOC_PATH);
+
+    expect(hasVersionRationaleSection(doc, EXPECTED_APP_VERSION)).toBe(true);
+  });
+
+  it("正の対照: 実ファイルに対しても、存在しない版数(9.9.9)では根拠セクションが見つからない", () => {
+    // 上のテストだけでは「常に true を返す検出器」を見抜けない(m7 と同型の空振り)。
+    // 実ファイルに対しても陰性の対照を取ることで、純関数レベルの正の対照
+    // (純関数: hasVersionRationaleSection の同名テスト)が実ファイルの配線でも
+    // 効いていることを確認する。
+    const doc = readNormalized(VERSIONING_DOC_PATH);
+
+    expect(hasVersionRationaleSection(doc, "9.9.9")).toBe(false);
+  });
+
   it("workflow_dispatch による同一コミットの再送は「公開」に含めず、版数を上げない旨が明記されている(#44-D-1 のメタレビュー差し戻し 要修正1)", () => {
     // 差し戻し前は「頻度」条項が [PUBLISH-APPROVED] push と workflow_dispatch の両方を
     // 「公開」として扱っており、後者は同一コミットの再実行であるため版数を上げる余地が
@@ -333,6 +410,41 @@ describe("配線: docs/versioning.md(版数運用規約)", () => {
     expect(doc).toContain("EXPECTED_APP_VERSION");
     // 「テストの失敗ではなく更新漏れの検出である」という読み方そのものを明示していること。
     expect(doc).toMatch(/更新漏れ.{0,20}(検出|正しく)/);
+  });
+
+  it("同時更新チェックリストの7項目目として、版数根拠セクションの追加が明記されている(code-reviewer 一次レビュー 提案1対応)", () => {
+    // 対応2: 汎用の不変条件(hasVersionRationaleSection)を追加したことで、
+    // 「版を上げたら根拠セクションを書く」ことが新たにチェックリスト上も要求される。
+    // これを明記しないと、機械検査だけが先行してチェックリスト本文と食い違う
+    // (チェックリストを見ても7項目目の存在に気づけない)。
+    const doc = readNormalized(VERSIONING_DOC_PATH);
+
+    expect(doc).toContain("7. ");
+    expect(doc).toContain("次の正式版が");
+    expect(doc).toMatch(/7\.[\s\S]{0,80}根拠セクション/);
+  });
+});
+
+describe("配線: 版数の凍結(Issue #248。exe の最終版 1.44.0)", () => {
+  it("docs/versioning.md の先頭に凍結の節があり、凍結する版数・以後は上げないこと・理由・再開の条件が書かれている", () => {
+    const doc = readNormalized(VERSIONING_DOC_PATH);
+    const m = doc.match(/^## 版数の凍結[^\n]*\n([\s\S]*?)(?=\n## )/m);
+    // 前提固定: 節が見つかること、かつ本文が空でないこと(空振りで以降の検査が自明に通らない)。
+    expect(m).not.toBeNull();
+    const section = m![1] ?? "";
+    expect(section.length).toBeGreaterThan(200);
+    expect(section).toContain(EXPECTED_APP_VERSION);
+    expect(section).toContain("exe の最終版");
+    expect(section).toMatch(/以後は上げない/);
+    expect(section).toContain("version-bump-check");
+    expect(section).toMatch(/再開/);
+    // 凍結の節は、規約の本文(「背景」)より前にある(読み手が最初に当たる)。
+    expect(doc.indexOf("## 版数の凍結")).toBeLessThan(doc.indexOf("## 背景: なぜこの規約が要るか"));
+  });
+
+  it("CLAUDE.md と docs/current-spec.md が、版数の凍結(exe の最終版)に触れている", () => {
+    expect(readNormalized(path.join(REPO_ROOT, "CLAUDE.md"))).toMatch(/版数は 1\.44\.0.{0,20}で凍結/);
+    expect(readNormalized(CURRENT_SPEC_PATH)).toMatch(/exe の最終版[\s\S]{0,80}凍結/);
   });
 });
 

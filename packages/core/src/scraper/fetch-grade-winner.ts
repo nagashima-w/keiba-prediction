@@ -19,7 +19,7 @@
  * 本ファイルはNAR固有の分岐・例外送出を一切持たない。
  */
 
-import type { CachedFetchTextOptions } from "./cache.js";
+import type { CachedFetchTextOptions } from "./cached-fetcher.js";
 import type { RaceId } from "./ids.js";
 import {
   type GradeWinnerEntry,

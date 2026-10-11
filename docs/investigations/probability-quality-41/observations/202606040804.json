@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040804",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 4,
+  "raceName": "清秋ジャンプ",
+  "listedEntryCount": 6,
+  "status": "ok",
+  "courseType": "障",
+  "distance": 3210,
+  "runnerCount": 6,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "プラチナトレジャー",
+      "prior": 0.4279858801374518,
+      "placeOddsMin": 2,
+      "placeOddsMax": 2.5,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 33
+    },
+    {
+      "umaban": 2,
+      "horseName": "メイショウソムリエ",
+      "prior": 0.3417661848935395,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 1.9,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 24
+    },
+    {
+      "umaban": 3,
+      "horseName": "ネビーイーム",
+      "prior": 0.6965082213597495,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 36
+    },
+    {
+      "umaban": 4,
+      "horseName": "トゥラッタッタ",
+      "prior": 0.5400073269676923,
+      "placeOddsMin": 4.2,
+      "placeOddsMax": 5.4,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 26
+    },
+    {
+      "umaban": 5,
+      "horseName": "コレクテイニア",
+      "prior": 0.5205068396022945,
+      "placeOddsMin": 1.7,
+      "placeOddsMax": 2.1,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 29
+    },
+    {
+      "umaban": 6,
+      "horseName": "アクロスザリバー",
+      "prior": 0.4732255470392724,
+      "placeOddsMin": 19.5,
+      "placeOddsMax": 23.9,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 167,
+      "removedCount": 6,
+      "removedByCutoffCount": 6,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:14:08.922Z"
+}

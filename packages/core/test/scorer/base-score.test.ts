@@ -244,68 +244,89 @@ describe("computeJockeyScore(騎手の当該コース複勝率・optional入力)
   });
 });
 
-describe("computeWeightChangeScore(斤量変化・馬体重増減の小補正)", () => {
+describe("computeWeightChangeScore(斤量変化の小補正。馬体重は Issue #213 で撤去)", () => {
   it("斤量増はマイナス方向・上限でクリップされること", () => {
-    // 前走54→今回56(+2)。スケール0.01・上限3・重み1 → -2*0.01 = -0.02。馬体重変化なし。
+    // 前走54→今回56(+2)。スケール0.01・上限3・重み1 → -2*0.01 = -0.02。
     const features = deriveRaceFeatures([
       makeResult({ date: "2025/01/01", kinryo: 54 }),
     ]);
     const c = computeWeightChangeScore(
       features,
-      { kinryo: 56, bodyWeightDiff: null },
+      { kinryo: 56 },
       cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 1 } }),
     );
     expect(c.applied).toBe(true);
     expect(c.correction).toBeCloseTo(-0.02, 10);
   });
 
-  it("大幅な馬体重減はマイナス補正になること", () => {
-    // 斤量同値(前走55→55)、馬体重-10。減スケール0.004・上限-20 → -10*0.004 = -0.04。
+  it("斤量増の絶対値が上限を超えたらクリップされること(+5kg → 上限3kgの -0.03)", () => {
     const features = deriveRaceFeatures([
-      makeResult({ date: "2025/01/01", kinryo: 55 }),
+      makeResult({ date: "2025/01/01", kinryo: 52 }),
     ]);
     const c = computeWeightChangeScore(
       features,
-      { kinryo: 55, bodyWeightDiff: -10 },
-      cfg({
-        kinryoScale: 0.01,
-        bodyWeightDropScale: 0.004,
-        bodyWeightDropCapKg: -20,
-        weights: { weightChange: 1 },
-      }),
+      { kinryo: 57 },
+      cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 1 } }),
     );
-    expect(c.correction).toBeCloseTo(-0.04, 10);
+    expect(c.correction).toBeCloseTo(-0.03, 10);
   });
 
-  it("馬体重増(プラス)は補正0(ペナルティなし)になること", () => {
-    // 斤量同値(55→55)、馬体重+10。増は罰しない設計 → 馬体重項0。斤量項0 → 補正0(ただし applied)。
+  it("斤量減はプラス方向になること(前走56→今回55 で +0.01)", () => {
     const features = deriveRaceFeatures([
-      makeResult({ date: "2025/01/01", kinryo: 55 }),
+      makeResult({ date: "2025/01/01", kinryo: 56 }),
     ]);
     const c = computeWeightChangeScore(
       features,
-      { kinryo: 55, bodyWeightDiff: 10 },
-      cfg({
-        kinryoScale: 0.01,
-        bodyWeightDropScale: 0.004,
-        weights: { weightChange: 1 },
-      }),
+      { kinryo: 55 },
+      cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 1 } }),
     );
-    expect(c.applied).toBe(true);
-    expect(c.correction).toBeCloseTo(0, 10);
+    expect(c.correction).toBeCloseTo(0.01, 10);
   });
 
-  it("前走斤量が取れず馬体重変化もなければ補正なしになること", () => {
+  it("馬体重の増減は補正に一切影響しないこと(Issue #213。-20kg でも +20kg でも未指定でも斤量項だけ)", () => {
+    // 斤量は前走54→今回56(+2)で、斤量項は非ゼロの -0.02。
+    // 馬体重の減点が残っていれば、-20kg の結果が未指定と食い違う(-0.02 + -0.08)。
+    const features = deriveRaceFeatures([
+      makeResult({ date: "2025/01/01", kinryo: 54 }),
+    ]);
+    const config = cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 1 } });
+    const base = computeWeightChangeScore(features, { kinryo: 56 }, config);
+    // 型から外したフィールドを、古い呼び出し元が渡してきた場合を想定する(オブジェクトリテラル直書きだと
+    // 過剰プロパティ検査で型エラーになるため、変数経由で渡す)。
+    const legacyDrop = { kinryo: 56, bodyWeightDiff: -20 };
+    const legacyGain = { kinryo: 56, bodyWeightDiff: 20 };
+    const drop = computeWeightChangeScore(features, legacyDrop, config);
+    const gain = computeWeightChangeScore(features, legacyGain, config);
+    expect(base.correction).toBeCloseTo(-0.02, 10); // 比較の前提: 斤量項は非ゼロ
+    expect(drop.correction).toBeCloseTo(base.correction, 10);
+    expect(gain.correction).toBeCloseTo(base.correction, 10);
+    expect(drop.applied).toBe(true);
+  });
+
+  it("前走斤量が取れなければ補正なしになること(馬体重が取れていても適用しない)", () => {
     const features = deriveRaceFeatures([
       makeResult({ date: "2025/01/01", kinryo: null }),
     ]);
-    const c = computeWeightChangeScore(
-      features,
-      { kinryo: 56, bodyWeightDiff: null },
-      DEFAULT_SCORER_CONFIG,
-    );
+    const c = computeWeightChangeScore(features, { kinryo: 56 }, DEFAULT_SCORER_CONFIG);
     expect(c.applied).toBe(false);
     expect(c.correction).toBe(0);
+    expect(c.reason).toContain("前走斤量");
+    // 古い呼び出し元が馬体重を渡してきても、以前のように applied=true にはならない(旧: 馬体重だけで適用)。
+    const legacy = { kinryo: 56, bodyWeightDiff: -10 };
+    const c2 = computeWeightChangeScore(features, legacy, DEFAULT_SCORER_CONFIG);
+    expect(c2.applied).toBe(false);
+    expect(c2.correction).toBe(0);
+  });
+
+  it("戦績が空(前走なし)でも補正なしになること", () => {
+    const c = computeWeightChangeScore([], { kinryo: 56 }, DEFAULT_SCORER_CONFIG);
+    expect(c.applied).toBe(false);
+    expect(c.correction).toBe(0);
+  });
+
+  it("寄与度の表示名は「斤量」であること", () => {
+    const c = computeWeightChangeScore([], { kinryo: 56 }, DEFAULT_SCORER_CONFIG);
+    expect(c.biasName).toBe("斤量");
   });
 });
 
@@ -358,7 +379,7 @@ describe("computeBaseScore(基礎スコア統合)", () => {
     ]);
     const r = computeBaseScore(
       features,
-      { courseType: "ダ", distance: 1800, venueName: "中山", frameZone: "内", kinryo: 55, bodyWeightDiff: 0 },
+      { courseType: "ダ", distance: 1800, venueName: "中山", frameZone: "内", kinryo: 55 },
       { starts: 10, placed: 3 },
       DEFAULT_SCORER_CONFIG,
     );
@@ -367,7 +388,8 @@ describe("computeBaseScore(基礎スコア統合)", () => {
     expect(names).toContain("上がり3F");
     expect(names).toContain("コース・距離適性");
     expect(names).toContain("騎手当該コース");
-    expect(names).toContain("斤量・馬体重");
+    expect(names).toContain("斤量");
+    expect(names).not.toContain("斤量・馬体重");
     expect(names).toContain("コース枠順バイアス");
     expect(r.contributions).toHaveLength(6);
     const sum = r.contributions.reduce((s, c) => s + c.correction, 0);
@@ -386,7 +408,6 @@ describe("computeBaseScore(基礎スコア統合)", () => {
         venueName: "中山",
         frameZone: "内",
         kinryo: 55,
-        bodyWeightDiff: 0,
         venueKind: "nar",
       },
       undefined,
@@ -404,7 +425,7 @@ describe("computeBaseScore 実フィクスチャ(ウィンターガーデン23�
     const features = deriveRaceFeatures(winter);
     const r = computeBaseScore(
       features,
-      { courseType: "ダ", distance: 1800, venueName: "中山", frameZone: "内", kinryo: 56, bodyWeightDiff: 2 },
+      { courseType: "ダ", distance: 1800, venueName: "中山", frameZone: "内", kinryo: 56 },
       undefined,
       DEFAULT_SCORER_CONFIG,
     );

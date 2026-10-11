@@ -135,12 +135,94 @@ export function foldToCandidateSubsets(
   return [...folded.values()];
 }
 
-/** 貪欲逐次配分に渡す1 outcome分の的中候補インデックス集合。 */
+/**
+ * 貪欲逐次配分に渡す1 outcome分の的中候補インデックス集合。
+ *
+ * **不変条件**: `indices`は**同一outcome内で重複を含まない**(同じインデックスが2回以上
+ * 現れない)。この不変条件は構築元(`buildOutcomeIndexSets`・`combo-bet-allocation.ts`の
+ * `determined`枝)がどちらも「候補インデックスiを0から昇順に1回ずつ走査し、的中していれば
+ * pushする」という構造で組み立てているため、データに依存せず常に成立する構造的な保証である
+ * (実データでの事後確認ではなく、構築ロジック自体がこの性質を保証する)。
+ *
+ * この不変条件はIssue #96で検討した`fresh = commonWealth[j] + delta*odds[i]`という
+ * O(1)の恒等式(`runGreedyAllocation`の`computeFreshWealth`をO(1)化する案)が依存する
+ * 前提として洗い出したものである。**この案自体は同Issueで不採用になった**(数学的には
+ * 同値だが浮動小数演算としてはビット一致するとは限らず、実際に既存テストの結果を反転
+ * させたため。`runGreedyAllocation`のJSDoc「検討したが採用しなかった案」参照)。
+ *
+ * **★Issue #107で状況が変わった: 現在の`runGreedyAllocation`はこの不変条件に依存している
+ * (過去形の記録ではない)。** 同Issueが導入した接頭辞和の再利用(`prefixSum`+
+ * `contactPositionFlat`)は、「候補iがoutcome jの`indices`内にちょうど1回しか現れない」
+ * ことを前提に、その1回の出現位置を`indices`内での一意な位置として扱う。この不変条件が
+ * 破れる(同一outcome内に同じインデックスが2回以上現れる)と、位置の特定自体が破綻し、
+ * `runGreedyAllocation`のJSDoc「Issue #107」節と異なる(採用Cとも異なる)第三の誤った値を
+ * 返しうる。**将来この不変条件を弱める変更(構築元に重複を許す等)をする場合は、
+ * `runGreedyAllocation`の接頭辞和の再利用を同時に見直すこと。**
+ */
 export interface OutcomeIndexSet {
-  /** この outcome で的中している候補のインデックス(candidates配列内の位置)。 */
+  /** この outcome で的中している候補のインデックス(candidates配列内の位置)。重複なし(上記JSDoc参照)。 */
   readonly indices: readonly number[];
   /** この outcome の確率。 */
   readonly probability: number;
+}
+
+/**
+ * `indices`(的中候補インデックス集合)が完全一致する`OutcomeIndexSet`をまとめ、
+ * `probability`を合算する(Issue #96)。
+ *
+ * ## 背景: 単勝(win)候補が1件でもあると計算量が跳ね上がる問題への対処
+ *
+ * `combo-bet-allocation.ts`の`allocateGeneralBets`は、win候補が1件でもあり順序が決定できた
+ * (`determined`)呼び出しで、`foldToCandidateSubsets`(集合空間への畳み込み)を経由せず、
+ * 順序付きoutcome空間(`P(頭数,topFinishCount)`通り。畳み込み無し)をそのまま
+ * `runGreedyAllocation`/`computeHitProbabilities`へ渡していた(Issue #92の裁定:
+ * winのidentity判定〈`order[0]===umaban`〉は`foldToCandidateSubsets`〈`placed`を候補集合と
+ * 交差させ昇順ソートする「順序を捨てる」畳み込み〉を通すと壊れるため、意図的に通さない
+ * 設計だった)。この結果、集合空間なら`C(候補数,3)`程度で済むところが、順序空間では
+ * `P(候補数,3)`(6倍)になり、実測で`buildMixedAllocationDisplay`が約7.9倍遅くなった
+ * (Issue #96)。
+ *
+ * ## この関数がなぜ正しさを壊さずに高速化になるのか
+ *
+ * `foldToCandidateSubsets`とは**別物の畳み込み**である: `foldToCandidateSubsets`は`placed`
+ * (的中馬番の集合)を書き換える(順序情報を失う)畳み込みだが、本関数は`indices`列
+ * (どの買い目候補が的中したか)を**一切変更しない**。同じ`indices`を持つoutcome同士は
+ * `wealth_T`(候補の連続比率`x`とオッズから決まる資産額)が常に同一の値になるため
+ * (`wealth`は`indices`とその中身〈`x[idx]`・`odds[idx]`〉だけで決まり、`indices`が同じなら
+ * `x`・`odds`が同じである限りいつでも同一)、目的関数への寄与
+ * `P1·log(wealth_T) + P2·log(wealth_T) = (P1+P2)·log(wealth_T)`
+ * が数学的に厳密に成り立つ。したがって「同じ`indices`を持つ複数のoutcomeをまとめて
+ * 確率を足し合わせる」ことは、win候補の識別性(`indices`列そのもの)を一切失わずに
+ * outcome件数だけを減らせる(実測: 中央16頭の実オッズで3360件→1023件。
+ * `scripts/bench-mixed-allocation.ts`で再現可能)。
+ *
+ * ## 適用範囲
+ *
+ * `combo-bet-allocation.ts`の`determined`枝(順序付きoutcome空間を直接使う経路)にのみ
+ * 適用する。**集合空間(`else`枝、`foldToCandidateSubsets`を通す経路)には適用しない**
+ * (#92が非破壊を宣言した既存経路を触る理由が無いため。boss裁定・Issue #96)。
+ *
+ * ## 出力の性質
+ *
+ * - 出力順は決定的(同じ入力に対し常に同じ順序を返す。内部でMapを使い、キーの初出順=
+ *   入力での初出順を保つ)。
+ * - 署名がすべて異なる入力では、件数・順序・`probability`が入力と完全に一致する
+ *   (畳み込みが実質的に何もしないケースで挙動が変わらないことの保証)。
+ */
+export function foldOutcomeIndexSetsBySignature(
+  outcomeIndexSets: readonly OutcomeIndexSet[],
+): OutcomeIndexSet[] {
+  const folded = new Map<string, { indices: readonly number[]; probability: number }>();
+  for (const outcome of outcomeIndexSets) {
+    const key = outcome.indices.join(",");
+    const existing = folded.get(key);
+    if (existing) {
+      existing.probability += outcome.probability;
+    } else {
+      folded.set(key, { indices: outcome.indices, probability: outcome.probability });
+    }
+  }
+  return [...folded.values()];
 }
 
 /**
@@ -148,6 +230,16 @@ export interface OutcomeIndexSet {
  * 「的中」の定義は呼び出し側が isHit で与える(券種非依存性の要): 複勝なら
  * `outcome.placed.includes(candidate.umaban)`、組合せ券種なら
  * `candidate.umabans.every(u => outcome.placed.includes(u))`(部分集合包含)。
+ *
+ * **単勝(win)の的中判定はこの部分集合包含ではない**(Issue #92)。win候補は
+ * `outcome.order[0] === candidate.umaban`(1着の identity 判定)であり、`foldedOutcomes`
+ * (`PlaceOutcome[]`。順序を持たない)を経由できない(`order`情報自体を持たないため)。
+ * `combo-bet-allocation.ts`の`allocateGeneralBets`はwin候補があり順序が決定できた
+ * (`determined`)呼び出しで、本関数(`buildOutcomeIndexSets`)を通さず、`OrderedOutcome[]`
+ * から`OutcomeIndexSet[]`を直接構築する(win候補があっても`indeterminate`の呼び出しは
+ * `else`枝に落ちて本関数を通る。`combo-bet-allocation.ts`の該当コメント参照)。
+ * 型ジェネリック`<T>`は候補型のみで、outcome型は`PlaceOutcome`に固定されたまま。
+ * outcome型を汎用化する変更は#92のスコープでは行わなかった。
  */
 export function buildOutcomeIndexSets<T>(
   candidates: readonly T[],
@@ -183,8 +275,12 @@ export interface GreedyAllocationResult {
  * 貪欲逐次配分で連続最適比率(ケリー基準のバンクロール比率 x*_i、0〜1)を求める。
  * 目的関数 F(x) = Σ_T P(T)·log(1 − Σx_i + Σ_{i∈T}x_i·o_i)。
  * 総資金・1レース上限には一切依存しない(スケール不変)。候補が「馬」か「馬の組」かには
- * 一切依存しない(odds・outcomeIndexSetsだけを参照する。的中判定はbuildOutcomeIndexSetsで
- * 済んでいる前提)。
+ * 一切依存しない(odds・outcomeIndexSetsだけを参照する。的中判定は呼び出し側で既に済んで
+ * いる前提。**構築元は`buildOutcomeIndexSets`とは限らない**(Issue #92)。win候補があり
+ * 順序が決定できた呼び出しは`buildOutcomeIndexSets`を通さず、順序付きoutcome空間から
+ * 直接`indices`を構築する。**Issue #96以降は`foldOutcomeIndexSetsBySignature`(署名畳み込み)
+ * を経由した`OutcomeIndexSet[]`が渡ることもある。** 本関数自身はどの構築元・畳み込みの
+ * 有無でも同じロジックで動作し区別しない)。
  *
  * 貪欲法に大域最適の理論保証は無い(bet-allocation.ts 由来の既知の注記。目的関数Fはlogの内側で
  * 変数x_iが結合しており分離可能ではないため)。試した範囲では全探索の最適格子点と経験的に
@@ -209,17 +305,11 @@ export interface GreedyAllocationResult {
  *
  * 一方T∋iのwealth(候補iが実際に属すoutcomeでの値。1つのoutcomeが的中しうる候補数は
  * 高々2^topFinishCount−1という定数で頭打ちになる)は候補iごとに異なる値になる
- * (変化する部分)。ここは**旧実装と全く同じ式・同じ項順**(`trialX[i]=x[i]+δ`として
- * 該当outcomeのpayoutを候補ごとに再計算する)で組み直す。**変わらない部分式は1回だけ
- * 計算して使い回し、変わる部分の算術は一切変えない**、という設計であるため、置き換えの
- * 前後で計算結果が変わる理由が無い。
- *
- * 具体的には、outcome Tごとに
- *   - 現在のxでの payout P_T = Σ_{idx∈T} x[idx]·o[idx](旧実装がtrialX=xで呼ばれた場合と同じ式)
- *   - commonWealth_T = 1 − trialSumX + P_T (旧実装の `1 - trialSumX + payout` と同じ項順)
- * を1ステップに1回だけ計算し(T∌iの場合の値そのもの)、T∋iの場合だけ旧実装と同じ
- * 「trialX[i]=x[i]+δとして該当outcomeのpayoutをresumし直す」処理(freshWealth)に置き換える。
- * 候補iのtrialF相当値は
+ * (変化する部分)。具体的には、outcome Tごとに
+ *   - 現在のxでの payout P_T = Σ_{idx∈T} x[idx]·o[idx]
+ *   - commonWealth_T = 1 − trialSumX + P_T
+ * を1ステップに1回だけ計算し(T∌iの場合の値そのもの)、T∋iの場合だけ候補iに対応する
+ * freshWealth_T(下記「Issue #96」節参照)に置き換える。候補iのtrialF相当値は
  *   trialLogSum_i = commonLogSum − Σ_{T∋i} P(T)·log(commonWealth_T) + Σ_{T∋i} P(T)·log(freshWealth_T)
  * (commonLogSum = Σ_T P(T)·log(commonWealth_T)、1ステップに1回だけ計算)。
  *
@@ -230,25 +320,127 @@ export interface GreedyAllocationResult {
  * (O(候補数×outcome数))へフォールバックする(高オッズ×低確率などEPSに近づく極端な入力の
  * 稀なステップでのみ発生。頻度が低いため全体の実測時間への影響は軽微)。
  *
- * **状態更新(x・sumX・currentF)は常に旧実装と同じ`computeF`によるフレッシュな再計算で行う**
- * (高速パスの中間値は候補選択〈bestIdxの決定〉にのみ使う)。
+ * **状態更新(x・sumX・currentF)は常に`computeF`(ブルートフォースと同一の関数。未改変)による
+ * フレッシュな再計算で行う**(高速パスの中間値は候補選択〈bestIdxの決定〉にのみ使う)。
+ *
+ * ## Issue #96: win候補混在時の計算量再増加への対応
+ *
+ * #92で単勝(win)候補を扱えるようにした際、win候補が1件でもあると集合空間(`C(候補数,3)`)
+ * ではなく順序付きoutcome空間(`P(候補数,3)`。6倍)がそのまま本関数へ渡るようになり、
+ * `buildMixedAllocationDisplay`が実測で約7.9倍遅くなった(再現: `pnpm tsx
+ * scripts/bench-mixed-allocation.ts`)。#96はこれを次の2点で緩和する。
+ *
+ * 1. **署名畳み込み(呼び出し側の責務。`foldOutcomeIndexSetsBySignature`)**: `indices`が
+ *    完全一致するoutcome同士は`wealth`が常に同一になるため確率を合算でき、実測で
+ *    outcome数を3360→1023(中央16頭の実オッズ)へ削減する。本関数自体を変更するものでは
+ *    なく、`OutcomeIndexSet[]`を受け取る契約は変わらない。
+ * 2. **ビット厳密なメモ化**: `Math.log(commonWealth[j])`を`commonLogSum`算出時に1回だけ
+ *    計算して配列に保持し、候補評価ループで再利用する。同様に`freshWealth`(旧実装と全く
+ *    同じ式・操作列で計算する。下記参照)もworstFresh算出パスで1回だけ計算して配列に保持し、
+ *    候補評価ループで再利用する。**どちらも「同じ引数に対する同じ関数値を1回だけ計算して
+ *    使い回す」だけなので、値そのものは構成上ビット同一になる**(D-2aのcommonWealth再利用と
+ *    同種の共通部分式除去。したがって上記1点目〈署名畳み込み〉を適用しない限り、本関数
+ *    単体の挙動はこのIssueの前後で1ビットも変わらない)。
+ *
+ * ### 検討したが採用しなかった案: computeFreshWealthのO(1)化(採用C・Issue #96)
+ *
+ * `fresh = commonWealth[j] + delta·odds[i]`という恒等式(前提:
+ * `i`が`outcomeIndexSets[j].indices`に重複なくちょうど1回含まれること。`OutcomeIndexSet`の
+ * JSDoc参照)を使えば`computeFreshWealth`をO(1)化できる。数学的には旧実装(該当outcomeの
+ * `indices`をループしてpayoutを再構成する版)と厳密に同値だが、**浮動小数演算としては
+ * ビット一致するとは限らない**(`(a+δ)·o`と`a·o+δ·o`は数学的には等しいが、IEEE754の
+ * 乗算・加算は分配則を厳密には満たさないため)。
+ *
+ * このビット差は、`x`・`sumX`・`currentF`の更新が常に未改変の`computeF`によるフレッシュな
+ * 再計算で行われる(上記「状態更新」参照)ため状態に直接蓄積しないが、高速パスの候補評価
+ * ループで求めた`increment`の**argmax(`bestIdx`)が反転する**経路で最終的な`fractions`に
+ * 伝わりうる。**実際にこの反転を`bet-allocation.test.ts`「キャップでbetCountが2頭→1頭に
+ * 減り、notDiversifiedが立つこと」で実測した**(全odds=3で目的関数が平坦になる退化ケース。
+ * 同ファイルのJSDocが「貪欲の評価順序・加算順序が生む丸め誤差というタイブレークがたまたま
+ * 選んだ1点」の検知用番人と明記している。O(1)化を適用するとbetCountが2→1に変化し、
+ * `pnpm --filter @keiba/core test`が赤くなった。O(1)化を外し旧来のループ版に戻すと
+ * 全件緑に戻ることも実測済み)。AC-3(既存テストの非破壊)を満たせないため不採用とした
+ * (boss確認済み。署名畳み込み〈上記1点目〉だけでも実測3360→1023outcomeの削減効果があり、
+ * #96の目的は達成できる)。
+ *
+ * ## Issue #107(#24-C): ビット一致を保ったままの定数倍削減(CSR化・バッファ再利用・接頭辞和の再利用)
+ *
+ * `pnpm tsx scripts/bench-run-greedy-allocation.ts`のフェーズ別内訳実測により、
+ * ステップループの支配的コストは`freshByCandidate`相当の計算(候補ごとに、接触先outcomeの
+ * `indices`を毎回全部なめ直してpayoutを再構成する箇所。計算量`Σ_j|indices_j|²`)であることが
+ * 判明した(具体的な比率は実行環境に依存するため、再現コマンドの実出力で確認すること。
+ * AC-5)。本Issueは次の3点を、**演算そのもの・加算順序を一切変えずに**適用する。
+ *
+ * 1. **CSR化**: `outcomeIndexSets[j].indices`(オブジェクト配列の中のプレーン配列)を、
+ *    ステップループの外で1回だけ`Int32Array`+オフセット配列(`outcomeIndicesFlat`/
+ *    `outcomeOffsets`)へ平坦化する。走査順序は元の`indices`配列の順序をそのまま保つ
+ *    (連結するだけなので、走査順が変わらないことは構成上自明)。候補→接触先outcomeの
+ *    逆引き(旧`contactsByCandidate`)も同様に`contactOutcomeFlat`/`contactOffsets`へ
+ *    平坦化し、書き込み順序(=候補ごとの接触先の並び順)は旧実装(outcome番号jを0から
+ *    昇順に走査しながらpushする)と同じにする。
+ * 2. **バッファ再利用**: `commonWealth`・`commonLogWealth`・`freshFlat`(旧`freshByCandidate`
+ *    相当)は、ステップループの外で`Float64Array`として1回だけ確保し、毎ステップ再利用する。
+ *    安全性: `commonWealth`・`freshFlat`は`if(safe)`の外で毎ステップ全要素を書き潰してから
+ *    読むため(下記実装参照)、ステップ間で古い値が紛れ込む経路は無い。`commonLogWealth`は
+ *    `if(safe)`の中でのみ書かれるが、読み出しも同じ`if(safe)`ブロック内の2箇所
+ *    (`commonLogSum`算出直後の候補評価ループ)でしか発生せず、`safe===false`のステップでは
+ *    一切読まれない。`safe`なステップに入るたびoutcome数ぶん全走査して書き潰してから読むので、
+ *    前の`safe`ステップの古い値が紛れ込む経路も無い(実装者が読んで確認済み。#107ゲート裁定
+ *    §6(2))。
+ * 3. **接頭辞和の再利用(採用Cとは異なる、ビット一致するO(Σ|indices_j|(|indices_j|+1)/2)化)**:
+ *    `commonWealth`計算のための各outcome内forward累算(`payout += x[idx]·odds[idx]`を
+ *    `indices`の順に足していく)は、そのままだと「途中経過」を捨てているだけである。
+ *    この途中経過(位置pより**前**までの累算値。現在のx、未変更)を`prefixSum`
+ *    (`Float64Array`、CSRと同じ平坦配置)へ位置ごとに保存しておくと、候補iが位置pに
+ *    いるoutcome jの`fresh`値は
+ *    ```
+ *    payout = prefixSum[position(i,j)]        // 位置pより前(旧実装と同じ累算値。同じ操作列)
+ *    payout += (x[i]+δ)·odds[i]               // 置き換わる1項(旧実装のv=x[i]+δの項と同一)
+ *    payout += t_{p+1} + t_{p+2} + ... + t_end // 位置pより後を元の順序のまま歩いて加算
+ *    ```
+ *    として求まる。**採用Cとの違いはここが本質**: 採用Cは`commonWealth[j]`(全項を
+ *    accumulateし終えた最終値)に対して`+delta·odds[i]`を**後から**足す(=`(a+δ)·o`と
+ *    `a·o+δ·o`の分配則に依存する別の演算列)のに対し、本手法は**旧実装と同じ順序で同じ
+ *    被加数を同じアキュムレータに足していく操作を、位置pより前の部分だけ結果を使い回して
+ *    再生する**(位置pより後は旧実装と全く同じ「forループで1項ずつ足す」処理をそのまま行う)。
+ *    IEEE754の加算は決定的(同じ操作列は同じ結果を返す)なので、位置pより前の部分和が
+ *    旧実装の対応する中間状態とビット一致する限り、後続の加算も含めた最終結果は旧実装の
+ *    ループを最初から回した場合とビット一致する。
+ *
+ *    計算量は、outcome jの位置pにいる候補について旧実装がO(|indices_j|)(全項を毎回歩く)
+ *    だったのに対し、本手法はO(|indices_j|−p)(位置pより後だけを歩く)になる。outcome j内の
+ *    全候補について合計すると`Σ_{p=0}^{|indices_j|-1}(|indices_j|-p-1)`
+ *    `= |indices_j|(|indices_j|-1)/2`となり、旧実装の`|indices_j|²`から**概ね半分**へ
+ *    減る(前段の`commonWealth`計算ループに`prefixSum`への1回のstoreを追加するだけなので、
+ *    その部分の追加コストはO(1)/要素で無視できる)。
+ *
+ *    ★`worstFresh`の走査順序(候補メジャー: 候補iについて0からn-1、各候補の接触先を
+ *    outcome番号昇順)は本Issueの前後で**変えていない**(接頭辞和は別の平坦配列
+ *    `prefixSum`〈outcomeメジャーで構築〉から値を引くだけで、`freshFlat`への書き込み・
+ *    `worstFresh`の更新自体は旧実装と同じ候補メジャーのループ構造のまま行う)。
+ *    NaNが混じった場合の扱い(`fresh < worstFresh`がfalseになり更新されない)も、
+ *    比較の構造自体を変えていないため旧実装と同一の挙動になる。
  *
  * ### 確認できた範囲(鉄則8: 観測していないことを断定しない)
  *
- * 「総和の加算順序まで旧実装と厳密に同一」であることを一般に証明したわけではない
- * (outcomeを跨ぐ総和は、共通部分の再利用によって旧実装とは異なる順序で足し合わされる)。
- * 確認できているのは次の2点である:
- *   1. 既存 `bet-allocation.test.ts` の80件(複勝経路。無改変)が、この置き換えの前後で
- *      出力がビット一致すること(`toBe` による厳密等価。実行結果は本タスクの報告参照)
- *   2. 独立した検証(3券種混在372候補・全点正EV987候補の2条件)で、置き換え前後の配分結果
- *      (Σx*・betCount・totalStake)が一致することを別セッションで確認済み(本タスクの報告参照。
- *      当該検証はスクラッチ実行であり本リポジトリのコミット済みテストではない)
- * この2つの確認範囲を超えて「あらゆる入力で常にビット一致する」とは主張しない。
+ * 確認できているのは次の点である:
+ *   1. 既存 `bet-allocation.test.ts` の80件超(複勝経路。無改変)が、D-2a・#96・#107いずれの
+ *      置き換えの前後でも出力がビット一致すること(`toBe` による厳密等価)
+ *   2. `allocation-primitives.test.ts`の「高速パスとブルートフォースが同じ結果になること」
+ *      (テーブル駆動。候補数・outcome数・接触密度・オッズ分布の異なる複数条件、および
+ *      Issue #107(#24-C)で追加した「実際の順序付きoutcome空間の形」シナリオ×greedySteps
+ *      複数水準)が、Issue #96・#107いずれのメモ化・CSR化・接頭辞和再利用導入後も
+ *      ブルートフォース参照実装(未改変)と`toEqual`で厳密一致すること
+ *   3. `scripts/bench-run-greedy-allocation.ts`のAC-1b自己検査(自前構築した`OutcomeIndexSet[]`
+ *      に対する本関数の結果が、同じ入力に対する`allocateGeneralBets`の`continuousFraction`と
+ *      `===`で一致すること)が、Issue #107の最適化前後どちらでも通ること
+ * この確認範囲を超えて「あらゆる入力で常にビット一致する」とは主張しない。
  *
- * 実測(`pnpm tsx scripts/bench-allocation.ts`): 18頭・現実的なオッズ分布(正EV候補
- * 数百〜987件規模)で、旧実装は無制限(candidateCap無効化)時に数秒〜十数秒。新実装は
- * 同条件で1秒未満まで短縮された(具体的な数値は実行環境に依存するため、再現コマンドで
- * 都度確認すること。固定の数値をここに書き込まない)。
+ * 実測: `pnpm tsx scripts/bench-allocation.ts`(D-2a時点)・
+ * `pnpm tsx scripts/bench-mixed-allocation.ts`(Issue #96時点)・
+ * `pnpm tsx scripts/bench-run-greedy-allocation.ts`(Issue #107時点。フェーズ別内訳・
+ * `runGreedyAllocation`単体の所要時間を含む)。具体的な数値は実行環境に依存するため、
+ * 再現コマンドで都度確認すること(固定の数値をここに書き込まない)。
  */
 export function runGreedyAllocation(
   n: number,
@@ -262,11 +454,56 @@ export function runGreedyAllocation(
 
   const outcomeCount = outcomeIndexSets.length;
 
-  // 候補→接触先outcomeの逆引き(「総接触数」分だけ。ステップループの外で1回だけ構築する)。
-  const contactsByCandidate: number[][] = Array.from({ length: n }, () => [] as number[]);
+  // ── CSR化(outcome-major・Issue #107)。outcomeIndexSets[j].indicesを1本のInt32Arrayへ
+  // 連結する。走査順序は元の`indices`配列の順序(候補インデックス昇順。OutcomeIndexSetの
+  // 不変条件)をそのまま保つ(連結するだけなので走査順は変わらない)。ステップループの外で
+  // 1回だけ構築する。
+  const outcomeOffsets = new Int32Array(outcomeCount + 1);
   for (let j = 0; j < outcomeCount; j++) {
-    for (const idx of outcomeIndexSets[j]!.indices) {
-      contactsByCandidate[idx]!.push(j);
+    outcomeOffsets[j + 1] = outcomeOffsets[j]! + outcomeIndexSets[j]!.indices.length;
+  }
+  const totalEdges = outcomeOffsets[outcomeCount]!;
+  const outcomeIndicesFlat = new Int32Array(totalEdges);
+  const outcomeProbabilities = new Float64Array(outcomeCount);
+  {
+    let g = 0;
+    for (let j = 0; j < outcomeCount; j++) {
+      outcomeProbabilities[j] = outcomeIndexSets[j]!.probability;
+      for (const idx of outcomeIndexSets[j]!.indices) {
+        outcomeIndicesFlat[g] = idx;
+        g++;
+      }
+    }
+  }
+
+  // ── CSR化(candidate-major・Issue #107)。候補→接触先outcomeの逆引き(旧
+  // `contactsByCandidate`)を平坦化する。書き込み順序(=候補ごとの接触先の並び順)は
+  // 旧実装(outcome番号jを0から昇順に走査しながらpushする)と同じにする。
+  // `contactPositionFlat`は「候補iがoutcome jのindices配列の中で何番目(0始まり)か」を
+  // 記録する(`OutcomeIndexSet`の不変条件〈重複なし〉により一意に決まる)。接頭辞和の再利用
+  // (下記)で使う。
+  const contactCountByCandidate = new Int32Array(n);
+  for (let g = 0; g < totalEdges; g++) {
+    contactCountByCandidate[outcomeIndicesFlat[g]!]!++;
+  }
+  const contactOffsets = new Int32Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    contactOffsets[i + 1] = contactOffsets[i]! + contactCountByCandidate[i]!;
+  }
+  const contactOutcomeFlat = new Int32Array(totalEdges);
+  const contactPositionFlat = new Int32Array(totalEdges);
+  {
+    const cursor = contactOffsets.slice(0, n); // 候補ごとの書き込みカーソル(初期値=開始オフセット)。
+    for (let j = 0; j < outcomeCount; j++) {
+      const start = outcomeOffsets[j]!;
+      const end = outcomeOffsets[j + 1]!;
+      for (let g = start; g < end; g++) {
+        const idx = outcomeIndicesFlat[g]!;
+        const w = cursor[idx]!;
+        contactOutcomeFlat[w] = j;
+        contactPositionFlat[w] = g - start; // outcome j内での位置(0始まり)。
+        cursor[idx] = w + 1;
+      }
     }
   }
 
@@ -274,13 +511,28 @@ export function runGreedyAllocation(
   const delta = 1 / greedySteps;
   let sumX = 0;
 
+  // ── ステップループの外で1回だけ確保し、毎ステップ全要素を書き潰して再利用するバッファ
+  // (Issue #107)。commonWealth・freshFlatはif(safe)の外で毎ステップ全要素を書き潰してから
+  // 読むため安全。commonLogWealthはif(safe)の中でのみ書かれるが、読み出しも同じif(safe)
+  // ブロック内でしか発生しないため、safe===falseのステップで前回の値が紛れ込むことはない
+  // (本関数JSDoc「Issue #107」節参照)。
+  const commonWealth = new Float64Array(outcomeCount);
+  const prefixSum = new Float64Array(totalEdges); // outcome-major(上記CSRと同じ配置)。
+  const commonLogWealth = new Float64Array(outcomeCount);
+  const freshFlat = new Float64Array(totalEdges); // candidate-major(上記CSRと同じ配置)。
+
   // 旧来のブルートフォース計算。フォールバック専用として温存する(EPSガードがきわどい
-  // 稀なステップと、状態更新〈currentFの再計算〉の両方で使う。既存実装と完全に同じ式)。
+  // 稀なステップと、状態更新〈currentFの再計算〉の両方で使う)。CSR化した配列を使うが、
+  // 走査順序・演算順序は旧実装(outcomeIndexSets[j].indicesを順に辿る版)と完全に同じ
+  // (outcomeIndicesFlatは`indices`を元の順序のまま連結しただけであるため)。
   const computeF = (trialSumX: number, trialX: readonly number[]): number | null => {
     let total = 0;
-    for (const outcome of outcomeIndexSets) {
+    for (let j = 0; j < outcomeCount; j++) {
+      const start = outcomeOffsets[j]!;
+      const end = outcomeOffsets[j + 1]!;
       let payout = 0;
-      for (const idx of outcome.indices) {
+      for (let g = start; g < end; g++) {
+        const idx = outcomeIndicesFlat[g]!;
         payout += trialX[idx]! * odds[idx]!;
       }
       const wealth = 1 - trialSumX + payout;
@@ -288,25 +540,9 @@ export function runGreedyAllocation(
         // 資産が0以下になる割当は候補から除外する(logの定義域外)。
         return null;
       }
-      total += outcome.probability * Math.log(wealth);
+      total += outcomeProbabilities[j]! * Math.log(wealth);
     }
     return total;
-  };
-
-  // 接触先outcome1件分のfreshWealthを、旧実装と全く同じ式・操作列で計算する
-  // (trialXの全体コピーは作らず、該当outcomeのindicesだけを見て候補iの項だけδを足す。
-  // 値としてはtrialX=x.slice();trialX[i]+=deltaしたときの該当outcomeのpayoutと完全に一致する)。
-  const computeFreshWealth = (
-    outcomeIdx: number,
-    candidateIdx: number,
-    trialSumX: number,
-  ): number => {
-    let payout = 0;
-    for (const idx of outcomeIndexSets[outcomeIdx]!.indices) {
-      const v = idx === candidateIdx ? x[idx]! + delta : x[idx]!;
-      payout += v * odds[idx]!;
-    }
-    return 1 - trialSumX + payout;
   };
 
   let currentF = computeF(sumX, x)!; // 全て0の初期状態は必ず有効(wealth=1 for 全outcome)。
@@ -315,12 +551,16 @@ export function runGreedyAllocation(
   for (let step = 0; step < greedySteps; step++) {
     const trialSumX = sumX + delta;
 
-    // commonWealth_T = 1 - trialSumX + P_T(現在のxでのpayout)。旧実装がi∉Tの候補を
-    // 試行したときに計算する値と完全に同じ式・同じ操作列(証明はJSDoc参照)。
-    const commonWealth = new Array<number>(outcomeCount);
+    // commonWealth_T = 1 - trialSumX + P_T(現在のxでのpayout)。同じforward累算の中で、
+    // 位置pより前までの部分和(現在のx。未変更)を`prefixSum`へ保存する(接頭辞和の再利用。
+    // 追加コストはstore1回/要素だけなので、このループ自体のコストは実質変わらない)。
     for (let j = 0; j < outcomeCount; j++) {
+      const start = outcomeOffsets[j]!;
+      const end = outcomeOffsets[j + 1]!;
       let payout = 0;
-      for (const idx of outcomeIndexSets[j]!.indices) {
+      for (let g = start; g < end; g++) {
+        prefixSum[g] = payout; // このoutcome内で位置(g-start)より前までの和。
+        const idx = outcomeIndicesFlat[g]!;
         payout += x[idx]! * odds[idx]!;
       }
       commonWealth[j] = 1 - trialSumX + payout;
@@ -334,10 +574,36 @@ export function runGreedyAllocation(
         worstCommon = commonWealth[j]!;
       }
     }
+
+    // 接頭辞和の再利用(Issue #107)。候補iについて、接触先outcome j(位置p)のfreshは
+    //   payout = prefixSum[position(i,j)]        ← 位置pより前(旧実装と同じ累算値・同じ操作列)
+    //   payout += (x[i]+δ)·odds[i]               ← 置き換わる1項(旧実装のv=x[i]+δの項と同一)
+    //   payout += t_{p+1} + ... + t_end           ← 位置pより後を元の順序のまま歩いて加算
+    // として求まる(本関数JSDoc「Issue #107」節参照)。旧実装(位置0からoutcome末尾まで
+    // 毎回フルスキャン)と同じ被加数を同じ順序・同じアキュムレータの上に足すだけであり、
+    // IEEE754の加算は決定的なのでビット一致する(採用C〈commonWealth[j]+delta·odds[i]〉が
+    // 分配則に依存する別演算列で不採用だったのとは異なる。上記JSDoc参照)。
+    // 走査順序(候補メジャー: 候補iを0からn-1、各候補の接触先をoutcome番号昇順)は旧実装から
+    // 変えていない。
     let worstFresh = Infinity;
     for (let i = 0; i < n; i++) {
-      for (const j of contactsByCandidate[i]!) {
-        const fresh = computeFreshWealth(j, i, trialSumX);
+      const cStart = contactOffsets[i]!;
+      const cEnd = contactOffsets[i + 1]!;
+      const freshTerm = (x[i]! + delta) * odds[i]!;
+      for (let c = cStart; c < cEnd; c++) {
+        const j = contactOutcomeFlat[c]!;
+        const p = contactPositionFlat[c]!;
+        const start = outcomeOffsets[j]!;
+        const end = outcomeOffsets[j + 1]!;
+        const g = start + p;
+        let payout = prefixSum[g]!;
+        payout += freshTerm;
+        for (let g2 = g + 1; g2 < end; g2++) {
+          const idx2 = outcomeIndicesFlat[g2]!;
+          payout += x[idx2]! * odds[idx2]!;
+        }
+        const fresh = 1 - trialSumX + payout;
+        freshFlat[c] = fresh;
         if (fresh < worstFresh) {
           worstFresh = fresh;
         }
@@ -349,18 +615,22 @@ export function runGreedyAllocation(
     let bestIncrement = 0; // 増分の最大値が0以下になったら停止するため、初期値は0(厳密に上回る候補のみ採用)。
 
     if (safe) {
-      // 高速パス: O(outcome数+総接触数)。commonLogSum(全候補共通)を1回だけ計算し、
-      // 各候補は自分の接触先outcomeだけをfreshWealthで置き換える(JSDoc導出参照)。
+      // 高速パス: O(outcome数+総接触数)相当(接頭辞和の再利用によりfreshFlat算出自体も
+      // Σ|indices_j|(|indices_j|+1)/2程度に削減済み。本関数JSDoc「Issue #107」節参照)。
       let commonLogSum = 0;
       for (let j = 0; j < outcomeCount; j++) {
-        commonLogSum += outcomeIndexSets[j]!.probability * Math.log(commonWealth[j]!);
+        const logW = Math.log(commonWealth[j]!);
+        commonLogWealth[j] = logW;
+        commonLogSum += outcomeProbabilities[j]! * logW;
       }
       for (let i = 0; i < n; i++) {
         let trialLogSum = commonLogSum;
-        for (const j of contactsByCandidate[i]!) {
-          const prob = outcomeIndexSets[j]!.probability;
-          const fresh = computeFreshWealth(j, i, trialSumX);
-          trialLogSum = trialLogSum - prob * Math.log(commonWealth[j]!) + prob * Math.log(fresh);
+        const cStart = contactOffsets[i]!;
+        const cEnd = contactOffsets[i + 1]!;
+        for (let c = cStart; c < cEnd; c++) {
+          const j = contactOutcomeFlat[c]!;
+          const prob = outcomeProbabilities[j]!;
+          trialLogSum = trialLogSum - prob * commonLogWealth[j]! + prob * Math.log(freshFlat[c]!);
         }
         const increment = trialLogSum - currentF;
         if (increment > bestIncrement) {
@@ -546,6 +816,69 @@ export function applyMinimumStake(
 }
 
 /**
+ * オッズの値域の下限(1.0)。オッズは「賭け金が最低でも戻ってくる倍率」であり1.0未満の値は
+ * 値域外(Issue #74)。`0`は構文上は正当な数値だが値域外であり、旧基準`value > 0`は
+ * `[0,1)`をすべて通してしまっていた(#31→#74で1.0へ引き上げ)。
+ *
+ * **この定数を変えたら、以下も同時に直すこと(boss裁定Q1(b)・2026-09-04)**:
+ *   - `expected-value.ts` の除外理由文言「複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外」
+ *   - 値域を断定している散文(`combo-bet-allocation.ts`・`bet-allocation.ts`・`verify.ts`の
+ *     「1.0未満」表記。#74 AC-11で是正した箇所)
+ * 定数だけを変えると `allocation-primitives.test.ts` の「値域の定数と文言は同時に直す」テストが
+ * 赤くなる(1つの `it()` の中で定数と文言の両方をハードコードしたリテラルとして固定しているため)。
+ */
+export const MIN_VALID_ODDS = 1.0;
+
+/**
+ * オッズとして使える値か(1.0以上の有限値)を判定する(Issue #31→#74で基準を`>0`から
+ * `>=MIN_VALID_ODDS`(1.0)へ引き上げ)。
+ *
+ * 背景(Issue #31): `combo-bet-allocation.ts` の `validateCandidates`(門番・throw基準)と
+ * `resolveComboOdds`(分類器・`malformed`基準)が `!Number.isFinite(x) || x <= 0` を独立に
+ * 2回実装していた(将来どちらか一方だけ基準を変えて他方が古いまま残る、本リポジトリが
+ * 繰り返してきた事故形)。複勝経路(`bet-allocation.ts`)の候補フィルタも同じ基準を必要と
+ * したため(候補外の1頭に `NaN`/`Infinity` が混じると `runGreedyAllocation` の増分がNaN汚染され、
+ * 健全な他の馬の配分まで巻き添えで消える)、本述語へ1本化した。
+ *
+ * 背景(Issue #74): オッズの値域は「1.0以上」であり`0`は値域外だが、旧基準`value > 0`は
+ * `[0,1)`を通してしまい、複勝EV側(`expected-value.ts`)が `oddsMin=0` を
+ * `ev = placeProb×0 = 0` という「正常な判定結果」に潰していた(判定不能と判定結果の混同。
+ * #31の原則違反)。基準を`value >= MIN_VALID_ODDS`へ引き上げ、全呼び出し元に同時適用する。
+ * **数(単位を明記。呼び出し箇所=実際に`isUsableOdds(...)`を呼ぶ式の数、モジュール=そのファイル数。
+ * 定義自身の行・コメント内の言及は含まない)**:
+ *   - **#74着手前**: 呼び出し6・モジュール3(`combo-bet-allocation.ts`2・`bet-allocation.ts`3・
+ *     `verify.ts`1)
+ *   - **#74で追加**: `probability-quality-metrics.ts`1・`expected-value.ts`1・
+ *     `build-prompt.ts`1(いずれも本Issueで新規に委譲)
+ *   - **#74後**: 呼び出し9・モジュール6
+ * 再現(このファイルを含む`packages/core/src`全体を対象にすること。`ev/`だけに絞ると
+ * `analyzer/build-prompt.ts`の1件を取りこぼす):
+ * `grep -c "isUsableOdds(" <各ファイルパス>` でファイルごとの出現**行数**を数え、
+ * コメント内出現(`bet-allocation.ts`1件・`expected-value.ts`1件。加えて本ファイル自身の
+ * この段落にも「isUsableOdds(」という字面が複数回登場する)を除いた行が実呼び出し。
+ *
+ * **`grep -rhoE "isUsableOdds\(" packages/core/src | wc -l`(定義・コメント内言及を含む
+ * 総出現数)は、この段落を編集するたびに変わる自己参照値である。固定の数として本文に
+ * 書き込まない(#73 R5・本Issueで一度実際にここで13→14の食い違いを起こした教訓)。
+ * 呼び出し箇所・モジュールの数(上記「#74後: 呼び出し9・モジュール6」)だけが安定した
+ * 意味のある数であり、確認したいときはその都度上記コマンドで数え直すこと。**
+ *
+ * **null判定は含まない(呼び出し側の責務)**: 引数の型を `number` のみとし `number | null` を
+ * 受け取らないのは意図的。「未確定(null)」と「不正値(数値だが使えない)」は意味が異なり、
+ * この区別を呼び出し側が保持し続けることで、excludedReason等の文言分岐(判定不能の内訳)を
+ * 呼び出し側で作り分けられるようにする(本述語に混ぜるとその区別が失われる)。
+ *
+ * **適用範囲は「オッズ」に限る(馬番の検証には使わない)**: `validateCandidates` の馬番検証
+ * (`umabans`)も式としては同一の `!Number.isFinite(u) || u <= 0` だが、これは「馬番として
+ * 妥当か」という別概念であり、式が同じなのは偶然に過ぎない。ここへ本述語を流用すると、
+ * 将来オッズ側の基準だけを変えた際に馬番の検証まで意図せず道連れで変わってしまう
+ * (#74でオッズ側の基準を1.0へ引き上げた際も、馬番側の散文・基準は一切変更していない)。
+ */
+export function isUsableOdds(value: number): boolean {
+  return Number.isFinite(value) && value >= MIN_VALID_ODDS;
+}
+
+/**
  * 見送り理由のコード(文言を持たない判別共用体)。文言は呼び出し側(bet-allocation.ts /
  * combo-bet-allocation.ts)がそれぞれ独立して持つ(見送り理由・advisoryの文言定数は
  * 券種ごとに分離する。boss着手前ゲート2026-08-05決定)。
@@ -557,6 +890,35 @@ export type SkipReasonCode =
   | "kelly-zero"
   | "no-candidates"
   | "no-edge";
+
+/**
+ * `SkipReasonCode`の全メンバーの一覧(Issue #80・AC-A5)。
+ *
+ * この配列自体はテストの期待値ではなく、`SkipReasonCode`という**型**が今後増えていないことを
+ * 機械的に検査するための唯一の正である(`packages/core/test/ev/allocation-primitives.test.ts`が
+ * 独立したリテラル配列と`toEqual`で突き合わせる)。
+ *
+ * 下記`AssertAllSkipReasonCodesCovered`は、`SkipReasonCode`に新しい値を追加してこの配列の
+ * 更新を忘れると型検査(`pnpm typecheck`)がコンパイルエラーで検出する仕掛け
+ * (`Exclude<SkipReasonCode, 本配列の要素型>`が`never`にならなければ、`= true`の代入が失敗する)。
+ * 逆方向(本配列が`SkipReasonCode`に無い値を含む)は`satisfies readonly SkipReasonCode[]`が
+ * 型検査時点で弾く。両方向により本配列は`SkipReasonCode`と過不足なく一致する。
+ */
+export const ALL_SKIP_REASON_CODES = [
+  "bankroll-unset",
+  "cap-unset",
+  "cap-too-small",
+  "kelly-zero",
+  "no-candidates",
+  "no-edge",
+] as const satisfies readonly SkipReasonCode[];
+
+type MissingSkipReasonCodes = Exclude<SkipReasonCode, (typeof ALL_SKIP_REASON_CODES)[number]>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- 型検査だけが目的の代入(値は使わない)。
+const _assertAllSkipReasonCodesCovered: MissingSkipReasonCodes extends never
+  ? true
+  : ["SkipReasonCodeに値を追加したらALL_SKIP_REASON_CODESも更新すること", MissingSkipReasonCodes] = true;
+void _assertAllSkipReasonCodesCovered;
 
 /**
  * 見送り理由を6分類・優先順位順に決定する(コードのみ。文言化は呼び出し側の責務)。

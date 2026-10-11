@@ -47,6 +47,12 @@
 import type { JointModelHorse } from "./place-joint-model.js";
 import { CONDITIONAL_BERNOULLI_MODEL } from "./place-joint-model.js";
 import { resolveComboOdds } from "./combo-bet-allocation.js";
+import { isUsableOdds } from "./allocation-primitives.js";
+import {
+  binIndexFor,
+  calibrationBinBounds,
+  DEFAULT_QUALITY_BIN_COUNT,
+} from "./calibration-bins.js";
 
 // ---------------------------------------------------------------------------
 // 共通の型
@@ -160,9 +166,10 @@ export type MarketImpliedPlaceProbabilities =
 /**
  * `1/placeOddsMin` から市場含意複勝確率を求め、Σ=min(3,頭数)に正規化する。
  *
- * `placeOddsMin` が欠損(null)・非有限・0以下の馬が**1頭でもいる**レースは、Σ=一定への
- * 正規化そのものが崩れるため、レース全体の市場系指標を算出不能(`values: null`)として扱う
- * (一部の馬だけ除外して正規化すると、残りの馬の値も歪むため)。
+ * `placeOddsMin` が欠損(null)・値域外(1.0未満・非有限。Issue #74。判定基準は
+ * `allocation-primitives.ts` の `isUsableOdds` に委譲する)の馬が**1頭でもいる**レースは、
+ * Σ=一定への正規化そのものが崩れるため、レース全体の市場系指標を算出不能(`values: null`)
+ * として扱う(一部の馬だけ除外して正規化すると、残りの馬の値も歪むため)。
  *
  * `oddsStatus === "yoso"`(発売前)は `OddsSnapshot.place` が常に空オブジェクトになる
  * (複勝オッズ自体が未発売)。呼び出し側が生の `OddsSnapshot.place` から `placeOddsMin` を
@@ -183,7 +190,10 @@ export function computeMarketImpliedPlaceProbabilities(
   const inverses: { umaban: number; inv: number }[] = [];
   for (const h of horses) {
     const odds = h.placeOddsMin;
-    if (odds === null || !Number.isFinite(odds) || odds <= 0) {
+    // 判定基準は allocation-primitives.ts の isUsableOdds に委譲する(Issue #74。旧実装は
+    // `!Number.isFinite(odds) || odds <= 0` を独立に再実装しており、isUsableOddsの基準
+    // 〈#74で>0から>=1.0へ引き上げ〉と食い違うと片方だけ古いまま残る事故の温床になっていた)。
+    if (odds === null || !isUsableOdds(odds)) {
       return {
         values: null,
         reason: `馬番${h.umaban}の複勝オッズ下限が欠損または不正な値のため、レース全体のΣ=一定への正規化が崩れる(oddsStatus="yoso"では常にこの経路に入る)`,
@@ -549,4 +559,397 @@ export function computeTrioAllPointEvOverPayoutRate(
     diagnostics,
     reason: null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// (5) 二値事象の Brier スコアと Murphy 分解(#41「#35-1b」。着順が必要な唯一の指標群)
+// ---------------------------------------------------------------------------
+
+/** 1頭分の観測: 予測確率と、その事象(3着以内)が実際に起きたか。 */
+export interface BrierObservation {
+  readonly probability: number;
+  readonly occurred: boolean;
+}
+
+/**
+ * Brier 系関数の入力検証。**範囲外の確率はクリップせず弾く**(`computeMarketImpliedPlaceProbabilities`
+ * のΣ=3正規化後に1を超えうる市場含意確率を黙って1へ丸めると、分解の前提が崩れたデータが
+ * もっともらしい数値に化ける。呼び出し側がレース単位で市場比較から除外する)。
+ */
+function findInvalidBrierObservationReason(
+  observations: readonly BrierObservation[],
+): string | null {
+  if (observations.length === 0) {
+    return "観測が0件";
+  }
+  for (let i = 0; i < observations.length; i++) {
+    const o = observations[i]!;
+    if (!Number.isFinite(o.probability) || o.probability < 0 || o.probability > 1) {
+      return `${i + 1}番目の確率が不正(NaN・Infinity・負値・1超のいずれか。値=${String(o.probability)})`;
+    }
+    if (typeof o.occurred !== "boolean") {
+      return `${i + 1}番目の結果が真偽値でない`;
+    }
+  }
+  return null;
+}
+
+/** Brier スコア(確率と結果{0,1}の二乗誤差の平均)。小さいほど良い。 */
+export function computeBrierScore(observations: readonly BrierObservation[]): NullableMetric {
+  const invalid = findInvalidBrierObservationReason(observations);
+  if (invalid !== null) {
+    return metricNull(invalid);
+  }
+  let sum = 0;
+  for (const o of observations) {
+    sum += (o.probability - (o.occurred ? 1 : 0)) ** 2;
+  }
+  return metricOk(sum / observations.length);
+}
+
+/**
+ * Brier skill score `1 − BS_model / BS_reference`。0=基準と同等、正=基準より良い、負=基準より悪い。
+ * 基準の Brier が0(ゼロ除算)・非有限・負のときは `null`。
+ */
+export function brierSkillScore(modelBrier: number, referenceBrier: number): NullableMetric {
+  if (!Number.isFinite(modelBrier) || modelBrier < 0) {
+    return metricNull("モデルの Brier が非有限または負");
+  }
+  if (!Number.isFinite(referenceBrier) || referenceBrier < 0) {
+    return metricNull("基準の Brier が非有限または負");
+  }
+  if (referenceBrier === 0) {
+    return metricNull("基準の Brier が0(ゼロ除算)");
+  }
+  return metricOk(1 - modelBrier / referenceBrier);
+}
+
+/** Murphy 分解の1帯分(検証画面のキャリブレーション帯と同じ境界)。 */
+export interface BrierBinSummary {
+  readonly lowerBound: number;
+  readonly upperBound: number;
+  readonly count: number;
+  /** 帯内の予測確率の平均。件数0なら null。 */
+  readonly meanForecast: number | null;
+  /** 帯内の実際の発生率。件数0なら null(0 と書いて「的中率0%」と誤読させない)。 */
+  readonly observedRate: number | null;
+}
+
+/**
+ * Murphy 分解の結果。**帯で丸めた分解は `BS = REL − RES + UNC` が近似でしか成り立たない**
+ * (帯の中で予測確率が一様でないため)。厳密な恒等式は
+ * `BS = REL − RES + UNC + withinBinResidual`、`withinBinResidual = withinBinVariance − 2×withinBinCovariance`。
+ * 残差の2項は REL/RES/UNC とは独立に算出する(BS からの逆算にすると恒等式の検査が循環する)。
+ * **`withinBinResidual` は「帯内分散」ではない**(帯内の予測と結果の共分散を含み、負にもなる)。
+ */
+export interface BrierDecomposition {
+  readonly n: number;
+  /** Brier スコア(直接平均。分解の各項からは作っていない)。 */
+  readonly brier: number;
+  /** 全体の発生率 ō。 */
+  readonly baseRate: number;
+  /** 信頼性(小さいほど良い): Σ n_k (p̄_k − ō_k)² / n。 */
+  readonly reliability: number;
+  /** 分離性・識別力(大きいほど良い): Σ n_k (ō_k − ō)² / n。 */
+  readonly resolution: number;
+  /** 不確実性: ō(1−ō)。予測に依らない。 */
+  readonly uncertainty: number;
+  /** 帯内の予測確率の分散(Σ_k Σ_i∈k (p_i − p̄_k)² / n)。 */
+  readonly withinBinVariance: number;
+  /** 帯内の予測と結果の共分散(Σ_k Σ_i∈k (p_i − p̄_k)(o_i − ō_k) / n)。 */
+  readonly withinBinCovariance: number;
+  /** 帯丸めの残差 = withinBinVariance − 2×withinBinCovariance。 */
+  readonly withinBinResidual: number;
+  readonly bins: readonly BrierBinSummary[];
+}
+
+/** 判別共用体(`{decomposition:null, reason:null}` を型で構築不能にする)。 */
+export type BrierDecompositionResult =
+  | { readonly decomposition: BrierDecomposition; readonly reason: null }
+  | { readonly decomposition: null; readonly reason: string };
+
+/**
+ * 二値事象の Brier スコアを Murphy 分解する。帯は検証画面のキャリブレーションと同じ
+ * (`calibration-bins.ts` の `binIndexFor` を共有する。**同じ帯数を渡せば**検証画面と同じ帯になる。
+ * 既定は `DEFAULT_QUALITY_BIN_COUNT`=10帯で、検証画面の既定〈20帯〉とは別。#37)。
+ */
+export function computeBrierDecomposition(
+  observations: readonly BrierObservation[],
+  binCount: number = DEFAULT_QUALITY_BIN_COUNT,
+): BrierDecompositionResult {
+  if (!Number.isInteger(binCount) || binCount < 1) {
+    return { decomposition: null, reason: `帯数が正の整数でない(値=${String(binCount)})` };
+  }
+  const invalid = findInvalidBrierObservationReason(observations);
+  if (invalid !== null) {
+    return { decomposition: null, reason: invalid };
+  }
+  const n = observations.length;
+
+  const counts = new Array<number>(binCount).fill(0);
+  const sumP = new Array<number>(binCount).fill(0);
+  const sumO = new Array<number>(binCount).fill(0);
+  let sumOutcome = 0;
+  let sumSquaredError = 0;
+  for (const o of observations) {
+    const k = binIndexFor(o.probability, binCount);
+    const outcome = o.occurred ? 1 : 0;
+    counts[k]! += 1;
+    sumP[k]! += o.probability;
+    sumO[k]! += outcome;
+    sumOutcome += outcome;
+    sumSquaredError += (o.probability - outcome) ** 2;
+  }
+  const baseRate = sumOutcome / n;
+
+  let reliability = 0;
+  let resolution = 0;
+  for (let k = 0; k < binCount; k++) {
+    const nk = counts[k]!;
+    if (nk === 0) {
+      continue;
+    }
+    const meanP = sumP[k]! / nk;
+    const rateK = sumO[k]! / nk;
+    reliability += (nk * (meanP - rateK) ** 2) / n;
+    resolution += (nk * (rateK - baseRate) ** 2) / n;
+  }
+
+  // 残差の2項(帯平均まわりの偏差から独立に集計する。REL/RES/BS を再利用しない)。
+  let varianceSum = 0;
+  let covarianceSum = 0;
+  for (const o of observations) {
+    const k = binIndexFor(o.probability, binCount);
+    const meanP = sumP[k]! / counts[k]!;
+    const rateK = sumO[k]! / counts[k]!;
+    varianceSum += (o.probability - meanP) ** 2;
+    covarianceSum += (o.probability - meanP) * ((o.occurred ? 1 : 0) - rateK);
+  }
+  const withinBinVariance = varianceSum / n;
+  const withinBinCovariance = covarianceSum / n;
+
+  const bins: BrierBinSummary[] = [];
+  for (let k = 0; k < binCount; k++) {
+    const nk = counts[k]!;
+    bins.push({
+      ...calibrationBinBounds(k, binCount),
+      count: nk,
+      meanForecast: nk === 0 ? null : sumP[k]! / nk,
+      observedRate: nk === 0 ? null : sumO[k]! / nk,
+    });
+  }
+
+  return {
+    decomposition: {
+      n,
+      brier: sumSquaredError / n,
+      baseRate,
+      reliability,
+      resolution,
+      uncertainty: baseRate * (1 - baseRate),
+      withinBinVariance,
+      withinBinCovariance,
+      withinBinResidual: withinBinVariance - 2 * withinBinCovariance,
+      bins,
+    },
+    reason: null,
+  };
+}
+
+/** 1レース分の二乗誤差の合計(モデルと市場)。レース単位ブートストラップの再標本単位。 */
+export interface RaceSquaredErrorPair {
+  /** そのレースの観測頭数。 */
+  readonly count: number;
+  /** Σ (モデル確率 − 結果)²。 */
+  readonly modelSse: number;
+  /** Σ (市場確率 − 結果)²。 */
+  readonly marketSse: number;
+}
+
+export interface BootstrapOptions {
+  readonly iterations: number;
+  readonly seed: number;
+}
+
+/** ブートストラップ結果。点推定・区間・条件(反復回数・シード・レース数)を必ず同梱する。 */
+export type BrierDifferenceBootstrapResult =
+  | {
+      /** 観測値: (Σmodel_sse − Σmarket_sse) / Σcount。正ならモデルの方が悪い。 */
+      readonly value: number;
+      /** 95%区間(パーセンタイル法 2.5% / 97.5%)。 */
+      readonly lower: number;
+      readonly upper: number;
+      readonly iterations: number;
+      readonly seed: number;
+      readonly raceCount: number;
+      readonly reason: null;
+    }
+  | {
+      readonly value: null;
+      readonly lower: null;
+      readonly upper: null;
+      readonly iterations: number;
+      readonly seed: number;
+      readonly raceCount: number;
+      readonly reason: string;
+    };
+
+/** 決定論的な擬似乱数 mulberry32。 */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * モデルと市場の Brier 差(model − market)の95%区間を、**レース単位**の再標本化(復元抽出)で求める。
+ * 同一レースの馬は Σ=3 の制約で互いに独立でないため、馬ではなくレースを再標本単位にする。
+ * シードと反復回数は呼び出し側が固定する(取得前の分析計画に固定する)。
+ */
+export function bootstrapBrierDifferenceByRace(
+  pairs: readonly RaceSquaredErrorPair[],
+  options: BootstrapOptions,
+): BrierDifferenceBootstrapResult {
+  const { iterations, seed } = options;
+  const raceCount = pairs.length;
+  const fail = (reason: string): BrierDifferenceBootstrapResult => ({
+    value: null,
+    lower: null,
+    upper: null,
+    iterations,
+    seed,
+    raceCount,
+    reason,
+  });
+  if (!Number.isInteger(iterations) || iterations < 1) {
+    return fail(`反復回数が正の整数でない(値=${String(iterations)})`);
+  }
+  if (!Number.isFinite(seed)) {
+    return fail("シードが非有限");
+  }
+  if (raceCount < 2) {
+    return fail("レースが2件未満(再標本化しても区間が定義できない)");
+  }
+  for (let i = 0; i < raceCount; i++) {
+    const p = pairs[i]!;
+    if (!Number.isInteger(p.count) || p.count < 1) {
+      return fail(`${i + 1}番目のレースの頭数が1以上の整数でない`);
+    }
+    if (!Number.isFinite(p.modelSse) || !Number.isFinite(p.marketSse) || p.modelSse < 0 || p.marketSse < 0) {
+      return fail(`${i + 1}番目のレースの二乗誤差が非有限または負`);
+    }
+  }
+
+  const totalCount = pairs.reduce((s, p) => s + p.count, 0);
+  const observed = pairs.reduce((s, p) => s + (p.modelSse - p.marketSse), 0) / totalCount;
+
+  const rand = mulberry32(seed);
+  const stats = new Array<number>(iterations);
+  for (let it = 0; it < iterations; it++) {
+    let diffSum = 0;
+    let countSum = 0;
+    for (let j = 0; j < raceCount; j++) {
+      const p = pairs[Math.floor(rand() * raceCount)]!;
+      diffSum += p.modelSse - p.marketSse;
+      countSum += p.count;
+    }
+    stats[it] = diffSum / countSum;
+  }
+  stats.sort((a, b) => a - b);
+  const lower = stats[Math.floor(iterations * 0.025)]!;
+  const upper = stats[Math.ceil(iterations * 0.975) - 1]!;
+  return { value: observed, lower, upper, iterations, seed, raceCount, reason: null };
+}
+
+/** resolution の参照値(レース内ラベル並べ替え)の結果。 */
+export type PermutationResolutionResult =
+  | {
+      /** 並べ替え後の resolution の平均。 */
+      readonly mean: number;
+      /** 並べ替え後の resolution の95パーセンタイル。 */
+      readonly p95: number;
+      readonly iterations: number;
+      readonly seed: number;
+      readonly raceCount: number;
+      readonly reason: null;
+    }
+  | {
+      readonly mean: null;
+      readonly p95: null;
+      readonly iterations: number;
+      readonly seed: number;
+      readonly raceCount: number;
+      readonly reason: string;
+    };
+
+/**
+ * resolution の参照値(null 分布)を、**各レース内で結果(3着以内か)の割り当てを並べ替える**ことで求める。
+ * 各レースの的中頭数は保たれる。小標本では識別力が無くても resolution は正に偏るため、
+ * 「resolution が0に近いか」を、この参照値と並べて読む。頭数による3着以内の確率の違い
+ * (`3/頭数`)は並べ替えが保つので参照値に含まれる。したがって参照値を超える部分が
+ * レース内の識別力に当たる。シードと反復回数は呼び出し側が固定する。
+ */
+export function withinRacePermutationResolution(
+  races: readonly (readonly BrierObservation[])[],
+  options: BootstrapOptions,
+  binCount: number = DEFAULT_QUALITY_BIN_COUNT,
+): PermutationResolutionResult {
+  const { iterations, seed } = options;
+  const raceCount = races.length;
+  const fail = (reason: string): PermutationResolutionResult => ({
+    mean: null,
+    p95: null,
+    iterations,
+    seed,
+    raceCount,
+    reason,
+  });
+  if (!Number.isInteger(iterations) || iterations < 1) {
+    return fail(`反復回数が正の整数でない(値=${String(iterations)})`);
+  }
+  if (!Number.isFinite(seed)) {
+    return fail("シードが非有限");
+  }
+  if (raceCount === 0) {
+    return fail("レースが0件");
+  }
+  for (let i = 0; i < raceCount; i++) {
+    const invalid = findInvalidBrierObservationReason(races[i]!);
+    if (invalid !== null) {
+      return fail(`${i + 1}番目のレース: ${invalid}`);
+    }
+  }
+  const baseline = computeBrierDecomposition(races.flat(), binCount);
+  if (baseline.decomposition === null) {
+    return fail(baseline.reason);
+  }
+
+  const rand = mulberry32(seed);
+  const values = new Array<number>(iterations);
+  for (let it = 0; it < iterations; it++) {
+    const shuffled: BrierObservation[] = [];
+    for (const race of races) {
+      // Fisher-Yates でレース内の結果を並べ替える(予測確率は動かさない)。
+      const outcomes = race.map((o) => o.occurred);
+      for (let i = outcomes.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        const tmp = outcomes[i]!;
+        outcomes[i] = outcomes[j]!;
+        outcomes[j] = tmp;
+      }
+      race.forEach((o, i) => {
+        shuffled.push({ probability: o.probability, occurred: outcomes[i]! });
+      });
+    }
+    values[it] = computeBrierDecomposition(shuffled, binCount).decomposition!.resolution;
+  }
+  const mean = values.reduce((s, v) => s + v, 0) / iterations;
+  values.sort((a, b) => a - b);
+  const p95 = values[Math.ceil(iterations * 0.95) - 1]!;
+  return { mean, p95, iterations, seed, raceCount, reason: null };
 }

@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202630093003",
+  "region": "nar",
+  "requestedDate": "20260930",
+  "kaisaiDate": "20260930",
+  "venueCode": "30",
+  "raceNumber": 3,
+  "raceName": "3歳以上 C4ー3",
+  "listedEntryCount": 9,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1000,
+  "runnerCount": 9,
+  "placedCount": 3,
+  "oddsStatus": "middle",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "スウィンドル",
+      "prior": 0.47036139583734027,
+      "placeOddsMin": 1,
+      "placeOddsMax": 1.1,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 28
+    },
+    {
+      "umaban": 2,
+      "horseName": "ヤマトノヒカリ",
+      "prior": 0.35673414616652316,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.8,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 66
+    },
+    {
+      "umaban": 3,
+      "horseName": "キョウエイボンバー",
+      "prior": 0.3721037780145519,
+      "placeOddsMin": 2.8,
+      "placeOddsMax": 5.5,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 48
+    },
+    {
+      "umaban": 4,
+      "horseName": "フークストロンガー",
+      "prior": 0.30092567031572265,
+      "placeOddsMin": 5.9,
+      "placeOddsMax": 11.9,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 5,
+      "horseName": "ダイメイゼット",
+      "prior": 0.3577345222904528,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.9,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 36
+    },
+    {
+      "umaban": 6,
+      "horseName": "ベルトモ",
+      "prior": 0.4448047749154306,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 2.3,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 17
+    },
+    {
+      "umaban": 7,
+      "horseName": "タイセツオー",
+      "prior": 0.405595239292643,
+      "placeOddsMin": 2,
+      "placeOddsMax": 3.8,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 82
+    },
+    {
+      "umaban": 8,
+      "horseName": "キタノシュナイダー",
+      "prior": 0.26986256396912134,
+      "placeOddsMin": 2.1,
+      "placeOddsMax": 4.1,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 20
+    },
+    {
+      "umaban": 9,
+      "horseName": "ハタノイチバンボシ",
+      "prior": 0.2524282678463006,
+      "placeOddsMin": 24.8,
+      "placeOddsMax": 50.6,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 70
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/30",
+      "totalResultCount": 381,
+      "removedCount": 9,
+      "removedByCutoffCount": 9,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:43:02.730Z"
+}

@@ -2,16 +2,22 @@
  * fetch-combo-odds — 組合せオッズ(ワイド・3連複)取得のオーケストレーション層
  * (機能D-2b-B・Issue #33第3段。boss着手前ゲート2026-08-07裁定)。
  *
- * `HttpClient`(構造的に互換な最小フェッチャ)を受け取り、中央/地方 × ワイド/三連複の
- * 4経路を束ねて「成否と診断値」を返す純粋な取得層。**`OddsSnapshot`拡張・`scrapeRace`配線
+ * `HttpClient`(構造的に互換な最小フェッチャ)を受け取り、中央/地方 × 券種の各経路
+ * (下記「## 経路」参照)を束ねて「成否と診断値」を返す純粋な取得層。**`OddsSnapshot`拡張・`scrapeRace`配線
  * (第4段のスコープ)には一切触れない**。`scraper/`配下の葉モジュール(`scrape-race.ts`)を
  * importすると層依存が逆流するため、フェッチャの型もローカルに独立定義する
  * (`ScrapeWarning`/`ScrapeWarningKind`の生成・拡張も第4段の責務)。
  *
- * ## 4経路
- * - 中央ワイド/3連複: `wideOddsApiUrl`/`trioOddsApiUrl` を1リクエスト → `parseComboOdds`
- * - 地方ワイド: `narWideOddsPageUrl` を1リクエスト → `parseNarComboOdds`
+ * ## 経路(中央・地方 × 単発リクエスト/軸走査で分岐する。券種が増えるたびに厳密な本数を
+ * 書き直さずに済むよう、ここでは形で分類する。個々のURL関数は`urls.ts`参照)
+ * - 中央(ワイド/3連複/馬単/馬連): `wideOddsApiUrl`/`trioOddsApiUrl`/`exactaOddsApiUrl`/
+ *   `quinellaOddsApiUrl` を各1リクエスト → `parseComboOdds`
+ * - 地方(ワイド/馬単/馬連): `narWideOddsPageUrl`/`narExactaOddsPageUrl`/
+ *   `narQuinellaOddsPageUrl` を各1リクエスト → `parseNarComboOdds`
  *   (軸馬別の制限を受けない。`urls.ts`のJSDoc参照)
+ * - 枠連(Issue #143・#26-D): 中央 `bracketQuinellaOddsApiUrl`・地方 `narBracketQuinellaOddsPageUrl`
+ *   を各1リクエスト。ただし期待組合せ数が出走馬番ではなく枠の構成で決まるため、`fetchComboOdds`
+ *   ではなく別関数 `fetchBracketQuinellaOdds` から呼ぶ(`fetchComboOdds` に渡すと throw)
  * - 地方3連複: `deriveNarTrioAxisUmabans` で軸集合を導出し、各軸に `narTrioOddsAxisUrl` を
  *   1リクエストずつ直列に発行 → `parseNarComboOdds` → `mergeAxisComboOddsMaps` でマージ
  *
@@ -71,9 +77,11 @@
  * | 軸間の同一キーの値(**衝突**) | `mergeAxisComboOddsMaps`(`combo-odds-key.ts`) | あり | 分類+保守側採用(`null`<小<大。throwしない) | #14の下限採用と同じ保守方針。合成データでテスト(`combo-odds-key.test.ts`) |
  */
 
-import type { CachedFetchTextOptions } from "./cache.js";
+import type { CachedFetchTextOptions } from "./cached-fetcher.js";
 import {
+  COMBO_KEY_ORDER,
   COMBO_SIZE,
+  MAX_WAKUBAN,
   mergeAxisComboOddsMaps,
   type AxisComboOddsMap,
   type ComboBetType,
@@ -92,8 +100,16 @@ import {
   type NarComboOddsUnavailableReason,
 } from "./parse-nar-combo-odds.js";
 import {
+  bracketQuinellaOddsApiUrl,
+  exactaOddsApiUrl,
+  narBracketQuinellaOddsPageUrl,
+  narExactaOddsPageUrl,
+  narQuinellaOddsPageUrl,
+  narTrifectaOddsAxisUrl,
   narTrioOddsAxisUrl,
   narWideOddsPageUrl,
+  quinellaOddsApiUrl,
+  trifectaOddsApiUrl,
   trioOddsApiUrl,
   wideOddsApiUrl,
 } from "./urls.js";
@@ -131,7 +147,12 @@ export interface ComboOddsFetchDiagnostics {
   readonly betType: ComboBetType;
   /** 発行したHTTPリクエスト数。 */
   readonly requestCount: number;
-  /** 出走馬番から導出した期待組合せ数(ワイド: C(n,2)、3連複: C(n,3))。 */
+  /**
+   * 期待組合せ数(ワイド: C(n,2)、3連複: C(n,3)、馬単: P(n,2)。nは出走馬番の頭数。
+   * Issue #106・#24-B: 馬単は着順が意味を持つため組合せではなく順列で計算する。
+   * 枠連は頭数ではなく枠の構成から C(相異なる枠の数,2) + (2頭以上いる枠の数)。
+   * Issue #143・#26-D)。
+   */
   readonly expectedComboCount: number;
   /** マージ後に実際に得られた組合せ数。 */
   readonly obtainedComboCount: number;
@@ -171,7 +192,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 組合せ数 C(n, r) を計算する(n<r または r<0 は0件)。 */
+/** 組合せ数 C(n, r) を計算する(n<r または r<0 は0件)。**順不同の券種(ワイド・3連複)専用**。 */
 function combinationCount(n: number, r: number): number {
   if (r < 0 || n < r) return 0;
   let result = 1;
@@ -179,6 +200,63 @@ function combinationCount(n: number, r: number): number {
     result = (result * (n - i)) / (i + 1);
   }
   return Math.round(result);
+}
+
+/**
+ * 順列数 P(n, r) = n!/(n-r)! を計算する(n<r または r<0 は0件)。**着順が意味を持つ券種
+ * (馬単)専用**(Issue #106・#24-B)。
+ *
+ * ワイド・3連複は「組」(順不同)なのでC(n,r)だが、馬単は「並び」(1着・2着の順序が
+ * 別の買い目)なのでP(n,r)=C(n,r)×r!になる(r=2なら2倍)。実測: 16頭の馬単で
+ * P(16,2)=240件全順列が1リクエストで返る(`urls.ts`の`exactaOddsApiUrl`JSDoc参照。
+ * 誤ってC(16,2)=120を使うと、実際には240件取得できているのに120件を「期待超過」と
+ * 誤診断する〈着手前ゲートで発見〉)。
+ */
+function permutationCount(n: number, r: number): number {
+  if (r < 0 || n < r) return 0;
+  let result = 1;
+  for (let i = 0; i < r; i++) {
+    result *= n - i;
+  }
+  return result;
+}
+
+/** betTypeの順序方針に応じてC(n,r)/P(n,r)を振り分ける(Issue #106・#24-B)。 */
+function expectedCountFor(betType: ComboBetType, n: number, r: number): number {
+  return COMBO_KEY_ORDER[betType] === "ordered" ? permutationCount(n, r) : combinationCount(n, r);
+}
+
+/**
+ * 出走馬番から期待組合せ数を導出する(枠連以外。`fetchComboOdds`の経路が使う)。
+ * 頭数nは重複を除いた出走馬番の数で、`expectedCountFor`にbetTypeの構成頭数を渡す。
+ */
+function expectedCountForUmabans(betType: ComboBetType, startingUmabans: readonly number[]): number {
+  return expectedCountFor(betType, new Set(startingUmabans).size, COMBO_SIZE[betType]);
+}
+
+/**
+ * 枠連(bracketQuinella)の期待組合せ数を、出走馬の枠番の多重集合(馬ごとの枠番の並び)から
+ * 導出する(Issue #143・#26-D)。
+ *
+ * 式は **C(相異なる枠の数,2) + (2頭以上いる枠の数)** (`docs/wakuren-odds-investigation.md`
+ * §2.2)。枠連の組合せは馬番ではなく枠番で、異なる2枠の組合せに加え、**2頭以上が入る枠に
+ * 限り**同枠(`AA-AA`)が加わる(1頭だけの枠には同枠の買い目が無い)。頭数nではなく枠の構成で
+ * 決まるため、順不同の馬番の組に使う`expectedCountFor`(C(n,r)/P(n,r))とは別の関数にした。
+ *
+ * 実測との対応: 16頭(8枠すべて2頭)=28+8=36、10頭(7・8枠のみ2頭)=28+2=30、9頭(8枠のみ2頭)=29、
+ * 地方12頭=32、地方9頭=29(`fetch-combo-odds.test.ts`が製品コード経由で固定)。
+ * 出走取消で枠の構成が変わると期待数もずれる(診断値のみで、EVには影響しない。既存券種と同じ限界)。
+ *
+ * @param startingWakubans 出走馬ごとの枠番(順不同・重複あり。1頭につき1要素)。値の範囲検証は
+ *   呼び出し元(`fetchBracketQuinellaOdds`)が行う(この関数は純粋な数え上げ)。
+ */
+export function expectedBracketQuinellaComboCount(startingWakubans: readonly number[]): number {
+  const horsesPerFrame = new Map<number, number>();
+  for (const w of startingWakubans) {
+    horsesPerFrame.set(w, (horsesPerFrame.get(w) ?? 0) + 1);
+  }
+  const sameFrameCount = [...horsesPerFrame.values()].filter((n) => n >= 2).length;
+  return combinationCount(horsesPerFrame.size, 2) + sameFrameCount;
 }
 
 /**
@@ -199,18 +277,20 @@ function determineState(
   return "failed";
 }
 
-/** 診断値を組み立てる(中央・地方ワイド〈単発〉・地方3連複〈軸走査〉で共有)。 */
+/**
+ * 診断値を組み立てる(中央・地方ワイド〈単発〉・地方3連複〈軸走査〉・枠連で共有)。
+ * 期待組合せ数は呼び出し元が導出して渡す(Issue #143・#26-D: 枠連は頭数ではなく枠の構成で
+ * 決まるため、出走馬番からの導出をここに持たない)。
+ */
 function buildResult(
   betType: ComboBetType,
-  startingUmabans: readonly number[],
+  expectedComboCount: number,
   requestCount: number,
   axisUmabans: readonly number[],
   attempts: readonly ComboOddsFetchAttempt[],
   odds: ReadonlyMap<string, ComboOddsCell>,
   conflicts: readonly ComboOddsCellConflict[],
 ): ComboOddsFetchResult {
-  const n = new Set(startingUmabans).size;
-  const expectedComboCount = combinationCount(n, COMBO_SIZE[betType]);
   const obtainedComboCount = odds.size;
   const missingComboCount = Math.max(0, expectedComboCount - obtainedComboCount);
   const numericConflictCount = conflicts.filter((c) => c.kind === "numeric").length;
@@ -236,20 +316,90 @@ function buildResult(
   };
 }
 
-/** 中央ワイド/3連複・地方ワイド(いずれも1リクエストで完結)を取得する。 */
+/**
+ * 単発リクエストで完結する経路(中央ワイド/3連複/馬単/馬連/三連単/枠連・地方ワイド/馬単/馬連/枠連)のURLを選ぶ
+ * (Issue #106・#24-B: 馬単を追加した際、既存の`betType === "wide" ? ... : trioOddsApiUrl`
+ * という2値三項演算子に馬単を追加せず、3連複用URLを誤って使ってしまう欠陥が着手前ゲートで
+ * 見つかった。網羅的なswitchにして同種の欠陥を再発させない)。
+ *
+ * 地方3連複は軸馬別取得が必要なため単発リクエストでは扱えず、呼び出し元
+ * (`fetchComboOdds`)が`isNar && betType === "trio"`を`fetchNarTrioComboOdds`へ
+ * 別途分岐している。したがってこの関数に`isNar=true, betType="trio"`が渡ることは
+ * production からは到達しない(呼び出し元の不変条件が壊れた場合の検出用にthrowする)。
+ */
+function comboOddsUrlFor(raceId: RaceId, betType: ComboBetType, isNar: boolean): string {
+  if (isNar) {
+    switch (betType) {
+      case "wide":
+        return narWideOddsPageUrl(raceId);
+      case "exacta":
+        return narExactaOddsPageUrl(raceId);
+      case "quinella":
+        return narQuinellaOddsPageUrl(raceId);
+      case "bracketQuinella":
+        return narBracketQuinellaOddsPageUrl(raceId);
+      case "trio":
+        throw new Error(
+          "地方3連複は単発リクエストでは扱えません(呼び出し元はfetchNarTrioComboOddsへ分岐すること)",
+        );
+      case "trifecta":
+        // 地方三連単も3連複と同じく軸馬別取得が必要で単発リクエストでは扱えない(Issue #130・
+        // #25-D)。ただし3連複と異なり、本Issueでは全軸を回すオーケストレーション関数
+        // (fetchNarTrioComboOdds相当)を作らない(オーケストレーター裁定Q2)ため、呼び出し元
+        // (fetchComboOdds)にtrio用の専用分岐は無く、isNar&&"trifecta"はこの関数まで素通しで
+        // 到達しうる形になっている。
+        //
+        // **Issue #137(#25-E2・ユーザー判断2026-09-27)で「地方の三連単は当面取得しない」と
+        // 確定した。** `scrape-race.ts`は地方(NAR)では`fetchComboBetTypeOdds("trifecta", …)`
+        // 自体を呼ばない(調教と同じ`if (!isNar)`の明示ガード)ため、この`throw`は
+        // **productionからは到達しないガードとして残る**(#130時点の「#132で配線する際は
+        // 1軸単位のfetchNarTrifectaAxisOddsへ分岐させる必要がある」という記述は、地方対応
+        // そのものを当面行わないと決めたことで前提が変わった。将来もし地方三連単を
+        // 実装することになれば、そのときは呼び出し元〈fetchComboOdds〉にtrio用と同型の
+        // 専用分岐を追加し、1軸単位の`fetchNarTrifectaAxisOdds`〈#130で実装済み〉を使うこと)。
+        throw new Error(
+          "地方三連単は単発リクエストでは扱えません(1軸単位のfetchNarTrifectaAxisOddsを使うこと。地方三連単の取得自体は#137〈2026-09-27〉時点で未実装・対応予定なし)",
+        );
+      default: {
+        const exhaustiveCheck: never = betType;
+        throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);
+      }
+    }
+  }
+  switch (betType) {
+    case "wide":
+      return wideOddsApiUrl(raceId);
+    case "trio":
+      return trioOddsApiUrl(raceId);
+    case "exacta":
+      return exactaOddsApiUrl(raceId);
+    case "quinella":
+      return quinellaOddsApiUrl(raceId);
+    case "trifecta":
+      return trifectaOddsApiUrl(raceId);
+    case "bracketQuinella":
+      return bracketQuinellaOddsApiUrl(raceId);
+    default: {
+      const exhaustiveCheck: never = betType;
+      throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);
+    }
+  }
+}
+
+/**
+ * 単発リクエストで完結する経路(中央ワイド/3連複/馬単/馬連/三連単/枠連・地方ワイド/馬単/馬連/枠連)を取得する
+ * (URLの選択は`comboOddsUrlFor`に委譲する。地方3連複は軸馬別取得が必要なため対象外
+ * 〈呼び出し元`fetchComboOdds`が`fetchNarTrioComboOdds`へ別途分岐する〉)。
+ */
 async function fetchSingleRequestComboOdds(
   raceId: RaceId,
   betType: ComboBetType,
   isNar: boolean,
-  startingUmabans: readonly number[],
+  expectedComboCount: number,
   fetcher: ComboOddsFetcher,
   options: CachedFetchTextOptions,
 ): Promise<ComboOddsFetchResult> {
-  const url = isNar
-    ? narWideOddsPageUrl(raceId)
-    : betType === "wide"
-      ? wideOddsApiUrl(raceId)
-      : trioOddsApiUrl(raceId);
+  const url = comboOddsUrlFor(raceId, betType, isNar);
 
   let attempt: ComboOddsFetchAttempt;
   let odds: ReadonlyMap<string, ComboOddsCell> = new Map();
@@ -271,7 +421,7 @@ async function fetchSingleRequestComboOdds(
     attempt = { axis: null, state: "fetchFailed", message: errorMessage(error) };
   }
 
-  return buildResult(betType, startingUmabans, 1, [], [attempt], odds, []);
+  return buildResult(betType, expectedComboCount, 1, [], [attempt], odds, []);
 }
 
 /**
@@ -330,7 +480,7 @@ async function fetchNarTrioComboOdds(
 
   return buildResult(
     "trio",
-    startingUmabans,
+    expectedCountForUmabans("trio", startingUmabans),
     axisUmabans.length,
     axisUmabans,
     attempts,
@@ -339,11 +489,75 @@ async function fetchNarTrioComboOdds(
   );
 }
 
+/** `fetchNarTrifectaAxisOdds` の戻り値(Issue #130・#25-D Q2裁定)。 */
+export interface NarTrifectaAxisFetchResult {
+  /** その軸の取得試行の結末(`axis`には呼び出し時に指定した軸番号がそのまま入る)。 */
+  readonly attempt: ComboOddsFetchAttempt;
+  /** availableのときのみ組合せを含む(unavailable/fetchFailed/parseErrorのときは空Map)。 */
+  readonly odds: ReadonlyMap<string, ComboOddsCell>;
+}
+
 /**
- * 組合せオッズ(ワイド・3連複)を取得する(中央/地方 × ワイド/3連複の4経路を自動選択)。
+ * 地方三連単オッズを軸(1着の馬番)単位で取得する(Issue #130・#25-D Q2裁定)。
+ *
+ * `fetchNarTrioComboOdds`(3連複。全軸を内部でループし`mergeAxisComboOddsMaps`でマージする
+ * オーケストレーション関数)とは異なり、**1軸ぶんだけを取得する関数**として提供する
+ * (docs/trifecta-odds-investigation.md §9への申し送りどおり、全軸を回すかどうか・
+ * 何軸まで回すかは#132の判断に委ねるため、本Issueでは全軸ループを作らない)。
+ *
+ * 分類ロジック(available/unavailable/fetchFailed/parseError)は`fetchNarTrioComboOdds`の
+ * ループ本体と同じ(Q3裁定「本階層は基本的にthrowしない」を1軸単位でも踏襲する)。
+ * `axis`の契約違反(1〜18の整数でない)は`narTrifectaOddsAxisUrl`自身がHTTP発行前にthrowする
+ * (二層原則の門番側。#132で全軸ループを実装する際は、この関数の呼び出し前に軸集合を
+ * 検証してfail fastする設計〈`fetchNarTrioComboOdds`のAC-6と同じ〉を踏襲すること)。
+ *
+ * @param raceId 対象レースID(地方)
+ * @param axis 軸馬番(1着に固定する馬番。1〜18の整数)
+ * @param fetcher HTTP取得を担うフェッチャ
+ * @param options `maxAgeMs`/`bypassCache`等
+ */
+export async function fetchNarTrifectaAxisOdds(
+  raceId: RaceId,
+  axis: number,
+  fetcher: ComboOddsFetcher,
+  options: CachedFetchTextOptions = {},
+): Promise<NarTrifectaAxisFetchResult> {
+  const url = narTrifectaOddsAxisUrl(raceId, axis); // 契約違反はここでthrow(HTTP発行前)。
+
+  let attempt: ComboOddsFetchAttempt;
+  let odds: ReadonlyMap<string, ComboOddsCell> = new Map();
+
+  try {
+    const text = await fetcher.fetchText(url, options);
+    try {
+      const parsed = parseNarComboOdds(text, "trifecta");
+      if (parsed.state === "available") {
+        odds = parsed.odds;
+        attempt = { axis, state: "available", comboCount: parsed.odds.size };
+      } else {
+        attempt = { axis, state: "unavailable", reason: parsed.reason };
+      }
+    } catch (error) {
+      attempt = { axis, state: "parseError", message: errorMessage(error) };
+    }
+  } catch (error) {
+    attempt = { axis, state: "fetchFailed", message: errorMessage(error) };
+  }
+
+  return { attempt, odds };
+}
+
+/**
+ * 組合せ券種(ワイド・3連複・馬単・馬連・三連単)を取得する(中央/地方 × 券種の経路を自動選択)。
+ * **枠連(bracketQuinella)は対象外**で、渡すとHTTP発行前にthrowする(`fetchBracketQuinellaOdds`を使う。
+ * Issue #143・#26-D)。
  *
  * @param raceId 対象レースID(検証済み。中央/地方は`venueKindOfRaceId`で自動判定)
- * @param betType "wide"(ワイド)または"trio"(3連複)
+ * @param betType "wide"(ワイド)・"trio"(3連複)・"exacta"(馬単。Issue #106・#24-B)・
+ *   "quinella"(馬連。ワイドと同じ単発リクエスト。Issue #113・#24-D2)・"trifecta"
+ *   (三連単。中央は単発リクエストで扱えるが、地方は軸馬別取得が必要で単発では扱えないため
+ *   isNarがtrueの場合はthrowする。地方は`fetchNarTrifectaAxisOdds`を軸ごとに直接使うこと。
+ *   Issue #130・#25-D)
  * @param startingUmabans 出走馬番の集合(順不同・重複ありうる。期待組合せ数の算出・
  *   地方3連複の軸導出に使う。`parseShutuba`の結果由来)
  * @param fetcher HTTP取得を担うフェッチャ(`HttpClient`/`CachedFetcher`のいずれも可)
@@ -356,9 +570,74 @@ export async function fetchComboOdds(
   fetcher: ComboOddsFetcher,
   options: CachedFetchTextOptions = {},
 ): Promise<ComboOddsFetchResult> {
+  if (betType === "bracketQuinella") {
+    // 枠連の期待組合せ数は出走馬番ではなく枠の構成で決まるため、この関数(出走馬番を受け取る)
+    // では扱えない。HTTPを発行する前に失敗させ、`fetchBracketQuinellaOdds`を使わせる
+    // (誤って出走馬番を頭数として渡すと、期待数が静かに誤る。呼び出し元の取り違え=こちら側のバグ)。
+    throw new Error(
+      "枠連はfetchComboOddsでは扱えません(期待組合せ数が枠の構成で決まるため、fetchBracketQuinellaOddsを使うこと)",
+    );
+  }
   const isNar = venueKindOfRaceId(raceId) === "nar";
   if (isNar && betType === "trio") {
     return fetchNarTrioComboOdds(raceId, startingUmabans, fetcher, options);
   }
-  return fetchSingleRequestComboOdds(raceId, betType, isNar, startingUmabans, fetcher, options);
+  return fetchSingleRequestComboOdds(
+    raceId,
+    betType,
+    isNar,
+    expectedCountForUmabans(betType, startingUmabans),
+    fetcher,
+    options,
+  );
+}
+
+/**
+ * 枠連オッズを取得する(中央・地方とも1リクエスト。Issue #143・#26-D)。
+ *
+ * `fetchComboOdds`(出走馬番を受け取る)とは別関数にした理由: 枠連の期待組合せ数は頭数ではなく
+ * 出走馬の**枠番の構成**で決まる(`expectedBracketQuinellaComboCount`参照)。取得・分類の
+ * 本体(`fetchSingleRequestComboOdds`)は他の単発券種と共有し、URL選択は`comboOddsUrlFor`
+ * (中央: type=3のJSON API、地方: type=b3の静的HTML。軸馬別取得は不要)、パースは
+ * `parseComboOdds`/`parseNarComboOdds`に委譲する。Q3裁定(基本的にthrowしない。HTTP失敗・
+ * パース例外は診断値に分類する)も同じ。
+ *
+ * 頭数不足(8頭以下)のレースの応答は、中央は封筒`NG`(presaleと区別できない)、地方は全セルが
+ * `0.0`のページで、どちらも`state:"unavailable"`になる(パーサ側の扱い。
+ * `docs/wakuren-odds-investigation.md` §6)。
+ *
+ * **契約違反はHTTP発行前にthrowする**: `startingWakubans`に1〜8の整数でない値があるのは
+ * 外部データの異常ではなくこちら側のバグ(`parseShutuba`が枠番を1〜8で検証済み)。
+ * **`scrapeRace`からの呼び出しはIssue #148(#26-E2)で配線した**(`scrape-race.ts`の
+ * `fetchBracketQuinellaOutcome`。他の組合せ券種の後、中央・地方とも1レースあたり1リクエスト)。
+ *
+ * @param raceId 対象レースID(中央/地方は`venueKindOfRaceId`で自動判定)
+ * @param startingWakubans 出走馬ごとの枠番(1頭につき1要素。順不同・重複あり。
+ *   `parseShutuba`の`horses[].wakuban`由来)
+ * @param fetcher HTTP取得を担うフェッチャ
+ * @param options `maxAgeMs`/`bypassCache`等
+ */
+export async function fetchBracketQuinellaOdds(
+  raceId: RaceId,
+  startingWakubans: readonly number[],
+  fetcher: ComboOddsFetcher,
+  options: CachedFetchTextOptions = {},
+): Promise<ComboOddsFetchResult> {
+  // HTTP発行前にfail fast(値の範囲検証は`validateWakubanCombo`の要素検証と同じ基準)。
+  for (const w of startingWakubans) {
+    if (!Number.isInteger(w) || w < 1 || w > MAX_WAKUBAN) {
+      throw new Error(
+        `出走馬の枠番は1〜${MAX_WAKUBAN}の整数である必要があります(startingWakubans=${startingWakubans.join(",")}, 不正な値=${w})`,
+      );
+    }
+  }
+  const isNar = venueKindOfRaceId(raceId) === "nar";
+  return fetchSingleRequestComboOdds(
+    raceId,
+    "bracketQuinella",
+    isNar,
+    expectedBracketQuinellaComboCount(startingWakubans),
+    fetcher,
+    options,
+  );
 }

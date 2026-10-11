@@ -23,11 +23,15 @@ import {
   analyzeRace,
   FALLBACK_REASON_INVOCATION_ERROR,
   FALLBACK_REASON_PARSE_ERROR,
+  FALLBACK_REASON_REFUSED,
   FALLBACK_REASON_TRUNCATED,
 } from "../../src/analyzer/analyze-race.js";
 import type { LlmClient } from "../../src/analyzer/analyze-race.js";
 import type { BuildPromptInput } from "../../src/analyzer/build-prompt.js";
-import { AnalyzerTruncationError } from "../../src/analyzer/parse-response.js";
+import {
+  AnalyzerRefusalError,
+  AnalyzerTruncationError,
+} from "../../src/analyzer/parse-response.js";
 
 function input(): BuildPromptInput {
   return {
@@ -451,5 +455,201 @@ describe("analyzeRace(A: 印関連違反時のフォールバック分離・確�
     expect(r.marksDropped).toBe(false);
     expect(r.retryCount).toBe(1);
     expect(r.horses.find((h) => h.umaban === 3)!.mark).toBe("◎");
+  });
+});
+
+describe("analyzeRace(拒否 stop_reason='refusal'・Issue #157)", () => {
+  it("拒否(AnalyzerRefusalError)2回: fallback:true・拒否用の固定文言・truncated:false・stopReason='refusal' で prior を採用すること", async () => {
+    const llm: LlmClient = {
+      complete: vi.fn(async () => {
+        throw new AnalyzerRefusalError("LLMが応答を拒否しました", "refusal");
+      }),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(llm.complete).toHaveBeenCalledTimes(2);
+    expect(r.retryCount).toBe(1);
+    expect(r.fallbackReason).toBe(FALLBACK_REASON_REFUSED);
+    expect(r.truncated).toBe(false);
+    expect(r.stopReason).toBe("refusal");
+    expect(r.marksDropped).toBe(false);
+    expect(r.rawResponse).toBeNull();
+    expect(r.horses.every((h) => h.usedPrior)).toBe(true);
+    expect(r.horses.every((h) => h.mark === null)).toBe(true);
+  });
+
+  it("拒否の固定文言は切り詰め・汎用パース失敗・呼び出し失敗のいずれとも異なること(振り分けの取り違え防止)", () => {
+    expect(FALLBACK_REASON_REFUSED).not.toBe(FALLBACK_REASON_TRUNCATED);
+    expect(FALLBACK_REASON_REFUSED).not.toBe(FALLBACK_REASON_PARSE_ERROR);
+    expect(FALLBACK_REASON_REFUSED).not.toBe(FALLBACK_REASON_INVOCATION_ERROR);
+  });
+
+  it("診断メッセージ(diagnosticMessage)にも拒否の固定文言を入れること(生の例外内容を混ぜない)", async () => {
+    const llm: LlmClient = {
+      complete: vi.fn(async () => {
+        throw new AnalyzerRefusalError("秘密っぽい生メッセージ sk-ant-xxxx", "refusal");
+      }),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.diagnosticMessage).toBe(FALLBACK_REASON_REFUSED);
+  });
+
+  it("拒否後のリトライで成功すれば通常成功として扱うこと(fallback:false)", async () => {
+    const llm: LlmClient = {
+      complete: vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce(new AnalyzerRefusalError("拒否", "refusal"))
+        .mockResolvedValueOnce(okBody),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.retryCount).toBe(1);
+    expect(r.fallbackReason).toBeNull();
+  });
+});
+
+describe("analyzeRace(使ったモデルの記録 modelUsed・Issue #157)", () => {
+  /** completeDetailed を持つ LLM。応答ごとに {text, model} を返す。 */
+  function detailedLlm(...responses: ({ text: string; model: string } | Error)[]): LlmClient {
+    const queue = [...responses];
+    const next = async () => {
+      const r = queue.shift();
+      if (r === undefined) throw new Error("応答が尽きた");
+      if (r instanceof Error) throw r;
+      return r;
+    };
+    return {
+      complete: vi.fn(async () => (await next()).text),
+      completeDetailed: vi.fn(next),
+    };
+  }
+
+  it("completeDetailed があればそれを使い、成功時の model を modelUsed に載せること", async () => {
+    const llm = detailedLlm({ text: okBody, model: "claude-sonnet-9-9" });
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.modelUsed).toBe("claude-sonnet-9-9");
+    expect(llm.completeDetailed).toHaveBeenCalledTimes(1);
+    expect(llm.complete).not.toHaveBeenCalled();
+  });
+
+  it("リトライで成功した場合は、実際に採用した試行の model を載せること(切り替えで1回目と2回目のモデルが違う)", async () => {
+    const llm = detailedLlm(
+      { text: "壊れたJSON", model: "claude-sonnet-9-9" },
+      { text: okBody, model: "claude-sonnet-5-5" },
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.retryCount).toBe(1);
+    expect(r.modelUsed).toBe("claude-sonnet-5-5");
+  });
+
+  it("パース失敗でフォールバックした場合も、最後に応答したモデルを modelUsed に載せること", async () => {
+    const llm = detailedLlm(
+      { text: "壊れた1", model: "claude-sonnet-9-9" },
+      { text: "壊れた2", model: "claude-sonnet-9-9" },
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.modelUsed).toBe("claude-sonnet-9-9");
+  });
+
+  it("LLM呼び出しが毎回例外なら modelUsed は載せないこと(応答したモデルが無い。キー自体を持たない)", async () => {
+    const llm = detailedLlm(new Error("失敗1"), new Error("失敗2"));
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect("modelUsed" in r).toBe(false);
+  });
+
+  it.each([
+    { name: "拒否", make: (model: string) => new AnalyzerRefusalError("拒否", "refusal", model) },
+    {
+      name: "切り詰め",
+      make: (model: string) => new AnalyzerTruncationError("切り詰め", "max_tokens", model),
+    },
+  ])(
+    "2回とも$nameで終わっても、エラーが運ぶ応答モデルを modelUsed に載せること(固定モデル名での代用に落とさない)",
+    async ({ make }) => {
+      const served = "claude-sonnet-9-9";
+      const llm = detailedLlm(make(served), make(served));
+      const r = await analyzeRace(input(), { llm });
+      expect(r.fallback).toBe(true);
+      expect(r.modelUsed).toBe(served);
+    },
+  );
+
+  it("拒否のあと呼び出し例外で終わった場合も、拒否で分かった応答モデルを modelUsed に残すこと", async () => {
+    const llm = detailedLlm(
+      new AnalyzerRefusalError("拒否", "refusal", "claude-sonnet-9-9"),
+      new Error("ネットワーク断"),
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.modelUsed).toBe("claude-sonnet-9-9");
+  });
+
+  it("model を持たない(旧形式の)拒否・切り詰めエラーでは modelUsed を載せないこと", async () => {
+    const llm = detailedLlm(
+      new AnalyzerRefusalError("拒否", "refusal"),
+      new AnalyzerTruncationError("切り詰め", "max_tokens"),
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect("modelUsed" in r).toBe(false);
+  });
+
+  it("completeDetailed が無い LlmClient(旧実装・既存モック)では modelUsed を載せず、complete で動くこと(後方互換)", async () => {
+    const llm = fixedLlm(okBody);
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect("modelUsed" in r).toBe(false);
+    expect(llm.complete).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("analyzeRace(強調材料 highlights・懸念事項 concerns の伝播。Issue #197)", () => {
+  const withItems = JSON.stringify({
+    horses: [
+      { number: 1, place_prob: 0.45, reason: "調教良化", highlights: ["追い切り好時計"], concerns: ["距離延長"] },
+      { number: 2, place_prob: 0.15, reason: "展開不利", highlights: [], concerns: ["外枠"] },
+      ...fillerMarkHorses(),
+    ],
+  });
+
+  it("初回成功: 各馬の highlights / concerns が結果に載ること(キー欠落の馬は空配列)", async () => {
+    const r = await analyzeRace(input(), { llm: fixedLlm(withItems) });
+    const h1 = r.horses.find((h) => h.umaban === 1)!;
+    const h2 = r.horses.find((h) => h.umaban === 2)!;
+    const h3 = r.horses.find((h) => h.umaban === 3)!;
+    expect(r.fallback).toBe(false);
+    expect(h1.highlights).toEqual(["追い切り好時計"]);
+    expect(h1.concerns).toEqual(["距離延長"]);
+    expect(h2.highlights).toEqual([]);
+    expect(h2.concerns).toEqual(["外枠"]);
+    expect(h3.highlights).toEqual([]);
+    expect(h3.concerns).toEqual([]);
+  });
+
+  it("印関連違反のA救済(marksDropped:true)でも highlights / concerns を保持すること", async () => {
+    const bad = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎", highlights: ["強み"], concerns: ["弱み"] },
+        { number: 2, place_prob: 0.15, reason: "y", mark: "◎" }, // ◎が2頭で頭数違反。
+        ...fillerMarkHorses(),
+      ],
+    });
+    const r = await analyzeRace(input(), { llm: fixedLlm(bad, bad) });
+    const h1 = r.horses.find((h) => h.umaban === 1)!;
+    expect(r.marksDropped).toBe(true);
+    expect(h1.usedPrior).toBe(false);
+    expect(h1.highlights).toEqual(["強み"]);
+    expect(h1.concerns).toEqual(["弱み"]);
+  });
+
+  it("フォールバック(全馬 prior 採用)では全馬の highlights / concerns が空配列であること", async () => {
+    const r = await analyzeRace(input(), { llm: fixedLlm("こわれ1", "こわれ2") });
+    expect(r.fallback).toBe(true);
+    expect(r.horses).toHaveLength(6);
+    expect(r.horses.every((h) => h.highlights.length === 0 && h.concerns.length === 0)).toBe(true);
+    expect(r.horses.every((h) => Array.isArray(h.highlights) && Array.isArray(h.concerns))).toBe(true);
   });
 });

@@ -5,3 +5,4 @@ release/
 *.sqlite
 *.sqlite3
 .env
+cloud/wrangler.measure-verify.generated.toml

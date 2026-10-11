@@ -2,10 +2,16 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <!-- レンダラーのセキュリティ: 自己由来のスクリプトのみ許可(inline/eval禁止)。 -->
+    <!--
+      レンダラーのセキュリティ: 自己由来のスクリプトのみ許可(inline/eval禁止)。
+      worker-src(Issue #119・#24-C3): 配分計算をWeb Workerで実行するために追加した。
+      CSP仕様上はworker-src未指定時script-srcへフォールバックするため理屈上は無くても
+      'self'が効くはずだが、file://上のモジュールWorkerという組み合わせでのブラウザ実装差に
+      依存しないよう明示する(2026-09-25ゴーサイン)。
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>競馬期待値分析ツール</title>

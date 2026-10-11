@@ -1,0 +1,302 @@
+# クラウド版(Cloudflare Worker。cloud/)の型検査・テスト・本番デプロイ(Issue #161〈#21-C〉)。
+#
+# ★2つのジョブ:
+#   - check: 作業ブランチへの push と手動実行のたびに毎回走る(型検査・テスト・デプロイの dry-run・D1 の migration のローカル適用・ローカルスモーク)。
+#            Secrets を持たない。
+#   - deploy: check が通ったうえで、下の条件を満たすときだけ本番にデプロイする。
+#
+# ★デプロイの条件(deploy ジョブの if:。ここ1箇所にだけ書く。Issue #248 で廃止した exe の公開ゲートと同じ形):
+#   許可した作業ブランチ(下の1本)の上で、
+#     - 先端コミットのメッセージに承認印 `[PUBLISH-APPROVED]` を含み、かつ「レビュー継続中」を含まない push、または
+#     - 手動実行(workflow_dispatch。付け忘れからの回復レバー)。
+#   手動実行も許可ブランチの上でしか deploy が動かない(承認印のない任意のブランチから本番に出せる抜け道を作らない)。
+#   残存リスク: Actions の式の文字列比較(contains を含む)は大文字小文字を区別しないため、`[publish-approved]` でも一致する。
+#   1回の push に複数コミットが含まれる場合の判定は先端コミット(head_commit)のみで行う。
+#   許可ブランチを変えるときは、on.push.branches・deploy の if:・scripts/test/cloud-deploy-workflow.test.ts を揃えて直す。
+#
+# ★concurrency の注意(承認印付きの run が取り消されうる): cancel-in-progress: false でも、同じ group で実行中の run があると、
+#   待機できる run は最新の1本だけで、待機中の古い run は後続の push に取り消される。承認印付きの push の直後に別の push
+#   (印の有無を問わない)が来ると、待機中だった承認印付きの run が取り消され、deploy が走らないことがある
+#   (先端が印のないコミットに移ると、後続の run は deploy の条件を満たさない)。回復は、許可ブランチでの
+#   workflow_dispatch(手動実行。deploy の条件を満たす)。承認印付きの push 後は、deploy ジョブが実際に走ったことを確かめる。
+#
+# ★paths フィルタを付けない理由: 承認印付きの最終コミットは版数・文書だけのことが多く、cloud/ を含まない。
+#   フィルタを付けると、その最終コミットで deploy が走らず、cloud/ の変更が本番に出なくなる。
+#
+# ★公開リポジトリ: ジョブログは誰でも読める。workers.dev のサブドメイン(アカウントを特定できる)は、wrangler deploy が
+#   URL をログに出すより前に ::add-mask:: で隠す。メールアドレス・Access のチーム名・AUD は Worker の secret にあり、
+#   ここには一切現れない。
+#
+# ★ci.yml(ルートの型検査・テスト・app のビルドの関門)とは独立: このワークフローは ubuntu-latest で動き、wrangler / workerd などの
+#   依存は cloud/(pnpm workspace の外)にだけ入れる。承認印付き push は両方のワークフローを起動するが、デプロイは ci.yml の結果を待たない。
+#   承認印付きの push の後は、ci.yml の成否と、この deploy ジョブが実際に走った(スキップされていない)ことの両方を確かめる。
+#   exe の公開は Issue #248 で止めた(旧 build-windows.yml は削除済み)。承認印は、このデプロイの関門としてだけ残っている。
+name: クラウド版の検査と本番デプロイ
+
+on:
+  push:
+    branches:
+      - claude/issue-order-processing-wjgpdd
+  workflow_dispatch:
+
+# リポジトリへは何も書き戻さない。
+permissions:
+  contents: read
+
+# 同時実行は1本に絞る。実行中のデプロイを途中で打ち切らない。
+concurrency:
+  group: deploy-cloud
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      # pnpm はバージョン未指定にして、ルートの package.json の packageManager フィールドに従わせる。
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@v4
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: cloud/pnpm-lock.yaml
+
+      # cloud/ は pnpm workspace の外。ロックファイルで固定し、独立にインストールする。
+      - name: 依存をインストール(cloud)
+        working-directory: cloud
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      - name: 型検査
+        working-directory: cloud
+        run: pnpm run typecheck
+
+      - name: テスト
+        working-directory: cloud
+        run: pnpm test
+
+      # デプロイせずに、バンドルと設定(DO の migration を含む)を確かめる。認証情報は要らない。
+      - name: デプロイの dry-run
+        working-directory: cloud
+        run: pnpm run deploy:dry
+
+      # D1 の migration を、ローカル(workerd)の D1 に適用する(Issue #171)。SQL がエンジンで通ること・ファイル名の番号の取り違えを
+      # デプロイの前に検出する。--local だけで、本番の D1 には触れない(check は秘密を持たない)。スモークは自分の一時の保存先に
+      # 同じ migration を適用してから起動する(smoke.ts)。
+      - name: D1 の migration をローカルに適用
+        working-directory: cloud
+        run: pnpm exec wrangler d1 migrations apply DB --local
+
+      # ローカル(workerd)での配線のスモーク: 認証の関門(403)・DO の SQLite・/api/health。外部へは出ない。
+      - name: ローカルスモークテスト
+        working-directory: cloud
+        run: pnpm run smoke
+
+  deploy:
+    needs: check
+    # ★デプロイの条件(上のヘッダ参照)。条件式をほかの場所に複製しない。
+    if: ${{ github.ref == 'refs/heads/claude/issue-order-processing-wjgpdd' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[PUBLISH-APPROVED]') && !contains(github.event.head_commit.message, 'レビュー継続中'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      # cloud/wrangler.toml の name と一致させる(scripts/test/cloud-deploy-workflow.test.ts が固定)。
+      WORKER_NAME: keiba-cloud
+    steps:
+      # 最初の関門: Secrets の存在。未登録の Secret は Actions では空文字になる。値は出力しない。
+      - name: Secrets の存在を確認
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error title=Secret が未登録::リポジトリの Secrets に CLOUDFLARE_API_TOKEN が登録されていません"
+            missing=1
+          fi
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error title=Secret が未登録::リポジトリの Secrets に CLOUDFLARE_ACCOUNT_ID が登録されていません"
+            missing=1
+          fi
+          if [ "$missing" != "0" ]; then
+            exit 1
+          fi
+          echo "Secrets は2つとも登録されています(値は表示しません)"
+
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      # Issue #171: D1 の database_id が仮の値(ゼロ UUID。D1 を作る前の置き場所)のままなら、デプロイしない(早く落ちる。
+      # 依存のインストールの前に確認する)。秘密は使わず、リポジトリの cloud/wrangler.toml の値だけを見る。コメント行は見ない。
+      # このスクリプトは cloud/test/deploy-steps.test.ts が実際に実行して固定している(仮の値で失敗・実際の値で成功)。
+      - name: database_id が仮の値でないことを確認
+        run: |
+          db_id=$(grep -E '^database_id[[:space:]]*=' cloud/wrangler.toml | grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -n 1 || true)
+          if [ -z "$db_id" ]; then
+            echo "::error title=database_id を確認できません::cloud/wrangler.toml の database_id が UUID の形で見つかりません"
+            exit 1
+          fi
+          if [ "$db_id" = "00000000-0000-0000-0000-000000000000" ]; then
+            echo "::error title=database_id が仮の値です::cloud/wrangler.toml の database_id が仮の値(ゼロ UUID)のままです。ダッシュボードで作成した D1 の ID に置き換えてからデプロイしてください"
+            exit 1
+          fi
+          echo "database_id は仮の値ではありません"
+
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@v4
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: cloud/pnpm-lock.yaml
+
+      - name: 依存をインストール(cloud)
+        working-directory: cloud
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      # wrangler deploy は Worker の URL(workers.dev のサブドメインを含む)をログに出すので、その前にサブドメインを
+      # 取得して ::add-mask:: で隠す。API の応答はファイルに書き、ログに出さない。取得できなければデプロイしない
+      # (隠せないまま URL がログに出るのを避ける)。マスクを登録してから GITHUB_ENV に書く。
+      - name: サブドメインを取得してマスク
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          out="$RUNNER_TEMP/subdomain.json"
+          status=$(curl -s -o "$out" -w '%{http_code}' --max-time 30 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" || true)
+          sub=""
+          if [ "$status" = "200" ]; then
+            sub=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write(typeof r.result?.subdomain==="string"?r.result.subdomain:"")' "$out" || true)
+          fi
+          rm -f "$out"
+          if [ -z "$sub" ]; then
+            echo "::error title=サブドメインを取得できません::workers.dev のサブドメインを API から取得できなかったためデプロイしません(HTTP $status。トークンの権限か、workers.dev のサブドメインの登録を確認してください)"
+            exit 1
+          fi
+          echo "::add-mask::$sub"
+          echo "CF_SUBDOMAIN=$sub" >> "$GITHUB_ENV"
+          echo "サブドメインを取得し、マスクしました(値は表示しません)"
+
+      # Issue #171: D1 の権限確認。API トークンが D1 を読めるか(権限不足・未作成を、デプロイの前にはっきり知らせる)を、
+      # D1 の取得 API のステータスコードだけで判定する。**応答の本文は出力しない**(-o /dev/null)・トークンもアカウント ID も出さない。
+      # 200 のとき以外は失敗にする。R2 の権限確認は、次のステップ(Issue #174)。
+      # このスクリプトは cloud/test/deploy-steps.test.ts が、偽の curl で実際に実行して固定している。
+      - name: D1 の権限を確認(ステータスコードだけを出す)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          db_id=$(grep -E '^database_id[[:space:]]*=' cloud/wrangler.toml | grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -n 1 || true)
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$db_id" || true)
+          case "$status" in
+            200)
+              echo "D1 にアクセスできます(HTTP 200)"
+              ;;
+            401|403)
+              echo "::error title=D1 の権限がありません::D1 の取得が HTTP $status でした。API トークンに D1 の編集権限があるか確認してください"
+              exit 1
+              ;;
+            404)
+              echo "::error title=D1 が見つかりません::D1 の取得が HTTP 404 でした。cloud/wrangler.toml の database_id と、ダッシュボードで作成した D1 を確認してください"
+              exit 1
+              ;;
+            *)
+              echo "::error title=D1 を確認できません::D1 の取得が HTTP $status でした"
+              exit 1
+              ;;
+          esac
+
+      # Issue #174: R2 の権限確認。API トークンが R2 のバケットを読めるか(権限不足・R2 の未有効化・バケット名の誤りを、デプロイの前に
+      # はっきり知らせる)を、R2 のバケット取得 API のステータスコードだけで判定する。**応答の本文は出力しない**(-o /dev/null)・
+      # トークンもアカウント ID も出さない。200 のとき以外は失敗にする。D1 の migration(本番への取り消せない変更)より前に置く。
+      # バケット名は cloud/wrangler.toml の `[[r2_buckets]]` の bucket_name から読む(コメント行は見ない。R2 の命名規則に合わない値なら、API を呼ばずに失敗する)。
+      # ★公式ドキュメントに、この API に必要なトークン権限・存在しないバケットのステータスの記載は無い(未確認)。最初の本番の実行の結果で確かめる(cloud/README.md)。
+      # このスクリプトは cloud/test/deploy-steps.test.ts が、偽の curl で実際に実行して固定している。
+      - name: R2 の権限を確認(ステータスコードだけを出す)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          bucket=$(grep -E '^bucket_name[[:space:]]*=' cloud/wrangler.toml | grep -oE '"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]"' | head -n 1 | tr -d '"' || true)
+          if [ -z "$bucket" ]; then
+            echo "::error title=bucket_name を確認できません::cloud/wrangler.toml の bucket_name が、R2 のバケット名の形(小文字・数字・ハイフンの 3〜63 文字)で見つかりません"
+            exit 1
+          fi
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$bucket" || true)
+          case "$status" in
+            200)
+              echo "R2 のバケットにアクセスできます(HTTP 200)"
+              ;;
+            401|403)
+              echo "::error title=R2 の権限がありません::R2 のバケットの取得が HTTP $status でした。API トークンに R2 の権限があるか、アカウントで R2 が有効化されているかを確認してください(ステータスコードだけでは区別できません)"
+              exit 1
+              ;;
+            404)
+              echo "::error title=R2 のバケットが見つかりません::R2 のバケットの取得が HTTP 404 でした。cloud/wrangler.toml の bucket_name と、ダッシュボードで作成したバケットの名前を確認してください。バケットに管轄(jurisdiction)の指定がある場合も、この確認では見つかりません"
+              exit 1
+              ;;
+            *)
+              echo "::error title=R2 を確認できません::R2 のバケットの取得が HTTP $status でした"
+              exit 1
+              ;;
+          esac
+
+      # Issue #171: D1 の migration を本番に適用する。**wrangler deploy より前**(新しいコードは新しい表・列を前提にするため)。
+      # 失敗したら、後続のデプロイには進まない。migration は追加のみ(適用からデプロイまでの間は旧 Worker が新スキーマで動く)。
+      # 適用済みの migration は d1_migrations 表で記録され、再実行しても何も起きない。
+      # 復旧手段は D1 の Time Travel(自動の時点復元)。wrangler の適用処理はバックアップを取らない(4.147.0 の実装を確認)。
+      # CI など非対話の環境では、確認の入力を省いて適用する。
+      - name: D1 の migration を本番に適用
+        working-directory: cloud
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler d1 migrations apply DB --remote
+
+      # 秘密(ACCESS_TEAM_NAME / ACCESS_AUD / ACCESS_ALLOWED_EMAIL)は Worker の secret にあり、wrangler deploy では消えない。
+      - name: Worker をデプロイ
+        working-directory: cloud
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+
+      # 事後確認: 認証なしの GET が 2xx にならないこと(Access のログインへのリダイレクト 302、401、または Worker 自身の
+      # 403 のいずれか)。Access を掛ける前の初回デプロイ(secret 未設定)では Worker の 403 で通る。
+      # 反映の遅れに備えて数回やり直す。URL・サブドメインは出力しない(ステータスコードだけを出す)。
+      - name: 事後確認(認証なしで 2xx にならない)
+        run: |
+          url="https://${WORKER_NAME}.${CF_SUBDOMAIN}.workers.dev/"
+          code="000"
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$url" || true)
+            case "$code" in
+              302|401|403)
+                echo "認証なしの GET は HTTP $code でした(2xx ではありません)"
+                exit 0
+                ;;
+              2??)
+                echo "::error title=認証なしで 2xx が返りました::認証なしの GET が HTTP $code でした。Access と Worker の認証の関門を確認してください"
+                exit 1
+                ;;
+            esac
+            echo "試行 $attempt: HTTP $code(反映待ち。5秒後に再試行します)"
+            sleep 5
+          done
+          echo "::error title=事後確認できません::認証なしの GET が想定した応答(302/401/403)になりませんでした(最後の HTTP $code)"
+          exit 1

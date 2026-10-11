@@ -13,6 +13,7 @@ import {
 import {
   DiscordNotifyError,
   filterJpnOnlyEntries,
+  generateMigrationLines,
   isDiscordWebhookUrl,
   parseKaisaiDate,
   parseRaceId,
@@ -29,6 +30,7 @@ import type {
   BatchRaceOutcome,
   BulkImportProgress,
   BulkImportRaceOutcome,
+  CloudMigrationExportOutcome,
   DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   LogExportOutcome,
@@ -57,6 +59,10 @@ import {
   serializeAnalysisExportCsv,
   serializeAnalysisExportJson,
 } from "./analysis-export.js";
+import {
+  buildDefaultCloudMigrationFileName,
+  writeCloudMigrationFile,
+} from "./cloud-migration-export.js";
 import { runBulkImport } from "./import-batch.js";
 import { buildDefaultLogExportFileName, collectLogExportContent } from "./log-export.js";
 import { getLogDirectory, logError, logWarn, setSecretsProvider } from "./logger.js";
@@ -74,6 +80,16 @@ import {
 } from "./settings-store.js";
 import { toRaceListItem } from "./to-race-list-item.js";
 import { withErrorLogging } from "./with-error-logging.js";
+import {
+  resolveNativeBindingPath,
+  resolveVerifiedNativeBindingPath,
+} from "./native-binding.js";
+
+// resolveNativeBindingPath / resolveVerifiedNativeBindingPath は electron 非依存の
+// 独立モジュール(./native-binding.js)へ抽出した(Issue #62)。ipc.ts はここで re-export し、
+// 既存の呼び出し元(このファイル内の resourceManager 配線)・既存テスト
+// (test/ipc-native-binding.test.ts、"../src/main/ipc.js" からの import)を無改変で保つ。
+export { resolveNativeBindingPath, resolveVerifiedNativeBindingPath };
 
 /**
  * main プロセスの IPC ハンドラをまとめて登録する。
@@ -189,6 +205,9 @@ export function registerIpcHandlers(): void {
   // ログ取り出し導線(Task#36)。
   ipcMain.handle(IPC_CHANNELS.openLogFolder, () => handleOpenLogFolder());
   ipcMain.handle(IPC_CHANNELS.exportLogs, (event) => handleExportLogs(event));
+  ipcMain.handle(IPC_CHANNELS.exportCloudMigration, (event) =>
+    handleExportCloudMigration(event),
+  );
 
   // 分析データのエクスポート(第一版・GitHub Issue#10)。
   ipcMain.handle(IPC_CHANNELS.exportAnalysis, (event, raceId: unknown) =>
@@ -216,8 +235,16 @@ export function closeResources(): void {
 const resourceManager = new ResourceManager<PipelineResources>({
   create: () => {
     const settings = getSettingsStore().load();
+    // better-sqlite3のネイティブバインディング絶対パス(Issue #60-B)。packaged実行時のみ解決し、
+    // .nodeが見つからなければここで診断メッセージ付きの例外を投げる(createPipelineDeps/
+    // new Databaseへは到達しない)。非packagedはundefinedのまま(従来どおりbindingsに委ねる)。
+    const nativeBindingPath = resolveVerifiedNativeBindingPath({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+    });
     return createPipelineDeps({
       dbPath: path.join(app.getPath("userData"), "keiba.db"),
+      nativeBindingPath,
       apiKey: resolveEffectiveApiKey(settings, process.env.ANTHROPIC_API_KEY),
       scorerConfig: buildScorerConfig(settings),
       evConfig: buildEvConfig(settings),
@@ -229,6 +256,19 @@ const resourceManager = new ResourceManager<PipelineResources>({
       // (未設定は pipeline-deps.ts 側の `??` が既定false〈組合せオッズを取得しない〉へ
       // フォールバックする)。
       includeComboOdds: settings.includeComboOdds,
+      // 配分提案(Issue #59・#24-D3a・#24-E3a・#25-E3a・#26-E3a)の設定9項目。includeComboOddsは上で渡し済み
+      // のため含めない(pipeline-deps.ts が1箇所で解決し、scrape束縛とここへ同じ値を使う。#59 4節)。
+      allocationSettings: {
+        bankroll: settings.bankroll,
+        perRaceCap: settings.perRaceCap,
+        kellyFraction: settings.kellyFraction,
+        includeWideInAllocation: settings.includeWideInAllocation,
+        includeTrioInAllocation: settings.includeTrioInAllocation,
+        includeQuinellaInAllocation: settings.includeQuinellaInAllocation,
+        includeExactaInAllocation: settings.includeExactaInAllocation,
+        includeTrifectaInAllocation: settings.includeTrifectaInAllocation,
+        includeBracketQuinellaInAllocation: settings.includeBracketQuinellaInAllocation,
+      },
       // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
       fetch: netFetchAdapter,
       // HttpClient(core)のサポート外charset警告をログ基盤へ接続する(要修正4)。
@@ -887,6 +927,64 @@ async function handleExportLogs(
     const content = collectLogExportContent(getLogDirectory());
     writeFileSync(result.filePath, content, "utf8");
     return { status: "saved", filePath: result.filePath };
+  });
+}
+
+/** クラウド移行用の書き出しが進行中か(設定タブの再マウントで画面側の「書き出し中」が失われても二重実行を防ぐ)。 */
+let cloudMigrationExporting = false;
+
+/**
+ * 「クラウド移行用に書き出す」ハンドラの実処理(Issue #215・#167-A)。
+ * 保存先は dialog.showSaveDialog で選ばせる(既定名 keiba-cloud-migration-YYYYMMDD.ndjson.gz)。キャンセル時は
+ * 何もせず "canceled" を返す。
+ *
+ * 書き出し全体を resourceManager.runExclusive で包む: 書き出しは await をまたいで進むので、その間の設定保存
+ * (markDirty)で DB 接続が閉じられて「connection is not open」にならないようにする(runExclusive は相互排他ではないので、
+ * 他の IPC〈分析の保存など〉は並行して走れる。読み出しはページごとの同期 `.all()` で、接続を握り続けない)。
+ * 行の生成・検証は core(generateMigrationLines)、gzip と一時ファイル→rename は cloud-migration-export.ts。
+ * 形式に合わない値があれば(どの表・どの id/race_id・どの列かを含むメッセージで)例外になり、保存先には何も残らない。
+ */
+async function handleExportCloudMigration(
+  event: IpcMainInvokeEvent,
+): Promise<CloudMigrationExportOutcome> {
+  return withErrorLogging(IPC_CHANNELS.exportCloudMigration, undefined, async () => {
+    if (cloudMigrationExporting) {
+      throw new Error("クラウド移行用の書き出し中です。完了してからやり直してください。");
+    }
+    cloudMigrationExporting = true;
+    try {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const dialogOptions = {
+        defaultPath: buildDefaultCloudMigrationFileName(new Date()),
+        filters: [{ name: "クラウド移行ファイル(gzip)", extensions: ["gz"] }],
+      };
+      const result =
+        window !== null
+          ? await dialog.showSaveDialog(window, dialogOptions)
+          : await dialog.showSaveDialog(dialogOptions);
+      if (result.canceled || result.filePath === undefined || result.filePath === "") {
+        return { status: "canceled" } as const;
+      }
+      const filePath = result.filePath;
+      const written = await resourceManager.runExclusive((resources) =>
+        writeCloudMigrationFile(
+          filePath,
+          generateMigrationLines(resources.cloudMigrationSource, {
+            exportedAt: new Date().toISOString(),
+            appVersion: buildAppInfo(app.getVersion()).appVersion,
+          }),
+        ),
+      );
+      return {
+        status: "saved",
+        filePath,
+        analysisCount: written.footer.analysisLines,
+        resultRaceCount: written.footer.resultLines,
+        fileBytes: written.fileBytes,
+      } as const;
+    } finally {
+      cloudMigrationExporting = false;
+    }
   });
 }
 

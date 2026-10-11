@@ -155,6 +155,9 @@ function makeStoredAnalysis(overrides: Partial<StoredAnalysis> = {}): StoredAnal
     model: "claude-sonnet-4-6",
     rawResponse: '{"horses":[]}',
     raceSnapshot: buildRaceSnapshot(makeRaceData()),
+    // 先読みリーク遮断の印(Issue #152)。エクスポートでは使わないので記録なし(null)にしておく。
+    historyCutoffDate: null,
+    promptLookaheadGuarded: null,
     horses: [
       {
         umaban: 1,
@@ -166,6 +169,8 @@ function makeStoredAnalysis(overrides: Partial<StoredAnalysis> = {}): StoredAnal
         contributions: null,
         mark: "◎",
         reason: "調教良化",
+        highlights: [],
+        concerns: [],
       },
       {
         umaban: 2,
@@ -177,6 +182,8 @@ function makeStoredAnalysis(overrides: Partial<StoredAnalysis> = {}): StoredAnal
         contributions: null,
         mark: null,
         reason: null,
+        highlights: [],
+        concerns: [],
       },
     ],
     ...overrides,
@@ -284,13 +291,25 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
     const hasOwn = (obj: object, key: string): boolean =>
       Object.prototype.hasOwnProperty.call(obj, key);
 
-    /** ワイド・三連複を含むraceDataを組み立てる(odds/metaの3フィールドを個別に上書きできる)。 */
+    /**
+     * ワイド・三連複・馬連・馬単・三連単を含むraceDataを組み立てる(odds/metaのフィールドを
+     * 個別に上書きできる)。馬連(quinellaCombo)はIssue #116・#24-D3b-1、馬単(exactaCombo)は
+     * Issue #122・#24-E2、三連単(trifectaCombo)はIssue #137・#25-E2で追加。
+     */
     function makeComboRaceData(overrides: {
       wideCombo?: Record<string, number | null>;
       trioCombo?: Record<string, number | null>;
+      quinellaCombo?: Record<string, number | null>;
+      exactaCombo?: Record<string, number | null>;
+      trifectaCombo?: Record<string, number | null>;
+      bracketQuinellaCombo?: Record<string, number | null>;
       comboOdds?: {
         wide?: ReturnType<typeof makeComboOddsFetchOutcome>;
         trio?: ReturnType<typeof makeComboOddsFetchOutcome>;
+        quinella?: ReturnType<typeof makeComboOddsFetchOutcome>;
+        exacta?: ReturnType<typeof makeComboOddsFetchOutcome>;
+        trifecta?: ReturnType<typeof makeComboOddsFetchOutcome>;
+        bracketQuinella?: ReturnType<typeof makeComboOddsFetchOutcome>;
       };
     }): RaceData {
       return makeRaceData({
@@ -304,6 +323,18 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
           },
           ...(overrides.wideCombo !== undefined ? { wideCombo: overrides.wideCombo } : {}),
           ...(overrides.trioCombo !== undefined ? { trioCombo: overrides.trioCombo } : {}),
+          ...(overrides.quinellaCombo !== undefined
+            ? { quinellaCombo: overrides.quinellaCombo }
+            : {}),
+          ...(overrides.exactaCombo !== undefined
+            ? { exactaCombo: overrides.exactaCombo }
+            : {}),
+          ...(overrides.trifectaCombo !== undefined
+            ? { trifectaCombo: overrides.trifectaCombo }
+            : {}),
+          ...(overrides.bracketQuinellaCombo !== undefined
+            ? { bracketQuinellaCombo: overrides.bracketQuinellaCombo }
+            : {}),
         },
         meta: {
           fetchedAt: "2026-07-24T09:00:00.000Z",
@@ -314,28 +345,43 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       });
     }
 
-    it("OFF(includeComboOdds未使用): race.odds.wideCombo/trioCombo・race.meta.comboOddsが" +
-      "undefinedのままなら、スナップショットにキー自体が生えないこと(受け入れ条件7)", () => {
-      // makeRaceData()の既定odds/metaにはwideCombo/trioCombo/comboOddsを含めていない
-      // (scrapeRaceのincludeComboOdds:false相当)。まず前提を無条件expectで固定する。
+    it("OFF(includeComboOdds未使用): race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaCombo・" +
+      "race.meta.comboOddsがundefinedのままなら、スナップショットにキー自体が生えないこと" +
+      "(受け入れ条件7。馬連はIssue #116 AC-4、馬単はIssue #122 AC-4、三連単はIssue #137 AC-2)", () => {
+      // makeRaceData()の既定odds/metaにはwideCombo/trioCombo/quinellaCombo/exactaCombo/
+      // trifectaCombo/comboOddsを含めていない(scrapeRaceのincludeComboOdds:false相当)。
+      // まず前提を無条件expectで固定する。
       const race = makeRaceData();
       expect(race.odds.wideCombo).toBeUndefined();
       expect(race.odds.trioCombo).toBeUndefined();
+      expect(race.odds.quinellaCombo).toBeUndefined();
+      expect(race.odds.exactaCombo).toBeUndefined();
+      expect(race.odds.trifectaCombo).toBeUndefined();
       expect(race.meta.comboOdds).toBeUndefined();
 
       const snapshot = buildRaceSnapshot(race);
       expect(hasOwn(snapshot, "wideCombo")).toBe(false);
       expect(hasOwn(snapshot, "trioCombo")).toBe(false);
+      expect(hasOwn(snapshot, "quinellaCombo")).toBe(false);
+      expect(hasOwn(snapshot, "exactaCombo")).toBe(false);
+      expect(hasOwn(snapshot, "trifectaCombo")).toBe(false);
       expect(hasOwn(snapshot, "comboOdds")).toBe(false);
     });
 
-    it("ON・取得成功: race.odds.wideCombo/trioCombo・race.meta.comboOddsの値が欠落なく写ること(受け入れ条件7・3キーすべて有)", () => {
+    it("ON・取得成功: race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaCombo・race.meta.comboOddsの値が" +
+      "欠落なく写ること(受け入れ条件7・6キーすべて有。馬連はIssue #116 AC-4、馬単はIssue #122 AC-4、三連単はIssue #137 AC-2)", () => {
       const race = makeComboRaceData({
         wideCombo: { "1-2": 3.4 },
         trioCombo: { "1-2-3": 12.5 },
+        quinellaCombo: { "1-4": 5.6 },
+        exactaCombo: { "0102": 7.8, "0201": 9.1 },
+        trifectaCombo: { "010203": 15.2, "030201": 88.4 },
         comboOdds: {
           wide: makeComboOddsFetchOutcome("available"),
           trio: makeComboOddsFetchOutcome("available"),
+          quinella: makeComboOddsFetchOutcome("available"),
+          exacta: makeComboOddsFetchOutcome("available"),
+          trifecta: makeComboOddsFetchOutcome("available"),
         },
       });
 
@@ -344,11 +390,119 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       expect(hasOwn(snapshot, "wideCombo")).toBe(true);
       expect(snapshot.trioCombo).toEqual({ "1-2-3": 12.5 });
       expect(hasOwn(snapshot, "trioCombo")).toBe(true);
+      expect(snapshot.quinellaCombo).toEqual({ "1-4": 5.6 });
+      expect(hasOwn(snapshot, "quinellaCombo")).toBe(true);
+      // 順序付きキー("0102"と"0201")が別値のまま伝播すること(馬単固有の回帰観点)。
+      expect(snapshot.exactaCombo).toEqual({ "0102": 7.8, "0201": 9.1 });
+      expect(hasOwn(snapshot, "exactaCombo")).toBe(true);
+      // 三連単も同じく順序付きキー("010203"と"030201")が別値のまま伝播すること。
+      expect(snapshot.trifectaCombo).toEqual({ "010203": 15.2, "030201": 88.4 });
+      expect(hasOwn(snapshot, "trifectaCombo")).toBe(true);
       expect(snapshot.comboOdds).toEqual({
         wide: makeComboOddsFetchOutcome("available"),
         trio: makeComboOddsFetchOutcome("available"),
+        quinella: makeComboOddsFetchOutcome("available"),
+        exacta: makeComboOddsFetchOutcome("available"),
+        trifecta: makeComboOddsFetchOutcome("available"),
       });
       expect(hasOwn(snapshot, "comboOdds")).toBe(true);
+    });
+
+    it("quinellaComboのみ設定・wide/trioComboは未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース。馬連はIssue #116 AC-4)", () => {
+      const race = makeComboRaceData({ quinellaCombo: { "1-4": 5.6 } });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.quinellaCombo).toEqual({ "1-4": 5.6 });
+      expect(hasOwn(snapshot, "quinellaCombo")).toBe(true);
+      expect(snapshot.wideCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "wideCombo")).toBe(false);
+      expect(snapshot.trioCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "trioCombo")).toBe(false);
+      expect(snapshot.comboOdds).toBeUndefined();
+      expect(hasOwn(snapshot, "comboOdds")).toBe(false);
+    });
+
+    it("exactaComboのみ設定・wide/trio/quinellaComboは未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース。馬単はIssue #122 AC-4)", () => {
+      const race = makeComboRaceData({ exactaCombo: { "0102": 7.8 } });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.exactaCombo).toEqual({ "0102": 7.8 });
+      expect(hasOwn(snapshot, "exactaCombo")).toBe(true);
+      expect(snapshot.wideCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "wideCombo")).toBe(false);
+      expect(snapshot.trioCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "trioCombo")).toBe(false);
+      expect(snapshot.quinellaCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "quinellaCombo")).toBe(false);
+      expect(snapshot.comboOdds).toBeUndefined();
+      expect(hasOwn(snapshot, "comboOdds")).toBe(false);
+    });
+
+    it("trifectaComboのみ設定・wide/trio/quinella/exactaComboは未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース。三連単はIssue #137 AC-2)", () => {
+      const race = makeComboRaceData({ trifectaCombo: { "010203": 15.2 } });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.trifectaCombo).toEqual({ "010203": 15.2 });
+      expect(hasOwn(snapshot, "trifectaCombo")).toBe(true);
+      expect(snapshot.wideCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "wideCombo")).toBe(false);
+      expect(snapshot.trioCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "trioCombo")).toBe(false);
+      expect(snapshot.quinellaCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "quinellaCombo")).toBe(false);
+      expect(snapshot.exactaCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "exactaCombo")).toBe(false);
+      expect(snapshot.comboOdds).toBeUndefined();
+      expect(hasOwn(snapshot, "comboOdds")).toBe(false);
+    });
+
+    describe("枠連(bracketQuinellaCombo。Issue #148・#26-E2)", () => {
+      it("未設定ならスナップショットにキー自体が無いこと({}に化けない)", () => {
+        const snapshot = buildRaceSnapshot(makeComboRaceData({ wideCombo: { "0102": 3.4 } }));
+        expect(snapshot.wideCombo).toEqual({ "0102": 3.4 }); // 前提固定
+        expect(snapshot.bracketQuinellaCombo).toBeUndefined();
+        expect(hasOwn(snapshot, "bracketQuinellaCombo")).toBe(false);
+      });
+
+      it("設定されていれば枠番4桁キーのままスナップショットに載り、comboOdds.bracketQuinellaも写されること", () => {
+        const race = makeComboRaceData({
+          bracketQuinellaCombo: { "0407": 31.5, "0101": 63.5 },
+          comboOdds: {
+            bracketQuinella: makeComboOddsFetchOutcome("available"),
+          },
+        });
+
+        const snapshot = buildRaceSnapshot(race);
+        expect(snapshot.bracketQuinellaCombo).toEqual({ "0407": 31.5, "0101": 63.5 });
+        expect(hasOwn(snapshot, "bracketQuinellaCombo")).toBe(true);
+        expect(snapshot.comboOdds?.bracketQuinella).toEqual(makeComboOddsFetchOutcome("available"));
+        // JSON往復(analyses.race_snapshot_jsonへの保存相当)でも消えない。
+        const roundTripped = JSON.parse(JSON.stringify(snapshot)) as {
+          bracketQuinellaCombo: Record<string, number | null>;
+        };
+        expect(roundTripped.bracketQuinellaCombo).toEqual({ "0407": 31.5, "0101": 63.5 });
+      });
+
+      it("空オブジェクトなら空のまま載ること(undefinedへ化けない)", () => {
+        const snapshot = buildRaceSnapshot(makeComboRaceData({ bracketQuinellaCombo: {} }));
+        expect(snapshot.bracketQuinellaCombo).toEqual({});
+        expect(hasOwn(snapshot, "bracketQuinellaCombo")).toBe(true);
+      });
+
+      it("bracketQuinellaComboのみ設定・他の5券種は未設定のとき、独立して伝播すること(非対称ケース)", () => {
+        const snapshot = buildRaceSnapshot(makeComboRaceData({ bracketQuinellaCombo: { "0101": 63.5 } }));
+        expect(snapshot.bracketQuinellaCombo).toEqual({ "0101": 63.5 });
+        for (const key of [
+          "wideCombo",
+          "trioCombo",
+          "quinellaCombo",
+          "exactaCombo",
+          "trifectaCombo",
+          "comboOdds",
+        ]) {
+          expect(hasOwn(snapshot, key)).toBe(false);
+        }
+      });
     });
 
     /**
@@ -726,6 +880,9 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
       isPositive: false,
       mark: "◎",
       reason: "調教良化",
+      // Issue #199: 強調材料・懸念事項のキーが馬ごとに出る(このフィクスチャは項目なし = [])。既存キーの値は変わらない。
+      highlights: [],
+      concerns: [],
     });
     expect(doc.results).toEqual([
       { umaban: 1, finishPosition: 1, placePayout: 120, passing: [2, 1, 1, 1], last3f: 34.5 },
@@ -749,6 +906,8 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
               contributions: null,
               mark: null,
               reason: null,
+              highlights: [],
+              concerns: [],
             },
           ],
         }),
@@ -782,6 +941,8 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
               contributions: null,
               mark: null,
               reason: null,
+              highlights: [],
+              concerns: [],
             },
           ],
         }),
@@ -810,6 +971,8 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
               contributions: null,
               mark: null,
               reason: null,
+              highlights: [],
+              concerns: [],
             },
           ],
         }),
@@ -886,6 +1049,35 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
     });
   });
 
+  it("枠連(bracketQuinellaCombo。Issue #148)を持つ新形式のraceSnapshotを渡しても例外を投げず、他の項目は復元でき、エクスポートJSONへは漏れないこと(旧形式=枠連キー無しでも同じ)", () => {
+    const baseOdds = {
+      officialDatetime: "2026-07-24 09:00:00",
+      oddsStatus: "result" as const,
+      win: { 1: { odds: 2.5, ninki: 1 } },
+      place: { 1: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 } },
+    };
+    const withBracket = buildRaceSnapshot(
+      makeRaceData({ odds: { ...baseOdds, bracketQuinellaCombo: { "0407": 31.5 } } }),
+    );
+    // 前提固定: このraceSnapshotには実際に枠連が載っていること。
+    expect(withBracket.bracketQuinellaCombo).toEqual({ "0407": 31.5 });
+    // 枠連以外は同一のオッズで、枠連キーだけ無い旧形式相当(キー無し)。
+    const withoutBracket = buildRaceSnapshot(makeRaceData({ odds: baseOdds }));
+    expect(withoutBracket.bracketQuinellaCombo).toBeUndefined();
+
+    const docWith = buildAnalysisExportDocument(
+      makeInput({ analysis: makeStoredAnalysis({ raceSnapshot: withBracket }) }),
+    );
+    const docWithout = buildAnalysisExportDocument(
+      makeInput({ analysis: makeStoredAnalysis({ raceSnapshot: withoutBracket }) }),
+    );
+    expect(docWith.race.raceName).toBe("テストステークス");
+    expect("bracketQuinellaCombo" in docWith.race).toBe(false);
+    // 枠連の有無でエクスポートされるレース・馬の内容が変わらないこと。
+    expect(docWith.race).toEqual(docWithout.race);
+    expect(docWith.horses).toEqual(docWithout.horses);
+  });
+
   it("結果未取込(results/resultDetailともにundefined)ならresultsは空配列になること", () => {
     const doc = buildAnalysisExportDocument(makeInput());
     expect(doc.results).toEqual([]);
@@ -922,6 +1114,8 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
               contributions: null,
               mark: null,
               reason: null,
+              highlights: [],
+              concerns: [],
             },
           ],
         }),
@@ -1052,6 +1246,8 @@ describe("serializeAnalysisExportCsv(馬別CSV文字列化・RFC4180準拠)", ()
               contributions: null,
               mark: null,
               reason: 'reasonにも,"引用"を含む',
+              highlights: [],
+              concerns: [],
             },
           ],
         }),
@@ -1198,3 +1394,85 @@ function parseCsvRecords(text: string): string[][] {
   }
   return records.filter((r) => !(r.length === 1 && r[0] === ""));
 }
+
+/**
+ * Issue #199(#196-b): 強調材料・懸念事項(highlights・concerns)のエクスポート。
+ * JSON は馬ごとに配列を足す(schemaVersion は 1 のまま)。CSV は既存列の位置を変えず末尾に2列を足し、
+ * セルの中は ` / ` で連結する(`passing` が `-` 連結なのと同じ、1セル内の連結)。
+ */
+describe("強調材料・懸念事項のエクスポート(Issue #199)", () => {
+  /** 旧版(#199 より前)の CSV ヘッダ。この並びと位置が変わらないことを固定する(位置が変わる変異を殺す)。 */
+  const LEGACY_CSV_COLUMNS = [
+    "umaban", "wakuban", "name", "sex", "age", "kinryo", "jockeyName", "trainerName", "bodyWeight", "winOdds",
+    "popularity", "placeOddsMin", "oikiriCritic", "oikiriRank", "prior", "adjustedProb", "ev", "isPositive", "mark", "reason",
+    "finishPosition", "placePayout", "last3f", "passing",
+  ];
+
+  const horseWith = (umaban: number, highlights: readonly string[], concerns: readonly string[]): StoredAnalysis["horses"][number] => ({
+    umaban,
+    prior: 0.3,
+    adjustedProb: 0.3,
+    placeOddsMin: 2,
+    ev: 0.6,
+    isPositive: false,
+    contributions: null,
+    mark: null,
+    reason: "根拠",
+    highlights,
+    concerns,
+  });
+
+  const docOf = (horses: StoredAnalysis["horses"]) => buildAnalysisExportDocument(makeInput({ analysis: makeStoredAnalysis({ horses }) }));
+
+  it("JSON: 馬ごとに highlights・concerns の配列が出る(空は [])。schemaVersion は 1 のまま", () => {
+    const doc = docOf([horseWith(1, ["A", "B", "C"], ["D"]), horseWith(2, [], [])]);
+    expect(doc.schemaVersion).toBe(1);
+    expect(doc.horses[0]!.highlights).toEqual(["A", "B", "C"]);
+    expect(doc.horses[0]!.concerns).toEqual(["D"]);
+    expect(doc.horses[1]!.highlights).toEqual([]);
+    expect(doc.horses[1]!.concerns).toEqual([]);
+    // 文字列化しても配列のまま(JSON 往復で形が変わらない)。
+    const parsed = JSON.parse(serializeAnalysisExportJson(doc)) as { schemaVersion: number; horses: { highlights: string[]; concerns: string[] }[] };
+    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.horses[0]!.highlights).toEqual(["A", "B", "C"]);
+    expect(parsed.horses[1]!.concerns).toEqual([]);
+  });
+
+  it("CSV: 既存24列の位置は変わらず、末尾に highlights・concerns の2列が付く", () => {
+    const csv = serializeAnalysisExportCsv(docOf([horseWith(1, ["A"], ["B"])]));
+    const header = csv.split("\r\n")[0]!.split(",");
+    expect(LEGACY_CSV_COLUMNS).toHaveLength(24);
+    expect(header.slice(0, 24)).toEqual(LEGACY_CSV_COLUMNS);
+    expect(header.slice(24)).toEqual(["highlights", "concerns"]);
+    expect(header).toHaveLength(26);
+  });
+
+  it("CSV: 複数項目は ` / ` で連結し、空配列は空セルになる", () => {
+    const csv = serializeAnalysisExportCsv(docOf([horseWith(1, ["A", "B", "C"], ["D", "E"]), horseWith(2, [], [])]));
+    const rows = parseCsvRecords(csv);
+    const header = rows[0]!;
+    const hi = header.indexOf("highlights");
+    const co = header.indexOf("concerns");
+    expect(hi).toBe(24);
+    expect(co).toBe(25);
+    expect(rows[1]![hi]).toBe("A / B / C");
+    expect(rows[1]![co]).toBe("D / E");
+    expect(rows[2]![hi]).toBe("");
+    expect(rows[2]![co]).toBe("");
+    // 全行が同じ列数(列がずれない)。
+    expect(rows[1]).toHaveLength(26);
+    expect(rows[2]).toHaveLength(26);
+  });
+
+  it("CSV: 項目にカンマ・引用符・改行・区切り(` / `)を含んでも、列数がずれず往復で同じ文字列に戻る", () => {
+    const tricky = ['脚質,先行"逃げ"', "改行\n入り", "前走1着 / 好タイム"];
+    const csv = serializeAnalysisExportCsv(docOf([horseWith(1, tricky, ["懸念,あり"])]));
+    const rows = parseCsvRecords(csv);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toHaveLength(26);
+    expect(rows[1]![24]).toBe(tricky.join(" / "));
+    expect(rows[1]![25]).toBe("懸念,あり");
+    // 引用符で囲まれて出力されている(素のカンマで列が割れていない)。
+    expect(csv).toContain('"脚質,先行""逃げ""');
+  });
+});

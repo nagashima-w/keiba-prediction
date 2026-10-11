@@ -1,16 +1,17 @@
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
-  buildPriorInput,
   buildPrompt,
   CLIP_VARIANTS,
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
   PROMPT_VERSION,
+  summarizeBestWeight,
   summarizeBodyWeightTrend,
   summarizeJockeyChange,
   summarizeMarginTrend,
   summarizeMarketGap,
+  summarizeRestRecord,
   type AnalyzeRaceResult,
   type BuildPromptInput,
   type CourseType,
@@ -25,6 +26,7 @@ import {
   type ShutubaHorse,
 } from "@keiba/core";
 import type { AnalysisRecord } from "@keiba/core";
+import { buildPriorInput } from "@keiba/core/pipeline";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import {
@@ -35,8 +37,10 @@ import {
 import type { AnalysisProgress } from "../src/shared/analysis-types.js";
 
 // buildPriorInput を実挙動そのままのスパイに差し替え、渡された race.date を検証できるようにする。
-vi.mock("@keiba/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@keiba/core")>();
+// Issue #176: runAnalysis の core の import 先がバレル(@keiba/core)から狭い入口(@keiba/core/pipeline)に変わったので、
+// スパイもその入口に掛ける(上の import の buildPriorInput も同じ入口から取る。検証する内容は変えていない)。
+vi.mock("@keiba/core/pipeline", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@keiba/core/pipeline")>();
   return { ...actual, buildPriorInput: vi.fn(actual.buildPriorInput) };
 });
 
@@ -223,6 +227,8 @@ describe("runAnalysis(分析パイプライン)", () => {
       }),
       now: () => FIXED_NOW,
       llmSkipReason: "APIキー未設定",
+      // Issue #59: この呼び出しでは配分計算を行わない(既存テストの回帰を防ぐ既定値)。
+      allocationSettings: null,
     });
   });
 
@@ -514,6 +520,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior,
           reason: null,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: true,
           mark: h.umaban === 1 ? "◎" : h.umaban === 2 ? "〇" : null,
@@ -556,6 +564,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior,
           reason: null,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: true,
           mark: null,
@@ -583,6 +593,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -601,6 +613,81 @@ describe("runAnalysis(分析パイプライン)", () => {
       );
       expect(saved[0]!.model).toBe("claude-sonnet-4-6");
       expect(saved[0]!.rawResponse).toBe("LLMの生応答テキスト");
+    });
+
+    /** 全馬 prior 採用の最小 analyze(modelUsed を差し替えられる)。 */
+    function analyzeWith(modelUsed?: string) {
+      return vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            highlights: [],
+            concerns: [],
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+          rawResponse: "LLMの生応答テキスト",
+          ...(modelUsed !== undefined ? { modelUsed } : {}),
+        }),
+      );
+    }
+
+    describe("使ったモデルの記録(Issue #157。analyzeRace の modelUsed を最優先する)", () => {
+      it("modelUsed が静的な deps.modelName と異なるとき、保存レコードの model と AnalysisResult.model の両方が modelUsed になること", async () => {
+        // 前提: 自動選択モデルは固定モデル(deps.modelName)と異なる(でなければ優先順位を検出できない)
+        const auto = "claude-sonnet-9-9";
+        const fixed = "claude-sonnet-5-5";
+        expect(auto).not.toBe(fixed);
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(auto), modelName: fixed },
+          onProgress,
+        );
+        expect(saved[0]!.model).toBe(auto);
+        expect(result.model).toBe(auto);
+      });
+
+      it("modelUsed が無ければ deps.modelName を使うこと(analyzeRace が応答を得られなかった場合・旧モック)", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(undefined), modelName: "claude-sonnet-5-5" },
+          onProgress,
+        );
+        expect(saved[0]!.model).toBe("claude-sonnet-5-5");
+        expect(result.model).toBe("claude-sonnet-5-5");
+      });
+
+      it("modelUsed も modelName も無ければ null であること", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(undefined) },
+          onProgress,
+        );
+        expect(saved[0]!.model).toBeNull();
+        expect(result.model).toBeNull();
+      });
+
+      it("LLMスキップ時は AnalysisResult.model が null であること(modelName が設定されていても偽値混入なし)", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), modelName: "claude-sonnet-5-5" },
+          onProgress,
+        );
+        expect(result.llmUsed).toBe(false);
+        expect(result.model).toBeNull();
+        expect(saved[0]!.model).toBeNull();
+      });
     });
 
     it("LLMスキップ時は保存レコードのmodel/rawResponseがnullになること(deps.modelNameが設定されていても偽値混入なし)", async () => {
@@ -622,6 +709,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: `馬番${h.umaban}の根拠`,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -649,6 +738,80 @@ describe("runAnalysis(分析パイプライン)", () => {
         onProgress,
       );
       expect(saved[0]!.horses.every((h) => h.reason === null)).toBe(true);
+    });
+
+    describe("強調材料・懸念事項(highlights・concerns)の配線(Issue #197・#196-a)", () => {
+      const analyzeWith = (omitUmaban: number | null) =>
+        vi.fn(
+          async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+            horses: input.horses
+              .filter((h) => h.umaban !== omitUmaban)
+              .map((h) => ({
+                umaban: h.umaban,
+                prior: h.prior,
+                adjustedProb: h.prior,
+                reason: `根拠${h.umaban}`,
+                highlights: [`強み${h.umaban}-a`, `強み${h.umaban}-b`],
+                concerns: [`弱み${h.umaban}`],
+                clipped: false,
+                usedPrior: false,
+                mark: null,
+              })),
+            fallback: false,
+            retryCount: 0,
+            fallbackReason: null,
+            rawResponse: "raw",
+          }),
+        );
+
+      it("LLM有り: 各馬の highlights / concerns が rows(画面)と保存レコードの horses[] の両方に載ること", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(null) },
+          onProgress,
+        );
+        const row1 = result.rows.find((r) => r.umaban === 1)!;
+        const rec1 = saved[0]!.horses.find((h) => h.umaban === 1)!;
+        expect(row1.highlights).toEqual(["強み1-a", "強み1-b"]);
+        expect(row1.concerns).toEqual(["弱み1"]);
+        expect(rec1.highlights).toEqual(["強み1-a", "強み1-b"]);
+        expect(rec1.concerns).toEqual(["弱み1"]);
+        // 馬ごとに自分の値が載る(取り違えない)。
+        const row2 = result.rows.find((r) => r.umaban === 2)!;
+        expect(row2.highlights).toEqual(["強み2-a", "強み2-b"]);
+      });
+
+      it("LLMスキップ時は全馬の highlights / concerns が空配列(rows・保存レコードとも)", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          baseDeps(),
+          onProgress,
+        );
+        expect(result.rows.length).toBeGreaterThan(0);
+        expect(result.rows.every((r) => r.highlights.length === 0 && r.concerns.length === 0)).toBe(true);
+        expect(saved[0]!.horses.every((h) => (h.highlights ?? []).length === 0 && (h.concerns ?? []).length === 0)).toBe(true);
+        // 空配列で渡す(undefined にしない: 型が必須のため、画面側が常に配列を前提にできる)。
+        expect(result.rows.every((r) => Array.isArray(r.highlights) && Array.isArray(r.concerns))).toBe(true);
+      });
+
+      it("LLMの分析結果に含まれない馬番(欠けた馬)は空配列で、含まれる馬の値は保たれる", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(2) },
+          onProgress,
+        );
+        const row2 = result.rows.find((r) => r.umaban === 2)!;
+        const row1 = result.rows.find((r) => r.umaban === 1)!;
+        // 前提: 馬2は分析結果に無いので reason も null(prior 採用)。
+        expect(row2.reason).toBeNull();
+        expect(row2.highlights).toEqual([]);
+        expect(row2.concerns).toEqual([]);
+        expect(saved[0]!.horses.find((h) => h.umaban === 2)!.highlights ?? []).toEqual([]);
+        expect(row1.highlights).toEqual(["強み1-a", "強み1-b"]);
+      });
     });
 
     it("取得したレース情報のスナップショットをrace_snapshot_json保存用のraceSnapshotに記録すること(LLM有無に関わらず保存)", async () => {
@@ -681,6 +844,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -722,6 +887,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -765,6 +932,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -875,6 +1044,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1004,6 +1175,183 @@ describe("runAnalysis(分析パイプライン)", () => {
     });
   });
 
+  describe("休み明け実績・ベスト体重(Issue #212・#210-A)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            highlights: [],
+            concerns: [],
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    /** 分析日(KAISAI=2026/07/09)に対し、前走から111日あく戦績(新しい順)。休み明けの走が2つ(5着・1着)ある。 */
+    const restResults = (): HorseRaceResult[] => [
+      fakeResult("2026/03/20", [1, 1], { finishPosition: { kind: "順位", value: 5 }, bodyWeight: { weight: 486, diff: 6 } }), // 前走(休み明け・5着)
+      fakeResult("2025/12/01", [2, 2], { finishPosition: { kind: "順位", value: 2 }, bodyWeight: { weight: 470, diff: -2 } }), // 前走の前(通常・2着)
+      fakeResult("2025/11/01", [3, 3], { finishPosition: { kind: "順位", value: 1 }, bodyWeight: { weight: 474, diff: 2 } }), // 休み明け(1着)
+      fakeResult("2025/06/01", [4, 4], { finishPosition: { kind: "順位", value: 8 }, bodyWeight: { weight: 472, diff: 0 } }), // 初戦(数えない)
+    ];
+
+    it("今回が前走から71日以上の馬に、戦績と分析日から summarizeRestRecord を写した restRecord が載ること(休み明け2走: 5着・1着)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(RACE_ID, { 1: restResults() })),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      // 手計算の期待値(純関数に依存しない): 前走(5着)は2025/12/01から109日あき、2025/11/01の走は初戦から153日あき。
+      expect(horse1.restRecord).not.toBeNull();
+      expect(horse1.restRecord!.今回間隔日数).toBe(111);
+      expect(horse1.restRecord!.走数).toBe(2);
+      expect(horse1.restRecord!.一着).toBe(1);
+      expect(horse1.restRecord!.着外).toBe(1);
+      expect(horse1.restRecord!.着順).toEqual([5, 1]);
+      // 純関数の出力とも一致する(配線のずれ防止)。
+      expect(horse1.restRecord).toEqual(summarizeRestRecord(restResults(), "2026/07/09"));
+    });
+
+    it("今回が休み明けでない馬(戦績なし・前走が近い)には restRecord が載らない(null)こと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, { 2: [fakeResult("2026/06/25", [1, 1], { finishPosition: { kind: "順位", value: 1 } })] }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      const horses = captured.value!.horses;
+      expect(horses.find((h) => h.umaban === 2)!.restRecord).toBeNull(); // 前走から14日。
+      expect(horses.find((h) => h.umaban === 3)!.restRecord).toBeNull(); // 戦績なし。
+    });
+
+    it("horseData.results が null(戦績取得失敗)でも例外にならず restRecord は null になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {});
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) => (h.shutuba.umaban === 1 ? { ...h, results: null } : h)),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+      await expect(
+        runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress),
+      ).resolves.toBeDefined();
+      expect(captured.value!.horses.find((h) => h.umaban === 1)!.restRecord).toBeNull();
+    });
+
+    it("過去走の bodyWeight・着順と当日 shutuba.bodyWeight から summarizeBestWeight を写した bestWeight が載ること(好走2走: 470・474)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(RACE_ID, { 1: restResults() })),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      // 手計算: 好走(3着以内)は2025/12/01(2着・470kg)と2025/11/01(1着・474kg)。5着・8着は除く。
+      // fakeHorse(1) の当日 bodyWeight は {480, 0} → 範囲470〜474に対して6kg重い。前走比0なので前走も480kg。
+      expect(horse1.bestWeight).not.toBeNull();
+      expect(horse1.bestWeight!.好走時体重).toEqual([470, 474]);
+      expect(horse1.bestWeight!.中央値).toBe(472);
+      expect(horse1.bestWeight!.今回).toEqual({ 体重: 480, 位置: "重い", 範囲外差: 6 });
+      expect(horse1.bestWeight).toEqual(
+        summarizeBestWeight(
+          restResults().map((r) => ({ bodyWeight: r.bodyWeight, finishPosition: r.finishPosition })),
+          { weight: 480, diff: 0 },
+        ),
+      );
+    });
+
+    it("当日の馬体重が未発表(null)の馬は bestWeight が null になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, { 1: restResults() });
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1 ? { ...h, shutuba: { ...h.shutuba, bodyWeight: null } } : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      expect(captured.value!.horses.find((h) => h.umaban === 1)!.bestWeight).toBeNull();
+    });
+
+    it("プロンプト行に「休み明け実績=」「ベスト体重=」が実際に描画され、各 note と一致すること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(RACE_ID, { 1: restResults() })),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      const line1 = buildPrompt(captured.value!)
+        .split("\n")
+        .find((l) => l.startsWith("馬番1 "))!;
+      expect(line1).toContain(`休み明け実績=${horse1.restRecord!.note}`);
+      expect(line1).toContain(`ベスト体重=${horse1.bestWeight!.note}`);
+      // 休み明けでない馬2の行には休み明け実績が出ない(ベスト体重は当日体重があるので好走0走として出る)。
+      const line2 = buildPrompt(captured.value!)
+        .split("\n")
+        .find((l) => l.startsWith("馬番2 "))!;
+      expect(line2).not.toContain("休み明け実績");
+      expect(line2).toContain("ベスト体重=好走時の体重データなし(サンプル不足)");
+    });
+
+    it("基準日以降の走(先読み)は休み明け実績・ベスト体重に混入しないこと(既存の基準日フィルタ越しに計算される)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              // 分析日(2026/07/09)より後の走: 先読みなので除外される。
+              fakeResult("2026/08/15", [1, 1], { finishPosition: { kind: "順位", value: 1 }, bodyWeight: { weight: 500, diff: 0 } }),
+              ...restResults(),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1.restRecord!.着順).toEqual([5, 1]);
+      expect(horse1.bestWeight!.好走時体重).toEqual([470, 474]);
+    });
+  });
+
   describe("人気・着順の乖離(タスク#7・未使用パラメータ活用②)の配線", () => {
     /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
     function analyzeCapturing(
@@ -1017,6 +1365,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1175,6 +1525,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1337,6 +1689,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1488,6 +1842,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1587,6 +1943,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1617,7 +1975,7 @@ describe("runAnalysis(分析パイプライン)", () => {
 
     it("getRaceResultDetailが2本以上の確定済み同面兄弟レースを返すとき、プロンプトに当日傾向行が出ること", async () => {
       const captured: { value: BuildPromptInput | null } = { value: null };
-      // RACE_ID(場コード05・東京・回次02・日次08・11R)の兄弟は先頭10桁+01〜12(11番を除く)。
+      // RACE_ID(場コード05・東京・回次02・日次08・11R)の lookup 対象は、先頭10桁+自番号より小さい01〜10だけ(Issue #153)。
       const map: Record<string, RaceResultDetail> = {
         "202605020801": frontLeaningDetail("芝"),
         "202605020802": frontLeaningDetail("芝"),
@@ -1720,6 +2078,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1762,6 +2122,7 @@ describe("runAnalysis(分析パイプライン)", () => {
         async (
           _raceId: RaceId,
           _conditions: GradeWinnerConditions,
+          _cutoffDate: string,
         ): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
       );
       const deps: AnalysisPipelineDeps = {
@@ -1772,10 +2133,12 @@ describe("runAnalysis(分析パイプライン)", () => {
       await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
 
       expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
-      const [calledRaceId, calledConditions] = getGradeWinnerTrend.mock.calls[0]!;
+      const [calledRaceId, calledConditions, calledCutoff] = getGradeWinnerTrend.mock.calls[0]!;
       expect(calledRaceId).toBe(RACE_ID);
       // RACE_ID(場コード05)→東京、fakeRaceDataの既定はcourseType="芝"・distance=1600。
       expect(calledConditions).toEqual({ trackCode: "05", track: "芝", kyori: 1600 });
+      // 先読みリークの遮断(Issue #153): 基準日は戦績の絞り込み(#39)と同じ分析日(開催日 YYYY/MM/DD)。
+      expect(calledCutoff).toBe("2026/07/09");
 
       expect(captured.value!.race.gradeWinnerTrend).toEqual(fakeGradeWinnerTrend());
       const promptText = buildPrompt(captured.value!);
@@ -1802,6 +2165,7 @@ describe("runAnalysis(分析パイプライン)", () => {
         async (
           _raceId: RaceId,
           _conditions: GradeWinnerConditions,
+          _cutoffDate: string,
         ): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
       );
       const deps: AnalysisPipelineDeps = {
@@ -1818,10 +2182,11 @@ describe("runAnalysis(分析パイプライン)", () => {
       );
 
       expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
-      const [calledRaceId, calledConditions] = getGradeWinnerTrend.mock.calls[0]!;
+      const [calledRaceId, calledConditions, calledCutoff] = getGradeWinnerTrend.mock.calls[0]!;
       expect(calledRaceId).toBe(NAR_RACE_ID);
       // NAR_RACE_ID(場コード54)→高知、fakeRaceDataの既定はcourseType="芝"・distance=1600。
       expect(calledConditions).toEqual({ trackCode: "54", track: "芝", kyori: 1600 });
+      expect(calledCutoff).toBe("2026/07/09");
       expect(captured.value!.race.gradeWinnerTrend).toEqual(fakeGradeWinnerTrend());
     });
 
@@ -2007,6 +2372,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2104,6 +2471,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: 0.5,
           reason: `根拠${h.umaban}`,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: false,
           mark: null,
@@ -2150,6 +2519,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2190,6 +2561,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2235,6 +2608,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2280,6 +2655,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2310,6 +2687,64 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(horse1.referenceEv).toBeNull(); // 複勝オッズ下限が無いため算出不可。
   });
 
+  it("result.rows[].winOdds に単勝オッズを供給する(Issue #90・#23-B2。promptInput.horsesと同じ供給元)", async () => {
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      baseDeps(),
+      onProgress,
+    );
+    const byUmaban = new Map(result.rows.map((r) => [r.umaban, r]));
+    // 1番: 単勝5.2倍(fakeRaceDataのwin[1].odds)。
+    expect(byUmaban.get(1)!.winOdds).toBe(5.2);
+    // 3番: 単勝オッズ欠損(fakeRaceDataのwin[3].odds=null)→ null。
+    expect(byUmaban.get(3)!.winOdds).toBeNull();
+  });
+
+  it("result.rows[].winOdds は yoso(複勝未発売)でも予想オッズ値をそのまま供給する(promptInput.horsesと同じ挙動)", async () => {
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "yoso")),
+    };
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+    const byUmaban = new Map(result.rows.map((r) => [r.umaban, r]));
+    expect(byUmaban.get(1)!.winOdds).toBe(5.2);
+    expect(byUmaban.get(1)!.evEstimated).toBe(true); // 前提(空振り防止): yosoで推定EV経路であること。
+  });
+
+  it("result.rows[].winOdds は値域外(0・1.0未満・非有限)でも生値のまま保持しnullに潰さない(placeOddsMinと同じ流儀)", async () => {
+    const base = fakeRaceData(RACE_ID, {}, "result");
+    const race: RaceData = {
+      ...base,
+      odds: {
+        ...base.odds,
+        win: {
+          ...base.odds.win,
+          1: { odds: 0, ninki: 1 },
+          2: { odds: 0.5, ninki: 2 },
+        },
+      },
+    };
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => race),
+    };
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+    const byUmaban = new Map(result.rows.map((r) => [r.umaban, r]));
+    expect(byUmaban.get(1)!.winOdds).toBe(0);
+    expect(byUmaban.get(2)!.winOdds).toBe(0.5);
+  });
+
   it("LLMがフェイルセーフで prior にフォールバックした場合、result.fallback=true を返す", async () => {
     const analyze = vi.fn(
       async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
@@ -2318,6 +2753,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior,
           reason: null,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: true,
           mark: null,
@@ -2354,6 +2791,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior,
           reason: null,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: true,
           mark: null,
@@ -2380,6 +2819,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior + 0.01,
           reason: "通常補正",
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: false,
           mark: null,
@@ -2409,6 +2850,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2446,6 +2889,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: "通常補正",
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null,
@@ -2473,6 +2918,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: "通常補正",
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null,
@@ -2514,6 +2961,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: "通常補正",
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null,
@@ -2543,6 +2992,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior + 0.05, // prior に戻さず、確率補正が有効なままであることを示す。
             reason: "調教良化",
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null, // A救済では全馬 mark=null。
@@ -2583,6 +3034,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null,
@@ -2626,6 +3079,8 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       }),
       now: () => FIXED_NOW,
       llmSkipReason: "APIキー未設定",
+      // Issue #59: この呼び出しでは配分計算を行わない(既存テストの回帰を防ぐ既定値)。
+      allocationSettings: null,
     });
   });
 
@@ -2764,9 +3219,9 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
     const hasOwn = (obj: object, key: string): boolean =>
       Object.prototype.hasOwnProperty.call(obj, key);
 
-    it("race.odds.wideCombo/trioCombo・race.meta.comboOddsが未設定(未取得)なら、結果のwideCombo/trioCombo/comboOddsもキー自体が無いままであること({}に化けないこと)", async () => {
-      // fakeRaceData(RACE_ID) は wideCombo/trioCombo/meta.comboOdds を持たない
-      // (scrapeRaceのincludeComboOdds未指定=既定の未取得状態を模す)。
+    it("race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaCombo・race.meta.comboOddsが未設定(未取得)なら、結果のwideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaCombo/comboOddsもキー自体が無いままであること({}に化けないこと。馬連はIssue #116 AC-4、馬単はIssue #122 AC-4、三連単はIssue #137 AC-2)", async () => {
+      // fakeRaceData(RACE_ID) は wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaCombo/
+      // meta.comboOdds を持たない(scrapeRaceのincludeComboOdds未指定=既定の未取得状態を模す)。
       const result = await runAnalysis(
         parseRaceId(RACE_ID),
         parseKaisaiDate(KAISAI),
@@ -2776,15 +3231,21 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
 
       expect(result.wideCombo).toBeUndefined();
       expect(result.trioCombo).toBeUndefined();
+      expect(result.quinellaCombo).toBeUndefined();
+      expect(result.exactaCombo).toBeUndefined();
+      expect(result.trifectaCombo).toBeUndefined();
       expect(result.comboOdds).toBeUndefined();
       // 「undefinedという値の代入」と「キー自体が無いこと」は違う(JSON.stringifyでは
       // 両者が区別できない)。hasOwnPropertyで直接キーの有無を見る。
       expect(hasOwn(result, "wideCombo")).toBe(false);
       expect(hasOwn(result, "trioCombo")).toBe(false);
+      expect(hasOwn(result, "quinellaCombo")).toBe(false);
+      expect(hasOwn(result, "exactaCombo")).toBe(false);
+      expect(hasOwn(result, "trifectaCombo")).toBe(false);
       expect(hasOwn(result, "comboOdds")).toBe(false);
     });
 
-    it("race.odds.wideCombo/trioComboが設定されていれば結果にそのまま伝播し、JSON往復(IPC相当)でも中身が消えないこと", async () => {
+    it("race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaComboが設定されていれば結果にそのまま伝播し、JSON往復(IPC相当)でも中身が消えないこと(馬連はIssue #116 AC-4、馬単はIssue #122 AC-4、三連単はIssue #137 AC-2)", async () => {
       const base = fakeRaceData(RACE_ID);
       const race: RaceData = {
         ...base,
@@ -2792,6 +3253,9 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
           ...base.odds,
           wideCombo: { "0102": 1.5, "0103": null },
           trioCombo: { "010203": 2.3 },
+          quinellaCombo: { "0104": 4.5, "0105": null },
+          exactaCombo: { "0106": 6.5, "0601": 9.8 },
+          trifectaCombo: { "010203": 15.2, "030201": 88.4 },
         },
       };
       const deps: AnalysisPipelineDeps = {
@@ -2808,14 +3272,23 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
 
       expect(result.wideCombo).toEqual({ "0102": 1.5, "0103": null });
       expect(result.trioCombo).toEqual({ "010203": 2.3 });
+      expect(result.quinellaCombo).toEqual({ "0104": 4.5, "0105": null });
+      // 順序付きキー("0106"と"0601")が別値のまま伝播すること(馬単固有の回帰観点)。
+      expect(result.exactaCombo).toEqual({ "0106": 6.5, "0601": 9.8 });
+      // 三連単も同じく順序付きキー("010203"と"030201")が別値のまま伝播すること。
+      expect(result.trifectaCombo).toEqual({ "010203": 15.2, "030201": 88.4 });
       // Mapではない(plainオブジェクト)ことを直接確認する(#33と同じ回帰観点)。
       expect(result.wideCombo instanceof Map).toBe(false);
       expect(result.trioCombo instanceof Map).toBe(false);
-      // boss指摘・要修正1: このケース(wideCombo/trioComboが有・comboOddsが無)で
-      // comboOddsのキー自体が無いことも固定する。comboOddsの条件式が
-      // `race.meta.comboOdds !== undefined || race.odds.wideCombo !== undefined` のように
-      // wideCombo側へ広がる変異(fail-open)は、wideComboが有るこのテストでこそ露呈する
-      // (fail-open変異は「選言が真になる状態でキー不在を主張する」テストでしか検知できない)。
+      expect(result.quinellaCombo instanceof Map).toBe(false);
+      expect(result.exactaCombo instanceof Map).toBe(false);
+      expect(result.trifectaCombo instanceof Map).toBe(false);
+      // boss指摘・要修正1: このケース(wideCombo/trioCombo/quinellaCombo/exactaCombo/
+      // trifectaComboが有・comboOddsが無)でcomboOddsのキー自体が無いことも固定する。
+      // comboOddsの条件式が`race.meta.comboOdds !== undefined || race.odds.wideCombo !==
+      // undefined` のようにwideCombo側へ広がる変異(fail-open)は、wideComboが有るこの
+      // テストでこそ露呈する(fail-open変異は「選言が真になる状態でキー不在を主張する」
+      // テストでしか検知できない)。
       expect(result.comboOdds).toBeUndefined();
       expect(hasOwn(result, "comboOdds")).toBe(false);
 
@@ -2824,16 +3297,29 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       const roundTripped = JSON.parse(JSON.stringify(result)) as {
         wideCombo: Record<string, number | null>;
         trioCombo: Record<string, number | null>;
+        quinellaCombo: Record<string, number | null>;
+        exactaCombo: Record<string, number | null>;
+        trifectaCombo: Record<string, number | null>;
       };
       expect(roundTripped.wideCombo).toEqual({ "0102": 1.5, "0103": null });
       expect(roundTripped.trioCombo).toEqual({ "010203": 2.3 });
+      expect(roundTripped.quinellaCombo).toEqual({ "0104": 4.5, "0105": null });
+      expect(roundTripped.exactaCombo).toEqual({ "0106": 6.5, "0601": 9.8 });
+      expect(roundTripped.trifectaCombo).toEqual({ "010203": 15.2, "030201": 88.4 });
     });
 
-    it("race.odds.wideCombo/trioComboが空オブジェクト(1件も取得できなかった。発売なし/取得失敗いずれの原因でも起こりうる)なら、結果も空オブジェクトのまま(undefinedへ化けない)であること(未取得との2状態を区別)", async () => {
+    it("race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaComboが空オブジェクト(1件も取得できなかった。発売なし/取得失敗いずれの原因でも起こりうる)なら、結果も空オブジェクトのまま(undefinedへ化けない)であること(未取得との2状態を区別。馬連はIssue #116 AC-4、馬単はIssue #122 AC-4、三連単はIssue #137 AC-2)", async () => {
       const base = fakeRaceData(RACE_ID);
       const race: RaceData = {
         ...base,
-        odds: { ...base.odds, wideCombo: {}, trioCombo: {} },
+        odds: {
+          ...base.odds,
+          wideCombo: {},
+          trioCombo: {},
+          quinellaCombo: {},
+          exactaCombo: {},
+          trifectaCombo: {},
+        },
       };
       const deps: AnalysisPipelineDeps = {
         ...baseDeps(),
@@ -2849,11 +3335,126 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
 
       expect(result.wideCombo).toEqual({});
       expect(result.trioCombo).toEqual({});
+      expect(result.quinellaCombo).toEqual({});
+      expect(result.exactaCombo).toEqual({});
+      expect(result.trifectaCombo).toEqual({});
       // 未取得(前テスト。キー自体が無い)とは異なり、こちらはキーが存在すること。
       expect(hasOwn(result, "wideCombo")).toBe(true);
       expect(hasOwn(result, "trioCombo")).toBe(true);
-      // boss指摘・要修正1: このケース(wideCombo/trioComboが有〈空〉・comboOddsが無)でも
-      // comboOddsのキー自体が無いことを固定する(fail-open変異の検知)。
+      expect(hasOwn(result, "quinellaCombo")).toBe(true);
+      expect(hasOwn(result, "exactaCombo")).toBe(true);
+      expect(hasOwn(result, "trifectaCombo")).toBe(true);
+      // boss指摘・要修正1: このケース(wideCombo/trioCombo/quinellaCombo/exactaCombo/
+      // trifectaComboが有〈空〉・comboOddsが無)でもcomboOddsのキー自体が無いことを固定する
+      // (fail-open変異の検知)。
+      expect(result.comboOdds).toBeUndefined();
+      expect(hasOwn(result, "comboOdds")).toBe(false);
+    });
+
+    it("quinellaComboのみ設定・wide/trioComboは未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース。馬連はIssue #116 AC-4)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          quinellaCombo: { "0104": 4.5 },
+          // wideCombo/trioComboはキー自体を持たせない(=未取得のまま)。
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.quinellaCombo).toEqual({ "0104": 4.5 });
+      expect(hasOwn(result, "quinellaCombo")).toBe(true);
+      expect(result.wideCombo).toBeUndefined();
+      expect(hasOwn(result, "wideCombo")).toBe(false);
+      expect(result.trioCombo).toBeUndefined();
+      expect(hasOwn(result, "trioCombo")).toBe(false);
+      // quinellaComboが有るこのケースでも、comboOddsの条件式がquinellaCombo側へ
+      // 広がる変異(fail-open)を検知できるよう、キー自体が無いことを固定する。
+      expect(result.comboOdds).toBeUndefined();
+      expect(hasOwn(result, "comboOdds")).toBe(false);
+    });
+
+    it("exactaComboのみ設定・wide/trio/quinellaComboは未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース。馬単はIssue #122 AC-4。exactaComboの条件式がwideCombo等と独立していることの回帰ピン)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          exactaCombo: { "0106": 6.5 },
+          // wideCombo/trioCombo/quinellaComboはキー自体を持たせない(=未取得のまま)。
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.exactaCombo).toEqual({ "0106": 6.5 });
+      expect(hasOwn(result, "exactaCombo")).toBe(true);
+      expect(result.wideCombo).toBeUndefined();
+      expect(hasOwn(result, "wideCombo")).toBe(false);
+      expect(result.trioCombo).toBeUndefined();
+      expect(hasOwn(result, "trioCombo")).toBe(false);
+      expect(result.quinellaCombo).toBeUndefined();
+      expect(hasOwn(result, "quinellaCombo")).toBe(false);
+      // exactaComboが有るこのケースでも、comboOddsの条件式がexactaCombo側へ
+      // 広がる変異(fail-open)を検知できるよう、キー自体が無いことを固定する。
+      expect(result.comboOdds).toBeUndefined();
+      expect(hasOwn(result, "comboOdds")).toBe(false);
+    });
+
+    it("trifectaComboのみ設定・wide/trio/quinella/exactaComboは未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース。三連単はIssue #137 AC-2。trifectaComboの条件式がwideCombo等と独立していることの回帰ピン)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          trifectaCombo: { "010203": 15.2 },
+          // wideCombo/trioCombo/quinellaCombo/exactaComboはキー自体を持たせない(=未取得のまま)。
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.trifectaCombo).toEqual({ "010203": 15.2 });
+      expect(hasOwn(result, "trifectaCombo")).toBe(true);
+      expect(result.wideCombo).toBeUndefined();
+      expect(hasOwn(result, "wideCombo")).toBe(false);
+      expect(result.trioCombo).toBeUndefined();
+      expect(hasOwn(result, "trioCombo")).toBe(false);
+      expect(result.quinellaCombo).toBeUndefined();
+      expect(hasOwn(result, "quinellaCombo")).toBe(false);
+      expect(result.exactaCombo).toBeUndefined();
+      expect(hasOwn(result, "exactaCombo")).toBe(false);
+      // trifectaComboが有るこのケースでも、comboOddsの条件式がtrifectaCombo側へ
+      // 広がる変異(fail-open)を検知できるよう、キー自体が無いことを固定する。
       expect(result.comboOdds).toBeUndefined();
       expect(hasOwn(result, "comboOdds")).toBe(false);
     });
@@ -3075,6 +3676,135 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       expect(hasOwn(result, "trioCombo")).toBe(true);
       expect(result.comboOdds).toEqual(comboOdds);
       expect(hasOwn(result, "comboOdds")).toBe(true);
+    });
+    describe("枠連(bracketQuinellaCombo。Issue #148・#26-E2)の伝播", () => {
+      /** 枠連の診断値(core ComboOddsFetchOutcome 相当。betTypeは"bracketQuinella")。 */
+      function fakeBracketOutcome() {
+        return {
+          state: "available",
+          diagnostics: {
+            betType: "bracketQuinella",
+            requestCount: 1,
+            expectedComboCount: 36,
+            obtainedComboCount: 36,
+            missingComboCount: 0,
+            axisUmabans: [],
+            attempts: [{ axis: null, state: "available", comboCount: 36 }],
+            numericConflictCount: 0,
+            nullWinConflictCount: 0,
+            conflictSamples: [],
+          },
+        } as const;
+      }
+
+      it("未設定(未取得)なら結果のbracketQuinellaComboもキー自体が無いままであること({}に化けない)", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          baseDeps(),
+          onProgress,
+        );
+
+        expect(result.bracketQuinellaCombo).toBeUndefined();
+        expect(hasOwn(result, "bracketQuinellaCombo")).toBe(false);
+      });
+
+      it("設定されていれば結果にそのまま(枠番4桁キーのまま)伝播し、JSON往復(IPC相当)でも消えず、comboOdds.bracketQuinellaも届くこと", async () => {
+        const base = fakeRaceData(RACE_ID);
+        const outcome = fakeBracketOutcome();
+        const race: RaceData = {
+          ...base,
+          odds: { ...base.odds, bracketQuinellaCombo: { "0407": 31.5, "0101": 63.5 } },
+          meta: { ...base.meta, comboOdds: { bracketQuinella: outcome } },
+        };
+        const deps: AnalysisPipelineDeps = { ...baseDeps(), scrape: vi.fn(async () => race) };
+
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          deps,
+          onProgress,
+        );
+
+        expect(result.bracketQuinellaCombo).toEqual({ "0407": 31.5, "0101": 63.5 });
+        expect(hasOwn(result, "bracketQuinellaCombo")).toBe(true);
+        expect(result.bracketQuinellaCombo instanceof Map).toBe(false);
+        expect(result.comboOdds?.bracketQuinella).toEqual(outcome);
+        const roundTripped = JSON.parse(JSON.stringify(result)) as {
+          bracketQuinellaCombo: Record<string, number | null>;
+        };
+        expect(roundTripped.bracketQuinellaCombo).toEqual({ "0407": 31.5, "0101": 63.5 });
+      });
+
+      it("空オブジェクト(発売なし等で1件も取れなかった)なら結果も空オブジェクトのまま(undefinedへ化けない)であること", async () => {
+        const base = fakeRaceData(RACE_ID);
+        const race: RaceData = { ...base, odds: { ...base.odds, bracketQuinellaCombo: {} } };
+        const deps: AnalysisPipelineDeps = { ...baseDeps(), scrape: vi.fn(async () => race) };
+
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          deps,
+          onProgress,
+        );
+
+        expect(result.bracketQuinellaCombo).toEqual({});
+        expect(hasOwn(result, "bracketQuinellaCombo")).toBe(true);
+      });
+
+      it("bracketQuinellaComboのみ設定・他の5券種は未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース)", async () => {
+        const base = fakeRaceData(RACE_ID);
+        const race: RaceData = {
+          ...base,
+          odds: { ...base.odds, bracketQuinellaCombo: { "0101": 63.5 } },
+        };
+        const deps: AnalysisPipelineDeps = { ...baseDeps(), scrape: vi.fn(async () => race) };
+
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          deps,
+          onProgress,
+        );
+
+        expect(result.bracketQuinellaCombo).toEqual({ "0101": 63.5 });
+        for (const key of [
+          "wideCombo",
+          "trioCombo",
+          "quinellaCombo",
+          "exactaCombo",
+          "trifectaCombo",
+          "comboOdds",
+        ]) {
+          expect(hasOwn(result, key)).toBe(false);
+        }
+      });
+
+      it("他の5券種のみ設定・bracketQuinellaComboは未設定のとき、結果にbracketQuinellaComboのキーが現れないこと(fail-open変異の検知)", async () => {
+        const base = fakeRaceData(RACE_ID);
+        const race: RaceData = {
+          ...base,
+          odds: {
+            ...base.odds,
+            wideCombo: { "0102": 1.5 },
+            trioCombo: { "010203": 2.3 },
+            quinellaCombo: { "0102": 3.0 },
+            exactaCombo: { "0102": 4.0 },
+            trifectaCombo: { "010203": 5.0 },
+          },
+        };
+        const deps: AnalysisPipelineDeps = { ...baseDeps(), scrape: vi.fn(async () => race) };
+
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          deps,
+          onProgress,
+        );
+
+        expect(result.trifectaCombo).toEqual({ "010203": 5.0 }); // 前提固定
+        expect(hasOwn(result, "bracketQuinellaCombo")).toBe(false);
+      });
     });
   });
 });

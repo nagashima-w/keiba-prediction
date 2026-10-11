@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040811",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 11,
+  "raceName": "秋風S",
+  "listedEntryCount": 14,
+  "status": "ok",
+  "courseType": "芝",
+  "distance": 1600,
+  "runnerCount": 14,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "エフォートレス",
+      "prior": 0.2402594335563947,
+      "placeOddsMin": 3.1,
+      "placeOddsMax": 4.6,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 19
+    },
+    {
+      "umaban": 2,
+      "horseName": "サウンドムーブ",
+      "prior": 0.32414135149032286,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 1.7,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 3,
+      "horseName": "ソルトブリーズ",
+      "prior": 0.32047976162344244,
+      "placeOddsMin": 1.8,
+      "placeOddsMax": 2.5,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    },
+    {
+      "umaban": 4,
+      "horseName": "フォルラニーニ",
+      "prior": 0.303320109471814,
+      "placeOddsMin": 1.9,
+      "placeOddsMax": 2.7,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 16
+    },
+    {
+      "umaban": 5,
+      "horseName": "グラニット",
+      "prior": 0.08099882308599105,
+      "placeOddsMin": 8.2,
+      "placeOddsMax": 12.4,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 32
+    },
+    {
+      "umaban": 6,
+      "horseName": "アルトゥーム",
+      "prior": 0.0951459380990094,
+      "placeOddsMin": 13.1,
+      "placeOddsMax": 20,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 25
+    },
+    {
+      "umaban": 7,
+      "horseName": "エスコバル",
+      "prior": 0.07003190609039042,
+      "placeOddsMin": 28.7,
+      "placeOddsMax": 43.8,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 22
+    },
+    {
+      "umaban": 8,
+      "horseName": "インパクトシー",
+      "prior": 0.1719149605706342,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.2,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 14
+    },
+    {
+      "umaban": 9,
+      "horseName": "ナヴォーナ",
+      "prior": 0.02,
+      "placeOddsMin": 15.3,
+      "placeOddsMax": 23.3,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 15
+    },
+    {
+      "umaban": 10,
+      "horseName": "ウォータークラーク",
+      "prior": 0.48383609145409523,
+      "placeOddsMin": 3,
+      "placeOddsMax": 4.4,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    },
+    {
+      "umaban": 11,
+      "horseName": "マイネルフルムーン",
+      "prior": 0.15393133478795692,
+      "placeOddsMin": 6.7,
+      "placeOddsMax": 10,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 14
+    },
+    {
+      "umaban": 12,
+      "horseName": "マテンロウブラボー",
+      "prior": 0.29350533511888466,
+      "placeOddsMin": 2.3,
+      "placeOddsMax": 3.3,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 15
+    },
+    {
+      "umaban": 13,
+      "horseName": "セブンマジシャン",
+      "prior": 0.17827482502279882,
+      "placeOddsMin": 3.6,
+      "placeOddsMax": 5.2,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 27
+    },
+    {
+      "umaban": 14,
+      "horseName": "テンミラクルスター",
+      "prior": 0.2691148329418135,
+      "placeOddsMin": 7.2,
+      "placeOddsMax": 10.9,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 261,
+      "removedCount": 14,
+      "removedByCutoffCount": 14,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:26:31.912Z"
+}

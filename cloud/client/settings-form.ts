@@ -1,0 +1,392 @@
+/**
+ * 設定画面の下書き・検証・表示用データ(Issue #189。純関数)。`view.ts` がこれを VNode にする。
+ *
+ * **下書きは文字列(数値欄は入力した文字のまま)・真偽は真偽値**で持つ。検証は保存の押下時に1回だけ(`validateDraft`。入力のたびには行わない=`change` で描画しない設計)。
+ * 検証の範囲は、サーバが 400 にする**書く側の述語**(`cloud/src/settings.ts` の `CLOUD_SETTINGS_RULES[key].isWritable`)をそのまま使う(範囲の定義は1か所)。
+ * 並びとラベルは exe の設定画面(`packages/app/src/renderer/SettingsView.tsx`)に合わせる(ラベルは exe の共有定数を流用)。**補助文は cloud の実際の挙動に合わせて書き直した**:
+ *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
+ *  - LLM を使うときだけ効く: 追加指示・クリップ幅(発走前の分析の LLM〈Issue #194〉で使う。Worker の API キーが未登録の間は LLM を使わないので効かない。補助文はキーの有無のどちらでも嘘にならない書き方)
+ *  - LLM を使うときだけ効く(分析モデル。Issue #158): 選んだ系統の最新のモデルで、保存後に次に始まる発走前の分析から使う
+ *  - 事前分析と発走前の分析の両方で効く: スコアリングの重み13項目(Issue #218。`WEIGHT_FIELD_ORDER`。`fields` ではなく専用の節〈`weights`〉に出す)。取得ステップで固定した設定のスナップショットで計算する
+ *  - 次の計画から効く: 発走何分前(定時の自動実行〈Issue #166・#206・#249〉の毎晩 21:00 の翌日分の計画で読み、計画の行に固定する。すでに計画した日の分は変わらない)
+ */
+import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/app/src/shared/settings";
+import {
+  ADDITIONAL_INSTRUCTION_MAX_LENGTH,
+  ANALYSIS_MODEL_IDS,
+  CLOUD_SETTINGS_KEYS,
+  CLOUD_SETTINGS_RULES,
+  DEFAULT_CLOUD_SETTINGS,
+  KELLY_FRACTION_WRITE_MIN,
+  PRE_RACE_OFFSET_MAX,
+  PRE_RACE_OFFSET_MIN,
+  SCORING_WEIGHT_FIELDS,
+  type CloudSettings,
+} from "../src/settings";
+import type { SettingsSource } from "./api-settings";
+import { MIGRATION_SETTINGS_SECTION } from "./migration-model";
+import { buildPreviewText } from "./prompt-preview";
+
+export type FieldKey = keyof CloudSettings;
+export type DraftValue = string | boolean;
+/** 下書き(項目 → 入力した文字、または真偽)。 */
+export type SettingsDraft = Readonly<Record<FieldKey, DraftValue>>;
+export type FieldErrors = Readonly<Partial<Record<FieldKey, string>>>;
+export type FieldKind = "text" | "checkbox" | "select" | "textarea";
+
+/** 画面の項目の並び(exe の設定画面の並び。発走何分前は cloud 専用なので末尾)。 */
+export const FIELD_ORDER: readonly FieldKey[] = [
+  "evThreshold",
+  "includeComboOdds",
+  "includeWideInAllocation",
+  "includeQuinellaInAllocation",
+  "includeBracketQuinellaInAllocation",
+  "includeExactaInAllocation",
+  "includeTrioInAllocation",
+  "includeTrifectaInAllocation",
+  "bankroll",
+  "perRaceCap",
+  "kellyFraction",
+  "additionalInstruction",
+  "clipVariant",
+  "analysisModel",
+  "preRaceOffsetMinutes",
+];
+
+/** スコアリングの重み13項目の並び(Issue #218。対応表 `SCORING_WEIGHT_FIELDS` の並び = exe の設定画面の並び: バイアス7 → 基礎6)。画面では `fields` とは別の節に出す。 */
+export const WEIGHT_FIELD_ORDER: readonly FieldKey[] = SCORING_WEIGHT_FIELDS.map((f) => f.field);
+
+const BOOLEAN_KEYS: ReadonlySet<FieldKey> = new Set(CLOUD_SETTINGS_KEYS.filter((k) => typeof CLOUD_SETTINGS_RULES[k].fallback === "boolean"));
+const KNOWN_KEYS: ReadonlySet<string> = new Set(CLOUD_SETTINGS_KEYS);
+
+/** 設定から下書きを作る(数値は文字列にする)。 */
+export function draftFromSettings(settings: CloudSettings): SettingsDraft {
+  const draft: Record<string, DraftValue> = {};
+  for (const key of CLOUD_SETTINGS_KEYS) {
+    const value = settings[key];
+    draft[key] = typeof value === "number" ? String(value) : value;
+  }
+  return draft as SettingsDraft;
+}
+
+/** 「重みを既定値に戻す」(Issue #218): 重み13項目の下書きだけを既定値(文字列)に戻した新しい下書きを返す(保存はしない。元は変えない。重み以外の項目は変えない)。 */
+export function resetWeightsInDraft(draft: SettingsDraft): SettingsDraft {
+  const next: Record<string, DraftValue> = { ...draft };
+  for (const key of WEIGHT_FIELD_ORDER) {
+    next[key] = String(DEFAULT_CLOUD_SETTINGS[key]);
+  }
+  return next as SettingsDraft;
+}
+
+/** 下書きの1項目を更新した新しい下書きを返す(元は変えない)。真偽の項目は `"true"`・`"false"`。未知の項目は無視する。 */
+export function setDraftValue(draft: SettingsDraft, key: FieldKey, value: string): SettingsDraft {
+  if (!KNOWN_KEYS.has(key)) return draft;
+  return { ...draft, [key]: BOOLEAN_KEYS.has(key) ? value === "true" : value };
+}
+
+/** 数値の入力(前後の空白は除く)。数字・小数点・符号・指数だけを受ける(16 進・Infinity・全角・カンマ区切りは不可)。 */
+function parseNumberInput(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === "" || !/^[0-9eE+\-.]+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 1,000,000 のような桁区切り。 */
+const withCommas = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+const ERROR_TEXT: Readonly<Record<FieldKey, (draftValue: DraftValue) => string>> = {
+  evThreshold: () => "0より大きい数値を入力してください(半角)。",
+  additionalInstruction: (v) => `${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)}文字以内で入力してください(現在 ${typeof v === "string" ? v.length : 0} 文字)。`,
+  clipVariant: () => "選択肢から選んでください。",
+  analysisModel: () => "選択肢から選んでください。",
+  bankroll: () => "0以上100,000,000以下の整数を入力してください(半角。0は未設定を表し、配分提案を出しません)。",
+  perRaceCap: () => "0以上10,000,000以下の整数を入力してください(半角。0は未設定を表し、配分提案を出しません)。",
+  kellyFraction: () => `${KELLY_FRACTION_WRITE_MIN}以上1以下の数値を入力してください(半角)。`,
+  includeComboOdds: () => "チェックの状態が不正です。",
+  includeWideInAllocation: () => "チェックの状態が不正です。",
+  includeTrioInAllocation: () => "チェックの状態が不正です。",
+  includeQuinellaInAllocation: () => "チェックの状態が不正です。",
+  includeExactaInAllocation: () => "チェックの状態が不正です。",
+  includeTrifectaInAllocation: () => "チェックの状態が不正です。",
+  includeBracketQuinellaInAllocation: () => "チェックの状態が不正です。",
+  preRaceOffsetMinutes: () => `${PRE_RACE_OFFSET_MIN}以上${PRE_RACE_OFFSET_MAX}以下の整数(分)を入力してください(半角)。`,
+  // スコアリングの重み13項目(Issue #218): exe の isValidWeight(有限な数で 0 以上。上限なし)と同じ範囲
+  ...(Object.fromEntries(WEIGHT_FIELD_ORDER.map((key) => [key, () => "0以上の数値を入力してください(半角)。"])) as Record<(typeof SCORING_WEIGHT_FIELDS)[number]["field"], () => string>),
+};
+
+export type DraftValidation = { readonly ok: true; readonly settings: CloudSettings } | { readonly ok: false; readonly errors: FieldErrors };
+
+/** 下書きを検証する(書く側の述語。保存の押下時に1回)。全項目が有効なら数値に直した設定、そうでなければ項目ごとのエラー。 */
+export function validateDraft(draft: SettingsDraft): DraftValidation {
+  const settings: Record<string, unknown> = {};
+  const errors: Partial<Record<FieldKey, string>> = {};
+  for (const key of CLOUD_SETTINGS_KEYS) {
+    const raw = draft[key];
+    const fallback = CLOUD_SETTINGS_RULES[key].fallback;
+    // 数値の項目は文字列を数値に直してから、書く側の述語に通す。それ以外はそのまま。
+    const candidate = typeof fallback === "number" ? (typeof raw === "string" ? parseNumberInput(raw) : null) : raw;
+    if (candidate !== null && (CLOUD_SETTINGS_RULES[key] as { isWritable(v: unknown): boolean }).isWritable(candidate)) {
+      settings[key] = candidate;
+    } else {
+      errors[key] = ERROR_TEXT[key](raw);
+    }
+  }
+  return Object.keys(errors).length === 0 ? { ok: true, settings: settings as unknown as CloudSettings } : { ok: false, errors };
+}
+
+export const SOURCE_NOTE_DEFAULT = "まだ保存されていません(既定値を表示しています)。";
+export const SOURCE_NOTE_INVALID = "保存済みの設定が読めないため、既定値を表示しています。保存すると置き換わります。";
+export const SAVED_NOTICE = "保存しました。次に実行する発走前の分析から使われます。";
+
+export type SettingsLoadState = { readonly kind: "loading" } | { readonly kind: "error"; readonly message: string } | { readonly kind: "ready"; readonly source: SettingsSource };
+export type SettingsSaveState = { readonly kind: "idle" } | { readonly kind: "saving" } | { readonly kind: "saved" } | { readonly kind: "error"; readonly message: string };
+
+export interface SettingsModelInput {
+  readonly load: SettingsLoadState;
+  readonly draft: SettingsDraft | null;
+  readonly errors: FieldErrors;
+  readonly save: SettingsSaveState;
+  /** プロンプトのプレビューを開いているか(Issue #201。省略は閉じている)。 */
+  readonly previewOpen?: boolean;
+}
+
+/** プロンプトのプレビューの表示用データ(Issue #201)。閉じているときは文面・注記・反映ボタンを持たない(文面は開いたときだけ組み立てる)。 */
+export interface PreviewModel {
+  readonly open: boolean;
+  readonly toggleLabel: string;
+  /** 「入力中の内容を反映」ボタンの文言(開いているときだけ)。 */
+  readonly refreshLabel: string | null;
+  /** 注記(開いているときだけ)。 */
+  readonly notes: readonly string[];
+  /** プレビューの文面(開いているときだけ。改行を含む)。 */
+  readonly text: string | null;
+}
+
+export interface FieldModel {
+  readonly key: FieldKey;
+  readonly kind: FieldKind;
+  readonly label: string;
+  readonly help: string | null;
+  readonly value: DraftValue;
+  readonly error: string | null;
+  readonly disabled: boolean;
+  /** 数字のキーボード(text の数値欄だけ)。 */
+  readonly inputmode: "numeric" | "decimal" | null;
+  /** 文字数の上限(textarea だけ)。 */
+  readonly maxlength: string | null;
+  readonly options?: readonly { readonly value: string; readonly label: string }[];
+}
+
+/** スコアリングの重みの節の表示用データ(Issue #218)。 */
+export interface WeightsModel {
+  readonly heading: string;
+  /** 節の説明(段落ごと)。 */
+  readonly help: readonly string[];
+  /** 小見出し付きの入力欄(exe と同じ: 環境・状態バイアス補正 7 → 基礎スコア 6)。 */
+  readonly groups: readonly { readonly heading: string; readonly fields: readonly FieldModel[] }[];
+  /** 「重みを既定値に戻す」ボタンの文言と、押せないか(保存中)。 */
+  readonly resetLabel: string;
+  readonly resetDisabled: boolean;
+}
+
+export interface SettingsModel {
+  readonly kind: "settings";
+  /** 戻り先(トップ=一覧)。 */
+  readonly backHref: "#";
+  readonly loading: boolean;
+  /** 取得の失敗(固定の文言)。 */
+  readonly error: string | null;
+  readonly sourceNote: string | null;
+  readonly saving: boolean;
+  readonly saveNotice: { readonly tone: "ok" | "error"; readonly text: string } | null;
+  readonly fields: readonly FieldModel[];
+  /** スコアリングの重みの節(Issue #218)。下書きを取得できていないとき(項目が出ないとき)は null。 */
+  readonly weights: WeightsModel | null;
+  /** プロンプトのプレビュー(Issue #201)。下書きを取得できていないとき(項目が出ないとき)は null。 */
+  readonly preview: PreviewModel | null;
+  /** 「exe から移行」の節(Issue #222。要点と移行の画面へのリンク。設定の取得の成否によらず出す)。 */
+  readonly migration: typeof MIGRATION_SETTINGS_SECTION;
+}
+
+const COMBO_NAME = "ワイド・馬連・馬単・三連複・三連単・枠連";
+const ALLOCATION_HELP = "既定は ON です。上の「オッズも取得する」が OFF の間は効果がありません(取得したオッズが無いため)。";
+/**
+ * 追加指示・クリップ幅の補助文。LLM は Worker の secret `ANTHROPIC_API_KEY` があるときだけ使う(Issue #194)ので、**キーの有無のどちらでも嘘にならない書き方**にする
+ * (画面からキーの有無は分からない)。画面に出す文なので、Issue 番号は書かない。
+ */
+const LLM_ONLY_HELP = "発走前の分析で LLM を使うときに効きます。API キーが未登録の間は LLM を使わないので、変更しても分析の結果は変わりません。";
+
+/** クリップ幅の選択肢のラベル。幅(%)は core の `CLIP_VARIANTS` の値(`client-settings-form.test.ts` が一致を固定)。 */
+const CLIP_LABELS: Readonly<Record<(typeof CLIP_VARIANT_IDS)[number], string>> = {
+  default: "対照(±10%、既定)",
+  wide15: "新版(±15%)",
+};
+
+/**
+ * 分析モデルの選択肢のラベル(Issue #158)。個別のモデル ID や日付付きの版は並べない(系統の最新を、分析のたびに解決する)。
+ * 「自動」は既定で、アプリの推奨に任せる設定(今は最新の Sonnet。Sonnet を選んだときと同じ)。
+ */
+const ANALYSIS_MODEL_LABELS: Readonly<Record<(typeof ANALYSIS_MODEL_IDS)[number], string>> = {
+  auto: "自動(最新の Sonnet、既定)",
+  sonnet: "Sonnet(最新版)",
+  opus: "Opus(最新版)",
+  haiku: "Haiku(最新版)",
+};
+
+/**
+ * 分析モデルの補助文。費用は相対表現にとどめる(金額・倍率は価格改定で嘘になるので書かない)。画面に出す文なので、Issue 番号は書かない。
+ * 「次に始まる発走前の分析から」: 計画・取得が済んだ分析は、取得時点の設定(スナップショット)のまま進むため。
+ */
+const ANALYSIS_MODEL_HELP =
+  `${LLM_ONLY_HELP}「自動」はアプリの推奨に任せる設定で、今は最新の Sonnet を使います(Sonnet を選んだときと同じです)。Opus は Sonnet より費用が高く、Haiku は安くなります。` +
+  "選んだモデルが使えなかったときは、動作確認済みの固定モデルに切り替えて分析を続けます。保存後、次に始まる発走前の分析から使われます。";
+
+const WEIGHTS_HEADING = "スコアリングの重み";
+/** 節の説明(画面に出る文なので、Issue 番号は書かない)。重みはバイアス補正・基礎スコアの補正の倍率。事前分析と発走前の分析の両方で使う。 */
+const WEIGHTS_HELP: readonly string[] = [
+  "各項目の補正の強さの倍率です(0 以上の数値。上限はありません)。既定値は exe と同じです。大きくしすぎると補正が過剰になり、確率が極端に偏ることがあるので、少しずつ変えてください。",
+  "事前分析と発走前の分析の両方で使われます。保存後に始まる準備・分析から反映され、すでに始まったタスクは始めたときの設定のままです。",
+];
+const WEIGHT_GROUP_HEADINGS: Readonly<Record<"bias" | "base", string>> = { bias: "環境・状態バイアス補正", base: "基礎スコア" };
+const WEIGHTS_RESET_LABEL = "重みを既定値に戻す";
+/** 騎手成績の重みの補助文: 分析のパイプライン(exe の runAnalysis と同じコード)が騎手の当該コース成績を渡さないため、今は結果に効かない。 */
+const JOCKEY_WEIGHT_HELP = "現在の分析では騎手の当該コース成績を取得していないため、この値を変えても結果は変わりません(exe と同じです)。";
+
+interface FieldSpec {
+  readonly kind: FieldKind;
+  readonly label: string;
+  readonly help: string | null;
+  /** select の選択肢(`kind: "select"` のとき)。 */
+  readonly options?: readonly { readonly value: string; readonly label: string }[];
+  readonly inputmode?: "numeric" | "decimal";
+  readonly maxlength?: string;
+}
+
+const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
+  evThreshold: { kind: "text", label: "EV閾値(この値を超える馬券を抽出。既定1.0)", help: "0より大きい数値。EV(的中確率 × オッズ)がこの値を超える馬券を、複勝と組合せの全券種で配分の候補にします。馬ごとの「EVプラス」の判定にも、同じ値を使います。", inputmode: "decimal" },
+  includeComboOdds: {
+    kind: "checkbox",
+    label: INCLUDE_COMBO_ODDS_LABELS.checkbox,
+    help: `既定は OFF です。ON にすると、発走前の分析で${COMBO_NAME}のオッズも取得します(取得するぶん分析に時間がかかります)。OFF の間は、組合せの券種は配分に入りません。三連単は中央競馬のみ取得します(地方競馬では取得しません)。`,
+  },
+  includeWideInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.wide.checkbox, help: ALLOCATION_HELP },
+  includeQuinellaInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.quinella.checkbox, help: ALLOCATION_HELP },
+  includeBracketQuinellaInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.bracketQuinella.checkbox, help: `${ALLOCATION_HELP}発売されていないレース(頭数が少ない場合など)では対象になりません。` },
+  includeExactaInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.exacta.checkbox, help: ALLOCATION_HELP },
+  includeTrioInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.trio.checkbox, help: ALLOCATION_HELP },
+  includeTrifectaInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.trifecta.checkbox, help: ALLOCATION_HELP },
+  bankroll: { kind: "text", label: BET_ALLOCATION_LABELS.bankroll, help: `${BET_ALLOCATION_LABELS.bankrollHelp}。0 以上 100,000,000 以下の整数(円)。0 のままだと配分の提案は出ません。`, inputmode: "numeric" },
+  perRaceCap: { kind: "text", label: BET_ALLOCATION_LABELS.perRaceCap, help: "1レースで使う金額の上限(円)。0 以上 10,000,000 以下の整数。0 のままだと配分の提案は出ません。", inputmode: "numeric" },
+  kellyFraction: { kind: "text", label: BET_ALLOCATION_LABELS.kellyFraction, help: "0.05〜1(既定 0.5)。小さいほど1回あたりの配分額が控えめになり、資産変動が穏やかになります。", inputmode: "decimal" },
+  additionalInstruction: {
+    kind: "textarea",
+    label: "プロンプト追加指示(任意)",
+    help: `${LLM_ONLY_HELP}${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)} 文字まで。市場オッズ(人気)に近づける方向の指示は、妙味検出を損なうため避けてください。`,
+    maxlength: String(ADDITIONAL_INSTRUCTION_MAX_LENGTH),
+  },
+  clipVariant: { kind: "select", label: "LLM補正の許容幅(クリップ幅の版。A/B比較用)", help: LLM_ONLY_HELP, options: CLIP_VARIANT_IDS.map((id) => ({ value: id, label: CLIP_LABELS[id] })) },
+  analysisModel: { kind: "select", label: "LLM分析のモデル", help: ANALYSIS_MODEL_HELP, options: ANALYSIS_MODEL_IDS.map((id) => ({ value: id, label: ANALYSIS_MODEL_LABELS[id] })) },
+  preRaceOffsetMinutes: {
+    kind: "text",
+    label: "発走の何分前に評価するか",
+    help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。変更は、毎晩 21:00(日本時間)に行う翌日分の事前分析の計画から反映されます。その時刻より前に保存した変更は、翌日の分から効きます。すでに計画した日の分は変わりません。`,
+    inputmode: "numeric",
+  },
+  // スコアリングの重み13項目(Issue #218)。ラベルは exe の共有定数。
+  ...(Object.fromEntries(
+    SCORING_WEIGHT_FIELDS.map((f): [string, FieldSpec] => [
+      f.field,
+      {
+        kind: "text",
+        label: f.group === "bias" ? BIAS_WEIGHT_LABELS[f.exeKey] : BASE_SCORE_WEIGHT_LABELS[f.exeKey],
+        help: f.field === "baseScoreWeightJockey" ? JOCKEY_WEIGHT_HELP : null,
+        inputmode: "decimal",
+      },
+    ]),
+  ) as Record<(typeof SCORING_WEIGHT_FIELDS)[number]["field"], FieldSpec>),
+};
+
+const PREVIEW_TOGGLE_OPEN = "LLMへ送るプロンプトのプレビューを開く";
+const PREVIEW_TOGGLE_CLOSE = "LLMへ送るプロンプトのプレビューを閉じる";
+const PREVIEW_REFRESH = "入力中の内容を反映";
+
+/**
+ * プレビューの注記(画面に出る文なので、Issue 番号は書かない)。exe の設定画面(`SettingsView.tsx`)の注記を踏襲し、cloud の実際の挙動に合わせた:
+ *  - 追加指示・クリップ幅は、exe のように入力の即時反映ではなく、「入力中の内容を反映」を押した時点の入力欄の内容で作る(入力のたびには再描画しない設計。`app.ts`)
+ *  - 実際の分析に使われるのは保存済みの内容(保存後、次に実行する発走前の分析から)
+ *  - **同日の傾向は、取り込み済みの前のレースが同じ場・同じ面で2つ以上あるときだけ、実際の分析でも送る**(Issue #209: `race-day-core.ts` が D1 の結果から当日傾向を作る)。
+ *    効くのは実質、中央のレース(地方の結果ページには通過順の列が無く、脚質傾向が「データ不足」になって傾向ごと送られない)。「発走の何分前に評価するか」が大きいと、前のレースの結果が間に合わず入らない。
+ *  - **重賞の傾向は、重賞のレース(出馬表に重賞のバッジがある)で、実際の分析でも送る**(Issue #181: 取得ステップが netkeiba から取ってキャッシュに載せ、計算ステップが使う)。
+ *    ただし、取得できて、条件に合う過去回が3回以上あるときだけ(core の `grade-winner-trend.ts` の `MIN_MATCHED_RACES = 3`。3回未満はブロックごと出ない)。サンプルには、どちらももともと含まれない。
+ */
+const PREVIEW_NOTES: readonly string[] = [
+  "※このプレビューはサンプルレースで作った例です。実際の分析では【レース情報】【展開想定】【出走馬】は分析対象レースの実データに置き換わります。【予想印】【出力スキーマ】は実際の分析でもこのままLLMへ送られます。【指示】も基本的にこのまま送られますが、天候・馬場が悪化条件(雨・稍重以下など)のレースでは「馬場悪化シナリオ」の指示が1文追加されます(このサンプルは晴・良のため出ていません)。",
+  "【追加指示】とクリップ幅(許容幅の表記)は、「入力中の内容を反映」を押した時点の入力欄の内容で作ります(入力しただけでは変わりません)。実際の分析に使われるのは保存済みの内容で、保存後、次に実行する発走前の分析から反映されます。",
+  "同日の傾向は、取り込み済みの前のレースが同じ場・同じ面で2つ以上あるときだけ、実際の分析でも送ります(中央のレースが対象です。地方は結果ページに通過順が無いため、ほとんど効きません)。「発走の何分前に評価するか」を大きくするほど、前のレースの結果が間に合わず入りません。重賞のレースでは、同じレースの過去10年の傾向も、取得できて条件に合う過去回が3回以上あるときだけ、実際の分析でも送ります。このサンプルには、どちらも含まれません。",
+];
+
+function buildPreviewModel(draft: SettingsDraft, open: boolean): PreviewModel {
+  if (!open) {
+    return { open: false, toggleLabel: PREVIEW_TOGGLE_OPEN, refreshLabel: null, notes: [], text: null };
+  }
+  const preview = buildPreviewText({ additionalInstruction: String(draft.additionalInstruction), clipVariant: String(draft.clipVariant) });
+  return {
+    open: true,
+    toggleLabel: PREVIEW_TOGGLE_CLOSE,
+    refreshLabel: PREVIEW_REFRESH,
+    notes: [
+      ...PREVIEW_NOTES,
+      ...(preview.clamped ? [`追加指示が ${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)} 文字(UTF-16 の単位)を超えているため、先頭から切った文面が送られます(このプレビューも切った後の文面です)。`] : []),
+      `プロンプト版: ${preview.promptVersion}`,
+    ],
+    text: preview.text,
+  };
+}
+
+export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
+  const { load, draft, errors, save } = input;
+  const ready = load.kind === "ready" && draft !== null;
+  const saving = save.kind === "saving";
+  const fieldOf = (key: FieldKey, draftNow: SettingsDraft): FieldModel => {
+    const spec = SPECS[key];
+    return {
+      key,
+      kind: spec.kind,
+      label: spec.label,
+      help: spec.help,
+      value: draftNow[key],
+      error: errors[key] ?? null,
+      disabled: saving,
+      inputmode: spec.inputmode ?? null,
+      maxlength: spec.maxlength ?? null,
+      ...(spec.options === undefined ? {} : { options: spec.options }),
+    };
+  };
+  const fields: FieldModel[] = ready ? FIELD_ORDER.map((key) => fieldOf(key, draft)) : [];
+  const weights: WeightsModel | null = ready
+    ? {
+        heading: WEIGHTS_HEADING,
+        help: WEIGHTS_HELP,
+        groups: (["bias", "base"] as const).map((group) => ({
+          heading: WEIGHT_GROUP_HEADINGS[group],
+          fields: SCORING_WEIGHT_FIELDS.filter((f) => f.group === group).map((f) => fieldOf(f.field, draft)),
+        })),
+        resetLabel: WEIGHTS_RESET_LABEL,
+        resetDisabled: saving,
+      }
+    : null;
+  return {
+    kind: "settings",
+    backHref: "#",
+    loading: load.kind === "loading",
+    error: load.kind === "error" ? load.message : null,
+    sourceNote: load.kind === "ready" ? (load.source === "default" ? SOURCE_NOTE_DEFAULT : load.source === "invalid" ? SOURCE_NOTE_INVALID : null) : null,
+    saving,
+    saveNotice: save.kind === "saved" ? { tone: "ok", text: SAVED_NOTICE } : save.kind === "error" ? { tone: "error", text: save.message } : null,
+    fields,
+    weights,
+    preview: ready ? buildPreviewModel(draft, input.previewOpen === true) : null,
+    migration: MIGRATION_SETTINGS_SECTION,
+  };
+}

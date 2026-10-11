@@ -6,7 +6,7 @@
  * 実ファイル書き込み(dialog.showSaveDialog → writeFileSync)は呼び出し側(main/ipc.ts)が担う。
  *
  * データの出どころ:
- * - meta/horses(prior・adjustedProb・ev・isPositive・mark・reason・placeOddsMin)は
+ * - meta/horses(prior・adjustedProb・ev・isPositive・mark・reason・highlights・concerns・placeOddsMin)は
  *   AnalysisStore.listAnalyses が返す StoredAnalysis(analyses・analysis_horses)から。
  *   placeOddsMinはスナップショットの生オッズではなく、実際にEV計算へ使った値(ev/isPositiveと対)を
  *   採用する。
@@ -23,7 +23,7 @@
  * AnalysisStore側で既に null にフォールバック済み(analysis-store.ts toStoredRaceSnapshot)。
  * ここではさらに「null」「スキーマに一致しないunknown値」のいずれでも例外を投げず、
  * スナップショット由来の項目だけを null にフォールバックする(analysis_horses由来の
- * prior/adjustedProb/ev/isPositive/mark/reason は StoredAnalysisHorse から独立して取得できるため
+ * prior/adjustedProb/ev/isPositive/mark/reason/highlights/concerns は StoredAnalysisHorse から独立して取得できるため
  * 影響を受けない)。
  *
  * 秘密安全性: 入力(BuildAnalysisExportInput)は StoredAnalysis・レース結果・会場名・ツール情報のみで
@@ -40,7 +40,7 @@ import type {
   RaceResultDetail,
   RaceResultEntry,
   StoredAnalysis,
-} from "@keiba/core";
+} from "@keiba/core/pipeline";
 
 /** schemaVersion の現行値(第一版)。 */
 export const ANALYSIS_EXPORT_SCHEMA_VERSION = 1 as const;
@@ -56,6 +56,11 @@ export interface RaceSnapshotRace {
   readonly fence: string | null;
   readonly oddsStatus: string | null;
   readonly officialDatetime: string | null;
+  /**
+   * グレード(Issue #250。"G1"〜"G3"・"J・G1"〜"J・G3"・地方の "Jpn1" や "重賞" など。出馬表の `grade` の写し)。
+   * **値があるときだけキーを持つ任意項目**: グレードの無いレース・グレードを保存する前に作った過去のスナップショットはキー自体が無い。
+   */
+  readonly grade?: string;
 }
 
 /** レース情報スナップショットの「馬」部分(Issue#10)。過去戦績は含めない。 */
@@ -87,17 +92,61 @@ export interface RaceSnapshot {
    * **この値自体は「JSON永続化用のスナップショット」であり、馬券配分の計算には使われない**
    * (この記述は今も正しい)。第4段(Issue #28)で券種横断の配分が実際に使うのは、
    * このスナップショットではなく**別の生きた経路**(`AnalysisResult.wideCombo` →
-   * `renderer/mixed-allocation-view.ts`。DB保存を経ずに分析結果からその場で計算する)である。
-   * 混同を避けるための補足: この`RaceSnapshot.wideCombo`はエクスポート・DB保存専用の写しに
-   * すぎず、配分計算の入力としては一切参照されない。
+   * `shared/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。Issue #57で
+   * `renderer/mixed-allocation-view.ts` から分離した。DB保存を経ずに分析結果からその場で
+   * 計算する)である。混同を避けるための補足: この`RaceSnapshot.wideCombo`はエクスポート・
+   * DB保存専用の写しにすぎず、配分計算の入力としては一切参照されない。
+   * **さらなる追記予定(#56-3)**: main が実際にこの経路を配線したら、「DB保存を経ずに
+   * 分析結果からその場で計算する」という記述は main 起点の呼び出しが生まれた分だけ
+   * 古くなる可能性があるため、#56-3 着手時にこの段落を再確認・再更新すること。
    */
   readonly wideCombo?: Record<string, number | null>;
   /** 三連複オッズ(機能D-2c第3段)。`wideCombo`と同じ条件・同じ理由でoptional。 */
   readonly trioCombo?: Record<string, number | null>;
   /**
-   * 組合せオッズの取得診断値(機能D-2c第3段)。`wideCombo`/`trioCombo`が空({})になった原因
-   * (発売なし/未発売なのか、取得失敗なのか)を判別する唯一の手段(`comboOdds.<betType>.state`)。
-   * core `RaceDataMeta.comboOdds`のプレーン写し。
+   * 馬連オッズ(Issue #116・#24-D3b-1)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * 配分・画面への配線はまだ無い(このスナップショットに保持するだけ)。
+   */
+  readonly quinellaCombo?: Record<string, number | null>;
+  /**
+   * 馬単オッズ(Issue #122・#24-E2)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * キーは順序付き(1着・2着の順序が意味を持つ)。配分・画面への配線はまだ無い
+   * (このスナップショットに保持するだけ。#123のスコープ)。
+   */
+  readonly exactaCombo?: Record<string, number | null>;
+  /**
+   * 三連単オッズ(Issue #137・#25-E2)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * キーは順序付き(1着・2着・3着の順序が意味を持つ。馬単`exactaCombo`と同じ性質)。
+   *
+   * **地方(NAR)では常に`undefined`**(ユーザー判断2026-09-27により地方の三連単は当面
+   * 取得しないため)。このスナップショット自体は保持・エクスポート専用の写しであり、
+   * 配分計算の入力としては一切参照されない(このファイル冒頭JSDocの`wideCombo`と同じ設計。
+   * 実際の配分接続〈Issue #139・#25-E3b〉は`AnalysisResult.trifectaCombo`
+   * 〈`shared/analysis-types.ts`〉側で完結している)。
+   *
+   * **サイズについての注記(2026-09-27実測。`docs/current-spec.md`参照)**: 出走頭数nに対し
+   * P(n,3)通りのキーを持ち(16頭なら3360キー・18頭なら4896キー)、`wideCombo`/`trioCombo`/
+   * `quinellaCombo`/`exactaCombo`より1桁多い。`analyses.race_snapshot_json`(SQLite TEXT列)
+   * へそのまま保存されるため、`includeComboOdds:true`の分析を保存するたびにこのぶんだけ
+   * DBサイズが増える(圧縮・保存方針の見直しは#53の範疇。本フィールド追加自体を妨げない)。
+   */
+  readonly trifectaCombo?: Record<string, number | null>;
+  /**
+   * 枠連オッズ(Issue #148・#26-E2)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * キーは**枠番**の組(2桁ゼロ埋め連結・昇順・同枠可。例"0407"・"0101")で、馬番ではない。
+   * 三連単と異なり中央・地方とも取得する。#148の時点では配分・画面への配線は無く(このスナップショットに
+   * 保持するだけだった)、設定の配管は#149で完了し、Issue #150(#26-E3b)で配分への接続・画面への
+   * 表示が完了した。枠番4桁キーは最大でも36件規模なので、三連単のような
+   * DBサイズの懸念はない。
+   */
+  readonly bracketQuinellaCombo?: Record<string, number | null>;
+  /**
+   * 組合せオッズの取得診断値(機能D-2c第3段。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・
+   * #24-E2、三連単はIssue #137・#25-E2、枠連はIssue #148・#26-E2で追加)。`wideCombo`/
+   * `trioCombo`/`quinellaCombo`/`exactaCombo`/`trifectaCombo`/`bracketQuinellaCombo`が空({})に
+   * なった原因(発売なし/未発売なのか、取得失敗
+   * なのか)を判別する唯一の手段(`comboOdds.<betType>.state`)。core
+   * `RaceDataMeta.comboOdds`のプレーン写し。
    */
   readonly comboOdds?: ComboOddsScrapeOutcome;
 }
@@ -119,6 +168,7 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
       fence: race.race.fence ?? null,
       oddsStatus: race.odds.oddsStatus,
       officialDatetime: race.odds.officialDatetime,
+      ...(race.race.grade !== undefined ? { grade: race.race.grade } : {}),
     },
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;
@@ -139,13 +189,23 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         oikiriRank: h.oikiri?.rank ?? null,
       };
     }),
-    // 組合せオッズ(ワイド・三連複、機能D-2c第3段・Issue #28): race.odds.wideCombo/trioCombo・
-    // race.meta.comboOdds はいずれも scrapeRace の options.includeComboOdds が true のときだけ
-    // 設定される optional フィールド。ここでは「写すだけ」で新たな解釈・変換は行わない
-    // (analysis-pipeline.ts の AnalysisResult 組み立て〈同じ写し方〉と同じ流儀。条件付きspreadで、
-    // 未設定〈undefined〉のときはキー自体を持たせない)。
+    // 組合せオッズ(ワイド・三連複・馬連・馬単・三連単〈中央のみ〉・枠連、機能D-2c第3段・Issue #28。
+    // 馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、
+    // 枠連はIssue #148・#26-E2で追加): race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/
+    // trifectaCombo/bracketQuinellaCombo・
+    // race.meta.comboOdds はいずれも scrapeRace の
+    // options.includeComboOdds が true のときだけ設定される optional フィールド。
+    // ここでは「写すだけ」で新たな解釈・変換は行わない(analysis-pipeline.ts の
+    // AnalysisResult 組み立て〈同じ写し方〉と同じ流儀。条件付きspreadで、未設定
+    // 〈undefined〉のときはキー自体を持たせない)。
     ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
     ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
+    ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),
+    ...(race.odds.exactaCombo !== undefined ? { exactaCombo: race.odds.exactaCombo } : {}),
+    ...(race.odds.trifectaCombo !== undefined ? { trifectaCombo: race.odds.trifectaCombo } : {}),
+    ...(race.odds.bracketQuinellaCombo !== undefined
+      ? { bracketQuinellaCombo: race.odds.bracketQuinellaCombo }
+      : {}),
     ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
   };
 }
@@ -168,8 +228,11 @@ const EMPTY_SNAPSHOT_RACE: RaceSnapshotRace = {
  * 解釈する。null・オブジェクトでない・想定した形と異なる場合は例外を投げず、
  * 「レース情報スナップショット全体が無い」ものとして扱う(防御的復元)。
  * horses は配列であれば要素ごとに umaban→馬情報のMapとして使えるようにする(不正な要素はスキップ)。
+ *
+ * Issue #183(#165-a)で export した(クラウド版の `GET /api/analyses/{id}` が、馬名・レース名を読むのに使う。関数の中身は無変更)。
+ * **値の型までは検証しない**(`name` が文字列とは限らない)ので、呼び出し側が必要な型へ絞ること。
  */
-function toSafeRaceSnapshot(raw: unknown): {
+export function toSafeRaceSnapshot(raw: unknown): {
   readonly race: RaceSnapshotRace;
   readonly horsesByUmaban: ReadonlyMap<number, RaceSnapshotHorse>;
 } {
@@ -268,6 +331,13 @@ export interface AnalysisExportHorse {
   readonly isPositive: boolean;
   readonly mark: string | null;
   readonly reason: string | null;
+  /**
+   * LLM が挙げた強調材料(Issue #199・#196-b。各最大3項目。LLM 未使用・項目なし・旧レコードは `[]`)。
+   * schemaVersion は 1 のまま(キーを足すだけなので、既存の読み手には後方互換)。
+   */
+  readonly highlights: readonly string[];
+  /** LLM が挙げた懸念事項(Issue #199。仕様は highlights と同じ)。 */
+  readonly concerns: readonly string[];
 }
 
 /** エクスポートJSONの実結果1頭分(schemaVersion=1)。 */
@@ -392,6 +462,8 @@ export function buildAnalysisExportDocument(
       isPositive: h.isPositive,
       mark: h.mark,
       reason: h.reason,
+      highlights: h.highlights,
+      concerns: h.concerns,
     };
   });
 
@@ -434,7 +506,7 @@ export function serializeAnalysisExportJson(doc: AnalysisExportDocument): string
 }
 
 /**
- * CSVのヘッダ順(AnalysisExportHorse + 結果4列)。
+ * CSVのヘッダ順(AnalysisExportHorse + 結果4列 + 強調材料・懸念事項の2列)。
  * code-reviewer提案対応: 相互運用の完全性のため、JSON側に既にある結果の passing・last3f も
  * CSVへ追加する(finishPosition・placePayoutと同じ「結果があれば結合」列)。
  */
@@ -463,6 +535,9 @@ const CSV_COLUMNS = [
   "placePayout",
   "last3f",
   "passing",
+  // Issue #199(#196-b): 既存列の位置を変えないため、末尾(passing の後)に足す。
+  "highlights",
+  "concerns",
 ] as const;
 
 /**
@@ -487,6 +562,19 @@ function csvEscape(value: string | number | boolean | null): string {
  */
 function formatPassingForCsv(passing: readonly number[]): string {
   return passing.length === 0 ? "" : passing.join("-");
+}
+
+/** CSV1セル内で強調材料・懸念事項の項目をつなぐ区切り(Issue #199)。 */
+export const CSV_LIST_SEPARATOR = " / ";
+
+/**
+ * 強調材料・懸念事項の配列をCSV1セル向けの文字列にする(例: ["A","B"] → "A / B")。空配列は空セルにする。
+ * ⚠️ 可逆ではない: 項目の文字列そのものに ` / ` が含まれると、セルから項目を厳密には復元できない
+ * (LLM が書く短い句に `/` が混じりうるため)。項目を正確に取り出したい読み手は JSON を使うこと。
+ * カンマ・引用符・改行を含む項目は、既存の csvEscape が引用符で囲むので列はずれない。
+ */
+function formatPointsForCsv(items: readonly string[]): string | null {
+  return items.length === 0 ? null : items.join(CSV_LIST_SEPARATOR);
 }
 
 /**
@@ -527,6 +615,8 @@ export function serializeAnalysisExportCsv(doc: AnalysisExportDocument): string 
       placePayout: result?.placePayout ?? null,
       last3f: result?.last3f ?? null,
       passing: result === undefined ? null : formatPassingForCsv(result.passing),
+      highlights: formatPointsForCsv(h.highlights),
+      concerns: formatPointsForCsv(h.concerns),
     };
     return CSV_COLUMNS.map((col) => csvEscape(record[col])).join(",");
   });

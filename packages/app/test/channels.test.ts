@@ -55,6 +55,10 @@ describe("IPCチャネル定義", () => {
     expect(IPC_CHANNELS.logRendererError).toBe("log:renderer-error");
   });
 
+  it("クラウド移行用の書き出しチャネルが定義されている(Issue #215)", () => {
+    expect(IPC_CHANNELS.exportCloudMigration).toBe("migration:export-cloud");
+  });
+
   it("ログフォルダを開く・ログエクスポート用のチャネルが定義されている(Task#36)", () => {
     expect(IPC_CHANNELS.openLogFolder).toBe("log:open-folder");
     expect(IPC_CHANNELS.exportLogs).toBe("log:export");

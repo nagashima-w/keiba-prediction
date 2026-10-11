@@ -21,7 +21,11 @@ import {
   computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
+  createCloudMigrationSource,
+  createModelSelector,
+  createSdkModelLister,
   DEFAULT_ANALYZER_CONFIG,
+  PRODUCTION_VERIFY_CONFIG,
   HttpClient,
   listNarRaces,
   listRaces,
@@ -31,11 +35,13 @@ import {
   scrapeRace,
   type BuildPromptInput,
   type ClipVariantId,
+  type CloudMigrationSource,
   type EvConfig,
   type FetchLike,
   type GradeWinnerConditions,
   type KaisaiDate,
   type MessageSender,
+  type ModelLister,
   type RaceId,
   type RaceListEntry,
   type ScorerConfig,
@@ -92,6 +98,13 @@ export interface PipelineWiringConfig {
    */
   readonly llmSender?: MessageSender;
   /**
+   * テスト専用: モデル一覧取得関数の差し替え(Issue #157)。
+   * 最新 Sonnet の自動選択(Models API)は、**この lister を注入したとき**または**llmSender を
+   * 注入していない本番**のときだけ有効になる。llmSender だけを注入して modelLister を注入していない
+   * 場合は自動選択をスキップして固定モデルを使う(テストが実 Models API を呼ぶ事故を防ぐ)。
+   */
+  readonly modelLister?: ModelLister;
+  /**
    * HTTP取得に使う fetch(注入)。
    *
    * Electron main では Electron の net.fetch アダプタ(net-fetch-adapter)を渡し、
@@ -125,6 +138,57 @@ export interface PipelineWiringConfig {
    * (第1段までの既定挙動と発行URL列・リクエスト数が完全に一致する)。
    */
   readonly includeComboOdds?: boolean;
+  /**
+   * 配分提案(Issue #59)の設定9項目(`bankroll`/`perRaceCap`/`kellyFraction`/
+   * `includeWideInAllocation`/`includeTrioInAllocation`/`includeQuinellaInAllocation`/
+   * `includeExactaInAllocation`/`includeTrifectaInAllocation`/`includeBracketQuinellaInAllocation`)。`includeComboOdds`は含めない
+   * (上記の`includeComboOdds`が単一ソース。ここへ二重に持たせない。#59 4節)。省略時は
+   * `AnalysisPipelineDeps.allocationSettings` が null になり、この呼び出しでは配分計算を行わない
+   * (既存呼び出し元・`pipeline-deps.test.ts`の20箇所超との後方互換のためこのフィールド自体は
+   * 任意のままとする。#59着手前確認済み)。
+   *
+   * `includeQuinellaInAllocation`(#24-D3a・Issue #115)は5→6項目化した追加分。
+   * `includeExactaInAllocation`(#24-E3a・Issue #124)は6→7項目化した追加分。ここで
+   * 受け取り、下でincludeComboOddsと合成した`AnalysisAllocationSettings`(main/allocation-record.ts)
+   * までそのまま運ぶ。`allocation-record.ts`のメタ行(`analysis_allocation_meta`)への書き込みは、
+   * 馬連はIssue #118、馬単はIssue #126(#24-E3c)で列一覧の凍結を解除して接続した
+   * (`allocation-record.ts`冒頭のJSDoc参照)。
+   *
+   * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は7→8項目化した追加分。
+   * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #139(#25-E3b)で完了した。
+   * メタ行への書き込み(`include_trifecta`列)はIssue #140(#25-E3c)で接続した(`allocation-record.ts`冒頭のJSDoc参照)。
+   *
+   * `includeBracketQuinellaInAllocation`(#26-E3a・Issue #149)は8→9項目化した追加分。三連単(#25-E3a)と
+   * 同じ経緯を辿る: この型に持たせる目的は`AnalysisAllocationSettings`(9→10項目)まで値を運ぶ
+   * 配管の一部として始まり、`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続は
+   * #26-E3b(Issue #150)で完了した。メタ行への書き込み(`include_bracket_quinella`列)は
+   * #26-E3c(Issue #151)で接続した(`allocation-record.ts`冒頭のJSDoc参照)。
+   */
+  readonly allocationSettings?: {
+    readonly bankroll: number;
+    readonly perRaceCap: number;
+    readonly kellyFraction: number;
+    readonly includeWideInAllocation: boolean;
+    readonly includeTrioInAllocation: boolean;
+    readonly includeQuinellaInAllocation: boolean;
+    readonly includeExactaInAllocation: boolean;
+    readonly includeTrifectaInAllocation: boolean;
+    readonly includeBracketQuinellaInAllocation: boolean;
+  };
+  /**
+   * better-sqlite3 のネイティブバインディング(.node)の絶対パス(Issue #60-B)。
+   *
+   * 背景: bindings パッケージは呼び出し元のスタックトレースからモジュールルートを推測して
+   * .node を探すが、packaged(asar化)実行では推測が崩れて `Could not locate the bindings file`
+   * になりうる(実機バグ報告)。この推測を経路ごと外すため、packaged 時は呼び出し側(ipc.ts)が
+   * app.asar.unpacked 配下の絶対パスを解決・実在確認した上でここへ渡し、
+   * `new Database(dbPath, { nativeBinding })` として明示指定する。
+   * 省略時(非packaged・開発・vitest)は従来どおり `new Database(dbPath)` のみで、
+   * bindings パッケージの推測解決に委ねる(挙動を変えない)。
+   * このモジュールは electron に依存させないため、解決・実在確認そのものは行わない
+   * (呼び出し側から解決済みの値を受け取るだけ)。
+   */
+  readonly nativeBindingPath?: string;
 }
 
 /** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
@@ -176,6 +240,12 @@ export interface PipelineResources {
    * buildAnalysisExportDocument へ渡す。
    */
   readonly getAnalysisExportInput: (raceId: RaceId) => AnalysisExportSource | null;
+  /**
+   * クラウド移行用の書き出し元(Issue #215・#167-A)。同じ DB 接続に対するキーセット・ページングの読み出し
+   * (ページごとに同期で `.all()` し、イテレータを await をまたいで持たない)。行の生成・gzip・書き込みは
+   * 呼び出し側(main/ipc.ts → cloud-migration-export.ts)が担う。
+   */
+  readonly cloudMigrationSource: CloudMigrationSource;
   /** DB接続などを閉じる。 */
   readonly close: () => void;
 }
@@ -196,7 +266,13 @@ export function shouldUseLlm(apiKey: string | undefined): boolean {
 export function createPipelineDeps(
   config: PipelineWiringConfig,
 ): PipelineResources {
-  const db = new Database(config.dbPath);
+  // nativeBindingPath(Issue #60-B)を渡された場合のみ明示指定する。bindings パッケージの
+  // スタックトレース探索は packaged 実行での失敗要因になり得るため、その経路自体を通さない。
+  // 省略時(非packaged・開発・vitest)は従来どおり第2引数無しで開き、bindings に解決を委ねる。
+  const db =
+    config.nativeBindingPath !== undefined
+      ? new Database(config.dbPath, { nativeBinding: config.nativeBindingPath })
+      : new Database(config.dbPath);
   const cache = new ScrapeCache({ database: db });
   // fetch を注入すると undici 既定経路を通らず、Electron main では net.fetch(Chromium スタック)で取得する。
   const httpClient = new HttpClient({ fetch: config.fetch, onWarn: config.onWarn });
@@ -213,6 +289,21 @@ export function createPipelineDeps(
   // deps.clipVariant(analysis-pipeline.ts が promptInput.clipVariant・promptVersion の解決に使う)の
   // 両方に同じ変数を使う(単一ソース。文面とクリップ幅が別々の値を参照して食い違う余地を無くす)。
   const clipVariant = resolveClipVariant(config.clipVariant);
+  // モデルの自動選択(Issue #157)。AnthropicLlmClient は1レースごとに new されるため、一覧の取得結果
+  // (遅延・メモ化・失敗もメモ化)と降格の記憶は、deps 単位で1つ持つ selector に置く。
+  // lister は、テスト注入(config.modelLister)か、sender 未注入の本番(実 Models API)のときだけ使う。
+  // sender だけ注入されている場合は null(自動選択スキップ=固定モデル)。
+  const modelLister =
+    config.modelLister ??
+    (config.llmSender === undefined ? createSdkModelLister({ apiKey: config.apiKey }) : null);
+  const modelSelector =
+    useLlm && modelLister !== null
+      ? createModelSelector({
+          lister: modelLister,
+          fixedModel: DEFAULT_ANALYZER_CONFIG.model,
+          onWarn: config.onWarn,
+        })
+      : undefined;
   const analyze = useLlm
     ? (input: BuildPromptInput) =>
         analyzeRace(input, {
@@ -220,11 +311,18 @@ export function createPipelineDeps(
           // AnthropicLlmClient の既定sender=実SDK呼び出しのまま。本番挙動は不変)。
           llm: new AnthropicLlmClient(
             { apiKey: config.apiKey },
-            config.llmSender ? { sender: config.llmSender } : {},
+            {
+              ...(config.llmSender ? { sender: config.llmSender } : {}),
+              ...(modelSelector !== undefined ? { modelSelector } : {}),
+              ...(config.onWarn !== undefined ? { onWarn: config.onWarn } : {}),
+            },
           ),
           maxAdjust: clipVariant.maxAdjust,
         })
     : null;
+  // 組合せオッズ取得可否(機能D-2c第3段・Issue #28)を1回だけ解決し、scrapeRace束縛と
+  // deps.allocationSettings(Issue #59)の両方にこの同じ値を使う(#59 4節「二重定義を作らない」)。
+  const includeComboOdds = config.includeComboOdds ?? false;
 
   const deps: AnalysisPipelineDeps = {
     // 組合せオッズ(ワイド・3連複、機能D-2c第3段・Issue #28): 設定画面のチェックボックス
@@ -235,16 +333,27 @@ export function createPipelineDeps(
     // 組合せオッズはcore側〈scrape-race.ts:446〉が単勝・複勝と同じoddsFetchOptionsを流用するため、
     // ここを触ると単勝・複勝のキャッシュ挙動まで変わる)。
     scrape: (raceId: RaceId) =>
-      scrapeRace(raceId, { fetcher }, { includeComboOdds: config.includeComboOdds ?? false }),
+      scrapeRace(raceId, { fetcher }, { includeComboOdds }),
     analyze,
     saveAnalysis: (record) => store.saveAnalysis(record),
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。
     scorerConfig: config.scorerConfig,
     evConfig: config.evConfig,
+    // 配分提案(Issue #59)。config.allocationSettings(9項目)にincludeComboOdds(上で1回だけ
+    // 解決した値。scrape束縛と同じ値)を合成して10項目にする。config.allocationSettingsが
+    // 省略時はnull(この呼び出しでは配分計算を行わない。required-nullableの契約は
+    // analysis-pipeline.ts AnalysisPipelineDeps.allocationSettings参照)。
+    allocationSettings:
+      config.allocationSettings !== undefined
+        ? { ...config.allocationSettings, includeComboOdds }
+        : null,
     additionalInstruction: config.additionalInstruction,
     clipVariant: clipVariant.id,
-    // 使用するLLMモデル名(Issue#10)。LLM使用時のみ既定モデル名(anthropic-client.tsの
-    // DEFAULT_ANALYZER_CONFIG.model)を注入する。LLM未使用時はundefinedのまま
+    // 使用するLLMモデル名(Issue#10)。LLM使用時のみ既定(固定)モデル名(anthropic-client.tsの
+    // DEFAULT_ANALYZER_CONFIG.model)を注入する。Issue #157 以降、実際に使ったモデルは自動選択の結果で
+    // 変わるため、保存・表示には analyzeRace の modelUsed(応答の model)を優先し、この値は
+    // modelUsed が得られなかった場合(HTTPエラー・ネットワーク断等で応答自体が毎回得られなかった等)の代用にだけ使う。
+    // LLM未使用時はundefinedのまま
     // (analysis-pipeline.ts側でllmUsed===falseのため、設定されていても保存レコードには使われない。
     // 二重の安全策として、そもそも注入自体もLLM使用時に限定する)。
     modelName: useLlm ? DEFAULT_ANALYZER_CONFIG.model : undefined,
@@ -253,8 +362,13 @@ export function createPipelineDeps(
     getRaceResultDetail: (raceId: RaceId) => store.getRaceResultDetail(raceId),
     // 同レース(重賞)の過去10年結果傾向(タスク機能B)。fetcher(既存のCachedFetcher。中央・地方
     // いずれもホスト自動選択で取得できる)で束縛した collectGradeWinnerTrend をそのまま渡す。
-    getGradeWinnerTrend: (raceId: RaceId, conditions: GradeWinnerConditions) =>
-      collectGradeWinnerTrend(raceId, conditions, { fetcher }),
+    // 第3引数の基準日(分析日。Issue #153)は先読みリーク(当該回自身・基準日以降の回)の除外に使うため、
+    // 落とさず collectGradeWinnerTrend へ素通しする(必須引数。落とすと型エラーになる)。
+    getGradeWinnerTrend: (
+      raceId: RaceId,
+      conditions: GradeWinnerConditions,
+      cutoffDate: string,
+    ) => collectGradeWinnerTrend(raceId, conditions, cutoffDate, { fetcher }),
     // 要修正10: getGradeWinnerTrendが例外を投げた(構造破壊・API仕様変更等の本物の異常)ときの
     // 診断ログを、HttpClientの警告と同じ既存チャンネル(config.onWarn→ipc.tsのlogWarn)へ流す。
     // 非重賞NG(status:NG)・条件一致3回未満のような正常系のnull返却は例外を投げないため、
@@ -288,24 +402,28 @@ export function createPipelineDeps(
         // 常にライブ取得(キャッシュ毒化回避)。パース失敗時は saveResult に到達しない。
         fetchText: (url, options) => fetcher.fetchText(url, options),
         parse: parseRaceResult,
-        // courseType(面、タスク#27-A2)を素通しする。ここで引数を落とすと、
-        // importRaceResult が渡す result.courseType が本番経路で握り潰される
-        // (テストは緑でも実際にはrace_result_metaへ書かれない)ため、必ず転送する。
-        saveResult: (rid, entries, courseType) =>
-          store.saveResult(rid, entries, courseType),
+        // courseType(面、タスク#27-A2)・comboPayouts(ワイド・3連複、Issue #52)を素通しする。
+        // ここで引数を落とすと、importRaceResult が渡す result.courseType /
+        // widePayouts・trioPayouts が本番経路で握り潰される(テストは緑でも実際には
+        // race_result_meta・race_combo_payoutsへ書かれない。#27-A2と同型の事故)ため、
+        // 必ず転送する(boss裁定R-8)。
+        saveResult: (rid, entries, courseType, comboPayouts) =>
+          store.saveResult(rid, entries, courseType, comboPayouts),
       }),
     listUnimportedRaceIds: (): readonly string[] => store.listUnimportedRaceIds(),
     listAnalyzedRaceIdsByPromptVersion: (version: string): readonly string[] =>
       store.listAnalyzedRaceIdsByPromptVersion(version),
     getVerifyReport: (venueKind?: VerifyVenueFilter): VerifyReportView =>
-      computeVerifyReport(store, undefined, venueKind),
+      computeVerifyReport(store, PRODUCTION_VERIFY_CONFIG, venueKind),
     getVerifyReportByPromptVersion: (): readonly PromptVersionVerifyReportView[] =>
-      computeVerifyReportByPromptVersion(store),
+      computeVerifyReportByPromptVersion(store, PRODUCTION_VERIFY_CONFIG),
     deleteUnknownPromptVersionAnalyses: (): DeleteUnknownPromptVersionAnalysesResult => ({
       deletedCount: store.deleteAnalysesWithUnknownPromptVersion(),
     }),
     getRaceLedger: (): readonly RaceLedgerView[] =>
-      buildRaceLedgerView(computeRaceLedger(store)),
+      buildRaceLedgerView(computeRaceLedger(store), (analysisId) =>
+        store.getStoredAllocation(analysisId),
+      ),
     getAnalysisExportInput: (raceId: RaceId): AnalysisExportSource | null => {
       const latest = pickLatestAnalysis(store.listAnalyses({ raceId }));
       if (latest === null) {
@@ -318,6 +436,7 @@ export function createPipelineDeps(
         resultDetail: store.getRaceResultDetail(raceId),
       };
     },
+    cloudMigrationSource: createCloudMigrationSource(store.rawDatabase),
     close: () => db.close(),
   };
 }

@@ -10,12 +10,50 @@
  *
  * 着順は「中止」「除外」等の非数値があり得るため、数値順位か種別かを判別可能な型で返す
  * (スコアリングでの除外判定に使う)。
+ *
+ * ## 単勝オッズ列(COL.odds)の数値化(Issue #73 R1。boss メタレビュー2026-09-03指摘)
+ * `types.ts` が「単勝オッズ」と明記する `odds` フィールドは、`raceNumber`/`entryCount`/
+ * `wakuban`/`umaban`/`kinryo`/`margin`/`last3f` と共用の汎用ヘルパ `numberOrNull`
+ * (`Number(t)`直呼び)ではなく、共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber`
+ * に委譲する(odds列だけを切り出す。他7フィールドは引き続き `numberOrNull` のまま。
+ * 〈Issue #75 で `ninki` は `numberOrNull` から `scraper/ninki.ts` の `toNinki` に移した。
+ * 当時は他8フィールドだった〉。再現
+ * (コメント行を構造的に除外する。単一ファイルを `grep -n`(`-r` なし)で走査する場合、
+ * 出力は `NN:内容` 形式で先頭にファイル名が付かないため、`parse-combo-odds.ts` が使う
+ * `:[0-9]+: *\*`〈`grep -rn` の複数ファイル出力 `path:NN: *…` を前提〉ではコメント行を
+ * 除外できない〈boss メタレビュー2026-09-03指摘。第2段までの出力が9〈定義1+呼び出し8〉
+ * ではなく10になることで発覚した〉。単一ファイル出力の形式 `^NN: *…` に合わせたパターンを
+ * 使う。この行自体が `*` で始まるコメント行のため自己参照で数が変わらない):
+ * `grep -n "numberOrNull(" packages/core/src/scraper/parse-horse-results.ts | grep -vE '^[0-9]+: *\*' | grep -v "function numberOrNull"`
+ * → 7行〈raceNumber・entryCount・wakuban・umaban・kinryo・margin・last3f〉
+ * (Issue #75 で `ninki` が抜けた。`ninki` を含む旧版は8行)。
+ * 第2段(コメント行除外)までは8行〈定義1+呼び出し7〉であることも実測済み)。
+ *
+ * 判断: **(a) odds列だけを共有ヘルパへ委譲する**を選択した。理由は #73 の趣旨
+ * 「同一概念(単勝オッズの数値化)が同一リポジトリ内で異なる契約を持つ状態を残さない」
+ * (`scraper/odds-number.ts` JSDoc参照)がここにも直接当てはまるため。
+ *
+ * 実測(severityは低い。放置してもよいと早合点しないための記録):
+ * 実フィクスチャ5件・72行(`fixtures/horse_results_*.json`)を実パーサに通したところ、
+ * カンマ入りセル0件・null(空セル)3件・最大値313.1(いずれも本ヘルパへの委譲前後で
+ * 出力不変を実測確認済み)。指数表記("1e3"等)・符号付き表記("+1.5"等)も0件で、
+ * `numberOrNull`と`toOddsNumber`の契約差(桁区切りカンマ・指数表記・符号)がこのフィクスチャ
+ * 集合には現れていない。消費側も実測: `scraper/parse-horse-results.ts` が返す
+ * `HorseRaceResult.odds` を読む `scorer/*.ts`・`derive-features.ts`・`prior.ts`・
+ * `snapshot-filter.ts` はいずれも参照0件(grep実測)であり、app側の永続化・表示にも
+ * 現れない。
  */
 
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
 import { parseRaceId, type RaceId } from "./ids.js";
-import { HORSE_RESULTS_SELECTORS as SEL, PATTERNS } from "./selectors.js";
+import { toNinki } from "./ninki.js";
+import { toOddsNumber } from "./odds-number.js";
+import {
+  HORSE_RESULTS_EMPTY_NOTICE,
+  HORSE_RESULTS_SELECTORS as SEL,
+  PATTERNS,
+} from "./selectors.js";
 import type {
   BodyWeight,
   CourseType,
@@ -205,11 +243,41 @@ function classifyRace($cell: ReturnType<CheerioAPI>): RaceClassification {
   return { raceId: null, raceIdRaw: raw, venueKind: "地方" };
 }
 
+/** 空白(全角・改行を含む)を1個にまとめてトリムする。 */
+function normalizeText(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * 戦績テーブルの無い応答が「出走歴の無い馬(初出走)の正常な応答」かを判定する(Issue #228)。
+ *
+ * 次の**両方**を満たすときだけ真にする(どちらかが欠けた応答は壊れた応答として扱う):
+ * - 見出し `div.cate_bar h2` が `{馬名}の競走成績` で、馬名が空でない
+ *   (存在しない馬IDの応答は見出しの馬名が空で、本文の文言は初出走馬と同じになるため、これで区別する)
+ * - 本文ブロック `div.contents` が1個以上あり、**すべて**の本文が文言 {@link HORSE_RESULTS_EMPTY_NOTICE} と
+ *   完全一致する(他の文言が混じる・文言が別の場所にあるだけ・ブロックが無い、は壊れた応答)
+ *
+ * 空白・改行はテンプレートの揺れ(実応答でも取得時期で空白の入り方が違った)に備えて無視する。
+ */
+function isNoRaceHistoryPage($: CheerioAPI): boolean {
+  const heading = normalizeText($(SEL.heading).first().text());
+  // `.+` が1文字以上を要求する(見出しは正規化・トリム済みなので、馬名が空白だけの見出しも「の競走成績」になり一致しない)。
+  if (!/^.+の競走成績$/.test(heading)) {
+    return false;
+  }
+  const $blocks = $(SEL.emptyNoticeBlock);
+  return (
+    $blocks.length > 0 &&
+    $blocks.toArray().every((el) => normalizeText($(el).text()) === HORSE_RESULTS_EMPTY_NOTICE)
+  );
+}
+
 /**
  * 全戦績のAPI JSON文字列をパースする。
  *
  * @param json ajax_horse_results のJSON文字列
- * @returns 1走ずつの戦績配列(HTML上の並び=新しい順)
+ * @returns 1走ずつの戦績配列(HTML上の並び=新しい順)。初出走馬(正常な応答で出走歴が無い)は空配列
+ *   (取得失敗=`null` とは別。判定は {@link isNoRaceHistoryPage})。
  */
 export function parseHorseResults(json: string): HorseRaceResult[] {
   let parsed: ResultsResponse;
@@ -231,6 +299,11 @@ export function parseHorseResults(json: string): HorseRaceResult[] {
   const $ = cheerio.load(parsed.data);
   const $table = $(SEL.table).first();
   if ($table.length === 0) {
+    // 戦績テーブルが無い応答は2種類ある。初出走馬(正常な応答で、出走歴が無い)は空配列、
+    // それ以外(ブロックの中身が無い・見知らぬ構造)は壊れた応答として失敗させる。
+    if (isNoRaceHistoryPage($)) {
+      return [];
+    }
     throw new HorseResultsParseError(
       "戦績テーブル(db_h_race_results)が見つかりませんでした",
     );
@@ -287,8 +360,9 @@ function parseRow(
     entryCount: numberOrNull(text(COL.entryCount)),
     wakuban: numberOrNull(text(COL.wakuban)),
     umaban: numberOrNull(text(COL.umaban)),
-    odds: numberOrNull(text(COL.odds)),
-    ninki: numberOrNull(text(COL.ninki)),
+    odds: toOddsNumber(text(COL.odds)),
+    // 人気は1始まりの整数。0・負・小数は値域外なので生成側で null にする(Issue #75)。
+    ninki: toNinki(text(COL.ninki)),
     finishPosition: toFinishPosition(text(COL.finish)),
     jockeyName: textOrNull($jockey.text()),
     jockeyId,

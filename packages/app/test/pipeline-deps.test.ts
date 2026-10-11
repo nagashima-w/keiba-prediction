@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
@@ -53,6 +57,47 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(typeof r.deps.saveAnalysis).toBe("function");
     expect(typeof r.deps.scrape).toBe("function");
     expect(typeof r.listRaces).toBe("function");
+  });
+
+  describe("nativeBindingPath(Issue #60-B: bindingsのスタックトレース探索を外す明示指定)", () => {
+    it("nativeBindingPath未指定なら従来どおりbindingsに解決を任せてDBが開けること(開発・vitestの既定経路)", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      // DBが実際に開けている(saveAnalysisが動く)ことを、bindings既定経路が壊れていない証拠とする。
+      expect(() =>
+        r.deps.saveAnalysis({
+          raceId: "202605020811",
+          analyzedAt: "2026-01-01T00:00:00.000Z",
+          horses: [],
+        }),
+      ).not.toThrow();
+    });
+
+    it("nativeBindingPathに実在するbetter_sqlite3.nodeの絶対パスを渡すと、その nativeBinding 経由でDBが開くこと(明示指定が実際に効いている証拠)", () => {
+      const req = createRequire(import.meta.url);
+      const realBindingPath = req.resolve(
+        "better-sqlite3/build/Release/better_sqlite3.node",
+      );
+
+      const r = createPipelineDeps({ dbPath: ":memory:", nativeBindingPath: realBindingPath });
+      resources.push(r);
+
+      r.deps.saveAnalysis({
+        raceId: "202605020811",
+        analyzedAt: "2026-01-01T00:00:00.000Z",
+        horses: [],
+      });
+      expect(r.getRaceLedger()).toHaveLength(1);
+    });
+
+    it("nativeBindingPathに実在しない絶対パスを渡すと、new Database生成時に例外が投げられること(nativeBindingが実際に第2引数まで渡っている証拠。渡さない経路が残っていればこの例外は起きないはず)", () => {
+      expect(() =>
+        createPipelineDeps({
+          dbPath: ":memory:",
+          nativeBindingPath: path.join("/definitely/not/a/real/dir", "better_sqlite3.node"),
+        }),
+      ).toThrow();
+    });
   });
 
   it("clipVariant未指定なら deps.clipVariant は対照('default')になること(タスクD-2: 配線疎通)", () => {
@@ -228,6 +273,131 @@ describe("createPipelineDeps(本番依存の配線)", () => {
       // スパイの復元は afterEach の vi.restoreAllMocks() に一本化する
       // (このアサーションが失敗しても復元が漏れないようにするため)。
     });
+
+    /**
+     * Issue #52・boss裁定R-8: courseTypeと同型の配線落ち検出(位置引数の転送はTypeScriptが
+     * 守らないため、DIラムダが第4引数〈comboPayouts〉を静かに落としても型検査は通る)。
+     * 上のcourseTypeテストと同じ合成HTMLに、ワイド・3連複の払戻テーブルを追加し、
+     * store.saveResultの第4引数までワイド・3連複が実際に届くことを実行時に確認する。
+     */
+    it("合成HTML(芝1200m見出し+最小結果行+ワイド・3連複の払戻テーブル)を取り込むと、widePayouts/trioPayoutsがstore.saveResultの第4引数まで届くこと(Issue #52・boss裁定R-8)", async () => {
+      const saveResultSpy = vi.spyOn(AnalysisStore.prototype, "saveResult");
+
+      const html = `<html><body>
+        <div class="RaceData01">15:35発走 /<span> 芝1200m</span> (右A) / 天候:晴 / 馬場:良</div>
+        <table id="All_Result_Table"><tbody>
+          <tr class="HorseList">
+            <td class="Result_Num"><div class="Rank">1</div></td>
+            <td class="Num Waku1"><div>1</div></td>
+            <td class="Num Txt_C"><div>1</div></td>
+            <td class="Horse_Info">
+              <span class="Horse_Name">
+                <a href="https://db.netkeiba.com/horse/2022101678" title="テスト馬">
+                  <span class="HorseNameSpan">テスト馬</span>
+                </a>
+              </span>
+            </td>
+          </tr>
+        </tbody></table>
+        <table class="Payout_Detail_Table"><tbody>
+          <tr class="Tansho"><th>単勝</th>
+            <td class="Result"><div><span>1</span></div></td>
+            <td class="Payout"><span>150円</span></td>
+          </tr>
+          <tr class="Fukusho"><th>複勝</th>
+            <td class="Result"><div><span>1</span></div></td>
+            <td class="Payout"><span>110円</span></td>
+          </tr>
+          <tr class="Wide"><th>ワイド</th>
+            <td class="Result"><ul><li><span>1</span></li><li><span>2</span></li><li></li></ul></td>
+            <td class="Payout"><span>100円</span></td>
+          </tr>
+          <tr class="Fuku3"><th>3連複</th>
+            <td class="Result"><ul><li><span>1</span></li><li><span>2</span></li><li><span>3</span></li></ul></td>
+            <td class="Payout"><span>500円</span></td>
+          </tr>
+        </tbody></table>
+      </body></html>`;
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type"
+              ? "text/html; charset=utf-8"
+              : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> =>
+          new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      const outcome = await r.importResult(parseRaceId("202602010607"));
+
+      expect(outcome.status).toBe("imported");
+      expect(saveResultSpy).toHaveBeenCalledTimes(1);
+      const [, , , comboPayouts] = saveResultSpy.mock.calls[0]!;
+      expect(comboPayouts).toEqual({
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 100 }] },
+        trio: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 500 }] },
+        // 馬連(Issue #114・#24-F1): この合成HTMLにはtr.Umaren行が無いため「発売なし」の
+        // 空配列(payoutTableAbsentではない。payoutTablePresent=trueかつ行が0件のケース)。
+        quinella: { state: "parsed", payouts: [] },
+        // 馬単(Issue #121・#24-F2): この合成HTMLにはtr.Umatan行が無いため、quinellaと
+        // 同じ理由で「発売なし」の空配列になる。
+        exacta: { state: "parsed", payouts: [] },
+        // 三連単(Issue #131・#25-F): この合成HTMLにはtr.Tan3行が無いため、quinella/exactaと
+        // 同じ理由で「発売なし」の空配列になる。
+        trifecta: { state: "parsed", payouts: [] },
+        // 枠連(Issue #145・#26-F): この合成HTMLにはtr.Wakuren行が無いため、上と同じ理由で
+        // 「発売なし」の空配列になる。
+        bracketQuinella: { state: "parsed", payouts: [] },
+      });
+    });
+
+    /**
+     * Issue #145・#26-F: 枠連の配線落ち検出(上のテストと同型)。こちらは合成HTMLではなく
+     * **実フィクスチャ**(中央16頭。枠連4-7=3,150円)をfetchのレスポンスにし、
+     * createPipelineDeps → importResult → store.saveResult の第4引数まで枠連が実際に届くことを固定する。
+     * 上のテストは枠連の行が無い文書(空配列が届く)しか扱わないため、行のある文書で
+     * 枠連の中身(枠番の組と払戻額)が届くことは別に固定する必要がある。
+     */
+    it("実フィクスチャ(枠連4-7=3,150円)を取り込むと、bracketQuinellaが枠番の組[4,7]としてstore.saveResultの第4引数まで届くこと(Issue #145・#26-F)", async () => {
+      const saveResultSpy = vi.spyOn(AnalysisStore.prototype, "saveResult");
+      const html = readFileSync(
+        fileURLToPath(new URL("../../../fixtures/result_202603020211.html", import.meta.url)),
+        "utf-8",
+      );
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type"
+              ? "text/html; charset=utf-8"
+              : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> =>
+          new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      const outcome = await r.importResult(parseRaceId("202603020211"));
+
+      expect(outcome.status).toBe("imported");
+      expect(saveResultSpy).toHaveBeenCalledTimes(1);
+      const [, , , comboPayouts] = saveResultSpy.mock.calls[0]!;
+      expect(comboPayouts?.bracketQuinella).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [4, 7], payout: 3150 }],
+      });
+    });
   });
 
   describe("deps.getRaceResultDetail の配線(タスク#27-C: 当日傾向をプロンプトに反映する配線)", () => {
@@ -315,9 +485,9 @@ describe("createPipelineDeps(本番依存の配線)", () => {
 
     it("deps.getGradeWinnerTrendが関数として組み立てられ、注入したfetch(Electron net.fetch相当の注入経路)経由でPOSTし、集計結果を返すこと", async () => {
       const rawEntries = [
-        { race_id: "202503020211", jyo: "福島", kyori: 1800, track: "芝", tosu: 14, result: [{ umaban: 1, kakutei: 1, ninki: 3 }], payback: null },
-        { race_id: "202403020211", jyo: "福島", kyori: 1800, track: "芝", tosu: 12, result: [], payback: null },
-        { race_id: "202303020211", jyo: "福島", kyori: 1800, track: "芝", tosu: 16, result: [], payback: null },
+        { race_id: "202503020211", race_date: "2025-06-29", jyo: "福島", kyori: 1800, track: "芝", tosu: 14, result: [{ umaban: 1, kakutei: 1, ninki: 3 }], payback: null },
+        { race_id: "202403020211", race_date: "2024-06-30", jyo: "福島", kyori: 1800, track: "芝", tosu: 12, result: [], payback: null },
+        { race_id: "202303020211", race_date: "2023-07-02", jyo: "福島", kyori: 1800, track: "芝", tosu: 16, result: [], payback: null },
       ];
       const fetch = vi.fn<FetchLike>(async () =>
         makeFetchResponse(makeOkRawResponse(rawEntries)),
@@ -331,7 +501,7 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         trackCode: "03",
         track: "芝",
         kyori: 1800,
-      });
+      }, "2026/06/28");
 
       expect(summary).not.toBeNull();
       expect(summary!.条件一致回数).toBe(3);
@@ -363,7 +533,7 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         trackCode: "03",
         track: "芝",
         kyori: 1800,
-      });
+      }, "2026/07/01");
 
       expect(summary).toBeNull();
     });
@@ -377,11 +547,29 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         trackCode: "44",
         track: "ダ",
         kyori: 2000,
-      });
+      }, "2026/07/01");
 
       expect(fetch).toHaveBeenCalledTimes(1);
       const [calledUrl] = fetch.mock.calls[0]!;
       expect(calledUrl).toBe("https://nar.netkeiba.com/race_api/");
+    });
+
+    it("第3引数の基準日が collectGradeWinnerTrend へそのまま渡り、先読みになる回の除外に使われること(Issue #153。実フィクスチャ=2023年の回を要求した応答)", async () => {
+      const raw = readFileSync(
+        fileURLToPath(new URL("../../../fixtures/grade_winner_nar_202344062811.json", import.meta.url)),
+        "utf-8",
+      );
+      const fetch = vi.fn<FetchLike>(async () => makeFetchResponse(raw));
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+      const conditions = { trackCode: "44", track: "ダ" as const, kyori: 2000 };
+
+      // 基準日=当該回の開催日(2023/06/28): 当該回(2023年)・後の回(2024〜2026年)が除かれ 6回。
+      const atRaceDay = await r.deps.getGradeWinnerTrend!(parseRaceId("202344062811"), conditions, "2023/06/28");
+      expect(atRaceDay!.対象回数).toBe(6);
+      // 基準日を十分に未来にすると、残るのは raceId 一致で除かれる当該回を除いた 9回(基準日が効いている証拠)。
+      const farFuture = await r.deps.getGradeWinnerTrend!(parseRaceId("202344062811"), conditions, "2099/12/31");
+      expect(farFuture!.対象回数).toBe(9);
     });
 
     it("config.onWarnを渡すと、deps.onGradeWinnerTrendErrorがraceId・messageを含む文言でonWarnへ届くこと(要修正10: 構造破壊/API仕様変更の警告配線)", () => {
@@ -790,5 +978,193 @@ describe("createPipelineDeps(本番依存の配線)", () => {
 
     expect(onWarn).toHaveBeenCalledTimes(1);
     expect(onWarn.mock.calls[0]![0]).toContain("shift_jis");
+  });
+
+  describe("LLMモデルの自動選択とリクエストの形(Issue #157)", () => {
+    const FIXED = DEFAULT_ANALYZER_CONFIG.model;
+    const AUTO = "claude-sonnet-9-9";
+    const MODELS = [
+      { id: "claude-sonnet-4-6", created_at: "2026-02-01T00:00:00Z" },
+      { id: AUTO, created_at: "2027-01-01T00:00:00Z" },
+      { id: FIXED, created_at: "2026-09-01T00:00:00Z" },
+    ];
+
+    const okText = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.3, reason: "x", mark: "〇" },
+        { number: 3, place_prob: 0.3, reason: "x", mark: "▲" },
+        { number: 4, place_prob: 0.3, reason: "x", mark: "△" },
+      ],
+    });
+
+    function samplePromptInput(): BuildPromptInput {
+      return {
+        race: { courseType: "芝", distance: 1600 },
+        horses: [
+          { umaban: 1, horseName: "対象馬", prior: 0.4, runs: [] },
+          { umaban: 2, horseName: "馬2", prior: 0.3, runs: [] },
+          { umaban: 3, horseName: "馬3", prior: 0.3, runs: [] },
+          { umaban: 4, horseName: "馬4", prior: 0.3, runs: [] },
+        ],
+      };
+    }
+
+    function okSender() {
+      return vi.fn<MessageSender>(async (params) => ({
+        content: [{ type: "text", text: okText }],
+        model: params.model,
+      }));
+    }
+
+    it("前提: 自動選択されるモデルは固定モデルと異なること", () => {
+      expect(AUTO).not.toBe(FIXED);
+      expect(FIXED).toBe("claude-sonnet-5-5");
+    });
+
+    it("lister(modelLister)を注入すると、最新 Sonnet で送り、使ったモデルを modelUsed に返すこと", async () => {
+      const sender = okSender();
+      const lister = vi.fn(async () => MODELS);
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+        modelLister: lister,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      expect(result.fallback).toBe(false);
+      expect(sender.mock.calls[0]![0].model).toBe(AUTO);
+      expect(result.modelUsed).toBe(AUTO);
+    });
+
+    it("lister の取得は analyze の初回に遅延実行され、複数レース(クライアントは都度 new)でも deps 単位で1回だけであること", async () => {
+      const sender = okSender();
+      const lister = vi.fn(async () => MODELS);
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+        modelLister: lister,
+      });
+      resources.push(r);
+      expect(lister).not.toHaveBeenCalled();
+      await r.deps.analyze!(samplePromptInput());
+      await r.deps.analyze!(samplePromptInput());
+      await r.deps.analyze!(samplePromptInput());
+      expect(lister).toHaveBeenCalledTimes(1);
+      expect(sender).toHaveBeenCalledTimes(3);
+    });
+
+    it("sender だけを注入して lister を注入しない場合は、自動選択をスキップして固定モデルで送ること(テストが実 API を呼ぶ事故の防止)", async () => {
+      const sender = okSender();
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      expect(sender).toHaveBeenCalledTimes(1);
+      expect(sender.mock.calls[0]![0].model).toBe(FIXED);
+      expect(result.modelUsed).toBe(FIXED);
+    });
+
+    it("一覧取得が失敗したら固定モデルで送り、警告を onWarn に残すこと", async () => {
+      const sender = okSender();
+      const onWarn = vi.fn<(m: string) => void>();
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+        modelLister: async () => {
+          throw new Error("一覧取得失敗");
+        },
+        onWarn,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      expect(sender.mock.calls[0]![0].model).toBe(FIXED);
+      expect(result.modelUsed).toBe(FIXED);
+      expect(onWarn).toHaveBeenCalled();
+    });
+
+    it("自動選択モデルが 400 を返したら固定モデルでやり直し、modelUsed は固定モデル・以降のレースも固定モデルで送ること", async () => {
+      const sender = vi.fn<MessageSender>(async (params) => {
+        if (params.model === AUTO) {
+          throw Object.assign(new Error("invalid_request_error"), { status: 400 });
+        }
+        return { content: [{ type: "text", text: okText }], model: params.model };
+      });
+      const onWarn = vi.fn<(m: string) => void>();
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+        modelLister: async () => MODELS,
+        onWarn,
+      });
+      resources.push(r);
+      const first = await r.deps.analyze!(samplePromptInput());
+      expect(first.fallback).toBe(false);
+      expect(first.modelUsed).toBe(FIXED);
+      expect(sender.mock.calls.map((c) => c[0].model)).toEqual([AUTO, FIXED]);
+      const second = await r.deps.analyze!(samplePromptInput());
+      expect(second.modelUsed).toBe(FIXED);
+      expect(sender.mock.calls.map((c) => c[0].model)).toEqual([AUTO, FIXED, FIXED]);
+      expect(onWarn.mock.calls.some((c) => c[0].includes(AUTO))).toBe(true);
+    });
+
+    it("リクエストに temperature を載せず、output_config.effort='low'・max_tokens=16000 を載せること", async () => {
+      const sender = okSender();
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+      });
+      resources.push(r);
+      await r.deps.analyze!(samplePromptInput());
+      const params = sender.mock.calls[0]![0];
+      expect("temperature" in params).toBe(false);
+      expect(params.output_config).toEqual({ effort: "low" });
+      expect(params.max_tokens).toBe(16000);
+    });
+
+    it.each(["refusal", "max_tokens"])(
+      "自動選択モデルが2回とも stop_reason='%s' で終わっても、modelUsed は実際に応答した自動選択モデルであること(固定モデル名で代用しない)",
+      async (stop) => {
+        expect(AUTO).not.toBe(FIXED);
+        const sender = vi.fn<MessageSender>(async (params) => ({
+          content: [],
+          stop_reason: stop,
+          model: params.model,
+        }));
+        const r = createPipelineDeps({
+          dbPath: ":memory:",
+          apiKey: "sk-ant-fake-test-key-not-real",
+          llmSender: sender,
+          modelLister: async () => MODELS,
+        });
+        resources.push(r);
+        const result = await r.deps.analyze!(samplePromptInput());
+        expect(result.fallback).toBe(true);
+        expect(sender.mock.calls.map((c) => c[0].model)).toEqual([AUTO, AUTO]);
+        expect(result.modelUsed).toBe(AUTO);
+      },
+    );
+
+    it("refusal 応答は2回とも拒否なら prior へフォールバックし、固定文言と stopReason='refusal' を返すこと", async () => {
+      const sender = vi.fn<MessageSender>(async () => ({ content: [], stop_reason: "refusal" }));
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      expect(result.fallback).toBe(true);
+      expect(result.stopReason).toBe("refusal");
+      expect(sender).toHaveBeenCalledTimes(2);
+    });
   });
 });

@@ -87,8 +87,6 @@ export interface TodayRaceConditions {
   readonly stableLocation: StableLocation;
   /** 今回の斤量(kg)。 */
   readonly kinryo: number;
-  /** 今回の馬体重増減(kg、前走比)。未発表なら null。 */
-  readonly bodyWeightDiff: number | null;
   /**
    * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
    * "nar"(地方競馬)では COURSE_TRAITS・COURSE_FRAME_BIAS_TABLE・美浦/栗東輸送負荷テーブルが
@@ -145,7 +143,6 @@ function collectContributions(input: PriorInput): {
       venueName: today.venueName,
       frameZone: today.frameZone,
       kinryo: today.kinryo,
-      bodyWeightDiff: today.bodyWeightDiff,
       venueKind: today.venueKind,
     },
     input.jockeyCourseStats,
@@ -373,7 +370,7 @@ function monthOf(date: string): number | null {
 
 /**
  * 出馬表馬 + 全戦績 + 今回レース条件から PriorInput を組み立てる(任意ヘルパ)。
- * 枠ゾーン・季節・休み明け走番・馬体重増減などの今回条件を scraper 出力から導出する。
+ * 枠ゾーン・季節・休み明け走番・斤量などの今回条件を scraper 出力から導出する。
  * 枠ゾーン・季節が確定できない異常入力(枠範囲外・日付不正)は呼び出し側の想定外とし、
  * それぞれ「中」枠・「春秋」に丸めてフォールバックする(prior自体は落とさない)。
  */
@@ -408,7 +405,6 @@ export function buildPriorInput(args: BuildPriorInputArgs): PriorInput {
     restRunNumber: todayRestRunNumber(features, race.date),
     stableLocation,
     kinryo: horse.kinryo,
-    bodyWeightDiff: horse.bodyWeight?.diff ?? null,
     venueKind: race.venueKind,
   };
 

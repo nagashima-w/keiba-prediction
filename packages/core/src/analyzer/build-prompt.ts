@@ -137,8 +137,34 @@
  * 一切変わらない。1行目・3行目、省略挙動(材料が無い部分の省略・両方null時のブロック省略)は
  * 不変。この対照(default)のPROMPT_VERSION更新に伴い、
  * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * "2026-10-07.1"(Issue #197・#196-a: 根拠の細分化。2026-10-07 着手前ゲート合意・ユーザー判断): 馬ごとの
+ * 出力に強調材料(highlights)と懸念事項(concerns)を足した(各最大3項目・1項目は全角30字以内の短い句・
+ * 該当が無ければ空配列)。reason(総合の根拠の一文)は残し、言い換えはさせない。単勝オッズ・人気・参考EVは
+ * この2つの項目の材料にさせない(既存のアンカリング禁止と揃える。印の判断材料としての既存指示は不変)。
+ * 出力スキーマの例は mark の後ろにこの2つを置く(項目は reason の例と同じ "..." にする。具体的な語を例に書くと、LLM がそのまま返して画面に出てしまうため)。解析側は parse-response.ts の coerceItemList
+ * (欠落・形違いは `[]`。分析は止めない)。出力トークンが増える(馬1頭あたり reason に加えて最大6句)ので、
+ * 費用・所要時間・切り詰めはクラウド版の usage 記録(#197 段2)で確かめる。この対照(default)の
+ * PROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * "2026-10-09.1"(Issue #212・#210-A: 休み明け・馬体重の増減を、その馬の過去の傾向と照らして判断させる。
+ * 2026-10-09 ユーザー決定): 各馬の行に「休み明け実績=」(rest-record.ts。今回が前走から71日以上のときだけ)と
+ * 「ベスト体重=」(best-weight.ts。今回の馬体重が発表済みのときだけ)を足し、【指示】に解釈の指示を足した
+ * (休み明け・馬体重の増減をそれだけで懸念事項にも強調材料にもしない。実績と照らし、「サンプル2走未満」
+ * 「サンプル不足」のときは中立に扱う。中央⇄地方の転入に伴う間隔は放牧明けと移籍の空きを区別できない)。
+ * 新しい見出し【】は作らない。材料が無い馬の行は従来とバイト一致(spread-omit)。出力スキーマ・予想印の
+ * 指示・3着内率の値(scorer)は不変(scorer の減点の撤去は別 Issue #213)。この対照(default)の
+ * PROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * "2026-10-09.2"(Issue #213・#210-B: scorer の馬体重の減点と休み明けの一律減点を撤去。2026-10-09 ユーザー決定):
+ * **プロンプトの文面は変えていない**(`.1` とバイト一致。違うのは各馬の「3着内率=」の数字だけ)。版を上げたのは、
+ * LLM に渡る 3着内率が系統的に上がるため(前走比で馬体重が減った馬の減点と、休み明け実績2走未満の一律
+ * −0.05×重み〈prior 合成で×0.3 に減衰〉が消える)。(1) 検証画面は版ごとに集計するので、`.1`(LLM が休み明け実績を
+ * 見るが scorer は減点する)と `.2`(両方なし)を分けて比べられるようにする。(2) 期間一括の重複判定は現行の版で
+ * 分析済みのレースを飛ばすので、版が同じだと `.1` で分析した過去のレースを新しい scorer で再分析できない。
+ * この対照(default)のPROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-07-28.2";
+export const PROMPT_VERSION = "2026-10-09.2";
 
 export {
   CLIP_VARIANTS,
@@ -169,15 +195,18 @@ export {
  */
 
 import type { CourseType } from "../scraper/types.js";
+import type { RestRecordSummary } from "./rest-record.js";
+import type { BestWeightSummary } from "./best-weight.js";
 import type { RaceIdVenueKind } from "../scraper/ids.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
-import type { GradeWinnerTrendSummary } from "./grade-winner-trend.js";
+import type { GradeWinnerTrendSummary } from "./grade-winner-trend-types.js";
 import type { SameDayTrendSummary } from "./same-day-trend.js";
 import type { TurfWearHint } from "./turf-wear.js";
 import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
 import type { MarketGapSummary } from "./market-gap.js";
 import type { JockeyChangeSummary } from "./jockey-change.js";
 import type { MarginTrendSummary } from "./margin-trend.js";
+import { isUsableOdds } from "../ev/allocation-primitives.js";
 import {
   clipAbsoluteLabel,
   clipPercentLabel,
@@ -271,6 +300,21 @@ export interface PromptHorse {
   readonly marginTrend?: MarginTrendSummary | null;
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
+  /**
+   * 休み明け実績(Issue #212・#210-A。rest-record.ts の summarizeRestRecord が返す要約)。
+   * 値がある(non-null)ときだけ、この馬の行の「レース間隔=」の直後に「休み明け実績=」+note を追加する。
+   * undefined/null(今回が休み明けでない馬・未配線の呼び出し元)ならこの項目自体を出さない
+   * (bodyWeightTrend/marketGap と同じ spread-omit 流儀。未指定なら既存行バイト不変)。
+   * scorer の計算には一切影響しない(プロンプト専用)。
+   */
+  readonly restRecord?: RestRecordSummary | null;
+  /**
+   * ベスト体重(Issue #212・#210-A。best-weight.ts の summarizeBestWeight が返す要約)。
+   * 値がある(non-null)ときだけ、この馬の行の「馬体重推移=」の直後(無ければ「過去ペース傾向=」の直後)に
+   * 「ベスト体重=」+note を追加する。undefined/null(今回の馬体重が未発表の馬・未配線の呼び出し元)なら
+   * この項目自体を出さない(未指定なら既存行バイト不変)。scorer の計算には一切影響しない。
+   */
+  readonly bestWeight?: BestWeightSummary | null;
   /** 単勝オッズ。取消等で未取得なら null/undefined(「不明」と表記)。 */
   readonly winOdds?: number | null;
   /** 人気。取得できない場合は null/undefined(「不明(オッズ値から判断)」と表記)。 */
@@ -294,13 +338,17 @@ export interface PromptHorse {
  * ev/expected-value.ts の computeRaceEv(全馬・OddsSnapshot前提)を呼び回す必要はなく、
  * analyzer 層に閉じた単純計算で済む(呼び出し側が PromptHorse.referenceEv に渡す値の算出に使う)。
  * @param prior 3着内率(scorerのprior)
- * @param placeOddsMin 複勝オッズ下限。欠損(null)なら参考EVは算出不可としてnullを返す。
+ * @param placeOddsMin 複勝オッズ下限。欠損(null)・値域外(1.0未満・非有限。Issue #74)なら
+ *   参考EVは算出不可としてnullを返す。
  */
 export function computeReferenceEv(
   prior: number,
   placeOddsMin: number | null,
 ): number | null {
-  if (placeOddsMin === null || !Number.isFinite(placeOddsMin)) {
+  // 判定基準は allocation-primitives.ts の isUsableOdds に委譲する(Issue #74。旧実装は
+  // `!Number.isFinite(placeOddsMin)`のみを見ており、値域外(0等)を通して
+  // `prior×0=0`という「参考EVが算出できた」結果に潰していた)。
+  if (placeOddsMin === null || !isUsableOdds(placeOddsMin)) {
     return null;
   }
   if (!Number.isFinite(prior)) {
@@ -707,6 +755,12 @@ export function buildPrompt(input: BuildPromptInput): string {
     // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
     const bodyWeightTrendSegment =
       h.bodyWeightTrend != null ? `馬体重推移=${h.bodyWeightTrend.note}, ` : "";
+    // ベスト体重(Issue #212): 値がある(non-null)ときだけ「馬体重推移」の直後に挿入する。
+    const bestWeightSegment =
+      h.bestWeight != null ? `ベスト体重=${h.bestWeight.note}, ` : "";
+    // 休み明け実績(Issue #212): 値がある(non-null)ときだけ「レース間隔」の直後に挿入する。
+    const restRecordSegment =
+      h.restRecord != null ? `休み明け実績=${h.restRecord.note}, ` : "";
     // 人気・着順の乖離(タスク#7): 値がある(non-null)ときだけ「条件替わり」の直後に追記する。
     // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
     const marketGapSegment =
@@ -725,7 +779,9 @@ export function buildPrompt(input: BuildPromptInput): string {
         `脚質=${a.style ?? "不明"}(安定度:${a.stability}), ` +
         `過去ペース傾向=${summarizePastPaceTendency(h.runs, { recentRuns })}, ` +
         bodyWeightTrendSegment +
+        bestWeightSegment +
         `レース間隔=${orText(h.restInterval, "不明")}, ` +
+        restRecordSegment +
         `調教=${oikiriText(h.oikiri)}, ` +
         `厩舎コメント=${orText(h.stableComment, "なし")}, ` +
         `単勝オッズ=${oddsText(h.winOdds, "不明")}, ` +
@@ -767,6 +823,36 @@ export function buildPrompt(input: BuildPromptInput): string {
   // 指示文自体にも英語表記(prior)を出さず「3着内率」に統一する。
   lines.push(
     "reason の文中では、事前推定値を指すときは必ず「3着内率」と日本語で表記してください(英語の略称は使わないでください)。",
+  );
+  // 根拠の細分化(Issue #197・#196-a): reason(総合の根拠の一文)に加えて、強調材料(highlights)と
+  // 懸念事項(concerns)を馬ごとの短い句の配列で出させる。reason の言い換えにはさせない。
+  // 単勝オッズ・人気・参考EVはこの2つの項目の材料にさせない(アンカリング禁止と揃える。印の判断材料としての
+  // 既存指示〈【予想印】の判断材料・上の「重要」〉は変えない)。
+  lines.push(
+    "各馬について、reason(総合の根拠の一文)とは別に、強調材料(highlights)と懸念事項(concerns)を短い句の配列で出力してください。" +
+      "highlights はその馬を高く評価できる材料、concerns は評価を下げる材料です。" +
+      "それぞれ最大3項目で、1項目は全角30字以内の短い句にしてください。該当する材料が無ければ空配列 [] にしてください。",
+  );
+  lines.push(
+    "highlights・concerns は reason の言い換えではなく、reason とは別の個々の材料を挙げてください。" +
+      "highlights・concerns の文中でも、事前推定値を指すときは必ず「3着内率」と日本語で表記してください。",
+  );
+  lines.push(
+    "highlights・concerns の各項目には、単勝オッズ・人気・参考EVを材料として挙げないでください" +
+      "(これらを予想印の判断に使うことは従来どおりで構いません)。",
+  );
+  // 休み明け・馬体重の増減の扱い(Issue #212・#210-A): 「休み明け」「馬体重-9kg」が一律にマイナス材料として
+  // 出ていた。その馬自身の過去の実績(各馬の行の「休み明け実績」「ベスト体重」)と照らして判断させる。
+  // 新しい見出し【】は作らない(設定画面のプレビュー注記が列挙する見出しの集合を変えないため)。
+  // 「サンプル2走未満」「サンプル不足」は rest-record.ts・best-weight.ts の note が実際に出す語と一致させる。
+  lines.push(
+    "休み明け・馬体重の増減の扱い: レース間隔の「休み明け」や馬体重の増減を、それだけを理由に懸念事項にも強調材料にもしないでください。" +
+      "各馬の行の「休み明け実績」(その馬の過去の休み明けでの成績)と「ベスト体重」(その馬が好走したときの体重の範囲)と照らし、" +
+      "実績が良ければ強調材料、悪ければ懸念事項として挙げてください。",
+  );
+  lines.push(
+    "実績が「サンプル2走未満」「サンプル不足」と書かれている場合は、実績が乏しいので中立に扱い、強調材料にも懸念事項にも挙げないでください。" +
+      "中央⇄地方の転入に伴う間隔は、放牧明けか移籍に伴う空きかを区別できません(条件替わりの表記も参考にし、間隔の長さだけで判断しないでください)。",
   );
   if (wetScenario) {
     lines.push(
@@ -842,8 +928,10 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push("【出力スキーマ(この形式の JSON のみ)】");
   lines.push(
     '{"horses": [' +
-      '{"number": 1, "place_prob": 0.42, "reason": "...", "mark": "◎"}, ' +
-      '{"number": 2, "place_prob": 0.30, "reason": "...", "mark": null}' +
+      '{"number": 1, "place_prob": 0.42, "reason": "...", "mark": "◎", ' +
+      '"highlights": ["...", "..."], "concerns": ["..."]}, ' +
+      '{"number": 2, "place_prob": 0.30, "reason": "...", "mark": null, ' +
+      '"highlights": [], "concerns": ["...", "..."]}' +
       "]}",
   );
 
@@ -871,6 +959,33 @@ const PREVIEW_SAMPLE_RACE: BuildPromptRaceInfo = {
   venueName: "東京",
   weather: "晴",
   trackCondition: "良",
+};
+
+/** プレビュー用の休み明け実績(サンプルホース3。休み明け3走で3着内2回)。 */
+const PREVIEW_SAMPLE_REST_RECORD: RestRecordSummary = {
+  今回間隔日数: 112,
+  走数: 3,
+  一着: 1,
+  二着: 0,
+  三着: 1,
+  着外: 1,
+  三着内: 2,
+  着順: [6, 3, 1],
+  サンプル不足: false,
+  note: "今回は前走から112日の休み明け。過去の休み明け(前走から71日以上)は3走で1着1回・2着0回・3着1回・着外1回(3着内2/3。新しい順に6着・3着・1着)",
+};
+
+/** プレビュー用のベスト体重(サンプルホース3。好走3走・今回は範囲内、前走は範囲より重い)。 */
+const PREVIEW_SAMPLE_BEST_WEIGHT: BestWeightSummary = {
+  好走数: 3,
+  好走時体重: [478, 470, 474],
+  中央値: 474,
+  最小: 470,
+  最大: 478,
+  サンプル不足: false,
+  今回: { 体重: 476, 位置: "範囲内", 範囲外差: 0 },
+  前走: { 体重: 485, 位置: "重い", 範囲外差: 7 },
+  note: "好走(3着以内)時の直近3走の体重は中央値474kg・範囲470〜478kg。今回476kg(範囲内)、前走485kg(範囲より7kg重い)",
 };
 
 const PREVIEW_SAMPLE_HORSES: readonly PromptHorse[] = [
@@ -917,6 +1032,8 @@ const PREVIEW_SAMPLE_HORSES: readonly PromptHorse[] = [
       { passing: [13, 12, 11, 10], fieldSize: 15, pace: "35.2-37.5", last3f: 37.0 },
     ],
     restInterval: "休み明け",
+    restRecord: PREVIEW_SAMPLE_REST_RECORD,
+    bestWeight: PREVIEW_SAMPLE_BEST_WEIGHT,
     winOdds: 24.5,
     popularity: 8,
     placeOddsMin: 3.4,

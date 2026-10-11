@@ -22,6 +22,7 @@
  */
 
 import { inflateSync } from "node:zlib";
+import { toNinkiFromJson } from "./ninki.js";
 
 /** 過去10年結果APIのパース失敗を表す例外(status:"OK"なのに構造が壊れている場合のみ)。 */
 export class GradeWinnerParseError extends Error {
@@ -147,7 +148,7 @@ function parseResultHorse(raw: unknown): GradeWinnerResultHorse {
     ijyo: strOrNull(r.ijyo),
     corner: strOrNull(r.corner),
     haron3: numOrNull(r.haron3),
-    ninki: numOrNull(r.ninki),
+    ninki: toNinkiFromJson(r.ninki),
     chakusa: strOrNull(r.chakusa),
   };
 }
@@ -160,11 +161,11 @@ function parsePayback(raw: unknown): GradeWinnerPayback | null {
   const p = raw as Record<string, unknown>;
   return {
     fukuPay1: numOrNull(p.fuku_pay1),
-    fukuNinki1: numOrNull(p.fuku_ninki1),
+    fukuNinki1: toNinkiFromJson(p.fuku_ninki1),
     fukuPay2: numOrNull(p.fuku_pay2),
-    fukuNinki2: numOrNull(p.fuku_ninki2),
+    fukuNinki2: toNinkiFromJson(p.fuku_ninki2),
     fukuPay3: numOrNull(p.fuku_pay3),
-    fukuNinki3: numOrNull(p.fuku_ninki3),
+    fukuNinki3: toNinkiFromJson(p.fuku_ninki3),
   };
 }
 
@@ -248,7 +249,9 @@ export function parseGradeWinnerResponse(
 
   let decodedText: string;
   try {
-    decodedText = inflateSync(Buffer.from(encoded, "base64")).toString("utf-8");
+    // Buffer.from(...) で包むのは、型の解決のため(Issue #176: cloud の型検査は @cloudflare/workers-types と @types/node を併用し、
+    // 前者の inflateSync の戻り値の型では toString("utf-8") が通らない。実行時は inflateSync が返す Buffer のコピーで、結果は同じ)。
+    decodedText = Buffer.from(inflateSync(Buffer.from(encoded, "base64"))).toString("utf-8");
   } catch (error) {
     throw new GradeWinnerParseError(
       `同レース過去10年結果APIの応答の復号(base64/zlib)に失敗しました: ${String(error)}`,

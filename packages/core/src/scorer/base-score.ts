@@ -33,7 +33,7 @@ const PLACE_MAX_RANK = 3;
  *
  * 複勝率系項目(近走着順・上がり3F・コース距離・騎手)では sampleCount/targetRate/overallRate を
  * 埋め、targetRate と overallRate の差 × weight が correction になる。
- * 斤量馬体重・コース枠順バイアスは複勝率差分ではないため、これらの内訳は省略(undefined)する。
+ * 斤量・コース枠順バイアスは複勝率差分ではないため、これらの内訳は省略(undefined)する。
  */
 export interface BaseScoreContribution {
   /** 項目名(ログ識別用)。 */
@@ -313,32 +313,33 @@ export function computeJockeyScore(
 }
 
 // ---------------------------------------------------------------------------
-// (5) 斤量変化・馬体重増減
+// (5) 斤量変化
 // ---------------------------------------------------------------------------
 
-const WEIGHT_CHANGE_NAME = "斤量・馬体重";
+const WEIGHT_CHANGE_NAME = "斤量";
 
-/** 斤量・馬体重の今回条件。 */
+/** 斤量の今回条件。 */
 export interface WeightChangeInput {
   /** 今回の斤量(kg)。 */
   readonly kinryo: number;
-  /** 今回の馬体重増減(kg、前走比)。出馬表で未発表なら null。 */
-  readonly bodyWeightDiff: number | null;
 }
 
 /**
- * 斤量変化・馬体重増減の小補正を計算する。
+ * 斤量変化の小補正を計算する。
  * - 斤量: 前走(直近走)比の増減。増はマイナス方向、kinryoCapKg で絶対値をクリップ。
- * - 馬体重: 大幅減(負値)のみマイナス補正、bodyWeightDropCapKg で下限クリップ。増・微減は0。
- * どちらのスケールも控えめ(仕様「小補正・控えめに設計」)。前走斤量が取れず馬体重も未発表なら補正なし。
+ * スケールは控えめ(仕様「小補正・控えめに設計」)。前走斤量が取れなければ補正なし。
+ *
+ * 馬体重の増減による減点は Issue #213(#210-B)で撤去した。休み明け・馬体重の増減は、LLM が
+ * その馬自身の実績(休み明け実績・ベスト体重。Issue #212)と照らして判断する。scorer でも機械的に
+ * 減点すると二重に数えることになり、馬体重の減少が「ベスト体重に戻した」結果でも減点してしまうため。
+ * 重みのキー(weights.weightChange)は、保存済みの設定を壊さないため名前を据え置いている(今は斤量だけに効く)。
  */
 export function computeWeightChangeScore(
   features: readonly DerivedRaceFeature[],
   today: WeightChangeInput,
   config: ScorerConfig = DEFAULT_SCORER_CONFIG,
 ): BaseScoreContribution {
-  const { kinryoScale, kinryoCapKg, bodyWeightDropScale, bodyWeightDropCapKg } =
-    config.baseScore;
+  const { kinryoScale, kinryoCapKg } = config.baseScore;
   const weight = config.baseScore.weights.weightChange;
 
   // 前走(直近走)の斤量。取得できなければ斤量項は評価しない。
@@ -352,25 +353,12 @@ export function computeWeightChangeScore(
     hasKin = true;
   }
 
-  let bwTerm = 0;
-  let hasBw = false;
-  if (today.bodyWeightDiff !== null) {
-    hasBw = true;
-    if (today.bodyWeightDiff < 0) {
-      const capped = Math.max(today.bodyWeightDiff, bodyWeightDropCapKg);
-      bwTerm = capped * bodyWeightDropScale; // 減(負値)でマイナス。
-    }
-  }
-
-  const applied = hasKin || hasBw;
   return {
     biasName: WEIGHT_CHANGE_NAME,
-    applied,
-    reason: applied
-      ? "斤量増減・馬体重増減による小補正"
-      : "前走斤量・馬体重増減とも取得できないため補正なし",
+    applied: hasKin,
+    reason: hasKin ? "斤量増減による小補正" : "前走斤量が取得できないため補正なし",
     weight,
-    correction: (kinTerm + bwTerm) * weight,
+    correction: kinTerm * weight,
   };
 }
 
@@ -451,8 +439,6 @@ export interface BaseScoreInput {
   readonly frameZone: FrameZone;
   /** 今回の斤量(kg)。 */
   readonly kinryo: number;
-  /** 今回の馬体重増減(kg、前走比)。未発表なら null。 */
-  readonly bodyWeightDiff: number | null;
   /**
    * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
    * computeCourseFrameBiasScore にそのまま渡す(NARではコースレベル枠順バイアスを対象外にする)。
@@ -492,7 +478,7 @@ export function computeBaseScore(
     computeJockeyScore(jockeyCourseStats, config),
     computeWeightChangeScore(
       features,
-      { kinryo: today.kinryo, bodyWeightDiff: today.bodyWeightDiff },
+      { kinryo: today.kinryo },
       config,
     ),
     computeCourseFrameBiasScore(

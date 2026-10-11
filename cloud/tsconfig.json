@@ -1,0 +1,27 @@
+{
+  // Worker / Durable Object(src/)とテスト(test/)・スモークテスト(smoke.ts)の型検査。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types", "node"],
+    // core(workspace の外。相対 import で取り込む)の依存は packages/core/node_modules が CI に無いため、このディレクトリの
+    // node_modules へ向ける(wrangler.toml の [alias]・vitest.config.ts の alias と同じ対応)。undici はスタブに差し替える。
+    "paths": {
+      "undici": ["./src/undici-stub.ts"],
+      "iconv-lite": ["./node_modules/iconv-lite"],
+      "cheerio": ["./node_modules/cheerio"],
+      // Issue #193: LLM の SDK。core(相対 import で取り込む)の anthropic-client.ts・model-selection.ts が import するので、cloud/node_modules へ向ける。
+      "@anthropic-ai/sdk": ["./node_modules/@anthropic-ai/sdk"],
+      // Issue #176: runAnalysis(app)が import する core の狭い入口と、core のサブパス(`@keiba/core/pipeline` など)。
+      // バレル `@keiba/core` そのものは向けない(better-sqlite3 を巻き込むため。型だけの import でも CI で解決に失敗する)。
+      "@keiba/core/*": ["../packages/core/src/*"]
+    }
+  },
+  "include": ["src", "test", "smoke.ts", "smoke-worker.ts", "smoke-modules.d.ts", "vitest.config.ts", "build-client.ts", "print-report-prompt.ts", "print-palette-report.ts"]
+}

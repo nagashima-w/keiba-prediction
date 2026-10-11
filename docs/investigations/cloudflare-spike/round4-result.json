@@ -1,0 +1,684 @@
+{
+ "schemaVersion": 1,
+ "runId": "37455078310-1",
+ "startedAt": "2026-10-06T11:15:08.134Z",
+ "finishedAt": "2026-10-06T11:15:27.557Z",
+ "netkeiba": {
+  "records": [],
+  "requestCount": 0,
+  "stoppedReason": null,
+  "stoppedBySource": {
+   "worker": null,
+   "runner": null
+  }
+ },
+ "selftest": {
+  "eucJpRoundTrip": true,
+  "detail": "往復一致"
+ },
+ "cpu": {
+  "worker": {
+   "parse": null,
+   "score": null,
+   "alloc": null,
+   "allocFull": null
+  },
+  "durableObject": {
+   "parse": null,
+   "score": null,
+   "alloc": null,
+   "allocFull": null
+  },
+  "samples": []
+ },
+ "local": {
+  "entries": [
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     18.5,
+     19.3,
+     20.1
+    ]
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     0.4,
+     0.4,
+     0.9
+    ]
+   },
+   {
+    "runtime": "worker",
+    "work": "alloc",
+    "reps": 3,
+    "runs": 3,
+    "perRepMsSorted": [
+     73.33333333333333,
+     75.33333333333333,
+     84.33333333333333
+    ]
+   },
+   {
+    "runtime": "worker",
+    "work": "allocFull",
+    "reps": 2,
+    "runs": 3,
+    "perRepMsSorted": [
+     276,
+     282,
+     284
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     18,
+     19.9,
+     23.3
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     0.2,
+     0.2,
+     0.3
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 3,
+    "runs": 3,
+    "perRepMsSorted": [
+     73.66666666666667,
+     76,
+     79.33333333333333
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 2,
+    "runs": 3,
+    "perRepMsSorted": [
+     283,
+     284,
+     303.5
+    ]
+   }
+  ]
+ },
+ "cleanup": {
+  "leftoverWorkers": [],
+  "deletedByFallback": [],
+  "durableObjectNamespaces": "removed",
+  "ok": true,
+  "listUnavailable": false
+ },
+ "notes": [
+  "Worker が応答するまで 1 回の /ping を要した",
+  "Durable Object の /do/ping: HTTP 200 {\"ok\":true,\"runtime\":\"durableObject\",\"sqliteOk\":true}"
+ ],
+ "experiments": [
+  "socket-matrix"
+ ],
+ "socketMatrix": {
+  "plannedCount": 9,
+  "netkeibaRequestCount": 9,
+  "stoppedReason": null,
+  "skippedStepIds": [],
+  "records": [
+   {
+    "targetId": "central-shutuba",
+    "url": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "status": 200,
+    "bodyLength": 276742,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": 16,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "via": "1.1 28932a3f25cf6715295f68710a6431a4.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "stepId": "S1",
+    "variant": "identity",
+    "role": "reference",
+    "pairWith": null,
+    "meta": {
+     "status": 200,
+     "framing": "chunked",
+     "contentEncoding": null,
+     "receivedBytes": 277432,
+     "wireBodyBytes": 276742,
+     "decodedBytes": 276742,
+     "bodySha256": "a3e69ca6b186c6d2",
+     "openedMs": 37,
+     "firstByteMs": 306,
+     "totalMs": 431
+    },
+    "instance": {
+     "id": "f29353f4-8ed8-4402-8703-03825025cf6f",
+     "call": 1
+    },
+    "sentAtMs": 0
+   },
+   {
+    "targetId": "db-horse-results",
+    "url": "https://db.netkeiba.com/horse/ajax_horse_results.html?input=UTF-8&output=json&id=2021105857",
+    "status": 200,
+    "bodyLength": 140135,
+    "charset": "UTF-8",
+    "parsedKind": "horse-results",
+    "parsedCount": 26,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "application/json; charset=UTF-8",
+     "via": "1.1 d34197793a8ae5292373777ba90b2ece.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "stepId": "R1",
+    "variant": "identity",
+    "role": "coverage",
+    "pairWith": null,
+    "meta": {
+     "status": 200,
+     "framing": "chunked",
+     "contentEncoding": null,
+     "receivedBytes": 140575,
+     "wireBodyBytes": 140135,
+     "decodedBytes": 140135,
+     "bodySha256": "3a853e9561abcb03",
+     "openedMs": 42,
+     "firstByteMs": 291,
+     "totalMs": 292
+    },
+    "instance": {
+     "id": "f29353f4-8ed8-4402-8703-03825025cf6f",
+     "call": 2
+    },
+    "sentAtMs": 2000
+   },
+   {
+    "targetId": "nar-shutuba",
+    "url": "https://nar.netkeiba.com/race/shutuba.html?race_id=202654071210",
+    "status": 200,
+    "bodyLength": 218738,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": 12,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "via": "1.1 3d7e09d64f9509703de21a414140ecb0.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "stepId": "N1",
+    "variant": "identity",
+    "role": "coverage",
+    "pairWith": null,
+    "meta": {
+     "status": 200,
+     "framing": "chunked",
+     "contentEncoding": null,
+     "receivedBytes": 219529,
+     "wireBodyBytes": 218738,
+     "decodedBytes": 218738,
+     "bodySha256": "117867e45788ae80",
+     "openedMs": 33,
+     "firstByteMs": 309,
+     "totalMs": 438
+    },
+    "instance": {
+     "id": "f29353f4-8ed8-4402-8703-03825025cf6f",
+     "call": 3
+    },
+    "sentAtMs": 4001
+   },
+   {
+    "targetId": "central-odds",
+    "url": "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=1&action=init",
+    "status": 200,
+    "bodyLength": 890,
+    "charset": "UTF-8",
+    "parsedKind": "odds-json",
+    "parsedCount": 16,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "application/json; charset=UTF-8",
+     "content-length": "890",
+     "via": "1.1 caa0030d22a6085f61962306be552c66.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "stepId": "O1",
+    "variant": "identity",
+    "role": "coverage",
+    "pairWith": null,
+    "meta": {
+     "status": 200,
+     "framing": "content-length",
+     "contentEncoding": null,
+     "receivedBytes": 1286,
+     "wireBodyBytes": 890,
+     "decodedBytes": 890,
+     "bodySha256": "61d37dd507fe430d",
+     "openedMs": 11,
+     "firstByteMs": 155,
+     "totalMs": 155
+    },
+    "instance": {
+     "id": "f29353f4-8ed8-4402-8703-03825025cf6f",
+     "call": 4
+    },
+    "sentAtMs": 6001
+   },
+   {
+    "targetId": "central-trio-odds",
+    "url": "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=7&action=init",
+    "status": 200,
+    "bodyLength": 17856,
+    "charset": "UTF-8",
+    "parsedKind": "combo-trio-json",
+    "parsedCount": 560,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "application/json; charset=UTF-8",
+     "via": "1.1 434329bf447481cfa4668ab16ada3f7c.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "stepId": "T1",
+    "variant": "identity",
+    "role": "coverage",
+    "pairWith": null,
+    "meta": {
+     "status": 200,
+     "framing": "chunked",
+     "contentEncoding": null,
+     "receivedBytes": 18280,
+     "wireBodyBytes": 17856,
+     "decodedBytes": 17856,
+     "bodySha256": "6174a7fdb78854c6",
+     "openedMs": 9,
+     "firstByteMs": 177,
+     "totalMs": 177
+    },
+    "instance": {
+     "id": "f29353f4-8ed8-4402-8703-03825025cf6f",
+     "call": 5
+    },
+    "sentAtMs": 8002
+   },
+   {
+    "targetId": "nar-odds-page",
+    "url": "https://nar.netkeiba.com/odds/index.html?type=b1&race_id=202654071210",
+    "status": 200,
+    "bodyLength": 56459,
+    "charset": "UTF-8",
+    "parsedKind": "nar-odds-page",
+    "parsedCount": 12,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "via": "1.1 a22d445a8d705fadf7d904f1571655b6.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "stepId": "N2",
+    "variant": "identity",
+    "role": "coverage",
+    "pairWith": null,
+    "meta": {
+     "status": 200,
+     "framing": "chunked",
+     "contentEncoding": null,
+     "receivedBytes": 57111,
+     "wireBodyBytes": 56459,
+     "decodedBytes": 56459,
+     "bodySha256": "f35e88bf40df2e29",
+     "openedMs": 39,
+     "firstByteMs": 230,
+     "totalMs": 231
+    },
+    "instance": {
+     "id": "f29353f4-8ed8-4402-8703-03825025cf6f",
+     "call": 6
+    },
+    "sentAtMs": 10003
+   },
+   {
+    "targetId": "central-shutuba",
+    "url": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "status": 200,
+    "bodyLength": 276742,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": 16,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "via": "1.1 a065b841e3862dc80408e8b4c9e9ce4a.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "stepId": "S1r",
+    "variant": "identity",
+    "role": "repeat",
+    "pairWith": "S1",
+    "meta": {
+     "status": 200,
+     "framing": "chunked",
+     "contentEncoding": null,
+     "receivedBytes": 277461,
+     "wireBodyBytes": 276742,
+     "decodedBytes": 276742,
+     "bodySha256": "a3e69ca6b186c6d2",
+     "openedMs": 11,
+     "firstByteMs": 408,
+     "totalMs": 536
+    },
+    "instance": {
+     "id": "f29353f4-8ed8-4402-8703-03825025cf6f",
+     "call": 7
+    },
+    "sentAtMs": 12004
+   },
+   {
+    "targetId": "central-shutuba",
+    "url": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "status": 200,
+    "bodyLength": 276742,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": 16,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "via": "1.1 a32d27c7f523a7d796f2f2bdfd8ecfda.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "stepId": "S1g",
+    "variant": "gzip",
+    "role": "compression",
+    "pairWith": "S1",
+    "meta": {
+     "status": 200,
+     "framing": "chunked",
+     "contentEncoding": null,
+     "receivedBytes": 277460,
+     "wireBodyBytes": 276742,
+     "decodedBytes": 276742,
+     "bodySha256": "a3e69ca6b186c6d2",
+     "openedMs": 11,
+     "firstByteMs": 294,
+     "totalMs": 422
+    },
+    "instance": {
+     "id": "f29353f4-8ed8-4402-8703-03825025cf6f",
+     "call": 8
+    },
+    "sentAtMs": 14005
+   },
+   {
+    "targetId": "central-trio-odds",
+    "url": "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=7&action=init",
+    "status": 200,
+    "bodyLength": 17856,
+    "charset": "UTF-8",
+    "parsedKind": "combo-trio-json",
+    "parsedCount": 560,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "application/json; charset=UTF-8",
+     "via": "1.1 0bff98411be7553fe46a16d779ea3486.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "stepId": "T1g",
+    "variant": "gzip",
+    "role": "compression",
+    "pairWith": "T1",
+    "meta": {
+     "status": 200,
+     "framing": "chunked",
+     "contentEncoding": null,
+     "receivedBytes": 18272,
+     "wireBodyBytes": 17856,
+     "decodedBytes": 17856,
+     "bodySha256": "6174a7fdb78854c6",
+     "openedMs": 13,
+     "firstByteMs": 193,
+     "totalMs": 193
+    },
+    "instance": {
+     "id": "f29353f4-8ed8-4402-8703-03825025cf6f",
+     "call": 9
+    },
+    "sentAtMs": 16006
+   }
+  ],
+  "summary": {
+   "coverage": [
+    {
+     "stepId": "S1",
+     "targetId": "central-shutuba",
+     "host": "race.netkeiba.com",
+     "status": 200,
+     "verdict": "ok",
+     "parsedKind": "shutuba",
+     "parsedCount": 16,
+     "replacementChars": 0,
+     "bodyBytes": 276742
+    },
+    {
+     "stepId": "R1",
+     "targetId": "db-horse-results",
+     "host": "db.netkeiba.com",
+     "status": 200,
+     "verdict": "ok",
+     "parsedKind": "horse-results",
+     "parsedCount": 26,
+     "replacementChars": 0,
+     "bodyBytes": 140135
+    },
+    {
+     "stepId": "N1",
+     "targetId": "nar-shutuba",
+     "host": "nar.netkeiba.com",
+     "status": 200,
+     "verdict": "ok",
+     "parsedKind": "shutuba",
+     "parsedCount": 12,
+     "replacementChars": 0,
+     "bodyBytes": 218738
+    },
+    {
+     "stepId": "O1",
+     "targetId": "central-odds",
+     "host": "race.netkeiba.com",
+     "status": 200,
+     "verdict": "ok",
+     "parsedKind": "odds-json",
+     "parsedCount": 16,
+     "replacementChars": 0,
+     "bodyBytes": 890
+    },
+    {
+     "stepId": "T1",
+     "targetId": "central-trio-odds",
+     "host": "race.netkeiba.com",
+     "status": 200,
+     "verdict": "ok",
+     "parsedKind": "combo-trio-json",
+     "parsedCount": 560,
+     "replacementChars": 0,
+     "bodyBytes": 17856
+    },
+    {
+     "stepId": "N2",
+     "targetId": "nar-odds-page",
+     "host": "nar.netkeiba.com",
+     "status": 200,
+     "verdict": "ok",
+     "parsedKind": "nar-odds-page",
+     "parsedCount": 12,
+     "replacementChars": 0,
+     "bodyBytes": 56459
+    }
+   ],
+   "compression": [
+    {
+     "stepId": "S1g",
+     "pairWith": "S1",
+     "targetId": "central-shutuba",
+     "identityStatus": 200,
+     "gzipStatus": 200,
+     "identityWireBytes": 276742,
+     "gzipWireBytes": 276742,
+     "identityDecodedBytes": 276742,
+     "gzipDecodedBytes": 276742,
+     "wireRatio": 1,
+     "identityTotalMs": 431,
+     "gzipTotalMs": 422,
+     "identityFirstByteMs": 306,
+     "gzipFirstByteMs": 294,
+     "contentEncoding": null,
+     "compressed": false,
+     "bodyHashEqual": true
+    },
+    {
+     "stepId": "T1g",
+     "pairWith": "T1",
+     "targetId": "central-trio-odds",
+     "identityStatus": 200,
+     "gzipStatus": 200,
+     "identityWireBytes": 17856,
+     "gzipWireBytes": 17856,
+     "identityDecodedBytes": 17856,
+     "gzipDecodedBytes": 17856,
+     "wireRatio": 1,
+     "identityTotalMs": 177,
+     "gzipTotalMs": 193,
+     "identityFirstByteMs": 177,
+     "gzipFirstByteMs": 193,
+     "contentEncoding": null,
+     "compressed": false,
+     "bodyHashEqual": true
+    }
+   ],
+   "repeat": [
+    {
+     "stepId": "S1r",
+     "pairWith": "S1",
+     "targetId": "central-shutuba",
+     "firstStatus": 200,
+     "secondStatus": 200,
+     "bytesEqual": true,
+     "hashEqual": true,
+     "gapMs": 12004,
+     "sameInstance": true,
+     "firstTotalMs": 431,
+     "secondTotalMs": 536
+    }
+   ],
+   "instances": {
+    "distinctIds": 1,
+    "maxCall": 9
+   }
+  },
+  "subrequestProbe": {
+   "ran": true,
+   "requested": 60,
+   "attempted": 60,
+   "succeeded": 60,
+   "firstFailureAt": null,
+   "errorKind": null,
+   "error": null,
+   "httpStatus": null
+  },
+  "reading": {
+   "facts": [
+    "DO の中のソケットで netkeiba へ出した本数: 9 本",
+    "S1: 200(central-shutuba。判定 ok、パース 16 件、本文 276742 バイト)",
+    "R1: 200(db-horse-results。判定 ok、パース 26 件、本文 140135 バイト)",
+    "N1: 200(nar-shutuba。判定 ok、パース 12 件、本文 218738 バイト)",
+    "O1: 200(central-odds。判定 ok、パース 16 件、本文 890 バイト)",
+    "T1: 200(central-trio-odds。判定 ok、パース 560 件、本文 17856 バイト)",
+    "N2: 200(nar-odds-page。判定 ok、パース 12 件、本文 56459 バイト)",
+    "S1r: 200(central-shutuba。判定 ok、パース 16 件、本文 276742 バイト)",
+    "S1g: 200(central-shutuba、gzip を要求。判定 ok、パース 16 件、本文 276742 バイト)",
+    "T1g: 200(central-trio-odds、gzip を要求。判定 ok、パース 560 件、本文 17856 バイト)",
+    "打ち切り: なし",
+    "出馬表(S1)の本文は 276742 バイトで、#160 E3(通常の Worker のソケット)の 276708 バイトと違う",
+    "S1g: gzip を要求したが圧縮されなかった(content-encoding: なし)。本文は 276742 バイトで、identity(S1。276742 バイト)と同じ。所要時間(全体)は gzip 422 ms / identity 431 ms、本文のハッシュは一致",
+    "T1g: gzip を要求したが圧縮されなかった(content-encoding: なし)。本文は 17856 バイトで、identity(T1。17856 バイト)と同じ。所要時間(全体)は gzip 193 ms / identity 177 ms、本文のハッシュは一致",
+    "S1r: S1 と同じ URL の2回目(12004 ms 後)。ステータスは 200 → 200、本文のバイト数は同じ、本文のハッシュは一致、DO のインスタンスは同じ",
+    "DO のインスタンス: 記録全体で異なる ID は 1 個(呼び出し通番の最大は 9)",
+    "Worker から DO を 60 回呼ぶ試験: 60 回すべて成功した"
+   ],
+   "inferences": [
+    "DO の中から、通常の Worker(#160 E3)と同じヘッダで、出馬表が通った(取得でき、既存パーサで読めた)。これは1回の観測で、DO と通常の Worker で送信元の扱いが同じかどうかは分離できていない。",
+    "測った identity の取得先(S1・R1・N1・O1・T1・N2)は、すべて ok と判定された。取得先ごとに1本ずつの観測である。",
+    "S1g: Accept-Encoding: gzip を足しても拒否されなかったが、サーバは圧縮せずに返した(圧縮されなかった。この取得先の1本の観測)。",
+    "T1g: Accept-Encoding: gzip を足しても拒否されなかったが、サーバは圧縮せずに返した(圧縮されなかった。この取得先の1本の観測)。",
+    "Worker から DO を 60 回呼んで失敗しなかったので、DO の呼び出し(stub.fetch)は、Free の subrequest 上限(50)に数えられていないか、上限がこのアカウントでは違う可能性がある(プランは未確認)。"
+   ],
+   "limitations": [
+    "標本が小さい: 各セルは n=1(同じ取得先・同じ方式の取得は1本。再現性だけが同じ URL の2本)で、1アカウント・1回の実行。通った・拒否されたという結果は、その1回の観測である。",
+    "ms(所要時間)は、CloudFront のキャッシュの状態・経路・実行のタイミングの揺れを含む。n=1 なので、セルどうしの差の下位桁に意味はなく、読めるのは大まかな桁だけ。",
+    "本文のハッシュの不一致は、サーバ側での更新(出馬表・オッズの更新)による正当な違いでありうる。拒否や不具合の証拠とは読まない。",
+    "プランは確認していない(§6・§7 と同じ Secrets のアカウント。Free と推定しているだけ)。Free でソケットが使えるかの公式の記載は見当たらない。",
+    "ヘッダは #160 E3 と同じ4つ(User-Agent・accept・accept-language・sec-fetch-mode)。どのヘッダが拒否に効くか、TLS の特徴や HTTP バージョンが効くかは、この実験では分離できない。",
+    "gzip は、2対象(出馬表・三連複のオッズ)だけで測った。ほかの取得先で gzip が通るかは未測定。"
+   ]
+  }
+ }
+}

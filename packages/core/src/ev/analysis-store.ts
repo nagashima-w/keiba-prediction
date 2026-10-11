@@ -80,202 +80,83 @@
 
 import Database from "better-sqlite3";
 
-import type { PredictionMark } from "../analyzer/parse-response.js";
+import { type ComboBetType } from "../scraper/combo-odds-key.js";
 import type { CourseType } from "../scraper/types.js";
+import {
+  ANALYSES_TABLE,
+  ANALYSIS_ALLOCATION_META_TABLE,
+  ANALYSIS_BETS_TABLE,
+  ANALYSIS_HORSES_TABLE,
+  buildChildParams,
+  analysisParams,
+  comboPayoutParams,
+  DELETE_COMBO_PAYOUTS_SQL,
+  INSERT_ALLOCATION_BET_SQL,
+  INSERT_ALLOCATION_META_SQL,
+  INSERT_ANALYSIS_HORSE_SQL,
+  INSERT_ANALYSIS_SQL,
+  INSERT_COMBO_PAYOUT_SQL,
+  MARK_COMBO_IMPORTED_SQL,
+  planComboWrites,
+  RACE_COMBO_PAYOUT_IMPORTS_TABLE,
+  RACE_COMBO_PAYOUTS_TABLE,
+  RACE_RESULT_META_TABLE,
+  RACE_RESULTS_TABLE,
+  raceResultParams,
+  SELECT_ALLOCATION_BETS_SQL,
+  SELECT_ALLOCATION_META_SQL,
+  SELECT_ANALYSES_BY_RACE_SQL,
+  SELECT_ANALYSES_SQL,
+  SELECT_ANALYSIS_HORSES_SQL,
+  SELECT_RESULT_DETAIL_SQL,
+  SELECT_RESULT_META_SQL,
+  toRaceResultDetail,
+  toStoredAllocation,
+  toStoredAnalysis,
+  UPSERT_RACE_RESULT_META_SQL,
+  UPSERT_RACE_RESULT_SQL,
+  type AllocationMetaRow,
+  type AnalysisRow,
+  type HorseRow,
+  type ResultDetailRow,
+} from "./analysis-store-codec.js";
+import type {
+  AnalysisFilter,
+  AnalysisRecord,
+  RaceComboPayoutsReadResult,
+  RaceComboPayoutsSaveInput,
+  RaceResultDetail,
+  RaceResultEntry,
+  StoredAllocation,
+  StoredAllocationBet,
+  StoredAllocationBetDetail,
+  StoredAllocationSummary,
+  StoredAnalysis,
+  StoredComboPayout,
+} from "./analysis-store-types.js";
 
-const ANALYSES_TABLE = "analyses";
-const ANALYSIS_HORSES_TABLE = "analysis_horses";
-const RACE_RESULTS_TABLE = "race_results";
-const RACE_RESULT_META_TABLE = "race_result_meta";
-
-/** 保存する分析の1頭分。 */
-export interface AnalysisHorseRecord {
-  /** 馬番。 */
-  readonly umaban: number;
-  /** 事前複勝確率(prior)。 */
-  readonly prior: number;
-  /** 補正後複勝確率(Phase3まで prior と同値)。 */
-  readonly adjustedProb: number;
-  /** 使用した複勝オッズ下限。欠損時は null。 */
-  readonly placeOddsMin: number | null;
-  /** 期待値。オッズ欠損時は null。 */
-  readonly ev: number | null;
-  /** EVが閾値を上回ったか。 */
-  readonly isPositive: boolean;
-  /** 寄与度ログ(JSON化して保存)。無ければ null。 */
-  readonly contributions: unknown;
-  /** 予想印(◎〇▲△☆注のいずれか。印なしは null)。Task#23。 */
-  readonly mark: PredictionMark | null;
-  /**
-   * LLMが返した和文根拠(Issue#10 分析データのエクスポート)。LLM未使用(prior採用)の分析は
-   * null を渡す想定。省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
-   */
-  readonly reason?: string | null;
-}
-
-/** 保存する分析(レース単位)。 */
-export interface AnalysisRecord {
-  /** レースID。 */
-  readonly raceId: string;
-  /** 分析日時(ISO文字列など、そのまま保持)。 */
-  readonly analyzedAt: string;
-  /** 各馬の推定結果。 */
-  readonly horses: readonly AnalysisHorseRecord[];
-  /**
-   * この分析が推定EV(単勝オッズからの複勝下限概算)によるものか(Task#25)。
-   * 省略時は false(確定EV。既存呼び出し元との後方互換のため任意項目とする)。
-   * verify は既定でこのフラグが true の分析を回収率集計から除外する。
-   */
-  readonly evEstimated?: boolean;
-  /**
-   * プロンプト版番号(analyzer/build-prompt.ts の PROMPT_VERSION、Task#27)。
-   * LLMを使わず prior をそのまま採用した分析(プロンプトを使っていない)は null を渡す。
-   * 省略時も null(版不明。既存呼び出し元との後方互換のため任意項目とする)。
-   */
-  readonly promptVersion?: string | null;
-  /**
-   * 追加指示(analyzer/build-prompt.ts の BuildPromptInput.additionalInstruction、Task#28)。
-   * 設定画面の自由記述欄が空、またはLLMを使わず prior をそのまま採用した分析(プロンプト自体を
-   * 使っていない)は null を渡す。省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
-   */
-  readonly additionalInstruction?: string | null;
-  /**
-   * 開催日(YYYYMMDD、Task#34)。app 側で選択済みの開催日(kaisaiDate)をそのまま渡す想定。
-   * 選択済み開催日が渡らなかった(当日日付で近似した)場合は null を渡す。
-   * 省略時も null(日付不明。既存呼び出し元との後方互換のため任意項目とする)。
-   */
-  readonly kaisaiDate?: string | null;
-  /**
-   * 使用したLLMモデル名(Issue#10 分析データのエクスポート、例: "claude-sonnet-4-6")。
-   * LLMを使わず prior をそのまま採用した分析(LLMスキップ)は null を渡す想定(偽値を混入させない)。
-   * 省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
-   */
-  readonly model?: string | null;
-  /**
-   * LLMの生応答テキスト(Issue#10)。LLMスキップ時は null を渡す想定。
-   * 秘密安全性: これはLLMが返したモデル出力テキストのみで、プロンプト本文・apiKey等は含まない
-   * (呼び出し側〈analysis-pipeline.ts〉が analyzeRace の結果からそのまま転送する)。
-   * 省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
-   */
-  readonly rawResponse?: string | null;
-  /**
-   * 取得したレース情報のスナップショット(Issue#10。エクスポート用、過去戦績は含めない)。
-   * JSON化して保存する(contributions と同じ流儀)。LLM使用有無に関わらず、取得済みレース情報が
-   * あれば保存してよい。省略時・undefinedは null(スナップショット無し)として保存する。
-   * 型は analysis-store 側では意図的に unknown のまま扱う(スキーマは呼び出し側
-   * 〈main/analysis-export.ts の RaceSnapshot〉が定義・検証する)。
-   */
-  readonly raceSnapshot?: unknown;
-}
-
-/** 復元した分析の1頭分(contributions は JSON からパース済み)。 */
-export interface StoredAnalysisHorse {
-  readonly umaban: number;
-  readonly prior: number;
-  readonly adjustedProb: number;
-  readonly placeOddsMin: number | null;
-  readonly ev: number | null;
-  readonly isPositive: boolean;
-  readonly contributions: unknown;
-  /** 予想印(◎〇▲△☆注のいずれか。印なし・旧レコード(列追加前の保存)は null)。Task#23。 */
-  readonly mark: PredictionMark | null;
-  /**
-   * LLMが返した和文根拠(Issue#10)。LLM未使用・旧レコード(列追加前の保存)は null。
-   */
-  readonly reason: string | null;
-}
-
-/** 復元した分析(レース単位)。 */
-export interface StoredAnalysis {
-  /** 分析ID(採番)。 */
-  readonly id: number;
-  readonly raceId: string;
-  readonly analyzedAt: string;
-  readonly horses: StoredAnalysisHorse[];
-  /**
-   * 推定EV(Task#25)による分析か。旧レコード(列追加前の保存)は false(確定EV扱い)として復元する。
-   */
-  readonly evEstimated: boolean;
-  /**
-   * プロンプト版番号(Task#27)。旧レコード(列追加前の保存)・LLM未使用の分析は null(版不明)。
-   */
-  readonly promptVersion: string | null;
-  /**
-   * 追加指示(Task#28)。旧レコード(列追加前の保存)・設定が空・LLM未使用の分析は null。
-   */
-  readonly additionalInstruction: string | null;
-  /**
-   * 開催日(YYYYMMDD、Task#34)。旧レコード(列追加前の保存)・選択済み開催日が渡らなかった分析は
-   * null(日付不明)。
-   */
-  readonly kaisaiDate: string | null;
-  /**
-   * 使用したLLMモデル名(Issue#10)。LLMスキップ・旧レコード(列追加前の保存)は null。
-   */
-  readonly model: string | null;
-  /**
-   * LLMの生応答テキスト(Issue#10)。LLMスキップ・旧レコード(列追加前の保存)は null。
-   */
-  readonly rawResponse: string | null;
-  /**
-   * 取得したレース情報のスナップショット(Issue#10。JSONからパース済み)。未保存・
-   * 旧レコード(列追加前の保存)・破損JSONは null(防御的復元。getRaceResultDetailと同方針)。
-   */
-  readonly raceSnapshot: unknown;
-}
-
-/** レース結果の1頭分。 */
-export interface RaceResultEntry {
-  /** 馬番。 */
-  readonly umaban: number;
-  /** 実着順。非数値着順(中止・除外・着順不明)は null。 */
-  readonly finishPosition: number | null;
-  /**
-   * 複勝の確定払戻(100円あたりの円)。verifyで回収率を実配当ベースで算出するために用いる。
-   * 複勝圏外の馬・未取込(旧データ)は null。省略時も null 扱い(後方互換)。
-   */
-  readonly placePayout?: number | null;
-  /**
-   * 通過順位(例: [2,3,4,3]、タスク#27-A2)。取得できない場合は空配列。
-   * 省略時は空配列として保存する(placePayoutと同方針の非破壊optional追加)。
-   */
-  readonly passing?: number[];
-  /**
-   * 上がり3F(タスク#27-A2)。取得できない場合は null。省略時もnull扱い(後方互換)。
-   */
-  readonly last3f?: number | null;
-}
-
-/** 復元したレース結果詳細の1頭分(getRaceResultDetail、タスク#27-A2)。 */
-export interface RaceResultDetailHorse {
-  /** 馬番。 */
-  readonly umaban: number;
-  /** 実着順。非数値着順(中止・除外・着順不明)は null。 */
-  readonly finishPosition: number | null;
-  /** 通過順位。未保存・復元不能(JSON破損等)は空配列。 */
-  readonly passing: number[];
-  /** 上がり3F。未保存は null。 */
-  readonly last3f: number | null;
-}
-
-/**
- * 復元したレース結果詳細(getRaceResultDetail、タスク#27-A2)。
- * #27-C(当日傾向のプロンプト反映)が消費する最小フィールドに絞った契約型。
- * horseName・wakuban 等、race_resultsに保存していない項目は含めない
- * (未保存の値に偽の値を混入させないため)。
- */
-export interface RaceResultDetail {
-  /** レース単位の面(芝/ダ/障)。未取得・未保存(race_result_metaに行が無い)は null。 */
-  readonly courseType: CourseType | null;
-  /** 各馬の着順・通過順・上がり3F(馬番昇順)。 */
-  readonly horses: readonly RaceResultDetailHorse[];
-}
-
-/** listAnalyses の絞り込み条件。 */
-export interface AnalysisFilter {
-  /** レースIDで絞り込む。 */
-  readonly raceId?: string;
-}
+// Issue #168(#163-a): 入出力の型は better-sqlite3 に依存しない analysis-store-types.ts へ切り出した。
+// 既存の import 元(`./analysis-store.js`・バレル)を壊さないよう、ここから再 export する。
+export type {
+  AnalysisHorseRecord,
+  AnalysisRecord,
+  AnalysisAllocationRecord,
+  AnalysisAllocationMetaRecord,
+  StoredAllocationBet,
+  StoredAllocationBetDetail,
+  StoredAllocation,
+  StoredAllocationSummary,
+  AnalysisBetRecord,
+  StoredAnalysisHorse,
+  StoredAnalysis,
+  RaceResultEntry,
+  RaceComboPayoutsSaveInput,
+  StoredComboPayout,
+  RaceComboPayoutsReadResult,
+  RaceResultDetailHorse,
+  RaceResultDetail,
+  AnalysisFilter,
+} from "./analysis-store-types.js";
 
 /** AnalysisStore の構築オプション。 */
 export interface AnalysisStoreOptions {
@@ -283,19 +164,6 @@ export interface AnalysisStoreOptions {
   filename?: string;
   /** 既存の better-sqlite3 Database を注入(ScrapeCache との共有時に使用)。 */
   database?: Database.Database;
-}
-
-/** 分析馬行のDB表現。 */
-interface HorseRow {
-  umaban: number;
-  prior: number;
-  adjusted_prob: number;
-  place_odds_min: number | null;
-  ev: number | null;
-  is_positive: number;
-  contributions_json: string | null;
-  mark: string | null;
-  reason: string | null;
 }
 
 /**
@@ -326,7 +194,9 @@ export class AnalysisStore {
         kaisai_date TEXT,
         model TEXT,
         raw_response TEXT,
-        race_snapshot_json TEXT
+        race_snapshot_json TEXT,
+        history_cutoff_date TEXT,
+        prompt_lookahead_guarded INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_${ANALYSES_TABLE}_race
         ON ${ANALYSES_TABLE} (race_id);
@@ -341,6 +211,8 @@ export class AnalysisStore {
         contributions_json TEXT,
         mark TEXT,
         reason TEXT,
+        highlights_json TEXT,
+        concerns_json TEXT,
         PRIMARY KEY (analysis_id, umaban),
         FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
       );
@@ -349,14 +221,100 @@ export class AnalysisStore {
         umaban INTEGER NOT NULL,
         finish_position INTEGER,
         place_payout REAL,
+        win_payout REAL,
         PRIMARY KEY (race_id, umaban)
       );
       CREATE TABLE IF NOT EXISTS ${RACE_RESULT_META_TABLE} (
         race_id TEXT PRIMARY KEY,
         course_type TEXT
       );
+      -- 組合せ払戻(ワイド・3連複)の値テーブルとマーカーテーブル(Issue #52・AC12)。
+      -- race_result_meta(タスク#27-A2)と同じ理由・同じ流儀で CREATE TABLE IF NOT EXISTS
+      -- を使う(ALTER TABLE ADD COLUMN ではない): これらは既存テーブルへの列追加ではなく
+      -- 新規テーブルの追加であり、旧DBを開いた際に無ければ作成されるだけで既存データには
+      -- 触れない(冪等・非破壊)。2テーブルに分けた理由(R-4): 値テーブル(下記)だけでは
+      -- 「未取込」と「取り込んだが該当券種の払戻が0件だった」を区別できない
+      -- (行の個数ではなく行の有無で判定する必要があるため。listUnimportedRaceIdsが
+      -- race_resultsの行の有無でNOT EXISTS判定する既存流儀と同じ)。
+      --
+      -- combo_key は buildComboOddsKeyFor(betType, umabans) による正規化キーであり、
+      -- betTypeごとに順序方針(ソートする/しない)が異なる(ワイド・3連複は順不同、
+      -- 馬単は着順ありのまま連結。COMBO_KEY_ORDER参照。Issue #106・#24-B裁定)。
+      -- combo_keyはただのTEXTで、主キーが(race_id, bet_type, combo_key)であるため、
+      -- 順序付きキー(馬単)もこの同じ列・同じテーブルに保持できる(列/テーブル分離は
+      -- 不要。AC10改訂: Issue #52時点の「分離が必要」という記述は過剰に強かった)。
+      -- 詳細: StoredComboPayout.comboKey のJSDoc。
+      CREATE TABLE IF NOT EXISTS ${RACE_COMBO_PAYOUTS_TABLE} (
+        race_id TEXT NOT NULL,
+        bet_type TEXT NOT NULL,
+        combo_key TEXT NOT NULL,
+        payout INTEGER NOT NULL,
+        PRIMARY KEY (race_id, bet_type, combo_key)
+      );
+      CREATE TABLE IF NOT EXISTS ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} (
+        race_id TEXT NOT NULL,
+        bet_type TEXT NOT NULL,
+        PRIMARY KEY (race_id, bet_type)
+      );
+      -- 配分提案(Issue #59)のレース単位メタ行。全経路(unset/yoso/unavailable/place-only/
+      -- mixed/invalid)で必ず1行書く契約(#31: 判定不能と判定結果を混ぜない)。列一覧は
+      -- boss着手前ゲート・#59で固定(Issue #118〈#24-D3b-3〉で include_quinella 列を追加し
+      -- 20→21列、Issue #126〈#24-E3c〉で include_exacta 列を追加し21→22列、Issue #140〈#25-E3c〉で
+      -- include_trifecta 列を追加し22→23列、Issue #151〈#26-E3c〉で include_bracket_quinella 列を
+      -- 追加し23→24列。列を読む人〈過去分析の再表示「馬連/馬単/三連単/枠連: ON/OFF/記録なし」〉が
+      -- 実在するに至ったため #59 の凍結を部分的に解除した4つの例外)。race_combo_payouts と同じ理由・同じ流儀で
+      -- CREATE TABLE IF NOT EXISTS を使う(新規テーブル追加であり既存データには触れない)。
+      -- include_quinella・include_exacta・include_trifecta・include_bracket_quinella はいずれも
+      -- NULL を許す(NOT NULL にしない・DEFAULT も付けない): 列追加前(それぞれIssue #118・#126・
+      -- #140・#151より前)に保存された行は「馬連/馬単/三連単/枠連の設定を記録していない」のであって
+      -- 「馬連/馬単/三連単/枠連を配分に使わなかった」のではないため、0で埋めるとOFFと断定する
+      -- 誤りになる(#31の原則。着手前ゲート裁定)。枠連は v1.13.0(#150)から買い目行が保存されて
+      -- いるため、v1.13.0で保存された行は「枠連の買い目はあるが設定列は NULL」になりうるが、
+      -- 買い目行から ON と推定はしない。
+      CREATE TABLE IF NOT EXISTS ${ANALYSIS_ALLOCATION_META_TABLE} (
+        analysis_id INTEGER PRIMARY KEY,
+        route TEXT NOT NULL,
+        unavailable_reason TEXT,
+        fallback_reason TEXT,
+        skip_reason_code TEXT,
+        combo_odds_wide TEXT,
+        combo_odds_trio TEXT,
+        bankroll REAL NOT NULL,
+        per_race_cap REAL NOT NULL,
+        kelly_fraction REAL NOT NULL,
+        ev_threshold REAL NOT NULL,
+        include_combo_odds INTEGER NOT NULL,
+        include_wide INTEGER NOT NULL,
+        include_trio INTEGER NOT NULL,
+        include_quinella INTEGER,
+        include_exacta INTEGER,
+        include_trifecta INTEGER,
+        include_bracket_quinella INTEGER,
+        bet_unit INTEGER,
+        greedy_steps INTEGER,
+        candidate_cap INTEGER,
+        model_id TEXT,
+        model_approximate INTEGER,
+        odds_status TEXT NOT NULL,
+        FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
+      );
+      -- 配分提案(Issue #59)の買い目明細(stake>0のみ、呼び出し側でフィルタ済み)。
+      -- 複勝・ワイド・3連複を bet_type 列だけで共通化する(GeneralBetAllocation/BetAllocationの
+      -- 両方が continuousFraction/scaledFraction/stake/droppedBelowMinimum を持つため、保存列は
+      -- bet_type/combo_key/stake/odds/ev の5列〈+analysis_id〉に絞れる。#59決定(c))。
+      CREATE TABLE IF NOT EXISTS ${ANALYSIS_BETS_TABLE} (
+        analysis_id INTEGER NOT NULL,
+        bet_type TEXT NOT NULL,
+        combo_key TEXT NOT NULL,
+        stake INTEGER NOT NULL,
+        odds REAL,
+        ev REAL,
+        PRIMARY KEY (analysis_id, bet_type, combo_key),
+        FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
+      );
     `);
     this.migrateResultPayoutColumn();
+    this.migrateResultWinPayoutColumn();
     this.migrateMarkColumn();
     this.migrateEvEstimatedColumn();
     this.migratePromptVersionColumn();
@@ -365,6 +323,104 @@ export class AnalysisStore {
     this.migrateResultDetailColumns();
     this.migrateAnalysisExportColumns();
     this.migrateHorseReasonColumn();
+    this.migrateHorseItemsColumns();
+    this.migrateAllocationQuinellaColumn();
+    this.migrateAllocationExactaColumn();
+    this.migrateAllocationTrifectaColumn();
+    this.migrateAllocationBracketQuinellaColumn();
+    this.migrateHistoryCutoffDateColumn();
+    this.migratePromptLookaheadGuardedColumn();
+  }
+
+  /**
+   * LLMプロンプト側の先読みリーク遮断の印(prompt_lookahead_guarded)列を後付けするマイグレーション
+   * (Issue #153)。この列が無い analyses(v1.14.x 以前)には追加する。既存行は ALTER TABLE で NULL が入る
+   * =「遮断の記録なし=是正前」として読める(0や1で誤読させない。history_cutoff_date の後付けと同じ流儀)。冪等。
+   */
+  private migratePromptLookaheadGuardedColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "prompt_lookahead_guarded")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN prompt_lookahead_guarded INTEGER`);
+    }
+  }
+
+  /**
+   * 戦績の絞り込み基準日(history_cutoff_date)列を後付けするマイグレーション(Issue #39)。
+   * #39より前に作成済みの analyses にはこの列が無いため、存在しなければ追加する。既存行は
+   * ALTER TABLE で NULL が入る=「先読みリーク遮断の記録なし=是正前」として読める(0や空文字で
+   * 「是正済み」と誤読させない。#31の原則・include_*列の後付けと同じ流儀)。冪等。
+   */
+  private migrateHistoryCutoffDateColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "history_cutoff_date")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN history_cutoff_date TEXT`);
+    }
+  }
+
+  /**
+   * 配分提案メタ行のinclude_quinella列を後付けするマイグレーション(Issue #118・#24-D3b-3)。
+   * Issue #118より前に作成済みの analysis_allocation_meta にはこの列が無いため、存在しなければ
+   * 追加する(既存行はALTER TABLEでNULLが入る=「馬連の設定を記録していない」として読める。
+   * #31: OFFと断定しない。上記CREATE TABLEのコメント参照)。
+   */
+  private migrateAllocationQuinellaColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "include_quinella")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_quinella INTEGER`);
+    }
+  }
+
+  /**
+   * 配分提案メタ行のinclude_exacta列を後付けするマイグレーション(Issue #126・#24-E3c)。
+   * Issue #126より前に作成済みの analysis_allocation_meta にはこの列が無いため、存在しなければ
+   * 追加する(既存行はALTER TABLEでNULLが入る=「馬単の設定を記録していない」として読める。
+   * #31: OFFと断定しない。上記CREATE TABLEのコメント参照。`migrateAllocationQuinellaColumn`と同型)。
+   */
+  private migrateAllocationExactaColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "include_exacta")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_exacta INTEGER`);
+    }
+  }
+
+  /**
+   * 配分提案メタ行のinclude_trifecta列を後付けするマイグレーション(Issue #140・#25-E3c)。
+   * Issue #140より前に作成済みの analysis_allocation_meta にはこの列が無いため、存在しなければ
+   * 追加する(既存行はALTER TABLEでNULLが入る=「三連単の設定を記録していない」として読める。
+   * #31: OFFと断定しない。上記CREATE TABLEのコメント参照。`migrateAllocationQuinellaColumn`/
+   * `migrateAllocationExactaColumn`と同型)。
+   */
+  private migrateAllocationTrifectaColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "include_trifecta")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_trifecta INTEGER`);
+    }
+  }
+
+  /**
+   * 配分提案メタ行のinclude_bracket_quinella列を後付けするマイグレーション(Issue #151・#26-E3c)。
+   * Issue #151より前(v1.13.0まで)に作成済みの analysis_allocation_meta にはこの列が無いため、
+   * 存在しなければ追加する(既存行はALTER TABLEでNULLが入る=「枠連の設定を記録していない」として
+   * 読める。#31: OFFと断定しない。上記CREATE TABLEのコメント参照。`migrateAllocationQuinellaColumn`/
+   * `migrateAllocationExactaColumn`/`migrateAllocationTrifectaColumn`と同型)。
+   */
+  private migrateAllocationBracketQuinellaColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "include_bracket_quinella")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_bracket_quinella INTEGER`);
+    }
   }
 
   /**
@@ -401,6 +457,23 @@ export class AnalysisStore {
       .all() as Array<{ name: string }>;
     if (!columns.some((c) => c.name === "reason")) {
       this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN reason TEXT`);
+    }
+  }
+
+  /**
+   * 強調材料・懸念事項(highlights_json・concerns_json)列を後付けするマイグレーション(Issue #197・#196-a)。
+   * 旧バージョンで作成済みの analysis_horses には2列が無いため、無い列だけ追加する(既存行は NULL=項目なしとして
+   * `[]` で読める=後方互換)。列の並びは CREATE TABLE と同じ(reason の後ろ)で、クラウド版(D1)の migration 0006 の
+   * ALTER の並びとも一致する(構造の一致は scripts/test/cloud-d1-schema.test.ts が固定している)。
+   */
+  private migrateHorseItemsColumns(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_HORSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    for (const name of ["highlights_json", "concerns_json"]) {
+      if (!columns.some((c) => c.name === name)) {
+        this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN ${name} TEXT`);
+      }
     }
   }
 
@@ -494,6 +567,23 @@ export class AnalysisStore {
   }
 
   /**
+   * 実配当列(win_payout)を後付けするマイグレーション(Issue #100・#23-C)。
+   * migrateResultPayoutColumn(place_payout)の逐語コピー。旧バージョンで作成済みの
+   * race_results には win_payout 列が無いため、存在しなければ追加する
+   * (既存行は NULL=未取込となり、verifyは判定不能として扱う=後方互換)。
+   */
+  private migrateResultWinPayoutColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${RACE_RESULTS_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "win_payout")) {
+      this.db.exec(
+        `ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN win_payout REAL`,
+      );
+    }
+  }
+
+  /**
    * 通過順(passing_json)・上がり3F(last3f)列を後付けするマイグレーション(タスク#27-A2)。
    * 旧バージョンで作成済みの race_results にはこれらの列が無いため、存在しなければ追加する
    * (既存行は passing_json=NULL→復元時 passing=[]、last3f=NULLのまま読める=後方互換)。
@@ -517,48 +607,25 @@ export class AnalysisStore {
    * @param record レース単位の分析結果
    */
   saveAnalysis(record: AnalysisRecord): number {
-    const insertAnalysis = this.db.prepare(
-      `INSERT INTO ${ANALYSES_TABLE}
-         (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date,
-          model, raw_response, race_snapshot_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    const insertHorse = this.db.prepare(
-      `INSERT INTO ${ANALYSIS_HORSES_TABLE}
-         (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
+    const insertAnalysis = this.db.prepare(INSERT_ANALYSIS_SQL);
+    const insertHorse = this.db.prepare(INSERT_ANALYSIS_HORSE_SQL);
+    // 配分提案(Issue #59)。record.allocation が渡されたときだけ書く(#59 AC4「旧分析(記録なし)」)。
+    const insertAllocationMeta = this.db.prepare(INSERT_ALLOCATION_META_SQL);
+    const insertAllocationBet = this.db.prepare(INSERT_ALLOCATION_BET_SQL);
 
     const tx = this.db.transaction((rec: AnalysisRecord): number => {
-      const info = insertAnalysis.run(
-        rec.raceId,
-        rec.analyzedAt,
-        rec.evEstimated ? 1 : 0,
-        rec.promptVersion ?? null,
-        rec.additionalInstruction ?? null,
-        rec.kaisaiDate ?? null,
-        rec.model ?? null,
-        rec.rawResponse ?? null,
-        rec.raceSnapshot === undefined || rec.raceSnapshot === null
-          ? null
-          : JSON.stringify(rec.raceSnapshot),
-      );
+      const info = insertAnalysis.run(...analysisParams(rec));
       const analysisId = Number(info.lastInsertRowid);
-      for (const h of rec.horses) {
-        insertHorse.run(
-          analysisId,
-          h.umaban,
-          h.prior,
-          h.adjustedProb,
-          h.placeOddsMin,
-          h.ev,
-          h.isPositive ? 1 : 0,
-          h.contributions === undefined || h.contributions === null
-            ? null
-            : JSON.stringify(h.contributions),
-          h.mark,
-          h.reason ?? null,
-        );
+      // 子の行の束縛値は codec(D1 実装と共有)が組み立てる。書く順序は 馬 → 配分メタ → 買い目。
+      const child = buildChildParams(rec, analysisId);
+      for (const params of child.horses) {
+        insertHorse.run(...params);
+      }
+      if (child.allocationMeta !== null) {
+        insertAllocationMeta.run(...child.allocationMeta);
+        for (const params of child.allocationBets) {
+          insertAllocationBet.run(...params);
+        }
       }
       return analysisId;
     });
@@ -567,57 +634,198 @@ export class AnalysisStore {
   }
 
   /**
-   * レース後の実着順(通過順・上がり3F・複勝確定払戻)と、レース単位の面(course_type)を保存する。
-   * (race_id, umaban) 主キーで再保存は上書きする。
-   * placePayout/passing/last3f を省略した場合はそれぞれ null/空配列/null で保存する
-   * (未取込項目=後続の復元・verifyは欠損値として扱う)。
+   * レース後の実着順(通過順・上がり3F・複勝確定払戻・単勝確定払戻)と、レース単位の面
+   * (course_type)を保存する。(race_id, umaban) 主キーで再保存は上書きする。
+   * placePayout/winPayout/passing/last3f を省略した場合はそれぞれ null/null/空配列/null で
+   * 保存する(未取込項目=後続の復元・verifyは欠損値として扱う)。winPayout は placePayout と
+   * 同型の後付け列(win_payout、Issue #100・#23-C)。
    *
-   * race_results(馬単位)・race_result_meta(レース単位の面)の2テーブルは単一の
-   * db.transaction 内で書く(better-sqlite3のtransactionは例外で全ロールバックされるため、
-   * 2テーブル書き込みの原子性を担保する)。courseType が null/未指定の場合は
-   * race_result_meta に行を作らない(面が取れないレースまで不確かな行を残さないため)。
+   * race_results(馬単位)・race_result_meta(レース単位の面)・race_combo_payouts/
+   * race_combo_payout_imports(組合せ払戻、Issue #52)は単一の db.transaction 内で書く
+   * (better-sqlite3のtransactionは例外で全ロールバックされるため、複数テーブル書き込みの
+   * 原子性を担保する。AC7)。courseType が null/未指定の場合は race_result_meta に行を
+   * 作らない(面が取れないレースまで不確かな行を残さないため)。
+   *
+   * comboPayouts の各券種は、`state:"undetermined"`(構造異常・払戻未公開)なら
+   * その券種のテーブルに一切触れない(boss裁定R-5・R-7: 一過性の構造異常での再取込が
+   * 正しい過去データを破壊しないため)。`state:"parsed"` なら既存行を削除してから
+   * 保存し直す(delete-then-insert。AC8: 再取込で組数が減っても孤児行を残さない)。
+   * 券種キー省略・comboPayouts自体の省略は「触れない」と同義(courseTypeと同じ非破壊
+   * optional。AC13)。
+   *
+   * **呼び出し側への警告(提案・boss メタレビュー対応)**: `payouts` に正規化後(`buildComboOddsKey`
+   * 適用後)で同一になる組が2件以上含まれていると、`race_combo_payouts` の
+   * PRIMARY KEY(race_id, bet_type, combo_key)違反で例外が飛び、この呼び出し全体が
+   * ロールバックされる(=着順(`race_results`)まで巻き戻る。この関数自身は重複を検知して
+   * 除外したりしない)。`parseRaceResult` は `duplicateCombo` を検出して
+   * `state:"undetermined"` に倒すため通常この経路には来ないが、将来 `parseRaceResult` を
+   * 経由しない呼び出し元(#53〜#55等)が増えたときは、呼び出し側が事前に重複を検証するか、
+   * この関数側の防御を検討すること(`analysis-store.test.ts`「単一トランザクション」describe
+   * に、この事故が発生した際に着順まで巻き戻ることを直接固定したテストがある)。
    * @param raceId レースID
    * @param results 馬番→着順・複勝払戻・通過順・上がり3F(非数値着順は finishPosition=null)
    * @param courseType レース単位の面(芝/ダ/障)。取得できない・省略時は race_result_meta を書かない
+   * @param comboPayouts ワイド・3連複の確定払戻(Issue #52)。省略時は組合せ払戻テーブルに触れない
    */
   saveResult(
     raceId: string,
     results: readonly RaceResultEntry[],
     courseType?: CourseType | null,
+    comboPayouts?: RaceComboPayoutsSaveInput,
   ): void {
-    const upsertResult = this.db.prepare(
-      `INSERT INTO ${RACE_RESULTS_TABLE}
-         (race_id, umaban, finish_position, place_payout, passing_json, last3f)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(race_id, umaban) DO UPDATE SET
-         finish_position = excluded.finish_position,
-         place_payout = excluded.place_payout,
-         passing_json = excluded.passing_json,
-         last3f = excluded.last3f`,
-    );
-    const upsertMeta = this.db.prepare(
-      `INSERT INTO ${RACE_RESULT_META_TABLE} (race_id, course_type)
-       VALUES (?, ?)
-       ON CONFLICT(race_id) DO UPDATE SET course_type = excluded.course_type`,
-    );
+    // SQL と束縛値の組み立ては codec(クラウド版の D1 実装と共有。Issue #207)。文の発行は従来と同じ(同じ文・同じ回数・同じ順序。
+    // `analysis-store-result-sql-sequence.test.ts` が固定している)。
+    const upsertResult = this.db.prepare(UPSERT_RACE_RESULT_SQL);
+    const upsertMeta = this.db.prepare(UPSERT_RACE_RESULT_META_SQL);
+    const deleteCombo = this.db.prepare(DELETE_COMBO_PAYOUTS_SQL);
+    const insertCombo = this.db.prepare(INSERT_COMBO_PAYOUT_SQL);
+    const markComboImported = this.db.prepare(MARK_COMBO_IMPORTED_SQL);
     const tx = this.db.transaction(
-      (rows: readonly RaceResultEntry[], meta: CourseType | null | undefined) => {
+      (
+        rows: readonly RaceResultEntry[],
+        meta: CourseType | null | undefined,
+        combo: RaceComboPayoutsSaveInput | undefined,
+      ) => {
         for (const r of rows) {
-          upsertResult.run(
-            raceId,
-            r.umaban,
-            r.finishPosition,
-            r.placePayout ?? null,
-            JSON.stringify(r.passing ?? []),
-            r.last3f ?? null,
-          );
+          upsertResult.run(...raceResultParams(raceId, r));
         }
         if (meta !== undefined && meta !== null) {
           upsertMeta.run(raceId, meta);
         }
+        // R-5・R-7: 判定不能(undetermined)または未指定の券種は plan に含まれず、DBに判定結果として残さない
+        // (再取込で一過性の異常が起きても、既存の正しい値を保持する)。キーは betType 別の順序方針(codec の comboPayoutParams)。
+        for (const { betType, payouts } of planComboWrites(combo)) {
+          deleteCombo.run(raceId, betType);
+          for (const entry of payouts) {
+            insertCombo.run(...comboPayoutParams(raceId, betType, entry));
+          }
+          markComboImported.run(raceId, betType);
+        }
       },
     );
-    tx(results, courseType);
+    tx(results, courseType, comboPayouts);
+  }
+
+  /**
+   * ワイド・3連複の確定払戻を取得する(Issue #52。返り値契約は RaceComboPayoutsReadResult
+   * のJSDoc参照)。
+   *
+   * 「未取込」の判定は race_combo_payout_imports のマーカー行の有無で行う
+   * (race_results の行の有無を根拠にしてはならない。boss裁定R-4): 旧DB
+   * (本機能より前に取り込んだレース)は race_results に行があるがこのマーカーが無いため、
+   * 正しく not_imported と判定できる。marker が有る(=取込試行が成功した)場合のみ
+   * race_combo_payouts を読み、0件でも imported として返す(未発売等と not_imported を
+   * 混同しない)。
+   *
+   * 未知の bet_type 文字列が紛れ込んだ場合の防御(boss裁定R-6): この関数は呼び出し側が
+   * 渡す型付きの betType(`ComboBetType`)で WHERE 句を等価比較するため、DBに万一未知の
+   * bet_type 値が混入していても、そのレース・その betType の一致行以外は自動的に除外される
+   * (toStoredCourseType のような追加の防御的フォールバック関数を別途持つ必要が無い)。
+   * @param raceId レースID
+   * @param betType 券種(`ComboBetType`)
+   */
+  getComboPayouts(raceId: string, betType: ComboBetType): RaceComboPayoutsReadResult {
+    const marker = this.db
+      .prepare(
+        `SELECT 1 FROM ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} WHERE race_id = ? AND bet_type = ?`,
+      )
+      .get(raceId, betType);
+    if (marker === undefined) {
+      return { state: "not_imported" };
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT combo_key AS comboKey, payout FROM ${RACE_COMBO_PAYOUTS_TABLE}
+           WHERE race_id = ? AND bet_type = ? ORDER BY combo_key`,
+      )
+      .all(raceId, betType) as StoredComboPayout[];
+    return { state: "imported", payouts: rows };
+  }
+
+  /**
+   * 配分提案(analysis_allocation_meta / analysis_bets、Issue #59)のうち、#71(#54-B。
+   * 配分ベースの回収率 `proposedBet` 系)が読む最小列だけを取得する。メタ行が無ければ
+   * undefined を返す(#59 より前に保存された旧分析=「記録なし」。`AnalysisRecord.allocation`
+   * が渡されなかった保存はメタ行を作らない)。
+   *
+   * **意図的に読まない列(#71 着手前ゲート決定)**: メタ行の残り22列(`analysis_id`を含む。
+   * Issue #118でinclude_quinella・#126でinclude_exacta・#140でinclude_trifecta・#151で
+   * include_bracket_quinellaがそれぞれ実効設定の一員として加わり、物理列数の増加分
+   * 〈20→21→22→23→24〉だけこの残り列数も増えている。実測: 物理24列のうち本メソッドが読むのは
+   * `route`/`skip_reason_code`の2列だけなので、残りは24-2=22列)
+   * (`unavailable_reason`/`fallback_reason`/`combo_odds_wide`/`combo_odds_trio`の4列、実効設定11列
+   * 〈bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/include_wide/
+   * include_trio/include_quinella/include_exacta/include_trifecta/include_bracket_quinella〉、
+   * 実効値5列〈bet_unit/greedy_steps/candidate_cap/model_id/model_approximate〉、`odds_status`、
+   * `analysis_id`。4+11+5+1+1=22)と、明細の `odds`/`ev` の2列は返さない。#71 が実際に使うのは
+   * `route`・`skip_reason_code`(母集団の4分類)と `bet_type`/`combo_key`/`stake`
+   * (実際の配分額そのものを賭け金とする。Q-C)の5列のみで、`odds`/`ev` を読むと
+   * 「回収率」ではなく「提案時点の期待値の再計算」になってしまう(Q-Cに反する)。
+   * 誰も読まない列にまで #59 の条件B(非衝突)のコストを払わない判断は #59 で8巡した
+   * 失敗の再現を避けるため(#71 Issue本文)。#55(過去分析の再表示UI)で残り22列/odds/evが
+   * 必要になった時点で別途追加する。
+   *
+   * **`odds`/`ev`を返り値の型に持たせないこと自体は「将来この関数が改修されても読まれない」
+   * ことまでは保証しない**(#71メタレビュー指摘)。本当の保証は、消費側
+   * `ev/verify.test.ts`「AC-B4: analysis_bets.oddsが異常値(+Infinity/NaN)でもproposedBetの
+   * 集計結果が変わらないこと」が、`odds`/`ev`に極端な値(+Infinity・NaN)を入れた分析と
+   * 通常値の分析で`computeVerifyReport(...).proposedBet`が完全一致することを実際に確認している
+   * behavioralなテストの方(型は将来の追加を止めない)。
+   * @param analysisId 分析ID
+   */
+  getAllocationForVerify(analysisId: number): StoredAllocationSummary | undefined {
+    const metaRow = this.db
+      .prepare(
+        `SELECT route, skip_reason_code AS skipReasonCode
+           FROM ${ANALYSIS_ALLOCATION_META_TABLE} WHERE analysis_id = ?`,
+      )
+      .get(analysisId) as { route: string; skipReasonCode: string | null } | undefined;
+    if (metaRow === undefined) {
+      return undefined;
+    }
+    const bets = this.db
+      .prepare(
+        `SELECT bet_type AS betType, combo_key AS comboKey, stake
+           FROM ${ANALYSIS_BETS_TABLE} WHERE analysis_id = ? ORDER BY bet_type, combo_key`,
+      )
+      .all(analysisId) as StoredAllocationBet[];
+    return { route: metaRow.route, skipReasonCode: metaRow.skipReasonCode, bets };
+  }
+
+  /**
+   * 配分提案(analysis_allocation_meta / analysis_bets、Issue #59)のうち、#55(過去分析の
+   * 再表示で配分提案を出す)が読む17列 + bets(betType/comboKey/stake/odds/ev)を取得する
+   * (include_quinellaはIssue #118〈#24-D3b-3〉で13→14列、include_exactaはIssue #126〈#24-E3c〉で
+   * 14→15列、include_trifectaはIssue #140〈#25-E3c〉で15→16列、include_bracket_quinellaは
+   * Issue #151〈#26-E3c〉で16→17列、それぞれ読む列に追加した)。
+   * メタ行が無ければ undefined を返す(#59より前の旧分析=「記録なし」)。
+   *
+   * **読まない6列(boss裁定2026-09-02)**: `combo_odds_wide`/`combo_odds_trio`/`greedy_steps`/
+   * `candidate_cap`/`model_id`/`model_approximate`(メタ行の物理列数24から読む17列と
+   * `analysis_id`〈検索キーであり返り値のデータ列ではないため列挙に含めない〉を除いた数。
+   * Issue #118・#126・#140・#151で列が20→21→22→23→24列に増えても、読まない6列自体は変わらない)。
+   * 前者2つは表示予定が無く(#55のスコープ外。必要になれば#16で追加)、後者4つは利用者に
+   * 意味の無い内部パラメータ(`getAllocationForVerify`のJSDocと同じ判断)。詳細は
+   * {@link StoredAllocation} のJSDoc参照。
+   *
+   * `include_quinella`/`include_exacta`/`include_trifecta`/`include_bracket_quinella`は他13列と
+   * 異なりNULLを許す列のため、DB値が`null`のときはそれぞれ`includeQuinella: null`/
+   * `includeExacta: null`/`includeTrifecta: null`/`includeBracketQuinella: null`(記録なし)として
+   * そのまま返す(0/1のときのみ`!== 0`でboolean化する。
+   * #31: 記録なしをfalseに丸めない)。
+   * @param analysisId 分析ID
+   */
+  getStoredAllocation(analysisId: number): StoredAllocation | undefined {
+    const metaRow = this.db.prepare(SELECT_ALLOCATION_META_SQL).get(analysisId) as
+      | AllocationMetaRow
+      | undefined;
+    if (metaRow === undefined) {
+      return undefined;
+    }
+    const bets = this.db
+      .prepare(SELECT_ALLOCATION_BETS_SQL)
+      .all(analysisId) as StoredAllocationBetDetail[];
+    return toStoredAllocation(metaRow, bets);
   }
 
   /**
@@ -627,13 +835,15 @@ export class AnalysisStore {
   getResult(raceId: string): RaceResultEntry[] | undefined {
     const rows = this.db
       .prepare(
-        `SELECT umaban, finish_position AS finishPosition, place_payout AS placePayout
+        `SELECT umaban, finish_position AS finishPosition, place_payout AS placePayout,
+                win_payout AS winPayout
            FROM ${RACE_RESULTS_TABLE} WHERE race_id = ? ORDER BY umaban`,
       )
       .all(raceId) as Array<{
       umaban: number;
       finishPosition: number | null;
       placePayout: number | null;
+      winPayout: number | null;
     }>;
     if (rows.length === 0) {
       return undefined;
@@ -642,6 +852,7 @@ export class AnalysisStore {
       umaban: r.umaban,
       finishPosition: r.finishPosition,
       placePayout: r.placePayout,
+      winPayout: r.winPayout,
     }));
   }
 
@@ -657,34 +868,15 @@ export class AnalysisStore {
    * @param raceId レースID
    */
   getRaceResultDetail(raceId: string): RaceResultDetail | undefined {
-    const rows = this.db
-      .prepare(
-        `SELECT umaban, finish_position AS finishPosition, passing_json AS passingJson, last3f
-           FROM ${RACE_RESULTS_TABLE} WHERE race_id = ? ORDER BY umaban`,
-      )
-      .all(raceId) as Array<{
-      umaban: number;
-      finishPosition: number | null;
-      passingJson: string | null;
-      last3f: number | null;
-    }>;
+    const rows = this.db.prepare(SELECT_RESULT_DETAIL_SQL).all(raceId) as ResultDetailRow[];
     if (rows.length === 0) {
       return undefined;
     }
-    const metaRow = this.db
-      .prepare(
-        `SELECT course_type AS courseType FROM ${RACE_RESULT_META_TABLE} WHERE race_id = ?`,
-      )
-      .get(raceId) as { courseType: string | null } | undefined;
-    return {
-      courseType: toStoredCourseType(metaRow?.courseType ?? null),
-      horses: rows.map((r) => ({
-        umaban: r.umaban,
-        finishPosition: r.finishPosition,
-        passing: toStoredPassing(r.passingJson),
-        last3f: r.last3f,
-      })),
-    };
+    const metaRow = this.db.prepare(SELECT_RESULT_META_SQL).get(raceId) as
+      | { courseType: string | null }
+      | undefined;
+    // 行 → 結果詳細の復元(通過順・面の防御的復元を含む)は codec(D1 実装と共有)が担う。
+    return toRaceResultDetail(rows, metaRow?.courseType ?? null);
   }
 
   /**
@@ -695,66 +887,14 @@ export class AnalysisStore {
   listAnalyses(filter: AnalysisFilter = {}): StoredAnalysis[] {
     const analyses = (
       filter.raceId === undefined
-        ? this.db
-            .prepare(
-              `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
-                      prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
-                      kaisai_date AS kaisaiDate, model, raw_response AS rawResponse,
-                      race_snapshot_json AS raceSnapshotJson
-                 FROM ${ANALYSES_TABLE} ORDER BY id`,
-            )
-            .all()
-        : this.db
-            .prepare(
-              `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
-                      prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
-                      kaisai_date AS kaisaiDate, model, raw_response AS rawResponse,
-                      race_snapshot_json AS raceSnapshotJson
-                 FROM ${ANALYSES_TABLE} WHERE race_id = ? ORDER BY id`,
-            )
-            .all(filter.raceId)
-    ) as Array<{
-      id: number;
-      raceId: string;
-      analyzedAt: string;
-      evEstimated: number | null;
-      promptVersion: string | null;
-      additionalInstruction: string | null;
-      kaisaiDate: string | null;
-      model: string | null;
-      rawResponse: string | null;
-      raceSnapshotJson: string | null;
-    }>;
+        ? this.db.prepare(SELECT_ANALYSES_SQL).all()
+        : this.db.prepare(SELECT_ANALYSES_BY_RACE_SQL).all(filter.raceId)
+    ) as AnalysisRow[];
 
-    const horseStmt = this.db.prepare(
-      `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason
-         FROM ${ANALYSIS_HORSES_TABLE} WHERE analysis_id = ? ORDER BY umaban`,
-    );
+    const horseStmt = this.db.prepare(SELECT_ANALYSIS_HORSES_SQL);
 
-    return analyses.map((a) => {
-      const horseRows = horseStmt.all(a.id) as HorseRow[];
-      return {
-        id: a.id,
-        raceId: a.raceId,
-        analyzedAt: a.analyzedAt,
-        horses: horseRows.map(toStoredHorse),
-        // NULL(旧レコード・未指定保存)は false(確定EV扱い)として復元する。
-        evEstimated: a.evEstimated === 1,
-        // NULL(旧レコード・列追加前の保存・LLM未使用)は版不明としてnullのまま復元する。
-        promptVersion: a.promptVersion,
-        // NULL(旧レコード・列追加前の保存・設定が空・LLM未使用)は追加指示なしとしてnullのまま復元する。
-        additionalInstruction: a.additionalInstruction,
-        // NULL(旧レコード・列追加前の保存・選択済み開催日が渡らなかった分析)は日付不明としてnullのまま復元する。
-        kaisaiDate: a.kaisaiDate,
-        // NULL(旧レコード・列追加前の保存・LLM未使用)はモデル不明としてnullのまま復元する(Issue#10)。
-        model: a.model,
-        // NULL(旧レコード・列追加前の保存・LLM未使用)は応答なしとしてnullのまま復元する(Issue#10)。
-        rawResponse: a.rawResponse,
-        // NULL・破損JSON(旧レコード・未保存)はスナップショットなしとしてnullで復元する(Issue#10。
-        // 防御的復元。getRaceResultDetailと同方針)。
-        raceSnapshot: toStoredRaceSnapshot(a.raceSnapshotJson),
-      };
-    });
+    // 行 → StoredAnalysis の復元(NULL・0/1・JSON)は codec(D1 実装と共有)が担う。
+    return analyses.map((a) => toStoredAnalysis(a, horseStmt.all(a.id) as HorseRow[]));
   }
 
   /**
@@ -836,6 +976,21 @@ export class AnalysisStore {
    * @returns 削除した分析(analyses行)の件数
    */
   deleteAnalysesWithUnknownPromptVersion(): number {
+    // 配分提案(Issue #59・analysis_allocation_meta/analysis_bets)も analyses(id) を
+    // 参照するFK(NO ACTION)を持つため、analysis_horsesと同様に親行より先に削除しないと
+    // FOREIGN KEY constraint failed で失敗する(#59 AC5-2。事前にこの経路の存在を実測確認済み)。
+    const deleteBets = this.db.prepare(
+      `DELETE FROM ${ANALYSIS_BETS_TABLE}
+         WHERE analysis_id IN (
+           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
+         )`,
+    );
+    const deleteAllocationMeta = this.db.prepare(
+      `DELETE FROM ${ANALYSIS_ALLOCATION_META_TABLE}
+         WHERE analysis_id IN (
+           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
+         )`,
+    );
     const deleteHorses = this.db.prepare(
       `DELETE FROM ${ANALYSIS_HORSES_TABLE}
          WHERE analysis_id IN (
@@ -846,7 +1001,11 @@ export class AnalysisStore {
       `DELETE FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL`,
     );
     const tx = this.db.transaction((): number => {
-      // 先に子行(analysis_horses)を消してから親行(analyses)を消す(FK制約違反を避けるため)。
+      // 先に子行(analysis_bets → analysis_allocation_meta → analysis_horses)を消してから
+      // 親行(analyses)を消す(FK制約違反を避けるため)。bets/meta と horses の間に順序制約は
+      // 無い(互いを参照しない兄弟テーブル)が、いずれも analyses より先である必要がある。
+      deleteBets.run();
+      deleteAllocationMeta.run();
       deleteHorses.run();
       const info = deleteAnalyses.run();
       return info.changes;
@@ -862,75 +1021,5 @@ export class AnalysisStore {
   /** データベース接続を閉じる。 */
   close(): void {
     this.db.close();
-  }
-}
-
-/**
- * race_results.passing_json(JSON文字列)を数値配列へ復元する(タスク#27-A2)。
- * NULL・JSON parseの失敗・配列でない・要素が数値でない(想定外の書き込み混入)は、
- * silentにthrowせず空配列にフォールバックする(getRaceResultDetailの防御的復元方針)。
- */
-function toStoredPassing(raw: string | null): number[] {
-  if (raw === null) {
-    return [];
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.every((n) => typeof n === "number")
-      ? (parsed as number[])
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * race_result_meta.course_type(TEXT)をドメイン型へ復元する(タスク#27-A2)。
- * NULL(面行が無い=面不明)・未知の文字列(想定外の書き込み混入)は null にフォールバックする
- * (getRaceResultDetailの防御的復元方針。parse-race-resultのtoCourseTypeOrNullと同流儀)。
- */
-function toStoredCourseType(raw: string | null): CourseType | null {
-  switch (raw) {
-    case "芝":
-    case "ダ":
-    case "障":
-      return raw;
-    default:
-      return null;
-  }
-}
-
-/** DB行から復元済み馬レコードへ変換する(is_positive の 0/1、JSON の復元を含む)。 */
-function toStoredHorse(row: HorseRow): StoredAnalysisHorse {
-  return {
-    umaban: row.umaban,
-    prior: row.prior,
-    adjustedProb: row.adjusted_prob,
-    placeOddsMin: row.place_odds_min,
-    ev: row.ev,
-    isPositive: row.is_positive !== 0,
-    contributions:
-      row.contributions_json === null ? null : JSON.parse(row.contributions_json),
-    // DBには自前で書き込んだ値(またはNULL)のみが入るため、素通しでキャストする
-    // (未知の文字列が紛れ込む経路は無い。念のため未知値でも「印なし扱い」にはせず型どおり通す)。
-    mark: row.mark as PredictionMark | null,
-    reason: row.reason,
-  };
-}
-
-/**
- * analyses.race_snapshot_json(JSON文字列)をレース情報スナップショットへ復元する(Issue#10)。
- * NULL(未保存・旧レコード)・JSON parseの失敗は、silentにthrowせず null にフォールバックする
- * (getRaceResultDetail/toStoredPassingと同じ防御的復元方針)。スキーマの妥当性検証は行わない
- * (呼び出し側〈main/analysis-export.ts〉が必要に応じて構造を検証する)。
- */
-function toStoredRaceSnapshot(raw: string | null): unknown {
-  if (raw === null) {
-    return null;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
   }
 }

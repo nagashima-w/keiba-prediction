@@ -36,20 +36,33 @@ export const RACE_LIST_SELECTORS = {
    * NARは `Icon_Grade_None_Text Icon_GradeType Icon_GradeType{N} Icon_GradePos01` の内テキストに
    * "Jpn1"/"重賞"/"OP" 等がそのまま入ることを確認済み(class番号も併記されるがテキストを優先採用)。
    * 中央は同じ枠が `Icon_GradeType` のみ(Icon_Grade_None_Text クラス無し)で内テキストが常に空の
-   * 画像アイコン方式のため、このセレクタではマッチせず自然に undefined になる。
+   * 画像アイコン方式のため、このセレクタではマッチしない(中央は下の `gradeIcon` の番号から読む。Issue #250)。
    * 詳細: docs/nar-scraping-plan.md。
    */
   grade: ".Icon_Grade_None_Text",
+  /**
+   * 中央のグレードアイコン(画像アイコン方式。Issue #250)。**レース名の横**(`.RaceList_ItemTitle` 内)のものだけを見る。
+   * データ枠(`.RaceData`)の中にも別のアイコン(番号 13)があり、グレードではない。番号→ラベルは grade-label.ts。
+   */
+  gradeIcon: ".RaceList_ItemTitle .Icon_GradeType",
 } as const;
 
 /** 出馬表(shutuba.html)のセレクタ。 */
 export const SHUTUBA_SELECTORS = {
-  /** レース名(ページ上部)。 */
-  raceName: "h1.RaceName",
+  /**
+   * レース名(ページ上部)。中央は `<h1 class="RaceName">`、地方は `<div class="RaceName">` とタグ名が異なる
+   * ため、タグ名を問わないクラスセレクタにする(Issue #252: `h1.RaceName` 限定だと地方が常に空文字になっていた)。
+   * 地方はこの要素の内側にグレードのテキスト(`<span class="Icon_Grade_None_Text …">Jpn1</span>`)が同居するので、
+   * レース名を読むときは下の `raceNameGradeIcon` を除いてから読む。
+   */
+  raceName: ".RaceName",
+  /** レース名の要素の内側にあるグレードのアイコン(中央はテキスト無し、地方は "Jpn1" 等のテキスト入り)。レース名からは除く。 */
+  raceNameGradeIcon: ".Icon_GradeType",
   /**
    * 重賞グレードバッジ(タスク機能B 要修正2: 非重賞への無駄なAPI呼び出しを避ける事前判定)。
    * RaceName配下にIcon_GradeTypeクラスを持つ要素があるかどうかで判定する(有無のみ。
-   * グレード番号〈Icon_GradeType{N}〉は中央・地方で体系が異なるため一切解釈しない)。
+   * このセレクタによる判定では番号を解釈しない。グレードそのもの〈`ShutubaRaceInfo.grade`〉は下の
+   * `gradeIconCentral`〈中央の番号〉・`gradeText`〈地方のテキスト〉で別に読む。Issue #250)。
    * 中央は<h1 class="RaceName">…<span class="Icon_GradeType Icon_GradeType3">、
    * 地方(NAR)は<div class="RaceName">…<span class="Icon_Grade_None_Text Icon_GradeType
    * Icon_GradeType19 …">Jpn1</span>とタグ名(h1/div)が異なるため、raceNameセレクタ
@@ -57,6 +70,14 @@ export const SHUTUBA_SELECTORS = {
    * (実測: 2026-07-28 boss着手前ゲート裁定)。
    */
   gradeBadge: ".RaceName .Icon_GradeType",
+  /**
+   * 中央のグレードアイコン(Issue #250)。`h1.RaceName` に限る: 地方は `div.RaceName` でアイコンの番号が別体系
+   * (Jpn1=19 など)のため、中央の番号の表を地方に当てないよう、タグ名で構造的に分ける。
+   * グレードの隣に別のアイコン(番号 13)が並ぶレースがあり、番号の表に無い番号は無視される。
+   */
+  gradeIconCentral: "h1.RaceName .Icon_GradeType",
+  /** 地方のグレードのテキスト(`Icon_Grade_None_Text` の内テキスト。例: "Jpn1"。Issue #250)。一覧の `grade` と同じクラス。 */
+  gradeText: ".RaceName .Icon_Grade_None_Text",
   /** 発走時刻・距離・コース・天候・馬場を含む行。 */
   raceData01: ".RaceData01",
   /** 会場・条件・頭数などを含む行。 */
@@ -93,6 +114,18 @@ export const SHUTUBA_SELECTORS = {
   trainerLink: "td.Trainer a",
   /** 馬体重(増減)(例: 464<small>(-8)</small>)。 */
   weight: "td.Weight",
+  /**
+   * 取消・除外の行(Issue #154)。実測: 中央 202606040901(2026-09-27 中山1R・発走後に取得)の
+   * 取消馬の行は `<tr class="HorseList Cancel" id="tr_">`。**完全一致のクラス `Cancel` で取る**
+   * (メモ欄のボタン `Cancel_Btn01`・取消行のセルの `Cancel_NoData` など、`Cancel` を前方に持つ
+   * 別クラスを巻き込まないため。前方一致の属性セレクタは使わない)。
+   *
+   * **未観測**: 発走前の時点・地方(nar.netkeiba.com)の出馬表・「除外」の文言。
+   * いずれも中央の取消と同じ雛形・同じ印と見込んでいる(実物は無い。docs/current-spec.md 参照)。
+   */
+  cancelledRow: "tr.Cancel",
+  /** 取消・除外の印(行内の `<td class="Cancel_Txt">取消</td>`。Issue #154。未観測の前提は上記)。 */
+  cancelText: "td.Cancel_Txt",
 } as const;
 
 /** 馬プロフィール(db.netkeiba.com/horse/{id}/)のセレクタ。 */
@@ -119,7 +152,17 @@ export const HORSE_RESULTS_SELECTORS = {
   headerCell: "th",
   /** データセル。 */
   dataCell: "td",
+  /** 見出しのバー(馬名入りの `<h2>{馬名}の競走成績</h2>` を持つ)。出走歴なしの判定に使う(Issue #228)。 */
+  heading: "div.cate_bar h2",
+  /** 戦績が無い馬の本文ブロック(`<div class="contents">競走データがありません</div>`。出走歴のある馬の応答には無い)。 */
+  emptyNoticeBlock: "div.contents",
 } as const;
+
+/**
+ * 初出走馬(出走歴なし)の応答が `emptyNoticeBlock` に入れる文言(Issue #228)。
+ * 実測(2026-10-10。中央の初出走馬3頭の応答すべてに有り、出走歴のある馬の応答27件〈既存フィクスチャ5 + 地方2歳戦の22頭〉すべてに無い)。
+ */
+export const HORSE_RESULTS_EMPTY_NOTICE = "競走データがありません";
 
 /**
  * レース結果(result.html)のセレクタ。
@@ -135,6 +178,11 @@ export const RACE_RESULT_SELECTORS = {
    * 既存規約(RACE_LIST_SELECTORS/SHUTUBA_SELECTORS等の作法)に合わせ、ここにも独立して持つ。
    */
   raceData01: ".RaceData01",
+  /**
+   * 会場・条件・頭数(`<span>10頭</span>`)を含む行(Issue #209: 全頭の着順がそろったかの判定に使う頭数)。
+   * 結果テーブルとは独立に出る(結果の行が 0 件の発売前ページにも出ている)。
+   */
+  raceData02: ".RaceData02",
   /** 全着順テーブル(結果本体)。他テーブルの行と区別するため id で限定する。 */
   resultTable: "#All_Result_Table",
   /**
@@ -174,6 +222,60 @@ export const RACE_RESULT_SELECTORS = {
   payoutResult: "td.Result",
   /** 払戻行の払戻金額セル(内部で <br> 区切り。複数点あり)。 */
   payoutAmount: "td.Payout",
+  /**
+   * ワイドの払戻行(Issue #52)。行セレクタを直指定するため、文書内に払戻テーブルが
+   * 複数(単勝・複勝・馬連を含む1つ目/ワイド・馬単・三連複・三連単を含む2つ目)存在しても
+   * 取りこぼさない(実測: `fixtures/result_202602010605.html`・
+   * `fixtures/nar_result_202630062407.html` はいずれも `tr.Wide` が2つ目のテーブルに入るが、
+   * `class="Wide"` は文書中に1回だけしか出現しないため `.first()` を挟まずとも一意に取れる)。
+   */
+  wideRow: "tr.Wide",
+  /** 三連複の払戻行(Issue #52)。wideRow と同じ理由で行セレクタを直指定する。 */
+  trioRow: "tr.Fuku3",
+  /**
+   * 馬連の払戻行(Issue #114・#24-F1)。wideRow と同じ理由で行セレクタを直指定する。
+   * 単勝・複勝と同じ1つ目の払戻テーブルに入る(実測:
+   * `fixtures/result_202603020211.html`・`fixtures/nar_result_202654071210.html`。
+   * `class="Umaren"`は文書中に1回だけしか出現しない)。
+   */
+  quinellaRow: "tr.Umaren",
+  /**
+   * 馬単の払戻行(Issue #121・#24-F2)。wideRow/trioRow と同じ理由で行セレクタを直指定する。
+   * ワイド・3連複と同じ2つ目の払戻テーブルに入る(実測:
+   * `fixtures/result_202603020211.html:1967`・`fixtures/nar_result_202654071210.html:1730`。
+   * `class="Umatan"`は文書中に1回だけしか出現しない)。**構造(td.Result内のul/li・単一値の
+   * td.Payout)はwide/trio/quinellaと同型だが、馬単は「1着→2着」の並びが意味を持つため、
+   * `parseComboPayoutRow`はbetTypeを見て並びをソートしない(`combo-odds-key.ts`の
+   * `COMBO_KEY_ORDER`参照)。**
+   */
+  exactaRow: "tr.Umatan",
+  /**
+   * 三連単の払戻行(Issue #131・#25-F)。wideRow/trioRow/exactaRow と同じ理由で行セレクタを
+   * 直指定する。ワイド・3連複・馬単と同じ2つ目の払戻テーブルに入る(実測:
+   * `fixtures/result_202603020211.html:1995`・`fixtures/nar_result_202654071210.html:1758`。
+   * `class="Tan3"`は文書中に1回だけしか出現しない)。**構造(td.Result内のul/li・単一値の
+   * td.Payout)はwide/trio/quinella/exactaと同型だが、三連単は「1着→2着→3着」の並びが
+   * 意味を持つため、`parseComboPayoutRow`はbetTypeを見て並びをソートしない(馬単と同じ
+   * 順序方針。`combo-odds-key.ts`の`COMBO_KEY_ORDER`参照)。**
+   */
+  trifectaRow: "tr.Tan3",
+  /**
+   * 枠連の払戻行(Issue #145・#26-F)。quinellaRow/trifectaRow と同じ理由で行セレクタを直指定する。
+   * 馬連〈`tr.Umaren`〉と同じ払戻テーブルに入る(実測: `fixtures/result_202603020211.html`・
+   * `fixtures/nar_result_202654071210.html` ほか。`class="Wakuren"`は文書中に0回か1回)。
+   * **8頭以下のレースには行が無い**(`docs/wakuren-odds-investigation.md` §5。発売なし)。
+   * **構造(td.Result内のul/li・単一値のtd.Payout)は馬連と同型だが、`td.Result`の各`<span>`は
+   * 馬番ではなく枠番(1〜8)であり、同枠(`2-2`)が的中しうる。**`parseComboPayoutRow`は
+   * `COMBO_ELEMENT_KIND`を見て枠番用の検証(非減少・同枠可)に振り分ける。
+   */
+  bracketQuinellaRow: "tr.Wakuren",
+  /**
+   * ワイド・三連複の払戻行内で1組を表す `<ul>`(Issue #52)。組内の的中馬番は
+   * 各 `<li>` のテキスト(空の `<li></li>` は区切り用でワイドの末尾に付く)。
+   */
+  comboGroup: "ul",
+  /** 組内の的中馬番を表すセル(Issue #52。空要素は呼び出し側でフィルタする)。 */
+  comboSlot: "li",
 } as const;
 
 /**
@@ -289,12 +391,21 @@ export const OIKIRI_SELECTORS = {
 
 /** パースに用いる正規表現。 */
 export const PATTERNS = {
+  /** グレードアイコンのクラス属性から番号を取り出す(例: `Icon_GradeType Icon_GradeType3 Icon_GradePos01` → 3。番号の無い `Icon_GradeType` だけではマッチしない)。 */
+  gradeTypeNumber: /(?:^|\s)Icon_GradeType(\d+)(?:\s|$)/,
   /** href から race_id(12桁)を取り出す。 */
   raceIdFromHref: /race_id=(\d+)/,
   /** テキストからコース種別と距離を取り出す(例: 芝1800m / ダ1700m / 障2750m)。 */
   courseAndDistance: /(芝|ダ|障)\s*(\d+)\s*m/,
   /** テキストから頭数を取り出す(例: 16頭)。 */
   entryCount: /(\d+)\s*頭/,
+  /**
+   * レース一覧のデータ枠(`.RaceData`)のテキストから発走時刻を取り出す(Issue #202。例: `10:00 ` → 10:00)。
+   * 中央は `span.RaceList_Itemtime`、地方は先頭の素の `<span>` に入る(どちらでも枠のテキストに時刻が含まれる)。
+   * 数字の途中(`1200m16頭` など)を拾わないよう、前後が数字でない `H:MM`・`HH:MM` に限る。範囲(0〜23 時・0〜59 分)は呼び出し側で確かめる。
+   * 発走後に取得した中央の一覧では、時刻の span が空になる行がある(実測 race_list_sub_20260926.html)。その行はマッチしない。
+   */
+  raceListStartTime: /(?<!\d)(\d{1,2}):(\d{2})(?!\d)/,
   /** テキストからレース番号を取り出す(例: 11R)。 */
   raceNumber: /(\d+)\s*R/,
   /** href から horse_id を取り出す。 */
@@ -365,10 +476,6 @@ export const PATTERNS = {
   demotedFinish: /^(\d+)\s*[(（]\s*降\s*[)）]$/,
   /** 結果テーブルの枠セル判定(class に Waku{n} を含むか)。 */
   wakuClass: /\bWaku\d/,
-  /** NARオッズの単勝セル(単一の数値。例: 24.8)。 */
-  narWinOdds: /^[0-9]+(\.[0-9]+)?$/,
-  /** NARオッズの複勝セル(下限 - 上限。例: 6.8 - 8.5)。 */
-  narPlaceOddsRange: /^([0-9]+(?:\.[0-9]+)?)\s*-\s*([0-9]+(?:\.[0-9]+)?)$/,
   /**
    * 交流重賞(Jpn1/2/3)のグレード表記。半角数字("Jpn1"等)またはローマ数字
    * ("JpnⅠ"等)のみを受理し、全角数字("Jpn１")は受理しない(実測で確認済みの

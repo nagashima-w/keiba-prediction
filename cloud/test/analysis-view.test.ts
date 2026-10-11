@@ -1,0 +1,322 @@
+import { describe, expect, it } from "vitest";
+import type { StoredAllocation, StoredAnalysis, StoredAnalysisHorse } from "../../packages/core/src/ev/analysis-store-types";
+import { buildRaceSnapshot } from "../../packages/app/src/main/analysis-export";
+import { buildAnalysisView } from "../src/analysis-view";
+import type { AnalysisDetailResult, DetailStatus } from "../src/analysis-repository";
+import type { LlmCallRecord } from "../src/llm-calls";
+import { scrapeFixtureRace } from "./pipeline-fixtures";
+
+/**
+ * Issue #183(#165-a): `GET /api/analyses/{id}` の応答の整形(`buildAnalysisView`。純関数)。
+ * 画面に必要なものだけ(許可したキーの集合を固定する)。`rawResponse`・`contributions`・raceSnapshot の全体は返さない。
+ */
+
+const RAW_SECRET = "RAW-RESPONSE-SECRET-aaaa";
+const CONTRIB_SECRET = "CONTRIB-SECRET-bbbb";
+const JOCKEY_SECRET = "JOCKEY-SECRET-cccc";
+const COMBO_SECRET = "COMBO-SECRET-dddd";
+
+function horse(umaban: number, over: Partial<StoredAnalysisHorse> = {}): StoredAnalysisHorse {
+  return { umaban, prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, contributions: { secret: CONTRIB_SECRET }, mark: "◎", reason: "根拠", highlights: [], concerns: [], ...over };
+}
+
+const SNAPSHOT = {
+  race: { raceName: "テストステークス", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良", startTime: "15:45", fence: "A", oddsStatus: "確定", officialDatetime: "2026-06-28 15:00" },
+  horses: [
+    { umaban: 1, name: "アルファ", jockeyName: JOCKEY_SECRET, wakuban: 1 },
+    { umaban: 2, name: "ブラボー", jockeyName: JOCKEY_SECRET, wakuban: 2 },
+  ],
+  wideCombo: { "0102": COMBO_SECRET },
+};
+
+function analysis(over: Partial<StoredAnalysis> = {}): StoredAnalysis {
+  return {
+    id: 7,
+    raceId: "202603020211",
+    analyzedAt: "2026-06-28T05:00:00.000Z",
+    horses: [horse(1), horse(2, { mark: null, reason: null, placeOddsMin: null, ev: null, isPositive: false }), horse(3)],
+    evEstimated: false,
+    promptVersion: null,
+    additionalInstruction: "ADDITIONAL-INSTRUCTION-SECRET",
+    kaisaiDate: "20260628",
+    model: null,
+    rawResponse: RAW_SECRET,
+    raceSnapshot: SNAPSHOT,
+    historyCutoffDate: "20260627",
+    ...over,
+  } as StoredAnalysis;
+}
+
+const ALLOCATION: StoredAllocation = {
+  route: "mixed",
+  unavailableReason: null,
+  fallbackReason: "FALLBACK-SECRET",
+  skipReasonCode: null,
+  bankroll: 10000,
+  perRaceCap: 3000,
+  kellyFraction: 0.25,
+  evThreshold: 1.1,
+  includeComboOdds: true,
+  includeWide: true,
+  includeTrio: false,
+  includeQuinella: null,
+  includeExacta: true,
+  includeTrifecta: false,
+  includeBracketQuinella: null,
+  betUnit: 777777,
+  oddsStatus: "確定",
+  bets: [
+    { betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 },
+    { betType: "wide", comboKey: "0102", stake: 200, odds: null, ev: null },
+  ],
+};
+
+function detail(a: StoredAnalysis, status: DetailStatus, note: string | null = null, llmCalls: readonly LlmCallRecord[] | null = null): AnalysisDetailResult {
+  return { analysis: a, detail: status, llmNote: note, llmCalls };
+}
+
+const sorted = (o: object): string[] => Object.keys(o).sort();
+
+describe("buildAnalysisView の llmNote(Issue #194)", () => {
+  const NOTE = "LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました";
+
+  it("D1 の理由(固定文言)をそのまま載せる。理由なしは null(キーは常にある)", () => {
+    expect(buildAnalysisView(detail(analysis(), "present", NOTE), ALLOCATION).llmNote).toBe(NOTE);
+    expect(buildAnalysisView(detail(analysis(), "present"), ALLOCATION).llmNote).toBeNull();
+    expect("llmNote" in buildAnalysisView(detail(analysis(), "none"), undefined)).toBe(true);
+  });
+
+  it("詳細が present でないとき(none・missing)も、理由は載せる(詳細の状態に依らない)", () => {
+    for (const status of ["none", "missing"] as const) {
+      expect(buildAnalysisView(detail(analysis(), status, NOTE), undefined).llmNote, status).toBe(NOTE);
+    }
+  });
+});
+
+describe("buildAnalysisView の llmCalls(LLM 呼び出しの記録。Issue #197 段2)", () => {
+  const OK: LlmCallRecord = { ok: true, ms: 41_234, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: false, error: null };
+  const FAILED: LlmCallRecord = { ok: false, ms: 180_001, inputTokens: null, outputTokens: null, stopReason: null, model: null, replayed: false, error: "種別=timeout" };
+
+  it("記録を呼び出しの順にそのまま載せる(失敗・成功・再生が混ざっても、1件も落とさず、並びを変えない)", () => {
+    const calls = [FAILED, OK, { ...OK, replayed: true }];
+    const view = buildAnalysisView(detail(analysis(), "present", null, calls), undefined);
+    expect(view.llmCalls).toEqual(calls);
+  });
+
+  it("記録なし(LLM を呼ばなかった・旧い分析)は null で、キーは常にある", () => {
+    expect(buildAnalysisView(detail(analysis(), "present"), undefined).llmCalls).toBeNull();
+    expect("llmCalls" in buildAnalysisView(detail(analysis(), "none"), undefined)).toBe(true);
+  });
+
+  it.each([["present"], ["missing"], ["none"]] as const)("詳細(R2)が %s でも載せる(D1 の列にあるので、詳細の状態に依らない)", (status) => {
+    expect(buildAnalysisView(detail(analysis(), status, null, [OK]), undefined).llmCalls).toEqual([OK]);
+  });
+
+  it("許可したキーだけを返す(1件のキーの集合を固定)。余分なキー・保存した値の余計な項目は、応答に載せない", () => {
+    const polluted = [{ ...OK, secret: "sk-ant-LEAK", body: "応答の本文" }] as unknown as readonly LlmCallRecord[];
+    const view = buildAnalysisView(detail(analysis(), "present", null, polluted), undefined);
+    for (const c of view.llmCalls!) {
+      expect(sorted(c)).toEqual(["error", "inputTokens", "model", "ms", "ok", "outputTokens", "replayed", "stopReason"]);
+    }
+    expect(JSON.stringify(view)).not.toContain("LEAK");
+    expect(JSON.stringify(view)).not.toContain("応答の本文");
+  });
+
+  it("応答の配列・要素は、元の記録とは別物(後から書き換えても元に影響しない)", () => {
+    const calls = [OK];
+    const view = buildAnalysisView(detail(analysis(), "present", null, calls), undefined);
+    expect(view.llmCalls).not.toBe(calls);
+    expect(view.llmCalls![0]).not.toBe(calls[0]);
+  });
+});
+
+describe("buildAnalysisView の highlights・concerns(Issue #197)", () => {
+  it("馬ごとの強調材料・懸念事項をそのまま載せる(馬を取り違えない)。項目なしは [] で、キーは常にある", () => {
+    const a = analysis({ horses: [horse(1, { highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] }), horse(2, { highlights: [], concerns: ["外枠"] }), horse(3)] });
+    const view = buildAnalysisView(detail(a, "present"), undefined);
+    expect(view.horses.map((h) => [h.umaban, h.highlights, h.concerns])).toEqual([
+      [1, ["追い切り好時計", "内枠有利"], ["距離延長"]],
+      [2, [], ["外枠"]],
+      [3, [], []],
+    ]);
+  });
+
+  it.each([["present"], ["missing"], ["none"]] as const)("詳細(R2)が %s でも載せる(D1 の馬の行にあるので、詳細の状態に依らない)", (status) => {
+    const a = analysis({ horses: [horse(1, { highlights: ["強み"], concerns: ["弱み"] })] });
+    const view = buildAnalysisView(detail(a, status), undefined);
+    expect(view.horses[0]!.highlights).toEqual(["強み"]);
+    expect(view.horses[0]!.concerns).toEqual(["弱み"]);
+  });
+
+  it("応答の配列は元のレコードの配列とは別物(後から書き換えても元に影響しない)", () => {
+    const h = horse(1, { highlights: ["強み"], concerns: ["弱み"] });
+    const view = buildAnalysisView(detail(analysis({ horses: [h] }), "present"), undefined);
+    expect(view.horses[0]!.highlights).not.toBe(h.highlights);
+    expect(view.horses[0]!.concerns).not.toBe(h.concerns);
+  });
+});
+
+describe("buildAnalysisView(Issue #183)", () => {
+  it("present: 馬名・レース情報を raceSnapshot から結合し、場名・R は raceId から導く", () => {
+    const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
+    expect(view).toMatchObject({
+      id: 7,
+      raceId: "202603020211",
+      analyzedAt: "2026-06-28T05:00:00.000Z",
+      kaisaiDate: "20260628",
+      evEstimated: false,
+      model: null,
+      promptVersion: null,
+      detail: "present",
+      race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良" },
+    });
+    expect(view.horses.map((h) => [h.umaban, h.name])).toEqual([
+      [1, "アルファ"],
+      [2, "ブラボー"],
+      [3, null], // スナップショットに無い馬は null
+    ]);
+    expect(view.horses[1]).toEqual({ umaban: 2, name: "ブラボー", prior: 0.2, adjustedProb: 0.18, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null });
+    expect(view.horses[0]).toEqual({ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", reason: "根拠", highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null });
+  });
+
+  it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・戦績の基準日は、応答のどこにも現れない(fallbackReason・betUnit は #185 で意図して返す)", () => {
+    const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
+    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "detail", "evEstimated", "horses", "id", "kaisaiDate", "llmCalls", "llmNote", "model", "promptVersion", "race", "raceId"]);
+    expect(sorted(view.race)).toEqual(["courseType", "distance", "grade", "oddsStatus", "raceName", "raceNumber", "startTime", "trackCondition", "venueName", "weather"]);
+    for (const h of view.horses) {
+      expect(sorted(h)).toEqual(["adjustedProb", "concerns", "ev", "fairWinOdds", "highlights", "isPositive", "mark", "name", "placeOddsMin", "prior", "reason", "umaban", "winOdds", "winProb"]);
+    }
+    expect(sorted(view.allocation!)).toEqual([
+      "bankroll", "betUnit", "bets", "evThreshold", "fallbackReason", "includeBracketQuinella", "includeComboOdds", "includeExacta", "includeQuinella", "includeTrifecta", "includeTrio", "includeWide",
+      "kellyFraction", "oddsStatus", "perRaceCap", "route", "skipReasonCode", "unavailableReason",
+    ]);
+    for (const b of view.allocation!.bets) {
+      expect(sorted(b)).toEqual(["betType", "comboKey", "ev", "odds", "stake"]);
+    }
+    const text = JSON.stringify(view);
+    for (const secret of [RAW_SECRET, CONTRIB_SECRET, JOCKEY_SECRET, COMBO_SECRET, "ADDITIONAL-INSTRUCTION-SECRET", "historyCutoffDate"]) {
+      expect(text, secret).not.toContain(secret);
+    }
+  });
+
+  it("配分: 設定の要約と買い目を写す(odds・ev の null を保つ)。記録なし(null)の券種も null のまま。配分が無ければ null", () => {
+    const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
+    expect(view.allocation).toEqual({
+      route: "mixed",
+      skipReasonCode: null,
+      unavailableReason: null,
+      fallbackReason: "FALLBACK-SECRET",
+      betUnit: 777777,
+      bankroll: 10000,
+      perRaceCap: 3000,
+      kellyFraction: 0.25,
+      evThreshold: 1.1,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: false,
+      includeQuinella: null,
+      includeExacta: true,
+      includeTrifecta: false,
+      includeBracketQuinella: null,
+      oddsStatus: "確定",
+      bets: [
+        { betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 },
+        { betType: "wide", comboKey: "0102", stake: 200, odds: null, ev: null },
+      ],
+    });
+    expect(buildAnalysisView(detail(analysis(), "present"), undefined).allocation).toBeNull();
+    // #185: fallbackReason・betUnit は値をそのまま写す(null も null のまま。0 や空文字に潰さない。exe の表示関数が「記録なし」と「値あり」を区別するため)
+    const nulls = buildAnalysisView(detail(analysis(), "present"), { ...ALLOCATION, fallbackReason: null, betUnit: null }).allocation!;
+    expect(nulls.fallbackReason).toBeNull();
+    expect(nulls.betUnit).toBeNull();
+    const other = buildAnalysisView(detail(analysis(), "present"), { ...ALLOCATION, fallbackReason: "no-combo-candidates", betUnit: 100 }).allocation!;
+    expect(other.fallbackReason).toBe("no-combo-candidates");
+    expect(other.betUnit).toBe(100);
+    // 配分はあるが買い目が 0 件
+    expect(buildAnalysisView(detail(analysis(), "present"), { ...ALLOCATION, bets: [] }).allocation!.bets).toEqual([]);
+  });
+
+  it.each([["missing"], ["none"]] as const)("detail が %s: present と同じキーの形で、馬名・レース情報の詳細は null(スナップショットが万一入っていても使わない)。D1 の要約は残る", (status) => {
+    const present = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
+    const view = buildAnalysisView(detail(analysis({ rawResponse: null }), status), ALLOCATION);
+    expect(view.detail).toBe(status);
+    expect(sorted(view)).toEqual(sorted(present));
+    expect(sorted(view.race)).toEqual(sorted(present.race));
+    expect(view.horses.map((h) => h.name)).toEqual([null, null, null]);
+    expect(view.race).toEqual({ venueName: "福島", raceNumber: 11, raceName: null, grade: null, startTime: null, courseType: null, distance: null, weather: null, trackCondition: null, oddsStatus: null });
+    // D1 の値(馬の prior・印・配分)は残る
+    expect(view.horses.map((h) => [h.umaban, h.prior, h.mark])).toEqual([[1, 0.2, "◎"], [2, 0.2, null], [3, 0.2, "◎"]]);
+    expect(view.allocation).not.toBeNull();
+    expect(JSON.stringify(view)).not.toContain("アルファ");
+  });
+
+  describe("グレード(Issue #250。スナップショットの race.grade から)", () => {
+    const withGrade = (grade: unknown) => analysis({ raceSnapshot: { ...SNAPSHOT, race: { ...SNAPSHOT.race, grade } } });
+
+    it.each(["G3", "J・G1", "Jpn1", "重賞"])("スナップショットの grade=%s を、そのまま返す", (grade) => {
+      expect(buildAnalysisView(detail(withGrade(grade), "present"), undefined).race.grade).toBe(grade);
+    });
+
+    it("グレードを持たない(過去の)スナップショットは null(補い値を作らない)", () => {
+      // 前提: 既定のスナップショットは grade のキーを持たない
+      expect("grade" in SNAPSHOT.race).toBe(false);
+      expect(buildAnalysisView(detail(analysis(), "present"), undefined).race.grade).toBeNull();
+    });
+
+    it("文字列でない grade(数値・オブジェクト・null)は null", () => {
+      for (const grade of [3, { a: 1 }, null, true]) {
+        expect(buildAnalysisView(detail(withGrade(grade), "present"), undefined).race.grade, JSON.stringify(grade)).toBeNull();
+      }
+    });
+
+    it.each([["missing"], ["none"]] as const)("detail が %s のときは、スナップショットに grade があっても使わない(null)", (status) => {
+      // 前提: 同じスナップショットで present なら取れる
+      expect(buildAnalysisView(detail(withGrade("G3"), "present"), undefined).race.grade).toBe("G3");
+      expect(buildAnalysisView(detail(withGrade("G3"), status), undefined).race.grade).toBeNull();
+    });
+  });
+
+  it("壊れたスナップショットで例外を投げない(null・文字列・horses が配列でない・race が数値・名前が文字列でない・umaban が文字列)。取れないものは null", () => {
+    const broken: unknown[] = [
+      null,
+      "text",
+      42,
+      { race: 5, horses: "x" },
+      { race: { raceName: 123, distance: "1800", weather: { a: 1 } }, horses: [{ umaban: "1", name: "文字列の馬番" }, { umaban: 1, name: 123 }, null, "x"] },
+    ];
+    for (const raceSnapshot of broken) {
+      const view = buildAnalysisView(detail(analysis({ raceSnapshot }), "present"), undefined);
+      expect(view.horses.map((h) => h.name), JSON.stringify(raceSnapshot)).toEqual([null, null, null]);
+      expect(view.race.raceName).toBeNull();
+      expect(view.race.distance).toBeNull();
+      expect(view.race.weather).toBeNull();
+      expect(view.race.venueName).toBe("福島"); // raceId から導く値は、スナップショットが壊れていても取れる
+    }
+  });
+
+  it("退化入力: 馬 0 頭・不正な raceId(12 桁でない)でも例外を投げず、場名・R は null", () => {
+    const view = buildAnalysisView(detail(analysis({ horses: [], raceId: "R0001" }), "present"), undefined);
+    expect(view.horses).toEqual([]);
+    expect(view.race.venueName).toBeNull();
+    expect(view.race.raceNumber).toBeNull();
+  });
+
+  it("地方のレースIDは、場名(地方の表)と R を raceId から導く", () => {
+    const view = buildAnalysisView(detail(analysis({ raceId: "202654071210" }), "missing"), undefined);
+    expect(view.race.venueName).toBe("高知");
+    expect(view.race.raceNumber).toBe(10);
+  });
+
+  it("書き込み側との drift: 実フィクスチャの RaceData から buildRaceSnapshot で作ったスナップショットを通すと、全頭の馬名・レース名が取れる", async () => {
+    const { race } = await scrapeFixtureRace();
+    expect(race.horses.length).toBeGreaterThan(0); // 前提(空振り防止)
+    const snapshot = buildRaceSnapshot(race);
+    const horses = race.horses.map((h) => horse(h.shutuba.umaban));
+    const view = buildAnalysisView(detail(analysis({ horses, raceSnapshot: JSON.parse(JSON.stringify(snapshot)) }), "present"), undefined);
+    expect(view.horses.map((h) => h.name)).toEqual(race.horses.map((h) => h.shutuba.name));
+    expect(view.horses.every((h) => typeof h.name === "string" && h.name.length > 0)).toBe(true);
+    expect(view.race.raceName).toBe(race.race.raceName);
+    expect(view.race.distance).toBe(race.race.distance);
+    expect(view.race.courseType).toBe(race.race.courseType);
+  });
+});
