@@ -33,7 +33,7 @@ export interface DispatchStore {
 
 /** 日単位の DO のスタブのうち、ここで使う部分だけ(RPC なので Promise)。 */
 export interface ResultDayStub {
-  requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[] }): Promise<RequestResultImportResult>;
+  requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[]; readonly winOddsOnly?: boolean }): Promise<RequestResultImportResult>;
 }
 
 export interface DispatchResultImportsInput {
@@ -47,6 +47,11 @@ export interface DispatchResultImportsInput {
   /** 開催日の DO のスタブを引く（呼び出し側の 1 行。`idFromName(開催日)`）。 */
   readonly stubFor: (kaisaiDate: string) => ResultDayStub;
   readonly log: (line: string, level: "info" | "error") => void;
+  /**
+   * 確定の単勝オッズ・人気だけを保存させる依頼にする(Issue #259。結果の補完の段階 2 だけが true)。true のとき、日ごとの依頼の入力に `winOddsOnly: true` を付ける
+   * (着順・払戻・組合せ払戻を上書きしない)。省略・false のときは入力にこのキーを付けない(cron・手動・段階 1 の依頼は従来と同じ)。
+   */
+  readonly winOddsOnly?: boolean;
 }
 
 export interface DispatchResultImportsResult {
@@ -86,7 +91,7 @@ export function resultWindowFor(todayKaisaiDate: string): { readonly from: strin
  * 窓の未取込を列挙し、日ごとに、その日の DO に結果の取り込みを依頼する（依頼だけをして戻る）。例外を投げない。
  */
 export async function dispatchResultImports(input: DispatchResultImportsInput): Promise<DispatchResultImportsResult> {
-  const { from, to, maxDays, store, stubFor, log } = input;
+  const { from, to, maxDays, store, stubFor, log, winOddsOnly } = input;
   let races: UnimportedRace[];
   try {
     races = await store.listUnimportedRacesByDay({ from, to, perDay: RESULT_PER_DAY_LIMIT, maxDays, total: RESULT_TOTAL_LIMIT });
@@ -105,7 +110,7 @@ export async function dispatchResultImports(input: DispatchResultImportsInput): 
   let failedDays = 0;
   for (const [kaisaiDate, raceIds] of byDay) {
     try {
-      const result = await stubFor(kaisaiDate).requestResultImport({ kaisaiDate, raceIds });
+      const result = await stubFor(kaisaiDate).requestResultImport({ kaisaiDate, raceIds, ...(winOddsOnly === true ? { winOddsOnly: true } : {}) });
       accepted += result.accepted;
     } catch (error) {
       failedDays += 1;

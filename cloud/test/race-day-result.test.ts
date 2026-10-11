@@ -113,6 +113,11 @@ interface SaveCall {
 }
 interface FakeStore {
   readonly calls: SaveCall[];
+  /** Issue #259: 過去分の補完(`winOddsOnly` の依頼)で呼ばれる `saveWinOdds` の呼び出し。 */
+  readonly oddsCalls: Array<{ readonly raceId: string; readonly entries: readonly RaceResultEntry[] }>;
+  /** 次の saveWinOdds を、この回数だけ失敗させる。 */
+  oddsFailures: number;
+  saveWinOdds(raceId: string, entries: readonly RaceResultEntry[]): Promise<{ readonly rowsWritten: number }>;
   /** 次の saveResult を、この回数だけ失敗させる。 */
   failures: number;
   saveResult(raceId: string, entries: readonly RaceResultEntry[], courseType?: CourseType | null, comboPayouts?: RaceComboPayoutsSaveInput): Promise<void>;
@@ -122,6 +127,16 @@ interface FakeStore {
 function fakeStore(): FakeStore {
   const store: FakeStore = {
     calls: [],
+    oddsCalls: [],
+    oddsFailures: 0,
+    async saveWinOdds(raceId, entries) {
+      if (store.oddsFailures > 0) {
+        store.oddsFailures -= 1;
+        throw new Error("D1 の保存に失敗(SECRET-D1-ODDS-MESSAGE)");
+      }
+      store.oddsCalls.push({ raceId, entries });
+      return { rowsWritten: entries.length };
+    },
     failures: 0,
     async saveResult(raceId, entries, courseType, comboPayouts) {
       if (store.failures > 0) {
@@ -826,5 +841,137 @@ describe("fuzz: 即時ループ・停止がない(結果の取り込み。種 60
     expect(wakes).toBeGreaterThan(300); // 空振り防止: 十分な起床を観測した
     expect(resultSteps).toBeGreaterThan(100); // 空振り防止: 結果のステップを多数通った
     expect(interleavedTasks).toBeGreaterThan(10); // 空振り防止: タスクの割り込みを通った
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #259: winOddsOnly の依頼(過去分の補完。確定の単勝オッズ・人気だけを、保存済みの結果に埋める)
+// ---------------------------------------------------------------------------
+
+const oddsMarkers = (h: Harness): string[] =>
+  (h.sql.exec("SELECT race_id FROM race_day_win_odds_only ORDER BY race_id").toArray() as { race_id: string }[]).map((r) => r.race_id);
+const DAY_MS = 24 * 60 * MIN;
+/** DO の時計の JST の暦日(YYYYMMDD)。`drive` は掃除のアラームまで時計を進めうるので、固定の日付を期待値に書かない。 */
+const todayOf = (h: Harness): string => new Date(h.clock.now + 9 * 3_600_000).toISOString().slice(0, 10).replace(/-/g, "");
+
+describe("Issue #259: winOddsOnly の依頼は、取り込み済みのレースを積み直し、saveResult ではなく saveWinOdds で保存する", () => {
+  /** R_A を通常の取り込みで imported にしてから、翌日の時計で winOddsOnly の依頼を出し、実行まで進める。 */
+  async function importThenOddsOnly(h: Harness): Promise<void> {
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A] });
+    await drive(h);
+    expect(rowOf(h, R_A).state).toBe("imported"); // 前提
+    h.clock.now += DAY_MS;
+    h.store.calls.length = 0;
+    h.gate.urls.length = 0;
+  }
+
+  it("前提: 通常の取り込みは saveResult だけを呼び(saveWinOdds は呼ばない)、印は立たない", async () => {
+    const h = harness();
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A] });
+    expect(oddsMarkers(h)).toEqual([]);
+    await drive(h);
+    expect(h.store.calls.map((c) => c.raceId)).toEqual([R_A]);
+    expect(h.store.oddsCalls).toEqual([]);
+  });
+
+  it("取り込み済み(前の日に imported)のレースへの winOddsOnly は積み直され、印が立つ。実行すると結果ページを 1 回取得し、saveWinOdds(確定オッズ・人気つき)だけを呼ぶ", async () => {
+    const h = harness();
+    await importThenOddsOnly(h);
+    const result = await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+    expect(result).toEqual({ accepted: 1, ignored: { inProgress: 0, imported: 0, alreadyToday: 0 } });
+    expect(oddsMarkers(h)).toEqual([R_A]);
+    expect(rowOf(h, R_A)).toMatchObject({ state: "queued", attempts: 0, requested_on: todayOf(h) });
+    expect(todayOf(h) > TODAY).toBe(true); // 前提: 最初の取り込みより後の日の依頼(積み直しの条件)
+    expect(await tick(h)).toBe(`${R_A}:result:import:ok`);
+    expect(h.gate.urls).toEqual([resultUrl(R_A)]);
+    expect(h.store.calls).toEqual([]); // saveResult は呼ばない(着順・払戻・組合せ払戻を上書きしない)
+    expect(h.store.oddsCalls).toHaveLength(1);
+    const { raceId, entries } = h.store.oddsCalls[0]!;
+    expect(raceId).toBe(R_A);
+    expect(entries).toHaveLength(16);
+    const winner = entries.find((e) => e.finishPosition === 1)!;
+    expect([winner.umaban, winner.ninki, winner.winOdds]).toEqual([13, 1, 5.4]); // フィクスチャの実値
+    expect(entries.every((e) => e.winOdds !== null && e.winOdds !== undefined)).toBe(true);
+    expect(rowOf(h, R_A)).toMatchObject({ state: "imported", last_class: "imported" });
+  });
+
+  it("その後、通常の依頼(winOddsOnly なし)で積み直されたら印が消え、saveResult で保存される(印が残り続けて通常の取り込みを奪わない)", async () => {
+    const h = harness();
+    await importThenOddsOnly(h);
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+    await drive(h);
+    h.clock.now += DAY_MS;
+    h.store.calls.length = 0;
+    h.store.oddsCalls.length = 0;
+    const again = await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A] });
+    expect(again.accepted).toBe(1);
+    expect(oddsMarkers(h)).toEqual([]);
+    await drive(h);
+    expect(h.store.calls.map((c) => c.raceId)).toEqual([R_A]);
+    expect(h.store.oddsCalls).toEqual([]);
+  });
+
+  it("無視される依頼(進行中・同じ日に取り込み済み)は印を変えない: 通常の依頼が進行中のレースへの winOddsOnly は、印を立てず、通常の保存のまま", async () => {
+    const h = harness();
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A] });
+    const result = await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+    expect(result).toEqual({ accepted: 0, ignored: { inProgress: 1, imported: 0, alreadyToday: 0 } });
+    expect(oddsMarkers(h)).toEqual([]);
+    await drive(h);
+    expect(h.store.calls.map((c) => c.raceId)).toEqual([R_A]);
+    expect(h.store.oddsCalls).toEqual([]);
+  });
+
+  it("同じ日に winOddsOnly で取り込み済みのレースへの再依頼は無視され(alreadyToday でなく imported)、印はそのまま", async () => {
+    const h = harness();
+    await importThenOddsOnly(h);
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+    expect(await tick(h)).toBe(`${R_A}:result:import:ok`);
+    const again = await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+    expect(again).toEqual({ accepted: 0, ignored: { inProgress: 0, imported: 1, alreadyToday: 0 } });
+    expect(h.store.oddsCalls).toHaveLength(1);
+  });
+
+  it("印はレースごと: 同じ依頼の中の別のレース(通常)は saveResult、winOddsOnly のレースだけが saveWinOdds", async () => {
+    const h = harness();
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A] });
+    await drive(h);
+    h.clock.now += DAY_MS;
+    h.store.calls.length = 0;
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_B] });
+    expect(oddsMarkers(h)).toEqual([R_A]);
+    await drive(h);
+    expect(h.store.calls.map((c) => c.raceId)).toEqual([R_B]);
+    expect(h.store.oddsCalls.map((c) => c.raceId)).toEqual([R_A]);
+  });
+
+  it("winOddsOnly の保存が失敗したら、通常と同じ save-failed の再試行(試行を数え、10 分後)。再試行で成功すれば imported。例外の文面は状態に入れない", async () => {
+    const h = harness();
+    await importThenOddsOnly(h);
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+    h.store.oddsFailures = 1;
+    expect(await tick(h)).toBe(`${R_A}:result:import:retry`);
+    expect(rowOf(h, R_A)).toMatchObject({ state: "queued", attempts: 1, last_class: "save-failed" });
+    expect(dumpAllTables(h)).not.toContain("SECRET-D1-ODDS-MESSAGE");
+    expect(h.store.calls).toEqual([]);
+    await drive(h);
+    expect(rowOf(h, R_A)).toMatchObject({ state: "imported" });
+    expect(h.store.oddsCalls).toHaveLength(1);
+  });
+
+  it("winOddsOnly でも、払戻のテーブルが無いページ(審議中)は保存しない(no-payout)。saveWinOdds は呼ばない", async () => {
+    const h = harness();
+    await importThenOddsOnly(h);
+    htmlOf[R_A] = withoutPayoutTables(fixture("result_202603020211.html"));
+    try {
+      await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+      await tick(h);
+      expect(rowOf(h, R_A)).toMatchObject({ state: "queued", attempts: 1, last_class: "no-payout" });
+      expect(h.store.oddsCalls).toEqual([]);
+      expect(h.store.calls).toEqual([]);
+    } finally {
+      htmlOf[R_A] = fixture("result_202603020211.html");
+    }
   });
 });

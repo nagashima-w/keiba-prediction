@@ -9,6 +9,11 @@
  *  - `requested_on`: 依頼を受けた日(JST の暦日 YYYYMMDD。DO の時計から。**1 日 1 回**の判定に使う)
  *  - `last_class`: 直近の結果の分類(固定の語 {@link ResultClass}。メッセージ・例外の文面は持たない)
  *
+ * `race_day_win_odds_only`(Issue #259。**別の新しい表**。`race_day_result` には列を足さない: 稼働中の DO の表に ALTER が要るため)
+ *  - 1 レース 1 行(race_id が主キー)。**印がある行は、確定の単勝オッズ・人気だけを保存する**(`saveWinOdds`。着順・払戻・組合せ払戻を上書きしない)。過去分の補完(結果の補完の段階 2)の依頼が立てる
+ *  - 印は**積む(`accepted`)たびに依頼のとおりに付け直す**(`winOddsOnly` なら立て、そうでなければ消す)。無視された依頼は印を変えない。したがって、
+ *    後日の通常の依頼で積み直されたレースが、古い印のせいで着順を保存しない、ということは起きない
+ *
  * ## 依頼の判定表({@link ResultImportStore.request})
  *  | 行の状態 | 動作 |
  *  | 行なし | 積む(`requested_on` = 今日) |
@@ -86,6 +91,26 @@ export class ResultImportStore {
          race_id TEXT PRIMARY KEY, state TEXT NOT NULL, attempts INTEGER NOT NULL, deferrals INTEGER NOT NULL, next_try_at INTEGER NOT NULL,
          requested_on TEXT NOT NULL, last_class TEXT, queued_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     );
+    this.createWinOddsOnlyTable();
+  }
+
+  /** 印の表を作る(`CREATE TABLE IF NOT EXISTS`)。コンストラクタから。 */
+  private createWinOddsOnlyTable(): void {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS race_day_win_odds_only (race_id TEXT PRIMARY KEY)");
+  }
+
+  /** 確定の単勝オッズ・人気だけを保存する印を、付ける/消す(Issue #259。冪等)。 */
+  setWinOddsOnly(raceId: string, on: boolean): void {
+    if (on) {
+      this.sql.exec("INSERT OR IGNORE INTO race_day_win_odds_only (race_id) VALUES (?)", raceId);
+    } else {
+      this.sql.exec("DELETE FROM race_day_win_odds_only WHERE race_id = ?", raceId);
+    }
+  }
+
+  /** そのレースに「オッズ・人気だけを保存する」印があるか(Issue #259)。 */
+  isWinOddsOnly(raceId: string): boolean {
+    return this.sql.exec("SELECT 1 AS x FROM race_day_win_odds_only WHERE race_id = ?", raceId).toArray().length > 0;
   }
 
   row(raceId: string): ResultRow | null {

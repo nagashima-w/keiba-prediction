@@ -331,6 +331,19 @@ export interface RaceResultHorse {
    * 見出し列が解決できない・セル値が空/非数値の場合は null。
    */
   readonly last3f: number | null;
+  /**
+   * 確定の人気(Issue #259)。ヘッダの「人気」列から読む。取消・除外・中止などで空のセル・非数値・0・
+   * 列が解決できない表・セル数がヘッダと合わない行(隣の列を拾わないため)は null。
+   * optional にしているのは既存の `RaceResultHorse` リテラル(テスト等)を非破壊にするため(`courseType` と同じ理由・同じ流儀)。
+   * `parseRaceResult` は常に populate する。
+   */
+  readonly ninki?: number | null;
+  /**
+   * 確定の単勝オッズ(Issue #259)。ヘッダの「単勝オッズ」列から読む(勝ち馬のオッズ×100 が単勝の確定払戻に一致する
+   * ことを、保存済みの結果ページで検査している)。1.0 以上の有限数だけ採り、空・非数値・`---.-`・1.0 未満・列が解決できない表・
+   * セル数がヘッダと合わない行は null。optional の理由と populate は {@link ninki} と同じ。
+   */
+  readonly winOdds?: number | null;
 }
 
 /**

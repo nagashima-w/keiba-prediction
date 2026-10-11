@@ -59,6 +59,7 @@ import {
   validateComboUmabansFor,
   type ComboBetType,
 } from "./combo-odds-key.js";
+import { toNinki } from "./ninki.js";
 import {
   PATTERNS,
   RACE_RESULT_HEADER_LABELS,
@@ -178,6 +179,22 @@ function numberOrNull(raw: string): number | null {
   }
   const n = Number(t);
   return Number.isNaN(n) ? null : n;
+}
+
+/** 単勝オッズの下限(netkeiba の単勝オッズは 1.0 倍が最小。`allocation-primitives` の `MIN_VALID_ODDS` と同じ値)。 */
+const MIN_WIN_ODDS = 1.0;
+
+/**
+ * 単勝オッズのセル(例: "5.4")を数値にする(Issue #259)。空・"---.-"・"**"・非数値・1.0 未満・非有限は null。
+ * 取消・除外のセルは空で来る(2026-10-11 の実測: 除外の行は人気・オッズとも空の span)。
+ */
+function toWinOdds(raw: string): number | null {
+  const t = normalizeText(raw);
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(t)) {
+    return null;
+  }
+  const n = Number(t);
+  return Number.isFinite(n) && n >= MIN_WIN_ODDS ? n : null;
 }
 
 /**
@@ -507,6 +524,8 @@ export function parseRaceResult(html: string): RaceResult {
   const expectedColumnCount = headers.length;
   const last3fIndex = columnIndexOf(headers, RACE_RESULT_HEADER_LABELS.last3f);
   const passingIndex = columnIndexOf(headers, RACE_RESULT_HEADER_LABELS.passing);
+  const ninkiIndex = columnIndexOf(headers, RACE_RESULT_HEADER_LABELS.ninki);
+  const winOddsIndex = columnIndexOf(headers, RACE_RESULT_HEADER_LABELS.winOdds);
 
   const horses: RaceResult["horses"] = [];
   $table.find(SEL.resultRow).each((_, row) => {
@@ -532,6 +551,11 @@ export function parseRaceResult(html: string): RaceResult {
       passingIndex === null || !aligned
         ? []
         : toPassing($cells.eq(passingIndex).text());
+    // 確定の人気・単勝オッズ(Issue #259)。後3F・通過順と同じく、列が解決できない・行がずれている場合は読まない。
+    const ninki =
+      ninkiIndex === null || !aligned ? null : toNinki(normalizeText($cells.eq(ninkiIndex).text()));
+    const winOdds =
+      winOddsIndex === null || !aligned ? null : toWinOdds($cells.eq(winOddsIndex).text());
 
     horses.push({
       umaban,
@@ -540,6 +564,8 @@ export function parseRaceResult(html: string): RaceResult {
       wakuban,
       passing,
       last3f,
+      ninki,
+      winOdds,
     });
   });
 

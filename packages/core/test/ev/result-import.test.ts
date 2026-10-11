@@ -141,6 +141,26 @@ describe("toResultEntries / summarizeImport(core 版。変換の網羅は app �
     expect(entries.filter((e) => e.placePayout !== null)).toHaveLength(result.placePayouts.length);
   });
 
+  // Issue #259: 確定の人気・単勝オッズを保存レコードへ詰める(D1 だけが保存する。exe の codec は無視する)。
+  it("toResultEntries: 各馬の ninki・winOdds がパース結果のとおり馬番で対応付く(実フィクスチャ。1 着は人気 1 番とは限らない)", () => {
+    const entries = toResultEntries(result);
+    // 前提(空振り防止): 全馬が人気・オッズを持つフィクスチャで、人気が着順と同じ並びではない。
+    expect(result.horses.every((h) => h.ninki !== null && h.winOdds !== null)).toBe(true);
+    expect(entries.map((e) => e.ninki)).not.toEqual([...entries.map((e) => e.ninki)].sort((a, b) => a! - b!));
+    for (const h of result.horses) {
+      const e = entries.find((x) => x.umaban === h.umaban)!;
+      expect([e.ninki, e.winOdds]).toEqual([h.ninki, h.winOdds]);
+    }
+    // 1着(馬番 13)は人気 1・5.4 倍(単勝払戻 540 円と一致)。
+    expect(entries.find((e) => e.finishPosition === 1)).toMatchObject({ umaban: 13, ninki: 1, winOdds: 5.4, winPayout: 540 });
+  });
+
+  it("toResultEntries: 人気・オッズが null の馬(除外など)は null のまま渡す(0 や NaN にしない)", () => {
+    const base = result.horses[0]!;
+    const entries = toResultEntries({ ...result, horses: [{ ...base, ninki: null, winOdds: null }] });
+    expect(entries[0]).toMatchObject({ ninki: null, winOdds: null });
+  });
+
   it("summarizeImport: 払戻あり", () => {
     expect(summarizeImport(RACE_ID, result)).toEqual({
       status: "imported",

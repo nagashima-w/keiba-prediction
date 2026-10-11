@@ -1681,7 +1681,7 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - **取得できないレース(無限に再試行しない)**: `backfill_race`(DO の SQLite)に記録する。永続的な分類(`not-confirmed`・`no-payout`・`parse-error`・`incomplete`、および依頼の前の検査 `checkRaceDate` で落ちる `invalid-race`)は 1 サイクルで永久に除外。
   **系統的な障害の緩和(レビューで追加)**: 1 つのチャンクで**取り込みが 0 件かつ失敗が全件、同じ永続的な分類**なら、netkeiba が夜間に 200 のメンテナンス画面を返したなど系統的な障害とみなして、一時的な扱い(晩数に数える。3 晩目に除外)にする。永続的な分類を鵜呑みにすると、その晩のレースが一括で永久に除外され二度と取り込まれないため。取り込めたレースが 1 つでもあれば、ページは読めているので分類を信用する。本当に未確定・払戻なしのレースも、3 晩後には除外される。一時的な分類(`fetch-failed`・`save-failed`・`stalled`)は 1 晩に 1 回で 3 晩目に除外。gate の都合(`blocked`・`busy`)・日単位の DO への依頼の失敗(`dispatch-failed`)は晩数に数えず、その晩は止め、5 晩続いたら除外。その晩に試したレースは列挙から除外する(日単位の DO は同じ日の `gave_up` を積み直さないので、除外しないと同じレースを延々と列挙する)。
   **既知の費用**: 古い地方のレースで結果ページが無い(404)と、HTTP エラーは `fetch-failed` に丸められるので、3 晩 × 3 試行 = 9 リクエストで除外される。
-- **D1 の書き込み(実測。再現: `cd cloud && pnpm exec vitest run test/result-rows-written.test.ts`)**: 結果 1 レースの新規保存は、保存済みの結果ページ 14 本(中央 8・地方 6)で **38〜62 行**(最大は 16 頭の 2 本)。文ごとの内訳は `[2H, 面 2, 削除 0, 2C, 2M]`(H = 馬の数、C = 組合せ払戻の行数、M = parsed の券種の数。`race_results` などは複合主キーの自動索引で行が 2 倍)。150 レース/晩なら多くとも約 **9,300 行**(Free の 10 万行/日の約 9%)。ローカルの workerd の D1 が報告する値で、本番の値と同じとは限らない(最初の本番の実保存で確かめる)。
+- **D1 の書き込み(実測。再現: `cd cloud && pnpm exec vitest run test/result-rows-written.test.ts`。★Issue #259 で 6 文目〈確定オッズ・人気の UPDATE〉が加わり、現在は 43〜78 行。下の「確定単勝オッズ・人気の保存と補完」)**: 結果 1 レースの新規保存は〈5 文のときの値〉、保存済みの結果ページ 14 本(中央 8・地方 6)で **38〜62 行**(最大は 16 頭の 2 本)。文ごとの内訳は `[2H, 面 2, 削除 0, 2C, 2M]`(H = 馬の数、C = 組合せ払戻の行数、M = parsed の券種の数。`race_results` などは複合主キーの自動索引で行が 2 倍)。150 レース/晩なら多くとも約 **9,300 行**(Free の 10 万行/日の約 9%)。ローカルの workerd の D1 が報告する値で、本番の値と同じとは限らない(最初の本番の実保存で確かめる)。
 - **起動**: cron の `scheduled` が毎日、`requestPlan`・結果の依頼のあとに `kick()` を呼ぶ(アラームが無ければ張るだけ。失敗しても朝の計画・既存の結果の取り込みを失敗させない)。`GET /api/results/backfill`(読み取りの API)でも、アラームが無ければ張り直す。移行の完了を push で通知する経路は作らない(`CloudMigration` を無変更に保つため)。最悪で完了の翌日まで始まりが遅れるが、「数日かけて自動で進む」要件には支障がない。
 - **API と画面**: `GET /api/results/backfill`(`state`・`migrationState`・`remaining`・`undated`・`imported`・`abandoned`・`tonight`・`inflight`・`nextRunAt`・`window`)。移行画面(`#migration`)には、移行が `completed` だったときだけ 1 行(`GET /api/results/backfill` を 1 回取る。ポーリングはしない。「再読込」で取り直す)。失敗は黙って出さないだけで、移行の進捗は壊れない。
 - **クライアントのバンドル**: 157,309 → **160,159 バイト**(+2,850。`pnpm run build:client` が出力する。移行画面の 1 行の API・文言・節だけ。サーバ側のコードはクライアントに入らない)。
@@ -1689,6 +1689,28 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - **移行画面の文言**: `paused` は原因を断定しない(「今夜は一時停止中です。明晩に再開します」)。止まる経路は、gate の都合(ブレーカー・混雑)と、日単位の DO への依頼の失敗の両方なため。
 - **ガード**: `scripts/test/cloud-config-guard.test.ts` — DO の binding は 4 つ・migration は v1〜v4。補完のコードは gate の `fetchRaw`・`postRaw`・LLM・通知・R2 を持たない。`.kick()` は `scheduled.ts` と補完の DO の中だけ。`dispatchResultImports(` の呼び出しは `handler.ts`・`result-backfill-core.ts`・`scheduled.ts` の 1 つずつ。
 - **変わらないもの**: exe・`packages/core` のコード・D1 のスキーマ(migration 0009 は無い)・既存の DO(`NetkeibaGate`・`RaceDay`・`CloudMigration`)・`prompt_version`。
+
+### クラウド版の確定単勝オッズ・人気の保存と補完(#259 の前半。版数は 1.44.0 で凍結のため上げない)
+結果ページ(`result.html`)の「人気」「単勝オッズ」の列を、D1 の `race_results.ninki`・`win_odds` に保存する(目的: #257 の切り分けを本番のデータで確かめる検証画面の表〈#259 の後半。#254 の後〉の材料)。**表そのものはこの変更に無い。**
+
+- **事実の訂正**: #259 の本文は「`RaceResult` にすでに単勝オッズと人気がある」と書いていたが誤り。`odds`・`ninki` は過去走(`HorseRaceResult`)の項目で、結果ページ用の `RaceResultHorse` には無く、パーサも読んでいなかった。ページに列があるのに読んでいなかっただけなので、パーサの拡張が要った。
+- **パーサ**(`packages/core/src/scraper/parse-race-result.ts`): ヘッダの文言(`RACE_RESULT_HEADER_LABELS.ninki`=「人気」・`.winOdds`=「単勝オッズ」)で列を解決し、後3F・通過順と同じく**行の td 数がヘッダと一致する行だけ**読む。人気は共有ヘルパ `toNinki`(0・非数値は null)、オッズは 1.0 以上の有限数だけ(空・`---.-`・`**`・1.0 未満は null)。`RaceResultHorse.ninki`・`.winOdds` は optional(既存のリテラルを壊さない)で、`parseRaceResult` は常に埋める。
+- **実測**(2026-10-11。再現: `pnpm exec vitest run test/scraper/parse-race-result-win-odds.test.ts`〈`packages/core`〉の実フィクスチャの検査):
+  - 保存済みの結果ページ 17 本(中央 10・地方 7)で、**勝ち馬の単勝オッズ × 100 が単勝の確定払戻に一致**(オッズは確定値)。うち 2 本(`result_202605040205.html`〈除外 1 頭〉・`result_202608040204.html`〈3 着同着〉)は今回 netkeiba から取り足した。
+  - **除外の行**(`tr.Torikeshi`): 着順セルは「除外」、人気・オッズのセルは**空の span**。行の td 数はヘッダと一致する。**除外の馬も、ページの「N頭」に数えられる**(取得した中央 48 本で `<span>N頭</span>` と結果の行数が全て一致。`docs/current-spec.md` の #209 の「未検証」への答え)。
+  - 取得した 48 本の 677 行のうち、人気・オッズが空だったのは除外の 1 行だけ。取消・1 着同着・地方の除外は実物を観測できていない(地方の除外は合成 HTML のテストで補った。「合成」とテスト名に明記)。
+- **保存**: migration `0011_win_odds.sql`(`ALTER TABLE race_results ADD COLUMN win_odds REAL; … ninki INTEGER`。nullable・索引なし・既存の行は NULL のまま)。**D1 専用の列**: exe の codec(`analysis-store-codec.ts`)・移行の形式(`MIGRATION_TABLES`)・共有 golden は変えない(`RaceResultEntry` に optional の `winOdds`・`ninki` を足したが、exe の `AnalysisStore` は読まない)。`scripts/test/cloud-d1-schema.test.ts` の `D1_EXTRA_COLUMNS` に宣言。
+  - `saveResult` は、馬の UPSERT の直後(同じ batch)に **`FILL_WIN_ODDS_SQL`(`UPDATE … FROM json_each`)を 6 文目として足す**(オッズか人気を持つ馬がいるときだけ。無ければ従来の文の数のまま)。UPSERT は新しい 2 列を SET に含めないので、**再取り込みで保存済みのオッズは消えない**。バインドは 2 個。
+  - この UPDATE は **NULL の列だけ**を埋める(`COALESCE`。値のある列は上書きしない)ので冪等(2 回目は書き込み 0 行)。
+- **過去分の補完**(結果の補完〈#217〉の段階 2): 段階 1(未取込の結果)が尽きたら、**結果はあるがオッズが 1 頭も入っていないレース**(`LIST_WIN_ODDS_BACKFILL_SQL`。レース単位の判定なので、除外の馬だけ NULL のレースは再列挙されない)を、同じ仕組みで少しずつ埋める。
+  - 依頼は同じ `dispatchResultImports`(呼び出し箇所は増えない)に `winOddsOnly: true` を渡し、日単位の DO が結果ページを取り直して **`saveWinOdds`(上の UPDATE の 1 文だけ)**で保存する。**着順・払戻・通過順・面・組合せ払戻には一切触れない**(全再取り込みにしない理由: `saveResult` は UPSERT と組合せ払戻の DELETE → INSERT で上書きするため、古いレースに後から対応した券種の払戻が加わり、検証画面の回収率が遡って変わる。exe 移行の「既存を優先」にも反する)。
+  - 日単位の DO には、新しい表 `race_day_win_odds_only`(race_id)の**印**で伝える(`race_day_result` に列を足さない)。印は積むたびに依頼のとおりに付け直す(通常の依頼で積み直せば消える)。
+  - 1 晩 150 レース・1 回 30 レース・JST 01:00〜06:00・gate の都合・失敗の扱い(永続的な分類は除外・一時的は 3 晩目で除外)は**段階 1 と共有**。取り込めたレースは `backfill_race` に `odds_done` で残し(ページにオッズが無くても二度と列挙しない)、失敗は `odds_tried`・`odds_abandoned`(段階 1 の `tried`・`abandoned` とは別に数える)。結果のレースが約 1,301(ユーザーの実データ。`docs/current-spec.md` の移行画面の節の記述)なら、1,301 ÷ 150 ≈ 8.7 で約 9 晩。
+  - 開催日が NULL の分析のレースは対象外(段階 1 と同じ理由)。`GET /api/results/backfill` の応答に `winOdds: { remaining, undated, filled, abandoned: { total, byClass } }` を足した(追加のみ)。`state` は段階 1 と段階 2 の両方が 0 のときだけ `done`。
+- **D1 の書き込み(実測。再現: `cd cloud && pnpm exec vitest run test/result-rows-written.test.ts`。ローカルの workerd の D1 の値で、本番と同じとは限らない)**: 結果 1 レースの新規保存は、保存済みの結果ページ 14 本で **43〜78 行**(旧い 5 文のときは 38〜62 行)。文ごとの内訳は `[2H, O, 面 2, 削除 0, 2C, 2M]`(O = オッズか人気を持つ馬の数。UPDATE は更新した行数で、索引は動かない)。150 レース/晩なら多くとも 11,700 行(Free の 10 万行/日の約 12%)。過去分の補完は UPDATE の 1 文だけで **O 行**(14 本の各ページで O と一致、2 回目は 0 行)。
+- **D1 の容量**: 1 行あたり約 +11 バイト(REAL 8 + 小整数 1 + レコードヘッダ約 2。SQLite のレコード形式からの概算)。結果の行数は `scripts/measure-verify.ts` の合成データの 20,814 行が上限の目安で、約 229 KB。Free の 500 MB の 0.05% で無視できる。
+- **検証画面への影響**: 無い(`verify-read.ts`・`daily-report-repository.ts` は列を明示して読むので、新しい列は読まれない)。後半の表で読む。補完の UPDATE は `MAX(rowid)` を変えないので、検証の集計キャッシュ(透かし)は補完では無効化されず、`VERIFY_TTL_MS`(60 分)で拾われる。
+- **変わらないもの**: exe・`MIGRATION_TABLES`・共有 golden・既存の DO の表(`race_day_result` ほか)・`dispatchResultImports(`〜`.requestResultImport(` の呼び出し箇所の数(`scripts/test/cloud-config-guard.test.ts`)・版数・`prompt_version`。
 
 ### クラウド版の移行画面(#222〈#167-B2〉。v1.29.0)
 変更は `cloud/` のクライアント(`client/`)と `page.ts` の CSS、生成物 `client-bundle.generated.ts` だけ(**サーバ・D1・DO・wrangler.toml・exe・core は無変更**)。API は #216 のまま(上の「exe から移したファイルの取り込み」)。運用の詳細は `cloud/README.md` の「移行画面」。

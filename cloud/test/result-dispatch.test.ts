@@ -84,7 +84,9 @@ function fakeStore(): FakeStore {
 }
 
 interface FakeStubs {
-  readonly requests: Array<{ date: string; kaisaiDate: string; raceIds: string[] }>;
+  readonly requests: Array<{ date: string; kaisaiDate: string; raceIds: string[]; winOddsOnly?: boolean }>;
+  /** 依頼の入力そのもの(キーの有無を調べる: Issue #259)。 */
+  readonly inputs: Array<Record<string, unknown>>;
   readonly opened: string[];
   failDates: Set<string>;
   stubFor(date: string): ResultDayStub;
@@ -92,13 +94,15 @@ interface FakeStubs {
 function fakeStubs(): FakeStubs {
   const f: FakeStubs = {
     requests: [],
+    inputs: [],
     opened: [],
     failDates: new Set(),
     stubFor(date) {
       f.opened.push(date);
       return {
         async requestResultImport(input) {
-          f.requests.push({ date, kaisaiDate: input.kaisaiDate, raceIds: [...input.raceIds] });
+          f.inputs.push({ ...input });
+          f.requests.push({ date, kaisaiDate: input.kaisaiDate, raceIds: [...input.raceIds], ...(input.winOddsOnly === undefined ? {} : { winOddsOnly: input.winOddsOnly }) });
           if (f.failDates.has(date)) throw new Error(`SECRET-RPC-${date}`);
           return { accepted: input.raceIds.length, ignored: { inProgress: 0, imported: 0, alreadyToday: 0 } };
         },
@@ -133,6 +137,31 @@ describe("dispatchResultImports(列挙 → 日ごとの依頼)", () => {
     expect(result).toEqual({ listed: 3, days: 2, accepted: 3, failedDays: 0, listFailed: false });
     expect(out.lines.every((l) => l.level === "info")).toBe(true);
     expect(out.text()).toContain("days=2");
+  });
+
+  // Issue #259: 過去分の補完(結果の補完の段階 2)は winOddsOnly: true を渡して、確定の単勝オッズ・人気だけを保存させる。
+  it("winOddsOnly を渡さない依頼(cron・手動・段階 1)の入力に winOddsOnly のキーは無い(従来の依頼とバイトが同じ)", async () => {
+    const store = fakeStore();
+    store.list = [{ raceId: "202603020211", kaisaiDate: "20261007" }];
+    const stubs = fakeStubs();
+    await dispatchResultImports({ ...window, maxDays: CRON_RESULT_MAX_DAYS, store, stubFor: stubs.stubFor, log: logger().log });
+    expect(stubs.inputs).toEqual([{ kaisaiDate: "20261007", raceIds: ["202603020211"] }]);
+    expect(Object.keys(stubs.inputs[0]!)).toEqual(["kaisaiDate", "raceIds"]);
+  });
+
+  it("winOddsOnly: true を渡すと、日ごとの依頼のすべてに winOddsOnly: true が付く(日の分け方・件数・失敗の扱いは変わらない)", async () => {
+    const store = fakeStore();
+    store.list = [
+      { raceId: "202603020211", kaisaiDate: "20261007" },
+      { raceId: "202603020111", kaisaiDate: "20261005" },
+    ];
+    const stubs = fakeStubs();
+    const result = await dispatchResultImports({ ...window, maxDays: 2, store, stubFor: stubs.stubFor, log: logger().log, winOddsOnly: true });
+    expect(stubs.requests).toEqual([
+      { date: "20261007", kaisaiDate: "20261007", raceIds: ["202603020211"], winOddsOnly: true },
+      { date: "20261005", kaisaiDate: "20261005", raceIds: ["202603020111"], winOddsOnly: true },
+    ]);
+    expect(result).toEqual({ listed: 2, days: 2, accepted: 2, failedDays: 0, listFailed: false });
   });
 
   it("手動は maxDays = 3 で列挙する", async () => {

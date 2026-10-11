@@ -447,6 +447,14 @@ export interface RaceResultEntry {
    * 上がり3F(タスク#27-A2)。取得できない場合は null。省略時もnull扱い(後方互換)。
    */
   readonly last3f?: number | null;
+  /**
+   * 確定の人気(Issue #259)。**クラウド版の D1(`race_results.ninki`、migration 0011)だけが保存する。**
+   * exe の `AnalysisStore.saveResult`・共有 codec(`raceResultParams`)・移行の形式は読まない・書かない(exe はアーカイブ済み。
+   * 共有 golden と exe スキーマの一致を保つため)。取消・除外などで無い馬・未取込は null。省略時も null 扱い(非破壊の optional 追加)。
+   */
+  readonly ninki?: number | null;
+  /** 確定の単勝オッズ(Issue #259)。保存先・省略時の扱いは {@link ninki} と同じ。 */
+  readonly winOdds?: number | null;
 }
 
 /**

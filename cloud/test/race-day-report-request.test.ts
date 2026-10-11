@@ -125,6 +125,8 @@ interface SaveCall {
 interface FakeStore {
   readonly calls: SaveCall[];
   saveResult(raceId: string, entries: readonly RaceResultEntry[], courseType?: CourseType | null, comboPayouts?: RaceComboPayoutsSaveInput): Promise<void>;
+  /** Issue #259 で結果ストアの型に加わった保存(過去分の補完)。このファイルの主題ではないので何もしない。 */
+  saveWinOdds(raceId: string, entries: readonly RaceResultEntry[]): Promise<{ readonly rowsWritten: number }>;
   getRaceResultDetails(raceIds: readonly string[]): Promise<Map<string, RaceResultDetail>>;
 }
 function fakeStore(): FakeStore {
@@ -132,6 +134,9 @@ function fakeStore(): FakeStore {
     calls: [],
     async saveResult(raceId, entries, courseType) {
       store.calls.push({ raceId, entries, courseType });
+    },
+    async saveWinOdds() {
+      return { rowsWritten: 0 };
     },
     async getRaceResultDetails() {
       return new Map();

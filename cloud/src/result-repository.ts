@@ -5,13 +5,15 @@
  * #209〈当日傾向〉)。このモジュールの責務は「D1 への書き込み・読み出し」だけで、netkeiba への取得・いつ取り込むかは持たない。
  *
  * ## 保存の形は exe と同じ(#167〈exe の DB を D1 へ移す〉との統合のため)
- * 表は migration 0001 にある exe の最終スキーマのまま(`race_results`・`race_result_meta`・`race_combo_payouts`・`race_combo_payout_imports`)。**migration は足さない**。
+ * 表は migration 0001 にある exe の最終スキーマのまま(`race_results`・`race_result_meta`・`race_combo_payouts`・`race_combo_payout_imports`)。**migration は足さない**
+ * (例外: Issue #259 の migration 0011 が、`race_results` に **D1 専用の列 `win_odds`・`ninki`**〈確定の単勝オッズ・人気〉を足した。exe の codec・移行の形式・共有 golden は変えず、この列は下の `FILL_WIN_ODDS_SQL` だけが書く)。
  * SQL の文・束縛値の変換・復元(`toStoredPassing`・`toStoredCourseType` ほか)は core の codec(`analysis-store-codec.ts`)が持ち、exe の `AnalysisStore` と共有する。
  * 同じ入力から、exe の `AnalysisStore.saveResult` と同じ4表になることは、共有 golden(`packages/core/test/golden/race-result-contract.json`)で固定している
  * (exe 側: core の `race-result-contract.test.ts`。D1 側: `cloud/test/result-repository.test.ts`)。
  *
  * ## 書き込み(saveResult)
- * **1 回の `batch`**(D1 の batch は 1 つのトランザクション。exe の `db.transaction` と同じく、途中で失敗すれば全てロールバックされる)に、**最大 5 文**:
+ * **1 回の `batch`**(D1 の batch は 1 つのトランザクション。exe の `db.transaction` と同じく、途中で失敗すれば全てロールバックされる)に、**最大 5 文**
+ * (Issue #259: オッズか人気を持つ馬がいるときは、①の直後に確定の単勝オッズ・人気の UPDATE が 1 文入り、**最大 6 文**。持つ馬がいなければ従来どおり最大 5 文):
  *   ① 馬ごとの UPSERT(`race_results`。`json_each` で全馬を 1 文) ② 面の UPSERT(`race_result_meta`。面があるときだけ)
  *   ③ 組合せ払戻の DELETE(書く券種を `json_each` で 1 文) ④ 組合せ払戻の INSERT(`json_each` で全券種・全行を 1 文。払戻の行が 1 つも無いときは省く) ⑤ 取込マーカー(`json_each` で 1 文)
  * 文の数は馬・券種・払戻の行数に依らず一定(18 頭・全 6 券種でも 5 文)。**1 文のバインドの上限(100)を超えない**(馬を 1 行ずつ束縛すると 18 頭 × 7 列 = 126 で超える。
@@ -98,6 +100,20 @@ const UPSERT_RESULTS_JSON_SQL = jsonEachInsertSelectSql(UPSERT_RACE_RESULT_SQL);
 const DELETE_COMBOS_JSON_SQL = jsonEachDeleteSql(DELETE_COMBO_PAYOUTS_SQL);
 const INSERT_COMBOS_JSON_SQL = jsonEachInsertSelectSql(INSERT_COMBO_PAYOUT_SQL);
 const MARK_IMPORTED_JSON_SQL = jsonEachInsertSelectSql(MARK_COMBO_IMPORTED_SQL);
+
+/**
+ * 確定の単勝オッズ・人気を埋める文(Issue #259。migration 0011 の D1 専用の列。束縛値は `[行の配列の JSON, race_id]` の 2 個。行は `[umaban, winOdds, ninki]`)。
+ * **NULL の列だけを埋める**: 入力が non-null で、保存済みの列が NULL の馬の、その列だけ(`COALESCE` で、既に値のある列は残す)。したがって
+ *  - 冪等(2 回目は WHERE に当たる行が無く、書き込みは 0 行。別の値を渡しても上書きしない)
+ *  - 他の列(着順・払戻・通過順・上がり)には触れない
+ *  - 結果の行が無い馬番・レースには行を作らない(UPDATE だけ)
+ * 新規の取り込み(`saveResult` の 6 文目)と、過去分の補完(`saveWinOdds`)が**同じこの 1 文**を使う(経路を 1 つにして、冪等性の検査を 1 か所にする)。
+ * 馬ごとの UPSERT(codec の文)は、この 2 列を SET に含めない: 再取り込みで、保存済みのオッズが消えない。
+ */
+export const FILL_WIN_ODDS_SQL = `UPDATE race_results SET win_odds = COALESCE(race_results.win_odds, j.o), ninki = COALESCE(race_results.ninki, j.n)
+           FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS o, json_extract(value,'$[2]') AS n FROM json_each(?)) j
+           WHERE race_results.race_id = ? AND race_results.umaban = j.u
+             AND ((race_results.win_odds IS NULL AND j.o IS NOT NULL) OR (race_results.ninki IS NULL AND j.n IS NOT NULL))`;
 
 /** codec の復元の文(1 レース)に race_id を足し、`WHERE race_id IN (json_each)` にして複数レースを 1 文で読む。 */
 function toManyRacesSql(codecSelectSql: string, orderBy: string | null): string {
@@ -187,6 +203,40 @@ export const COUNT_BACKFILL_SQL = `WITH u AS (
                   COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated
            FROM u`;
 
+/**
+ * 結果の補完の段階 2(Issue #259)の列挙。**段階 1({@link LIST_BACKFILL_SQL})の逆**: 分析済みで、結果の行が**あり**、確定の単勝オッズ(`win_odds`)が**1 頭も入っていない**レース。
+ * 「1 頭も」にするのは、除外・取消の馬が NULL のまま残るレースを、毎晩列挙し直さないため(レース単位の判定)。それ以外(開催日が `to` 以下・`GROUP BY race_id` の最小の開催日・
+ * 未取込のある最も新しい日を 1 日だけ・レースID 昇順・除外するレース ID を JSON 1 つで渡す)は段階 1 と同じ。束縛値は `[to, excludeJson, limit]`。
+ */
+export const LIST_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
+             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+             FROM analyses a
+             WHERE a.kaisai_date <= ?
+               AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
+               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL)
+               AND a.race_id NOT IN (SELECT value FROM json_each(?))
+             GROUP BY a.race_id
+           )
+           SELECT raceId, firstDate FROM u
+           WHERE firstDate = (SELECT MAX(firstDate) FROM u)
+           ORDER BY raceId
+           LIMIT ?`;
+
+/**
+ * 段階 2 の残りの数({@link COUNT_BACKFILL_SQL} と同じ形)。`dated` = 対象で開催日が `to` 以前のレース(除外を除く)、`undated` = 対象で開催日がすべて NULL のレース
+ * (日単位の DO の宛先が決まらないので補完できない。数だけ見せる)。束縛値は `[to, excludeJson]`。
+ */
+export const COUNT_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
+             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+             FROM analyses a
+             WHERE EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
+               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL)
+             GROUP BY a.race_id
+           )
+           SELECT COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS dated,
+                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated
+           FROM u`;
+
 
 // ---------------------------------------------------------------------------
 // 移行(Issue #216・#167-B1): exe の結果を、既存の行を優先して入れる
@@ -248,6 +298,25 @@ export interface MigratedResultOutcome {
 // 保存の文の組み立て
 // ---------------------------------------------------------------------------
 
+/** 値が有限数ならそのまま、そうでなければ null(JSON に NaN・Infinity・undefined を載せない)。 */
+function finiteOrNull(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * 確定の単勝オッズ・人気を埋める文({@link FILL_WIN_ODDS_SQL})。オッズも人気も持つ馬が 1 頭もいなければ null(D1 に何も発行しない)。
+ * D1 には何も発行しない(`prepare().bind()` を組み立てるだけ)。テストが「文の数・束縛値の数」を調べるために export している。
+ */
+export function buildWinOddsStatement(db: ResultDb, raceId: string, results: readonly RaceResultEntry[]): D1PreparedStatement | null {
+  const rows = results
+    .map((r) => [r.umaban, finiteOrNull(r.winOdds), finiteOrNull(r.ninki)] as const)
+    .filter(([, odds, ninki]) => odds !== null || ninki !== null);
+  if (rows.length === 0) {
+    return null;
+  }
+  return db.prepare(FILL_WIN_ODDS_SQL).bind(JSON.stringify(rows), raceId);
+}
+
 /**
  * 1 レースの結果を書く D1 の文(1 回の batch に渡す)。最大 5 文で、馬・券種・払戻の行数によらず一定(上の説明)。
  * 何も書くものが無い(馬も面も組合せも無い)ときは空配列。D1 には何も発行しない(`prepare().bind()` を組み立てるだけ)。
@@ -264,6 +333,11 @@ export function buildSaveResultStatements(
   if (results.length > 0) {
     // 先頭の race_id を除いた束縛値の並びは codec のもの(exe と同じ)。
     statements.push(db.prepare(UPSERT_RESULTS_JSON_SQL).bind(raceId, JSON.stringify(results.map((r) => raceResultParams(raceId, r).slice(1)))));
+    // 確定の単勝オッズ・人気(Issue #259)。UPSERT の直後(同じ batch の順序)に、NULL の列だけを埋める。オッズを持つ馬がいなければ文を足さない(従来の文の数のまま)。
+    const odds = buildWinOddsStatement(db, raceId, results);
+    if (odds !== null) {
+      statements.push(odds);
+    }
   }
   if (courseType !== undefined && courseType !== null) {
     statements.push(db.prepare(UPSERT_RACE_RESULT_META_SQL).bind(raceId, courseType));
@@ -334,9 +408,16 @@ export interface BackfillCounts {
 
 export interface ResultRepository {
   saveResult(raceId: string, results: readonly RaceResultEntry[], courseType?: CourseType | null, comboPayouts?: RaceComboPayoutsSaveInput): Promise<void>;
+  /** 確定の単勝オッズ・人気だけを、NULL の列に限って埋める(Issue #259。過去分の補完)。他の列・組合せ払戻には触れない。 */
+  saveWinOdds(raceId: string, results: readonly RaceResultEntry[]): Promise<WinOddsOutcome>;
   getRaceResultDetails(raceIds: readonly string[]): Promise<Map<string, RaceResultDetail>>;
   listUnimportedRaces(options: ListUnimportedOptions): Promise<UnimportedRace[]>;
   listUnimportedRacesByDay(options: ListUnimportedByDayOptions): Promise<UnimportedRace[]>;
+}
+
+/** {@link D1ResultStore.saveWinOdds} の結果。`rowsWritten` は D1 が報告した `meta.rows_written`(書くものが無ければ 0)。 */
+export interface WinOddsOutcome {
+  readonly rowsWritten: number;
 }
 
 export interface D1ResultStoreOptions {
@@ -379,6 +460,19 @@ export class D1ResultStore implements ResultRepository {
     await this.db.batch(statements);
   }
 
+  /**
+   * 確定の単勝オッズ・人気**だけ**を、保存済みの結果の NULL の列に埋める(Issue #259。結果の補完の段階 2。{@link FILL_WIN_ODDS_SQL} の 1 文)。
+   * `saveResult` と違い、着順・払戻・通過順・上がり・面・組合せ払戻には**一切触れない**(再取り込みで上書きしない)。冪等: 2 回目は何も書かない(`rowsWritten` は 0)。
+   * 書くもの(オッズか人気を持つ馬)が無ければ D1 に何も発行しない。失敗は reject する。
+   */
+  async saveWinOdds(raceId: string, results: readonly RaceResultEntry[]): Promise<WinOddsOutcome> {
+    const statement = buildWinOddsStatement(this.db, raceId, results);
+    if (statement === null) {
+      return { rowsWritten: 0 };
+    }
+    const [result] = await this.db.batch([statement]);
+    return { rowsWritten: result?.meta.rows_written ?? 0 };
+  }
 
   /**
    * exe から移した結果を、**既存の行を優先して**保存する(Issue #216。上の {@link MIGRATED_RESULTS_SQL})。1 回の batch(最大 4 文)。冪等(同じ内容を2回渡しても、2回目の `rowsWritten` は 0)。
@@ -484,6 +578,31 @@ export class D1ResultStore implements ResultRepository {
     }
     const { results } = await this.db.prepare(LIST_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
+  }
+
+  /**
+   * 結果の補完の段階 2(Issue #259。上の {@link LIST_WIN_ODDS_BACKFILL_SQL})の列挙。
+   * @throws RangeError to が YYYYMMDD の8桁でない・limit が 1〜{@link UNIMPORTED_MAX_LIMIT} の整数でない・exclude が文字列の配列でない(D1 には発行しない)
+   */
+  async listWinOddsBackfillRaces(options: ListBackfillOptions): Promise<UnimportedRace[]> {
+    const { to, exclude, limit } = options;
+    checkBackfillInput(to, exclude);
+    if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
+      throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
+    }
+    const { results } = await this.db.prepare(LIST_WIN_ODDS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
+  }
+
+  /**
+   * 結果の補完の段階 2 の残りの数(Issue #259。上の {@link COUNT_WIN_ODDS_BACKFILL_SQL})。
+   * @throws RangeError to が YYYYMMDD の8桁でない・exclude が文字列の配列でない
+   */
+  async countWinOddsBackfill(options: CountBackfillOptions): Promise<BackfillCounts> {
+    const { to, exclude } = options;
+    checkBackfillInput(to, exclude);
+    const row = await this.db.prepare(COUNT_WIN_ODDS_BACKFILL_SQL).bind(to, JSON.stringify(exclude)).first<{ dated: number; undated: number }>();
+    return { dated: row?.dated ?? 0, undated: row?.undated ?? 0 };
   }
 
   /**

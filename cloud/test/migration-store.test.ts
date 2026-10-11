@@ -279,7 +279,16 @@ describe("saveMigratedResult: 結果の保存(既存の行を優先)", () => {
 
   const ORDER: Record<string, string> = { race_results: "umaban", race_combo_payouts: "bet_type, combo_key", race_combo_payout_imports: "bet_type", race_result_meta: "race_id" };
   async function dump(table: string, raceId: string): Promise<unknown[]> {
-    return (await local.db.prepare(`SELECT * FROM ${table} WHERE race_id = ? ORDER BY ${ORDER[table] ?? "1"}`).bind(raceId).all()).results;
+    const rows = (await local.db.prepare(`SELECT * FROM ${table} WHERE race_id = ? ORDER BY ${ORDER[table] ?? "1"}`).bind(raceId).all()).results as Array<Record<string, unknown>>;
+    if (table !== "race_results") {
+      return rows;
+    }
+    // Issue #259: race_results の D1 専用の列(win_odds・ninki。migration 0011)は exe の行に無いので、移行した行では NULL のまま(結果の補完の段階 2 が埋める)。
+    // exe の行との比較は、その 2 列を除いて行う(NULL であること自体をここで固定する)。
+    return rows.map(({ win_odds, ninki, ...exeColumns }) => {
+      expect([win_odds, ninki], `${raceId} 馬番 ${String(exeColumns["umaban"])}`).toEqual([null, null]);
+      return exeColumns;
+    });
   }
 
   it("5レースすべて: 4表の行が exe の行そのまま入る(passing_json は文字列のまま)", async () => {

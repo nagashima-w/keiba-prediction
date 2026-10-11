@@ -145,6 +145,11 @@ const D1_EXTRA_COLUMNS: Readonly<Record<string, readonly ColumnInfo[]>> = {
     // 0009 の start_time(Issue #219。発走時刻の写し。NULL=未確認・''=スナップショットに無い・'HH:MM'=値。検証画面の先読み判定が使う。検証の DO が R2 の詳細から遅延で埋める)。
     { name: "start_time", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
   ],
+  // 0011 の win_odds・ninki(Issue #259。結果ページの確定の単勝オッズ・人気。NULL=未取得。exe の codec・移行の形式〈MIGRATION_TABLES〉・共有 golden は読まない・書かない D1 専用の列。結果の補完の段階 2 と取り込みが NULL の列だけを埋める)。
+  race_results: [
+    { name: "win_odds", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
+    { name: "ninki", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+  ],
 };
 const D1_EXTRA_INDEXES: Readonly<Record<string, readonly IndexInfo[]>> = {
   analyses: [
@@ -239,8 +244,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql の10本だけで、番号は 0001 から連続している(後から足すときは 0011 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql の11本だけで、番号は 0001 から連続している(後から足すときは 0012 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -297,10 +302,10 @@ describe("0001_init.sql は凍結されている(Issue #197。適用済みのフ
   });
 });
 
-describe("AC-a1: 0001〜0009 を流した構造が、exe の最終スキーマ + 宣言した追加分(列・索引・r2_ops 表)と一致する", () => {
+describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ + 宣言した追加分(列・索引・r2_ops 表)と一致する", () => {
   const sqls = FILES.map(readMigration);
 
-  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key・llm_note・llm_calls_json・exe_analysis_id・start_time・索引2つ+0008 の4つ・r2_ops 表・cloud_settings 表だけ)", () => {
+  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key・llm_note・llm_calls_json・exe_analysis_id・start_time・race_results の win_odds・ninki・索引2つ+0008 の4つ・r2_ops 表・cloud_settings 表だけ)", () => {
     const actual = schemaAfter(sqls);
     expect(diffSchemas(expectedD1Schema(exe), actual)).toEqual([]);
   });
@@ -328,6 +333,20 @@ describe("AC-a1: 0001〜0009 を流した構造が、exe の最終スキーマ +
     expect(Object.keys(exe)).not.toContain("cloud_settings");
     expect(actual["cloud_settings"]!.columns).toEqual(D1_EXTRA_TABLES["cloud_settings"]!.columns);
     expect(sqls[3]).toMatch(/CHECK \(id = 1\)/);
+  });
+
+  it("Issue #259: win_odds(REAL)・ninki(INTEGER)は 0011 だけが足す。0001〜0010 までには無い。追加のみ(ALTER TABLE ... ADD COLUMN の2文だけ・UPDATE なし)。exe の race_results には無く(D1 専用)、移行の形式の列にも入れない", () => {
+    const before = schemaAfter(sqls.slice(0, 10));
+    expect(before["race_results"]!.columns.map((c) => c.name)).not.toContain("win_odds");
+    expect(before["race_results"]!.columns.map((c) => c.name)).not.toContain("ninki");
+    const after = schemaAfter(sqls);
+    expect(after["race_results"]!.columns.find((c) => c.name === "win_odds")).toEqual({ name: "win_odds", type: "REAL", notnull: 0, dflt_value: null, pk: 0 });
+    expect(after["race_results"]!.columns.find((c) => c.name === "ninki")).toEqual({ name: "ninki", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 });
+    expect(exe["race_results"]!.columns.map((c) => c.name)).not.toContain("win_odds");
+    expect(exe["race_results"]!.columns.map((c) => c.name)).not.toContain("ninki");
+    expect(after["race_results"]!.indexes).toEqual(before["race_results"]!.indexes); // 索引は足さない
+    const code = sqls[10]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n").trim();
+    expect(code).toBe("ALTER TABLE race_results ADD COLUMN win_odds REAL;\nALTER TABLE race_results ADD COLUMN ninki INTEGER;");
   });
 
   it("Issue #194: llm_note 列(TEXT・NULL 可)は 0005 だけが足す。0001〜0004 までには無い。追加のみ(ALTER TABLE ... ADD COLUMN だけの1文)", () => {

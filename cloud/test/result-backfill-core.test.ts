@@ -7,6 +7,7 @@ import {
   BACKFILL_GATE_BUSY_PENDING,
   BACKFILL_INFLIGHT_MAX_MS,
   BACKFILL_MAX_DEFER_NIGHTS,
+  BACKFILL_MAX_RELIST,
   BACKFILL_MAX_NIGHTS,
   BACKFILL_MIGRATION_POLL_MS,
   BACKFILL_NIGHTLY_LIMIT,
@@ -58,29 +59,39 @@ class World {
   /** 未取込のレース(取り込み済みになると消える)。 */
   unimported: Array<{ raceId: string; kaisaiDate: string }> = [];
   undated = 0;
+  /** 段階 2(Issue #259): 結果はあるがオッズが 1 頭も無いレース(オッズが入ると消える)。 */
+  needOdds: Array<{ raceId: string; kaisaiDate: string }> = [];
+  undatedOdds = 0;
+  oddsListCalls: Array<{ to: string; exclude: string[]; limit: number }> = [];
   listCalls: Array<{ to: string; exclude: string[]; limit: number }> = [];
   listError = false;
   /** 日ごとの DO。 */
-  days = new Map<string, { requests: string[][]; rows: Map<string, DayRow>; failRequest: boolean; failProgress: boolean }>();
+  days = new Map<string, { requests: string[][]; flags: Array<boolean | undefined>; rows: Map<string, DayRow>; failRequest: boolean; failProgress: boolean }>();
   setAlarmCalls: number[] = [];
   warns: string[] = [];
 
   day(date: string) {
     let d = this.days.get(date);
     if (d === undefined) {
-      d = { requests: [], rows: new Map(), failRequest: false, failProgress: false };
+      d = { requests: [], flags: [], rows: new Map(), failRequest: false, failProgress: false };
       this.days.set(date, d);
     }
     return d;
   }
 
-  /** 日の DO の、積まれた行を全部「取り込み済み」にする(D1 にも結果が入ったことにする)。 */
-  settleImported(date: string): void {
+  /**
+   * 日の DO の、積まれた行を全部「取り込み済み」にする(D1 にも結果が入ったことにする)。
+   * `oddsStay: true` は、段階 2 の依頼が成功したのに D1 のオッズが入らなかった(結果ページにオッズが無かった)ことにする(列挙の対象に残る)。
+   */
+  settleImported(date: string, oddsStay = false): void {
     for (const [id, row] of this.day(date).rows) {
       if (row.state === "queued") {
         row.state = "imported";
         row.lastClass = "imported";
         this.unimported = this.unimported.filter((r) => r.raceId !== id);
+        if (!oddsStay) {
+          this.needOdds = this.needOdds.filter((r) => r.raceId !== id);
+        }
       }
     }
   }
@@ -111,14 +122,29 @@ class World {
       dated: this.unimported.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId)).length,
       undated: this.undated,
     }),
+    listWinOddsBackfillRaces: async ({ to, exclude, limit }) => {
+      this.oddsListCalls.push({ to, exclude: [...exclude], limit });
+      const candidates = this.needOdds.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId));
+      if (candidates.length === 0) return [];
+      const newest = candidates.map((r) => r.kaisaiDate).sort().at(-1)!;
+      return candidates
+        .filter((r) => r.kaisaiDate === newest)
+        .sort((a, b) => a.raceId.localeCompare(b.raceId))
+        .slice(0, limit);
+    },
+    countWinOddsBackfill: async ({ to, exclude }) => ({
+      dated: this.needOdds.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId)).length,
+      undated: this.undatedOdds,
+    }),
   };
 
   stubFor = (date: string): BackfillDayStub => {
     const d = this.day(date);
     return {
-      requestResultImport: async ({ raceIds }) => {
+      requestResultImport: async ({ raceIds, winOddsOnly }) => {
         if (d.failRequest) throw new Error("RPC SECRET-REQ");
         d.requests.push([...raceIds]);
+        d.flags.push(winOddsOnly);
         let accepted = 0;
         for (const id of raceIds) {
           if (!d.rows.has(id) || d.rows.get(id)!.state !== "queued") {
@@ -850,5 +876,211 @@ describe("例外を投げない", () => {
     w.gateError = false;
     await expect(core.runNextStep()).resolves.toBeUndefined();
     expect(w.setAlarmCalls.length).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #259: 段階 2(確定の単勝オッズ・人気の補完)
+// ---------------------------------------------------------------------------
+
+describe("段階 2: 段階 1 が尽きたら、結果はあるがオッズが無いレースを winOddsOnly で依頼する", () => {
+  it("段階 1 が空なら、同じ tick で段階 2 を列挙して依頼する(最も新しい日の 30 レース・winOddsOnly: true)。段階 1 の依頼には winOddsOnly を付けない", async () => {
+    const w = new World();
+    w.needOdds = [...races("20261009", 45), ...races("20261001", 5)];
+    const { core } = make(w);
+    await core.runNextStep();
+    expect(w.listCalls).toHaveLength(1); // 段階 1 を先に引く(空)
+    expect(w.oddsListCalls).toEqual([{ to: YESTERDAY, exclude: [], limit: 30 }]);
+    expect(w.day("20261009").requests).toEqual([races("20261009", 30).map((r) => r.raceId)]);
+    expect(w.day("20261009").flags).toEqual([true]);
+    expect(w.alarm).toBe(T0 + BACKFILL_POLL_MS);
+    const status = await core.getStatus();
+    expect(status.state).toBe("running");
+    expect(status.inflight).toMatchObject({ day: "20261009", races: 30 });
+    expect(status.tonight).toMatchObject({ dispatched: 30 });
+  });
+
+  it("段階 1 に未取込が残る間は、段階 2 を列挙しない(段階 1 が先)。段階 1 の依頼は winOddsOnly を付けない(undefined)", async () => {
+    const w = new World();
+    w.unimported = races("20261009", 3);
+    w.needOdds = races("20261008", 3);
+    const { core } = make(w);
+    await core.runNextStep();
+    expect(w.oddsListCalls).toEqual([]);
+    expect(w.day("20261009").flags).toEqual([undefined]);
+    expect([...w.days.keys()]).toEqual(["20261009"]);
+  });
+
+  it("段階 1 が尽きた次の tick で段階 2 に進む: 1 チャンク目を取り込み、次の tick で段階 2 のチャンクを依頼する", async () => {
+    const w = new World();
+    w.unimported = races("20261009", 2);
+    w.needOdds = races("20261008", 2);
+    const { core } = make(w);
+    await core.runNextStep(); // 段階 1 の依頼
+    w.settleImported("20261009");
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep(); // 回収 → 段階 1 は空 → 段階 2 を依頼
+    expect(w.day("20261009").flags).toEqual([undefined]);
+    expect(w.day("20261008").flags).toEqual([true]);
+    expect(w.day("20261008").requests).toEqual([races("20261008", 2).map((r) => r.raceId)]);
+    expect((await core.getStatus()).imported).toBe(2); // 取り込みの累計は段階 1 だけが数える
+  });
+
+  it("段階 2 の取り込みが成功したレースは odds_done になり、ページにオッズが無くて D1 の列挙に残っても、二度と依頼しない(毎晩の再列挙を防ぐ)", async () => {
+    const w = new World();
+    w.needOdds = races("20261009", 3);
+    const { core, sql } = make(w);
+    await core.runNextStep();
+    w.settleImported("20261009", true); // 成功したが D1 にはオッズが入らず、列挙の対象に残る
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep(); // 回収。続けて列挙するが、全部 odds_done で除外されて空
+    expect(w.needOdds).toHaveLength(3); // 前提: D1 の列挙の対象には残っている
+    expect(w.day("20261009").requests).toHaveLength(1);
+    expect(w.oddsListCalls.at(-1)!.exclude).toEqual(races("20261009", 3).map((r) => r.raceId).sort());
+    expect((sql.exec("SELECT state, COUNT(*) AS n FROM backfill_race GROUP BY state").toArray() as Array<{ state: string; n: number }>)).toEqual([{ state: "odds_done", n: 3 }]);
+    for (const day of [11, 12, 13]) {
+      w.now = jst(10, day, 2);
+      await core.runNextStep();
+    }
+    expect(w.day("20261009").requests).toHaveLength(1); // 追加の依頼なし
+    const status = await core.getStatus();
+    expect(status.winOdds).toEqual({ remaining: 0, undated: 0, filled: 3, abandoned: { total: 0, byClass: {} } });
+    expect(status.state).toBe("done");
+  });
+
+  it("1 晩の上限は段階 1・2 で共有する: 段階 1 の 100 レースのあと、段階 2 は残り 50 レースだけ(30・20)", async () => {
+    const w = new World();
+    w.unimported = races("20261009", 100);
+    w.needOdds = races("20261008", 80);
+    const { core } = make(w);
+    for (let i = 0; i < 12; i += 1) {
+      await core.runNextStep();
+      w.settleImported("20261009");
+      w.settleImported("20261008");
+      w.now += BACKFILL_POLL_MS;
+    }
+    const sizes = (date: string) => w.day(date).requests.map((r) => r.length);
+    expect(sizes("20261009")).toEqual([30, 30, 30, 10]); // 段階 1: 100
+    expect(sizes("20261008")).toEqual([30, 20]); // 段階 2: 150 - 100 = 50
+    expect((await core.getStatus()).tonight.dispatched).toBe(150);
+  });
+
+  it("段階 2 の失敗は段階 2 の状態(odds_tried / odds_abandoned)に記録し、段階 1 の abandoned には混ざらない。永久な分類は 1 サイクルで除外(取り込めたレースがあるとき)", async () => {
+    const w = new World();
+    w.needOdds = races(YESTERDAY, 2);
+    const { core, sql } = make(w);
+    await core.runNextStep();
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 1))!.state = "imported";
+    w.needOdds = w.needOdds.filter((r) => r.raceId !== idOf(YESTERDAY, 1));
+    w.settleGaveUp(YESTERDAY, "no-payout");
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep();
+    const status = await core.getStatus();
+    expect(status.abandoned).toEqual({ total: 0, byClass: {} }); // 段階 1 の除外には数えない
+    expect(status.winOdds).toEqual({ remaining: 0, undated: 0, filled: 1, abandoned: { total: 1, byClass: { "no-payout": 1 } } });
+    expect((sql.exec("SELECT race_id, state FROM backfill_race ORDER BY race_id").toArray() as Array<{ race_id: string; state: string }>)).toEqual([
+      { race_id: idOf(YESTERDAY, 1), state: "odds_done" },
+      { race_id: idOf(YESTERDAY, 2), state: "odds_abandoned" },
+    ]);
+  });
+
+  it("段階 2 の一時的な失敗は晩数に数え、BACKFILL_MAX_NIGHTS 晩目で除外する(段階 1 と同じ規則)", async () => {
+    const w = new World();
+    w.needOdds = races(YESTERDAY, 1);
+    const { core, sql } = make(w);
+    for (let night = 1; night <= BACKFILL_MAX_NIGHTS; night += 1) {
+      w.now = jst(10, 9 + night, 2);
+      await core.runNextStep();
+      w.settleGaveUp(YESTERDAY, "fetch-failed");
+      w.now += BACKFILL_POLL_MS;
+      await core.runNextStep();
+      expect(w.day(YESTERDAY).requests.length, `${night} 晩目`).toBe(night);
+    }
+    expect((sql.exec("SELECT state FROM backfill_race").toArray() as Array<{ state: string }>)).toEqual([{ state: "odds_abandoned" }]);
+    w.now = jst(10, 13, 2);
+    await core.runNextStep();
+    expect(w.day(YESTERDAY).requests.length).toBe(BACKFILL_MAX_NIGHTS);
+  });
+
+  it("再起動しても続きから: 段階 2 の飛行中の記録(kind)を新しいインスタンスが引き継ぎ、回収したレースを odds_done にする", async () => {
+    const w = new World();
+    w.needOdds = races(YESTERDAY, 2);
+    const first = make(w);
+    await first.core.runNextStep();
+    w.settleImported(YESTERDAY, true);
+    w.now += BACKFILL_POLL_MS;
+    const second = make(w, {}, first.sql);
+    await second.core.runNextStep();
+    expect((await second.core.getStatus()).winOdds.filled).toBe(2);
+  });
+
+  it("この変更より前に保存された飛行中の記録(kind なし)は段階 1 として回収する(取り込めたレースの記録を消す=従来どおり)", async () => {
+    const w = new World();
+    w.unimported = races(YESTERDAY, 2);
+    const first = make(w);
+    await first.core.runNextStep();
+    const meta = first.sql.exec("SELECT value FROM backfill_meta WHERE key = 'inflight'").toArray() as Array<{ value: string }>;
+    const legacy = JSON.parse(meta[0]!.value) as Record<string, unknown>;
+    expect(legacy["kind"]).toBe("results"); // 前提: 新しい記録は kind を持つ
+    delete legacy["kind"];
+    first.sql.exec("UPDATE backfill_meta SET value = ? WHERE key = 'inflight'", JSON.stringify(legacy));
+    w.settleImported(YESTERDAY);
+    w.now += BACKFILL_POLL_MS;
+    await make(w, {}, first.sql).core.runNextStep();
+    expect((first.sql.exec("SELECT COUNT(*) AS n FROM backfill_race").toArray() as Array<{ n: number }>)[0]!.n).toBe(0);
+  });
+
+  it("getStatus: 段階 2 の残りがあれば、段階 1 が空でも done にならない(ready)。残り・開催日不明の数を返す", async () => {
+    const w = new World();
+    w.needOdds = races(YESTERDAY, 4);
+    w.undatedOdds = 9;
+    const { core } = make(w);
+    const status = await core.getStatus();
+    expect(status.remaining).toBe(0);
+    expect(status.state).toBe("ready");
+    expect(status.winOdds).toEqual({ remaining: 4, undated: 9, filled: 0, abandoned: { total: 0, byClass: {} } });
+  });
+
+  it("段階 2 の日単位の DO への依頼が失敗: 段階 1 と同じく、その晩は止める(dispatch-failed を記録)", async () => {
+    const w = new World();
+    w.needOdds = races(YESTERDAY, 3);
+    w.day(YESTERDAY).failRequest = true;
+    const { core, sql } = make(w);
+    await core.runNextStep();
+    expect(w.alarm).toBe(jst(10, 11, 1));
+    expect((sql.exec("SELECT state, last_class FROM backfill_race ORDER BY race_id").toArray() as Array<{ state: string; last_class: string }>)).toEqual(
+      Array.from({ length: 3 }, () => ({ state: "odds_tried", last_class: "dispatch-failed" })),
+    );
+  });
+});
+
+describe("段階 2 と不正なレース(Issue #259)", () => {
+  it("段階 1 の再列挙の上限(BACKFILL_MAX_RELIST 回)を不正なレースだけで使い切った tick は、まだ段階 1 が尽きたと言えないので、段階 2 に進まない。次の tick で空になって初めて進む", async () => {
+    const w = new World();
+    // 12 桁でないレースID(checkRaceDate が弾く)を上限+1 件。chunkSize 1 なので、1 回の列挙で 1 件ずつ除外され、再列挙の上限を使い切っても 1 件が残る。
+    w.unimported = Array.from({ length: BACKFILL_MAX_RELIST + 1 }, (_, i) => ({ raceId: `9${i}`, kaisaiDate: YESTERDAY }));
+    w.needOdds = races("20261008", 2);
+    const { core } = make(w, { chunkSize: 1 });
+    await core.runNextStep();
+    expect(w.listCalls).toHaveLength(BACKFILL_MAX_RELIST);
+    expect(w.oddsListCalls).toEqual([]); // 段階 2 は列挙しない
+    expect(w.days.size).toBe(0);
+    expect(w.alarm).toBe(T0 + BACKFILL_POLL_MS); // 続きは次のステップ
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep(); // 残りの 1 件を除外して空 → 段階 2 を依頼
+    expect(w.oddsListCalls).toHaveLength(1);
+    expect(w.day("20261008").flags).toEqual([true]);
+  });
+
+  it("段階 2 でも、開催日と食い違う不正なレースID は依頼の前に除外する(odds_abandoned・invalid-race)。同じ列挙の有効なレースは依頼する", async () => {
+    const w = new World();
+    w.needOdds = [{ raceId: "12345", kaisaiDate: YESTERDAY }, ...races(YESTERDAY, 2)];
+    const { core, sql } = make(w);
+    await core.runNextStep();
+    expect(w.day(YESTERDAY).requests).toEqual([races(YESTERDAY, 2).map((r) => r.raceId)]);
+    expect(sql.exec("SELECT race_id, state, last_class FROM backfill_race").toArray()).toEqual([{ race_id: "12345", state: "odds_abandoned", last_class: "invalid-race" }]);
+    const status = await core.getStatus();
+    expect(status.abandoned.total).toBe(0);
+    expect(status.winOdds.abandoned).toEqual({ total: 1, byClass: { "invalid-race": 1 } });
   });
 });

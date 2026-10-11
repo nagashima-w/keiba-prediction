@@ -81,12 +81,16 @@ function loadFixture(name: string): string {
   return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
 }
 
-/** 実フィクスチャのパース結果から、実際の取込と同じ入力(toResultEntries・面・全券種の払戻)を作る。 */
+/**
+ * 実フィクスチャのパース結果から、実際の取込と同じ入力(toResultEntries・面・全券種の払戻)を作る。
+ * Issue #259: `toResultEntries` が詰める確定の人気・単勝オッズ(`ninki`・`winOdds`)は、**D1 専用の列**に入るもので、exe の codec・この golden の 4 表には関係しない。
+ * golden を変えない(exe と D1 の 4 表の一致という契約を、オッズの追加で動かさない)ため、ここでは取り除く。オッズの保存は `cloud/test/result-win-odds.test.ts` が固定する。
+ */
 function stepFromFixture(raceId: string, fixture: string): ContractStep {
   const result = parseRaceResult(loadFixture(fixture));
   return {
     raceId,
-    entries: toResultEntries(result),
+    entries: toResultEntries(result).map(({ ninki: _ninki, winOdds: _winOdds, ...exeColumns }) => exeColumns),
     courseType: result.courseType ?? null,
     comboPayouts: {
       wide: result.widePayouts,

@@ -136,6 +136,7 @@ async function runPreRace(h: Harness): Promise<{ readonly computeOutcome: string
 function goldenStore(requested: (readonly string[])[]): ResultStoreLike {
   return {
     saveResult: async () => undefined,
+    saveWinOdds: async () => ({ rowsWritten: 0 }),
     getRaceResultDetails: async (ids) => {
       requested.push([...ids]);
       const map = new Map<string, RaceResultDetail>();
@@ -172,6 +173,7 @@ describe("AC-C4: 配線(偽のストア)", () => {
   it("D1 の読み出しが失敗しても分析は止めない: 当日傾向なしで保存し、警告に固定の語(秘密・生の文面は出さない)", async () => {
     const store: ResultStoreLike = {
       saveResult: async () => undefined,
+    saveWinOdds: async () => ({ rowsWritten: 0 }),
       getRaceResultDetails: async () => {
         throw new Error(`D1_ERROR: SELECT secret ${SECRET}`);
       },

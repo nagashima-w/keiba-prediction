@@ -263,7 +263,7 @@ export interface AnalysisSink {
 }
 
 /** 結果の保存先のうち、日単位の DO が使う部分: 取り込みの保存(`saveResult`)と、発走前の分析の当日傾向の読み出し(`getRaceResultDetails`。Issue #209)。 */
-export type ResultStoreDeps = Pick<ResultRepository, "saveResult" | "getRaceResultDetails">;
+export type ResultStoreDeps = Pick<ResultRepository, "saveResult" | "saveWinOdds" | "getRaceResultDetails">;
 
 export interface RaceDayDeps {
   readonly sql: SqlLike;
@@ -973,9 +973,11 @@ export class RaceDayCore {
    * **依頼だけをして戻る**(取得・保存はアラームの中。1 ステップにつき 1 レース)。冪等: 判定は `race-day-result.ts` の表のとおり(進行中・同じ日に取り込み済み・同じ日に諦めた、は積み直さない。
    * 前の日の依頼で諦めた・取り込み済みのレースは、1 日 1 回だけ積み直す)。依頼の日は**この DO の時計**の JST の暦日(cron の重複配信は同じ日になる)。
    * 受理しても拒否しても、アラームは状態から張り直す(`rearm`。冪等)。開催日を pin する(別の日で pin 済みなら拒否)。
+   * `winOddsOnly: true`(Issue #259。結果の補完の段階 2): 積んだレースは、実行のとき確定の単勝オッズ・人気**だけ**を保存する(`saveWinOdds`。着順・払戻・組合せ払戻を上書きしない)。
+   * 印は積んだレースにだけ、依頼のとおりに付け直す(無視されたレースは変えない)。それ以外の判定・上限・取得は通常の依頼と同じ。
    * @throws 結果ストアが無い構成、無効な開催日・レースID、**今日以降の開催日**(当日中の取り込みは対象外)、年・地方の月日の不整合、1 回の件数の上限、1 日の行数の上限(1 件も積まない)
    */
-  async requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[] }): Promise<RequestResultImportResult> {
+  async requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[]; readonly winOddsOnly?: boolean }): Promise<RequestResultImportResult> {
     if (this.resultStore === undefined) {
       throw new Error("結果の保存先(D1)が、この構成にはありません");
     }
@@ -1019,6 +1021,7 @@ export class RaceDayCore {
       const decision = this.results.decide(raceId, today);
       if (decision === "accepted") {
         this.results.enqueue(raceId, today, now);
+        this.results.setWinOddsOnly(raceId, input.winOddsOnly === true);
         accepted += 1;
       } else if (decision === "in-progress") {
         ignored.inProgress += 1;
@@ -1855,6 +1858,8 @@ export class RaceDayCore {
     // 当日の行(Issue #209): 計画の確定で積んだ行 = 依頼の日が開催日。全頭の着順がそろった確認と、5 分おき・10 回の再試行が加わる。過去日の行(後日の cron の依頼)は従来どおり。
     const sameDay = row.requested_on === this.metaGet("kaisai_date");
     const progress: { stage: "fetch" | "parse" | "save"; noPayout: boolean; incomplete: "short" | "unknown-size" | null } = { stage: "fetch", noPayout: false, incomplete: null };
+    // 確定の単勝オッズ・人気だけを保存する依頼か(Issue #259。印は積むときに付け直す)。
+    const winOddsOnly = this.results.isWinOddsOnly(raceId);
     let imported = false;
     let failure: unknown = null;
     try {
@@ -1882,6 +1887,11 @@ export class RaceDayCore {
         },
         saveResult: async (id, entries, courseType, comboPayouts) => {
           progress.stage = "save";
+          if (winOddsOnly) {
+            // 過去分の補完(Issue #259): 確定の単勝オッズ・人気だけを、NULL の列に埋める。保存済みの着順・払戻・組合せ払戻には触れない。
+            await this.resultStore!.saveWinOdds(id, entries);
+            return;
+          }
           await this.resultStore!.saveResult(id, entries, courseType, comboPayouts);
         },
       });

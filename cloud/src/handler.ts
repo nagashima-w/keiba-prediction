@@ -73,7 +73,7 @@ export interface RaceDayStubLike {
   /** 通知の一覧の読み取り(Issue #205・#206。URL・例外の文面を含まない。状態は変えない)。 */
   getNotifications(): Promise<NotificationRecord[]>;
   /** 結果の取り込みの依頼(Issue #208)。**呼ぶのは `dispatchResultImports`(result-dispatch.ts。cron の `scheduled` と手動の `POST /api/results/import`)だけ**。handler.ts は直接は呼ばない(ガードテストが固定)。 */
-  requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[] }): Promise<RequestResultImportResult>;
+  requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[]; readonly winOddsOnly?: boolean }): Promise<RequestResultImportResult>;
   /** 結果の取り込みの観測（Issue #208 `GET /api/plan`。状態は変えない）。 */
   getResultImportProgress(): Promise<ResultImportProgress>;
 }

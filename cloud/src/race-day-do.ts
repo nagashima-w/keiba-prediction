@@ -146,7 +146,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
    * 結果の取り込みを依頼する(RPC。Issue #208。依頼だけをして戻る。冪等)。呼ぶのは `dispatchResultImports`（result-dispatch.ts）だけ。
    * 今日以降の開催日・無効な入力は例外（RPC 越しは型が落ちる）。
    */
-  requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[] }): Promise<RequestResultImportResult> {
+  requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[]; readonly winOddsOnly?: boolean }): Promise<RequestResultImportResult> {
     return this.core.requestResultImport(input);
   }
 

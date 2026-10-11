@@ -50,6 +50,8 @@ export type ImportResultOutcome =
  *   複数馬がそれぞれ自分の払戻額を持つ(winPayoutsの件数はparsePayoutRoutが固定しないため)。
  * - 通過順(passing)・上がり3F(last3f、タスク#27-A2)は各馬の値をそのまま詰める
  *   (parseRaceResult が既に非throwフォールバック済みのため、ここでの追加変換は不要)。
+ * - 確定の人気(ninki)・単勝オッズ(winOdds、Issue #259)も各馬の値をそのまま詰める。クラウド版の D1 だけが保存する
+ *   (exe の `AnalysisStore.saveResult` は読まない。契約は `RaceResultEntry` の JSDoc)。
  */
 export function toResultEntries(result: RaceResult): RaceResultEntry[] {
   const placePayoutByUmaban = new Map(
@@ -70,6 +72,9 @@ export function toResultEntries(result: RaceResult): RaceResultEntry[] {
       winPayout: winPayoutByUmaban.get(h.umaban) ?? null,
       passing: h.passing,
       last3f: h.last3f,
+      // 確定の人気・単勝オッズ(Issue #259)。そのまま渡す(null は null、未設定は未設定)。D1 だけが保存する(exe の codec は読まない)。
+      ninki: h.ninki,
+      winOdds: h.winOdds,
     };
   });
 }
