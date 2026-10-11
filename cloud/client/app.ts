@@ -87,8 +87,9 @@ export interface AppDeps {
   /** 画面に制御を返す(移行ファイルの検証が主スレッドを占有し続けないように。本番は `setTimeout(0)`。省略は何もしない)。Issue #222。 */
   readonly yieldToUi?: () => Promise<void>;
   /**
-   * 役割(Issue #238。サーバが `#app` の `data-role` で渡す)。**閲覧者(`admin` 以外のすべて)には、設定・検証への入口・分析の実行ボタン・日報の作成ボタンを出さず、
-   * 設定・検証・移行の画面を直接開いても API を取らずに案内だけを出す**。画面で隠すのは補助で、拒否はサーバ側(403)。
+   * 役割(Issue #238。サーバが `#app` の `data-role` で渡す)。**閲覧者(`admin` 以外のすべて)には、設定への入口・分析の実行ボタン・日報の作成ボタンを出さず、
+   * 設定・移行の画面を直接開いても API を取らずに案内だけを出す**。画面で隠すのは補助で、拒否はサーバ側(403)。
+   * 検証は Issue #263 で閲覧者にも開いた(入口も出る)。閲覧者には「更新」ボタンを出さず、集計のやり直しを起こさない(サーバがキャッシュを返すだけ)。
    */
   readonly role: Role;
 }
@@ -121,7 +122,7 @@ function assertNever(screen: never): never {
 const PRIOR_NOTICE_PREFIX = "順位を取得できませんでした。";
 
 /** 管理者だけの画面(Issue #238)。閲覧者が開いたときは、API を取らずに案内だけを出す(`admin-only`)。 */
-const ADMIN_SCREENS: ReadonlySet<Screen> = new Set<Screen>(["settings", "migration", "verify"]);
+const ADMIN_SCREENS: ReadonlySet<Screen> = new Set<Screen>(["settings", "migration"]);
 
 /** 今の画面(Issue #238)。route から決まる画面に、役割で決まる `admin-only` を足したもの。 */
 type AppScreen = Screen | "admin-only";
@@ -132,8 +133,8 @@ export function createApp(deps: AppDeps): App {
   const admin = isAdmin(deps.role);
 
   /**
-   * 今の画面の判定の**唯一の場所**(Issue #191 の `screenOf` に、Issue #238 の役割を足したもの)。閲覧者が管理者だけの画面(設定・移行・検証)の route に居るときは
-   * `admin-only` を返す。**app.ts の画面ごとの分岐は、すべてこの関数を通す**(`screenOf(route)` を直接使わない)ので、閲覧者は設定・移行・検証の取得も下書きも始めない。
+   * 今の画面の判定の**唯一の場所**(Issue #191 の `screenOf` に、Issue #238 の役割を足したもの)。閲覧者が管理者だけの画面(設定・移行。検証は Issue #263 で閲覧者にも開いた)の route に居るときは
+   * `admin-only` を返す。**app.ts の画面ごとの分岐は、すべてこの関数を通す**(`screenOf(route)` を直接使わない)ので、閲覧者は設定・移行の取得も下書きも始めない。
    */
   function currentScreen(): AppScreen {
     const screen = screenOf(route);
@@ -282,10 +283,12 @@ export function createApp(deps: AppDeps): App {
   });
 
   // ---- 検証画面(Issue #219) ----
+  // Issue #263: 閲覧者にも開く。閲覧者には更新ボタンを出さず、「更新」(refresh=1)も送らない(サーバも閲覧者の refresh は無視し、集計のやり直しを起こさない)。
   const verify = createVerifyScreen({
     fetch: deps.fetch,
     timers: deps.timers,
     isVisible: deps.isVisible,
+    admin,
     onChange: () => render(),
   });
 

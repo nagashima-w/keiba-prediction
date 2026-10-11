@@ -146,8 +146,8 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
       model.venueTabs.map((t) => h("a", { class: "tab", href: t.href, "aria-current": t.current ? "page" : undefined }, [t.label])),
     ),
     h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
-    // 検証・設定への入口は管理者だけ(Issue #238。閲覧者は href が null)。日報は閲覧者にも出す。
-    ...(model.verifyHref === null ? [] : [h("a", { class: "verify-link", href: model.verifyHref }, ["検証"])]),
+    // 検証への入口は閲覧者にも出す(Issue #263。閲覧者の要求は集計のやり直しを起こさない)。設定への入口は管理者だけ(Issue #238。閲覧者は href が null)。日報は閲覧者にも出す。
+    h("a", { class: "verify-link", href: model.verifyHref }, ["検証"]),
     h("a", { class: "report-link", href: model.reportHref }, ["日報"]),
     ...(model.settingsHref === null ? [] : [h("a", { class: "settings-link", href: model.settingsHref }, ["設定"])]),
   ]);
@@ -685,7 +685,8 @@ function versionsNodes(section: VersionsSection, actions: ViewActions): VNode[] 
 function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
     h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
-    h("button", { class: "refresh", disabled: model.refreshDisabled }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+    // 更新ボタンは管理者だけ(Issue #263。閲覧者の要求は集計のやり直しを起こさない)
+    ...(model.canRefresh ? [h("button", { class: "refresh", disabled: model.refreshDisabled }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh })] : []),
   ]);
   const venues = h(
     "div",

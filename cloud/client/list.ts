@@ -112,7 +112,7 @@ export interface ListModelInput {
   readonly tracking?: string | null;
   /** 利用者が押した場の開閉(キーは `groupKeys`)。無い場は既定(場が 2 つ以上なら閉・1 つなら開)。省略は「何も押していない」。 */
   readonly choices?: ReadonlyMap<string, boolean>;
-  /** 閲覧者(Issue #238)。設定・検証への入口を出さない。省略は false(管理者)。 */
+  /** 閲覧者(Issue #238)。設定への入口を出さない(検証への入口は Issue #263 で閲覧者にも出す)。省略は false(管理者)。 */
   readonly readOnly?: boolean;
   /**
    * 場ごとの一括実行(Issue #251)の入力。`now` は発走済みの判定に使う現在時刻、`states` は場のまとまりのキー(`groupKeys`)→ 操作の状態。
@@ -154,8 +154,8 @@ export interface ListModel {
   readonly venue: Venue;
   /** 設定画面への入口のリンク先(Issue #189)。閲覧者(`readOnly`)は null(入口を出さない。Issue #238)。 */
   readonly settingsHref: string | null;
-  /** 検証画面への入口のリンク先(Issue #219)。閲覧者(`readOnly`)は null(入口を出さない。Issue #238)。 */
-  readonly verifyHref: string | null;
+  /** 検証画面への入口のリンク先(Issue #219)。閲覧者(`readOnly`)にも出す(Issue #263。閲覧者の要求は集計のやり直しを起こさない)。 */
+  readonly verifyHref: string;
   /** 日報画面への入口のリンク先(Issue #235)。 */
   readonly reportHref: string;
   readonly venueTabs: readonly { readonly venue: Venue; readonly label: string; readonly href: string; readonly current: boolean }[];
@@ -187,7 +187,7 @@ export function buildListModel(input: ListModelInput): ListModel {
     dateInput: ymdToInput(route.date),
     venue: route.venue,
     settingsHref: input.readOnly === true ? null : SETTINGS_HASH,
-    verifyHref: input.readOnly === true ? null : VERIFY_HASH,
+    verifyHref: VERIFY_HASH,
     reportHref: REPORT_HASH,
     venueTabs: (["central", "nar"] as const).map((venue) => ({
       venue,

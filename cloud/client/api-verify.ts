@@ -5,7 +5,9 @@
  * (診断の細目・帯ごとの代表予測値など、この画面が読まないもの)は無視する。Issue #220 で、補正方向×結果・キャリブレーション・印別的中率を読む項目に加えた(群の数・重複・順序は core の契約どおりに検査する)。読む項目のキー名のドリフトは `test/client-api-verify-contract.test.ts` が検出する。
  * Issue #254 で、帯ごとの予測の平均(`meanPredictedProb`)と、補正前〈prior〉で分けたキャリブレーション(`priorCalibration`。補正後と同じ帯数)も読む項目に加えた。
  * **サーバの文面は読まない**(失敗は、ステータスと `error.type`〈サーバが決めた固定の識別子〉だけで分類し、固定の文言にする)。
- * 応答の `status`: `ready`(集計。`stale` なら古い)・`preparing`(発走時刻の補完中)・`throttled`(再計算の柵〈最短間隔 5 分・1 日の上限〉に当たっていて、出せる集計が無い。`reason` で区別する〈Issue #254〉)。
+ * 応答の `status`: `ready`(集計。`stale` なら古い)・`preparing`(発走時刻の補完中)・`throttled`(再計算の柵〈最短間隔 5 分・1 日の上限〉に当たっていて、出せる集計が無い。`reason` で区別する〈Issue #254〉)・
+ * `not-computed`(**閲覧者にだけ**返る。使える集計がまだ無い。閲覧者の要求は集計のやり直しを起こさないので、管理者が集計するまでこの状態になる。Issue #263)。
+ * 閲覧者の `ready` は管理者の `ready` と同じ形で読む(診断は発走時刻の欠落だけ・`stale` は偽・追加指示の全文は `"(非公開)"` に置き換わっている。サーバが落とす)。
  */
 import { classify, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
@@ -130,7 +132,9 @@ export type VerifyOutcome =
     }
   | { readonly kind: "preparing"; readonly remaining: number; readonly blocked: "r2-fence" | "error" | null; readonly resumeAt: string | null }
   /** 再計算の柵に当たって出せる集計が無い。`reason`(Issue #254): `min-interval`=最短間隔〈5 分〉の内側、`daily-limit`=1 日の上限。 */
-  | { readonly kind: "throttled"; readonly nextAt: string; readonly reason: ThrottleReason };
+  | { readonly kind: "throttled"; readonly nextAt: string; readonly reason: ThrottleReason }
+  /** 閲覧者に、使える集計がまだ無い(Issue #263)。閲覧者の要求は集計のやり直しを起こさないので、管理者が集計するまで続く。 */
+  | { readonly kind: "not-computed" };
 
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const isMoney = (v: unknown): v is number => isNum(v) && v >= 0;
@@ -270,6 +274,9 @@ const STALE_REASONS: ReadonlySet<string> = new Set<StaleReason>(["backfilling", 
 export function parseVerifyResponse(body: unknown): VerifyOutcome | null {
   if (!isRecord(body) || body["ok"] !== true) return null;
   const status = body["status"];
+  if (status === "not-computed") {
+    return { kind: "not-computed" };
+  }
   if (status === "throttled") {
     const reason = body["reason"];
     return isStr(body["nextAt"]) && (reason === "min-interval" || reason === "daily-limit") ? { kind: "throttled", nextAt: body["nextAt"], reason } : null;
@@ -327,8 +334,26 @@ export async function fetchVerify(fetchLike: FetchLike, venue: VerifyVenue, refr
   return outcome === null ? { ok: false, error: { kind: "unexpected", httpStatus: 200 } } : { ok: true, outcome };
 }
 
-/** 取得の失敗の固定の文言(サーバの文面は含めない)。 */
-export function verifyFetchFailureMessage(failure: ApiFailure): string {
+/**
+ * 取得の失敗の固定の文言(サーバの文面は含めない)。`canRefresh`(Issue #263): 「更新」ボタンがあるか。閲覧者には無いので、存在しないボタンを案内せず、再読み込みを案内する。
+ */
+export function verifyFetchFailureMessage(failure: ApiFailure, canRefresh = true): string {
+  if (!canRefresh) {
+    switch (failure.kind) {
+      case "forbidden":
+      case "origin-mismatch":
+        return "検証を取得できませんでした。アクセスできません。ログインの期限切れかもしれません。ページを再読み込みしてください。";
+      case "network":
+        return "検証の取得の通信に失敗しました。ログインの期限切れかもしれません。ページを再読み込みしてください。";
+      case "server-error":
+      case "netkeiba-unavailable":
+        return "検証を取得できませんでした。サーバでエラーが起きました。少し待ってから、ページを再読み込みしてください。";
+      case "bad-request":
+      case "not-found":
+      case "unexpected":
+        return `検証の応答が想定外でした${failure.kind === "unexpected" ? `(HTTP ${failure.httpStatus})` : ""}。少し待ってから、ページを再読み込みしてください。`;
+    }
+  }
   switch (failure.kind) {
     case "forbidden":
     case "origin-mismatch":

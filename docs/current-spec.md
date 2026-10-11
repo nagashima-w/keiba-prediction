@@ -1080,14 +1080,14 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
   - 役割は**検証済みのメールと管理者の一覧の完全一致**だけで決める(JWT のメールは分割も部分一致もしない)。メールが文字列でない・判定中に例外が起きたら viewer。ヘッダ・クッキー・`ctx.access` のどの経路でも同じ判定。
 - **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 26 + パターン 2 = 28 ルート。#244 でアイコン 7 本、#251 で `/api/analyses/run/bulk` を足した)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
   **リクエスト本文を読まず・DO/D1/R2/gate に触れず**に 403 `{"ok":false,"error":{"type":"admin-only"}}`(固定。認証の拒否の `forbidden` とは本文で区別する)を返す。**表に無い (method, path) は管理者専用**(フェイルクローズ)。
-  - 閲覧者に許す(16 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`、
+  - 閲覧者に許す(17 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`・`GET /api/verify`(#263。下の「閲覧者の検証画面」)、
     アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/favicon-16.png`・`/icons/favicon-32.png`・`/icons/header-32.png`・`/icons/header-64.png`・`/icons/header-96.png`。#244。下の「アイコン」の節)。
-  - 管理者だけ(12 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/verify`。
+  - 管理者だけ(11 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`。
   - 閲覧者が表の外の method(HEAD・POST など)を送ると、405 ではなく 403 になる。`{id}`・`{date}` のパターンは `run` に化けない(`/api/analyses/run`・`/api/reports/run` は管理者専用)。
   - `GET /api/races` は閲覧者でも netkeiba への取得を起こしうる(DO のキャッシュと gate が効く)。利用者の決定(2026-10-10)で許可した。
 - **画面**: サーバが `renderPage(email, role)` で `#app` に `data-role="admin|viewer"` を渡す(インラインスクリプトは使えないため属性。`client/main.ts` が `roleFromAttribute` で読み、欠落・不明は viewer)。
   閲覧者には、結果の「配分が未設定」の注記から設定への案内の括弧書きを外した固定文言(`UNSET_ALLOCATION_NOTE_VIEWER`。結果画面とレース画面のカードの両方)を出す。総資金・1レース上限・買い目・日報の賭け金や払戻などの数値は閲覧者にもそのまま見せる(利用者の判断)。
-  閲覧者には(「ログイン中」の行の役割の表示「閲覧専用」は #238 で足し、#243〈v1.41.0〉で外した)、一覧の「検証」「設定」の入口、レース画面の分析の実行ボタン、日報の作成ボタン(と、ボタンに言及する案内)を出さない。`#settings`・`#verify`・`#migration` を直接開いても API を取らず、
+  閲覧者には(「ログイン中」の行の役割の表示「閲覧専用」は #238 で足し、#243〈v1.41.0〉で外した)、一覧の「設定」の入口、レース画面の分析の実行ボタン、日報の作成ボタン(と、ボタンに言及する案内)を出さない(**検証への入口は #263 で閲覧者にも出す**)。`#settings`・`#migration` を直接開いても API を取らず、
   固定文言「管理者だけが使えます」と一覧へ戻るリンクだけを出す。**画面で隠すのは補助で、拒否はサーバ側**。`test/client-app-viewer.test.ts` が、閲覧者の画面(と押せる操作)が出す要求がすべて表で viewer に足りることを、表(`requiredRole`)に直接つないで固定する。
 - **ログ**: `access: ok via=<経路> role=<admin|viewer> admins=<fallback|configured|none>`(アドレスは出さない)。拒否の `access: denied reason=…` は不変(`email-mismatch` の理由コードは無くなった)。
 - 検査: `test/access-jwt.test.ts`(`ADMIN_USER` の解釈・役割の判定のテーブル)・`test/authenticate.test.ts`・`test/route-policy.test.ts`(手書きの表と静的ガード)・`test/handler-roles.test.ts`(`handle()` を実際に呼ぶ)・`test/client-*.test.ts`・smoke(B・C・J・K・L)。
@@ -1616,6 +1616,15 @@ exe の検証画面の残りの表を web に持ってきた(#219 の続き): **
   - キャッシュのヒット: 壁時計 11〜24ms、workerd の CPU 0〜20ms(3 構成の最小〜最大)。
 - **【記録】**: (1) 版別の追加指示は全文を持って配信し、画面で 30 文字に要約する(開いたときに全文を出すため)。追加指示が長い版が多いと応答が大きくなる(上の実測)。要約だけを配り全文は別取得にする案は、現状の大きさでは不要として採らなかった。(2) 帯グラフの `progress` の見た目・開閉ボタンの操作・スマホ幅での折り返しは**自動検査できない**(デプロイ後に実機で確認する)。(3) 本番の版の数・追加指示の実際の長さは未確認(デプロイ後の `GET /api/verify` の応答の大きさで確かめる)。
 - **検査**: `client-api-verify-contract.test.ts`(本物の `VerifyReport` と版別の射影を通し、群の数・重複・順序の検査を固定)・`client-verify-model.test.ts`・`client-view-verify.test.ts`・`client-verify-screen.test.ts`(版別の開閉)・`client-app-verify.test.ts`・`verify-versions.test.ts`・`verify-core.test.ts`(版別の kv・`CACHE_VERSION`)、ルートの `scripts/test/cloud-verify-format.test.ts`(整形が exe の関数と一致)・`cloud-verify-parity.test.ts`(exe と cloud の**完全な版別レポート〈射影の前。core の `computeVerifyReportByPromptVersion`〉が一致**することと、**同じ射影関数 `computePromptVersionSummaries` を両側に適用した結果が一致**することを比べる。同じ射影を両側に通すので、**射影が何を残すか〈項目の取捨選択〉はこのテストでは保証しない**。それは `verify-versions.test.ts` が固定する)・`measure-verify.test.ts`(合成データの版・追加指示)。
+
+### 閲覧者の検証画面(#263。**版数は 1.44.0 のまま**〈凍結〉)
+利用者の決定(2026-10-11): 友人(閲覧者)にも検証画面を見せる。**閲覧者には「更新」ボタンを出さず、閲覧者の要求は集計のやり直しを起こさない。** 検証は LLM も netkeiba も使わず(D1 の集計だけ)課金は無いが、再計算の柵(最短 5 分・1 日 20 回)は全員で共有しており、閲覧者が更新を繰り返すと管理者がその日に更新できなくなるため。
+- **ルート**: `GET /api/verify` を閲覧者にも開く(`route-policy.ts`。GET だけ。HEAD・POST は閲覧者には 403 admin-only)。入口(一覧の「検証」リンク)も閲覧者に出す。`#verify` を直接開いた閲覧者にも画面が開く(「管理者だけが使えます」にならない)。
+- **役割での分岐**(`handler.ts` の `handleVerify`): 役割は認証の結果(`auth.role`。管理者でない・判定できないときは閲覧者に倒れる)だけで決め、クエリでは名乗れない。**管理者**は従来どおり DO の `getReport`(キャッシュ・柵つきで再計算しうる。`refresh=1` を受ける)。**閲覧者**は DO の `getViewerReport`(`VerifyCore.getViewerReport`): kv のキャッシュを読むだけの同期関数で、D1(透かし・補完待ち)・R2・補完のアラーム・柵の記録(`runs`)・キャッシュの書き込みのどれにも触れない。**閲覧者の `refresh` は無視する**(値の検証は通す〈`refresh=yes` は 400〉。拒否にはせず、画面が壊れない)。
+- **閲覧者の応答**: キャッシュがあれば、古くてもそのまま返す(`computedAt` で時点が分かる。データの更新に追いついているかは確かめないので `stale` は常に false・`staleReason`/`nextRecomputeAt` は null で、古いとは偽らない)。使えるキャッシュが無い(まだ集計されていない・形式の版が違う)ときは `{status: "not-computed"}`。画面は「まだ集計されていません。管理者が検証画面を開いて集計すると、ここに表示されます。」と出す。集計は管理者が開いた・更新したときにだけ行われる。**形式の版を上げた直後(`CACHE_VERSION`)は、管理者が最初に開くまで閲覧者には `not-computed`**。
+- **閲覧者に見せない情報**: (1) 診断は発走時刻の欠落(`diag.startTimeGaps`。画面の注記に使う)だけ。D1 の読み取り行数(`rowsRead`)・表ごとの行数(`counts`)・所要時間(`readMs`・`computeMs`・`promptVersionsMs`)は出さない。(2) 版別比較の**追加指示の全文**(設定の値。`GET /api/analyses/{id}` も閲覧者には返さない)は、あり/なしの別と数だけを残して全文を固定文字列 `(非公開)` に置き換える(`VIEWER_REDACTED_INSTRUCTION`)。画面も閲覧者には『追加指示: あり / なし』(複数の種類があれば『あり(2種類)』)としか出さず、全文の行を出さない(サーバが全文を返してしまっても出ない。二重の守り)。集計の数値(回収率・対応表・件数)はそのまま見せる。設定・API キーの有無・ログ・例外の文面は、検証の応答にもともと含まれない(`test/handler-verify.test.ts`・`test/verify-core.test.ts`・`test/client-api-verify-contract.test.ts` が固定)。
+- **画面**: 閲覧者は「更新」ボタンが無く(`onRefresh` も `refresh=1` を送らない)、区分(全体/中央/地方)・対応表の補正前/後・版別の開閉は使える。集計が出ているときは「閲覧用の画面です。この集計は管理者が更新したときの内容で、その後に増えた分析や結果は反映されていないことがあります」の注記を出す。取得失敗の文言は『更新』を案内せず再読み込みを案内する。
+- **検査**: `test/verify-core.test.ts`(閲覧者 × キャッシュあり/古い/無し/形式違いの組み合わせ。D1・R2・アラーム・`runs` に触れない・柵を消費しない・診断と追加指示の秘匿)、`test/handler-verify.test.ts`(役割による呼び分け・`refresh` の無視)、`scripts/test/cloud-config-guard.test.ts`(`handleVerify` の分岐と `getViewerReport` の本体が store・アラーム・書き込みに触れない静的ガード)、`test/client-app-viewer.test.ts`、`smoke.ts`(閲覧者の `GET /api/verify` は 200 で `not-computed`・管理者は同じ状態で `ready`)。
 
 ### クラウド版の検証画面の対応表の信頼区間(#254。**版数は 1.44.0 のまま**〈凍結〉。統計モデルの見直しの第 1 段階)
 「今の件数で統計モデルを見直してよいか」を利用者が画面で判断できるよう、検証画面の対応表(キャリブレーション)の各帯に、**件数から求めた実際の複勝率の信頼区間**と、予測との照合を付けた。分析のロジック・モデルのパラメータは変えない(課金なし)。

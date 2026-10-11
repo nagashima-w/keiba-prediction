@@ -906,6 +906,40 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     expect((handler.match(/\benv\.VERIFY_REPORT\b/g) ?? []).length).toBe(1);
   });
 
+  it("Issue #263: 閲覧者の検証の要求は集計のやり直しを起こさない。handleVerify は管理者の分岐でだけ getReport を呼び、閲覧者は getViewerReport。VerifyCore.getViewerReport は store・アラーム・kv の書き込み・再計算・柵に触れない同期関数", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = handler.indexOf("async function handleVerify(");
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(800); // 前提: 本体を実際に読めている
+    const admin = body.indexOf('role === "admin"');
+    const getReport = body.indexOf(".getReport(");
+    const viewer = body.indexOf(".getViewerReport(");
+    expect(admin).toBeGreaterThan(-1);
+    expect(admin).toBeLessThan(getReport); // 管理者の分岐の中(役割の判定が先)
+    expect(getReport).toBeLessThan(viewer); // 閲覧者の側は別の呼び出し
+    expect((body.match(/\.getReport\(/g) ?? []).length).toBe(1);
+    expect((body.match(/\.getViewerReport\(/g) ?? []).length).toBe(1);
+    // DO のラッパは core の getViewerReport だけを呼ぶ(getReport・store を経由しない)
+    const doCode = stripCode(readTextLf("cloud", "src", "verify-do.ts"));
+    const doStart = doCode.indexOf("getViewerReport(venue");
+    expect(doStart).toBeGreaterThan(-1);
+    const doBody = doCode.slice(doStart, doCode.indexOf("\n  }\n", doStart));
+    expect(doBody).toContain("this.core.getViewerReport(");
+    expect(doBody).not.toContain("getReport(");
+    // core の getViewerReport: 同期(async・await なし)で、D1・R2・アラーム・書き込み・再計算・柵に触れない
+    const core = stripCode(readTextLf("cloud", "src", "verify-core.ts"));
+    const coreStart = core.indexOf("  getViewerReport(venue");
+    expect(coreStart).toBeGreaterThan(-1);
+    const coreBody = core.slice(coreStart, core.indexOf("\n  }\n", coreStart));
+    expect(coreBody.length).toBeGreaterThan(300); // 前提: 本体を実際に読めている
+    expect(coreBody).toContain("this.readCache()");
+    expect(coreBody).not.toContain("async");
+    for (const forbidden of ["await", "store", "setAlarm", "getAlarm", "kv.put", "recompute", "gate(", "inflight", "armBackfill", "getReport", "readAll", "refresh"]) {
+      expect(coreBody, `getViewerReport に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    expect(core.slice(Math.max(0, coreStart - 8), coreStart)).not.toContain("async");
+  });
+
   it("cron の scheduled・RaceDay・result-dispatch・他の DO は、検証の DO を参照しない", () => {
     for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "migration-do.ts", "migration-core.ts", "result-backfill-do.ts", "result-backfill-core.ts"]) {
       const code = stripCode(readTextLf("cloud", "src", f));

@@ -33,7 +33,7 @@ import { D1ReportStore } from "./daily-report-repository";
 import { DAILY_REPORT_NAME, type ReportMode, type ReportStatus, type RequestReportResult } from "./daily-report-core";
 import type { MigrationStatus, StartResult } from "./migration-core";
 import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-core";
-import type { GetReportOptions, VerifyResponse } from "./verify-core";
+import type { GetReportOptions, VerifyResponse, ViewerVerifyResponse } from "./verify-core";
 import { toRaceListRows } from "./race-list";
 import type { JWTVerifyGetKey } from "jose";
 
@@ -119,6 +119,8 @@ export interface BackfillNamespaceLike {
 export interface VerifyStubLike {
   /** 検証の集計(キャッシュ・補完の確認を含む)。区分は `all`・`central`・`nar`。 */
   getReport(venue: "all" | "central" | "nar", options?: GetReportOptions): Promise<VerifyResponse>;
+  /** 閲覧者向けの集計(Issue #263)。キャッシュを読むだけ(集計のやり直し・D1・R2 を起こさない)。管理者向けの情報は落としてある。 */
+  getViewerReport(venue: "all" | "central" | "nar"): Promise<ViewerVerifyResponse>;
 }
 
 /** 検証の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link VERIFY_NAME})。 */
@@ -389,7 +391,7 @@ export async function handle(
         headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
       });
     }
-    return handleVerify(request, env);
+    return handleVerify(request, env, auth.role);
   }
 
   if (pathname === "/api/results/backfill") {
@@ -511,12 +513,16 @@ const VERIFY_PARAMS = new Set(["venue", "refresh"]);
 const VERIFY_VENUES = new Set(["all", "central", "nar"]);
 
 /**
+ * **閲覧者にも開く(Issue #263。route-policy.ts)が、閲覧者の要求は集計のやり直しを起こさない**: 管理者(`role === "admin"`)だけが DO の `getReport`(キャッシュ・費用の柵つきで再計算しうる。`refresh` を受け付ける)に届き、
+ * それ以外は `getViewerReport`(キャッシュを読むだけ。D1・R2・柵の記録に触れず、管理者向けの診断・追加指示の全文を落とす)に届く。閲覧者の `refresh` は(値の検証は通したうえで)**無視する**(400 にも 403 にもしない。画面が壊れない)。
+ * 役割は認証の結果(`auth.role`。管理者でない・判定できないときは閲覧者に倒れる)だけで決める。クエリでは名乗れない。
+ *
  * `GET /api/verify?venue=all|central|nar[&refresh=1]`(Issue #219〈#219 web の検証画面(1)〉): 検証の集計(累積回収率・配分ベースの回収率ほか。core の `computeVerifyReport`)。
  * 集計は DO(`VerifyReportDO`)がキャッシュ付きで行い、Worker は呼ぶだけ(Workers Free の CPU は 10ms。D1・R2 に触れない)。応答の `status`: `ready`(集計。`stale` なら古い)・
  * `preparing`(発走時刻の補完中)・`throttled`(再計算の柵〈最短間隔・1 日の上限〉に当たっていて、出せる集計が無い。`reason` で区別する〈Issue #254〉)。`refresh=1` は再計算の要求(DO の最短間隔・1 日の上限は守られる)。
  * **別サイトからの要求は 403**(`Sec-Fetch-Site`。D1 を数万行読む再計算を外から起こされないため)。入力の検証が先(400。DO は呼ばない)。DO の失敗・binding なしは 503(固定の種類名)。
  */
-async function handleVerify(request: Request, env: Env): Promise<Response> {
+async function handleVerify(request: Request, env: Env, role: "admin" | "viewer"): Promise<Response> {
   const site = request.headers.get("sec-fetch-site");
   if (site !== null && site !== "same-origin" && site !== "none") {
     return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
@@ -539,7 +545,11 @@ async function handleVerify(request: Request, env: Env): Promise<Response> {
     if (namespace === undefined) {
       throw new Error("VERIFY_REPORT binding がありません");
     }
-    const response = await namespace.get(namespace.idFromName(VERIFY_NAME)).getReport(venue as "all" | "central" | "nar", { refresh: refreshValue === "1" });
+    const stub = namespace.get(namespace.idFromName(VERIFY_NAME));
+    const response =
+      role === "admin"
+        ? await stub.getReport(venue as "all" | "central" | "nar", { refresh: refreshValue === "1" })
+        : await stub.getViewerReport(venue as "all" | "central" | "nar"); // 閲覧者: refresh は渡さない(渡せない)
     return json({ ok: true, ...response });
   } catch {
     return json({ ok: false, error: { type: "verify-error" } }, 503);

@@ -8,6 +8,7 @@
  *    `staleReason` が `backfilling`({@link VERIFY_BACKFILL_POLL_MS}=5 秒)。通常の集計・柵(R2・最短間隔・1 日の上限)・エラーで止まっている準備中では張らない。`setInterval` は使わない
  *    (取得が長引いても重ならない)。{@link VERIFY_MAX_POLLS} 回で止める。**非表示の間は止め**、表示に戻ったら(補完中なら)即時に 1 回取って再開する。
  *    ポーリング中の通信の失敗は前の表示を残し、{@link MAX_FAILURES} 回続いたら止める。
+ *  - **閲覧者(Issue #263。`admin` が false)**: 取得・区分の切替・開閉は同じ。「更新」だけ何もしない(`refresh=1` を送らない。ボタンも出さない)。閲覧者の応答は `not-computed`・通常の `ready` で、補完中の自動更新は起きない。
  *  - 世代(`gen`)と取得の通し番号(`seq`): 離れる・開き直すたびに `gen` を、取得を始めるたびに `seq` を進め、**古い応答(離れる前・区分を替える前に出したもの)は反映しない**。
  */
 import { fetchVerify, verifyFetchFailureMessage, type VerifyOutcome, type VerifyVenue } from "./api-verify";
@@ -27,6 +28,11 @@ export interface VerifyScreenDeps {
   readonly fetch: FetchLike;
   readonly timers: { readonly set: (fn: () => void, ms: number) => unknown; readonly clear: (handle: unknown) => void };
   readonly isVisible: () => boolean;
+  /**
+   * 管理者か(Issue #263。`app.ts` が役割から渡す)。**閲覧者(false)の画面は、更新ボタンを出さず、`onRefresh` も何もしない**(`refresh=1` を送らない。サーバも閲覧者の `refresh` は無視する。
+   * 閲覧者は集計のやり直しを起こさず、費用の柵を消費しない)。追加指示の全文も管理者にだけ出す。
+   */
+  readonly admin: boolean;
   /** 画面の再描画の要求。 */
   readonly onChange: () => void;
 }
@@ -38,7 +44,7 @@ export interface VerifyScreen {
   leave(): void;
   /** 区分の切替。同じ区分・画面に居ないときは何もしない。 */
   onVenue(venue: VerifyVenue): void;
-  /** 「更新」。取得中は無視。 */
+  /** 「更新」。取得中は無視。閲覧者(`admin` が false)は何もしない。 */
   onRefresh(): void;
   /** 版別のキャリブレーションの開閉(Issue #220)。`open` は押したあとの状態。画面に居ないときは何もしない。取得は増えない。 */
   onVersionToggle(key: string, open: boolean): void;
@@ -126,7 +132,7 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
         failures = 0;
         pollStopped = false;
       } else if (mode === "first") {
-        load = { kind: "error", message: verifyFetchFailureMessage(result.error) };
+        load = { kind: "error", message: verifyFetchFailureMessage(result.error, deps.admin) };
       } else {
         failures += 1;
         if (failures >= MAX_FAILURES) pollStopped = true;
@@ -166,7 +172,7 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
   }
 
   function onRefresh(): void {
-    if (load === null || busy || load.kind === "loading") return;
+    if (!deps.admin || load === null || busy || load.kind === "loading") return;
     fetchOnce("first", true);
   }
 
@@ -203,7 +209,7 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
     onVersionToggle,
     onCalibrationTarget,
     onVisibilityChange,
-    model: () => buildVerifyModel({ load: load ?? { kind: "loading" }, venue, busy, pollStopped, expandedVersions: [...expandedVersions], calibrationTarget }),
+    model: () => buildVerifyModel({ load: load ?? { kind: "loading" }, venue, busy, pollStopped, expandedVersions: [...expandedVersions], calibrationTarget, admin: deps.admin }),
     pending: () => [...inflight],
   };
 }

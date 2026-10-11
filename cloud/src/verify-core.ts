@@ -15,6 +15,13 @@
  * 4. 再計算: `readAll`(7 文の batch)→ `buildVerifySource` → 3 区分の `computeVerifyReport`(`PRODUCTION_VERIFY_CONFIG` = exe の検証画面と同じ設定)と、プロンプト版別の比較(`computePromptVersionSummaries`。全体のみ・画面が使う項目だけ。D1 は追加で読まない。Issue #220)。
  *    読んだ行に NULL の行が混ざっていたら(確認と読みの間に保存された)、キャッシュせず `preparing`(集計は exe と一致するときだけ出す)。
  *
+ * ## 閲覧者の要求(`getViewerReport`。Issue #263)
+ * 閲覧者(友人)にも検証画面を見せるが、**閲覧者の要求は集計のやり直しを起こさない**。`getReport` とは別のメソッドにしてあり(`refresh` の引数も無い)、kv のキャッシュを読むだけ:
+ *  - 再計算しない(柵〈最短間隔・1 日の上限〉の記録 `runs` に触れない)。D1(透かし・補完待ち)も R2 も読まず、補完のアラームも張らない。だから閲覧者が何度開いても、管理者の再計算の枠を減らさない。
+ *  - キャッシュがあれば、古くてもそのまま返す(`computedAt` で時点が分かる。データが更新されたかは確かめないので `stale` は常に false〈偽らない〉)。使えるキャッシュが無ければ `not-computed`。
+ *  - **管理者向けの情報を落とす**: 診断は発走時刻の欠落(`startTimeGaps`。画面の注記に使う)だけ(D1 の読み取り行数・表ごとの行数・所要時間は出さない)。
+ *    版別比較の追加指示の全文は、設定の値で、分析の詳細の API も閲覧者には返さない(analysis-view.ts)ので、**あり/なしの別と数だけ**を残して全文を {@link VIEWER_REDACTED_INSTRUCTION} に置き換える。
+ *
  * ## 費用の柵(D1 の読み取り 500 万行/日)
  *  - 再計算は {@link VERIFY_MIN_INTERVAL_MS}(5 分)に 1 回まで、1 日(JST)に {@link VERIFY_DAILY_LIMIT} 回まで。キャッシュのヒット時の D1 の読みは、透かしと補完待ちの確認の 2 クエリだけ。
  *  - 数値の根拠は {@link VERIFY_DAILY_LIMIT} の JSDoc と `docs/current-spec.md` の「クラウド版の検証画面」(ローカルでの実測)。
@@ -190,6 +197,28 @@ export type VerifyResponse =
       readonly reason: "min-interval" | "daily-limit";
     };
 
+/** 閲覧者の応答で、追加指示の全文の代わりに入れる固定の文字列(Issue #263。『追加指示あり』の印。値に意味はなく、画面は『あり』としか表示しない)。 */
+export const VIEWER_REDACTED_INSTRUCTION = "(非公開)";
+
+/**
+ * 閲覧者の応答(Issue #263)。`ready` は管理者の応答と同じ形(画面の読み取りを共通にする)で、`stale`・`staleReason`・`nextRecomputeAt` は常に偽・null、
+ * `diag` は発走時刻の欠落だけ。`not-computed`: 使えるキャッシュがまだ無い(管理者が開いて集計するまで)。
+ */
+export type ViewerVerifyResponse =
+  | {
+      readonly status: "ready";
+      readonly venue: VerifyVenueFilter;
+      readonly report: VerifyReport;
+      /** 版別比較。追加指示の全文は {@link VIEWER_REDACTED_INSTRUCTION} に置き換えてある(なしは null のまま)。 */
+      readonly promptVersions: readonly PromptVersionSummary[];
+      readonly computedAt: string;
+      readonly stale: false;
+      readonly staleReason: null;
+      readonly nextRecomputeAt: null;
+      readonly diag: Pick<VerifyDiag, "startTimeGaps">;
+    }
+  | { readonly status: "not-computed" };
+
 export interface GetReportOptions {
   /** true なら、透かしが同じ・TTL 内でも再計算する(最短間隔・1 日の上限は守る)。 */
   readonly refresh?: boolean;
@@ -282,6 +311,28 @@ export class VerifyCore {
       return { status: "preparing", remaining: result.preparing, blocked: null, resumeAt: null };
     }
     return this.ready(result, venue, null, null);
+  }
+
+  /**
+   * 閲覧者の要求(Issue #263)。**集計のやり直しを起こさない**: kv のキャッシュを読むだけで、D1・R2・アラーム・柵の記録(`runs`)に触れない(クラス冒頭の説明)。
+   * 同期関数(await するものが無いこと自体が、store に触れないことの保証になる)。
+   */
+  getViewerReport(venue: VerifyVenueFilter): ViewerVerifyResponse {
+    const cache = this.readCache();
+    if (cache === null) {
+      return { status: "not-computed" };
+    }
+    return {
+      status: "ready",
+      venue,
+      report: cache.reports[venue],
+      promptVersions: cache.promptVersions.map((v) => ({ ...v, additionalInstructions: v.additionalInstructions.map((i) => (i === null ? null : VIEWER_REDACTED_INSTRUCTION)) })),
+      computedAt: new Date(cache.computedAt).toISOString(),
+      stale: false,
+      staleReason: null,
+      nextRecomputeAt: null,
+      diag: { startTimeGaps: cache.diag.startTimeGaps },
+    };
   }
 
   private readCache(): CacheEntry | null {

@@ -77,6 +77,9 @@ describe("生成物のドリフトと決定性", () => {
     // 24e3325 の生成物が 231,913(d99276a から +1,820)、それに #254 を載せた今の生成物が **235,792**(24e3325 から +3,879)で、235,000 を 792 バイト超えた。
     // 計り方: 各コミットの `cloud/src/client-bundle.generated.ts` を import して `Buffer.byteLength(CLIENT_JS)` を取った(今の値は `pnpm run build:client` の出力)。
     // 新しい上限 245,000 は今の大きさの約 3.9% 増(余裕は 9,208 バイト)。増えたのは日本語の文言(`\u` エスケープ)とロジックで、Plackett-Luce などの重い依存は入っていない。
+    // Issue #263: 上限は据え置き。閲覧者の検証画面(更新ボタンの出し分け・閲覧者の注記と『まだ集計されていません』の固定文言・追加指示の『あり/なし』の要約・`not-computed` の読み取り・
+    // 失敗の文言の閲覧者版)を足した増分は +2,773(235,792 → 238,565。計り方: f867ee9〈#254 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。
+    // 今の値は `pnpm run build:client` の出力。上限までの余裕は 6,435 バイト)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(245_000);
   });
@@ -517,21 +520,37 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     ["属性なし", null],
     ["未知の値", "root"],
     ["大文字の ADMIN(完全一致でない)", "ADMIN"],
-  ] as [string, string | null][])("Issue #238: data-role が %s のとき、一覧に「検証」「設定」の入口が出ない(日報は出る)", async (_label, role) => {
+  ] as [string, string | null][])("Issue #238: data-role が %s のとき、一覧に「設定」の入口が出ない(日報は出る。検証の入口は Issue #263 で閲覧者にも出す)", async (_label, role) => {
     const { root, calls } = run("", NOT_FOUND, role);
     await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
     const classes = linkClasses(root);
     expect(classes).toContain("report-link"); // 前提: 一覧が描画されている
-    expect(classes).not.toContain("verify-link");
+    expect(classes).toContain("verify-link");
     expect(classes).not.toContain("settings-link");
   });
 
-  it.each([["設定", "#settings"], ["検証", "#verify"], ["移行", "#migration"]])("Issue #238: 閲覧者が %s の画面(%s)を直接開いても、API を取らず「管理者だけが使えます」を出す(生成物の実行)", async (_label, hash) => {
+  it.each([["設定", "#settings"], ["移行", "#migration"]])("Issue #238: 閲覧者が %s の画面(%s)を直接開いても、API を取らず「管理者だけが使えます」を出す(生成物の実行)", async (_label, hash) => {
     const { root, calls } = run(hash, NOT_FOUND, "viewer");
     await until(() => root.children.some((c) => textOf(c).includes("管理者だけが使えます")));
     await settle();
     expect(root.children.some((c) => textOf(c).includes("管理者だけが使えます"))).toBe(true);
     expect(calls).toEqual([]);
+  });
+
+  it("Issue #263: 閲覧者が検証の画面(#verify)を開くと、GET /api/verify?venue=all を 1 回だけ取る(refresh は付けない)。「管理者だけが使えます」は出ず、更新ボタンが無い。管理者には更新ボタンがある(生成物の実行)", async () => {
+    const buttonClasses = (root: { children: (FakeElement | FakeText)[] }): string[] =>
+      root.children.flatMap(flat).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "button").map((n) => n.attrs.get("class") ?? "");
+    const viewer = run("#verify", NOT_FOUND, "viewer");
+    await until(() => viewer.calls.length >= 1 && viewer.root.children.some((c) => textOf(c).includes("検証")));
+    await settle();
+    expect(viewer.calls.map((c) => c.url)).toEqual(["/api/verify?venue=all"]);
+    expect(viewer.root.children.some((c) => textOf(c).includes("管理者だけが使えます"))).toBe(false);
+    expect(buttonClasses(viewer.root)).toContain("verify-venue"); // 前提: 検証の画面が描画されている
+    expect(buttonClasses(viewer.root)).not.toContain("refresh");
+    const admin = run("#verify", NOT_FOUND, "admin");
+    await until(() => admin.calls.length >= 1 && admin.root.children.some((c) => textOf(c).includes("検証")));
+    await settle();
+    expect(buttonClasses(admin.root)).toContain("refresh");
   });
 
   it("Issue #238: レース画面は、管理者には起動のボタンが 2 つ、閲覧者には 0 個(生成物の実行)", async () => {

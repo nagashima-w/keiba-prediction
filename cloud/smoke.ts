@@ -9,7 +9,7 @@
  *  A. 設定なし(secret が無い本番の初回デプロイ直後と同じ)→ すべて 403(JWT が付いていても)
  *  B. `[access.dev]` で ctx.access を注入し、secret 相当を --var で渡す(正しい構成)→ 200。ただし不正な JWT が付けば 403
  *  C. (Issue #238)B から ACCESS_ALLOWED_EMAIL だけを変える(ログインするアカウントは管理者でなくなる)→ **閲覧者として通る**(旧: 403)。
- *     閲覧者は読み取りの画面・API だけ(200)、管理者専用(設定・検証・移行・health・確認・POST のすべて)は 403(本文は admin-only の固定)。
+ *     閲覧者は読み取りの画面・API だけ(200。検証〈Issue #263〉は集計のやり直しを起こさず not-computed)、管理者専用(設定・移行・health・確認・POST のすべて)は 403(本文は admin-only の固定)。
  *  J. (Issue #238)ADMIN_USER を別の人に登録する → ACCESS_ALLOWED_EMAIL の人は(フォールバックせず)閲覧者。
  *  K. (Issue #238)ADMIN_USER に複数(大文字・空白つき)を登録し、ログインするアカウントがその 1 人 → 管理者(ACCESS_ALLOWED_EMAIL とは別でも)。
  *  L. (Issue #238)ADMIN_USER が不正な区切り(登録済みで有効 0 件)→ 管理者なし。ACCESS_ALLOWED_EMAIL の人も閲覧者(フォールバックしない)。
@@ -174,12 +174,19 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const reports = await req(port, "GET", "/api/reports");
   check(`${label}: GET /api/reports は 200(日報は閲覧できる)`, reports.status === 200 && parseJson(reports.text)["ok"] === true, `${reports.status} ${reports.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/verify?venue=all"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
   }
   check(`${label}: HEAD /api/plan は 403(表の外の method は管理者専用)`, (await req(port, "HEAD", "/api/plan?kaisai_date=20261008")).status === 403);
+  // Issue #263: 検証は閲覧者にも GET を開く。**閲覧者の要求は集計のやり直しを起こさない**: 使える集計がまだ無い状態(起動したばかりの空の保存先)では、`refresh=1` を付けても
+  // 集計せずに `not-computed`(管理者なら同じ状態で `ready` を返して集計する。expectAdmin の対照)。本物の DO(`VerifyReportDO.getViewerReport` の RPC)・D1 を通る。
+  for (const query of ["?venue=all", "?venue=central&refresh=1"]) {
+    const verify = await req(port, "GET", `/api/verify${query}`);
+    check(`${label}: GET /api/verify${query} は 200・not-computed(閲覧者は集計のやり直しを起こさない。refresh は無視)。管理者向けの情報(診断・設定)を含まない`, verify.status === 200 && verify.text === JSON.stringify({ ok: true, status: "not-computed" }), `${verify.status} ${verify.text.slice(0, 120)}`);
+  }
+  check(`${label}: GET /api/verify?venue=bad は 400(閲覧者にも入力の検証が効く)・HEAD と POST は 403(admin-only。GET だけ開く)`, (await req(port, "GET", "/api/verify?venue=bad")).status === 400 && (await req(port, "HEAD", "/api/verify")).status === 403 && (await req(port, "POST", "/api/verify")).status === 403);
 }
 
 /** Issue #238: ログインしているアカウントが**管理者**であることの確認。管理者専用の API が 200・POST は役割の関門を通って各ハンドラの守り(Origin)に届く。 */
@@ -193,6 +200,9 @@ async function expectAdmin(port: number, label: string, email: string): Promise<
   const migration = await req(port, "GET", "/api/migration");
   check(`${label}: GET /api/migration は 200(管理者だけ)`, migration.status === 200 && parseJson(migration.text)["ok"] === true, `${migration.status} ${migration.text.slice(0, 80)}`);
   check(`${label}: GET /api/verify?venue=bad は 400(役割の関門を通って、入力の検証に届く)・GET /check は 200`, (await req(port, "GET", "/api/verify?venue=bad")).status === 400 && (await req(port, "GET", "/check")).status === 200);
+  // Issue #263 の対照: 閲覧者は同じ状態(使える集計が無い)で not-computed だった。管理者は集計して ready を返す(本物の DO・D1。空の保存先なので集計対象は 0 件)。
+  const verifyAdmin = await req(port, "GET", "/api/verify?venue=all");
+  check(`${label}: GET /api/verify は ready(管理者は集計する。閲覧者の not-computed との対照)`, verifyAdmin.status === 200 && parseJson(verifyAdmin.text)["status"] === "ready", `${verifyAdmin.status} ${verifyAdmin.text.slice(0, 160)}`);
   const post = await req(port, "POST", "/api/analyses/run");
   check(`${label}: POST /api/analyses/run は(Origin が無いので)origin-mismatch の 403。admin-only ではない(役割の関門を通って、ハンドラの守りに届く)`, post.status === 403 && post.text !== ADMIN_ONLY_BODY && post.text.includes("origin-mismatch"), `${post.status} ${post.text.slice(0, 80)}`);
   const bulk = await req(port, "POST", "/api/analyses/run/bulk");

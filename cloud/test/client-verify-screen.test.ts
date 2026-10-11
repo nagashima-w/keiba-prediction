@@ -48,7 +48,7 @@ interface Harness {
   settle(): Promise<void>;
 }
 
-function harness(): Harness {
+function harness(admin = true): Harness {
   const timers = createFakeTimers();
   const urls: string[] = [];
   const h: Harness = {
@@ -82,6 +82,7 @@ function harness(): Harness {
     fetch: fetchLike,
     timers: { set: timers.set, clear: timers.clear },
     isVisible: () => h.visible,
+    admin,
     onChange: () => {
       h.changes += 1;
     },
@@ -412,5 +413,53 @@ describe("対応表の対象の切替(補正後〈AI〉/補正前〈統計〉。
     expect(h.changes).toBe(afterLeave);
     await open(h);
     expect(current(h)).toBe("adjusted");
+  });
+});
+
+describe("Issue #263: 閲覧者(admin: false)の検証画面の制御", () => {
+  it("開く・区分の切替は取る(refresh は付けない)。「更新」は何もしない(通信も再描画もしない)。モデルは更新ボタンを出さない", async () => {
+    const h = harness(false);
+    await open(h);
+    expect(h.urls).toEqual(["/api/verify?venue=all"]);
+    expect(h.screen.model().canRefresh).toBe(false);
+    expect(h.screen.model().bet).not.toBeNull(); // 前提(空振り防止): 集計が出ている
+    const changes = h.changes;
+    h.screen.onRefresh();
+    await h.settle();
+    expect(h.urls).toEqual(["/api/verify?venue=all"]);
+    expect(h.changes).toBe(changes);
+    h.screen.onVenue("nar");
+    await h.settle();
+    expect(h.urls).toEqual(["/api/verify?venue=all", "/api/verify?venue=nar"]);
+    // 対照: 管理者(既定)なら「更新」で refresh=1 が出る
+    const admin = harness();
+    await open(admin);
+    admin.screen.onRefresh();
+    await admin.settle();
+    expect(admin.urls).toEqual(["/api/verify?venue=all", "/api/verify?venue=all&refresh=1"]);
+    expect(admin.screen.model().canRefresh).toBe(true);
+  });
+
+  it("not-computed(集計がまだ無い)は自動で取り直さない(タイマーを張らない)。補完中ではないので、見えない間の再取得もしない", async () => {
+    const h = harness(false);
+    h.responses = [reply(200, { ok: true, status: "not-computed" })];
+    await open(h);
+    expect(h.screen.model().unavailable?.text).toContain("まだ集計されていません");
+    expect(h.timers.pending()).toBe(0);
+    await h.timers.advance(60_000);
+    await h.settle();
+    expect(h.urls).toEqual(["/api/verify?venue=all"]);
+  });
+
+  it("取得の失敗の文言は『更新』を案内しない(再読み込みを案内する)。管理者には従来の文言", async () => {
+    const viewer = harness(false);
+    viewer.responses = [reply(503, { ok: false, error: { type: "verify-error" } })];
+    await open(viewer);
+    expect(viewer.screen.model().error).not.toBeNull();
+    expect(viewer.screen.model().error).not.toContain("「更新」");
+    const admin = harness();
+    admin.responses = [reply(503, { ok: false, error: { type: "verify-error" } })];
+    await open(admin);
+    expect(admin.screen.model().error).toContain("「更新」");
   });
 });

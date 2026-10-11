@@ -618,3 +618,147 @@ describe("runBackfillTick(アラーム: 発走時刻の補完を少しずつ)", 
     expect(alarms.at(-1)).toBe(clock.now);
   });
 });
+
+describe("Issue #263: getViewerReport(閲覧者の要求。集計のやり直しを起こさず、D1・R2・アラームに触れない)", () => {
+  /** 管理者の要求で集計を 1 回作り、store の呼び出し記録を空にした状態。 */
+  async function withCache(options: VerifyCoreOptions = {}, rows: VerifyReadRows = DEFAULT_ROWS) {
+    const env = setup(options);
+    env.store.state.rows = rows;
+    const first = await env.core.getReport("all");
+    if (first.status !== "ready") throw new Error("前提: 管理者の最初の要求で集計ができているはず");
+    env.store.calls.length = 0;
+    env.alarms.length = 0;
+    return { ...env, first };
+  }
+
+  it("キャッシュがあれば ready で返す(区分ごとの報告・版別比較・集計の時刻)。D1 も R2 もアラームも使わず、再計算の記録(runs)も増えない", async () => {
+    const { core, store, kv, alarms, first } = await withCache();
+    const runsBefore = JSON.stringify(kv.get("runs"));
+    expect(runsBefore).toBeDefined(); // 前提: 管理者の再計算の記録がある(比べる相手が undefined でない)
+    // 管理者の応答(区分ごと)を先に取る(キャッシュのヒットで D1 の確認クエリを発行するので、閲覧者の区間とは分ける)
+    const adminByVenue = {
+      all: first,
+      central: await core.getReport("central"),
+      nar: await core.getReport("nar"),
+    };
+    store.calls.length = 0;
+    alarms.length = 0;
+    for (const venue of ["all", "central", "nar"] as const) {
+      const res = core.getViewerReport(venue);
+      const admin = adminByVenue[venue];
+      if (res.status !== "ready" || admin.status !== "ready") throw new Error("ready のはず");
+      expect(res.venue).toBe(venue);
+      expect(res.report).toEqual(admin.report);
+      expect(res.promptVersions.length).toBeGreaterThan(0); // 前提: 版別比較が空でない(下の比較が自明にならない)
+      expect(res.promptVersions.map((v) => v.includedAnalysisCount)).toEqual(admin.promptVersions.map((v) => v.includedAnalysisCount));
+      expect(res.computedAt).toBe(admin.computedAt);
+    }
+    // 前提(空振り防止): 区分で報告が違う(全体 2・中央 1・地方 1)ので、区分を取り違えると上の toEqual が落ちる
+    const central = core.getViewerReport("central");
+    const all = core.getViewerReport("all");
+    expect(central.status === "ready" && all.status === "ready" && [all.report.includedAnalysisCount, central.report.includedAnalysisCount]).toEqual([2, 1]);
+    expect(store.calls).toEqual([]);
+    expect(alarms).toEqual([]);
+    expect(JSON.stringify(kv.get("runs"))).toBe(runsBefore);
+  });
+
+  it("古いキャッシュ(TTL 超過・透かしが変わった・最短間隔の外・上限の内 = 管理者なら再計算する状況)でも、そのまま返す。stale にも偽らない。再計算しない", async () => {
+    const { core, store, kv, clock, first } = await withCache();
+    clock.now += 3 * 60 * 60_000; // TTL(1 時間)を大きく超える
+    store.state.watermark = { ...store.state.watermark, analyses: 99 };
+    const runsBefore = JSON.stringify(kv.get("runs"));
+    const cacheBefore = JSON.stringify(kv.get("cache"));
+    const res = core.getViewerReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(res.computedAt).toBe(first.status === "ready" ? first.computedAt : "");
+    expect(res.computedAt).toBe(new Date(T0).toISOString()); // 古い集計の時刻のまま
+    expect(res.stale).toBe(false);
+    expect(store.calls).toEqual([]); // 透かしも読まない(D1 に触れない)
+    expect(JSON.stringify(kv.get("runs"))).toBe(runsBefore);
+    expect(JSON.stringify(kv.get("cache"))).toBe(cacheBefore);
+    // 対照(空振り防止): 同じ状態で管理者の要求なら再計算する(=閲覧者の要求がやり直しを起こさないことに意味がある状況だった)
+    await core.getReport("all");
+    expect(store.calls.filter((c) => c === "readAll")).toHaveLength(1);
+    expect(JSON.stringify(kv.get("runs"))).not.toBe(runsBefore);
+  });
+
+  it("キャッシュがまったく無ければ not-computed。再計算しない(管理者なら計算する状況)。D1・R2・アラームに触れず、runs・cache を作らない", async () => {
+    const { core, store, kv, alarms } = setup();
+    store.state.pending = [pendingRow(1)]; // 補完待ちがあっても、閲覧者はアラームを張らない
+    for (const venue of ["all", "central", "nar"] as const) {
+      expect(core.getViewerReport(venue)).toEqual({ status: "not-computed" });
+    }
+    expect(store.calls).toEqual([]);
+    expect(alarms).toEqual([]);
+    expect(kv.get("runs")).toBeUndefined();
+    expect(kv.get("cache")).toBeUndefined();
+    // 対照(空振り防止): 補完待ちを外して管理者の要求なら計算する
+    store.state.pending = [];
+    const admin = await core.getReport("all");
+    expect(admin.status).toBe("ready");
+  });
+
+  it("形式の版が違う(使えない)キャッシュは無いものとして not-computed。古い形式の中身を閲覧者に出さない", async () => {
+    const { core, kv } = await withCache();
+    const cache = kv.get<Record<string, unknown>>("cache")!;
+    kv.put("cache", { ...cache, v: 2 });
+    expect(core.getViewerReport("all")).toEqual({ status: "not-computed" });
+    // 対照: 版を戻せば返る
+    kv.put("cache", cache);
+    expect(core.getViewerReport("all").status).toBe("ready");
+  });
+
+  it("閲覧者がどれだけ要求しても、費用の柵(1 日の上限・最短間隔)を消費しない: 後からの管理者の再計算が、上限の手前なら通る", async () => {
+    // 1 日の上限 2 回。管理者が 1 回計算したあと、閲覧者が 50 回要求し(新しいデータがある状況)、その後の管理者の再計算が(最短間隔の後に)通る
+    const { core, store, kv, clock } = await withCache({ dailyLimit: 2 });
+    for (let i = 0; i < 50; i += 1) {
+      clock.now += 60_000;
+      store.state.watermark = { ...store.state.watermark, analyses: 10 + i };
+      core.getViewerReport((["all", "central", "nar"] as const)[i % 3]!);
+    }
+    expect(kv.get<{ count: number }>("runs")?.count).toBe(1); // 柵の記録は管理者の 1 回だけ
+    expect(store.calls).toEqual([]);
+    const admin = await core.getReport("all");
+    expect(admin.status === "ready" && admin.stale).toBe(false);
+    expect(admin.status === "ready" && admin.computedAt).toBe(new Date(clock.now).toISOString()); // 再計算された(上限で止められていない)
+    expect(kv.get<{ count: number }>("runs")?.count).toBe(2);
+  });
+
+  it("閲覧者に見せる応答は、画面が使う項目だけ: 診断は発走時刻の欠落(startTimeGaps)だけで、D1 の読み取り行数・表ごとの行数・所要時間を含まない", async () => {
+    const { core } = await withCache();
+    const res = core.getViewerReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(Object.keys(res).sort()).toEqual(["computedAt", "diag", "nextRecomputeAt", "promptVersions", "report", "stale", "staleReason", "status", "venue"]);
+    expect(res.stale).toBe(false);
+    expect(res.staleReason).toBeNull();
+    expect(res.nextRecomputeAt).toBeNull();
+    expect(Object.keys(res.diag)).toEqual(["startTimeGaps"]);
+    expect(res.diag.startTimeGaps).toEqual({ lost: 0, affecting: 0 });
+    const text = JSON.stringify(res);
+    for (const forbidden of ["rowsRead", "counts", "readMs", "computeMs", "promptVersionsMs"]) {
+      expect(text, forbidden).not.toContain(forbidden);
+    }
+    // 対照(空振り防止): 管理者の応答には診断の細目がある
+    const admin = await core.getReport("all");
+    expect(JSON.stringify(admin)).toContain("rowsRead");
+  });
+
+  it("追加指示の全文(設定の値。分析の詳細の API も閲覧者には返さない)は、閲覧者の応答に含めない。版ごとの『あり/なし』の別と数は残す", async () => {
+    const SECRET = "SECRET-逃げ馬を重視せよ";
+    const rows = rowsOf([analysisRow(1, CENTRAL, { promptVersion: "v1", additionalInstruction: null }), analysisRow(2, NAR, { kaisaiDate: null, promptVersion: "v2", additionalInstruction: SECRET }), analysisRow(3, "202606030812", { promptVersion: "v2", additionalInstruction: null })]);
+    const { core } = await withCache({}, rows);
+    const admin = await core.getReport("all");
+    if (admin.status !== "ready") throw new Error("ready のはず");
+    // 前提: 管理者の応答には全文がある(下の not.toContain が自明にならない)
+    expect(admin.promptVersions[1]!.additionalInstructions).toEqual([SECRET, null]);
+    const res = core.getViewerReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(JSON.stringify(res)).not.toContain("SECRET");
+    expect(JSON.stringify(res)).not.toContain("逃げ馬");
+    // 構造は同じ(あり=非 null・なし=null の別と順序・数)
+    expect(res.promptVersions.map((v) => v.additionalInstructions.map((i) => i === null))).toEqual(admin.promptVersions.map((v) => v.additionalInstructions.map((i) => i === null)));
+    expect(res.promptVersions[1]!.additionalInstructions).toHaveLength(2);
+    // ほかの項目は変えない
+    expect(res.promptVersions.map((v) => ({ ...v, additionalInstructions: [] }))).toEqual(admin.promptVersions.map((v) => ({ ...v, additionalInstructions: [] })));
+  });
+});

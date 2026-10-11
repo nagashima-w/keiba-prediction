@@ -304,8 +304,8 @@ describe("見出しの要約(summarizeGroup。レース単位)", () => {
   });
 });
 
-describe("Issue #238: 閲覧者(readOnly)の一覧: 検証・設定への入口を出さない(日報への入口は残す)", () => {
-  it("管理者(既定)は 3 つの入口のリンク先を持つ。readOnly は検証・設定が null で、日報は残る。一覧そのもの(場・レース)は同じ", () => {
+describe("Issue #238: 閲覧者(readOnly)の一覧: 設定への入口を出さない(日報への入口は残す。検証への入口は Issue #263 で閲覧者にも出す)", () => {
+  it("管理者(既定)は 3 つの入口のリンク先を持つ。readOnly は設定だけが null で、検証(Issue #263)と日報は残る。一覧そのもの(場・レース)は同じ", () => {
     const races = [race("202603020211")];
     const admin = buildListModel(input({ list: { kind: "ready", races } }));
     expect(admin.settingsHref).toBe("#settings");
@@ -313,7 +313,7 @@ describe("Issue #238: 閲覧者(readOnly)の一覧: 検証・設定への入口�
     expect(admin.reportHref).toBe("#report");
     const viewer = buildListModel(input({ list: { kind: "ready", races }, readOnly: true }));
     expect(viewer.settingsHref).toBeNull();
-    expect(viewer.verifyHref).toBeNull();
+    expect(viewer.verifyHref).toBe("#verify");
     expect(viewer.reportHref).toBe("#report");
     expect(viewer.groups).toEqual(admin.groups);
     expect(viewer.groups).toHaveLength(1);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { handle, type Env } from "../src/handler";
-import type { VerifyResponse } from "../src/verify-core";
+import type { ViewerVerifyResponse, VerifyResponse } from "../src/verify-core";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
@@ -21,6 +21,18 @@ const READY: VerifyResponse = {
   diag: { rowsRead: 10, counts: {}, readMs: 1, computeMs: 2, promptVersionsMs: 1, startTimeGaps: { lost: 0, affecting: 0 } },
 };
 
+const VIEWER_READY: ViewerVerifyResponse = {
+  status: "ready",
+  venue: "all",
+  report: { includedAnalysisCount: 3 } as never,
+  promptVersions: [],
+  computedAt: "2026-10-10T03:00:00.000Z",
+  stale: false,
+  staleReason: null,
+  nextRecomputeAt: null,
+  diag: { startTimeGaps: { lost: 0, affecting: 0 } },
+};
+
 const NOT_CALLED = (): never => {
   throw new Error("呼ばれない想定");
 };
@@ -28,7 +40,10 @@ const NOT_CALLED = (): never => {
 interface Harness {
   readonly names: string[];
   readonly calls: Array<{ venue: string; refresh: boolean | undefined }>;
+  /** 閲覧者の要求(Issue #263)で呼ばれた DO の getViewerReport。 */
+  readonly viewerCalls: Array<{ venue: string; args: unknown[] }>;
   response: VerifyResponse;
+  viewerResponse: ViewerVerifyResponse;
   fails: boolean;
   env(withBinding?: boolean): Env;
 }
@@ -37,7 +52,9 @@ function harness(): Harness {
   const h: Harness = {
     names: [],
     calls: [],
+    viewerCalls: [],
     response: READY,
+    viewerResponse: VIEWER_READY,
     fails: false,
     env: (withBinding = true) => ({
       ...GOOD_ENV,
@@ -57,6 +74,11 @@ function harness(): Harness {
                   h.calls.push({ venue, refresh: options?.refresh });
                   if (h.fails) throw new Error("DO の詳細 SECRET-DO");
                   return h.response;
+                },
+                getViewerReport: async (venue: string, ...args: unknown[]) => {
+                  h.viewerCalls.push({ venue, args });
+                  if (h.fails) throw new Error("DO の詳細 SECRET-DO");
+                  return h.viewerResponse;
                 },
               }),
             },
@@ -173,5 +195,98 @@ describe("GET /api/verify: 検証の集計", () => {
       expect(res.status, method).toBe(405);
     }
     expect(h.names).toEqual([]);
+  });
+});
+
+describe("Issue #263: 閲覧者の GET /api/verify(集計のやり直しを起こさない)", () => {
+  async function setupRoles() {
+    const key = await makeKey("k1");
+    const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
+    return { deps, admin: await signToken(key), viewer: await signToken(key, { email: "friend@example.com" }) };
+  }
+
+  it("管理者は従来どおり getReport(refresh を渡す)。閲覧者用の getViewerReport は呼ばない", async () => {
+    const { deps, admin } = await setupRoles();
+    const h = harness();
+    const res = await handle(get(admin, "?venue=nar&refresh=1"), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    expect(h.calls).toEqual([{ venue: "nar", refresh: true }]);
+    expect(h.viewerCalls).toEqual([]);
+  });
+
+  it.each(["all", "central", "nar"])("閲覧者(venue=%s)は getViewerReport(区分だけ)を呼ぶ。getReport(集計のやり直しを起こしうる経路)は呼ばない", async (venue) => {
+    const { deps, viewer } = await setupRoles();
+    const h = harness();
+    const res = await handle(get(viewer, `?venue=${venue}`), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, ...VIEWER_READY });
+    expect(h.names).toEqual(["main"]);
+    expect(h.viewerCalls).toEqual([{ venue, args: [] }]); // 区分だけを渡す(refresh の指定は DO に渡らない)
+    expect(h.calls).toEqual([]);
+  });
+
+  it.each(["?refresh=1", "?venue=central&refresh=1", "?refresh=0"])("閲覧者の refresh は無視する(%s)。getReport は呼ばれず、getViewerReport に refresh は渡らない。応答は 200", async (query) => {
+    const { deps, viewer } = await setupRoles();
+    const h = harness();
+    const res = await handle(get(viewer, query), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    expect(h.calls).toEqual([]);
+    expect(h.viewerCalls).toHaveLength(1);
+    expect(h.viewerCalls[0]!.args).toEqual([]);
+  });
+
+  it("閲覧者でも入力の検証は同じ(不正な区分・refresh の値・未知のパラメータ・重複は 400。DO に触れない)。役割をクエリで名乗れない(role=admin は未知のパラメータで 400)", async () => {
+    const { deps, viewer } = await setupRoles();
+    for (const query of ["?venue=both", "?refresh=yes", "?venue=all&x=1", "?refresh=1&refresh=1", "?role=admin", "?admin=1"]) {
+      const h = harness();
+      const res = await handle(get(viewer, query), h.env(), {}, deps);
+      expect(res.status, query).toBe(400);
+      expect(h.names, query).toEqual([]);
+    }
+  });
+
+  it("集計がまだ無い(not-computed)も、そのまま返す(status で区別する)", async () => {
+    const { deps, viewer } = await setupRoles();
+    const h = harness();
+    h.viewerResponse = { status: "not-computed" };
+    const res = await handle(get(viewer), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, status: "not-computed" });
+  });
+
+  it("別サイトからの要求は 403(DO に触れない)・DO の失敗と binding なしは 503(固定の種類名だけ)・GET 以外の method は管理者専用の 403(DO に触れない)", async () => {
+    const { deps, viewer } = await setupRoles();
+    const cross = harness();
+    expect((await handle(get(viewer, "", "GET", { "Sec-Fetch-Site": "cross-site" }), cross.env(), {}, deps)).status).toBe(403);
+    expect(cross.names).toEqual([]);
+
+    const failing = harness();
+    failing.fails = true;
+    const failed = await handle(get(viewer), failing.env(), {}, deps);
+    expect(failed.status).toBe(503);
+    const text = await failed.text();
+    expect(JSON.parse(text)).toEqual({ ok: false, error: { type: "verify-error" } });
+    expect(text).not.toContain("SECRET-DO");
+
+    const noBinding = await handle(get(viewer), harness().env(false), {}, deps);
+    expect(noBinding.status).toBe(503);
+
+    const methods = harness();
+    for (const method of ["HEAD", "POST", "PUT", "DELETE"]) {
+      const res = await handle(get(viewer, "", method, { Origin: ORIGIN }), methods.env(), {}, deps);
+      expect(res.status, method).toBe(403);
+      expect(await res.text(), method).toBe(JSON.stringify({ ok: false, error: { type: "admin-only" } }));
+    }
+    expect(methods.names).toEqual([]);
+  });
+
+  it("役割は認証の結果だけで決まる: 管理者が登録されていて(ADMIN_USER)そこに載らないアカウントも、閲覧者として getViewerReport を通る", async () => {
+    const { deps, admin } = await setupRoles();
+    const h = harness();
+    const env = { ...h.env(), ADMIN_USER: "someone-else@example.com" } as Env;
+    const res = await handle(get(admin, "?refresh=1"), env, {}, deps); // admin のトークン(EMAIL)は ADMIN_USER に無い → 閲覧者
+    expect(res.status).toBe(200);
+    expect(h.calls).toEqual([]);
+    expect(h.viewerCalls).toHaveLength(1);
   });
 });

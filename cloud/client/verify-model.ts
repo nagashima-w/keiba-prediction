@@ -49,6 +49,11 @@ export interface VerifyModelInput {
   readonly expandedVersions: readonly string[];
   /** 対応表の対象(補正後・補正前の切替。Issue #254)。 */
   readonly calibrationTarget: CalibrationTarget;
+  /**
+   * 管理者か(Issue #263)。**false(閲覧者)のとき**: 更新ボタンを出さない(`canRefresh` が false)・集計が「管理者が更新したときの内容」であることを注記する・
+   * 追加指示の全文を出さない(版別は『あり/なし』だけ。サーバも全文を落とすが、画面でも出さない)。必須(省略で管理者の画面になる向きには倒さない)。
+   */
+  readonly admin: boolean;
 }
 
 export type Tone = "info" | "ok" | "error" | "wait";
@@ -176,6 +181,8 @@ export interface VerifyModel {
   readonly backHref: "#";
   readonly venueTabs: readonly { readonly venue: VerifyVenue; readonly label: string; readonly current: boolean }[];
   readonly loading: boolean;
+  /** 「更新」ボタンを出すか(管理者だけ。Issue #263)。 */
+  readonly canRefresh: boolean;
   readonly refreshDisabled: boolean;
   readonly error: string | null;
   readonly pollNotice: string | null;
@@ -198,6 +205,12 @@ export interface VerifyModel {
 }
 
 const POLL_STOPPED_NOTICE = "自動更新を止めました。「更新」で取り直せます。";
+/** 閲覧者には「更新」ボタンが無い(Issue #263)。 */
+const VIEWER_POLL_STOPPED_NOTICE = "自動更新を止めました。ページを再読み込みしてください。";
+/** 閲覧者の集計の注記(Issue #263)。閲覧者の要求は集計のやり直しを起こさないので、表示は管理者が更新したときの内容。データの更新に追いついているかは確かめない。 */
+const VIEWER_NOTICE = "閲覧用の画面です。この集計は管理者が更新したときの内容で、その後に増えた分析や結果は反映されていないことがあります(集計時点は上に表示しています)。";
+/** 閲覧者に、使える集計がまだ無いとき(Issue #263)。 */
+const NOT_COMPUTED_NOTICE = "まだ集計されていません。管理者が検証画面を開いて集計すると、ここに表示されます。";
 
 /** 回収率の表示(Issue #254・#255 からの申し送り)。丸めると 100.0% になる値を 100.0% と出さない(`formatRecoveryPercent`〈#245〉。ちょうど 1 だけが 100.0%)。null は "-"。実複勝率などの `formatRate` とは別。 */
 function recoveryText(rate: number | null): string {
@@ -325,32 +338,43 @@ export function versionKey(promptVersion: string | null): string {
 
 const UNKNOWN_VERSION_NOTE = "「版不明」は版記録導入前の旧データと、APIキー未設定で実行したLLM未使用の分析の両方を含みます(区別できません)。";
 
-function versionCard(v: PromptVersionView, expandedKeys: ReadonlySet<string>): VersionCard {
+/**
+ * 閲覧者向けの追加指示の要約(Issue #263)。**全文は出さない**(設定の値。分析の詳細の API も閲覧者には返さない)。非 null は『あり』(複数の種類があれば『あり(N種類)』)、null は『なし』。
+ * 並びは管理者の要約と同じ(あり → なし)。入力の中身(文字列)は見ない=サーバが全文を返してしまっても、ここで出さない。
+ */
+export function viewerInstructionsSummary(instructions: readonly (string | null)[]): string {
+  const given = instructions.filter((i) => i !== null).length;
+  const parts = [...(given === 0 ? [] : [given === 1 ? "あり" : `あり(${given}種類)`]), ...(instructions.some((i) => i === null) || given === 0 ? ["なし"] : [])];
+  return parts.join(" / ");
+}
+
+function versionCard(v: PromptVersionView, expandedKeys: ReadonlySet<string>, admin: boolean): VersionCard {
   const key = versionKey(v.promptVersion);
   const expanded = expandedKeys.has(key);
+  const summary = admin ? additionalInstructionsSummary(v.additionalInstructions) : viewerInstructionsSummary(v.additionalInstructions);
   return {
     key,
     title: promptVersionLabel(v.promptVersion),
-    instructions: `追加指示: ${additionalInstructionsSummary(v.additionalInstructions)}`,
+    instructions: `追加指示: ${summary}`,
     included: `集計件数 ${v.includedAnalysisCount}件`,
     tiles: tiles(v.bet.betCount, v.bet.totalStake, v.bet.totalReturn, v.bet.recoveryRate),
     expanded,
     toggleLabel: expanded ? "キャリブレーションを閉じる" : "キャリブレーションを表示",
-    calibrationHeading: expanded ? promptVersionCalibrationHeading(v.promptVersion, v.additionalInstructions) : null,
-    fullInstructions: expanded ? `追加指示(全文): ${additionalInstructionsFullText(v.additionalInstructions)}` : null,
+    calibrationHeading: expanded ? (admin ? promptVersionCalibrationHeading(v.promptVersion, v.additionalInstructions) : `${promptVersionLabel(v.promptVersion)} (追加指示: ${summary})`) : null,
+    fullInstructions: expanded && admin ? `追加指示(全文): ${additionalInstructionsFullText(v.additionalInstructions)}` : null,
     calibrationEmpty: expanded && v.calibration.length === 0 ? "データがありません。" : null,
     calibrationRows: expanded ? calibrationRows(v.calibration) : [],
   };
 }
 
-function versionsSection(versions: readonly PromptVersionView[], expandedVersions: readonly string[]): VersionsSection {
+function versionsSection(versions: readonly PromptVersionView[], expandedVersions: readonly string[], admin: boolean): VersionsSection {
   const expandedKeys = new Set(expandedVersions);
   return {
     heading: "プロンプト版別比較",
     description: "プロンプトの版ごとの累積回収率とキャリブレーション。版別は全体の集計です(上の区分の切替には連動しません)。同じ版でも追加指示が違えば別条件です。",
     unknownNote: versions.some((v) => v.promptVersion === null) ? UNKNOWN_VERSION_NOTE : null,
     empty: versions.length === 0 ? "集計対象がありません。" : null,
-    cards: versions.map((v) => versionCard(v, expandedKeys)),
+    cards: versions.map((v) => versionCard(v, expandedKeys, admin)),
   };
 }
 
@@ -441,6 +465,9 @@ function gapNotice(gaps: { readonly lost: number; readonly affecting: number }):
 }
 
 function unavailableNotice(outcome: Exclude<VerifyOutcome, { kind: "ready" }>): VerifyNotice {
+  if (outcome.kind === "not-computed") {
+    return { tone: "info", text: NOT_COMPUTED_NOTICE };
+  }
   if (outcome.kind === "throttled") {
     // 柵の種類で文言を変える(Issue #254。最短間隔のときに『1 日の上限』と出さない)。
     if (outcome.reason === "min-interval") {
@@ -463,6 +490,7 @@ export function buildVerifyModel(input: VerifyModelInput): VerifyModel {
   const ready = outcome !== null && outcome.kind === "ready" ? outcome : null;
   const notices: VerifyNotice[] = [];
   if (ready !== null) {
+    if (!input.admin) notices.push({ tone: "info", text: VIEWER_NOTICE });
     const stale = staleNotice(ready);
     if (stale !== null) notices.push(stale);
     const gap = gapNotice(ready.startTimeGaps);
@@ -473,15 +501,16 @@ export function buildVerifyModel(input: VerifyModelInput): VerifyModel {
     backHref: "#",
     venueTabs: (["all", "central", "nar"] as const).map((venue) => ({ venue, label: venueLabel(venue), current: venue === input.venue })),
     loading: load.kind === "loading" || input.busy,
+    canRefresh: input.admin,
     refreshDisabled: load.kind === "loading" || input.busy,
     error: load.kind === "error" ? load.message : null,
-    pollNotice: input.pollStopped ? POLL_STOPPED_NOTICE : null,
+    pollNotice: input.pollStopped ? (input.admin ? POLL_STOPPED_NOTICE : VIEWER_POLL_STOPPED_NOTICE) : null,
     unavailable: outcome !== null && outcome.kind !== "ready" ? unavailableNotice(outcome) : null,
     computedAt: ready === null ? null : jst(ready.computedAt),
     notices,
     bet: ready === null ? null : betSection(ready.report),
     proposed: ready === null ? null : proposedSection(ready.report),
-    versions: ready === null ? null : versionsSection(ready.promptVersions, input.expandedVersions),
+    versions: ready === null ? null : versionsSection(ready.promptVersions, input.expandedVersions, input.admin),
     direction: ready === null ? null : directionSection(ready.report),
     calibration: ready === null ? null : calibrationSection(ready.report, input.calibrationTarget),
     marks: ready === null ? null : marksSection(ready.report),

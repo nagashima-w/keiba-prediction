@@ -9,7 +9,7 @@
  */
 import { DurableObject } from "cloudflare:workers";
 import { parseLimitOverride } from "./migration-core";
-import { VerifyCore, VERIFY_DAILY_LIMIT, VERIFY_MIN_INTERVAL_MS, type GetReportOptions, type VerifyResponse } from "./verify-core";
+import { VerifyCore, VERIFY_DAILY_LIMIT, VERIFY_MIN_INTERVAL_MS, type GetReportOptions, type VerifyResponse, type ViewerVerifyResponse } from "./verify-core";
 import { D1VerifyStore, type VerifyBucket, type VerifyDb } from "./verify-store";
 import type { VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
 
@@ -46,6 +46,14 @@ export class VerifyReportDO extends DurableObject<VerifyReportEnv> {
   /** 検証の集計(RPC)。キャッシュ・費用の柵・発走時刻の補完の確認を含む。呼ぶのは Worker の `GET /api/verify` だけ。 */
   getReport(venue: VerifyVenueFilter, options?: GetReportOptions): Promise<VerifyResponse> {
     return this.core.getReport(venue, options);
+  }
+
+  /**
+   * 閲覧者向けの集計(RPC。Issue #263)。**キャッシュを読むだけ**で、集計のやり直し・D1・R2・アラームを起こさない(`VerifyCore.getViewerReport`)。呼ぶのは Worker の `GET /api/verify` の、閲覧者の要求だけ。
+   * 管理者向けの情報(診断の細目・追加指示の全文)は落としてある。
+   */
+  getViewerReport(venue: VerifyVenueFilter): ViewerVerifyResponse {
+    return this.core.getViewerReport(venue);
   }
 
   /** アラーム: 発走時刻の補完を 1 tick 進める(例外は握る: 失敗は状態に記録され、退避の間隔で再試行される)。 */

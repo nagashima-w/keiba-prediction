@@ -78,6 +78,7 @@ const ROUTES: readonly { readonly sample: string; readonly viewer: readonly stri
   { sample: "/api/analyses/123", viewer: ["GET"] },
   { sample: "/api/reports", viewer: ["GET"] },
   { sample: "/api/reports/20261010", viewer: ["GET"] },
+  { sample: "/api/verify", viewer: ["GET"] }, // Issue #263: 検証は閲覧者にも GET を開く(集計のやり直しは起こさない)
   // アイコン 7 本(Issue #244)。閲覧者にも GET・HEAD を開く
   { sample: "/favicon.ico", viewer: ["GET", "HEAD"] },
   { sample: "/apple-touch-icon.png", viewer: ["GET", "HEAD"] },
@@ -97,7 +98,6 @@ const ROUTES: readonly { readonly sample: string; readonly viewer: readonly stri
   { sample: "/api/migration", viewer: [] },
   { sample: "/api/migration/upload", viewer: [] },
   { sample: "/api/reports/run", viewer: [] },
-  { sample: "/api/verify", viewer: [] },
 ];
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 
@@ -116,10 +116,10 @@ async function call(env: Env, deps: Parameters<typeof handle>[3], req: Request):
 describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-only。裏側にもリクエスト本文にも触れない", () => {
   const cases = ROUTES.flatMap((r) => METHODS.filter((m) => !r.viewer.includes(m)).map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者が管理者専用に当たる組は 143 通り(28 ルート × 6 method = 168 から、閲覧者に許す 25 を引く)", () => {
+  it("前提: 閲覧者が管理者専用に当たる組は 142 通り(28 ルート × 6 method = 168 から、閲覧者に許す 26 を引く)", () => {
     expect(ROUTES).toHaveLength(28);
-    expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(25);
-    expect(cases).toHaveLength(143);
+    expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(26);
+    expect(cases).toHaveLength(142);
   });
 
   it.each(cases)("%s %s → 403(本文は admin-only の固定)。バインディングに触れず、本文を読まない", async (method, path) => {
@@ -152,8 +152,8 @@ describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-onl
 describe("閲覧者(viewer): 許された (path, method) は関門を通る(管理者専用の 403 にならない)", () => {
   const allowed = ROUTES.flatMap((r) => r.viewer.map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者に許す組は 25 通り(画面と API の 11 + アイコン 7 本の GET・HEAD で 14)", () => {
-    expect(allowed).toHaveLength(25);
+  it("前提: 閲覧者に許す組は 26 通り(画面と API の 12 + アイコン 7 本の GET・HEAD で 14)", () => {
+    expect(allowed).toHaveLength(26);
   });
 
   it.each(allowed)("%s %s → 管理者専用の 403 ではない", async (method, path) => {

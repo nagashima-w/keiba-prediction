@@ -8,11 +8,12 @@
  * **表に無い (method, path) は管理者専用に倒れる(fail-closed)**。新しいルートを足して表に書き忘れても、閲覧者に開く方向には倒れない。
  * 表との突き合わせ(`test/route-policy.test.ts`)は、handler.ts の `pathname` の比較を走査し、表に無いルートが増えたら落とす。
  *
- * 閲覧者に開くもの(16 ルート):
+ * 閲覧者に開くもの(17 ルート):
  *   画面 `GET|HEAD /`・`GET|HEAD /app.js`、一覧 `GET /api/races`(netkeiba への取得を起こしうるが、キャッシュと gate が効く)、
  *   `GET /api/plan`、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、
+ *   `GET /api/verify`(検証。Issue #263。閲覧者の要求は集計のやり直しを起こさない〈キャッシュを返すだけ〉、`refresh` は管理者だけ)、
  *   アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244。{@link ICON_PATHS}。表に無いと閲覧者の画面でアイコンが 403 になる)。
- * それ以外(設定・検証・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・確認ページと確認 API・health)は管理者だけ。
+ * それ以外(設定・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・確認ページと確認 API・health)は管理者だけ。
  * 閲覧者が表の外の method(HEAD・POST など)を送ったときは、405 ではなく 403 になる(副作用の有無に関わらず管理者専用)。
  */
 import { ICON_PATHS } from "./icons";
@@ -68,6 +69,9 @@ export const ROUTE_RULES: readonly RouteRule[] = [
     matches: (pathname) => pathname !== "/api/reports/run" && pathname.startsWith(REPORTS_PREFIX),
     viewerMethods: GET,
   },
+  // 検証(Issue #263)。D1 の集計の読み取りだけで LLM も netkeiba も使わない。**閲覧者の要求は集計のやり直しを起こさない**(handler.ts の `handleVerify` が役割で DO のメソッドを分け、
+  // 閲覧者はキャッシュを読むだけの `getViewerReport`。`refresh` は管理者だけ)。柵(最短 5 分・1 日 20 回)を閲覧者が消費しない。GET だけ(HEAD は管理者専用)
+  exact("/api/verify", GET),
   // アイコン(Issue #244)。handler.ts は `iconAsset(pathname)` で配る。パスの一覧は icons.ts と共有する(ここに直書きしない)
   ...ICON_PATHS.map((iconPath) => exact(iconPath, PAGE)),
   // ---- 管理者だけ(method を問わない) ----
@@ -83,7 +87,6 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/migration", ADMIN_ONLY),
   exact("/api/migration/upload", ADMIN_ONLY),
   exact("/api/reports/run", ADMIN_ONLY), // 日報の手動作成(LLM を呼ぶ)
-  exact("/api/verify", ADMIN_ONLY),
 ];
 
 /**

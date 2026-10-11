@@ -26,7 +26,7 @@ interface Expected {
 
 /** ルート × 役割の最終表(手書き)。閲覧者に許すのは GET(と、画面の `/`・`/app.js`・アイコン 7 本〈Issue #244〉の HEAD)だけ。 */
 const EXPECTED: readonly Expected[] = [
-  // ---- 閲覧者にも許す(16。画面と API が 9、アイコン〈Issue #244〉が 7) ----
+  // ---- 閲覧者にも許す(17。画面と API が 10、アイコン〈Issue #244〉が 7) ----
   { name: "/", sample: "/", viewer: ["GET", "HEAD"] },
   { name: "/app.js", sample: "/app.js", viewer: ["GET", "HEAD"] },
   { name: "/api/races", sample: "/api/races", viewer: ["GET"] },
@@ -36,6 +36,8 @@ const EXPECTED: readonly Expected[] = [
   { name: "/api/analyses/{id}", sample: "/api/analyses/123", viewer: ["GET"] },
   { name: "/api/reports", sample: "/api/reports", viewer: ["GET"] },
   { name: "/api/reports/{date}", sample: "/api/reports/20261010", viewer: ["GET"] },
+  // 検証(Issue #263)。閲覧者の GET は**集計のやり直しを起こさない**(キャッシュを返すだけ。handler.ts・verify-core.ts)。`refresh` は管理者だけが受け付ける
+  { name: "/api/verify", sample: "/api/verify", viewer: ["GET"] },
   // アイコン(Issue #244。タブの favicon・見出しの画像・apple-touch-icon。読み取りだけの静的な画像なので、閲覧者にも開く)
   { name: "/favicon.ico", sample: "/favicon.ico", viewer: ["GET", "HEAD"] },
   { name: "/apple-touch-icon.png", sample: "/apple-touch-icon.png", viewer: ["GET", "HEAD"] },
@@ -44,7 +46,7 @@ const EXPECTED: readonly Expected[] = [
   { name: "/icons/header-32.png", sample: "/icons/header-32.png", viewer: ["GET", "HEAD"] },
   { name: "/icons/header-64.png", sample: "/icons/header-64.png", viewer: ["GET", "HEAD"] },
   { name: "/icons/header-96.png", sample: "/icons/header-96.png", viewer: ["GET", "HEAD"] },
-  // ---- 管理者だけ(12)。method を問わず ----
+  // ---- 管理者だけ(11)。method を問わず ----
   { name: "/check", sample: "/check", viewer: [] },
   { name: "/api/health", sample: "/api/health", viewer: [] },
   { name: "/api/netkeiba/check", sample: "/api/netkeiba/check", viewer: [] },
@@ -56,16 +58,15 @@ const EXPECTED: readonly Expected[] = [
   { name: "/api/migration", sample: "/api/migration", viewer: [] },
   { name: "/api/migration/upload", sample: "/api/migration/upload", viewer: [] },
   { name: "/api/reports/run", sample: "/api/reports/run", viewer: [] },
-  { name: "/api/verify", sample: "/api/verify", viewer: [] },
 ];
 
 describe("ルート × 役割の表(手書きの期待値と、実装の requiredRole を全 method で突き合わせる)", () => {
-  it("前提: 表は 28 ルート(閲覧者に開くもの 16・管理者だけ 12)で、閲覧者に開く method の組は 25 通り(GET が 16・HEAD が 9)", () => {
+  it("前提: 表は 28 ルート(閲覧者に開くもの 17・管理者だけ 11)で、閲覧者に開く method の組は 26 通り(GET が 17・HEAD が 9)", () => {
     expect(EXPECTED).toHaveLength(28);
-    expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(16);
-    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(12);
-    expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(25);
-    expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(16);
+    expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(17);
+    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(11);
+    expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(26);
+    expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(17);
     expect(EXPECTED.filter((e) => e.viewer.includes("HEAD"))).toHaveLength(9);
     expect(ROUTE_RULES).toHaveLength(EXPECTED.length);
     expect(ROUTE_RULES.map((r) => r.path).sort()).toEqual(EXPECTED.map((e) => e.name).sort());
@@ -76,10 +77,10 @@ describe("ルート × 役割の表(手書きの期待値と、実装の require
     expect(requiredRole(method, sample)).toBe(expected);
   });
 
-  it("method の組み合わせの数: 28 ルート × 7 method = 196 通りのうち、閲覧者でよいのは 25 通りだけ", () => {
+  it("method の組み合わせの数: 28 ルート × 7 method = 196 通りのうち、閲覧者でよいのは 26 通りだけ", () => {
     expect(cases).toHaveLength(196);
-    expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(25);
-    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(171);
+    expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(26);
+    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(170);
   });
 
   it("リクエストの method が小文字などの未知の表記でも、閲覧者に開かない(完全一致の大文字だけを認める)", () => {
@@ -96,6 +97,7 @@ describe("表に無い path は管理者専用(fail-closed。新しいルート�
     expect(requiredRole("GET", "/api/analyses/1")).toBe("viewer");
     for (const iconPath of ICON_PATHS) expect(requiredRole("GET", iconPath), iconPath).toBe("viewer"); // アイコン 7 本(Issue #246: 下の /icons/x の行が、これらの完全一致だけを開けていることを確かめる前提)
     expect(requiredRole("GET", "/api/reports/20261010")).toBe("viewer");
+    expect(requiredRole("GET", "/api/verify")).toBe("viewer"); // Issue #263
   });
 
   it.each([

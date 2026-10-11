@@ -4,7 +4,7 @@ import { fetchVerify, MARKS, parseVerifyResponse, PROPOSED_BET_TYPES, verifyFetc
 import { handle, type Env } from "../src/handler";
 import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-response.js";
 import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
-import type { VerifyResponse } from "../src/verify-core";
+import { VerifyCore, type VerifyKv, type VerifyResponse, type VerifyStorePort } from "../src/verify-core";
 import { buildVerifySource, type VerifyAnalysisRow, type VerifyReadRows } from "../src/verify-read";
 import { computePromptVersionSummaries } from "../src/verify-versions";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
@@ -94,6 +94,9 @@ async function connect(): Promise<Connected> {
           state.calls.push({ venue, refresh: options?.refresh });
           if (state.fails) throw new Error("DO の秘密");
           return state.response;
+        },
+        getViewerReport: async () => {
+          throw new Error("管理者の要求では呼ばれない想定");
         },
       }),
     },
@@ -207,6 +210,87 @@ describe("GET /api/verify の契約", () => {
   });
 });
 
+describe("Issue #263: 閲覧者の応答の契約(本物の VerifyCore.getViewerReport → 本物の handle() → クライアントの結果)", () => {
+  /** 本物の VerifyCore(偽の D1・R2・時計)。管理者の要求で集計を 1 回作っておくか(`computed`)、まだ作らない。 */
+  async function viewerSetup(computed: boolean) {
+    const data = new Map<string, unknown>();
+    const kv: VerifyKv = { get: <T,>(key: string) => data.get(key) as T | undefined, put: (key, value) => void data.set(key, JSON.parse(JSON.stringify(value))) };
+    const analysis = (id: number, raceId: string, promptVersion: string, additionalInstruction: string | null): VerifyAnalysisRow => ({
+      id, raceId, analyzedAt: "2026-07-05T05:00:00.000Z", evEstimated: 0, promptVersion, additionalInstruction, kaisaiDate: "20260705",
+      model: null, rawResponse: null, raceSnapshotJson: null, historyCutoffDate: "20260705", promptLookaheadGuarded: 1, startTime: "15:45",
+    });
+    const analyses = [analysis(1, "202606030811", "v1", null), analysis(2, "202606030812", "v2", "SECRET-逃げ馬を重視")];
+    const rows: VerifyReadRows = {
+      analyses,
+      horses: analyses.map((a) => ({ analysisId: a.id, umaban: 1, prior: 0.5, adjusted_prob: 0.5, place_odds_min: 2, ev: 1.2, is_positive: 1, contributions_json: null, mark: "◎", reason: null, highlights_json: null, concerns_json: null })),
+      allocationMeta: [], bets: [],
+      results: analyses.map((a) => ({ raceId: a.raceId, umaban: 1, finishPosition: 1, placePayout: 300, winPayout: null })),
+      comboPayouts: [], comboImports: [],
+    };
+    const storeCalls: string[] = [];
+    const store: VerifyStorePort = {
+      readWatermark: async () => (storeCalls.push("watermark"), { analyses: 2, results: 2, comboPayouts: null, comboImports: null }),
+      listPending: async () => (storeCalls.push("listPending"), { rows: [], total: 0 }),
+      readUsage: async () => ({ classA: 0, classB: 0 }),
+      resolveStartTimes: async () => ({ resolved: [], missing: [], failed: [], gets: 0 }),
+      commitStartTimes: async () => 0,
+      readAll: async () => (storeCalls.push("readAll"), { rows, rowsRead: 4321, counts: {} as never }),
+    };
+    const core = new VerifyCore({ kv, now: () => Date.parse("2026-10-10T03:00:00.000Z"), setAlarm: () => {}, getAlarm: async () => null, store });
+    if (computed) await core.getReport("all");
+    storeCalls.length = 0;
+    const key = await makeKey("k1");
+    const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
+    const token = await signToken(key, { email: "friend@example.com" }); // 管理者(GOOD_ENV の ACCESS_ALLOWED_EMAIL)ではないアカウント = 閲覧者
+    const adminCalls: string[] = [];
+    const env: Env = {
+      ...GOOD_ENV,
+      NETKEIBA_GATE: { idFromName: NOT_CALLED, get: NOT_CALLED },
+      RACE_DAY: { idFromName: NOT_CALLED, get: NOT_CALLED },
+      DB: {} as unknown as Env["DB"],
+      ANALYSIS_DETAIL: {} as unknown as Env["ANALYSIS_DETAIL"],
+      VERIFY_REPORT: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          getReport: async (venue, options) => {
+            adminCalls.push(`${venue} ${String(options?.refresh)}`);
+            return core.getReport(venue, options);
+          },
+          getViewerReport: async (venue) => core.getViewerReport(venue),
+        }),
+      },
+    };
+    const fetchLike: FetchLike = async (url, init) => {
+      const headers = new Headers(init.headers);
+      headers.set("Cf-Access-Jwt-Assertion", token);
+      headers.set("Sec-Fetch-Site", "same-origin");
+      const response = await handle(new Request(`${ORIGIN}${url}`, { method: init.method, headers }), env, {}, deps);
+      return { status: response.status, json: () => response.json() };
+    };
+    return { fetch: fetchLike, adminCalls, storeCalls };
+  }
+
+  it("集計がある: 閲覧者の要求(refresh を付けても)は管理者用の getReport に届かず、D1 にも触れない。ready として読め、stale でなく、追加指示の全文はクライアントの結果にも入らない", async () => {
+    const s = await viewerSetup(true);
+    const result = await fetchVerify(s.fetch, "central", true);
+    if (!result.ok || result.outcome.kind !== "ready") throw new Error("ready のはず");
+    expect(s.adminCalls).toEqual([]);
+    expect(s.storeCalls).toEqual([]);
+    expect(result.outcome).toMatchObject({ venue: "central", computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 } });
+    expect(result.outcome.report.includedAnalysisCount).toBe(2); // 前提(空振り防止): 集計に入っている
+    expect(result.outcome.promptVersions.map((v) => v.additionalInstructions)).toEqual([[null], ["(非公開)"]]);
+    expect(JSON.stringify(result.outcome)).not.toContain("SECRET");
+    expect(JSON.stringify(result.outcome)).not.toContain("rowsRead");
+  });
+
+  it("集計がまだ無い: not-computed として読める(集計は起こさない)", async () => {
+    const s = await viewerSetup(false);
+    expect(await fetchVerify(s.fetch, "all", true)).toEqual({ ok: true, outcome: { kind: "not-computed" } });
+    expect(s.adminCalls).toEqual([]);
+    expect(s.storeCalls).toEqual([]);
+  });
+});
+
 describe("parseVerifyResponse(応答を信用しない)", () => {
   const ready = (): Record<string, unknown> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as object) });
 
@@ -295,6 +379,19 @@ describe("parseVerifyResponse(応答を信用しない)", () => {
     expect(parseVerifyResponse("ready")).toBeNull();
   });
 
+  it("Issue #263: not-computed(閲覧者に、集計がまだ無い)は読める。ok が true でなければ null", () => {
+    expect(parseVerifyResponse({ ok: true, status: "not-computed" })).toEqual({ kind: "not-computed" });
+    expect(parseVerifyResponse({ ok: false, status: "not-computed" })).toBeNull();
+  });
+
+  it("Issue #263: 閲覧者の ready(診断は発走時刻の欠落だけ)も読める。欠落(startTimeGaps)が無ければ null", () => {
+    const body = ready();
+    body["diag"] = { startTimeGaps: { lost: 1, affecting: 0 } };
+    expect(parseVerifyResponse(body)).toMatchObject({ kind: "ready", startTimeGaps: { lost: 1, affecting: 0 } });
+    body["diag"] = {};
+    expect(parseVerifyResponse(body)).toBeNull();
+  });
+
   it("版別が 0 件(分析が無い)でも読める", () => {
     const body = ready();
     body["promptVersions"] = [];
@@ -323,5 +420,16 @@ describe("fetchVerify の失敗の分類", () => {
       expect(verifyFetchFailureMessage(failure).length).toBeGreaterThan(10);
     }
     expect(verifyFetchFailureMessage({ kind: "unexpected", httpStatus: 418 })).toContain("418");
+  });
+  it("Issue #263: 閲覧者(更新ボタンが無い)向けの文言は『更新』を案内しない(再読み込みを案内する)。管理者向け(既定)は従来どおり", () => {
+    const failures = [{ kind: "forbidden" }, { kind: "origin-mismatch" }, { kind: "network" }, { kind: "server-error" }, { kind: "bad-request" }, { kind: "not-found" }, { kind: "unexpected", httpStatus: 418 }] as const;
+    const adminMessages = failures.map((f) => verifyFetchFailureMessage(f));
+    expect(adminMessages.filter((m) => m.includes("「更新」"))).toHaveLength(5); // 前提(空振り防止): 管理者向けには『更新』の案内がある(network・server-error・bad-request・not-found・unexpected の 5 つ。forbidden・origin-mismatch は再読み込みのみ)
+    for (const failure of failures) {
+      const viewerMessage = verifyFetchFailureMessage(failure, false);
+      expect(viewerMessage, failure.kind).not.toContain("「更新」");
+      expect(viewerMessage.length, failure.kind).toBeGreaterThan(10);
+    }
+    expect(verifyFetchFailureMessage({ kind: "server-error" }, false)).toContain("再読み込み");
   });
 });

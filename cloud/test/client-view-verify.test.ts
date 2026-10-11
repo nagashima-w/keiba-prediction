@@ -40,7 +40,7 @@ const REPORT: VerifyReportView = {
   },
 };
 const READY: VerifyOutcome = { kind: "ready", venue: "all", report: REPORT, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 5, affecting: 2 } };
-const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: READY }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", ...over });
+const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: READY }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, ...over });
 const tree = (over: Partial<VerifyModelInput> = {}, actions: ViewActions = noopActions): VNode => renderScreen(buildVerifyModel(input(over)), actions);
 
 describe("検証画面の VNode", () => {
@@ -266,6 +266,47 @@ describe("検証画面の VNode", () => {
   });
 });
 
+describe("Issue #263: 閲覧者の検証画面の VNode", () => {
+  it("更新ボタン(.refresh)が無い。一覧へ戻るリンク・区分の切替・対応表の切替・版別の開閉は残る。管理者には更新ボタンがある(対照)", () => {
+    expect(byClass(tree(), "refresh")).toHaveLength(1); // 前提(空振り防止): 管理者には更新ボタンがある
+    const t = tree({ admin: false });
+    expect(byClass(t, "refresh")).toHaveLength(0);
+    expect(findAll(t, (n) => n.tag === "button" && textOf(n).includes("更新"))).toEqual([]);
+    expect(byClass(t, "back")).toHaveLength(1);
+    expect(byClass(t, "verify-venue")).toHaveLength(3);
+    expect(byClass(t, "verify-target")).toHaveLength(2);
+    expect(byClass(t, "verify-version-toggle").length).toBeGreaterThan(0);
+    // 区分の切替・対応表の切替は押せる(閲覧用の操作)
+    const venues: string[] = [];
+    const targets: string[] = [];
+    const t2 = tree({ admin: false }, { ...noopActions, onVerifyVenue: (v) => venues.push(v), onVerifyCalibrationTarget: (x) => targets.push(x) });
+    byClass(t2, "verify-venue")[1]!.on?.click?.();
+    byClass(t2, "verify-target")[1]!.on?.click?.();
+    expect(venues).toEqual(["central"]);
+    expect(targets).toEqual(["prior"]);
+  });
+
+  it("集計がまだ無い(not-computed): 『まだ集計されていません』を出し、集計の節は出さない。更新ボタンも無い。許可リストの範囲で組める", () => {
+    const t = tree({ admin: false, load: { kind: "ready", outcome: { kind: "not-computed" } } });
+    expect(textOf(t)).toContain("まだ集計されていません");
+    expect(byClass(t, "refresh")).toHaveLength(0);
+    expect(byClass(t, "verify-tiles")).toHaveLength(0);
+    expect(() => mountAll(t)).not.toThrow();
+    expect(() => mountAll(tree({ admin: false }))).not.toThrow();
+  });
+
+  it("集計時点と『管理者が更新したときの内容』の注記が文字で出る。追加指示の全文は出ない(版別カードは『あり/なし』)", () => {
+    const keys = buildVerifyModel(input({ admin: false })).versions?.cards.map((c) => c.key) ?? [];
+    const t = tree({ admin: false, expandedVersions: keys });
+    const text = textOf(t);
+    expect(text).toContain("集計時点: 2026-10-10 12:00(JST)");
+    expect(text).toContain("管理者が更新したときの内容");
+    expect(text).toContain("追加指示: あり / なし");
+    expect(text).not.toContain("逃げ馬");
+    expect(text).not.toContain("追加指示(全文)");
+  });
+});
+
 describe("一覧の入口", () => {
   it("一覧のモデルに検証画面へのリンク先(#verify)があり、一覧の画面に『検証』のリンクが出る(設定のリンクの前)", () => {
     const model = buildListModel({ route: { date: "20261010", venue: "central", race: null, analysis: null, settings: false }, list: { kind: "loading" }, board: { kind: "none" } });
@@ -273,5 +314,14 @@ describe("一覧の入口", () => {
     const t = renderScreen(model, noopActions);
     const links = findAll(t, (n) => n.tag === "a" && (n.attrs?.["class"] === "verify-link" || n.attrs?.["class"] === "settings-link"));
     expect(links.map((n) => [n.attrs?.["class"], n.attrs?.["href"], textOf(n)])).toEqual([["verify-link", "#verify", "検証"], ["settings-link", "#settings", "設定"]]);
+  });
+
+  it("Issue #263: 閲覧者(readOnly)の一覧にも『検証』の入口が出る(#verify)。設定の入口は出ない", () => {
+    const model = buildListModel({ route: { date: "20261010", venue: "central", race: null, analysis: null, settings: false }, list: { kind: "loading" }, board: { kind: "none" }, readOnly: true });
+    expect(model.verifyHref).toBe("#verify");
+    expect(model.settingsHref).toBeNull();
+    const t = renderScreen(model, noopActions);
+    const links = findAll(t, (n) => n.tag === "a" && (n.attrs?.["class"] === "verify-link" || n.attrs?.["class"] === "settings-link"));
+    expect(links.map((n) => [n.attrs?.["class"], n.attrs?.["href"], textOf(n)])).toEqual([["verify-link", "#verify", "検証"]]);
   });
 });

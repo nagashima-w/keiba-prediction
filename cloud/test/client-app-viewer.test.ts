@@ -6,12 +6,13 @@ import type { VNode } from "../client/vnode";
 import { requiredRole } from "../src/route-policy";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { createFakeTimers } from "./client-fakes";
+import { calibrationFixture, priorCalibrationFixture, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /**
  * Issue #238: 閲覧者(viewer)の画面。ボタンを隠すのは補助で、拒否はサーバ側だが、**画面が管理者専用の API を叩いて 403 を出さない**ことを固定する。
  *  - **不変条件**: 閲覧者が開ける画面(と、そこで押せるすべての操作)が出す要求は、サーバの表(`route-policy.ts` の `requiredRole`)で viewer に足りるものだけ。
  *    表をクライアントのテストに直接つなぐので、画面が管理者専用の API を読む変更を足すと、ここで落ちる。
- *  - 設定・検証・移行の画面を直接(`#settings` など)開いた閲覧者には、API を取らずに固定文言「管理者だけが使えます」を出す。
+ *  - 設定・移行の画面を直接(`#settings` など)開いた閲覧者には、API を取らずに固定文言「管理者だけが使えます」を出す(検証は Issue #263 で閲覧者にも開いた。下の専用の describe)。
  *  - 対照として、管理者は同じ操作で入口・ボタンが出る(隠す条件が逆でも気づけるように、毎回、管理者側の存在を無条件に確かめる)。
  * 今日は 2026-06-28(JST)。
  */
@@ -28,6 +29,21 @@ function findAll(node: VNode | string, pred: (n: VNode) => boolean): VNode[] {
 }
 const textOf = (node: VNode | string): string => (typeof node === "string" ? node : (node.children ?? []).map(textOf).join(" "));
 const byClass = (tree: VNode, cls: string): VNode[] => findAll(tree, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes(cls));
+
+const SUMMARY = { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, unjudgedCount: 0 };
+const VERIFY_REPORT = {
+  includedAnalysisCount: 3, excludedAnalysisCount: 0, supersededAnalysisCount: 0, excludedEstimatedCount: 0, excludedLookaheadSuspectCount: 0, excludedLookaheadUnknownCount: 0,
+  bet: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, actualPayoutCount: 1, approximatePayoutCount: 0 },
+  calibration: calibrationFixture(), priorCalibration: priorCalibrationFixture(), trend: trendFixture(),
+  proposedBet: {
+    population: { allocated: 1, skipped: 0, unreached: 0, noRecord: 0 },
+    overall: SUMMARY, place: SUMMARY, win: SUMMARY, wide: SUMMARY, trio: SUMMARY, quinella: SUMMARY, exacta: SUMMARY, trifecta: SUMMARY, bracketQuinella: SUMMARY,
+    unknownBetType: { count: 0, totalStake: 0, betTypes: [] },
+  },
+};
+/** 閲覧者向けの検証の応答(サーバの `getViewerReport` と同じ形: 診断は発走時刻の欠落だけ・stale は偽)。 */
+const VIEWER_VERIFY_READY = { ok: true, status: "ready", venue: "all", report: VERIFY_REPORT, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } };
+let verifyResponse: Record<string, unknown> = VIEWER_VERIFY_READY;
 
 /** 配分が unset(総資金・1レース上限が未設定。cloud の既定値なので、ほぼ全件がこの状態)の分析。 */
 const ANALYSIS_5 = {
@@ -62,6 +78,7 @@ function respond(method: string, url: string): Resp {
   if (method === "GET" && path === "/api/reports") return ok({ ok: true, reports: [] });
   if (method === "GET" && /^\/api\/reports\/\d{8}$/.test(path)) return ok({ ok: true, job_status: "ok", report: null, job: null });
   if (method === "GET" && path === "/api/settings") return ok({ ok: true, settings: DEFAULT_CLOUD_SETTINGS, source: "d1" });
+  if (method === "GET" && path === "/api/verify") return ok({ ...verifyResponse, venue: new URL(url, "https://x.invalid").searchParams.get("venue") ?? "all" });
   return ok({ ok: true });
 }
 
@@ -132,15 +149,15 @@ describe("不変条件: 閲覧者の画面が出す要求は、サーバの表�
     }
   });
 
-  it("前提(検出が空振りでない): 閲覧者が開ける 7 つの画面は実際に要求を出し、管理者専用の画面を管理者が開くと admin の要求が出る(= この検査は admin の要求を検出できる)", async () => {
-    const viewable = SCREENS.filter(([, hash]) => !["#settings", "#verify", "#migration"].includes(hash));
-    expect(viewable).toHaveLength(7);
+  it("前提(検出が空振りでない): 閲覧者が開ける 8 つの画面〈検証を含む。Issue #263〉は実際に要求を出し、管理者専用の画面を管理者が開くと admin の要求が出る(= この検査は admin の要求を検出できる)", async () => {
+    const viewable = SCREENS.filter(([, hash]) => !["#settings", "#migration"].includes(hash));
+    expect(viewable).toHaveLength(8);
     for (const [name, hash] of viewable) {
       const h = harness("viewer", hash);
       await exercise(h);
       expect(h.calls.length, name).toBeGreaterThan(0);
     }
-    for (const hash of ["#settings", "#verify", "#migration"]) {
+    for (const hash of ["#settings", "#migration"]) {
       const admin = harness("admin", hash);
       await exercise(admin);
       expect(admin.calls.some((c) => requiredRole(c.method, c.url.split("?")[0]!) === "admin"), hash).toBe(true);
@@ -157,8 +174,8 @@ describe("不変条件: 閲覧者の画面が出す要求は、サーバの表�
   });
 });
 
-describe("設定・検証・移行の画面を直接開いた閲覧者: API を取らず、固定文言で案内する", () => {
-  it.each([["設定", "#settings"], ["検証", "#verify"], ["移行", "#migration"]])("%s(%s): 要求が 0 件で、「管理者だけが使えます」と、一覧へ戻るリンクが出る", async (_name, hash) => {
+describe("設定・移行の画面を直接開いた閲覧者: API を取らず、固定文言で案内する(検証は Issue #263 で閲覧者にも開いた)", () => {
+  it.each([["設定", "#settings"], ["移行", "#migration"]])("%s(%s): 要求が 0 件で、「管理者だけが使えます」と、一覧へ戻るリンクが出る", async (_name, hash) => {
     const viewer = harness("viewer", hash);
     viewer.app.start();
     await viewer.app.whenIdle();
@@ -179,7 +196,7 @@ describe("設定・検証・移行の画面を直接開いた閲覧者: API を�
 });
 
 describe("閲覧者の画面から、管理者の入口・ボタンが消える(管理者には出る)", () => {
-  it("一覧: 「検証」「設定」のリンクが無い。「日報」のリンクは残る。管理者には 3 つとも出る", async () => {
+  it("一覧: 「設定」のリンクが無い。「検証」(Issue #263)と「日報」のリンクは残る。管理者には 3 つとも出る", async () => {
     const admin = harness("admin", `#date=${DATE}&venue=central`);
     admin.app.start();
     await admin.app.whenIdle();
@@ -189,7 +206,8 @@ describe("閲覧者の画面から、管理者の入口・ボタンが消える(
     const viewer = harness("viewer", `#date=${DATE}&venue=central`);
     viewer.app.start();
     await viewer.app.whenIdle();
-    expect(byClass(viewer.tree(), "verify-link")).toHaveLength(0);
+    expect(byClass(viewer.tree(), "verify-link")).toHaveLength(1);
+    expect(byClass(viewer.tree(), "verify-link")[0]!.attrs?.["href"]).toBe("#verify");
     expect(byClass(viewer.tree(), "settings-link")).toHaveLength(0);
     expect(byClass(viewer.tree(), "report-link")).toHaveLength(1);
     // 一覧そのもの(レースの行)は閲覧者にも出る
@@ -231,7 +249,7 @@ describe("閲覧者の画面から、管理者の入口・ボタンが消える(
     h.app.start();
     await h.app.whenIdle();
     expect(byClass(h.tree(), "settings-link")).toHaveLength(0);
-    expect(byClass(h.tree(), "verify-link")).toHaveLength(0);
+    expect(byClass(h.tree(), "verify-link")).toHaveLength(1); // 検証は閲覧者にも開いている(Issue #263)
     const direct = harness("root" as never, "#settings");
     direct.app.start();
     await direct.app.whenIdle();
@@ -257,5 +275,53 @@ describe("閲覧者の画面に、設定・ボタンへの案内の文が残ら�
     expect(textOf(viewer.tree())).toContain("配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です。");
     expect(textOf(viewer.tree())).not.toContain(SETTINGS_GUIDE);
     expect(textOf(viewer.tree())).not.toContain("入れられます");
+  });
+});
+
+describe("Issue #263: 閲覧者の検証画面(更新ボタンが無く、集計のやり直しを求めない)", () => {
+  it("閲覧者が #verify を開くと GET /api/verify?venue=all を 1 回だけ取り、集計が出る。「管理者だけが使えます」は出ない。更新ボタンが無い", async () => {
+    verifyResponse = VIEWER_VERIFY_READY;
+    const viewer = harness("viewer", "#verify");
+    viewer.app.start();
+    await viewer.app.whenIdle();
+    expect(viewer.calls).toEqual([{ method: "GET", url: "/api/verify?venue=all" }]);
+    expect(textOf(viewer.tree())).not.toContain("管理者だけが使えます");
+    expect(textOf(viewer.tree())).toContain("累積回収率");
+    expect(textOf(viewer.tree())).toContain("管理者が更新したときの内容");
+    expect(byClass(viewer.tree(), "refresh")).toHaveLength(0);
+    expect(byClass(viewer.tree(), "back")).toHaveLength(1);
+    // 対照(空振り防止): 管理者には更新ボタンがある
+    const admin = harness("admin", "#verify");
+    admin.app.start();
+    await admin.app.whenIdle();
+    expect(byClass(admin.tree(), "refresh")).toHaveLength(1);
+  });
+
+  it("押せるボタンをすべて押しても(区分・対応表・版別の開閉)、閲覧者は refresh=1 を送らない。区分の切替は取り直す。管理者は更新で refresh=1 を送る(対照)", async () => {
+    verifyResponse = VIEWER_VERIFY_READY;
+    const viewer = harness("viewer", "#verify");
+    await exercise(viewer);
+    expect(viewer.calls.length).toBeGreaterThan(1); // 前提(空振り防止): 区分の切替などで取り直している
+    expect(viewer.calls.every((c) => c.method === "GET" && c.url.startsWith("/api/verify?venue="))).toBe(true);
+    expect(viewer.calls.some((c) => c.url.includes("refresh"))).toBe(false);
+    const admin = harness("admin", "#verify");
+    await exercise(admin);
+    expect(admin.calls.some((c) => c.url.includes("refresh=1"))).toBe(true);
+  });
+
+  it("集計がまだ無い(not-computed)なら『まだ集計されていません』。更新ボタンは無く、自動で取り直さない", async () => {
+    verifyResponse = { ok: true, status: "not-computed" };
+    try {
+      const viewer = harness("viewer", "#verify");
+      viewer.app.start();
+      await viewer.app.whenIdle();
+      expect(textOf(viewer.tree())).toContain("まだ集計されていません");
+      expect(byClass(viewer.tree(), "refresh")).toHaveLength(0);
+      await viewer.timers.advance(10 * 60_000);
+      await viewer.app.whenIdle();
+      expect(viewer.calls).toEqual([{ method: "GET", url: "/api/verify?venue=all" }]);
+    } finally {
+      verifyResponse = VIEWER_VERIFY_READY;
+    }
   });
 });

@@ -43,7 +43,7 @@ const ready = (over: Partial<Extract<VerifyOutcome, { kind: "ready" }>> = {}, r:
   kind: "ready", venue: "all", report: r, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 }, ...over,
 });
 
-const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: ready() }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", ...over });
+const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: ready() }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, ...over });
 
 describe("整形(exe と同じ)", () => {
   it("率は小数第 1 位のパーセント(null は -)、金額は 3 桁区切りの円", () => {
@@ -581,5 +581,72 @@ describe("累積回収率の丸め(Issue #254・#255 からの申し送り)", ()
 
   it("実複勝率・的中率は従来どおり formatRate(exe と同じ。丸めて 100.0% になる値もそのまま)", () => {
     expect(formatRate(0.99996)).toBe("100.0%");
+  });
+});
+
+describe("Issue #263: 閲覧者(admin: false)の検証画面のモデル", () => {
+  const viewer = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => input({ admin: false, ...over });
+
+  it("更新ボタンを出さない(canRefresh が false)。管理者(既定)は出す。集計の中身(タイル・対応表など)は管理者と同じ", () => {
+    expect(buildVerifyModel(input()).canRefresh).toBe(true);
+    const m = buildVerifyModel(viewer());
+    expect(m.canRefresh).toBe(false);
+    const admin = buildVerifyModel(input());
+    expect(admin.bet).not.toBeNull(); // 前提(空振り防止): 集計がある
+    expect(m.bet).toEqual(admin.bet);
+    expect(m.proposed).toEqual(admin.proposed);
+    expect(m.calibration).toEqual(admin.calibration);
+    expect(m.direction).toEqual(admin.direction);
+    expect(m.marks).toEqual(admin.marks);
+    expect(m.computedAt).toBe(admin.computedAt);
+    expect(m.venueTabs).toEqual(admin.venueTabs);
+  });
+
+  it("集計時点を出し、『管理者が更新したときの内容』であることを注記する(管理者には出さない)。古いとは言わない(stale でない)", () => {
+    const m = buildVerifyModel(viewer());
+    expect(m.computedAt).toBe("2026-10-10 12:00(JST)");
+    const notice = m.notices.find((n) => n.text.includes("管理者が更新したときの内容"));
+    expect(notice?.tone).toBe("info");
+    expect(buildVerifyModel(input()).notices.some((n) => n.text.includes("管理者が更新した"))).toBe(false);
+    // 集計が出ていないとき(取得中・失敗)は注記を出さない(集計時点が無いので)
+    expect(buildVerifyModel(viewer({ load: { kind: "loading" } })).notices).toEqual([]);
+  });
+
+  it("集計がまだ無い(not-computed): 『まだ集計されていません』と管理者が集計することを案内する。集計・タイルは出さない。更新を促さない", () => {
+    const m = buildVerifyModel(viewer({ load: { kind: "ready", outcome: { kind: "not-computed" } } }));
+    expect(m.unavailable?.text).toContain("まだ集計されていません");
+    expect(m.unavailable?.text).toContain("管理者");
+    expect(m.unavailable?.text).not.toContain("「更新」");
+    expect(m.unavailable?.tone).toBe("info");
+    expect(m.bet).toBeNull();
+    expect(m.proposed).toBeNull();
+    expect(m.versions).toBeNull();
+    expect(m.computedAt).toBeNull();
+    expect(m.notices).toEqual([]);
+    expect(m.canRefresh).toBe(false);
+  });
+
+  it("追加指示の全文を出さない: 要約は『あり/なし』だけ(複数あれば種類数)。版別のキャリブレーションを開いても全文の行は出ない。管理者には全文が出る(対照)", () => {
+    const keys = buildVerifyModel(viewer()).versions?.cards.map((c) => c.key) ?? [];
+    expect(keys).toHaveLength(3); // 前提(空振り防止): 版が 3 つ
+    const closed = buildVerifyModel(viewer());
+    expect(closed.versions?.cards.map((c) => c.instructions)).toEqual(["追加指示: あり / なし", "追加指示: なし", "追加指示: なし"]);
+    const opened = buildVerifyModel(viewer({ expandedVersions: keys }));
+    expect(opened.versions?.cards.every((c) => c.expanded && c.fullInstructions === null)).toBe(true);
+    expect(opened.versions?.cards[0]?.calibrationHeading).toBe("2026-10-09.2 (追加指示: あり / なし)");
+    // 生の文字列がモデルのどこにも出ない(サーバが全文を返してしまった場合でも、閲覧者の画面に出さない)
+    expect(JSON.stringify(opened)).not.toContain("逃げ馬");
+    // 対照: 管理者には全文が出る
+    const admin = buildVerifyModel(input({ expandedVersions: keys }));
+    expect(admin.versions?.cards[0]?.fullInstructions).toContain("逃げ馬を重視");
+    // 追加指示が複数の種類ならその数
+    const two = { ...(ready() as Extract<VerifyOutcome, { kind: "ready" }>), promptVersions: [{ ...versionsFixture()[0]!, additionalInstructions: ["a", "b", null] }] };
+    expect(buildVerifyModel(viewer({ load: { kind: "ready", outcome: two } })).versions?.cards[0]?.instructions).toBe("追加指示: あり(2種類) / なし");
+  });
+
+  it("自動更新を止めた注記に、存在しない『更新』ボタンを案内しない(再読み込みを案内する)。管理者の文言は従来のまま", () => {
+    expect(buildVerifyModel(viewer({ pollStopped: true })).pollNotice).not.toContain("「更新」");
+    expect(buildVerifyModel(viewer({ pollStopped: true })).pollNotice).toContain("再読み込み");
+    expect(buildVerifyModel(input({ pollStopped: true })).pollNotice).toContain("「更新」");
   });
 });
