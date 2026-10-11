@@ -283,15 +283,24 @@ function intervalText(interval: ProportionInterval | null): string {
 }
 
 /**
- * キャリブレーションの行。過信バイアスは帯と**同じ添字**で対応づける(exe の `CalibrationTable` と同じ。無ければ「予測−実績」は -)。
- * 版別のキャリブレーション(`verify-versions` の射影)は帯に過信バイアスを含むので、`gaps` を帯と同じ長さで渡す。
+ * 帯の「予測−実績」= **帯内の平均予測 − 実複勝率**(Issue #254)。同じ行の「平均予測」「判定」と**同じ基準**で差を取る。
+ * 従来は core の過信バイアス(帯の中央値 − 実複勝率)を使っていたが、判定は平均予測で比べるので、帯の中央と平均がずれる行で
+ * 「予測−実績」は過信・判定は過小評価のように向きが逆になった(レビュー指摘)。core の `trend.calibrationBias`(帯の中央値。exe と共有)は変えず、クライアントは使わない。
+ * 平均予測または実複勝率が無い(件数 0)帯は null。過信・過小評価の語は、この差の符号で付ける(`overconfidenceLabel`)。
+ */
+function meanGap(bin: CalibrationBinView): number | null {
+  return bin.meanPredictedProb === null || bin.actualPlaceRate === null ? null : bin.meanPredictedProb - bin.actualPlaceRate;
+}
+
+/**
+ * キャリブレーションの行(主表の補正後・補正前、版別カードで共通)。
  *
  * Issue #254: 末尾に **平均予測**(帯内の予測の平均)・**95%区間**(その帯の件数から求めた実複勝率の Wilson 区間)・**判定**(平均予測が区間に入るか。30 件未満は件数不足)を足す。
- * 先頭の 4 つの cell は変えない(予測−実績は従来どおり帯の中央との差)。
+ * 先頭の 4 つの cell の並びは変えない。「予測−実績」は平均予測 − 実複勝率(`meanGap`)。
  */
-export function calibrationRows(bins: readonly CalibrationBinView[], gaps: readonly (number | null)[]): readonly StatRow[] {
-  return bins.map((bin, index) => {
-    const gap = gaps[index] ?? null;
+export function calibrationRows(bins: readonly CalibrationBinView[]): readonly StatRow[] {
+  return bins.map((bin) => {
+    const gap = meanGap(bin);
     const judged = judgeCalibration({ predicted: bin.predictedCount, placed: bin.placedCount, meanPredictedProb: bin.meanPredictedProb });
     return {
       label: formatBinRange(bin),
@@ -307,11 +316,6 @@ export function calibrationRows(bins: readonly CalibrationBinView[], gaps: reado
       ],
     };
   });
-}
-
-/** 帯の中央 − 実複勝率(core の `CalibrationBiasBin.overconfidenceGap` と同じ定義)。補正前の表は core がこの値を持たないので、クライアントで同じ式で出す。 */
-function midpointGaps(bins: readonly CalibrationBinView[]): readonly (number | null)[] {
-  return bins.map((bin) => (bin.actualPlaceRate === null ? null : (bin.lowerBound + bin.upperBound) / 2 - bin.actualPlaceRate));
 }
 
 /** 版別の開閉のキー。版不明(null)と、文字列の版が衝突しない形にする。 */
@@ -335,7 +339,7 @@ function versionCard(v: PromptVersionView, expandedKeys: ReadonlySet<string>): V
     calibrationHeading: expanded ? promptVersionCalibrationHeading(v.promptVersion, v.additionalInstructions) : null,
     fullInstructions: expanded ? `追加指示(全文): ${additionalInstructionsFullText(v.additionalInstructions)}` : null,
     calibrationEmpty: expanded && v.calibration.length === 0 ? "データがありません。" : null,
-    calibrationRows: expanded ? calibrationRows(v.calibration, v.overconfidenceGaps) : [],
+    calibrationRows: expanded ? calibrationRows(v.calibration) : [],
   };
 }
 
@@ -380,14 +384,12 @@ const CALIBRATION_TARGET_LABELS: Readonly<Record<CalibrationTarget, string>> = {
 
 function calibrationSection(report: VerifyReportView, target: CalibrationTarget): CalibrationSection {
   const bins = target === "prior" ? report.priorCalibration : report.calibration;
-  // 過信バイアスは、補正後は core の値(添字で対応づける)、補正前は同じ式でクライアントが出す。
-  const gaps = target === "prior" ? midpointGaps(bins) : report.trend.calibrationBias.map((b) => b.overconfidenceGap);
   return {
     heading: "キャリブレーション(推定確率帯ごとの実複勝率・過信バイアス)",
-    description: `予測−実績が正なら過信、負なら過小評価。${CALIBRATION_TARGET_NOTES[target]}${CALIBRATION_NOTE}`,
+    description: `予測−実績(帯内の予測の平均 − 実複勝率)が正なら過信、負なら過小評価。${CALIBRATION_TARGET_NOTES[target]}${CALIBRATION_NOTE}`,
     empty: bins.length === 0 ? "データがありません。" : null,
     targets: (["adjusted", "prior"] as const).map((t) => ({ target: t, label: CALIBRATION_TARGET_LABELS[t], current: t === target })),
-    rows: calibrationRows(bins, gaps),
+    rows: calibrationRows(bins),
   };
 }
 

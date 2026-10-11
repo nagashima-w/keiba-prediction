@@ -24,6 +24,9 @@ export const CONFIDENCE_Z_95 = 1.959964;
 /** 判定を出すのに要る最小の件数。これ未満は区間だけを出し、判定は「件数不足」とする(目安の定数)。 */
 export const MIN_COUNT_FOR_JUDGMENT = 30;
 
+/** 区間の端との比較に許す丸め誤差。 */
+const BOUNDARY_TOLERANCE = 1e-12;
+
 /** 2 項比率の信頼区間(0〜1 の割合)。 */
 export interface ProportionInterval {
   readonly lower: number;
@@ -88,10 +91,12 @@ export function judgeCalibration(input: {
   if (predicted === null) {
     return { interval, verdict: null };
   }
-  if (predicted > interval.upper) {
+  // 区間の端との比較は丸め誤差の許容(1e-12)をつける。全件が複勝圏〈または 0 件〉で平均予測が 1.0〈0.0〉のとき、区間の端は数学的には 1〈0〉だが
+  // 浮動小数では 1e-16 ほど内側にずれ、予測−実績が 0 の行が「予測が高い」になるのを防ぐ。
+  if (predicted > interval.upper + BOUNDARY_TOLERANCE) {
     return { interval, verdict: "overpredicted" };
   }
-  if (predicted < interval.lower) {
+  if (predicted < interval.lower - BOUNDARY_TOLERANCE) {
     return { interval, verdict: "underpredicted" };
   }
   return { interval, verdict: "consistent" };

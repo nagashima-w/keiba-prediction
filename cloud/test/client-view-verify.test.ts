@@ -213,7 +213,7 @@ describe("検証画面の VNode", () => {
     const rows = findAll(byClass(t, "verify-stats")[1]!, (n) => n.tag === "li");
     expect(rows).toHaveLength(20);
     const cellTexts = (i: number) => byClass(rows[i]!, "verify-stat-cell").map(textOf);
-    expect(cellTexts(4)).toEqual(["予測件数 200件", "複勝件数 46件", "実複勝率 23.0%", "予測−実績 -0.5pt(過小評価)", "平均予測 22.6%", "95%区間 17.7〜29.3%", "判定 整合"]);
+    expect(cellTexts(4)).toEqual(["予測件数 200件", "複勝件数 46件", "実複勝率 23.0%", "予測−実績 -0.4pt(過小評価)", "平均予測 22.6%", "95%区間 17.7〜29.3%", "判定 整合"]);
     expect(cellTexts(6).slice(4)).toEqual(["平均予測 33.1%", "95%区間 13.8〜28.0%", "判定 予測が高い(過信)"]);
     expect(cellTexts(14).slice(4)).toEqual(["平均予測 72.0%", "95%区間 76.9〜96.0%", "判定 予測が低い(過小評価)"]);
     expect(cellTexts(2).slice(4)).toEqual(["平均予測 12.0%", "95%区間 0.0〜49.0%", "判定 件数不足(30件未満)"]);

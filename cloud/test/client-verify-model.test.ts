@@ -188,25 +188,27 @@ describe("buildVerifyModel: 補正方向×結果・キャリブレーション�
     // 件数 0 の帯: 実複勝率・予測−実績は -。帯グラフは 0
     // (Issue #254: 先頭の 4 つの cell は旧版と同じ。末尾に 平均予測・95%区間・判定 の 3 つが付く)
     expect(rows[0]).toEqual({ label: "0〜5%", bar: { value: 0, max: 1000, label: "実複勝率 -" }, cells: [{ name: "予測件数", value: "0件" }, { name: "複勝件数", value: "0件" }, { name: "実複勝率", value: "-" }, { name: "予測−実績", value: "-" }, { name: "平均予測", value: "-" }, { name: "95%区間", value: "-" }, { name: "判定", value: "-" }] });
-    // 過信(予測 12.5% > 実 0%)
-    expect(rows[2]?.cells.slice(0, 4)).toEqual([{ name: "予測件数", value: "4件" }, { name: "複勝件数", value: "0件" }, { name: "実複勝率", value: "0.0%" }, { name: "予測−実績", value: "+12.5pt(過信)" }]);
+    // 過信(Issue #254: 予測 = 帯内の平均予測 12.0% > 実 0%。帯の中央 12.5% ではない)
+    expect(rows[2]?.cells.slice(0, 4)).toEqual([{ name: "予測件数", value: "4件" }, { name: "複勝件数", value: "0件" }, { name: "実複勝率", value: "0.0%" }, { name: "予測−実績", value: "+12.0pt(過信)" }]);
     expect(rows[2]?.bar).toEqual({ value: 0, max: 1000, label: "実複勝率 0.0%" });
-    // 過小評価(予測 52.5% < 実 70%)
-    expect(rows[10]?.cells[3]).toEqual({ name: "予測−実績", value: "-17.5pt(過小評価)" });
+    // 過小評価(平均予測 53.0% < 実 70%)
+    expect(rows[10]?.cells[3]).toEqual({ name: "予測−実績", value: "-17.0pt(過小評価)" });
     expect(rows[10]?.bar).toEqual({ value: 700, max: 1000, label: "実複勝率 70.0%" });
-    // 実複勝率がちょうど代表予測値(62.5%)= 一致
+    // 実複勝率がちょうど平均予測(62.5%)= 一致
     expect(rows[12]?.cells[3]).toEqual({ name: "予測−実績", value: "+0.0pt(一致)" });
     // 41.7%(5/12)の帯グラフは四捨五入して 417
     expect(rows[8]?.bar?.value).toBe(417);
     expect(rows[19]?.bar).toEqual({ value: 1000, max: 1000, label: "実複勝率 100.0%" });
   });
 
-  it("過信バイアスの配列が帯より短いときは、足りない帯の予測−実績を - にする(exe と同じ添字の対応)", () => {
+  it("Issue #254: 予測−実績は core の過信バイアス(trend.calibrationBias。帯の中央値ベース)を使わない。短い配列・食い違う値を渡しても行は変わらない", () => {
     const r = report();
-    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, report({ trend: { ...r.trend, calibrationBias: r.trend.calibrationBias.slice(0, 8) } })) } }));
-    expect(m.calibration?.rows[8]?.cells[3]).toEqual({ name: "予測−実績", value: "-" });
-    expect(m.calibration?.rows[2]?.cells[3]?.value).toBe("+12.5pt(過信)");
-    expect(m.calibration?.rows[8]?.cells[2]?.value).toBe("41.7%"); // 実複勝率は出る
+    const base = buildVerifyModel(input()).calibration?.rows;
+    const short = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, report({ trend: { ...r.trend, calibrationBias: r.trend.calibrationBias.slice(0, 8) } })) } })).calibration?.rows;
+    const wrong = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, report({ trend: { ...r.trend, calibrationBias: r.trend.calibrationBias.map(() => ({ overconfidenceGap: 0.5 })) } })) } })).calibration?.rows;
+    expect(base?.[8]?.cells[3]).toEqual({ name: "予測−実績", value: "+1.3pt(過信)" }); // 前提: 平均予測 43.0% − 実 41.7%。core の値〈中央 42.5% − 41.7% = +0.8〉とは別の値なので、core の値を使うと下の比較が崩れる
+    expect(short).toEqual(base);
+    expect(wrong).toEqual(base);
   });
 
   it("集計対象が 0 件でも(exe と同じく)表は出す。帯が 0 本なら『データがありません。』", () => {
@@ -273,8 +275,9 @@ describe("buildVerifyModel: プロンプト版別の比較(Issue #220)", () => {
     expect(a?.calibrationHeading).toBe(`2026-10-09.2 (追加指示: ${SUMMARY_30} / なし)`);
     expect(a?.fullInstructions).toBe(`追加指示(全文): ${LONG_INSTRUCTION} / なし`);
     expect(a?.calibrationRows).toHaveLength(20);
-    // 主表と同じ行の作り(過信バイアスは版ごとの添字で対応づける)
-    expect(a?.calibrationRows[2]?.cells[3]).toEqual({ name: "予測−実績", value: "+12.5pt(過信)" });
+    // 主表と同じ行の作り(Issue #254: 予測−実績は帯内の平均予測 − 実複勝率。版別の overconfidenceGaps〈帯の中央値ベース〉は使わない)
+    expect(a?.calibrationRows[2]?.cells[3]).toEqual({ name: "予測−実績", value: "+12.0pt(過信)" });
+    expect(a?.calibrationRows).toEqual(buildVerifyModel(input()).calibration?.rows);
     expect(a?.calibrationRows[10]?.bar?.value).toBe(700);
     // 開いていない版は閉じたまま
     expect(b?.expanded).toBe(false);
@@ -472,13 +475,50 @@ describe("対応表の信頼区間と判定(Issue #254)", () => {
     expect(cellsOf(prior.rows[10])).toMatchObject({ 予測件数: "30件", "95%区間": "7.3〜33.6%", 判定: "予測が高い(過信)" });
   });
 
-  it("補正前の表の『予測−実績』は、補正後の表と同じ定義(帯の中央 − 実複勝率)でクライアントが出す", () => {
+  it("補正前の表の『予測−実績』も、補正後と同じ定義(平均予測 − 実複勝率)", () => {
     const prior = calib({ calibrationTarget: "prior" });
-    // 帯 5(25〜30%): 中央 27.5% − 実 40.0% = -12.5pt(過小評価)
+    // 帯 5(25〜30%): 平均予測 27.5% − 実 40.0% = -12.5pt(過小評価)
     expect(cellsOf(prior.rows[5])["予測−実績"]).toBe("-12.5pt(過小評価)");
-    // 帯 3(15〜20%): 中央 17.5% − 実 16.0% = +1.5pt(過信)
-    expect(cellsOf(prior.rows[3])["予測−実績"]).toBe("+1.5pt(過信)");
+    // 帯 3(15〜20%): 平均予測 17.2% − 実 16.0% = +1.2pt(過信)。帯の中央〈17.5%〉なら +1.5pt
+    expect(cellsOf(prior.rows[3])["予測−実績"]).toBe("+1.2pt(過信)");
     expect(cellsOf(prior.rows[0])["予測−実績"]).toBe("-");
+  });
+
+  it("Issue #254(レビュー指摘): 帯の中央と平均予測がずれる行でも、『予測−実績』の向きと『判定』の向きが一致する(同じ行の『平均予測』と同じ基準で差を取る)", () => {
+    // 5〜10% 帯: 中央 7.5%、平均予測 6.0%、実 7.2%(3,000 件中 216 件)。中央値基準なら +0.3pt(過信)、平均予測基準なら -1.2pt(過小評価)で、後者が判定(平均予測が区間の下)と同じ向き
+    const bin = { lowerBound: 0.05, upperBound: 0.1, predictedCount: 3000, placedCount: 216, actualPlaceRate: 216 / 3000, meanPredictedProb: 0.06 };
+    expect((bin.lowerBound + bin.upperBound) / 2 - bin.actualPlaceRate).toBeGreaterThan(0); // 前提: 中央値基準だと過信側(向きが逆になる入力)
+    const r = report({ calibration: [bin], priorCalibration: [bin] });
+    for (const target of ["adjusted", "prior"] as const) {
+      const row = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, r) }, calibrationTarget: target })).calibration!.rows[0];
+      expect(cellsOf(row)).toMatchObject({ "予測−実績": "-1.2pt(過小評価)", 平均予測: "6.0%", 判定: "予測が低い(過小評価)" });
+    }
+  });
+
+  it("Issue #254: 判定が『予測が高い』なら予測−実績は『過信』、『予測が低い』なら『過小評価』(件数・実際の率・平均予測を総当たり。向きが逆になる行が無い)", () => {
+    const counts = { high: 0, low: 0, consistent: 0, insufficient: 0 };
+    for (const predicted of [29, 30, 50, 100, 400, 1000]) {
+      for (let placed = 0; placed <= predicted; placed += Math.max(1, Math.floor(predicted / 20))) {
+        for (let m = 0; m <= 100; m += 2) {
+          const bin = { lowerBound: 0.2, upperBound: 0.25, predictedCount: predicted, placedCount: placed, actualPlaceRate: placed / predicted, meanPredictedProb: m / 100 };
+          const row = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, report({ calibration: [bin] })) } })).calibration!.rows[0];
+          const c = cellsOf(row);
+          if (c["判定"] === "予測が高い(過信)") {
+            counts.high += 1;
+            expect(c["予測−実績"], JSON.stringify(bin)).toMatch(/^\+.*\(過信\)$/);
+          } else if (c["判定"] === "予測が低い(過小評価)") {
+            counts.low += 1;
+            expect(c["予測−実績"], JSON.stringify(bin)).toMatch(/^-.*\(過小評価\)$/);
+          } else if (c["判定"] === "整合") counts.consistent += 1;
+          else counts.insufficient += 1;
+        }
+      }
+    }
+    // 前提(空振り防止): 4 通りすべてが走査に十分に現れる
+    expect(counts.high).toBeGreaterThan(100);
+    expect(counts.low).toBeGreaterThan(100);
+    expect(counts.consistent).toBeGreaterThan(100);
+    expect(counts.insufficient).toBeGreaterThan(10);
   });
 
   it("説明文に、区間の読み方と注意(同じレースの馬は独立でないので目安・20 帯のうち 1 帯程度は偶然に区間を外れる)が入る", () => {

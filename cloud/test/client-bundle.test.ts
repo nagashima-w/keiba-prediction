@@ -72,8 +72,8 @@ describe("生成物のドリフトと決定性", () => {
     // (218,081 → 219,767。計り方: cd78fc2〈#246 の承認後〉の生成物と今の生成物を、それぞれ import して `Buffer.byteLength` を取った。上限までの余裕は 15,233 バイト)。勝率の計算はサーバで行い、クライアントに Plackett-Luce を入れていない
     // (クライアントが推定を呼ぶと束に Plackett-Luce が入って増える。下の「Plackett-Luce が入っていない」テストが、生成物にモデルの文言が無いことで固定する)。
     // Issue #254: 上限は 235,000 のまま据え置き(引き上げなし)。検証画面の対応表の信頼区間(Wilson 区間と判定 `@keiba/core/ev/binomial-interval`・補正後/補正前の切替・平均予測/95%区間/判定の cell・
-    // 説明文・throttled の文言の出し分け・回収率の丸め〈`src/recovery-format`〉)を足した増分は +3,887(230,093 → 233,980。計り方: d99276a〈#255 の承認後〉の生成物と今の生成物を、それぞれ
-    // import して `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力)。上限までの余裕は 1,020 バイト(約 0.4%)なので、**次にクライアントへ機能を足す Issue は、ここで上限の引き上げが要る見込み**。
+    // 説明文・throttled の文言の出し分け・回収率の丸め〈`src/recovery-format`〉)を足した増分は +3,883(230,093 → 233,976。計り方: d99276a〈#255 の承認後〉の生成物と今の生成物を、それぞれ
+    // import して `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力)。上限までの余裕は 1,024 バイト(約 0.4%)なので、**次にクライアントへ機能を足す Issue は、ここで上限の引き上げが要る見込み**。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(235_000);
   });

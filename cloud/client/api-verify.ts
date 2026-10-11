@@ -85,7 +85,7 @@ export interface VerifyReportView {
   readonly trend: {
     /** 上げ・下げ・据え置きの 3 群(この順)。 */
     readonly directionGroups: readonly DirectionGroupView[];
-    /** 帯ごとの過信バイアス(`calibration` と同じ添字。exe は添字で対応づけ、無ければ null)。 */
+    /** 帯ごとの過信バイアス(`calibration` と同じ添字。帯の中央値ベース)。Issue #254 以降、画面は使わない(予測−実績は平均予測ベースでクライアントが出す)。応答の検査だけ残してある。 */
     readonly calibrationBias: readonly { readonly overconfidenceGap: number | null }[];
     /** 印別 6 群+印なし(null)の 7 群。 */
     readonly markStats: readonly MarkStatView[];
@@ -107,7 +107,7 @@ export interface PromptVersionView {
   readonly includedAnalysisCount: number;
   readonly bet: { readonly betCount: number; readonly totalStake: number; readonly totalReturn: number; readonly recoveryRate: number | null };
   readonly calibration: readonly CalibrationBinView[];
-  /** 帯ごとの過信バイアス(`calibration` と同じ長さ・同じ添字)。 */
+  /** 帯ごとの過信バイアス(`calibration` と同じ長さ・同じ添字。帯の中央値ベース)。Issue #254 以降、画面は使わない。応答の検査だけ残してある。 */
   readonly overconfidenceGaps: readonly (number | null)[];
 }
 

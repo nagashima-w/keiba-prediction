@@ -79,6 +79,20 @@ describe("wilsonInterval(Wilson スコア区間・95%)", () => {
     expect(checked).toBe(2 + 3 + 6 + 21 + 101 + 401); // 前提: 空振りでない(全組を走査した)
   });
 
+  it("0 件のとき下限は丸め誤差で負にならず、ちょうど 0(クランプ)。n=7 は式の値が約 -2.8e-17 になる入力", () => {
+    // 前提: クランプ前の式の値が負になる入力(n=7)。式を写して確かめる(クランプが空振りでないことの固定)
+    const z2 = CONFIDENCE_Z_95 * CONFIDENCE_Z_95;
+    const n = 7;
+    const raw = z2 / (2 * n) / (1 + z2 / n) - (CONFIDENCE_Z_95 * Math.sqrt(z2 / (4 * n * n))) / (1 + z2 / n);
+    expect(raw).toBeLessThan(0);
+    expect(wilsonInterval(0, n)!.lower).toBe(0);
+    // 全件のとき上限もちょうど 1(同様に丸め誤差で 1 を超えない)
+    for (const m of [1, 3, 7, 20, 100]) {
+      expect(wilsonInterval(m, m)!.upper).toBeLessThanOrEqual(1);
+      expect(wilsonInterval(0, m)!.lower).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   it("対称性: wilson(k, n) の下限 = 1 − wilson(n−k, n) の上限", () => {
     for (const [k, n] of [[3, 17], [30, 100], [1, 20]] as const) {
       const a = wilsonInterval(k, n)!;
@@ -160,6 +174,21 @@ describe("judgeCalibration(予測値と区間の照合)", () => {
     expect(judgeCalibration({ predicted: 100, placed: 30, meanPredictedProb: w.upper }).verdict).toBe("consistent");
     expect(judgeCalibration({ predicted: 100, placed: 30, meanPredictedProb: w.upper + 1e-9 }).verdict).toBe("overpredicted");
     expect(judgeCalibration({ predicted: 100, placed: 30, meanPredictedProb: w.lower - 1e-9 }).verdict).toBe("underpredicted");
+  });
+
+  it("全件が複勝圏で平均予測も 1.0(または 0 件で 0.0)なら、丸め誤差で区間の端を超えて『高い/低い』にならず consistent(予測−実績が 0 の行が判定だけ食い違わない)", () => {
+    let checked = 0;
+    for (const n of [30, 31, 50, 100, 400, 1000]) {
+      const hi = wilsonInterval(n, n)!;
+      const lo = wilsonInterval(0, n)!;
+      // 前提(空振り防止): 区間の端が 1.0 / 0.0 に(ほぼ)一致しているが、浮動小数では厳密に一致するとは限らない入力を含む
+      expect(1 - hi.upper).toBeLessThan(1e-9);
+      expect(lo.lower).toBeLessThan(1e-9);
+      expect(judgeCalibration({ predicted: n, placed: n, meanPredictedProb: 1 }).verdict).toBe("consistent");
+      expect(judgeCalibration({ predicted: n, placed: 0, meanPredictedProb: 0 }).verdict).toBe("consistent");
+      checked += 2;
+    }
+    expect(checked).toBe(12);
   });
 
   it("30 件未満は区間は出すが判定は insufficient。予測が区間の外でも判定しない(29 件と 30 件の境界)", () => {
