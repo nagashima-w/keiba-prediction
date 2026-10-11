@@ -83,10 +83,6 @@ function groupHeadingText(group: RaceGroupItem): string {
   return parts.join("・");
 }
 
-/**
- * 場のまとまり。見出しは h2 の中のボタン(`<details>` は使わない=描画のたびに DOM を作り直すので、開閉の状態を DOM に持てない)。閉じた場のレースの行は作らない。
- * **クリック処理に渡すキーは `data-key` にも出す**(Issue #186。`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されないので、引数が木に出ていないと古い処理が残る)。
- */
 function bulkPanel(key: string, panel: BulkPanel, actions: ViewActions): VNode {
   switch (panel.kind) {
     case "confirm":
@@ -122,6 +118,10 @@ function bulkSection(key: string, bulk: BulkModel, actions: ViewActions): VNode 
   ]);
 }
 
+/**
+ * 場のまとまり。見出しは h2 の中のボタン(`<details>` は使わない=描画のたびに DOM を作り直すので、開閉の状態を DOM に持てない)。閉じた場のレースの行は作らない。
+ * **クリック処理に渡すキーは `data-key` にも出す**(Issue #186。`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されないので、引数が木に出ていないと古い処理が残る)。
+ */
 function venueSection(group: RaceGroupItem, actions: ViewActions): VNode {
   const toggle = h("button", { class: "venue-toggle", "aria-expanded": group.open ? "true" : "false", "data-key": group.key }, [groupHeadingText(group)], { click: () => actions.onToggleGroup(group.key, !group.open) });
   // 一括実行(Issue #251)は、場を開いているときだけ、見出しとレースの一覧の間に置く(管理者だけ=閲覧者は group.bulk が null)。
