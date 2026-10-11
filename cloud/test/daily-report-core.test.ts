@@ -855,3 +855,56 @@ describe("Issue #264: 直近 4 週の累計(直前 27 日を再集計して、�
     expect(f!.value).toContain("回収率");
   });
 });
+
+describe("Issue #264 デプロイをまたぐジョブ: 旧コードが永続化した状態を、新コードが読んでも落ちない", () => {
+  it("save 段階までを旧コードが作った record(stats に見込みの項目が無く、rolling・promptVersion も無い)でも、notify は Discord に送れる(failed にならない)", async () => {
+    const h = harness({ raceCount: 2, appBaseUrl: "https://example.com" });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    // list → gather → generate → save まで進め、notify の手前で止める
+    for (let i = 0; i < 4; i += 1) await h.step();
+    const job = h.kv.get<{ phase: string; record: { body: Record<string, unknown> } }>(`job:${DATE}`)!;
+    expect(job.phase).toBe("notify"); // 前提: 次は通知の段階
+    const stats = job.record.body["stats"] as Record<string, unknown>;
+    for (const key of ["expectedBetCount", "expectedHits", "expectedBaseHits", "maxPayout", "maxPayoutStake"]) {
+      expect(key in stats, `前提: 新しい項目 ${key} を持っている(これから消す)`).toBe(true);
+      delete stats[key];
+    }
+    delete job.record.body["rolling"];
+    delete job.record.body["promptVersion"];
+    h.kv.put(`job:${DATE}`, job);
+    h.clock.t += 1000;
+    const outcome = await h.step();
+    expect(outcome).toMatchObject({ kind: "ran", phase: "notify", result: "ok" });
+    expect(h.sent).toHaveLength(1);
+    const embed = h.sent[0]!.embeds![0]! as { fields?: Array<{ name: string; value: string }> };
+    expect(embed.fields!.map((f) => f.name)).not.toContain("直近 28 日の累計(その日を含む)");
+    expect(embed.fields!.find((f) => f.name === "成績")!.value).not.toContain("見込み");
+    expect(h.core.getStatus(DATE)).toBeNull(); // 終わったジョブは消える(failed で残らない)
+  });
+
+  it("gather までを旧コードが作ったダイジェスト(買い目に ev が無い)でも、generate は落ちず、見込みは『確率を導ける買い目なし』になる", async () => {
+    const h = harness({ raceCount: 2 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.step(); // list
+    await h.step(); // gather
+    const job = h.kv.get<{ phase: string; digests: Array<{ bets: Array<Record<string, unknown>> }> }>(`job:${DATE}`)!;
+    expect(job.phase).toBe("generate");
+    let stripped = 0;
+    for (const d of job.digests) {
+      for (const b of d.bets) {
+        expect("ev" in b, "前提: 新コードのダイジェストは買い目に ev を持つ(これから消す)").toBe(true);
+        delete b["ev"];
+        stripped += 1;
+      }
+    }
+    expect(stripped).toBeGreaterThan(0);
+    h.kv.put(`job:${DATE}`, job);
+    await h.drain();
+    expect(h.saved).toHaveLength(1);
+    const body = h.saved[0]!.body;
+    expect(body.stats.judgedBetCount).toBeGreaterThan(0); // 前提: 判定できた買い目はある
+    expect(body.stats.expectedBetCount).toBe(0);
+    expect(body.stats.expectedHits).toBe(0);
+    expect(h.sent).toHaveLength(1);
+  });
+});

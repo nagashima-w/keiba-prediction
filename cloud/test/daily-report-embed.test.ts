@@ -203,3 +203,45 @@ describe("Issue #264: 直近 28 日の累計の field と、見込みの的中�
   });
 });
 
+
+describe("Issue #264 デプロイをまたぐジョブ: 旧コードが作った record(見込みの項目が無い stats)を、新コードの通知が読んでも落ちない", () => {
+  /** 旧コード(#264 の前)の DayStats の形: 見込み・最大払戻の項目が無い。 */
+  const OLD_STATS = (() => {
+    const { expectedBetCount, expectedHits, expectedBaseHits, maxPayout, maxPayoutStake, ...old } = { ...STATS } as DayStats;
+    void [expectedBetCount, expectedHits, expectedBaseHits, maxPayout, maxPayoutStake];
+    return old as unknown as DayStats;
+  })();
+
+  it("前提: 旧形の stats には見込みの項目が実際に無い(あるつもりで検査していない)", () => {
+    for (const key of ["expectedBetCount", "expectedHits", "expectedBaseHits", "maxPayout", "maxPayoutStake"]) {
+      expect(key in OLD_STATS, key).toBe(false);
+    }
+    expect(OLD_STATS.judgedBetCount).toBe(60);
+  });
+
+  it("buildReportEmbed は throw せず、成績は旧来の『N 点中 M 点的中』だけ(見込みの括弧を出さない)。累計の field は出さない", () => {
+    const e = buildReportEmbed({ kaisaiDate: "20261010", stats: OLD_STATS, narrative: NARRATIVE, note: null, link: undefined });
+    const stat = e.fields!.find((f) => f.name === "成績")!;
+    expect(stat.value).toBe("賭け金 12,000円・払戻 15,600円・回収率 130.0%(黒字)\n60 点中 14 点的中");
+    expect(e.fields!.map((f) => f.name)).toEqual(["成績", "レース", "良かった点", "改善点"]);
+  });
+
+  it.each([
+    ["expectedBetCount が無い", { expectedHits: 1.2, expectedBaseHits: 1 }],
+    ["expectedHits が無い", { expectedBetCount: 3, expectedBaseHits: 1 }],
+    ["expectedBaseHits が無い", { expectedBetCount: 3, expectedHits: 1.2 }],
+    ["expectedHits が null", { expectedBetCount: 3, expectedHits: null, expectedBaseHits: 1 }],
+    ["expectedHits が NaN", { expectedBetCount: 3, expectedHits: Number.NaN, expectedBaseHits: 1 }],
+    ["expectedHits が Infinity", { expectedBetCount: 3, expectedHits: Number.POSITIVE_INFINITY, expectedBaseHits: 1 }],
+    ["expectedBetCount が文字列", { expectedBetCount: "3", expectedHits: 1.2, expectedBaseHits: 1 }],
+    ["全部無い", {}],
+  ])("formatExpectedHits は欠けた・不正な項目では throw せず null: %s", (_n, s) => {
+    expect(formatExpectedHits(s as unknown as Parameters<typeof formatExpectedHits>[0])).toBeNull();
+  });
+
+  it("対照: 項目がそろっていれば従来どおり出す(欠損の扱いが、そろった入力まで落としていない)", () => {
+    expect(formatExpectedHits({ expectedBetCount: 3, expectedHits: 1.2, expectedBaseHits: 1 })).toBe("見込み 1.20 点・実際 1 点");
+    const e = buildReportEmbed({ kaisaiDate: "20261010", stats: { ...OLD_STATS, expectedBetCount: 60, expectedHits: 9.5, expectedBaseHits: 14 }, narrative: NARRATIVE, note: null, link: undefined });
+    expect(e.fields!.find((f) => f.name === "成績")!.value).toContain("60 点中 14 点的中(見込み 9.50 点・実際 14 点)");
+  });
+});

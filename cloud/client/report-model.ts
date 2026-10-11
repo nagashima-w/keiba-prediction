@@ -201,7 +201,7 @@ function statTiles(s: ReportStats): TileView[] {
     { label: "回収率", value: s.recoveryRate === null ? "-" : formatRecoveryPercent(s.recoveryRate), strong: true },
     { label: "的中", value: `${s.judgedBetCount} 点中 ${s.hitBetCount} 点`, strong: false },
   ];
-  const expected = s.expectedBetCount === undefined || s.expectedHits === undefined || s.expectedBaseHits === undefined ? null : formatExpectedHits({ expectedBetCount: s.expectedBetCount, expectedHits: s.expectedHits, expectedBaseHits: s.expectedBaseHits });
+  const expected = formatExpectedHits(s); // 項目が欠けた(この項目を持つ前の)日報では null
   if (expected !== null) tiles.push({ label: "見込みと実際", value: expected, strong: false });
   return tiles;
 }

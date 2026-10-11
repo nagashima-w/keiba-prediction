@@ -81,8 +81,8 @@ describe("生成物のドリフトと決定性", () => {
     // 失敗の文言の閲覧者版)を足した増分は +2,773(235,792 → 238,565。計り方: f867ee9〈#254 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。
     // 今の値は `pnpm run build:client` の出力。上限までの余裕は 6,435 バイト)。
     // Issue #264: 上限は据え置き。日報の画面に、見込みの項目(全体・券種別)と直近 28 日の累計(`parseOptionalGroup`・`parsePeriod`・`parseRolling`・`statTiles`・`rollingOf`・VNode)、
-    // 共有の `src/expected-format` を足した増分は +1,887(238,565 → 240,452。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して
-    // `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 4,548 バイト)。10/12 公開予定の #259・#226 が先に入るので、リベース後に測り直すこと。
+    // 共有の `src/expected-format` を足した増分は +1,836(238,565 → 240,401。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して
+    // `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 4,599 バイト)。10/12 公開予定の #259・#226 が先に入るので、リベース後に測り直すこと。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(245_000);
   });
