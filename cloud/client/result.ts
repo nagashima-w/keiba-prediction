@@ -27,6 +27,7 @@ import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { nameWithGrade } from "./grade";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
+import { buildPlaceOddsLine, PLACE_ODDS_NOTE, type PlaceOddsLine } from "../src/place-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
 import { buildHash, type Route } from "./route";
 
@@ -83,6 +84,11 @@ export interface HorseCard {
    * 実際のラベルは分析時点のオッズの状態(確定・暫定・予想)で変わる。強調(`higher`)は丸めた値どうしの比較。
    */
   readonly winOdds: WinOddsLine;
+  /**
+   * 複勝の想定(目安)と実際(下限〜上限。Issue #253)。LLM の有無に依らず出す(想定は補正後の3着内率から。5〜7頭は2着内率から)。見出しは出走5〜7頭のとき「複勝(2着まで)」。
+   * 出走4頭以下(`race.placeBasis` が null)は想定も実際も「-」。強調(`higher`)は実際の**下限**と想定を丸めた値どうしで比べる(想定が 1.0倍未満のときは比べない)。
+   */
+  readonly placeOdds: PlaceOddsLine;
 }
 
 /** 印の付いた馬の一覧の1行(Issue #211)。印・馬番・馬名だけ(数値は出さない)。 */
@@ -143,6 +149,8 @@ export interface ResultContent {
   readonly detailNote: string | null;
   /** 単勝の想定の説明文(Issue #247。「馬ごとの評価」の見出しの下に1回)。想定か実際が1頭でもあるときだけ(全頭が「-」なら null)。 */
   readonly winOddsNote: string | null;
+  /** 複勝の想定の説明文(Issue #253。単勝の説明とは別の段落。「馬ごとの評価」の見出しの下に1回)。複勝の基準があり、想定か実際の下限が1頭でもあるときだけ(全頭が「-」なら null)。 */
+  readonly placeOddsNote: string | null;
   readonly horses: readonly HorseCard[];
   readonly allocation: AllocationSection;
 }
@@ -231,6 +239,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
     topProbs: topProbsOf(a.horses, llmEffective),
     detailNote: detailNoteOf(a.detail),
     winOddsNote: a.horses.some((h) => h.fairWinOdds !== null || h.winOdds !== null) ? WIN_ODDS_NOTE : null,
+    placeOddsNote: a.race.placeBasis !== null && a.horses.some((h) => h.fairPlaceOdds !== null || h.actualPlaceOddsMin !== null) ? PLACE_ODDS_NOTE : null,
     horses: a.horses.map((h) => ({
       umaban: h.umaban,
       name: h.name,
@@ -244,6 +253,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
       ev: h.ev === null ? formatEv(null) : `${formatEv(h.ev)}${formatEstimatedEvSuffix(a.evEstimated)}`,
       positive: h.isPositive,
       winOdds: buildWinOddsLine(h.fairWinOdds, h.winOdds, a.race.oddsStatus),
+      placeOdds: buildPlaceOddsLine(h.fairPlaceOdds, h.actualPlaceOddsMin, h.actualPlaceOddsMax, a.race.oddsStatus, a.race.placeBasis),
     })),
     allocation: allocationOf(a, readOnly),
   };

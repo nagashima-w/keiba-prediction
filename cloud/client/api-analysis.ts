@@ -41,6 +41,15 @@ export interface AnalysisHorse {
   readonly fairWinOdds: number | null;
   /** 分析時点の実際の単勝オッズ(詳細なし・未確定・不正は null)。 */
   readonly winOdds: number | null;
+  /**
+   * 想定複勝オッズ(Issue #253。払戻率 0.8 ÷ 複勝の的中率。的中率は `race.placeBasis` が top3 なら3着内率・top2 なら2着内率)。判定不能・4頭以下は null。
+   * 1.0 倍未満の値もそのまま届く(「1.0倍未満」の表示は `place-odds-format.ts`)。
+   */
+  readonly fairPlaceOdds: number | null;
+  /** 分析時点の実際の複勝オッズの下限(Issue #253。詳細なし・未確定・発売前は null)。 */
+  readonly actualPlaceOddsMin: number | null;
+  /** 分析時点の実際の複勝オッズの上限(Issue #253。上限を保存する前の過去の分析は null=下限だけ出す)。 */
+  readonly actualPlaceOddsMax: number | null;
 }
 
 /**
@@ -77,7 +86,15 @@ export interface AnalysisDetail {
    */
   readonly llmCalls: readonly LlmCall[] | null;
   /** `grade`(Issue #250)はスナップショットのグレードの生の値(表示するかは `grade.ts`)。過去の分析・キー無し(古いサーバの応答)は null。`oddsStatus`(Issue #247)は分析時点のオッズの状態(result / middle / yoso。詳細なしは null)。実際の単勝オッズのラベル(確定・暫定・予想)に使う。 */
-  readonly race: { readonly venueName: string | null; readonly raceNumber: number | null; readonly raceName: string | null; readonly grade: string | null; readonly oddsStatus: string | null };
+  readonly race: {
+    readonly venueName: string | null;
+    readonly raceNumber: number | null;
+    readonly raceName: string | null;
+    readonly grade: string | null;
+    readonly oddsStatus: string | null;
+    /** 想定複勝オッズの基準(Issue #253。top3=3着内率〈8頭以上〉・top2=2着内率〈5〜7頭。複勝は2着まで〉・null=出さない〈4頭以下〉)。 */
+    readonly placeBasis: "top3" | "top2" | null;
+  };
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
   readonly detail: DetailState;
@@ -120,15 +137,17 @@ const isStrArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(is
 
 function parseHorse(row: unknown): AnalysisHorse | null {
   if (!isRecord(row)) return null;
-  const { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights, concerns, winProb, fairWinOdds, winOdds } = row;
+  const { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights, concerns, winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax } = row;
   if (!isNum(umaban) || !strOrNull(name) || !isNum(prior) || !isNum(adjustedProb) || !numOrNull(placeOddsMin) || !numOrNull(ev) || !isBool(isPositive) || !strOrNull(mark) || !strOrNull(reason)) {
     return null;
   }
   if (!isStrArray(highlights) || !isStrArray(concerns)) return null;
   // Issue #247: 勝率・想定・実際は、キーが欠けたら(undefined)想定外。有限の数か null だけ(黙って null にしない)。
   if (!numOrNull(winProb) || !numOrNull(fairWinOdds) || !numOrNull(winOdds)) return null;
+  // Issue #253: 想定複勝・実際の複勝の下限と上限も同じ(キーが欠けたら想定外)。
+  if (!numOrNull(fairPlaceOdds) || !numOrNull(actualPlaceOddsMin) || !numOrNull(actualPlaceOddsMax)) return null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
@@ -221,6 +240,9 @@ function parseDetail(value: unknown): AnalysisDetail | null {
   // グレード(Issue #250): キー無し(古いサーバの応答)は null。文字列・null 以外の型は応答ごと不正にする。
   const grade = race["grade"] ?? null;
   if (!strOrNull(grade)) return null;
+  // 想定複勝オッズの基準(Issue #253): キーが欠けたら(undefined)想定外。top3・top2・null だけ。
+  const placeBasis = race["placeBasis"];
+  if (placeBasis !== "top3" && placeBasis !== "top2" && placeBasis !== null) return null;
   if (!Array.isArray(horses)) return null;
   const parsedHorses: AnalysisHorse[] = [];
   for (const raw of horses as unknown[]) {
@@ -242,7 +264,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     model,
     llmNote,
     llmCalls: parsedCalls,
-    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"] },
+    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis },
     horses: parsedHorses,
     allocation: parsedAllocation,
     detail,

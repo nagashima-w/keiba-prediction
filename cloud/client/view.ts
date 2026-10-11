@@ -304,6 +304,11 @@ function horseCard(horse: HorseCard): VNode {
       `単勝 ${FAIR_WIN_ODDS_LABEL} ${horse.winOdds.fair} / ${horse.winOdds.actualLabel} ${horse.winOdds.actual}`,
       ...(horse.winOdds.higher ? [h("strong", { class: "odds-higher" }, [ACTUAL_HIGHER_MARK])] : []),
     ]),
+    // 複勝の想定(目安)と実際の下限〜上限(Issue #253)。単勝の行の下。見出しは5〜7頭のとき「複勝(2着まで)」。強調は実際の下限が想定より高いとき(文字だけ)。欠損は「-」。
+    h("span", { class: "horse-line place-odds" }, [
+      `${horse.placeOdds.heading} ${FAIR_WIN_ODDS_LABEL} ${horse.placeOdds.fair} / ${horse.placeOdds.actualLabel} ${horse.placeOdds.actual}`,
+      ...(horse.placeOdds.higher ? [h("strong", { class: "odds-higher" }, [ACTUAL_HIGHER_MARK])] : []),
+    ]),
     ...(horse.reason === null ? [] : [h("span", { class: "horse-reason" }, [`根拠 ${horse.reason}`])]),
     // 根拠の下に、強調材料・懸念事項(LLM が効いたときだけ中身がある。空の側は塊ごと出さない)。
     ...(horse.highlights.length === 0 ? [] : [pointsBlock("highlights", LABEL_HIGHLIGHTS, horse.highlights)]),
@@ -357,6 +362,7 @@ function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
       h(heading, {}, ["馬ごとの評価"]),
       // 単勝の想定の説明文(Issue #247)。カードごとには出さず、見出しの下に1回。
       ...(content.winOddsNote === null ? [] : [h("p", { class: "meta win-odds-note" }, [content.winOddsNote])]),
+      ...(content.placeOddsNote === null ? [] : [h("p", { class: "meta place-odds-note" }, [content.placeOddsNote])]),
       h("ul", { class: "horse-list" }, content.horses.map(horseCard)),
     ]),
     h("section", { class: "allocation" }, [

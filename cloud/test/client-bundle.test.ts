@@ -83,6 +83,10 @@ describe("生成物のドリフトと決定性", () => {
     // Issue #264: 上限は据え置き。日報の画面に、見込みの項目(全体・券種別)と直近 28 日の累計(`parseOptionalGroup`・`parsePeriod`・`parseRolling`・`statTiles`・`rollingOf`・VNode)、
     // 共有の `src/expected-format` を足した増分は +1,836(238,565 → 240,401。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して
     // `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 4,599 バイト)。10/12 公開予定の #259・#226 が先に入るので、リベース後に測り直すこと。
+    // Issue #253: 上限は据え置き。馬のカードの複勝の想定・実際(下限〜上限)の表示(API の検証 `api-analysis.ts` の3項目と `race.placeBasis`・カードの表示用データ `result.ts`・VNode `view.ts`・
+    // 表示の整形 `src/place-odds-format.ts`〈1.0倍未満・幅・上限なし・強調の判定〉と説明文)を足した増分は +2,374(238,565 → 240,939。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、
+    // それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 4,061 バイト)。想定の計算(Plackett-Luce)はサーバで、束には入っていない(下のテストが固定する)。
+    // **余裕が 4,061 バイトまで減った**ので、次に画面や文言を足す Issue は、先に上限の引き上げを見込むこと。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(245_000);
   });
@@ -117,6 +121,8 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   "../src/win-odds-format",
   // Issue #264: 見込みの的中数の表示(`formatExpectedHits`)。Discord の日報(Worker)と日報の画面が同じ書き方を使うため。**import を持たない**ことを下のテストが固定する。
   "../src/expected-format",
+  // Issue #253: 複勝の想定・実際(下限〜上限)の表示(1.0倍未満・幅・上限なし・強調の判定・説明文)。Discord の通知(Worker)と馬のカードが同じ表示を使うため。取り込むのは `./win-odds-format`(上)だけで、下のテストが固定する。
+  "../src/place-odds-format",
 ]);
 
 function importAllowed(specifier: string): boolean {
@@ -284,6 +290,34 @@ describe("馬のカードがクライアントに取り込む Worker 側のモ�
   });
 });
 
+describe("馬のカードがクライアントに取り込む Worker 側のモジュール(複勝。Issue #253)", () => {
+  /** import / export-from の指定子(コメントを除いた本体から)。 */
+  const importSpecifiers = (file: string): string[] =>
+    [...stripComments(readFileSync(path.join(ROOT, "cloud", "src", file), "utf-8")).matchAll(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["']([^"']+)["']/g)].map((m) => m[1]!);
+
+  it("place-odds-format.ts が取り込むのは `./win-odds-format`(import を持たない純モジュール)だけ。core の推定・Worker 専用のモジュール・node: を引き込まない。クライアントの閉包に入っている", async () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "place-odds-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(1000);
+    expect(importSpecifiers("place-odds-format.ts")).toEqual(["./win-odds-format"]);
+    expect(importSpecifiers("win-odds-format.ts"), "前提: 取り込み先は import を持たない").toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/place-odds-format")).toBe(true);
+    const inputs = await listBundledInputs();
+    expect(inputs.some((f) => f.endsWith("src/place-odds-format.ts")), "前提: 複勝の想定の表示が閉包に入っている").toBe(true);
+  }, 60_000);
+
+  it("クライアントの束に、複勝の想定の計算(core の推定・頭数の判定・API の整形)が入っていない: 計算はサーバで行う。閉包にも入っていない(単勝の推定 `win-odds-estimate.ts` は combo-bet-allocation 経由で閉包に載るが、使われないので出力には残らない)", async () => {
+    const inputs = await listBundledInputs();
+    for (const server of ["ev/place-odds-estimate.ts", "src/place-odds-view.ts", "src/analysis-view.ts"]) {
+      expect(
+        inputs.filter((f) => f.endsWith(server)),
+        `${server} はクライアントの閉包に入れない`,
+      ).toEqual([]);
+    }
+    expect(CLIENT_JS).not.toContain("PLACKETT_LUCE_MODEL.");
+  }, 60_000);
+});
+
 describe("移行画面がクライアントに取り込む Worker 側のモジュール(Issue #222)", () => {
   it("migration-reader.ts は import を 1 つも持たない(Worker 専用のモジュール・node: を引き込まないことを、クライアントの閉包に入れる前提として固定する)", () => {
     const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "migration-reader.ts"), "utf-8"));
@@ -316,8 +350,8 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     model: null,
     llmNote: null,
     llmCalls: null,
-    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", oddsStatus: "result" },
-    horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null }],
+    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", oddsStatus: "result", placeBasis: "top3" },
+    horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null }],
     allocation: {
       route: "mixed", unavailableReason: null, fallbackReason: "no-combo-candidates", skipReasonCode: null, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.1,
       includeComboOdds: true, includeWide: true, includeTrio: false, includeQuinella: null, includeExacta: true, includeTrifecta: false, includeBracketQuinella: null, betUnit: 100, oddsStatus: "result",

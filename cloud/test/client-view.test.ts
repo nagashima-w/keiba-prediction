@@ -1,3 +1,4 @@
+import { PLACE_ODDS_NOTE } from "../src/place-odds-format";
 import { WIN_ODDS_NOTE } from "../src/win-odds-format";
 import { describe, expect, it } from "vitest";
 import type { AnalysisDetail } from "../client/api-analysis";
@@ -305,10 +306,10 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     model: null,
     llmNote: null,
     llmCalls: null,
-    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result" },
+    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result", placeBasis: "top3" },
     horses: [
-      { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.25, isPositive: true, mark: "◎", reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
-      { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
+      { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.25, isPositive: true, mark: "◎", reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
+      { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
     ],
     allocation: null,
     detail: "present",
@@ -565,7 +566,7 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
     const a = analysis({
       id: 7,
       model: PAYLOAD,
-      horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null }],
+      horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null }],
     });
     const tree = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 7 })], prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
     expect(byClass(tree, "horse")).toHaveLength(1); // 前提: カードの中に馬が出ている
@@ -577,8 +578,8 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
   it("結果画面(馬名・レース名・モデル名・印)", () => {
     const a = analysis({
       model: PAYLOAD,
-      race: { venueName: PAYLOAD, raceNumber: 11, raceName: PAYLOAD, grade: null, oddsStatus: PAYLOAD },
-      horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null }],
+      race: { venueName: PAYLOAD, raceNumber: 11, raceName: PAYLOAD, grade: null, oddsStatus: PAYLOAD, placeBasis: "top3" },
+      horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null }],
     });
     const { tags, texts } = mountAll(resultTree(a));
     expect(tags.filter((t) => ["img", "script", "svg", "iframe", "style"].includes(t))).toEqual([]);
@@ -845,11 +846,11 @@ describe("LLM の結果の表示(Issue #195。結果画面とカードの中の�
   const NO_KEY = "LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました";
   const MARKS = "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)";
   const llmHorses: AnalysisDetail["horses"] = [
-    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.35, isPositive: true, mark: "◎", reason: "調教の動きが良い", highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
-    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: 3, ev: 0.27, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.35, isPositive: true, mark: "◎", reason: "調教の動きが良い", highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
+    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: 3, ev: 0.27, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
   ];
   const noLlmHorses: AnalysisDetail["horses"] = [
-    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 0.36, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 0.36, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
   ];
   const cardTree = (a: AnalysisDetail): VNode => {
     const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
@@ -931,9 +932,9 @@ describe("LLM の結果の表示(Issue #195。結果画面とカードの中の�
  */
 describe("強調材料・懸念事項・LLM の usage の表示(Issue #198。結果画面とカードの中の両方)", () => {
   const POINT_HORSES: AnalysisDetail["horses"] = [
-    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.35, isPositive: true, mark: "◎", reason: "調教の動きが良い", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: null, fairWinOdds: null, winOdds: null },
-    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: 3, ev: 0.27, isPositive: false, mark: null, reason: "特筆なし", highlights: [], concerns: ["外枠", "休み明け"], winProb: null, fairWinOdds: null, winOdds: null },
-    { umaban: 3, name: "チャーリー", prior: 0.1, adjustedProb: 0.1, placeOddsMin: 4, ev: 0.4, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.35, isPositive: true, mark: "◎", reason: "調教の動きが良い", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
+    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: 3, ev: 0.27, isPositive: false, mark: null, reason: "特筆なし", highlights: [], concerns: ["外枠", "休み明け"], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
+    { umaban: 3, name: "チャーリー", prior: 0.1, adjustedProb: 0.1, placeOddsMin: 4, ev: 0.4, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
   ];
   const CALL = { ok: true, ms: 41_234, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: false, error: null } as const;
   const cardTree = (a: AnalysisDetail): VNode => {
@@ -1051,7 +1052,7 @@ describe("強調材料・懸念事項・LLM の usage の表示(Issue #198。結
  */
 describe("印の付いた馬の section(Issue #211。結果画面とカードの中の両方)", () => {
   const H = (umaban: number, name: string | null, mark: string | null) =>
-    ({ umaban, name, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null }) as AnalysisDetail["horses"][number];
+    ({ umaban, name, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null }) as AnalysisDetail["horses"][number];
   const markedHorses: AnalysisDetail["horses"] = [H(5, "ゴー", null), H(3, "エートラックス", "◎"), H(2, null, "▲"), H(1, "アイ", "〇")];
   const noMarkHorses: AnalysisDetail["horses"] = [H(1, "アイ", null), H(2, "ウー", null)];
   const cardTree = (a: AnalysisDetail, resultOpen = true): VNode => {
@@ -1147,7 +1148,7 @@ describe("印の付いた馬の section(Issue #211。結果画面とカードの
  */
 describe("3着内率の上位5頭の section(Issue #240。結果画面とカードの中の両方)", () => {
   const H = (umaban: number, name: string | null, mark: string | null, prior: number, adjustedProb: number) =>
-    ({ umaban, name, prior, adjustedProb, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null }) as AnalysisDetail["horses"][number];
+    ({ umaban, name, prior, adjustedProb, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null }) as AnalysisDetail["horses"][number];
   // prior の順位 = 馬1,2,3,4,5,6、adjustedProb の順位 = 馬6,5,4,3,2,1(食い違わせて、見出しと並べる値の取り違えを検出する)
   const sixHorses: AnalysisDetail["horses"] = [
     H(1, "アイ", "◎", 0.6, 0.1),
@@ -1261,6 +1262,9 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
     winProb: fairWinOdds === null ? null : 0.8 / fairWinOdds,
     fairWinOdds,
     winOdds,
+    fairPlaceOdds: null,
+    actualPlaceOddsMin: null,
+    actualPlaceOddsMax: null,
     ...over,
   });
   const HORSES = [oddsHorse(1, 8.5, 12.3), oddsHorse(2, 4.0, 3.0), oddsHorse(3, null, 5.5), oddsHorse(4, 6.0, null), oddsHorse(5, null, null)];
@@ -1291,7 +1295,7 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
 
       it("オッズの状態: 発売中は『実際(暫定)』・発売前は『実際(予想)』", () => {
         for (const [status, label] of [["middle", "実際(暫定)"], ["yoso", "実際(予想)"]] as const) {
-          const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, oddsStatus: status }, horses: [oddsHorse(1, 8.5, 12.3)] });
+          const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, oddsStatus: status, placeBasis: "top3" }, horses: [oddsHorse(1, 8.5, 12.3)] });
           expect(byClass(tree(a), "win-odds").map(textOf), status).toEqual([`単勝 想定(目安) 8.5倍 / ${label} 12.3倍 ↑想定より高い`]);
         }
       });
@@ -1316,8 +1320,97 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
         expect(byClass(t, "win-odds")).toHaveLength(2);
       });
 
+      // ---- Issue #253: 複勝の想定・実際(下限〜上限) ----
+      describe("複勝の想定・実際(Issue #253)", () => {
+        const raceOf = (placeBasis: "top3" | "top2" | null, oddsStatus: string = "result"): AnalysisDetail["race"] => ({
+          venueName: "福島",
+          raceNumber: 11,
+          raceName: "テスト",
+          grade: null,
+          oddsStatus,
+          placeBasis,
+        });
+        const placeHorse = (umaban: number, fairPlaceOdds: number | null, min: number | null, max: number | null) =>
+          oddsHorse(umaban, null, null, { fairPlaceOdds, actualPlaceOddsMin: min, actualPlaceOddsMax: max });
+        const PLACE_HORSES = [
+          placeHorse(1, 1.4, 1.5, 2.3),
+          placeHorse(2, 2.0, 1.5, 2.3),
+          placeHorse(3, null, 1.5, 2.3),
+          placeHorse(4, 1.4, null, null),
+          placeHorse(5, 0.9, 1.0, 1.2),
+          placeHorse(6, 1.2, 1.5, null),
+        ];
+
+        it("馬ごとに『複勝 想定(目安) … / 実際 …』を出す。実際の下限が高い馬だけ『↑想定より高い』。幅・欠損・1.0倍未満・上限なしの形", () => {
+          const cards = byClass(tree(analysis({ race: raceOf("top3"), horses: PLACE_HORSES })), "horse");
+          expect(cards).toHaveLength(6);
+          expect(cards.map((c) => byClass(c, "place-odds").map(textOf))).toEqual([
+            ["複勝 想定(目安) 1.4倍 / 実際 1.5〜2.3倍 ↑想定より高い"],
+            ["複勝 想定(目安) 2.0倍 / 実際 1.5〜2.3倍"],
+            ["複勝 想定(目安) - / 実際 1.5〜2.3倍"],
+            ["複勝 想定(目安) 1.4倍 / 実際 -"],
+            ["複勝 想定(目安) 1.0倍未満 / 実際 1.0〜1.2倍"],
+            ["複勝 想定(目安) 1.2倍 / 実際 1.5倍〜 ↑想定より高い"],
+          ]);
+          // 強調の文字は、高い馬(1・6)のカードの複勝の行にだけある(単勝の行ではない)
+          const marksIn = (c: VNode) => byClass(c, "place-odds").flatMap((n) => byClass(n, "odds-higher")).map(textOf);
+          expect(cards.map(marksIn)).toEqual([["↑想定より高い"], [], [], [], [], ["↑想定より高い"]]);
+          expect(byClass(cards[0]!, "win-odds").flatMap((n) => byClass(n, "odds-higher"))).toEqual([]);
+        });
+
+        it("複勝の行は、単勝の行の直下(根拠より前)に1行だけ出る", () => {
+          const card = byClass(tree(analysis({ race: raceOf("top3"), horses: [oddsHorse(1, 8.5, 12.3, { fairPlaceOdds: 1.4, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3 })] })), "horse")[0]!;
+          const classes = (card.children ?? []).flatMap((c) => (typeof c === "string" ? [] : [String(c.attrs?.["class"] ?? "")]));
+          const win = classes.indexOf("horse-line win-odds");
+          const place = classes.indexOf("horse-line place-odds");
+          expect(win, "前提: 単勝の行がある").toBeGreaterThanOrEqual(0);
+          expect(place).toBe(win + 1);
+          expect(classes.filter((c) => c === "horse-line place-odds")).toHaveLength(1);
+        });
+
+        it("5〜7頭(2着まで)は『複勝(2着まで)』の見出し。8頭以上には付かない", () => {
+          const top2 = byClass(tree(analysis({ race: raceOf("top2"), horses: [placeHorse(1, 2.4, 1.5, 2.3)] })), "place-odds").map(textOf);
+          expect(top2).toEqual(["複勝(2着まで) 想定(目安) 2.4倍 / 実際 1.5〜2.3倍"]);
+          const top3 = byClass(tree(analysis({ race: raceOf("top3"), horses: [placeHorse(1, 2.4, 1.5, 2.3)] })), "place-odds").map(textOf);
+          expect(top3).toEqual(["複勝 想定(目安) 2.4倍 / 実際 1.5〜2.3倍"]);
+        });
+
+        it("4頭以下(基準なし)は想定も実際も『-』で、説明文は出ない", () => {
+          const t = tree(analysis({ race: raceOf(null), horses: [placeHorse(1, 2.4, 1.5, 2.3)] }));
+          expect(byClass(t, "place-odds").map(textOf)).toEqual(["複勝 想定(目安) - / 実際 -"]);
+          expect(byClass(t, "place-odds-note")).toEqual([]);
+        });
+
+        it("オッズの状態: 発売中は『実際(暫定)』・発売前は『実際(予想)』(複勝は未発売で『-』)", () => {
+          expect(byClass(tree(analysis({ race: raceOf("top3", "middle"), horses: [placeHorse(1, 1.4, 1.5, 2.3)] })), "place-odds").map(textOf)).toEqual(["複勝 想定(目安) 1.4倍 / 実際(暫定) 1.5〜2.3倍 ↑想定より高い"]);
+          expect(byClass(tree(analysis({ race: raceOf("top3", "yoso"), horses: [placeHorse(1, 1.4, null, null)] })), "place-odds").map(textOf)).toEqual(["複勝 想定(目安) 1.4倍 / 実際(予想) -"]);
+        });
+
+        it("説明文は『馬ごとの評価』の中で1回だけ(単勝の説明とは別の段落)。単勝の説明文はそのまま。全頭が『-』なら複勝の説明文は出ない", () => {
+          const t = tree(analysis({ race: raceOf("top3"), horses: [oddsHorse(1, 8.5, 12.3, { fairPlaceOdds: 1.4, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3 }), placeHorse(2, 2.0, 1.5, 2.3)] }));
+          const notes = byClass(t, "place-odds-note");
+          expect(notes).toHaveLength(1);
+          expect(textOf(notes[0]!)).toBe(PLACE_ODDS_NOTE);
+          expect(textOf(notes[0]!)).not.toMatch(/妙味|お得/);
+          expect(byClass(t, "win-odds-note").map(textOf)).toEqual([WIN_ODDS_NOTE]);
+          const section = byClass(t, "horses")[0]!;
+          expect(byClass(section, "place-odds-note")).toHaveLength(1);
+          expect(byClass(section, "horse-list")).toHaveLength(1);
+          const none = tree(analysis({ race: raceOf("top3"), horses: [placeHorse(1, null, null, null), placeHorse(2, null, null, 2.3)] }));
+          expect(byClass(none, "place-odds-note")).toEqual([]);
+          expect(byClass(none, "place-odds")).toHaveLength(2);
+        });
+
+        it("外から来た文字列はテキストのみ(オッズの状態が奇妙な文字列でも要素を作らない)", () => {
+          const a = analysis({ race: raceOf("top3", "<img src=x onerror=alert(1)>"), horses: [placeHorse(1, 1.4, 1.5, 2.3)] });
+          const cards = byClass(tree(a), "horse");
+          expect(textOf(cards[0]!)).toContain("複勝 想定(目安) 1.4倍 / 実際 1.5〜2.3倍");
+          expect(findAll(cards[0]!, (n) => n.tag === "img")).toEqual([]);
+        });
+      });
+
       it("外から来た文字列はテキストのみ(オッズの状態が奇妙な文字列でも要素を作らない)", () => {
-        const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, oddsStatus: '<img src=x onerror=alert(1)>' }, horses: [oddsHorse(1, 8.5, 12.3)] });
+        const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, oddsStatus: '<img src=x onerror=alert(1)>', placeBasis: "top3" }, horses: [oddsHorse(1, 8.5, 12.3)] });
         const cards = byClass(tree(a), "horse");
         expect(textOf(cards[0]!)).toContain("単勝 想定(目安) 8.5倍 / 実際 12.3倍");
         expect(findAll(cards[0]!, (n) => n.tag === "img")).toEqual([]);

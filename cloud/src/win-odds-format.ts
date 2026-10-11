@@ -24,8 +24,8 @@ export const FAIR_WIN_ODDS_LABEL = "想定(目安)";
 export const WIN_ODDS_NOTE =
   "単勝の想定は、3着内率から推定した勝率で払戻率80%(地方も80%と仮定した概算)を割った目安で、AIが勝率を直接判断した値ではありません。想定は払戻率込みなので、実際が想定を上回ってもEVが1を超えるとは限りません。";
 
-/** 丸めた値(小数第1位)。表示と強調の比較が同じ値を使う。非有限・欠損は null。1000 を超える値は、比較のため 1000 より大きい 1 つの値にまとめる。 */
-function roundedOf(odds: number | null): number | null {
+/** 丸めた値(小数第1位)。表示と強調の比較が同じ値を使う。非有限・欠損は null。1000 を超える値は、比較のため 1000 より大きい 1 つの値にまとめる。複勝の表示(`place-odds-format.ts`。Issue #253)も同じ丸めを使う。 */
+export function roundedOf(odds: number | null): number | null {
   if (odds === null || !Number.isFinite(odds)) {
     return null;
   }

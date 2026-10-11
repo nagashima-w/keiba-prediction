@@ -7,7 +7,8 @@ import { formatWinOdds, WIN_ODDS_DISPLAY_MAX } from "../src/win-odds-format";
 
 /**
  * Issue #247: Discord の分析の通知の「印」の field に、想定単勝オッズと分析時点の実際の単勝オッズを添える。
- *  - 行: `◎ 3番 馬名 想定8.5倍/実際12.3倍`(実際が高いときは末尾に ` ↑想定より高い`)。実際のラベルはオッズの状態(確定=実際・発売中=実際(暫定)・発売前=実際(予想))
+ *  - 行: `◎ 3番 馬名 単勝 想定8.5倍/実際12.3倍`(実際が高いときは末尾に ` ↑想定より高い`)。実際のラベルはオッズの状態(確定=実際・発売中=実際(暫定)・発売前=実際(予想))
+ *    (Issue #253 で、複勝の部分〈` 複勝 想定…/実際…`。検査は `notify-embeds-place-odds.test.ts`〉を後ろに続けるため、単勝の部分に「単勝 」の接頭辞を付けた。この describe は単勝の部分 = 行の ` 複勝` より前を固定する)
  *  - 想定も実際も無い馬の行は、従来のまま(何も足さない)。1頭でも足したときは、field の末尾に説明の1行
  *  - EV プラスの馬の行(description。core の embed を exe と共有)には足さない
  */
@@ -38,6 +39,8 @@ function record(opts: { horses?: AnalysisRecord["horses"]; winOdds?: (umaban: nu
 }
 
 const marksField = (out: CloudEmbed): { name: string; value: string } | undefined => out.fields?.find((f) => f.name === "印");
+/** 行の単勝の部分(Issue #253: 複勝の部分は ` 複勝` から後ろに続く。単勝の部分の検査は旧版と同じ強さで、行頭から ` 複勝` の手前までを比べる)。 */
+const winPartOf = (line: string): string => line.split(" 複勝")[0]!;
 const fairOf = (umaban: number): number => estimateFairWinOdds(PROBS.map((p, i) => ({ umaban: i + 1, placeProb: p })))[umaban - 1]!.fairWinOdds!;
 
 describe("Discord の印の field の単勝の想定・実際(Issue #247)", () => {
@@ -50,10 +53,11 @@ describe("Discord の印の field の単勝の想定・実際(Issue #247)", () =
     expect(fairOf(3)).toBeLessThan(9.9);
     const out = buildAnalysisNotificationEmbed(record({ winOdds: (u) => (u === 1 ? 12.3 : u === 2 ? 3.0 : 9.9) }), effective, label());
     const lines = marksField(out)!.value.split("\n");
-    expect(lines.slice(0, 3)).toEqual([
-      `◎ 1番 馬1 想定${formatWinOdds(fairOf(1))}/実際12.3倍 ↑想定より高い`,
-      `〇 2番 馬2 想定${formatWinOdds(fairOf(2))}/実際3.0倍`,
-      `▲ 3番 馬3 想定${formatWinOdds(fairOf(3))}/実際9.9倍 ↑想定より高い`,
+    expect(lines.slice(0, 3).every((l) => l.includes(" 複勝 想定")), "前提: 12頭なので複勝の部分も続く(単勝の部分だけを比べる)").toBe(true);
+    expect(lines.slice(0, 3).map(winPartOf)).toEqual([
+      `◎ 1番 馬1 単勝 想定${formatWinOdds(fairOf(1))}/実際12.3倍 ↑想定より高い`,
+      `〇 2番 馬2 単勝 想定${formatWinOdds(fairOf(2))}/実際3.0倍`,
+      `▲ 3番 馬3 単勝 想定${formatWinOdds(fairOf(3))}/実際9.9倍 ↑想定より高い`,
     ]);
     expect(lines).toHaveLength(4); // 3行 + 説明の1行
     expect(lines.some((l) => l.includes("4番"))).toBe(false);
@@ -61,20 +65,20 @@ describe("Discord の印の field の単勝の想定・実際(Issue #247)", () =
 
   it("具体値で固定: ◎ の想定は 3.7倍(= 0.8 ÷ 勝率)、実際 12.3倍 なら『想定3.7倍/実際12.3倍 ↑想定より高い』", () => {
     const out = buildAnalysisNotificationEmbed(record({ winOdds: () => 12.3 }), effective, label());
-    expect(marksField(out)!.value.split("\n")[0]).toBe("◎ 1番 馬1 想定3.7倍/実際12.3倍 ↑想定より高い");
+    expect(winPartOf(marksField(out)!.value.split("\n")[0]!)).toBe("◎ 1番 馬1 単勝 想定3.7倍/実際12.3倍 ↑想定より高い");
   });
 
   it("オッズの状態: 発売中は『実際(暫定)』・発売前は『実際(予想)』・確定は『実際』", () => {
     for (const [status, text] of [["middle", "実際(暫定)"], ["yoso", "実際(予想)"], ["result", "実際"]] as const) {
       const out = buildAnalysisNotificationEmbed(record({ oddsStatus: status, winOdds: () => 12.3 }), effective, label());
-      expect(marksField(out)!.value.split("\n")[0], status).toBe(`◎ 1番 馬1 想定3.7倍/${text}12.3倍 ↑想定より高い`);
+      expect(winPartOf(marksField(out)!.value.split("\n")[0]!), status).toBe(`◎ 1番 馬1 単勝 想定3.7倍/${text}12.3倍 ↑想定より高い`);
     }
   });
 
   it("実際が欠損(未確定 null・不正)は『実際-』。想定は出る", () => {
     for (const bad of [null, "5.0", Number.NaN, 0.5, undefined]) {
       const out = buildAnalysisNotificationEmbed(record({ winOdds: () => bad }), effective, label());
-      expect(marksField(out)!.value.split("\n")[0], String(bad)).toBe("◎ 1番 馬1 想定3.7倍/実際-");
+      expect(winPartOf(marksField(out)!.value.split("\n")[0]!), String(bad)).toBe("◎ 1番 馬1 単勝 想定3.7倍/実際-");
     }
   });
 
@@ -84,10 +88,10 @@ describe("Discord の印の field の単勝の想定・実際(Issue #247)", () =
       effective,
       label(),
     );
-    expect(marksField(zero)!.value.split("\n")[0]).toBe("◎ 1番 馬1 想定-/実際12.3倍");
+    expect(marksField(zero)!.value.split("\n")[0]).toBe("◎ 1番 馬1 単勝 想定-/実際12.3倍"); // 3着内率 0 は複勝の想定も無く、実際の複勝も無いので、複勝の部分は続かない(行全体で比べる)
     // 頭数が3頭(判定不能)
     const three = buildAnalysisNotificationEmbed(record({ horses: [horse(1, "◎", 0.9), horse(2, null, 0.6), horse(3, null, 0.5)], winOdds: () => 5.5 }), effective, label());
-    expect(marksField(three)!.value.split("\n")[0]).toBe("◎ 1番 馬1 想定-/実際5.5倍");
+    expect(marksField(three)!.value.split("\n")[0]).toBe("◎ 1番 馬1 単勝 想定-/実際5.5倍"); // 3頭は複勝が発売されない(基準なし)ので、複勝の部分は続かない(行全体で比べる)
   });
 
   it("想定も実際も無い馬の行には何も足さない(従来のまま)。1頭も足さなければ説明の行も無い", () => {

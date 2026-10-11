@@ -19,6 +19,8 @@ import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
 import { nameWithGrade } from "../client/grade";
 import { kaisaiDateWeekday } from "./auto-run-plan";
 import { DISCORD_COLORS } from "./palette";
+import { buildPlaceOddsLine } from "./place-odds-format";
+import { estimatePlaceOddsForRace } from "./place-odds-view";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine } from "./win-odds-format";
 import type { AutoFailReason, AutoRunOutcome } from "./auto-run-result";
 import type { PlanFailureReasons } from "./plan-failure";
@@ -244,25 +246,38 @@ const markRank = (mark: string): number => {
   return i === -1 ? MARK_ORDER.length : i;
 };
 
-/** 印の field の末尾に1行だけ足す説明(想定の行が1頭でもあるとき。Issue #247)。目安であること・払戻率の仮定・EV との違い。web の説明文(`WIN_ODDS_NOTE`)の短縮。 */
-export const WIN_ODDS_FIELD_NOTE = "※想定は3着内率から推定した勝率で払戻率80%(地方も80%と仮定)を割った目安。実際が想定を上回ってもEV>1とは限りません";
+/**
+ * 印の field の末尾に1行だけ足す説明(想定の部分が1頭でもあるとき。Issue #247・#253)。目安であること・払戻率の仮定・複勝の的中率の基準・EV との違い。
+ * web の説明文(`WIN_ODDS_NOTE`・`PLACE_ODDS_NOTE`)の短縮で、単勝と複勝の両方を1行に収める。
+ */
+export const ODDS_FIELD_NOTE = "※想定は払戻率80%(地方も80%と仮定)÷推定した的中率の目安(単勝は勝率、複勝は3着内率。5〜7頭は2着内率)。複勝の↑は実際の下限と比較。実際が想定を上回ってもEV>1とは限りません";
 
-/** 印の馬の行に添える単勝の想定・実際の材料(Issue #247)。 */
-interface WinOddsInfo {
+/** 印の馬の行に添える単勝・複勝の想定・実際の材料(Issue #247・#253)。 */
+interface OddsInfo {
   /** 馬番 → 想定単勝オッズ(配分と同じ関数。判定不能・勝率0は null)。 */
   readonly fair: ReadonlyMap<number, number | null>;
   /** 馬番 → 分析時点の実際の単勝オッズ(`isUsableOdds` の基準。欠損・不正は無し)。 */
   readonly actual: ReadonlyMap<number, number | null>;
   /** 分析時点のオッズの状態(ラベルの出し分け)。 */
   readonly oddsStatus: string;
+  /** 想定複勝オッズの基準(top3=3着内率・top2=2着内率〈5〜7頭〉・null=出さない〈4頭以下〉)。 */
+  readonly placeBasis: "top3" | "top2" | null;
+  /** 馬番 → 想定複勝オッズ(判定不能・的中率0は null)。 */
+  readonly fairPlace: ReadonlyMap<number, number | null>;
+  /** 馬番 → 分析時点の実際の複勝オッズの下限(欠損・不正は無し)。 */
+  readonly placeMin: ReadonlyMap<number, number | null>;
+  /** 馬番 → 分析時点の実際の複勝オッズの上限(欠損・不正・上限を保存する前の過去の分析は無し)。 */
+  readonly placeMax: ReadonlyMap<number, number | null>;
 }
 
 /**
  * 印の付いた馬の field。印の順 → 馬番の昇順(web の結果画面の一覧と同じ)。印の無い馬(null・空白だけ)は載せない。
- * 行には単勝の想定・実際を添える(Issue #247): `◎ 3番 馬名 想定8.5倍/実際12.3倍`(実際が高いときは ` ↑想定より高い`)。想定も実際も無い馬の行には何も足さない。
- * 1頭でも足したときは、末尾に説明の1行(収まらないときは、既存の行の切り詰めで末尾=説明から落ちる)。
+ * 行には単勝・複勝の想定・実際を添える(Issue #247・#253): `◎ 3番 馬名 単勝 想定8.5倍/実際12.3倍 ↑想定より高い 複勝 想定1.5倍/実際1.6〜2.3倍 ↑想定より高い`。
+ *  - 単勝: 想定も実際も無い馬は『単勝』の部分を足さない。複勝: 基準が無い(4頭以下)・想定も実際の下限も無い馬は『複勝』の部分を足さない
+ *  - 複勝は出走5〜7頭のとき見出しが『複勝(2着まで)』。『↑想定より高い』は、単勝は実際のオッズ、複勝は実際の**下限**が想定より高いとき(丸めた値どうし)
+ * どちらかの部分を足したときは、末尾に説明の1行(収まらないときは、既存の行の切り詰めで末尾=説明から落ちる)。
  */
-function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, string | null>, winOdds: WinOddsInfo): EmbedField {
+function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, string | null>, odds: OddsInfo): EmbedField {
   const marked = record.horses
     .flatMap((h) => (h.mark === null || h.mark.trim() === "" ? [] : [{ umaban: h.umaban, mark: h.mark as string }]))
     .sort((a, b) => markRank(a.mark) - markRank(b.mark) || a.umaban - b.umaban);
@@ -273,16 +288,26 @@ function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, stri
   const lines = marked.map((h) => {
     const name = names.get(h.umaban);
     const head = name === null || name === undefined || name === "" ? `${h.mark} ${h.umaban}番` : `${h.mark} ${h.umaban}番 ${truncate(name, MARK_NAME_MAX)}`;
-    const fair = winOdds.fair.get(h.umaban) ?? null;
-    const actual = winOdds.actual.get(h.umaban) ?? null;
-    if (fair === null && actual === null) {
+    const parts: string[] = [];
+    const fair = odds.fair.get(h.umaban) ?? null;
+    const actual = odds.actual.get(h.umaban) ?? null;
+    if (fair !== null || actual !== null) {
+      const line = buildWinOddsLine(fair, actual, odds.oddsStatus);
+      parts.push(`単勝 想定${line.fair}/${line.actualLabel}${line.actual}${line.higher ? ` ${ACTUAL_HIGHER_MARK}` : ""}`);
+    }
+    const fairPlace = odds.fairPlace.get(h.umaban) ?? null;
+    const placeMin = odds.placeMin.get(h.umaban) ?? null;
+    if (odds.placeBasis !== null && (fairPlace !== null || placeMin !== null)) {
+      const line = buildPlaceOddsLine(fairPlace, placeMin, odds.placeMax.get(h.umaban) ?? null, odds.oddsStatus, odds.placeBasis);
+      parts.push(`${line.heading} 想定${line.fair}/${line.actualLabel}${line.actual}${line.higher ? ` ${ACTUAL_HIGHER_MARK}` : ""}`);
+    }
+    if (parts.length === 0) {
       return head;
     }
     withOdds += 1;
-    const line = buildWinOddsLine(fair, actual, winOdds.oddsStatus);
-    return `${head} 想定${line.fair}/${line.actualLabel}${line.actual}${line.higher ? ` ${ACTUAL_HIGHER_MARK}` : ""}`;
+    return `${head} ${parts.join(" ")}`;
   });
-  return { name: "印", value: [...lines, ...(withOdds > 0 ? [WIN_ODDS_FIELD_NOTE] : [])].join("\n") };
+  return { name: "印", value: [...lines, ...(withOdds > 0 ? [ODDS_FIELD_NOTE] : [])].join("\n") };
 }
 
 /** 配分の状態(exe の `buildAllocationProposalView` の `kind` と同じ分類。パリティは `test/notify-allocation-parity.test.ts`)。 */
@@ -417,6 +442,10 @@ interface SnapshotView {
   readonly names: ReadonlyMap<number, string | null>;
   /** 馬番 → 分析時点の実際の単勝オッズ(Issue #247。欠損・不正〈有限でない・1.0 未満〉は null)。 */
   readonly winOdds: ReadonlyMap<number, number | null>;
+  /** 馬番 → 分析時点の実際の複勝オッズの下限(Issue #253。欠損・不正は null)。 */
+  readonly placeMin: ReadonlyMap<number, number | null>;
+  /** 馬番 → 分析時点の実際の複勝オッズの上限(Issue #253。欠損・不正・上限を保存する前の過去の分析は null)。 */
+  readonly placeMax: ReadonlyMap<number, number | null>;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -436,11 +465,16 @@ function readSnapshot(raw: unknown): SnapshotView {
   }
   const names = new Map<number, string | null>();
   const winOdds = new Map<number, number | null>();
+  const placeMin = new Map<number, number | null>();
+  const placeMax = new Map<number, number | null>();
+  const usable = (value: unknown): number | null => (typeof value === "number" && isUsableOdds(value) ? value : null);
   for (const horse of raw["horses"] as unknown[]) {
     if (isObject(horse) && typeof horse["umaban"] === "number") {
       names.set(horse["umaban"], typeof horse["name"] === "string" ? horse["name"] : null);
       const odds = horse["winOdds"];
       winOdds.set(horse["umaban"], typeof odds === "number" && isUsableOdds(odds) ? odds : null);
+      placeMin.set(horse["umaban"], usable(horse["placeOddsMin"]));
+      placeMax.set(horse["umaban"], usable(horse["placeOddsMax"]));
     }
   }
   return {
@@ -451,6 +485,8 @@ function readSnapshot(raw: unknown): SnapshotView {
     oddsStatus: oddsStatus as EmbedRaceInfo["oddsStatus"],
     names,
     winOdds,
+    placeMin,
+    placeMax,
   };
 }
 
@@ -511,8 +547,21 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
   const description = body === undefined ? undefined : [...startLine(label), body].join("\n");
   // 印の付いた馬 → 買い目の順(収まらないときは末尾の買い目から縮める)。EV プラスの馬の行(description)は core のまま残す。
   // 印の馬の行に単勝の想定(配分と同じ関数。補正後の3着内率から)と実際(スナップショットの winOdds)を添える(Issue #247)。
+  // 続けて複勝の想定(出走頭数で3着内率・2着内率を切り替える `estimatePlaceOddsForRace`)と実際の下限〜上限(スナップショットの placeOddsMin・placeOddsMax)を添える(Issue #253)。
   const fair = new Map(estimateFairWinOdds(record.horses.map((h) => ({ umaban: h.umaban, placeProb: h.adjustedProb }))).map((e) => [e.umaban, e.fairWinOdds]));
-  const fields: EmbedField[] = [buildMarksField(record, snapshot.names, { fair, actual: snapshot.winOdds, oddsStatus: snapshot.oddsStatus }), buildAllocationField(record.allocation)];
+  const placeOdds = estimatePlaceOddsForRace(record.horses);
+  const fields: EmbedField[] = [
+    buildMarksField(record, snapshot.names, {
+      fair,
+      actual: snapshot.winOdds,
+      oddsStatus: snapshot.oddsStatus,
+      placeBasis: placeOdds.basis,
+      fairPlace: placeOdds.byUmaban,
+      placeMin: snapshot.placeMin,
+      placeMax: snapshot.placeMax,
+    }),
+    buildAllocationField(record.allocation),
+  ];
   // タイトルは失敗・手動スキップ・最小の通知と同じ関数で作る(Issue #230。「会場 NR レース名」)。core のタイトルは番号を持たない(core は変えない)。
   // 番号は計画の行(`label.raceNumber`)から。無ければ番号なしの今の形(「会場 レース名」)になる。レース名は、スナップショットにあればそれを優先する(従来どおり)。
   // グレードは、スナップショット(分析時に取れた値)を優先し、無ければ計画の行から(Issue #250)。

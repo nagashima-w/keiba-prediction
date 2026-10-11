@@ -24,6 +24,7 @@ import {
 } from "../src/notify-embeds";
 import type { PlanProgress } from "../src/race-day-core";
 import { DISCORD_COLORS } from "../src/palette";
+import { estimatePlaceOddsForRace } from "../src/place-odds-view";
 import { allocationRecord, betRecord } from "./allocation-fixtures";
 
 /**
@@ -443,11 +444,17 @@ describe("buildAnalysisNotificationEmbed(Issue #230: 印の付いた馬の field
     horses: names.map((name, i) => ({ umaban: i + 1, name })),
   });
   const marksField = (out: CloudEmbed): { name: string; value: string } | undefined => out.fields?.find((f) => f.name === "印");
-  // Issue #247: 印の馬の行には単勝の想定・実際(` 想定…/実際…`)と説明の行(`※…`)が付きうる。この describe が固定するのは「印・馬番・馬名」の部分なので、その部分だけを取り出す
-  // (付く内容の検査は `notify-embeds-win-odds.test.ts`)。印・馬番・馬名・並び・除外の検査は旧版と同じ強さのまま。
-  // Issue #255: 落とす部分は、`想定X/実際Y`(`win-odds-format.ts` の書式: 「8.5倍」「1000倍超」「-」、実際のラベルは「実際」「実際(暫定)」「実際(予想)」、強調は ` ↑想定より高い`)の形に限る。
+  // Issue #247・#253: 印の馬の行には単勝の想定・実際(` 単勝 想定…/実際…`)と複勝の想定・実際(` 複勝 想定…/実際…`)と説明の行(`※…`)が付きうる。この describe が固定するのは「印・馬番・馬名」の部分なので、その部分だけを取り出す
+  // (付く内容の検査は `notify-embeds-win-odds.test.ts`・`notify-embeds-place-odds.test.ts`)。印・馬番・馬名・並び・除外の検査は旧版と同じ強さのまま。
+  // Issue #255: 落とす部分は、単勝の部分(`win-odds-format.ts` の書式: 「8.5倍」「1000倍超」「-」、実際のラベルは「実際」「実際(暫定)」「実際(予想)」、強調は ` ↑想定より高い`)と
+  // 複勝の部分(`place-odds-format.ts` の書式: 見出し「複勝」「複勝(2着まで)」、想定は「1.0倍未満」も、実際は「1.5〜2.3倍」「1.5倍」「1.5倍〜」「-」)の形に限る。
   // 以前は ` 想定` 以降を丸ごと落としていたので、その後ろに余計な文字が付いても(例: 末尾に ZZ)この describe では見えなかった。形に合わない余りは残り、比較で落ちる。
-  const ODDS_SUFFIX = / 想定(?:\d+\.\d倍|1000倍超|-)\/実際(?:\((?:暫定|予想)\))?(?:\d+\.\d倍|1000倍超|-)(?: ↑想定より高い)?$/;
+  const ODDS_NUM = String.raw`(?:\d+\.\d倍|1000倍超)`;
+  const ODDS_LABEL = String.raw`実際(?:\((?:暫定|予想)\))?`;
+  const HIGHER = String.raw`(?: ↑想定より高い)?`;
+  const WIN_SUFFIX = String.raw` 単勝 想定(?:${ODDS_NUM}|-)\/${ODDS_LABEL}(?:${ODDS_NUM}|-)${HIGHER}`;
+  const PLACE_SUFFIX = String.raw` 複勝(?:\(2着まで\))? 想定(?:${ODDS_NUM}|1\.0倍未満|-)\/${ODDS_LABEL}(?:-|\d+\.\d〜${ODDS_NUM}|${ODDS_NUM}〜?)${HIGHER}`;
+  const ODDS_SUFFIX = new RegExp(`(?:${WIN_SUFFIX})?(?:${PLACE_SUFFIX})?$`);
   const headLines = (out: CloudEmbed): string[] =>
     marksField(out)!
       .value.split("\n")
@@ -483,10 +490,11 @@ describe("buildAnalysisNotificationEmbed(Issue #230: 印の付いた馬の field
   });
 
   it("18 頭すべてに印があっても、field の値は 1024 以内に収まり、embed 全体も 6000 以内", () => {
-    // Issue #247: 想定・実際が付くと 1 行が長くなり 18 行は収まらない(その場合は `notify-embeds-win-odds.test.ts` が固定)。ここは旧版と同じ「想定が付かない入力」のまま、
-    // 18 行が 1 行も落ちずに収まることを固定するため、固定馬が2頭になる確率(1.0 が2頭 = 判定不能)にして、想定が付かないことを前提として確かめる。
-    const horses = Array.from({ length: 18 }, (_, i) => ({ ...markedHorse(i + 1, "△"), adjustedProb: i < 2 ? 1 : 0.05 }) as AnalysisRecord["horses"][number]);
-    expect(estimateFairWinOdds(horses.map((h) => ({ umaban: h.umaban, placeProb: h.adjustedProb }))).every((e) => e.fairWinOdds === null), "前提: 想定が付かない入力").toBe(true);
+    // Issue #247・#253: 想定・実際が付くと 1 行が長くなり 18 行は収まらない(その場合は `notify-embeds-win-odds.test.ts`・`notify-embeds-place-odds.test.ts` が固定)。ここは旧版と同じ「想定が付かない入力」のまま、
+    // 18 行が 1 行も落ちずに収まることを固定するため、3着内率が全頭 0(単勝の勝率も複勝の的中率も決まらない)にして、単勝・複勝の想定が付かないことを前提として確かめる。
+    const horses = Array.from({ length: 18 }, (_, i) => ({ ...markedHorse(i + 1, "△"), adjustedProb: 0 }) as AnalysisRecord["horses"][number]);
+    expect(estimateFairWinOdds(horses.map((h) => ({ umaban: h.umaban, placeProb: h.adjustedProb }))).every((e) => e.fairWinOdds === null), "前提: 単勝の想定が付かない入力").toBe(true);
+    expect([...estimatePlaceOddsForRace(horses).byUmaban.values()].every((v) => v === null), "前提: 複勝の想定が付かない入力").toBe(true);
     const names = Array.from({ length: 18 }, () => "あ".repeat(32));
     const out = buildAnalysisNotificationEmbed(record({ horses }, snapshotOf(names)), effective, label());
     expect(marksField(out)!.value.split("\n")).toHaveLength(18); // 前提: 1 頭も落ちていない(退化させない)

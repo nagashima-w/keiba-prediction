@@ -249,6 +249,7 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       winOdds: 2.5,
       popularity: 1,
       placeOddsMin: 1.2,
+      placeOddsMax: 1.4,
       oikiriCritic: "動き良好",
       oikiriRank: "A",
     });
@@ -792,6 +793,7 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
         winOdds: 2.5,
         popularity: 9,
         placeOddsMin: 1.6,
+        placeOddsMax: 1.9,
         oikiriCritic: "動き良好",
         oikiriRank: "A",
       });
@@ -808,6 +810,7 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
         winOdds: 8.0,
         popularity: 6,
         placeOddsMin: 3.3,
+        placeOddsMax: 3.9,
         oikiriCritic: "平凡",
         oikiriRank: "B",
       });

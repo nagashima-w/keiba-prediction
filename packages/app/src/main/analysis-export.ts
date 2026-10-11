@@ -77,6 +77,12 @@ export interface RaceSnapshotHorse {
   readonly winOdds: number | null;
   readonly popularity: number | null;
   readonly placeOddsMin: number | null;
+  /**
+   * 複勝オッズの上限(Issue #253。`race.odds.place[umaban].oddsMax`)。分析時点の実際の複勝オッズを「下限〜上限」の幅で見せるために保存する。
+   * **任意項目**: このキーを保存する前に作った過去のスナップショットは持たない(読み出し〈`toSafeRaceSnapshot`〉では null になる)。
+   * 未確定・取れない馬・複勝が未発売(発売前の予想)は null。
+   */
+  readonly placeOddsMax?: number | null;
   readonly oikiriCritic: string | null;
   readonly oikiriRank: string | null;
 }
@@ -185,6 +191,7 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         winOdds: race.odds.win[umaban]?.odds ?? null,
         popularity: race.odds.win[umaban]?.ninki ?? null,
         placeOddsMin: race.odds.place[umaban]?.oddsMin ?? null,
+        placeOddsMax: race.odds.place[umaban]?.oddsMax ?? null,
         oikiriCritic: h.oikiri?.critic ?? null,
         oikiriRank: h.oikiri?.rank ?? null,
       };
@@ -270,6 +277,7 @@ export function toSafeRaceSnapshot(raw: unknown): {
         winOdds: horse.winOdds ?? null,
         popularity: horse.popularity ?? null,
         placeOddsMin: horse.placeOddsMin ?? null,
+        placeOddsMax: horse.placeOddsMax ?? null,
         oikiriCritic: horse.oikiriCritic ?? null,
         oikiriRank: horse.oikiriRank ?? null,
       });

@@ -264,6 +264,32 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     expect(model.content!.winOddsNote).not.toBeNull();
   });
 
+  it("複勝の想定・実際の下限と上限(Issue #253): 本物の応答をクライアントが読み、カードの画面用データまで通る。下限・上限は保存したスナップショットの値、想定は adjustedProb の3着内率から(16頭は top3)", async () => {
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    const { race } = await scrapeFixtureRace();
+    const base = await record({}, []);
+    const horses = base.horses.map((h, i) => ({ ...h, prior: 0.5 - i * 0.025, adjustedProb: 0.5 - i * 0.025 }));
+    const saved = await store.saveAnalysis({ ...base, horses } as AnalysisRecord);
+    const { fetch } = await connect(realEnv());
+    const result = await fetchAnalysis(fetch, saved.id);
+    expect(result.ok, "前提: 読める(サーバのキー名・形がクライアントの検査を通る)").toBe(true);
+    if (!result.ok) return;
+    expect(result.analysis.race.placeBasis).toBe("top3");
+    const valid = (v: number | null | undefined): number | null => (v != null && v >= 1 ? v : null);
+    expect(result.analysis.horses.map((h) => h.actualPlaceOddsMin)).toEqual(race.horses.map((h) => valid(race.odds.place[h.shutuba.umaban]?.oddsMin)));
+    expect(result.analysis.horses.map((h) => h.actualPlaceOddsMax)).toEqual(race.horses.map((h) => valid(race.odds.place[h.shutuba.umaban]?.oddsMax)));
+    expect(result.analysis.horses.filter((h) => h.actualPlaceOddsMax !== null).length, "前提: 上限が取れている馬がいる").toBeGreaterThan(8);
+    // 想定 = 0.8 ÷ 3着内率(3着内率の高い馬ほど低い)
+    expect(result.analysis.horses.map((h) => h.fairPlaceOdds)).toEqual(horses.map((h) => 0.8 / h.adjustedProb));
+    const model = buildResultModel({ route: { date: DATE, venue: "central", race: null, analysis: saved.id, settings: false }, source: { kind: "ready", analysis: result.analysis } });
+    const cards = model.content!.horses;
+    expect(cards[0]!.placeOdds.heading).toBe("複勝");
+    expect(cards[0]!.placeOdds.fair).toBe("1.6倍");
+    expect(cards.every((c) => c.placeOdds.fair !== "-")).toBe(true);
+    expect(cards.filter((c) => /^\d+\.\d〜\d+\.\d倍$/.test(c.placeOdds.actual)).length, "前提: 幅つきの実際が出ている").toBeGreaterThan(8);
+    expect(model.content!.placeOddsNote).not.toBeNull();
+  });
+
   it("配分あり(買い目)と、記録が無い分析(allocation: null)", async () => {
     const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
     const withBets = await store.saveAnalysis(

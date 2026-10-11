@@ -270,6 +270,27 @@ describe("GET /api/analyses/{id}: ローカルの D1・R2 で保存した分析�
     expect(view.horses.filter((h) => h.winOdds !== null).length, "前提: 実際のオッズが取れている馬がいる").toBeGreaterThan(8);
   });
 
+  it("複勝の想定・実際の下限と上限(Issue #253): 下限・上限は保存したスナップショットの placeOddsMin・placeOddsMax(16頭ぶん)、想定は補正後の3着内率から(全馬が同じ 0.1 なら 0.8÷0.1 = 8 倍)。placeBasis は 16頭で top3", async () => {
+    const rec = await record();
+    const { race } = await scrapeFixtureRace();
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(rec);
+    const view = (await getView(saved.id, spyBucket(local.r2).bucket)).body.analysis as unknown as {
+      race: { placeBasis: string | null };
+      horses: { umaban: number; fairPlaceOdds: number | null; actualPlaceOddsMin: number | null; actualPlaceOddsMax: number | null }[];
+    };
+    expect(view.horses).toHaveLength(16);
+    expect(view.race.placeBasis).toBe("top3");
+    const valid = (v: number | null | undefined): number | null => (v != null && v >= 1 ? v : null);
+    for (const h of view.horses) {
+      expect(h.actualPlaceOddsMin, `馬番${h.umaban}`).toBe(valid(race.odds.place[h.umaban]?.oddsMin));
+      expect(h.actualPlaceOddsMax, `馬番${h.umaban}`).toBe(valid(race.odds.place[h.umaban]?.oddsMax));
+      expect(h.fairPlaceOdds!, `馬番${h.umaban}`).toBeCloseTo(8, 9);
+    }
+    // 前提(空振り防止): 上限が取れている馬が多く、下限と上限が違う値の馬がいる(取り違えを検出できる)
+    expect(view.horses.filter((h) => h.actualPlaceOddsMax !== null).length).toBeGreaterThan(8);
+    expect(view.horses.some((h) => h.actualPlaceOddsMin !== null && h.actualPlaceOddsMax !== null && h.actualPlaceOddsMin !== h.actualPlaceOddsMax)).toBe(true);
+  });
+
   it("強調材料・懸念事項(Issue #197): 保存した馬ごとの highlights・concerns が応答の馬に載る。詳細(R2)の状態(present・missing・none)に依らない", async () => {
     const base = await record();
     const horses = base.horses.map((h, i) => (i === 0 ? { ...h, highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] } : i === 1 ? { ...h, highlights: [], concerns: ["外枠"] } : h));

@@ -33,20 +33,32 @@ export const WIN_PAYOUT_RATE = 0.8;
 export const WIN_PROB_TOP_FINISH_COUNT = 3;
 
 /**
+ * 順序付き outcome から、各馬の「上位 `depth` 着以内に入る確率」を求める(`order[0]`〜`order[depth-1]` の確率の合算)。
+ * 同じ outcome の中で1頭が複数の着に入ることはない(着順は馬の並び)ので、着ごとの事象は排反で、合算がそのまま「上位 depth 着以内」の確率になる。
+ *  - `depth=1`: 1着確率(勝率)。`buildWinCandidates`(配分)と `estimateWinProbabilities`(表示)が共有する(`aggregateWinProbabilities`)
+ *  - `depth=2`: 2着内率(出走5〜7頭の想定複勝オッズ。Issue #253)
+ * 着順が `depth` より短い outcome は、存在する着だけを数える。着順が空の outcome(出走0頭の縮退)は読み飛ばす。
+ */
+export function aggregateTopFinishProbabilities(ordered: readonly OrderedOutcome[], depth: number): Map<number, number> {
+  const probByUmaban = new Map<number, number>();
+  for (const outcome of ordered) {
+    for (let k = 0; k < depth; k++) {
+      const umaban = outcome.order[k];
+      if (umaban === undefined) {
+        break;
+      }
+      probByUmaban.set(umaban, (probByUmaban.get(umaban) ?? 0) + outcome.probability);
+    }
+  }
+  return probByUmaban;
+}
+
+/**
  * 順序付き outcome から、各馬の1着確率(`order[0]` の確率の合算)を求める。
- * `buildWinCandidates`(配分)と `estimateWinProbabilities`(表示)が共有する。
- * 着順が空の outcome(出走0頭の縮退)は読み飛ばす。
+ * `buildWinCandidates`(配分)と `estimateWinProbabilities`(表示)が共有する。`aggregateTopFinishProbabilities(ordered, 1)` と同じ。
  */
 export function aggregateWinProbabilities(ordered: readonly OrderedOutcome[]): Map<number, number> {
-  const winProbByUmaban = new Map<number, number>();
-  for (const outcome of ordered) {
-    const winner = outcome.order[0];
-    if (winner === undefined) {
-      continue;
-    }
-    winProbByUmaban.set(winner, (winProbByUmaban.get(winner) ?? 0) + outcome.probability);
-  }
-  return winProbByUmaban;
+  return aggregateTopFinishProbabilities(ordered, 1);
 }
 
 /**
@@ -66,13 +78,21 @@ export function estimateWinProbabilities(
   return new Map(horses.map((h) => [h.umaban, aggregated.get(h.umaban) ?? 0]));
 }
 
-/** 想定単勝オッズ = 払戻率 ÷ 勝率。勝率が 0 以下・非有限、または結果が非有限(オーバーフロー)なら null。 */
-export function fairWinOddsOf(winProb: number): number | null {
-  if (!Number.isFinite(winProb) || winProb <= 0) {
+/**
+ * 想定オッズ = 払戻率 ÷ 的中率。的中率が 0 以下・非有限、または結果が非有限(オーバーフロー)なら null。
+ * 想定単勝オッズ(`fairWinOddsOf`)と想定複勝オッズ(`fairPlaceOddsOf`。Issue #253)が共有する。
+ */
+export function fairOddsOf(hitProb: number, payoutRate: number): number | null {
+  if (!Number.isFinite(hitProb) || hitProb <= 0) {
     return null;
   }
-  const odds = WIN_PAYOUT_RATE / winProb;
+  const odds = payoutRate / hitProb;
   return Number.isFinite(odds) ? odds : null;
+}
+
+/** 想定単勝オッズ = 払戻率 ÷ 勝率。勝率が 0 以下・非有限、または結果が非有限(オーバーフロー)なら null。 */
+export function fairWinOddsOf(winProb: number): number | null {
+  return fairOddsOf(winProb, WIN_PAYOUT_RATE);
 }
 
 /** 1頭ぶんの勝率と想定単勝オッズ。 */

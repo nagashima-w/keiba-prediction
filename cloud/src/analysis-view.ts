@@ -3,7 +3,8 @@
  *
  * **画面に必要なものだけ**を、許可したキーで明示的に組み立てる(`...analysis` のような展開は使わない)。返さないもの:
  * `rawResponse`・馬の `contributions`・raceSnapshot の全体(騎手・調教師・オッズ・組合せオッズなど)・追加指示・戦績の基準日。
- * (単勝オッズ〈馬ごとの `winOdds` だけ〉とオッズの状態〈`race.oddsStatus`〉は Issue #247 で返すようにした。ほかのオッズ〈組合せオッズ・複勝オッズ〉は返さない。馬ごとの勝率・想定単勝オッズも同じ Issue で足した〈D1 の補正後の3着内率から計算〉。)
+ * (単勝オッズ〈馬ごとの `winOdds` だけ〉とオッズの状態〈`race.oddsStatus`〉は Issue #247 で返すようにした。馬ごとの勝率・想定単勝オッズも同じ Issue で足した〈D1 の補正後の3着内率から計算〉。
+ * 複勝オッズの下限・上限〈馬ごとの `actualPlaceOddsMin`・`actualPlaceOddsMax`〉と、想定複勝オッズ〈`fairPlaceOdds`〉・想定の基準〈`race.placeBasis`〉は Issue #253 で足した。組合せオッズは返さない。)
  * (配分の `fallbackReason`・`betUnit` は Issue #185 で返すようにした。exe の `buildAllocationProposalView` に渡すと、これが無いとフォールバックの注記が消え、`cap-too-small` が「単位額が記録されていません」と誤って表示されるため)。
  * 馬名・レース名・天候などは raceSnapshot(R2 の詳細。`detail` が `present` のときだけ入る)から、場名・R は raceId から導く。
  * **`detail` が present でないとき(柵に達した・R2 に無い・詳細なし)は、スナップショットを使わず**(馬名は null)、同じキーの形で返す。
@@ -16,8 +17,10 @@ import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
 import type { StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
+import type { PlaceOddsBasis } from "../../packages/core/src/ev/place-odds-estimate";
 import type { AnalysisDetailResult, DetailStatus } from "./analysis-repository";
 import type { LlmCallRecord } from "./llm-calls";
+import { estimatePlaceOddsForRace } from "./place-odds-view";
 
 export interface AnalysisViewHorse {
   readonly umaban: number;
@@ -46,6 +49,18 @@ export interface AnalysisViewHorse {
    * オッズの状態が発売前〈yoso〉のときは予想値(`race.oddsStatus` で区別する)。
    */
   readonly winOdds: number | null;
+  /**
+   * 想定複勝オッズ(Issue #253。払戻率 0.8 ÷ 複勝の的中率。地方も 0.8 と仮定した概算)。的中率は `race.placeBasis` が top3 なら補正後の3着内率、top2(出走5〜7頭)なら2着内率。
+   * 的中率が 0・判定不能・複勝が発売されない頭数(4頭以下)は null。1.0 倍未満の値もそのまま返す(丸めない。「1.0倍未満」の表示は画面側)。D1 の値だけから計算するので、詳細〈R2〉の状態に依らない。
+   */
+  readonly fairPlaceOdds: number | null;
+  /**
+   * 分析時点の実際の複勝オッズの下限(Issue #253。raceSnapshot〈R2〉の `placeOddsMin`)。詳細が present でない・未確定・発売前〈複勝が未発売〉・不正(有限でない・1.0 未満)は null。
+   * D1 の `placeOddsMin`(EV の計算に使った値。発売前は単勝からの推定)とは別の値で、スナップショットの生の値。
+   */
+  readonly actualPlaceOddsMin: number | null;
+  /** 分析時点の実際の複勝オッズの上限(Issue #253。raceSnapshot の `placeOddsMax`)。**上限を保存する前の過去の分析は null**(下限だけ出る)。仕様は下限と同じ。 */
+  readonly actualPlaceOddsMax: number | null;
 }
 
 export interface AnalysisViewRace {
@@ -63,6 +78,11 @@ export interface AnalysisViewRace {
   readonly trackCondition: string | null;
   /** 分析時点のオッズの状態(Issue #247。result=確定・middle=発売中〈暫定〉・yoso=発売前〈予想〉。raceSnapshot から。詳細が無いときは null)。 */
   readonly oddsStatus: string | null;
+  /**
+   * 想定複勝オッズの基準(Issue #253)。出走8頭以上は "top3"(3着内率)・5〜7頭は "top2"(複勝が2着まで。2着内率)・4頭以下(複勝が発売されない)と馬が0頭は null(想定は出さない)。
+   * 画面が「2着まで」を添える・複勝の行を「-」にするのに使う。分析した馬の数から決まり、詳細〈R2〉の状態に依らない。
+   */
+  readonly placeBasis: PlaceOddsBasis | null;
 }
 
 export interface AnalysisViewAllocation {
@@ -142,6 +162,8 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
   const race = snapshot?.race;
   // 想定単勝オッズ(Issue #247): 配分の単勝候補と同じ関数(`estimateFairWinOdds`)で、D1 の補正後の3着内率から。throw しない(判定不能は null)。
   const fairByUmaban = new Map(estimateFairWinOdds(analysis.horses.map((h) => ({ umaban: h.umaban, placeProb: h.adjustedProb }))).map((e) => [e.umaban, e]));
+  // 想定複勝オッズ(Issue #253): 出走頭数で基準(3着内率・2着内率・出さない)を決め、D1 の補正後の3着内率から。throw しない。
+  const placeOdds = estimatePlaceOddsForRace(analysis.horses);
   return {
     id: analysis.id,
     raceId: analysis.raceId,
@@ -167,6 +189,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       weather: str(race?.weather),
       trackCondition: str(race?.trackCondition),
       oddsStatus: str(race?.oddsStatus),
+      placeBasis: placeOdds.basis,
     },
     horses: analysis.horses.map((h) => ({
       umaban: h.umaban,
@@ -183,6 +206,9 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       winProb: fairByUmaban.get(h.umaban)?.winProb ?? null,
       fairWinOdds: fairByUmaban.get(h.umaban)?.fairWinOdds ?? null,
       winOdds: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.winOdds),
+      fairPlaceOdds: placeOdds.byUmaban.get(h.umaban) ?? null,
+      actualPlaceOddsMin: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.placeOddsMin),
+      actualPlaceOddsMax: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.placeOddsMax),
     })),
     allocation:
       allocation === undefined

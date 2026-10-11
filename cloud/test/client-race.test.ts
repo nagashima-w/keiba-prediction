@@ -107,10 +107,10 @@ const ANALYSIS: AnalysisDetail = {
   model: null,
   llmNote: null,
   llmCalls: null,
-  race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result" },
+  race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result", placeBasis: "top3" },
   horses: [
-    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
-    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.1, placeOddsMin: null, ev: null, isPositive: false, mark: "◎", reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
+    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.1, placeOddsMin: null, ev: null, isPositive: false, mark: "◎", reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
   ],
   allocation: null,
   detail: "present",
