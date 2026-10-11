@@ -454,11 +454,11 @@ describe("カードの説明(Issue #191)", () => {
   });
 
   // 文言そのものは固定しない。ただし、次の「事実の印」は、モードごとに固有の語として固定する(取り違え・事実の削除で赤になる)。
-  it("事前分析の説明は、戦績・調教を取得すること(調教は中央のみ)に触れ、LLM には触れない。発走前の説明は、LLM(キーの有無での違い・補正・印と根拠・EV)と配分の条件(資金・上限)に触れ、戦績には触れない。「現在は LLM を使いません」とは言わない", () => {
+  it("事前分析の説明は、戦績・騎手の成績・調教を取得すること(調教は中央のみ)に触れ、LLM には触れない。発走前の説明は、LLM(キーの有無での違い・補正・印と根拠・EV)と配分の条件(資金・上限)に触れ、戦績には触れない。「現在は LLM を使いません」とは言わない", () => {
     const [morning, preRace] = cards(buildRaceModel(input()));
     expect(morning!.mode).toBe("morning");
     expect(preRace!.mode).toBe("pre_race");
-    for (const word of ["戦績", "調教", "中央のみ"]) {
+    for (const word of ["戦績", "騎手の成績", "調教", "中央のみ"]) {
       expect(morning!.description, `朝の説明に「${word}」`).toContain(word);
     }
     expect(morning!.description).not.toContain("LLM");

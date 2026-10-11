@@ -464,7 +464,7 @@ async function main(): Promise<void> {
     });
 
     // F. (Issue #177)日単位の DO `RaceDay` を、workerd の実環境で通す: 予約(RPC は予約だけ)→ アラーム(取得 → 計算の2ステップ)→ 朝の prior が DO に残る。
-    //    取得は NetkeibaGate の偽ソケット経由(中央16頭の 19 本。gate の間隔 2 秒で、約 40 秒かかる)。2回目はキャッシュで、gate の間隔の待ちが無く速い。
+    //    取得は NetkeibaGate の偽ソケット経由(中央16頭・騎手16人の 35 本〈出馬表1・戦績16・調教1・オッズ1・騎手16。Issue #226 の前は騎手を取らず 19 本〉。gate の間隔 2 秒で、約 70 秒かかる)。2回目はキャッシュで、gate の間隔の待ちが無く速い。
     //    D1 には何も書かれない(GET /api/analyses が空のまま)。E とは別の起動(E はブレーカーを開くので、その前の別の状態で動かす)。
     await withWorker(BASE_PORT + 5, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 5;
@@ -515,14 +515,24 @@ async function main(): Promise<void> {
       const firstMs = Date.now() - started;
       const race = (board["races"] as Record<string, unknown>[] | undefined)?.[0];
       check(`${label}: アラームで取得 → 計算が進み、状態が done になる(約 ${Math.round(firstMs / 1000)} 秒)`, race?.["status"] === "done" && race["error"] === null && race["prior"] === true && board["kaisai_date"] === date, JSON.stringify(board).slice(0, 300));
-      check(`${label}: 取得は gate の間隔(2 秒 × 19 本)を守っている(冷えた状態で 30 秒以上かかる)`, firstMs >= 30_000, `${firstMs}ms`);
+      check(`${label}: 取得は gate の間隔(2 秒 × 35 本)を守っている(冷えた状態で 60 秒以上かかる)`, firstMs >= 60_000, `${firstMs}ms`);
       const withPrior = parseJson((await req(port, "GET", `/api/analyses/status?kaisai_date=${date}&race_id=${raceId}`)).text);
       const priorRows = (withPrior["prior"] as { rows: { prior: number }[] } | null)?.rows ?? [];
       check(`${label}: GET /api/analyses/status?race_id= が朝の prior の最小限(16頭・prior の高い順)を返す`, priorRows.length === 16 && priorRows.every((r, i) => i === 0 || priorRows[i - 1]!.prior >= r.prior), JSON.stringify(withPrior).slice(0, 200));
 
       const prior = parseJson((await req(port, "GET", `/smoke/race-day/prior?date=${date}&race_id=${raceId}`)).text)["prior"] as Record<string, unknown> | null;
       check(`${label}: 朝の prior が DO に残る(16頭・LLM なし・組合せオッズなし・近似の日付ではない)`, prior !== null && prior["rows"] === 16 && prior["llmUsed"] === false && prior["hasWideCombo"] === false && prior["dateApproximate"] === false, JSON.stringify(prior).slice(0, 200));
-      check(`${label}: 朝の prior の値が、exe 側の golden(LLM なし)の prior と一致する(workerd でも同じ計算)`, JSON.stringify(prior?.["priors"]) === JSON.stringify(golden.noLlmNoAllocationNoDate.result.rows.map((r) => [r.umaban, r.prior])), "");
+      // Issue #226: 既定の重み(騎手 0.15)では騎手の年度別成績も prior に入る。exe の golden は騎手の成績を持たない分析なので、一致はしなくなった
+      // (騎手を取らない場合の「exe の golden と同じ値」は、上の A〈workerd の runAnalysis が golden と SHA-256 まで一致〉と vitest の race-day-core.test.ts が固定している)。
+      // ここでは、騎手の項が workerd でも効いていること(馬の並びは同じで、1頭以上の prior が golden と違い、差はどの馬も 0.1 未満)を確かめる。
+      const goldenPriors = golden.noLlmNoAllocationNoDate.result.rows.map((r) => [r.umaban, r.prior] as const);
+      const smokePriors = (prior?.["priors"] as [number, number][] | undefined) ?? [];
+      const priorDiffs = smokePriors.map((p, i) => Math.abs(p[1] - (goldenPriors[i]?.[1] ?? Number.NaN)));
+      check(
+        `${label}: 朝の prior は、騎手の成績(既定の重み 0.15)を含むので、騎手を含まない exe 側の golden とは少しだけ違う(馬の並びは同じ・1頭以上が違う・差はどの馬も 0.1 未満)`,
+        smokePriors.length === 16 && smokePriors.every((p, i) => p[0] === goldenPriors[i]?.[0]) && priorDiffs.every((d) => d < 0.1) && priorDiffs.some((d) => d > 0.0005),
+        JSON.stringify(priorDiffs),
+      );
 
       // 2回目: キャッシュ(出馬表 10 分・戦績・調教 24 時間・オッズ 60 秒の内側)で、gate への取得が0本 = 間隔の待ちが無く速い
       const second = await run(goodBody);
@@ -581,7 +591,7 @@ async function main(): Promise<void> {
       const preMs = Date.now() - preStarted;
       check(`${label}: 発走前の分析が done になる(約 ${Math.round(preMs / 1000)} 秒。朝のキャッシュで取得は少ない)`, preRow?.["status"] === "done" && preRow["error"] === null && typeof preRow["analysis_id"] === "number", JSON.stringify(preRow).slice(0, 300));
       check(`${label}: 保存した子の行(馬・買い目)の件数が一致し(children_ok)、R2 の詳細が置かれた(detail: stored)`, preRow?.["children_ok"] === true && preRow["detail"] === "stored", JSON.stringify(preRow).slice(0, 300));
-      check(`${label}: 発走前の取得は、朝の 19 本よりずっと速い(キャッシュ。gate の間隔 2 秒 × 19 本の約 36 秒を待たない)`, preMs < 20_000, `${preMs}ms`);
+      check(`${label}: 発走前の取得は、朝の 35 本よりずっと速い(キャッシュ。戦績・調教・騎手の成績は取り直さない。gate の間隔 2 秒 × 35 本の約 70 秒を待たない)`, preMs < 20_000, `${preMs}ms`);
       const saved = parseJson((await req(port, "GET", `/api/analyses?race_id=${raceId}`)).text);
       const savedList = (saved["analyses"] as { id: number; raceId: string; kaisaiDate: string | null; horses: unknown[]; hasDetail: boolean }[] | undefined) ?? [];
       check(`${label}: D1 に分析が1件だけ保存された(GET /api/analyses。16頭・開催日・R2 の詳細あり)`, savedList.length === 1 && savedList[0]!.raceId === raceId && savedList[0]!.kaisaiDate === date && savedList[0]!.horses.length === 16 && savedList[0]!.hasDetail === true && savedList[0]!.id === preRow?.["analysis_id"], JSON.stringify(saved).slice(0, 300));

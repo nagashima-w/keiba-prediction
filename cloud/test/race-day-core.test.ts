@@ -7,6 +7,7 @@ import { HttpError } from "../../packages/core/src/scraper/http-client";
 import type { GateResult } from "../src/gate-core";
 import { GateRefusedError, type GateLike } from "../src/gate-fetch";
 import { CACHE_RETENTION_MS, MAX_TASKS_PER_DAY, PURGE_MARGIN_MS, RaceDayCore, serializeGate, type RaceDayDeps } from "../src/race-day-core";
+import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { fixtureForUrl } from "./pipeline-fixtures";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
@@ -81,6 +82,13 @@ afterEach(() => {
   }
 });
 
+/**
+ * このファイルの検査は、取得の本数・順序・キャッシュ・golden との一致を、**騎手の成績を取らない取得**(出馬表1・戦績16・調教1・オッズ1=19本)で固定している。
+ * Issue #226 で、既定の重み(騎手 0.15)のときは騎手の年度別成績も取る(16頭・騎手16人で35本。cloud/test/race-day-jockey.test.ts が固定する)ようになったので、
+ * ここでは騎手の重みを 0(= 取らない)にして、従来の検査の意味を保つ(検査の内容・期待値は変えていない)。
+ */
+const NO_JOCKEY_SETTINGS = { ...DEFAULT_CLOUD_SETTINGS, baseScoreWeightJockey: 0 };
+
 function harness(overrides: Partial<RaceDayDeps> = {}, gate: FakeGate = fakeGate()): Harness {
   const sql = openNodeSql();
   opened.push(sql);
@@ -97,6 +105,7 @@ function harness(overrides: Partial<RaceDayDeps> = {}, gate: FakeGate = fakeGate
       alarm.at = at;
     },
     onWarn: (message) => warnings.push(message),
+    loadSettings: async () => NO_JOCKEY_SETTINGS,
     ...overrides,
   });
   return { core, sql, gate, clock, alarms, alarm, warnings };

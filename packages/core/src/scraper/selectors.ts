@@ -298,6 +298,27 @@ export const RACE_RESULT_HEADER_LABELS = {
 } as const;
 
 /**
+ * 騎手の年度別成績(db.netkeiba.com/jockey/result.html?id=…。Issue #226)のセレクタとヘッダ文言。
+ *
+ * 表は `summary="年度別成績"`。ヘッダは2段(1段目に 年度・順位・1着・2着・3着・着外・重賞・特別・平場・芝・ダート・…、
+ * 2段目は 出走・勝利)で、データ行は「通算」の行と年(4桁)の行。列位置は固定せず、1段目のヘッダ文言
+ * (colspan を足し込んで数える)から解決する。
+ */
+export const JOCKEY_RESULTS_SELECTORS = {
+  /** 年度別成績の表。 */
+  table: 'table[summary="年度別成績"]',
+} as const;
+
+/** 騎手の年度別成績の表のヘッダ文言(列の解決に使う)。 */
+export const JOCKEY_RESULTS_HEADER_LABELS = {
+  year: "年度",
+  first: "1着",
+  second: "2着",
+  third: "3着",
+  unplaced: "着外",
+} as const;
+
+/**
  * 地方(NAR)オッズページ(odds/index.html?type=b1)のセレクタ。
  *
  * 発売後は #odds_tan_block(単勝)・#odds_fuku_block(複勝)の2ブロックが静的に入る。

@@ -9863,14 +9863,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -10048,14 +10048,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -10233,14 +10233,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -10418,14 +10418,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -10603,14 +10603,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -10788,14 +10788,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -10973,14 +10973,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -11158,14 +11158,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -11343,14 +11343,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -11528,14 +11528,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -11713,14 +11713,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -11898,14 +11898,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -12083,14 +12083,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -12268,14 +12268,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -12453,14 +12453,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -12638,14 +12638,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -24683,14 +24683,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -24870,14 +24870,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -25060,14 +25060,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -25245,14 +25245,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -25434,14 +25434,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -25622,14 +25622,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -25809,14 +25809,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -25996,14 +25996,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -26186,14 +26186,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -26371,14 +26371,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -26560,14 +26560,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -26748,14 +26748,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -26935,14 +26935,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -27122,14 +27122,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -27312,14 +27312,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -27497,14 +27497,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -46345,14 +46345,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -46530,14 +46530,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -46715,14 +46715,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -46900,14 +46900,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -47085,14 +47085,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -47270,14 +47270,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -47455,14 +47455,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -47640,14 +47640,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -47825,14 +47825,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -48010,14 +48010,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -48195,14 +48195,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -48380,14 +48380,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -48565,14 +48565,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -48750,14 +48750,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -48935,14 +48935,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",
@@ -49120,14 +49120,14 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "騎手当該コース",
+              "biasName": "騎手成績",
               "applied": false,
-              "reason": "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+              "reason": "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
               "weight": 0.15,
               "correction": 0,
               "sampleCount": 0,
               "targetRate": null,
-              "overallRate": 0.33
+              "overallRate": 0.22
             },
             {
               "biasName": "斤量",

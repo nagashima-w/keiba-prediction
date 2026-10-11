@@ -11,7 +11,8 @@
  * ## 役割
  * 開催日(`idFromName(kaisaiDate)`)ごとに1つの DO が、その日の全レースの**事前分析**を直列に処理する(gate の待ち行列の上限 8 に当たらない)。
  *  - **ステップ1(取得 `fetch`)**: `scrapeRace`(変更なし。組合せオッズは取らない。単勝・複勝のオッズを1本取る)でキャッシュを埋める。中央16頭の
- *    冷えた状態で gate への取得は **19 本**(出馬表 1・戦績 16・調教 1・単勝複勝 1)。
+ *    冷えた状態で gate への取得は **19 本**(出馬表 1・戦績 16・調教 1・単勝複勝 1)。**騎手の重みが 0 より大きいとき(既定 0.15)は、騎手の年度別成績
+ *    (Issue #226)を騎手 ID で一意にして 1 人 1 本、その後ろに足す**(16 頭・騎手 16 人で 35 本。中央 18 頭・騎手 18 人で最大 39 本)。重みが 0 なら 19 本のまま。
  *  - **ステップ2(計算 `compute`)**: **netkeiba には出ず**(gate は0回)、キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)` を走らせ、
  *    朝の prior(`AnalysisResult`)を **DO のストレージにだけ**置く(**D1・R2 には書かない**。ユーザー判断 2026-10-06: 保存するのは発走前の分析だけ)。
  *    取得のあとで TTL が切れても読めるよう、キャッシュの鮮度を実質無期限にして読む。キャッシュに戦績が無ければ(掃除された等)、netkeiba に出ず失敗にする
@@ -236,7 +237,17 @@ const CACHE_ONLY_TTL: ScrapeTtlConfig = {
   oikiriMs: FOREVER_MS,
   oddsMs: FOREVER_MS,
   raceListMs: FOREVER_MS,
+  jockeyMs: FOREVER_MS,
 };
+
+/**
+ * 騎手の年度別成績(Issue #226)を取得するか。**騎手の重みが 0 より大きいときだけ**(0 なら、取得しても補正が 0 になるだけなので、
+ * リクエストを増やさない)。取得ステップ・計算ステップ・発走前の取得が**同じ設定のスナップショット**から同じ結果を得る
+ * (取得と計算で食い違うと、計算がキャッシュに無い騎手を探しにいく)。
+ */
+function wantsJockeyStats(settings: Pick<CloudSettings, "baseScoreWeightJockey">): boolean {
+  return settings.baseScoreWeightJockey > 0;
+}
 
 export type TaskStatus = "queued" | "fetched" | "done" | "failed";
 
@@ -1976,14 +1987,18 @@ export class RaceDayCore {
     try {
       // 設定(スコアリングの重み。Issue #218)を読んでタスクに固定する(発走前の取得と同じ流儀。取得〜計算で重みが変わらない。再試行では読み直さない)。
       // 読めなければ投げる(下の catch が再試行し、尽きたら failed。既定値の重みで黙って prior を作らない)。`loadSettings` の無い構成は読まない(計算は既定値の重み)。
-      if (task.settings_json === null && this.loadSettings !== undefined) {
-        const settings = await this.loadSettings();
+      let settings: CloudSettings = DEFAULT_CLOUD_SETTINGS;
+      if (task.settings_json !== null) {
+        settings = coerceCloudSettings(JSON.parse(task.settings_json));
+      } else if (this.loadSettings !== undefined) {
+        settings = await this.loadSettings();
         this.setTaskFields(task, { settings_json: JSON.stringify(settings) });
       }
+      // 騎手の年度別成績(Issue #226)は、ここ(netkeiba に出る取得ステップ)で取っておく。計算ステップはキャッシュだけを読む。
       const race = await scrapeRace(
         parseRaceId(task.race_id),
         { fetcher: this.networkFetcher, now: () => new Date(this.now()) },
-        { includeComboOdds: false },
+        { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings) },
       );
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
       if (missing.length > 0) {
@@ -2013,7 +2028,7 @@ export class RaceDayCore {
       // 取得ステップが固定した設定のスナップショットの重みを使う(Issue #218)。スナップショットの無いタスク(設定を読まない構成・この変更の前に取得まで済んだタスク)は既定値の重み(今までと同じ結果)。
       const settings = task.settings_json === null ? DEFAULT_CLOUD_SETTINGS : coerceCloudSettings(JSON.parse(task.settings_json));
       const result = await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
-        scrape: (id) => this.scrapeFromCache(id, false),
+        scrape: (id) => this.scrapeFromCache(id, { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings) }),
         analyze: null,
         // 朝の prior は D1・R2 に保存しない(DO のストレージにだけ置く)。ここは何も書かない。
         saveAnalysis: () => undefined,
@@ -2045,7 +2060,11 @@ export class RaceDayCore {
    * (それより古いもの〈前回の発走前の実行で残った、保持 26 時間のキャッシュ〉は、無いものとして扱う)。古い組合せが「今のオッズ」として配分に使われるのを防ぐ。
    * 無い組合せは、exe で組合せの取得が失敗したときと同じく、`scrapeRace` が警告にして、その券種を除く。単勝・複勝のオッズが古い(無い)ときは投げる(必須のデータ)。
    */
-  private async scrapeFromCache(raceId: Parameters<typeof scrapeRace>[0], includeComboOdds: boolean, oddsSince?: number) {
+  private async scrapeFromCache(
+    raceId: Parameters<typeof scrapeRace>[0],
+    options: { readonly includeComboOdds: boolean; readonly includeJockeyStats: boolean },
+    oddsSince?: number,
+  ) {
     const fetcher: RaceFetcher =
       oddsSince === undefined
         ? this.cacheOnly
@@ -2064,8 +2083,9 @@ export class RaceDayCore {
     const race = await scrapeRace(
       raceId,
       { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL },
-      { includeComboOdds },
+      options,
     );
+    // 騎手の成績(種別=騎手)はキャッシュに無くても失敗にしない(その騎手は補正なし。戦績は無いと prior が作れないので失敗にする)。
     const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
     if (missing.length > 0) {
       throw new Error(`キャッシュに戦績がありません(${missing.length} 頭分)。取得をやり直してください`);
@@ -2137,7 +2157,7 @@ export class RaceDayCore {
       const race = await scrapeRace(
         parseRaceId(task.race_id),
         { fetcher: this.networkFetcher, now: () => new Date(this.now()) },
-        { includeComboOdds: settings.includeComboOdds, bypassOddsCache: true },
+        { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), bypassOddsCache: true },
       );
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
       if (missing.length > 0) {
@@ -2244,7 +2264,7 @@ export class RaceDayCore {
               });
         await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
           scrape: async (id) => {
-            const race = await this.scrapeFromCache(id, settings.includeComboOdds, oddsSince);
+            const race = await this.scrapeFromCache(id, { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings) }, oddsSince);
             scrapeWarnings = race.meta.warnings;
             return race;
           },

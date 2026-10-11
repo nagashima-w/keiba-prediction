@@ -4,6 +4,7 @@ import {
   InvalidIdError,
   kaisaiDateFromNarRaceId,
   parseHorseId,
+  parseJockeyId,
   parseKaisaiDate,
   parseRaceId,
   precedingRaceIdsSameDay,
@@ -448,6 +449,23 @@ describe("parseHorseId(馬IDのパースと検証)", () => {
         expect(() => parseHorseId(input)).toThrow(InvalidIdError);
       }
     });
+  });
+});
+
+describe("parseJockeyId(騎手ID。Issue #226)", () => {
+  it.each(["01170", "05496", "a01ad", "A01AD", "z"])("URLに入れてよい英数字(1〜10文字)はそのまま返す: %s", (id) => {
+    expect(parseJockeyId(id)).toBe(id);
+  });
+
+  it.each([
+    ["空文字", ""],
+    ["11文字(上限超え)", "01234567890"],
+    ["記号(URLの区切りを持ち込める)", "01170&x=1"],
+    ["スラッシュ", "01/70"],
+    ["空白", "01 70"],
+    ["全角数字", "０１１７０"],
+  ])("%s は InvalidIdError", (_name, id) => {
+    expect(() => parseJockeyId(id)).toThrow(InvalidIdError);
   });
 });
 

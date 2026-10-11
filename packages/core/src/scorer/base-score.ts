@@ -14,8 +14,9 @@
  * - (2)上がり3F: 戦績には同一レース内の上がり順位がないため、自身の上がりタイムが「速い」水準
  *   (fastLast3fThresholdSec 以下)を使えた率で代替する。上がりはコース・距離・ペース依存が強く
  *   粗い代替のため既定重みは控えめ。将来、同一レースの上がり順位が取れれば相対順位評価に差し替える。
- * - (4)騎手当該コース複勝率: 騎手コース成績のscraper拡張が未実装のため入力を optional にする。
+ * - (4)騎手の複勝率: 騎手の成績(前年+当年の全体。Issue #226)を optional 入力にする。
  *   与えられれば複勝率で補正し、なければ「データなし」を寄与度ログに残して補正なし。
+ *   競馬場・距離ごとの成績は netkeiba のプレミアム限定のため、当該コースの複勝率ではない。
  */
 
 import type { DerivedRaceFeature, FrameZone } from "./derive-features.js";
@@ -248,54 +249,63 @@ export function computeCourseDistanceScore(
 }
 
 // ---------------------------------------------------------------------------
-// (4) 騎手の当該コース複勝率(optional入力)
+// (4) 騎手の複勝率(前年+当年の全体の成績。optional入力。Issue #226)
 // ---------------------------------------------------------------------------
 
-const JOCKEY_NAME = "騎手当該コース";
+const JOCKEY_NAME = "騎手成績";
 
-/** 騎手の当該コース成績(scraper拡張が未実装のため optional に渡す)。 */
+/**
+ * 騎手の成績。**全体**の成績(当該コースではない)で、集計の窓は分析日の前年+当年
+ * (過去日の分析は前々年+前年。`jockey-stats.ts`)。型名の「Course」は歴史的な名前で、
+ * 競馬場・距離ごとの内訳は netkeiba のプレミアム限定で取得できないため(`parse-jockey-results.ts`)、
+ * 現在は渡していない(競馬場・距離ごとの成績は第2段階の Issue #256)。
+ */
 export interface JockeyCourseStats {
-  /** 当該コースの騎乗数。 */
+  /** 騎乗数(窓の年の合計)。 */
   readonly starts: number;
   /** うち複勝圏内(3着以内)の回数。 */
   readonly placed: number;
 }
 
 /**
- * 騎手の当該コース複勝率の補正を計算する。
- * 入力がなければ「データなし」を寄与度ログに残して補正なし(scraper拡張は別タスク)。
- * 騎乗数が最小サンプル(minSampleForBias)未満なら補正なし。
+ * 騎手の複勝率の補正を計算する。
+ * - 入力がなければ「データなし」を寄与度ログに残して補正なし。
+ * - 騎乗数が最小(`jockeyMinStarts`、既定100)未満なら補正なし(複勝率は参考値として残す)。
+ * - それ以外は `(複勝率 − 中立) × 重み`。中立は開催区分で別(`jockeyNeutralPlaceRate`)。
+ * @param venueKind 今回のレースの開催区分。省略時は "central"。
  */
 export function computeJockeyScore(
   stats: JockeyCourseStats | undefined,
   config: ScorerConfig = DEFAULT_SCORER_CONFIG,
+  venueKind: RaceIdVenueKind = "central",
 ): BaseScoreContribution {
-  const { neutralPlaceRate } = config.baseScore;
+  const { jockeyMinStarts } = config.baseScore;
+  const neutral = config.baseScore.jockeyNeutralPlaceRate[venueKind];
   const weight = config.baseScore.weights.jockey;
 
   if (stats === undefined) {
     return {
       biasName: JOCKEY_NAME,
       applied: false,
-      reason: "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+      reason: "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
       weight,
       correction: 0,
       sampleCount: 0,
       targetRate: null,
-      overallRate: neutralPlaceRate,
+      overallRate: neutral,
     };
   }
 
-  if (stats.starts < config.minSampleForBias) {
+  if (stats.starts < jockeyMinStarts) {
     return {
       biasName: JOCKEY_NAME,
       applied: false,
-      reason: "騎手の当該コース騎乗数が2走未満のため補正なし",
+      reason: `騎手の騎乗数が${jockeyMinStarts}走未満のため補正なし`,
       weight,
       correction: 0,
       sampleCount: stats.starts,
       targetRate: stats.starts === 0 ? null : stats.placed / stats.starts,
-      overallRate: neutralPlaceRate,
+      overallRate: neutral,
     };
   }
 
@@ -303,12 +313,12 @@ export function computeJockeyScore(
   return {
     biasName: JOCKEY_NAME,
     applied: true,
-    reason: "騎手の当該コース複勝率で補正",
+    reason: "騎手の複勝率(前年+当年)で補正",
     weight,
-    correction: (rate - neutralPlaceRate) * weight,
+    correction: (rate - neutral) * weight,
     sampleCount: stats.starts,
     targetRate: rate,
-    overallRate: neutralPlaceRate,
+    overallRate: neutral,
   };
 }
 
@@ -475,7 +485,7 @@ export function computeBaseScore(
       { courseType: today.courseType, distance: today.distance },
       config,
     ),
-    computeJockeyScore(jockeyCourseStats, config),
+    computeJockeyScore(jockeyCourseStats, config, today.venueKind),
     computeWeightChangeScore(
       features,
       { kinryo: today.kinryo },

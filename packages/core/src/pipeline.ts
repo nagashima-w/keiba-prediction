@@ -113,6 +113,10 @@ export {
 } from "./scorer/derive-features.js";
 
 export {
+  selectJockeyStats,
+} from "./scorer/jockey-stats.js";
+
+export {
   buildPriorInput,
   computeFieldPriors,
 } from "./scorer/prior.js";

@@ -31,6 +31,13 @@ export type KaisaiDate = Branded<string, "KaisaiDate">;
 export type HorseId = Branded<string, "HorseId">;
 
 /**
+ * 騎手ID(Issue #226)。出馬表の騎手リンク(`/jockey/result/recent/{id}`)の末尾で、実測(2026-10-11)では
+ * 5桁の数字(中央・地方)か5桁の英数字(例 `a01ad`)。形が未確認の変種があっても取りこぼさないよう、
+ * 1〜10文字の英数字を受理する(URLに埋め込むので、記号・空白・全角は拒否する)。
+ */
+export type JockeyId = Branded<string, "JockeyId">;
+
+/**
  * ID・開催日の検証失敗を表す例外。理由を日本語メッセージに含める。
  */
 export class InvalidIdError extends Error {
@@ -336,4 +343,17 @@ export function parseHorseId(input: string): HorseId {
     );
   }
   return input as HorseId;
+}
+
+/**
+ * 騎手IDを検証してブランド型にする(Issue #226)。1〜10文字の半角英数字のみ受理する。
+ * @throws InvalidIdError 形式が不正な場合
+ */
+export function parseJockeyId(input: string): JockeyId {
+  if (!/^[0-9a-zA-Z]{1,10}$/.test(input)) {
+    throw new InvalidIdError(
+      `騎手IDは1〜10文字の半角英数字である必要があります(入力: "${input}")`,
+    );
+  }
+  return input as JockeyId;
 }

@@ -59,6 +59,7 @@ import {
   summarizeMarketGap,
   summarizeRestRecord,
   precedingRaceIdsSameDay,
+  selectJockeyStats,
   venueKindOfRaceId,
   type AnalysisAllocationRecord,
   type AnalysisRecord,
@@ -345,6 +346,20 @@ function conditionChangeRunsOf(
 }
 
 /**
+ * 騎手の年度別成績(`RaceData.jockeyStats`)から、その騎手の記録を取り出す。取得していない・取得に失敗した・
+ * 騎手IDが無い場合は undefined。**自前のプロパティだけを見る**(騎手IDは英数字で、`valueOf` のような
+ * 名前が Object.prototype の関数を返さないように)。
+ */
+function jockeyRecordsOf(race: RaceData, jockeyId: string | null) {
+  if (jockeyId === null || race.jockeyStats === undefined) {
+    return undefined;
+  }
+  return Object.prototype.hasOwnProperty.call(race.jockeyStats, jockeyId)
+    ? race.jockeyStats[jockeyId]
+    : undefined;
+}
+
+/**
  * race.odds.win から馬番の単勝オッズを取り出す唯一のヘルパ(Issue #90・#23-B2)。
  * `promptInput.horses`(【出走馬】プロンプト用。下記race.horses.mapコールバック内)と
  * `rows`(`AnalysisResult.rows`。手順(5)の別のrace.horses.mapコールバック内)の**両方**が
@@ -447,6 +462,14 @@ export async function runAnalysis(
         venueKind,
       },
       fieldSize: horseCount,
+      // 騎手の成績(Issue #226)。scrapeRace が `includeJockeyStats` で取った年度別成績(`race.jockeyStats`)から、
+      // 分析日に応じた窓(ライブ=前年+当年・過去日=前々年+前年)で集計する。取得していない(キー自体が無い)・
+      // 取得に失敗した・騎手IDが無い馬は undefined(scorer が「データなし」で補正なし)。
+      jockeyCourseStats: selectJockeyStats(
+        jockeyRecordsOf(race, horseData.shutuba.jockeyId),
+        analysisDate,
+        now(),
+      ),
       config: deps.scorerConfig,
     });
   });

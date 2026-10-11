@@ -8,7 +8,7 @@
  * 対応表: docs/phase1-scraping-plan.md「対象ページとURL一覧」
  */
 
-import type { HorseId, KaisaiDate, RaceId } from "./ids.js";
+import type { HorseId, JockeyId, KaisaiDate, RaceId, RaceIdVenueKind } from "./ids.js";
 import { venueKindOfRaceId } from "./ids.js";
 
 /** race.netkeiba.com のベースURL(PC版・中央レースページ群)。 */
@@ -111,6 +111,18 @@ export function commentUrl(raceId: RaceId): string {
 /** 馬個別ページ(プロフィール)のURL。末尾スラッシュはnetkeibaの正規形に合わせる。 */
 export function horseUrl(horseId: HorseId): string {
   return `${DB_BASE}/horse/${horseId}/`;
+}
+
+/**
+ * 騎手の年度別成績ページ(Issue #226)のURL。中央・地方とも db.netkeiba.com で、年ごとの 1着・2着・3着・着外の
+ * 回数が静的HTMLに入る(`parseJockeyResults`)。**中央の成績が既定のページで、地方の成績は `&syusai=20`**
+ * (2026-10-11 実測: 中央の 01170 は既定で通算850勝、地方の 05496 は `&syusai=20` で通算625勝・芝0出走)。
+ * 競馬場別・距離別の内訳(`jockey/data_summary/`)はプレミアム限定で取得しない(`parse-jockey-results.ts` の冒頭参照)。
+ * @param kind 今回のレースの開催区分(`venueKindOfRaceId`)。中央のレースは中央の成績、地方のレースは地方の成績を読む。
+ */
+export function jockeyResultsUrl(jockeyId: JockeyId, kind: RaceIdVenueKind): string {
+  const base = `${DB_BASE}/jockey/result.html?id=${jockeyId}`;
+  return kind === "nar" ? `${base}&syusai=20` : base;
 }
 
 /**

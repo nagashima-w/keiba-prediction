@@ -250,8 +250,6 @@ const WEIGHTS_HELP: readonly string[] = [
 ];
 const WEIGHT_GROUP_HEADINGS: Readonly<Record<"bias" | "base", string>> = { bias: "環境・状態バイアス補正", base: "基礎スコア" };
 const WEIGHTS_RESET_LABEL = "重みを既定値に戻す";
-/** 騎手成績の重みの補助文: 分析のパイプライン(exe の runAnalysis と同じコード)が騎手の当該コース成績を渡さないため、今は結果に効かない。 */
-const JOCKEY_WEIGHT_HELP = "現在の分析では騎手の当該コース成績を取得していないため、この値を変えても結果は変わりません(exe と同じです)。";
 
 interface FieldSpec {
   readonly kind: FieldKind;
@@ -300,7 +298,7 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
       {
         kind: "text",
         label: f.group === "bias" ? BIAS_WEIGHT_LABELS[f.exeKey] : BASE_SCORE_WEIGHT_LABELS[f.exeKey],
-        help: f.field === "baseScoreWeightJockey" ? JOCKEY_WEIGHT_HELP : null,
+        help: null, // 13項目とも補助文なし(騎手成績の重みも、年度別成績を取得して prior に入れるようになったので、注記は要らない)
         inputmode: "decimal",
       },
     ]),

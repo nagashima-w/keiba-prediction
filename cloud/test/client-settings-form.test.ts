@@ -601,12 +601,14 @@ describe("Issue #218: スコアリングの重みの節(buildSettingsModel の w
     expect(weights({ save: { kind: "saving" } }).resetDisabled).toBe(true);
   });
 
-  it("補助文: 騎手成績の重みは「現在の分析では効かない」旨を書く(分析が騎手の当該コース成績を渡さないため。exe も同じ)。ほかの12項目には書かない。画面に出る文に Issue 番号を書かない", () => {
+  it("補助文: 騎手成績の重みに「変わりません」の注記は無い(騎手の年度別成績を取得して prior に入れるようになった。Issue #226。旧: 分析が成績を渡さず効かない旨を書いていた)。13項目のどれにも書かない。画面に出る文に Issue 番号を書かない", () => {
     const w = weights();
     const byKey = Object.fromEntries(allFields(w).map((f) => [f.key, f.help ?? ""]));
-    expect(byKey["baseScoreWeightJockey"]).toContain("変えても結果は変わりません");
-    for (const f of SCORING_WEIGHT_FIELDS.filter((x) => x.field !== "baseScoreWeightJockey")) {
+    expect(SCORING_WEIGHT_FIELDS).toHaveLength(13); // 下のループが13項目すべてを見ていることの前提
+    expect(Object.keys(byKey)).toContain("baseScoreWeightJockey");
+    for (const f of SCORING_WEIGHT_FIELDS) {
       expect(byKey[f.field], f.field).not.toContain("変わりません");
+      expect(byKey[f.field], f.field).not.toContain("取得していない");
     }
     for (const [key, help] of Object.entries(byKey)) expect(help, key).not.toMatch(/#\d/);
     expect(w.heading).not.toMatch(/#\d/);

@@ -47,6 +47,11 @@ export function fixtureForUrl(url: string): string {
     return loadFixture(RESULTS_BY_HORSE[horseId] ?? "horse_results_2021105857.json");
   }
   if (url.includes("oikiri.html")) return loadFixture("oikiri_202603020211.html");
+  // 騎手の年度別成績(Issue #226)。01170 は実ページ(通算850勝の上位騎手)、それ以外の騎手は別の実ページ(デビュー2年目の騎手)で代用する
+  // (騎手によって複勝率が違い、取り違えを検出できる。どちらも前年+当年の騎乗数が100以上で、補正が掛かる)。
+  if (url.includes("/jockey/result.html")) {
+    return loadFixture(url.includes("id=01170") ? "jockey_results_01170.html" : "jockey_results_01220.html");
+  }
   if (url.includes("type=5")) return loadFixture("odds_wide_202603020211.json");
   if (url.includes("type=7")) return loadFixture("odds_trio_202603020211.json");
   if (url.includes("type=4")) return loadFixture("odds_quinella_202603020211.json");

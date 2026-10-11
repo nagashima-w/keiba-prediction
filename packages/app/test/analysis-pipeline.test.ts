@@ -3808,3 +3808,133 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
     });
   });
 });
+
+describe("runAnalysis(騎手の成績を prior に渡す。Issue #226)", () => {
+  let saved: AnalysisRecord[];
+
+  beforeEach(() => {
+    (buildPriorInput as unknown as Mock).mockClear();
+    saved = [];
+  });
+
+  /** 騎手ID入りの出馬表馬にして、騎手の年度別成績を載せたレースデータを作る(3頭: 1番=J0001・2番=J0002〈成績の取得に失敗〉・3番=騎手IDなし)。 */
+  function raceWithJockeys(
+    raceId: string,
+    jockeyStats: RaceData["jockeyStats"] | undefined,
+  ): RaceData {
+    const base = fakeRaceData(raceId);
+    const ids: Array<string | null> = ["J0001", "J0002", null];
+    const horses = base.horses.map((h, i) => ({ ...h, shutuba: { ...h.shutuba, jockeyId: ids[i]! } }));
+    return { ...base, horses, ...(jockeyStats === undefined ? {} : { jockeyStats }) };
+  }
+
+  /** 4年分の記録。年ごとに騎乗数・3着内が違う値(窓の年を取り違えると合計が食い違う)。 */
+  const RECORDS = [
+    { year: 2026, starts: 400, placed: 120 },
+    { year: 2025, starts: 600, placed: 200 },
+    { year: 2024, starts: 500, placed: 100 },
+    { year: 2023, starts: 450, placed: 90 },
+  ];
+
+  const deps = (race: RaceData): AnalysisPipelineDeps => ({
+    scrape: vi.fn(async () => race),
+    analyze: null,
+    saveAnalysis: vi.fn((rec: AnalysisRecord) => {
+      saved.push(rec);
+      return saved.length;
+    }),
+    now: () => FIXED_NOW, // 2026-07-09T12:34Z = JST 2026/07/09 21:34
+    llmSkipReason: "APIキー未設定",
+    allocationSettings: null,
+  });
+
+  const statsArgs = (): Array<unknown> =>
+    (buildPriorInput as unknown as Mock).mock.calls.map((c) => c[0].jockeyCourseStats);
+
+  type Contribution = {
+    biasName: string;
+    applied: boolean;
+    correction: number;
+    sampleCount?: number;
+    targetRate?: number | null;
+    overallRate?: number | null;
+    reason: string;
+  };
+  const contributionsOf = (rec: AnalysisRecord, umaban: number): Contribution[] =>
+    rec.horses.find((h) => h.umaban === umaban)!.contributions as Contribution[];
+  const jockeyContribution = (umaban: number, rec: AnalysisRecord = saved[0]!): Contribution =>
+    contributionsOf(rec, umaban).find((c) => c.biasName === "騎手成績")!;
+
+  it("ライブ(分析日=今日): 前年+当年の合計を、騎手IDで突合した馬の buildPriorInput に渡す。成績の無い馬・騎手IDなしの馬は undefined", async () => {
+    const race = raceWithJockeys(RACE_ID, { J0001: RECORDS });
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps(race));
+    // 2026 + 2025 = 騎乗1000・3着内320(2024 以前は入らない)。
+    expect(statsArgs()).toEqual([{ starts: 1000, placed: 320 }, undefined, undefined]);
+  });
+
+  it("ライブ: 寄与度ログに『騎手成績』が適用(中央の中立0.22・重み0.15)で載り、成績の無い馬は『データなし』で補正なし", async () => {
+    const race = raceWithJockeys(RACE_ID, { J0001: RECORDS });
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps(race));
+    const j1 = jockeyContribution(1);
+    expect(j1.applied).toBe(true);
+    expect(j1.sampleCount).toBe(1000);
+    expect(j1.targetRate).toBeCloseTo(0.32, 10);
+    expect(j1.overallRate).toBe(0.22);
+    expect(j1.correction).toBeCloseTo((0.32 - 0.22) * 0.15, 10);
+    for (const umaban of [2, 3]) {
+      const c = jockeyContribution(umaban);
+      expect(c.applied).toBe(false);
+      expect(c.reason).toContain("データなし");
+      expect(c.correction).toBe(0);
+    }
+  });
+
+  it("騎手の成績は、その騎手の馬の prior だけを動かす(騎手項を除いた補正は成績の有無で変わらない)", async () => {
+    const a = await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps(raceWithJockeys(RACE_ID, undefined)));
+    const b = await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps(raceWithJockeys(RACE_ID, { J0001: RECORDS })));
+    const withoutJockey = (rec: AnalysisRecord, umaban: number): number =>
+      contributionsOf(rec, umaban)
+        .filter((c) => c.biasName !== "騎手成績")
+        .reduce((s, c) => s + c.correction, 0);
+    expect(withoutJockey(saved[1]!, 1)).toBeCloseTo(withoutJockey(saved[0]!, 1), 12);
+    // 比較の前提: 騎手項は非ゼロ(このフェイクの3頭は戦績が空で prior が上限0.95に張り付くため、prior の値そのものでは
+    // 動きを見られない。prior が実際に動くことは cloud/test/race-day-weights.test.ts が16頭の実フィクスチャで固定している)。
+    expect(jockeyContribution(1, saved[1]!).correction).not.toBe(0);
+    // 成績を載せていない2番の寄与度は、成績の有無で完全に同じ。
+    expect(contributionsOf(saved[1]!, 2)).toEqual(contributionsOf(saved[0]!, 2));
+    expect(a.rows.map((r) => r.umaban)).toEqual(b.rows.map((r) => r.umaban));
+  });
+
+  it("過去日の分析(分析日が JST の今日より前): 前々年+前年の合計(当年の行は分析日より後の騎乗を含むので使わない)", async () => {
+    const race = raceWithJockeys(RACE_ID, { J0001: RECORDS });
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate("20260101"), deps(race));
+    // 分析日 2026/01/01 → 窓は 2024 + 2025 = 騎乗1100・3着内300。
+    expect(statsArgs()).toEqual([{ starts: 1100, placed: 300 }, undefined, undefined]);
+  });
+
+  it("成績を載せていない(jockeyStats なし = 取得しない設定・exe)ときは、全頭 undefined のまま(従来どおり)", async () => {
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps(raceWithJockeys(RACE_ID, undefined)));
+    expect(statsArgs()).toEqual([undefined, undefined, undefined]);
+    expect(jockeyContribution(1).applied).toBe(false);
+    expect(jockeyContribution(1).reason).toContain("データなし");
+  });
+
+  it("地方のレースは地方の中立(0.29)との差で補正する", async () => {
+    const race = raceWithJockeys(NAR_RACE_ID, { J0001: RECORDS });
+    await runAnalysis(parseRaceId(NAR_RACE_ID), parseKaisaiDate("20260709"), deps(race));
+    const j1 = jockeyContribution(1);
+    expect(j1.applied).toBe(true);
+    expect(j1.overallRate).toBe(0.29);
+    expect(j1.correction).toBeCloseTo((0.32 - 0.29) * 0.15, 10);
+  });
+
+  it("騎乗数が100走未満の騎手は補正なし(騎乗数と複勝率は寄与度に残る)", async () => {
+    const race = raceWithJockeys(RACE_ID, { J0001: [{ year: 2026, starts: 99, placed: 50 }] });
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps(race));
+    const j1 = jockeyContribution(1);
+    expect(j1.applied).toBe(false);
+    expect(j1.correction).toBe(0);
+    expect(j1.sampleCount).toBe(99);
+    expect(j1.reason).toContain("100走未満");
+  });
+});

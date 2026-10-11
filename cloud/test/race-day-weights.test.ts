@@ -195,7 +195,7 @@ describe("w1・w2: 重みが分析に効く(発走前・朝の両方)", () => {
     expect(maxDiff).toBeGreaterThan(0.001);
   });
 
-  it("w1: 発走前の分析は保存済みの重みを使う — 1項目ずつ 4 に変えると(ほかは既定値のまま)、このレース(良馬場の 16 頭)では13項目のうち10項目が prior を動かす", async () => {
+  it("w1: 発走前の分析は保存済みの重みを使う — 1項目ずつ 4 に変えると(ほかは既定値のまま)、このレース(良馬場の 16 頭)では13項目のうち11項目が prior を動かす", async () => {
     const base = harness();
     base.settings = DEFAULT_CLOUD_SETTINGS;
     const basePriors = await preRacePriors(base);
@@ -206,10 +206,10 @@ describe("w1・w2: 重みが分析に効く(発走前・朝の両方)", () => {
       const priors = await preRacePriors(h);
       if (priors.some((p, i) => Math.abs(p - basePriors[i]!) > 1e-12)) moved.push(f.field);
     }
-    // 動かない3項目(実測。いずれも重みの渡し漏れではない: scorer-config.test.ts が13項目の対応を固定している):
+    // 動かない2項目(実測。いずれも重みの渡し漏れではない: scorer-config.test.ts が13項目の対応を固定している):
     //  - biasWeightTrackCondition: 道悪(稍重以下)のレースのときだけ発動する補正(bias-track-condition.ts)。このレースでは補正が 0
     //  - biasWeightSummerFatigue: 夏負けの判定(bias-season.ts)に、このレースの出走馬が当たらない
-    //  - baseScoreWeightJockey: 騎手の当該コース成績。分析のパイプライン(runAnalysis。exe も同じ)が jockeyCourseStats を渡さない(`grep -rn jockeyCourseStats packages/app/src` は 0 件)ので、重みが効く入力が無い(既存の挙動)
+    // 騎手成績(baseScoreWeightJockey)は、Issue #226 で動くようになった(分析が騎手の年度別成績を取得して prior に渡す。旧: 入力が無く動かない3項目の1つだった)。
     expect(moved.sort()).toEqual(
       [
         "biasWeightVenue",
@@ -220,11 +220,12 @@ describe("w1・w2: 重みが分析に効く(発走前・朝の両方)", () => {
         "baseScoreWeightRecentForm",
         "baseScoreWeightLast3f",
         "baseScoreWeightCourseDistance",
+        "baseScoreWeightJockey",
         "baseScoreWeightWeightChange",
         "baseScoreWeightCourseFrameBias",
       ].sort(),
     );
-  });
+  }, 120_000); // 14 回(13 項目 + 基準)の取得・計算を回す。Issue #226 で騎手の年度別成績(16 本ぶんの取得と70KB の HTML のパース)が各回に加わり、単独で約 14 秒(既定の 30 秒の約半分)になったので、並列で遅い環境でも落ちないよう上限を延ばした(期待値は変えていない)
 
   it("w2: 朝の prior も保存済みの重みを使い、HEAVY の朝の prior は既定値の朝の prior と別の値", async () => {
     const a = harness();

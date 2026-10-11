@@ -101,6 +101,9 @@ export interface BaseScoreWeights {
  * (neutralPlaceRate)の差分に重みを掛けて補正を作る(バイアス補正と同じ差分パターン)。
  * 中立基準はリーグ平均的な複勝率の目安であり、頭数正規化(prior.ts)で系統的な偏りは吸収するため
  * 概算で足りる。すべてチューニング対象(verifyの寄与度ログを見て調整する)。
+ * ただし**騎手の項だけは中立が別**(`jockeyNeutralPlaceRate`。中央・地方別。Issue #226): 全騎乗の平均複勝率は
+ * 0.33 よりずっと低く、正規化は許容(`normalizeTolerance`)を超えたときだけ働くため、流用すると平均的な騎手が全員
+ * マイナス補正のまま残るレースが出る。
  *
  * 既定重みの較正根拠(過剰補正・クランプ飽和の防止。仕様L135):
  * - recentForm・courseDistance・jockey はいずれも「馬の総合能力」を別スライスで測る相関の強い
@@ -117,6 +120,26 @@ export interface BaseScoreConfig {
    * 平均的な馬の複勝率の目安(既定0.33)。差分 = 対象複勝率 − この値。
    */
   readonly neutralPlaceRate: number;
+  /**
+   * 騎手の複勝率(前年+当年の全体の成績。Issue #226)の中立基準。**中央と地方で別の値**。
+   * 差分 = 騎手の複勝率 − この値。`neutralPlaceRate`(0.33。「馬」の複勝率の目安)を流用しないのは、
+   * 全騎乗の平均複勝率はもっと低いため(平均的な騎手が全員マイナス補正になる)。
+   *
+   * 既定値の根拠: 全騎乗の平均複勝率 = Σ min(3,頭数) / Σ 頭数。レース一覧のフィクスチャで
+   * 中央 0.2159(8開催日・252レース・3,501頭)→ 0.22、地方 0.2906(7開催日・254レース・2,622頭)→ 0.29
+   * (小数2桁に丸めた)。再現: `test/scorer/jockey-neutral-rate.test.ts`(フィクスチャのファイル名を固定して再計算し、
+   * 既定値と一致することを検査している)。
+   */
+  readonly jockeyNeutralPlaceRate: {
+    readonly central: number;
+    readonly nar: number;
+  };
+  /**
+   * 騎手の複勝率で補正を掛ける最小の騎乗数(前年+当年の合計。既定100)。これ未満は補正なし(縮小推定はしない。
+   * ユーザー決定 2026-10-11)。バイアス項目の `minSampleForBias`(2)とは別: 年単位の集計は数百走が普通で、
+   * 数走の騎手(海外の短期免許・デビュー直後)の複勝率で補正しないための下限。
+   */
+  readonly jockeyMinStarts: number;
   /**
    * 近走着順の幾何減衰率(0<r≤1)。直近走の重み1、1走ごとに r 倍に減衰する(既定0.8)。
    */
@@ -243,6 +266,8 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
       courseFrameBias: 1,
     },
     neutralPlaceRate: 0.33,
+    jockeyNeutralPlaceRate: { central: 0.22, nar: 0.29 },
+    jockeyMinStarts: 100,
     recentFormDecay: 0.8,
     recentFormMaxRuns: 6,
     outOfPlaceStep: 0.1,

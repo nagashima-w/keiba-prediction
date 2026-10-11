@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseHorseId,
+  parseJockeyId,
   parseKaisaiDate,
   parseRaceId,
 } from "../../src/scraper/ids.js";
@@ -13,6 +14,7 @@ import {
   gradeWinnerRefererUrl,
   horseResultsApiUrl,
   horseUrl,
+  jockeyResultsUrl,
   narBracketQuinellaOddsPageUrl,
   narExactaOddsPageUrl,
   narOddsPageUrl,
@@ -435,6 +437,26 @@ describe("narBracketQuinellaOddsPageUrl(地方 枠連オッズページ。Issue 
   it("type=b3固定のクエリ付き地方枠連オッズページURLを返すこと", () => {
     expect(narBracketQuinellaOddsPageUrl(narRaceId)).toBe(
       "https://nar.netkeiba.com/odds/index.html?type=b3&race_id=202654071210",
+    );
+  });
+});
+
+describe("jockeyResultsUrl(騎手の年度別成績ページ。Issue #226)", () => {
+  it("中央のレースの騎手は、db.netkeiba.com の result.html?id=…(中央の成績が既定)", () => {
+    expect(jockeyResultsUrl(parseJockeyId("01170"), "central")).toBe(
+      "https://db.netkeiba.com/jockey/result.html?id=01170",
+    );
+  });
+
+  it("地方のレースの騎手は、同じページに &syusai=20(地方の成績)を付ける", () => {
+    expect(jockeyResultsUrl(parseJockeyId("05496"), "nar")).toBe(
+      "https://db.netkeiba.com/jockey/result.html?id=05496&syusai=20",
+    );
+  });
+
+  it("英字つきの騎手IDも、そのままクエリに入る", () => {
+    expect(jockeyResultsUrl(parseJockeyId("a01ad"), "central")).toBe(
+      "https://db.netkeiba.com/jockey/result.html?id=a01ad",
     );
   });
 });

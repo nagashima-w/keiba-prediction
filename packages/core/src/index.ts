@@ -30,6 +30,7 @@ export {
   InvalidIdError,
   kaisaiDateFromNarRaceId,
   parseHorseId,
+  parseJockeyId,
   parseKaisaiDate,
   parseRaceId,
   precedingRaceIdsSameDay,
@@ -37,6 +38,7 @@ export {
   venueKindOfRaceId,
   type CentralVenueInfo,
   type HorseId,
+  type JockeyId,
   type KaisaiDate,
   type RaceId,
   type RaceIdVenueKind,
@@ -48,6 +50,7 @@ export {
   gradeWinnerRefererUrl,
   horseResultsApiUrl,
   horseUrl,
+  jockeyResultsUrl,
   narOddsPageUrl,
   narRaceListSubUrl,
   narTrioOddsAxisUrl,
@@ -93,6 +96,11 @@ export {
   isNonStartResult,
   parseHorseResults,
 } from "./scraper/parse-horse-results.js";
+export {
+  JockeyResultsParseError,
+  parseJockeyResults,
+  type JockeyYearRecord,
+} from "./scraper/parse-jockey-results.js";
 export { OddsParseError, parseOdds } from "./scraper/parse-odds.js";
 export { NarOddsParseError, parseNarOdds } from "./scraper/parse-nar-odds.js";
 export {
@@ -103,6 +111,7 @@ export {
 } from "./scraper/parse-race-result.js";
 export { OikiriParseError, parseOikiri } from "./scraper/parse-oikiri.js";
 export {
+  DEFAULT_JOCKEY_TTL_MS,
   DEFAULT_ODDS_TTL_MS,
   DEFAULT_OIKIRI_TTL_MS,
   DEFAULT_RACE_LIST_TTL_MS,
@@ -232,6 +241,11 @@ export {
   type JockeyCourseStats,
   type WeightChangeInput,
 } from "./scorer/base-score.js";
+export {
+  isLiveAnalysisDate,
+  jockeyStatsWindow,
+  selectJockeyStats,
+} from "./scorer/jockey-stats.js";
 export {
   buildPriorInput,
   computeFieldPriors,

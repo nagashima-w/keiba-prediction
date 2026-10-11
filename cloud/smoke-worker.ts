@@ -10,6 +10,8 @@
  * 本番の dry-run のバンドルに無いことを `test/bundle-guard.test.ts` が固定している。
  */
 import centralHtml from "../fixtures/shutuba_202603020211.html";
+import jockeyResults01170Html from "../fixtures/jockey_results_01170.html";
+import jockeyResults01220Html from "../fixtures/jockey_results_01220.html";
 import oikiriHtml from "../fixtures/oikiri_202603020211.html";
 import oddsJson from "../fixtures/odds_202603020211.json";
 import oddsWideJson from "../fixtures/odds_wide_202603020211.json";
@@ -106,6 +108,10 @@ function route(host: string, path: string): { status: number; body: string } {
   if (host === "race.netkeiba.com" && path.startsWith("/race/oikiri.html") && raceId === "202603020211") {
     return { status: 200, body: oikiriHtml };
   }
+  // Issue #226: 騎手の年度別成績(db ホスト)。事前分析の取得ステップが、騎手の重み > 0(既定)のとき騎手ごとに1本ずつ取る。01170 は実ページ、ほかは別の実ページで代用する。
+  if (host === "db.netkeiba.com" && path.startsWith("/jockey/result.html")) {
+    return { status: 200, body: fixtureText(`https://db.netkeiba.com${path}`) };
+  }
   if (host === "race.netkeiba.com" && path.startsWith("/api/api_get_jra_odds.html") && raceId === "202603020211" && /[?&]type=1(&|$)/.test(path)) {
     return { status: 200, body: JSON.stringify(oddsJson) };
   }
@@ -193,6 +199,7 @@ function fixtureText(url: string): string {
     return JSON.stringify(RESULTS_BY_HORSE[horseId] ?? results2021105857);
   }
   if (url.includes("oikiri.html")) return oikiriHtml;
+  if (url.includes("/jockey/result.html")) return url.includes("id=01170") ? jockeyResults01170Html : jockeyResults01220Html;
   if (url.includes("type=5")) return JSON.stringify(oddsWideJson);
   if (url.includes("type=7")) return JSON.stringify(oddsTrioJson);
   if (url.includes("type=4")) return JSON.stringify(oddsQuinellaJson);

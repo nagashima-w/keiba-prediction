@@ -8,6 +8,8 @@
  * - 馬プロフィール(db.netkeiba.com/horse/{id}/)は取得しない。厩舎所在地は出馬表に含まれ、
  *   全戦績はAjax APIで取れるため、プロフィール取得はリクエスト数を増やすだけで得るものがない
  *   (設計判断: 1レースあたりのGET数を「出馬表1+戦績N+調教1+オッズ1」に抑える)。
+ *   騎手の年度別成績(`options.includeJockeyStats`。Issue #226)は opt-in で、true のときだけ騎手IDで一意にして
+ *   1人1本が追加で取得される(既定OFFでは従来の本数のまま)。
  * - エラー方針: 必須データ(出馬表・オッズ)の失敗は throw。optional データ(調教・組合せオッズ)の
  *   失敗は結果を null/未設定にして警告を積む。戦績は馬単位で握り、1頭の失敗で全体を落とさない。
  * - キャッシュTTL: 戦績・調教(24時間)とレース一覧(6時間)は長TTL、出馬表は当日の更新(取消・馬体重・
@@ -29,8 +31,9 @@ import {
   type ComboOddsFetchState,
 } from "./fetch-combo-odds.js";
 import type { HorseId, KaisaiDate, RaceId } from "./ids.js";
-import { venueKindOfRaceId } from "./ids.js";
+import { parseJockeyId, venueKindOfRaceId } from "./ids.js";
 import { excludeNonStartResults, parseHorseResults } from "./parse-horse-results.js";
+import { parseJockeyResults, type JockeyYearRecord } from "./parse-jockey-results.js";
 import { parseNarOdds } from "./parse-nar-odds.js";
 import { parseOdds } from "./parse-odds.js";
 import { parseOikiri } from "./parse-oikiri.js";
@@ -47,6 +50,7 @@ import type {
 } from "./types.js";
 import {
   horseResultsApiUrl,
+  jockeyResultsUrl,
   narOddsPageUrl,
   narRaceListSubUrl,
   oddsApiUrl,
@@ -90,6 +94,14 @@ export const DEFAULT_RESULTS_TTL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_OIKIRI_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * 騎手の年度別成績のキャッシュ許容鮮度(ミリ秒。Issue #226)。既定24時間(戦績と同じ)。
+ * 年度別の成績は開催日ごとに増えるだけで、分析に使う窓(前年+当年)の数百走に対して1日の変化は小さく、
+ * 前日の夜に取った成績を翌日の発走前の分析でも使い回してよい(取り直しのリクエストを増やさない)。
+ * 鮮度は読み取り側で判定する(`cache.ts`の`maxAgeMs`)。
+ */
+export const DEFAULT_JOCKEY_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
  * オッズのキャッシュ許容鮮度(ミリ秒)。既定60秒。
  * オッズは発走直前まで刻々と変動するため短い。確実に最新を取りたい場合は bypassOddsCache を使う。
  */
@@ -114,6 +126,8 @@ export interface ScrapeTtlConfig {
   readonly oddsMs: number;
   /** レース一覧。 */
   readonly raceListMs: number;
+  /** 騎手の年度別成績(Issue #226)。 */
+  readonly jockeyMs: number;
 }
 
 /** 既定のTTL設定。 */
@@ -123,6 +137,7 @@ const DEFAULT_TTL: ScrapeTtlConfig = {
   oikiriMs: DEFAULT_OIKIRI_TTL_MS,
   oddsMs: DEFAULT_ODDS_TTL_MS,
   raceListMs: DEFAULT_RACE_LIST_TTL_MS,
+  jockeyMs: DEFAULT_JOCKEY_TTL_MS,
 };
 
 /**
@@ -159,10 +174,21 @@ export interface ScrapeRaceOptions {
    * 一例〉が発行されうる。
    */
   readonly includeComboOdds?: boolean;
+  /**
+   * true のとき、出走馬の騎手ごとに年度別成績(`db.netkeiba.com/jockey/result.html?id=…`。地方のレースは
+   * `&syusai=20`)を取得して `RaceData.jockeyStats` に載せる(Issue #226)。既定は `false`(オプトイン)。
+   *
+   * **未指定(既定)時は本関数が発行するURL列・リクエスト数を一切変えない**。true のときは、騎手IDで一意にして
+   * 1人1本を、**既存の取得(出馬表・戦績・調教・オッズ・組合せオッズ)がすべて済んだ後ろ**に足す(既存の発行順を
+   * 変えない。オッズの鮮度〈発走前の分析がキャッシュを迂回して取る〉も、騎手の取得に遅らされない)。
+   * 1人の失敗は警告(種別=騎手)にして続行する(その騎手は `jockeyStats` に載らず、scorer は補正なしにする)。
+   * 呼び出し側は、騎手の重みが 0 のときはこれを true にしない(取得しても使わないため)。
+   */
+  readonly includeJockeyStats?: boolean;
 }
 
 /** 取得中に発生した非致命的な問題の種別。 */
-export type ScrapeWarningKind = "戦績" | "調教" | "組合せオッズ" | "出走取消";
+export type ScrapeWarningKind = "戦績" | "調教" | "組合せオッズ" | "出走取消" | "騎手";
 
 /** 取得中に発生した非致命的な問題(結果には含めるが失敗はさせない)。 */
 export interface ScrapeWarning {
@@ -172,6 +198,8 @@ export interface ScrapeWarning {
   readonly message: string;
   /** 馬単位の警告(戦績)の場合の対象馬ID。 */
   readonly horseId?: HorseId;
+  /** 騎手単位の警告(種別=騎手。Issue #226)の場合の対象騎手ID。 */
+  readonly jockeyId?: string;
 }
 
 /**
@@ -286,6 +314,13 @@ export interface RaceData {
   readonly odds: OddsSnapshot;
   /** 取得メタ情報。 */
   readonly meta: RaceDataMeta;
+  /**
+   * 出走馬の騎手の年度別成績(騎手IDをキーにした素のオブジェクト。新しい年が先)。`options.includeJockeyStats` が
+   * true のときだけ設定される(キー自体が無ければ取得していない)。取得できなかった騎手はキーに載らない
+   * (警告に残る)。IPC/`JSON.stringify` を経由しても値が消えないよう、Map ではなく Record にしている。
+   * 窓の年(前年+当年など)の選択は scorer 側(`scorer/jockey-stats.ts`)で、ここは取得した全年を持つ。
+   */
+  readonly jockeyStats?: Readonly<Record<string, readonly JockeyYearRecord[]>>;
 }
 
 /** エラーオブジェクトから表示用メッセージを取り出す。 */
@@ -724,6 +759,36 @@ export async function scrapeRace(
     };
   }
 
+  // (6) 騎手の年度別成績(optional・オプトイン。Issue #226)。既存の取得がすべて済んだ後ろで、騎手IDで一意にして
+  // 1人1本を順に取る。失敗は騎手単位で握る(警告にして、その騎手は載せない)。騎手IDの無い馬(騎手未定・
+  // リンク欠損)は取得せず、警告も出さない(補正なし=「データなし」で十分に伝わる)。
+  let jockeyStats: Record<string, readonly JockeyYearRecord[]> | undefined;
+  if (options.includeJockeyStats) {
+    jockeyStats = {};
+    const kind = isNar ? "nar" : "central";
+    const seen = new Set<string>();
+    for (const horse of shutuba.horses) {
+      const jockeyId = horse.jockeyId;
+      if (jockeyId === null || seen.has(jockeyId)) {
+        continue;
+      }
+      seen.add(jockeyId);
+      try {
+        const text = await deps.fetcher.fetchText(
+          jockeyResultsUrl(parseJockeyId(jockeyId), kind),
+          { maxAgeMs: ttl.jockeyMs },
+        );
+        jockeyStats[jockeyId] = parseJockeyResults(text);
+      } catch (error) {
+        warnings.push({
+          kind: "騎手",
+          jockeyId,
+          message: `騎手ID ${jockeyId} の年度別成績の取得に失敗しました: ${errorMessage(error)}`,
+        });
+      }
+    }
+  }
+
   const odds: OddsSnapshot = {
     ...baseOdds,
     ...(wideCombo !== undefined ? { wideCombo } : {}),
@@ -752,6 +817,7 @@ export async function scrapeRace(
       comboOdds,
       ...(scratchedHorses.length > 0 ? { scratched: scratchedHorses } : {}),
     },
+    ...(jockeyStats !== undefined ? { jockeyStats } : {}),
   };
 }
 
