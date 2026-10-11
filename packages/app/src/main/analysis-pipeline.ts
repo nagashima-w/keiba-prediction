@@ -619,6 +619,10 @@ export async function runAnalysis(
             pace: r.pace,
             last3f: r.last3f,
           })),
+          // 戦績の走数(Issue #261。初出走の明示)。0 のときだけプロンプトの行に「戦績=初出走(出走経験なし)」が出る。
+          // 戦績の取得失敗(results=null)は null(不明)にして、初出走とは書かせない。結果の行の careerRunCount
+          // (下の rows)と同じ元データ・同じ式。除外・取消の行は scrapeRace が除き、分析日以降は #39 が除いた後の件数。
+          careerRunCount: horseData.results === null ? null : horseData.results.length,
           // 条件替わり(妙味材料)判定用の過去走条件(既存runsとは別配列。互いに影響しない)。
           runConditions: conditionChangeRunsOf(horseData.results),
           // 馬体重トレンド(タスク#6): 過去走のbodyWeight(新しい順)と当日のshutuba.bodyWeightを

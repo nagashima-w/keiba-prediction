@@ -454,8 +454,14 @@ export interface RaceDevelopmentHorseInput {
   readonly frontRunningScore: number | null;
 }
 
-/** 想定ペース(3択)。 */
-export type PaceEstimate = "スロー" | "平均" | "ハイ";
+/**
+ * 想定ペース。逃げ馬の頭数から求める3択に、出走全頭の脚質が不明で想定できない場合の「不明」を加えた
+ * 4値(Issue #262)。
+ */
+export type PaceEstimate = KnownPaceEstimate | "不明";
+
+/** 逃げ馬の頭数から求める想定ペース(3択)。「不明」は含まない。 */
+type KnownPaceEstimate = "スロー" | "平均" | "ハイ";
 
 /** 展開想定(1レース分)。 */
 export interface RaceDevelopment {
@@ -468,7 +474,10 @@ export interface RaceDevelopment {
    * または先行力スコアが算出できる馬が1頭も居なければ null。
    */
   readonly paceSetterUmaban: number | null;
-  /** 想定ペース(逃げ馬の頭数から推定。estimatePace と同じ閾値)。 */
+  /**
+   * 想定ペース(逃げ馬の頭数から推定。estimatePace と同じ閾値)。出走全頭の脚質が不明なときは「不明」
+   * (Issue #262。この場合 paceReason は「脚質のデータが無い…」・恵まれる/損する脚質は空)。
+   */
   readonly pace: PaceEstimate;
   /** 想定ペースの根拠(日本語文。逃げ馬の頭数・主導権候補を明示)。 */
   readonly paceReason: string;
@@ -487,7 +496,7 @@ const STABILITY_RANK: Record<LegStyleStability, number> = {
 };
 
 /** 逃げ馬の頭数から想定ペース(3択)を求める(estimatePace と同じ閾値)。 */
-function paceEstimateFromFrontRunnerCount(frontRunnerCount: number): PaceEstimate {
+function paceEstimateFromFrontRunnerCount(frontRunnerCount: number): KnownPaceEstimate {
   if (frontRunnerCount <= 0) return "スロー";
   if (frontRunnerCount === 1) return "平均";
   return "ハイ";
@@ -521,7 +530,7 @@ function isFuryoTrackCondition(trackCondition: string | null | undefined): boole
  * 従来の対応表を一切変えない(不良ルールは地方専用)。
  */
 function favoredStylesForPace(
-  pace: PaceEstimate,
+  pace: KnownPaceEstimate,
   venueKind?: RaceIdVenueKind,
   trackCondition?: string | null,
 ): {
@@ -600,6 +609,24 @@ export function buildRaceDevelopment(
         paceSetterUmaban = c.umaban;
       }
     }
+  }
+
+  // 出走全頭の脚質が不明(新馬戦など)のときは、ペースを想定しない(Issue #262)。逃げ馬の頭数は
+  // 「判定できた馬の中の逃げ馬」であり、全頭不明の「逃げ0頭」は「逃げ馬がいない」ではなく
+  // 「データが無い」だけなのに、従来は「逃げ馬不在でスロー(前残り)想定」と断定し、恵まれる脚質
+  // (逃げ・先行)まで出していた。出走馬が空の入力(production では到達しない)は従来どおり
+  // (スロー)にとどめ、「出走馬がいて、既知の脚質が1頭もいない」場合だけを不明とする。
+  // 一部だけ不明のときは従来のまま(既知の馬の分布からペースを想定する)。
+  if (horses.length > 0 && unknownCount === horses.length) {
+    return {
+      styleCounts,
+      unknownCount,
+      paceSetterUmaban: null,
+      pace: "不明",
+      paceReason: "脚質のデータが無いため想定しない(出走全頭が脚質不明)",
+      favoredStyles: [],
+      disfavoredStyles: [],
+    };
   }
 
   const pace = paceEstimateFromFrontRunnerCount(styleCounts.逃げ);

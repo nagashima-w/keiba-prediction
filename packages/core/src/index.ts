@@ -88,7 +88,9 @@ export {
   parseHorseProfile,
 } from "./scraper/parse-horse-profile.js";
 export {
+  excludeNonStartResults,
   HorseResultsParseError,
+  isNonStartResult,
   parseHorseResults,
 } from "./scraper/parse-horse-results.js";
 export { OddsParseError, parseOdds } from "./scraper/parse-odds.js";

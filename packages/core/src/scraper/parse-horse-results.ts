@@ -379,3 +379,31 @@ function parseRow(
     winnerName: textOrNull($cells.eq(COL.winner).text()),
   };
 }
+
+/**
+ * 出走しなかった行(競走除外・出走取消)かどうかを判定する(Issue #261)。
+ *
+ * netkeiba の戦績には、除外・取消になったレースの行も残る。着順セルは「除」「取」(実物で観測したのは
+ * 「除」だけ)で、オッズ・人気・通過順・上りは空、**ペース欄にはそのレース全体の前後半3Fが入る**
+ * (馬自身の値ではない)。この行を1走として数えると、過去ペース傾向・レース間隔・前走騎手・馬体重推移・
+ * ローテーション適性(prior)に、走っていないレースが混ざる。実例: 東京5R(2026-10-11)の
+ * マイネルユンフェンは、10/04 の東京2R(2歳新馬)で除外されており、「後傾(先行有利)1回」と出た。
+ * 実物の応答は `fixtures/horse_results_2024103584.json`。
+ *
+ * 判定は、着順が非数値で、文字列が「除」または「取」で始まるもの(「除外」「取消」の完全な語も含む。
+ * 「取」は未観測なので先頭一致で受ける)。**「中」(中止)・「失」(失格)は走っているので残す。**
+ * 着順セルが空(`null`)の行は、判定材料が無いので残す(除外と決めつけない)。
+ */
+export function isNonStartResult(result: Pick<HorseRaceResult, "finishPosition">): boolean {
+  const finish = result.finishPosition;
+  return finish !== null && finish.kind === "非数値" && /^(除|取)/.test(finish.text);
+}
+
+/**
+ * 戦績から、出走しなかった行({@link isNonStartResult})を除く。順序は保つ。入力は変更しない。
+ * `scrapeRace` が戦績の取得直後に1回だけ呼ぶ(取消馬を出走馬から除く #154 と同じく、分析日に依らない
+ * 事実なので scraper で除く)。
+ */
+export function excludeNonStartResults(results: readonly HorseRaceResult[]): HorseRaceResult[] {
+  return results.filter((r) => !isNonStartResult(r));
+}

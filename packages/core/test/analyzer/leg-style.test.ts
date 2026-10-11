@@ -536,6 +536,74 @@ describe("buildRaceDevelopment(展開想定の構造化)", () => {
   });
 });
 
+describe("buildRaceDevelopment(出走全頭の脚質が不明のときはペースを想定しない。Issue #262)", () => {
+  /** n 頭すべての脚質が不明(新馬戦など)。 */
+  function allUnknown(n: number): RaceDevelopmentHorseInput[] {
+    return Array.from({ length: n }, (_, i) => ({
+      umaban: i + 1,
+      style: null,
+      stability: "不明" as const,
+      frontRunningScore: null,
+    }));
+  }
+
+  it("全頭不明なら、想定ペースは「不明」・根拠に「脚質のデータが無い」・恵まれる/損する脚質は空・主導権候補は null になること", () => {
+    const d = buildRaceDevelopment(allUnknown(11));
+    // 前提: 11頭すべてが不明で、既知の脚質が1頭もいない(退化入力ではなく、判定の対象であること)。
+    expect(d.unknownCount).toBe(11);
+    expect(d.styleCounts).toEqual({ 逃げ: 0, 先行: 0, 差し: 0, 追込: 0 });
+    expect(d.pace).toBe("不明");
+    expect(d.paceReason).toContain("脚質のデータが無い");
+    expect(d.favoredStyles).toEqual([]);
+    expect(d.disfavoredStyles).toEqual([]);
+    expect(d.paceSetterUmaban).toBeNull();
+  });
+
+  it("全頭不明の判定は頭数に依らないこと(1頭・2頭・16頭)", () => {
+    for (const n of [1, 2, 16]) {
+      const d = buildRaceDevelopment(allUnknown(n));
+      expect(d.unknownCount, `${n}頭`).toBe(n);
+      expect(d.pace, `${n}頭`).toBe("不明");
+    }
+  });
+
+  it("全頭不明なら、地方・馬場不良でも想定ペースは「不明」で、恵まれる/損する脚質は空のままであること", () => {
+    for (const [venueKind, trackCondition] of [
+      ["nar", "良"],
+      ["nar", "不良"],
+      ["central", "不良"],
+    ] as const) {
+      const d = buildRaceDevelopment(allUnknown(8), venueKind, trackCondition);
+      expect(d.unknownCount, `${venueKind}/${trackCondition}`).toBe(8);
+      expect(d.pace, `${venueKind}/${trackCondition}`).toBe("不明");
+      expect(d.favoredStyles, `${venueKind}/${trackCondition}`).toEqual([]);
+      expect(d.disfavoredStyles, `${venueKind}/${trackCondition}`).toEqual([]);
+    }
+  });
+
+  it("一部だけ不明(既知が1頭でもいる)なら、従来どおり逃げ馬の頭数からペースを想定すること(根拠に「脚質のデータが無い」は出ない)", () => {
+    const noFrontRunner: RaceDevelopmentHorseInput[] = [
+      { umaban: 1, style: "差し", stability: "安定", frontRunningScore: 0.5 },
+      ...allUnknown(3).map((h) => ({ ...h, umaban: h.umaban + 1 })),
+    ];
+    const slow = buildRaceDevelopment(noFrontRunner);
+    expect(slow.unknownCount).toBe(3); // 前提: 3頭は不明、1頭は既知。
+    expect(slow.pace).toBe("スロー");
+    expect(slow.paceReason).not.toContain("脚質のデータが無い");
+    expect(slow.favoredStyles).toEqual(["逃げ", "先行"]);
+    expect(slow.disfavoredStyles).toEqual(["追込"]);
+
+    const oneFrontRunner: RaceDevelopmentHorseInput[] = [
+      { umaban: 1, style: "逃げ", stability: "安定", frontRunningScore: 0.05 },
+      ...allUnknown(3).map((h) => ({ ...h, umaban: h.umaban + 1 })),
+    ];
+    const mid = buildRaceDevelopment(oneFrontRunner);
+    expect(mid.unknownCount).toBe(3);
+    expect(mid.pace).toBe("平均");
+    expect(mid.paceSetterUmaban).toBe(1);
+  });
+});
+
 describe("buildRaceDevelopment(地方/コース形態の有利脚質補正)", () => {
   // pace(想定ペース)は styleCounts.逃げ の頭数のみで決まる(paceEstimateFromFrontRunnerCount)。
   // スロー=逃げ0頭・平均=逃げ1頭・ハイ=逃げ2頭以上、となる最小構成を用意する。

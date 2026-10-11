@@ -30,7 +30,7 @@ import {
 } from "./fetch-combo-odds.js";
 import type { HorseId, KaisaiDate, RaceId } from "./ids.js";
 import { venueKindOfRaceId } from "./ids.js";
-import { parseHorseResults } from "./parse-horse-results.js";
+import { excludeNonStartResults, parseHorseResults } from "./parse-horse-results.js";
 import { parseNarOdds } from "./parse-nar-odds.js";
 import { parseOdds } from "./parse-odds.js";
 import { parseOikiri } from "./parse-oikiri.js";
@@ -564,7 +564,11 @@ export async function scrapeRace(
         horseResultsApiUrl(horse.horseId),
         { maxAgeMs: ttl.resultsMs },
       );
-      results.set(horse.horseId, parseHorseResults(text));
+      // 出走しなかった行(除外・取消。Issue #261)はここで除く。馬の戦績ではなく「そのレースで走らなかった」
+      // 記録で、ペース欄にはレース全体の値が入っている。除かないと、過去ペース傾向・レース間隔・前走騎手・
+      // ローテーション適性(prior)に走っていないレースが混ざる。分析日に依らない事実なので、取消馬を
+      // 出走馬から除く上の(1b)と同じく scraper で除く(日付依存の #39 は runAnalysis 側のまま)。
+      results.set(horse.horseId, excludeNonStartResults(parseHorseResults(text)));
     } catch (error) {
       warnings.push({
         kind: "戦績",

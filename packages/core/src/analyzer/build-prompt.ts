@@ -163,8 +163,22 @@
  * 見るが scorer は減点する)と `.2`(両方なし)を分けて比べられるようにする。(2) 期間一括の重複判定は現行の版で
  * 分析済みのレースを飛ばすので、版が同じだと `.1` で分析した過去のレースを新しい scorer で再分析できない。
  * この対照(default)のPROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * "2026-10-11.1"(Issue #261・#260・#262: 初出走の明示・出力の日本語化・全頭脚質不明のペース。2026-10-11 ユーザー決定。
+ * 3件の文面の変更を1回の版上げにまとめた): (1) #261: 各馬の行の「3着内率」の直後に、戦績が0走と確定している馬
+ * (`PromptHorse.careerRunCount===0`)だけ「戦績=初出走(出走経験なし)」を出し、【指示】に、初出走の馬には
+ * 過去の出走を前提にした根拠を書かないよう指示する文を足した。取得に失敗した馬(null)・未指定の馬の行は従来とバイト一致。
+ * (2) #260: 【指示】の highlights・concerns の説明の直後に「出力するすべての文章(reason・highlights・concerns)は
+ * 日本語で書く。英単語を混ぜない(馬名などの固有名詞と、kg・m などの単位を除く)」を足した(従来 highlights・concerns には
+ * 「日本語で」の指示が無く、懸念事項に英単語が混ざった実例があった)。例として英単語は挙げない。
+ * (3) #262: 出走全頭の脚質が不明(新馬戦など)のとき、【展開想定】の「ペース想定」を「不明(根拠: 脚質のデータが無い…)」にし、
+ * 主導権候補を「該当馬なし(脚質のデータが無い)」、恵まれる脚質・損する脚質を「不明」にした(従来は「逃げ馬不在でスロー(前残り)想定」
+ * と断定し、逃げ・先行が恵まれると書いた)。一部だけ不明のときは従来のまま。
+ * 同じ作業で、戦績から出走しなかった行(除外・取消)を除く修正(#261。scrapeRace)も入ったが、これは文面を変えない
+ * (入力が変わるだけ。3着内率〈ローテーション適性〉も、除外の行を持つ馬では変わる)。見出し【】は増やしていない。
+ * この対照(default)のPROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-10-09.2";
+export const PROMPT_VERSION = "2026-10-11.1";
 
 export {
   CLIP_VARIANTS,
@@ -298,6 +312,13 @@ export interface PromptHorse {
    * それをLLMプロンプト用に表出する専用の配線であり、scorer側の計算には一切影響しない。
    */
   readonly marginTrend?: MarginTrendSummary | null;
+  /**
+   * 戦績の走数(Issue #261)。**0 のときだけ**この馬の行の「3着内率」の直後に「戦績=初出走(出走経験なし)」を出す。
+   * null(戦績の取得失敗=不明)・undefined(未指定)・1以上のときは何も出さない(取得に失敗した馬を
+   * 初出走と言わないため、`runs` が空かどうかでは判定せず、専用の値で受ける)。呼び出し側は、除外・取消の
+   * 行を除き(scrapeRace)、分析日で絞った(#39)後の戦績の件数を渡す。scorer の計算には影響しない。
+   */
+  readonly careerRunCount?: number | null;
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
   /**
@@ -693,11 +714,16 @@ export function buildPrompt(input: BuildPromptInput): string {
       `差し${development.styleCounts.差し}頭 / 追込${development.styleCounts.追込}頭` +
       (development.unknownCount > 0 ? ` / 不明${development.unknownCount}頭` : ""),
   );
+  // 出走全頭の脚質が不明(development.pace==="不明"。新馬戦など。Issue #262)のときは、
+  // 「逃げ・先行タイプ不在」「特になし」と断定せず、脚質のデータが無いことをそのまま伝える。
+  const paceUnknown = development.pace === "不明";
   lines.push(
     `主導権候補: ${
       development.paceSetterUmaban !== null
         ? `馬番${development.paceSetterUmaban}`
-        : "該当馬なし(逃げ・先行タイプ不在)"
+        : paceUnknown
+          ? "該当馬なし(脚質のデータが無い)"
+          : "該当馬なし(逃げ・先行タイプ不在)"
     }`,
   );
   lines.push(`ペース想定: ${development.pace}(根拠: ${development.paceReason})`);
@@ -705,14 +731,18 @@ export function buildPrompt(input: BuildPromptInput): string {
     `恵まれる脚質: ${
       development.favoredStyles.length > 0
         ? development.favoredStyles.join("・")
-        : "特になし"
+        : paceUnknown
+          ? "不明"
+          : "特になし"
     }`,
   );
   lines.push(
     `損する脚質: ${
       development.disfavoredStyles.length > 0
         ? development.disfavoredStyles.join("・")
-        : "特になし"
+        : paceUnknown
+          ? "不明"
+          : "特になし"
     }`,
   );
   // (a) 全venue共通: 上記は逃げ馬の頭数から機械的に推定した想定であり、会場・回り(右/左)・
@@ -773,9 +803,15 @@ export function buildPrompt(input: BuildPromptInput): string {
     // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
     const marginTrendSegment =
       h.marginTrend != null ? `, 着差傾向=${h.marginTrend.note}` : "";
+    // 初出走の明示(Issue #261): 戦績が0走と確定している馬(careerRunCount===0)だけ「3着内率」の直後に
+    // 出す。null(戦績の取得失敗=不明)・undefined(未配線の呼び出し元・プレビュー)・1以上は出さない
+    // (取得に失敗した馬を初出走と言わない。未指定の行はバイト不変)。過去走が無いことを「データ不足」
+    // 「不明」の羅列だけで伝えると、LLM が過去の出走経験を作る余地が残るため、事実として明示する。
+    const debutSegment = h.careerRunCount === 0 ? "戦績=初出走(出走経験なし), " : "";
     lines.push(
       `馬番${h.umaban} ${h.horseName}: ` +
         `3着内率=${h.prior.toFixed(2)}, ` +
+        debutSegment +
         `脚質=${a.style ?? "不明"}(安定度:${a.stability}), ` +
         `過去ペース傾向=${summarizePastPaceTendency(h.runs, { recentRuns })}, ` +
         bodyWeightTrendSegment +
@@ -841,6 +877,13 @@ export function buildPrompt(input: BuildPromptInput): string {
     "highlights・concerns の各項目には、単勝オッズ・人気・参考EVを材料として挙げないでください" +
       "(これらを予想印の判断に使うことは従来どおりで構いません)。",
   );
+  // 出力の日本語化(Issue #260): reason には「日本語で」の指示があったが、highlights・concerns には
+  // 「3着内率」の表記の指示しか無く、懸念事項に英単語が混ざった実例があった(2026-10-11、京都5R)。
+  // 例として英単語を挙げない(具体的な語を例に書くと LLM がそのまま返すため)。
+  lines.push(
+    "出力するすべての文章(reason・highlights・concerns)は日本語で書いてください。" +
+      "英単語・英語の略称を混ぜないでください(馬名などの固有名詞と、kg・m などの単位を除く)。",
+  );
   // 休み明け・馬体重の増減の扱い(Issue #212・#210-A): 「休み明け」「馬体重-9kg」が一律にマイナス材料として
   // 出ていた。その馬自身の過去の実績(各馬の行の「休み明け実績」「ベスト体重」)と照らして判断させる。
   // 新しい見出し【】は作らない(設定画面のプレビュー注記が列挙する見出しの集合を変えないため)。
@@ -853,6 +896,12 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push(
     "実績が「サンプル2走未満」「サンプル不足」と書かれている場合は、実績が乏しいので中立に扱い、強調材料にも懸念事項にも挙げないでください。" +
       "中央⇄地方の転入に伴う間隔は、放牧明けか移籍に伴う空きかを区別できません(条件替わりの表記も参考にし、間隔の長さだけで判断しないでください)。",
+  );
+  // 初出走の馬の扱い(Issue #261): 各馬の行の「戦績=初出走」と対にする指示。材料の有無に依らず常に出す。
+  lines.push(
+    "戦績が「初出走」の馬には、過去の出走に基づく材料(脚質・過去ペース傾向・レース間隔・馬体重の推移・着差など)が存在しません。" +
+      "過去の出走経験を前提にした根拠(「〜の経験がある」など)を書かないでください。" +
+      "調教・厩舎コメント・展開など、各馬の行にある材料だけで判断してください。",
   );
   if (wetScenario) {
     lines.push(
