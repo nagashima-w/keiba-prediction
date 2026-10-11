@@ -37,6 +37,11 @@ export interface DayBet {
   readonly comboKey: string;
   readonly stake: number;
   readonly odds: number | null;
+  /**
+   * 分析時点の期待値(`analysis_bets.ev`)。**的中確率 × 採用したオッズ**なので、{@link betHitProb} で的中確率に戻せる(Issue #264)。
+   * 省略・null は確率を導けない買い目(見込みの的中数に入れない)。
+   */
+  readonly ev?: number | null;
 }
 
 export type BetStatus = "hit" | "miss" | "unjudged";
@@ -45,6 +50,24 @@ export type BetStatus = "hit" | "miss" | "unjudged";
 export interface BetOutcome extends DayBet {
   readonly status: BetStatus;
   readonly payout: number;
+}
+
+/**
+ * 買い目の分析時点の的中確率(Issue #264)。`ev / odds`。
+ *
+ * 根拠: `analysis_bets` には的中確率の列が無いが、`odds` と `ev` が保存されていて、配分が使う `ev` は券種を問わず「的中確率 × 採用したオッズ」で作られている
+ * (複勝: 補正後の3着内率 × 複勝オッズ下限〈`packages/core/src/ev/expected-value.ts` の `HorseEv.ev`〉、組合せ・単勝: 同時分布から導いた的中確率 × オッズ〈`packages/core/src/ev/combo-bet-allocation.ts` の単勝候補 `ev = winProb * odds` と組合せ候補 `ev = hitProb * odds`〉)。
+ * 導けない(odds・ev が無い、odds が 0 以下、ev が負、有限でない、確率が 1 を超える)ときは null を返し、**確率を捏造しない**。
+ */
+export function betHitProb(odds: number | null | undefined, ev: number | null | undefined): number | null {
+  if (odds === null || odds === undefined || ev === null || ev === undefined) {
+    return null;
+  }
+  if (!Number.isFinite(odds) || !Number.isFinite(ev) || odds <= 0 || ev < 0) {
+    return null;
+  }
+  const p = ev / odds;
+  return p > 1 + 1e-9 ? null : Math.min(p, 1);
 }
 
 const COMBO_BET_TYPES: ReadonlySet<string> = new Set(["wide", "trio", "quinella", "exacta", "trifecta", "bracketQuinella"]);

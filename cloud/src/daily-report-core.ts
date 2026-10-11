@@ -14,7 +14,7 @@
  * 1 日 1 回で確定し、作成後に取り込まれた結果や追加の分析は反映しない。
  *
  * ## 段階(1 回のアラームで 1 段階だけ進める)
- * `list`(その日の分析を、レースごとに最新の 1 件に絞って列挙)→ `gather`({@link REPORT_READ_CHUNK} レースずつ読んでダイジェスト化)→ `generate`(LLM を 1 回)→
+ * `list`(その日の分析を、レースごとに最新の 1 件に絞って列挙)→ `gather`({@link REPORT_READ_CHUNK} レースずつ読んでダイジェスト化)→ `generate`(直前 27 日の再集計を 1 回読み〈Issue #264。D1 の batch 1 回=サブリクエスト 1〉、その日の統計に足して「直近 28 日の累計」にしてから、LLM を 1 回)→
  * `save`(D1 に保存)→ `notify`(Discord に 1 回)。段階を分ける理由: Workers Free の「1 呼び出し 50 サブリクエスト」。1 レースの読み出しは約 4(分析の詳細の D1 の batch・
  * R2 の get・読み出しの回数の記録・配分の batch)なので、{@link REPORT_READ_CHUNK}(8)レースで約 33 に収める(結果の読み出し 1 を含む)。
  *
@@ -29,7 +29,9 @@ import { isRealYmd } from "../client/date";
 import { jstKaisaiDate } from "./auto-run-plan";
 import { buildDayStats, buildRaceDigest, type DayStats, type DigestTopHorse, type RaceDigest } from "./daily-report-digest";
 import { buildReportEmbed } from "./daily-report-embed";
-import { buildReportPrompt, parseNarrative, raceTitle, REPORT_MAX_TOKENS, type Narrative } from "./daily-report-prompt";
+import { buildReportPrompt, parseNarrative, raceTitle, REPORT_MAX_TOKENS, REPORT_PROMPT_VERSION, type Narrative } from "./daily-report-prompt";
+import { buildRollingSummary, rollingPriorWindow, type PeriodStats, type RollingSummary } from "./period-stats";
+import { addDaysToKaisaiDate } from "./result-dispatch";
 import { serializeLlmCalls, type LlmCallRecord } from "./llm-calls";
 import { createCallLog, createCloudModelSelectors, createMeteredSender, redactSecrets, withErrorLog, type ModelSelectorFor } from "./llm-run";
 import type { CloudLlm } from "./llm-sender";
@@ -93,6 +95,11 @@ export interface ReportSource {
   listDayAnalyses(kaisaiDate: string): Promise<readonly DayAnalysisRef[]>;
   /** 指定した分析の材料(items と同じ順。分析が見つからなければ null)。 */
   readRaces(items: readonly DayAnalysisRef[]): Promise<ReadonlyArray<RaceInput | null>>;
+  /**
+   * 期間 `[fromDate, toDate]`(開催日 YYYYMMDD。両端を含む)の統計を D1 から再集計する(Issue #264。レースごとに最新の分析・日報の 1 日の統計と同じ集計)。
+   * 日報は、その日を除く直前 27 日をこれで読み、その日の統計に足して「直近 28 日の累計」にする。読めなければ例外(段階の再試行に任せる)。
+   */
+  readPeriodStats(fromDate: string, toDate: string): Promise<PeriodStats>;
 }
 
 export interface ReportStore {
@@ -137,6 +144,12 @@ export interface ReportBody {
   readonly narrativeRaw: string | null;
   /** 文章が無い・生の文章のときの理由(固定文言)。 */
   readonly note: string | null;
+  /**
+   * 直前 27 日と直近 28 日の累計(Issue #264。LLM に渡した数字そのもの。画面と Discord が出す)。**この項目を持つ前の日報には無い**。
+   */
+  readonly rolling?: RollingSummary;
+  /** 日報を書いたプロンプトの版(`REPORT_PROMPT_VERSION`)。持つ前の日報には無い(= 「偶然」の定型の前提を渡していた版)。 */
+  readonly promptVersion?: string;
 }
 
 export interface ReportRecord {
@@ -196,6 +209,8 @@ interface Job {
   llmText: string | null;
   llmModel: string | null;
   llmGaveUp: boolean;
+  /** 直近 28 日の累計(Issue #264)。generate の段階で 1 回読んで永続化する(LLM の再試行で読み直さない)。無い・null は未読(旧版が積んだジョブも同じ)。 */
+  rolling?: RollingSummary | null;
   calls: LlmCallRecord[];
   record: ReportRecord | null;
   notify: "pending" | "sending";
@@ -233,12 +248,6 @@ function cut(text: string, max: number): string {
   return `${head}…`;
 }
 
-/** 開催日(YYYYMMDD)を日数だけずらす(JST の暦日。`Date.UTC` の正規化で月またぎも合う)。 */
-function shiftKaisaiDate(kaisaiDate: string, deltaDays: number): string {
-  const d = new Date(Date.UTC(Number(kaisaiDate.slice(0, 4)), Number(kaisaiDate.slice(4, 6)) - 1, Number(kaisaiDate.slice(6, 8))) + deltaDays * 86_400_000);
-  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
-}
-
 function errorText(error: unknown): string {
   return redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 200);
 }
@@ -261,7 +270,7 @@ export class DailyReportCore {
     if (kaisaiDate > today) {
       return { accepted: false, reason: "future-date" };
     }
-    if (input.mode !== "manual" && kaisaiDate < shiftKaisaiDate(today, -REPORT_MAX_AGE_DAYS)) {
+    if (input.mode !== "manual" && kaisaiDate < addDaysToKaisaiDate(today, -REPORT_MAX_AGE_DAYS)) {
       return { accepted: false, reason: "too-old" };
     }
     const existing = this.deps.kv.get<Job>(jobKey(kaisaiDate));
@@ -375,11 +384,19 @@ export class DailyReportCore {
     const digests = [...job.digests].sort((a, b) => (a.raceId < b.raceId ? -1 : a.raceId > b.raceId ? 1 : 0));
     const stats = buildDayStats(digests);
     let current = job;
+    if (current.rolling === undefined || current.rolling === null) {
+      // 直近 28 日の累計(Issue #264): その日を除く直前 27 日を再集計して、その日の統計に足す。LLM の前に読み、永続化する(LLM の再試行で読み直さない)。
+      // 読めなければ投げる(段階の再試行 → 上限で failed)。4 週の累計なしの日報を静かに確定させない(日報は 1 日 1 回で上書きできない)。
+      const window = rollingPriorWindow(job.kaisaiDate);
+      const prior = await this.deps.source.readPeriodStats(window.fromDate, window.toDate);
+      current = { ...current, rolling: buildRollingSummary(job.kaisaiDate, stats, prior) };
+      this.putJob(current);
+    }
     if (this.deps.llm !== undefined && current.llmText === null && !current.llmGaveUp) {
       // 試行は呼ぶ前に永続化する(落ちても無限に続かない)。
       current = { ...current, llmAttempts: current.llmAttempts + 1 };
       this.putJob(current);
-      const outcome = await this.callLlm(buildReportPrompt({ kaisaiDate: job.kaisaiDate, digests, stats }));
+      const outcome = await this.callLlm(buildReportPrompt({ kaisaiDate: job.kaisaiDate, digests, stats, rolling: current.rolling! }));
       if (outcome.ok) {
         // 応答は成功した直後に書く(保存の失敗の再試行で LLM を呼び直さない)。
         current = { ...current, llmText: outcome.text, llmModel: outcome.model, calls: [...current.calls, ...outcome.calls] };
@@ -469,7 +486,7 @@ export class DailyReportCore {
       totalStake: stats.totalStake,
       totalReturn: stats.totalReturn,
       summary,
-      body: { format: 1, kaisaiDate: job.kaisaiDate, stats, races, narrative, narrativeRaw, note },
+      body: { format: 1, kaisaiDate: job.kaisaiDate, stats, races, narrative, narrativeRaw, note, ...(job.rolling === undefined || job.rolling === null ? {} : { rolling: job.rolling }), promptVersion: REPORT_PROMPT_VERSION },
       llmCallsJson: serializeLlmCalls(job.calls.length === 0 ? null : job.calls),
     };
   }
@@ -498,7 +515,7 @@ export class DailyReportCore {
     const body = record.body;
     const narrative = body.narrative ?? (record.summary === null ? null : { summary: record.summary, good: [], improve: [], races: [] });
     const link = this.deps.appBaseUrl === undefined ? undefined : buildReportLink(this.deps.appBaseUrl, job.kaisaiDate);
-    const embed = buildReportEmbed({ kaisaiDate: job.kaisaiDate, stats: body.stats, narrative, note: body.note, link });
+    const embed = buildReportEmbed({ kaisaiDate: job.kaisaiDate, stats: body.stats, narrative, note: body.note, link, rolling: body.rolling });
     // 送る前に sending を書く(ここまで同期。落ちても再送しない)。
     this.putJob({ ...job, notify: "sending" });
     let ok = true;

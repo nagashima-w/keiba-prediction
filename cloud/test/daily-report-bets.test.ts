@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { judgeBets, type DayBet, type RaceResultData } from "../src/daily-report-bets";
+import { betHitProb, judgeBets, type DayBet, type RaceResultData } from "../src/daily-report-bets";
 import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
 import type { RaceComboPayoutsReadResult, RaceResultEntry, StoredAnalysis, VerifyDataSource } from "../../packages/core/src/ev/analysis-store-types.js";
 
@@ -211,5 +211,38 @@ describe("Issue #246: judgeBets と core の computeVerifyReport(proposedBet)の
     expect(pb.trifecta.totalReturn).toBeGreaterThan(0);
     expect(pb.bracketQuinella.totalReturn).toBeGreaterThan(0);
     expect(pb.trio.unjudgedCount).toBe(1);
+  });
+});
+
+describe("betHitProb(Issue #264: 分析時点の的中確率。保存済みの ev / odds から導く)", () => {
+  // 根拠: 買い目の ev は「的中確率 × 採用したオッズ」(複勝は補正後の3着内率 × 複勝オッズ下限、組合せは同時分布から導いた的中確率 × オッズ)で、
+  // analysis_bets に odds と ev が保存されている。だから 的中確率 = ev / odds。
+  it.each([
+    { name: "複勝: 3着内率 0.42 × オッズ下限 2.5 = ev 1.05", odds: 2.5, ev: 1.05, expected: 0.42 },
+    { name: "三連単のような低確率: 0.002 × 500 = 1.0", odds: 500, ev: 1.0, expected: 0.002 },
+    { name: "ev が 0 なら確率 0(的中しないと見込んだ買い目)", odds: 3, ev: 0, expected: 0 },
+    { name: "確率ちょうど 1(境界。含める)", odds: 2, ev: 2, expected: 1 },
+  ])("$name", ({ odds, ev, expected }) => {
+    expect(betHitProb(odds, ev)).toBeCloseTo(expected, 12);
+  });
+
+  it.each([
+    { name: "odds が null", odds: null, ev: 1.1 },
+    { name: "ev が null", odds: 3, ev: null },
+    { name: "ev が未指定(旧い呼び出し)", odds: 3, ev: undefined },
+    { name: "odds が 0(ゼロ除算しない)", odds: 0, ev: 1.1 },
+    { name: "odds が負", odds: -2, ev: 1.1 },
+    { name: "ev が負", odds: 3, ev: -0.1 },
+    { name: "odds が NaN", odds: Number.NaN, ev: 1.1 },
+    { name: "odds が Infinity", odds: Number.POSITIVE_INFINITY, ev: 1.1 },
+    { name: "ev が Infinity", odds: 3, ev: Number.POSITIVE_INFINITY },
+    { name: "確率が 1 を超える(保存値が食い違っている。捏造せず使わない)", odds: 2, ev: 2.5 },
+  ])("使えない入力は null: $name", ({ odds, ev }) => {
+    expect(betHitProb(odds, ev)).toBeNull();
+  });
+
+  it("judgeBets の出力は ev をそのまま運ぶ(確率の集計が使う)", () => {
+    const [o] = judgeBets([{ betType: "win", comboKey: "01", stake: 100, odds: 4.5, ev: 1.35 }], RESULT);
+    expect(o).toMatchObject({ betType: "win", status: "hit", ev: 1.35, odds: 4.5 });
   });
 });

@@ -778,6 +778,7 @@ function reportRaceNode(r: RaceRowView): VNode {
 
 function reportBodyNodes(b: ReportBodyView): VNode[] {
   const nodes: VNode[] = [h("h2", {}, [b.heading]), h("p", { class: "meta" }, [b.meta]), tilesNode(b.tiles)];
+  if (b.rolling !== null) nodes.push(h("h3", {}, [b.rolling.heading]), h("p", { class: "meta" }, [b.rolling.meta]), tilesNode(b.rolling.tiles));
   if (b.textNote !== null) nodes.push(notice("info", b.textNote));
   if (b.summary !== null) nodes.push(h("h3", {}, ["総括"]), h("p", { class: "report-summary" }, [b.summary]));
   if (b.good.length > 0) nodes.push(h("h3", {}, ["良かった点"]), bulletList(b.good));

@@ -24,6 +24,10 @@ export interface ReportBetTypeStat {
   readonly hitCount: number;
   readonly stake: number;
   readonly payout: number;
+  /** 見込みの的中数(Issue #264)。この項目を持つ前の日報には無い。 */
+  readonly expectedBetCount?: number;
+  readonly expectedHits?: number;
+  readonly expectedBaseHits?: number;
 }
 
 export interface ReportMarkStat {
@@ -47,8 +51,29 @@ export interface ReportStats {
   readonly hitBetCount: number;
   readonly unjudgedBetCount: number;
   readonly unjudgedStake: number;
+  /** 見込みの的中数(確率のある買い目の点数・的中確率の合計・同じ買い目の実際の的中数)と、最大払戻の 1 点(Issue #264)。この項目を持つ前の日報には無い。 */
+  readonly expectedBetCount?: number;
+  readonly expectedHits?: number;
+  readonly expectedBaseHits?: number;
+  readonly maxPayout?: number;
+  readonly maxPayoutStake?: number;
   readonly byBetType: Readonly<Record<string, ReportBetTypeStat>>;
   readonly byMark: readonly ReportMarkStat[];
+}
+
+/** 期間の統計(サーバの `PeriodStats`。Issue #264)。 */
+export interface ReportPeriod extends ReportStats {
+  readonly fromDate: string;
+  readonly toDate: string;
+  /** 期間のうち、分析のあった開催日の数。 */
+  readonly dayCount: number;
+}
+
+/** 直前 27 日と直近 28 日の累計(サーバの `RollingSummary`。Issue #264)。この項目を持つ前の日報には無い。 */
+export interface ReportRolling {
+  readonly windowDays: number;
+  readonly prior: ReportPeriod;
+  readonly total: ReportPeriod;
 }
 
 export interface ReportTopHorse {
@@ -98,6 +123,8 @@ export interface ReportDetail {
   readonly totalReturn: number;
   readonly summary: string | null;
   readonly stats: ReportStats;
+  /** 直前 27 日と直近 28 日の累計(Issue #264)。この項目を持つ前の日報には無い。 */
+  readonly rolling?: ReportRolling;
   readonly races: readonly ReportRace[];
   readonly narrative: ReportNarrative | null;
   /** 応答が構造として読めなかったときの生の文章。 */
@@ -137,6 +164,29 @@ function parseListItem(row: unknown): ReportListItem | null {
   return { date, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary };
 }
 
+/**
+ * 見込みの項目(Issue #264)を読む。**全部あるか、全部無いか**(一部だけは壊れた応答として null)。全部無ければ空のオブジェクト(キーを足さない)。
+ * `counts` は 0 以上の整数、`nums` は有限の数。
+ */
+function parseOptionalGroup(v: Record<string, unknown>, counts: readonly string[], nums: readonly string[]): Record<string, number> | null {
+  const keys = [...counts, ...nums];
+  const present = keys.filter((k) => k in v);
+  if (present.length === 0) return {};
+  if (present.length !== keys.length) return null;
+  const out: Record<string, number> = {};
+  for (const k of counts) {
+    const x = v[k];
+    if (!isCount(x)) return null;
+    out[k] = x;
+  }
+  for (const k of nums) {
+    const x = v[k];
+    if (!isNum(x)) return null;
+    out[k] = x;
+  }
+  return out;
+}
+
 function parseStats(value: unknown): ReportStats | null {
   if (!isRecord(value)) return null;
   const v = value;
@@ -150,18 +200,37 @@ function parseStats(value: unknown): ReportStats | null {
   const byBetType: Record<string, ReportBetTypeStat> = {};
   for (const [type, stat] of Object.entries(v["byBetType"])) {
     if (!isRecord(stat) || !isCount(stat["betCount"]) || !isCount(stat["hitCount"]) || !isNum(stat["stake"]) || !isNum(stat["payout"])) return null;
-    byBetType[type] = { betCount: stat["betCount"], hitCount: stat["hitCount"], stake: stat["stake"], payout: stat["payout"] };
+    const typeExpected = parseOptionalGroup(stat, ["expectedBetCount", "expectedBaseHits"], ["expectedHits"]);
+    if (typeExpected === null) return null;
+    byBetType[type] = { betCount: stat["betCount"], hitCount: stat["hitCount"], stake: stat["stake"], payout: stat["payout"], ...typeExpected };
   }
   const byMark: ReportMarkStat[] = [];
   for (const m of v["byMark"]) {
     if (!isRecord(m) || !isStr(m["mark"]) || !isCount(m["count"]) || !isCount(m["win"]) || !isCount(m["top3"])) return null;
     byMark.push({ mark: m["mark"], count: m["count"], win: m["win"], top3: m["top3"] });
   }
+  const expected = parseOptionalGroup(v, ["expectedBetCount", "expectedBaseHits"], ["expectedHits", "maxPayout", "maxPayoutStake"]);
+  if (expected === null) return null;
   return {
     raceCount: v["raceCount"], resultRaceCount: v["resultRaceCount"], noResultRaceCount: v["noResultRaceCount"], betRaceCount: v["betRaceCount"], llmUsedRaceCount: v["llmUsedRaceCount"],
     totalStake: v["totalStake"], totalReturn: v["totalReturn"], recoveryRate: v["recoveryRate"], judgedBetCount: v["judgedBetCount"], hitBetCount: v["hitBetCount"],
-    unjudgedBetCount: v["unjudgedBetCount"], unjudgedStake: v["unjudgedStake"], byBetType, byMark,
+    unjudgedBetCount: v["unjudgedBetCount"], unjudgedStake: v["unjudgedStake"], ...expected, byBetType, byMark,
   };
+}
+
+const isYmd = (v: unknown): v is string => isStr(v) && /^[0-9]{8}$/.test(v);
+
+function parsePeriod(value: unknown): ReportPeriod | null {
+  const stats = parseStats(value);
+  if (stats === null || !isRecord(value) || !isYmd(value["fromDate"]) || !isYmd(value["toDate"]) || !isCount(value["dayCount"])) return null;
+  return { ...stats, fromDate: value["fromDate"], toDate: value["toDate"], dayCount: value["dayCount"] };
+}
+
+function parseRolling(value: unknown): ReportRolling | null {
+  if (!isRecord(value) || !isCount(value["windowDays"])) return null;
+  const prior = parsePeriod(value["prior"]);
+  const total = parsePeriod(value["total"]);
+  return prior === null || total === null ? null : { windowDays: value["windowDays"], prior, total };
 }
 
 function parseRace(value: unknown): ReportRace | null {
@@ -210,7 +279,8 @@ function parseDetail(value: unknown): ReportDetail | null {
   }
   const stats = parseStats(body["stats"]);
   const narrative = parseNarrative(body["narrative"]);
-  if (stats === null || narrative === undefined || !isArr(body["races"]) || !strOrNull(body["narrativeRaw"]) || !strOrNull(body["note"])) {
+  const rolling = "rolling" in body ? parseRolling(body["rolling"]) : undefined;
+  if (rolling === null || stats === null || narrative === undefined || !isArr(body["races"]) || !strOrNull(body["narrativeRaw"]) || !strOrNull(body["note"])) {
     return null;
   }
   const races: ReportRace[] = [];
@@ -220,7 +290,7 @@ function parseDetail(value: unknown): ReportDetail | null {
     races.push(parsed);
   }
   return {
-    date, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary, stats, races, narrative,
+    date, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary, stats, ...(rolling === undefined ? {} : { rolling }), races, narrative,
     narrativeRaw: body["narrativeRaw"], note: body["note"],
   };
 }

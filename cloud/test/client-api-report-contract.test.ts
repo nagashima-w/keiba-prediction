@@ -83,6 +83,14 @@ describe("契約: 本物の日報(DailyReportCore の出力)を、クライア�
     if (!detail.ok || detail.report === null) throw new Error("日報が読めませんでした");
     const r = detail.report;
     expect(r.stats).toStrictEqual(record.body.stats);
+    // Issue #264: 見込みの的中数・最大払戻の 1 点・直近 28 日の累計も、サーバが書いたキー名のまま読める(前提: 実際に値がある)
+    expect(record.body.stats.expectedBetCount).toBeGreaterThan(0);
+    expect(record.body.stats.expectedHits).toBeGreaterThan(0);
+    expect(record.body.stats.maxPayout).toBeGreaterThan(0);
+    expect(Object.values(record.body.stats.byBetType).every((t) => t.expectedBetCount > 0)).toBe(true);
+    expect(record.body.rolling).toBeDefined();
+    expect(record.body.rolling!.total.dayCount).toBe(record.body.rolling!.prior.dayCount + 1);
+    expect(r.rolling).toStrictEqual(record.body.rolling);
     expect(r.races.map((x) => x.raceId)).toEqual(record.body.races.map((x) => x.raceId));
     expect(r.races[0]).toMatchObject({ title: record.body.races[0]!.title, hasResult: true, comment: "◎→▲の組み合わせが有効だった" });
     expect(r.races[0]!.top3.map((t) => t.finishPosition)).toEqual([1, 2, 3]);

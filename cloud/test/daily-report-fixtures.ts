@@ -6,6 +6,7 @@
 import type { AnalysisView, AnalysisViewHorse } from "../src/analysis-view";
 import type { RaceResultData } from "../src/daily-report-bets";
 import { DailyReportCore, type DailyReportDeps, type RaceInput, type ReportRecord } from "../src/daily-report-core";
+import type { PeriodStats } from "../src/period-stats";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import type { MessageSender } from "@keiba/core/llm";
 
@@ -59,6 +60,26 @@ export function fixtureRaceInputs(): RaceInput[] {
   ];
 }
 
+/**
+ * 偽の「直前 27 日」の統計(Issue #264)。開催 6 日・120 レース・買い目 300 点中 24 点的中(見込み 21.5 点)・回収率 85%。
+ * 範囲(fromDate・toDate)は日報が渡した値で上書きされる。プロンプトの確認用スクリプト(`print-report-prompt.ts`)のシナリオも、これを土台に数字を変える。
+ */
+export function fixturePriorStats(over: Partial<PeriodStats> = {}): PeriodStats {
+  return {
+    fromDate: "20260913", toDate: "20261009", dayCount: 6,
+    raceCount: 120, resultRaceCount: 118, noResultRaceCount: 2, betRaceCount: 110, llmUsedRaceCount: 100,
+    totalStake: 40000, totalReturn: 34000, recoveryRate: 0.85, judgedBetCount: 300, hitBetCount: 24, unjudgedBetCount: 3, unjudgedStake: 900,
+    expectedBetCount: 300, expectedHits: 21.5, expectedBaseHits: 24, maxPayout: 9000, maxPayoutStake: 300,
+    byBetType: {
+      win: { betCount: 100, hitCount: 6, stake: 15000, payout: 12000, expectedBetCount: 100, expectedHits: 5.25, expectedBaseHits: 6 },
+      place: { betCount: 120, hitCount: 14, stake: 17000, payout: 15000, expectedBetCount: 120, expectedHits: 12.5, expectedBaseHits: 14 },
+      wide: { betCount: 80, hitCount: 4, stake: 8000, payout: 7000, expectedBetCount: 80, expectedHits: 3.75, expectedBaseHits: 4 },
+    },
+    byMark: [{ mark: "◎", count: 118, win: 30, top3: 70 }, { mark: "〇", count: 110, win: 18, top3: 62 }],
+    ...over,
+  };
+}
+
 /** 偽の LLM の応答(日報の JSON)。 */
 export function fixtureNarrativeText(): string {
   return JSON.stringify({
@@ -70,7 +91,7 @@ export function fixtureNarrativeText(): string {
 }
 
 /** 本物のコアに偽のポートを通して、保存される日報を作る。`promptOut` を渡すと、LLM に送ったプロンプトを入れる。 */
-export async function buildSavedRecord(options: { readonly llmText?: string; readonly promptOut?: string[]; readonly inputs?: RaceInput[] } = {}): Promise<ReportRecord> {
+export async function buildSavedRecord(options: { readonly llmText?: string; readonly promptOut?: string[]; readonly inputs?: RaceInput[]; readonly prior?: PeriodStats } = {}): Promise<ReportRecord> {
   const inputs = options.inputs ?? fixtureRaceInputs();
   const saved: ReportRecord[] = [];
   const kv = new Map<string, unknown>();
@@ -91,6 +112,7 @@ export async function buildSavedRecord(options: { readonly llmText?: string; rea
     source: {
       listDayAnalyses: async () => inputs.map((i) => ({ raceId: i.view.raceId, analysisId: i.view.id })),
       readRaces: async (items) => items.map((i) => inputs.find((x) => x.view.id === i.analysisId) ?? null),
+      readPeriodStats: async (fromDate, toDate) => ({ ...(options.prior ?? fixturePriorStats()), fromDate, toDate }),
     },
     store: { hasReport: async () => false, saveReport: async (r) => (saved.push(r), "saved") },
     loadSettings: async () => DEFAULT_CLOUD_SETTINGS,

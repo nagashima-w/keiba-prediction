@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { AnalysisView, AnalysisViewHorse } from "../src/analysis-view";
 import type { RaceResultData } from "../src/daily-report-bets";
 import { buildDayStats, buildRaceDigest } from "../src/daily-report-digest";
-import { buildReportPrompt, formatComboKey, NARRATIVE_LIMITS, parseNarrative } from "../src/daily-report-prompt";
+import { buildReportPrompt, formatComboKey, NARRATIVE_LIMITS, parseNarrative, REPORT_PROMPT_VERSION } from "../src/daily-report-prompt";
+import { buildRollingSummary, type PeriodStats, type RollingSummary } from "../src/period-stats";
 
 /** Issue #235: 日報のプロンプトの組み立てと、LLM の応答(JSON)の解釈。 */
 
@@ -27,9 +28,24 @@ function digests() {
     buildRaceDigest(view(R2, 2, [horse(5, { mark: "◎" })], [["win", "05", 300]]), undefined),
   ];
 }
+/** 期間の統計(直前 27 日)。数字は明示する(テストが期待値を手で書けるように)。 */
+function period(over: Partial<PeriodStats> = {}): PeriodStats {
+  return {
+    fromDate: "20260913", toDate: "20261009", dayCount: 6,
+    raceCount: 120, resultRaceCount: 118, noResultRaceCount: 2, betRaceCount: 110, llmUsedRaceCount: 100,
+    totalStake: 40000, totalReturn: 34000, recoveryRate: 0.85, judgedBetCount: 300, hitBetCount: 24, unjudgedBetCount: 3, unjudgedStake: 900,
+    expectedBetCount: 300, expectedHits: 21.5, expectedBaseHits: 24, maxPayout: 9000, maxPayoutStake: 300,
+    byBetType: { win: { betCount: 100, hitCount: 6, stake: 15000, payout: 12000, expectedBetCount: 100, expectedHits: 5.25, expectedBaseHits: 6 } },
+    byMark: [{ mark: "◎", count: 118, win: 30, top3: 70 }],
+    ...over,
+  };
+}
+function rolling(day = buildDayStats(digests()), prior = period()): RollingSummary {
+  return buildRollingSummary("20261010", day, prior);
+}
 const input = () => {
   const d = digests();
-  return { kaisaiDate: "20261010", digests: d, stats: buildDayStats(d) };
+  return { kaisaiDate: "20261010", digests: d, stats: buildDayStats(d), rolling: rolling(buildDayStats(d)) };
 };
 
 describe("buildReportPrompt", () => {
@@ -92,9 +108,135 @@ describe("buildReportPrompt", () => {
   });
 
   it("レースが 0 件でも組み立てられる", () => {
-    const p = buildReportPrompt({ kaisaiDate: "20261010", digests: [], stats: buildDayStats([]) });
+    const p = buildReportPrompt({ kaisaiDate: "20261010", digests: [], stats: buildDayStats([]), rolling: rolling(buildDayStats([])) });
     expect(p).toContain("2026年10月10日(土)");
     expect(p).toContain("分析したレース: 0 件");
+  });
+});
+
+describe("Issue #264: 直近 4 週との比較・見込みの的中数", () => {
+  const sections = (p: string): Record<string, string> => {
+    const out: Record<string, string> = {};
+    const parts = p.split(/^## /m).slice(1);
+    for (const part of parts) {
+      const nl = part.indexOf("\n");
+      out[part.slice(0, nl)] = part.slice(nl + 1);
+    }
+    return out;
+  };
+
+  it("版: REPORT_PROMPT_VERSION を持つ(日報の本文に残して、どの文面が書いた日報かを区別する)", () => {
+    expect(REPORT_PROMPT_VERSION).toMatch(/^report-\d{4}-\d{2}-\d{2}\.\d+$/);
+  });
+
+  it("定型の前提『数十レースの 1 日分では、偶然の影響が大きい』を LLM に渡さない(毎日『偶然の影響が強い 1 日です』と書かせていた出どころ)", () => {
+    const p = buildReportPrompt(input());
+    expect(p).not.toContain("偶然の影響が大きい");
+    expect(p).not.toContain("数十レースの 1 日分");
+  });
+
+  it("規則: 穴馬の高配当を狙う考え方・見込みとの比較・その日と 4 週の両方・『偶然』は数字で示せるときだけ総括で多くとも 1 回", () => {
+    const rules = sections(buildReportPrompt(input()))["規則"]!;
+    expect(rules).toContain("穴馬");
+    expect(rules).toContain("1 点の的中で回収率が大きく動くのは想定どおり");
+    expect(rules).toContain("見込みの的中数");
+    expect(rules).toContain("上回った");
+    expect(rules).toContain("下回った");
+    expect(rules).toContain("直近 28 日の累計");
+    expect(rules).toContain("数字で示せるときだけ");
+    expect(rules).toContain("総括で多くとも 1 回");
+    expect(rules).toContain("見込みとの比較で書いて");
+    // 数字を伴わない定型の断りを禁じている(例文として挙げる)
+    expect(rules).toContain("偶然の影響が強い 1 日です");
+  });
+
+  it("規則が以前から持っていたもの(確定値は計算し直さない・推測しない・結果なしは成否を判断しない・改善点は命令しない)は残る", () => {
+    const rules = sections(buildReportPrompt(input()))["規則"]!;
+    expect(rules).toContain("計算し直さず");
+    expect(rules).toContain("推測");
+    expect(rules).toContain("成否を判断しない");
+    expect(rules).toContain("命令する書き方はしない");
+  });
+
+  it("成績の節は、その日 → 直前 27 日 → 直近 28 日の累計 → レースごと の順に並ぶ", () => {
+    const p = buildReportPrompt(input());
+    const heads = ["## 2026年10月10日(土) の成績(確定値)", "## 直前 27 日(その日を除く)の成績(確定値)", "## 直近 28 日の累計(その日を含む)の成績(確定値)", "## レースごとの予想と結果"].map((h) => p.indexOf(h));
+    expect(heads.every((i) => i >= 0)).toBe(true);
+    expect([...heads].sort((a, b) => a - b)).toEqual(heads);
+  });
+
+  it("その日の節: 見込みの的中数と実際の的中数・差・最大払戻の 1 点を除いた回収率を確定値で出す(LLM に引き算させない)", () => {
+    const d = buildDayStats(digests());
+    // 前提: その日は単勝 200 円 1 点だけ判定できて的中(odds 3・ev 1.1 → 確率 1.1/3)。もう 1 点は結果なしで判定不能
+    expect(d.judgedBetCount).toBe(1);
+    expect(d.hitBetCount).toBe(1);
+    const day = sections(buildReportPrompt(input()))["2026年10月10日(土) の成績(確定値)"]!;
+    expect(day).toContain("見込みの的中数: 0.37 点");
+    expect(day).toContain("確率のある 1 点が対象");
+    expect(day).toContain("実際の的中: 1 点");
+    expect(day).toContain("差(実際 − 見込み): +0.63 点");
+    // 的中が 1 点だけ: その 1 点を除くと賭け金が残らない
+    expect(day).toContain("払戻が最大の 1 点を除いた回収率: なし");
+  });
+
+  it("直前 27 日の節: 期間・開催日数・レース数・回収率・見込みと実際・最大の 1 点を除いた回収率を出す", () => {
+    const prior = sections(buildReportPrompt(input()))["直前 27 日(その日を除く)の成績(確定値)"]!;
+    expect(prior).toContain("2026年9月13日〜2026年10月9日");
+    expect(prior).toContain("分析のあった開催日 6 日");
+    expect(prior).toContain("120 件");
+    expect(prior).toContain("賭け金 40,000円・払戻 34,000円・回収率 85.0%");
+    expect(prior).toContain("300 点中 24 点的中");
+    expect(prior).toContain("見込みの的中数: 21.50 点");
+    expect(prior).toContain("実際の的中: 24 点");
+    expect(prior).toContain("差(実際 − 見込み): +2.50 点");
+    // (34000 - 9000) / (40000 - 300)
+    expect(prior).toContain("払戻が最大の 1 点を除いた回収率: 63.0%");
+    expect(prior).toContain("その 1 点: 払戻 9,000円・賭け金 300円");
+  });
+
+  it("直近 28 日の累計の節: その日 + 直前 27 日の和(賭け金・払戻・点数・見込み)を出し、券種別(見込みつき)と印別も出す", () => {
+    const r = rolling();
+    const total = sections(buildReportPrompt({ ...input(), rolling: r }))["直近 28 日の累計(その日を含む)の成績(確定値)"]!;
+    expect(total).toContain("2026年9月13日〜2026年10月10日");
+    expect(total).toContain("分析のあった開催日 7 日"); // 6 + その日
+    expect(total).toContain("賭け金 40,200円・払戻 34,700円"); // 40000+200 / 34000+700
+    expect(total).toContain("301 点中 25 点的中");
+    expect(total).toContain(`見込みの的中数: ${r.total.expectedHits.toFixed(2)} 点`);
+    expect(total).toContain("単勝 101 点中 7 点的中");
+    expect(total).toContain("見込み 5.62 点"); // 5.25 + 1.1/3
+    expect(total).toContain("印別");
+    expect(total).toContain("◎ 119 / 31 / 71"); // 118+1 頭 / 30+1 / 70+1
+  });
+
+  it("確率を導けない買い目があるときは、見込みの対象が判定できた点数より少ないことを書き、実際の的中も同じ点数の中で数える", () => {
+    const p = period({ judgedBetCount: 300, expectedBetCount: 270, expectedHits: 20, expectedBaseHits: 22, hitBetCount: 24 });
+    const prior = sections(buildReportPrompt({ ...input(), rolling: rolling(buildDayStats(digests()), p) }))["直前 27 日(その日を除く)の成績(確定値)"]!;
+    expect(prior).toContain("確率のある 270 点が対象");
+    expect(prior).toContain("実際の的中: 22 点"); // 24 ではない(確率を導けた 270 点の中の的中)
+    expect(prior).toContain("30 点は確率が無く、見込みに含めない");
+    expect(prior).toContain("差(実際 − 見込み): +2.00 点");
+  });
+
+  it("見込みを出せない(確率のある買い目が 0 点)ときは『なし』と書き、数字を捏造しない", () => {
+    const p = period({ expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0 });
+    const prior = sections(buildReportPrompt({ ...input(), rolling: rolling(buildDayStats(digests()), p) }))["直前 27 日(その日を除く)の成績(確定値)"]!;
+    expect(prior).toContain("見込みの的中数: なし");
+    expect(prior).not.toContain("差(実際 − 見込み)");
+  });
+
+  it("直前 27 日に分析したレースが無いときは、比較できないと書き、累計の節は『その日と同じ』とする(0 件の統計を並べない)", () => {
+    const empty = period({ raceCount: 0, dayCount: 0, resultRaceCount: 0, noResultRaceCount: 0, betRaceCount: 0, llmUsedRaceCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, judgedBetCount: 0, hitBetCount: 0, unjudgedBetCount: 0, unjudgedStake: 0, expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0, maxPayout: 0, maxPayoutStake: 0, byBetType: {}, byMark: [] });
+    const sec = sections(buildReportPrompt({ ...input(), rolling: rolling(buildDayStats(digests()), empty) }));
+    expect(sec["直前 27 日(その日を除く)の成績(確定値)"]).toContain("分析したレースはありません");
+    expect(sec["直前 27 日(その日を除く)の成績(確定値)"]).toContain("比較できません");
+    expect(sec["直近 28 日の累計(その日を含む)の成績(確定値)"]).toContain("その日の成績と同じ");
+    expect(sec["直近 28 日の累計(その日を含む)の成績(確定値)"]).not.toContain("賭け金");
+  });
+
+  it("出力形式の summary の指示に、見込みとの比較を含める", () => {
+    const p = buildReportPrompt(input());
+    const line = p.split("\n").find((l) => l.includes('"summary"'))!;
+    expect(line).toContain("見込み");
   });
 });
 

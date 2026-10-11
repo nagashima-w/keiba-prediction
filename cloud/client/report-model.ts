@@ -5,9 +5,10 @@
  * **サーバ由来の「文」は、LLM が書いた文章(総括・良かった点・改善点・レースごとの一言・生の文章)だけ**を、そのまま(テキストとして)出す。それ以外の文言
  * (文章が無い理由・状態の説明)はすべてクライアントの固定の文言(サーバの `note` は読まない)。
  */
-import type { ReportDetail, ReportJob, ReportListItem, ReportRace } from "./api-report";
+import type { ReportDetail, ReportJob, ReportListItem, ReportRace, ReportStats } from "./api-report";
 import { formatJstDateTime } from "./date";
 import { buildReportHash } from "./route";
+import { formatExpectedHits } from "../src/expected-format";
 import { formatRecoveryPercent } from "../src/recovery-format";
 import { formatYen, PROPOSED_BET_LABELS } from "./verify-format";
 
@@ -84,11 +85,21 @@ export interface RaceRowView {
   readonly comment: string | null;
 }
 
+/** 直近 28 日の累計の節(Issue #264)。 */
+export interface RollingView {
+  readonly heading: string;
+  /** 期間・開催日数・レース数。 */
+  readonly meta: string;
+  readonly tiles: readonly TileView[];
+}
+
 export interface ReportBodyView {
   readonly heading: string;
   /** 作成時刻・モデル・レース数。 */
   readonly meta: string;
   readonly tiles: readonly TileView[];
+  /** 直近 28 日の累計(Issue #264)。この項目を持つ前の日報では null。 */
+  readonly rolling: RollingView | null;
   /** 文章が無い・生の文章のときの固定の説明。 */
   readonly textNote: string | null;
   /** LLM の総括。 */
@@ -182,14 +193,31 @@ function raceRow(r: ReportRace): RaceRowView {
   return { raceId: r.raceId, title: r.title, result, marks, bets, comment: r.comment };
 }
 
-function bodyOf(report: ReportDetail): ReportBodyView {
-  const s = report.stats;
+/** 賭け金・払戻・回収率・的中(+ 見込みと実際)のタイル。その日と累計で同じ書き方。見込みは、この項目を持つ日報で、確率のある買い目があるときだけ。 */
+function statTiles(s: ReportStats): TileView[] {
   const tiles: TileView[] = [
     { label: "賭け金", value: formatYen(s.totalStake), strong: false },
     { label: "払戻", value: formatYen(s.totalReturn), strong: false },
     { label: "回収率", value: s.recoveryRate === null ? "-" : formatRecoveryPercent(s.recoveryRate), strong: true },
     { label: "的中", value: `${s.judgedBetCount} 点中 ${s.hitBetCount} 点`, strong: false },
   ];
+  const expected = s.expectedBetCount === undefined || s.expectedHits === undefined || s.expectedBaseHits === undefined ? null : formatExpectedHits({ expectedBetCount: s.expectedBetCount, expectedHits: s.expectedHits, expectedBaseHits: s.expectedBaseHits });
+  if (expected !== null) tiles.push({ label: "見込みと実際", value: expected, strong: false });
+  return tiles;
+}
+
+const ymd = (d: string): string => `${Number(d.slice(0, 4))}年${Number(d.slice(4, 6))}月${Number(d.slice(6, 8))}日`;
+
+function rollingOf(report: ReportDetail): RollingView | null {
+  const t = report.rolling?.total;
+  return t === undefined
+    ? null
+    : { heading: "直近 28 日の累計(その日を含む)", meta: `${ymd(t.fromDate)}〜${ymd(t.toDate)}・開催 ${t.dayCount} 日・${t.raceCount} レース`, tiles: statTiles(t) };
+}
+
+function bodyOf(report: ReportDetail): ReportBodyView {
+  const s = report.stats;
+  const tiles = statTiles(s);
   const typeRows: RowView[] = PROPOSED_BET_LABELS.filter(({ type }) => s.byBetType[type] !== undefined).map(({ type, label }) => {
     const t = s.byBetType[type]!;
     return { label, value: `${t.betCount} 点中 ${t.hitCount} 点的中・賭け金 ${formatYen(t.stake)}・払戻 ${formatYen(t.payout)}` };
@@ -206,6 +234,7 @@ function bodyOf(report: ReportDetail): ReportBodyView {
     heading: `${dateLabel(report.date)}の日報`,
     meta: metaParts.join("・"),
     tiles,
+    rolling: rollingOf(report),
     textNote:
       report.narrative !== null
         ? null

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ReportDetail, ReportListItem } from "../client/api-report";
+import type { ReportDetail, ReportListItem, ReportPeriod } from "../client/api-report";
 import { buildReportModel, CREATE_CAUTION, CREATE_TODAY_CAUTION, dateLabel, JOB_UNAVAILABLE_NOTICE, MAX_CHIPS, NO_REPORT_NOTICE, type ReportModelInput } from "../client/report-model";
 
 /** Issue #235: 日報画面の表示用データ。文言は固定(LLM の文章以外にサーバの文は出さない)・数値の整形・状態ごとの出し分け。 */
@@ -331,5 +331,52 @@ describe("Issue #246 項目 6: watching(running を見て確認を続けてい�
   it("watching で止めたあとは、止めた旨の案内が優先される", () => {
     const m = buildReportModel(input({ detail: { kind: "ready", report: null, job: null, jobUnavailable: true }, watching: true, pollStopped: true }));
     expect(m.notice!.text).toContain("自動更新を止めました");
+  });
+});
+
+describe("Issue #264: 見込みの的中数・直近 28 日の累計", () => {
+  const withExpected = (): ReportDetail => {
+    const base = report();
+    return { ...base, stats: { ...base.stats, expectedBetCount: 4, expectedHits: 1.25, expectedBaseHits: 1, maxPayout: 1300, maxPayoutStake: 600 } };
+  };
+  const period = (over: Partial<ReportPeriod> = {}): ReportPeriod => ({
+    ...report().stats, fromDate: "20260913", toDate: "20261010", dayCount: 7,
+    raceCount: 156, totalStake: 52000, totalReturn: 49400, recoveryRate: 0.95, judgedBetCount: 360, hitBetCount: 30, expectedBetCount: 360, expectedHits: 27.25, expectedBaseHits: 30, maxPayout: 9000, maxPayoutStake: 300,
+    ...over,
+  });
+  const withRolling = (total: ReportPeriod = period()): ReportDetail => ({ ...withExpected(), rolling: { windowDays: 28, prior: { ...total, toDate: "20261009", dayCount: 6 }, total } });
+  const body = (r: ReportDetail) => buildReportModel(input({ detail: { kind: "ready", report: r, job: null } })).body!;
+
+  it("この項目を持つ前の日報: タイルは従来の 4 つのまま、累計の節は出さない", () => {
+    const b = body(report());
+    expect(b.tiles.map((t) => t.label)).toEqual(["賭け金", "払戻", "回収率", "的中"]);
+    expect(b.rolling).toBeNull();
+  });
+
+  it("その日のタイルに『見込みと実際』を足す(見込みの的中数と、同じ買い目の実際の的中数)。見込みを導ける買い目が無ければ足さない", () => {
+    const tiles = body(withExpected()).tiles;
+    expect(tiles.map((t) => [t.label, t.value])).toEqual([["賭け金", "1,000円"], ["払戻", "1,300円"], ["回収率", "130.0%"], ["的中", "4 点中 1 点"], ["見込みと実際", "見込み 1.25 点・実際 1 点"]]);
+    const none = withExpected();
+    expect(body({ ...none, stats: { ...none.stats, expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0 } }).tiles.map((t) => t.label)).toEqual(["賭け金", "払戻", "回収率", "的中"]);
+  });
+
+  it("累計の節: 見出し・期間と開催日数とレース数・賭け金/払戻/回収率/的中/見込みと実際のタイル", () => {
+    const r = body(withRolling()).rolling!;
+    expect(r.heading).toBe("直近 28 日の累計(その日を含む)");
+    expect(r.meta).toBe("2026年9月13日〜2026年10月10日・開催 7 日・156 レース");
+    expect(r.tiles.map((t) => [t.label, t.value])).toEqual([
+      ["賭け金", "52,000円"], ["払戻", "49,400円"], ["回収率", "95.0%"], ["的中", "360 点中 30 点"], ["見込みと実際", "見込み 27.25 点・実際 30 点"],
+    ]);
+    expect(r.tiles.find((t) => t.strong)!.label).toBe("回収率");
+  });
+
+  it("累計の回収率は、日報と同じ書き方(100.0% を 1 以外に出さない)。賭け金が 0 のときは『-』", () => {
+    expect(body(withRolling(period({ recoveryRate: 0.9999 }))).rolling!.tiles.find((t) => t.label === "回収率")!.value).toBe("99.99%");
+    expect(body(withRolling(period({ recoveryRate: null, totalStake: 0, totalReturn: 0 }))).rolling!.tiles.find((t) => t.label === "回収率")!.value).toBe("-");
+  });
+
+  it("累計に見込みが無い(確率のある買い目が 0 点)ときは、見込みのタイルを出さない", () => {
+    const r = body(withRolling(period({ expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0 }))).rolling!;
+    expect(r.tiles.map((t) => t.label)).toEqual(["賭け金", "払戻", "回収率", "的中"]);
   });
 });

@@ -983,7 +983,7 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
 describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discord を使う場所と、依頼の呼び出し箇所が固定されている", () => {
   const srcDir = path.join(ROOT, "cloud", "src");
   const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
-  const reportSources = ["daily-report-core.ts", "daily-report-digest.ts", "daily-report-bets.ts", "daily-report-prompt.ts", "daily-report-embed.ts", "daily-report-repository.ts", "daily-report-do.ts", "day-quiet.ts"].map(
+  const reportSources = ["daily-report-core.ts", "daily-report-digest.ts", "daily-report-bets.ts", "daily-report-prompt.ts", "daily-report-embed.ts", "daily-report-repository.ts", "daily-report-do.ts", "day-quiet.ts", "period-stats.ts"].map(
     (f) => [f, stripCode(readTextLf("cloud", "src", f))] as const,
   );
   /** コメントを除いた cloud/src の全ファイルで、パターンの出現数をファイルごとに数える(関数の宣言は数えない呼び出しの走査用)。 */
@@ -996,8 +996,8 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
     return out;
   };
 
-  it("日報のソース(8 ファイル)に、netkeiba の取得口・日単位の DO・他の DO・グローバルの fetch・socket が無い", () => {
-    expect(reportSources).toHaveLength(8);
+  it("日報のソース(9 ファイル。Issue #264 で period-stats.ts が加わった)に、netkeiba の取得口・日単位の DO・他の DO・グローバルの fetch・socket が無い", () => {
+    expect(reportSources).toHaveLength(9);
     for (const [name, code] of reportSources) {
       expect(code.length, `${name} を読めている`).toBeGreaterThan(300);
       for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "VERIFY_REPORT", "createGateHttpClient", "socket"]) {

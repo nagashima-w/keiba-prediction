@@ -8,7 +8,7 @@
  * 結果が無いレース(`undefined`)は、着順なし・買い目は判定不能として載せる(中止・取り込み不能の可能性があるので、日報にも「結果なし」と出す)。
  */
 import type { AnalysisView } from "./analysis-view";
-import { judgeBets, type BetOutcome, type RaceResultData } from "./daily-report-bets";
+import { betHitProb, judgeBets, type BetOutcome, type RaceResultData } from "./daily-report-bets";
 
 /** ダイジェストに載せる馬の最大数(印は最大 6 頭なので、印の付いた馬は必ず収まる)。 */
 export const DIGEST_MAX_HORSES = 8;
@@ -126,7 +126,7 @@ export function buildRaceDigest(view: AnalysisView, result: RaceResultData | und
     .sort((a, b) => a[1] - b[1] || a[0] - b[0])
     .map(([umaban, finishPosition]) => ({ umaban, name: nameByUmaban.get(umaban) ?? null, finishPosition }));
 
-  const bets = judgeBets(view.allocation?.bets.map((b) => ({ betType: b.betType, comboKey: b.comboKey, stake: b.stake, odds: b.odds })) ?? [], result);
+  const bets = judgeBets(view.allocation?.bets.map((b) => ({ betType: b.betType, comboKey: b.comboKey, stake: b.stake, odds: b.odds, ev: b.ev })) ?? [], result);
   const judged = bets.filter((b) => b.status !== "unjudged");
   const unjudged = bets.filter((b) => b.status === "unjudged");
   const allocation = view.allocation;
@@ -160,6 +160,12 @@ export interface BetTypeStat {
   readonly hitCount: number;
   readonly stake: number;
   readonly payout: number;
+  /** 判定できた買い目のうち、分析時点の的中確率(`betHitProb`)を導けたものの点数(Issue #264)。 */
+  readonly expectedBetCount: number;
+  /** 見込みの的中数: 上の点数それぞれの的中確率の合計(Issue #264)。実際の `hitCount` と並べて「当たる頻度が見込みどおりか」を見る。 */
+  readonly expectedHits: number;
+  /** 実際の的中数のうち、上の `expectedBetCount` と同じ買い目(確率を導けたもの)だけの数。見込み(`expectedHits`)と比べる実際の数は、分母をそろえるためこちら。 */
+  readonly expectedBaseHits: number;
 }
 
 export interface MarkStat {
@@ -184,12 +190,40 @@ export interface DayStats {
   readonly hitBetCount: number;
   readonly unjudgedBetCount: number;
   readonly unjudgedStake: number;
+  /**
+   * 判定できた買い目のうち、分析時点の的中確率を導けたものの点数と、その確率の合計(見込みの的中数。Issue #264)。
+   * **判定不能の買い目は入れない**(実際の的中数と分母をそろえる)。導けない買い目〈ev・odds が無い等〉があると `expectedBetCount < judgedBetCount` になる。
+   */
+  readonly expectedBetCount: number;
+  readonly expectedHits: number;
+  /** 実際の的中数のうち、確率を導けた買い目(`expectedBetCount` と同じ集合)だけの数。**見込み `expectedHits` と並べる実際の数はこちら**(`hitBetCount` は確率を導けない買い目の的中も含む)。 */
+  readonly expectedBaseHits: number;
+  /**
+   * 的中した買い目のうち払戻が最大の 1 点の払戻と賭け金(円。的中が無ければどちらも 0)。{@link excludingTopRecoveryRate} が「最大の 1 点を除いた回収率」を作る。
+   * 払戻が同じなら賭け金の大きい方(足す順に依らず決まる)。
+   */
+  readonly maxPayout: number;
+  readonly maxPayoutStake: number;
   readonly byBetType: Readonly<Record<string, BetTypeStat>>;
   readonly byMark: readonly MarkStat[];
 }
 
-export function buildDayStats(digests: readonly RaceDigest[]): DayStats {
-  const byBetType = new Map<string, { betCount: number; hitCount: number; stake: number; payout: number }>();
+/** 統計の集計に要る 1 レース分(ダイジェストからも、D1 の行から作る期間の統計〈`period-stats.ts`〉からも作る。同じ集計の本体を通すための共通の形)。 */
+export interface StatsRace {
+  readonly hasResult: boolean;
+  readonly llmUsed: boolean;
+  readonly bets: readonly BetOutcome[];
+  /** 印の付いた馬と着順(着順が分からない馬は null)。 */
+  readonly marks: readonly { readonly mark: string; readonly finishPosition: number | null }[];
+}
+
+/** 最大払戻の 1 点の比較: 払戻が大きい方、同じなら賭け金が大きい方。 */
+function topBetOf(a: { payout: number; stake: number }, b: { payout: number; stake: number }): { payout: number; stake: number } {
+  return b.payout > a.payout || (b.payout === a.payout && b.stake > a.stake) ? b : a;
+}
+
+export function buildStatsFromRaces(races: readonly StatsRace[]): DayStats {
+  const byBetType = new Map<string, { betCount: number; hitCount: number; stake: number; payout: number; expectedBetCount: number; expectedHits: number; expectedBaseHits: number }>();
   const byMark = new Map<string, { count: number; win: number; top3: number }>();
   let totalStake = 0;
   let totalReturn = 0;
@@ -197,27 +231,44 @@ export function buildDayStats(digests: readonly RaceDigest[]): DayStats {
   let hitBetCount = 0;
   let unjudgedBetCount = 0;
   let unjudgedStake = 0;
-  for (const d of digests) {
-    totalStake += d.totalStake;
-    totalReturn += d.totalReturn;
-    judgedBetCount += d.judgedBetCount;
-    hitBetCount += d.hitCount;
-    unjudgedBetCount += d.unjudgedBetCount;
-    unjudgedStake += d.unjudgedStake;
-    for (const b of d.bets) {
+  let expectedBetCount = 0;
+  let expectedHits = 0;
+  let expectedBaseHits = 0;
+  let top = { payout: 0, stake: 0 };
+  for (const r of races) {
+    for (const b of r.bets) {
       if (b.status === "unjudged") {
+        unjudgedBetCount += 1;
+        unjudgedStake += b.stake;
         continue;
       }
-      const stat = byBetType.get(b.betType) ?? { betCount: 0, hitCount: 0, stake: 0, payout: 0 };
+      judgedBetCount += 1;
+      totalStake += b.stake;
+      totalReturn += b.payout;
+      const hit = b.status === "hit";
+      hitBetCount += hit ? 1 : 0;
+      if (hit) {
+        top = topBetOf(top, { payout: b.payout, stake: b.stake });
+      }
+      const stat = byBetType.get(b.betType) ?? { betCount: 0, hitCount: 0, stake: 0, payout: 0, expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0 };
       stat.betCount += 1;
-      stat.hitCount += b.status === "hit" ? 1 : 0;
+      stat.hitCount += hit ? 1 : 0;
       stat.stake += b.stake;
       stat.payout += b.payout;
+      const prob = betHitProb(b.odds, b.ev);
+      if (prob !== null) {
+        stat.expectedBetCount += 1;
+        stat.expectedHits += prob;
+        stat.expectedBaseHits += hit ? 1 : 0;
+        expectedBetCount += 1;
+        expectedHits += prob;
+        expectedBaseHits += hit ? 1 : 0;
+      }
       byBetType.set(b.betType, stat);
     }
-    if (d.hasResult) {
-      for (const h of d.horses) {
-        if (h.mark === null || h.finishPosition === null) {
+    if (r.hasResult) {
+      for (const h of r.marks) {
+        if (h.finishPosition === null) {
           continue;
         }
         const stat = byMark.get(h.mark) ?? { count: 0, win: 0, top3: 0 };
@@ -228,13 +279,13 @@ export function buildDayStats(digests: readonly RaceDigest[]): DayStats {
       }
     }
   }
-  const resultRaceCount = digests.filter((d) => d.hasResult).length;
+  const resultRaceCount = races.filter((r) => r.hasResult).length;
   return {
-    raceCount: digests.length,
+    raceCount: races.length,
     resultRaceCount,
-    noResultRaceCount: digests.length - resultRaceCount,
-    betRaceCount: digests.filter((d) => d.bets.length > 0).length,
-    llmUsedRaceCount: digests.filter((d) => d.llmUsed).length,
+    noResultRaceCount: races.length - resultRaceCount,
+    betRaceCount: races.filter((r) => r.bets.length > 0).length,
+    llmUsedRaceCount: races.filter((r) => r.llmUsed).length,
     totalStake,
     totalReturn,
     recoveryRate: totalStake === 0 ? null : totalReturn / totalStake,
@@ -242,7 +293,85 @@ export function buildDayStats(digests: readonly RaceDigest[]): DayStats {
     hitBetCount,
     unjudgedBetCount,
     unjudgedStake,
+    expectedBetCount,
+    expectedHits,
+    expectedBaseHits,
+    maxPayout: top.payout,
+    maxPayoutStake: top.stake,
     byBetType: Object.fromEntries(byBetType),
     byMark: [...byMark.entries()].map(([mark, s]) => ({ mark, ...s })).sort((a, b) => markRank(a.mark) - markRank(b.mark)),
   };
+}
+
+export function buildDayStats(digests: readonly RaceDigest[]): DayStats {
+  return buildStatsFromRaces(
+    digests.map((d) => ({
+      hasResult: d.hasResult,
+      llmUsed: d.llmUsed,
+      bets: d.bets,
+      marks: d.horses.flatMap((h) => (h.mark === null ? [] : [{ mark: h.mark, finishPosition: h.finishPosition }])),
+    })),
+  );
+}
+
+/**
+ * 2 つの統計を足す(Issue #264。直前 27 日 + その日 = 28 日累計。月報〈#265〉の期間の合算にも使う)。
+ * 件数・賭け金・払戻・見込みは足し、回収率は足した賭け金・払戻から作り直す(率の平均ではない)。最大払戻は大きい方。券種別・印別は和集合(印は印の順)。
+ */
+export function mergeDayStats(a: DayStats, b: DayStats): DayStats {
+  const byBetType: Record<string, BetTypeStat> = {};
+  for (const type of new Set([...Object.keys(a.byBetType), ...Object.keys(b.byBetType)])) {
+    const x = a.byBetType[type];
+    const y = b.byBetType[type];
+    byBetType[type] = {
+      betCount: (x?.betCount ?? 0) + (y?.betCount ?? 0),
+      hitCount: (x?.hitCount ?? 0) + (y?.hitCount ?? 0),
+      stake: (x?.stake ?? 0) + (y?.stake ?? 0),
+      payout: (x?.payout ?? 0) + (y?.payout ?? 0),
+      expectedBetCount: (x?.expectedBetCount ?? 0) + (y?.expectedBetCount ?? 0),
+      expectedHits: (x?.expectedHits ?? 0) + (y?.expectedHits ?? 0),
+      expectedBaseHits: (x?.expectedBaseHits ?? 0) + (y?.expectedBaseHits ?? 0),
+    };
+  }
+  const marks = new Map<string, MarkStat>();
+  for (const m of [...a.byMark, ...b.byMark]) {
+    const cur = marks.get(m.mark);
+    marks.set(m.mark, cur === undefined ? m : { mark: m.mark, count: cur.count + m.count, win: cur.win + m.win, top3: cur.top3 + m.top3 });
+  }
+  const totalStake = a.totalStake + b.totalStake;
+  const totalReturn = a.totalReturn + b.totalReturn;
+  const top = topBetOf({ payout: a.maxPayout, stake: a.maxPayoutStake }, { payout: b.maxPayout, stake: b.maxPayoutStake });
+  return {
+    raceCount: a.raceCount + b.raceCount,
+    resultRaceCount: a.resultRaceCount + b.resultRaceCount,
+    noResultRaceCount: a.noResultRaceCount + b.noResultRaceCount,
+    betRaceCount: a.betRaceCount + b.betRaceCount,
+    llmUsedRaceCount: a.llmUsedRaceCount + b.llmUsedRaceCount,
+    totalStake,
+    totalReturn,
+    recoveryRate: totalStake === 0 ? null : totalReturn / totalStake,
+    judgedBetCount: a.judgedBetCount + b.judgedBetCount,
+    hitBetCount: a.hitBetCount + b.hitBetCount,
+    unjudgedBetCount: a.unjudgedBetCount + b.unjudgedBetCount,
+    unjudgedStake: a.unjudgedStake + b.unjudgedStake,
+    expectedBetCount: a.expectedBetCount + b.expectedBetCount,
+    expectedHits: a.expectedHits + b.expectedHits,
+    expectedBaseHits: a.expectedBaseHits + b.expectedBaseHits,
+    maxPayout: top.payout,
+    maxPayoutStake: top.stake,
+    byBetType,
+    byMark: [...marks.values()].sort((x, y) => markRank(x.mark) - markRank(y.mark)),
+  };
+}
+
+/**
+ * 払戻が最大の 1 点を除いた回収率(Issue #264)。`(払戻 − 最大払戻) ÷ (賭け金 − その買い目の賭け金)`。
+ * 的中が無い(除く 1 点が無い)・除いた残りの賭け金が 0 のときは null。回収率が 1 点の的中に支えられているかを、確定値で示す。
+ */
+export function excludingTopRecoveryRate(stats: Pick<DayStats, "totalStake" | "totalReturn" | "maxPayout" | "maxPayoutStake">): number | null {
+  if (stats.maxPayout <= 0) {
+    return null;
+  }
+  const stake = stats.totalStake - stats.maxPayoutStake;
+  return stake <= 0 ? null : (stats.totalReturn - stats.maxPayout) / stake;
 }

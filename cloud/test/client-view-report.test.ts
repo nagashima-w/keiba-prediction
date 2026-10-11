@@ -185,3 +185,41 @@ describe("日報画面の VNode: 許可リスト(dom.ts)の範囲で組める", 
     expect(() => mountAll(empty)).not.toThrow();
   });
 });
+
+describe("Issue #264: 日報画面の VNode: 直近 28 日の累計", () => {
+  const stats = { ...report().stats, expectedBetCount: 4, expectedHits: 1.25, expectedBaseHits: 1, maxPayout: 1300, maxPayoutStake: 600 };
+  const total = { ...stats, fromDate: "20260913", toDate: "20261010", dayCount: 7, raceCount: 156, totalStake: 52000, totalReturn: 49400, recoveryRate: 0.95, judgedBetCount: 360, hitBetCount: 30, expectedBetCount: 360, expectedHits: 27.25, expectedBaseHits: 30 };
+  const withRolling = (): ReportDetail => ({ ...report({ stats }), rolling: { windowDays: 28, prior: { ...total, dayCount: 6 }, total } });
+
+  it("見出し『直近 28 日の累計(その日を含む)』の直後に期間の説明、その次にタイル。その日のタイルより後、総括より前に出る", () => {
+    const t = tree(withRolling());
+    const hs = headings(t);
+    expect(hs.indexOf("直近 28 日の累計(その日を含む)")).toBeGreaterThanOrEqual(0);
+    expect(hs.indexOf("直近 28 日の累計(その日を含む)")).toBeLessThan(hs.indexOf("総括"));
+    const meta = after(t, "h3", "直近 28 日の累計(その日を含む)");
+    expect(meta).toBeDefined();
+    expect(textOf(meta!)).toBe("2026年9月13日〜2026年10月10日・開催 7 日・156 レース");
+    const tiles = kids(t)[kids(t).indexOf(meta!) + 1] as VNode;
+    expect(classesOf(tiles)).toContain("verify-tiles");
+    const text = textOf(tiles);
+    expect(text).toContain("52,000円");
+    expect(text).toContain("95.0%");
+    expect(text).toContain("360 点中 30 点");
+    expect(text).toContain("見込み 27.25 点・実際 30 点");
+  });
+
+  it("その日のタイルにも『見込みと実際』が出る(累計と取り違えない: その日は 1.25 点、累計は 27.25 点)", () => {
+    const tilesNodes = byClass(tree(withRolling()), "verify-tiles");
+    expect(tilesNodes).toHaveLength(2); // その日 + 累計
+    expect(textOf(tilesNodes[0]!)).toContain("見込み 1.25 点・実際 1 点");
+    expect(textOf(tilesNodes[0]!)).not.toContain("27.25");
+    expect(textOf(tilesNodes[1]!)).toContain("見込み 27.25 点・実際 30 点");
+  });
+
+  it("累計が無い日報(この項目を持つ前の日報)では、節を出さない。タイルは 1 組だけ", () => {
+    const t = tree(report());
+    expect(headings(t)).not.toContain("直近 28 日の累計(その日を含む)");
+    expect(byClass(t, "verify-tiles")).toHaveLength(1);
+    mountAll(tree(withRolling())); // DOM への写しも落ちない
+  });
+});

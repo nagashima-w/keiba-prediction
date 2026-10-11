@@ -20,6 +20,9 @@ import {
   type ReportStore,
   type StepOutcome,
 } from "../src/daily-report-core";
+import { REPORT_PROMPT_VERSION } from "../src/daily-report-prompt";
+import { buildPeriodStats, buildRollingSummary, type PeriodStats } from "../src/period-stats";
+import { buildDayStats, buildRaceDigest } from "../src/daily-report-digest";
 import { DEFAULT_CLOUD_SETTINGS, type AnalysisModelId } from "../src/settings";
 import type { DiscordPayload } from "../../packages/core/src/notify/discord";
 
@@ -64,6 +67,16 @@ function raceInput(n: number, withResult = true): RaceInput {
 const NARRATIVE_JSON = (races: string[] = []): string =>
   JSON.stringify({ summary: "20 レースを分析しました。", good: ["◎の取りこぼしが少ない"], improve: ["荒れたレースが弱い"], races: races.map((raceId) => ({ raceId, comment: "振り返り" })) });
 
+/** 直前 27 日の統計(偽)。数字は明示(賭け金 40,000 円・払戻 34,000 円・開催 6 日)。 */
+function priorStats(over: Partial<PeriodStats> = {}): PeriodStats {
+  return {
+    ...buildPeriodStats({ races: [], bets: [], marks: [], results: [], combos: [], imports: [] }, { fromDate: "20260913", toDate: "20261009" }),
+    dayCount: 6, raceCount: 120, resultRaceCount: 118, noResultRaceCount: 2, betRaceCount: 110, totalStake: 40000, totalReturn: 34000, recoveryRate: 0.85,
+    judgedBetCount: 300, hitBetCount: 24, expectedBetCount: 300, expectedHits: 21.5, expectedBaseHits: 24, maxPayout: 9000, maxPayoutStake: 300,
+    ...over,
+  };
+}
+
 interface Harness {
   readonly core: DailyReportCore;
   readonly kv: ReturnType<typeof memoryKv>;
@@ -76,7 +89,9 @@ interface Harness {
   /** LLM に送ったリクエストのモデル ID(送った順)。 */
   readonly models: string[];
   readonly readCalls: number[];
-  readonly state: { analyses: { raceId: string; analysisId: number }[]; inputs: Map<number, RaceInput>; failRead: number; failSave: number; hasReport: boolean; llmFailures: number; llmText: string; notifyFails: boolean; saveResult: "saved" | "exists"; allMissing: boolean; hasReportCalls: number };
+  /** 期間の再集計の呼び出し(from, to)。 */
+  readonly periodCalls: Array<[string, string]>;
+  readonly state: { period: PeriodStats; failPeriod: number; analyses: { raceId: string; analysisId: number }[]; inputs: Map<number, RaceInput>; failRead: number; failSave: number; hasReport: boolean; llmFailures: number; llmText: string; notifyFails: boolean; saveResult: "saved" | "exists"; allMissing: boolean; hasReportCalls: number };
   step(): Promise<StepOutcome>;
   drain(max?: number): Promise<StepOutcome[]>;
 }
@@ -91,8 +106,11 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
   const prompts: string[] = [];
   const models: string[] = [];
   const readCalls: number[] = [];
+  const periodCalls: Array<[string, string]> = [];
   const raceCount = options.raceCount ?? 20;
   const state: Harness["state"] = {
+    period: priorStats(),
+    failPeriod: 0,
     analyses: Array.from({ length: raceCount }, (_, i) => ({ raceId: raceIdOf(i + 1), analysisId: 101 + i })),
     inputs: new Map(Array.from({ length: raceCount }, (_, i) => [101 + i, raceInput(i + 1, i !== 3)])),
     failRead: 0,
@@ -114,6 +132,14 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
         throw new Error("D1 が落ちた");
       }
       return items.map((i) => (state.allMissing ? null : (state.inputs.get(i.analysisId) ?? null)));
+    },
+    readPeriodStats: async (fromDate, toDate) => {
+      periodCalls.push([fromDate, toDate]);
+      if (state.failPeriod > 0) {
+        state.failPeriod -= 1;
+        throw new Error("D1 が落ちた(期間)");
+      }
+      return { ...state.period, fromDate, toDate };
     },
   };
   const store: ReportStore = {
@@ -168,7 +194,7 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
   };
   const core = new DailyReportCore(deps);
   return {
-    core, kv, clock, alarms, warns, saved, sent, prompts, models, readCalls, state,
+    core, kv, clock, alarms, warns, saved, sent, prompts, models, readCalls, periodCalls, state,
     step: () => core.runNextStep(),
     async drain(max = 60) {
       const outcomes: StepOutcome[] = [];
@@ -571,7 +597,7 @@ describe("C9: 通知は送る前に sending を書く(送信の途中で落ち�
       now: () => h.clock.t,
       setAlarm: () => {},
       onWarn: () => {},
-      source: { listDayAnalyses: async () => [], readRaces: async () => [] },
+      source: { listDayAnalyses: async () => [], readRaces: async () => [], readPeriodStats: async () => priorStats() },
       store: { hasReport: async () => false, saveReport: async () => "saved" },
       loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
       notifier: { send: async () => void seenDuringSend.push(kv.get<Record<string, unknown>>(`job:${DATE}`)?.["notify"]) },
@@ -592,7 +618,7 @@ describe("C9: 通知は送る前に sending を書く(送信の途中で落ち�
         now: () => h.clock.t,
         setAlarm: () => {},
         onWarn: () => {},
-        source: { listDayAnalyses: async () => [], readRaces: async () => [] },
+        source: { listDayAnalyses: async () => [], readRaces: async () => [], readPeriodStats: async () => priorStats() },
         store: { hasReport: async () => false, saveReport: async () => "saved" },
         loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
         notifier: { send },
@@ -635,7 +661,7 @@ describe("C7(Issue #255): LLM の試行は、呼ぶ前に永続化する(呼び�
         now: () => h.clock.t,
         setAlarm: () => {},
         onWarn: () => {},
-        source: { listDayAnalyses: async () => [], readRaces: async () => [] },
+        source: { listDayAnalyses: async () => [], readRaces: async () => [], readPeriodStats: async () => priorStats() },
         store: {
           hasReport: async () => false,
           saveReport: async (r) => {
@@ -715,5 +741,117 @@ describe("isRequestSettled: 日単位の DO が依頼を完了として扱うか
     [{ accepted: false, reason: "future-date" }, false],
   ] as const)("%j → %s", (result, expected) => {
     expect(isRequestSettled(result as never)).toBe(expected);
+  });
+});
+
+
+describe("Issue #264: 直近 4 週の累計(直前 27 日を再集計して、その日の統計に足す)", () => {
+  it("generate の段階で、その日を除く直前 27 日 [D−27, D−1] を 1 回だけ読む。段階の並びは変わらない(段階を足さない)", async () => {
+    const h = harness({ raceCount: 3 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    const outcomes = await h.drain();
+    expect(h.periodCalls).toEqual([["20260913", "20261009"]]);
+    const phases = outcomes.filter((o) => o.kind === "ran").map((o) => (o as { phase: string }).phase);
+    expect(phases).toEqual(["list", "gather", "generate", "save", "notify"]);
+  });
+
+  it("LLM に渡すプロンプトに、直前 27 日と 28 日累計の確定値が入る(読み出しは LLM の呼び出しより前)", async () => {
+    const h = harness({ raceCount: 3 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0]).toContain("## 直前 27 日(その日を除く)の成績(確定値)");
+    expect(h.prompts[0]).toContain("賭け金 40,000円・払戻 34,000円・回収率 85.0%");
+    expect(h.prompts[0]).toContain("## 直近 28 日の累計(その日を含む)の成績(確定値)");
+    expect(h.prompts[0]).toContain("2026年9月13日〜2026年10月10日");
+  });
+
+  it("保存する日報の本文に rolling(LLM に渡した数字そのもの)と promptVersion を残す。28 日累計 = 直前 27 日 + その日の統計", async () => {
+    const h = harness({ raceCount: 3 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    const body = h.saved[0]!.body;
+    expect(body.promptVersion).toBe(REPORT_PROMPT_VERSION);
+    const expected = buildRollingSummary(DATE, body.stats, { ...priorStats(), fromDate: "20260913", toDate: "20261009" });
+    expect(body.rolling).toStrictEqual(expected);
+    // 前提(空振り防止): 足し算が働いている(その日の賭け金が 0 でなく、累計が直前 27 日より大きい)
+    expect(body.stats.totalStake).toBeGreaterThan(0);
+    expect(body.rolling!.total.totalStake).toBe(40000 + body.stats.totalStake);
+    expect(body.rolling!.total.totalStake).toBeGreaterThan(body.rolling!.prior.totalStake);
+    expect(body.rolling!.total.fromDate).toBe("20260913");
+    expect(body.rolling!.total.toDate).toBe(DATE);
+    // 統計(その日)は従来どおり日報の統計のまま
+    expect(body.stats).toStrictEqual(buildDayStats([...Array(3)].map((_, i) => buildRaceDigest(raceInput(i + 1, i !== 3).view, raceInput(i + 1, i !== 3).result))));
+  });
+
+  it("キー未登録(LLM なし)の統計だけの日報にも rolling を残す(画面と Discord が出す)", async () => {
+    const h = harness({ raceCount: 2, llm: false });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    expect(h.prompts).toHaveLength(0);
+    expect(h.periodCalls).toHaveLength(1);
+    expect(h.saved[0]!.body.rolling).toBeDefined();
+    expect(h.saved[0]!.body.promptVersion).toBe(REPORT_PROMPT_VERSION);
+  });
+
+  it("読み出しに失敗したら、LLM を呼ばずに間隔を空けて再試行する。上限を超えたらジョブは failed になり、4 週の累計なしの日報は保存しない", async () => {
+    const h = harness({ raceCount: 2 });
+    h.state.failPeriod = 99;
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    for (let i = 0; i < 12; i += 1) {
+      await h.step();
+      h.clock.t += REPORT_RETRY_DELAY_MS;
+    }
+    expect(h.periodCalls).toHaveLength(REPORT_MAX_STEP_ATTEMPTS);
+    expect(h.core.getStatus(DATE)).toMatchObject({ status: "failed", phase: "generate" });
+    expect(h.prompts).toHaveLength(0);
+    expect(h.saved).toHaveLength(0);
+    expect(h.sent).toHaveLength(0);
+    expect(JSON.stringify(h.kv.get(`job:${DATE}`))).not.toContain("D1 が落ちた"); // ジョブの状態にエラーの本文は残さない
+  });
+
+  it("一過性の失敗(1 回)なら、再試行で成功して日報は 4 週の累計つきで保存される", async () => {
+    const h = harness({ raceCount: 2 });
+    h.state.failPeriod = 1;
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.step(); // list
+    await h.step(); // gather
+    expect(await h.step()).toMatchObject({ kind: "ran", phase: "generate", result: "retry" }); // 1 回目の読み出しが失敗
+    expect(h.prompts).toHaveLength(0);
+    h.clock.t += REPORT_RETRY_DELAY_MS;
+    await h.drain();
+    expect(h.periodCalls).toHaveLength(2);
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0]!.body.rolling).toBeDefined();
+  });
+
+  it("読んだ累計はジョブに永続化し、LLM の再試行では読み直さない(同じ数字で再試行する)。収集の前のジョブ(rolling が無い形)でも generate が読む", async () => {
+    const h = harness({ raceCount: 2 });
+    h.state.llmFailures = 1;
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.step(); // list
+    await h.step(); // gather
+    const before = h.kv.get<Record<string, unknown>>(`job:${DATE}`)!;
+    expect(before["phase"]).toBe("generate");
+    expect(before["rolling"] ?? null).toBeNull(); // この時点のジョブに累計は無い(旧版が積んだジョブと同じ形)
+    expect(h.periodCalls).toHaveLength(0);
+    await h.step(); // generate: 累計を読み、LLM は 1 回目が失敗
+    expect(h.periodCalls).toHaveLength(1);
+    expect(h.kv.get<Record<string, unknown>>(`job:${DATE}`)!["rolling"]).toBeTruthy();
+    h.state.period = priorStats({ totalStake: 1 }); // 読み直せば数字が変わる状況にしておく
+    h.clock.t += REPORT_RETRY_DELAY_MS;
+    await h.drain();
+    expect(h.periodCalls).toHaveLength(1); // LLM の再試行で読み直していない
+    expect(h.saved[0]!.body.rolling!.prior.totalStake).toBe(40000); // 最初に読んだ数字のまま
+  });
+
+  it("Discord の embed に、直近 28 日の累計の field が付く", async () => {
+    const h = harness({ raceCount: 2 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    const fields = (h.sent[0]!.embeds![0]! as { fields?: Array<{ name: string; value: string }> }).fields!;
+    const f = fields.find((x) => x.name.includes("直近 28 日"));
+    expect(f).toBeDefined();
+    expect(f!.value).toContain("回収率");
   });
 });

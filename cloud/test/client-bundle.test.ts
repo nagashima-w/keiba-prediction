@@ -80,6 +80,9 @@ describe("生成物のドリフトと決定性", () => {
     // Issue #263: 上限は据え置き。閲覧者の検証画面(更新ボタンの出し分け・閲覧者の注記と『まだ集計されていません』の固定文言・追加指示の『あり/なし』の要約・`not-computed` の読み取り・
     // 失敗の文言の閲覧者版)を足した増分は +2,773(235,792 → 238,565。計り方: f867ee9〈#254 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。
     // 今の値は `pnpm run build:client` の出力。上限までの余裕は 6,435 バイト)。
+    // Issue #264: 上限は据え置き。日報の画面に、見込みの項目(全体・券種別)と直近 28 日の累計(`parseOptionalGroup`・`parsePeriod`・`parseRolling`・`statTiles`・`rollingOf`・VNode)、
+    // 共有の `src/expected-format` を足した増分は +1,887(238,565 → 240,452。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して
+    // `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 4,548 バイト)。10/12 公開予定の #259・#226 が先に入るので、リベース後に測り直すこと。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(245_000);
   });
@@ -112,6 +115,8 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   "../src/recovery-format",
   // Issue #247: 単勝の想定・実際のオッズの表示(丸め・「1000倍超」・ラベル・強調の判定・説明文)。Discord の通知(Worker)と馬のカードが同じ表示を使うため。**import を持たない**ことを下のテストが固定する。
   "../src/win-odds-format",
+  // Issue #264: 見込みの的中数の表示(`formatExpectedHits`)。Discord の日報(Worker)と日報の画面が同じ書き方を使うため。**import を持たない**ことを下のテストが固定する。
+  "../src/expected-format",
 ]);
 
 function importAllowed(specifier: string): boolean {
@@ -247,6 +252,18 @@ describe("日報の画面がクライアントに取り込む Worker 側のモ�
     expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
     expect(importAllowed("../src/recovery-format")).toBe(true);
   });
+});
+
+describe("日報の画面がクライアントに取り込む Worker 側のモジュール(Issue #264)", () => {
+  it("expected-format.ts は import を 1 つも持たない(Worker 専用のモジュール・node: を引き込まない)。クライアントの閉包に入っている", async () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "expected-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(200);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/expected-format")).toBe(true);
+    const inputs = await listBundledInputs();
+    expect(inputs.some((f) => f.endsWith("src/expected-format.ts")), "前提: 見込みの表示が閉包に入っている").toBe(true);
+  }, 60_000);
 });
 
 describe("馬のカードがクライアントに取り込む Worker 側のモジュール(Issue #247)", () => {

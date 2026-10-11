@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDayStats, type DayStats } from "../src/daily-report-digest";
+import { formatExpectedHits } from "../src/expected-format";
+import type { PeriodStats, RollingSummary } from "../src/period-stats";
 import { buildReportEmbed } from "../src/daily-report-embed";
 import { DISCORD_COLORS } from "../src/palette";
 import { EMBED_LIMITS, embedLength } from "../src/notify-embeds";
@@ -142,3 +144,62 @@ describe("buildReportEmbed", () => {
     expect(embedLength(e)).toBeLessThanOrEqual(EMBED_LIMITS.total);
   });
 });
+
+describe("Issue #264: 直近 28 日の累計の field と、見込みの的中数", () => {
+  const TOTAL: PeriodStats = {
+    ...STATS, fromDate: "20260913", toDate: "20261010", dayCount: 7,
+    raceCount: 156, resultRaceCount: 150, noResultRaceCount: 6, totalStake: 52000, totalReturn: 49400, recoveryRate: 0.95,
+    judgedBetCount: 360, hitBetCount: 30, expectedBetCount: 360, expectedHits: 27.25, expectedBaseHits: 30,
+  };
+  const ROLLING: RollingSummary = { windowDays: 28, prior: { ...TOTAL, dayCount: 6 }, total: TOTAL };
+  const DAY_STATS: DayStats = { ...STATS, expectedBetCount: 60, expectedHits: 9.5, expectedBaseHits: 14 };
+  const build = (rolling: RollingSummary | undefined, stats: DayStats = DAY_STATS) => buildReportEmbed({ kaisaiDate: "20261010", stats, narrative: NARRATIVE, note: null, link: undefined, rolling });
+
+  it("formatExpectedHits: 『見込み X.XX 点・実際 Y 点』。確率のある買い目が無ければ null(捏造しない)", () => {
+    expect(formatExpectedHits({ expectedBetCount: 60, expectedHits: 9.5, expectedBaseHits: 14 })).toBe("見込み 9.50 点・実際 14 点");
+    expect(formatExpectedHits({ expectedBetCount: 3, expectedHits: 0.3333, expectedBaseHits: 0 })).toBe("見込み 0.33 点・実際 0 点");
+    expect(formatExpectedHits({ expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0 })).toBeNull();
+  });
+
+  it("成績・レースの次に、『直近 28 日の累計(その日を含む)』の field を出す。賭け金・払戻・回収率・点数・見込みと実際・開催日数", () => {
+    const e = build(ROLLING);
+    const names = e.fields!.map((f) => f.name);
+    expect(names.slice(0, 3)).toEqual(["成績", "レース", "直近 28 日の累計(その日を含む)"]);
+    const f = e.fields!.find((x) => x.name.startsWith("直近 28 日"))!;
+    expect(f.value).toContain("賭け金 52,000円・払戻 49,400円・回収率 95.0%");
+    expect(f.value).toContain("360 点中 30 点的中");
+    expect(f.value).toContain("見込み 27.25 点・実際 30 点");
+    expect(f.value).toContain("開催 7 日・156 レース");
+  });
+
+  it("その日の成績の field にも、見込みと実際を添える(4 週と同じ書き方)", () => {
+    const stat = build(ROLLING).fields!.find((f) => f.name === "成績")!;
+    expect(stat.value).toContain("60 点中 14 点的中(見込み 9.50 点・実際 14 点)");
+  });
+
+  it("累計が無い日報(この項目を持つ前の日報)は、field を出さず、従来の field のまま", () => {
+    const e = build(undefined, STATS);
+    expect(e.fields!.map((f) => f.name)).toEqual(["成績", "レース", "良かった点", "改善点"]);
+  });
+
+  it("見込みを出せない(確率のある買い目が無い)累計は、見込みの語を出さない", () => {
+    const none: RollingSummary = { ...ROLLING, total: { ...TOTAL, expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0 } };
+    const f = build(none).fields!.find((x) => x.name.startsWith("直近 28 日"))!;
+    expect(f.value).not.toContain("見込み");
+    expect(f.value).toContain("360 点中 30 点的中");
+  });
+
+  it("累計の賭け金が 0 なら回収率は『なし』(NaN を出さない)。直前 27 日が空でその日だけの累計でも出る", () => {
+    const zero: RollingSummary = { ...ROLLING, total: { ...TOTAL, totalStake: 0, totalReturn: 0, recoveryRate: null, judgedBetCount: 0, hitBetCount: 0, expectedBetCount: 0 } };
+    const f = build(zero).fields!.find((x) => x.name.startsWith("直近 28 日"))!;
+    expect(f.value).toContain("回収率 なし");
+    expect(f.value).not.toMatch(/NaN|Infinity/);
+  });
+
+  it("累計の field を足しても Discord の上限(合計 6000)を守る", () => {
+    const long = { ...NARRATIVE, summary: "あ".repeat(4000), good: ["い".repeat(900), "い".repeat(900), "い".repeat(900)], improve: ["う".repeat(900), "う".repeat(900), "う".repeat(900)] };
+    const e = buildReportEmbed({ kaisaiDate: "20261010", stats: DAY_STATS, narrative: long, note: null, link: undefined, rolling: ROLLING });
+    expect(embedLength(e)).toBeLessThanOrEqual(EMBED_LIMITS.total);
+  });
+});
+

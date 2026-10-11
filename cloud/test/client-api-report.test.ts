@@ -134,3 +134,63 @@ describe("固定の文言", () => {
     expect(reportFetchFailureMessage({ kind: "unexpected", httpStatus: 418 })).toContain("418");
   });
 });
+
+describe("Issue #264: 見込みの的中数・直近 28 日の累計を読む", () => {
+  const STATS = {
+    raceCount: 2, resultRaceCount: 2, noResultRaceCount: 0, betRaceCount: 2, llmUsedRaceCount: 2, totalStake: 1000, totalReturn: 1300, recoveryRate: 1.3, judgedBetCount: 4, hitBetCount: 1, unjudgedBetCount: 0, unjudgedStake: 0,
+    byBetType: { win: { betCount: 2, hitCount: 1, stake: 600, payout: 1300 } },
+    byMark: [{ mark: "◎", count: 2, win: 1, top3: 1 }],
+  };
+  const EXPECTED = { expectedBetCount: 4, expectedHits: 1.25, expectedBaseHits: 1, maxPayout: 1300, maxPayoutStake: 600 };
+  const TYPE_EXPECTED = { expectedBetCount: 2, expectedHits: 0.6, expectedBaseHits: 1 };
+  const withExpected = { ...STATS, ...EXPECTED, byBetType: { win: { ...STATS.byBetType.win, ...TYPE_EXPECTED } } };
+  const PERIOD = { ...withExpected, fromDate: "20260913", toDate: "20261010", dayCount: 7 };
+  const ROLLING = { windowDays: 28, prior: { ...PERIOD, toDate: "20261009", dayCount: 6 }, total: PERIOD };
+  const detail = (stats: unknown, rolling?: unknown) => ({
+    date: "20261010", created_at: "2026-10-10T11:00:00.000Z", model: null, race_count: 2, total_stake: 1000, total_return: 1300, summary: null,
+    body: { format: 1, kaisaiDate: "20261010", stats, races: [], narrative: null, narrativeRaw: null, note: null, ...(rolling === undefined ? {} : { rolling }) },
+  });
+  const fetchWith = (report: unknown) => fetchReport(reply(200, { ok: true, report, job: null, job_status: "ok" }), "20261010");
+  const unexpected = { ok: false, error: { kind: "unexpected", httpStatus: 200 } };
+
+  it("見込みの項目(全体・券種別)と累計を、サーバが書いた値のまま読む", async () => {
+    const got = await fetchWith(detail(withExpected, ROLLING));
+    expect(got.ok).toBe(true);
+    if (!got.ok || got.report === null) throw new Error("読めませんでした");
+    expect(got.report.stats).toStrictEqual(withExpected);
+    expect(got.report.rolling).toStrictEqual(ROLLING);
+    // 前提(空振り防止): 見込みの項目が実際に値を持っている
+    expect(got.report.stats.expectedHits).toBe(1.25);
+    expect(got.report.rolling!.total.dayCount).toBe(7);
+  });
+
+  it("この項目を持つ前の日報(見込みも累計も無い)は、そのまま読める。キーを足さない", async () => {
+    const got = await fetchWith(detail(STATS));
+    if (!got.ok || got.report === null) throw new Error("読めませんでした");
+    expect(got.report.stats).toStrictEqual(STATS);
+    expect("rolling" in got.report).toBe(false);
+    expect("expectedHits" in got.report.stats).toBe(false);
+  });
+
+  it.each([
+    ["見込みの項目が一部だけ(expectedHits だけ)", { ...STATS, expectedHits: 1.2 }],
+    ["見込みの点数が負", { ...withExpected, expectedBetCount: -1 }],
+    ["見込みの的中数が文字列", { ...withExpected, expectedHits: "1.2" }],
+    ["最大払戻の賭け金だけ", { ...STATS, maxPayoutStake: 100 }],
+    ["券種別の見込みが一部だけ", { ...STATS, byBetType: { win: { ...STATS.byBetType.win, expectedHits: 0.5 } } }],
+  ])("想定外の形は一部だけ採用せず unexpected: %s", async (_n, stats) => {
+    expect(await fetchWith(detail(stats))).toStrictEqual(unexpected);
+  });
+
+  it.each([
+    ["total が無い", { windowDays: 28, prior: PERIOD }],
+    ["prior が無い", { windowDays: 28, total: PERIOD }],
+    ["windowDays が数でない", { ...ROLLING, windowDays: "28" }],
+    ["total の範囲(fromDate)が 8 桁でない", { ...ROLLING, total: { ...PERIOD, fromDate: "2026-09-13" } }],
+    ["total の開催日数が負", { ...ROLLING, total: { ...PERIOD, dayCount: -1 } }],
+    ["total の統計が壊れている", { ...ROLLING, total: { ...PERIOD, totalStake: "x" } }],
+    ["累計がオブジェクトでない", "x"],
+  ])("累計が壊れていれば unexpected: %s", async (_n, rolling) => {
+    expect(await fetchWith(detail(withExpected, rolling))).toStrictEqual(unexpected);
+  });
+});
