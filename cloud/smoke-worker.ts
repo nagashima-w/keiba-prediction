@@ -265,6 +265,8 @@ export { ResultBackfill } from "./src/result-backfill-do";
 export { VerifyReportDO } from "./src/verify-do";
 // Issue #235: 日報の DO(本番の worker.ts と同じもの。binding のクラスが入口から export されている必要がある)。
 export { DailyReportDO } from "./src/daily-report-do";
+// Issue #266: 統計モデル用の書き出しの DO(同上)。
+export { PriorExportDO } from "./src/prior-export-do";
 
 type SmokeEnv = Env;
 

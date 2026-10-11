@@ -41,7 +41,7 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
-  it("Issue #177・#216・#217・#219・#235: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
+  it("Issue #177・#216・#217・#219・#235・#266: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6、統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)は migration v7 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
     const migrations = [...tomlCode.matchAll(/^\[\[migrations\]\]\ntag = "(v\d+)"\n(?:[^\n]*\n)*?new_sqlite_classes = \[([^\]]*)\]/gm)].map((m) => [m[1], m[2]]);
     expect(migrations).toEqual([
       ["v1", '"NetkeibaGate"'],
@@ -50,6 +50,7 @@ describe("wrangler.toml", () => {
       ["v4", '"ResultBackfill"'],
       ["v5", '"VerifyReportDO"'],
       ["v6", '"DailyReportDO"'],
+      ["v7", '"PriorExportDO"'],
     ]);
     expect(tomlCode).toMatch(/^name = "RACE_DAY"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceDay"$/m);
@@ -61,9 +62,11 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "VerifyReportDO"$/m);
     expect(tomlCode).toMatch(/^name = "DAILY_REPORT"$/m);
     expect(tomlCode).toMatch(/^class_name = "DailyReportDO"$/m);
+    expect(tomlCode).toMatch(/^name = "PRIOR_EXPORT"$/m);
+    expect(tomlCode).toMatch(/^class_name = "PriorExportDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|deleted_classes|transferred_classes)\s*=/m);
-    // DO のバインディングはちょうど6つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(6);
+    // DO のバインディングはちょうど7つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(7);
   });
 
   it("Issue #206・#249: cron はちょうど2本で `0 12 * * *`(UTC 12:00 = JST 21:00)と `0 14 * * *`(UTC 14:00 = JST 23:00)。朝 9 時の定時実行は無い。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -1059,5 +1062,74 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
   it("cron の行は 1 行のまま(日報のために cron を足していない。Issue #249 で 21 時・23 時の 2 本になったが、日報は 23 時の再実行が補完する)。起動は日単位の DO のイベント（静かになったとき）と、23 時の cron の補完・手動", () => {
     expect((tomlCode.match(/^crons\s*=\s*\[[^\]]*\]\s*$/gm) ?? []).length).toBe(1);
     expect(tomlCode).toContain('crons = ["0 12 * * *", "0 14 * * *"]');
+  });
+});
+
+describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkeiba にも LLM にも出ず、他の DO・cron と干渉せず、R2 への書き込みは 1 箇所、Worker は D1 に触れない", () => {
+  const exportSources = ["prior-export-core.ts", "prior-export-do.ts", "prior-export-store.ts", "prior-export-format.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
+
+  it("書き出しのソース(4 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・他の DO が無い", () => {
+    expect(exportSources).toHaveLength(4);
+    for (const [name, code] of exportSources) {
+      expect(code.length, `${name} を読めている`).toBeGreaterThan(500);
+      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "VERIFY_REPORT", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+  });
+
+  it("D1・R2 の読み書きは prior-export-store.ts だけ。R2 の put は putFile の 1 箇所、get は詳細の読みの 1 箇所(list・head・delete は使わない)。D1 の書き込みは r2_ops の 2 文(Class B の加算・Class A の加算)だけ", () => {
+    const store = exportSources.find(([n]) => n === "prior-export-store.ts")![1];
+    expect((store.match(/this\.bucket\.put\(/g) ?? []).length).toBe(1);
+    expect((store.match(/this\.bucket\.get\(/g) ?? []).length).toBe(1);
+    for (const forbidden of [".list(", ".head(", ".delete(", "DELETE FROM", "UPDATE analyses", "UPDATE analysis_", "UPDATE race_", "UPDATE daily_", "UPDATE cloud_", "INSERT INTO analyses", "INSERT INTO race_", "INSERT INTO daily_", "INSERT INTO cloud_"]) {
+      expect(store, `prior-export-store.ts に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    expect((store.match(/INSERT INTO r2_ops/g) ?? []).length).toBe(2);
+    // 型 PriorExportBucket は get と put だけを許す
+    expect(store).toMatch(/type PriorExportBucket = Pick<R2Bucket, "get" \| "put">/);
+    // ほかの書き出しのソースは D1・R2 に直接触れない(core は注入された窓口だけを使う)
+    for (const [name, code] of exportSources.filter(([n]) => n === "prior-export-core.ts" || n === "prior-export-format.ts")) {
+      for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", ".prepare(", ".batch(", ".put(\"exports"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it("GET /api/export/prior-dataset の関数(handlePriorExport)は、DO の request を呼び、R2 は完成したファイルの get 1 回だけ。D1・取得・LLM・Webhook・R2 の書き込みに触れない。Refresh ヘッダの遷移先は定数のパスだけ(?refresh=1 を含めない)", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = handler.indexOf("async function handlePriorExport(");
+    expect(start).toBeGreaterThan(-1);
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(1500); // 前提: 本体を実際に読めている
+    expect(body).toContain(".request(mode)");
+    expect(body).toContain("sec-fetch-site");
+    expect((body.match(/env\.ANALYSIS_DETAIL\.get\(PRIOR_EXPORT_KEY\)/g) ?? []).length).toBe(1);
+    expect((body.match(/env\.ANALYSIS_DETAIL/g) ?? []).length).toBe(1);
+    expect(body).toContain("url=${PRIOR_EXPORT_PATH}");
+    expect(body).not.toContain("refresh=1}");
+    for (const forbidden of ["env.DB", "NETKEIBA_GATE", "RACE_DAY", "RESULT_BACKFILL", "CLOUD_MIGRATION", "VERIFY_REPORT", ".kick(", ".start(", ".fetchRaw(", ".prepare(", ".put(", ".list(", ".delete(", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "fetch("]) {
+      expect(body, `handlePriorExport に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 書き出しの DO の binding・クラスに触れるファイルは、概念で走査して固定(cloud/src の全ファイル)
+    const srcDir = path.join(ROOT, "cloud", "src");
+    const sites: Record<string, number> = {};
+    for (const f of readdirSync(srcDir).filter((x) => x.endsWith(".ts") && x !== "client-bundle.generated.ts")) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(/\bPRIOR_EXPORT\b|\bPriorExportDO\b/g) ?? []).length;
+      if (n > 0) sites[f] = n;
+    }
+    // handler.ts(Env の型・env.PRIOR_EXPORT)・worker.ts(export)・prior-export-do.ts(クラス定義・上書きの var 名の型)だけ
+    expect(Object.keys(sites).sort()).toEqual(["handler.ts", "prior-export-do.ts", "worker.ts"]);
+    expect((handler.match(/\benv\.PRIOR_EXPORT\b/g) ?? []).length).toBe(1);
+  });
+
+  it("cron の scheduled・RaceDay・result-dispatch・他の DO は、書き出しの DO を参照しない。route-policy は管理者専用の行を持つ", () => {
+    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "migration-do.ts", "migration-core.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "daily-report-do.ts"]) {
+      const code = stripCode(readTextLf("cloud", "src", f));
+      expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
+      expect(code, `${f} は書き出しを参照しない`).not.toMatch(/PRIOR_EXPORT|PriorExport|prior-export/);
+    }
+    expect(stripCode(readTextLf("cloud", "src", "route-policy.ts"))).toContain('exact("/api/export/prior-dataset", ADMIN_ONLY)');
   });
 });

@@ -58,13 +58,14 @@ const EXPECTED: readonly Expected[] = [
   { name: "/api/migration", sample: "/api/migration", viewer: [] },
   { name: "/api/migration/upload", sample: "/api/migration/upload", viewer: [] },
   { name: "/api/reports/run", sample: "/api/reports/run", viewer: [] },
+  { name: "/api/export/prior-dataset", sample: "/api/export/prior-dataset", viewer: [] }, // Issue #266
 ];
 
 describe("ルート × 役割の表(手書きの期待値と、実装の requiredRole を全 method で突き合わせる)", () => {
-  it("前提: 表は 28 ルート(閲覧者に開くもの 17・管理者だけ 11)で、閲覧者に開く method の組は 26 通り(GET が 17・HEAD が 9)", () => {
-    expect(EXPECTED).toHaveLength(28);
+  it("前提: 表は 29 ルート(閲覧者に開くもの 17・管理者だけ 12)で、閲覧者に開く method の組は 26 通り(GET が 17・HEAD が 9)", () => {
+    expect(EXPECTED).toHaveLength(29);
     expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(17);
-    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(11);
+    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(12);
     expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(26);
     expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(17);
     expect(EXPECTED.filter((e) => e.viewer.includes("HEAD"))).toHaveLength(9);
@@ -77,10 +78,10 @@ describe("ルート × 役割の表(手書きの期待値と、実装の require
     expect(requiredRole(method, sample)).toBe(expected);
   });
 
-  it("method の組み合わせの数: 28 ルート × 7 method = 196 通りのうち、閲覧者でよいのは 26 通りだけ", () => {
-    expect(cases).toHaveLength(196);
+  it("method の組み合わせの数: 29 ルート × 7 method = 203 通りのうち、閲覧者でよいのは 26 通りだけ", () => {
+    expect(cases).toHaveLength(203);
     expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(26);
-    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(170);
+    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(177);
   });
 
   it("リクエストの method が小文字などの未知の表記でも、閲覧者に開かない(完全一致の大文字だけを認める)", () => {
@@ -160,12 +161,12 @@ describe("handler.ts の静的ガード(ルーティングの構文を走査す�
     expect(handleBody.length).toBeGreaterThan(2_000);
   });
 
-  it("pathname と完全一致で比べている path は 19 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(26)と過不足なく一致する", () => {
+  it("pathname と完全一致で比べている path は 20 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(27)と過不足なく一致する", () => {
     const literals = [...new Set([...code.matchAll(/\bpathname === "([^"]+)"/g)].map((m) => m[1]!))].sort();
     const exactRules = ROUTE_RULES.filter((r) => r.exact).map((r) => r.path).sort();
-    expect(literals).toHaveLength(19);
+    expect(literals).toHaveLength(20);
     expect(ICON_PATHS).toHaveLength(7);
-    expect(exactRules).toHaveLength(26);
+    expect(exactRules).toHaveLength(27);
     expect([...literals, ...ICON_PATHS].sort()).toEqual(exactRules);
     // アイコンの path が handler.ts に直書きされていない(表と共有する定数だけで振り分ける)
     for (const iconPath of ICON_PATHS) {

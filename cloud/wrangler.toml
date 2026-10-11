@@ -71,6 +71,13 @@ class_name = "VerifyReportDO"
 name = "DAILY_REPORT"
 class_name = "DailyReportDO"
 
+# 統計モデルの見直し用の書き出しの Durable Object(Issue #266)。`idFromName("main")` の単一インスタンスが、管理者の要求(GET /api/export/prior-dataset)で、本番の分析と結果を馬ごとに書き出したファイル
+# (NDJSON を gzip。prior・項目ごとの補正・着順・確定オッズ・人気)を、アラームで少しずつ(1 回に R2 の詳細 30 件)作り、R2 に置く。D1 を読む(主キーの索引を引く)・R2 を読む(詳細)・R2 に 1 つ書く。
+# 1 日(JST)3 回まで、R2 の柵(`r2-fence.ts`)を尊重する。netkeiba にも LLM にも出ない。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "PRIOR_EXPORT"
+class_name = "PriorExportDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["NetkeibaGate"]
@@ -99,6 +106,11 @@ new_sqlite_classes = ["VerifyReportDO"]
 [[migrations]]
 tag = "v6"
 new_sqlite_classes = ["DailyReportDO"]
+
+# 追加だけ(v1〜v6 には触れない)。Issue #266。
+[[migrations]]
+tag = "v7"
+new_sqlite_classes = ["PriorExportDO"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。

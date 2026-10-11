@@ -34,6 +34,8 @@ import { DAILY_REPORT_NAME, type ReportMode, type ReportStatus, type RequestRepo
 import type { MigrationStatus, StartResult } from "./migration-core";
 import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-core";
 import type { GetReportOptions, VerifyResponse, ViewerVerifyResponse } from "./verify-core";
+import type { ExportMode, ExportResponse } from "./prior-export-core";
+import { exportFilename, PRIOR_EXPORT_KEY } from "./prior-export-format";
 import { toRaceListRows } from "./race-list";
 import type { JWTVerifyGetKey } from "jose";
 
@@ -132,6 +134,21 @@ export interface VerifyNamespaceLike {
 /** 検証の DO の固定名(単一インスタンス)。 */
 const VERIFY_NAME = "main";
 
+/** 統計モデル用の書き出しの DO(PriorExportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #266。 */
+export interface PriorExportStubLike {
+  /** 要求(`download`・`refresh`・`status`)。作成中は古いファイルを返さず building を返す。 */
+  request(mode: ExportMode): Promise<ExportResponse>;
+}
+
+/** 統計モデル用の書き出しの DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link PRIOR_EXPORT_NAME})。 */
+export interface PriorExportNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): PriorExportStubLike;
+}
+
+/** 統計モデル用の書き出しの DO の固定名(単一インスタンス)。 */
+const PRIOR_EXPORT_NAME = "main";
+
 /** 日報の DO(DailyReportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #235。 */
 export interface DailyReportStubLike {
   /** 日報の作成の依頼(冪等。進行中・作成済みは断る)。 */
@@ -157,6 +174,8 @@ export interface Env extends AccessEnv {
   RESULT_BACKFILL?: BackfillNamespaceLike;
   /** 検証の集計の DO(VerifyReportDO。wrangler.toml の binding)。Issue #219。本番では常にある。無い構成では `GET /api/verify` が 503 になる。 */
   VERIFY_REPORT?: VerifyNamespaceLike;
+  /** 統計モデル用の書き出しの DO(PriorExportDO。wrangler.toml の binding)。Issue #266。本番では常にある。無い構成では `GET /api/export/prior-dataset` が 503 になる。 */
+  PRIOR_EXPORT?: PriorExportNamespaceLike;
   /** 日報の DO(DailyReportDO。wrangler.toml の binding)。Issue #235。本番では常にある。無い構成では `POST /api/reports/run` が 503 になり、cron は日報の取り残しの補完をしない(一覧・本文の GET は D1 を読むだけなので動く)。 */
   DAILY_REPORT?: DailyReportNamespaceLike;
   /** D1(分析履歴。wrangler.toml の `[[d1_databases]]` の binding)。Issue #171。 */
@@ -394,6 +413,17 @@ export async function handle(
     return handleVerify(request, env, auth.role);
   }
 
+  if (pathname === "/api/export/prior-dataset") {
+    // 管理者専用(route-policy.ts)。DO の状態を読むか作成を始め、完成していれば R2 のファイルを返すだけ(Worker は D1 に触れない)。GET だけ(HEAD で DO を開かない)。Issue #266。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handlePriorExport(request, env);
+  }
+
   if (pathname === "/api/results/backfill") {
     // 読み取り専用(補完の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #217。
     if (method !== "GET") {
@@ -509,6 +539,9 @@ async function handleBackfillStatus(env: Env): Promise<Response> {
   }
 }
 
+/** 統計モデル用の書き出しの URL(route-policy.ts と同じ値)。 */
+const PRIOR_EXPORT_PATH = "/api/export/prior-dataset";
+
 const VERIFY_PARAMS = new Set(["venue", "refresh"]);
 const VERIFY_VENUES = new Set(["all", "central", "nar"]);
 
@@ -553,6 +586,86 @@ async function handleVerify(request: Request, env: Env, role: "admin" | "viewer"
     return json({ ok: true, ...response });
   } catch {
     return json({ ok: false, error: { type: "verify-error" } }, 503);
+  }
+}
+
+const PRIOR_EXPORT_PARAMS = new Set(["refresh", "status"]);
+/** 作成中の応答の Refresh ヘッダ(秒)。遷移先は**クエリなし**の URL(`?refresh=1` を自動で再読み込みさせて、作成を何度も始めない)。 */
+const PRIOR_EXPORT_REFRESH_SECONDS = 5;
+
+/**
+ * `GET /api/export/prior-dataset[?refresh=1|?status=1]`(Issue #266。管理者専用): 統計モデルの見直し用に、本番の分析と結果を馬ごとに書き出したファイル(NDJSON を gzip)を返す。
+ * 作成は DO(`PriorExportDO`)がアラームで少しずつ行い(Worker Free の CPU 10ms と、R2 の詳細 1,300 件超の読みのため)、Worker はその状態を読むか作成を頼むだけ。
+ *  - 通常の GET: 完成したファイルがあれば本体をそのまま返す(200・attachment)。無ければ作成を始めて 202。**作成中は古いファイルを返さず 202**。
+ *  - `?refresh=1`: 作り直しを始める(作成中なら二重に始めず 202。1 日 3 回まで〈超えると 429〉)。ファイルは返さない。
+ *  - `?status=1`: 状態の JSON だけ(副作用なし)。
+ * 202 の `Refresh` ヘッダは、`?refresh=1` を含まない URL へ 5 秒後に遷移させる(完成するとダウンロードになる)。
+ * 別サイトからの要求は 403(`Sec-Fetch-Site`。アドレスバーからは `none`)。入力の検証が先(400。DO は呼ばない)。失敗は固定の種類名だけ(例外の文面は返さない)。
+ */
+async function handlePriorExport(request: Request, env: Env): Promise<Response> {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin" && site !== "none") {
+    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  }
+  const url = new URL(request.url);
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((k) => !PRIOR_EXPORT_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+    return badRequest("クエリは refresh(1 または 0)と status(1 または 0)だけを、それぞれ1つまで指定できます");
+  }
+  const refreshValue = url.searchParams.get("refresh");
+  const statusValue = url.searchParams.get("status");
+  if ((refreshValue !== null && refreshValue !== "0" && refreshValue !== "1") || (statusValue !== null && statusValue !== "0" && statusValue !== "1")) {
+    return badRequest("refresh・status は 1 または 0 で指定してください");
+  }
+  if (refreshValue === "1" && statusValue === "1") {
+    return badRequest("refresh と status は同時に指定できません");
+  }
+  const mode: ExportMode = statusValue === "1" ? "status" : refreshValue === "1" ? "refresh" : "download";
+  let response: ExportResponse;
+  try {
+    const namespace = env.PRIOR_EXPORT;
+    if (namespace === undefined) {
+      throw new Error("PRIOR_EXPORT binding がありません");
+    }
+    response = await namespace.get(namespace.idFromName(PRIOR_EXPORT_NAME)).request(mode);
+  } catch {
+    return json({ ok: false, error: { type: "export-error" } }, 503);
+  }
+  if (mode === "status") {
+    return json({ ok: true, ...response });
+  }
+  switch (response.status) {
+    case "ready": {
+      if (mode !== "download") {
+        return json({ ok: true, ...response });
+      }
+      const object = await env.ANALYSIS_DETAIL.get(PRIOR_EXPORT_KEY).catch(() => null);
+      if (object === null) {
+        return json({ ok: false, error: { type: "export-missing" } }, 503);
+      }
+      return new Response(object.body, {
+        status: 200,
+        headers: {
+          ...SECURITY_HEADERS,
+          "content-type": "application/gzip",
+          "content-disposition": `attachment; filename="${exportFilename(response.file.generatedAt)}"`,
+          "content-length": String(object.size),
+        },
+      });
+    }
+    case "building":
+      return new Response(JSON.stringify({ ok: true, ...response }), {
+        status: 202,
+        headers: { ...SECURITY_HEADERS, "content-type": "application/json; charset=utf-8", refresh: `${PRIOR_EXPORT_REFRESH_SECONDS}; url=${PRIOR_EXPORT_PATH}` },
+      });
+    case "throttled":
+      return json({ ok: false, error: { type: "export-throttled" }, nextAt: response.nextAt, file: response.file }, 429);
+    case "blocked":
+      return json({ ok: false, error: { type: "export-blocked", reason: response.reason }, file: response.file }, 503);
+    case "failed":
+      return json({ ok: false, error: { type: "export-failed", reason: response.reason }, file: response.file }, 503);
+    case "empty":
+      return json({ ok: true, ...response });
   }
 }
 

@@ -42,6 +42,7 @@ function throwingBackends(): Record<string, unknown> {
     CLOUD_MIGRATION: { idFromName: boom, get: boom },
     RESULT_BACKFILL: { idFromName: boom, get: boom },
     VERIFY_REPORT: { idFromName: boom, get: boom },
+    PRIOR_EXPORT: { idFromName: boom, get: boom },
     DAILY_REPORT: { idFromName: boom, get: boom },
     DB: { prepare: boom, batch: boom },
     ANALYSIS_DETAIL: { get: boom, put: boom },
@@ -98,6 +99,7 @@ const ROUTES: readonly { readonly sample: string; readonly viewer: readonly stri
   { sample: "/api/migration", viewer: [] },
   { sample: "/api/migration/upload", viewer: [] },
   { sample: "/api/reports/run", viewer: [] },
+  { sample: "/api/export/prior-dataset", viewer: [] }, // Issue #266
 ];
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 
@@ -116,10 +118,10 @@ async function call(env: Env, deps: Parameters<typeof handle>[3], req: Request):
 describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-only。裏側にもリクエスト本文にも触れない", () => {
   const cases = ROUTES.flatMap((r) => METHODS.filter((m) => !r.viewer.includes(m)).map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者が管理者専用に当たる組は 142 通り(28 ルート × 6 method = 168 から、閲覧者に許す 26 を引く)", () => {
-    expect(ROUTES).toHaveLength(28);
+  it("前提: 閲覧者が管理者専用に当たる組は 148 通り(29 ルート × 6 method = 174 から、閲覧者に許す 26 を引く)", () => {
+    expect(ROUTES).toHaveLength(29);
     expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(26);
-    expect(cases).toHaveLength(142);
+    expect(cases).toHaveLength(148);
   });
 
   it.each(cases)("%s %s → 403(本文は admin-only の固定)。バインディングに触れず、本文を読まない", async (method, path) => {

@@ -27,7 +27,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -174,7 +174,7 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const reports = await req(port, "GET", "/api/reports");
   check(`${label}: GET /api/reports は 200(日報は閲覧できる)`, reports.status === 200 && parseJson(reports.text)["ok"] === true, `${reports.status} ${reports.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
@@ -203,6 +203,7 @@ async function expectAdmin(port: number, label: string, email: string): Promise<
   // Issue #263 の対照: 閲覧者は同じ状態(使える集計が無い)で not-computed だった。管理者は集計して ready を返す(本物の DO・D1。空の保存先なので集計対象は 0 件)。
   const verifyAdmin = await req(port, "GET", "/api/verify?venue=all");
   check(`${label}: GET /api/verify は ready(管理者は集計する。閲覧者の not-computed との対照)`, verifyAdmin.status === 200 && parseJson(verifyAdmin.text)["status"] === "ready", `${verifyAdmin.status} ${verifyAdmin.text.slice(0, 160)}`);
+  check(`${label}: GET /api/export/prior-dataset?x=1(Issue #266)は 400(役割の関門を通って、入力の検証に届く。DO は開かない)`, (await req(port, "GET", "/api/export/prior-dataset?x=1")).status === 400);
   const post = await req(port, "POST", "/api/analyses/run");
   check(`${label}: POST /api/analyses/run は(Origin が無いので)origin-mismatch の 403。admin-only ではない(役割の関門を通って、ハンドラの守りに届く)`, post.status === 403 && post.text !== ADMIN_ONLY_BODY && post.text.includes("origin-mismatch"), `${post.status} ${post.text.slice(0, 80)}`);
   const bulk = await req(port, "POST", "/api/analyses/run/bulk");
@@ -349,6 +350,28 @@ async function main(): Promise<void> {
       const sumOf = (j: Record<string, unknown>): number => ((j["report"] as Record<string, number> | undefined)?.["includedAnalysisCount"] ?? -1);
       check(`${label}: 区分の切替(central・nar)はキャッシュから返り、中央 + 地方 = 全体(集計した分析の件数)`, sumOf(verifyCentral) + sumOf(verifyNar) === sumOf(verifyJson) && (verifyCentral["computedAt"] === verifyJson["computedAt"]), `${sumOf(verifyCentral)} ${sumOf(verifyNar)} ${sumOf(verifyJson)}`);
       check(`${label}: GET /api/verify は不正な区分で 400・POST は 405`, (await req(port, "GET", "/api/verify?venue=both")).status === 400 && (await req(port, "POST", "/api/verify")).status === 405);
+
+      // Issue #266: 統計モデル用の書き出し(本物の DO `PriorExportDO`)。通常の GET が作成を始めて 202(Refresh ヘッダは ?refresh=1 を含まない URL)→ アラームで少しずつ進み ready →
+      // 次の通常の GET が R2 のファイル(gzip の NDJSON)を返す。ファイルはメタ行 + 行で、メタ行の件数と一致する。
+      const exportFirst = await req(port, "GET", "/api/export/prior-dataset");
+      check(`${label}: GET /api/export/prior-dataset は(ファイルが無いので)作成を始めて 202。Refresh ヘッダは ?refresh=1 を含まない URL へ`, exportFirst.status === 202 && parseJson(exportFirst.text)["status"] === "building" && exportFirst.headers.get("refresh") === "5; url=/api/export/prior-dataset", `${exportFirst.status} ${exportFirst.text.slice(0, 200)} ${exportFirst.headers.get("refresh")}`);
+      let exportStatus: Record<string, unknown> = {};
+      let exportPolls = 0;
+      for (; exportPolls < 120; exportPolls += 1) {
+        exportStatus = parseJson((await req(port, "GET", "/api/export/prior-dataset?status=1")).text);
+        if (exportStatus["status"] !== "building") break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      const exportFile = exportStatus["file"] as { rows: number; races: number; bytes: number; diag: { rowsRead: number; gets: number } } | null | undefined;
+      check(`${label}: 書き出しが ready になる(本物の DO・D1・R2)。D1 の読み取り行数と R2 の取得回数が診断に出る`, exportStatus["status"] === "ready" && typeof exportFile?.diag.rowsRead === "number" && exportFile.diag.rowsRead > 0 && typeof exportFile.diag.gets === "number", `${exportPolls} ${JSON.stringify(exportStatus).slice(0, 400)}`);
+      const exportDownload = await req(port, "GET", "/api/export/prior-dataset");
+      const exportLines = exportDownload.status === 200 ? new TextDecoder().decode(gunzipSync(exportDownload.bytes)).split("\n").filter((l) => l !== "") : [];
+      const exportMeta = (parseJson(exportLines[0] ?? "")["_meta"] ?? {}) as { format?: number; rows?: number };
+      check(`${label}: ready のあとの通常の GET は 200 で gzip の NDJSON を返す(attachment・no-store)。先頭がメタ行(format 1)で、行数がメタ行・状態と一致する`, exportDownload.status === 200 && exportDownload.headers.get("content-type") === "application/gzip" && (exportDownload.headers.get("content-disposition") ?? "").startsWith('attachment; filename="prior-dataset-') && exportDownload.headers.get("cache-control") === "no-store" && exportMeta.format === 1 && exportMeta.rows === exportLines.length - 1 && exportMeta.rows === exportFile?.rows, `${exportDownload.status} ${exportLines.length} ${JSON.stringify(exportMeta)}`);
+      const exportAgain = await req(port, "GET", "/api/export/prior-dataset?refresh=1");
+      const exportAgainDuring = await req(port, "GET", "/api/export/prior-dataset");
+      check(`${label}: ?refresh=1 は作り直しを始めて 202。作成中の通常の GET は古いファイルを返さず 202(進捗)`, exportAgain.status === 202 && exportAgainDuring.status === 202 && parseJson(exportAgainDuring.text)["status"] === "building", `${exportAgain.status} ${exportAgainDuring.status} ${exportAgainDuring.text.slice(0, 120)}`);
+      check(`${label}: GET /api/export/prior-dataset の POST は 405`, (await req(port, "POST", "/api/export/prior-dataset")).status === 405);
 
       const second = await upload(golden);
       check(`${label}: 同じファイルをもう一度 upload しても 202`, second.status === 202, `${second.status}`);

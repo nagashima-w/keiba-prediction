@@ -13,7 +13,7 @@
  *   `GET /api/plan`、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、
  *   `GET /api/verify`(検証。Issue #263。閲覧者の要求は集計のやり直しを起こさない〈キャッシュを返すだけ〉、`refresh` は管理者だけ)、
  *   アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244。{@link ICON_PATHS}。表に無いと閲覧者の画面でアイコンが 403 になる)。
- * それ以外(設定・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・確認ページと確認 API・health)は管理者だけ。
+ * それ以外(設定・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・統計モデル用の書き出し〈Issue #266〉・確認ページと確認 API・health)は管理者だけ。
  * 閲覧者が表の外の method(HEAD・POST など)を送ったときは、405 ではなく 403 になる(副作用の有無に関わらず管理者専用)。
  */
 import { ICON_PATHS } from "./icons";
@@ -45,7 +45,7 @@ function exact(path: string, viewerMethods: readonly string[]): RouteRule {
 }
 
 /**
- * 表。完全一致のルートが 26(画面・API・管理者専用が 19、アイコンが 7)、パターンのルートが 2(`/api/analyses/{id}`・`/api/reports/{date}`)。
+ * 表。完全一致のルートが 27(画面・API・管理者専用が 20、アイコンが 7)、パターンのルートが 2(`/api/analyses/{id}`・`/api/reports/{date}`)。
  * パターンは、同じ階層の固定の path(`/api/analyses/run`・`/api/reports/run`)に化けないよう、`run` を除く。
  */
 export const ROUTE_RULES: readonly RouteRule[] = [
@@ -87,6 +87,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/migration", ADMIN_ONLY),
   exact("/api/migration/upload", ADMIN_ONLY),
   exact("/api/reports/run", ADMIN_ONLY), // 日報の手動作成(LLM を呼ぶ)
+  // 統計モデルの見直し用の書き出し(Issue #266)。分析・結果の全件に近い内容(prior・補正・着順・オッズ)が出るので管理者だけ。作成は DO が R2 の詳細を大量に読む
+  exact("/api/export/prior-dataset", ADMIN_ONLY),
 ];
 
 /**
