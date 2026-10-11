@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProposedSummaryView, VerifyOutcome, VerifyReportView } from "../client/api-verify";
 import { exclusionRows, formatRate, formatUnknownBetTypeNotice, formatYen, PROPOSED_BET_LABELS, venueLabel } from "../client/verify-format";
 import { buildVerifyModel, type VerifyModelInput } from "../client/verify-model";
-import { calibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
+import { calibrationFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /** Issue #219: 検証画面の表示用データ。数値の整形は exe と同じ(一致は scripts/test/cloud-verify-format.test.ts が exe の関数と比べる)。 */
 
@@ -18,6 +18,7 @@ function report(over: Partial<VerifyReportView> = {}): VerifyReportView {
     excludedLookaheadUnknownCount: 0,
     bet: { betCount: 52, totalStake: 5200, totalReturn: 4994, recoveryRate: 0.9603846, actualPayoutCount: 20, approximatePayoutCount: 1 },
     calibration: calibrationFixture(),
+    priorCalibration: priorCalibrationFixture(),
     trend: trendFixture(),
     proposedBet: {
       population: { allocated: 90, skipped: 10, unreached: 15, noRecord: 5 },
@@ -42,7 +43,7 @@ const ready = (over: Partial<Extract<VerifyOutcome, { kind: "ready" }>> = {}, r:
   kind: "ready", venue: "all", report: r, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 }, ...over,
 });
 
-const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: ready() }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], ...over });
+const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: ready() }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", ...over });
 
 describe("整形(exe と同じ)", () => {
   it("率は小数第 1 位のパーセント(null は -)、金額は 3 桁区切りの円", () => {
@@ -185,9 +186,10 @@ describe("buildVerifyModel: 補正方向×結果・キャリブレーション�
     expect(rows.map((r) => r.label).slice(0, 3)).toEqual(["0〜5%", "5〜10%", "10〜15%"]);
     expect(rows[19]?.label).toBe("95〜100%");
     // 件数 0 の帯: 実複勝率・予測−実績は -。帯グラフは 0
-    expect(rows[0]).toEqual({ label: "0〜5%", bar: { value: 0, max: 1000, label: "実複勝率 -" }, cells: [{ name: "予測件数", value: "0件" }, { name: "複勝件数", value: "0件" }, { name: "実複勝率", value: "-" }, { name: "予測−実績", value: "-" }] });
+    // (Issue #254: 先頭の 4 つの cell は旧版と同じ。末尾に 平均予測・95%区間・判定 の 3 つが付く)
+    expect(rows[0]).toEqual({ label: "0〜5%", bar: { value: 0, max: 1000, label: "実複勝率 -" }, cells: [{ name: "予測件数", value: "0件" }, { name: "複勝件数", value: "0件" }, { name: "実複勝率", value: "-" }, { name: "予測−実績", value: "-" }, { name: "平均予測", value: "-" }, { name: "95%区間", value: "-" }, { name: "判定", value: "-" }] });
     // 過信(予測 12.5% > 実 0%)
-    expect(rows[2]?.cells).toEqual([{ name: "予測件数", value: "4件" }, { name: "複勝件数", value: "0件" }, { name: "実複勝率", value: "0.0%" }, { name: "予測−実績", value: "+12.5pt(過信)" }]);
+    expect(rows[2]?.cells.slice(0, 4)).toEqual([{ name: "予測件数", value: "4件" }, { name: "複勝件数", value: "0件" }, { name: "実複勝率", value: "0.0%" }, { name: "予測−実績", value: "+12.5pt(過信)" }]);
     expect(rows[2]?.bar).toEqual({ value: 0, max: 1000, label: "実複勝率 0.0%" });
     // 過小評価(予測 52.5% < 実 70%)
     expect(rows[10]?.cells[3]).toEqual({ name: "予測−実績", value: "-17.5pt(過小評価)" });
@@ -219,7 +221,7 @@ describe("buildVerifyModel: 補正方向×結果・キャリブレーション�
   });
 
   it("集計が出せないとき・取得中は出さない", () => {
-    for (const load of [{ kind: "loading" }, { kind: "error", message: "x" }, { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z" } }] as const) {
+    for (const load of [{ kind: "loading" }, { kind: "error", message: "x" }, { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" } }] as const) {
       const m = buildVerifyModel(input({ load }));
       expect([m.direction, m.calibration, m.marks]).toEqual([null, null, null]);
     }
@@ -301,7 +303,7 @@ describe("buildVerifyModel: プロンプト版別の比較(Issue #220)", () => {
     expect(m.versions?.empty).toBe("集計対象がありません。");
     expect(m.versions?.cards).toEqual([]);
     expect(model.versions?.empty).toBeNull();
-    for (const load of [{ kind: "loading" }, { kind: "error", message: "x" }, { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z" } }] as const) {
+    for (const load of [{ kind: "loading" }, { kind: "error", message: "x" }, { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" } }] as const) {
       expect(buildVerifyModel(input({ load })).versions).toBeNull();
     }
   });
@@ -361,9 +363,21 @@ describe("buildVerifyModel: 集計が出せないとき・取得の状態", () =
   });
 
   it("throttled: 次に開ける時刻を出す", () => {
-    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z" } } }));
+    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" } } }));
     expect(m.unavailable?.text).toContain("2026-10-11 00:00");
     expect(m.bet).toBeNull();
+  });
+
+  it("Issue #254(#255 からの申し送り) throttled の文言は柵の種類で変わる: 1 日の上限のときだけ『1 日の集計の上限』と言い、最短間隔(5 分)のときは言わない", () => {
+    const daily = buildVerifyModel(input({ load: { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" } } }));
+    const interval = buildVerifyModel(input({ load: { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T03:05:00.000Z", reason: "min-interval" } } }));
+    expect(daily.unavailable?.text).toContain("1 日の集計の上限");
+    expect(daily.unavailable?.text).toContain("2026-10-11 00:00");
+    expect(interval.unavailable?.text).not.toContain("1 日の集計の上限");
+    expect(interval.unavailable?.text).toContain("5 分に 1 回");
+    expect(interval.unavailable?.text).toContain("2026-10-10 12:05"); // 03:05Z = JST 12:05
+    expect(interval.unavailable?.tone).toBe("wait");
+    expect(interval.bet).toBeNull();
   });
 
   it("取得中は loading、失敗は固定の文言(error)。自動更新を止めたら注記", () => {
@@ -384,5 +398,148 @@ describe("exclusionRows", () => {
     const rows = exclusionRows(r);
     expect(rows).toHaveLength(6);
     expect(rows.reduce((n, x) => n + Number.parseInt(x.value, 10), 0)).toBe(120 + 7 + 30 + 4 + 3 + 2);
+  });
+});
+
+/** Issue #254: 対応表(キャリブレーション)の信頼区間・判定・補正前/補正後の切替。 */
+describe("対応表の信頼区間と判定(Issue #254)", () => {
+  const calib = (over: Partial<VerifyModelInput> = {}) => buildVerifyModel(input(over)).calibration!;
+  const cellsOf = (row: { cells: readonly { name: string; value: string }[] } | undefined) => Object.fromEntries((row?.cells ?? []).map((c) => [c.name, c.value]));
+
+  it("各行に 平均予測・95%区間・判定 の 3 つの cell が末尾に付き、先頭の 4 つ(予測件数・複勝件数・実複勝率・予測−実績)は旧版と同じ順", () => {
+    const rows = calib().rows;
+    expect(rows).toHaveLength(20);
+    expect(rows.every((r) => r.cells.map((c) => c.name).join() === "予測件数,複勝件数,実複勝率,予測−実績,平均予測,95%区間,判定")).toBe(true);
+  });
+
+  it("判定は 4 通り(整合・予測が高い=過信・予測が低い=過小評価・件数不足)と、件数 0 の帯の『-』。区間は Wilson(小数第 1 位のパーセント)", () => {
+    const rows = calib().rows;
+    // 前提(空振り防止): 4 通りすべての帯が見本にある(件数 200・120・40・4)
+    expect([rows[4], rows[6], rows[14], rows[2]].map((r) => cellsOf(r)["予測件数"])).toEqual(["200件", "120件", "40件", "4件"]);
+    expect(cellsOf(rows[4])).toMatchObject({ 平均予測: "22.6%", "95%区間": "17.7〜29.3%", 判定: "整合" });
+    expect(cellsOf(rows[6])).toMatchObject({ 平均予測: "33.1%", "95%区間": "13.8〜28.0%", 判定: "予測が高い(過信)" });
+    expect(cellsOf(rows[14])).toMatchObject({ 平均予測: "72.0%", "95%区間": "76.9〜96.0%", 判定: "予測が低い(過小評価)" });
+    // 件数 4: 区間は出す(幅が広いこと自体が情報)が、判定は『件数不足』
+    expect(cellsOf(rows[2])).toMatchObject({ 平均予測: "12.0%", "95%区間": "0.0〜49.0%", 判定: "件数不足(30件未満)" });
+    // 件数 0: すべて -
+    expect(cellsOf(rows[0])).toMatchObject({ 平均予測: "-", "95%区間": "-", 判定: "-" });
+  });
+
+  it("区間の幅は件数で決まる: 同じ実複勝率でも、件数が多い帯ほど区間が狭い(前提: 幅が 0 でない)", () => {
+    const widthOf = (text: string | undefined): number => {
+      const m = /^([\d.]+)〜([\d.]+)%$/.exec(text ?? "");
+      if (m === null) throw new Error(`区間の形式でない: ${text}`);
+      return Number(m[2]) - Number(m[1]);
+    };
+    const rows = calib().rows;
+    // 帯 4(200 件)・帯 6(120 件)・帯 14(40 件)・帯 2(4 件)
+    const widths = [4, 6, 14, 2].map((i) => widthOf(cellsOf(rows[i])["95%区間"]));
+    expect(widths[0]).toBeGreaterThan(0);
+    expect(widths[0]!).toBeLessThan(widths[1]!);
+    expect(widths[1]!).toBeLessThan(widths[2]!);
+    expect(widths[2]!).toBeLessThan(widths[3]!);
+  });
+
+  it("既定は補正後(AI)。切替の候補は 補正後(AI)・補正前(統計) の 2 つで、今のほうが current", () => {
+    const m = calib();
+    expect(m.targets).toEqual([
+      { target: "adjusted", label: "補正後(AI)", current: true },
+      { target: "prior", label: "補正前(統計)", current: false },
+    ]);
+    const p = calib({ calibrationTarget: "prior" });
+    expect(p.targets.map((t) => t.current)).toEqual([false, true]);
+  });
+
+  it("補正前を選ぶと、priorCalibration の帯で表を作る(補正後の表とは別の件数・別の判定)。見出しは同じで、説明が変わる", () => {
+    const adjusted = calib();
+    const prior = calib({ calibrationTarget: "prior" });
+    expect(prior.heading).toBe(adjusted.heading);
+    expect(prior.rows).toHaveLength(20);
+    expect(prior.rows).not.toEqual(adjusted.rows);
+    expect(prior.description).not.toBe(adjusted.description);
+    expect(adjusted.description).toContain("補正後");
+    expect(prior.description).toContain("補正前");
+    // prior の見本: 帯 3(300 件・整合)・帯 5(100 件・予測が低い)
+    expect(cellsOf(prior.rows[3])).toMatchObject({ 予測件数: "300件", 実複勝率: "16.0%", 平均予測: "17.2%", "95%区間": "12.3〜20.6%", 判定: "整合" });
+    expect(cellsOf(prior.rows[5])).toMatchObject({ 予測件数: "100件", 平均予測: "27.5%", "95%区間": "30.9〜49.8%", 判定: "予測が低い(過小評価)" });
+    // 補正後の表で件数のある帯(4)は、補正前の表では空
+    expect(cellsOf(prior.rows[4])).toMatchObject({ 予測件数: "0件", 判定: "-" });
+  });
+
+  it("件数 29 は判定しない・30 は判定する(境界)。補正前の見本の帯 9(29 件)と帯 10(30 件)", () => {
+    const prior = calib({ calibrationTarget: "prior" });
+    expect(cellsOf(prior.rows[9])).toMatchObject({ 予測件数: "29件", "95%区間": "19.9〜52.7%", 判定: "件数不足(30件未満)" });
+    expect(cellsOf(prior.rows[10])).toMatchObject({ 予測件数: "30件", "95%区間": "7.3〜33.6%", 判定: "予測が高い(過信)" });
+  });
+
+  it("補正前の表の『予測−実績』は、補正後の表と同じ定義(帯の中央 − 実複勝率)でクライアントが出す", () => {
+    const prior = calib({ calibrationTarget: "prior" });
+    // 帯 5(25〜30%): 中央 27.5% − 実 40.0% = -12.5pt(過小評価)
+    expect(cellsOf(prior.rows[5])["予測−実績"]).toBe("-12.5pt(過小評価)");
+    // 帯 3(15〜20%): 中央 17.5% − 実 16.0% = +1.5pt(過信)
+    expect(cellsOf(prior.rows[3])["予測−実績"]).toBe("+1.5pt(過信)");
+    expect(cellsOf(prior.rows[0])["予測−実績"]).toBe("-");
+  });
+
+  it("説明文に、区間の読み方と注意(同じレースの馬は独立でないので目安・20 帯のうち 1 帯程度は偶然に区間を外れる)が入る", () => {
+    for (const target of ["adjusted", "prior"] as const) {
+      const d = calib({ calibrationTarget: target }).description;
+      expect(d).toContain("95%区間");
+      expect(d).toContain("30件未満");
+      expect(d).toContain("独立");
+      expect(d).toContain("1 帯程度は偶然");
+    }
+  });
+
+  it("補正前の表が空(帯が 0 本)なら『データがありません。』。補正後の表は別に出せる", () => {
+    const r = report({ priorCalibration: [] });
+    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, r) }, calibrationTarget: "prior" })).calibration!;
+    expect(m.empty).toBe("データがありません。");
+    expect(m.rows).toEqual([]);
+    expect(buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, r) } })).calibration?.empty).toBeNull();
+  });
+
+  it("版別カードの対応表にも 平均予測・95%区間・判定 が付く(補正後の帯。補正前/補正後の切替には連動しない)", () => {
+    const keys = buildVerifyModel(input()).versions?.cards.map((c) => c.key) ?? [];
+    for (const target of ["adjusted", "prior"] as const) {
+      const a = buildVerifyModel(input({ expandedVersions: [keys[0]!], calibrationTarget: target })).versions?.cards[0];
+      expect(cellsOf(a?.calibrationRows[4])).toMatchObject({ 予測件数: "200件", "95%区間": "17.7〜29.3%", 判定: "整合" });
+      expect(cellsOf(a?.calibrationRows[6])["判定"]).toBe("予測が高い(過信)");
+    }
+  });
+});
+
+describe("累積回収率の丸め(Issue #254・#255 からの申し送り)", () => {
+  const tileValue = (rate: number | null): string | undefined => buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, report({ bet: { betCount: 5, totalStake: 500, totalReturn: 500, recoveryRate: rate, actualPayoutCount: 1, approximatePayoutCount: 0 } })) } })).bet?.tiles.find((t) => t.label === "回収率")?.value;
+
+  it.each([
+    [0.99996, "99.99%"], // 小数第 1 位に丸めると 100.0% になる(1 未満)値は、100.0% と出さない
+    [0.9996, "99.96%"],
+    [1, "100.0%"], // ちょうど 1 だけが 100.0%
+    [1.00004, "100.01%"], // 1 を超えて丸めると 100.0% になる値
+    [1.0004, "100.04%"],
+    [0.9603846, "96.0%"], // 従来どおり
+    [0, "0.0%"],
+    [null, "-"],
+  ] as const)("累積回収率 %s → %s", (rate, expected) => {
+    expect(tileValue(rate)).toBe(expected);
+  });
+
+  it("配分ベースの回収率(合算のタイルと券種別の行)も同じ丸めを使う", () => {
+    const r = report({
+      proposedBet: {
+        ...report().proposedBet,
+        overall: summary({ betCount: 300, totalStake: 100000, totalReturn: 99996, recoveryRate: 0.99996 }),
+        byType: { ...report().proposedBet.byType, place: summary({ betCount: 100, recoveryRate: 1.00004 }), win: summary({ betCount: 50, recoveryRate: 0.9603846 }) },
+      },
+    });
+    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, r) } }));
+    expect(m.proposed?.tiles.find((t) => t.label === "回収率")?.value).toBe("99.99%");
+    expect(m.proposed?.types.find((t) => t.label === "複勝")?.rate).toBe("100.01%");
+    expect(m.proposed?.types.find((t) => t.label === "単勝")?.rate).toBe("96.0%"); // 従来どおり
+  });
+
+  it("実複勝率・的中率は従来どおり formatRate(exe と同じ。丸めて 100.0% になる値もそのまま)", () => {
+    expect(formatRate(0.99996)).toBe("100.0%");
   });
 });

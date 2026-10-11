@@ -11,7 +11,7 @@ import type { CardResult, RaceModel, TaskCard } from "./race";
 import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
-import type { StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
+import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
 import type { RaceRowView, ReportBodyView, ReportModel } from "./report-model";
 import type { AdminOnlyModel } from "./admin-only";
@@ -55,6 +55,8 @@ export interface ViewActions {
   readonly onVerifyVenue: (venue: VerifyVenue) => void;
   /** 検証画面の版別キャリブレーションの開閉(Issue #220)。`key` は版のキー、`open` は押したあとの状態。 */
   readonly onVerifyVersionToggle: (key: string, open: boolean) => void;
+  /** 検証画面: 対応表の対象の切替(補正後〈AI〉/補正前〈統計〉。Issue #254)。 */
+  readonly onVerifyCalibrationTarget: (target: CalibrationTarget) => void;
   /** 日報画面の「この日の日報を作る」ボタン(Issue #235)。引数なし(表示中の日は `report-screen.ts` が持つ)。 */
   readonly onReportRun: () => void;
 }
@@ -742,6 +744,13 @@ function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
   if (model.calibration !== null) {
     const c = model.calibration;
     body.push(h("h2", {}, [c.heading]), h("p", { class: "meta" }, [c.description]));
+    body.push(
+      h(
+        "div",
+        { class: "verify-targets", role: "group", "aria-label": "対応表の対象" },
+        c.targets.map((t) => h("button", { class: "verify-target", "aria-pressed": t.current ? "true" : "false" }, [t.label], { click: () => actions.onVerifyCalibrationTarget(t.target) })),
+      ),
+    );
     body.push(c.empty !== null ? h("p", { class: "empty" }, [c.empty]) : statRowsNode(c.rows));
   }
   if (model.marks !== null) {

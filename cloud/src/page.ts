@@ -198,6 +198,10 @@ ${paletteCss()}
   .verify-venues { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
   .verify-venue { min-width: 64px; }
   .verify-venue[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  /* Issue #254: 対応表の対象の切替(補正後〈AI〉/補正前〈統計〉)。区分の切替と同じ見た目(押されている側を太字+枠色で示す=色だけに頼らない) */
+  .verify-targets { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+  .verify-target { min-width: 64px; }
+  .verify-target[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
   .verify-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
   .verify-tile { display: flex; flex-direction: column; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
   .verify-tile.strong { border-color: var(--accent); }

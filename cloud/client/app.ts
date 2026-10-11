@@ -319,6 +319,7 @@ export function createApp(deps: AppDeps): App {
     onMigrationCancelCheck: migration.onCancelCheck,
     onVerifyVenue: verify.onVenue,
     onVerifyVersionToggle: verify.onVersionToggle,
+    onVerifyCalibrationTarget: verify.onCalibrationTarget,
     onReportRun: report.onRun,
   };
 

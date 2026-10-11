@@ -513,7 +513,7 @@ const VERIFY_VENUES = new Set(["all", "central", "nar"]);
 /**
  * `GET /api/verify?venue=all|central|nar[&refresh=1]`(Issue #219〈#219 web の検証画面(1)〉): 検証の集計(累積回収率・配分ベースの回収率ほか。core の `computeVerifyReport`)。
  * 集計は DO(`VerifyReportDO`)がキャッシュ付きで行い、Worker は呼ぶだけ(Workers Free の CPU は 10ms。D1・R2 に触れない)。応答の `status`: `ready`(集計。`stale` なら古い)・
- * `preparing`(発走時刻の補完中)・`throttled`(1 日の再計算の上限に達していて、出せる集計が無い)。`refresh=1` は再計算の要求(DO の最短間隔・1 日の上限は守られる)。
+ * `preparing`(発走時刻の補完中)・`throttled`(再計算の柵〈最短間隔・1 日の上限〉に当たっていて、出せる集計が無い。`reason` で区別する〈Issue #254〉)。`refresh=1` は再計算の要求(DO の最短間隔・1 日の上限は守られる)。
  * **別サイトからの要求は 403**(`Sec-Fetch-Site`。D1 を数万行読む再計算を外から起こされないため)。入力の検証が先(400。DO は呼ばない)。DO の失敗・binding なしは 503(固定の種類名)。
  */
 async function handleVerify(request: Request, env: Env): Promise<Response> {

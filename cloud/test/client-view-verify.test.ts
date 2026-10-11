@@ -6,7 +6,7 @@ import { buildVerifyModel, type VerifyModelInput } from "../client/verify-model"
 import { renderScreen, type ViewActions } from "../client/view";
 import type { VNode } from "../client/vnode";
 import { noopActions } from "./client-fakes";
-import { calibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
+import { calibrationFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /**
  * Issue #219: 検証画面の VNode と、一覧の入口のリンク。モデル(`client-verify-model.test.ts`)→ VNode の写し間違い、許可リスト(`dom.ts`)を通ること、ボタンが動作に繋がること。
@@ -30,6 +30,7 @@ const REPORT: VerifyReportView = {
   includedAnalysisCount: 120, excludedAnalysisCount: 7, supersededAnalysisCount: 30, excludedEstimatedCount: 4, excludedLookaheadSuspectCount: 3, excludedLookaheadUnknownCount: 2,
   bet: { betCount: 52, totalStake: 5200, totalReturn: 4994, recoveryRate: 0.96, actualPayoutCount: 20, approximatePayoutCount: 1 },
   calibration: calibrationFixture(),
+  priorCalibration: priorCalibrationFixture(),
   trend: trendFixture(),
   proposedBet: {
     population: { allocated: 90, skipped: 10, unreached: 15, noRecord: 5 },
@@ -39,7 +40,7 @@ const REPORT: VerifyReportView = {
   },
 };
 const READY: VerifyOutcome = { kind: "ready", venue: "all", report: REPORT, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 5, affecting: 2 } };
-const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: READY }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], ...over });
+const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: READY }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", ...over });
 const tree = (over: Partial<VerifyModelInput> = {}, actions: ViewActions = noopActions): VNode => renderScreen(buildVerifyModel(input(over)), actions);
 
 describe("検証画面の VNode", () => {
@@ -49,7 +50,7 @@ describe("検証画面の VNode", () => {
       { load: { kind: "loading" } },
       { load: { kind: "error", message: "失敗" } },
       { load: { kind: "ready", outcome: { kind: "preparing", remaining: 5, blocked: null, resumeAt: null } } },
-      { load: { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z" } } },
+      { load: { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" } } },
       { load: { kind: "ready", outcome: { ...READY, stale: true, staleReason: "min-interval", nextRecomputeAt: "2026-10-10T03:05:00.000Z" } } },
       { venue: "nar", busy: true, pollStopped: true },
     ];
@@ -181,6 +182,43 @@ describe("検証画面の VNode", () => {
     const t = tree({ load: { kind: "ready", outcome: { ...READY, report: { ...REPORT, calibration: [] } } } });
     expect(textOf(t)).toContain("データがありません。");
     expect(byClass(t, "verify-stats")).toHaveLength(2); // 補正方向・印別。キャリブレーションの行は無い
+  });
+
+  it("Issue #254: 対応表の見出しの下に 補正後(AI)・補正前(統計) の切替(ボタン 2 つ。今のほうが aria-pressed=true)。押すと対象とともにアクションが呼ばれる", () => {
+    const calls: string[] = [];
+    const actions: ViewActions = { ...noopActions, onVerifyCalibrationTarget: (target) => calls.push(target) };
+    const t = tree({}, actions);
+    const group = byClass(t, "verify-targets")[0]!;
+    expect(group.attrs?.["role"]).toBe("group");
+    const buttons = byClass(group, "verify-target");
+    expect(buttons.map(textOf)).toEqual(["補正後(AI)", "補正前(統計)"]);
+    expect(buttons.map((b) => b.attrs?.["aria-pressed"])).toEqual(["true", "false"]);
+    expect(buttons.every((b) => b.tag === "button")).toBe(true);
+    for (const b of buttons) b.on?.click?.();
+    expect(calls).toEqual(["adjusted", "prior"]);
+    // 補正前を選んだ状態
+    const p = tree({ calibrationTarget: "prior" }, actions);
+    expect(byClass(byClass(p, "verify-targets")[0]!, "verify-target").map((b) => b.attrs?.["aria-pressed"])).toEqual(["false", "true"]);
+    // 切替は対応表の節にだけある(他の節・版別カードにはない)
+    expect(byClass(t, "verify-targets")).toHaveLength(1);
+    // 見出し → 説明 → 切替 → 行 の順
+    const text = textOf(t);
+    expect(text.indexOf("キャリブレーション(推定確率帯ごとの実複勝率・過信バイアス)")).toBeLessThan(text.indexOf("補正後(AI)"));
+    expect(() => mountAll(t)).not.toThrow();
+    expect(() => mountAll(p)).not.toThrow();
+  });
+
+  it("Issue #254: 対応表の行に 平均予測・95%区間・判定 が文字で出る(色だけに頼らない)。件数のある帯の判定は 整合/予測が高い/予測が低い/件数不足", () => {
+    const t = tree();
+    const rows = findAll(byClass(t, "verify-stats")[1]!, (n) => n.tag === "li");
+    expect(rows).toHaveLength(20);
+    const cellTexts = (i: number) => byClass(rows[i]!, "verify-stat-cell").map(textOf);
+    expect(cellTexts(4)).toEqual(["予測件数 200件", "複勝件数 46件", "実複勝率 23.0%", "予測−実績 -0.5pt(過小評価)", "平均予測 22.6%", "95%区間 17.7〜29.3%", "判定 整合"]);
+    expect(cellTexts(6).slice(4)).toEqual(["平均予測 33.1%", "95%区間 13.8〜28.0%", "判定 予測が高い(過信)"]);
+    expect(cellTexts(14).slice(4)).toEqual(["平均予測 72.0%", "95%区間 76.9〜96.0%", "判定 予測が低い(過小評価)"]);
+    expect(cellTexts(2).slice(4)).toEqual(["平均予測 12.0%", "95%区間 0.0〜49.0%", "判定 件数不足(30件未満)"]);
+    expect(cellTexts(0).slice(4)).toEqual(["平均予測 -", "95%区間 -", "判定 -"]);
+    expect(findAll(t, (n) => n.tag === "table")).toEqual([]);
   });
 
   it("集計対象が 0 件でも、3 つの節は出す(exe と同じ)", () => {

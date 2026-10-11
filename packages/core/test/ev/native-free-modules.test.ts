@@ -164,6 +164,8 @@ const NATIVE_FREE_MODULES = [
   path.join("ev", "analysis-store-codec.ts"),
   // Issue #207(#182-A): 結果の取込フロー(app から core へ移した。クラウド版が相対 import で取り込む)。
   path.join("ev", "result-import.ts"),
+  // Issue #254: 検証画面の信頼区間(Wilson 区間)。ブラウザのクライアントが `@keiba/core/ev/binomial-interval` として直接 import する(import を持たない純モジュール)。
+  path.join("ev", "binomial-interval.ts"),
 ];
 
 describe("切り出した新モジュールは better-sqlite3 に依存しない(cloud のバンドルに入れられる)", () => {

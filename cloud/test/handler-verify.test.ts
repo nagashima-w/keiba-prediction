@@ -108,8 +108,8 @@ describe("GET /api/verify: 検証の集計", () => {
     const h = harness();
     h.response = { status: "preparing", remaining: 12, blocked: null, resumeAt: null };
     expect(await (await handle(get(token), h.env(), {}, deps)).json()).toEqual({ ok: true, status: "preparing", remaining: 12, blocked: null, resumeAt: null });
-    h.response = { status: "throttled", nextAt: "2026-10-10T15:00:00.000Z" };
-    expect(await (await handle(get(token), h.env(), {}, deps)).json()).toEqual({ ok: true, status: "throttled", nextAt: "2026-10-10T15:00:00.000Z" });
+    h.response = { status: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" };
+    expect(await (await handle(get(token), h.env(), {}, deps)).json()).toEqual({ ok: true, status: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" });
   });
 
   it.each([

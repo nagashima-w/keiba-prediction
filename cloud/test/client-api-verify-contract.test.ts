@@ -151,6 +151,13 @@ describe("GET /api/verify の契約", () => {
     // 値は core のそのもの
     expect(r.trend.directionGroups).toEqual(server.trend.directionGroups);
     expect(r.calibration).toEqual(server.calibration);
+    // Issue #254: 帯の平均予測値(meanPredictedProb)と、補正前(prior)の対応表もそのまま読める。補正前の対応表は補正後とは別の振り分けである(取り違えを弾く)
+    expect(server.calibration.filter((b) => b.predictedCount > 0).every((b) => typeof b.meanPredictedProb === "number")).toBe(true);
+    expect(server.calibration.filter((b) => b.predictedCount === 0).every((b) => b.meanPredictedProb === null)).toBe(true);
+    expect(server.priorCalibration).toHaveLength(20);
+    expect(server.priorCalibration).not.toEqual(server.calibration);
+    expect(server.priorCalibration.reduce((n, b) => n + b.predictedCount, 0)).toBe(server.calibration.reduce((n, b) => n + b.predictedCount, 0));
+    expect(r.priorCalibration).toEqual(server.priorCalibration);
     expect(r.trend.calibrationBias).toEqual(server.trend.calibrationBias.map((b) => ({ overconfidenceGap: b.overconfidenceGap })));
     expect(r.trend.markStats).toEqual(server.trend.markStats);
     expect(r.trend.markStats).toHaveLength(7);
@@ -168,6 +175,8 @@ describe("GET /api/verify の契約", () => {
     expect(server[1]!.additionalInstructions).toEqual(["逃げ馬を重視", null]);
     expect(server.every((v) => v.calibration.length === 20 && v.overconfidenceGaps.length === 20 && v.calibration.some((b) => b.predictedCount > 0))).toBe(true);
     expect(result.outcome.promptVersions).toEqual(server);
+    // Issue #254: 版別の帯にも平均予測値がある(版別カードの判定に使う)
+    expect(server.every((v) => v.calibration.some((b) => b.meanPredictedProb !== null))).toBe(true);
   });
 
   it("venue と refresh が DO まで届く(refresh=1 は true、それ以外は false)", async () => {
@@ -181,8 +190,11 @@ describe("GET /api/verify の契約", () => {
     const s = await connect();
     s.response = { status: "preparing", remaining: 40, blocked: "r2-fence", resumeAt: "2026-11-01T00:05:00.000Z" };
     expect(await fetchVerify(s.fetch, "all", false)).toEqual({ ok: true, outcome: { kind: "preparing", remaining: 40, blocked: "r2-fence", resumeAt: "2026-11-01T00:05:00.000Z" } });
-    s.response = { status: "throttled", nextAt: "2026-10-10T15:00:00.000Z" };
-    expect(await fetchVerify(s.fetch, "all", false)).toEqual({ ok: true, outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z" } });
+    s.response = { status: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" };
+    expect(await fetchVerify(s.fetch, "all", false)).toEqual({ ok: true, outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" } });
+    // Issue #254: 最短間隔(5 分)の柵も区別して読める
+    s.response = { status: "throttled", nextAt: "2026-10-10T03:05:00.000Z", reason: "min-interval" };
+    expect(await fetchVerify(s.fetch, "all", false)).toEqual({ ok: true, outcome: { kind: "throttled", nextAt: "2026-10-10T03:05:00.000Z", reason: "min-interval" } });
   });
 
   it("DO の失敗(503)は server-error。文面は持ち込まない", async () => {
@@ -239,6 +251,18 @@ describe("parseVerifyResponse(応答を信用しない)", () => {
     ["帯の下限が欠ける", (b) => { delete b["report"].calibration[0].lowerBound; }],
     ["帯の上限が下限以下", (b) => { b["report"].calibration[3].upperBound = b["report"].calibration[3].lowerBound; }],
     ["帯の実複勝率が負", (b) => { b["report"].calibration[0].actualPlaceRate = -0.2; }],
+    ["帯の平均予測値が欠ける(Issue #254)", (b) => { delete b["report"].calibration[7].meanPredictedProb; }],
+    ["帯の平均予測値が 1 を超える", (b) => { b["report"].calibration[7].meanPredictedProb = 1.2; }],
+    ["帯の平均予測値が負", (b) => { b["report"].calibration[7].meanPredictedProb = -0.1; }],
+    ["帯の平均予測値が文字列", (b) => { b["report"].calibration[7].meanPredictedProb = "0.3"; }],
+    ["予測件数があるのに平均予測値が null", (b) => { const bin = b["report"].calibration.find((x: { predictedCount: number }) => x.predictedCount > 0); bin.meanPredictedProb = null; }],
+    ["予測件数が 0 なのに平均予測値がある", (b) => { const bin = b["report"].calibration.find((x: { predictedCount: number }) => x.predictedCount === 0); bin.meanPredictedProb = 0.1; }],
+    ["補正前の対応表が無い", (b) => { delete b["report"].priorCalibration; }],
+    ["補正前の対応表が配列でない", (b) => { b["report"].priorCalibration = {}; }],
+    ["補正前の対応表の帯数が補正後と違う", (b) => { b["report"].priorCalibration.pop(); }],
+    ["補正前の帯の予測件数が負", (b) => { b["report"].priorCalibration[0].predictedCount = -1; }],
+    ["補正前の帯の平均予測値が欠ける", (b) => { delete b["report"].priorCalibration[0].meanPredictedProb; }],
+    ["版の帯の平均予測値が文字列", (b) => { b["promptVersions"][0].calibration[3].meanPredictedProb = "x"; }],
     ["過信バイアスが配列でない", (b) => { b["report"].trend.calibrationBias = null; }],
     ["過信バイアスが文字列", (b) => { b["report"].trend.calibrationBias[0].overconfidenceGap = "x"; }],
     ["promptVersions が無い", (b) => { delete b["promptVersions"]; }],
@@ -264,6 +288,9 @@ describe("parseVerifyResponse(応答を信用しない)", () => {
     expect(parseVerifyResponse({ ok: true, status: "preparing", remaining: -1, blocked: null, resumeAt: null })).toBeNull();
     expect(parseVerifyResponse({ ok: true, status: "preparing", remaining: 1, blocked: "x", resumeAt: null })).toBeNull();
     expect(parseVerifyResponse({ ok: true, status: "throttled" })).toBeNull();
+    // Issue #254: 柵の種類(reason)が無い・未知なら null
+    expect(parseVerifyResponse({ ok: true, status: "throttled", nextAt: "2026-10-10T15:00:00.000Z" })).toBeNull();
+    expect(parseVerifyResponse({ ok: true, status: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "x" })).toBeNull();
     expect(parseVerifyResponse(null)).toBeNull();
     expect(parseVerifyResponse("ready")).toBeNull();
   });

@@ -5,6 +5,8 @@
  * **スマホ幅(360px 前後)で横に伸びない形**にする: exe が「/」区切りの 1 行で出していた内訳は、項目ごとの行に分ける(数値の 4 つ組は 2×2 のタイル)。横スクロールは使わない。
  * **サーバ由来の文は読まない**: 出す文言はすべてクライアントの固定の文言(サーバが返す日時・件数・券種コードは、整形して埋め込むだけ)。
  */
+import { judgeCalibration, MIN_COUNT_FOR_JUDGMENT, type CalibrationVerdict, type ProportionInterval } from "@keiba/core/ev/binomial-interval";
+import { formatRecoveryPercent } from "../src/recovery-format";
 import { formatJstDateTime } from "./date";
 import type { CalibrationBinView, ProposedSummaryView, PromptVersionView, VerifyOutcome, VerifyReportView, VerifyVenue } from "./api-verify";
 import {
@@ -33,6 +35,9 @@ export type VerifyLoadState =
   | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "ready"; readonly outcome: VerifyOutcome };
 
+/** 対応表(キャリブレーション)の対象。`adjusted`: 補正後〈AI〉の確率で分けた表。`prior`: 補正前〈統計モデル〉の確率で分けた表(Issue #254)。 */
+export type CalibrationTarget = "adjusted" | "prior";
+
 export interface VerifyModelInput {
   readonly load: VerifyLoadState;
   readonly venue: VerifyVenue;
@@ -42,6 +47,8 @@ export interface VerifyModelInput {
   readonly pollStopped: boolean;
   /** キャリブレーションを開いている版のキー(`versionKey`)。 */
   readonly expandedVersions: readonly string[];
+  /** 対応表の対象(補正後・補正前の切替。Issue #254)。 */
+  readonly calibrationTarget: CalibrationTarget;
 }
 
 export type Tone = "info" | "ok" | "error" | "wait";
@@ -117,9 +124,18 @@ export interface StatSection {
   readonly rows: readonly StatRow[];
 }
 
+/** 対応表の対象の切替の 1 つ(Issue #254)。 */
+export interface CalibrationTargetTab {
+  readonly target: CalibrationTarget;
+  readonly label: string;
+  readonly current: boolean;
+}
+
 /** キャリブレーションの節。帯が 0 本のときは `empty` に文を入れる。 */
 export interface CalibrationSection extends StatSection {
   readonly empty: string | null;
+  /** 補正後(AI)・補正前(統計)の切替(Issue #254)。 */
+  readonly targets: readonly CalibrationTargetTab[];
 }
 
 /** 版別比較の 1 版のカード。キャリブレーションは開いたときだけ行を持つ。 */
@@ -183,12 +199,17 @@ export interface VerifyModel {
 
 const POLL_STOPPED_NOTICE = "自動更新を止めました。「更新」で取り直せます。";
 
+/** 回収率の表示(Issue #254・#255 からの申し送り)。丸めると 100.0% になる値を 100.0% と出さない(`formatRecoveryPercent`〈#245〉。ちょうど 1 だけが 100.0%)。null は "-"。実複勝率などの `formatRate` とは別。 */
+function recoveryText(rate: number | null): string {
+  return rate === null ? "-" : formatRecoveryPercent(rate);
+}
+
 function tiles(betCount: number, totalStake: number, totalReturn: number, recoveryRate: number | null): readonly Tile[] {
   return [
     { label: "賭け数", value: `${betCount}点`, strong: false },
     { label: "投資額", value: formatYen(totalStake), strong: false },
     { label: "回収額", value: formatYen(totalReturn), strong: false },
-    { label: "回収率", value: formatRate(recoveryRate), strong: true },
+    { label: "回収率", value: recoveryText(recoveryRate), strong: true },
   ];
 }
 
@@ -207,7 +228,7 @@ function betSection(report: VerifyReportView): BetSection {
 }
 
 function rateRow(label: string, s: ProposedSummaryView): TypeRowView {
-  return { label, count: `${s.betCount}点`, rate: formatRate(s.recoveryRate) };
+  return { label, count: `${s.betCount}点`, rate: recoveryText(s.recoveryRate) };
 }
 
 function proposedSection(report: VerifyReportView): ProposedSection {
@@ -240,13 +261,38 @@ function rateBar(rate: number | null): BarView {
   return { value, max: 1000, label: `実複勝率 ${formatRate(rate)}` };
 }
 
+/** 判定の文言(色だけに頼らず文字で出す。語は `overconfidenceLabel` の「過信」「過小評価」とそろえる)。 */
+function verdictLabel(verdict: CalibrationVerdict | null): string {
+  switch (verdict) {
+    case null:
+      return "-";
+    case "consistent":
+      return "整合";
+    case "overpredicted":
+      return "予測が高い(過信)";
+    case "underpredicted":
+      return "予測が低い(過小評価)";
+    case "insufficient":
+      return `件数不足(${MIN_COUNT_FOR_JUDGMENT}件未満)`;
+  }
+}
+
+/** 区間の表示(例: "21.9〜39.6%")。区間なし(件数 0)は "-"。 */
+function intervalText(interval: ProportionInterval | null): string {
+  return interval === null ? "-" : `${(interval.lower * 100).toFixed(1)}〜${(interval.upper * 100).toFixed(1)}%`;
+}
+
 /**
  * キャリブレーションの行。過信バイアスは帯と**同じ添字**で対応づける(exe の `CalibrationTable` と同じ。無ければ「予測−実績」は -)。
  * 版別のキャリブレーション(`verify-versions` の射影)は帯に過信バイアスを含むので、`gaps` を帯と同じ長さで渡す。
+ *
+ * Issue #254: 末尾に **平均予測**(帯内の予測の平均)・**95%区間**(その帯の件数から求めた実複勝率の Wilson 区間)・**判定**(平均予測が区間に入るか。30 件未満は件数不足)を足す。
+ * 先頭の 4 つの cell は変えない(予測−実績は従来どおり帯の中央との差)。
  */
 export function calibrationRows(bins: readonly CalibrationBinView[], gaps: readonly (number | null)[]): readonly StatRow[] {
   return bins.map((bin, index) => {
     const gap = gaps[index] ?? null;
+    const judged = judgeCalibration({ predicted: bin.predictedCount, placed: bin.placedCount, meanPredictedProb: bin.meanPredictedProb });
     return {
       label: formatBinRange(bin),
       bar: rateBar(bin.actualPlaceRate),
@@ -255,9 +301,17 @@ export function calibrationRows(bins: readonly CalibrationBinView[], gaps: reado
         { name: "複勝件数", value: `${bin.placedCount}件` },
         { name: "実複勝率", value: formatRate(bin.actualPlaceRate) },
         { name: "予測−実績", value: gap === null ? "-" : `${formatAdjustment(gap)}(${overconfidenceLabel(gap)})` },
+        { name: "平均予測", value: formatRate(bin.meanPredictedProb) },
+        { name: "95%区間", value: intervalText(judged.interval) },
+        { name: "判定", value: verdictLabel(judged.verdict) },
       ],
     };
   });
+}
+
+/** 帯の中央 − 実複勝率(core の `CalibrationBiasBin.overconfidenceGap` と同じ定義)。補正前の表は core がこの値を持たないので、クライアントで同じ式で出す。 */
+function midpointGaps(bins: readonly CalibrationBinView[]): readonly (number | null)[] {
+  return bins.map((bin) => (bin.actualPlaceRate === null ? null : (bin.lowerBound + bin.upperBound) / 2 - bin.actualPlaceRate));
 }
 
 /** 版別の開閉のキー。版不明(null)と、文字列の版が衝突しない形にする。 */
@@ -312,12 +366,28 @@ function directionSection(report: VerifyReportView): StatSection {
   };
 }
 
-function calibrationSection(report: VerifyReportView): CalibrationSection {
+const CALIBRATION_NOTE = `95%区間は、その帯の件数から求めた実際の複勝率の幅(Wilson 区間)で、狭いほど件数が十分です。判定は、帯内の予測の平均が区間に入るかを見ます(${MIN_COUNT_FOR_JUDGMENT}件未満は判定しません)。同じレースの馬は互いに独立でないので区間は目安で、20 帯のうち 1 帯程度は偶然に区間を外れます。`;
+
+const CALIBRATION_TARGET_NOTES: Readonly<Record<CalibrationTarget, string>> = {
+  adjusted: "補正後(AI が補正した確率)で分けています。",
+  prior: "補正前(統計モデルの確率)で分けています。AI を使わなかった分析は補正後と同じです。",
+};
+
+const CALIBRATION_TARGET_LABELS: Readonly<Record<CalibrationTarget, string>> = {
+  adjusted: "補正後(AI)",
+  prior: "補正前(統計)",
+};
+
+function calibrationSection(report: VerifyReportView, target: CalibrationTarget): CalibrationSection {
+  const bins = target === "prior" ? report.priorCalibration : report.calibration;
+  // 過信バイアスは、補正後は core の値(添字で対応づける)、補正前は同じ式でクライアントが出す。
+  const gaps = target === "prior" ? midpointGaps(bins) : report.trend.calibrationBias.map((b) => b.overconfidenceGap);
   return {
     heading: "キャリブレーション(推定確率帯ごとの実複勝率・過信バイアス)",
-    description: "予測−実績が正なら過信、負なら過小評価。",
-    empty: report.calibration.length === 0 ? "データがありません。" : null,
-    rows: calibrationRows(report.calibration, report.trend.calibrationBias.map((b) => b.overconfidenceGap)),
+    description: `予測−実績が正なら過信、負なら過小評価。${CALIBRATION_TARGET_NOTES[target]}${CALIBRATION_NOTE}`,
+    empty: bins.length === 0 ? "データがありません。" : null,
+    targets: (["adjusted", "prior"] as const).map((t) => ({ target: t, label: CALIBRATION_TARGET_LABELS[t], current: t === target })),
+    rows: calibrationRows(bins, gaps),
   };
 }
 
@@ -370,6 +440,10 @@ function gapNotice(gaps: { readonly lost: number; readonly affecting: number }):
 
 function unavailableNotice(outcome: Exclude<VerifyOutcome, { kind: "ready" }>): VerifyNotice {
   if (outcome.kind === "throttled") {
+    // 柵の種類で文言を変える(Issue #254。最短間隔のときに『1 日の上限』と出さない)。
+    if (outcome.reason === "min-interval") {
+      return { tone: "wait", text: `集計は 5 分に 1 回までで、いま表示できる集計がありません。${jst(outcome.nextAt)}以降にもう一度開いてください。` };
+    }
     return { tone: "wait", text: `1 日の集計の上限に達していて、表示できる集計がありません。${jst(outcome.nextAt)}以降にもう一度開いてください。` };
   }
   if (outcome.blocked === "r2-fence") {
@@ -407,7 +481,7 @@ export function buildVerifyModel(input: VerifyModelInput): VerifyModel {
     proposed: ready === null ? null : proposedSection(ready.report),
     versions: ready === null ? null : versionsSection(ready.promptVersions, input.expandedVersions),
     direction: ready === null ? null : directionSection(ready.report),
-    calibration: ready === null ? null : calibrationSection(ready.report),
+    calibration: ready === null ? null : calibrationSection(ready.report, input.calibrationTarget),
     marks: ready === null ? null : marksSection(ready.report),
   };
 }

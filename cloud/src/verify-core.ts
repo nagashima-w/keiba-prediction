@@ -68,12 +68,13 @@ const JST_OFFSET_MS = 9 * 60 * 60_000;
 /**
  * kv に保存する集計の形式の版。形が変わったら上げる(古い集計は使わず再計算する)。
  * 2: 版別比較(`promptVersions`。Issue #220)を足した。版 1 の集計は使わず、デプロイ後の最初の要求で再計算する(1 日の再計算の回数に数える)。
+ * 3: 補正前の対応表(`priorCalibration`)と、帯の平均予測値(`CalibrationBin.meanPredictedProb`)を足した(Issue #254)。版 2 の集計は使わず、デプロイ後の最初の要求で再計算する(同上)。
  *
  * **上げた日の副作用(Issue #245)**: 版の違う集計は使わない(`readCache` が null)ので、古い集計を `stale` で出す道が無い。デプロイ後の最初の要求が最短間隔(5 分)か
  * 1 日の上限に当たると `throttled`(出せる集計が無い)になる。`runs` は kv に残る。デプロイは、再計算の直後と、その日の再計算が上限に近い日を避ける。
  * (`test/verify-core.test.ts` の「形式の版を上げた直後…」が固定している)
  */
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 /** `ctx.storage.kv`(同期 API)のうち、ここで使う部分。 */
 export interface VerifyKv {
@@ -182,9 +183,11 @@ export type VerifyResponse =
       readonly resumeAt: string | null;
     }
   | {
-      /** 1 日の再計算の上限に達していて、出せる集計も無い。 */
+      /** 再計算の柵(最短間隔・1 日の上限)に当たっていて、出せる集計も無い。 */
       readonly status: "throttled";
       readonly nextAt: string;
+      /** 柵の種類(Issue #254)。`min-interval`: 最短間隔〈5 分〉の内側。`daily-limit`: 1 日の上限。画面が文言を出し分ける。 */
+      readonly reason: "min-interval" | "daily-limit";
     };
 
 export interface GetReportOptions {
@@ -267,7 +270,7 @@ export class VerifyCore {
       if (cache !== null) {
         return unchanged ? this.ready(cache, venue, null, null) : this.ready(cache, venue, gate.reason, gate.nextAt);
       }
-      return { status: "throttled", nextAt: new Date(gate.nextAt).toISOString() };
+      return { status: "throttled", nextAt: new Date(gate.nextAt).toISOString(), reason: gate.reason };
     }
 
     this.inflight ??= this.recompute(watermark).finally(() => {

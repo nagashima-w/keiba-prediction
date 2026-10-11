@@ -334,6 +334,106 @@ describe("computeVerifyReport(verify集計)", () => {
     });
   });
 
+  describe("帯内の平均予測値と補正前(prior)の対応表(Issue #254)", () => {
+    it("各帯の meanPredictedProb は、その帯に入った馬の補正後の確率の平均(帯の中央値ではない)。0 件の帯は null", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [horse(1, 0.451, 2.0, 0.9, false), horse(2, 0.46, 2.0, 0.9, false), horse(3, 0.1, 2.0, 0.2, false)],
+      });
+      store.saveResult("R1", [
+        { umaban: 1, finishPosition: 1 },
+        { umaban: 2, finishPosition: 8 },
+        { umaban: 3, finishPosition: 9 },
+      ]);
+      const report = computeVerifyReport(store);
+      const bin = report.calibration[9]!; // 45-50%
+      expect(bin.predictedCount).toBe(2);
+      expect(bin.meanPredictedProb).toBeCloseTo((0.451 + 0.46) / 2, 12);
+      // 前提: 平均は帯の中央値(0.475)とは別の値である(中央値を返す実装を弾く)
+      expect(Math.abs(bin.meanPredictedProb! - (bin.lowerBound + bin.upperBound) / 2)).toBeGreaterThan(0.01);
+      expect(report.calibration[2]!.meanPredictedProb).toBeCloseTo(0.1, 12); // 10-15%(1 件)
+      expect(report.calibration[0]!.predictedCount).toBe(0);
+      expect(report.calibration[0]!.meanPredictedProb).toBeNull();
+      store.close();
+    });
+
+    it("priorCalibration は prior で切った同じ構成の帯(帯数・境界・順序は calibration と同じ)。馬の振り分けは prior の値で行う", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [
+          trendHorse(1, 0.12, 0.42), // prior は 10-15%(index 2)、補正後は 40-45%(index 8)
+          trendHorse(2, 0.12, 0.13), // prior も補正後も 10-15%(index 2)
+          trendHorse(3, 0.33, 0.2), // prior は 30-35%(index 6)、補正後は 20-25%(index 4)
+        ],
+      });
+      store.saveResult("R1", [
+        { umaban: 1, finishPosition: 2 },
+        { umaban: 2, finishPosition: 9 },
+        { umaban: 3, finishPosition: 1 },
+      ]);
+      const report = computeVerifyReport(store);
+      expect(report.priorCalibration).toHaveLength(20);
+      expect(report.priorCalibration.map((b) => [b.lowerBound, b.upperBound])).toEqual(report.calibration.map((b) => [b.lowerBound, b.upperBound]));
+      // 補正前: 馬 1・2 が 10-15%、馬 3 が 30-35%
+      expect(report.priorCalibration[2]).toMatchObject({ predictedCount: 2, placedCount: 1 });
+      expect(report.priorCalibration[2]!.actualPlaceRate).toBeCloseTo(0.5, 12);
+      expect(report.priorCalibration[2]!.meanPredictedProb).toBeCloseTo(0.12, 12);
+      expect(report.priorCalibration[6]).toMatchObject({ predictedCount: 1, placedCount: 1 });
+      expect(report.priorCalibration[6]!.meanPredictedProb).toBeCloseTo(0.33, 12);
+      expect(report.priorCalibration[8]!.predictedCount).toBe(0);
+      // 補正後(calibration)は prior とは別の振り分け(取り違えを弾く対照)
+      expect(report.calibration[8]).toMatchObject({ predictedCount: 1, placedCount: 1 });
+      expect(report.calibration[2]).toMatchObject({ predictedCount: 1, placedCount: 0 });
+      expect(report.calibration[4]).toMatchObject({ predictedCount: 1, placedCount: 1 });
+      store.close();
+    });
+
+    it("母集団は calibration と同じ: 着順不明の馬・結果未保存のレースは priorCalibration にも入らず、両者の件数の合計が一致する", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({ raceId: "R1", analyzedAt: "t", horses: [trendHorse(1, 0.2, 0.3), trendHorse(2, 0.2, 0.3), trendHorse(3, 0.5, 0.5)] });
+      store.saveResult("R1", [
+        { umaban: 1, finishPosition: 1 },
+        { umaban: 2, finishPosition: null }, // 着順不明(中止)
+        { umaban: 3, finishPosition: 7 },
+      ]);
+      store.saveAnalysis({ raceId: "R2", analyzedAt: "t", horses: [trendHorse(1, 0.2, 0.3)] }); // 結果未保存
+      const report = computeVerifyReport(store);
+      const sum = (bins: readonly { readonly predictedCount: number }[]): number => bins.reduce((a, b) => a + b.predictedCount, 0);
+      expect(sum(report.calibration)).toBe(2); // 前提: 空振りでない
+      expect(sum(report.priorCalibration)).toBe(2);
+      expect(report.priorCalibration[4]).toMatchObject({ predictedCount: 1, placedCount: 1 }); // prior 0.2(20-25%)
+      store.close();
+    });
+
+    it("prior と補正後が同じ(LLM を使わなかった分析)なら、priorCalibration は calibration と完全に一致する", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({ raceId: "R1", analyzedAt: "t", horses: [horse(1, 0.31, null, null, false), horse(2, 0.07, null, null, false), horse(3, 0.8, null, null, false)] });
+      store.saveResult("R1", [
+        { umaban: 1, finishPosition: 3 },
+        { umaban: 2, finishPosition: 4 },
+        { umaban: 3, finishPosition: 1 },
+      ]);
+      const report = computeVerifyReport(store);
+      expect(report.calibration.filter((b) => b.predictedCount > 0)).toHaveLength(3); // 前提: 非空の帯がある
+      expect(report.priorCalibration).toEqual(report.calibration);
+      store.close();
+    });
+
+    it("版別のレポート(computeVerifyReportByPromptVersion)の各 report も priorCalibration を持つ", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({ raceId: "R1", analyzedAt: "t", promptVersion: "v1", horses: [trendHorse(1, 0.12, 0.42)] });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const byVersion = computeVerifyReportByPromptVersion(store);
+      expect(byVersion).toHaveLength(1);
+      expect(byVersion[0]!.report.priorCalibration[2]).toMatchObject({ predictedCount: 1, placedCount: 1 });
+      store.close();
+    });
+  });
+
   describe("推定EVフラグ付き分析の除外(Task#25)", () => {
     it("evEstimated:trueの分析は既定で集計から除外され、excludedEstimatedCountに計上されること", () => {
       const store = new AnalysisStore();

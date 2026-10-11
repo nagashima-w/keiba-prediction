@@ -280,6 +280,12 @@ export interface CalibrationBin {
   readonly placedCount: number;
   /** 実際の複勝率(placedCount/predictedCount)。予測0件なら null。 */
   readonly actualPlaceRate: number | null;
+  /**
+   * この帯に入った馬の予測確率の平均(Issue #254)。帯の中央値ではなく**実際の平均**で、実際の率の信頼区間
+   * (`binomial-interval.ts`)に入るかを見るときの比較対象にする(確率の分布は帯の中で偏るため、中央値だと最大 ±帯幅/2 ずれる)。
+   * 予測0件なら null。`calibration` では補正後の確率、`priorCalibration` では補正前(prior)の確率の平均。
+   */
+  readonly meanPredictedProb: number | null;
 }
 
 /** 補正方向の分類(Task#26)。「上げ」「下げ」「据え置き」の3値。 */
@@ -558,8 +564,13 @@ export interface VerifyReport {
   readonly excludedLookaheadUnknownCount: number;
   /** 累積回収率サマリ。 */
   readonly bet: VerifyBetSummary;
-  /** 推定確率帯ごとのキャリブレーション表。 */
+  /** 推定確率帯ごとのキャリブレーション表(補正後〈AI〉の確率 `adjustedProb` で帯に分ける)。 */
   readonly calibration: CalibrationBin[];
+  /**
+   * 補正前(統計モデルの事前確率 `prior`)で帯に分けたキャリブレーション表(Issue #254)。`calibration` と**同じ母集団・同じ帯構成・同じ順序**で、
+   * 帯への振り分けと `meanPredictedProb` だけが prior の値になる。LLM を使わなかった分析は prior == adjustedProb なので、その分は両者で同じ帯に入る。
+   */
+  readonly priorCalibration: CalibrationBin[];
   /** 補正傾向サマリ(Task#26)。 */
   readonly trend: VerifyTrendReport;
   /** 配分ベースの回収率(Issue #71・#54-B)。 */
@@ -744,6 +755,8 @@ export function computeRaceLedger(
 interface BinCounter {
   predicted: number;
   placed: number;
+  /** 帯に入った予測確率の合計(平均予測値 = probSum / predicted。Issue #254)。 */
+  probSum: number;
 }
 
 /**
@@ -1163,10 +1176,15 @@ function computeVerifyReportForAnalyses(
 ): VerifyReport {
   const { calibrationBins, directionEpsilon } = config;
 
-  const bins: BinCounter[] = Array.from({ length: calibrationBins }, () => ({
-    predicted: 0,
-    placed: 0,
-  }));
+  const newBins = (): BinCounter[] =>
+    Array.from({ length: calibrationBins }, () => ({
+      predicted: 0,
+      placed: 0,
+      probSum: 0,
+    }));
+  const bins = newBins();
+  // 補正前(prior)で帯に分けた対応表(Issue #254)。補正後の bins と同じループ・同じ母集団で計上する。
+  const priorBins = newBins();
 
   // 補正傾向サマリ(Task#26)の可変カウンタ。回収率・キャリブレーションと同じループで計上する
   // (母集団を既存verifyと揃えるため)。
@@ -1228,8 +1246,16 @@ function computeVerifyReportForAnalyses(
       // キャリブレーション: 全馬(推定確率帯ごと)に計上する。
       const binIndex = binIndexFor(horse.adjustedProb, calibrationBins);
       bins[binIndex]!.predicted += 1;
+      bins[binIndex]!.probSum += horse.adjustedProb;
       if (isInTopThree) {
         bins[binIndex]!.placed += 1;
+      }
+      // 補正前(prior)の対応表: 帯への振り分けだけが prior の値(Issue #254)。
+      const priorBinIndex = binIndexFor(horse.prior, calibrationBins);
+      priorBins[priorBinIndex]!.predicted += 1;
+      priorBins[priorBinIndex]!.probSum += horse.prior;
+      if (isInTopThree) {
+        priorBins[priorBinIndex]!.placed += 1;
       }
 
       // 補正傾向サマリ(1) 補正方向×結果: diff の符号とεで3群に分類する(Task#26)。
@@ -1279,6 +1305,7 @@ function computeVerifyReportForAnalyses(
   }
 
   const calibration = bins.map((c, i) => finalizeBin(c, i, calibrationBins));
+  const priorCalibration = priorBins.map((c, i) => finalizeBin(c, i, calibrationBins));
 
   return {
     includedAnalysisCount: selected.included.length,
@@ -1297,6 +1324,7 @@ function computeVerifyReportForAnalyses(
       unjudgedOddsCount,
     },
     calibration,
+    priorCalibration,
     trend: {
       directionGroups: (["raised", "lowered", "unchanged"] as const).map((direction) =>
         finalizeDirectionGroup(direction, directionCounters[direction]),
@@ -1735,5 +1763,7 @@ function finalizeBin(
     placedCount: counter.placed,
     actualPlaceRate:
       counter.predicted === 0 ? null : counter.placed / counter.predicted,
+    meanPredictedProb:
+      counter.predicted === 0 ? null : counter.probSum / counter.predicted,
   };
 }

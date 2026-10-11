@@ -12,7 +12,7 @@
  */
 import { fetchVerify, verifyFetchFailureMessage, type VerifyOutcome, type VerifyVenue } from "./api-verify";
 import type { FetchLike } from "./api";
-import { buildVerifyModel, type VerifyLoadState, type VerifyModel } from "./verify-model";
+import { buildVerifyModel, type CalibrationTarget, type VerifyLoadState, type VerifyModel } from "./verify-model";
 
 /** 準備中(集計がまだ無い)の更新間隔。 */
 export const VERIFY_PREPARING_POLL_MS = 3_000;
@@ -42,6 +42,8 @@ export interface VerifyScreen {
   onRefresh(): void;
   /** 版別のキャリブレーションの開閉(Issue #220)。`open` は押したあとの状態。画面に居ないときは何もしない。取得は増えない。 */
   onVersionToggle(key: string, open: boolean): void;
+  /** 対応表の対象の切替(補正後〈AI〉/補正前〈統計〉。Issue #254)。同じ対象・画面に居ないときは何もしない。取得は増えない。 */
+  onCalibrationTarget(target: CalibrationTarget): void;
   onVisibilityChange(): void;
   model(): VerifyModel;
   /** 取得中のもの(テスト用の待ち)。 */
@@ -65,6 +67,8 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
   let timer: unknown = null;
   /** キャリブレーションを開いている版のキー(Issue #220。区分の切替・更新をまたいで保つ。画面を離れたら捨てる)。 */
   const expandedVersions = new Set<string>();
+  /** 対応表の対象(Issue #254。区分の切替・更新をまたいで保つ。画面を離れたら補正後に戻す)。 */
+  let calibrationTarget: CalibrationTarget = "adjusted";
   let gen = 0;
   let seq = 0;
   const inflight = new Set<Promise<unknown>>();
@@ -148,6 +152,7 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
     load = null;
     venue = "all";
     expandedVersions.clear();
+    calibrationTarget = "adjusted";
     busy = false;
     pollStopped = false;
     failures = 0;
@@ -172,6 +177,12 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
     deps.onChange();
   }
 
+  function onCalibrationTarget(next: CalibrationTarget): void {
+    if (load === null || next === calibrationTarget) return;
+    calibrationTarget = next;
+    deps.onChange();
+  }
+
   function onVisibilityChange(): void {
     if (load === null) return;
     if (!deps.isVisible()) {
@@ -190,8 +201,9 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
     onVenue,
     onRefresh,
     onVersionToggle,
+    onCalibrationTarget,
     onVisibilityChange,
-    model: () => buildVerifyModel({ load: load ?? { kind: "loading" }, venue, busy, pollStopped, expandedVersions: [...expandedVersions] }),
+    model: () => buildVerifyModel({ load: load ?? { kind: "loading" }, venue, busy, pollStopped, expandedVersions: [...expandedVersions], calibrationTarget }),
     pending: () => [...inflight],
   };
 }

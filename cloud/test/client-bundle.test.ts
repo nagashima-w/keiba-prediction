@@ -71,6 +71,9 @@ describe("生成物のドリフトと決定性", () => {
     // Issue #247: 上限は据え置き。馬のカードの単勝の想定・実際の表示(API の検証 `api-analysis.ts` の3項目と `oddsStatus`・カードの表示用データ `result.ts`・VNode `view.ts`・表示の整形 `src/win-odds-format.ts`)を足した増分は +1,686
     // (218,081 → 219,767。計り方: cd78fc2〈#246 の承認後〉の生成物と今の生成物を、それぞれ import して `Buffer.byteLength` を取った。上限までの余裕は 15,233 バイト)。勝率の計算はサーバで行い、クライアントに Plackett-Luce を入れていない
     // (クライアントが推定を呼ぶと束に Plackett-Luce が入って増える。下の「Plackett-Luce が入っていない」テストが、生成物にモデルの文言が無いことで固定する)。
+    // Issue #254: 上限は 235,000 のまま据え置き(引き上げなし)。検証画面の対応表の信頼区間(Wilson 区間と判定 `@keiba/core/ev/binomial-interval`・補正後/補正前の切替・平均予測/95%区間/判定の cell・
+    // 説明文・throttled の文言の出し分け・回収率の丸め〈`src/recovery-format`〉)を足した増分は +3,887(230,093 → 233,980。計り方: d99276a〈#255 の承認後〉の生成物と今の生成物を、それぞれ
+    // import して `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力)。上限までの余裕は 1,020 バイト(約 0.4%)なので、**次にクライアントへ機能を足す Issue は、ここで上限の引き上げが要る見込み**。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(235_000);
   });
@@ -93,6 +96,10 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   // Issue #222(移行画面): 移行ファイルの形式の検証(`parseMigrationLine`・`MigrationTally`)を、サーバ・exe と同じ実装で行うため。core を直接 import する 2 つ目の例外(上と同じ理由:
   // `exports` の宣言済みサブパスで、**import が 1 つも無い**〈`node:`・`node_modules`・バレルが入らない〉モジュール。`packages/core/test/ev/native-free-modules.test.ts` も閉包を固定している)。
   "@keiba/core/ev/cloud-migration-format",
+  // Issue #254(検証画面の対応表の信頼区間): Wilson 区間と判定(`wilsonInterval`・`judgeCalibration`)を、サーバ・テストと同じ実装で行うため。core を直接 import する 3 つ目の例外
+  // (上と同じ理由: `exports` の宣言済みサブパスで、**import が 1 つも無い**〈`node:`・`node_modules`・バレルが入らない〉モジュール。`packages/core/test/ev/binomial-interval.test.ts` が
+  // import の無いことを、`native-free-modules.test.ts` が閉包を固定している)。
+  "@keiba/core/ev/binomial-interval",
   // Issue #222: サーバと同じ行の分割(`readLines`。区切りは 0x0A だけ・U+2028/2029 を壊さない)。**import を持たない**ことを下のテストが固定する(Worker 専用のモジュールを引き込まない)。
   "../src/migration-reader",
   // Issue #245: 回収率の表示(`formatRecoveryPercent`)。Discord の日報(Worker)と日報の画面が同じ丸めを使うため。**import を持たない**ことを下のテストが固定する。

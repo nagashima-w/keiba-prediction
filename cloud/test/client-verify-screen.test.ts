@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../client/api";
 import { createVerifyScreen, VERIFY_BACKFILL_POLL_MS, VERIFY_MAX_POLLS, VERIFY_PREPARING_POLL_MS, type VerifyScreen } from "../client/verify-screen";
 import { createFakeTimers, deferred } from "./client-fakes";
-import { calibrationFixture, trendFixture, versionsFixture } from "./verify-fixtures";
+import { calibrationFixture, priorCalibrationFixture, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /**
  * Issue #219: 検証画面の制御(取得・区分の切替・更新・ポーリング)。偽の fetch・偽のタイマー・偽の可視状態。
@@ -21,6 +21,7 @@ const REPORT = {
   includedAnalysisCount: 3, excludedAnalysisCount: 0, supersededAnalysisCount: 0, excludedEstimatedCount: 0, excludedLookaheadSuspectCount: 0, excludedLookaheadUnknownCount: 0,
   bet: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, actualPayoutCount: 1, approximatePayoutCount: 0 },
   calibration: calibrationFixture(),
+  priorCalibration: priorCalibrationFixture(),
   trend: trendFixture(),
   proposedBet: {
     population: { allocated: 1, skipped: 0, unreached: 0, noRecord: 0 },
@@ -203,7 +204,7 @@ describe("ポーリング", () => {
     ["柵(min-interval)で古い集計", ready("all", { stale: true, staleReason: "min-interval", nextRecomputeAt: "2026-10-10T03:05:00.000Z" })],
     ["R2 の柵で止まっている準備中", preparing(5, "r2-fence")],
     ["エラーで止まっている準備中", preparing(5, "error")],
-    ["throttled", { ok: true, status: "throttled", nextAt: "2026-10-10T15:00:00.000Z" }],
+    ["throttled", { ok: true, status: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" }],
   ])("%s ではタイマーを張らない", async (_name, body) => {
     const h = harness();
     h.responses = [reply(200, body)];
@@ -358,5 +359,58 @@ describe("版別キャリブレーションの開閉(Issue #220)", () => {
     expect(h.changes).toBe(afterLeave);
     await open(h);
     expect(card(h)?.expanded).toBe(false);
+  });
+});
+
+describe("対応表の対象の切替(補正後〈AI〉/補正前〈統計〉。Issue #254)", () => {
+  const current = (h: Harness) => h.screen.model().calibration?.targets.find((t) => t.current)?.target;
+  const counts = (h: Harness) => h.screen.model().calibration?.rows.map((r) => r.cells[0]?.value);
+
+  it("既定は補正後。切り替えると補正前の表になり、取得は増えず、再描画を要求する。戻せる", async () => {
+    const h = harness();
+    await open(h);
+    expect(current(h)).toBe("adjusted");
+    const adjustedCounts = counts(h);
+    const urls = h.urls.length;
+    const changes = h.changes;
+    h.screen.onCalibrationTarget("prior");
+    expect(current(h)).toBe("prior");
+    expect(counts(h)).not.toEqual(adjustedCounts); // 前提と結論: 別の表になっている(補正前の見本は補正後の見本と件数が違う)
+    expect(h.changes).toBe(changes + 1);
+    expect(h.urls).toHaveLength(urls);
+    h.screen.onCalibrationTarget("adjusted");
+    expect(current(h)).toBe("adjusted");
+    expect(counts(h)).toEqual(adjustedCounts);
+  });
+
+  it("区分の切替・更新をまたいで選んだ対象を保つ。同じ対象を重ねて指示しても再描画を増やさない", async () => {
+    const h = harness();
+    await open(h);
+    h.screen.onCalibrationTarget("prior");
+    const changes = h.changes;
+    h.screen.onCalibrationTarget("prior");
+    expect(h.changes).toBe(changes);
+    h.screen.onVenue("nar");
+    await h.settle();
+    expect(current(h)).toBe("prior");
+    h.screen.onRefresh();
+    await h.settle();
+    expect(current(h)).toBe("prior");
+  });
+
+  it("画面を離れると補正後に戻る。画面に居ない間の指示は何もしない(再描画も要求しない)", async () => {
+    const h = harness();
+    const before = h.changes;
+    h.screen.onCalibrationTarget("prior"); // enter 前
+    expect(h.changes).toBe(before);
+    await open(h);
+    expect(current(h)).toBe("adjusted"); // enter 前の指示は効いていない
+    h.screen.onCalibrationTarget("prior");
+    h.screen.leave();
+    const afterLeave = h.changes;
+    h.screen.onCalibrationTarget("prior"); // leave 後
+    expect(h.changes).toBe(afterLeave);
+    await open(h);
+    expect(current(h)).toBe("adjusted");
   });
 });

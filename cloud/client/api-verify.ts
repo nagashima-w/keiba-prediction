@@ -3,12 +3,16 @@
  *
  * **応答を信用しない**: 読む項目の型・範囲(件数は 0 以上の整数、金額・率は有限の数、率は null もある)を満たすときだけ成功。一部だけを採用しない。余計なキー
  * (診断の細目・帯ごとの代表予測値など、この画面が読まないもの)は無視する。Issue #220 で、補正方向×結果・キャリブレーション・印別的中率を読む項目に加えた(群の数・重複・順序は core の契約どおりに検査する)。読む項目のキー名のドリフトは `test/client-api-verify-contract.test.ts` が検出する。
+ * Issue #254 で、帯ごとの予測の平均(`meanPredictedProb`)と、補正前〈prior〉で分けたキャリブレーション(`priorCalibration`。補正後と同じ帯数)も読む項目に加えた。
  * **サーバの文面は読まない**(失敗は、ステータスと `error.type`〈サーバが決めた固定の識別子〉だけで分類し、固定の文言にする)。
- * 応答の `status`: `ready`(集計。`stale` なら古い)・`preparing`(発走時刻の補完中)・`throttled`(1 日の再計算の上限に達していて、出せる集計が無い)。
+ * 応答の `status`: `ready`(集計。`stale` なら古い)・`preparing`(発走時刻の補完中)・`throttled`(再計算の柵〈最短間隔 5 分・1 日の上限〉に当たっていて、出せる集計が無い。`reason` で区別する〈Issue #254〉)。
  */
 import { classify, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 export type VerifyVenue = "all" | "central" | "nar";
+
+/** 集計が出せないときの柵の種類。 */
+export type ThrottleReason = "min-interval" | "daily-limit";
 
 /** 券種別(または合算)の配分ベースの回収率の 1 行。 */
 export interface ProposedSummaryView {
@@ -30,6 +34,8 @@ export interface CalibrationBinView {
   readonly predictedCount: number;
   readonly placedCount: number;
   readonly actualPlaceRate: number | null;
+  /** 帯に入った馬の予測確率の平均(Issue #254。件数 0 は null)。実複勝率の信頼区間に入るかを見る比較対象。 */
+  readonly meanPredictedProb: number | null;
 }
 
 /** 補正方向の 3 値。 */
@@ -72,8 +78,10 @@ export interface VerifyReportView {
     readonly actualPayoutCount: number;
     readonly approximatePayoutCount: number;
   };
-  /** 推定確率帯ごとのキャリブレーション(core の帯と同じ順)。 */
+  /** 推定確率帯ごとのキャリブレーション(補正後〈AI〉の確率で分けたもの。core の帯と同じ順)。 */
   readonly calibration: readonly CalibrationBinView[];
+  /** 補正前(統計モデルの事前確率 prior)で分けたキャリブレーション(Issue #254。`calibration` と同じ帯数・同じ順)。 */
+  readonly priorCalibration: readonly CalibrationBinView[];
   readonly trend: {
     /** 上げ・下げ・据え置きの 3 群(この順)。 */
     readonly directionGroups: readonly DirectionGroupView[];
@@ -121,7 +129,8 @@ export type VerifyOutcome =
       readonly startTimeGaps: { readonly lost: number; readonly affecting: number };
     }
   | { readonly kind: "preparing"; readonly remaining: number; readonly blocked: "r2-fence" | "error" | null; readonly resumeAt: string | null }
-  | { readonly kind: "throttled"; readonly nextAt: string };
+  /** 再計算の柵に当たって出せる集計が無い。`reason`(Issue #254): `min-interval`=最短間隔〈5 分〉の内側、`daily-limit`=1 日の上限。 */
+  | { readonly kind: "throttled"; readonly nextAt: string; readonly reason: ThrottleReason };
 
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const isMoney = (v: unknown): v is number => isNum(v) && v >= 0;
@@ -131,9 +140,11 @@ const rate01OrNull = (v: unknown): v is number | null => v === null || (isNum(v)
 const signedOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 
 function parseBin(v: unknown): CalibrationBinView | null {
-  if (!isRecord(v) || !isNum(v["lowerBound"]) || !isNum(v["upperBound"]) || !isCount(v["predictedCount"]) || !isCount(v["placedCount"]) || !rate01OrNull(v["actualPlaceRate"])) return null;
+  if (!isRecord(v) || !isNum(v["lowerBound"]) || !isNum(v["upperBound"]) || !isCount(v["predictedCount"]) || !isCount(v["placedCount"]) || !rate01OrNull(v["actualPlaceRate"]) || !rate01OrNull(v["meanPredictedProb"])) return null;
   if (v["lowerBound"] < 0 || v["upperBound"] > 1 || v["upperBound"] <= v["lowerBound"] || v["placedCount"] > v["predictedCount"]) return null;
-  return { lowerBound: v["lowerBound"], upperBound: v["upperBound"], predictedCount: v["predictedCount"], placedCount: v["placedCount"], actualPlaceRate: v["actualPlaceRate"] };
+  // 平均予測値は、予測件数が 0 のときだけ null(core の契約)。
+  if ((v["meanPredictedProb"] === null) !== (v["predictedCount"] === 0)) return null;
+  return { lowerBound: v["lowerBound"], upperBound: v["upperBound"], predictedCount: v["predictedCount"], placedCount: v["placedCount"], actualPlaceRate: v["actualPlaceRate"], meanPredictedProb: v["meanPredictedProb"] };
 }
 
 function parseDirectionGroup(v: unknown): DirectionGroupView | null {
@@ -187,8 +198,11 @@ function parseReport(v: unknown): VerifyReportView | null {
   const bet = v["bet"];
   if (!isRecord(bet) || !isCount(bet["betCount"]) || !isMoney(bet["totalStake"]) || !isMoney(bet["totalReturn"]) || !rateOrNull(bet["recoveryRate"]) || !isCount(bet["actualPayoutCount"]) || !isCount(bet["approximatePayoutCount"])) return null;
   const calibration = parseList(v["calibration"], parseBin);
+  const priorCalibration = parseList(v["priorCalibration"], parseBin);
   const trend = parseTrend(v["trend"]);
-  if (calibration === null || trend === null) return null;
+  if (calibration === null || priorCalibration === null || trend === null) return null;
+  // 補正前の対応表は補正後と同じ帯構成(Issue #254。画面が同じ表として並べる)
+  if (priorCalibration.length !== calibration.length) return null;
   const proposed = v["proposedBet"];
   if (!isRecord(proposed)) return null;
   const population = proposed["population"];
@@ -212,6 +226,7 @@ function parseReport(v: unknown): VerifyReportView | null {
     excludedLookaheadUnknownCount: v["excludedLookaheadUnknownCount"] as number,
     bet: { betCount: bet["betCount"], totalStake: bet["totalStake"], totalReturn: bet["totalReturn"], recoveryRate: bet["recoveryRate"], actualPayoutCount: bet["actualPayoutCount"], approximatePayoutCount: bet["approximatePayoutCount"] },
     calibration,
+    priorCalibration,
     trend,
     proposedBet: {
       population: { allocated: population["allocated"], skipped: population["skipped"], unreached: population["unreached"], noRecord: population["noRecord"] },
@@ -256,7 +271,8 @@ export function parseVerifyResponse(body: unknown): VerifyOutcome | null {
   if (!isRecord(body) || body["ok"] !== true) return null;
   const status = body["status"];
   if (status === "throttled") {
-    return isStr(body["nextAt"]) ? { kind: "throttled", nextAt: body["nextAt"] } : null;
+    const reason = body["reason"];
+    return isStr(body["nextAt"]) && (reason === "min-interval" || reason === "daily-limit") ? { kind: "throttled", nextAt: body["nextAt"], reason } : null;
   }
   if (status === "preparing") {
     const blocked = body["blocked"];

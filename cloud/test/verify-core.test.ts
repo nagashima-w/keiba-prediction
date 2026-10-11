@@ -277,7 +277,7 @@ describe("getReport: 計算とキャッシュ", () => {
     kv.data.delete("cache");
     clock.now += 6 * 60_000;
     const res = await core.getReport("all");
-    expect(res).toEqual({ status: "throttled", nextAt: "2026-10-10T15:00:00.000Z" });
+    expect(res).toEqual({ status: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" });
     expect(store.calls.filter((c) => c === "readAll")).toHaveLength(1);
   });
 
@@ -312,6 +312,30 @@ describe("getReport: 計算とキャッシュ", () => {
     expect(kv.get<{ v: number }>("cache")!.v).toBeGreaterThanOrEqual(2);
   });
 
+  it("Issue #254: 補正前の対応表(priorCalibration)と帯の平均予測値を持たない版 2 のキャッシュは使わず、再計算する。新しい集計は版 3 で、3 区分とも priorCalibration を持つ", async () => {
+    const { core, store, kv, clock } = setup();
+    await core.getReport("all");
+    const cache = kv.get<{ v: number; reports: Record<string, Record<string, unknown>> }>("cache")!;
+    expect(cache.v).toBe(3);
+    // 版 2 の形(priorCalibration が無い)を模擬する
+    const oldReports = Object.fromEntries(Object.entries(cache.reports).map(([venue, r]) => {
+      const { priorCalibration: _drop, ...rest } = r;
+      return [venue, rest];
+    }));
+    kv.put("cache", { ...cache, v: 2, reports: oldReports });
+    store.calls.length = 0;
+    clock.now += 6 * 60_000; // 最短間隔を過ぎている
+    const res = await core.getReport("central");
+    expect(store.calls).toContain("readAll"); // 版 2 は使われない
+    expect(res.status).toBe("ready");
+    const fresh = kv.get<{ v: number; reports: Record<string, { priorCalibration?: unknown[]; calibration: unknown[] }> }>("cache")!;
+    expect(fresh.v).toBe(3);
+    for (const venue of ["all", "central", "nar"]) {
+      expect(fresh.reports[venue]!.priorCalibration).toHaveLength(20);
+      expect(fresh.reports[venue]!.calibration).toHaveLength(20);
+    }
+  });
+
   it("古い形式のキャッシュ(版が違う)は使わず、再計算する", async () => {
     const { core, store, kv, clock } = setup();
     await core.getReport("all");
@@ -332,6 +356,8 @@ describe("getReport: 計算とキャッシュ", () => {
     clock.now += 60_000; // 最短間隔(5 分)の内側
     const res = await core.getReport("all");
     expect(res.status).toBe("throttled"); // 前提と結論: 古い集計は使われず、出せる集計が無い
+    // Issue #254: 理由は『最短間隔』(1 日の上限ではない)。画面が文言を出し分ける。次に開ける時刻は最短間隔の終わり
+    expect(res).toEqual({ status: "throttled", nextAt: new Date(T0 + 5 * 60_000).toISOString(), reason: "min-interval" });
     expect(store.calls).not.toContain("readAll"); // 再計算もしていない
     // 対照: 同じ状況で、版が同じキャッシュなら stale の集計か最新の集計が出る(throttled にならない)
     kv.put("cache", cache);
