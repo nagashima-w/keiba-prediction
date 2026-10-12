@@ -668,13 +668,21 @@ function versionCardNode(card: VersionCard, actions: ViewActions): VNode {
   if (card.expanded) {
     if (card.calibrationHeading !== null) opened.push(h("p", { class: "verify-version-calibration-heading" }, [card.calibrationHeading]));
     if (card.fullInstructions !== null) opened.push(h("p", { class: "meta verify-version-instructions-full" }, [card.fullInstructions]));
-    opened.push(card.calibrationEmpty !== null ? h("p", { class: "empty" }, [card.calibrationEmpty]) : statRowsNode(card.calibrationRows));
+    if (card.calibrationEmpty !== null) {
+      opened.push(h("p", { class: "empty" }, [card.calibrationEmpty]));
+    } else {
+      // 補正後(AI)の表に続けて、補正前(統計モデル)の表(Issue #271)
+      for (const [label, rows] of [[card.calibrationLabel, card.calibrationRows], [card.priorCalibrationLabel, card.priorCalibrationRows]] as const) {
+        opened.push(h("p", { class: "meta verify-version-table-label" }, [label ?? ""]), statRowsNode(rows));
+      }
+    }
   }
   return h("section", { class: "verify-version" }, [
     h("h3", { class: "verify-version-title" }, [card.title]),
     h("p", { class: "meta verify-version-instructions" }, [card.instructions]),
     h("p", { class: "meta" }, [card.included]),
     tilesNode(card.tiles),
+    h("p", { class: "meta verify-version-quality" }, [card.quality]),
     toggle,
     ...opened,
   ]);

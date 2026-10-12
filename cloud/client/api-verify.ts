@@ -4,6 +4,7 @@
  * **応答を信用しない**: 読む項目の型・範囲(件数は 0 以上の整数、金額・率は有限の数、率は null もある)を満たすときだけ成功。一部だけを採用しない。余計なキー
  * (診断の細目・帯ごとの代表予測値など、この画面が読まないもの)は無視する。Issue #220 で、補正方向×結果・キャリブレーション・印別的中率を読む項目に加えた(群の数・重複・順序は core の契約どおりに検査する)。読む項目のキー名のドリフトは `test/client-api-verify-contract.test.ts` が検出する。
  * Issue #254 で、帯ごとの予測の平均(`meanPredictedProb`)と、補正前〈prior〉で分けたキャリブレーション(`priorCalibration`。補正後と同じ帯数)も読む項目に加えた。
+ * Issue #271 で、版別比較の各版に、補正前で分けたキャリブレーション(`priorCalibration`。補正後と同じ帯数)と Brier(`quality`。評価頭数が 0 なら Brier は両方 null)も読む項目に加えた。
  * **サーバの文面は読まない**(失敗は、ステータスと `error.type`〈サーバが決めた固定の識別子〉だけで分類し、固定の文言にする)。
  * 応答の `status`: `ready`(集計。`stale` なら古い)・`preparing`(発走時刻の補完中)・`throttled`(再計算の柵〈最短間隔 5 分・1 日の上限〉に当たっていて、出せる集計が無い。`reason` で区別する〈Issue #254〉)・
  * `not-computed`(**閲覧者にだけ**返る。使える集計がまだ無い。閲覧者の要求は集計のやり直しを起こさないので、管理者が集計するまでこの状態になる。Issue #263)。
@@ -107,6 +108,13 @@ export interface VerifyReportView {
   };
 }
 
+/** 補正前・補正後の Brier と、求めた馬の数(サーバの `VerifyQuality`。Issue #271)。 */
+export interface QualityView {
+  readonly evaluatedCount: number;
+  readonly priorBrier: number | null;
+  readonly adjustedBrier: number | null;
+}
+
 /** プロンプト版別の比較の 1 版(サーバの `PromptVersionSummary`。画面が使う項目だけ)。 */
 export interface PromptVersionView {
   /** 版。版不明は null。 */
@@ -116,6 +124,10 @@ export interface PromptVersionView {
   readonly includedAnalysisCount: number;
   readonly bet: { readonly betCount: number; readonly totalStake: number; readonly totalReturn: number; readonly recoveryRate: number | null };
   readonly calibration: readonly CalibrationBinView[];
+  /** 補正前(統計モデルの確率)で分けた帯(`calibration` と同じ帯数。Issue #271)。 */
+  readonly priorCalibration: readonly CalibrationBinView[];
+  /** 補正前・補正後の Brier(Issue #271)。 */
+  readonly quality: QualityView;
   /** 帯ごとの過信バイアス(`calibration` と同じ長さ・同じ添字。帯の中央値ベース)。Issue #254 以降、画面は使わない。応答の検査だけ残してある。 */
   readonly overconfidenceGaps: readonly (number | null)[];
 }
@@ -248,6 +260,13 @@ function parseReport(v: unknown): VerifyReportView | null {
   };
 }
 
+/** Brier は 0〜1。評価した馬が 0 頭なら、どちらも null(求められないものを 0 と読ませない)。 */
+function parseQuality(v: unknown): QualityView | null {
+  if (!isRecord(v) || !isCount(v["evaluatedCount"]) || !rate01OrNull(v["priorBrier"]) || !rate01OrNull(v["adjustedBrier"])) return null;
+  if (v["evaluatedCount"] === 0 && (v["priorBrier"] !== null || v["adjustedBrier"] !== null)) return null;
+  return { evaluatedCount: v["evaluatedCount"], priorBrier: v["priorBrier"], adjustedBrier: v["adjustedBrier"] };
+}
+
 function parsePromptVersion(v: unknown): PromptVersionView | null {
   if (!isRecord(v) || !strOrNull(v["promptVersion"]) || !isCount(v["includedAnalysisCount"])) return null;
   const instructions = v["additionalInstructions"];
@@ -255,14 +274,18 @@ function parsePromptVersion(v: unknown): PromptVersionView | null {
   const bet = v["bet"];
   if (!isRecord(bet) || !isCount(bet["betCount"]) || !isMoney(bet["totalStake"]) || !isMoney(bet["totalReturn"]) || !rateOrNull(bet["recoveryRate"])) return null;
   const calibration = parseList(v["calibration"], parseBin);
+  const priorCalibration = parseList(v["priorCalibration"], parseBin);
+  const quality = parseQuality(v["quality"]);
   const gaps = parseList(v["overconfidenceGaps"], (g) => (signedOrNull(g) ? { gap: g } : null));
-  if (calibration === null || gaps === null || gaps.length !== calibration.length) return null;
+  if (calibration === null || priorCalibration === null || quality === null || gaps === null || gaps.length !== calibration.length || priorCalibration.length !== calibration.length) return null;
   return {
     promptVersion: v["promptVersion"],
     additionalInstructions: instructions as (string | null)[],
     includedAnalysisCount: v["includedAnalysisCount"],
     bet: { betCount: bet["betCount"], totalStake: bet["totalStake"], totalReturn: bet["totalReturn"], recoveryRate: bet["recoveryRate"] },
     calibration,
+    priorCalibration,
+    quality,
     overconfidenceGaps: gaps.map((g) => g.gap),
   };
 }

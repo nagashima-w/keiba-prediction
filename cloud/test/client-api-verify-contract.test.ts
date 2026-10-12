@@ -391,6 +391,20 @@ describe("parseVerifyResponse(応答を信用しない)", () => {
     ["版の帯が不正(予測件数が負)", (b) => { b["promptVersions"][0].calibration[3].predictedCount = -1; }],
     ["版の過信バイアスの長さが帯と違う", (b) => { b["promptVersions"][0].overconfidenceGaps.pop(); }],
     ["版の過信バイアスが文字列", (b) => { b["promptVersions"][0].overconfidenceGaps[0] = "x"; }],
+    ["版の補正前の対応表が無い(Issue #271)", (b) => { delete b["promptVersions"][0].priorCalibration; }],
+    ["版の補正前の対応表が配列でない", (b) => { b["promptVersions"][0].priorCalibration = {}; }],
+    ["版の補正前の対応表の帯数が補正後と違う", (b) => { b["promptVersions"][0].priorCalibration.pop(); }],
+    ["版の補正前の帯が不正(予測件数が負)", (b) => { b["promptVersions"][0].priorCalibration[3].predictedCount = -1; }],
+    ["版の補正前の帯の平均予測値が欠ける", (b) => { delete b["promptVersions"][0].priorCalibration[3].meanPredictedProb; }],
+    ["版の quality が無い", (b) => { delete b["promptVersions"][0].quality; }],
+    ["版の quality がオブジェクトでない", (b) => { b["promptVersions"][0].quality = 0.17; }],
+    ["版の評価頭数が負", (b) => { b["promptVersions"][0].quality.evaluatedCount = -1; }],
+    ["版の評価頭数が小数", (b) => { b["promptVersions"][0].quality.evaluatedCount = 1.5; }],
+    ["版の補正前 Brier が文字列", (b) => { b["promptVersions"][0].quality.priorBrier = "0.17"; }],
+    ["版の補正後 Brier が欠ける", (b) => { delete b["promptVersions"][0].quality.adjustedBrier; }],
+    ["版の補正後 Brier が 1 を超える", (b) => { b["promptVersions"][0].quality.adjustedBrier = 1.2; }],
+    ["版の補正前 Brier が負", (b) => { b["promptVersions"][0].quality.priorBrier = -0.1; }],
+    ["版の評価頭数が 0 なのに Brier がある", (b) => { b["promptVersions"][0].quality = { evaluatedCount: 0, priorBrier: 0.1, adjustedBrier: null }; }],
   ];
   it.each(mutations)("%s は null(一部だけを採用しない)", (_name, mutate) => {
     const body = ready();

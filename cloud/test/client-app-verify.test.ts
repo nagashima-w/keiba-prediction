@@ -142,12 +142,13 @@ describe("検証画面を開く", () => {
     expect(byClass(h.tree(), "verify-version")).toHaveLength(3);
     expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(20); // 前提(空振り防止): 主表の 20 帯だけ(版別は閉じている)
     byClass(h.tree(), "verify-version-toggle")[0]!.on!.click!();
-    expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(40);
+    // 主表 20 + 開いた版の補正後・補正前の 2 表(20 帯ずつ。Issue #271)
+    expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(60);
     expect(byClass(h.tree(), "verify-version-toggle")[0]!.attrs?.["aria-expanded"]).toBe("true");
     expect(h.calls).toEqual(["GET /api/verify?venue=all"]);
     byClass(h.tree(), "verify-venue")[1]!.on!.click!();
     await h.app.whenIdle();
-    expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(40);
+    expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(60);
     byClass(h.tree(), "verify-version-toggle")[0]!.on!.click!();
     expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(20);
   });

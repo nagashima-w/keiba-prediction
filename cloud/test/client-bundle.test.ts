@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 245,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 252,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -90,8 +90,14 @@ describe("生成物のドリフトと決定性", () => {
     // Issue #72: 上限は据え置き。配分ベースの回収率の返還の表示(応答の検査の 2 項目・「うち返還 N点(金額)」の 1 行・2 つの系の取消・除外の扱いを言う説明文の 2 文)を足した増分は +660
     // (238,565 → 239,225。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。
     // 今の値は `pnpm run build:client` の出力。上限までの余裕は 5,775 バイト)。
+    // Issue #271: 上限を 245,000 から 252,000 へ引き上げた。検証画面の版別カードに、補正前〈統計モデル〉の Brier の 1 行(レース数の足りない版は値を隠す)・補正前の対応表・
+    // 応答の検査(`priorCalibration`・`quality`)を足した増分は +1,384(240,298 → 241,682。計り方: origin/issue-16-flat-compare の先端 d34b548 の `cloud/src/client-bundle.generated.ts` と今の生成物を、
+    // それぞれ `Buffer.byteLength(CLIENT_JS)` で測った。今の値は `pnpm run build:client` の出力)。この枝だけなら 245,000 に収まる(余裕 3,318 バイト)が、**公開待ちの枝と合わせると超える**:
+    // 同じ計り方で、6d345a6〈#263 の承認後〉の 238,565 に対し #253(origin/issue-253-fair-place-odds)の先端は 240,939(+2,374)・#264(origin/issue-264-report-rolling)の先端は 240,401(+1,836)で、
+    // 足し合わせた見積もりは 240,298 + 2,374 + 1,836 + 1,384 = 245,892(**加算の見積もりで、4 枝を実際に合流させた測定ではない**。合流で view.ts などが重なれば数百バイトはずれうる)。
+    // 新しい上限 252,000 は、その見積もりの約 2.5% 増(余裕は 6,108 バイト)。増えたのは日本語の文言(`\u` エスケープ)とロジックで、Plackett-Luce などの重い依存は入っていない。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(245_000);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(252_000);
   });
 });
 

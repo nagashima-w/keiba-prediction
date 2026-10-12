@@ -224,6 +224,7 @@ ${paletteCss()}
   .verify-version .meta { overflow-wrap: anywhere; }
   .verify-version-toggle { display: block; width: 100%; min-height: 44px; margin: 8px 0 0; padding: 8px 12px; text-align: left; font-weight: bold; }
   .verify-version-calibration-heading { margin: 12px 0 4px; font-size: 0.9rem; font-weight: bold; overflow-wrap: anywhere; }
+  .verify-version-table-label { margin: 12px 0 4px; font-weight: bold; }
   .verify-stat-bar { display: block; width: 100%; height: 8px; margin-top: 4px; }
   .field { margin: 0 0 16px; }
   .field-label { display: flex; flex-direction: column; gap: 4px; font-size: 0.95rem; font-weight: bold; }

@@ -176,6 +176,31 @@ describe("検証画面の VNode", () => {
     expect(() => mountAll(t)).not.toThrow();
   });
 
+  it("Issue #271: 閉じた版にも Brier の 1 行を出し(レース数不足の版は不足の文言)、開いた版は補正後・補正前の 2 つの表(それぞれ 20 帯)を見出し付きで続けて出す", () => {
+    const closed = byClass(tree(), "verify-version");
+    expect(closed.map((c) => textOf(byClass(c, "verify-version-quality")[0]!))).toEqual([
+      "Brier 補正前 0.1661 / 補正後 0.1655(395頭・80レース)",
+      "Brier: レース数不足(30レース未満)",
+      "Brier: レース数不足(30レース未満)",
+    ]);
+    expect(closed.every((c) => byClass(c, "verify-version-table-label").length === 0)).toBe(true);
+    const [first, second] = byClass(tree({ expandedVersions: ["v:2026-10-09.2"] }), "verify-version");
+    expect(byClass(first!, "verify-version-table-label").map(textOf)).toEqual(["補正後(AI)", "補正前(統計)"]);
+    const tables = byClass(first!, "verify-stats");
+    expect(tables).toHaveLength(2);
+    for (const table of tables) {
+      expect(findAll(table, (n) => n.tag === "li")).toHaveLength(20);
+      expect(findAll(table, (n) => n.tag === "progress")).toHaveLength(20);
+    }
+    // 2 つの表は別物(補正前の帯 3 は 300 件、補正後の帯 3 は 0 件)
+    expect(textOf(tables[0]!)).not.toBe(textOf(tables[1]!));
+    expect(textOf(findAll(tables[1]!, (n) => n.tag === "li")[3]!)).toContain("300件");
+    expect(textOf(findAll(tables[0]!, (n) => n.tag === "li")[3]!)).not.toContain("300件");
+    // 閉じたままの版は表を持たない
+    expect(byClass(second!, "verify-stats")).toHaveLength(0);
+    expect(() => mountAll(tree({ expandedVersions: ["v:2026-10-09.2"] }))).not.toThrow();
+  });
+
   it("開閉ボタンを押すと、版のキーと押したあとの状態でアクションが呼ばれる", () => {
     const calls: Array<[string, boolean]> = [];
     const actions: ViewActions = { ...noopActions, onVerifyVersionToggle: (key, open) => calls.push([key, open]) };

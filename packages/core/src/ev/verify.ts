@@ -204,6 +204,7 @@ import {
   DEFAULT_VERIFY_BIN_COUNT,
 } from "./calibration-bins.js";
 import { isUsableOdds } from "./allocation-primitives.js";
+import { computeBrierScore, type BrierObservation } from "./probability-quality-metrics.js";
 import { classifyLookaheadSuspicion } from "./lookahead-suspicion.js";
 
 /**
@@ -286,6 +287,20 @@ export interface CalibrationBin {
    * 予測0件なら null。`calibration` では補正後の確率、`priorCalibration` では補正前(prior)の確率の平均。
    */
   readonly meanPredictedProb: number | null;
+}
+
+/**
+ * 補正前(統計モデルの prior)と補正後(AI 補正)の当たり具合(Brier。Issue #271)。
+ * 母集団は `calibration`・`priorCalibration` と同じ(結果の着順が確定した馬。両方の Brier は**同じ馬の集合**で求める)ので、
+ * 差は「同じ馬への確率の違い」だけを表す。小さいほど良い。計算は `computeBrierScore`(`probability-quality-metrics.ts`)。
+ */
+export interface VerifyQuality {
+  /** Brier を求めた馬の数(= `calibration` の `predictedCount` の合計)。 */
+  readonly evaluatedCount: number;
+  /** 補正前(prior)の Brier。馬が 0 頭、または確率が範囲外〈0〜1 の外・非有限〉の馬がいるときは null。 */
+  readonly priorBrier: number | null;
+  /** 補正後の Brier。条件は `priorBrier` と同じ。 */
+  readonly adjustedBrier: number | null;
 }
 
 /** 補正方向の分類(Task#26)。「上げ」「下げ」「据え置き」の3値。 */
@@ -593,6 +608,8 @@ export interface VerifyReport {
    * 帯への振り分けと `meanPredictedProb` だけが prior の値になる。LLM を使わなかった分析は prior == adjustedProb なので、その分は両者で同じ帯に入る。
    */
   readonly priorCalibration: CalibrationBin[];
+  /** 補正前・補正後の Brier(Issue #271)。`calibration` と同じ母集団。 */
+  readonly quality: VerifyQuality;
   /** 補正傾向サマリ(Task#26)。 */
   readonly trend: VerifyTrendReport;
   /** 配分ベースの回収率(Issue #71・#54-B)。 */
@@ -1207,6 +1224,9 @@ function computeVerifyReportForAnalyses(
   const bins = newBins();
   // 補正前(prior)で帯に分けた対応表(Issue #254)。補正後の bins と同じループ・同じ母集団で計上する。
   const priorBins = newBins();
+  // Brier の観測(Issue #271)。キャリブレーションと同じループ・同じ位置で積むので、母集団は両者で必ず一致する。
+  const priorObservations: BrierObservation[] = [];
+  const adjustedObservations: BrierObservation[] = [];
 
   // 補正傾向サマリ(Task#26)の可変カウンタ。回収率・キャリブレーションと同じループで計上する
   // (母集団を既存verifyと揃えるため)。
@@ -1279,6 +1299,9 @@ function computeVerifyReportForAnalyses(
       if (isInTopThree) {
         priorBins[priorBinIndex]!.placed += 1;
       }
+      // Brier の観測(Issue #271): キャリブレーションの 2 つの表に入る馬と同じ馬を、同じ結果(3 着以内か)で積む。
+      priorObservations.push({ probability: horse.prior, occurred: isInTopThree });
+      adjustedObservations.push({ probability: horse.adjustedProb, occurred: isInTopThree });
 
       // 補正傾向サマリ(1) 補正方向×結果: diff の符号とεで3群に分類する(Task#26)。
       const diff = horse.adjustedProb - horse.prior;
@@ -1347,6 +1370,11 @@ function computeVerifyReportForAnalyses(
     },
     calibration,
     priorCalibration,
+    quality: {
+      evaluatedCount: adjustedObservations.length,
+      priorBrier: computeBrierScore(priorObservations).value,
+      adjustedBrier: computeBrierScore(adjustedObservations).value,
+    },
     trend: {
       directionGroups: (["raised", "lowered", "unchanged"] as const).map((direction) =>
         finalizeDirectionGroup(direction, directionCounters[direction]),

@@ -70,11 +70,13 @@ export const LONG_INSTRUCTION = "逃げ馬を重視して、前走で出遅れ�
 
 export function versionsFixture(): PromptVersionView[] {
   const bins = calibrationFixture();
+  const priorBins = priorCalibrationFixture();
   const gaps = trendFixture().calibrationBias.map((b) => b.overconfidenceGap);
   const emptyBins = bins.map((b) => ({ ...b, predictedCount: 0, placedCount: 0, actualPlaceRate: null, meanPredictedProb: null }));
+  // Issue #271: 版ごとの補正前の対応表と Brier。集計件数(レース数)が 30 以上の版〈80〉は Brier を出し、30 未満の版〈25・15〉は値があっても出さない(版 3 は値を持たせて、隠していることを検出できるようにする)。
   return [
-    { promptVersion: "2026-10-09.2", additionalInstructions: [LONG_INSTRUCTION, null], includedAnalysisCount: 80, bet: { betCount: 52, totalStake: 5200, totalReturn: 4994, recoveryRate: 0.9603846 }, calibration: bins, overconfidenceGaps: gaps },
-    { promptVersion: "2026-10-09.2-clip015", additionalInstructions: [null], includedAnalysisCount: 25, bet: { betCount: 10, totalStake: 1000, totalReturn: 1250, recoveryRate: 1.25 }, calibration: emptyBins, overconfidenceGaps: emptyBins.map(() => null) },
-    { promptVersion: null, additionalInstructions: [null], includedAnalysisCount: 15, bet: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null }, calibration: bins, overconfidenceGaps: gaps },
+    { promptVersion: "2026-10-09.2", additionalInstructions: [LONG_INSTRUCTION, null], includedAnalysisCount: 80, bet: { betCount: 52, totalStake: 5200, totalReturn: 4994, recoveryRate: 0.9603846 }, calibration: bins, priorCalibration: priorBins, quality: { evaluatedCount: 395, priorBrier: 0.1661, adjustedBrier: 0.1655 }, overconfidenceGaps: gaps },
+    { promptVersion: "2026-10-09.2-clip015", additionalInstructions: [null], includedAnalysisCount: 25, bet: { betCount: 10, totalStake: 1000, totalReturn: 1250, recoveryRate: 1.25 }, calibration: emptyBins, priorCalibration: emptyBins, quality: { evaluatedCount: 0, priorBrier: null, adjustedBrier: null }, overconfidenceGaps: emptyBins.map(() => null) },
+    { promptVersion: null, additionalInstructions: [null], includedAnalysisCount: 15, bet: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null }, calibration: bins, priorCalibration: priorBins, quality: { evaluatedCount: 150, priorBrier: 0.1802, adjustedBrier: 0.1799 }, overconfidenceGaps: gaps },
   ];
 }

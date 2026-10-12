@@ -3,11 +3,12 @@
  *
  * core の `computeVerifyReportByPromptVersion`(exe と同じ関数・同じ `PRODUCTION_VERIFY_CONFIG`)は版ごとに**完全な `VerifyReport`**(約 7KB。配分ベースの 8 券種・除外の内訳・印別などを含む)を返すが、
  * 画面(exe の版別の表と版別キャリブレーション)が使うのは次の項目だけ: 版・追加指示・集計件数・累積回収率の 4 値・キャリブレーションの帯と帯ごとの過信バイアス。
+ * Issue #271 で、**補正前〈統計モデル〉で分けた対応表**と**補正前・補正後の Brier**(`quality`)を足した(統計モデルを変えた前後を、版ごとに比べる)。
  * 版の数に比例する kv の値と API の応答を小さく保つため、**この項目だけを残して保存・配信する**(`summarizePromptVersions`)。完全な版別レポートは持たない。
  *
  * 版別は**区分(全体/中央のみ/地方のみ)に依らず全体**(exe の版別比較と同じ。core の関数に区分の引数が無い)。
  */
-import type { CalibrationBin, PromptVersionVerifyReport } from "../../packages/core/src/ev/verify.js";
+import type { CalibrationBin, PromptVersionVerifyReport, VerifyQuality } from "../../packages/core/src/ev/verify.js";
 import { computeVerifyReportByPromptVersion, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
 import type { VerifyDataSource } from "../../packages/core/src/ev/analysis-store-types.js";
 
@@ -28,6 +29,10 @@ export interface PromptVersionSummary {
   };
   /** キャリブレーションの帯(core の帯と同じ順)。 */
   readonly calibration: readonly CalibrationBin[];
+  /** 補正前(統計モデルの確率 prior)で分けた帯。`calibration` と同じ長さ・同じ帯構成(Issue #271)。 */
+  readonly priorCalibration: readonly CalibrationBin[];
+  /** 補正前・補正後の Brier と、求めた馬の数(Issue #271)。 */
+  readonly quality: VerifyQuality;
   /** 帯ごとの過信バイアス。`calibration` と**同じ長さ・同じ添字**(core の過信バイアスが短ければ、足りない分は null。exe が添字で対応づけ、無ければ「-」にするのと同じ)。 */
   readonly overconfidenceGaps: readonly (number | null)[];
 }
@@ -40,6 +45,8 @@ export function summarizePromptVersions(reports: readonly PromptVersionVerifyRep
     includedAnalysisCount: report.includedAnalysisCount,
     bet: { betCount: report.bet.betCount, totalStake: report.bet.totalStake, totalReturn: report.bet.totalReturn, recoveryRate: report.bet.recoveryRate },
     calibration: report.calibration,
+    priorCalibration: report.priorCalibration,
+    quality: report.quality,
     overconfidenceGaps: report.calibration.map((_, index) => report.trend.calibrationBias[index]?.overconfidenceGap ?? null),
   }));
 }

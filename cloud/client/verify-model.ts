@@ -163,6 +163,12 @@ export interface VersionCard {
   readonly fullInstructions: string | null;
   readonly calibrationEmpty: string | null;
   readonly calibrationRows: readonly StatRow[];
+  /** 常に出す Brier の 1 行(Issue #271)。レース数が足りない版は値を出さず、その旨を言う。 */
+  readonly quality: string;
+  /** 開いたときだけ(帯が 0 本なら null): 補正後の表・補正前の表のそれぞれの見出しと行(Issue #271)。 */
+  readonly calibrationLabel: string | null;
+  readonly priorCalibrationLabel: string | null;
+  readonly priorCalibrationRows: readonly StatRow[];
 }
 
 export interface VersionsSection {
@@ -354,10 +360,22 @@ export function viewerInstructionsSummary(instructions: readonly (string | null)
   return parts.join(" / ");
 }
 
+/** Brier を出す最小のレース数。これ未満は、馬が少ないうえ同じレースの馬が互いに独立でなく、値が偶然で大きく動くので出さない(Issue #271)。 */
+const MIN_RACES_FOR_BRIER = 30;
+
+const formatBrier = (value: number | null): string => (value === null ? "-" : value.toFixed(4));
+
+/** Brier の 1 行。レース数は版の集計件数(同じ版の中では 1 レース 1 分析)。 */
+function qualityText(v: PromptVersionView): string {
+  if (v.includedAnalysisCount < MIN_RACES_FOR_BRIER) return `Brier: レース数不足(${MIN_RACES_FOR_BRIER}レース未満)`;
+  return `Brier 補正前 ${formatBrier(v.quality.priorBrier)} / 補正後 ${formatBrier(v.quality.adjustedBrier)}(${v.quality.evaluatedCount}頭・${v.includedAnalysisCount}レース)`;
+}
+
 function versionCard(v: PromptVersionView, expandedKeys: ReadonlySet<string>, admin: boolean): VersionCard {
   const key = versionKey(v.promptVersion);
   const expanded = expandedKeys.has(key);
   const summary = admin ? additionalInstructionsSummary(v.additionalInstructions) : viewerInstructionsSummary(v.additionalInstructions);
+  const showTables = expanded && v.calibration.length > 0;
   return {
     key,
     title: promptVersionLabel(v.promptVersion),
@@ -370,6 +388,10 @@ function versionCard(v: PromptVersionView, expandedKeys: ReadonlySet<string>, ad
     fullInstructions: expanded && admin ? `追加指示(全文): ${additionalInstructionsFullText(v.additionalInstructions)}` : null,
     calibrationEmpty: expanded && v.calibration.length === 0 ? "データがありません。" : null,
     calibrationRows: expanded ? calibrationRows(v.calibration) : [],
+    quality: qualityText(v),
+    calibrationLabel: showTables ? CALIBRATION_TARGET_LABELS.adjusted : null,
+    priorCalibrationLabel: showTables ? CALIBRATION_TARGET_LABELS.prior : null,
+    priorCalibrationRows: showTables ? calibrationRows(v.priorCalibration) : [],
   };
 }
 
@@ -377,7 +399,7 @@ function versionsSection(versions: readonly PromptVersionView[], expandedVersion
   const expandedKeys = new Set(expandedVersions);
   return {
     heading: "プロンプト版別比較",
-    description: "プロンプトの版ごとの累積回収率とキャリブレーション。版別は全体の集計です(上の区分の切替には連動しません)。同じ版でも追加指示が違えば別条件です。",
+    description: "プロンプトの版ごとの累積回収率・キャリブレーション・Brier。版別は全体の集計です(上の区分の切替には連動しません)。同じ版でも追加指示が違えば別条件です。Brier は予測と結果のずれの平均で、小さいほど良い。版ごとにレースが違うので、差は目安です。",
     unknownNote: versions.some((v) => v.promptVersion === null) ? UNKNOWN_VERSION_NOTE : null,
     empty: versions.length === 0 ? "集計対象がありません。" : null,
     cards: versions.map((v) => versionCard(v, expandedKeys, admin)),

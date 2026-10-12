@@ -52,7 +52,7 @@ describe("computePromptVersionSummaries", () => {
 
   it("画面が使う項目だけを持つ(完全な VerifyReport を持ち込まない)", () => {
     for (const s of summaries) {
-      expect(Object.keys(s).sort()).toEqual(["additionalInstructions", "bet", "calibration", "includedAnalysisCount", "overconfidenceGaps", "promptVersion"]);
+      expect(Object.keys(s).sort()).toEqual(["additionalInstructions", "bet", "calibration", "includedAnalysisCount", "overconfidenceGaps", "priorCalibration", "promptVersion", "quality"]);
       expect(Object.keys(s.bet).sort()).toEqual(["betCount", "recoveryRate", "totalReturn", "totalStake"]);
     }
   });
@@ -66,6 +66,9 @@ describe("computePromptVersionSummaries", () => {
       expect(s.includedAnalysisCount).toBe(f.report.includedAnalysisCount);
       expect(s.bet).toEqual({ betCount: f.report.bet.betCount, totalStake: f.report.bet.totalStake, totalReturn: f.report.bet.totalReturn, recoveryRate: f.report.bet.recoveryRate });
       expect(s.calibration).toEqual(f.report.calibration);
+      // Issue #271: 補正前の対応表と Brier(補正前・補正後)も、その版の report のまま
+      expect(s.priorCalibration).toEqual(f.report.priorCalibration);
+      expect(s.quality).toEqual(f.report.quality);
       expect(s.overconfidenceGaps).toEqual(f.report.trend.calibrationBias.map((b) => b.overconfidenceGap));
     });
     // 前提(空振り防止): 回収率に差があり(版 a は複勝圏外のみ=0 点、版 b は的中あり)、帯に件数が入っている
@@ -74,6 +77,21 @@ describe("computePromptVersionSummaries", () => {
     expect(summaries.every((s) => s.calibration.some((b) => b.predictedCount > 0))).toBe(true);
     expect(summaries.every((s) => s.calibration.length === 20 && s.overconfidenceGaps.length === 20)).toBe(true);
     expect(summaries.some((s) => s.overconfidenceGaps.some((g) => g !== null))).toBe(true);
+  });
+
+  it("Issue #271: 補正前の対応表・Brier は版ごとにあり、補正後とは別の値(前提: 空振りでない)", () => {
+    for (const s of summaries) {
+      expect(s.priorCalibration).toHaveLength(s.calibration.length);
+      expect(s.quality.evaluatedCount).toBeGreaterThan(0);
+      expect(s.priorCalibration.reduce((a, b) => a + b.predictedCount, 0)).toBe(s.quality.evaluatedCount);
+      expect(typeof s.quality.priorBrier).toBe("number");
+      expect(typeof s.quality.adjustedBrier).toBe("number");
+    }
+    // 補正前と補正後の対応表・Brier は別物(prior を calibration で取り違える実装を弾く)
+    expect(summaries.every((s) => JSON.stringify(s.priorCalibration) !== JSON.stringify(s.calibration))).toBe(true);
+    expect(summaries.every((s) => s.quality.priorBrier !== s.quality.adjustedBrier)).toBe(true);
+    // 版ごとに評価頭数が違う(版 b は 2 レース=4 頭、他は 1 レース=2 頭)
+    expect(summaries.map((s) => s.quality.evaluatedCount)).toEqual([2, 4, 2]);
   });
 
   it("過信バイアスが帯より短い入力でも、帯と同じ長さに揃える(足りない分は null。exe の添字の対応と同じ)", () => {

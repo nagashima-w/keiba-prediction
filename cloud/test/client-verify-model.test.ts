@@ -697,3 +697,103 @@ describe("Issue #263: 閲覧者(admin: false)の検証画面のモデル", () =>
     expect(buildVerifyModel(input({ pollStopped: true })).pollNotice).toContain("「更新」");
   });
 });
+
+describe("Issue #271: 版別カードに、補正前(統計モデル)の対応表と Brier を出す", () => {
+  const cellsOf = (row: { cells: readonly { name: string; value: string }[] } | undefined) => Object.fromEntries((row?.cells ?? []).map((c) => [c.name, c.value]));
+  const withVersions = (versions: ReturnType<typeof versionsFixture>, over: Partial<VerifyModelInput> = {}): VerifyModelInput =>
+    input({ load: { kind: "ready", outcome: { ...(ready() as Extract<VerifyOutcome, { kind: "ready" }>), promptVersions: versions } }, ...over });
+  const MIN_RACES = 30;
+
+  it("閉じたカードにも Brier の 1 行を出す(補正前・補正後・頭数・レース数。レース数は集計件数)", () => {
+    const [first] = buildVerifyModel(input()).versions?.cards ?? [];
+    expect(first?.expanded).toBe(false); // 前提: 閉じている
+    expect(first?.quality).toBe("Brier 補正前 0.1661 / 補正後 0.1655(395頭・80レース)");
+  });
+
+  it("レース数が 30 未満の版は値を隠し『レース数不足』と出す(値を持っていても出さない)", () => {
+    const cards = buildVerifyModel(input()).versions?.cards ?? [];
+    const insufficient = `Brier: レース数不足(${MIN_RACES}レース未満)`;
+    expect(cards[1]?.quality).toBe(insufficient);
+    expect(cards[2]?.quality).toBe(insufficient);
+    // 前提(空振り防止): 版 3 は値を持っている=隠していることを検出できる
+    expect(versionsFixture()[2]!.quality.priorBrier).toBe(0.1802);
+    expect(cards[2]?.quality).not.toContain("0.18");
+  });
+
+  it.each([
+    [29, false],
+    [30, true],
+    [31, true],
+  ])("境界: レース数 %i は Brier を出す=%s", (races, shown) => {
+    const v = { ...versionsFixture()[0]!, includedAnalysisCount: races };
+    const card = buildVerifyModel(withVersions([v])).versions?.cards[0];
+    expect(card?.quality.startsWith("Brier 補正前 0.1661")).toBe(shown);
+    expect(card?.quality.includes("レース数不足")).toBe(!shown);
+  });
+
+  it("Brier は小数第 4 位に丸める。求められなかった方は - と出す(もう一方は出す)", () => {
+    const v = { ...versionsFixture()[0]!, quality: { evaluatedCount: 12, priorBrier: 0.123456, adjustedBrier: null } };
+    expect(buildVerifyModel(withVersions([v])).versions?.cards[0]?.quality).toBe("Brier 補正前 0.1235 / 補正後 -(12頭・80レース)");
+    const w = { ...versionsFixture()[0]!, quality: { evaluatedCount: 12, priorBrier: null, adjustedBrier: 0 } };
+    expect(buildVerifyModel(withVersions([w])).versions?.cards[0]?.quality).toBe("Brier 補正前 - / 補正後 0.0000(12頭・80レース)");
+  });
+
+  it("開いたカードは、補正後の表に続けて補正前の表(20 帯)を持つ。補正前の表の行は補正前の帯から作る(補正後の帯と取り違えない)", () => {
+    const keys = buildVerifyModel(input()).versions?.cards.map((c) => c.key) ?? [];
+    const [a] = buildVerifyModel(input({ expandedVersions: [keys[0]!] })).versions?.cards ?? [];
+    expect(a?.calibrationLabel).toBe("補正後(AI)");
+    expect(a?.priorCalibrationLabel).toBe("補正前(統計)");
+    expect(a?.calibrationRows).toHaveLength(20);
+    expect(a?.priorCalibrationRows).toHaveLength(20);
+    // 補正前の帯 3(15〜20%): 300 件・複勝 48 件・区間 12.3〜20.6%・整合。補正後の帯 3 は 0 件
+    expect(cellsOf(a?.priorCalibrationRows[3])).toMatchObject({ 予測件数: "300件", 複勝件数: "48件", 実複勝率: "16.0%", 平均予測: "17.2%", "95%区間": "12.3〜20.6%", 判定: "整合" });
+    expect(cellsOf(a?.calibrationRows[3])["予測件数"]).toBe("0件");
+    // 件数 29 は件数不足、件数 30 は判定が出る(全体の補正前の表と同じ行の作り)
+    expect(cellsOf(a?.priorCalibrationRows[9])["判定"]).toBe("件数不足(30件未満)");
+    expect(cellsOf(a?.priorCalibrationRows[10])["判定"]).toBe("予測が高い(過信)");
+    // 全体の補正前の表(Issue #254)と同じ行の作り: 版の補正前の帯が全体のものと同じなら、行も同じ
+    expect(a?.priorCalibrationRows).toEqual(buildVerifyModel(input({ calibrationTarget: "prior" })).calibration?.rows);
+  });
+
+  it("閉じたカードは補正前の表の行・ラベルを持たない。開いたカードだけが持つ", () => {
+    const keys = buildVerifyModel(input()).versions?.cards.map((c) => c.key) ?? [];
+    const cards = buildVerifyModel(input({ expandedVersions: [keys[0]!] })).versions?.cards ?? [];
+    expect(cards[0]?.expanded).toBe(true); // 前提: 1 枚は開いている
+    for (const c of cards.slice(1)) {
+      expect(c.expanded).toBe(false);
+      expect(c.priorCalibrationRows).toEqual([]);
+      expect(c.calibrationLabel).toBeNull();
+      expect(c.priorCalibrationLabel).toBeNull();
+    }
+  });
+
+  it("帯が 0 本の版は『データがありません。』だけで、補正前の行・ラベルも出さない", () => {
+    const v = { ...versionsFixture()[0]!, calibration: [], priorCalibration: [], overconfidenceGaps: [] };
+    const key = buildVerifyModel(withVersions([v])).versions?.cards[0]?.key;
+    const card = buildVerifyModel(withVersions([v], { expandedVersions: [key!] })).versions?.cards[0];
+    expect(card?.calibrationEmpty).toBe("データがありません。");
+    expect(card?.calibrationRows).toEqual([]);
+    expect(card?.priorCalibrationRows).toEqual([]);
+    expect(card?.calibrationLabel).toBeNull();
+    expect(card?.priorCalibrationLabel).toBeNull();
+  });
+
+  it("版別の説明に、Brier の読み方(小さいほど良い)と、版ごとにレースが違うので差は目安であることを書く", () => {
+    const description = buildVerifyModel(input()).versions?.description ?? "";
+    expect(description).toContain("Brier");
+    expect(description).toContain("小さいほど良い");
+    expect(description).toContain("レースが違う");
+  });
+
+  it("閲覧者にも同じ Brier・補正前の表を出す(追加指示の全文だけを伏せる)", () => {
+    const keys = buildVerifyModel(input()).versions?.cards.map((c) => c.key) ?? [];
+    const admin = buildVerifyModel(input({ expandedVersions: [keys[0]!] })).versions?.cards[0];
+    const viewer = buildVerifyModel(input({ admin: false, expandedVersions: [keys[0]!] })).versions?.cards[0];
+    expect(viewer?.quality).toBe(admin?.quality);
+    expect(viewer?.quality).toContain("0.1661"); // 前提(空振り防止)
+    expect(viewer?.priorCalibrationRows).toEqual(admin?.priorCalibrationRows);
+    expect(viewer?.priorCalibrationRows).toHaveLength(20);
+    expect(admin?.fullInstructions).not.toBeNull();
+    expect(viewer?.fullInstructions).toBeNull();
+  });
+});
