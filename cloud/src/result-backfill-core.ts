@@ -33,11 +33,17 @@
  *  - gate の都合(`blocked`・`busy`・日単位の DO への依頼の失敗〈`dispatch-failed`〉): 晩数に数えず、**その晩は止める**。{@link BACKFILL_MAX_DEFER_NIGHTS} 晩続いたら永久に除外(上限があるので無限にならない)。
  * その晩に試したレースは列挙から除外する(日単位の DO は同じ日の `gave_up` を積み直さないので、除外しないと同じレースを延々と列挙する)。
  *
- * ## 段階 2: 確定の単勝オッズ・人気の補完(Issue #259)
- * 段階 1 が尽きたら(列挙が空で、不正なレースの除外もなかったとき)、**結果は取り込み済みだがオッズが 1 頭も入っていないレース**(`race_results.win_odds` が全頭 NULL。migration 0011 より前に取り込んだ約 1,300 レース)を、同じ仕組みで少しずつ埋める。
- * 取得は同じ `dispatchResultImports`(呼び出し箇所は増えない)に **`winOddsOnly: true`** を渡して依頼し、日単位の DO が結果ページを取り直して、**確定の単勝オッズ・人気だけ**を NULL の列に保存する
- * (`saveWinOdds`。着順・払戻・組合せ払戻は上書きしない)。窓・1 晩 {@link BACKFILL_NIGHTLY_LIMIT} レース・1 回 {@link BACKFILL_CHUNK_SIZE} レース・gate の都合・失敗の扱いは**段階 1 と共有**する。
- * 違いは記録の状態だけ: 取り込めたレースは `odds_done`(ページにオッズが無くても、**二度と列挙しない**。毎晩の再列挙を防ぐ)、失敗は `odds_tried`・`odds_abandoned`(段階 1 の `tried`・`abandoned` と別に数える)。
+ * ## 段階 2: 確定の単勝オッズ・人気の補完(Issue #259)と、取消・除外の記録の補完(Issue #270)
+ * 段階 1 が尽きたら(列挙が空で、不正なレースの除外もなかったとき)、**結果は取り込み済みだが、次の (A) または (B) に当たるレース**を、同じ仕組みで少しずつ埋める。
+ *  - (A)(Issue #259)オッズが 1 頭も入っていない(`race_results.win_odds` が全頭 NULL。migration 0011 より前に取り込んだ約 1,300 レース)
+ *  - (B)(Issue #270。#72 の残り)着順が NULL で `scratched` が NULL の行がある(`scratched` を記録する前〈migration 0013 より前〉に取り込んだ行・exe から移した行。取消か中止か判別できず、検証は不的中として数えている)
+ * 取得は同じ `dispatchResultImports`(呼び出し箇所は増えない)に **`winOddsOnly: true`** を渡して依頼し、日単位の DO が結果ページを**1 回**取り直して、NULL の列だけを保存する:
+ * 確定の単勝オッズ・人気(`saveWinOdds`)と、取消・除外の記録(`saveScratched`。着順が NULL で scratched が NULL の行にだけ。取消・除外は 1・それ以外は 0)。
+ * 着順・払戻・組合せ払戻は上書きしない。(A) と (B) の両方に当たるレースも、取得は 1 本で済む。窓・1 晩 {@link BACKFILL_NIGHTLY_LIMIT} レース・1 回 {@link BACKFILL_CHUNK_SIZE} レース・gate の都合・失敗の扱いは**段階 1 と共有**する。
+ * 違いは記録の状態だけ: 取り込めたレースは `fill_done`(ページにオッズが無くても、着順なしの馬が D1 に残っても、**二度と列挙しない**。毎晩の再列挙を防ぐ)、失敗は `odds_tried`・`odds_abandoned`(段階 1 の `tried`・`abandoned` と別に数える)。
+ * **旧い `odds_done`**(Issue #270 より前の、オッズだけの補完を終えた印)は列挙の除外に含めない: それらのレースは scratched が NULL のままなので、(B) に当たる限り 1 回だけ取り直し、`fill_done` に上書きされる。
+ * `odds_abandoned` のレースは従来どおり除外のまま(取得の失敗が永続した分を、scratched のためだけに救済しない)。
+ * 1 晩の上限(150)は、(A)・(B) の合計に対する上限のまま。対象は (B) の分だけ増えるが、1 晩に取得する本数は増えない(多いぶんは、翌晩以降に回る)。
  * 開催日が NULL の分析のレースは、段階 1 と同じ理由で対象外({@link BackfillStatus.winOdds} の `undated` に件数を出す)。
  *
  * ## 対象外(数だけ見せる)
@@ -51,7 +57,7 @@ import { checkRaceDate } from "./race-date";
 import type { MigrationState } from "./migration-core";
 import type { ResultImportProgress } from "./race-day-core";
 import { addDaysToKaisaiDate, dispatchResultImports, errorKind, type DispatchStore, type ResultDayStub } from "./result-dispatch";
-import type { BackfillCounts, CountBackfillOptions, ListBackfillOptions, UnimportedRace } from "./result-repository";
+import type { BackfillCounts, CountBackfillOptions, ListBackfillOptions, UnimportedRace, WinOddsBackfillCounts } from "./result-repository";
 import type { SqlLike } from "./sql-like";
 
 /** 結果の補完の DO(`ResultBackfill`)の固定名(単一インスタンス)。cron の `scheduled` と `GET /api/results/backfill` が引く。 */
@@ -124,9 +130,9 @@ export interface BackfillDayStub extends ResultDayStub {
 export interface BackfillStore {
   listBackfillRaces(options: ListBackfillOptions): Promise<UnimportedRace[]>;
   countBackfill(options: CountBackfillOptions): Promise<BackfillCounts>;
-  /** 段階 2(Issue #259): 結果はあるがオッズが 1 頭も入っていないレース。 */
+  /** 段階 2(Issue #259・#270): 結果はあるが、オッズが 1 頭も入っていない、または scratched が欠ける(着順が NULL で scratched が NULL の行がある)レース。 */
   listWinOddsBackfillRaces(options: ListBackfillOptions): Promise<UnimportedRace[]>;
-  countWinOddsBackfill(options: CountBackfillOptions): Promise<BackfillCounts>;
+  countWinOddsBackfill(options: CountBackfillOptions): Promise<WinOddsBackfillCounts>;
 }
 
 export interface BackfillDeps {
@@ -164,10 +170,17 @@ export interface BackfillStatus {
   /** 永久に除外したレース(取得できなかった)の数と、最後の分類ごとの内訳。 */
   readonly abandoned: { readonly total: number; readonly byClass: Readonly<Record<string, number>> };
   /**
-   * 段階 2(Issue #259。確定の単勝オッズ・人気の補完)。`remaining` = 結果はあるがオッズが 1 頭も無く、開催日が昨日以前で、永久に除外していないレースの数 /
-   * `undated` = 同じ条件で開催日がすべて NULL(補完の対象外)/ `filled` = 補完を終えたレース(`odds_done`)の累計 / `abandoned` = 取得できず永久に除外したレース(段階 1 の `abandoned` とは別)。
+   * 段階 2(Issue #259 の確定の単勝オッズ・人気の補完と、Issue #270 の取消・除外の記録〈scratched〉の補完)。`remaining` = 結果はあるが、オッズが 1 頭も無い、または scratched が欠ける(着順が NULL で scratched が NULL の行がある)レースのうち、
+   * 開催日が昨日以前で、永久に除外していないものの数 / `undated` = 同じ条件で開催日がすべて NULL(補完の対象外)/ `filled` = 補完を終えたレースの累計(`fill_done`。Issue #270 より前の印 `odds_done` を含む)/
+   * `scratchedMissing` = `remaining` のうち scratched が欠けるレースの数(オッズも欠けているレースを含む。本番の件数を後から確かめる観測値)/ `abandoned` = 取得できず永久に除外したレース(段階 1 の `abandoned` とは別)。
    */
-  readonly winOdds: { readonly remaining: number; readonly undated: number; readonly filled: number; readonly abandoned: { readonly total: number; readonly byClass: Readonly<Record<string, number>> } };
+  readonly winOdds: {
+    readonly remaining: number;
+    readonly undated: number;
+    readonly filled: number;
+    readonly scratchedMissing: number;
+    readonly abandoned: { readonly total: number; readonly byClass: Readonly<Record<string, number>> };
+  };
   readonly tonight: { readonly night: string; readonly dispatched: number; readonly limit: number };
   readonly inflight: { readonly day: string; readonly races: number; readonly since: string } | null;
   /** 次にアラームが起きる時刻(ISO。無ければ null)。 */
@@ -194,8 +207,11 @@ interface RaceRecord {
   readonly defers: number;
   readonly last_night: string;
   readonly last_class: string;
-  /** 段階 1: `tried`・`abandoned` / 段階 2(Issue #259): `odds_tried`・`odds_abandoned`・`odds_done`。 */
-  readonly state: "tried" | "abandoned" | "odds_tried" | "odds_abandoned" | "odds_done";
+  /**
+   * 段階 1: `tried`・`abandoned` / 段階 2(Issue #259): `odds_tried`・`odds_abandoned`・`fill_done`(Issue #270 で `odds_done` から改名した完了の印)。
+   * `odds_done` は Issue #270 より前に書かれた旧い印で、**新しくは書かない**。列挙の除外にも含めない(下の `excludedIds`)。
+   */
+  readonly state: "tried" | "abandoned" | "odds_tried" | "odds_abandoned" | "odds_done" | "fill_done";
 }
 
 /** JST の時刻(時)で窓の中か。 */
@@ -279,12 +295,14 @@ export class ResultBackfillCore {
   }
 
   /**
-   * 列挙から除外するレース ID: 永久に除外したもの + その晩に試したもの。段階 2 の `odds_abandoned`・`odds_done`(補完を終えた)も含める
+   * 列挙から除外するレース ID: 永久に除外したもの + その晩に試したもの。段階 2 の `odds_abandoned`・`fill_done`(補完を終えた)も含める
    * (段階 1 の列挙に混ざっても、そのレースは結果があるので当たらない。段階 2 の列挙は、これで補完済みのレースを再び選ばない)。
+   * **旧い `odds_done`(Issue #270 より前に、オッズだけの補完を終えた印)は含めない**: それらのレースは scratched が NULL のままなので、D1 の条件(scratched の欠け)が選ぶ限り取り直す。
+   * 取り込めたら `fill_done` に上書きされ、以後は除外される(1 つの `race_id` に状態は 1 つなので、`odds_done` ↔ 別の状態で行き来しない)。
    */
   private excludedIds(night: string): string[] {
     const rows = this.deps.sql
-      .exec("SELECT race_id FROM backfill_race WHERE state IN ('abandoned', 'odds_abandoned', 'odds_done') OR last_night = ? ORDER BY race_id", night)
+      .exec("SELECT race_id FROM backfill_race WHERE state IN ('abandoned', 'odds_abandoned', 'fill_done') OR last_night = ? ORDER BY race_id", night)
       .toArray() as { race_id: string }[];
     return rows.map((r) => r.race_id);
   }
@@ -295,9 +313,9 @@ export class ResultBackfillCore {
     return rows.map((r) => r.race_id);
   }
 
-  /** 段階 2 の残りの数えで除く、補完を終えた・永久に除外したレース ID。 */
+  /** 段階 2 の残りの数えで除く、補完を終えた(`fill_done`)・永久に除外した(`odds_abandoned`)レース ID。旧い `odds_done` は含めない(`excludedIds` の説明)。 */
   private oddsExcludedIds(): string[] {
-    const rows = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state IN ('odds_abandoned', 'odds_done') ORDER BY race_id").toArray() as { race_id: string }[];
+    const rows = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state IN ('odds_abandoned', 'fill_done') ORDER BY race_id").toArray() as { race_id: string }[];
     return rows.map((r) => r.race_id);
   }
 
@@ -320,11 +338,11 @@ export class ResultBackfillCore {
     );
   }
 
-  /** 段階 2 で補完を終えたレースを記録する(ページにオッズが無くて列に入らなかったレースも、二度と列挙しない)。 */
-  private recordOddsDone(raceId: string, night: string): void {
+  /** 段階 2 で補完を終えたレースを記録する(ページにオッズが無くて列に入らなかった、または着順なしの馬が D1 に残ったレースも、二度と列挙しない)。旧い `odds_done` の行は `fill_done` に上書きする。 */
+  private recordFillDone(raceId: string, night: string): void {
     this.deps.sql.exec(
-      `INSERT INTO backfill_race (race_id, nights, defers, last_night, last_class, state) VALUES (?, 0, 0, ?, 'imported', 'odds_done')
-       ON CONFLICT(race_id) DO UPDATE SET nights = 0, defers = 0, last_night = excluded.last_night, last_class = 'imported', state = 'odds_done'`,
+      `INSERT INTO backfill_race (race_id, nights, defers, last_night, last_class, state) VALUES (?, 0, 0, ?, 'imported', 'fill_done')
+       ON CONFLICT(race_id) DO UPDATE SET nights = 0, defers = 0, last_night = excluded.last_night, last_class = 'imported', state = 'fill_done'`,
       raceId,
       night,
     );
@@ -529,7 +547,7 @@ export class ResultBackfillCore {
       if (row?.state === "imported") {
         imported += 1;
         if (kind === "win-odds") {
-          this.recordOddsDone(raceId, inflight.night); // 補完を終えた(ページにオッズが無くても、二度と列挙しない)
+          this.recordFillDone(raceId, inflight.night); // 補完を終えた(ページにオッズが無くても・着順なしの馬が残っても、二度と列挙しない)
         } else {
           this.deps.sql.exec("DELETE FROM backfill_race WHERE race_id = ?", raceId);
         }
@@ -588,7 +606,7 @@ export class ResultBackfillCore {
       oddsByClass[row.cls] = row.n;
       oddsAbandoned += row.n;
     }
-    const filled = (this.deps.sql.exec("SELECT COUNT(*) AS n FROM backfill_race WHERE state = 'odds_done'").toArray() as { n: number }[])[0]?.n ?? 0;
+    const filled = (this.deps.sql.exec("SELECT COUNT(*) AS n FROM backfill_race WHERE state IN ('odds_done', 'fill_done')").toArray() as { n: number }[])[0]?.n ?? 0;
     let state: BackfillState;
     if (this.disabled) {
       state = "disabled";
@@ -613,7 +631,7 @@ export class ResultBackfillCore {
       undated: counts.undated,
       imported: this.count("imported"),
       abandoned: { total, byClass },
-      winOdds: { remaining: oddsCounts.dated, undated: oddsCounts.undated, filled, abandoned: { total: oddsAbandoned, byClass: oddsByClass } },
+      winOdds: { remaining: oddsCounts.dated, undated: oddsCounts.undated, filled, scratchedMissing: oddsCounts.scratchedMissing, abandoned: { total: oddsAbandoned, byClass: oddsByClass } },
       tonight: { night, dispatched, limit: this.nightlyLimit },
       inflight: inflight === null ? null : { day: inflight.day, races: inflight.raceIds.length, since: new Date(inflight.at).toISOString() },
       nextRunAt: alarm === null ? null : new Date(alarm).toISOString(),

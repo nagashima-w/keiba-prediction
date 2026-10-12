@@ -133,6 +133,19 @@ export const FILL_WIN_ODDS_SQL = `UPDATE race_results SET win_odds = COALESCE(ra
            WHERE race_results.race_id = ? AND race_results.umaban = j.u
              AND ((race_results.win_odds IS NULL AND j.o IS NOT NULL) OR (race_results.ninki IS NULL AND j.n IS NOT NULL))`;
 
+/**
+ * 取消・除外の記録(`scratched`)を、保存済みの行の NULL に限って埋める文(Issue #270。#72 の残り。束縛値は `[行の配列の JSON, race_id]` の 2 個。行は `[umaban, scratched]`で、scratched は取消・除外が 1・それ以外が 0)。
+ * 対象は **`scratched IS NULL` かつ `finish_position IS NULL` の行だけ**(`scratched` を記録する前に取り込んだ行のうち、取消か中止か判別できない行。着順のある馬は取消でありえないので書かない):
+ *  - 冪等(2 回目は WHERE に当たる行が無く、書き込みは 0 行。別の値を渡しても、記録済みの 0/1 を上書きしない)
+ *  - 他の列(着順・払戻・通過順・上がり・オッズ・人気)には触れない
+ *  - 結果の行が無い馬番・レースには行を作らない(UPDATE だけ)
+ * 新規の取り込みは `saveResult` の UPSERT が scratched を書く(全頭に 0/1)ので、この文を使うのは過去分の補完(`saveScratched`)だけ。
+ */
+export const FILL_SCRATCHED_SQL = `UPDATE race_results SET scratched = j.s
+           FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS s FROM json_each(?)) j
+           WHERE race_results.race_id = ? AND race_results.umaban = j.u
+             AND race_results.scratched IS NULL AND race_results.finish_position IS NULL`;
+
 /** codec の復元の文(1 レース)に race_id を足し、`WHERE race_id IN (json_each)` にして複数レースを 1 文で読む。 */
 function toManyRacesSql(codecSelectSql: string, orderBy: string | null): string {
   const selected = codecSelectSql.replace(/^(\s*SELECT\s+)/, "$1race_id AS raceId, ");
@@ -222,8 +235,17 @@ export const COUNT_BACKFILL_SQL = `WITH u AS (
            FROM u`;
 
 /**
- * 結果の補完の段階 2(Issue #259)の列挙。**段階 1({@link LIST_BACKFILL_SQL})の逆**: 分析済みで、結果の行が**あり**、確定の単勝オッズ(`win_odds`)が**1 頭も入っていない**レース。
- * 「1 頭も」にするのは、除外・取消の馬が NULL のまま残るレースを、毎晩列挙し直さないため(レース単位の判定)。それ以外(開催日が `to` 以下・`GROUP BY race_id` の最小の開催日・
+ * 結果の補完の段階 2 で、scratched が欠けるレース(Issue #270 の (B))の条件: **着順が NULL で scratched が NULL の行が 1 つでもある**。
+ * `scratched` を記録する前(migration 0013 より前)に取り込んだ行・exe から移した行のうち、取消か中止か判別できないもの。着順のある馬は取消でありえないので数えない。
+ * 補完で埋まる(`saveScratched`)と、そのレースはこの条件から外れる。PK(race_id, umaban)の先頭で引くので、分析 1 行につき 1 レースの行だけを読む。
+ */
+const SCRATCHED_MISSING_EXISTS = `EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.finish_position IS NULL AND r.scratched IS NULL)`;
+
+/**
+ * 結果の補完の段階 2(Issue #259・#270)の列挙。**段階 1({@link LIST_BACKFILL_SQL})の逆**: 分析済みで、結果の行が**あり**、次の (A) または (B) に当たるレース。
+ *  - (A)(Issue #259)確定の単勝オッズ(`win_odds`)が**1 頭も入っていない**。「1 頭も」にするのは、除外・取消の馬が NULL のまま残るレースを、毎晩列挙し直さないため(レース単位の判定)
+ *  - (B)(Issue #270)着順が NULL で scratched が NULL の行がある({@link SCRATCHED_MISSING_EXISTS})。オッズが入っていても対象
+ * 同じ取得 1 回で、両方を埋める(`winOddsOnly` の依頼。オッズ・人気は `saveWinOdds`、scratched は `saveScratched`)。それ以外(開催日が `to` 以下・`GROUP BY race_id` の最小の開催日・
  * 未取込のある最も新しい日を 1 日だけ・レースID 昇順・除外するレース ID を JSON 1 つで渡す)は段階 1 と同じ。束縛値は `[to, excludeJson, limit]`。
  */
 export const LIST_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
@@ -231,7 +253,8 @@ export const LIST_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
              FROM analyses a
              WHERE a.kaisai_date <= ?
                AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL)
+               AND (NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL)
+                    OR ${SCRATCHED_MISSING_EXISTS})
                AND a.race_id NOT IN (SELECT value FROM json_each(?))
              GROUP BY a.race_id
            )
@@ -241,18 +264,21 @@ export const LIST_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
            LIMIT ?`;
 
 /**
- * 段階 2 の残りの数({@link COUNT_BACKFILL_SQL} と同じ形)。`dated` = 対象で開催日が `to` 以前のレース(除外を除く)、`undated` = 対象で開催日がすべて NULL のレース
- * (日単位の DO の宛先が決まらないので補完できない。数だけ見せる)。束縛値は `[to, excludeJson]`。
+ * 段階 2 の残りの数({@link COUNT_BACKFILL_SQL} と同じ形)。`dated` = 対象((A) または (B))で開催日が `to` 以前のレース(除外を除く)、`undated` = 対象で開催日がすべて NULL のレース
+ * (日単位の DO の宛先が決まらないので補完できない。数だけ見せる)、`scratchedMissing`(Issue #270)= `dated` のうち (B) に当たるレース(オッズも欠けているレースを含む。本番の件数を後から確かめる観測値)。
+ * 束縛値は `[to, excludeJson, to, excludeJson]`(`dated` と `scratchedMissing` の分)。
  */
 export const COUNT_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
-             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate, MAX(${SCRATCHED_MISSING_EXISTS}) AS scratchedMissing
              FROM analyses a
              WHERE EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL)
+               AND (NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL)
+                    OR ${SCRATCHED_MISSING_EXISTS})
              GROUP BY a.race_id
            )
            SELECT COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS dated,
-                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated
+                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated,
+                  COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) AND scratchedMissing = 1 THEN 1 ELSE 0 END), 0) AS scratchedMissing
            FROM u`;
 
 
@@ -333,6 +359,19 @@ export function buildWinOddsStatement(db: ResultDb, raceId: string, results: rea
     return null;
   }
   return db.prepare(FILL_WIN_ODDS_SQL).bind(JSON.stringify(rows), raceId);
+}
+
+/**
+ * 取消・除外の記録を埋める文({@link FILL_SCRATCHED_SQL})。入力が空なら null(D1 に何も発行しない)。
+ * 入力の各馬の `scratched` は、`true` なら 1、それ以外(印のない馬)は 0(`saveResult` の UPSERT と同じ値の作り方)。
+ * D1 には何も発行しない(`prepare().bind()` を組み立てるだけ)。テストが「文の数・束縛値の数」を調べるために export している。
+ */
+export function buildScratchedStatement(db: ResultDb, raceId: string, results: readonly RaceResultEntry[]): D1PreparedStatement | null {
+  if (results.length === 0) {
+    return null;
+  }
+  const rows = results.map((r) => [r.umaban, r.scratched === true ? 1 : 0] as const);
+  return db.prepare(FILL_SCRATCHED_SQL).bind(JSON.stringify(rows), raceId);
 }
 
 /**
@@ -426,10 +465,17 @@ export interface BackfillCounts {
   readonly undated: number;
 }
 
+/** {@link COUNT_WIN_ODDS_BACKFILL_SQL} の結果(段階 2)。`scratchedMissing` は `dated` のうち、scratched が欠けて対象になるレースの数(Issue #270)。 */
+export interface WinOddsBackfillCounts extends BackfillCounts {
+  readonly scratchedMissing: number;
+}
+
 export interface ResultRepository {
   saveResult(raceId: string, results: readonly RaceResultEntry[], courseType?: CourseType | null, comboPayouts?: RaceComboPayoutsSaveInput): Promise<void>;
   /** 確定の単勝オッズ・人気だけを、NULL の列に限って埋める(Issue #259。過去分の補完)。他の列・組合せ払戻には触れない。 */
   saveWinOdds(raceId: string, results: readonly RaceResultEntry[]): Promise<WinOddsOutcome>;
+  /** 取消・除外の記録(`scratched`)だけを、着順が NULL で scratched が NULL の行に限って埋める(Issue #270。#72 の残り)。他の列・組合せ払戻には触れない。 */
+  saveScratched(raceId: string, results: readonly RaceResultEntry[]): Promise<ScratchedOutcome>;
   getRaceResultDetails(raceIds: readonly string[]): Promise<Map<string, RaceResultDetail>>;
   listUnimportedRaces(options: ListUnimportedOptions): Promise<UnimportedRace[]>;
   listUnimportedRacesByDay(options: ListUnimportedByDayOptions): Promise<UnimportedRace[]>;
@@ -437,6 +483,11 @@ export interface ResultRepository {
 
 /** {@link D1ResultStore.saveWinOdds} の結果。`rowsWritten` は D1 が報告した `meta.rows_written`(書くものが無ければ 0)。 */
 export interface WinOddsOutcome {
+  readonly rowsWritten: number;
+}
+
+/** {@link D1ResultStore.saveScratched} の結果。`rowsWritten` は D1 が報告した `meta.rows_written`(書くものが無ければ 0)。 */
+export interface ScratchedOutcome {
   readonly rowsWritten: number;
 }
 
@@ -487,6 +538,20 @@ export class D1ResultStore implements ResultRepository {
    */
   async saveWinOdds(raceId: string, results: readonly RaceResultEntry[]): Promise<WinOddsOutcome> {
     const statement = buildWinOddsStatement(this.db, raceId, results);
+    if (statement === null) {
+      return { rowsWritten: 0 };
+    }
+    const [result] = await this.db.batch([statement]);
+    return { rowsWritten: result?.meta.rows_written ?? 0 };
+  }
+
+  /**
+   * 取消・除外の記録(`scratched`)**だけ**を、保存済みの結果の「着順が NULL で scratched が NULL」の行に埋める(Issue #270。#72 の残り。結果の補完の段階 2 が、結果ページを取り直したときに
+   * `saveWinOdds` の直後に呼ぶ。{@link FILL_SCRATCHED_SQL} の 1 文)。`saveResult` と違い、他の列・面・組合せ払戻には**一切触れない**。冪等: 2 回目は何も書かない(`rowsWritten` は 0)。
+   * 入力が空なら D1 に何も発行しない。失敗は reject する。
+   */
+  async saveScratched(raceId: string, results: readonly RaceResultEntry[]): Promise<ScratchedOutcome> {
+    const statement = buildScratchedStatement(this.db, raceId, results);
     if (statement === null) {
       return { rowsWritten: 0 };
     }
@@ -618,11 +683,12 @@ export class D1ResultStore implements ResultRepository {
    * 結果の補完の段階 2 の残りの数(Issue #259。上の {@link COUNT_WIN_ODDS_BACKFILL_SQL})。
    * @throws RangeError to が YYYYMMDD の8桁でない・exclude が文字列の配列でない
    */
-  async countWinOddsBackfill(options: CountBackfillOptions): Promise<BackfillCounts> {
+  async countWinOddsBackfill(options: CountBackfillOptions): Promise<WinOddsBackfillCounts> {
     const { to, exclude } = options;
     checkBackfillInput(to, exclude);
-    const row = await this.db.prepare(COUNT_WIN_ODDS_BACKFILL_SQL).bind(to, JSON.stringify(exclude)).first<{ dated: number; undated: number }>();
-    return { dated: row?.dated ?? 0, undated: row?.undated ?? 0 };
+    const json = JSON.stringify(exclude);
+    const row = await this.db.prepare(COUNT_WIN_ODDS_BACKFILL_SQL).bind(to, json, to, json).first<{ dated: number; undated: number; scratchedMissing: number }>();
+    return { dated: row?.dated ?? 0, undated: row?.undated ?? 0, scratchedMissing: row?.scratchedMissing ?? 0 };
   }
 
   /**

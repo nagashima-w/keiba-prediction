@@ -8,6 +8,8 @@ import type { GateLike } from "../src/gate-fetch";
 import { RaceDayCore } from "../src/race-day-core";
 import { ResultBackfillCore, type BackfillDayStub, type BackfillOptions } from "../src/result-backfill-core";
 import { D1ResultStore } from "../src/result-repository";
+import { toResultEntries } from "../../packages/core/src/ev/result-import";
+import { parseRaceResult } from "../../packages/core/src/scraper/parse-race-result";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
@@ -20,6 +22,8 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const RESULT_HTML = readFileSync(path.join(ROOT, "fixtures", "result_202603020211.html"), "utf-8");
 const EMPTY_HTML = "<html><body></body></html>";
+/** 取消の馬が 1 頭いる結果ページ(Issue #270)。 */
+const RESULT_WITH_SCRATCH_HTML = readFileSync(path.join(ROOT, "fixtures", "result_202606040901.html"), "utf-8");
 const bytes = (text: string): ArrayBuffer => {
   const view = new TextEncoder().encode(text);
   const copy = new Uint8Array(view.length);
@@ -58,7 +62,7 @@ interface Alarm {
   at: number | null;
 }
 
-function world(startAt: number, options: { badRaceIds?: ReadonlySet<string>; backfill?: BackfillOptions } = {}) {
+function world(startAt: number, options: { badRaceIds?: ReadonlySet<string>; backfill?: BackfillOptions; htmlByRaceId?: Readonly<Record<string, string>> } = {}) {
   const clock = { now: startAt };
   const gate: GateLike & { inFlight: number; maxInFlight: number; urls: string[] } = {
     inFlight: 0,
@@ -71,7 +75,8 @@ function world(startAt: number, options: { badRaceIds?: ReadonlySet<string>; bac
       gate.inFlight -= 1;
       gate.urls.push(url);
       const bad = [...(options.badRaceIds ?? [])].some((id) => url.includes(id));
-      return { kind: "response", status: 200, contentType: "text/html; charset=UTF-8", body: bytes(bad ? EMPTY_HTML : RESULT_HTML), queuedMs: 0, elapsedMs: 1 };
+      const custom = Object.entries(options.htmlByRaceId ?? {}).find(([id]) => url.includes(id))?.[1];
+      return { kind: "response", status: 200, contentType: "text/html; charset=UTF-8", body: bytes(bad ? EMPTY_HTML : (custom ?? RESULT_HTML)), queuedMs: 0, elapsedMs: 1 };
     },
   };
   const days = new Map<string, { core: RaceDayCore; alarm: Alarm }>();
@@ -188,7 +193,7 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
     expect(w.gate.urls[0]).toContain(need);
     expect([...w.days.keys()]).toEqual(["20261008"]);
     const rows = (await local.db.prepare("SELECT * FROM race_results WHERE race_id = ? ORDER BY umaban").bind(need).all<Record<string, unknown>>()).results;
-    // 保存済みの 1 行(馬番 13)は、7 列がそのまま(払戻 999・通過順・上がりを上書きしない)で、オッズ・人気だけが埋まる(#72 の scratched も、補完は触らないので NULL のまま)。ページの他の 15 頭の行は作らない(UPDATE だけ)。
+    // 保存済みの 1 行(馬番 13)は、7 列がそのまま(払戻 999・通過順・上がりを上書きしない)で、オッズ・人気だけが埋まる(#72 の scratched は、この行が着順ありなので補完の対象外=NULL のまま)。ページの他の 15 頭の行は作らない(UPDATE だけ)。
     expect(rows).toEqual([{ race_id: need, umaban: 13, finish_position: 1, place_payout: 111, win_payout: 999, passing_json: "[7,7]", last3f: 12.3, win_odds: 5.4, ninki: 1, scratched: null }]);
     expect(await savedRaceIds()).toEqual([need, alreadyFilled, idOf(5, 1), idOf(10, 1)].sort());
     const filled = await local.db.prepare("SELECT win_odds, ninki FROM race_results WHERE race_id = ?").bind(alreadyFilled).first<{ win_odds: number; ninki: number }>();
@@ -197,13 +202,55 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
     expect(status).toMatchObject({ state: "done", remaining: 0, imported: 0 });
     expect(status.winOdds).toMatchObject({ remaining: 0, undated: 1, filled: 1 }); // 今日のレース〈オッズ NULL〉は to(昨日)より後なので残りに数えない。開催日不明 1
     expect(status.tonight).toMatchObject({ dispatched: 1 });
-    // 翌晩: 埋めたレース(odds_done)とオッズ済みのレースは取り直さない。新たに対象になるのは、前の晩は「今日」だったレース(20261010)だけ。
+    // 翌晩: 埋めたレース(fill_done)とオッズ済みのレースは取り直さない。新たに対象になるのは、前の晩は「今日」だったレース(20261010)だけ。
     const urlsBefore = w.gate.urls.length;
     await w.run(jst(10, 12, 3));
     expect(w.gate.urls.slice(urlsBefore)).toHaveLength(1);
     expect(w.gate.urls[urlsBefore]).toContain(idOf(10, 1));
     expect(w.gate.urls.filter((u) => u.includes(need))).toHaveLength(1);
     expect(w.gate.urls.some((u) => u.includes(alreadyFilled))).toBe(false);
+  });
+
+  // Issue #270: 取消・除外の区別を記録する前の行(scratched が NULL)を、段階 2 の同じ取得で補完する。
+  it("段階 2: オッズは入っているが scratched が NULL(着順なし)のレースの結果ページを取り直し、scratched だけを埋める(取消は 1・他は 0)。着順・払戻・オッズは上書きせず、取得は 1 レース 1 本。埋めたら翌晩以降に再び取得しない", async () => {
+    const parsedPage = parseRaceResult(RESULT_WITH_SCRATCH_HTML);
+    const entries = toResultEntries(parsedPage);
+    const scratchedUmaban = entries.find((e) => e.scratched === true)!.umaban;
+    const finisher = entries.find((e) => e.finishPosition === 1)!.umaban;
+    const pending = idOf(8, 1); // 補完の対象(B)
+    const recorded = idOf(8, 2); // scratched が記録済み(取り直さない)
+    const allFinished = idOf(8, 3); // 全頭に着順(scratched は NULL のまま。取り直さない)
+    for (const [i, id] of [pending, recorded, allFinished].entries()) await addAnalysis(id, "20261008", i + 1);
+    // pending: 旧い行。馬 finisher はページでは 1 着だが、旧い行では着順なし(わざと)。取消の馬はオッズなし。オッズは入っている(段階 2 の (A) には当たらない)。払戻はページと違う値 999。
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, win_odds, ninki) VALUES (?, ?, NULL, 111, 999, 7.7, 3)").bind(pending, finisher).run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position) VALUES (?, ?, NULL)").bind(pending, scratchedUmaban).run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, scratched) VALUES (?, 1, NULL, 2.0, 0)").bind(recorded).run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds) VALUES (?, 1, 1, 2.0)").bind(allFinished).run();
+    const w = world(jst(10, 10, 2), { htmlByRaceId: { [pending]: RESULT_WITH_SCRATCH_HTML } });
+    expect((await w.core.getStatus()).winOdds).toMatchObject({ remaining: 1, scratchedMissing: 1 }); // 前提: 対象は pending の 1 レース(観測値で見える)
+    await w.core.kick();
+    const steps = await w.run(jst(10, 11, 0, 59));
+    expect(steps).toBeGreaterThan(2); // 前提: 実際に動いた
+    expect(w.gate.urls).toHaveLength(1); // 取得は 1 レース 1 本
+    expect(w.gate.urls[0]).toContain(pending);
+    const rows = (await local.db.prepare("SELECT * FROM race_results WHERE race_id = ? ORDER BY umaban").bind(pending).all<Record<string, unknown>>()).results;
+    const byUmaban = (u: number) => rows.find((r) => r["umaban"] === u)!;
+    expect(rows).toHaveLength(2); // ページの他の馬の行は作らない
+    expect(byUmaban(scratchedUmaban)).toMatchObject({ finish_position: null, scratched: 1 });
+    // 旧い行で着順なし・オッズありの馬: scratched は 0。着順(NULL)・払戻(111・999)・オッズ(7.7・3)は上書きしない。
+    expect(byUmaban(finisher)).toMatchObject({ finish_position: null, place_payout: 111, win_payout: 999, win_odds: 7.7, ninki: 3, scratched: 0 });
+    expect(await local.db.prepare("SELECT scratched FROM race_results WHERE race_id = ?").bind(recorded).first()).toEqual({ scratched: 0 });
+    expect(await local.db.prepare("SELECT scratched FROM race_results WHERE race_id = ?").bind(allFinished).first()).toEqual({ scratched: null });
+    const status = await w.core.getStatus();
+    expect(status.winOdds).toMatchObject({ remaining: 0, scratchedMissing: 0, filled: 1 });
+    // 翌晩以降: 取り直さない。
+    const urlsBefore = w.gate.urls.length;
+    for (const day of [11, 12]) {
+      w.clock.now = jst(10, day, 2);
+      await w.core.kick();
+      await w.run(jst(10, day + 1, 0, 59));
+    }
+    expect(w.gate.urls.length).toBe(urlsBefore);
   });
 
   it("取得できない(中身が空のページ)レースは記録して除外し、翌晩以降に再び取得しない。他のレースは取り込まれる", async () => {

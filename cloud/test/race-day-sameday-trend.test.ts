@@ -137,6 +137,7 @@ function goldenStore(requested: (readonly string[])[]): ResultStoreLike {
   return {
     saveResult: async () => undefined,
     saveWinOdds: async () => ({ rowsWritten: 0 }),
+    saveScratched: async () => ({ rowsWritten: 0 }),
     getRaceResultDetails: async (ids) => {
       requested.push([...ids]);
       const map = new Map<string, RaceResultDetail>();
@@ -174,6 +175,7 @@ describe("AC-C4: 配線(偽のストア)", () => {
     const store: ResultStoreLike = {
       saveResult: async () => undefined,
     saveWinOdds: async () => ({ rowsWritten: 0 }),
+    saveScratched: async () => ({ rowsWritten: 0 }),
       getRaceResultDetails: async () => {
         throw new Error(`D1_ERROR: SELECT secret ${SECRET}`);
       },

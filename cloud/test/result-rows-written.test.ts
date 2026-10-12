@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { buildSaveResultStatements, buildWinOddsStatement } from "../src/result-repository";
+import { buildSaveResultStatements, buildScratchedStatement, buildWinOddsStatement } from "../src/result-repository";
 import { toResultEntries } from "../../packages/core/src/ev/result-import";
 import { parseRaceId } from "../../packages/core/src/scraper/ids";
 import { parseRaceResult } from "../../packages/core/src/scraper/parse-race-result";
@@ -102,5 +102,26 @@ describe("結果 1 レースの新規保存の D1 の書き込み行数(meta.row
     expect(first!.meta.rows_written).toBe(oddsHorses);
     const [second] = await local.db.batch([buildWinOddsStatement(local.db, raceId, entries)!]);
     expect(second!.meta.rows_written).toBe(0);
+  });
+  // Issue #270: 取消・除外の記録の補完(saveScratched)は、着順が NULL で scratched が NULL の行の数だけ書く(着順のある馬は書かない)。2 回目は 0。
+  // 取消・除外を含む実フィクスチャ 2 本(FIXTURES には無い)を足して測る。
+  const SCRATCH_FIXTURES = ["result_202606040901.html", "result_202605040205.html"];
+  it("過去分の補完(saveScratched、Issue #270)の rows_written は、着順の無い馬の数と等しい。2 回目は 0。取消・除外のフィクスチャ 2 本を含み、着順の無い馬が実在する", async () => {
+    let totalNonFinishers = 0;
+    for (const fixture of [...FIXTURES, ...SCRATCH_FIXTURES]) {
+      await local.reset();
+      const raceId = parseRaceId(/(\d{12})/.exec(fixture)![1]!);
+      const parsed = parseRaceResult(load(fixture));
+      const entries = toResultEntries(parsed);
+      await local.db.batch(buildSaveResultStatements(local.db, raceId, entries, parsed.courseType ?? null));
+      await local.db.prepare("UPDATE race_results SET scratched = NULL").run(); // 旧い行にする
+      const nonFinishers = entries.filter((e) => e.finishPosition === null).length;
+      totalNonFinishers += nonFinishers;
+      const [first] = await local.db.batch([buildScratchedStatement(local.db, raceId, entries)!]);
+      expect(first!.meta.rows_written, fixture).toBe(nonFinishers);
+      const [second] = await local.db.batch([buildScratchedStatement(local.db, raceId, entries)!]);
+      expect(second!.meta.rows_written, fixture).toBe(0);
+    }
+    expect(totalNonFinishers).toBeGreaterThan(0); // 前提(空振り防止): 着順の無い馬が実在する
   });
 });

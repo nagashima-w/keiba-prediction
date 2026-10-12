@@ -118,6 +118,13 @@ interface FakeStore {
   /** 次の saveWinOdds を、この回数だけ失敗させる。 */
   oddsFailures: number;
   saveWinOdds(raceId: string, entries: readonly RaceResultEntry[]): Promise<{ readonly rowsWritten: number }>;
+  /** Issue #270: 過去分の補完(`winOddsOnly` の依頼)で、`saveWinOdds` の直後に呼ばれる `saveScratched` の呼び出し。 */
+  readonly scratchedCalls: Array<{ readonly raceId: string; readonly entries: readonly RaceResultEntry[] }>;
+  /** 次の saveScratched を、この回数だけ失敗させる。 */
+  scratchedFailures: number;
+  /** saveWinOdds・saveScratched が呼ばれた順(呼び出しの名前)。 */
+  readonly order: string[];
+  saveScratched(raceId: string, entries: readonly RaceResultEntry[]): Promise<{ readonly rowsWritten: number }>;
   /** 次の saveResult を、この回数だけ失敗させる。 */
   failures: number;
   saveResult(raceId: string, entries: readonly RaceResultEntry[], courseType?: CourseType | null, comboPayouts?: RaceComboPayoutsSaveInput): Promise<void>;
@@ -135,6 +142,19 @@ function fakeStore(): FakeStore {
         throw new Error("D1 の保存に失敗(SECRET-D1-ODDS-MESSAGE)");
       }
       store.oddsCalls.push({ raceId, entries });
+      store.order.push("saveWinOdds");
+      return { rowsWritten: entries.length };
+    },
+    scratchedCalls: [],
+    scratchedFailures: 0,
+    order: [],
+    async saveScratched(raceId, entries) {
+      if (store.scratchedFailures > 0) {
+        store.scratchedFailures -= 1;
+        throw new Error("D1 の保存に失敗(SECRET-D1-SCRATCHED-MESSAGE)");
+      }
+      store.scratchedCalls.push({ raceId, entries });
+      store.order.push("saveScratched");
       return { rowsWritten: entries.length };
     },
     failures: 0,
@@ -960,6 +980,46 @@ describe("Issue #259: winOddsOnly の依頼は、取り込み済みのレース�
     expect(h.store.oddsCalls).toHaveLength(1);
   });
 
+  it("Issue #270: winOddsOnly の保存は saveWinOdds → saveScratched の順で、同じ取得の entries を渡す(取得は 1 回のまま)。取消の馬は scratched: true で届く", async () => {
+    const h = harness();
+    await importThenOddsOnly(h);
+    htmlOf[R_A] = fixture("result_202606040901.html");
+    try {
+      await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+      expect(await tick(h)).toBe(`${R_A}:result:import:ok`);
+      expect(h.gate.urls).toEqual([resultUrl(R_A)]); // 取得は 1 回
+      expect(h.store.order).toEqual(["saveWinOdds", "saveScratched"]);
+      expect(h.store.scratchedCalls).toHaveLength(1);
+      expect(h.store.scratchedCalls[0]!.raceId).toBe(R_A);
+      expect(h.store.scratchedCalls[0]!.entries).toBe(h.store.oddsCalls[0]!.entries); // 同じ取得の結果
+      expect(h.store.scratchedCalls[0]!.entries.filter((e) => e.scratched === true)).toHaveLength(1); // 前提: フィクスチャに取消が 1 頭
+      expect(h.store.calls).toEqual([]); // saveResult は呼ばない
+    } finally {
+      htmlOf[R_A] = fixture("result_202603020211.html");
+    }
+  });
+
+  it("Issue #270: 通常の取り込み(winOddsOnly なし)は saveScratched を呼ばない(saveResult の UPSERT が scratched を 0/1 で書く)", async () => {
+    const h = harness();
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A] });
+    await drive(h);
+    expect(h.store.calls.map((c) => c.raceId)).toEqual([R_A]);
+    expect(h.store.scratchedCalls).toEqual([]);
+  });
+
+  it("Issue #270: saveScratched の保存が失敗したら、通常と同じ save-failed の再試行(試行を数える)。再試行で成功すれば imported。例外の文面は状態に入れない", async () => {
+    const h = harness();
+    await importThenOddsOnly(h);
+    await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A], winOddsOnly: true });
+    h.store.scratchedFailures = 1;
+    expect(await tick(h)).toBe(`${R_A}:result:import:retry`);
+    expect(rowOf(h, R_A)).toMatchObject({ state: "queued", attempts: 1, last_class: "save-failed" });
+    expect(dumpAllTables(h)).not.toContain("SECRET-D1-SCRATCHED-MESSAGE");
+    await drive(h);
+    expect(rowOf(h, R_A)).toMatchObject({ state: "imported" });
+    expect(h.store.scratchedCalls).toHaveLength(1);
+  });
+
   it("winOddsOnly でも、払戻のテーブルが無いページ(審議中)は保存しない(no-payout)。saveWinOdds は呼ばない", async () => {
     const h = harness();
     await importThenOddsOnly(h);
@@ -969,6 +1029,7 @@ describe("Issue #259: winOddsOnly の依頼は、取り込み済みのレース�
       await tick(h);
       expect(rowOf(h, R_A)).toMatchObject({ state: "queued", attempts: 1, last_class: "no-payout" });
       expect(h.store.oddsCalls).toEqual([]);
+      expect(h.store.scratchedCalls).toEqual([]); // Issue #270: saveScratched も呼ばない
       expect(h.store.calls).toEqual([]);
     } finally {
       htmlOf[R_A] = fixture("result_202603020211.html");

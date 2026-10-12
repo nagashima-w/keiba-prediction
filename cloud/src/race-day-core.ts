@@ -281,7 +281,7 @@ export interface AnalysisSink {
 }
 
 /** 結果の保存先のうち、日単位の DO が使う部分: 取り込みの保存(`saveResult`)と、発走前の分析の当日傾向の読み出し(`getRaceResultDetails`。Issue #209)。 */
-export type ResultStoreDeps = Pick<ResultRepository, "saveResult" | "saveWinOdds" | "getRaceResultDetails">;
+export type ResultStoreDeps = Pick<ResultRepository, "saveResult" | "saveWinOdds" | "saveScratched" | "getRaceResultDetails">;
 
 export interface RaceDayDeps {
   readonly sql: SqlLike;
@@ -1007,7 +1007,8 @@ export class RaceDayCore {
    * **依頼だけをして戻る**(取得・保存はアラームの中。1 ステップにつき 1 レース)。冪等: 判定は `race-day-result.ts` の表のとおり(進行中・同じ日に取り込み済み・同じ日に諦めた、は積み直さない。
    * 前の日の依頼で諦めた・取り込み済みのレースは、1 日 1 回だけ積み直す)。依頼の日は**この DO の時計**の JST の暦日(cron の重複配信は同じ日になる)。
    * 受理しても拒否しても、アラームは状態から張り直す(`rearm`。冪等)。開催日を pin する(別の日で pin 済みなら拒否)。
-   * `winOddsOnly: true`(Issue #259。結果の補完の段階 2): 積んだレースは、実行のとき確定の単勝オッズ・人気**だけ**を保存する(`saveWinOdds`。着順・払戻・組合せ払戻を上書きしない)。
+   * `winOddsOnly: true`(Issue #259。結果の補完の段階 2): 積んだレースは、実行のとき保存済みの結果の **NULL の列だけ**を埋める。確定の単勝オッズ・人気(`saveWinOdds`)と、取消・除外の記録
+   * (`saveScratched`。Issue #270)で、着順・払戻・組合せ払戻を上書きしない。名前は #259 のまま、意味を「NULL の列だけを埋める」に広げた(取得は 1 回のまま)。
    * 印は積んだレースにだけ、依頼のとおりに付け直す(無視されたレースは変えない)。それ以外の判定・上限・取得は通常の依頼と同じ。
    * @throws 結果ストアが無い構成、無効な開催日・レースID、**今日以降の開催日**(当日中の取り込みは対象外)、年・地方の月日の不整合、1 回の件数の上限、1 日の行数の上限(1 件も積まない)
    */
@@ -1948,8 +1949,10 @@ export class RaceDayCore {
         saveResult: async (id, entries, courseType, comboPayouts) => {
           progress.stage = "save";
           if (winOddsOnly) {
-            // 過去分の補完(Issue #259): 確定の単勝オッズ・人気だけを、NULL の列に埋める。保存済みの着順・払戻・組合せ払戻には触れない。
+            // 過去分の補完(Issue #259・#270): 確定の単勝オッズ・人気と、取消・除外の記録(scratched)だけを、NULL の列に埋める。保存済みの着順・払戻・組合せ払戻には触れない。
+            // 同じ取得(同じ entries)で両方を埋める。どちらも冪等なので、片方が失敗して再試行になっても、埋まった分は書き直されない。
             await this.resultStore!.saveWinOdds(id, entries);
+            await this.resultStore!.saveScratched(id, entries);
             return;
           }
           await this.resultStore!.saveResult(id, entries, courseType, comboPayouts);

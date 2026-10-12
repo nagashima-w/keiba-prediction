@@ -113,7 +113,77 @@ describe("countWinOddsBackfill: 残り(開催日あり・to 以前・除外を�
     await addAnalysis("U2", null);
     for (const id of ["D1", "D2", "D3", "FUT", "U1", "U2"]) await addResult(id);
     await addResult("DONE", [2.0]);
-    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: ["D3"] })).toStrictEqual({ dated: 2, undated: 2 });
-    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 3, undated: 2 });
+    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: ["D3"] })).toStrictEqual({ dated: 2, undated: 2, scratchedMissing: 0 });
+    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 3, undated: 2, scratchedMissing: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #270: 段階 2 の対象に「着順が NULL で scratched が NULL の行を持つレース」(B)を足す
+// ---------------------------------------------------------------------------
+
+/**
+ * 結果の行を入れる(Issue #270)。rows は馬ごとの [着順, win_odds, scratched](着順 null は取消・中止など、scratched null は記録なし)。
+ */
+async function addResultRows(raceId: string, rows: ReadonlyArray<readonly [number | null, number | null, number | null]>): Promise<void> {
+  for (const [i, [finish, odds, scratched]] of rows.entries()) {
+    await local.db
+      .prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, scratched) VALUES (?, ?, ?, ?, ?)")
+      .bind(raceId, i + 1, finish, odds, scratched)
+      .run();
+  }
+}
+
+describe("Issue #270 listWinOddsBackfillRaces: オッズが入っていても、着順が NULL で scratched が NULL の行があるレースは対象(B)", () => {
+  it("(B) に当たるレースを返す。オッズ済みでも返す。scratched が記録済み(0 も 1 も)のレース・着順が全頭にあるレース・どちらにも当たらないレースは返さない", async () => {
+    for (const id of ["B_ODDS", "B_NOODDS", "REC0", "REC1", "ALLFINISH", "NEITHER", "A_ONLY"]) await addAnalysis(id, "20261003");
+    await addResultRows("B_ODDS", [[1, 3.4, null], [null, 5.0, null]]); // オッズ済み・着順 NULL・scratched NULL
+    await addResultRows("B_NOODDS", [[1, null, null], [null, null, null]]); // (A) と (B) の両方
+    await addResultRows("REC0", [[1, 3.4, 0], [null, 5.0, 0]]); // 記録済み(中止)
+    await addResultRows("REC1", [[1, 3.4, 0], [null, 5.0, 1]]); // 記録済み(取消)
+    await addResultRows("ALLFINISH", [[1, 3.4, null], [2, 5.0, null]]); // 全頭に着順(scratched は NULL のまま=補完しても学ぶことが無い)
+    await addResultRows("NEITHER", [[1, 3.4, 0], [2, 5.0, 0]]);
+    await addResultRows("A_ONLY", [[1, null, 0], [null, null, 0]]); // オッズが 1 頭も無い (A) だけ
+    const listed = (await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId);
+    expect(listed).toEqual(["A_ONLY", "B_NOODDS", "B_ODDS"]);
+  });
+
+  it("着順が NULL の行が 1 つでも scratched NULL ならレースごと対象。その行だけが記録済みになれば外れる(他の馬が NULL でも、着順があれば数えない)", async () => {
+    await addAnalysis("R1", "20261003");
+    await addResultRows("R1", [[1, 3.4, null], [null, 5.0, null]]);
+    expect((await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId)).toEqual(["R1"]);
+    await local.db.prepare("UPDATE race_results SET scratched = 1 WHERE race_id = 'R1' AND umaban = 2").run();
+    expect(await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).toEqual([]); // 馬 1 は着順ありで NULL のままだが、対象にしない
+  });
+
+  it("(B) のレースにも、除外・to・開催日 NULL・最も新しい日 1 日だけ・limit の規則がそのまま効く", async () => {
+    await addAnalysis("NEW1", "20261003");
+    await addAnalysis("NEW2", "20261003");
+    await addAnalysis("OLD1", "20261001");
+    await addAnalysis("AFTER", "20261005");
+    await addAnalysis("UNDATED", null);
+    for (const id of ["NEW1", "NEW2", "OLD1", "AFTER", "UNDATED"]) await addResultRows(id, [[1, 3.4, null], [null, 5.0, null]]);
+    const ids = async (opts: { exclude: string[]; limit: number }) => (await store().listWinOddsBackfillRaces({ to: "20261004", ...opts })).map((r) => r.raceId);
+    expect(await ids({ exclude: [], limit: 50 })).toEqual(["NEW1", "NEW2"]);
+    expect(await ids({ exclude: [], limit: 1 })).toEqual(["NEW1"]);
+    expect(await ids({ exclude: ["NEW1", "NEW2"], limit: 50 })).toEqual(["OLD1"]);
+  });
+});
+
+describe("Issue #270 countWinOddsBackfill: scratched が欠けて対象になるレースの数(scratchedMissing)", () => {
+  it("dated は (A) または (B) のレース数。scratchedMissing は、そのうち (B) に当たるレース数(オッズも欠けている両方のレースを含む)。除外は両方から除く", async () => {
+    for (const id of ["A", "B", "AB", "EXCL_B", "FUT_B", "OK"]) await addAnalysis(id, id === "FUT_B" ? "20261005" : "20261003");
+    await addAnalysis("U_B", null);
+    await addAnalysis("U_A", null);
+    await addResultRows("A", [[1, null, 0], [null, null, 0]]); // (A) のみ
+    await addResultRows("B", [[1, 3.4, null], [null, 5.0, null]]); // (B) のみ
+    await addResultRows("AB", [[1, null, null], [null, null, null]]); // 両方
+    await addResultRows("EXCL_B", [[1, 3.4, null], [null, 5.0, null]]); // (B)・除外
+    await addResultRows("FUT_B", [[1, 3.4, null], [null, 5.0, null]]); // (B)・to の後
+    await addResultRows("OK", [[1, 3.4, 0], [null, 5.0, 0]]);
+    await addResultRows("U_B", [[1, 3.4, null], [null, 5.0, null]]); // (B)・開催日 NULL
+    await addResultRows("U_A", [[1, null, 0]]); // (A)・開催日 NULL
+    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: ["EXCL_B"] })).toStrictEqual({ dated: 3, undated: 2, scratchedMissing: 2 });
+    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 4, undated: 2, scratchedMissing: 3 });
   });
 });
