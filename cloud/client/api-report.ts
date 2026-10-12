@@ -24,6 +24,8 @@ export interface ReportBetTypeStat {
   readonly hitCount: number;
   readonly stake: number;
   readonly payout: number;
+  /** 返還(取消・除外の馬への買い目。Issue #278)の点数。`betCount` に含まれる内訳。この項目を持つ前の日報には無い。 */
+  readonly refundCount?: number;
   /** 見込みの的中数(Issue #264)。この項目を持つ前の日報には無い。 */
   readonly expectedBetCount?: number;
   readonly expectedHits?: number;
@@ -45,6 +47,8 @@ export interface ReportTemplateStat {
   readonly payout: number;
   readonly unjudgedCount: number;
   readonly inapplicableCount: number;
+  /** 判定できた点数のうち返還(Issue #278)のレース数。`betCount` に含まれる内訳。この項目を持つ前の日報には無い。 */
+  readonly refundCount?: number;
 }
 
 /** 惜しかったレース(サーバの `NearMissSummary`。Issue #272)。 */
@@ -67,6 +71,9 @@ export interface ReportStats {
   readonly hitBetCount: number;
   readonly unjudgedBetCount: number;
   readonly unjudgedStake: number;
+  /** 返還(取消・除外の馬への買い目。Issue #278)の点数と賭け金。`judgedBetCount`・`totalStake` に含まれる内訳。この項目を持つ前の日報には無い(無いものを 0 点とみなさない)。 */
+  readonly refundedBetCount?: number;
+  readonly refundedStake?: number;
   /** 見込みの的中数(確率のある買い目の点数・的中確率の合計・同じ買い目の実際の的中数)と、最大払戻の 1 点(Issue #264)。この項目を持つ前の日報には無い。 */
   readonly expectedBetCount?: number;
   readonly expectedHits?: number;
@@ -120,6 +127,8 @@ export interface ReportRace {
   readonly totalReturn: number;
   readonly judgedBetCount: number;
   readonly hitCount: number;
+  /** 返還(Issue #278)の点数。`judgedBetCount` に含まれる内訳。この項目を持つ前の日報には無い。 */
+  readonly refundedBetCount?: number;
   readonly unjudgedBetCount: number;
   readonly allocationNote: string | null;
   readonly comment: string | null;
@@ -209,6 +218,13 @@ function parseOptionalGroup(v: Record<string, unknown>, counts: readonly string[
   return out;
 }
 
+/** 1 つだけの任意の件数(Issue #278 の返還の項目)。無ければ空のオブジェクト(キーを足さない)、あって 0 以上の整数でなければ null(壊れた応答)。 */
+function optionalCount(v: Record<string, unknown>, key: string): Record<string, number> | null {
+  if (!(key in v)) return {};
+  const x = v[key];
+  return isCount(x) ? { [key]: x } : null;
+}
+
 /** 印の定型の成績(Issue #272)を読む。null はそのまま null。壊れていれば undefined(呼び出し側が応答全体を捨てる)。 */
 function parseWhatIf(value: unknown): Record<string, ReportTemplateStat> | null | undefined {
   if (value === null) return null;
@@ -216,7 +232,9 @@ function parseWhatIf(value: unknown): Record<string, ReportTemplateStat> | null 
   const out: Record<string, ReportTemplateStat> = {};
   for (const [id, t] of Object.entries(value)) {
     if (!isRecord(t) || !isCount(t["betCount"]) || !isCount(t["hitCount"]) || !isNum(t["stake"]) || !isNum(t["payout"]) || !isCount(t["unjudgedCount"]) || !isCount(t["inapplicableCount"])) return undefined;
-    out[id] = { betCount: t["betCount"], hitCount: t["hitCount"], stake: t["stake"], payout: t["payout"], unjudgedCount: t["unjudgedCount"], inapplicableCount: t["inapplicableCount"] };
+    const refund = optionalCount(t, "refundCount");
+    if (refund === null) return undefined;
+    out[id] = { betCount: t["betCount"], hitCount: t["hitCount"], stake: t["stake"], payout: t["payout"], unjudgedCount: t["unjudgedCount"], inapplicableCount: t["inapplicableCount"], ...refund };
   }
   return out;
 }
@@ -246,7 +264,9 @@ function parseStats(value: unknown): ReportStats | null {
     if (!isRecord(stat) || !isCount(stat["betCount"]) || !isCount(stat["hitCount"]) || !isNum(stat["stake"]) || !isNum(stat["payout"])) return null;
     const typeExpected = parseOptionalGroup(stat, ["expectedBetCount", "expectedBaseHits"], ["expectedHits"]);
     if (typeExpected === null) return null;
-    byBetType[type] = { betCount: stat["betCount"], hitCount: stat["hitCount"], stake: stat["stake"], payout: stat["payout"], ...typeExpected };
+    const typeRefund = optionalCount(stat, "refundCount");
+    if (typeRefund === null) return null;
+    byBetType[type] = { betCount: stat["betCount"], hitCount: stat["hitCount"], stake: stat["stake"], payout: stat["payout"], ...typeRefund, ...typeExpected };
   }
   const byMark: ReportMarkStat[] = [];
   for (const m of v["byMark"]) {
@@ -255,12 +275,14 @@ function parseStats(value: unknown): ReportStats | null {
   }
   const expected = parseOptionalGroup(v, ["expectedBetCount", "expectedBaseHits"], ["expectedHits", "maxPayout", "maxPayoutStake"]);
   if (expected === null) return null;
+  const refund = parseOptionalGroup(v, ["refundedBetCount"], ["refundedStake"]);
+  if (refund === null) return null;
   const whatIf = "whatIf" in v ? parseWhatIf(v["whatIf"]) : undefined;
   if ("whatIf" in v && whatIf === undefined) return null;
   return {
     raceCount: v["raceCount"], resultRaceCount: v["resultRaceCount"], noResultRaceCount: v["noResultRaceCount"], betRaceCount: v["betRaceCount"], llmUsedRaceCount: v["llmUsedRaceCount"],
     totalStake: v["totalStake"], totalReturn: v["totalReturn"], recoveryRate: v["recoveryRate"], judgedBetCount: v["judgedBetCount"], hitBetCount: v["hitBetCount"],
-    unjudgedBetCount: v["unjudgedBetCount"], unjudgedStake: v["unjudgedStake"], ...expected, byBetType, byMark, ...(whatIf === undefined ? {} : { whatIf }),
+    unjudgedBetCount: v["unjudgedBetCount"], unjudgedStake: v["unjudgedStake"], ...refund, ...expected, byBetType, byMark, ...(whatIf === undefined ? {} : { whatIf }),
   };
 }
 
@@ -299,9 +321,11 @@ function parseRace(value: unknown): ReportRace | null {
     if (!isRecord(m) || !isStr(m["mark"]) || !isCount(m["umaban"]) || !strOrNull(m["name"]) || !(m["finishPosition"] === null || isCount(m["finishPosition"]))) return null;
     marks.push({ mark: m["mark"], umaban: m["umaban"], name: m["name"], finishPosition: m["finishPosition"] });
   }
+  const refund = optionalCount(r, "refundedBetCount");
+  if (refund === null) return null;
   return {
     raceId: r["raceId"], analysisId: r["analysisId"], title: r["title"], llmUsed: r["llmUsed"], hasResult: r["hasResult"], top3, marks, totalStake: r["totalStake"], totalReturn: r["totalReturn"],
-    judgedBetCount: r["judgedBetCount"], hitCount: r["hitCount"], unjudgedBetCount: r["unjudgedBetCount"], allocationNote: r["allocationNote"], comment: r["comment"],
+    judgedBetCount: r["judgedBetCount"], hitCount: r["hitCount"], ...refund, unjudgedBetCount: r["unjudgedBetCount"], allocationNote: r["allocationNote"], comment: r["comment"],
   };
 }
 

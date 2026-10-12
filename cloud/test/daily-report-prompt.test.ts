@@ -31,11 +31,11 @@ function digests() {
 }
 /** 直前 27 日の定型の成績(Issue #272)。数字は明示する。 */
 const PRIOR_WHATIF = {
-  win: { betCount: 40, hitCount: 8, stake: 4000, payout: 3200, unjudgedCount: 2, inapplicableCount: 3 },
-  place: { betCount: 40, hitCount: 18, stake: 4000, payout: 4300, unjudgedCount: 2, inapplicableCount: 3 },
-  wide: { betCount: 30, hitCount: 5, stake: 3000, payout: 3900, unjudgedCount: 2, inapplicableCount: 13 },
-  quinella: { betCount: 30, hitCount: 3, stake: 3000, payout: 2100, unjudgedCount: 2, inapplicableCount: 13 },
-  trio: { betCount: 20, hitCount: 1, stake: 2000, payout: 6000, unjudgedCount: 2, inapplicableCount: 23 },
+  win: { betCount: 40, hitCount: 8, stake: 4000, payout: 3200, refundCount: 0, unjudgedCount: 2, inapplicableCount: 3 },
+  place: { betCount: 40, hitCount: 18, stake: 4000, payout: 4300, refundCount: 0, unjudgedCount: 2, inapplicableCount: 3 },
+  wide: { betCount: 30, hitCount: 5, stake: 3000, payout: 3900, refundCount: 0, unjudgedCount: 2, inapplicableCount: 13 },
+  quinella: { betCount: 30, hitCount: 3, stake: 3000, payout: 2100, refundCount: 0, unjudgedCount: 2, inapplicableCount: 13 },
+  trio: { betCount: 20, hitCount: 1, stake: 2000, payout: 6000, refundCount: 0, unjudgedCount: 2, inapplicableCount: 23 },
 };
 
 /** 期間の統計(直前 27 日)。数字は明示する(テストが期待値を手で書けるように)。 */
@@ -43,9 +43,9 @@ function period(over: Partial<PeriodStats> = {}): PeriodStats {
   return {
     fromDate: "20260913", toDate: "20261009", dayCount: 6,
     raceCount: 120, resultRaceCount: 118, noResultRaceCount: 2, betRaceCount: 110, llmUsedRaceCount: 100,
-    totalStake: 40000, totalReturn: 34000, recoveryRate: 0.85, judgedBetCount: 300, hitBetCount: 24, unjudgedBetCount: 3, unjudgedStake: 900,
+    totalStake: 40000, totalReturn: 34000, recoveryRate: 0.85, judgedBetCount: 300, hitBetCount: 24, refundedBetCount: 0, refundedStake: 0, unjudgedBetCount: 3, unjudgedStake: 900,
     expectedBetCount: 300, expectedHits: 21.5, expectedBaseHits: 24, maxPayout: 9000, maxPayoutStake: 300,
-    byBetType: { win: { betCount: 100, hitCount: 6, stake: 15000, payout: 12000, expectedBetCount: 100, expectedHits: 5.25, expectedBaseHits: 6 } },
+    byBetType: { win: { betCount: 100, hitCount: 6, stake: 15000, payout: 12000, refundCount: 0, expectedBetCount: 100, expectedHits: 5.25, expectedBaseHits: 6 } },
     byMark: [{ mark: "◎", count: 118, win: 30, top3: 70 }],
     whatIf: PRIOR_WHATIF,
     ...over,

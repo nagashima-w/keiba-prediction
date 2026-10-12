@@ -119,11 +119,11 @@ function buildPrior(s: { dayCount: number; races: number; judged: number; hits: 
   const results = s.races - 2;
   return fixturePriorStats({
     dayCount: s.dayCount, raceCount: s.races, resultRaceCount: results, noResultRaceCount: 2, betRaceCount: Math.round(s.races * 0.9), llmUsedRaceCount: s.races - 10,
-    totalStake: s.stake, totalReturn: s.ret, recoveryRate: s.ret / s.stake, judgedBetCount: s.judged, hitBetCount: s.hits, unjudgedBetCount: 2, unjudgedStake: 600,
+    totalStake: s.stake, totalReturn: s.ret, recoveryRate: s.ret / s.stake, judgedBetCount: s.judged, hitBetCount: s.hits, refundedBetCount: 0, refundedStake: 0, unjudgedBetCount: 2, unjudgedStake: 600,
     expectedBetCount: s.judged, expectedHits: s.expectedHits, expectedBaseHits: s.hits, maxPayout: s.maxPayout, maxPayoutStake: s.maxPayoutStake,
     byBetType: {
-      win: { betCount: winN, hitCount: winHits, stake: winStake, payout: winPay, expectedBetCount: winN, expectedHits: winExp, expectedBaseHits: winHits },
-      place: { betCount: placeN, hitCount: s.hits - winHits, stake: s.stake - winStake, payout: s.ret - winPay, expectedBetCount: placeN, expectedHits: s.expectedHits - winExp, expectedBaseHits: s.hits - winHits },
+      win: { betCount: winN, hitCount: winHits, stake: winStake, payout: winPay, refundCount: 0, expectedBetCount: winN, expectedHits: winExp, expectedBaseHits: winHits },
+      place: { betCount: placeN, hitCount: s.hits - winHits, stake: s.stake - winStake, payout: s.ret - winPay, refundCount: 0, expectedBetCount: placeN, expectedHits: s.expectedHits - winExp, expectedBaseHits: s.hits - winHits },
     },
     byMark: [
       { mark: "◎", count: results, win: Math.round(results * 0.27), top3: Math.round(results * 0.6) },

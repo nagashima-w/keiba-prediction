@@ -158,8 +158,8 @@ describe("buildDayStats", () => {
     const s = buildDayStats(digests());
     // Issue #264: 券種別に「見込みの的中数」(expectedBetCount・expectedHits)も持つ。この入力の買い目は odds 3・ev 1.1 なので、的中確率は 1.1 / 3。
     expect(s.byBetType).toStrictEqual({
-      win: { betCount: 1, hitCount: 1, stake: 200, payout: 800, expectedBetCount: 1, expectedHits: 1.1 / 3, expectedBaseHits: 1 },
-      place: { betCount: 1, hitCount: 0, stake: 100, payout: 0, expectedBetCount: 1, expectedHits: 1.1 / 3, expectedBaseHits: 0 },
+      win: { betCount: 1, hitCount: 1, stake: 200, payout: 800, refundCount: 0, expectedBetCount: 1, expectedHits: 1.1 / 3, expectedBaseHits: 1 },
+      place: { betCount: 1, hitCount: 0, stake: 100, payout: 0, refundCount: 0, expectedBetCount: 1, expectedHits: 1.1 / 3, expectedBaseHits: 0 },
     });
   });
 
@@ -385,8 +385,8 @@ describe("Issue #272: ダイジェストの定型の結果(templates)と統計�
     const noMark = buildRaceDigest(view("202605030802", [horse(1)]), FULL);
     const w = buildDayStats([hit, noResult, noMark]).whatIf!;
     // 前提: 3 つの状態(判定できた・判定不能・対象外)がそれぞれ 1 レースずつ
-    expect(w.win).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 450, unjudgedCount: 1, inapplicableCount: 1 });
-    expect(w.trio).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 5000, unjudgedCount: 1, inapplicableCount: 1 });
+    expect(w.win).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 450, refundCount: 0, unjudgedCount: 1, inapplicableCount: 1 });
+    expect(w.trio).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 5000, refundCount: 0, unjudgedCount: 1, inapplicableCount: 1 });
   });
 
   it("templates を持たないダイジェスト(デプロイをまたいだ旧形のジョブ)が 1 つでもあれば whatIf は null(旧形でも落ちない)", () => {
@@ -400,7 +400,7 @@ describe("Issue #272: ダイジェストの定型の結果(templates)と統計�
   it("mergeDayStats は whatIf を足す。片方が null なら null", () => {
     const a = buildDayStats([buildRaceDigest(view("202605030801", marked()), FULL)]);
     const b = buildDayStats([buildRaceDigest(view("202605030802", marked()), undefined)]);
-    expect(mergeDayStats(a, b).whatIf!.win).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 450, unjudgedCount: 1, inapplicableCount: 0 });
+    expect(mergeDayStats(a, b).whatIf!.win).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 450, refundCount: 0, unjudgedCount: 1, inapplicableCount: 0 });
     expect(mergeDayStats(a, { ...b, whatIf: null }).whatIf).toBeNull();
     expect(mergeDayStats({ ...a, whatIf: null }, b).whatIf).toBeNull();
   });

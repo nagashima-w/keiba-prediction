@@ -102,6 +102,30 @@ describe("buildPeriodStats(行 → 統計)", () => {
     expect(s.maxPayoutStake).toBe(200);
   });
 
+  it("Issue #278 返還: 行の scratched=true の馬への買い目は返還(賭け金・払戻・点数に含め、的中には入れない)。scratched が無い行(旧い行)の着順なしは従来どおりはずれ", () => {
+    const base = rows();
+    const withScratched = (scratched: boolean | undefined): PeriodRows => ({
+      ...base,
+      // R1 の 2 番(複勝の買い目 100 円。元は 5 着ではずれ)を、着順なしにして scratched を付け替える
+      results: base.results.map((r) => (r.raceId === "202605030801" && r.umaban === 2 ? { raceId: r.raceId, umaban: 2, finishPosition: null, winPayout: null, placePayout: null, ...(scratched === undefined ? {} : { scratched }) } : r)),
+    });
+    const refunded = buildPeriodStats(withScratched(true), RANGE);
+    expect(refunded.refundedBetCount).toBe(1);
+    expect(refunded.refundedStake).toBe(100);
+    expect(refunded.judgedBetCount).toBe(3); // 点数は変わらない(はずれ → 返還)
+    expect(refunded.hitBetCount).toBe(1);
+    expect(refunded.totalStake).toBe(600);
+    expect(refunded.totalReturn).toBe(900); // 的中 800 + 返還 100
+    expect(refunded.byBetType["place"]!.refundCount).toBe(1);
+    expect(refunded.expectedBetCount).toBe(2); // 返還は見込みに入れない(3 → 2)
+    // 対照: scratched が無い(旧い行)・false(中止など)は、はずれのまま
+    for (const flag of [undefined, false]) {
+      const s = buildPeriodStats(withScratched(flag), RANGE);
+      expect(s.refundedBetCount).toBe(0);
+      expect(s.totalReturn).toBe(800);
+    }
+  });
+
   it("印別は、結果のあるレースの頭数・1 着・3 着内(結果の無いレースの印は数えない)。着順に載っていない馬は数えない", () => {
     const s = buildPeriodStats(rows(), RANGE);
     expect(s.byMark).toEqual([
@@ -133,13 +157,13 @@ describe("buildPeriodStats(行 → 統計)", () => {
   it("Issue #272: 印の定型の買い方(whatIf)は、同じ行(印・結果・組合せ払戻・取込印)から作る。判定できた・判定不能・対象外が別々に数えられる", () => {
     const w = buildPeriodStats(rows(), RANGE).whatIf!;
     // R1(◎1 着・〇5 着・結果あり)・R2(◎のみ・結果なし)・R3(◎4 着・結果あり)。組合せ払戻の行は無い。
-    expect(w["win"]).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 400, unjudgedCount: 1, inapplicableCount: 0 });
-    expect(w["place"]).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 150, unjudgedCount: 1, inapplicableCount: 0 });
+    expect(w["win"]).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 400, refundCount: 0, unjudgedCount: 1, inapplicableCount: 0 });
+    expect(w["place"]).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 150, refundCount: 0, unjudgedCount: 1, inapplicableCount: 0 });
     // ワイド・馬連: R1 だけ◎〇が揃うが取込印が無く判定不能。R2・R3 は〇が無く対象外
-    expect(w["wide"]).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 1, inapplicableCount: 2 });
+    expect(w["wide"]).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, refundCount: 0, unjudgedCount: 1, inapplicableCount: 2 });
     expect(w["quinella"]).toEqual(w["wide"]);
     // 3 連複: ▲が無く 3 レースとも対象外
-    expect(w["trio"]).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 0, inapplicableCount: 3 });
+    expect(w["trio"]).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, refundCount: 0, unjudgedCount: 0, inapplicableCount: 3 });
   });
 
   it("Issue #272: 組合せ払戻と取込印があれば、ワイド・馬連・3 連複の型が的中として数えられる(別のレースの払戻は混ぜない)", () => {

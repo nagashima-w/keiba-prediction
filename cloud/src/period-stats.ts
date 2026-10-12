@@ -42,7 +42,15 @@ export interface PeriodRows {
   readonly bets: readonly { readonly analysisId: number; readonly betType: string; readonly comboKey: string; readonly stake: number; readonly odds: number | null; readonly ev: number | null }[];
   /** 印の付いた馬(`analysis_horses.mark` が NULL でない行)。 */
   readonly marks: readonly { readonly analysisId: number; readonly umaban: number; readonly mark: string }[];
-  readonly results: readonly { readonly raceId: string; readonly umaban: number; readonly finishPosition: number | null; readonly winPayout: number | null; readonly placePayout: number | null }[];
+  readonly results: readonly {
+    readonly raceId: string;
+    readonly umaban: number;
+    readonly finishPosition: number | null;
+    readonly winPayout: number | null;
+    readonly placePayout: number | null;
+    /** 取消・除外か(Issue #278。`race_results.scratched`。未記録の旧い行はキーが無い)。 */
+    readonly scratched?: boolean;
+  }[];
   readonly combos: readonly { readonly raceId: string; readonly betType: string; readonly comboKey: string; readonly payout: number }[];
   readonly imports: readonly { readonly raceId: string; readonly betType: string }[];
 }
@@ -78,7 +86,13 @@ function resultsByRace(rows: PeriodRows): Map<string, RaceResultData> {
   }
   const out = new Map<string, RaceResultData>();
   for (const [raceId, list] of horsesByRace) {
-    const horses: ResultHorse[] = list.map((r) => ({ umaban: r.umaban, finishPosition: r.finishPosition, winPayout: r.winPayout, placePayout: r.placePayout }));
+    const horses: ResultHorse[] = list.map((r) => ({
+      umaban: r.umaban,
+      finishPosition: r.finishPosition,
+      winPayout: r.winPayout,
+      placePayout: r.placePayout,
+      ...(r.scratched === undefined ? {} : { scratched: r.scratched }),
+    }));
     out.set(raceId, { horses, combos: (combosByRace.get(raceId) ?? {}) as Readonly<Record<string, ComboPayouts>> });
   }
   return out;

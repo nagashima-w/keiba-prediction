@@ -111,6 +111,38 @@ describe("契約: 本物の日報(DailyReportCore の出力)を、クライア�
     expect(detail.jobStatus).toBe("ok");
   });
 
+  it("Issue #278: 返還(取消・除外の馬への買い目)のある日報の項目が、サーバが書いたキー名のまま読める", async () => {
+    // 1R の◎1(単勝 300 円・ワイド 1-3 200 円の買い目)が取消・除外。単勝とワイド 1-3 は返還になる。
+    const inputs = fixtureRaceInputs();
+    const first = inputs[0]!;
+    inputs[0] = {
+      view: first.view,
+      result: {
+        horses: [
+          { umaban: 1, finishPosition: null, winPayout: null, placePayout: null, scratched: true },
+          { umaban: 2, finishPosition: 1, winPayout: 420, placePayout: 140, scratched: false },
+          { umaban: 3, finishPosition: 2, winPayout: null, placePayout: 210, scratched: false },
+          { umaban: 4, finishPosition: 3, winPayout: null, placePayout: 230, scratched: false },
+        ],
+        combos: { wide: { imported: true, payouts: [{ comboKey: "0203", payout: 900 }] }, quinella: { imported: false, payouts: [] } },
+      },
+    };
+    const record = await buildSavedRecord({ inputs });
+    // 前提(空振り防止): サーバが返還を実際に数えている
+    expect(record.body.stats.refundedBetCount).toBeGreaterThanOrEqual(3);
+    expect(record.body.stats.refundedStake).toBeGreaterThan(0);
+    expect(record.body.stats.byBetType["win"]!.refundCount).toBeGreaterThan(0);
+    expect(record.body.stats.whatIf!["win"]!.refundCount).toBeGreaterThan(0);
+    expect(record.body.races[0]!.refundedBetCount).toBe(record.body.stats.refundedBetCount);
+    const { fetch } = await connect(record, { status: null });
+    const detail = await fetchReport(fetch, FIXTURE_DATE);
+    if (!detail.ok || detail.report === null) throw new Error("日報が読めませんでした");
+    expect(detail.report.stats).toStrictEqual(record.body.stats);
+    expect(detail.report.rolling).toStrictEqual(record.body.rolling);
+    expect(detail.report.races[0]!.refundedBetCount).toBe(record.body.races[0]!.refundedBetCount);
+    expect(detail.report.stats.refundedBetCount).toBe(record.body.stats.refundedBetCount);
+  });
+
   it("Issue #272: 惜しかったレース(組合せ券種の型が的中したのに買っていない)が 1 件ある日報の nearMisses が、サーバが書いた値のまま読める", async () => {
     // 1R の◎1〇2▲3 が 1・2・3 着。ワイド 1-2(640 円)が出たが、実際に買ったのはワイド 1-3 と馬連 1-3 だけ。
     const inputs = fixtureRaceInputs();

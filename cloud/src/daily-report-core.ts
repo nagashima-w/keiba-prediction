@@ -154,6 +154,8 @@ export interface ReportRaceRow {
   readonly totalReturn: number;
   readonly judgedBetCount: number;
   readonly hitCount: number;
+  /** 判定できた買い目のうち返還(Issue #278。取消・除外の馬への買い目)の点数。`judgedBetCount`・`totalStake`・`totalReturn` に含まれる内訳で、`hitCount` には入らない。この項目を持つ前の日報には無い。 */
+  readonly refundedBetCount: number;
   readonly unjudgedBetCount: number;
   readonly allocationNote: string | null;
   /** LLM のレース別の一言。 */
@@ -525,6 +527,8 @@ export class DailyReportCore {
       totalReturn: d.totalReturn,
       judgedBetCount: d.judgedBetCount,
       hitCount: d.hitCount,
+      // 買い目の状態から数える(この項目を持つ前に積まれた、デプロイをまたいだジョブのダイジェストにも対応する)。
+      refundedBetCount: d.bets.filter((b) => b.status === "refund").length,
       unjudgedBetCount: d.unjudgedBetCount,
       allocationNote: d.allocationNote,
       comment: comments.get(d.raceId) ?? null,

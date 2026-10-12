@@ -25,14 +25,16 @@ export interface TemplateStatLike {
   readonly payout: number;
   readonly unjudgedCount: number;
   readonly inapplicableCount: number;
+  /** 判定できたレースのうち返還(取消・除外の馬を含む型。Issue #278)のレース数。`betCount` に含まれる内訳。無い(この項目を持つ前の日報)・0 なら添えない。 */
+  readonly refundCount?: number;
 }
 
 /**
  * 型 1 つ分の成績の文。判定できたレースが無ければ回収率を出さない(賭け金 0)。判定不能・対象外は、あるときだけ添える(成績には含めない)。
- * 例: `判定できた 38 レース中 7 的中・賭け金 3,800円・払戻 3,150円・回収率 82.9%(判定不能 2 レース・対象外 5 レース)`
+ * 例: `判定できた 38 レース中 7 的中・賭け金 3,800円・払戻 3,150円・回収率 82.9%(判定不能 2 レース・対象外 5 レース)`。返還があれば `7 的中(うち返還 3 レース)・賭け金…`(Issue #278)
  */
 export function formatTemplateStat(s: TemplateStatLike, yen: (n: number) => string): string {
-  const head = s.betCount === 0 ? "判定できたレースなし" : `判定できた ${s.betCount} レース中 ${s.hitCount} 的中・賭け金 ${yen(s.stake)}・払戻 ${yen(s.payout)}・回収率 ${formatRecoveryPercent(s.payout / s.stake)}`;
+  const head = s.betCount === 0 ? "判定できたレースなし" : `判定できた ${s.betCount} レース中 ${s.hitCount} 的中${s.refundCount !== undefined && s.refundCount > 0 ? `(うち返還 ${s.refundCount} レース)` : ""}・賭け金 ${yen(s.stake)}・払戻 ${yen(s.payout)}・回収率 ${formatRecoveryPercent(s.payout / s.stake)}`;
   const rest = [s.unjudgedCount > 0 ? `判定不能 ${s.unjudgedCount} レース` : null, s.inapplicableCount > 0 ? `対象外 ${s.inapplicableCount} レース` : null].filter((t): t is string => t !== null);
   return rest.length === 0 ? head : `${head}(${rest.join("・")})`;
 }

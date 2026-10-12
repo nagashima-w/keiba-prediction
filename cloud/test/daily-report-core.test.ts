@@ -937,7 +937,7 @@ describe("Issue #272: 日報の「もしも」(印の定型の買い方と惜し
     });
   }
   const priorWithWhatIf = (): PeriodStats => {
-    const zero = { betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 0, inapplicableCount: 0 };
+    const zero = { betCount: 0, hitCount: 0, stake: 0, payout: 0, refundCount: 0, unjudgedCount: 0, inapplicableCount: 0 };
     return priorStats({ whatIf: { win: { ...zero, betCount: 40, hitCount: 8, stake: 4000, payout: 3200 }, place: zero, wide: zero, quinella: zero, trio: zero } });
   };
 
@@ -949,11 +949,11 @@ describe("Issue #272: 日報の「もしも」(印の定型の買い方と惜し
     await h.drain();
     const body = h.saved[0]!.body;
     // その日: 3 レースとも◎が 1 着(単勝 350 円)。ワイドは R1 だけ組合せ払戻があり的中、R2・R3 は取込印なしで判定不能
-    expect(body.stats.whatIf!["win"]).toEqual({ betCount: 3, hitCount: 3, stake: 300, payout: 1050, unjudgedCount: 0, inapplicableCount: 0 });
-    expect(body.stats.whatIf!["wide"]).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 800, unjudgedCount: 2, inapplicableCount: 0 });
-    expect(body.stats.whatIf!["trio"]).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 0, inapplicableCount: 3 });
+    expect(body.stats.whatIf!["win"]).toEqual({ betCount: 3, hitCount: 3, stake: 300, payout: 1050, refundCount: 0, unjudgedCount: 0, inapplicableCount: 0 });
+    expect(body.stats.whatIf!["wide"]).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 800, refundCount: 0, unjudgedCount: 2, inapplicableCount: 0 });
+    expect(body.stats.whatIf!["trio"]).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, refundCount: 0, unjudgedCount: 0, inapplicableCount: 3 });
     // 累計 = 直前 27 日(40 点・8 的中)+ その日(3 点・3 的中)
-    expect(body.rolling!.total.whatIf!["win"]).toEqual({ betCount: 43, hitCount: 11, stake: 4300, payout: 4250, unjudgedCount: 0, inapplicableCount: 0 });
+    expect(body.rolling!.total.whatIf!["win"]).toEqual({ betCount: 43, hitCount: 11, stake: 4300, payout: 4250, refundCount: 0, unjudgedCount: 0, inapplicableCount: 0 });
     expect(body.nearMisses).toEqual({ total: 1, shown: [{ raceId: raceIdOf(1), templateId: "wide", payout: 800 }] });
   });
 
@@ -969,7 +969,7 @@ describe("Issue #272: 日報の「もしも」(印の定型の買い方と惜し
     expect(h.prompts[0]).toContain(`${raceIdOf(1)}`);
     expect(h.prompts[0]).toContain("◎-〇ワイドが的中していた(定型の払戻 800円)・実際の買い目: 賭け金 200円・払戻 700円");
     expect(h.prompts[0]!.split("\n").filter((l) => l.includes("「もしも」(印の定型の買い方)の成績は"))).toHaveLength(1);
-    expect(h.saved[0]!.body.promptVersion).toBe("report-2026-10-12.1");
+    expect(h.saved[0]!.body.promptVersion).toBe("report-2026-10-12.2");
   });
 
   it("Discord の要約に、『もしも』と『惜しかったレース』の field が出る(レース名つき)", async () => {
@@ -1280,5 +1280,52 @@ describe("Issue #268: 管理者による日報の作り直し(mode: regenerate)"
       expect(job.record).toBeNull();
       expect(job.calls).toEqual([]);
     });
+  });
+});
+
+describe("Issue #278: 日報の返還(取消・除外の馬への買い目)", () => {
+  /** R1 を、◎の 1 番(単勝 200 円)が取消・除外のレースに差し替える。 */
+  function scratchedRace(h: Harness): void {
+    const base = raceInput(1);
+    h.state.inputs.set(101, {
+      view: base.view,
+      result: { horses: [{ umaban: 1, finishPosition: null, winPayout: null, placePayout: null, scratched: true }, { umaban: 2, finishPosition: 1, winPayout: 350, placePayout: 130, scratched: false }, { umaban: 3, finishPosition: 2, winPayout: null, placePayout: 150, scratched: false }], combos: {} },
+    });
+  }
+
+  it("取消の馬への買い目は返還として、日報の本文(レース行・統計・券種別・もしも)・LLM のプロンプト・版・Discord に出る", async () => {
+    const h = harness({ raceCount: 3 });
+    scratchedRace(h);
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    const body = h.saved[0]!.body;
+    const row = body.races.find((r) => r.raceId === raceIdOf(1))!;
+    expect(row).toMatchObject({ judgedBetCount: 1, hitCount: 0, refundedBetCount: 1, totalStake: 200, totalReturn: 200 });
+    expect(body.races.filter((r) => r.raceId !== raceIdOf(1)).every((r) => r.refundedBetCount === 0)).toBe(true);
+    expect(body.stats.refundedBetCount).toBe(1);
+    expect(body.stats.refundedStake).toBe(200);
+    expect(body.stats.byBetType["win"]!.refundCount).toBe(1);
+    expect(body.rolling!.total.refundedBetCount).toBe(1); // 直前 27 日(偽)は返還なし + その日の 1 点
+    expect(body.stats.whatIf!["win"]!.refundCount).toBe(1); // ◎が取消の型(単勝)は返還
+    expect(h.prompts[0]).toContain("→ 返還 200円");
+    expect(h.prompts[0]).toContain("取消・除外");
+    expect(body.promptVersion).toBe(REPORT_PROMPT_VERSION);
+    const fields = (h.sent[0]!.embeds![0]! as { fields?: Array<{ name: string; value: string }> }).fields!;
+    expect(fields.find((f) => f.name === "成績")!.value).toContain("うち返還 1 点");
+  });
+
+  it("デプロイをまたいだ旧形のジョブ(rolling に返還の項目が無い)でも、落ちずに確定する", async () => {
+    const h = harness({ raceCount: 3 });
+    scratchedRace(h);
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.step();
+    await h.step();
+    const key = `job:${DATE}`;
+    const job = h.kv.data.get(key) as { phase: string; digests: Array<{ refundedBetCount?: number; refundedStake?: number }> };
+    expect(job.phase).toBe("generate");
+    h.kv.put(key, { ...job, digests: job.digests.map(({ refundedBetCount: _c, refundedStake: _s, ...rest }) => rest) });
+    await h.drain();
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0]!.body.stats.refundedBetCount).toBe(1); // 件数は買い目(status)から数え直すので、旧形のダイジェストでも同じ
   });
 });

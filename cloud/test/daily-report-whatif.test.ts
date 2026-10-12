@@ -166,10 +166,10 @@ describe("buildWhatIfStats: 集計", () => {
       { templates: FIVE({ win: o("win", "miss"), place: o("place", "hit", 150), wide: o("wide", "hit", 800) }) },
       { templates: FIVE({}) },
     ])!;
-    expect(stats.win).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 450, unjudgedCount: 0, inapplicableCount: 1 });
-    expect(stats.place).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 150, unjudgedCount: 0, inapplicableCount: 1 });
-    expect(stats.wide).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 800, unjudgedCount: 1, inapplicableCount: 1 });
-    expect(stats.trio).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 0, inapplicableCount: 3 });
+    expect(stats.win).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 450, refundCount: 0, unjudgedCount: 0, inapplicableCount: 1 });
+    expect(stats.place).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 150, refundCount: 0, unjudgedCount: 0, inapplicableCount: 1 });
+    expect(stats.wide).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 800, refundCount: 0, unjudgedCount: 1, inapplicableCount: 1 });
+    expect(stats.trio).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, refundCount: 0, unjudgedCount: 0, inapplicableCount: 3 });
     // 5 型ぜんぶ必ず載る(形が固定)
     expect(Object.keys(stats)).toEqual(["win", "place", "wide", "quinella", "trio"]);
   });
@@ -191,8 +191,8 @@ describe("mergeWhatIfStats: 合算", () => {
 
   it("全項目を足す(率ではなく件数・金額を足す)", () => {
     const m = mergeWhatIfStats(a, b)!;
-    expect(m.win).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 450, unjudgedCount: 0, inapplicableCount: 0 });
-    expect(m.trio).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 1, inapplicableCount: 1 });
+    expect(m.win).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 450, refundCount: 0, unjudgedCount: 0, inapplicableCount: 0 });
+    expect(m.trio).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, refundCount: 0, unjudgedCount: 1, inapplicableCount: 1 });
   });
 
   it("片方が null なら null(欠けた分だけ小さい累計を作らない)", () => {

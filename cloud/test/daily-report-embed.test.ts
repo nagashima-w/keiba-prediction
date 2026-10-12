@@ -247,7 +247,7 @@ describe("Issue #264 デプロイをまたぐジョブ: 旧コードが作った
 });
 
 describe("Issue #272: 印の定型の買い方(もしも)と惜しかったレース", () => {
-  const stat = (betCount: number, hitCount: number, payout: number, over: Record<string, number> = {}) => ({ betCount, hitCount, stake: betCount * 100, payout, unjudgedCount: 0, inapplicableCount: 0, ...over });
+  const stat = (betCount: number, hitCount: number, payout: number, over: Record<string, number> = {}) => ({ betCount, hitCount, stake: betCount * 100, payout, refundCount: 0, unjudgedCount: 0, inapplicableCount: 0, ...over });
   const DAY = { win: stat(10, 2, 1500), place: stat(10, 5, 1100), wide: stat(4, 0, 0, { inapplicableCount: 6 }), quinella: stat(4, 1, 2400), trio: stat(0, 0, 0, { inapplicableCount: 10 }) };
   const TOTAL = { win: stat(41, 9, 3550), place: stat(40, 20, 4000), wide: stat(30, 5, 3900), quinella: stat(30, 3, 2100), trio: stat(20, 1, 6000) };
   const rolling = (): RollingSummary => {

@@ -58,10 +58,14 @@ function profitWord(recoveryRate: number): string {
   return "(赤字)";
 }
 
-/** 『N 点中 M 点的中』に、見込みを導けるときは『(見込み X.XX 点・実際 Y 点)』を添える。 */
+/**
+ * 『N 点中 M 点的中』に、返還があるときは『うち返還 K 点』(Issue #278。項目が無い旧形・0 点なら添えない)、見込みを導けるときは『見込み X.XX 点・実際 Y 点』を、1 つの括弧に添える。
+ * 返還は N には含まれ、M には含まれない。
+ */
 function hitText(s: DayStats): string {
   const expected = formatExpectedHits(s);
-  return `${s.judgedBetCount} 点中 ${s.hitBetCount} 点的中${expected === null ? "" : `(${expected})`}`;
+  const parts = [(s.refundedBetCount ?? 0) > 0 ? `うち返還 ${s.refundedBetCount} 点` : null, expected].filter((t): t is string => t !== null);
+  return `${s.judgedBetCount} 点中 ${s.hitBetCount} 点的中${parts.length === 0 ? "" : `(${parts.join("・")})`}`;
 }
 
 export function buildReportEmbed(input: ReportEmbedInput): CloudEmbed {

@@ -33,6 +33,8 @@ export interface DigestHorse {
   readonly isPositive: boolean;
   /** 実着順(結果が無い・着順が空の馬は null)。 */
   readonly finishPosition: number | null;
+  /** 取消・除外の馬(Issue #278。`race_results.scratched` が true)のとき true。それ以外はキーが無い(着順が null でも中止・未記録は付けない)。 */
+  readonly scratched?: true;
   readonly reason: string | null;
   readonly highlights: readonly string[];
   readonly concerns: readonly string[];
@@ -63,11 +65,16 @@ export interface RaceDigest {
   readonly bets: readonly BetOutcome[];
   /** 買い目が無い理由(配分が見送りだったとき `買い目なし(見送り: <理由コード>)`)。配分の行が無い・買い目があるときは null。 */
   readonly allocationNote: string | null;
-  /** 判定できた買い目の賭け金・払戻(円)・点数・的中数。 */
+  /**
+   * 判定できた買い目の賭け金・払戻(円)・点数・的中数。**返還(Issue #278。取消・除外の馬への買い目)は判定できた側**に入れる(点数・賭け金・払戻。払戻 = 賭け金)が、的中数には入れない。
+   */
   readonly totalStake: number;
   readonly totalReturn: number;
   readonly judgedBetCount: number;
   readonly hitCount: number;
+  /** 判定できた買い目のうち返還の点数と賭け金(Issue #278。`judgedBetCount`・`totalStake` に含まれる内訳)。 */
+  readonly refundedBetCount: number;
+  readonly refundedStake: number;
   /** 判定不能の買い目の賭け金・点数。 */
   readonly unjudgedStake: number;
   readonly unjudgedBetCount: number;
@@ -105,6 +112,7 @@ export function buildRaceDigest(view: AnalysisView, result: RaceResultData | und
     }
   }
   const nameByUmaban = new Map(view.horses.map((h) => [h.umaban, h.name] as const));
+  const scratchedUmabans = new Set((result?.horses ?? []).filter((h) => h.scratched === true).map((h) => h.umaban));
 
   let picked = view.horses.filter((h) => h.mark !== null || h.isPositive);
   if (picked.length === 0) {
@@ -121,6 +129,7 @@ export function buildRaceDigest(view: AnalysisView, result: RaceResultData | und
       ev: h.ev,
       isPositive: h.isPositive,
       finishPosition: finishByUmaban.get(h.umaban) ?? null,
+      ...(scratchedUmabans.has(h.umaban) ? { scratched: true as const } : {}),
       reason: h.reason === null || h.reason === "" ? null : cut(h.reason, REASON_MAX_CHARS),
       highlights: h.highlights.slice(0, ITEM_MAX_COUNT).map((s) => cut(s, ITEM_MAX_CHARS)),
       concerns: h.concerns.slice(0, ITEM_MAX_COUNT).map((s) => cut(s, ITEM_MAX_CHARS)),
@@ -139,6 +148,7 @@ export function buildRaceDigest(view: AnalysisView, result: RaceResultData | und
     result,
   );
   const judged = bets.filter((b) => b.status !== "unjudged");
+  const refunded = bets.filter((b) => b.status === "refund");
   const unjudged = bets.filter((b) => b.status === "unjudged");
   const allocation = view.allocation;
   return {
@@ -161,6 +171,8 @@ export function buildRaceDigest(view: AnalysisView, result: RaceResultData | und
     totalReturn: judged.reduce((s, b) => s + b.payout, 0),
     judgedBetCount: judged.length,
     hitCount: judged.filter((b) => b.status === "hit").length,
+    refundedBetCount: refunded.length,
+    refundedStake: refunded.reduce((s, b) => s + b.stake, 0),
     unjudgedStake: unjudged.reduce((s, b) => s + b.stake, 0),
     unjudgedBetCount: unjudged.length,
     templates,
@@ -172,7 +184,11 @@ export interface BetTypeStat {
   readonly hitCount: number;
   readonly stake: number;
   readonly payout: number;
-  /** 判定できた買い目のうち、分析時点の的中確率(`betHitProb`)を導けたものの点数(Issue #264)。 */
+  /** 判定できた買い目のうち返還(Issue #278。取消・除外の馬への買い目)の点数。`betCount`・`stake`・`payout` に含まれる内訳で、`hitCount` には入らない。 */
+  readonly refundCount: number;
+  /**
+   * 判定できた買い目のうち、分析時点の的中確率(`betHitProb`)を導けたものの点数(Issue #264)。**返還は入れない**(出走して的中する確率の対象外。Issue #278)。
+   */
   readonly expectedBetCount: number;
   /** 見込みの的中数: 上の点数それぞれの的中確率の合計(Issue #264)。実際の `hitCount` と並べて「当たる頻度が見込みどおりか」を見る。 */
   readonly expectedHits: number;
@@ -200,11 +216,17 @@ export interface DayStats {
   readonly recoveryRate: number | null;
   readonly judgedBetCount: number;
   readonly hitBetCount: number;
+  /**
+   * 判定できた買い目のうち返還(Issue #278。取消・除外の馬を構成に含む買い目)の点数と賭け金。`judgedBetCount`・`totalStake` に含まれる内訳(払戻にも同額が含まれる)で、`hitBetCount` には入らない。
+   * **この項目を持つ前の日報の統計には無い**(読む側は無いものを 0 とみなさず、何も出さない)。
+   */
+  readonly refundedBetCount: number;
+  readonly refundedStake: number;
   readonly unjudgedBetCount: number;
   readonly unjudgedStake: number;
   /**
    * 判定できた買い目のうち、分析時点の的中確率を導けたものの点数と、その確率の合計(見込みの的中数。Issue #264)。
-   * **判定不能の買い目は入れない**(実際の的中数と分母をそろえる)。導けない買い目〈ev・odds が無い等〉があると `expectedBetCount < judgedBetCount` になる。
+   * **判定不能の買い目と返還は入れない**(実際の的中数と分母をそろえる。返還は出走して的中する確率の対象外〈Issue #278〉)。導けない買い目〈ev・odds が無い等〉や返還があると `expectedBetCount < judgedBetCount` になる。
    */
   readonly expectedBetCount: number;
   readonly expectedHits: number;
@@ -242,12 +264,14 @@ function topBetOf(a: { payout: number; stake: number }, b: { payout: number; sta
 }
 
 export function buildStatsFromRaces(races: readonly StatsRace[]): DayStats {
-  const byBetType = new Map<string, { betCount: number; hitCount: number; stake: number; payout: number; expectedBetCount: number; expectedHits: number; expectedBaseHits: number }>();
+  const byBetType = new Map<string, { betCount: number; hitCount: number; stake: number; payout: number; refundCount: number; expectedBetCount: number; expectedHits: number; expectedBaseHits: number }>();
   const byMark = new Map<string, { count: number; win: number; top3: number }>();
   let totalStake = 0;
   let totalReturn = 0;
   let judgedBetCount = 0;
   let hitBetCount = 0;
+  let refundedBetCount = 0;
+  let refundedStake = 0;
   let unjudgedBetCount = 0;
   let unjudgedStake = 0;
   let expectedBetCount = 0;
@@ -269,11 +293,19 @@ export function buildStatsFromRaces(races: readonly StatsRace[]): DayStats {
       if (hit) {
         top = topBetOf(top, { payout: b.payout, stake: b.stake });
       }
-      const stat = byBetType.get(b.betType) ?? { betCount: 0, hitCount: 0, stake: 0, payout: 0, expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0 };
+      const stat = byBetType.get(b.betType) ?? { betCount: 0, hitCount: 0, stake: 0, payout: 0, refundCount: 0, expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0 };
       stat.betCount += 1;
       stat.hitCount += hit ? 1 : 0;
       stat.stake += b.stake;
       stat.payout += b.payout;
+      if (b.status === "refund") {
+        // 返還(Issue #278): 点数・賭け金・払戻には数えるが、的中数と見込みの的中数(出走して的中する確率)には入れない。
+        refundedBetCount += 1;
+        refundedStake += b.stake;
+        stat.refundCount += 1;
+        byBetType.set(b.betType, stat);
+        continue;
+      }
       const prob = betHitProb(b.odds, b.ev);
       if (prob !== null) {
         stat.expectedBetCount += 1;
@@ -310,6 +342,8 @@ export function buildStatsFromRaces(races: readonly StatsRace[]): DayStats {
     recoveryRate: totalStake === 0 ? null : totalReturn / totalStake,
     judgedBetCount,
     hitBetCount,
+    refundedBetCount,
+    refundedStake,
     unjudgedBetCount,
     unjudgedStake,
     expectedBetCount,
@@ -349,6 +383,8 @@ export function mergeDayStats(a: DayStats, b: DayStats): DayStats {
       hitCount: (x?.hitCount ?? 0) + (y?.hitCount ?? 0),
       stake: (x?.stake ?? 0) + (y?.stake ?? 0),
       payout: (x?.payout ?? 0) + (y?.payout ?? 0),
+      // 旧形(この項目を持つ前に永続化された統計)では欠けるので 0 として足す(NaN にしない)。
+      refundCount: (x?.refundCount ?? 0) + (y?.refundCount ?? 0),
       expectedBetCount: (x?.expectedBetCount ?? 0) + (y?.expectedBetCount ?? 0),
       expectedHits: (x?.expectedHits ?? 0) + (y?.expectedHits ?? 0),
       expectedBaseHits: (x?.expectedBaseHits ?? 0) + (y?.expectedBaseHits ?? 0),
@@ -373,6 +409,8 @@ export function mergeDayStats(a: DayStats, b: DayStats): DayStats {
     recoveryRate: totalStake === 0 ? null : totalReturn / totalStake,
     judgedBetCount: a.judgedBetCount + b.judgedBetCount,
     hitBetCount: a.hitBetCount + b.hitBetCount,
+    refundedBetCount: (a.refundedBetCount ?? 0) + (b.refundedBetCount ?? 0),
+    refundedStake: (a.refundedStake ?? 0) + (b.refundedStake ?? 0),
     unjudgedBetCount: a.unjudgedBetCount + b.unjudgedBetCount,
     unjudgedStake: a.unjudgedStake + b.unjudgedStake,
     expectedBetCount: a.expectedBetCount + b.expectedBetCount,

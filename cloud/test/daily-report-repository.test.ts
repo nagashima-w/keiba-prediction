@@ -281,9 +281,47 @@ describe("D1ReportSource.readPeriodStats(Issue #264)", () => {
     expect(Object.keys(byBetType).sort()).toEqual(Object.keys(dayTypes).sort());
     for (const [type, t] of Object.entries(dayTypes)) {
       const { expectedHits: h, ...r } = byBetType[type]!;
-      expect(r).toStrictEqual({ betCount: t.betCount, hitCount: t.hitCount, stake: t.stake, payout: t.payout, expectedBetCount: t.expectedBetCount, expectedBaseHits: t.expectedBaseHits });
+      expect(r).toStrictEqual({ betCount: t.betCount, hitCount: t.hitCount, stake: t.stake, payout: t.payout, refundCount: t.refundCount, expectedBetCount: t.expectedBetCount, expectedBaseHits: t.expectedBaseHits });
       expect(h).toBeCloseTo(t.expectedHits, 12);
     }
+  });
+
+  it("Issue #278 返還: race_results.scratched を、日報の経路(readRaces)も期間の再集計(readPeriodRows)も読み、同じ統計(返還を含む)を返す。NULL(旧い行)は返還にしない", async () => {
+    const a = analyses();
+    // R1: 2 番が取消(scratched=1)。単勝 02・ワイド 0102 は返還、単勝 01 は的中。
+    const r1 = await a.saveAnalysis(rec(1, DATE, "2026-10-10T04:00:00.000Z", [["win", "01", 300, 4, 1.2], ["win", "02", 200, 5, 1.1], ["wide", "0102", 100, 6, 1.1]]));
+    // R2: 2 番は着順なしだが scratched が NULL(旧い行)。単勝 02 は従来どおりはずれ。
+    const r2 = await a.saveAnalysis(rec(2, DATE, "2026-10-10T04:30:00.000Z", [["win", "02", 400, 5, 1.5]]));
+    const results = new D1ResultStore({ db: local.db });
+    const entries = (rows: Array<[number, number | null, number | null, number | null, boolean?]>) =>
+      rows.map(([umaban, finishPosition, winPayout, placePayout, scratched]) => ({ umaban, finishPosition, winPayout, placePayout, ...(scratched === true ? { scratched: true } : {}) }));
+    await results.saveResult(raceIdOf(1), entries([[1, 1, 450, 150], [2, null, null, null, true], [3, 3, null, 210]]), "芝", { wide: { state: "parsed", payouts: [{ umabans: [1, 3], payout: 900 }] } });
+    await results.saveResult(raceIdOf(2), entries([[1, 1, 450, 150], [2, null, null, null], [3, 3, null, 210]]), "芝", {});
+    await local.db.prepare("UPDATE race_results SET scratched = NULL WHERE race_id = ?").bind(raceIdOf(2)).run(); // 旧い行(migration 0013 より前に保存)
+    const col = await local.db.prepare("SELECT race_id AS raceId, umaban, scratched FROM race_results WHERE umaban = 2 ORDER BY race_id").all<{ raceId: string; umaban: number; scratched: number | null }>();
+    expect(col.results.map((r) => r.scratched)).toEqual([1, null]); // 前提: 取消(1)と未記録(NULL)の両方が D1 にある
+
+    const refs = [r1, r2].map((x, i) => ({ raceId: raceIdOf(i + 1), analysisId: x.id }));
+    const inputs = await source().readRaces(refs);
+    expect(inputs[0]!.result!.horses.find((h) => h.umaban === 2)!.scratched).toBe(true);
+    expect(inputs[0]!.result!.horses.find((h) => h.umaban === 1)!.scratched).toBe(false);
+    expect("scratched" in inputs[1]!.result!.horses.find((h) => h.umaban === 2)!).toBe(false); // NULL はキーを付けない
+    const day = buildDayStats(inputs.map((i) => buildRaceDigest(i!.view, i!.result)));
+    expect(day.refundedBetCount).toBe(2);
+    expect(day.refundedStake).toBe(300);
+    expect(day.judgedBetCount).toBe(4);
+    expect(day.totalStake).toBe(300 + 200 + 100 + 400);
+    expect(day.totalReturn).toBe(1350 + 200 + 100); // 的中 450×3 + 返還 200 + 返還 100(R2 の単勝 02 は旧い行なのではずれ)
+
+    const { rows } = await source().readPeriodRows(DATE, DATE);
+    expect(rows.results.filter((r) => r.umaban === 2).map((r) => r.scratched)).toEqual([true, undefined]);
+    const period = await source().readPeriodStats(DATE, DATE);
+    expect(period.refundedBetCount).toBe(day.refundedBetCount);
+    expect(period.refundedStake).toBe(day.refundedStake);
+    expect(period.totalStake).toBe(day.totalStake);
+    expect(period.totalReturn).toBe(day.totalReturn);
+    expect(period.byBetType["win"]!.refundCount).toBe(1);
+    expect(period.byBetType["wide"]!.refundCount).toBe(1);
   });
 
   it("範囲は両端を含む開催日。範囲外の日・開催日 NULL の分析は入らない。開催の無い日は dayCount に数えない", async () => {
@@ -398,6 +436,7 @@ describe("D1ReportSource.readPeriodStats(Issue #264)", () => {
       expect(rows.imports).toHaveLength(races * 3);
       // 実測(ローカルの workerd。このテストで再現できる): 300 レースで 30,001 行、1000 レースで 100,001 行 = 1 レースあたり約 100 行(レース数に比例。二乗では増えない)。
       // 内訳の目安: 返す行 38(レース 1・買い目 5・印 6・結果 14・組合せ払戻 9・取込印 3)+ 印の無い馬 8 + 最新の分析の選別と結合。本番の D1 の数え方がローカルと同じとは限らない。
+      // Issue #278: 結果の SQL に scratched 列を足しても rows_read は変わらない(同じ行の列を足すだけ)。足す前も後も 300 レースで 30,001 行・1000 レースで 100,001 行(このテストの seed で測った)。
       // 1000 レース(上限の 1/3)でも約 10 万行 = Free の 1 日 500 万行の約 2%。日報は 1 日 1 回。
       expect(rowsRead).toBeGreaterThan(races * 40); // 計測が働いている(各表の行を実際に走査している)
       expect(rowsRead).toBeLessThanOrEqual(races * 120); // 実測 100 行/レースに 2 割の余裕。二乗に増える書き方(結合の取り違え)になれば超える

@@ -9,8 +9,11 @@
  * ## 型は固定
  * 後知恵にならないよう、型の一覧は {@link MARK_TEMPLATES} で固定し、日によって変えない。id は券種名と同じ。同じ券種の型を足すときは別の id を付ける。
  *
- * ## 既知の限界
- * ◎が取消・除外の馬でも「はずれ」になる(日報の `judgeBets` は `race_results.scratched` を読まない。実際の買い目と同じ扱い)。
+ * ## 返還(Issue #278)
+ * 型を構成する印の馬(◎に限らず、〇・▲を含む型なら〇・▲も)が取消・除外なら、`judgeBets` が返還にする(#72 の検証画面・日報の実際の買い目と同じ規則)。
+ * 返還は **点数・賭け金・払戻(各 100 円)に含め**、内訳として `refundCount` に数える。的中数には入れない。
+ * 実際に買っていれば賭け金が戻るので、実際の買い目と回収率の扱いをそろえる(除外すると同じ日報の中で扱いが食い違う)。
+ * 旧い行(`scratched` が未記録)の着順なしは、取消か中止か分からないので従来どおりはずれ(#270 で補完するまで)。
  */
 import { judgeBets, unorderedComboKey, type DayBet, type RaceResultData } from "./daily-report-bets";
 
@@ -40,9 +43,9 @@ const NEAR_MISS_IDS: ReadonlySet<string> = new Set(["wide", "quinella", "trio"])
 /** 惜しかったレースを出す最大件数(1 日分)。 */
 export const NEAR_MISS_LIMIT = 3;
 
-export type TemplateStatus = "hit" | "miss" | "unjudged" | "inapplicable";
+export type TemplateStatus = "hit" | "miss" | "refund" | "unjudged" | "inapplicable";
 
-/** 1 レースの 1 型の結果。`payout` は円(賭け金 100 円あたり。的中以外は 0)。`bought` は的中した型と同じ券種・同じ組合せが実際の買い目にあったとき true(それ以外は付けない)。 */
+/** 1 レースの 1 型の結果。`payout` は円(賭け金 100 円あたり。的中は払戻、返還は賭け金 100 円、はずれ・判定不能・対象外は 0)。`bought` は的中した型と同じ券種・同じ組合せが実際の買い目にあったとき true(それ以外は付けない)。 */
 export interface TemplateOutcome {
   readonly id: string;
   readonly status: TemplateStatus;
@@ -82,6 +85,9 @@ export function evaluateTemplates(marks: readonly MarkedHorse[], actualBets: rea
       return { id: template.id, status: "inapplicable", payout: 0 };
     }
     const outcome = judged[next++]!;
+    if (outcome.status === "refund") {
+      return { id: template.id, status: "refund", payout: outcome.payout };
+    }
     if (outcome.status !== "hit") {
       return { id: template.id, status: outcome.status === "miss" ? "miss" : "unjudged", payout: 0 };
     }
@@ -93,11 +99,13 @@ export function evaluateTemplates(marks: readonly MarkedHorse[], actualBets: rea
 // ---- 集計 ----
 
 export interface TemplateStat {
-  /** 判定できた点数(的中 + はずれ)。賭け金 = 点数 × 100 円。 */
+  /** 判定できた点数(的中 + はずれ + 返還)。賭け金 = 点数 × 100 円。 */
   readonly betCount: number;
   readonly hitCount: number;
   readonly stake: number;
   readonly payout: number;
+  /** 判定できた点数のうち返還(取消・除外の馬を構成に含む。Issue #278)のレース数。`betCount`・`stake`・`payout` に含まれる内訳で、`hitCount` には入らない。 */
+  readonly refundCount: number;
   /** 判定不能(買うはずだったが結果・取込印・払戻が無い)のレース数。成績に入れない。 */
   readonly unjudgedCount: number;
   /** 対象外(必要な印が無い)のレース数。成績に入れない。 */
@@ -112,7 +120,7 @@ export interface TemplateRace {
   readonly templates?: readonly TemplateOutcome[];
 }
 
-const ZERO: TemplateStat = { betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 0, inapplicableCount: 0 };
+const ZERO: TemplateStat = { betCount: 0, hitCount: 0, stake: 0, payout: 0, refundCount: 0, unjudgedCount: 0, inapplicableCount: 0 };
 
 /** 型ごとの成績。1 レースでも `templates` が無ければ null(一部のレースだけの集計を、全体の成績として返さない)。 */
 export function buildWhatIfStats(races: readonly TemplateRace[]): WhatIfStats | null {
@@ -135,6 +143,7 @@ export function buildWhatIfStats(races: readonly TemplateRace[]): WhatIfStats | 
         s.stake += TEMPLATE_STAKE;
         s.payout += out.payout;
         s.hitCount += out.status === "hit" ? 1 : 0;
+        s.refundCount += out.status === "refund" ? 1 : 0;
       }
     }
   }
@@ -157,6 +166,8 @@ export function mergeWhatIfStats(a: WhatIfStats | null, b: WhatIfStats | null): 
           hitCount: x.hitCount + y.hitCount,
           stake: x.stake + y.stake,
           payout: x.payout + y.payout,
+          // 旧形(この項目を持つ前に永続化された統計)では欠けるので 0 として足す。
+          refundCount: (x.refundCount ?? 0) + (y.refundCount ?? 0),
           unjudgedCount: x.unjudgedCount + y.unjudgedCount,
           inapplicableCount: x.inapplicableCount + y.inapplicableCount,
         },

@@ -19,8 +19,9 @@ import { formatTemplateStat, templateLabel } from "./whatif-format";
  * 文面を変えた前後の日報を比べるため)。**プロンプトの文面〈規則・出力形式・成績の節の書き方〉を変えたら更新する**(分析のプロンプトの `PROMPT_VERSION` とは別)。
  * 本文に `promptVersion` が無い日報は、この版を持つ前〈2026-10-11 まで。「数十レースの 1 日分では偶然の影響が大きい」という規則だった版〉に作られたもの。
  * `report-2026-10-12.1`(Issue #272)で、印の定型の買い方(「もしも」)の節と規則の 1 文を足した。
+ * `report-2026-10-12.2`(Issue #278)で、返還(取消・除外の馬への買い目)の書き方を足した: 買い目の行の「→ 返還」・成績の「うち返還」・取消・除外の馬の表記・見込みの対象外の注記・規則の 1 文(返還があるときだけ)。
  */
-export const REPORT_PROMPT_VERSION = "report-2026-10-12.1";
+export const REPORT_PROMPT_VERSION = "report-2026-10-12.2";
 
 /** 応答の最大トークン数(thinking を含む)。非ストリーミングの上限(21333)未満。日報の JSON は数千トークンの見込み。 */
 export const REPORT_MAX_TOKENS = 12000;
@@ -104,7 +105,7 @@ function raceBlock(d: RaceDigest): string {
       `- ${h.mark ?? "印なし"} ${horseLabel(h.umaban, h.name)}`,
       `補正後の3着内率 ${percent(h.adjustedProb)}`,
       h.ev === null ? "EV なし" : `EV ${h.ev.toFixed(2)}`,
-      h.finishPosition === null ? "着順 不明" : `${h.finishPosition}着`,
+      h.finishPosition === null ? (h.scratched === true ? "取消・除外" : "着順 不明") : `${h.finishPosition}着`,
     ];
     if (h.reason !== null) parts.push(`根拠: ${h.reason}`);
     if (h.highlights.length > 0) parts.push(`強調: ${h.highlights.join("、")}`);
@@ -116,11 +117,11 @@ function raceBlock(d: RaceDigest): string {
   } else {
     const bets = d.bets.map((b) => {
       const head = `${betTypeLabel(b.betType)} ${formatComboKey(b.betType, b.comboKey)} ${yen(b.stake)}`;
-      return b.status === "hit" ? `${head} → 的中 ${yen(b.payout)}` : b.status === "miss" ? `${head} → はずれ` : `${head} → 判定不能`;
+      return b.status === "hit" ? `${head} → 的中 ${yen(b.payout)}` : b.status === "refund" ? `${head} → 返還 ${yen(b.payout)}` : b.status === "miss" ? `${head} → はずれ` : `${head} → 判定不能`;
     });
     lines.push(`買い目: ${bets.join(" / ")}`);
     if (d.judgedBetCount > 0) {
-      lines.push(`このレース(判定できた買い目): 賭け金 ${yen(d.totalStake)}・払戻 ${yen(d.totalReturn)}`);
+      lines.push(`このレース(判定できた買い目): 賭け金 ${yen(d.totalStake)}・払戻 ${yen(d.totalReturn)}${d.refundedBetCount > 0 ? `(うち返還 ${d.refundedBetCount} 点・賭け金 ${yen(d.refundedStake)})` : ""}`);
     }
   }
   return lines.join("\n");
@@ -137,8 +138,17 @@ function expectedLines(s: DayStats): string[] {
     `見込みの的中数: ${s.expectedHits.toFixed(2)} 点(分析時点の的中確率の合計。確率のある ${s.expectedBetCount} 点が対象)・実際の的中: ${s.expectedBaseHits} 点(同じ ${s.expectedBetCount} 点中)`,
     `差(実際 − 見込み): ${signed(s.expectedBaseHits - s.expectedHits)} 点`,
   ];
-  if (s.expectedBetCount < s.judgedBetCount) {
-    lines.push(`(判定できた ${s.judgedBetCount} 点のうち ${s.judgedBetCount - s.expectedBetCount} 点は確率が無く、見込みに含めない)`);
+  // 見込みに入れない買い目: 返還(Issue #278。出走して的中する確率の対象外)と、確率を導けない買い目。内訳を分けて書く(返還を「確率が無い」に混ぜない)。
+  const refunded = s.refundedBetCount ?? 0;
+  const noProb = s.judgedBetCount - refunded - s.expectedBetCount;
+  if (refunded === 0) {
+    if (noProb > 0) {
+      lines.push(`(判定できた ${s.judgedBetCount} 点のうち ${noProb} 点は確率が無く、見込みに含めない)`);
+    }
+  } else if (noProb > 0) {
+    lines.push(`(判定できた ${s.judgedBetCount} 点のうち ${refunded} 点は返還(取消・除外)、${noProb} 点は確率が無く、見込みに含めない)`);
+  } else {
+    lines.push(`(判定できた ${s.judgedBetCount} 点のうち ${refunded} 点は返還(取消・除外)のため、見込みに含めない)`);
   }
   return lines;
 }
@@ -152,12 +162,13 @@ function excludingTopLine(s: DayStats): string {
 
 function typeText(t: DayStats["byBetType"][string]): string {
   const expected = t.expectedBetCount === 0 ? "" : `・見込み ${t.expectedHits.toFixed(2)} 点${t.expectedBetCount < t.betCount ? `(確率あり ${t.expectedBetCount} 点)` : ""}`;
-  return `${t.betCount} 点中 ${t.hitCount} 点的中(賭け金 ${yen(t.stake)}・払戻 ${yen(t.payout)}${expected})`;
+  const refund = (t.refundCount ?? 0) > 0 ? `・うち返還 ${t.refundCount} 点` : "";
+  return `${t.betCount} 点中 ${t.hitCount} 点的中(賭け金 ${yen(t.stake)}・払戻 ${yen(t.payout)}${refund}${expected})`;
 }
 
 /** 買い目の成績の行(その日・期間で共通)。 */
 function betResultLine(s: DayStats): string {
-  return `買い目の成績(判定できたもの): 賭け金 ${yen(s.totalStake)}・払戻 ${yen(s.totalReturn)}・回収率 ${s.recoveryRate === null ? "なし(賭け金 0)" : formatRecoveryPercent(s.recoveryRate)}・${s.judgedBetCount} 点中 ${s.hitBetCount} 点的中`;
+  return `買い目の成績(判定できたもの): 賭け金 ${yen(s.totalStake)}・払戻 ${yen(s.totalReturn)}・回収率 ${s.recoveryRate === null ? "なし(賭け金 0)" : formatRecoveryPercent(s.recoveryRate)}・${s.judgedBetCount} 点中 ${s.hitBetCount} 点的中${(s.refundedBetCount ?? 0) > 0 ? `(うち返還 ${s.refundedBetCount} 点・賭け金 ${yen(s.refundedStake)})` : ""}`;
 }
 
 function tailLines(s: DayStats): string[] {
@@ -225,9 +236,10 @@ function whatIfSection(input: ReportPromptInput): string[] | null {
   if (day === null || total === null) {
     return null;
   }
+  const hasRefund = [...Object.values(day), ...Object.values(total)].some((t) => (t.refundCount ?? 0) > 0);
   const lines = [
     `## ${WHATIF_HEADING}`,
-    "印の定型の買い方(下の 5 つの型)を、毎レース各 100 円で買っていたときの成績です。対象は印の付いたレース全部で、実際の配分(買い目のあるレースだけ)とは点数も賭け金も揃っていません。判定不能は結果・払戻が未取得のレース、対象外は必要な印が付いていないレースで、どちらも成績に含めません。",
+    `印の定型の買い方(下の 5 つの型)を、毎レース各 100 円で買っていたときの成績です。対象は印の付いたレース全部で、実際の配分(買い目のあるレースだけ)とは点数も賭け金も揃っていません。判定不能は結果・払戻が未取得のレース、対象外は必要な印が付いていないレースで、どちらも成績に含めません。${hasRefund ? "型の印の馬が取消・除外になったレースは返還として、賭け金と払戻に含め、的中には数えません。" : ""}`,
     "### その日",
     ...whatIfRows(day),
     "### 直近 28 日の累計(その日を含む)",
@@ -259,6 +271,8 @@ export interface ReportPromptInput {
 
 export function buildReportPrompt(input: ReportPromptInput): string {
   const whatIf = whatIfSection(input);
+  // 返還(Issue #278)の説明は、その日か直近 28 日の累計に返還があるときだけ書く(返還が無ければ、文面は返還を知らない版と同じ)。
+  const hasRefund = (input.stats.refundedBetCount ?? 0) > 0 || (input.rolling.total.refundedBetCount ?? 0) > 0;
   const sections: string[] = [
     `あなたは競馬の期待値分析ツールの「日報」を書く振り返り担当です。以下は ${dateLabel(input.kaisaiDate)} に、このツールが発走前に分析した全レースの「予想」と「結果」です。`,
     "利用者は、この日報を読んで、ツールの予想がその日どうだったかを振り返ります。",
@@ -273,6 +287,9 @@ export function buildReportPrompt(input: ReportPromptInput): string {
     ...(whatIf === null
       ? []
       : ["- 「もしも」(印の定型の買い方)の成績は、後から買い方を選び直したときの参考値です。1 日分は点数が少なく、その日に当たった型を追いかける材料にしないでください。続けてよい型かどうかは、直近 28 日の累計の点数と回収率で述べてください(累計でも点数の少ない型は断定しない)。"]),
+    ...(hasRefund
+      ? ["- 「返還」は、取消・除外になった馬を含む買い目で、賭け金がそのまま戻ったものです。的中でもはずれでもないので、「はずれ」と書かないでください。賭け金と払戻の両方に含まれ(回収率の計算に入っています)、的中数・見込みの的中数には含めません。予想の巧拙の根拠にしないでください。"]
+      : []),
     "- 直前 27 日の開催日数や点数が少ないときは、その少なさを一度だけ述べ、4 週の傾向を断定しないでください。",
     "- 1〜2 レースだけで起きた個別の出来事は、レース別の一言に回し、「良かった点」「改善点」には繰り返し見える傾向を優先してください。",
     "- 改善点は、気づきとして書いてください(プロンプトや重みを変えるよう命令する書き方はしない)。",

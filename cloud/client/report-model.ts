@@ -218,13 +218,16 @@ function horseText(umaban: number, name: string | null): string {
   return name === null ? `${umaban}番` : `${umaban}番 ${name}`;
 }
 
+/** 返還(取消・除外の馬への買い目。Issue #278)の内訳。点数が無い(この項目を持つ前の日報)・0 点なら添えない。 */
+const refundText = (count: number | undefined): string => (count !== undefined && count > 0 ? `(うち返還 ${count} 点)` : "");
+
 /** そのレースの実際の買い目の概要(レースごとの行と、惜しかったレースが使う)。 */
 function betsText(r: ReportRace): string {
   if (r.judgedBetCount === 0 && r.unjudgedBetCount === 0) {
     return r.allocationNote ?? "買い目なし";
   }
   const parts: string[] = [];
-  if (r.judgedBetCount > 0) parts.push(`${r.judgedBetCount} 点中 ${r.hitCount} 点的中・賭け金 ${formatYen(r.totalStake)}・払戻 ${formatYen(r.totalReturn)}`);
+  if (r.judgedBetCount > 0) parts.push(`${r.judgedBetCount} 点中 ${r.hitCount} 点的中${refundText(r.refundedBetCount)}・賭け金 ${formatYen(r.totalStake)}・払戻 ${formatYen(r.totalReturn)}`);
   if (r.unjudgedBetCount > 0) parts.push(`判定不能 ${r.unjudgedBetCount} 点`);
   return `買い目: ${parts.join("・")}`;
 }
@@ -241,7 +244,7 @@ function statTiles(s: ReportStats): TileView[] {
     { label: "賭け金", value: formatYen(s.totalStake), strong: false },
     { label: "払戻", value: formatYen(s.totalReturn), strong: false },
     { label: "回収率", value: s.recoveryRate === null ? "-" : formatRecoveryPercent(s.recoveryRate), strong: true },
-    { label: "的中", value: `${s.judgedBetCount} 点中 ${s.hitBetCount} 点`, strong: false },
+    { label: "的中", value: `${s.judgedBetCount} 点中 ${s.hitBetCount} 点${refundText(s.refundedBetCount)}`, strong: false },
   ];
   const expected = formatExpectedHits(s); // 項目が欠けた(この項目を持つ前の)日報では null
   if (expected !== null) tiles.push({ label: "見込みと実際", value: expected, strong: false });
@@ -285,7 +288,7 @@ function whatIfOf(report: ReportDetail): WhatIfView | null {
         };
   return {
     heading: "もしも(印の定型の買い方。各100円)",
-    note: "毎レース各100円で買っていたときの成績です(印の付いたレース全部が対象。実際の配分とは点数も賭け金も揃いません)。判定不能と対象外は成績に含めません。",
+    note: "毎レース各100円で買っていたときの成績です(印の付いたレース全部が対象。実際の配分とは点数も賭け金も揃いません)。判定不能と対象外は成績に含めません。取消・除外の馬を含む型は返還として、賭け金と払戻に含めます。",
     groups,
     near,
   };
@@ -296,12 +299,12 @@ function bodyOf(report: ReportDetail): ReportBodyView {
   const tiles = statTiles(s);
   const typeRows: RowView[] = PROPOSED_BET_LABELS.filter(({ type }) => s.byBetType[type] !== undefined).map(({ type, label }) => {
     const t = s.byBetType[type]!;
-    return { label, value: `${t.betCount} 点中 ${t.hitCount} 点的中・賭け金 ${formatYen(t.stake)}・払戻 ${formatYen(t.payout)}` };
+    return { label, value: `${t.betCount} 点中 ${t.hitCount} 点的中${refundText(t.refundCount)}・賭け金 ${formatYen(t.stake)}・払戻 ${formatYen(t.payout)}` };
   });
   // 券種名が既知のラベルに無いもの(将来の券種)は、キーのまま末尾に出す(黙って落とさない)。
   const known = new Set(PROPOSED_BET_LABELS.map((l) => l.type as string));
   for (const [type, t] of Object.entries(s.byBetType)) {
-    if (!known.has(type)) typeRows.push({ label: type, value: `${t.betCount} 点中 ${t.hitCount} 点的中・賭け金 ${formatYen(t.stake)}・払戻 ${formatYen(t.payout)}` });
+    if (!known.has(type)) typeRows.push({ label: type, value: `${t.betCount} 点中 ${t.hitCount} 点的中${refundText(t.refundCount)}・賭け金 ${formatYen(t.stake)}・払戻 ${formatYen(t.payout)}` });
   }
   const metaParts = [`作成 ${formatJstDateTime(report.createdAt)}`, `${report.raceCount} レース`, report.model === null ? "LLM の文章なし" : `モデル ${report.model}`];
   if (s.noResultRaceCount > 0) metaParts.push(`結果なし ${s.noResultRaceCount} レース`);
