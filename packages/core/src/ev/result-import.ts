@@ -12,6 +12,7 @@
  */
 
 import { RaceResultNotConfirmedError } from "../scraper/parse-race-result.js";
+import { isNonStartResult } from "../scraper/parse-horse-results.js";
 import type { CourseType, RaceResult } from "../scraper/types.js";
 import type { RaceId } from "../scraper/ids.js";
 import { raceResultUrl } from "../scraper/urls.js";
@@ -52,6 +53,12 @@ export type ImportResultOutcome =
  *   (parseRaceResult が既に非throwフォールバック済みのため、ここでの追加変換は不要)。
  * - 確定の人気(ninki)・単勝オッズ(winOdds、Issue #259)も各馬の値をそのまま詰める。クラウド版の D1 だけが保存する
  *   (exe の `AnalysisStore.saveResult` は読まない。契約は `RaceResultEntry` の JSDoc)。
+ * - 取消・除外(Issue #72): 着順欄が「取消」「除外」(先頭が 取・除)の馬には `scratched: true` を付ける。
+ *   馬券は返還される。`finishPosition` は従来どおり null(中止・失格と同じ)なので、区別はこの印だけが担う。
+ *   判定は戦績側の `isNonStartResult`(Issue #261)と同じ関数で、語彙の定義を2箇所に持たない。
+ *   取消・除外でない馬には**キー自体を付けない**(false を書くと、既存の golden・保存レコードのすべてに
+ *   新しいキーが現れる。D1 側が「印のない行は 0」と読むので情報は落ちない)。
+ *   観測は中央の「取消」(202606040901)だけで、「除外」・地方の文言は未観測。
  */
 export function toResultEntries(result: RaceResult): RaceResultEntry[] {
   const placePayoutByUmaban = new Map(
@@ -75,6 +82,7 @@ export function toResultEntries(result: RaceResult): RaceResultEntry[] {
       // 確定の人気・単勝オッズ(Issue #259)。そのまま渡す(null は null、未設定は未設定)。D1 だけが保存する(exe の codec は読まない)。
       ninki: h.ninki,
       winOdds: h.winOdds,
+      ...(isNonStartResult(h) ? { scratched: true } : {}),
     };
   });
 }

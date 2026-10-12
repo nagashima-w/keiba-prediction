@@ -95,6 +95,8 @@ export interface ProposedSection {
   readonly tiles: readonly Tile[];
   readonly typeHeading: string;
   readonly types: readonly TypeRowView[];
+  /** 返還として数えた点数と賭け金の 1 行(Issue #72。合算の値)。返還が 0 点なら null。タイルの賭け数・投資額・回収額に含まれている内訳。 */
+  readonly refund: string | null;
   /** 判定不能(集計対象外)の券種別の点数。0 点なら null。 */
   readonly unjudged: { readonly heading: string; readonly rows: readonly RowView[] } | null;
   readonly unknownNotice: string | null;
@@ -230,7 +232,7 @@ function betSection(report: VerifyReportView): BetSection {
   const suspicious = report.excludedLookaheadSuspectCount + report.excludedLookaheadUnknownCount > 0;
   return {
     heading: "累積回収率",
-    description: "EVプラスの馬の複勝を、一律 100 円ずつ買ったとした場合。",
+    description: "EVプラスの馬の複勝を、一律 100 円ずつ買ったとした場合。取消・除外・中止など着順が出ていない馬は集計に入れません。",
     empty: report.includedAnalysisCount === 0 ? "集計対象がありません。" : null,
     tiles: tiles(report.bet.betCount, report.bet.totalStake, report.bet.totalReturn, report.bet.recoveryRate),
     payoutLine: `払戻内訳: ${formatPayoutBreakdown(report.bet)}(実配当が無い点は複勝下限で近似)`,
@@ -248,11 +250,12 @@ function proposedSection(report: VerifyReportView): ProposedSection {
   const p = report.proposedBet;
   return {
     heading: "配分ベースの回収率",
-    description: "分析時点の設定で実際に提案した配分額を、そのまま賭け金とした場合。上の累積回収率とは賭け金の仮定が違うので、合算しません。",
+    description: "分析時点の設定で実際に提案した配分額を、そのまま賭け金とした場合。上の累積回収率とは賭け金の仮定が違うので、合算しません。取消・除外の馬への買い目は返還として、賭け金を払戻に含めます。",
     empty: report.includedAnalysisCount === 0 ? "集計対象がありません。" : null,
     tiles: tiles(p.overall.betCount, p.overall.totalStake, p.overall.totalReturn, p.overall.recoveryRate),
     typeHeading: "券種別(点数・回収率)",
     types: PROPOSED_BET_LABELS.map(({ type, label }) => rateRow(label, p.byType[type])),
+    refund: p.overall.refundedCount > 0 ? `うち返還 ${p.overall.refundedCount}点(${formatYen(p.overall.refundedStake)})` : null,
     unjudged:
       p.overall.unjudgedCount > 0
         ? { heading: "判定不能(集計対象外)", rows: PROPOSED_BET_LABELS.map(({ type, label }) => ({ label, value: `${p.byType[type].unjudgedCount}点` })) }

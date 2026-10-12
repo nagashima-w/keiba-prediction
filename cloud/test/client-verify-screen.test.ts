@@ -16,7 +16,7 @@ import { calibrationFixture, priorCalibrationFixture, trendFixture, versionsFixt
 type Resp = { status: number; json: () => Promise<unknown> };
 const reply = (code: number, body: unknown): Resp => ({ status: code, json: async () => body });
 
-const SUMMARY = { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, unjudgedCount: 0 };
+const SUMMARY = { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, unjudgedCount: 0, refundedCount: 0, refundedStake: 0 };
 const REPORT = {
   includedAnalysisCount: 3, excludedAnalysisCount: 0, supersededAnalysisCount: 0, excludedEstimatedCount: 0, excludedLookaheadSuspectCount: 0, excludedLookaheadUnknownCount: 0,
   bet: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, actualPayoutCount: 1, approximatePayoutCount: 0 },

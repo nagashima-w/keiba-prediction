@@ -297,7 +297,8 @@ describe("saveMigratedResult: 結果の保存(既存の行を優先)", () => {
     }
     for (const line of GOLDEN_RESULTS) {
       const sortBy = (rows: readonly Record<string, unknown>[], ...keys: string[]) => [...rows].sort((a, b) => keys.map((k) => String(a[k]).localeCompare(String(b[k]))).find((x) => x !== 0) ?? 0);
-      expect(await dump("race_results", line.raceId), line.raceId).toEqual(sortBy(line.results, "umaban").map((r) => ({ ...r })));
+      // 移行の行は exe の列だけを書く。D1 専用の scratched(migration 0013。Issue #72)には触れないので NULL(記録なし)のまま。
+      expect(await dump("race_results", line.raceId), line.raceId).toEqual(sortBy(line.results, "umaban").map((r) => ({ ...r, scratched: null })));
       expect(await dump("race_result_meta", line.raceId)).toEqual(line.meta === null ? [] : [{ ...line.meta }]);
       expect(await dump("race_combo_payouts", line.raceId)).toEqual(sortBy(line.comboPayouts, "bet_type", "combo_key").map((r) => ({ ...r })));
       expect(await dump("race_combo_payout_imports", line.raceId)).toEqual(sortBy(line.comboPayoutImports, "bet_type").map((r) => ({ ...r })));

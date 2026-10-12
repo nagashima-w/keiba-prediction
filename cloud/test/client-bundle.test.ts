@@ -87,6 +87,9 @@ describe("生成物のドリフトと決定性", () => {
     // 表示の整形 `src/place-odds-format.ts`〈1.0倍未満・幅・上限なし・強調の判定〉と説明文)を足した増分は +2,374(238,565 → 240,939。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、
     // それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 4,061 バイト)。想定の計算(Plackett-Luce)はサーバで、束には入っていない(下のテストが固定する)。
     // **余裕が 4,061 バイトまで減った**ので、次に画面や文言を足す Issue は、先に上限の引き上げを見込むこと。
+    // Issue #72: 上限は据え置き。配分ベースの回収率の返還の表示(応答の検査の 2 項目・「うち返還 N点(金額)」の 1 行・2 つの系の取消・除外の扱いを言う説明文の 2 文)を足した増分は +660
+    // (238,565 → 239,225。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。
+    // 今の値は `pnpm run build:client` の出力。上限までの余裕は 5,775 バイト)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(245_000);
   });

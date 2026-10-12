@@ -38,8 +38,15 @@ function realReport() {
       { analysisId: 1, betType: "win", comboKey: "01", stake: 100 },
       { analysisId: 1, betType: "wide", comboKey: "0102", stake: 300 },
       { analysisId: 1, betType: "mystery", comboKey: "01", stake: 100 },
+      // 取消(4番。下の results で scratched=1)を含む3連複: 返還として数える(Issue #72。契約の refundedCount・refundedStake が 0 のままの空振りを避ける)
+      { analysisId: 1, betType: "trio", comboKey: "010204", stake: 400 },
     ],
-    results: [{ raceId: "202606030811", umaban: 1, finishPosition: 1, placePayout: 150, winPayout: 380 }, { raceId: "202606030811", umaban: 2, finishPosition: 2, placePayout: 120, winPayout: null }, { raceId: "202606030811", umaban: 3, finishPosition: 5, placePayout: null, winPayout: null }],
+    results: [
+      { raceId: "202606030811", umaban: 1, finishPosition: 1, placePayout: 150, winPayout: 380 },
+      { raceId: "202606030811", umaban: 2, finishPosition: 2, placePayout: 120, winPayout: null },
+      { raceId: "202606030811", umaban: 3, finishPosition: 5, placePayout: null, winPayout: null },
+      { raceId: "202606030811", umaban: 4, finishPosition: null, placePayout: null, winPayout: null, scratched: 1 },
+    ],
     comboPayouts: [{ raceId: "202606030811", betType: "wide", comboKey: "0102", payout: 450 }],
     comboImports: [{ raceId: "202606030811", betType: "wide" }],
   };
@@ -127,7 +134,7 @@ describe("GET /api/verify の契約", () => {
     expect(o.report.bet.betCount).toBe(1);
     expect(o.report.proposedBet.population).toEqual(server.proposedBet.population);
     expect(o.report.proposedBet.population.allocated).toBe(1);
-    const pick = (x: { betCount: number; totalStake: number; totalReturn: number; recoveryRate: number | null; unjudgedCount: number }) => ({ betCount: x.betCount, totalStake: x.totalStake, totalReturn: x.totalReturn, recoveryRate: x.recoveryRate, unjudgedCount: x.unjudgedCount });
+    const pick = (x: { betCount: number; totalStake: number; totalReturn: number; recoveryRate: number | null; unjudgedCount: number; refundedCount: number; refundedStake: number }) => ({ refundedCount: x.refundedCount, refundedStake: x.refundedStake, betCount: x.betCount, totalStake: x.totalStake, totalReturn: x.totalReturn, recoveryRate: x.recoveryRate, unjudgedCount: x.unjudgedCount });
     expect(o.report.proposedBet.overall).toEqual(pick(server.proposedBet.overall));
     for (const type of PROPOSED_BET_TYPES) {
       expect(o.report.proposedBet.byType[type], type).toEqual(pick(server.proposedBet[type]));
@@ -136,6 +143,9 @@ describe("GET /api/verify の契約", () => {
     expect(o.report.proposedBet.byType.place.betCount).toBe(1);
     expect(o.report.proposedBet.byType.win.betCount).toBe(1);
     expect(o.report.proposedBet.byType.wide.totalReturn).toBe(1350);
+    // Issue #72: 返還(取消の4番を含む3連複 400 円)が、サーバの値のままクライアントの結果に読める
+    expect(o.report.proposedBet.byType.trio).toMatchObject({ betCount: 1, totalStake: 400, totalReturn: 400, refundedCount: 1, refundedStake: 400 });
+    expect(o.report.proposedBet.overall).toMatchObject({ refundedCount: 1, refundedStake: 400 });
     expect(o.report.proposedBet.unknownBetType).toEqual({ count: 1, totalStake: 100, betTypes: ["mystery"] });
   });
 
@@ -312,6 +322,11 @@ describe("parseVerifyResponse(応答を信用しない)", () => {
     ["券種の内訳が 1 つ欠ける(三連単)", (b) => { delete b["report"].proposedBet.trifecta; }],
     ["券種の内訳の点数が文字列", (b) => { b["report"].proposedBet.wide.betCount = "3"; }],
     ["母集団の項目が欠ける", (b) => { delete b["report"].proposedBet.population.noRecord; }],
+    ["返還の点数が欠ける(合算。Issue #72)", (b) => { delete b["report"].proposedBet.overall.refundedCount; }],
+    ["返還の賭け金が欠ける(券種別)", (b) => { delete b["report"].proposedBet.wide.refundedStake; }],
+    ["返還の点数が負", (b) => { b["report"].proposedBet.place.refundedCount = -1; }],
+    ["返還の点数が小数", (b) => { b["report"].proposedBet.trio.refundedCount = 0.5; }],
+    ["返還の賭け金が文字列", (b) => { b["report"].proposedBet.overall.refundedStake = "400"; }],
     ["未知の券種の券種コードが文字列の配列でない", (b) => { b["report"].proposedBet.unknownBetType.betTypes = [1]; }],
     ["除外カウンタが欠ける", (b) => { delete b["report"].excludedLookaheadUnknownCount; }],
     ["report が無い", (b) => { delete b["report"]; }],

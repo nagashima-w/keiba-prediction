@@ -13,7 +13,7 @@ import { computePromptVersionSummaries } from "../../cloud/src/verify-versions.j
  *
  * **ここ(ルートの scripts/test/)に置く理由**: exe 側の `AnalysisStore` は better-sqlite3 を使う。cloud の CI は cloud だけを install する(better-sqlite3 が無い)ので、cloud/test からは
  * import できない(#218 と同じ)。cloud の SQL 定数(`VERIFY_READ_SQL`)を、exe と同じスキーマの SQLite にそのまま流して行を取り、D1 の行の代わりにする。
- * D1 の列のうち exe に無いのは `start_time` だけで、これは `ALTER TABLE` で足し、検証の DO の補完と同じ関数(`extractStartTime`)で埋める。
+ * D1 の列のうち exe に無いのは `start_time` と `scratched`(Issue #72。全行 NULL のまま)で、これらは `ALTER TABLE` で足し、検証の DO の補完と同じ関数(`extractStartTime`)で埋める。
  *
  * 入力は乱数(固定の種)で作った 160 レース前後の分析・結果。**一致の検査が空振りでない**ことを、集計の各カウンタ・券種別の点数が 0 でないことで先に固定する。
  */
@@ -153,6 +153,9 @@ function build(seed: number): Dataset {
       store.saveResult(raceId, entries, null, makeComboPayouts(next, headCount));
     }
   }
+  // 取消・除外の記録(0013。Issue #72)。exe の AnalysisStore は scratched を保存しないので、D1 の列は全行 NULL(記録なし)のまま = 返還の判定が働かない。
+  // 両者の一致が成り立つのは、この「記録なし」の状態(旧い行・移行した行)。scratched を持つ行の集計は cloud/test/result-scratched.test.ts と core の verify-refund.test.ts が見る。
+  db.exec("ALTER TABLE race_results ADD COLUMN scratched INTEGER");
   // 発走時刻の写し(0009)。検証の DO の補完と同じ手順: 保存済みのスナップショットから extractStartTime → なければ ''。
   db.exec("ALTER TABLE analyses ADD COLUMN start_time TEXT");
   const snapshots = db.prepare("SELECT id, race_snapshot_json AS json FROM analyses").all() as Array<{ id: number; json: string | null }>;

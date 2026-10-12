@@ -196,7 +196,7 @@ import type {
   VerifyDataSource,
 } from "./analysis-store-types.js";
 import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-response.js";
-import { buildComboOddsKey, type ComboBetType } from "../scraper/combo-odds-key.js";
+import { buildComboOddsKey, parseComboOddsKey, type ComboBetType } from "../scraper/combo-odds-key.js";
 import { parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "../scraper/ids.js";
 import {
   binIndexFor,
@@ -389,6 +389,14 @@ export interface ProposedBetTypeSummary {
    * (買い目行単位。レース単位ではない)。
    */
   readonly unjudgedCount: number;
+  /**
+   * 取消・除外の馬を構成に含むため返還として数えた買い目の点数(Issue #72)。`betCount` に**含まれる**
+   * (賭け金は分母に残り、`totalReturn` には賭け金そのものを足す)。的中でも不的中でもない第3の状態で、
+   * 内訳の件数としてだけ持つ(的中数・的中率はこの系に無い)。枠連は返還を判定しないので常に0。
+   */
+  readonly refundedCount: number;
+  /** 返還として数えた買い目の賭け金合計(円)。`totalStake` に含まれ、同額が `totalReturn` にも含まれる。 */
+  readonly refundedStake: number;
 }
 
 /**
@@ -1344,11 +1352,13 @@ interface ProposedBetAccumulator {
   totalStake: number;
   totalReturn: number;
   unjudgedCount: number;
+  refundedCount: number;
+  refundedStake: number;
 }
 
 /** 空の可変カウンタを作る。 */
 function emptyProposedBetAccumulator(): ProposedBetAccumulator {
-  return { betCount: 0, totalStake: 0, totalReturn: 0, unjudgedCount: 0 };
+  return { betCount: 0, totalStake: 0, totalReturn: 0, unjudgedCount: 0, refundedCount: 0, refundedStake: 0 };
 }
 
 /** 未知券種行(Issue #76)の可変カウンタ。`betTypes`は集合として集める(重複を避ける)。 */
@@ -1384,6 +1394,8 @@ function finalizeProposedBetSummary(acc: ProposedBetAccumulator): ProposedBetTyp
     totalReturn: acc.totalReturn,
     recoveryRate: acc.totalStake === 0 ? null : acc.totalReturn / acc.totalStake,
     unjudgedCount: acc.unjudgedCount,
+    refundedCount: acc.refundedCount,
+    refundedStake: acc.refundedStake,
   };
 }
 
@@ -1440,6 +1452,24 @@ function finalizeProposedBetOverall(
       exacta.unjudgedCount +
       trifecta.unjudgedCount +
       bracketQuinella.unjudgedCount,
+    refundedCount:
+      place.refundedCount +
+      win.refundedCount +
+      wide.refundedCount +
+      trio.refundedCount +
+      quinella.refundedCount +
+      exacta.refundedCount +
+      trifecta.refundedCount +
+      bracketQuinella.refundedCount,
+    refundedStake:
+      place.refundedStake +
+      win.refundedStake +
+      wide.refundedStake +
+      trio.refundedStake +
+      quinella.refundedStake +
+      exacta.refundedStake +
+      trifecta.refundedStake +
+      bracketQuinella.refundedStake,
   });
 }
 
@@ -1464,18 +1494,24 @@ function finalizeProposedBetOverall(
  * 非空だが該当`combo_key`が無い場合は「不的中」(betCount+1・totalReturn+0)であり、判定不能とは
  * 区別する(規則Uの肝)。
  *
- * 【残余(本タスクでは意図的に塞がない。#71メタレビュー指摘)】取消・除外馬(finishPosition=null)を
- * 含む買い目は現実には返還(全額払戻)されるが、確定払戻表(`race_results.place_payout`/
- * `race_combo_payouts`)からは「返還」と「不的中(対象外で払戻0)」を区別できない
- * (finish_position=nullの馬はplace_payoutの行自体を持たないか非nullにならないため、
- * このコードは該当馬番が逆引きマップ/comboKey一致に無いケースと同じ扱いになり、不的中
- * 〈betCount+1・totalReturn+0〉として計上される)。回収率はこの分だけ保守的に下振れする。
- * **同じ状況で既存`bet`系(`computeHorseBetOutcome`)は`finishPosition===null`を集計対象外として
- * 賭け金・払戻の双方から除外しており〈本ファイル冒頭コメント「着順不明・非数値は集計対象外」〉、
- * `proposedBet`系とは扱いが異なる。** 正しい扱い(返還として`totalReturn+=stake`/判定不能として
- * 除外/現状維持のいずれか)は設計判断が必要で、かつ組合せ券(ワイド・3連複)では返還判定に
- * 構成馬番の複合(`combo_key`のデコード)が要るため、#71では意図的に対処しない
- * (`combo_key`デコーダの新設は#71スコープ外。着手前ゲート決定)。
+ * 【返還(Issue #72。#71メタレビューで見つかった残余の解消)】取消・除外の馬(`RaceResultEntry.scratched === true`。
+ * 結果ページの着順欄が「取消」「除外」)を構成に含む買い目は、現実には全額返還される。確定払戻表
+ * (`race_results.place_payout`/`race_combo_payouts`)からは「返還」と「不的中」を区別できないので、
+ * `scratched` を見て**返還として数える**(`betCount+1`・`totalStake+=stake`・`totalReturn+=stake`。賭け金は分母に
+ * 残り、払戻にも含める。内訳は`refundedCount`/`refundedStake`)。返還は的中でも不的中でもない第3の状態。
+ * - 構成馬番は `comboKey` を `parseComboOddsKey`(#55のデコーダ。#54ゲートが禁じた「逆関数の新設」ではなく既存の
+ *   ものの再利用)で戻して判定する。馬単・三連単の順序付きキーも、構成馬の集合として見るので順序に依らない。
+ *   復元できないキー(`null`)は返還にせず、従来の判定へ進む。
+ * - 返還の判定は払戻表の取込状態(規則U)より**前**。返還は払戻表に依らず確定するため、払戻が未取込でも
+ *   判定不能にしない。
+ * - 中止・失格・降着は返還されない(`scratched` を付けない)。`scratched` が未記録(旧い行・exe から移行した行)の
+ *   `finishPosition=null` は取消か中止か判別できないので、従来どおり不的中として数える(保守的な下振れ)。
+ * - **枠連(bracketQuinella)は返還を判定しない(別 Issue)**。`comboKey` が枠番の組で、JRA の規定では「枠の出走馬が
+ *   尽きれば、その枠を含む組が返還」「ゾロ目は、その枠に出走馬が1頭だけ残れば返還」「2頭残れば返還なし」
+ *   となり、馬番→枠番の対応が要るが保存していない。取消を含む枠連の買い目は従来どおり不的中として数える。
+ * **既存`bet`系(`computeHorseBetOutcome`)は`finishPosition===null`を集計対象外として賭け金・払戻の双方から
+ * 除外しており〈本ファイル冒頭コメント「着順不明・非数値は集計対象外」〉、`proposedBet`系とは扱いが異なる**
+ * (一律100円の系は今回変えない)。
  */
 function computeProposedBetReport(
   store: VerifyDataSource,
@@ -1541,6 +1577,15 @@ function computeProposedBetReport(
     }
     allocated += 1;
 
+    // 取消・除外の馬番(Issue #72)。`scratched === true` だけが対象で、中止・失格や未記録(旧い行。undefined)の
+    // `finishPosition=null` は含めない(取消か中止か判別できないものを返還にしない)。
+    const scratchedUmabans = new Set<number>();
+    for (const r of results) {
+      if (r.scratched === true) {
+        scratchedUmabans.add(r.umaban);
+      }
+    }
+
     // 複勝払戻の逆引きマップ(規則Hのracehasplacepayoutゲートを転用)。
     const racePayoutAvailable = raceHasPlacePayout(results);
     const placePayoutByComboKey = new Map<string, number>();
@@ -1591,6 +1636,23 @@ function computeProposedBetReport(
       // とき、その券種の買い目が黙って末尾のカウンタ〈三連単〉に混入する)。上の許可リストで
       // 既知の券種に絞り込まれているため、ここでの添字は必ず存在する。
       const accumulator = accumulatorByBetType[bet.betType];
+
+      // 返還(Issue #72): 取消・除外の馬を構成に含む買い目は、馬券が全額返還される。払戻表の取込状態
+      // (規則U)の判定より**前**に置く: 返還は払戻表に依らず確定するので、払戻が未取込でも判定不能にしない。
+      // 枠連(bracketQuinella)は対象外: comboKey が馬番ではなく枠番で、枠の出走馬が尽きたか(JRA の規定では
+      // 返還)・ゾロ目で1頭だけ残ったか(ゾロ目のみ返還)の判定に馬番→枠番の対応が要るが、保存していない。
+      // 枠連は従来どおり不的中として数える(別 Issue)。
+      if (bet.betType !== "bracketQuinella" && scratchedUmabans.size > 0) {
+        const umabans = parseComboOddsKey(bet.comboKey);
+        if (umabans !== null && umabans.some((u) => scratchedUmabans.has(u))) {
+          accumulator.betCount += 1;
+          accumulator.totalStake += bet.stake;
+          accumulator.totalReturn += bet.stake;
+          accumulator.refundedCount += 1;
+          accumulator.refundedStake += bet.stake;
+          continue;
+        }
+      }
 
       if (bet.betType === "place") {
         if (!racePayoutAvailable) {

@@ -149,6 +149,8 @@ const D1_EXTRA_COLUMNS: Readonly<Record<string, readonly ColumnInfo[]>> = {
   race_results: [
     { name: "win_odds", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
     { name: "ninki", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+    // 0013 の scratched(Issue #72。取消・除外の記録。NULL=記録なし〈旧い行・exe から移行した行〉・0=取消・除外でない・1=取消・除外。検証画面の配分ベースの回収率が、取消・除外の馬への買い目を返還として数える)。
+    { name: "scratched", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
   ],
 };
 const D1_EXTRA_INDEXES: Readonly<Record<string, readonly IndexInfo[]>> = {
@@ -256,8 +258,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql の12本だけで、番号は 0001 から連続している(後から足すときは 0013 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql の13本だけで、番号は 0001 から連続している(後から足すときは 0014 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {

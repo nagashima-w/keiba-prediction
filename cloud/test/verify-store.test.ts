@@ -216,6 +216,7 @@ describe("readAll(集計に使う行を 1 回の batch で読む)", () => {
     expect(out.rowsRead).toBeGreaterThanOrEqual(5);
     const source = buildVerifySource(out.rows);
     expect(source.listAnalyses()).toHaveLength(2);
-    expect(source.getResult("202606030811")).toEqual([{ umaban: 1, finishPosition: 1, placePayout: 150, winPayout: 300 }]);
+    // saveResult で書いた行は scratched=0(記録済み・取消でない)で、読み取り口では false(Issue #72)。
+    expect(source.getResult("202606030811")).toEqual([{ umaban: 1, finishPosition: 1, placePayout: 150, winPayout: 300, scratched: false }]);
   });
 });

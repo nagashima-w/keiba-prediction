@@ -6,7 +6,7 @@ import { calibrationFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFix
 
 /** Issue #219: 検証画面の表示用データ。数値の整形は exe と同じ(一致は scripts/test/cloud-verify-format.test.ts が exe の関数と比べる)。 */
 
-const summary = (over: Partial<ProposedSummaryView> = {}): ProposedSummaryView => ({ betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0, ...over });
+const summary = (over: Partial<ProposedSummaryView> = {}): ProposedSummaryView => ({ betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0, refundedCount: 0, refundedStake: 0, ...over });
 
 function report(over: Partial<VerifyReportView> = {}): VerifyReportView {
   return {
@@ -122,6 +122,24 @@ describe("buildVerifyModel: 集計があるとき", () => {
     expect(m.proposed?.unjudged?.rows).toHaveLength(8);
     expect(m.proposed?.unjudged?.rows.find((x) => x.label === "ワイド")).toEqual({ label: "ワイド", value: "3点" });
     expect(m.proposed?.unjudged?.rows.find((x) => x.label === "複勝")).toEqual({ label: "複勝", value: "0点" });
+  });
+
+  it("Issue #72: 返還が 1 点でもあれば、合算の点数と賭け金を「うち返還 N点(金額)」の 1 行で出す。無ければ出さない", () => {
+    expect(model.proposed?.refund).toBeNull();
+    const r = report();
+    const withRefund = report({ proposedBet: { ...r.proposedBet, overall: summary({ ...r.proposedBet.overall, refundedCount: 3, refundedStake: 1200 }), byType: { ...r.proposedBet.byType, wide: summary({ refundedCount: 3, refundedStake: 1200 }) } } });
+    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, withRefund) } }));
+    expect(m.proposed?.refund).toBe("うち返還 3点(1,200円)");
+    // 返還は賭け金にも回収額にも含まれる(タイルの値は overall のまま。返還を足し引きして見せない)
+    expect(m.proposed?.tiles.map((t) => t.value)).toEqual(["300点", "123,456円", "130,000円", "105.3%"]);
+  });
+
+  it("Issue #72: 説明文が、2 つの系の取消・除外の扱いの違い(一律 100 円は集計に入れない/配分ベースは返還として賭け金を払戻に含める)を言う", () => {
+    expect(model.bet?.description).toContain("取消・除外・中止など着順が出ていない馬は集計に入れません");
+    expect(model.proposed?.description).toContain("取消・除外の馬への買い目は返還として、賭け金を払戻に含めます");
+    // 既存の説明(賭け金の仮定が違うので合算しない)は残る
+    expect(model.proposed?.description).toContain("合算しません");
+    expect(model.bet?.description).toContain("一律 100 円");
   });
 
   it("未知の券種があれば注記を出す", () => {

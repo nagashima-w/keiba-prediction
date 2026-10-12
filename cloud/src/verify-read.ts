@@ -48,7 +48,7 @@ export const VERIFY_READ_SQL = {
   allocationMeta: `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode FROM analysis_allocation_meta`,
   bets: `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake
   FROM analysis_bets ORDER BY analysis_id, bet_type, combo_key`,
-  results: `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout
+  results: `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched
   FROM race_results ORDER BY race_id, umaban`,
   comboPayouts: `SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout
   FROM race_combo_payouts ORDER BY race_id, bet_type, combo_key`,
@@ -79,6 +79,8 @@ export interface VerifyResultRow {
   readonly finishPosition: number | null;
   readonly placePayout: number | null;
   readonly winPayout: number | null;
+  /** 取消・除外か(migration 0013。Issue #72)。1=取消・除外、0=記録済みで取消・除外でない、NULL=記録なし(旧い行・移行した行)。 */
+  readonly scratched?: number | null;
 }
 export interface VerifyComboPayoutRow {
   readonly raceId: string;
@@ -128,7 +130,14 @@ export function buildVerifySource(rows: VerifyReadRows): VerifyDataSource {
   for (const [raceId, group] of groupBy(rows.results, (r) => r.raceId)) {
     resultsByRace.set(
       raceId,
-      group.map((r) => ({ umaban: r.umaban, finishPosition: r.finishPosition, placePayout: r.placePayout, winPayout: r.winPayout })),
+      group.map((r) => ({
+        umaban: r.umaban,
+        finishPosition: r.finishPosition,
+        placePayout: r.placePayout,
+        winPayout: r.winPayout,
+        // 1 → true、0 → false、NULL(記録なし)はキー自体を付けない(未記録を false にしない。core の `RaceResultEntry.scratched` のJSDoc参照)。
+        ...(r.scratched === null || r.scratched === undefined ? {} : { scratched: r.scratched === 1 }),
+      })),
     );
   }
   const importedKeys = new Set(rows.comboImports.map((i) => `${i.raceId}:${i.betType}`));

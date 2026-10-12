@@ -736,7 +736,9 @@ function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
     if (p.empty !== null) {
       body.push(h("p", { class: "empty" }, [p.empty]));
     } else {
-      body.push(tilesNode(p.tiles), h("h3", {}, [p.typeHeading]), typeRowsNode(p.types));
+      body.push(tilesNode(p.tiles));
+      if (p.refund !== null) body.push(h("p", { class: "meta" }, [p.refund]));
+      body.push(h("h3", {}, [p.typeHeading]), typeRowsNode(p.types));
       if (p.unjudged !== null) body.push(h("h3", {}, [p.unjudged.heading]), rowsNode(p.unjudged.rows));
       if (p.unknownNotice !== null) body.push(notice("wait", p.unknownNotice));
     }

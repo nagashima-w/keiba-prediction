@@ -5,8 +5,10 @@
  * #209〈当日傾向〉)。このモジュールの責務は「D1 への書き込み・読み出し」だけで、netkeiba への取得・いつ取り込むかは持たない。
  *
  * ## 保存の形は exe と同じ(#167〈exe の DB を D1 へ移す〉との統合のため)
- * 表は migration 0001 にある exe の最終スキーマのまま(`race_results`・`race_result_meta`・`race_combo_payouts`・`race_combo_payout_imports`)。**migration は足さない**
- * (例外: Issue #259 の migration 0011 が、`race_results` に **D1 専用の列 `win_odds`・`ninki`**〈確定の単勝オッズ・人気〉を足した。exe の codec・移行の形式・共有 golden は変えず、この列は下の `FILL_WIN_ODDS_SQL` だけが書く)。
+ * 表は migration 0001 にある exe の最終スキーマのまま(`race_results`・`race_result_meta`・`race_combo_payouts`・`race_combo_payout_imports`)。
+ * **例外が2つ**: (1) Issue #259 の migration 0011 が、`race_results` に **D1 専用の列 `win_odds`・`ninki`**〈確定の単勝オッズ・人気〉を足した。exe の codec・移行の形式・共有 golden は変えず、この列は下の `FILL_WIN_ODDS_SQL` だけが書く。
+ * (2) `race_results.scratched`(migration 0013。Issue #72。取消・除外の記録。D1 専用で exe には無い)。馬ごとの UPSERT にだけこの列を足す
+ * ({@link withScratchedColumn}。codec の文は変えない)。取消・除外の馬は 1、印のない馬は 0。移行で入れた行(`MIGRATED_RESULTS_SQL`。exe の列だけ)は触れない = NULL(記録なし)。
  * SQL の文・束縛値の変換・復元(`toStoredPassing`・`toStoredCourseType` ほか)は core の codec(`analysis-store-codec.ts`)が持ち、exe の `AnalysisStore` と共有する。
  * 同じ入力から、exe の `AnalysisStore.saveResult` と同じ4表になることは、共有 golden(`packages/core/test/golden/race-result-contract.json`)で固定している
  * (exe 側: core の `race-result-contract.test.ts`。D1 側: `cloud/test/result-repository.test.ts`)。
@@ -96,7 +98,23 @@ export function jsonEachDeleteSql(codecDeleteSql: string): string {
   return replaced;
 }
 
-const UPSERT_RESULTS_JSON_SQL = jsonEachInsertSelectSql(UPSERT_RACE_RESULT_SQL);
+/**
+ * codec の `race_results` の UPSERT に、D1 専用の `scratched` 列(migration 0013。Issue #72)を足した文。exe の `AnalysisStore` は
+ * この列を持たない(保存しない)ので、codec の文は変えず、ここで列と `?` と `DO UPDATE SET` の1項目を足す。codec の文の形が
+ * 想定と違えば(置換が効かなければ)読み込み時に落ちる。
+ * @throws 想定の形でない
+ */
+export function withScratchedColumn(codecUpsertSql: string): string {
+  const withColumn = codecUpsertSql.replace("last3f)", "last3f, scratched)");
+  const withPlaceholder = withColumn.replace(/VALUES \(((?:\?, )*\?)\)/, "VALUES ($1, ?)");
+  const withUpdate = withPlaceholder.replace("last3f = excluded.last3f", "last3f = excluded.last3f,\n         scratched = excluded.scratched");
+  if (withColumn === codecUpsertSql || withPlaceholder === withColumn || withUpdate === withPlaceholder) {
+    throw new Error("codec の race_results の UPSERT 文の形が想定と違います");
+  }
+  return withUpdate;
+}
+
+const UPSERT_RESULTS_JSON_SQL = jsonEachInsertSelectSql(withScratchedColumn(UPSERT_RACE_RESULT_SQL));
 const DELETE_COMBOS_JSON_SQL = jsonEachDeleteSql(DELETE_COMBO_PAYOUTS_SQL);
 const INSERT_COMBOS_JSON_SQL = jsonEachInsertSelectSql(INSERT_COMBO_PAYOUT_SQL);
 const MARK_IMPORTED_JSON_SQL = jsonEachInsertSelectSql(MARK_COMBO_IMPORTED_SQL);
@@ -331,8 +349,10 @@ export function buildSaveResultStatements(
 ): D1PreparedStatement[] {
   const statements: D1PreparedStatement[] = [];
   if (results.length > 0) {
-    // 先頭の race_id を除いた束縛値の並びは codec のもの(exe と同じ)。
-    statements.push(db.prepare(UPSERT_RESULTS_JSON_SQL).bind(raceId, JSON.stringify(results.map((r) => raceResultParams(raceId, r).slice(1)))));
+    // 先頭の race_id を除いた束縛値の並びは codec のもの(exe と同じ)に、D1 専用の scratched(取消・除外は 1、印のない馬は 0。Issue #72)を末尾に足す。
+    statements.push(
+      db.prepare(UPSERT_RESULTS_JSON_SQL).bind(raceId, JSON.stringify(results.map((r) => [...raceResultParams(raceId, r).slice(1), r.scratched === true ? 1 : 0]))),
+    );
     // 確定の単勝オッズ・人気(Issue #259)。UPSERT の直後(同じ batch の順序)に、NULL の列だけを埋める。オッズを持つ馬がいなければ文を足さない(従来の文の数のまま)。
     const odds = buildWinOddsStatement(db, raceId, results);
     if (odds !== null) {

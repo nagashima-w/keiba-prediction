@@ -25,7 +25,7 @@ function mountAll(tree: VNode): void {
   mount(doc, { replaceChildren() {} }, tree);
 }
 
-const summary = (over: Partial<ProposedSummaryView> = {}): ProposedSummaryView => ({ betCount: 2, totalStake: 200, totalReturn: 300, recoveryRate: 1.5, unjudgedCount: 0, ...over });
+const summary = (over: Partial<ProposedSummaryView> = {}): ProposedSummaryView => ({ betCount: 2, totalStake: 200, totalReturn: 300, recoveryRate: 1.5, unjudgedCount: 0, refundedCount: 0, refundedStake: 0, ...over });
 const REPORT: VerifyReportView = {
   includedAnalysisCount: 120, excludedAnalysisCount: 7, supersededAnalysisCount: 30, excludedEstimatedCount: 4, excludedLookaheadSuspectCount: 3, excludedLookaheadUnknownCount: 2,
   bet: { betCount: 52, totalStake: 5200, totalReturn: 4994, recoveryRate: 0.96, actualPayoutCount: 20, approximatePayoutCount: 1 },
@@ -95,6 +95,15 @@ describe("検証画面の VNode", () => {
     expect(text).toContain("判定不能(集計対象外)");
     expect(text).toContain("母集団");
     expect(text).toContain("未対応の券種コード(x)");
+  });
+
+  it("Issue #72: 返還があれば「うち返還 N点(金額)」の 1 行を配分ベースのタイルの下に出す。無ければ出さない(行の数は増えない)", () => {
+    expect(textOf(tree())).not.toContain("うち返還");
+    const withRefund: VerifyOutcome = { ...READY, report: { ...REPORT, proposedBet: { ...REPORT.proposedBet, overall: summary({ betCount: 300, totalStake: 123456, unjudgedCount: 4, refundedCount: 2, refundedStake: 900 }) } } };
+    const t = tree({ load: { kind: "ready", outcome: withRefund } });
+    expect(textOf(t)).toContain("うち返還 2点(900円)");
+    // 行(ul)の数と中身は変わらない(返還は段落 1 行で、券種別の行を増やさない)
+    expect(byClass(t, "verify-rows").map((l) => findAll(l, (n) => n.tag === "li").length)).toEqual([6, 8, 8, 4]);
   });
 
   it("補正方向×結果・キャリブレーション・印別的中率(Issue #220): 見出しと、行(ul)で組む。表は使わない", () => {

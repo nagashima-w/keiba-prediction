@@ -2076,6 +2076,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 750,
       recoveryRate: 1.5,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(wide).toEqual({
       betCount: 1,
@@ -2083,6 +2085,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 3000,
       recoveryRate: 10,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(trio).toEqual({
       betCount: 1,
@@ -2090,6 +2094,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 0,
       recoveryRate: 0,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(overall).toEqual({
       betCount: 4,
@@ -2097,6 +2103,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 3750,
       recoveryRate: 3.75,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
 
     // PM指定(b): overallがplace+win+wide+trio+quinellaの和であることを関係として固定する
@@ -2177,6 +2185,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 0,
       recoveryRate: null,
       unjudgedCount: 1,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(report.proposedBet.wide).toEqual({
       betCount: 0,
@@ -2184,6 +2194,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 0,
       recoveryRate: null,
       unjudgedCount: 2,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(report.proposedBet.trio).toEqual({
       betCount: 0,
@@ -2191,6 +2203,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 0,
       recoveryRate: null,
       unjudgedCount: 3,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(report.proposedBet.overall).toEqual({
       betCount: 0,
@@ -2198,11 +2212,13 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 0,
       recoveryRate: null,
       unjudgedCount: 6,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     store.close();
   });
 
-  it("要修正1(bossメタレビュー): 取消・除外馬(finishPosition=null)を含む買い目は「返還」ではなく「不的中」として計上され、回収率が保守的に下振れすること(現状維持=挙動固定。computeProposedBetReportのJSDoc「残余」参照)", () => {
+  it("要修正1(bossメタレビュー)→Issue #72で契約変更: finishPosition=null でも scratched が未記録(旧い行。AnalysisStoreは scratched を保存しない)の馬を含む買い目は、取消か中止か判別できないので従来どおり不的中として計上される(返還にするのは scratched=true の馬だけ。返還の網羅は verify-refund.test.ts)", () => {
     const store = new AnalysisStore();
     store.saveAnalysis({
       raceId: "PB_CANCEL",
@@ -2222,8 +2238,9 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         { umaban: 1, finishPosition: 1, placePayout: 140 },
         { umaban: 2, finishPosition: 2, placePayout: 310 },
         { umaban: 3, finishPosition: 3, placePayout: 180 },
-        // umaban5は出走取消(現実には返還されるが、race_results/race_combo_payoutsからは
-        // 「返還」と「不的中」を区別できない。#71メタレビューで指摘された残余)。
+        // umaban5は着順が空(finishPosition=null)だが scratched の記録が無い。#71時点は「出走取消だが返還と
+        // 不的中を区別できない」残余だった。#72で取消・除外は scratched=true で区別できるようになったが、
+        // この行は未記録(旧い行相当)なので取消か中止か判別できず、従来どおり不的中として数える。
         { umaban: 5, finishPosition: null },
       ],
       null,
@@ -2240,6 +2257,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 0,
       recoveryRate: 0,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(report.proposedBet.wide).toEqual({
       betCount: 1,
@@ -2247,6 +2266,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 0,
       recoveryRate: 0,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     store.close();
   });
@@ -2285,6 +2306,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 750,
       recoveryRate: 2.5,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(report.proposedBet.wide).toEqual({
       betCount: 1,
@@ -2292,6 +2315,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 3000,
       recoveryRate: 15,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(report.proposedBet.trio).toEqual({
       betCount: 2,
@@ -2299,6 +2324,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 5000,
       recoveryRate: 5000 / 300,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
     expect(report.proposedBet.overall).toEqual({
       betCount: 4,
@@ -2306,6 +2333,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       totalReturn: 8750,
       recoveryRate: 8750 / 800,
       unjudgedCount: 0,
+      refundedCount: 0,
+      refundedStake: 0,
     });
 
     // PM指定(b)を別フィクスチャでも再固定(2箇所目。1箇所だけだと偶然の一致を否定できないため)。
@@ -2471,6 +2500,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 480,
         recoveryRate: 4.8,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       store.close();
     });
@@ -2543,6 +2574,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 1655,
         recoveryRate: 1655 / 280,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       expect(overall.betCount).toBe(
         place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
@@ -2618,6 +2651,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 13650, // 4550 * (300 / 100)
         recoveryRate: 13650 / 300,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       store.close();
     });
@@ -2664,6 +2699,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 2550,
         recoveryRate: 2550 / 500,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
 
       // 前提固定(空振り防止): place以外(win/wide/trio)は0件で、overallはplace+quinellaのみで
@@ -2681,6 +2718,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 2690, // place(140) + quinella(2550)
         recoveryRate: 2690 / 600,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       expect(overall.betCount).toBe(
         place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
@@ -2774,6 +2813,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 25080,
         recoveryRate: 25080 / 500,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
 
       // 前提固定(空振り防止): place/win/wide/trio/quinellaは0件で、overallはexactaのみで
@@ -2791,6 +2832,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 25080,
         recoveryRate: 25080 / 500,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       expect(overall.betCount).toBe(
         place.betCount +
@@ -2917,6 +2960,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 52690,
         recoveryRate: 52690 / 600,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
 
       // 前提固定(空振り防止): 他の5券種は0件で、overallはtrifectaのみで構成されること。
@@ -2934,6 +2979,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 52690,
         recoveryRate: 52690 / 600,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       expect(overall.betCount).toBe(
         place.betCount +
@@ -3065,6 +3112,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 6300,
         recoveryRate: 6300 / 500,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       // ★他券種に混入していない(枠連が三連単の集計に落ちる変異を殺す)。
       expect(trifecta.betCount).toBe(0);
@@ -3082,6 +3131,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 6300,
         recoveryRate: 6300 / 500,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       store.close();
     });
@@ -3104,6 +3155,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 18390,
         recoveryRate: 18390 / 300,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       expect(overall.totalReturn).toBe(18390);
       store.close();
@@ -3132,6 +3185,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 3150,
         recoveryRate: 31.5,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       expect(trifecta).toEqual({
         betCount: 1,
@@ -3139,6 +3194,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 52690,
         recoveryRate: 526.9,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       expect(overall).toEqual({
         betCount: 2,
@@ -3146,6 +3203,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 55840,
         recoveryRate: 279.2,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       store.close();
     });
@@ -3169,6 +3228,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 0,
         recoveryRate: null,
         unjudgedCount: 1,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       store.close();
     });
@@ -3188,6 +3249,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 0,
         recoveryRate: null,
         unjudgedCount: 1,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       expect(overall.unjudgedCount).toBe(1);
       expect(overall.betCount).toBe(0);
@@ -3332,6 +3395,8 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         totalReturn: 250,
         recoveryRate: 2.5,
         unjudgedCount: 0,
+        refundedCount: 0,
+        refundedStake: 0,
       });
       expect(report.proposedBet.unknownBetType).toEqual({
         count: 1,

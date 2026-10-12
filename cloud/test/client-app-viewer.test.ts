@@ -30,7 +30,7 @@ function findAll(node: VNode | string, pred: (n: VNode) => boolean): VNode[] {
 const textOf = (node: VNode | string): string => (typeof node === "string" ? node : (node.children ?? []).map(textOf).join(" "));
 const byClass = (tree: VNode, cls: string): VNode[] => findAll(tree, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes(cls));
 
-const SUMMARY = { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, unjudgedCount: 0 };
+const SUMMARY = { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, unjudgedCount: 0, refundedCount: 0, refundedStake: 0 };
 const VERIFY_REPORT = {
   includedAnalysisCount: 3, excludedAnalysisCount: 0, supersededAnalysisCount: 0, excludedEstimatedCount: 0, excludedLookaheadSuspectCount: 0, excludedLookaheadUnknownCount: 0,
   bet: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, actualPayoutCount: 1, approximatePayoutCount: 0 },

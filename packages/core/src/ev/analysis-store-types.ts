@@ -455,6 +455,18 @@ export interface RaceResultEntry {
   readonly ninki?: number | null;
   /** 確定の単勝オッズ(Issue #259)。保存先・省略時の扱いは {@link ninki} と同じ。 */
   readonly winOdds?: number | null;
+  /**
+   * 取消・除外か(Issue #72)。結果ページの着順欄が「取消」「除外」の馬だけ true で、**印のない馬はキー自体が無い**
+   * (`toResultEntries` の出力)。`finishPosition` は取消・除外・中止・失格のいずれも null なので、馬券が
+   * 返還される取消・除外を区別するのはこの印だけ。中止・失格は返還されないので付けない。
+   *
+   * **保存するのはクラウド版(D1 の `race_results.scratched`。migration 0013)だけ**で、exe の `AnalysisStore` は
+   * 保存も復元もしない(exe は Issue #248 でアーカイブ済み。exe の列を足すと移行 ndjson の形式の版まで連鎖するため)。
+   * D1 側の読み出しでは、未記録(旧い行・exe から移行した行。DB の NULL)は `undefined`、記録済みで取消・除外なし
+   * (DB の 0)は `false`、取消・除外(DB の 1)は `true`。**`undefined`(未記録)と `false` は別物**:
+   * 未記録の `finishPosition=null` は取消か中止か判別できず、従来どおり不的中として数える。
+   */
+  readonly scratched?: boolean;
 }
 
 /**
