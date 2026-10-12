@@ -361,7 +361,7 @@ export async function handle(
         headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
       });
     }
-    return handleCheck(new URL(request.url), env);
+    return handleCheck(request, env);
   }
 
   if (pathname === "/api/migration/upload") {
@@ -1507,8 +1507,17 @@ function badRequest(message: string): Response {
  *  - `type` を省略または `shutuba`: 出馬表を GET で取得して頭数を返す。
  *  - `type=grade-winner`: 重賞の過去10年傾向の API へ POST を 1 本送り、過去回の数を返す(Cloudflare の出口から POST が通るかの確認。キャッシュを通さない)。
  * パラメータは `race_id`(必須)と `type`(省略可)だけで、それぞれ1つ(余計なパラメータ・重複・未知の `type` は 400)。race_id が無効なら、ゲートを呼ばない。
+ * **別サイトからの要求は 403**(`Sec-Fetch-Site`。Issue #267)。順序は: `Sec-Fetch-Site`(403)→ 入力の検証(400)→ ゲート。ここまでゲート(DO)にも netkeiba にも触れない。
+ * 理由: この GET は netkeiba に出る。別サイトのページから(管理者のブラウザで)読み込ませて実在しない race_id を取らせて netkeiba の拒否(400/403/429)が2回連続すると(実測はしていない)ゲートのブレーカーが開き、
+ * 30 分間すべての取得が止まる(その間の発走前の取得は失敗で確定する)。メソッドの 405 はこの前(呼び出し側)で済んでいる。
  */
-async function handleCheck(url: URL, env: Env): Promise<Response> {
+async function handleCheck(request: Request, env: Env): Promise<Response> {
+  // ブラウザは Sec-Fetch-Site を付ける(確認フォームの送信は same-origin、アドレスバー・ブックマークは none)。付かない非ブラウザのクライアントは通す。
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin" && site !== "none") {
+    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  }
+  const url = new URL(request.url);
   const keys = [...url.searchParams.keys()];
   if (keys.some((key) => key !== "race_id" && key !== "type") || new Set(keys).size !== keys.length || !keys.includes("race_id")) {
     return badRequest("クエリは race_id(必須)と type(省略可。shutuba または grade-winner)だけを、それぞれ1つ指定してください");

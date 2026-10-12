@@ -348,7 +348,7 @@ netkeiba の取得が、本番(Cloudflare)で通ることを、出馬表1本で�
 - `race_id` が無効(12桁の数字でない・帯広・地方で実在しない日付など)なら HTTP 400 で、netkeiba へは出ない。
 - 失敗の種類(`error.type`): `gate-refused`(ゲートが拒否。`reason` に blocked / queue-full / network-error / timeout / bad-response)・`http-error`(netkeiba が 2xx 以外。`status`)・
   `parse-error`(取得できたが出馬表として読めない)・`fetch-failed`(ゲートの呼び出し自体の失敗)。
-- 中身の確認は `GET /api/netkeiba/check?race_id=...` を直接開いても同じ(GET のみ。HEAD では取得しない)。
+- 中身の確認は `GET /api/netkeiba/check?race_id=...` を直接開いても同じ(GET のみ。HEAD では取得しない)。アドレスバーから開く・`/check` のフォームから送るのは通る。**別サイトのページから読み込まれた要求は 403**(`Sec-Fetch-Site` が same-origin・none 以外。Issue #267。ゲートにも netkeiba にも触れない)。
 - **POST の確認(Issue #181)**: `/check` の「POST の確認」のフォーム(`GET /api/netkeiba/check?race_id=...&type=grade-winner`)は、重賞の「同レース過去10年傾向」の API へ **POST を1本**送る(キャッシュを通さず、ゲートを直接使う)。
   **本番で最初に、Cloudflare の出口からの POST が通るかを確かめるためのもの。** 初期値の `202603020211` は重賞。見ること: `ok: true`・`target: "grade-winner"`・`status: 200`・`entries`(読めた過去回の数。この重賞は 10)・`kind`・`gate.postBlockedUntil: null`。
   重賞でないレースは `entries: null`(通信とパースは成功)。**POST が拒否(400/403/429)されたら、POST だけを30分止める**(出馬表などの GET は止まらない): `error.type: "http-error"`・`status`、次の POST は HTTP 503・`error.reason: "post-blocked"`・`gate.postBlockedUntil`(解除時刻)。

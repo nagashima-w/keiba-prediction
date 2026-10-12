@@ -917,6 +917,35 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     }
   });
 
+  it("Issue #267: GET /api/netkeiba/check の関数(handleCheck)は、ゲートに触れる前に Sec-Fetch-Site を見て、request を受け取る(別サイトからの取得を起こさせない)", () => {
+    const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = code.indexOf("async function handleCheck(");
+    expect(start).toBeGreaterThan(-1);
+    const body = code.slice(start, code.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(500); // 前提: 本体を実際に読めている(空振りでない)
+    // 前提: ゲートに触れる呼び出し(binding・取得・POST・状態)が本体にある。順序の検査が空振りにならない
+    const gateTouches = ["NETKEIBA_GATE", ".fetchRaw(", ".postRaw(", ".status("];
+    for (const touch of gateTouches) {
+      expect(body, `handleCheck に ${touch} がある(前提)`).toContain(touch);
+    }
+    expect(body).toContain("sec-fetch-site");
+    expect(body).toContain("same-origin");
+    expect(body).toContain('"none"');
+    expect(body).toContain("origin-mismatch");
+    expect(body).toContain("403");
+    for (const touch of gateTouches) {
+      expect(body.indexOf("sec-fetch-site"), `Sec-Fetch-Site の検査は ${touch} より前`).toBeLessThan(body.indexOf(touch));
+    }
+    // ヘッダを見るには request が要る(url だけを受け取る形に戻すと、検査を書けない)
+    expect(code.slice(start, code.indexOf("{", start))).toMatch(/\(\s*request\s*:\s*Request\s*,\s*env\s*:\s*Env\s*\)/);
+    // 呼び出しは 1 箇所だけで、request を渡す
+    expect((code.match(/\bhandleCheck\(/g) ?? []).length).toBe(2); // 定義 1 + 呼び出し 1
+    expect(code).toContain("handleCheck(request, env)");
+    // 対照(検出の確認。空振りでない): 検査より後にゲートに触れる本体は「前」の検査を満たさない
+    const bad = 'async function handleCheck(request: Request, env: Env) {\n  const g = env.NETKEIBA_GATE;\n  const site = request.headers.get("sec-fetch-site");\n}';
+    expect(bad.indexOf("sec-fetch-site") < bad.indexOf("NETKEIBA_GATE")).toBe(false);
+  });
+
   it("GET /api/verify の関数(handleVerify)は、検証の DO の getReport だけを呼ぶ。D1・R2・取得・LLM・Webhook に触れない", () => {
     const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
     const start = handler.indexOf("async function handleVerify(");

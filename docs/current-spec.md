@@ -1152,6 +1152,8 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **確認用エンドポイント**: `GET /api/netkeiba/check?race_id=...`(Access の関門のあと。GET のみ)。race_id を core の検証(中央 01〜10・地方 30〜64・帯広 65 は対象外)で確かめ、
   出馬表を1本取得して `parseShutuba` で読み、`ok`・`status`・頭数・`kind`(central/nar)・`queuedMs`・`elapsedMs`・ゲートの状態を JSON で返す。`/check` にフォーム(Issue #184 で `/` から移した。初期値 202603020211)がある。
   **実在しない race_id は netkeiba に拒否(400 など)されてブレーカーを開きうる**ので、初回は実在するレースで確認する。
+  **別サイトからの要求は 403**(`Sec-Fetch-Site` が same-origin・none 以外。#267。ヘッダの無い非ブラウザのクライアントは通す)。順序は メソッド(405)→ `Sec-Fetch-Site`(403)→ 入力の検証(400)→ ゲート。403 の時点でゲートにも netkeiba にも触れない
+  (別サイトのページから実在しない race_id を取らせてブレーカーを開かれ、30 分の取得停止と、その間の発走前の取得の失敗確定を起こされないため。Access の `CF_Authorization` の SameSite は既定が None)。
   `type=grade-winner` を付けると、同じエンドポイントで**重賞の過去10年傾向の API へ POST を1本**試せる(#181 段階1。キャッシュを通さずゲートを直接使う。`/check` に「POST の確認」のフォームがある)。
   結果は `ok`・`target: "grade-winner"`・`status`・`entries`(読めた過去回の数。非重賞は null)・`kind`・`queuedMs`・`elapsedMs`・ゲートの状態(`postBlockedUntil` を含む)。
   `type` は `shutuba`(既定)か `grade-winner` で、重複・未知の値・余計なパラメータは 400。分析がこの POST を使うのは取得ステップ(下の「重賞の過去10年傾向」。#181 段階2〈v1.23.0〉)で、この確認とは別。
@@ -1447,7 +1449,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - id は 1〜2,147,483,647 の整数(先頭の 0 は 400)。不正・クエリつきは 400(D1・R2 に触れない)。無ければ 404 `{ ok: false, error: { type: "not-found" } }`。D1 の失敗は 503 `d1-error`(文面なし)。**配分の読み出しだけが失敗したときも全体を 503 にする**(配分だけ欠けた 200 は「買い目なし」と誤読される)。GET だけ(HEAD は 405)。`/api/analyses/status`・`/run` とは衝突しない(完全一致を先に処理する)。
   - ⚠️ **無害な読み取りではない**: `detail` が present のとき、R2 の GET(Class B)に加えて D1 の `r2_ops` を +1 する(書き込み1行)。**画面から自動で繰り返し(ポーリング)呼ばないこと**。
 - **静的ガード**(`scripts/test/cloud-config-guard.test.ts`): 取得の起点は「認証の後ろの手動の操作」(上の2つと `POST /api/analyses/run`・`GET /api/netkeiba/check`)だけ。handler.ts の `.schedule(`・`.getRaceList(`・`.fetchRaw(` の呼び出し箇所を1つずつに固定し、新しい取得口を足すと落ちる。
-  - **`/api/netkeiba/check` にも `Sec-Fetch-Site` の検査を入れるか**は未決(【記録】。一覧と同じく GET で netkeiba に出る)。
+  - **`/api/netkeiba/check` にも `Sec-Fetch-Site` の検査を入れた**(#267。`handleCheck` が、ゲートに触れる前に別サイトを 403 で拒否する。一覧と同じく GET で netkeiba に出るため)。静的ガードが、検査が `NETKEIBA_GATE`・`.fetchRaw(`・`.postRaw(`・`.status(` より前にあることを固定する。
 - **検査**: `race-day-list.test.ts`(一覧の取得・キャッシュ・アラームの共有・失敗・空・同時取得。本物の SQLite)・`handler-races.test.ts`・`analysis-view.test.ts`(漏洩・書き込み側との drift)・`handler-analysis-detail.test.ts`(本物のローカルの D1・R2。柵・R2 欠落・配分の失敗)、smoke(workerd で、一覧と保存済みの分析1件)。
 - 本番での動作確認は #174 の R2 権限の追加後。
 

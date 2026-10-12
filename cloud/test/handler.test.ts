@@ -713,6 +713,96 @@ describe("GET /api/netkeiba/check(Issue #162 段階2b。AC-14)", () => {
   });
 });
 
+describe("GET /api/netkeiba/check の Sec-Fetch-Site(Issue #267。別サイトからの要求を、ゲートに触れずに拒否する)", () => {
+  /** 別サイトのページから読み込まれた要求(Access の cookie の代わりに JWT を付ける)。 */
+  const withSite = (path: string, token: string, site: string | null): Request => req(path, { token, headers: site === null ? {} : { "sec-fetch-site": site } });
+
+  it.each([
+    ["cross-site(別サイト)", "cross-site"],
+    ["same-site(兄弟サブドメイン)", "same-site"],
+    ["未知の値", "unknown"],
+    ["空の値", ""],
+  ])("%s は 403(origin-mismatch)で、ゲートを 1 回も呼ばない(fetchRaw も status も)", async (_label, site) => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    // 前提: 同じ要求でヘッダだけが違えば通る(拒否が Sec-Fetch-Site によるものだという確認)
+    const allowed = await handle(withSite(CHECK(CENTRAL_ID), token, "same-origin"), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(allowed.status).toBe(200);
+    expect(g.urls).toHaveLength(1);
+    const before = { urls: g.urls.length, statuses: g.statusCalls() };
+    expect(before.statuses).toBe(1);
+
+    const response = await handle(withSite(CHECK(CENTRAL_ID), token, site), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: false, error: { type: "origin-mismatch" } });
+    expect(g.urls).toHaveLength(before.urls);
+    expect(g.statusCalls()).toBe(before.statuses);
+  });
+
+  it("type=grade-winner(POST を送る経路)も、cross-site なら 403 で postRaw を呼ばない", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(
+      () => responseOf(new Uint8Array()),
+      undefined,
+      () => responseOf(fixtureBytes("grade_winner_202603020211.json")),
+    );
+    // 前提: same-origin なら POST が 1 回送られる
+    expect((await handle(withSite(CHECK_POST(GRADE_ID), token, "same-origin"), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps)).status).toBe(200);
+    expect(g.posts).toHaveLength(1);
+    const response = await handle(withSite(CHECK_POST(GRADE_ID), token, "cross-site"), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(g.posts).toHaveLength(1);
+    expect(g.urls).toHaveLength(0);
+  });
+
+  it.each([
+    ["same-origin(確認フォームの送信・同じオリジンの fetch)", "same-origin"],
+    ["none(アドレスバー・ブックマーク)", "none"],
+    ["ヘッダなし(非ブラウザのクライアント)", null],
+  ])("%s は従来どおり取得して 200", async (_label, site) => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    const response = await handle(withSite(CHECK(CENTRAL_ID), token, site), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, kind: "central", horses: 16 });
+    expect(g.urls).toEqual(["https://race.netkeiba.com/race/shutuba.html?race_id=202603020211"]);
+  });
+
+  it("順序: cross-site は入力の検証(400)より先に 403 になる(race_id が無効でも 400 を返さない)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    // 前提: 同じ無効な入力は、same-origin なら 400(検証が働く経路である確認)
+    expect((await handle(withSite(CHECK("20260302021"), token, "same-origin"), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps)).status).toBe(400);
+    const response = await handle(withSite(CHECK("20260302021"), token, "cross-site"), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(g.urls).toHaveLength(0);
+  });
+
+  it("メソッドの検査は従来どおり先: cross-site でも HEAD は 405(Allow: GET)、POST も 405 で、ゲートに触れない", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    const crossSite = (method: string): Request => req(CHECK(CENTRAL_ID), { token, method, headers: { "sec-fetch-site": "cross-site" } });
+    // Allow は HEAD(この分岐。GET だけ)でだけ固定する。POST は経路全体の 405(別の分岐。このタスクで変えない)
+    const head = await handle(crossSite("HEAD"), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(head.status).toBe(405);
+    expect(head.headers.get("allow")).toBe("GET");
+    expect((await handle(crossSite("POST"), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps)).status).toBe(405);
+    expect(g.urls).toHaveLength(0);
+    expect(g.statusCalls()).toBe(0);
+  });
+
+  it("認証が先: JWT なしなら cross-site でも 403 は forbidden(認証の拒否。origin-mismatch の JSON ではない)", async () => {
+    const { deps } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    const response = await handle(req(CHECK(CENTRAL_ID), { headers: { "sec-fetch-site": "cross-site" } }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("forbidden");
+    expect(g.urls).toHaveLength(0);
+  });
+});
+
 const CHECK_POST = (raceId: string): string => `/api/netkeiba/check?race_id=${raceId}&type=grade-winner`;
 const GRADE_ID = "202603020211";
 const NAR_GRADE_ID = "202644070111";
