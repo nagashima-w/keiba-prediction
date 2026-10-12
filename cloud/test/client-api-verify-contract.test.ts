@@ -134,7 +134,7 @@ describe("GET /api/verify の契約", () => {
     expect(o.report.bet.betCount).toBe(1);
     expect(o.report.proposedBet.population).toEqual(server.proposedBet.population);
     expect(o.report.proposedBet.population.allocated).toBe(1);
-    const pick = (x: { betCount: number; totalStake: number; totalReturn: number; recoveryRate: number | null; unjudgedCount: number; refundedCount: number; refundedStake: number }) => ({ refundedCount: x.refundedCount, refundedStake: x.refundedStake, betCount: x.betCount, totalStake: x.totalStake, totalReturn: x.totalReturn, recoveryRate: x.recoveryRate, unjudgedCount: x.unjudgedCount });
+    const pick = (x: { betCount: number; totalStake: number; totalReturn: number; recoveryRate: number | null; unjudgedCount: number; refundedCount: number; refundedStake: number; flatStake: number; flatReturn: number; flatRecoveryRate: number | null }) => ({ flatStake: x.flatStake, flatReturn: x.flatReturn, flatRecoveryRate: x.flatRecoveryRate, refundedCount: x.refundedCount, refundedStake: x.refundedStake, betCount: x.betCount, totalStake: x.totalStake, totalReturn: x.totalReturn, recoveryRate: x.recoveryRate, unjudgedCount: x.unjudgedCount });
     expect(o.report.proposedBet.overall).toEqual(pick(server.proposedBet.overall));
     for (const type of PROPOSED_BET_TYPES) {
       expect(o.report.proposedBet.byType[type], type).toEqual(pick(server.proposedBet[type]));
@@ -146,6 +146,14 @@ describe("GET /api/verify の契約", () => {
     // Issue #72: 返還(取消の4番を含む3連複 400 円)が、サーバの値のままクライアントの結果に読める
     expect(o.report.proposedBet.byType.trio).toMatchObject({ betCount: 1, totalStake: 400, totalReturn: 400, refundedCount: 1, refundedStake: 400 });
     expect(o.report.proposedBet.overall).toMatchObject({ refundedCount: 1, refundedStake: 400 });
+    // Issue #16: 同じ買い目に一律 100 円(サーバの値のまま読める。賭け金が 100 円でない買い目を含むので、配分ベースとは値が違う)
+    const overall = o.report.proposedBet.overall;
+    expect(overall.betCount).toBeGreaterThan(1); // 前提(空振り防止)
+    expect(overall.flatStake).toBe(overall.betCount * 100);
+    expect(overall.flatStake).not.toBe(overall.totalStake);
+    expect(overall.flatReturn).toBeGreaterThan(0);
+    expect(overall.flatRecoveryRate).toBe(overall.flatReturn / overall.flatStake);
+    expect(o.report.proposedBet.byType.trio).toMatchObject({ flatStake: 100, flatReturn: 100 }); // 返還は一律でも 100 円
     expect(o.report.proposedBet.unknownBetType).toEqual({ count: 1, totalStake: 100, betTypes: ["mystery"] });
   });
 
@@ -327,6 +335,13 @@ describe("parseVerifyResponse(応答を信用しない)", () => {
     ["返還の点数が負", (b) => { b["report"].proposedBet.place.refundedCount = -1; }],
     ["返還の点数が小数", (b) => { b["report"].proposedBet.trio.refundedCount = 0.5; }],
     ["返還の賭け金が文字列", (b) => { b["report"].proposedBet.overall.refundedStake = "400"; }],
+    ["一律の賭け金が欠ける(合算。Issue #16)", (b) => { delete b["report"].proposedBet.overall.flatStake; }],
+    ["一律の払戻が欠ける(券種別)", (b) => { delete b["report"].proposedBet.wide.flatReturn; }],
+    ["一律の回収率が欠ける(券種別。null は許すが、キー自体が無いのは不可)", (b) => { delete b["report"].proposedBet.place.flatRecoveryRate; }],
+    ["一律の賭け金が負", (b) => { b["report"].proposedBet.place.flatStake = -100; }],
+    ["一律の賭け金が文字列", (b) => { b["report"].proposedBet.overall.flatStake = "100"; }],
+    ["一律の払戻が文字列", (b) => { b["report"].proposedBet.trio.flatReturn = "100"; }],
+    ["一律の回収率が文字列", (b) => { b["report"].proposedBet.overall.flatRecoveryRate = "50%"; }],
     ["未知の券種の券種コードが文字列の配列でない", (b) => { b["report"].proposedBet.unknownBetType.betTypes = [1]; }],
     ["除外カウンタが欠ける", (b) => { delete b["report"].excludedLookaheadUnknownCount; }],
     ["report が無い", (b) => { delete b["report"]; }],

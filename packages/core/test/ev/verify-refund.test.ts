@@ -150,6 +150,9 @@ describe("取消・除外の馬への買い目は返還として数える(Issue 
       unjudgedCount: 0,
       refundedCount: 1,
       refundedStake: 500,
+      flatStake: 100,
+      flatReturn: 100,
+      flatRecoveryRate: 1,
     });
   });
 
@@ -167,6 +170,9 @@ describe("取消・除外の馬への買い目は返還として数える(Issue 
       unjudgedCount: 0,
       refundedCount: 0,
       refundedStake: 0,
+      flatStake: 100,
+      flatReturn: 0,
+      flatRecoveryRate: 0,
     });
   });
 
@@ -207,6 +213,9 @@ describe("取消・除外の馬への買い目は返還として数える(Issue 
       unjudgedCount: 0,
       refundedCount: 1,
       refundedStake: 500,
+      flatStake: 300,
+      flatReturn: 240,
+      flatRecoveryRate: 0.8,
     });
   });
 
@@ -227,6 +236,9 @@ describe("取消・除外の馬への買い目は返還として数える(Issue 
       unjudgedCount: 1,
       refundedCount: 1,
       refundedStake: 300,
+      flatStake: 100,
+      flatReturn: 100,
+      flatRecoveryRate: 1,
     });
   });
 
@@ -259,6 +271,9 @@ describe("取消・除外の馬への買い目は返還として数える(Issue 
       totalReturn: 500 + 300 + 2000,
       refundedCount: 2,
       refundedStake: 800,
+      flatStake: 300,
+      flatReturn: 2200,
+      flatRecoveryRate: 2200 / 300,
     });
     // 券種別の内訳の和が overall に一致する
     const types = [p.place, p.win, p.wide, p.trio, p.quinella, p.exacta, p.trifecta, p.bracketQuinella];
@@ -307,6 +322,9 @@ describe("枠連は返還を判定しない(Issue #72。別 Issue で扱う)", (
       unjudgedCount: 0,
       refundedCount: 0,
       refundedStake: 0,
+      flatStake: 100,
+      flatReturn: 0,
+      flatRecoveryRate: 0,
     });
   });
 

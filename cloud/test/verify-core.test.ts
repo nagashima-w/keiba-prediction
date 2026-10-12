@@ -315,11 +315,11 @@ describe("getReport: 計算とキャッシュ", () => {
     expect(kv.get<{ v: number }>("cache")!.v).toBeGreaterThanOrEqual(2);
   });
 
-  it("Issue #254: 補正前の対応表(priorCalibration)と帯の平均予測値を持たない版 2 のキャッシュは使わず、再計算する。新しい集計は(Issue #72 以降)版 4 で、3 区分とも priorCalibration を持つ", async () => {
+  it("Issue #254: 補正前の対応表(priorCalibration)と帯の平均予測値を持たない版 2 のキャッシュは使わず、再計算する。新しい集計は(Issue #16 以降)版 5 で、3 区分とも priorCalibration を持つ", async () => {
     const { core, store, kv, clock } = setup();
     await core.getReport("all");
     const cache = kv.get<{ v: number; reports: Record<string, Record<string, unknown>> }>("cache")!;
-    expect(cache.v).toBe(4);
+    expect(cache.v).toBe(5);
     // 版 2 の形(priorCalibration が無い)を模擬する
     const oldReports = Object.fromEntries(Object.entries(cache.reports).map(([venue, r]) => {
       const { priorCalibration: _drop, ...rest } = r;
@@ -332,18 +332,18 @@ describe("getReport: 計算とキャッシュ", () => {
     expect(store.calls).toContain("readAll"); // 版 2 は使われない
     expect(res.status).toBe("ready");
     const fresh = kv.get<{ v: number; reports: Record<string, { priorCalibration?: unknown[]; calibration: unknown[] }> }>("cache")!;
-    expect(fresh.v).toBe(4);
+    expect(fresh.v).toBe(5);
     for (const venue of ["all", "central", "nar"]) {
       expect(fresh.reports[venue]!.priorCalibration).toHaveLength(20);
       expect(fresh.reports[venue]!.calibration).toHaveLength(20);
     }
   });
 
-  it("Issue #72: 返還の項目(refundedCount・refundedStake)を持たない版 3 のキャッシュは使わず、再計算する。新しい集計は版 4 で、3 区分とも配分ベースの全要約(overall と 8 券種)が返還の項目を持つ", async () => {
+  it("Issue #72: 返還の項目(refundedCount・refundedStake)を持たない版 3 のキャッシュは使わず、再計算する。新しい集計は(Issue #16 以降)版 5 で、3 区分とも配分ベースの全要約(overall と 8 券種)が返還の項目を持つ", async () => {
     const { core, store, kv, clock } = setup();
     await core.getReport("all");
     const cache = kv.get<{ v: number; reports: Record<string, { proposedBet: Record<string, unknown> }> }>("cache")!;
-    expect(cache.v).toBe(4);
+    expect(cache.v).toBe(5);
     // 版 3 の形(返還の項目が無い)を模擬する
     const strip = (summary: unknown): unknown => {
       const { refundedCount: _c, refundedStake: _s, ...rest } = summary as Record<string, unknown>;
@@ -362,13 +362,48 @@ describe("getReport: 計算とキャッシュ", () => {
     expect(store.calls).toContain("readAll"); // 版 3 は使われない
     expect(res.status).toBe("ready");
     const fresh = kv.get<{ v: number; reports: Record<string, { proposedBet: Record<string, Record<string, unknown>> }> }>("cache")!;
-    expect(fresh.v).toBe(4);
+    expect(fresh.v).toBe(5);
     for (const venue of ["all", "central", "nar"]) {
       for (const key of SUMMARY_KEYS) {
         expect(fresh.reports[venue]!.proposedBet[key], `${venue}.${key}`).toMatchObject({ refundedCount: 0, refundedStake: 0 });
       }
     }
     expect(SUMMARY_KEYS).toHaveLength(9); // overall + 8 券種(空振り防止: 検査対象が空でない)
+  });
+
+  it("Issue #16: 一律 100 円の項目(flatStake・flatReturn・flatRecoveryRate)を持たない版 4 のキャッシュ(#72 だけが先に公開された本番に残る形)は使わず、再計算する。新しい集計は版 5 で、3 区分とも配分ベースの全要約(overall と 8 券種)が一律の項目を持つ", async () => {
+    const { core, store, kv, clock } = setup();
+    await core.getReport("all");
+    const cache = kv.get<{ v: number; reports: Record<string, { proposedBet: Record<string, unknown> }> }>("cache")!;
+    expect(cache.v).toBe(5);
+    // 版 4 の形(返還の項目はあるが、一律の項目が無い)を模擬する
+    const strip = (summary: unknown): unknown => {
+      const { flatStake: _a, flatReturn: _b, flatRecoveryRate: _c, ...rest } = summary as Record<string, unknown>;
+      return rest;
+    };
+    const oldReports = Object.fromEntries(
+      Object.entries(cache.reports).map(([venue, r]) => [
+        venue,
+        { ...r, proposedBet: Object.fromEntries(Object.entries(r.proposedBet).map(([k, v]) => [k, SUMMARY_KEYS.includes(k) ? strip(v) : v])) },
+      ]),
+    );
+    // 前提(空振り防止): 版 4 の形には返還の項目があり、一律の項目が無い
+    const sample = oldReports["all"]!.proposedBet["overall"] as Record<string, unknown>;
+    expect(sample).toHaveProperty("refundedCount");
+    expect(sample).not.toHaveProperty("flatStake");
+    kv.put("cache", { ...cache, v: 4, reports: oldReports });
+    store.calls.length = 0;
+    clock.now += 6 * 60_000; // 最短間隔を過ぎている
+    const res = await core.getReport("nar");
+    expect(store.calls).toContain("readAll"); // 版 4 は使われない
+    expect(res.status).toBe("ready");
+    const fresh = kv.get<{ v: number; reports: Record<string, { proposedBet: Record<string, Record<string, unknown>> }> }>("cache")!;
+    expect(fresh.v).toBe(5);
+    for (const venue of ["all", "central", "nar"]) {
+      for (const key of SUMMARY_KEYS) {
+        expect(fresh.reports[venue]!.proposedBet[key], `${venue}.${key}`).toMatchObject({ flatStake: 0, flatReturn: 0, flatRecoveryRate: null });
+      }
+    }
   });
 
   it("古い形式のキャッシュ(版が違う)は使わず、再計算する", async () => {

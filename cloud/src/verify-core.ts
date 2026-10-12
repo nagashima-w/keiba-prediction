@@ -78,12 +78,14 @@ const JST_OFFSET_MS = 9 * 60 * 60_000;
  * 3: 補正前の対応表(`priorCalibration`)と、帯の平均予測値(`CalibrationBin.meanPredictedProb`)を足した(Issue #254)。版 2 の集計は使わず、デプロイ後の最初の要求で再計算する(同上)。
  * 4: 配分ベースの回収率の各要約(`proposedBet` の overall と 8 券種)に、返還の件数・金額(`refundedCount`・`refundedStake`)を足し、取消・除外の馬への買い目を返還として数えるよう集計の意味を変えた(Issue #72)。
  *    版 3 の集計は使わず、デプロイ後の最初の要求で再計算する(同上)。版を上げないと、旧い形の集計が最大 1 時間(`VERIFY_TTL_MS`)返り続け、クライアントの応答の検査が新しい項目の欠落で失敗する。
+ * 5: 配分ベースの各要約(`proposedBet` の overall と 8 券種)に、同じ買い目に一律 100 円を賭けた場合の賭け金・払戻・回収率(`flatStake`・`flatReturn`・`flatRecoveryRate`)を足した(Issue #16)。
+ *    版 4 の集計は使わず、デプロイ後の最初の要求で再計算する(同上)。**#72 が先に単独で公開されると本番に版 4 の集計(一律の項目なし)が残る**ので、4 のまま #16 を出すとクライアントの検査が失敗する。版を上げれば公開の順序に依らず安全。
  *
  * **上げた日の副作用(Issue #245)**: 版の違う集計は使わない(`readCache` が null)ので、古い集計を `stale` で出す道が無い。デプロイ後の最初の要求が最短間隔(5 分)か
  * 1 日の上限に当たると `throttled`(出せる集計が無い)になる。`runs` は kv に残る。デプロイは、再計算の直後と、その日の再計算が上限に近い日を避ける。
  * (`test/verify-core.test.ts` の「形式の版を上げた直後…」が固定している)
  */
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
 
 /** `ctx.storage.kv`(同期 API)のうち、ここで使う部分。 */
 export interface VerifyKv {

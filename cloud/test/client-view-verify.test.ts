@@ -25,7 +25,7 @@ function mountAll(tree: VNode): void {
   mount(doc, { replaceChildren() {} }, tree);
 }
 
-const summary = (over: Partial<ProposedSummaryView> = {}): ProposedSummaryView => ({ betCount: 2, totalStake: 200, totalReturn: 300, recoveryRate: 1.5, unjudgedCount: 0, refundedCount: 0, refundedStake: 0, ...over });
+const summary = (over: Partial<ProposedSummaryView> = {}): ProposedSummaryView => ({ betCount: 2, totalStake: 200, totalReturn: 300, recoveryRate: 1.5, unjudgedCount: 0, refundedCount: 0, refundedStake: 0, flatStake: 0, flatReturn: 0, flatRecoveryRate: null, ...over });
 const REPORT: VerifyReportView = {
   includedAnalysisCount: 120, excludedAnalysisCount: 7, supersededAnalysisCount: 30, excludedEstimatedCount: 4, excludedLookaheadSuspectCount: 3, excludedLookaheadUnknownCount: 2,
   bet: { betCount: 52, totalStake: 5200, totalReturn: 4994, recoveryRate: 0.96, actualPayoutCount: 20, approximatePayoutCount: 1 },
@@ -103,6 +103,15 @@ describe("検証画面の VNode", () => {
     const t = tree({ load: { kind: "ready", outcome: withRefund } });
     expect(textOf(t)).toContain("うち返還 2点(900円)");
     // 行(ul)の数と中身は変わらない(返還は段落 1 行で、券種別の行を増やさない)
+    expect(byClass(t, "verify-rows").map((l) => findAll(l, (n) => n.tag === "li").length)).toEqual([6, 8, 8, 4]);
+  });
+
+  it("Issue #16: 一律 100 円の行を配分ベースのタイルの下に 1 行出す。一律の賭け金が 0 なら出さない(行の数は増えない)", () => {
+    expect(textOf(tree())).not.toContain("同じ買い目に一律 100 円なら");
+    const withFlat: VerifyOutcome = { ...READY, report: { ...REPORT, proposedBet: { ...REPORT.proposedBet, overall: summary({ betCount: 300, totalStake: 123456, unjudgedCount: 4, flatStake: 30000, flatReturn: 29490, flatRecoveryRate: 0.983 }) } } };
+    const t = tree({ load: { kind: "ready", outcome: withFlat } });
+    // 説明文にも「同じ買い目に一律 100 円」の語があるので、行の文(「なら」以降の値まで)で確かめる
+    expect(textOf(t)).toContain("同じ買い目に一律 100 円なら 回収率 98.3%(投資額 30,000円 / 回収額 29,490円)");
     expect(byClass(t, "verify-rows").map((l) => findAll(l, (n) => n.tag === "li").length)).toEqual([6, 8, 8, 4]);
   });
 

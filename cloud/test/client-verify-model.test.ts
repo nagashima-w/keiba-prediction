@@ -6,7 +6,7 @@ import { calibrationFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFix
 
 /** Issue #219: 検証画面の表示用データ。数値の整形は exe と同じ(一致は scripts/test/cloud-verify-format.test.ts が exe の関数と比べる)。 */
 
-const summary = (over: Partial<ProposedSummaryView> = {}): ProposedSummaryView => ({ betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0, refundedCount: 0, refundedStake: 0, ...over });
+const summary = (over: Partial<ProposedSummaryView> = {}): ProposedSummaryView => ({ betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0, refundedCount: 0, refundedStake: 0, flatStake: 0, flatReturn: 0, flatRecoveryRate: null, ...over });
 
 function report(over: Partial<VerifyReportView> = {}): VerifyReportView {
   return {
@@ -140,6 +140,35 @@ describe("buildVerifyModel: 集計があるとき", () => {
     // 既存の説明(賭け金の仮定が違うので合算しない)は残る
     expect(model.proposed?.description).toContain("合算しません");
     expect(model.bet?.description).toContain("一律 100 円");
+  });
+
+  it("Issue #16: 一律 100 円の比較は、合算の値で「同じ買い目に一律 100 円なら 回収率 X(投資額 / 回収額)」の 1 行にする。一律の賭け金が 0 なら出さない", () => {
+    expect(model.proposed?.flat).toBeNull(); // 既定の summary は一律の賭け金 0
+    const r = report();
+    const withFlat = report({ proposedBet: { ...r.proposedBet, overall: summary({ ...r.proposedBet.overall, flatStake: 30000, flatReturn: 29490, flatRecoveryRate: 0.983 }), byType: { ...r.proposedBet.byType, place: summary({ flatStake: 999900, flatReturn: 1, flatRecoveryRate: 0.5 }) } } });
+    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, withFlat) } }));
+    // 合算(overall)の値を使う(券種別の値を取り違えない)
+    expect(m.proposed?.flat).toBe("同じ買い目に一律 100 円なら 回収率 98.3%(投資額 30,000円 / 回収額 29,490円)");
+    // タイルは配分ベースのまま(一律の値を混ぜない)
+    expect(m.proposed?.tiles.map((t) => t.value)).toEqual(["300点", "123,456円", "130,000円", "105.3%"]);
+  });
+
+  it("Issue #16: 一律の回収率が丸めて 100.0% になる値は、100.0% と出さない(配分ベースのタイルと同じ整形)", () => {
+    const r = report();
+    const almost = report({ proposedBet: { ...r.proposedBet, overall: summary({ ...r.proposedBet.overall, flatStake: 10000, flatReturn: 9999, flatRecoveryRate: 0.9999 }) } });
+    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({}, almost) } }));
+    expect(m.proposed?.flat).not.toContain("100.0%");
+    expect(m.proposed?.flat).toContain("99.99%");
+  });
+
+  it("Issue #16: 配分ベースの説明文が、「同じ買い目に一律 100 円」の意味(買い目の集合が同じ・返還を含み判定不能を除く)と、累積回収率とは集合が違うことを言う", () => {
+    const d = model.proposed?.description ?? "";
+    expect(d).toContain("「同じ買い目に一律 100 円」は、この配分ベースと同じ買い目");
+    expect(d).toContain("返還を含み、判定不能を除く");
+    expect(d).toContain("買い目の集合が違います");
+    // 既存の文は残る
+    expect(d).toContain("合算しません");
+    expect(d).toContain("取消・除外の馬への買い目は返還として、賭け金を払戻に含めます");
   });
 
   it("未知の券種があれば注記を出す", () => {

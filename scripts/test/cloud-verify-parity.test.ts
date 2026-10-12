@@ -266,6 +266,14 @@ describe("前提: 入力が一致の検査を空振りさせない(各カウン�
       expect(pb[type].betCount, `${type} の点数`).toBeGreaterThan(0);
     }
     expect(pb.overall.totalReturn).toBeGreaterThan(0);
+    // Issue #16: 一律 100 円の比較(JSON 往復込みの一致は他のテストが全体を比べる)が 0 同士の一致にならない
+    for (const type of ["place", "win", "wide", "trio", "quinella", "exacta", "trifecta", "bracketQuinella"] as const) {
+      expect(pb[type].flatStake, `${type} の一律の賭け金`).toBe(pb[type].betCount * 100);
+    }
+    expect(pb.overall.flatStake).toBe(pb.overall.betCount * 100);
+    expect(pb.overall.flatStake).not.toBe(pb.overall.totalStake); // 配分の賭け金は 100 円でない買い目を含む
+    expect(pb.overall.flatReturn).toBeGreaterThan(0);
+    expect(pb.overall.flatRecoveryRate).not.toBeNull();
     expect(pb.overall.unjudgedCount).toBeGreaterThan(0);
     expect(pb.unknownBetType.count).toBeGreaterThan(0);
   });

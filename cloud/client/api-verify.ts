@@ -26,6 +26,10 @@ export interface ProposedSummaryView {
   /** 取消・除外のため返還として数えた点数と賭け金(Issue #72。`betCount`・`totalStake` に含まれる)。 */
   readonly refundedCount: number;
   readonly refundedStake: number;
+  /** 同じ買い目に一律 100 円を賭けた場合の賭け金・払戻・回収率(Issue #16。判定した買い目〈`betCount`〉と同じ集合。賭け金 0 なら回収率は null)。 */
+  readonly flatStake: number;
+  readonly flatReturn: number;
+  readonly flatRecoveryRate: number | null;
 }
 
 /** 配分ベースの 8 券種の名前(サーバの `ProposedBetReport` のキー)。 */
@@ -194,8 +198,8 @@ function parseTrend(v: unknown): VerifyReportView["trend"] | null {
 }
 
 function parseSummary(v: unknown): ProposedSummaryView | null {
-  if (!isRecord(v) || !isCount(v["betCount"]) || !isMoney(v["totalStake"]) || !isMoney(v["totalReturn"]) || !rateOrNull(v["recoveryRate"]) || !isCount(v["unjudgedCount"]) || !isCount(v["refundedCount"]) || !isMoney(v["refundedStake"])) return null;
-  return { betCount: v["betCount"], totalStake: v["totalStake"], totalReturn: v["totalReturn"], recoveryRate: v["recoveryRate"], unjudgedCount: v["unjudgedCount"], refundedCount: v["refundedCount"], refundedStake: v["refundedStake"] };
+  if (!isRecord(v) || !isCount(v["betCount"]) || !isMoney(v["totalStake"]) || !isMoney(v["totalReturn"]) || !rateOrNull(v["recoveryRate"]) || !isCount(v["unjudgedCount"]) || !isCount(v["refundedCount"]) || !isMoney(v["refundedStake"]) || !isMoney(v["flatStake"]) || !isMoney(v["flatReturn"]) || !rateOrNull(v["flatRecoveryRate"])) return null;
+  return { betCount: v["betCount"], totalStake: v["totalStake"], totalReturn: v["totalReturn"], recoveryRate: v["recoveryRate"], unjudgedCount: v["unjudgedCount"], refundedCount: v["refundedCount"], refundedStake: v["refundedStake"], flatStake: v["flatStake"], flatReturn: v["flatReturn"], flatRecoveryRate: v["flatRecoveryRate"] };
 }
 
 function parseReport(v: unknown): VerifyReportView | null {

@@ -397,6 +397,20 @@ export interface ProposedBetTypeSummary {
   readonly refundedCount: number;
   /** 返還として数えた買い目の賭け金合計(円)。`totalStake` に含まれ、同額が `totalReturn` にも含まれる。 */
   readonly refundedStake: number;
+  /**
+   * 「同じ買い目に一律 {@link FLAT_COMPARISON_STAKE}円を賭けた場合」の賭け金合計(円。Issue #16)。
+   * 集合は `betCount` に数える買い目と**全く同じ**なので、常に `betCount * FLAT_COMPARISON_STAKE`。
+   * 判定不能・未知券種は数えない(配分ベースと同じ)。配分の効果(どこに厚く賭けたか)だけを切り出すための比較で、
+   * 既存の `VerifyReport.bet`(EVプラスの複勝を一律にした系)とは買い目の集合が違う。
+   */
+  readonly flatStake: number;
+  /**
+   * 同じ買い目に一律 100 円を賭けた場合の払戻合計(円)。払戻の式は配分ベースと同じ(100円あたりの払戻 × 賭け金 / 100)で、
+   * 賭け金に 100 を与えたもの。的中は 100円あたりの払戻そのもの・不的中は 0・返還(#72)は 100 円。
+   */
+  readonly flatReturn: number;
+  /** 同じ買い目に一律 100 円を賭けた場合の回収率(`flatReturn / flatStake`)。`flatStake===0` なら null(`recoveryRate` と同じ流儀)。 */
+  readonly flatRecoveryRate: number | null;
 }
 
 /**
@@ -1354,11 +1368,49 @@ interface ProposedBetAccumulator {
   unjudgedCount: number;
   refundedCount: number;
   refundedStake: number;
+  flatStake: number;
+  flatReturn: number;
 }
 
 /** 空の可変カウンタを作る。 */
 function emptyProposedBetAccumulator(): ProposedBetAccumulator {
-  return { betCount: 0, totalStake: 0, totalReturn: 0, unjudgedCount: 0, refundedCount: 0, refundedStake: 0 };
+  return { betCount: 0, totalStake: 0, totalReturn: 0, unjudgedCount: 0, refundedCount: 0, refundedStake: 0, flatStake: 0, flatReturn: 0 };
+}
+
+/**
+ * 「同じ買い目に一律に賭ける」比較(Issue #16)の賭け金(円)。100円あたりの払戻をそのまま払戻とするので 100 に固定する
+ * (配分の `betUnit` は分析ごとに違いうるので使わない)。
+ */
+export const FLAT_COMPARISON_STAKE = 100;
+
+/**
+ * 100円あたりの払戻から、賭け金 `stake` 円の払戻を出す(配分ベースと一律の比較で**同じ式を通す**ための唯一の定義)。
+ * 配分ベースは実際の賭け金、一律は {@link FLAT_COMPARISON_STAKE} を与える。
+ */
+function payoutForStake(unitPayout: number, stake: number): number {
+  return unitPayout * (stake / 100);
+}
+
+/**
+ * 判定できた(的中・不的中・返還のいずれか)買い目を、配分ベースと一律の両方に計上する。
+ * 一律側の集合が `betCount` と必ず一致するよう、計上はここ1か所に集める。
+ * `unitPayout` は100円あたりの払戻(不的中は undefined)。返還は `refund:true` で賭け金そのものを払戻にする。
+ */
+function recordJudgedBet(acc: ProposedBetAccumulator, stake: number, unitPayout: number | undefined, refund: boolean): void {
+  acc.betCount += 1;
+  acc.totalStake += stake;
+  acc.flatStake += FLAT_COMPARISON_STAKE;
+  if (refund) {
+    acc.totalReturn += stake;
+    acc.flatReturn += FLAT_COMPARISON_STAKE;
+    acc.refundedCount += 1;
+    acc.refundedStake += stake;
+    return;
+  }
+  if (unitPayout !== undefined) {
+    acc.totalReturn += payoutForStake(unitPayout, stake);
+    acc.flatReturn += payoutForStake(unitPayout, FLAT_COMPARISON_STAKE);
+  }
 }
 
 /** 未知券種行(Issue #76)の可変カウンタ。`betTypes`は集合として集める(重複を避ける)。 */
@@ -1396,6 +1448,9 @@ function finalizeProposedBetSummary(acc: ProposedBetAccumulator): ProposedBetTyp
     unjudgedCount: acc.unjudgedCount,
     refundedCount: acc.refundedCount,
     refundedStake: acc.refundedStake,
+    flatStake: acc.flatStake,
+    flatReturn: acc.flatReturn,
+    flatRecoveryRate: acc.flatStake === 0 ? null : acc.flatReturn / acc.flatStake,
   };
 }
 
@@ -1470,6 +1525,24 @@ function finalizeProposedBetOverall(
       exacta.refundedStake +
       trifecta.refundedStake +
       bracketQuinella.refundedStake,
+    flatStake:
+      place.flatStake +
+      win.flatStake +
+      wide.flatStake +
+      trio.flatStake +
+      quinella.flatStake +
+      exacta.flatStake +
+      trifecta.flatStake +
+      bracketQuinella.flatStake,
+    flatReturn:
+      place.flatReturn +
+      win.flatReturn +
+      wide.flatReturn +
+      trio.flatReturn +
+      quinella.flatReturn +
+      exacta.flatReturn +
+      trifecta.flatReturn +
+      bracketQuinella.flatReturn,
   });
 }
 
@@ -1509,6 +1582,11 @@ function finalizeProposedBetOverall(
  * - **枠連(bracketQuinella)は返還を判定しない(別 Issue)**。`comboKey` が枠番の組で、JRA の規定では「枠の出走馬が
  *   尽きれば、その枠を含む組が返還」「ゾロ目は、その枠に出走馬が1頭だけ残れば返還」「2頭残れば返還なし」
  *   となり、馬番→枠番の対応が要るが保存していない。取消を含む枠連の買い目は従来どおり不的中として数える。
+ * 【同じ買い目に一律100円(Issue #16)】判定できた買い目(`betCount`に数えるもの。的中・不的中・返還)の賭け金だけを
+ * {@link FLAT_COMPARISON_STAKE}円に置き換えた賭け金・払戻を、`flatStake`/`flatReturn`に持つ。計上は`recordJudgedBet`の1か所に
+ * 集め、払戻の式(`payoutForStake`)も配分ベースと一律で共有する(集合と式が構造的に一致する)。判定不能・未知券種は数えない。
+ * `analysis_bets.stake`は保存側が`stake>0`のみ書く契約(`analysis-store.ts`のスキーマコメント。CHECK制約は無い)なので、
+ * `stake<=0`の行は扱わない(あっても一律側は100円として数える)。
  * **既存`bet`系(`computeHorseBetOutcome`)は`finishPosition===null`を集計対象外として賭け金・払戻の双方から
  * 除外しており〈本ファイル冒頭コメント「着順不明・非数値は集計対象外」〉、`proposedBet`系とは扱いが異なる**
  * (一律100円の系は今回変えない)。
@@ -1645,11 +1723,7 @@ function computeProposedBetReport(
       if (bet.betType !== "bracketQuinella" && scratchedUmabans.size > 0) {
         const umabans = parseComboOddsKey(bet.comboKey);
         if (umabans !== null && umabans.some((u) => scratchedUmabans.has(u))) {
-          accumulator.betCount += 1;
-          accumulator.totalStake += bet.stake;
-          accumulator.totalReturn += bet.stake;
-          accumulator.refundedCount += 1;
-          accumulator.refundedStake += bet.stake;
+          recordJudgedBet(accumulator, bet.stake, undefined, true);
           continue;
         }
       }
@@ -1659,12 +1733,7 @@ function computeProposedBetReport(
           accumulator.unjudgedCount += 1;
           continue;
         }
-        accumulator.betCount += 1;
-        accumulator.totalStake += bet.stake;
-        const payout = placePayoutByComboKey.get(bet.comboKey);
-        if (payout !== undefined) {
-          accumulator.totalReturn += payout * (bet.stake / 100);
-        }
+        recordJudgedBet(accumulator, bet.stake, placePayoutByComboKey.get(bet.comboKey), false);
         continue;
       }
 
@@ -1675,12 +1744,7 @@ function computeProposedBetReport(
           accumulator.unjudgedCount += 1;
           continue;
         }
-        accumulator.betCount += 1;
-        accumulator.totalStake += bet.stake;
-        const payout = winPayoutByComboKey.get(bet.comboKey);
-        if (payout !== undefined) {
-          accumulator.totalReturn += payout * (bet.stake / 100);
-        }
+        recordJudgedBet(accumulator, bet.stake, winPayoutByComboKey.get(bet.comboKey), false);
         continue;
       }
 
@@ -1700,12 +1764,7 @@ function computeProposedBetReport(
         accumulator.unjudgedCount += 1;
         continue;
       }
-      accumulator.betCount += 1;
-      accumulator.totalStake += bet.stake;
-      const hit = comboResult.payouts.find((p) => p.comboKey === bet.comboKey);
-      if (hit !== undefined) {
-        accumulator.totalReturn += hit.payout * (bet.stake / 100);
-      }
+      recordJudgedBet(accumulator, bet.stake, comboResult.payouts.find((p) => p.comboKey === bet.comboKey)?.payout, false);
     }
   }
 
