@@ -1674,6 +1674,32 @@ export class RaceDayCore {
     }
   }
 
+  /**
+   * 発走前の分析(取得ステップ)を行ったレースの、結果の取り込みの行を積む(Issue #277)。自動の計画の行は {@link enqueueSameDayResults} が確定時に積むが、手動の分析(計画外のレース)は積まれず、
+   * 日報の「静か」の判定({@link isDayQuiet})から見えないため、そのレースの結果を待たずに日報が依頼されていた。出馬表の発走時刻が分かるこの時点で、自動の行と同じ規則の行
+   * (発走 + {@link SAME_DAY_RESULT_DELAY_MS} が最初の試行・依頼の日は開催日)を積む。
+   * 積まない: 結果ストアが無い構成 / 過去の開催日(開催日 < 今日 JST。後日の cron の取り込みの対象) / 発走時刻が無い・読めない / 既に行があるレース(自動の計画のレース・分析し直し。
+   * `enqueue` は既存の行を巻き戻すので、必ず先に確かめる) / 当日の行の上限({@link MAX_SAME_DAY_RESULT_ROWS}。翌日以降の cron の依頼のための枠を残す)。
+   * 開催日が今日より先でも積む(前日の夜の分析。自動の行も前日夜の確定で、未来の時刻の `queued` として積まれる)。日報の依頼の後に積んだ行は結果の取り込みだけをして、日報は作り直さない(`report_requested`)。
+   * 失敗しても分析を止めない(固定の警告だけ)。
+   */
+  private enqueueResultForAnalyzedRace(raceId: string, startTime: string | undefined): void {
+    try {
+      const kaisaiDate = this.metaGet("kaisai_date");
+      if (this.resultStore === undefined || kaisaiDate === null || startTime === undefined || kaisaiDate < jstKaisaiDate(this.now())) {
+        return;
+      }
+      if (this.results.row(raceId) !== null || this.results.count() >= MAX_SAME_DAY_RESULT_ROWS) {
+        return;
+      }
+      // 出馬表の時刻は 1 桁の時間(`9:50`)を取りうる(`\d{1,2}:\d{2}`)。`startTimeEpochMs` は 2 桁を要求するので揃える。読めなければ(RangeError)積まない。
+      const startMs = startTimeEpochMs(kaisaiDate, startTime.padStart(5, "0"));
+      this.results.enqueue(raceId, kaisaiDate, this.now(), startMs + SAME_DAY_RESULT_DELAY_MS);
+    } catch {
+      this.onWarn(`結果の取り込みの行を積めませんでした(${raceId})。分析は続けます`);
+    }
+  }
+
   /** 1対象の計画の行を作る(期限・すぐ実行・スキップの判定と、上限)。 */
   private buildPlanRow(venue: PlanVenue, entry: RaceListEntry, kaisaiDate: string, offsetMinutes: number, nowMs: number): PlanRowRecord {
     const due = planPreRaceDue({ kaisaiDate, startTime: entry.startTime, offsetMinutes, nowMs });
@@ -2211,6 +2237,8 @@ export class RaceDayCore {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
       }
       await this.prefetchGradeWinner(task, parseRaceId(task.race_id), race.race.hasGradeBadge);
+      // 日報がこのレースの結果を待つように、結果の取り込みの行を積む(Issue #277)。タスクが未了(fetched)のあいだに積むので、日報の判定に隙間ができない。
+      this.enqueueResultForAnalyzedRace(task.race_id, race.race.startTime);
       this.updateTask(task, "fetched", attempts, null);
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "ok" };
     } catch (error) {
