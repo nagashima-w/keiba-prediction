@@ -6,15 +6,18 @@
  *    日報が 1 件も無ければ今日を表示する。他の API には出ない。日付の入力で選ぶ・前/今日/次のリンクを押す(Issue #273)とハッシュが変わり、`app.ts` が同じ `enter` を新しい日付で呼ぶ(同じ画面の中の切替)。
  *  - 「この日の日報を作る」(`onRun`): `POST /api/reports/run`(表示中の日)。受け付けたら作成中の表示にして、{@link REPORT_POLL_MS} おきに本文を取り直す。
  *    日報が現れたら止める(一覧も取り直す)。作成が失敗(`failed`)したら止める。{@link REPORT_MAX_POLLS} 回で止める。
+ *  - 「日報を作り直す」(`onRegenOpen`・`onRegenGo`・`onRegenCancel`。Issue #268。日報がある日の管理者だけ): 開くと**確認の段階**が出る(実行を選ぶまで POST は出ない。LLM の費用が発生し、いまの日報を置き換えるため)。
+ *    実行すると `POST /api/reports/run`(本文は `{ date, regenerate: true }`)。受け付けたら作り直し中の表示にして、同じ間隔で本文を取り直す。**作成時刻(`createdAt`)が依頼の時点から変われば完了**、
+ *    作り直しのジョブ(`job.regenerate`)が failed なら失敗(前の日報のまま)。作成時刻が変わらずジョブも見えない間は、完了にせず確認を続ける。上限は通常の作成と同じ {@link REPORT_MAX_POLLS} 回。
  *  - 作成中(サーバの `job` が running)の日を開いたときも、同じく自動で取り直す。**非表示の間は止め**、表示に戻ったら(作成中なら)即時に 1 回取って再開する。`setInterval` は使わない。
  *  - 確認を続けている状態(`watching`。Issue #246): 取得の結果が running のとき立て、日報が現れた・作成が失敗(running 以外の job)・進行状況が無いと分かった(`job_status` が `ok` で job なし)・
  *    最初の取得(`first`)が通信の失敗、のいずれかで下ろす。**進行状況を取得できなかった(`unavailable`)応答と、確認中(`poll`)の通信の失敗では変えない**。立っている間に `unavailable` が返っても、
  *    `waiting()` は true のままで、確認を止めず、固定の案内(`JOB_UNAVAILABLE_NOTICE`)を出す。日付の切替・画面を離れると捨てる。「更新」では保つ。開いた直後の最初の取得が `unavailable` のときは、running を見ていないので立てない。
  *  - 世代(`gen`)と取得の通し番号(`seq`): 離れる・開き直す・日付を替えるたびに進め、**古い応答は反映しない**。
  */
-import { fetchReport, fetchReportList, postReportRun, reportFetchFailureMessage, reportRunFailureMessage } from "./api-report";
+import { fetchReport, fetchReportList, postReportRun, reportFetchFailureMessage, reportRunFailureMessage, type ReportRunOutcome } from "./api-report";
 import type { FetchLike } from "./api";
-import { buildReportModel, type ReportDetailState, type ReportListState, type ReportModel, type ReportRunState } from "./report-model";
+import { buildReportModel, REGEN_LIMIT_MESSAGE, type ReportDetailState, type ReportListState, type ReportModel, type ReportRegenState, type ReportRunState } from "./report-model";
 
 /** 作成中の確認の間隔。 */
 export const REPORT_POLL_MS = 5_000;
@@ -42,12 +45,23 @@ export interface ReportScreen {
   leave(): void;
   /** 「この日の日報を作る」。依頼中・日報がある日・画面に居ないときは何もしない。 */
   onRun(): void;
+  /** 「日報を作り直す」を押した: 確認の段階を開く(管理者・日報がある日・作り直し中でないときだけ)。 */
+  onRegenOpen(): void;
+  /** 確認で「作り直す」を選んだ: 依頼する。確認が開いていなければ何もしない。 */
+  onRegenGo(): void;
+  /** 確認で「やめる」を選んだ。 */
+  onRegenCancel(): void;
   /** 「更新」。取得中は無視。 */
   onRefresh(): void;
   onVisibilityChange(): void;
   model(): ReportModel;
   /** 取得中のもの(テスト用の待ち)。 */
   pending(): Promise<unknown>[];
+}
+
+/** 依頼が断られた・失敗したときの固定の文言。1 日の回数の上限(`daily-limit`。作り直しだけが返す。Issue #268)は専用の案内。 */
+function runRefusedMessage(outcome: { readonly kind: "daily-limit" | "already-exists" } | Extract<ReportRunOutcome, { kind: "failed" }>): string {
+  return outcome.kind === "daily-limit" ? REGEN_LIMIT_MESSAGE : reportRunFailureMessage(outcome.kind === "failed" ? outcome.failure : { kind: "unexpected", httpStatus: 409 });
 }
 
 export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
@@ -57,6 +71,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
   let list: ReportListState = { kind: "loading" };
   let detail: ReportDetailState | null = null;
   let run: ReportRunState = { kind: "idle" };
+  let regen: ReportRegenState = { kind: "idle" };
   let busy = false;
   let pollStopped = false;
   /** 作成中(running)を見て確認を続けている(Issue #246)。進行状況を取れなかった(`unavailable`)ときに、確認を止めない根拠。`unavailable`・通信の失敗では変えない。 */
@@ -85,6 +100,10 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
    * running を見たあとの `unavailable` は「ジョブが無い」ではなく「分からない」ので、止めない)。
    */
   function waiting(): boolean {
+    if (detail !== null && detail.kind === "ready" && detail.report !== null) {
+      // 日報がある日: 作り直しを依頼した、または作り直しのジョブが走っている(Issue #268)。
+      return regen.kind === "requested" || (detail.job !== null && detail.job.regenerate === true && detail.job.status === "running");
+    }
     return (
       detail !== null &&
       detail.kind === "ready" &&
@@ -140,6 +159,11 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
           // 確認を続ける状態(Issue #246): running を見たら立て、日報が現れた・失敗した・進行状況が無いと分かった(`ok` で job なし)ら下ろす。`unavailable` では変えない。
           if (result.report !== null || (result.job !== null && result.job.status !== "running") || (result.job === null && result.jobStatus === "ok")) watching = false;
           else if (result.job !== null) watching = true;
+          if (result.report !== null && regen.kind === "requested") {
+            // 作り直しの確認(Issue #268): 作り直しのジョブが失敗したなら失敗(表示はジョブから)。作成時刻が変わったなら完了。どちらでもなければ確認を続ける。
+            if (result.job !== null && result.job.regenerate === true && result.job.status === "failed") regen = { kind: "idle" };
+            else if (result.report.createdAt !== regen.since) regen = { kind: "done" };
+          }
           if (result.report !== null) {
             run = { kind: "idle" };
             // 新しく現れた日報を一覧に入れる(前後のリンクが使う)。
@@ -200,6 +224,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
       gen += 1;
       list = { kind: "loading" };
       run = { kind: "idle" };
+      regen = { kind: "idle" };
       watching = false;
       shown = date ?? deps.today();
       fetchList(true);
@@ -209,6 +234,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
     // 同じ画面の中で日付が変わった: 本文だけ取り直す(一覧はそのまま)。
     gen += 1;
     run = { kind: "idle" };
+    regen = { kind: "idle" };
     watching = false;
     shown = resolveShown();
     fetchDetail("first");
@@ -223,6 +249,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
     list = { kind: "loading" };
     detail = null;
     run = { kind: "idle" };
+    regen = { kind: "idle" };
     busy = false;
     pollStopped = false;
     watching = false;
@@ -251,7 +278,49 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
           run = { kind: "idle" };
           fetchDetail("first");
         } else {
-          run = { kind: "error", message: reportRunFailureMessage(outcome.failure) };
+          run = { kind: "error", message: runRefusedMessage(outcome) };
+        }
+        deps.onChange();
+      }),
+    );
+  }
+
+  /** 作り直しを始められる状態か: 管理者・この画面に居る・日報がある日・作り直し中でない(ジョブが走っていない)。 */
+  function canRegen(): boolean {
+    return deps.readOnly !== true && active && detail !== null && detail.kind === "ready" && detail.report !== null && !waiting();
+  }
+
+  function onRegenOpen(): void {
+    if (!canRegen() || regen.kind === "posting" || regen.kind === "confirm") return;
+    regen = { kind: "confirm" };
+    deps.onChange();
+  }
+
+  function onRegenCancel(): void {
+    if (regen.kind !== "confirm") return;
+    regen = { kind: "idle" };
+    deps.onChange();
+  }
+
+  function onRegenGo(): void {
+    if (regen.kind !== "confirm" || !canRegen() || detail === null || detail.kind !== "ready" || detail.report === null) return;
+    const g = gen;
+    const date = shown;
+    const since = detail.report.createdAt;
+    regen = { kind: "posting" };
+    deps.onChange();
+    track(
+      postReportRun(deps.fetch, date, true).then((outcome) => {
+        if (g !== gen || date !== shown) return;
+        if (outcome.kind === "accepted" || outcome.kind === "accepted-malformed" || outcome.kind === "in-progress") {
+          // 受け付けた(または既に作り直し中)。作り直し中の表示にして、確認を始める。
+          regen = { kind: "requested", since };
+          pollStopped = false;
+          failures = 0;
+          polls = 0;
+          fetchDetail("poll");
+        } else {
+          regen = { kind: "error", message: runRefusedMessage(outcome) };
         }
         deps.onChange();
       }),
@@ -261,6 +330,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
   function onRefresh(): void {
     if (!active || busy || detail === null || detail.kind === "loading") return;
     run = run.kind === "error" || run.kind === "no-report" ? { kind: "idle" } : run;
+    regen = regen.kind === "error" || regen.kind === "done" ? { kind: "idle" } : regen;
     fetchList(false);
     fetchDetail("first");
   }
@@ -280,9 +350,12 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
     enter,
     leave,
     onRun,
+    onRegenOpen,
+    onRegenGo,
+    onRegenCancel,
     onRefresh,
     onVisibilityChange,
-    model: () => buildReportModel({ today: deps.today(), shownDate: shown, list, detail, run, pollStopped, watching, readOnly: deps.readOnly === true }),
+    model: () => buildReportModel({ today: deps.today(), shownDate: shown, list, detail, run, regen, pollStopped, watching, readOnly: deps.readOnly === true }),
     pending: () => [...inflight],
   };
 }

@@ -1078,18 +1078,42 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
     expect(sites(/\.requestReport\(/g)).toEqual({ "daily-report-do.ts": 1, "handler.ts": 1, "race-day-core.ts": 1, "race-day-do.ts": 1, "scheduled.ts": 1 });
     // 日報の DO の binding に触れるファイル: handler.ts（手動 POST・進行状況）・scheduled.ts（補完）・race-day-do.ts（日単位の DO の配線）・worker.ts（export）・daily-report-do.ts（クラス）
     expect(Object.keys(sites(/\bDAILY_REPORT\b|\bDailyReportDO\b/g)).sort()).toEqual(["daily-report-do.ts", "handler.ts", "race-day-do.ts", "scheduled.ts", "worker.ts"]);
-    // 依頼の mode は 3 種類（auto は日単位の DO・catchup は cron・manual は手動 POST）で、呼び出し側が固定している
+    // 依頼の mode は 4 種類（auto は日単位の DO・catchup は cron・manual と regenerate は手動 POST〈regenerate は本文の `regenerate: true`。Issue #268〉）で、呼び出し側が固定している。
+    // 自動で作り直す経路は無い（auto・catchup のファイルに "regenerate" が出ない）
     expect(stripCode(readTextLf("cloud", "src", "race-day-do.ts"))).toContain('mode: "auto"');
     expect(stripCode(readTextLf("cloud", "src", "scheduled.ts"))).toContain('mode: "catchup"');
-    expect(stripCode(readTextLf("cloud", "src", "handler.ts"))).toContain('mode: "manual"');
+    expect(stripCode(readTextLf("cloud", "src", "handler.ts"))).toContain('mode: regenerate ? "regenerate" : "manual"');
+    for (const f of ["race-day-do.ts", "race-day-core.ts", "scheduled.ts"]) {
+      expect(stripCode(readTextLf("cloud", "src", f)), `${f} は作り直しを依頼しない`).not.toContain("regenerate");
+    }
     // 日単位の DO は、依頼の結果の「完了」の判定を isRequestSettled に任せる（too-old を完了として扱う。個別の条件を持たない）
     expect(stripCode(readTextLf("cloud", "src", "race-day-do.ts"))).toContain("isRequestSettled(result)");
   });
 
-  it("日報の D1 の書き込みは daily-report-repository.ts の INSERT OR IGNORE INTO daily_reports の 1 文だけ(上書き・削除・他の表への書き込みが無い)。Worker の GET は読むだけ", () => {
+  it("Issue #268: 日報の Discord への送信は daily-report-core.ts の 1 箇所だけ（runNotify）。作り直しの save は通知の段階を書かない（作り直しは Discord に送らない）", () => {
+    const core = reportSources.find(([n]) => n === "daily-report-core.ts")![1];
+    expect((core.match(/notifier\.send\(/g) ?? []).length).toBe(1);
+    expect((core.match(/\.send\(/g) ?? []).length).toBe(1);
+    // 通知の段階（phase: "notify"）を書くのは runSave の通常の保存の 1 箇所だけで、作り直しの分岐（mode === "regenerate"）より後ろにある
+    expect((core.match(/phase: "notify"/g) ?? []).length).toBe(1);
+    expect(core.indexOf('job.mode === "regenerate"')).toBeGreaterThan(-1);
+    expect(core.indexOf('job.mode === "regenerate"')).toBeLessThan(core.indexOf('phase: "notify"'));
+    // 作り直しの他のファイル（通知の埋め込み・DO）が、通知を足していない
+    for (const f of ["daily-report-embed.ts", "daily-report-do.ts"]) {
+      expect(reportSources.find(([n]) => n === f)![1], `${f} に regenerate の送信が無い`).not.toContain("regenerate");
+    }
+  });
+
+  it("日報の D1 の書き込みは daily-report-repository.ts の 2 文だけ: 通常の保存の INSERT OR IGNORE INTO daily_reports(上書きしない)と、作り直し(Issue #268)の UPSERT 1 文(INSERT INTO daily_reports … ON CONFLICT(kaisai_date) DO UPDATE。文章のある前の日報を文章の無い記録で潰さない WHERE つき)。削除・他の表への書き込みが無い。Worker の GET は読むだけ", () => {
     const repo = reportSources.find(([n]) => n === "daily-report-repository.ts")![1];
     expect((repo.match(/INSERT OR IGNORE INTO daily_reports/g) ?? []).length).toBe(1);
-    for (const forbidden of ["DELETE FROM", "UPDATE ", "REPLACE INTO", "INSERT INTO", "DROP ", "ALTER "]) {
+    // 作り直しの UPSERT: 書き込みの文は 1 つ(INSERT INTO 1・ON CONFLICT 1・DO UPDATE 1)で、対象は daily_reports だけ。上書きを許す条件(WHERE)を持つ
+    expect((repo.match(/INSERT INTO daily_reports/g) ?? []).length).toBe(1);
+    expect((repo.match(/INSERT INTO/g) ?? []).length).toBe(1);
+    expect((repo.match(/ON CONFLICT\(kaisai_date\) DO UPDATE SET/g) ?? []).length).toBe(1);
+    expect((repo.match(/UPDATE /g) ?? []).length).toBe(1); // 上の DO UPDATE SET だけ（単独の UPDATE 文は無い）
+    expect(repo).toContain("WHERE excluded.model IS NOT NULL OR daily_reports.model IS NULL");
+    for (const forbidden of ["DELETE FROM", "REPLACE INTO", "DROP ", "ALTER "]) {
       expect(repo, `daily-report-repository.ts に ${forbidden} が無い`).not.toContain(forbidden);
     }
     const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));

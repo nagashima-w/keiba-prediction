@@ -37,6 +37,18 @@ export type ReportRunState =
   | { readonly kind: "no-report" }
   | { readonly kind: "error"; readonly message: string };
 
+/**
+ * 「日報を作り直す」(Issue #268。日報がある日の管理者だけ)の状態。`confirm`: 確認の段階を開いている(押しても、ここで実行を選ぶまで依頼は出ない)。`posting`: 依頼中。
+ * `requested`: 依頼を受け付けた(`since` は依頼の時点の日報の作成時刻。これが変われば作り直しが済んだ)。`done`: 新しい日報に替わった。`error`: 断られた・失敗した(固定の文言)。
+ */
+export type ReportRegenState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "confirm" }
+  | { readonly kind: "posting" }
+  | { readonly kind: "requested"; readonly since: string }
+  | { readonly kind: "done" }
+  | { readonly kind: "error"; readonly message: string };
+
 export interface ReportModelInput {
   /** 今日(JST、YYYYMMDD)。日報がまだ 1 件も無いとき、表示する日になる。 */
   readonly today: string;
@@ -46,6 +58,8 @@ export interface ReportModelInput {
   /** 表示する日の本文。取得を始める前は null。 */
   readonly detail: ReportDetailState | null;
   readonly run: ReportRunState;
+  /** 作り直し(Issue #268)の状態。省略は idle。 */
+  readonly regen?: ReportRegenState;
   /** 自動の更新(作成中の確認)を止めている。 */
   readonly pollStopped: boolean;
   /** 作成中(running)を見て確認を続けている(Issue #246)。進行状況を取れなかった(`jobUnavailable`)ときに、依頼していなくても固定の案内を出す。省略は false。 */
@@ -139,10 +153,15 @@ export interface ReportModel {
   readonly shownLabel: string;
   readonly notice: { readonly tone: Tone; readonly text: string } | null;
   /**
-   * 「この日の日報を作る」。日報が無く、作成中でもない日だけ出す。`caution` は常に出す確定の注意(押した時点の分析と結果で作り、その日は作り直せない)。
+   * 「この日の日報を作る」。日報が無く、作成中でもない日だけ出す。`caution` は常に出す注意(押した時点の分析と結果で作る。作ったあとの作り直しは管理者の「日報を作り直す」)。
    * `todayCaution` は表示中の日が今日のときだけ(まだ自動の作成条件を満たしていない可能性があるため、強めの注意)。
    */
   readonly create: { readonly label: string; readonly disabled: boolean; readonly caution: string; readonly todayCaution: string | null } | null;
+  /**
+   * 「日報を作り直す」(Issue #268)。日報がある日の**管理者**だけ(閲覧者・日報の無い日・作り直し中は null)。`confirm` があるときは、ボタンの代わりに確認(文面・実行・やめる)を出す。
+   * 実行を選ぶまでは依頼を出さない(LLM の費用が発生し、いまの日報を置き換えるため)。
+   */
+  readonly regen: { readonly label: string; readonly disabled: boolean; readonly confirm: { readonly text: string; readonly goLabel: string; readonly cancelLabel: string } | null } | null;
   readonly body: ReportBodyView | null;
 }
 
@@ -156,11 +175,18 @@ export function dateLabel(ymd: string): string {
   return `${y}年${mo}月${d}日(${WEEKDAYS[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()]!})`;
 }
 
-/** 手動の作成の確定の注意(固定文言)。1 日 1 回で確定し、上書きしないため。 */
-export const CREATE_CAUTION = "押した時点の分析と結果で日報を作り、その日は作り直せません。";
+/** 手動の作成の注意(固定文言)。作ったあとは、管理者が「日報を作り直す」で作り直せる(Issue #268。回数に上限がある)。 */
+export const CREATE_CAUTION = "押した時点の分析と結果で日報を作ります。作ったあとも「日報を作り直す」で作り直せます(1 日の回数に上限があります)。";
 /** 今日の日付のときの強めの注意(固定文言)。 */
 export const CREATE_TODAY_CAUTION =
-  "今日の日報は、まだ分析していないレース(夜の地方など)や、結果の取り込みが終わっていないレースがあるうちに押すと、それらを含まないまま確定します。通常は、その日の分析と結果が揃うと自動で作られるので、急がなければ待ってください。";
+  "今日の日報は、まだ分析していないレース(夜の地方など)や、結果の取り込みが終わっていないレースがあるうちに押すと、それらを含まないまま作られます。通常は、その日の分析と結果が揃うと自動で作られるので、急がなければ待ってください。";
+/** 作り直しの確認の文面(Issue #268。固定文言)。費用・置き換え(元に戻せない)・回数の上限・Discord に送らないこと。 */
+export const REGEN_CONFIRM_TEXT =
+  "いまの分析と結果でこの日の日報を作り直し、いまの日報を置き換えます(元に戻せません)。LLM を呼ぶため API の費用がかかり、1 日の回数に上限があります。Discord には送りません。";
+export const REGEN_REQUESTED_NOTICE = "日報の作り直しを依頼しました。しばらくすると新しい日報に替わります(この画面は自動で更新します)。";
+export const REGEN_DONE_NOTICE = "日報を作り直しました。";
+export const REGEN_FAILED_NOTICE = "日報の作り直しに失敗しました。前の日報のままです。";
+export const REGEN_LIMIT_MESSAGE = "今日の作り直しの上限に達しました。日付が変わってから(日本時間)もう一度押してください。";
 /** 依頼したが日報が作られずに終わったときの固定文言。 */
 export const NO_REPORT_NOTICE = "この日は分析したレースが無いため、日報は作られませんでした。";
 
@@ -316,7 +342,7 @@ export function buildReportModel(input: ReportModelInput): ReportModel {
     shownLabel: dateLabel(input.shownDate),
   };
   const loading = list.kind === "loading" || detail === null || detail.kind === "loading";
-  const refreshDisabled = loading || run.kind === "posting";
+  const refreshDisabled = loading || run.kind === "posting" || input.regen?.kind === "posting";
   let error: string | null = null;
   if (list.kind === "error") error = list.message;
   else if (detail !== null && detail.kind === "error") error = detail.message;
@@ -324,9 +350,26 @@ export function buildReportModel(input: ReportModelInput): ReportModel {
   let body: ReportBodyView | null = null;
   let notice: ReportModel["notice"] = null;
   let create: ReportModel["create"] = null;
+  let regen: ReportModel["regen"] = null;
   if (detail !== null && detail.kind === "ready") {
     if (detail.report !== null) {
       body = bodyOf(detail.report);
+      const g = input.regen ?? { kind: "idle" };
+      const job = detail.job;
+      const running = g.kind === "requested" || (job !== null && job.regenerate === true && job.status === "running");
+      if (running) {
+        notice = { tone: "wait", text: g.kind === "requested" && detail.jobUnavailable === true ? JOB_UNAVAILABLE_NOTICE : REGEN_REQUESTED_NOTICE };
+      } else if (g.kind === "done") {
+        notice = { tone: "ok", text: REGEN_DONE_NOTICE };
+      } else if (g.kind === "error") {
+        notice = { tone: "error", text: g.message };
+      } else if (g.kind !== "posting" && job !== null && job.regenerate === true && job.status === "failed") {
+        notice = { tone: "error", text: REGEN_FAILED_NOTICE };
+      }
+      // 閲覧者(Issue #238)には出さない(作り直しは管理者だけ。サーバも 403)。作り直し中も出さない。
+      if (input.readOnly !== true && !running) {
+        regen = { label: g.kind === "posting" ? "依頼中…" : "日報を作り直す", disabled: g.kind === "posting", confirm: g.kind === "confirm" ? { text: REGEN_CONFIRM_TEXT, goLabel: "作り直す", cancelLabel: "やめる" } : null };
+      }
     } else if (detail.job !== null && detail.job.status === "running") {
       notice = { tone: "wait", text: "日報を作成中です。しばらくすると表示されます(この画面は自動で更新します)。" };
     } else if (run.kind === "requested" || (input.watching === true && detail.jobUnavailable === true)) {
@@ -363,5 +406,5 @@ export function buildReportModel(input: ReportModelInput): ReportModel {
   if (input.pollStopped && notice !== null && notice.tone === "wait") {
     notice = { tone: "wait", text: "作成の確認の自動更新を止めました。「更新」を押すと、もう一度確認します。" };
   }
-  return { ...base, loading, refreshDisabled, error, notice, create, body };
+  return { ...base, loading, refreshDisabled, error, notice, create, regen, body };
 }

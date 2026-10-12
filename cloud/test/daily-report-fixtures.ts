@@ -122,7 +122,7 @@ export async function buildSavedRecord(options: { readonly llmText?: string; rea
       readRaces: async (items) => items.map((i) => inputs.find((x) => x.view.id === i.analysisId) ?? null),
       readPeriodStats: async (fromDate, toDate) => ({ ...(options.prior ?? fixturePriorStats()), fromDate, toDate }),
     },
-    store: { hasReport: async () => false, saveReport: async (r) => (saved.push(r), "saved") },
+    store: { hasReport: async () => false, saveReport: async (r) => (saved.push(r), "saved"), replaceReport: async () => "replaced" },
     loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
     llm: { sender },
   };

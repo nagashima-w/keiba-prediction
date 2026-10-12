@@ -11,6 +11,7 @@ import {
   REPORT_NOTE_NO_KEY,
   REPORT_NOTE_UNPARSED,
   REPORT_READ_CHUNK,
+  REPORT_REGEN_DAILY_LIMIT,
   REPORT_RETRY_DELAY_MS,
   type DailyReportDeps,
   type DailyReportKv,
@@ -84,6 +85,8 @@ interface Harness {
   readonly alarms: number[];
   readonly warns: string[];
   readonly saved: ReportRecord[];
+  /** `replaceReport`(作り直しの上書き。Issue #268)に渡された記録。 */
+  readonly replaced: ReportRecord[];
   readonly sent: DiscordPayload[];
   readonly prompts: string[];
   /** LLM に送ったリクエストのモデル ID(送った順)。 */
@@ -91,7 +94,7 @@ interface Harness {
   readonly readCalls: number[];
   /** 期間の再集計の呼び出し(from, to)。 */
   readonly periodCalls: Array<[string, string]>;
-  readonly state: { period: PeriodStats; failPeriod: number; analyses: { raceId: string; analysisId: number }[]; inputs: Map<number, RaceInput>; failRead: number; failSave: number; hasReport: boolean; llmFailures: number; llmText: string; notifyFails: boolean; saveResult: "saved" | "exists"; allMissing: boolean; hasReportCalls: number };
+  readonly state: { period: PeriodStats; failPeriod: number; analyses: { raceId: string; analysisId: number }[]; inputs: Map<number, RaceInput>; failRead: number; failSave: number; hasReport: boolean; llmFailures: number; llmText: string; notifyFails: boolean; saveResult: "saved" | "exists"; allMissing: boolean; hasReportCalls: number; replaceResult: "replaced" | "kept"; failReplace: number };
   step(): Promise<StepOutcome>;
   drain(max?: number): Promise<StepOutcome[]>;
 }
@@ -102,6 +105,7 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
   const alarms: number[] = [];
   const warns: string[] = [];
   const saved: ReportRecord[] = [];
+  const replaced: ReportRecord[] = [];
   const sent: DiscordPayload[] = [];
   const prompts: string[] = [];
   const models: string[] = [];
@@ -122,6 +126,8 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
     saveResult: "saved",
     allMissing: false,
     hasReportCalls: 0,
+    replaceResult: "replaced",
+    failReplace: 0,
   };
   const source: ReportSource = {
     listDayAnalyses: async () => state.analyses,
@@ -159,6 +165,17 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
       state.hasReport = true;
       return "saved";
     },
+    replaceReport: async (record) => {
+      if (state.failReplace > 0) {
+        state.failReplace -= 1;
+        throw new Error("D1 書き込み失敗(上書き)");
+      }
+      if (state.replaceResult === "kept") {
+        return "kept";
+      }
+      replaced.push(record);
+      return "replaced";
+    },
   };
   const sender: MessageSender = async (params) => {
     prompts.push(params.messages[0]!.content);
@@ -194,7 +211,7 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
   };
   const core = new DailyReportCore(deps);
   return {
-    core, kv, clock, alarms, warns, saved, sent, prompts, models, readCalls, periodCalls, state,
+    core, kv, clock, alarms, warns, saved, replaced, sent, prompts, models, readCalls, periodCalls, state,
     step: () => core.runNextStep(),
     async drain(max = 60) {
       const outcomes: StepOutcome[] = [];
@@ -598,7 +615,7 @@ describe("C9: 通知は送る前に sending を書く(送信の途中で落ち�
       setAlarm: () => {},
       onWarn: () => {},
       source: { listDayAnalyses: async () => [], readRaces: async () => [], readPeriodStats: async () => priorStats() },
-      store: { hasReport: async () => false, saveReport: async () => "saved" },
+      store: { hasReport: async () => false, saveReport: async () => "saved", replaceReport: async () => "replaced" },
       loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
       notifier: { send: async () => void seenDuringSend.push(kv.get<Record<string, unknown>>(`job:${DATE}`)?.["notify"]) },
     });
@@ -619,7 +636,7 @@ describe("C9: 通知は送る前に sending を書く(送信の途中で落ち�
         setAlarm: () => {},
         onWarn: () => {},
         source: { listDayAnalyses: async () => [], readRaces: async () => [], readPeriodStats: async () => priorStats() },
-        store: { hasReport: async () => false, saveReport: async () => "saved" },
+        store: { hasReport: async () => false, saveReport: async () => "saved", replaceReport: async () => "replaced" },
         loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
         notifier: { send },
       });
@@ -664,6 +681,7 @@ describe("C7(Issue #255): LLM の試行は、呼ぶ前に永続化する(呼び�
         source: { listDayAnalyses: async () => [], readRaces: async () => [], readPeriodStats: async () => priorStats() },
         store: {
           hasReport: async () => false,
+          replaceReport: async () => "replaced",
           saveReport: async (r) => {
             saved.push(r);
             return "saved";
@@ -986,5 +1004,281 @@ describe("Issue #272: 日報の「もしも」(印の定型の買い方と惜し
     expect(body.nearMisses).toBeUndefined();
     expect(h.prompts[0]).not.toContain("印の定型の買い方");
     expect(((h.sent[0]!.embeds![0]! as { fields?: Array<{ name: string }> }).fields ?? []).map((f) => f.name).join("|")).not.toMatch(/もしも|惜しかった/);
+  });
+});
+
+
+describe("Issue #268: 管理者による日報の作り直し(mode: regenerate)", () => {
+  /** 日報が既にある日を作り直す準備(日報が D1 にある状態)。 */
+  function regenHarness(options: Parameters<typeof harness>[0] = {}): Harness {
+    const h = harness(options);
+    h.state.hasReport = true;
+    return h;
+  }
+
+  /** 再試行の待ち(REPORT_RETRY_DELAY_MS)も時計を進めて、動かせるジョブが無くなるまで進める。 */
+  async function settle(h: Harness): Promise<StepOutcome[]> {
+    const outcomes: StepOutcome[] = [];
+    for (let i = 0; i < 200; i += 1) {
+      const o = await h.step();
+      outcomes.push(o);
+      if (o.kind === "idle") {
+        if (h.kv.get("jobs") === undefined) break;
+        h.clock.t += REPORT_RETRY_DELAY_MS;
+      } else {
+        h.clock.t += 1000;
+      }
+    }
+    return outcomes;
+  }
+
+  /** 作り直しを依頼して最後まで進める。 */
+  async function regenerateOnce(h: Harness, date: string = DATE): Promise<Awaited<ReturnType<Harness["core"]["requestReport"]>>> {
+    const result = await h.core.requestReport({ kaisaiDate: date, mode: "regenerate" });
+    await settle(h);
+    return result;
+  }
+
+  const quotaOf = (h: Harness): { day: string; count: number } | undefined => h.kv.get<{ day: string; count: number }>("regen");
+
+  describe("依頼の受け付け", () => {
+    it("前提: 1 日の上限は 3 回", () => {
+      expect(REPORT_REGEN_DAILY_LIMIT).toBe(3);
+    });
+
+    it("日報がある日は受け付け、アラームを今に設定する。ジョブは作り直しとして状況に出る(regenerate: true)", async () => {
+      const h = regenHarness();
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: true });
+      expect(h.alarms).toEqual([T0]);
+      expect(h.core.getStatus(DATE)).toStrictEqual({ phase: "list", status: "running", attempts: 0, regenerate: true });
+    });
+
+    it("通常の作成のジョブの状況には regenerate を付けない(キーそのものが無い)", async () => {
+      const h = harness();
+      await h.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+      const status = h.core.getStatus(DATE)!;
+      expect(status).toStrictEqual({ phase: "list", status: "running", attempts: 0 });
+      expect("regenerate" in status).toBe(false);
+    });
+
+    it("日報が無い日は not-exists で断る(作成の入口の仕事)。状態も回数も作らない", async () => {
+      const h = harness(); // hasReport = false
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "not-exists" });
+      expect(h.kv.data.size).toBe(0);
+      expect(h.alarms).toEqual([]);
+    });
+
+    it("作成中の日は in-progress で断る。断った依頼は回数に数えない", async () => {
+      const h = regenHarness();
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: true });
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "in-progress" });
+      expect(quotaOf(h)).toStrictEqual({ day: DATE, count: 1 });
+    });
+
+    it("未来・不正な日付は受け付けない。回数に数えない", async () => {
+      const h = regenHarness();
+      expect(await h.core.requestReport({ kaisaiDate: "20261011", mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "future-date" });
+      expect(await h.core.requestReport({ kaisaiDate: "20261340", mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "invalid-date" });
+      expect(h.kv.data.size).toBe(0);
+    });
+
+    it("古い日(JST の今日から 30 日前)も受け付ける(manual と同じで、日付の古さの上限はない)", async () => {
+      const h = regenHarness();
+      expect(await h.core.requestReport({ kaisaiDate: "20260910", mode: "regenerate" })).toStrictEqual({ accepted: true });
+    });
+
+    it("isRequestSettled: 新しい理由 not-exists・daily-limit は完了として扱わない(auto は送らないが、型の網羅として固定する)", () => {
+      expect(isRequestSettled({ accepted: false, reason: "not-exists" })).toBe(false);
+      expect(isRequestSettled({ accepted: false, reason: "daily-limit" })).toBe(false);
+    });
+  });
+
+  describe("1 日の回数の上限(全体・JST の日付・受理したときだけ数える)", () => {
+    it("3 回まで受理し、4 回目は daily-limit で断る(ジョブも作らない)。断った依頼(in-progress・not-exists)は数えない", async () => {
+      const h = regenHarness();
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: true });
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "in-progress" }); // 数えない
+      await settle(h);
+      h.state.hasReport = false;
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "not-exists" }); // 数えない
+      h.state.hasReport = true;
+      // ここまでの受理は 1 回。断った依頼を数えていたら、下の 2 回の受理が揃わない
+      expect(await regenerateOnce(h)).toStrictEqual({ accepted: true });
+      expect(await regenerateOnce(h)).toStrictEqual({ accepted: true });
+      expect(h.replaced).toHaveLength(3);
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "daily-limit" });
+      expect(h.core.getStatus(DATE)).toBeNull();
+      expect(quotaOf(h)).toStrictEqual({ day: DATE, count: 3 });
+    });
+
+    it("上限は日付(開催日)ごとではなく全体: 別の開催日の作り直しも合わせて 3 回", async () => {
+      const h = regenHarness();
+      await regenerateOnce(h, "20261008");
+      await regenerateOnce(h, "20261009");
+      await regenerateOnce(h, DATE);
+      expect(h.replaced.map((r) => r.kaisaiDate)).toEqual(["20261008", "20261009", DATE]);
+      expect(await h.core.requestReport({ kaisaiDate: "20261007", mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "daily-limit" });
+    });
+
+    it("失敗した作り直しも数える(LLM の費用が発生しうる)。失敗したジョブがあっても新しい依頼は受け付ける", async () => {
+      const h = regenHarness();
+      h.state.replaceResult = "kept";
+      await regenerateOnce(h);
+      expect(h.core.getStatus(DATE)).toMatchObject({ status: "failed" });
+      expect(quotaOf(h)).toStrictEqual({ day: DATE, count: 1 });
+      h.state.replaceResult = "replaced";
+      expect(await regenerateOnce(h)).toStrictEqual({ accepted: true });
+      expect(h.replaced).toHaveLength(1);
+      expect(h.core.getStatus(DATE)).toBeNull();
+      expect(quotaOf(h)).toStrictEqual({ day: DATE, count: 2 });
+    });
+
+    it("JST の 0 時で数え直す(UTC の 0 時ではない): JST 23:59:59 は同じ日、JST 0:00 から新しい日", async () => {
+      const h = regenHarness();
+      await regenerateOnce(h);
+      await regenerateOnce(h);
+      await regenerateOnce(h);
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "daily-limit" });
+      h.clock.t = Date.parse("2026-10-10T14:59:59.000Z"); // JST 23:59:59
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: false, reason: "daily-limit" });
+      h.clock.t = Date.parse("2026-10-10T15:00:00.000Z"); // JST 翌日 0:00(UTC では同じ日の 15 時)
+      expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" })).toStrictEqual({ accepted: true });
+      expect(quotaOf(h)).toStrictEqual({ day: "20261011", count: 1 });
+    });
+
+    it("通常の作成(manual)は回数に数えず、上限に達していても制限されない", async () => {
+      const h = harness({ raceCount: 2 });
+      await h.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+      await h.drain();
+      expect(quotaOf(h)).toBeUndefined();
+      h.kv.put("regen", { day: DATE, count: 3 }); // 上限に達した状態
+      h.state.hasReport = false;
+      expect(await h.core.requestReport({ kaisaiDate: "20261009", mode: "manual" })).toStrictEqual({ accepted: true });
+    });
+  });
+
+  describe("作り直しの流れ", () => {
+    it("list → gather → generate → save で終わり、通知に進まない。D1 には replaceReport だけを使う(saveReport は呼ばない)", async () => {
+      const h = regenHarness({ appBaseUrl: "https://example.com" });
+      await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" });
+      const outcomes = await h.drain();
+      const phases = outcomes.filter((o) => o.kind === "ran").map((o) => (o as { phase: string }).phase);
+      expect(phases).toEqual(["list", "gather", "gather", "gather", "generate", "save"]);
+      expect(h.replaced).toHaveLength(1);
+      expect(h.saved).toHaveLength(0);
+      expect(h.prompts).toHaveLength(1);
+      expect(h.kv.get("job:" + DATE)).toBeUndefined(); // 終わったジョブは消える
+      expect(h.core.getStatus(DATE)).toBeNull();
+    });
+
+    it("Discord に送らない(通知の経路が無い)。対照: 同じ入力の通常の作成(manual)は 1 回送る", async () => {
+      const control = harness({ appBaseUrl: "https://example.com" });
+      await control.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+      await control.drain();
+      expect(control.sent).toHaveLength(1); // 対照: 送れる構成であること(0 回が自明に成り立たない)
+      const h = regenHarness({ appBaseUrl: "https://example.com" });
+      await regenerateOnce(h);
+      expect(h.replaced).toHaveLength(1); // 作り直しは最後まで走った
+      expect(h.sent).toHaveLength(0);
+    });
+
+    it("作り直した日報は通常の作成と同じ本文(4 週の累計・もしも・惜しかったレース・文章)を作る。前の日報から引き継がない", async () => {
+      const control = harness();
+      await control.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+      await control.drain();
+      const h = regenHarness();
+      await regenerateOnce(h);
+      const created = control.saved[0]!;
+      const regenerated = h.replaced[0]!;
+      expect(regenerated.body).toStrictEqual(created.body);
+      expect(regenerated.body.rolling).toBeDefined(); // 4 週の累計(#264)
+      expect(regenerated.body.nearMisses).toBeDefined(); // 惜しかったレース(#272)
+      expect(regenerated.body.stats.whatIf).not.toBeNull(); // もしも(#272)
+      expect(regenerated.summary).toBe(created.summary);
+      expect(h.periodCalls).toHaveLength(1); // 直前 27 日を、作り直しの時点で再集計する
+      expect(h.periodCalls).toStrictEqual(control.periodCalls);
+    });
+
+    it("作り直した記録の作成時刻は、作り直した時刻になる", async () => {
+      const h = regenHarness();
+      h.clock.t = Date.parse("2026-10-10T12:00:00.000Z");
+      await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" });
+      await h.drain();
+      expect(Date.parse(h.replaced[0]!.createdAt)).toBeGreaterThanOrEqual(Date.parse("2026-10-10T12:00:00.000Z"));
+    });
+  });
+
+  describe("失敗しても前の日報は消えない(コアは replaceReport 以外で D1 を書かない)", () => {
+    it("保存(replaceReport)が上限まで失敗したら failed。書いていないので前の日報は残る。状況に regenerate: true が残る", async () => {
+      const h = regenHarness();
+      h.state.failReplace = 99;
+      await regenerateOnce(h);
+      expect(h.replaced).toHaveLength(0);
+      expect(h.saved).toHaveLength(0);
+      expect(h.core.getStatus(DATE)).toStrictEqual({ phase: "save", status: "failed", attempts: REPORT_MAX_STEP_ATTEMPTS, regenerate: true });
+      expect(h.sent).toHaveLength(0);
+    });
+
+    it("保存の失敗の再試行で、LLM は呼び直さない(応答を永続化している)", async () => {
+      const h = regenHarness();
+      h.state.failReplace = 1;
+      await regenerateOnce(h);
+      expect(h.prompts).toHaveLength(1);
+      expect(h.replaced).toHaveLength(1);
+    });
+
+    it("置き換えなかった(kept: 前の日報の方が良い)ときは failed にして、通知もしない。動かすジョブの一覧から外れる", async () => {
+      const h = regenHarness();
+      h.state.replaceResult = "kept";
+      await h.core.requestReport({ kaisaiDate: DATE, mode: "regenerate" });
+      const outcomes = await h.drain();
+      const last = outcomes.filter((o) => o.kind === "ran").at(-1);
+      expect(last).toMatchObject({ phase: "save", result: "failed" });
+      expect(h.core.getStatus(DATE)).toMatchObject({ phase: "save", status: "failed", regenerate: true });
+      expect(h.replaced).toHaveLength(0);
+      expect(h.sent).toHaveLength(0);
+      expect(h.kv.get("jobs")).toBeUndefined();
+      expect(h.warns.some((w) => w.includes("前の日報"))).toBe(true);
+    });
+
+    it("LLM が使えなかった作り直しは、文章なしの記録(model: null)を replaceReport に渡す(置き換えるかどうかは D1 の側の規則)", async () => {
+      const h = regenHarness();
+      h.state.llmFailures = 99;
+      await regenerateOnce(h);
+      expect(h.replaced).toHaveLength(1);
+      expect(h.replaced[0]!.model).toBeNull();
+      expect(h.replaced[0]!.body.note).toBe(REPORT_NOTE_FAILED);
+      expect(h.prompts).toHaveLength(REPORT_MAX_LLM_ATTEMPTS);
+    });
+
+    it("その日の分析が見つからないとき(list が 0 件)は、LLM を呼ばず、置き換えず、作り直しの失敗として残す", async () => {
+      const h = regenHarness();
+      h.state.analyses = [];
+      await regenerateOnce(h);
+      expect(h.prompts).toHaveLength(0);
+      expect(h.replaced).toHaveLength(0);
+      expect(h.core.getStatus(DATE)).toMatchObject({ status: "failed", regenerate: true });
+    });
+
+    it("分析は列挙されたが詳細が全件読めなかった(ダイジェスト 0 件)ときも同じ", async () => {
+      const h = regenHarness();
+      h.state.allMissing = true;
+      await regenerateOnce(h);
+      expect(h.prompts).toHaveLength(0);
+      expect(h.replaced).toHaveLength(0);
+      expect(h.core.getStatus(DATE)).toMatchObject({ status: "failed", regenerate: true });
+    });
+
+    it("失敗した作り直しのジョブは本文を抱え込まない(kv を肥大させない)", async () => {
+      const h = regenHarness();
+      h.state.replaceResult = "kept";
+      await regenerateOnce(h);
+      const job = h.kv.get<{ digests: unknown[]; items: unknown[]; record: unknown; calls: unknown[] }>("job:" + DATE)!;
+      expect(job).toBeDefined();
+      expect(job.digests).toEqual([]);
+      expect(job.items).toEqual([]);
+      expect(job.record).toBeNull();
+      expect(job.calls).toEqual([]);
+    });
   });
 });

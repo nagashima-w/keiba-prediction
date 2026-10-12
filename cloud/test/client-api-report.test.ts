@@ -255,3 +255,39 @@ describe("Issue #272: 印の定型の買い方(whatIf)と惜しかったレー�
     expect(await fetchWith(detail(STATS, { nearMisses }))).toStrictEqual(unexpected);
   });
 });
+
+describe("Issue #268: 作り直し(regenerate)の API", () => {
+  const BODY = { ok: true, accepted: true, date: "20261005" };
+
+  it("postReportRun(…, true) は本文に regenerate: true を足す。省略(従来の呼び出し)は { date } だけで、キーそのものを付けない", async () => {
+    const bodies: unknown[] = [];
+    const spy: FetchLike = async (_url, init) => {
+      bodies.push(JSON.parse(init.body as string));
+      return { status: 202, json: async () => BODY };
+    };
+    expect(await postReportRun(spy, "20261005", true)).toStrictEqual({ kind: "accepted" });
+    await postReportRun(spy, "20261005");
+    await postReportRun(spy, "20261005", false);
+    expect(bodies).toStrictEqual([{ date: "20261005", regenerate: true }, { date: "20261005" }, { date: "20261005" }]);
+  });
+
+  it("429 は error.type が daily-limit のときだけ daily-limit(1 日の上限)。型が違う・本文が無い 429 は unexpected", async () => {
+    expect(await postReportRun(reply(429, { ok: false, error: { type: "daily-limit" } }), "20261005", true)).toStrictEqual({ kind: "daily-limit" });
+    expect(await postReportRun(reply(429, { ok: false, error: { type: "other" } }), "20261005", true)).toStrictEqual({ kind: "failed", failure: { kind: "unexpected", httpStatus: 429 } });
+    expect(await postReportRun(reply(429, "x"), "20261005", true)).toStrictEqual({ kind: "failed", failure: { kind: "unexpected", httpStatus: 429 } });
+  });
+
+  it("409 の not-exists(作り直しなのに日報が無い。画面からは出せない)は、既知の型にせず unexpected(固定の文言で出る)", async () => {
+    expect(await postReportRun(reply(409, { ok: false, error: { type: "not-exists" } }), "20261005", true)).toStrictEqual({ kind: "failed", failure: { kind: "unexpected", httpStatus: 409 } });
+  });
+
+  it("job の regenerate: true を読む。無ければキーを足さない。true 以外(false・文字列)は壊れた応答として unexpected", async () => {
+    const withJob = (job: unknown) => reply(200, { ok: true, report: null, job, job_status: "ok" });
+    expect(await fetchReport(withJob({ phase: "save", status: "failed", attempts: 3, regenerate: true }), "20261005")).toMatchObject({ ok: true, job: { phase: "save", status: "failed", attempts: 3, regenerate: true } });
+    const plain = (await fetchReport(withJob({ phase: "save", status: "failed", attempts: 3 }), "20261005")) as { job: object };
+    expect("regenerate" in plain.job).toBe(false);
+    for (const regenerate of [false, "true", 1, null]) {
+      expect(await fetchReport(withJob({ phase: "save", status: "failed", attempts: 3, regenerate }), "20261005"), String(regenerate)).toMatchObject({ ok: false });
+    }
+  });
+});

@@ -158,6 +158,8 @@ export interface ReportJob {
   readonly phase: "list" | "gather" | "generate" | "save" | "notify";
   readonly status: "running" | "failed";
   readonly attempts: number;
+  /** 作り直し(Issue #268)のジョブにだけ付く(`true`)。通常の作成のジョブにはキーそのものが無い。 */
+  readonly regenerate?: true;
 }
 
 export type ReportListResult = { readonly ok: true; readonly reports: readonly ReportListItem[] } | { readonly ok: false; readonly error: ApiFailure };
@@ -343,11 +345,12 @@ function parseDetail(value: unknown): ReportDetail | null {
 function parseJob(value: unknown): ReportJob | null | undefined {
   if (value === null) return null;
   if (!isRecord(value)) return undefined;
-  const { phase, status, attempts } = value;
-  if ((phase !== "list" && phase !== "gather" && phase !== "generate" && phase !== "save" && phase !== "notify") || (status !== "running" && status !== "failed") || !isCount(attempts)) {
+  const { phase, status, attempts, regenerate } = value;
+  // regenerate は無いか true だけ(サーバが書くのは true のみ。それ以外は壊れた応答として、一部だけを採用しない)。
+  if ((phase !== "list" && phase !== "gather" && phase !== "generate" && phase !== "save" && phase !== "notify") || (status !== "running" && status !== "failed") || !isCount(attempts) || (regenerate !== undefined && regenerate !== true)) {
     return undefined;
   }
-  return { phase, status, attempts };
+  return regenerate === true ? { phase, status, attempts, regenerate } : { phase, status, attempts };
 }
 
 async function readBody(response: Awaited<ReturnType<FetchLike>>): Promise<unknown> {
@@ -409,10 +412,15 @@ export type ReportRunOutcome =
   | { readonly kind: "accepted-malformed" }
   | { readonly kind: "already-exists" }
   | { readonly kind: "in-progress" }
+  /** 作り直し(Issue #268)の 1 日の回数の上限(429 `daily-limit`)。 */
+  | { readonly kind: "daily-limit" }
   | { readonly kind: "failed"; readonly failure: ApiFailure };
 
-/** `POST /api/reports/run`。Origin の扱いは `api-run.ts` の説明と同じ(`referrerPolicy` を付け、`mode` は指定しない)。 */
-export async function postReportRun(fetchLike: FetchLike, date: string): Promise<ReportRunOutcome> {
+/**
+ * `POST /api/reports/run`。Origin の扱いは `api-run.ts` の説明と同じ(`referrerPolicy` を付け、`mode` は指定しない)。
+ * `regenerate` が true なら本文に `regenerate: true` を足す(Issue #268。日報がある日の作り直し。管理者だけ)。省略・false は従来の `{ date }` だけ。
+ */
+export async function postReportRun(fetchLike: FetchLike, date: string, regenerate: boolean = false): Promise<ReportRunOutcome> {
   let response: Awaited<ReturnType<FetchLike>>;
   try {
     response = await fetchLike("/api/reports/run", {
@@ -420,7 +428,7 @@ export async function postReportRun(fetchLike: FetchLike, date: string): Promise
       credentials: "same-origin",
       referrerPolicy: "same-origin",
       headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ date }),
+      body: JSON.stringify(regenerate ? { date, regenerate: true } : { date }),
     });
   } catch {
     return { kind: "failed", failure: { kind: "network" } };
@@ -435,6 +443,7 @@ export async function postReportRun(fetchLike: FetchLike, date: string): Promise
     if (error?.["type"] === "in-progress") return { kind: "in-progress" };
     return { kind: "failed", failure: { kind: "unexpected", httpStatus: 409 } };
   }
+  if (response.status === 429 && isRecord(body) && isRecord(body["error"]) && body["error"]["type"] === "daily-limit") return { kind: "daily-limit" };
   if (response.status === 400 || response.status === 413 || response.status === 415) return { kind: "failed", failure: { kind: "bad-request" } };
   const failure = classify(response.status, body);
   return { kind: "failed", failure: failure.kind === "netkeiba-unavailable" ? { kind: "server-error" } : failure };

@@ -59,6 +59,10 @@ export interface ViewActions {
   readonly onVerifyCalibrationTarget: (target: CalibrationTarget) => void;
   /** 日報画面の「この日の日報を作る」ボタン(Issue #235)。引数なし(表示中の日は `report-screen.ts` が持つ)。 */
   readonly onReportRun: () => void;
+  /** 日報画面の「日報を作り直す」(Issue #268。管理者だけ)。押すと確認が開き、確認の「作り直す」で依頼し、「やめる」で閉じる。 */
+  readonly onReportRegenOpen: () => void;
+  readonly onReportRegenGo: () => void;
+  readonly onReportRegenCancel: () => void;
   /** 日報画面の日付の入力(`<input type="date">`の値 YYYY-MM-DD)。Issue #273。 */
   readonly onReportDateChange: (value: string) => void;
 }
@@ -842,6 +846,19 @@ function reportScreen(model: ReportModel, actions: ViewActions): VNode {
     body.push(h("p", { class: "meta report-caution" }, [model.create.caution]));
     if (model.create.todayCaution !== null) body.push(notice("wait", model.create.todayCaution));
     body.push(h("button", { class: "report-run", disabled: model.create.disabled }, [model.create.label], { click: actions.onReportRun }));
+  }
+  if (model.regen !== null) {
+    const r = model.regen;
+    // 作り直し(Issue #268)。確認を開いているときは、ボタンの代わりに確認(文面・実行・やめる)を出す。
+    body.push(
+      r.confirm === null
+        ? h("button", { class: "report-regen", disabled: r.disabled }, [r.label], { click: actions.onReportRegenOpen })
+        : h("div", { class: "report-regen-confirm" }, [
+            h("p", { class: "meta report-caution" }, [r.confirm.text]),
+            h("button", { class: "report-regen-go" }, [r.confirm.goLabel], { click: actions.onReportRegenGo }),
+            h("button", { class: "report-regen-cancel" }, [r.confirm.cancelLabel], { click: actions.onReportRegenCancel }),
+          ]),
+    );
   }
   if (model.body !== null) body.push(...reportBodyNodes(model.body));
   return h("div", { class: "screen report-screen" }, [controls, ...body]);

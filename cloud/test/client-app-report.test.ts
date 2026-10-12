@@ -57,7 +57,7 @@ interface Harness {
 
 const LIST_ROW = (date: string) => ({ date, created_at: "2026-06-27T11:00:00.000Z", model: null, race_count: 2, total_stake: 100, total_return: 0, summary: null });
 
-async function harness(initialHash: string): Promise<Harness> {
+async function harness(initialHash: string, role: "admin" | "viewer" = "admin"): Promise<Harness> {
   const calls: string[] = [];
   const hashes: string[] = [];
   const forces: boolean[] = [];
@@ -95,7 +95,7 @@ async function harness(initialHash: string): Promise<Harness> {
     },
   };
   (h as { app: App }).app = createApp({
-    role: "admin",
+    role,
     fetch: fetchLike,
     now: () => new Date("2026-06-28T00:00:00Z"),
     render: (tree, force) => {
@@ -278,5 +278,51 @@ describe("日報の日付の選択(日付の入力と前・今日・次のリン
     h.go("#report=20260628");
     await h.app.whenIdle();
     expect(links(h)).toEqual([["前の日報", "#report=20260627"], ["今日", "#report=20260628"]]);
+  });
+});
+
+describe("Issue #268: アプリ全体の中の『日報を作り直す』", () => {
+  it("管理者・日報がある日: ボタン → 確認(やめる/作り直す)→ POST → 作り直し中 → 新しい日報に替わって完了。作成のボタンは出ない", async () => {
+    const h = await harness("#report=20260627");
+    h.app.start();
+    await h.app.whenIdle();
+    expect(byClass(h.tree(), "report-run")).toHaveLength(0);
+    expect(byClass(h.tree(), "report-regen")).toHaveLength(1);
+    // 押すと確認が開く(POST はまだ出ない)。やめると閉じる
+    byClass(h.tree(), "report-regen")[0]!.on!.click!();
+    expect(byClass(h.tree(), "report-regen-confirm")).toHaveLength(1);
+    expect(byClass(h.tree(), "report-regen")).toHaveLength(0);
+    expect(h.calls).not.toContain("POST /api/reports/run");
+    byClass(h.tree(), "report-regen-cancel")[0]!.on!.click!();
+    expect(byClass(h.tree(), "report-regen")).toHaveLength(1);
+    expect(h.calls).not.toContain("POST /api/reports/run");
+    // もう一度開いて実行する
+    byClass(h.tree(), "report-regen")[0]!.on!.click!();
+    const first = h.details["20260627"]![0]!;
+    h.details["20260627"] = [
+      { ...first, job: { phase: "generate", status: "running", attempts: 0, regenerate: true } },
+      { ...first, report: { ...(first["report"] as object), created_at: "2026-06-27T13:00:00.000Z" }, job: null },
+    ];
+    byClass(h.tree(), "report-regen-go")[0]!.on!.click!();
+    await h.app.whenIdle();
+    expect(h.calls).toContain("POST /api/reports/run");
+    expect(textOf(h.tree())).toContain("日報の作り直しを依頼しました");
+    expect(byClass(h.tree(), "report-regen")).toHaveLength(0); // 作り直し中はボタンを出さない
+    expect(textOf(h.tree())).toContain("回収率"); // 前の日報の本文は出したまま
+    await h.timers.advance(5_000);
+    await h.app.whenIdle();
+    expect(textOf(h.tree())).toContain("日報を作り直しました。");
+    expect(byClass(h.tree(), "report-regen")).toHaveLength(1);
+    expect(h.timers.pending()).toBe(0);
+  });
+
+  it("閲覧者: 日報があってもボタンも確認も出ない(対照: 同じ日報で管理者には出る)", async () => {
+    for (const role of ["admin", "viewer"] as const) {
+      const h = await harness("#report=20260627", role);
+      h.app.start();
+      await h.app.whenIdle();
+      expect(textOf(h.tree()), role).toContain("回収率"); // 日報の本文は閲覧者にも出る
+      expect(byClass(h.tree(), "report-regen").length, role).toBe(role === "admin" ? 1 : 0);
+    }
   });
 });

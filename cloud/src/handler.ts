@@ -152,7 +152,7 @@ const PRIOR_EXPORT_NAME = "main";
 
 /** 日報の DO(DailyReportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #235。 */
 export interface DailyReportStubLike {
-  /** 日報の作成の依頼(冪等。進行中・作成済みは断る)。 */
+  /** 日報の作成の依頼(冪等。進行中・作成済みは断る)。`mode: "regenerate"`(Issue #268)は逆に、日報が無い日を断り、1 日の回数の上限がある。 */
   requestReport(input: { readonly kaisaiDate: string; readonly mode: ReportMode }): Promise<RequestReportResult>;
   /** 進行状況(無ければ null)。 */
   getStatus(kaisaiDate: string): Promise<ReportStatus | null>;
@@ -400,7 +400,7 @@ export async function handle(
         headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
       });
     }
-    return pathname === "/api/reports" ? handleReportList(new URL(request.url), env) : handleReportDetail(new URL(request.url), pathname.slice(REPORTS_PREFIX.length), env);
+    return pathname === "/api/reports" ? handleReportList(new URL(request.url), env) : handleReportDetail(new URL(request.url), pathname.slice(REPORTS_PREFIX.length), env, auth.role);
   }
 
   if (pathname === "/api/verify") {
@@ -1443,13 +1443,17 @@ async function handleReportList(url: URL, env: Env): Promise<Response> {
 
 /**
  * `GET /api/reports/{YYYYMMDD}`(Issue #235): 1 日の日報(本文つき)。無い日は `report: null` で、日報の DO の進行状況(作成中・失敗)を `job` に付ける
- * (DO が失敗・binding なしでも 200 で `job: null`。画面を壊さない)。日報があるときは DO を呼ばない。開催日の形が違えば 404(D1 を引かない)。クエリは受け付けない(400)。
+ * (DO が失敗・binding なしでも 200 で `job: null`。画面を壊さない)。開催日の形が違えば 404(D1 を引かない)。クエリは受け付けない(400)。
+ *
+ * **日報があるとき**(Issue #268): **閲覧者**は DO を呼ばない(`job: null`・`ok`。従来どおり)。**管理者**は日報があっても DO の進行状況を付ける
+ * (作り直しの進行・失敗を画面が見るため。`regenerate: true` のジョブだけが意味を持つ)。DO の取得が失敗しても日報は 200 で返し、`job_status` を `unavailable` にする。
+ * 役割は認証の結果(`auth.role`)だけで決める(クエリでは名乗れない)。
  *
  * **`job_status`(Issue #245)**: `job: null` の意味を区別する。`"ok"`: 取得できた(日報があるとき・DO が「ジョブなし」と答えたとき・binding が無い構成〈ジョブが存在しえない〉)。
  * `"unavailable"`: 日報が無い日に、日報の DO の取得(RPC)が**失敗した**(ジョブがあるかどうか分からない)。画面は、依頼の直後に `job: null` かつ `ok` のときだけ
  * 「日報は作られずに終わった」と判断し、`unavailable` のときは確認を続ける(従来は失敗も `job: null` で、実行中でも「作られなかった」と出て確認が止まった)。
  */
-async function handleReportDetail(url: URL, dateText: string, env: Env): Promise<Response> {
+async function handleReportDetail(url: URL, dateText: string, env: Env, role: "admin" | "viewer"): Promise<Response> {
   if (!/^[0-9]{8}$/.test(dateText) || !checkKaisaiDate(dateText).ok) {
     return json({ ok: false, error: { type: "not-found" } }, 404);
   }
@@ -1462,7 +1466,21 @@ async function handleReportDetail(url: URL, dateText: string, env: Env): Promise
   } catch {
     return json({ ok: false, error: { type: "report-error" } }, 503);
   }
+  // 進行状況(DO の getStatus)。固定の形だけを写す(DO から別の値が来ても、そのまま返さない)。`regenerate` は `true` のときだけ付ける(Issue #268)。
+  const readJob = async (): Promise<{ job: ReportStatus | null; jobStatus: "ok" | "unavailable" }> => {
+    try {
+      const namespace = env.DAILY_REPORT;
+      if (namespace === undefined) {
+        return { job: null, jobStatus: "ok" };
+      }
+      const status = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).getStatus(dateText);
+      return { job: status === null ? null : { phase: status.phase, status: status.status, attempts: status.attempts, ...(status.regenerate === true ? { regenerate: true as const } : {}) }, jobStatus: "ok" };
+    } catch {
+      return { job: null, jobStatus: "unavailable" };
+    }
+  };
   if (report !== null) {
+    const { job, jobStatus } = role === "admin" ? await readJob() : { job: null, jobStatus: "ok" as const };
     return json({
       ok: true,
       report: {
@@ -1475,31 +1493,21 @@ async function handleReportDetail(url: URL, dateText: string, env: Env): Promise
         summary: report.summary,
         body: report.body,
       },
-      job: null,
-      job_status: "ok",
+      job,
+      job_status: jobStatus,
     });
   }
-  let job: ReportStatus | null = null;
-  let jobStatus: "ok" | "unavailable" = "ok";
-  try {
-    const namespace = env.DAILY_REPORT;
-    if (namespace !== undefined) {
-      const status = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).getStatus(dateText);
-      // 固定の形だけを写す(DO から別の値が来ても、そのまま返さない)。
-      job = status === null ? null : { phase: status.phase, status: status.status, attempts: status.attempts };
-    }
-  } catch {
-    job = null;
-    jobStatus = "unavailable";
-  }
+  const { job, jobStatus } = await readJob();
   return json({ ok: true, report: null, job, job_status: jobStatus });
 }
 
 const REPORT_RUN_BODY_MAX_BYTES = 1024;
-const REPORT_RUN_KEYS = new Set(["date"]);
+const REPORT_RUN_KEYS = new Set(["date", "regenerate"]);
 
 /**
  * `POST /api/reports/run`(Issue #235): 指定した開催日の日報を、日報の DO に依頼する(202)。本文は JSON `{ date }`(JST の開催日 8 桁。今日以前)。
+ * **`regenerate: true` を付けると、日報がある日の作り直し**(Issue #268。DO には `mode: "regenerate"`)。`regenerate` は boolean だけ(型違いは 400)で、無い・`false` は通常の作成(`mode: "manual"`)。
+ * 作り直しの断りは固定の型で返す: 作成中 409 `in-progress`・日報が無い 409 `not-exists`・**1 日の回数の上限 429 `daily-limit`**。管理者専用(route-policy.ts の `/api/reports/run`)。
  * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON のオブジェクト 400)→ 入力の検証(400。ここまでで DO は呼ばない)→ DO。
  * 作成済み・作成中は 409(`already-exists`・`in-progress`)。DO の失敗・binding なしは 503 `report-error`(文面を返さない)。Worker は LLM も netkeiba も呼ばない(作るのは DO のアラーム)。
  */
@@ -1520,6 +1528,11 @@ async function handleReportRun(request: Request, env: Env, now: () => Date): Pro
   if (!checked.ok) {
     return badRequest(checked.message);
   }
+  const flag = record["regenerate"];
+  if (flag !== undefined && typeof flag !== "boolean") {
+    return badRequest("regenerate は true または false で指定してください");
+  }
+  const regenerate = flag === true;
   const today = jstKaisaiDate(now().getTime());
   if (date > today) {
     return badRequest(`date は今日(${today})以前にしてください`);
@@ -1529,13 +1542,20 @@ async function handleReportRun(request: Request, env: Env, now: () => Date): Pro
     if (namespace === undefined) {
       throw new Error("DAILY_REPORT binding がありません");
     }
-    const result = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate: date, mode: "manual" });
+    const result = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate: date, mode: regenerate ? "regenerate" : "manual" });
     if (!result.accepted) {
-      if (result.reason === "exists") {
+      if (result.reason === "exists" && !regenerate) {
         return json({ ok: false, error: { type: "already-exists" } }, 409);
       }
       if (result.reason === "in-progress") {
         return json({ ok: false, error: { type: "in-progress" } }, 409);
+      }
+      // 作り直しだけが返す理由(通常の作成に返ってきたら食い違いなので、下の 503)。
+      if (regenerate && result.reason === "not-exists") {
+        return json({ ok: false, error: { type: "not-exists" } }, 409);
+      }
+      if (regenerate && result.reason === "daily-limit") {
+        return json({ ok: false, error: { type: "daily-limit" } }, 429);
       }
       // 検証で弾いたはずの理由(不正・未来の日付)が DO から来た: 食い違いなので 503。
       return json({ ok: false, error: { type: "report-error" } }, 503);

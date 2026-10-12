@@ -324,6 +324,9 @@ export function createApp(deps: AppDeps): App {
     onVerifyVersionToggle: verify.onVersionToggle,
     onVerifyCalibrationTarget: verify.onCalibrationTarget,
     onReportRun: report.onRun,
+    onReportRegenOpen: report.onRegenOpen,
+    onReportRegenGo: report.onRegenGo,
+    onReportRegenCancel: report.onRegenCancel,
     onReportDateChange,
   };
 

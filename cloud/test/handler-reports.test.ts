@@ -167,8 +167,10 @@ describe("GET /api/reports: 日報の一覧", () => {
 });
 
 describe("GET /api/reports/{YYYYMMDD}: 1 日の日報", () => {
-  it("日報があれば本文つきで返し、進行状況(job)は null(日報の DO を呼ばない)", async () => {
-    const { deps, token } = await setup();
+  it("閲覧者: 日報があれば本文つきで返し、進行状況(job)は null(日報の DO を呼ばない。管理者は Issue #268 で作り直しの進行状況を付けるので DO を呼ぶ。下の describe)", async () => {
+    const key = await makeKey("k1");
+    const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
+    const token = await signToken(key, { email: "friend@example.com" });
     const h = harness();
     const res = await handle(get("/api/reports/20261005", token), h.env(), {}, deps);
     expect(res.status).toBe(200);
@@ -277,5 +279,178 @@ describe("POST /api/reports/run: 手動の作成", () => {
     const res = await handle(get("/api/reports/run", token), harness().env(), {}, deps);
     expect(res.status).toBe(405);
     expect(res.headers.get("allow")).toBe("POST");
+  });
+});
+
+
+describe("Issue #268: POST /api/reports/run の regenerate: true(管理者による日報の作り直し)", () => {
+  it("regenerate: true なら日報の DO に mode: regenerate で依頼し、202 を返す(通常の mode: manual ではない)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    const res = await handle(post({ date: "20261005", regenerate: true }, token), h.env(), {}, deps);
+    expect(res.status).toBe(202);
+    expect(await res.json()).toStrictEqual({ ok: true, accepted: true, date: "20261005" });
+    expect(h.requests).toEqual([{ kaisaiDate: "20261005", mode: "regenerate" }]);
+  });
+
+  it("regenerate: false は通常の作成(mode: manual)。キーが無い呼び出しも従来どおり manual(古いクライアントの束で作り直しが起きない)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    expect((await handle(post({ date: "20261005", regenerate: false }, token), h.env(), {}, deps)).status).toBe(202);
+    expect((await handle(post({ date: "20261005" }, token), h.env(), {}, deps)).status).toBe(202);
+    expect(h.requests).toEqual([
+      { kaisaiDate: "20261005", mode: "manual" },
+      { kaisaiDate: "20261005", mode: "manual" },
+    ]);
+  });
+
+  it.each([["文字列 true", "true"], ["数値 1", 1], ["null", null], ["配列", [true]]])("regenerate が boolean でなければ 400(DO を呼ばない): %s", async (_name, value) => {
+    const { deps, token } = await setup();
+    const h = harness();
+    const res = await handle(post({ date: "20261005", regenerate: value }, token), h.env(), {}, deps);
+    expect(res.status).toBe(400);
+    expect(h.requests).toEqual([]);
+  });
+
+  it("作り直しでも入力の検証は同じ: 未来の日・不正な日付・余計なキーは 400(DO を呼ばない)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    for (const body of [{ date: "20261007", regenerate: true }, { date: "20261340", regenerate: true }, { date: "20261005", regenerate: true, mode: "auto" }, { regenerate: true }]) {
+      expect((await handle(post(body, token), h.env(), {}, deps)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect(h.requests).toEqual([]);
+  });
+
+  it.each([
+    ["作成中", { accepted: false, reason: "in-progress" } as RequestReportResult, 409, "in-progress"],
+    ["日報が無い", { accepted: false, reason: "not-exists" } as RequestReportResult, 409, "not-exists"],
+    ["1 日の回数の上限", { accepted: false, reason: "daily-limit" } as RequestReportResult, 429, "daily-limit"],
+  ])("作り直しを DO が断ったとき(%s)は固定の型で返す", async (_name, result, status, type) => {
+    const { deps, token } = await setup();
+    const h = harness();
+    h.requestResult = result;
+    const res = await handle(post({ date: "20261005", regenerate: true }, token), h.env(), {}, deps);
+    expect(res.status).toBe(status);
+    expect(await res.json()).toStrictEqual({ ok: false, error: { type } });
+  });
+
+  it("作り直しの依頼で DO が exists を返す(食い違い)ときは、409 ではなく 503(作り直しは日報がある日が前提)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    h.requestResult = { accepted: false, reason: "exists" };
+    expect((await handle(post({ date: "20261005", regenerate: true }, token), h.env(), {}, deps)).status).toBe(503);
+  });
+
+  it("通常の作成の依頼に not-exists・daily-limit が返る(食い違い)ときは 503(作り直し以外は 429 を返さない)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    for (const reason of ["not-exists", "daily-limit"] as const) {
+      h.requestResult = { accepted: false, reason };
+      expect((await handle(post({ date: "20261005" }, token), h.env(), {}, deps)).status, reason).toBe(503);
+    }
+  });
+
+  it("守りは作り直しでも同じ: Origin が違えば 403・Content-Type が JSON でなければ 415(DO を呼ばない)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    expect((await handle(post({ date: "20261005", regenerate: true }, token, { origin: "https://evil.invalid" }), h.env(), {}, deps)).status).toBe(403);
+    expect((await handle(post({ date: "20261005", regenerate: true }, token, { "content-type": "text/plain" }), h.env(), {}, deps)).status).toBe(415);
+    expect(h.requests).toEqual([]);
+  });
+
+  it("閲覧者は作り直せない: 403(admin-only)で、DO を呼ばない", async () => {
+    const key = await makeKey("k1");
+    const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
+    const viewerToken = await signToken(key, { email: "friend@example.com" });
+    const h = harness();
+    const res = await handle(post({ date: "20261005", regenerate: true }, viewerToken), h.env(), {}, deps);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toStrictEqual({ ok: false, error: { type: "admin-only" } });
+    expect(h.requests).toEqual([]);
+    expect(h.names).toEqual([]);
+  });
+});
+
+describe("Issue #268: GET /api/reports/{date} は、管理者の要求に限り、日報があっても作り直しの進行状況(job)を付ける", () => {
+  it("管理者: 日報があっても日報の DO の進行状況を付ける(作り直し中は regenerate: true のジョブ)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    h.status = { phase: "generate", status: "running", attempts: 0, regenerate: true };
+    const res = await handle(get("/api/reports/20261005", token), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { report: { date: string }; job: unknown; job_status: string };
+    expect(body.report.date).toBe("20261005");
+    expect(body.job).toStrictEqual({ phase: "generate", status: "running", attempts: 0, regenerate: true });
+    expect(body.job_status).toBe("ok");
+    expect(h.names).toEqual(["main"]);
+  });
+
+  it("管理者: 作り直しの失敗(failed)も返す。ジョブが無ければ job は null(ok)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    h.status = { phase: "save", status: "failed", attempts: 3, regenerate: true };
+    const failed = (await (await handle(get("/api/reports/20261005", token), h.env(), {}, deps)).json()) as { job: unknown };
+    expect(failed.job).toStrictEqual({ phase: "save", status: "failed", attempts: 3, regenerate: true });
+    h.status = null;
+    const none = (await (await handle(get("/api/reports/20261005", token), h.env(), {}, deps)).json()) as { job: unknown; job_status: string };
+    expect(none.job).toBeNull();
+    expect(none.job_status).toBe("ok");
+  });
+
+  it("管理者: 固定の形だけを写す(regenerate が true でなければ付けない。余計なキーも返さない)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    h.status = { phase: "gather", status: "running", attempts: 1, regenerate: "yes", secret: "SECRET-X" } as unknown as ReportStatus;
+    const body = (await (await handle(get("/api/reports/20261005", token), h.env(), {}, deps)).json()) as { job: unknown };
+    expect(body.job).toStrictEqual({ phase: "gather", status: "running", attempts: 1 });
+    expect(JSON.stringify(body)).not.toContain("SECRET-X");
+  });
+
+  it("管理者: 日報があるとき DO の取得が失敗しても 200 で日報を返す(job は null・job_status は unavailable)。例外の文面は返さない", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    h.statusFails = true;
+    const res = await handle(get("/api/reports/20261005", token), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const body = JSON.parse(text) as { report: { date: string }; job: unknown; job_status: string };
+    expect(body.report.date).toBe("20261005");
+    expect(body.job).toBeNull();
+    expect(body.job_status).toBe("unavailable");
+    expect(text).not.toContain("SECRET-DO");
+  });
+
+  it("管理者: binding の無い構成では DO を呼ばず、日報を返す(job は null・ok)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    const body = (await (await handle(get("/api/reports/20261005", token), h.env(false), {}, deps)).json()) as { job: unknown; job_status: string };
+    expect(body.job).toBeNull();
+    expect(body.job_status).toBe("ok");
+  });
+
+  it("閲覧者: 日報があるとき DO を呼ばない(従来どおり job は null・ok)。作り直しのジョブが走っていても見せない", async () => {
+    const key = await makeKey("k1");
+    const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
+    const viewerToken = await signToken(key, { email: "friend@example.com" });
+    const h = harness();
+    h.status = { phase: "generate", status: "running", attempts: 0, regenerate: true }; // 走っていても、閲覧者には出さない
+    const res = await handle(get("/api/reports/20261005", viewerToken), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { report: { date: string }; job: unknown; job_status: string };
+    expect(body.report.date).toBe("20261005");
+    expect(body.job).toBeNull();
+    expect(body.job_status).toBe("ok");
+    expect(h.names).toEqual([]); // 対照: 管理者なら上のテストのとおり ["main"] になる。DO の名前空間にも触れていない
+  });
+
+  it("閲覧者: 日報が無い日の進行状況は従来どおり返す(作成中・失敗。regenerate は付かない通常のジョブ)", async () => {
+    const key = await makeKey("k1");
+    const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
+    const viewerToken = await signToken(key, { email: "friend@example.com" });
+    const h = harness();
+    h.status = { phase: "gather", status: "running", attempts: 1 };
+    const body = (await (await handle(get("/api/reports/20261003", viewerToken), h.env(), {}, deps)).json()) as { report: unknown; job: unknown };
+    expect(body.report).toBeNull();
+    expect(body.job).toStrictEqual({ phase: "gather", status: "running", attempts: 1 });
   });
 });

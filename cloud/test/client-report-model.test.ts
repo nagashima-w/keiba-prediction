@@ -140,31 +140,31 @@ describe("日報が無い日", () => {
     expect(text).not.toContain("その日の分析と結果が揃うと自動で作られます");
   });
 
-  it("R3: ボタンには確定の注意(押した時点で作り、作り直せない)が常に付く。今日の日付のときだけ強めの注意も付く", () => {
+  it("R3: ボタンには注意(押した時点で作る。作ったあとの作り直しは別のボタン・回数に上限。Issue #268 で『作り直せません』から改めた)が常に付く。今日の日付のときだけ強めの注意も付く", () => {
     const other = buildReportModel(input({ shownDate: "20261009", detail: { kind: "ready", report: null, job: null } })).create!;
     expect(other.caution).toBe(CREATE_CAUTION);
-    expect(other.caution).toContain("作り直せません");
+    expect(other.caution).toContain("「日報を作り直す」で作り直せます");
     expect(other.todayCaution).toBeNull();
     const today = buildReportModel(input({ shownDate: "20261010", detail: { kind: "ready", report: null, job: null } })).create!;
     expect(today.caution).toBe(CREATE_CAUTION);
     expect(today.todayCaution).toBe(CREATE_TODAY_CAUTION);
-    expect(today.todayCaution).toContain("含まないまま確定");
+    expect(today.todayCaution).toContain("含まないまま作られます");
     // 失敗(job が failed)・依頼中・依頼の失敗のときも、ボタンが出るなら注意は付く
     expect(buildReportModel(input({ detail: { kind: "ready", report: null, job: { phase: "save", status: "failed", attempts: 3 } } })).create!.caution).toBe(CREATE_CAUTION);
     expect(buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, run: { kind: "posting" } })).create!.caution).toBe(CREATE_CAUTION);
   });
 
   it("Issue #246 K11: 確定の注意と、今日の強い注意の文言をリテラルで固定する(定数どうしの比較では、文面を弱めても通ってしまう)", () => {
-    expect(CREATE_CAUTION).toBe("押した時点の分析と結果で日報を作り、その日は作り直せません。");
+    expect(CREATE_CAUTION).toBe("押した時点の分析と結果で日報を作ります。作ったあとも「日報を作り直す」で作り直せます(1 日の回数に上限があります)。");
     expect(CREATE_TODAY_CAUTION).toBe(
-      "今日の日報は、まだ分析していないレース(夜の地方など)や、結果の取り込みが終わっていないレースがあるうちに押すと、それらを含まないまま確定します。通常は、その日の分析と結果が揃うと自動で作られるので、急がなければ待ってください。",
+      "今日の日報は、まだ分析していないレース(夜の地方など)や、結果の取り込みが終わっていないレースがあるうちに押すと、それらを含まないまま作られます。通常は、その日の分析と結果が揃うと自動で作られるので、急がなければ待ってください。",
     );
     // 画面のモデルが、その文言をそのまま出す(今日だけ強い注意。ほかの日は null)
     const today = buildReportModel(input({ shownDate: "20261010", detail: { kind: "ready", report: null, job: null } })).create!;
-    expect(today.caution).toBe("押した時点の分析と結果で日報を作り、その日は作り直せません。");
+    expect(today.caution).toBe("押した時点の分析と結果で日報を作ります。作ったあとも「日報を作り直す」で作り直せます(1 日の回数に上限があります)。");
     expect(today.todayCaution).toContain("まだ分析していないレース");
     expect(today.todayCaution).toContain("結果の取り込みが終わっていないレース");
-    expect(today.todayCaution).toContain("含まないまま確定します");
+    expect(today.todayCaution).toContain("含まないまま作られます");
     expect(today.todayCaution).toContain("急がなければ待ってください");
     expect(buildReportModel(input({ shownDate: "20261009", detail: { kind: "ready", report: null, job: null } })).create!.todayCaution).toBeNull();
   });

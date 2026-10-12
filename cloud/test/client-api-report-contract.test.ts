@@ -20,7 +20,10 @@ interface Connected {
   readonly requests: Array<{ kaisaiDate: string; mode: string }>;
 }
 
-async function connect(record: ReportRecord, options: { readonly statusFails?: boolean } = {}): Promise<Connected> {
+/** 日報の DO が返す進行状況(偽)。既定は「収集中」。`null` は「ジョブなし」。 */
+type FakeStatus = { phase: "list" | "gather" | "generate" | "save" | "notify"; status: "running" | "failed"; attempts: number; regenerate?: true } | null;
+
+async function connect(record: ReportRecord, options: { readonly statusFails?: boolean; readonly status?: FakeStatus } = {}): Promise<Connected> {
   const key = await makeKey("k1");
   const token = await signToken(key);
   const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
@@ -47,7 +50,7 @@ async function connect(record: ReportRecord, options: { readonly statusFails?: b
         },
         getStatus: async () => {
           if (options.statusFails === true) throw new Error("日報の DO の RPC の失敗");
-          return { phase: "gather" as const, status: "running" as const, attempts: 0 };
+          return options.status === undefined ? { phase: "gather" as const, status: "running" as const, attempts: 0 } : options.status;
         },
       }),
     },
@@ -77,7 +80,7 @@ describe("契約: 本物の日報(DailyReportCore の出力)を、クライア�
     const record = await buildSavedRecord();
     expect(record.totalStake).toBeGreaterThan(0); // 前提(空振り防止): 賭け金のある日報で検査している
     expect(record.body.stats.byMark.length).toBeGreaterThan(0);
-    const { fetch } = await connect(record);
+    const { fetch } = await connect(record, { status: null }); // 管理者の要求は日報があっても進行状況を取る(Issue #268)。ここは「ジョブなし」の場合
     const detail = await fetchReport(fetch, FIXTURE_DATE);
     expect(detail.ok).toBe(true);
     if (!detail.ok || detail.report === null) throw new Error("日報が読めませんでした");
@@ -162,5 +165,30 @@ describe("契約: 本物の日報(DailyReportCore の出力)を、クライア�
     expect(await postReportRun(fetch, "20261006")).toStrictEqual({ kind: "accepted" });
     expect(requests).toEqual([{ kaisaiDate: "20261006", mode: "manual" }]);
     expect(await postReportRun(fetch, "20261230")).toMatchObject({ kind: "failed", failure: { kind: "bad-request" } }); // 未来の日
+  });
+});
+
+describe("契約(Issue #268): 日報がある日の作り直しの進行状況と、作り直しの依頼", () => {
+  it("管理者の GET は日報があっても作り直しのジョブ(regenerate: true)を返し、クライアントが読める", async () => {
+    const record = await buildSavedRecord();
+    const { fetch } = await connect(record, { status: { phase: "generate", status: "running", attempts: 1, regenerate: true } });
+    const detail = await fetchReport(fetch, FIXTURE_DATE);
+    expect(detail).toMatchObject({ ok: true, jobStatus: "ok", job: { phase: "generate", status: "running", attempts: 1, regenerate: true } });
+    expect((detail as { report: unknown }).report).not.toBeNull();
+  });
+
+  it("日報がある日の進行状況の取得が失敗しても、日報は読める(jobStatus は unavailable)", async () => {
+    const record = await buildSavedRecord();
+    const { fetch } = await connect(record, { statusFails: true });
+    const detail = await fetchReport(fetch, FIXTURE_DATE);
+    expect(detail).toMatchObject({ ok: true, job: null, jobStatus: "unavailable" });
+    expect((detail as { report: unknown }).report).not.toBeNull();
+  });
+
+  it("postReportRun(…, true) は、本物の handle() を通って mode: regenerate の依頼になり、accepted で返る", async () => {
+    const record = await buildSavedRecord();
+    const { fetch, requests } = await connect(record);
+    expect(await postReportRun(fetch, "20261005", true)).toStrictEqual({ kind: "accepted" });
+    expect(requests).toEqual([{ kaisaiDate: "20261005", mode: "regenerate" }]);
   });
 });

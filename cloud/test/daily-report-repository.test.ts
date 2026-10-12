@@ -408,3 +408,78 @@ describe("D1ReportSource.readPeriodStats(Issue #264)", () => {
     }, 120_000);
   });
 });
+
+describe("D1ReportStore.replaceReport(Issue #268: 作り直しの上書き)", () => {
+  const store = () => new D1ReportStore({ db: local.db });
+  /** 文章の無い記録(LLM が使えなかった日報)。 */
+  const plain = (over: Partial<ReportRecord> = {}): ReportRecord =>
+    record({ model: null, summary: null, llmCallsJson: null, body: { ...record().body, narrative: null, note: "LLM を使えなかったため、統計だけの日報です" }, ...over });
+
+  it("前の日報を全列置き換える(LLM の文章がある同士)。本文・作成時刻・件数・集計・総括・LLM の記録のどれも新しい", async () => {
+    const s = store();
+    await s.saveReport(record());
+    const next = record({
+      createdAt: "2026-10-11T01:00:00.000Z", model: "claude-opus-5", raceCount: 7, totalStake: 700, totalReturn: 2100, summary: "作り直した総括",
+      body: { ...record().body, narrative: { summary: "作り直した総括", good: ["新しい良い点"], improve: [], races: [] } },
+      llmCallsJson: '[{"n":1}]',
+    });
+    expect(await s.replaceReport(next)).toBe("replaced");
+    expect(await s.getReport(DATE)).toStrictEqual(next);
+    expect((await s.listReports(10)).map((r) => r.kaisaiDate)).toEqual([DATE]); // 行が増えない
+  });
+
+  it("前が文章なし(本来の用途: LLM が失敗して統計だけで確定した日)なら、新しい記録が文章なしでも置き換える(最新の統計に更新される)", async () => {
+    const s = store();
+    await s.saveReport(plain({ totalReturn: 100 }));
+    const next = plain({ createdAt: "2026-10-11T01:00:00.000Z", totalReturn: 999 });
+    expect(await s.replaceReport(next)).toBe("replaced");
+    expect((await s.getReport(DATE))!.totalReturn).toBe(999);
+    expect((await s.getReport(DATE))!.createdAt).toBe("2026-10-11T01:00:00.000Z");
+  });
+
+  it("前が文章なしで、新しい記録に文章があれば置き換える(統計だけの日報を直すという本来の用途)", async () => {
+    const s = store();
+    await s.saveReport(plain());
+    const next = record({ createdAt: "2026-10-11T01:00:00.000Z" });
+    expect(await s.replaceReport(next)).toBe("replaced");
+    expect(await s.getReport(DATE)).toStrictEqual(next);
+  });
+
+  it("前に文章があり、新しい記録に文章が無い(LLM が使えなかった作り直し)ときは置き換えない(kept)。前の日報は全列そのまま", async () => {
+    const s = store();
+    const before = record({ summary: "前の総括", totalReturn: 1400 });
+    await s.saveReport(before);
+    expect(await s.replaceReport(plain({ createdAt: "2026-10-11T01:00:00.000Z", totalReturn: 5, raceCount: 99 }))).toBe("kept");
+    expect(await s.getReport(DATE)).toStrictEqual(before);
+  });
+
+  it("文章が生の文章(narrative なし・model あり)の記録は『文章あり』として扱う: 前が文章ありでも置き換える", async () => {
+    const s = store();
+    await s.saveReport(record());
+    const raw = record({ createdAt: "2026-10-11T01:00:00.000Z", model: "claude-sonnet-5-5", summary: "生の文章の先頭", body: { ...record().body, narrative: null, narrativeRaw: "生の文章", note: "LLM の応答を構造として読めなかったため、生の文章を載せています" } });
+    expect(await s.replaceReport(raw)).toBe("replaced");
+    expect((await s.getReport(DATE))!.body.narrativeRaw).toBe("生の文章");
+  });
+
+  it("前の日報が無い日でも落ちず、通常の保存と同じに作る(置き換え扱い)", async () => {
+    const s = store();
+    expect(await s.replaceReport(record())).toBe("replaced");
+    expect(await s.getReport(DATE)).toStrictEqual(record());
+  });
+
+  it("他の日の日報には触れない", async () => {
+    const s = store();
+    const other = record({ kaisaiDate: "20261009", summary: "別の日", body: { ...record().body, kaisaiDate: "20261009" } });
+    await s.saveReport(other);
+    await s.saveReport(record());
+    await s.replaceReport(record({ summary: "作り直し", createdAt: "2026-10-11T01:00:00.000Z" }));
+    expect(await s.getReport("20261009")).toStrictEqual(other);
+  });
+
+  it("対照: 通常の保存(saveReport)は、作り直しの導入後も上書きしない(INSERT OR IGNORE のまま)", async () => {
+    const s = store();
+    await s.saveReport(record({ summary: "最初" }));
+    expect(await s.saveReport(record({ summary: "後から" }))).toBe("exists");
+    expect((await s.getReport(DATE))!.summary).toBe("最初");
+  });
+});

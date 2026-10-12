@@ -1,7 +1,7 @@
 /**
  * 日報(Issue #235)の D1 の読み書き。
  *
- *  - {@link D1ReportStore}: `daily_reports`(migration 0010)の保存・読み出し・取り残しの列挙。1 日 1 行で、同じ日は上書きしない(`INSERT OR IGNORE`)。
+ *  - {@link D1ReportStore}: `daily_reports`(migration 0010)の保存・読み出し・取り残しの列挙。1 日 1 行で、通常の保存は同じ日を上書きしない(`INSERT OR IGNORE`)。作り直し(Issue #268)だけが `replaceReport` で上書きする。
  *  - {@link D1ReportSource}: 日報の材料の読み出し。分析は既存の `D1AnalysisStore`(要約 + R2 の詳細)と `buildAnalysisView` を再利用し(馬名・レース情報・根拠・強調材料・懸念事項・配分)、
  *    結果(着順・払戻・組合せ払戻)は `race_id IN (json_each(?))` の 3 文を 1 回の batch で読む(束縛は JSON 1 つ。レース数に依らない)。
  *
@@ -27,6 +27,15 @@ export const DAY_ANALYSES_LIMIT = 1000;
 
 const INSERT_REPORT_SQL =
   "INSERT OR IGNORE INTO daily_reports (kaisai_date, created_at, model, race_count, total_stake, total_return, summary, body_json, llm_calls_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+/**
+ * 作り直し(Issue #268)の上書き。1 文の UPSERT で、途中の状態が無い。
+ * **WHERE**: 新しい記録に LLM の文章がある(`model` が非 NULL。文章か生の文章があるとき `buildRecord` が入れる)か、前の日報に文章が無い(`model` が NULL)ときだけ置き換える。
+ * 文章のある前の日報を、LLM が使えなかった作り直しの「文章なし」で潰さないため。偽なら何も変えず `meta.changes` が 0(= `kept`)。
+ */
+const REPLACE_REPORT_SQL = `INSERT INTO daily_reports (kaisai_date, created_at, model, race_count, total_stake, total_return, summary, body_json, llm_calls_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(kaisai_date) DO UPDATE SET created_at = excluded.created_at, model = excluded.model, race_count = excluded.race_count, total_stake = excluded.total_stake,
+    total_return = excluded.total_return, summary = excluded.summary, body_json = excluded.body_json, llm_calls_json = excluded.llm_calls_json
+  WHERE excluded.model IS NOT NULL OR daily_reports.model IS NULL`;
 const SELECT_REPORT_SQL =
   "SELECT kaisai_date AS kaisaiDate, created_at AS createdAt, model, race_count AS raceCount, total_stake AS totalStake, total_return AS totalReturn, summary, body_json AS bodyJson, llm_calls_json AS llmCallsJson FROM daily_reports WHERE kaisai_date = ?";
 const LIST_REPORTS_SQL =
@@ -118,6 +127,15 @@ export class D1ReportStore implements ReportStore {
       .bind(record.kaisaiDate, record.createdAt, record.model, record.raceCount, record.totalStake, record.totalReturn, record.summary, JSON.stringify(record.body), record.llmCallsJson)
       .run();
     return (result.meta.changes ?? 0) > 0 ? "saved" : "exists";
+  }
+
+  /** 作り直しの上書き(Issue #268。`REPLACE_REPORT_SQL` の説明)。前の日報が無ければ通常の保存と同じに作る。 */
+  async replaceReport(record: ReportRecord): Promise<"replaced" | "kept"> {
+    const result = await this.db
+      .prepare(REPLACE_REPORT_SQL)
+      .bind(record.kaisaiDate, record.createdAt, record.model, record.raceCount, record.totalStake, record.totalReturn, record.summary, JSON.stringify(record.body), record.llmCallsJson)
+      .run();
+    return (result.meta.changes ?? 0) > 0 ? "replaced" : "kept";
   }
 
   /** 日報 1 件(本文つき)。無い・本文が JSON として読めない行は null。 */
