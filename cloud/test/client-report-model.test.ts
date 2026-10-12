@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ReportDetail, ReportListItem, ReportPeriod, ReportTemplateStat } from "../client/api-report";
-import { buildReportModel, CREATE_CAUTION, CREATE_TODAY_CAUTION, dateLabel, JOB_UNAVAILABLE_NOTICE, MAX_CHIPS, NO_REPORT_NOTICE, type ReportModelInput } from "../client/report-model";
+import { buildReportModel, CREATE_CAUTION, CREATE_TODAY_CAUTION, dateLabel, JOB_UNAVAILABLE_NOTICE, NO_REPORT_NOTICE, type ReportModelInput } from "../client/report-model";
 
 /** Issue #235: 日報画面の表示用データ。文言は固定(LLM の文章以外にサーバの文は出さない)・数値の整形・状態ごとの出し分け。 */
 
@@ -241,35 +241,74 @@ describe("読み込み・エラー・日付の並び", () => {
     expect(buildReportModel(input({ detail: { kind: "error", message: "本文の失敗" } })).error).toBe("本文の失敗");
     expect(buildReportModel(input()).error).toBeNull();
   });
+});
 
-  it("日付の並び: 今日が先頭、続けて日報のある日の新しい順。表示中の日が current。href は #report=日付", () => {
-    const chips = buildReportModel(input({ list: { kind: "ready", items: [item("20261009"), item("20261008")] }, shownDate: "20261009" })).dateChips;
-    expect(chips.map((c) => [c.label, c.href, c.current])).toEqual([
-      ["今日 10/10", "#report=20261010", false],
-      ["10/09", "#report=20261009", true],
-      ["10/08", "#report=20261008", false],
-    ]);
+/**
+ * Issue #273: 日付の選択。日付のタイル(今日 + 日報のある日の新しい順・最大 MAX_CHIPS 個)をやめ、日付の入力(`dateInput`)と「前の日報」「今日」「次の日報」のリンク(`dateNav`)にした。
+ * 旧タイルの 3 テストが保証していたことの置き場所:
+ *  (1) 並び: 今日が先頭・日報のある日が続く・href は #report=日付・表示中の日が current → 今日のリンク(常にある)・前後のリンク(一覧から)・入力の値(表示中の日)
+ *  (2) 日報の無い日(並びに無い日)を表示しても並びに足して current → 一覧に無い日を表示していても、入力の値はその日で、前後のリンクはその日を基準に決まる
+ *  (3) 最大 MAX_CHIPS 個 → 上限そのものが無くなった。代わりに、一覧が 60 件でも前後は表示中の日の最近傍になる(14 件目以降の日報も辿れる)
+ */
+describe("Issue #273: 日付の選択(入力の値と前・今日・次のリンク)", () => {
+  const nav = (over: Partial<ReportModelInput>) => buildReportModel(input(over));
+  const listOf = (...dates: string[]) => ({ kind: "ready" as const, items: dates.map(item) });
+
+  it("入力の値は表示中の日(YYYY-MM-DD)。今日・一覧の最新・日報の無い日・一覧より古い日のどれでも、表示中の日そのまま", () => {
+    const dates = ["20261010", "20261009", "20261001", "20200101"];
+    const values = dates.map((d) => nav({ shownDate: d, list: listOf("20261010", "20261009", "20261001") }).dateInput);
+    expect(values).toEqual(["2026-10-10", "2026-10-09", "2026-10-01", "2020-01-01"]);
   });
 
-  it("日報が無い日を表示しているとき(並びに無い日)も、並びに足して current にする。今日が一覧にあっても重複しない", () => {
-    const chips = buildReportModel(input({ list: { kind: "ready", items: [item("20261010")] }, shownDate: "20200101" })).dateChips;
-    expect(chips.map((c) => c.href)).toEqual(["#report=20261010", "#report=20200101"]);
-    expect(chips.filter((c) => c.current).map((c) => c.href)).toEqual(["#report=20200101"]);
+  it("前後のリンクは日報のある日へ: 表示中より古い最大の日が「前」、新しい最小の日が「次」。今日のリンクは常に今日(旧: 今日が先頭・href は #report=日付)", () => {
+    const m = nav({ shownDate: "20261009", list: listOf("20261010", "20261009", "20261008") });
+    expect(m.dateNav).toEqual({ prevHref: "#report=20261008", todayHref: "#report=20261010", nextHref: "#report=20261010" });
+    // 今日のリンクは、表示中の日・一覧に今日が無くても今日を指す。
+    const noToday = nav({ today: "20261020", shownDate: "20261009", list: listOf("20261009", "20261008") });
+    expect(noToday.dateNav.todayHref).toBe("#report=20261020");
+    expect(noToday.dateNav.nextHref).toBeNull();
   });
 
-  it(`日付の並びは最大 ${MAX_CHIPS} 個(表示中の日は別に足す)`, () => {
-    const items = Array.from({ length: 40 }, (_, i) => item(`2026${String(Math.floor(i / 28) + 8).padStart(2, "0")}${String((i % 28) + 1).padStart(2, "0")}`));
-    // 前提(Issue #255。空振り防止): 日付は今日と重ならない 40 個で、並びの上限より多い。
-    expect(items).toHaveLength(40);
-    expect(items.some((i) => i.date === "20261010")).toBe(false);
-    expect(items.length).toBeGreaterThan(MAX_CHIPS);
-    // 表示中の日が並びに入っている(今日)ときは、ちょうど MAX_CHIPS 個(上界だけの検査だと 0 個や MAX_CHIPS + 1 個でも通る)。
-    const inside = buildReportModel(input({ list: { kind: "ready", items }, shownDate: "20261010" })).dateChips;
-    expect(inside).toHaveLength(MAX_CHIPS);
-    // 表示中の日が切り捨てられる日(並びの外)のときは、別に 1 つ足して MAX_CHIPS + 1 個。足した日が current。
-    const outside = buildReportModel(input({ list: { kind: "ready", items }, shownDate: "20200101" })).dateChips;
-    expect(outside).toHaveLength(MAX_CHIPS + 1);
-    expect(outside.filter((c) => c.current).map((c) => c.href)).toEqual(["#report=20200101"]);
+  it("表示中の日が一覧に無い日(日報が無い日)でも、その日を基準に前後を決める(旧: 並びに足して current)", () => {
+    const m = nav({ shownDate: "20261005", list: listOf("20261010", "20261009", "20261001") });
+    // 前提: 表示中の日は一覧に無い。
+    expect(m.dateInput).toBe("2026-10-05");
+    expect(m.dateNav.prevHref).toBe("#report=20261001");
+    expect(m.dateNav.nextHref).toBe("#report=20261009");
+  });
+
+  it("端: 最新を表示すれば「次」が無く、最古を表示すれば「前」が無く、一覧の最古より古い日では「前」が無い(一覧の件数の限界。「次」は最古の日)。表示中の日自身は前後に入らない", () => {
+    const l = listOf("20261010", "20261009", "20261008");
+    expect(nav({ shownDate: "20261010", list: l }).dateNav).toMatchObject({ prevHref: "#report=20261009", nextHref: null });
+    expect(nav({ shownDate: "20261008", list: l }).dateNav).toMatchObject({ prevHref: null, nextHref: "#report=20261009" });
+    expect(nav({ shownDate: "20200101", list: l }).dateNav).toMatchObject({ prevHref: null, nextHref: "#report=20261008" });
+    expect(nav({ shownDate: "20271231", list: l }).dateNav).toMatchObject({ prevHref: "#report=20261010", nextHref: null });
+  });
+
+  it("一覧が 60 件でも前後は最近傍(上限は無い。旧: 14 個で切れて 15 件目以降は辿れなかった)。一覧の並びに依存しない", () => {
+    // 2026-08-01 から 60 日分(8〜9 月)。新しい順。
+    const asc = Array.from({ length: 60 }, (_, i) => {
+      const d = new Date(Date.UTC(2026, 7, 1 + i));
+      return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
+    });
+    const desc = [...asc].reverse();
+    expect(desc).toHaveLength(60);
+    const shown = desc[40]!; // 41 番目(旧タイルの 14 個の外)
+    const expected = { prevHref: `#report=${desc[41]!}`, nextHref: `#report=${desc[39]!}` };
+    expect(expected.prevHref).not.toBe(expected.nextHref);
+    expect(nav({ shownDate: shown, list: listOf(...desc) }).dateNav).toMatchObject(expected);
+    // 並びを入れ替えても(昇順・ばらばら)同じ。
+    const shuffled = [...desc].sort((a, b) => ((Number(a.slice(6)) * 7) % 11) - ((Number(b.slice(6)) * 7) % 11) || a.localeCompare(b));
+    expect(shuffled).not.toEqual(desc);
+    expect(nav({ shownDate: shown, list: listOf(...shuffled) }).dateNav).toMatchObject(expected);
+  });
+
+  it("一覧が読み込み中・失敗のときは前後のリンクを出さない(入力の値と今日のリンクは出る)", () => {
+    for (const list of [{ kind: "loading" } as const, { kind: "error", message: "失敗" } as const]) {
+      const m = nav({ list, shownDate: "20261009" });
+      expect(m.dateNav).toEqual({ prevHref: null, todayHref: "#report=20261010", nextHref: null });
+      expect(m.dateInput).toBe("2026-10-09");
+    }
   });
 });
 

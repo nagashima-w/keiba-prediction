@@ -66,7 +66,7 @@ import { buildSettingsModel, draftFromSettings, resetWeightsInDraft, setDraftVal
 import { createMigrationScreen } from "./migration-screen";
 import { createVerifyScreen } from "./verify-screen";
 import { createReportScreen } from "./report-screen";
-import { buildHash, parseHash, screenOf, type Route, type Screen, type Venue } from "./route";
+import { buildHash, buildReportHash, parseHash, screenOf, type Route, type Screen, type Venue } from "./route";
 import { buildAdminOnlyModel } from "./admin-only";
 import { isAdmin, type Role } from "./role";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
@@ -324,6 +324,7 @@ export function createApp(deps: AppDeps): App {
     onVerifyVersionToggle: verify.onVersionToggle,
     onVerifyCalibrationTarget: verify.onCalibrationTarget,
     onReportRun: report.onRun,
+    onReportDateChange,
   };
 
   function render(force = false): void {
@@ -894,6 +895,16 @@ export function createApp(deps: AppDeps): App {
       return;
     }
     deps.setHash(buildHash({ date: ymd, venue: route.venue }));
+  }
+
+  /** 日報画面の日付の入力(Issue #273)。有効な日付なら `#report=YYYYMMDD` へ(前・今日・次のリンクと同じ経路)。空・不正は無視し、強制の再描画で入力欄を表示中の日に戻す。 */
+  function onReportDateChange(value: string): void {
+    const ymd = inputToYmd(value);
+    if (ymd === null) {
+      render(true);
+      return;
+    }
+    deps.setHash(buildReportHash(ymd));
   }
 
   function onToggleGroup(key: string, open: boolean): void {

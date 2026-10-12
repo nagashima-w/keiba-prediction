@@ -6,7 +6,7 @@
  * (文章が無い理由・状態の説明)はすべてクライアントの固定の文言(サーバの `note` は読まない)。
  */
 import type { ReportDetail, ReportJob, ReportListItem, ReportRace, ReportStats, ReportTemplateStat } from "./api-report";
-import { formatJstDateTime } from "./date";
+import { formatJstDateTime, ymdToInput } from "./date";
 import { buildReportHash } from "./route";
 import { formatExpectedHits } from "../src/expected-format";
 import { formatRecoveryPercent } from "../src/recovery-format";
@@ -55,12 +55,6 @@ export interface ReportModelInput {
 }
 
 export type Tone = "info" | "ok" | "error" | "wait";
-
-export interface DateChip {
-  readonly label: string;
-  readonly href: string;
-  readonly current: boolean;
-}
 
 export interface TileView {
   readonly label: string;
@@ -137,7 +131,10 @@ export interface ReportModel {
   readonly refreshDisabled: boolean;
   /** 一覧・本文の取得の失敗(固定の文言)。 */
   readonly error: string | null;
-  readonly dateChips: readonly DateChip[];
+  /** 日付の入力(`<input type="date">`)の値(YYYY-MM-DD)。表示中の日(Issue #273)。 */
+  readonly dateInput: string;
+  /** 前・今日・次のリンク(`#report=YYYYMMDD`)。前後は日報のある日で、無ければ null。今日は常にある(管理者が今日の日報を作る入口)。 */
+  readonly dateNav: { readonly prevHref: string | null; readonly todayHref: string; readonly nextHref: string | null };
   /** 表示している日の見出し(`2026年10月10日(土)`)。 */
   readonly shownLabel: string;
   readonly notice: { readonly tone: Tone; readonly text: string } | null;
@@ -159,9 +156,6 @@ export function dateLabel(ymd: string): string {
   return `${y}年${mo}月${d}日(${WEEKDAYS[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()]!})`;
 }
 
-/** 日付の並び(今日 → 日報のある日の新しい順)。表示中の日が並びに無くても(古い日・日報が無い日)先頭側に足す。最大 {@link MAX_CHIPS} 個。 */
-export const MAX_CHIPS = 14;
-
 /** 手動の作成の確定の注意(固定文言)。1 日 1 回で確定し、上書きしないため。 */
 export const CREATE_CAUTION = "押した時点の分析と結果で日報を作り、その日は作り直せません。";
 /** 今日の日付のときの強めの注意(固定文言)。 */
@@ -177,14 +171,21 @@ export const NO_REPORT_NOTICE = "この日は分析したレースが無いた�
  */
 export const JOB_UNAVAILABLE_NOTICE = "作成の状況を確認できませんでした。確認を続けます(この画面は自動で更新します)。";
 
-function chipsOf(input: ReportModelInput): DateChip[] {
-  const dates: string[] = [input.today];
+/**
+ * 前・今日・次のリンク(Issue #273)。前後は、一覧(`GET /api/reports`。サーバが返す上限は 60 件)の日付のうち、表示中の日の直前・直後の日報の日。
+ * 表示中の日が一覧に無くても(日報の無い日・一覧より古い日)その日を基準にする。一覧が読み込み中・失敗のときは前後なし。
+ * **限界**: 一覧は新しい 60 件までなので、表示中の日が一覧の最古以前だと「前」は出ない(実際には前の日報があっても)。日付の入力からは届く。
+ */
+function dateNavOf(input: ReportModelInput): ReportModel["dateNav"] {
+  let prev: string | null = null;
+  let next: string | null = null;
   if (input.list.kind === "ready") {
-    for (const item of input.list.items) if (!dates.includes(item.date)) dates.push(item.date);
+    for (const { date } of input.list.items) {
+      if (date < input.shownDate && (prev === null || date > prev)) prev = date;
+      if (date > input.shownDate && (next === null || date < next)) next = date;
+    }
   }
-  const limited = dates.slice(0, MAX_CHIPS);
-  if (!limited.includes(input.shownDate)) limited.push(input.shownDate);
-  return limited.map((date) => ({ label: date === input.today ? `今日 ${date.slice(4, 6)}/${date.slice(6, 8)}` : `${date.slice(4, 6)}/${date.slice(6, 8)}`, href: buildReportHash(date), current: date === input.shownDate }));
+  return { prevHref: prev === null ? null : buildReportHash(prev), todayHref: buildReportHash(input.today), nextHref: next === null ? null : buildReportHash(next) };
 }
 
 function horseText(umaban: number, name: string | null): string {
@@ -310,7 +311,8 @@ export function buildReportModel(input: ReportModelInput): ReportModel {
     kind: "report" as const,
     backHref: "#" as const,
     heading: "日報",
-    dateChips: chipsOf(input),
+    dateInput: ymdToInput(input.shownDate),
+    dateNav: dateNavOf(input),
     shownLabel: dateLabel(input.shownDate),
   };
   const loading = list.kind === "loading" || detail === null || detail.kind === "loading";

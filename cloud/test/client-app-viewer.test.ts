@@ -244,6 +244,18 @@ describe("閲覧者の画面から、管理者の入口・ボタンが消える(
     expect(textOf(viewer.tree())).not.toContain("下のボタン");
   });
 
+  it("日報画面: 日付の入力と前・今日・次のリンクは閲覧者にも出る(作成のボタンだけが管理者の操作。Issue #273)", async () => {
+    for (const role of ["admin", "viewer"] as const) {
+      const h = harness(role, "#report=20260628");
+      h.app.start();
+      await h.app.whenIdle();
+      const input = findAll(h.tree(), (n) => n.tag === "input" && n.attrs?.["type"] === "date");
+      expect(input).toHaveLength(1);
+      expect(input[0]!.attrs?.["value"]).toBe("2026-06-28");
+      expect(byClass(h.tree(), "tab").map((n) => n.attrs?.["href"])).toEqual(["#report=20260628"]);
+    }
+  });
+
   it("役割が admin でも viewer でもない値(型を破った呼び出し)は、閲覧者として扱う(管理者の入口を出さない)", async () => {
     const h = harness("root" as never, `#date=${DATE}&venue=central`);
     h.app.start();

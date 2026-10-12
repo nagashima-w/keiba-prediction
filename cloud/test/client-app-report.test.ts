@@ -44,6 +44,10 @@ interface Harness {
   readonly calls: string[];
   readonly timers: ReturnType<typeof createFakeTimers>;
   hash: string;
+  /** `setHash` に渡された値(日付の入力の操作が書くハッシュ)。 */
+  readonly hashes: string[];
+  /** 描画の `force`(不正な入力のとき、入力欄を戻すための強制の再描画)の履歴。 */
+  readonly forces: boolean[];
   /** 本文の応答(日付 → 呼ばれるたびに先頭から消費。残り 1 つなら繰り返す)。 */
   details: Record<string, Record<string, unknown>[]>;
   list: Record<string, unknown>[];
@@ -55,6 +59,8 @@ const LIST_ROW = (date: string) => ({ date, created_at: "2026-06-27T11:00:00.000
 
 async function harness(initialHash: string): Promise<Harness> {
   const calls: string[] = [];
+  const hashes: string[] = [];
+  const forces: boolean[] = [];
   const timers = createFakeTimers();
   let latest: VNode | null = null;
   const doc: DomDocument = { createElement: (tag) => new FakeElement(tag) as never, createTextNode: (t) => new FakeText(t) };
@@ -78,6 +84,8 @@ async function harness(initialHash: string): Promise<Harness> {
     calls,
     timers,
     hash: initialHash,
+    hashes,
+    forces,
     details: { "20260627": [{ ok: true, job_status: "ok", report: reportBody, job: null }] },
     list: [LIST_ROW("20260627")],
     tree: () => latest!,
@@ -92,10 +100,13 @@ async function harness(initialHash: string): Promise<Harness> {
     now: () => new Date("2026-06-28T00:00:00Z"),
     render: (tree, force) => {
       latest = tree;
+      forces.push(force === true);
       mounter(tree, force);
     },
     getHash: () => h.hash,
-    setHash: () => {},
+    setHash: (hash) => {
+      hashes.push(hash);
+    },
     timers: { set: timers.set, clear: timers.clear },
     isVisible: () => true,
   });
@@ -118,8 +129,8 @@ describe("日報画面を開く", () => {
     const h = await harness("#report");
     h.app.start();
     await h.app.whenIdle();
-    const chips = byClass(h.tree(), "tab").map((n) => n.attrs?.["href"]);
-    expect(chips).toEqual(["#report=20260628", "#report=20260627"]);
+    // 日付のタイルは無い。リンクは「今日」だけ(一覧は 20260627 の 1 件で、表示中の日が最新かつ最古なので前後は無い)。
+    expect(byClass(h.tree(), "tab").map((n) => n.attrs?.["href"])).toEqual(["#report=20260628"]);
     h.go("#report=20260628");
     await h.app.whenIdle();
     expect(h.calls.slice(2)).toEqual(["GET /api/reports/20260628"]);
@@ -195,5 +206,77 @@ describe("日報画面を開く", () => {
     const link = byClass(h.tree(), "report-link")[0]!;
     expect(link.attrs?.["href"]).toBe("#report");
     expect(textOf(link)).toBe("日報");
+  });
+});
+
+/**
+ * Issue #273: 日報の日付の選択。日付のタイルをやめ、レース一覧と同じ日付の入力(`<input type="date">`)と、前・今日・次のリンクにした。
+ * 守ること: 入力の初期値は表示中の日(既定の表示日の選び方は従来どおり〈最新の日報の日、無ければ今日〉)・選ぶと `#report=YYYYMMDD` へ(旧タイルと同じ経路)・不正/空は無視して入力欄を戻す・前後は一覧から。
+ */
+describe("日報の日付の選択(日付の入力と前・今日・次のリンク。Issue #273)", () => {
+  const dateInput = (h: Harness): VNode => findAll(h.tree(), (n) => n.tag === "input" && n.attrs?.["type"] === "date")[0]!;
+  const links = (h: Harness) => byClass(h.tree(), "tab").map((n) => [textOf(n), n.attrs?.["href"]]);
+
+  it("入力の初期値は表示中の日: #report は最新の日報の日、日報が 1 件も無ければ今日、#report=日付 はその日(日報の無い日でも)", async () => {
+    const latest = await harness("#report");
+    latest.list = [LIST_ROW("20260627"), LIST_ROW("20260620")];
+    latest.app.start();
+    await latest.app.whenIdle();
+    expect(dateInput(latest).attrs?.["value"]).toBe("2026-06-27");
+
+    const empty = await harness("#report");
+    empty.list = [];
+    empty.app.start();
+    await empty.app.whenIdle();
+    expect(dateInput(empty).attrs?.["value"]).toBe("2026-06-28");
+
+    const dated = await harness("#report=20260615");
+    dated.app.start();
+    await dated.app.whenIdle();
+    expect(dateInput(dated).attrs?.["value"]).toBe("2026-06-15");
+  });
+
+  it("入力で日付を選ぶと #report=日付 へ移り(旧タイルのリンクと同じ書式)、そのハッシュで本文だけを取り直す。入力の値と前後のリンクも追従する", async () => {
+    const h = await harness("#report");
+    h.list = [LIST_ROW("20260627"), LIST_ROW("20260620")];
+    h.app.start();
+    await h.app.whenIdle();
+    dateInput(h).on!.change!("2026-06-20");
+    expect(h.hashes).toEqual(["#report=20260620"]);
+    h.go(h.hashes[0]!);
+    await h.app.whenIdle();
+    expect(h.calls.slice(2)).toEqual(["GET /api/reports/20260620"]);
+    expect(dateInput(h).attrs?.["value"]).toBe("2026-06-20");
+    // 20260620 は最古: 前は無く、次は 20260627、今日は 20260628。
+    expect(links(h)).toEqual([["今日", "#report=20260628"], ["次の日報", "#report=20260627"]]);
+  });
+
+  it("入力が空・不正(実在しない日)のときは何もせず、強制の再描画で入力欄を表示中の日に戻す", async () => {
+    const h = await harness("#report");
+    h.app.start();
+    await h.app.whenIdle();
+    const before = h.forces.length;
+    dateInput(h).on!.change!("");
+    dateInput(h).on!.change!("2026-02-30");
+    expect(h.hashes).toEqual([]);
+    expect(h.forces.slice(before)).toEqual([true, true]);
+    expect(h.calls).toEqual(["GET /api/reports", "GET /api/reports/20260627"]); // 取得は増えない
+  });
+
+  it("前・今日・次のリンク: 日報のある日へ飛ぶ(表示中の日の前後)。今日のリンクは常にあり、端では前/次のリンクが消える", async () => {
+    const h = await harness("#report=20260627");
+    h.list = [LIST_ROW("20260627"), LIST_ROW("20260620"), LIST_ROW("20260613")];
+    h.details["20260620"] = [{ ok: true, job_status: "ok", report: null, job: null }];
+    h.app.start();
+    await h.app.whenIdle();
+    // 前提: 一覧は 3 件で、表示中の日(20260627)は最新。
+    expect(h.list).toHaveLength(3);
+    expect(links(h)).toEqual([["前の日報", "#report=20260620"], ["今日", "#report=20260628"]]);
+    h.go("#report=20260620");
+    await h.app.whenIdle();
+    expect(links(h)).toEqual([["前の日報", "#report=20260613"], ["今日", "#report=20260628"], ["次の日報", "#report=20260627"]]);
+    h.go("#report=20260628");
+    await h.app.whenIdle();
+    expect(links(h)).toEqual([["前の日報", "#report=20260627"], ["今日", "#report=20260628"]]);
   });
 });

@@ -3,7 +3,7 @@
  * 画面ごとの状態を closure に持ち、画面を離れたら破棄する(`app.ts` が `enter`・`leave` を呼ぶ)。
  *
  *  - 開く(`enter(date)`): `GET /api/reports`(日付の一覧)と、表示する日の `GET /api/reports/{date}` を取る。日付が未指定(`#report`)なら、一覧が届いたあと最新の日報の日、
- *    日報が 1 件も無ければ今日を表示する。他の API には出ない。日付のリンクを押すとハッシュが変わり、`app.ts` が同じ `enter` を新しい日付で呼ぶ(同じ画面の中の切替)。
+ *    日報が 1 件も無ければ今日を表示する。他の API には出ない。日付の入力で選ぶ・前/今日/次のリンクを押す(Issue #273)とハッシュが変わり、`app.ts` が同じ `enter` を新しい日付で呼ぶ(同じ画面の中の切替)。
  *  - 「この日の日報を作る」(`onRun`): `POST /api/reports/run`(表示中の日)。受け付けたら作成中の表示にして、{@link REPORT_POLL_MS} おきに本文を取り直す。
  *    日報が現れたら止める(一覧も取り直す)。作成が失敗(`failed`)したら止める。{@link REPORT_MAX_POLLS} 回で止める。
  *  - 作成中(サーバの `job` が running)の日を開いたときも、同じく自動で取り直す。**非表示の間は止め**、表示に戻ったら(作成中なら)即時に 1 回取って再開する。`setInterval` は使わない。
@@ -142,7 +142,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
           else if (result.job !== null) watching = true;
           if (result.report !== null) {
             run = { kind: "idle" };
-            // 新しく現れた日報を日付の並びに入れる。
+            // 新しく現れた日報を一覧に入れる(前後のリンクが使う)。
             if (list.kind === "ready" && !list.items.some((i) => i.date === date)) refreshList();
           } else if (run.kind === "requested" && result.job !== null && result.job.status === "failed") {
             run = { kind: "idle" };

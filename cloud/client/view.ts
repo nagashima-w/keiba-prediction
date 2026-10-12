@@ -59,6 +59,8 @@ export interface ViewActions {
   readonly onVerifyCalibrationTarget: (target: CalibrationTarget) => void;
   /** 日報画面の「この日の日報を作る」ボタン(Issue #235)。引数なし(表示中の日は `report-screen.ts` が持つ)。 */
   readonly onReportRun: () => void;
+  /** 日報画面の日付の入力(`<input type="date">`の値 YYYY-MM-DD)。Issue #273。 */
+  readonly onReportDateChange: (value: string) => void;
 }
 
 function badge(prefix: string, b: Badge): VNode {
@@ -821,12 +823,17 @@ function reportScreen(model: ReportModel, actions: ViewActions): VNode {
     h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
     h("button", { class: "refresh", disabled: model.refreshDisabled }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
   ]);
-  const chips = h(
-    "nav",
-    { class: "tabs", "aria-label": "日報の日付" },
-    model.dateChips.map((c) => h("a", { class: "tab", href: c.href, "aria-current": c.current ? "page" : undefined }, [c.label])),
-  );
-  const body: VNode[] = [h("h1", { class: "title" }, [model.heading]), chips];
+  // 日付の選択(Issue #273): レース一覧と同じ日付の入力(カレンダー)と、日報のある日へ飛ぶ前・今日・次のリンク(`<a href>`。ハッシュの変化から画面が切り替わる)。
+  const nav = model.dateNav;
+  const dateControls = h("div", { class: "controls" }, [
+    h("label", { class: "date" }, [h("span", {}, ["日付"]), h("input", { type: "date", value: model.dateInput }, [], { change: actions.onReportDateChange })]),
+    h("nav", { class: "tabs", "aria-label": "日報の移動" }, [
+      ...(nav.prevHref === null ? [] : [h("a", { class: "tab", href: nav.prevHref }, ["前の日報"])]),
+      h("a", { class: "tab", href: nav.todayHref }, ["今日"]),
+      ...(nav.nextHref === null ? [] : [h("a", { class: "tab", href: nav.nextHref }, ["次の日報"])]),
+    ]),
+  ]);
+  const body: VNode[] = [h("h1", { class: "title" }, [model.heading]), dateControls];
   if (model.loading && model.body === null) body.push(h("p", { class: "empty" }, ["読み込み中…"]));
   if (model.error !== null) body.push(notice("error", model.error));
   if (model.notice !== null) body.push(notice(model.notice.tone, model.notice.text));
