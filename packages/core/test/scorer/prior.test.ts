@@ -280,6 +280,30 @@ describe("computeFieldPriors は正規化を normalizeFieldPriors に委譲す�
   });
 });
 
+describe("computeFieldPriors は config.prior を正規化に渡す(Issue #258)", () => {
+  it("targetPlaceCount=2 の設定では Σprior が 2 になる(既定の 3 ではない)", () => {
+    const cfg: ScorerConfig = {
+      ...DEFAULT_SCORER_CONFIG,
+      prior: { ...DEFAULT_SCORER_CONFIG.prior, targetPlaceCount: 2 },
+    };
+    const horse = (finish: number): PriorInput => ({
+      features: deriveRaceFeatures([
+        makeResult({ date: "2025/01/01", finishPosition: rank(finish) }),
+      ]),
+      today: NEUTRAL_TODAY,
+      fieldSize: 8,
+      config: cfg,
+    });
+    const priors = computeFieldPriors([1, 2, 3, 4, 6, 8, 10, 14].map(horse));
+    expect(priors.reduce((s, p) => s + p.prior, 0)).toBeCloseTo(2, 10);
+    // 既定(3)の設定とは異なる結果になる(設定が実際に効いている)。
+    const dflt = computeFieldPriors(
+      [1, 2, 3, 4, 6, 8, 10, 14].map((f) => ({ ...horse(f), config: undefined })),
+    );
+    expect(dflt.reduce((s, p) => s + p.prior, 0)).toBeCloseTo(3, 10);
+  });
+});
+
 describe("buildPriorInput(scraper出力からの組み立て)", () => {
   it("出馬表馬+戦績+レース条件から今回条件を組み立てること", () => {
     const horse: ShutubaHorse = {

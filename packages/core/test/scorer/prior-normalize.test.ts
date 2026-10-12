@@ -255,6 +255,75 @@ describe("normalizeFieldPriors: 範囲外・退化した入力", () => {
   });
 });
 
+describe("normalizeFieldPriors: 非有限(NaN)の raw が混ざっても、影響はその馬だけに留まる", () => {
+  // 旧実装は NaN の馬だけが NaN になり、他の馬は(正規化されないまま)有限の値を返した。
+  // 新実装で二分法が NaN で壊れ、他の全頭が maxPrior に張り付く退行を防ぐ(メタレビュー)。
+  const finiteRaws = [0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1, 0.45, 0.5, 0.28, 0.33];
+  const withNaN = [Number.NaN, ...finiteRaws];
+
+  it("前提: 有限の 11 頭だけを渡した場合の Σ は目標 3 になり、全頭が天井に張り付かない", () => {
+    const base = normalizeFieldPriors(finiteRaws, CFG);
+    expect(sum(base)).toBeCloseTo(3, 10);
+    expect(Math.max(...base)).toBeLessThan(CFG.maxPrior);
+    // 空振り防止: 入力の Σ は目標と大きく異なる(正規化が実際に働く)。
+    expect(Math.abs(sum(finiteRaws) - 3)).toBeGreaterThan(0.1);
+  });
+
+  it("12 頭中 1 頭が NaN: その馬は NaN のまま、残りの 11 頭は有限で、maxPrior に張り付かない", () => {
+    const out = normalizeFieldPriors(withNaN, CFG);
+    expect(out).toHaveLength(12);
+    expect(Number.isNaN(out[0]!)).toBe(true);
+    const rest = out.slice(1);
+    for (const v of rest) {
+      expect(Number.isFinite(v)).toBe(true);
+      expect(v).toBeLessThan(CFG.maxPrior);
+      expect(v).toBeGreaterThanOrEqual(CFG.minPrior);
+    }
+    // 前提(無条件): 残りは互いに異なる値(全頭が同値に潰れていない)。
+    expect(new Set(rest.map((v) => v.toFixed(9))).size).toBeGreaterThan(5);
+  });
+
+  it("有限の馬は、NaN の馬が無かった場合と同じ値になる(有限の馬だけで Σ を目標に合わせる)", () => {
+    const out = normalizeFieldPriors(withNaN, CFG);
+    const base = normalizeFieldPriors(finiteRaws, CFG);
+    out.slice(1).forEach((v, i) => expect(v).toBeCloseTo(base[i]!, 12));
+    expect(sum(out.slice(1))).toBeCloseTo(3, 10);
+  });
+
+  it("NaN が複数・末尾・途中にあっても、その馬だけが NaN", () => {
+    const raws = [0.4, Number.NaN, 0.35, 0.3, Number.NaN, 0.25, 0.2, 0.15, 0.1, 0.45];
+    const out = normalizeFieldPriors(raws, CFG);
+    raws.forEach((r, i) => {
+      expect(Number.isNaN(out[i]!)).toBe(Number.isNaN(r));
+    });
+    const finite = out.filter((v) => !Number.isNaN(v));
+    expect(finite).toHaveLength(8);
+    expect(sum(finite)).toBeCloseTo(3, 10);
+    for (const v of finite) expect(v).toBeLessThan(CFG.maxPrior);
+  });
+
+  it("全頭 NaN: throw せず、全頭 NaN を返す", () => {
+    const out = normalizeFieldPriors(new Array(8).fill(Number.NaN), CFG);
+    expect(out).toHaveLength(8);
+    expect(out.every((v) => Number.isNaN(v))).toBe(true);
+  });
+
+  it("有限の馬が目標より少ない(2 頭だけ有限): 実現不能として天井に飽和し、NaN の馬は NaN のまま", () => {
+    const raws = [Number.NaN, 0.5, Number.NaN, 0.3, Number.NaN, Number.NaN];
+    const out = normalizeFieldPriors(raws, CFG);
+    expect(out[1]).toBe(CFG.maxPrior);
+    expect(out[3]).toBe(CFG.maxPrior);
+    expect([0, 2, 4, 5].every((i) => Number.isNaN(out[i]!))).toBe(true);
+  });
+
+  it("±Infinity は NaN ではなく、片側にクランプされる(従来どおり)", () => {
+    const out = normalizeFieldPriors([Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0.4, 0.3, 0.2, 0.25, 0.35, 0.15], CFG);
+    expect(out.every((v) => Number.isFinite(v))).toBe(true);
+    expect(sum(out)).toBeCloseTo(3, 10);
+    expect(out[0]!).toBeGreaterThan(out[1]!);
+  });
+});
+
 describe("normalizeFieldPriors: 決定性と副作用", () => {
   it("同じ入力 → ビット一致の出力。入力配列は変更しない", () => {
     const raws = Object.freeze(linspace(0.05, 0.7, 18));

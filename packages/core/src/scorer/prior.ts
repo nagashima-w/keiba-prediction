@@ -278,6 +278,8 @@ const LOGIT_EPSILON = 1e-12;
  * - **常に 0.02〜0.95**: 負や 1 超は出ない。
  * - **実現不能は throw しない**: 目標 ≥ 頭数 × maxPrior(頭数 3 以下など)なら全頭 maxPrior、
  *   目標 ≤ 頭数 × minPrior なら全頭 minPrior に飽和させる(合計は目標に届かない)。
+ * - **NaN の raw は、その馬だけ NaN のまま**で、他の馬は有限の馬だけで合計を合わせる(全頭 NaN なら全頭 NaN。
+ *   throw しない)。±Infinity は片側に収まる。
  * - 頭数 0 は空配列。入力は変更しない。
  *
  * @param rawPriors 全頭の raw prior(中立確率 + 補正合計。クランプ前)。
@@ -293,22 +295,41 @@ export function normalizeFieldPriors(
   }
   const { minPrior, maxPrior, targetPlaceCount } = config;
   const target = Math.min(targetPlaceCount, n);
-  if (target >= n * maxPrior) {
-    return new Array<number>(n).fill(maxPrior);
+
+  // NaN の馬は二分法から除き、出力も NaN のままにする(影響をその 1 頭に閉じ込める。旧版の乗算も、NaN の馬だけが
+  // NaN になり他の馬は有限だった)。NaN を含めると total(c) が NaN になり、`NaN > target` が常に偽で探索が
+  // 片側に倒れて、他の全頭が maxPrior に張り付く。有限の馬だけで Σ を目標に合わせる(目標は NaN の馬を含む
+  // 頭数 n で決める。NaN の馬の取り分は不明なので、残りの馬にその分だけ多く配られる)。±Infinity は NaN ではなく、
+  // [minPrior, maxPrior] への収め込みで片側に寄る。
+  const out = new Array<number>(n).fill(Number.NaN);
+  const finiteIndices: number[] = [];
+  rawPriors.forEach((v, i) => {
+    if (!Number.isNaN(v)) {
+      finiteIndices.push(i);
+    }
+  });
+  const m = finiteIndices.length;
+  if (m === 0) {
+    return out;
   }
-  if (target <= n * minPrior) {
-    return new Array<number>(n).fill(minPrior);
+  if (target >= m * maxPrior) {
+    finiteIndices.forEach((i) => (out[i] = maxPrior));
+    return out;
+  }
+  if (target <= m * minPrior) {
+    finiteIndices.forEach((i) => (out[i] = minPrior));
+    return out;
   }
 
   const logitLow = Math.max(minPrior, LOGIT_EPSILON);
   const logitHigh = Math.min(maxPrior, 1 - LOGIT_EPSILON);
-  const logits = rawPriors.map((v) => logit(clamp(v, logitLow, logitHigh)));
+  const logits = finiteIndices.map((i) => logit(clamp(rawPriors[i]!, logitLow, logitHigh)));
   const shifted = (l: number, c: number): number =>
     clamp(sigmoid(l + c), minPrior, maxPrior);
   const total = (c: number): number =>
     logits.reduce((s, l) => s + shifted(l, c), 0);
 
-  // g(−bound) = n×minPrior < 目標 < n×maxPrior = g(+bound)(上の実現可能性の判定で保証)。
+  // g(−bound) = m×minPrior < 目標 < m×maxPrior = g(+bound)(上の実現可能性の判定で保証)。
   let lo = -SHIFT_SEARCH_BOUND;
   let hi = SHIFT_SEARCH_BOUND;
   for (let i = 0; i < SHIFT_BISECTION_ITERATIONS; i++) {
@@ -320,7 +341,10 @@ export function normalizeFieldPriors(
     }
   }
   const c = (lo + hi) / 2;
-  return logits.map((l) => shifted(l, c));
+  finiteIndices.forEach((idx, k) => {
+    out[idx] = shifted(logits[k]!, c);
+  });
+  return out;
 }
 
 /**
