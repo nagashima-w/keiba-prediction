@@ -217,6 +217,27 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     indexes: [{ origin: "pk", unique: 1, columns: ["jockey_id", "kind"], name: null }],
   },
+  // 0014 の中身(Issue #256 段階A)。各馬の戦績(1 走 1 行。WITHOUT ROWID。主キーは (horse_id, race_key)。副索引なし)と、保存 1 回ごとの集計の記録(主キーは (saved_at, race_id))。
+  horse_runs: {
+    columns: [
+      { name: "data", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "first_seen_at", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "horse_id", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "parser_version", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "race_key", type: "TEXT", notnull: 1, dflt_value: null, pk: 2 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["horse_id", "race_key"], name: null }],
+  },
+  horse_run_saves: {
+    columns: [
+      { name: "race_id", type: "TEXT", notnull: 1, dflt_value: null, pk: 2 },
+      { name: "saved_at", type: "INTEGER", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "stats_json", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["saved_at", "race_id"], name: null }],
+  },
 };
 
 /** exe のスキーマに、宣言した D1 専用の追加分(列・索引・表)を足した「期待する D1 の構造」。 */
@@ -258,8 +279,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql の13本だけで、番号は 0001 から連続している(後から足すときは 0014 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql の14本だけで、番号は 0001 から連続している(後から足すときは 0015 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {

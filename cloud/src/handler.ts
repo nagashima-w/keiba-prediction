@@ -10,6 +10,7 @@
 import type { AccessEnv } from "./access-jwt";
 import { D1AnalysisStore, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { checkD1 } from "./d1-health";
+import { readHorseRunsStatus, STATUS_DAYS_DEFAULT, STATUS_DAYS_MAX } from "./horse-runs-repository";
 import { webhookStatus } from "./notify-send";
 import { resolveAppBaseUrl } from "./notify-link";
 import { remoteKeys } from "./access-jwt";
@@ -424,6 +425,17 @@ export async function handle(
     return handlePriorExport(request, env);
   }
 
+  if (pathname === "/api/horse-runs") {
+    // 管理者専用(route-policy.ts)。D1 の horse_runs・horse_run_saves を読むだけ(netkeiba にも LLM にも出ない)。GET だけ。Issue #256 段階A。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handleHorseRuns(request, env, deps.now ?? (() => new Date()));
+  }
+
   if (pathname === "/api/results/backfill") {
     // 読み取り専用(補完の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #217。
     if (method !== "GET") {
@@ -536,6 +548,42 @@ async function handleBackfillStatus(env: Env): Promise<Response> {
     return json({ ok: true, ...(await namespace.get(namespace.idFromName(RESULT_BACKFILL_NAME)).getStatus()) });
   } catch {
     return json({ ok: false, error: { type: "backfill-error" } }, 503);
+  }
+}
+
+const HORSE_RUNS_PARAMS = new Set(["days", "cells"]);
+
+/**
+ * `GET /api/horse-runs[?days=N][&cells=1]`(Issue #256 段階A。管理者専用): 各馬の戦績の蓄積(D1 の `horse_runs`・`horse_run_saves`)の状態。
+ * 2〜4 週後に、取得を減らす段階 D・騎手 × コースの集計の段階 E に進むかを判断する材料(表の行数・馬の数・開催区分別・保存の集計〈新規/重複/不一致/初見の馬/新規行の取り込み済み割合〉)。
+ *  - `days`(1〜{@link STATUS_DAYS_MAX}。既定 {@link STATUS_DAYS_DEFAULT}): 保存の集計を読む期間。
+ *  - `cells=1`: 中央の走を 騎手 × 競馬場 × 芝ダ × 距離帯のセルに分けた走数の分布(段階 E の判断材料。horse_runs の全件走査なので、付けたときだけ)。
+ * 読み取り専用。順序は: `Sec-Fetch-Site`(別サイトからなら 403。全件走査を外から起こされないため)→ 入力の検証(400。ここまでで D1 に触れない)→ D1(失敗は 503 の固定の種類名だけ)。
+ */
+async function handleHorseRuns(request: Request, env: Env, now: () => Date): Promise<Response> {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin" && site !== "none") {
+    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  }
+  const url = new URL(request.url);
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((k) => !HORSE_RUNS_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+    return badRequest("クエリは days(1〜60 の整数)と cells(1 または 0)だけを、それぞれ1つまで指定できます");
+  }
+  const daysText = url.searchParams.get("days");
+  const days = daysText === null ? STATUS_DAYS_DEFAULT : /^[0-9]{1,3}$/.test(daysText) ? Number(daysText) : Number.NaN;
+  if (!(days >= 1 && days <= STATUS_DAYS_MAX)) {
+    return badRequest(`days は 1 から ${STATUS_DAYS_MAX} の整数で指定してください`);
+  }
+  const cellsText = url.searchParams.get("cells");
+  if (cellsText !== null && cellsText !== "0" && cellsText !== "1") {
+    return badRequest("cells は 1 または 0 で指定してください");
+  }
+  try {
+    const status = await readHorseRunsStatus(env.DB, { sinceMs: now().getTime() - days * 86_400_000, days, cells: cellsText === "1" });
+    return json({ ok: true, ...status });
+  } catch {
+    return json({ ok: false, error: { type: "horse-runs-error" } }, 503);
   }
 }
 

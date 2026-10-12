@@ -17,6 +17,8 @@
  *    1 回の取得の fetcher 呼び出しの合計は上限 40(`DEFAULT_JOCKEY_REQUEST_LIMIT`)で、届いたら残りの騎手は取らず補正なしで続ける。重みが 0 なら 19 本のまま。
  *  - **ステップ2(計算 `compute`)**: **netkeiba には出ず**(gate は0回)、キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)` を走らせ、
  *    朝の prior(`AnalysisResult`)を **DO のストレージにだけ**置く(**D1・R2 には書かない**。ユーザー判断 2026-10-06: 保存するのは発走前の分析だけ)。
+ *    ただし**各馬の戦績**(キャッシュ済みの事実。Issue #256 段階A)は、prior の保存とタスクの完了の後に D1 の `horse_runs` へ貯める(`horseRunsStore`。取得は増やさない。
+ *    失敗は警告にして分析を止めない)。保存は事前分析の計算ステップだけで、発走前の分析(pre_race)では貯めない=手動の発走前だけの分析の戦績は貯まらない(段階Aの限界)。
  *    取得のあとで TTL が切れても読めるよう、キャッシュの鮮度を実質無期限にして読む。キャッシュに戦績が無ければ(掃除された等)、netkeiba に出ず失敗にする
  *    (`scrapeRace` は戦績の失敗を警告にして続けるので、戦績なしの prior を黙って作らないよう検出する)。
  *  - 2つのステップは**別々のアラーム呼び出し**で動かす(1呼び出しの中のサブリクエスト数〈Free は 50〉を抑える・再試行でネットワークを撃ち直さない)。
@@ -76,6 +78,8 @@ import { parseRaceFieldSize, parseRaceResult, RaceResultNotConfirmedError } from
 import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
 import type { JockeyResultsStore } from "../../packages/core/src/scraper/jockey-results-store";
+import type { HorseRunsStore } from "./horse-runs";
+import type { RaceData } from "../../packages/core/src/scraper/scrape-race";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import { narRaceListSubUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
 import { MAX_BULK_RACES } from "./bulk-limits";
@@ -297,6 +301,12 @@ export interface RaceDayDeps {
    * 取得ステップ・発走前の取得・計算ステップ(キャッシュだけ。許容鮮度は実質無期限)のすべてに同じものを渡す。
    */
   readonly jockeyStore?: JockeyResultsStore;
+  /**
+   * 各馬の戦績の蓄積先(Issue #256 段階A。本番は D1 の `horse_runs`・`horse_run_saves`〈migration 0014〉)。**事前分析(morning)の計算ステップの末尾だけ**で、
+   * キャッシュ済みの出走馬全頭の戦績を渡す(取得は増やさない)。prior を保存してタスクを done にした**後**に呼び、失敗は握って警告にする(分析は止めない。再試行もしない)。
+   * 発走前の分析(pre_race)では呼ばない(朝のキャッシュを使い回すので同じ戦績。手動の発走前だけの分析の戦績は貯まらない=段階Aの限界)。省略時は何もしない。
+   */
+  readonly horseRunsStore?: HorseRunsStore;
   /**
    * LLM の依存(Issue #194〈#179-b〉。sender・モデル一覧。DO のラッパが、Worker の secret `ANTHROPIC_API_KEY` から作る)。**キーが無ければ渡さない**: 発走前の分析は LLM なしで保存し、
    * 理由(固定文言)を残す。朝のタスクでは使わない。`lister` が無ければ、モデルの自動選択をせず、固定モデルで送る。
@@ -627,6 +637,7 @@ export class RaceDayCore {
   private readonly sink: AnalysisSink | undefined;
   private readonly loadSettings: (() => Promise<CloudSettings>) | undefined;
   private readonly jockeyStore: JockeyResultsStore | undefined;
+  private readonly horseRunsStore: HorseRunsStore | undefined;
   private readonly llm: CloudLlm | undefined;
   /** 分析モデルの選択(`analysisModel`)に応じたモデルの自動選択(系統ごとの取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined。Issue #158)。 */
   private readonly modelSelectorFor: ModelSelectorFor | undefined;
@@ -661,6 +672,7 @@ export class RaceDayCore {
     this.sink = deps.sink;
     this.loadSettings = deps.loadSettings;
     this.jockeyStore = deps.jockeyStore;
+    this.horseRunsStore = deps.horseRunsStore;
     this.llm = deps.llm;
     this.modelSelectorFor = deps.llm === undefined ? undefined : createCloudModelSelectors(deps.llm, onWarn);
     // ⚠️ スキーマ変更の仕組みは無い: DO の SQLite の表は `CREATE TABLE IF NOT EXISTS` だけで作る(既存の表に列を足す処理は無い)。
@@ -2038,8 +2050,13 @@ export class RaceDayCore {
       const raceId = parseRaceId(task.race_id);
       // 取得ステップが固定した設定のスナップショットの重みを使う(Issue #218)。スナップショットの無いタスク(設定を読まない構成・この変更の前に取得まで済んだタスク)は既定値の重み(今までと同じ結果)。
       const settings = task.settings_json === null ? DEFAULT_CLOUD_SETTINGS : coerceCloudSettings(JSON.parse(task.settings_json));
+      // 各馬の戦績の蓄積(Issue #256 段階A)のために、この計算ステップで読んだキャッシュ済みの取得結果を控える(取得は増やさない)。
+      let scraped: RaceData | undefined;
       const result = await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
-        scrape: (id) => this.scrapeFromCache(id, { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings) }),
+        scrape: async (id) => {
+          scraped = await this.scrapeFromCache(id, { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings) });
+          return scraped;
+        },
         analyze: null,
         // 朝の prior は D1・R2 に保存しない(DO のストレージにだけ置く)。ここは何も書かない。
         saveAnalysis: () => undefined,
@@ -2056,12 +2073,31 @@ export class RaceDayCore {
         JSON.stringify(result),
       );
       this.updateTask(task, "done", task.attempts, null);
+      // prior の保存・タスクの完了より後。失敗は握る(分析は止めない)ので、下の catch(計算の失敗)には来ない。
+      await this.saveHorseRuns(task.race_id, kaisaiDate, scraped);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "compute", result: "ok" };
     } catch (error) {
       const message = redactSecrets(errorMessage(error)); // 保存する文面は鍵の形を伏せる(閲覧者にも見える。Issue #245)
       this.updateTask(task, "failed", task.attempts, message);
       this.onWarn(`朝の prior の計算に失敗しました(${task.race_id}): ${message}`);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "compute", result: "failed" };
+    }
+  }
+
+  /**
+   * 各馬の戦績を蓄積先へ渡す(Issue #256 段階A。事前分析の計算ステップの末尾から呼ぶ)。**投げない**: 失敗は警告(鍵の形を伏せる)にして戻る(再試行しない)。
+   * 渡すのは `scrapeRace` が除外・取消の行(#261)を除いた後の戦績そのまま(日付での絞り込み〈#39〉は分析側の仕事で、ここは事実を渡す)。
+   * 蓄積先が無い構成・取得結果が無い(計算の途中で控えられなかった)ときは何もしない。
+   */
+  private async saveHorseRuns(raceId: string, kaisaiDate: string, scraped: RaceData | undefined): Promise<void> {
+    if (this.horseRunsStore === undefined || scraped === undefined) {
+      return;
+    }
+    try {
+      const horses = scraped.horses.flatMap((h) => (h.results === null ? [] : [{ horseId: h.shutuba.horseId, results: h.results }]));
+      await this.horseRunsStore.saveRace({ raceId, kaisaiDate, savedAt: this.now(), horses });
+    } catch (error) {
+      this.onWarn(`各馬の戦績を保存できませんでした(${raceId})。分析は続けます: ${redactSecrets(errorMessage(error))}`);
     }
   }
 

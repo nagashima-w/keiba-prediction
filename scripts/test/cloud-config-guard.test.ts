@@ -518,9 +518,10 @@ describe("D1 の migration は追加のみ(Issue #171。AC-a7: 静的ガード)"
     expect(isContinuousExceptReserved(files.map((f) => Number(f.slice(0, 4))), RESERVED_NUMBERS), files.join(",")).toBe(true);
   });
 
-  it("検出の確認(空振りでない): 欠番・重複・順序の乱れを拾う(予約が無いので、0011〜0013 のどれが欠けても拾う)", () => {
+  it("検出の確認(空振りでない): 欠番・重複・順序の乱れを拾う(予約が無いので、0011〜0014 のどれが欠けても拾う)", () => {
     const ok = (nums: number[]): boolean => isContinuousExceptReserved(nums, RESERVED_NUMBERS);
-    expect(ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])).toBe(true); // 今の枝
+    expect(ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])).toBe(true); // 今の枝(0014 は #256 の horse_runs)
+    expect(ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14])).toBe(false); // 0013 の欠番
     expect(ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toBe(true);
     expect(ok([1, 2, 4])).toBe(false); // 欠番
     expect(ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13])).toBe(false); // 0011・0012 の欠番
@@ -947,6 +948,31 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     // 対照(検出の確認。空振りでない): 検査より後にゲートに触れる本体は「前」の検査を満たさない
     const bad = 'async function handleCheck(request: Request, env: Env) {\n  const g = env.NETKEIBA_GATE;\n  const site = request.headers.get("sec-fetch-site");\n}';
     expect(bad.indexOf("sec-fetch-site") < bad.indexOf("NETKEIBA_GATE")).toBe(false);
+  });
+
+  it("Issue #256: GET /api/horse-runs の関数(handleHorseRuns)は、D1 に触れる前に Sec-Fetch-Site を見て、request を受け取る。読み取り(readHorseRunsStatus)だけで、取得・LLM・Webhook・DO・R2・書き込みに触れない", () => {
+    const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = code.indexOf("async function handleHorseRuns(");
+    expect(start).toBeGreaterThan(-1);
+    const body = code.slice(start, code.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(800); // 前提: 本体を実際に読めている(空振りでない)
+    expect(body).toContain("readHorseRunsStatus(env.DB");
+    expect(body).toContain("sec-fetch-site");
+    expect(body).toContain("same-origin");
+    expect(body).toContain('"none"');
+    expect(body).toContain("origin-mismatch");
+    expect(body).toContain("403");
+    expect(body.indexOf("sec-fetch-site"), "Sec-Fetch-Site の検査は D1 に触れるより前").toBeLessThan(body.indexOf("env.DB"));
+    for (const forbidden of ["NETKEIBA_GATE", "RACE_DAY", "RESULT_BACKFILL", "CLOUD_MIGRATION", "VERIFY_REPORT", "PRIOR_EXPORT", "ANALYSIS_DETAIL", ".fetchRaw(", ".prepare(", ".batch(", ".run(", "INSERT", "UPDATE", "DELETE", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "fetch("]) {
+      expect(body, `handleHorseRuns に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // ヘッダを見るには request が要る。呼び出しは 1 箇所だけで、request を渡す
+    expect(code.slice(start, code.indexOf("{", start))).toMatch(/\(\s*request\s*:\s*Request\s*,\s*env\s*:\s*Env\s*,/);
+    expect((code.match(/\bhandleHorseRuns\(/g) ?? []).length).toBe(2); // 定義 1 + 呼び出し 1
+    expect(code).toContain("handleHorseRuns(request, env,");
+    // 対照(検出の確認。空振りでない): 検査より後に D1 に触れる本体は「前」の検査を満たさない
+    const bad = 'async function handleHorseRuns(request: Request, env: Env) {\n  await readHorseRunsStatus(env.DB, {});\n  const site = request.headers.get("sec-fetch-site");\n}';
+    expect(bad.indexOf("sec-fetch-site") < bad.indexOf("env.DB")).toBe(false);
   });
 
   it("GET /api/verify の関数(handleVerify)は、検証の DO の getReport だけを呼ぶ。D1・R2・取得・LLM・Webhook に触れない", () => {

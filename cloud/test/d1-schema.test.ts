@@ -68,6 +68,8 @@ describe("migration の適用(ローカルの D1)", () => {
       "cloud_settings",
       "daily_reports", // Issue #235(0010。日報)
       "jockey_results", // Issue #226(0012。騎手の年ごとの成績。0011 は #259 が使う)
+      "horse_runs", // Issue #256 段階A(0014。各馬の戦績 1 走 1 行)
+      "horse_run_saves", // Issue #256 段階A(0014。保存 1 回ごとの集計の記録)
     ].sort());
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("detail_key");
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("llm_note"); // Issue #194(0005)
@@ -79,8 +81,8 @@ describe("migration の適用(ローカルの D1)", () => {
     expect(indexes).toEqual(["idx_analyses_analyzed_at", "idx_analyses_exe_id", "idx_analyses_kaisai_analyzed", "idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race", "idx_analyses_race_analyzed"]);
   });
 
-  it("migration は13本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql"]);
+  it("migration は14本とも適用済みとして記録されている(d1_migrations)", async () => {
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql"]);
     expect((await rows("PRAGMA table_info(race_results)")).map((r) => r["name"])).toContain("scratched"); // Issue #72(0013)
   });
 });

@@ -22,6 +22,7 @@ import type { GateLike } from "./gate-fetch";
 import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type PlanProgress, type RaceListResult, type RaceListVenue, type RequestPlanResult, type RequestResultImportResult, type ResultImportProgress, type ScheduleInput, type ScheduleManyInput, type ScheduleManyResult, type ScheduleResult } from "./race-day-core";
 import { DAILY_REPORT_NAME, isRequestSettled, type RequestReportResult } from "./daily-report-core";
 import { D1JockeyResultsStore } from "./jockey-results-repository";
+import { D1HorseRunsStore } from "./horse-runs-repository";
 import { D1ResultStore } from "./result-repository";
 import { loadSettings } from "./settings";
 
@@ -112,6 +113,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 騎手の年ごとの成績の保存先(Issue #226。D1 の jockey_results〈migration 0012〉)。日をまたいで共有し、取得日時から 7 日以内なら netkeiba に出ない(週に 1 回の更新)。
       // 読み書きの失敗は取得へフォールバックする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
       jockeyStore: new D1JockeyResultsStore({ db: env.DB }),
+      // 各馬の戦績の蓄積先(Issue #256 段階A。D1 の horse_runs・horse_run_saves〈migration 0014〉)。事前分析の計算ステップの末尾だけで保存する(取得は増やさない)。
+      // 失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
+      horseRunsStore: new D1HorseRunsStore({ db: env.DB }),
       // 日報の作成の依頼(Issue #235)。DAILY_REPORT が無い構成では渡さない(依頼しない)。
       ...(requestReport === undefined ? {} : { requestReport }),
       loadSettings: async () => {

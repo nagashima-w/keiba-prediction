@@ -175,7 +175,7 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const reports = await req(port, "GET", "/api/reports");
   check(`${label}: GET /api/reports は 200(日報は閲覧できる)`, reports.status === 200 && parseJson(reports.text)["ok"] === true, `${reports.status} ${reports.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
@@ -205,6 +205,11 @@ async function expectAdmin(port: number, label: string, email: string): Promise<
   const verifyAdmin = await req(port, "GET", "/api/verify?venue=all");
   check(`${label}: GET /api/verify は ready(管理者は集計する。閲覧者の not-computed との対照)`, verifyAdmin.status === 200 && parseJson(verifyAdmin.text)["status"] === "ready", `${verifyAdmin.status} ${verifyAdmin.text.slice(0, 160)}`);
   check(`${label}: GET /api/export/prior-dataset?x=1(Issue #266)は 400(役割の関門を通って、入力の検証に届く。DO は開かない)`, (await req(port, "GET", "/api/export/prior-dataset?x=1")).status === 400);
+  // Issue #256 段階A: 各馬の戦績の蓄積の診断。管理者は 200(本物の D1。migration 0014 の表が空なので、行数 0・保存の集計 0)。入力の検証は 400。
+  const horseRuns = await req(port, "GET", "/api/horse-runs");
+  const horseRunsBody = parseJson(horseRuns.text);
+  check(`${label}: GET /api/horse-runs(Issue #256)は 200(管理者だけ。表は空で、行数 0・保存の集計 0・段階Aの限界の注記つき)`, horseRuns.status === 200 && horseRunsBody["ok"] === true && (horseRunsBody["table"] as { rows?: unknown } | undefined)?.rows === 0 && typeof horseRunsBody["note"] === "string", `${horseRuns.status} ${horseRuns.text.slice(0, 160)}`);
+  check(`${label}: GET /api/horse-runs?cells=1 は 200(セルの分布も返す)・?days=0 は 400(役割の関門を通って、入力の検証に届く)`, (await req(port, "GET", "/api/horse-runs?cells=1")).status === 200 && (await req(port, "GET", "/api/horse-runs?days=0")).status === 400);
   const post = await req(port, "POST", "/api/analyses/run");
   check(`${label}: POST /api/analyses/run は(Origin が無いので)origin-mismatch の 403。admin-only ではない(役割の関門を通って、ハンドラの守りに届く)`, post.status === 403 && post.text !== ADMIN_ONLY_BODY && post.text.includes("origin-mismatch"), `${post.status} ${post.text.slice(0, 80)}`);
   const bulk = await req(port, "POST", "/api/analyses/run/bulk");

@@ -1122,11 +1122,11 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
   - **登録済みで有効な項目が 0 件**(セミコロン・空白・改行区切り、文字列でない値など)なら**管理者なし**(全員が閲覧者。`ACCESS_ALLOWED_EMAIL` にもフォールバックしない。`admins=none`)。`ADMIN_USER` の不備は設定全体を無効にしない(閲覧者を締め出さない)。
   - `ACCESS_ALLOWED_EMAIL` は**必須のまま**(欠落・`@` なしは `config-missing`/`config-invalid` で全拒否)。`ADMIN_USER` が有効なときは、管理者の判定には使われない。
   - 役割は**検証済みのメールと管理者の一覧の完全一致**だけで決める(JWT のメールは分割も部分一致もしない)。メールが文字列でない・判定中に例外が起きたら viewer。ヘッダ・クッキー・`ctx.access` のどの経路でも同じ判定。
-- **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 27 + パターン 2 = 29 ルート。#244 でアイコン 7 本、#251 で `/api/analyses/run/bulk`、#266 で `/api/export/prior-dataset` を足した)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
+- **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 28 + パターン 2 = 30 ルート。#244 でアイコン 7 本、#251 で `/api/analyses/run/bulk`、#266 で `/api/export/prior-dataset`、#256 で `/api/horse-runs` を足した)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
   **リクエスト本文を読まず・DO/D1/R2/gate に触れず**に 403 `{"ok":false,"error":{"type":"admin-only"}}`(固定。認証の拒否の `forbidden` とは本文で区別する)を返す。**表に無い (method, path) は管理者専用**(フェイルクローズ)。
   - 閲覧者に許す(17 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`・`GET /api/verify`(#263。下の「閲覧者の検証画面」)、
     アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/favicon-16.png`・`/icons/favicon-32.png`・`/icons/header-32.png`・`/icons/header-64.png`・`/icons/header-96.png`。#244。下の「アイコン」の節)。
-  - 管理者だけ(12 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/export/prior-dataset`(#266)。
+  - 管理者だけ(13 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/export/prior-dataset`(#266)・`/api/horse-runs`(#256 段階A。各馬の戦績の蓄積の診断)。
   - 閲覧者が表の外の method(HEAD・POST など)を送ると、405 ではなく 403 になる。`{id}`・`{date}` のパターンは `run` に化けない(`/api/analyses/run`・`/api/reports/run` は管理者専用)。
   - `GET /api/races` は閲覧者でも netkeiba への取得を起こしうる(DO のキャッシュと gate が効く)。利用者の決定(2026-10-10)で許可した。
 - **画面**: サーバが `renderPage(email, role)` で `#app` に `data-role="admin|viewer"` を渡す(インラインスクリプトは使えないため属性。`client/main.ts` が `roleFromAttribute` で読み、欠落・不明は viewer)。
@@ -2095,3 +2095,21 @@ upload(26.2MB を R2 にそのまま置く): 532ms
 - **web**(馬のカード。結果画面と発走前のカードの中の両方): 単勝の行の下に「複勝 想定(目安) 2.0倍 / 実際 1.5〜2.3倍」。5〜7頭は見出しが「複勝(2着まで)」。丸めると下限と上限が同じなら「1.5倍」、上限が無ければ「1.5倍〜」、下限が無ければ「-」。**「↑想定より高い」は、実際の下限と想定を、丸めた値どうしで比べる**(利用者の決定 2026-10-10。上限は比べない)。**想定が 1.0倍未満のときは比べず、「↑」を出さない**(利用者の決定 2026-10-11。実際の下限は必ず 1.0 以上で、比べても情報にならない)。説明文は単勝とは別の段落で「馬ごとの評価」の見出しの下に1回(基準があり、想定か実際の下限が1頭でもあるときだけ)。表示の整形は import を持たない `cloud/src/place-odds-format.ts`。「3着内率の上位5頭」には出さない。
 - **Discord**(「印」の field): 単勝に続けて1行に収める: `◎ 3番 馬名 単勝 想定8.5倍/実際12.3倍 ↑想定より高い 複勝 想定1.5倍/実際1.6〜2.3倍 ↑想定より高い`(5〜7頭は `複勝(2着まで)`)。単勝・複勝それぞれ、想定も実際も無い馬(複勝は基準が無い馬も)にはその部分を足さない。どちらかを足したときは field の末尾に説明の1行(`ODDS_FIELD_NOTE`。単勝・複勝の両方を含む)。印の馬が最大 8 頭(◎1・〇1・▲1・△3・☆1・注1)で、馬名が 32 字・実際が「(暫定)」・単勝も複勝も 1000倍超かつ強調ありという最悪ケースでも、8 頭と説明の行が 1 行も落ちず field の上限 1024 に収まる(`cloud/test/notify-embeds-place-odds.test.ts` の最悪ケースが固定する)。このため、複勝のラベルの短縮も、単勝と複勝を別の field に分けることも不要だった。収まらない入力(18 頭すべてに印など)は、既存の「…ほか N 件」で末尾から落ちる。
 - **#257 の発見**(統計モデルは人気薄の3着内率を高く見積もる)について、表示は計算どおりに出し、注記は付けない(利用者の決定)。
+### クラウド版の各馬の戦績の蓄積(#256 段階A。**版数は 1.44.0 のまま**・`PROMPT_VERSION` も変えない〈分析の入力・数値は変わらない〉)
+事前分析で取った各馬の戦績を D1 に貯め始める(段階A = 貯めるだけ・取得は今のまま)。2〜4 週後の実測で、取得を減らす段階 D(結果ページから行を作る)・騎手 × コースの集計(段階 E)・走破タイムの基準(#274)に進むかを決める。
+- **何を貯めるか**: `HorseRaceResult` の全 27 項目(`packages/core/src/scraper/horse-run-record.ts`)。`raceId` は `raceIdRaw` から導けるので持たず、残り 26 項目を位置タプル(JSON 配列)にする。走破タイム・馬場・距離・コースを含む。
+  `HORSE_RUN_FIELD_SLOTS` の型(`satisfies Record<keyof HorseRaceResult, …>`)と網羅ガードのテストが、項目の追加を赤にする。戦績は `scrapeRace` が除外・取消の行(#261)を除いた後のもの(分析入力と同じ集合)。
+- **表**(migration 0014。追加のみ): `horse_runs`(1 走 1 行。`WITHOUT ROWID`・主キー `(horse_id, race_key)`・副索引なし。`race_key` はレース ID〈`raceIdRaw`。中央も地方も 12 桁〉、無ければ〈海外・リンク欠損〉`'X' + 日付`。
+  `parser_version`・`first_seen_at`・`data`)と、`horse_run_saves`(1 回の保存につき 1 行の集計。主キー `(saved_at, race_id)`)。
+- **いつ・どこで**: 事前分析(morning)の**計算ステップの末尾**だけ(`RaceDayCore.saveHorseRuns`)。キャッシュ済みの出走馬全頭の戦績を渡し、prior の保存とタスクの完了の**後**に呼ぶ。取得ステップ・発走前の分析(pre_race)では貯めない。
+  **限界**: 手動の発走前だけの分析(事前分析を経ない)の戦績は貯まらない。失敗は握って警告にする(分析は止めない・再試行しない)。取得は 1 本も増えない(テストが、保存先の有無でゲートへの URL の列が同じことを固定する)。
+- **1 回の保存の D1 への問い合わせ**(`cloud/src/horse-runs-repository.ts`): 保存済みの読み 1・race_results の確認 1(新規行があるときだけ)・行の書き込み(新規と上書きそれぞれ、あるときだけ。500 行ごと)・集計の記録 1。
+  行は JSON 1 個を `json_each` で展開して書く(1 行ずつバインドすると D1 の 1 文 100 変数の上限に 33 行ほどで当たる)。重複だけの再送は読み 1 + 記録 1 の 2 文で、行の書き込みは 0。
+- **冪等と分類**(`cloud/src/horse-runs.ts` の純ロジック): 新規 / 重複(同日の再実行・前日以前から保存済み)/ 不一致(**後から埋まっただけ** と **値が変わった**を分ける。標本は 1 回の保存で最大 5 件)/ 再パース(保存済みの版が古い)/ 保存済みの版が新しい(触らない)。
+  不一致は netkeiba を正として上書きする(初見時刻は据え置き)。判断材料として、初見でない馬の新規行が「その時点で race_results に取り込み済みのレース」だけだったか(`horsesNewAllInResults`)を保存時に数える(後からは必ず真になるため)。
+- **先読みのリーク**: 保存は事実の記録なので絞らない。段階 E の集計は `run_date < 基準日` に絞る(日付は `YYYY/MM/DD` の文字列で、辞書順 = 日付順)。レース後の手動再分析は、そのレース自身を表に入れる(集計の絞りで外れる)ので、診断は「開催日より前に保存した分(`beforeRaceDay`)」を別に出す。
+- **診断**(`GET /api/horse-runs[?days=1〜60][&cells=1]`。管理者専用・GET だけ・読み取り専用。別サイトからの要求は 403 `origin-mismatch`): 表の行数・馬の数・開催区分別・版数別・走った日の範囲、保存の集計(全体と `beforeRaceDay`・日ごと)と割合
+  (`shareNewAllInResults` = 初見でない馬のうち新規行がすべて取り込み済みの割合〈段階 D の判断材料〉、`shareZeroNew` = 初見でない馬のうち新規 0 行の割合〈段階 C で省ける取得〉)。`cells=1` のときだけ、中央の走を 騎手 × 競馬場 × 芝ダ × 距離帯(200m)のセルに分けた走数の分布(n≥10・30・100 のセル数。段階 E の判断材料。horse_runs の全件走査)。
+- **書き込み・容量の見積もり**(仮定を含む): 初見の馬が多い最初の日は 1 日 約 350 頭 × 1 頭あたりの走数(8〜20 と仮定)で約 2,800〜7,000 行、定常は約 350 行/日 + 集計 約 36 行/日。D1 Free の 10 万行/日の内側。
+  1 行 約 300〜350 バイト(ローカルの D1 で実フィクスチャの行を元にした 約 2 万行を入れた実測: 馬 ID が連番で 296、乱数で 348 バイト/行。母集団の平均ではない)。活躍馬 約 1 万頭 × 10 走で約 35MB。
+- **正当に変わりうる項目と不一致の数え方**: 直後のレースは通過順・ペース・上がりなどが遅れて入ることがあるため、保存済みで空だった項目が埋まっただけの行は「埋まった」として「変わった」と分けて数える。降着による繰り上がり・騎手名の表記の変更などは「変わった」に入り、違ったスロットの番号を標本に残す。
