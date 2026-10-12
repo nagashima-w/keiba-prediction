@@ -256,6 +256,7 @@ export {
   buildPriorInput,
   computeFieldPriors,
   computePrior,
+  normalizeFieldPriors,
   type BuildPriorInputArgs,
   type BuildPriorRaceInfo,
   type PriorInput,

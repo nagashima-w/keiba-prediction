@@ -361,23 +361,21 @@ export const PLACKETT_LUCE_MODEL: OrderedPlaceJointModel = {
    * そのものではなく、水詰め射影(water-filling)による再スケール後の目標 q である。**
    * `fitPlackettLuceStrengths`(`plackett-luce-strength.ts`)は Σp≠k の入力を
    * `q_i=min(1,λ・p_i)`(Σq=k)へ射影してから解く。`scripts/bench-joint-model.ts` の実測
-   * (`pnpm tsx scripts/bench-joint-model.ts` で再現可能。clipVariant=default・N=200)では
-   * p=0を含むレースが197/200(98.5%)に達し、再スケールがほぼ常時働く。つまり
+   * (`pnpm tsx scripts/bench-joint-model.ts` で再現可能。clipVariant=default・N=200。Issue #258 で
+   * raw prior の正規化をロジットシフトに替えた後の実行。#258 前の乗算の正規化では 197/200〈98.5%〉)では
+   * p=0を含むレースが196/200(98.0%)に達し、再スケールがほぼ常時働く。つまり
    * production では「false」が指す“厳密な再現”の対象はほとんどの場合 placeProb 自体では
    * なく再スケール後の q であり、この q は placeProb と一致しない。
    *
    * **さらに、この false は CONDITIONAL_BERNOULLI_MODEL(true)より周辺確率の再現精度が
    * 高いことを意味しない。** 同じ実測(clipVariant=default・N=200)で `marginalDeviationMax`
    * (実際に構築した同時分布の周辺確率と入力placeProbとの最大絶対差)の中央値は
-   * PL=0.061835・CB=0.046275 であり、**PLの方が悪化する**。PLがCBより悪化するレースの割合は
-   * 117/199(58.8%。clipVariant=wide15・N=200では143/200=71.5%)に達する
-   * (分母がclipVariantで199と200で異なるのは母数の取り方の違いではなく、`runModelLayer`が
-   * `plWorseCount/successCount`〈フィット成功件数を分母にする〉を出力しているため:
-   * clipVariant=defaultはN=200中`not-converged`が1件発生し成功件数が199件になるのに対し、
-   * wide15は`not-converged`が0件でN=200のまま成功件数と一致する。
-   * `pnpm tsx scripts/bench-joint-model.ts` 実行結果の
-   * 「成功: 199/200」「not-converged: 1/200」〈default〉/「成功: 200/200」〈wide15〉で
-   * 再現できる)。
+   * PL=0.057701・CB=0.047349 であり、**PLの方が悪化する**。PLがCBより悪化するレースの割合は
+   * 121/200(60.5%。clipVariant=wide15・N=200では144/200=72.0%)に達する
+   * (#258 前の乗算の正規化では PL=0.061835・CB=0.046275、117/199〈58.8%〉・143/200〈71.5%〉だった。
+   * 分母は`runModelLayer`が出力する`plWorseCount/successCount`〈フィット成功件数〉で、
+   * #258 後の実行では両 clipVariant とも`not-converged`が0件のため200件。
+   * 「成功: 200/200」「not-converged: 0/200」の出力で確認できる)。
    *
    * **重要: false は「1着確率や3着内率の予測が当たる」ことを一切意味しない。**
    * 「同時分布が周辺確率をどれだけ忠実に再現するか」という数学的な性質のフラグであり、

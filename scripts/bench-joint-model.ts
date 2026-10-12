@@ -13,13 +13,19 @@
  *   (両者は併存する)。
  *
  * ## 入力の作り方(production 到達可能域を模す。要修正5で是正)
- * `scorer/prior.ts` の `computeFieldPriors`(:246-297)と同じ「クランプ → Σを
- * min(targetPlaceCount, 頭数) へ一律スケールで正規化(逸脱が normalizeTolerance を超えるときのみ)
- * → 再クランプ」という順序を、本スクリプトの `computeNormalizedRawPriors` として再現する
+ * `scorer/prior.ts` の `normalizeFieldPriors`(Issue #258 でロジットシフトに替えた頭数正規化)を
+ * **そのまま import して**使う(raw → [minPrior,maxPrior] に収めて logit → 共通項 c を足して
+ * Σ=min(targetPlaceCount, 頭数) → 再クランプ)。#258 より前は、乗算の正規化を本スクリプトの
+ * `computeNormalizedRawPriors` で再実装(ミラー)していたが、二重管理になるため撤去した
  * (`computeFieldPriors` 自体は `DerivedRaceFeature`/`TodayRaceConditions` 等の重い依存を要求し、
- * 過去走を空にすると全馬同一の退化した prior になってしまうため、正規化アルゴリズムだけを
- * ミラーする設計にした。定数〈minPrior/maxPrior/targetPlaceCount/normalizeTolerance〉は
- * `DEFAULT_SCORER_CONFIG.prior` から直接読み込み、二重定義しない)。
+ * 過去走を空にすると全馬同一の退化した prior になってしまうため、raw の配列だけを作って
+ * 純関数に渡す)。定数〈minPrior/maxPrior/targetPlaceCount〉は `DEFAULT_SCORER_CONFIG.prior` から
+ * 直接読み込み、二重定義しない。
+ *
+ * **#258 での入力分布の変化**: raw prior の混合分布(下記)に対し、乗算では突出馬が Σ合わせで
+ * 引き下げられていたが、ロジットシフトでは(Σraw が約3の合成分布では共通項 c が小さいため)
+ * 突出馬が 0.9 以上のまま残る。このため bench の数値(p=1 を含むレースの割合・PL/CB の周辺確率差など)は
+ * #258 前と一致しない。#258 前の値は、下の各段落に「#258 前」として併記した。
  *
  * 是正前(#77初回実装)は各馬の placeProb を `[minPrior,maxPrior]` から独立一様乱色で生成しており、
  * Σが正規化されないまま `avgSumP≈8.8`(目標3の約3倍)という production では起こらない入力で
@@ -41,19 +47,23 @@
  * (独立一様分布1本だと正規化の一律スケールが強く効きすぎ、突出馬がいても maxPrior=0.95 に
  * 届かずp=1に構造的に到達できなかったため)。
  *
- * **この是正により明らかになったこと(#78の材料)**: p=0を含むレースは98.5〜100%、p=1を
- * 含むレースは12〜14%に達し(自分の実測。下記「使い方」で再現可能)、
+ * **この是正により明らかになったこと(#78の材料)**: p=0を含むレースは98.0〜100%(#258 前は98.5〜100%)、p=1を
+ * 含むレースは19.5〜26.0%に達し(#258 後の実測。下記「使い方」で再現可能。#258 前は12〜14%)、
  * `degenerateFixedCount`/`rescaleInducedFixedCount` も平均0より大きくなる(縮約経路を
- * 実際に通るようになった)。一方で `not-converged` も 0%ではなくなり(default 0.5%程度)、
- * **フィット+分布生成のms分布は中央値こそ2〜3ms台に留まるが、95%点は8〜12ms、最悪値は
- * p=1近傍の内点ターゲットを含むレースで30〜80ms台に達することがある**(θフィット反復回数が
+ * 実際に通るようになった)。一方で `not-converged` も 0%ではなくなり(`runModelLayer` の N=200 では
+ * #258 前の default 0.5%程度に対し、#258 後は両 clipVariant とも 0/200。標本が小さいので
+ * `runFitPerformanceSweep` の N=3200 〈`plackett-luce-strength.ts` の表〉で見ること)、
+ * **フィット+分布生成のms分布は中央値こそ2〜3ms台に留まるが、95%点は7〜12ms、最悪値は
+ * p=1近傍の内点ターゲットを含むレースで40〜80ms台に達することがある**(θフィット反復回数が
  * 数百〜1000超になるケースが実在する)。
  *
  * **AC-9(18頭・k=3のフィット+分布生成が5ms未満)は、この本番相当分布に対しては未達である
  * (要修正Bで明記。「別物として明記する」という読み替えは boss メタレビューで差し戻された)。**
  * AC-9 の5msが実際に成立するのは `runSingleShotPerformanceCheck`(Σp=kちょうどの単発計測。
- * 反復5回・実測1.3〜1.4ms)だけであり、`runModelLayer` が測るこの現実的な入力分布では
- * 95%点10.6ms・最悪36.7ms(default)/78.1ms(wide15)で、5msの2〜16倍に達する。
+ * 反復5回・実測1.3〜1.4ms。#258 後の実行は合計0.842ms)だけであり、`runModelLayer` が測るこの現実的な
+ * 入力分布では(#258 後の2回の実行で)95%点8.0〜8.4ms・最悪43.4〜43.9ms(default)/ 95%点6.6〜7.0ms・
+ * 最悪36.7〜45.6ms(wide15)で、5msの1.3〜9倍に達する(#258 前は 95%点10.6ms・最悪36.7ms〈default〉/
+ * 78.1ms〈wide15〉。ms は実行環境で動くため範囲で書く)。
  * `MAX_FIT_ITERATIONS=2000`(`plackett-luce-strength.ts`)は「5msの予算より
  * `not-converged`率を優先した」選択である。**この上限を50〜20000まで振ったときの
  * not-converged率・フィット所要msの表(Issue #80・#78-A・実測是正)は、二重管理を避けるため
@@ -79,7 +89,9 @@
  * ラベル付けし転記したものだった(#78のゲートでboss が検出・是正。詳細は
  * `docs/issue-order.md`「#80に着手する前に必ず読むもの」参照)。**HEAD(`f2312ae`)の実測は
  * PL 0.061835 / CB 0.046275(中央値)・PLが悪化する割合 default 58.8% / wide15 71.5%**
- * であり、本スクリプトの`runModelLayer`実行結果として毎回再現できる(下記「使い方」参照)。
+ * であり、当時は本スクリプトの`runModelLayer`実行結果として再現できた。**Issue #258 で入力の正規化を
+ * 替えた後の実測は PL 0.057701 / CB 0.047349(default)・PLが悪化する割合 default 60.5% / wide15 72.0%**
+ * で、これが現在の`runModelLayer`実行結果として再現できる(下記「使い方」参照)。
  *
  * ## 使い方
  *   pnpm tsx scripts/bench-joint-model.ts
@@ -104,27 +116,8 @@ import {
   type PlaceOutcome,
 } from "../packages/core/src/ev/place-joint-model.js";
 import { DEFAULT_SCORER_CONFIG } from "../packages/core/src/scorer/config.js";
+import { normalizeFieldPriors } from "../packages/core/src/scorer/prior.js";
 import { CLIP_VARIANTS } from "../packages/core/src/analyzer/clip-variants.js";
-
-/**
- * `scorer/prior.ts` の `computeFieldPriors` と同じ正規化アルゴリズムを、素の数値配列に対して
- * 再現する(クランプ → Σが目標から `normalizeTolerance` を超えて逸脱していれば一律スケール →
- * 再クランプ)。定数は DEFAULT_SCORER_CONFIG.prior から直接読む(二重定義しない)。
- */
-function computeNormalizedRawPriors(rawPriors: readonly number[]): number[] {
-  const { minPrior, maxPrior, targetPlaceCount, normalizeTolerance } =
-    DEFAULT_SCORER_CONFIG.prior;
-  const fieldSize = rawPriors.length;
-  const target = Math.min(targetPlaceCount, fieldSize);
-  const clamp = (x: number, min: number, max: number) => Math.min(max, Math.max(min, x));
-  const clamped = rawPriors.map((v) => clamp(v, minPrior, maxPrior));
-  const sumClamped = clamped.reduce((a, b) => a + b, 0);
-  let scale = 1;
-  if (sumClamped > 0 && Math.abs(sumClamped - target) / target > normalizeTolerance) {
-    scale = target / sumClamped;
-  }
-  return clamped.map((v) => clamp(v * scale, minPrior, maxPrior));
-}
 
 /** 決定的な疑似乱数生成器(LCG)。 */
 function makeRng(seed: number): () => number {
@@ -163,8 +156,8 @@ function applyProductionClip(
 
 /**
  * production 相当の18頭・複勝人数3のレースを1件生成する(clipVariantで±maxAdjustを切替)。
- * 要修正5: raw prior → computeNormalizedRawPriors(Σを min(3,頭数) へ正規化) → ±maxAdjust の
- * クリップ、という production と同じ順序(prior.ts のクランプ→正規化→再クランプ、
+ * 要修正5: raw prior → normalizeFieldPriors(Σを min(3,頭数) へ正規化) → ±maxAdjust の
+ * クリップ、という production と同じ順序(prior.ts の正規化〈#258 でロジットシフト〉、
  * その後 parse-response.ts の ±maxAdjust クリップ)で生成する。
  * 要修正3: LLMの生の応答値(value)は、窓[lower,upper]よりずっと広い範囲(prior±0.6。
  * [0,1]の外にはみ出すことも許す)から引き、`applyProductionClip` で実際にクリップする。
@@ -173,16 +166,16 @@ function buildRaceHorses(
   rand: () => number,
   clipVariantId: keyof typeof CLIP_VARIANTS,
   n = 18,
-): { horses: JointModelHorse[]; clippedToZeroCount: number; clippedToOneCount: number } {
+): { horses: JointModelHorse[]; clippedToZeroCount: number; clippedToOneCount: number; maxPrior: number } {
   const maxAdjust = CLIP_VARIANTS[clipVariantId].maxAdjust;
   // raw prior(正規化前)は「大半は0〜0.25の一般馬・5%は0.9〜0.99の突出馬(混合分布)」から
   // 引く(独立一様分布1本だと正規化のΣ合わせが強く効きすぎ、突出馬がいてもscaleで
   // maxPrior=0.95に届かなくなり、p=1に構造的に到達できないことが判明した。要修正3で
-  // 訂正。この混合なら実測で約28.6%のレースで最大priorが0.9以上に達する)。
+  // 訂正。この混合なら、#258 の正規化〈ロジットシフト〉では `runModelLayer`(N=200)の出力「最大priorが0.9以上のレース」で default 92/200〈46.0%〉・wide15 100/200〈50.0%〉に達する〈乗算だった#258前は実測で約28.6%〉)。
   const rawPriors = Array.from({ length: n }, () =>
     rand() < 0.05 ? uniform(rand, 0.9, 0.99) : uniform(rand, 0, 0.25),
   );
-  const priors = computeNormalizedRawPriors(rawPriors);
+  const priors = normalizeFieldPriors(rawPriors, DEFAULT_SCORER_CONFIG.prior);
   let clippedToZeroCount = 0;
   let clippedToOneCount = 0;
   const horses = priors.map((prior, i) => {
@@ -194,7 +187,7 @@ function buildRaceHorses(
     if (clipped && adjusted === 1) clippedToOneCount++;
     return { umaban: i + 1, placeProb: adjusted };
   });
-  return { horses, clippedToZeroCount, clippedToOneCount };
+  return { horses, clippedToZeroCount, clippedToOneCount, maxPrior: Math.max(...priors) };
 }
 
 /** 分布からの周辺確率(馬iを含むoutcomeの確率合計)。 */
@@ -263,6 +256,7 @@ function runModelLayer(clipVariantId: keyof typeof CLIP_VARIANTS, sampleCount: n
   // 要修正3: 入力クラスの統計(bench が「窓の外に答えるLLM」を実際に生成しているかを示す)。
   let racesWithZeroCount = 0;
   let racesWithOneCount = 0;
+  let racesWithMaxPrior09 = 0;
   let totalClippedToZero = 0;
   let totalClippedToOne = 0;
   const degenerateZeroCounts: number[] = [];
@@ -271,7 +265,8 @@ function runModelLayer(clipVariantId: keyof typeof CLIP_VARIANTS, sampleCount: n
   let notConvergedWithZeroOrOne = 0;
 
   for (let i = 0; i < sampleCount; i++) {
-    const { horses, clippedToZeroCount, clippedToOneCount } = buildRaceHorses(rand, clipVariantId);
+    const { horses, clippedToZeroCount, clippedToOneCount, maxPrior } = buildRaceHorses(rand, clipVariantId);
+    if (maxPrior >= 0.9) racesWithMaxPrior09++;
     const k = 3;
     const hasZero = horses.some((h) => h.placeProb === 0);
     const hasOne = horses.some((h) => h.placeProb === 1);
@@ -331,6 +326,10 @@ function runModelLayer(clipVariantId: keyof typeof CLIP_VARIANTS, sampleCount: n
   console.log(
     `  p=0を含むレース: ${racesWithZeroCount}/${sampleCount}(${((racesWithZeroCount / sampleCount) * 100).toFixed(1)}%)` +
       ` / p=1を含むレース: ${racesWithOneCount}/${sampleCount}(${((racesWithOneCount / sampleCount) * 100).toFixed(1)}%)`,
+  );
+  // 正規化後(LLM のクリップ前)の最大 prior が 0.9 以上のレース(突出馬が天井近くに残る割合。#258)。
+  console.log(
+    `  最大priorが0.9以上のレース(正規化後・クリップ前): ${racesWithMaxPrior09}/${sampleCount}(${((racesWithMaxPrior09 / sampleCount) * 100).toFixed(1)}%)`,
   );
   console.log(
     `  クリップで0に丸められた頭数の合計: ${totalClippedToZero} / 1に丸められた頭数の合計: ${totalClippedToOne}`,

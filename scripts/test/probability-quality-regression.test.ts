@@ -36,6 +36,14 @@
  * | [前後比較・固定値] リークあり(ρ=0.2104489…・klModel=0.0155563…)・遮断後(ρ=-0.0058866…・klModel=0.0235949…)の値を固定 | **無改変**の値を固定(リークあり側は上の参照実装から、遮断後は `runAnalysis` の生入力・絞り済み入力の両方から) |
  * | [前後比較・conditions] 遮断側で `leakFilterApplied=true`・`removedResultCount` が診断値と一致、生側で false | **無改変**(`leakFilter` は計測側が渡す診断値であり、production の遮断とは独立。#39 以降 production は常に遮断するので、生入力側の false は「診断値を渡していない」の意味) |
  * | [戦績0走] 全走を除外した馬でも完走・Σprior≈3 | 無改変 |
+ *
+ * ## #258 での改訂(頭数正規化を乗算スケール → ロジットシフトに替えた。許容 ±10% のゲートも撤去)
+ * | 旧(#213 後・乗算)の保証 | 新(ロジットシフト)での扱い |
+ * |---|---|
+ * | [固定値] 中央 ρ=-0.0073583…・sd比=0.4521232…・klModel=0.0229221…、地方 ρ=0.5288974…・sd比=0.9879264…・klModel=0.0604388… | ρ・klMarket は**無改変**(ρ は順序だけに依存し、正規化は順序を保つ。市場側はリークと正規化の両方に無関係)。sd比・klModel は実測し直して固定(**中央**: sd比 0.4521→0.5709・klModel 0.02292→0.03651、**地方**: sd比 0.98793→1.00149・klModel 0.06044→0.06187。広がりが保たれるので sd比・klModel は上がる) |
+ * | [前後比較・リークあり参照値] ρ=0.2369…・klModel=0.0153467… | ρ は無改変。klModel は 0.0279291… に更新(同じ理由) |
+ * | [前後比較・遮断後] ρ=-0.0073583…・klModel=0.0229221… | ρ は無改変。klModel は 0.0365121… に更新 |
+ * | [戦績0走] Σprior=3.04(raw 合計が許容内で正規化が発動せず)・範囲 [0.1675, 0.2075] | **意図して反転**: 許容のゲートを撤去したので Σprior=3(10 桁)・範囲 [0.165232…, 0.204824…]。順序は無改変で、全頭が 0 でも 1 でもない |
  */
 
 import { readFileSync } from "node:fs";
@@ -85,13 +93,13 @@ const FIXTURES: readonly FixtureCase[] = [
     label: "中央16頭",
     fixtureFileName: "central-on.json",
     kaisaiDate: "20260628",
-    expected: { spearmanRho: -0.007358353721315753, sdRatio: 0.4521232078462746, klModel: 0.02292214278492964, klMarket: 0.10397453475016975 },
+    expected: { spearmanRho: -0.007358353721315753, sdRatio: 0.5709254965131206, klModel: 0.03651212643083496, klMarket: 0.10397453475016975 },
   },
   {
     label: "地方12頭",
     fixtureFileName: "nar-on.json",
     kaisaiDate: "20260712",
-    expected: { spearmanRho: 0.5288974835954514, sdRatio: 0.9879264735332672, klModel: 0.06043880053025523, klMarket: 0.053251532406149917 },
+    expected: { spearmanRho: 0.5288974835954514, sdRatio: 1.0014875352607635, klModel: 0.06186901117145247, klMarket: 0.053251532406149917 },
   },
 ];
 
@@ -309,10 +317,12 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     // 回帰: 自分で実行して得た値を固定する(受け入れ条件8。リークあり側は参照実装から)。
     // Issue #213 で scorer の馬体重の減点・休み明けの一律減点を撤去したため、値を実測し直した
     // (旧: リークあり ρ=0.2104489…・klModel=0.0155563…、遮断後 ρ=-0.0058866…・klModel=0.0235949…)。
+    // Issue #258 で頭数正規化をロジットシフトに替えたため、klModel を実測し直した(ρ は順序だけに依存するので不変。
+    // 旧 #213 後: リークあり klModel=0.0153467…、遮断後 klModel=0.0229221…)。
     expect(leakyReport.spearmanRho.value).toBeCloseTo(0.23693898982636727, 9);
     expect(filteredReport.spearmanRho.value).toBeCloseTo(-0.007358353721315753, 9);
-    expect(leakyReport.normalizedJointKlModel.value).toBeCloseTo(0.015346756614944555, 9);
-    expect(filteredReport.normalizedJointKlModel.value).toBeCloseTo(0.02292214278492964, 9);
+    expect(leakyReport.normalizedJointKlModel.value).toBeCloseTo(0.027929117780105397, 9);
+    expect(filteredReport.normalizedJointKlModel.value).toBeCloseTo(0.03651212643083496, 9);
 
     // conditionsにリーク遮断の実際の診断値が反映されていること。
     // (leakFilter は計測側が渡す診断値。#39 以降 production は常に遮断するので、diagnostics を
@@ -353,19 +363,21 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     // 全馬careerRunCount=0(新馬相当)であること。
     expect(result.rows.every((row) => row.careerRunCount === 0)).toBe(true);
 
-    // Σpriorが目標(min(3,頭数)=3)付近に収まること。
+    // Σpriorが目標(min(3,頭数)=3)に一致すること。
     // Issue #213 以前は、馬体重の減点で raw 合計が下振れして頭数正規化(許容10%)が発動し、Σ=3 ちょうどに
     // 揃っていた(固定値 3.000000000000001)。減点の撤去後は raw 合計が許容内(偏差 1.3%)に入り正規化は
-    // 発動しないので、Σ=3.04(コースレベル枠順バイアスの加算分)になる。
+    // 発動しないので、Σ=3.04(コースレベル枠順バイアスの加算分)だった。
+    // Issue #258 で許容のゲートを撤去し(常に Σ=目標)、ロジットシフトに替えたので、再び Σ=3 になる。
     const priorSum = result.rows.reduce((s, row) => s + row.prior, 0);
     expect(priorSum).toBeCloseTo(3, 1);
 
     // 回帰: 自分で実行して得た値を固定する(受け入れ条件8)。
-    expect(priorSum).toBeCloseTo(3.04, 9);
+    expect(priorSum).toBeCloseTo(3, 9);
     expect(result.rows.every((row) => row.prior > 0 && row.prior < 1)).toBe(true);
-    // 参考: Issue #213 以前の範囲は [0.1608, 0.2142](boss実測。正規化後の値)。正規化が発動しなくなったので変わった。
-    expect(Math.min(...result.rows.map((r) => r.prior))).toBeCloseTo(0.1675, 9);
-    expect(Math.max(...result.rows.map((r) => r.prior))).toBeCloseTo(0.2075, 9);
+    // 参考: Issue #213 以前の範囲は [0.1608, 0.2142](boss実測)、#213 後 #258 前(正規化なし)は [0.1675, 0.2075]。
+    // #258 で全頭の raw に共通のロジットの共通項を足して Σ=3 に揃えたので、範囲は [0.1652…, 0.2048…] になった。
+    expect(Math.min(...result.rows.map((r) => r.prior))).toBeCloseTo(0.16523210542099664, 9);
+    expect(Math.max(...result.rows.map((r) => r.prior))).toBeCloseTo(0.20482376771505625, 9);
 
     // eslint-disable-next-line no-console
     console.log(

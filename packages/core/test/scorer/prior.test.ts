@@ -8,6 +8,7 @@ import {
   buildPriorInput,
   computeFieldPriors,
   computePrior,
+  normalizeFieldPriors,
   type PriorInput,
   type TodayRaceConditions,
 } from "../../src/scorer/prior.js";
@@ -253,6 +254,29 @@ describe("computeFieldPriors(頭数レベルの健全性)", () => {
     for (const p of priors) {
       expect(p.prior).toBeCloseTo(first, 10);
     }
+  });
+});
+
+describe("computeFieldPriors は正規化を normalizeFieldPriors に委譲する(Issue #258)", () => {
+  it("prior == normalizeFieldPriors(各馬の rawPrior) で、Σprior が目標(3)に一致する", () => {
+    // 強さの異なる 8 頭(近走の着順を変える)。raw の合計は目標を大きく上回る。
+    const horse = (finish: number): PriorInput => ({
+      features: deriveRaceFeatures([
+        makeResult({ date: "2025/01/01", finishPosition: rank(finish) }),
+      ]),
+      today: NEUTRAL_TODAY,
+      fieldSize: 8,
+    });
+    const inputs = [1, 2, 3, 4, 6, 8, 10, 14].map(horse);
+    const priors = computeFieldPriors(inputs);
+    const raws = priors.map((p) => p.rawPrior);
+    // 前提(無条件): raw は馬ごとに異なり(退化していない)、合計は目標 3 と異なる。
+    expect(new Set(raws.map((v) => v.toFixed(6))).size).toBeGreaterThan(3);
+    expect(Math.abs(raws.reduce((s, v) => s + v, 0) - 3)).toBeGreaterThan(0.05);
+    expect(priors.map((p) => p.prior)).toEqual(
+      normalizeFieldPriors(raws, DEFAULT_SCORER_CONFIG.prior),
+    );
+    expect(priors.reduce((s, p) => s + p.prior, 0)).toBeCloseTo(3, 10);
   });
 });
 

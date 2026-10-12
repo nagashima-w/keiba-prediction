@@ -99,11 +99,13 @@ export interface BaseScoreWeights {
  *
  * 近走着順・コース距離適性・騎手複勝率などの「複勝率系」項目は、対象複勝率と中立基準
  * (neutralPlaceRate)の差分に重みを掛けて補正を作る(バイアス補正と同じ差分パターン)。
- * 中立基準はリーグ平均的な複勝率の目安であり、頭数正規化(prior.ts)で系統的な偏りは吸収するため
- * 概算で足りる。すべてチューニング対象(verifyの寄与度ログを見て調整する)。
+ * 中立基準はリーグ平均的な複勝率の目安であり、全馬に共通の偏りは頭数正規化(prior.ts の
+ * `normalizeFieldPriors`。Issue #258 で乗算からロジットシフトに替えた)が吸収するため概算で足りる。
+ * すべてチューニング対象(verifyの寄与度ログを見て調整する)。
  * ただし**騎手の項だけは中立が別**(`jockeyNeutralPlaceRate`。中央・地方別。Issue #226): 全騎乗の平均複勝率は
- * 0.33 よりずっと低く、正規化は許容(`normalizeTolerance`)を超えたときだけ働くため、流用すると平均的な騎手が全員
- * マイナス補正のまま残るレースが出る。
+ * 0.33 よりずっと低く、流用すると平均的な騎手が全員マイナス補正になり、寄与度ログ上の騎手項が
+ * 「平均的な騎手 = 0」にならない(Issue #258 以降、全馬共通の偏りはレース内で正規化が吸収するが、
+ * 補正値の読みやすさのために平均的な騎手を中立に置く設計は変えていない)。
  *
  * 既定重みの較正根拠(過剰補正・クランプ飽和の防止。仕様L135):
  * - recentForm・courseDistance・jockey はいずれも「馬の総合能力」を別スライスで測る相関の強い
@@ -178,14 +180,10 @@ export interface PriorConfig {
   readonly maxPrior: number;
   /**
    * 頭数レベル正規化の目標となる「1レースの複勝圏内数」(既定3)。
-   * 実際の目標は min(この値, 頭数)。全馬のraw合計をこの目標に寄せる。
+   * 実際の目標は min(この値, 頭数)。全馬の prior の合計をこの目標にちょうど合わせる
+   * (Issue #258: 旧版の「逸脱が許容〈normalizeTolerance=0.1〉を超えたときだけ」のゲートは撤去した)。
    */
   readonly targetPlaceCount: number;
-  /**
-   * 頭数正規化を発動する逸脱の許容比率(既定0.1)。
-   * |raw合計 − 目標| / 目標 がこの値を超えたときだけ正規化する(仕様「大きく逸脱する場合は正規化」)。
-   */
-  readonly normalizeTolerance: number;
   /**
    * 環境・状態バイアス7項目(馬場・競馬場・季節・夏負け・枠順個別・輸送滞在・ローテ)の補正合計に
    * 掛ける減衰係数(既定0.3)。各バイアスは小さいバケットの複勝率差でノイズが乗りやすく、重み1のまま
@@ -281,7 +279,6 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
     minPrior: 0.02,
     maxPrior: 0.95,
     targetPlaceCount: 3,
-    normalizeTolerance: 0.1,
     biasCorrectionScale: 0.3,
   },
   summerFatigue: {
