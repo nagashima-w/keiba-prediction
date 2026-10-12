@@ -78,7 +78,7 @@ function buildDay(races: number, bets: readonly BetSpec[]): RaceInput[] {
     const rest = [1, 2, 3, 4, 5, 6, 7, 8].filter((u) => !top.includes(u));
     const order = [...top.slice(0, 3), ...rest];
     const horse = (umaban: number, over: Partial<AnalysisViewHorse> = {}): AnalysisViewHorse => ({
-      umaban, name: `馬${n}-${umaban}`, prior: 0.2, adjustedProb: 0.25, placeOddsMin: 2, ev: 1.0, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, ...over,
+      umaban, name: `馬${n}-${umaban}`, prior: 0.2, adjustedProb: 0.25, placeOddsMin: 2, ev: 1.0, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, ...over,
     });
     const horses: AnalysisViewHorse[] = [
       ...list.map((_, k) => horse(k + 2, { mark: MARKS[k]!, adjustedProb: 0.3 - k * 0.05, ev: 1.1 + k * 0.1, isPositive: true, reason: k === 0 ? "近走の内容が安定している" : null })),
@@ -86,7 +86,7 @@ function buildDay(races: number, bets: readonly BetSpec[]): RaceInput[] {
     ].sort((a, b) => a.umaban - b.umaban);
     const view: AnalysisView = {
       id: 100 + n, raceId: `2026050308${String(n).padStart(2, "0")}`, analyzedAt: "2026-10-10T05:00:00.000Z", kaisaiDate: SCENARIO_DATE, evEstimated: false, model: "claude-sonnet-5-5", promptVersion: "v-scenario", llmNote: null, llmCalls: null,
-      race: { venueName: n % 2 === 0 ? "京都" : "東京", raceNumber: ((n - 1) % 12) + 1, raceName: `シナリオ${n}S`, grade: null, startTime: `${10 + Math.floor((n - 1) / 2)}:${n % 2 === 0 ? "30" : "00"}`, courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
+      race: { venueName: n % 2 === 0 ? "京都" : "東京", raceNumber: ((n - 1) % 12) + 1, raceName: `シナリオ${n}S`, grade: null, startTime: `${10 + Math.floor((n - 1) / 2)}:${n % 2 === 0 ? "30" : "00"}`, courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", oddsStatus: "result", placeBasis: "top3" },
       horses, detail: "present",
       allocation: {
         route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 20000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1,
