@@ -342,12 +342,66 @@ describe("buildDayStats", () => {
 
   it("buildStatsFromRaces は buildDayStats と同じ集計の本体(D1 の行から作る期間の統計と、日報の 1 日の統計が同じ関数を通る)", () => {
     const ds = digests();
-    const viaRaces = buildStatsFromRaces(ds.map((d) => ({ hasResult: d.hasResult, llmUsed: d.llmUsed, bets: d.bets, marks: d.horses.flatMap((h) => (h.mark === null ? [] : [{ mark: h.mark, finishPosition: h.finishPosition }])) })));
+    const viaRaces = buildStatsFromRaces(ds.map((d) => ({ hasResult: d.hasResult, llmUsed: d.llmUsed, bets: d.bets, templates: d.templates, marks: d.horses.flatMap((h) => (h.mark === null ? [] : [{ mark: h.mark, finishPosition: h.finishPosition }])) })));
     expect(viaRaces).toStrictEqual(buildDayStats(ds));
   });
 
   it("レースが 0 件でも落ちない", () => {
     const s = buildDayStats([]);
     expect(s).toMatchObject({ raceCount: 0, resultRaceCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, byMark: [], byBetType: {} });
+  });
+});
+
+describe("Issue #272: ダイジェストの定型の結果(templates)と統計の whatIf", () => {
+  const alloc = (b: Array<[string, string, number]>): NonNullable<AnalysisView["allocation"]> => ({
+    route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1,
+    includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok",
+    bets: b.map(([betType, comboKey, stake]) => ({ betType, comboKey, stake, odds: 5, ev: 1.1 })),
+  });
+  const marked = (): AnalysisViewHorse[] => [horse(1, { mark: "◎" }), horse(2, { mark: "〇" }), horse(3, { mark: "▲" }), horse(4, { mark: "△" }), horse(5)];
+  const FULL = result([[1, 1, 450, 150], [2, 2, null, 210], [3, 3, null, 320], [4, 4, null, null]], {
+    wide: { imported: true, payouts: [{ comboKey: "0102", payout: 800 }] },
+    quinella: { imported: true, payouts: [{ comboKey: "0102", payout: 1200 }] },
+    trio: { imported: true, payouts: [{ comboKey: "010203", payout: 5000 }] },
+  });
+
+  it("印・結果・実際の買い目から 5 型の結果を作る。実際に買っていた組合せ(ワイド 1-2)は bought、買っていない 3 連複は bought なし", () => {
+    const d = buildRaceDigest(view("202605030801", marked(), { allocation: alloc([["wide", "0102", 200]]) }), FULL);
+    expect(d.templates!.map((t) => [t.id, t.status, t.payout, t.bought ?? false])).toEqual([
+      ["win", "hit", 450, false], ["place", "hit", 150, false], ["wide", "hit", 800, true], ["quinella", "hit", 1200, false], ["trio", "hit", 5000, false],
+    ]);
+  });
+
+  it("印が無いレースは 5 型とも対象外、結果が無いレースは 5 型とも判定不能(どちらも 5 件を持つ)", () => {
+    const noMark = buildRaceDigest(view("202605030802", [horse(1), horse(2)]), FULL);
+    expect(noMark.templates!.map((t) => t.status)).toEqual(Array(5).fill("inapplicable"));
+    const noResult = buildRaceDigest(view("202605030803", marked()), undefined);
+    expect(noResult.templates!.map((t) => t.status)).toEqual(Array(5).fill("unjudged"));
+  });
+
+  it("buildDayStats の whatIf は、ダイジェストの定型の結果の集計(型ごとの点数・的中・賭け金・払戻・判定不能・対象外)", () => {
+    const hit = buildRaceDigest(view("202605030801", marked()), FULL);
+    const noResult = buildRaceDigest(view("202605030803", marked()), undefined);
+    const noMark = buildRaceDigest(view("202605030802", [horse(1)]), FULL);
+    const w = buildDayStats([hit, noResult, noMark]).whatIf!;
+    // 前提: 3 つの状態(判定できた・判定不能・対象外)がそれぞれ 1 レースずつ
+    expect(w.win).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 450, unjudgedCount: 1, inapplicableCount: 1 });
+    expect(w.trio).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 5000, unjudgedCount: 1, inapplicableCount: 1 });
+  });
+
+  it("templates を持たないダイジェスト(デプロイをまたいだ旧形のジョブ)が 1 つでもあれば whatIf は null(旧形でも落ちない)", () => {
+    const fresh = buildRaceDigest(view("202605030801", marked()), FULL);
+    const { templates: _templates, ...legacy } = { ...fresh, raceId: "202605030802" };
+    const stats = buildDayStats([fresh, legacy]);
+    expect(stats.whatIf).toBeNull();
+    expect(stats.raceCount).toBe(2);
+  });
+
+  it("mergeDayStats は whatIf を足す。片方が null なら null", () => {
+    const a = buildDayStats([buildRaceDigest(view("202605030801", marked()), FULL)]);
+    const b = buildDayStats([buildRaceDigest(view("202605030802", marked()), undefined)]);
+    expect(mergeDayStats(a, b).whatIf!.win).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 450, unjudgedCount: 1, inapplicableCount: 0 });
+    expect(mergeDayStats(a, { ...b, whatIf: null }).whatIf).toBeNull();
+    expect(mergeDayStats({ ...a, whatIf: null }, b).whatIf).toBeNull();
   });
 });

@@ -97,6 +97,8 @@ describe("生成物のドリフトと決定性", () => {
     // 足し合わせた見積もりは 240,298 + 2,374 + 1,836 + 1,384 = 245,892(**加算の見積もりで、4 枝を実際に合流させた測定ではない**。合流で view.ts などが重なれば数百バイトはずれうる)。
     // 新しい上限 252,000 は、その見積もりの約 2.5% 増(余裕は 6,108 バイト)。増えたのは日本語の文言(`\u` エスケープ)とロジックで、Plackett-Luce などの重い依存は入っていない。
     // 実測(2026-10-12 の公開。#259・#226・#264・#253・#266・#267・#72・#16・#271 を本番の先端に合流させた後の `pnpm run build:client` の出力): **245,611 バイト**(見積もりより 281 少ない)。上限までの余裕は 6,389 バイト。
+    // Issue #272(日報の「もしも」。印の定型の成績・惜しかったレースの画面と、サーバと共有する `src/whatif-format`)の増分は +3,644(245,611 → 249,255。計り方: 上と同じ。
+    // 本番の先端 85db4b3 の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ `Buffer.byteLength(CLIENT_JS)` で測った)。上限は上げていない(余裕は 2,745 バイト)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(252_000);
   });
@@ -133,6 +135,8 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   "../src/expected-format",
   // Issue #253: 複勝の想定・実際(下限〜上限)の表示(1.0倍未満・幅・上限なし・強調の判定・説明文)。Discord の通知(Worker)と馬のカードが同じ表示を使うため。取り込むのは `./win-odds-format`(上)だけで、下のテストが固定する。
   "../src/place-odds-format",
+  // Issue #272: 日報の「もしも」の型の名前と成績の文(`templateLabel`・`formatTemplateStat`)。Discord の日報・LLM のプロンプト(Worker)と日報の画面が同じ書き方を使うため。取り込むのは `./recovery-format`(上)だけで、下のテストが固定する。
+  "../src/whatif-format",
 ]);
 
 function importAllowed(specifier: string): boolean {
@@ -325,6 +329,26 @@ describe("馬のカードがクライアントに取り込む Worker 側のモ�
       ).toEqual([]);
     }
     expect(CLIENT_JS).not.toContain("PLACKETT_LUCE_MODEL.");
+  }, 60_000);
+});
+
+describe("日報の画面がクライアントに取り込む Worker 側のモジュール(Issue #272)", () => {
+  const importSpecifiers = (file: string): string[] =>
+    [...stripComments(readFileSync(path.join(ROOT, "cloud", "src", file), "utf-8")).matchAll(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["']([^"']+)["']/g)].map((m) => m[1]!);
+
+  it("whatif-format.ts が取り込むのは `./recovery-format`(import を持たない純モジュール)だけ。Worker 専用のモジュール(判定・集計)・node: を引き込まない。クライアントの閉包に入っている", async () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "whatif-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(500);
+    expect(importSpecifiers("whatif-format.ts")).toEqual(["./recovery-format"]);
+    expect(importSpecifiers("recovery-format.ts"), "前提: 取り込み先は import を持たない").toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/whatif-format")).toBe(true);
+    const inputs = await listBundledInputs();
+    expect(inputs.some((f) => f.endsWith("src/whatif-format.ts")), "前提: 型の表示が閉包に入っている").toBe(true);
+    // 判定・集計(Worker 側の `daily-report-whatif.ts`・`daily-report-bets.ts`)は、クライアントの閉包に入れない
+    for (const server of ["src/daily-report-whatif.ts", "src/daily-report-bets.ts", "src/daily-report-digest.ts"]) {
+      expect(inputs.filter((f) => f.endsWith(server)), `${server} はクライアントの閉包に入れない`).toEqual([]);
+    }
   }, 60_000);
 });
 

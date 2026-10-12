@@ -3,7 +3,7 @@ import type { FetchLike } from "../client/api";
 import { fetchReport, fetchReportList, postReportRun } from "../client/api-report";
 import { handle, type Env } from "../src/handler";
 import type { ReportRecord } from "../src/daily-report-core";
-import { buildSavedRecord, FIXTURE_DATE } from "./daily-report-fixtures";
+import { buildSavedRecord, FIXTURE_DATE, fixtureRaceInputs } from "./daily-report-fixtures";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
@@ -91,6 +91,13 @@ describe("契約: 本物の日報(DailyReportCore の出力)を、クライア�
     expect(record.body.rolling).toBeDefined();
     expect(record.body.rolling!.total.dayCount).toBe(record.body.rolling!.prior.dayCount + 1);
     expect(r.rolling).toStrictEqual(record.body.rolling);
+    // Issue #272: 印の定型の成績(その日・累計)と惜しかったレースも、サーバが書いたキー名のまま読める(前提: 実際に数えられている)
+    expect(record.body.stats.whatIf!["win"]!.betCount).toBeGreaterThan(0);
+    expect(record.body.stats.whatIf!["win"]!.hitCount).toBeGreaterThan(0);
+    expect(record.body.rolling!.total.whatIf!["win"]!.betCount).toBeGreaterThan(record.body.stats.whatIf!["win"]!.betCount);
+    expect(r.stats.whatIf).toStrictEqual(record.body.stats.whatIf);
+    expect(r.rolling!.total.whatIf).toStrictEqual(record.body.rolling!.total.whatIf);
+    expect(r.nearMisses).toStrictEqual(record.body.nearMisses);
     expect(r.races.map((x) => x.raceId)).toEqual(record.body.races.map((x) => x.raceId));
     expect(r.races[0]).toMatchObject({ title: record.body.races[0]!.title, hasResult: true, comment: "◎→▲の組み合わせが有効だった" });
     expect(r.races[0]!.top3.map((t) => t.finishPosition)).toEqual([1, 2, 3]);
@@ -99,6 +106,30 @@ describe("契約: 本物の日報(DailyReportCore の出力)を、クライア�
     expect(r.note).toBeNull();
     expect(detail.job).toBeNull();
     expect(detail.jobStatus).toBe("ok");
+  });
+
+  it("Issue #272: 惜しかったレース(組合せ券種の型が的中したのに買っていない)が 1 件ある日報の nearMisses が、サーバが書いた値のまま読める", async () => {
+    // 1R の◎1〇2▲3 が 1・2・3 着。ワイド 1-2(640 円)が出たが、実際に買ったのはワイド 1-3 と馬連 1-3 だけ。
+    const inputs = fixtureRaceInputs();
+    const first = inputs[0]!;
+    inputs[0] = {
+      view: first.view,
+      result: {
+        horses: [
+          { umaban: 1, finishPosition: 1, winPayout: 420, placePayout: 140 },
+          { umaban: 2, finishPosition: 2, winPayout: null, placePayout: 210 },
+          { umaban: 3, finishPosition: 3, winPayout: null, placePayout: 230 },
+          { umaban: 4, finishPosition: 4, winPayout: null, placePayout: null },
+        ],
+        combos: { wide: { imported: true, payouts: [{ comboKey: "0102", payout: 640 }, { comboKey: "0103", payout: 780 }, { comboKey: "0203", payout: 900 }] }, quinella: { imported: false, payouts: [] } },
+      },
+    };
+    const record = await buildSavedRecord({ inputs });
+    expect(record.body.nearMisses).toEqual({ total: 1, shown: [{ raceId: first.view.raceId, templateId: "wide", payout: 640 }] });
+    const detail = await fetchReport((await connect(record)).fetch, FIXTURE_DATE);
+    if (!detail.ok || detail.report === null) throw new Error("日報が読めませんでした");
+    expect(detail.report.nearMisses).toStrictEqual(record.body.nearMisses);
+    expect(detail.report.nearMisses!.shown[0]).toStrictEqual({ raceId: first.view.raceId, templateId: "wide", payout: 640 });
   });
 
   it("文章が無い日報(LLM なし)・生の文章の日報も読める", async () => {

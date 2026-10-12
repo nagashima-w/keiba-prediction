@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AnalysisView, AnalysisViewHorse } from "../src/analysis-view";
 import type { RaceResultData } from "../src/daily-report-bets";
 import { buildDayStats, buildRaceDigest } from "../src/daily-report-digest";
+import { pickNearMisses } from "../src/daily-report-whatif";
 import { buildReportPrompt, formatComboKey, NARRATIVE_LIMITS, parseNarrative, REPORT_PROMPT_VERSION } from "../src/daily-report-prompt";
 import { buildRollingSummary, type PeriodStats, type RollingSummary } from "../src/period-stats";
 
@@ -28,6 +29,15 @@ function digests() {
     buildRaceDigest(view(R2, 2, [horse(5, { mark: "◎" })], [["win", "05", 300]]), undefined),
   ];
 }
+/** 直前 27 日の定型の成績(Issue #272)。数字は明示する。 */
+const PRIOR_WHATIF = {
+  win: { betCount: 40, hitCount: 8, stake: 4000, payout: 3200, unjudgedCount: 2, inapplicableCount: 3 },
+  place: { betCount: 40, hitCount: 18, stake: 4000, payout: 4300, unjudgedCount: 2, inapplicableCount: 3 },
+  wide: { betCount: 30, hitCount: 5, stake: 3000, payout: 3900, unjudgedCount: 2, inapplicableCount: 13 },
+  quinella: { betCount: 30, hitCount: 3, stake: 3000, payout: 2100, unjudgedCount: 2, inapplicableCount: 13 },
+  trio: { betCount: 20, hitCount: 1, stake: 2000, payout: 6000, unjudgedCount: 2, inapplicableCount: 23 },
+};
+
 /** 期間の統計(直前 27 日)。数字は明示する(テストが期待値を手で書けるように)。 */
 function period(over: Partial<PeriodStats> = {}): PeriodStats {
   return {
@@ -37,6 +47,7 @@ function period(over: Partial<PeriodStats> = {}): PeriodStats {
     expectedBetCount: 300, expectedHits: 21.5, expectedBaseHits: 24, maxPayout: 9000, maxPayoutStake: 300,
     byBetType: { win: { betCount: 100, hitCount: 6, stake: 15000, payout: 12000, expectedBetCount: 100, expectedHits: 5.25, expectedBaseHits: 6 } },
     byMark: [{ mark: "◎", count: 118, win: 30, top3: 70 }],
+    whatIf: PRIOR_WHATIF,
     ...over,
   };
 }
@@ -304,5 +315,93 @@ describe("parseNarrative", () => {
     expect(parseNarrative(JSON.stringify({ summary: "s", races }), known)!.races).toStrictEqual([{ raceId: R2, comment: "ok" }]);
     const dup = Array.from({ length: NARRATIVE_LIMITS.races + 3 }, () => ({ raceId: R1, comment: "c" }));
     expect(parseNarrative(JSON.stringify({ summary: "s", races: dup }), known)!.races).toHaveLength(NARRATIVE_LIMITS.races);
+  });
+});
+
+describe("Issue #272: 印の定型の買い方(もしも)の節と規則", () => {
+  const sectionsOf = (p: string): Record<string, string> => Object.fromEntries(p.split(/^## /m).slice(1).map((part) => [part.slice(0, part.indexOf("\n")), part.slice(part.indexOf("\n") + 1)]));
+  const WHATIF_HEADING = "印の定型の買い方(「もしも」。確定値。各 100 円)";
+
+  /** R3: ◎1〇2▲3 が 1〜3 着で、3 連複 1-2-3(払戻 5,000 円)が出たが、実際はワイド 1-4 だけ買っていた(はずれ)。 */
+  function nearMissDigest() {
+    const r = result([[1, 1, 350, 130], [2, 2, null, 150], [3, 3, null, 110], [4, 4, null, null]]);
+    return buildRaceDigest(
+      view("202605030803", 3, [horse(1, { mark: "◎" }), horse(2, { mark: "〇" }), horse(3, { mark: "▲" })], [["wide", "0104", 200]]),
+      { ...r, combos: { wide: { imported: true, payouts: [{ comboKey: "0102", payout: 800 }] }, trio: { imported: true, payouts: [{ comboKey: "010203", payout: 5000 }] } } },
+    );
+  }
+  const withNear = () => {
+    const d = [...digests(), nearMissDigest()];
+    return { kaisaiDate: "20261010", digests: d, stats: buildDayStats(d), rolling: rolling(buildDayStats(d)), nearMisses: pickNearMisses(d) };
+  };
+
+  it("節は『レースごとの予想と結果』の前にあり、その日と直近 28 日の累計に、5 型の成績を型の順に出す(合算は 直前 27 日 + その日)", () => {
+    const p = buildReportPrompt(input());
+    const s = sectionsOf(p);
+    expect(Object.keys(s).indexOf(WHATIF_HEADING)).toBeGreaterThan(Object.keys(s).indexOf("直近 28 日の累計(その日を含む)の成績(確定値)"));
+    expect(Object.keys(s).indexOf(WHATIF_HEADING)).toBeLessThan(Object.keys(s).indexOf("レースごとの予想と結果"));
+    const sec = s[WHATIF_HEADING]!;
+    const [day, total] = sec.split(/^### /m).slice(1);
+    // その日: R1 の◎(1 着・単勝 350 円)。R2 は結果なしで判定不能
+    expect(day).toContain("その日");
+    expect(day).toContain("- ◎単勝: 判定できた 1 レース中 1 的中・賭け金 100円・払戻 350円・回収率 350.0%(判定不能 1 レース)");
+    // ◎-〇ワイドは、R1 が組合せ払戻なしで判定不能、R2 は〇が無く対象外
+    expect(day).toContain("- ◎-〇ワイド: 判定できたレースなし(判定不能 1 レース・対象外 1 レース)");
+    // 累計: 直前 27 日(40 点・8 的中・払戻 3,200)+ その日(1 点・1 的中・払戻 350)
+    expect(total).toContain("直近 28 日の累計");
+    expect(total).toContain("- ◎単勝: 判定できた 41 レース中 9 的中・賭け金 4,100円・払戻 3,550円・回収率 86.6%(判定不能 3 レース・対象外 3 レース)");
+    // 型の順序
+    const labels = ["◎単勝", "◎複勝", "◎-〇ワイド", "◎-〇馬連", "◎〇▲の3連複"];
+    const at = labels.map((l) => day!.indexOf(`- ${l}:`));
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+  });
+
+  it("節に、母集団が実際の配分と違うこと・判定不能と対象外は成績に含めないことを書く", () => {
+    const sec = sectionsOf(buildReportPrompt(input()))[WHATIF_HEADING]!;
+    expect(sec).toContain("実際の配分");
+    expect(sec).toContain("点数も賭け金も揃っていません");
+    expect(sec).toContain("成績に含めません");
+  });
+
+  it("規則に 1 文足す: 『もしも』は後から選び直した参考値・1 日分で当たった型を追いかけない・続けてよいかは直近 28 日の点数と回収率で。『偶然の影響が大きい』は使わない", () => {
+    const rules = sectionsOf(buildReportPrompt(input()))["規則"]!;
+    const rule = rules.split("\n").filter((l) => l.includes("もしも"));
+    expect(rule).toHaveLength(1);
+    expect(rule[0]).toContain("追いかける材料にしない");
+    expect(rule[0]).toContain("直近 28 日の累計の点数と回収率");
+    expect(buildReportPrompt(input())).not.toContain("偶然の影響が大きい");
+  });
+
+  it("その日の定型の成績が無い(旧形のジョブ。whatIf=null)なら、節も規則の 1 文も出さない(参照先の無い規則を残さない)", () => {
+    const d = digests();
+    const stats = { ...buildDayStats(d), whatIf: null };
+    const p = buildReportPrompt({ kaisaiDate: "20261010", digests: d, stats, rolling: rolling(stats) });
+    expect(p).not.toContain("印の定型の買い方");
+    expect(p).not.toContain("もしも");
+    expect(p).toContain("## レースごとの予想と結果");
+  });
+
+  it("惜しかったレース: 払戻の多い順の行に、レース・型・定型の払戻・実際の買い目(賭け金・払戻)を出す。全件数を添える", () => {
+    const p = buildReportPrompt(withNear());
+    const near = sectionsOf(p)[WHATIF_HEADING]!.split(/^### /m).slice(1).find((x) => x.startsWith("惜しかったレース"))!;
+    expect(near).toContain("全 1 件");
+    expect(near).toContain("raceId=202605030803");
+    expect(near).toContain("◎〇▲の3連複が的中していた(定型の払戻 5,000円)");
+    expect(near).toContain("実際の買い目: 賭け金 200円・払戻 0円");
+  });
+
+  it("惜しかったレースが 0 件なら『該当なし』。nearMisses を渡さない(未計算)ときは、その小節を出さない", () => {
+    const none = buildReportPrompt({ ...input(), nearMisses: { total: 0, shown: [] } });
+    expect(sectionsOf(none)[WHATIF_HEADING]).toContain("- 該当なし");
+    expect(sectionsOf(buildReportPrompt(input()))[WHATIF_HEADING]).not.toContain("惜しかったレース");
+  });
+
+  it("実際の買い目が無いレースは、見送りの理由か『買い目なし』を書く", () => {
+    const v = view("202605030804", 4, [horse(1, { mark: "◎" }), horse(2, { mark: "〇" })]);
+    const d = buildRaceDigest(v, { ...result([[1, 1, 350, 130], [2, 2, null, 150]]), combos: { wide: { imported: true, payouts: [{ comboKey: "0102", payout: 700 }] } } });
+    const stats = buildDayStats([d]);
+    const p = buildReportPrompt({ kaisaiDate: "20261010", digests: [d], stats, rolling: rolling(stats), nearMisses: pickNearMisses([d]) });
+    expect(sectionsOf(p)[WHATIF_HEADING]).toContain("◎-〇ワイドが的中していた(定型の払戻 700円)・実際の買い目: 買い目なし");
   });
 });

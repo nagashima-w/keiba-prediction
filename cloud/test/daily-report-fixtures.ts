@@ -76,6 +76,14 @@ export function fixturePriorStats(over: Partial<PeriodStats> = {}): PeriodStats 
       wide: { betCount: 80, hitCount: 4, stake: 8000, payout: 7000, expectedBetCount: 80, expectedHits: 3.75, expectedBaseHits: 4 },
     },
     byMark: [{ mark: "◎", count: 118, win: 30, top3: 70 }, { mark: "〇", count: 110, win: 18, top3: 62 }],
+    // 印の定型(Issue #272)。どの型も 120 レースの内訳(判定できた + 判定不能 3 + 対象外)。対象外は、◎が無い 2 件(全型)、〇が無い 10 件を足してワイド・馬連が 12 件、▲が無い 15 件を足して 3 連複が 27 件。
+    whatIf: {
+      win: { betCount: 115, hitCount: 30, stake: 11500, payout: 10100, unjudgedCount: 3, inapplicableCount: 2 },
+      place: { betCount: 115, hitCount: 70, stake: 11500, payout: 11900, unjudgedCount: 3, inapplicableCount: 2 },
+      wide: { betCount: 105, hitCount: 22, stake: 10500, payout: 9800, unjudgedCount: 3, inapplicableCount: 12 },
+      quinella: { betCount: 105, hitCount: 12, stake: 10500, payout: 9300, unjudgedCount: 3, inapplicableCount: 12 },
+      trio: { betCount: 90, hitCount: 4, stake: 9000, payout: 7200, unjudgedCount: 3, inapplicableCount: 27 },
+    },
     ...over,
   };
 }

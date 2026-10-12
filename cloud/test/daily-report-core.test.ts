@@ -908,3 +908,83 @@ describe("Issue #264 デプロイをまたぐジョブ: 旧コードが永続化
     expect(h.sent).toHaveLength(1);
   });
 });
+
+describe("Issue #272: 日報の「もしも」(印の定型の買い方と惜しかったレース)", () => {
+  /** R1 を、◎1〇2 が 1・2 着でワイド 1-2(払戻 800 円)が出たが、実際は単勝しか買っていないレースに差し替える(惜しかったレース)。 */
+  function nearMissRace(h: Harness): void {
+    const base = raceInput(1);
+    h.state.inputs.set(101, {
+      view: base.view,
+      result: { ...base.result!, combos: { wide: { imported: true, payouts: [{ comboKey: "0102", payout: 800 }] } } },
+    });
+  }
+  const priorWithWhatIf = (): PeriodStats => {
+    const zero = { betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 0, inapplicableCount: 0 };
+    return priorStats({ whatIf: { win: { ...zero, betCount: 40, hitCount: 8, stake: 4000, payout: 3200 }, place: zero, wide: zero, quinella: zero, trio: zero } });
+  };
+
+  it("本文の stats.whatIf に型ごとの成績、rolling.total.whatIf に 直前 27 日 + その日 を残す。惜しかったレースは nearMisses に残す", async () => {
+    const h = harness({ raceCount: 3 });
+    h.state.period = priorWithWhatIf();
+    nearMissRace(h);
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    const body = h.saved[0]!.body;
+    // その日: 3 レースとも◎が 1 着(単勝 350 円)。ワイドは R1 だけ組合せ払戻があり的中、R2・R3 は取込印なしで判定不能
+    expect(body.stats.whatIf!["win"]).toEqual({ betCount: 3, hitCount: 3, stake: 300, payout: 1050, unjudgedCount: 0, inapplicableCount: 0 });
+    expect(body.stats.whatIf!["wide"]).toEqual({ betCount: 1, hitCount: 1, stake: 100, payout: 800, unjudgedCount: 2, inapplicableCount: 0 });
+    expect(body.stats.whatIf!["trio"]).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 0, inapplicableCount: 3 });
+    // 累計 = 直前 27 日(40 点・8 的中)+ その日(3 点・3 的中)
+    expect(body.rolling!.total.whatIf!["win"]).toEqual({ betCount: 43, hitCount: 11, stake: 4300, payout: 4250, unjudgedCount: 0, inapplicableCount: 0 });
+    expect(body.nearMisses).toEqual({ total: 1, shown: [{ raceId: raceIdOf(1), templateId: "wide", payout: 800 }] });
+  });
+
+  it("LLM に渡すプロンプトに、節(その日・累計・惜しかったレース)と規則の 1 文が入る。版が上がっている", async () => {
+    const h = harness({ raceCount: 3 });
+    h.state.period = priorWithWhatIf();
+    nearMissRace(h);
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0]).toContain("## 印の定型の買い方(「もしも」。確定値。各 100 円)");
+    expect(h.prompts[0]).toContain("- ◎単勝: 判定できた 43 レース中 11 的中");
+    expect(h.prompts[0]).toContain(`${raceIdOf(1)}`);
+    expect(h.prompts[0]).toContain("◎-〇ワイドが的中していた(定型の払戻 800円)・実際の買い目: 賭け金 200円・払戻 700円");
+    expect(h.prompts[0]!.split("\n").filter((l) => l.includes("「もしも」(印の定型の買い方)の成績は"))).toHaveLength(1);
+    expect(h.saved[0]!.body.promptVersion).toBe("report-2026-10-12.1");
+  });
+
+  it("Discord の要約に、『もしも』と『惜しかったレース』の field が出る(レース名つき)", async () => {
+    const h = harness({ raceCount: 3 });
+    h.state.period = priorWithWhatIf();
+    nearMissRace(h);
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    expect(h.sent).toHaveLength(1);
+    const fields = (h.sent[0]!.embeds![0]! as { fields?: Array<{ name: string; value: string }> }).fields!;
+    expect(fields.find((f) => f.name === "もしも(印の定型・各100円)")!.value).toContain("◎単勝: その日 3/3 350.0%・28日 11/43 98.8%");
+    const near = fields.find((f) => f.name === "惜しかったレース(全 1 件)")!;
+    expect(near.value).toBe("東京1R テスト1S(15:45 芝1600m良): ◎-〇ワイド 800円");
+  });
+
+  it("デプロイをまたいだ旧形のジョブ(ダイジェストに templates が無い)は、『もしも』なしで確定する。落ちず、節も field も nearMisses も出さない", async () => {
+    const h = harness({ raceCount: 3 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.step(); // list
+    await h.step(); // gather
+    const key = `job:${DATE}`;
+    const job = h.kv.data.get(key) as { phase: string; digests: Array<Record<string, unknown>> };
+    expect(job.phase).toBe("generate");
+    expect(job.digests).toHaveLength(3);
+    expect(job.digests.every((d) => Array.isArray(d["templates"]))).toBe(true); // 前提: 新コードは templates を積む
+    h.kv.put(key, { ...job, digests: job.digests.map(({ templates: _templates, ...rest }) => rest) });
+    await h.drain();
+    const body = h.saved[0]!.body;
+    expect(body.stats.raceCount).toBe(3);
+    expect(body.stats.whatIf).toBeNull();
+    expect(body.rolling!.total.whatIf).toBeNull();
+    expect(body.nearMisses).toBeUndefined();
+    expect(h.prompts[0]).not.toContain("印の定型の買い方");
+    expect(((h.sent[0]!.embeds![0]! as { fields?: Array<{ name: string }> }).fields ?? []).map((f) => f.name).join("|")).not.toMatch(/もしも|惜しかった/);
+  });
+});

@@ -11,13 +11,16 @@
 import { excludingTopRecoveryRate, type DayStats, type RaceDigest } from "./daily-report-digest";
 import type { PeriodStats, RollingSummary } from "./period-stats";
 import { formatRecoveryPercent } from "./recovery-format";
+import { MARK_TEMPLATES, NEAR_MISS_LIMIT, type NearMissSummary, type WhatIfStats } from "./daily-report-whatif";
+import { formatTemplateStat, templateLabel } from "./whatif-format";
 
 /**
  * 日報のプロンプトの版(Issue #264)。日報の本文(`ReportBody.promptVersion`)に残し、どの文面が書いた日報かを後から区別する(日報の質の見直し〈`docs/prompt-improvement-plan.md`〉で、
  * 文面を変えた前後の日報を比べるため)。**プロンプトの文面〈規則・出力形式・成績の節の書き方〉を変えたら更新する**(分析のプロンプトの `PROMPT_VERSION` とは別)。
  * 本文に `promptVersion` が無い日報は、この版を持つ前〈2026-10-11 まで。「数十レースの 1 日分では偶然の影響が大きい」という規則だった版〉に作られたもの。
+ * `report-2026-10-12.1`(Issue #272)で、印の定型の買い方(「もしも」)の節と規則の 1 文を足した。
  */
-export const REPORT_PROMPT_VERSION = "report-2026-10-11.1";
+export const REPORT_PROMPT_VERSION = "report-2026-10-12.1";
 
 /** 応答の最大トークン数(thinking を含む)。非ストリーミングの上限(21333)未満。日報の JSON は数千トークンの見込み。 */
 export const REPORT_MAX_TOKENS = 12000;
@@ -198,15 +201,64 @@ function periodBlock(p: PeriodStats, full: boolean): string {
 
 const NO_PRIOR_BLOCK = "(この期間に分析したレースはありません。直前 27 日と比較できません)";
 
+/** 実際の買い目の概要(惜しかったレースの行に添える)。買い目が無ければ見送りの理由か「買い目なし」。 */
+function actualBetsText(d: RaceDigest): string {
+  if (d.bets.length === 0) {
+    return d.allocationNote ?? "買い目なし";
+  }
+  const parts: string[] = [];
+  if (d.judgedBetCount > 0) parts.push(`賭け金 ${yen(d.totalStake)}・払戻 ${yen(d.totalReturn)}`);
+  if (d.unjudgedBetCount > 0) parts.push(`判定不能 ${d.unjudgedBetCount} 点`);
+  return parts.join("・");
+}
+
+const WHATIF_HEADING = "印の定型の買い方(「もしも」。確定値。各 100 円)";
+
+function whatIfRows(w: WhatIfStats): string[] {
+  return MARK_TEMPLATES.flatMap((t) => (w[t.id] === undefined ? [] : [`- ${templateLabel(t.id)}: ${formatTemplateStat(w[t.id]!, yen)}`]));
+}
+
+/** 「もしも」の節(Issue #272)。その日と累計のどちらかの成績が無い(旧形のジョブ)ときは出さない(null)。 */
+function whatIfSection(input: ReportPromptInput): string[] | null {
+  const day = input.stats.whatIf;
+  const total = input.rolling.total.whatIf;
+  if (day === null || total === null) {
+    return null;
+  }
+  const lines = [
+    `## ${WHATIF_HEADING}`,
+    "印の定型の買い方(下の 5 つの型)を、毎レース各 100 円で買っていたときの成績です。対象は印の付いたレース全部で、実際の配分(買い目のあるレースだけ)とは点数も賭け金も揃っていません。判定不能は結果・払戻が未取得のレース、対象外は必要な印が付いていないレースで、どちらも成績に含めません。",
+    "### その日",
+    ...whatIfRows(day),
+    "### 直近 28 日の累計(その日を含む)",
+    ...whatIfRows(total),
+  ];
+  const near = input.nearMisses;
+  if (near !== undefined && near !== null) {
+    lines.push(`### 惜しかったレース(その日。組合せ券種の型が的中したのに、同じ組合せを買っていなかったレース。払戻の多い順に最大 ${NEAR_MISS_LIMIT} 件。全 ${near.total} 件)`);
+    if (near.shown.length === 0) {
+      lines.push("- 該当なし");
+    }
+    for (const n of near.shown) {
+      const d = input.digests.find((x) => x.raceId === n.raceId);
+      lines.push(`- ${d === undefined ? n.raceId : `${raceTitle(d)} raceId=${d.raceId}`}: ${templateLabel(n.templateId)}が的中していた(定型の払戻 ${yen(n.payout)})・実際の買い目: ${d === undefined ? "不明" : actualBetsText(d)}`);
+    }
+  }
+  return lines;
+}
+
 export interface ReportPromptInput {
   readonly kaisaiDate: string;
   readonly digests: readonly RaceDigest[];
   readonly stats: DayStats;
   /** 直前 27 日と直近 28 日の累計(Issue #264)。 */
   readonly rolling: RollingSummary;
+  /** 惜しかったレース(Issue #272)。省略・null は未計算(旧形のジョブ)で、その小節を出さない。 */
+  readonly nearMisses?: NearMissSummary | null;
 }
 
 export function buildReportPrompt(input: ReportPromptInput): string {
+  const whatIf = whatIfSection(input);
   const sections: string[] = [
     `あなたは競馬の期待値分析ツールの「日報」を書く振り返り担当です。以下は ${dateLabel(input.kaisaiDate)} に、このツールが発走前に分析した全レースの「予想」と「結果」です。`,
     "利用者は、この日報を読んで、ツールの予想がその日どうだったかを振り返ります。",
@@ -218,6 +270,9 @@ export function buildReportPrompt(input: ReportPromptInput): string {
     "- このツールは穴馬の高配当を狙います。的中の頻度は低く、1 点の的中で回収率が大きく動くのは想定どおりです。回収率が 1 点の的中で動いたこと自体を、問題としても手柄としても書かないでください。",
     "- 予想の評価は「見込みの的中数」との比較で書いてください。見込みの的中数は、判定できた買い目それぞれの分析時点の的中確率の合計です(確定値)。実際の的中数が見込みを上回ったか、下回ったか、同程度かを、数字を挙げて述べてください。「その日」と「直近 28 日の累計」の両方で同じ比較をし、その日が 4 週の水準と比べてどうだったか(回収率・的中・印別)も書いてください。",
     "- 「偶然」と書いてよいのは、その根拠を下の確定値の数字で示せるときだけです(例: 払戻が最大の 1 点を除いた回収率、点数の少なさ)。見込みの的中数との比較で説明できることは、「偶然」ではなく見込みとの比較で書いてください。「偶然の影響が強い 1 日です」のように数字を伴わない定型の断りは書かないでください。「偶然」という断りは、総括で多くとも 1 回にして、良かった点・改善点では繰り返さないでください。",
+    ...(whatIf === null
+      ? []
+      : ["- 「もしも」(印の定型の買い方)の成績は、後から買い方を選び直したときの参考値です。1 日分は点数が少なく、その日に当たった型を追いかける材料にしないでください。続けてよい型かどうかは、直近 28 日の累計の点数と回収率で述べてください(累計でも点数の少ない型は断定しない)。"]),
     "- 直前 27 日の開催日数や点数が少ないときは、その少なさを一度だけ述べ、4 週の傾向を断定しないでください。",
     "- 1〜2 レースだけで起きた個別の出来事は、レース別の一言に回し、「良かった点」「改善点」には繰り返し見える傾向を優先してください。",
     "- 改善点は、気づきとして書いてください(プロンプトや重みを変えるよう命令する書き方はしない)。",
@@ -242,6 +297,7 @@ export function buildReportPrompt(input: ReportPromptInput): string {
     "## 直近 28 日の累計(その日を含む)の成績(確定値)",
     input.rolling.prior.raceCount === 0 ? "(直前 27 日に分析したレースが無いため、累計はその日の成績と同じです)" : periodBlock(input.rolling.total, true),
     "",
+    ...(whatIf === null ? [] : [...whatIf, ""]),
     "## レースごとの予想と結果",
     ...(input.digests.length === 0 ? ["(分析したレースはありません)"] : input.digests.flatMap((d) => [raceBlock(d), ""])),
   ];

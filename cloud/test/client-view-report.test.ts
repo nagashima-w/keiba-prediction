@@ -223,3 +223,50 @@ describe("Issue #264: 日報画面の VNode: 直近 28 日の累計", () => {
     mountAll(tree(withRolling())); // DOM への写しも落ちない
   });
 });
+
+describe("Issue #272: 日報画面の VNode: 印の定型の買い方(もしも)と惜しかったレース", () => {
+  const tpl = (over: Record<string, number> = {}) => ({ betCount: 10, hitCount: 2, stake: 1000, payout: 1500, unjudgedCount: 0, inapplicableCount: 0, ...over });
+  const DAY = { win: tpl(), place: tpl({ hitCount: 5, payout: 1100 }), wide: tpl({ betCount: 0, hitCount: 0, stake: 0, payout: 0 }), quinella: tpl(), trio: tpl() };
+  const TOTAL = { win: tpl({ betCount: 41, hitCount: 9, stake: 4100, payout: 3550 }), place: tpl(), wide: tpl(), quinella: tpl(), trio: tpl() };
+  const withWhatIf = (): ReportDetail => {
+    const base = report();
+    const total = { ...base.stats, fromDate: "20260913", toDate: "20261010", dayCount: 7, whatIf: TOTAL };
+    return { ...base, stats: { ...base.stats, whatIf: DAY }, rolling: { windowDays: 28, prior: { ...total, dayCount: 6 }, total }, nearMisses: { total: 4, shown: [{ raceId: "202605030801", templateId: "trio", payout: 12340 }] } };
+  };
+
+  it("見出し『もしも…』は、印別の成績の後・レースごとの前。その日と累計の 2 組が、型の順の行で出る", () => {
+    const t = tree(withWhatIf());
+    const hs = headings(t);
+    const at = hs.indexOf("もしも(印の定型の買い方。各100円)");
+    expect(at).toBeGreaterThan(hs.indexOf("印別の成績(結果のあるレース。頭数 / 1着 / 3着内)"));
+    expect(at).toBeLessThan(hs.indexOf("レースごと"));
+    const lists = byClass(t, "verify-rows");
+    const whatIfLists = lists.filter((l) => textOf(l).includes("◎単勝"));
+    expect(whatIfLists).toHaveLength(2);
+    // その日の先頭行と、累計の先頭行を取り違えない(10 レースと 41 レース)
+    expect(textOf(whatIfLists[0]!)).toContain("◎単勝 判定できた 10 レース中 2 的中");
+    expect(textOf(whatIfLists[1]!)).toContain("◎単勝 判定できた 41 レース中 9 的中");
+    expect(textOf(whatIfLists[0]!)).toContain("◎-〇ワイド 判定できたレースなし");
+    expect(kids(whatIfLists[0]!)).toHaveLength(5);
+  });
+
+  it("惜しかったレースの見出し(全件数つき)と、レース名・型・払戻・実際の買い目の行が出る。件数が上限を超えるので件数の説明つき", () => {
+    const t = tree(withWhatIf());
+    expect(headings(t)).toContain("惜しかったレース(全 4 件のうち、払戻の多い順に 1 件)");
+    const items = byClass(t, "report-list").filter((l) => textOf(l).includes("が的中していた"));
+    expect(items).toHaveLength(1);
+    expect(textOf(items[0]!)).toContain("東京1R 3歳未勝利: ◎〇▲の3連複が的中していた(定型の払戻 12,340円)。実際の買い目: 3 点中 1 点的中");
+  });
+
+  it("惜しかったレースが 0 件なら案内の 1 文。もしもの節を持たない日報(旧形)は見出しごと出さない", () => {
+    const zero = { ...withWhatIf(), nearMisses: { total: 0, shown: [] } };
+    expect(textOf(tree(zero))).toContain("該当するレースはありませんでした。");
+    const t = tree(report());
+    expect(headings(t).some((h) => h.startsWith("もしも"))).toBe(false);
+    expect(headings(t).some((h) => h.startsWith("惜しかった"))).toBe(false);
+  });
+
+  it("DOM への写しも落ちない", () => {
+    expect(() => mountAll(tree(withWhatIf()))).not.toThrow();
+  });
+});

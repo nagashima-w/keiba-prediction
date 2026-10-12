@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ReportDetail, ReportListItem, ReportPeriod } from "../client/api-report";
+import type { ReportDetail, ReportListItem, ReportPeriod, ReportTemplateStat } from "../client/api-report";
 import { buildReportModel, CREATE_CAUTION, CREATE_TODAY_CAUTION, dateLabel, JOB_UNAVAILABLE_NOTICE, MAX_CHIPS, NO_REPORT_NOTICE, type ReportModelInput } from "../client/report-model";
 
 /** Issue #235: 日報画面の表示用データ。文言は固定(LLM の文章以外にサーバの文は出さない)・数値の整形・状態ごとの出し分け。 */
@@ -378,5 +378,71 @@ describe("Issue #264: 見込みの的中数・直近 28 日の累計", () => {
   it("累計に見込みが無い(確率のある買い目が 0 点)ときは、見込みのタイルを出さない", () => {
     const r = body(withRolling(period({ expectedBetCount: 0, expectedHits: 0, expectedBaseHits: 0 }))).rolling!;
     expect(r.tiles.map((t) => t.label)).toEqual(["賭け金", "払戻", "回収率", "的中"]);
+  });
+});
+
+describe("Issue #272: 印の定型の買い方(もしも)と惜しかったレース", () => {
+  const tpl = (over: Partial<ReportTemplateStat> = {}): ReportTemplateStat => ({ betCount: 10, hitCount: 2, stake: 1000, payout: 1500, unjudgedCount: 0, inapplicableCount: 0, ...over });
+  const DAY = { win: tpl(), place: tpl({ hitCount: 5, payout: 1100, unjudgedCount: 1 }), wide: tpl({ betCount: 0, hitCount: 0, stake: 0, payout: 0, inapplicableCount: 4 }), quinella: tpl({ payout: 0, hitCount: 0 }), trio: tpl({ betCount: 1, hitCount: 1, stake: 100, payout: 5000 }) };
+  const TOTAL = { win: tpl({ betCount: 41 , hitCount: 9, stake: 4100, payout: 3550 }), place: tpl(), wide: tpl(), quinella: tpl(), trio: tpl() };
+  const withWhatIf = (extra: Partial<ReportDetail> = {}): ReportDetail => {
+    const base = report();
+    const total = { ...base.stats, fromDate: "20260913", toDate: "20261010", dayCount: 7, whatIf: TOTAL };
+    return { ...base, stats: { ...base.stats, whatIf: DAY }, rolling: { windowDays: 28, prior: { ...total, toDate: "20261009" }, total }, ...extra };
+  };
+  const body = (r: ReportDetail) => buildReportModel(input({ detail: { kind: "ready", report: r, job: null } })).body!;
+
+  it("この項目を持つ前の日報・旧形のジョブで作った日報(whatIf が無い・null)は、節を出さない", () => {
+    expect(body(report()).whatIf).toBeNull();
+    const base = report();
+    expect(body({ ...base, stats: { ...base.stats, whatIf: null } }).whatIf).toBeNull();
+  });
+
+  it("その日と直近 28 日の 2 組。型は決まった順で、1 行 1 型(ラベル・成績の文)。累計が無い日報はその日だけ", () => {
+    const w = body(withWhatIf()).whatIf!;
+    expect(w.groups.map((g) => g.title)).toEqual(["その日", "直近 28 日の累計(その日を含む)"]);
+    expect(w.groups[0]!.rows.map((r) => r.label)).toEqual(["◎単勝", "◎複勝", "◎-〇ワイド", "◎-〇馬連", "◎〇▲の3連複"]);
+    expect(w.groups[0]!.rows[0]!.value).toBe("判定できた 10 レース中 2 的中・賭け金 1,000円・払戻 1,500円・回収率 150.0%");
+    expect(w.groups[0]!.rows[1]!.value).toContain("(判定不能 1 レース)");
+    expect(w.groups[0]!.rows[2]!.value).toBe("判定できたレースなし(対象外 4 レース)");
+    expect(w.groups[1]!.rows[0]!.value).toBe("判定できた 41 レース中 9 的中・賭け金 4,100円・払戻 3,550円・回収率 86.6%");
+    const dayOnly = withWhatIf();
+    expect(body({ ...dayOnly, rolling: undefined } as ReportDetail).whatIf!.groups.map((g) => g.title)).toEqual(["その日"]);
+  });
+
+  it("未知の型 id は id のまま末尾に出す(黙って落とさない)", () => {
+    const base = withWhatIf();
+    const w = body({ ...base, stats: { ...base.stats, whatIf: { ...DAY, future: tpl() } } }).whatIf!;
+    expect(w.groups[0]!.rows.map((r) => r.label)).toEqual(["◎単勝", "◎複勝", "◎-〇ワイド", "◎-〇馬連", "◎〇▲の3連複", "future"]);
+  });
+
+  it("惜しかったレース: レース名・型・定型の払戻・実際の買い目(そのレースの行から)。全件数が上限を超えるときは件数を添える", () => {
+    const base = withWhatIf();
+    const near = { total: 5, shown: [{ raceId: "202605030801", templateId: "trio", payout: 12340 }, { raceId: "202605030802", templateId: "wide", payout: 800 }] };
+    const n = body({ ...base, nearMisses: near }).whatIf!.near!;
+    expect(n.heading).toBe("惜しかったレース(全 5 件のうち、払戻の多い順に 2 件)");
+    expect(n.items).toEqual([
+      "東京1R 3歳未勝利(11:00 芝1600m良): ◎〇▲の3連複が的中していた(定型の払戻 12,340円)。実際の買い目: 3 点中 1 点的中・賭け金 700円・払戻 1,300円",
+      "東京2R: ◎-〇ワイドが的中していた(定型の払戻 800円)。実際の買い目: 判定不能 1 点",
+    ]);
+    expect(n.empty).toBeNull();
+    // 全件が表示されるときは件数だけ
+    expect(body({ ...base, nearMisses: { total: 1, shown: [near.shown[0]!] } }).whatIf!.near!.heading).toBe("惜しかったレース(全 1 件)");
+  });
+
+  it("実際の買い目が無いレースは『買い目なし』(見送りの理由があればそれ)。レースの行が見つからなくても落ちない(raceId を出す)", () => {
+    const base = withWhatIf();
+    const races = base.races.map((r, i) => (i === 1 ? { ...r, unjudgedBetCount: 0, allocationNote: "買い目なし(見送り: ev-low)" } : r));
+    const n = body({ ...base, races, nearMisses: { total: 2, shown: [{ raceId: "202605030802", templateId: "wide", payout: 800 }, { raceId: "ZZZ", templateId: "wide", payout: 100 }] } }).whatIf!.near!;
+    expect(n.items[0]).toContain("実際の買い目なし(見送り: ev-low)");
+    expect(n.items[1]).toBe("ZZZ: ◎-〇ワイドが的中していた(定型の払戻 100円)");
+  });
+
+  it("惜しかったレースが 0 件なら空の案内。nearMisses が無い日報はその小節を出さない", () => {
+    const base = withWhatIf();
+    const none = body({ ...base, nearMisses: { total: 0, shown: [] } }).whatIf!.near!;
+    expect(none.items).toEqual([]);
+    expect(none.empty).toBe("該当するレースはありませんでした。");
+    expect(body(base).whatIf!.near).toBeNull();
   });
 });

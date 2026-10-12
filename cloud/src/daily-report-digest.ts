@@ -9,6 +9,7 @@
  */
 import type { AnalysisView } from "./analysis-view";
 import { betHitProb, judgeBets, type BetOutcome, type RaceResultData } from "./daily-report-bets";
+import { buildWhatIfStats, evaluateTemplates, mergeWhatIfStats, type TemplateOutcome, type WhatIfStats } from "./daily-report-whatif";
 
 /** ダイジェストに載せる馬の最大数(印は最大 6 頭なので、印の付いた馬は必ず収まる)。 */
 export const DIGEST_MAX_HORSES = 8;
@@ -70,6 +71,10 @@ export interface RaceDigest {
   /** 判定不能の買い目の賭け金・点数。 */
   readonly unjudgedStake: number;
   readonly unjudgedBetCount: number;
+  /**
+   * 印の定型の買い方の結果(Issue #272。常に 5 型)。**この項目を持つ前に積まれたジョブのダイジェストには無い**(その日の `whatIf` を作らない理由)。
+   */
+  readonly templates?: readonly TemplateOutcome[];
 }
 
 function cut(text: string, max: number): string {
@@ -127,6 +132,12 @@ export function buildRaceDigest(view: AnalysisView, result: RaceResultData | und
     .map(([umaban, finishPosition]) => ({ umaban, name: nameByUmaban.get(umaban) ?? null, finishPosition }));
 
   const bets = judgeBets(view.allocation?.bets.map((b) => ({ betType: b.betType, comboKey: b.comboKey, stake: b.stake, odds: b.odds, ev: b.ev })) ?? [], result);
+  // 印の定型(Issue #272)。印は digest の絞り込み後ではなく分析の全馬から取る。
+  const templates = evaluateTemplates(
+    view.horses.flatMap((h) => (h.mark === null ? [] : [{ mark: h.mark, umaban: h.umaban }])),
+    view.allocation?.bets ?? [],
+    result,
+  );
   const judged = bets.filter((b) => b.status !== "unjudged");
   const unjudged = bets.filter((b) => b.status === "unjudged");
   const allocation = view.allocation;
@@ -152,6 +163,7 @@ export function buildRaceDigest(view: AnalysisView, result: RaceResultData | und
     hitCount: judged.filter((b) => b.status === "hit").length,
     unjudgedStake: unjudged.reduce((s, b) => s + b.stake, 0),
     unjudgedBetCount: unjudged.length,
+    templates,
   };
 }
 
@@ -206,6 +218,11 @@ export interface DayStats {
   readonly maxPayoutStake: number;
   readonly byBetType: Readonly<Record<string, BetTypeStat>>;
   readonly byMark: readonly MarkStat[];
+  /**
+   * 印の定型の買い方(各 100 円)の型ごとの成績(Issue #272)。**1 レースでも定型の結果を持たない(旧形のダイジェスト)と null**
+   * (一部のレースだけの成績を全体の成績として出さない)。足し算(`mergeDayStats`)でも、片方が null なら null。
+   */
+  readonly whatIf: WhatIfStats | null;
 }
 
 /** 統計の集計に要る 1 レース分(ダイジェストからも、D1 の行から作る期間の統計〈`period-stats.ts`〉からも作る。同じ集計の本体を通すための共通の形)。 */
@@ -215,6 +232,8 @@ export interface StatsRace {
   readonly bets: readonly BetOutcome[];
   /** 印の付いた馬と着順(着順が分からない馬は null)。 */
   readonly marks: readonly { readonly mark: string; readonly finishPosition: number | null }[];
+  /** 印の定型の結果(Issue #272)。無いレースがあると `DayStats.whatIf` は null。 */
+  readonly templates?: readonly TemplateOutcome[];
 }
 
 /** 最大払戻の 1 点の比較: 払戻が大きい方、同じなら賭け金が大きい方。 */
@@ -300,6 +319,7 @@ export function buildStatsFromRaces(races: readonly StatsRace[]): DayStats {
     maxPayoutStake: top.stake,
     byBetType: Object.fromEntries(byBetType),
     byMark: [...byMark.entries()].map(([mark, s]) => ({ mark, ...s })).sort((a, b) => markRank(a.mark) - markRank(b.mark)),
+    whatIf: buildWhatIfStats(races),
   };
 }
 
@@ -309,6 +329,7 @@ export function buildDayStats(digests: readonly RaceDigest[]): DayStats {
       hasResult: d.hasResult,
       llmUsed: d.llmUsed,
       bets: d.bets,
+      ...(d.templates === undefined ? {} : { templates: d.templates }),
       marks: d.horses.flatMap((h) => (h.mark === null ? [] : [{ mark: h.mark, finishPosition: h.finishPosition }])),
     })),
   );
@@ -361,6 +382,7 @@ export function mergeDayStats(a: DayStats, b: DayStats): DayStats {
     maxPayoutStake: top.stake,
     byBetType,
     byMark: [...marks.values()].sort((x, y) => markRank(x.mark) - markRank(y.mark)),
+    whatIf: mergeWhatIfStats(a.whatIf, b.whatIf),
   };
 }
 

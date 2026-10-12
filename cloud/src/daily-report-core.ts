@@ -30,6 +30,7 @@ import { jstKaisaiDate } from "./auto-run-plan";
 import { buildDayStats, buildRaceDigest, type DayStats, type DigestTopHorse, type RaceDigest } from "./daily-report-digest";
 import { buildReportEmbed } from "./daily-report-embed";
 import { buildReportPrompt, parseNarrative, raceTitle, REPORT_MAX_TOKENS, REPORT_PROMPT_VERSION, type Narrative } from "./daily-report-prompt";
+import { pickNearMisses, type NearMissSummary } from "./daily-report-whatif";
 import { buildRollingSummary, rollingPriorWindow, type PeriodStats, type RollingSummary } from "./period-stats";
 import { addDaysToKaisaiDate } from "./result-dispatch";
 import { serializeLlmCalls, type LlmCallRecord } from "./llm-calls";
@@ -148,6 +149,11 @@ export interface ReportBody {
    * 直前 27 日と直近 28 日の累計(Issue #264。LLM に渡した数字そのもの。画面と Discord が出す)。**この項目を持つ前の日報には無い**。
    */
   readonly rolling?: RollingSummary;
+  /**
+   * 惜しかったレース(Issue #272。組合せ券種の型が的中したのに、同じ組合せを買っていなかったレース。その日だけ)。LLM に渡した件と同じ。
+   * **この項目を持つ前の日報、デプロイをまたいだ旧形のジョブで作った日報には無い**(`stats.whatIf` が null の日も無い)。
+   */
+  readonly nearMisses?: NearMissSummary;
   /** 日報を書いたプロンプトの版(`REPORT_PROMPT_VERSION`)。持つ前の日報には無い(= 「偶然」の定型の前提を渡していた版)。 */
   readonly promptVersion?: string;
 }
@@ -396,7 +402,7 @@ export class DailyReportCore {
       // 試行は呼ぶ前に永続化する(落ちても無限に続かない)。
       current = { ...current, llmAttempts: current.llmAttempts + 1 };
       this.putJob(current);
-      const outcome = await this.callLlm(buildReportPrompt({ kaisaiDate: job.kaisaiDate, digests, stats, rolling: current.rolling! }));
+      const outcome = await this.callLlm(buildReportPrompt({ kaisaiDate: job.kaisaiDate, digests, stats, rolling: current.rolling!, nearMisses: stats.whatIf === null ? null : pickNearMisses(digests) }));
       if (outcome.ok) {
         // 応答は成功した直後に書く(保存の失敗の再試行で LLM を呼び直さない)。
         current = { ...current, llmText: outcome.text, llmModel: outcome.model, calls: [...current.calls, ...outcome.calls] };
@@ -478,6 +484,8 @@ export class DailyReportCore {
       allocationNote: d.allocationNote,
       comment: comments.get(d.raceId) ?? null,
     }));
+    // 惜しかったレース(Issue #272)。その日の定型の成績を作れなかった(旧形のダイジェスト)日は出さない。
+    const nearMisses = stats.whatIf === null ? null : pickNearMisses(digests);
     return {
       kaisaiDate: job.kaisaiDate,
       createdAt: new Date(this.deps.now()).toISOString(),
@@ -486,7 +494,7 @@ export class DailyReportCore {
       totalStake: stats.totalStake,
       totalReturn: stats.totalReturn,
       summary,
-      body: { format: 1, kaisaiDate: job.kaisaiDate, stats, races, narrative, narrativeRaw, note, ...(job.rolling === undefined || job.rolling === null ? {} : { rolling: job.rolling }), promptVersion: REPORT_PROMPT_VERSION },
+      body: { format: 1, kaisaiDate: job.kaisaiDate, stats, races, narrative, narrativeRaw, note, ...(job.rolling === undefined || job.rolling === null ? {} : { rolling: job.rolling }), ...(nearMisses === null ? {} : { nearMisses }), promptVersion: REPORT_PROMPT_VERSION },
       llmCallsJson: serializeLlmCalls(job.calls.length === 0 ? null : job.calls),
     };
   }
@@ -515,7 +523,7 @@ export class DailyReportCore {
     const body = record.body;
     const narrative = body.narrative ?? (record.summary === null ? null : { summary: record.summary, good: [], improve: [], races: [] });
     const link = this.deps.appBaseUrl === undefined ? undefined : buildReportLink(this.deps.appBaseUrl, job.kaisaiDate);
-    const embed = buildReportEmbed({ kaisaiDate: job.kaisaiDate, stats: body.stats, narrative, note: body.note, link, rolling: body.rolling });
+    const embed = buildReportEmbed({ kaisaiDate: job.kaisaiDate, stats: body.stats, narrative, note: body.note, link, rolling: body.rolling, nearMisses: body.nearMisses, races: body.races });
     // 送る前に sending を書く(ここまで同期。落ちても再送しない)。
     this.putJob({ ...job, notify: "sending" });
     let ok = true;

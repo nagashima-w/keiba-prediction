@@ -130,6 +130,38 @@ describe("buildPeriodStats(行 → 統計)", () => {
     expect(s.unjudgedBetCount).toBe(2);
   });
 
+  it("Issue #272: 印の定型の買い方(whatIf)は、同じ行(印・結果・組合せ払戻・取込印)から作る。判定できた・判定不能・対象外が別々に数えられる", () => {
+    const w = buildPeriodStats(rows(), RANGE).whatIf!;
+    // R1(◎1 着・〇5 着・結果あり)・R2(◎のみ・結果なし)・R3(◎4 着・結果あり)。組合せ払戻の行は無い。
+    expect(w["win"]).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 400, unjudgedCount: 1, inapplicableCount: 0 });
+    expect(w["place"]).toEqual({ betCount: 2, hitCount: 1, stake: 200, payout: 150, unjudgedCount: 1, inapplicableCount: 0 });
+    // ワイド・馬連: R1 だけ◎〇が揃うが取込印が無く判定不能。R2・R3 は〇が無く対象外
+    expect(w["wide"]).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 1, inapplicableCount: 2 });
+    expect(w["quinella"]).toEqual(w["wide"]);
+    // 3 連複: ▲が無く 3 レースとも対象外
+    expect(w["trio"]).toEqual({ betCount: 0, hitCount: 0, stake: 0, payout: 0, unjudgedCount: 0, inapplicableCount: 3 });
+  });
+
+  it("Issue #272: 組合せ払戻と取込印があれば、ワイド・馬連・3 連複の型が的中として数えられる(別のレースの払戻は混ぜない)", () => {
+    const r = rows();
+    const withCombos: PeriodRows = {
+      ...r,
+      marks: [...r.marks, { analysisId: 1, umaban: 3, mark: "▲" }, { analysisId: 3, umaban: 2, mark: "〇" }],
+      combos: [
+        { raceId: "202605030801", betType: "wide", comboKey: "0102", payout: 900 },
+        { raceId: "202605030801", betType: "trio", comboKey: "010203", payout: 6000 },
+        { raceId: "202605030901", betType: "wide", comboKey: "0102", payout: 111 },
+      ],
+      imports: [{ raceId: "202605030801", betType: "wide" }, { raceId: "202605030801", betType: "trio" }, { raceId: "202605030801", betType: "quinella" }, { raceId: "202605030901", betType: "wide" }],
+    };
+    const w = buildPeriodStats(withCombos, RANGE).whatIf!;
+    // 判定は払戻の表のキー(昇順の組)との一致。R3 は◎3-〇2(キー 0203)で、R3 の払戻の表は 0102 だけ → はずれ(R1 の 0102 の払戻 900 と混ざらない)
+    expect(w["wide"]).toMatchObject({ betCount: 2, hitCount: 1, payout: 900, unjudgedCount: 0, inapplicableCount: 1 });
+    expect(w["trio"]).toMatchObject({ betCount: 1, hitCount: 1, payout: 6000, inapplicableCount: 2 });
+    // 馬連: R1 は取込印だけで払戻 0 件、R3 は取込印なし → どちらも判定不能。R2 は〇が無く対象外
+    expect(w["quinella"]).toMatchObject({ betCount: 0, unjudgedCount: 2, inapplicableCount: 1 });
+  });
+
   it("行が 1 つも無い期間は、件数 0・回収率 null・開催日 0(落ちない)", () => {
     const s = buildPeriodStats(emptyRows(), RANGE);
     expect(s).toMatchObject({ raceCount: 0, dayCount: 0, totalStake: 0, recoveryRate: null, expectedHits: 0, maxPayout: 0, byMark: [], byBetType: {} });
@@ -179,6 +211,9 @@ describe("日報の 1 日の統計と、期間の統計が同じ数字になる(
     expect(day.expectedBetCount).toBe(day.judgedBetCount);
     expect(day.expectedHits).toBeGreaterThan(0);
     expect(day.maxPayout).toBeGreaterThan(0);
+    // 定型(Issue #272)も実際に数えられている: 単勝は的中 1・はずれ 1・判定不能 1、3 連複は判定不能 1・対象外 2
+    expect(day.whatIf!["win"]).toMatchObject({ betCount: 2, hitCount: 1, unjudgedCount: 1 });
+    expect(day.whatIf!["trio"]).toMatchObject({ betCount: 0, unjudgedCount: 1, inapplicableCount: 2 });
     const { dayCount, fromDate, toDate, ...stats } = period;
     expect(dayCount).toBe(1);
     expect([fromDate, toDate]).toEqual(["20261010", "20261010"]);

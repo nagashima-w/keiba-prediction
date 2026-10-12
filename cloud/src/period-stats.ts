@@ -16,6 +16,7 @@
  */
 import { judgeBets, type ComboPayouts, type DayBet, type RaceResultData, type ResultHorse } from "./daily-report-bets";
 import { buildStatsFromRaces, mergeDayStats, type DayStats, type StatsRace } from "./daily-report-digest";
+import { evaluateTemplates } from "./daily-report-whatif";
 import { addDaysToKaisaiDate } from "./result-dispatch";
 
 /** 日報の「長い期間」の日数(その日を含む)。直近 4 週。 */
@@ -94,11 +95,14 @@ export function buildPeriodStats(rows: PeriodRows, range: { readonly fromDate: s
       finishByUmaban.set(h.umaban, h.finishPosition);
     }
     const bets: DayBet[] = (betsByAnalysis.get(race.analysisId) ?? []).map((b) => ({ betType: b.betType, comboKey: b.comboKey, stake: b.stake, odds: b.odds, ev: b.ev }));
+    const marks = marksByAnalysis.get(race.analysisId) ?? [];
     return {
       hasResult: result !== undefined,
       llmUsed: race.model !== null,
       bets: judgeBets(bets, result),
-      marks: (marksByAnalysis.get(race.analysisId) ?? []).map((m) => ({ mark: m.mark, finishPosition: finishByUmaban.get(m.umaban) ?? null })),
+      marks: marks.map((m) => ({ mark: m.mark, finishPosition: finishByUmaban.get(m.umaban) ?? null })),
+      // 印の定型(Issue #272)。同じ行(印・結果・組合せ払戻・取込印)から、日報の 1 日分と同じ `evaluateTemplates` で判定する。
+      templates: evaluateTemplates(marks, bets, result),
     };
   });
   return {

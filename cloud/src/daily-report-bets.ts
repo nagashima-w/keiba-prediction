@@ -77,6 +77,14 @@ function singleKey(umaban: number): string {
   return String(umaban).padStart(2, "0");
 }
 
+/**
+ * 順不同の組(ワイド・馬連・3 連複)のキー: 馬番を昇順にして 2 桁ゼロ埋めで連結する(core の `buildComboOddsKey` と同じ。一致はテストで固定)。
+ * 馬単・三連単・枠連のキーではない(着順・枠番の並びが違う)。「もしも」(Issue #272)の定型の買い目が使う。
+ */
+export function unorderedComboKey(umabans: readonly number[]): string {
+  return [...umabans].sort((a, b) => a - b).map(singleKey).join("");
+}
+
 function unjudged(bet: DayBet): BetOutcome {
   return { ...bet, status: "unjudged", payout: 0 };
 }

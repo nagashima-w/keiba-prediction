@@ -37,6 +37,22 @@ export interface ReportMarkStat {
   readonly top3: number;
 }
 
+/** 印の定型の買い方の型 1 つぶんの成績(サーバの `TemplateStat`。Issue #272)。 */
+export interface ReportTemplateStat {
+  readonly betCount: number;
+  readonly hitCount: number;
+  readonly stake: number;
+  readonly payout: number;
+  readonly unjudgedCount: number;
+  readonly inapplicableCount: number;
+}
+
+/** 惜しかったレース(サーバの `NearMissSummary`。Issue #272)。 */
+export interface ReportNearMisses {
+  readonly total: number;
+  readonly shown: readonly { readonly raceId: string; readonly templateId: string; readonly payout: number }[];
+}
+
 /** 1 日の統計(サーバの `DayStats`)。 */
 export interface ReportStats {
   readonly raceCount: number;
@@ -59,6 +75,8 @@ export interface ReportStats {
   readonly maxPayoutStake?: number;
   readonly byBetType: Readonly<Record<string, ReportBetTypeStat>>;
   readonly byMark: readonly ReportMarkStat[];
+  /** 印の定型の買い方の型ごとの成績(Issue #272)。この項目を持つ前の日報には無い。null は、旧形のジョブで作った日報(成績を作れなかった)。 */
+  readonly whatIf?: Readonly<Record<string, ReportTemplateStat>> | null;
 }
 
 /** 期間の統計(サーバの `PeriodStats`。Issue #264)。 */
@@ -125,6 +143,8 @@ export interface ReportDetail {
   readonly stats: ReportStats;
   /** 直前 27 日と直近 28 日の累計(Issue #264)。この項目を持つ前の日報には無い。 */
   readonly rolling?: ReportRolling;
+  /** 惜しかったレース(Issue #272)。この項目を持つ前の日報、旧形のジョブで作った日報には無い。 */
+  readonly nearMisses?: ReportNearMisses;
   readonly races: readonly ReportRace[];
   readonly narrative: ReportNarrative | null;
   /** 応答が構造として読めなかったときの生の文章。 */
@@ -187,6 +207,28 @@ function parseOptionalGroup(v: Record<string, unknown>, counts: readonly string[
   return out;
 }
 
+/** 印の定型の成績(Issue #272)を読む。null はそのまま null。壊れていれば undefined(呼び出し側が応答全体を捨てる)。 */
+function parseWhatIf(value: unknown): Record<string, ReportTemplateStat> | null | undefined {
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, ReportTemplateStat> = {};
+  for (const [id, t] of Object.entries(value)) {
+    if (!isRecord(t) || !isCount(t["betCount"]) || !isCount(t["hitCount"]) || !isNum(t["stake"]) || !isNum(t["payout"]) || !isCount(t["unjudgedCount"]) || !isCount(t["inapplicableCount"])) return undefined;
+    out[id] = { betCount: t["betCount"], hitCount: t["hitCount"], stake: t["stake"], payout: t["payout"], unjudgedCount: t["unjudgedCount"], inapplicableCount: t["inapplicableCount"] };
+  }
+  return out;
+}
+
+function parseNearMisses(value: unknown): ReportNearMisses | null {
+  if (!isRecord(value) || !isCount(value["total"]) || !isArr(value["shown"])) return null;
+  const shown: ReportNearMisses["shown"][number][] = [];
+  for (const n of value["shown"]) {
+    if (!isRecord(n) || !isStr(n["raceId"]) || !isStr(n["templateId"]) || !isNum(n["payout"])) return null;
+    shown.push({ raceId: n["raceId"], templateId: n["templateId"], payout: n["payout"] });
+  }
+  return { total: value["total"], shown };
+}
+
 function parseStats(value: unknown): ReportStats | null {
   if (!isRecord(value)) return null;
   const v = value;
@@ -211,10 +253,12 @@ function parseStats(value: unknown): ReportStats | null {
   }
   const expected = parseOptionalGroup(v, ["expectedBetCount", "expectedBaseHits"], ["expectedHits", "maxPayout", "maxPayoutStake"]);
   if (expected === null) return null;
+  const whatIf = "whatIf" in v ? parseWhatIf(v["whatIf"]) : undefined;
+  if ("whatIf" in v && whatIf === undefined) return null;
   return {
     raceCount: v["raceCount"], resultRaceCount: v["resultRaceCount"], noResultRaceCount: v["noResultRaceCount"], betRaceCount: v["betRaceCount"], llmUsedRaceCount: v["llmUsedRaceCount"],
     totalStake: v["totalStake"], totalReturn: v["totalReturn"], recoveryRate: v["recoveryRate"], judgedBetCount: v["judgedBetCount"], hitBetCount: v["hitBetCount"],
-    unjudgedBetCount: v["unjudgedBetCount"], unjudgedStake: v["unjudgedStake"], ...expected, byBetType, byMark,
+    unjudgedBetCount: v["unjudgedBetCount"], unjudgedStake: v["unjudgedStake"], ...expected, byBetType, byMark, ...(whatIf === undefined ? {} : { whatIf }),
   };
 }
 
@@ -280,7 +324,8 @@ function parseDetail(value: unknown): ReportDetail | null {
   const stats = parseStats(body["stats"]);
   const narrative = parseNarrative(body["narrative"]);
   const rolling = "rolling" in body ? parseRolling(body["rolling"]) : undefined;
-  if (rolling === null || stats === null || narrative === undefined || !isArr(body["races"]) || !strOrNull(body["narrativeRaw"]) || !strOrNull(body["note"])) {
+  const nearMisses = "nearMisses" in body ? parseNearMisses(body["nearMisses"]) : undefined;
+  if (rolling === null || nearMisses === null || stats === null || narrative === undefined || !isArr(body["races"]) || !strOrNull(body["narrativeRaw"]) || !strOrNull(body["note"])) {
     return null;
   }
   const races: ReportRace[] = [];
@@ -290,7 +335,7 @@ function parseDetail(value: unknown): ReportDetail | null {
     races.push(parsed);
   }
   return {
-    date, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary, stats, ...(rolling === undefined ? {} : { rolling }), races, narrative,
+    date, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary, stats, ...(rolling === undefined ? {} : { rolling }), ...(nearMisses === undefined ? {} : { nearMisses }), races, narrative,
     narrativeRaw: body["narrativeRaw"], note: body["note"],
   };
 }

@@ -194,3 +194,64 @@ describe("Issue #264: 見込みの的中数・直近 28 日の累計を読む", 
     expect(await fetchWith(detail(withExpected, rolling))).toStrictEqual(unexpected);
   });
 });
+
+describe("Issue #272: 印の定型の買い方(whatIf)と惜しかったレースを読む", () => {
+  const tpl = (over: Record<string, number> = {}) => ({ betCount: 10, hitCount: 2, stake: 1000, payout: 1500, unjudgedCount: 1, inapplicableCount: 3, ...over });
+  const WHATIF = { win: tpl(), place: tpl({ hitCount: 5, payout: 1100 }), wide: tpl({ betCount: 0, hitCount: 0, stake: 0, payout: 0 }), quinella: tpl(), trio: tpl() };
+  const STATS = {
+    raceCount: 2, resultRaceCount: 2, noResultRaceCount: 0, betRaceCount: 2, llmUsedRaceCount: 2, totalStake: 1000, totalReturn: 1300, recoveryRate: 1.3, judgedBetCount: 4, hitBetCount: 1, unjudgedBetCount: 0, unjudgedStake: 0,
+    byBetType: { win: { betCount: 2, hitCount: 1, stake: 600, payout: 1300 } },
+    byMark: [{ mark: "◎", count: 2, win: 1, top3: 1 }],
+  };
+  const NEAR = { total: 4, shown: [{ raceId: "202605030801", templateId: "trio", payout: 12340 }] };
+  const detail = (stats: unknown, extra: Record<string, unknown> = {}) => ({
+    date: "20261010", created_at: "2026-10-10T11:00:00.000Z", model: null, race_count: 2, total_stake: 1000, total_return: 1300, summary: null,
+    body: { format: 1, kaisaiDate: "20261010", stats, races: [], narrative: null, narrativeRaw: null, note: null, ...extra },
+  });
+  const fetchWith = (report: unknown) => fetchReport(reply(200, { ok: true, report, job: null, job_status: "ok" }), "20261010");
+  const unexpected = { ok: false, error: { kind: "unexpected", httpStatus: 200 } };
+
+  it("whatIf(型ごとの成績)と nearMisses を、サーバが書いた値のまま読む", async () => {
+    const got = await fetchWith(detail({ ...STATS, whatIf: WHATIF }, { nearMisses: NEAR }));
+    if (!got.ok || got.report === null) throw new Error("読めませんでした");
+    expect(got.report.stats.whatIf).toStrictEqual(WHATIF);
+    expect(got.report.nearMisses).toStrictEqual(NEAR);
+    // 前提(空振り防止): 値が実際に入っている
+    expect(got.report.stats.whatIf!["place"]!.hitCount).toBe(5);
+  });
+
+  it("whatIf が null(旧形のジョブで作った日報)は null のまま読む。項目そのものが無い日報(旧形)はキーを足さない", async () => {
+    const asNull = await fetchWith(detail({ ...STATS, whatIf: null }));
+    if (!asNull.ok || asNull.report === null) throw new Error("読めませんでした");
+    expect(asNull.report.stats.whatIf).toBeNull();
+    expect("nearMisses" in asNull.report).toBe(false);
+    const legacy = await fetchWith(detail(STATS));
+    if (!legacy.ok || legacy.report === null) throw new Error("読めませんでした");
+    expect("whatIf" in legacy.report.stats).toBe(false);
+    expect("nearMisses" in legacy.report).toBe(false);
+  });
+
+  it.each([
+    ["型の統計が一部の項目だけ", { ...STATS, whatIf: { ...WHATIF, win: { betCount: 1 } } }],
+    ["点数が負", { ...STATS, whatIf: { ...WHATIF, win: tpl({ betCount: -1 }) } }],
+    ["払戻が文字列", { ...STATS, whatIf: { ...WHATIF, win: tpl({ payout: "1" as unknown as number }) } }],
+    ["判定不能の数が小数", { ...STATS, whatIf: { ...WHATIF, win: tpl({ unjudgedCount: 1.5 }) } }],
+    ["型の統計がオブジェクトでない", { ...STATS, whatIf: { ...WHATIF, win: 3 } }],
+    ["whatIf が配列", { ...STATS, whatIf: [] }],
+    ["whatIf が文字列", { ...STATS, whatIf: "x" }],
+  ])("想定外の形は一部だけ採用せず unexpected: %s", async (_n, stats) => {
+    expect(await fetchWith(detail(stats))).toStrictEqual(unexpected);
+  });
+
+  it.each([
+    ["total が無い", { shown: [] }],
+    ["total が負", { total: -1, shown: [] }],
+    ["shown が配列でない", { total: 1, shown: "x" }],
+    ["shown の払戻が数でない", { total: 1, shown: [{ raceId: "R", templateId: "trio", payout: "1" }] }],
+    ["shown の raceId が無い", { total: 1, shown: [{ templateId: "trio", payout: 1 }] }],
+    ["nearMisses がオブジェクトでない", "x"],
+    ["nearMisses が null", null],
+  ])("惜しかったレースが壊れていれば unexpected: %s", async (_n, nearMisses) => {
+    expect(await fetchWith(detail(STATS, { nearMisses }))).toStrictEqual(unexpected);
+  });
+});

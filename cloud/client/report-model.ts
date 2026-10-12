@@ -5,11 +5,12 @@
  * **サーバ由来の「文」は、LLM が書いた文章(総括・良かった点・改善点・レースごとの一言・生の文章)だけ**を、そのまま(テキストとして)出す。それ以外の文言
  * (文章が無い理由・状態の説明)はすべてクライアントの固定の文言(サーバの `note` は読まない)。
  */
-import type { ReportDetail, ReportJob, ReportListItem, ReportRace, ReportStats } from "./api-report";
+import type { ReportDetail, ReportJob, ReportListItem, ReportRace, ReportStats, ReportTemplateStat } from "./api-report";
 import { formatJstDateTime } from "./date";
 import { buildReportHash } from "./route";
 import { formatExpectedHits } from "../src/expected-format";
 import { formatRecoveryPercent } from "../src/recovery-format";
+import { formatTemplateStat, TEMPLATE_LABELS, templateLabel } from "../src/whatif-format";
 import { formatYen, PROPOSED_BET_LABELS } from "./verify-format";
 
 /** 一覧(日付の並び)の状態。 */
@@ -93,6 +94,16 @@ export interface RollingView {
   readonly tiles: readonly TileView[];
 }
 
+/** 印の定型の買い方(もしも)の節(Issue #272)。 */
+export interface WhatIfView {
+  readonly heading: string;
+  readonly note: string;
+  /** その日・直近 28 日の累計。 */
+  readonly groups: readonly { readonly title: string; readonly rows: readonly RowView[] }[];
+  /** 惜しかったレース。この項目を持たない日報では null。 */
+  readonly near: { readonly heading: string; readonly items: readonly string[]; readonly empty: string | null } | null;
+}
+
 export interface ReportBodyView {
   readonly heading: string;
   /** 作成時刻・モデル・レース数。 */
@@ -100,6 +111,8 @@ export interface ReportBodyView {
   readonly tiles: readonly TileView[];
   /** 直近 28 日の累計(Issue #264)。この項目を持つ前の日報では null。 */
   readonly rolling: RollingView | null;
+  /** 印の定型の買い方(Issue #272)。この項目を持つ前の日報・旧形のジョブで作った日報では null。 */
+  readonly whatIf: WhatIfView | null;
   /** 文章が無い・生の文章のときの固定の説明。 */
   readonly textNote: string | null;
   /** LLM の総括。 */
@@ -178,19 +191,21 @@ function horseText(umaban: number, name: string | null): string {
   return name === null ? `${umaban}番` : `${umaban}番 ${name}`;
 }
 
+/** そのレースの実際の買い目の概要(レースごとの行と、惜しかったレースが使う)。 */
+function betsText(r: ReportRace): string {
+  if (r.judgedBetCount === 0 && r.unjudgedBetCount === 0) {
+    return r.allocationNote ?? "買い目なし";
+  }
+  const parts: string[] = [];
+  if (r.judgedBetCount > 0) parts.push(`${r.judgedBetCount} 点中 ${r.hitCount} 点的中・賭け金 ${formatYen(r.totalStake)}・払戻 ${formatYen(r.totalReturn)}`);
+  if (r.unjudgedBetCount > 0) parts.push(`判定不能 ${r.unjudgedBetCount} 点`);
+  return `買い目: ${parts.join("・")}`;
+}
+
 function raceRow(r: ReportRace): RaceRowView {
   const result = r.hasResult ? (r.top3.length === 0 ? "着順の記録なし" : r.top3.map((t) => `${t.finishPosition}着 ${horseText(t.umaban, t.name)}`).join(" / ")) : "結果なし(未取得・中止などで取り込めていません)";
   const marks = r.marks.length === 0 ? null : r.marks.map((m) => `${m.mark} ${horseText(m.umaban, m.name)}${m.finishPosition === null ? "" : ` → ${m.finishPosition}着`}`).join(" / ");
-  let bets: string;
-  if (r.judgedBetCount === 0 && r.unjudgedBetCount === 0) {
-    bets = r.allocationNote ?? "買い目なし";
-  } else {
-    const parts: string[] = [];
-    if (r.judgedBetCount > 0) parts.push(`${r.judgedBetCount} 点中 ${r.hitCount} 点的中・賭け金 ${formatYen(r.totalStake)}・払戻 ${formatYen(r.totalReturn)}`);
-    if (r.unjudgedBetCount > 0) parts.push(`判定不能 ${r.unjudgedBetCount} 点`);
-    bets = `買い目: ${parts.join("・")}`;
-  }
-  return { raceId: r.raceId, title: r.title, result, marks, bets, comment: r.comment };
+  return { raceId: r.raceId, title: r.title, result, marks, bets: betsText(r), comment: r.comment };
 }
 
 /** 賭け金・払戻・回収率・的中(+ 見込みと実際)のタイル。その日と累計で同じ書き方。見込みは、この項目を持つ日報で、確率のある買い目があるときだけ。 */
@@ -215,6 +230,40 @@ function rollingOf(report: ReportDetail): RollingView | null {
     : { heading: "直近 28 日の累計(その日を含む)", meta: `${ymd(t.fromDate)}〜${ymd(t.toDate)}・開催 ${t.dayCount} 日・${t.raceCount} レース`, tiles: statTiles(t) };
 }
 
+/** 型ごとの行(決まった順。未知の id は id のまま末尾)。 */
+function templateRows(w: Readonly<Record<string, ReportTemplateStat>>): RowView[] {
+  const known = new Set(TEMPLATE_LABELS.map(([id]) => id));
+  return [...TEMPLATE_LABELS.map(([id]) => id), ...Object.keys(w).filter((id) => !known.has(id))]
+    .filter((id) => w[id] !== undefined)
+    .map((id) => ({ label: templateLabel(id), value: formatTemplateStat(w[id]!, formatYen) }));
+}
+
+function whatIfOf(report: ReportDetail): WhatIfView | null {
+  const day = report.stats.whatIf;
+  if (day === null || day === undefined) return null;
+  const groups = [{ title: "その日", rows: templateRows(day) }];
+  const total = report.rolling?.total.whatIf;
+  if (total !== null && total !== undefined) groups.push({ title: "直近 28 日の累計(その日を含む)", rows: templateRows(total) });
+  const nm = report.nearMisses;
+  const near =
+    nm === undefined
+      ? null
+      : {
+          heading: `惜しかったレース(全 ${nm.total} 件${nm.total > nm.shown.length ? `のうち、払戻の多い順に ${nm.shown.length} 件` : ""})`,
+          items: nm.shown.map((n) => {
+            const race = report.races.find((r) => r.raceId === n.raceId);
+            return `${race?.title ?? n.raceId}: ${templateLabel(n.templateId)}が的中していた(定型の払戻 ${formatYen(n.payout)})${race === undefined ? "" : `。実際の${betsText(race)}`}`;
+          }),
+          empty: nm.shown.length === 0 ? "該当するレースはありませんでした。" : null,
+        };
+  return {
+    heading: "もしも(印の定型の買い方。各100円)",
+    note: "毎レース各100円で買っていたときの成績です(印の付いたレース全部が対象。実際の配分とは点数も賭け金も揃いません)。判定不能と対象外は成績に含めません。",
+    groups,
+    near,
+  };
+}
+
 function bodyOf(report: ReportDetail): ReportBodyView {
   const s = report.stats;
   const tiles = statTiles(s);
@@ -235,6 +284,7 @@ function bodyOf(report: ReportDetail): ReportBodyView {
     meta: metaParts.join("・"),
     tiles,
     rolling: rollingOf(report),
+    whatIf: whatIfOf(report),
     textNote:
       report.narrative !== null
         ? null

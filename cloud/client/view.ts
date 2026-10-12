@@ -13,7 +13,7 @@ import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./mi
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
-import type { RaceRowView, ReportBodyView, ReportModel } from "./report-model";
+import type { RaceRowView, ReportBodyView, ReportModel, WhatIfView } from "./report-model";
 import type { AdminOnlyModel } from "./admin-only";
 import { h, type PickedFile, type VNode } from "./vnode";
 
@@ -793,6 +793,14 @@ function reportRaceNode(r: RaceRowView): VNode {
   ]);
 }
 
+/** 印の定型の買い方(もしも)と惜しかったレース(Issue #272)。 */
+function whatIfNodes(w: WhatIfView): VNode[] {
+  const nodes: VNode[] = [h("h3", {}, [w.heading]), h("p", { class: "meta" }, [w.note])];
+  for (const g of w.groups) nodes.push(h("p", {}, [h("strong", {}, [g.title])]), rowsNode(g.rows));
+  if (w.near !== null) nodes.push(h("h3", {}, [w.near.heading]), w.near.empty !== null ? h("p", { class: "empty" }, [w.near.empty]) : bulletList(w.near.items));
+  return nodes;
+}
+
 function reportBodyNodes(b: ReportBodyView): VNode[] {
   const nodes: VNode[] = [h("h2", {}, [b.heading]), h("p", { class: "meta" }, [b.meta]), tilesNode(b.tiles)];
   if (b.rolling !== null) nodes.push(h("h3", {}, [b.rolling.heading]), h("p", { class: "meta" }, [b.rolling.meta]), tilesNode(b.rolling.tiles));
@@ -803,6 +811,7 @@ function reportBodyNodes(b: ReportBodyView): VNode[] {
   if (b.raw !== null) nodes.push(h("p", { class: "report-raw" }, [b.raw]));
   if (b.typeRows.length > 0) nodes.push(h("h3", {}, [b.typeHeading]), rowsNode(b.typeRows));
   if (b.markRows.length > 0) nodes.push(h("h3", {}, [b.markHeading]), rowsNode(b.markRows));
+  if (b.whatIf !== null) nodes.push(...whatIfNodes(b.whatIf));
   nodes.push(h("h2", {}, [b.racesHeading]), ...b.races.map(reportRaceNode));
   return nodes;
 }

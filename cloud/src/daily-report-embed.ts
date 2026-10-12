@@ -9,6 +9,8 @@ import { formatRecoveryPercent } from "./recovery-format";
 import type { DayStats } from "./daily-report-digest";
 import { DISCORD_COLORS } from "./palette";
 import { fitEmbed, type CloudEmbed, type EmbedField } from "./notify-embeds";
+import type { NearMissSummary, WhatIfStats } from "./daily-report-whatif";
+import { templateLabel, TEMPLATE_LABELS } from "./whatif-format";
 
 // 帯の色は palette.ts(Issue #239)。
 const COLOR_GREEN = DISCORD_COLORS.ok;
@@ -29,6 +31,21 @@ export interface ReportEmbedInput {
   readonly link: string | undefined;
   /** 直前 27 日と直近 28 日の累計(Issue #264)。この項目を持つ前の日報には無い(undefined)。 */
   readonly rolling?: RollingSummary | undefined;
+  /** 惜しかったレース(Issue #272)。省略・null は未計算(旧形)で、field を出さない。 */
+  readonly nearMisses?: NearMissSummary | null | undefined;
+  /** 惜しかったレースの名前を引くための、その日のレースの一覧。無ければ raceId を出す。 */
+  readonly races?: readonly { readonly raceId: string; readonly title: string }[] | undefined;
+}
+
+/** 型 1 つの『的中/点数 回収率』(判定できた点が無ければ回収率は『-』)。 */
+function templateShort(s: WhatIfStats[string] | undefined): string {
+  if (s === undefined) return "-";
+  return `${s.hitCount}/${s.betCount} ${s.betCount === 0 ? "-" : formatRecoveryPercent(s.payout / s.stake)}`;
+}
+
+/** 型の成績が 1 つでも数えられている(レースが 0 件の日は false)。 */
+function hasWhatIfData(w: WhatIfStats): boolean {
+  return Object.values(w).some((s) => s.betCount + s.unjudgedCount + s.inapplicableCount > 0);
 }
 
 /**
@@ -60,6 +77,20 @@ export function buildReportEmbed(input: ReportEmbedInput): CloudEmbed {
       name: "直近 28 日の累計(その日を含む)",
       value: `賭け金 ${yen(t.totalStake)}・払戻 ${yen(t.totalReturn)}・回収率 ${t.recoveryRate === null ? "なし" : formatRecoveryPercent(t.recoveryRate)}\n${hitText(t)}\n開催 ${t.dayCount} 日・${t.raceCount} レース`,
     });
+  }
+  // 型の上では必須でも、デプロイをまたいだジョブの record は旧コードが積んだもの(この項目が無い)ことがある。落とさず、field を出さない。
+  const whatIf: WhatIfStats | null | undefined = stats.whatIf;
+  if (whatIf !== null && whatIf !== undefined && hasWhatIfData(whatIf)) {
+    const total = input.rolling?.total.whatIf ?? null;
+    fields.push({
+      name: "もしも(印の定型・各100円)",
+      value: TEMPLATE_LABELS.map(([id, label]) => `${label}: その日 ${templateShort(whatIf[id])}${total === null ? "" : `・28日 ${templateShort(total[id])}`}`).join("\n"),
+    });
+  }
+  const near = input.nearMisses;
+  if (near !== undefined && near !== null && near.total > 0) {
+    const titleOf = (raceId: string): string => input.races?.find((r) => r.raceId === raceId)?.title ?? raceId;
+    fields.push({ name: `惜しかったレース(全 ${near.total} 件)`, value: near.shown.map((n) => `${titleOf(n.raceId)}: ${templateLabel(n.templateId)} ${yen(n.payout)}`).join("\n") });
   }
   if (narrative !== null) {
     if (narrative.good.length > 0) {

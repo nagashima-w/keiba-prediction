@@ -245,3 +245,59 @@ describe("Issue #264 デプロイをまたぐジョブ: 旧コードが作った
     expect(e.fields!.find((f) => f.name === "成績")!.value).toContain("60 点中 14 点的中(見込み 9.50 点・実際 14 点)");
   });
 });
+
+describe("Issue #272: 印の定型の買い方(もしも)と惜しかったレース", () => {
+  const stat = (betCount: number, hitCount: number, payout: number, over: Record<string, number> = {}) => ({ betCount, hitCount, stake: betCount * 100, payout, unjudgedCount: 0, inapplicableCount: 0, ...over });
+  const DAY = { win: stat(10, 2, 1500), place: stat(10, 5, 1100), wide: stat(4, 0, 0, { inapplicableCount: 6 }), quinella: stat(4, 1, 2400), trio: stat(0, 0, 0, { inapplicableCount: 10 }) };
+  const TOTAL = { win: stat(41, 9, 3550), place: stat(40, 20, 4000), wide: stat(30, 5, 3900), quinella: stat(30, 3, 2100), trio: stat(20, 1, 6000) };
+  const rolling = (): RollingSummary => {
+    const p = { ...STATS, fromDate: "20260913", toDate: "20261010", dayCount: 8, whatIf: TOTAL } as PeriodStats;
+    return { windowDays: 28, prior: p, total: p };
+  };
+  const base = { kaisaiDate: "20261010", stats: { ...STATS, whatIf: DAY }, narrative: NARRATIVE, note: null, link: undefined, rolling: rolling() };
+  const field = (e: ReturnType<typeof buildReportEmbed>, name: string) => e.fields!.find((f) => f.name === name);
+
+  it("型ごとに 1 行: その日と直近 28 日の『的中/点数 回収率』を並べる。判定できた点が無い型は回収率を『-』にする", () => {
+    const lines = field(buildReportEmbed(base), "もしも(印の定型・各100円)")!.value.split("\n");
+    expect(lines).toEqual([
+      "◎単勝: その日 2/10 150.0%・28日 9/41 86.6%",
+      "◎複勝: その日 5/10 110.0%・28日 20/40 100.0%",
+      "◎-〇ワイド: その日 0/4 0.0%・28日 5/30 130.0%",
+      "◎-〇馬連: その日 1/4 600.0%・28日 3/30 70.0%",
+      "◎〇▲の3連複: その日 0/0 -・28日 1/20 300.0%",
+    ]);
+  });
+
+  it("直近 28 日の累計が無い(旧形)ときは、その日だけ出す。その日の成績が無い(null)・レースが 0 件なら field ごと出さない", () => {
+    const dayOnly = field(buildReportEmbed({ ...base, rolling: undefined }), "もしも(印の定型・各100円)")!.value;
+    expect(dayOnly.split("\n")[0]).toBe("◎単勝: その日 2/10 150.0%");
+    expect(field(buildReportEmbed({ ...base, stats: { ...STATS, whatIf: null } }), "もしも(印の定型・各100円)")).toBeUndefined();
+    expect(field(buildReportEmbed({ ...base, stats: { ...STATS, raceCount: 0, whatIf: buildDayStats([]).whatIf } }), "もしも(印の定型・各100円)")).toBeUndefined();
+  });
+
+  it("旧コードが積んだ record(stats に whatIf の項目そのものが無い)でも落ちず、field を出さない", () => {
+    const { whatIf: _omitted, ...legacyStats } = STATS;
+    const e = buildReportEmbed({ ...base, stats: legacyStats as DayStats });
+    expect(e.fields!.map((f) => f.name)).toEqual(["成績", "レース", "直近 28 日の累計(その日を含む)", "良かった点", "改善点"]);
+  });
+
+  it("惜しかったレース: 全件数を見出しに、最大 3 件をレース名・型・定型の払戻で出す。0 件・未計算なら field ごと出さない", () => {
+    const races = [{ raceId: "R1", title: "東京5R 3歳未勝利" }, { raceId: "R2", title: "中山11R テストS" }];
+    const near = { total: 4, shown: [{ raceId: "R1", templateId: "trio", payout: 12340 }, { raceId: "R2", templateId: "wide", payout: 800 }] };
+    const e = buildReportEmbed({ ...base, nearMisses: near, races });
+    expect(field(e, "惜しかったレース(全 4 件)")!.value).toBe("東京5R 3歳未勝利: ◎〇▲の3連複 12,340円\n中山11R テストS: ◎-〇ワイド 800円");
+    const names = (x: ReturnType<typeof buildReportEmbed>) => x.fields!.map((f) => f.name).join("|");
+    expect(names(buildReportEmbed({ ...base, nearMisses: { total: 0, shown: [] }, races }))).not.toContain("惜しかったレース");
+    expect(names(buildReportEmbed(base))).not.toContain("惜しかったレース");
+    // レースの名前が分からなくても落ちない(raceId を出す)
+    expect(field(buildReportEmbed({ ...base, nearMisses: near }), "惜しかったレース(全 4 件)")!.value).toContain("R1: ◎〇▲の3連複 12,340円");
+  });
+
+  it("上限(field 1024・合計 6000)を守る", () => {
+    const long = "あ".repeat(900);
+    const near = { total: 3, shown: [1, 2, 3].map((i) => ({ raceId: `R${i}`, templateId: "trio", payout: 100 })) };
+    const e = buildReportEmbed({ ...base, nearMisses: near, races: [1, 2, 3].map((i) => ({ raceId: `R${i}`, title: long })) });
+    for (const f of e.fields!) expect(f.value.length).toBeLessThanOrEqual(EMBED_LIMITS.fieldValue);
+    expect(embedLength(e)).toBeLessThanOrEqual(EMBED_LIMITS.total);
+  });
+});
