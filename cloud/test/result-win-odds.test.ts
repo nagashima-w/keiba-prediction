@@ -71,9 +71,9 @@ const ENTRIES: RaceResultEntry[] = [
 ];
 
 describe("migration 0011: race_results に D1 専用の列 win_odds・ninki", () => {
-  it("win_odds は REAL・ninki は INTEGER で、どちらも NULL 可・既定値なし。既存の列は 7 つのまま", async () => {
+  it("win_odds は REAL・ninki は INTEGER で、どちらも NULL 可・既定値なし。既存の列は 7 つのまま(その後ろに #72 の 0013 の scratched が続く)", async () => {
     const cols = (await local.db.prepare("PRAGMA table_info(race_results)").all()).results as Array<{ name: string; type: string; notnull: number; dflt_value: unknown; pk: number }>;
-    expect(cols.map((c) => c.name)).toEqual(["race_id", "umaban", "finish_position", "place_payout", "win_payout", "passing_json", "last3f", "win_odds", "ninki"]);
+    expect(cols.map((c) => c.name)).toEqual(["race_id", "umaban", "finish_position", "place_payout", "win_payout", "passing_json", "last3f", "win_odds", "ninki", "scratched"]);
     expect(cols.find((c) => c.name === "win_odds")).toMatchObject({ type: "REAL", notnull: 0, dflt_value: null, pk: 0 });
     expect(cols.find((c) => c.name === "ninki")).toMatchObject({ type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 });
   });
