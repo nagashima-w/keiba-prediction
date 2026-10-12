@@ -254,6 +254,10 @@ async function smokeAnalysis(): Promise<Response> {
     bets: record?.allocation?.bets.length ?? 0,
     resultSha256: await sha256Hex(JSON.stringify(result)),
     recordSha256: await sha256Hex(JSON.stringify(record)),
+    // Issue #258: smoke は、浮動小数点の値を相対誤差の許容つきで golden と比べる(`smoke-compare.ts`)ので、SHA-256 だけでなく本体も返す
+    // (Node と workerd では `Math.log`・`Math.exp` の結果が最後の 1 ビットだけ違うことがあり、SHA-256 の完全一致は成り立たない)。SHA-256 は情報として残す。
+    result,
+    record,
   });
 }
 

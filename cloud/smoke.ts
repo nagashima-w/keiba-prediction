@@ -18,6 +18,7 @@
  *     した一時設定で起動し、`GET /api/netkeiba/check` を通す。workerd と nodejs_compat の実環境で、
  *     Worker → DO → ソケットクライアント → HttpClient → cheerio が fixture で通り、頭数が返ること、2 秒間隔(DO の kv と実際の
  *     タイマー)・ブレーカー(403 の連続)が効くことを、netkeiba へ出さずに確かめる。
+ *     また、workerd の runAnalysis の出力が exe 側の golden と一致することも確かめる(浮動小数点は相対誤差 1e-12 以内・それ以外は完全一致。Issue #258。比較は smoke-compare.ts)。
  *  F. (#177・#180ほか)日単位の DO `RaceDay` を、偽ソケットの実環境で通す(手動の起動・朝の取得・発走前の分析・一覧・分析の詳細)。
  *  G. (#206・#249)cron の入口 `scheduled` を、`/cdn-cgi/local/scheduled`(cron の手動発火)で起動し、21 時(1 本目)で翌日の計画が確定すること・重複配信で状態が変わらないこと・
  *     23 時(2 本目)の再実行(rescue)が正常な日を変えないこと・JST の日付の境界(23:59 と翌 0:00・年またぎ)・`GET /api/plan` で観測できることを確かめる。Webhook は入れない(外へ出さない)。
@@ -25,11 +26,11 @@
  * JWT の検証そのものは単体テスト(test/)が担う。値はすべて文書用のダミー。
  */
 import { execFileSync, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { compareWithFloatTolerance } from "./smoke-compare";
 
 const BASE_PORT = Number(process.env["SMOKE_PORT"] ?? "8801");
 const CONFIG_PATH = "wrangler.smoke.generated.toml";
@@ -418,14 +419,26 @@ async function main(): Promise<void> {
       check(`${label}: GET /check に確認フォーム(GET で /api/netkeiba/check へ。初期値 202603020211)がある`, page.status === 200 && page.text.includes('<form method="get" action="/api/netkeiba/check">') && page.text.includes('value="202603020211"'), `${page.status}`);
 
       // Issue #176: runAnalysis(クラウド版の入口)が workerd で、フィクスチャから最後まで通り、exe 側の golden と同じ出力になる。
+      // Issue #258: 「同じ出力」は、浮動小数点の値を相対誤差 1e-12 以内、それ以外(項目の集合・順序・文字列・整数・真偽・配列の長さ・買い目の数)を完全一致で比べる。
+      //   SHA-256 の完全一致にしない理由: Math.log・Math.exp は Node(V8 12.4)と workerd で、同じ引数に最後の 1 ビットだけ違う結果を返すことがある
+      //   (実測: 最大の相対誤差 2.4e-15)。許容の根拠・規則は smoke-compare.ts のヘッダ。
       const analysis = await req(port, "GET", "/smoke/analysis");
       const analysisJson = parseJson(analysis.text);
       const golden = JSON.parse(readFileSync(path.join("..", "packages", "app", "test", "golden", "pipeline-golden.json"), "utf-8")) as {
         noLlmAllBets: { result: unknown; record: { allocation: { bets: unknown[] } } };
       };
-      const sha = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
       check(`${label}: runAnalysis が workerd で最後まで通る(保存1件・16頭・配分は多点)`, analysis.status === 200 && analysisJson["ok"] === true && analysisJson["saved"] === 1 && analysisJson["rows"] === 16 && typeof analysisJson["bets"] === "number" && (analysisJson["bets"] as number) > 1, `${analysis.status} ${analysis.text.slice(0, 300)}`);
-      check(`${label}: workerd の runAnalysis の結果(AnalysisResult)・保存レコード(AnalysisRecord)が、exe 側の golden と SHA-256 まで一致する`, analysisJson["resultSha256"] === sha(golden.noLlmAllBets.result) && analysisJson["recordSha256"] === sha(golden.noLlmAllBets.record) && analysisJson["bets"] === golden.noLlmAllBets.record.allocation.bets.length, `${String(analysisJson["resultSha256"])} / ${String(analysisJson["recordSha256"])}`);
+      const resultCompare = compareWithFloatTolerance(analysisJson["result"], golden.noLlmAllBets.result);
+      const recordCompare = compareWithFloatTolerance(analysisJson["record"], golden.noLlmAllBets.record);
+      check(
+        `${label}: workerd の runAnalysis の結果(AnalysisResult)・保存レコード(AnalysisRecord)が、exe 側の golden と一致する(浮動小数点は相対誤差 1e-12 以内・それ以外は完全一致)`,
+        resultCompare.ok && recordCompare.ok && analysisJson["bets"] === golden.noLlmAllBets.record.allocation.bets.length,
+        `result: ${resultCompare.mismatchCount} 件 ${resultCompare.mismatches.join(" | ")} / record: ${recordCompare.mismatchCount} 件 ${recordCompare.mismatches.join(" | ")} / bets ${String(analysisJson["bets"])}`,
+      );
+      // 情報(合否に影響しない): 完全には一致せず、許容内で一致とみなした浮動小数点の値の件数と、最大の相対誤差。
+      console.log(
+        `INFO: ${label}: 最終ビットなどの許容内の差 result ${resultCompare.floatDiffCount} 件(最大の相対誤差 ${resultCompare.maxRelativeError})・record ${recordCompare.floatDiffCount} 件(最大の相対誤差 ${recordCompare.maxRelativeError})`,
+      );
       // (上の runAnalysis の確認は、ゲートの間隔(2 秒)の確認に影響しないよう、取得の確認の前に置く)
 
       const central = await req(port, "GET", "/api/netkeiba/check?race_id=202603020211");
@@ -546,7 +559,7 @@ async function main(): Promise<void> {
       const prior = parseJson((await req(port, "GET", `/smoke/race-day/prior?date=${date}&race_id=${raceId}`)).text)["prior"] as Record<string, unknown> | null;
       check(`${label}: 朝の prior が DO に残る(16頭・LLM なし・組合せオッズなし・近似の日付ではない)`, prior !== null && prior["rows"] === 16 && prior["llmUsed"] === false && prior["hasWideCombo"] === false && prior["dateApproximate"] === false, JSON.stringify(prior).slice(0, 200));
       // Issue #226: 既定の重み(騎手 0.15)では騎手の年度別成績も prior に入る。exe の golden は騎手の成績を持たない分析なので、一致はしなくなった
-      // (騎手を取らない場合の「exe の golden と同じ値」は、上の A〈workerd の runAnalysis が golden と SHA-256 まで一致〉と vitest の race-day-core.test.ts が固定している)。
+      // (騎手を取らない場合の「exe の golden と同じ値」は、上の E〈workerd の runAnalysis が golden と一致〉と vitest の race-day-core.test.ts が固定している)。
       // ここでは、騎手の項が workerd でも効いていること(馬の並びは同じで、1頭以上の prior が golden と違い、差はどの馬も 0.1 未満)を確かめる。
       const goldenPriors = golden.noLlmNoAllocationNoDate.result.rows.map((r) => [r.umaban, r.prior] as const);
       const smokePriors = (prior?.["priors"] as [number, number][] | undefined) ?? [];
