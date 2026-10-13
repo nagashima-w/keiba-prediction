@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SPIKE_WORKER_PREFIX } from "../cloudflare-spike/preflight.js";
 
 /**
  * Issue #161(#21-C): 本番デプロイのワークフロー(.github/workflows/deploy-cloud.yml)の静的検査。
@@ -540,14 +539,11 @@ describe("deploy ジョブのステップ(秘密・サブドメインの扱い�
 });
 
 describe("Worker 名", () => {
-  it("本番の Worker 名は wrangler.toml と一致し、スパイクの接頭辞(後片付けが接頭辞で削除する)と衝突しない", () => {
+  it("本番の Worker 名は wrangler.toml と一致する", () => {
     const toml = readTextLf("cloud", "wrangler.toml");
     const tomlName = /^name = "([^"]+)"$/m.exec(toml)?.[1];
     const ymlName = /^ {6}WORKER_NAME: "?([^"\n]+)"?$/m.exec(yml)?.[1];
     expect(tomlName).toBe("keiba-cloud");
     expect(ymlName).toBe(tomlName);
-    expect(SPIKE_WORKER_PREFIX).toBe("keiba-cf-spike-");
-    expect(tomlName!.startsWith(SPIKE_WORKER_PREFIX)).toBe(false);
-    expect(SPIKE_WORKER_PREFIX.startsWith(tomlName!)).toBe(false);
   });
 });

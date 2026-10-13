@@ -1,5 +1,12 @@
 # Cloudflare 移行スパイク(Issue #159〈#21-A〉・#160〈#21-B〉・#162〈#21-D〉段階1)の結果
 
+> **注記(Issue #290)**: この調査の実験用のコード(`spikes/cloudflare/`・`scripts/cloudflare-spike/`・`.github/workflows/cloudflare-spike.yml`・
+> それらのテスト `scripts/test/cloudflare-spike-*.test.ts`・フィクスチャ `scripts/test/fixtures/cloudflare-spike/`)は、移行の完了後に削除した。
+> **以下の本文は履歴として書き換えていない。** 本文中のパス・コマンド(再生成・ローカルでの確認・ワークフローの使い方を含む)は、
+> 削除の直前のコミット **668a7c5** を指す。再現するにはそのコミットをチェックアウトする。
+> 結果 JSON(`round*-result.json`)は残してあるが、生成節と JSON の一致を検査していたテスト(`cloudflare-spike-report-doc.test.ts`)も削除したため、
+> 生成節は以後、検査のない凍結した記録である。
+
 #21(分析全体とスマホの画面を Cloudflare へ移す)の前提だった2点を、実際に Cloudflare に Worker をデプロイして測った(#159)。
 
 1. netkeiba は、Cloudflare Workers からのアクセスを受け付けるか

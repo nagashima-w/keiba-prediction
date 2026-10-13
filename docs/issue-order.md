@@ -15,7 +15,7 @@
 - **#285**(親): exe のコードを削除する。段階 A=#286、B=#287、C=#288、D=#289。
 - ~~**#288**~~(#285-C): **完了**(`1fa9a9b`。2026-10-13 に #276 とともに closed〈completed〉)。`deploy-cloud.yml` の check から smoke を別ジョブに分け、check・smoke・deploy の 3 ジョブにした(check と smoke は並列で、deploy は `needs: [check, smoke]` で両方を待つ。承認印・「レビュー継続中」の AND 条件は不変)。`ci.yml` から `@keiba/app` のビルドを外すのは #287 で済んでいた。あわせて、版ごとの検証(by-version)の経路で先読みの疑いを除外していること(`cloud/src/verify-versions.ts` の `PRODUCTION_VERIFY_CONFIG`)を固定するテストを足した。**実績(1 run)**: 並列にして約 230 秒(約 33%)短縮(同じ run を直列で走らせた場合の見積もり約 704 秒に対して。#288 のコメント)。待ち時間の本体は cloud の vitest(275〜436 秒)。shard 分割は、もう数 run の実測を見てから判断する。
 - **#289**(#285-D): docs と CLAUDE.md を exe 削除後の状態に合わせる。**本体は公開済み**(`9470ce4`)。#288 の確定後の分(CI のジョブ構成の記述〈check・smoke の 2 ジョブ〉と、CLAUDE.md の追加の本文案 A・B〈ユーザーの了承済み〉)は、後続のコミットで直した。
-- **#290**: Cloudflare 移行の実験用のコード(`spikes/cloudflare`・`scripts/cloudflare-spike` ほか)を削除する。#285 とは別の Issue(ユーザーの決定)。調査の記録 `docs/investigations/cloudflare-spike/report.md` は残す。#287 の後。
+- ~~**#290**~~: **実装済み(コミットハッシュは公開後に記入)**。Cloudflare 移行の実験用のコード(`spikes/cloudflare`・`scripts/cloudflare-spike`・そのテストとフィクスチャ・`.github/workflows/cloudflare-spike.yml`)を削除した。#285 とは別の Issue(ユーザーの決定)。調査の記録 `docs/investigations/cloudflare-spike/` は残し、冒頭に注記を足した(削除の直前のコミットは `668a7c5`)。本番の束(`worker.js`)は byte 一致。
 - **#291**: 手動の分析だけの日は、先に分析したレースの結果がそろった時点で日報が作られる(後から分析したレースが抜ける)。未決定。10/13 の川崎の分析で実際にどうなったかを見てから、着手するかを決める。
 
 ## ★2026-10-13: 公開・Issue の整理・次の着手順

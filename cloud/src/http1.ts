@@ -5,7 +5,7 @@
  * 範囲を絞っている: GET と POST(Issue #181。本文つき)だけ、`Connection: close` で EOF まで読む前提、**圧縮は要求しない**(`Accept-Encoding` を送らない。
  * 呼び出し側が指定することも禁止する)、1xx の暫定応答・Upgrade・パイプラインは扱わない(不正な入力は例外にする)。
  *
- * 由来: 調査(#160・#162 段階1)の `scripts/cloudflare-spike/http1.ts` を土台に、本番用として作り直した。
+ * 由来: 調査(#160・#162 段階1)の `scripts/cloudflare-spike/http1.ts` を土台に、本番用として作り直した(Issue #290 で削除済み。コミット 668a7c5 に残る)。
  * 調査のコードは参照(import)しない。gzip の展開・計測用のメタ情報は本番には持ち込まない。
  */
 
