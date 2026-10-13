@@ -14,6 +14,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { D1AnalysisStore, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { createAnalysisSink } from "./analysis-sink";
+import { D1BabaStore } from "./baba-repository";
+import { babaUrlStatus, createBabaFetcher } from "./baba-fetch";
 import { createCloudLlm } from "./llm-sender";
 import { createDiscordNotifier, webhookStatus } from "./notify-send";
 import { resolveAppBaseUrl } from "./notify-link";
@@ -55,6 +57,12 @@ export interface RaceDayEnv {
    * https のオリジンだけ有効。未登録・形式不正ならリンクを付けない(通知は送る)。検証済みの値だけを `RaceDayCore` に渡し、材料(`payload_json`)には入れない(送信の直前に足す)。値はログに出さない。
    */
   APP_BASE_URL?: string;
+  /**
+   * 外部の馬場の API(JRA の競馬場の最新の馬場状態。Issue #294)の URL(Worker の secret。**ユーザーがダッシュボードまたは wrangler で登録する**。URL はリポジトリ・チャットに書かない)。
+   * 未登録・https の URL として使えない形なら、取得の段階全体を無効にする(印も書かず、アラームの候補にもしない。分析は従来どおり)。URL は `createBabaFetcher` のクロージャの中にだけあり、`RaceDayCore` には渡らない。
+   * 利用の条件は「JRA の開催日に、利用者全体で 1 日 1 回」。
+   */
+  BABA_API_URL?: string;
   NETKEIBA_GATE: {
     idFromName(name: string): any;
     get(id: any): Required<GateLike> & { status(): Promise<GateStatus> };
@@ -78,6 +86,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
     const gate = env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
     if (webhookStatus(env.DISCORD_WEBHOOK_URL) === "invalid") {
       console.warn("DISCORD_WEBHOOK_URL の形式が Discord の Webhook ではないため、通知は送りません(値は出しません)");
+    }
+    if (babaUrlStatus(env.BABA_API_URL) === "invalid") {
+      console.warn("BABA_API_URL の形式が https の URL ではないため、馬場の API の取得は行いません(値は出しません)");
     }
     const appBase = resolveAppBaseUrl(env.APP_BASE_URL);
     if (appBase.status === "invalid") {
@@ -117,6 +128,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 各馬の戦績の蓄積先(Issue #256 段階A。D1 の horse_runs・horse_run_saves〈migration 0014〉)。事前分析の計算ステップの末尾だけで保存する(取得は増やさない)。
       // 失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
       horseRunsStore: new D1HorseRunsStore({ db: env.DB }),
+      // 馬場の API の取得(Issue #294)。secret が未登録・形式不正なら undefined(取得の段階全体が無効)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(baba_fetches・baba_conditions〈migration 0017〉)。
+      fetchBaba: createBabaFetcher(env.BABA_API_URL),
+      babaStore: new D1BabaStore({ db: env.DB }),
       // 日報の作成の依頼(Issue #235)。DAILY_REPORT が無い構成では渡さない(依頼しない)。
       ...(requestReport === undefined ? {} : { requestReport }),
       loadSettings: async () => {

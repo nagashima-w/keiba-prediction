@@ -120,6 +120,7 @@ import {
 } from "./race-day-result";
 import type { ResultRepository } from "./result-repository";
 import { requireCacheKeyForPost } from "./post-cache-guard";
+import { BabaStage, type BabaFetcher, type BabaStepOutcome, type BabaStore } from "./race-day-baba";
 import { NAR_TRIFECTA_AXES_PER_STEP, NarTrifectaStore } from "./race-day-nar-trifecta";
 import { PLAN_VENUES, PlanStore, type PlanRowRecord, type PlanSkipReason, type PlanVenue } from "./race-day-plan";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
@@ -208,6 +209,11 @@ export interface AlarmInputs {
    * 省略・null は候補なし。タスクがあるあいだに入れない理由: `pickNext` は再試行待ちのタスクを時刻を見ずに返すので、結果の候補で起きると、再試行の間隔を無効にして撃ち直してしまう。
    */
   readonly resultAtMs?: number | null;
+  /**
+   * 馬場の API の取得(Issue #294)の期限({@link BabaStage.dueAtMs})。**前夜のうちから**翌朝の期限で入る(過去は now)。取得の印があれば null(取得の後に候補が残って、即時のアラームが続かない)。
+   * 省略・null は候補なし(取得口が無い構成・中央の開催日でない日・既存の呼び出し)。
+   */
+  readonly babaAtMs?: number | null;
 }
 
 /**
@@ -237,6 +243,9 @@ export function nextAlarmAt(i: AlarmInputs): number | null {
   }
   if (i.resultAtMs !== undefined && i.resultAtMs !== null) {
     candidates.push(Math.max(i.resultAtMs, i.nowMs));
+  }
+  if (i.babaAtMs !== undefined && i.babaAtMs !== null) {
+    candidates.push(Math.max(i.babaAtMs, i.nowMs));
   }
   if (i.purgeDueMs !== null && !i.immediateWork && !i.retryWork) {
     candidates.push(Math.max(i.purgeDueMs, i.nowMs));
@@ -341,6 +350,13 @@ export interface RaceDayDeps {
    * 成功したら依頼済みの印を書く(以降は呼ばない)。失敗は固定の警告だけを残し、印を書かない(次の起床で再び依頼する)。
    */
   readonly requestReport?: (kaisaiDate: string) => Promise<void>;
+  /**
+   * 馬場の API の取得口(Issue #294〈#293-A〉。DO のラッパが、Worker の secret `BABA_API_URL` から作る)。**URL そのものは持たない**(本文を返す関数だけ。URL が状態・ログに入る経路を作らない)。
+   * **未登録・形式不正なら渡さない**: 取得の段階全体が無効(印も書かず、アラームの候補にもしない)。`babaStore` と両方があるときだけ動く。
+   */
+  readonly fetchBaba?: BabaFetcher;
+  /** 馬場の API の取得の試み・結果の保存先(本番は D1 の `baba_fetches`・`baba_conditions`〈migration 0017〉)。 */
+  readonly babaStore?: BabaStore;
 }
 
 export interface ScheduleInput {
@@ -392,7 +408,9 @@ export type StepOutcome =
   /**
    * 結果の取り込みの 1 ステップ(Issue #208。`mode: "result"`)。`raceId` は取り込んだレース。`ok` は D1 に保存した、`retry` は再試行(保留を含む)、`failed` はこの依頼としては諦めた。
    */
-  | { readonly kind: "ran"; readonly raceId: string; readonly mode: "result"; readonly step: "import"; readonly result: "ok" | "retry" | "failed" };
+  | { readonly kind: "ran"; readonly raceId: string; readonly mode: "result"; readonly step: "import"; readonly result: "ok" | "retry" | "failed" }
+  /** 馬場の API の取得(Issue #294。`mode: "baba"`)。`raceId` は開催日。`ok` は当日の競馬場の値を D1 に保存した、`retry` は試みの記録(D1)の失敗で再試行待ち、`failed` はこの日は取得しない(再試行しない)。 */
+  | BabaStepOutcome;
 
 /** 通知の1件の状態(状態から読める。失敗の分類だけで、URL・メッセージ・本文は持たない。`getNotifications`)。 */
 export interface NotificationRecord {
@@ -659,6 +677,7 @@ export class RaceDayCore {
   private readonly appBaseUrl: string | undefined;
   /** 結果の取り込みの表(Issue #208。新しい表だけ)。 */
   private readonly results: ResultImportStore;
+  private readonly baba: BabaStage;
   /** 結果の保存先。無ければ結果の仕組み全体が無効。 */
   private readonly resultStore: ResultStoreDeps | undefined;
   /** 日報の作成の依頼(Issue #235)。無ければ依頼しない。 */
@@ -714,6 +733,22 @@ export class RaceDayCore {
     this.results = new ResultImportStore(this.sql);
     this.resultStore = deps.resultStore;
     this.requestReport = deps.requestReport;
+    // 馬場の API の取得(Issue #294)。メタは既存の race_day_meta(新しい表は無い)。取得口・保存先が無ければ段階全体が無効。
+    this.baba = new BabaStage({
+      sql: this.sql,
+      now: this.now,
+      fetcher: deps.fetchBaba,
+      store: deps.babaStore,
+      onWarn,
+      facts: () => ({
+        kaisaiDate: this.metaGet("kaisai_date"),
+        planFinalized: this.plan.finalizedAt() !== null,
+        centralListed: this.plan.centralListed(),
+        firstCentralDueMs: this.plan.firstCentralDueMs(),
+      }),
+      retryDelayMs: RETRY_DELAY_MS,
+      maxClaimAttempts: MAX_ATTEMPTS,
+    });
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
     // RaceDay から gate への呼び出しは直列(同時に1本)。HttpClient は間隔 0・再試行 0(間隔制御は gate だけが行う)。
     // 結果のページは同じ HttpClient(同じ直列化した gate)を、キャッシュを通さずに使う(DO の SQLite に結果のページを溜めない。Issue #208)。
@@ -1252,6 +1287,13 @@ export class RaceDayCore {
     const notice = this.notifyPlan().sendNow;
     if (notice !== null) {
       const outcome = await this.runNotifyStep(notice);
+      await this.armAlarm();
+      return outcome;
+    }
+    // 馬場の API の取得(Issue #294)。開催日の朝の 1 回だけ。**タスクより前**: 発走前の分析(LLM)に当日の値を間に合わせる。期限は最初の発走前の分析より前なので、分析を遅らせない。
+    // 動けるのは、取得口・保存先があり、中央の開催日で、今日が開催日で、期限が来ていて、まだ試みていないときだけ({@link BabaStage.runnable})。失敗しても例外にせず、次の起床でタスクが進む。
+    if (this.baba.runnable()) {
+      const outcome = await this.baba.run();
       await this.armAlarm();
       return outcome;
     }
@@ -1852,6 +1894,7 @@ export class RaceDayCore {
       purgeDueMs: purgeText === null ? null : Number(purgeText),
       notifyAtMs: this.earliest(this.notifyPlan().nextAtMs, this.rescueJudgeAtMs()),
       resultAtMs: this.resultsRunnable() ? this.results.nextTryAtMs() : null,
+      babaAtMs: this.baba.dueAtMs(),
     });
     if (at !== null) {
       await this.setAlarm(at);

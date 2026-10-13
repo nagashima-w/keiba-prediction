@@ -268,3 +268,22 @@ describe("rearm: 古い掃除の期限があっても、仕事のあいだは再
     expect(h.alarm.at).toBe(h.clock.now + RETRY_DELAY_MS);
   });
 });
+
+describe("アラームの合成: nextAlarmAt の馬場の API の取得の候補(Issue #294)", () => {
+  it("取得の候補だけなら、その時刻(過去は now)。省略・null は候補なし", () => {
+    expect(nextAlarmAt({ ...base, babaAtMs: NOW + 5_000 })).toBe(NOW + 5_000);
+    expect(nextAlarmAt({ ...base, babaAtMs: NOW - 5_000 })).toBe(NOW);
+    expect(nextAlarmAt({ ...base, babaAtMs: null })).toBeNull();
+    expect(nextAlarmAt(base)).toBeNull();
+  });
+
+  it("他の候補との最小を取る(max ではない)", () => {
+    expect(nextAlarmAt({ ...base, babaAtMs: NOW + 1_000, planNextDueMs: NOW + 9_000 })).toBe(NOW + 1_000);
+    expect(nextAlarmAt({ ...base, babaAtMs: NOW + 9_000, planNextDueMs: NOW + 1_000 })).toBe(NOW + 1_000);
+    expect(nextAlarmAt({ ...base, babaAtMs: NOW + 9_000, purgeDueMs: NOW + 1_000 })).toBe(NOW + 1_000);
+  });
+
+  it("再試行待ちの仕事があっても、取得の時刻が来ていれば候補に入る(再試行の間隔を待たない)", () => {
+    expect(nextAlarmAt({ ...base, retryWork: true, babaAtMs: NOW })).toBe(NOW);
+  });
+});

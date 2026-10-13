@@ -349,6 +349,18 @@ export class PlanStore {
       .toArray() as { race_id: string; start_ms: number }[];
   }
 
+  /** 中央の一覧が取得できて 1 件以上ある(= JRA の開催日)か。取得できなかった会場・救済で戻した会場は false(`listed` が NULL)。馬場の API の取得(Issue #294)の条件。 */
+  centralListed(): boolean {
+    const rows = this.sql.exec("SELECT state, listed FROM race_day_plan_venue WHERE venue = 'central'").toArray() as { state: string; listed: number | null }[];
+    return rows[0]?.state === "ok" && (rows[0].listed ?? 0) > 0;
+  }
+
+  /** 中央の計画の行のうち、最も早い発走前の分析の期限(エポックミリ秒)。期限のある行が無ければ null。馬場の API の取得(Issue #294)の期限の上限に使う。 */
+  firstCentralDueMs(): number | null {
+    const rows = this.sql.exec("SELECT MIN(due_ms) AS at FROM race_day_plan WHERE venue = 'central' AND due_ms IS NOT NULL").toArray() as { at: number | null }[];
+    return rows[0]?.at ?? null;
+  }
+
   plannedCount(): number {
     return (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_plan WHERE state = 'planned'").toArray() as { n: number }[])[0]?.n ?? 0;
   }

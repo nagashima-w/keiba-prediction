@@ -638,3 +638,28 @@ describe("通知(Discord)のバンドル(Issue #205)", () => {
     120_000,
   );
 });
+
+/**
+ * Issue #294(#293-A): 馬場の API の取得の配線。本番のバンドル(worker.ts)に、RaceDay の取得口の配線の行そのもの(`fetchBaba: createBabaFetcher(env.BABA_API_URL)`)・保存先の配線・取得の段階(DO の状態のキー)・
+ * 保存先の表の名前が入っていること。配線が外れると、secret を登録しても何も起きない(静かに止まる)ので、行そのものを検査する。
+ */
+describe("馬場の API の取得のバンドル(Issue #294)", () => {
+  const FETCHER_WIRING_LINE = "fetchBaba: createBabaFetcher(env.BABA_API_URL)";
+  const STORE_WIRING_LINE = "babaStore: new D1BabaStore({ db: env.DB })";
+
+  it(
+    "本番のバンドルに、取得口・保存先の配線の行・取得の段階の状態のキー・表の名前があり、handler.ts には配線が無い",
+    () => {
+      const doSource = readFileSync(path.join(CLOUD, "src", "race-day-do.ts"), "utf-8");
+      const handlerSource = readFileSync(path.join(CLOUD, "src", "handler.ts"), "utf-8");
+      expect(doSource.includes(FETCHER_WIRING_LINE), "race-day-do.ts に取得口の配線の行がある").toBe(true);
+      expect(doSource.includes(STORE_WIRING_LINE), "race-day-do.ts に保存先の配線の行がある").toBe(true);
+      expect(handlerSource.includes("BABA_API_URL"), "handler.ts は馬場の API の secret を読まない").toBe(false);
+      const code = bundle(null, "worker.js");
+      for (const marker of [FETCHER_WIRING_LINE, STORE_WIRING_LINE, "baba_attempted_at", "INSERT INTO baba_fetches", "INSERT INTO baba_conditions"]) {
+        expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
+      }
+    },
+    120_000,
+  );
+});

@@ -1377,3 +1377,103 @@ describe("Issue #279・#280: 月報(MonthlyReportDO)は netkeiba に出ず、LLM
     expect(offenders).toEqual([]);
   });
 });
+
+describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所だけで読み、core・純ロジックは外向きの通信も URL も持たず、D1 の書き込みは 3 文だけ", () => {
+  const srcDir = path.join(ROOT, "cloud", "src");
+  const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
+  const code = (f: string): string => stripCode(readTextLf("cloud", "src", f));
+  const sites = (pattern: RegExp): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const f of srcFiles) {
+      const n = (code(f).match(pattern) ?? []).length;
+      if (n > 0) out[f] = n;
+    }
+    return out;
+  };
+  /** 馬場の API に関わるソース(取得の部品・純ロジック・保存先・段階)。 */
+  const babaSources = ["baba-conditions.ts", "baba-fetch.ts", "baba-repository.ts", "race-day-baba.ts"];
+
+  it("前提: 馬場のソースと core を実際に読めている(以降の検査が空振りでない)", () => {
+    for (const f of [...babaSources, "race-day-core.ts", "race-day-do.ts"]) {
+      expect(code(f).length, `${f} を読めている`).toBeGreaterThan(500);
+    }
+  });
+
+  it("secret の名前 BABA_API_URL が現れるのは race-day-do.ts だけ(型の宣言 1 + 形式の確認 1 + 取得口の作成 1 + 形式不正の警告の文言 1)。ほかのソースには現れない。wrangler.toml の [vars] にも置かない", () => {
+    expect(sites(/\bBABA_API_URL\b/g)).toEqual({ "race-day-do.ts": 4 });
+    expect((code("race-day-do.ts").match(/\benv\.BABA_API_URL\b/g) ?? []).length).toBe(2);
+    expect(code("race-day-do.ts")).toContain("fetchBaba: createBabaFetcher(env.BABA_API_URL)");
+    expect(tomlCode).not.toMatch(/BABA/);
+  });
+
+  it("取得口を作る createBabaFetcher の呼び出しは race-day-do.ts の 1 箇所だけ", () => {
+    expect(sites(/(?<!function\s)\bcreateBabaFetcher\(/g)).toEqual({ "race-day-do.ts": 1 });
+  });
+
+  it("グローバルの fetch を呼ぶのは baba-fetch.ts の 1 箇所(注入できる既定)だけ。core・段階・純ロジック・保存先には外向きの通信が無い", () => {
+    expect((code("baba-fetch.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
+    for (const f of ["baba-conditions.ts", "baba-repository.ts", "race-day-baba.ts", "race-day-core.ts"]) {
+      expect((code(f).match(/(^|[^.\w])fetch\(/g) ?? []).length, `${f} にグローバルの fetch が無い`).toBe(0);
+      expect(code(f), `${f} に .fetch( が無い`).not.toMatch(/\.fetch\(/);
+    }
+  });
+
+  it("リダイレクトを追わない(redirect: manual)。再試行の仕組み(retry・リトライのループ)を持たない: 取得口の fetch は 1 回の呼び出しに 1 回", () => {
+    const fetchCode = code("baba-fetch.ts");
+    expect(fetchCode).toContain('redirect: "manual"');
+    expect((fetchCode.match(/await fetchFn\(/g) ?? []).length).toBe(1);
+    expect(fetchCode).not.toMatch(/\b(for|while)\b[^\n]*fetchFn/);
+  });
+
+  it("馬場のソースに URL のリテラル(http(s)://…)が無い。外部の API の宛先は secret にだけある", () => {
+    for (const f of babaSources) {
+      expect(code(f), `${f} に URL のリテラルが無い`).not.toMatch(/https?:\/\//);
+    }
+    for (const f of ["race-day-core.ts"]) {
+      expect(code(f), `${f} に馬場の API の URL が無い`).not.toMatch(/baba[^\n]*https?:\/\//i);
+    }
+  });
+
+  it("D1 の書き込みは baba-repository.ts の 3 文だけ(claim の INSERT・結果の UPDATE・競馬場の INSERT)。DELETE は無い", () => {
+    const repo = code("baba-repository.ts");
+    expect((repo.match(/INSERT INTO baba_fetches/g) ?? []).length).toBe(1);
+    expect((repo.match(/UPDATE baba_fetches/g) ?? []).length).toBe(1);
+    expect((repo.match(/INSERT INTO baba_conditions/g) ?? []).length).toBe(1);
+    expect(repo).not.toMatch(/\bDELETE\b|\bREPLACE\b/);
+    expect(repo).toContain("ON CONFLICT (kaisai_date) DO NOTHING");
+    // 表を書くのはこのファイルだけ
+    expect(sites(/\b(INSERT INTO|UPDATE|DELETE FROM)\s+baba_(fetches|conditions)\b/g)).toEqual({ "baba-repository.ts": 3 });
+  });
+
+  it("取得の段階(BabaStage)を使うのは race-day-core.ts だけ。runNextStep では通知の後・タスクの前に 1 箇所、アラームの合成で 1 箇所(期限の候補)", () => {
+    expect(sites(/\bBabaStage\b/g)).toEqual({ "race-day-baba.ts": 1, "race-day-core.ts": 3 }); // core: import・フィールドの型・new
+    const core = code("race-day-core.ts");
+    expect((core.match(/this\.baba\.runnable\(\)/g) ?? []).length).toBe(1);
+    expect((core.match(/this\.baba\.run\(\)/g) ?? []).length).toBe(1);
+    expect((core.match(/this\.baba\.dueAtMs\(\)/g) ?? []).length).toBe(1);
+    const notify = core.indexOf("const notice = this.notifyPlan().sendNow;");
+    const baba = core.indexOf("this.baba.runnable()");
+    const pick = core.indexOf("const next = this.pickNext();");
+    expect(notify).toBeGreaterThan(-1);
+    expect(baba).toBeGreaterThan(notify);
+    expect(pick).toBeGreaterThan(baba);
+  });
+
+  it("他の DO・cron・日報・月報は、馬場の API の取得を参照しない(アラームは DO ごとに 1 つ。干渉しない)", () => {
+    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["race-day-core.ts", "race-day-do.ts", "race-day-plan.ts"].includes(n))) {
+      expect(code(f), `${f} は馬場の API を参照しない`).not.toMatch(/baba-(conditions|fetch|repository)|race-day-baba|BabaStage|BABA_API_URL/);
+    }
+  });
+
+  it("deploy-cloud.yml は BABA_API_URL を必須の secret にしない(任意の secret。未登録なら機能が止まるだけ)", () => {
+    expect(readTextLf(".github", "workflows", "deploy-cloud.yml")).not.toMatch(/BABA/);
+  });
+
+  it("migration 0017 は baba_fetches・baba_conditions の 2 表だけを作る", () => {
+    const sql = readTextLf("cloud", "migrations", "0017_baba.sql")
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("--"))
+      .join("\n");
+    expect([...sql.matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1])).toEqual(["baba_fetches", "baba_conditions"]);
+  });
+});
