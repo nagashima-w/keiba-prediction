@@ -5,8 +5,9 @@
  * 配線するだけの薄いラッパ(`cloudflare:workers` を持つため、テストでは import できない)。
  *
  * 呼び出す入口は、手動の `POST /api/analyses/run`(#180)と、cron の `scheduled`(#206。`requestPlan`)、結果の取り込みの依頼(#208。`requestResultImport`。cron の `scheduled` と手動の `POST /api/results/import` が `dispatchResultImports` 経由で呼ぶ)。この DO は `worker.ts` から export される(wrangler が binding のクラスを要求する)。
- * **朝のタスクは D1・R2 に触れない**(朝の prior は DO のストレージにだけ置く)。発走前の分析(`pre_race`。#178)だけが、D1(設定の読み出し・分析の要約)と
- * R2(詳細)を使う。結果の取り込み(#208)は D1 に結果を保存する(`D1ResultStore`。取得は gate 経由・キャッシュなし)。
+ * **朝のタスクは、分析の結果(prior)を D1・R2 に書かない**(DO のストレージにだけ置く)。朝のタスクが D1 に触れるのは、設定の読み出し(#218)・
+ * 騎手の成績の保存先 `jockey_results`(#226)・各馬の戦績の蓄積 `horse_runs`(#256 段階A)だけで、R2 には触れない。分析履歴(D1 の要約と R2 の詳細)を保存するのは
+ * 発走前の分析(`pre_race`。#178)だけ。結果の取り込み(#208)は D1 に結果を保存する(`D1ResultStore`。取得は gate 経由・キャッシュなし)。
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v2)に固定される。
  */
@@ -34,7 +35,7 @@ export const R2_PUT_TIMEOUT_MS = 15_000;
 
 /**
  * RaceDay が使う binding。NetkeibaGate の名前空間(取得)と、**発走前の分析(`pre_race`)の保存先・設定の D1・R2**(Issue #178)。
- * 朝のタスクは D1・R2 に触れない(`RaceDayCore` が、朝のタスクでは保存先と設定を一切呼ばない)。
+ * 朝のタスクは、この保存先(分析履歴の D1・R2)を呼ばない(`RaceDayCore` が朝のタスクでは `save` を呼ばない)。朝のタスクが D1 に触れるのは、設定の読み出し・騎手の成績・各馬の戦績だけ(上の冒頭の説明)。
  */
 export interface RaceDayEnv {
   DB: AnalysisDb & Pick<D1Database, "prepare">;
@@ -108,7 +109,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       notifier: createDiscordNotifier(env.DISCORD_WEBHOOK_URL),
       // 通知のリンクの基点(Issue #230)。検証済みのオリジンだけを渡す(未登録・形式不正は undefined = リンクなしで通知する)。
       appBaseUrl: appBase.status === "valid" ? appBase.origin : undefined,
-      // 結果の取り込み(Issue #208)。D1 に結果を保存する（exe の AnalysisStore.saveResult と同じ 4 表。1 レース 1 batch・最大 5 文）。
+      // 結果の取り込み(Issue #208)。D1 に結果を保存する（exe の AnalysisStore.saveResult と同じ 4 表。1 レース 1 batch・最大 6 文）。
       resultStore: new D1ResultStore({ db: env.DB }),
       // 騎手の年ごとの成績の保存先(Issue #226。D1 の jockey_results〈migration 0012〉)。日をまたいで共有し、取得日時から 7 日以内なら netkeiba に出ない(週に 1 回の更新)。
       // 読み書きの失敗は取得へフォールバックする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。

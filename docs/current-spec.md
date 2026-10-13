@@ -223,7 +223,7 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
 - **戦績から出走しなかった行(除外・取消)を除く(Issue #261)**: netkeiba の戦績には、除外・取消になったレースの行も残る
   (着順セルが「除」「取」。オッズ・人気・通過順・上りは空で、**ペース欄にはそのレース全体の前後半3Fが入る**)。これを1走として数えると、
   過去ペース傾向(「後傾(先行有利)1回」)・レース間隔・前走騎手・馬体重推移・ローテーション適性(3着内率)に、走っていないレースが混ざる。
-  実例は東京5R(2026-10-11・2歳新馬)の 3 番 マイネルユンフェン(10/04 の東京2R で除外)。`scrapeRace` が戦績を取得した直後に
+  実例は東京5R(2026-10-11・2歳新馬)の 3 番 マイネルユンフェン(10/04 の東京5R〈4回東京2日目〉で除外)。`scrapeRace` が戦績を取得した直後に
   `excludeNonStartResults`(`parse-horse-results.ts`)で除く(出走取消の馬を出走馬から除く #154 と同じく、分析日に依らない事実なので scraper で除く)。
   判定は `isNonStartResult`: 着順が非数値で、文字列が「除」または「取」で始まる行。「中」(中止)・「失」(失格)・数値順位・降着・着順が空の行は残す。
   **観測したのは「除」だけ**(実物の応答は `fixtures/horse_results_2024103584.json`)で、「取」は未観測のため先頭一致で受ける。除外の行だけの馬は
@@ -251,7 +251,7 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   自レース16走・施行日より後5走)。`runAnalysis`(`analysis-pipeline.ts`)は **scrape 直後の1点**で
   戦績を絞り、以降の消費箇所(prior・LLMプロンプト入力〈runs・条件替わり・馬体重推移・人気着順乖離・
   乗り替わり・着差傾向・休養間隔〉・結果行の `careerRunCount`・条件替わりタグ)はすべて絞った戦績を使う。
-  scraper では絞らない(生の戦績が必要な用途があるため)。絞り方は次の2つ(`scorer/snapshot-filter.ts`)。
+  scraper では、出走した行の戦績までしか絞らない(非出走の行を除いたうえでの戦績。日付の絞り込みは分析日に依るので scraper では行わない)。絞り方は次の2つ(`scorer/snapshot-filter.ts`)。
   - `excludeOwnRaceResults`: **当該 raceId の走を日付に依らず除外**する。比較は `HorseRaceResult.raceIdRaw`
     (中央・地方とも12桁の生値)で行う。`raceId` フィールドは地方では常に null のため使わない。
   - `filterRaceDataBefore`: 基準日(`analysisDate`)**と同日以降**の走と、**日付欠損・不正形式の走**を
@@ -503,9 +503,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     「馬連/馬単/三連単/枠連の設定を記録していない」であり、0(OFF)に丸めない〈#31〉。
     **v1.15.1〈#150〉で保存された記録は枠連の買い目行を持ちうるが、`include_bracket_quinella`は
     NULLのままで、過去分析の再表示では「枠連: 記録なし」と出る。買い目行からONと推定する
-    バックフィルはしない〈#31〉**)、経路ごとに実際に使われた既定値4列
+    バックフィルはしない〈#31〉**)、経路ごとに実際に使われた既定値5列
     (`bet_unit`/`greedy_steps`/`candidate_cap`/`model_id`+`model_approximate`。複勝のみ経路には
-    `candidate_cap`が存在しないため常にnull、coreの配分計算に未到達の経路は4列とも null)、
+    `candidate_cap`が存在しないため常にnull、coreの配分計算に未到達の経路は5列とも null)、
     `odds_status` を持つ。
   - `analysis_bets`(`analysis_id`/`bet_type`/`combo_key`複合主キー・`analyses`へのFK):
     実際に配分された(`stake>0`の)買い目の明細のみを保存する(点数・総額は
@@ -726,10 +726,10 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   - 総資金と1レース上限を分けているのは、**ケリー基準の資金は本来「総資金」**であり、1レースの予算を
     そのまま渡すと配分が予算の数%にしかならないため。上限は「これ以上は賭けない」という歯止めとして働く。
   - 上限に届くかは妙味の大きさに依存する。上限を使い切るのに必要な総資金は上限の `1/(λ·Σx*)` 倍で、
-    `Σx*` がレースごとに大きく変わるためこの倍率も大きく変動する(16頭立て・EV1.14 の候補2頭という
-    実測例では `Σx*=8.1%` すなわち約25倍だったが、候補が少なく退化するケースでは `Σx*` が 1 に近づき
-    倍率は `1/λ` = 2倍まで下がる)。**注記: この 8.1% は特定の合成入力による実測値であり、自動テストで
-    守られていない**(入力を再現するテストの追加は別タスク。この数値をそのまま引用しないこと)。
+    `Σx*` がレースごとに大きく変わるためこの倍率も大きく変動する(候補が少なく退化するケースでは `Σx*` が
+    1 に近づき、倍率は `1/λ` = 2倍〈λ の既定 0.5〉まで下がる)。**特定のレースの `Σx*` や倍率の実測値は、
+    再現できる入力がリポジトリに無いので書かない**(かつて書いていた「16頭立て・候補2頭で `Σx*=8.1%`、約25倍」は
+    入力が残っておらず、既定モデルも条件付きベルヌーイから Plackett-Luce に替わって、再現も検証もできないため削除した。Issue #17)。
     **普遍的な倍率は存在しないため UI に固定倍率を書いてはならない。**
     代わりに**そのレースのケリー適正額と上限を併記してどちらが効いたかを示す**。
 - **入力の防御**: `bankroll` / `perRaceCap` の非有限・0以下は**計算に入る前に0へクランプ**する
@@ -1223,7 +1223,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **未実装**: 保存の**呼び出し元**(#164。分析履歴のストア本体〈`D1AnalysisStore`〉は #175 で実装済み)・分析の実行(#164)・R2 の操作回数の安全柵(#173)・取得キャッシュ(#170)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
 
 ### D1(分析履歴)の土台(#171〈#169-a〉。v1.19.7)
-クラウド版の分析履歴の保存先 D1 の**土台だけ**(migration・binding・CI・health)。保存・読み取りのロジック(`D1AnalysisStore`)と R2 は #172、R2 の操作回数の安全柵は #173
+クラウド版の分析履歴の保存先 D1 の**土台だけ**(migration・binding・CI・health)。保存・読み取りのロジック(`D1AnalysisStore`)と R2 は #172(のちに #174〈R2 の土台〉と #175〈ストア本体〉に分割して実装済み。下の各節)、R2 の操作回数の安全柵は #173(実装済み。下の節)
 (#169 を #171・#172・#173 に3分割。exe のアプリコードは無変更)。
 - **migration**(`cloud/migrations/`): `0001_init.sql` は exe の `new AnalysisStore()` 後の `sqlite_master` のダンプ(8表と `idx_analyses_race`。**#197 までは生成スクリプト
   `scripts/gen-cloud-d1-migration.ts` の生成物。いまは凍結**)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key TEXT`〈R2 のキー〉・索引 `analyses(kaisai_date)`・`analyses(prompt_version, race_id)`)。
@@ -1600,7 +1600,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **core(exe と共有)**: `saveResult` の SQL・束縛値の組み立て・`planComboWrites`(`undetermined`・省略の券種には触れない)・`toStoredPassing`・`toStoredCourseType`・`toRaceResultDetail` を `analysis-store-codec.ts` に出した(`AnalysisStore` はそれを使う。発行する SQL の列は従来と同じで、`analysis-store-result-sql-sequence.test.ts` が固定する)。
   `toResultEntries`・`importRaceResult`・`summarizeImport` を app から core の `ev/result-import.ts` へ移した(app の `result-import.ts` は re-export。#168 と同じ型)。`ImportResultDeps.saveResult` の戻り値は `void | Promise<void>`(await する。reject は伝播)。
 - **`cloud/src/result-repository.ts` の `D1ResultStore`**:
-  - `saveResult(raceId, entries, courseType?, comboPayouts?)`: **1 回の `batch`・最大 5 文**(馬・面・組合せの DELETE・INSERT・マーカー。`json_each`)。文の数は馬・券種・払戻の行数に依らず一定で、**1 文のバインドの上限(100)を超えない**(18 頭 × 7 列 = 126 を超えるため馬を 1 行ずつ束縛しない)。`undetermined`・券種の省略は、その券種の行・マーカーに触れない。`parsed` で払戻 0 件はマーカーだけ。
+  - `saveResult(raceId, entries, courseType?, comboPayouts?)`: **1 回の `batch`・最大 6 文**(馬・単勝オッズ/人気〈#259。オッズか人気を持つ馬がいるときだけ〉・面・組合せの DELETE・INSERT・マーカー。`json_each`。オッズ・人気が無ければ最大 5 文。枠番〈#269〉は馬の文の束縛値に足すだけで、文は増えない)。文の数は馬・券種・払戻の行数に依らず一定で、**1 文のバインドの上限(100)を超えない**(18 頭 × 7 列 = 126 を超えるため馬を 1 行ずつ束縛しない)。`undetermined`・券種の省略は、その券種の行・マーカーに触れない。`parsed` で払戻 0 件はマーカーだけ。
   - `getRaceResultDetails(ids)`: 前のレース分を **1 回の batch(馬・面の 2 文)**で読み、`Map` で返す(`runAnalysis` の `getRaceResultDetails` にそのまま渡せる形)。結果の行が無いレースは入れない。ids が空なら D1 に発行しない。
   - `listUnimportedRaces({ from, to, limit })`: 分析済み(`analyses` に行がある)で結果の行が 1 件も無い(`NOT EXISTS`)レースを、開催日 `[from, to]`(両端を含む。`kaisai_date` が NULL の分析は入らない)で、(開催日, レースID)の昇順に最大 `limit` 件(1〜200)。全頭が中止・除外のレースは「取り込み済み」。
 - **検査**: 共有 golden(`packages/core/test/golden/race-result-contract.json`。生成は `scripts/gen-race-result-contract.ts`)で、同じ入力から exe の `AnalysisStore.saveResult` と D1 の 4 表のダンプ・`getRaceResultDetail` の復元結果が同じことを固定(7 ケース。18 頭・全 6 券種・再保存・全頭中止・`undetermined`・壊れた通過順と未知の面)。実フィクスチャ(中央 8・地方 6)を `importRaceResult` → `D1ResultStore` に通す往復。`result-repository-bundle.test.ts` が、まだ本番の入口に無いこのコードが Worker にバンドルできること(better-sqlite3 を巻き込まない)を固定する。
@@ -1608,7 +1608,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 
 ### クラウド版の結果の自動取り込み(#208〈#182-B〉。v1.21.7。**公開すると、次の cron から本番で動く**。Issue #249 以降は 23:00 JST の再実行で動く)
 #182 の主目的(分析と結果を同じ DB にそろえる)。過去の開催日の結果(着順・払戻)を netkeiba から取得して D1 に保存する。保存の形は exe と同じ(#207)。当日中の取り込みと当日傾向は #209(次の節)。LLM・課金は増えない。
-- **取り込みの単位**(`RaceDayCore.runResultStep`): 日単位の DO(`RaceDay`)が、**アラームの 1 ステップにつき 1 レース**を取り込む。取得は gate 経由・**キャッシュを通さない**生の `HttpClient`(結果のページを DO の SQLite に溜めない)、保存は `D1ResultStore.saveResult`(1 レース 1 batch・最大 5 文)。core の `importRaceResult` を、`parse` を包んで使う。
+- **取り込みの単位**(`RaceDayCore.runResultStep`): 日単位の DO(`RaceDay`)が、**アラームの 1 ステップにつき 1 レース**を取り込む。取得は gate 経由・**キャッシュを通さない**生の `HttpClient`(結果のページを DO の SQLite に溜めない)、保存は `D1ResultStore.saveResult`(1 レース 1 batch・最大 6 文〈オッズ・人気が無ければ 5 文〉)。core の `importRaceResult` を、`parse` を包んで使う。
   **払戻のテーブルが出てから保存する**: 単勝の払戻が 0 件(着順の行はあるが払戻が無い = 審議中の暫定の着順)なら保存しない。未確定(結果の行が無い)・構造の異常・取得の失敗・保存の失敗も保存せず再試行する。**1 回の依頼につき 3 試行・間隔 10 分**で、上限で諦める(`gave_up`)。試行回数は取得の前に永続化する。
   gate の拒否は試行に数えない**保留**: `queue-full`(待ち行列が上限)は 60 秒後、`blocked`(ブレーカー)は解除時刻の 1 秒後(分からなければ 60 秒後。待つのは最大 60 分)に再試行する。保留は 5 回まで(6 回目で諦める)。許可リスト外(`disallowed-url`)は即座に諦める。
 - **状態は新しい表**: `race_day_result`(1 レース 1 行。`state` は `queued`〈再試行待ちを含む〉・`imported`・`gave_up`。試行・保留・次の試行の時刻・依頼の日・直近の分類)。`race_day_tasks` には入れない(1 日の上限 100 を食うため)。1 日の行数の上限は 120。既存の表には ALTER しない。
@@ -1622,7 +1622,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **cron**(`scheduled.ts`): `requestPlan` のあとに、JST の今日の前日までの 7 日(**今日は含めない**)を窓にして `dispatchResultImports` を呼ぶ。**`requestPlan` の成否によらず走らせ、結果の依頼の失敗は `requestPlan` を失敗させない**(投げるのは `requestPlan` が 3 回失敗したときだけ)。D1 は列挙の読み取り 1 クエリだけ。
 - **手動の取り込み `POST /api/results/import`**: 本文 JSON `{ "from": "YYYYMMDD", "to": "YYYYMMDD" }`(JST の開催日。両端を含む)。窓(7 日)より古いぶんの取り込み用。認証・Origin・Content-Type(415)・本文 1 KiB(413)・JSON(400)は `/api/analyses/run` と同じ(`readJsonObjectBody`)。検証(400): 未知のキー・日付の形と実在・`from ≤ to`・**`to` は今日より前**・範囲は両端を含めて **31 日以内**。応答は **202** `{ ok, listed, days, accepted, failed_days }`(件数だけ)。D1 の列挙の失敗、または依頼した日のすべてで DO が失敗したときは **503**(文面なし)。続きが必要なら同じ範囲でもう一度呼ぶ。
 - **観測**: `GET /api/plan?kaisai_date=` の応答に `result_import: { total, queued, imported, gave_up, races: [{ race_id, state, attempts, deferrals, requested_on, next_try_at, last_class, updated_at }] }` を足した(許可リスト・固定の語と数値だけ)。RPC `getResultImportProgress`(読み取り専用)。
-- **D1 の「1 回の呼び出しで 50 クエリ」との関係**: Worker(cron・POST)の D1 は列挙の 1 クエリだけ(日ごとに引かない)。DO のアラームの 1 ステップの D1 は 1 レースの保存(最大 5 文)だけ。
+- **D1 の「1 回の呼び出しで 50 クエリ」との関係**: Worker(cron・POST)の D1 は列挙の 1 クエリだけ(日ごとに引かない)。DO のアラームの 1 ステップの D1 は 1 レースの保存(最大 6 文〈オッズ・人気が無ければ 5 文〉)だけ。
 - **検査**: cloud `race-day-result.test.ts`(依頼の判定表・払戻なし/未確定/構造異常/取得失敗/保存失敗・3 試行で諦める・保留・優先度・fuzz)・`result-dispatch.test.ts`(窓の計算・日数の上限・失敗の扱い・同時に gate に並ぶ呼び出しの最大数)・`result-repository.test.ts`(1 クエリ版の列挙・EXPLAIN)・`scheduled.test.ts`・`handler-results.test.ts`・`handler-plan.test.ts`・`handler-json-guard.test.ts`・`race-day-rpc-surface.test.ts`、scripts `cloud-config-guard.test.ts`(取得の起点の呼び出し箇所 5 つ・POST のルート 3 つ・結果の取得が gate 経由の 1 本だけ)、smoke(構成 F の末尾: cron の発火 → 偽ソケットの結果ページ → 取り込み済み・D1 に 16 頭・重複配信で状態不変・手動 POST・地方の未確定)。
 - **【記録】**:
   - 当日の計画が確定しないまま止まる(会場の一覧・確定が終わらない)と、その日の結果は取り込まれない。`GET /api/plan` の `plan.stage`・`result_import.queued` で見える(#209 で、条件を `hasPlanWork` から `planStageSettled` に緩めた。期限を待つ planned の行は止めない)。

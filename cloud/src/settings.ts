@@ -83,7 +83,7 @@ export interface CloudSettings extends Readonly<Record<ScoringWeightField, numbe
   readonly perRaceCap: number;
   /** ケリー係数(0〜1)。 */
   readonly kellyFraction: number;
-  /** ワイド・3連複・馬連・馬単・三連単〈中央〉・枠連のオッズを取得するか。 */
+  /** ワイド・3連複・馬連・馬単・三連単〈中央・地方。地方は Issue #283 から〉・枠連のオッズを取得するか。 */
   readonly includeComboOdds: boolean;
   readonly includeWideInAllocation: boolean;
   readonly includeTrioInAllocation: boolean;

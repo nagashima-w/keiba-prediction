@@ -1973,7 +1973,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
 
   /**
    * coreの配分計算に未到達な経路(unset/yoso/unavailable/invalid)のメタ行を組み立てる
-   * (実効値4列が実際にnullになる形。allocation-record.tsの実際の書き込み内容に合わせる)。
+   * (実効値5列が実際にnullになる形。allocation-record.tsの実際の書き込み内容に合わせる)。
    */
   function unreachedAllocationMeta(route: string): AnalysisAllocationMetaRecord {
     return allocationMeta({

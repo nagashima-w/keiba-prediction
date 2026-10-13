@@ -582,3 +582,30 @@ describe("地方三連単の段階: 騎手の補正を落とさない・上限�
     expect(s1.urls.length).toBeLessThan(2 * 16 + 4 + 16); // 上限が無ければ騎手 16 人全員(52 本)になる。上限 40 で止まっている
   });
 });
+
+describe("地方三連単の段階: 掃除のアラームで孤立した行を消す(Issue #283 のレビューの記録。wakeWithoutWork の配線)", () => {
+  const ORPHAN_RACE = "202654071299";
+
+  it("掃除の時刻になった起床(仕事が無い)で、進行中でないレースの段階の行を消す。時刻前の起床では消さない", async () => {
+    const h = harness();
+    h.gate.body = narBody(12);
+    await scheduleNar(h);
+    await stepsUntilDone(h);
+    expect(taskStatus(h)).toBe("done");
+    expect(stageRows(h)).toEqual([]); // 前提: 完了したレースの行は残っていない
+
+    // 孤立した行(タスクの無いレースの、軸の登録)を直接入れる。
+    h.sql.exec("INSERT INTO race_day_nar_trifecta (race_id, instance, axis, state) VALUES (?, 100, 1, 'pending')", ORPHAN_RACE);
+    expect(stageRows(h)).toHaveLength(1);
+
+    // 掃除の時刻の前に起きても、何も消さない(= 消えるのは掃除の分岐だけ。孤立の掃除が常に走っているのではない)。
+    h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('purge_due_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(h.clock.now + 60_000));
+    expect(await h.core.runNextStep()).toMatchObject({ kind: "idle" });
+    expect(stageRows(h)).toHaveLength(1);
+
+    // 掃除の時刻になって起きると、孤立した行が消える。
+    h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('purge_due_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(h.clock.now));
+    expect(await h.core.runNextStep()).toMatchObject({ kind: "idle" });
+    expect(stageRows(h)).toEqual([]);
+  });
+});

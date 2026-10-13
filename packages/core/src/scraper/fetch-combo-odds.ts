@@ -556,7 +556,7 @@ export async function fetchNarTrifectaAxisOdds(
  *   投げると成功済みの軸の結果を握りつぶす。`fetchNarTrioComboOdds`と同じ)。
  * - 軸は直列(自前のsleepは持たない。間隔はHttpClient/gateの責務)。`maxAgeMs`/`bypassCache`は全軸に一様に渡す。
  * - 1軸の失敗・未発売・構造異常は、その軸の`attempt`に分類するだけで他の軸の結果は残す(部分被覆。
- *   失敗軸にしか属さない組はキーごと不在になる)。早期終了はしない(3連複と同じ。ユーザー判断2026-10-13)。
+ *   失敗軸にしか属さない組はキーごと不在になる)。早期終了はしない(3連複と同じ。Issue #283)。
  * - 3頭未満は軸0件で、HTTPを発行せず`unavailable`(期待数0)を返す。
  */
 async function fetchNarTrifectaComboOdds(

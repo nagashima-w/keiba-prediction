@@ -19,7 +19,7 @@
  */
 import type { SqlLike } from "./sql-like";
 
-/** 1回のアラーム(1ステップ)で取る軸の最大本数(ユーザー指定 2026-10-13)。18 頭立てでも 2 アラーム。 */
+/** 1回のアラーム(1ステップ)で取る軸の最大本数(Issue #283)。18 頭立てでも 2 アラーム。 */
 export const NAR_TRIFECTA_AXES_PER_STEP = 9;
 
 export type NarTrifectaAxisState = "pending" | "fetched" | "failed";

@@ -48,7 +48,7 @@ export type ImportResultOutcome =
  * - 複勝の確定払戻(placePayout)を馬番で対応付ける。払戻の無い馬は null。
  * - 単勝の確定払戻(winPayout、Issue #100・#23-C)を馬番で対応付ける。placePayoutと同じ
  *   対応付けロジック(payoutByUmaban)。1着以外の馬は null。1着同着の場合は該当する
- *   複数馬がそれぞれ自分の払戻額を持つ(winPayoutsの件数はparsePayoutRoutが固定しないため)。
+ *   複数馬がそれぞれ自分の払戻額を持つ(winPayoutsの件数はparsePayoutRowが固定しないため)。
  * - 通過順(passing)・上がり3F(last3f、タスク#27-A2)は各馬の値をそのまま詰める
  *   (parseRaceResult が既に非throwフォールバック済みのため、ここでの追加変換は不要)。
  * - 確定の人気(ninki)・単勝オッズ(winOdds、Issue #259)も各馬の値をそのまま詰める。クラウド版の D1 だけが保存する

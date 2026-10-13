@@ -344,6 +344,7 @@ free odds schedule"}`)とは**まったく異なる形状**だった:
 ```
 node -e '
 const j = JSON.parse(require("fs").readFileSync("fixtures/odds_trifecta_presale_202606040901_20260926.json","utf-8"));
+console.log("status:", j.status, "reason:", j.reason);
 const odds = j.data.odds["8"];
 const keys = Object.keys(odds);
 console.log("total:", keys.length);
@@ -355,6 +356,7 @@ const nonCapVals = keys.filter(k => odds[k][0] !== "999,999.9").map(k => Number(
 console.log("非capの値の種類数:", new Set(nonCapVals).size, "範囲:", Math.min(...nonCapVals), "〜", Math.max(...nonCapVals));
 console.log("人気の相異なる値の数:", new Set(keys.map(k => odds[k][2])).size, "/", keys.length);
 '
+// => status: middle reason: result odds empty
 // => total: 3360
 // => cap(999,999.9)件数: 2644 比率: 78.7%
 // => 非cap件数: 716 比率: 21.3%

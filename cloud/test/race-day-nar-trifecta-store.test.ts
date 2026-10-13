@@ -26,7 +26,7 @@ const RACE = "202654071210";
 const ALL_12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 describe("NAR_TRIFECTA_AXES_PER_STEP", () => {
-  it("1アラームあたり 9 軸(ユーザー指定。18頭立てでも 2 アラームに収まり、どのプランの上限 50 も十分に下回る)", () => {
+  it("1アラームあたり 9 軸(Issue #283。18頭立てでも 2 アラームに収まり、どのプランの上限 50 も十分に下回る)", () => {
     expect(NAR_TRIFECTA_AXES_PER_STEP).toBe(9);
     expect(Math.ceil(18 / NAR_TRIFECTA_AXES_PER_STEP)).toBe(2);
   });

@@ -1583,22 +1583,25 @@ function finalizeProposedBetOverall(
  * (`route==="unset"`等〈coreの配分計算に未到達〉のとき`skipReasonCode`は常にnullになるため、
  * `skipReasonCode`を先に見ると「配分あり」に誤って混入する。#71着手前ゲートで実測確認済みの罠)。
  *
- * 払戻の突合は近似を一切行わない(実配当のみ。Q-C): 複勝は`results`(`selectIncludedAnalyses`が
- * 既に取得済みの実結果をそのまま再利用し、二重にDBへ問い合わせない)の各`umaban`に
- * `buildComboOddsKey`を適用した逆引きマップで突合し、ワイド・3連複は`getComboPayouts`の
- * 文字列一致で突合する(デコーダ新設なし。AC-B4)。
+ * 払戻の突合は近似を一切行わない(実配当のみ。Q-C)。対象の券種は8つ(place/win/wide/trio/quinella/exacta/
+ * trifecta/bracketQuinella。本関数内の許可リスト〈下の `bet.betType !== …` の連鎖〉と同じ。これ以外の券種コードは未知券種〈`unknownBetType`〉に数える):
+ * - 複勝・単勝は`results`(`selectIncludedAnalyses`が既に取得済みの実結果をそのまま再利用し、二重にDBへ
+ *   問い合わせない)の各`umaban`に`buildComboOddsKey`を適用した逆引きマップ(複勝は`placePayout`、単勝は
+ *   `winPayout`。Issue #100・#23-C)で突合する。
+ * - ワイド・3連複・馬連・馬単・三連単・枠連の6券種は`getComboPayouts`の`comboKey`の文字列完全一致で突合する
+ *   (デコーダ新設なし。AC-B4。馬連〈#114〉・馬単〈#121〉・三連単〈#131〉・枠連〈#145〉は後から同じ経路に加わった)。
  *
  * 規則U(判定不能の扱い、#71 Issue本文): 複勝はそのレースの複勝払戻が1件も取込済みでなければ
  * (`raceHasPlacePayout`。規則Hと同じ「取込状態ゲート」を転用——両者とも「このレースの複勝払戻は
- * 取込済みか」という同じ問いに答えるため、二重定義を避ける)、ワイド・3連複は`getComboPayouts`が
- * `not_imported`または`imported`かつ`payouts`が空配列であれば、いずれも判定不能として
- * 件数・賭け金・払戻のいずれにも計上せず`unjudgedCount`に計上する。`imported`かつ`payouts`が
- * 非空だが該当`combo_key`が無い場合は「不的中」(betCount+1・totalReturn+0)であり、判定不能とは
- * 区別する(規則Uの肝)。
+ * 取込済みか」という同じ問いに答えるため、二重定義を避ける)、単勝は同じ形で単勝払戻が1件も取込済みでなければ
+ * (`raceHasWinPayout`)、組合せの6券種は`getComboPayouts`が`not_imported`または`imported`かつ`payouts`が
+ * 空配列であれば、いずれも判定不能として件数・賭け金・払戻のいずれにも計上せず`unjudgedCount`に計上する。
+ * `imported`かつ`payouts`が非空だが該当`combo_key`が無い場合は「不的中」(betCount+1・totalReturn+0)であり、
+ * 判定不能とは区別する(規則Uの肝。複勝・単勝も、払戻が取込済みで該当馬の払戻が無ければ不的中)。
  *
  * 【返還(Issue #72。#71メタレビューで見つかった残余の解消)】取消・除外の馬(`RaceResultEntry.scratched === true`。
  * 結果ページの着順欄が「取消」「除外」)を構成に含む買い目は、現実には全額返還される。確定払戻表
- * (`race_results.place_payout`/`race_combo_payouts`)からは「返還」と「不的中」を区別できないので、
+ * (`race_results.place_payout`/`win_payout`/`race_combo_payouts`)からは「返還」と「不的中」を区別できないので、
  * `scratched` を見て**返還として数える**(`betCount+1`・`totalStake+=stake`・`totalReturn+=stake`。賭け金は分母に
  * 残り、払戻にも含める。内訳は`refundedCount`/`refundedStake`)。返還は的中でも不的中でもない第3の状態。
  * - 構成馬番は `comboKey` を `parseComboOddsKey`(#55のデコーダ。#54ゲートが禁じた「逆関数の新設」ではなく既存の

@@ -447,7 +447,7 @@ export interface AnalysisResult {
    */
   readonly bracketQuinellaCombo?: Record<string, number | null>;
   /**
-   * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉・枠連)の取得結果(core
+   * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単・枠連。三連単は Issue #283 から地方も取得する)の取得結果(core
    * `RaceDataMeta.comboOdds` のプレーン写し。機能D-2c第1段・Issue #28。馬連はIssue #116・
    * #24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、枠連はIssue #148・#26-E2で
    * 追加)。このフィールド自身(外側の`comboOdds`オブジェクト)の有無は`wideCombo`/

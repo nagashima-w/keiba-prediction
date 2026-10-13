@@ -430,7 +430,8 @@ export async function runAnalysis(
   //    近似日のとき基準日は実行日になるため、施行日より後・実行日より前の走は残る(既知の限界。
   //    近似日はUIから到達しない。画面には「近似」と表示される)。
   //  - 当日の未施行レースでは自レース・施行日以降の走がそもそも存在せず、何も変わらない。
-  // scraper では絞らない(scrapeRace は分析日を知らず、生の戦績を必要とする用途があるため)。
+  // 日付での絞り込みは scraper ではしない(scrapeRace は分析日を知らない)。
+  // 出走しなかった行(除外・取消)は日付に依らない事実なので、Issue #261 から scrapeRace が戦績の取得時点で除いている(上の絞りはその後の戦績に掛かる)。
   const race = filterRaceDataBefore(
     excludeOwnRaceResults(scrapedRace, raceId).raceData,
     analysisDate,

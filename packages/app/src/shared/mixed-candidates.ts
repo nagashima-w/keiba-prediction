@@ -76,8 +76,8 @@
  *
  * これは**第3段以降のための受け口**であり、本段(第2段)では妙味度による券種切り替えを
  * 実装しない(ユーザー決定Q2「常に全券種」)。既定値は`ALL_MIXED_CANDIDATE_BET_TYPES`
- * (place/wide/trioの3券種。**`AllocationBetType`の全メンバーではない**。#91で`AllocationBetType`
- * に`win`が加わったが、単勝の候補ビルダーが存在しないため対象に含めていない。下記
+ * (place/win/wide/quinella/bracketQuinella/exacta/trio/trifectaの8券種で、**現在は`AllocationBetType`の
+ * 全メンバーと一致する**。券種が増えるたびに一致したりしなかったりした経緯は、下記
  * `ALL_MIXED_CANDIDATE_BET_TYPES`のJSDoc参照)。型定義上、妙味度・
  * `RaceOpportunity` に類する値は本モジュールの入力に一切現れない(受け取れない)。
  *
