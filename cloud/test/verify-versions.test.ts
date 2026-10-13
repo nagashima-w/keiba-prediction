@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeVerifyReportByPromptVersion, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
+import { computeVerifyReportByPromptVersion, DEFAULT_VERIFY_CONFIG, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
 import { computePromptVersionSummaries, summarizePromptVersions } from "../src/verify-versions";
 import { buildVerifySource, type VerifyAnalysisRow, type VerifyReadRows } from "../src/verify-read";
 
@@ -17,12 +17,16 @@ function analysisRow(id: number, raceId: string, promptVersion: string | null, a
 
 /** 版 b(2 レース)・版 a(1 レース。追加指示あり)・版不明(1 レース)。1 レース 1 分析で、1 番の馬が複勝圏。 */
 function rows(): VerifyReadRows {
-  const analyses = [
+  return rowsOf([
     analysisRow(1, "202606030801", "b"),
     analysisRow(2, "202606030802", "b", "逃げ馬を重視"),
     analysisRow(3, "202606030803", "a", "逃げ馬を重視"),
     analysisRow(4, "202606030804", null),
-  ];
+  ]);
+}
+
+/** 分析の行から、馬(1・2番)と結果(1 番の馬は id が偶数なら 1 着、奇数なら 5 着)をそろえた入力を作る。 */
+function rowsOf(analyses: VerifyAnalysisRow[]): VerifyReadRows {
   const horses = analyses.flatMap((a) => [
     { analysisId: a.id, umaban: 1, prior: 0.5, adjusted_prob: 0.55 - a.id * 0.1, place_odds_min: 2, ev: 1.2, is_positive: 1, contributions_json: null, mark: "◎", reason: null, highlights_json: null, concerns_json: null },
     { analysisId: a.id, umaban: 2, prior: 0.2, adjusted_prob: 0.15, place_odds_min: 5, ev: 0.8, is_positive: 0, contributions_json: null, mark: null, reason: null, highlights_json: null, concerns_json: null },
@@ -110,5 +114,56 @@ describe("computePromptVersionSummaries", () => {
 
   it("JSON 往復で変わらない(kv・API に載せる形)", () => {
     expect(JSON.parse(JSON.stringify(summaries))).toEqual(summaries);
+  });
+});
+
+/**
+ * Issue #288(#287 のレビューで見つかったテストの穴): 上の describe の入力は全行が遮断済み(clean)で、先読み疑いを含まない。
+ * そのため `PRODUCTION_VERIFY_CONFIG`(先読み疑いの除外あり)と `DEFAULT_VERIFY_CONFIG`(なし)で結果が同じになり、
+ * `computePromptVersionSummaries` が使う設定を `DEFAULT_VERIFY_CONFIG` に取り違えても全緑のまま残っていた。
+ * ここでは、先読み疑い(suspect)と判定不能(unknown)の行を入れ、版別の経路でも本番の設定で除外されることを固定する。
+ */
+describe("computePromptVersionSummaries: 先読み疑いの除外(本番の設定。Issue #288)", () => {
+  const SNAP_1545 = JSON.stringify({ race: { startTime: "15:45" } });
+  const unguarded = { historyCutoffDate: null, promptLookaheadGuarded: null } as const;
+
+  /**
+   * 版 b: clean(1)・suspect(2。遮断なし・15:45 発走の後〈JST 16:00〉に分析)。
+   * 版 a: clean(3)・unknown(4。遮断なし・発走時刻なし・開催日と同日に分析)。
+   */
+  function mixedRows(): VerifyReadRows {
+    return rowsOf([
+      analysisRow(1, "202606030801", "b"),
+      { ...analysisRow(2, "202606030802", "b"), ...unguarded, raceSnapshotJson: SNAP_1545, analyzedAt: "2026-07-05T07:00:00.000Z" },
+      analysisRow(3, "202606030803", "a"),
+      { ...analysisRow(4, "202606030804", "a"), ...unguarded, raceSnapshotJson: null, analyzedAt: "2026-07-05T03:00:00.000Z" },
+    ]);
+  }
+
+  const source = buildVerifySource(mixedRows());
+  const production = computePromptVersionSummaries(source);
+  const withoutExclusion = summarizePromptVersions(computeVerifyReportByPromptVersion(source, DEFAULT_VERIFY_CONFIG));
+  const countOf = (list: ReturnType<typeof computePromptVersionSummaries>, version: string) => list.find((s) => s.promptVersion === version)?.includedAnalysisCount;
+
+  it("前提(空振り防止): 本番の設定は先読み疑いを除外し、既定の設定は除外しない。除外なしの集計では両方の版で 2 件ずつ数えられる(差が 0 でない)", () => {
+    expect(PRODUCTION_VERIFY_CONFIG.excludeLookaheadSuspects).toBe(true);
+    expect(DEFAULT_VERIFY_CONFIG.excludeLookaheadSuspects).toBe(false);
+    expect(countOf(withoutExclusion, "b")).toBe(2);
+    expect(countOf(withoutExclusion, "a")).toBe(2);
+  });
+
+  it("版別でも先読み疑い(suspect)と判定不能(unknown)を除外する: 版 b は clean の 1 件、版 a は clean の 1 件だけを数える(除外なしなら各 2 件)", () => {
+    expect(countOf(production, "b")).toBe(1);
+    expect(countOf(production, "a")).toBe(1);
+  });
+
+  it("結果全体が、本番の設定(PRODUCTION_VERIFY_CONFIG)での core の版別レポートの射影と完全に一致し、除外なしの設定の射影とは異なる", () => {
+    const expected = summarizePromptVersions(computeVerifyReportByPromptVersion(source, PRODUCTION_VERIFY_CONFIG));
+    expect(expected).toHaveLength(2);
+    expect(production).toEqual(expected);
+    expect(JSON.stringify(production)).not.toBe(JSON.stringify(withoutExclusion));
+    // 除外を false にしただけの設定(本番の設定の取り違えの別の形)とも異なる
+    const flagOff = summarizePromptVersions(computeVerifyReportByPromptVersion(source, { ...PRODUCTION_VERIFY_CONFIG, excludeLookaheadSuspects: false }));
+    expect(JSON.stringify(production)).not.toBe(JSON.stringify(flagOff));
   });
 });

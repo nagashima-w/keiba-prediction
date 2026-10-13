@@ -12,7 +12,8 @@ import {
 import type { PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "../src/verify-store";
 import type { VerifyAnalysisRow, VerifyReadRows } from "../src/verify-read";
 import { R2_FENCE_LIMITS, type R2Usage } from "../src/r2-fence";
-import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
+import { computeVerifyReport, computeVerifyReportByPromptVersion, DEFAULT_VERIFY_CONFIG, PRODUCTION_VERIFY_CONFIG, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
+import { summarizePromptVersions } from "../src/verify-versions";
 import { buildVerifySource } from "../src/verify-read";
 
 /**
@@ -504,6 +505,22 @@ describe("getReport: exe と同じ集計の設定・区分の割り当て(レビ
     expect(off.excludedLookaheadSuspectCount).toBe(0);
     expect(off).not.toEqual(all);
     expect(JSON.stringify(central)).not.toBe(JSON.stringify(nar));
+  });
+
+  it("Issue #288: 版別比較(promptVersions)も、core の computeVerifyReportByPromptVersion(PRODUCTION_VERIFY_CONFIG)の射影と完全に一致する(先読み疑いの除外あり。経路全体〈getReport → verify-versions〉の設定の取り違えを検出する)", async () => {
+    const { core, store } = setup();
+    store.state.rows = mixedRows();
+    const source = buildVerifySource(store.state.rows);
+    const direct = JSON.parse(JSON.stringify(summarizePromptVersions(computeVerifyReportByPromptVersion(source, PRODUCTION_VERIFY_CONFIG))));
+    const withoutExclusion = summarizePromptVersions(computeVerifyReportByPromptVersion(source, DEFAULT_VERIFY_CONFIG));
+    // 前提(空振り防止): 入力が先読みの除外を実際に動かす(同じ版 v1 で、除外ありは 3 件、除外なしは 5 件)
+    expect(direct.map((v: { promptVersion: string | null; includedAnalysisCount: number }) => [v.promptVersion, v.includedAnalysisCount])).toEqual([["v1", 3]]);
+    expect(withoutExclusion.map((v) => [v.promptVersion, v.includedAnalysisCount])).toEqual([["v1", 5]]);
+    for (const venue of ["all", "central", "nar"] as const) {
+      const res = await core.getReport(venue);
+      if (res.status !== "ready") throw new Error(`ready のはず: ${res.status}`);
+      expect(JSON.parse(JSON.stringify(res.promptVersions)), venue).toEqual(direct);
+    }
   });
 
   it("透かしの各項目(analyses・results・comboPayouts・comboImports)のどれが動いても再計算が走る(1 つでも比較から漏れると、更新が反映されない)", async () => {

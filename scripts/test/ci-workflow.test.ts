@@ -24,6 +24,8 @@
  * 8. exe の公開が戻っていない: リポジトリの全ワークフローに action-gh-release と contents: write が無く、
  *    build-windows.yml が存在しない。
  * 9. 検査する側の自己検証(正の対照): コメント除去・ステップ名抽出が、合成テキストで期待どおりに働く。
+ * 10. (Issue #288)app のビルドを外した代わりの守り: deploy-cloud.yml の check ジョブが cloud の型検査(pnpm run typecheck)とテスト(pnpm test)を
+ *     無条件で走らせ、deploy が check を待つ。スモークを別ジョブ(smoke)に分けても、この守りが黙って消えない。
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -223,5 +225,87 @@ describe("exe の公開が戻っていない(Issue #248: 公開を止め、運�
     const code = withoutComments(readTextLf(path.join(WORKFLOWS_DIR, file)));
     expect(code).not.toContain("action-gh-release");
     expect(code).not.toMatch(/contents:\s*write/);
+  });
+});
+
+/** `jobs:` 直下の job の本文(次の job の直前まで)。見つからなければ例外。 */
+function extractJob(yml: string, jobId: string): string {
+  const lines = yml.split("\n");
+  const start = lines.findIndex((l) => l === `  ${jobId}:`);
+  if (start < 0) {
+    throw new Error(`job が見つかりません: ${jobId}`);
+  }
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^ {2}[A-Za-z0-9_-]+:/.test(lines[i]!)) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+/** job 本文から、`- name:` で始まるステップ(名前の一部が一致)の本文を返す。見つからなければ例外。 */
+function extractJobStep(job: string, nameFragment: string): string {
+  const lines = job.split("\n");
+  const start = lines.findIndex((l) => /^\s+- name:/.test(l) && l.includes(nameFragment));
+  if (start < 0) {
+    throw new Error(`ステップが見つかりません: ${nameFragment}`);
+  }
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\s+- name:/.test(lines[i]!)) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+describe("app のビルドを外した代わりの守り(Issue #287・#288: ci.yml のヘッダが述べる『代わりの検出』が、deploy-cloud.yml に残っている)", () => {
+  // ci.yml のヘッダ(Issue #287): renderer 由来の共有部分に node 組込みの import を混ぜる破綻は、app のビルドの代わりに、
+  // deploy-cloud.yml の check ジョブの cloud の型検査(tsconfig.client.json が Node の型を持たない)と、cloud のテスト
+  // (test/client-bundle.test.ts・test/import-guard.test.ts)が検出する。check から型検査かテストを外すと、その検出が黙って消える。
+  // (Issue #288 で check から smoke を別ジョブに分けても、型検査とテストは check に残る。smoke はこの検出に関与しない)
+  const deployYml = readTextLf(path.join(WORKFLOWS_DIR, "deploy-cloud.yml"));
+
+  it("deploy-cloud.yml の check ジョブが、cloud の pnpm run typecheck と pnpm test を無条件で走らせる(if: が無く、continue-on-error が無い)", () => {
+    const check = extractJob(deployYml, "check");
+    const code = withoutComments(check);
+    const runs = [...code.matchAll(/^\s+run: (.+)$/gm)].map((m) => (m[1] ?? "").trim());
+    expect(runs).toContain("pnpm run typecheck");
+    expect(runs).toContain("pnpm test");
+    expect(code).not.toMatch(/^\s+if:/m);
+    expect(code).not.toMatch(/continue-on-error/);
+    // 型検査・テストは cloud/ で実行する(ルートの tsconfig ではなく、cloud の tsconfig.client.json を含む検査)
+    expect(extractJobStep(check, "型検査")).toContain("working-directory: cloud");
+    expect(extractJobStep(check, "テスト")).toContain("working-directory: cloud");
+  });
+
+  it("その検出が型検査で働く前提: cloud の typecheck は client 用の tsconfig(Node の型を持たない)を含む", () => {
+    const pkg = JSON.parse(readTextLf(path.join(ROOT, "cloud", "package.json"))) as { scripts: Record<string, string> };
+    expect(pkg.scripts["typecheck"]).toContain("tsc -p tsconfig.client.json");
+  });
+
+  it("deploy ジョブは check の成功を待つ(check が失敗した状態で本番へ出ない。needs は単独指定でも配列指定でもよい)", () => {
+    const deploy = extractJob(deployYml, "deploy");
+    const m = /^ {4}needs:[ \t]*(.+)$/m.exec(withoutComments(deploy));
+    expect(m).not.toBeNull();
+    const needs = m![1]!
+      .replace(/^\[|\]$/g, "")
+      .split(",")
+      .map((s) => s.trim());
+    expect(needs).toContain("check");
+  });
+
+  it("検出器の確認(空振りでない): extractJob・extractJobStep は job・ステップごとの本文を取り違えない", () => {
+    const sample = ["jobs:", "  a:", "    steps:", "      - name: x1", "        run: one", "      - name: x2", "        run: two", "  b:", "    needs: a"].join("\n");
+    expect(extractJob(sample, "a")).toContain("steps:");
+    expect(extractJob(sample, "a")).not.toContain("needs");
+    expect(extractJob(sample, "b")).toContain("needs: a");
+    expect(() => extractJob(sample, "c")).toThrow();
+    expect(extractJobStep(extractJob(sample, "a"), "x1")).toContain("run: one");
+    expect(extractJobStep(extractJob(sample, "a"), "x1")).not.toContain("run: two");
+    expect(() => extractJobStep(extractJob(sample, "a"), "zzz")).toThrow();
   });
 });

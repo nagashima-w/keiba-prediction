@@ -22,6 +22,8 @@
 #   その関門を担っていた。いまは共有部分が packages/core/src/view/・analysis/ にあり、同じ混入を検出するのは、deploy-cloud.yml の check ジョブの
 #   cloud の型検査(`pnpm run typecheck`。tsconfig.client.json が Node の型を持たない)と、cloud のテスト(`pnpm test`)に含まれる
 #   test/client-bundle.test.ts・test/import-guard.test.ts である(Issue #287 で、混入の実験をして確かめた)。
+#   Issue #288 で deploy-cloud.yml のスモークを別ジョブ(smoke)に分けたが、型検査とテストは check ジョブに残っている
+#   (scripts/test/ci-workflow.test.ts が、check が cloud の型検査とテストを無条件で走らせていることを固定している)。
 name: 型検査・テストの関門
 
 on:

@@ -1,9 +1,25 @@
 # クラウド版(Cloudflare Worker。cloud/)の型検査・テスト・本番デプロイ(Issue #161〈#21-C〉)。
 #
-# ★2つのジョブ:
-#   - check: 作業ブランチへの push と手動実行のたびに毎回走る(型検査・テスト・デプロイの dry-run・D1 の migration のローカル適用・ローカルスモーク)。
+# ★3つのジョブ(Issue #288 で、check から smoke を分けた):
+#   - check: 作業ブランチへの push と手動実行のたびに毎回走る(型検査・テスト・デプロイの dry-run・D1 の migration のローカル適用)。
 #            Secrets を持たない。
-#   - deploy: check が通ったうえで、下の条件を満たすときだけ本番にデプロイする。
+#   - smoke: check と**並列**に、毎回走る(ローカルスモーク〈workerd〉)。Secrets を持たない。自分のジョブで依存をインストールする
+#            (check の成果物を前提にしない。スモークは自前の一時の保存先に D1 の migration を適用してから起動する〈cloud/smoke.ts〉)。
+#   - deploy: **check と smoke の両方**が通ったうえで、下の条件を満たすときだけ本番にデプロイする。
+#
+# ★なぜ分けるか(Issue #276・#288): 待ち時間の本体は cloud のテスト(vitest。275〜436 秒)とスモーク(190〜229 秒)で、逐次だと合計になる
+#   (2026-10-13 の run 38346562975・38358399757・38369789300・38379766135 の check ジョブのステップ時間。`gh api repos/<owner>/<repo>/actions/runs/<id>/jobs`)。
+#   並列にすると、待ち時間はおおむね長いほう(vitest)で決まる。分割で依存のインストールが2回になるが、
+#   pnpm のキャッシュが効いて 3〜6 秒(同じ4 run)で、並列なので待ち時間には加わらない。
+#   dry-run と D1 の migration(ローカル)を check に置くのは、スモークがどちらにも依存しないうえ、長いほうのジョブに足されるのが 5〜8 秒(同じ4 run の dry-run 1〜2 秒 + migration 4〜6 秒)で済むため
+#   (「check ジョブも deploy:dry と migration を実行する」とする文書の記述を保つ)。
+#
+# ★smoke だけが失敗したときに deploy が止まる根拠(GitHub Actions の公式の記述。2026-10-13 に docs.github.com で確認した原文):
+#   - jobs.<job_id>.needs: "If a job fails or is skipped, all jobs that need it are skipped unless the jobs use a conditional expression that causes the job to continue."
+#   - 式の Status check functions: "A default status check of `success()` is applied unless you include one of these functions."
+#   deploy の if: は always()・failure()・cancelled() を含まないので、needs の失敗・スキップ・取り消しで deploy はスキップされる。
+#   scripts/test/cloud-deploy-workflow.test.ts が、deploy の needs の集合・if: に状態確認の関数が無いこと・continue-on-error が無いことを固定している
+#   (公式の記述に基づく静的な検査であり、Actions の実評価ではない)。
 #
 # ★デプロイの条件(deploy ジョブの if:。ここ1箇所にだけ書く。Issue #248 で廃止した exe の公開ゲートと同じ形):
 #   許可した作業ブランチ(下の1本)の上で、
@@ -94,13 +110,38 @@ jobs:
         working-directory: cloud
         run: pnpm exec wrangler d1 migrations apply DB --local
 
+  # Issue #288: check と並列に走る(needs を持たない)。依存のインストールも自前で行う(check の成果物を前提にしない)。
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      # pnpm はバージョン未指定にして、ルートの package.json の packageManager フィールドに従わせる。
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@v4
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: cloud/pnpm-lock.yaml
+
+      - name: 依存をインストール(cloud)
+        working-directory: cloud
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
       # ローカル(workerd)での配線のスモーク: 認証の関門(403)・DO の SQLite・/api/health。外部へは出ない。
       - name: ローカルスモークテスト
         working-directory: cloud
         run: pnpm run smoke
 
   deploy:
-    needs: check
+    needs: [check, smoke]
     # ★デプロイの条件(上のヘッダ参照)。条件式をほかの場所に複製しない。
     if: ${{ github.ref == 'refs/heads/claude/issue-order-processing-wjgpdd' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[PUBLISH-APPROVED]') && !contains(github.event.head_commit.message, 'レビュー継続中'))) }}
     runs-on: ubuntu-latest

@@ -11,6 +11,9 @@ import { SPIKE_WORKER_PREFIX } from "../cloudflare-spike/preflight.js";
  * できない。ただし `deploy` ジョブの `if:` は、yml から取り出した式の文字列を JS に機械的に翻訳して(contains の
  * 大文字小文字の無視と、dispatch で head_commit が null になることを模した上で)真理値表で評価している。
  * 翻訳と模倣は本テストの前提であり、承認印付き push の実物確認(Actions の run)に代わるものではない。
+ *
+ * Issue #288: check から smoke を別ジョブに分けた(check と smoke は並列、deploy は両方を待つ)。ジョブ構成(3 ジョブ・needs・並列)・各ジョブのコマンド・
+ * 『smoke だけが失敗したら deploy が止まる』(公式の記述に基づく静的な検査)を固定する。deploy の if: の式と真理値表は変えていない。
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -114,33 +117,118 @@ describe("起動条件", () => {
   });
 });
 
-describe("check ジョブ(毎回走る。秘密を持たない)", () => {
-  const check = jobBody("check");
+/** `jobs:` 直下のジョブ ID を、出現順に列挙する。 */
+function jobIds(): string[] {
+  const lines = yml.split("\n");
+  const start = lines.indexOf("jobs:");
+  expect(start, "jobs: がある").toBeGreaterThanOrEqual(0);
+  const ids: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === "" || line.trim().startsWith("#")) continue;
+    if (!line.startsWith(" ")) break;
+    const m = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line);
+    if (m !== null) ids.push(m[1]!);
+  }
+  return ids;
+}
 
-  it("if を持たず(印のない push でも走る)、Secrets を一切参照しない", () => {
-    expect(withoutComments(check)).not.toMatch(/^\s+if:/m);
-    expect(check).not.toContain("secrets.");
-    expect(check).not.toContain("CLOUDFLARE_API_TOKEN");
+/** ジョブの `needs:`(`needs: a` も `needs: [a, b]` も受ける)。無ければ null。 */
+function needsOf(job: string): string[] | null {
+  const m = /^ {4}needs:[ \t]*(.+)$/m.exec(withoutComments(job));
+  if (m === null) return null;
+  return m[1]!
+    .trim()
+    .replace(/^\[|\]$/g, "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+}
+
+/** ジョブ内の `run:` の単一行コマンドを、出現順に返す(コメント行は除く)。 */
+function runCommands(job: string): string[] {
+  return withoutComments(job)
+    .split("\n")
+    .map((l) => /^\s+run: (.+)$/.exec(l)?.[1]?.trim())
+    .filter((c): c is string => c !== undefined);
+}
+
+const CLOUD_INSTALL = "pnpm install --ignore-workspace --frozen-lockfile";
+
+describe("ジョブ構成(Issue #288: 型検査・テストの check と、スモークの smoke を並列に走らせ、deploy は両方を待つ)", () => {
+  it("jobs: 直下のジョブは check・smoke・deploy の3つだけ(ジョブの増減・改名を検出する)", () => {
+    expect(jobIds()).toEqual(["check", "smoke", "deploy"]);
   });
 
-  it("cloud/ で、frozen-lockfile のインストール → 型検査 → テスト → デプロイの dry-run → D1 の migration(ローカル)→ スモークの順に実行する", () => {
-    expect(check).toContain("working-directory: cloud");
-    const install = stepIndex(check, "依存をインストール");
-    const order = ["型検査", "テスト", "dry-run", "D1 の migration をローカルに適用", "スモーク"].map((n) => stepIndex(check, n));
-    expect(install).toBeGreaterThanOrEqual(0);
-    for (const i of order) {
-      expect(i).toBeGreaterThan(install);
+  it("check と smoke は needs を持たない(互いを待たない=並列に走る。直列化の退行を検出する)", () => {
+    expect(needsOf(jobBody("check"))).toBeNull();
+    expect(needsOf(jobBody("smoke"))).toBeNull();
+  });
+
+  it("検出器の確認(空振りでない): needsOf は単独指定・配列指定・指定なしを区別して読む", () => {
+    expect(needsOf("  x:\n    needs: check\n")).toEqual(["check"]);
+    expect(needsOf("  x:\n    needs: [check, smoke]\n")).toEqual(["check", "smoke"]);
+    expect(needsOf("  x:\n    # needs: check\n    runs-on: y\n")).toBeNull();
+    expect(jobBody("deploy")).toContain("needs:");
+  });
+});
+
+describe.each([
+  ["check", "型検査・テスト・デプロイの dry-run・D1 の migration(ローカル)"],
+  ["smoke", "ローカルスモーク"],
+] as const)("%s ジョブ(毎回走る。秘密を持たない): %s", (jobName, _summary) => {
+
+  it("if を持たず(印のない push でも走る)、Secrets を一切参照しない。continue-on-error も付けない(失敗が deploy を止める)", () => {
+    const job = jobBody(jobName);
+    expect(withoutComments(job)).not.toMatch(/^\s+if:/m);
+    expect(job).not.toContain("secrets.");
+    expect(job).not.toContain("CLOUDFLARE_API_TOKEN");
+    expect(withoutComments(job)).not.toMatch(/continue-on-error/);
+  });
+
+  it("cloud/ で、frozen-lockfile のインストールを自分のジョブの中で行う。pnpm・Node(22)・キャッシュ(cloud のロックファイル)も自前で用意する(並列なので他方のジョブの成果物を前提にできない)", () => {
+    const job = jobBody(jobName);
+    const names = [...job.matchAll(/^ {6}- name: (.+)$/gm)].map((m) => m[1]!.trim());
+    expect(names.slice(0, 4)).toEqual(["リポジトリを取得", "pnpm をセットアップ", "Node.js をセットアップ", "依存をインストール(cloud)"]);
+    expect(stepBody(job, "pnpm をセットアップ")).toContain("uses: pnpm/action-setup@v4");
+    const node = stepBody(job, "Node.js をセットアップ");
+    expect(node).toMatch(/node-version: 22\b/);
+    expect(node).toContain("cache: pnpm");
+    expect(node).toContain("cache-dependency-path: cloud/pnpm-lock.yaml");
+    const install = stepBody(job, "依存をインストール");
+    expect(install).toContain("working-directory: cloud");
+    expect(install).toContain(`run: ${CLOUD_INSTALL}`);
+  });
+
+  it("ジョブ全体の env に WRANGLER_SEND_METRICS=false を持ち、timeout-minutes を持つ", () => {
+    const job = jobBody(jobName);
+    expect(job).toMatch(/\n {6}WRANGLER_SEND_METRICS: "false"\n/);
+    expect(job).toMatch(/\n {4}timeout-minutes: \d+\n/);
+  });
+});
+
+describe("check ジョブのコマンド(順序つきで完全一致)", () => {
+  it("install → 型検査 → テスト → デプロイの dry-run → D1 の migration(ローカル)の順に、この5つだけを実行する(smoke は含まない)", () => {
+    const check = jobBody("check");
+    expect(runCommands(check)).toEqual([
+      CLOUD_INSTALL,
+      "pnpm run typecheck",
+      "pnpm test",
+      "pnpm run deploy:dry",
+      "pnpm exec wrangler d1 migrations apply DB --local",
+    ]);
+    // 5つのコマンドは、すべて cloud/ で実行する(各ステップに working-directory: cloud がある)
+    const stepNames = ["依存をインストール", "型検査", "テスト", "dry-run", "D1 の migration をローカルに適用"];
+    for (const n of stepNames) {
+      expect(stepBody(check, n), n).toContain("working-directory: cloud");
     }
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-    const installStep = stepBody(check, "依存をインストール");
-    expect(installStep).toContain("pnpm install --ignore-workspace --frozen-lockfile");
-    expect(stepBody(check, "型検査")).toContain("pnpm run typecheck");
-    expect(stepBody(check, "テスト")).toContain("pnpm test");
-    expect(stepBody(check, "dry-run")).toContain("pnpm run deploy:dry");
-    expect(stepBody(check, "スモーク")).toContain("pnpm run smoke");
+    // ステップの順序(名前でも固定)
+    const idx = stepNames.map((n) => stepIndex(check, n));
+    for (const i of idx) expect(i).toBeGreaterThanOrEqual(0);
+    expect([...idx].sort((a, b) => a - b)).toEqual(idx);
   });
 
   it("AC-a4: D1 の migration は --local だけで適用する(check は秘密を持たず、本番の D1 に触れない)。--remote は check に無い", () => {
+    const check = jobBody("check");
     const step = stepBody(check, "D1 の migration をローカルに適用");
     expect(step).toContain("working-directory: cloud");
     const commands = withoutComments(step).split("\n").filter((l) => /wrangler d1 migrations apply/.test(l));
@@ -148,6 +236,39 @@ describe("check ジョブ(毎回走る。秘密を持たない)", () => {
     expect(withoutComments(check)).not.toContain("--remote");
     // 適用先は binding 名 DB(wrangler.toml の [[d1_databases]] と同じ)
     expect(readTextLf("cloud", "wrangler.toml")).toMatch(/^binding = "DB"$/m);
+  });
+});
+
+describe("smoke ジョブのコマンド(順序つきで完全一致)", () => {
+  it("install → スモークの2つだけを実行する。スモークは cloud/ で実行する", () => {
+    const smoke = jobBody("smoke");
+    expect(runCommands(smoke)).toEqual([CLOUD_INSTALL, "pnpm run smoke"]);
+    expect(stepBody(smoke, "スモーク")).toContain("working-directory: cloud");
+    expect(stepIndex(smoke, "依存をインストール")).toBeLessThan(stepIndex(smoke, "スモーク"));
+  });
+
+  it("本番の D1 に触れない(--remote・migrations apply は smoke ジョブに無い。スモークは自分の一時の保存先に自前で適用する〈smoke.ts〉)", () => {
+    const smoke = jobBody("smoke");
+    expect(withoutComments(smoke)).not.toContain("--remote");
+    expect(withoutComments(smoke)).not.toMatch(/migrations apply/);
+  });
+});
+
+describe("check と smoke の分割で、元の6コマンドが1つも落ちていない(Issue #288 の対応表: 旧 check ジョブの『6コマンドの順序』の保証)", () => {
+  it("check の5コマンドと smoke の smoke を合わせると、旧 check ジョブの6コマンド(install・型検査・テスト・dry-run・migration・smoke)がそろう。install は2ジョブとも持つ", () => {
+    const all = [...runCommands(jobBody("check")), ...runCommands(jobBody("smoke"))];
+    for (const c of [
+      CLOUD_INSTALL,
+      "pnpm run typecheck",
+      "pnpm test",
+      "pnpm run deploy:dry",
+      "pnpm exec wrangler d1 migrations apply DB --local",
+      "pnpm run smoke",
+    ]) {
+      expect(all, c).toContain(c);
+    }
+    expect(all.filter((c) => c === CLOUD_INSTALL)).toHaveLength(2);
+    expect(all).toHaveLength(7);
   });
 });
 
@@ -204,8 +325,56 @@ describe("deploy ジョブの条件(許可ブランチの上で、承認印付�
     expect(evaluate(input)).toBe(expected);
   });
 
-  it("check に依存する(型検査・テスト・dry-run を通ったあとだけデプロイする)", () => {
-    expect(jobBody("deploy")).toMatch(/\n {4}needs: check\n/);
+  /**
+   * Issue #288 の受け入れ条件『smoke だけが失敗したときに deploy が止まる』を、静的に固定する。
+   *
+   * 根拠(GitHub Actions の公式の記述。2026-10-13 に docs.github.com で確認した原文):
+   * - ワークフロー構文(jobs.<job_id>.needs): "If a job fails or is skipped, all jobs that need it are skipped unless the jobs use a conditional expression that causes the job to continue."
+   *   (継続させたいときは jobs.<job_id>.if に always() を書く、とも述べている)
+   * - 式(Status check functions): "A default status check of `success()` is applied unless you include one of these functions."
+   *   (success() は "Returns `true` when all previous steps have succeeded.")
+   * したがって deploy の if: に always()・failure()・cancelled() が無ければ、needs の失敗・スキップ・取り消しで deploy はスキップされる。
+   * **限界**: これは公式の記述に基づくモデルの評価であり、Actions の実評価ではない(使い捨てブランチでの実験は行わない。Issue #288 の方針)。
+   */
+  type JobResult = "success" | "failure" | "skipped" | "cancelled";
+  /** 公式の記述のモデル: needs の全ジョブが success で、かつ if: の式が true のときだけ deploy が実行される。 */
+  function deployRuns(results: Record<string, JobResult>, conditionHolds: boolean): boolean {
+    const needs = needsOf(jobBody("deploy"));
+    expect(needs, "deploy ジョブに needs: がある").not.toBeNull();
+    return needs!.every((n) => results[n] === "success") && conditionHolds;
+  }
+
+  it("Issue #288: deploy は check と smoke の両方に依存する(順序は問わない。型検査・テスト・dry-run・migration とスモークの両方を通ったあとだけデプロイする)", () => {
+    expect([...needsOf(jobBody("deploy"))!].sort()).toEqual(["check", "smoke"]);
+  });
+
+  it("Issue #288: deploy の if: は状態確認の関数(always・failure・cancelled)を含まない。含むと needs の失敗・スキップ後も deploy が走りうる", () => {
+    // 前提: 式を取り出せていて、承認印の式として中身がある(空文字の『含まない』にしない)
+    expect(deployCondition()).toContain("[PUBLISH-APPROVED]");
+    expect(deployCondition()).not.toMatch(/\b(always|failure|cancelled)\s*\(/);
+    // 検出器の確認(空振りでない)
+    expect("always() && x").toMatch(/\b(always|failure|cancelled)\s*\(/);
+    expect("x && !cancelled()").toMatch(/\b(always|failure|cancelled)\s*\(/);
+    expect("failure()").toMatch(/\b(always|failure|cancelled)\s*\(/);
+  });
+
+  it("Issue #288: 全ジョブに continue-on-error が無い(付くと失敗しても『成功』として needs を通過する)", () => {
+    expect(withoutComments(yml)).not.toMatch(/continue-on-error/);
+  });
+
+  it.each([
+    ["check も smoke も成功", { check: "success", smoke: "success" }, true],
+    ["smoke だけが失敗", { check: "success", smoke: "failure" }, false],
+    ["check だけが失敗", { check: "failure", smoke: "success" }, false],
+    ["両方が失敗", { check: "failure", smoke: "failure" }, false],
+    ["smoke がスキップ", { check: "success", smoke: "skipped" }, false],
+    ["smoke が取り消し", { check: "success", smoke: "cancelled" }, false],
+    ["check がスキップ", { check: "skipped", smoke: "success" }, false],
+  ] as const)("Issue #288: %s → deploy が実行される: %s", (_name, results, expected) => {
+    // 前提: 基準(両方成功 + 承認印付きの許可ブランチ push)で deploy が実行される。必要な依存が足りないと偽になる評価器の故障で、否定の行が偶然通らない確認
+    expect(evaluate({ ref: REF, event: "push", message: STAMP })).toBe(true);
+    expect(deployRuns({ check: "success", smoke: "success" }, true)).toBe(true);
+    expect(deployRuns(results, evaluate({ ref: REF, event: "push", message: STAMP }))).toBe(expected);
   });
 });
 
