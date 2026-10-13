@@ -64,6 +64,9 @@ function withoutComments(text: string): string {
     .join("\n");
 }
 
+/** 応答ファイルの中身をログに出す形(cat / tee)。mask ステップの検査と、その検出が空振りでないことの対照で同じものを使う(Issue #161 の記録)。 */
+const DUMPS_FILE_PATTERN = /\b(cat|tee)\b/;
+
 /** 実行トレース(set -x など)を有効にする記述があるか。 */
 function tracesCommands(code: string): boolean {
   return /\bset\s+-[a-zA-Z]*x|\b(ba)?sh\s+-[a-zA-Z]*x|xtrace/.test(code);
@@ -298,6 +301,11 @@ describe("deploy ジョブのステップ(秘密・サブドメインの扱い�
     expect(mask.indexOf("::add-mask::")).toBeLessThan(mask.indexOf("GITHUB_ENV"));
     // API の応答をそのままログに出さない
     expect(mask).toContain("-o ");
+    // 応答を書いたファイル($out)を cat / tee でログに出さない(マスク登録の前に、サブドメインを含む応答が漏れる。Issue #161 の記録)。
+    // 検出の確認(空振りでない): 本文を表示する形は拾える
+    expect('curl -o "$out" ...\ncat "$out"').toMatch(DUMPS_FILE_PATTERN);
+    expect('curl -o "$out" ...\ntee -a "$out"').toMatch(DUMPS_FILE_PATTERN);
+    expect(withoutComments(mask)).not.toMatch(DUMPS_FILE_PATTERN);
   });
 
   it("Secrets は、必要なステップの env にだけ渡す(ジョブ全体の env に置かない)", () => {

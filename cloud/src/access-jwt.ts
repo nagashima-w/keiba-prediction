@@ -31,7 +31,7 @@ export interface AccessEnv {
   ADMIN_USER?: string;
 }
 
-/** 役割(Issue #238)。admin = 設定・検証・状態を変える操作・LLM を呼ぶ操作まで。viewer = 読み取りだけ。 */
+/** 役割(Issue #238)。admin = 設定・状態を変える操作・LLM を呼ぶ操作まで(検証の読み取りは Issue #263 から viewer にも開いている)。viewer = 読み取りだけ。 */
 export type Role = "admin" | "viewer";
 
 /** 管理者の一覧の出どころ(ログ用の固定トークン。アドレスは含まない)。 */

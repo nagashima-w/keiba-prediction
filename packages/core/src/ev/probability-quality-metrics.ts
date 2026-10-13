@@ -19,6 +19,22 @@
  * 再利用する(受け入れ条件7。二重定義しない)。`scraper/scrape-race.ts` 等の重い実行時依存を
  * 持つモジュールからの値インポートは0件。
  *
+ * ## 同時分布モデルは意図して `CONDITIONAL_BERNOULLI_MODEL` に固定している(Issue #79 の裁定)
+ * `normalizedTrioJointKlDivergence`・`computeTrioAllPointEvOverPayoutRate` の2関数は、配分の既定
+ * (`PLACKETT_LUCE_MODEL`。#81で切替)とは独立に、`CONDITIONAL_BERNOULLI_MODEL` を直接参照する。
+ * 「たまたま両方 CB」ではなく、PL に切り替えない裁定の結果である。理由:
+ *  - 本番の呼び出し元が無い。公開エントリ `buildProbabilityQualityReport` の呼び出しは
+ *    `scripts/`(確率の質の調査)と各テストだけで、切り替えても本番の数値は動かない。
+ *  - 市場含意確率を入力に取る(合計が3にならないことが確実)。PL は入力の合計が `placeCount` と違うとき、
+ *    水詰めで再スケールしてからフィットする(`rescaleApplied`)ので、切り替えると計測値は「入力そのもの」ではなく
+ *    「再スケール後」の分布の値になり、固定馬(θ=∞)が出れば計測できないレースも生じる(`degenerateFixedCount`)。
+ *    どちらも、再スケールを許すか計測を見送るかの新しい設計が要る。
+ *  - 「PL に切り替えれば計測の質が上がる」という保証は無い(`bet-allocation.test.ts` の AC-B9 は、再スケールが
+ *    働く1フィクスチャで、PL の `marginalDeviationMax` のほうが CB より大きいことを固定している)。切り替える論拠は
+ *    『配分と同じモデルで測る』という一貫性だけで、進行中の確率の質の調査(#41・#258)の基準線を動かす害のほうが大きい。
+ * したがって「配分は PL・計測は CB」という併存は仕様である。この2関数の値は、配分が実際に使う分布ではなく
+ * CB 近似の分布で測ったものとして読むこと。切り替えを検討し直すときは、上の3点を再検討すること。
+ *
  * ## NaN・Infinity・負値の防御(code-reviewer指摘・boss実測で再現)
  * `modelProb`(prior・LLM補正後確率)・`placeProb` を受け取るすべての指標関数は、演算前に
  * `findInvalidProbabilityReason` で**有限かつ非負**であることを検証する。

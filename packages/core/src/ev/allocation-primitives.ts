@@ -179,8 +179,10 @@ export interface OutcomeIndexSet {
  * winのidentity判定〈`order[0]===umaban`〉は`foldToCandidateSubsets`〈`placed`を候補集合と
  * 交差させ昇順ソートする「順序を捨てる」畳み込み〉を通すと壊れるため、意図的に通さない
  * 設計だった)。この結果、集合空間なら`C(候補数,3)`程度で済むところが、順序空間では
- * `P(候補数,3)`(6倍)になり、実測で`buildMixedAllocationDisplay`が約7.9倍遅くなった
- * (Issue #96)。
+ * `P(候補数,3)`(6倍)になり、`buildMixedAllocationDisplay`が目に見えて遅くなった
+ * (Issue #96。遅くなった倍率はms値と同じく環境依存で、比べてよいのは同一環境内の前後比だけ。
+ * 再現するなら、#90着手前のコミット`9711767`と本Issue以降を同じ環境で
+ * `pnpm tsx scripts/bench-mixed-allocation.ts`にかけて比べること)。
  *
  * ## この関数がなぜ正しさを壊さずに高速化になるのか
  *
@@ -327,8 +329,9 @@ export interface GreedyAllocationResult {
  *
  * #92で単勝(win)候補を扱えるようにした際、win候補が1件でもあると集合空間(`C(候補数,3)`)
  * ではなく順序付きoutcome空間(`P(候補数,3)`。6倍)がそのまま本関数へ渡るようになり、
- * `buildMixedAllocationDisplay`が実測で約7.9倍遅くなった(再現: `pnpm tsx
- * scripts/bench-mixed-allocation.ts`)。#96はこれを次の2点で緩和する。
+ * `buildMixedAllocationDisplay`が目に見えて遅くなった(倍率は環境依存。再現と比較の仕方は
+ * `foldOutcomeIndexSetsBySignature`のJSDoc「背景」節〈`9711767`と同一環境で
+ * `pnpm tsx scripts/bench-mixed-allocation.ts`を比べる〉を参照)。#96はこれを次の2点で緩和する。
  *
  * 1. **署名畳み込み(呼び出し側の責務。`foldOutcomeIndexSetsBySignature`)**: `indices`が
  *    完全一致するoutcome同士は`wealth`が常に同一になるため確率を合算でき、実測で

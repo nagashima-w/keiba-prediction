@@ -685,12 +685,12 @@ export interface GeneralBetAllocationDiagnostics {
 export type WinOutcomeIndeterminateReason = "degenerate-fixed-count" | "top-k-covers-all-runners";
 
 /**
- * 順序付きoutcome空間を要する候補(win・馬連など。`ALLOCATION_BET_TYPE_REQUIRES_ORDER`
+ * 順序付きoutcome空間を要する候補(win・馬連・馬単・枠連・三連単など。`ALLOCATION_BET_TYPE_REQUIRES_ORDER`
  * 参照)の的中確率が、この呼び出しで決定できたかの申告(Issue #92・AC-B1b-3・#112で
  * 馬連にも共有される判定へ一般化)。3値の判別共用体。名前が`Win…`のままである理由は
  * `WinOutcomeIndeterminateReason`のJSDoc参照。
  *
- * - `"not-requested"`: 候補に順序を要するもの(win・馬連)が1件も含まれていない(複勝・
+ * - `"not-requested"`: 候補に順序を要するもの(win・馬連・馬単・枠連・三連単)が1件も含まれていない(複勝・
  *   ワイド・三連複のみの呼び出しは常にこれ)。**「候補として要求されなかった」ことだけを
  *   表す。** 「単勝・馬連が発売されていない」「頭数が発売条件を満たさない」という*真の*
  *   not-applicableとは意味が異なる(#90導入時にこの値と混同しないよう、あえて
@@ -738,7 +738,7 @@ export interface GeneralBetAllocationResult {
   readonly modelId: string;
   readonly modelApproximate: boolean;
   readonly diagnostics: GeneralBetAllocationDiagnostics;
-  /** 順序付きoutcome空間を要する候補(win・馬連。Issue #92・#112)の的中確率が決定できたか。
+  /** 順序付きoutcome空間を要する候補(win・馬連・馬単・枠連・三連単。Issue #92・#112)の的中確率が決定できたか。
    *  そのような候補が無い呼び出しは常に`{kind:"not-requested"}`
    *  (既存の複勝・ワイド・三連複専用呼び出しへの非破壊性)。 */
   readonly winOutcome: WinOutcome;
@@ -1068,7 +1068,7 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
  * outcomeIndexSetsから各候補の的中確率(周辺確率)を導出する。
  *
  * **`outcomeIndexSets`の構築元は呼び出し側の分岐で変わる**(Issue #92・#112)。順序付き
- * outcome空間を要する候補(win・馬連)が無い、または順序が判定不能な呼び出しは
+ * outcome空間を要する候補(win・馬連・馬単・枠連・三連単)が無い、または順序が判定不能な呼び出しは
  * `foldToCandidateSubsets`(畳み込み)経由で構築されるが、そのような候補があり順序が
  * 決定できた呼び出しは`foldToCandidateSubsets`を通らず、順序付きoutcome空間から
  * 直接構築される(`allocateGeneralBets`の`determined`分岐参照)。
@@ -1117,7 +1117,7 @@ export function allocateGeneralBets(
     ? resolveWakubanByUmaban(horses)
     : null;
 
-  // 順序付きoutcome空間を要する候補(win・馬連。ALLOCATION_BET_TYPE_REQUIRES_ORDER参照)の
+  // 順序付きoutcome空間を要する候補(win・馬連・馬単・枠連・三連単。ALLOCATION_BET_TYPE_REQUIRES_ORDER参照)の
   // 有無を判定し(Issue #92・#112で馬連に一般化)、winOutcome(3値)を確定する。そのような
   // 候補が無い呼び出しはここで確定した`winOutcome:{kind:"not-requested"}`以外、以降の
   // ロジックを一切変えない(AC-B1b-2の非破壊性)。あるときだけ、順序付きoutcome空間を
@@ -1163,7 +1163,7 @@ export function allocateGeneralBets(
     }
   }
 
-  // winOutcomeが"determined"でなければ、順序付きoutcome空間を要する候補(win・馬連)を
+  // winOutcomeが"determined"でなければ、順序付きoutcome空間を要する候補(win・馬連・馬単・枠連・三連単)を
   // 最適化の対象から完全に除外する(AC-B1b-3(b)。isHitを常にfalseにするだけでは、
   // candidateUmabanSet・candidateCap選抜・診断値の件数にその候補の痕跡が残り、
   // そのような候補が無い呼び出しと畳み込みの粒度・件数が微妙に異なってしまう
@@ -1208,14 +1208,14 @@ export function allocateGeneralBets(
   //
   // winOutcomeが"determined"でない場合: 既存どおり集合空間(model.buildDistributionが
   // 返すもの)+foldToCandidateSubsets(候補集合への畳み込み)を通す
-  // (AC-B1b-2の非破壊性。finalCandidatesは上記で順序を要する候補〈win・馬連〉を除外済みの
+  // (AC-B1b-2の非破壊性。finalCandidatesは上記で順序を要する候補〈win・馬連・馬単・枠連・三連単〉を除外済みの
   // ため、そのような候補が無い呼び出しと構造的に同一)。
   //
   // winOutcomeが"determined"の場合: 「誰が1着か」(win)・「誰が1着2着か」(馬連)・
   // 「上位topFinishCount集合は何か」(place/wide/trio)を**同じ確率空間**(Σ=1)から
   // 同時に決定する必要があるため(boss裁定。片方の空間だけでは他方が決定できない)、既に
   // 構築済みの順序付きoutcome空間(orderedRaw。P(頭数,topFinishCount)通り)を使い、
-  // win・馬連・place/wide/trioいずれのisHitもこの同じ生の分布から直接判定する。
+  // win・馬連・馬単・枠連・三連単・place/wide/trioいずれのisHitもこの同じ生の分布から直接判定する。
   // **`foldToCandidateSubsets`は通さない**(#92の裁定を維持。`foldToCandidateSubsets`は
   // `placed`を候補集合と交差させ昇順ソートする「順序を捨てる」畳み込みであり、winの
   // identity判定〈`order[0]===umaban`〉・馬連の並び判定〈`{order[0],order[1]}`〉を
@@ -1223,12 +1223,13 @@ export function allocateGeneralBets(
   //
   // **一方、Issue #96で`foldOutcomeIndexSetsBySignature`(署名畳み込み)を新たに適用する**。
   // これは`foldToCandidateSubsets`とは別物: `indices`列(どの買い目候補が的中したか)自体は
-  // 一切変更せず、`indices`が完全一致するoutcome同士の確率を合算するだけなので、win・馬連の
+  // 一切変更せず、`indices`が完全一致するoutcome同士の確率を合算するだけなので、win・馬連・馬単・枠連・三連単の
   // identity判定を一切失わない(`indices`が同じなら`wealth`は常に同一になるため確率を
   // 合算しても厳密に等価。導出は`allocation-primitives.ts`の同関数JSDoc参照)。順序を要する
   // 候補が1件でもあると順序付きoutcome空間(畳み込み無しではP(候補数,3)通り)がそのまま
   // `runGreedyAllocation`/`computeHitProbabilities`に渡り計算量が跳ね上がっていたため
-  // (実測: 中央16頭の実オッズで`buildMixedAllocationDisplay`が約7.9倍遅くなった)、
+  // (`buildMixedAllocationDisplay`が目に見えて遅くなった。倍率は環境依存で、再現と比較の仕方は
+  // `allocation-primitives.ts`の`foldOutcomeIndexSetsBySignature`のJSDoc「背景」節を参照)、
   // 両方へ渡す前にここで1回だけ畳み込む。
   let outcomeIndexSets: readonly OutcomeIndexSet[];
   if (winOutcome.kind === "determined") {

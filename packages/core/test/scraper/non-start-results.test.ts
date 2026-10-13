@@ -14,7 +14,7 @@ import type { FinishPosition, HorseRaceResult } from "../../src/scraper/types.js
 /**
  * Issue #261 — 出走しなかった行(除外・取消)を戦績から外す。
  *
- * 背景: 東京5R(2026-10-11・2歳新馬)の 3 番 マイネルユンフェンは、10/04 の東京2R(2歳新馬)で出走除外に
+ * 背景: 東京5R(2026-10-11・2歳新馬)の 3 番 マイネルユンフェンは、10/04 の東京5R(4回東京2日目・2歳新馬)で出走除外に
  * なっていた。netkeiba の戦績には着順セル「除」の行が残り、ペース欄にはそのレース全体の前後半3Fが入る。
  * 旧実装はこの行を1走として扱い、「過去ペース傾向=後傾(先行有利)1回」「レース間隔=連闘〜中3週」
  * 「前走から継続」をプロンプトに出し、3着内率(ローテーション適性)まで動かしうる状態だった。
@@ -38,7 +38,7 @@ function rowWith(finishPosition: FinishPosition | null): HorseRaceResult {
   return { ...base, finishPosition };
 }
 
-describe("実物の応答(マイネルユンフェン・10/04 東京2R で除外)", () => {
+describe("実物の応答(マイネルユンフェン・10/04 東京5R で除外)", () => {
   it("パーサは「除」の行を1行返し、着順は非数値の「除」・ペースにはレース全体の値が入っていること(除去の前提)", () => {
     const rows = parseHorseResults(NON_START_FIXTURE);
     expect(rows).toHaveLength(1);

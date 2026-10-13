@@ -53,9 +53,10 @@
  *   `includeBracketQuinella: null`〈記録なし〉のまま読める。v1.13.0〈#150〉で保存された行は
  *   枠連の買い目行を持ちうるが、買い目行からONと推定はしない〈#31〉。
  *   `includeQuinella`/`includeExacta`/`includeTrifecta`と同型)。
- * - コード5列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
+ * - コード6列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
  *   combo_odds_trio): `AllocationOutcomeCodes` をそのまま6列へ分解する(comboOddsはwide/trioの2列)。
- * - 実効値4列(bet_unit/greedy_steps/candidate_cap/model_id・model_approximate):
+ * - 実効値5列(bet_unit/greedy_steps/candidate_cap/model_id/model_approximate。
+ *   `getAllocationForVerify`のJSDoc〈`analysis-store.ts` 759行付近〉の数え方と同じ):
  *   経路ごとに参照するconfigオブジェクトを一致させる(2026-08-27追加指定)。
  *   `betUnit`/`greedySteps`は「これらの値が実際に使われた」経路の既定値定数を直接参照する
  *   (`allocateGeneralBets`/`allocatePlaceBets`のconfig引数と同じ定数。値が偶然一致していても
@@ -187,7 +188,7 @@ export function toMixedAllocationSettings(
   return { ...settings, evThreshold };
 }
 
-/** `AllocationOutcomeCodes` を、メタ行のコード5列(comboOddsはwide/trioの2列)へ分解する。 */
+/** `AllocationOutcomeCodes` を、メタ行のコード6列(routeに加え、comboOddsはwide/trioの2列)へ分解する。 */
 function codesColumnsOf(
   codes: AllocationOutcomeCodes,
 ): Pick<

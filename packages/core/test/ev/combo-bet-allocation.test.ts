@@ -4469,3 +4469,40 @@ describe("allocateGeneralBets: 三連単(trifecta)候補の統合(Issue #128・#
     });
   });
 });
+
+describe("allocateGeneralBets: 注入したモデルのid/approximateが結果に反映されること(Issue #86。model引数を無視して現在の既定をハードコードで返す退行の検出)", () => {
+  // 現在の既定(PLACKETT_LUCE_MODEL: id="plackett-luce"・approximate=false。#81で既定に採用)とは
+  // 異なるid・approximateを持つスタブを注入する。approximateはbooleanで値が2つしかないため、
+  // 「CBとも現在の既定とも異なる」値は表現できない。この`it`の契約は「現在の既定(PL)へのハードコード
+  // 退行の検出」なので、スタブのapproximateはPLと異なるtrueに固定し、比較対象もPLに揃える
+  // (bet-allocation.test.tsの「差し替えたモデルのid/approximateが反映されること」と同じ形)。
+  const swappedModel: PlaceJointModel = {
+    id: "exact-future-model",
+    approximate: true,
+    buildDistribution: () => [
+      { placed: [], probability: 0.4 },
+      { placed: [1], probability: 0.6 },
+    ],
+  };
+  const horses: JointModelHorse[] = [{ umaban: 1, placeProb: 0.6 }];
+  const candidates: AllocationCandidate[] = [{ betType: "place", umabans: [1], odds: 3, ev: 1.8, isPositive: true }];
+  const config: GeneralBetAllocationConfig = {
+    ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+    bankroll: 10000,
+    perRaceCap: 10000,
+  };
+
+  it("前提固定(空振り防止): 配分が実際に1件以上出ており、見送り(isSkip)になっていないこと", () => {
+    const result = allocateGeneralBets(horses, 1, candidates, config, swappedModel);
+    expect(result.isSkip).toBe(false);
+    expect(result.allocations.length).toBeGreaterThan(0);
+  });
+
+  it("結果のmodelId/modelApproximateが注入したスタブの値であり、現在の既定(PL)の値とは異なること", () => {
+    const result = allocateGeneralBets(horses, 1, candidates, config, swappedModel);
+    expect(result.modelId).toBe("exact-future-model");
+    expect(result.modelApproximate).toBe(true);
+    expect(result.modelId).not.toBe(PLACKETT_LUCE_MODEL.id);
+    expect(result.modelApproximate).not.toBe(PLACKETT_LUCE_MODEL.approximate);
+  });
+});

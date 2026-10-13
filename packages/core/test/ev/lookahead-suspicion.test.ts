@@ -141,6 +141,13 @@ describe("classifyLookaheadSuspicion(先読みリーク疑いの分類)", () => 
       expect(classifyLookaheadSuspicion({ ...base, analyzedAt: "2026-07-13T15:30:00.000Z" })).toBe("suspect");
     });
 
+    it("1桁時の発走時刻(9:05)も読める: 9:05 JST(=00:05:00Z)の1秒前は clean、ちょうどは suspect(Issue #147 の記録31)", () => {
+      // 本番の抽出は `\d{1,2}:\d{2}` なので 1桁時は到達しうる。2桁固定の正規表現に変えると読めず unknown に倒れる。
+      const base = input({ raceSnapshot: snapshotWith("9:05") });
+      expect(classifyLookaheadSuspicion({ ...base, analyzedAt: "2026-07-05T00:04:59.000Z" })).toBe("clean");
+      expect(classifyLookaheadSuspicion({ ...base, analyzedAt: "2026-07-05T00:05:00.000Z" })).toBe("suspect");
+    });
+
     it("kaisaiDate がある行は raceId の月日より kaisaiDate を優先する(kaisaiDate ?? raceId の順)", () => {
       // raceId は 7/14 を指すが kaisaiDate は 7/15。20:50 JST 発走は 7/15 なら 2026-07-15T11:50:00Z。
       const base = input({
@@ -163,6 +170,22 @@ describe("classifyLookaheadSuspicion(先読みリーク疑いの分類)", () => 
     it("kaisaiDate が壊れている行(実在しない日付)は、raceId に頼らず日付不明として unknown", () => {
       expect(
         classifyLookaheadSuspicion(input({ kaisaiDate: "20260230", raceSnapshot: snapshotWith("15:45") })),
+      ).toBe("unknown");
+    });
+
+    it("地方でも kaisaiDate が壊れている行は、raceId の月日にフォールバックせず unknown(Issue #147 の記録32)", () => {
+      // 前提固定: 同じ raceId・同じ分析日時で kaisaiDate を無効にしないと、raceId の月日(7/14)で判定でき、20:50 JST 発走
+      // (=11:50:00Z)より後の 12:00Z は suspect になる。つまり「unknown」はフォールバックしないことの結果であって、入力の退化ではない。
+      const analyzedAt = "2026-07-14T12:00:00.000Z";
+      expect(
+        classifyLookaheadSuspicion(
+          input({ raceId: NAR_RACE_ID, kaisaiDate: null, analyzedAt, raceSnapshot: snapshotWith("20:50") }),
+        ),
+      ).toBe("suspect");
+      expect(
+        classifyLookaheadSuspicion(
+          input({ raceId: NAR_RACE_ID, kaisaiDate: "20260230", analyzedAt, raceSnapshot: snapshotWith("20:50") }),
+        ),
       ).toBe("unknown");
     });
   });
@@ -210,6 +233,8 @@ describe("classifyLookaheadSuspicion(先読みリーク疑いの分類)", () => 
       { name: "startTime が時刻の形でない", snapshot: snapshotWith("発走未定") },
       { name: "startTime の時が範囲外(25:00)", snapshot: snapshotWith("25:00") },
       { name: "startTime の分が範囲外(15:60)", snapshot: snapshotWith("15:60") },
+      // 時の上限の境界(Issue #147 の記録30)。24:00 を「翌日0時」とは読まない(時の上限 `>23` が `>24` に緩むと受理されて clean になる)。
+      { name: "startTime の時が24(24:00。翌日0時とは読まない)", snapshot: snapshotWith("24:00") },
       { name: "startTime の前後に余計な文字がある", snapshot: snapshotWith("15:45発走") },
     ];
     it.each(invalidSnapshots)("$name → 時刻なしとして扱い、同日の分析は unknown", ({ snapshot }) => {

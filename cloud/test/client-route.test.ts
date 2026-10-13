@@ -150,7 +150,7 @@ describe("app.ts は、画面の判定を screenOf だけに任せる(Issue #191
     expect(code.match(/route\.(analysis|race)\s*[!=]==\s*null/g) ?? []).toEqual([]);
   });
 
-  // Issue #238(契約変更): 旧「5 つの関数が screenOf(route) を使う」は、`screenOf` に役割(閲覧者は設定・移行・検証を admin-only にする)を足した `currentScreen()` を使う、に変わった。
+  // Issue #238(契約変更): 旧「5 つの関数が screenOf(route) を使う」は、`screenOf` に役割(閲覧者は設定・移行を admin-only にする。検証は Issue #263 で閲覧者にも開いた)を足した `currentScreen()` を使う、に変わった。
   // 保証していたこと(画面の判定が 1 か所に集まり、画面を判定する 5 つの関数がそれを使う)は保つ。加えて、`screenOf(route)` を直接呼ぶのは `currentScreen` の中の 1 箇所だけであること(役割の判定を素通りしない)を固定する。
   it("currentScreen() を呼ぶ箇所が、画面を判定する 5 つの関数(render・onCompleted・syncLatestAnalysis・ensureLoaded・onRefresh)にあり、screenOf(route) を直接呼ぶのは currentScreen の中の 1 箇所だけ", () => {
     for (const fn of ["render", "onCompleted", "syncLatestAnalysis", "ensureLoaded", "onRefresh"]) {

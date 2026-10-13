@@ -808,8 +808,11 @@ export class AnalysisStore {
    * 意味の無い内部パラメータ(`getAllocationForVerify`のJSDocと同じ判断)。詳細は
    * {@link StoredAllocation} のJSDoc参照。
    *
-   * `include_quinella`/`include_exacta`/`include_trifecta`/`include_bracket_quinella`は他13列と
-   * 異なりNULLを許す列のため、DB値が`null`のときはそれぞれ`includeQuinella: null`/
+   * `include_quinella`/`include_exacta`/`include_trifecta`/`include_bracket_quinella`は、設定の
+   * エコー列のうち`bankroll`/`per_race_cap`/`kelly_fraction`/`ev_threshold`/`include_combo_odds`/
+   * `include_wide`/`include_trio`(いずれもNOT NULL)と異なりNULLを許す列のため
+   * (`unavailable_reason`等のコード列も別の理由でNULLを許すが、それらは「該当なし」を表す)、
+   * DB値が`null`のときはそれぞれ`includeQuinella: null`/
    * `includeExacta: null`/`includeTrifecta: null`/`includeBracketQuinella: null`(記録なし)として
    * そのまま返す(0/1のときのみ`!== 0`でboolean化する。
    * #31: 記録なしをfalseに丸めない)。

@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  * `remote = true` が無いことは scripts/test/cloud-config-guard.test.ts が固定している)。
  *
  * 限界: ローカルの D1 は workerd 内蔵の SQLite で、本番の D1 と同じビルドとは限らない。外部キーと実行計画の挙動は、本番のデプロイ後に
- * `/api/health`(D1 の疎通)と、#172 の最初の実保存で確かめる。
+ * `/api/health`(D1 の疎通)と、#175(#172-b)の分析履歴ストアの最初の実保存で確かめる。
  */
 
 const CLOUD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -129,7 +129,7 @@ describe("AC-a2: 外部キーが効く(analyses を親とする3つの子の表)
 });
 
 /**
- * #172(ストア)が発行する想定の検索の文。race_id の絞り込みは exe の `listAnalyses` と同じ文(core の codec)。
+ * #175(#172-b。分析履歴ストア `src/analysis-repository.ts`)が発行する想定の検索の文。race_id の絞り込みは exe の `listAnalyses` と同じ文(core の codec)。
  * 版別の列挙は exe の `listAnalyzedRaceIdsByPromptVersion` と同じ文(analysis-store.ts のインライン。codec に切り出されていないので写している)。
  */
 const BY_RACE_SQL = "SELECT id FROM analyses WHERE race_id = ? ORDER BY id";

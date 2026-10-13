@@ -142,6 +142,10 @@ describe("設定フォームの入力検証(純関数)", () => {
         expect(BASE_SCORE_WEIGHT_LABELS[key]).toBeTruthy();
       }
     });
+
+    it("weightChange のラベルは「斤量」(馬体重は別の項目。「斤量・馬体重」に戻さない。Issue #213・#214)", () => {
+      expect(BASE_SCORE_WEIGHT_LABELS.weightChange).toBe("斤量");
+    });
   });
 
   describe("INCLUDE_COMBO_ODDS_LABELS(組合せオッズ取得設定の文言。機能D-2c第3段・Issue #28)", () => {

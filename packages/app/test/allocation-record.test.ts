@@ -1045,7 +1045,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeExacta: true,
       includeTrifecta: true,
       includeBracketQuinella: true,
-      // skipでも配分計算自体には到達しているため、実効値4列はplace-onlyの通常ケースと同じ。
+      // skipでも配分計算自体には到達しているため、実効値5列はplace-onlyの通常ケースと同じ。
       betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: null,
