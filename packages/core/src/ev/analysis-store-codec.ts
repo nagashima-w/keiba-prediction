@@ -486,7 +486,7 @@ export function toStoredHorse(row: HorseRow): StoredAnalysisHorse {
  * analyses.race_snapshot_json(JSON文字列)をレース情報スナップショットへ復元する(Issue#10)。
  * NULL(未保存・旧レコード)・JSON parseの失敗は、silentにthrowせず null にフォールバックする
  * (getRaceResultDetail/toStoredPassingと同じ防御的復元方針)。スキーマの妥当性検証は行わない
- * (呼び出し側〈main/analysis-export.ts〉が必要に応じて構造を検証する)。
+ * (呼び出し側〈analysis/analysis-export.ts〉が必要に応じて構造を検証する)。
  */
 export function toStoredRaceSnapshot(raw: string | null): unknown {
   if (raw === null) {

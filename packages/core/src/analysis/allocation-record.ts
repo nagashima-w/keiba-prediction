@@ -1,10 +1,10 @@
 /**
  * allocation-record — 配分提案の永続化(Issue #59・#56-3)。
  *
- * `shared/mixed-race-allocation.ts` の `buildMixedRaceAllocationWithOutcome` が返す
+ * `analysis/mixed-race-allocation.ts` の `buildMixedRaceAllocationWithOutcome` が返す
  * `MixedRaceAllocationOutcome`(view + コード付き到達状態)を、core `AnalysisStore.saveAnalysis`
  * が受け取る `AnalysisAllocationRecord`(analysis_allocation_meta / analysis_bets の2テーブル分)へ
- * 変換する純関数を持つ。呼び出し側(main/analysis-pipeline.ts)の変更を最小に保つため、
+ * 変換する純関数を持つ。呼び出し側(analysis/analysis-pipeline.ts)の変更を最小に保つため、
  * 経路網羅のロジックはすべてこのファイルに集約する(boss着手前ゲート2026-08-27・#59)。
  *
  * ## 列の由来(#59スキーマ固定。増減は停止条件。Issue #118・#126・#140・#151で4つの例外を追加)
@@ -135,7 +135,7 @@ import type {
  * 至ったIssue #118で解除した)。#117時点までは、この型に持たせる目的は`MixedAllocationSettings`
  * (7→8項目)まで値を運ぶ配管の一部としてのみだった(`resolveMixedBetTypes`・
  * `isComboBetTypesOff`への実際の接続はIssue #117(#24-D3b-2)で完了。
- * `shared/mixed-race-allocation.ts`のJSDoc参照)。
+ * `analysis/mixed-race-allocation.ts`のJSDoc参照)。
  *
  * `includeExactaInAllocation`(#24-E3a・Issue #124)は7→8項目化した追加分。**メタ行への
  * 書き込みはIssue #126(#24-E3c)で接続した**: `settingsColumnsOf`(上記「## 列の由来」参照)が
@@ -144,11 +144,11 @@ import type {
  * 〈過去分析再表示の「馬単: ON/OFF/記録なし」〉が実在するに至ったIssue #126で解除した)。
  * #125時点までは、この型に持たせる目的は`MixedAllocationSettings`(8→9項目)まで値を運ぶ配管の
  * 一部としてのみだった(`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #125
- * 〈#24-E3b〉で完了。`shared/mixed-race-allocation.ts`のJSDoc参照)。
+ * 〈#24-E3b〉で完了。`analysis/mixed-race-allocation.ts`のJSDoc参照)。
  *
  * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は8→9項目化した追加分。
  * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #139(#25-E3b)で完了した
- * (`shared/mixed-race-allocation.ts`のJSDoc参照)。**メタ行への書き込みはIssue #140(#25-E3c)で
+ * (`analysis/mixed-race-allocation.ts`のJSDoc参照)。**メタ行への書き込みはIssue #140(#25-E3c)で
  * 接続した**: `settingsColumnsOf`(上記「## 列の由来」参照)がこのフィールドを読み、メタ行の
  * 設定エコーは`include_wide`/`include_trio`/`include_quinella`/`include_exacta`/
  * `include_trifecta`の5列になった(#59が固定した「列一覧は固定・増減は停止条件」を、列を読む人
@@ -157,7 +157,7 @@ import type {
  *
  * `includeBracketQuinellaInAllocation`(#26-E3a・Issue #149)は9→10項目化した追加分。
  * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #150(#26-E3b)で完了した
- * (`shared/mixed-race-allocation.ts`のJSDoc参照)。**メタ行への書き込みはIssue #151(#26-E3c)で
+ * (`analysis/mixed-race-allocation.ts`のJSDoc参照)。**メタ行への書き込みはIssue #151(#26-E3c)で
  * 接続した**: `settingsColumnsOf`(上記「## 列の由来」参照)がこのフィールドを読み、メタ行の
  * 設定エコーは`include_wide`/`include_trio`/`include_quinella`/`include_exacta`/
  * `include_trifecta`/`include_bracket_quinella`の6列になった(#59が固定した「列一覧は固定・

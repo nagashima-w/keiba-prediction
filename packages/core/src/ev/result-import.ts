@@ -19,7 +19,7 @@ import { raceResultUrl } from "../scraper/urls.js";
 import type { RaceComboPayoutsSaveInput, RaceResultEntry } from "./analysis-store-types.js";
 
 /**
- * 結果取込の結果(UI通知用。判別共用体)。app の `ImportResultOutcome`(`shared/analysis-types.ts`)と**同じ形**
+ * 結果取込の結果(UI通知用。判別共用体)。`analysis/analysis-types.ts` の `ImportResultOutcome`(exe の `shared/analysis-types.ts` から #286 で移した)と**同じ形**
  * (同一性は `packages/core/test/ev/result-import-flow.test.ts` の末尾の型テストが固定する。app は Issue #287 で削除した)。
  * - "imported": 結果が確定していて着順を保存した(複勝払戻は無いこともある。hasPayout で判別)。
  * - "not_confirmed": まだ発走前・結果確定前で着順を取得できなかった(何も保存していない)。

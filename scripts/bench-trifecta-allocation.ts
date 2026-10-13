@@ -28,10 +28,10 @@
  *    「合成値」であることを明記する(メイン裁定)。
  * 2. **Workerプール(#119)の12レース一括見積もり**: 実際にWorker Poolを起動して測るのではなく、
  *    単一レースの実測平均時間から算術的に見積もる(`ceil(12/並列数)×1レース平均時間`)。
- *    `mixed-allocation-worker-pool.ts`はブラウザのWeb Worker前提でNode/tsxから素朴には動かせず、
+ *    exe の `mixed-allocation-worker-pool.ts` はブラウザのWeb Worker前提でNode/tsxから素朴には動かせず、
  *    実機Electron測定(#119の`verify-worker-pool-electron.mjs`相当)は本タスクの射程外という
  *    メイン裁定。並列数の上限式は`computeAllocationWorkerPoolCap`
- *    (`mixed-allocation-worker-pool.ts`)の`max(1, min(hardwareConcurrency−1, maxWorkers=4))`
+ *    (exe の `mixed-allocation-worker-pool.ts`)の`max(1, min(hardwareConcurrency−1, maxWorkers=4))`
  *    に基づき、**2並列(3コア機相当)・4並列(5コア以上相当)の両方**を見積もる(メイン指定)。
  *    見積もりであり実測ではないことを出力に明記する。
  *    (`mixed-allocation-worker-pool.ts`・`verify-worker-pool-electron.mjs` は exe の一部で、#287 で削除した。最後に残っているコミットは 3c1664e。)

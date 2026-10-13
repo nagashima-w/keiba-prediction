@@ -1,6 +1,6 @@
 /**
  * mixed-race-allocation-trifecta.test.ts — 三連単(trifecta)を配分の券種選択・D-2フォールバック
- * 規則(`shared/mixed-race-allocation.ts`)へ接続する配線のテスト(Issue #139・#25-E3b)。
+ * 規則(`analysis/mixed-race-allocation.ts`)へ接続する配線のテスト(Issue #139・#25-E3b)。
  *
  * `mixed-race-allocation-exacta.test.ts`(馬単版・Issue #125)と同じ構造を踏襲する。
  *

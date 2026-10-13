@@ -4,10 +4,10 @@
  * boss着手前ゲート(第2段Go)で確定した設計。第1段(`AnalysisResult` に `wideCombo?`/`trioCombo?`/
  * `comboOdds?` を追加)を土台に、`@keiba/core/ev/combo-bet-allocation` の汎用配分エンジン
  * (`allocateGeneralBets`)にそのまま渡せる `AllocationCandidate[]` を組み立てる純関数
- * `buildMixedCandidates` を提供する。**着手当時(第2段)は画面(`BatchAnalysisView.tsx`)・
+ * `buildMixedCandidates` を提供する。**着手当時(第2段)は画面(exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで))・
  * 既存の複勝専用ビュー(`bet-allocation-view.ts`)を一切変更しなかった**(本ファイルからは
  * import するだけだった)。**追記(Issue #57)**: 本ファイル自体は `renderer/mixed-candidates.ts`
- * から `shared/mixed-candidates.ts` へ移動した(ファイル名は不変)。import 先も
+ * から `shared/mixed-candidates.ts` へ移動した(ファイル名は不変。その後 #286 で `analysis/` へ移った)。import 先も
  * `resolvePlaceBetTarget`/`PlaceBetUnavailableReason` の移設に伴い `./race-allocation.js`
  * (旧`./bet-allocation-view.js`)へ変わっている(下記import文参照)。
  *
@@ -156,7 +156,7 @@ export type MixedCandidateBetType = AllocationBetType;
  * **#112(#24-D1)で`quinella`(馬連)が`AllocationBetType`に加わったが、当初は本配列に
  * 含めていなかった。** #116(#24-D3b-1)で`buildQuinellaCandidatesForBetType`
  * (core `buildQuinellaCandidates`を呼ぶ本ファイルの実装)を新設した後も、配分の券種選択
- * (`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`)が実際に`"quinella"`を渡すまでは
+ * (`analysis/mixed-race-allocation.ts`の`resolveMixedBetTypes`)が実際に`"quinella"`を渡すまでは
  * 利用者から見える配分結果を変えないよう、意図的に本配列へ加えるのを見送っていた
  * (オーケストレーター裁定・Issue #116 Q1)。**Issue #117でその接続を行い、本配列にも
  * `quinella`を加えた**(「対象にする」宣言と実体〈`buildQuinellaCandidatesForBetType`・

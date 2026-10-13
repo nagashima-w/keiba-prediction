@@ -351,7 +351,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
     // 検出できない。booleanは2値しかないため、6項目(includeComboOdds/includeWideInAllocation/
     // includeTrioInAllocation/includeQuinellaInAllocation/includeExactaInAllocation/
     // includeTrifectaInAllocation)を2件だけで「非定数」かつ「互いに異なるパターン」には
-    // できない(鳩の巣原理。ipc-allocation-wiring.test.tsと同じ理由で3件目を追加する)。
+    // できない(鳩の巣原理。exe の ipc-allocation-wiring.test.ts と同じ理由で3件目を追加する)。
     // パターン(件1,件2,件3): comboOdds=(T,F,T)・wide=(F,T,T)・trio=(T,T,F)・quinella=(F,T,F)・
     // exacta=(F,F,T)・trifecta=(T,F,F)とし、6項目とも非定数かつ互いに異なる列にする
     // (#24-D3aでquinella列、#24-E3aでexacta列、#25-E3aでtrifecta列を追加。3ビットパターン

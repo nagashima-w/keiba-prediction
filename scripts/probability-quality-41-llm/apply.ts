@@ -2,7 +2,7 @@
  * #156(#41-B)段階3の適用(1レース)。サブエージェントが作った応答ファイルを、production の
  * `analyzeRace`(パース・`maxAdjust` のクリップ・リトライ・フォールバック)に通して補正後確率を作る。
  * `runAnalysis` を `driveRunAnalysis` 経由で駆動し(段階1と同じ組み立て)、`deps.analyze` に
- * 「ファイル版 `LlmClient` を使う `analyzeRace`」を入れる(`pipeline-deps.ts` の束縛と同じ形)。
+ * 「ファイル版 `LlmClient` を使う `analyzeRace`」を入れる(exe の `pipeline-deps.ts` の束縛と同じ形)。
  *
  * ## 整合性の検証(食い違えば例外。黙って進まない)
  * - `analyzeRace` が組み立てて `complete` に渡したプロンプトの SHA-256 が、段階1が記録した値と一致する。

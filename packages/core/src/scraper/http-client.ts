@@ -76,7 +76,7 @@ export interface HttpClientOptions {
   /**
    * サポート外charset検出時などの警告メッセージを受け取るコールバック(要修正4)。
    * core パッケージは electron に依存できないため、呼び出し側(app の main プロセス)が
-   * ログ基盤(main/logger.ts の logWarn)へ接続する際に注入する。未指定時は従来どおり
+   * ログ基盤(exe の main/logger.ts の logWarn(#287 で削除。3c1664e まで))へ接続する際に注入する。未指定時は従来どおり
    * console.warn を使う(後方互換)。
    */
   onWarn?: (message: string) => void;

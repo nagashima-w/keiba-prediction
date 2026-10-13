@@ -242,7 +242,7 @@ function toMixedCandidateInput(result: AnalysisResult): MixedCandidateBuildInput
 }
 
 /**
- * 券種別(betType)に金額・点数を集計する(mixed-allocation-view.tsのbuildMixedAllocationBreakdownと
+ * 券種別(betType)に金額・点数を集計する(exe の mixed-allocation-view.ts の buildMixedAllocationBreakdown と
  * 同じ集計方式。Issue #76でumabans.lengthからの逆算をやめ、候補自身が運ぶbetTypeで集計する)。
  *
  * **Issue #96 AC-6: winを追加した。** #90で単勝(win)がアプリの配分提案に対応した後も

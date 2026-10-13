@@ -25,7 +25,7 @@
  * せず `PlackettLuceFitError` を例外として投げる。#20-A(#77)時点では production 呼び出し元が
  * ゼロだったため波及もゼロだったが、#81(#78-B)で既定モデルが本モデルへ切り替わった現在は
  * production からも到達しうる。この例外は `mixed-race-allocation.ts`・
- * `mixed-allocation-view.ts` 側の外側 try/catch(#80・#78-A で新設。型を問わず汎用的に捕捉する)
+ * exe の `mixed-allocation-view.ts`(#287 で削除。3c1664e まで) 側の外側 try/catch(#80・#78-A で新設。型を問わず汎用的に捕捉する)
  * が拾い、`route:"invalid"`/`kind:"invalid"` の見送り経路へ振り分ける(本例外専用の catch は
  * 設けていない)。
  *

@@ -1,6 +1,6 @@
 /**
  * mixed-race-allocation-exacta.test.ts — 馬単(exacta)を配分の券種選択・D-2フォールバック規則
- * (`shared/mixed-race-allocation.ts`)へ接続する配線のテスト(Issue #125・#24-E3b)。
+ * (`analysis/mixed-race-allocation.ts`)へ接続する配線のテスト(Issue #125・#24-E3b)。
  *
  * `mixed-race-allocation-quinella.test.ts`(馬連版・Issue #117)と同じ構造を踏襲する。
  *

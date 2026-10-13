@@ -25,7 +25,7 @@ export type VerifyVenueFilter = "all" | RaceVenueKind;
 /**
  * レース一覧の取得対象(UI表示用の3択。タスクB1で導入、タスクB2b-1でrendererからshared移設)。
  * main(期間バッチのlistDayRaces呼び分け)・renderer(3択UI)双方が参照するためshared層に置く。
- * 写像関数(raceListTargetToSelection/selectionToRaceListTarget)は shared/race-list-target.ts。
+ * 写像関数(raceListTargetToSelection/selectionToRaceListTarget)は exe の shared/race-list-target.ts(#287 で削除。3c1664e まで)。
  */
 export type RaceListTarget = "central" | "nar-all" | "nar-jpn";
 
@@ -324,7 +324,7 @@ export interface AnalysisResult {
    * (core analyzeRace の FALLBACK_REASON_TRUNCATED / FALLBACK_REASON_PARSE_ERROR /
    * FALLBACK_REASON_INVOCATION_ERROR のいずれか。論点C: 2026-07-19合意)。
    * DB(AnalysisRecord)には保存しない(marksDroppedReasonと同方針。論点D)。
-   * UI(BatchAnalysisView)では「LLM補正:」行のtooltip(title)に表示する。
+   * UI(exe の BatchAnalysisView(#287 で削除。3c1664e まで))では「LLM補正:」行のtooltip(title)に表示する。
    */
   readonly fallbackReason: string | null;
   /**
@@ -345,7 +345,7 @@ export interface AnalysisResult {
    * 得られなければ静的な既定モデル名。LLMスキップ時は null。
    * optional なのは既存の AnalysisResult リテラルを使うテスト・旧データを無改変で通すため
    * (runAnalysis 自身は必ず string/null のいずれかを明示的に返す)。
-   * 分析結果の画面に「分析モデル: …」として出す(renderer/format.ts の analysisModelText)。
+   * 分析結果の画面に「分析モデル: …」として出す(view/format.ts の analysisModelText)。
    */
   readonly model?: string | null;
   /**
@@ -674,24 +674,24 @@ export interface ProposedBetPopulationView {
  * Issue #145・#26-Fで追加。
  *
  * ★`quinella`フィールドはIssue #117(#24-D3b-2)でapp側の配分提案への組み込みが完了し
- * 買い目が実際に発生するようになったため、`VerifyView.tsx`も画面に馬連の行を出す
+ * 買い目が実際に発生するようになったため、exe の`VerifyView.tsx`(#287 で削除。3c1664e まで)も画面に馬連の行を出す
  * (#116までは買い目が構造的に0件だったため、#112「馬連 ¥0 0点」の事故と同型を避けるため
  * あえて表示しない設計だった。Issue #114 AC-6・着手前ゲートの合意)。
  *
  * ★`exacta`フィールドはIssue #121・#24-F2で追加したが、配分は馬単の買い目をまだ作らない
  * (#123・#24-E3bで対応予定)ため`betCount`は構造的に常に0であり、quinellaと同じ理由で
- * `VerifyView.tsx`への表示は#123へ申し送る(core `ProposedBetReport` JSDoc参照)。
+ * exe の`VerifyView.tsx`への表示は#123へ申し送る(core `ProposedBetReport` JSDoc参照)。
  *
  * ★`trifecta`フィールドはIssue #131・#25-Fで追加した。本インターフェースは「coreの型の
  * プレーン写し」を設計原則としており(この段落自体がその原則の記述)、画面表示の有無に
  * かかわらず core `ProposedBetReport` に追加されたフィールドは即座に写す(#121〈exacta〉と
- * 同じ扱い)。`VerifyView.tsx`への表示は#132へ申し送る(exactaと同じ理由。配分が三連単の
+ * 同じ扱い)。exe の`VerifyView.tsx`への表示は#132へ申し送る(exactaと同じ理由。配分が三連単の
  * 買い目をまだ作らないため`betCount`は構造的に常に0)。
  *
  * ★`bracketQuinella`フィールドはIssue #145・#26-Fで追加した(trifectaと同じ扱い。上記の
- * 「プレーン写し」の原則により即座に写す)。#145の時点では`VerifyView.tsx`への表示を#146へ申し送り、
+ * 「プレーン写し」の原則により即座に写す)。#145の時点ではexe の`VerifyView.tsx`への表示を#146へ申し送り、
  * 配分が枠連の買い目をまだ作らないため`betCount`は構造的に常に0だった。**Issue #150(#26-E3b)で配分が
- * 枠連の買い目を作るようになり、`VerifyView.tsx`の内訳・判定不能の行にも表示している。**
+ * 枠連の買い目を作るようになり、exe の`VerifyView.tsx`の内訳・判定不能の行にも表示している。**
  */
 export interface ProposedBetReportView {
   /** 母集団4分類の件数。 */
@@ -707,24 +707,24 @@ export interface ProposedBetReportView {
   /** 3連複の内訳。 */
   readonly trio: ProposedBetTypeSummaryView;
   /**
-   * 馬連の内訳(Issue #114・#24-F1)。Issue #117(#24-D3b-2)以降、`VerifyView.tsx`はこの値を
+   * 馬連の内訳(Issue #114・#24-F1)。Issue #117(#24-D3b-2)以降、exe の`VerifyView.tsx`はこの値を
    * 表示する(このJSDoc冒頭の注意参照)。
    */
   readonly quinella: ProposedBetTypeSummaryView;
   /**
    * 馬単の内訳(Issue #121・#24-F2)。配分が馬単の買い目をまだ作らないため`betCount`は
-   * 現時点で常に0(このJSDoc冒頭の注意参照)。`VerifyView.tsx`への表示は#123で行う。
+   * 現時点で常に0(このJSDoc冒頭の注意参照)。exe の`VerifyView.tsx`への表示は#123で行う。
    */
   readonly exacta: ProposedBetTypeSummaryView;
   /**
    * 三連単の内訳(Issue #131・#25-F)。配分が三連単の買い目をまだ作らないため`betCount`は
-   * 現時点で常に0(このJSDoc冒頭の注意参照)。`VerifyView.tsx`への表示は#132で行う。
+   * 現時点で常に0(このJSDoc冒頭の注意参照)。exe の`VerifyView.tsx`への表示は#132で行う。
    */
   readonly trifecta: ProposedBetTypeSummaryView;
   /**
    * 枠連の内訳(Issue #145・#26-F)。#145の時点では配分が枠連の買い目をまだ作らず`betCount`は
    * 常に0だったが、Issue #150(#26-E3b)で配分が枠連の買い目を作るようになり、`betCount`は実際の
-   * 買い目の数になった。`VerifyView.tsx`の内訳・判定不能の行にも表示している(#150)。
+   * 買い目の数になった。exe の`VerifyView.tsx`の内訳・判定不能の行にも表示している(#150)。
    */
   readonly bracketQuinella: ProposedBetTypeSummaryView;
   /** 未知の券種コードの内訳(Issue #76。`overall`には合算しない)。 */
@@ -1052,7 +1052,7 @@ export interface RaceLedgerView {
 
 /**
  * 期間バッチ「先取得+件数算出」フェーズ(phase1)の日ごとのアウトカム(表示用。タスクB2b-1)。
- * core RangeCollectResult.perDayOutcome(main/range-collect.ts)のプレーン写し(IPC越しの共有用)。
+ * core RangeCollectResult.perDayOutcome(exe の main/range-collect.ts(#287 で削除。3c1664e まで))のプレーン写し(IPC越しの共有用)。
  */
 export type PeriodBatchDayOutcomeView =
   | { readonly date: string; readonly status: "hasRaces"; readonly raceCount: number }
@@ -1061,7 +1061,7 @@ export type PeriodBatchDayOutcomeView =
 
 /**
  * 期間バッチ「先取得」(phase1)の全体進捗(main→renderer に webContents.send で通知。タスクC2)。
- * main/range-collect.ts の onProgress コールバックのペイロードと同じ形(日単位の単純な件数。
+ * exe の main/range-collect.ts の onProgress コールバックのペイロードと同じ形(日単位の単純な件数。
  * レース内段階が無い点は BulkImportProgress と同じ流儀)。
  */
 export interface PeriodBatchCollectProgress {
@@ -1074,7 +1074,7 @@ export interface PeriodBatchCollectProgress {
 /**
  * 期間バッチの実行対象1レース(表示用・IPC共有用。タスクC1)。
  * 中央のraceIdは暦日を持たないため、収集時にそのレースが見つかった開催日(kaisaiDate)を
- * レースごとに運ぶ(main/range-collect.ts の RangeCollectTargetRace のプレーン写し)。
+ * レースごとに運ぶ(exe の main/range-collect.ts の RangeCollectTargetRace のプレーン写し)。
  * phase2(期間バッチ実行ハンドラ)はこの kaisaiDate でレースごとに runAnalysis を呼び分け、
  * 日跨ぎのレースで開催日を取り違えない(単一共有dateを渡すバグを構造的に防ぐ)。
  */
@@ -1088,7 +1088,7 @@ export interface PeriodBatchTargetRace {
 /**
  * 期間バッチ「先取得+件数算出」フェーズ(phase1)の結果(タスクB2b-1、targetRacesはタスクC1で導入)。
  * 実際の分析実行(phase2)は行わず、対象レース(raceId+kaisaiDate)と件数の算出までを表す
- * (main/range-collect.ts の RangeCollectResult のプレーン写し。IPC越しの共有用)。
+ * (exe の main/range-collect.ts の RangeCollectResult のプレーン写し。IPC越しの共有用)。
  */
 export interface PeriodBatchCollectResult {
   /** 収集成功レース総数(dedup前)。failureになった日のレースは含まれない。 */

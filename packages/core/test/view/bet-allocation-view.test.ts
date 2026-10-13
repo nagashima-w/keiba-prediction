@@ -260,7 +260,7 @@ describe("formatBetLabel(買い目ラベルの純関数生成。umabanをJSXに�
  * 昇順の組として表示)にすると、着順の情報が失われる(13→8と8→13が同じ「8-13」に
  * 潰れて見える)。本関数はbetTypeを見て、exactaだけはumabansの並びをそのまま保った
  * 「N→M」表記(netkeibaの表記に合わせる)にし、それ以外(place/win/wide/quinella/trio)は
- * 既存の`formatBetLabel`と同じ表記のままにする(呼び出し元〈BatchAnalysisView.tsx・
+ * 既存の`formatBetLabel`と同じ表記のままにする(呼び出し元〈exe の BatchAnalysisView.tsx(#287 で削除。3c1664e まで)・
  * allocation-proposal-view.ts〉を書き換えても、馬単以外の券種の見た目は変えない)。
  */
 describe("formatComboBetLabel(券種を見て表記を切り替える。Issue #125・#24-E3b・AC-6、Issue #139・#25-E3bで三連単を追加)", () => {
@@ -363,7 +363,7 @@ describe("formatAllocationSummary(合計行。capAppliedで文言切替)", () =>
   });
 });
 
-describe("NOT_DIVERSIFIED_NOTE(機能D-2c第4段でexport。mixed-allocation-view.tsが再利用する)", () => {
+describe("NOT_DIVERSIFIED_NOTE(機能D-2c第4段でexport。exe の mixed-allocation-view.ts が再利用する)", () => {
   it("空でなく、原因を名指ししない中立表現であること(「1レース上限」を名指ししない)", () => {
     expect(NOT_DIVERSIFIED_NOTE.length).toBeGreaterThan(0);
     expect(NOT_DIVERSIFIED_NOTE).not.toContain("1レース上限の制約により");

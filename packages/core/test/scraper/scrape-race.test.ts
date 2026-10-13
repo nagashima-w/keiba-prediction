@@ -495,7 +495,7 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
     ).toBe(false);
   });
 
-  it("includeComboOdds:falseを明示しても、省略時と完全に同じURL列になること(機能D-2c第1段・Issue #28: pipeline-deps.tsが第3引数を明示的に渡す配線に変わったことへの回帰ピン)", async () => {
+  it("includeComboOdds:falseを明示しても、省略時と完全に同じURL列になること(機能D-2c第1段・Issue #28: exe の pipeline-deps.ts が第3引数を明示的に渡す配線に変わったことへの回帰ピン)", async () => {
     const omittedFetcher = new RecordingFetcher(defaultHandler);
     await scrapeRace(RACE_ID, { fetcher: omittedFetcher, now: FIXED_NOW });
 

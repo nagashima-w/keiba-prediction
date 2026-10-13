@@ -4,14 +4,14 @@ import { describe, expect, it } from "vitest";
 import type { StoredAllocationView } from "../../src/analysis/analysis-types.js";
 
 /**
- * shared/analysis-types.ts の配分提案View型(core型の手動コピー。Issue #55)が、core型と
+ * analysis/analysis-types.ts の配分提案View型(core型の手動コピー。Issue #55)が、core型と
  * 構造的に完全一致していることを型レベルで固定する(boss メタレビュー指摘: 構造的部分型のため
  * `RaceLedgerView.allocation = e.allocation` の代入は shared側がフィールドを「落とす」方向の
  * ドリフトが起きてもコンパイルを通してしまい、静かに壊れる)。
  *
  * `analysis-types-combo-odds-pin.test.ts` と同じ手法(`Equal`/`ExpectTrue`)を用いる
  * (再定義になるが、boss指示どおり「同一実装であることを明記」する形で対応した。
- * shared/analysis-types.ts 自体は core から一切importしない既存の流儀を守るため、
+ * analysis/analysis-types.ts 自体は core から一切importしない既存の流儀を守るため、
  * 型検査はこのテストファイル側だけで行う)。
  *
  * `StoredAllocation` は `bets: readonly StoredAllocationBetDetail[]` を内包するため、

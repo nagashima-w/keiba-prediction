@@ -13,7 +13,7 @@
  * #150で枠連が配分に入れば、実挙動のテストが同じ配線を覆う(本ファイルは#148の間の固定)。
  *
  * ## Web Worker経路について
- * Workerへ渡すのは`race: AnalysisResult`全体(`mixed-allocation-worker-handler.ts`の
+ * Workerへ渡すのは`race: AnalysisResult`全体(exe の`mixed-allocation-worker-handler.ts`(#287 で削除。3c1664e まで)の
  * `AllocationWorkerRequest`)であり、馬の配列(`JointModelHorse`)はWorker内で`race.rows`から
  * 組み立てる。`AnalysisRow.wakuban`は必須フィールドなので直列化(structured clone)では落ちない
  * (`mixed-candidates.test.ts`の枠連describeが`structuredClone`した入力で同じ候補が作られることを固定)。

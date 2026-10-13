@@ -2,7 +2,7 @@
  * mixed-race-allocation-win.test.ts — 単勝(win)を混在配分経路へ通す配線のテスト
  * (Issue #90・#23-B2・AC4)。
  *
- * `shared/mixed-race-allocation.ts` の `resolveMixedBetTypes` が `"win"` を常時積むこと
+ * `analysis/mixed-race-allocation.ts` の `resolveMixedBetTypes` が `"win"` を常時積むこと
  * (A-2是正)と、D-7で確定した制限(ワイド・3連複が使えない設定・状況では、win候補が
  * あっても提案されずplace-onlyへ落ちること)を固定する。
  */
@@ -20,7 +20,7 @@ import {
 } from "../../src/analysis/mixed-race-allocation.js";
 
 // ============================================================================
-// テストヘルパー(mixed-allocation-view.test.tsの流儀を踏襲)
+// テストヘルパー(exe の mixed-allocation-view.test.ts の流儀を踏襲)
 // ============================================================================
 
 /** テスト用のAnalysisRowを組み立てる補助関数。 */

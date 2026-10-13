@@ -70,7 +70,7 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
     });
   });
 
-  describe("resolveEffectivePerRaceCap(公開関数・SettingsViewのライブプレビューと共有)", () => {
+  describe("resolveEffectivePerRaceCap(公開関数・exe の SettingsView(#287 で削除。3c1664e まで)のライブプレビューと共有)", () => {
     it("正の値はbetUnitの倍数に切り捨てる", () => {
       expect(resolveEffectivePerRaceCap(2550, 100)).toBe(2500);
       expect(resolveEffectivePerRaceCap(150.7, 100)).toBe(100);

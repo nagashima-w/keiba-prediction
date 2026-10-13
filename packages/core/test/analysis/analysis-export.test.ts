@@ -104,7 +104,7 @@ function makeRaceData(overrides: Partial<RaceData> = {}): RaceData {
  * テスト用の最小 ComboOddsFetchOutcome(機能D-2c第3段・Issue #28)を組み立てる。
  * state="available"なら1件取得できた体、それ以外(unavailable/failed)は0件取得の体にする
  * (発売なし/未発売と取得失敗はどちらもwideCombo/trioComboが{}になるが、この`state`だけが
- * 両者を区別する唯一の手段であるため〈shared/analysis-types.tsのJSDoc参照〉)。
+ * 両者を区別する唯一の手段であるため〈analysis/analysis-types.tsのJSDoc参照〉)。
  */
 function makeComboOddsFetchOutcome(
   state: ComboOddsFetchOutcome["state"],

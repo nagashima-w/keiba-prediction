@@ -853,7 +853,7 @@ describe("券種フィルタ(options.betTypes)", () => {
    * (`AllocationBetType`の全メンバーと一致していた)。**#112で`AllocationBetType`に
    * `quinella`(馬連)が加わったが、`buildMixedCandidates`(app側)はまだそれを参照しない
    * (app側の候補組み立ては#24-D3のスコープ)ため、`quinella`が一時的に除外へ加わった。**
-   * **Issue #117(#24-D3b-2)で`resolveMixedBetTypes`〈shared/mixed-race-allocation.ts〉が
+   * **Issue #117(#24-D3b-2)で`resolveMixedBetTypes`〈analysis/mixed-race-allocation.ts〉が
    * 実際に`"quinella"`を渡すよう接続し、`ALL_MIXED_CANDIDATE_BET_TYPES`にも`quinella`を
    * 加えたため、除外集合は再び空になった。**
    * **Issue #120(#24-E1)で`AllocationBetType`に`exacta`(馬単)が加わったが、

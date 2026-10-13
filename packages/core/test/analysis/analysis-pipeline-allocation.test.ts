@@ -21,7 +21,7 @@ import { runAnalysis, type AnalysisPipelineDeps } from "../../src/analysis/analy
  * analysis-pipeline-allocation.test.ts — Issue #59(#56-3)。
  * `runAnalysis` から配分提案(`AnalysisRecord.allocation`)への配線と、AC6(配分計算の例外で
  * 分析本体を失わないこと)を検証する。`analysis-pipeline.test.ts` は既存の巨大な回帰群であり、
- * AC6の検証には `shared/mixed-race-allocation.ts` をファイル全体でモックする必要があるため
+ * AC6の検証には `analysis/mixed-race-allocation.ts` をファイル全体でモックする必要があるため
  * (既存の他テストへ影響させないため)、独立ファイルに分離する。
  */
 

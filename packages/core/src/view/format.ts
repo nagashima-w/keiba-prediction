@@ -145,7 +145,7 @@ export function formatEstimatedEvSuffix(evEstimated: boolean): string {
 }
 
 /**
- * LLM補正状態の表示文言(BatchAnalysisView の「LLM補正:」行、A: フォールバック分離2026-07-19合意)。
+ * LLM補正状態の表示文言(exe の BatchAnalysisView(#287 で削除。3c1664e まで) の「LLM補正:」行、A: フォールバック分離2026-07-19合意)。
  *
  * fallback(確率補正そのものを prior に戻す)と marksDropped(確率補正〈AI補正後確率〉は
  * 有効なまま、印の制約違反により印だけを全馬非表示にする)は意味が異なるため、区別した文言にする。

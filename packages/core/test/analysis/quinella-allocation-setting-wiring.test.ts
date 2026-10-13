@@ -8,7 +8,7 @@
  *   キャッシュキーまで配管する
  * - **候補ビルダー(`resolveMixedBetTypes`)・D-2フォールバック規則(`isComboBetTypesOff`)は
  *   変更しない**(馬連の候補を実際に作るのは#117の仕事。D3aで変えると配分の答えが変わりうる)
- * - **設定画面(`SettingsView.tsx`)にトグルを出さない**
+ * - **設定画面(exe の`SettingsView.tsx`(#287 で削除。3c1664e まで))にトグルを出さない**
  *
  * このファイルは当時、上記2点(未接続・未表示)を「参照していないこと」のソース走査と
  * 「値を変えても結果が変わらないこと」の振る舞いテストで固定していた。
@@ -27,13 +27,13 @@
  * |---|---|---|---|
  * | 「resolveMixedBetTypesがincludeQuinellaInAllocationを参照していないこと」(ソース走査の否定) | 関数本体の文字列にincludeQuinellaInAllocationが出現しない(構造的な未接続) | 「resolveMixedBetTypes配線: includeQuinellaInAllocationの値でbetType='quinella'の有無が変わること」(値) | true/falseを実際に渡し、betType='quinella'の配分行の有無が切り替わること(接続されたことを値で確認) |
  * | 「isComboBetTypesOffがincludeQuinellaInAllocationを参照していないこと」(ソース走査の否定) | 同上(条件②の判定式にincludeQuinellaInAllocationが出現しない) | 「isComboBetTypesOff配線: includeQuinellaInAllocationの値でfallbackReasonが変わること」(値) | ワイド・3連複OFFのまま馬連だけtrue/falseを切り替えると、fallbackReasonが'combo-bet-types-off'かどうかが切り替わること |
- * | 「SettingsView.tsxがincludeQuinellaInAllocationを一切参照していないこと」(ソース走査の否定) | 画面にまだトグルを出していないこと | 「SettingsView.tsxがincludeQuinellaInAllocationを参照すること」(ソース走査の肯定) | #117でチェックボックスを追加したため、識別子が実在すること(JSX直書きでレンダリングテスト基盤が無いため、この項目のみソース走査を維持する。`combo-odds-scope-guard.test.ts`と同じ流儀) |
+ * | 「exe の SettingsView.tsxがincludeQuinellaInAllocationを一切参照していないこと」(ソース走査の否定) | 画面にまだトグルを出していないこと | 「exe の SettingsView.tsxがincludeQuinellaInAllocationを参照すること」(ソース走査の肯定) | #117でチェックボックスを追加したため、識別子が実在すること(JSX直書きでレンダリングテスト基盤が無いため、この項目のみソース走査を維持する。`combo-odds-scope-guard.test.ts`と同じ流儀) |
  * | 「mixed経路でtrue/falseに変えてもkind・result全体がビット一致すること」 | 値を変えても計算結果が一切変わらない(未接続の証明) | 「mixed経路でtrue/falseに変えると馬連配分行の有無が変わること」(値) | 接続されたことで結果が実際に変わること。より詳細な行列は`mixed-race-allocation-quinella.test.ts`が持つ |
  * | 「place-only経路でtrue/falseに変えても結果が変わらないこと」 | 同上(未接続の証明。place-only経由の対照) | 維持(意味を再解釈)。 | この特定のケース(馬連オッズ自体が無い)は#117後も**偶然**結果が一致する(quinella=trueでも候補0件のため条件③、quinella=falseなら条件②——**理由〈fallbackReason〉は異なるが最終的なview.kindと中身は一致する**)。オッズが無いケースでの一致であることをJSDocで明記し、「接続後も一律に無視される」という誤読を防ぐ |
  *
  * 設定の保存・読込・キャッシュキー等(#115で配管した「参照していないこと」以外の部分)を
- * 固定する往復テストは本ファイルには元々存在しない(`settings-reducer.test.ts`・
- * `settings-store.test.ts`・`ipc-*-wiring.test.ts`が担う。それらは本タスクでは変更しない)。
+ * 固定する往復テストは本ファイルには元々存在しない(exe の `settings-reducer.test.ts`・
+ * `settings-store.test.ts`・`ipc-*-wiring.test.ts`が担う(exe のテスト。#287 で削除。3c1664e まで)。それらは本タスクでは変更しない)。
  */
 
 

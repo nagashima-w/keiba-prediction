@@ -177,7 +177,7 @@ describe("analyzeRace(1レース分の分析)", () => {
     // UI/DB向けの fallbackReason は固定分類文言のみで、秘密様文字列を含まないこと。
     expect(r.fallbackReason).toBe(FALLBACK_REASON_INVOCATION_ERROR);
     expect(r.fallbackReason).not.toContain(secretLike);
-    // 診断用の生詳細(ログ専用・マスキングは main/logger.ts 側で行う)には残ってよい。
+    // 診断用の生詳細(ログ専用・マスキングは exe の main/logger.ts(#287 で削除。3c1664e まで) 側で行う)には残ってよい。
     expect(r.diagnosticMessage).toContain(secretLike);
   });
 

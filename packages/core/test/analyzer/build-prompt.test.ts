@@ -1626,7 +1626,7 @@ describe("clipVariant(タスクD-2: クリップ幅の版切替)", () => {
     expect(variant.maxAdjust).toBe(0.15);
     const p = buildPrompt({ ...baseInput(), clipVariant: variant.id });
     // この期待文字列自体を variant.maxAdjust(=parseAnalyzerResponseへ渡るmaxAdjustと同一値。
-    // clip-variants.test.ts / pipeline-deps.test.ts の配線疎通テストと合わせて一致を保証する)から
+    // clip-variants.test.ts / exe の pipeline-deps.test.ts の配線疎通テストと合わせて一致を保証する)から
     // 動的に組み立てることで、ハードコードした数値同士の偶然の一致ではないことを示す。
     expect(p).toContain(
       `±${clipPercentLabel(variant.maxAdjust)}(絶対値${clipAbsoluteLabel(variant.maxAdjust)})`,
@@ -1730,7 +1730,7 @@ describe("buildPromptPreview(設定画面向けプロンプトプレビュー)",
 
   it(
     "出力されるセクション見出しの集合が固定であること" +
-      "(設定画面〈SettingsView.tsx〉のプレビュー注記が列挙するセクションと1対1で対応させる必要があるため、" +
+      "(設定画面〈exe の SettingsView.tsx(#287 で削除。3c1664e まで)〉のプレビュー注記が列挙するセクションと1対1で対応させる必要があるため、" +
       "buildPrompt のセクション構成が変わったらこのテストで検知し、注記側の見直しを促す)",
     () => {
       const withoutAdditional = sectionHeadingKeys(buildPromptPreview());
@@ -1760,7 +1760,7 @@ describe("buildPromptPreview(設定画面向けプロンプトプレビュー)",
 
   it("サンプルレースは晴・良のため馬場悪化シナリオの指示(条件付き1行)を含まないこと", () => {
     // 馬場悪化シナリオは独立したセクション見出しではなく【指示】内の条件付き1行のため、
-    // 上のセクション見出し集合のテストでは検知できない。SettingsView の注記が「馬場悪化」に
+    // 上のセクション見出し集合のテストでは検知できない。exe の SettingsView の注記が「馬場悪化」に
     // 触れていないことと矛盾しないよう、サンプル入力(晴・良)では出ないことを別途固定する。
     const p = buildPromptPreview();
     expect(p).not.toContain("馬場悪化");

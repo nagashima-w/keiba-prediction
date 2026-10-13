@@ -249,7 +249,7 @@ export function summarizeSameDayTrend(
 /**
  * collectSameDayTrend の lookup が返す、当日傾向の集計に必要な最小限のレース結果詳細
  * (構造的最小型)。ev/analysis-store.ts の RaceResultDetail はこの形を満たすため、
- * 呼び出し側(app/pipeline-deps.ts)は実際の getRaceResultDetail をそのまま lookup として
+ * 呼び出し側(exe の app/pipeline-deps.ts(#287 で削除。3c1664e まで))は実際の getRaceResultDetail をそのまま lookup として
  * 注入できる(analyzer層からev層への実importはせず、循環依存を避ける設計)。
  */
 export interface SameDayTrendRaceDetailLike {

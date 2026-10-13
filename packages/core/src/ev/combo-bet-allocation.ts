@@ -75,7 +75,7 @@
  * `allocateGeneralBets`/`buildComboCandidates`は契約違反(候補の構造・数値異常、topFinishCount異常)を
  * throwで止める設計にした(複勝専用の`allocateBets`が同種の異常を無防備のまま許容しているのとは
  * 対照的。`allocateBets`側にthrowを入れなかった理由は#31参照)。D-3でrenderer側からこれらを呼ぶ際、
- * `BatchAnalysisView.tsx`のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
+ * exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで)のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
  * **呼び出し前に候補を検証して弾くか、error boundaryを置くこと。**
  *
  * **この受け皿は充足済み(Issue #31・2026-08-20時点で確認)。** `packages/core/src/analysis/
@@ -88,7 +88,7 @@
  *
  * **件数(旧「〈5件〉」)を書かない。** 旧版はここに具体的な件数を書いていたが、実際に数え直すと
  * 誤りだった(boss指摘2026-08-20)。件数は`describe`が増減するたびに腐る参照であり、腐った状態が
- * 気づかれないまま残る(`docs/issue-order.md`の`BatchAnalysisView.tsx:625`行番号参照〈メモ化を
+ * 気づかれないまま残る(`docs/issue-order.md`のexe の`BatchAnalysisView.tsx:625`行番号参照〈メモ化を
  * `useMemo`と決め打った記述〉が腐って偽になっていたのと同じ欠陥クラス。この参照先の行は
  * 本タスク完了後に`docs/issue-order.md`から削除される見込みのため、**検証はコミット
  * `7151534`時点の`docs/issue-order.md`を参照すること**〈`git show 7151534:docs/issue-order.md`〉)。

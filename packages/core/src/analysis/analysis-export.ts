@@ -3,7 +3,7 @@
  *
  * レース単位の JSON(schemaVersion=1)+ 馬別 CSV を組み立てる純関数群。electron・IO に一切
  * 依存しないため、ユニットテストだけで完結させられる(log-export.ts と同じ流儀)。
- * 実ファイル書き込み(dialog.showSaveDialog → writeFileSync)は呼び出し側(main/ipc.ts)が担う。
+ * 実ファイル書き込み(dialog.showSaveDialog → writeFileSync)は呼び出し側(exe の main/ipc.ts(#287 で削除。3c1664e まで))が担う。
  *
  * データの出どころ:
  * - meta/horses(prior・adjustedProb・ev・isPositive・mark・reason・highlights・concerns・placeOddsMin)は
@@ -98,7 +98,7 @@ export interface RaceSnapshot {
    * **この値自体は「JSON永続化用のスナップショット」であり、馬券配分の計算には使われない**
    * (この記述は今も正しい)。第4段(Issue #28)で券種横断の配分が実際に使うのは、
    * このスナップショットではなく**別の生きた経路**(`AnalysisResult.wideCombo` →
-   * `shared/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。Issue #57で
+   * `analysis/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。Issue #57で
    * `renderer/mixed-allocation-view.ts` から分離した。DB保存を経ずに分析結果からその場で
    * 計算する)である。混同を避けるための補足: この`RaceSnapshot.wideCombo`はエクスポート・
    * DB保存専用の写しにすぎず、配分計算の入力としては一切参照されない。
@@ -128,7 +128,7 @@ export interface RaceSnapshot {
    * このスナップショット自体は保持・エクスポート専用の写しであり、
    * 配分計算の入力としては一切参照されない(このファイル冒頭JSDocの`wideCombo`と同じ設計。
    * 実際の配分接続〈Issue #139・#25-E3b〉は`AnalysisResult.trifectaCombo`
-   * 〈`shared/analysis-types.ts`〉側で完結している)。
+   * 〈`analysis/analysis-types.ts`〉側で完結している)。
    *
    * **サイズについての注記(2026-09-27実測。`docs/current-spec.md`参照)**: 出走頭数nに対し
    * P(n,3)通りのキーを持ち(16頭なら3360キー・18頭なら4896キー)、`wideCombo`/`trioCombo`/
@@ -388,9 +388,9 @@ export interface BuildAnalysisExportInput {
 
 /**
  * BuildAnalysisExportInput のうち、DB(AnalysisStore)から組み立てられる部分だけを持つ型
- * (main/pipeline-deps.ts の getAnalysisExportInput が返す)。
+ * (exe の main/pipeline-deps.ts の getAnalysisExportInput が返す)。
  * toolName・toolVersion・exportedAt(electron/main固有の情報。app-info.ts の値・実行時刻)は
- * 含めない(呼び出し側〈main/ipc.ts〉が別途補って BuildAnalysisExportInput を完成させる)。
+ * 含めない(呼び出し側〈exe の main/ipc.ts〉が別途補って BuildAnalysisExportInput を完成させる)。
  */
 export type AnalysisExportSource = Omit<
   BuildAnalysisExportInput,
@@ -676,14 +676,14 @@ export function buildDefaultAnalysisExportFileName(
  *   (例: "analysis.csv" → "analysis.csv.csv")、追加後は元と異なる文字列になる。
  * 万一ユーザーが保存ダイアログでJSON保存先に ".csv" 拡張子を選んでも、この関数だけで
  * jsonPath===csvPath(CSV書き込みがJSONを無確認上書きする事故)を起こしえない設計にしている
- * (呼び出し側 main/ipc.ts の handleExportAnalysis 側にも念のための同値チェックを残す。多層防御)。
+ * (呼び出し側 exe の main/ipc.ts の handleExportAnalysis 側にも念のための同値チェックを残す。多層防御)。
  *
  * クロスプラットフォーム対応(Windows CI障害の再発防止): node:path モジュール(path.dirname/
  * path.basename/path.join等)は区切り文字をOS依存で正規化してしまい、Windows実行時には入力の
  * "/" を "\" に変換してしまう(dialog.showSaveDialogが返す実際のパスはOS流儀のままなので
  * 本番では問題にならないが、"/"区切りのテスト入力がWindows CIでのみ失敗する事故があった)。
  * この関数は path モジュールを一切使わず、入力文字列の区切り文字をそのまま保持する
- * 純文字列操作のみで実装する(OS非依存。ipc.ts側の衝突比較〈path.resolve〉はパスの実体比較が
+ * 純文字列操作のみで実装する(OS非依存。exe の ipc.ts 側の衝突比較〈path.resolve〉はパスの実体比較が
  * 目的のため path 使用のままで問題ない)。
  * @param jsonPath ユーザーが選んだJSON保存先の絶対パス
  */

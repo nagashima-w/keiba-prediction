@@ -40,7 +40,7 @@ export interface AnalyzerConfig {
    *
    * 注意(タスクD-2で判明した設計上の記録): この値は AnthropicLlmClient.complete() 内では
    * 一切参照されない(実際のクリップは parseAnalyzerResponse が受け取る
-   * AnalyzeRaceDeps.maxAdjust〈analyze-race.ts〉で行われ、そちらは呼び出し側〈pipeline-deps.ts〉が
+   * AnalyzeRaceDeps.maxAdjust〈analyze-race.ts〉で行われ、そちらは呼び出し側〈exe の pipeline-deps.ts(#287 で削除。3c1664e まで)〉が
    * clip-variants.ts の CLIP_VARIANTS から別途解決して渡す設計にした)。このフィールドは
    * 後方互換のために残すが、実際のクリップ幅制御には使われない(デッド。将来削除を検討)。
    */

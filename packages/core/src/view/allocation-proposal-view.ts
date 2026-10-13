@@ -2,10 +2,10 @@
  * allocation-proposal-view — 検証タブ「レース一覧」の各レースに「配分提案(分析時点)」を
  * 表示するための純関数モジュール(Issue #55)。
  *
- * `VerifyView.tsx` には本機能の `route`/`skipReasonCode` 分岐と文言リテラルを一切置かない
+ * exe の`VerifyView.tsx`(#287 で削除。3c1664e まで) には本機能の `route`/`skipReasonCode` 分岐と文言リテラルを一切置かない
  * (boss着手前ゲート・設計制約)。`buildAllocationProposalView` が保存済み配分
  * (`StoredAllocationView`。core `AnalysisStore.getStoredAllocation` の写し)を
- * 表示状態の判別共用体へ変換し、`VerifyView.tsx` は返ってきた配列を `.map` するだけにする。
+ * 表示状態の判別共用体へ変換し、exe の`VerifyView.tsx` は返ってきた配列を `.map` するだけにする。
  *
  * ## 表示範囲(PM決定)
  * 提案した買い目・金額・分析時点のオッズ/EV・見送り理由・実効設定のみ。的中・払戻・回収率は
@@ -26,7 +26,7 @@
  * ## fallback_reason の分岐(boss指摘。重要)
  * `fallback_reason` は `route==="place-only"` 専用ではない。`route==="unavailable"` でも
  * 非nullになりうる(D-2フォールバックが `buildRaceAllocation` を呼んだ結果、頭数不可で
- * `kind:"unavailable"` になる場合。`shared/mixed-race-allocation.ts` の
+ * `kind:"unavailable"` になる場合。`analysis/mixed-race-allocation.ts` の
  * `AllocationOutcomeCodes` JSDoc参照)。したがって分岐は `route` ではなく
  * `fallbackReason !== null` で行う(`route`で分岐すると `unavailable` 経由のフォールバック
  * 理由が静かに消える)。
@@ -220,7 +220,7 @@ export const FALLBACK_REASON_UNKNOWN_NOTE =
 /**
  * 券種コード(bet_type)→日本語ラベル。未知の値はそのまま返す(throwしない)。
  *
- * `mixed-allocation-view.ts`の`mixedBetTypeLabel`(閉じたユニオン`AllocationBetType`。
+ * exe の`mixed-allocation-view.ts`(#287 で削除。3c1664e まで)の`mixedBetTypeLabel`(閉じたユニオン`AllocationBetType`。
  * 未知値は上流がthrowする)とは**統合しない**(Issue #76裁定): 本関数はDB由来の開いた
  * `string`を扱う契約であり、統合すると`mixedBetTypeLabel`側が未知分岐を持つことになって
  * `switch`の網羅性(TSによる保護)が失われる。place/win/wide/trioの4つの日本語ラベルが
@@ -230,7 +230,7 @@ export const FALLBACK_REASON_UNKNOWN_NOTE =
  * 通ってしまう欠陥があった)。
  *
  * `"win"`(単勝)はIssue #90・#23-B2でcaseを追加した(#91時点では意図的に無く、
- * `default`分岐でDB由来の生文字列`"win"`をそのまま返していた——`mixed-allocation-view.ts`の
+ * `default`分岐でDB由来の生文字列`"win"`をそのまま返していた——exe の`mixed-allocation-view.ts`の
  * `mixedBetTypeLabel`とは非対称だった。#90でwinがproductionに到達可能になったため
  * (`allocation-record.ts`が`bet_type="win"`行をコード変更なしで保存する)、この非対称は
  * 利用者から見える誤り〈生の"win"がUIに表示される〉になっていた。本caseの追加で解消)。
@@ -286,7 +286,7 @@ function betTypeLabel(betType: string): string {
  * 既存の `oddsStatusNote`(format.ts)は流用しない: (i) `"result"`(確定)で `null` を返す設計
  * (実効設定は12項目すべてに値が要るため使えない)、(ii) 文言が実行中のラン向け(「発売後に
  * 再分析推奨」)で過去分析の再表示には不適切、という用途の違いによる(`oddsStatusNote` 自体は
- * 改変しない。`BatchAnalysisView.tsx` が依存しているため)。
+ * 改変しない。exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで) が依存しているため)。
  */
 function oddsStatusLabelForPastAnalysis(oddsStatus: string): string {
   switch (oddsStatus) {

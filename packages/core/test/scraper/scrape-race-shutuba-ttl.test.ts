@@ -21,7 +21,7 @@ import {
  * 「10分以内ならキャッシュ・10分を超えたら取り直し」は、`scrapeRace` の `now`(メタ情報用で
  * 鮮度判定に関与しない)ではなく、`ScrapeCache` に注入する時計と `CachedFetcher` の `maxAgeMs`
  * の組み合わせで決まる。そのため **本番と同じ配線**(`{ fetcher: CachedFetcher }` のみ。`ttl` は
- * 渡さず既定値を使う。`pipeline-deps.ts` と同じ)で、可変クロックを進めて境界の両側を固定する。
+ * 渡さず既定値を使う。exe の `pipeline-deps.ts` と同じ)で、可変クロックを進めて境界の両側を固定する。
  */
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;

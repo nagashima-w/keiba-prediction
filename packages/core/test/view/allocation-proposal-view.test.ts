@@ -3,7 +3,7 @@
  * 純関数モジュール。Issue #55)のテスト。
  *
  * 対象は `buildAllocationProposalView`(保存済み配分〈StoredAllocationView〉→表示状態の判別・
- * 注記・買い目行・実効設定行への変換)。VerifyView.tsx には本機能のroute/skipReasonCode分岐と
+ * 注記・買い目行・実効設定行への変換)。exe の VerifyView.tsx(#287 で削除。3c1664e まで) には本機能のroute/skipReasonCode分岐と
  * 文言リテラルを一切置かない設計制約があるため、その分岐・文言はすべてここで固定する。
  */
 import { describe, expect, it } from "vitest";
@@ -631,7 +631,7 @@ describe("買い目行(AC4)", () => {
 //   #139版: 「place/win/wide/quinella/exacta/trio/trifectaの7ラベルが一致」
 //   #150版(本版): 「place/win/wide/quinella/exacta/trio/trifecta/bracketQuinellaの8ラベルが一致」
 //     (7ラベルの保証は弱めていない。枠連の1ラベルを追加しただけで、既存の7ラベルは同じリテラルで固定したまま)
-describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の8ラベルが同一文字列であること(Issue #76・D-5〈#90〉: 統合はしないが値は一致させる。相互参照JSDoc対応。Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉、Issue #139で三連単〈trifecta〉、Issue #150で枠連〈bracketQuinella〉を追加し4→8ラベルに拡張)", () => {
+describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(exe の mixed-allocation-view.ts)の8ラベルが同一文字列であること(Issue #76・D-5〈#90〉: 統合はしないが値は一致させる。相互参照JSDoc対応。Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉、Issue #139で三連単〈trifecta〉、Issue #150で枠連〈bracketQuinella〉を追加し4→8ラベルに拡張)", () => {
   it("place/win/wide/quinella/exacta/trio/trifecta/bracketQuinellaそれぞれで同じ日本語ラベルを返すこと(日本語リテラルに対してassert。#90本体: 両関数が一緒にずれても検知できるよう、mixedBetTypeLabelへの委譲ではなく固定文字列で固定する)", () => {
     const view = buildAllocationProposalView(
       allocation({

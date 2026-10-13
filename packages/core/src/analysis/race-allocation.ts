@@ -10,7 +10,7 @@
  * 表示専用の関数・定数(`formatBetLabel`・`formatAllocationSummary`・`probabilitySumWarning`・
  * `buildAllocationNotices`・各 NOTE 定数・`evThresholdFootnote`・
  * `placeBetUnavailableMessage`・reasonコード→文言のマップ)は
- * `renderer/bet-allocation-view.ts` に残る(表示/計算の分割線。Issue #57)。
+ * `view/bet-allocation-view.ts` に残る(表示/計算の分割線。Issue #57)。
  */
 
 import {
@@ -22,7 +22,7 @@ import {
 
 import type { AnalysisRow, OddsStatus } from "./analysis-types.js";
 
-/** 馬券配分の設定3項目(SettingsView由来。core BetAllocationConfigのUI公開部分)。 */
+/** 馬券配分の設定3項目(exe の SettingsView(#287 で削除。3c1664e まで)由来。core BetAllocationConfigのUI公開部分)。 */
 export interface BetAllocationSettings {
   readonly bankroll: number;
   readonly perRaceCap: number;

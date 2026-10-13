@@ -143,8 +143,8 @@
  *    - 買い目ラベルの純関数化はrenderer側(bet-allocation-view.ts)の責務(本ファイルは非依存)
  *
  * C-2のスコープ境界: 本ファイルは packages/core 配下の純関数のみ。設定画面・IPC・renderer表示・
- * verify.ts・analysis-pipeline.ts への配線は別ファイル(shared/settings.ts・
- * renderer/bet-allocation-view.ts 等)の責務であり、本ファイルはそれらに一切依存しない
+ * verify.ts・analysis-pipeline.ts への配線は別ファイル(analysis/app-settings.ts・
+ * view/bet-allocation-view.ts 等)の責務であり、本ファイルはそれらに一切依存しない
  * (入力は AllocationHorse という構造的最小型のみで受け取る)。
  */
 
@@ -192,7 +192,7 @@ export { CONDITIONAL_BERNOULLI_MODEL };
  *
  * 注意: これは Issue #57 で削除した「未使用の re-export シム」とは別物である。あちらは
  * どこからも import されていない re-export(削除しても app はコンパイルできた)だったのに
- * 対し、こちらは `shared/mixed-race-allocation.ts`(Issue #58)が実際に import して使う
+ * 対し、こちらは `analysis/mixed-race-allocation.ts`(Issue #58)が実際に import して使う
  * re-export であり、削除すると app のコンパイルが壊れる。
  */
 export type { SkipReasonCode };
@@ -203,7 +203,7 @@ export type { SkipReasonCode };
 // (allocateBetsのシグネチャ・AllocationHorse/BetAllocation/BetAllocationResult/
 // BetAllocationConfigの各フィールド名・型・resolveEffectivePerRaceCapの公開場所)は
 // 抽出の前後で一切変えていない。resolveEffectivePerRaceCapは元の公開場所を保つため、
-// ここで再exportする(SettingsView.tsxの既存importを壊さない)。
+// ここで再exportする(exe の SettingsView.tsx(#287 で削除。3c1664e まで)の既存importを壊さない)。
 export { resolveEffectivePerRaceCap };
 
 /** 配分最適化に渡す1頭分の情報(構造的最小型。AnalysisRow等shared型には依存しない)。 */

@@ -115,7 +115,7 @@ export interface AnalysisRecord {
    * JSON化して保存する(contributions と同じ流儀)。LLM使用有無に関わらず、取得済みレース情報が
    * あれば保存してよい。省略時・undefinedは null(スナップショット無し)として保存する。
    * 型は analysis-store 側では意図的に unknown のまま扱う(スキーマは呼び出し側
-   * 〈main/analysis-export.ts の RaceSnapshot〉が定義・検証する)。
+   * 〈analysis/analysis-export.ts の RaceSnapshot〉が定義・検証する)。
    */
   readonly raceSnapshot?: unknown;
   /**
@@ -123,7 +123,7 @@ export interface AnalysisRecord {
    * (呼び出し側が配分計算そのものを行わなかった=「未到達」であり、以前からの分析と区別が
    * つかない旧形式のまま。#59 AC4「旧分析(記録なし)」に対応する)。
    * 値を渡す場合は必ず meta を含める(全経路〈unset/yoso/unavailable/place-only/mixed/invalid〉で
-   * 1行書くのが#59の核心の不変条件。呼び出し側〈main/allocation-record.ts〉が保証する)。
+   * 1行書くのが#59の核心の不変条件。呼び出し側〈analysis/allocation-record.ts〉が保証する)。
    */
   readonly allocation?: AnalysisAllocationRecord;
 }
@@ -131,9 +131,9 @@ export interface AnalysisRecord {
 /**
  * 配分提案(Issue #59)のレース単位メタ + 明細行。
  *
- * route・betType・各種理由コードは呼び出し側(app shared/ の AllocationRouteCode 等)が
+ * route・betType・各種理由コードは呼び出し側(`analysis/mixed-race-allocation.ts` の `AllocationRouteCode` 等)が
  * 定義する文字列をそのまま受け取り、core はその意味を解釈しない(raceSnapshot: unknown と
- * 同じ流儀。shared/ の型を core へ複製しない)。
+ * 同じ流儀。`analysis/` の型を `ev/` へ複製しない)。
  */
 export interface AnalysisAllocationRecord {
   readonly meta: AnalysisAllocationMetaRecord;
@@ -143,7 +143,7 @@ export interface AnalysisAllocationRecord {
 
 /** 配分提案のレース単位メタ行(#59 スキーマ。列一覧は固定。増減は停止条件)。 */
 export interface AnalysisAllocationMetaRecord {
-  /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま受け取る。 */
+  /** 到達状態(層1)。`analysis/mixed-race-allocation.ts` の `AllocationRouteCode` の値をそのまま受け取る。 */
   readonly route: string;
   /** app 側 PlaceBetUnavailableReason。route!=="unavailable" のときは null(未到達)。 */
   readonly unavailableReason: string | null;
@@ -261,14 +261,14 @@ export interface StoredAllocationBetDetail {
  * 意図的な分離)。
  */
 export interface StoredAllocation {
-  /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま。未知の値でもそのまま返す。 */
+  /** 到達状態(層1)。`analysis/mixed-race-allocation.ts` の `AllocationRouteCode` の値をそのまま。未知の値でもそのまま返す。 */
   readonly route: string;
   /** app 側 PlaceBetUnavailableReason。route!=="unavailable" のときは null(未到達)。 */
   readonly unavailableReason: string | null;
   /**
    * app 側 PlaceOnlyFallbackReason。D-2フォールバックを通っていないときは null(未到達)。
    * `route==="unavailable"` でも非nullになりうる(D-2フォールバックが頭数不可で
-   * `kind:"unavailable"` になった場合。`shared/mixed-race-allocation.ts` の
+   * `kind:"unavailable"` になった場合。`analysis/mixed-race-allocation.ts` の
    * `AllocationOutcomeCodes` JSDoc参照)。
    */
   readonly fallbackReason: string | null;
@@ -324,7 +324,7 @@ export interface StoredAllocation {
  * route/skip_reason_codeしか読まないため無関係〉。下記`getAllocationForVerify` のJSDoc参照)。
  */
 export interface StoredAllocationSummary {
-  /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま。 */
+  /** 到達状態(層1)。`analysis/mixed-race-allocation.ts` の `AllocationRouteCode` の値をそのまま。 */
   readonly route: string;
   /** 見送り理由(層2)。coreの配分計算に未到達、または非skipのときは null。 */
   readonly skipReasonCode: string | null;

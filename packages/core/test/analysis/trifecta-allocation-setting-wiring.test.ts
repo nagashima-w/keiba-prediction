@@ -11,7 +11,7 @@
  * - **候補ビルダー(`resolveMixedBetTypes`)・D-2フォールバック規則(`isComboBetTypesOff`)・
  *   条件③の候補数カウント(`comboCandidateCount`)は変更しない**(三連単の候補を実際に作るのは
  *   #25-E3b〈Issue #139〉の仕事。E3aで変えると配分の答えが変わりうる)
- * - **設定画面(`SettingsView.tsx`)にトグルを出さない**
+ * - **設定画面(exe の`SettingsView.tsx`(#287 で削除。3c1664e まで))にトグルを出さない**
  * - DB列(`analysis_allocation_meta.include_trifecta`)の追加は#25-E3c(Issue #140)へ送る
  *
  * このファイルは当時、上記2点(未接続・未表示)を「値の一致(toEqual)」の振る舞いテストと
@@ -29,11 +29,11 @@
  * |---|---|---|---|
  * | 「mixed経路(8頭)でincludeTrifectaInAllocationをtrue/falseに変えても、kind・result全体がビット一致すること」 | 値を変えても計算結果が一切変わらない(未接続の証明) | 「resolveMixedBetTypes配線: includeTrifectaInAllocationの値でbetType='trifecta'の有無が変わること」(値) | true/falseを実際に渡し、betType='trifecta'の配分行の有無が切り替わること(接続されたことを値で確認) |
  * | 「isComboBetTypesOff配線(D-2フォールバック規則の条件②)経路でincludeTrifectaInAllocationを変えても結果・理由コードが変わらないこと」 | 条件②の判定式がincludeTrifectaInAllocationを参照しない(値を変えても`fallbackReason`が一切変わらない) | 「isComboBetTypesOff配線: includeTrifectaInAllocationの値でfallbackReasonが変わること」(値) | ワイド・3連複・馬連・馬単OFFのまま三連単だけtrue/falseを切り替えると、fallbackReasonが'combo-bet-types-off'かどうかが切り替わること |
- * | (#138時点に無し。SettingsView.tsxのソース走査は元々このファイルの対象外) | — | 「SettingsView.tsxがincludeTrifectaInAllocationを参照すること」(ソース走査の肯定) | #139でチェックボックスを追加したため、識別子が実在すること(JSX直書きでレンダリングテスト基盤が無いため、この項目のみソース走査で確認する。`exacta-allocation-setting-wiring.test.ts`・`combo-odds-scope-guard.test.ts`と同じ流儀) |
+ * | (#138時点に無し。exe の SettingsView.tsxのソース走査は元々このファイルの対象外) | — | 「exe の SettingsView.tsxがincludeTrifectaInAllocationを参照すること」(ソース走査の肯定) | #139でチェックボックスを追加したため、識別子が実在すること(JSX直書きでレンダリングテスト基盤が無いため、この項目のみソース走査で確認する。`exacta-allocation-setting-wiring.test.ts`・`combo-odds-scope-guard.test.ts`と同じ流儀) |
  *
  * 設定の保存・読込・キャッシュキー等(#138で配管した「参照していないこと」以外の部分)を
- * 固定する往復テストは本ファイルには元々存在しない(`settings-reducer.test.ts`・
- * `settings-store.test.ts`・`ipc-*-wiring.test.ts`が担う。それらは本タスクでは変更しない)。
+ * 固定する往復テストは本ファイルには元々存在しない(exe の `settings-reducer.test.ts`・
+ * `settings-store.test.ts`・`ipc-*-wiring.test.ts`が担う(exe のテスト。#287 で削除。3c1664e まで)。それらは本タスクでは変更しない)。
  */
 
 

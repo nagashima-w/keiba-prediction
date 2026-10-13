@@ -152,7 +152,7 @@ describe("listCallerFiles(テストヘルパーの自己検証)", () => {
   });
 });
 
-describe("受け入れ条件1(第4段で改訂、Issue #57でさらに改訂): buildMixedCandidatesの呼び出し元がshared/mixed-race-allocation.ts以外に無いこと(単一定義の原則)", () => {
+describe("受け入れ条件1(第4段で改訂、Issue #57でさらに改訂): buildMixedCandidatesの呼び出し元がanalysis/mixed-race-allocation.ts以外に無いこと(単一定義の原則)", () => {
   it("core/src配下(.ts/.tsx)を走査しても、analysis/mixed-candidates.ts自身とanalysis/mixed-race-allocation.ts以外に呼び出しが無いこと", () => {
     const files = readSourceFiles(coreSrcDir, [".ts", ".tsx"]);
     // 前提固定: 両ファイルに定義・呼び出しが実在すること(空振り防止)。
@@ -161,14 +161,14 @@ describe("受け入れ条件1(第4段で改訂、Issue #57でさらに改訂): b
     const callers = listCallerFiles(files, "buildMixedCandidates", [
       path.join(sharedDir, "mixed-candidates.ts"),
     ]);
-    // 唯一の承認された呼び出し元(shared/mixed-race-allocation.ts の buildMixedRaceAllocation)
-    // 以外は無いこと。BatchAnalysisView.tsx等が単一定義の原則(D-2)を破って直接呼んでいないことの検知。
+    // 唯一の承認された呼び出し元(analysis/mixed-race-allocation.ts の buildMixedRaceAllocation)
+    // 以外は無いこと。exe の BatchAnalysisView.tsx(#287 で削除。3c1664e まで)等が単一定義の原則(D-2)を破って直接呼んでいないことの検知。
     expect(callers).toEqual([path.join(sharedDir, "mixed-race-allocation.ts")]);
   });
 });
 
 describe("受け入れ条件9(第4段で改訂、Issue #57でさらに改訂): 複勝専用の配分計算・表示が単一定義の原則により組合せオッズに一切関与しないこと", () => {
-  it("shared/race-allocation.ts(複勝専用の配分計算本体。Issue #57でbet-allocation-view.tsから分離)がwideCombo/trioCombo/comboOddsを一切参照していないこと", () => {
+  it("analysis/race-allocation.ts(複勝専用の配分計算本体。Issue #57でbet-allocation-view.tsから分離)がwideCombo/trioCombo/comboOddsを一切参照していないこと", () => {
     const source = readFileSync(path.join(sharedDir, "race-allocation.ts"), "utf8");
     // 前提固定: このファイルには複勝配分の中核関数が実在すること(空振り防止)。
     expect(source).toContain("export function buildRaceAllocation");
@@ -177,7 +177,7 @@ describe("受け入れ条件9(第4段で改訂、Issue #57でさらに改訂): �
     expect(source).not.toContain("comboOdds");
   });
 
-  it("renderer/bet-allocation-view.ts(複勝専用の表示関数群)がwideCombo/trioCombo/comboOddsを一切参照していないこと", () => {
+  it("view/bet-allocation-view.ts(複勝専用の表示関数群)がwideCombo/trioCombo/comboOddsを一切参照していないこと", () => {
     const source = readFileSync(path.join(coreViewDir, "bet-allocation-view.ts"), "utf8");
     // 前提固定: このファイルには複勝配分の表示関数が実在すること(空振り防止)。
     expect(source).toContain("export function placeBetUnavailableMessage");

@@ -43,11 +43,11 @@ import {
  *
  * 背景: 従来は生の例外メッセージ(lastError.message等)をそのまま fallbackReason に埋め込んでいたが、
  * これは analyzeRace 内部専用のフィールドで、UI/DBには露出していなかった。今回 fallbackReason を
- * UI(BatchAnalysisView の「LLM補正:」行tooltip)へ新規露出させるにあたり、CLAUDE.mdに記録された
+ * UI(exe の BatchAnalysisView(#287 で削除。3c1664e まで) の「LLM補正:」行tooltip)へ新規露出させるにあたり、CLAUDE.mdに記録された
  * 過去の秘密漏洩事故の重さを踏まえ、生の例外内容(万一 apiKey・プロンプト本文の断片等を含んでいても)が
  * 構造的にUI/DBへ混入しないよう、fallbackReason は必ずこの3種の固定文字列のいずれかとする
- * (診断に必要な生の詳細は diagnosticMessage に別途保持し、ログ経路〈main/pipeline-deps.ts の
- * onFallback→main/logger.ts の logWarn〉でのみ、既存の秘密マスキング〈log-formatter.ts〉を通して使う。
+ * (診断に必要な生の詳細は diagnosticMessage に別途保持し、ログ経路〈exe の main/pipeline-deps.ts(#287 で削除。3c1664e まで)の
+ * onFallback→exe の main/logger.ts の logWarn〉でのみ、既存の秘密マスキング〈exe の log-formatter.ts〉を通して使う。
  * UI/DB(AnalysisResult/AnalysisRecord)へは diagnosticMessage を一切渡さない)。
  */
 export const FALLBACK_REASON_TRUNCATED =
@@ -140,9 +140,9 @@ export interface AnalyzeRaceResult {
   readonly stopReason?: string | null;
   /**
    * fallback:true 時の診断用の生詳細(例外メッセージ等)。UI(AnalysisResult)にもDB
-   * (AnalysisRecord)にも絶対に伝播させないこと。main/analysis-pipeline.ts の onFallback
-   * コールバック経由で main/logger.ts の logWarn に渡し、既存の秘密マスキング
-   * (shared/log-formatter.ts)を通してのみ記録する(#35 ログ基盤: LLM呼び出し失敗の原因を
+   * (AnalysisRecord)にも絶対に伝播させないこと。analysis/analysis-pipeline.ts の onFallback
+   * コールバック経由で exe の main/logger.ts の logWarn に渡し、既存の秘密マスキング
+   * (exe の shared/log-formatter.ts)を通してのみ記録する(#35 ログ基盤: LLM呼び出し失敗の原因を
    * 完全不可視にしないための診断ログ保持)。truncated:true の場合は stopReason で診断可能なため
    * 生の例外メッセージではなく固定文言(FALLBACK_REASON_TRUNCATED)を入れる。fallback:true の
    * 失敗時は必ず値が入り、成功時・印救済時(fallback:false)は省略(undefined)。
@@ -326,8 +326,8 @@ export async function analyzeRace(
   // 印・切り詰めのいずれとも無関係な失敗 → prior をそのまま採用(フェイルセーフ)。
   // fallbackReason(UI/DB向け)は固定分類文言のみとし、生の例外メッセージ(万一秘密を含んでいても)が
   // 構造的に混入しないようにする。生の詳細は diagnosticMessage に保持し、ログ経路
-  // (main/analysis-pipeline.ts の onFallback → main/logger.ts の logWarn)でのみ、
-  // 既存の秘密マスキング(shared/log-formatter.ts)を通して使う(#35 診断ログ保持)。
+  // (analysis/analysis-pipeline.ts の onFallback → exe の main/logger.ts の logWarn)でのみ、
+  // 既存の秘密マスキング(exe の shared/log-formatter.ts)を通して使う(#35 診断ログ保持)。
   const isParseError = lastError instanceof AnalyzerResponseParseError;
   const reason = isParseError ? FALLBACK_REASON_PARSE_ERROR : FALLBACK_REASON_INVOCATION_ERROR;
   const diagnosticMessage = isParseError

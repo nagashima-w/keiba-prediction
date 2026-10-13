@@ -224,7 +224,7 @@ describe("parseAnalyzerResponse(バリデーション・クリップ)", () => {
 /**
  * クリップ幅版D-2(±0.15)の境界値テスト。
  * maxAdjust は CLIP_VARIANTS.wide15.maxAdjust をそのまま options に渡す(ハードコードした0.15を
- * 二重に持たず、build-prompt.ts の文面生成・pipeline-deps.ts の配線と単一ソースを共有する)。
+ * 二重に持たず、build-prompt.ts の文面生成・exe の pipeline-deps.ts の配線と単一ソースを共有する)。
  */
 describe("parseAnalyzerResponse(クリップ幅版D-2: ±0.15)", () => {
   const maxAdjust = CLIP_VARIANTS.wide15.maxAdjust;

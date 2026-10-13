@@ -1,6 +1,6 @@
 /**
  * mixed-race-allocation-quinella.test.ts — 馬連(quinella)を配分の券種選択・D-2フォールバック規則
- * (`shared/mixed-race-allocation.ts`)へ接続する配線のテスト(Issue #117・#24-D3b-2)。
+ * (`analysis/mixed-race-allocation.ts`)へ接続する配線のテスト(Issue #117・#24-D3b-2)。
  *
  * `mixed-race-allocation-win.test.ts`(win版)と同じ構造を踏襲する。
  *
