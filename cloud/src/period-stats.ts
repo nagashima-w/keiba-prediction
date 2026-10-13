@@ -38,7 +38,14 @@ export interface PeriodStats extends DayStats {
 /** 読んだ行(列名は SQL の別名と同じ)。 */
 export interface PeriodRows {
   /** 期間の、レースごとに最新の分析。 */
-  readonly races: readonly { readonly analysisId: number; readonly raceId: string; readonly kaisaiDate: string; readonly model: string | null }[];
+  readonly races: readonly {
+    readonly analysisId: number;
+    readonly raceId: string;
+    readonly kaisaiDate: string;
+    readonly model: string | null;
+    /** 分析を書いたプロンプトの版(`analyses.prompt_version`。Issue #279)。月報の版別の行が使う。版が分からない行・この項目を読まない呼び出し(日報の 28 日累計)は null かキー無し(どちらも「版不明」)。 */
+    readonly promptVersion?: string | null;
+  }[];
   readonly bets: readonly { readonly analysisId: number; readonly betType: string; readonly comboKey: string; readonly stake: number; readonly odds: number | null; readonly ev: number | null }[];
   /** 印の付いた馬(`analysis_horses.mark` が NULL でない行)。 */
   readonly marks: readonly { readonly analysisId: number; readonly umaban: number; readonly mark: string }[];

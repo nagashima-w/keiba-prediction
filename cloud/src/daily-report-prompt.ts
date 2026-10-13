@@ -167,11 +167,11 @@ function typeText(t: DayStats["byBetType"][string]): string {
 }
 
 /** 買い目の成績の行(その日・期間で共通)。 */
-function betResultLine(s: DayStats): string {
+export function betResultLine(s: DayStats): string {
   return `買い目の成績(判定できたもの): 賭け金 ${yen(s.totalStake)}・払戻 ${yen(s.totalReturn)}・回収率 ${s.recoveryRate === null ? "なし(賭け金 0)" : formatRecoveryPercent(s.recoveryRate)}・${s.judgedBetCount} 点中 ${s.hitBetCount} 点的中${(s.refundedBetCount ?? 0) > 0 ? `(うち返還 ${s.refundedBetCount} 点・賭け金 ${yen(s.refundedStake)})` : ""}`;
 }
 
-function tailLines(s: DayStats): string[] {
+export function tailLines(s: DayStats): string[] {
   const lines: string[] = [...expectedLines(s), excludingTopLine(s)];
   if (s.unjudgedBetCount > 0) {
     lines.push(`判定不能の買い目: ${s.unjudgedBetCount} 点(賭け金 ${yen(s.unjudgedStake)}。結果が無い・払戻が未取得のため成績に含めない)`);
@@ -194,13 +194,13 @@ function statsBlock(s: DayStats): string {
   ].join("\n");
 }
 
-const ymdLabel = (kaisaiDate: string): string => {
+export const ymdLabel = (kaisaiDate: string): string => {
   const m = /^(\d{4})(\d{2})(\d{2})$/.exec(kaisaiDate);
   return m === null ? kaisaiDate : `${Number(m[1])}年${Number(m[2])}月${Number(m[3])}日`;
 };
 
 /** 期間の成績の節(直前 27 日・28 日累計)。`full` なら券種別・印別も出す(累計)。分析したレースが無い期間は、その旨だけ。 */
-function periodBlock(p: PeriodStats, full: boolean): string {
+export function periodBlock(p: PeriodStats, full: boolean): string {
   const lines = [
     `期間: ${ymdLabel(p.fromDate)}〜${ymdLabel(p.toDate)}。分析のあった開催日 ${p.dayCount} 日・分析したレース ${p.raceCount} 件(結果あり ${p.resultRaceCount} 件・結果なし ${p.noResultRaceCount} 件)`,
     betResultLine(p),
@@ -223,9 +223,9 @@ function actualBetsText(d: RaceDigest): string {
   return parts.join("・");
 }
 
-const WHATIF_HEADING = "印の定型の買い方(「もしも」。確定値。各 100 円)";
+export const WHATIF_HEADING = "印の定型の買い方(「もしも」。確定値。各 100 円)";
 
-function whatIfRows(w: WhatIfStats): string[] {
+export function whatIfRows(w: WhatIfStats): string[] {
   return MARK_TEMPLATES.flatMap((t) => (w[t.id] === undefined ? [] : [`- ${templateLabel(t.id)}: ${formatTemplateStat(w[t.id]!, yen)}`]));
 }
 

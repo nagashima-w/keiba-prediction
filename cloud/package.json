@@ -9,7 +9,8 @@
     "test": "vitest run",
     "deploy:dry": "wrangler deploy --dry-run --outdir dist-dry",
     "smoke": "tsx smoke.ts",
-    "report:prompt": "tsx print-report-prompt.ts"
+    "report:prompt": "tsx print-report-prompt.ts",
+    "monthly:prompt": "tsx print-monthly-prompt.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.70.1",

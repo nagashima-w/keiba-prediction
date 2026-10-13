@@ -182,8 +182,9 @@ export type ReportDetailResult =
   | { readonly ok: true; readonly report: ReportDetail | null; readonly job: ReportJob | null; readonly jobStatus: ReportJobStatus }
   | { readonly ok: false; readonly error: ApiFailure };
 
-const isCount = (v: unknown): v is number => isNum(v) && Number.isInteger(v) && v >= 0;
-const numOrNull = (v: unknown): v is number | null => v === null || isNum(v);
+/** 以下の `isCount`・`numOrNull`・`isYmd`・`parsePeriod`・`readBody` は月報の API(`api-monthly.ts`。Issue #279)も使う(統計の読み方を日報と共有する)。 */
+export const isCount = (v: unknown): v is number => isNum(v) && Number.isInteger(v) && v >= 0;
+export const numOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 const isArr = (v: unknown): v is unknown[] => Array.isArray(v);
 
 function parseListItem(row: unknown): ReportListItem | null {
@@ -286,9 +287,9 @@ function parseStats(value: unknown): ReportStats | null {
   };
 }
 
-const isYmd = (v: unknown): v is string => isStr(v) && /^[0-9]{8}$/.test(v);
+export const isYmd = (v: unknown): v is string => isStr(v) && /^[0-9]{8}$/.test(v);
 
-function parsePeriod(value: unknown): ReportPeriod | null {
+export function parsePeriod(value: unknown): ReportPeriod | null {
   const stats = parseStats(value);
   if (stats === null || !isRecord(value) || !isYmd(value["fromDate"]) || !isYmd(value["toDate"]) || !isCount(value["dayCount"])) return null;
   return { ...stats, fromDate: value["fromDate"], toDate: value["toDate"], dayCount: value["dayCount"] };
@@ -366,18 +367,33 @@ function parseDetail(value: unknown): ReportDetail | null {
   };
 }
 
-function parseJob(value: unknown): ReportJob | null | undefined {
+/** 進行状況(job)の形。段階 `phase` の語は日報と月報で違う(`parseJobOf` に渡す)。 */
+export interface JobOf<P extends string> {
+  readonly phase: P;
+  readonly status: "running" | "failed";
+  readonly attempts: number;
+  /** 作り直し(Issue #268・#280)のジョブにだけ付く(`true`)。 */
+  readonly regenerate?: true;
+}
+
+/**
+ * 進行状況を読む(日報の `job` と月報〈Issue #280〉の `job` で共有する)。null は「ジョブなし」、undefined は壊れた応答。`phases` に無い段階・想定外の status・負の試行数は壊れた応答。
+ * regenerate は無いか true だけ(サーバが書くのは true のみ。それ以外は壊れた応答として、一部だけを採用しない)。
+ */
+export function parseJobOf<P extends string>(value: unknown, phases: readonly P[]): JobOf<P> | null | undefined {
   if (value === null) return null;
   if (!isRecord(value)) return undefined;
   const { phase, status, attempts, regenerate } = value;
-  // regenerate は無いか true だけ(サーバが書くのは true のみ。それ以外は壊れた応答として、一部だけを採用しない)。
-  if ((phase !== "list" && phase !== "gather" && phase !== "generate" && phase !== "save" && phase !== "notify") || (status !== "running" && status !== "failed") || !isCount(attempts) || (regenerate !== undefined && regenerate !== true)) {
+  if (typeof phase !== "string" || !(phases as readonly string[]).includes(phase) || (status !== "running" && status !== "failed") || !isCount(attempts) || (regenerate !== undefined && regenerate !== true)) {
     return undefined;
   }
-  return regenerate === true ? { phase, status, attempts, regenerate } : { phase, status, attempts };
+  return regenerate === true ? { phase: phase as P, status, attempts, regenerate } : { phase: phase as P, status, attempts };
 }
 
-async function readBody(response: Awaited<ReturnType<FetchLike>>): Promise<unknown> {
+const REPORT_PHASES = ["list", "gather", "generate", "save", "notify"] as const;
+const parseJob = (value: unknown): ReportJob | null | undefined => parseJobOf(value, REPORT_PHASES);
+
+export async function readBody(response: Awaited<ReturnType<FetchLike>>): Promise<unknown> {
   try {
     return await response.json();
   } catch {
@@ -444,22 +460,30 @@ export type ReportRunOutcome =
  * `POST /api/reports/run`。Origin の扱いは `api-run.ts` の説明と同じ(`referrerPolicy` を付け、`mode` は指定しない)。
  * `regenerate` が true なら本文に `regenerate: true` を足す(Issue #268。日報がある日の作り直し。管理者だけ)。省略・false は従来の `{ date }` だけ。
  */
-export async function postReportRun(fetchLike: FetchLike, date: string, regenerate: boolean = false): Promise<ReportRunOutcome> {
+export function postReportRun(fetchLike: FetchLike, date: string, regenerate: boolean = false): Promise<ReportRunOutcome> {
+  return postRun(fetchLike, "/api/reports/run", "date", date, regenerate);
+}
+
+/**
+ * 日報と月報(Issue #280。`POST /api/monthly-reports/run`)の手動の作成・作り直しの POST と、応答の分類(共有)。`key` は本文のキー(`date`・`month`)、`id` はその値。
+ * 202 は応答が `{ ok: true, accepted: true, [key]: id }` のときだけ accepted。
+ */
+export async function postRun(fetchLike: FetchLike, path: string, key: "date" | "month", id: string, regenerate: boolean): Promise<ReportRunOutcome> {
   let response: Awaited<ReturnType<FetchLike>>;
   try {
-    response = await fetchLike("/api/reports/run", {
+    response = await fetchLike(path, {
       method: "POST",
       credentials: "same-origin",
       referrerPolicy: "same-origin",
       headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify(regenerate ? { date, regenerate: true } : { date }),
+      body: JSON.stringify(regenerate ? { [key]: id, regenerate: true } : { [key]: id }),
     });
   } catch {
     return { kind: "failed", failure: { kind: "network" } };
   }
   const body = await readBody(response);
   if (response.status === 202) {
-    return isRecord(body) && body["ok"] === true && body["accepted"] === true && body["date"] === date ? { kind: "accepted" } : { kind: "accepted-malformed" };
+    return isRecord(body) && body["ok"] === true && body["accepted"] === true && body[key] === id ? { kind: "accepted" } : { kind: "accepted-malformed" };
   }
   if (response.status === 409) {
     const error = isRecord(body) && isRecord(body["error"]) ? body["error"] : undefined;

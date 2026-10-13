@@ -174,8 +174,10 @@ async function expectViewer(port: number, label: string, email: string): Promise
   check(`${label}: GET /api/plan は 200(読み取り)`, plan.status === 200 && parseJson(plan.text)["ok"] === true, `${plan.status} ${plan.text.slice(0, 80)}`);
   const reports = await req(port, "GET", "/api/reports");
   check(`${label}: GET /api/reports は 200(日報は閲覧できる)`, reports.status === 200 && parseJson(reports.text)["ok"] === true, `${reports.status} ${reports.text.slice(0, 80)}`);
+  const monthly = await req(port, "GET", "/api/monthly-reports");
+  check(`${label}: GET /api/monthly-reports は 200(月報は閲覧できる。Issue #279)・POST は 403(admin-only)`, monthly.status === 200 && parseJson(monthly.text)["ok"] === true && (await req(port, "POST", "/api/monthly-reports")).status === 403, `${monthly.status} ${monthly.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
@@ -422,6 +424,69 @@ async function main(): Promise<void> {
       const label = "E(偽ソケット)";
       const page = await req(port, "GET", "/check");
       check(`${label}: GET /check に確認フォーム(GET で /api/netkeiba/check へ。初期値 202603020211)がある`, page.status === 200 && page.text.includes('<form method="get" action="/api/netkeiba/check">') && page.text.includes('value="202603020211"'), `${page.status}`);
+
+      // Issue #279・#280: 月報(本物の DO `MonthlyReportDO`)。ローカルの D1 に 2026 年 3 月の分析 2 件(月初と月末の開催日。版は別々)と月初の結果を入れ、管理者の手動の入口
+      // (POST /api/monthly-reports/run。終わった月。最終日の待ちは起きない)で作る → アラームで進み、D1 に保存される → GET /api/monthly-reports/202603 が本文つきで返り、一覧に載る。
+      // 同じ月の 2 回目の作成は 409(already-exists)。続けて作り直し(regenerate: true)を受理の上限(1 日 3 回)まで回し、4 回目は 429(daily-limit)。
+      // この環境には LLM の API キーも Discord の Webhook も無い: 統計だけの月報(固定の理由つき)になる。LLM・Discord・netkeiba には出ない。
+      check(`${label}: 月報の材料(分析 2 件・結果 1 件)をローカルの D1 に入れる(smoke 専用の経路)`, parseJson((await req(port, "GET", "/smoke/monthly/seed?month=202603")).text)["ok"] === true);
+      const monthlyOrigin = `http://127.0.0.1:${port}`;
+      const monthlyRun = (body: unknown, headers: Record<string, string> = { Origin: monthlyOrigin, "Content-Type": "application/json" }) =>
+        fetch(`${monthlyOrigin}/api/monthly-reports/run`, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
+      const monthlyDetail = async (): Promise<Record<string, unknown>> => parseJson((await req(port, "GET", "/api/monthly-reports/202603")).text);
+      const monthlyNoOrigin = await monthlyRun({ month: "202603" }, { "Content-Type": "application/json" });
+      check(`${label}: 月報の手動の作成は Origin が無いと 403(origin-mismatch)。まだ終わっていない月(2099 年 12 月)は 400`, monthlyNoOrigin.status === 403 && monthlyNoOrigin.text.includes("origin-mismatch") && (await monthlyRun({ month: "209912" })).status === 400, `${monthlyNoOrigin.status} ${monthlyNoOrigin.text.slice(0, 80)}`);
+      const monthlyGetRun = await req(port, "GET", "/api/monthly-reports/run");
+      check(`${label}: GET /api/monthly-reports/run は 405(Allow: POST)。月の本文としては扱わない`, monthlyGetRun.status === 405 && monthlyGetRun.headers.get("allow") === "POST", `${monthlyGetRun.status}`);
+      const monthlyRequest = await monthlyRun({ month: "202603" });
+      check(`${label}: 月報の手動の作成(2026 年 3 月)が 202 で受理される(本物の DO の RPC)`, monthlyRequest.status === 202 && parseJson(monthlyRequest.text)["accepted"] === true, `${monthlyRequest.status} ${monthlyRequest.text.slice(0, 200)}`);
+      let monthlyReport: Record<string, unknown> | null = null;
+      let monthlyPolls = 0;
+      for (; monthlyPolls < 120; monthlyPolls += 1) {
+        monthlyReport = ((await monthlyDetail())["report"] ?? null) as Record<string, unknown> | null;
+        if (monthlyReport !== null) break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      const monthlyBody = (monthlyReport?.["body"] ?? {}) as { format?: number; month?: string; lastDayPending?: boolean; narrative?: unknown; narrativeRaw?: unknown; note?: string; promptVersion?: string; stats?: { raceCount?: number; resultRaceCount?: number; days?: { date: string }[]; byVersion?: { promptVersion: string | null }[] } };
+      check(
+        `${label}: 月報が保存され、本文(統計・日ごとの行・版ごとの行)つきで読める(本物の DO・D1)。2 レース・結果あり 1 レース・開催日 2 日・版 2 つで、最終日は未確定の印なし`,
+        monthlyReport !== null && monthlyReport["month"] === "202603" && monthlyReport["race_count"] === 2 && monthlyBody.format === 1 && monthlyBody.stats?.raceCount === 2 && monthlyBody.stats?.resultRaceCount === 1 &&
+          JSON.stringify(monthlyBody.stats?.days?.map((d) => d.date)) === JSON.stringify(["20260301", "20260328"]) && JSON.stringify(monthlyBody.stats?.byVersion?.map((v) => v.promptVersion)) === JSON.stringify(["v-smoke-1", "v-smoke-2"]) && monthlyBody.lastDayPending === false,
+        `${monthlyPolls} ${JSON.stringify(monthlyReport).slice(0, 300)}`,
+      );
+      check(
+        `${label}: キー未登録なので、文章なし(model・summary は NULL、narrative は null)・固定の理由・月報のプロンプトの版つきの統計だけの月報になる(LLM を呼ばない)`,
+        monthlyReport !== null && monthlyReport["model"] === null && monthlyReport["summary"] === null && monthlyBody.narrative === null && monthlyBody.narrativeRaw === null && typeof monthlyBody.note === "string" && monthlyBody.note.includes("API キーが未登録") && /^monthly-/.test(monthlyBody.promptVersion ?? ""),
+        JSON.stringify(monthlyBody).slice(0, 300),
+      );
+      const monthlyList = parseJson((await req(port, "GET", "/api/monthly-reports")).text)["reports"] as { month: string }[] | undefined;
+      const monthlyAgain = await monthlyRun({ month: "202603" });
+      check(`${label}: 月報の一覧に載り、同じ月の 2 回目の作成は 409(already-exists。1 か月 1 回で確定)`, monthlyList?.some((r) => r.month === "202603") === true && monthlyAgain.status === 409 && monthlyAgain.text.includes("already-exists"), `${monthlyAgain.status} ${monthlyAgain.text.slice(0, 200)}`);
+      const monthlyJob = await monthlyDetail();
+      check(`${label}: 管理者の詳細は進行状況(job・job_status)を持つ。作成が済んだ後はジョブなし(job: null・ok)`, monthlyJob["job"] === null && monthlyJob["job_status"] === "ok", JSON.stringify(monthlyJob).slice(0, 120));
+      // 作り直し(regenerate: true)。受理の上限は 1 日 3 回(全体)。受理するたびに作成時刻が変わる(置き換わる)。
+      let regenCreatedAt = monthlyReport?.["created_at"];
+      let regenAccepted = 0;
+      let regenReplaced = 0;
+      for (let n = 0; n < 3; n += 1) {
+        const regen = await monthlyRun({ month: "202603", regenerate: true });
+        if (regen.status !== 202) break;
+        regenAccepted += 1;
+        for (let i = 0; i < 120; i += 1) {
+          const now = ((await monthlyDetail())["report"] as Record<string, unknown> | null)?.["created_at"];
+          if (now !== undefined && now !== regenCreatedAt) {
+            regenCreatedAt = now;
+            regenReplaced += 1;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+      check(`${label}: 月報の作り直し(regenerate: true)を 3 回受理でき、そのたびに作成時刻が新しくなる(本物の DO・D1 の UPSERT。前が文章なしなので文章なしの作り直しでも置き換わる)`, regenAccepted === 3 && regenReplaced === 3, `accepted=${regenAccepted} replaced=${regenReplaced}`);
+      const regenLimited = await monthlyRun({ month: "202603", regenerate: true });
+      check(`${label}: 4 回目の作り直しは 429(daily-limit。1 日 3 回の上限。日報とは別枠)`, regenLimited.status === 429 && regenLimited.text.includes("daily-limit"), `${regenLimited.status} ${regenLimited.text.slice(0, 120)}`);
+      const regenNone = await monthlyRun({ month: "202602", regenerate: true });
+      check(`${label}: 月報が無い月の作り直しは(上限に達していても、月報の有無の確認が先なので)409(not-exists)`, regenNone.status === 409 && regenNone.text.includes("not-exists"), `${regenNone.status} ${regenNone.text.slice(0, 120)}`);
 
       // Issue #176: runAnalysis(クラウド版の入口)が workerd で、フィクスチャから最後まで通り、exe 側の golden と同じ出力になる。
       // Issue #258: 「同じ出力」は、浮動小数点の値を相対誤差 1e-12 以内、それ以外(項目の集合・順序・文字列・整数・真偽・配列の長さ・買い目の数)を完全一致で比べる。

@@ -7,7 +7,7 @@
  * `race` は **有効な `date` があるときだけ**採る(中央のレースIDは日付を含まず、日付なしでは別の日のレースと取り違えるため)。
  * `race`(レース画面)・`analysis`(結果画面)を使う画面は Issue #185。両方あれば analysis が優先(`app.ts`)。
  */
-import { isRealYmd } from "./date";
+import { isRealMonth, isRealYmd } from "./date";
 
 export type Venue = "central" | "nar";
 
@@ -30,9 +30,9 @@ export interface Route {
   readonly verify?: boolean;
   /**
    * 日報画面(Issue #235)。`#report`(完全一致。`date` は null = 最新)と `#report=YYYYMMDD`(実在の日付の完全一致)のときだけ付く。**省略は日報画面ではない**
-   * (`migration`・`verify` と同じ流儀)。
+   * (`migration`・`verify` と同じ流儀)。**月報(Issue #279)は同じ画面の中**で、`#report=YYYYMM`(実在の月の完全一致)のとき `month` が付く(`date` は null)。日報のときは `month` のキー自体が無い。
    */
-  readonly report?: { readonly date: string | null };
+  readonly report?: { readonly date: string | null; readonly month?: string };
 }
 
 /** 設定画面のハッシュ(Issue #189)。一覧のトップの入口のリンク先。 */
@@ -50,6 +50,11 @@ export const REPORT_HASH = "#report";
 /** その日の日報のハッシュ(`#report=YYYYMMDD`)。通知のリンクにも使う。 */
 export function buildReportHash(date: string): string {
   return `${REPORT_HASH}=${date}`;
+}
+
+/** その月の月報のハッシュ(`#report=YYYYMM`。Issue #279)。日報の画面の中の「月」の指定。通知のリンクにも使う。 */
+export function buildMonthlyHash(month: string): string {
+  return `${REPORT_HASH}=${month}`;
 }
 
 const ANALYSIS_ID_MAX = 2_147_483_647;
@@ -80,6 +85,11 @@ export function parseHash(hash: string, today: string): Route {
   const reportMatch = /^#report=([0-9]{8})$/.exec(hash);
   if (reportMatch !== null && isRealYmd(reportMatch[1]!)) {
     return { date: today, venue: "central", race: null, analysis: null, settings: false, report: { date: reportMatch[1]! } };
+  }
+  // 月報(Issue #279)は日報の画面の中: `#report=YYYYMM`(実在の月の完全一致)。
+  const monthMatch = /^#report=([0-9]{6})$/.exec(hash);
+  if (monthMatch !== null && isRealMonth(monthMatch[1]!)) {
+    return { date: today, venue: "central", race: null, analysis: null, settings: false, report: { date: null, month: monthMatch[1]! } };
   }
   let params: URLSearchParams;
   try {

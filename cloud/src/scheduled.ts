@@ -9,6 +9,9 @@
  *    (c)日報の取り残しの補完(前日以前の最大 3 日)を日報の DO へ依頼する。21 時にこれらを行わないのは、21 時は翌日分の事前分析の取得が gate を占めるため。
  *    ★結果の窓・日報の補完の基準は cron の JST の今日(翌日ではない)。DO が「今日以降の開催日の結果の取り込みは拒否」するため、窓は今日の前日まで。当日の結果は日単位の DO が当日中に取り込む(7 日の窓は保険)。
  *    当日に諦めたレースの取り直しと日報の補完は、翌日の 21 時・23 時の実行で拾う(従来は翌朝 9 時。約 12〜14 時間遅くなる)。
+ *  - **月報の依頼(Issue #265・#279。21:00・23:00 のどちらの実行でも。新しい cron は足さない)**: 最終日(JST の今日が月の最終日)なら、月報の DO(`MonthlyReportDO`)へ当月を `auto`・同日 22:00 JST 開始で依頼する(`monthly-report-plan.ts`。ユーザーの決定:
+ *    毎月最終日の 22 時ごろ)。23:00 の実行は同じ依頼を出す保険で、加えて月が明けて 3 日以内なら前月を `catchup` で依頼する。DO は 22:00 に最終日の結果と日報を待ってから作る。
+ *    ★事前分析の計画の成否によらず走らせ、失敗しても投げない(分類 `monthly-report-failed` だけをログに出す)。
  *  - **netkeiba にも LLM にも直接は出ない**(取得・予約・分析・結果の取り込みは、依頼を受けた DO がアラームの中で行う)。D1 は結果の未取込の**列挙(読み取り 1 クエリ)**だけ。
  *    `cloudflare:workers` を import しない(型だけ import する)ので、Node の vitest でそのままテストできる。worker.ts は、これに 1 行で委譲する。
  *  - **開催日**: {@link planTargetDate}(`scheduledTime` から。21 時と 23 時は JST で同じ日なので同じ翌日になる。月末・年末・うるう日は暦日の足し算で繰り上がる)。
@@ -22,13 +25,15 @@
  *    これで拾えない失敗は、Worker 自体が動かない場合だけ。送るのは、結果の取り込み・kick・日報の補完のあと(送信の待ちが他の仕事を遅らせない)。
  *  - **ログ**: 固定の分類名・開催日・試行番号・エラーの `name`(文字種を絞る)だけ。メッセージ本文・値・秘密は出さない。
  *
- * 呼び出す DO の RPC は `requestPlan` の 1 つ(ここに直接)と、`dispatchResultImports` 経由の `requestResultImport`、補完の `kick` の 1 つ(`scripts/test/cloud-config-guard.test.ts` が、呼び出し箇所の数と、取得に出る呼び出しが無いことを固定する)。
+ * 呼び出す DO の RPC は、(日報の `requestReport`〈Issue #235〉と月報の `requestMonthlyReport`〈Issue #279〉のほかに)`requestPlan` の 1 つ(ここに直接)と、`dispatchResultImports` 経由の `requestResultImport`、補完の `kick` の 1 つ(`scripts/test/cloud-config-guard.test.ts` が、呼び出し箇所の数と、取得に出る呼び出しが無いことを固定する)。
  * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。計画・既存の結果の依頼を失敗させない。
  */
 import { jstKaisaiDate, planTargetDate, scheduledRunKind, type ScheduledRunKind } from "./auto-run-plan";
-import type { BackfillNamespaceLike, DailyReportNamespaceLike, RaceDayNamespaceLike } from "./handler";
+import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceDayNamespaceLike } from "./handler";
 import { DAILY_REPORT_NAME } from "./daily-report-core";
 import { D1ReportStore } from "./daily-report-repository";
+import { MONTHLY_REPORT_NAME } from "./monthly-report-core";
+import { monthlyRequestsFor } from "./monthly-report-plan";
 import { buildPlanRequestFailedEmbed } from "./notify-embeds";
 import { classifyNotifyError, createDiscordNotifier, webhookStatus } from "./notify-send";
 import type { DiscordFetchLike } from "../../packages/core/src/notify/discord";
@@ -50,6 +55,8 @@ export interface ScheduledEnv {
   readonly RESULT_BACKFILL?: BackfillNamespaceLike;
   /** 日報の DO(Issue #235)。無い構成では日報の取り残しの補完をしない。 */
   readonly DAILY_REPORT?: DailyReportNamespaceLike;
+  /** 月報の DO(Issue #265・#279)。無い構成では月報を依頼しない。 */
+  readonly MONTHLY_REPORT?: MonthlyReportNamespaceLike;
   /** Discord の Webhook(Worker の secret。Issue #249)。**23 時の再実行で計画の依頼が 3 回とも失敗したときの通知にだけ使う**。未登録・形式不正なら送らない。 */
   readonly DISCORD_WEBHOOK_URL?: string;
 }
@@ -143,6 +150,12 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     }
   }
 
+  // 月報の依頼(Issue #279)。21:00・23:00 のどちらの実行でも(新しい cron は足さない)。**先の事前分析の計画の成否によらず**走らせ、失敗しても投げない。
+  // 最終日は当月を auto(同日 22:00 JST 開始)、月が明けて 3 日以内の 23:00 の実行は前月を catchup(`monthly-report-plan.ts`)。
+  if (env.MONTHLY_REPORT !== undefined) {
+    await requestMonthlyReports(env.MONTHLY_REPORT, today, kind, log);
+  }
+
   if (!planned) {
     log(`scheduled: failed class=request-plan-failed kind=${kind} date=${kaisaiDate}`, "error");
     // 23 時の再実行でも依頼できなかった: 利用者の決定(Issue #249)で、ここから固定文を 1 通送る。first では送らない(23 時に救済される)。
@@ -174,6 +187,23 @@ async function notifyPlanRequestFailed(
     log(`scheduled: plan-failure-notice sent date=${kaisaiDate}`, "info");
   } catch (error) {
     log(`scheduled: plan-failure-notice failed date=${kaisaiDate} class=${classifyNotifyError(error)}`, "error");
+  }
+}
+
+/** 月報の依頼(Issue #279)。計画された月ごとに月報の DO へ依頼する。投げない(失敗は分類だけをログに出し、残りを続ける)。 */
+async function requestMonthlyReports(
+  namespace: MonthlyReportNamespaceLike,
+  today: string,
+  kind: ScheduledRunKind,
+  log: (line: string, level: "info" | "error") => void,
+): Promise<void> {
+  for (const request of monthlyRequestsFor(today, kind)) {
+    try {
+      const result = await namespace.get(namespace.idFromName(MONTHLY_REPORT_NAME)).requestMonthlyReport(request);
+      log(`scheduled: monthly-report month=${request.month} mode=${request.mode} accepted=${String(result.accepted)}${result.accepted ? "" : ` reason=${result.reason}`}`, "info");
+    } catch (error) {
+      log(`scheduled: failed class=monthly-report-failed month=${request.month} mode=${request.mode} error=${errorKind(error)}`, "error");
+    }
   }
 }
 

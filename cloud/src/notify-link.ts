@@ -6,7 +6,8 @@
  *    結果に入力の値は入れない(invalid のとき、値の一部もログ・応答に出ない)。
  *  - {@link buildAnalysisLink}: 分析画面へのリンク。ハッシュの形は、クライアントの `buildHash`(`cloud/client/route.ts`。`parseHash` が読む)をそのまま使う(形を二重に持たない)。
  */
-import { buildHash, buildReportHash } from "../client/route";
+import { buildHash, buildMonthlyHash, buildReportHash } from "../client/route";
+import { isValidMonth } from "./monthly-month";
 
 export type AppBaseUrlResolution =
   | { readonly status: "absent" }
@@ -68,4 +69,9 @@ export function buildAnalysisLink(origin: string, input: AnalysisLinkInput): str
 /** その日の日報へのリンク(`<オリジン>/#report=YYYYMMDD`。Issue #235)。開催日が 8 桁の数字でなければ undefined(リンクを作らない)。 */
 export function buildReportLink(origin: string, kaisaiDate: string): string | undefined {
   return /^[0-9]{8}$/.test(kaisaiDate) ? `${origin}/${buildReportHash(kaisaiDate)}` : undefined;
+}
+
+/** その月の月報へのリンク(`<オリジン>/#report=YYYYMM`。Issue #280)。実在する月(6 桁)でなければ undefined(リンクを作らない)。 */
+export function buildMonthlyLink(origin: string, month: string): string | undefined {
+  return isValidMonth(month) ? `${origin}/${buildMonthlyHash(month)}` : undefined;
 }

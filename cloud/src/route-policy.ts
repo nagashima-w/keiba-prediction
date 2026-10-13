@@ -8,9 +8,9 @@
  * **表に無い (method, path) は管理者専用に倒れる(fail-closed)**。新しいルートを足して表に書き忘れても、閲覧者に開く方向には倒れない。
  * 表との突き合わせ(`test/route-policy.test.ts`)は、handler.ts の `pathname` の比較を走査し、表に無いルートが増えたら落とす。
  *
- * 閲覧者に開くもの(17 ルート):
+ * 閲覧者に開くもの(19 ルート):
  *   画面 `GET|HEAD /`・`GET|HEAD /app.js`、一覧 `GET /api/races`(netkeiba への取得を起こしうるが、キャッシュと gate が効く)、
- *   `GET /api/plan`、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、
+ *   `GET /api/plan`、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、`GET /api/monthly-reports`・`/api/monthly-reports/{month}`(月報も見せる。Issue #279)、
  *   `GET /api/verify`(検証。Issue #263。閲覧者の要求は集計のやり直しを起こさない〈キャッシュを返すだけ〉、`refresh` は管理者だけ)、
  *   アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244。{@link ICON_PATHS}。表に無いと閲覧者の画面でアイコンが 403 になる)。
  * それ以外(設定・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・統計モデル用の書き出し〈Issue #266〉・各馬の戦績の蓄積の診断〈Issue #256〉・確認ページと確認 API・health)は管理者だけ。
@@ -36,6 +36,9 @@ export const ANALYSIS_DETAIL_PATTERN = /^\/api\/analyses\/([^/]+)$/;
 /** `/api/reports/{date}` の接頭辞(handler.ts もこの定数で振り分ける)。 */
 export const REPORTS_PREFIX = "/api/reports/";
 
+/** `/api/monthly-reports/{month}` の接頭辞(月報。Issue #279。handler.ts もこの定数で振り分ける)。 */
+export const MONTHLY_REPORTS_PREFIX = "/api/monthly-reports/";
+
 const GET = ["GET"] as const;
 const PAGE = ["GET", "HEAD"] as const;
 const ADMIN_ONLY: readonly string[] = [];
@@ -45,8 +48,8 @@ function exact(path: string, viewerMethods: readonly string[]): RouteRule {
 }
 
 /**
- * 表。完全一致のルートが 28(画面・API・管理者専用が 21、アイコンが 7)、パターンのルートが 2(`/api/analyses/{id}`・`/api/reports/{date}`)。
- * パターンは、同じ階層の固定の path(`/api/analyses/run`・`/api/reports/run`)に化けないよう、`run` を除く。
+ * 表。完全一致のルートが 30(画面・API・管理者専用が 23、アイコンが 7)、パターンのルートが 3(`/api/analyses/{id}`・`/api/reports/{date}`・`/api/monthly-reports/{month}`)。
+ * パターンは、同じ階層の固定の path(`/api/analyses/run`・`/api/reports/run`・`/api/monthly-reports/run`)に化けないよう、`run` を除く。
  */
 export const ROUTE_RULES: readonly RouteRule[] = [
   // ---- 閲覧者にも許す ----
@@ -69,6 +72,15 @@ export const ROUTE_RULES: readonly RouteRule[] = [
     matches: (pathname) => pathname !== "/api/reports/run" && pathname.startsWith(REPORTS_PREFIX),
     viewerMethods: GET,
   },
+  // 月報(Issue #265・#279)。日報と同じく D1 の `monthly_reports` を読むだけ(LLM も netkeiba も使わない)で、閲覧者にも見せる(ユーザーの決定)。
+  // パターンは、同じ階層の固定の path(`/api/monthly-reports/run`。管理者専用の POST。Issue #280)に化けないよう、`run` を除く。
+  exact("/api/monthly-reports", GET),
+  {
+    path: "/api/monthly-reports/{month}",
+    exact: false,
+    matches: (pathname) => pathname !== "/api/monthly-reports/run" && pathname.startsWith(MONTHLY_REPORTS_PREFIX),
+    viewerMethods: GET,
+  },
   // 検証(Issue #263)。D1 の集計の読み取りだけで LLM も netkeiba も使わない。**閲覧者の要求は集計のやり直しを起こさない**(handler.ts の `handleVerify` が役割で DO のメソッドを分け、
   // 閲覧者はキャッシュを読むだけの `getViewerReport`。`refresh` は管理者だけ)。柵(最短 5 分・1 日 20 回)を閲覧者が消費しない。GET だけ(HEAD は管理者専用)
   exact("/api/verify", GET),
@@ -87,6 +99,7 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/migration", ADMIN_ONLY),
   exact("/api/migration/upload", ADMIN_ONLY),
   exact("/api/reports/run", ADMIN_ONLY), // 日報の手動作成(LLM を呼ぶ)
+  exact("/api/monthly-reports/run", ADMIN_ONLY), // 月報の手動作成と作り直し(Issue #280。LLM を呼ぶ)
   // 統計モデルの見直し用の書き出し(Issue #266)。分析・結果の全件に近い内容(prior・補正・着順・オッズ)が出るので管理者だけ。作成は DO が R2 の詳細を大量に読む
   exact("/api/export/prior-dataset", ADMIN_ONLY),
   // 各馬の戦績の蓄積の診断(Issue #256 段階A)。D1 の horse_runs の走査(件数・開催区分別・セルの分布)を起こしうるので管理者だけ。読み取り専用・GET だけ

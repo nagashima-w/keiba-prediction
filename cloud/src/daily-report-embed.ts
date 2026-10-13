@@ -38,13 +38,13 @@ export interface ReportEmbedInput {
 }
 
 /** 型 1 つの『的中/点数 回収率』(判定できた点が無ければ回収率は『-』)。 */
-function templateShort(s: WhatIfStats[string] | undefined): string {
+export function templateShort(s: WhatIfStats[string] | undefined): string {
   if (s === undefined) return "-";
   return `${s.hitCount}/${s.betCount} ${s.betCount === 0 ? "-" : formatRecoveryPercent(s.payout / s.stake)}`;
 }
 
 /** 型の成績が 1 つでも数えられている(レースが 0 件の日は false)。 */
-function hasWhatIfData(w: WhatIfStats): boolean {
+export function hasWhatIfData(w: WhatIfStats): boolean {
   return Object.values(w).some((s) => s.betCount + s.unjudgedCount + s.inapplicableCount > 0);
 }
 
@@ -52,7 +52,7 @@ function hasWhatIfData(w: WhatIfStats): boolean {
  * 帯の色(緑・赤)だけに頼らないための語(Issue #239)。境界は帯の色の条件(`recoveryRate >= 1` で緑)と同じ: 100% ちょうどは緑で「収支±0」、それ未満は赤で「赤字」、超えれば緑で「黒字」。
  * 丸めた表示が「100.0%」でも、実際の値が 1 未満なら赤字(帯も赤)。
  */
-function profitWord(recoveryRate: number): string {
+export function profitWord(recoveryRate: number): string {
   if (recoveryRate > 1) return "(黒字)";
   if (recoveryRate === 1) return "(収支±0)";
   return "(赤字)";
@@ -62,7 +62,7 @@ function profitWord(recoveryRate: number): string {
  * 『N 点中 M 点的中』に、返還があるときは『うち返還 K 点』(Issue #278。項目が無い旧形・0 点なら添えない)、見込みを導けるときは『見込み X.XX 点・実際 Y 点』を、1 つの括弧に添える。
  * 返還は N には含まれ、M には含まれない。
  */
-function hitText(s: DayStats): string {
+export function hitText(s: DayStats): string {
   const expected = formatExpectedHits(s);
   const parts = [(s.refundedBetCount ?? 0) > 0 ? `うち返還 ${s.refundedBetCount} 点` : null, expected].filter((t): t is string => t !== null);
   return `${s.judgedBetCount} 点中 ${s.hitBetCount} 点的中${parts.length === 0 ? "" : `(${parts.join("・")})`}`;

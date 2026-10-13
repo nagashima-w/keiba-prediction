@@ -23,5 +23,5 @@
       "@keiba/core/*": ["../packages/core/src/*"]
     }
   },
-  "include": ["src", "test", "smoke.ts", "smoke-compare.ts", "smoke-worker.ts", "smoke-modules.d.ts", "vitest.config.ts", "build-client.ts", "print-report-prompt.ts", "report-prompt-scenarios.ts", "measure-period-cpu.ts", "print-palette-report.ts"]
+  "include": ["src", "test", "smoke.ts", "smoke-compare.ts", "smoke-worker.ts", "smoke-modules.d.ts", "vitest.config.ts", "build-client.ts", "print-report-prompt.ts", "report-prompt-scenarios.ts", "print-monthly-prompt.ts", "monthly-prompt-scenarios.ts", "measure-period-cpu.ts", "print-palette-report.ts"]
 }

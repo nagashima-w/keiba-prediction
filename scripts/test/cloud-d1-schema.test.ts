@@ -205,6 +205,22 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     indexes: [{ origin: "pk", unique: 1, columns: ["kaisai_date"], name: null }],
   },
+  // 0015 の中身(Issue #265・#279)。月報(1 か月 1 行。月 YYYYMM が主キー)。列は daily_reports と同じ(開催日 → 月)。
+  monthly_reports: {
+    columns: [
+      { name: "body_json", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "created_at", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "llm_calls_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "model", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "month", type: "TEXT", notnull: 0, dflt_value: null, pk: 1 },
+      { name: "race_count", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "summary", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "total_return", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "total_stake", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["month"], name: null }],
+  },
   // 0012 の中身(Issue #226。0011 は #259 が使う)。騎手の年ごとの成績(1 騎手・1 区分で 1 行。年ごとの成績は years_json に `[[年, 騎乗数, 3着内], ...]`)。
   // 主キーは (jockey_id, kind) の複合(TEXT なので rowid の別名ではなく、自動索引〈origin `pk`・名前なし〉ができる)。kind の CHECK は table_info に出ない。
   jockey_results: {
@@ -279,8 +295,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql の14本だけで、番号は 0001 から連続している(後から足すときは 0015 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql の15本だけで、番号は 0001 から連続している(後から足すときは 0016 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {

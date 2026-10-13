@@ -7,7 +7,7 @@
  */
 import type { ReportDetail, ReportJob, ReportListItem, ReportRace, ReportStats, ReportTemplateStat } from "./api-report";
 import { formatJstDateTime, ymdToInput } from "./date";
-import { buildReportHash } from "./route";
+import { buildMonthlyHash, buildReportHash } from "./route";
 import { formatExpectedHits } from "../src/expected-format";
 import { formatRecoveryPercent } from "../src/recovery-format";
 import { formatTemplateStat, TEMPLATE_LABELS, templateLabel } from "../src/whatif-format";
@@ -147,6 +147,8 @@ export interface ReportModel {
   readonly error: string | null;
   /** 日付の入力(`<input type="date">`)の値(YYYY-MM-DD)。表示中の日(Issue #273)。 */
   readonly dateInput: string;
+  /** 日報と月報の切り替え(Issue #279。同じ画面の中の 2 つのタブ)。日は表示中の日、月は表示中の日の月の月報(`#report=YYYYMM`)。日報の画面では日が現在位置。 */
+  readonly tabs: { readonly dayHref: string; readonly monthHref: string };
   /** 前・今日・次のリンク(`#report=YYYYMMDD`)。前後は日報のある日で、無ければ null。今日は常にある(管理者が今日の日報を作る入口)。 */
   readonly dateNav: { readonly prevHref: string | null; readonly todayHref: string; readonly nextHref: string | null };
   /** 表示している日の見出し(`2026年10月10日(土)`)。 */
@@ -219,7 +221,7 @@ function horseText(umaban: number, name: string | null): string {
 }
 
 /** 返還(取消・除外の馬への買い目。Issue #278)の内訳。点数が無い(この項目を持つ前の日報)・0 点なら添えない。 */
-const refundText = (count: number | undefined): string => (count !== undefined && count > 0 ? `(うち返還 ${count} 点)` : "");
+export const refundText = (count: number | undefined): string => (count !== undefined && count > 0 ? `(うち返還 ${count} 点)` : "");
 
 /** そのレースの実際の買い目の概要(レースごとの行と、惜しかったレースが使う)。 */
 function betsText(r: ReportRace): string {
@@ -239,7 +241,7 @@ function raceRow(r: ReportRace): RaceRowView {
 }
 
 /** 賭け金・払戻・回収率・的中(+ 見込みと実際)のタイル。その日と累計で同じ書き方。見込みは、この項目を持つ日報で、確率のある買い目があるときだけ。 */
-function statTiles(s: ReportStats): TileView[] {
+export function statTiles(s: ReportStats): TileView[] {
   const tiles: TileView[] = [
     { label: "賭け金", value: formatYen(s.totalStake), strong: false },
     { label: "払戻", value: formatYen(s.totalReturn), strong: false },
@@ -251,7 +253,7 @@ function statTiles(s: ReportStats): TileView[] {
   return tiles;
 }
 
-const ymd = (d: string): string => `${Number(d.slice(0, 4))}年${Number(d.slice(4, 6))}月${Number(d.slice(6, 8))}日`;
+export const ymd = (d: string): string => `${Number(d.slice(0, 4))}年${Number(d.slice(4, 6))}月${Number(d.slice(6, 8))}日`;
 
 function rollingOf(report: ReportDetail): RollingView | null {
   const t = report.rolling?.total;
@@ -261,12 +263,17 @@ function rollingOf(report: ReportDetail): RollingView | null {
 }
 
 /** 型ごとの行(決まった順。未知の id は id のまま末尾)。 */
-function templateRows(w: Readonly<Record<string, ReportTemplateStat>>): RowView[] {
+export function templateRows(w: Readonly<Record<string, ReportTemplateStat>>): RowView[] {
   const known = new Set(TEMPLATE_LABELS.map(([id]) => id));
   return [...TEMPLATE_LABELS.map(([id]) => id), ...Object.keys(w).filter((id) => !known.has(id))]
     .filter((id) => w[id] !== undefined)
     .map((id) => ({ label: templateLabel(id), value: formatTemplateStat(w[id]!, formatYen) }));
 }
+
+/** 「もしも」の節の見出しと説明(固定文言)。月報(Issue #279)の画面も同じ文言を使う。 */
+export const WHATIF_HEADING = "もしも(印の定型の買い方。各100円)";
+export const WHATIF_NOTE =
+  "毎レース各100円で買っていたときの成績です(印の付いたレース全部が対象。実際の配分とは点数も賭け金も揃いません)。判定不能と対象外は成績に含めません。取消・除外の馬を含む型は返還として、賭け金と払戻に含めます。";
 
 function whatIfOf(report: ReportDetail): WhatIfView | null {
   const day = report.stats.whatIf;
@@ -287,25 +294,37 @@ function whatIfOf(report: ReportDetail): WhatIfView | null {
           empty: nm.shown.length === 0 ? "該当するレースはありませんでした。" : null,
         };
   return {
-    heading: "もしも(印の定型の買い方。各100円)",
-    note: "毎レース各100円で買っていたときの成績です(印の付いたレース全部が対象。実際の配分とは点数も賭け金も揃いません)。判定不能と対象外は成績に含めません。取消・除外の馬を含む型は返還として、賭け金と払戻に含めます。",
+    heading: WHATIF_HEADING,
+    note: WHATIF_NOTE,
     groups,
     near,
   };
 }
 
-function bodyOf(report: ReportDetail): ReportBodyView {
-  const s = report.stats;
-  const tiles = statTiles(s);
-  const typeRows: RowView[] = PROPOSED_BET_LABELS.filter(({ type }) => s.byBetType[type] !== undefined).map(({ type, label }) => {
-    const t = s.byBetType[type]!;
+/** 券種ごとの行(決まった順。未知の券種は券種コードのまま末尾に出す = 黙って落とさない)。日報と月報(Issue #279)で共有する。 */
+export function typeRowsOf(byBetType: ReportStats["byBetType"]): RowView[] {
+  const rows: RowView[] = PROPOSED_BET_LABELS.filter(({ type }) => byBetType[type] !== undefined).map(({ type, label }) => {
+    const t = byBetType[type]!;
     return { label, value: `${t.betCount} 点中 ${t.hitCount} 点的中${refundText(t.refundCount)}・賭け金 ${formatYen(t.stake)}・払戻 ${formatYen(t.payout)}` };
   });
   // 券種名が既知のラベルに無いもの(将来の券種)は、キーのまま末尾に出す(黙って落とさない)。
   const known = new Set(PROPOSED_BET_LABELS.map((l) => l.type as string));
-  for (const [type, t] of Object.entries(s.byBetType)) {
-    if (!known.has(type)) typeRows.push({ label: type, value: `${t.betCount} 点中 ${t.hitCount} 点的中${refundText(t.refundCount)}・賭け金 ${formatYen(t.stake)}・払戻 ${formatYen(t.payout)}` });
+  for (const [type, t] of Object.entries(byBetType)) {
+    if (!known.has(type)) rows.push({ label: type, value: `${t.betCount} 点中 ${t.hitCount} 点的中${refundText(t.refundCount)}・賭け金 ${formatYen(t.stake)}・払戻 ${formatYen(t.payout)}` });
   }
+  return rows;
+}
+
+/** 印ごとの行(頭数 / 1着 / 3着内)。 */
+export const MARK_HEADING = "印別の成績(結果のあるレース。頭数 / 1着 / 3着内)";
+export function markRowsOf(byMark: ReportStats["byMark"]): RowView[] {
+  return byMark.map((m) => ({ label: m.mark, value: `${m.count} 頭 / ${m.win} / ${m.top3}` }));
+}
+
+function bodyOf(report: ReportDetail): ReportBodyView {
+  const s = report.stats;
+  const tiles = statTiles(s);
+  const typeRows = typeRowsOf(s.byBetType);
   const metaParts = [`作成 ${formatJstDateTime(report.createdAt)}`, `${report.raceCount} レース`, report.model === null ? "LLM の文章なし" : `モデル ${report.model}`];
   if (s.noResultRaceCount > 0) metaParts.push(`結果なし ${s.noResultRaceCount} レース`);
   if (s.unjudgedBetCount > 0) metaParts.push(`判定不能の買い目 ${s.unjudgedBetCount} 点(賭け金 ${formatYen(s.unjudgedStake)}。成績に含めません)`);
@@ -327,8 +346,8 @@ function bodyOf(report: ReportDetail): ReportBodyView {
     raw: report.narrative === null ? report.narrativeRaw : null,
     typeHeading: "券種別の成績",
     typeRows,
-    markHeading: "印別の成績(結果のあるレース。頭数 / 1着 / 3着内)",
-    markRows: s.byMark.map((m) => ({ label: m.mark, value: `${m.count} 頭 / ${m.win} / ${m.top3}` })),
+    markHeading: MARK_HEADING,
+    markRows: markRowsOf(s.byMark),
     racesHeading: "レースごと",
     races: report.races.map(raceRow),
   };
@@ -341,6 +360,7 @@ export function buildReportModel(input: ReportModelInput): ReportModel {
     backHref: "#" as const,
     heading: "日報",
     dateInput: ymdToInput(input.shownDate),
+    tabs: { dayHref: buildReportHash(input.shownDate), monthHref: buildMonthlyHash(input.shownDate.slice(0, 6)) },
     dateNav: dateNavOf(input),
     shownLabel: dateLabel(input.shownDate),
   };

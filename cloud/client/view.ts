@@ -13,6 +13,7 @@ import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./mi
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
+import type { MonthlyBodyView, MonthlyModel } from "./monthly-model";
 import type { RaceRowView, ReportBodyView, ReportModel, WhatIfView } from "./report-model";
 import type { AdminOnlyModel } from "./admin-only";
 import { h, type PickedFile, type VNode } from "./vnode";
@@ -822,6 +823,42 @@ function reportBodyNodes(b: ReportBodyView): VNode[] {
   return nodes;
 }
 
+/** 日報と月報の切り替え(Issue #279。同じ画面の中の 2 つのタブ)。`current` の側が現在位置(aria-current=page)。 */
+function reportTabsNode(tabs: { readonly dayHref: string; readonly monthHref: string }, current: "day" | "month"): VNode {
+  return h("nav", { class: "tabs report-tabs", "aria-label": "日報と月報" }, [
+    h("a", { class: "report-tab", href: tabs.dayHref, "aria-current": current === "day" ? "page" : undefined }, ["日報"]),
+    h("a", { class: "report-tab", href: tabs.monthHref, "aria-current": current === "month" ? "page" : undefined }, ["月報"]),
+  ]);
+}
+
+/**
+ * 管理者の操作(日報の #235・#268 と月報の #280 で共有): 「作る」ボタン(注意つき。今日の日付のときは強めの注意を足す)と、「作り直す」ボタン(確認を開いているときは、ボタンの代わりに確認)。
+ * 月報の画面も同じ `onReportRun`・`onReportRegen*` を使う(`app.ts` が表示中の画面に振り分ける)。
+ */
+function reportOperationNodes(model: { readonly create: ReportModel["create"]; readonly regen: ReportModel["regen"] }, actions: ViewActions): VNode[] {
+  const nodes: VNode[] = [];
+  if (model.create !== null) {
+    // 確定の注意は、ボタンの手前(押す前に読める位置)に出す。
+    nodes.push(h("p", { class: "meta report-caution" }, [model.create.caution]));
+    if (model.create.todayCaution !== null) nodes.push(notice("wait", model.create.todayCaution));
+    nodes.push(h("button", { class: "report-run", disabled: model.create.disabled }, [model.create.label], { click: actions.onReportRun }));
+  }
+  if (model.regen !== null) {
+    const r = model.regen;
+    // 作り直し(Issue #268)。確認を開いているときは、ボタンの代わりに確認(文面・実行・やめる)を出す。
+    nodes.push(
+      r.confirm === null
+        ? h("button", { class: "report-regen", disabled: r.disabled }, [r.label], { click: actions.onReportRegenOpen })
+        : h("div", { class: "report-regen-confirm" }, [
+            h("p", { class: "meta report-caution" }, [r.confirm.text]),
+            h("button", { class: "report-regen-go" }, [r.confirm.goLabel], { click: actions.onReportRegenGo }),
+            h("button", { class: "report-regen-cancel" }, [r.confirm.cancelLabel], { click: actions.onReportRegenCancel }),
+          ]),
+    );
+  }
+  return nodes;
+}
+
 function reportScreen(model: ReportModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
     h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
@@ -837,30 +874,64 @@ function reportScreen(model: ReportModel, actions: ViewActions): VNode {
       ...(nav.nextHref === null ? [] : [h("a", { class: "tab", href: nav.nextHref }, ["次の日報"])]),
     ]),
   ]);
-  const body: VNode[] = [h("h1", { class: "title" }, [model.heading]), dateControls];
+  const body: VNode[] = [h("h1", { class: "title" }, [model.heading]), reportTabsNode(model.tabs, "day"), dateControls];
   if (model.loading && model.body === null) body.push(h("p", { class: "empty" }, ["読み込み中…"]));
   if (model.error !== null) body.push(notice("error", model.error));
   if (model.notice !== null) body.push(notice(model.notice.tone, model.notice.text));
-  if (model.create !== null) {
-    // 確定の注意は、ボタンの手前(押す前に読める位置)に出す。今日の日付のときは、強めの注意を足す。
-    body.push(h("p", { class: "meta report-caution" }, [model.create.caution]));
-    if (model.create.todayCaution !== null) body.push(notice("wait", model.create.todayCaution));
-    body.push(h("button", { class: "report-run", disabled: model.create.disabled }, [model.create.label], { click: actions.onReportRun }));
-  }
-  if (model.regen !== null) {
-    const r = model.regen;
-    // 作り直し(Issue #268)。確認を開いているときは、ボタンの代わりに確認(文面・実行・やめる)を出す。
-    body.push(
-      r.confirm === null
-        ? h("button", { class: "report-regen", disabled: r.disabled }, [r.label], { click: actions.onReportRegenOpen })
-        : h("div", { class: "report-regen-confirm" }, [
-            h("p", { class: "meta report-caution" }, [r.confirm.text]),
-            h("button", { class: "report-regen-go" }, [r.confirm.goLabel], { click: actions.onReportRegenGo }),
-            h("button", { class: "report-regen-cancel" }, [r.confirm.cancelLabel], { click: actions.onReportRegenCancel }),
-          ]),
-    );
-  }
+  body.push(...reportOperationNodes(model, actions));
   if (model.body !== null) body.push(...reportBodyNodes(model.body));
+  return h("div", { class: "screen report-screen" }, [controls, ...body]);
+}
+
+// ---- 月報画面(Issue #279。日報の画面の中の「月」) ----
+
+/**
+ * 月報の日ごと・版ごとの行。値が長い(レース数・回収率・的中・賭け金・払戻)ので、ラベルの下に値を折り返して出す(`verify-rows` の左右 2 列にしない = 狭い幅で横にあふれさせない)。
+ * `href` があるラベルはリンク(その日の日報)。
+ */
+function longRowsNode(rows: readonly { readonly label: string; readonly value: string; readonly href?: string }[]): VNode {
+  return h(
+    "ul",
+    { class: "report-days" },
+    rows.map((r) => h("li", {}, [r.href === undefined ? h("span", { class: "report-row-label" }, [r.label]) : h("a", { class: "report-day-link", href: r.href }, [r.label]), h("span", { class: "report-row-value" }, [r.value])])),
+  );
+}
+
+function monthlyBodyNodes(b: MonthlyBodyView): VNode[] {
+  const nodes: VNode[] = [h("h2", {}, [b.heading]), h("p", { class: "meta" }, [b.meta]), tilesNode(b.tiles)];
+  for (const note of b.notes) nodes.push(h("p", { class: "meta report-note" }, [note]));
+  if (b.textNote !== null) nodes.push(notice("info", b.textNote));
+  // LLM の文章(Issue #280)。サーバが書いた文は、テキストノードのまま出す(HTML として解釈しない)。
+  if (b.summary !== null) nodes.push(h("h3", {}, ["総括"]), h("p", { class: "report-summary" }, [b.summary]));
+  if (b.good.length > 0) nodes.push(h("h3", {}, ["良かった点"]), bulletList(b.good));
+  if (b.improve.length > 0) nodes.push(h("h3", {}, ["改善点"]), bulletList(b.improve));
+  if (b.outlook.length > 0) nodes.push(h("h3", {}, ["来月に向けて"]), bulletList(b.outlook));
+  if (b.raw !== null) nodes.push(h("p", { class: "report-raw" }, [b.raw]));
+  if (b.dayRows.length > 0) nodes.push(h("h3", {}, [b.dayHeading]), longRowsNode(b.dayRows));
+  if (b.typeRows.length > 0) nodes.push(h("h3", {}, [b.typeHeading]), rowsNode(b.typeRows));
+  if (b.markRows.length > 0) nodes.push(h("h3", {}, [b.markHeading]), rowsNode(b.markRows));
+  if (b.whatIf !== null) nodes.push(h("h3", {}, [b.whatIf.heading]), h("p", { class: "meta" }, [b.whatIf.note]), rowsNode(b.whatIf.rows));
+  if (b.versions !== null) nodes.push(h("h3", {}, [b.versions.heading]), longRowsNode(b.versions.rows), h("p", { class: "meta report-version-note" }, [b.versions.note]));
+  return nodes;
+}
+
+function monthlyScreen(model: MonthlyModel, actions: ViewActions): VNode {
+  const controls = h("div", { class: "controls" }, [
+    h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
+    h("button", { class: "refresh", disabled: model.refreshDisabled }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+  ]);
+  const nav = model.monthNav;
+  const links: VNode[] = [];
+  if (nav.prevHref !== null) links.push(h("a", { class: "report-tab", href: nav.prevHref }, ["前の月報"]));
+  if (nav.nextHref !== null) links.push(h("a", { class: "report-tab", href: nav.nextHref }, ["次の月報"]));
+  if (nav.latestHref !== null) links.push(h("a", { class: "report-tab", href: nav.latestHref }, ["最新の月報"]));
+  const body: VNode[] = [h("h1", { class: "title" }, [model.heading]), reportTabsNode(model.tabs, "month"), h("p", { class: "report-month" }, [h("strong", {}, [model.shownLabel])])];
+  if (links.length > 0) body.push(h("nav", { class: "tabs report-tabs", "aria-label": "月報の移動" }, links));
+  if (model.loading && model.body === null) body.push(h("p", { class: "empty" }, ["読み込み中…"]));
+  if (model.error !== null) body.push(notice("error", model.error));
+  if (model.notice !== null) body.push(notice(model.notice.tone, model.notice.text));
+  body.push(...reportOperationNodes(model, actions));
+  if (model.body !== null) body.push(...monthlyBodyNodes(model.body));
   return h("div", { class: "screen report-screen" }, [controls, ...body]);
 }
 
@@ -873,7 +944,7 @@ function adminOnlyScreen(model: AdminOnlyModel): VNode {
   ]);
 }
 
-export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel | AdminOnlyModel, actions: ViewActions): VNode {
+export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel | MonthlyModel | AdminOnlyModel, actions: ViewActions): VNode {
   switch (model.kind) {
     case "list":
       return listScreen(model, actions);
@@ -889,6 +960,8 @@ export function renderScreen(model: ListModel | RaceModel | ResultModel | Settin
       return verifyScreen(model, actions);
     case "report":
       return reportScreen(model, actions);
+    case "monthly":
+      return monthlyScreen(model, actions);
     case "admin-only":
       return adminOnlyScreen(model);
   }

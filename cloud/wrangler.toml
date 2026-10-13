@@ -78,6 +78,13 @@ class_name = "DailyReportDO"
 name = "PRIOR_EXPORT"
 class_name = "PriorExportDO"
 
+# 月報の Durable Object(Issue #265・#279)。`idFromName("main")` の単一インスタンスが、当月 1 日〜最終日の予想と結果を D1 から再集計して月報(統計。日ごと・版ごとの行つき)を作り、D1(monthly_reports)に保存する。
+# 起動は cron の 21:00(最終日の 22:00 開始を依頼)・23:00(保険と、月が明けて 3 日以内の前月の補完)の依頼だけ(新しい cron は足さない)。LLM・Discord・netkeiba には出ない(文章・通知は段階 B〈#280〉)。
+# 日報の DO に相乗りしない(アラームは DO ごとに 1 つで、2 つのコアが互いを上書きするため)。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "MONTHLY_REPORT"
+class_name = "MonthlyReportDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["NetkeibaGate"]
@@ -111,6 +118,11 @@ new_sqlite_classes = ["DailyReportDO"]
 [[migrations]]
 tag = "v7"
 new_sqlite_classes = ["PriorExportDO"]
+
+# 追加だけ(v1〜v7 には触れない)。Issue #265・#279。
+[[migrations]]
+tag = "v8"
+new_sqlite_classes = ["MonthlyReportDO"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。

@@ -41,7 +41,7 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
-  it("Issue #177・#216・#217・#219・#235・#266: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6、統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)は migration v7 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
+  it("Issue #177・#216・#217・#219・#235・#266・#279: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6、統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)は migration v7、月報の DO(MONTHLY_REPORT・MonthlyReportDO)は migration v8 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
     const migrations = [...tomlCode.matchAll(/^\[\[migrations\]\]\ntag = "(v\d+)"\n(?:[^\n]*\n)*?new_sqlite_classes = \[([^\]]*)\]/gm)].map((m) => [m[1], m[2]]);
     expect(migrations).toEqual([
       ["v1", '"NetkeibaGate"'],
@@ -51,6 +51,7 @@ describe("wrangler.toml", () => {
       ["v5", '"VerifyReportDO"'],
       ["v6", '"DailyReportDO"'],
       ["v7", '"PriorExportDO"'],
+      ["v8", '"MonthlyReportDO"'],
     ]);
     expect(tomlCode).toMatch(/^name = "RACE_DAY"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceDay"$/m);
@@ -64,9 +65,11 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "DailyReportDO"$/m);
     expect(tomlCode).toMatch(/^name = "PRIOR_EXPORT"$/m);
     expect(tomlCode).toMatch(/^class_name = "PriorExportDO"$/m);
+    expect(tomlCode).toMatch(/^name = "MONTHLY_REPORT"$/m);
+    expect(tomlCode).toMatch(/^class_name = "MonthlyReportDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|deleted_classes|transferred_classes)\s*=/m);
-    // DO のバインディングはちょうど7つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(7);
+    // DO のバインディングはちょうど8つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(8);
   });
 
   it("Issue #206・#249: cron はちょうど2本で `0 12 * * *`(UTC 12:00 = JST 21:00)と `0 14 * * *`(UTC 14:00 = JST 23:00)。朝 9 時の定時実行は無い。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -214,13 +217,13 @@ describe("wrangler.toml", () => {
     expect(("await dispatchResultImports(x);\nexport async function dispatchResultImports(i) {}").match(/(?<!function\s)\bdispatchResultImports\(/g)).toHaveLength(1);
   });
 
-  it("Issue #208・#216・#251: 手動の POST を受けるルートは 5 つだけ(/api/settings・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/migration/upload)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
+  it("Issue #208・#216・#251: 手動の POST を受けるルートは 7 つだけ(/api/settings・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/migration/upload・/api/reports/run・/api/monthly-reports/run〈Issue #280〉)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
-    // POST の分岐は 6 つ(`method === "POST"`)
-    expect((code.match(/method === "POST"/g) ?? []).length).toBe(6);
+    // POST の分岐は 7 つ(`method === "POST"`)
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(7);
     const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
-    expect(routes).toEqual(["/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/migration/upload", "/api/reports/run"]); // settings は pathname の分岐の中で method を見る
+    expect(routes).toEqual(["/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/migration/upload", "/api/reports/run", "/api/monthly-reports/run"]); // settings は pathname の分岐の中で method を見る
     expect(code).toMatch(/pathname === "\/api\/settings"/);
     // handleResultsImport の本体
     const start = code.indexOf("async function handleResultsImport(");
@@ -1068,10 +1071,10 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
     }
   });
 
-  it("LLM の依存(createCloudLlm)を作るのは、発走前の分析の DO(race-day-do.ts)と日報の DO(daily-report-do.ts)の 2 箇所だけ。Discord の送信(createDiscordNotifier)は、この 2 箇所と、scheduled.ts の失敗通知の 1 箇所(Issue #249)だけ", () => {
-    expect(sites(/(?<!function\s)\bcreateCloudLlm\(/g)).toEqual({ "daily-report-do.ts": 1, "race-day-do.ts": 1 });
+  it("LLM の依存(createCloudLlm)を作るのは、発走前の分析の DO(race-day-do.ts)・日報の DO(daily-report-do.ts)・月報の DO(monthly-report-do.ts。Issue #280)の 3 箇所だけ。Discord の送信(createDiscordNotifier)は、この 3 箇所と、scheduled.ts の失敗通知の 1 箇所(Issue #249)だけ", () => {
+    expect(sites(/(?<!function\s)\bcreateCloudLlm\(/g)).toEqual({ "daily-report-do.ts": 1, "monthly-report-do.ts": 1, "race-day-do.ts": 1 });
     // Issue #249: scheduled.ts の 1 箇所が加わった(23 時の再実行で計画の依頼が 3 回とも失敗したときの固定文の通知だけ。上の scheduled.ts の検査が固定する)
-    expect(sites(/(?<!function\s)\bcreateDiscordNotifier\(/g)).toEqual({ "daily-report-do.ts": 1, "race-day-do.ts": 1, "scheduled.ts": 1 });
+    expect(sites(/(?<!function\s)\bcreateDiscordNotifier\(/g)).toEqual({ "daily-report-do.ts": 1, "monthly-report-do.ts": 1, "race-day-do.ts": 1, "scheduled.ts": 1 });
   });
 
   it("日報の作成の依頼(.requestReport( の呼び出し)の箇所: 手動 POST(handler.ts)・取り残しの補完(scheduled.ts)・日単位の DO の配線(race-day-do.ts)・その中の呼び出し(race-day-core.ts)・DO の RPC の委譲(daily-report-do.ts)だけ", () => {
@@ -1213,5 +1216,154 @@ describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkei
       expect(code, `${f} は書き出しを参照しない`).not.toMatch(/PRIOR_EXPORT|PriorExport|prior-export/);
     }
     expect(stripCode(readTextLf("cloud", "src", "route-policy.ts"))).toContain('exact("/api/export/prior-dataset", ADMIN_ONLY)');
+  });
+});
+
+describe("Issue #279・#280: 月報(MonthlyReportDO)は netkeiba に出ず、LLM・Discord の配線は DO だけで、他の DO・cron と干渉せず、D1 の書き込みは 2 文、Worker の GET は読むだけ(進行状況は管理者だけ)", () => {
+  const srcDir = path.join(ROOT, "cloud", "src");
+  const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
+  /** 純ロジックの 7 ファイル(LLM・Discord の本物に触れない。core は注入された口だけを使う)と、配線の DO。 */
+  const pureNames = ["monthly-month.ts", "monthly-stats.ts", "monthly-report-core.ts", "monthly-report-plan.ts", "monthly-report-repository.ts", "monthly-report-prompt.ts", "monthly-report-embed.ts"];
+  const monthlySources = [...pureNames, "monthly-report-do.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
+  const sites = (pattern: RegExp): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const f of srcFiles) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(pattern) ?? []).length;
+      if (n > 0) out[f] = n;
+    }
+    return out;
+  };
+  const coreCode = monthlySources.find(([n]) => n === "monthly-report-core.ts")![1];
+
+  it("月報のソース(8 ファイル)に、netkeiba の取得口・日単位の DO・他の DO・グローバルの fetch・socket が無い。LLM・Discord の本物(secret・作る関数)に触れるのは DO だけ", () => {
+    expect(monthlySources).toHaveLength(8);
+    for (const [name, code] of monthlySources) {
+      expect(code.length, `${name} を読めている`).toBeGreaterThan(300);
+      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "VERIFY_REPORT", "DAILY_REPORT", "PRIOR_EXPORT", "createGateHttpClient", "socket"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+    for (const [name, code] of monthlySources.filter(([n]) => n !== "monthly-report-do.ts")) {
+      for (const forbidden of ["ANTHROPIC", "DISCORD_WEBHOOK", "createCloudLlm", "createDiscordNotifier"]) {
+        expect(code, `${name} に ${forbidden} が無い(本物の LLM・Discord への配線は DO だけ。DISCORD_COLORS は帯の色の定数)`).not.toContain(forbidden);
+      }
+    }
+    const doCode = monthlySources.find(([n]) => n === "monthly-report-do.ts")![1];
+    expect((doCode.match(/createCloudLlm\(/g) ?? []).length).toBe(1);
+    expect((doCode.match(/createDiscordNotifier\(/g) ?? []).length).toBe(1);
+    expect(doCode).toContain("ANTHROPIC_API_KEY");
+    expect(doCode).toContain("DISCORD_WEBHOOK_URL");
+  });
+
+  it("月報の依頼(.requestMonthlyReport( の呼び出し)の箇所は cron(scheduled.ts)と管理者の手動の入口(handler.ts の handleMonthlyRun)の 2 箇所だけ。月報の DO の binding に触れるファイルは固定", () => {
+    expect(sites(/\.requestMonthlyReport\(/g)).toEqual({ "handler.ts": 1, "scheduled.ts": 1 });
+    // MONTHLY_REPORT・MonthlyReportDO に触れるファイル: handler.ts(Env の型・手動の入口・進行状況)・scheduled.ts(依頼)・worker.ts(export)・monthly-report-do.ts(クラス)
+    expect(Object.keys(sites(/\bMONTHLY_REPORT\b|\bMonthlyReportDO\b/g)).sort()).toEqual(["handler.ts", "monthly-report-do.ts", "scheduled.ts", "worker.ts"]);
+    // cron が出す mode は auto と catchup だけ(plan が決める)。cron の側に作り直し・手動は無い。自動で作り直す経路は無い
+    const scheduled = stripCode(readTextLf("cloud", "src", "scheduled.ts"));
+    expect(scheduled).not.toContain("regenerate");
+    expect(scheduled).not.toContain('"manual"');
+    const plan = monthlySources.find(([n]) => n === "monthly-report-plan.ts")![1];
+    expect(plan).toContain('mode: "auto"');
+    expect(plan).toContain('mode: "catchup"');
+    expect(plan).not.toContain('"manual"');
+    expect(plan).not.toContain("regenerate");
+    // 手動の入口が出す mode は、本文の `regenerate: true` で決まる manual と regenerate だけ
+    expect(stripCode(readTextLf("cloud", "src", "handler.ts"))).toContain('mode: regenerate ? "regenerate" : "manual"');
+  });
+
+  it("新しい cron は足していない(月報の依頼は 21:00・23:00 の既存の実行が出す)。cron の行は 1 行のまま", () => {
+    expect((tomlCode.match(/^crons\s*=\s*\[[^\]]*\]\s*$/gm) ?? []).length).toBe(1);
+    expect(tomlCode).toContain('crons = ["0 12 * * *", "0 14 * * *"]');
+  });
+
+  it('月報の Discord への送信は monthly-report-core.ts の 1 箇所だけ(runNotify)。通知の段階(phase: "notify")を書くのは runSave の自動・補完の経路の 1 箇所だけで、作り直し・手動の作成の分岐より後ろにある(送るのは auto・catchup だけ)', () => {
+    expect((coreCode.match(/notifier\.send\(/g) ?? []).length).toBe(1);
+    expect((coreCode.match(/\.send\(/g) ?? []).length).toBe(1);
+    expect((coreCode.match(/phase: "notify"/g) ?? []).length).toBe(1);
+    const notifyAt = coreCode.indexOf('phase: "notify"');
+    expect(coreCode.indexOf('job.mode === "regenerate"')).toBeGreaterThan(-1);
+    expect(coreCode.indexOf('job.mode === "regenerate"')).toBeLessThan(notifyAt);
+    expect(coreCode.indexOf('job.mode === "manual"')).toBeGreaterThan(-1);
+    expect(coreCode.indexOf('job.mode === "manual"')).toBeLessThan(notifyAt);
+    // 通知の他のファイル(embed・DO・repository・prompt)に送信が無い
+    for (const f of ["monthly-report-embed.ts", "monthly-report-do.ts", "monthly-report-repository.ts", "monthly-report-prompt.ts"]) {
+      expect(monthlySources.find(([n]) => n === f)![1], `${f} に送信が無い`).not.toMatch(/\.send\(/);
+    }
+  });
+
+  it("月報の D1 の書き込みは monthly-report-repository.ts の 2 文だけ: 通常の保存の INSERT OR IGNORE INTO monthly_reports(上書きしない)と、作り直しの UPSERT 1 文(INSERT INTO monthly_reports … ON CONFLICT(month) DO UPDATE。文章のある前の月報を文章の無い記録で潰さない WHERE つき)。削除・他の表への書き込みが無い", () => {
+    const repo = monthlySources.find(([n]) => n === "monthly-report-repository.ts")![1];
+    expect((repo.match(/INSERT OR IGNORE INTO monthly_reports/g) ?? []).length).toBe(1);
+    expect((repo.match(/INSERT INTO monthly_reports/g) ?? []).length).toBe(1);
+    expect((repo.match(/INSERT /g) ?? []).length).toBe(2);
+    expect((repo.match(/ON CONFLICT\(month\) DO UPDATE SET/g) ?? []).length).toBe(1);
+    expect((repo.match(/UPDATE /g) ?? []).length).toBe(1); // 上の DO UPDATE SET だけ(単独の UPDATE 文は無い)
+    expect(repo).toContain("WHERE excluded.model IS NOT NULL OR monthly_reports.model IS NULL");
+    for (const forbidden of ["DELETE FROM", "REPLACE INTO", "DROP ", "ALTER "]) {
+      expect(repo, `monthly-report-repository.ts に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 月報の他のソースは D1 に直接触れない(core は注入された窓口だけを使う)
+    for (const [name, code] of monthlySources.filter(([n]) => n !== "monthly-report-repository.ts")) {
+      expect(code, `${name} は D1 に直接触れない`).not.toMatch(/\.prepare\(|\.batch\(|\.exec\(/);
+    }
+  });
+
+  it("Worker の GET(handleMonthlyList・handleMonthlyDetail)は読むだけ: D1MonthlyStore の読み出しと、(詳細だけ)管理者のときの月報の DO の getStatus 以外の DO・R2・取得・LLM・Webhook・書き込みに触れない。閲覧者は DO に触れない。route-policy は GET の行だけを閲覧者に開く", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const bodyOf = (fn: string): string => {
+      const start = handler.indexOf(`async function ${fn}(`);
+      expect(start, `${fn} がある`).toBeGreaterThan(-1);
+      const body = handler.slice(start, handler.indexOf("\n}\n", start));
+      expect(body.length, `${fn} の本体を読めている`).toBeGreaterThan(300);
+      return body;
+    };
+    const forbiddenAlways = [".saveReport(", ".replaceReport(", ".requestMonthlyReport(", "DAILY_REPORT", "ANALYSIS_DETAIL", "NETKEIBA_GATE", "RACE_DAY", "ANTHROPIC", "DISCORD", "fetch(", ".prepare(", ".batch("];
+    const list = bodyOf("handleMonthlyList");
+    for (const forbidden of [...forbiddenAlways, "MONTHLY_REPORT", ".getStatus("]) {
+      expect(list, `handleMonthlyList に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    const detail = bodyOf("handleMonthlyDetail");
+    for (const forbidden of forbiddenAlways) {
+      expect(detail, `handleMonthlyDetail に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // DO に触れるのは getStatus の 1 箇所だけで、管理者のときにしか呼ばれない(閲覧者は DO に触れない)
+    expect((detail.match(/\.getStatus\(/g) ?? []).length).toBe(1);
+    expect((detail.match(/readJob\(\)/g) ?? []).length).toBe(1);
+    expect(detail).toContain('role === "admin" ? await readJob() : { job: null, jobStatus: "ok" as const }');
+    const policy = stripCode(readTextLf("cloud", "src", "route-policy.ts"));
+    expect(policy).toContain('exact("/api/monthly-reports", GET)');
+    expect(policy).toContain('path: "/api/monthly-reports/{month}"');
+    expect(policy).toContain('exact("/api/monthly-reports/run", ADMIN_ONLY)');
+  });
+
+  it("手動の作成・作り直し(handleMonthlyRun)は run と同じ守り(readJsonObjectBody)を先に通り、月報の DO の requestMonthlyReport だけを呼ぶ。D1・R2・LLM・取得に触れない", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = handler.indexOf("async function handleMonthlyRun(");
+    expect(start).toBeGreaterThan(-1);
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(800);
+    expect(body.indexOf("readJsonObjectBody(")).toBeGreaterThan(-1);
+    expect(body.indexOf("readJsonObjectBody(")).toBeLessThan(body.indexOf(".requestMonthlyReport("));
+    for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", "NETKEIBA_GATE", "RACE_DAY", "DAILY_REPORT", "ANTHROPIC", "DISCORD", "fetch(", ".prepare(", ".getStatus("]) {
+      expect(body, `handleMonthlyRun に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+  });
+
+  it("他の DO(日報・検証・日単位・結果の補完・移行・書き出し)と日報のソースは、月報を参照しない(干渉しない。アラームは DO ごとに 1 つ)", () => {
+    for (const f of ["daily-report-core.ts", "daily-report-do.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "migration-do.ts", "migration-core.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "prior-export-do.ts"]) {
+      const code = stripCode(readTextLf("cloud", "src", f));
+      expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
+      expect(code, `${f} は月報を参照しない`).not.toMatch(/MONTHLY_REPORT|MonthlyReport|monthly-report/);
+    }
+  });
+
+  it("月報のプロンプト・embed・core のソースは、クライアントの束(cloud/client)から import されない(プロンプトの文面が束に入って肥大しない)", () => {
+    const clientDir = path.join(ROOT, "cloud", "client");
+    const files = readdirSync(clientDir).filter((n) => n.endsWith(".ts"));
+    expect(files.length).toBeGreaterThan(10); // 前提: 走査の対象を読めている
+    const offenders = files.filter((f) => /monthly-report-(prompt|embed|core)/.test(readTextLf("cloud", "client", f)));
+    expect(offenders).toEqual([]);
   });
 });

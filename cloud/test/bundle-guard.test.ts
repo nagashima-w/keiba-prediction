@@ -62,7 +62,10 @@ function withoutRaceDay(toml: string): string {
     .replace(/\[\[migrations\]\]\ntag = "v6"\nnew_sqlite_classes = \["DailyReportDO"\]\n/, "")
     // Issue #266: 統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)も同じく除く(migration v7 も)。
     .replace(/\[\[durable_objects\.bindings\]\]\nname = "PRIOR_EXPORT"\nclass_name = "PriorExportDO"\n/, "")
-    .replace(/\[\[migrations\]\]\ntag = "v7"\nnew_sqlite_classes = \["PriorExportDO"\]\n/, "");
+    .replace(/\[\[migrations\]\]\ntag = "v7"\nnew_sqlite_classes = \["PriorExportDO"\]\n/, "")
+    // Issue #279: 月報の DO(MONTHLY_REPORT・MonthlyReportDO)も同じく除く(migration v8 も)。
+    .replace(/\[\[durable_objects\.bindings\]\]\nname = "MONTHLY_REPORT"\nclass_name = "MonthlyReportDO"\n/, "")
+    .replace(/\[\[migrations\]\]\ntag = "v8"\nnew_sqlite_classes = \["MonthlyReportDO"\]\n/, "");
   expect(stripped, "RACE_DAY の binding と migration v2 を除けている").not.toBe(toml);
   expect(stripped).not.toContain("RaceDay");
   expect(stripped, "CLOUD_MIGRATION の binding と migration v3 を除けている").not.toContain("CloudMigration");
@@ -70,6 +73,7 @@ function withoutRaceDay(toml: string): string {
   expect(stripped, "VERIFY_REPORT の binding と migration v5 を除けている").not.toContain("VerifyReportDO");
   expect(stripped, "DAILY_REPORT の binding と migration v6 を除けている").not.toContain("DailyReportDO");
   expect(stripped, "PRIOR_EXPORT の binding と migration v7 を除けている").not.toContain("PriorExportDO");
+  expect(stripped, "MONTHLY_REPORT の binding と migration v8 を除けている").not.toContain("MonthlyReportDO");
   return stripped;
 }
 

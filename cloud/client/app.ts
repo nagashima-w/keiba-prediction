@@ -43,6 +43,12 @@
  * **Issue #235(日報画面。`#report`・`#report=YYYYMMDD`)**: 一覧の入口のリンク先の**別の画面**。状態・取得・日付の切替・手動の作成・作成中のポーリングは `report-screen.ts` が持ち、ここは出入り(`enter`・`leave`)・描画・可視状態を渡すだけ。
  *  - 開くと `GET /api/reports`(日付の一覧)と、表示する日の `GET /api/reports/{date}` だけを取る(一覧・板・設定・レース・分析・検証は取らない)。他の画面は `/api/reports` を取らない。作成中だけ自動で取り直し(5 秒)、離れると状態・タイマーを捨てる。
  *
+ * **Issue #279(月報。`#report=YYYYMM`。日報の画面の中の「月」)**: 画面の種類(`screenOf`)は `report` のまま。状態・取得・月の切替・更新は `monthly-screen.ts` が持ち、ここは出入り(`enter`・`leave`)・描画を渡すだけ。
+ *  - 開くと `GET /api/monthly-reports`(月の一覧)と、表示する月の `GET /api/monthly-reports/{month}` だけを取る(日報・一覧・板・設定・レース・分析・検証は取らない)。日報の画面は月報の API を取らない。
+ *  - **Issue #280**: 管理者だけの「この月の月報を作る」「月報を作り直す」(確認つき)と、作成中・作り直し中の確認(5 秒のポーリング。非表示の間は止める)も `monthly-screen.ts` が持つ。ビューの操作は日報の画面と共通
+ *    (`onReportRun`・`onReportRegen*`)で、ここが表示中の側(日報か月報)に振り分ける。POST の先は日報が `/api/reports/run`、月報が `/api/monthly-reports/run`。
+ *  - 日報 ⇄ 月報の行き来(タブ・日ごとの行のリンク)では、出る側の状態を捨ててから入る側を開く(片方の状態をもう片方へ持ち越さない)。
+ *
  * **Issue #188(発走前の結果をレース画面のカードの中に出す)**:
  *  - 最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id(`race.ts` の `latestAnalysisIdOf`。取る・出すの判定は同じ関数)。
  *  - 取得は `loadAnalysis`(id ごとに 1 回。結果画面と**同じキャッシュ・同じ 3 つの門**〈`analyses`・`analysisErrors`・`analysisInflight`〉)。再描画・ポーリング・hashchange の連打では増えない。失敗は自動で再試行しない。
@@ -65,6 +71,7 @@ import { buildResultModel, type ResultSource } from "./result";
 import { buildSettingsModel, draftFromSettings, resetWeightsInDraft, setDraftValue, validateDraft, WEIGHT_FIELD_ORDER, type FieldErrors, type FieldKey, type SettingsDraft, type SettingsLoadState, type SettingsSaveState } from "./settings-form";
 import { createMigrationScreen } from "./migration-screen";
 import { createVerifyScreen } from "./verify-screen";
+import { createMonthlyScreen } from "./monthly-screen";
 import { createReportScreen } from "./report-screen";
 import { buildHash, buildReportHash, parseHash, screenOf, type Route, type Screen, type Venue } from "./route";
 import { buildAdminOnlyModel } from "./admin-only";
@@ -302,6 +309,19 @@ export function createApp(deps: AppDeps): App {
     readOnly: !admin,
   });
 
+  // ---- 月報画面(Issue #279。日報の画面の中の「月」) ----
+  const monthly = createMonthlyScreen({
+    fetch: deps.fetch,
+    timers: deps.timers,
+    isVisible: deps.isVisible,
+    today: () => todayJst(deps.now()),
+    onChange: () => render(),
+    readOnly: !admin,
+  });
+
+  /** 今のルートが月報(`#report=YYYYMM`)か。日報の画面の中の 2 つの表示のどちらか。 */
+  const isMonthlyRoute = (): boolean => route.report?.month !== undefined;
+
   const actions = {
     onDateChange,
     onRefresh,
@@ -323,10 +343,11 @@ export function createApp(deps: AppDeps): App {
     onVerifyVenue: verify.onVenue,
     onVerifyVersionToggle: verify.onVersionToggle,
     onVerifyCalibrationTarget: verify.onCalibrationTarget,
-    onReportRun: report.onRun,
-    onReportRegenOpen: report.onRegenOpen,
-    onReportRegenGo: report.onRegenGo,
-    onReportRegenCancel: report.onRegenCancel,
+    // 日報と月報の画面は同じ操作(作る・作り直す)を持つので、表示中の側に振り分ける(Issue #280)。
+    onReportRun: () => (isMonthlyRoute() ? monthly.onRun() : report.onRun()),
+    onReportRegenOpen: () => (isMonthlyRoute() ? monthly.onRegenOpen() : report.onRegenOpen()),
+    onReportRegenGo: () => (isMonthlyRoute() ? monthly.onRegenGo() : report.onRegenGo()),
+    onReportRegenCancel: () => (isMonthlyRoute() ? monthly.onRegenCancel() : report.onRegenCancel()),
     onReportDateChange,
   };
 
@@ -383,7 +404,7 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       case "report": {
-        deps.render(renderScreen(report.model(), actions), force);
+        deps.render(renderScreen(isMonthlyRoute() ? monthly.model() : report.model(), actions), force);
         return;
       }
       case "list": {
@@ -579,7 +600,14 @@ export function createApp(deps: AppDeps): App {
         verify.enter();
         return;
       case "report":
-        report.enter(route.report?.date ?? null); // 同じ画面の中の日付の切替も、ここ(重ねて呼んでも同じ日の取得は増えない)
+        // 日報 ⇄ 月報(Issue #279): 出る側を離れてから入る側を開く(`leave` は開いていなければ何も起きない)。同じ画面の中の日付・月の切替も、ここ(重ねて呼んでも同じ日・月の取得は増えない)。
+        if (route.report?.month !== undefined) {
+          report.leave();
+          monthly.enter(route.report.month);
+        } else {
+          monthly.leave();
+          report.enter(route.report?.date ?? null);
+        }
         return;
       default:
         return assertNever(screen);
@@ -885,7 +913,10 @@ export function createApp(deps: AppDeps): App {
     if (wasSettings && currentScreen() !== "settings") leaveSettings(); // 画面を離れたら下書きを破棄する
     if (wasMigration && currentScreen() !== "migration") migration.leave(); // 移行の状態(検証・タイマー・遅れて届く応答)を破棄する
     if (wasVerify && currentScreen() !== "verify") verify.leave(); // 検証の状態(タイマー・遅れて届く応答)を破棄する
-    if (wasReport && currentScreen() !== "report") report.leave(); // 日報の状態(タイマー・遅れて届く応答)を破棄する
+    if (wasReport && currentScreen() !== "report") {
+      report.leave(); // 日報の状態(タイマー・遅れて届く応答)を破棄する
+      monthly.leave(); // 月報の状態(遅れて届く応答)を破棄する
+    }
     ensureLoaded();
     render();
   }
@@ -979,8 +1010,9 @@ export function createApp(deps: AppDeps): App {
         verify.onRefresh();
         return;
       case "report":
-        // 取得中は何もしない(`onRefresh` が見る)。一覧と本文を取り直す。画面の再描画は状態の変化(`onChange`)で行われる。
-        report.onRefresh();
+        // 取得中は何もしない(`onRefresh` が見る)。一覧と本文を取り直す。画面の再描画は状態の変化(`onChange`)で行われる。月報(Issue #279)は月報の一覧と本文。
+        if (isMonthlyRoute()) monthly.onRefresh();
+        else report.onRefresh();
         return;
       case "settings": {
         // 取得中・保存中は何もしない(同じものを同時に 2 本取らない・保存中の入力を捨てない)。未保存の入力は捨てて、サーバの値を取り直す。
@@ -1005,10 +1037,11 @@ export function createApp(deps: AppDeps): App {
       migration.onVisibilityChange();
       verify.onVisibilityChange();
       report.onVisibilityChange();
+      monthly.onVisibilityChange();
     },
     async whenIdle() {
       // 取得が終わるたびに新しい取得は始まらない(失敗の自動再試行なし。追跡のタイマーは偽・実物とも待たない)ので、数回の確認で必ず止まる。
-      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight, ...migration.pending(), ...verify.pending(), ...report.pending()];
+      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight, ...migration.pending(), ...verify.pending(), ...report.pending(), ...monthly.pending()];
       for (let i = 0; i < 10 && pending().length > 0; i += 1) {
         await Promise.all(pending());
       }

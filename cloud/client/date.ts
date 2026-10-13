@@ -43,6 +43,11 @@ export function inputToYmd(value: string): string | null {
   return isRealYmd(ymd) ? ymd : null;
 }
 
+/** YYYYMM の 6 桁で、実在する月(01〜12)か(月報。Issue #279)。 */
+export function isRealMonth(value: string): boolean {
+  return /^[0-9]{6}$/.test(value) && isRealYmd(`${value}01`);
+}
+
 /** ISO 8601 の日時 → JST の「YYYY-MM-DD HH:mm」(秒は出さない)。ブラウザのタイムゾーンに依存しない(UTC に 9 時間を足す)。解釈できなければ「日時不明」。 */
 export function formatJstDateTime(iso: string): string {
   const time = Date.parse(iso);

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ICON_PATHS } from "../src/icons";
-import { ANALYSIS_DETAIL_PATTERN, REPORTS_PREFIX, requiredRole, ROUTE_RULES } from "../src/route-policy";
+import { ANALYSIS_DETAIL_PATTERN, MONTHLY_REPORTS_PREFIX, REPORTS_PREFIX, requiredRole, ROUTE_RULES } from "../src/route-policy";
 
 /**
  * Issue #238: ルート × 役割の表(route-policy.ts)の固定。
@@ -26,7 +26,7 @@ interface Expected {
 
 /** ルート × 役割の最終表(手書き)。閲覧者に許すのは GET(と、画面の `/`・`/app.js`・アイコン 7 本〈Issue #244〉の HEAD)だけ。 */
 const EXPECTED: readonly Expected[] = [
-  // ---- 閲覧者にも許す(17。画面と API が 10、アイコン〈Issue #244〉が 7) ----
+  // ---- 閲覧者にも許す(19。画面と API が 12、アイコン〈Issue #244〉が 7) ----
   { name: "/", sample: "/", viewer: ["GET", "HEAD"] },
   { name: "/app.js", sample: "/app.js", viewer: ["GET", "HEAD"] },
   { name: "/api/races", sample: "/api/races", viewer: ["GET"] },
@@ -36,6 +36,9 @@ const EXPECTED: readonly Expected[] = [
   { name: "/api/analyses/{id}", sample: "/api/analyses/123", viewer: ["GET"] },
   { name: "/api/reports", sample: "/api/reports", viewer: ["GET"] },
   { name: "/api/reports/{date}", sample: "/api/reports/20261010", viewer: ["GET"] },
+  // 月報(Issue #265・#279)。日報と同じく読み取り専用(D1 の monthly_reports を読むだけ)で、閲覧者にも見せる(ユーザーの決定)
+  { name: "/api/monthly-reports", sample: "/api/monthly-reports", viewer: ["GET"] },
+  { name: "/api/monthly-reports/{month}", sample: "/api/monthly-reports/202610", viewer: ["GET"] },
   // 検証(Issue #263)。閲覧者の GET は**集計のやり直しを起こさない**(キャッシュを返すだけ。handler.ts・verify-core.ts)。`refresh` は管理者だけが受け付ける
   { name: "/api/verify", sample: "/api/verify", viewer: ["GET"] },
   // アイコン(Issue #244。タブの favicon・見出しの画像・apple-touch-icon。読み取りだけの静的な画像なので、閲覧者にも開く)
@@ -58,17 +61,18 @@ const EXPECTED: readonly Expected[] = [
   { name: "/api/migration", sample: "/api/migration", viewer: [] },
   { name: "/api/migration/upload", sample: "/api/migration/upload", viewer: [] },
   { name: "/api/reports/run", sample: "/api/reports/run", viewer: [] },
+  { name: "/api/monthly-reports/run", sample: "/api/monthly-reports/run", viewer: [] }, // Issue #280: 月報の手動の作成と作り直し(LLM を呼ぶ)
   { name: "/api/export/prior-dataset", sample: "/api/export/prior-dataset", viewer: [] }, // Issue #266
   { name: "/api/horse-runs", sample: "/api/horse-runs", viewer: [] }, // Issue #256 段階A: 各馬の戦績の蓄積の診断(D1 の全件に近い走査を起こしうる)
 ];
 
 describe("ルート × 役割の表(手書きの期待値と、実装の requiredRole を全 method で突き合わせる)", () => {
-  it("前提: 表は 30 ルート(閲覧者に開くもの 17・管理者だけ 13)で、閲覧者に開く method の組は 26 通り(GET が 17・HEAD が 9)", () => {
-    expect(EXPECTED).toHaveLength(30);
-    expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(17);
-    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(13);
-    expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(26);
-    expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(17);
+  it("前提: 表は 33 ルート(閲覧者に開くもの 19・管理者だけ 14)で、閲覧者に開く method の組は 28 通り(GET が 19・HEAD が 9)", () => {
+    expect(EXPECTED).toHaveLength(33);
+    expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(19);
+    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(14);
+    expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(28);
+    expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(19);
     expect(EXPECTED.filter((e) => e.viewer.includes("HEAD"))).toHaveLength(9);
     expect(ROUTE_RULES).toHaveLength(EXPECTED.length);
     expect(ROUTE_RULES.map((r) => r.path).sort()).toEqual(EXPECTED.map((e) => e.name).sort());
@@ -79,10 +83,10 @@ describe("ルート × 役割の表(手書きの期待値と、実装の require
     expect(requiredRole(method, sample)).toBe(expected);
   });
 
-  it("method の組み合わせの数: 30 ルート × 7 method = 210 通りのうち、閲覧者でよいのは 26 通りだけ", () => {
-    expect(cases).toHaveLength(210);
-    expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(26);
-    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(184);
+  it("method の組み合わせの数: 33 ルート × 7 method = 231 通りのうち、閲覧者でよいのは 28 通りだけ", () => {
+    expect(cases).toHaveLength(231);
+    expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(28);
+    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(203);
   });
 
   it("リクエストの method が小文字などの未知の表記でも、閲覧者に開かない(完全一致の大文字だけを認める)", () => {
@@ -100,6 +104,7 @@ describe("表に無い path は管理者専用(fail-closed。新しいルート�
     for (const iconPath of ICON_PATHS) expect(requiredRole("GET", iconPath), iconPath).toBe("viewer"); // アイコン 7 本(Issue #246: 下の /icons/x の行が、これらの完全一致だけを開けていることを確かめる前提)
     expect(requiredRole("GET", "/api/reports/20261010")).toBe("viewer");
     expect(requiredRole("GET", "/api/verify")).toBe("viewer"); // Issue #263
+    expect(requiredRole("GET", "/api/monthly-reports/202610")).toBe("viewer"); // Issue #279
   });
 
   it.each([
@@ -146,6 +151,13 @@ describe("表に無い path は管理者専用(fail-closed。新しいルート�
     expect(requiredRole("GET", "/api/reports/run")).toBe("admin"); // run は {date} に化けない
     expect(requiredRole("GET", "/api/reports/run/x")).toBe("viewer"); // ハンドラの startsWith("/api/reports/") と同じ規則で、日付の検証が 400 を返す読み取り専用の経路
     expect(requiredRole("GET", "/api/reports/")).toBe("viewer"); // 同上(空の日付は 400)
+    // 月報(Issue #279・#280): 日報と同じ規則。`run` は {month} に化けない(POST /api/monthly-reports/run は表の完全一致の行で管理者専用)
+    expect(ROUTE_RULES.find((r) => r.matches("/api/monthly-reports/run"))?.path).toBe("/api/monthly-reports/run"); // 完全一致の行が先に当たる(パターンの {month} ではない)
+    expect(requiredRole("GET", "/api/monthly-reports/run")).toBe("admin");
+    expect(requiredRole("POST", "/api/monthly-reports/run")).toBe("admin");
+    expect(requiredRole("POST", "/api/monthly-reports")).toBe("admin"); // 読み取り専用: POST は管理者専用
+    expect(requiredRole("POST", "/api/monthly-reports/202610")).toBe("admin");
+    expect(requiredRole("GET", "/api/monthly-reports/run/x")).toBe("viewer"); // ハンドラの startsWith と同じ規則で、月の検証が 404 を返す読み取り専用の経路
   });
 });
 
@@ -162,12 +174,12 @@ describe("handler.ts の静的ガード(ルーティングの構文を走査す�
     expect(handleBody.length).toBeGreaterThan(2_000);
   });
 
-  it("pathname と完全一致で比べている path は 21 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(28)と過不足なく一致する", () => {
+  it("pathname と完全一致で比べている path は 23 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(30)と過不足なく一致する", () => {
     const literals = [...new Set([...code.matchAll(/\bpathname === "([^"]+)"/g)].map((m) => m[1]!))].sort();
     const exactRules = ROUTE_RULES.filter((r) => r.exact).map((r) => r.path).sort();
-    expect(literals).toHaveLength(21);
+    expect(literals).toHaveLength(23);
     expect(ICON_PATHS).toHaveLength(7);
-    expect(exactRules).toHaveLength(28);
+    expect(exactRules).toHaveLength(30);
     expect([...literals, ...ICON_PATHS].sort()).toEqual(exactRules);
     // アイコンの path が handler.ts に直書きされていない(表と共有する定数だけで振り分ける)
     for (const iconPath of ICON_PATHS) {
@@ -176,17 +188,20 @@ describe("handler.ts の静的ガード(ルーティングの構文を走査す�
     expect(code).toContain("iconAsset(pathname)");
   });
 
-  it("パターンのルート 2 つ({id}・{date})は、表と共有する定数(ANALYSIS_DETAIL_PATTERN・REPORTS_PREFIX)で振り分けている(正規表現・接頭辞のリテラルを直書きしない)", () => {
+  it("パターンのルート 3 つ({id}・{date}・{month})は、表と共有する定数(ANALYSIS_DETAIL_PATTERN・REPORTS_PREFIX・MONTHLY_REPORTS_PREFIX)で振り分けている(正規表現・接頭辞のリテラルを直書きしない)", () => {
     expect(code).toContain("ANALYSIS_DETAIL_PATTERN.exec(pathname)");
     expect(code).toContain("pathname.startsWith(REPORTS_PREFIX)");
     expect(code).toContain("pathname.slice(REPORTS_PREFIX.length)");
+    expect(code).toContain("pathname.startsWith(MONTHLY_REPORTS_PREFIX)");
+    expect(code).toContain("pathname.slice(MONTHLY_REPORTS_PREFIX.length)");
     expect(code).not.toMatch(/startsWith\("/); // 直書きの接頭辞
     expect(code).not.toMatch(/\\\/api\\\//); // 直書きの正規表現(`\/api\/`)
-    expect(ROUTE_RULES.filter((r) => !r.exact)).toHaveLength(2);
+    expect(ROUTE_RULES.filter((r) => !r.exact)).toHaveLength(3);
     // 共有する定数の中身(表の期待値と同じ規則)
     expect(ANALYSIS_DETAIL_PATTERN.exec("/api/analyses/123")?.[1]).toBe("123");
     expect(ANALYSIS_DETAIL_PATTERN.exec("/api/analyses/1/2")).toBeNull();
     expect(REPORTS_PREFIX).toBe("/api/reports/");
+    expect(MONTHLY_REPORTS_PREFIX).toBe("/api/monthly-reports/");
   });
 
   it("pathname を使う式は、上の形(完全一致・共有定数・分割代入)だけ。switch・endsWith・includes・正規表現の直接の比較などの新しい形が増えたら落ちる", () => {
@@ -195,6 +210,8 @@ describe("handler.ts の静的ガード(ルーティングの構文を走査す�
       .replace(/(?:new URL\(request\.url\)\.)?pathname === "[^"]+"/g, "")
       .replace(/pathname\.startsWith\(REPORTS_PREFIX\)/g, "")
       .replace(/pathname\.slice\(REPORTS_PREFIX\.length\)/g, "")
+      .replace(/pathname\.startsWith\(MONTHLY_REPORTS_PREFIX\)/g, "")
+      .replace(/pathname\.slice\(MONTHLY_REPORTS_PREFIX\.length\)/g, "")
       .replace(/ANALYSIS_DETAIL_PATTERN\.exec\(pathname\)/g, "")
       .replace(/iconAsset\(pathname\)/g, "")
       .replace(/requiredRole\(method, pathname\)/g, "");

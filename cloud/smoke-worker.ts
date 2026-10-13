@@ -271,6 +271,8 @@ export { VerifyReportDO } from "./src/verify-do";
 export { DailyReportDO } from "./src/daily-report-do";
 // Issue #266: 統計モデル用の書き出しの DO(同上)。
 export { PriorExportDO } from "./src/prior-export-do";
+// Issue #279: 月報の DO(同上)。
+export { MonthlyReportDO } from "./src/monthly-report-do";
 
 type SmokeEnv = Env;
 
@@ -332,9 +334,31 @@ async function smokeResults(url: URL, env: SmokeEnv): Promise<Response> {
   return Response.json({ ok: true, result: detail === undefined ? null : { horses: detail.horses.length, courseType: detail.courseType ?? null, comboPayoutRows: combos?.n ?? 0 } });
 }
 
+/**
+ * Issue #279・#280: 月報の DO `MonthlyReportDO` を、workerd の実環境(本物の DO の SQLite・アラーム・D1)で通すための材料の投入。smoke 専用(認証の関門の前に置く。netkeiba にも Anthropic にも Discord にも出ない)。
+ *  - `/smoke/monthly/seed?month=YYYYMM`: ローカルの D1 に、その月の分析を 2 件(月初と月末の開催日。版は別々)と、月初の分の結果(1 着の馬の行)を入れる。
+ * 月報の作成・作り直しの依頼は、本番の入口(管理者の `POST /api/monthly-reports/run`)を smoke.ts が直接叩く(Issue #280。ここに RPC の近道は持たない)。
+ */
+async function smokeMonthly(url: URL, env: SmokeEnv): Promise<Response> {
+  const month = url.searchParams.get("month") ?? "";
+  const analysis = (raceId: string, analyzedAt: string, kaisaiDate: string, version: string) =>
+    env.DB.prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date, prompt_version) VALUES (?, ?, 0, ?, ?)").bind(raceId, analyzedAt, kaisaiDate, version).run();
+  await analysis(`${month}0000000001`, `${month.slice(0, 4)}-${month.slice(4)}-01T04:00:00.000Z`, `${month}01`, "v-smoke-1");
+  await analysis(`${month}0000000002`, `${month.slice(0, 4)}-${month.slice(4)}-28T04:00:00.000Z`, `${month}28`, "v-smoke-2");
+  await env.DB.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, place_payout) VALUES (?, 1, 1, 400, 150)").bind(`${month}0000000001`).run();
+  return Response.json({ ok: true });
+}
+
 export default {
   async fetch(request: Request, env: SmokeEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/smoke/monthly/seed") {
+      try {
+        return await smokeMonthly(url, env);
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
     if (url.pathname === "/smoke/results" || url.pathname === "/smoke/results/clear") {
       try {
         return await smokeResults(url, env);

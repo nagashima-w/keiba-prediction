@@ -15,7 +15,7 @@ import { webhookStatus } from "./notify-send";
 import { resolveAppBaseUrl } from "./notify-link";
 import { remoteKeys } from "./access-jwt";
 import { authenticate, type AccessContextLike } from "./authenticate";
-import { ANALYSIS_DETAIL_PATTERN, REPORTS_PREFIX, requiredRole } from "./route-policy";
+import { ANALYSIS_DETAIL_PATTERN, MONTHLY_REPORTS_PREFIX, REPORTS_PREFIX, requiredRole } from "./route-policy";
 import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { buildAnalysisView } from "./analysis-view";
@@ -31,6 +31,9 @@ import { jstKaisaiDate } from "./auto-run-plan";
 import { addDaysToKaisaiDate, dispatchResultImports, MANUAL_RESULT_MAX_DAYS } from "./result-dispatch";
 import { D1ResultStore } from "./result-repository";
 import { D1ReportStore } from "./daily-report-repository";
+import { D1MonthlyStore } from "./monthly-report-repository";
+import { MONTHLY_REPORT_NAME, type MonthlyMode, type MonthlyStatus, type RequestMonthlyResult } from "./monthly-report-core";
+import { isValidMonth, monthRange } from "./monthly-month";
 import { DAILY_REPORT_NAME, type ReportMode, type ReportStatus, type RequestReportResult } from "./daily-report-core";
 import type { MigrationStatus, StartResult } from "./migration-core";
 import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-core";
@@ -165,6 +168,20 @@ export interface DailyReportNamespaceLike {
 }
 
 
+/** 月報の DO(MonthlyReportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #265・#279・#280。依頼するのは cron(`scheduled.ts`。auto・catchup)と、管理者の手動の入口(`POST /api/monthly-reports/run`。manual・regenerate)。 */
+export interface MonthlyReportStubLike {
+  /** 月報の作成の依頼(冪等。進行中・作成済みは断る)。`startAt`(エポックミリ秒)は、その時刻まで始めない(今から 24 時間以内のときだけ有効)。 */
+  requestMonthlyReport(input: { readonly month: string; readonly mode: MonthlyMode; readonly startAt?: number }): Promise<RequestMonthlyResult>;
+  /** 進行状況(無ければ null)。 */
+  getStatus(month: string): Promise<MonthlyStatus | null>;
+}
+
+/** 月報の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 `MONTHLY_REPORT_NAME`)。 */
+export interface MonthlyReportNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): MonthlyReportStubLike;
+}
+
 export interface Env extends AccessEnv {
   NETKEIBA_GATE: GateNamespaceLike;
   /** 日単位の DO(RaceDay。wrangler.toml の binding)。Issue #177・#180。 */
@@ -179,6 +196,8 @@ export interface Env extends AccessEnv {
   PRIOR_EXPORT?: PriorExportNamespaceLike;
   /** 日報の DO(DailyReportDO。wrangler.toml の binding)。Issue #235。本番では常にある。無い構成では `POST /api/reports/run` が 503 になり、cron は日報の取り残しの補完をしない(一覧・本文の GET は D1 を読むだけなので動く)。 */
   DAILY_REPORT?: DailyReportNamespaceLike;
+  /** 月報の DO(MonthlyReportDO。wrangler.toml の binding)。Issue #265・#279。本番では常にある。無い構成では cron は月報を依頼しない(一覧・本文の GET は D1 を読むだけなので動く)。 */
+  MONTHLY_REPORT?: MonthlyReportNamespaceLike;
   /** D1(分析履歴。wrangler.toml の `[[d1_databases]]` の binding)。Issue #171。 */
   DB: AnalysisDb;
   /** R2(分析の詳細オブジェクト。wrangler.toml の `[[r2_buckets]]` の binding)。Issue #174・#175。get と put だけを使う。 */
@@ -270,7 +289,7 @@ export async function handle(
       headers: { ...SECURITY_HEADERS, allow: "GET, POST", "content-type": "text/plain; charset=utf-8" },
     });
   }
-  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run` の 6 本だけ**(`run/bulk` は Issue #251、下の 3 本は Issue #208・#216・#235)。認証(上)の後で、Origin の確認・入力の検証を行う。
+  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run`・`/api/monthly-reports/run` の 7 本だけ**(`run/bulk` は Issue #251、下の 4 本は Issue #208・#216・#235・#280)。認証(上)の後で、Origin の確認・入力の検証を行う。
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run") {
     return handleRun(request, env);
   }
@@ -278,7 +297,7 @@ export async function handle(
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run/bulk") {
     return handleRunBulk(request, env);
   }
-  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 6 本(上の 3 つ〈`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`〉・ここ・下の `/api/migration/upload`・`/api/reports/run`〈Issue #235〉)。
+  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 7 本(上の 3 つ〈`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`〉・ここ・下の `/api/migration/upload`・`/api/reports/run`〈Issue #235〉・`/api/monthly-reports/run`〈Issue #280〉)。
   if (method === "POST" && new URL(request.url).pathname === "/api/results/import") {
     return handleResultsImport(request, env, deps.now ?? (() => new Date()), log);
   }
@@ -286,9 +305,13 @@ export async function handle(
   if (method === "POST" && new URL(request.url).pathname === "/api/migration/upload") {
     return handleMigrationUpload(request, env, log);
   }
-  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 6 つだけ**(`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run`)。
+  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 7 つだけ**(`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run`・`/api/monthly-reports/run`)。
   if (method === "POST" && new URL(request.url).pathname === "/api/reports/run") {
     return handleReportRun(request, env, deps.now ?? (() => new Date()));
+  }
+  // 月報の手動の作成と作り直し(Issue #280)。管理者専用(route-policy.ts の表)。
+  if (method === "POST" && new URL(request.url).pathname === "/api/monthly-reports/run") {
+    return handleMonthlyRun(request, env, deps.now ?? (() => new Date()));
   }
   if (method !== "GET" && method !== "HEAD") {
     return new Response("method not allowed", {
@@ -401,6 +424,25 @@ export async function handle(
       });
     }
     return pathname === "/api/reports" ? handleReportList(new URL(request.url), env) : handleReportDetail(new URL(request.url), pathname.slice(REPORTS_PREFIX.length), env, auth.role);
+  }
+
+  if (pathname === "/api/monthly-reports/run") {
+    // POST だけ(上で処理済み)。GET・HEAD などは 405(月の本文 `/api/monthly-reports/{YYYYMM}` として扱わない)。
+    return new Response("method not allowed", {
+      status: 405,
+      headers: { ...SECURITY_HEADERS, allow: "POST", "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  if (pathname === "/api/monthly-reports" || pathname.startsWith(MONTHLY_REPORTS_PREFIX)) {
+    // 読み取り専用(D1 の monthly_reports を読むだけ。管理者の詳細だけ、月報の DO の進行状況〈getStatus〉も読む。netkeiba にも LLM にも出ない)。GET だけ(HEAD で D1 を引かない)。Issue #279・#280。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return pathname === "/api/monthly-reports" ? handleMonthlyList(new URL(request.url), env) : handleMonthlyDetail(new URL(request.url), pathname.slice(MONTHLY_REPORTS_PREFIX.length), env, auth.role);
   }
 
   if (pathname === "/api/verify") {
@@ -1501,6 +1543,82 @@ async function handleReportDetail(url: URL, dateText: string, env: Env, role: "a
   return json({ ok: true, report: null, job, job_status: jobStatus });
 }
 
+/** 月報の一覧の件数(画面が並べる数。D1 の本文は読まない)。 */
+const MONTHLY_LIST_LIMIT = 36;
+
+/**
+ * `GET /api/monthly-reports`(Issue #279): 月報の一覧(月の新しい順。本文を含まない)。クエリは受け付けない(400)。D1 の失敗は 503(固定の型だけ。例外の文面は返さない)。
+ */
+async function handleMonthlyList(url: URL, env: Env): Promise<Response> {
+  if ([...url.searchParams.keys()].length > 0) {
+    return badRequest("このパスにクエリは指定できません");
+  }
+  try {
+    const rows = await new D1MonthlyStore({ db: env.DB }).listReports(MONTHLY_LIST_LIMIT);
+    return json({
+      ok: true,
+      reports: rows.map((r) => ({ month: r.month, created_at: r.createdAt, model: r.model, race_count: r.raceCount, total_stake: r.totalStake, total_return: r.totalReturn, summary: r.summary })),
+    });
+  } catch {
+    return json({ ok: false, error: { type: "report-error" } }, 503);
+  }
+}
+
+/**
+ * `GET /api/monthly-reports/{YYYYMM}`(Issue #279・#280): 1 か月の月報(本文つき)。無い月は `report: null`(200)。月の形が 6 桁の実在の月でなければ 404(D1 を引かない)。
+ * クエリは受け付けない(400)。D1 の失敗は 503。閲覧者にも月報は返す。
+ *
+ * **進行状況(`job`・`job_status`。Issue #280。日報の #268 と同じ形)**: **管理者だけ**月報の DO の `getStatus` を読む(作り直し・手動の作成の進行・失敗を画面が見るため。`regenerate: true` のジョブだけが
+ * 「作り直し」を意味する)。**閲覧者は DO に一切触れない**(`job: null`・`job_status: "ok"`)。役割は認証の結果(`auth.role`)だけで決める(クエリでは名乗れない)。
+ * DO の取得が失敗しても月報は 200 で返し、`job_status` を `unavailable` にする(ジョブがあるかどうか分からない。画面は確認を続ける)。binding が無い構成は、ジョブが存在しえないので `ok`。
+ */
+async function handleMonthlyDetail(url: URL, monthText: string, env: Env, role: "admin" | "viewer"): Promise<Response> {
+  if (!isValidMonth(monthText)) {
+    return json({ ok: false, error: { type: "not-found" } }, 404);
+  }
+  if ([...url.searchParams.keys()].length > 0) {
+    return badRequest("このパスにクエリは指定できません");
+  }
+  let report;
+  try {
+    report = await new D1MonthlyStore({ db: env.DB }).getReport(monthText);
+  } catch {
+    return json({ ok: false, error: { type: "report-error" } }, 503);
+  }
+  // 進行状況(DO の getStatus)。固定の形だけを写す(DO から別の値が来ても、そのまま返さない)。`regenerate` は `true` のときだけ付ける。
+  const readJob = async (): Promise<{ job: MonthlyStatus | null; jobStatus: "ok" | "unavailable" }> => {
+    try {
+      const namespace = env.MONTHLY_REPORT;
+      if (namespace === undefined) {
+        return { job: null, jobStatus: "ok" };
+      }
+      const status = await namespace.get(namespace.idFromName(MONTHLY_REPORT_NAME)).getStatus(monthText);
+      return { job: status === null ? null : { phase: status.phase, status: status.status, attempts: status.attempts, ...(status.regenerate === true ? { regenerate: true as const } : {}) }, jobStatus: "ok" };
+    } catch {
+      return { job: null, jobStatus: "unavailable" };
+    }
+  };
+  const { job, jobStatus } = role === "admin" ? await readJob() : { job: null, jobStatus: "ok" as const };
+  return json({
+    ok: true,
+    report:
+      report === null
+        ? null
+        : {
+            month: report.month,
+            created_at: report.createdAt,
+            model: report.model,
+            race_count: report.raceCount,
+            total_stake: report.totalStake,
+            total_return: report.totalReturn,
+            summary: report.summary,
+            body: report.body,
+          },
+    job,
+    job_status: jobStatus,
+  });
+}
+
 const REPORT_RUN_BODY_MAX_BYTES = 1024;
 const REPORT_RUN_KEYS = new Set(["date", "regenerate"]);
 
@@ -1561,6 +1679,67 @@ async function handleReportRun(request: Request, env: Env, now: () => Date): Pro
       return json({ ok: false, error: { type: "report-error" } }, 503);
     }
     return json({ ok: true, accepted: true, date }, 202);
+  } catch {
+    return json({ ok: false, error: { type: "report-error" } }, 503);
+  }
+}
+
+const MONTHLY_RUN_KEYS = new Set(["month", "regenerate"]);
+
+/**
+ * `POST /api/monthly-reports/run`(Issue #280): 指定した月の月報を、月報の DO に依頼する(202)。本文は JSON `{ month, regenerate? }`(月は YYYYMM の 6 桁。**終わった月だけ**: 今月・先の月は 400)。
+ * **`regenerate: true` を付けると、月報がある月の作り直し**(DO には `mode: "regenerate"`)。`regenerate` は boolean だけ(型違いは 400)で、無い・`false` は通常の作成(`mode: "manual"`)。日報の `POST /api/reports/run` と同じ形。
+ * 断りは固定の型で返す: 作成済み(通常の作成)409 `already-exists`・作成中 409 `in-progress`・月報が無い(作り直し)409 `not-exists`・**1 日の回数の上限(作り直し)429 `daily-limit`**。
+ * 管理者専用(route-policy.ts の `/api/monthly-reports/run`)。**Discord には送らない**(手動の作成・作り直しの通知は無い。DO の `mode` が決める)。
+ * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON のオブジェクト 400)→ 入力の検証(400。ここまでで DO は呼ばない)→ DO。
+ * DO の失敗・binding なし・食い違う理由は 503 `report-error`(文面を返さない)。Worker は LLM も netkeiba も呼ばない(作るのは DO のアラーム)。
+ */
+async function handleMonthlyRun(request: Request, env: Env, now: () => Date): Promise<Response> {
+  const guarded = await readJsonObjectBody(request, REPORT_RUN_BODY_MAX_BYTES);
+  if (!guarded.ok) {
+    return guarded.response;
+  }
+  const record = guarded.body;
+  if (Object.keys(record).some((k) => !MONTHLY_RUN_KEYS.has(k))) {
+    return badRequest("本文のキーは month と regenerate だけです");
+  }
+  const month = record["month"];
+  if (typeof month !== "string" || !isValidMonth(month)) {
+    return badRequest("month は YYYYMM の 6 桁の文字列(実在の月)で指定してください");
+  }
+  const flag = record["regenerate"];
+  if (flag !== undefined && typeof flag !== "boolean") {
+    return badRequest("regenerate は true または false で指定してください");
+  }
+  const regenerate = flag === true;
+  const today = jstKaisaiDate(now().getTime());
+  if (monthRange(month).toDate >= today) {
+    return badRequest("month は終わった月(今月より前)にしてください。今月の月報は、月の最終日の夜に自動で作られます");
+  }
+  try {
+    const namespace = env.MONTHLY_REPORT;
+    if (namespace === undefined) {
+      throw new Error("MONTHLY_REPORT binding がありません");
+    }
+    const result = await namespace.get(namespace.idFromName(MONTHLY_REPORT_NAME)).requestMonthlyReport({ month, mode: regenerate ? "regenerate" : "manual" });
+    if (!result.accepted) {
+      if (result.reason === "exists" && !regenerate) {
+        return json({ ok: false, error: { type: "already-exists" } }, 409);
+      }
+      if (result.reason === "in-progress") {
+        return json({ ok: false, error: { type: "in-progress" } }, 409);
+      }
+      // 作り直しだけが返す理由(通常の作成に返ってきたら食い違いなので、下の 503)。
+      if (regenerate && result.reason === "not-exists") {
+        return json({ ok: false, error: { type: "not-exists" } }, 409);
+      }
+      if (regenerate && result.reason === "daily-limit") {
+        return json({ ok: false, error: { type: "daily-limit" } }, 429);
+      }
+      // 検証で弾いたはずの理由(不正・終わっていない月)や、あり得ない理由が DO から来た: 食い違いなので 503。
+      return json({ ok: false, error: { type: "report-error" } }, 503);
+    }
+    return json({ ok: true, accepted: true, month }, 202);
   } catch {
     return json({ ok: false, error: { type: "report-error" } }, 503);
   }

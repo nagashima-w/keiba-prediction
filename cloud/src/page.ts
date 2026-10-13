@@ -109,8 +109,8 @@ ${paletteCss()}
   .date { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--muted); }
   input[type="date"] { font-size: 1rem; min-height: 44px; padding: 0 8px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
   .tabs { display: flex; gap: 4px; }
-  .tab { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 64px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
-  .tab[aria-current="page"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  .tab, .report-tab { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 64px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .tab[aria-current="page"], .report-tab[aria-current="page"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
   button { font-size: 1rem; min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); background: var(--card); }
   button[disabled] { opacity: 0.6; }
   .notice { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); font-size: 0.9rem; }
@@ -194,6 +194,15 @@ ${paletteCss()}
   .report-raw { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
   .report-race { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
   .report-race h3 { margin: 0 0 4px; font-size: 1rem; }
+  /* Issue #279: 月報(日報の画面の中の「月」)。月の見出し・注記・日ごと/版ごとの行(値が長いので、ラベルの下に折り返す。日付のリンクはタップしやすい高さ 44px 以上) */
+  .report-month { margin: 8px 0 4px; font-size: 1.1rem; }
+  .report-tabs { flex-wrap: wrap; margin: 4px 0 8px; }
+  .report-note, .report-version-note { overflow-wrap: anywhere; }
+  .report-days { list-style: none; margin: 4px 0 12px; padding: 0; }
+  .report-days li { padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+  .report-day-link { display: flex; align-items: center; min-height: 44px; font-weight: bold; color: var(--accent); }
+  .report-row-label { display: block; font-weight: bold; padding: 4px 0; }
+  .report-row-value { display: block; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
   .report-race p { margin: 2px 0; overflow-wrap: anywhere; font-size: 0.9rem; }
   .verify-venues { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
   .verify-venue { min-width: 64px; }
