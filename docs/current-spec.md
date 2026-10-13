@@ -1368,8 +1368,18 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
 - **cloud の設定**: `wrangler.toml` の `[alias]` は完全一致で、**サブパスごとに1行**(`@keiba/core/pipeline`・`scorer/snapshot-filter`・`ev/bet-allocation`・`ev/combo-bet-allocation`)。`tsconfig.json` の `paths`・`vitest.config.ts` の `alias` は前方一致。
   `kaisaiDate`(YYYYMMDD)は `runCloudAnalysis` が必須にする(渡らないと runAnalysis が当日日付〈Worker は UTC〉で近似するため)。
 - **検査**: `packages/app/test/analysis-pipeline-golden.test.ts`(exe の出力)・`analysis-pipeline-async-deps.test.ts`(非同期 deps・バッチ)、core の `native-free-modules.test.ts`、cloud の `import-guard.test.ts`(型を含む閉包・alias の一致)・`bundle-guard.test.ts`(runAnalysis がバンドルに入り better-sqlite3 が入らない)・
-  `pipeline-run.test.ts`(golden との一致)、smoke(workerd で `runAnalysis` が最後まで通り、golden と SHA-256 まで一致)。
+  `pipeline-run.test.ts`(golden との一致)、smoke(workerd で `runAnalysis` が最後まで通り、golden と一致。浮動小数点は相対誤差 1e-12 の許容つきで比べ、整数・文字列・項目の集合は完全一致。`cloud/smoke-compare.ts`。SHA-256 の完全一致は成り立たない。次の節を参照)。
 - **限界**: 本番のエントリは `runCloudAnalysis` を参照しないので、本番のバンドルには入っていない(bundle-guard は、これを参照する一時の入口を本番と同じ `wrangler.toml` でバンドルして検査する)。重賞の「同レース過去10年傾向」は POST で取る。gate は #181 段階1(v1.22.2)で許可リスト付きの POST に対応し、段階2(v1.23.0)で発走前の取得ステップが POST を使うようになった(下の「重賞の過去10年傾向」)。
+
+### Node と workerd の浮動小数点の最後の 1 ビットの差(#275。判断 2026-10-13)
+`Math.log`・`Math.exp`・指数が 3 以上の整数の `**` は、Node(22 / V8 12.4)と workerd で、同じ引数に最後の 1 ビット(1ulp)だけ違う結果を返すことがある(食い違いの標本ではすべて workerd の方が正しい丸め。当時の実測は Issue #275 の本文)。
+- **結論: この差は、利用者から見える値を変えない。** 利用者が見る値(配分額・印・期待値プラスの判定など)は、すべて本番の workerd で計算される(exe 版は #248 でアーカイブ済み)。Node で動くのはテストと golden だけなので、差が出るのは「テストの期待値と本番の一致」の問題にとどまる。
+- **すでに入れている対応**: smoke の E(workerd の出力と golden の照合)は、浮動小数点を相対誤差 1e-12 の許容つきで比べる(`cloud/smoke-compare.ts`)。整数(配分額・馬番・件数)・文字列・項目の集合・順序は完全一致。
+  比較関数は、オブジェクトの項目の集合が違った時点でその階層の比較を打ち切る。赤になる点は変わらず、同じ階層の下位の不一致が報告に出ないだけ(診断の情報が減るのみ。直さない)。
+- **Node の版を上げるとき**: `packages/app/test/golden/pipeline-golden.json` との完全一致を見るテスト(`packages/app/test/analysis-pipeline-golden.test.ts`・`cloud/test/pipeline-run.test.ts` ほか)が、同じ種類の差で赤になりうる。新しい Node の V8 が `Math.log`・`Math.exp` の実装を変えると、golden を作った Node と最後の 1 ビットが違う値が出るため。
+  手順: (1) 赤になった箇所の差が、1ulp 程度の浮動小数点だけであること(整数・文字列・項目の集合・順序の差が無いこと)を確かめる。差が大きい、または整数や項目が変わっているなら、版の差ではなく実装の変更なので、golden を更新してはいけない。
+  (2) 確かめられたら `pnpm tsx scripts/gen-pipeline-golden.ts`(リポジトリルート)で golden を再生成し、差分が浮動小数点の末尾の桁だけであることを再確認してからコミットする。(3) ルートの `pnpm test` と、cloud の `npx vitest run`・`pnpm run smoke` を通す。
+  なお CI の Node の版は `.github/workflows/ci.yml` の `node-version`(22)。
 
 ### 日単位の DO `RaceDay`・取得キャッシュ・朝の取得と prior(#177〈#164-b〉。v1.19.12)
 **呼び出す入口は、手動の `POST /api/analyses/run`〈#180〉と、cron の `scheduled`〈#206。`requestPlan`〉**。`worker.ts` が `RaceDay` を export する(wrangler が binding のクラスを要求する)。ローカルの smoke も RPC を呼んで通す。
