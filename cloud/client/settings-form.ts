@@ -3,7 +3,7 @@
  *
  * **下書きは文字列(数値欄は入力した文字のまま)・真偽は真偽値**で持つ。検証は保存の押下時に1回だけ(`validateDraft`。入力のたびには行わない=`change` で描画しない設計)。
  * 検証の範囲は、サーバが 400 にする**書く側の述語**(`cloud/src/settings.ts` の `CLOUD_SETTINGS_RULES[key].isWritable`)をそのまま使う(範囲の定義は1か所)。
- * 並びとラベルは exe の設定画面(`packages/app/src/renderer/SettingsView.tsx`)に合わせる(ラベルは exe の共有定数を流用)。**補助文は cloud の実際の挙動に合わせて書き直した**:
+ * 並びとラベルは exe の最後の設定画面(`packages/app/src/renderer/SettingsView.tsx`。#287 で削除。3c1664e まで)に合わせた(ラベルは exe と共有していた定数 `packages/core/src/analysis/app-settings.ts` を流用)。**補助文は cloud の実際の挙動に合わせて書き直した**:
  *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
  *  - LLM を使うときだけ効く: 追加指示・クリップ幅(発走前の分析の LLM〈Issue #194〉で使う。Worker の API キーが未登録の間は LLM を使わないので効かない。補助文はキーの有無のどちらでも嘘にならない書き方)
  *  - LLM を使うときだけ効く(分析モデル。Issue #158): 選んだ系統の最新のモデルで、保存後に次に始まる発走前の分析から使う

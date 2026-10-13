@@ -191,7 +191,7 @@ export type MarketImpliedPlaceProbabilities =
  * (複勝オッズ自体が未発売)。呼び出し側が生の `OddsSnapshot.place` から `placeOddsMin` を
  * 引く限り、この関数は必ずこの経路(全馬 `placeOddsMin: null` → 算出不能)に入る。
  *
- * **注意**: `AnalysisRow.placeOddsMin`(`packages/app` の分析結果行)は `yoso` のとき
+ * **注意**: `AnalysisRow.placeOddsMin`(`packages/core/src/analysis/analysis-types.ts` の分析結果行)は `yoso` のとき
  * 単勝オッズからの推定値に置き換わっており、生の市場データではない
  * (`computeEstimatedRaceEv`。`expected-value.ts` のJSDoc「本関数は odds.place を一切参照
  * しない」参照)。本関数には必ず `OddsSnapshot.place[umaban].oddsMin` 由来の値(生データ)を

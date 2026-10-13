@@ -4,8 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Issue #175: cloud/src が core の**バレル(`packages/core/src/index.ts`)や、better-sqlite3 に依存するモジュール**(`analysis-store.ts`・`cache.ts` など)を
- * 値で import していないことの静的ガード。バレルは `cache.ts`・`analysis-store.ts` を値で巻き込み、Worker のバンドルに better-sqlite3(ネイティブ)が入る。
+ * Issue #175: cloud/src が core の**バレル(`packages/core/src/index.ts`)や、better-sqlite3 に依存するモジュール**(`cache.ts` など。#287 より前は `analysis-store.ts` も)を
+ * 値で import していないことの静的ガード。バレルは `cache.ts`(#287 より前は `analysis-store.ts` も)を値で巻き込み、Worker のバンドルに better-sqlite3(ネイティブ)が入る。
+ * `ev/analysis-store.ts` は #287 で src から `packages/core/test/support/` へ移したが、src に戻さないために、下の各検査の禁止の一覧には残してある。
  * 検査: cloud/src の各ファイルが(推移的に)値で import する core のモジュールの閉包を取り、(1)バレルを含まない (2)better-sqlite3 を import するモジュールを含まない。
  * バンドルの実物の検査は bundle-guard.test.ts(wrangler の dry-run)が行う。これは、バンドルの前にソースの段階で理由つきで落とすための検査。
  *
@@ -166,7 +167,7 @@ describe("cloud/src が core から値で import するもの(Issue #175・#176)
     expect([...unresolvedCoreSpecifiers]).toEqual([]);
   });
 
-  it("better-sqlite3 に依存するモジュール(analysis-store.ts・cache.ts など)を、推移的にも値で import していない", () => {
+  it("better-sqlite3 に依存するモジュール(cache.ts など。analysis-store.ts は src に戻さないための禁止)を、推移的にも値で import していない", () => {
     const names = [...coreFiles].map(rel);
     expect(names).not.toContain("ev/analysis-store.ts");
     expect(names).not.toContain("scraper/cache.ts");
@@ -226,7 +227,7 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
     expect(coreFiles.size).toBeGreaterThan(40);
   });
 
-  it("型だけの import も含めて、バレル・cache.ts・analysis-store.ts・better-sqlite3 を経由しない。exports に無い `@keiba/core/...` も無い", () => {
+  it("型だけの import も含めて、バレル・cache.ts・analysis-store.ts〈src に戻さないための禁止〉・better-sqlite3 を経由しない。exports に無い `@keiba/core/...` も無い", () => {
     const names = [...coreFiles].map(relCore);
     for (const forbidden of ["index.ts", "scraper/cache.ts", "ev/analysis-store.ts"]) {
       expect(names, forbidden).not.toContain(forbidden);
@@ -292,7 +293,7 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
     }
   });
 
-  it("Issue #219: 検証の集計が使う core の入口(verify.ts・lookahead-suspicion.ts・analysis-store-types.ts)は、型を含めて辿っても analysis-store.ts・better-sqlite3 に届かない(クラウドだけを install する CI の型検査が通る)", () => {
+  it("Issue #219: 検証の集計が使う core の入口(verify.ts・lookahead-suspicion.ts・analysis-store-types.ts)は、型を含めて辿っても analysis-store.ts〈src に戻さないための禁止〉・better-sqlite3 に届かない(クラウドだけを install する CI の型検査が通る)", () => {
     for (const file of ["verify.ts", "lookahead-suspicion.ts", "analysis-store-types.ts", "analysis-store-codec.ts"]) {
       const closure = closureOf([path.join(CORE_SRC, "ev", file)], { includeTypes: true });
       expect([...closure.coreFiles].map(relCore), file).not.toContain("ev/analysis-store.ts");

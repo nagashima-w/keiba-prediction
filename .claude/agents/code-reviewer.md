@@ -22,17 +22,20 @@ model: sonnet
 ## レビュー手順
 1. `git diff` で変更差分を確認する(コミット済みならベースコミットからの差分)
 2. テストを自分で実行し、結果を確かめる(実装者の報告を信用しない)。検証は
-   `pnpm test` / `pnpm typecheck` / **`pnpm --filter @keiba/app build`** の3点セットを**自分で実行**する
+   ルートの `pnpm test` / `pnpm typecheck` と、cloud(`cloud/` で)の **`pnpm run typecheck` / `npx vitest run` / `pnpm run smoke`** を**自分で実行**する
    (`pnpm test`/`pnpm typecheck` はいずれもリポジトリルートの `-r` 無しコマンド。ルート直下
    `scripts/` 配下のテスト・型検査は `pnpm -r test`/`pnpm -r typecheck` では実行されないため、
    `-r` 付きのコマンドで代替しないこと)
-   (build は必須。renderer のブラウザ向けバンドルの破綻はテストでも typecheck でも検出できない)
+   (cloud の3つは必須。ブラウザ向けバンドル〈`cloud/client`〉の破綻はテストだけでは検出できない。これを検出するのは、
+   cloud の `pnpm run typecheck`〈client 用の tsconfig を含む〉と `cloud/test/client-bundle.test.ts`・`import-guard.test.ts` である。
+   exe の削除〈#285〉で `pnpm --filter @keiba/app build` は無くなった。実行しても何もせず exit 0 で終わるため、検証に含めない。
+   smoke の前に `ps` で他の wrangler・workerd が動いていないことを確かめる)
    - **ローカル緑は CI 緑を意味しない(実行環境の差)**: あなたのローカルは Linux/LF で、CI(`ci.yml`・`deploy-cloud.yml`)も
      `ubuntu-latest` のため OS は同じ(Issue #248 で Windows ランナーを廃止した)。それでも、差分に**リポジトリ内のファイルを
      読むテスト**がある場合は、読み込み直後に改行を LF へ正規化しているか(利用者の Windows での checkout が CRLF になりうる)を
-     確認する。**CI の関門はルート(`ci.yml`: `pnpm typecheck`・`pnpm test`・`pnpm --filter @keiba/app build`)と cloud
-     (`deploy-cloud.yml` の check ジョブ)の2系統**で、あなたの3点セットは前者に相当する。差分が `cloud/` に触れるなら、
-     cloud の typecheck・test・smoke も自分で実行する
+     確認する。**CI の関門はルート(`ci.yml`: `pnpm typecheck`・`pnpm test`)と cloud
+     (`deploy-cloud.yml` の check ジョブ)の2系統**で、上の検証はその両方に相当する。差分が `cloud/` に触れるなら、
+     cloud の typecheck・test・smoke を必ず自分で実行する
      (過去に、`\n` を要求する正規表現がローカル LF で緑・Windows ランナーの CRLF で失敗し、実装者・レビュアーとも見逃した事例がある)
 3. 以下の観点で問題を探す:
    - **仕様適合**: `keiba-ev-tool-spec.md` の該当箇所と突き合わせ、仕様との乖離・解釈違いがないか

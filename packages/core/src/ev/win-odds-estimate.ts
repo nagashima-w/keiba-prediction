@@ -27,8 +27,8 @@ import { PLACKETT_LUCE_MODEL } from "./plackett-luce-model.js";
 export const WIN_PAYOUT_RATE = 0.8;
 
 /**
- * 勝率の推定に使う上位着数。配分(`shared/mixed-candidates.ts` の `COMBO_TOP_FINISH_COUNT`)と同じ 3。
- * 値の一致は `packages/app/test` のテストが固定する(app の定数は export されていないため、`buildMixedCandidates` の戻り値で突き合わせる)。
+ * 勝率の推定に使う上位着数。配分(`packages/core/src/analysis/mixed-candidates.ts` の `COMBO_TOP_FINISH_COUNT`)と同じ 3。
+ * 値の一致は `cloud/test/win-odds-parity.test.ts` が固定する(`COMBO_TOP_FINISH_COUNT` は export されていないため、`buildMixedCandidates` の戻り値の `topFinishCount` で突き合わせる)。
  */
 export const WIN_PROB_TOP_FINISH_COUNT = 3;
 

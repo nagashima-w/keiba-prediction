@@ -28,14 +28,18 @@ model: sonnet
 差分として作業してください。
 
 ## 検証(完了報告の前に必ず自分で実行する)
-以下の3点を**自分で実行し、実出力を報告に含める**こと。他人の報告や「通るはず」で代替しない。
-1. `pnpm test`
-2. `pnpm typecheck`
-3. `pnpm --filter @keiba/app build`
+以下を**自分で実行し、実出力を報告に含める**こと。他人の報告や「通るはず」で代替しない。
+1. `pnpm test`(リポジトリルート)
+2. `pnpm typecheck`(リポジトリルート)
+3. cloud(`cloud/` で。初回は `pnpm install --ignore-workspace --frozen-lockfile`): `pnpm run typecheck`・`npx vitest run`・`pnpm run smoke`
 
-**3 は必須**。vitest は Node 環境で走るため、renderer(ブラウザ向け Vite バンドル)の破綻は
-**テストでも typecheck でも検出できない**(過去に `node:zlib` の混入で CI が落ちた)。
-renderer から core を使うときは**バレル(`@keiba/core`)ではなく `exports` のサブパス**を import すること。
+**3 は必須**。vitest は Node 環境で走るため、**ブラウザ向けのバンドル(`cloud/client`)の破綻はテストだけでは
+検出できない**(過去に `node:zlib` の混入で CI が落ちた)。これを検出するのは、cloud の `pnpm run typecheck`
+(client 用の tsconfig を含む)と、`cloud/test/client-bundle.test.ts`・`import-guard.test.ts` である。
+(exe の削除〈#285〉で `pnpm --filter @keiba/app build` は無くなった。実行しても何もせず exit 0 で終わるため、
+検証要件に書かない。)
+cloud/client から core を使うときは、バレル(`@keiba/core`)を import せず、`client-bundle.test.ts` の許可リストにある入口を使うこと。
+smoke は固定のポートを使うので、実行の前に `ps` で他の wrangler・workerd が動いていないことを確かめる。
 
 **1・2 はいずれもリポジトリルートの `-r` 無しコマンド。** ルート直下 `scripts/` 配下のテスト・
 型検査は `pnpm -r test`/`pnpm -r typecheck`(パッケージ横断だが `-r` は workspace 全体を意味し、

@@ -34,6 +34,7 @@
  *    (`mixed-allocation-worker-pool.ts`)の`max(1, min(hardwareConcurrency−1, maxWorkers=4))`
  *    に基づき、**2並列(3コア機相当)・4並列(5コア以上相当)の両方**を見積もる(メイン指定)。
  *    見積もりであり実測ではないことを出力に明記する。
+ *    (`mixed-allocation-worker-pool.ts`・`verify-worker-pool-electron.mjs` は exe の一部で、#287 で削除した。最後に残っているコミットは 3c1664e。)
  * 3. **反復回数**: 三連単込みの配分計算は#96の署名畳み込みが効かず大きく遅くなる見込み
  *    (`docs/issue-order.md` §1-3)であるため、既存ベンチのような固定反復回数(30回)を
  *    そのまま使わない。まず1回のウォームアップ実行時間を測り、時間予算(1シナリオあたり

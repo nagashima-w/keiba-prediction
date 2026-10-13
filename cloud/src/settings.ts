@@ -1,11 +1,12 @@
 import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "./pre-race-time.js";
 
 /**
- * クラウド版の設定(D1 の1行。Issue #178〈#164-c〉。編集の API と画面は Issue #189)。**依存を持たない純モジュール**(exe の既定値との一致を `scripts/test/cloud-settings-defaults.test.ts` が
- * 固定するため、scripts の型検査からも import できる形にしている)。
+ * クラウド版の設定(D1 の1行。Issue #178〈#164-c〉。編集の API と画面は Issue #189)。**依存を持たない純モジュール**(既定値を `scripts/test/cloud-settings-defaults.test.ts` が
+ * 固定値(リテラル)と比べて固定するため、scripts の型検査からも import できる形にしている)。
  *
- * **既定値は exe の現在の既定値**(`packages/app/src/main/settings-store.ts` の `DEFAULT_APP_SETTINGS`。メインの判断 2026-10-06)。cloud は exe の設定ストア
- * (node:fs を使う)を import できないので、値を写して、上のテストで一致を固定する。
+ * **既定値は、exe の最後の既定値を写したもの**(メインの判断 2026-10-06。元は exe の `packages/app/src/main/settings-store.ts` の `DEFAULT_APP_SETTINGS`。
+ * exe は #287 で削除した。最後に残っているコミットは 3c1664e)。exe を削除した後は **web の既定値を正とする**(ユーザー決定 2026-10-13)。
+ * 上のテストは、削除の直前に両者が一致していた値をリテラルで固定していて、既定値を変えるときはそのリテラルも意図して書き換える。
  *  - `bankroll`・`perRaceCap` は既定 0(配分提案を出さない opt-in。exe と同じ)。ユーザーが値を決めたら、D1 の行に入れる。
  *  - `includeComboOdds`(組合せオッズの取得)は既定 OFF(オプトイン)。OFF なら、組合せの券種は配分に入らない(exe と同じ)。
  *  - 各券種の `include*InAllocation` は既定 ON。

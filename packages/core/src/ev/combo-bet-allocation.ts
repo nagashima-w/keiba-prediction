@@ -8,7 +8,7 @@
  * 1. `bet-allocation.ts` の公開契約(allocateBetsのシグネチャ・AllocationHorse/BetAllocation/
  *    BetAllocationResult/BetAllocationConfigの各フィールド名・型・resolveEffectivePerRaceCapの
  *    公開場所)は一切変更しない。既存 `bet-allocation.test.ts` の80件は無改変のまま全件パスする
- *    (`git diff` で確認済み。報告参照)。`packages/app/**` も一切変更しない。
+ *    (`git diff` で確認済み。報告参照)。`packages/app/**` も一切変更しなかった(当時。exe は #287 で削除。最後は 3c1664e)。
  * 2. 防御関数群・貪欲最適化・畳み込み・betUnit丸め・キャップ比例縮小・最低額ロジック・
  *    見送り理由の判定ロジック(文言を除く)は `allocation-primitives.ts` を通じて
  *    `bet-allocation.ts` と共有する(重複実装しない)。
@@ -78,13 +78,13 @@
  * `BatchAnalysisView.tsx`のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
  * **呼び出し前に候補を検証して弾くか、error boundaryを置くこと。**
  *
- * **この受け皿は充足済み(Issue #31・2026-08-20時点で確認)。** `packages/app/src/shared/
- * mixed-race-allocation.ts`(Issue #57で`packages/app/src/renderer/mixed-allocation-view.ts`から
- * 分離した`buildMixedRaceAllocation`)が `allocateGeneralBets` の呼び出しをtry/catchで保護し、
+ * **この受け皿は充足済み(Issue #31・2026-08-20時点で確認)。** `packages/core/src/analysis/
+ * mixed-race-allocation.ts`(Issue #57でexeの`renderer/mixed-allocation-view.ts`から
+ * 分離した`buildMixedRaceAllocation`。#286で`packages/app/src/shared/`から移した)が `allocateGeneralBets` の呼び出しをtry/catchで保護し、
  * 例外を `MixedRaceAllocationInvalid`(`kind:"invalid"`)へ変換して他レースの計算・画面全体に
- * 波及させない(受け皿の実体はtry/catchブロック本体。表示側のテストは `packages/app/test/
- * mixed-allocation-view.test.ts` の **`AC17` を冠する describe 群**〈`grep -n "AC17"` で
- * 辿れる〉が固定している)。D-3着手時に改めて受け皿を新設する必要はない。
+ * 波及させない(受け皿の実体はtry/catchブロック本体。テストは `packages/core/test/analysis/
+ * mixed-race-allocation-gates.test.ts` の **`AC17` を冠する describe**〈`grep -n "AC17"` で
+ * 辿れる。#287で exe の`mixed-allocation-view.test.ts`から移した〉が固定している)。D-3着手時に改めて受け皿を新設する必要はない。
  *
  * **件数(旧「〈5件〉」)を書かない。** 旧版はここに具体的な件数を書いていたが、実際に数え直すと
  * 誤りだった(boss指摘2026-08-20)。件数は`describe`が増減するたびに腐る参照であり、腐った状態が

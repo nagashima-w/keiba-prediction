@@ -66,7 +66,8 @@
  *     こちらは`isUsableOdds`のゲートが無く、構造的には到達可能(`placeConfig.coef`が
  *     非有限だと`isPositive=true`かつ`isUsableOdds`不成立になりうる。#74 boss メタレビューR1で
  *     発見・残余として明記。`expected-value.ts`の`computeEstimatedRaceEv`JSDoc参照)。
- *     ただし本番では`placeConfig`の供給元が`packages/app/src`に存在せず常に既定
+ *     ただし本番では`placeConfig`の供給元が`cloud/src`に存在せず(`grep -rn placeConfig cloud/src`が0件。
+ *     exe の供給元`packages/app/src`も無かった)常に既定
  *     (`coef=0.2`)が使われるため、**運用上は到達しない**(#50調査済み。状態分離自体は#23-B)。
  *   将来の経路追加・#23-Bでの状態分離に備えた防御。
  * - 判定順序: この判定(unjudgedOdds)は払戻計算より前に行う。オッズが使えないと判定した馬が、

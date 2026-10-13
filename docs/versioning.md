@@ -3,6 +3,11 @@
 本書は root(`package.json`)・`packages/app`(`@keiba/app`)の版数(semver)をいつ・誰が・どの区分で
 上げるかを定める(Issue #44-D-1)。
 
+> **注記(2026-10-13。Issue #285)**: exe のコード(`packages/app`・`scripts/release-gate.ts`・`scripts/artifact-gate.ts` ほか)は
+> 削除した。**exe のコードが最後に残っているコミットは `3c1664e`** である(git のタグは打っていない)。
+> 以下の本文は 1.44.0 までの運用の**履歴**であり、書き換えていない。本文の `packages/app`・`version-policy.test.ts`・
+> `release-gate` などのパスと名前は、3c1664e にあったものを指す。
+
 ## 版数の凍結(Issue #248。exe の最終版は 1.44.0)
 
 2026-10-10 の利用者の決定で、exe 版の公開(ビルドと `dev-latest` の更新)を止めた。以後、root(`package.json`)と

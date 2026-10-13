@@ -14,7 +14,7 @@ import { makeResult } from "./helpers.js";
  * `filterRaceDataBefore` は先読みリーク(戦績を日付でフィルタせず prior に渡してしまう欠陥)を
  * 遮断するための純関数。#40 は計測用の入力データの遮断に使い、#39 で production の
  * `analysis-pipeline.ts`(`runAnalysis` の scrape 直後)も同じ関数を使うようになった
- * (production 側の配線は `packages/app/test/analysis-pipeline-no-lookahead.test.ts` で固定)。
+ * (production 側の配線は `packages/core/test/analysis/analysis-pipeline-no-lookahead.test.ts` で固定)。
  */
 
 /** 出馬表1頭分を最小構成で組み立てる。 */

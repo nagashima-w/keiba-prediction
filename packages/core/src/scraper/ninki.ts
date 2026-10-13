@@ -31,11 +31,11 @@
  *
  * ## 本ヘルパを経由しない `ninki` 生成経路を追加する場合の注意(Issue #34)
  * `race.odds.win[umaban]?.ninki` を直接読む消費経路は次の2箇所(`grep -rn
- * "odds.win\[.*\]?\.ninki" packages/app/src` で確認可能)であり、いずれも
+ * "odds.win\[.*\]?\.ninki" packages/core/src cloud/src` で確認可能。このコメント自身の行を除く)であり、いずれも
  * 「nullish(`null`/`undefined`)のみ」を欠損として扱う契約になっている:
- * `main/analysis-pipeline.ts` の `const popularity = race.odds.win[umaban]?.ninki ?? null`
+ * `analysis/analysis-pipeline.ts` の `const popularity = race.odds.win[umaban]?.ninki ?? null`
  * (LLMプロンプト用の `PromptHorse.popularity` を組み立てる)と、
- * `main/analysis-export.ts` の `popularity: race.odds.win[umaban]?.ninki ?? null`
+ * `analysis/analysis-export.ts` の `popularity: race.odds.win[umaban]?.ninki ?? null`
  * (`buildRaceSnapshot`。`analyses.race_snapshot_json` への永続化・CSV/JSON出力の元)。
  * `??` は nullish のみを捕捉するため `0 ?? null` は `0` のまま素通りする。
  * 上記いずれかの値をそのまま受け取る `analyzer/build-prompt.ts` の `popularityText` も

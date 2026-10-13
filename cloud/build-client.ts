@@ -17,12 +17,12 @@ export const CLIENT_DIR = path.join(HERE, "client");
 export const GENERATED_PATH = path.join(HERE, "src", "client-bundle.generated.ts");
 
 /**
- * exe の renderer(`allocation-proposal-view` ほか。Issue #185 で配分の表示を流用する)が import する core のサブパス(`@keiba/core/ev/...`)は、
+ * クライアントが流用する表示関数(`packages/core/src/view/allocation-proposal-view` ほか。Issue #185 で配分の表示を流用する。もとは exe の renderer で、#286 で core へ移した)が import する core のサブパス(`@keiba/core/ev/...`)は、
  * `tsconfig.client.json` の `paths` で実ファイルへ向ける。**esbuild は tsconfig の paths を読む**ので、型検査(tsc)とバンドル(esbuild)の解決が 1 か所で揃う
  * (別に esbuild の `alias` を持たない。二重に持つとズレる)。CI(cloud/ だけをインストールし、各 package の node_modules が無い配置)でも解決できる
  * (実測: alias なし・paths ありで、生成物がバイト単位で同一。paths も外すと `Could not resolve "@keiba/core/ev/combo-bet-allocation"` で失敗する)。
  * **バレル `@keiba/core` は paths に無い**(better-sqlite3 を巻き込むので、import されたら解決に失敗して落ちる)。
- * renderer の閉包が新しいサブパスを import しても `@keiba/core/*` で解決されるが、閉包に入ってはいけないもの(node_modules・バレル・better-sqlite3 に依存するモジュール)は
+ * 表示関数の閉包が新しいサブパスを import しても `@keiba/core/*` で解決されるが、閉包に入ってはいけないもの(node_modules・バレル・better-sqlite3 に依存するモジュール)は
  * `test/client-bundle.test.ts` の metafile の検査が拾う。
  */
 async function runBuild(options: { readonly minify: boolean }) {

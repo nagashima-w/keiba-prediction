@@ -7,7 +7,8 @@
 設定画面またはconfigでチューニング可能。
 
 - ツール名: 競馬期待値分析ツール(keiba-ev-tool)
-- 種別: 複勝の期待値プラス馬券を抽出するデスクトップアプリ(Electron + React)
+- 種別: 期待値プラスの馬券を抽出する分析ツール。現在の実装は web 版(Uma Driller。Cloudflare Worker。`cloud/`。10 節)と、その土台の `@keiba/core`。
+  デスクトップアプリ(exe。Electron + React)はアーカイブ済みで、コードは削除した(2026-10-13。Issue #285。最後に残っているコミットは `3c1664e`。8 節)
 - **対応券種は用途によって異なる(3点。混同しないこと)**:
   - **配分提案**: 複勝+単勝+ワイド+馬連+馬単+三連複(単勝はIssue #90・#23-B2で、馬連は
     Issue #117・#24-D3b-2で、馬単はIssue #125・#24-E3bで追加)。複勝・単勝は常時対象、
@@ -27,7 +28,7 @@
     回収率集計(overall)からは除外する(検証画面には除外している旨の注記が出る)。旧方式
     (`VerifyReport.bet`。複勝一律100円ずつ買ったと仮定した累積回収率)は複勝のみを対象と
     する設計(賭け金の仮定がproposedBet系と異なるため合算しない。AC-B5)で、こちらは
-    変更していない。`ev/analysis-store.ts`は複勝の確定払戻(`race_results.place_payout`)・
+    変更していない。`ev/analysis-store.ts`(exe の SQLite 実装。#287 で `packages/core/test/support/analysis-store.ts` へ移した。web は同じ SQL を `ev/analysis-store-codec.ts` 経由で D1 に発行する)は複勝の確定払戻(`race_results.place_payout`)・
     単勝の確定払戻(`race_results.win_payout`、Issue #100)をレース結果テーブルへ、
     ワイド・三連複・馬連・馬単・三連単・枠連の確定払戻(ワイド・三連複はIssue #52、馬連はIssue
     #114・#24-F1、馬単はIssue #121・#24-F2、三連単はIssue #131・#25-F、枠連はIssue #145・#26-F)を
@@ -37,7 +38,7 @@
     枠連はIssue #150(#26-E3b)で配分提案・画面表示に接続されたため、`bracketQuinella`は検証画面の
     内訳・判定不能の行にも表示する(表示順は馬連→枠連→馬単)**。
     **馬連はIssue #117(#24-D3b-2)、馬単はIssue #125(#24-E3b)でそれぞれ配分提案への
-    組み込みが完了し、買い目が実際に発生するようになったため、検証画面(`VerifyView.tsx`)の
+    組み込みが完了し、買い目が実際に発生するようになったため、検証画面(exe の `VerifyView.tsx`〈削除済み。3c1664e まで〉)の
     内訳・判定不能の行にも表示するようになった(表示順は馬連→馬単で、ワイドと3連複の
     間)**(それまでは買い目が構造的に0件だったため、#112「馬連 ¥0 0点」の事故と同型を
     避けるためあえて表示しない設計だった)。
@@ -61,11 +62,11 @@
     単一値)→ 馬連の確定払戻の取込・回収率検証(Issue #114・#24-F1。上記「記録・回収率検証」
     参照)→ 配分に含めるかの設定`includeQuinellaInAllocation`の配管(Issue #115・#24-D3a。
     既定ON)→ `scrape-race.ts`(オッズ取得)への配線・分析結果/保存スナップショットへの搭載・
-    `shared/mixed-candidates.ts`の候補ビルダー(`buildMixedCandidates`)対応(Issue #116・
+    `packages/core/src/analysis/mixed-candidates.ts`の候補ビルダー(`buildMixedCandidates`)対応(Issue #116・
     #24-D3b-1。`includeComboOdds: true`のとき、既存のワイド・3連複の**後**に馬連オッズを
     1リクエスト追加で取得する〈中央 `type=4`・地方 `type=b4`、いずれも単発リクエストで
     完結。地方3連複の軸馬別取得とは異なる〉)→ **配分の券種選択
-    (`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`・D-2フォールバック規則)への
+    (`packages/core/src/analysis/mixed-race-allocation.ts`の`resolveMixedBetTypes`・D-2フォールバック規則)への
     接続と画面表示(Issue #117・#24-D3b-2)**。これにより`includeQuinellaInAllocation`がONで
     馬連オッズが取得できていれば、一括分析画面の配分内訳・検証画面の回収率内訳に馬連が
     ワイドと3連複の間に表示されるようになった(利用者から見える変化はここで初めて生じた)。
@@ -75,12 +76,12 @@
     順序付きキー〈`buildOrderedComboOddsKey`〉でオッズを引き、`buildExactaCandidates`が
     P(n,2)通りの順序付きペアを列挙してP(1着=a,2着=b)で的中確率を求める)→ 馬単の確定払戻の
     取込・回収率検証(Issue #121・#24-F2)→ `scrape-race.ts`(オッズ取得)への配線・
-    分析結果/保存スナップショットへの搭載・`shared/mixed-candidates.ts`の候補ビルダー
+    分析結果/保存スナップショットへの搭載・`packages/core/src/analysis/mixed-candidates.ts`の候補ビルダー
     (`buildExactaCandidatesForBetType`)対応(Issue #122・#24-E2。`includeComboOdds: true`
     のとき、既存のワイド・3連複・馬連の**後**に馬単オッズを1リクエスト追加で取得する
     〈中央`type=6`・地方`type=b6`、いずれも単発リクエストで完結〉)→ 配分に含めるかの設定
     `includeExactaInAllocation`の配管(Issue #124・#24-E3a。既定ON)→ **配分の券種選択
-    (`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`・D-2フォールバック規則)への
+    (`packages/core/src/analysis/mixed-race-allocation.ts`の`resolveMixedBetTypes`・D-2フォールバック規則)への
     接続と画面表示(Issue #125・#24-E3b)**。これにより`includeExactaInAllocation`がONで
     馬単オッズが取得できていれば、一括分析画面の配分内訳・検証画面の回収率内訳に馬単が
     馬連と3連複の間に表示されるようになった(利用者から見える変化はここで初めて生じた)。
@@ -96,7 +97,7 @@
     的中確率を求める)→ 三連単の確定払戻の取込・回収率検証(Issue #131・#25-F)→
     配分計算の性能実測とcandidateCap引き上げ(Issue #129・#25-C、Issue #136・#25-E0。
     既定2000→8000)→ `scrape-race.ts`(オッズ取得)への配線・分析結果/保存スナップショットへの
-    搭載・`shared/mixed-candidates.ts`の候補ビルダー(`buildTrifectaCandidatesForBetType`)対応
+    搭載・`packages/core/src/analysis/mixed-candidates.ts`の候補ビルダー(`buildTrifectaCandidatesForBetType`)対応
     (Issue #137・#25-E2。`includeComboOdds: true`のとき、既存のワイド・3連複・馬連・馬単の
     **後**に三連単オッズを1リクエスト追加で取得する〈中央`type=8`のみ、単発リクエストで
     完結〉)。**三連単は地方(NAR)でも取得する**(Issue #283・ユーザー判断2026-10-13。当初は
@@ -132,8 +133,8 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.44.0`(exe の最終版。Issue #248 で凍結。以後は上げない)、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
-  private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
+- バージョン: ルート `1.44.0`(exe の最終版。Issue #248 で凍結。以後は上げない。アプリの `packages/app` は #285 で削除した)、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+  private かつ npm 未公開で、削除前の app〈`packages/app`〉からは `workspace:*` 参照のみだったため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
   独立した確率推定 × 市場オッズで見つける。個人利用専用。
@@ -141,21 +142,22 @@
 ## 全体構成(pnpm ワークスペース)
 
 ```
-packages/core  … @keiba/core: scraper / scorer / analyzer / ev / notify を UI 非依存のライブラリとして実装
-packages/app   … @keiba/app: Electron(main/preload)+ React(renderer)デスクトップアプリ
-scripts        … CLI・アイコン生成・フィクスチャ取得などの補助スクリプト
+packages/core  … @keiba/core: scraper / scorer / analyzer / ev / notify を UI 非依存のライブラリとして実装。
+                 web が使う分析パイプライン(analysis/)と画面用の表示関数(view/)もここにある(#286 で exe の packages/app から移した)
+scripts        … CLI・計測・フィクスチャ取得などの補助スクリプトと、そのテスト(scripts/test/)
 fixtures       … テスト用の保存済み HTML/JSON(テストは実サイトへアクセスしない)
+cloud          … クラウド版 Uma Driller(Cloudflare Worker。pnpm ワークスペースの外。10 節)
 ```
 
-- **renderer は core のバレル(`@keiba/core`)を import しない**。バレル経由だと `better-sqlite3`・
-  `node:zlib` 等のネイティブ/Node 専用依存が renderer のブラウザ向けバンドルに巻き込まれ、Vite ビルドが
-  落ちる(実際に `node:zlib` の混入で CI が失敗した実績がある)。取得・DB・LLM 呼び出しなどネイティブ依存
-  を伴う処理は main プロセスに集約し、renderer は IPC 経由で結果を受け取る(当初仕様「UI はコアを直接
-  import」からの意図的な差異。README「仕様との差異」参照)。
-- ただし**純粋な計算ロジックに限り、renderer から core の `exports` サブパスを直接 import してよい**
-  (例: `@keiba/core/ev/race-opportunity`、`@keiba/core/ev/bet-allocation`、
-  `@keiba/core/scraper/validate-period-input`)。サブパス公開により Node 専用モジュールを引き込まない
-  ことがビルドで保証される。**新しく renderer から core を使うときは必ずサブパスを追加すること。**
+- **ブラウザ向けのクライアント(`cloud/client`)は core のバレル(`@keiba/core`)を import しない**。バレル経由だと `better-sqlite3`・
+  `node:zlib` 等のネイティブ/Node 専用依存がブラウザ向けバンドルに巻き込まれる(`node:zlib` の混入で CI が失敗した実績がある。
+  当時は exe の renderer の Vite ビルドで起きた)。クライアントが import してよいのは `cloud/test/client-bundle.test.ts` の許可リストにある入口だけで、
+  破綻は cloud の `pnpm run typecheck`(client 用の `tsconfig.client.json`)・`client-bundle.test.ts`・`import-guard.test.ts` が検出する。
+  取得・DB・LLM 呼び出しなどネイティブ依存を伴う処理は、web では Worker 側(`cloud/src`)に置く
+  (exe では main プロセスに集約し、renderer は IPC 経由で結果を受け取っていた。当初仕様「UI はコアを直接 import」からの意図的な差異)。
+- ただし**純粋な計算ロジックに限り、クライアントから core の `exports` サブパスを直接 import してよい**
+  (例: `@keiba/core/analyzer/build-prompt`、`@keiba/core/ev/binomial-interval`。許可リストにある入口だけ)。サブパス公開により Node 専用モジュールを
+  引き込まないことがバンドルの検査で保証される。**新しくクライアントから core を使うときは、サブパスを追加して許可リストにも足すこと。**
 - 主要モジュール(core、`packages/core/src/index.ts` が公開 API): `scraper/`(取得)、`scorer/`(数値
   スコアリング)、`analyzer/`(LLM 分析と材料生成)、`ev/`(期待値・検証・分析履歴ストア)、`notify/`(Discord)。
 - **core の保存層の構成(#168〈#163-a〉。v1.19.6)**: クラウド版〈`cloud/`。Cloudflare Workers〉が、ネイティブ依存の better-sqlite3 を
@@ -163,11 +165,11 @@ fixtures       … テスト用の保存済み HTML/JSON(テストは実サイ�
   - `scraper/cached-fetcher.ts`: 取得結果の保存先の抽象 `CacheStore`(`get`・`set` の戻り値は値でも Promise でもよい。鮮度は経過が `maxAgeMs` を**超えたら**ミス)、
     `CachedFetcher`、`TextFetcher`。better-sqlite3 に依存しない。
   - `scraper/cache.ts`: SQLite 実装の `ScrapeCache`(`CacheStore` を満たす)。`CachedFetcher` などは上のファイルから再 export し、既存の import 元を保つ。
-  - `ev/analysis-store-types.ts`: 分析履歴の入出力の型(型のみ。`import type` だけ)。`ev/analysis-store.ts` が再 export する。
+  - `ev/analysis-store-types.ts`: 分析履歴の入出力の型(型のみ。`import type` だけ)。切り出した当時は `ev/analysis-store.ts` が再 export していた。
   - `ev/analysis-store-codec.ts`: 表名・INSERT/SELECT の SQL 文・`AnalysisRecord` から各表の束縛値への変換(NULL/0/1、`undefined` → `null`、JSON 化。配分が無ければ
     配分メタ行を出さない)・DB 行から `StoredAnalysis`/`StoredAllocation` への復元の純関数。exe の `AnalysisStore`(better-sqlite3。同期)と、後続の D1 実装(非同期)が共有する。
-  - `AnalysisStore` は従来どおり同期の具象クラスのまま(verify・app の呼び出しは無変更)。新ファイルが better-sqlite3 に依存しないことは
-    `packages/core/test/ev/native-free-modules.test.ts` が機械的に固定している。**cloud は core のバレル(`index.ts`)を import してはいけない**(`cache.ts`・`analysis-store.ts` を巻き込む)。
+  - `AnalysisStore` は従来どおり同期の具象クラスのまま(verify・app の呼び出しは無変更)だった。#287 で exe を削除したときに、`ev/analysis-store.ts` は `packages/core/test/support/analysis-store.ts`(テスト用)へ移し、src からは無くした。新ファイルが better-sqlite3 に依存しないことは
+    `packages/core/test/ev/native-free-modules.test.ts` が機械的に固定している。**cloud は core のバレル(`index.ts`)を import してはいけない**(`cache.ts` を巻き込む。#287 より前は `analysis-store.ts` も)。
   - 保存→取得の契約は共有フィクスチャ `packages/core/test/fixtures/analysis-store-contract.json` で固定し、クラウドの D1 実装(#169)も同じ期待値で検査する。
 
 ## 1. 取得(scraper)
@@ -198,8 +200,8 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   `HttpClient`/`CachedFetcher` は GET 専用ではなく POST(method/body/追加ヘッダ)にも対応し、
   URL が固定でリクエスト識別子が POST ボディに入る API 向けに `cacheKey`(省略時は URL)を明示指定できる
   (同レース過去10年結果 API 向け。詳細は次項)。
-- **期間一括取得**: 日付範囲を `enumerateDates` で列挙し、`validatePeriodInput` で入力検証したうえで
-  複数日・複数レースをまとめて取得する(`packages/app` 側の一括分析と連動)。
+- **期間一括取得**(exe の機能。`enumerateDates`・`validatePeriodInput` とともに #287 で削除した。3c1664e まで): 日付範囲を列挙し、
+  入力検証したうえで複数日・複数レースをまとめて取得していた。web は開催日ごとの計画(10 節)で取得する。
 - **エラー方針**: 必須データ(出馬表・オッズ)の失敗は throw。optional データ(調教)の失敗はその項目を
   null にして警告(`ScrapeWarning`、kind: 調教/戦績)を積む。戦績は馬単位で握り、1 頭の失敗で全体を落とさない。
 - **取消・除外の馬は出走馬から除く(Issue #154)**: 発走前に取消になった馬は出馬表に残ることがある
@@ -388,7 +390,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 
 ## 4. 検証(ev/verify)
 
-分析結果と実結果を突き合わせて予実を可視化する(`ev/verify.ts`、履歴ストアは `ev/analysis-store.ts`)。
+分析結果と実結果を突き合わせて予実を可視化する(`ev/verify.ts`、履歴ストアは `ev/analysis-store-codec.ts` を共有する exe の SQLite 実装〈`ev/analysis-store.ts`。#287 で `packages/core/test/support/` へ移した〉と web の D1)。
 
 - **結果取込**: レース結果を取り込み(`parse-race-result.ts`)。未確定レース(結果表はあるが着順行が
   0 件)は構造異常と区別して `RaceResultNotConfirmedError` で穏やかに扱う。未取込レースの一括取込に対応。
@@ -527,7 +529,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   ため、`overall`(8券種の合算)は持つ。**馬連はIssue #117(#24-D3b-2)、馬単はIssue #125
   (#24-E3b)、三連単はIssue #139(#25-E3b)でそれぞれ配分提案への組み込みが完了し買い目が
   実際に発生するようになったため、`quinella`・`exacta`・`trifecta`は検証画面
-  (`VerifyView.tsx`)の内訳・判定不能の行にも表示する(表示順は馬連→枠連→馬単→3連複→三連単。枠連はIssue #150・#26-E3bで追加)**
+  (exe の `VerifyView.tsx`〈削除済み。3c1664e まで〉)の内訳・判定不能の行にも表示する(表示順は馬連→枠連→馬単→3連複→三連単。枠連はIssue #150・#26-E3bで追加)**
   (それまでは買い目が構造的に0件だったため値のみ保持し画面には表示しない設計だった)。
   - **読み出しAPI**: `AnalysisStore.getAllocationForVerify(analysisId)` が
     `analysis_allocation_meta`/`analysis_bets` のうち `route`・`skip_reason_code`・
@@ -604,7 +606,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     - **`CACHE_VERSION` を 4 → 5 に上げた**(#72 だけが先に公開されると本番に版4の集計〈一律の項目なし〉が残り、4 のままだと
       クライアントの応答の検査が失敗するため。版を上げれば公開の順序に依らず安全。副作用は #245 と同じ)。
     - 日報(`daily-report-bets.ts`)は一律の比較を持たない。
-  - UI(`VerifyView`)は既存の累積回収率の下に、上記overall・券種別内訳・母集団4分類件数を表示する。
+  - UI(exe の `VerifyView`〈削除済み。3c1664e まで〉)は既存の累積回収率の下に、上記overall・券種別内訳・母集団4分類件数を表示する。
 - **過去分析の再表示(Issue #55)**: 検証タブ「レース一覧」の各レースの折りたたみ内に
   「配分提案(分析時点)」ブロックを表示する。導線は新設せず、既存の「レース一覧」
   (`RaceLedgerView`)に配分を引き当てるだけ(新規IPCチャネルは追加していない)。的中・払戻・
@@ -625,7 +627,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     `includeTrifecta: null`/`includeBracketQuinella: null`(記録なし)としてそのまま返す(0/1のときのみbooleanへ変換する。#31: 記録なしをOFFに丸めない)。
     `getAllocationForVerify`(#71。route/skip_reason_code/bet_type/combo_key/stakeの5列のみ)とは
     読む列の範囲が異なる別クエリであり、互いに影響しない。
-  - **表示状態(`renderer/allocation-proposal-view.ts`)**: 記録なし/unset/yoso/unavailable/
+  - **表示状態(`packages/core/src/view/allocation-proposal-view.ts`)**: 記録なし/unset/yoso/unavailable/
     invalid/見送り(skip)/配分ありの7状態に加え、値の矛盾(未知の`route`文字列、または
     `route∈{place-only,mixed}` ∧ `skip_reason_code=null` ∧ `bets=[]`)を「判定不能」として
     別枠で扱う(#31: 判定済みを未判定に潰さない)。状態の下位理由・パラメータだけが欠けている
@@ -645,7 +647,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     Issue #118・#151・#126・#140より前の記録で`includeQuinella=null`/`includeBracketQuinella=null`/
     `includeExacta=null`/`includeTrifecta=null`)を表示する(#31: OFFと断定しない。
     v1.15.1で保存された枠連の買い目を持つ記録も「枠連: 記録なし」と出す〈ONと推定しない〉)。
-    `VerifyView.tsx`には本機能の`route`/`skip_reason_code`分岐と文言リテラルを置かず、
+    exe の `VerifyView.tsx`〈削除済み。3c1664e まで〉には本機能の`route`/`skip_reason_code`分岐と文言リテラルを置かず、
     `allocation-proposal-view.ts`が返す配列を`.map`するだけにしている。
 
 ## 5. 馬券配分の提案(ev/place-joint-model・ev/bet-allocation)
@@ -692,7 +694,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     `model_approximate` 列は #80 時点で既に存在しており、#81 でスキーマは変更していない。
     切替は**新規分析以降にのみ**適用されるため、切替前に保存された分析行は
     `model_id="conditional-bernoulli"` のまま DB に残り続ける。`verify.ts` の回収率
-    (`getAllocationForVerify`)も過去分析の再表示(`getStoredAllocation`。`VerifyView.tsx`
+    (`getAllocationForVerify`)も過去分析の再表示(`getStoredAllocation`。exe の `VerifyView.tsx`〈削除済み。3c1664e まで〉
     は保存値を読むだけで再計算しない)も、いずれも保存済みの値をそのまま読むため、
     **切替の前後で数値が書き換わることはない**。その結果、DB内には CB 期の分析行と PL 期の
     分析行が混在するが、**`model_id` 列は上記2つの読み出しAPIのどちらも「意図的に読まない列」
@@ -746,7 +748,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **提案しないレース**: 8頭未満(複勝が2着まで、または非発売で3着内率推定と整合しない)、
   オッズ未発売(`oddsStatus="yoso"` の推定 EV は誤差±20〜30%で賭け金に直接効く)。
   出走頭数が判定できない場合は「発売されない」ではなく専用の理由を返す。
-- **表示**(`renderer/bet-allocation-view.ts` + `BatchAnalysisView`): 配分表(馬番・馬名・補正後確率・
+- **表示**(`packages/core/src/view/bet-allocation-view.ts` + exe の `BatchAnalysisView`〈削除済み。3c1664e まで〉): 配分表(馬番・馬名・補正後確率・
   複勝下限・EV・配分額)と、ケリー適正額・1レース上限のどちらが効いたかを示す合計行。注記として
   (1)賭け額の考え方、(2)**レース横断のオーバーベット警告**(配分はレースごとに独立計算のため、複数
   レースを同時購入すると合計はケリー最適を超える)、(3)EV 閾値の脚注を常時表示する。複勝圏内確率の
@@ -754,9 +756,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **券種横断の配分(機能D-2c・Issue #28。馬連はIssue #117・#24-D3b-2、馬単はIssue #125・
   #24-E3b、三連単はIssue #139・#25-E3b、枠連はIssue #150・#26-E3bで追加)**: 複勝・ワイド・馬連・枠連・馬単・三連複・三連単を
   **同じ1つの予算枠**の中で`allocateGeneralBets`(`@keiba/core/ev/combo-bet-allocation`)に
-  より同時最適化する(`shared/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。
-  Issue #57で`renderer/mixed-allocation-view.ts` から分離した。表示データの導出
-  〈`buildMixedAllocationDisplay`〉は引き続き `renderer/mixed-allocation-view.ts` にある)。
+  より同時最適化する(`packages/core/src/analysis/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。
+  Issue #57で exe の `renderer/mixed-allocation-view.ts` から分離した。表示データの導出
+  〈`buildMixedAllocationDisplay`〉は同ファイルにあったが、#287 で exe とともに削除した。3c1664e まで)。
   ワイド・馬連・馬単・三連複・三連単・枠連のオッズ取得(`includeComboOdds`・既定OFF。1つのフラグで
   6券種をまとめて取得する。馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、枠連は
   Issue #148・#26-E2で追加。既存のワイド・3連複・馬連・馬単の**後**に1レース1リクエスト
@@ -806,7 +808,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   あった注記が新経路で欠落しないことを個別に確認済み)。**組合せ券種のEVは推定誤差が組み合わせ人数ぶん増幅されて過大評価になりやすく、
   較正は未実施**(Issue #35。計測基盤は#40で整備済み、較正方式の要否検討は#42。画面にも注記を
   表示する)。異常な数値(オッズ・馬番)を含むレースは例外を投げずに判別可能な状態で表示する。
-- **配分計算のタイミング(Issue #110・v1.9.4)**: 一括分析画面の券種横断の配分は、**描画の中で同期的に
+- **配分計算のタイミング(Issue #110・v1.9.4。exe の画面の記述。#287 で削除済み。パスは 3c1664e のもの)**: 一括分析画面の券種横断の配分は、**描画の中で同期的に
   計算しない**。画面の他の部分を先に表示し、配分は**1レースずつ**計算して、レースとレースの間に画面を
   更新する(`renderer/mixed-allocation-queue.ts` の `createAllocationQueueRunner` /
   `createAllocationScheduler`)。未計算のレースの配分欄には「配分を計算中…」、「レース別ハイライト」
@@ -816,7 +818,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   分析タブへ戻っても、設定が変わっていなければ再計算しない**。表示は常に「今の設定」をキーに照会するので、
   計算途中で設定が変わっても古い設定の金額は表示しない。分析タブを離れると計算は止まり、戻ると続きから
   再開する。**配分の答え(金額・点数・構成比)はこの変更の前後で同じ**(同じ関数を同じ引数で呼ぶ)。
-- **配分計算のWorkerプール化(Issue #119・#24-C3)**: 上記(#110)の1レースずつの計算を、
+- **配分計算のWorkerプール化(Issue #119・#24-C3。exe の画面の記述。#287 で削除済み。パスは 3c1664e のもの)**: 上記(#110)の1レースずつの計算を、
   さらに**Web Workerのプールへ移し、レース単位で並列化**した。実際の計算
   (`buildMixedAllocationDisplay`)は`renderer/mixed-allocation-worker-handler.ts`
   (Workerエントリ`renderer/mixed-allocation.worker.ts`から呼ばれる。画面側の逐次フォールバックと
@@ -850,9 +852,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   「一律100円 vs 配分」の回収率比較。券種構成比を大きく左右する貪欲配分の刻み幅(`greedySteps`)の
   挙動確認・調整は別Issue(#36)。詳細は `docs/handover-next-session.md`。
 
-## 6. エクスポート(app: analysis-export)
+## 6. エクスポート(analysis/analysis-export)
 
-- **JSON(schemaVersion=1)+ CSV**(`packages/app/src/main/analysis-export.ts`)。
+- **JSON(schemaVersion=1)+ CSV**(`packages/core/src/analysis/analysis-export.ts`。#286 で exe の `packages/app/src/main/analysis-export.ts` から移した)。
 - meta に版メタ: `promptVersion` / `additionalInstruction` / `model` / `evEstimated` / `kaisaiDate` /
   ツール名・版・エクスポート時刻。horses に prior・adjustedProb・ev・isPositive・mark・reason・
   出馬表項目・オッズ・調教評価、results に着順・複勝配当・通過順・上がり3F、`rawLlmResponse`
@@ -864,7 +866,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   末尾(`passing` の後)に `highlights`・`concerns` の2列を足し、セルの中は ` / ` で連結する(空配列は空セル)。
   **CSV のセルは可逆ではない**: 項目の文字列自体に ` / ` が含まれると項目を厳密には復元できない。
   正確に取り出したいときは JSON を使う(カンマ・引用符・改行を含む項目は RFC4180 のエスケープで列がずれない)。
-- 画面(一括分析の結果表): 「LLM根拠」列のセルに reason → 強調材料 → 懸念事項(ラベルは「強調材料」「懸念事項」。
+- 画面(exe の一括分析の結果表。削除済み): 「LLM根拠」列のセルに reason → 強調材料 → 懸念事項(ラベルは「強調材料」「懸念事項」。
   cloud と共有の定数 `LABEL_HIGHLIGHTS`・`LABEL_CONCERNS`)の順で出す。項目の無い塊は出さない。
   ハイライト表(EV プラスの馬の要約表)には出さない。
 
@@ -901,7 +903,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     `MigrationFormatError`。exe の表に列が足されたら、形式の版(`version`)を上げる。
   - 書き出し側も、各行を書く前に同じ検証を通す。実 DB に有限でない数値(Infinity)や型の揺れ(実数列に文字列など)があれば、
     書き出しがその行を指して失敗する(`JSON.stringify` は Infinity を黙って null にするため、検証が先)。
-- **書き出しの実装**(`packages/core/src/ev/cloud-migration-{format,lines,reader}.ts`・`packages/app/src/main/cloud-migration-export.ts`):
+- **書き出しの実装**(#287 で `cloud-migration-lines.ts`・`cloud-migration-reader.ts` と exe の `cloud-migration-export.ts` を削除した。形式 `packages/core/src/ev/cloud-migration-format.ts` は残る。以下は 3c1664e までの実装の記述):
   - 読み出しはキーセット・ページング(`WHERE id > ? ORDER BY id LIMIT n`。分析は 50 件ずつ、結果は 200 レースずつ)。
     **定義表の列を明示して SELECT する**(長い期間の migration を経た DB に古い列が残っていても、書き出しは形式に合う)。
     1 ページは `await` をはさまず同期の `.all()` で読み、better-sqlite3 の `.iterate()` を await をまたいで持たない
@@ -917,29 +919,29 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 
 - レース名・日付・会場と **EV プラスの馬**(予想印・馬番・馬名・AI 補正後確率・複勝下限・EV、推定 EV は
   接尾表示)を embed で送信。EV プラスが無ければ「該当なし」。
-- 設定画面の Webhook URL に送信、手動「Discordに送信」ボタン + 自動送信 ON/OFF。レート制限(429)は
+- (exe の画面の記述。削除済み。web は Worker の secret `DISCORD_WEBHOOK_URL`〈10 節・`cloud/README.md`〉)設定画面の Webhook URL に送信、手動「Discordに送信」ボタン + 自動送信 ON/OFF。レート制限(429)は
   Retry-After を尊重して 1 回だけ待機リトライ。送信失敗は分析結果表示に影響しない。
 
-## 8. 配布(exe 版はアーカイブ済み。Issue #248)
+## 8. 配布(exe 版はアーカイブ済み・コードは削除済み。Issue #248・#285)
 
-**exe 版の公開は止めた(2026-10-10 の利用者の決定)。** 最後の exe は GitHub Releases の `dev-latest`
-(`keiba-ev-tool-1.44.0-portable.exe`)に残してある。exe のビルドと `dev-latest` への公開をしていた
+**exe 版の公開は止め(2026-10-10 の利用者の決定。#248)、コードも削除した(2026-10-13。#285)。** 最後の exe は GitHub Releases の `dev-latest`
+(`keiba-ev-tool-1.44.0-portable.exe`)に残してある。**exe のコードが最後に残っているコミットは `3c1664e`**(`git checkout 3c1664e` で参照できる。git のタグは打っていない)。exe のビルドと `dev-latest` への公開をしていた
 `.github/workflows/build-windows.yml` は削除した(内容は版管理の履歴にある)。以後の機能追加と統計モデルの
 見直しは web(cloud)だけを対象にする。
 
 - **現在の CI**(いずれも `ubuntu-latest`。作業ブランチ 1 本への push と `workflow_dispatch` で起動):
-  - `.github/workflows/ci.yml`: `pnpm typecheck`・`pnpm test`(packages/core・packages/app・scripts のテスト)・
-    `pnpm --filter @keiba/app build` の関門。公開はしない(`scripts/test/ci-workflow.test.ts` が固定)。
-    cloud は packages/core と packages/app のソースを相対 import しているので、app のテストと build は残した。
+  - `.github/workflows/ci.yml`: `pnpm typecheck`・`pnpm test`(packages/core・scripts のテスト)の関門。公開はしない(`scripts/test/ci-workflow.test.ts` が固定)。
+    cloud は packages/core のソースを相対 import しているので、core のテストは残してある。
+    (`pnpm --filter @keiba/app build` は #287 で packages/app を削除したので無くなった。実行しても何もせず exit 0 になる。)
   - `.github/workflows/deploy-cloud.yml`: cloud の型検査・テスト・dry-run・スモークと、本番デプロイ(10 節)。
     **承認印 `[PUBLISH-APPROVED]` は、この本番デプロイの関門として残っている**(先端コミットに承認印があり、
     「レビュー継続中」を含まない push、または許可ブランチでの手動実行)。
 - **版数は 1.44.0(exe の最終版)で凍結**した。以後は上げない([`docs/versioning.md`](./versioning.md))。
-- **残してあるもの**: `packages/app` のコードとテスト(web が `cloud/client`・`cloud/src` から import している)。
-  exe 専用のコード(`packages/app/electron-builder.yml`・`scripts/release-gate.ts`・`scripts/artifact-gate.ts`・
-  `scripts/gen-icon.mjs` ほか)は削除していない。CI からは呼ばれない。
+- **削除したもの**: web が使っていた共有部分は `packages/core/src/analysis/`・`packages/core/src/view/` へ移した(#286)。
+  exe 専用のコード(`packages/app` 全体・`packages/app/electron-builder.yml`・`scripts/release-gate.ts`・`scripts/artifact-gate.ts`・
+  `scripts/gen-icon.mjs` ほか)と、その依存は削除した(#287)。
 
-**以下の「開発版」から「配布 exe の可動性検査」までは、1.44.0 までの exe の配布の記録である。現在は動いていない。**
+**以下の「開発版」から「配布 exe の可動性検査」までは、1.44.0 までの exe の配布の記録である。現在は動いていない。コードも削除済みで、`packages/app/…`・`scripts/release-gate.ts`・`scripts/artifact-gate.ts` ほかのパスは、3c1664e にあったものを指す。**
 
 - **Windows portable exe**(`keiba-ev-tool-<version>-portable.exe`、インストール不要)。
 - **開発版**: 開発ブランチ(`claude/keiba-ev-tool-dev-cvagiu`・`claude/handover-next-session-x5ki6o`・
@@ -1095,8 +1097,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   - NaN・Infinity・負値は演算前に明示検証して弾く(`reason` 付きの `null` を返し、
     もっともらしい誤った数値を返さない)。`placeOddsMin` は下限であり単一の真値ではない
     (複勝は下限〜上限の幅を持つ券種)ことを `conditions.placeOddsKind` で明示する。
-- **回帰テスト**: `packages/core/test/` に低レベル指標の単体テスト(合成データ・境界値、
-  `packages/app` に非依存)。`scripts/test/probability-quality-regression.test.ts` に
+- **回帰テスト**: `packages/core/test/` に低レベル指標の単体テスト(合成データ・境界値)。`scripts/test/probability-quality-regression.test.ts` に
   実フィクスチャ(中央16頭・地方12頭)を `runAnalysis` で駆動する回帰テストと、リーク遮断の
   前後比較(#40で実測: 中央16頭で ρ 0.2104→-0.0059、正規化KL 0.0156→0.0236)。#39 以降は
   `runAnalysis` 自身が遮断するため、「リークあり」の値は core の公開関数(`buildPriorInput`+
@@ -1359,15 +1360,15 @@ Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 
   DO で保存するなら CPU 上限は桁違いに緩い(#159)。Node 単体(`gzipSync`)の level 6 は約 4.5ms で、workerd と近い(zlib はネイティブ)。
 
 ### runAnalysis のクラウドへの取り込み(#176〈#164-a〉。v1.19.10)
-exe の分析パイプライン(`packages/app/src/main/analysis-pipeline.ts` の `runAnalysis`)を、**組み直さずに** cloud が相対 import で取り込む(`cloud/src/pipeline.ts` の `runCloudAnalysis`。呼び出し元は #177 以降で、本番のエントリはまだ呼ばない)。
-exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` を変更前のコミット b821c97 で生成して固定。生成手順 `scripts/gen-pipeline-golden.ts`)。
+exe の分析パイプライン(`packages/core/src/analysis/analysis-pipeline.ts` の `runAnalysis`。#286 で exe の `packages/app/src/main/analysis-pipeline.ts` から移した)を、**組み直さずに** cloud が相対 import で取り込む(`cloud/src/pipeline.ts` の `runCloudAnalysis`。呼び出し元は #177 以降で、本番のエントリはまだ呼ばない)。
+exe の出力は変わらない(`packages/core/test/golden/pipeline-golden.json`〈#286 で `packages/app/test/golden/` から移した〉を変更前のコミット b821c97 で生成して固定。生成手順 `scripts/gen-pipeline-golden.ts`)。
 - **core の狭い入口 `@keiba/core/pipeline`**(`packages/core/src/pipeline.ts`。値 20 個と型だけを再 export する): バレルは `cache.ts`・`analysis-store.ts`(better-sqlite3)を巻き込み、cloud のバンドルも型検査も(CI のように各 package の node_modules が無い配置では)失敗する(実測)。
-  この入口は型だけの import も含めて better-sqlite3 に依存するモジュールを経由しない(型は `ev/analysis-store-types.ts` から。`scrape-race.ts` ほか3ファイルの `CachedFetchTextOptions` も `cached-fetcher.ts` から取る)。app の `analysis-pipeline.ts`・`allocation-record.ts`・`analysis-export.ts` がこれを使う(`pipeline-deps.ts` ほか exe の他の部分は従来どおりバレル)。
+  この入口は型だけの import も含めて better-sqlite3 に依存するモジュールを経由しない(型は `ev/analysis-store-types.ts` から。`scrape-race.ts` ほか3ファイルの `CachedFetchTextOptions` も `cached-fetcher.ts` から取る)。core の `analysis/analysis-pipeline.ts`・`allocation-record.ts`・`analysis-export.ts` がこれを使う(当時の exe の `pipeline-deps.ts` ほかは従来どおりバレル。#287 で削除)。
 - **deps は非同期でもよい**: `saveAnalysis` の戻り値は `unknown`(Promise なら await。reject は runAnalysis の reject)。当日傾向は、`getRaceResultDetails`(任意。`precedingRaceIdsSameDay` の ID をまとめて1回で引く。D1 の1呼び出しあたりのクエリ数の上限〈Free は 50〉を避ける)を渡せる。
   同期の単発 `getRaceResultDetail`(exe の束縛)は従来どおり ID ごとに1回・昇順。両方あればバッチを使う。
 - **cloud の設定**: `wrangler.toml` の `[alias]` は完全一致で、**サブパスごとに1行**(`@keiba/core/pipeline`・`scorer/snapshot-filter`・`ev/bet-allocation`・`ev/combo-bet-allocation`)。`tsconfig.json` の `paths`・`vitest.config.ts` の `alias` は前方一致。
   `kaisaiDate`(YYYYMMDD)は `runCloudAnalysis` が必須にする(渡らないと runAnalysis が当日日付〈Worker は UTC〉で近似するため)。
-- **検査**: `packages/app/test/analysis-pipeline-golden.test.ts`(exe の出力)・`analysis-pipeline-async-deps.test.ts`(非同期 deps・バッチ)、core の `native-free-modules.test.ts`、cloud の `import-guard.test.ts`(型を含む閉包・alias の一致)・`bundle-guard.test.ts`(runAnalysis がバンドルに入り better-sqlite3 が入らない)・
+- **検査**: `packages/core/test/analysis/analysis-pipeline-golden.test.ts`(golden との一致)・同ディレクトリの `analysis-pipeline-async-deps.test.ts`(非同期 deps・バッチ)、core の `native-free-modules.test.ts`、cloud の `import-guard.test.ts`(型を含む閉包・alias の一致)・`bundle-guard.test.ts`(runAnalysis がバンドルに入り better-sqlite3 が入らない)・
   `pipeline-run.test.ts`(golden との一致)、smoke(workerd で `runAnalysis` が最後まで通り、golden と一致。浮動小数点は相対誤差 1e-12 の許容つきで比べ、整数・文字列・項目の集合は完全一致。`cloud/smoke-compare.ts`。SHA-256 の完全一致は成り立たない。次の節を参照)。
 - **限界**: 本番のエントリは `runCloudAnalysis` を参照しないので、本番のバンドルには入っていない(bundle-guard は、これを参照する一時の入口を本番と同じ `wrangler.toml` でバンドルして検査する)。重賞の「同レース過去10年傾向」は POST で取る。gate は #181 段階1(v1.22.2)で許可リスト付きの POST に対応し、段階2(v1.23.0)で発走前の取得ステップが POST を使うようになった(下の「重賞の過去10年傾向」)。
 
@@ -1376,7 +1377,7 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
 - **結論: この差は、利用者から見える値を変えない。** 利用者が見る値(配分額・印・期待値プラスの判定など)は、すべて本番の workerd で計算される(exe 版は #248 でアーカイブ済み)。Node で動くのはテストと golden だけなので、差が出るのは「テストの期待値と本番の一致」の問題にとどまる。
 - **すでに入れている対応**: smoke の E(workerd の出力と golden の照合)は、浮動小数点を相対誤差 1e-12 の許容つきで比べる(`cloud/smoke-compare.ts`)。整数(配分額・馬番・件数)・文字列・項目の集合・順序は完全一致。
   比較関数は、オブジェクトの項目の集合が違った時点でその階層の比較を打ち切る。赤になる点は変わらず、同じ階層の下位の不一致が報告に出ないだけ(診断の情報が減るのみ。直さない)。
-- **Node の版を上げるとき**: `packages/app/test/golden/pipeline-golden.json` との完全一致を見るテスト(`packages/app/test/analysis-pipeline-golden.test.ts`・`cloud/test/pipeline-run.test.ts` ほか)が、同じ種類の差で赤になりうる。新しい Node の V8 が `Math.log`・`Math.exp` の実装を変えると、golden を作った Node と最後の 1 ビットが違う値が出るため。
+- **Node の版を上げるとき**: `packages/core/test/golden/pipeline-golden.json` との完全一致を見るテスト(`packages/core/test/analysis/analysis-pipeline-golden.test.ts`・`cloud/test/pipeline-run.test.ts` ほか)が、同じ種類の差で赤になりうる。新しい Node の V8 が `Math.log`・`Math.exp` の実装を変えると、golden を作った Node と最後の 1 ビットが違う値が出るため。
   手順: (1) 赤になった箇所の差が、1ulp 程度の浮動小数点だけであること(整数・文字列・項目の集合・順序の差が無いこと)を確かめる。差が大きい、または整数や項目が変わっているなら、版の差ではなく実装の変更なので、golden を更新してはいけない。
   (2) 確かめられたら `pnpm tsx scripts/gen-pipeline-golden.ts`(リポジトリルート)で golden を再生成し、差分が浮動小数点の末尾の桁だけであることを再確認してからコミットする。(3) ルートの `pnpm test` と、cloud の `npx vitest run`・`pnpm run smoke` を通す。
   なお CI の Node の版は `.github/workflows/ci.yml` の `node-version`(22)。
@@ -1571,7 +1572,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - `GET /api/analyses/{id}` は**開いたとき id ごとに 1 回だけ**(メモリにキャッシュ。往復で取り直さない。⚠️ サーバは R2 の詳細を読み Class B を +1 する)。失敗は固定の文言(404 は「見つかりません」)で、自動では再試行せず、**失敗したときだけ**「更新」で取り直せる(成功した画面に「更新」は無い)。結果画面は一覧・板・状態を取らない。「戻る」は、分析の `kaisaiDate`(無い・不正ならハッシュの日付)のそのレースの画面。
 - **API の変更**: `GET /api/analyses/{id}` の `allocation` に `fallbackReason`・`betUnit` を足した(exe の表示関数に渡さないと、フォールバックの注記が消え、`cap-too-small` が「単位額が記録されていません」と誤って表示される)。
 - **応答の検証**: クライアントのパーサは、型違い・キーの欠落(配分のキーが 1 つ欠けても)を「想定外の応答」にし、`undefined` を表示関数に渡さない。未知の `route` 文字列は通す(表示関数が「判定不能」にする)。
-- **ビルド(exe の renderer の取り込み)**: クライアントが import してよいのは `client/` の中と、exe の `renderer/allocation-proposal-view`・`renderer/format`・`shared/analysis-types`(型のみ)だけ(許可リスト。`test/client-bundle.test.ts`。**#201 で、core を直接 import する唯一の例外として `@keiba/core/analyzer/build-prompt` を足した**)。renderer が import する core のサブパス(`@keiba/core/ev/bet-allocation`・`@keiba/core/ev/combo-bet-allocation`)は、CI(各 package の node_modules が無い配置)でも解決できるよう、`tsconfig.client.json` の paths で実ファイルへ向ける(esbuild もこの paths を読むので、型検査とバンドルの解決が 1 か所で揃う。バレルは向けない)。バンドルの閉包は metafile で検査し(`node_modules`・バレル・better-sqlite3 に依存するモジュール・exe の main が無いこと)、生成物を Node の組込みの無い環境(`node:vm`)で実行して、配分の表示が動くことも確かめている。**exe の renderer・core の ev を変えると、cloud のドリフトの検査が落ちる**(`pnpm run build:client` で再生成する)。
+- **ビルド(exe から移した表示関数の取り込み)**: クライアントが import してよいのは `client/` の中と、`packages/core/src/view/allocation-proposal-view`・`packages/core/src/view/format`・`packages/core/src/analysis/analysis-types`(型のみ)だけ(許可リスト。`test/client-bundle.test.ts`。**#201 で、core を直接 import する唯一の例外として `@keiba/core/analyzer/build-prompt` を足した**)。renderer が import する core のサブパス(`@keiba/core/ev/bet-allocation`・`@keiba/core/ev/combo-bet-allocation`)は、CI(各 package の node_modules が無い配置)でも解決できるよう、`tsconfig.client.json` の paths で実ファイルへ向ける(esbuild もこの paths を読むので、型検査とバンドルの解決が 1 か所で揃う。バレルは向けない)。バンドルの閉包は metafile で検査し(`node_modules`・バレル・better-sqlite3 に依存するモジュール・exe の main が無いこと)、生成物を Node の組込みの無い環境(`node:vm`)で実行して、配分の表示が動くことも確かめている。**exe の renderer・core の ev を変えると、cloud のドリフトの検査が落ちる**(`pnpm run build:client` で再生成する)。
 - **XSS・CSP**: #184 のまま(外から来た文字列はテキストノードだけ。要素・属性の許可リストは**変更なし**=一覧は `ul`、強調は class と文字で組む)。
 - **検査**: `test/client-api-analysis.test.ts`(パーサ)・`client-api-analysis-contract.test.ts`(実際の `handle()` の応答。分析はローカルの D1・R2 に保存して読み、exe の表示関数まで通す)・`client-race.test.ts`・`client-result.test.ts`・`client-view.test.ts`(VNode・XSS)・`client-app.test.ts`・`client-bundle.test.ts`・`analysis-view.test.ts`。**実機(スマホ)でのレイアウト・タップは自動検査できない**(デプロイ後にユーザーが確認する)。
 

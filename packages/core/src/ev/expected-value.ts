@@ -102,8 +102,9 @@ export const DEFAULT_ESTIMATED_PLACE_CONFIG: EstimatedPlaceConfig = {
  *   `estimatePlaceOddsMinFromWin(1.0, {coef:-Infinity})`→`kind="算出値不正"`・`value=NaN`)。
  *   coefが有限でも極端な値の組み合わせでは到達する(実測: `winOdds=1e308, coef=1e10`
  *   〈coefは有限〉→ 加算項がオーバーフローし `value=Infinity`)。
- *   **本番では到達しない**: (1) `packages/app/src/main/pipeline-deps.ts` が組み立てる
- *   `AnalysisPipelineDeps` は `estimatedPlaceConfig` を供給しないため常に既定値 `coef=0.2` が
+ *   **本番では到達しない**: (1) 本番(`cloud/src`)が組み立てる
+ *   `AnalysisPipelineDeps` は `estimatedPlaceConfig` を供給しない(`grep -rn estimatedPlaceConfig cloud/src` が0件。
+ *   exe の `packages/app/src/main/pipeline-deps.ts` も供給しなかった)ため常に既定値 `coef=0.2` が
  *   使われる。(2) この固定coef=0.2の下では、値域内の有限winOddsをどれだけ大きくしても
  *   (実測: `winOdds=Number.MAX_VALUE` でも算出値は約 `3.60e307` でfinite)オーバーフローせず、
  *   非有限winOddsは算出前の `単勝オッズ値域外` 分岐で既に弾かれるため、この2つが組み合わさって

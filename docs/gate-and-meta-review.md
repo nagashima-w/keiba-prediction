@@ -88,9 +88,10 @@
   しかしルートの `vitest.config.ts` は `scripts/test/**` しか含まないので、**`packages/app/...` は
   何にも一致せず、黙って実行されなかった**(ファイル数が前回と同じ 46 のままだった)。
   実装者・レビュアー・メインの3者が同じコマンドを使ったため、`docs/current-spec.md` の版表記の
-  漏れを誰も検出できず、CI で初めて落ちた。**版数のテストを含む app のテストは
-  `cd packages/app && pnpm test`** で実行する。コマンドを指定するときは、**件数・ファイル数が
-  増えたことまで**確かめさせる
+  漏れを誰も検出できず、CI で初めて落ちた(当時の `packages/app` は #285 で削除済み。パスは 3c1664e のもの)。
+  いまの実行場所は次のとおり: ルートの vitest は `scripts/test/**` だけを含む。packages/core のテストは
+  ルートの `pnpm test`(`pnpm -r test` を含む)で、cloud のテストは `cd cloud && npx vitest run` で実行する。
+  コマンドを指定するときは、**件数・ファイル数が増えたことまで**確かめさせる
 - **実装者の提案を採るときは、設定値の境界(最小値・最大値)と組み合わせて確かめる。** #204 では、
   ゲートが「昇格の時点でも `planPreRaceDue` を再利用して too-late を判定する」提案を採った。しかし
   offset の最小値 10 分は、too-late の閾値 10 分と一致する。そのため、**アラームが 1ms 遅れるだけで
@@ -99,9 +100,10 @@
 - **検証要件には、CI の check ジョブが実行するコマンドを全部入れる。** #205 では、ゲートの
   検証要件が `typecheck`・`test`・`deploy:dry` だけだった。そのため、`pnpm run smoke`(workerd を
   起動して health などを完全一致で確かめる)が漏れ、health にキーを足した変更が CI で初めて落ちた。
-  ルートの CI(`ci.yml`)は、`pnpm typecheck`・`pnpm test`・`pnpm --filter @keiba/app build` を実行する
-  (Issue #248 で exe の公開を止めたあとも、この関門は残してある。cloud の check ジョブは packages/core・
-  packages/app・scripts のテストを走らせないので、**cloud に触れない変更でも、ルートの3コマンドは検証要件に入れる**)。
+  ルートの CI(`ci.yml`)は、`pnpm typecheck`・`pnpm test` を実行する
+  (Issue #248 で exe の公開を止めたあとも、この関門は残してある。`pnpm --filter @keiba/app build` は #285 で
+  packages/app を削除したので無くなった。実行しても何もせず exit 0 になるため、検証要件に書かない。
+  cloud の check ジョブは packages/core・scripts のテストを走らせないので、**cloud に触れない変更でも、ルートの2コマンドは検証要件に入れる**)。
   `deploy-cloud.yml` の check ジョブは、typecheck・test・deploy:dry・
   `wrangler d1 migrations apply DB --local`・smoke を実行する。ブリーフを書く前に
   ワークフローの `run:` を列挙する。**smoke は固定のポートと同じレースIDを使うので、2つの

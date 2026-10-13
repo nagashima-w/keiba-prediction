@@ -39,11 +39,8 @@
    こちらから見えない事象を「〜されました」「〜なしで通りました」と書いてはならない
    (ツール呼び出しが結果を返したことは、ユーザーが許可を押した後でも同じに見える)。
    観測手段が無いなら「〜のはずです。違っていたら教えてください」と書いて止める。
-9. **「テスト全緑」を成功の代理指標にしない。** CI が実行する内容(`ci.yml` の
-   `pnpm typecheck`・`pnpm test`・`pnpm --filter @keiba/app build`、`deploy-cloud.yml` の check ジョブの
-   `run:` 全部)をローカル検証が覆っているかを、オーケストレーター自身が確認する。vitest は Node 環境で走るため、**renderer(ブラウザ向け Vite バンドル)の破綻は
-   テストでも typecheck でも検出できない**(過去に `node:zlib` の混入で CI が落ちた)。
-   サブエージェントへの検証要件にも `pnpm --filter @keiba/app build` を必ず含めること。
+9. **「テスト全緑」を成功の代理指標にしない。** CI が実行する内容(`ci.yml` の `pnpm typecheck`・`pnpm test`、`deploy-cloud.yml` の deploy 以外のジョブの `run:` 全部)をローカル検証が覆っているかを、オーケストレーター自身が確認する。vitest は Node 環境で走るため、**ブラウザ向けのバンドル(`cloud/client`)の破綻はテストだけでは検出できない**(過去に `node:zlib` の混入で CI が落ちた)。これを検出するのは、cloud の `pnpm run typecheck`(client 用の tsconfig を含む)と、`cloud/test/client-bundle.test.ts`・`import-guard.test.ts` である。サブエージェントへの検証要件には、cloud の `pnpm run typecheck`・`npx vitest run`・`pnpm run smoke` を必ず含めること。
+   (exe の削除〈#285〉で `pnpm --filter @keiba/app build` は無くなった。実行しても何もせず exit 0 で終わるため、検証要件に書かない。)
 10. **サブエージェントの「稼働中」表示を稼働の証拠にしない。** 中断(API エラー・session limit 等)から
     再開を指示したときは、**再開指示が実際に届いたことと、その後に本当に動いていることを実物で確認して
     から**ユーザーに報告する。ハーネスの `still running` 表示は、中断したまま放置されている状態と
@@ -263,17 +260,12 @@ tdd-implementer とのやり取りを全てメインが中継していたため�
   スキップされるのが正しい(上記(f)。Issue #43 以降、CI は既定で非公開)。この局面では check ジョブと
   `ci.yml` の成功のみを確認すればよく、deploy ジョブの実行は確認対象にしない
 
-## exe 版のアーカイブ(ユーザー決定・2026-10-10。Issue #248)
-exe 版の公開(ビルドと `dev-latest` の更新)を止め、運用を web(cloud)に一本化した。以後の機能追加と統計モデルの
-見直しは web だけを対象にする。
-- **残したもの**: 最後の exe(`dev-latest` の `keiba-ev-tool-1.44.0-portable.exe`)。`packages/app` のコードとテスト
-  (web が `cloud/client`・`cloud/src` から import している)。`pnpm --filter @keiba/app build` も `ci.yml` と検証要件に残す。
-- **版数は 1.44.0(exe の最終版)で凍結した。以後は上げない**([`docs/versioning.md`](./docs/versioning.md))。
-  web の公開の区別はコミットと Issue 番号で行う。
-- **承認印 `[PUBLISH-APPROVED]` は、cloud の本番デプロイの関門として残る**(リテラル・「レビュー継続中」を含めば
-  デプロイしない AND 条件・`deploy-cloud.yml` の `if:` の式は不変)。
-- exe 専用のコード(electron-builder の設定・`scripts/release-gate.ts`・`scripts/artifact-gate.ts` ほか)は削除せず残してある。
-  CI からは呼ばれない。削除と、共有部分の core への移設は、必要になったら別の Issue で扱う。
+## exe 版のアーカイブと削除(ユーザー決定・2026-10-10 Issue #248、2026-10-13 Issue #285)
+exe 版の公開を止め(#248)、コードも削除した(#285)。運用は web(cloud)だけを対象にする。
+- **残したもの**: 最後の exe(GitHub Releases の `dev-latest` にある `keiba-ev-tool-1.44.0-portable.exe`)。exe のコードが最後に残っているコミットは **3c1664e**(`git checkout 3c1664e` で参照できる)。
+- web が使っていた共有部分は `packages/core/src/analysis/`・`packages/core/src/view/` へ移した(#286)。exe 専用のコード・scripts・依存は削除した(#287)。
+- **版数は 1.44.0(exe の最終版)で凍結した。以後は上げない**(`docs/versioning.md`)。web の公開の区別はコミットと Issue 番号で行う。
+- **承認印 `[PUBLISH-APPROVED]` は、cloud の本番デプロイの関門として残る**(リテラル・「レビュー継続中」を含めばデプロイしない AND 条件・`deploy-cloud.yml` の `if:` の式は不変)。
 
 ## その他
 - netkeibaへの実リクエストを伴う動作確認は、ユーザーに確認してから最小限の回数で行う

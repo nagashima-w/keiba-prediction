@@ -176,7 +176,7 @@ describe("切り出した新モジュールは better-sqlite3 に依存しない
     expect(offenders).toEqual([]);
   });
 
-  it("codec・型・CachedFetcher の3ファイルとも、exe の SQLite 実装(cache.ts・analysis-store.ts)を値で import しない", () => {
+  it("codec・型・CachedFetcher の3ファイルとも、SQLite 実装(cache.ts と、src に戻さない analysis-store.ts)を値で import しない", () => {
     for (const relative of NATIVE_FREE_MODULES) {
       const { visited } = closureOf(path.join(SRC, relative));
       const names = visited.map((f) => path.relative(SRC, f));
@@ -188,14 +188,14 @@ describe("切り出した新モジュールは better-sqlite3 に依存しない
 
 /**
  * Issue #176(#164-a): runAnalysis をクラウドに載せるための狭い入口 `@keiba/core/pipeline`(`src/pipeline.ts`)。
- * バレル(index.ts)は cache.ts・analysis-store.ts を巻き込む。この入口は、**型だけの import も含めて**
+ * バレル(index.ts)は cache.ts を巻き込む(#287 より前は analysis-store.ts も)。この入口は、**型だけの import も含めて**
  * better-sqlite3 に依存するモジュールを経由しない(cloud の型検査は CI で packages/core/node_modules が無く、型でも
  * better-sqlite3 を解決しに行くと失敗するため)。
  */
 describe("狭い入口 @keiba/core/pipeline(Issue #176)", () => {
   const entry = path.join(SRC, "pipeline.ts");
 
-  it("src/pipeline.ts が実在し、閉包(型だけの import も辿る)に better-sqlite3 が無い。バレル・cache.ts・analysis-store.ts も経由しない", () => {
+  it("src/pipeline.ts が実在し、閉包(型だけの import も辿る)に better-sqlite3 が無い。バレル・cache.ts・analysis-store.ts〈src に戻さないための禁止〉も経由しない", () => {
     expect(existsSync(entry), "src/pipeline.ts が存在する").toBe(true);
     const { visited, offenders } = closureOf(entry, { followTypes: true });
     expect(visited.length).toBeGreaterThan(10); // 前提: 閉包を実際に辿れている(空振りでない)
@@ -263,7 +263,7 @@ describe("狭い入口 @keiba/core/pipeline(Issue #176)", () => {
 describe("狭い入口 @keiba/core/llm(Issue #193)", () => {
   const entry = path.join(SRC, "llm.ts");
 
-  it("src/llm.ts が実在し、閉包(型だけの import も辿る)に better-sqlite3 が無い。バレル・cache.ts・analysis-store.ts も経由しない", () => {
+  it("src/llm.ts が実在し、閉包(型だけの import も辿る)に better-sqlite3 が無い。バレル・cache.ts・analysis-store.ts〈src に戻さないための禁止〉も経由しない", () => {
     expect(existsSync(entry), "src/llm.ts が存在する").toBe(true);
     const { visited, offenders } = closureOf(entry, { followTypes: true });
     expect(visited.length).toBeGreaterThan(5); // 前提: 閉包を実際に辿れている(空振りでない)
@@ -300,7 +300,7 @@ describe("狭い入口 @keiba/core/llm(Issue #193)", () => {
 describe("移行ファイルの形式 @keiba/core/ev/cloud-migration-format(Issue #215)", () => {
   const FORMAT = path.join("ev", "cloud-migration-format.ts");
 
-  it.each([FORMAT])("%s は実在し、閉包(型だけの import も辿る)に better-sqlite3・バレル・cache.ts・analysis-store.ts が無い", (relative) => {
+  it.each([FORMAT])("%s は実在し、閉包(型だけの import も辿る)に better-sqlite3・バレル・cache.ts・analysis-store.ts〈src に戻さないための禁止〉が無い", (relative) => {
     const entry = path.join(SRC, relative);
     expect(existsSync(entry), `${relative} が存在する`).toBe(true);
     const { visited, offenders } = closureOf(entry, { followTypes: true });

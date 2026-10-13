@@ -1,6 +1,8 @@
 /**
- * Issue #216(#167-B1)のテスト用: exe の書き出しの実物(packages/core/test/fixtures/cloud-migration-small.ndjson。
- * core の cloud-migration-golden.test.ts が、今の書き出しの経路との一致を固定している)を読む。
+ * Issue #216(#167-B1)のテスト用: exe の書き出しの実物(packages/core/test/fixtures/cloud-migration-small.ndjson)を読む。
+ * 以前は core の cloud-migration-golden.test.ts が、exe の書き出しの経路との一致を固定していた。exe の書き出しの経路は
+ * Issue #287 で削除したので、そのテストも削除した(いまこのファイルは、取り込み側のテストが使う固定の入力である。
+ * 書き出しの経路が最後に残っているコミットは 3c1664e)。
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

@@ -662,7 +662,8 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
     // mixedBetTypeLabel側も同じ日本語リテラルを返すことを、betTypeLabelとは独立に固定する
     // (両関数を比較する形〈旧実装〉だと両方が一緒にずれても緑のまま通ってしまう。boss指摘)。
     // 【Issue #286】上の mixedBetTypeLabel(exe の mixed-allocation-view.ts)側の8ラベルの固定は、
-    // packages/app/test/mixed-bet-type-label.test.ts へ分離した(core のテストから exe 専用の関数を import しないため。assert は弱めていない)。
+    // exe の packages/app/test/mixed-bet-type-label.test.ts へ分離した(core のテストから exe 専用の関数を import しないため。assert は弱めていない)。
+    // そのテストは、対象の exe の関数とともに #287 で削除した(3c1664e まで)。
   });
 });
 
