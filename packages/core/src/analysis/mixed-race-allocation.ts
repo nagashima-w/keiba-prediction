@@ -395,10 +395,17 @@ export function comboOddsAvailabilityFromDiagnostics(
   }
 }
 
-/** `MixedRaceAllocationView`とコード付き到達状態(`AllocationOutcomeCodes`)の組。 */
+/** `MixedRaceAllocationView`とコード付き到達状態(`AllocationOutcomeCodes`)の組(+ 候補の診断)。 */
 export interface MixedRaceAllocationOutcome {
   readonly view: MixedRaceAllocationView;
   readonly outcome: AllocationOutcomeCodes;
+  /**
+   * 候補ビルド(`buildMixedCandidates`)の診断値(Issue #296)。**候補を実際に作った経路だけ**に載る: mixed・`allocateGeneralBets` が throw した invalid(内側 catch)・
+   * D-2 条件③(`no-combo-candidates`。ビューは place-only に落ちるが、組合せの候補が 0 点だったことの記録として残す)。
+   * 候補を作る前に決まる経路(unset・yoso・条件①②のフォールバック)と、候補ビルド自体が throw した invalid(外側 catch)は undefined。
+   * D1 の列には対応しない(`AllocationOutcomeCodes` とは別。`combo-stats.ts` が券種ごとの点数に縮めて R2 のスナップショットに残す)。
+   */
+  readonly candidateDiagnostics?: MixedCandidateDiagnostics;
 }
 
 /** 判定に到達していない(null)ことを表す共通の空`AllocationOutcomeCodes`片。 */
@@ -421,12 +428,16 @@ function buildPlaceOnlyFallbackOutcome(
   settings: MixedAllocationSettings,
   fallbackReason: PlaceOnlyFallbackReason,
   comboOdds: AllocationOutcomeCodes["comboOdds"],
+  candidateDiagnostics?: MixedCandidateDiagnostics,
 ): MixedRaceAllocationOutcome {
   const view = buildRaceAllocation(race, settings);
+  // 候補の診断(Issue #296)。候補ビルドを走らせた経路(条件③)だけが渡す。無いときはキー自体を持たせない。
+  const diagnosticsPart = candidateDiagnostics === undefined ? {} : { candidateDiagnostics };
   if (view.kind === "unavailable") {
     return {
       view,
       outcome: { route: "unavailable", unavailableReason: view.reason, fallbackReason, skipReasonCode: null, comboOdds },
+      ...diagnosticsPart,
     };
   }
   if (view.kind === "computed") {
@@ -439,6 +450,7 @@ function buildPlaceOnlyFallbackOutcome(
         skipReasonCode: view.result.isSkip ? view.result.skipReasonCode : null,
         comboOdds,
       },
+      ...diagnosticsPart,
     };
   }
   // 契約違反(呼び出し元の前提が崩れている場合の防御)。上記JSDoc参照。
@@ -520,7 +532,7 @@ function buildMixedRaceAllocationCore(
       c.betType === "bracketQuinella",
   ).length;
   if (comboCandidateCount === 0) {
-    return buildPlaceOnlyFallbackOutcome(race, settings, "no-combo-candidates", comboOdds);
+    return buildPlaceOnlyFallbackOutcome(race, settings, "no-combo-candidates", comboOdds, mixed.diagnostics);
   }
 
   // 5. 混在配分を実際に計算する。
@@ -555,6 +567,7 @@ function buildMixedRaceAllocationCore(
         skipReasonCode: result.isSkip ? result.skipReasonCode : null,
         comboOdds,
       },
+      candidateDiagnostics: mixed.diagnostics,
     };
   } catch (e) {
     // AC17: allocateGeneralBetsのthrow(契約違反。異常な数値を含む候補等)を捕捉し、
@@ -564,6 +577,7 @@ function buildMixedRaceAllocationCore(
     return {
       view: { kind: "invalid", message: e instanceof Error ? e.message : String(e) },
       outcome: { route: "invalid", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOdds },
+      candidateDiagnostics: mixed.diagnostics,
     };
   }
 }

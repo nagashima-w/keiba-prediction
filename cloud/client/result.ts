@@ -18,6 +18,7 @@
  *    片方だけ・判定不能の注記(設定画面に触れていない)は exe のまま。差し替えは、exe から import した定数との一致で行う(文言を変えても追従する。exe の判定の二重持ちを避ける)
  *  - **3着内率の上位5頭**(Issue #240。「印の付いた馬」の直後。印が無くても出す): 馬番・馬名・率・印。**LLM が効いたとき(モデル ID があるとき)は補正後の3着内率(`adjustedProb`)で並べ、見出しは「AI補正後の3着内率 上位5頭」、
  *    効いていないときは3着内率(`prior`)で並べ、見出しは「3着内率 上位5頭」**(率がどちらの値かを見出しで取り違えない)。並びは率(生の数値)の降順 → 同率は馬番の昇順。5頭未満なら全頭。率が非有限の馬は除き、全頭が欠けていれば出さない
+ *  - **組合せの券種ごとの行**(Issue #296。`combos`): 「配分の提案」の節の最後(設定の行の後)。オッズの取得点数・EV プラスの点数・配分の点数。サーバが文章にしたものをそのまま出す(クライアントに文言を置かない)。無ければ何も出さない
  *  - **そのとき LLM が見た当日の馬場の値**(Issue #295。`baba`): 「3着内率の上位5頭」の後・「馬ごとの評価」の前の節。行はサーバがプロンプトと同じ整形にしたもの。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null(節ごと出さない)
  * ⚠️ このファイルが exe の renderer を import する唯一の層(`format.ts`・`allocation-proposal-view.ts`)。許可リストは `test/client-bundle.test.ts`。
  */
@@ -140,6 +141,8 @@ export interface AllocationSection {
   readonly notices: readonly string[];
   readonly bets: readonly AllocationBetRowView[];
   readonly settingsRows: readonly string[];
+  /** 組合せの券種ごとの行(Issue #296。サーバが組み立てた文章。設定の行の後ろに出す)。無ければ空配列。 */
+  readonly comboLines: readonly string[];
 }
 
 export interface ResultContent {
@@ -190,13 +193,14 @@ function detailNoteOf(detail: AnalysisDetail["detail"]): string | null {
 }
 
 function allocationOf(a: AnalysisDetail, readOnly: boolean): AllocationSection {
+  const comboLines = a.combos?.lines ?? [];
   if (a.allocation === null) {
-    return { kind: "none", notices: [NO_ALLOCATION_NOTE], bets: [], settingsRows: [] };
+    return { kind: "none", notices: [NO_ALLOCATION_NOTE], bets: [], settingsRows: [], comboLines };
   }
   const view = buildAllocationProposalView(a.allocation);
   // exe の「両方未設定」の注記(import した定数と一致するもの)だけを差し替える。片方だけ・判定不能・フォールバックなどの他の注記と、注記の並び・件数は変えない。
   const notices = view.notices.map((n) => (n === BET_ALLOCATION_UNSET_NOTE ? (readOnly ? UNSET_ALLOCATION_NOTE_VIEWER : UNSET_ALLOCATION_NOTE) : n));
-  return { kind: view.kind, notices, bets: view.bets, settingsRows: view.settingsRows };
+  return { kind: view.kind, notices, bets: view.bets, settingsRows: view.settingsRows, comboLines };
 }
 
 /** 強調材料・懸念事項の項目(空文字・空白だけは捨てる。文字列は加工しない)。 */

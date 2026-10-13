@@ -101,6 +101,7 @@ import {
   filterRaceDataBefore,
 } from "../scorer/snapshot-filter.js";
 import { buildRaceSnapshot } from "./analysis-export.js";
+import { buildComboStats, COMBO_STATS_SNAPSHOT_KEY, type ComboStats } from "./combo-stats.js";
 import { centralVenueInfoFromRaceId } from "../scraper/ids.js";
 import { normalizeDayBaba, selectDayBabaForCourse, type DayBaba } from "../analyzer/day-baba.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
@@ -864,6 +865,8 @@ export async function runAnalysis(
   // 行わない選択)のときは何もしない(record.allocationを省略=「未到達」のまま。#59 AC4)。
   const oddsStatus = race.odds.oddsStatus;
   let allocation: AnalysisAllocationRecord | undefined;
+  // 組合せの券種ごとの EV プラスの点数(Issue #296)。配分の候補を作った経路だけ非 null(R2 のスナップショットに残す)。
+  let comboStats: ComboStats | null = null;
   if (deps.allocationSettings !== null) {
     // EV閾値は evConfig から導出する単一ソース(#59 3節。allocationSettings には持たせない)。
     const evThreshold = (deps.evConfig ?? DEFAULT_EV_CONFIG).threshold;
@@ -908,6 +911,7 @@ export async function runAnalysis(
     try {
       const outcome = buildMixedRaceAllocationWithOutcome(raceForAllocation, mixedSettings);
       allocation = buildAllocationRecord(outcome, mixedSettings, oddsStatus);
+      comboStats = buildComboStats(outcome);
     } catch {
       // AC6: buildMixedRaceAllocationWithOutcome自体の例外(呼び出し元の前提が崩れている
       // 場合の防御。極めて稀)を捕捉し、分析本体の保存を失わせない(この分析はLLM呼び出し
@@ -961,7 +965,12 @@ export async function runAnalysis(
     // 取得したレース情報のスナップショット(Issue#10。エクスポート用、過去戦績は含めない)。
     // LLM使用有無に関わらず保存する(取得済みレース情報のため)。
     // 当日の馬場の値(Issue #295)は、LLM に渡した値(絞った後)と同じものを載せる(画面に出すのは「そのとき LLM が見た値」)。
-    raceSnapshot: { ...buildRaceSnapshot(race), ...(baba !== null ? { baba } : {}) },
+    // 組合せの券種ごとの EV プラスの点数(Issue #296)も同じ置き場所に残す(画面の「配分の提案」の券種ごとの行に使う)。
+    raceSnapshot: {
+      ...buildRaceSnapshot(race),
+      ...(baba !== null ? { baba } : {}),
+      ...(comboStats !== null ? { [COMBO_STATS_SNAPSHOT_KEY]: comboStats } : {}),
+    },
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;
       const prior = priorByUmaban.get(umaban)!;

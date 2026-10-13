@@ -78,6 +78,15 @@ export interface AnalysisBaba {
 const BABA_MAX_LINES = 12;
 const BABA_MAX_LINE_LENGTH = 600;
 
+/** 組合せの券種ごとの行(Issue #296)。サーバが組み立てた文章(取得の点数・EV プラスの点数・配分の点数)。 */
+export interface AnalysisCombos {
+  readonly lines: readonly string[];
+}
+
+/** `combos.lines` の上限(Issue #296)。券種は 6 つ・1 行は 100 字前後。想定外に大きい応答は読まない(null にする)。 */
+const COMBOS_MAX_LINES = 6;
+const COMBOS_MAX_LINE_LENGTH = 300;
+
 export interface AnalysisDetail {
   readonly id: number;
   readonly raceId: string;
@@ -109,6 +118,11 @@ export interface AnalysisDetail {
    * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
    */
   readonly baba?: AnalysisBaba | null;
+  /**
+   * 組合せの券種ごとの行(Issue #296。オッズの取得点数・EV プラスの点数・配分の点数)。組合せの記録が無い・詳細なし・キー無し(古いサーバの応答)・形が不正な値は null にする
+   * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
+   */
+  readonly combos?: AnalysisCombos | null;
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
   readonly detail: DetailState;
@@ -234,12 +248,12 @@ function parseAllocation(value: unknown): StoredAllocationView | null {
   };
 }
 
-/** `baba` を読む(Issue #295)。{ lines: 1〜12 行の文字列(各 600 字以内) } だけを受け、それ以外(キー無し・null・不正)は null。 */
-function parseBaba(value: unknown): AnalysisBaba | null {
+/** `{ lines: 1〜maxLines 行の文字列(各 maxLength 字以内) }` だけを受け、それ以外(キー無し・null・不正)は null。`baba`(Issue #295)と `combos`(Issue #296)が共有する。 */
+function parseLines(value: unknown, maxLines: number, maxLength: number): { readonly lines: readonly string[] } | null {
   if (!isRecord(value) || !Array.isArray(value["lines"])) return null;
   const lines = value["lines"] as unknown[];
-  if (lines.length < 1 || lines.length > BABA_MAX_LINES) return null;
-  if (!lines.every((l): l is string => typeof l === "string" && l.length <= BABA_MAX_LINE_LENGTH)) return null;
+  if (lines.length < 1 || lines.length > maxLines) return null;
+  if (!lines.every((l): l is string => typeof l === "string" && l.length <= maxLength)) return null;
   return { lines: [...lines] };
 }
 
@@ -288,7 +302,8 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     llmNote,
     llmCalls: parsedCalls,
     race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis },
-    baba: parseBaba(value["baba"]),
+    baba: parseLines(value["baba"], BABA_MAX_LINES, BABA_MAX_LINE_LENGTH),
+    combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
     horses: parsedHorses,
     allocation: parsedAllocation,
     detail,

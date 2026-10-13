@@ -9837,6 +9837,32 @@
               "conflictSamples": []
             }
           }
+        },
+        "comboStats": {
+          "wide": {
+            "positive": 58,
+            "judged": 120
+          },
+          "quinella": {
+            "positive": 64,
+            "judged": 120
+          },
+          "bracketQuinella": {
+            "positive": 17,
+            "judged": 36
+          },
+          "exacta": {
+            "positive": 124,
+            "judged": 240
+          },
+          "trio": {
+            "positive": 310,
+            "judged": 560
+          },
+          "trifecta": {
+            "positive": 1900,
+            "judged": 3360
+          }
         }
       },
       "horses": [
@@ -24658,6 +24684,32 @@
               "nullWinConflictCount": 0,
               "conflictSamples": []
             }
+          }
+        },
+        "comboStats": {
+          "wide": {
+            "positive": 58,
+            "judged": 120
+          },
+          "quinella": {
+            "positive": 65,
+            "judged": 120
+          },
+          "bracketQuinella": {
+            "positive": 17,
+            "judged": 36
+          },
+          "exacta": {
+            "positive": 124,
+            "judged": 240
+          },
+          "trio": {
+            "positive": 310,
+            "judged": 560
+          },
+          "trifecta": {
+            "positive": 1906,
+            "judged": 3360
           }
         }
       },

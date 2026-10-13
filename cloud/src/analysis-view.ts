@@ -21,6 +21,7 @@ import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimat
 import type { PlaceOddsBasis } from "../../packages/core/src/ev/place-odds-estimate";
 import type { AnalysisDetailResult, DetailStatus } from "./analysis-repository";
 import type { LlmCallRecord } from "./llm-calls";
+import { buildComboCountLines } from "./combo-counts-view";
 import { estimatePlaceOddsForRace } from "./place-odds-view";
 
 export interface AnalysisViewHorse {
@@ -114,6 +115,11 @@ export interface AnalysisViewBaba {
   readonly lines: readonly string[];
 }
 
+/** 組合せの券種ごとの行(Issue #296。「配分の提案」の下)。サーバが組み立てた文章の行だけ。 */
+export interface AnalysisViewCombos {
+  readonly lines: readonly string[];
+}
+
 export interface AnalysisView {
   readonly id: number;
   readonly raceId: string;
@@ -139,6 +145,12 @@ export interface AnalysisView {
    * (生の列・余計なキーは返さない)。**詳細が present でない・値が無い(地方・LLM を使わない分析・計測が無い日・Issue #295 より前の分析)・不正な値は null**。画面は null なら何も出さない。`buildAnalysisView` は常にキーを持つ(null を含む)。型で省略可なのは、日報の材料などこの項目を使わない呼び出し側の固定データ(Issue #295 より前の形)を壊さないため。
    */
   readonly baba?: AnalysisViewBaba | null;
+  /**
+   * 組合せの券種(ワイド・馬連・枠連・馬単・三連複・三連単)ごとの「オッズの取得点数・EV プラスの点数・配分の点数」の行(Issue #296)。raceSnapshot〈R2〉の `comboOdds`・各 `*Combo`・`comboStats` と
+   * D1 の配分から作る(`combo-counts-view.ts`)。**詳細が present でない・組合せの記録が無い〈取得 OFF の分析など〉は null**。Issue #296 より前の分析は EV プラスと理由の部分だけが無い(取得と配分の点数は出る)。
+   * 画面は null なら何も出さない。オッズの写像・診断の中身は返さない(行だけ)。`buildAnalysisView` は常にキーを持つ。型で省略可なのは、この項目を使わない呼び出し側の固定データを壊さないため。
+   */
+  readonly combos?: AnalysisViewCombos | null;
   readonly horses: readonly AnalysisViewHorse[];
   /** 配分(D1 の配分の行が無ければ null)。 */
   readonly allocation: AnalysisViewAllocation | null;
@@ -173,6 +185,12 @@ function babaViewOf(rawSnapshot: unknown): AnalysisViewBaba | null {
   }
   const baba = normalizeDayBaba((rawSnapshot as Record<string, unknown>)["baba"]);
   return baba === null ? null : { lines: dayBabaLines(baba) };
+}
+
+/** スナップショットと配分から、組合せの券種ごとの行を作る。材料が無ければ null。 */
+function combosViewOf(rawSnapshot: unknown, allocation: StoredAllocation | undefined): AnalysisViewCombos | null {
+  const lines = buildComboCountLines(rawSnapshot, allocation);
+  return lines === null ? null : { lines };
 }
 
 export function buildAnalysisView(result: AnalysisDetailResult, allocation: StoredAllocation | undefined): AnalysisView {
@@ -213,6 +231,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
     },
     // 詳細が present でないときは、スナップショットを一切使わない(null)。
     baba: detail === "present" ? babaViewOf(analysis.raceSnapshot) : null,
+    combos: detail === "present" ? combosViewOf(analysis.raceSnapshot, allocation) : null,
     horses: analysis.horses.map((h) => ({
       umaban: h.umaban,
       name: str(snapshot?.horsesByUmaban.get(h.umaban)?.name),

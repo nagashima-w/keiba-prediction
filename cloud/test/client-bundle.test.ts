@@ -132,6 +132,9 @@ describe("生成物のドリフトと決定性", () => {
     // 分析の画面の「AI に渡した当日の馬場」の節(API の `baba` の解釈 `api-analysis.ts`・表示用データ `result.ts`・VNode `view.ts`)・設定画面の注記を足した増分は +5,895(275,202 → 281,097)。
     // 計り方: a1b185d〈#294 の承認後〉の `cloud/src/client-bundle.generated.ts` の `CLIENT_JS` と今の生成物を、それぞれ文字列として取り出して `Buffer.byteLength` を取った。今の値は `pnpm run build:client` の出力〈「281097 バイト」〉。
     // 上限 282,200 までの余裕は **1,103 バイトまで減った**ので、次に画面や文言を足す Issue は、先に上限の引き上げを見込むこと。
+    // Issue #296: 上限は据え置き(収まった)。分析の画面の「配分の提案」の下の組合せの券種ごとの行(API の `combos` の解釈 `api-analysis.ts`・表示用データ `result.ts`・VNode `view.ts`)を足した増分は +222(281,097 → 281,319。
+    // `pnpm run build:client` の出力〈「281319 バイト」〉)。文言はサーバ(`src/combo-counts-view.ts`)で組み立ててクライアントには置かず〈日本語は `\u` エスケープで 1 文字 6 バイト〉、
+    // `parseBaba` を `baba` と `combos` で共有する `parseLines` に改めたので小さく収まった。余裕は **881 バイト**。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(282_200);
   });

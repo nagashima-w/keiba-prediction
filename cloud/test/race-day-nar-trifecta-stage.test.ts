@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
+import type { AnalysisRecord, StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
+import { buildComboCountLines } from "../src/combo-counts-view";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
 import { RaceDayCore, type AnalysisSink, type RaceDayDeps } from "../src/race-day-core";
@@ -607,5 +608,71 @@ describe("地方三連単の段階: 掃除のアラームで孤立した行を�
     h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('purge_due_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(h.clock.now));
     expect(await h.core.runNextStep()).toMatchObject({ kind: "idle" });
     expect(stageRows(h)).toEqual([]);
+  });
+});
+
+/** 保存した記録(`AnalysisRecord.allocation`)を、D1 から読み戻したときの形(`StoredAllocation`)に写す(読み出しの列だけ)。 */
+function storedAllocationOf(record: AnalysisRecord): StoredAllocation {
+  const { meta, bets } = record.allocation!;
+  return {
+    route: meta.route,
+    unavailableReason: meta.unavailableReason,
+    fallbackReason: meta.fallbackReason,
+    skipReasonCode: meta.skipReasonCode,
+    bankroll: meta.bankroll,
+    perRaceCap: meta.perRaceCap,
+    kellyFraction: meta.kellyFraction,
+    evThreshold: meta.evThreshold,
+    includeComboOdds: meta.includeComboOdds,
+    includeWide: meta.includeWide,
+    includeTrio: meta.includeTrio,
+    includeQuinella: meta.includeQuinella,
+    includeExacta: meta.includeExacta,
+    includeTrifecta: meta.includeTrifecta,
+    includeBracketQuinella: meta.includeBracketQuinella,
+    betUnit: meta.betUnit,
+    oddsStatus: meta.oddsStatus,
+    bets: bets.map((b) => ({ betType: b.betType, comboKey: b.comboKey, stake: b.stake, odds: b.odds, ev: b.ev })),
+  };
+}
+
+describe("地方三連単の結果が、スナップショットと画面の行に出る(Issue #296)", () => {
+  it("12頭: 全軸が取れた三連単は、スナップショットの comboOdds.trifecta が available で、「オッズ 1,320 点取得」(12×11×10)と EV プラス・配分の点数の行になる", async () => {
+    const h = harness();
+    h.gate.body = narBody(12);
+    await scheduleNar(h);
+    await stepsUntilDone(h);
+    const record = h.sink.saved[0]!;
+    const snapshot = record.raceSnapshot as { comboOdds: { trifecta: { state: string } }; comboStats: { trifecta: { positive: number; judged: number } } };
+    expect(snapshot.comboOdds.trifecta.state).toBe("available");
+    expect(snapshot.comboStats.trifecta.judged).toBe(1320); // 前提: 全 1,320 点を判定できた
+    const allocated = trifectaBets(record).length;
+    expect(allocated).toBeGreaterThan(0);
+
+    const lines = buildComboCountLines(record.raceSnapshot, storedAllocationOf(record))!;
+    const line = lines.find((l) => l.startsWith("三連単:"))!;
+    expect(line).toBe(`三連単: オッズ 1,320 点取得・EV プラス ${snapshot.comboStats.trifecta.positive.toLocaleString("en-US")} 点・配分 ${allocated} 点`);
+    // 地方でも、三連単以外の券種(取得できたもの・発売なしのもの)の行が並ぶ
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("1軸が取れなかった(404)三連単は、「オッズ 1,210/1,320 点取得(取得できなかった軸 1 本)」になる(#283 の段階の失敗が画面で分かる)", async () => {
+    const h = harness();
+    const body = narBody(12);
+    h.gate.body = (url) => (isB8(url) && jikuOf(url) === 7 ? null : body(url));
+    await scheduleNar(h);
+    await stepsUntilDone(h);
+    const record = h.sink.saved[0]!;
+    const line = buildComboCountLines(record.raceSnapshot, storedAllocationOf(record))!.find((l) => l.startsWith("三連単:"))!;
+    expect(line).toContain("オッズ 1,210/1,320 点取得(取得できなかった軸 1 本)");
+  });
+
+  it("組合せ OFF の分析は、comboOdds が無いので行が出ない(null)", async () => {
+    const h = harness({ settings: { ...BASE, includeComboOdds: false } });
+    h.gate.body = narBody(12);
+    await scheduleNar(h);
+    await stepsUntilDone(h);
+    const record = h.sink.saved[0]!;
+    expect(buildComboCountLines(record.raceSnapshot, storedAllocationOf(record))).toBeNull();
   });
 });

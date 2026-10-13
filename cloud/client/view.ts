@@ -389,6 +389,8 @@ function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
             ),
           ]),
       ...(allocation.settingsRows.length === 0 ? [] : [h("ul", { class: "settings" }, allocation.settingsRows.map((r) => h("li", {}, [h("small", {}, [r])])))]),
+      // 組合せの券種ごとの行(Issue #296)。設定の行の後ろ。サーバの文章(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
+      ...(allocation.comboLines.length === 0 ? [] : [h("ul", { class: "settings combo-counts" }, allocation.comboLines.map((r) => h("li", {}, [h("small", {}, [r])])))]),
     ]),
   ];
 }
