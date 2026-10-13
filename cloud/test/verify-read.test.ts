@@ -11,7 +11,7 @@ import { buildVerifySource, countStartTimeGaps, VERIFY_READ_SQL, type VerifyAnal
  * (cloud は better-sqlite3 を持たない)。
  */
 const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
-const FILES = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0013_result_scratched.sql"]; // 0013 は race_results.scratched(Issue #72。VERIFY_READ_SQL が読む)。0010〜0012 はこのテストが読む表に関わらない
+const FILES = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0013_result_scratched.sql", "0016_result_wakuban.sql"]; // 0013 は race_results.scratched(Issue #72)、0016 は race_results.wakuban(Issue #269)。どちらも VERIFY_READ_SQL が読む。0010〜0012・0014・0015 はこのテストが読む表に関わらない
 
 function openDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");

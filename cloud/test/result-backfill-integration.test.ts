@@ -194,7 +194,7 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
     expect([...w.days.keys()]).toEqual(["20261008"]);
     const rows = (await local.db.prepare("SELECT * FROM race_results WHERE race_id = ? ORDER BY umaban").bind(need).all<Record<string, unknown>>()).results;
     // 保存済みの 1 行(馬番 13)は、7 列がそのまま(払戻 999・通過順・上がりを上書きしない)で、オッズ・人気だけが埋まる(#72 の scratched は、この行が着順ありなので補完の対象外=NULL のまま)。ページの他の 15 頭の行は作らない(UPDATE だけ)。
-    expect(rows).toEqual([{ race_id: need, umaban: 13, finish_position: 1, place_payout: 111, win_payout: 999, passing_json: "[7,7]", last3f: 12.3, win_odds: 5.4, ninki: 1, scratched: null }]);
+    expect(rows).toEqual([{ race_id: need, umaban: 13, finish_position: 1, place_payout: 111, win_payout: 999, passing_json: "[7,7]", last3f: 12.3, win_odds: 5.4, ninki: 1, scratched: null, wakuban: null }]); // 補完は枠番に触れない(NULL のまま。Issue #269 の旧行の補完は今回は作らない)
     expect(await savedRaceIds()).toEqual([need, alreadyFilled, idOf(5, 1), idOf(10, 1)].sort());
     const filled = await local.db.prepare("SELECT win_odds, ninki FROM race_results WHERE race_id = ?").bind(alreadyFilled).first<{ win_odds: number; ninki: number }>();
     expect(filled).toEqual({ win_odds: 2.0, ninki: 1 }); // オッズ済みは触れない

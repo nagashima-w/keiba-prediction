@@ -5,7 +5,7 @@
  *  - **返還(Issue #278。#72 の検証画面と同じ規則)**: 取消・除外の馬(`ResultHorse.scratched === true`)を構成に含む買い目は、全額返還される。払戻 = 賭け金とし、的中でもはずれでもない第3の状態(`refund`)にする。
  *    構成馬は `comboKey` を core の `parseComboOddsKey` で戻して判定する(馬単・三連単の順序付きキーも集合として見る。復元できないキーは返還にせず従来の判定へ進む)。
  *    払戻の取込状態の判定より**前**に行う(返還は払戻表に依らず確定するので、未取込でも判定不能にしない)。
- *    **枠連は返還にしない**(`comboKey` が枠番の組で、馬番→枠番の対応を保存していない。#269)。中止・失格・降着(`scratched` が false)と、`scratched` が未記録(旧い行)の着順なしは、従来どおりはずれ(#270 で旧行を補完するまで)
+ *    **枠連は構成馬ではなく枠ごとの出走馬の残りで決める**(Issue #269。`comboKey` が枠番の組。検証画面と同じ関数 `isBracketQuinellaRefund`。枠番か `scratched` が未記録の行があるレースは判定しない)。中止・失格・降着(`scratched` が false)と、`scratched` が未記録(旧い行)の着順なしは、従来どおりはずれ(#270 で旧行を補完するまで)
  *  - 単勝・複勝(1 頭 = 1 買い目): そのレースに該当する払戻が 1 頭にも無ければ(取込状態ゲート)判定不能。あれば、馬番のキーで払戻を引く(払戻 = 100 円あたりの払戻 × 賭け金 / 100)
  *  - ワイド・3 連複・馬連・馬単・三連単・枠連: 券種の取込印が無い、または払戻が 0 件なら判定不能。あれば、組合せのキーの文字列の完全一致で的中
  *    (買い目側のキーも払戻側のキーも、保存時に券種別の順序方針で正規化済みのものをそのまま比べる。馬単の逆順は別の買い目)
@@ -14,6 +14,7 @@
  * `test/daily-report-bets.test.ts` が、同じ入力を `computeVerifyReport` の `proposedBet` に通して突き合わせて固定している。**
  */
 
+import { buildBracketFrameCensus, isBracketQuinellaRefund } from "../../packages/core/src/ev/bracket-quinella-refund.js";
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key.js";
 
 /** 結果の 1 頭分(D1 の `race_results`)。払戻は 100 円あたり。 */
@@ -27,6 +28,11 @@ export interface ResultHorse {
    * **未記録(旧い行。NULL)はキーを付けない**(未記録を false にしない。取消か中止か分からない着順なしは、従来どおりはずれ)。
    */
   readonly scratched?: boolean;
+  /**
+   * 枠番(Issue #269。D1 の `race_results.wakuban`、1〜8)。枠連の買い目の返還の判定に使う。**未記録(旧い行。NULL)はキーを付けない**。
+   * 1頭でも未記録・範囲外の馬がいるレースは、枠連の返還を判定しない(検証画面と同じ関数 `isBracketQuinellaRefund` を使う)。
+   */
+  readonly wakuban?: number;
 }
 
 /** 組合せ券種 1 つぶんの払戻(D1 の `race_combo_payouts`。取込印が無ければ `imported: false`)。 */
@@ -110,6 +116,8 @@ export function judgeBets(bets: readonly DayBet[], result: RaceResultData | unde
   }
   // 取消・除外の馬番。`scratched === true` だけが対象(未記録・false の着順なしは含めない)。
   const scratchedUmabans = new Set(result.horses.filter((h) => h.scratched === true).map((h) => h.umaban));
+  // 枠連の返還の判定に使う枠ごとの出走馬の集計(Issue #269)。取消・除外の馬がいないレースは返還が起きないので作らない。枠番か scratched が未記録の行があれば null。
+  const bracketCensus = scratchedUmabans.size > 0 ? buildBracketFrameCensus(result.horses) : null;
   const hasWin = result.horses.some((h) => h.winPayout !== null);
   const hasPlace = result.horses.some((h) => h.placePayout !== null);
   const winByKey = new Map<string, number>();
@@ -123,8 +131,14 @@ export function judgeBets(bets: readonly DayBet[], result: RaceResultData | unde
     }
   }
   return bets.map((bet): BetOutcome => {
-    // 返還(Issue #278): 払戻の取込状態の判定より前。枠連は対象外(キーが枠番)。
-    if (bet.betType !== "bracketQuinella" && scratchedUmabans.size > 0 && (COMBO_BET_TYPES.has(bet.betType) || bet.betType === "win" || bet.betType === "place")) {
+    // 返還(Issue #278): 払戻の取込状態の判定より前。
+    // 枠連(Issue #269)は comboKey が馬番ではなく枠番の組なので、構成馬では決まらない。枠ごとの出走馬の残りで決める
+    // (検証画面の配分ベースの回収率と同じ関数 `isBracketQuinellaRefund`。枠番が未記録の旧い行があるレースは `bracketCensus` が null で、返還にしない)。
+    if (bet.betType === "bracketQuinella") {
+      if (isBracketQuinellaRefund(bet.comboKey, bracketCensus)) {
+        return { ...bet, status: "refund", payout: bet.stake };
+      }
+    } else if (scratchedUmabans.size > 0 && (COMBO_BET_TYPES.has(bet.betType) || bet.betType === "win" || bet.betType === "place")) {
       const umabans = parseComboOddsKey(bet.comboKey);
       if (umabans !== null && umabans.some((u) => scratchedUmabans.has(u))) {
         return { ...bet, status: "refund", payout: bet.stake };

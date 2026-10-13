@@ -48,7 +48,7 @@ export const VERIFY_READ_SQL = {
   allocationMeta: `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode FROM analysis_allocation_meta`,
   bets: `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake
   FROM analysis_bets ORDER BY analysis_id, bet_type, combo_key`,
-  results: `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched
+  results: `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban
   FROM race_results ORDER BY race_id, umaban`,
   comboPayouts: `SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout
   FROM race_combo_payouts ORDER BY race_id, bet_type, combo_key`,
@@ -81,6 +81,8 @@ export interface VerifyResultRow {
   readonly winPayout: number | null;
   /** 取消・除外か(migration 0013。Issue #72)。1=取消・除外、0=記録済みで取消・除外でない、NULL=記録なし(旧い行・移行した行)。 */
   readonly scratched?: number | null;
+  /** 枠番(migration 0016。Issue #269)。1〜8、NULL=記録なし(旧い行・移行した行)。 */
+  readonly wakuban?: number | null;
 }
 export interface VerifyComboPayoutRow {
   readonly raceId: string;
@@ -137,6 +139,8 @@ export function buildVerifySource(rows: VerifyReadRows): VerifyDataSource {
         winPayout: r.winPayout,
         // 1 → true、0 → false、NULL(記録なし)はキー自体を付けない(未記録を false にしない。core の `RaceResultEntry.scratched` のJSDoc参照)。
         ...(r.scratched === null || r.scratched === undefined ? {} : { scratched: r.scratched === 1 }),
+        // 枠番(Issue #269)。NULL(記録なし)はキー自体を付けない(`scratched` と同じ。枠連の返還は、枠番が1頭でも欠けるレースを判定しない)。
+        ...(r.wakuban === null || r.wakuban === undefined ? {} : { wakuban: r.wakuban }),
       })),
     );
   }

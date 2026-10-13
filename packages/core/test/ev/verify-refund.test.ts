@@ -76,7 +76,7 @@ function results(overrides: Partial<Record<number, Partial<RaceResultEntry>>> = 
   return base.map((r) => ({ ...r, ...(overrides[r.umaban] ?? {}) }));
 }
 
-type BetType = "place" | "win" | "wide" | "trio" | "quinella" | "exacta" | "trifecta";
+type BetType = "place" | "win" | "wide" | "trio" | "quinella" | "exacta" | "trifecta" | "bracketQuinella";
 
 interface Bet {
   readonly betType: BetType;
@@ -116,6 +116,8 @@ function run(bets: readonly Bet[], res: RaceResultEntry[], opts: { importCombo?:
           quinella: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 800 }] },
           exacta: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 1500 }] },
           trifecta: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 9000 }] },
+          // 枠連(Issue #269)。umabans は馬番ではなく枠番。
+          bracketQuinella: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 600 }] },
         },
   );
   const report = computeVerifyReport(sourceWith(store, { [RACE]: res }));
@@ -296,54 +298,140 @@ describe("取消・除外の馬への買い目は返還として数える(Issue 
   });
 });
 
-describe("枠連は返還を判定しない(Issue #72。別 Issue で扱う)", () => {
-  it("枠連の買い目は、構成の枠に取消馬がいても従来どおり(不的中)で、返還の件数に入らない", () => {
-    const store = new AnalysisStore();
-    store.saveAnalysis({
-      raceId: RACE,
-      analyzedAt: "t",
-      horses: [horse(1)],
-      allocation: {
-        meta: meta(),
-        bets: [
-          // 枠番 5-8 の組。8頭立てなので馬番5が取消なら枠5の全馬が取消(JRA の規定では返還になるが、今回は判定しない)。
-          { betType: "bracketQuinella", comboKey: buildAllocationBetComboKey("bracketQuinella", [5, 8]), stake: 400, odds: 1, ev: 1 },
-        ],
-      },
+/**
+ * 枠連(Issue #269。#72 の残り)。comboKey は馬番ではなく枠番の組。返還かどうかは、結果の各馬の枠番(`wakuban`)と
+ * 取消・除外の印(`scratched`)から、`bracket-quinella-refund.ts` の純関数が決める(規則は bracket-quinella-refund.test.ts が表で固定している)。
+ * ここは `verify.ts` への配線(返還の件数・金額・払戻表の取込状態との順序・旧行の扱い)を固定する。
+ */
+describe("枠連の返還(Issue #269)", () => {
+  /** 8頭立て(各枠1頭。馬番 = 枠番)。馬番5が取消・除外なら枠5の出走馬が尽きる。 */
+  function eightByFrame(overrides: Partial<Record<number, Partial<RaceResultEntry>>> = {}): RaceResultEntry[] {
+    return results(overrides).map((r) => ({ ...r, wakuban: r.umaban, scratched: false, ...(overrides[r.umaban] ?? {}) }));
+  }
+
+  /** 16頭立て(各枠2頭。枠 = ceil(馬番/2))。馬番5・6が枠3。 */
+  function sixteen(overrides: Partial<Record<number, Partial<RaceResultEntry>>> = {}): RaceResultEntry[] {
+    return Array.from({ length: 16 }, (_, i) => {
+      const umaban = i + 1;
+      return { umaban, finishPosition: umaban, placePayout: null, winPayout: null, wakuban: Math.ceil(umaban / 2), scratched: false, ...(overrides[umaban] ?? {}) };
     });
-    store.saveResult(RACE, [{ umaban: 1, finishPosition: 1 }], null, { bracketQuinella: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 600 }] } });
-    const p = computeVerifyReport(sourceWith(store, { [RACE]: results({ 5: { scratched: true } }) })).proposedBet;
-    store.close();
-    expect(p.bracketQuinella).toEqual({
-      betCount: 1,
-      totalStake: 400,
-      totalReturn: 0,
-      recoveryRate: 0,
-      unjudgedCount: 0,
-      refundedCount: 0,
-      refundedStake: 0,
-      flatStake: 100,
-      flatReturn: 0,
-      flatRecoveryRate: 0,
+  }
+
+  const REFUND_400 = {
+    betCount: 1,
+    totalStake: 400,
+    totalReturn: 400,
+    recoveryRate: 1,
+    unjudgedCount: 0,
+    refundedCount: 1,
+    refundedStake: 400,
+    flatStake: 100,
+    flatReturn: 100,
+    flatRecoveryRate: 1,
+  };
+
+  it("枠の出走馬が尽きる(8頭立てで馬番5が取消 = 枠5が空)と、枠5を含む組は返還: 賭け金が払戻に含まれ、返還の件数・金額に出る", () => {
+    const res = eightByFrame({ 5: { scratched: true } });
+    // 前提: 枠5の馬は馬番5の1頭だけで、その1頭が取消・除外
+    expect(res.filter((r) => r.wakuban === 5).map((r) => [r.umaban, r.scratched])).toEqual([[5, true]]);
+    const p = run([{ betType: "bracketQuinella", umabans: [5, 8], stake: 400 }], res);
+    expect(p.bracketQuinella).toEqual(REFUND_400);
+  });
+
+  it("返還の判定は払戻表の取込状態に依らない(枠連の払戻が未取込でも返還。取消を含まない買い目は従来どおり判定不能)", () => {
+    const p = run(
+      [
+        { betType: "bracketQuinella", umabans: [5, 8], stake: 400 },
+        { betType: "bracketQuinella", umabans: [6, 7], stake: 100 },
+      ],
+      eightByFrame({ 5: { scratched: true } }),
+      { importCombo: false },
+    );
+    expect(p.bracketQuinella).toEqual({ ...REFUND_400, unjudgedCount: 1 });
+  });
+
+  it("枠の出走馬が尽きていない組は返還しない(従来どおり不的中)。尽きた枠を含まない買い目も同じ", () => {
+    const p = run([{ betType: "bracketQuinella", umabans: [6, 7], stake: 400 }], eightByFrame({ 5: { scratched: true } }));
+    expect(p.bracketQuinella).toMatchObject({ betCount: 1, totalStake: 400, totalReturn: 0, refundedCount: 0, refundedStake: 0 });
+  });
+
+  it("取消のない枠の的中は通常の払戻(枠1-2、600円 × 4 = 2400円)、返還と並ぶ", () => {
+    const p = run(
+      [
+        { betType: "bracketQuinella", umabans: [1, 2], stake: 400 }, // 的中
+        { betType: "bracketQuinella", umabans: [5, 8], stake: 400 }, // 返還
+        { betType: "bracketQuinella", umabans: [6, 7], stake: 200 }, // 不的中
+      ],
+      eightByFrame({ 5: { scratched: true } }),
+    );
+    expect(p.bracketQuinella).toMatchObject({ betCount: 3, totalStake: 1000, totalReturn: 2400 + 400, refundedCount: 1, refundedStake: 400 });
+  });
+
+  it("1枠2頭で1頭だけ取消(16頭立ての馬番5。枠3は6番が残る): ゾロ目の枠3-3だけ返還。枠3を含む別の組・馬番5を枠番と取り違えた組(枠5-6)は返還しない", () => {
+    const res = sixteen({ 5: { scratched: true, finishPosition: null } });
+    expect(res.filter((r) => r.wakuban === 3).map((r) => [r.umaban, r.scratched])).toEqual([
+      [5, true],
+      [6, false],
+    ]);
+    const p = run(
+      [
+        { betType: "bracketQuinella", umabans: [3, 3], stake: 400 }, // ゾロ目: 返還
+        { betType: "bracketQuinella", umabans: [3, 4], stake: 100 }, // 枠3に6番が残る: 返還なし
+        { betType: "bracketQuinella", umabans: [5, 6], stake: 100 }, // 枠5・6(馬番9〜12)。馬番5の取消とは無関係
+      ],
+      res,
+    );
+    expect(p.bracketQuinella).toMatchObject({ betCount: 3, totalStake: 600, totalReturn: 400, refundedCount: 1, refundedStake: 400 });
+  });
+
+  it("1枠2頭で2頭とも取消: 枠3を含む別の組も返還になる", () => {
+    const res = sixteen({ 5: { scratched: true, finishPosition: null }, 6: { scratched: true, finishPosition: null } });
+    const p = run([{ betType: "bracketQuinella", umabans: [3, 7], stake: 400 }], res);
+    expect(p.bracketQuinella).toEqual(REFUND_400);
+  });
+
+  it("中止・失格(finishPosition=null、scratched=false)は返還にしない", () => {
+    const res = eightByFrame({ 5: { scratched: false, finishPosition: null } });
+    expect(res.find((r) => r.umaban === 5)).toMatchObject({ finishPosition: null, scratched: false });
+    const p = run([{ betType: "bracketQuinella", umabans: [5, 8], stake: 400 }], res);
+    expect(p.bracketQuinella).toMatchObject({ betCount: 1, totalReturn: 0, refundedCount: 0 });
+  });
+
+  describe("判定しない(従来どおり不的中。旧い行の保守的な扱い)", () => {
+    const betsOn58 = [{ betType: "bracketQuinella" as const, umabans: [5, 8], stake: 400 }];
+    const NOT_REFUNDED = { betCount: 1, totalStake: 400, totalReturn: 0, recoveryRate: 0, unjudgedCount: 0, refundedCount: 0, refundedStake: 0, flatStake: 100, flatReturn: 0, flatRecoveryRate: 0 };
+
+    it("枠番を保存する前の旧い行(wakuban が無い。#72 当時と同じ入力): 取消馬がいても返還にしない", () => {
+      const res = results({ 5: { scratched: true } });
+      expect(res.every((r) => r.wakuban === undefined)).toBe(true);
+      expect(run(betsOn58, res).bracketQuinella).toEqual(NOT_REFUNDED);
+    });
+
+    it("1頭でも wakuban が null / 範囲外ならレース全体を判定しない(返還になるはずの構成から1行だけ崩す)", () => {
+      expect(run(betsOn58, eightByFrame({ 5: { scratched: true } })).bracketQuinella).toEqual(REFUND_400); // 崩す前は返還
+      expect(run(betsOn58, eightByFrame({ 5: { scratched: true }, 1: { wakuban: null } })).bracketQuinella).toEqual(NOT_REFUNDED);
+      expect(run(betsOn58, eightByFrame({ 5: { scratched: true }, 1: { wakuban: 9 } })).bracketQuinella).toEqual(NOT_REFUNDED);
+    });
+
+    it("1頭でも scratched が未記録ならレース全体を判定しない", () => {
+      const res = eightByFrame({ 5: { scratched: true } }).map((r) => (r.umaban === 1 ? { umaban: r.umaban, finishPosition: r.finishPosition, placePayout: r.placePayout, winPayout: r.winPayout, wakuban: r.wakuban } : r));
+      expect(res.find((r) => r.umaban === 1)!.scratched).toBeUndefined();
+      expect(run(betsOn58, res).bracketQuinella).toEqual(NOT_REFUNDED);
     });
   });
 
-  it("枠連の comboKey は馬番ではなく枠番: 枠番5を含む買い目を、馬番5の取消と取り違えて返還にしない(馬番側の判定の対象外であることの確認)", () => {
-    // 馬番5が取消、買い目は枠 [5,6]。枠番として5を含むが、馬番5の取消とは無関係なので、返還の判定に使ってはならない。
-    const store = new AnalysisStore();
-    store.saveAnalysis({
-      raceId: RACE,
-      analyzedAt: "t",
-      horses: [horse(1)],
-      allocation: {
-        meta: meta(),
-        bets: [{ betType: "bracketQuinella", comboKey: buildAllocationBetComboKey("bracketQuinella", [5, 6]), stake: 400, odds: 1, ev: 1 }],
-      },
-    });
-    store.saveResult(RACE, [{ umaban: 1, finishPosition: 1 }], null, { bracketQuinella: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 600 }] } });
-    const p = computeVerifyReport(sourceWith(store, { [RACE]: results({ 5: { scratched: true } }) })).proposedBet;
-    store.close();
-    expect(p.bracketQuinella.refundedCount).toBe(0);
-    expect(p.bracketQuinella.totalReturn).toBe(0);
+  it("overall の返還は、枠連の返還の件数・金額を含む(8券種の内訳の和 = overall)", () => {
+    const p = run(
+      [
+        { betType: "bracketQuinella", umabans: [5, 8], stake: 400 },
+        { betType: "place", umabans: [5], stake: 500 },
+      ],
+      eightByFrame({ 5: { scratched: true } }),
+    );
+    expect(p.bracketQuinella.refundedCount).toBe(1);
+    expect(p.overall).toMatchObject({ betCount: 2, totalStake: 900, totalReturn: 900, refundedCount: 2, refundedStake: 900 });
+    const types = [p.place, p.win, p.wide, p.trio, p.quinella, p.exacta, p.trifecta, p.bracketQuinella];
+    expect(types.reduce((a, s) => a + s.refundedCount, 0)).toBe(p.overall.refundedCount);
+    expect(types.reduce((a, s) => a + s.refundedStake, 0)).toBe(p.overall.refundedStake);
   });
 });

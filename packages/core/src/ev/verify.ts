@@ -204,6 +204,7 @@ import {
   DEFAULT_VERIFY_BIN_COUNT,
 } from "./calibration-bins.js";
 import { isUsableOdds } from "./allocation-primitives.js";
+import { buildBracketFrameCensus, isBracketQuinellaRefund } from "./bracket-quinella-refund.js";
 import { computeBrierScore, type BrierObservation } from "./probability-quality-metrics.js";
 import { classifyLookaheadSuspicion } from "./lookahead-suspicion.js";
 
@@ -407,7 +408,7 @@ export interface ProposedBetTypeSummary {
   /**
    * 取消・除外の馬を構成に含むため返還として数えた買い目の点数(Issue #72)。`betCount` に**含まれる**
    * (賭け金は分母に残り、`totalReturn` には賭け金そのものを足す)。的中でも不的中でもない第3の状態で、
-   * 内訳の件数としてだけ持つ(的中数・的中率はこの系に無い)。枠連は返還を判定しないので常に0。
+   * 内訳の件数としてだけ持つ(的中数・的中率はこの系に無い)。枠連は、枠番が記録されたレースだけ返還を判定する(Issue #269)。
    */
   readonly refundedCount: number;
   /** 返還として数えた買い目の賭け金合計(円)。`totalStake` に含まれ、同額が `totalReturn` にも含まれる。 */
@@ -1607,9 +1608,11 @@ function finalizeProposedBetOverall(
  *   判定不能にしない。
  * - 中止・失格・降着は返還されない(`scratched` を付けない)。`scratched` が未記録(旧い行・exe から移行した行)の
  *   `finishPosition=null` は取消か中止か判別できないので、従来どおり不的中として数える(保守的な下振れ)。
- * - **枠連(bracketQuinella)は返還を判定しない(別 Issue)**。`comboKey` が枠番の組で、JRA の規定では「枠の出走馬が
- *   尽きれば、その枠を含む組が返還」「ゾロ目は、その枠に出走馬が1頭だけ残れば返還」「2頭残れば返還なし」
- *   となり、馬番→枠番の対応が要るが保存していない。取消を含む枠連の買い目は従来どおり不的中として数える。
+ * - **枠連(bracketQuinella。Issue #269)**: `comboKey` が枠番の組なので構成馬では決まらない。JRA の規定では「枠の出走馬が
+ *   尽きれば、その枠を含む組が返還」「ゾロ目は、その枠の出走馬が1頭だけ残れば返還」「2頭残れば返還なし」。結果の各馬の
+ *   枠番(`RaceResultEntry.wakuban`)で枠ごとに数え、`isBracketQuinellaRefund`(`bracket-quinella-refund.ts`。規定の原文と出典を持つ)が決める。
+ *   日報の `judgeBets` も同じ関数を使う。枠番か `scratched` が未記録の行(旧い行・exe から移行した行)が1頭でもあるレースは判定せず、
+ *   従来どおり不的中として数える(頭数から枠番を導くことはしない)。
  * 【同じ買い目に一律100円(Issue #16)】判定できた買い目(`betCount`に数えるもの。的中・不的中・返還)の賭け金だけを
  * {@link FLAT_COMPARISON_STAKE}円に置き換えた賭け金・払戻を、`flatStake`/`flatReturn`に持つ。計上は`recordJudgedBet`の1か所に
  * 集め、払戻の式(`payoutForStake`)も配分ベースと一律で共有する(集合と式が構造的に一致する)。判定不能・未知券種は数えない。
@@ -1692,6 +1695,10 @@ function computeProposedBetReport(
       }
     }
 
+    // 枠連の返還の判定に使う、枠ごとの出走馬の集計(Issue #269)。取消・除外の馬がいないレースは返還が起きないので作らない。
+    // 枠番か scratched が未記録の行があるレースは null(判定しない)。
+    const bracketCensus = scratchedUmabans.size > 0 ? buildBracketFrameCensus(results) : null;
+
     // 複勝払戻の逆引きマップ(規則Hのracehasplacepayoutゲートを転用)。
     const racePayoutAvailable = raceHasPlacePayout(results);
     const placePayoutByComboKey = new Map<string, number>();
@@ -1745,10 +1752,15 @@ function computeProposedBetReport(
 
       // 返還(Issue #72): 取消・除外の馬を構成に含む買い目は、馬券が全額返還される。払戻表の取込状態
       // (規則U)の判定より**前**に置く: 返還は払戻表に依らず確定するので、払戻が未取込でも判定不能にしない。
-      // 枠連(bracketQuinella)は対象外: comboKey が馬番ではなく枠番で、枠の出走馬が尽きたか(JRA の規定では
-      // 返還)・ゾロ目で1頭だけ残ったか(ゾロ目のみ返還)の判定に馬番→枠番の対応が要るが、保存していない。
-      // 枠連は従来どおり不的中として数える(別 Issue)。
-      if (bet.betType !== "bracketQuinella" && scratchedUmabans.size > 0) {
+      // 枠連(bracketQuinella。Issue #269)は comboKey が馬番ではなく枠番の組なので、構成馬では決まらない。
+      // 枠ごとの出走馬の残りで決める(`isBracketQuinellaRefund`。日報の `judgeBets` と同じ関数を共有する)。
+      // 枠番が未記録の旧い行があるレースは `bracketCensus` が null で、返還にせず従来どおり不的中として数える。
+      if (bet.betType === "bracketQuinella") {
+        if (isBracketQuinellaRefund(bet.comboKey, bracketCensus)) {
+          recordJudgedBet(accumulator, bet.stake, undefined, true);
+          continue;
+        }
+      } else if (scratchedUmabans.size > 0) {
         const umabans = parseComboOddsKey(bet.comboKey);
         if (umabans !== null && umabans.some((u) => scratchedUmabans.has(u))) {
           recordJudgedBet(accumulator, bet.stake, undefined, true);

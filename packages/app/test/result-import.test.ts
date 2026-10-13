@@ -81,6 +81,7 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
       winPayout: 670,
       passing: [],
       last3f: null,
+      wakuban: null, // 枠番(Issue #269)。この入力では取れていない行は null のまま詰める
     });
     expect(byUmaban.get(9)).toEqual({
       umaban: 9,
@@ -89,6 +90,7 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
       winPayout: null,
       passing: [],
       last3f: null,
+      wakuban: null,
     });
   });
 
@@ -114,6 +116,7 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
       winPayout: 670,
       passing: [2, 2, 4, 2],
       last3f: 37.2,
+      wakuban: 4, // 枠番(Issue #269)。パース結果の値をそのまま詰める
     });
   });
 

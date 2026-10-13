@@ -58,7 +58,8 @@ export type ImportResultOutcome =
  *   判定は戦績側の `isNonStartResult`(Issue #261)と同じ関数で、語彙の定義を2箇所に持たない。
  *   取消・除外でない馬には**キー自体を付けない**(false を書くと、既存の golden・保存レコードのすべてに
  *   新しいキーが現れる。D1 側が「印のない行は 0」と読むので情報は落ちない)。
- *   観測は中央の「取消」(202606040901)だけで、「除外」・地方の文言は未観測。
+ *   観測は中央の「取消」(202606040901)と「除外」(202605040205)。地方の取消・除外の文言は未観測。
+ * - 枠番(Issue #269): 各馬の `wakuban` をそのまま詰める(枠連の買い目の返還の判定に使う。契約は `RaceResultEntry.wakuban` の JSDoc)。
  */
 export function toResultEntries(result: RaceResult): RaceResultEntry[] {
   const placePayoutByUmaban = new Map(
@@ -82,6 +83,8 @@ export function toResultEntries(result: RaceResult): RaceResultEntry[] {
       // 確定の人気・単勝オッズ(Issue #259)。そのまま渡す(null は null、未設定は未設定)。D1 だけが保存する(exe の codec は読まない)。
       ninki: h.ninki,
       winOdds: h.winOdds,
+      // 枠番(Issue #269)。枠連の返還の判定が読む。取消・除外の馬の行にもある。取れなかった行は null のまま(頭数から導かない)。D1 だけが保存する。
+      wakuban: h.wakuban,
       ...(isNonStartResult(h) ? { scratched: true } : {}),
     };
   });

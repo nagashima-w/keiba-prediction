@@ -57,6 +57,8 @@ export interface PeriodRows {
     readonly placePayout: number | null;
     /** 取消・除外か(Issue #278。`race_results.scratched`。未記録の旧い行はキーが無い)。 */
     readonly scratched?: boolean;
+    /** 枠番(Issue #269。`race_results.wakuban`)。枠連の返還の判定に使う。未記録の旧い行はキーが無い。 */
+    readonly wakuban?: number;
   }[];
   readonly combos: readonly { readonly raceId: string; readonly betType: string; readonly comboKey: string; readonly payout: number }[];
   readonly imports: readonly { readonly raceId: string; readonly betType: string }[];
@@ -99,6 +101,7 @@ function resultsByRace(rows: PeriodRows): Map<string, RaceResultData> {
       winPayout: r.winPayout,
       placePayout: r.placePayout,
       ...(r.scratched === undefined ? {} : { scratched: r.scratched }),
+      ...(r.wakuban === undefined ? {} : { wakuban: r.wakuban }),
     }));
     out.set(raceId, { horses, combos: (combosByRace.get(raceId) ?? {}) as Readonly<Record<string, ComboPayouts>> });
   }

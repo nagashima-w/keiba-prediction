@@ -467,6 +467,16 @@ export interface RaceResultEntry {
    * 未記録の `finishPosition=null` は取消か中止か判別できず、従来どおり不的中として数える。
    */
   readonly scratched?: boolean;
+  /**
+   * 枠番(1〜8。Issue #269)。枠連の買い目の返還(取消・除外で枠の出走馬が尽きる等)の判定に使う
+   * (`bracket-quinella-refund.ts`)。取消・除外の馬の行にも枠番がある。
+   *
+   * **保存するのはクラウド版(D1 の `race_results.wakuban`。migration 0016)だけ**で、exe の `AnalysisStore` は保存も復元もしない
+   * (`scratched` と同じ。exe はアーカイブ済み)。D1 側の読み出しでは、未記録(旧い行・exe から移行した行。DB の NULL)は
+   * **キー自体が無い**(`undefined`)。パース結果の枠番が取れなかった行(`null`)は DB に NULL で入るので、読み出しでは未記録と同じになる。
+   * どちらの場合も、そのレースの枠連は返還を判定しない(頭数から枠番を導くことはしない)。
+   */
+  readonly wakuban?: number | null;
 }
 
 /**

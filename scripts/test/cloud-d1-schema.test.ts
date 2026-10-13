@@ -151,6 +151,8 @@ const D1_EXTRA_COLUMNS: Readonly<Record<string, readonly ColumnInfo[]>> = {
     { name: "ninki", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
     // 0013 の scratched(Issue #72。取消・除外の記録。NULL=記録なし〈旧い行・exe から移行した行〉・0=取消・除外でない・1=取消・除外。検証画面の配分ベースの回収率が、取消・除外の馬への買い目を返還として数える)。
     { name: "scratched", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+    // 0016 の wakuban(Issue #269。結果ページの各馬の枠番〈1〜8〉。NULL=記録なし〈旧い行・exe から移行した行〉。枠連の買い目の返還の判定が読む)。
+    { name: "wakuban", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
   ],
 };
 const D1_EXTRA_INDEXES: Readonly<Record<string, readonly IndexInfo[]>> = {
@@ -295,8 +297,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql の15本だけで、番号は 0001 から連続している(後から足すときは 0016 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql の16本だけで、番号は 0001 から連続している(後から足すときは 0017 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -356,7 +358,7 @@ describe("0001_init.sql は凍結されている(Issue #197。適用済みのフ
 describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ + 宣言した追加分(列・索引・r2_ops 表)と一致する", () => {
   const sqls = FILES.map(readMigration);
 
-  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key・llm_note・llm_calls_json・exe_analysis_id・start_time・race_results の win_odds・ninki・索引2つ+0008 の4つ・r2_ops 表・cloud_settings 表だけ)", () => {
+  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key・llm_note・llm_calls_json・exe_analysis_id・start_time・race_results の win_odds・ninki・scratched・wakuban・索引2つ+0008 の4つ・r2_ops 表・cloud_settings 表だけ)", () => {
     const actual = schemaAfter(sqls);
     expect(diffSchemas(expectedD1Schema(exe), actual)).toEqual([]);
   });

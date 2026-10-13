@@ -53,7 +53,7 @@ export const LIST_DAY_ANALYSES_SQL = `SELECT id AS analysisId, race_id AS raceId
 
 /** 結果の 3 文(束縛値はどれも JSON 配列 1 つ)。 */
 export const READ_RESULTS_SQL = {
-  results: `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, win_payout AS winPayout, place_payout AS placePayout, scratched
+  results: `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, win_payout AS winPayout, place_payout AS placePayout, scratched, wakuban
            FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban`,
   combos: `SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout
            FROM race_combo_payouts WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, bet_type, combo_key`,
@@ -85,7 +85,7 @@ export const READ_PERIOD_SQL = {
            FROM analysis_bets b JOIN latest l ON l.id = b.analysis_id ORDER BY b.analysis_id, b.bet_type, b.combo_key`,
   marks: `${PERIOD_LATEST_CTE} SELECT h.analysis_id AS analysisId, h.umaban, h.mark
            FROM analysis_horses h JOIN latest l ON l.id = h.analysis_id WHERE h.mark IS NOT NULL ORDER BY h.analysis_id, h.umaban`,
-  results: `${PERIOD_LATEST_CTE} SELECT r.race_id AS raceId, r.umaban, r.finish_position AS finishPosition, r.win_payout AS winPayout, r.place_payout AS placePayout, r.scratched
+  results: `${PERIOD_LATEST_CTE} SELECT r.race_id AS raceId, r.umaban, r.finish_position AS finishPosition, r.win_payout AS winPayout, r.place_payout AS placePayout, r.scratched, r.wakuban
            FROM race_results r WHERE r.race_id IN (SELECT race_id FROM latest) ORDER BY r.race_id, r.umaban`,
   combos: `${PERIOD_LATEST_CTE} SELECT c.race_id AS raceId, c.bet_type AS betType, c.combo_key AS comboKey, c.payout
            FROM race_combo_payouts c WHERE c.race_id IN (SELECT race_id FROM latest) ORDER BY c.race_id, c.bet_type, c.combo_key`,
@@ -99,6 +99,14 @@ export const READ_PERIOD_SQL = {
  */
 function scratchedField(value: number | null | undefined): { scratched?: boolean } {
   return value === null || value === undefined ? {} : { scratched: value === 1 };
+}
+
+/**
+ * `race_results.wakuban`(INTEGER。Issue #269)を `ResultHorse.wakuban` に直す。値はそのまま、NULL(未記録の旧い行)・未取得はキー自体を付けない
+ * (枠連の返還は、枠番が1頭でも未記録のレースを判定しない。`verify-read.ts` と同じ)。
+ */
+function wakubanField(value: number | null | undefined): { wakuban?: number } {
+  return value === null || value === undefined ? {} : { wakuban: value };
 }
 
 /**
@@ -125,12 +133,13 @@ export async function readPeriodRowsFrom(db: ReportDb, fromDate: string, toDate:
       races: races as PeriodRows["races"],
       bets: bets as PeriodRows["bets"],
       marks: marks as PeriodRows["marks"],
-      results: (results as Array<Omit<PeriodRows["results"][number], "scratched"> & { scratched?: number | null }>).map(({ scratched, ...r }) => ({
+      results: (results as Array<Omit<PeriodRows["results"][number], "scratched" | "wakuban"> & { scratched?: number | null; wakuban?: number | null }>).map(({ scratched, wakuban, ...r }) => ({
         ...r,
         finishPosition: r.finishPosition ?? null,
         winPayout: r.winPayout ?? null,
         placePayout: r.placePayout ?? null,
         ...scratchedField(scratched),
+        ...wakubanField(wakuban),
       })),
       combos: combos as PeriodRows["combos"],
       imports: imports as PeriodRows["imports"],
@@ -295,9 +304,9 @@ export class D1ReportSource implements ReportSource {
       this.db.prepare(READ_RESULTS_SQL.imports).bind(json),
     ]);
     const horses = new Map<string, ResultHorse[]>();
-    for (const r of (horseRes?.results ?? []) as Array<Omit<ResultHorse, "scratched"> & { raceId: string; scratched?: number | null }>) {
+    for (const r of (horseRes?.results ?? []) as Array<Omit<ResultHorse, "scratched" | "wakuban"> & { raceId: string; scratched?: number | null; wakuban?: number | null }>) {
       const list = horses.get(r.raceId) ?? [];
-      list.push({ umaban: r.umaban, finishPosition: r.finishPosition ?? null, winPayout: r.winPayout ?? null, placePayout: r.placePayout ?? null, ...scratchedField(r.scratched) });
+      list.push({ umaban: r.umaban, finishPosition: r.finishPosition ?? null, winPayout: r.winPayout ?? null, placePayout: r.placePayout ?? null, ...scratchedField(r.scratched), ...wakubanField(r.wakuban) });
       horses.set(r.raceId, list);
     }
     const combos = new Map<string, Record<string, { imported: boolean; payouts: { comboKey: string; payout: number }[] }>>();
