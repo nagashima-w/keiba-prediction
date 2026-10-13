@@ -5,7 +5,7 @@ import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import { parseRaceId } from "../../src/scraper/ids.js";
 import { parseShutuba } from "../../src/scraper/parse-shutuba.js";
 import { scrapeRace, type RaceFetcher } from "../../src/scraper/scrape-race.js";
-import { narTrioOddsAxisUrl } from "../../src/scraper/urls.js";
+import { narTrifectaOddsAxisUrl, narTrioOddsAxisUrl } from "../../src/scraper/urls.js";
 
 /**
  * Issue #154: 出馬表に残った取消・除外の馬を `scrapeRace` が出走馬から除くこと。
@@ -230,7 +230,7 @@ function narHandler(shutubaHtml: string): (url: string) => string {
     if (url.includes("ajax_horse_results")) return NAR_RESULTS;
     // 組合せオッズはすべて「発売前・未発売」の形(リクエスト先の検証だけが目的)。
     if (url.includes("odds_get_form.html")) return NAR_UNAVAILABLE_HTML;
-    if (/type=b[3-7]\b/.test(url)) return NAR_UNAVAILABLE_HTML;
+    if (/type=b[3-8]\b/.test(url)) return NAR_UNAVAILABLE_HTML;
     if (url.includes("odds/index.html")) return NAR_ODDS;
     throw new Error(`未知のURL(NAR): ${url}`);
   };
@@ -247,9 +247,16 @@ describe("scrapeRace: 地方の取消(合成。実物は未観測で、中央と
     await scrapeRace(NAR_RACE_ID, { fetcher: control, now: FIXED_NOW }, { includeComboOdds: true });
     const controlAxes = control.calls
       .map((c) => c.url)
-      .filter((u) => u.includes("odds_get_form.html"));
+      .filter((u) => u.includes("odds_get_form.html") && u.includes("type=b7"));
     expect(controlAxes).toEqual(
       [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((k) => narTrioOddsAxisUrl(NAR_RACE_ID, k)),
+    );
+    // 対照: 取消なし → 三連単(Issue #283)の軸は出走馬番の全数 = 馬番1〜12(3連複の n-2 ではない)。
+    const controlTrifectaAxes = control.calls
+      .map((c) => c.url)
+      .filter((u) => u.includes("odds_get_form.html") && u.includes("type=b8"));
+    expect(controlTrifectaAxes).toEqual(
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((k) => narTrifectaOddsAxisUrl(NAR_RACE_ID, k)),
     );
 
     // 取消あり(馬番1): 出走11頭 = 馬番2〜12 → 軸は先頭 n-2=9頭 = 馬番2〜10。馬番1は叩かない。
@@ -262,9 +269,18 @@ describe("scrapeRace: 地方の取消(合成。実物は未観測で、中央と
     expect(data.horses).toHaveLength(11);
     expect(data.horses.some((h) => h.shutuba.umaban === 1)).toBe(false);
     expect(data.meta.scratched!.map((s) => s.umaban)).toEqual([1]);
-    const axes = fetcher.calls.map((c) => c.url).filter((u) => u.includes("odds_get_form.html"));
+    const axes = fetcher.calls
+      .map((c) => c.url)
+      .filter((u) => u.includes("odds_get_form.html") && u.includes("type=b7"));
     expect(axes).toEqual(
       [2, 3, 4, 5, 6, 7, 8, 9, 10].map((k) => narTrioOddsAxisUrl(NAR_RACE_ID, k)),
+    );
+    // 三連単の軸(Issue #283)も出走馬11頭 = 馬番2〜12の全数。取消馬の馬番1は叩かない。
+    const trifectaAxes = fetcher.calls
+      .map((c) => c.url)
+      .filter((u) => u.includes("odds_get_form.html") && u.includes("type=b8"));
+    expect(trifectaAxes).toEqual(
+      [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((k) => narTrifectaOddsAxisUrl(NAR_RACE_ID, k)),
     );
     // 取消馬の戦績も取得しない(出走11頭ぶん)。
     expect(fetcher.calls.filter((c) => c.url.includes("ajax_horse_results"))).toHaveLength(11);
@@ -279,5 +295,17 @@ describe("scrapeRace: 地方の取消(合成。実物は未観測で、中央と
     );
     const diag = data.meta.comboOdds!.trio!.diagnostics;
     expect(diag.expectedComboCount).toBe(165);
+  });
+
+  it("三連単の期待組合せ数も出走馬の頭数から作られること(P(11,3)=990。取消込みの12頭ならP(12,3)=1320。Issue #283)", async () => {
+    const fetcher = new RecordingFetcher(narHandler(narShutubaWithHorse1Scratched()));
+    const data = await scrapeRace(
+      NAR_RACE_ID,
+      { fetcher, now: FIXED_NOW },
+      { includeComboOdds: true },
+    );
+    const diag = data.meta.comboOdds!.trifecta!.diagnostics;
+    expect(diag.requestCount).toBe(11);
+    expect(diag.expectedComboCount).toBe(990);
   });
 });

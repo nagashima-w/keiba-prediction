@@ -726,13 +726,25 @@ describe("地方(NAR)でも、前回の組合せオッズがキャッシュに�
   /** 軸馬別(`odds_get_form.html?type=b7&...&jiku=N`)の最小限の合成オッズ。軸 N と、軸にならない 11・12 番の組(オッズは大きく、期待値が閾値を超えて買い目に入る値)。 */
   const narAxisHtml = (axis: number): string =>
     `<div id="odds_view_form"><table class="Odds_Table"><tr><td class="Odds" id="chk_x_b7_c0_${axis}_11_12">900.0</td></tr></table></div>`;
-  /** 地方の組合せ: 馬連 b4・ワイド b5・馬単 b6 は `odds/index.html`(単発)、3連複 b7 は軸馬別の `odds/odds_get_form.html`。 */
+  /**
+   * 三連単(Issue #283)の軸馬別(`odds_get_form.html?type=b8&...&jiku=N`)の最小限の合成オッズ。1着=軸 N、2着・3着は軸と重ならない 11・12 番などの1組(オッズは大きく、期待値が閾値を超えて買い目に入る値)。
+   * 軸 11・12 は 2着・3着が (12,1)・(11,1) になる。
+   */
+  const narTrifectaAxisHtml = (axis: number): string => {
+    const second = axis === 11 ? 12 : 11;
+    const third = axis === 1 ? 2 : 1;
+    return `<div id="odds_view_form"><table class="Odds_Table"><tr><td class="Odds" id="chk_x_b8_c0_${axis}_${second}_${third}">90000.0</td></tr></table></div>`;
+  };
+  /** 地方の組合せ: 馬連 b4・ワイド b5・馬単 b6 は `odds/index.html`(単発)、3連複 b7・三連単 b8 は軸馬別の `odds/odds_get_form.html`。 */
   const isNarAxisUrl = (url: string): boolean => url.includes("odds_get_form.html");
   const isNarIndexComboUrl = (url: string): boolean => /odds\/index\.html\?type=b[3-8]&/.test(url);
   const narBody = (url: string): string => {
     if (url.includes("shutuba.html")) return narFixture("nar_shutuba_202654071210.html");
     if (url.includes("ajax_horse_results")) return narFixture("horse_results_2021104387.json");
-    if (isNarAxisUrl(url)) return narAxisHtml(Number(/[?&]jiku=(\d+)/.exec(url)![1]));
+    if (isNarAxisUrl(url)) {
+      const axis = Number(/[?&]jiku=(\d+)/.exec(url)![1]);
+      return url.includes("type=b8") ? narTrifectaAxisHtml(axis) : narAxisHtml(axis);
+    }
     if (url.includes("type=b1&")) return narFixture("nar_odds_b1_202654071210.html");
     if (url.includes("type=b4&")) return narFixture("nar_odds_b4_202654071210.html");
     if (url.includes("type=b5&")) return narFixture("nar_odds_b5_202654071210.html");
@@ -743,11 +755,21 @@ describe("地方(NAR)でも、前回の組合せオッズがキャッシュに�
   };
   const betTypes = (record: AnalysisRecord): string[] => [...new Set(record.allocation!.bets.map((b) => b.betType))].sort();
 
+  /**
+   * 取得ステップ(1回)→ 地方三連単の段階(Issue #283。12頭は 9 軸 + 3 軸の 2 アラーム)→ 計算ステップ。
+   * 旧版は「取得 → 計算」の 2 ステップだったが、地方の三連単の軸ごとの取得を別のアラームに分けたので、間に段階のステップ(`step: "fetch"`)が入る。
+   */
+  async function narFetchThenCompute(h: Harness): Promise<void> {
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" }); // 取得ステップ(三連単を除く)
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" }); // 三連単の段階 1(軸 1〜9)
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" }); // 三連単の段階 2(軸 10〜12)
+    expect(await h.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+  }
+
   async function narFirstRunThenSecondScheduled(h: Harness): Promise<void> {
     h.gate.body = narBody;
     await h.core.schedule({ raceId: NAR_RACE, kaisaiDate: "20260712", mode: "pre_race" });
-    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" });
-    expect(await h.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+    await narFetchThenCompute(h);
     expect(h.sink.saved).toHaveLength(1);
     h.clock.now += 60 * 60_000;
     await h.core.schedule({ raceId: NAR_RACE, kaisaiDate: "20260712", mode: "pre_race" });
@@ -762,6 +784,8 @@ describe("地方(NAR)でも、前回の組合せオッズがキャッシュに�
     expect(types).toContain("trio");
     expect(types).toContain("wide");
     expect(types).toContain("quinella");
+    expect(types).toContain("trifecta"); // Issue #283: 地方の三連単も(別のアラームの段階で取って)買い目に入る
+    expect(h.gate.urls.filter((u) => u.includes("type=b8"))).toHaveLength(12);
   });
 
   it("今回、軸馬別のURLがすべて404のとき: 前回のキャッシュの3連複は使わず、3連複の買い目は入らない。index.html 系(ワイド・馬連ほか)は今回取れたぶんが入る", async () => {
@@ -769,12 +793,14 @@ describe("地方(NAR)でも、前回の組合せオッズがキャッシュに�
     await narFirstRunThenSecondScheduled(h);
     const firstTypes = betTypes(h.sink.saved[0]!);
     h.gate.body = (url) => (isNarAxisUrl(url) ? null : narBody(url));
-    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" });
-    expect(await h.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+    await narFetchThenCompute(h);
     expect(h.sink.saved).toHaveLength(2);
     const types = betTypes(h.sink.saved[1]!);
     expect(firstTypes).toContain("trio"); // 前提: 1回目には入っていた
+    expect(firstTypes).toContain("trifecta"); // 前提: 三連単も1回目には入っていた(Issue #283)
     expect(types).not.toContain("trio");
+    expect(types).not.toContain("trifecta"); // 三連単の軸もすべて404 → 前回のキャッシュは使わない
+    expect(h.warnings.some((w) => w.includes("組合せ") && w.includes("三連単"))).toBe(true);
     expect(types).toEqual(expect.arrayContaining(["wide", "quinella", "exacta"])); // index.html 系は今回取れている
     expect(h.warnings.some((w) => w.includes("組合せ") && w.includes("3連複"))).toBe(true);
   });
@@ -784,8 +810,7 @@ describe("地方(NAR)でも、前回の組合せオッズがキャッシュに�
     await narFirstRunThenSecondScheduled(h);
     const firstTypes = betTypes(h.sink.saved[0]!);
     h.gate.body = (url) => (isNarIndexComboUrl(url) && !url.includes("type=b7&") ? null : narBody(url));
-    await h.core.runNextStep();
-    await h.core.runNextStep();
+    await narFetchThenCompute(h);
     expect(h.sink.saved).toHaveLength(2);
     const types = betTypes(h.sink.saved[1]!);
     expect(types).not.toContain("wide");
@@ -798,8 +823,7 @@ describe("地方(NAR)でも、前回の組合せオッズがキャッシュに�
   it("対照: 今回もすべて取れれば、前回と同じ券種が入り、組合せの警告は出ない", async () => {
     const h = harness();
     await narFirstRunThenSecondScheduled(h);
-    await h.core.runNextStep();
-    await h.core.runNextStep();
+    await narFetchThenCompute(h);
     expect(betTypes(h.sink.saved[1]!)).toEqual(betTypes(h.sink.saved[0]!));
     expect(h.warnings.filter((w) => w.includes("組合せ"))).toEqual([]);
   });

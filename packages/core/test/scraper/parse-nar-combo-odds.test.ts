@@ -577,6 +577,111 @@ describe("parseNarComboOdds(三連単。Issue #130・#25-D)", () => {
 });
 
 /**
+ * 三連単の発売中の表示(Issue #283・#134)。
+ *
+ * ## 上限値 `999,999.9`(#134の【記録】1件目の回収)
+ * 中央の組合せパーサは、票の無い組合せの上限表示 `999,999.9` を欠損(null)にしている(#130。三連単の
+ * presale応答の約8割がこの値)。地方の組合せパーサも**券種で分岐せず**同じ変換を行う(実オッズとして
+ * 読むと EV が桁外れのプラスになり、配分がそこへ偏る)。**地方の発売中の厚いプールでの実物は未観測**
+ * (下記の実フィクスチャ2本は、薄いプールと発売開始前のもの)なので、ここでは合成の入力で固定する。
+ *
+ * ## 実フィクスチャ(2026-10-13 に発売中のレースから取得。来歴は `docs/trifecta-odds-investigation.md` §11)
+ * - `nar_odds_b8_live_partial_202648101301_20261013.html`: 90セル(11頭立ての軸1。P(10,2))のうち70セルが `0.0`
+ *   (票の無い組)、20セルが数値(薄いプールで同じ値が繰り返す)。`0.0` は欠損(null)になり、`available`のまま。
+ * - `nar_odds_b8_live_allzero_202635101306_20261013.html`: 発売開始前の全110セルが `0.0` → `unavailable`。
+ */
+describe("parseNarComboOdds(三連単の発売中の表示。上限値・0.0。Issue #283・#134)", () => {
+  /** 最小限の合成NAR三連単HTML(軸1固定のセル。値は文字列そのまま)。 */
+  function narTrifectaHtml(entries: ReadonlyArray<readonly [number, number, number, string]>): string {
+    const cells = entries
+      .map(([a, b, c, v]) => `<tr><td class="Odds" id="chk_x_b8_c0_${a}_${b}_${c}">${v}</td></tr>`)
+      .join("");
+    return `<div id="odds_view_form"><table class="Odds_Table">${cells}</table></div>`;
+  }
+
+  it("上限値\"999,999.9\"のセルはnull(欠損)になり、隣接値\"999,999.8\"・通常値は数値のまま残ること(丁度999999.9だけを欠損にする)", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(
+        narTrifectaHtml([
+          [1, 2, 3, "999,999.9"],
+          [1, 2, 4, "999,999.8"],
+          [1, 3, 2, "1,234.5"],
+          [1, 3, 4, "12.3"],
+        ]),
+        "trifecta",
+      ),
+    );
+    expect(odds.size).toBe(4); // 前提固定: 4セルともパースされる
+    expect(odds.get("010203")?.oddsMin).toBeNull();
+    expect(odds.get("010204")?.oddsMin).toBeCloseTo(999999.8, 5);
+    expect(odds.get("010302")?.oddsMin).toBeCloseTo(1234.5, 5);
+    expect(odds.get("010304")?.oddsMin).toBeCloseTo(12.3, 5);
+  });
+
+  it("上限値は券種で分岐せず、他の地方の組合せ券種(馬単・ワイドのレンジの上下限)でも欠損になること", () => {
+    const exacta = expectAvailable(
+      parseNarComboOdds(
+        `<div id="odds_view_form"><table><tr><td class="Odds" id="chk_x_b6_c0_1_2">999,999.9</td></tr><tr><td class="Odds" id="chk_x_b6_c0_2_1">5.0</td></tr></table></div>`,
+        "exacta",
+      ),
+    );
+    expect(exacta.get("0102")?.oddsMin).toBeNull();
+    expect(exacta.get("0201")?.oddsMin).toBe(5);
+    const wide = expectAvailable(
+      parseNarComboOdds(
+        `<div id="odds_view_form"><table><tr><td class="Odds" id="chk_x_b5_c0_1_2">999,999.9 - 999,999.9</td></tr><tr><td class="Odds" id="chk_x_b5_c0_1_3">1.5 - 2.5</td></tr></table></div>`,
+        "wide",
+      ),
+    );
+    expect(wide.get("0102")).toEqual({ oddsMin: null, oddsMax: null, ninki: null });
+    expect(wide.get("0103")).toEqual({ oddsMin: 1.5, oddsMax: 2.5, ninki: null });
+  });
+
+  it("上限値は\"0.0\"ではないので、全セルが上限値のページを「全セルが0」の発売なし(unavailable)扱いにしないこと(availableのまま全件null)", () => {
+    const result = parseNarComboOdds(
+      narTrifectaHtml([
+        [1, 2, 3, "999,999.9"],
+        [1, 3, 2, "999,999.9"],
+      ]),
+      "trifecta",
+    );
+    const odds = expectAvailable(result);
+    expect([...odds.values()].every((c) => c.oddsMin === null)).toBe(true);
+    expect(odds.size).toBe(2);
+  });
+
+  it("実フィクスチャ(発売中・薄いプール): 90セル中70セルの\"0.0\"がnull、20セルが数値で、availableのままパースできること", () => {
+    const html = loadFixture("nar_odds_b8_live_partial_202648101301_20261013.html");
+    // 前提固定(パーサに依らない生のHTMLの数え上げ): 90セル・うち\"0.0\"が70セル
+    const rawCells = html.match(/<td class="Odds"[^>]*>[^<]*/g) ?? [];
+    const rawTexts = rawCells.map((c) => c.replace(/^[^>]*>/, "").trim());
+    expect(rawTexts).toHaveLength(90);
+    expect(rawTexts.filter((t) => t === "0.0")).toHaveLength(70);
+
+    const odds = expectAvailable(parseNarComboOdds(html, "trifecta"));
+    expect(odds.size).toBe(90); // P(10,2)
+    const nulls = [...odds.values()].filter((c) => c.oddsMin === null);
+    const numeric = [...odds.values()].filter((c) => c.oddsMin !== null);
+    expect(nulls).toHaveLength(70);
+    expect(numeric).toHaveLength(20);
+    // 1着は全件が軸1(先頭の馬番が01)
+    expect([...odds.keys()].every((k) => k.startsWith("01"))).toBe(true);
+    // 数値セルの最小は94.7(実測)。上限値などの桁外れの値が紛れ込んでいないこと
+    expect(Math.min(...numeric.map((c) => c.oddsMin!))).toBeCloseTo(94.7, 5);
+    expect(Math.max(...numeric.map((c) => c.oddsMin!))).toBeCloseTo(1041.8, 5);
+  });
+
+  it("実フィクスチャ(発売開始前・全110セルが\"0.0\"): unavailableになること(#odds_selectはあり、組合せ0件扱い)", () => {
+    const html = loadFixture("nar_odds_b8_live_allzero_202635101306_20261013.html");
+    const rawTexts = (html.match(/<td class="Odds"[^>]*>[^<]*/g) ?? []).map((c) => c.replace(/^[^>]*>/, "").trim());
+    expect(rawTexts).toHaveLength(110);
+    expect(rawTexts.every((t) => t === "0.0")).toBe(true);
+    const result = parseNarComboOdds(html, "trifecta");
+    expect(result.state).toBe("unavailable");
+  });
+});
+
+/**
  * 地方枠連(bracketQuinella。odds/index.html?type=b3)。Issue #143・#26-D。
  *
  * セルidは`chk_..._b3_c0_{枠}_{枠}`(枠番は1桁表記・昇順)。期待キー集合は枠の構成

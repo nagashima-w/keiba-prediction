@@ -518,62 +518,12 @@ export function comboBetTypeNote(diag: ComboCandidateDiagnosticsView): string | 
   }
 }
 
-/**
- * レースIDの場コード(5〜6桁目)から中央/地方を判定する(Issue #139・#25-E3b・AC4)。
- *
- * 中央/地方の判定ロジック自体は core `venueKindOfRaceId`(scraper/ids.ts)と同じ場コード範囲
- * (中央01〜10)によるが、renderer層は core のバレル(`@keiba/core`)をそのまま import すると
- * native依存(better-sqlite3等。core/package.json の exports コメント参照)をバンドルに巻き込んで
- * しまい、この判定だけの狭いsubpathも無いため、この一行の閾値判定のみをここに複製する
- * (`renderer/race-ledger-filter.ts`の`venueKindOfRaceLedgerRaceId`と同じ前例・同じ理由。
- * `pnpm --filter @keiba/app build`が検出する`node:zlib`混入と同種の事故を避けるため)。
- *
- * `raceId`が無い(旧データ・raceIdを持たない最小テスト入力)場合は`false`(中央として扱う)を
- * 返す。production では`AnalysisResult.raceId`が常に存在するため、raceId欠落は「未知」を
- * 意味するだけであり、判定不能を「地方」と断定してはならない(#31の原則)。
- *
- * `mixed-allocation-view.test.ts`が本関数の判定と core `venueKindOfRaceId` の判定を
- * 中央・地方それぞれ1件で直接比較して固定する(複製が本家からずれる事故を防ぐ)。
- */
-export function isNarRaceId(raceId: string | undefined): boolean {
-  if (raceId === undefined || raceId.length < 6) {
-    return false;
-  }
-  return Number(raceId.slice(4, 6)) > 10;
-}
-
-/**
- * 地方競馬では三連単を取得していない旨の注記(Issue #139・#25-E3b・AC4)。
- * `trifectaBetTypeNote`が地方レースの"unknown"状態に対して返す固定文言。
- */
-export const NAR_TRIFECTA_NOTE = "地方競馬では三連単を取得していません。";
-
-/**
- * 三連単の状態注記(Issue #139・#25-E3b・AC4)。wide/trio/quinella/exactaの`comboBetTypeNote`と
- * 基本は同じだが、地方(NAR)は三連単を当面取得しない(ユーザー判断2026-09-27。
- * `scrapeRace`が調教と同じ`if (!isNar)`ガードで取得自体を試みない)という三連単固有の事情が
- * あるため、`comboOddsState==="unknown"`のときだけ地方/中央で文言を分ける。
- *
- * 中央の"unknown"(未取得。設定変更後に再分析すると反映される)は`comboBetTypeNote`の
- * 既存文言をそのまま使う(再分析〈`includeComboOdds`をONにする〉すれば実際に取得されるため、
- * 文言は事実と一致する)。地方の場合は、再分析しても三連単は取得されない
- * (`docs/trifecta-odds-investigation.md`。地方は当面非対応)ため、その既存文言をそのまま
- * 出すと「設定変更後に再分析すると反映されます」という誤った案内になる。代わりに
- * `NAR_TRIFECTA_NOTE`(「地方競馬では三連単を取得していません」)を返す。
- *
- * `unavailable`/`failed`/`available`(EVプラス0件)は中央・地方を問わず同じ意味を持つため
- * (発売なし・取得失敗・EVプラスなしはいずれも「取得は試みた結果」であり、地方特例の対象では
- * ない)、`comboBetTypeNote`にそのまま委譲する。
- */
-export function trifectaBetTypeNote(
-  diag: ComboCandidateDiagnosticsView,
-  raceId: string | undefined,
-): string | null {
-  if (diag.kind === "built" && diag.comboOddsState === "unknown" && isNarRaceId(raceId)) {
-    return NAR_TRIFECTA_NOTE;
-  }
-  return comboBetTypeNote(diag);
-}
+// 【Issue #283で除去】`isNarRaceId`(coreの`venueKindOfRaceId`をrenderer層に複製した判定)・`NAR_TRIFECTA_NOTE`
+// (「地方競馬では三連単を取得していません。」)・`trifectaBetTypeNote`(地方の"unknown"だけ上の文言に差し替える関数)。
+// #139の時点では地方の三連単を取得せず(ユーザー判断2026-09-27)、再分析しても反映されないため専用の注記に
+// 差し替えていた。ユーザーが2026-10-13に地方の三連単の対応を決定し、地方も取得するようになった(Issue #283)ので、
+// 「設定変更後に再分析すると反映されます」が地方でも事実になり、出し分け自体が不要になった。三連単の注記は
+// 他の券種と同じ`comboBetTypeNote`をそのまま使う(`buildMixedAllocationDisplay`)。
 
 /**
  * `buildComboBetTypeNotices`が返す1件(表示するラベルと注記文言)。
@@ -749,10 +699,9 @@ export interface MixedAllocationDisplay {
    */
   readonly bracketQuinellaNote: string | null;
   /**
-   * 三連単の状態注記(Issue #139・AC4。`trifectaBetTypeNote`を使う。無ければnull)。
-   * 地方(NAR)では`comboOddsState==='unknown'`のとき`comboBetTypeNote`の中央向け文言
-   * (「設定変更後に再分析すると反映されます」)ではなく`NAR_TRIFECTA_NOTE`になる点が
-   * wide/trio/quinella/exactaと異なる(`trifectaBetTypeNote`のJSDoc参照)。
+   * 三連単の状態注記(Issue #139・AC4。wide/trio/quinella/exactaと同じ`comboBetTypeNote`を使う。無ければnull)。
+   * Issue #139では地方(NAR)の`comboOddsState==='unknown'`だけ専用文言(「地方競馬では三連単を取得していません」)に
+   * 差し替えていたが、Issue #283で地方の三連単も取得するようになり、出し分けを除去した(中央・地方とも同じ文言)。
    */
   readonly trifectaNote: string | null;
   /** 頭数不可で複勝が対象外のときの注記(AC3改訂。無ければnull)。 */
@@ -872,7 +821,7 @@ export function buildMixedAllocationDisplay(
     quinellaNote: comboBetTypeNote(view.diagnostics.quinella),
     exactaNote: comboBetTypeNote(view.diagnostics.exacta),
     bracketQuinellaNote: comboBetTypeNote(view.diagnostics.bracketQuinella),
-    trifectaNote: trifectaBetTypeNote(view.diagnostics.trifecta, race.raceId),
+    trifectaNote: comboBetTypeNote(view.diagnostics.trifecta),
     placeUnavailableNote: placeUnavailableNoteForMixed(view.diagnostics.place),
     placeOnlyStake: resolvePlaceOnlyStake(race, settings),
     probabilitySumWarning: resolveMixedProbabilitySumWarning(race, view.topFinishCount),

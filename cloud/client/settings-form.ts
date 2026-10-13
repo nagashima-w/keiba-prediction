@@ -266,7 +266,7 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
   includeComboOdds: {
     kind: "checkbox",
     label: INCLUDE_COMBO_ODDS_LABELS.checkbox,
-    help: `既定は OFF です。ON にすると、発走前の分析で${COMBO_NAME}のオッズも取得します(取得するぶん分析に時間がかかります)。OFF の間は、組合せの券種は配分に入りません。三連単は中央競馬のみ取得します(地方競馬では取得しません)。`,
+    help: `既定は OFF です。ON にすると、発走前の分析で${COMBO_NAME}のオッズも取得します(取得するぶん分析に時間がかかります)。OFF の間は、組合せの券種は配分に入りません。地方競馬の三連複・三連単は頭数ぶん(最大18)のリクエストを取得します。`,
   },
   includeWideInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.wide.checkbox, help: ALLOCATION_HELP },
   includeQuinellaInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.quinella.checkbox, help: ALLOCATION_HELP },

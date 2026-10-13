@@ -284,7 +284,14 @@ describe("wrangler.toml", () => {
     expect(count(/serializeGate\(deps\.gate\)/g)).toBe(1); // 直列化した gate は 1 つ(キャッシュ付きの取得と結果の取得が同じ待ち行列を使う)
     expect(count(/this\.httpClient\.fetchText\(/g)).toBe(1); // 結果のページの取得は 1 箇所
     expect(count(/(\.|await\s+)fetch\(/g)).toBe(0); // グローバルの fetch に出ない
-    expect(count(/bypassCache/g)).toBe(0); // キャッシュを通す取得(CachedFetcher)の bypassCache では取らない
+    // 【Issue #283で改訂】旧: `bypassCache` が race-day-core.ts に 0 件(結果のページを、キャッシュを通す取得〈CachedFetcher〉の bypassCache では取らない)。
+    // 地方三連単の段階(`runNarTrifectaStep`)が、オッズの軸の本文をキャッシュに積むために `{ bypassCache: true }` で CachedFetcher を呼ぶので、1 件になった。
+    // 保証していたことは変わらない: 結果のページの取得(runResultStep)に `bypassCache` は無く(下の本体の検査)、この 1 件は runNarTrifectaStep の中にだけある。
+    expect(count(/bypassCache/g)).toBe(1);
+    const stageStart = core.indexOf("private async runNarTrifectaStep(");
+    expect(stageStart).toBeGreaterThan(-1);
+    const stageEnd = core.indexOf("\n  }\n", stageStart);
+    expect(core.slice(stageStart, stageEnd)).toContain("bypassCache");
     expect(count(/this\.setAlarm\(/g)).toBe(1); // アラームを張るのは rearm の 1 箇所だけ
     // runResultStep の本体は、キャッシュ付きの取得(networkFetcher・cacheOnly)を使わず、D1 は saveResult の 1 経路だけ
     const start = core.indexOf("private async runResultStep(");
@@ -296,6 +303,7 @@ describe("wrangler.toml", () => {
     expect(body).toContain("importRaceResult(");
     expect(body).toContain("this.resultStore!.saveResult(");
     expect(body).toContain("winPayouts.length === 0"); // 払戻のテーブルが出てから保存する
+    expect(body).not.toContain("bypassCache"); // 結果の取得は、キャッシュを通す取得の bypassCache では取らない(旧: ファイル全体で 0 件)
     for (const forbidden of ["networkFetcher", "cacheOnly", "this.cache", "this.sink", "loadSettings", "fetch("]) {
       expect(body.replace(/this\.httpClient\.fetchText\(/g, ""), `runResultStep に ${forbidden} が無い`).not.toContain(forbidden);
     }

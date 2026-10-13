@@ -42,19 +42,16 @@ import {
   COMBO_EV_CALIBRATION_NOTE,
   formatHiddenAllocationsSummary,
   formatUnjudgedNote,
-  isNarRaceId,
   MIXED_ALLOCATION_INVALID_MESSAGE,
   MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER,
   MIXED_ALLOCATION_VISIBLE_LIMIT,
   mixedBetTypeLabel,
-  NAR_TRIFECTA_NOTE,
   placeUnavailableNoteForMixed,
   resolveMixedProbabilitySumWarning,
   resolvePlaceOnlyStake,
   sortMixedAllocationsForDisplay,
   splitAllocationsForDisplay,
   totalUnjudgedCount,
-  trifectaBetTypeNote,
   type MixedAllocationDisplay,
   type MixedAllocationSplit,
 } from "../src/renderer/mixed-allocation-view.js";
@@ -1022,35 +1019,18 @@ describe("buildMixedAllocationDisplay — display.exactaNote(Issue #125・AC-4)"
 });
 
 // ============================================================================
-// AC4(Issue #139): isNarRaceId — coreのvenueKindOfRaceIdと同じ判定をrenderer層で複製する
-// (`race-ledger-filter.ts`の`venueKindOfRaceLedgerRaceId`と同じ前例・同じ理由)。
-// 複製がcoreの本家からずれていないことを、中央・地方それぞれ1件で直接比較して固定する。
+// 【Issue #283で削除】AC4(Issue #139): isNarRaceId — coreのvenueKindOfRaceIdと同じ判定をrenderer層で複製していた。
+// 地方の三連単を取得するようになり(ユーザー判断2026-10-13)、地方だけ「取得していません」に差し替える特別扱いが
+// 不要になったため、`isNarRaceId`自体を除去した(判別する用途が無い)。旧describe(3件)が保証していたこと:
+//   (1) 中央のrace_idでfalse、(2) 地方のrace_idでtrue、(3) raceId無しでfalse(中央として扱う)
+// → いずれも「地方かどうかでtrifectaNoteを出し分ける」ための判定で、出し分けが無くなったので保証の対象が消えた。
+//   出し分けが無いこと自体は、下の「display.trifectaNote」describeが固定する(地方でも中央と同じcomboBetTypeNote)。
 // ============================================================================
 
-describe("isNarRaceId — coreのvenueKindOfRaceIdと同じ判定になること(Issue #139・AC4)", () => {
-  it("中央のrace_id(202603020211。場コード03)でfalse(中央)になり、coreのvenueKindOfRaceIdと一致すること", () => {
-    const raceId = "202603020211";
-    expect(isNarRaceId(raceId)).toBe(false);
-    // 前提固定+直接比較: coreの判定結果("central")と一致すること。
-    expect(venueKindOfRaceId(parseRaceId(raceId))).toBe("central");
-  });
-
-  it("地方のrace_id(202654071210。場コード54)でtrue(地方)になり、coreのvenueKindOfRaceIdと一致すること", () => {
-    const raceId = "202654071210";
-    expect(isNarRaceId(raceId)).toBe(true);
-    // 前提固定+直接比較: coreの判定結果("nar")と一致すること。
-    expect(venueKindOfRaceId(parseRaceId(raceId))).toBe("nar");
-  });
-
-  it("raceIdが無い(旧データ)ときはfalse(中央として扱う。判定不能を地方と断定しない)こと", () => {
-    expect(isNarRaceId(undefined)).toBe(false);
-  });
-});
-
 // ============================================================================
-// AC4(Issue #139): display.trifectaNote — wide/trio/quinella/exactaと同じcomboBetTypeNoteを
-// 三連単にも適用するが、地方(NAR)では"unknown"の文言を「地方競馬では三連単を取得していません」
-// に差し替えること(地方は当面三連単を取得しないため、再分析しても反映されない)。
+// AC4(Issue #139、Issue #283で改訂): display.trifectaNote — wide/trio/quinella/exactaと同じcomboBetTypeNoteを
+// 三連単にも適用する。#139では地方(NAR)の"unknown"を「地方競馬では三連単を取得していません」に差し替えていたが
+// (当時は地方で再分析しても取得されなかったため)、#283で地方も取得するようになり、地方も中央と同じ文言にする。
 // ============================================================================
 
 describe("buildMixedAllocationDisplay — display.trifectaNote(Issue #139・AC4)", () => {
@@ -1088,7 +1068,7 @@ describe("buildMixedAllocationDisplay — display.trifectaNote(Issue #139・AC4)
     void umabans;
   });
 
-  it("【地方限定・unavailable】地方(NAR)のレースでも、三連単が発売されていない(comboOddsState='unavailable')ときは地方の特例文言(NAR_TRIFECTA_NOTE)ではなく通常のcomboBetTypeNoteの文言になること(殺す変異: 分岐条件を'unknown以外'に広げる)", () => {
+  it("【地方限定・unavailable】地方(NAR)のレースでも、三連単が発売されていない(comboOddsState='unavailable')ときは通常のcomboBetTypeNoteの文言になること(殺す変異: 分岐条件を'unknown以外'に広げる)", () => {
     const race = raceWithPositiveCombos(8, {
       raceId: "202654071210",
       trifectaCombo: {},
@@ -1109,10 +1089,9 @@ describe("buildMixedAllocationDisplay — display.trifectaNote(Issue #139・AC4)
     }
     expect(view.diagnostics.trifecta.comboOddsState).toBe("unavailable");
     expect(view.display.trifectaNote).toBe(comboBetTypeNote(view.diagnostics.trifecta));
-    expect(view.display.trifectaNote).not.toBe(NAR_TRIFECTA_NOTE);
   });
 
-  it("【地方限定・failed】地方(NAR)のレースでも、三連単の取得に失敗した(comboOddsState='failed')ときは地方の特例文言(NAR_TRIFECTA_NOTE)ではなく通常のcomboBetTypeNoteの文言になること(殺す変異: 分岐条件を'unknown以外'に広げる)", () => {
+  it("【地方限定・failed】地方(NAR)のレースでも、三連単の取得に失敗した(comboOddsState='failed')ときは通常のcomboBetTypeNoteの文言になること(殺す変異: 分岐条件を'unknown以外'に広げる)", () => {
     const race = raceWithPositiveCombos(8, {
       raceId: "202654071210",
       trifectaCombo: {},
@@ -1133,7 +1112,6 @@ describe("buildMixedAllocationDisplay — display.trifectaNote(Issue #139・AC4)
     }
     expect(view.diagnostics.trifecta.comboOddsState).toBe("failed");
     expect(view.display.trifectaNote).toBe(comboBetTypeNote(view.diagnostics.trifecta));
-    expect(view.display.trifectaNote).not.toBe(NAR_TRIFECTA_NOTE);
   });
 
   it("【地方限定・EVプラス】地方(NAR)のレースでも、三連単にEVプラスの候補があるときはnull(注記なし)であること(殺す変異: 分岐条件を'unknown以外'に広げる)", () => {
@@ -1198,10 +1176,15 @@ describe("buildMixedAllocationDisplay — display.trifectaNote(Issue #139・AC4)
     }
     expect(view.diagnostics.trifecta.comboOddsState).toBe("unknown");
     expect(view.display.trifectaNote).toBe(comboBetTypeNote(view.diagnostics.trifecta));
-    expect(view.display.trifectaNote).not.toBe(NAR_TRIFECTA_NOTE);
   });
 
-  it("★AC4の核心: 地方のレースで三連単が未取得(comboOddsState='unknown')のときは、『地方競馬では三連単を取得していません』を出し、既存の『設定変更後に再分析すると反映されます』は出さないこと(地方は当面取得しないため、再分析しても反映されない)", () => {
+  // 【Issue #283で改訂】旧版「★AC4の核心: 地方のレースで三連単が未取得(unknown)のときは『地方競馬では三連単を取得していません』を出し、
+  // 既存の『設定変更後に再分析すると反映されます』は出さない」と「trifectaBetTypeNoteを直接呼んでも同じ結果になること」の新旧対応表:
+  //   旧1(地方のunknownは専用文言) → 新1: 地方のunknownも中央と同じcomboBetTypeNote(「設定変更後に再分析すると反映されます」)。
+  //        地方も再分析すれば取得されるようになった(#283)ので、この案内が事実になった。専用文言が再混入しない(「取得していません」を含まない)ことも固定する
+  //   旧2(既存のcomboBetTypeNoteと異なる文言) → 新2: 同一であること(出し分けが無い)
+  //   旧3(trifectaBetTypeNoteへの委譲の確認) → 関数自体を除去したので対象が消えた。`display.trifectaNote`が`comboBetTypeNote`と一致することが新1で固定される
+  it("★Issue #283: 地方のレースで三連単が未取得(comboOddsState='unknown')のときも、中央と同じ『設定変更後に再分析すると反映されます』の案内を出すこと(地方も再分析すれば取得される)。『取得していません』の専用文言には戻らない", () => {
     const race = raceWithPositiveCombos(8, { raceId: "202654071210" });
     const view = buildMixedAllocationDisplay(race, settings());
     expect(view.kind).toBe("mixed");
@@ -1213,13 +1196,10 @@ describe("buildMixedAllocationDisplay — display.trifectaNote(Issue #139・AC4)
     }
     // 前提固定(空振り防止): 実際にcomboOddsState='unknown'に到達していること。
     expect(view.diagnostics.trifecta.comboOddsState).toBe("unknown");
-    // 前提固定(空振り防止): 既存のcomboBetTypeNote(中央向け文言)とは異なる文言であること。
-    expect(view.display.trifectaNote).not.toBe(comboBetTypeNote(view.diagnostics.trifecta));
-    expect(view.display.trifectaNote).toBe(NAR_TRIFECTA_NOTE);
-  });
-
-  it("trifectaBetTypeNoteを直接呼んでも同じ結果になること(display.trifectaNoteが本関数へ委譲していることの確認)", () => {
-    expect(trifectaBetTypeNote({ kind: "not-requested" }, "202654071210")).toBeNull();
+    expect(view.display.trifectaNote).toBe(comboBetTypeNote(view.diagnostics.trifecta));
+    expect(view.display.trifectaNote).toContain("設定変更後に再分析すると反映されます");
+    expect(view.display.trifectaNote).not.toContain("取得していません。");
+    expect(view.display.trifectaNote).not.toContain("地方競馬では三連単");
   });
 });
 

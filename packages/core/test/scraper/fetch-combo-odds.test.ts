@@ -497,15 +497,15 @@ describe("fetchComboOdds(馬連。Issue #113・#24-D2)", () => {
 });
 
 /**
- * 三連単(trifecta)の配線(Issue #130・#25-D)。
+ * 三連単(trifecta)の配線(Issue #130・#25-D、地方の全軸取得は Issue #283)。
  *
  * 中央は馬単・馬連と同じ「単発リクエスト」だが、キーは着順どおり(ordered)のためexpectedComboCountは
  * 組合せC(n,r)ではなく順列P(n,r)で計算される(#106のexactaと同じ式)。地方は3連複と同じ
- * 「軸馬別取得」が必要な券種だが、**全軸を回すオーケストレーション関数は本Issueでは作らない**
- * (オーケストレーター裁定Q2)。そのため`fetchComboOdds`の地方三連単経路は、3連複の
- * `case "trio": throw`と同じ理由で単発リクエストとしては扱えないことをthrowで示す
- * (`comboOddsUrlFor`の両switchに`case "trifecta"`が無い場合はコンパイルエラーになるため、
- * 実装前はビルド自体が通らない形でRedになる)。
+ * 「軸馬別取得」が必要な券種で、#130では1軸単位の`fetchNarTrifectaAxisOdds`だけを提供し、
+ * `fetchComboOdds`の地方三連単経路は単発リクエストとしては扱えないことをthrowで示していた。
+ * **Issue #283で全軸を回す`fetchComboOdds`の地方三連単分岐を追加した**(下記の
+ * 「fetchComboOdds(地方三連単: 全軸の軸走査。Issue #283)」describe。旧テスト「地方三連単を
+ * fetchComboOdds経由で呼ぶとthrowすること」は、この契約変更で意図的に置き換えた)。
  */
 describe("fetchComboOdds(三連単。Issue #130・#25-D)", () => {
   it("中央三連単: 1リクエストのみ発行し、trifectaOddsApiUrlを叩き、expectedComboCountがP(16,3)=3360になること(C(16,3)=560ではない)", async () => {
@@ -520,17 +520,6 @@ describe("fetchComboOdds(三連単。Issue #130・#25-D)", () => {
     expect(result.state).toBe("available");
     expect(result.odds.size).toBe(3360); // P(16,3)、実測(fixtures/odds_trifecta_202603020211.json)
     expect(result.diagnostics.expectedComboCount).toBe(3360);
-  });
-
-  it("地方三連単をfetchComboOdds(汎用オーケストレーター)経由で呼ぶとthrowすること(全軸を回す実装は#132のスコープであり本Issueでは提供しない)", async () => {
-    const { fetcher } = createFakeFetcher(() => {
-      throw new Error("呼ばれないはず");
-    });
-    const startingUmabans = Array.from({ length: 12 }, (_, i) => i + 1);
-
-    await expect(
-      fetchComboOdds(NAR_RACE_ID, "trifecta", startingUmabans, fetcher),
-    ).rejects.toThrow();
   });
 });
 
@@ -594,6 +583,196 @@ describe("fetchNarTrifectaAxisOdds(地方三連単の軸単位取得。Issue #13
     await expect(fetchNarTrifectaAxisOdds(NAR_RACE_ID, 1.5, fetcher)).rejects.toThrow();
     await expect(fetchNarTrifectaAxisOdds(NAR_RACE_ID, 19, fetcher)).rejects.toThrow();
     expect(calls.length).toBe(0);
+  });
+});
+
+/**
+ * 最小限の合成NAR三連単オッズHTML(1軸ぶん)。軸(1着)を固定した全順列P(n-1,2)を返す。
+ * 値は組ごとに一意(a*1000+b*10+c の整数.0)で、どの軸のどの組かをテストから逆算できる。
+ */
+function narTrifectaAxisHtml(axis: number, umabans: readonly number[]): string {
+  const cells: string[] = [];
+  for (const b of umabans) {
+    if (b === axis) continue;
+    for (const c of umabans) {
+      if (c === axis || c === b) continue;
+      cells.push(
+        `<tr><td class="Odds" id="chk_x_b8_c0_${axis}_${b}_${c}">${axis * 1000 + b * 10 + c}.0</td></tr>`,
+      );
+    }
+  }
+  return `<div id="odds_view_form"><table class="Odds_Table">${cells.join("")}</table></div>`;
+}
+
+/** URLの`jiku=`から軸番号を取り出す。 */
+function jikuOf(url: string): number {
+  return Number(/[?&]jiku=(\d+)/.exec(url)![1]);
+}
+
+/**
+ * fetchComboOdds(地方三連単: 全軸の軸走査。Issue #283)。
+ *
+ * 地方の三連単は軸(1着)ごとに取得する。3連複(n-2軸)と違い、どの馬番も1着になりうるため
+ * **出走馬番の全数(n本)**を叩く。軸どうしのキーは先頭の馬番が異なるので重ならない。
+ */
+describe("fetchComboOdds(地方三連単: 全軸の軸走査。Issue #283)", () => {
+  const umabans12 = Array.from({ length: 12 }, (_, i) => i + 1);
+
+  it("12頭→軸12件、URLがjiku=1..12の順で直列に発行され、requestCount=12・axisUmabans=1..12になること(3連複の10件ではない)", async () => {
+    const { fetcher, calls, maxConcurrent } = createFakeFetcher((url) =>
+      narTrifectaAxisHtml(jikuOf(url), umabans12),
+    );
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "trifecta", umabans12, fetcher);
+
+    expect(calls.length).toBe(12);
+    expect(calls.map((c) => c.url)).toEqual(umabans12.map((k) => narTrifectaOddsAxisUrl(NAR_RACE_ID, k)));
+    expect(maxConcurrent()).toBe(1);
+    expect(result.diagnostics.requestCount).toBe(12);
+    expect(result.diagnostics.axisUmabans).toEqual(umabans12);
+    expect(result.diagnostics.attempts).toHaveLength(12);
+  });
+
+  it("全軸が取れれば、P(12,3)=1320件が欠落なく揃い、期待数と一致して available になること(衝突0件)", async () => {
+    const { fetcher } = createFakeFetcher((url) => narTrifectaAxisHtml(jikuOf(url), umabans12));
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "trifecta", umabans12, fetcher);
+
+    expect(result.state).toBe("available");
+    expect(result.odds.size).toBe(1320);
+    expect(result.diagnostics.expectedComboCount).toBe(1320);
+    expect(result.diagnostics.obtainedComboCount).toBe(1320);
+    expect(result.diagnostics.missingComboCount).toBe(0);
+    expect(result.diagnostics.numericConflictCount).toBe(0);
+    expect(result.diagnostics.nullWinConflictCount).toBe(0);
+    // 順序付きキー(着順どおり)で引けること: 軸=7, 2着=3, 3着=11 → "070311"。逆順の"110307"は別の値
+    expect(result.odds.get("070311")?.oddsMin).toBe(7 * 1000 + 3 * 10 + 11);
+    expect(result.odds.get("110307")?.oddsMin).toBe(11 * 1000 + 3 * 10 + 7);
+    expect(result.odds.get("070311")?.oddsMin).not.toBe(result.odds.get("110307")?.oddsMin);
+  });
+
+  it("実フィクスチャ(軸1・2・5)+他の軸は未発売: 330件(=110×3)、5→7→1 のキー\"050701\"が2600.9(確定払戻260,090円÷100)で引けること", async () => {
+    const fixtures: Record<number, string> = {
+      1: loadFixture("nar_odds_b8_202654071210.html"),
+      2: loadFixture("nar_odds_b8_jiku2_202654071210.html"),
+      5: loadFixture("nar_odds_b8_jiku5_202654071210.html"),
+    };
+    const { fetcher } = createFakeFetcher((url) => fixtures[jikuOf(url)] ?? NAR_UNAVAILABLE_HTML);
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "trifecta", umabans12, fetcher);
+
+    expect(result.state).toBe("available");
+    expect(result.odds.size).toBe(330);
+    expect(result.diagnostics.expectedComboCount).toBe(1320);
+    expect(result.diagnostics.missingComboCount).toBe(990);
+    expect(result.diagnostics.numericConflictCount).toBe(0);
+    const states = result.diagnostics.attempts.map((a) => `${a.axis}:${a.state}`);
+    expect(states.filter((s) => s.endsWith(":available"))).toEqual(["1:available", "2:available", "5:available"]);
+    expect(states.filter((s) => s.endsWith(":unavailable"))).toHaveLength(9);
+    expect(result.odds.get("050701")?.oddsMin).toBe(2600.9);
+    expect(result.odds.get("050107")?.oddsMin).toBe(3212.9); // 2着・3着を入れ替えた別の組
+  });
+
+  it("1軸だけHTTP失敗しても、他の軸の結果は捨てず available になり、その軸の組だけがキーごと不在になること(部分被覆)", async () => {
+    const { fetcher } = createFakeFetcher((url) =>
+      jikuOf(url) === 7 ? new Error("模擬したHTTP失敗") : narTrifectaAxisHtml(jikuOf(url), umabans12),
+    );
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "trifecta", umabans12, fetcher);
+
+    expect(result.state).toBe("available");
+    expect(result.odds.size).toBe(1320 - 110); // 軸7ぶん(P(11,2)=110)が欠落
+    expect(result.diagnostics.missingComboCount).toBe(110);
+    expect(result.diagnostics.attempts.find((a) => a.axis === 7)?.state).toBe("fetchFailed");
+    expect(result.odds.has("070203")).toBe(false);
+    expect(result.odds.has("010203")).toBe(true);
+  });
+
+  it("1軸だけ構造異常(parseError)でも、他の軸は残り、その軸は parseError と分類されること", async () => {
+    const { fetcher } = createFakeFetcher((url) =>
+      jikuOf(url) === 4 ? "<html><body>想定外の構造</body></html>" : narTrifectaAxisHtml(jikuOf(url), umabans12),
+    );
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "trifecta", umabans12, fetcher);
+
+    expect(result.state).toBe("available");
+    expect(result.diagnostics.attempts.find((a) => a.axis === 4)?.state).toBe("parseError");
+    expect(result.odds.size).toBe(1320 - 110);
+  });
+
+  it("全軸が未発売なら state=unavailable(早期終了せず、全12軸を叩く。3連複と同じ)", async () => {
+    const presale = loadFixture("nar_odds_b8_presale_202654092701_20260926.html");
+    const { fetcher, calls } = createFakeFetcher(() => presale);
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "trifecta", umabans12, fetcher);
+
+    expect(calls.length).toBe(12);
+    expect(result.state).toBe("unavailable");
+    expect(result.odds.size).toBe(0);
+    expect(result.diagnostics.attempts.every((a) => a.state === "unavailable")).toBe(true);
+  });
+
+  it("全軸がHTTP失敗なら state=failed(未発売と混同しない)", async () => {
+    const { fetcher } = createFakeFetcher(() => new Error("模擬したHTTP失敗"));
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "trifecta", umabans12, fetcher);
+
+    expect(result.state).toBe("failed");
+    expect(result.odds.size).toBe(0);
+    expect(result.diagnostics.attempts.every((a) => a.state === "fetchFailed")).toBe(true);
+  });
+
+  it("取消で馬番が飛ぶ {2,3,5,7,9} は、その5軸だけを叩く(存在しない馬番1を軸にしない)。期待数は P(5,3)=60", async () => {
+    const present = [2, 3, 5, 7, 9];
+    const { fetcher, calls } = createFakeFetcher((url) => narTrifectaAxisHtml(jikuOf(url), present));
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "trifecta", present, fetcher);
+
+    expect(calls.map((c) => jikuOf(c.url))).toEqual(present);
+    expect(result.diagnostics.expectedComboCount).toBe(60);
+    expect(result.odds.size).toBe(60);
+    expect(result.diagnostics.missingComboCount).toBe(0);
+  });
+
+  it("3頭未満(組合せが成立しない)ではHTTPを発行せず、unavailable・期待数0になること", async () => {
+    const { fetcher, calls } = createFakeFetcher(() => new Error("呼ばれないはず"));
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "trifecta", [1, 2], fetcher);
+
+    expect(calls.length).toBe(0);
+    expect(result.state).toBe("unavailable");
+    expect(result.diagnostics.requestCount).toBe(0);
+    expect(result.diagnostics.expectedComboCount).toBe(0);
+  });
+
+  it("軸の馬番が契約違反(19)ならHTTPを1本も発行する前にthrowすること(成功済みの軸の結果を握りつぶさないよう、ループの外で検証する)", async () => {
+    const { fetcher, calls } = createFakeFetcher(() => narTrifectaAxisHtml(1, [1, 2, 3]));
+
+    await expect(fetchComboOdds(NAR_RACE_ID, "trifecta", [1, 2, 3, 19], fetcher)).rejects.toThrow();
+    expect(calls.length).toBe(0);
+  });
+
+  it("optionsは全軸に一様に伝播すること(maxAgeMs/bypassCache)", async () => {
+    const { fetcher, calls } = createFakeFetcher((url) => narTrifectaAxisHtml(jikuOf(url), [1, 2, 3, 4]));
+    const options: CachedFetchTextOptions = { maxAgeMs: 12345, bypassCache: true };
+
+    await fetchComboOdds(NAR_RACE_ID, "trifecta", [1, 2, 3, 4], fetcher, options);
+
+    expect(calls.length).toBe(4); // 前提固定(n=4→軸4件)
+    for (const call of calls) {
+      expect(call.options).toEqual(options);
+    }
+  });
+
+  it("中央の三連単は従来どおり1リクエストのままであること(地方の全軸取得の追加で中央が変わらない)", async () => {
+    const json = loadFixture("odds_trifecta_202603020211.json");
+    const { fetcher, calls } = createFakeFetcher(() => json);
+
+    const result = await fetchComboOdds(CENTRAL_RACE_ID, "trifecta", Array.from({ length: 16 }, (_, i) => i + 1), fetcher);
+
+    expect(calls.length).toBe(1);
+    expect(result.diagnostics.axisUmabans).toEqual([]);
+    expect(result.diagnostics.requestCount).toBe(1);
   });
 });
 

@@ -312,20 +312,38 @@ describe("1 回の取得の fetcher 呼び出しの上限(サブリクエスト�
   });
 });
 
-describe("騎手を足す前の本数の式(docs の根拠): 中央 N+9(組合せ ON)・地方 2N+4(組合せ ON。三連単は取らない)", () => {
-  it("地方 12 頭・組合せ ON: 騎手以外の呼び出しは 2N+4 = 28 本。騎手 12 人を足して合計 40 本(上限ちょうど)で、警告なし", async () => {
-    const narHandler = (url: string): string => {
-      if (url.includes("shutuba.html")) return loadFixture("nar_shutuba_202654071210.html");
-      if (url.includes("ajax_horse_results")) return loadFixture("horse_results_2021105857.json");
-      if (url.includes("type=b3")) return loadFixture("nar_odds_b3_202654071210.html");
-      if (url.includes("type=b4")) return loadFixture("nar_odds_b4_202654071210.html");
-      if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
-      if (url.includes("type=b6")) return loadFixture("nar_odds_b6_202654071210.html");
-      if (url.includes("type=b7")) return loadFixture("nar_odds_b7_jiku1_202654071210.html");
-      if (url.includes("odds/index.html")) return loadFixture("nar_odds_b1_202654071210.html");
-      if (url.includes("/jockey/result.html")) return loadFixture("nar_jockey_results_05496.html");
-      throw new Error(`未知のURL(NAR): ${url}`);
-    };
+describe("騎手を足す前の本数の式(docs の根拠): 中央 N+9(組合せ ON)・地方 2N+4(組合せ ON。三連単を除く)・地方 3N+4(三連単の全軸を足す。Issue #283)", () => {
+  /** 地方12頭の組合せ ON 用ハンドラ。三連単(type=b8)は未発売の形(本数の検証だけが目的)。 */
+  const narHandler = (url: string): string => {
+    if (url.includes("shutuba.html")) return loadFixture("nar_shutuba_202654071210.html");
+    if (url.includes("ajax_horse_results")) return loadFixture("horse_results_2021105857.json");
+    if (url.includes("type=b3")) return loadFixture("nar_odds_b3_202654071210.html");
+    if (url.includes("type=b4")) return loadFixture("nar_odds_b4_202654071210.html");
+    if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
+    if (url.includes("type=b6")) return loadFixture("nar_odds_b6_202654071210.html");
+    if (url.includes("type=b8")) return `<div id="odds_view_form"></div>`;
+    if (url.includes("type=b7")) return loadFixture("nar_odds_b7_jiku1_202654071210.html");
+    if (url.includes("odds/index.html")) return loadFixture("nar_odds_b1_202654071210.html");
+    if (url.includes("/jockey/result.html")) return loadFixture("nar_jockey_results_05496.html");
+    throw new Error(`未知のURL(NAR): ${url}`);
+  };
+
+  it("地方 12 頭・組合せ ON・三連単を別の段階に分ける(deferNarTrifecta): 騎手以外の呼び出しは 2N+4 = 28 本。騎手 12 人を足して合計 40 本(上限ちょうど)で、警告なし(従来の保証を維持)", async () => {
+    const fetcher = new RecordingFetcher(narHandler);
+    const data = await scrapeRace(
+      parseRaceId("202654071210"),
+      { fetcher, now: FIXED_NOW },
+      { includeJockeyStats: true, includeComboOdds: true, deferNarTrifecta: true },
+    );
+    const n = data.horses.length;
+    expect(n).toBe(12);
+    expect(fetcher.calls.filter((c) => !c.url.includes("/jockey/result.html"))).toHaveLength(2 * n + 4);
+    expect(fetcher.jockeyCalls).toHaveLength(12);
+    expect(fetcher.calls).toHaveLength(40);
+    expect(data.meta.warnings.filter((w) => w.kind === "騎手")).toEqual([]);
+  });
+
+  it("地方 12 頭・組合せ ON・三連単をインラインで取る(既定): 騎手以外の呼び出しは 3N+4 = 40 本で上限に達し、騎手は 1 人も取らず、警告に 12 人・補正なしが出る(cloud版が三連単を別の段階に分ける理由)", async () => {
     const fetcher = new RecordingFetcher(narHandler);
     const data = await scrapeRace(
       parseRaceId("202654071210"),
@@ -334,9 +352,23 @@ describe("騎手を足す前の本数の式(docs の根拠): 中央 N+9(組合�
     );
     const n = data.horses.length;
     expect(n).toBe(12);
-    expect(fetcher.calls.filter((c) => !c.url.includes("/jockey/result.html"))).toHaveLength(2 * n + 4);
+    expect(fetcher.calls.filter((c) => !c.url.includes("/jockey/result.html"))).toHaveLength(3 * n + 4);
+    expect(fetcher.calls.filter((c) => c.url.includes("type=b8"))).toHaveLength(n); // 三連単はN本
+    expect(fetcher.jockeyCalls).toHaveLength(0);
+    const warns = data.meta.warnings.filter((w) => w.kind === "騎手");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]!.message).toContain("12 人");
+    expect(warns[0]!.message).toContain("補正なし");
+  });
+
+  it("jockeyRequestLimitを大きくすれば、インライン(3N+4)でも騎手は全員取れる(計算ステップがネットワークに出ないため上限を上書きする根拠)", async () => {
+    const fetcher = new RecordingFetcher(narHandler);
+    const data = await scrapeRace(
+      parseRaceId("202654071210"),
+      { fetcher, now: FIXED_NOW },
+      { includeJockeyStats: true, includeComboOdds: true, jockeyRequestLimit: Number.MAX_SAFE_INTEGER },
+    );
     expect(fetcher.jockeyCalls).toHaveLength(12);
-    expect(fetcher.calls).toHaveLength(40);
     expect(data.meta.warnings.filter((w) => w.kind === "騎手")).toEqual([]);
   });
 

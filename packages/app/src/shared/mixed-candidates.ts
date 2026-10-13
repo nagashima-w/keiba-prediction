@@ -245,8 +245,8 @@ export interface MixedCandidateBuildInput {
   /**
    * 三連単オッズ(Issue #137・#25-E2)。`options.betTypes`に`"trifecta"`があるときのみ
    * 参照される。Issue #139(#25-E3b)で`ALL_MIXED_CANDIDATE_BET_TYPES`が`"trifecta"`を
-   * 含むようになったため、既定呼び出しでも実際に参照される。**地方(NAR)では常に`undefined`**
-   * (ユーザー判断2026-09-27により地方の三連単は当面取得しないため)。
+   * 含むようになったため、既定呼び出しでも実際に参照される。地方(NAR)も取得する
+   * (Issue #283・ユーザー判断2026-10-13。旧: 地方では常に`undefined`)。
    */
   readonly trifectaCombo?: Record<string, number | null>;
   /**
@@ -260,12 +260,10 @@ export interface MixedCandidateBuildInput {
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
   /**
    * レースID(Issue #139・#25-E3b・AC4)。本ファイル自体は参照しない(候補構築は中央/地方を
-   * 問わず同一ロジック)。`renderer/mixed-allocation-view.ts`が三連単の状態注記
-   * (`trifectaBetTypeNote`)で「地方は当面三連単を取得しない」ことを判別するためだけに使う。
-   * `AnalysisResult`は常に`raceId`を持つため、`buildMixedAllocationDisplay`の実際の呼び出し元
-   * (`BatchAnalysisView.tsx`等)は`AnalysisResult`をそのまま渡せば構造的に値が入る。
-   * テスト等でraceIdを持たない最小入力を渡した場合はoptionalのままundefinedになり、
-   * `isNarRaceId(undefined)`が`false`(中央として扱う。判定不能を地方と断定しない)を返す。
+   * 問わず同一ロジック)。#139では`renderer/mixed-allocation-view.ts`が三連単の状態注記
+   * (`trifectaBetTypeNote`)で「地方は当面三連単を取得しない」ことを判別するためだけに使っていたが、
+   * **Issue #283で地方の三連単も取得するようになり、その特別扱いを除去した**ため、現在は参照する
+   * 箇所が無い(フィールド自体の削除はスコープ外として残している)。
    */
   readonly raceId?: string;
 }

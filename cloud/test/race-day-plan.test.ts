@@ -1300,6 +1300,30 @@ describe("G-C1(ステップの直前): 自動で積んだ pre_race は、各ス�
     expect(nonListUrls(h).length).toBeGreaterThan(urlsBefore);
   });
 
+  it("地方三連単の段階(Issue #283): 発走に達していたら、gate に出ず failed(理由 started)。段階の行も消える", async () => {
+    const { h } = await autoQueued();
+    const queuedAt = preRaceRow(h)[0]!.queued_at;
+    h.sql.exec("UPDATE race_day_tasks SET status = 'fetched', fetch_started_at = ?, settings_json = ? WHERE mode = 'pre_race'", jst("09:15"), JSON.stringify(DEFAULT_CLOUD_SETTINGS));
+    h.sql.exec("INSERT INTO race_day_nar_trifecta (race_id, instance, axis, state) VALUES (?, ?, 1, 'pending')", R1, queuedAt);
+    const urlsBefore = nonListUrls(h).length;
+    expect(await wakeAt(h, jst("10:00"))).toBe(`${R1}:pre_race:fetch:failed`);
+    expect(nonListUrls(h).length).toBe(urlsBefore);
+    expect(preRaceRow(h)).toMatchObject([{ status: "failed", error: AUTO_RUN_STARTED_ERROR }]);
+    expect(resultOf(h, R1)).toMatchObject({ kind: "failed", reason: "started" });
+    expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_nar_trifecta").toArray() as { n: number }[])[0]!.n).toBe(0);
+  });
+
+  it("対照(地方三連単の段階): 発走の 1ms 前なら、ガードは働かず gate に出て軸を取る(取得に失敗しても段階は ok で進む)", async () => {
+    const { h } = await autoQueued();
+    const queuedAt = preRaceRow(h)[0]!.queued_at;
+    h.sql.exec("UPDATE race_day_tasks SET status = 'fetched', fetch_started_at = ?, settings_json = ? WHERE mode = 'pre_race'", jst("09:15"), JSON.stringify(DEFAULT_CLOUD_SETTINGS));
+    h.sql.exec("INSERT INTO race_day_nar_trifecta (race_id, instance, axis, state) VALUES (?, ?, 1, 'pending')", R1, queuedAt);
+    const urlsBefore = nonListUrls(h).length;
+    expect(await wakeAt(h, jst("10:00") - 1)).toBe(`${R1}:pre_race:fetch:ok`);
+    expect(nonListUrls(h).length).toBe(urlsBefore + 1);
+    expect(preRaceRow(h)).toMatchObject([{ status: "fetched" }]);
+  });
+
   it("計算ステップ: 発走に達していたら、LLM・保存先に出ず failed(理由 started)", async () => {
     const { h, sink } = await autoQueued();
     h.sql.exec("UPDATE race_day_tasks SET status = 'fetched', fetch_started_at = ?, settings_json = ? WHERE mode = 'pre_race'", jst("09:15"), JSON.stringify(DEFAULT_CLOUD_SETTINGS));

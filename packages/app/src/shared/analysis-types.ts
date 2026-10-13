@@ -198,7 +198,7 @@ export interface ComboOddsFetchOutcomeView {
 }
 
 /**
- * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉・枠連)取得結果のペア(core
+ * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単・枠連)取得結果のペア(core
  * `ComboOddsScrapeOutcome` のプレーン写し。機能D-2c第1段・Issue #28。馬連はIssue #116・
  * #24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、枠連はIssue #148・#26-E2で
  * 追加)。core
@@ -210,9 +210,9 @@ export interface ComboOddsScrapeOutcomeView {
   readonly quinella?: ComboOddsFetchOutcomeView;
   readonly exacta?: ComboOddsFetchOutcomeView;
   /**
-   * 三連単の取得結果(Issue #137・#25-E2)。**地方(NAR)では常に`undefined`**
-   * (ユーザー判断2026-09-27により地方は当面取得しないため。`AnalysisResult.trifectaCombo`
-   * のJSDoc参照)。中央では他の4券種と同じく`options.includeComboOdds`がtrueのとき設定される。
+   * 三連単の取得結果(Issue #137・#25-E2)。中央・地方とも`options.includeComboOdds`がtrueのとき
+   * 設定される(地方は軸ごとの全軸取得。Issue #283・ユーザー判断2026-10-13。旧: 地方は取得しない)。
+   * `AnalysisResult.trifectaCombo`のJSDoc参照。
    */
   readonly trifecta?: ComboOddsFetchOutcomeView;
   /**
@@ -425,9 +425,9 @@ export interface AnalysisResult {
    * 状態と原因が1対1に対応しないことは`wideCombo`と同じ(原因の判別は
    * `comboOdds.trifecta.state`を見ること)。
    *
-   * **地方(NAR)では常に`undefined`**(ユーザー判断2026-09-27により地方の三連単は当面取得
-   * しないため。地方では`scrapeRace`が調教と同じ`if (!isNar)`ガードで取得自体を試みない
-   * 〈`comboOdds.trifecta`もあわせて`undefined`のまま〉。中央では他の券種と同じ挙動)。
+   * **地方(NAR)も取得する**(Issue #283・ユーザー判断2026-10-13。軸=1着固定ごとに頭数ぶんのリクエスト。
+   * 旧: ユーザー判断2026-09-27により地方の三連単は当面取得せず、`scrapeRace`が調教と同じ
+   * `if (!isNar)`ガードで取得自体を試みなかった〈この間、地方では常に`undefined`〉)。
    *
    * 配分の券種選択(`resolveMixedBetTypes`)への接続はIssue #138(#25-E3a・
    * `includeTrifectaInAllocation`の配管)・Issue #139(#25-E3b・実際の接続)で完了した。

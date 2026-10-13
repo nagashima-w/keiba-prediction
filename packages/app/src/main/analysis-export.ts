@@ -124,8 +124,8 @@ export interface RaceSnapshot {
    * 三連単オッズ(Issue #137・#25-E2)。`wideCombo`と同じ条件・同じ理由でoptional。
    * キーは順序付き(1着・2着・3着の順序が意味を持つ。馬単`exactaCombo`と同じ性質)。
    *
-   * **地方(NAR)では常に`undefined`**(ユーザー判断2026-09-27により地方の三連単は当面
-   * 取得しないため)。このスナップショット自体は保持・エクスポート専用の写しであり、
+   * 地方(NAR)も取得する(Issue #283・ユーザー判断2026-10-13。旧: 地方では常に`undefined`)。
+   * このスナップショット自体は保持・エクスポート専用の写しであり、
    * 配分計算の入力としては一切参照されない(このファイル冒頭JSDocの`wideCombo`と同じ設計。
    * 実際の配分接続〈Issue #139・#25-E3b〉は`AnalysisResult.trifectaCombo`
    * 〈`shared/analysis-types.ts`〉側で完結している)。
@@ -196,7 +196,7 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         oikiriRank: h.oikiri?.rank ?? null,
       };
     }),
-    // 組合せオッズ(ワイド・三連複・馬連・馬単・三連単〈中央のみ〉・枠連、機能D-2c第3段・Issue #28。
+    // 組合せオッズ(ワイド・三連複・馬連・馬単・三連単・枠連、機能D-2c第3段・Issue #28。
     // 馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、
     // 枠連はIssue #148・#26-E2で追加): race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/
     // trifectaCombo/bracketQuinellaCombo・

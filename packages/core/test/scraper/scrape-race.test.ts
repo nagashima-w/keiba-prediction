@@ -813,38 +813,164 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
     });
   });
 
-  describe("地方(NAR)三連単(trifecta)は取得しないこと(ユーザー判断2026-09-27・Issue #137 AC-1)", () => {
-    it("includeComboOdds:trueでも、地方では三連単のリクエストが発生せず、trifectaCombo・comboOdds.trifectaのいずれも設定されないこと(調教〈oikiri〉と同じ、対象外としての明示スキップ。警告も出ないこと)", async () => {
+  /**
+   * 地方(NAR)三連単は全軸を取得する(Issue #283)。
+   *
+   * 旧: 「地方(NAR)三連単(trifecta)は取得しないこと(ユーザー判断2026-09-27・Issue #137 AC-1)」。
+   * ユーザーが2026-10-13に地方の三連単の対応を決定し、`scrapeRace`の`if (!isNar)`ガードを外した。
+   * 旧テスト(地方では三連単のリクエストが発生せず、trifectaCombo・comboOdds.trifectaが設定されない)が
+   * 保証していたことと、新テストの対応:
+   *  - 「地方でリクエストが発生しない」→ `deferNarTrifecta:true`のときだけ発生しない(cloud版が別のアラームで取る)
+   *  - 「trifectaCombo・comboOdds.trifectaが無い」→ 同じく`deferNarTrifecta:true`のときだけ無い
+   *  - 「警告が出ない」→ 同じ(defer時)。インライン時は、取れなかった軸があるときだけ警告
+   *  - 「他の券種(馬連・馬単)は地方でも通常どおり取得できる」→ 両方のモードで維持
+   */
+  describe("地方(NAR)三連単(trifecta)は全軸を取得し、deferNarTrifecta:trueのときだけ取得しないこと(Issue #283)", () => {
+    const NAR_UMABANS = Array.from({ length: 12 }, (_, i) => i + 1);
+
+    /** 合成の1軸ぶんのNAR三連単HTML(軸=1着固定。値は a*1000+b*10+c)。 */
+    function narTrifectaAxisHtml(axis: number): string {
+      const cells: string[] = [];
+      for (const b of NAR_UMABANS) {
+        if (b === axis) continue;
+        for (const c of NAR_UMABANS) {
+          if (c === axis || c === b) continue;
+          cells.push(`<tr><td class="Odds" id="chk_x_b8_c0_${axis}_${b}_${c}">${axis * 1000 + b * 10 + c}.0</td></tr>`);
+        }
+      }
+      return `<div id="odds_view_form"><table class="Odds_Table">${cells.join("")}</table></div>`;
+    }
+
+    /** 三連単(軸馬別b8)を合成HTMLで返し、他は既存の地方ハンドラと同じにする。 */
+    function narWithTrifectaHandler(url: string): string {
+      if (url.includes("odds_get_form.html") && url.includes("type=b8")) {
+        return narTrifectaAxisHtml(Number(/[?&]jiku=(\d+)/.exec(url)![1]));
+      }
+      if (url.includes("odds_get_form.html")) return NAR_COMBO_ODDS_UNAVAILABLE_HTML; // 3連複(b7)の軸は未発売扱い
+      if (url.includes("type=b4")) return loadFixture("nar_odds_b4_202654071210.html");
+      if (url.includes("type=b6")) return loadFixture("nar_odds_b6_202654071210.html");
+      return narHandler(url);
+    }
+
+    /** 中央の組合せオッズ(type=3〜8)を実フィクスチャで返すハンドラ(上のdescribe内のcomboAwareCentralHandlerと同じ振り分け)。 */
+    function comboAwareCentralHandler(url: string): string {
+      if (url.includes("type=5")) return loadFixture("odds_wide_202603020211.json");
+      if (url.includes("type=7")) return loadFixture("odds_trio_202603020211.json");
+      if (url.includes("type=4")) return loadFixture("odds_quinella_202603020211.json");
+      if (url.includes("type=6")) return loadFixture("odds_exacta_202603020211.json");
+      if (url.includes("type=8")) return loadFixture("odds_trifecta_202603020211.json");
+      if (url.includes("type=3")) return loadFixture("odds_wakuren_202603020211.json");
+      return defaultHandler(url);
+    }
+
+    const trifectaCalls = (fetcher: RecordingFetcher) => fetcher.calls.filter((c) => c.url.includes("type=b8"));
+
+    it("includeComboOdds:trueなら地方でも三連単を12軸ぶん(jiku=1..12)取得し、P(12,3)=1320件がtrifectaComboに順序付きキーで載り、診断値が取れること", async () => {
+      const fetcher = new RecordingFetcher(narWithTrifectaHandler);
+      const data = await scrapeRace(NAR_RACE_ID, { fetcher, now: FIXED_NOW }, { includeComboOdds: true });
+
+      expect(data.horses).toHaveLength(12); // 前提固定
+      expect(trifectaCalls(fetcher)).toHaveLength(12);
+      expect(trifectaCalls(fetcher).map((c) => Number(/[?&]jiku=(\d+)/.exec(c.url)![1]))).toEqual(NAR_UMABANS);
+      const record = data.odds.trifectaCombo;
+      expect(record).toBeDefined();
+      expect(Object.keys(record!)).toHaveLength(1320);
+      expect(record!["070311"]).toBe(7 * 1000 + 3 * 10 + 11);
+      expect(record!["110307"]).toBe(11 * 1000 + 3 * 10 + 7);
+      const outcome = data.meta.comboOdds?.trifecta;
+      expect(outcome?.state).toBe("available");
+      expect(outcome?.diagnostics.requestCount).toBe(12);
+      expect(outcome?.diagnostics.expectedComboCount).toBe(1320);
+      expect(outcome?.diagnostics.missingComboCount).toBe(0);
+      // 取れた軸のぶんは、警告が出ない
+      expect(data.meta.warnings.filter((w) => w.kind === "組合せオッズ" && w.message.includes("三連単"))).toEqual([]);
+      // JSON往復でも消えない(MapではなくRecord)
+      const roundTripped = JSON.parse(JSON.stringify(data.odds)) as { trifectaCombo: Record<string, number | null> };
+      expect(Object.keys(roundTripped.trifectaCombo)).toHaveLength(1320);
+    });
+
+    it("URL列の順序: 地方では三連単の12軸が、馬単の後・枠連(最後)の前に発行されること(既存URL列の先頭部分を変えない)", async () => {
+      const fetcher = new RecordingFetcher(narWithTrifectaHandler);
+      await scrapeRace(NAR_RACE_ID, { fetcher, now: FIXED_NOW }, { includeComboOdds: true });
+
+      const urls = fetcher.calls.map((c) => c.url);
+      const firstTrifecta = urls.findIndex((u) => u.includes("type=b8"));
+      const lastTrifecta = urls.map((u) => u.includes("type=b8")).lastIndexOf(true);
+      const exactaIndex = urls.findIndex((u) => u.includes("type=b6"));
+      expect(exactaIndex).toBeGreaterThanOrEqual(0);
+      expect(firstTrifecta).toBeGreaterThan(exactaIndex);
+      expect(lastTrifecta - firstTrifecta).toBe(11); // 連続した12本
+      expect(urls[urls.length - 1]).toContain("type=b3"); // 枠連が最後
+      expect(urls.findIndex((u) => u.includes("type=b3"))).toBeGreaterThan(lastTrifecta);
+    });
+
+    it("1軸だけ取得に失敗しても、レースは落ちず、他の軸のぶんは残り、警告に「三連単」の部分被覆が出ること(馬連・馬単は不変)", async () => {
       const fetcher = new RecordingFetcher((url) => {
-        if (url.includes("type=b4")) return loadFixture("nar_odds_b4_202654071210.html");
-        if (url.includes("type=b6")) return loadFixture("nar_odds_b6_202654071210.html");
-        return narHandler(url);
+        if (url.includes("type=b8") && url.includes("jiku=7")) throw new Error("軸7の取得に失敗した(模擬)");
+        return narWithTrifectaHandler(url);
       });
+      const data = await scrapeRace(NAR_RACE_ID, { fetcher, now: FIXED_NOW }, { includeComboOdds: true });
+
+      expect(data.meta.comboOdds?.quinella?.state).toBe("available");
+      expect(data.meta.comboOdds?.exacta?.state).toBe("available");
+      expect(Object.keys(data.odds.trifectaCombo!)).toHaveLength(1320 - 110);
+      expect(data.odds.trifectaCombo!["070203"]).toBeUndefined();
+      expect(data.odds.trifectaCombo!["010203"]).toBe(1 * 1000 + 2 * 10 + 3);
+      expect(data.meta.comboOdds?.trifecta?.state).toBe("available");
+      expect(data.meta.comboOdds?.trifecta?.diagnostics.missingComboCount).toBe(110);
+      const warning = data.meta.warnings.find((w) => w.kind === "組合せオッズ" && w.message.includes("三連単"));
+      expect(warning).toBeDefined();
+      expect(warning!.message).toContain("部分的");
+    });
+
+    it("deferNarTrifecta:trueの地方では、三連単のリクエストが1本も発生せず、trifectaCombo・comboOdds.trifectaが設定されず、警告も出ないこと(cloud版が別のアラームで取る。他の券種は不変)", async () => {
+      const fetcher = new RecordingFetcher(narWithTrifectaHandler);
       const data = await scrapeRace(
         NAR_RACE_ID,
         { fetcher, now: FIXED_NOW },
-        { includeComboOdds: true },
+        { includeComboOdds: true, deferNarTrifecta: true },
       );
 
-      // 前提固定(空振り防止): 他の組合せオッズ(馬連・馬単)は地方でも通常どおり取得できて
-      // いること(三連単だけが対象外であることをこの前提と対比させる)。
+      // 前提固定(空振り防止): 他の組合せオッズは地方でも通常どおり取得できていること
       expect(data.meta.comboOdds?.quinella?.state).toBe("available");
       expect(data.meta.comboOdds?.exacta?.state).toBe("available");
-
+      expect(trifectaCalls(fetcher)).toHaveLength(0);
       expect(data.odds.trifectaCombo).toBeUndefined();
       expect(data.meta.comboOdds?.trifecta).toBeUndefined();
-      // 三連単関連のURL(中央type=8・地方type=b8)への発行が1件も無いこと。
-      expect(
-        fetcher.calls.some((c) => c.url.includes("type=8") || c.url.includes("type=b8")),
-      ).toBe(false);
-      // 対象外は調教と同じ扱いであり、想定外の例外として警告を出さないこと
-      // (fetch-combo-odds.tsのcomboOddsUrlForが持つ「地方三連単は単発リクエストでは
-      // 扱えません」というthrowは、本テストの経路では一切発火しない=到達不能のまま)。
-      expect(
-        data.meta.warnings.filter(
-          (w) => w.kind === "組合せオッズ" && w.message.includes("三連単"),
-        ),
-      ).toEqual([]);
+      expect(data.meta.warnings.filter((w) => w.kind === "組合せオッズ" && w.message.includes("三連単"))).toEqual([]);
+    });
+
+    it("deferNarTrifecta:trueの地方のリクエスト列は、三連単の12本を除いた従来の列と同じ(馬連・馬単・枠連・3連複の軸の順序を変えない)", async () => {
+      const inline = new RecordingFetcher(narWithTrifectaHandler);
+      await scrapeRace(NAR_RACE_ID, { fetcher: inline, now: FIXED_NOW }, { includeComboOdds: true });
+      const deferred = new RecordingFetcher(narWithTrifectaHandler);
+      await scrapeRace(NAR_RACE_ID, { fetcher: deferred, now: FIXED_NOW }, { includeComboOdds: true, deferNarTrifecta: true });
+
+      const withoutTrifecta = inline.calls.map((c) => c.url).filter((u) => !u.includes("type=b8"));
+      expect(inline.calls.length - withoutTrifecta.length).toBe(12); // 前提固定: インラインでは12本が三連単
+      expect(deferred.calls.map((c) => c.url)).toEqual(withoutTrifecta);
+    });
+
+    it("deferNarTrifecta:trueでも、中央の三連単は従来どおり取得される(フラグは地方だけに効く。URL列・trifectaComboが完全に同一)", async () => {
+      const plain = new RecordingFetcher(comboAwareCentralHandler);
+      const plainData = await scrapeRace(RACE_ID, { fetcher: plain, now: FIXED_NOW }, { includeComboOdds: true });
+      const deferred = new RecordingFetcher(comboAwareCentralHandler);
+      const deferredData = await scrapeRace(
+        RACE_ID,
+        { fetcher: deferred, now: FIXED_NOW },
+        { includeComboOdds: true, deferNarTrifecta: true },
+      );
+
+      expect(plain.calls.filter((c) => c.url.includes("type=8"))).toHaveLength(1); // 前提固定
+      expect(deferred.calls.map((c) => c.url)).toEqual(plain.calls.map((c) => c.url));
+      expect(Object.keys(deferredData.odds.trifectaCombo!)).toHaveLength(3360);
+      expect(deferredData.odds.trifectaCombo).toEqual(plainData.odds.trifectaCombo);
+    });
+
+    it("includeComboOdds省略時は、deferNarTrifectaの有無によらず三連単のURLへの発行が1件も無いこと", async () => {
+      const fetcher = new RecordingFetcher(narWithTrifectaHandler);
+      await scrapeRace(NAR_RACE_ID, { fetcher, now: FIXED_NOW }, { deferNarTrifecta: true });
+      expect(trifectaCalls(fetcher)).toHaveLength(0);
     });
   });
 
@@ -947,7 +1073,7 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       expect(outcome?.diagnostics.expectedComboCount).toBe(32);
       expect(outcome?.diagnostics.obtainedComboCount).toBe(32);
       expect(fetcher.calls.filter((c) => c.url.includes("type=b3"))).toHaveLength(1);
-      // 地方では三連単は取得しない(#137)ので、枠連が最後のリクエストになる。
+      // 地方は三連単を全軸取得する(#283)が、枠連が最後のリクエストになる(このテストの地方ハンドラは三連単の軸を返さず、軸の失敗は隔離される)。
       expect(fetcher.calls[fetcher.calls.length - 1]!.url).toContain("type=b3");
       expect(
         data.meta.warnings.filter((w) => w.kind === "組合せオッズ" && w.message.includes("枠連")),

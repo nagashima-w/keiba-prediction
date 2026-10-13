@@ -24,6 +24,12 @@
  *  - 2つのステップは**別々のアラーム呼び出し**で動かす(1呼び出しの中のサブリクエスト数〈Free は 50〉を抑える・再試行でネットワークを撃ち直さない)。
  *    1回の `runNextStep` は1レースの1ステップだけを行い、続きがあればアラームを設定して戻る。
  *
+ * ## 地方三連単の段階(Issue #283)
+ * 発走前(pre_race)の取得ステップは、地方の三連単(軸=1着固定ごとに頭数ぶんのリクエスト)を取らない(`scrapeRace` の `deferNarTrifecta`)。組合せが ON の地方では、取得ステップが成功したあと、
+ * 出走馬の全馬番を `race_day_nar_trifecta`(`race-day-nar-trifecta.ts`)に pending で登録し、タスクは `fetched` になる。`fetched` の発走前のタスクに pending の軸があれば、`runStep` は計算より先に
+ * {@link RaceDayCore.runNarTrifectaStep}(**別のアラーム**。1回に最大 {@link NAR_TRIFECTA_AXES_PER_STEP} 軸を取って `fetch_cache` に積む)を呼ぶ。pending が尽きたら計算ステップ(ネットワークに出ない。キャッシュから三連単をインラインで読む)。
+ * 1アラームあたりの gate への呼び出しは、取得ステップ ≤ 40(騎手の上限)・段階 ≤ 9・計算 0。外から見える `status` は増やさない(段階の間も `fetched`)。失敗・打ち切りでも三連単なしで計算に進む。
+ *
  * ## 予約(schedule)
  * 予約だけをして戻る(`setAlarm(now)`)。本処理はアラームの中(`runNextStep`)。同じレースが実行中(queued・fetched)なら受け付けない。
  * DO は1つの開催日だけを扱う(最初の予約の開催日に固定し、別の日・raceId の年と違う日は拒否する)。
@@ -76,12 +82,13 @@ import { GradeWinnerParseError } from "../../packages/core/src/scraper/parse-gra
 import { importRaceResult } from "../../packages/core/src/ev/result-import";
 import { parseRaceFieldSize, parseRaceResult, RaceResultNotConfirmedError } from "../../packages/core/src/scraper/parse-race-result";
 import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
-import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
+import { parseKaisaiDate, parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
+import { deriveNarTrifectaAxisUmabans } from "../../packages/core/src/scraper/nar-trifecta-axis";
 import type { JockeyResultsStore } from "../../packages/core/src/scraper/jockey-results-store";
 import type { HorseRunsStore } from "./horse-runs";
 import type { RaceData } from "../../packages/core/src/scraper/scrape-race";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
-import { narRaceListSubUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
+import { narRaceListSubUrl, narTrifectaOddsAxisUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
 import { MAX_BULK_RACES } from "./bulk-limits";
 import { checkRaceDate } from "./race-date";
 import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
@@ -113,6 +120,7 @@ import {
 } from "./race-day-result";
 import type { ResultRepository } from "./result-repository";
 import { requireCacheKeyForPost } from "./post-cache-guard";
+import { NAR_TRIFECTA_AXES_PER_STEP, NarTrifectaStore } from "./race-day-nar-trifecta";
 import { PLAN_VENUES, PlanStore, type PlanRowRecord, type PlanSkipReason, type PlanVenue } from "./race-day-plan";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { DoSqlCacheStore } from "./do-cache-store";
@@ -642,6 +650,8 @@ export class RaceDayCore {
   /** 分析モデルの選択(`analysisModel`)に応じたモデルの自動選択(系統ごとの取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined。Issue #158)。 */
   private readonly modelSelectorFor: ModelSelectorFor | undefined;
   private readonly plan: PlanStore;
+  /** 地方三連単の軸ごとの取得(別のアラームの段階)の進み具合の表(Issue #283。新しい表だけ。既存の表には ALTER しない)。 */
+  private readonly narTrifecta: NarTrifectaStore;
   /** 通知の表(Issue #205。新しい表だけ)。 */
   private readonly notifyStore: NotifyStore;
   /** Discord への送信。無ければ(webhook が無効)通知の仕組み全体が無効。 */
@@ -694,6 +704,8 @@ export class RaceDayCore {
     SqlLlmResponseStore.ensureTable(this.sql);
     // 事前分析の計画の表(Issue #203。新しい表だけ。既存の表には ALTER しない)。
     this.plan = new PlanStore(this.sql);
+    // 地方三連単の段階の表(Issue #283。新しい表だけ。既存の表には ALTER しない)。
+    this.narTrifecta = new NarTrifectaStore(this.sql);
     // 通知の表(Issue #205。新しい表だけ。既存の表には ALTER しない)。
     this.notifyStore = new NotifyStore(this.sql);
     this.notifier = deps.notifier;
@@ -1744,7 +1756,11 @@ export class RaceDayCore {
 
   private runStep(task: TaskRow): Promise<StepOutcome> {
     if (task.mode === "pre_race") {
-      return task.status === "fetched" ? this.runPreRaceCompute(task) : this.runPreRaceFetch(task);
+      if (task.status !== "fetched") {
+        return this.runPreRaceFetch(task);
+      }
+      // 地方三連単の段階(Issue #283): 取得済み(fetched)でも、軸ごとの取得が残っていれば、計算より先にそれを進める(計算は pending が尽きるまで待つ)。
+      return this.narTrifecta.hasPending(task.race_id, task.queued_at) ? this.runNarTrifectaStep(task) : this.runPreRaceCompute(task);
     }
     return task.status === "fetched" ? this.runCompute(task) : this.runFetch(task);
   }
@@ -1770,6 +1786,7 @@ export class RaceDayCore {
     this.sql.exec("DELETE FROM race_day_meta WHERE key = ?", PURGE_DUE_KEY);
     // 進行中のタスクが無いので、残っている LLM の応答の記録は孤立している(消し損ねた分)。
     SqlLlmResponseStore.clearOrphans(this.sql);
+    this.narTrifecta.clearOrphans();
     const purged = this.purgeCache();
     await this.rearm();
     return { kind: "idle", purged };
@@ -2156,10 +2173,13 @@ export class RaceDayCore {
               return this.cacheOnly.fetchText(url, options);
             },
           };
+    // 騎手の取得の上限(`DEFAULT_JOCKEY_REQUEST_LIMIT`=40)は、サブリクエストの保険で、キャッシュに当たる呼び出しも数える。ここはキャッシュだけから読み、
+    // ネットワークに出ない(上限の意味が無い)ので、上限を外す。外さないと、地方 12 頭以上は三連単の全軸を読むだけで 3N+4>=40 に達し、
+    // 保存先に無い騎手をキャッシュから読めなくなる(Issue #283)。取得ステップの `scrapeRace` には渡さない(そちらの上限は有効のまま)。
     const race = await scrapeRace(
       raceId,
       { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL, jockeyStore: this.jockeyStore },
-      options,
+      { ...options, jockeyRequestLimit: Number.MAX_SAFE_INTEGER },
     );
     // 騎手の成績(種別=騎手)はキャッシュに無くても失敗にしない(その騎手は補正なし。戦績は無いと prior が作れないので失敗にする)。
     const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
@@ -2209,6 +2229,7 @@ export class RaceDayCore {
   /**
    * 発走前の取得ステップ: 設定を1回だけ読んでタスクに保存し(スナップショット)、出馬表(取消・天候・馬場を反映。TTL 10 分)・オッズ(**常にキャッシュを迂回**)・
    * 組合せオッズ(設定が ON のときだけ。同じくキャッシュを迂回)を取り直す。戦績・調教は朝のキャッシュがあればそれを使う(無ければ取る)。
+   * **地方の三連単だけは、ここでは取らず**(`deferNarTrifecta`)、成功したあと軸を `race_day_nar_trifecta` に登録して次の段階({@link runNarTrifectaStep})に回す(Issue #283)。
    */
   private async runPreRaceFetch(task: TaskRow): Promise<StepOutcome> {
     const started = this.failIfStarted(task, "fetch");
@@ -2233,7 +2254,8 @@ export class RaceDayCore {
       const race = await scrapeRace(
         parseRaceId(task.race_id),
         { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore },
-        { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), bypassOddsCache: true },
+        // 地方の三連単は軸ごとに頭数ぶんのリクエストが要るので、この取得ステップ(1回のアラーム)では取らず、次の段階(別のアラーム)に分ける(`deferNarTrifecta`。中央は無視される。Issue #283)。
+        { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), bypassOddsCache: true, deferNarTrifecta: true },
       );
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
       if (missing.length > 0) {
@@ -2242,6 +2264,10 @@ export class RaceDayCore {
       await this.prefetchGradeWinner(task, parseRaceId(task.race_id), race.race.hasGradeBadge);
       // 日報がこのレースの結果を待つように、結果の取り込みの行を積む(Issue #277)。タスクが未了(fetched)のあいだに積むので、日報の判定に隙間ができない。
       this.enqueueResultForAnalyzedRace(task.race_id, race.race.startTime);
+      // 地方三連単の段階の軸を登録する(組合せが ON の地方だけ。取消馬を除いた出走馬の全馬番。3頭未満は空=段階に入らない)。`fetched` への更新と同じ同期区間。
+      if (settings.includeComboOdds && venueKindOfRaceId(parseRaceId(task.race_id)) === "nar") {
+        this.narTrifecta.begin(task.race_id, task.queued_at, deriveNarTrifectaAxisUmabans(race.horses.map((h) => h.shutuba.umaban)));
+      }
       this.updateTask(task, "fetched", attempts, null);
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "ok" };
     } catch (error) {
@@ -2280,6 +2306,48 @@ export class RaceDayCore {
       }
       this.onWarn(`発走前の取得(${task.race_id}): 重賞の過去10年傾向を取得できなかったため、傾向なしで続けます(${redactSecrets(errorMessage(error)).slice(0, 200)})`);
     }
+  }
+
+  /**
+   * 地方三連単の段階(Issue #283): 取得済み(fetched)の発走前のタスクで、軸ごとの取得が残っているとき、**1回のアラームで最大 {@link NAR_TRIFECTA_AXES_PER_STEP} 軸**を取り、
+   * 本文を取得キャッシュ(`fetch_cache`)に積む(パースは計算ステップに任せる=二重に解析しない)。軸の結果(fetched・failed)は**取得の直後に、次の軸を取る前に**表に書く
+   * (再開・二重のアラームで、書けた軸を取り直さない。取り直すのは、書く前に落ちた 1 軸だけ)。未取得の軸が尽きたら、次のステップで計算に進む。
+   *
+   * 外への呼び出しの上限: このステップは gate への取得が最大 9 本(取得ステップの 2N+4+M ≤ 40 とは別のアラーム)で、計算ステップは 0 本。
+   * 失敗は軸ごとに隔離する: 1軸の失敗(404・通信エラー・タイムアウト・`queue-full`)はその軸だけ failed にして次へ。**ブレーカー(blocked)・許可リスト外は残りを撃たずに全部 failed**
+   * にして打ち切る(30 分のブレーカーの間に撃ち直さない)。どの場合も計算に進み、取れなかった軸は、計算ステップの `scrapeRace` がキャッシュに無い軸として `fetchFailed`
+   * (部分被覆の警告)にする。三連単なしでも他の券種で分析は完了する。
+   * 自動の発走前は、発走済みなら取得を撃たず failed にする({@link failIfStarted}。計算ステップの失敗と整合)。段階のステップの結果は `step: "fetch"` で返す。
+   */
+  private async runNarTrifectaStep(task: TaskRow): Promise<StepOutcome> {
+    const started = this.failIfStarted(task, "fetch");
+    if (started !== null) {
+      this.narTrifecta.clear(task.race_id);
+      return started;
+    }
+    const raceId = parseRaceId(task.race_id);
+    const axes = this.narTrifecta.pendingAxes(task.race_id, task.queued_at, NAR_TRIFECTA_AXES_PER_STEP);
+    for (const axis of axes) {
+      let fetchError: unknown = null;
+      try {
+        // オッズなので常にキャッシュを迂回する(`scrapeRace` の `bypassOddsCache` と同じ)。取得した本文は CachedFetcher が `fetch_cache` に書く。
+        await this.networkFetcher.fetchText(narTrifectaOddsAxisUrl(raceId, axis), { bypassCache: true });
+      } catch (error) {
+        fetchError = error;
+      }
+      // 結果は取得の直後(次の軸を取る前)に書く。書き込みの例外は軸の失敗として握らない(落ちたら、書けなかった軸だけが再開時に取り直される)。
+      this.narTrifecta.mark(task.race_id, task.queued_at, axis, fetchError === null ? "fetched" : "failed");
+      if (fetchError === null) {
+        continue;
+      }
+      if (isFatalFetchError(fetchError)) {
+        const dropped = this.narTrifecta.failAllPending(task.race_id, task.queued_at);
+        this.onWarn(`地方三連単の取得を打ち切りました(${task.race_id}。軸 ${axis} で取得先が拒否。残り ${dropped} 軸は取得しません): ${redactSecrets(errorMessage(fetchError))}`);
+        break;
+      }
+      this.onWarn(`地方三連単の軸 ${axis} を取得できませんでした(${task.race_id}): ${redactSecrets(errorMessage(fetchError))}`);
+    }
+    return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "ok" };
   }
 
   /**
@@ -2419,6 +2487,7 @@ export class RaceDayCore {
         }
       }
       this.updateTask(task, "done", task.attempts, null);
+      this.narTrifecta.clear(task.race_id); // 地方三連単の段階の行は、完了したら要らない
       // 完了した(保存済み)ので、LLM の応答の記録は要らない。
       SqlLlmResponseStore.clear(this.sql, task.race_id, task.mode);
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "compute", result: "ok" };
@@ -2426,6 +2495,7 @@ export class RaceDayCore {
       const message = redactSecrets(errorMessage(error));
       if (computeAttempts >= MAX_ATTEMPTS) {
         this.updateTask(task, "failed", task.attempts, message);
+        this.narTrifecta.clear(task.race_id);
         this.recordAutoFail(task, "compute-exhausted");
         SqlLlmResponseStore.clear(this.sql, task.race_id, task.mode); // 諦めたので、記録は要らない(再予約は新しい実行)
         this.onWarn(`発走前の計算・保存に失敗しました(${task.race_id}。試行 ${computeAttempts} 回): ${message}`);

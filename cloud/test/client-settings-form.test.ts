@@ -394,14 +394,17 @@ describe("buildSettingsModel", () => {
     expect(help).not.toContain("複勝オッズの下限"); // 複勝の EV の定義(3着内率 × 複勝オッズの下限)だけに効くと読める書き方
   });
 
-  it("補助文: 各券種の配分は、組合せオッズの取得が OFF の間は効果がない旨と、既定が ON である旨。組合せの取得は、OFF の間は組合せの券種が配分に入らない旨と、三連単は中央のみ", () => {
+  it("補助文: 各券種の配分は、組合せオッズの取得が OFF の間は効果がない旨と、既定が ON である旨。組合せの取得は、OFF の間は組合せの券種が配分に入らない旨と、地方の三連複・三連単は頭数ぶんのリクエストが要る旨", () => {
     const byKey = Object.fromEntries(buildSettingsModel(READY_INPUT()).fields.map((f) => [f.key, f.help ?? ""]));
     for (const key of ["includeWideInAllocation", "includeQuinellaInAllocation", "includeBracketQuinellaInAllocation", "includeExactaInAllocation", "includeTrioInAllocation", "includeTrifectaInAllocation"]) {
       expect(byKey[key], key).toContain("既定は ON");
       expect(byKey[key], key).toContain("OFF の間は効果がありません");
     }
     expect(byKey["includeComboOdds"]).toContain("OFF の間は、組合せの券種は配分に入りません");
-    expect(byKey["includeComboOdds"]).toContain("三連単は中央競馬のみ");
+    // 【Issue #283で改訂】旧: 「三連単は中央競馬のみ」を含むこと。地方の三連単も取得するようになったので、含まないこと + 頭数ぶんの費用を明示すること。
+    expect(byKey["includeComboOdds"]).not.toContain("中央競馬のみ");
+    expect(byKey["includeComboOdds"]).not.toContain("地方競馬では取得しません");
+    expect(byKey["includeComboOdds"]).toContain("地方競馬の三連複・三連単は頭数ぶん(最大18)のリクエスト");
     expect(byKey["bankroll"]).toContain("0 のままだと配分の提案は出ません");
     expect(byKey["perRaceCap"]).toContain("0 のままだと配分の提案は出ません");
   });

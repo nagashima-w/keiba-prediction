@@ -193,7 +193,8 @@ export interface ScrapeRaceOptions {
    * true指定時は追加で最大2リクエスト(中央ワイド1件+中央3連複1件、または地方ワイド1件)、
    * 地方3連複はさらに最大16リクエスト(軸走査。`fetch-combo-odds.ts`参照。所要は最大約24秒
    * 〈16軸×1.5秒の**導出値**であり測定値ではない。16頭なら14軸≒21秒だが、それは上限ではなく
-   * 一例〉が発行されうる。
+   * 一例〉が発行されうる。**地方三連単はさらに出走頭数ぶん**(軸=1着固定を全頭。Issue #283。
+   * `deferNarTrifecta` が true なら飛ばす)。
    */
   readonly includeComboOdds?: boolean;
   /**
@@ -212,6 +213,18 @@ export interface ScrapeRaceOptions {
    * テストが小さい値で上限の挙動を確かめるための上書き。`includeJockeyStats` が false なら無関係。
    */
   readonly jockeyRequestLimit?: number;
+  /**
+   * true のとき、**地方(NAR)の三連単だけ**取得を飛ばす(Issue #283)。リクエストも警告も出さず、
+   * `OddsSnapshot.trifectaCombo`・`ComboOddsScrapeOutcome.trifecta` も設定しない。中央は無視する
+   * (中央の三連単は常に1リクエストで取る)。既定は false(地方でも三連単を全軸取得する)。
+   *
+   * 用途: cloud版は、地方三連単の軸ごとの取得(頭数分のリクエスト)を、発走前の取得ステップの
+   * 1回のアラームに詰め込まず、**別のアラームの段階**に分ける(サブリクエスト数・壁時間の上限を
+   * どのプランでも超えないため。`cloud/src/race-day-core.ts` の `runNarTrifectaStep`)。取得ステップはこれを
+   * true で呼び、段階が軸ごとに取得してキャッシュに積み、計算ステップは false(既定)で
+   * キャッシュから読む。`includeComboOdds` が false なら無関係。
+   */
+  readonly deferNarTrifecta?: boolean;
 }
 
 /** 取得中に発生した非致命的な問題の種別。 */
@@ -247,7 +260,7 @@ export interface ComboOddsFetchOutcome {
 }
 
 /**
- * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉・枠連)取得結果のペア。
+ * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単・枠連)取得結果のペア。
  * `options.includeComboOdds`がtrueのときのみ設定される(馬連はIssue #116・#24-D3b-1、
  * 馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、枠連はIssue #148・#26-E2で追加)。
  */
@@ -257,9 +270,9 @@ export interface ComboOddsScrapeOutcome {
   readonly quinella?: ComboOddsFetchOutcome;
   readonly exacta?: ComboOddsFetchOutcome;
   /**
-   * 三連単の取得結果(Issue #137・#25-E2)。**地方(NAR)では常に`undefined`**
-   * (ユーザー判断2026-09-27により地方は当面取得しないため。`OddsSnapshot.trifectaCombo`の
-   * JSDoc参照)。中央では他の4券種と同じく`options.includeComboOdds`がtrueのとき設定される。
+   * 三連単の取得結果(Issue #137・#25-E2)。中央・地方とも`options.includeComboOdds`がtrueのとき
+   * 設定される(地方は軸ごとの全軸取得。Issue #283)。**ただし`options.deferNarTrifecta`がtrueの
+   * 地方では`undefined`**(取得を別の段階に分けるとき。`OddsSnapshot.trifectaCombo`のJSDoc参照)。
    */
   readonly trifecta?: ComboOddsFetchOutcome;
   /**
@@ -363,16 +376,15 @@ function errorMessage(error: unknown): string {
  * `ComboBetType`に`exacta`(馬単)を追加した際、この三項演算子はコンパイルエラーを
  * 出さずに馬単を誤って「3連複」と表示する状態になっていた(**現在は本ファイルの
  * `fetchComboBetTypeOdds`呼び出しがwide・trio・quinella〈Issue #116・#24-D3b-1〉・
- * exacta〈Issue #122・#24-E2〉・trifecta〈Issue #137・#25-E2。ただし中央のみ〉の
+ * exacta〈Issue #122・#24-E2〉・trifecta〈Issue #137・#25-E2。地方も#283から〉の
  * 5券種すべてを取得しており、5つともproductionから到達する。枠連〈Issue #148・#26-E2〉は
  * `fetchComboBetTypeOdds`ではなく専用の`fetchBracketQuinellaOutcome`が取得するが、警告文言の
  * 券種名は本関数を共有するため`bracketQuinella`のcaseも到達する**)。`default`のnever
  * 到達チェックにより、次に券種を追加する際〈#26等〉は必ずコンパイルエラーで
  * 気づける形にしておく。
  *
- * **三連単(trifecta)は地方(NAR)では`fetchComboBetTypeOdds`が呼ばれない**
- * (ユーザー判断2026-09-27。`scrapeRace`の`if (!isNar)`ガード参照)ため、このcaseの
- * 地方分岐は依然として到達しないが、中央分岐は#137で到達するようになった。
+ * 三連単(trifecta)は、中央が#137から、地方も#283から`fetchComboBetTypeOdds`で取得するため、
+ * このcaseは中央・地方とも到達する(`options.deferNarTrifecta`が true の地方だけ呼ばれない)。
  */
 function comboBetTypeLabel(betType: ComboBetType): string {
   switch (betType) {
@@ -687,7 +699,7 @@ export async function scrapeRace(
   // (5)自体が実行されないため、この行の位置に関わらず既存の挙動と完全に一致する)。
   const oddsFetchedAt = now().toISOString();
 
-  // (5) 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉・枠連。オプトイン。既定OFF。
+  // (5) 組合せオッズ(ワイド・3連複・馬連・馬単・三連単・枠連。オプトイン。既定OFF。
   // 機能D-2b-B・Issue #33第4段。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、
   // 三連単はIssue #137・#25-E2、枠連はIssue #148・#26-E2で追加):
   // options.includeComboOddsがtrueの場合のみ実行する。既定呼び出しでは本ステップは一切実行
@@ -701,13 +713,13 @@ export async function scrapeRace(
   // (追加コストは小頭数レースの1リクエストだけ)。取得には出走馬の**枠番**を渡す
   // (期待組合せ数は枠の構成で決まる。`shutuba.horses[].wakuban`は`parseShutuba`が1〜8で検証済み)。
   //
-  // **三連単は中央のみ取得する(ユーザー判断2026-09-27)**: 地方三連単は軸馬別取得
-  // (1着固定・頭数分のリクエストが必要。`docs/trifecta-odds-investigation.md` §3.3)だが、
-  // 当面実装しない(取得しない)と決めたため、調教(oikiri)と同じ`if (!isNar)`で明示的に
-  // ガードする(wide/trio/quinella/exactaのように無条件で`fetchComboBetTypeOdds`を呼び
-  // `fetch-combo-odds.ts`の地方三連単throwに委ねる設計は採らない。その方式だと地方の
-  // 分析のたびに「想定外の例外」という警告が混入し、意図的な仕様であることと矛盾する。
-  // `comboOddsUrlFor`の地方三連単throwは、本ガードにより到達不能のまま残る)。
+  // **三連単は中央・地方とも取得する(Issue #283。ユーザー判断2026-10-13)**: 地方は軸馬別取得
+  // (1着固定・頭数分のリクエスト。`docs/trifecta-odds-investigation.md` §3.3)で、`fetchComboOdds`が
+  // 全軸を直列に取る(`fetchNarTrifectaComboOdds`)。旧: 「地方は当面実装しない(ユーザー判断
+  // 2026-09-27)ため、調教〈oikiri〉と同じ`if (!isNar)`で明示的にガードする」。
+  // **`options.deferNarTrifecta`が true の地方だけ、取得を飛ばす**(リクエストも警告も出さない)。
+  // cloud版は地方三連単の軸ごとの取得を別のアラームの段階に分け、計算ステップが(false=既定で)
+  // キャッシュから読む。
   //
   // 防御カバレッジ表への追記(AC8。fetch-combo-odds.tsの表に対する追加出口):
   // | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
@@ -758,18 +770,19 @@ export async function scrapeRace(
       oddsFetchOptions,
       warnings,
     );
-    // 三連単は中央のみ(調教と同じ明示ガード。上記コメント参照)。地方では
-    // fetchComboBetTypeOdds自体を呼ばないため、リクエストも警告も発生しない。
-    const trifectaOutcome = isNar
-      ? undefined
-      : await fetchComboBetTypeOdds(
-          "trifecta",
-          raceId,
-          startingUmabans,
-          fetcher,
-          oddsFetchOptions,
-          warnings,
-        );
+    // 三連単: 中央は1リクエスト、地方は軸(1着固定)ごとに頭数分(Issue #283。旧: 地方は取得しない)。
+    // 地方で`deferNarTrifecta`のときだけ取得しない(リクエストも警告も発生しない。上記コメント参照)。
+    const trifectaOutcome =
+      isNar && options.deferNarTrifecta === true
+        ? undefined
+        : await fetchComboBetTypeOdds(
+            "trifecta",
+            raceId,
+            startingUmabans,
+            fetcher,
+            oddsFetchOptions,
+            warnings,
+          );
     // 枠連(Issue #148・#26-E2): 中央・地方とも取得する。最後(三連単の後)に発行する。
     const bracketQuinellaOutcome = await fetchBracketQuinellaOutcome(
       raceId,

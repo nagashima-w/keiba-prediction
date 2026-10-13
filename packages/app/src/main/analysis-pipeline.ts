@@ -853,9 +853,9 @@ export async function runAnalysis(
     // このフィールドは production の配分結果に実際に影響する(quinellaCombo・exactaCombo・
     // trifectaComboが接続されたのと同じ経緯。`analysis-pipeline-allocation.test.ts`のIssue #148
     // (AC-2・AC-4)テスト参照)。
-    // raceIdはIssue #139(#25-E3b・AC4)で追加した。三連単の状態注記
-    // (`renderer/mixed-allocation-view.ts`の`trifectaBetTypeNote`)が中央/地方を判別するために
-    // 使う値で、本ファイル(main)自身は参照しない。
+    // raceIdはIssue #139(#25-E3b・AC4)で追加した。三連単の状態注記の中央/地方の判別に使っていたが、
+    // Issue #283で地方の三連単も取得するようになり、その特別扱いを除去したため、現在は参照する箇所が無い
+    // (フィールド自体の削除はスコープ外として残している)。本ファイル(main)自身は参照しない。
     const raceForAllocation: MixedCandidateBuildInput = {
       oddsStatus,
       rows,
@@ -974,7 +974,7 @@ export async function runAnalysis(
     rows,
     warnings: race.meta.warnings.map((w) => w.message),
     analyzedAt,
-    // 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉・枠連、機能D-2c第1段・Issue #28。
+    // 組合せオッズ(ワイド・3連複・馬連・馬単・三連単・枠連、機能D-2c第1段・Issue #28。
     // 馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、
     // 枠連はIssue #148・#26-E2で追加): race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/
     // trifectaCombo/bracketQuinellaCombo・race.meta.comboOdds はいずれも scrapeRace の

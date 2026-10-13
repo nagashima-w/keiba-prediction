@@ -239,9 +239,27 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/三連単[^。]*1レースあたり[^。]*1リクエスト追加/);
     });
 
-    // ユーザー判断(2026-09-27)「地方は当面取らない」を必ず明示する(オーケストレーター指定)。
-    it("補助文が『三連単は地方競馬では取得しません』旨を明示すること(Issue #137・ユーザー判断2026-09-27)", () => {
-      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("地方競馬では取得しません");
+    // 【Issue #283で改訂】旧版は、ユーザー判断(2026-09-27)「地方は当面取らない」を必ず明示していた
+    // (「三連単は地方競馬では取得しません」)。ユーザーが2026-10-13に地方の三連単の対応を決定し、地方も取得する
+    // ようになったので、この断定は事実と食い違う。新旧対応表:
+    //   旧: 「地方競馬では取得しません」を含むこと → 事実と食い違うため削除
+    //   新1: その断定を含まないこと(古い文言の再混入を検知)。「三連単は中央競馬のみ」も含まない
+    //   新2: 地方の三連複・三連単は頭数ぶん(最大18)のリクエストが要ることを明示する(費用の事実)
+    //   新3: 数値(旧「最大16リクエスト・約24秒」「12レース一括で+約5分」)は消した。cloud の gate の間隔は2秒で、
+    //        exe の1.5秒から出した導出値と食い違うため(ユーザー判断2026-10-13)。再混入しないことを固定する
+    it("補助文が『三連単は地方競馬では取得しません』をもう含まないこと(Issue #283: 地方の三連単も取得するようになった)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("地方競馬では取得しません");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("中央競馬のみ");
+    });
+
+    it("補助文が『地方競馬の三連複・三連単は頭数ぶん(最大18)のリクエスト』と書き、中央の三連単は1レースあたり1リクエストであること(Issue #283)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("地方競馬の三連複・三連単は頭数ぶん(最大18)のリクエスト");
+    });
+
+    it("補助文に所要時間の数値(約24秒・+約5分・最大16リクエスト)が残っていないこと(Issue #283: 導出の前提が cloud と食い違う)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("約24秒");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("約5分");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("最大16リクエスト");
     });
 
     // 【Issue #139(#25-E3b)で改訂】旧版(#137時点)は「配分に使うかどうかは下記の設定に従う」
@@ -268,8 +286,10 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toMatch(/三連単[^。]*配分には使いません/);
     });
 
-    it("『地方競馬では取得しません』旨は引き続き明示すること(Issue #139・AC6: 配分利用と取得可否は別の事実であり、配分に使うようになっても地方非対応の事実は変わらない)", () => {
-      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("地方競馬では取得しません");
+    // 【Issue #283で改訂】旧版は「『地方競馬では取得しません』旨は引き続き明示すること(Issue #139・AC6)」だった。
+    // 地方の三連単を取得するようになったので削除(上の新旧対応表を参照)。
+    it("『地方競馬では取得しません』旨はもう含まないこと(Issue #283: 配分利用の文言を変えても取得可否の事実が更新されている)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("地方競馬では取得しません");
     });
 
     /**
@@ -353,8 +373,12 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("三連単");
     });
 
-    it("『三連単は地方競馬では取得しません』旨を明示すること(Issue #137・ユーザー判断2026-09-27)", () => {
-      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("地方競馬では取得しません");
+    // 【Issue #283で改訂】INCLUDE_COMBO_ODDS_LABELS.helpのテストと同じ新旧対応表(旧: 「地方競馬では取得しません」を含むこと)。
+    it("『三連単は地方競馬では取得しません』をもう含まず、地方の三連複・三連単は頭数ぶんのリクエストと書くこと(Issue #283)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toContain("地方競馬では取得しません");
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toContain("中央競馬のみ");
+      // この注記は数値を含まない契約(上のテスト)なので、「最大18」は書かず「頭数ぶん」だけ
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("地方競馬の三連複・三連単は頭数ぶんのリクエスト");
     });
 
     // 【Issue #139で改訂】INCLUDE_COMBO_ODDS_LABELS.helpのテストと同じ新旧対応表。

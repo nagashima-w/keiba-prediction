@@ -107,8 +107,10 @@ const JSON_ODDS_KEY: Record<ComboBetType, string> = {
  * (`parseComboOdds`)の中でoddsMin・oddsMaxの両方に一律適用する。単勝・複勝
  * (`parse-odds.ts`・`parse-nar-odds.ts`)や過去走(`parse-horse-results.ts`)が使う
  * 共有ヘルパ`toOddsNumber`自体には入れない(これらの経路で上限値が観測された例が無く、
- * 影響範囲を組合せ券種の外へ広げないため)。地方の組合せパーサ(`parse-nar-combo-odds.ts`)も
- * 同様の値の観測例が無いため、本Issueでは対象外とする。
+ * 影響範囲を組合せ券種の外へ広げないため)。地方の組合せパーサ(`parse-nar-combo-odds.ts`)は
+ * #130時点では観測例が無く対象外としていたが、**Issue #283(#134の【記録】1件目の回収)で
+ * 地方三連単を取得するのに合わせ、本関数(`toComboOddsNumber`)をexportして地方側でも使う**
+ * (券種で分岐しない)。地方の発売中の厚いプールでの実物は未観測のため、予防的な変換である。
  */
 const ODDS_CAP_VALUE = 999999.9;
 
@@ -117,7 +119,7 @@ const ODDS_CAP_VALUE = 999999.9;
  * `ODDS_CAP_VALUE`のJSDoc参照)。丁度`ODDS_CAP_VALUE`と一致する場合のみnullにし、
  * 隣接する値(例: 999999.8)はそのまま数値として残す。
  */
-function toComboOddsNumber(raw: unknown): number | null {
+export function toComboOddsNumber(raw: unknown): number | null {
   const value = toOddsNumber(raw);
   return value === ODDS_CAP_VALUE ? null : value;
 }

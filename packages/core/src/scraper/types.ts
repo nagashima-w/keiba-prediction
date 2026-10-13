@@ -611,10 +611,11 @@ export interface OddsSnapshot {
    * #25-B、確定払戻の取込はIssue #131・#25-F、順序付きキー表現・`ComboBetType`への追加は
    * Issue #128・#130で先行済み)。
    *
-   * **地方(NAR)では取得しない(ユーザー判断2026-09-27)**: 地方三連単は軸馬別取得
-   * (1着固定・頭数分のリクエストが必要。`docs/trifecta-odds-investigation.md` §3.3)が
-   * 必要だが、当面実装しない(取得しない)と決めたため、地方では本フィールド自体が
-   * `undefined`のまま(`scrapeRace`が地方では取得を試みない。調教と同じ「対象外」扱い)。
+   * **地方(NAR)は軸馬別取得**(1着固定・頭数分のリクエストが必要。
+   * `docs/trifecta-odds-investigation.md` §3.3)で、Issue #283(ユーザー判断2026-10-13)から
+   * 全軸を取得する(旧: ユーザー判断2026-09-27により当面取得しない)。ただし
+   * `ScrapeOptions.deferNarTrifecta`が true の地方では取得を飛ばし、本フィールドは`undefined`のまま
+   * (cloud版が別のアラームで取り、計算ステップがキャッシュから読む)。
    * optional・`Record`である理由は`exactaCombo`と同じ。
    */
   readonly trifectaCombo?: Record<string, number | null>;

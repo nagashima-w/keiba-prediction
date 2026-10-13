@@ -429,8 +429,9 @@ export function narTrioOddsAxisUrl(raceId: RaceId, jiku: number): string {
  * `docs/trifecta-odds-investigation.md` §3(実測: race_id=202654071210・12頭)により、
  * 三連単の軸は「1着を固定する」意味であり(3連複〈`narTrioOddsAxisUrl`〉の「(順不同で)含む」
  * とは異なる)、`jiku=k`は「1着=kの全順列」P(n-1,2)件を返す。全組合せP(n,3)を得るには
- * 軸1〜n(頭数分。3連複のn-2とは異なる式)を叩く必要があるが、**全軸を回すオーケストレーション
- * 関数は本Issueでは作らない**(#132で判断。`fetchNarTrifectaAxisOdds`参照)。
+ * 軸1〜n(頭数分。3連複のn-2とは異なる式)を叩く必要がある。全軸を回す関数は、#130では
+ * 作らず(1軸単位の`fetchNarTrifectaAxisOdds`だけ)、Issue #283で`fetchComboOdds`の地方三連単分岐
+ * (`fetchNarTrifectaComboOdds`)として追加した。
  *
  * `jiku` は馬番(1〜{@link MAX_UMABAN}の整数)。契約は`narTrioOddsAxisUrl`と同じ
  * (呼び出し側が構築する引数であり市場データではないため、契約違反はthrowする)。
