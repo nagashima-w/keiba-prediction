@@ -933,7 +933,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   - `.github/workflows/ci.yml`: `pnpm typecheck`・`pnpm test`(packages/core・scripts のテスト)の関門。公開はしない(`scripts/test/ci-workflow.test.ts` が固定)。
     cloud は packages/core のソースを相対 import しているので、core のテストは残してある。
     (`pnpm --filter @keiba/app build` は #287 で packages/app を削除したので無くなった。実行しても何もせず exit 0 になる。)
-  - `.github/workflows/deploy-cloud.yml`: cloud の型検査・テスト・dry-run・スモークと、本番デプロイ(10 節)。
+  - `.github/workflows/deploy-cloud.yml`: 3 つのジョブ(Issue #288 で check から smoke を分けた)。**check**(cloud の型検査・テスト・dry-run・D1 の migration のローカル適用)と **smoke**(ローカルスモーク)は並列に走り、**deploy**(本番デプロイ。10 節)は `needs: [check, smoke]` で両方の成功を待つ。
     **承認印 `[PUBLISH-APPROVED]` は、この本番デプロイの関門として残っている**(先端コミットに承認印があり、
     「レビュー継続中」を含まない push、または許可ブランチでの手動実行)。
 - **版数は 1.44.0(exe の最終版)で凍結**した。以後は上げない([`docs/versioning.md`](./versioning.md))。

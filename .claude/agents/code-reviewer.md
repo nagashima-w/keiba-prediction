@@ -34,7 +34,8 @@ model: sonnet
      `ubuntu-latest` のため OS は同じ(Issue #248 で Windows ランナーを廃止した)。それでも、差分に**リポジトリ内のファイルを
      読むテスト**がある場合は、読み込み直後に改行を LF へ正規化しているか(利用者の Windows での checkout が CRLF になりうる)を
      確認する。**CI の関門はルート(`ci.yml`: `pnpm typecheck`・`pnpm test`)と cloud
-     (`deploy-cloud.yml` の check ジョブ)の2系統**で、上の検証はその両方に相当する。差分が `cloud/` に触れるなら、
+     (`deploy-cloud.yml` の check ジョブ〈型検査・テスト・dry-run・D1 の migration のローカル適用〉と smoke ジョブ〈ローカルスモーク〉。
+     2 つは並列に走り、deploy は両方を待つ)の2系統**で、上の検証はその両方に相当する。差分が `cloud/` に触れるなら、
      cloud の typecheck・test・smoke を必ず自分で実行する
      (過去に、`\n` を要求する正規表現がローカル LF で緑・Windows ランナーの CRLF で失敗し、実装者・レビュアーとも見逃した事例がある)
 3. 以下の観点で問題を探す:

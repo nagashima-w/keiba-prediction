@@ -32,7 +32,7 @@ pnpm exec wrangler d1 migrations apply DB --local   # D1 の migration をロー
 
 ## デプロイ
 `.github/workflows/deploy-cloud.yml`。許可した作業ブランチの上で、承認印 `[PUBLISH-APPROVED]` 付きの push(「レビュー継続中」を含まない)
-または手動実行のときだけ、`check`(型検査・テスト・dry-run・スモーク)の後に本番へ出す。
+または手動実行のときだけ、`check`(型検査・テスト・dry-run・D1 の migration のローカル適用)と `smoke`(ローカルスモーク)の**両方が通った後**に本番へ出す(check と smoke は並列に走り、deploy は両方を待つ。Issue #288)。
 
 ## D1(分析履歴。Issue #171〈#169-a〉)
 クラウド版の分析履歴の保存先。**この Issue は土台だけ**(migration・binding・CI・health)で、保存・読み取りのロジック(`D1AnalysisStore`)と R2 は #174・#175(旧 #172)、R2 の操作回数の安全柵は #173。

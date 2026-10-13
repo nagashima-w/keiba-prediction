@@ -97,15 +97,16 @@
   offset の最小値 10 分は、too-late の閾値 10 分と一致する。そのため、**アラームが 1ms 遅れるだけで
   全レースがスキップになる**構造だった(code-reviewer が【要修正】として検出)。
   「同じ定義で揃う」という利点だけで採らない
-- **検証要件には、CI の check ジョブが実行するコマンドを全部入れる。** #205 では、ゲートの
+- **検証要件には、CI の check・smoke ジョブが実行するコマンドを全部入れる。** #205 では、ゲートの
   検証要件が `typecheck`・`test`・`deploy:dry` だけだった。そのため、`pnpm run smoke`(workerd を
   起動して health などを完全一致で確かめる)が漏れ、health にキーを足した変更が CI で初めて落ちた。
   ルートの CI(`ci.yml`)は、`pnpm typecheck`・`pnpm test` を実行する
   (Issue #248 で exe の公開を止めたあとも、この関門は残してある。`pnpm --filter @keiba/app build` は #285 で
   packages/app を削除したので無くなった。実行しても何もせず exit 0 になるため、検証要件に書かない。
-  cloud の check ジョブは packages/core・scripts のテストを走らせないので、**cloud に触れない変更でも、ルートの2コマンドは検証要件に入れる**)。
+  cloud の check・smoke ジョブは packages/core・scripts のテストを走らせないので、**cloud に触れない変更でも、ルートの2コマンドは検証要件に入れる**)。
   `deploy-cloud.yml` の check ジョブは、typecheck・test・deploy:dry・
-  `wrangler d1 migrations apply DB --local`・smoke を実行する。ブリーフを書く前に
+  `wrangler d1 migrations apply DB --local` を、smoke ジョブは smoke を実行する(Issue #288 で分けた。2 つは並列に走り、
+  deploy は `needs: [check, smoke]` で両方を待つ)。ブリーフを書く前に
   ワークフローの `run:` を列挙する。**smoke は固定のポートと同じレースIDを使うので、2つの
   作業ツリーで同時に動かすと互いに干渉する**(#205 で、実装担当とレビュアーの smoke がぶつかった)。
   実行の前に `ps` で、ほかの wrangler・workerd が動いていないことを確かめる

@@ -84,7 +84,7 @@ pnpm tsx scripts/dump-race.ts --date 20260628
 - **最後の版**: GitHub の Releases → `開発版(最新ビルド)`(タグ `dev-latest`)に、`keiba-ev-tool-1.44.0-portable.exe`(portable 版・インストール不要。ダブルクリックで起動)を残してあります。これ以上は更新されません。
 - **版数は 1.44.0 で凍結**しました([`docs/versioning.md`](./docs/versioning.md))。
 - **exe のコードが最後に残っているコミットは `3c1664e`** です(`git checkout 3c1664e` で参照できます)。web 版が使っていた共有部分は `packages/core/src/analysis/`・`packages/core/src/view/` へ移しました(#286)。exe 専用のコード・スクリプト・依存は削除しました(#287)。
-- exe のビルドと `dev-latest` への公開をしていたワークフローは削除しました。いまの CI は [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)(型検査・テストの関門。公開はしない)と [`.github/workflows/deploy-cloud.yml`](./.github/workflows/deploy-cloud.yml)(web 版の検査と本番デプロイ)です。
+- exe のビルドと `dev-latest` への公開をしていたワークフローは削除しました。いまの CI は [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)(型検査・テストの関門。公開はしない)と [`.github/workflows/deploy-cloud.yml`](./.github/workflows/deploy-cloud.yml)(web 版の検査〈check ジョブと smoke ジョブ。並列〉と、両方が通った後の本番デプロイ)です。
 - **個人利用専用**である点は本ツール全体と同様です。
 - exe に残っている過去の分析・結果を web 版へ移す手順は、`cloud/README.md` と、web 版の設定画面の「exe から移行」を参照してください。
 

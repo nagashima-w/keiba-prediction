@@ -224,7 +224,7 @@ tdd-implementer とのやり取りを全てメインが中継していたため�
   コミットメッセージに「レビュー継続中」を含む場合を除外する)。**加えて Issue #43 以降、コミットメッセージに
   承認印 `[PUBLISH-APPROVED]` が無い push もすべて除外される**(既定で非公開)。
   レビュー継続中の間は承認印を付けないため、この2つの条件は独立に機能する。
-  テスト・ビルドの関門(`ci.yml` と、`deploy-cloud.yml` の check ジョブ)は従来どおり走るため、CIの成否は確認する
+  テスト・ビルドの関門(`ci.yml` と、`deploy-cloud.yml` の check・smoke ジョブ)は従来どおり走るため、CIの成否は確認する
 
 ## 報告と承認の方針(ユーザー指定)
 - メインセッションは着手前ゲート(メイン)→実装(tdd-implementer)→レビュー(code-reviewer→メタレビュー)→コミットまで**自律で進めてよい**。各ステップの逐一報告は不要
@@ -244,7 +244,7 @@ tdd-implementer とのやり取りを全てメインが中継していたため�
   報告する**(ユーザー指定。2026-10-10 に exe の公開を止めた〈Issue #248〉ため、確認の対象を exe の再ビルドから
   本番デプロイに改めた)。**これは手順6で承認印 `[PUBLISH-APPROVED]` を付けて push したことの結果を確認する作業であり、
   印を付け忘れていれば本番は更新されない(下の「例外」参照)。** 確認内容: (1) `ci.yml` の該当 run が
-  `conclusion=success`、(2) `deploy-cloud.yml` の `check` ジョブが success。承認印付きの最終コミットでは加えて、
+  `conclusion=success`、(2) `deploy-cloud.yml` の `check` ジョブと `smoke` ジョブが success。承認印付きの最終コミットでは加えて、
   (3) `deploy` ジョブが**スキップされずに実行され** success になったこと。CI 完了には時間がかかるため、プッシュ直後は
   `in_progress` のことが多い。その場合は完了を待って(self-scheduled な再確認等で)追い、成功を確認してから
   報告する。CI が失敗していたら原因を調べて報告する。**run 全体の conclusion が success でも、deploy ジョブが
@@ -257,7 +257,7 @@ tdd-implementer とのやり取りを全てメインが中継していたため�
   メッセージ**(`git log -1 --format=%s` 等)を確認する。回復手段は**承認印付きコミットの追加 push**、
   または許可ブランチでの `deploy-cloud.yml` の `workflow_dispatch`(手動実行)。
   一方、**レビュー継続中の中間コミット、または承認印を含まない中間コミット**では、deploy ジョブが
-  スキップされるのが正しい(上記(f)。Issue #43 以降、CI は既定で非公開)。この局面では check ジョブと
+  スキップされるのが正しい(上記(f)。Issue #43 以降、CI は既定で非公開)。この局面では check・smoke ジョブと
   `ci.yml` の成功のみを確認すればよく、deploy ジョブの実行は確認対象にしない
 
 ## exe 版のアーカイブと削除(ユーザー決定・2026-10-10 Issue #248、2026-10-13 Issue #285)
@@ -275,7 +275,7 @@ exe 版の公開を止め(#248)、コードも削除した(#285)。運用は web
 本リポジトリの主要ドキュメント。参照漏れを防ぐため一箇所に集約する(規約の唯一の正は本 `CLAUDE.md`)。
 
 - [`keiba-ev-tool-spec.md`](./keiba-ev-tool-spec.md) — 当初の設計・計画(Phase 1→6)の記録。中央競馬前提。
-- [`docs/current-spec.md`](./docs/current-spec.md) — **実装済みの現状仕様(v1)**。取得・スコアリング・LLM分析・検証・エクスポート・Discord・配布を実コードに基づき記述。
+- [`docs/current-spec.md`](./docs/current-spec.md) — **実装済みの現状仕様(v1)**。取得・スコアリング・LLM分析・検証・エクスポート・Discord を実コードに基づき記述(exe の配布は記録として残す)。
 - [`docs/development-workflow.md`](./docs/development-workflow.md) — 開発ワークフローの導線・要約(2体のサブエージェント・着手前ゲート・TDD・2段レビュー・報告方針)。詳細は本 `CLAUDE.md` と `.claude/agents/*.md`。
 - [`docs/gate-and-meta-review.md`](./docs/gate-and-meta-review.md) — **着手前ゲートとメタレビューの手引き**(オーケストレーター用)。旧 `.claude/agents/boss.md` を 2026-09-24 の boss 廃止に伴って移したもので、蓄積された観点は削っていない。ゲート自身が持ち込みうる欠陥・数値の再現欄・フィクスチャの指定方法・失われた独立性の埋め合わせ。
 - [`docs/lessons-learned.md`](./docs/lessons-learned.md) — 過去セッションの重大失敗(ツール結果・ユーザー同意の捏造等)の記録と再発防止の鉄則。本ファイル冒頭「最重要」の詳細。
@@ -285,6 +285,6 @@ exe 版の公開を止め(#248)、コードも削除した(#285)。運用は web
 - [`docs/phase1-scraping-plan.md`](./docs/phase1-scraping-plan.md) — Phase 1 の中央競馬 HTML 構造調査・対象ページ URL・セレクタ・フィクスチャ取得計画。
 - [`docs/prompt-improvement-plan.md`](./docs/prompt-improvement-plan.md) — 検証結果(回収率)に基づく LLM プロンプト改善の仕組みの検討メモ(過学習リスク・記録/可視化を先行する方針)。
 - [`docs/handover-next-session.md`](./docs/handover-next-session.md) — 過去セッションから次セッションへの引き継ぎ(実装済みタスクの仕様記録・技術メモ)。
-- [`docs/versioning.md`](./docs/versioning.md) — 版数運用規約(major/minor/patch の基準、公開1回につき必ず1回上げる運用、`packages/core` 対象外の理由)。**Issue #248 で 1.44.0 に凍結済み(以後は上げない)。** 規約の本文は 1.44.0 までの運用の記録。
+- [`docs/versioning.md`](./docs/versioning.md) — 版数運用規約(major/minor/patch の基準、公開1回につき必ず1回上げる運用、`packages/core` 対象外の理由)。**Issue #248 で 1.44.0 に凍結済み(以後は上げない)。** 規約の本文は 1.44.0 までの運用の記録。exe のコードは #285 で削除(最後に残っているコミットは 3c1664e)。
 - [`docs/issue-order.md`](./docs/issue-order.md) — **Issue の着手順**。次に何をやるか、依存関係・前提、着手しないと決めた理由を集約。
-- 補足: [`README.md`](./README.md) は利用者向けの概要・ダウンロード・Discord 設定・開発コマンド、[`GETTING_STARTED.md`](./GETTING_STARTED.md) はクラウド版の開始手順。
+- 補足: [`README.md`](./README.md) は利用者向けの概要・最後の exe の案内・Discord 設定・開発コマンド、[`GETTING_STARTED.md`](./GETTING_STARTED.md) はクラウド版の開始手順。
