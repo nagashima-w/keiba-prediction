@@ -9,7 +9,7 @@ import {
   type RaceSquaredErrorPair,
 } from "../../src/ev/probability-quality-metrics.js";
 import { binIndexFor, DEFAULT_QUALITY_BIN_COUNT } from "../../src/ev/calibration-bins.js";
-import { AnalysisStore } from "../../src/ev/analysis-store.js";
+import { AnalysisStore } from "../support/analysis-store.js";
 import { computeVerifyReport, DEFAULT_VERIFY_CONFIG } from "../../src/ev/verify.js";
 
 /**

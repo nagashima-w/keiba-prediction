@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AnalysisStore } from "../../src/ev/analysis-store.js";
+import { AnalysisStore } from "../support/analysis-store.js";
 import {
   MIGRATION_TABLES,
   MIGRATION_TABLE_NAMES,

@@ -179,7 +179,7 @@ function forbiddenInputs(inputs: readonly string[]): string[] {
       /node_modules/.test(f) ||
       /packages\/core\/src\/index\.ts$/.test(f) ||
       /packages\/core\/src\/(?:ev\/analysis-store|scraper\/cache)\.ts$/.test(f) ||
-      /packages\/app\/src\/main\//.test(f) ||
+      // Issue #287(#285 の段階B): 旧 `packages/app/src/main/` 全体の禁止の規則は、パッケージごと削除したので外した。
       // Issue #286(#285 の段階A): 旧 `packages/app/src/main/` の共有部分 4 本(analysis-pipeline・analysis-export・allocation-record・venue-codes)は
       // `packages/core/src/analysis/` へ移った。**「main の4本はクライアントに入れない」を、移設先の同じ4本で維持する**(同じ名前の `analysis-types`・`app-settings` などは、移設前も許可していた)。
       /packages\/core\/src\/analysis\/(?:analysis-pipeline|analysis-export|allocation-record|venue-codes)\.ts$/.test(f) ||

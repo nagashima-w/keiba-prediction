@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AnalysisStore, type AnalysisHorseRecord } from "../../src/ev/analysis-store.js";
+import { AnalysisStore, type AnalysisHorseRecord } from "../support/analysis-store.js";
 import { computeVerifyReport, computeVerifyReportByPromptVersion } from "../../src/ev/verify.js";
 
 /**

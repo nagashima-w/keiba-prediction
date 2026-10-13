@@ -7,7 +7,7 @@ import {
   type AnalysisAllocationMetaRecord,
   type AnalysisRecord,
   type StoredAllocation,
-} from "../../src/ev/analysis-store.js";
+} from "../support/analysis-store.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
 import { ScrapeCache } from "../../src/scraper/cache.js";
 

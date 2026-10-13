@@ -7,7 +7,7 @@ import {
   type AnalysisRecord,
   type StoredAllocation,
   type StoredAnalysis,
-} from "../../src/ev/analysis-store.js";
+} from "../support/analysis-store.js";
 
 /**
  * Issue #168(#163-a)AC-a6: 保存→取得の契約(共有フィクスチャ)。

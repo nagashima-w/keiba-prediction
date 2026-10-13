@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
-import { AnalysisStore } from "../../src/ev/analysis-store.js";
+import { AnalysisStore } from "../support/analysis-store.js";
 import {
   importRaceResult,
   summarizeImport,
@@ -16,9 +16,9 @@ import { parseRaceResult, RaceResultParseError } from "../../src/scraper/parse-r
  * Issue #207(#182-A)AC-A2: 結果の取込フロー(取得 → パース → 保存 → サマリ)の core への移設。
  *
  * 移設前は `packages/app/src/main/result-import.ts` にあった。クラウド版(cloud/)が app の import(core のバレル経由で better-sqlite3 を巻き込む)
- * を経由せずに使えるよう core へ移し、app は re-export する(#168 と同じ型)。**app 側の既存テスト(result-import.test.ts)は無改変で通る**(re-export の同一性)。
+ * を経由せずに使えるよう core へ移し、app は re-export する(#168 と同じ型)。**app 側の既存テスト(result-import.test.ts)は無改変で通る**(re-export の同一性)。〈Issue #287 で app を削除し、そのテストは `result-import-flow.test.ts` に移した〉
  * ここで固定するのは、移設で変わった唯一の契約「`saveResult` の依存は同期でも非同期でもよい(await する)」と、移設後のコードが core 単体で動くこと。
- * 変換(toResultEntries)・素通し(comboPayouts)の網羅は app 側の既存テストが引き続き担う。
+ * 変換(toResultEntries)・素通し(comboPayouts)の網羅は `result-import-flow.test.ts`(旧 app 側のテスト)が担う。
  */
 
 function loadFixture(name: string): string {
@@ -130,7 +130,7 @@ describe("importRaceResult(core 版)", () => {
   });
 });
 
-describe("toResultEntries / summarizeImport(core 版。変換の網羅は app 側の既存テストが担う)", () => {
+describe("toResultEntries / summarizeImport(core 版。変換の網羅は result-import-flow.test.ts が担う)", () => {
   const result = parseRaceResult(HTML);
 
   it("toResultEntries: 頭数・着順・単勝/複勝の払戻の対応付けが、パース結果と一致する", () => {

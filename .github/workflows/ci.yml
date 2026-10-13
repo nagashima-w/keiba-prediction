@@ -1,10 +1,10 @@
-# 型検査・テスト・app のビルドの関門(Issue #248)。
+# 型検査・テストの関門(Issue #248。#287 で app のビルドを外した)。
 #
 # ★何のためのワークフローか:
 #   exe 版をアーカイブし、exe のビルドと dev-latest への公開を止めた(Issue #248。最後の exe は dev-latest にある 1.44.0)。
-#   それまで、ルートの `pnpm typecheck` と `pnpm test`(packages/core・packages/app・scripts/ のテスト)を CI で走らせていたのは
+#   それまで、ルートの `pnpm typecheck` と `pnpm test`(packages/core・scripts/ のテスト)を CI で走らせていたのは
 #   旧 build-windows.yml だけだった。deploy-cloud.yml の check ジョブは cloud/ のテストしか走らせない。
-#   しかし cloud は packages/core と packages/app のソースを相対 import しており、承認印のゲートの検査(scripts/test)も
+#   しかし cloud は packages/core のソースを相対 import しており、承認印のゲートの検査(scripts/test)も
 #   ルートの `pnpm test` でしか走らない。そのため、exe の公開だけを外して「テストの関門」を残したのが本ワークフローである。
 #   **ここは公開しない。** リリースへの書き込み・タグでの起動・秘密の参照は持たない(scripts/test/ci-workflow.test.ts が固定している)。
 #
@@ -16,16 +16,13 @@
 # ★ubuntu-latest で動かす理由: ローカル(Linux/LF)と同じ環境になり、改行コード(CRLF)・シェルの差(pwsh)による
 #   「ローカルは緑・CI で落ちる」事故が構造的に消える。web(Cloudflare Worker)に Windows 固有の要素は無い。
 #
-# ★`pnpm --filter @keiba/app build` を残す理由: cloud が import する renderer のモジュール(例 renderer/format.ts)に node 組込みの
-#   名前付き import(`import { gzipSync } from "node:zlib"` と、その呼び出し)を混入させると、cloud の検査(cloud/ の
-#   `pnpm run typecheck` と `pnpm exec vitest run test/client-bundle.test.ts`)でも app のビルドでも落ちる。しかし cloud が import しない
-#   exe 専用の renderer(例 renderer/batch-summary.ts)に同じ混入をすると、落ちるのは app のビルドだけだった(Issue #248 の実験。
-#   混入先のファイルだけを変えて再現できる。副作用だけの `import "node:zlib"` は app のビルドも通ってしまうので、実験には使えない)。
-#   ビルドは数秒で済み、アーカイブした exe のコードが腐らない保険になる。
-#
-# ★ELECTRON_SKIP_BINARY_DOWNLOAD: Electron の実行ファイル(約100MB)は、型検査にもテストにもビルドにも要らない
-#   (確かめ方: この env を付けて `pnpm install --frozen-lockfile` してから、下の 3 コマンドを実行する)。取得を省いて時間を節約する。
-name: 型検査・テスト・ビルドの関門
+# ★app のビルド(`pnpm --filter @keiba/app build`)を外した理由(Issue #287。packages/app を削除した):
+#   以前は、web のクライアントが import する renderer のモジュール(例 renderer/format.ts)に node 組込みの名前付き import
+#   (`import { gzipSync } from "node:zlib"` と、その呼び出し)を混入させたとき、vitest・型検査では検出できないので、app のビルドが
+#   その関門を担っていた。いまは共有部分が packages/core/src/view/・analysis/ にあり、同じ混入を検出するのは、deploy-cloud.yml の check ジョブの
+#   cloud の型検査(`pnpm run typecheck`。tsconfig.client.json が Node の型を持たない)と、cloud のテスト(`pnpm test`)に含まれる
+#   test/client-bundle.test.ts・test/import-guard.test.ts である(Issue #287 で、混入の実験をして確かめた)。
+name: 型検査・テストの関門
 
 on:
   push:
@@ -46,8 +43,6 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - name: リポジトリを取得
         uses: actions/checkout@v4
@@ -73,8 +68,3 @@ jobs:
       # ルートの `pnpm test`(= `pnpm -r test && vitest run`)。`pnpm -r test` のままだと scripts/ のテストが CI で実行されない。
       - name: テストを実行
         run: pnpm test
-
-      # renderer(Vite)+ main/preload(esbuild)をビルドする。vitest は Node 環境で走るため、
-      # renderer(ブラウザ向けバンドル)の破綻はテストでも型検査でも検出できない(過去に node:zlib の混入で CI が落ちた)。
-      - name: app をビルド
-        run: pnpm --filter @keiba/app build

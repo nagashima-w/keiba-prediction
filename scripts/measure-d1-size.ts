@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
-import { AnalysisStore } from "../packages/core/src/ev/analysis-store.js";
+import { AnalysisStore } from "../packages/core/test/support/analysis-store.js";
 import type { AnalysisRecord } from "../packages/core/src/ev/analysis-store-types.js";
 import { toComboOddsScalarMap } from "../packages/core/src/scraper/combo-odds-key.js";
 import { parseComboOdds, type ComboBetType } from "../packages/core/src/scraper/parse-combo-odds.js";

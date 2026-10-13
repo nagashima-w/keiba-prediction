@@ -139,18 +139,17 @@ describe("検出器の自己検査(空振りを防ぐ)", () => {
     expect(mentionsNative(source)).toBe(true);
   });
 
-  it("対照: 既存の cache.ts と analysis-store.ts は better-sqlite3 を import している(検出器が実物で効く)", () => {
+  // Issue #287(#285 の段階B): exe の `ev/analysis-store.ts` は `test/support/` へ移した(src からは消えた)ので、better-sqlite3 を import する実物の対照は
+  // `scraper/cache.ts`(ScrapeCache)だけになった。`ev/analysis-store.ts` を src に戻さないことは、下の各検査の `forbidden` が引き続き見張る。
+  it("対照: 既存の cache.ts は better-sqlite3 を import している(検出器が実物で効く)", () => {
+    expect(existsSync(path.join(SRC, "scraper", "cache.ts")), "前提: cache.ts が src にある").toBe(true);
     expect(closureOf(path.join(SRC, "scraper", "cache.ts")).offenders).toContain(path.join("scraper", "cache.ts"));
-    expect(closureOf(path.join(SRC, "ev", "analysis-store.ts")).offenders).toContain(
-      path.join("ev", "analysis-store.ts"),
-    );
   });
 
   it("対照: native を持つファイルを値で import するファイル(バレル index.ts)は、閉包で NG になる(伝播を検出できる)", () => {
-    // index.ts は cache.ts・analysis-store.ts を値で再 export する。cloud がバレルを import してはいけない理由でもある。
+    // index.ts は cache.ts を値で再 export する(Issue #287 で analysis-store.ts はバレルから外した)。cloud がバレルを import してはいけない理由でもある。
     const { offenders } = closureOf(path.join(SRC, "index.ts"));
     expect(offenders).toContain(path.join("scraper", "cache.ts"));
-    expect(offenders).toContain(path.join("ev", "analysis-store.ts"));
   });
 
   it("対照: 型だけを import する verify.ts(`import type`)は NG にならない(型の import は辿らない)", () => {
@@ -214,20 +213,20 @@ describe("狭い入口 @keiba/core/pipeline(Issue #176)", () => {
     expect(pkg.exports["./pipeline"]).toBe("./src/pipeline.ts");
   });
 
-  it("対照: 型だけの import を辿る設定では、バレル(index.ts)・analysis-store.ts を経由する入口で better-sqlite3 が現れる(followTypes が実物で効く)", () => {
+  it("対照: 型だけの import を辿る設定では、バレル(index.ts)・cache.ts を経由する入口で better-sqlite3 が現れる(followTypes が実物で効く)", () => {
     expect(closureOf(path.join(SRC, "index.ts"), { followTypes: true }).offenders.length).toBeGreaterThan(0);
-    // `import type` だけで analysis-store.ts を指すファイルは、既定では NG にならないが、followTypes では NG になる。
+    // `import type` だけで cache.ts(better-sqlite3 に依存する。Issue #287 で analysis-store.ts から変えた)を指すファイルは、既定では NG にならないが、followTypes では NG になる。
     // 実在の core のファイルには、もうその形のものが無い(verify.ts・lookahead-suspicion.ts は #219 で analysis-store-types.ts に切り替えた)ので、一時ファイルで作る。
     // 一時ファイルは**リポジトリの中**(このテストの隣)に作る。os の一時ディレクトリだと、Windows の CI ではドライブが別(C: と D:)で相対パスが作れず、辿れない(f98ec2d の CI で失敗した)。
     const dir = mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), ".tmp-native-free-"));
     try {
       const entry = path.join(dir, "type-only.ts");
-      const specifier = relativeSpecifier(dir, path.join(SRC, "ev", "analysis-store.js"));
+      const specifier = relativeSpecifier(dir, path.join(SRC, "scraper", "cache.js"));
       expect(specifier.startsWith("."), "指定子が相対パスで、POSIX 区切りで、バックスラッシュを含まない").toBe(true);
       expect(specifier).not.toContain("\\");
-      writeFileSync(entry, `import type { AnalysisStore } from "${specifier}";\nexport type T = AnalysisStore;\n`);
+      writeFileSync(entry, `import type { ScrapeCache } from "${specifier}";\nexport type T = ScrapeCache;\n`);
       expect(closureOf(entry).offenders).toEqual([]);
-      expect(closureOf(entry, { followTypes: true }).offenders).toContain(path.join("ev", "analysis-store.ts"));
+      expect(closureOf(entry, { followTypes: true }).offenders).toContain(path.join("scraper", "cache.ts"));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -294,27 +293,26 @@ describe("狭い入口 @keiba/core/llm(Issue #193)", () => {
 /**
  * Issue #215(#167-A): クラウド移行ファイルの形式。取り込み側(#216。ブラウザと Worker)が import するのは
  * サブパス `@keiba/core/ev/cloud-migration-format` だけで、**この閉包に better-sqlite3・`node:` の組込み・
- * 実 DB の読み出し側(cloud-migration-reader.ts)・バレルが入ってはならない**(過去に `node:zlib` の混入で renderer の CI が落ちた)。
- * 生成器(cloud-migration-lines.ts)も同じ条件を満たす(読み出しはインターフェース越しで、実 DB を知らない)。
+ * バレルが入ってはならない**(過去に `node:zlib` の混入で renderer の CI が落ちた)。
+ * Issue #287(#285 の段階B): exe の書き出し側(生成器 cloud-migration-lines.ts・読み出し側 cloud-migration-reader.ts)は削除した。
+ * 形式(format)の検査だけが残る(生成器・読み出し側を対象にしていた `it.each` の 1 要素ずつと、reader の対照 1 件は、対象のコードごと消した)。
  */
 describe("移行ファイルの形式 @keiba/core/ev/cloud-migration-format(Issue #215)", () => {
   const FORMAT = path.join("ev", "cloud-migration-format.ts");
-  const LINES = path.join("ev", "cloud-migration-lines.ts");
-  const READER = path.join("ev", "cloud-migration-reader.ts");
 
-  it.each([FORMAT, LINES])("%s は実在し、閉包(型だけの import も辿る)に better-sqlite3・読み出し側・バレル・analysis-store.ts が無い", (relative) => {
+  it.each([FORMAT])("%s は実在し、閉包(型だけの import も辿る)に better-sqlite3・バレル・cache.ts・analysis-store.ts が無い", (relative) => {
     const entry = path.join(SRC, relative);
     expect(existsSync(entry), `${relative} が存在する`).toBe(true);
     const { visited, offenders } = closureOf(entry, { followTypes: true });
     expect(visited.length).toBeGreaterThanOrEqual(1);
     expect(offenders).toEqual([]);
     const names = visited.map((f) => path.relative(SRC, f));
-    for (const forbidden of ["index.ts", READER, path.join("scraper", "cache.ts"), path.join("ev", "analysis-store.ts")]) {
+    for (const forbidden of ["index.ts", path.join("scraper", "cache.ts"), path.join("ev", "analysis-store.ts")]) {
       expect(names, `${relative} → ${forbidden}`).not.toContain(forbidden);
     }
   });
 
-  it.each([FORMAT, LINES])("%s の閉包の import は、すべて相対指定子(node: の組込み・パッケージを一切含まない)", (relative) => {
+  it.each([FORMAT])("%s の閉包の import は、すべて相対指定子(node: の組込み・パッケージを一切含まない)", (relative) => {
     const { visited } = closureOf(path.join(SRC, relative), { followTypes: true });
     expect(visited.length).toBeGreaterThanOrEqual(1);
     for (const file of visited) {
@@ -329,10 +327,5 @@ describe("移行ファイルの形式 @keiba/core/ev/cloud-migration-format(Issu
       exports: Record<string, string>;
     };
     expect(pkg.exports["./ev/cloud-migration-format"]).toBe("./src/ev/cloud-migration-format.ts");
-  });
-
-  it("対照: 読み出し側(cloud-migration-reader.ts)は better-sqlite3 を import している(検出器が実物で効く)", () => {
-    expect(existsSync(path.join(SRC, READER))).toBe(true);
-    expect(closureOf(path.join(SRC, READER), { followTypes: true }).offenders).toContain(READER);
   });
 });

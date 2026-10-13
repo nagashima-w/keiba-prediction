@@ -5,7 +5,7 @@ import {
   AnalysisStore,
   type AnalysisAllocationMetaRecord,
   type AnalysisHorseRecord,
-} from "../../src/ev/analysis-store.js";
+} from "../support/analysis-store.js";
 import type { PredictionMark } from "../../src/analyzer/parse-response.js";
 import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
 import { buildAllocationBetComboKey } from "../../src/ev/combo-bet-allocation.js";

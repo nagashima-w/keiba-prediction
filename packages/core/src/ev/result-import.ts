@@ -20,7 +20,7 @@ import type { RaceComboPayoutsSaveInput, RaceResultEntry } from "./analysis-stor
 
 /**
  * 結果取込の結果(UI通知用。判別共用体)。app の `ImportResultOutcome`(`shared/analysis-types.ts`)と**同じ形**
- * (app は構造的に同じ型として扱う。同一性は `packages/app/test/result-import-reexport.test.ts` が固定する)。
+ * (同一性は `packages/core/test/ev/result-import-flow.test.ts` の末尾の型テストが固定する。app は Issue #287 で削除した)。
  * - "imported": 結果が確定していて着順を保存した(複勝払戻は無いこともある。hasPayout で判別)。
  * - "not_confirmed": まだ発走前・結果確定前で着順を取得できなかった(何も保存していない)。
  *   例外ではなく正常応答として返すことで、一括取込側が自動スキップしやすくする(Task#31)。

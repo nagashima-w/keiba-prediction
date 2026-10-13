@@ -169,7 +169,7 @@ describe("本番のバンドル(deploy --dry-run)", () => {
  * Issue #171(#169-a)AC-a6: 本番のバンドルに better-sqlite3(ネイティブ依存。Workers では動かない)が入らないこと。
  * **前提(空振り防止)**: D1 を呼ぶコード(`/api/health` の疎通確認)が、実際にバンドルされていること。
  * バンドルに D1 のコードが無ければ「better-sqlite3 が無い」は自明に成立するため、先に固定する。
- * 対照: core の better-sqlite3 を使うモジュール(`analysis-store.ts`)を巻き込む入口では、バンドル(または解決の失敗)に
+ * 対照: core の better-sqlite3 を使うモジュール(`scraper/cache.ts`(Issue #287 で analysis-store.ts から変えた))を巻き込む入口では、バンドル(または解決の失敗)に
  * better-sqlite3 が現れる。検出が、実際に巻き込まれたときに拾えることの確認。
  */
 describe("本番のバンドルと D1(Issue #171)", () => {
@@ -192,7 +192,7 @@ describe("本番のバンドルと D1(Issue #171)", () => {
     () => {
       writeFileSync(
         NATIVE_PROBE_ENTRY,
-        'import { AnalysisStore } from "../packages/core/src/ev/analysis-store";\nexport { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response(String(AnalysisStore)); } };\n',
+        'import { ScrapeCache } from "../packages/core/src/scraper/cache";\nexport { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response(String(ScrapeCache)); } };\n',
       );
       const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
       const probeConfig = withoutRaceDay(base).replace('main = "src/worker.ts"', 'main = "native-probe.generated.ts"');

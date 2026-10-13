@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
-import { AnalysisStore, type AnalysisRecord } from "../../src/ev/analysis-store.js";
+import { AnalysisStore, type AnalysisRecord } from "../support/analysis-store.js";
 
 /**
  * Issue #168(#163-a)AC-a7: exe の保存・取得が発行する SQL 文の列を固定する(特性化テスト)。

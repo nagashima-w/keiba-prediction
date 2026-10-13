@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AnalysisStore } from "../../packages/core/src/ev/analysis-store.js";
+import { AnalysisStore } from "../../packages/core/test/support/analysis-store.js";
 import type { AnalysisRecord, RaceComboPayoutsSaveInput, RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
 import { extractStartTime } from "../../packages/core/src/ev/lookahead-suspicion.js";
 import { computeVerifyReport, computeVerifyReportByPromptVersion, PRODUCTION_VERIFY_CONFIG, type VerifyReport, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";

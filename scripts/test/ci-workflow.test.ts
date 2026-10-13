@@ -2,7 +2,7 @@
  * テストの関門のワークフロー(.github/workflows/ci.yml)の静的な不変条件テスト(Issue #248)。
  *
  * 背景: Issue #248 で exe 版をアーカイブし、exe のビルドと dev-latest への公開を止めた。それまで
- * ルートの `pnpm typecheck` と `pnpm test`(packages/core・packages/app・scripts/ のテスト)を
+ * ルートの `pnpm typecheck` と `pnpm test`(packages/core・scripts/ のテスト。Issue #287 で packages/app を削除した)を
  * CI で走らせていたのは build-windows.yml だけだった(deploy-cloud.yml の check ジョブは
  * cloud/ のテストしか走らせない)。build-windows.yml を消すとそれらが CI から消えるため、
  * 「テストの関門だけ」を残した ci.yml(ubuntu-latest)を新設した。本テストはその形を固定する。
@@ -16,9 +16,9 @@
  * 2. 権限は contents: read のみ(リリースへ書き込まない)。
  * 3. runner は ubuntu-latest(Windows ではない)。
  * 4. 全ステップの名前と出現順序が期待する配列と完全一致する(挿入・削除・並べ替えを一括で検出する)。
- * 5. 関門の 3 コマンドが完全一致で、型検査 → テスト → app のビルドの順に並ぶ。
+ * 5. 関門の 2 コマンドが完全一致で、型検査 → テストの順に並ぶ(Issue #287 で app のビルドを外した。代わりの守りは deploy-cloud.yml の check ジョブ)。
  *    ルートの `pnpm typecheck`/`pnpm test` は `-r` 付きの下位互換ではない(Issue #38)。
- * 6. 依存のインストールは `--frozen-lockfile`。Electron のバイナリは取得しない(env)。
+ * 6. 依存のインストールは `--frozen-lockfile`。
  * 7. 関門のステップは無条件に実行される(if: が無い)・失敗を握りつぶさない(continue-on-error が無い)。
  *    秘密(secrets.)を参照しない。
  * 8. exe の公開が戻っていない: リポジトリの全ワークフローに action-gh-release と contents: write が無く、
@@ -96,7 +96,6 @@ const STEP_NAMES = {
   install: "依存をインストール",
   typecheck: "型検査を実行",
   test: "テストを実行",
-  build: "app をビルド",
 } as const;
 
 describe("検査する側の自己検証(正の対照。検出器が空振りしていないことの確認)", () => {
@@ -177,24 +176,20 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
       STEP_NAMES.install,
       STEP_NAMES.typecheck,
       STEP_NAMES.test,
-      STEP_NAMES.build,
     ]);
   });
 
-  it("関門の 3 コマンドが完全一致で、型検査 → テスト → app のビルドの順に並ぶ(ルートの pnpm typecheck / pnpm test。-r 付きで代替しない)", () => {
+  it("関門の 2 コマンドが完全一致で、型検査 → テストの順に並ぶ(ルートの pnpm typecheck / pnpm test。-r 付きで代替しない)。app のビルドは無い(Issue #287)", () => {
     expect(extractRunLine(extractStep(yml, STEP_NAMES.typecheck))).toBe("pnpm typecheck");
     expect(extractRunLine(extractStep(yml, STEP_NAMES.test))).toBe("pnpm test");
-    expect(extractRunLine(extractStep(yml, STEP_NAMES.build))).toBe("pnpm --filter @keiba/app build");
     const index = (name: string): number => yml.indexOf(`      - name: ${name}`);
     expect(index(STEP_NAMES.install)).toBeGreaterThanOrEqual(0);
     expect(index(STEP_NAMES.install)).toBeLessThan(index(STEP_NAMES.typecheck));
     expect(index(STEP_NAMES.typecheck)).toBeLessThan(index(STEP_NAMES.test));
-    expect(index(STEP_NAMES.test)).toBeLessThan(index(STEP_NAMES.build));
   });
 
-  it("依存のインストールは --frozen-lockfile で、Electron のバイナリは取得しない(env で ELECTRON_SKIP_BINARY_DOWNLOAD=1)", () => {
+  it("依存のインストールは --frozen-lockfile", () => {
     expect(extractRunLine(extractStep(yml, STEP_NAMES.install))).toBe("pnpm install --frozen-lockfile");
-    expect(code).toMatch(/^\s+ELECTRON_SKIP_BINARY_DOWNLOAD:\s*"1"\s*$/m);
   });
 
   it("pnpm と Node.js は package.json の packageManager と Node 22 に従う(pnpm はバージョン未指定・Node は 22)", () => {

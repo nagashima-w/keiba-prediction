@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { AnalysisStore } from "../../src/ev/analysis-store.js";
+import { AnalysisStore } from "../support/analysis-store.js";
 import type { RaceComboPayoutsSaveInput, RaceResultDetail, RaceResultEntry } from "../../src/ev/analysis-store-types.js";
 import { toResultEntries } from "../../src/ev/result-import.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";

@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseRaceId, type RaceListEntry } from "../../packages/core/src/index.js";
 import { FetchHaltedError } from "../probability-quality-41/guarded-fetcher.js";
@@ -16,6 +19,8 @@ import {
   type RaceObservation,
 } from "../probability-quality-41/observation.js";
 import type { MeasureTarget } from "../probability-quality-41/measure.js";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /**
  * 取得の進行(`measurement-plan.md` §2・§4)の制御を、ネットワークなしで検証する。
@@ -270,12 +275,15 @@ describe("assertPlanCommitted: 計画の文書がコミット済みでなけれ�
 });
 
 describe("CODE_PATHS_MUST_BE_CLEAN", () => {
-  it("測定の本体である runAnalysis(packages/app/src)も未コミット検査の対象に含む", () => {
+  it("測定の本体である runAnalysis(packages/core/src/analysis。Issue #286 で app から移した)も未コミット検査の対象に含む", () => {
     expect(CODE_PATHS_MUST_BE_CLEAN).toEqual([
       "scripts/probability-quality-41",
       "packages/core/src",
-      "packages/app/src",
     ]);
+    // 前提(空振り防止): runAnalysis の実体が、検査対象のパスの下に実在する。
+    const runAnalysisPath = "packages/core/src/analysis/analysis-pipeline.ts";
+    expect(existsSync(path.join(REPO_ROOT, runAnalysisPath))).toBe(true);
+    expect(CODE_PATHS_MUST_BE_CLEAN.some((p) => runAnalysisPath.startsWith(`${p}/`))).toBe(true);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AnalysisStore } from "../../src/ev/analysis-store.js";
+import { AnalysisStore } from "../support/analysis-store.js";
 import type { VerifyDataSource } from "../../src/ev/analysis-store-types.js";
 import {
   computeVerifyReport,

@@ -468,7 +468,7 @@ export interface RaceResult {
   /**
    * ワイドの確定払戻(Issue #52)。`parseRaceResult` は常にこのフィールドを populate するが、
    * optional にしているのは既存の `RaceResult` リテラル(テスト等。例:
-   * `packages/app/test/result-import.test.ts` の `buildRaceResult`、
+   * `packages/core/test/ev/result-import-flow.test.ts`(旧 packages/app/test/result-import.test.ts)の `buildRaceResult`、
    * `packages/core/test/analyzer/same-day-trend.test.ts`)を非破壊にするため
    * (courseType と同じ理由・同じ流儀)。
    *

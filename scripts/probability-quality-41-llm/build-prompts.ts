@@ -157,7 +157,6 @@ export const LLM_CODE_PATHS_MUST_BE_CLEAN: readonly string[] = [
   "scripts/probability-quality-41-llm",
   "scripts/probability-quality-41",
   "packages/core/src",
-  "packages/app/src",
 ];
 
 function argValue(argv: readonly string[], name: string): string {

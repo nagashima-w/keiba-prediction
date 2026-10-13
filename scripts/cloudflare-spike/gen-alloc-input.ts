@@ -3,7 +3,7 @@
  *
  * `scripts/bench-mixed-allocation.ts` と同じ入力・同じ計測条件(中央16頭・race_id=202603020211・
  * 実オッズ・実 prior・実レース日 2026/06/28・LLM 未使用)で `AnalysisResult` を作り、
- * `buildMixedAllocationDisplay` が受け取る最小構造(`MixedCandidateBuildInput`)だけを JSON に書く。
+ * `buildMixedRaceAllocation` が受け取る最小構造(`MixedCandidateBuildInput`)だけを JSON に書く。
  * `runAnalysis` 本体は better-sqlite3 等を巻き込むため Worker には載せず、入力だけをここで作る。
  * ネットワークには出ない。
  *

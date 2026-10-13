@@ -62,23 +62,24 @@ export function resolveCoreSubpath(specifier: string): string | null {
 interface Closure {
   /** 閉包に入った core のモジュール(絶対パス)。 */
   readonly coreFiles: Set<string>;
-  /** 閉包に入った app(packages/app/src)のモジュール(絶対パス)。runAnalysis を相対 import で取り込むため(Issue #176)。 */
-  readonly appFiles: Set<string>;
+  /**
+   * 閉包に入ったモジュールのうち、cloud/ の下でも packages/core/src の下でもないもの(絶対パス)。web の本番コードの閉包は、この2つの外へ出てはならない
+   * (Issue #287〈#285 の段階B〉。以前は「packages/app/src に入らない」を `appFiles` で見ていた。exe のパッケージを削除したので、他のどのパッケージ・ディレクトリも同様に禁じる形に一般化した)。
+   */
+  readonly outsideFiles: Set<string>;
   /** 値で import された、相対でない指定子(better-sqlite3・@keiba/core など。解決できた `@keiba/core/<サブパス>` は含めない)。 */
   readonly bareSpecifiers: Set<string>;
   /** 解決できなかった `@keiba/core/...` の指定子(exports に無いサブパス)。 */
   readonly unresolvedCoreSpecifiers: Set<string>;
 }
 
-const APP_SRC = path.resolve(CLOUD, "..", "packages", "app", "src");
-
 /**
- * `entries` から値の import を辿り、core・app のモジュールとパッケージ名の閉包を返す(node_modules の中は辿らない)。
+ * `entries` から値の import を辿り、core のモジュールとパッケージ名の閉包(と、cloud/・core/src の外に出たモジュール)を返す(node_modules の中は辿らない)。
  * `includeTypes: true` なら型だけの import も辿る(型検査が解決しに行く経路)。
  */
 export function closureOf(entries: readonly string[], options: { readonly includeTypes?: boolean } = {}): Closure {
   const coreFiles = new Set<string>();
-  const appFiles = new Set<string>();
+  const outsideFiles = new Set<string>();
   const bareSpecifiers = new Set<string>();
   const unresolvedCoreSpecifiers = new Set<string>();
   const seen = new Set<string>();
@@ -92,8 +93,8 @@ export function closureOf(entries: readonly string[], options: { readonly includ
     if (file.startsWith(CORE_SRC + path.sep)) {
       coreFiles.add(file);
     }
-    if (file.startsWith(APP_SRC + path.sep)) {
-      appFiles.add(file);
+    if (!file.startsWith(CORE_SRC + path.sep) && !file.startsWith(CLOUD + path.sep)) {
+      outsideFiles.add(file);
     }
     for (const specifier of valueSpecifiers(readFileSync(file, "utf-8"), options)) {
       if (specifier.startsWith(".")) {
@@ -113,7 +114,7 @@ export function closureOf(entries: readonly string[], options: { readonly includ
       }
     }
   }
-  return { coreFiles, appFiles, bareSpecifiers, unresolvedCoreSpecifiers };
+  return { coreFiles, outsideFiles, bareSpecifiers, unresolvedCoreSpecifiers };
 }
 
 const cloudSources = readdirSync(path.join(CLOUD, "src"))
@@ -176,8 +177,8 @@ describe("cloud/src が core から値で import するもの(Issue #175・#176)
     }
   });
 
-  it("対照: core のバレルや analysis-store.ts を入口にすると、閉包に better-sqlite3 が現れる(検査が、実際に巻き込まれたときに拾えることの確認)", () => {
-    for (const entry of ["ev/analysis-store.ts", "index.ts"]) {
+  it("対照: core のバレルや cache.ts(Issue #287 で analysis-store.ts から変えた。exe の analysis-store は test/support へ移した)を入口にすると、閉包に better-sqlite3 が現れる(検査が、実際に巻き込まれたときに拾えることの確認)", () => {
+    for (const entry of ["scraper/cache.ts", "index.ts"]) {
       const closure = closureOf([path.join(CORE_SRC, entry)]);
       expect([...closure.bareSpecifiers], entry).toContain("better-sqlite3");
     }
@@ -202,11 +203,11 @@ function isAllowedBareSpecifier(s: string): boolean {
  * だから、型を含めた閉包でも、cloud が持っている依存(cheerio・iconv-lite・jose・@anthropic-ai/sdk・Node の組込み・cloudflare:*)の外を指さないこと。
  */
 describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () => {
-  const { coreFiles, appFiles, bareSpecifiers, unresolvedCoreSpecifiers } = closureOf(cloudSources, { includeTypes: true });
+  const { coreFiles, outsideFiles, bareSpecifiers, unresolvedCoreSpecifiers } = closureOf(cloudSources, { includeTypes: true });
   const relCore = (f: string): string => path.relative(CORE_SRC, f).split(path.sep).join("/");
-  const relApp = (f: string): string => path.relative(APP_SRC, f).split(path.sep).join("/");
+  const relOutside = (f: string): string => path.relative(path.join(CLOUD, ".."), f).split(path.sep).join("/");
 
-  it("前提(空振り防止): runAnalysis の閉包(core の analysis/ の8ファイル。うち analysis-types.ts は型だけで繋がる)を実際に辿れている。cloud/src は packages/app を一切辿らない(Issue #286)", () => {
+  it("前提(空振り防止): runAnalysis の閉包(core の analysis/ の8ファイル。うち analysis-types.ts は型だけで繋がる)を実際に辿れている。閉包は cloud/ と packages/core/src の外へ出ない(Issue #286・#287)", () => {
     // Issue #286(#285 の段階A): 旧 app の8ファイル(main/ の4本と shared/ の4本)は packages/core/src/analysis/ へ移った。同じ8ファイルが閉包に入っていることを固定する。
     expect([...coreFiles].map(relCore).filter((f) => f.startsWith("analysis/")).sort()).toEqual(
       [
@@ -220,8 +221,8 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
         "analysis/venue-codes.ts",
       ],
     );
-    // 移設で新しく固定する不変条件: web の本番コードの閉包は exe のパッケージ(packages/app)に一切入らない。
-    expect([...appFiles].map(relApp)).toEqual([]);
+    // 不変条件: web の本番コードの閉包は、cloud/ と packages/core/src の外のファイル(exe のパッケージ packages/app があった場所を含む)に一切入らない。
+    expect([...outsideFiles].map(relOutside)).toEqual([]);
     expect(coreFiles.size).toBeGreaterThan(40);
   });
 
@@ -258,7 +259,7 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
       aliasEntries.set(m[1]!, m[2]!);
     }
     const used = new Set<string>();
-    for (const file of [...appFiles, ...coreFiles, ...cloudSources]) {
+    for (const file of [...coreFiles, ...cloudSources]) {
       for (const specifier of valueSpecifiers(readFileSync(file, "utf-8"), { includeTypes: true })) {
         if (specifier.startsWith("@keiba/core/")) {
           used.add(specifier);
@@ -274,18 +275,18 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
     }
   });
 
-  it("対照: 型を含めて辿ると、型だけで better-sqlite3 に依存するモジュール(analysis-store.ts)に届く入口では、そのモジュールが現れる(includeTypes が実物で効く)。実在する core のファイルには、もうその形のものが無い(verify.ts・lookahead-suspicion.ts は #219 で analysis-store-types.ts に切り替えた)ので、一時ファイルで作る", () => {
+  it("対照: 型を含めて辿ると、型だけで better-sqlite3 に依存するモジュール(cache.ts。Issue #287 で analysis-store.ts から変えた)に届く入口では、そのモジュールが現れる(includeTypes が実物で効く)。実在する core のファイルには、もうその形のものが無い(verify.ts・lookahead-suspicion.ts は #219 で analysis-store-types.ts に切り替えた)ので、一時ファイルで作る", () => {
     // 一時ファイルはリポジトリの中(このテストの隣)に作る。os の一時ディレクトリだと、Windows ではドライブが別になりうる(相対パスが作れない。core の native-free-modules.test.ts と同じ事情)。
     const dir = mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), ".tmp-import-guard-"));
     try {
       const entry = path.join(dir, "type-only.ts");
-      const relative = path.relative(dir, path.join(CORE_SRC, "ev", "analysis-store.js"));
+      const relative = path.relative(dir, path.join(CORE_SRC, "scraper", "cache.js"));
       expect(path.isAbsolute(relative), "同じドライブで相対パスが作れる").toBe(false);
       const specifier = relative.split(path.sep).join("/");
       expect(specifier.startsWith("."), "指定子は相対パス").toBe(true);
-      writeFileSync(entry, `import type { AnalysisStore } from "${specifier}";\nexport type T = AnalysisStore;\n`);
-      expect([...closureOf([entry]).coreFiles].map(relCore)).not.toContain("ev/analysis-store.ts");
-      expect([...closureOf([entry], { includeTypes: true }).coreFiles].map(relCore)).toContain("ev/analysis-store.ts");
+      writeFileSync(entry, `import type { ScrapeCache } from "${specifier}";\nexport type T = ScrapeCache;\n`);
+      expect([...closureOf([entry]).coreFiles].map(relCore)).not.toContain("scraper/cache.ts");
+      expect([...closureOf([entry], { includeTypes: true }).coreFiles].map(relCore)).toContain("scraper/cache.ts");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -317,7 +318,7 @@ describe("cloud/client の閉包(型だけの import も含む。Issue #201)", (
   const clientSources = readdirSync(path.join(CLOUD, "client"))
     .filter((f) => f.endsWith(".ts"))
     .map((f) => path.join(CLOUD, "client", f));
-  const { coreFiles, appFiles, bareSpecifiers, unresolvedCoreSpecifiers } = closureOf(clientSources, { includeTypes: true });
+  const { coreFiles, outsideFiles, bareSpecifiers, unresolvedCoreSpecifiers } = closureOf(clientSources, { includeTypes: true });
   const relCore = (f: string): string => path.relative(CORE_SRC, f).split(path.sep).join("/");
 
   it("前提(空振り防止): クライアントのファイルがあり、core(view/・analysis/・build-prompt・配分)の閉包を実際に辿れている", () => {
@@ -332,7 +333,7 @@ describe("cloud/client の閉包(型だけの import も含む。Issue #201)", (
     expect(names).toContain("view/format.ts");
     expect(names).toContain("analysis/analysis-types.ts");
     expect(names).toContain("analysis/app-settings.ts");
-    expect(appFiles.size).toBe(0);
+    expect(outsideFiles.size).toBe(0);
   });
 
   it("相対でない指定子(undici・iconv-lite・cheerio・node:*・react など)を、型だけの import でも1つも持たない。`@keiba/core/<サブパス>` は exports にあるものだけ。バレルを経由しない", () => {
@@ -341,8 +342,8 @@ describe("cloud/client の閉包(型だけの import も含む。Issue #201)", (
     expect([...coreFiles].map(relCore)).not.toContain("index.ts");
   });
 
-  it("閉包の core・app のモジュールが、Node のグローバル(Buffer)を使わない", () => {
-    const offenders = [...coreFiles, ...appFiles].filter((f) => usesNodeGlobal(readFileSync(f, "utf-8")));
+  it("閉包の core のモジュールが、Node のグローバル(Buffer)を使わない", () => {
+    const offenders = [...coreFiles].filter((f) => usesNodeGlobal(readFileSync(f, "utf-8")));
     expect(offenders.map((f) => path.relative(path.join(CLOUD, ".."), f).split(path.sep).join("/"))).toEqual([]);
   });
 

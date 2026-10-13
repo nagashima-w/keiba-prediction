@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
  *
  * `model.buildDistribution(`(`PlaceJointModel.buildDistribution`の呼び出し。同時分布モデルが
  * throwしうる唯一の入口)が production の `packages/core/src` 配下に何箇所あるかを
- * ソース走査で固定する(`packages/app/test/combo-odds-scope-guard.test.ts` の流儀に倣う)。
+ * ソース走査で固定する(`packages/core/test/analysis/combo-odds-scope-guard.test.ts`(旧 packages/app/test/)の流儀に倣う)。
  *
  * 呼び出し構文(`<識別子>.buildDistribution(`)のみを数え、インターフェース宣言・メソッド定義
  * (`buildDistribution(horses, placeCount) {`。`place-joint-model.ts`・`plackett-luce-model.ts`)

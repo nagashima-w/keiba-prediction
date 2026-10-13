@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { AnalysisStore } from "../../packages/core/src/ev/analysis-store.js";
+import { AnalysisStore } from "../../packages/core/test/support/analysis-store.js";
 import { FROZEN_INIT_MIGRATION_SHA256, sha256OfLf } from "../gen-cloud-d1-migration.js";
 
 /**

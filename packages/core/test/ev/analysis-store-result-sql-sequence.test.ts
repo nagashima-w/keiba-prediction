@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
-import { AnalysisStore } from "../../src/ev/analysis-store.js";
+import { AnalysisStore } from "../support/analysis-store.js";
 
 /**
  * Issue #207(#182-A)AC-A1: exe の結果の保存・取得(saveResult・getRaceResultDetail)が発行する SQL 文の列を固定する(特性化テスト)。

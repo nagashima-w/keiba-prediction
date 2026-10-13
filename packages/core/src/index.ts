@@ -80,11 +80,6 @@ export {
   type GradeWinnerFetcher,
 } from "./scraper/fetch-grade-winner.js";
 export { filterJpnOnlyEntries, isJpnGrade } from "./scraper/jpn-grade.js";
-export { enumerateDates } from "./scraper/enumerate-dates.js";
-export {
-  validatePeriodInput,
-  type PeriodInputValidationResult,
-} from "./scraper/validate-period-input.js";
 export { parseShutuba, ShutubaParseError } from "./scraper/parse-shutuba.js";
 export {
   HorseProfileParseError,
@@ -276,38 +271,28 @@ export {
   type HorseEv,
   type HorsePrior,
 } from "./ev/expected-value.js";
-export {
-  computeRaceOpportunity,
-  DEFAULT_RACE_OPPORTUNITY_CONFIG,
-  type RaceOddsStatus,
-  type RaceOpportunity,
-  type RaceOpportunityBestPick,
-  type RaceOpportunityConfig,
-  type RaceOpportunityHorse,
-  type RaceOpportunityMeta,
-} from "./ev/race-opportunity.js";
-export {
-  AnalysisStore,
-  type AnalysisAllocationMetaRecord,
-  type AnalysisAllocationRecord,
-  type AnalysisBetRecord,
-  type AnalysisFilter,
-  type AnalysisHorseRecord,
-  type AnalysisRecord,
-  type AnalysisStoreOptions,
-  type RaceComboPayoutsReadResult,
-  type RaceComboPayoutsSaveInput,
-  type RaceResultDetail,
-  type RaceResultDetailHorse,
-  type RaceResultEntry,
-  type StoredAllocation,
-  type StoredAllocationBetDetail,
-  type StoredAnalysis,
-  type StoredAnalysisHorse,
-  type StoredComboPayout,
-} from "./ev/analysis-store.js";
-// Issue #215(#167-A): クラウド移行ファイルの書き出し。形式(format)と生成器(lines)は better-sqlite3 に依存しない純ロジックで、
-// 読み出し側(reader)だけが better-sqlite3 に依存する(analysis-store と同じ扱い。バレル経由は exe の main だけが使う)。
+// Issue #287(#285 の段階B): exe の SQLite 保存 `AnalysisStore`(値)は `test/support/` へ移し、バレルからは外した。
+// 型は better-sqlite3 に依存しない `analysis-store-types.ts` から出す(名前は従来どおり)。
+export type {
+  AnalysisAllocationMetaRecord,
+  AnalysisAllocationRecord,
+  AnalysisBetRecord,
+  AnalysisFilter,
+  AnalysisHorseRecord,
+  AnalysisRecord,
+  RaceComboPayoutsReadResult,
+  RaceComboPayoutsSaveInput,
+  RaceResultDetail,
+  RaceResultDetailHorse,
+  RaceResultEntry,
+  StoredAllocation,
+  StoredAllocationBetDetail,
+  StoredAnalysis,
+  StoredAnalysisHorse,
+  StoredComboPayout,
+} from "./ev/analysis-store-types.js";
+// Issue #215(#167-A): クラウド移行ファイルの形式(better-sqlite3 に依存しない純ロジック)。
+// Issue #287(#285 の段階B)で exe の書き出し側(生成器 lines・読み出し reader)は削除した。形式の検証側だけが残る。
 // ブラウザ/Worker(#216)は、バレルではなくサブパス `@keiba/core/ev/cloud-migration-format` から import すること。
 export {
   buildAnalysisLine,
@@ -334,16 +319,6 @@ export {
   type MigrationTableName,
   type MigrationTableSpec,
 } from "./ev/cloud-migration-format.js";
-export {
-  DEFAULT_ANALYSIS_PAGE_SIZE,
-  DEFAULT_RESULT_PAGE_SIZE,
-  generateMigrationLines,
-  type CloudMigrationSource,
-  type GenerateMigrationLinesOptions,
-  type MigrationAnalysisPageItem,
-  type MigrationResultPageItem,
-} from "./ev/cloud-migration-lines.js";
-export { createCloudMigrationSource } from "./ev/cloud-migration-reader.js";
 export {
   importRaceResult,
   summarizeImport,

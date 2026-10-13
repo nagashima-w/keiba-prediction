@@ -33,7 +33,7 @@ import {
   runAnalysis,
   type AnalysisPipelineDeps,
 } from "../../packages/core/src/analysis/analysis-pipeline.js";
-import { toResultEntries } from "../../packages/app/src/main/result-import.js";
+import { toResultEntries } from "../../packages/core/src/ev/result-import.js";
 import type { AnalysisResult } from "../../packages/core/src/analysis/analysis-types.js";
 import {
   classifyRaceFinishes,

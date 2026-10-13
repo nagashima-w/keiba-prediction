@@ -4,7 +4,7 @@ import {
   AnalysisStore,
   type AnalysisAllocationMetaRecord,
   type AnalysisRecord,
-} from "../../src/ev/analysis-store.js";
+} from "../support/analysis-store.js";
 import {
   computeVerifyReport,
   computeVerifyReportByPromptVersion,

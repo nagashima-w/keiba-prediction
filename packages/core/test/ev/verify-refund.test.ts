@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AnalysisStore, type AnalysisAllocationMetaRecord, type AnalysisHorseRecord } from "../../src/ev/analysis-store.js";
+import { AnalysisStore, type AnalysisAllocationMetaRecord, type AnalysisHorseRecord } from "../support/analysis-store.js";
 import type { RaceResultEntry, VerifyDataSource } from "../../src/ev/analysis-store-types.js";
 import { buildAllocationBetComboKey } from "../../src/ev/combo-bet-allocation.js";
 import { computeVerifyReport, type ProposedBetTypeSummary } from "../../src/ev/verify.js";

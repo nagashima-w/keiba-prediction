@@ -1,4 +1,11 @@
 /**
+ * 【Issue #287(#285 の段階B)の注記】exe(`packages/app`)の削除に伴い、計測の対象を exe の `buildMixedAllocationDisplay`
+ * (`buildMixedRaceAllocation` + 表示データ導出)から、共有の `buildMixedRaceAllocation` に付け替えた。表示用の並べ替え・内訳・
+ * 注記の導出が計測から外れるため、計測する仕事は以前よりわずかに軽くなる(以前の ms の数値と直接は比べられない)。
+ * 枠連の節の出力も変わった: 「判定不能の合計」は枠連だけの件数になり、「枠連の注記」(exe の表示文言)は出なくなった。
+ * 以下の本文の `buildMixedAllocationDisplay` の呼び出しとログの見出しは、`buildMixedRaceAllocation` に置き換えた。経緯の節に残る `mixed-allocation-view.ts` への言及は、付け替え前の記録である。
+ */
+/**
  * 券種横断の馬券配分(機能D-2c第4段・Issue #28)の再現可能な計測スクリプト。
  *
  * ## 経緯(code-reviewer指摘・boss確認2026-08-13)
@@ -41,7 +48,7 @@
  *    製品の`hitProb`と全候補で一致することを毎回検査する**(一致しなければ例外)。
  *
  * 5. 枠連(bracketQuinella)を配分に接続したとき(Issue #150〈#26-E3b〉。`includeBracketQuinellaInAllocation`)の
- *    実際の配分結果。`buildMixedAllocationDisplay`(画面が呼ぶ経路)を、他6券種をすべてONにした設定で
+ *    実際の配分結果。`buildMixedRaceAllocation`(web が呼ぶ経路の本体)を、他6券種をすべてONにした設定で
  *    枠連ON/OFFの2通り実行し、総額・点数・券種別構成比・枠連の候補件数(EVプラス件数)を並べる。
  *    - 「枠連が入るレース」: 中央16頭(`202603020211`。全8枠に馬がいる。実オッズ・実prior)。
  *      同じレースを枠連OFFにしたものが「入らない」比較対象(設定で入らない)。
@@ -57,7 +64,7 @@
  * ## 出力
  * 1. `greedySteps` 感度表: 資金/1レース上限の組合せ × greedySteps(既定1000 / 400)で、
  *    総額・点数・券種別構成比(複勝/ワイド/三連複)を表示する。
- * 2. 1レースあたりの所要時間(`buildMixedAllocationDisplay` を実運用と同じ既定設定で
+ * 2. 1レースあたりの所要時間(`buildMixedRaceAllocation` を実運用と同じ既定設定で
  *    複数回実行した平均。ウォームアップ1回を除く)。
  * 3. 馬連(quinella)・馬単(exacta)・三連単(trifecta)を候補ビルダーに追加したときの性能・
  *    構成の実測(Issue #116 AC-7・Issue #117で追記・Issue #122 AC-7で馬単の構成を追加・
@@ -105,8 +112,7 @@ import {
 } from "../packages/core/src/ev/combo-bet-allocation.js";
 import { foldOutcomeIndexSetsBySignature } from "../packages/core/src/ev/allocation-primitives.js";
 import { PLACKETT_LUCE_MODEL } from "../packages/core/src/ev/plackett-luce-model.js";
-import { buildMixedAllocationDisplay } from "../packages/app/src/renderer/mixed-allocation-view.js";
-import type { MixedAllocationSettings } from "../packages/core/src/analysis/mixed-race-allocation.js";
+import { buildMixedRaceAllocation, type MixedAllocationSettings } from "../packages/core/src/analysis/mixed-race-allocation.js";
 import { parseComboOdds } from "../packages/core/src/scraper/parse-combo-odds.js";
 import { toComboOddsScalarMap } from "../packages/core/src/scraper/combo-odds-key.js";
 
@@ -329,19 +335,19 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
   };
 
   // ウォームアップ1回(JITの影響を減らす)を除いた上で、実運用の1レース分の呼び出し
-  // (buildMixedAllocationDisplay。既定greedySteps)を繰り返し計測する。
-  buildMixedAllocationDisplay(race, settings);
+  // (buildMixedRaceAllocation。既定greedySteps)を繰り返し計測する。
+  buildMixedRaceAllocation(race, settings);
   const iterations = 30;
   const samples: number[] = [];
   for (let i = 0; i < iterations; i++) {
     const t0 = performance.now();
-    buildMixedAllocationDisplay(race, settings);
+    buildMixedRaceAllocation(race, settings);
     samples.push(performance.now() - t0);
   }
   const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
   const max = Math.max(...samples);
   console.log("");
-  console.log("=== 1レースあたりの所要時間(buildMixedAllocationDisplay・既定greedySteps) ===");
+  console.log("=== 1レースあたりの所要時間(buildMixedRaceAllocation・既定greedySteps) ===");
   console.log(
     `平均${avg.toFixed(1)}ms / 最大${max.toFixed(1)}ms(n=${iterations}回・中央16頭。候補件数は上のgreedySteps感度の出力を参照)`,
   );
@@ -687,7 +693,7 @@ function bracketOutcome(state: "available" | "unavailable"): NonNullable<ComboOd
 
 /**
  * 枠連を配分に接続したときの実際の配分結果を実測する(Issue #150〈#26-E3b〉)。冒頭JSDocの5.を参照。
- * 経路は画面と同じ`buildMixedAllocationDisplay`(`buildMixedRaceAllocation`+表示データ導出)。
+ * 経路は web と同じ`buildMixedRaceAllocation`(旧: exe の画面は`buildMixedAllocationDisplay`=これ+表示データ導出を呼んでいた)。
  */
 async function runBracketQuinellaAllocationComparison(result: AnalysisResult): Promise<void> {
   const base = toMixedCandidateInput(result);
@@ -743,7 +749,7 @@ async function runBracketQuinellaAllocationComparison(result: AnalysisResult): P
   };
 
   console.log("");
-  console.log("=== 枠連(bracketQuinella)を配分に接続したときの配分結果(Issue #150・buildMixedAllocationDisplay・実運用と同じ経路) ===");
+  console.log("=== 枠連(bracketQuinella)を配分に接続したときの配分結果(Issue #150・buildMixedRaceAllocation・実運用と同じ経路) ===");
   console.log(`  (未発売フィクスチャのパース結果: state=${unsold.state}。8頭の例は出走馬を合成している。冒頭JSDoc 5.参照)`);
   const cases: readonly {
     readonly label: string;
@@ -755,22 +761,31 @@ async function runBracketQuinellaAllocationComparison(result: AnalysisResult): P
     { label: "合成8頭・枠連ON(発売なし=unavailable。入らない)", race: race8, settings: settings8 },
   ];
   for (const c of cases) {
-    const view = buildMixedAllocationDisplay(c.race, c.settings);
+    const view = buildMixedRaceAllocation(c.race, c.settings);
     if (view.kind !== "mixed") {
       console.log(`  ${c.label}: kind=${view.kind}(混在経路に入らなかった)`);
       continue;
     }
     const total = view.result.totalStake;
-    const bracket = view.display.breakdown.bracketQuinella;
+    const bracketAllocations = view.result.allocations.filter((a) => a.betType === "bracketQuinella");
+    const bracket = {
+      stake: bracketAllocations.reduce((sum, a) => sum + a.stake, 0),
+      count: bracketAllocations.filter((a) => a.stake > 0).length,
+    };
     const diag = view.diagnostics.bracketQuinella;
+    // 枠連の判定不能の件数(発売なし=unavailable は判定不能に数えない。旧 exe の aggregateUnjudgedCounts と同じ扱い)。
+    const unjudged =
+      diag.kind === "built" && diag.comboOddsState !== "unavailable"
+        ? diag.build.unjudged.oddsMissingCount + diag.build.unjudged.oddsUnfetchedCount + diag.build.unjudged.oddsMalformedCount
+        : 0;
     const positive = diag.kind === "built" ? diag.build.judged.positiveCount : null;
     const pct = (n: number): string => (total > 0 ? `${((n / total) * 100).toFixed(1)}%` : "0.0%");
     const iterations = 10;
-    buildMixedAllocationDisplay(c.race, c.settings); // ウォームアップ
+    buildMixedRaceAllocation(c.race, c.settings); // ウォームアップ
     const samples: number[] = [];
     for (let i = 0; i < iterations; i++) {
       const t0 = performance.now();
-      buildMixedAllocationDisplay(c.race, c.settings);
+      buildMixedRaceAllocation(c.race, c.settings);
       samples.push(performance.now() - t0);
     }
     const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
@@ -778,8 +793,7 @@ async function runBracketQuinellaAllocationComparison(result: AnalysisResult): P
       `  ${c.label}: 総額${total.toLocaleString()}円 / ${view.result.betCount}点 / ` +
         `枠連 ${bracket.stake.toLocaleString()}円(${pct(bracket.stake)}) ${bracket.count}点 / ` +
         `枠連の候補(EVプラス)${positive === null ? "なし(対象外)" : `${positive}件`} / ` +
-        `判定不能の合計${view.display.unjudged.oddsMissingCount + view.display.unjudged.oddsUnfetchedCount + view.display.unjudged.oddsMalformedCount}件 / ` +
-        `枠連の注記=${view.display.bracketQuinellaNote ?? "なし"} / 平均${avg.toFixed(1)}ms(n=${iterations})`,
+        `枠連の判定不能${unjudged}件 / 平均${avg.toFixed(1)}ms(n=${iterations})`,
     );
   }
 }

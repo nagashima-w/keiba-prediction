@@ -5,10 +5,12 @@
  *  - parse: 出馬表1ページ(中央16頭・277KB)のパース(`parseShutuba`)
  *  - score: 1レース分の確率計算(analysis-pipeline.ts のスコアリング段と同じ経路: 先読みリーク遮断 →
  *    `buildPriorInput` → `computeFieldPriors`。LLM は使わない)
- *  - alloc: 配分計算 `buildMixedAllocationDisplay`(単勝・複勝・ワイド・三連複。`scripts/bench-mixed-allocation.ts`
+ *  - alloc: 配分計算 `buildMixedRaceAllocation`(単勝・複勝・ワイド・三連複。`scripts/bench-mixed-allocation.ts`
  *    の「1レースあたりの所要時間」節と同じ入力・同じ設定)
  *  - allocFull: 同(馬連・馬単・三連単・枠連の実オッズも渡す。同ファイル 5. 節と同じ入力。全券種を
  *    配分に含めたときの実運用と同じ負荷)
+ * 【Issue #287(#285 の段階B)】exe の削除に伴い、計測の対象を exe の `buildMixedAllocationDisplay`(`buildMixedRaceAllocation` + 表示データ導出)から
+ * 共有の `buildMixedRaceAllocation` に付け替えた。表示用の導出が計測から外れるので、計測する仕事は以前よりわずかに軽い(以前の ms とは直接比べられない)。
  * 入力の alloc 系 JSON は `pnpm tsx scripts/cloudflare-spike/gen-alloc-input.ts` で再生成できる。
  *
  * **時計について**: 本番の Workers では、実行中に I/O がないと `performance.now()` は進まない。そこで
@@ -18,9 +20,8 @@
 
 import raceDataJson from "../../../docs/investigations/combo-odds-real-fetch/central-on.json";
 import shutubaHtml from "../../../fixtures/shutuba_202603020211.html";
-import { buildMixedAllocationDisplay } from "../../../packages/app/src/renderer/mixed-allocation-view.js";
 import type { MixedCandidateBuildInput } from "../../../packages/core/src/analysis/mixed-candidates.js";
-import type { MixedAllocationSettings } from "../../../packages/core/src/analysis/mixed-race-allocation.js";
+import { buildMixedRaceAllocation, type MixedAllocationSettings } from "../../../packages/core/src/analysis/mixed-race-allocation.js";
 import { parseRaceId, venueKindOfRaceId } from "../../../packages/core/src/scraper/ids.js";
 import { parseShutuba } from "../../../packages/core/src/scraper/parse-shutuba.js";
 import type { RaceData } from "../../../packages/core/src/scraper/scrape-race.js";
@@ -85,7 +86,7 @@ function runOnce(work: CpuWork): number {
     case "alloc":
     case "allocFull": {
       const input = (work === "alloc" ? allocInput : allocFullInput) as unknown as MixedCandidateBuildInput;
-      const view = buildMixedAllocationDisplay(input, ALLOC_SETTINGS);
+      const view = buildMixedRaceAllocation(input, ALLOC_SETTINGS);
       // 「混在配分が実際に計算された」ことの確認(早期 return で空振りしていないこと)。
       return view.kind === "mixed" ? view.result.betCount : -1;
     }

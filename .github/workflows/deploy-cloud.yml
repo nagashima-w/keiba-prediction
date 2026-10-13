@@ -27,7 +27,7 @@
 #   URL をログに出すより前に ::add-mask:: で隠す。メールアドレス・Access のチーム名・AUD は Worker の secret にあり、
 #   ここには一切現れない。
 #
-# ★ci.yml(ルートの型検査・テスト・app のビルドの関門)とは独立: このワークフローは ubuntu-latest で動き、wrangler / workerd などの
+# ★ci.yml(ルートの型検査・テストの関門)とは独立: このワークフローは ubuntu-latest で動き、wrangler / workerd などの
 #   依存は cloud/(pnpm workspace の外)にだけ入れる。承認印付き push は両方のワークフローを起動するが、デプロイは ci.yml の結果を待たない。
 #   承認印付きの push の後は、ci.yml の成否と、この deploy ジョブが実際に走った(スキップされていない)ことの両方を確かめる。
 #   exe の公開は Issue #248 で止めた(旧 build-windows.yml は削除済み)。承認印は、このデプロイの関門としてだけ残っている。

@@ -41,11 +41,13 @@ export const NOT_SAVED_REASONS: readonly string[] = [
   "unclassified-finish",
 ];
 
-/** 取得に使うコードのうち、未コミットなら取得を拒否するパス(`runAnalysis` が測定の本体のため app も含む)。 */
+/**
+ * 取得に使うコードのうち、未コミットなら取得を拒否するパス。測定の本体 `runAnalysis` は `packages/core/src/analysis/` にある
+ * (Issue #286 で `packages/app` から移し、Issue #287 で `packages/app` を削除した)ので、`packages/core/src` に含まれる。
+ */
 export const CODE_PATHS_MUST_BE_CLEAN: readonly string[] = [
   "scripts/probability-quality-41",
   "packages/core/src",
-  "packages/app/src",
 ];
 
 /** 観測の保存先(レース単位。再実行で飛ばす判定に使う)。 */
