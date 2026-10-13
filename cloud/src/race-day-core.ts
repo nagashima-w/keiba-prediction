@@ -120,7 +120,7 @@ import {
 } from "./race-day-result";
 import type { ResultRepository } from "./result-repository";
 import { requireCacheKeyForPost } from "./post-cache-guard";
-import { BabaStage, type BabaFetcher, type BabaStepOutcome, type BabaStore } from "./race-day-baba";
+import { BabaStage, type BabaFetcher, type BabaReader, type BabaStepOutcome, type BabaStore } from "./race-day-baba";
 import { NAR_TRIFECTA_AXES_PER_STEP, NarTrifectaStore } from "./race-day-nar-trifecta";
 import { PLAN_VENUES, PlanStore, type PlanRowRecord, type PlanSkipReason, type PlanVenue } from "./race-day-plan";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
@@ -357,6 +357,11 @@ export interface RaceDayDeps {
   readonly fetchBaba?: BabaFetcher;
   /** 馬場の API の取得の試み・結果の保存先(本番は D1 の `baba_fetches`・`baba_conditions`〈migration 0017〉)。 */
   readonly babaStore?: BabaStore;
+  /**
+   * 貯めた当日の馬場の値の読み出し口(Issue #295。本番は `D1BabaStore.load`)。**発走前の計算ステップだけ**が、そのレースの開催日 × 場コードの値を読み、LLM のプロンプトとスナップショットに渡す
+   * (中央のレースで、LLM を使うときだけ。netkeiba には出ない)。無い構成は読まない(従来どおり)。読み出しの失敗は握って値なしで続け、警告は固定の語だけ(例外の文面は出さない)。
+   */
+  readonly babaReader?: BabaReader;
 }
 
 export interface ScheduleInput {
@@ -678,6 +683,7 @@ export class RaceDayCore {
   /** 結果の取り込みの表(Issue #208。新しい表だけ)。 */
   private readonly results: ResultImportStore;
   private readonly baba: BabaStage;
+  private readonly babaReader: BabaReader | undefined;
   /** 結果の保存先。無ければ結果の仕組み全体が無効。 */
   private readonly resultStore: ResultStoreDeps | undefined;
   /** 日報の作成の依頼(Issue #235)。無ければ依頼しない。 */
@@ -734,6 +740,7 @@ export class RaceDayCore {
     this.resultStore = deps.resultStore;
     this.requestReport = deps.requestReport;
     // 馬場の API の取得(Issue #294)。メタは既存の race_day_meta(新しい表は無い)。取得口・保存先が無ければ段階全体が無効。
+    this.babaReader = deps.babaReader;
     this.baba = new BabaStage({
       sql: this.sql,
       now: this.now,
@@ -2503,6 +2510,14 @@ export class RaceDayCore {
           onGradeWinnerTrendError: (info) => this.onWarn(`発走前の分析(${info.raceId}): 重賞の過去10年傾向を使えなかったため、傾向なしで続けます(${redactSecrets(info.message).slice(0, 200)})`),
           getRaceResultDetails: async (ids) => (this.resultStore === undefined ? new Map() : this.resultStore.getRaceResultDetails(ids)),
           onSameDayTrendError: (info) => this.onWarn(`発走前の分析(${info.raceId}): 当日傾向を読み出せなかったため、当日傾向なしで続けます(${redactSecrets(info.message).slice(0, 200)})`),
+          // 当日の馬場の値(Issue #295): 中央のレースで LLM を使うときだけ runAnalysis が読む(開催日 × 場コードで D1 の 1 行。netkeiba には出ない)。
+          // 失敗は runAnalysis が握って値なしで続け、`onBabaError` に渡す。警告は固定の語だけ(例外の文面・D1 の内部のメッセージは出さない)。
+          ...(this.babaReader === undefined
+            ? {}
+            : {
+                getBabaConditions: (venueCode: string, date: string) => this.babaReader!.load(date, venueCode),
+                onBabaError: (info: { readonly raceId: string }) => this.onWarn(`発走前の分析(${info.raceId}): 当日の馬場の値を読み出せなかったため、馬場の値なしで続けます`),
+              }),
           llmSkipReason: LLM_NOTE_NO_KEY,
         });
         // LLM が効かなかったとき(キー未登録・フォールバック)は、固定の理由だけを警告に残す(API のエラーの本文・診断メッセージは出さない)。

@@ -6,9 +6,14 @@
  * `meta.changes` が 1 のとき(= この呼び出しが行を作った)だけ `claimed` を返し、0 なら `exists`(既に誰かが試みた)。DO の再起動・アラームの重複・DO のストレージの消失でも、2 回目は通らない。
  * 結果({@link D1BabaStore.finish})は、試みの行の更新と競馬場の行の INSERT を `batch` 1 回(原子的)で書く。**結果の保存に失敗しても、再試行はしない**(API は既に使った)。
  *
+ * ## 読み出し: {@link D1BabaStore.load}(Issue #295)
+ * 発走前の分析が、そのレースの開催日 × 場コードの 1 行(主キー)を読む。**SELECT 1 文**。列(クッション値・芝とダートの状態と含水率・使用コース・芝の状態の文章)だけを読み(芝丈・降水量・元の JSON は読まない)、
+ * core の `normalizeDayBaba` を通す(D1 に直接入れた値でも、許可リスト外の状態語・見出しの偽造・範囲外の数値がそのまま LLM に入らない)。行が無い・読めない値は null。失敗(表が無い・D1 の失敗)は投げる(呼び出し側が握って値なしで続ける)。
+ *
  * 書き込みは 1 日 数文(claim 1 + finish の batch が 1 + 競馬場の数)。呼び出しは `RaceDayCore` の取得ステップだけ。
  */
-import type { BabaFinish, BabaStore } from "./race-day-baba";
+import type { BabaFinish, BabaReader, BabaStore } from "./race-day-baba";
+import { normalizeDayBaba, type DayBaba } from "../../packages/core/src/analyzer/day-baba";
 import type { BabaVenueRecord } from "./baba-conditions";
 
 /** D1 のうち使う部分(`D1Database` の構造的な部分集合)。 */
@@ -51,7 +56,12 @@ function conditionBinds(kaisaiDate: string, v: BabaVenueRecord, savedAt: number)
   ];
 }
 
-export class D1BabaStore implements BabaStore {
+const LOAD_SQL =
+  "SELECT measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, " +
+  "dirt_condition, dirt_goal_condition, dirt_corner4_condition, dirt_goal_moisture, dirt_corner4_moisture, used_course, turf_state_text " +
+  "FROM baba_conditions WHERE kaisai_date = ? AND venue_code = ?";
+
+export class D1BabaStore implements BabaStore, BabaReader {
   private readonly db: BabaDb;
 
   constructor(options: { readonly db: BabaDb }) {
@@ -71,5 +81,33 @@ export class D1BabaStore implements BabaStore {
       ...finish.venues.map((v) => this.db.prepare(CONDITION_SQL).bind(...conditionBinds(kaisaiDate, v, finish.finishedAt))),
     ];
     await this.db.batch(statements);
+  }
+
+  /** 開催日(YYYYMMDD)× JRA の場コード(01〜10)の当日の馬場の値を読む。行が無い・読めない値は null。失敗は投げる。 */
+  async load(kaisaiDate: string, venueCode: string): Promise<DayBaba | null> {
+    const row = await this.db.prepare(LOAD_SQL).bind(kaisaiDate, venueCode).first<Record<string, unknown>>();
+    if (row === null) {
+      return null;
+    }
+    return normalizeDayBaba({
+      measuredAt: row["measured_at"],
+      cushion: row["cushion"],
+      turf: {
+        condition: row["turf_condition"],
+        goalCondition: row["turf_goal_condition"],
+        corner4Condition: row["turf_corner4_condition"],
+        goalMoisture: row["turf_goal_moisture"],
+        corner4Moisture: row["turf_corner4_moisture"],
+      },
+      dirt: {
+        condition: row["dirt_condition"],
+        goalCondition: row["dirt_goal_condition"],
+        corner4Condition: row["dirt_corner4_condition"],
+        goalMoisture: row["dirt_goal_moisture"],
+        corner4Moisture: row["dirt_corner4_moisture"],
+      },
+      usedCourse: row["used_course"],
+      turfStateText: row["turf_state_text"],
+    });
   }
 }

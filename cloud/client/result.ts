@@ -18,6 +18,7 @@
  *    片方だけ・判定不能の注記(設定画面に触れていない)は exe のまま。差し替えは、exe から import した定数との一致で行う(文言を変えても追従する。exe の判定の二重持ちを避ける)
  *  - **3着内率の上位5頭**(Issue #240。「印の付いた馬」の直後。印が無くても出す): 馬番・馬名・率・印。**LLM が効いたとき(モデル ID があるとき)は補正後の3着内率(`adjustedProb`)で並べ、見出しは「AI補正後の3着内率 上位5頭」、
  *    効いていないときは3着内率(`prior`)で並べ、見出しは「3着内率 上位5頭」**(率がどちらの値かを見出しで取り違えない)。並びは率(生の数値)の降順 → 同率は馬番の昇順。5頭未満なら全頭。率が非有限の馬は除き、全頭が欠けていれば出さない
+ *  - **そのとき LLM が見た当日の馬場の値**(Issue #295。`baba`): 「3着内率の上位5頭」の後・「馬ごとの評価」の前の節。行はサーバがプロンプトと同じ整形にしたもの。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null(節ごと出さない)
  * ⚠️ このファイルが exe の renderer を import する唯一の層(`format.ts`・`allocation-proposal-view.ts`)。許可リストは `test/client-bundle.test.ts`。
  */
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/core/src/view/allocation-proposal-view";
@@ -116,6 +117,15 @@ export interface TopProbHorse {
   readonly mark: string | null;
 }
 
+/** 「そのとき LLM が見た当日の馬場の値」の節の見出し(Issue #295)。 */
+export const BABA_HEADING = "AI に渡した当日の馬場(朝の計測値)";
+
+/** 当日の馬場の節(Issue #295)。行はサーバがプロンプトと同じ整形にしたもの。 */
+export interface BabaSection {
+  readonly heading: string;
+  readonly lines: readonly string[];
+}
+
 /** 3着内率の上位5頭(Issue #240)。見出しと行。 */
 export interface TopProbs {
   readonly heading: string;
@@ -146,6 +156,8 @@ export interface ResultContent {
   readonly markLegend: string | null;
   /** 3着内率の上位5頭(Issue #240。印の付いた馬の直後)。率が有限な馬が1頭も無ければ null(節ごと出さない)。 */
   readonly topProbs: TopProbs | null;
+  /** そのとき LLM が見た当日の馬場の値(Issue #295。「3着内率の上位5頭」の後・「馬ごとの評価」の前)。地方・値が無い・古い分析は null(節ごと出さない)。 */
+  readonly baba: BabaSection | null;
   readonly detailNote: string | null;
   /** 単勝の想定の説明文(Issue #247。「馬ごとの評価」の見出しの下に1回)。想定か実際が1頭でもあるときだけ(全頭が「-」なら null)。 */
   readonly winOddsNote: string | null;
@@ -237,6 +249,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
     markedHorses,
     markLegend: markedHorses.length > 0 ? MARK_LEGEND : null,
     topProbs: topProbsOf(a.horses, llmEffective),
+    baba: a.baba == null ? null : { heading: BABA_HEADING, lines: a.baba.lines },
     detailNote: detailNoteOf(a.detail),
     winOddsNote: a.horses.some((h) => h.fairWinOdds !== null || h.winOdds !== null) ? WIN_ODDS_NOTE : null,
     placeOddsNote: a.race.placeBasis !== null && a.horses.some((h) => h.fairPlaceOdds !== null || h.actualPlaceOddsMin !== null) ? PLACE_ODDS_NOTE : null,

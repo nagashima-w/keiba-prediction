@@ -101,6 +101,8 @@ import {
   filterRaceDataBefore,
 } from "../scorer/snapshot-filter.js";
 import { buildRaceSnapshot } from "./analysis-export.js";
+import { centralVenueInfoFromRaceId } from "../scraper/ids.js";
+import { normalizeDayBaba, selectDayBabaForCourse, type DayBaba } from "../analyzer/day-baba.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
 
 /** runAnalysis に注入する依存。すべて関数注入でモック可能。 */
@@ -242,6 +244,16 @@ export interface AnalysisPipelineDeps {
     readonly raceId: RaceId;
     readonly message: string;
   }) => void;
+  /**
+   * 当日の馬場の値(クッション値・含水率・使用コース・芝の状態の文章)の読み出し(Issue #295〈#293-B〉。クラウド版は D1 の `baba_conditions`)。
+   * 引数は JRA の場コード(2桁。レースIDの5〜6桁目)と開催日(YYYYMMDD)。値が無い(地方・計測が無い日・取得の前)は null。
+   * **呼ぶのは、LLM を使う中央のレースで、開催日が渡っているときだけ**(地方・LLM スキップ・近似日では呼ばない。LLM が見ていない値を記録しないため)。
+   * 返った値は正規化し(normalizeDayBaba)、コース種別で絞って(selectDayBabaForCourse)から、プロンプトとスナップショット(`raceSnapshot.baba`)の両方に同じものを渡す。
+   * 省略時は何もしない(機能オフ。既存のプロンプト・保存内容はバイト不変)。失敗(throw・reject)は握って値なしで続け、`onBabaError` に渡す。
+   */
+  readonly getBabaConditions?: (venueCode: string, kaisaiDate: string) => DayBaba | null | Promise<DayBaba | null>;
+  /** `getBabaConditions` が失敗したときの警告用フック(Issue #295)。失敗しても分析は止めず、値なしで続ける。省略時は黙って値なしにする。 */
+  readonly onBabaError?: (info: { readonly raceId: RaceId; readonly message: string }) => void;
   /**
    * fallback:true(LLMがフェイルセーフでpriorに復帰)発生時に呼ばれる任意の診断ログ用フック
    * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(marksDroppedのみの
@@ -499,6 +511,9 @@ export async function runAnalysis(
   let modelUsed: string | null = null;
   const adjustedByUmaban = new Map<number, AdjustedHorse>();
 
+  // 当日の馬場の値(Issue #295)。LLM に渡した値(絞った後)。LLM を使わない・地方・値なしは null のまま(スナップショットに載せない)。
+  let baba: DayBaba | null = null;
+
   if (deps.analyze === null) {
     llmSkippedReason = deps.llmSkipReason ?? "LLM分析はスキップされました";
     notify({
@@ -599,6 +614,23 @@ export async function runAnalysis(
       }
     }
 
+    // 当日の馬場の値(Issue #295): LLM を使う中央のレースで、開催日が渡っているときだけ読む。失敗は握って値なしで続ける。
+    const centralVenue = centralVenueInfoFromRaceId(raceId);
+    if (deps.getBabaConditions && centralVenue !== null && kaisaiDate !== null) {
+      try {
+        baba = selectDayBabaForCourse(
+          normalizeDayBaba(await deps.getBabaConditions(centralVenue.trackCode, kaisaiDate)),
+          race.race.courseType,
+        );
+      } catch (error) {
+        baba = null;
+        deps.onBabaError?.({
+          raceId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     const promptInput: BuildPromptInput = {
       race: {
         raceName: race.race.raceName,
@@ -617,6 +649,8 @@ export async function runAnalysis(
         // 同レース(重賞)の過去10年結果傾向(タスク機能B。grade-winner-trend.ts の
         // collectGradeWinnerTrend)。
         gradeWinnerTrend,
+        // 当日の馬場の値(Issue #295。コース種別で絞った値。無ければキー自体を持たせない)。
+        ...(baba !== null ? { baba } : {}),
       },
       horses: race.horses.map((horseData) => {
         const umaban = horseData.shutuba.umaban;
@@ -926,7 +960,8 @@ export async function runAnalysis(
     rawResponse: llmUsed ? rawResponse : null,
     // 取得したレース情報のスナップショット(Issue#10。エクスポート用、過去戦績は含めない)。
     // LLM使用有無に関わらず保存する(取得済みレース情報のため)。
-    raceSnapshot: buildRaceSnapshot(race),
+    // 当日の馬場の値(Issue #295)は、LLM に渡した値(絞った後)と同じものを載せる(画面に出すのは「そのとき LLM が見た値」)。
+    raceSnapshot: { ...buildRaceSnapshot(race), ...(baba !== null ? { baba } : {}) },
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;
       const prior = priorByUmaban.get(umaban)!;

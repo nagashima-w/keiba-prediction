@@ -498,6 +498,9 @@ describe("Issue #201: プロンプトのプレビューの表示用データ(bui
     expect(notes).toContain("発走の何分前に評価するか");
     expect(notes).toContain("重賞のレースでは、同じレースの過去10年の傾向も、取得できて条件に合う過去回が3回以上あるときだけ、実際の分析でも送ります");
     expect(notes).toContain("このサンプルには、どちらも含まれません");
+    // Issue #295: 当日の馬場の節は、中央のレースで朝の計測値が貯まっているときだけ【レース情報】の直後に足される(このサンプルには含まれない)。
+    expect(notes).toContain("【当日の馬場(朝の計測値)】");
+    expect(notes).toContain("中央のレースで、その日の朝の計測値が取得できているときだけ");
     expect(notes).not.toContain("重賞の傾向は送りません"); // 旧: 重賞の傾向は送らないとする文
     expect(notes).not.toContain("同日の傾向・重賞の傾向"); // 旧: 同日の傾向も送らないとする文
     expect(notes).not.toContain("今後追加予定");

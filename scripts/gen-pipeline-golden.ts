@@ -8,6 +8,7 @@
  * 差分が出たら、それは exe の出力が変わったことを意味する(意図した変更でない限り golden を更新してはいけない)。
  * **Issue #250 で一度だけ再生成した**: スナップショットの race にグレード(`grade`)を足したため、G3 のレース(ラジオNIKKEI賞)の
  * raceSnapshot.race に `"grade": "G3"` が加わった(差分はその 3 か所のみ。`git diff` で確認済み)。
+ * **Issue #295 で再生成した**(`PROMPT_VERSION` が "2026-10-13.1" → "2026-10-13.2" になった): 差分は LLM のシナリオの `record.promptVersion` の 1 行のみ(プロンプト本文・スナップショットは、当日の馬場の値が無いので不変)。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */

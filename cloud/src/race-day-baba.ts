@@ -28,6 +28,7 @@ import { BabaFetchError, parseBabaResponse, type BabaFetcher, type BabaResultCla
 import { startTimeEpochMs } from "./pre-race-time";
 import { jstKaisaiDate } from "./auto-run-plan";
 import type { SqlLike } from "./sql-like";
+import type { DayBaba } from "../../packages/core/src/analyzer/day-baba";
 
 export type { BabaFetcher };
 
@@ -63,6 +64,14 @@ export interface BabaFinish {
 export interface BabaStore {
   claim(kaisaiDate: string, attemptedAt: number): Promise<"claimed" | "exists">;
   finish(kaisaiDate: string, finish: BabaFinish): Promise<void>;
+}
+
+/**
+ * 貯めた当日の馬場の値の読み出し口(Issue #295。本番は `D1BabaStore.load`)。発走前の分析が、そのレースの開催日 × 場コードの値を読む。
+ * 行が無ければ null。失敗は投げる(呼び出し側が握って値なしで続ける)。取得の段階(`BabaStore`)とは独立。
+ */
+export interface BabaReader {
+  load(kaisaiDate: string, venueCode: string): Promise<DayBaba | null>;
 }
 
 /** 計画の事実(`RaceDayCore` が計画の表から作る)。 */

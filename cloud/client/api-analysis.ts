@@ -69,6 +69,15 @@ export interface LlmCall {
 
 export type DetailState = "present" | "missing" | "none";
 
+/** そのとき LLM が見た当日の馬場の値(Issue #295)。サーバがプロンプトと同じ整形にした行(クッション値・含水率・使用コース・芝の状態の文章)。 */
+export interface AnalysisBaba {
+  readonly lines: readonly string[];
+}
+
+/** `baba.lines` の上限(Issue #295)。サーバが作る行は最大 6 行・各 400 字程度。想定外に大きい応答は読まない(null にする)。 */
+const BABA_MAX_LINES = 12;
+const BABA_MAX_LINE_LENGTH = 600;
+
 export interface AnalysisDetail {
   readonly id: number;
   readonly raceId: string;
@@ -95,6 +104,11 @@ export interface AnalysisDetail {
     /** 想定複勝オッズの基準(Issue #253。top3=3着内率〈8頭以上〉・top2=2着内率〈5〜7頭。複勝は2着まで〉・null=出さない〈4頭以下〉)。 */
     readonly placeBasis: "top3" | "top2" | null;
   };
+  /**
+   * そのとき LLM が見た当日の馬場の値(Issue #295)。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null。キー無し(古いサーバの応答)・形が不正な値も null にする
+   * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
+   */
+  readonly baba?: AnalysisBaba | null;
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
   readonly detail: DetailState;
@@ -220,6 +234,15 @@ function parseAllocation(value: unknown): StoredAllocationView | null {
   };
 }
 
+/** `baba` を読む(Issue #295)。{ lines: 1〜12 行の文字列(各 600 字以内) } だけを受け、それ以外(キー無し・null・不正)は null。 */
+function parseBaba(value: unknown): AnalysisBaba | null {
+  if (!isRecord(value) || !Array.isArray(value["lines"])) return null;
+  const lines = value["lines"] as unknown[];
+  if (lines.length < 1 || lines.length > BABA_MAX_LINES) return null;
+  if (!lines.every((l): l is string => typeof l === "string" && l.length <= BABA_MAX_LINE_LENGTH)) return null;
+  return { lines: [...lines] };
+}
+
 function parseDetail(value: unknown): AnalysisDetail | null {
   if (!isRecord(value)) return null;
   const { id, raceId, analyzedAt, kaisaiDate, evEstimated, model, llmNote, llmCalls, race, horses, allocation, detail } = value;
@@ -265,6 +288,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     llmNote,
     llmCalls: parsedCalls,
     race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis },
+    baba: parseBaba(value["baba"]),
     horses: parsedHorses,
     allocation: parsedAllocation,
     detail,

@@ -131,6 +131,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 馬場の API の取得(Issue #294)。secret が未登録・形式不正なら undefined(取得の段階全体が無効)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(baba_fetches・baba_conditions〈migration 0017〉)。
       fetchBaba: createBabaFetcher(env.BABA_API_URL),
       babaStore: new D1BabaStore({ db: env.DB }),
+      // 貯めた当日の馬場の値の読み出し(Issue #295)。発走前の分析が、そのレースの開催日 × 場コードの 1 行を D1 から読む(表が無い間は読み出しが失敗して値なしで続ける)。
+      babaReader: new D1BabaStore({ db: env.DB }),
       // 日報の作成の依頼(Issue #235)。DAILY_REPORT が無い構成では渡さない(依頼しない)。
       ...(requestReport === undefined ? {} : { requestReport }),
       loadSettings: async () => {

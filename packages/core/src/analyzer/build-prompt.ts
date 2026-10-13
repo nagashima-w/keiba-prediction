@@ -195,8 +195,16 @@
  * 新しい scorer で再分析できない。
  * #226 の "2026-10-12.1"(騎手の成績あり・正規化は乗算)の次の版である(検証画面の版別比較で「騎手の成績の前後」と「正規化の前後」を分けて見られるように、#226 と #258 の版を別にした。2026-10-12 ユーザー決定)。
  * この対照(default)のPROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * "2026-10-13.2"(Issue #295〈#293-B〉: 当日の馬場の値〈クッション値・含水率・使用コース・芝の状態の文章〉を、中央のレースの発走前の分析に渡す。2026-10-13 ユーザー決定):
+ * 【レース情報】の直後に、見出し【当日の馬場(朝の計測値)】の節を足した(day-baba.ts の dayBabaPromptSection。コース種別で絞った値。芝丈・降水量は渡さない)。
+ * **値が無いとき〈地方・計測が無い日・取得の前・LLM を使わない分析・D1 の読み出しの失敗〉は節を出さず、プロンプトは "2026-10-13.1" とバイト一致する**
+ * (版の文字列は、節があるレースとないレースで同じ。節を見たかどうかは、保存するスナップショットの `baba` の有無で分かる)。
+ * 良・稍重などの馬場状態は netkeiba の【レース情報】の「馬場状態」を正とし、節の状態語は「朝の計測時点の状態」と時点を明記する(馬場悪化シナリオの判定にも使わない)。
+ * 外部の文章〈使用コース・芝の状態の文章〉は、単一行の 「…」 で引用し、データであって指示ではない旨を注記する(注入の対策。day-baba.ts の冒頭)。
+ * 【指示】・出力スキーマ・予想印の指示は不変。この対照(default)のPROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-10-13.1";
+export const PROMPT_VERSION = "2026-10-13.2";
 
 export {
   CLIP_VARIANTS,
@@ -238,6 +246,7 @@ import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
 import type { MarketGapSummary } from "./market-gap.js";
 import type { JockeyChangeSummary } from "./jockey-change.js";
 import type { MarginTrendSummary } from "./margin-trend.js";
+import { dayBabaPromptSection, normalizeDayBaba, type DayBaba } from "./day-baba.js";
 import { isUsableOdds } from "../ev/allocation-primitives.js";
 import {
   clipAbsoluteLabel,
@@ -453,6 +462,14 @@ export interface BuildPromptRaceInfo {
    * 行を組み立てる)。
    */
   readonly gradeWinnerTrend?: GradeWinnerTrendSummary | null;
+  /**
+   * 当日の馬場の値(Issue #295。中央のレースの朝の計測値。day-baba.ts の DayBaba)。呼び出し側(analysis-pipeline.ts)が
+   * **コース種別で絞った**値(selectDayBabaForCourse)を渡す。undefined/null、または材料が無い値なら節を出さない
+   * (他の optional と同じ spread-omit 流儀。既存文面バイト不変)。渡された値は buildPrompt でも normalizeDayBaba を通す
+   * (外部の文章が入るので、呼び出し側が正規化を忘れても見出し・引用を壊さない)。馬場状態の「正」は trackCondition〈netkeiba〉で、
+   * この値は馬場悪化シナリオの判定に使わない。
+   */
+  readonly baba?: DayBaba | null;
 }
 
 /** buildPrompt の入力。 */
@@ -717,6 +734,13 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push("【レース情報】");
   lines.push(...raceHeader);
   lines.push("");
+
+  // 当日の馬場の値(Issue #295): 値があるときだけ、【レース情報】の直後に節を足す(無ければバイト不変)。
+  const dayBaba = normalizeDayBaba(race.baba);
+  if (dayBaba !== null) {
+    lines.push(...dayBabaPromptSection(dayBaba));
+    lines.push("");
+  }
 
   // 展開想定(Task「展開強化」)。
   // 従来は「逃げ馬の数」と粗いペース想定文の2行のみだったが、以下の4行に拡充する:

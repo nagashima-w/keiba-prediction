@@ -365,6 +365,8 @@ function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
         ]),
     // 3着内率の上位5頭(Issue #240)。印の有無と独立。率が有限な馬が1頭も無ければ section ごと出さない。凡例は足さない(印の付いた馬の凡例が1回出ている)。
     ...(content.topProbs === null ? [] : [h("section", { class: "top-probs" }, [h(heading, {}, [content.topProbs.heading]), h("ul", { class: "horse-list" }, content.topProbs.rows.map(topProbRow))])]),
+    // そのとき LLM が見た当日の馬場の値(Issue #295)。無ければ section ごと出さない。行はサーバの整形(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
+    ...(content.baba === null ? [] : [h("section", { class: "baba" }, [h(heading, {}, [content.baba.heading]), ...content.baba.lines.map((line) => h("p", { class: "meta baba-line" }, [line]))])]),
     h("section", { class: "horses" }, [
       h(heading, {}, ["馬ごとの評価"]),
       // 単勝の想定の説明文(Issue #247)。カードごとには出さず、見出しの下に1回。

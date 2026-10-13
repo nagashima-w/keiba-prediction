@@ -663,3 +663,28 @@ describe("馬場の API の取得のバンドル(Issue #294)", () => {
     120_000,
   );
 });
+
+/**
+ * Issue #295(#293-B): 当日の馬場の値の読み出しの配線。`race-day-do.ts` の読み出し口の行(`babaReader: new D1BabaStore({ db: env.DB })`)が消えると、
+ * 発走前の分析は馬場の値を読まなくなり、機能が黙って無効になる(`babaReader` は省略可能で、テストは偽の読み出し口を直接渡すため、全テストが緑のまま)。
+ * 本番のバンドルに、配線の行そのもの・`runAnalysis` への依存の受け渡し・D1 の SELECT が入っていることを検査する。
+ */
+describe("当日の馬場の値の読み出しのバンドル(Issue #295)", () => {
+  const READER_WIRING_LINE = "babaReader: new D1BabaStore({ db: env.DB })";
+  const CORE_WIRING = "this.babaReader.load(date, venueCode)";
+
+  it(
+    "本番のバンドルに、読み出し口の配線の行・runAnalysis への受け渡し・D1 の SELECT があり、handler.ts には配線が無い",
+    () => {
+      const doSource = readFileSync(path.join(CLOUD, "src", "race-day-do.ts"), "utf-8");
+      const handlerSource = readFileSync(path.join(CLOUD, "src", "handler.ts"), "utf-8");
+      expect(doSource.includes(READER_WIRING_LINE), "race-day-do.ts に読み出し口の配線の行がある").toBe(true);
+      expect(handlerSource.includes("babaReader"), "handler.ts は馬場の値を読まない").toBe(false);
+      const code = bundle(null, "worker.js");
+      for (const marker of [READER_WIRING_LINE, CORE_WIRING, "FROM baba_conditions WHERE kaisai_date = ? AND venue_code = ?", "getBabaConditions"]) {
+        expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
+      }
+    },
+    120_000,
+  );
+});

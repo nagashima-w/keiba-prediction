@@ -41,6 +41,7 @@ import type {
   RaceResultEntry,
   StoredAnalysis,
 } from "../pipeline.js";
+import type { DayBaba } from "../analyzer/day-baba.js";
 
 /** schemaVersion の現行値(第一版)。 */
 export const ANALYSIS_EXPORT_SCHEMA_VERSION = 1 as const;
@@ -155,6 +156,12 @@ export interface RaceSnapshot {
    * `RaceDataMeta.comboOdds`のプレーン写し。
    */
   readonly comboOdds?: ComboOddsScrapeOutcome;
+  /**
+   * 発走前の分析の LLM に渡した当日の馬場の値(Issue #295。コース種別で絞った後の値)。**値があるときだけキーを持つ任意項目**:
+   * 地方・LLM を使わない分析・値が無い日・Issue #295 より前のスナップショットはキー自体が無い。キーがある ⇔ LLM がその節を見た。
+   * `buildRaceSnapshot` は付けない(取得した RaceData には無い。`runAnalysis` が LLM に渡した値を足す)。
+   */
+  readonly baba?: DayBaba;
 }
 
 /**

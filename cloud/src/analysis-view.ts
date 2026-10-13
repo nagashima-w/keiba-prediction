@@ -12,6 +12,7 @@
  * raceSnapshot は書き込み側(`buildRaceSnapshot`)の形だが、JSON から復元しただけで型は検証されていない。読み出しは `toSafeRaceSnapshot`(欠損・不正で投げない)に任せ、
  * 値は文字列・有限の数だけに絞る(それ以外は null)。書き込み側との食い違いは、`test/analysis-view.test.ts` の drift のテストが検出する。
  */
+import { dayBabaLines, normalizeDayBaba } from "../../packages/core/src/analyzer/day-baba";
 import { toSafeRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
@@ -108,6 +109,11 @@ export interface AnalysisViewAllocation {
   readonly bets: readonly { readonly betType: string; readonly comboKey: string; readonly stake: number; readonly odds: number | null; readonly ev: number | null }[];
 }
 
+/** そのとき LLM が見た当日の馬場の値(Issue #295)。LLM のプロンプトと同じ整形(`dayBabaLines`)の行だけ。 */
+export interface AnalysisViewBaba {
+  readonly lines: readonly string[];
+}
+
 export interface AnalysisView {
   readonly id: number;
   readonly raceId: string;
@@ -128,6 +134,11 @@ export interface AnalysisView {
    */
   readonly llmCalls: readonly LlmCallRecord[] | null;
   readonly race: AnalysisViewRace;
+  /**
+   * そのとき LLM が見た当日の馬場の値(Issue #295。クッション値・含水率・使用コース・芝の状態の文章)。raceSnapshot〈R2〉の `baba` から、LLM のプロンプトと同じ整形の行だけを返す
+   * (生の列・余計なキーは返さない)。**詳細が present でない・値が無い(地方・LLM を使わない分析・計測が無い日・Issue #295 より前の分析)・不正な値は null**。画面は null なら何も出さない。`buildAnalysisView` は常にキーを持つ(null を含む)。型で省略可なのは、日報の材料などこの項目を使わない呼び出し側の固定データ(Issue #295 より前の形)を壊さないため。
+   */
+  readonly baba?: AnalysisViewBaba | null;
   readonly horses: readonly AnalysisViewHorse[];
   /** 配分(D1 の配分の行が無ければ null)。 */
   readonly allocation: AnalysisViewAllocation | null;
@@ -153,6 +164,15 @@ function venueNameOf(raceId: string): string | null {
 
 function raceNumberOf(raceId: string): number | null {
   return /^[0-9]{12}$/.test(raceId) ? Number(raceId.slice(10)) : null;
+}
+
+/** スナップショットの `baba` を検証・正規化して、プロンプトと同じ整形の行にする。無い・不正は null。 */
+function babaViewOf(rawSnapshot: unknown): AnalysisViewBaba | null {
+  if (typeof rawSnapshot !== "object" || rawSnapshot === null) {
+    return null;
+  }
+  const baba = normalizeDayBaba((rawSnapshot as Record<string, unknown>)["baba"]);
+  return baba === null ? null : { lines: dayBabaLines(baba) };
 }
 
 export function buildAnalysisView(result: AnalysisDetailResult, allocation: StoredAllocation | undefined): AnalysisView {
@@ -191,6 +211,8 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       oddsStatus: str(race?.oddsStatus),
       placeBasis: placeOdds.basis,
     },
+    // 詳細が present でないときは、スナップショットを一切使わない(null)。
+    baba: detail === "present" ? babaViewOf(analysis.raceSnapshot) : null,
     horses: analysis.horses.map((h) => ({
       umaban: h.umaban,
       name: str(snapshot?.horsesByUmaban.get(h.umaban)?.name),

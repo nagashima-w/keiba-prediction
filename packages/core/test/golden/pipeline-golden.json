@@ -19790,7 +19790,7 @@
       "raceId": "202603020211",
       "analyzedAt": "2026-06-28T12:00:00.000Z",
       "evEstimated": false,
-      "promptVersion": "2026-10-13.1",
+      "promptVersion": "2026-10-13.2",
       "additionalInstruction": null,
       "kaisaiDate": "20260628",
       "historyCutoffDate": "20260628",
