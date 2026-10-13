@@ -19,8 +19,8 @@
 import raceDataJson from "../../../docs/investigations/combo-odds-real-fetch/central-on.json";
 import shutubaHtml from "../../../fixtures/shutuba_202603020211.html";
 import { buildMixedAllocationDisplay } from "../../../packages/app/src/renderer/mixed-allocation-view.js";
-import type { MixedCandidateBuildInput } from "../../../packages/app/src/shared/mixed-candidates.js";
-import type { MixedAllocationSettings } from "../../../packages/app/src/shared/mixed-race-allocation.js";
+import type { MixedCandidateBuildInput } from "../../../packages/core/src/analysis/mixed-candidates.js";
+import type { MixedAllocationSettings } from "../../../packages/core/src/analysis/mixed-race-allocation.js";
 import { parseRaceId, venueKindOfRaceId } from "../../../packages/core/src/scraper/ids.js";
 import { parseShutuba } from "../../../packages/core/src/scraper/parse-shutuba.js";
 import type { RaceData } from "../../../packages/core/src/scraper/scrape-race.js";

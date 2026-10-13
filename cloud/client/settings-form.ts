@@ -10,7 +10,7 @@
  *  - 事前分析と発走前の分析の両方で効く: スコアリングの重み13項目(Issue #218。`WEIGHT_FIELD_ORDER`。`fields` ではなく専用の節〈`weights`〉に出す)。取得ステップで固定した設定のスナップショットで計算する
  *  - 次の計画から効く: 発走何分前(定時の自動実行〈Issue #166・#206・#249〉の毎晩 21:00 の翌日分の計画で読み、計画の行に固定する。すでに計画した日の分は変わらない)
  */
-import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/app/src/shared/settings";
+import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/core/src/analysis/app-settings";
 import {
   ADDITIONAL_INSTRUCTION_MAX_LENGTH,
   ANALYSIS_MODEL_IDS,

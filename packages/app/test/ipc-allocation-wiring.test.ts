@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IPC_CHANNELS } from "../src/shared/channels.js";
 import { DEFAULT_APP_SETTINGS } from "../src/main/settings-store.js";
-import type { SettingsUpdate } from "../src/shared/settings.js";
+import type { SettingsUpdate } from "@keiba/core/analysis/app-settings";
 
 /**
  * ipc.ts が設定画面の配分の設定項目(shared/settings.ts の AppSettings.bankroll ほか。項目数は下の各テストの期待値が正)を
@@ -44,7 +44,7 @@ vi.mock("../src/main/pipeline-deps.js", () => ({
   createPipelineDeps: createPipelineDepsMock,
 }));
 
-vi.mock("../src/main/analysis-pipeline.js", () => ({
+vi.mock("@keiba/core/analysis/analysis-pipeline", () => ({
   runAnalysis: runAnalysisMock,
 }));
 

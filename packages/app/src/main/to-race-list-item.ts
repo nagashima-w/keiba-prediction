@@ -9,7 +9,7 @@
 
 import type { RaceListEntry } from "@keiba/core";
 
-import type { RaceListItem } from "../shared/analysis-types.js";
+import type { RaceListItem } from "@keiba/core/analysis/analysis-types";
 
 /** RaceListEntry を RaceListItem に変換する。 */
 export function toRaceListItem(entry: RaceListEntry): RaceListItem {

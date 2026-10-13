@@ -18,7 +18,7 @@
  * すべてAND(複数条件を同時に満たすエントリのみ残す)。
  */
 
-import type { RaceLedgerView, VerifyVenueFilter } from "../shared/analysis-types.js";
+import type { RaceLedgerView, VerifyVenueFilter } from "@keiba/core/analysis/analysis-types";
 
 /**
  * レース一覧の絞り込み条件。空条件(EMPTY_RACE_LEDGER_FILTER)は絞り込みなし(全件表示)。

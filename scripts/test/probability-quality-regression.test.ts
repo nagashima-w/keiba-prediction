@@ -65,8 +65,8 @@ import {
 import {
   runAnalysis,
   type AnalysisPipelineDeps,
-} from "../../packages/app/src/main/analysis-pipeline.js";
-import type { AnalysisResult } from "../../packages/app/src/shared/analysis-types.js";
+} from "../../packages/core/src/analysis/analysis-pipeline.js";
+import type { AnalysisResult } from "../../packages/core/src/analysis/analysis-types.js";
 
 interface FixtureCase {
   readonly label: string;

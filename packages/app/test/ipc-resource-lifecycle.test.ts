@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IPC_CHANNELS } from "../src/shared/channels.js";
 import { DEFAULT_APP_SETTINGS } from "../src/main/settings-store.js";
-import type { SettingsUpdate } from "../src/shared/settings.js";
+import type { SettingsUpdate } from "@keiba/core/analysis/app-settings";
 
 /**
  * ipc.ts の資源ライフサイクル結線テスト(既存 ipc.test.ts の流儀: electron をモックし、

@@ -9,7 +9,7 @@
  *
  * **サーバ側(Worker)だけが import する。** クライアントの束に Plackett-Luce を入れない(`test/client-bundle.test.ts` が固定する)。
  */
-import { resolvePlaceBetTarget } from "../../packages/app/src/shared/race-allocation";
+import { resolvePlaceBetTarget } from "../../packages/core/src/analysis/race-allocation";
 import { estimateFairPlaceOdds, type PlaceOddsBasis } from "../../packages/core/src/ev/place-odds-estimate";
 
 /** 出走頭数 → 想定複勝オッズの基準。 */

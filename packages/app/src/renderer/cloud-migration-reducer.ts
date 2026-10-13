@@ -5,7 +5,7 @@
  * (このリポジトリは @testing-library 未導入のためレンダリングテストは行わない)。
  */
 
-import type { CloudMigrationExportOutcome } from "../shared/analysis-types.js";
+import type { CloudMigrationExportOutcome } from "@keiba/core/analysis/analysis-types";
 
 /** 保存に成功した結果(件数・大きさ・保存先)。 */
 export type CloudMigrationSaved = Extract<CloudMigrationExportOutcome, { status: "saved" }>;

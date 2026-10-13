@@ -77,7 +77,7 @@ import {
   type RaceData,
   type RaceId,
 } from "../packages/core/src/index.js";
-import { buildRaceSnapshot, type RaceSnapshot } from "../packages/app/src/main/analysis-export.js";
+import { buildRaceSnapshot, type RaceSnapshot } from "../packages/core/src/analysis/analysis-export.js";
 
 /** 出力先ディレクトリ(リポジトリルート直下)。 */
 const OUT_DIR = path.resolve(

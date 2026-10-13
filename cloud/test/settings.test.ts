@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BASE_SCORE_WEIGHT_KEYS, BIAS_WEIGHT_KEYS } from "../../packages/app/src/shared/settings";
+import { BASE_SCORE_WEIGHT_KEYS, BIAS_WEIGHT_KEYS } from "../../packages/core/src/analysis/app-settings";
 import { DEFAULT_SCORER_CONFIG } from "../../packages/core/src/scorer/config";
 import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "../src/pre-race-time";
 import {

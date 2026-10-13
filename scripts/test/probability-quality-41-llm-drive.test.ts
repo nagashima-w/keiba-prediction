@@ -11,7 +11,7 @@ import {
   type GradeWinnerFetcher,
   type RaceData,
 } from "../../packages/core/src/index.js";
-import { runAnalysis } from "../../packages/app/src/main/analysis-pipeline.js";
+import { runAnalysis } from "../../packages/core/src/analysis/analysis-pipeline.js";
 import { assignCaseIds, CASE_ID_SEED } from "../probability-quality-41-llm/case-ids.js";
 import { buildRaceResultDetail, driveRunAnalysis, type DriveInput } from "../probability-quality-41-llm/drive.js";
 import { FileLlmClient } from "../probability-quality-41-llm/file-llm-client.js";

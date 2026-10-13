@@ -20,7 +20,7 @@ import type {
   BatchRaceOutcome,
   PeriodBatchCollectResult,
   RaceListItem,
-} from "../src/shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 
 const race = (raceId: string, raceNumber: number, venue: string): RaceListItem => ({
   raceId,

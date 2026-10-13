@@ -3,7 +3,7 @@
  *
  * exe(`packages/app`)の `main/analysis-pipeline.ts` の `runAnalysis` を、**組み直さずに相対 import で取り込む**
  * (取得 → 戦績の先読みリーク遮断 → scorer → LLM → EV → 配分 → 保存。exe と同じコードなので、出力は同じになる。
- * exe の出力は golden〈`packages/app/test/golden/pipeline-golden.json`〉で固定されており、cloud のテストも同じ golden と照合する)。
+ * exe の出力は golden〈`packages/core/test/golden/pipeline-golden.json`〉で固定されており、cloud のテストも同じ golden と照合する)。
  *
  * 取り込めるのは、`runAnalysis` の閉包が Electron・better-sqlite3・Node 固有の API を値で import しないため。core は
  * バレル(`@keiba/core`)ではなく、狭い入口 `@keiba/core/pipeline`(better-sqlite3 に依存するモジュールを型でも経由しない)から取る
@@ -18,8 +18,8 @@
 import {
   runAnalysis,
   type AnalysisPipelineDeps,
-} from "../../packages/app/src/main/analysis-pipeline";
-import type { AnalysisProgress, AnalysisResult } from "../../packages/app/src/shared/analysis-types";
+} from "../../packages/core/src/analysis/analysis-pipeline";
+import type { AnalysisProgress, AnalysisResult } from "../../packages/core/src/analysis/analysis-types";
 import type { KaisaiDate, RaceId } from "../../packages/core/src/scraper/ids";
 
 export type { AnalysisPipelineDeps as CloudAnalysisDeps, AnalysisResult as CloudAnalysisResult };

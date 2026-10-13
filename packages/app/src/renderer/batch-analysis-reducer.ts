@@ -14,7 +14,7 @@ import type {
   PeriodBatchCollectResult,
   RaceListItem,
   RaceVenueKind,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 
 /** Discord送信の状態。 */
 export type DiscordSendStatus = "idle" | "sending" | "success" | "error";

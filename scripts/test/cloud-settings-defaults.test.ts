@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "../../cloud/src/pre-race-time.js";
 import { CLOUD_SETTINGS_RULES, DEFAULT_CLOUD_SETTINGS, SCORING_WEIGHT_FIELDS } from "../../cloud/src/settings.js";
 import { coerceSettings, DEFAULT_APP_SETTINGS } from "../../packages/app/src/main/settings-store.js";
-import { BASE_SCORE_WEIGHT_KEYS, BIAS_WEIGHT_KEYS } from "../../packages/app/src/shared/settings.js";
+import { BASE_SCORE_WEIGHT_KEYS, BIAS_WEIGHT_KEYS } from "../../packages/core/src/analysis/app-settings.js";
 import { DEFAULT_SCORER_CONFIG } from "../../packages/core/src/scorer/config.js";
 
 /**

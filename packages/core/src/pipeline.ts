@@ -8,7 +8,7 @@
  * 一切(値でも型でも)経由しない**。型は `ev/analysis-store-types.ts`(型だけ)から取る。
  * 検査: `test/ev/native-free-modules.test.ts`(閉包に better-sqlite3 が無いこと)。
  *
- * 追加の基準: runAnalysis の closure(`app/src/main/analysis-pipeline.ts`・`allocation-record.ts`・`analysis-export.ts`)が
+ * 追加の基準: runAnalysis の closure(`core/src/analysis/analysis-pipeline.ts`・`allocation-record.ts`・`analysis-export.ts`)が
  * `@keiba/core` から import する名前だけを置く。exe の他の部分(pipeline-deps.ts 等)は引き続きバレルを使う。
  */
 

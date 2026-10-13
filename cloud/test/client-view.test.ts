@@ -7,7 +7,7 @@ import { buildListModel, type ListModelInput } from "../client/list";
 import { buildRaceModel, type RaceModelInput, type RunUi } from "../client/race";
 import { buildResultModel, type ResultSource } from "../client/result";
 import { buildSettingsModel, draftFromSettings } from "../client/settings-form";
-import { MARK_LEGEND } from "../../packages/app/src/renderer/format";
+import { MARK_LEGEND } from "../../packages/core/src/view/format";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { renderScreen, type ViewActions } from "../client/view";
 import { h, type VNode } from "../client/vnode";

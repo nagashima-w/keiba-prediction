@@ -16,7 +16,7 @@ import type {
   AnalysisRow,
   ComboOddsFetchDiagnosticsView,
   ComboOddsFetchOutcomeView,
-} from "../src/shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 import {
   buildMixedCandidates,
   type ComboCandidateDiagnosticsView,
@@ -24,9 +24,9 @@ import {
   type MixedCandidateDiagnostics,
   type PlaceCandidateDiagnostics,
   type WinCandidateDiagnosticsView,
-} from "../src/shared/mixed-candidates.js";
-import { NOT_DIVERSIFIED_NOTE, probabilitySumWarning } from "../src/renderer/bet-allocation-view.js";
-import { buildRaceAllocation, resolvePlaceBetTarget } from "../src/shared/race-allocation.js";
+} from "@keiba/core/analysis/mixed-candidates";
+import { NOT_DIVERSIFIED_NOTE, probabilitySumWarning } from "@keiba/core/view/bet-allocation-view";
+import { buildRaceAllocation, resolvePlaceBetTarget } from "@keiba/core/analysis/race-allocation";
 import {
   aggregateUnjudgedCounts,
   ALLOCATION_COMPUTE_ERROR_NOTE,
@@ -55,8 +55,8 @@ import {
   type MixedAllocationDisplay,
   type MixedAllocationSplit,
 } from "../src/renderer/mixed-allocation-view.js";
-import { buildMixedRaceAllocation, type MixedAllocationSettings } from "../src/shared/mixed-race-allocation.js";
-import { formatYen } from "../src/renderer/verify-format.js";
+import { buildMixedRaceAllocation, type MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
+import { formatYen } from "@keiba/core/view/verify-format";
 
 // ============================================================================
 // テストヘルパー(定義したヘルパーはすべて自己テストする。mixed-candidates.test.tsの流儀を踏襲)

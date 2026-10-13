@@ -26,8 +26,8 @@ import { fileURLToPath } from "node:url";
 import type {
   AnalysisResult,
   ComboOddsScrapeOutcomeView,
-} from "../../packages/app/src/shared/analysis-types.js";
-import type { MixedCandidateBuildInput } from "../../packages/app/src/shared/mixed-candidates.js";
+} from "../../packages/core/src/analysis/analysis-types.js";
+import type { MixedCandidateBuildInput } from "../../packages/core/src/analysis/mixed-candidates.js";
 import { toComboOddsScalarMap } from "../../packages/core/src/scraper/combo-odds-key.js";
 import { parseComboOdds } from "../../packages/core/src/scraper/parse-combo-odds.js";
 import { loadAnalysisResult } from "../bench-mixed-allocation.js";

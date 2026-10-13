@@ -15,7 +15,7 @@ import type { SkipReasonCode } from "../../packages/core/src/ev/combo-bet-alloca
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key";
-import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
+import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import { nameWithGrade } from "../client/grade";
 import { kaisaiDateWeekday } from "./auto-run-plan";
 import { DISCORD_COLORS } from "./palette";

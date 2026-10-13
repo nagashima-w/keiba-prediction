@@ -1,4 +1,4 @@
-import type { RaceListItem, RaceListTarget } from "../shared/analysis-types.js";
+import type { RaceListItem, RaceListTarget } from "@keiba/core/analysis/analysis-types";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
 import { groupRacesByVenue } from "./group-races.js";

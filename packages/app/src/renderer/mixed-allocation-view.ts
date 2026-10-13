@@ -44,20 +44,20 @@ import type {
   MixedCandidateBuildInput,
   MixedCandidateDiagnostics,
   PlaceCandidateDiagnostics,
-} from "../shared/mixed-candidates.js";
+} from "@keiba/core/analysis/mixed-candidates";
 import {
   buildMixedRaceAllocation,
   type MixedAllocationSettings,
   type MixedRaceAllocationComputed,
   type MixedRaceAllocationInvalid,
-} from "../shared/mixed-race-allocation.js";
-import { buildRaceAllocation, type RaceAllocationView } from "../shared/race-allocation.js";
+} from "@keiba/core/analysis/mixed-race-allocation";
+import { buildRaceAllocation, type RaceAllocationView } from "@keiba/core/analysis/race-allocation";
 import {
   NOT_DIVERSIFIED_NOTE,
   placeBetUnavailableMessage,
   probabilitySumWarning,
-} from "./bet-allocation-view.js";
-import { formatYen } from "./verify-format.js";
+} from "@keiba/core/view/bet-allocation-view";
+import { formatYen } from "@keiba/core/view/verify-format";
 
 
 // ============================================================================

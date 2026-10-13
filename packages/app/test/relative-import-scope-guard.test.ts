@@ -338,10 +338,12 @@ describe("shared配下の相対importがshared配下の外を指していない�
     });
   });
 
-  it("実ファイル走査: shared配下が空でなく、shared/analysis-types.tsが走査対象に含まれること(空振り防止)", () => {
+  // 【Issue #286(#285 の段階A)】analysis-types.ts は packages/core/src/analysis/ へ移った(shared/ に残るのは exe 専用の5ファイル)。
+  // 空振り防止の「実在を確かめるファイル」を、shared/ に残る channels.ts に替えた(走査の対象・違反の判定は変えていない)。
+  it("実ファイル走査: shared配下が空でなく、shared/channels.tsが走査対象に含まれること(空振り防止)", () => {
     const files = readSourceFiles(sharedDir, [".ts"]);
     expect(files.size).toBeGreaterThan(0);
-    expect(files.has(path.join(sharedDir, "analysis-types.ts"))).toBe(true);
+    expect(files.has(path.join(sharedDir, "channels.ts"))).toBe(true);
   });
 
   it("shared配下(.ts)の相対importをすべて解決しても、shared配下の外を指すものが0件であること", () => {

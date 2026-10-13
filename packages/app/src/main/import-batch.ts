@@ -28,7 +28,7 @@ import type {
   BulkImportProgress,
   BulkImportRaceOutcome,
   ImportResultOutcome,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 
 /** レース間の最低リクエスト間隔(ミリ秒)。仕様の「1.5秒レート制限」を満たす。 */
 export const BULK_IMPORT_RATE_LIMIT_MS = 1500;

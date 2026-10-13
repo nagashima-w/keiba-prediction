@@ -7,7 +7,7 @@
  * 未知の `route` 文字列は通す(表示関数が「判定不能」の注記にする)。
  * サーバ側のキー名・形のドリフトは `test/client-api-analysis-contract.test.ts`(実際の `handle()` の応答を通す)が検出する。
  */
-import type { StoredAllocationBetView, StoredAllocationView } from "../../packages/app/src/shared/analysis-types";
+import type { StoredAllocationBetView, StoredAllocationView } from "../../packages/core/src/analysis/analysis-types";
 import { classify, getJson, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 /** 過去の分析の一覧の 1 件(`GET /api/analyses` の要約から、画面に使う項目だけ)。 */

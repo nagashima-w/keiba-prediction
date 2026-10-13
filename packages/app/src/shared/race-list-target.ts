@@ -10,7 +10,7 @@
  * venueKind="nar" + jpnOnly=true という組み合わせで表現し、UI層だけがこの3択を意識する。
  */
 
-import type { RaceListSelection, RaceListTarget } from "./analysis-types.js";
+import type { RaceListSelection, RaceListTarget } from "@keiba/core/analysis/analysis-types";
 
 /**
  * 3択を内部状態(venueKind, jpnOnly)へ写像する。

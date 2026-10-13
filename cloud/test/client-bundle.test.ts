@@ -136,12 +136,12 @@ describe("生成物のドリフトと決定性", () => {
 
 /** クライアントが取り込んでよい exe 側のモジュール(相対 import の指定子。拡張子なし)。exe の renderer・shared の純関数だけ。#185 で配分の表示(`buildAllocationProposalView`)を流用するため。 */
 const ALLOWED_EXTERNAL_IMPORTS = new Set([
-  "../../packages/app/src/renderer/allocation-proposal-view",
-  "../../packages/app/src/renderer/bet-allocation-view",
-  "../../packages/app/src/renderer/format",
-  "../../packages/app/src/shared/analysis-types",
+  "../../packages/core/src/view/allocation-proposal-view",
+  "../../packages/core/src/view/bet-allocation-view",
+  "../../packages/core/src/view/format",
+  "../../packages/core/src/analysis/analysis-types",
   // Issue #189(設定画面): ラベルと版 ID は exe の共有定数(import なしの純モジュール)、範囲の述語は cloud/src の純モジュール(サーバと同じ述語を使う)。
-  "../../packages/app/src/shared/settings",
+  "../../packages/core/src/analysis/app-settings",
   "../src/settings",
   // Issue #201(設定画面のプロンプトのプレビュー): **core を直接 import する唯一の例外**。exe の設定画面と同じ関数(`buildPromptPreview`)を直接呼んで、プレビューの文面を exe と
   // 一致させるため(renderer に再 export の薄いモジュールを置くと、exe 側を触ることになる)。この入口は core の `exports` の宣言済みサブパスで、閉包に `node:`・`node_modules`・バレルは入らない
@@ -180,6 +180,9 @@ function forbiddenInputs(inputs: readonly string[]): string[] {
       /packages\/core\/src\/index\.ts$/.test(f) ||
       /packages\/core\/src\/(?:ev\/analysis-store|scraper\/cache)\.ts$/.test(f) ||
       /packages\/app\/src\/main\//.test(f) ||
+      // Issue #286(#285 の段階A): 旧 `packages/app/src/main/` の共有部分 4 本(analysis-pipeline・analysis-export・allocation-record・venue-codes)は
+      // `packages/core/src/analysis/` へ移った。**「main の4本はクライアントに入れない」を、移設先の同じ4本で維持する**(同じ名前の `analysis-types`・`app-settings` などは、移設前も許可していた)。
+      /packages\/core\/src\/analysis\/(?:analysis-pipeline|analysis-export|allocation-record|venue-codes)\.ts$/.test(f) ||
       /^node:/.test(f) ||
       // Issue #222: 移行の取り込み(変換・DO・予算・サーバの検証)は Worker 専用。クライアントには「形式の検証」と「行の分割」だけを入れる。
       /(^|\/)src\/migration-(?:core|do|convert|verify)\.ts$/.test(f) ||
@@ -250,17 +253,17 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
   });
 
   it("対照: import の許可判定は、バレル・core の直接 import・bare specifier・許可外の renderer を拒否する(上の検査が空振りでない)", () => {
-    for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/app/src/main/analysis-export"]) {
+    for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/core/src/analysis/analysis-export"]) {
       expect(importAllowed(bad), bad).toBe(false);
     }
-    for (const good of ["./api", "../../packages/app/src/renderer/allocation-proposal-view", "../../packages/app/src/renderer/bet-allocation-view", "../../packages/app/src/renderer/format", "../../packages/app/src/shared/analysis-types", "../../packages/app/src/shared/settings", "../src/settings", "@keiba/core/analyzer/build-prompt", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader"]) {
+    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings", "@keiba/core/analyzer/build-prompt", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader"]) {
       expect(importAllowed(good), good).toBe(true);
     }
   });
 
   it("バンドルの閉包(esbuild の metafile): exe の renderer の純関数が実際に入っており、node_modules・バレル・better-sqlite3 に依存するモジュール・Node の組込みは入っていない", async () => {
     const inputs = await listBundledInputs();
-    expect(inputs.some((f) => f.endsWith("packages/app/src/renderer/allocation-proposal-view.ts")), "前提: renderer の流用が閉包に入っている").toBe(true);
+    expect(inputs.some((f) => f.endsWith("packages/core/src/view/allocation-proposal-view.ts")), "前提: renderer の流用が閉包に入っている").toBe(true);
     expect(inputs.some((f) => f.endsWith("packages/core/src/ev/combo-bet-allocation.ts")), "前提: core のサブパスが tsconfig の paths で解決されている").toBe(true);
     // Issue #201: プレビューが呼ぶ exe と同じ関数(`buildPromptPreview`)の閉包が入っている(入っていなければ、下の禁止の検査は何も見ていない)
     expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/build-prompt.ts")), "前提: build-prompt が閉包に入っている").toBe(true);
@@ -279,7 +282,7 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
       "../packages/core/src/ev/analysis-store.ts",
       "../packages/core/src/scraper/cache.ts",
       "node:zlib",
-      "../packages/app/src/main/analysis-export.ts",
+      "../packages/core/src/analysis/analysis-export.ts",
     ];
     expect(forbiddenInputs([...bad, "src/migration-core.ts", "src/migration-do.ts", "src/migration-convert.ts", "src/migration-verify.ts", "../packages/core/src/ev/analysis-store-codec.ts"])).toEqual([
       ...bad,
@@ -289,7 +292,7 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
       "src/migration-verify.ts",
       "../packages/core/src/ev/analysis-store-codec.ts",
     ]);
-    expect(forbiddenInputs(["client/main.ts", "../packages/app/src/renderer/format.ts", "../packages/core/src/ev/bet-allocation.ts", "src/migration-reader.ts", "../packages/core/src/ev/cloud-migration-format.ts"])).toEqual([]);
+    expect(forbiddenInputs(["client/main.ts", "../packages/core/src/view/format.ts", "../packages/core/src/ev/bet-allocation.ts", "src/migration-reader.ts", "../packages/core/src/ev/cloud-migration-format.ts"])).toEqual([]);
   });
 });
 

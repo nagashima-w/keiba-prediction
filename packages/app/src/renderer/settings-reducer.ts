@@ -23,7 +23,7 @@ import {
   type ClipVariantId,
   type MaskedSettings,
   type SettingsUpdate,
-} from "../shared/settings.js";
+} from "@keiba/core/analysis/app-settings";
 
 /** 保存操作の状態。 */
 export type SettingsStatus =

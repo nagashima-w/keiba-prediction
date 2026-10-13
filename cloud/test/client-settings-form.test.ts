@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CLIP_VARIANTS } from "@keiba/core/analyzer/clip-variants";
-import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS, isValidWeight } from "../../packages/app/src/shared/settings";
+import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS, isValidWeight } from "../../packages/core/src/analysis/app-settings";
 import {
   buildSettingsModel,
   draftFromSettings,

@@ -12,8 +12,8 @@
  * raceSnapshot は書き込み側(`buildRaceSnapshot`)の形だが、JSON から復元しただけで型は検証されていない。読み出しは `toSafeRaceSnapshot`(欠損・不正で投げない)に任せ、
  * 値は文字列・有限の数だけに絞る(それ以外は null)。書き込み側との食い違いは、`test/analysis-view.test.ts` の drift のテストが検出する。
  */
-import { toSafeRaceSnapshot } from "../../packages/app/src/main/analysis-export";
-import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
+import { toSafeRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
+import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
 import type { StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";

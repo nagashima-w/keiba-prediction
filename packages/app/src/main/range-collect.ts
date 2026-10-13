@@ -30,7 +30,7 @@
 
 import { enumerateDates, filterJpnOnlyEntries } from "@keiba/core";
 import type { KaisaiDate, RaceId, RaceListEntry } from "@keiba/core";
-import type { RaceListTarget } from "../shared/analysis-types.js";
+import type { RaceListTarget } from "@keiba/core/analysis/analysis-types";
 
 /** 日ごとの収集結果アウトカム。 */
 export type DayOutcome =

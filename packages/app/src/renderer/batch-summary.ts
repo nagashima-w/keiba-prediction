@@ -21,7 +21,7 @@ import type {
   ConditionChangeTagView,
   EvPlusSummaryRow,
   PredictionMark,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 
 /**
  * レースID(12桁)の末尾2桁からレース番号(1〜12)を取り出す(Task#29)。

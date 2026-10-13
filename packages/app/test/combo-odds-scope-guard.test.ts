@@ -45,7 +45,11 @@ import { describe, expect, it } from "vitest";
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.join(currentDir, "../src");
 const rendererDir = path.join(srcDir, "renderer");
-const sharedDir = path.join(srcDir, "shared");
+// 【Issue #286(#285 の段階A)】shared/・main/・renderer/ の共有部分は packages/core/src/analysis/・view/ へ移した(下の2つ)。
+// 走査の範囲は、移設前に保っていた「app/src 全体」に加えて、移設先の core/src 全体にも広げた(呼び出し元の検査を弱めない)。
+const coreSrcDir = path.join(currentDir, "../../core/src");
+const sharedDir = path.join(coreSrcDir, "analysis");
+const coreViewDir = path.join(coreSrcDir, "view");
 
 /** ディレクトリ配下の対象拡張子ファイルを再帰的に読み込み、パス→内容のMapを返す。 */
 function readSourceFiles(dir: string, extensions: readonly string[]): Map<string, string> {
@@ -152,7 +156,7 @@ describe("listCallerFiles(テストヘルパーの自己検証)", () => {
 
 describe("受け入れ条件1(第4段で改訂、Issue #57でさらに改訂): buildMixedCandidatesの呼び出し元がshared/mixed-race-allocation.ts以外に無いこと(単一定義の原則)", () => {
   it("app/src配下(.ts/.tsx)を走査しても、shared/mixed-candidates.ts自身とshared/mixed-race-allocation.ts以外に呼び出しが無いこと", () => {
-    const files = readSourceFiles(srcDir, [".ts", ".tsx"]);
+    const files = new Map([...readSourceFiles(srcDir, [".ts", ".tsx"]), ...readSourceFiles(coreSrcDir, [".ts", ".tsx"])]);
     // 前提固定: 両ファイルに定義・呼び出しが実在すること(空振り防止)。
     expect(files.has(path.join(sharedDir, "mixed-candidates.ts"))).toBe(true);
     expect(files.has(path.join(sharedDir, "mixed-race-allocation.ts"))).toBe(true);
@@ -176,7 +180,7 @@ describe("受け入れ条件9(第4段で改訂、Issue #57でさらに改訂): �
   });
 
   it("renderer/bet-allocation-view.ts(複勝専用の表示関数群)がwideCombo/trioCombo/comboOddsを一切参照していないこと", () => {
-    const source = readFileSync(path.join(rendererDir, "bet-allocation-view.ts"), "utf8");
+    const source = readFileSync(path.join(coreViewDir, "bet-allocation-view.ts"), "utf8");
     // 前提固定: このファイルには複勝配分の表示関数が実在すること(空振り防止)。
     expect(source).toContain("export function placeBetUnavailableMessage");
     expect(source).not.toContain("wideCombo");

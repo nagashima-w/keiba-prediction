@@ -16,9 +16,9 @@
  * 意味するようになる)。
  */
 
-import type { AnalysisResult } from "../shared/analysis-types.js";
+import type { AnalysisResult } from "@keiba/core/analysis/analysis-types";
 import type { AllocationOutcome } from "./mixed-allocation-queue.js";
-import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
+import type { MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
 import {
   buildMixedAllocationDisplay,
   type MixedRaceAllocationDisplayView,

@@ -16,7 +16,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IPC_CHANNELS } from "../src/shared/channels.js";
-import type { BatchRaceOutcome } from "../src/shared/analysis-types.js";
+import type { BatchRaceOutcome } from "@keiba/core/analysis/analysis-types";
 
 const { handleMock, createPipelineDepsMock, runAnalysisMock, logErrorMock, ctx } =
   vi.hoisted(() => ({
@@ -40,7 +40,7 @@ vi.mock("../src/main/pipeline-deps.js", () => ({
 }));
 
 // runAnalysis 本体は実IOを伴うためモックする(結線=一括オーケストレーションのみ検証)。
-vi.mock("../src/main/analysis-pipeline.js", () => ({
+vi.mock("@keiba/core/analysis/analysis-pipeline", () => ({
   runAnalysis: runAnalysisMock,
 }));
 

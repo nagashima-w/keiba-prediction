@@ -19,7 +19,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IPC_CHANNELS } from "../src/shared/channels.js";
-import type { LogExportOutcome } from "../src/shared/analysis-types.js";
+import type { LogExportOutcome } from "@keiba/core/analysis/analysis-types";
 
 const {
   handleMock,

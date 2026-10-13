@@ -60,18 +60,18 @@ vi.mock("@keiba/core/ev/bet-allocation", async (importOriginal) => {
   };
 });
 
-const { buildMixedRaceAllocationWithOutcome } = await import("../src/shared/mixed-race-allocation.js");
+const { buildMixedRaceAllocationWithOutcome } = await import("@keiba/core/analysis/mixed-race-allocation");
 const { resolvePlaceOnlyStake } = await import("../src/renderer/mixed-allocation-view.js");
 
 // ============================================================================
 // テストヘルパー(allocation-outcome-codes.test.tsと同じ流儀。本ファイル専用に複製する)
 // ============================================================================
 
-import type { AnalysisRow as AnalysisRowType, ComboOddsFetchDiagnosticsView, ComboOddsFetchOutcomeView } from "../src/shared/analysis-types.js";
+import type { AnalysisRow as AnalysisRowType, ComboOddsFetchDiagnosticsView, ComboOddsFetchOutcomeView } from "@keiba/core/analysis/analysis-types";
 import { buildComboOddsKey } from "@keiba/core/ev/combo-bet-allocation";
 import { CONDITIONAL_BERNOULLI_MODEL, PLACKETT_LUCE_MODEL } from "@keiba/core/ev/place-joint-model";
-import type { MixedCandidateBuildInput } from "../src/shared/mixed-candidates.js";
-import type { MixedAllocationSettings } from "../src/shared/mixed-race-allocation.js";
+import type { MixedCandidateBuildInput } from "@keiba/core/analysis/mixed-candidates";
+import type { MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
 
 function row(overrides: Partial<AnalysisRowType> & { umaban: number }): AnalysisRowType {
   return {

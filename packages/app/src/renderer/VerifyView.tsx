@@ -2,12 +2,12 @@ import type {
   CalibrationBiasBinView,
   CalibrationBinView,
   VerifyVenueFilter,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 import type { VerifyState } from "./verify-reducer.js";
-import { buildAllocationProposalView } from "./allocation-proposal-view.js";
+import { buildAllocationProposalView } from "@keiba/core/view/allocation-proposal-view";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
-import { formatEv, MARK_LEGEND } from "./format.js";
+import { formatEv, MARK_LEGEND } from "@keiba/core/view/format";
 import {
   formatFailedRaceErrors,
   summarizeBulkImport,
@@ -48,7 +48,7 @@ import {
   raceLedgerPositiveCount,
   raceLedgerStatusLabel,
   venueFilterLabel,
-} from "./verify-format.js";
+} from "@keiba/core/view/verify-format";
 
 /** 検証画面のプロパティ。 */
 export interface VerifyViewProps {

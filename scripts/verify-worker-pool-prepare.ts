@@ -25,8 +25,8 @@ import path from "node:path";
 
 import { loadAnalysisResult } from "./bench-mixed-allocation.js";
 import { buildMixedAllocationDisplay } from "../packages/app/src/renderer/mixed-allocation-view.js";
-import type { AnalysisResult } from "../packages/app/src/shared/analysis-types.js";
-import type { MixedAllocationSettings } from "../packages/app/src/shared/mixed-race-allocation.js";
+import type { AnalysisResult } from "../packages/core/src/analysis/analysis-types.js";
+import type { MixedAllocationSettings } from "../packages/core/src/analysis/mixed-race-allocation.js";
 import type { MixedRaceAllocationDisplayView } from "../packages/app/src/renderer/mixed-allocation-view.js";
 
 /** `verify-worker-pool-electron.mjs`が読み込むフィクスチャの形。 */

@@ -6,7 +6,7 @@
  * 会場名が取得できない(null)レースは「不明」グループにまとめる。
  */
 
-import type { RaceListItem } from "../shared/analysis-types.js";
+import type { RaceListItem } from "@keiba/core/analysis/analysis-types";
 
 /** 会場ごとのレースグループ。 */
 export interface RaceGroup {

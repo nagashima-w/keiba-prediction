@@ -12,7 +12,7 @@ import type {
   AnalysisResult,
   AnalysisRow,
   BatchRaceOutcome,
-} from "../src/shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 
 const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   umaban: 1,

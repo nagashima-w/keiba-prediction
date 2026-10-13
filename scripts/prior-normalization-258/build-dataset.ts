@@ -38,7 +38,7 @@ import {
   excludeOwnRaceResults,
   filterRaceDataBefore,
 } from "../../packages/core/src/scorer/snapshot-filter.js";
-import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes.js";
+import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes.js";
 import type { RaceObservation } from "../probability-quality-41/observation.js";
 import type {
   DatasetHorse,

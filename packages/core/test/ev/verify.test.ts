@@ -1375,7 +1375,7 @@ describe("computeVerifyReportByPromptVersion(プロンプト版別のverify集�
     () => {
       // 検証画面の削除確認ダイアログは、版別レポート(computeVerifyReportByPromptVersion)の
       // 版不明グループが持つ内訳の合計を「削除件数」として表示する
-      // (packages/app/src/renderer/verify-format.ts の unknownPromptVersionAnalysisCount)。
+      // (packages/core/src/view/verify-format.ts の unknownPromptVersionAnalysisCount)。
       // その内訳は6つ(集計対象included・結果未取込excluded・旧分析superseded・推定EV除外
       // excludedEstimated・リーク疑い除外excludedLookaheadSuspect・発走前後判定不可除外
       // excludedLookaheadUnknown。Issue #152 B)で、その6つの合計が

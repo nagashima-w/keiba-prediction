@@ -7,7 +7,7 @@ import type {
   PeriodBatchCollectProgress,
   RaceListTarget,
   VerifyVenueFilter,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 import {
   batchAnalysisReducer,
   createInitialBatchState,
@@ -18,7 +18,7 @@ import { deriveBatchAvailability } from "./batch-availability.js";
 import { canCollectPeriodBatch } from "./period-batch-gate.js";
 import { collectEvPlusSummary } from "./batch-summary.js";
 import { BatchAnalysisView } from "./BatchAnalysisView.js";
-import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
+import type { MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
 import {
   createMixedAllocationCache,
   type MixedAllocationCache,
@@ -44,7 +44,7 @@ import {
 import {
   deleteUnknownPromptVersionConfirmMessage,
   unknownPromptVersionAnalysisCount,
-} from "./verify-format.js";
+} from "@keiba/core/view/verify-format";
 
 /** 今日を YYYYMMDD で返す(日付ピッカーの初期値)。 */
 function todayYyyymmdd(): string {

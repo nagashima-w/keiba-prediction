@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StoredAnalysis, StoredAnalysisHorse } from "../../packages/core/src/ev/analysis-store-types";
-import { buildRaceSnapshot } from "../../packages/app/src/main/analysis-export";
+import { buildRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
 import { estimateFairPlaceOdds } from "../../packages/core/src/ev/place-odds-estimate";
 import { buildAnalysisView } from "../src/analysis-view";
 import type { AnalysisDetailResult, DetailStatus } from "../src/analysis-repository";

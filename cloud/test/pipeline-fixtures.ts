@@ -1,6 +1,6 @@
 /**
  * runAnalysis(クラウド版の取り込み。Issue #176)のテスト用の入力。リポジトリ内のフィクスチャ(`fixtures/`。中央16頭 202603020211)と
- * 固定の合成値だけで、実ネットワーク・実 API には触れない。内容は `packages/app/test/golden/pipeline-golden-scenarios.ts`
+ * 固定の合成値だけで、実ネットワーク・実 API には触れない。内容は `packages/core/test/golden/pipeline-golden-scenarios.ts`
  * (exe 側の golden を生成するシナリオ)と同じ。cloud はその app 側のファイル(core のバレルを import する)を取り込めないので、
  * ここに必要な部分を写している(golden JSON との一致が、写しが食い違っていないことの検査になる)。
  */
@@ -27,7 +27,7 @@ export function loadFixture(name: string): string {
 
 /** exe 側の golden JSON(変更前のコミットで生成)。 */
 export const GOLDEN = JSON.parse(
-  readFileSync(path.join(ROOT, "packages", "app", "test", "golden", "pipeline-golden.json"), "utf-8"),
+  readFileSync(path.join(ROOT, "packages", "core", "test", "golden", "pipeline-golden.json"), "utf-8"),
 ) as {
   noLlmAllBets: { result: unknown; record: { kaisaiDate: string | null; allocation?: { bets: unknown[] } } };
   llmStubSameDayGrade: { result: unknown; record: unknown; promptInput: unknown };

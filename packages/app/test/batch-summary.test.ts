@@ -23,7 +23,7 @@ import type {
   AnalysisResult,
   AnalysisRow,
   BatchRaceOutcome,
-} from "../src/shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 
 /** 最小の結果行を作る(既定はEVプラスでない)。 */
 const row = (over: Partial<AnalysisRow>): AnalysisRow => ({

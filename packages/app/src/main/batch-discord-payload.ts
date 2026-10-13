@@ -13,13 +13,13 @@ import {
   type DiscordPayload,
 } from "@keiba/core";
 
-import type { BatchRaceOutcome } from "../shared/analysis-types.js";
+import type { BatchRaceOutcome } from "@keiba/core/analysis/analysis-types";
 import {
   collectEvPlusSummary,
   rankRaceOpportunities,
   summarizeBatch,
 } from "../renderer/batch-summary.js";
-import { raceHeading } from "../renderer/format.js";
+import { raceHeading } from "@keiba/core/view/format";
 
 /** Discordサマリに載せる妙味レースランキングの最大件数(上位数件で十分)。 */
 const RANKING_TOP_N = 3;

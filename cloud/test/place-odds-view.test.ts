@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolvePlaceBetTarget } from "../../packages/app/src/shared/race-allocation";
+import { resolvePlaceBetTarget } from "../../packages/core/src/analysis/race-allocation";
 import { estimateFairPlaceOdds } from "../../packages/core/src/ev/place-odds-estimate";
 import { estimatePlaceOddsForRace, placeOddsBasisOf } from "../src/place-odds-view";
 

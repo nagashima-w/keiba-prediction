@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { mixedAllocationSettingsFromAppSettings } from "../src/renderer/mixed-allocation-settings.js";
-import type { MixedAllocationSettings } from "../src/shared/mixed-race-allocation.js";
+import type { MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const rendererDir = path.join(currentDir, "../src/renderer");

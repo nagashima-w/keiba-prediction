@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { AnalysisResult, AnalysisRow } from "../src/shared/analysis-types.js";
-import type { MixedAllocationSettings } from "../src/shared/mixed-race-allocation.js";
+import type { AnalysisResult, AnalysisRow } from "@keiba/core/analysis/analysis-types";
+import type { MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
 import { buildMixedAllocationDisplay } from "../src/renderer/mixed-allocation-view.js";
 import {
   handleAllocationWorkerRequest,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { RaceLedgerView } from "../src/shared/analysis-types.js";
+import type { RaceLedgerView } from "@keiba/core/analysis/analysis-types";
 import {
   distinctVenueNames,
   EMPTY_RACE_LEDGER_FILTER,

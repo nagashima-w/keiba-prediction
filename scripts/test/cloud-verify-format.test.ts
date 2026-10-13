@@ -34,10 +34,10 @@ import {
   formatUnknownBetTypeNotice as exeFormatUnknownBetTypeNotice,
   formatYen as exeFormatYen,
   venueFilterLabel,
-} from "../../packages/app/src/renderer/verify-format.js";
+} from "../../packages/core/src/view/verify-format.js";
 
 /**
- * Issue #219: クラウド版の検証画面の整形(`cloud/client/verify-format.ts`)は、exe の検証画面(`packages/app/src/renderer/verify-format.ts`)と同じ出力になる。
+ * Issue #219: クラウド版の検証画面の整形(`cloud/client/verify-format.ts`)は、exe の検証画面(`packages/core/src/view/verify-format.ts`)と同じ出力になる。
  * **ここ(ルートの scripts/test/)に置く理由**: exe の renderer の整形は app の閉包(型の import 先を含む)で、cloud の CI(cloud だけを install)からは引けない(#218 と同じ)。
  */
 describe("率・金額の整形は exe と同じ", () => {

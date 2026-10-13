@@ -21,7 +21,7 @@ import type {
   AnalysisResult,
   BatchProgress,
   BatchRaceOutcome,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 
 /** runBatchAnalysis に注入する依存。 */
 export interface BatchRunnerDeps {

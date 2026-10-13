@@ -33,7 +33,7 @@ import {
   type ClipVariantId,
   type MaskedSettings,
   type SettingsUpdate,
-} from "../shared/settings.js";
+} from "@keiba/core/analysis/app-settings";
 
 /** 馬券配分(機能C-2)の総資金の上限(円)。shared/settings.ts の isValidBankroll と一致させる。 */
 const BANKROLL_MAX = 100_000_000;

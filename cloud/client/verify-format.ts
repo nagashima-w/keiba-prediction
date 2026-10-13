@@ -1,5 +1,5 @@
 /**
- * 検証画面の表示整形(Issue #219。純関数)。**exe の検証画面(`packages/app/src/renderer/verify-format.ts`)と同じ出力**にする
+ * 検証画面の表示整形(Issue #219。純関数)。**exe の検証画面(`packages/core/src/view/verify-format.ts`)と同じ出力**にする
  * (率は小数第 1 位のパーセント、金額は 3 桁区切りの円)。exe の renderer は app の閉包(React ほか)で cloud から引けないため、同じ関数をここに持ち、
  * ルートの `scripts/test/cloud-verify-format.test.ts` が exe 版との出力の一致を固定する。
  */

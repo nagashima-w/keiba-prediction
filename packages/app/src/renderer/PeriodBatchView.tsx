@@ -1,7 +1,7 @@
 import type {
   PeriodBatchCollectProgress,
   RaceListTarget,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 import type { PeriodBatchState } from "./batch-analysis-reducer.js";
 import { summarizeBatch } from "./batch-summary.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";

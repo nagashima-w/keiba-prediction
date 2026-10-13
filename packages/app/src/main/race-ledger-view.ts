@@ -30,8 +30,8 @@
 
 import { kaisaiDateFromNarRaceId, type RaceLedgerEntry, type StoredAllocation } from "@keiba/core";
 
-import type { RaceLedgerView } from "../shared/analysis-types.js";
-import { venueNameFromRaceId } from "./venue-codes.js";
+import type { RaceLedgerView } from "@keiba/core/analysis/analysis-types";
+import { venueNameFromRaceId } from "@keiba/core/analysis/venue-codes";
 
 /**
  * kaisaiDateがnullかつ地方(NAR)レースの場合、raceIdから開催日を補完する。

@@ -11,12 +11,12 @@ import {
 } from "@keiba/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runAnalysis, type AnalysisPipelineDeps } from "../src/main/analysis-pipeline.js";
+import { runAnalysis, type AnalysisPipelineDeps } from "@keiba/core/analysis/analysis-pipeline";
 import {
   createPipelineDeps,
   type PipelineResources,
 } from "../src/main/pipeline-deps.js";
-import type { VerifyReportView } from "../src/shared/analysis-types.js";
+import type { VerifyReportView } from "@keiba/core/analysis/analysis-types";
 
 /**
  * 検証画面の集計へ「先読みリーク疑いの除外」を配線したこと(Issue #152 B)を、実 AnalysisStore

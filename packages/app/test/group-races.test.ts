@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { groupRacesByVenue } from "../src/renderer/group-races.js";
-import type { RaceListItem } from "../src/shared/analysis-types.js";
+import type { RaceListItem } from "@keiba/core/analysis/analysis-types";
 
 const race = (venue: string | null, raceNumber: number): RaceListItem => ({
   raceId: `2026050208${String(raceNumber).padStart(2, "0")}`,

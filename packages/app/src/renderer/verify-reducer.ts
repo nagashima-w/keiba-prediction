@@ -13,7 +13,7 @@ import type {
   RaceLedgerView,
   VerifyReportView,
   VerifyVenueFilter,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 import {
   EMPTY_RACE_LEDGER_FILTER,
   type RaceLedgerFilter,

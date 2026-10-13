@@ -16,7 +16,7 @@ import {
   resolveEffectiveApiKey,
   SettingsStore,
 } from "../src/main/settings-store.js";
-import type { AppSettings } from "../src/shared/settings.js";
+import type { AppSettings } from "@keiba/core/analysis/app-settings";
 
 describe("DEFAULT_APP_SETTINGS(既定設定)", () => {
   it("EV閾値1.0・重みはcoreの既定・APIキー等は空/false", () => {

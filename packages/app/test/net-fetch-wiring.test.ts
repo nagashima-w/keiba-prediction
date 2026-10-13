@@ -8,8 +8,8 @@ import { IPC_CHANNELS } from "../src/shared/channels.js";
 import type {
   AnalysisResult,
   BatchRaceOutcome,
-} from "../src/shared/analysis-types.js";
-import type { SettingsUpdate } from "../src/shared/settings.js";
+} from "@keiba/core/analysis/analysis-types";
+import type { SettingsUpdate } from "@keiba/core/analysis/app-settings";
 import { DEFAULT_APP_SETTINGS } from "../src/main/settings-store.js";
 
 /**

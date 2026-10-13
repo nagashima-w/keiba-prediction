@@ -206,19 +206,22 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
   const relCore = (f: string): string => path.relative(CORE_SRC, f).split(path.sep).join("/");
   const relApp = (f: string): string => path.relative(APP_SRC, f).split(path.sep).join("/");
 
-  it("前提(空振り防止): runAnalysis の閉包(app の7ファイルと、型だけで繋がる analysis-types.ts)を実際に辿れている", () => {
-    expect([...appFiles].map(relApp).sort()).toEqual(
+  it("前提(空振り防止): runAnalysis の閉包(core の analysis/ の8ファイル。うち analysis-types.ts は型だけで繋がる)を実際に辿れている。cloud/src は packages/app を一切辿らない(Issue #286)", () => {
+    // Issue #286(#285 の段階A): 旧 app の8ファイル(main/ の4本と shared/ の4本)は packages/core/src/analysis/ へ移った。同じ8ファイルが閉包に入っていることを固定する。
+    expect([...coreFiles].map(relCore).filter((f) => f.startsWith("analysis/")).sort()).toEqual(
       [
-        "main/allocation-record.ts",
-        "main/analysis-export.ts",
-        "main/analysis-pipeline.ts",
-        "main/venue-codes.ts",
-        "shared/analysis-types.ts",
-        "shared/mixed-candidates.ts",
-        "shared/mixed-race-allocation.ts",
-        "shared/race-allocation.ts",
+        "analysis/allocation-record.ts",
+        "analysis/analysis-export.ts",
+        "analysis/analysis-pipeline.ts",
+        "analysis/analysis-types.ts",
+        "analysis/mixed-candidates.ts",
+        "analysis/mixed-race-allocation.ts",
+        "analysis/race-allocation.ts",
+        "analysis/venue-codes.ts",
       ],
     );
+    // 移設で新しく固定する不変条件: web の本番コードの閉包は exe のパッケージ(packages/app)に一切入らない。
+    expect([...appFiles].map(relApp)).toEqual([]);
     expect(coreFiles.size).toBeGreaterThan(40);
   });
 
@@ -262,7 +265,8 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
         }
       }
     }
-    expect(used.size).toBeGreaterThanOrEqual(4); // 前提(空振り防止): 閉包が実際にサブパスを使っている
+    // 前提(空振り防止): 閉包が実際にサブパスを使っている。Issue #286(#285 の段階A)で runAnalysis が core の中へ移り相対 import になったため、使うのは cloud/src が直接 import する2つ(旧: 5つ)。
+    expect([...used].sort()).toEqual(["@keiba/core/llm", "@keiba/core/pipeline"]);
     expect([...aliasEntries.keys()].sort()).toEqual([...used].sort());
     for (const [specifier, target] of aliasEntries) {
       // 向け先は、core の exports が指すファイルと同じ(取り違えがない)
@@ -316,13 +320,19 @@ describe("cloud/client の閉包(型だけの import も含む。Issue #201)", (
   const { coreFiles, appFiles, bareSpecifiers, unresolvedCoreSpecifiers } = closureOf(clientSources, { includeTypes: true });
   const relCore = (f: string): string => path.relative(CORE_SRC, f).split(path.sep).join("/");
 
-  it("前提(空振り防止): クライアントのファイルがあり、exe の renderer・core(build-prompt・配分)の閉包を実際に辿れている", () => {
+  it("前提(空振り防止): クライアントのファイルがあり、core(view/・analysis/・build-prompt・配分)の閉包を実際に辿れている", () => {
     expect(clientSources.length).toBeGreaterThan(5);
     const names = [...coreFiles].map(relCore);
     expect(names).toContain("analyzer/build-prompt.ts");
     expect(names).toContain("analyzer/clip-variants.ts");
     expect(names).toContain("ev/combo-bet-allocation.ts");
-    expect(appFiles.size).toBeGreaterThan(0);
+    // Issue #286(#285 の段階A): 流用している共有部分は packages/core/src/view/・analysis/ にある。packages/app は閉包に入らない。
+    expect(names).toContain("view/allocation-proposal-view.ts");
+    expect(names).toContain("view/bet-allocation-view.ts");
+    expect(names).toContain("view/format.ts");
+    expect(names).toContain("analysis/analysis-types.ts");
+    expect(names).toContain("analysis/app-settings.ts");
+    expect(appFiles.size).toBe(0);
   });
 
   it("相対でない指定子(undici・iconv-lite・cheerio・node:*・react など)を、型だけの import でも1つも持たない。`@keiba/core/<サブパス>` は exports にあるものだけ。バレルを経由しない", () => {

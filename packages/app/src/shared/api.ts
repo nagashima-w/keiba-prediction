@@ -19,8 +19,8 @@ import type {
   RaceVenueKind,
   VerifyReportView,
   VerifyVenueFilter,
-} from "./analysis-types.js";
-import type { MaskedSettings, SettingsUpdate } from "./settings.js";
+} from "@keiba/core/analysis/analysis-types";
+import type { MaskedSettings, SettingsUpdate } from "@keiba/core/analysis/app-settings";
 
 /**
  * preload の contextBridge でレンダラーに公開する API の型。

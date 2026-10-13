@@ -30,8 +30,8 @@ import {
   type BaseScoreWeightKey,
   type BiasWeightKey,
   type ClipVariantId,
-} from "../shared/settings.js";
-import { formatYen } from "./verify-format.js";
+} from "@keiba/core/analysis/app-settings";
+import { formatYen } from "@keiba/core/view/verify-format";
 import {
   buildUpdate,
   createInitialSettingsState,

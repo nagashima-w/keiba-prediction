@@ -5,7 +5,7 @@ import type {
   BatchProgress,
   BulkImportProgress,
   PeriodBatchCollectProgress,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 import { IPC_CHANNELS } from "../shared/channels.js";
 
 /**

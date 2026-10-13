@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { buildRaceSnapshot } from "../../packages/app/src/main/analysis-export";
+import { buildRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { D1AnalysisStore, type AnalysisDb } from "../src/analysis-repository";
 import { handle, type Env } from "../src/handler";

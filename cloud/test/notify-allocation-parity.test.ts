@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-response";
 import type { AnalysisAllocationRecord } from "../../packages/core/src/ev/analysis-store-types";
-import { buildAllocationProposalView } from "../../packages/app/src/renderer/allocation-proposal-view";
-import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/app/src/renderer/bet-allocation-view";
-import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/app/src/renderer/allocation-proposal-view";
-import type { StoredAllocationView } from "../../packages/app/src/shared/analysis-types";
+import { buildAllocationProposalView } from "../../packages/core/src/view/allocation-proposal-view";
+import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/core/src/view/bet-allocation-view";
+import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/core/src/view/allocation-proposal-view";
+import type { StoredAllocationView } from "../../packages/core/src/analysis/analysis-types";
 import { KNOWN_MARK_ORDER } from "../client/result";
 import { allocationBetRows, allocationKindOf, MARK_ORDER, unsetKindOf } from "../src/notify-embeds";
 import { allocationRecord, betRecord } from "./allocation-fixtures";

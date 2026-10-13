@@ -14,7 +14,7 @@
  * ようにする(BulkImportRaceOutcome.error に個別メッセージが保持されているため)。
  */
 
-import type { BulkImportRaceOutcome } from "../shared/analysis-types.js";
+import type { BulkImportRaceOutcome } from "@keiba/core/analysis/analysis-types";
 
 /** エラーメッセージが無い(null)失敗アウトカムに使うフォールバック文言。 */
 const MISSING_ERROR_MESSAGE = "(エラーメッセージなし)";

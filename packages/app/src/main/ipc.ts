@@ -44,13 +44,13 @@ import type {
   RaceVenueKind,
   VerifyReportView,
   VerifyVenueFilter,
-} from "../shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 import { collectRaceIdsOverRange, type RangeCollectResult } from "./range-collect.js";
 import { buildBatchDiscordPayload } from "./batch-discord-payload.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
-import type { MaskedSettings, SettingsUpdate } from "../shared/settings.js";
+import type { MaskedSettings, SettingsUpdate } from "@keiba/core/analysis/app-settings";
 import { APP_NAME, buildAppInfo } from "./app-info.js";
-import { runAnalysis } from "./analysis-pipeline.js";
+import { runAnalysis } from "@keiba/core/analysis/analysis-pipeline";
 import { runBatchAnalysis } from "./analysis-batch.js";
 import {
   buildAnalysisExportDocument,
@@ -58,7 +58,7 @@ import {
   deriveCsvPathFromJsonPath,
   serializeAnalysisExportCsv,
   serializeAnalysisExportJson,
-} from "./analysis-export.js";
+} from "@keiba/core/analysis/analysis-export";
 import {
   buildDefaultCloudMigrationFileName,
   writeCloudMigrationFile,

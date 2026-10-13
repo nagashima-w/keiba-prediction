@@ -8,7 +8,7 @@
  * **カードの行は「最新の板」(ポーリング・起動のオーバーレイを反映したもの)から導く**(Issue #186。`app.ts` が `status.rows` に渡す。`status?race_id=` は prior と板の初期値)。
  * 状態(`status?race_id=`)と過去の分析(`GET /api/analyses`)の取得は互いに独立(片方の失敗で、もう片方を隠さない)。
  */
-import { formatPercent } from "../../packages/app/src/renderer/format";
+import { formatPercent } from "../../packages/core/src/view/format";
 import type { BoardRow, MorningPriorView, RaceRow, TaskMode, TaskStatus } from "./api";
 import type { PastAnalysis } from "./api-analysis";
 import { formatJstDateTime } from "./date";

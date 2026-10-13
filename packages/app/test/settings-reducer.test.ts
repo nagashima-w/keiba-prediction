@@ -4,7 +4,7 @@ import {
   BASE_SCORE_WEIGHT_KEYS,
   BIAS_WEIGHT_KEYS,
   type MaskedSettings,
-} from "../src/shared/settings.js";
+} from "@keiba/core/analysis/app-settings";
 import {
   buildUpdate,
   createInitialSettingsState,

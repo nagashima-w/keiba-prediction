@@ -13,8 +13,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IPC_CHANNELS } from "../src/shared/channels.js";
-import type { AnalysisExportOutcome } from "../src/shared/analysis-types.js";
-import type { AnalysisExportSource } from "../src/main/analysis-export.js";
+import type { AnalysisExportOutcome } from "@keiba/core/analysis/analysis-types";
+import type { AnalysisExportSource } from "@keiba/core/analysis/analysis-export";
 
 const {
   handleMock,
@@ -49,8 +49,8 @@ vi.mock("../src/main/pipeline-deps.js", () => ({
   createPipelineDeps: createPipelineDepsMock,
 }));
 
-vi.mock("../src/main/analysis-export.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/main/analysis-export.js")>();
+vi.mock("@keiba/core/analysis/analysis-export", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@keiba/core/analysis/analysis-export")>();
   return {
     ...actual,
     deriveCsvPathFromJsonPath: (jsonPath: string) =>

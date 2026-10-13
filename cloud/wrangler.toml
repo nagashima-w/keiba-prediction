@@ -146,12 +146,12 @@ bucket_name = "keiba-cloud-r2"
 # Issue #193(#179-a): `"@anthropic-ai/sdk"`(LLM の呼び出し。core の anthropic-client.ts・model-selection.ts が値で import する)も、cheerio と同じく
 # このディレクトリの node_modules から解決させる(CI には packages/core/node_modules が無い)。`"@keiba/core/llm"` は、その LLM の狭い入口
 # (analyze-race・anthropic-client・model-selection の再 export。better-sqlite3 を経由しない)。
-# Issue #176: 末尾の `"@keiba/core/..."` の行(4行 + #193 の llm で5行)は、runAnalysis(packages/app の main/analysis-pipeline.ts。相対 import で取り込む)が import する
-# core のサブパスを packages/core/src の実ファイルに向ける。★wrangler の alias は完全一致なので**サブパスごとに1行**要る(前方一致は無い。
-# CI のように各 package の node_modules が無い配置では、ここが無いと Could not resolve で失敗する)。runAnalysis の閉包が新しいサブパスを
-# import したら、ここに1行足す(tsconfig.json の paths は `@keiba/core/*` で前方一致、vitest.config.ts の alias も前方一致。
-# test/import-guard.test.ts が、閉包のサブパスとここの行の一致を検査する)。★バレル(`@keiba/core` そのもの)は向けない
-# (better-sqlite3 を巻き込む。型だけの import でも CI で解決に失敗する)。
+# Issue #176: 末尾の `"@keiba/core/..."` の行は、cloud/src が直接 import する core のサブパス(`pipeline`・`llm`)を packages/core/src の実ファイルに向ける。
+# ★wrangler の alias は完全一致なので**サブパスごとに1行**要る(前方一致は無い。CI のように各 package の node_modules が無い配置では、ここが無いと Could not resolve で失敗する)。
+# cloud/src の閉包が新しいサブパスを import したら、ここに1行足す(tsconfig.json の paths は `@keiba/core/*` で前方一致、vitest.config.ts の alias も前方一致。
+# test/import-guard.test.ts が、閉包のサブパスとここの行の一致を検査する)。★バレル(`@keiba/core` そのもの)は向けない(better-sqlite3 を巻き込む。型だけの import でも CI で解決に失敗する)。
+# Issue #286(#285 の段階A): runAnalysis(旧 packages/app の main/analysis-pipeline.ts)は packages/core/src/analysis/ へ移り、core の中で相対 import で他のモジュールを引くようになった。
+# そのため、以前ここにあった `ev/bet-allocation`・`ev/combo-bet-allocation`・`scorer/snapshot-filter` の3行は不要になり、削除した(閉包が使うサブパスは pipeline・llm の2つ)。
 # core(workspace の外。相対 import で取り込む)をバンドルするための解決。CI では packages/core/node_modules が無いので、
 # 依存はこのディレクトリの node_modules から解決させる。undici はスタブに差し替える(src/undici-stub.ts)。
 # tsconfig.json の paths・vitest.config.ts の alias と同じ対応。
@@ -162,6 +162,3 @@ cheerio = "./node_modules/cheerio"
 "@anthropic-ai/sdk" = "./node_modules/@anthropic-ai/sdk"
 "@keiba/core/pipeline" = "../packages/core/src/pipeline.ts"
 "@keiba/core/llm" = "../packages/core/src/llm.ts"
-"@keiba/core/scorer/snapshot-filter" = "../packages/core/src/scorer/snapshot-filter.ts"
-"@keiba/core/ev/bet-allocation" = "../packages/core/src/ev/bet-allocation.ts"
-"@keiba/core/ev/combo-bet-allocation" = "../packages/core/src/ev/combo-bet-allocation.ts"

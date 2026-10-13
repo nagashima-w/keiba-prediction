@@ -12,7 +12,7 @@ import type {
   AnalysisProgress,
   AnalysisResult,
   BatchProgress,
-} from "../src/shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 
 /** レース名だけ差し替えた最小の AnalysisResult を作る。 */
 const fakeResult = (raceId: string): AnalysisResult => ({

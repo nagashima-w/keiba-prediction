@@ -15,7 +15,7 @@ import {
 import type {
   BulkImportProgress,
   ImportResultOutcome,
-} from "../src/shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 
 /** status="imported" の最小のImportResultOutcomeを作る。 */
 function imported(raceId: string): ImportResultOutcome {

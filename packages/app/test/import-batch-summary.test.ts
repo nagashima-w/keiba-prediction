@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { BulkImportRaceOutcome } from "../src/shared/analysis-types.js";
+import type { BulkImportRaceOutcome } from "@keiba/core/analysis/analysis-types";
 import {
   formatFailedRaceErrors,
   summarizeBulkImport,

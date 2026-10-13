@@ -4,7 +4,7 @@ import type {
   PromptVersionVerifyReportView,
   RaceLedgerView,
   VerifyReportView,
-} from "../src/shared/analysis-types.js";
+} from "@keiba/core/analysis/analysis-types";
 import {
   createInitialVerifyState,
   IMPORT_NOT_CONFIRMED_MESSAGE,

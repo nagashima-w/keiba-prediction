@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import * as core from "@keiba/core";
 import * as appModule from "../src/main/result-import.js";
-import type { ImportResultOutcome as SharedImportResultOutcome } from "../src/shared/analysis-types.js";
+import type { ImportResultOutcome as SharedImportResultOutcome } from "@keiba/core/analysis/analysis-types";
 
 /**
  * Issue #207(#182-A)AC-A2: 結果の取込フロー(変換・importRaceResult)の実体を core へ移し、app の `result-import.ts` は re-export するだけにした。

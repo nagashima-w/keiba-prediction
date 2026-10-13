@@ -17,7 +17,7 @@
  * Web Workerへ渡す値に機微な値が混ざらないようにするため。項目を名指しで写す)。
  */
 
-import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
+import type { MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
 
 /**
  * 配分の設定11項目を名指しで写す(スプレッドで全項目を持ち込まない)。

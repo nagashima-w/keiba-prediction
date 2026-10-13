@@ -6,7 +6,7 @@ import {
   toMixedAllocationCacheKey,
   type MixedAllocationCacheKey,
 } from "../src/renderer/mixed-allocation-cache.js";
-import type { MixedAllocationSettings } from "../src/shared/mixed-race-allocation.js";
+import type { MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
 
 // `race`はキャッシュキーの中で唯一「参照(===)」で比較されるフィールドのため、既定値は
 // 1つの安定したオブジェクト参照を使い回す(key()を呼ぶたびに新しいリテラルを作ると、

@@ -54,12 +54,12 @@ import type {
   RaceLedgerView,
   VerifyReportView,
   VerifyVenueFilter,
-} from "../shared/analysis-types.js";
-import type { AnalysisPipelineDeps } from "./analysis-pipeline.js";
-import { pickLatestAnalysis, type AnalysisExportSource } from "./analysis-export.js";
+} from "@keiba/core/analysis/analysis-types";
+import type { AnalysisPipelineDeps } from "@keiba/core/analysis/analysis-pipeline";
+import { pickLatestAnalysis, type AnalysisExportSource } from "@keiba/core/analysis/analysis-export";
 import { buildRaceLedgerView } from "./race-ledger-view.js";
 import { importRaceResult } from "./result-import.js";
-import { venueNameFromRaceId } from "./venue-codes.js";
+import { venueNameFromRaceId } from "@keiba/core/analysis/venue-codes";
 
 /** createPipelineDeps の設定。 */
 export interface PipelineWiringConfig {

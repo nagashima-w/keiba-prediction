@@ -588,7 +588,9 @@ describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)",
    * tsconfig.json の paths は `@keiba/core/*` の前方一致、vitest.config.ts の alias は `@keiba/core` の前方一致。
    */
   // Issue #193: `llm`(LLM 用の狭い入口。analyze-race・anthropic-client・model-selection)を足した。
-  const CORE_SUBPATHS = ["pipeline", "llm", "scorer/snapshot-filter", "ev/bet-allocation", "ev/combo-bet-allocation"];
+  // Issue #286(#285 の段階A): runAnalysis が packages/core/src/analysis/ へ移り、core の中で相対 import になったため、cloud/src が直接 import するサブパスは `pipeline`・`llm` の2つになった
+  // (旧: `scorer/snapshot-filter`・`ev/bet-allocation`・`ev/combo-bet-allocation` も alias に要った)。cloud/test/import-guard.test.ts が、閉包が使うサブパスとこの行の一致を検査する。
+  const CORE_SUBPATHS = ["pipeline", "llm"];
 
   it("nodejs_compat を有効にしている(core の HttpClient・iconv-lite が Buffer を使う)", () => {
     expect(tomlCode).toMatch(/^compatibility_flags = \["nodejs_compat"\]$/m);

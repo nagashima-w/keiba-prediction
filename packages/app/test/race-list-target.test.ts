@@ -12,7 +12,7 @@ import {
   raceListTargetToSelection,
   selectionToRaceListTarget,
 } from "../src/shared/race-list-target.js";
-import type { RaceListTarget } from "../src/shared/analysis-types.js";
+import type { RaceListTarget } from "@keiba/core/analysis/analysis-types";
 
 describe("raceListTargetToSelection(3択→venueKind/jpnOnlyへの写像)", () => {
   const cases: Array<[RaceListTarget, { venueKind: "central" | "nar"; jpnOnly: boolean }]> = [

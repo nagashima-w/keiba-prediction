@@ -3,7 +3,7 @@
  * この関数を通る。組み立ての二重実装を作らず、production の `runAnalysis` が作るプロンプト入力
  * (`BuildPromptInput`)をそのまま使うため。
  *
- * production との対応(`packages/app/src/main/analysis-pipeline.ts`):
+ * production との対応(`packages/core/src/analysis/analysis-pipeline.ts`):
  * - 取消・除外の馬は、結果ページで判別して出走馬から除く(#41 の `measure.ts` と同じ。#154 で
  *   `scrapeRace` が除くようになった production の入力と同じ形)。
  * - `kaisaiDate` を必ず渡す(近似日にならない)。#39・#153 の先読み遮断は `runAnalysis` が自分で行う。
@@ -32,9 +32,9 @@ import {
 import {
   runAnalysis,
   type AnalysisPipelineDeps,
-} from "../../packages/app/src/main/analysis-pipeline.js";
+} from "../../packages/core/src/analysis/analysis-pipeline.js";
 import { toResultEntries } from "../../packages/app/src/main/result-import.js";
-import type { AnalysisResult } from "../../packages/app/src/shared/analysis-types.js";
+import type { AnalysisResult } from "../../packages/core/src/analysis/analysis-types.js";
 import {
   classifyRaceFinishes,
   type FinishClassification,

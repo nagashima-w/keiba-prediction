@@ -16,8 +16,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IPC_CHANNELS } from "../src/shared/channels.js";
-import type { BatchRaceOutcome } from "../src/shared/analysis-types.js";
-import type { SettingsUpdate } from "../src/shared/settings.js";
+import type { BatchRaceOutcome } from "@keiba/core/analysis/analysis-types";
+import type { SettingsUpdate } from "@keiba/core/analysis/app-settings";
 import { DEFAULT_APP_SETTINGS } from "../src/main/settings-store.js";
 
 const { handleMock, createPipelineDepsMock, sendDiscordMock, logErrorMock, ctx } =

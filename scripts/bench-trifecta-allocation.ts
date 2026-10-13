@@ -80,9 +80,9 @@ import { fileURLToPath } from "node:url";
 
 import { loadAnalysisResult } from "./bench-mixed-allocation.js";
 import { parseKaisaiDate, type RaceData } from "../packages/core/src/index.js";
-import { runAnalysis, type AnalysisPipelineDeps } from "../packages/app/src/main/analysis-pipeline.js";
-import type { AnalysisResult } from "../packages/app/src/shared/analysis-types.js";
-import { buildMixedCandidates, type MixedCandidateBuildInput } from "../packages/app/src/shared/mixed-candidates.js";
+import { runAnalysis, type AnalysisPipelineDeps } from "../packages/core/src/analysis/analysis-pipeline.js";
+import type { AnalysisResult } from "../packages/core/src/analysis/analysis-types.js";
+import { buildMixedCandidates, type MixedCandidateBuildInput } from "../packages/core/src/analysis/mixed-candidates.js";
 import {
   allocateGeneralBets,
   buildTrifectaCandidates,

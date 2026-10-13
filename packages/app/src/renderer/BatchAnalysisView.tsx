@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef } from "react";
 
-import type { AnalysisResult, BatchProgress } from "../shared/analysis-types.js";
+import type { AnalysisResult, BatchProgress } from "@keiba/core/analysis/analysis-types";
 import type {
   BatchRaceEntry,
   DiscordSendState,
@@ -15,7 +15,7 @@ import {
   formatComboBetLabel,
   KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
-} from "./bet-allocation-view.js";
+} from "@keiba/core/view/bet-allocation-view";
 import { type AllocationOutcome } from "./mixed-allocation-queue.js";
 import {
   type MixedAllocationCache,
@@ -44,9 +44,9 @@ import {
   totalUnjudgedCount,
   type MixedRaceAllocationDisplayView,
 } from "./mixed-allocation-view.js";
-import { isBetAllocationUnset, type RaceAllocationView } from "../shared/race-allocation.js";
-import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
-import { INCLUDE_COMBO_ODDS_BATCH_NOTE } from "../shared/settings.js";
+import { isBetAllocationUnset, type RaceAllocationView } from "@keiba/core/analysis/race-allocation";
+import type { MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
+import { INCLUDE_COMBO_ODDS_BATCH_NOTE } from "@keiba/core/analysis/app-settings";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
   collectPerRaceHighlights,
@@ -73,8 +73,8 @@ import {
   MARK_LEGEND,
   oddsStatusNote,
   raceHeading,
-} from "./format.js";
-import { formatYen } from "./verify-format.js";
+} from "@keiba/core/view/format";
+import { formatYen } from "@keiba/core/view/verify-format";
 
 /** 一括分析画面のプロパティ。状態と操作は親(App)から受け取る。 */
 export interface BatchAnalysisViewProps {

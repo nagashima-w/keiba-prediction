@@ -275,13 +275,15 @@ const PIPELINE_MARKERS = ["runCloudAnalysis", "promptLookaheadGuarded", "history
 
 describe("本番相当のバンドルと runAnalysis(Issue #176)", () => {
   it("前提: 検出する文字列は、runAnalysis のソースに実際にある。cloud/src/pipeline.ts は narrow な入口だけを使う", () => {
-    const pipelineSource = readFileSync(path.join(CLOUD, "..", "packages", "app", "src", "main", "analysis-pipeline.ts"), "utf-8");
+    const pipelineSource = readFileSync(path.join(CLOUD, "..", "packages", "core", "src", "analysis", "analysis-pipeline.ts"), "utf-8");
     const source = pipelineSource + readFileSync(path.join(CLOUD, "src", "pipeline.ts"), "utf-8");
     for (const marker of PIPELINE_MARKERS) {
       expect(source.includes(marker), `ソースに ${marker}`).toBe(true);
     }
-    expect(pipelineSource).toContain('from "@keiba/core/pipeline"');
+    // Issue #286(#285 の段階A): runAnalysis は packages/core/src/analysis/ へ移り、core の中なので狭い入口を相対 import する(旧: `@keiba/core/pipeline`)。バレルは相対でも指定でも使わない。
+    expect(pipelineSource).toContain('from "../pipeline.js"');
     expect(pipelineSource).not.toMatch(/from "@keiba\/core";/);
+    expect(pipelineSource).not.toMatch(/from "\.\.\/index\.js"/);
   });
 
   it(

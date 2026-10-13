@@ -10,7 +10,7 @@ import {
   type RaceResult,
 } from "../../packages/core/src/index.js";
 import { filterRaceDataBefore } from "../../packages/core/src/scorer/snapshot-filter.js";
-import { runAnalysis } from "../../packages/app/src/main/analysis-pipeline.js";
+import { runAnalysis } from "../../packages/core/src/analysis/analysis-pipeline.js";
 import { FetchHaltedError } from "../probability-quality-41/guarded-fetcher.js";
 import {
   measureRace,

@@ -56,7 +56,7 @@
  * 新しい経路〈`mixed-allocation-queue.ts`〉が独自のキー定義を持つことはない)。**
  */
 
-import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
+import type { MixedAllocationSettings } from "@keiba/core/analysis/mixed-race-allocation";
 
 
 /** キャッシュキー(表の13項目をそのまま構造体にしたもの)。 */

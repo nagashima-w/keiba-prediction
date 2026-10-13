@@ -22,7 +22,7 @@ import {
 } from "@keiba/core";
 
 import { IPC_CHANNELS } from "../src/shared/channels.js";
-import type { CloudMigrationExportOutcome } from "../src/shared/analysis-types.js";
+import type { CloudMigrationExportOutcome } from "@keiba/core/analysis/analysis-types";
 
 const { handleMock, showSaveDialogMock, fromWebContentsMock, createPipelineDepsMock, closeMock, ctx } = vi.hoisted(
   () => ({

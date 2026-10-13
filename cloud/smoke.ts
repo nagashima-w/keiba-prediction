@@ -494,7 +494,7 @@ async function main(): Promise<void> {
       //   (実測: 最大の相対誤差 2.4e-15)。許容の根拠・規則は smoke-compare.ts のヘッダ。
       const analysis = await req(port, "GET", "/smoke/analysis");
       const analysisJson = parseJson(analysis.text);
-      const golden = JSON.parse(readFileSync(path.join("..", "packages", "app", "test", "golden", "pipeline-golden.json"), "utf-8")) as {
+      const golden = JSON.parse(readFileSync(path.join("..", "packages", "core", "test", "golden", "pipeline-golden.json"), "utf-8")) as {
         noLlmAllBets: { result: unknown; record: { allocation: { bets: unknown[] } } };
       };
       check(`${label}: runAnalysis が workerd で最後まで通る(保存1件・16頭・配分は多点)`, analysis.status === 200 && analysisJson["ok"] === true && analysisJson["saved"] === 1 && analysisJson["rows"] === 16 && typeof analysisJson["bets"] === "number" && (analysisJson["bets"] as number) > 1, `${analysis.status} ${analysis.text.slice(0, 300)}`);
@@ -577,7 +577,7 @@ async function main(): Promise<void> {
       const label = "F(RaceDay)";
       const date = "20260628";
       const raceId = "202603020211";
-      const golden = JSON.parse(readFileSync(path.join("..", "packages", "app", "test", "golden", "pipeline-golden.json"), "utf-8")) as {
+      const golden = JSON.parse(readFileSync(path.join("..", "packages", "core", "test", "golden", "pipeline-golden.json"), "utf-8")) as {
         noLlmNoAllocationNoDate: { result: { rows: { umaban: number; prior: number }[] } };
       };
 

@@ -16,7 +16,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IPC_CHANNELS } from "../src/shared/channels.js";
-import type { PeriodBatchCollectResult } from "../src/shared/analysis-types.js";
+import type { PeriodBatchCollectResult } from "@keiba/core/analysis/analysis-types";
 
 const {
   handleMock,
@@ -57,7 +57,7 @@ vi.mock("../src/main/logger.js", () => ({
 vi.mock("../src/main/analysis-batch.js", () => ({
   runBatchAnalysis: runBatchAnalysisMock,
 }));
-vi.mock("../src/main/analysis-pipeline.js", () => ({
+vi.mock("@keiba/core/analysis/analysis-pipeline", () => ({
   runAnalysis: runAnalysisMock,
 }));
 

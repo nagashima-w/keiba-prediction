@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildMixedCandidates } from "../../packages/app/src/shared/mixed-candidates";
+import { buildMixedCandidates } from "../../packages/core/src/analysis/mixed-candidates";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { estimateFairWinOdds, estimateWinProbabilities, WIN_PROB_TOP_FINISH_COUNT } from "../../packages/core/src/ev/win-odds-estimate";
 import { runCloudAnalysis, type CloudAnalysisDeps } from "../src/pipeline";

@@ -181,7 +181,7 @@ export class NetkeibaGate extends RealGate {
 /**
  * Issue #176: runAnalysis(クラウド版の入口 runCloudAnalysis)を、workerd と nodejs_compat の実環境で、フィクスチャ(中央16頭 202603020211・
  * 全券種の組合せオッズ・LLM なし)から最後まで走らせる。結果(AnalysisResult)と保存レコード(AnalysisRecord)の本体と SHA-256 を返す。
- * smoke.ts が、exe 側の golden(`packages/app/test/golden/pipeline-golden.json` の noLlmAllBets。変更前のコミットで生成)の
+ * smoke.ts が、exe 側の golden(`packages/core/test/golden/pipeline-golden.json` の noLlmAllBets。変更前のコミットで生成)の
  * 同じ内容と照合する(Node で走る cloud の単体テストに加えて、workerd でも同じ出力になることの確認)。
  * 照合は SHA-256 の完全一致ではなく、浮動小数点を相対誤差 1e-12 の許容つきで比べる(`smoke-compare.ts`。整数・文字列・項目の集合は完全一致)。
  * Node と workerd では `Math.log`・`Math.exp` の結果が最後の 1 ビット違うことがあり、SHA-256 の完全一致は成り立たない(Issue #258・#275)。
