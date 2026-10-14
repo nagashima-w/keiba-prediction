@@ -6,7 +6,7 @@ import { isDayQuiet, type DayQuietInput } from "../src/day-quiet";
  * 全部が揃ったとき(基準)から 1 つずつ崩して、どの条件も判定を変えることを固定する。
  */
 
-const QUIET: DayQuietInput = { planFinalized: true, plannedRows: 0, pendingTasks: 0, resultRows: 36, queuedResults: 0 };
+const QUIET: DayQuietInput = { planFinalized: true, plannedRows: 0, pendingTasks: 0, resultRows: 36, queuedResults: 0, afterReportHold: true };
 
 describe("isDayQuiet", () => {
   it("基準: 計画が確定し、計画中の行も未了のタスクも結果の取り込み待ちも無く、結果の行がある → 静か", () => {
@@ -19,12 +19,13 @@ describe("isDayQuiet", () => {
     ["発走前のタスク(取得・計算)が未了", { pendingTasks: 1 }],
     ["結果の取り込み待ちのレースがある", { queuedResults: 1 }],
     ["結果の行が 1 件も無い(結果の仕組みが無効・レースが無い日)", { resultRows: 0, queuedResults: 0 }],
+    ["日報の時刻の下限(手動で分析した開催の最終レースの発走時刻。Issue #291)をまだ過ぎていない", { afterReportHold: false }],
   ] as const)("静かでない: %s", (_name, change) => {
     expect(isDayQuiet({ ...QUIET, ...change })).toBe(false);
   });
 
-  it("空振り防止: 上の 5 つの崩し方は、どれも基準と 1 項目だけ違う(複数を同時に崩していない)", () => {
-    const changes: Array<Partial<DayQuietInput>> = [{ planFinalized: false }, { plannedRows: 1 }, { pendingTasks: 1 }, { queuedResults: 1 }, { resultRows: 0 }];
+  it("空振り防止: 上の 6 つの崩し方は、どれも基準と 1 項目だけ違う(複数を同時に崩していない)", () => {
+    const changes: Array<Partial<DayQuietInput>> = [{ planFinalized: false }, { plannedRows: 1 }, { pendingTasks: 1 }, { queuedResults: 1 }, { resultRows: 0 }, { afterReportHold: false }];
     for (const change of changes) {
       const differing = (Object.keys(change) as Array<keyof DayQuietInput>).filter((k) => QUIET[k] !== change[k]);
       expect(differing).toHaveLength(1);
@@ -33,5 +34,16 @@ describe("isDayQuiet", () => {
 
   it("結果の取り込みを諦めた行(gave_up)は待たない: 行があり、待ち(queued)が 0 なら静か", () => {
     expect(isDayQuiet({ ...QUIET, resultRows: 3, queuedResults: 0 })).toBe(true);
+  });
+});
+
+describe("isDayQuiet: 日報の時刻の下限(Issue #291)", () => {
+  it("下限を過ぎていない(afterReportHold = false)ときは、ほかの条件がすべて揃っていても静かでない。過ぎた(true)ら静か", () => {
+    expect(isDayQuiet({ ...QUIET, afterReportHold: true })).toBe(true); // 前提: 下限以外は揃っている
+    expect(isDayQuiet({ ...QUIET, afterReportHold: false })).toBe(false);
+  });
+
+  it("下限は『ほかの条件を満たさない』ことを覆さない: 下限を過ぎていても、待ちの結果があれば静かでない(純関数は時刻を見ない)", () => {
+    expect(isDayQuiet({ ...QUIET, afterReportHold: true, queuedResults: 1 })).toBe(false);
   });
 });

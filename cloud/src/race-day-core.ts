@@ -93,6 +93,7 @@ import { MAX_BULK_RACES } from "./bulk-limits";
 import { checkRaceDate } from "./race-date";
 import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
 import { isDayQuiet } from "./day-quiet";
+import { holdHeadOf, isHoldSettled, lastStartMsOfHead, parseReportHold, reportHoldAtMs, withHoldFailure } from "./report-hold";
 import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, type AutoFailReason, type AutoRunOutcome } from "./auto-run-result";
 import { buildAnalysisLink } from "./notify-link";
 import { buildAnalysisNotificationEmbed, buildFailureEmbed, buildManualSkipEmbed, buildMinimalAnalysisEmbed, buildPlanFailureEmbed, buildPlanFailureMinimalEmbed, buildSummaryEmbed, notificationText, type CloudEmbed, type RaceLabel } from "./notify-embeds";
@@ -143,8 +144,17 @@ import type { SqlLike } from "./sql-like";
  */
 const RESCUE_VERDICT_KEY = "plan_rescue_verdict";
 
+/** 日報の時刻の下限を求められなかったときの警告(固定の文言。末尾に race_id を添える)。 */
+const WARN_REPORT_HOLD = "日報の時刻の下限を求められませんでした";
+
 /** 日報の作成を依頼済みの印(Issue #235。依頼した時刻〈エポックミリ秒〉)を永続化するキー。 */
 const REPORT_REQUESTED_KEY = "report_requested";
+
+/**
+ * 日報の時刻の下限(Issue #291)を永続化するキー。値は JSON(形は `report-hold.ts`): 開催(race_id の先頭 10 桁)ごとに、最終レースの発走時刻(epoch ms)か、記録できなかった試行の回数。
+ * 下限はその最大。手動で分析したレースの開催の最終レースの発走まで、日報を依頼しない。
+ */
+export const REPORT_HOLD_KEY = "report_hold";
 
 /** 掃除の時刻(エポックミリ秒)を永続化するキー。 */
 const PURGE_DUE_KEY = "purge_due_at";
@@ -214,6 +224,11 @@ export interface AlarmInputs {
    * 省略・null は候補なし(取得口が無い構成・中央の開催日でない日・既存の呼び出し)。
    */
   readonly babaAtMs?: number | null;
+  /**
+   * 日報の時刻の下限(Issue #291)。**未来のときだけ**候補にする(下限の時刻に起きて、日報を依頼する)。過去・now・null・省略は候補なし
+   * (他の候補と違い「過去は now」にしない: 下限を過ぎたあとに候補に残ると、即時のアラームのループになる)。
+   */
+  readonly reportHoldAtMs?: number | null;
 }
 
 /**
@@ -221,6 +236,7 @@ export interface AlarmInputs {
  *  - 即時の仕事 → now / 再試行待ちだけ → now + 間隔
  *  - 計画の次の試行・期限 → `max(それ, now)`(過去の時刻は now。仕事の有無によらず候補)
  *  - 結果の取り込みの次の試行 → `max(それ, now)`(呼び出し側が、動けるときだけ入れる)
+ *  - 日報の時刻の下限 → **未来のときだけ**その時刻(過去は候補にしない。Issue #291)
  *  - 掃除の期限 → `max(それ, now)`。**ただし、仕事(即時・再試行待ち)があるあいだは候補にしない**: 仕事が終われば `armAlarm` が掃除の期限を延ばして張り直す。
  *    古い掃除の期限を候補に入れると、再試行待ちの間隔を無効にして、すぐ起こしてしまう(今の `armAlarm` もそうしている)。
  */
@@ -246,6 +262,9 @@ export function nextAlarmAt(i: AlarmInputs): number | null {
   }
   if (i.babaAtMs !== undefined && i.babaAtMs !== null) {
     candidates.push(Math.max(i.babaAtMs, i.nowMs));
+  }
+  if (i.reportHoldAtMs !== undefined && i.reportHoldAtMs !== null && i.reportHoldAtMs > i.nowMs) {
+    candidates.push(i.reportHoldAtMs);
   }
   if (i.purgeDueMs !== null && !i.immediateWork && !i.retryWork) {
     candidates.push(Math.max(i.purgeDueMs, i.nowMs));
@@ -1902,6 +1921,7 @@ export class RaceDayCore {
       notifyAtMs: this.earliest(this.notifyPlan().nextAtMs, this.rescueJudgeAtMs()),
       resultAtMs: this.resultsRunnable() ? this.results.nextTryAtMs() : null,
       babaAtMs: this.baba.dueAtMs(),
+      reportHoldAtMs: this.pendingReportHoldAt(),
     });
     if (at !== null) {
       await this.setAlarm(at);
@@ -1919,6 +1939,79 @@ export class RaceDayCore {
   }
 
   // ---- 結果の取り込み(Issue #208)----
+
+  /** 日報の時刻の下限(Issue #291。記録が無ければ null)。meta の値が壊れていても空として扱う。 */
+  private reportHoldAt(): number | null {
+    return reportHoldAtMs(parseReportHold(this.metaGet(REPORT_HOLD_KEY)));
+  }
+
+  /** 下限が無い、または過ぎている(`now >= 下限`)。{@link isDayQuiet} に渡す真偽値(下限ちょうどは過ぎたとみなす)。 */
+  private afterReportHold(): boolean {
+    const hold = this.reportHoldAt();
+    return hold === null || this.now() >= hold;
+  }
+
+  /** アラームの候補にする下限: 日報の依頼先があり、まだ依頼しておらず、下限が未来のときだけ(それ以外は null)。 */
+  private pendingReportHoldAt(): number | null {
+    if (this.requestReport === undefined || this.metaGet(REPORT_REQUESTED_KEY) !== null) {
+      return null;
+    }
+    const hold = this.reportHoldAt();
+    return hold !== null && this.now() < hold ? hold : null;
+  }
+
+  /**
+   * 発走前の分析(取得ステップ)を行ったレースの**開催の最終レースの発走時刻**を、日報の時刻の下限として記録する(Issue #291)。
+   * 手動の分析だけの日は、先に分析したレースの結果がそろっただけで日報が依頼され、あとから分析するレースが抜けていた。下限までは日報を依頼しない({@link maybeRequestReport})。
+   * 時刻は、その日のレース一覧({@link getRaceList}。手動の分析は画面でこの一覧から選ぶので、通常は取得キャッシュに載っていてリクエストは増えない)の、同じ開催(race_id の先頭 10 桁)の行の読める発走時刻の最大。
+   * 最大のレース番号の行の時刻が読めないと、下限は本当の最終レースより早まる(部分的な保護)。
+   *
+   * **一覧の参照は 1 つの開催につき 1 回まで**: 記録できた開催は引かない。記録できなかった試行(一覧が取れない・該当の開催が無い・時刻が読めない・例外)は開催ごとに {@link MAX_ATTEMPTS} 回まで数え、
+   * 上限に達したらその日はもう引かない(自動の分析も同じ取得ステップを通るので、一覧が取れない日に毎レース引き続けない)。
+   * 引かない条件: 結果ストアか日報の依頼先が無い / 開催日が過去(日報は後日の cron の経路) / 日報を依頼済み(作り直さない)。
+   * **失敗しても取得ステップは失敗にしない**(今と同じ動き = 待たない。固定の警告だけを残し、例外の本文・拒否の本文は出さない)。例外は外へ漏らさない。
+   */
+  private async recordReportHold(raceId: string): Promise<void> {
+    try {
+      const kaisaiDate = this.metaGet("kaisai_date");
+      if (
+        this.resultStore === undefined ||
+        this.requestReport === undefined ||
+        kaisaiDate === null ||
+        kaisaiDate < jstKaisaiDate(this.now()) ||
+        this.metaGet(REPORT_REQUESTED_KEY) !== null
+      ) {
+        return;
+      }
+      const head = holdHeadOf(raceId);
+      if (isHoldSettled(parseReportHold(this.metaGet(REPORT_HOLD_KEY)), head, MAX_ATTEMPTS)) {
+        return;
+      }
+      let startMs: number | null = null;
+      try {
+        const kind = venueKindOfRaceId(parseRaceId(raceId));
+        const list = await this.getRaceList(kaisaiDate, kind === "central" ? "central" : "nar");
+        if (list.ok) {
+          startMs = lastStartMsOfHead(list.races, head, kaisaiDate);
+        }
+      } catch {
+        startMs = null;
+      }
+      // 一覧を待つあいだに他の記録が増えうるので、読み直してから書く(await の後〜書き込みは同期)。
+      const holds = parseReportHold(this.metaGet(REPORT_HOLD_KEY));
+      const next = startMs === null ? withHoldFailure(holds, head) : { ...holds, [head]: startMs };
+      this.sql.exec(
+        "INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        REPORT_HOLD_KEY,
+        JSON.stringify(next),
+      );
+      if (startMs === null) {
+        this.onWarn(`${WARN_REPORT_HOLD}(${raceId})。待たずに続けます`);
+      }
+    } catch {
+      this.onWarn(`${WARN_REPORT_HOLD}(${raceId})。待たずに続けます`);
+    }
+  }
 
   /**
    * 日報の作成を依頼する(Issue #235)。**その日が静かになった**({@link isDayQuiet})とき、1 回だけ。呼ぶのは、結果の 1 レースを取り込んだ直後と、仕事が無い起床。
@@ -1941,6 +2034,7 @@ export class RaceDayCore {
       pendingTasks: pending,
       resultRows: resultRows.length,
       queuedResults: resultRows.filter((r) => r.state === "queued").length,
+      afterReportHold: this.afterReportHold(),
     });
     if (!quiet) {
       return;
@@ -2312,6 +2406,8 @@ export class RaceDayCore {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
       }
       await this.prefetchGradeWinner(task, parseRaceId(task.race_id), race.race.hasGradeBadge);
+      // 日報の時刻の下限(Issue #291)を記録する。出馬表の取得が成功した後・結果の行を積む前(取得が失敗した試行では引かない)。失敗しても取得ステップは失敗にしない。
+      await this.recordReportHold(task.race_id);
       // 日報がこのレースの結果を待つように、結果の取り込みの行を積む(Issue #277)。タスクが未了(fetched)のあいだに積むので、日報の判定に隙間ができない。
       this.enqueueResultForAnalyzedRace(task.race_id, race.race.startTime);
       // 地方三連単の段階の軸を登録する(組合せが ON の地方だけ。取消馬を除いた出走馬の全馬番。3頭未満は空=段階に入らない)。`fetched` への更新と同じ同期区間。

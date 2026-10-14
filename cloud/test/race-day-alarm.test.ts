@@ -287,3 +287,32 @@ describe("アラームの合成: nextAlarmAt の馬場の API の取得の候補
     expect(nextAlarmAt({ ...base, retryWork: true, babaAtMs: NOW })).toBe(NOW);
   });
 });
+
+describe("アラームの合成: nextAlarmAt の日報の時刻の下限の候補(Issue #291)", () => {
+  it("下限が未来なら、その時刻が候補になる(単独なら、その時刻)", () => {
+    expect(nextAlarmAt({ ...base, reportHoldAtMs: NOW + 5_000 })).toBe(NOW + 5_000);
+  });
+
+  it.each([
+    ["過去", NOW - 5_000],
+    ["ちょうど now(下限に達している。日報の依頼は maybeRequestReport に任せる)", NOW],
+    ["null", null],
+  ] as const)("下限が%sなら候補にしない(過去の時刻を候補にして、即時のアラームのループを作らない)", (_name, value) => {
+    expect(nextAlarmAt({ ...base, reportHoldAtMs: value })).toBeNull();
+  });
+
+  it("省略(既存の呼び出し)は候補なし", () => {
+    expect(nextAlarmAt(base)).toBeNull();
+  });
+
+  it("他の候補との最小を取る(max ではない)。過去の下限は他の候補を邪魔しない", () => {
+    expect(nextAlarmAt({ ...base, reportHoldAtMs: NOW + 1_000, planNextDueMs: NOW + 9_000 })).toBe(NOW + 1_000);
+    expect(nextAlarmAt({ ...base, reportHoldAtMs: NOW + 9_000, planNextDueMs: NOW + 1_000 })).toBe(NOW + 1_000);
+    expect(nextAlarmAt({ ...base, reportHoldAtMs: NOW - 9_000, planNextDueMs: NOW + 1_000 })).toBe(NOW + 1_000);
+  });
+
+  it("再試行待ちの仕事があっても、未来の下限は(より早ければ)候補に入る", () => {
+    expect(RETRY_DELAY_MS).toBeGreaterThan(1_000); // 前提: 下限のほうが再試行の間隔より早い
+    expect(nextAlarmAt({ ...base, retryWork: true, reportHoldAtMs: NOW + 1_000 })).toBe(NOW + 1_000);
+  });
+});
