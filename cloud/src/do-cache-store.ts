@@ -1,7 +1,7 @@
 /**
  * 取得結果のキャッシュ(`CacheStore`)の、Durable Object の SQLite ストレージ(`ctx.storage.sql`)による実装(Issue #177〈#164-b〉・#170)。
  *
- * exe の `ScrapeCache`(better-sqlite3)と**同じ契約**(`packages/core/test/fixtures/cache-store-contract.json`。core と cloud の両方のテストが読む):
+ * core の `ScrapeCache`(`scraper/cache.ts`。better-sqlite3。旧 exe が本番で使った)と**同じ契約**(`packages/core/test/fixtures/cache-store-contract.json`。core と cloud の両方のテストが読む):
  *  - 鮮度は**読み取り側**で判定する: 保存からの経過(`now - fetched_at`)が `maxAgeMs` を**超えたら**ミス(ちょうどはヒット)。
  *    `maxAgeMs` を省略すると、常にヒット。期限切れの行は(掃除するまで)消えない。
  *  - 同じキーへの `set` は、値と取得時刻を上書きする。

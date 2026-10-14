@@ -6,16 +6,17 @@ import type { StoredAllocationView } from "../../src/analysis/analysis-types.js"
 /**
  * analysis/analysis-types.ts の配分提案View型(core型の手動コピー。Issue #55)が、core型と
  * 構造的に完全一致していることを型レベルで固定する(boss メタレビュー指摘: 構造的部分型のため
- * `RaceLedgerView.allocation = e.allocation` の代入は shared側がフィールドを「落とす」方向の
+ * `RaceLedgerView.allocation = e.allocation` の代入は View 型側がフィールドを「落とす」方向の
  * ドリフトが起きてもコンパイルを通してしまい、静かに壊れる)。
  *
  * `analysis-types-combo-odds-pin.test.ts` と同じ手法(`Equal`/`ExpectTrue`)を用いる
  * (再定義になるが、boss指示どおり「同一実装であることを明記」する形で対応した。
- * analysis/analysis-types.ts 自体は core から一切importしない既存の流儀を守るため、
+ * analysis/analysis-types.ts 自体は import を 1 つも持たない既存の流儀〈ブラウザ向けの束の閉包に
+ * core のバレルやネイティブ依存を引き込まないため。`cloud/test/client-bundle.test.ts` の許可リスト参照〉を守るため、
  * 型検査はこのテストファイル側だけで行う)。
  *
  * `StoredAllocation` は `bets: readonly StoredAllocationBetDetail[]` を内包するため、
- * この1本のピンだけで `StoredAllocationBetView`(shared)と `StoredAllocationBetDetail`(core)
+ * この1本のピンだけで `StoredAllocationBetView`(analysis-types.ts)と `StoredAllocationBetDetail`(core)
  * の構造一致まで連動して検査される(ネストした配列要素の型もEqualの比較対象に含まれるため)。
  */
 
@@ -31,7 +32,7 @@ type Equal<X, Y> =
  */
 type ExpectTrue<T extends true> = T;
 
-// core `StoredAllocation` と shared `StoredAllocationView` が構造的に完全一致すること
+// core `StoredAllocation` と analysis-types.ts の `StoredAllocationView` が構造的に完全一致すること
 // (ネストする bets 要素の型 `StoredAllocationBetDetail`/`StoredAllocationBetView` も含む)。
 export type _PinStoredAllocation = ExpectTrue<Equal<StoredAllocation, StoredAllocationView>>;
 

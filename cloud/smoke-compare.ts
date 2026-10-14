@@ -1,5 +1,5 @@
 /**
- * smoke の E(workerd の runAnalysis の出力 = exe 側の golden)の、許容つき比較(Issue #258)。
+ * smoke の E(workerd の runAnalysis の出力 = core の golden)の、許容つき比較(Issue #258)。
  *
  * ## なぜ SHA-256 の完全一致をやめたか
  * `Math.log`・`Math.exp`(と、指数が整数 3 以上の `**`)は、Node(V8 12.4)と workerd で、同じ引数に最後の 1 ビットだけ違う結果を返すことがある。

@@ -152,7 +152,7 @@ describe("買い目の大きさの上限(#175 の申し送り)", () => {
     const saved = await sink().save(bigBets(1_400_000));
     expect(saved.id).toBeGreaterThan(0);
     expect(await count("analysis_bets")).toBe(1);
-    // 通常の最大(exe 側の golden。全券種 ON の 265 件)の大きさ
+    // 通常の最大(core の golden。全券種 ON の 265 件)の大きさ
     const typical = JSON.stringify(
       Array.from({ length: 265 }, (_, i) => ({ betType: "trifecta", comboKey: String(100_000 + i), stake: 100, odds: 100.5, ev: 1.2345678901234567 })),
     ).length;

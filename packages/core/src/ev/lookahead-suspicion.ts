@@ -160,7 +160,7 @@ function resolveKaisaiDate(analysis: LookaheadSuspicionInput): DateParts | null 
  * Issue #219: クラウド版は、スナップショットが R2 にしか無いため、この関数で取り出した文字列を
  * D1 の `analyses.start_time` に写して先読み判定に使う。**判定(`classifyLookaheadSuspicion`)と写しの補完が
  * 同じ受理条件を使う**ように、取り出しをここに一本化している(別々に正規表現を持つと、片方だけ受理する値で
- * exe とクラウド版の判定が食い違う)。
+ * 旧 exe とクラウド版の判定が食い違った)。
  */
 export function extractStartTime(snapshot: unknown): string | null {
   return readStartTime(snapshot)?.text ?? null;

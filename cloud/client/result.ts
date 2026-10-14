@@ -3,24 +3,24 @@
  *
  * 見出し・分析時刻・分析モデル・馬ごとのカード(馬番・馬名・3着内率・複勝オッズの下限・EV)・配分。
  * 表示の決定(Issue #184 のゲート・#185):
- *  - **印は `mark` が non-null のときだけ**。印が1頭でもあれば(Issue #211: 印の付いた馬の一覧が空でなければ)、exe の凡例(`MARK_LEGEND`)を1行出す(「印の付いた馬」の見出しの下)。
+ *  - **印は `mark` が non-null のときだけ**。印が1頭でもあれば(Issue #211: 印の付いた馬の一覧が空でなければ)、core の凡例(`view/format.ts` の `MARK_LEGEND`)を1行出す(「印の付いた馬」の見出しの下)。
  *    **印の付いた馬の一覧**(Issue #211): 印・馬番・馬名だけ。印の順(◎〇▲△☆注)→ 馬番の昇順。印の無い馬は含めず、未知の印は既知の印の後ろ
- *  - **補正後の3着内率・根拠は、LLM が効いたとき(モデル ID があるとき)だけ**出す(Issue #195。exe は LLM なしでも「3着内率」「AI補正後」を常に両方出すが、cloud はスマホの縦カードで、
+ *  - **補正後の3着内率・根拠は、LLM が効いたとき(モデル ID があるとき)だけ**出す(Issue #195。旧 exe は LLM なしでも「3着内率」「AI補正後」を常に両方出していたが、cloud はスマホの縦カードで、
  *    LLM なしでは補正後が 3着内率〈prior〉と同じ値になり同じ値が重なるだけなので省く。LLM を使うと EV は補正後の確率から計算されるので、効いたときは両方出して EV と噛み合わせる)。
  *    根拠が null・空の馬は、その行を出さない
  *  - **強調材料・懸念事項は、根拠と同じく LLM が効いたとき(モデル ID があるとき)だけ**出す(Issue #198)。空(項目なし・空文字だけ)なら、その塊ごと出さない
  *  - **LLM の所要時間・usage は、記録(`llmCalls`)があれば、モデルの有無に関係なく**出す(Issue #198。全回が失敗してフォールバックした分析でも、時間と失敗の回数を確かめたい)。集計は `llm-usage.ts`
  *  - 分析モデルが null(または空)なら「LLM 未使用(統計のみ)」。**理由(`llmNote`)は、モデルの有無に関係なく null でなければ出す**(キー未登録・フォールバック・印の制約違反。固定文言)
  *  - EV プラスの強調はサーバの `isPositive` に従う(クライアントで EV から再計算しない)。推定 EV(`evEstimated`)は接尾辞「(推定)」で区別する
- *  - 配分は exe の `buildAllocationProposalView` を流用する(文言・券種ラベル・実効設定を exe と揃える)。**配分の行が無い(null)ときは、exe の関数を呼ばず cloud 専用の文言**
- *    (exe の「記録なし」は「Issue #59より前の分析です」と言い、cloud では事実と違うため)
- *  - 配分が `unset` で**両方(総資金・1レース上限)が未設定**のときも、注記だけ cloud 専用にする(exe の `BET_ALLOCATION_UNSET_NOTE` は「設定画面で入力」と言うが、cloud に設定画面は無い)。
- *    片方だけ・判定不能の注記(設定画面に触れていない)は exe のまま。差し替えは、exe から import した定数との一致で行う(文言を変えても追従する。exe の判定の二重持ちを避ける)
+ *  - 配分は core の `buildAllocationProposalView`(`view/allocation-proposal-view.ts`。旧 exe と共有していた)を流用する(文言・券種ラベル・実効設定を旧 exe と揃える)。**配分の行が無い(null)ときは、その関数を呼ばず cloud 専用の文言**
+ *    (その関数の「記録なし」は「Issue #59より前の分析です」と言い、cloud では事実と違うため)
+ *  - 配分が `unset` で**両方(総資金・1レース上限)が未設定**のときも、注記だけ cloud 専用にする(core の `BET_ALLOCATION_UNSET_NOTE`〈`view/bet-allocation-view.ts`〉は「設定画面で入力」と言うが、cloud に設定画面は無い)。
+ *    片方だけ・判定不能の注記(設定画面に触れていない)は core の文言のまま。差し替えは、core から import した定数との一致で行う(文言を変えても追従する。core の判定の二重持ちを避ける)
  *  - **3着内率の上位5頭**(Issue #240。「印の付いた馬」の直後。印が無くても出す): 馬番・馬名・率・印。**LLM が効いたとき(モデル ID があるとき)は補正後の3着内率(`adjustedProb`)で並べ、見出しは「AI補正後の3着内率 上位5頭」、
  *    効いていないときは3着内率(`prior`)で並べ、見出しは「3着内率 上位5頭」**(率がどちらの値かを見出しで取り違えない)。並びは率(生の数値)の降順 → 同率は馬番の昇順。5頭未満なら全頭。率が非有限の馬は除き、全頭が欠けていれば出さない
  *  - **組合せの券種ごとの行**(Issue #296。`combos`): 「配分の提案」の節の最後(設定の行の後)。オッズの取得点数・EV プラスの点数・配分の点数。サーバが文章にしたものをそのまま出す(クライアントに文言を置かない)。無ければ何も出さない
  *  - **そのとき LLM が見た当日の馬場の値**(Issue #295。`baba`): 「3着内率の上位5頭」の後・「馬ごとの評価」の前の節。行はサーバがプロンプトと同じ整形にしたもの。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null(節ごと出さない)
- * ⚠️ このファイルが exe の renderer を import する唯一の層(`format.ts`・`allocation-proposal-view.ts`)。許可リストは `test/client-bundle.test.ts`。
+ * ⚠️ core の `view/` の純関数(`format.ts`・`allocation-proposal-view.ts`・`bet-allocation-view.ts`。旧 exe の画面と共有していた)を import する層。許可リストは `test/client-bundle.test.ts`。
  */
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/core/src/view/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/core/src/view/bet-allocation-view";
@@ -33,7 +33,7 @@ import { buildPlaceOddsLine, PLACE_ODDS_NOTE, type PlaceOddsLine } from "../src/
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
 import { buildHash, type Route } from "./route";
 
-/** 画面のラベル(exe の共有定数。`view.ts` は renderer を import しない=ここを通す)。 */
+/** 画面のラベル(core の共有定数〈旧 exe と共有していた〉。`view.ts` は core を直接 import しない=ここを通す)。 */
 export { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR };
 /** 単勝の想定・実際の表示の固定文言(Issue #247。Worker の Discord の通知と共有する `src/win-odds-format.ts`)。 */
 export { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL };
@@ -45,7 +45,7 @@ export type ResultSource =
 
 export const NO_ALLOCATION_NOTE = "この分析には配分の記録がありません。";
 /**
- * exe の `BET_ALLOCATION_UNSET_NOTE`(両方が未設定のときの注記。「設定画面で…入力してください」)の cloud 専用の代わり。exe の「設定画面」は cloud には無い(cloud の設定は、トップの「設定」〈`#settings`。Issue #189〉)うえ、
+ * core の `BET_ALLOCATION_UNSET_NOTE`(両方が未設定のときの注記。「設定画面で…入力してください」)の cloud 専用の代わり。旧 exe の「設定画面」は cloud には無い(cloud の設定は、トップの「設定」〈`#settings`。Issue #189〉)うえ、
  * 既定値は 0 なので cloud の分析はほぼ全件がこの状態になり、cloud の画面と違う場所・呼び名へ誘導してしまう。**両方が未設定のときの文**なので、片方だけ・判定不能には使わない。
  */
 export const UNSET_ALLOCATION_NOTE =
@@ -155,7 +155,7 @@ export interface ResultContent {
   readonly llmUsage: LlmUsageView | null;
   /** 印の付いた馬の一覧(Issue #211)。印の順 → 馬番の昇順。印の無い馬(null・空白だけ)は含めない。未知の印は既知の印の後ろに馬番の昇順。 */
   readonly markedHorses: readonly MarkedHorse[];
-  /** 印の凡例(exe の `MARK_LEGEND`)。**一覧が空でないときだけ**(「印の付いた馬」の見出しの下に出す)。 */
+  /** 印の凡例(core の `MARK_LEGEND`)。**一覧が空でないときだけ**(「印の付いた馬」の見出しの下に出す)。 */
   readonly markLegend: string | null;
   /** 3着内率の上位5頭(Issue #240。印の付いた馬の直後)。率が有限な馬が1頭も無ければ null(節ごと出さない)。 */
   readonly topProbs: TopProbs | null;
@@ -198,7 +198,7 @@ function allocationOf(a: AnalysisDetail, readOnly: boolean): AllocationSection {
     return { kind: "none", notices: [NO_ALLOCATION_NOTE], bets: [], settingsRows: [], comboLines };
   }
   const view = buildAllocationProposalView(a.allocation);
-  // exe の「両方未設定」の注記(import した定数と一致するもの)だけを差し替える。片方だけ・判定不能・フォールバックなどの他の注記と、注記の並び・件数は変えない。
+  // core の「両方未設定」の注記(import した定数と一致するもの)だけを差し替える。片方だけ・判定不能・フォールバックなどの他の注記と、注記の並び・件数は変えない。
   const notices = view.notices.map((n) => (n === BET_ALLOCATION_UNSET_NOTE ? (readOnly ? UNSET_ALLOCATION_NOTE_VIEWER : UNSET_ALLOCATION_NOTE) : n));
   return { kind: view.kind, notices, bets: view.bets, settingsRows: view.settingsRows, comboLines };
 }
@@ -241,7 +241,7 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
 
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。`readOnly`(閲覧者。Issue #238)は設定への案内を外す。省略は管理者。 */
 export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
-  // LLM が効いたか = モデル ID があるか(exe の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
+  // LLM が効いたか = モデル ID があるか(core の `view/format.ts` の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
   const llmEffective = a.model !== null && a.model !== "";
   const markedHorses = markedHorsesOf(a.horses);
   return {

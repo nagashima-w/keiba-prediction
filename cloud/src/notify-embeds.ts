@@ -310,7 +310,7 @@ function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, stri
   return { name: "印", value: [...lines, ...(withOdds > 0 ? [ODDS_FIELD_NOTE] : [])].join("\n") };
 }
 
-/** 配分の状態(exe の `buildAllocationProposalView` の `kind` と同じ分類。パリティは `test/notify-allocation-parity.test.ts`)。 */
+/** 配分の状態(core の `buildAllocationProposalView`(`view/allocation-proposal-view.ts`)の `kind` と同じ分類。パリティは `test/notify-allocation-parity.test.ts`)。 */
 export type AllocationKind = "no-record" | "unset" | "yoso" | "unavailable" | "invalid" | "skip" | "allocated" | "indeterminate";
 
 export function allocationKindOf(allocation: AnalysisAllocationRecord | undefined): AllocationKind {
@@ -333,7 +333,7 @@ export function allocationKindOf(allocation: AnalysisAllocationRecord | undefine
   }
 }
 
-/** 未設定(unset)の内訳。exe の注記の選び方(`unsetNotices`)と同じ: 総資金・上限が 0 以下か。 */
+/** 未設定(unset)の内訳。core の注記の選び方(`view/allocation-proposal-view.ts` の `unsetNotices`)と同じ: 総資金・上限が 0 以下か。 */
 export function unsetKindOf(meta: Pick<AnalysisAllocationMetaRecord, "bankroll" | "perRaceCap">): "both" | "bankroll" | "cap" | "indeterminate" {
   const bankrollUnset = meta.bankroll <= 0;
   const capUnset = meta.perRaceCap <= 0;
@@ -362,7 +362,7 @@ function skipText(code: string | null): string {
   return reason === undefined ? "見送り(買い目はありません)" : `見送り(${reason})`;
 }
 
-/** 券種のラベル(exe の `betTypeLabel` と同じ。8 券種。未知はそのまま)。 */
+/** 券種のラベル(core の `betTypeLabel`〈`view/allocation-proposal-view.ts`〉と同じ。8 券種。未知はそのまま)。 */
 const BET_TYPE_LABELS: Readonly<Record<string, string>> = {
   place: "複勝",
   win: "単勝",
@@ -374,10 +374,10 @@ const BET_TYPE_LABELS: Readonly<Record<string, string>> = {
   trifecta: "三連単",
 };
 
-/** 券種の表示順(同額のときの並び。exe の `BET_TYPE_ORDER` と同じ。未知は末尾)。 */
+/** 券種の表示順(同額のときの並び。core の `BET_TYPE_ORDER`〈`view/allocation-proposal-view.ts`〉と同じ。未知は末尾)。 */
 const BET_TYPE_ORDER: Readonly<Record<string, number>> = { place: 0, win: 1, wide: 2, quinella: 3, bracketQuinella: 4, exacta: 5, trio: 6, trifecta: 7 };
 
-/** 組合せの表記(exe の `comboLabelOf`・`formatComboBetLabel` と同じ)。読めない comboKey はそのまま。 */
+/** 組合せの表記(core の `comboLabelOf`・`formatComboBetLabel`〈`view/allocation-proposal-view.ts`・`view/bet-allocation-view.ts`〉と同じ)。読めない comboKey はそのまま。 */
 function comboLabelOf(comboKey: string, betType: string): string {
   const numbers = parseComboOddsKey(comboKey);
   if (numbers === null) return comboKey;
@@ -390,7 +390,7 @@ export interface AllocationBetRow {
   readonly betTypeLabel: string;
   readonly comboLabel: string;
   readonly stake: number;
-  /** 「1,000円」(exe の `formatYen` と同じ)。 */
+  /** 「1,000円」(core の `formatYen`〈`packages/core/src/view/verify-format.ts`〉と同じ)。 */
   readonly stakeText: string;
 }
 
@@ -566,7 +566,7 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
   // 番号は計画の行(`label.raceNumber`)から。無ければ番号なしの今の形(「会場 レース名」)になる。レース名は、スナップショットにあればそれを優先する(従来どおり)。
   // グレードは、スナップショット(分析時に取れた値)を優先し、無ければ計画の行から(Issue #250)。
   const title = raceTitle({ ...label, raceName: snapshot.raceName ?? label.raceName, grade: snapshot.grade ?? label.grade });
-  // 帯の色は cloud 側で決める(Issue #239。カラーユニバーサルデザイン)。core の `buildAnalysisEmbed` も色を返すが、その定数は exe の Discord と共有で変えられない(exe は対象外)。
+  // 帯の色は cloud 側で決める(Issue #239。カラーユニバーサルデザイン)。core の `buildAnalysisEmbed` も色を返すが、その定数は旧 exe の Discord と共有していたもので、ここでは使わない(旧 exe は対象外だった。#287 で削除)。
   // 条件は core と同じ「EV プラスの馬がいるか」(`record.horses` を `EmbedHorse` に 1:1 で写しており、isPositive をそのまま渡している)。
   const color = record.horses.some((h) => h.isPositive) ? COLOR_GREEN : COLOR_GRAY;
   return fitEmbed({ ...base, title, color, ...(description === undefined ? {} : { description }), fields });

@@ -193,7 +193,9 @@ export { CONDITIONAL_BERNOULLI_MODEL };
  * 注意: これは Issue #57 で削除した「未使用の re-export シム」とは別物である。あちらは
  * どこからも import されていない re-export(削除しても app はコンパイルできた)だったのに
  * 対し、こちらは `analysis/mixed-race-allocation.ts`(Issue #58)が実際に import して使う
- * re-export であり、削除すると app のコンパイルが壊れる。
+ * re-export だった(現在は同ファイルが `combo-bet-allocation.ts` の同種の re-export から取る。
+ * この re-export を import しているのは `packages/core/test/ev/bet-allocation.test.ts` で、消すと型検査が壊れる。
+ * 公開しているサブパスの契約としても残している)。
  */
 export type { SkipReasonCode };
 

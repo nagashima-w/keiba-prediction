@@ -1,15 +1,17 @@
 /**
- * 設定画面の共有型と入力検証(純関数)。
+ * 設定画面の共有型・ラベル・入力検証(純関数)。
  *
- * main(永続化・マスク生成)・preload(型付き公開)・renderer(フォーム表示)の三者が参照するため、
- * analysis-types.ts と同じく core(better-sqlite3 等のネイティブ依存を含む)には依存させず、
- * この shared 層に純粋な TypeScript として置く。重みのキー集合はここを唯一の定義元とし、
- * coerce(main)・reducer/フォーム(renderer)がこの配列から項目を機械的に導出する。
+ * 現在はクラウド版の設定画面(`cloud/client/settings-form.ts`)が、ラベルと版 ID をここから参照する。
+ * 旧 exe では main(永続化・マスク生成)・preload(型付き公開)・renderer(フォーム表示)の三者が参照した
+ * (exe は #287 で削除。最後に残っているコミットは 3c1664e)。
+ * analysis-types.ts と同じく、core のバレルやネイティブ依存(better-sqlite3 等)を引き込まないよう、
+ * import を持たない純粋な TypeScript として置く。重みのキー集合はここを唯一の定義元とし、
+ * (旧 exe では)coerce(main)・reducer/フォーム(renderer)がこの配列から項目を機械的に導出した。
  *
- * すべて IPC でシリアライズ可能なプレーンオブジェクト(関数・ブランド型を含まない)であること。
+ * すべて JSON でシリアライズ可能なプレーンオブジェクト(関数・ブランド型を含まない)であること。
  */
 
-/** バイアス重み7項目(core の BiasWeights と構造一致。shared を core非依存に保つため再定義)。 */
+/** バイアス重み7項目(core の BiasWeights と構造一致。このファイルを core非依存に保つため再定義)。 */
 export interface BiasWeightValues {
   /** 馬場状態適性(道悪)。 */
   readonly trackCondition: number;
@@ -80,7 +82,7 @@ export const CLIP_VARIANT_IDS = ["default", "wide15"] as const;
 export type ClipVariantId = (typeof CLIP_VARIANT_IDS)[number];
 
 /**
- * 馬券配分(機能C-2)のラベル文字列(1箇所に集約。exe の SettingsView.tsx(#287 で削除。3c1664e まで)が参照する)。
+ * 馬券配分(機能C-2)のラベル文字列(1箇所に集約。クラウド版の `cloud/client/settings-form.ts` が参照する。旧 exe では SettingsView.tsx(#287 で削除。3c1664e まで)が参照した)。
  * 後から文言を差し替えられるよう定数化する(boss着手前ゲート2026-07-30合意)。
  */
 export const BET_ALLOCATION_LABELS = {
@@ -95,8 +97,9 @@ export const BET_ALLOCATION_LABELS = {
 } as const;
 
 /**
- * 組合せオッズ取得設定(機能D-2c第3段・Issue #28)の文言(1箇所に集約。exe の SettingsView.tsxが
- * 参照する。JSXに文言を直書きしない)。
+ * 組合せオッズ取得設定(機能D-2c第3段・Issue #28)の文言(1箇所に集約。クラウド版の
+ * `cloud/client/settings-form.ts`が参照する。旧 exe では SettingsView.tsx〈#287 で削除。3c1664e まで〉が
+ * 参照した。JSXに文言を直書きしない)。
  *
  * **第4段(Issue #28)で「記録のみ」の記述を更新した(AC19)**: 取得したオッズは、
  * `includeWideInAllocation`/`includeTrioInAllocation`(下記 `ALLOCATION_BET_TYPE_LABELS`)が
@@ -228,7 +231,7 @@ export const INCLUDE_COMBO_ODDS_BATCH_NOTE =
 
 /**
  * 券種横断の馬券配分(機能D-2c第4段・Issue #28)で、ワイド・三連複を配分対象に含めるかの
- * チェックボックス文言(1箇所に集約。exe の SettingsView.tsxが参照する)。
+ * チェックボックス文言(1箇所に集約。クラウド版の `cloud/client/settings-form.ts` が参照する。旧 exe では SettingsView.tsx〈#287 で削除。3c1664e まで〉が参照した)。
  *
  * 必須要件3点(boss裁定・AC24):
  * 1. `includeComboOdds`(オッズ取得)がOFFの間は効果が無いことを明記する(取得したオッズが
@@ -336,7 +339,7 @@ export interface AppSettings {
   /**
    * 分析結果の自動Discord送信ON/OFF。
    * ONかつWebhook URL設定済みなら、一括分析完了時に横断EVプラスが1頭以上あれば自動で1通送信する
-   * (exe の App.tsx(#287 で削除。3c1664e まで) の一括分析完了ハンドラを参照)。
+   * (旧 exe の App.tsx(#287 で削除。3c1664e まで) の一括分析完了ハンドラが送っていた。クラウド版の設定にこの項目は無い)。
    */
   readonly autoSendDiscord: boolean;
   /**
@@ -351,7 +354,7 @@ export interface AppSettings {
   /**
    * クリップ幅の版ID(タスクD-2)。既定"default"(対照、±10%)。
    * analyzer/build-prompt.ts の BuildPromptInput.clipVariant・parseAnalyzerResponse へ渡す
-   * maxAdjust の解決に使う(exe の main/pipeline-deps.ts(#287 で削除。3c1664e まで) が resolveClipVariant で解決)。
+   * maxAdjust の解決に使う(クラウド版は cloud/src/race-day-core.ts が resolveClipVariant で解決する。旧 exe では main/pipeline-deps.ts(#287 で削除。3c1664e まで) が解決した)。
    */
   readonly clipVariant: ClipVariantId;
   /**
@@ -372,8 +375,8 @@ export interface AppSettings {
   readonly kellyFraction: number;
   /**
    * ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。既定false(オプトイン)。
-   * core `ScrapeRaceOptions.includeComboOdds` と同名にして追跡を1語で通す(exe の main/pipeline-deps.ts が
-   * `createPipelineDeps` の config 経由で scrapeRace の第3引数へそのまま渡す)。
+   * core `ScrapeRaceOptions.includeComboOdds` と同名にして追跡を1語で通す(旧 exe の main/pipeline-deps.ts〈#287 で削除。3c1664e まで〉が
+   * `createPipelineDeps` の config 経由で scrapeRace の第3引数へそのまま渡していた)。
    *
    * **第4段(Issue #28)で「記録のみ」の制約を解除した(AC19)**: 取得したオッズは、
    * `includeWideInAllocation`/`includeTrioInAllocation`(下記)がONの券種について
@@ -405,7 +408,7 @@ export interface AppSettings {
    * 意味論・設計判断(取得と採用の分離・boolean 1項目)は `includeWideInAllocation`/
    * `includeTrioInAllocation` と同じ(そちらのJSDoc参照)。
    *
-   * exe の`SettingsView.tsx`のチェックボックス(ワイドと三連複の間)・`analysis/mixed-race-allocation.ts`の
+   * exe の`SettingsView.tsx`(#287 で削除。3c1664e まで)のチェックボックス(ワイドと三連複の間)・`analysis/mixed-race-allocation.ts`の
    * `resolveMixedBetTypes`・D-2フォールバック規則`isComboBetTypesOff`への接続は
    * Issue #117(#24-D3b-2)で完了した(この設定を変えると実際に配分結果が変わる)。
    */
@@ -447,7 +450,7 @@ export interface AppSettings {
    * **#26-E3a時点ではこの設定は画面に出ず(exe の`SettingsView.tsx`にチェックボックスを追加しない)、
    * 候補ビルダー(`analysis/mixed-race-allocation.ts` の `resolveMixedBetTypes`)・D-2フォールバック規則
    * `isComboBetTypesOff` にも未接続だった(値を変えても配分結果は変わらなかった)。#26-E3b(Issue #150)で
-   * 画面(exe の`SettingsView.tsx`のチェックボックス)へ出し、候補ビルダー・フォールバック規則に組み込んだ。**
+   * 画面(exe の`SettingsView.tsx`〈#287 で削除。3c1664e まで〉のチェックボックス)へ出し、候補ビルダー・フォールバック規則に組み込んだ。**
    * 三連単(#25-E3a→#25-E3b)と同じ切り方。
    */
   readonly includeBracketQuinellaInAllocation: boolean;
@@ -492,7 +495,7 @@ export interface MaskedSettings {
   readonly includeTrioInAllocation: boolean;
   /**
    * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。往復編集フォームとして表示するため
-   * そのまま返す。対応する画面トグル(exe の`SettingsView.tsx`)はIssue #117(#24-D3b-2)で追加した。
+   * そのまま返す。対応する画面トグル(exe の`SettingsView.tsx`。#287 で削除。3c1664e まで)はIssue #117(#24-D3b-2)で追加した。
    */
   readonly includeQuinellaInAllocation: boolean;
   /**

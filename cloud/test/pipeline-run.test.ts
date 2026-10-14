@@ -19,7 +19,7 @@ import {
 
 /**
  * Issue #176(#164-a)AC-a5: クラウド版(cloud/)から runAnalysis が、フィクスチャで最後まで通る。
- * 出力は exe 側の golden(変更前のコミットで生成)と一致する。LLM は使わない(analyze: null)か、確定的なスタブ。実 API・実 netkeiba には触れない。
+ * 出力は core の golden(変更前のコミットで生成)と一致する。LLM は使わない(analyze: null)か、確定的なスタブ。実 API・実 netkeiba には触れない。
  */
 
 async function depsFor(overrides: Partial<CloudAnalysisDeps> = {}) {
@@ -51,7 +51,7 @@ describe("クラウド版から runAnalysis(analyze: null)が最後まで通る(
     expect(race.horses).toHaveLength(16);
   });
 
-  it("結果・保存レコードが、exe 側の golden(noLlmAllBets)と完全に一致する", async () => {
+  it("結果・保存レコードが、core の golden(noLlmAllBets)と完全に一致する", async () => {
     const { deps, saved } = await depsFor();
     const result = await runCloudAnalysis(RACE_ID, KAISAI_DATE, deps);
     expect(saved).toHaveLength(1);
@@ -89,7 +89,7 @@ describe("クラウド版から runAnalysis(analyze: null)が最後まで通る(
     expect(saved).toEqual([]);
   });
 
-  it("LLM スタブ + 非同期のバッチ読み出し + 重賞傾向でも、exe 側の golden(llmStubSameDayGrade)と一致する(非同期の deps・前のレースだけのバッチ)", async () => {
+  it("LLM スタブ + 非同期のバッチ読み出し + 重賞傾向でも、core の golden(llmStubSameDayGrade)と一致する(非同期の deps・前のレースだけのバッチ)", async () => {
     const captured: BuildPromptInput[] = [];
     const batches: (readonly string[])[] = [];
     const { deps, saved } = await depsFor({

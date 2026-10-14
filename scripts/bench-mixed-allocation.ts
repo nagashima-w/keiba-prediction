@@ -352,8 +352,8 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     `平均${avg.toFixed(1)}ms / 最大${max.toFixed(1)}ms(n=${iterations}回・中央16頭。候補件数は上のgreedySteps感度の出力を参照)`,
   );
   console.log(
-    `12レース一括分析の参考値(単純に12倍。実際は details 開閉等でレース単位に再計算される` +
-      `〈AC21・mixed-allocation-cache.ts〉ため常に発生するわけではない): 約${(avg * 12).toFixed(0)}ms/レンダー`,
+    `12レース一括分析の参考値(単純に12倍。旧 exe の画面では details 開閉等でレース単位に再計算される` +
+      `〈AC21・mixed-allocation-cache.ts。#287 で削除。3c1664e まで〉ため常に発生するわけではなかった): 約${(avg * 12).toFixed(0)}ms/12レース分`,
   );
 }
 

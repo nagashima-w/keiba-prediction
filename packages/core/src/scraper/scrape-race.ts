@@ -102,7 +102,7 @@ export const DEFAULT_OIKIRI_TTL_MS = 24 * 60 * 60 * 1000;
  *  - **`ScrapeDeps.jockeyStore`(日をまたいで共有する保存先。クラウド版は D1)の取得日時**: この値以内なら netkeiba に出ずに使う。
  *    日をまたいで再利用できるのはこちらだけ。
  *  - `RaceFetcher` のキャッシュ(`maxAgeMs`): クラウド版は開催日ごとの DO の SQLite で、日をまたがない(翌日の DO は空から始まる)。
- *    保存先が無い構成(exe 等)・保存先が失敗したときの、同じ日の中の予備。
+ *    保存先が無い構成(旧 exe など)・保存先が失敗したときの、同じ日の中の予備。
  */
 export const DEFAULT_JOCKEY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -175,7 +175,7 @@ export interface ScrapeDeps {
   /**
    * 騎手の年ごとの成績を、日をまたいで共有する保存先(Issue #226。クラウド版は D1)。`options.includeJockeyStats` が true のときだけ使う。
    * 取得の前に読み、`ttl.jockeyMs`(既定 7 日)以内なら netkeiba に出ない。取得したぶんは取得の後にまとめて保存する。
-   * 読み書きの失敗は投げずに警告にして取得へフォールバックする。省略時(exe 等)は保存先なしで、従来どおり取得する。
+   * 読み書きの失敗は投げずに警告にして取得へフォールバックする。省略時(旧 exe など)は保存先なしで、従来どおり取得する。
    */
   readonly jockeyStore?: JockeyResultsStore;
 }
@@ -192,7 +192,7 @@ export interface ScrapeRaceOptions {
    * (`scrape-race.test.ts`の既存describeブロックが無改変で全緑であること自体がこの証拠)。
    * true指定時は追加で最大2リクエスト(中央ワイド1件+中央3連複1件、または地方ワイド1件)、
    * 地方3連複はさらに最大16リクエスト(軸走査で出走頭数-2本。18頭で16。`fetch-combo-odds.ts`参照)が
-   * 発行されうる。所要時間は取得の間隔(exe は1.5秒、cloud の gate は2秒)に依るので、秒数は書かない
+   * 発行されうる。所要時間は取得の間隔(旧 exe は1.5秒、cloud の gate は2秒)に依るので、秒数は書かない
    * (旧版の「最大約24秒」は exe の間隔からの導出値で、cloud と食い違うため削除した。Issue #283)。
    * **地方三連単はさらに出走頭数ぶん**(軸=1着固定を全頭。Issue #283。
    * `deferNarTrifecta` が true なら飛ばす)。

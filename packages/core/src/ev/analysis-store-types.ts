@@ -2,7 +2,7 @@
  * 分析履歴ストア(`analysis-store.ts`)が入出力する型の定義(Issue #168・#163-a で切り出し)。
  *
  * **型だけのファイルで、better-sqlite3 に依存しない**(`import type` のみ。ビルドで消える)。
- * クラウド版(cloud/。Cloudflare Workers)の D1 実装(#169)が、exe(SQLite)の実装と同じ型を共有するために置く。
+ * クラウド版(cloud/。Cloudflare Workers)の D1 実装(#169)が、旧 exe(SQLite)の実装と同じ型を共有するために置いた。現在の同期の実装は core のテスト用 `test/support/analysis-store.ts`。
  * `analysis-store.ts` が再 export するので、既存の import 元(`./analysis-store.js`・バレル)は変わらない。
  * 各型の意味・保存先の列との対応は、各型の JSDoc と `analysis-store.ts` の CREATE TABLE のコメントを参照。
  */
@@ -70,14 +70,14 @@ export interface AnalysisRecord {
    */
   readonly additionalInstruction?: string | null;
   /**
-   * 開催日(YYYYMMDD、Task#34)。app 側で選択済みの開催日(kaisaiDate)をそのまま渡す想定。
+   * 開催日(YYYYMMDD、Task#34)。呼び出し側(`analysis/analysis-pipeline.ts` の `runAnalysis`)で選択済みの開催日(kaisaiDate)をそのまま渡す想定。
    * 選択済み開催日が渡らなかった(当日日付で近似した)場合は null を渡す。
    * 省略時も null(日付不明。既存呼び出し元との後方互換のため任意項目とする)。
    */
   readonly kaisaiDate?: string | null;
   /**
    * 戦績を絞るのに使った基準日(YYYYMMDD。`kaisaiDate` と同じ形式。Issue #39)。
-   * app 側の分析パイプラインが、先読みリーク遮断(基準日と同日以降・当該レース自身の走を
+   * `analysis/analysis-pipeline.ts` の `runAnalysis` が、先読みリーク遮断(基準日と同日以降・当該レース自身の走を
    * 材料から除く)に**実際に使った基準日**をそのまま渡す。`dateApproximate=true`(開催日が
    * 渡らず実行日で近似した)の分析でも、使った基準日(=実行日)を書く。
    * 省略・null は「遮断の記録なし=是正前の呼び出し元/旧行」で、DBには NULL として保存する。
@@ -88,7 +88,7 @@ export interface AnalysisRecord {
   /**
    * LLMプロンプト側の先読みリーク遮断(Issue #153: 当日傾向〈sameDayTrend〉は自レースより前のレース
    * 番号だけ・同レース過去10年結果傾向〈gradeWinnerTrend〉は当該回自身と基準日以降の回を除く)を
-   * 通った分析であることの印。app 側の分析パイプラインが**新規の分析で常に true を渡す**
+   * 通った分析であることの印。`analysis/analysis-pipeline.ts` の `runAnalysis` が**新規の分析で常に true を渡す**
    * (LLM未使用の分析でも true。遮断を通る経路で作られたことを示す)。
    * `historyCutoffDate`(戦績の絞り込み〈#39〉の印)とは別の独立した印で、v1.14.x で保存された
    * LLM使用の分析は戦績は絞られているがプロンプト側のリークを含みうるため、この列で区別する。
@@ -145,15 +145,15 @@ export interface AnalysisAllocationRecord {
 export interface AnalysisAllocationMetaRecord {
   /** 到達状態(層1)。`analysis/mixed-race-allocation.ts` の `AllocationRouteCode` の値をそのまま受け取る。 */
   readonly route: string;
-  /** app 側 PlaceBetUnavailableReason。route!=="unavailable" のときは null(未到達)。 */
+  /** `analysis/race-allocation.ts` の `PlaceBetUnavailableReason`。route!=="unavailable" のときは null(未到達)。 */
   readonly unavailableReason: string | null;
-  /** app 側 PlaceOnlyFallbackReason。D-2フォールバックを通っていないときは null(未到達)。 */
+  /** `analysis/mixed-race-allocation.ts` の `PlaceOnlyFallbackReason`。D-2フォールバックを通っていないときは null(未到達)。 */
   readonly fallbackReason: string | null;
-  /** app 側 SkipReasonCode。coreの配分計算に未到達、または非skipのときは null。 */
+  /** `ev/allocation-primitives.ts` の `SkipReasonCode`。coreの配分計算に未到達、または非skipのときは null。 */
   readonly skipReasonCode: string | null;
-  /** app 側 ComboOddsAvailabilityCode(ワイド)。診断値を算出していなければ null(未到達)。 */
+  /** `analysis/mixed-race-allocation.ts` の `ComboOddsAvailabilityCode`(ワイド)。診断値を算出していなければ null(未到達)。 */
   readonly comboOddsWide: string | null;
-  /** app 側 ComboOddsAvailabilityCode(3連複)。診断値を算出していなければ null(未到達)。 */
+  /** `analysis/mixed-race-allocation.ts` の `ComboOddsAvailabilityCode`(3連複)。診断値を算出していなければ null(未到達)。 */
   readonly comboOddsTrio: string | null;
   /** 実効設定(実行時の値をそのまま記録。#59 決定(a): 復元不能な実効値)。 */
   readonly bankroll: number;
@@ -200,7 +200,7 @@ export interface AnalysisAllocationMetaRecord {
   readonly modelId: string | null;
   /** 上記モデルが近似か。modelId と同じ到達条件。 */
   readonly modelApproximate: boolean | null;
-  /** オッズ発売状態(発売前/中間/確定)。app 側 OddsStatus の値をそのまま受け取る。 */
+  /** オッズ発売状態(発売前/中間/確定)。`scraper/types.ts` の `OddsStatus` の値をそのまま受け取る。 */
   readonly oddsStatus: string;
 }
 
@@ -210,7 +210,7 @@ export interface AnalysisAllocationMetaRecord {
  * `getAllocationForVerify` のJSDoc参照)。
  */
 export interface StoredAllocationBet {
-  /** 券種。app 側の "place" | "wide" | "trio"。 */
+  /** 券種。core の `AllocationBetType`(`ev/combo-bet-allocation.ts`)の値。 */
   readonly betType: string;
   /** buildComboOddsKey による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
   readonly comboKey: string;
@@ -224,7 +224,7 @@ export interface StoredAllocationBet {
  * 「レース一覧」)が必要とする odds/ev を含む完全な表示用行として持つ。
  */
 export interface StoredAllocationBetDetail {
-  /** 券種。app 側の "place" | "wide" | "trio"。未知の値が混入していてもそのまま返す(throwしない)。 */
+  /** 券種。core の `AllocationBetType`(`ev/combo-bet-allocation.ts`)の値。未知の値が混入していてもそのまま返す(throwしない)。 */
   readonly betType: string;
   /** buildComboOddsKey による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
   readonly comboKey: string;
@@ -263,16 +263,16 @@ export interface StoredAllocationBetDetail {
 export interface StoredAllocation {
   /** 到達状態(層1)。`analysis/mixed-race-allocation.ts` の `AllocationRouteCode` の値をそのまま。未知の値でもそのまま返す。 */
   readonly route: string;
-  /** app 側 PlaceBetUnavailableReason。route!=="unavailable" のときは null(未到達)。 */
+  /** `analysis/race-allocation.ts` の `PlaceBetUnavailableReason`。route!=="unavailable" のときは null(未到達)。 */
   readonly unavailableReason: string | null;
   /**
-   * app 側 PlaceOnlyFallbackReason。D-2フォールバックを通っていないときは null(未到達)。
+   * `analysis/mixed-race-allocation.ts` の `PlaceOnlyFallbackReason`。D-2フォールバックを通っていないときは null(未到達)。
    * `route==="unavailable"` でも非nullになりうる(D-2フォールバックが頭数不可で
    * `kind:"unavailable"` になった場合。`analysis/mixed-race-allocation.ts` の
    * `AllocationOutcomeCodes` JSDoc参照)。
    */
   readonly fallbackReason: string | null;
-  /** app 側 SkipReasonCode。coreの配分計算に未到達、または非skipのときは null。 */
+  /** `ev/allocation-primitives.ts` の `SkipReasonCode`。coreの配分計算に未到達、または非skipのときは null。 */
   readonly skipReasonCode: string | null;
   /** 実効設定(実行時の値をそのまま記録)。 */
   readonly bankroll: number;
@@ -308,7 +308,7 @@ export interface StoredAllocation {
   readonly includeBracketQuinella: boolean | null;
   /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
   readonly betUnit: number | null;
-  /** オッズ発売状態(発売前/中間/確定)。app 側 OddsStatus の値をそのまま受け取る。 */
+  /** オッズ発売状態(発売前/中間/確定)。`scraper/types.ts` の `OddsStatus` の値をそのまま受け取る。 */
   readonly oddsStatus: string;
   /** stake>0 の明細のみ(#59 決定(a)を引き継ぐ)。 */
   readonly bets: readonly StoredAllocationBetDetail[];
@@ -334,9 +334,9 @@ export interface StoredAllocationSummary {
 
 /** 配分提案の1買い目分の明細行(#59。複勝・ワイド・3連複を共通の形に統合)。 */
 export interface AnalysisBetRecord {
-  /** 券種。app 側の "place" | "wide" | "trio"。 */
+  /** 券種。core の `AllocationBetType`(`ev/combo-bet-allocation.ts`)の値。 */
   readonly betType: string;
-  /** buildComboOddsKey(app 側が呼び出し済み)による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  /** buildComboOddsKey(`scraper/combo-odds-key.ts`。`analysis/allocation-record.ts` が呼び出し済み)による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
   readonly comboKey: string;
   /** 実際の配分額(円)。stake>0 の行のみを渡す前提(#59 決定(a))。 */
   readonly stake: number;
@@ -631,7 +631,7 @@ export interface AnalysisFilter {
  * 検証の集計(`computeVerifyReport` ほか)が読むデータの入口(Issue #219)。
  *
  * 集計が使う `AnalysisStore` のメソッドは次の4つだけ。型をここに切り出したのは、クラウド版(D1)が
- * 行を読んで同期の読み取り口を作り、**exe と同じ集計をそのまま使う**ため。`verify.ts` が
+ * 行を読んで同期の読み取り口を作り、**旧 exe と同じ集計をそのまま使う**ため。`verify.ts` が
  * `better-sqlite3` に依存する `analysis-store.ts` の型を引くと、クラウドだけをインストールする CI の
  * 型検査が解決に失敗する(#218 の教訓)。`AnalysisStore` はこの型を構造的に満たす(挙動は変わらない)。
  */

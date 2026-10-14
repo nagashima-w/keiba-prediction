@@ -11,7 +11,7 @@
  * SDK を使う入口を別にして、SDK がバンドルに入る経路を「この入口を import したとき」だけに限る。
  * clipVariant の解決(`resolveClipVariant`)は `pipeline.ts` から取る(ここでは再 export しない)。
  *
- * 追加の基準: クラウド版が LLM の実行(sender・モデル選択・analyzeRace)で使う名前だけを置く。exe は引き続きバレルを使う。
+ * 追加の基準: クラウド版が LLM の実行(sender・モデル選択・analyzeRace)で使う名前だけを置く。旧 exe は引き続きバレルを使っていた(#287 で削除。3c1664e まで)。
  */
 
 export {

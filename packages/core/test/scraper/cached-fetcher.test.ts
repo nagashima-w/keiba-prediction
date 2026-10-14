@@ -19,7 +19,7 @@ import {
  * 3種のストアで同じ表を走らせる:
  *  - sync: 同期の Map(ScrapeCache と同じ判定規則: 経過が maxAgeMs を**超えたら**ミス)
  *  - async: 非同期の Map(get・set とも少し遅れて完了する。await が抜けると結果が変わる)
- *  - ScrapeCache: exe の本番の実装(better-sqlite3)
+ *  - ScrapeCache: core の `scraper/cache.ts` の実装(better-sqlite3。旧 exe が本番で使った)
  *
  * 殺す変異の例:
  *  - get の await を落とす → async ストアで Promise が常に「ヒット」扱いになり、hit.value が undefined になる
@@ -103,7 +103,7 @@ const HARNESSES: ReadonlyArray<readonly [string, () => Harness]> = [
     },
   ],
   [
-    "ScrapeCache(exe の better-sqlite3)",
+    "ScrapeCache(better-sqlite3。旧 exe が本番で使った)",
     () => {
       const nowRef = { value: 1_000_000 };
       const cache = new ScrapeCache({ now: () => nowRef.value });

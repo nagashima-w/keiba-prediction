@@ -9,7 +9,7 @@
  * 検査: `test/ev/native-free-modules.test.ts`(閉包に better-sqlite3 が無いこと)。
  *
  * 追加の基準: runAnalysis の closure(`core/src/analysis/analysis-pipeline.ts`・`allocation-record.ts`・`analysis-export.ts`)が
- * `@keiba/core` から import する名前だけを置く。exe の他の部分(pipeline-deps.ts 等。#287 で削除)は引き続きバレルを使う。
+ * `@keiba/core` から import する名前だけを置く。旧 exe の他の部分(pipeline-deps.ts 等。#287 で削除。3c1664e まで)は引き続きバレルを使っていた。
  */
 
 export type {

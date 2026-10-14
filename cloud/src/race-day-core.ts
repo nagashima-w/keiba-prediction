@@ -2581,7 +2581,7 @@ export class RaceDayCore {
       if (analysisId === null) {
         const raceId = parseRaceId(task.race_id);
         // LLM(Issue #194)。clipVariant は1回だけ解決し、補正の最大幅(analyzeRace)と、プロンプト・promptVersion(runAnalysis の deps.clipVariant)の両方に同じ値を使う
-        // (文面の許容幅とクリップ幅の食い違いを構造的に防ぐ。exe の pipeline-deps.ts と同じ)。
+        // (文面の許容幅とクリップ幅の食い違いを構造的に防ぐ。旧 exe の pipeline-deps.ts〈#287 で削除。3c1664e まで〉と同じ)。
         const clipVariant = resolveClipVariant(settings.clipVariant);
         // 追加指示は、読む側に上限が無い(D1 に直接入れた長い値)ので、組み立て側で 2,000 UTF-16 単位に切る(サロゲートペアを割らない)。
         const instruction = clampAdditionalInstruction(settings.additionalInstruction);

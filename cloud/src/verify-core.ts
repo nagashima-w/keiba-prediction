@@ -4,16 +4,16 @@
  *
  * ## 役割
  * 検証の集計は、分析・結果の**全件**を読む(D1 の読み取りは 1 回の再計算で数万〜十数万行。Free は 1 日 500 万行)うえ、行のデコードだけで Worker Free の CPU 10ms を超える。
- * そこで DO の中で、core の `computeVerifyReport`(exe と同じ関数)を回し、**結果を kv にキャッシュ**する。区分(全体/中央のみ/地方のみ)は 3 つ同時に計算して保存する
+ * そこで DO の中で、core の `computeVerifyReport`(旧 exe と同じ関数)を回し、**結果を kv にキャッシュ**する。区分(全体/中央のみ/地方のみ)は 3 つ同時に計算して保存する
  * (区分の切替で D1 を読まない)。
  *
  * ## 流れ(`getReport`)
  * 1. 透かし(`readWatermark`。各表の `MAX(id)`/`MAX(rowid)`。各 1 行)と、発走時刻の補完待ち(`listPending`。カーソルより後の `start_time IS NULL`)を確認する。
- * 2. **補完待ちがあれば集計しない**(発走時刻を失ったまま計算すると、先読み疑いの判定が exe とずれる)。集計があれば、それを「補完中」の印つきで返し、無ければ `preparing`(残り件数)。
+ * 2. **補完待ちがあれば集計しない**(発走時刻を失ったまま計算すると、先読み疑いの判定が旧 exe(と同じ core の判定)とずれる)。集計があれば、それを「補完中」の印つきで返し、無ければ `preparing`(残り件数)。
  *    補完は `runBackfillTick`(アラーム)が少しずつ行う。
  * 3. 集計が新しい(透かしが同じで TTL 内)ならそのまま返す。そうでなければ再計算するが、**費用の柵**(最短間隔・1 日の回数)に当たったら古い集計を返す(`stale`)。
- * 4. 再計算: `readAll`(7 文の batch)→ `buildVerifySource` → 3 区分の `computeVerifyReport`(`PRODUCTION_VERIFY_CONFIG` = exe の検証画面と同じ設定)と、プロンプト版別の比較(`computePromptVersionSummaries`。全体のみ・画面が使う項目だけ。D1 は追加で読まない。Issue #220)。
- *    読んだ行に NULL の行が混ざっていたら(確認と読みの間に保存された)、キャッシュせず `preparing`(集計は exe と一致するときだけ出す)。
+ * 4. 再計算: `readAll`(7 文の batch)→ `buildVerifySource` → 3 区分の `computeVerifyReport`(`PRODUCTION_VERIFY_CONFIG` = 旧 exe の検証画面と同じ設定)と、プロンプト版別の比較(`computePromptVersionSummaries`。全体のみ・画面が使う項目だけ。D1 は追加で読まない。Issue #220)。
+ *    読んだ行に NULL の行が混ざっていたら(確認と読みの間に保存された)、キャッシュせず `preparing`(集計は旧 exe と一致するときだけ出す)。
  *
  * ## 閲覧者の要求(`getViewerReport`。Issue #263)
  * 閲覧者(友人)にも検証画面を見せるが、**閲覧者の要求は集計のやり直しを起こさない**。`getReport` とは別のメソッドにしてあり(`refresh` の引数も無い)、kv のキャッシュを読むだけ:
@@ -176,7 +176,7 @@ export type VerifyResponse =
       readonly status: "ready";
       readonly venue: VerifyVenueFilter;
       readonly report: VerifyReport;
-      /** プロンプト版別の比較(Issue #220)。**区分(venue)に依らず全体**(exe の版別比較と同じ)。画面が使う項目だけを持つ。 */
+      /** プロンプト版別の比較(Issue #220)。**区分(venue)に依らず全体**(旧 exe の版別比較と同じ)。画面が使う項目だけを持つ。 */
       readonly promptVersions: readonly PromptVersionSummary[];
       /** 集計した時刻(ISO)。 */
       readonly computedAt: string;
@@ -382,7 +382,7 @@ export class VerifyCore {
     const t0 = now();
     const read = await store.readAll();
     const t1 = now();
-    // 確認と読みの間に保存された分析(start_time が NULL)が混ざっていたら、集計しない(exe とずれうる)。
+    // 確認と読みの間に保存された分析(start_time が NULL)が混ざっていたら、集計しない(旧 exe とずれうる)。
     const unchecked = read.rows.analyses.filter((a) => a.startTime === null).length;
     if (unchecked > 0) {
       return { preparing: unchecked };

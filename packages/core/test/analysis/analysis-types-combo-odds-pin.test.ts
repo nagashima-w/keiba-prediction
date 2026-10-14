@@ -10,11 +10,12 @@ import type {
  * analysis/analysis-types.ts の組合せオッズView型群(core型の手動コピー)が、core型と
  * 構造的に完全一致していることを型レベルで固定する(code-reviewer指摘・提案1採用)。
  *
- * 背景: `analysis/analysis-types.ts` 自体は core から一切importしない既存の流儀(narrow import
- * 規約・main/preload/rendererの三者が参照するIPC境界を core のnative依存から独立させるため)を
+ * 背景: `analysis/analysis-types.ts` 自体は import を 1 つも持たない既存の流儀(ブラウザ向けの束の閉包に
+ * core のバレルやネイティブ依存を引き込まないため。`cloud/test/client-bundle.test.ts` の許可リスト参照。
+ * 旧 exe では main/preload/renderer が参照する IPC 境界を core のnative依存から独立させる理由もあった)を
  * 守っているため、View型は core型の**手動コピー**であり、コンパイラが構造一致を強制する仕組みが
- * 無かった。そのため core側にフィールドが追加・変更されても、shared側は静かにドリフトしうる
- * (boss着手前ゲート・code-reviewerが指摘)。このファイルは shared側の流儀を壊さずに
+ * 無かった。そのため core側にフィールドが追加・変更されても、View型側は静かにドリフトしうる
+ * (boss着手前ゲート・code-reviewerが指摘)。このファイルは analysis-types.ts の流儀を壊さずに
  * (importするのはこのテストファイル自身であり、analysis/analysis-types.tsではない)、
  * ズレを型検査(`pnpm -r typecheck`)で機械的に検知するためのピンを立てる。
  *
@@ -45,12 +46,12 @@ type Equal<X, Y> =
  */
 type ExpectTrue<T extends true> = T;
 
-// core `ComboOddsFetchOutcome` と shared `ComboOddsFetchOutcomeView` が構造的に完全一致すること。
+// core `ComboOddsFetchOutcome` と analysis-types.ts の `ComboOddsFetchOutcomeView` が構造的に完全一致すること。
 export type _PinComboOddsFetchOutcome = ExpectTrue<
   Equal<ComboOddsFetchOutcome, ComboOddsFetchOutcomeView>
 >;
 
-// core `ComboOddsScrapeOutcome` と shared `ComboOddsScrapeOutcomeView` が構造的に完全一致すること。
+// core `ComboOddsScrapeOutcome` と analysis-types.ts の `ComboOddsScrapeOutcomeView` が構造的に完全一致すること。
 export type _PinComboOddsScrapeOutcome = ExpectTrue<
   Equal<ComboOddsScrapeOutcome, ComboOddsScrapeOutcomeView>
 >;

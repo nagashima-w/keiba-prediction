@@ -88,7 +88,7 @@
  *
  * **件数(旧「〈5件〉」)を書かない。** 旧版はここに具体的な件数を書いていたが、実際に数え直すと
  * 誤りだった(boss指摘2026-08-20)。件数は`describe`が増減するたびに腐る参照であり、腐った状態が
- * 気づかれないまま残る(`docs/issue-order.md`のexe の`BatchAnalysisView.tsx:625`行番号参照〈メモ化を
+ * 気づかれないまま残る(`docs/issue-order.md`のexe の`BatchAnalysisView.tsx:625`(#287 で削除。3c1664e まで)行番号参照〈メモ化を
  * `useMemo`と決め打った記述〉が腐って偽になっていたのと同じ欠陥クラス。この参照先の行は
  * 本タスク完了後に`docs/issue-order.md`から削除される見込みのため、**検証はコミット
  * `7151534`時点の`docs/issue-order.md`を参照すること**〈`git show 7151534:docs/issue-order.md`〉)。
@@ -155,7 +155,7 @@ export { CONDITIONAL_BERNOULLI_MODEL, DEFAULT_EV_CONFIG };
  * (`exports` へ `./ev/allocation-primitives` を新規追加しない。型のみの re-export はランタイム
  * 出力に何も足さない)。
  *
- * 注意: これは Issue #57 で削除した「未使用の re-export シム」とは別物(削除すれば app が
+ * 注意: これは Issue #57 で削除した「未使用の re-export シム」とは別物(削除すれば `analysis/mixed-race-allocation.ts` が
  * コンパイルできない=使用される re-export)。詳細は `bet-allocation.ts` の同種コメント参照。
  */
 export type { SkipReasonCode };

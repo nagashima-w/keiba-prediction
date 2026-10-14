@@ -2,7 +2,7 @@
  * 分析の一覧・詳細の API 呼び出しと応答のパーサ(Issue #185)。DOM に触れない純ロジックで、`fetch` は注入する。
  *
  * **応答を信用しない**(`api.ts` と同じ): 型違い・キーの欠落は「想定外の応答」(`unexpected`)にし、一部だけを黙って落として返さない。
- * 配分は exe の表示関数(`buildAllocationProposalView`)の入力型 `StoredAllocationView` に写す。**キーが 1 つでも欠けたら想定外**にする
+ * 配分は core の表示関数(`view/allocation-proposal-view.ts` の `buildAllocationProposalView`。旧 exe と共有していた)の入力型 `StoredAllocationView` に写す。**キーが 1 つでも欠けたら想定外**にする
  * (欠けたまま `undefined` を渡すと、フォールバックの注記が消える・「単位額が記録されていません」と誤って表示される、など利用者に見える誤りになる)。
  * 未知の `route` 文字列は通す(表示関数が「判定不能」の注記にする)。
  * サーバ側のキー名・形のドリフトは `test/client-api-analysis-contract.test.ts`(実際の `handle()` の応答を通す)が検出する。
