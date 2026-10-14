@@ -24,6 +24,11 @@
 #   test/client-bundle.test.ts・test/import-guard.test.ts である(Issue #287 で、混入の実験をして確かめた)。
 #   Issue #288 で deploy-cloud.yml のスモークを別ジョブ(smoke)に分けたが、型検査とテストは check ジョブに残っている
 #   (scripts/test/ci-workflow.test.ts が、check が cloud の型検査とテストを無条件で走らせていることを固定している)。
+#
+# ★uses: はコミット SHA でピン留めしている(Issue #305)。タグ(v4)は付け替えで中身が差し替わりうるため、行末のコメントに版数を書く。
+#   SHA は `git ls-remote https://github.com/<owner>/<repo>` の実出力から取った、ピン留めの時点で `v4` タグが指していたコミット(CI が動かすコードは変えていない)。
+#   pnpm/action-setup の `v4` タグは最新の v4.4.0 ではなく v4.3.0 のコミットを指す(だから # v4.3.0)。
+#   版を上げるときは、全 uses 行と scripts/test/actions-pinned.test.ts の期待表を揃えて直す(テストが全 uses 行を固定している)。
 name: 型検査・テストの関門
 
 on:
@@ -47,14 +52,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: リポジトリを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # pnpm はバージョン未指定にして package.json の packageManager フィールド(pnpm@10.33.0)に従わせる。
       - name: pnpm をセットアップ
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       - name: Node.js をセットアップ
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
