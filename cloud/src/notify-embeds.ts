@@ -8,8 +8,13 @@
  *
  * `fields` は core の `DiscordEmbed` に無い(title・description・color だけ)ので、ここで {@link CloudEmbed} として拡張する(core には触らない)。
  * `sendDiscordNotification` は `JSON.stringify` するだけなので、そのまま通る。
+ *
+ * **外から来た文字列の無害化(Issue #301)**: netkeiba 由来の会場名・レース名・馬名は、載せる前に `escapeDiscordMarkdown` を掛ける(マスクドリンクや書式が描画されないように)。
+ * 掛けるのは**この層の組み立て**で、保存する材料・web 側には掛けない。core の `buildAnalysisEmbed` に渡す値は**生のまま**(core が自分で掛ける。二重に掛けない)。
+ * こちらが書く固定文(失敗の理由・LLM の注記・ラベル)は対象外。
  */
 import { buildAnalysisEmbed, truncate, type DiscordEmbed, type EmbedHorse, type EmbedRaceInfo } from "../../packages/core/src/notify/discord";
+import { dropDanglingBackslash, escapeDiscordMarkdown } from "../../packages/core/src/notify/discord-escape";
 import type { AnalysisAllocationMetaRecord, AnalysisAllocationRecord, AnalysisBetRecord, AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import type { SkipReasonCode } from "../../packages/core/src/ev/combo-bet-allocation";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
@@ -53,7 +58,7 @@ const COLOR_ORANGE = DISCORD_COLORS.warn;
 
 // ---- 上限を守る ----
 
-/** UTF-16 の長さが max 以内になるように切る。切ったら末尾を「…」にする。サロゲートペアを割らない。 */
+/** UTF-16 の長さが max 以内になるように切る。切ったら末尾を「…」にする。サロゲートペアと、escape の対(バックスラッシュ + 記号。Issue #301)を割らない。 */
 function cut(text: string, max: number): string {
   if (text.length <= max) {
     return text;
@@ -66,7 +71,7 @@ function cut(text: string, max: number): string {
   if (last >= 0xd800 && last <= 0xdbff) {
     head = head.slice(0, -1); // 前半だけのサロゲートを残さない
   }
-  return `${head}…`;
+  return `${dropDanglingBackslash(head)}…`;
 }
 
 /** 行の並びを maxLen 以内の value にする。収まらなければ、末尾の行から落として最後に「…ほか N 件」を付ける(N = 落とした行の数)。 */
@@ -161,9 +166,10 @@ function venueOf(label: Pick<RaceLabel, "raceId" | "venueName">): string {
 
 /** 「会場 NR レース名(グレード)」(無い部分は省く。グレードは重賞だけ。Issue #250)。 */
 export function raceTitle(label: RaceLabel): string {
-  const parts = [venueOf(label)];
+  // 会場名・レース名は netkeiba 由来(Issue #301: escape する。切り詰めはその後)。
+  const parts = [escapeDiscordMarkdown(venueOf(label))];
   if (label.raceNumber !== null) parts.push(`${label.raceNumber}R`);
-  if (label.raceName !== null && label.raceName !== "") parts.push(nameWithGrade(label.raceName, label.grade));
+  if (label.raceName !== null && label.raceName !== "") parts.push(escapeDiscordMarkdown(nameWithGrade(label.raceName, label.grade)));
   return cut(parts.join(" "), EMBED_LIMITS.title);
 }
 
@@ -287,7 +293,7 @@ function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, stri
   let withOdds = 0;
   const lines = marked.map((h) => {
     const name = names.get(h.umaban);
-    const head = name === null || name === undefined || name === "" ? `${h.mark} ${h.umaban}番` : `${h.mark} ${h.umaban}番 ${truncate(name, MARK_NAME_MAX)}`;
+    const head = name === null || name === undefined || name === "" ? `${h.mark} ${h.umaban}番` : `${h.mark} ${h.umaban}番 ${escapeDiscordMarkdown(truncate(name, MARK_NAME_MAX))}`;
     const parts: string[] = [];
     const fair = odds.fair.get(h.umaban) ?? null;
     const actual = odds.actual.get(h.umaban) ?? null;
@@ -604,9 +610,9 @@ function rowTag(row: PlanRow): string {
 }
 
 function rowLine(row: PlanRow, withVenue: boolean): string {
-  const venue = withVenue ? `${row.venueName ?? venueNameFromRaceId(row.raceId)} ` : "";
+  const venue = withVenue ? `${escapeDiscordMarkdown(row.venueName ?? venueNameFromRaceId(row.raceId))} ` : "";
   const number = row.raceNumber === null ? "?" : String(row.raceNumber);
-  return `${venue}${number}R ${truncate(row.raceName ?? "", RACE_NAME_MAX)} ${row.startTime ?? "--:--"} ${rowTag(row)}`;
+  return `${venue}${number}R ${escapeDiscordMarkdown(truncate(row.raceName ?? "", RACE_NAME_MAX))} ${row.startTime ?? "--:--"} ${rowTag(row)}`;
 }
 
 const byRaceNumber = (a: PlanRow, b: PlanRow): number => (a.raceNumber ?? 99) - (b.raceNumber ?? 99) || a.raceId.localeCompare(b.raceId);
@@ -669,10 +675,10 @@ export function buildSummaryEmbed(input: SummaryInput): CloudEmbed {
   const byVenue = new Map<string, PlanRow[]>();
   for (const row of central) {
     const name = row.venueName ?? venueNameFromRaceId(row.raceId);
-    byVenue.set(name, [...(byVenue.get(name) ?? []), row]);
+    byVenue.set(name, [...(byVenue.get(name) ?? []), row]); // field の名前に出すときに escape する(キーは生のまま。同じ会場を束ねるため)
   }
   for (const [name, rows] of byVenue) {
-    fields.push({ name, value: [...rows].sort(byRaceNumber).map((r) => rowLine(r, false)).join("\n") });
+    fields.push({ name: escapeDiscordMarkdown(name), value: [...rows].sort(byRaceNumber).map((r) => rowLine(r, false)).join("\n") });
   }
   const centralVenue = progress.venues.find((v) => v.venue === "central");
   if (central.length === 0 && centralVenue !== undefined) {

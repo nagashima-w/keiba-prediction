@@ -1,7 +1,11 @@
 /**
  * 日報(Issue #235)の Discord の要約(embed)。**純関数**。全文は web に保存してあり、ここは総括・成績・良かった点/改善点の先頭だけ。
  * 上限(説明 4096・field 1024・合計 6000)は {@link fitEmbed} が最後に保証する。リンク(`url`)は文字数の対象外で、基点があるときだけ付ける。
+ *
+ * **LLM の文章(総括・良かった点・改善点)と、惜しかったレースのレース名は、外から来た文字列として `escapeDiscordMarkdown` を掛けて載せる**(Issue #301。マスクドリンク・書式が描画されないように)。
+ * 掛けるのは**この embed の組み立てだけ**で、保存する文章・web の画面には掛けない(画面にバックスラッシュが見えるため)。固定文(`note` ほか)は対象外。
  */
+import { escapeDiscordMarkdown } from "../../packages/core/src/notify/discord-escape";
 import { dateLabel, yen, type Narrative } from "./daily-report-prompt";
 import { formatExpectedHits } from "./expected-format";
 import type { RollingSummary } from "./period-stats";
@@ -93,20 +97,20 @@ export function buildReportEmbed(input: ReportEmbedInput): CloudEmbed {
   }
   const near = input.nearMisses;
   if (near !== undefined && near !== null && near.total > 0) {
-    const titleOf = (raceId: string): string => input.races?.find((r) => r.raceId === raceId)?.title ?? raceId;
+    const titleOf = (raceId: string): string => escapeDiscordMarkdown(input.races?.find((r) => r.raceId === raceId)?.title ?? raceId);
     fields.push({ name: `惜しかったレース(全 ${near.total} 件)`, value: near.shown.map((n) => `${titleOf(n.raceId)}: ${templateLabel(n.templateId)} ${yen(n.payout)}`).join("\n") });
   }
   if (narrative !== null) {
     if (narrative.good.length > 0) {
-      fields.push({ name: "良かった点", value: narrative.good.slice(0, SHOWN_ITEMS).map((s) => `・${s}`).join("\n") });
+      fields.push({ name: "良かった点", value: narrative.good.slice(0, SHOWN_ITEMS).map((s) => `・${escapeDiscordMarkdown(s)}`).join("\n") });
     }
     if (narrative.improve.length > 0) {
-      fields.push({ name: "改善点", value: narrative.improve.slice(0, SHOWN_ITEMS).map((s) => `・${s}`).join("\n") });
+      fields.push({ name: "改善点", value: narrative.improve.slice(0, SHOWN_ITEMS).map((s) => `・${escapeDiscordMarkdown(s)}`).join("\n") });
     }
   }
   const embed: CloudEmbed = {
     title: `日報 ${dateLabel(input.kaisaiDate)}`,
-    description: narrative !== null ? narrative.summary : (input.note ?? "統計だけの日報です"),
+    description: narrative !== null ? escapeDiscordMarkdown(narrative.summary) : (input.note ?? "統計だけの日報です"),
     color: stats.recoveryRate === null ? COLOR_GRAY : stats.recoveryRate >= 1 ? COLOR_GREEN : COLOR_RED,
     fields,
     ...(input.link === undefined ? {} : { url: input.link }),

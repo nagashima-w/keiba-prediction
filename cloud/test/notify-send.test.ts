@@ -23,6 +23,11 @@ describe("webhookStatus(未登録・形式不正・有効)", () => {
     ["http(https でない)", "http://discord.com/api/webhooks/1/abc", "invalid"],
     ["別のホスト", "https://example.com/api/webhooks/1/abc", "invalid"],
     ["プレフィックスが途中", "xhttps://discord.com/api/webhooks/1/abc", "invalid"],
+    // Issue #301: new URL() による解析・ホストの完全一致
+    ["ホストが discord.com で始まるだけの別ホスト", "https://discord.com.evil.example/api/webhooks/1/abc", "invalid"],
+    ["クエリに正規 URL を埋め込んだ別ホスト", "https://evil.example/?https://discord.com/api/webhooks/", "invalid"],
+    ["明示ポート", "https://discord.com:444/api/webhooks/1/abc", "invalid"],
+    ["ドットセグメントでパスの外へ出る", "https://discord.com/api/webhooks/../x", "invalid"],
     ["文字列でない値(secret は文字列だが、型の防御)", 123 as unknown as string, "absent"],
   ] as const)("%s → %s", (_name, value, expected) => {
     expect(webhookStatus(value)).toBe(expected);
@@ -51,7 +56,8 @@ describe("createDiscordNotifier(Worker から送る)", () => {
     await notifier.send(PAYLOAD);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe(URL_OK);
-    expect(JSON.parse(calls[0]!.body)).toEqual(PAYLOAD);
+    // Issue #301: 送る本文は payload に allowed_mentions: { parse: [] } を足した形(キーを足しただけで、完全一致を保つ)。
+    expect(JSON.parse(calls[0]!.body)).toEqual({ ...PAYLOAD, allowed_mentions: { parse: [] } });
   });
 
   it("タイムアウトは 5 秒(応答が返らなければ打ち切る)", async () => {

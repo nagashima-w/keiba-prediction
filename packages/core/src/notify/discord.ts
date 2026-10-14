@@ -14,6 +14,7 @@
 
 import type { PredictionMark } from "../analyzer/parse-response.js";
 import { DEFAULT_USER_AGENT } from "../scraper/http-client.js";
+import { dropDanglingBackslash, escapeDiscordMarkdown } from "./discord-escape.js";
 
 /** Discord embed(送信ペイロードの1要素)。 */
 export interface DiscordEmbed {
@@ -31,6 +32,11 @@ export interface DiscordPayload {
   readonly content?: string;
   /** embed 群(本ツールは1件のみ送る想定)。 */
   readonly embeds: readonly DiscordEmbed[];
+  /**
+   * メンションの制御(Issue #301)。**指定しても無視され、{@link sendDiscordNotification} が常に `{ parse: [] }` に固定して送る**
+   * (`@everyone`・ユーザー・ロールのメンションで通知が飛ばない)。型に持つのは、受け取った側が値を確かめられるようにするため。
+   */
+  readonly allowed_mentions?: { readonly parse: readonly string[] };
 }
 
 /**
@@ -94,11 +100,10 @@ const COLOR_POSITIVE = 0x2ecc71;
 /** 該当なし色(グレー)。 */
 const COLOR_NONE = 0x95a5a6;
 
-/** 有効な Discord Webhook URL のプレフィックス(https のみ許容)。 */
-const WEBHOOK_URL_PREFIXES = [
-  "https://discord.com/api/webhooks/",
-  "https://discordapp.com/api/webhooks/",
-] as const;
+/** 有効な Discord Webhook URL のホスト(完全一致。サブドメイン・末尾ドットの別名は `new URL()` の正規化後にここへ一致しなければ不可)。 */
+const WEBHOOK_HOSTS: ReadonlySet<string> = new Set(["discord.com", "discordapp.com"]);
+/** 有効な Discord Webhook URL のパスの先頭。 */
+const WEBHOOK_PATH_PREFIX = "/api/webhooks/";
 
 /**
  * Discord 通知の失敗を表す例外。理由(ステータス・応答本文)を保持する。
@@ -122,11 +127,29 @@ export class DiscordNotifyError extends Error {
 }
 
 /**
- * 送信前のURL検証。Discord Webhook の正規プレフィックスで始まる https URL のみ許容する。
+ * 送信前のURL検証。`new URL()` で解析し、次をすべて満たす https URL のみ許容する(Issue #301。前方一致をやめた)。
+ *  - スキームが `https:`
+ *  - ホストが `discord.com` / `discordapp.com` の完全一致(`discord.com.evil.example`・`ptb.discord.com`・userinfo 偽装は不可)
+ *  - userinfo(`user:pass@`)と明示ポートが無い
+ *  - 正規化後のパスが `/api/webhooks/` で始まる(`/api/webhooks/../x` のようなドットセグメントは正規化後に外れて不可)
+ * 解析できない文字列は例外にせず false。ホスト・スキームの大文字小文字は解析で正規化されるので許容する。
  * (設定画面レビューの申し送り事項: 実送信の直前でホスト・パスを固定的に検証する。)
  */
 export function isDiscordWebhookUrl(url: string): boolean {
-  return WEBHOOK_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return (
+    parsed.protocol === "https:" &&
+    WEBHOOK_HOSTS.has(parsed.hostname) &&
+    parsed.username === "" &&
+    parsed.password === "" &&
+    parsed.port === "" &&
+    parsed.pathname.startsWith(WEBHOOK_PATH_PREFIX)
+  );
 }
 
 /**
@@ -155,7 +178,8 @@ export function truncate(text: string, maxLen: number): string {
   if (codePoints.length <= maxLen) {
     return text;
   }
-  return `${codePoints.slice(0, maxLen - 1).join("")}…`;
+  // escape 済みの文字列(Issue #301)を切るとき、escape の対(バックスラッシュ + 記号)を割って単独のバックスラッシュを残さない。
+  return `${dropDanglingBackslash(codePoints.slice(0, maxLen - 1).join(""))}…`;
 }
 
 /** embed 整形に用いるレース情報(`analysis/analysis-types.ts` の AnalysisResult と構造互換)。 */
@@ -253,12 +277,13 @@ export function buildAnalysisEmbed(
 ): DiscordEmbed {
   const positives = horses.filter((h) => h.isPositive);
 
-  const metaLine = `${raceInfo.date} / ${raceInfo.venueName} / ${raceInfo.courseType}${raceInfo.distance}m`;
+  // 外から来た文字列(netkeiba 由来の会場名・レース名・馬名)は、切り詰めの後で escape して載せる(Issue #301)。
+  const metaLine = `${raceInfo.date} / ${escapeDiscordMarkdown(raceInfo.venueName)} / ${raceInfo.courseType}${raceInfo.distance}m`;
 
   const horseLines =
     positives.length > 0
       ? positives.map((h) => {
-          const name = truncate(h.horseName, HORSE_NAME_MAX);
+          const name = escapeDiscordMarkdown(truncate(h.horseName, HORSE_NAME_MAX));
           // 予想印(Task#23): 印が付いた馬は行頭に「◎ 」のように添える。印なし馬は従来どおり。
           const markPrefix = h.mark !== null ? `${h.mark} ` : "";
           // 推定EV(Task#25): 発売前の概算EVである旨を末尾に「(推定)」で明示する(印の前置と共存)。
@@ -280,7 +305,7 @@ export function buildAnalysisEmbed(
 
   return {
     title: truncate(
-      `${raceInfo.venueName} ${raceInfo.raceName}`,
+      `${escapeDiscordMarkdown(raceInfo.venueName)} ${escapeDiscordMarkdown(raceInfo.raceName)}`,
       DISCORD_EMBED_TITLE_MAX,
     ),
     description,
@@ -411,7 +436,8 @@ export async function sendDiscordNotification(
   const fetchFn = deps.fetch ?? defaultDiscordFetch;
   const sleep = deps.sleep ?? defaultSleep;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_DISCORD_TIMEOUT_MS;
-  const body = JSON.stringify(payload);
+  // 常に allowed_mentions を空にして送る(Issue #301。呼び出し側の指定は上書きする)。content を使い始めても @everyone 等で通知が飛ばない。
+  const body = JSON.stringify({ ...payload, allowed_mentions: { parse: [] } });
 
   // 初回 + 429 のとき1回だけリトライ(合計最大2回試行)。
   // タイムアウト時は fetchWithTimeout が DiscordNotifyError を throw し、ループを抜けて即失敗する(リトライしない)。
