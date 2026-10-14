@@ -40,7 +40,7 @@ export interface AnalyzerConfig {
    *
    * 注意(タスクD-2で判明した設計上の記録): この値は AnthropicLlmClient.complete() 内では
    * 一切参照されない(実際のクリップは parseAnalyzerResponse が受け取る
-   * AnalyzeRaceDeps.maxAdjust〈analyze-race.ts〉で行われ、そちらは呼び出し側〈exe の pipeline-deps.ts(#287 で削除。3c1664e まで)〉が
+   * AnalyzeRaceDeps.maxAdjust〈analyze-race.ts〉で行われ、そちらは呼び出し側〈クラウド版は cloud/src/race-day-core.ts。旧 exe では pipeline-deps.ts(#287 で削除。3c1664e まで)〉が
    * clip-variants.ts の CLIP_VARIANTS から別途解決して渡す設計にした)。このフィールドは
    * 後方互換のために残すが、実際のクリップ幅制御には使われない(デッド。将来削除を検討)。
    */
@@ -259,13 +259,13 @@ export interface SdkMessageSenderOptions {
   /** fetch の差し替え(テスト用。実 API を呼ばずにリクエスト本文を検証する)。 */
   readonly fetch?: typeof fetch;
   /**
-   * 1リクエストの上限時間(ミリ秒。Issue #193)。省略時は SDK の既定(10 分)のまま(exe はこれを渡さない)。
+   * 1リクエストの上限時間(ミリ秒。Issue #193)。省略時は SDK の既定(10 分)のまま(旧 exe はこれを渡さなかった)。
    * クラウド版(DO のアラーム)が、応答を際限なく待たないために渡す。
    */
   readonly timeout?: number;
   /**
    * SDK が内部で行う再試行の回数(Issue #193)。省略時は SDK の既定(2 回。つまり HTTP は最大3本)のまま
-   * (exe はこれを渡さない)。0 は再試行しない。`analyzeRace` がすでに1回再送するので、
+   * (旧 exe はこれを渡さなかった)。0 は再試行しない。`analyzeRace` がすでに1回再送するので、
    * クラウド版は 0 を渡して HTTP の本数を抑える。
    */
   readonly maxRetries?: number;

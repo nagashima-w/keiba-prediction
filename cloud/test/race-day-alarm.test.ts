@@ -316,3 +316,32 @@ describe("アラームの合成: nextAlarmAt の日報の時刻の下限の候�
     expect(nextAlarmAt({ ...base, retryWork: true, reportHoldAtMs: NOW + 1_000 })).toBe(NOW + 1_000);
   });
 });
+
+describe("アラームの合成: nextAlarmAt の日報の判定の候補(Issue #298)", () => {
+  it("reportJudgePending が真なら、単独で now が候補になる", () => {
+    expect(nextAlarmAt({ ...base, reportJudgePending: true })).toBe(NOW);
+  });
+
+  it.each([
+    ["偽", false],
+    ["省略", undefined],
+  ] as const)("reportJudgePending が%sなら候補にしない(既存の呼び出しと同じ)", (_name, value) => {
+    expect(nextAlarmAt(value === undefined ? base : { ...base, reportJudgePending: value })).toBeNull();
+  });
+
+  it("他の候補との最小を取る: 未来の候補より早く(now)、すでに now の候補とは同じ", () => {
+    expect(nextAlarmAt({ ...base, reportJudgePending: true, planNextDueMs: NOW + 9_000 })).toBe(NOW);
+    expect(nextAlarmAt({ ...base, reportJudgePending: true, purgeDueMs: NOW + 9_000 })).toBe(NOW);
+    expect(nextAlarmAt({ ...base, reportJudgePending: true, immediateWork: true })).toBe(NOW);
+  });
+
+  it("nextAlarmAt は、再試行待ちの仕事があっても真なら now にする(タスクが無いときだけ真にするのは呼び出し側の責務。RaceDayCore のテストが固定する)", () => {
+    expect(RETRY_DELAY_MS).toBeGreaterThan(0); // 前提: 再試行の間隔は now より後
+    expect(nextAlarmAt({ ...base, retryWork: true, reportJudgePending: true })).toBe(NOW);
+  });
+
+  it("下限の候補(reportHoldAtMs。未来のときだけ)とは独立: 過去の下限だけでは候補にならない", () => {
+    expect(nextAlarmAt({ ...base, reportHoldAtMs: NOW - 1_000 })).toBeNull();
+    expect(nextAlarmAt({ ...base, reportHoldAtMs: NOW - 1_000, reportJudgePending: true })).toBe(NOW);
+  });
+});

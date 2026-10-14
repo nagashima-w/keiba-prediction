@@ -363,7 +363,7 @@ describe("formatAllocationSummary(合計行。capAppliedで文言切替)", () =>
   });
 });
 
-describe("NOT_DIVERSIFIED_NOTE(機能D-2c第4段でexport。exe の mixed-allocation-view.ts が再利用する)", () => {
+describe("NOT_DIVERSIFIED_NOTE(機能D-2c第4段でexport。旧 exe の mixed-allocation-view.ts〈#287 で削除。3c1664e まで〉が再利用した)", () => {
   it("空でなく、原因を名指ししない中立表現であること(「1レース上限」を名指ししない)", () => {
     expect(NOT_DIVERSIFIED_NOTE.length).toBeGreaterThan(0);
     expect(NOT_DIVERSIFIED_NOTE).not.toContain("1レース上限の制約により");

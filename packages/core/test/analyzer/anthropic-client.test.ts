@@ -535,7 +535,7 @@ describe("createSdkModelLister(Models API。fetch を差し替え・実APIは呼
 /**
  * Issue #193(#179-a): `createSdkMessageSender`・`createSdkModelLister` の省略可のオプション `timeout`・`maxRetries`。
  * クラウド版(Worker の DO のアラーム)が、SDK の既定(再試行 2 回・10 分)に任せず、呼び出しの上限を自分で決めるための口。
- * **exe はどちらも渡さない**ので、省略時は SDK の既定のまま(再試行は初回 + 2 回の計3本)であることも固定する。
+ * **旧 exe はどちらも渡さなかった**(#287 で削除。3c1664e まで)ので、省略時は SDK の既定のまま(再試行は初回 + 2 回の計3本)であることも固定する。
  * すべて fetch を差し替え、実 API には出ない。待ちは `retry-after-ms: 1`(SDK が従う非標準ヘッダ)で 1ms に縮める。
  */
 describe("SDK の timeout・maxRetries の口(Issue #193)", () => {

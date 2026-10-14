@@ -6,7 +6,7 @@
  * 実ネットワーク・実DBなしで単体テストできる(bypassCache の付与や、パース失敗時に保存しないことを検証)。
  *
  * Issue #207(#182-A)で `packages/app/src/main/result-import.ts` から core へ移した(#168 と同じ型)。クラウド版(cloud/)が、app の import
- * (core のバレル経由で better-sqlite3 を巻き込む)を経由せずに使うため。app は `result-import.ts` から re-export する(app の呼び出し元・テストは無改変)。
+ * (core のバレル経由で better-sqlite3 を巻き込む)を経由せずに使うため。app は `result-import.ts` から re-export していた(app の呼び出し元・テストは無改変。app は #287 で削除。3c1664e まで)。
  * 移設で変わったのは、`saveResult` の依存が**同期でも非同期でもよい**(戻り値を await する)ことだけ。D1(非同期)の保存を差し込める。
  * **このファイルは better-sqlite3 に依存しない**(`test/ev/native-free-modules.test.ts` が閉包を固定している)。
  */
@@ -130,7 +130,7 @@ export interface ImportResultDeps {
    * そのまま渡す(boss裁定R-7: 呼び出し側〈importRaceResult〉に「undeterminedを空配列に
    * 変換する」等の判断を持たせない。素通しのみ)。
    *
-   * 戻り値は同期(exe の AnalysisStore。better-sqlite3)でも Promise(クラウド版の D1)でもよい(Issue #207。`importRaceResult` が await する)。
+   * 戻り値は同期(旧 exe の AnalysisStore。better-sqlite3。現在は core のテスト用 `test/support/analysis-store.ts`)でも Promise(クラウド版の D1)でもよい(Issue #207。`importRaceResult` が await する)。
    * reject・throw は伝播する(保存に失敗したのに imported を返さない)。
    */
   readonly saveResult: (

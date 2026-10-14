@@ -110,7 +110,7 @@ export interface ModelSelectorOptions {
   readonly lister: ModelLister;
   /** 固定モデル。 */
   readonly fixedModel: string;
-  /** 選ぶ系統(Issue #158)。省略は sonnet(#157 からの挙動。exe はこれを渡さない)。固定モデル(切り替え先)は系統によらず fixedModel。 */
+  /** 選ぶ系統(Issue #158)。省略は sonnet(#157 からの挙動。旧 exe はこれを渡さなかった)。固定モデル(切り替え先)は系統によらず fixedModel。 */
   readonly family?: ModelFamily;
   /** 警告の記録先(一覧取得の失敗・その系統が 0件)。省略時は何も記録しない。 */
   readonly onWarn?: (message: string) => void;
@@ -162,9 +162,9 @@ export interface SdkModelListerOptions {
   readonly apiKey?: string;
   /** fetch の差し替え(テスト用。実 API を呼ばずにリクエストを検証する)。 */
   readonly fetch?: typeof fetch;
-  /** 1リクエストの上限時間(ミリ秒。Issue #193)。省略時は SDK の既定(10 分)のまま(exe は渡さない)。 */
+  /** 1リクエストの上限時間(ミリ秒。Issue #193)。省略時は SDK の既定(10 分)のまま(旧 exe は渡さなかった)。 */
   readonly timeout?: number;
-  /** SDK が内部で行う再試行の回数(Issue #193)。省略時は SDK の既定(2 回)のまま(exe は渡さない)。 */
+  /** SDK が内部で行う再試行の回数(Issue #193)。省略時は SDK の既定(2 回)のまま(旧 exe は渡さなかった)。 */
   readonly maxRetries?: number;
 }
 

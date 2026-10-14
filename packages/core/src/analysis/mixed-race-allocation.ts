@@ -47,7 +47,7 @@ import {
  *    ワイド・三連複には当てはまらない)。本モジュールもこれを踏襲し、頭数不可を混在経路全体の
  *    ゲートにしない。頭数不可のまま混在経路に入った場合、複勝が対象外である旨は
  *    `diagnostics.place`(`kind:"unavailable"`)としてそのまま表現され、表示側
- *    (exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで)。第4段後半)が既存の `placeBetUnavailableMessage(reason)` を
+ *    (旧 exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで)。第4段後半。現在は `view/allocation-proposal-view.ts`)が既存の `placeBetUnavailableMessage(reason)` を
  *    そのまま使って1行を追加する(新しい文言を作らない)。
  * 4. D-2 フォールバック規則(単一定義の原則。3条件のいずれかで既存 `buildRaceAllocation` の
  *    結果をそのまま返す。Issue #117(#24-D3b-2)で馬連〈quinella〉を、Issue #125(#24-E3b)で
@@ -70,7 +70,7 @@ import {
  * throwで止める設計(`combo-bet-allocation.ts:59-66`)。`mixed-candidates.ts` の
  * `buildPlaceCandidates` は `placeOddsMin===null || ev===null` のnullチェックしか行わず、
  * `placeOddsMin<=0`・`ev=NaN`・`umaban`非有限は弾かない(素通りしてAllocationCandidateへ
- * 混入しうる)。呼び出し元(exe の`BatchAnalysisView.tsx`)は render 内 IIFE でこの合成関数を呼ぶが、
+ * 混入しうる)。呼び出し元(旧 exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで))は render 内 IIFE でこの合成関数を呼んでいたが、
  * リポジトリに React error boundary は1つも無い(grep 0件)。したがって本モジュール内で
  * `allocateGeneralBets` の呼び出しを try/catch(内側catch)で保護し、例外を`kind:"invalid"`という
  * 判別可能な状態へ変換する(呼び出し前に`validateCandidates`と同じ数値検証を複製すると
@@ -163,7 +163,7 @@ export interface MixedAllocationSettings extends BetAllocationSettings {
 /**
  * 混在配分が異常な入力により計算不能だったことを表す(AC17)。`message` は開発者向けの
  * 診断情報(`allocateGeneralBets` が投げた例外のメッセージ)であり、ユーザー向け文言の生成は
- * 表示側(exe の`BatchAnalysisView.tsx`)の責務とする(仕様「見送り理由の文言はcoreが持つ」と同じ
+ * 表示側(旧 exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで))の責務とした(仕様「見送り理由の文言はcoreが持つ」と同じ
  * 「文言は呼び出し側で組み立てる」流儀は本モジュールでは採らない。異常系のため専用の一言注記を
  * 表示側で出す)。
  */

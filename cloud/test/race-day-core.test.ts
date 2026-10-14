@@ -181,7 +181,7 @@ describe("朝の取得(ステップ1)と計算(ステップ2)(Issue #177 AC-b5�
     expect(h.core.getBoard().races[0]).toMatchObject({ raceId: RACE_A, status: "done" });
   });
 
-  it("朝の prior は exe 側の golden(LLM なし・配分なし)の rows と同じ prior になる(同じ runAnalysis)", async () => {
+  it("朝の prior は core の golden(LLM なし・配分なし)の rows と同じ prior になる(同じ runAnalysis)", async () => {
     const golden = JSON.parse(
       readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "packages", "core", "test", "golden", "pipeline-golden.json"), "utf-8"),
     ) as { noLlmNoAllocationNoDate: { result: { rows: { umaban: number; prior: number }[] } } };

@@ -1,10 +1,10 @@
 /**
- * 検証画面の表示整形(Issue #219。純関数)。**exe の検証画面(`packages/core/src/view/verify-format.ts`)と同じ出力**にする
- * (率は小数第 1 位のパーセント、金額は 3 桁区切りの円)。exe の renderer は app の閉包(React ほか)で cloud から引けないため、同じ関数をここに持ち、
- * ルートの `scripts/test/cloud-verify-format.test.ts` が exe 版との出力の一致を固定する。
+ * 検証画面の表示整形(Issue #219。純関数)。**core の `packages/core/src/view/verify-format.ts`(旧 exe の検証画面が使った)と同じ出力**にする
+ * (率は小数第 1 位のパーセント、金額は 3 桁区切りの円)。もともと exe の renderer が app の閉包(React ほか)で cloud から引けなかったため、同じ関数をここに持ち、
+ * ルートの `scripts/test/cloud-verify-format.test.ts` が core 版との出力の一致を固定する。
  */
 /**
- * 型は api-verify.ts から引かず、ここで構造的に宣言する(ルートの `scripts/test/` が exe の整形と比べるためにこのファイルを import する。api-verify.ts を引くと、
+ * 型は api-verify.ts から引かず、ここで構造的に宣言する(ルートの `scripts/test/` が core の整形と比べるためにこのファイルを import する。api-verify.ts を引くと、
  * ルートの型検査〈moduleResolution: nodenext〉が cloud/client の拡張子なしの import を解決できず落ちる)。`api-verify.ts` の型はこれを満たす。
  */
 export type ProposedBetType = "place" | "win" | "wide" | "trio" | "quinella" | "exacta" | "trifecta" | "bracketQuinella";
@@ -46,7 +46,7 @@ export function exclusionRows(report: ExclusionCounts): ReadonlyArray<{ readonly
   ];
 }
 
-/** 配分ベースの券種の表示順と名前(exe の検証画面の「内訳」の並び)。 */
+/** 配分ベースの券種の表示順と名前(旧 exe の検証画面の「内訳」の並びに合わせた)。 */
 export const PROPOSED_BET_LABELS: ReadonlyArray<{ readonly type: ProposedBetType; readonly label: string }> = [
   { type: "place", label: "複勝" },
   { type: "win", label: "単勝" },

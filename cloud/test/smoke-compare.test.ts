@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { compareWithFloatTolerance, FLOAT_RELATIVE_TOLERANCE } from "../smoke-compare";
 
 /**
- * Issue #258(smoke E の赤への対応): workerd の runAnalysis の出力を exe 側の golden と比べる許容つき比較。
+ * Issue #258(smoke E の赤への対応): workerd の runAnalysis の出力を core の golden と比べる許容つき比較。
  *
  * 背景: `Math.log`・`Math.exp` は Node(V8 12.4)と workerd で、同じ引数に最後の 1 ビットだけ違う結果を返すことがある
  * (Issue #275 の本文に、当時の実測)。SHA-256 の完全一致は、この差で赤になる。

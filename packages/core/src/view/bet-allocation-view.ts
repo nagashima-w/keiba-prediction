@@ -1,9 +1,10 @@
 /**
- * 馬券配分(機能C-2)の renderer 側表示関数。
+ * 馬券配分(機能C-2)の表示関数。
  *
- * exe の BatchAnalysisView(#287 で削除。3c1664e まで) から利用する。計算本体(`resolvePlaceBetTarget`・`isBetAllocationUnset`・
+ * 現在の利用側は、クラウド版の `cloud/client/result.ts`(`BET_ALLOCATION_UNSET_NOTE`)と `view/allocation-proposal-view.ts`
+ * (`formatComboBetLabel`・`placeBetUnavailableMessage`)。旧 exe では BatchAnalysisView(#287 で削除。3c1664e まで) からも利用した。計算本体(`resolvePlaceBetTarget`・`isBetAllocationUnset`・
  * `buildRaceAllocation`・関連の型)は Issue #57 で `analysis/race-allocation.ts` へ移設した
- * (挙動不変・移動のみ。renderer・main の両方から呼べるようにするため)。本ファイルには
+ * (挙動不変・移動のみ。当時は旧 exe の renderer・main の両方から呼べるようにするため)。本ファイルには
  * 買い目ラベル・合計行・注記文言など、画面表示のためだけの純関数が残る。
  *
  * reasonコード→文言のマップはこのファイルに1箇所だけ置く(頭数の意味論はcoreが知り得ない
@@ -64,17 +65,17 @@ export function formatBetLabel(umaban: number | readonly number[]): string {
  * `formatBetLabel`のハイフン区切り(`"N-M"`)では[13,8]と[8,13]が「8-13」に潰れて見え、
  * 着順の情報が失われる。本関数はexacta・trifectaのときだけ`"N→M"`/`"N→M→L"`(netkeibaの
  * 表記に合わせる)で並びをそのまま出し、それ以外(place/win/wide/quinella/trio)は
- * `formatBetLabel`にそのまま委譲する(表記を変えない。呼び出し元はexe の`BatchAnalysisView.tsx`の
+ * `formatBetLabel`にそのまま委譲する(表記を変えない。呼び出し元は旧 exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで)の
  * 混在配分一覧・`allocation-proposal-view.ts`の`comboLabelOf`)。
  *
  * **Issue #150(#26-E3b・AC-2)で枠連(bracketQuinella)を追加した。** 枠連の`umabans`は**枠番**の組であり
  * 馬番ではない(`AllocationCandidate.umabans`のJSDoc参照)ため、`"枠4-7"`(同枠は`"枠2-2"`)と表記して
- * 馬番の馬連・ワイド(`"4-7"`)と区別する。買い目の表記を出す経路(exe の`BatchAnalysisView.tsx`の常時表示・
+ * 馬番の馬連・ワイド(`"4-7"`)と区別する。買い目の表記を出す経路(旧 exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで)の常時表示・
  * 折りたたみの2箇所と、`allocation-proposal-view.ts`の`comboLabelOf`〈過去分析。`comboKey`を
  * `parseComboOddsKey`で戻した値〉)は、すべて本関数を経由する。
  *
  * `formatBetLabel`自体はここでは変更しない(単勝・複勝の単一馬番表示など、betTypeを
- * 持たない既存呼び出し元〈exe の`BatchAnalysisView.tsx`の単勝候補一覧〉に影響させないため)。
+ * 持たない既存呼び出し元〈旧 exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで)の単勝候補一覧〉に影響させないため)。
  */
 export function formatComboBetLabel(betType: AllocationBetType, umabans: readonly number[]): string {
   if (betType === "exacta" || betType === "trifecta") {
@@ -177,8 +178,8 @@ export function probabilitySumWarning(diagnostics: ProbabilitySumWarningInput): 
  *
  * **機能D-2c第4段(Issue #28)でexportした**: `GeneralBetAllocationResult`(券種混在。
  * `combo-bet-allocation.ts`)も同じ意味の`notDiversified`フィールドを持つため、
- * exe の`mixed-allocation-view.ts`/exe の`BatchAnalysisView.tsx`がこの文言をそのまま再利用できるように
- * する(単一定義の原則。同じ注記文言を2箇所に複製しない)。
+ * 旧 exe の`mixed-allocation-view.ts`/`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで)がこの文言をそのまま再利用できるように
+ * した(単一定義の原則。同じ注記文言を2箇所に複製しない)。
  */
 export const NOT_DIVERSIFIED_NOTE =
   "妙味のある候補が複数いますが、1点のみの配分になっています(分散されていません)。";

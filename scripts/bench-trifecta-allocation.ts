@@ -972,7 +972,7 @@ function runAc5(
   console.log(
     "  ⚠️ Workerプール(#119)の12レース一括見積もり(算術見積もりであり、実際にWorker Poolを" +
       "起動して測ったものではない)。並列数の上限式: max(1, min(hardwareConcurrency−1, 4))" +
-      "(mixed-allocation-worker-pool.tsのcomputeAllocationWorkerPoolCap)。" +
+      "(旧 exe の mixed-allocation-worker-pool.tsのcomputeAllocationWorkerPoolCap。#287 で削除。3c1664e まで)。" +
       "**Issue #136で16頭(AC1)実測から18頭(AC-18)実測へ更新**: AC-18の「+trifecta」条件" +
       "(buildMixedCandidates+buildTrifectaCandidates+allocateGeneralBets、18頭・実オッズ・" +
       "candidateCap=新既定8000)の" +

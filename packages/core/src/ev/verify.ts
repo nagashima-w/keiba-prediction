@@ -241,8 +241,8 @@ export interface VerifyConfig {
    * (`chooseLatestPerRace`)より前**に行う(同一レースの「発走前の clean」と「発走後の suspect」で
    * clean が最新選択に負けて捨てられないように。clean だけを最新選択の対象にする)。
    * 除外した件数は `excludedLookaheadSuspectCount` / `excludedLookaheadUnknownCount` に計上する。
-   * 既定 false(既存の集計を1ビットも変えない)。production では exe の `pipeline-deps.ts`(#287 で削除。3c1664e まで) の
-   * `PRODUCTION_VERIFY_CONFIG` が true にしており、検証画面の集計(`computeVerifyReport`・
+   * 既定 false(既存の集計を1ビットも変えない)。production では、このファイルの `PRODUCTION_VERIFY_CONFIG`
+   * (旧 exe の `pipeline-deps.ts`〈#287 で削除。3c1664e まで〉から Issue #219 で移した)が true にしており、検証画面の集計(`computeVerifyReport`・
    * `computeVerifyReportByPromptVersion`)に効く(Issue #152 B)。
    */
   readonly excludeLookaheadSuspects: boolean;
@@ -263,8 +263,8 @@ export const DEFAULT_VERIFY_CONFIG: VerifyConfig = {
  * 先読みリーク疑い(発走後に分析し、遮断の印が無い行)と、発走の前後を判定できない行を集計から除外する
  * (ユーザー判断。画面に切り替えは設けない)。除外した件数は VerifyReport の2つのカウンタに載り、検証画面が表示する。
  * レース一覧(`computeRaceLedger`)とエクスポートには効かない(合意どおり対象外)。
- * exe(app の `pipeline-deps.ts`。#287 で削除)とクラウド版(`cloud/src/verify-core.ts`)が**同じ定数を共有する**
- * (別々に持つと、片方だけ設定が変わって同じデータで数値が食い違う)。
+ * 旧 exe(app の `pipeline-deps.ts`。#287 で削除。3c1664e まで)とクラウド版が**同じ定数を共有していた**
+ * (別々に持つと、片方だけ設定が変わって同じデータで数値が食い違う)。現在はクラウド版(`cloud/src/verify-core.ts`)が使う。
  */
 export const PRODUCTION_VERIFY_CONFIG: VerifyConfig = {
   ...DEFAULT_VERIFY_CONFIG,
@@ -459,7 +459,7 @@ export interface ProposedBetPopulation {
  * `verify.test.ts` に3本ある(ベース時点で2本。#76自身が「未知券種を含む入力でも成り立つこと」を
  * 確認する3本目を追加した。boss メタレビューR3: この数を断定する行を書くたびに`git show
  * <ベースコミット>:<このファイル>`と比較し、差分自身が数を動かしていないか検算すること)、
- * 混ぜると崩れる (2) exe の`VerifyView.tsx`(#287 で削除。3c1664e まで) は複勝・単勝・ワイド・3連複の4内訳だけを表示しており、
+ * 混ぜると崩れる (2) 当時の検証画面(exe の`VerifyView.tsx`。#287 で削除。3c1664e まで)は複勝・単勝・ワイド・3連複の4内訳だけを表示しており、
  * 混ぜると表示と合計が食い違う (3) `unjudgedCount` のJSDocは「規則U(Issue #71)により」と原因を
  * 名指ししており、混ぜると原因ラベルが誤りになる(#31・#55・#58の誤ラベル欠陥クラスの再生産)。
  */
@@ -489,26 +489,31 @@ export interface ProposedBetUnknownBetType {
  * 賭け金仮定を指すか名前から分からない語」を避けるためのもので、`ProposedBetReport` の内側では
  * 仮定は既に確定している。
  *
- * ★馬連(quinella)はIssue #117(#24-D3b-2)でapp側の配分提案への組み込みが完了し、
- * `quinella`の`betCount`が実際に発生するようになったため、画面(exe の`VerifyView.tsx`)の
+ * 「検証画面」は、現在はクラウド版(`cloud/client/verify-format.ts` の `PROPOSED_BET_LABELS` が8券種の内訳の並びを持つ)。
+ * 旧 exe では `VerifyView.tsx`(#287 で削除。3c1664e まで)で、以下の「画面」はそのときの経緯を含む。
+ *
+ * ★馬連(quinella)はIssue #117(#24-D3b-2)で配分提案への組み込みが完了し、
+ * `quinella`の`betCount`が実際に発生するようになったため、検証画面の
  * 内訳・判定不能の行にもワイドと3連複の間に表示する(#116までは買い目が構造的に0件だったため、
  * #112「馬連 ¥0 0点」の事故と同型を避けるためあえて表示しない設計だった。Issue #114 AC-6)。
  *
- * ★馬単(exacta)はIssue #121・#24-F2で確定払戻の取込・回収率判定に対応したが、配分が馬単の
- * 買い目をまだ作らない(#123・#24-E3bで対応予定)ため、`betCount`は現時点で構造的に常に0になる。
+ * ★馬単(exacta)はIssue #121・#24-F2で確定払戻の取込・回収率判定に対応したが、当時は配分が馬単の
+ * 買い目をまだ作らなかった(#123・#24-E3bで対応予定だった)ため、`betCount`は構造的に常に0だった。
  * quinellaが#112で辿った経緯(買い目0件の間は画面に表示しない)と同じ理由により、
- * exe の`VerifyView.tsx`への表示追加は#123へ申し送る(`exacta`フィールド自体はここ・
- * `computeProposedBetReport`・`overall`合算には既に含める。表示だけを見送る)。
+ * 画面への表示追加は#123へ申し送った(`exacta`フィールド自体はここ・
+ * `computeProposedBetReport`・`overall`合算には最初から含めた。表示だけを見送った)。
+ * その後Issue #125(#24-E3b)で配分が馬単の買い目を作るようになり、`betCount`は実際の買い目の数になった。
  *
- * ★三連単(trifecta)はIssue #131・#25-Fで確定払戻の取込・回収率判定に対応した。配分が三連単の
- * 買い目をまだ作らないため`betCount`は現時点で構造的に常に0になる(exactaと同じ経緯)。
- * exe の`VerifyView.tsx`への表示追加は#132へ申し送る(`trifecta`フィールド自体はここ・
- * `computeProposedBetReport`・`overall`合算には既に含める。表示だけを見送る)。
+ * ★三連単(trifecta)はIssue #131・#25-Fで確定払戻の取込・回収率判定に対応した。当時は配分が三連単の
+ * 買い目をまだ作らなかったため`betCount`は構造的に常に0だった(exactaと同じ経緯)。
+ * 画面への表示追加は#132へ申し送った(`trifecta`フィールド自体はここ・
+ * `computeProposedBetReport`・`overall`合算には最初から含めた。表示だけを見送った)。
+ * その後Issue #139(#25-E3b)で配分が三連単の買い目を作るようになり、`betCount`は実際の買い目の数になった。
  *
  * ★枠連(bracketQuinella)はIssue #145・#26-Fで確定払戻の取込・回収率判定に対応した。#145の時点では
- * 配分が枠連の買い目をまだ作らず(app側の候補・設定は#146以降に分割)`betCount`は構造的に常に0だった
+ * 配分が枠連の買い目をまだ作らず(候補・設定は#146以降に分割)`betCount`は構造的に常に0だった
  * (exacta・trifectaと同じ経緯)。**Issue #150(#26-E3b)で配分が枠連の買い目を作るようになり、
- * exe の`VerifyView.tsx`の内訳・判定不能の行にも表示している。** `bracketQuinella`フィールド自体は
+ * 検証画面の内訳・判定不能の行にも表示している。** `bracketQuinella`フィールド自体は
  * ここ・`computeProposedBetReport`・`overall`合算には#145から含めている。
  * **買い目の`comboKey`は枠番の組(`buildAllocationBetComboKey("bracketQuinella", [4,7])`→"0407"。
  * 同枠は"0101")、払戻側のキーも同じ枠番の組で、的中判定は他の組合せ券種と同じ文字列の完全一致**
@@ -531,25 +536,27 @@ export interface ProposedBetReport {
   /** 3連複の内訳。 */
   readonly trio: ProposedBetTypeSummary;
   /**
-   * 馬連の内訳(Issue #114・#24-F1)。Issue #117(#24-D3b-2)でapp側の配分提案への組み込みが
-   * 完了し買い目が実際に発生するようになったため、画面(exe の`VerifyView.tsx`)にも表示する
+   * 馬連の内訳(Issue #114・#24-F1)。Issue #117(#24-D3b-2)で配分提案への組み込みが
+   * 完了し買い目が実際に発生するようになったため、検証画面にも表示する
    * (このJSDoc冒頭の注意参照)。
    */
   readonly quinella: ProposedBetTypeSummary;
   /**
-   * 馬単の内訳(Issue #121・#24-F2)。配分が馬単の買い目をまだ作らないため`betCount`は
-   * 現時点で常に0(このJSDoc冒頭の注意参照)。画面(exe の`VerifyView.tsx`)への表示は#123で行う。
+   * 馬単の内訳(Issue #121・#24-F2)。#121の時点では配分が馬単の買い目をまだ作らず`betCount`は
+   * 常に0だったが、Issue #125(#24-E3b)で配分が馬単の買い目を作るようになり、`betCount`は実際の
+   * 買い目の数になった(このJSDoc冒頭の注意参照)。画面への表示は#123へ申し送られていた(現在の検証画面は8券種を表示する)。
    */
   readonly exacta: ProposedBetTypeSummary;
   /**
-   * 三連単の内訳(Issue #131・#25-F)。配分が三連単の買い目をまだ作らないため`betCount`は
-   * 現時点で常に0(このJSDoc冒頭の注意参照)。画面(exe の`VerifyView.tsx`)への表示は#132で行う。
+   * 三連単の内訳(Issue #131・#25-F)。#131の時点では配分が三連単の買い目をまだ作らず`betCount`は
+   * 常に0だったが、Issue #139(#25-E3b)で配分が三連単の買い目を作るようになり、`betCount`は実際の
+   * 買い目の数になった(このJSDoc冒頭の注意参照)。画面への表示は#132へ申し送られていた(現在の検証画面は8券種を表示する)。
    */
   readonly trifecta: ProposedBetTypeSummary;
   /**
    * 枠連の内訳(Issue #145・#26-F)。#145の時点では配分が枠連の買い目をまだ作らず`betCount`は
    * 常に0だったが、Issue #150(#26-E3b)で配分が枠連の買い目を作るようになり、`betCount`は実際の
-   * 買い目の数になった。画面(exe の`VerifyView.tsx`)の内訳・判定不能の行にも表示している(#150)。
+   * 買い目の数になった。検証画面の内訳・判定不能の行にも表示している(#150)。
    */
   readonly bracketQuinella: ProposedBetTypeSummary;
   /**
@@ -559,7 +566,7 @@ export interface ProposedBetReport {
    * `overall` には合算しない(`ProposedBetUnknownBetType` のJSDoc参照)。未知券種行が1件も
    * 無い通常時は `{ count: 0, totalStake: 0, betTypes: [] }`。このフィールド自体が省略される
    * ことはない(#71で`unjudgedCount`が core→shared View 型までは配線されながら
-   * exe の`VerifyView.tsx`に一度も表示されず差し戻しになった前例〈型の配線は`af75683`、表示の追加は
+   * exe の`VerifyView.tsx`(#287 で削除。3c1664e まで)に一度も表示されず差し戻しになった前例〈型の配線は`af75683`、表示の追加は
    * 後続の`ab4f448`〉があるため。「型まで配線すれば十分」ではなく、値自体を常在させたうえで
    * 表示配線まで本Issue内で完結させる設計にする。boss メタレビューR4対応)。
    */
@@ -755,7 +762,7 @@ export interface RaceLedgerEntry {
  * このビューには無い。統合リストの目的が「レースIDごとに最新の1件へまとめる」ことそのものであるため)。
  * 並び順は analyses の内部順序(id昇順→latestで絞り込んだ残り)のままで、開催日降順等の表示用の
  * 並び替えは呼び出し側(app層)に委ねる(private buildRaceBreakdownと同じ責務分担)。
- * @param store 分析・結果を読む入口(exe は AnalysisStore、クラウド版は D1 の行から作った実装。Issue #219)
+ * @param store 分析・結果を読む入口(旧 exe は AnalysisStore〈現在は core のテスト用 `test/support/analysis-store.ts`〉、クラウド版は D1 の行から作った実装。Issue #219)
  * @param config verify設定(stakePerBet・placeMaxRank。省略時は既定)
  */
 export function computeRaceLedger(
@@ -802,7 +809,7 @@ interface BinCounter {
 
 /**
  * 保存済み分析と実結果から verifyレポートを算出する。
- * @param store 分析・結果を読む入口(exe は AnalysisStore、クラウド版は D1 の行から作った実装。Issue #219)
+ * @param store 分析・結果を読む入口(旧 exe は AnalysisStore〈現在は core のテスト用 `test/support/analysis-store.ts`〉、クラウド版は D1 の行から作った実装。Issue #219)
  * @param config verify設定(省略時は既定)
  * @param venueKind 開催区分フィルタ(Task#32、省略時は "all"=絞り込みなし)。
  *   "central"/"nar" を指定すると raceId から判定した開催区分が一致する分析のみを集計する
@@ -859,7 +866,7 @@ function raceIdVenueKindSafe(raceId: string): RaceIdVenueKind | null {
  * (=版をまたいだ「最新」判定は行わない。同一版内での重複分析のみ防止する)。
  *
  * 返す配列は版番号の昇順([...String比較])で並べ、版不明(null)は末尾に置く決定的な順序とする。
- * @param store 分析・結果を読む入口(exe は AnalysisStore、クラウド版は D1 の行から作った実装。Issue #219)
+ * @param store 分析・結果を読む入口(旧 exe は AnalysisStore〈現在は core のテスト用 `test/support/analysis-store.ts`〉、クラウド版は D1 の行から作った実装。Issue #219)
  * @param config verify設定(省略時は既定)
  */
 export function computeVerifyReportByPromptVersion(

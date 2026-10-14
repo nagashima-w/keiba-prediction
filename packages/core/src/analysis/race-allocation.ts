@@ -22,7 +22,7 @@ import {
 
 import type { AnalysisRow, OddsStatus } from "./analysis-types.js";
 
-/** 馬券配分の設定3項目(exe の SettingsView(#287 で削除。3c1664e まで)由来。core BetAllocationConfigのUI公開部分)。 */
+/** 馬券配分の設定3項目(設定画面の項目。クラウド版は `cloud/client/settings-form.ts`、旧 exe は SettingsView(#287 で削除。3c1664e まで)。core BetAllocationConfigのUI公開部分)。 */
 export interface BetAllocationSettings {
   readonly bankroll: number;
   readonly perRaceCap: number;

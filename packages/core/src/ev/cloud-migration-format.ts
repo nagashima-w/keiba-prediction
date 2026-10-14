@@ -7,7 +7,7 @@
  *
  * **このファイルは better-sqlite3 にも `node:` にも依存しない**(ブラウザと Worker で動かすため。
  * `test/ev/native-free-modules.test.ts` が閉包まで機械的に固定している。過去に `node:zlib` の混入で
- * renderer の CI が落ちた)。gzip とファイルの読み書きは app の main だけが持つ。
+ * renderer の CI が落ちた)。gzip とファイルの読み書きは、書き出す側の旧 exe の main だけが持っていた(#287 で削除。3c1664e まで)。
  *
  * ## ファイルの構成(1 行 = 1 つの JSON。各行は `\n` で区切る。JSON.stringify は値中の改行を必ずエスケープする)
  * 1. ヘッダ 1 行: `{"type":"header","format":"keiba-cloud-migration","version":1,"exportedAt":…,"appVersion":…}`

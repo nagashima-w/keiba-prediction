@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ScrapeCache } from "../../src/scraper/cache.js";
 
 /**
- * Issue #177(#164-b)・#170 AC-c1: CacheStore の契約を、exe の実装(ScrapeCache。better-sqlite3)に当てる。
+ * Issue #177(#164-b)・#170 AC-c1: CacheStore の契約を、core の実装(ScrapeCache。better-sqlite3。旧 exe が本番で使った)に当てる。
  * 同じ契約(`fixtures/cache-store-contract.json`)を、クラウド版の DoSqlCacheStore(cloud/test/do-cache-store.test.ts)も読む。
  * 両方が同じ期待値に一致することで、2つの実装の鮮度判定(境界・上書き・読み取り側の判定)が食い違わないことを保つ。
  */

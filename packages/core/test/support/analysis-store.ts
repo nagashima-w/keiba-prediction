@@ -56,7 +56,7 @@
  * 開催日(kaisai_date)列(Task#34 レース単位の予実ブレークダウン): analyses に
  * kaisai_date TEXT(nullable、YYYYMMDD)を持つ。検証画面でレース単位に予実を表示する際、
  * 見出しに開催日を出したいが、中央のレースIDは回次・日次のみを埋め込み開催日を復元できない
- * (packages/core/src/scraper/ids.ts のコメント参照)。app 側は分析実行時に選択済みの開催日
+ * (packages/core/src/scraper/ids.ts のコメント参照)。呼び出し側(`analysis/analysis-pipeline.ts` の `runAnalysis`)は分析実行時に選択済みの開催日
  * (kaisaiDate)を保持しているため、それをそのまま保存する経路をこの列で持たせる。
  * 選択済み開催日が渡らなかった場合(kaisaiDateがnull)は、この列もnull(日付不明)として保存する
  * (analysis-pipeline.ts の当日近似日付はUI表示専用の近似値であり、実際の開催日ではないため

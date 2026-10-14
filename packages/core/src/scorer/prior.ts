@@ -411,7 +411,7 @@ export interface BuildPriorRaceInfo {
   /** 今回のレース日(YYYY/MM/DD)。季節分類・休み明け走目の算出に使う。 */
   readonly date: string;
   /**
-   * 今回レースの開催区分(中央/地方)。呼び出し側(app側 analysis-pipeline.ts)は
+   * 今回レースの開催区分(中央/地方)。呼び出し側(`analysis/analysis-pipeline.ts`)は
    * venueKindOfRaceId(raceId) 等で判定した値を必ず明示的に渡すこと(TodayRaceConditions.venueKind
    * と異なり省略不可)。NARでは競馬場適性・コース枠順バイアス・輸送滞在バイアスを対象外にする
    * (詳細は TodayRaceConditions.venueKind のコメント参照)。

@@ -7,7 +7,7 @@ import type { AnalysisRecord, RaceComboPayoutsSaveInput, RaceResultDetail, RaceR
 import type { CourseType } from "../../packages/core/src/scraper/types";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
-import { MAX_ATTEMPTS, RaceDayCore, REPORT_HOLD_KEY, type AnalysisSink, type StepOutcome } from "../src/race-day-core";
+import { MAX_ATTEMPTS, RaceDayCore, REPORT_HOLD_KEY, RETRY_DELAY_MS, type AnalysisSink, type StepOutcome } from "../src/race-day-core";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { fixtureForUrl } from "./pipeline-fixtures";
 import { openNodeSql, type NodeSql } from "./node-sql";
@@ -224,6 +224,8 @@ interface HarnessOptions {
   readonly resultStore?: boolean;
   /** false なら日報の依頼先を渡さない。 */
   readonly requestReport?: boolean;
+  /** true なら日報の依頼先が常に例外を投げる(依頼の失敗の模擬)。呼び出しの開催日は `reports` に残る。 */
+  readonly failReport?: boolean;
 }
 function harness(options: HarnessOptions = {}): Harness {
   const sql = openNodeSql();
@@ -254,6 +256,9 @@ function harness(options: HarnessOptions = {}): Harness {
           requestReport: async (kaisaiDate: string) => {
             reports.push(kaisaiDate);
             reportTimes.push(clock.now);
+            if (options.failReport === true) {
+              throw new Error("依頼先の失敗(本文は警告に出さない)SECRET-REPORT");
+            }
           },
         }),
   });
@@ -664,5 +669,121 @@ describe("AC5: 既存の挙動", () => {
     await driveUntil(h, jst("11:30"));
     expect(h.reports).toEqual([DATE]);
     expect(h.reportTimes).toEqual([jst("10:50")]); // 下限(10:35)ではなく、結果がそろった時点
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/** Issue #298: 下限を過ぎたあとの判定の印(meta)。値は判定したときの下限(`String(下限)`)。 */
+const JUDGED_KEY = "report_hold_judged";
+const metaValue = (h: Harness, key: string): string | null => {
+  const rows = h.sql.exec("SELECT value FROM race_day_meta WHERE key = ?", key).toArray() as { value: string }[];
+  return rows[0]?.value ?? null;
+};
+const taskAttempts = (h: Harness, raceId: string): number | undefined =>
+  (h.sql.exec("SELECT attempts FROM race_day_tasks WHERE race_id = ? AND mode = 'morning'", raceId).toArray() as { attempts: number }[])[0]?.attempts;
+/** 手動の 10R だけを分析し、10R の結果の取り込み(19:55)まで進めた状態(アラームは下限の 20:50 だけ)。 */
+async function onlyTenAnalyzed(h: Harness): Promise<void> {
+  await planned(h);
+  await manualPreRace(h, jst("19:30"), jst("19:39"), kawasaki(10));
+  await driveUntil(h, jst("19:59"));
+  expect(resultRowOf(h, kawasaki(10))!.state).toBe("imported"); // 前提: 10R の結果は済んだ
+  expect(h.reports).toEqual([]); // 前提: 下限の前なので未依頼
+  expect(h.alarm.at).toBe(KAWASAKI_LAST); // 前提: 他に起きる理由が無い(下限のアラームだけ)
+}
+/** 下限の時刻に、結果の行を積まない手動の朝(morning)のタスクを予約する(下限の起床が、日報を判定しない仕事に消費される状況)。 */
+async function scheduleMorningAtHold(h: Harness): Promise<void> {
+  h.clock.now = KAWASAKI_LAST;
+  h.gate.analysis = true;
+  await h.core.schedule({ raceId: "202603020211", kaisaiDate: DATE, mode: "morning" });
+}
+
+describe("Issue #298 AC1: 下限の起床が別の仕事に消費されても、日報の判定の機会が来る", () => {
+  it("下限の時刻に、結果の行を積まない仕事(朝のタスク)が重なっても、仕事が終わったあと短い遅れで依頼される(掃除のアラームを待たない)", async () => {
+    const h = harness();
+    await onlyTenAnalyzed(h);
+    expect(metaValue(h, JUDGED_KEY)).toBeNull(); // 前提: 下限の前の判定(10R の結果の取り込み後)は印を付けない
+    await scheduleMorningAtHold(h);
+    const labels = await driveUntil(h, KAWASAKI_LAST + 2 * MIN);
+    expect(labels.slice(0, 2)).toEqual(["202603020211:morning:fetch:ok", "202603020211:morning:compute:ok"]); // 前提: 朝のタスクが 2 ステップとも走った
+    expect(h.sql.exec("SELECT COUNT(*) AS n FROM race_day_result WHERE race_id = ?", "202603020211").toArray()).toEqual([{ n: 0 }]); // 前提: 朝は結果の行を積まない
+    expect(h.reports).toEqual([DATE]);
+    expect(h.reportTimes[0]! - KAWASAKI_LAST).toBeLessThan(MIN); // 短い遅れ(掃除のアラームは約 6 時間後)
+    expect(metaValue(h, JUDGED_KEY)).toBe(String(KAWASAKI_LAST)); // 印は判定したときの下限
+    await driveUntil(h, jst("23:59"));
+    expect(h.reports).toEqual([DATE]); // 1 回だけ
+  });
+
+  it("下限が後から伸びたら(別の開催を分析した)、新しい下限を過ぎたあとにもう一度判定の機会が来る(印は下限の値で照合する)", async () => {
+    const h = harness({ narRows: [...KAWASAKI_ROWS, nar(ooi(12), "大井", 12, "21:30")], failReport: true });
+    await onlyTenAnalyzed(h);
+    await scheduleMorningAtHold(h);
+    await driveUntil(h, KAWASAKI_LAST + 2 * MIN);
+    expect(metaValue(h, JUDGED_KEY)).toBe(String(KAWASAKI_LAST)); // 前提: 20:50 の下限で判定済み(依頼は失敗した。失敗する構成なので、依頼済みの印で候補が消えない)
+    expect(h.reports).toEqual([DATE]);
+    await manualPreRace(h, jst("21:00"), jst("21:01"), ooi(12)); // 大井 12R を分析 → 下限が 21:30 に伸びる
+    expect(holdMeta(h)).toMatchObject({ [OOI_HEAD]: jst("21:30") }); // 前提
+    expect(metaValue(h, JUDGED_KEY)).toBe(String(KAWASAKI_LAST)); // 前提: 印はまだ古い下限のまま(新しい下限は未判定)
+    await driveUntil(h, jst("21:29"));
+    expect(metaValue(h, JUDGED_KEY)).toBe(String(KAWASAKI_LAST)); // 新しい下限の前には判定しない(印は古いまま)
+    await driveUntil(h, jst("21:31"));
+    expect(metaValue(h, JUDGED_KEY)).toBe(String(jst("21:30"))); // 新しい下限のアラームで起きて、判定した(印が新しい下限に変わった)
+    expect(h.reports).toEqual([DATE]); // 大井 12R の結果が待ち(21:45 から)なので静かでなく、依頼はしていない
+  });
+});
+
+describe("Issue #298 AC2: 即時のループを作らない", () => {
+  /** 下限(を過ぎた時点)から `until` までの起床の回数と、最後に張られたアラームを返す。時計は進めず、アラームの時刻まで進める(tick と同じ)。 */
+  async function wakesUntil(h: Harness, until: number): Promise<number> {
+    return (await driveUntil(h, until)).length;
+  }
+
+  it("判定の結果が「静かでない」(分析したレースの結果が待ち)でも、起床は有界で、アラームは now に張られ続けない", async () => {
+    const h = harness();
+    await onlyTenAnalyzed(h);
+    await manualPreRace(h, jst("20:45"), jst("20:49"), kawasaki(12)); // 12R を分析 → 結果の取り込みは 21:05 から
+    expect(resultRowOf(h, kawasaki(12))!.state).toBe("queued"); // 前提: 待ちの結果がある(静かでない)
+    await scheduleMorningAtHold(h);
+    const wakes = await wakesUntil(h, KAWASAKI_LAST + 2 * MIN);
+    expect(h.reports).toEqual([]); // 前提: 判定の結果は「静かでない」
+    expect(metaValue(h, JUDGED_KEY)).toBe(String(KAWASAKI_LAST)); // 判定は行われた(印が付いた)
+    expect(wakes).toBeLessThanOrEqual(3); // 朝の 2 ステップ + 判定の起床 1 回
+    expect(h.alarm.at).not.toBeNull();
+    expect(h.alarm.at!).toBeGreaterThan(h.clock.now); // 以後のアラームは now ではない(結果の取り込みの 21:05 など)
+  });
+
+  it("依頼が失敗し続けても、起床は有界で、アラームは now に張られ続けない(失敗の警告は固定文・本文なし。次の起床で再び依頼する既存の振る舞いは変わらない)", async () => {
+    const h = harness({ failReport: true });
+    await onlyTenAnalyzed(h);
+    await scheduleMorningAtHold(h);
+    const wakes = await wakesUntil(h, KAWASAKI_LAST + 2 * MIN);
+    expect(wakes).toBeLessThanOrEqual(3); // 朝の 2 ステップ + 判定の起床 1 回
+    expect(h.reports).toEqual([DATE]); // 判定の機会で 1 回依頼され、失敗した
+    expect(metaValue(h, "report_requested")).toBeNull(); // 失敗なので依頼済みの印は書かない
+    const failed = h.warnings.filter((w) => w.includes("日報の作成の依頼に失敗しました"));
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).not.toContain("SECRET-REPORT");
+    expect(h.alarm.at).not.toBeNull();
+    expect(h.alarm.at!).toBeGreaterThan(h.clock.now); // 掃除のアラーム(約 6 時間後)。now ではない
+    // 次の起床(掃除専用のアラームなど)では、従来どおり再び依頼する。
+    h.clock.now = jst("21:00");
+    await h.core.runNextStep();
+    expect(h.reports).toEqual([DATE, DATE]);
+  });
+
+  it("再試行待ちのタスクだけが残っているあいだは、未判定でも now を張らない(タスクの再試行の間隔を守る。タスクの分岐は印を付けないので、守らないと撃ち直しが間隔なしで続く)", async () => {
+    const h = harness();
+    await onlyTenAnalyzed(h);
+    await scheduleMorningAtHold(h);
+    h.gate.fetchRaw = async () => {
+      throw new Error("通信の失敗(非致命)");
+    };
+    await tick(h); // 朝の取得が 1 回失敗 → 再試行待ち
+    expect(taskStatus(h, "202603020211")).toBeUndefined(); // 前提: pre_race の行ではない
+    expect(taskAttempts(h, "202603020211")).toBe(1); // 前提: 1 回試行して失敗した
+    expect((h.sql.exec("SELECT status FROM race_day_tasks WHERE race_id = ? AND mode = 'morning'", "202603020211").toArray() as { status: string }[])[0]!.status).toBe("queued"); // 前提: 再試行待ち
+    expect(metaValue(h, JUDGED_KEY)).toBeNull(); // 前提: 下限を過ぎて未判定(タスクの分岐は判定しない)
+    expect(h.clock.now).toBeGreaterThanOrEqual(KAWASAKI_LAST); // 前提: 下限は過ぎている
+    expect(h.alarm.at).toBe(h.clock.now + RETRY_DELAY_MS); // now ではなく、再試行の間隔の後
   });
 });

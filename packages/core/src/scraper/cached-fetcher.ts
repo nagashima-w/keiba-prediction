@@ -36,7 +36,7 @@ export interface ScrapeCacheGetOptions {
  * 取得結果の保存先(キャッシュストア)の最小インターフェース(Issue #168・#163-a)。
  *
  * `get`・`set` の戻り値は**値でも Promise でもよい**(`CachedFetcher` が `await` で受ける)。これにより、
- * exe の同期実装(`ScrapeCache`。better-sqlite3)をそのまま使いながら、クラウド版(Cloudflare の Durable Object の
+ * core の同期実装(`ScrapeCache`。better-sqlite3。旧 exe が本番で使った)をそのまま使いながら、クラウド版(Cloudflare の Durable Object の
  * ストレージ等。#170)は非同期の実装を差し込める。鮮度判定(`maxAgeMs`)は実装(ストア)の責務で、
  * 「保存からの経過が `maxAgeMs` を**超えたら**ミス」(`ScrapeCache.get` と同じ規則)に揃えること。
  */

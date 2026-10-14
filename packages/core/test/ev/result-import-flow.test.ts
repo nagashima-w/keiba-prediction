@@ -765,7 +765,7 @@ describe("組合せ払戻(枠連、Issue #145・#26-F)の取込", () => {
 });
 
 describe("型: core の ImportResultOutcome と analysis-types の ImportResultOutcome は同じ形(旧 result-import-reexport.test.ts から移した)", () => {
-  it("型: core の ImportResultOutcome と shared の ImportResultOutcome は同じ形", () => {
+  it("型: core の ImportResultOutcome と analysis-types の ImportResultOutcome は同じ形", () => {
     expectTypeOf<ImportResultOutcome>().toEqualTypeOf<SharedImportResultOutcome>();
   });
 });

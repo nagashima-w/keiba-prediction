@@ -248,9 +248,10 @@ export function summarizeSameDayTrend(
 
 /**
  * collectSameDayTrend の lookup が返す、当日傾向の集計に必要な最小限のレース結果詳細
- * (構造的最小型)。ev/analysis-store.ts の RaceResultDetail はこの形を満たすため、
- * 呼び出し側(exe の app/pipeline-deps.ts(#287 で削除。3c1664e まで))は実際の getRaceResultDetail をそのまま lookup として
- * 注入できる(analyzer層からev層への実importはせず、循環依存を避ける設計)。
+ * (構造的最小型)。ev/analysis-store-types.ts の RaceResultDetail はこの形を満たすため、
+ * 呼び出し側は実際の getRaceResultDetail をそのまま lookup として注入できる(旧 exe の app/pipeline-deps.ts〈#287 で削除。3c1664e まで〉はそうしていた。
+ * クラウド版は `analysis/analysis-pipeline.ts` が、D1 から読んだバッチ結果の Map を同期の lookup として渡す)。
+ * analyzer層からev層への実importはせず、循環依存を避ける設計。
  */
 export interface SameDayTrendRaceDetailLike {
   /** レース単位の面(芝/ダ/障)。未取得・未保存(面テーブルに行が無い)は null。 */

@@ -5,7 +5,7 @@
  * `rawResponse`・馬の `contributions`・raceSnapshot の全体(騎手・調教師・オッズ・組合せオッズなど)・追加指示・戦績の基準日。
  * (単勝オッズ〈馬ごとの `winOdds` だけ〉とオッズの状態〈`race.oddsStatus`〉は Issue #247 で返すようにした。馬ごとの勝率・想定単勝オッズも同じ Issue で足した〈D1 の補正後の3着内率から計算〉。
  * 複勝オッズの下限・上限〈馬ごとの `actualPlaceOddsMin`・`actualPlaceOddsMax`〉と、想定複勝オッズ〈`fairPlaceOdds`〉・想定の基準〈`race.placeBasis`〉は Issue #253 で足した。組合せオッズは返さない。)
- * (配分の `fallbackReason`・`betUnit` は Issue #185 で返すようにした。exe の `buildAllocationProposalView` に渡すと、これが無いとフォールバックの注記が消え、`cap-too-small` が「単位額が記録されていません」と誤って表示されるため)。
+ * (配分の `fallbackReason`・`betUnit` は Issue #185 で返すようにした。core の `buildAllocationProposalView` に渡すと、これが無いとフォールバックの注記が消え、`cap-too-small` が「単位額が記録されていません」と誤って表示されるため)。
  * 馬名・レース名・天候などは raceSnapshot(R2 の詳細。`detail` が `present` のときだけ入る)から、場名・R は raceId から導く。
  * **`detail` が present でないとき(柵に達した・R2 に無い・詳細なし)は、スナップショットを使わず**(馬名は null)、同じキーの形で返す。
  *

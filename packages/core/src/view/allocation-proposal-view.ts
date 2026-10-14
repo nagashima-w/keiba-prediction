@@ -2,10 +2,10 @@
  * allocation-proposal-view — 検証タブ「レース一覧」の各レースに「配分提案(分析時点)」を
  * 表示するための純関数モジュール(Issue #55)。
  *
- * exe の`VerifyView.tsx`(#287 で削除。3c1664e まで) には本機能の `route`/`skipReasonCode` 分岐と文言リテラルを一切置かない
- * (boss着手前ゲート・設計制約)。`buildAllocationProposalView` が保存済み配分
+ * 旧 exe の`VerifyView.tsx`(#287 で削除。3c1664e まで) には本機能の `route`/`skipReasonCode` 分岐と文言リテラルを一切置かなかった
+ * (boss着手前ゲート・設計制約。クラウド版の画面〈`cloud/client/result.ts`〉もこの関数を使う。`cloud/client/api-analysis.ts` はこの関数を呼ばず、サーバの応答を入力型 `StoredAllocationView` に写す)。`buildAllocationProposalView` が保存済み配分
  * (`StoredAllocationView`。core `AnalysisStore.getStoredAllocation` の写し)を
- * 表示状態の判別共用体へ変換し、exe の`VerifyView.tsx` は返ってきた配列を `.map` するだけにする。
+ * 表示状態の判別共用体へ変換し、画面側(旧 exe の`VerifyView.tsx`)は返ってきた配列を `.map` するだけにした。
  *
  * ## 表示範囲(PM決定)
  * 提案した買い目・金額・分析時点のオッズ/EV・見送り理由・実効設定のみ。的中・払戻・回収率は
@@ -236,19 +236,19 @@ export const FALLBACK_REASON_UNKNOWN_NOTE =
  * 利用者から見える誤り〈生の"win"がUIに表示される〉になっていた。本caseの追加で解消)。
  *
  * `"quinella"`(馬連)はIssue #117(#24-D3b-2)でcaseを追加した(#112時点では
- * `AllocationBetType`に加わっていたがapp側候補ビルダーが未接続だったため、
+ * `AllocationBetType`に加わっていたが候補ビルダー(`analysis/mixed-candidates.ts`)が未接続だったため、
  * `default`分岐で生文字列`"quinella"`をそのまま返していた。#117で`resolveMixedBetTypes`
  * が実際に馬連を配分対象に含めるようになり`allocation-record.ts`が`bet_type="quinella"`行を
  * 保存するようになったため、winのときと同じ理由で本caseを追加した)。
  *
  * `"exacta"`(馬単)はIssue #125(#24-E3b)でcaseを追加した(#120時点では`AllocationBetType`に
- * 加わっていたがapp側候補ビルダーが未接続だったため、`default`分岐で生文字列`"exacta"`を
+ * 加わっていたが候補ビルダー(`analysis/mixed-candidates.ts`)が未接続だったため、`default`分岐で生文字列`"exacta"`を
  * そのまま返していた。#125で`resolveMixedBetTypes`が実際に馬単を配分対象に含めるように
  * なり`allocation-record.ts`が`bet_type="exacta"`行を保存するようになったため、
  * quinellaのときと同じ理由で本caseを追加した)。
  *
  * `"trifecta"`(三連単)はIssue #139(#25-E3b)でcaseを追加した(#128時点では`AllocationBetType`に
- * 加わっていたがapp側候補ビルダーが未接続だったため、`default`分岐で生文字列`"trifecta"`を
+ * 加わっていたが候補ビルダー(`analysis/mixed-candidates.ts`)が未接続だったため、`default`分岐で生文字列`"trifecta"`を
  * そのまま返していた。#139で`resolveMixedBetTypes`が実際に三連単を配分対象に含めるように
  * なり`allocation-record.ts`が`bet_type="trifecta"`行を保存するようになったため、
  * exactaのときと同じ理由で本caseを追加した)。
@@ -286,7 +286,7 @@ function betTypeLabel(betType: string): string {
  * 既存の `oddsStatusNote`(format.ts)は流用しない: (i) `"result"`(確定)で `null` を返す設計
  * (実効設定は12項目すべてに値が要るため使えない)、(ii) 文言が実行中のラン向け(「発売後に
  * 再分析推奨」)で過去分析の再表示には不適切、という用途の違いによる(`oddsStatusNote` 自体は
- * 改変しない。exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで) が依存しているため)。
+ * 改変しない。旧 exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで) が依存していた。現在は `view/format.ts` の定義とそのテスト `test/view/format.test.ts` が固定している)。
  */
 function oddsStatusLabelForPastAnalysis(oddsStatus: string): string {
   switch (oddsStatus) {

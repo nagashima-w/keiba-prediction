@@ -21,7 +21,7 @@
  * 内部専用モジュール: `package.json` の `exports` には出さない(公開APIを増やさない。
  * boss着手前ゲート決定10)。bet-allocation.ts の公開契約(resolveEffectivePerRaceCapの
  * 公開場所を含む)は本抽出の前後で一切変えない。`bet-allocation.ts` は本ファイルから
- * `resolveEffectivePerRaceCap` を再exportし、既存の import 元(exe の SettingsView.tsx(#287 で削除。3c1664e まで)等)を維持する。
+ * `resolveEffectivePerRaceCap` を再exportし、既存の import 元(旧 exe の SettingsView.tsx(#287 で削除。3c1664e まで)等。現在は `test/ev/bet-allocation.test.ts`)を維持する。
  *
  * 挙動の等価性: 本ファイルへの抽出は「1ビットも挙動を変えないリファクタ」として行った。
  * 証拠は既存 `packages/core/test/ev/bet-allocation.test.ts` の80件が無改変のまま全件パスすること
@@ -93,7 +93,7 @@ export function resolveKellyFraction(kellyFraction: number): number {
 }
 
 /**
- * 1レース上限を実効値へ解決する(公開関数。exe の SettingsViewの「実効上限」ライブプレビューが使う)。
+ * 1レース上限を実効値へ解決する(公開関数。旧 exe の SettingsViewの「実効上限」ライブプレビューが使っていた(#287 で削除。3c1664e まで))。
  * 非有限(NaN/Infinity)・0以下は0を、そうでなければbetUnitの倍数に切り捨てた値を返す。
  * betUnitはこの関数の外で既に resolveBetUnit 済みの値が渡される想定だが、公開APIとして
  * 任意の呼び出し元から異常なbetUnitを渡された場合の防御として、内部でも resolveBetUnit を通す

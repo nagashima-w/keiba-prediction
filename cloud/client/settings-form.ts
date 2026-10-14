@@ -34,7 +34,7 @@ export type SettingsDraft = Readonly<Record<FieldKey, DraftValue>>;
 export type FieldErrors = Readonly<Partial<Record<FieldKey, string>>>;
 export type FieldKind = "text" | "checkbox" | "select" | "textarea";
 
-/** 画面の項目の並び(exe の設定画面の並び。発走何分前は cloud 専用なので末尾)。 */
+/** 画面の項目の並び(旧 exe の設定画面の並び。発走何分前は cloud 専用なので末尾)。 */
 export const FIELD_ORDER: readonly FieldKey[] = [
   "evThreshold",
   "includeComboOdds",
@@ -53,7 +53,7 @@ export const FIELD_ORDER: readonly FieldKey[] = [
   "preRaceOffsetMinutes",
 ];
 
-/** スコアリングの重み13項目の並び(Issue #218。対応表 `SCORING_WEIGHT_FIELDS` の並び = exe の設定画面の並び: バイアス7 → 基礎6)。画面では `fields` とは別の節に出す。 */
+/** スコアリングの重み13項目の並び(Issue #218。対応表 `SCORING_WEIGHT_FIELDS` の並び = 旧 exe の設定画面の並び: バイアス7 → 基礎6)。画面では `fields` とは別の節に出す。 */
 export const WEIGHT_FIELD_ORDER: readonly FieldKey[] = SCORING_WEIGHT_FIELDS.map((f) => f.field);
 
 const BOOLEAN_KEYS: ReadonlySet<FieldKey> = new Set(CLOUD_SETTINGS_KEYS.filter((k) => typeof CLOUD_SETTINGS_RULES[k].fallback === "boolean"));
@@ -291,7 +291,7 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
     help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。変更は、毎晩 21:00(日本時間)に行う翌日分の事前分析の計画から反映されます。その時刻より前に保存した変更は、翌日の分から効きます。すでに計画した日の分は変わりません。`,
     inputmode: "numeric",
   },
-  // スコアリングの重み13項目(Issue #218)。ラベルは exe の共有定数。
+  // スコアリングの重み13項目(Issue #218)。ラベルは core の共有定数(`app-settings.ts`。旧 exe と共有していた)。
   ...(Object.fromEntries(
     SCORING_WEIGHT_FIELDS.map((f): [string, FieldSpec] => [
       f.field,
@@ -311,7 +311,7 @@ const PREVIEW_REFRESH = "入力中の内容を反映";
 
 /**
  * プレビューの注記(画面に出る文なので、Issue 番号は書かない)。exe の設定画面(`SettingsView.tsx`)の注記を踏襲し、cloud の実際の挙動に合わせた:
- *  - 追加指示・クリップ幅は、exe のように入力の即時反映ではなく、「入力中の内容を反映」を押した時点の入力欄の内容で作る(入力のたびには再描画しない設計。`app.ts`)
+ *  - 追加指示・クリップ幅は、旧 exe のように入力の即時反映ではなく、「入力中の内容を反映」を押した時点の入力欄の内容で作る(入力のたびには再描画しない設計。`app.ts`)
  *  - 実際の分析に使われるのは保存済みの内容(保存後、次に実行する発走前の分析から)
  *  - **同日の傾向は、取り込み済みの前のレースが同じ場・同じ面で2つ以上あるときだけ、実際の分析でも送る**(Issue #209: `race-day-core.ts` が D1 の結果から当日傾向を作る)。
  *    効くのは実質、中央のレース(地方の結果ページには通過順の列が無く、脚質傾向が「データ不足」になって傾向ごと送られない)。「発走の何分前に評価するか」が大きいと、前のレースの結果が間に合わず入らない。

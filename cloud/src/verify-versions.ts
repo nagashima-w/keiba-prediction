@@ -1,8 +1,8 @@
 /**
  * 検証のプロンプト版別比較の射影(Issue #220〈web の検証画面(2)〉)。**`cloudflare:workers` を import しない**(Node でテストできる)。
  *
- * core の `computeVerifyReportByPromptVersion`(exe と同じ関数・同じ `PRODUCTION_VERIFY_CONFIG`)は版ごとに**完全な `VerifyReport`**(約 7KB。配分ベースの 8 券種・除外の内訳・印別などを含む)を返すが、
- * 画面(exe の版別の表と版別キャリブレーション)が使うのは次の項目だけ: 版・追加指示・集計件数・累積回収率の 4 値・キャリブレーションの帯と帯ごとの過信バイアス。
+ * core の `computeVerifyReportByPromptVersion`(旧 exe と同じ関数・同じ `PRODUCTION_VERIFY_CONFIG`)は版ごとに**完全な `VerifyReport`**(約 7KB。配分ベースの 8 券種・除外の内訳・印別などを含む)を返すが、
+ * 画面(旧 exe の版別の表と版別キャリブレーション)が使っていたのは次の項目だけ: 版・追加指示・集計件数・累積回収率の 4 値・キャリブレーションの帯と帯ごとの過信バイアス。
  * Issue #271 で、**補正前〈統計モデル〉で分けた対応表**と**補正前・補正後の Brier**(`quality`)を足した(統計モデルを変えた前後を、版ごとに比べる)。
  * 版の数に比例する kv の値と API の応答を小さく保つため、**この項目だけを残して保存・配信する**(`summarizePromptVersions`)。完全な版別レポートは持たない。
  *
@@ -51,7 +51,7 @@ export function summarizePromptVersions(reports: readonly PromptVersionVerifyRep
   }));
 }
 
-/** 版別比較を計算して射影する(設定は exe の検証画面と同じ `PRODUCTION_VERIFY_CONFIG`)。 */
+/** 版別比較を計算して射影する(設定は旧 exe の検証画面と同じ `PRODUCTION_VERIFY_CONFIG`)。 */
 export function computePromptVersionSummaries(source: VerifyDataSource): PromptVersionSummary[] {
   return summarizePromptVersions(computeVerifyReportByPromptVersion(source, PRODUCTION_VERIFY_CONFIG));
 }

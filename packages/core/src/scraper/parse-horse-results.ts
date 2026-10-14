@@ -40,7 +40,7 @@
  * `numberOrNull`と`toOddsNumber`の契約差(桁区切りカンマ・指数表記・符号)がこのフィクスチャ
  * 集合には現れていない。消費側も実測: `scraper/parse-horse-results.ts` が返す
  * `HorseRaceResult.odds` を読む `scorer/*.ts`・`derive-features.ts`・`prior.ts`・
- * `snapshot-filter.ts` はいずれも参照0件(grep実測)であり、app側の永続化・表示にも
+ * `snapshot-filter.ts` はいずれも参照0件(grep実測)であり、当時の app 側(exe)の永続化・表示にも
  * 現れない。
  */
 

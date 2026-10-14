@@ -1,19 +1,18 @@
 /**
- * 分析パイプライン(main プロセス)。
+ * 分析パイプライン(`runAnalysis`。クラウド版は `cloud/src/race-day-core.ts` から呼ぶ。旧 exe では main プロセスで動かした)。
  *
  * 1レース分の分析を次の順で実行し、途中経過を進捗コールバックで通知する:
  *   スクレイピング(scrapeRace) → 戦績の先読みリーク遮断(Issue #39。自レース・施行日以降の走を除く)
  *   → スコアリング(buildPriorInput × 全頭 → computeFieldPriors)
  *   → LLM分析(analyzeRace。未設定ならスキップし prior を採用) → EV計算(computeRaceEv)
- *   → 保存(AnalysisStore.saveAnalysis) → 結果を返す
+ *   → 保存(deps.saveAnalysis。クラウド版は D1 への保存) → 結果を返す
  *
  * テスト容易性の設計:
- * - 実IO(scrapeRace のフェッチャ・LLM・SQLite)は AnalysisPipelineDeps として関数注入する。
- *   本番配線(fetcher/store/llm から deps を組む)は exe の pipeline-deps.ts に分離し、この runAnalysis 自体は
+ * - 実IO(scrapeRace のフェッチャ・LLM・保存先)は AnalysisPipelineDeps として関数注入する。
+ *   本番配線(fetcher/store/llm から deps を組む)は呼び出し側(クラウド版は cloud/src/race-day-core.ts。旧 exe では pipeline-deps.ts(#287 で削除。3c1664e まで))に分離し、この runAnalysis 自体は
  *   注入されたスタブだけで完結してユニットテストできる(実ネットワーク・実APIのテストは書かない)。
- * - core は @keiba/core バレルから import する。scraper/ev(better-sqlite3 等のネイティブ依存)を
- *   正当に使うため、main バンドルにネイティブ依存が入るのはこのファイルからが起点となる
- *   (bundle.test.ts は「external 指定の維持」を検証する方針へ更新済み)。
+ * - core の名前は、バレル(better-sqlite3 を巻き込み、クラウド版のバンドルが失敗する)ではなく、狭い入口
+ *   `../pipeline.js` から import する(経緯は `pipeline.ts` のヘッダ。閉包は `cloud/test/import-guard.test.ts` が固定する)。
  *
  * 推定EV(Task#25): 発売前(race.odds.oddsStatus === "yoso")は複勝オッズが常に空
  * (scraper/parse-odds.ts・parse-nar-odds.ts の仕様により odds.place = {})になるため、
@@ -118,7 +117,7 @@ export interface AnalysisPipelineDeps {
     | ((input: BuildPromptInput) => Promise<AnalyzeRaceResult>)
     | null;
   /**
-   * 分析結果の保存(exe は AnalysisStore.saveAnalysis〈同期。採番IDを返す〉、クラウド版は D1 への保存〈非同期〉)。
+   * 分析結果の保存(旧 exe は AnalysisStore.saveAnalysis〈同期。採番IDを返す〉(#287 で削除。3c1664e まで)、クラウド版は D1 への保存〈非同期〉)。
    * 戻り値は runAnalysis では使わないので `unknown`。Promise が返れば `await` して完了を待ち、reject は runAnalysis の
    * reject として伝える(Issue #176。同期の throw は従来どおり)。
    */
@@ -127,7 +126,7 @@ export interface AnalysisPipelineDeps {
    * 配分提案(Issue #59)を計算するための設定(10項目。`evThreshold`を含まない——EV閾値は
    * `evConfig ?? DEFAULT_EV_CONFIG`から導出し二重ソースを作らない。#59 3節)。
    * `null`は「この呼び出しでは配分計算をしない」という明示的な選択を表す(required-nullable。
-   * optionalにしないことで、構築側〈exe の pipeline-deps.ts〉に選択を強制する。#59着手前ゲート)。
+   * optionalにしないことで、構築側〈クラウド版は cloud/src/race-day-core.ts。旧 exe では pipeline-deps.ts(#287 で削除。3c1664e まで)〉に選択を強制する。#59着手前ゲート)。
    * 非nullのときのみ `AnalysisRecord.allocation` を計算して積む(nullなら行を書かない=
    * 旧分析と区別できない「未到達」のまま。#59 AC4)。
    */
@@ -151,7 +150,7 @@ export interface AnalysisPipelineDeps {
    * この値は modelUsed が無いとき(応答を得られなかった場合・旧モック)の代用にだけ使う。
    * LLM使用時(deps.analyze!==null)のみ保存レコードの model 列に記録する。LLMスキップ時は
    * この値が設定されていても保存レコードの model は null にする(偽値混入を避けるため。
-   * 呼び出し側〈exe の pipeline-deps.ts〉は useLlm===true のときだけこの値を注入する想定)。
+   * 旧 exe の pipeline-deps.ts(#287 で削除。3c1664e まで)は useLlm===true のときだけこの値を注入する想定だった。クラウド版の cloud/src は注入していない)。
    */
   readonly modelName?: string;
   /**
@@ -166,15 +165,15 @@ export interface AnalysisPipelineDeps {
    * 省略時・不正値は対照("default"、±10%)へフォールバックする(core resolveClipVariant に委譲)。
    * この値を BuildPromptInput.clipVariant としてそのまま buildPrompt へ渡し(文面の許容幅表記に反映)、
    * 保存する promptVersion もこの値から解決した ClipVariant.promptVersion を使う(単一ソース。D-3)。
-   * 呼び出し側(exe の main/pipeline-deps.ts(#287 で削除。3c1664e まで))は、parseAnalyzerResponse へ渡す
+   * 呼び出し側(クラウド版は cloud/src/race-day-core.ts。旧 exe では main/pipeline-deps.ts(#287 で削除。3c1664e まで))は、parseAnalyzerResponse へ渡す
    * AnalyzeRaceDeps.maxAdjust も同じ版から解決した値を deps.analyze の束縛時に渡す必要がある
    * (文面とクリップ幅の食い違いを防ぐため、両者は同じ CLIP_VARIANTS エントリに由来させること)。
    */
   readonly clipVariant?: ClipVariantId;
   /**
    * 確定済みレース結果詳細の取得(タスク#27-C: 当日の同一場・同一面傾向をプロンプトに反映する配線)。
-   * 通常は AnalysisStore.getRaceResultDetail を束縛したもの(exe の pipeline-deps.ts が
-   * store.getRaceResultDetail をそのまま渡す)。省略時は当日傾向を算出せず、既存のプロンプト文面・
+   * 通常は AnalysisStore.getRaceResultDetail を束縛したもの(旧 exe の pipeline-deps.ts(#287 で削除。3c1664e まで)が
+   * store.getRaceResultDetail をそのまま渡していた。クラウド版は非同期のバッチ版 getRaceResultDetails を使う)。省略時は当日傾向を算出せず、既存のプロンプト文面・
    * 既存テストを非破壊のまま保つ(機能オフ)。LLM分析をスキップする経路(deps.analyze===null)では、
    * この依存が注入されていても当日傾向を算出しない(prior採用経路で無駄なDB読み出しを増やさないため)。
    */
@@ -193,10 +192,10 @@ export interface AnalysisPipelineDeps {
     | Promise<ReadonlyMap<string, RaceResultDetail | undefined>>;
   /**
    * 同レース(重賞)の過去10年結果傾向の取得+集計(タスク機能B。通常は core
-   * collectGradeWinnerTrend を CachedFetcher で束縛したもの。exe の pipeline-deps.ts が束縛する)。
+   * collectGradeWinnerTrend に fetcher を束縛したもの。クラウド版は cloud/src/race-day-core.ts、旧 exe では pipeline-deps.ts(#287 で削除。3c1664e まで)が束縛した)。
    * 省略時は算出せず、既存のプロンプト文面・既存テストを非破壊のまま保つ(機能オフ)。
    * 中央・地方(NAR)いずれのレースでも呼び出す(2026-07-28実測訂正: 地方専用ホストで同一APIが
-   * 取得できるため、venueKindによる事前フィルタは行わない。ホスト選択は束縛側の実装に委ねる)。
+   * 取得できるため、venueKindによる事前フィルタは行わない。ホスト選択は core の scraper/fetch-grade-winner.ts が race_id から行う〈束縛側は fetcher を渡すだけ〉)。
    *
    * 呼び出しゲート(要修正2・2026-07-28 boss裁定): 出馬表のレース名見出しに重賞グレードバッジ
    * (parse-shutuba.ts の hasGradeBadge)が無いと判定できた場合のみ、この依存が注入されていても
@@ -263,8 +262,8 @@ export interface AnalysisPipelineDeps {
    * 秘密安全性: context に相当する raceId・stopReason は構造化情報のみで apiKey・Webhook等は
    * 一切積まない。diagnosticMessage は LLM呼び出し例外・JSONパース失敗時の生の詳細を含みうる
    * ため、UI(AnalysisResult.fallbackReason)・DB(AnalysisRecord)には絶対に渡さず、
-   * このフック経由でのみ exe の main/logger.ts の logWarn(既存の秘密マスキング〈exe の shared/log-formatter.ts〉
-   * を通す)へ配線すること(呼び出し側は exe の pipeline-deps.ts/ipc.ts)。
+   * このフック経由でのみ(旧 exe では main/logger.ts の logWarn〈既存の秘密マスキング exe の shared/log-formatter.ts を通す〉へ、
+   * 呼び出し側 exe の pipeline-deps.ts/ipc.ts が配線していた。#287 で削除。3c1664e まで)ログ等へ配線すること。
    */
   readonly onFallback?: (info: {
     readonly raceId: RaceId;
@@ -546,7 +545,7 @@ export async function runAnalysis(
     // 結果〈自レースの発走時点では存在しない〉は混ざらない。当日運用では後続は未取込のため不変)。
     // Issue #176: collectSameDayTrend の lookup は同期なので、前のレース分(precedingRaceIdsSameDay。collectSameDayTrend が
     // 引くのと同じ ID 列)を先に(非同期でも)読んで Map にし、それを同期の lookup として渡す。
-    // 単発の getRaceResultDetail(同期。exe の束縛)は従来どおり ID ごとに1回ずつ(同じ順序で)呼ぶ。非同期にしたい呼び出し側(クラウド版)は
+    // 単発の getRaceResultDetail(同期。旧 exe の束縛)は従来どおり ID ごとに1回ずつ(同じ順序で)呼ぶ。非同期にしたい呼び出し側(クラウド版)は
     // バッチの getRaceResultDetails を使う。両方あればバッチを優先する。
     let sameDayTrend: ReturnType<typeof collectSameDayTrend> = null;
     if (deps.getRaceResultDetails || deps.getRaceResultDetail) {
@@ -554,8 +553,8 @@ export async function runAnalysis(
       let detailsById: ReadonlyMap<string, RaceResultDetail | undefined> | null;
       if (deps.getRaceResultDetails) {
         // バッチの読み出しの失敗(クラウド版は D1)は、当日傾向なし(null)として分析を続ける(Issue #177 の決定)。当日傾向は補助情報で、
-        // これが無いだけで LLM 分析全体(実課金を伴う)を止めない。警告フックに理由を渡す。単発の getRaceResultDetail(exe の同期の束縛)が
-        // throw したときは、従来どおり runAnalysis が reject する(exe の挙動は変えない)。
+        // これが無いだけで LLM 分析全体(実課金を伴う)を止めない。警告フックに理由を渡す。単発の getRaceResultDetail(旧 exe の同期の束縛)が
+        // throw したときは、従来どおり runAnalysis が reject する(旧 exe の挙動は変えない)。
         try {
           detailsById = await deps.getRaceResultDetails(precedingIds);
         } catch (error) {
@@ -585,8 +584,9 @@ export async function runAnalysis(
     // 無視できない件数〈約1,800本/181日〉になるため)。中央・地方(NAR)いずれも対応する
     // (2026-07-28実測訂正: 当初「地方にはこのデータが存在しない」としていたが、地方専用ホスト
     // 〈nar.netkeiba.com〉に同一パラメータでPOSTすれば取得できると判明したため、venueKindによる
-    // 事前フィルタは行わない。ホストの選択は deps.getGradeWinnerTrend の束縛側
-    // 〈exe の pipeline-deps.ts〉が urls.ts の gradeWinnerApiUrl等でrace_idから自動選択する)。
+    // 事前フィルタは行わない。ホストの選択は、core の scraper/fetch-grade-winner.ts が
+    // urls.ts の gradeWinnerApiUrl等でrace_idから自動選択する。deps.getGradeWinnerTrend の束縛側
+    // 〈クラウド版は cloud/src/race-day-core.ts。旧 exe では pipeline-deps.ts(#287 で削除。3c1664e まで)〉は fetcher を渡すだけ)。
     // 条件フィルタに渡すtrackCodeはraceId由来(要修正8。venueName〈表示専用〉はAPIのjyoと
     // 表記が一致しない場合があるため使わない)。
     // ネットワーク越しの補助材料のため、失敗してもLLM本体の分析は継続させる(nullへフォールバック)。
@@ -893,7 +893,7 @@ export async function runAnalysis(
     // (AC-2・AC-4)テスト参照)。
     // raceIdはIssue #139(#25-E3b・AC4)で追加した。三連単の状態注記の中央/地方の判別に使っていたが、
     // Issue #283で地方の三連単も取得するようになり、その特別扱いを除去したため、現在は参照する箇所が無い
-    // (フィールド自体の削除はスコープ外として残している)。本ファイル(main)自身は参照しない。
+    // (フィールド自体の削除はスコープ外として残している)。本ファイル自身は参照しない。
     const raceForAllocation: MixedCandidateBuildInput = {
       oddsStatus,
       rows,
@@ -954,7 +954,7 @@ export async function runAnalysis(
     // LLMプロンプト側の先読みリーク遮断を通った印(Issue #153)。新規の分析は必ず true を書く
     // (LLM未使用でも true。当日傾向は自レースより前のレース番号だけ、同レース過去傾向は当該回自身と
     // 基準日以降の回を除く経路で作られたことを示す)。NULL の行は v1.14.x 以前に保存された分析で、
-    // LLM使用の分析はプロンプト側のリークを含みうる。読み出しは StoredAnalysis に追加済み(#152 A)、検証画面の集計での扱いは #152 B で配線済み(pipeline-deps.ts の PRODUCTION_VERIFY_CONFIG)。
+    // LLM使用の分析はプロンプト側のリークを含みうる。読み出しは StoredAnalysis に追加済み(#152 A)、検証画面の集計での扱いは #152 B で配線済み(ev/verify.ts の PRODUCTION_VERIFY_CONFIG。旧 exe の pipeline-deps.ts から #219 で移した)。
     promptLookaheadGuarded: true,
     // 使用したLLMモデル名(Issue#10)。LLMを実際に使った分析のみ記録する(promptVersionと同じ方針。
     // LLMスキップ時は deps.modelName が設定されていても null にし、偽値を混入させない)。

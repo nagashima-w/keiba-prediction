@@ -11,12 +11,12 @@ import { allocationBetRows, allocationKindOf, MARK_ORDER, unsetKindOf } from "..
 import { allocationRecord, betRecord } from "./allocation-fixtures";
 
 /**
- * Issue #230: Discord の通知の「買い目」の整形は、exe の `buildAllocationProposalView`(web の結果画面が流用しているもの)を import せず、cloud/src に小さな自前の整形を持つ
+ * Issue #230: Discord の通知の「買い目」の整形は、core の `buildAllocationProposalView`(web の結果画面が流用しているもの)を import せず、cloud/src に小さな自前の整形を持つ
  * (`cloud/src` が辿る app のファイルを増やさないため。`test/import-guard.test.ts` の完全一致リストを広げない)。二重持ちの食い違いはここで固定する:
- * 状態の分類(kind)・未設定の内訳・券種ラベル・組合せラベル・金額表記・印の並び順が、exe(と web の画面)と一致すること。
+ * 状態の分類(kind)・未設定の内訳・券種ラベル・組合せラベル・金額表記・印の並び順が、core の関数(と web の画面)と一致すること。
  */
 
-/** 保存する配分の記録 → exe の表示の入力(`StoredAllocationView`)。読む列の対応は `analysis-view.ts`(web の API)と同じ。 */
+/** 保存する配分の記録 → core の表示関数の入力(`StoredAllocationView`)。読む列の対応は `analysis-view.ts`(web の API)と同じ。 */
 function storedViewOf(allocation: AnalysisAllocationRecord): StoredAllocationView {
   const m = allocation.meta;
   return {
@@ -43,7 +43,7 @@ function storedViewOf(allocation: AnalysisAllocationRecord): StoredAllocationVie
 
 const ONE_BET = [betRecord("place", "05", 500)];
 
-describe("状態の分類(kind)は exe の buildAllocationProposalView と同じ", () => {
+describe("状態の分類(kind)は core の buildAllocationProposalView と同じ", () => {
   it.each([
     ["unset(両方未設定)", allocationRecord({ route: "unset", bankroll: 0, perRaceCap: 0 })],
     ["unset(総資金だけ)", allocationRecord({ route: "unset", bankroll: 0, perRaceCap: 2000 })],
@@ -64,11 +64,11 @@ describe("状態の分類(kind)は exe の buildAllocationProposalView と同じ
     expect(allocationKindOf(allocation)).toBe(buildAllocationProposalView(storedViewOf(allocation)).kind);
   });
 
-  it("記録なし(allocation が無い)は、exe の no-record と同じ", () => {
+  it("記録なし(allocation が無い)は、core の no-record と同じ", () => {
     expect(allocationKindOf(undefined)).toBe(buildAllocationProposalView(null).kind);
   });
 
-  it("前提(空振り防止): 上の表は、exe の kind のうち no-record 以外の 7 種(unset・yoso・unavailable・invalid・skip・allocated・indeterminate)をすべて通っている", () => {
+  it("前提(空振り防止): 上の表は、core の kind のうち no-record 以外の 7 種(unset・yoso・unavailable・invalid・skip・allocated・indeterminate)をすべて通っている", () => {
     const kinds = new Set(
       [
         allocationRecord({ route: "unset" }),
@@ -84,7 +84,7 @@ describe("状態の分類(kind)は exe の buildAllocationProposalView と同じ
   });
 });
 
-describe("未設定(unset)の内訳は、exe が選ぶ注記と同じ分岐", () => {
+describe("未設定(unset)の内訳は、core が選ぶ注記と同じ分岐", () => {
   it.each([
     ["both", { bankroll: 0, perRaceCap: 0 }, BET_ALLOCATION_UNSET_NOTE],
     ["bankroll", { bankroll: 0, perRaceCap: 2000 }, UNSET_BANKROLL_ONLY_NOTE],
@@ -94,13 +94,13 @@ describe("未設定(unset)の内訳は、exe が選ぶ注記と同じ分岐", ()
   ] as const)("%s", (_name, over, note) => {
     const allocation = allocationRecord({ route: "unset", ...over });
     const exe = buildAllocationProposalView(storedViewOf(allocation));
-    expect(exe.notices).toEqual([note]); // 前提: exe がこの注記を選んでいる
+    expect(exe.notices).toEqual([note]); // 前提: core の関数がこの注記を選んでいる
     const kind = unsetKindOf(allocation.meta);
     expect(kind).toBe(_name.split("(")[0]);
   });
 });
 
-describe("買い目の行(券種・組合せ・金額)は、exe の買い目行と同じ表記", () => {
+describe("買い目の行(券種・組合せ・金額)は、core の買い目行と同じ表記", () => {
   const ALL_TYPES = [
     betRecord("place", "05", 800),
     betRecord("win", "12", 700),
@@ -127,7 +127,7 @@ describe("買い目の行(券種・組合せ・金額)は、exe の買い目行�
     expect(mine).toEqual(theirs);
   });
 
-  it("未知の券種・読めない comboKey も、exe と同じく生の文字列のまま出す", () => {
+  it("未知の券種・読めない comboKey も、core と同じく生の文字列のまま出す", () => {
     const odd = [betRecord("mystery", "0102", 100), betRecord("place", "xx", 200), betRecord("trio", "010", 300)];
     const exe = buildAllocationProposalView(storedViewOf(allocationRecord({ route: "mixed" }, odd)));
     const key = (b: string, c: string, s: string): string => `${b}|${c}|${s}`;

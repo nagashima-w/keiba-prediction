@@ -158,7 +158,7 @@ export function truncate(text: string, maxLen: number): string {
   return `${codePoints.slice(0, maxLen - 1).join("")}…`;
 }
 
-/** embed 整形に用いるレース情報(app の AnalysisResult と構造互換)。 */
+/** embed 整形に用いるレース情報(`analysis/analysis-types.ts` の AnalysisResult と構造互換)。 */
 export interface EmbedRaceInfo {
   /** レース名。 */
   readonly raceName: string;
@@ -181,7 +181,7 @@ export interface EmbedRaceInfo {
 
 /**
  * オッズ発売状態の embed 用注記(確定 result は注記なしで null)。
- * UI 表示(app 側 oddsStatusNote)より短い文言で、embed 説明文の1行として使う。
+ * `view/format.ts` の `oddsStatusNote`(旧 exe の UI 表示の文言。現在は production からの読み手が無い)より短い文言で、embed 説明文の1行として使う。
  */
 function embedOddsStatusNote(
   status: EmbedRaceInfo["oddsStatus"],
@@ -196,7 +196,7 @@ function embedOddsStatusNote(
   }
 }
 
-/** embed 整形に用いる1頭分の情報(app の AnalysisRow と構造互換の部分集合)。 */
+/** embed 整形に用いる1頭分の情報(`analysis/analysis-types.ts` の AnalysisRow と構造互換の部分集合)。 */
 export interface EmbedHorse {
   /** 馬番。 */
   readonly umaban: number;
@@ -215,8 +215,8 @@ export interface EmbedHorse {
   /**
    * このEV(ev/placeOddsMin)が推定値(発売前・単勝オッズからの複勝下限概算)によるものか(Task#25)。
    * 省略時は false 扱い(確定EV)。true のとき EV 表記の末尾に「(推定)」を付ける。
-   * app側 batch-discord-payload.ts と表示ロジックを揃えるための項目(Task#23で mark を
-   * 両実装に入れたのと同じ考え方。兄弟実装パリティ)。
+   * 旧 exe の batch-discord-payload.ts(#287 で削除。3c1664e まで)と表示ロジックを揃えるための項目だった(Task#23で mark を
+   * 両実装に入れたのと同じ考え方。兄弟実装パリティ。片方は削除済み)。
    */
   readonly evEstimated?: boolean;
 }

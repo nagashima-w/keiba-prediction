@@ -851,15 +851,15 @@ describe("券種フィルタ(options.betTypes)", () => {
    * 限らない設計を、「意図的に除外している券種の集合」としてリテラルで固定していた。
    * #90でwinの候補ビルダー(`buildWinCandidates`)が新設されたため、当時は除外が無かった
    * (`AllocationBetType`の全メンバーと一致していた)。**#112で`AllocationBetType`に
-   * `quinella`(馬連)が加わったが、`buildMixedCandidates`(app側)はまだそれを参照しない
-   * (app側の候補組み立ては#24-D3のスコープ)ため、`quinella`が一時的に除外へ加わった。**
+   * `quinella`(馬連)が加わったが、`buildMixedCandidates`(`analysis/mixed-candidates.ts`)はまだそれを参照しなかった
+   * (候補組み立ては#24-D3のスコープだった)ため、`quinella`が一時的に除外へ加わった。**
    * **Issue #117(#24-D3b-2)で`resolveMixedBetTypes`〈analysis/mixed-race-allocation.ts〉が
    * 実際に`"quinella"`を渡すよう接続し、`ALL_MIXED_CANDIDATE_BET_TYPES`にも`quinella`を
    * 加えたため、除外集合は再び空になった。**
    * **Issue #120(#24-E1)で`AllocationBetType`に`exacta`(馬単)が加わったが、
    * `mixed-candidates.ts`から馬単の候補を作る経路はまだ無かった(オッズ配線は#122・
    * 配分接続は#125のスコープ)ため、`exacta`が一時的に除外へ加わった(`quinella`のときと
-   * 同じ理由: app側候補ビルダーが未接続の券種を対象集合に含めると`resolveMixedBetTypes`
+   * 同じ理由: 候補ビルダーが未接続の券種を対象集合に含めると`resolveMixedBetTypes`
    * 経由でも実際には評価されない=常に「¥0 0点」相当になるため)。**
    * **Issue #125(#24-E3b)で`resolveMixedBetTypes`が実際に`"exacta"`を渡すよう接続し、
    * `ALL_MIXED_CANDIDATE_BET_TYPES`にも`exacta`を加えたため、除外集合は再び空になった。**
