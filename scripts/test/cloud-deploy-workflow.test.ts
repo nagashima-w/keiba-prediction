@@ -188,7 +188,7 @@ describe.each([
     const job = jobBody(jobName);
     const names = [...job.matchAll(/^ {6}- name: (.+)$/gm)].map((m) => m[1]!.trim());
     expect(names.slice(0, 4)).toEqual(["リポジトリを取得", "pnpm をセットアップ", "Node.js をセットアップ", "依存をインストール(cloud)"]);
-    expect(stepBody(job, "pnpm をセットアップ")).toContain("uses: pnpm/action-setup@v4");
+    expect(stepBody(job, "pnpm をセットアップ")).toContain("uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0");
     const node = stepBody(job, "Node.js をセットアップ");
     expect(node).toMatch(/node-version: 22\b/);
     expect(node).toContain("cache: pnpm");

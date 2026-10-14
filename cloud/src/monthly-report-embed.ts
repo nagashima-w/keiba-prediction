@@ -2,7 +2,9 @@
  * 月報(Issue #265・#280)の Discord の要約(embed)。**純関数**。全文は web に保存してあり、ここは総括・成績・良かった点/改善点/来月に向けての先頭だけ。
  * 上限(説明 4096・field 1024・合計 6000)は {@link fitEmbed} が最後に保証する。リンク(`url`)は文字数の対象外で、基点があるときだけ付ける。
  * 日報の embed(`daily-report-embed.ts`)の部品(黒字/赤字の語・的中の文・「もしも」の行)をそのまま使う。
+ * LLM の文章(総括・良かった点・改善点・来月に向けて)は、日報と同じ理由で `escapeDiscordMarkdown` を掛けて載せる(Issue #301。保存する文章・web には掛けない)。
  */
+import { escapeDiscordMarkdown } from "../../packages/core/src/notify/discord-escape";
 import { hasWhatIfData, hitText, profitWord, templateShort } from "./daily-report-embed";
 import { yen } from "./daily-report-prompt";
 import { formatMonthLabel } from "./monthly-month";
@@ -51,7 +53,7 @@ export function buildMonthlyEmbed(input: MonthlyEmbedInput): CloudEmbed {
     ];
     for (const [name, list] of items) {
       if (list.length > 0) {
-        fields.push({ name, value: list.slice(0, SHOWN_ITEMS).map((s) => `・${s}`).join("\n") });
+        fields.push({ name, value: list.slice(0, SHOWN_ITEMS).map((s) => `・${escapeDiscordMarkdown(s)}`).join("\n") });
       }
     }
   }
@@ -60,7 +62,7 @@ export function buildMonthlyEmbed(input: MonthlyEmbedInput): CloudEmbed {
   }
   const embed: CloudEmbed = {
     title: `月報 ${formatMonthLabel(input.month)}`,
-    description: narrative !== null ? narrative.summary : (input.note ?? "統計だけの月報です"),
+    description: narrative !== null ? escapeDiscordMarkdown(narrative.summary) : (input.note ?? "統計だけの月報です"),
     color: stats.recoveryRate === null ? DISCORD_COLORS.none : stats.recoveryRate >= 1 ? DISCORD_COLORS.ok : DISCORD_COLORS.fail,
     fields,
     ...(input.link === undefined ? {} : { url: input.link }),

@@ -15,6 +15,7 @@ import {
   type DispatchStore,
   type ResultDayStub,
 } from "../src/result-dispatch";
+import { checkRaceDate } from "../src/race-date";
 import { D1ResultStore } from "../src/result-repository";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
 import { openNodeSql, type NodeSql } from "./node-sql";
@@ -134,7 +135,7 @@ describe("dispatchResultImports(列挙 → 日ごとの依頼)", () => {
       { date: "20261007", kaisaiDate: "20261007", raceIds: ["202603020211", "202603020212"] },
       { date: "20261005", kaisaiDate: "20261005", raceIds: ["202603020111"] },
     ]);
-    expect(result).toEqual({ listed: 3, days: 2, accepted: 3, failedDays: 0, listFailed: false });
+    expect(result).toEqual({ listed: 3, days: 2, accepted: 3, failedDays: 0, invalid: 0, listFailed: false });
     expect(out.lines.every((l) => l.level === "info")).toBe(true);
     expect(out.text()).toContain("days=2");
   });
@@ -161,7 +162,7 @@ describe("dispatchResultImports(列挙 → 日ごとの依頼)", () => {
       { date: "20261007", kaisaiDate: "20261007", raceIds: ["202603020211"], winOddsOnly: true },
       { date: "20261005", kaisaiDate: "20261005", raceIds: ["202603020111"], winOddsOnly: true },
     ]);
-    expect(result).toEqual({ listed: 2, days: 2, accepted: 2, failedDays: 0, listFailed: false });
+    expect(result).toEqual({ listed: 2, days: 2, accepted: 2, failedDays: 0, invalid: 0, listFailed: false });
   });
 
   it("手動は maxDays = 3 で列挙する", async () => {
@@ -176,7 +177,7 @@ describe("dispatchResultImports(列挙 → 日ごとの依頼)", () => {
     const result = await dispatchResultImports({ ...window, maxDays: 2, store, stubFor: stubs.stubFor, log: logger().log });
     expect(stubs.opened).toEqual([]);
     expect(stubs.requests).toEqual([]);
-    expect(result).toEqual({ listed: 0, days: 0, accepted: 0, failedDays: 0, listFailed: false });
+    expect(result).toEqual({ listed: 0, days: 0, accepted: 0, failedDays: 0, invalid: 0, listFailed: false });
   });
 
   it("ある日の DO への依頼が失敗しても、他の日の依頼は続ける。例外にせず、失敗した日の数を返す。ログは日付と分類だけ(例外の文面を含まない)", async () => {
@@ -191,7 +192,7 @@ describe("dispatchResultImports(列挙 → 日ごとの依頼)", () => {
     const out = logger();
     const result = await dispatchResultImports({ ...window, maxDays: 3, store, stubFor: stubs.stubFor, log: out.log });
     expect(stubs.requests.map((r) => r.date)).toEqual(["20261007", "20261006", "20261005"]);
-    expect(result).toEqual({ listed: 3, days: 3, accepted: 2, failedDays: 1, listFailed: false });
+    expect(result).toEqual({ listed: 3, days: 3, accepted: 2, failedDays: 1, invalid: 0, listFailed: false });
     expect(out.lines.filter((l) => l.level === "error")).toHaveLength(1);
     expect(out.text()).toContain("20261006");
     expect(out.text()).not.toContain("SECRET");
@@ -203,11 +204,95 @@ describe("dispatchResultImports(列挙 → 日ごとの依頼)", () => {
     const stubs = fakeStubs();
     const out = logger();
     const result = await dispatchResultImports({ ...window, maxDays: 2, store, stubFor: stubs.stubFor, log: out.log });
-    expect(result).toEqual({ listed: 0, days: 0, accepted: 0, failedDays: 0, listFailed: true });
+    expect(result).toEqual({ listed: 0, days: 0, accepted: 0, failedDays: 0, invalid: 0, listFailed: true });
     expect(stubs.opened).toEqual([]);
     expect(out.lines).toHaveLength(1);
     expect(out.lines[0]!.level).toBe("error");
     expect(out.text()).not.toContain("SECRET");
+  });
+
+  // ---- Issue #307(#302-A): 不正なレースは、DO を呼ぶ前に除外する(補完〈result-backfill-core.ts〉と同じ checkRaceDate) ----
+  // 日単位の DO の requestResultImport は、不正なレースが 1 件でもあると依頼全体を拒否する。毒の行 1 件で、その日の本物のレースまで取り込めなくなるのを防ぐ。
+
+  describe("不正なレースの事前除外(checkRaceDate)", () => {
+    // 年が違う・桁が違う・地方の月日が開催日と違う、の 3 種類(有効な ID は中央 202603020211・地方 202644100701〈2026-10-07〉)
+    const POISON = [
+      { raceId: "202503020211", kaisaiDate: "20261007" }, // 年が開催日と違う
+      { raceId: "2026030202", kaisaiDate: "20261007" }, // 12 桁でない
+      { raceId: "202644100801", kaisaiDate: "20261007" }, // 地方の月日(10/08)が開催日(10/07)と違う
+    ];
+
+    it("前提: 毒の 3 件は実際に checkRaceDate を通らず、有効な 2 件は通る(テストの入力が空振りでない)", () => {
+      for (const p of POISON) expect(checkRaceDate(p.raceId, p.kaisaiDate).ok).toBe(false);
+      expect(checkRaceDate("202603020211", "20261007").ok).toBe(true);
+      expect(checkRaceDate("202644100701", "20261007").ok).toBe(true);
+    });
+
+    it("同じ日に不正なレースが混ざっていても、その日の依頼は有効なレースだけで出す(毒の行で、その日の全部が失敗しない)。除外した数を invalid で返す", async () => {
+      const store = fakeStore();
+      store.list = [
+        { raceId: "202603020211", kaisaiDate: "20261007" },
+        ...POISON,
+        { raceId: "202644100701", kaisaiDate: "20261007" },
+      ];
+      const stubs = fakeStubs();
+      const result = await dispatchResultImports({ ...window, maxDays: 2, store, stubFor: stubs.stubFor, log: logger().log });
+      expect(stubs.requests).toEqual([{ date: "20261007", kaisaiDate: "20261007", raceIds: ["202603020211", "202644100701"] }]);
+      expect(result).toEqual({ listed: 5, days: 1, accepted: 2, failedDays: 0, invalid: 3, listFailed: false });
+    });
+
+    it("開催日そのものが不正(例: 20261001x。文字列比較で窓に入ってしまう)なら、その日の DO のスタブを開かない。他の日は依頼する", async () => {
+      const store = fakeStore();
+      store.list = [
+        { raceId: "202603020211", kaisaiDate: "20261007" },
+        { raceId: "202603020111", kaisaiDate: "20261001x" },
+        { raceId: "202603020112", kaisaiDate: "20261001x" },
+      ];
+      const stubs = fakeStubs();
+      const result = await dispatchResultImports({ ...window, maxDays: 2, store, stubFor: stubs.stubFor, log: logger().log });
+      expect(stubs.opened).toEqual(["20261007"]);
+      expect(stubs.requests.map((r) => r.date)).toEqual(["20261007"]);
+      expect(result).toEqual({ listed: 3, days: 1, accepted: 1, failedDays: 0, invalid: 2, listFailed: false });
+    });
+
+    it("全部が不正なら、DO のスタブを開かず依頼もしない。失敗(failedDays・listFailed)としては数えない", async () => {
+      const store = fakeStore();
+      store.list = [...POISON];
+      const stubs = fakeStubs();
+      const result = await dispatchResultImports({ ...window, maxDays: 2, store, stubFor: stubs.stubFor, log: logger().log });
+      expect(stubs.opened).toEqual([]);
+      expect(stubs.requests).toEqual([]);
+      expect(result).toEqual({ listed: 3, days: 0, accepted: 0, failedDays: 0, invalid: 3, listFailed: false });
+    });
+
+    it("対照: 不正が無ければ invalid は 0 で、除外のログは出ない", async () => {
+      const store = fakeStore();
+      store.list = [{ raceId: "202603020211", kaisaiDate: "20261007" }];
+      const out = logger();
+      const result = await dispatchResultImports({ ...window, maxDays: 2, store, stubFor: fakeStubs().stubFor, log: out.log });
+      expect(result.invalid).toBe(0);
+      expect(out.text()).not.toContain("invalid-race");
+    });
+
+    it("除外のログは固定の分類名と件数だけ(レースID・開催日の値を出さない)", async () => {
+      const store = fakeStore();
+      store.list = [{ raceId: "202603020211", kaisaiDate: "20261007" }, ...POISON, { raceId: "SECRET-ID", kaisaiDate: "SECRET-DATE" }];
+      const out = logger();
+      await dispatchResultImports({ ...window, maxDays: 2, store, stubFor: fakeStubs().stubFor, log: out.log });
+      const skipped = out.lines.filter((l) => l.line.includes("invalid-race"));
+      expect(skipped).toHaveLength(1);
+      expect(skipped[0]!.line).toContain("count=4");
+      const all = out.text();
+      for (const secret of ["SECRET", "202503020211", "202644100801", "2026030202 "]) expect(all).not.toContain(secret);
+    });
+
+    it("winOddsOnly の依頼でも同じ除外をする(段階 2 の依頼にキーが付いたまま、有効なレースだけが行く)", async () => {
+      const store = fakeStore();
+      store.list = [{ raceId: "202603020211", kaisaiDate: "20261007" }, POISON[0]!];
+      const stubs = fakeStubs();
+      await dispatchResultImports({ ...window, maxDays: 2, store, stubFor: stubs.stubFor, log: logger().log, winOddsOnly: true });
+      expect(stubs.requests).toEqual([{ date: "20261007", kaisaiDate: "20261007", raceIds: ["202603020211"], winOddsOnly: true }]);
+    });
   });
 
   it("スタブの取得(stubFor)が投げても、その日の失敗として数える(例外にしない)", async () => {
@@ -311,7 +396,7 @@ describe("同時に並ぶ gate の呼び出しの最大数(AC-A: 過去日の DO
     for (const [maxDays, expectedDays] of [[CRON_RESULT_MAX_DAYS, ["20261008", "20261007"]], [MANUAL_RESULT_MAX_DAYS, ["20261008", "20261007", "20261006"]]] as const) {
       const w = world(Date.parse("2026-10-09T09:00:00+09:00"));
       const result = await dispatchResultImports({ from: "20261001", to: "20261008", maxDays, store, stubFor: w.stubFor, log: () => undefined });
-      expect(result).toMatchObject({ days: maxDays, accepted: maxDays * 2, failedDays: 0, listFailed: false });
+      expect(result).toMatchObject({ days: maxDays, accepted: maxDays * 2, failedDays: 0, invalid: 0, listFailed: false });
       expect([...w.cores.keys()]).toEqual([...expectedDays]);
       // 全 DO のアラームを同時に動かす(本番では各 DO が独立にアラームで動く)
       const loops = [...w.cores.values()].map(async ({ core, alarm }) => {

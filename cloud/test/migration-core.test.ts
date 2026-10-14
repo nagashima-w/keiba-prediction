@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { D1AnalysisStore } from "../src/analysis-repository";
-import { D1_FREE_DAILY_WRITE_ROWS, FREE_QUERIES_PER_INVOCATION, MigrationCore, MIGRATION_DAILY_ROW_LIMIT, parseLimitOverride, MIGRATION_MAX_ATTEMPTS, MIGRATION_TICK_QUERY_LIMIT, type MigrationCoreDeps, type MigrationStatus } from "../src/migration-core";
+import { MigrationFormatError } from "../../packages/core/src/ev/cloud-migration-format";
+import { clipForKv, D1_FREE_DAILY_WRITE_ROWS, FREE_QUERIES_PER_INVOCATION, MigrationCore, MIGRATION_DAILY_ROW_LIMIT, parseLimitOverride, MIGRATION_MAX_ATTEMPTS, MIGRATION_TICK_QUERY_LIMIT, type MigrationCoreDeps, type MigrationStatus } from "../src/migration-core";
 import { R2_FENCE_LIMITS } from "../src/r2-fence";
 import { D1ResultStore } from "../src/result-repository";
 import { GOLDEN_ANALYSES, GOLDEN_TEXT, gz, streamOf } from "./migration-fixture";
@@ -280,6 +281,24 @@ describe("検証: 書き始める前に全体を検証する", () => {
     expect(await count("race_results")).toBe(0);
     expect(h.files.has(KEY)).toBe(false);
     expect(h.alarm.at).toBeNull();
+  });
+
+  it("取り込み時刻 + 7 日より後の分析日時を含むファイル(Issue #308): failed(phase: verify)。D1 には何も書かれない。ちょうど 7 日後は通る", async () => {
+    const withStamp = (iso: string): string => `${lines.map((l, i) => (i === 1 ? l.replace('"analyzed_at":"2026-03-02T01:00:00.000Z"', `"analyzed_at":"${iso}"`) : l)).join("\n")}\n`;
+    expect(withStamp("2099-01-01T00:00:00.000Z")).not.toBe(`${lines.join("\n")}\n`); // 置換が効いている
+    const limit = T0 + 7 * 24 * 60 * 60 * 1000;
+    const over = harness();
+    await upload(over, withStamp(new Date(limit + 1).toISOString()));
+    await over.run();
+    expect(over.core.getStatus().state).toBe("failed");
+    expect(over.core.getStatus().failure?.phase).toBe("verify");
+    expect(over.core.getStatus().failure?.message).toMatch(/analyzed_at/);
+    expect(await count("analyses")).toBe(0);
+    await local.reset();
+    const exact = harness();
+    await upload(exact, withStamp(new Date(limit).toISOString()));
+    await exact.run();
+    expect(exact.core.getStatus().state).toBe("completed");
   });
 
   it("最後の分析の行が壊れているファイル(前の分析の行は正常): 最初の行も書かれない(全体を先に検証している)", async () => {
@@ -665,5 +684,223 @@ describe("parseLimitOverride(環境変数による上限の上書き)", () => {
   });
   it("Free の枠を超える値は受け付けない(日次 100,001 は null)", () => {
     expect(parseLimitOverride("100001", D1_FREE_DAILY_WRITE_ROWS)).toBeNull();
+  });
+});
+
+describe("処理前の書き込み行数の見積もり(Issue #309): 上限を超える行は、処理する前に翌日へ回す", () => {
+  it("上限 45: 3 件目(見積もり 15 行)を足すと 1 + 16 + 23 + 15 = 55 で超えるので、書く前に止まる(使用量 40、取り込み 2 件)", async () => {
+    const h = harness({ options: { dailyRowLimit: 45 } });
+    await upload(h);
+    const states = await h.runUntil((s) => s.state === "waiting-budget");
+    const waiting = states[states.length - 1]!;
+    expect(waiting.state).toBe("waiting-budget");
+    // 前提: 予算の残りは 5 行(= 45 − 40)あり、`budget.rows >= 上限` だけの判定では止まらない状況
+    expect(waiting.budget.usedRows).toBe(1 + 16 + 23);
+    expect(waiting.budget.usedRows).toBeLessThan(45);
+    expect(await count("analyses")).toBe(2);
+  });
+
+  it("上限 45 のまま最後まで進める: どのステップでも使用量は上限以下で、翌日以降に全件が取り込まれる", async () => {
+    const h = harness({ options: { dailyRowLimit: 45 } });
+    await upload(h);
+    const states = await h.run();
+    expect(states.filter((s) => s.state === "waiting-budget").length).toBeGreaterThanOrEqual(2);
+    for (const s of states) {
+      expect(s.budget.usedRows, `${s.state} の時点の使用量`).toBeLessThanOrEqual(45);
+    }
+    expect(h.core.getStatus().state).toBe("completed");
+    expect(await count("analyses")).toBe(5);
+    expect(await count("race_results")).toBe(4);
+  });
+
+  it("日の最初の行は、見積もりが上限を超えていても必ず処理する(上限 5): 毎日少なくとも 1 行は進み、最終的に全件が取り込まれる", async () => {
+    const h = harness({ options: { dailyRowLimit: 5 } });
+    await upload(h);
+    const states = await h.run();
+    const waits = states.filter((s) => s.state === "waiting-budget");
+    // 前提: 実際に毎日待った(上限が効いている)。最初の日は 1 行(分析 1 件)だけ進んで、使用量は上限を超える(1 + 16)
+    expect(waits.length).toBeGreaterThanOrEqual(5);
+    expect(waits[0]!.analyses.processed).toBe(1);
+    expect(waits[0]!.budget.usedRows).toBe(1 + 16);
+    expect(waits[0]!.budget.usedRows).toBeGreaterThan(5);
+    // 待つたびに、処理済みの行が増えている(日をまたいで空回りしない)
+    const progress = waits.map((s) => s.analyses.processed + s.results.processed);
+    for (let i = 1; i < progress.length; i += 1) {
+      expect(progress[i]!, `${i} 回目の待ち`).toBeGreaterThan(progress[i - 1]!);
+    }
+    expect(h.core.getStatus().state).toBe("completed");
+    expect(await count("analyses")).toBe(5);
+    expect(await count("race_results")).toBe(4);
+  });
+
+  it("取り込み済みの分析は見積もり 0: 全件が取り込み済みのファイルを再アップロードすると、予算で待たずに最後まで進む(上限 22。式で見積もると分析 2 の 23 行が収まらない)", async () => {
+    const first = harness();
+    await upload(first);
+    await first.run();
+    expect(await count("analyses")).toBe(5);
+    const again = harness({ options: { dailyRowLimit: 22 } });
+    await upload(again, GOLDEN_TEXT, "migration/test-again.ndjson.gz");
+    const states = await again.run();
+    // 前提: 分析は全件が取り込み済みとして数えられた(式で見積もると、分析 2 は 1 + 23 > 22 で待ってしまう)
+    expect(again.core.getStatus().analyses).toMatchObject({ imported: 0, alreadyImported: 5 });
+    expect(states.some((s) => s.state === "waiting-budget")).toBe(false);
+    expect(again.core.getStatus().state).toBe("completed");
+  });
+
+  it("古い保存値(lines が無い)の予算で、その日に既に 30 行使っている: 日の最初の行の例外は使わず、見積もりで翌日に回す(上限 45)", async () => {
+    const h = harness({ options: { dailyRowLimit: 45 } });
+    h.kv.set("budget", { day: "20261009", rows: 30 });
+    await upload(h);
+    const states = await h.runUntil((s) => s.state === "waiting-budget");
+    // 30 + 1(読み出しの計上)+ 16 = 47 > 45 → 分析 1 を書く前に止まる
+    expect(states[states.length - 1]!.state).toBe("waiting-budget");
+    expect(await count("analyses")).toBe(0);
+    expect(states[states.length - 1]!.budget.usedRows).toBe(31);
+  });
+});
+
+describe("kv に保存する文字列の長さ(Issue #309): 切り詰めて、先頭の文言は保つ", () => {
+  const KV_JOB_MAX_BYTES = 4096;
+  const jobBytes = (h: Harness): number => JSON.stringify(h.kv.get("job")).length;
+  const fakeAnalyses = (override: Partial<MigrationCoreDeps["analyses"]>): MigrationCoreDeps["analyses"] => {
+    const store = new D1AnalysisStore({ db: local.db, bucket: spyBucket(local.r2).bucket, now: () => new Date(T0) });
+    return {
+      findMigrated: (ids) => store.findMigrated(ids),
+      saveMigratedAnalysis: (imp) => store.saveMigratedAnalysis(imp),
+      repairDetail: (id, rec) => store.repairDetail(id, rec),
+      getR2Usage: () => store.getR2Usage(),
+      countR2Read: () => store.countR2Read(),
+      ...override,
+    };
+  };
+
+  it.each([
+    ["上限以下はそのまま", "あいう", 5, "あいう"],
+    ["ちょうど上限はそのまま", "あいうえお", 5, "あいうえお"],
+    ["上限を 1 超えると、先頭 max − 1 文字 + 省略記号", "あいうえおか", 5, "あいうえ…"],
+    ["空文字", "", 5, ""],
+  ])("clipForKv: %s", (_name, text, max, expected) => {
+    expect(clipForKv(text, max)).toBe(expected);
+  });
+
+  it("clipForKv: サロゲートペアの途中で切らない(孤立したサロゲートを残さない)。長さは上限以下", () => {
+    const text = `a${"😀".repeat(10)}`;
+    for (const max of [2, 3, 4, 5, 6]) {
+      const out = clipForKv(text, max);
+      expect(out.length, `max=${max}`).toBeLessThanOrEqual(max);
+      expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(out), `max=${max}`).toBe(false);
+      expect(out.startsWith("a")).toBe(true);
+    }
+  });
+
+  it("ヘッダの exportedAt・appVersion が 100 万文字でも、拒否せず取り込み、先頭を保って 64 文字以内に切り詰める", async () => {
+    const lines = GOLDEN_TEXT.trimEnd().split("\n");
+    const header = JSON.parse(lines[0]!);
+    header.exportedAt = `2026-10-09T00:00:00Z-${"y".repeat(1_000_000)}`;
+    header.appVersion = `v1.44.0-${"z".repeat(1_000_000)}`;
+    const h = harness();
+    await upload(h, `${[JSON.stringify(header), ...lines.slice(1)].join("\n")}\n`);
+    await h.run();
+    const status = h.core.getStatus();
+    expect(status.state).toBe("completed");
+    expect(status.upload!.exportedAt!.length).toBeLessThanOrEqual(64);
+    expect(status.upload!.exportedAt!.startsWith("2026-10-09T00:00:00Z-yyy")).toBe(true);
+    expect(status.upload!.appVersion!.length).toBeLessThanOrEqual(64);
+    expect(status.upload!.appVersion!.startsWith("v1.44.0-zzz")).toBe(true);
+    expect(jobBytes(h)).toBeLessThan(KV_JOB_MAX_BYTES);
+  });
+
+  it("対照: 通常のヘッダの値(ISO 日時・版数)は切り詰めない", async () => {
+    const h = harness();
+    await upload(h);
+    await h.run();
+    const header = JSON.parse(GOLDEN_TEXT.split("\n")[0]!);
+    expect(String(header.exportedAt).length).toBeGreaterThan(10); // 空どうしの比較で一致していない
+    expect(h.core.getStatus().upload).toMatchObject({ exportedAt: header.exportedAt, appVersion: header.appVersion });
+  });
+
+  it("形式の違反の message が 10 万文字でも、failure.message は 300 文字以内で、先頭の文言を保つ", async () => {
+    const analyses = fakeAnalyses({
+      saveMigratedAnalysis: async () => {
+        throw new MigrationFormatError(`先頭の文言。${"x".repeat(100_000)}`);
+      },
+    });
+    const h = harness({ deps: { analyses } });
+    await upload(h);
+    await h.run();
+    const status = h.core.getStatus();
+    expect(status.state).toBe("failed");
+    expect(status.failure!.phase).toBe("import");
+    expect(status.failure!.message.length).toBeLessThanOrEqual(300);
+    expect(status.failure!.message.startsWith("先頭の文言。xxx")).toBe(true);
+    expect(jobBytes(h)).toBeLessThan(KV_JOB_MAX_BYTES);
+  });
+
+  it("対照: 短い message はそのまま保存する", async () => {
+    const h = harness();
+    await upload(h, `${GOLDEN_TEXT.trimEnd().split("\n").slice(0, -1).join("\n")}\n`);
+    await h.run();
+    const message = h.core.getStatus().failure!.message;
+    expect(message).toMatch(/フッタ/);
+    expect(message.endsWith("…")).toBe(false);
+  });
+
+  it("衝突の例(conflictSamples)の raceId・分析日時が極端に長くても、各要素は 300 文字以内で、先頭の文言を保つ", async () => {
+    const analyses = fakeAnalyses({
+      findMigrated: async (ids) => new Map(ids.map((id) => [id, { id: 9000 + id, raceId: `R${"r".repeat(50_000)}`, analyzedAt: `A${"a".repeat(50_000)}` }])),
+    });
+    const h = harness({ deps: { analyses } });
+    await upload(h);
+    await h.run();
+    const status = h.core.getStatus();
+    expect(status.analyses.conflicts).toBe(5);
+    expect(status.conflictSamples.length).toBe(5);
+    for (const sample of status.conflictSamples) {
+      expect(sample.length).toBeLessThanOrEqual(300);
+      expect(sample.startsWith("exe の分析 id ")).toBe(true);
+    }
+    expect(jobBytes(h)).toBeLessThan(KV_JOB_MAX_BYTES);
+  });
+});
+
+describe("深い入れ子の JSON 列(Issue #309): 検証の段階で形式の拒否にする", () => {
+  const lines = GOLDEN_TEXT.trimEnd().split("\n");
+  const DEEP = 5000;
+  const nested = (depth: number): string => `${"[".repeat(depth)}${"]".repeat(depth)}`;
+
+  /** 分析の行(race_snapshot_json を持つ最初のもの)の列を差し替えたファイルと、その行番号(1 始まり)。 */
+  function withColumn(edit: (obj: any) => void): { text: string; lineNo: number } {
+    const index = lines.findIndex((l) => l.includes('"type":"analysis"') && l.includes('"race_snapshot_json":"'));
+    expect(index).toBeGreaterThan(0); // 前提: 差し替える行が見つかっている
+    const obj = JSON.parse(lines[index]!);
+    edit(obj);
+    return { text: `${lines.map((l, i) => (i === index ? JSON.stringify(obj) : l)).join("\n")}\n`, lineNo: index + 1 };
+  }
+
+  it.each([
+    ["race_snapshot_json", (o: any) => void (o.analysis.race_snapshot_json = nested(DEEP))],
+    ["contributions_json", (o: any) => void (o.horses[0].contributions_json = nested(DEEP))],
+  ])("%s が深さ 5000 の入れ子: failed(phase: verify)。行番号と列名を含み、D1 には何も書かれず、再試行もしない", async (column, edit) => {
+    const { text, lineNo } = withColumn(edit);
+    const h = harness();
+    await upload(h, text);
+    await h.run();
+    const status = h.core.getStatus();
+    expect(status.state).toBe("failed");
+    expect(status.failure!.phase).toBe("verify");
+    expect(status.failure!.message).toContain(`${lineNo} 行目`);
+    expect(status.failure!.message).toContain(column);
+    expect(status.attempts).toBeLessThanOrEqual(1);
+    expect(await count("analyses")).toBe(0);
+    expect(h.files.has(KEY)).toBe(false);
+  });
+
+  it("対照: 深さ 50 の入れ子は通り、最後まで取り込まれる(閾値より十分に浅い)", async () => {
+    const { text } = withColumn((o) => void (o.analysis.race_snapshot_json = nested(50)));
+    const h = harness();
+    await upload(h, text);
+    await h.run();
+    expect(h.core.getStatus().state).toBe("completed");
+    expect(await count("analyses")).toBe(5);
   });
 });

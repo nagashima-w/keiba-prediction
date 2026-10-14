@@ -334,7 +334,7 @@ async function main(): Promise<void> {
       check(`${label}: 取り込みが完了する(分析 5 件・結果 5 レース。すべて新規)`, completed["state"] === "completed" && analyses?.total === 5 && analyses.processed === 5 && analyses.imported === 5 && results?.total === 5 && results.processed === 5, JSON.stringify(completed).slice(0, 400));
       // 移行の完了後の補完の進捗。smoke は補完を止めているので、窓(JST 1:00〜6:00)の中で実行しても netkeiba に出ない(state は disabled のまま、アラームは張られない)。
       const backfillDone = parseJson((await req(port, "GET", "/api/results/backfill")).text);
-      // golden の 202603020213 は、結果の行に馬の行が無い(組合せの取込記録だけ)ので、`race_results` に行が無く「未取込」と数えられる(残り 1)。開催日不明は 0(同じレースの別の分析に開催日がある)。
+      // golden の 202603030101 は、結果の行に馬の行が無い(組合せの取込記録だけ)ので、`race_results` に行が無く「未取込」と数えられる(残り 1)。開催日不明は 0(同じレースの別の分析に開催日がある)。
       check(`${label}: 移行の完了後は migrationState completed・状態 disabled・残り 1・開催日不明 0・取得済み 0・取得できなかった 0・次の実行なし(golden の馬の行が無い 1 レースが未取込として数えられる。本物の DO 同士の RPC)`, backfillDone["migrationState"] === "completed" && backfillDone["state"] === "disabled" && backfillDone["remaining"] === 1 && backfillDone["undated"] === 0 && backfillDone["imported"] === 0 && (backfillDone["abandoned"] as { total: number }).total === 0 && typeof (backfillDone["winOdds"] as { remaining: number }).remaining === "number" && backfillDone["nextRunAt"] === null, JSON.stringify(backfillDone).slice(0, 400));
       const list = parseJson((await req(port, "GET", "/api/analyses?limit=200")).text);
       const items = list["analyses"] as { id: number; raceId: string; analyzedAt: string }[];

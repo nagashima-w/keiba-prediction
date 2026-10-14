@@ -135,6 +135,8 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 | `APP_BASE_URL` | 通知のタイトルのリンク(分析画面)の基点となる、このサイトの URL(Issue #230)。**登録は任意**: 未登録・形式不正なら、通知にリンクが付かないだけ(通知自体は送られる。分析も止まらない)。**https のオリジンだけ**有効(例は `https://<あなたのサイトのホスト名>`。パス・クエリ・`#`・ユーザー名とパスワードを含むものは「形式不正」)。登録の手順は、この表の下の「`APP_BASE_URL` の登録」 |
 | `BABA_API_URL` | 馬場の API(外部の API。JRA の競馬場の最新の馬場状態を返す JSON。Issue #294〈#293-A〉)の URL。**登録は任意**: 未登録・https の URL として読めない形なら、取得の仕組み全体が無効(印も書かず、アラームの候補にもしない。分析は従来どおり)。**利用の条件は「JRA の開催日に、利用者全体で 1 日 1 回」**。登録の手順と注意は、この表の下の「`BABA_API_URL` の登録」 |
 
+**`ANTHROPIC_BASE_URL` は登録しない(登録しても効かない)**: コードが Anthropic の宛先を `https://api.anthropic.com` に固定している(Issue #304。SDK は既定で環境変数 `ANTHROPIC_BASE_URL` を読み、`nodejs_compat` では secret が `process.env` に入りうるため、固定しないと API キーが別のホストへ送られる)。
+
 未設定の間は、Worker が全リクエストに 403 を返す(これが正しい動作。`ADMIN_USER` を除く 3 つのどれかが欠けている場合)。
 
 ### `ANTHROPIC_API_KEY` の登録(発走前の分析の LLM。ユーザーが自分で行う)

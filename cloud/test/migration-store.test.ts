@@ -349,8 +349,8 @@ describe("saveMigratedResult: 結果の保存(既存の行を優先)", () => {
   });
 
   it("払戻の行だけがあって取込記録の無い券種(exe の行)も、取り込める", async () => {
-    await resultStore().saveMigratedResult(byRace("202603020215"));
-    expect(await dump("race_combo_payouts", "202603020215")).toEqual(lineOf("202603020215").comboPayouts.map((r) => ({ ...r })));
-    expect(await dump("race_combo_payout_imports", "202603020215")).toEqual([]);
+    await resultStore().saveMigratedResult(byRace("202603030103"));
+    expect(await dump("race_combo_payouts", "202603030103")).toEqual(lineOf("202603030103").comboPayouts.map((r) => ({ ...r })));
+    expect(await dump("race_combo_payout_imports", "202603030103")).toEqual([]);
   });
 });

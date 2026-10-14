@@ -3,9 +3,11 @@
  *
  * 通すもの(どれかが違えば {@link MigrationFormatError}。メッセージに行番号を含む):
  *  - gzip として展開できること(途中で切れていない)
- *  - 各行が `parseMigrationLine`(JSON → 形式の検証)を通ること
+ *  - 各行が `parseMigrationLine`(JSON → 形式の検証)を通ること。**値の形・範囲・1 行あたりの子の行数も見る**(Issue #308。core の規則)。
+ *    **分析日時の上限(サーバの現在時刻 + 7 日)はここだけが渡す**(ブラウザのアップロード前の検証は時計を持たず、未来の日時を見ない)
  *  - `MigrationTally`: 行の並び(ヘッダ → 分析 → 結果 → フッタ)・id/raceId の昇順・フッタの件数と読んだ行数の一致・**フッタが来ていること**
  *  - **取り込みの変換が通ること**(`toAnalysisImport`・`toResultImport`): JSON の列が壊れている・馬番/買い目のキーが重複する、といった「形式は通るが取り込みの途中で落ちる」行を、書き始める前に見つける
+ *  - **取り込みで JSON.stringify される列が再直列化できること**(`assertDetailSerializable`。Issue #309): `JSON.parse` は通る深い入れ子が、取り込みの直列化で RangeError になり、再試行の末に failed になるのを防ぐ
  */
 
 import {
@@ -15,7 +17,7 @@ import {
   type MigrationFooterLine,
   type MigrationHeaderLine,
 } from "../../packages/core/src/ev/cloud-migration-format";
-import { toAnalysisImport, toResultImport } from "./migration-convert";
+import { assertDetailSerializable, toAnalysisImport, toResultImport } from "./migration-convert";
 import { MigrationFileError, readLines } from "./migration-reader";
 
 /** 検証の結果。 */
@@ -28,8 +30,21 @@ export interface VerifiedFile {
   readonly lines: number;
 }
 
+/**
+ * 分析日時の上限の余裕(Issue #308)。exe を使う PC の時計のずれや時差を許しつつ、`"9999-…"` のような値で一覧の先頭に居座られないようにする。
+ * 取り込み時刻 + この値より後の `analyzed_at` を持つファイルは拒否する。
+ */
+export const MIGRATION_ANALYZED_AT_FUTURE_MARGIN_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** 検証のオプション。 */
+export interface VerifyOptions {
+  /** サーバの現在時刻(エポックからのミリ秒)。必須(省略すると未来の日時を見落とすため、型で渡し忘れを防ぐ)。 */
+  readonly now: number;
+}
+
 /** @throws MigrationFormatError 検証に通らない(メッセージは固定の文言+位置+列名。値の全文は含めない) */
-export async function verifyMigrationFile(gz: ReadableStream<Uint8Array>): Promise<VerifiedFile> {
+export async function verifyMigrationFile(gz: ReadableStream<Uint8Array>, options: VerifyOptions): Promise<VerifiedFile> {
+  const parseOptions = { maxAnalyzedAtMs: options.now + MIGRATION_ANALYZED_AT_FUTURE_MARGIN_MS };
   const tally = new MigrationTally();
   let header: MigrationHeaderLine | null = null;
   let footer: MigrationFooterLine | null = null;
@@ -41,7 +56,7 @@ export async function verifyMigrationFile(gz: ReadableStream<Uint8Array>): Promi
       bytes = raw.end;
       let line;
       try {
-        line = parseMigrationLine(raw.text);
+        line = parseMigrationLine(raw.text, parseOptions);
       } catch (e) {
         throw new MigrationFormatError(`${count} 行目: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -53,7 +68,9 @@ export async function verifyMigrationFile(gz: ReadableStream<Uint8Array>): Promi
       } else {
         try {
           if (line.type === "analysis") {
-            toAnalysisImport(line);
+            const imp = toAnalysisImport(line);
+            // 取り込みで JSON.stringify される列が再直列化できること(深い入れ子は RangeError。Issue #309)
+            assertDetailSerializable(imp, `分析の行(analysis.id=${imp.exeId})`);
           } else {
             toResultImport(line);
           }

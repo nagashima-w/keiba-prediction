@@ -15,6 +15,9 @@
  *   (DO の 1 日の上限の環境変数 `MIGRATION_DAILY_ROW_LIMIT` は 100,000 が最大)。したがって **(iii) の行数は、買い目の件数を引数で変えて別々に測る**こと(`--bets`・`--horses`)。
  *   (ii) のバイト数(展開後の大きさ)は馬の頭数で決まるので、既定は実物に近い大きさにしてある(`--horses` を変えると変わる)。
  *
+ * ★Issue #308 以降、形式の検証が値の形と 1 行あたりの子の行数を見るので、合成の値は有効な形にしてある: レース ID は {@link syntheticRaceId}(最大 4800 レース)、
+ *   買い目は {@link syntheticBetKeys}(最大 {@link MAX_SYNTHETIC_BETS} 件)、`--horses` は 18 まで(超えると throw)。
+ *
  * 使い方(リポジトリのルートで。Linux のみ。/proc を使う):
  *   pnpm tsx scripts/measure-migration-import.ts [--analyses 2300] [--results 300] [--horses 10] [--bets 0] [--combo-every 4] [--port 8941] [--keep-file path]
  *
@@ -77,8 +80,67 @@ export interface SyntheticOptions {
 
 const reasonsOf = (text: string): string[] => [...text.matchAll(/"reason":\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]!);
 
+const two = (n: number): string => String(n).padStart(2, "0");
+
+/**
+ * n 番目(1 始まり)の有効なレース ID(昇順・実在する形)。年 2025・中央の場コード 01〜10・回 01〜05・日 01〜08・レース番号 01〜12 の混合基数で、
+ * n を大きくすると文字列としても大きくなる(容量 10×5×8×12 = 4800 レース)。Issue #308 の検証(`parseRaceId`)に適う。以前の `202500000000 + n` は場コード 00 で拒否される。
+ */
+export function syntheticRaceId(n: number): string {
+  if (!Number.isInteger(n) || n < 1 || n > 4800) {
+    throw new Error(`合成できるレース数は 1〜4800 です(n=${n})`);
+  }
+  const index = n - 1;
+  const race = (index % 12) + 1;
+  const day = (Math.floor(index / 12) % 8) + 1;
+  const kai = (Math.floor(index / 96) % 5) + 1;
+  const track = Math.floor(index / 480) + 1;
+  return `2025${two(track)}${two(kai)}${two(day)}${two(race)}`;
+}
+
+/** 買い目として合成できる (券種, キー) の最大数: 複勝 18 + ワイド 153 + 3連複 816 + 馬連 153 + 馬単 306 + 3連単 4896。 */
+export const MAX_SYNTHETIC_BETS = 6342;
+
+/** 先頭 `count` 件の買い目の (券種, キー)。6 券種を順に回す(券種ごとに重複しない有効なキー。Issue #308 の検証に適う)。 */
+export function syntheticBetKeys(count: number): Array<{ betType: string; key: string }> {
+  if (!Number.isInteger(count) || count < 0 || count > MAX_SYNTHETIC_BETS) {
+    throw new Error(`合成できる買い目は 0〜${MAX_SYNTHETIC_BETS} 件です(count=${count})`);
+  }
+  const pools: Array<{ betType: string; keys: string[] }> = [
+    { betType: "place", keys: [] }, { betType: "wide", keys: [] }, { betType: "trio", keys: [] },
+    { betType: "quinella", keys: [] }, { betType: "exacta", keys: [] }, { betType: "trifecta", keys: [] },
+  ];
+  const [place, wide, trio, quinella, exacta, trifecta] = pools.map((p) => p.keys) as [string[], string[], string[], string[], string[], string[]];
+  for (let a = 1; a <= 18; a += 1) {
+    place.push(two(a));
+    for (let b = 1; b <= 18; b += 1) {
+      if (a < b) {
+        wide.push(two(a) + two(b));
+        quinella.push(two(a) + two(b));
+      }
+      if (a !== b) exacta.push(two(a) + two(b));
+      for (let c = 1; c <= 18; c += 1) {
+        if (a < b && b < c) trio.push(two(a) + two(b) + two(c));
+        if (a !== b && b !== c && a !== c) trifecta.push(two(a) + two(b) + two(c));
+      }
+    }
+  }
+  const out: Array<{ betType: string; key: string }> = [];
+  for (let i = 0; out.length < count; i += 1) {
+    for (const pool of pools) {
+      const key = pool.keys[i];
+      if (key !== undefined && out.length < count) out.push({ betType: pool.betType, key });
+    }
+  }
+  return out;
+}
+
 /** 合成した移行ファイルの行(末尾の改行なし)を順に返す。 */
 export function* syntheticLines(options: SyntheticOptions): Generator<string> {
+  if (options.horses > 18) {
+    throw new Error(`馬は 18 頭までです(--horses ${options.horses}。Issue #308 の検証が 1 行 18 頭を超える行を拒否する)`);
+  }
+  const betKeys = syntheticBetKeys(options.bets);
   const rand = seededRandom(20261009);
   const detail = JSON.parse(buildDetailText()) as {
     raceSnapshot: Record<string, unknown>;
@@ -98,7 +160,7 @@ export function* syntheticLines(options: SyntheticOptions): Generator<string> {
 
   for (let i = 1; i <= options.analyses; i += 1) {
     const raceNo = 1 + (i % Math.max(1, options.results || 1));
-    const raceId = String(202500000000 + raceNo);
+    const raceId = syntheticRaceId(raceNo);
     const response = responses[i % responses.length]!;
     const reasons = reasonsOf(response);
     const snapshot = options.comboEvery > 0 && i % options.comboEvery === 0 ? fullSnapshot : lightSnapshot;
@@ -130,10 +192,10 @@ export function* syntheticLines(options: SyntheticOptions): Generator<string> {
       highlights_json: JSON.stringify(["近走の内容が良い", "距離適性あり", "鞍上強化"]),
       concerns_json: JSON.stringify(["斤量増", "間隔が短い"]),
     }));
-    const bets: MigrationRow[] = Array.from({ length: options.bets }, (_, b) => ({
+    const bets: MigrationRow[] = betKeys.map((b) => ({
       analysis_id: i,
-      bet_type: ["place", "wide", "trio", "quinella", "exacta", "trifecta"][b % 6]!,
-      combo_key: String(100000 + b * 37 + i).padStart(8, "0"),
+      bet_type: b.betType,
+      combo_key: b.key,
       stake: 100,
       odds: 5.5,
       ev: 1.2,
@@ -150,7 +212,7 @@ export function* syntheticLines(options: SyntheticOptions): Generator<string> {
   }
 
   for (let r = 1; r <= options.results; r += 1) {
-    const raceId = String(202500000000 + r);
+    const raceId = syntheticRaceId(r);
     const n = 14 + (r % 5);
     const results: MigrationRow[] = Array.from({ length: n }, (_, k) => ({
       race_id: raceId, umaban: k + 1, finish_position: k + 1, place_payout: k < 3 ? 150 + k * 40 : null, win_payout: k === 0 ? 380 : null, passing_json: JSON.stringify([3, 3, 2, 1]), last3f: 34 + rand(),

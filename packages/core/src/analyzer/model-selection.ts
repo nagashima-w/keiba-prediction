@@ -17,6 +17,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { ANTHROPIC_API_BASE_URL } from "./anthropic-endpoint.js";
 
 /** Models API の1件のうち、選別に使う最小の形。 */
 export interface ModelInfoLite {
@@ -177,6 +178,8 @@ export function createSdkModelLister(options: SdkModelListerOptions = {}): Model
   return async () => {
     if (client === null) {
       client = new Anthropic({
+        // 宛先は固定(環境変数 ANTHROPIC_BASE_URL を SDK に読ませない。Issue #304)
+        baseURL: ANTHROPIC_API_BASE_URL,
         ...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
         ...(options.timeout === undefined ? {} : { timeout: options.timeout }),

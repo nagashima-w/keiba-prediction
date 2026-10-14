@@ -542,6 +542,7 @@ export {
   type EmbedRaceInfo,
   type SendDiscordDeps,
 } from "./notify/discord.js";
+export { dropDanglingBackslash, escapeDiscordMarkdown } from "./notify/discord-escape.js";
 export type {
   BodyWeight,
   CourseType,

@@ -195,7 +195,7 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
   });
 
   it("pnpm と Node.js は package.json の packageManager と Node 22 に従う(pnpm はバージョン未指定・Node は 22)", () => {
-    expect(extractStep(yml, STEP_NAMES.pnpm)).toContain("uses: pnpm/action-setup@v4");
+    expect(extractStep(yml, STEP_NAMES.pnpm)).toContain("uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0");
     expect(extractStep(yml, STEP_NAMES.pnpm)).not.toMatch(/^\s+version:/m);
     expect(extractStep(yml, STEP_NAMES.node)).toMatch(/node-version: 22\b/);
   });

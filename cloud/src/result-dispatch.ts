@@ -9,10 +9,16 @@
  *    日ごとに引かないのは D1 の「1 回の呼び出しで 50 クエリ」の制約(手動は最大 31 日)のため。1 日の件数の上限があるので、古い日の永久に取り込めないレース(中止など)が、新しい日を押しのけない。
  *  - 依頼する日数は {@link CRON_RESULT_MAX_DAYS}(cron)・{@link MANUAL_RESULT_MAX_DAYS}(手動)に絞る: 過去日の DO が多数同時に gate に並ぶと、gate の待ち行列の上限(8)が埋まり、
  *    画面で開いた一覧まで拒否されるため。普段の未取込は前日の 1 日だけ。溜まった分は、翌日以降の cron か手動の再実行で、続きから消化される(取り込み済みは列挙から外れる)。
+ *  - **不正なレースは依頼の前に除外する**(Issue #307〈#302-A〉。`checkRaceDate`: 12 桁の中央/地方のレースID・開催日の実在・年の一致・地方の月日の一致。補完と同じ検査)。
+ *    日単位の DO の `requestResultImport` は不正なレースが 1 件でもあると依頼全体を拒否するので、毒の行 1 件でその日の本物のレースまで取り込めなくなる。開催日が不正(`20261001x` のように、
+ *    文字列比較では窓に入ってしまう値)の行も、その日の DO のスタブを引く前に落とす。除外した数は {@link DispatchResultImportsResult.invalid}・ログ(分類名と件数だけ)に出す。
+ *    **除外しても、不正なレースは未取込のまま列挙に残り続ける**(1 日 {@link RESULT_PER_DAY_LIMIT} 件・合計 {@link RESULT_TOTAL_LIMIT} 件の枠を占める。補完の「除外リスト」に相当するものは cron 経路には無い)。
+ *    不正な行が入ってくる入口(移行ファイルの取り込み)の検証は #308 で足す。
  *  - **失敗は例外にしない**(D1 の列挙の失敗も、ある日の DO への依頼の失敗も)。結果は件数で返し、ログは固定の分類名・日付・件数だけ(例外の文面・値は出さない)。
  *    事前分析の計画(`requestPlan`)を失敗させないため。
  */
 import type { RequestResultImportResult } from "./race-day-core";
+import { checkRaceDate } from "./race-date";
 import type { ListUnimportedByDayOptions, UnimportedRace } from "./result-repository";
 
 /** cron が見る窓の日数(今日は含めない。前日までの 7 日)。 */
@@ -63,6 +69,8 @@ export interface DispatchResultImportsResult {
   readonly accepted: number;
   /** 依頼（RPC）が失敗した日数。 */
   readonly failedDays: number;
+  /** 列挙したレースのうち、`checkRaceDate` を通らず、依頼の前に除外した数（Issue #307）。`listed` に含まれる。失敗（`failedDays`・`listFailed`）としては数えない。 */
+  readonly invalid: number;
   /** 列挙（D1）が失敗した。 */
   readonly listFailed: boolean;
 }
@@ -97,14 +105,23 @@ export async function dispatchResultImports(input: DispatchResultImportsInput): 
     races = await store.listUnimportedRacesByDay({ from, to, perDay: RESULT_PER_DAY_LIMIT, maxDays, total: RESULT_TOTAL_LIMIT });
   } catch (error) {
     log(`result-import: failed class=result-list-failed error=${errorKind(error)}`, "error");
-    return { listed: 0, days: 0, accepted: 0, failedDays: 0, listFailed: true };
+    return { listed: 0, days: 0, accepted: 0, failedDays: 0, invalid: 0, listFailed: true };
   }
-  // 日ごとにまとめる（列挙は新しい日が先。その並びを保つ）。
+  // 日ごとにまとめる（列挙は新しい日が先。その並びを保つ）。不正なレースは、ここで落とす（DO のスタブを引く前）。
   const byDay = new Map<string, string[]>();
+  let invalid = 0;
   for (const race of races) {
+    if (!checkRaceDate(race.raceId, race.kaisaiDate).ok) {
+      invalid += 1;
+      continue;
+    }
     const ids = byDay.get(race.kaisaiDate) ?? [];
     ids.push(race.raceId);
     byDay.set(race.kaisaiDate, ids);
+  }
+  if (invalid > 0) {
+    // 値（レースID・開催日）は出さない。分類名と件数だけ。
+    log(`result-import: skipped class=invalid-race count=${invalid}`, "error");
   }
   let accepted = 0;
   let failedDays = 0;
@@ -118,5 +135,5 @@ export async function dispatchResultImports(input: DispatchResultImportsInput): 
     }
   }
   log(`result-import: dispatched from=${from} to=${to} listed=${races.length} days=${byDay.size} accepted=${accepted} failed-days=${failedDays}`, "info");
-  return { listed: races.length, days: byDay.size, accepted, failedDays, listFailed: false };
+  return { listed: races.length, days: byDay.size, accepted, failedDays, invalid, listFailed: false };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AnthropicRequestParams } from "@keiba/core/llm";
 import { createCloudLlm, createCloudLlmSender, createCloudModelLister, LLM_LIST_TIMEOUT_MS, LLM_REQUEST_TIMEOUT_MS, LLM_SDK_MAX_RETRIES } from "../src/llm-sender";
@@ -190,5 +190,51 @@ describe("API キーの前後の空白は取り除いて送る(Issue #194 R5)", 
     expect(keys).toEqual([BARE, BARE]);
     // 前提(空振り防止): 偽 fetch は実際にヘッダを受け取っている(null でない)
     expect(keys.every((k) => k !== null)).toBe(true);
+  });
+});
+
+/**
+ * Issue #304: クラウド版の LLM の経路(`createCloudLlm` の sender・lister)でも、環境変数 `ANTHROPIC_BASE_URL` が効かず、
+ * 送信先が `api.anthropic.com` に固定されること(cloud 側で独自に SDK のクライアントを生成せず、core の同じクライアントを通る確認)。
+ * Worker の `nodejs_compat` では secret が `process.env` に入りうる。ここでは `process.env` に別のホストを入れて偽 fetch の受け取った URL を見る(実 API には出ない)。
+ */
+describe("環境変数 ANTHROPIC_BASE_URL が効かない(Issue #304)", () => {
+  const EVIL = "https://evil.example.test";
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env.ANTHROPIC_BASE_URL;
+    process.env.ANTHROPIC_BASE_URL = EVIL;
+  });
+  afterEach(() => {
+    if (saved === undefined) {
+      delete process.env.ANTHROPIC_BASE_URL;
+    } else {
+      process.env.ANTHROPIC_BASE_URL = saved;
+    }
+  });
+
+  function recordingFetch() {
+    const urls: string[] = [];
+    const fetchImpl = vi.fn(async (url: unknown) => {
+      urls.push(String(url));
+      const body = String(url).includes("/v1/models")
+        ? { data: [], has_more: false, first_id: null, last_id: null }
+        : { id: "msg_test", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [{ type: "text", text: "x" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    return { urls, fetchImpl: fetchImpl as unknown as typeof fetch };
+  }
+
+  it("createCloudLlm(RaceDay が使う入口)の sender・lister は、どちらも api.anthropic.com へ送る", async () => {
+    // 前提(空振り防止): 環境変数は実際に別のホストに設定されている
+    expect(process.env.ANTHROPIC_BASE_URL).toBe(EVIL);
+    const { urls, fetchImpl } = recordingFetch();
+    const llm = createCloudLlm("sk-ant-fake-test-key-not-real", { fetch: fetchImpl });
+    await llm!.sender(REQUEST);
+    await llm!.lister!();
+    // 前提: 偽 fetch は sender と lister の 2 本を受け取っている(messages と models)
+    expect(urls).toHaveLength(2);
+    expect(urls.map((u) => new URL(u).pathname)).toEqual(["/v1/messages", "/v1/models"]);
+    expect(urls.map((u) => new URL(u).host)).toEqual(["api.anthropic.com", "api.anthropic.com"]);
   });
 });

@@ -14,6 +14,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { ANTHROPIC_API_BASE_URL } from "./anthropic-endpoint.js";
 import type { LlmClient, LlmCompletion } from "./analyze-race.js";
 import type { ModelSelector } from "./model-selection.js";
 import { AnalyzerRefusalError, AnalyzerTruncationError } from "./parse-response.js";
@@ -284,6 +285,8 @@ export function createSdkMessageSender(options: SdkMessageSenderOptions = {}): M
   return async (params) => {
     if (client === null) {
       client = new Anthropic({
+        // 宛先は固定(環境変数 ANTHROPIC_BASE_URL を SDK に読ませない。Issue #304)
+        baseURL: ANTHROPIC_API_BASE_URL,
         ...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
         ...(options.timeout === undefined ? {} : { timeout: options.timeout }),

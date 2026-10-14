@@ -74,6 +74,87 @@ describe("isDiscordWebhookUrl(送信前のURL検証)", () => {
       expected: false,
       note: "サブドメイン偽装は不可(前方一致プレフィックス外)",
     },
+    // ---- Issue #301: new URL() による解析・ホストの完全一致・https・パスが /api/webhooks/ で始まる ----
+    {
+      url: "https://discord.com.evil.example/api/webhooks/1/x",
+      expected: false,
+      note: "ホストが discord.com で始まるだけの別ホスト(前方一致では通ってしまった形)は不可",
+    },
+    {
+      url: "https://evil.example/?https://discord.com/api/webhooks/",
+      expected: false,
+      note: "クエリに正規 URL を埋め込んだ別ホストは不可",
+    },
+    {
+      url: "https://evil.example/#https://discord.com/api/webhooks/1/x",
+      expected: false,
+      note: "フラグメントに正規 URL を埋め込んだ別ホストは不可",
+    },
+    {
+      url: "https://discord.com@evil.example/api/webhooks/1/x",
+      expected: false,
+      note: "userinfo 偽装(実際のホストは evil.example)は不可",
+    },
+    {
+      url: "https://evil@discord.com/api/webhooks/1/x",
+      expected: false,
+      note: "ホストが正規でも userinfo 付きは不可",
+    },
+    {
+      url: "https://discord.com:444/api/webhooks/1/x",
+      expected: false,
+      note: "明示ポート付きは不可",
+    },
+    {
+      url: "https://discord.com\\@evil.example/api/webhooks/1/x",
+      expected: false,
+      note: "バックスラッシュ(WHATWG ではパス区切り扱い)で正規ホストに見せる形は不可",
+    },
+    {
+      url: "https://discord.com/api/webhooks",
+      expected: false,
+      note: "末尾の / が無い(/api/webhooks/ で始まらない)は不可",
+    },
+    {
+      url: "https://discord.com/api/webhooks/../x",
+      expected: false,
+      note: "ドットセグメントで /api/webhooks/ の外へ出る形は不可(正規化後に判定)",
+    },
+    {
+      url: "https://discord.com/api/%2e%2e/x",
+      expected: false,
+      note: "パーセントエンコードしたドットセグメントも正規化後に判定して不可",
+    },
+    {
+      url: "https://ptb.discord.com/api/webhooks/1/x",
+      expected: false,
+      note: "サブドメイン(ptb.)は不可(ホストの完全一致)",
+    },
+    {
+      url: "https://discord.com./api/webhooks/1/x",
+      expected: false,
+      note: "末尾ドット付きのホストは不可(完全一致)",
+    },
+    {
+      url: "javascript:https://discord.com/api/webhooks/1/x",
+      expected: false,
+      note: "https: 以外のスキームは不可",
+    },
+    {
+      url: "not a url https://discord.com/api/webhooks/",
+      expected: false,
+      note: "URL として解析できない文字列は不可(例外を投げず false)",
+    },
+    {
+      url: "HTTPS://DISCORD.COM/api/webhooks/1/x",
+      expected: true,
+      note: "スキーム・ホストの大文字小文字は URL の解析で正規化されるため許容",
+    },
+    {
+      url: "https://discord.com/api/webhooks/123/abc?wait=true&thread_id=9",
+      expected: true,
+      note: "クエリ付きの正規 URL は妥当",
+    },
   ];
 
   for (const { url, expected, note } of cases) {
@@ -105,6 +186,15 @@ describe("parseRetryAfterMs(429 の待機時間解釈)", () => {
 });
 
 describe("truncate(文字数制限の切り詰め)", () => {
+  it("escape の対(バックスラッシュ + 記号)を割らない: 切り詰めの境界で単独のバックスラッシュが末尾の『…』の前に残らない(Issue #301)", () => {
+    // "ab\*cd" は 6 文字。maxLen=4 → 先頭 3 文字 "ab\" + "…" になるところ、孤立した \ を落として "ab…"。
+    expect(truncate("ab\\*cd", 4)).toBe("ab…");
+    // escape 済みのバックスラッシュ(\\)の対は完結しているので残す。
+    expect(truncate("ab\\\\cd", 5)).toBe("ab\\\\…");
+    // 境界が通常文字なら今までどおり
+    expect(truncate("abcdef", 4)).toBe("abc…");
+  });
+
   it("上限以下はそのまま返す", () => {
     expect(truncate("あいう", 3)).toBe("あいう");
     expect(truncate("あい", 3)).toBe("あい");
@@ -350,6 +440,37 @@ describe("buildAnalysisEmbed(分析結果→Discord embed 整形)", () => {
   });
 });
 
+describe("buildAnalysisEmbed(外から来た文字列の無害化。Issue #301)", () => {
+  const hostileInfo: EmbedRaceInfo = { ...raceInfo, raceName: "[G1](https://evil.example) *太字*", venueName: "東京" };
+  const hostileHorses: readonly EmbedHorse[] = [
+    { umaban: 3, horseName: "[押す](https://evil.example/x)", adjustedProb: 0.4, placeOddsMin: 2.5, ev: 1.05, isPositive: true, mark: "◎" },
+  ];
+
+  it("レース名(title)・馬名(EV プラスの行)のマスクドリンクと書式記号が escape される", () => {
+    const embed = buildAnalysisEmbed(hostileInfo, hostileHorses);
+    expect(embed.title).toBe("東京 \\[G1\\](https://evil.example) \\*太字\\*");
+    const line = (embed.description ?? "").split("\n").find((l) => l.includes("3番"))!;
+    expect(line).toContain("\\[押す\\](https://evil.example/x)");
+    // 素の `[` は 1 つも残らない(escape の対を除いて確認)
+    expect((embed.description ?? "").replace(/\\\[/g, "")).not.toContain("[");
+  });
+
+  it("馬名の切り詰め(32 コードポイント)は escape の前: 見える文字数が escape で減らない", () => {
+    const name = "*".repeat(40);
+    const embed = buildAnalysisEmbed(raceInfo, [{ ...hostileHorses[0]!, horseName: name }]);
+    const line = (embed.description ?? "").split("\n").find((l) => l.includes("3番"))!;
+    // 32 コードポイントで切る → 31 個の * と省略記号。各 * が \* になる。
+    expect(line).toContain(`${"\\*".repeat(31)}…`);
+  });
+
+  it("こちらのテンプレートの記号(印・括弧・%・推定)と、普通の馬名・レース名は変わらない", () => {
+    const embed = buildAnalysisEmbed(raceInfo, horses);
+    expect(embed.title).toBe("東京 テストステークス");
+    const line = (embed.description ?? "").split("\n").find((l) => l.includes("ウマA"))!;
+    expect(line).toBe("◎ 3番 ウマA AI補正後42.1% 複勝下限2.5 EV1.05");
+  });
+});
+
 describe("sendDiscordNotification(Webhook送信)", () => {
   const validUrl = "https://discord.com/api/webhooks/123/abc";
   const payload = { embeds: [{ title: "t", description: "d" }] };
@@ -367,7 +488,40 @@ describe("sendDiscordNotification(Webhook送信)", () => {
     expect(calledUrl).toBe(validUrl);
     expect(init.method).toBe("POST");
     expect(init.headers["Content-Type"]).toBe("application/json");
-    expect(JSON.parse(init.body)).toEqual(payload);
+    // Issue #301: 送る本文は payload に allowed_mentions を足した形で、完全一致のまま(キーを足しただけで、payload の内容は保つ)。
+    expect(JSON.parse(init.body)).toEqual({ ...payload, allowed_mentions: { parse: [] } });
+  });
+
+  it("allowed_mentions: { parse: [] } を常に付ける(メンションで誰にも通知が飛ばない。Issue #301)", async () => {
+    const fetchMock = vi.fn<DiscordFetchLike>(async () => makeResponse({ status: 204 }));
+    await sendDiscordNotification(validUrl, payload, { fetch: fetchMock });
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body) as Record<string, unknown>;
+    expect(body["allowed_mentions"]).toEqual({ parse: [] });
+    // content を使う将来の呼び出しでも同じ(@everyone を含む本文でも parse は空)
+    await sendDiscordNotification(validUrl, { content: "@everyone <@123>", embeds: [] }, { fetch: fetchMock });
+    const body2 = JSON.parse(fetchMock.mock.calls[1]![1].body) as Record<string, unknown>;
+    expect(body2["content"]).toBe("@everyone <@123>");
+    expect(body2["allowed_mentions"]).toEqual({ parse: [] });
+  });
+
+  it("呼び出し側が別の allowed_mentions を渡しても、送るのは { parse: [] } に固定する(上書き)", async () => {
+    const fetchMock = vi.fn<DiscordFetchLike>(async () => makeResponse({ status: 204 }));
+    const hostile = { ...payload, allowed_mentions: { parse: ["everyone", "users", "roles"] } } as unknown as typeof payload;
+    await sendDiscordNotification(validUrl, hostile, { fetch: fetchMock });
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body) as Record<string, unknown>;
+    expect(body["allowed_mentions"]).toEqual({ parse: [] });
+  });
+
+  it("429 の再送でも allowed_mentions を付けたまま(2 回目の本文も同じ)", async () => {
+    const fetchMock = vi
+      .fn<DiscordFetchLike>()
+      .mockResolvedValueOnce(makeResponse({ status: 429, headers: { "retry-after": "1" } }))
+      .mockResolvedValueOnce(makeResponse({ status: 204 }));
+    await sendDiscordNotification(validUrl, payload, { fetch: fetchMock, sleep: async () => {} });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      expect((JSON.parse(call[1].body) as Record<string, unknown>)["allowed_mentions"]).toEqual({ parse: [] });
+    }
   });
 
   it("不正なWebhook URLは fetch せず DiscordNotifyError を投げる", async () => {

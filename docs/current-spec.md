@@ -360,7 +360,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **予想印**: ◎〇▲△☆注(`PREDICTION_MARKS`)。◎はちょうど1頭必須、本線印は飛ばさない優先順位制約。
 - **強調材料・懸念事項**(Issue #197〈#196-a〉。`PROMPT_VERSION` `2026-10-07.1`): 馬ごとに、総合の根拠 `reason`(一文。残す)に加えて `highlights`(強調材料)・`concerns`(懸念事項)を出させる。
   各最大3項目・1項目は全角30字以内の短い句・該当が無ければ `[]`。`reason` の言い換えにはさせず、**単勝オッズ・人気・参考 EV を材料にさせない**(印の判断材料としての既存の指示は変えない)。出力例は `mark` の後ろに置く。
-  解析(`parse-response.ts` の `coerceItemList`): 欠落・配列でない値は `[]`、文字列でない要素と空(trim 後)は捨てて trim した値を残し、**空を除いたあとに**先頭3つに切る(1項目の長さは切らない)。
+  解析(`parse-response.ts` の `coerceItemList`): 欠落・配列でない値は `[]`、文字列でない要素と空(trim 後)は捨てて trim した値を残し、**空を除いたあとに**先頭3つに切る(1項目の長さは、trim 後に 100 コードポイントを超えるときだけ「…」付きで切る。Issue #303。`reason` は 400、未知の印の説明文に入る生値は 40 コードポイントで同様に切る。`truncateByCodePoints`)。
   `place_prob` が欠落・不正で prior 採用になった馬(`usedPrior`)は `[]`。**分析は止めない**(`clipped`・`missing`・フォールバックの判定に影響しない)。印の制約違反の救済でも保持する。
   保存: exe の `analysis_horses.highlights_json`・`concerns_json`(JSON 配列の文字列。**項目なし〈空配列・省略〉は NULL**、読むと NULL・壊れた値は `[]`)、D1 は migration `0006`。`AnalysisRow`・保存レコードに載る。画面への表示は、クラウド版が #198、exe の結果表とエクスポートが #199(§6)。
   出力量は増える(推測で約 2〜2.3 倍。**実測は公開後**)。
@@ -882,8 +882,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   分析の件数・結果のレース数・ファイルの大きさ・保存先を表示。キャンセルは何もしない。失敗時はメッセージ+ログのコピーボタン。
   書き出しの二重実行は main 側で拒否する(設定タブの再マウントで画面側の状態が消えても防ぐ)。
 - **ファイル**: gzip 圧縮の NDJSON(1 行 = 1 つの JSON。区切りは `\n` だけ。JSON.stringify は値中の改行〈`\n`・`\r`〉をエスケープするので
-  1 行に収まる。**U+2028・U+2029 はエスケープされず生のまま入る**〈2026-10-09 に node で確認〉ので、取り込み側は Unicode の行区切りではなく `\n` だけで分割すること)。形式は core の `ev/cloud-migration-format.ts`(ブラウザと Worker でも動く。`node:` も `better-sqlite3` も import しない。
+  1 行に収まる。**U+2028・U+2029 はエスケープされず生のまま入る**〈2026-10-09 に node で確認〉ので、取り込み側は Unicode の行区切りではなく `\n` だけで分割すること)。形式は core の `ev/cloud-migration-format.ts`(ブラウザと Worker でも動く。`node:` も `better-sqlite3` も import しない。import するのは import を持たない葉の `scraper/ids.ts`・`scraper/combo-odds-key.ts` の 2 本だけ〈#308〉。
   取り込み側は `@keiba/core/ev/cloud-migration-format` から import する)。
+  **値の検証(#308)**: 列集合・型・NOT NULL・親子の一致に加えて、値の形・範囲・1 行あたりの子の行数を検証し、違反があれば書き込む前にファイル全体を拒否する(サーバの全体検証とブラウザのアップロード前の検証の両方)。厳格: `race_id`(`parseRaceId`)・`kaisai_date`(null または `parseKaisaiDate`)・`analyzed_at`(ISO・タイムゾーンつき・暦に実在・長さ 40 以下)・`umaban`(1〜18)・`bet_type`(買い目は 8 種、払戻系は組合せの 6 種)。ゆるく: `combo_key` は偶数長の数字で各 2 桁が 01〜18、長さ 2〜6。`mark` は長さ 16 以下だけ。カテゴリ列は長さ 128 以下(列挙では見ない)。長文列は新しい上限なし(1 行 8MiB の既存上限)。子の行数の上限は理論値から導出: 馬・結果 18、買い目 6396、払戻 6360、取込マーカー 6。**`analyzed_at` が『サーバの現在時刻 + 7 日』より後のファイルはサーバの検証だけが拒否する**(ブラウザは時計を見ない)。
   1. ヘッダ 1 行: `{"type":"header","format":"keiba-cloud-migration","version":1,"exportedAt":<ISO UTC>,"appVersion":<アプリの版>}`
   2. 分析の行(0 行以上。`analysis.id` の昇順・重複なし): `{"type":"analysis","analysis":{analyses の全列},"horses":[analysis_horses の全列…],
      "bets":[analysis_bets の全列…],"allocationMeta":{analysis_allocation_meta の全列}|null}`。
@@ -1937,7 +1938,7 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
   失敗は、ステータスと `error.type` だけで分類した固定の日本語の文言(409 取り込み中・413 大きすぎ〈50MB〉・503 の `r2-fence`〈R2 の書き込み上限。翌月〉・その他の 503・Origin 不一致・ログイン切れ・通信の失敗)。**サーバの文面・例外の文面は読まない**。409 のときは、サーバの今の状態を取り直して進捗を見せる。取り込み中は、ファイルを選ばせず・始めさせない(サーバも 409 で断る)。
 - **進捗(`GET /api/migration`)**: 状態・分析/結果の処理済み/全体・新規/取り込み済み/衝突の内訳・今日の書き込み行数・アップロード日時と書き出し日時(JST)・予算待ち/R2 待ちの再開時刻(**JST**)・完了(衝突があれば件数と例を最大 5 件)・失敗の理由(`failure.message` を 300 文字までに切り詰めてテキストで。phase で「検証で失敗〈何も取り込まれていない〉」「取り込みで失敗〈再度アップロードすると続きから〉」を出し分け)。サーバが決めた固定の文言で、`failure.message` と `conflictSamples` だけは例外的に画面に出す。
   **更新の間隔**: 画面を開いたとき 1 回。その後は取り込み中の間だけ、verifying・importing は **10 秒**、waiting-budget・waiting-r2 は **60 秒**(再開は数時間〜翌月先)。idle・completed・failed では止める。非表示の間は止め、表示に戻ったら即時に 1 回取って再開する。通信の失敗が 3 回続いたら止めて「再読込」を促す(最後に取れた進捗は残す)。`GET /api/migration` は移行の DO の状態を読むだけで、D1 の読み取りも netkeiba・LLM も増やさない。画面を開き直すと進捗を取り直して見える。
-- **クライアントの取り込み**: core を直接 import する例外が 1 つ増えた(`@keiba/core/ev/cloud-migration-format`。import を 1 つも持たない)。`cloud/src/migration-reader.ts`(import なし)もクライアントに入る。`test/client-bundle.test.ts` が、この 2 つが閉包に入っていること・`migration-core`・`-do`・`-convert`・`-verify`・`analysis-store-codec` が入らないこと・`node:` が入らないことを固定している。
+- **クライアントの取り込み**: core を直接 import する例外が 1 つ増えた(`@keiba/core/ev/cloud-migration-format`。#222 の時点では import を 1 つも持たなかったが、#308 で `scraper/ids.ts`・`scraper/combo-odds-key.ts` の 2 本だけを import する形になった。この 2 本は import を持たず、`test/client-bundle.test.ts` が固定している)。`cloud/src/migration-reader.ts`(import なし)もクライアントに入る。`test/client-bundle.test.ts` が、この 2 つが閉包に入っていること・`migration-core`・`-do`・`-convert`・`-verify`・`analysis-store-codec` が入らないこと・`node:` が入らないことを固定している。
   DOM アダプタ(`dom.ts`)の許可を足した: 要素 `progress`(`value`・`max` は数字だけ)・属性 `accept`(`input type="file"` だけ。拡張子・MIME の並び)・イベント `on.file`(`input type="file"` だけ。選ばれた最初の File。`value`〈偽のパス〉は読まない)。
   **バンドルの大きさ**: 117,977 → **157,309 バイト**(+39,332。`pnpm run build:client`)。内訳(metafile の `bytesInOutput`): 形式の検証 10,437・画面の文言 10,318・API の分類と固定の失敗文言 7,829・制御 2,565・検証 2,020・行の分割 1,475、残りは `view.ts`・`dom.ts`・`settings-form.ts`・`app.ts`・`route.ts` の増分。日本語が `\u` エスケープで 1 文字 6 バイトになるのが大半。サイズの上限を 125,000 → 175,000 に引き上げた(`charset` は変えていない)。
 - **実画面の確認(Playwright + Chromium 141。本番の `worker.ts` を `wrangler dev --local`〈ctx.access 注入。D1・R2・DO はローカル〉で動かし、スマホ幅 360px と PC 幅 1280px)**: 合成ファイル(`scripts/measure-migration-import.ts` の `syntheticLines`。分析 2,225 件・結果 1,301 レース・馬 10 頭・買い目 0 件。3,528 行・展開後 154.9MB・gzip 25.6MB。**ユーザーの実データ〈gzip 14.9MB〉より大きい**)を選ばせた結果:
@@ -1962,6 +1963,11 @@ exe の「クラウド移行用に書き出す」(上の「クラウド移行用
   結果・結果メタ・組合せ払戻・取込記録は**既存の行を優先**(馬は、そのレースに 1 行でもあれば表ごと飛ばす。払戻は、その券種の取込記録があれば飛ばす)。同じファイルを 2 回 upload しても重複しない。
 - **予算**: D1 は 1 日 **6 万行**(`meta.rows_written` の実測の合計で数える。達したら `waiting-budget` で翌 UTC 日の 00:05 に自動で再開)。1 回のアラームの問い合わせ数は **40 以内**(batch は文の数で数える。Free の「1 回の呼び出しで 50 クエリ」の手前。**本番の数え方は未確認**)。
   R2 の柵(#173)に達したら、**要約だけの保存にせず**止めて翌月 1 日の 00:05 UTC に再開する。
+  **処理前の見積もり**(#309。#302-C): 行を処理する**前**に、その行が書く行数を見積もり(`estimateRowsWritten`。分析 = 12 + 2×馬 + (配分メタあり ? 1 + 2×買い目 : 0)、結果 = 2×結果の馬 + (面あり ? 2 : 0) + 2×払戻 + 2×取込記録。ローカル D1 の `meta.rows_written` の実測と一致を固定: `cloud/test/migration-rows-estimate.test.ts`)、使用量に足して上限を超えるなら処理せず翌日へ回す。
+  取り込み済みの分析は 0、日の最初の行は必ず処理する(小さい上限でも進む)。#308 の子の行数の上限(馬 18・買い目 6,396・払戻 6,360・取込記録 6)でも、1 行の最大は分析 12,841 行・結果 12,770 行で、移行の 1 日の上限(6 万行)と D1 Free の上限(10 万行)より小さい。
+  したがって #308 の後は、予算の確認が処理後だけでも D1 Free の上限は超えなかった(最悪でも 6 万 + 約 1.3 万行)。この見積もりの効果は、移行の 1 日の上限(6 万行)を守ること。本番の `rows_written` の数え方はローカルと同じとは限らない(最初の本番の実保存で確かめる)。
+  kv に保存して応答に載る文字列は長さで切る(`failure.message`・`conflictSamples` の各要素は 300 文字、ヘッダの `exportedAt`・`appVersion` は 64 文字。ヘッダ値は拒否せず切り詰め)。
+  検証では、取り込みで `JSON.stringify` される列(`race_snapshot_json`・各馬の `contributions_json`)の再直列化を試し、深い入れ子(`RangeError`)は形式の拒否にする(CPU の測定: `cloud/measure-verify-cpu.ts`)。
 - **詳細(R2)の欠落を防ぐ記憶と、アラームの自己回復**(レビューで見つけた穴の対処): 分析を D1 に書く**前**に「詳細が未完了」の記憶(kv の `pending`)に加え、R2 の put の成功で外す。ジョブの状態(待機・失敗・再アップロード)とは独立に残り、次にその分析に当たったとき、取り込み済みとして飛ばす前に詳細を作り直す
   (put の失敗のあとに日次予算・R2 の柵で待機に入る、連続失敗で `failed` になって R2 の復旧後に再アップロードする、といった経路でも、`completed` なのに詳細が欠ける状態にならない)。
   取り込み系の状態なのにアラームが無ければ(アラームの再試行の上限を超えて落ちた)、`GET /api/migration` とアップロードの受付で張り直す。
