@@ -1,6 +1,6 @@
 # 競馬期待値分析ツール 実装仕様書 v2
 
-> **本書は当初の設計・計画(Phase 1→6)の記録です。** 実装は v1.2.0 に到達しており、実際に実装済みの
+> **本書は当初の設計・計画(Phase 1→6)の記録です。** 実装は v1.44.0 に到達しており、実際に実装済みの
 > 現状仕様は [`docs/current-spec.md`](./docs/current-spec.md) を参照してください(本書と乖離する箇所が
 > あります)。本書は当初計画の記録として残します。
 
@@ -17,7 +17,7 @@ netkeibaのデータをスクレイピングし、Claude APIで各馬の複勝�
   - 理由: スクレイピング(cheerio + undici)、デスクトップUI(Electron)、Discord bot(discord.js)がすべて同一言語・同一コアロジックで書ける
 - **コア**: `packages/core` — scraper / scorer / analyzer / ev をUIから独立したライブラリとして実装(monorepo構成、pnpm workspace)
 - **UI**: Electron + React。コアを直接importして使う
-- **LLM**: Anthropic API(claude-sonnet-4-6)
+- **LLM**: Anthropic API(最新の Sonnet を Models API で自動選択。固定モデルは claude-sonnet-5-5。Issue #157 で claude-sonnet-4-6 から移行。詳細は `docs/current-spec.md` §3)
 - **通知**: Discord Webhook(分析結果のプッシュ用)
 - **データ保存**: SQLite(better-sqlite3)。スクレイピングキャッシュ・分析履歴・検証結果を保存
 - **配布**: GitHub ActionsでWindows向けにelectron-builderでビルド
@@ -50,7 +50,7 @@ netkeibaのデータをスクレイピングし、Claude APIで各馬の複勝�
 - 上がり3F順位
 - コース・距離適性(同条件での複勝率)
 - 騎手の当該コース複勝率
-- 斤量変化、馬体重増減
+- 斤量変化、馬体重増減(※ 馬体重増減の減点は Issue #213 で撤去。斤量変化のみ)
 - 枠順バイアス(コースごとの内外有利データを定数テーブルで保持)
 
 環境・状態バイアス補正:
@@ -90,6 +90,7 @@ netkeibaのデータをスクレイピングし、Claude APIで各馬の複勝�
   - 叩き良化型 × 叩き2〜3走目 → プラス補正
   - 使い込み下降型 × ピーク走目を過ぎた出走(目安: 休み明け4走目以降) → マイナス補正
 - 休み明け実績2走未満は「不明」として弱いマイナス補正のみ(休み明けは平均的に割引が妥当なため)
+  - ※ この「弱いマイナス補正」は Issue #213(2026-10-09)で撤去した(補正なしにした)。LLM が休み明け実績と照らして判断するため。現状は `docs/current-spec.md` を参照
 
 **枠順適性(馬個別)**
 - コースレベルの枠順バイアス(基礎スコア側)とは別に、馬個別の内外適性を全戦績から集計

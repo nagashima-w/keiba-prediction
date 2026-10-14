@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040808",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 8,
+  "raceName": "3歳以上1勝クラス",
+  "listedEntryCount": 16,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1200,
+  "runnerCount": 16,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "コウジハラ",
+      "prior": 0.27492868131329995,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.4,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 2,
+      "horseName": "ビアフォーナウ",
+      "prior": 0.13443600676853812,
+      "placeOddsMin": 15.8,
+      "placeOddsMax": 25.8,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 19
+    },
+    {
+      "umaban": 3,
+      "horseName": "ステラノヴァ",
+      "prior": 0.23078565807699714,
+      "placeOddsMin": 3.3,
+      "placeOddsMax": 5.1,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 18
+    },
+    {
+      "umaban": 4,
+      "horseName": "ラルフテソーロ",
+      "prior": 0.3503646199240045,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.4,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 10
+    },
+    {
+      "umaban": 5,
+      "horseName": "ヘイルメリーラン",
+      "prior": 0.16110408830284187,
+      "placeOddsMin": 62.7,
+      "placeOddsMax": 103.3,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 6,
+      "horseName": "アイファーファイト",
+      "prior": 0.022671551759992675,
+      "placeOddsMin": 50.3,
+      "placeOddsMax": 82.8,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 44
+    },
+    {
+      "umaban": 7,
+      "horseName": "トモジャシーマ",
+      "prior": 0.24115245808476804,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.3,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 24
+    },
+    {
+      "umaban": 8,
+      "horseName": "ヒナノムサシ",
+      "prior": 0.07767428631520637,
+      "placeOddsMin": 9.2,
+      "placeOddsMax": 14.9,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 9,
+      "horseName": "マイネルブリオン",
+      "prior": 0.048140222962716375,
+      "placeOddsMin": 12.4,
+      "placeOddsMax": 20.1,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 11
+    },
+    {
+      "umaban": 10,
+      "horseName": "ノアスペシャル",
+      "prior": 0.20142237378182704,
+      "placeOddsMin": 3.5,
+      "placeOddsMax": 5.5,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 18
+    },
+    {
+      "umaban": 11,
+      "horseName": "リゾートライン",
+      "prior": 0.2086913953210301,
+      "placeOddsMin": 2.3,
+      "placeOddsMax": 3.6,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    },
+    {
+      "umaban": 12,
+      "horseName": "ソニックブレイカー",
+      "prior": 0.28089110644650533,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 8
+    },
+    {
+      "umaban": 13,
+      "horseName": "ミラビリオン",
+      "prior": 0.42886667254728295,
+      "placeOddsMin": 5,
+      "placeOddsMax": 8,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 9
+    },
+    {
+      "umaban": 14,
+      "horseName": "スマートブル",
+      "prior": 0.17571347978393997,
+      "placeOddsMin": 5.4,
+      "placeOddsMax": 8.6,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 15
+    },
+    {
+      "umaban": 15,
+      "horseName": "ガールネクストドア",
+      "prior": 0.08004660804052395,
+      "placeOddsMin": 44.2,
+      "placeOddsMax": 72.8,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 17
+    },
+    {
+      "umaban": 16,
+      "horseName": "カツノテンス",
+      "prior": 0.08311079057052605,
+      "placeOddsMin": 22.5,
+      "placeOddsMax": 36.9,
+      "finish": {
+        "kind": "順位",
+        "value": 16
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 39
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 270,
+      "removedCount": 16,
+      "removedByCutoffCount": 16,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:21:02.543Z"
+}

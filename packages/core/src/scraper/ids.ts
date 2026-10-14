@@ -31,6 +31,13 @@ export type KaisaiDate = Branded<string, "KaisaiDate">;
 export type HorseId = Branded<string, "HorseId">;
 
 /**
+ * 騎手ID(Issue #226)。出馬表の騎手リンク(`/jockey/result/recent/{id}`)の末尾で、実測(2026-10-11)では
+ * 5桁の数字(中央・地方)か5桁の英数字(例 `a01ad`)。形が未確認の変種があっても取りこぼさないよう、
+ * 1〜10文字の英数字を受理する(URLに埋め込むので、記号・空白・全角は拒否する)。
+ */
+export type JockeyId = Branded<string, "JockeyId">;
+
+/**
  * ID・開催日の検証失敗を表す例外。理由を日本語メッセージに含める。
  */
 export class InvalidIdError extends Error {
@@ -146,7 +153,8 @@ export function venueKindOfRaceId(raceId: RaceId): RaceIdVenueKind {
 
 /**
  * 同一場・同一開催日の兄弟レースID(自身のレース番号を除く01〜12)を列挙する
- * (タスク#27-C: 当日の同一場・同一面傾向の集計対象探索に使う)。
+ * (タスク#27-C: 当日の同一場・同一面傾向の集計対象探索に使っていた。production では
+ * `precedingRaceIdsSameDay` 経由でのみ使われる)。
  *
  * レースIDの先頭10桁(中央: 場コード+回次+日次、地方: 場コード+月+日)が同一なら
  * 同一場・同一開催日であることを利用し、11〜12桁目(レース番号)だけを01〜12へ
@@ -175,6 +183,31 @@ export function siblingRaceIdsSameDay(raceId: RaceId): RaceId[] {
     }
   }
   return siblings;
+}
+
+/**
+ * 同一場・同一開催日のレースのうち、自レースより**前**のレースID(自番号より小さい01〜N-1)を
+ * 昇順で列挙する(Issue #153: 当日傾向〈sameDayTrend〉の先読みリーク遮断)。
+ *
+ * 当日傾向は「このレースが発走する時点で結果が出ている同日のレース」だけを材料にすべきで、
+ * レース番号が自レースより大きいレースは(過去のレースを後から分析する場合、結果が取り込まれて
+ * いても)発走時点では結果が存在しない。そのため自番号より小さい番号だけを返す。
+ * 自番号が01なら空配列を返す。実際にそのレースが開催されたか・結果が取り込まれているかは
+ * 検証しない(`siblingRaceIdsSameDay` と同じく、呼び出し側が結果取得〈lookup〉で
+ * 「該当データなし」として自然にスキップする前提)。
+ *
+ * 候補の列挙は `siblingRaceIdsSameDay`(自番号以外の01〜12。変更しない)に委ね、その結果から自番号より
+ * 小さいものだけを残す。`collectSameDayTrend` はこの関数だけを呼び、`siblingRaceIdsSameDay` を
+ * 直接は呼ばない。
+ *
+ * @param raceId 検証済みのレースID(基準となる自レース)
+ * @returns 自番号より小さいレース番号の同日レースID(レース番号昇順。自番号は含まない)
+ */
+export function precedingRaceIdsSameDay(raceId: RaceId): RaceId[] {
+  const ownRaceNumber = Number(raceId.slice(10, 12));
+  return siblingRaceIdsSameDay(raceId).filter(
+    (id) => Number(id.slice(10, 12)) < ownRaceNumber,
+  );
 }
 
 /**
@@ -310,4 +343,17 @@ export function parseHorseId(input: string): HorseId {
     );
   }
   return input as HorseId;
+}
+
+/**
+ * 騎手IDを検証してブランド型にする(Issue #226)。1〜10文字の半角英数字のみ受理する。
+ * @throws InvalidIdError 形式が不正な場合
+ */
+export function parseJockeyId(input: string): JockeyId {
+  if (!/^[0-9a-zA-Z]{1,10}$/.test(input)) {
+    throw new InvalidIdError(
+      `騎手IDは1〜10文字の半角英数字である必要があります(入力: "${input}")`,
+    );
+  }
+  return input as JockeyId;
 }

@@ -37,6 +37,10 @@
  *   `filterRaceDataBefore` を実行した**実際の戻り値**(`SnapshotFilterDiagnostics`)を渡した
  *   場合のみ非nullになる。「適用した」という自己申告のbooleanを受け取るのではなく、実際の
  *   診断値オブジェクトの有無・中身から導出する(申告と実測を取り違えない設計)。
+ *   **#39 以降の注意**: production(`runAnalysis`)が先読みリークを自分で遮断するようになった
+ *   ため、`runAnalysis` の出力を測る限り、値は診断値の有無に関わらず遮断済みである。
+ *   `leakFilterApplied=false` は「診断値が渡されなかった」の意味であり、「値がリークありである」
+ *   ことは意味しない(リークありの値は `runAnalysis` からは作れない)。
  * - `placeOddsKind` / `trioComboOddsKind`: 固定値(下記AC6'参照)。
  *
  * ## 複勝オッズは「幅」である(受け入れ条件6')
@@ -54,14 +58,25 @@ import type { OddsStatus } from "../scraper/types.js";
 import type { SnapshotFilterDiagnostics } from "../scorer/snapshot-filter.js";
 import type { JointModelHorse } from "./place-joint-model.js";
 import {
+  bootstrapBrierDifferenceByRace,
+  brierSkillScore,
+  computeBrierDecomposition,
+  computeBrierScore,
   computeMarketImpliedPlaceProbabilities,
   computeMaxMinRatio,
   computeTrioAllPointEvOverPayoutRate,
   computeVarianceRatioMetrics,
   normalizedTrioJointKlDivergence,
   spearmanRankCorrelation,
+  withinRacePermutationResolution,
+  type BootstrapOptions,
+  type BrierDecompositionResult,
+  type BrierDifferenceBootstrapResult,
+  type BrierObservation,
   type MarketImpliedPlaceProbabilities,
   type NullableMetric,
+  type PermutationResolutionResult,
+  type RaceSquaredErrorPair,
   type TrioAllPointEvOverPayoutRateResult,
   type VarianceRatioMetrics,
 } from "./probability-quality-metrics.js";
@@ -70,8 +85,11 @@ import {
 // core内部で低レベル関数を直接使いたい場合は
 // `./probability-quality-metrics.js` を直接importすること(パッケージ境界の内側限定)。
 export type {
+  BrierDecompositionResult,
+  BrierDifferenceBootstrapResult,
   MarketImpliedPlaceProbabilities,
   NullableMetric,
+  PermutationResolutionResult,
   TrioAllPointEvOverPayoutRateResult,
   VarianceRatioMetrics,
 };
@@ -209,5 +227,403 @@ export function buildProbabilityQualityReport(
     normalizedJointKlModel,
     normalizedJointKlMarket,
     trioAllPointEvOverPayoutRate,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Brier・Murphy 分解・対市場比較(#41「#35-1b」。着順が必要な指標。公開エントリポイント)
+// ---------------------------------------------------------------------------
+
+/**
+ * 市場との比較に使う最小の出走頭数。複勝が3着まで払い戻されるのは8頭以上
+ * (5〜7頭は2着まで・4頭以下は発売なし。`resolvePlaceBetTarget`)で、Σ=3 に正規化した
+ * 市場含意確率は8頭以上のレースでしか「3着以内」と同じ事象を表さない。
+ * **頭数は取消・除外を除いた出走頭数**(呼び出し側が取消馬を入力から除くこと)。
+ */
+export const MIN_FIELD_SIZE_FOR_PLACE_MARKET = 8;
+
+/** buildBrierQualityReport の1頭分の入力(出走した馬のみ。取消・除外は呼び出し側で除く)。 */
+export interface BrierQualityInputHorse {
+  readonly raceId: string;
+  readonly umaban: number;
+  /** 確率の質を測る対象確率(prior または LLM補正後確率)。 */
+  readonly modelProb: number;
+  /** 実際に3着以内に入ったか(同着で4頭以上になる場合は全員 true)。 */
+  readonly occurred: boolean;
+  /** 複勝オッズ下限(生の `OddsSnapshot.place[umaban].oddsMin`)。 */
+  readonly placeOddsMin: number | null;
+  /** 複勝オッズ上限(生の `OddsSnapshot.place[umaban].oddsMax`)。中点版の感度に使う。 */
+  readonly placeOddsMax: number | null;
+}
+
+/** buildBrierQualityReport の入力。 */
+export interface BrierQualityReportInput {
+  readonly horses: readonly BrierQualityInputHorse[];
+  /** 申告項目(本モジュールからは判別できない)。 */
+  readonly priorSource: PriorSource;
+  /** レース単位ブートストラップの反復回数とシード(取得前の分析計画で固定した値を渡す)。 */
+  readonly bootstrap: BootstrapOptions;
+  /** resolution の参照値(レース内ラベル並べ替え)の反復回数とシード。 */
+  readonly permutation: BootstrapOptions;
+  /**
+   * 市場比較に使えない(オッズが確定でない)レースの ID。呼び出し側(取得したオッズの状態を知っている側)が
+   * 渡す。これらは市場比較から外し、`excludedRaces.oddsNotFinal` に数える(「複勝オッズの欠損・不正」には
+   * 数えない)。頭数が8未満のレースは `smallField` が優先。モデル単独の集計には入る。
+   */
+  readonly oddsNotFinalRaceIds?: readonly string[];
+}
+
+/** 市場確率の作り方。 */
+export type BrierMarketKind = "placeOddsMinLowerBound" | "placeOddsMidpoint";
+
+/** Brier 計測の条件。数値と必ず同梱される。 */
+export interface BrierQualityConditions {
+  readonly priorSource: PriorSource;
+  /** 市場比較に使う最小頭数(出走頭数)。 */
+  readonly minFieldSizeForMarket: number;
+  /** 主表(下限版)と感度(中点版)の市場確率の作り方。 */
+  readonly marketKinds: {
+    readonly lowerBound: "placeOddsMinLowerBound";
+    readonly midpoint: "placeOddsMidpoint";
+  };
+  readonly bootstrap: BootstrapOptions;
+  readonly permutation: BootstrapOptions;
+}
+
+/** 市場比較から除外したレース(理由別のレースID)。 */
+export interface BrierMarketExclusions {
+  /** 出走頭数が最小頭数(8)未満。 */
+  readonly smallField: readonly string[];
+  /** オッズが確定でない(呼び出し側の申告。`oddsNotFinalRaceIds`)。頭数が8未満ならそちらが優先。 */
+  readonly oddsNotFinal: readonly string[];
+  /** 複勝オッズ(下限、中点版では下限と上限)が1頭でも欠損・不正で、市場含意確率を作れない。 */
+  readonly marketUnavailable: readonly string[];
+  /** 市場含意確率が1を超える馬がいる(黙ってクリップせず、レースごと比較から外す)。 */
+  readonly marketOutOfRange: readonly string[];
+}
+
+/** 市場との比較1通り分(同じレース集合の対で比べる)。 */
+export interface BrierMarketComparison {
+  readonly marketKind: BrierMarketKind;
+  readonly eligibleRaceCount: number;
+  readonly eligibleObservationCount: number;
+  readonly excludedRaces: BrierMarketExclusions;
+  /** 比較集合でのモデルの Brier。 */
+  readonly modelBrier: NullableMetric;
+  /** 比較集合での市場の Brier。 */
+  readonly marketBrier: NullableMetric;
+  /** 1 − BS_model / BS_market。正ならモデルが市場より良い。 */
+  readonly brierSkillVsMarket: NullableMetric;
+  readonly modelDecomposition: BrierDecompositionResult;
+  readonly marketDecomposition: BrierDecompositionResult;
+  /** Brier 差(model − market。正ならモデルが悪い)のレース単位ブートストラップ。 */
+  readonly brierDifference: BrierDifferenceBootstrapResult;
+}
+
+/** buildBrierQualityReport の算出結果一式。 */
+export interface BrierQualityReport {
+  readonly conditions: BrierQualityConditions;
+  readonly raceCount: number;
+  readonly observationCount: number;
+  /** モデル単独(全レース。頭数に依らない)。 */
+  readonly model: {
+    readonly brier: NullableMetric;
+    readonly decomposition: BrierDecompositionResult;
+    /** 気候値(全体の発生率を全馬に当てる予測)に対する skill = 1 − BS/UNC。 */
+    readonly brierSkillVsClimatology: NullableMetric;
+    /**
+     * resolution の参照値(各レース内で結果の割り当てを並べ替えた場合の分布。平均と95点)。
+     * 小標本では識別力が無くても resolution は正に偏るため、「0に近いか」はこれと並べて読む。
+     */
+    readonly resolutionNull: PermutationResolutionResult;
+  };
+  readonly marketComparison: {
+    /** 主表: 複勝オッズ下限から作った市場含意確率。 */
+    readonly lowerBound: BrierMarketComparison;
+    /** 感度: 複勝オッズの下限と上限の中点から作った市場含意確率。 */
+    readonly midpoint: BrierMarketComparison;
+  };
+}
+
+/** raceId ごとに馬をまとめる(最初に現れた順を保つ)。 */
+function groupByRace(
+  horses: readonly BrierQualityInputHorse[],
+): Array<{ readonly raceId: string; readonly horses: BrierQualityInputHorse[] }> {
+  const map = new Map<string, BrierQualityInputHorse[]>();
+  for (const h of horses) {
+    const list = map.get(h.raceId);
+    if (list === undefined) {
+      map.set(h.raceId, [h]);
+    } else {
+      list.push(h);
+    }
+  }
+  return Array.from(map, ([raceId, list]) => ({ raceId, horses: list }));
+}
+
+/** 複勝オッズ(下限・上限)から、その作り方に応じた「市場側が使うオッズ」を引く。 */
+function oddsFor(kind: BrierMarketKind, h: BrierQualityInputHorse): number | null {
+  if (kind === "placeOddsMinLowerBound") {
+    return h.placeOddsMin;
+  }
+  if (h.placeOddsMin === null || h.placeOddsMax === null) {
+    return null;
+  }
+  return (h.placeOddsMin + h.placeOddsMax) / 2;
+}
+
+function compareWithMarket(
+  kind: BrierMarketKind,
+  races: ReturnType<typeof groupByRace>,
+  bootstrap: BootstrapOptions,
+  oddsNotFinal: ReadonlySet<string>,
+): BrierMarketComparison {
+  const smallField: string[] = [];
+  const oddsNotFinalExcluded: string[] = [];
+  const marketUnavailable: string[] = [];
+  const marketOutOfRange: string[] = [];
+  const modelObservations: BrierObservation[] = [];
+  const marketObservations: BrierObservation[] = [];
+  const pairs: RaceSquaredErrorPair[] = [];
+
+  for (const r of races) {
+    if (r.horses.length < MIN_FIELD_SIZE_FOR_PLACE_MARKET) {
+      smallField.push(r.raceId);
+      continue;
+    }
+    if (oddsNotFinal.has(r.raceId)) {
+      oddsNotFinalExcluded.push(r.raceId);
+      continue;
+    }
+    const market = computeMarketImpliedPlaceProbabilities(
+      r.horses.map((h) => ({ umaban: h.umaban, placeOddsMin: oddsFor(kind, h) })),
+    );
+    if (market.values === null) {
+      marketUnavailable.push(r.raceId);
+      continue;
+    }
+    const values = market.values;
+    const marketProbs = r.horses.map((h) => values.get(h.umaban)!);
+    if (marketProbs.some((p) => p > 1)) {
+      marketOutOfRange.push(r.raceId);
+      continue;
+    }
+    let modelSse = 0;
+    let marketSse = 0;
+    r.horses.forEach((h, i) => {
+      const outcome = h.occurred ? 1 : 0;
+      modelObservations.push({ probability: h.modelProb, occurred: h.occurred });
+      marketObservations.push({ probability: marketProbs[i]!, occurred: h.occurred });
+      modelSse += (h.modelProb - outcome) ** 2;
+      marketSse += (marketProbs[i]! - outcome) ** 2;
+    });
+    pairs.push({ count: r.horses.length, modelSse, marketSse });
+  }
+
+  const modelBrier = computeBrierScore(modelObservations);
+  const marketBrier = computeBrierScore(marketObservations);
+  const brierSkillVsMarket =
+    modelBrier.value === null
+      ? modelBrier
+      : marketBrier.value === null
+        ? marketBrier
+        : brierSkillScore(modelBrier.value, marketBrier.value);
+
+  return {
+    marketKind: kind,
+    eligibleRaceCount: pairs.length,
+    eligibleObservationCount: modelObservations.length,
+    excludedRaces: { smallField, oddsNotFinal: oddsNotFinalExcluded, marketUnavailable, marketOutOfRange },
+    modelBrier,
+    marketBrier,
+    brierSkillVsMarket,
+    modelDecomposition: computeBrierDecomposition(modelObservations),
+    marketDecomposition: computeBrierDecomposition(marketObservations),
+    brierDifference: bootstrapBrierDifferenceByRace(pairs, bootstrap),
+  };
+}
+
+/**
+ * 確率の質(着順が必要な指標)を全レース分まとめて算出する公開エントリポイント。
+ * 常に `conditions` を同梱する(条件抜きの数値を返さない。`buildProbabilityQualityReport` と同じ方針)。
+ *
+ * - **モデル単独**: 頭数に関係なく全観測で Brier・Murphy 分解・気候値に対する skill。
+ * - **市場との比較**: 出走8頭以上で、市場含意確率を作れて1を超えない馬だけのレースの
+ *   **同じ集合の対**で比べる(モデル側もその集合に絞る)。除外したレースは理由別にIDを残す。
+ *   主表は複勝オッズ下限版、感度として中点版を並記する。
+ * - 範囲外の確率はクリップせず `reason` 付き null にする。
+ */
+export function buildBrierQualityReport(input: BrierQualityReportInput): BrierQualityReport {
+  const races = groupByRace(input.horses);
+  const notFinal = new Set(input.oddsNotFinalRaceIds ?? []);
+  const modelObservations: BrierObservation[] = input.horses.map((h) => ({
+    probability: h.modelProb,
+    occurred: h.occurred,
+  }));
+  const decomposition = computeBrierDecomposition(modelObservations);
+  const brierSkillVsClimatology: NullableMetric =
+    decomposition.decomposition === null
+      ? { value: null, reason: decomposition.reason }
+      : brierSkillScore(decomposition.decomposition.brier, decomposition.decomposition.uncertainty);
+
+  return {
+    conditions: {
+      priorSource: input.priorSource,
+      minFieldSizeForMarket: MIN_FIELD_SIZE_FOR_PLACE_MARKET,
+      marketKinds: { lowerBound: "placeOddsMinLowerBound", midpoint: "placeOddsMidpoint" },
+      bootstrap: input.bootstrap,
+      permutation: input.permutation,
+    },
+    raceCount: races.length,
+    observationCount: input.horses.length,
+    model: {
+      brier: computeBrierScore(modelObservations),
+      decomposition,
+      brierSkillVsClimatology,
+      resolutionNull: withinRacePermutationResolution(
+        races.map((r) => r.horses.map((h) => ({ probability: h.modelProb, occurred: h.occurred }))),
+        input.permutation,
+      ),
+    },
+    marketComparison: {
+      lowerBound: compareWithMarket("placeOddsMinLowerBound", races, input.bootstrap, notFinal),
+      midpoint: compareWithMarket("placeOddsMidpoint", races, input.bootstrap, notFinal),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// buildPairedBrierComparison(同じ馬集合の2つの確率列の比較。#156「#41-B」)
+// ---------------------------------------------------------------------------
+
+/** buildPairedBrierComparison の1頭分の入力(同じ馬に対する2つの確率。出走した馬のみ)。 */
+export interface PairedBrierInputHorse {
+  readonly raceId: string;
+  readonly umaban: number;
+  /** 比べる側の確率(例: LLM 補正後確率)。 */
+  readonly modelProb: number;
+  /** 基準側の確率(例: prior)。 */
+  readonly referenceProb: number;
+  /** 実際に3着以内に入ったか(同着で4頭以上になる場合は全員 true)。 */
+  readonly occurred: boolean;
+}
+
+/** buildPairedBrierComparison の入力。 */
+export interface PairedBrierComparisonInput {
+  readonly horses: readonly PairedBrierInputHorse[];
+  /** 申告項目: model 側の確率の出所(本モジュールからは判別できない)。 */
+  readonly modelSource: PriorSource;
+  /** 申告項目: reference 側の確率の出所。 */
+  readonly referenceSource: PriorSource;
+  /** レース単位ブートストラップの反復回数とシード(取得前の分析計画で固定した値を渡す)。 */
+  readonly bootstrap: BootstrapOptions;
+}
+
+/** 2系列比較の条件。数値と必ず同梱される。 */
+export interface PairedBrierComparisonConditions {
+  readonly modelSource: PriorSource;
+  readonly referenceSource: PriorSource;
+  readonly bootstrap: BootstrapOptions;
+}
+
+/** buildPairedBrierComparison の結果。 */
+export interface PairedBrierComparison {
+  readonly conditions: PairedBrierComparisonConditions;
+  readonly raceCount: number;
+  readonly observationCount: number;
+  /** model の Brier(全観測)。 */
+  readonly modelBrier: NullableMetric;
+  /** reference の Brier(同じ観測)。 */
+  readonly referenceBrier: NullableMetric;
+  /** `1 − BS_model / BS_reference`。正なら model が reference より良い。 */
+  readonly brierSkillVsReference: NullableMetric;
+  readonly modelDecomposition: BrierDecompositionResult;
+  readonly referenceDecomposition: BrierDecompositionResult;
+  /** Brier 差(model − reference。**正なら model が悪い**)のレース単位ブートストラップ。 */
+  readonly brierDifference: BrierDifferenceBootstrapResult;
+}
+
+/**
+ * 同じ馬集合に対する2つの確率列(model と reference)を、Brier・Murphy 分解・Brier 差の
+ * レース単位ブートストラップで比べる(#156: 「LLM 補正後」対「prior」を同じレース集合の対で比べる)。
+ *
+ * - **向きと実装は対市場の比較と同じ**: 差は `model − reference`(正なら model が悪い)で、
+ *   ブートストラップは `buildBrierQualityReport` の対市場の Brier 差と同じ実装
+ *   (`bootstrapBrierDifferenceByRace`)を呼ぶ。reference に市場含意確率を入れれば同じ値になる。
+ * - **レースを再標本単位にする**(同一レースの馬は Σ=3 の制約で独立でないため)。
+ * - 範囲外・非有限の確率はクリップせず、該当する系列の指標と差を `reason` 付き null にする。
+ * - 計測条件(どの2系列か・ブートストラップ条件)は必ず同梱する。
+ */
+export function buildPairedBrierComparison(input: PairedBrierComparisonInput): PairedBrierComparison {
+  const byRace = new Map<string, PairedBrierInputHorse[]>();
+  for (const h of input.horses) {
+    const list = byRace.get(h.raceId);
+    if (list === undefined) {
+      byRace.set(h.raceId, [h]);
+    } else {
+      list.push(h);
+    }
+  }
+
+  const modelObservations: BrierObservation[] = input.horses.map((h) => ({
+    probability: h.modelProb,
+    occurred: h.occurred,
+  }));
+  const referenceObservations: BrierObservation[] = input.horses.map((h) => ({
+    probability: h.referenceProb,
+    occurred: h.occurred,
+  }));
+  const modelBrier = computeBrierScore(modelObservations);
+  const referenceBrier = computeBrierScore(referenceObservations);
+  const brierSkillVsReference: NullableMetric =
+    modelBrier.value === null
+      ? modelBrier
+      : referenceBrier.value === null
+        ? referenceBrier
+        : brierSkillScore(modelBrier.value, referenceBrier.value);
+
+  const raceCount = byRace.size;
+  let brierDifference: BrierDifferenceBootstrapResult;
+  if (modelBrier.value === null || referenceBrier.value === null) {
+    // どちらかの系列に範囲外・非有限の確率がある(または観測が0件)。クリップして続行せず、差も出さない。
+    brierDifference = {
+      value: null,
+      lower: null,
+      upper: null,
+      iterations: input.bootstrap.iterations,
+      seed: input.bootstrap.seed,
+      raceCount,
+      reason: modelBrier.value === null ? `model 側: ${modelBrier.reason}` : `reference 側: ${referenceBrier.reason}`,
+    };
+  } else {
+    const pairs: RaceSquaredErrorPair[] = [];
+    for (const horses of byRace.values()) {
+      let modelSse = 0;
+      let referenceSse = 0;
+      for (const h of horses) {
+        const outcome = h.occurred ? 1 : 0;
+        modelSse += (h.modelProb - outcome) ** 2;
+        referenceSse += (h.referenceProb - outcome) ** 2;
+      }
+      // RaceSquaredErrorPair の marketSse は「比べる相手の二乗誤差」(ここでは reference)。
+      pairs.push({ count: horses.length, modelSse, marketSse: referenceSse });
+    }
+    brierDifference = bootstrapBrierDifferenceByRace(pairs, input.bootstrap);
+  }
+
+  return {
+    conditions: {
+      modelSource: input.modelSource,
+      referenceSource: input.referenceSource,
+      bootstrap: input.bootstrap,
+    },
+    raceCount,
+    observationCount: input.horses.length,
+    modelBrier,
+    referenceBrier,
+    brierSkillVsReference,
+    modelDecomposition: computeBrierDecomposition(modelObservations),
+    referenceDecomposition: computeBrierDecomposition(referenceObservations),
+    brierDifference,
   };
 }

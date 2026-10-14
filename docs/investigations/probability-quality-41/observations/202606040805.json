@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040805",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 5,
+  "raceName": "2歳新馬",
+  "listedEntryCount": 14,
+  "status": "ok",
+  "courseType": "芝",
+  "distance": 1800,
+  "runnerCount": 14,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "レックスダミアーニ",
+      "prior": 0.22928571428571426,
+      "placeOddsMin": 6,
+      "placeOddsMax": 11.5,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 2,
+      "horseName": "エバーラスティング",
+      "prior": 0.22928571428571426,
+      "placeOddsMin": 4.5,
+      "placeOddsMax": 8.5,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 3,
+      "horseName": "ヴァイスリッター",
+      "prior": 0.22928571428571426,
+      "placeOddsMin": 19.2,
+      "placeOddsMax": 37.7,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 4,
+      "horseName": "フェイマスジャズ",
+      "prior": 0.22928571428571426,
+      "placeOddsMin": 1.8,
+      "placeOddsMax": 3.2,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 5,
+      "horseName": "ニシノカチオトコ",
+      "prior": 0.1992857142857143,
+      "placeOddsMin": 2.5,
+      "placeOddsMax": 4.6,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 6,
+      "horseName": "ブンブクチャガマ",
+      "prior": 0.1992857142857143,
+      "placeOddsMin": 2.1,
+      "placeOddsMax": 3.8,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 7,
+      "horseName": "スペーストラベラー",
+      "prior": 0.1992857142857143,
+      "placeOddsMin": 7.1,
+      "placeOddsMax": 13.8,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 8,
+      "horseName": "ブーケフォーミー",
+      "prior": 0.1992857142857143,
+      "placeOddsMin": 5.1,
+      "placeOddsMax": 9.7,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 9,
+      "horseName": "ハナミヤビ",
+      "prior": 0.1992857142857143,
+      "placeOddsMin": 10.2,
+      "placeOddsMax": 19.8,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 10,
+      "horseName": "ペプチドデバイス",
+      "prior": 0.1992857142857143,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 11,
+      "horseName": "ゾネンバーデン",
+      "prior": 0.16928571428571426,
+      "placeOddsMin": 5.6,
+      "placeOddsMax": 10.7,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 12,
+      "horseName": "ジャロロッソ",
+      "prior": 0.16928571428571426,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 13,
+      "horseName": "サヴィッジブロウ",
+      "prior": 0.16928571428571426,
+      "placeOddsMin": 4.3,
+      "placeOddsMax": 8.1,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 14,
+      "horseName": "シダモフレイバー",
+      "prior": 0.16928571428571426,
+      "placeOddsMin": 2.5,
+      "placeOddsMax": 4.5,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 14,
+      "removedCount": 14,
+      "removedByCutoffCount": 14,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:16:44.954Z"
+}

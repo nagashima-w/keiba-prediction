@@ -1,0 +1,2817 @@
+{
+ "schemaVersion": 1,
+ "runId": "37184397455-1",
+ "startedAt": "2026-10-04T06:59:40.004Z",
+ "finishedAt": "2026-10-04T07:17:05.773Z",
+ "netkeiba": {
+  "records": [
+   {
+    "targetId": "central-shutuba",
+    "url": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "status": 400,
+    "bodyLength": 0,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": null,
+    "parseError": null,
+    "replacementChars": null,
+    "headers": {
+     "server": "cloudflare",
+     "cf-ray": "a4524e3b6b33e62b-IAD",
+     "content-type": "text/html; charset=UTF-8",
+     "content-length": "0",
+     "via": "1.1 ee7fec9396cfd57a35094b47cf52be30.cloudfront.net (CloudFront)",
+     "x-cache": "Error from cloudfront"
+    },
+    "bodyHead": "",
+    "error": "HTTPエラー(400)が発生しました: https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "source": "worker"
+   },
+   {
+    "targetId": "central-shutuba",
+    "url": "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211",
+    "status": 200,
+    "bodyLength": 277256,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": 16,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "via": "1.1 c9f0decc0c63834ae3be48cbc4198f60.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "source": "runner"
+   },
+   {
+    "targetId": "db-horse-page",
+    "url": "https://db.netkeiba.com/horse/2021105857/",
+    "status": 400,
+    "bodyLength": 0,
+    "charset": "EUC-JP",
+    "parsedKind": "horse-page",
+    "parsedCount": null,
+    "parseError": null,
+    "replacementChars": null,
+    "headers": {
+     "server": "cloudflare",
+     "cf-ray": "a4524e545b6be62b-IAD",
+     "content-type": "text/html; charset=EUC-JP",
+     "content-length": "0",
+     "via": "1.1 6fc72fa6c2eb32c52ac1d02c16e75776.cloudfront.net (CloudFront)",
+     "x-cache": "Error from cloudfront"
+    },
+    "bodyHead": "",
+    "error": "HTTPエラー(400)が発生しました: https://db.netkeiba.com/horse/2021105857/",
+    "source": "worker"
+   },
+   {
+    "targetId": "db-horse-page",
+    "url": "https://db.netkeiba.com/horse/2021105857/",
+    "status": 200,
+    "bodyLength": 84018,
+    "charset": "EUC-JP",
+    "parsedKind": "horse-page",
+    "parsedCount": 1,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=EUC-JP",
+     "via": "1.1 6fc72fa6c2eb32c52ac1d02c16e75776.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "source": "runner"
+   },
+   {
+    "targetId": "nar-shutuba",
+    "url": "https://nar.netkeiba.com/race/shutuba.html?race_id=202654071210",
+    "status": 200,
+    "bodyLength": 218738,
+    "charset": "UTF-8",
+    "parsedKind": "shutuba",
+    "parsedCount": 12,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "text/html; charset=UTF-8",
+     "content-length": "39138",
+     "content-encoding": "gzip",
+     "via": "1.1 95531ccb123bd3b0d5fdc04d3bc4457c.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "source": "runner"
+   },
+   {
+    "targetId": "central-odds",
+    "url": "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=1&action=init",
+    "status": 200,
+    "bodyLength": 890,
+    "charset": "UTF-8",
+    "parsedKind": "odds-json",
+    "parsedCount": 16,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "application/json; charset=UTF-8",
+     "content-length": "890",
+     "via": "1.1 fb5457d63c2bae82c659669b952f7d52.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "source": "runner"
+   },
+   {
+    "targetId": "db-horse-results",
+    "url": "https://db.netkeiba.com/horse/ajax_horse_results.html?input=UTF-8&output=json&id=2021105857",
+    "status": 200,
+    "bodyLength": 140135,
+    "charset": "UTF-8",
+    "parsedKind": "horse-results",
+    "parsedCount": 26,
+    "parseError": null,
+    "replacementChars": 0,
+    "headers": {
+     "server": "Apache",
+     "content-type": "application/json; charset=UTF-8",
+     "via": "1.1 ff2d6deff1b50282a21f4b199088c76e.cloudfront.net (CloudFront)",
+     "x-cache": "Miss from cloudfront"
+    },
+    "bodyHead": null,
+    "error": null,
+    "source": "runner"
+   }
+  ],
+  "requestCount": 7,
+  "stoppedReason": null,
+  "stoppedBySource": {
+   "worker": "consecutive-blocks",
+   "runner": null
+  }
+ },
+ "selftest": {
+  "eucJpRoundTrip": true,
+  "detail": "往復一致"
+ },
+ "cpu": {
+  "worker": {
+   "parse": {
+    "points": [
+     {
+      "reps": 1,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       125,
+       79,
+       93
+      ]
+     },
+     {
+      "reps": 2,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       129,
+       148,
+       166
+      ]
+     },
+     {
+      "reps": 4,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       214,
+       187,
+       196
+      ]
+     },
+     {
+      "reps": 8,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       559,
+       440,
+       404
+      ]
+     },
+     {
+      "reps": 16,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       155
+      ]
+     },
+     {
+      "reps": 12,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       33
+      ]
+     },
+     {
+      "reps": 10,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       31
+      ]
+     },
+     {
+      "reps": 9,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       32
+      ]
+     }
+    ],
+    "maxPassReps": 8,
+    "minFailReps": 9,
+    "reachedMax": false,
+    "stopReason": "converged",
+    "inconclusive": false,
+    "totalProbes": 16
+   },
+   "score": {
+    "points": [
+     {
+      "reps": 1,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       14,
+       13,
+       14
+      ]
+     },
+     {
+      "reps": 2,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       18,
+       24,
+       13
+      ]
+     },
+     {
+      "reps": 4,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       15,
+       16,
+       13
+      ]
+     },
+     {
+      "reps": 8,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       21,
+       25,
+       18
+      ]
+     },
+     {
+      "reps": 16,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       18,
+       20,
+       21
+      ]
+     },
+     {
+      "reps": 32,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       23,
+       20,
+       24
+      ]
+     },
+     {
+      "reps": 64,
+      "trialsRun": 3,
+      "ok": 3,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       44,
+       36,
+       54
+      ]
+     },
+     {
+      "reps": 128,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       28
+      ]
+     },
+     {
+      "reps": 96,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       21
+      ]
+     },
+     {
+      "reps": 80,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       20
+      ]
+     },
+     {
+      "reps": 72,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       19
+      ]
+     },
+     {
+      "reps": 68,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       30
+      ]
+     }
+    ],
+    "maxPassReps": 64,
+    "minFailReps": 68,
+    "reachedMax": false,
+    "stopReason": "converged",
+    "inconclusive": false,
+    "totalProbes": 26
+   },
+   "alloc": {
+    "points": [
+     {
+      "reps": 1,
+      "trialsRun": 2,
+      "ok": 1,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       337,
+       20
+      ]
+     }
+    ],
+    "maxPassReps": null,
+    "minFailReps": 1,
+    "reachedMax": false,
+    "stopReason": "converged",
+    "inconclusive": false,
+    "totalProbes": 2
+   },
+   "allocFull": {
+    "points": [
+     {
+      "reps": 1,
+      "trialsRun": 2,
+      "ok": 1,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       899,
+       21
+      ]
+     }
+    ],
+    "maxPassReps": null,
+    "minFailReps": 1,
+    "reachedMax": false,
+    "stopReason": "converged",
+    "inconclusive": false,
+    "totalProbes": 2
+   }
+  },
+  "durableObject": {
+   "parse": {
+    "points": [
+     {
+      "reps": 1,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       164,
+       115
+      ]
+     },
+     {
+      "reps": 2,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       193,
+       149
+      ]
+     },
+     {
+      "reps": 4,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       298,
+       293
+      ]
+     },
+     {
+      "reps": 8,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       501,
+       565
+      ]
+     },
+     {
+      "reps": 16,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       995,
+       1070
+      ]
+     },
+     {
+      "reps": 32,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       2052,
+       2199
+      ]
+     },
+     {
+      "reps": 64,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       4767,
+       4725
+      ]
+     },
+     {
+      "reps": 128,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       9376,
+       9492
+      ]
+     },
+     {
+      "reps": 256,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       18807,
+       17628
+      ]
+     },
+     {
+      "reps": 512,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       36487,
+       36350
+      ]
+     },
+     {
+      "reps": 1024,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       44656
+      ]
+     },
+     {
+      "reps": 768,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       40409
+      ]
+     },
+     {
+      "reps": 640,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       40899
+      ]
+     },
+     {
+      "reps": 576,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       41160
+      ]
+     },
+     {
+      "reps": 544,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       39564,
+       38742
+      ]
+     }
+    ],
+    "maxPassReps": 544,
+    "minFailReps": 576,
+    "reachedMax": false,
+    "stopReason": "converged",
+    "inconclusive": false,
+    "totalProbes": 26
+   },
+   "score": {
+    "points": [
+     {
+      "reps": 1,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       20,
+       17
+      ]
+     },
+     {
+      "reps": 2,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       21,
+       22
+      ]
+     },
+     {
+      "reps": 4,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       23,
+       21
+      ]
+     },
+     {
+      "reps": 8,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       19,
+       23
+      ]
+     },
+     {
+      "reps": 16,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       39,
+       22
+      ]
+     },
+     {
+      "reps": 32,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       33,
+       31
+      ]
+     },
+     {
+      "reps": 64,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       46,
+       56
+      ]
+     },
+     {
+      "reps": 128,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       76,
+       80
+      ]
+     },
+     {
+      "reps": 256,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       135,
+       130
+      ]
+     },
+     {
+      "reps": 512,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       282,
+       210
+      ]
+     },
+     {
+      "reps": 1024,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       446,
+       399
+      ]
+     },
+     {
+      "reps": 2048,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       851,
+       907
+      ]
+     },
+     {
+      "reps": 4096,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       1714,
+       1837
+      ]
+     }
+    ],
+    "maxPassReps": 4096,
+    "minFailReps": null,
+    "reachedMax": true,
+    "stopReason": "max-reps",
+    "inconclusive": false,
+    "totalProbes": 26
+   },
+   "alloc": {
+    "points": [
+     {
+      "reps": 1,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       253,
+       284
+      ]
+     },
+     {
+      "reps": 2,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       452,
+       456
+      ]
+     },
+     {
+      "reps": 4,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       898,
+       773
+      ]
+     },
+     {
+      "reps": 8,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       1696,
+       1636
+      ]
+     },
+     {
+      "reps": 16,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       3564,
+       4156
+      ]
+     },
+     {
+      "reps": 32,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       8099,
+       8276
+      ]
+     },
+     {
+      "reps": 64,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       17262,
+       17833
+      ]
+     },
+     {
+      "reps": 128,
+      "trialsRun": 2,
+      "ok": 1,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       33970,
+       31604
+      ]
+     },
+     {
+      "reps": 96,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       25555,
+       27202
+      ]
+     },
+     {
+      "reps": 112,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       32637,
+       30618
+      ]
+     },
+     {
+      "reps": 120,
+      "trialsRun": 2,
+      "ok": 1,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       32945,
+       32498
+      ]
+     }
+    ],
+    "maxPassReps": 112,
+    "minFailReps": 120,
+    "reachedMax": false,
+    "stopReason": "converged",
+    "inconclusive": false,
+    "totalProbes": 22
+   },
+   "allocFull": {
+    "points": [
+     {
+      "reps": 1,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       1060,
+       969
+      ]
+     },
+     {
+      "reps": 2,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       2128,
+       2455
+      ]
+     },
+     {
+      "reps": 4,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       3927,
+       3617
+      ]
+     },
+     {
+      "reps": 8,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       7000,
+       6987
+      ]
+     },
+     {
+      "reps": 16,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       14164,
+       14918
+      ]
+     },
+     {
+      "reps": 32,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       30088,
+       28219
+      ]
+     },
+     {
+      "reps": 64,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       34178
+      ]
+     },
+     {
+      "reps": 48,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       31526
+      ]
+     },
+     {
+      "reps": 40,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       31131
+      ]
+     },
+     {
+      "reps": 36,
+      "trialsRun": 2,
+      "ok": 2,
+      "cpuExceeded": 0,
+      "otherError": 0,
+      "passed": true,
+      "interrupted": false,
+      "elapsedMs": [
+       30674,
+       31380
+      ]
+     },
+     {
+      "reps": 38,
+      "trialsRun": 1,
+      "ok": 0,
+      "cpuExceeded": 1,
+      "otherError": 0,
+      "passed": false,
+      "interrupted": false,
+      "elapsedMs": [
+       31318
+      ]
+     }
+    ],
+    "maxPassReps": 36,
+    "minFailReps": 38,
+    "reachedMax": false,
+    "stopReason": "converged",
+    "inconclusive": false,
+    "totalProbes": 18
+   }
+  },
+  "samples": [
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 125,
+    "insideMs": 0,
+    "afterIoMs": 19,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 79,
+    "insideMs": 0,
+    "afterIoMs": 15,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 93,
+    "insideMs": 0,
+    "afterIoMs": 32,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 129,
+    "insideMs": 0,
+    "afterIoMs": 45,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 148,
+    "insideMs": 0,
+    "afterIoMs": 28,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 166,
+    "insideMs": 0,
+    "afterIoMs": 44,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 214,
+    "insideMs": 0,
+    "afterIoMs": 78,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 187,
+    "insideMs": 0,
+    "afterIoMs": 63,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 196,
+    "insideMs": 0,
+    "afterIoMs": 63,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 559,
+    "insideMs": 0,
+    "afterIoMs": 168,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 440,
+    "insideMs": 0,
+    "afterIoMs": 144,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 404,
+    "insideMs": 0,
+    "afterIoMs": 142,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 16,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 155,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 12,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 33,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 10,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 31,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 9,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 32,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 14,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 13,
+    "insideMs": 0,
+    "afterIoMs": 3,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 14,
+    "insideMs": 0,
+    "afterIoMs": 3,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 18,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 24,
+    "insideMs": 0,
+    "afterIoMs": 13,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 13,
+    "insideMs": 0,
+    "afterIoMs": 3,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 15,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 16,
+    "insideMs": 0,
+    "afterIoMs": 3,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 13,
+    "insideMs": 0,
+    "afterIoMs": 3,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 21,
+    "insideMs": 0,
+    "afterIoMs": 7,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 25,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 18,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 18,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 20,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 21,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 23,
+    "insideMs": 0,
+    "afterIoMs": 3,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 20,
+    "insideMs": 0,
+    "afterIoMs": 3,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 24,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 64,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 44,
+    "insideMs": 0,
+    "afterIoMs": 4,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 64,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 36,
+    "insideMs": 0,
+    "afterIoMs": 5,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 64,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 54,
+    "insideMs": 0,
+    "afterIoMs": 6,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 128,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 28,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 96,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 21,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 80,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 20,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 72,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 19,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 68,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 30,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "alloc",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 337,
+    "insideMs": 0,
+    "afterIoMs": 17,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "alloc",
+    "reps": 1,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 20,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "worker",
+    "work": "allocFull",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 899,
+    "insideMs": 0,
+    "afterIoMs": 36,
+    "bodyHead": null
+   },
+   {
+    "runtime": "worker",
+    "work": "allocFull",
+    "reps": 1,
+    "status": 503,
+    "kind": "cpu-exceeded",
+    "wallMs": 21,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "<!DOCTYPE html>\n<!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 7]>    <html class=\"no-js ie7 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if IE 8]>    <html class=\"no-js ie8 oldie\" lang=\"en-US\"> <![endif]-->\n<!--[if gt IE 8]><!--> <html class=\"no-js\" lang=\"en-US\"> <!",
+    "pingAfter": 200
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 1060,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 969,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 2128,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 2455,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 3927,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 3617,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 7000,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 6987,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 14164,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 14918,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 30088,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 28219,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 64,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 34178,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 48,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 31526,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 40,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 31131,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 36,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 30674,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 36,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 31380,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 38,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 31318,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 253,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 284,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 452,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 456,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 898,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 773,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 1696,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 1636,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 3564,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 4156,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 8099,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 8276,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 64,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 17262,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 64,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 17833,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 128,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 33970,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 128,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 31604,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 96,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 25555,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 96,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 27202,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 112,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 32637,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 112,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 30618,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 120,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 32945,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 120,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 32498,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 20,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 17,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 21,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 22,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 23,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 21,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 19,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 23,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 39,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 22,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 33,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 31,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 64,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 46,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 64,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 56,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 128,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 76,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 128,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 80,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 256,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 135,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 256,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 130,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 512,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 282,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 512,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 210,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 1024,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 446,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 1024,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 399,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 2048,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 851,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 2048,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 907,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 4096,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 1714,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 4096,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 1837,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 164,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 1,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 115,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 193,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 2,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 149,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 298,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 4,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 293,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 501,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 8,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 565,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 995,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 16,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 1070,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 2052,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 32,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 2199,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 64,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 4767,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 64,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 4725,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 128,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 9376,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 128,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 9492,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 256,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 18807,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 256,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 17628,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 512,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 36487,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 512,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 36350,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 1024,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 44656,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 768,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 40409,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 640,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 40899,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 576,
+    "status": 500,
+    "kind": "cpu-exceeded",
+    "wallMs": 41160,
+    "insideMs": null,
+    "afterIoMs": null,
+    "bodyHead": "{\"ok\":false,\"error\":\"Durable Object exceeded its CPU time limit and was reset.\"}"
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 544,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 39564,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 544,
+    "status": 200,
+    "kind": "ok",
+    "wallMs": 38742,
+    "insideMs": 0,
+    "afterIoMs": 0,
+    "bodyHead": null
+   }
+  ]
+ },
+ "local": {
+  "entries": [
+   {
+    "runtime": "worker",
+    "work": "parse",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     24.1,
+     24.5,
+     25.9
+    ]
+   },
+   {
+    "runtime": "worker",
+    "work": "score",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     0.4,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "runtime": "worker",
+    "work": "alloc",
+    "reps": 3,
+    "runs": 3,
+    "perRepMsSorted": [
+     134.66666666666666,
+     135,
+     135.66666666666666
+    ]
+   },
+   {
+    "runtime": "worker",
+    "work": "allocFull",
+    "reps": 2,
+    "runs": 3,
+    "perRepMsSorted": [
+     583,
+     587,
+     589
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "parse",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     23.2,
+     23.3,
+     23.3
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "score",
+    "reps": 10,
+    "runs": 3,
+    "perRepMsSorted": [
+     0.4,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "alloc",
+    "reps": 3,
+    "runs": 3,
+    "perRepMsSorted": [
+     135,
+     138.66666666666666,
+     139.33333333333334
+    ]
+   },
+   {
+    "runtime": "durableObject",
+    "work": "allocFull",
+    "reps": 2,
+    "runs": 3,
+    "perRepMsSorted": [
+     579.5,
+     590,
+     591
+    ]
+   }
+  ]
+ },
+ "cleanup": {
+  "leftoverWorkers": [],
+  "deletedByFallback": [],
+  "durableObjectNamespaces": "removed",
+  "ok": true,
+  "listUnavailable": false
+ },
+ "notes": [
+  "Worker が応答するまで 3 回の /ping を要した",
+  "Durable Object の /do/ping: HTTP 200 {\"ok\":true,\"runtime\":\"durableObject\",\"sqliteOk\":true}"
+ ]
+}

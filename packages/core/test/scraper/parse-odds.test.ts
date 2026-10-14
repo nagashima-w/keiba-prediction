@@ -121,7 +121,55 @@ describe("parseOdds(未確定・非数値の許容)", () => {
       place: { "01": ["**.*", "**.*", "0"] },
     });
     const r = parseOdds(json);
-    expect(r.place[1]).toEqual({ oddsMin: null, oddsMax: null, ninki: 0 });
+    // 【意図的な契約変更・Issue #34】旧実装は人気列"0"を Number("0")=0 のまま返しており、
+    // 本行はかつて ninki: 0 を期待していた(合成データ。実データでの"0"発生は未観測)。
+    // 人気は1始まりの値域で0は値域外であり、共有ヘルパ toNinki(scraper/ninki.ts)への
+    // 統合により欠損表現の null に統一した。テストの弱体化ではなく、値域外の値を
+    // 正常値として通していた欠陥の是正である。
+    expect(r.place[1]).toEqual({ oddsMin: null, oddsMax: null, ninki: null });
+  });
+});
+
+describe("parseOdds(人気列の欠損表現。Issue #34)", () => {
+  // 単勝側・複勝側を別々のテストに分ける(片側だけの退行を検出するため。AC4)。
+  it('単勝の人気列が"0"の場合はninkiがnullになること', () => {
+    const json = buildOddsJson({
+      win: { "01": ["9.0", "0.0", "0"] },
+      place: { "01": ["3.1", "4.1", "5"] },
+    });
+    const r = parseOdds(json);
+    expect(r.win[1]).toEqual({ odds: 9.0, ninki: null });
+  });
+
+  it('複勝の人気列が"0"の場合はninkiがnullになること', () => {
+    const json = buildOddsJson({
+      win: { "01": ["9.0", "0.0", "5"] },
+      place: { "01": ["3.1", "4.1", "0"] },
+    });
+    const r = parseOdds(json);
+    expect(r.place[1]).toEqual({ oddsMin: 3.1, oddsMax: 4.1, ninki: null });
+  });
+});
+
+describe("parseOdds(桁区切りカンマ。Issue #73)", () => {
+  // 条件A': 単勝odds/複勝oddsMin/複勝oddsMaxのいずれも非nullの異なる数値を生む。
+  // 条件B: 複勝セルは3列すべて異なる値にし、構造体まるごとtoEqualで比較する(#58再発防止)。
+  it('単勝オッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること(経路a)', () => {
+    const json = buildOddsJson({
+      win: { "01": ["1,234.5", "0.0", "5"] },
+      place: { "01": ["3.1", "4.1", "5"] },
+    });
+    const r = parseOdds(json);
+    expect(r.win[1]).toEqual({ odds: 1234.5, ninki: 5 });
+  });
+
+  it('複勝の下限・上限がいずれも桁区切りカンマを含む場合、それぞれ除去して数値化されること(経路b・c)', () => {
+    const json = buildOddsJson({
+      win: { "01": ["9.0", "0.0", "5"] },
+      place: { "01": ["1,234.5", "2,345.6", "3"] },
+    });
+    const r = parseOdds(json);
+    expect(r.place[1]).toEqual({ oddsMin: 1234.5, oddsMax: 2345.6, ninki: 3 });
   });
 });
 

@@ -19,6 +19,9 @@ keiba-ev-tool-spec.md の仕様と CLAUDE.md のワークフローに従って�
 レビューは code-reviewer サブエージェントに委譲してください。
 まずPhase 1(scraper)から。最初のタスクとして、対象ページのHTML構造調査と
 フィクスチャ取得の計画を立ててから着手してください。
+(当初の指示です。exe版は2026-10-10にアーカイブし〈Issue #248〉、2026-10-13にコードを削除しました〈Issue #285〉。
+現在はexeのビルド・公開を行いません。最後のexeはReleasesの`dev-latest`に残してあります。
+exeのコードが最後に残っているコミットは3c1664eです。詳細はREADME.md。)
 なお、GitHub ActionsでのWindows向けビルド(electron-builder)はPhase 4開始時点で
 先に整備し、UI実装中は常にReleasesからexeがダウンロードできる状態を維持してください。
 
@@ -28,3 +31,4 @@ keiba-ev-tool-spec.md の仕様と CLAUDE.md のワークフローに従って�
 - ロジック(scraper/scorer/ev)はクラウド上のテストで完結する
 - Electronの画面確認は、GitHub ActionsがビルドしたexeをReleasesから
   ダウンロードして手元で起動 → 感想をClaude Codeに返す、の往復で行う
+  (アーカイブ済みで、exeのコードは削除済み〈3c1664eまで〉。現在の画面確認は、web版〈Uma Driller〉を対象にする)

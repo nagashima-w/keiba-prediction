@@ -1,0 +1,2663 @@
+{
+  "cases": [
+    {
+      "name": "central-fixture-16-heads",
+      "steps": [
+        {
+          "raceId": "202603020211",
+          "entries": [
+            {
+              "umaban": 13,
+              "finishPosition": 1,
+              "placePayout": 200,
+              "winPayout": 540,
+              "passing": [
+                10,
+                11,
+                11,
+                11
+              ],
+              "last3f": 34
+            },
+            {
+              "umaban": 8,
+              "finishPosition": 2,
+              "placePayout": 360,
+              "winPayout": null,
+              "passing": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "last3f": 34.7
+            },
+            {
+              "umaban": 5,
+              "finishPosition": 3,
+              "placePayout": 200,
+              "winPayout": null,
+              "passing": [
+                2,
+                2,
+                2,
+                2
+              ],
+              "last3f": 34.8
+            },
+            {
+              "umaban": 15,
+              "finishPosition": 4,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                12,
+                13,
+                12,
+                12
+              ],
+              "last3f": 34.2
+            },
+            {
+              "umaban": 10,
+              "finishPosition": 5,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                8,
+                8,
+                4,
+                3
+              ],
+              "last3f": 34.7
+            },
+            {
+              "umaban": 4,
+              "finishPosition": 6,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                10,
+                8,
+                8,
+                7
+              ],
+              "last3f": 34.6
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 7,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                5,
+                6,
+                8,
+                7
+              ],
+              "last3f": 34.7
+            },
+            {
+              "umaban": 6,
+              "finishPosition": 8,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                5,
+                5,
+                4,
+                3
+              ],
+              "last3f": 34.9
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 9,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                8,
+                10,
+                12,
+                12
+              ],
+              "last3f": 34.4
+            },
+            {
+              "umaban": 1,
+              "finishPosition": 10,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                2,
+                3,
+                4,
+                3
+              ],
+              "last3f": 35
+            },
+            {
+              "umaban": 12,
+              "finishPosition": 11,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                14,
+                14,
+                15,
+                15
+              ],
+              "last3f": 34.3
+            },
+            {
+              "umaban": 7,
+              "finishPosition": 12,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                16,
+                16,
+                12,
+                12
+              ],
+              "last3f": 34.5
+            },
+            {
+              "umaban": 9,
+              "finishPosition": 13,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                12,
+                12,
+                15,
+                15
+              ],
+              "last3f": 34.4
+            },
+            {
+              "umaban": 16,
+              "finishPosition": 14,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                14,
+                14,
+                8,
+                7
+              ],
+              "last3f": 35.2
+            },
+            {
+              "umaban": 11,
+              "finishPosition": 15,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                2,
+                3,
+                2,
+                3
+              ],
+              "last3f": 35.5
+            },
+            {
+              "umaban": 14,
+              "finishPosition": 16,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [
+                5,
+                6,
+                4,
+                7
+              ],
+              "last3f": 36.7
+            }
+          ],
+          "courseType": "芝",
+          "comboPayouts": {
+            "wide": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    8,
+                    13
+                  ],
+                  "payout": 1520
+                },
+                {
+                  "umabans": [
+                    5,
+                    13
+                  ],
+                  "payout": 710
+                },
+                {
+                  "umabans": [
+                    5,
+                    8
+                  ],
+                  "payout": 1290
+                }
+              ]
+            },
+            "trio": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    5,
+                    8,
+                    13
+                  ],
+                  "payout": 8250
+                }
+              ]
+            },
+            "quinella": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    8,
+                    13
+                  ],
+                  "payout": 4550
+                }
+              ]
+            },
+            "exacta": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    13,
+                    8
+                  ],
+                  "payout": 8360
+                }
+              ]
+            },
+            "trifecta": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    13,
+                    8,
+                    5
+                  ],
+                  "payout": 52690
+                }
+              ]
+            },
+            "bracketQuinella": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    4,
+                    7
+                  ],
+                  "payout": 3150
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "expected": {
+        "race_results": [
+          {
+            "race_id": "202603020211",
+            "umaban": 1,
+            "finish_position": 10,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[2,3,4,3]",
+            "last3f": 35
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 2,
+            "finish_position": 9,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[8,10,12,12]",
+            "last3f": 34.4
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 3,
+            "finish_position": 7,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[5,6,8,7]",
+            "last3f": 34.7
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 4,
+            "finish_position": 6,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[10,8,8,7]",
+            "last3f": 34.6
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 5,
+            "finish_position": 3,
+            "place_payout": 200,
+            "win_payout": null,
+            "passing_json": "[2,2,2,2]",
+            "last3f": 34.8
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 6,
+            "finish_position": 8,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[5,5,4,3]",
+            "last3f": 34.9
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 7,
+            "finish_position": 12,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[16,16,12,12]",
+            "last3f": 34.5
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 8,
+            "finish_position": 2,
+            "place_payout": 360,
+            "win_payout": null,
+            "passing_json": "[1,1,1,1]",
+            "last3f": 34.7
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 9,
+            "finish_position": 13,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[12,12,15,15]",
+            "last3f": 34.4
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 10,
+            "finish_position": 5,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[8,8,4,3]",
+            "last3f": 34.7
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 11,
+            "finish_position": 15,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[2,3,2,3]",
+            "last3f": 35.5
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 12,
+            "finish_position": 11,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[14,14,15,15]",
+            "last3f": 34.3
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 13,
+            "finish_position": 1,
+            "place_payout": 200,
+            "win_payout": 540,
+            "passing_json": "[10,11,11,11]",
+            "last3f": 34
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 14,
+            "finish_position": 16,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[5,6,4,7]",
+            "last3f": 36.7
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 15,
+            "finish_position": 4,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[12,13,12,12]",
+            "last3f": 34.2
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 16,
+            "finish_position": 14,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[14,14,8,7]",
+            "last3f": 35.2
+          }
+        ],
+        "race_result_meta": [
+          {
+            "race_id": "202603020211",
+            "course_type": "芝"
+          }
+        ],
+        "race_combo_payouts": [
+          {
+            "race_id": "202603020211",
+            "bet_type": "bracketQuinella",
+            "combo_key": "0407",
+            "payout": 3150
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "exacta",
+            "combo_key": "1308",
+            "payout": 8360
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "quinella",
+            "combo_key": "0813",
+            "payout": 4550
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "trifecta",
+            "combo_key": "130805",
+            "payout": 52690
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "trio",
+            "combo_key": "050813",
+            "payout": 8250
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "wide",
+            "combo_key": "0508",
+            "payout": 1290
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "wide",
+            "combo_key": "0513",
+            "payout": 710
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "wide",
+            "combo_key": "0813",
+            "payout": 1520
+          }
+        ],
+        "race_combo_payout_imports": [
+          {
+            "race_id": "202603020211",
+            "bet_type": "bracketQuinella"
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "exacta"
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "quinella"
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "trifecta"
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "trio"
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "wide"
+          }
+        ]
+      },
+      "expectedDetails": {
+        "202603020211": {
+          "courseType": "芝",
+          "horses": [
+            {
+              "umaban": 1,
+              "finishPosition": 10,
+              "passing": [
+                2,
+                3,
+                4,
+                3
+              ],
+              "last3f": 35
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 9,
+              "passing": [
+                8,
+                10,
+                12,
+                12
+              ],
+              "last3f": 34.4
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 7,
+              "passing": [
+                5,
+                6,
+                8,
+                7
+              ],
+              "last3f": 34.7
+            },
+            {
+              "umaban": 4,
+              "finishPosition": 6,
+              "passing": [
+                10,
+                8,
+                8,
+                7
+              ],
+              "last3f": 34.6
+            },
+            {
+              "umaban": 5,
+              "finishPosition": 3,
+              "passing": [
+                2,
+                2,
+                2,
+                2
+              ],
+              "last3f": 34.8
+            },
+            {
+              "umaban": 6,
+              "finishPosition": 8,
+              "passing": [
+                5,
+                5,
+                4,
+                3
+              ],
+              "last3f": 34.9
+            },
+            {
+              "umaban": 7,
+              "finishPosition": 12,
+              "passing": [
+                16,
+                16,
+                12,
+                12
+              ],
+              "last3f": 34.5
+            },
+            {
+              "umaban": 8,
+              "finishPosition": 2,
+              "passing": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "last3f": 34.7
+            },
+            {
+              "umaban": 9,
+              "finishPosition": 13,
+              "passing": [
+                12,
+                12,
+                15,
+                15
+              ],
+              "last3f": 34.4
+            },
+            {
+              "umaban": 10,
+              "finishPosition": 5,
+              "passing": [
+                8,
+                8,
+                4,
+                3
+              ],
+              "last3f": 34.7
+            },
+            {
+              "umaban": 11,
+              "finishPosition": 15,
+              "passing": [
+                2,
+                3,
+                2,
+                3
+              ],
+              "last3f": 35.5
+            },
+            {
+              "umaban": 12,
+              "finishPosition": 11,
+              "passing": [
+                14,
+                14,
+                15,
+                15
+              ],
+              "last3f": 34.3
+            },
+            {
+              "umaban": 13,
+              "finishPosition": 1,
+              "passing": [
+                10,
+                11,
+                11,
+                11
+              ],
+              "last3f": 34
+            },
+            {
+              "umaban": 14,
+              "finishPosition": 16,
+              "passing": [
+                5,
+                6,
+                4,
+                7
+              ],
+              "last3f": 36.7
+            },
+            {
+              "umaban": 15,
+              "finishPosition": 4,
+              "passing": [
+                12,
+                13,
+                12,
+                12
+              ],
+              "last3f": 34.2
+            },
+            {
+              "umaban": 16,
+              "finishPosition": 14,
+              "passing": [
+                14,
+                14,
+                8,
+                7
+              ],
+              "last3f": 35.2
+            }
+          ]
+        },
+        "202603020210": null
+      }
+    },
+    {
+      "name": "nar-fixture",
+      "steps": [
+        {
+          "raceId": "202654071210",
+          "entries": [
+            {
+              "umaban": 5,
+              "finishPosition": 1,
+              "placePayout": 540,
+              "winPayout": 1450,
+              "passing": [],
+              "last3f": 40
+            },
+            {
+              "umaban": 7,
+              "finishPosition": 2,
+              "placePayout": 250,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 40.4
+            },
+            {
+              "umaban": 1,
+              "finishPosition": 3,
+              "placePayout": 790,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 38.3
+            },
+            {
+              "umaban": 9,
+              "finishPosition": 4,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 40.1
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 5,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 40.6
+            },
+            {
+              "umaban": 10,
+              "finishPosition": 6,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 40.7
+            },
+            {
+              "umaban": 11,
+              "finishPosition": 7,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 41.1
+            },
+            {
+              "umaban": 4,
+              "finishPosition": 8,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 40.7
+            },
+            {
+              "umaban": 6,
+              "finishPosition": 9,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 41.7
+            },
+            {
+              "umaban": 12,
+              "finishPosition": 10,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 42.5
+            },
+            {
+              "umaban": 8,
+              "finishPosition": 11,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 42.6
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 12,
+              "placePayout": null,
+              "winPayout": null,
+              "passing": [],
+              "last3f": 44.4
+            }
+          ],
+          "courseType": "ダ",
+          "comboPayouts": {
+            "wide": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    5,
+                    7
+                  ],
+                  "payout": 2040
+                },
+                {
+                  "umabans": [
+                    1,
+                    5
+                  ],
+                  "payout": 5310
+                },
+                {
+                  "umabans": [
+                    1,
+                    7
+                  ],
+                  "payout": 3240
+                }
+              ]
+            },
+            "trio": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    1,
+                    5,
+                    7
+                  ],
+                  "payout": 41580
+                }
+              ]
+            },
+            "quinella": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    5,
+                    7
+                  ],
+                  "payout": 5230
+                }
+              ]
+            },
+            "exacta": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    5,
+                    7
+                  ],
+                  "payout": 12970
+                }
+              ]
+            },
+            "trifecta": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    5,
+                    7,
+                    1
+                  ],
+                  "payout": 260090
+                }
+              ]
+            },
+            "bracketQuinella": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    5,
+                    6
+                  ],
+                  "payout": 1070
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "expected": {
+        "race_results": [
+          {
+            "race_id": "202654071210",
+            "umaban": 1,
+            "finish_position": 3,
+            "place_payout": 790,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 38.3
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 2,
+            "finish_position": 12,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 44.4
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 3,
+            "finish_position": 5,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 40.6
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 4,
+            "finish_position": 8,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 40.7
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 5,
+            "finish_position": 1,
+            "place_payout": 540,
+            "win_payout": 1450,
+            "passing_json": "[]",
+            "last3f": 40
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 6,
+            "finish_position": 9,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 41.7
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 7,
+            "finish_position": 2,
+            "place_payout": 250,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 40.4
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 8,
+            "finish_position": 11,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 42.6
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 9,
+            "finish_position": 4,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 40.1
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 10,
+            "finish_position": 6,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 40.7
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 11,
+            "finish_position": 7,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 41.1
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 12,
+            "finish_position": 10,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 42.5
+          }
+        ],
+        "race_result_meta": [
+          {
+            "race_id": "202654071210",
+            "course_type": "ダ"
+          }
+        ],
+        "race_combo_payouts": [
+          {
+            "race_id": "202654071210",
+            "bet_type": "bracketQuinella",
+            "combo_key": "0506",
+            "payout": 1070
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "exacta",
+            "combo_key": "0507",
+            "payout": 12970
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "quinella",
+            "combo_key": "0507",
+            "payout": 5230
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "trifecta",
+            "combo_key": "050701",
+            "payout": 260090
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "trio",
+            "combo_key": "010507",
+            "payout": 41580
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "wide",
+            "combo_key": "0105",
+            "payout": 5310
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "wide",
+            "combo_key": "0107",
+            "payout": 3240
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "wide",
+            "combo_key": "0507",
+            "payout": 2040
+          }
+        ],
+        "race_combo_payout_imports": [
+          {
+            "race_id": "202654071210",
+            "bet_type": "bracketQuinella"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "exacta"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "quinella"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "trifecta"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "trio"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "wide"
+          }
+        ]
+      },
+      "expectedDetails": {
+        "202654071210": {
+          "courseType": "ダ",
+          "horses": [
+            {
+              "umaban": 1,
+              "finishPosition": 3,
+              "passing": [],
+              "last3f": 38.3
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 12,
+              "passing": [],
+              "last3f": 44.4
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 5,
+              "passing": [],
+              "last3f": 40.6
+            },
+            {
+              "umaban": 4,
+              "finishPosition": 8,
+              "passing": [],
+              "last3f": 40.7
+            },
+            {
+              "umaban": 5,
+              "finishPosition": 1,
+              "passing": [],
+              "last3f": 40
+            },
+            {
+              "umaban": 6,
+              "finishPosition": 9,
+              "passing": [],
+              "last3f": 41.7
+            },
+            {
+              "umaban": 7,
+              "finishPosition": 2,
+              "passing": [],
+              "last3f": 40.4
+            },
+            {
+              "umaban": 8,
+              "finishPosition": 11,
+              "passing": [],
+              "last3f": 42.6
+            },
+            {
+              "umaban": 9,
+              "finishPosition": 4,
+              "passing": [],
+              "last3f": 40.1
+            },
+            {
+              "umaban": 10,
+              "finishPosition": 6,
+              "passing": [],
+              "last3f": 40.7
+            },
+            {
+              "umaban": 11,
+              "finishPosition": 7,
+              "passing": [],
+              "last3f": 41.1
+            },
+            {
+              "umaban": 12,
+              "finishPosition": 10,
+              "passing": [],
+              "last3f": 42.5
+            }
+          ]
+        },
+        "202654071209": null
+      }
+    },
+    {
+      "name": "synthetic-18-heads-all-bet-types",
+      "steps": [
+        {
+          "raceId": "202654071210",
+          "entries": [
+            {
+              "umaban": 1,
+              "finishPosition": 5,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 7
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 3,
+              "placePayout": 340,
+              "winPayout": null,
+              "passing": [
+                9,
+                9,
+                8,
+                6
+              ],
+              "last3f": 0
+            },
+            {
+              "umaban": 4,
+              "finishPosition": 11
+            },
+            {
+              "umaban": 5,
+              "finishPosition": 9,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 6,
+              "finishPosition": 14
+            },
+            {
+              "umaban": 7,
+              "finishPosition": 1,
+              "placePayout": 150,
+              "winPayout": 620,
+              "passing": [
+                2,
+                2,
+                1,
+                1
+              ],
+              "last3f": 33.7
+            },
+            {
+              "umaban": 8,
+              "finishPosition": 12
+            },
+            {
+              "umaban": 9,
+              "finishPosition": 6,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 10,
+              "finishPosition": 16
+            },
+            {
+              "umaban": 11,
+              "finishPosition": 1,
+              "placePayout": 210,
+              "winPayout": 620,
+              "passing": [
+                5,
+                5,
+                3,
+                2
+              ],
+              "last3f": 33.9
+            },
+            {
+              "umaban": 12,
+              "finishPosition": 10
+            },
+            {
+              "umaban": 13,
+              "finishPosition": 17,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 14,
+              "finishPosition": 4,
+              "passing": [],
+              "last3f": 34.5
+            },
+            {
+              "umaban": 15,
+              "finishPosition": 13,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 16,
+              "finishPosition": 8
+            },
+            {
+              "umaban": 17,
+              "finishPosition": 15,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 18,
+              "finishPosition": null,
+              "passing": [],
+              "last3f": null
+            }
+          ],
+          "courseType": "ダ",
+          "comboPayouts": {
+            "wide": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    7,
+                    11
+                  ],
+                  "payout": 450
+                },
+                {
+                  "umabans": [
+                    3,
+                    7
+                  ],
+                  "payout": 780
+                },
+                {
+                  "umabans": [
+                    3,
+                    11
+                  ],
+                  "payout": 1230
+                }
+              ]
+            },
+            "trio": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    3,
+                    7,
+                    11
+                  ],
+                  "payout": 25530
+                }
+              ]
+            },
+            "quinella": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    7,
+                    11
+                  ],
+                  "payout": 1320
+                }
+              ]
+            },
+            "exacta": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    7,
+                    11
+                  ],
+                  "payout": 2840
+                },
+                {
+                  "umabans": [
+                    11,
+                    7
+                  ],
+                  "payout": 2840
+                }
+              ]
+            },
+            "trifecta": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    7,
+                    11,
+                    3
+                  ],
+                  "payout": 39210
+                },
+                {
+                  "umabans": [
+                    11,
+                    7,
+                    3
+                  ],
+                  "payout": 39210
+                }
+              ]
+            },
+            "bracketQuinella": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    4,
+                    6
+                  ],
+                  "payout": 910
+                },
+                {
+                  "umabans": [
+                    8,
+                    8
+                  ],
+                  "payout": 7740
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "expected": {
+        "race_results": [
+          {
+            "race_id": "202654071210",
+            "umaban": 1,
+            "finish_position": 5,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[10,11]",
+            "last3f": 35.1
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 2,
+            "finish_position": 7,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 3,
+            "finish_position": 3,
+            "place_payout": 340,
+            "win_payout": null,
+            "passing_json": "[9,9,8,6]",
+            "last3f": 0
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 4,
+            "finish_position": 11,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 5,
+            "finish_position": 9,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[10,11]",
+            "last3f": 35.1
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 6,
+            "finish_position": 14,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 7,
+            "finish_position": 1,
+            "place_payout": 150,
+            "win_payout": 620,
+            "passing_json": "[2,2,1,1]",
+            "last3f": 33.7
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 8,
+            "finish_position": 12,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 9,
+            "finish_position": 6,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[10,11]",
+            "last3f": 35.1
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 10,
+            "finish_position": 16,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 11,
+            "finish_position": 1,
+            "place_payout": 210,
+            "win_payout": 620,
+            "passing_json": "[5,5,3,2]",
+            "last3f": 33.9
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 12,
+            "finish_position": 10,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 13,
+            "finish_position": 17,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[10,11]",
+            "last3f": 35.1
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 14,
+            "finish_position": 4,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": 34.5
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 15,
+            "finish_position": 13,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[10,11]",
+            "last3f": 35.1
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 16,
+            "finish_position": 8,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 17,
+            "finish_position": 15,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[10,11]",
+            "last3f": 35.1
+          },
+          {
+            "race_id": "202654071210",
+            "umaban": 18,
+            "finish_position": null,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          }
+        ],
+        "race_result_meta": [
+          {
+            "race_id": "202654071210",
+            "course_type": "ダ"
+          }
+        ],
+        "race_combo_payouts": [
+          {
+            "race_id": "202654071210",
+            "bet_type": "bracketQuinella",
+            "combo_key": "0406",
+            "payout": 910
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "bracketQuinella",
+            "combo_key": "0808",
+            "payout": 7740
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "exacta",
+            "combo_key": "0711",
+            "payout": 2840
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "exacta",
+            "combo_key": "1107",
+            "payout": 2840
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "quinella",
+            "combo_key": "0711",
+            "payout": 1320
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "trifecta",
+            "combo_key": "071103",
+            "payout": 39210
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "trifecta",
+            "combo_key": "110703",
+            "payout": 39210
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "trio",
+            "combo_key": "030711",
+            "payout": 25530
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "wide",
+            "combo_key": "0307",
+            "payout": 780
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "wide",
+            "combo_key": "0311",
+            "payout": 1230
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "wide",
+            "combo_key": "0711",
+            "payout": 450
+          }
+        ],
+        "race_combo_payout_imports": [
+          {
+            "race_id": "202654071210",
+            "bet_type": "bracketQuinella"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "exacta"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "quinella"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "trifecta"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "trio"
+          },
+          {
+            "race_id": "202654071210",
+            "bet_type": "wide"
+          }
+        ]
+      },
+      "expectedDetails": {
+        "202654071210": {
+          "courseType": "ダ",
+          "horses": [
+            {
+              "umaban": 1,
+              "finishPosition": 5,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 7,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 3,
+              "passing": [
+                9,
+                9,
+                8,
+                6
+              ],
+              "last3f": 0
+            },
+            {
+              "umaban": 4,
+              "finishPosition": 11,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 5,
+              "finishPosition": 9,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 6,
+              "finishPosition": 14,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 7,
+              "finishPosition": 1,
+              "passing": [
+                2,
+                2,
+                1,
+                1
+              ],
+              "last3f": 33.7
+            },
+            {
+              "umaban": 8,
+              "finishPosition": 12,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 9,
+              "finishPosition": 6,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 10,
+              "finishPosition": 16,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 11,
+              "finishPosition": 1,
+              "passing": [
+                5,
+                5,
+                3,
+                2
+              ],
+              "last3f": 33.9
+            },
+            {
+              "umaban": 12,
+              "finishPosition": 10,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 13,
+              "finishPosition": 17,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 14,
+              "finishPosition": 4,
+              "passing": [],
+              "last3f": 34.5
+            },
+            {
+              "umaban": 15,
+              "finishPosition": 13,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 16,
+              "finishPosition": 8,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 17,
+              "finishPosition": 15,
+              "passing": [
+                10,
+                11
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 18,
+              "finishPosition": null,
+              "passing": [],
+              "last3f": null
+            }
+          ]
+        },
+        "202654071211": null
+      }
+    },
+    {
+      "name": "all-finish-null-no-meta-no-combo",
+      "steps": [
+        {
+          "raceId": "202603020214",
+          "entries": [
+            {
+              "umaban": 1,
+              "finishPosition": null
+            },
+            {
+              "umaban": 2,
+              "finishPosition": null,
+              "passing": [],
+              "last3f": null
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "race_results": [
+          {
+            "race_id": "202603020214",
+            "umaban": 1,
+            "finish_position": null,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202603020214",
+            "umaban": 2,
+            "finish_position": null,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          }
+        ],
+        "race_result_meta": [],
+        "race_combo_payouts": [],
+        "race_combo_payout_imports": []
+      },
+      "expectedDetails": {
+        "202603020214": {
+          "courseType": null,
+          "horses": [
+            {
+              "umaban": 1,
+              "finishPosition": null,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 2,
+              "finishPosition": null,
+              "passing": [],
+              "last3f": null
+            }
+          ]
+        },
+        "202603020215": null
+      }
+    },
+    {
+      "name": "resave-delete-then-insert-undetermined-keeps",
+      "steps": [
+        {
+          "raceId": "202603020211",
+          "entries": [
+            {
+              "umaban": 1,
+              "finishPosition": 2,
+              "placePayout": 120,
+              "winPayout": null,
+              "passing": [
+                1,
+                1
+              ],
+              "last3f": 34
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 1,
+              "placePayout": 140,
+              "winPayout": 410,
+              "passing": [
+                2,
+                2
+              ],
+              "last3f": 33.8
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 3,
+              "placePayout": 180,
+              "passing": [
+                3,
+                3
+              ],
+              "last3f": 34.4
+            },
+            {
+              "umaban": 4,
+              "finishPosition": 4
+            },
+            {
+              "umaban": 5,
+              "finishPosition": null
+            }
+          ],
+          "courseType": "芝",
+          "comboPayouts": {
+            "wide": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    1,
+                    2
+                  ],
+                  "payout": 300
+                },
+                {
+                  "umabans": [
+                    1,
+                    3
+                  ],
+                  "payout": 500
+                },
+                {
+                  "umabans": [
+                    2,
+                    3
+                  ],
+                  "payout": 700
+                }
+              ]
+            },
+            "trio": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    1,
+                    2,
+                    3
+                  ],
+                  "payout": 2100
+                }
+              ]
+            },
+            "quinella": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    1,
+                    2
+                  ],
+                  "payout": 650
+                },
+                {
+                  "umabans": [
+                    1,
+                    3
+                  ],
+                  "payout": 900
+                }
+              ]
+            }
+          }
+        },
+        {
+          "raceId": "202603020212",
+          "entries": [
+            {
+              "umaban": 1,
+              "finishPosition": 1,
+              "placePayout": 110,
+              "winPayout": 150,
+              "passing": [
+                1
+              ],
+              "last3f": 36
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 2,
+              "placePayout": 130
+            }
+          ],
+          "courseType": "ダ",
+          "comboPayouts": {
+            "wide": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    1,
+                    2
+                  ],
+                  "payout": 240
+                },
+                {
+                  "umabans": [
+                    2,
+                    3
+                  ],
+                  "payout": 410
+                }
+              ]
+            }
+          }
+        },
+        {
+          "raceId": "202603020211",
+          "entries": [
+            {
+              "umaban": 1,
+              "finishPosition": 1,
+              "placePayout": 125,
+              "winPayout": 380,
+              "passing": [
+                1,
+                1,
+                1
+              ],
+              "last3f": 34.1
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 2,
+              "placePayout": 145,
+              "passing": [
+                2,
+                3
+              ],
+              "last3f": 33.9
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 3
+            }
+          ],
+          "courseType": "ダ",
+          "comboPayouts": {
+            "wide": {
+              "state": "parsed",
+              "payouts": []
+            },
+            "trio": {
+              "state": "undetermined",
+              "reason": {
+                "kind": "payoutTableAbsent",
+                "message": "払戻テーブルがありません",
+                "observedGroupCount": null,
+                "observedPayoutCount": null,
+                "rawHtml": null
+              }
+            },
+            "quinella": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    1,
+                    2
+                  ],
+                  "payout": 660
+                }
+              ]
+            },
+            "exacta": {
+              "state": "parsed",
+              "payouts": [
+                {
+                  "umabans": [
+                    1,
+                    2
+                  ],
+                  "payout": 1300
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "expected": {
+        "race_results": [
+          {
+            "race_id": "202603020211",
+            "umaban": 1,
+            "finish_position": 1,
+            "place_payout": 125,
+            "win_payout": 380,
+            "passing_json": "[1,1,1]",
+            "last3f": 34.1
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 2,
+            "finish_position": 2,
+            "place_payout": 145,
+            "win_payout": null,
+            "passing_json": "[2,3]",
+            "last3f": 33.9
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 3,
+            "finish_position": 3,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 4,
+            "finish_position": 4,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202603020211",
+            "umaban": 5,
+            "finish_position": null,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202603020212",
+            "umaban": 1,
+            "finish_position": 1,
+            "place_payout": 110,
+            "win_payout": 150,
+            "passing_json": "[1]",
+            "last3f": 36
+          },
+          {
+            "race_id": "202603020212",
+            "umaban": 2,
+            "finish_position": 2,
+            "place_payout": 130,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          }
+        ],
+        "race_result_meta": [
+          {
+            "race_id": "202603020211",
+            "course_type": "ダ"
+          },
+          {
+            "race_id": "202603020212",
+            "course_type": "ダ"
+          }
+        ],
+        "race_combo_payouts": [
+          {
+            "race_id": "202603020211",
+            "bet_type": "exacta",
+            "combo_key": "0102",
+            "payout": 1300
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "quinella",
+            "combo_key": "0102",
+            "payout": 660
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "trio",
+            "combo_key": "010203",
+            "payout": 2100
+          },
+          {
+            "race_id": "202603020212",
+            "bet_type": "wide",
+            "combo_key": "0102",
+            "payout": 240
+          },
+          {
+            "race_id": "202603020212",
+            "bet_type": "wide",
+            "combo_key": "0203",
+            "payout": 410
+          }
+        ],
+        "race_combo_payout_imports": [
+          {
+            "race_id": "202603020211",
+            "bet_type": "exacta"
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "quinella"
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "trio"
+          },
+          {
+            "race_id": "202603020211",
+            "bet_type": "wide"
+          },
+          {
+            "race_id": "202603020212",
+            "bet_type": "wide"
+          }
+        ]
+      },
+      "expectedDetails": {
+        "202603020211": {
+          "courseType": "ダ",
+          "horses": [
+            {
+              "umaban": 1,
+              "finishPosition": 1,
+              "passing": [
+                1,
+                1,
+                1
+              ],
+              "last3f": 34.1
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 2,
+              "passing": [
+                2,
+                3
+              ],
+              "last3f": 33.9
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 3,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 4,
+              "finishPosition": 4,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 5,
+              "finishPosition": null,
+              "passing": [],
+              "last3f": null
+            }
+          ]
+        },
+        "202603020212": {
+          "courseType": "ダ",
+          "horses": [
+            {
+              "umaban": 1,
+              "finishPosition": 1,
+              "passing": [
+                1
+              ],
+              "last3f": 36
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 2,
+              "passing": [],
+              "last3f": null
+            }
+          ]
+        },
+        "202603020213": null
+      }
+    },
+    {
+      "name": "undetermined-only",
+      "steps": [
+        {
+          "raceId": "202603020213",
+          "entries": [
+            {
+              "umaban": 1,
+              "finishPosition": 1,
+              "placePayout": 100,
+              "winPayout": 200
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 2
+            }
+          ],
+          "courseType": "障",
+          "comboPayouts": {
+            "wide": {
+              "state": "undetermined",
+              "reason": {
+                "kind": "payoutTableAbsent",
+                "message": "払戻テーブルがありません",
+                "observedGroupCount": null,
+                "observedPayoutCount": null,
+                "rawHtml": null
+              }
+            },
+            "trio": {
+              "state": "undetermined",
+              "reason": {
+                "kind": "payoutTableAbsent",
+                "message": "払戻テーブルがありません",
+                "observedGroupCount": null,
+                "observedPayoutCount": null,
+                "rawHtml": null
+              }
+            },
+            "exacta": {
+              "state": "undetermined",
+              "reason": {
+                "kind": "payoutTableAbsent",
+                "message": "払戻テーブルがありません",
+                "observedGroupCount": null,
+                "observedPayoutCount": null,
+                "rawHtml": null
+              }
+            }
+          }
+        }
+      ],
+      "expected": {
+        "race_results": [
+          {
+            "race_id": "202603020213",
+            "umaban": 1,
+            "finish_position": 1,
+            "place_payout": 100,
+            "win_payout": 200,
+            "passing_json": "[]",
+            "last3f": null
+          },
+          {
+            "race_id": "202603020213",
+            "umaban": 2,
+            "finish_position": 2,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[]",
+            "last3f": null
+          }
+        ],
+        "race_result_meta": [
+          {
+            "race_id": "202603020213",
+            "course_type": "障"
+          }
+        ],
+        "race_combo_payouts": [],
+        "race_combo_payout_imports": []
+      },
+      "expectedDetails": {
+        "202603020213": {
+          "courseType": "障",
+          "horses": [
+            {
+              "umaban": 1,
+              "finishPosition": 1,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 2,
+              "passing": [],
+              "last3f": null
+            }
+          ]
+        },
+        "202603020216": null
+      }
+    },
+    {
+      "name": "defensive-restore",
+      "raw": {
+        "race_results": [
+          {
+            "race_id": "202603020299",
+            "umaban": 1,
+            "finish_position": 1,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[1,2]",
+            "last3f": 35.1
+          },
+          {
+            "race_id": "202603020299",
+            "umaban": 2,
+            "finish_position": 2,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "broken",
+            "last3f": 34.8
+          },
+          {
+            "race_id": "202603020299",
+            "umaban": 3,
+            "finish_position": 3,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": null,
+            "last3f": null
+          },
+          {
+            "race_id": "202603020299",
+            "umaban": 4,
+            "finish_position": 4,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[\"a\"]",
+            "last3f": 0
+          },
+          {
+            "race_id": "202603020299",
+            "umaban": 5,
+            "finish_position": null,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[1,\"2\"]",
+            "last3f": null
+          },
+          {
+            "race_id": "202603020298",
+            "umaban": 1,
+            "finish_position": 1,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[3,3]",
+            "last3f": 36.2
+          }
+        ],
+        "race_result_meta": [
+          {
+            "race_id": "202603020299",
+            "course_type": "turf"
+          },
+          {
+            "race_id": "202603020298",
+            "course_type": "ダ"
+          },
+          {
+            "race_id": "202603020297",
+            "course_type": "芝"
+          }
+        ]
+      },
+      "steps": [],
+      "expected": {
+        "race_results": [
+          {
+            "race_id": "202603020298",
+            "umaban": 1,
+            "finish_position": 1,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[3,3]",
+            "last3f": 36.2
+          },
+          {
+            "race_id": "202603020299",
+            "umaban": 1,
+            "finish_position": 1,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[1,2]",
+            "last3f": 35.1
+          },
+          {
+            "race_id": "202603020299",
+            "umaban": 2,
+            "finish_position": 2,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "broken",
+            "last3f": 34.8
+          },
+          {
+            "race_id": "202603020299",
+            "umaban": 3,
+            "finish_position": 3,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": null,
+            "last3f": null
+          },
+          {
+            "race_id": "202603020299",
+            "umaban": 4,
+            "finish_position": 4,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[\"a\"]",
+            "last3f": 0
+          },
+          {
+            "race_id": "202603020299",
+            "umaban": 5,
+            "finish_position": null,
+            "place_payout": null,
+            "win_payout": null,
+            "passing_json": "[1,\"2\"]",
+            "last3f": null
+          }
+        ],
+        "race_result_meta": [
+          {
+            "race_id": "202603020297",
+            "course_type": "芝"
+          },
+          {
+            "race_id": "202603020298",
+            "course_type": "ダ"
+          },
+          {
+            "race_id": "202603020299",
+            "course_type": "turf"
+          }
+        ],
+        "race_combo_payouts": [],
+        "race_combo_payout_imports": []
+      },
+      "expectedDetails": {
+        "202603020299": {
+          "courseType": null,
+          "horses": [
+            {
+              "umaban": 1,
+              "finishPosition": 1,
+              "passing": [
+                1,
+                2
+              ],
+              "last3f": 35.1
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 2,
+              "passing": [],
+              "last3f": 34.8
+            },
+            {
+              "umaban": 3,
+              "finishPosition": 3,
+              "passing": [],
+              "last3f": null
+            },
+            {
+              "umaban": 4,
+              "finishPosition": 4,
+              "passing": [],
+              "last3f": 0
+            },
+            {
+              "umaban": 5,
+              "finishPosition": null,
+              "passing": [],
+              "last3f": null
+            }
+          ]
+        },
+        "202603020298": {
+          "courseType": "ダ",
+          "horses": [
+            {
+              "umaban": 1,
+              "finishPosition": 1,
+              "passing": [
+                3,
+                3
+              ],
+              "last3f": 36.2
+            }
+          ]
+        },
+        "202603020297": null,
+        "202603020296": null
+      }
+    }
+  ]
+}

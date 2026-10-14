@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040905",
+  "region": "central",
+  "requestedDate": "20260927",
+  "kaisaiDate": "20260927",
+  "venueCode": "06",
+  "raceNumber": 5,
+  "raceName": "2歳新馬",
+  "listedEntryCount": 10,
+  "status": "ok",
+  "courseType": "芝",
+  "distance": 2000,
+  "runnerCount": 10,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "タイセイパーシスト",
+      "prior": 0.315,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 2.7,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 2,
+      "horseName": "ケルンミッチー",
+      "prior": 0.315,
+      "placeOddsMin": 16.4,
+      "placeOddsMax": 33.9,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 3,
+      "horseName": "ダイアナマリア",
+      "prior": 0.315,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.1,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 4,
+      "horseName": "テムグリーン",
+      "prior": 0.285,
+      "placeOddsMin": 5.5,
+      "placeOddsMax": 11.1,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 5,
+      "horseName": "キセキテキニキテル",
+      "prior": 0.285,
+      "placeOddsMin": 7.5,
+      "placeOddsMax": 15.4,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 6,
+      "horseName": "スワーヴバシレウス",
+      "prior": 0.285,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 2.7,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 7,
+      "horseName": "ライカホウ",
+      "prior": 0.255,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 2.6,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 8,
+      "horseName": "テイクユアタイム",
+      "prior": 0.255,
+      "placeOddsMin": 7.2,
+      "placeOddsMax": 14.9,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 9,
+      "horseName": "エルエシック",
+      "prior": 0.255,
+      "placeOddsMin": 4.1,
+      "placeOddsMax": 8.1,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 10,
+      "horseName": "リンカーンバローズ",
+      "prior": 0.255,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 2.3,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/27",
+      "totalResultCount": 10,
+      "removedCount": 10,
+      "removedByCutoffCount": 10,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:36:53.464Z"
+}

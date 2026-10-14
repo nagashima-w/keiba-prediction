@@ -16,8 +16,16 @@
  *   - 正確な同時分布(例: Plackett-Luce モデルで着順分布を明示的に生成し、複勝圏内の組合せ確率を
  *     積分する等)は理論的により厳密だが実装・検証コストが高い。ユーザー要望「なる早で厳密に
  *     やりたい」を踏まえ、C-1では本モデルを PlaceJointModel インターフェースの1実装として
- *     切り出すことで、Phase 2 で本ファイルだけを差し替えれば済む設計にした(bet-allocation.ts は
- *     このモデルの実装詳細に一切依存しない)。
+ *     切り出した。
+ *
+ *     **「本ファイルだけを差し替えれば済む」という当初の想定は、既に偽である**(Issue #77・
+ *     #20-A で判明)。`probability-quality-metrics.ts` が `CONDITIONAL_BERNOULLI_MODEL` を
+ *     2箇所で直接 import・呼び出ししており、モデルを差し替えるにはそちらの呼び出し元も
+ *     書き換える必要がある。Plackett-Luce 実装(`plackett-luce-model.ts` の
+ *     `PLACKETT_LUCE_MODEL`)を追加した #20-A の時点では、`bet-allocation.ts`・
+ *     `combo-bet-allocation.ts` の既定モデルはまだ `CONDITIONAL_BERNOULLI_MODEL` のままだった
+ *     (その後 #81(#78-B)で本モデルへ切替済み。**現在の既定モデルは `PLACKETT_LUCE_MODEL`**)。
+ *     `PlaceJointModel` インターフェース自体は無改変(受け入れ条件)。
  *
  *   既知の不完全性(Phase 1として明記):
  *   - 条件付け後の周辺確率(各馬がいずれかの組に含まれる確率の合計)は、入力の placeProb と
@@ -55,16 +63,23 @@ export interface PlaceOutcome {
 }
 
 /**
- * 複勝の同時分布モデル。Phase 2 で厳密なモデル(Plackett-Luce 等)に差し替える際は、
- * この interface を満たす別実装を追加し、bet-allocation.ts の呼び出し側で model 引数を
- * 差し替えるだけで済むようにする。
+ * 複勝の同時分布モデル。この interface を満たす別実装を追加し、呼び出し側(bet-allocation.ts 等)で
+ * model 引数を差し替えることでモデルを入れ替えられるように設計している。実際に Plackett-Luce 実装
+ * (`PLACKETT_LUCE_MODEL`)をこの形で追加し、#81(#78-B)で既定モデルもそちらへ切替済み
+ * (「呼び出し側の model 引数を差し替えるだけで完結する」という当初の想定自体は
+ * `probability-quality-metrics.ts` の直接呼び出しにより既に崩れている。詳細は本ファイル冒頭の
+ * コメント参照)。
  */
 export interface PlaceJointModel {
   /** モデル識別子(結果に載せ、どのモデルで計算したかを追跡できるようにする)。 */
   readonly id: string;
   /**
-   * 近似モデルか(true)厳密モデルか(false)。UIが「近似計算」表記を機械的に出し分けるための
-   * フラグ(受け入れ条件10: modelApproximate が結果に載る)。
+   * 近似モデルか(true)厳密モデルか(false)。「同時分布が入力の周辺確率(placeProb)を
+   * 再現しないか」だけを表すフラグであり、**「1着確率や3着内率の予測が当たる」ことは意味しない**
+   * (#77・#20-A で意味を明確化。false は数学的な性質であって予測精度の保証ではない)。
+   *
+   * 現時点で本フラグの UI 消費者は存在しない(`modelApproximate` は結果に載り DB にも保存されるが、
+   * 表示を出し分ける画面はまだ無い。当初の JSDoc「UIが表記を出し分けるためのフラグ」は既に偽)。
    */
   readonly approximate: boolean;
   /**
@@ -78,11 +93,85 @@ export interface PlaceJointModel {
   ): readonly PlaceOutcome[];
 }
 
+/**
+ * 順序付き outcome(着順)とその確率(Issue #92・#23-B1b)。
+ *
+ * `PlaceOutcome.placed` は「複勝圏内に入った馬番の集合」で着順を持たないのに対し、`order` は
+ * **着順そのもの**(0番目が1着、1番目が2着、…)を表す。**`order` はソートしない。** ソートすると
+ * 着順情報が失われ、`PlaceOutcome` と区別が付かなくなる(`foldToCandidateSubsets` が
+ * `.sort((a,b)=>a-b)` して畳み込むのはまさにこの「順序を捨てて集合として扱う」操作であり、
+ * `OrderedOutcome` にこの関数を誤って通すと着順が黙って消える。型を分けているのはこの誤用を
+ * コンパイルエラーにするため)。
+ */
+export interface OrderedOutcome {
+  /** 着順(0番目が1着、…、(topFinishCount-1)番目がtopFinishCount着)。馬番。ソートしない。 */
+  readonly order: readonly number[];
+  /** この着順が実現する確率。全 OrderedOutcome の合計は常に1(判定不能でない限り)。 */
+  readonly probability: number;
+}
+
+/**
+ * 順序付き outcome 空間を構築できる `PlaceJointModel`(Issue #92・#23-B1b)。
+ *
+ * ## `PlaceJointModel` を直接拡張せず派生 interface にした理由
+ *
+ * 順序展開は Plackett-Luce のような「潜在強度から着順分布を導出するモデル」だけが持てる能力であり、
+ * `CONDITIONAL_BERNOULLI_MODEL` はそもそも定式化上これを持ちようがない(各馬の的中を独立ベルヌーイと
+ * みなし「ちょうどk頭」で条件付けるだけの近似であり、着順という概念が定式化に存在しない)。
+ * 「持てないモデルが存在する」という事実を、`PlaceJointModel` 自体に任意メソッドを足すのではなく
+ * 派生 interface として切り出すことで、複勝系の同時分布にしか関心のない実装(`PlaceJointModel`
+ * だけを満たす実装)の定義を順序関連の型で汚さない(ISP)。将来の馬単・三連単(#24・#25)も同じ
+ * `buildOrderedDistribution` を(topFinishCountを2・3にして)再利用できる。
+ *
+ * ただし正直に記録する: TypeScript の構造的型システムでは、「順序展開を実装し忘れたモデル」と
+ * 「意図的に実装しないモデル」を型だけで区別することはできない(派生 interface にしても、新しい
+ * モデルが単に `PlaceJointModel` として定義されれば、順序非対応であることをコンパイラは咎めない)。
+ * この穴を実際に塞いでいるのは型ではなく**挙動契約**である: win候補があるのに
+ * `isOrderedPlaceJointModel` が false を返すモデルが渡された場合、`allocateGeneralBets` は
+ * 黙って別モデルへ差し替えたり判定不能に倒したりせず、呼び出し側の契約違反として throw する
+ * (`combo-bet-allocation.ts` 参照)。「forgot」なモデルは初回のwin利用で即座に例外になるため、
+ * サイレントな誤答にはならない。
+ */
+export interface OrderedPlaceJointModel extends PlaceJointModel {
+  /**
+   * 出走全頭の複勝確率から、順序付き outcome 空間(上位 topFinishCount 着の着順分布。
+   * P(出走頭数, topFinishCount) 通り)を構築する。
+   *
+   * 1着(以降の着順)が構造的に一意に定まらない入力(例: 潜在強度に2頭以上の +Infinity(=上位k枠に
+   * 厳密に固定)が含まれ、固定馬同士の相対的な強さが縮約の過程で失われている場合)に対しては、
+   * 例外を投げず **`null`** を返す(判定不能。呼び出し側の契約違反ではなく、データ由来の
+   * 判定不能であるため throw と区別する)。
+   *
+   * @param horses 出走全頭(候補馬に限らない。同時分布は全頭の確率に依存するため)
+   * @param topFinishCount 上位何着までを着順判定に使うか
+   */
+  buildOrderedDistribution(
+    horses: readonly JointModelHorse[],
+    topFinishCount: number,
+  ): readonly OrderedOutcome[] | null;
+}
+
+/**
+ * model が順序付き outcome 空間を構築できるか判定する型ガード(Issue #92)。
+ *
+ * `allocateGeneralBets` はこの関数**1箇所**を検査点とし、`typeof model.buildOrderedDistribution
+ * === "function"` のようなインライン判定を呼び出し側に散らさない(Issue #76 の「判定を1箇所に
+ * 集約する」流儀)。
+ */
+export function isOrderedPlaceJointModel(
+  model: PlaceJointModel,
+): model is OrderedPlaceJointModel {
+  return (
+    typeof (model as Partial<OrderedPlaceJointModel>).buildOrderedDistribution === "function"
+  );
+}
+
 /** クランプに使う微小値。p=0/p=1 の境界でゼロ除算・発散を起こさないための下駄。 */
 const EPS = 1e-9;
 
 /**
- * 条件付きベルヌーイモデル(Phase 1 既定実装)。
+ * 条件付きベルヌーイモデル(Phase 1 で導入した近似実装。#81(#78-B)で既定は
+ * `PLACKETT_LUCE_MODEL` へ切替済みであり、現在の既定実装ではない)。
  * 各馬の的中を独立ベルヌーイとみなし、「複勝人数ちょうど k 頭が当たる」で条件付けた分布。
  * P(S) = Π_{i∈S} w_i / Σ_{|S'|=k} Π_{i∈S'} w_i 、w_i = p_i/(1-p_i)。
  */
@@ -190,3 +279,25 @@ function clamp(value: number, min: number, max: number): number {
   }
   return value;
 }
+
+// ---------------------------------------------------------------------------
+// Plackett-Luce モデル(Issue #77・#20-A)の re-export。
+//
+// `packages/core/package.json` の `exports` には `./ev/place-joint-model` のみが公開されており、
+// 新規サブパスは追加しない(#58 の裁定と同じ流儀)。実体は `plackett-luce-strength.ts`・
+// `plackett-luce-model.ts`・`plackett-luce-win-prob.ts` の3ファイルに分割して実装し、
+// ここから re-export することで既存の公開サブパス経由で参照できるようにする。
+// ---------------------------------------------------------------------------
+export {
+  fitPlackettLuceStrengths,
+  computePlackettLuceMarginals,
+  PlackettLuceFitError,
+  MAX_FIT_ITERATIONS,
+  FIT_TOLERANCE,
+  type PlackettLuceFitFailureReason,
+  type PlackettLuceFitSuccess,
+  type PlackettLuceFitFailure,
+  type PlackettLuceFitResult,
+} from "./plackett-luce-strength.js";
+export { PLACKETT_LUCE_MODEL } from "./plackett-luce-model.js";
+export { winProbabilitiesFromStrengths } from "./plackett-luce-win-prob.js";

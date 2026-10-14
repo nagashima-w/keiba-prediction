@@ -1,0 +1,862 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import vm from "node:vm";
+import { gzipSync } from "node:zlib";
+import { describe, expect, it } from "vitest";
+import { buildClientJs, CLIENT_DIR, GENERATED_PATH, listBundledInputs, renderGeneratedModule } from "../build-client";
+import { CLIENT_JS } from "../src/client-bundle.generated";
+import { GOLDEN_TEXT } from "./migration-fixture";
+
+/**
+ * Issue #184: クライアントのバンドル(`client/` → `src/client-bundle.generated.ts`)の検査。
+ *  - ドリフト: コミット済みの生成物が、今のソースから再ビルドした出力と一致する(クライアントを直して再生成を忘れると赤になる)
+ *  - 決定性: minify により、出力にリポジトリの絶対パス・パスコメントが入らない(入ると cwd・OS で出力が変わり、ドリフトの検査が環境依存になる)
+ *  - 静的ガード: HTML を文字列として解釈させる API・eval・Node の組込みを使わない(XSS・CSP)
+ *  - 実行スモーク: 生成物を偽の DOM・偽の fetch で評価し、ロードで例外にならず、初回の取得と描画・更新の連打ガードが実際に動く
+ */
+
+const ROOT = path.resolve(CLIENT_DIR, "..", "..");
+
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+}
+
+const clientFiles = readdirSync(CLIENT_DIR)
+  .filter((f) => f.endsWith(".ts"))
+  .map((f) => path.join(CLIENT_DIR, f));
+
+describe("生成物のドリフトと決定性", () => {
+  it("前提: 生成物は空でなく、クライアントのソースがある", () => {
+    expect(CLIENT_JS.length).toBeGreaterThan(1000);
+    expect(clientFiles.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("コミット済みの CLIENT_JS・生成ファイルが、今のソースから再ビルドした出力と一致する(不一致なら `pnpm run build:client` で再生成する)", async () => {
+    const js = await buildClientJs();
+    expect(js, "CLIENT_JS が古い。cloud/ で `pnpm run build:client` を実行して再生成する").toBe(CLIENT_JS);
+    const file = readFileSync(GENERATED_PATH, "utf-8").replace(/\r\n/g, "\n");
+    expect(file).toBe(renderGeneratedModule(js));
+  }, 60_000);
+
+  it("出力にリポジトリの絶対パス・パスコメントが入らない(minify。cwd・OS によらず同じ出力になる)", () => {
+    expect(CLIENT_JS).not.toContain(ROOT);
+    expect(CLIENT_JS).not.toContain("keiba-prediction");
+    expect(CLIENT_JS).not.toMatch(/^\s*\/\//m);
+  });
+
+  it("対照: minify を外すとパスコメントが入る(上の検査が、実際に入ったときに拾えることの確認)", async () => {
+    const unminified = await buildClientJs({ minify: false });
+    expect(unminified).toMatch(/^\s*\/\/ client\//m);
+    expect(unminified).not.toBe(CLIENT_JS);
+  }, 60_000);
+
+  it("生成物は小さい(肥大の検知。上限は 282,200 バイト)", () => {
+    // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
+    // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
+    // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
+    // 大半は日本語の文言で、esbuild の既定の `\u` エスケープ(1 文字 6 バイト。`charset` は変えない)で出力されるため大きい。上限 175,000 は実装後の約 11% 増。
+    // (経緯)Issue #201: 100,000 → 125,000。設定画面のプレビューが exe と同じ `buildPromptPreview`(build-prompt・clip-variants・condition-change・leg-style・derive-features の 5 ファイル)を取り込んだため。
+    // 実測: 3d8a0b1(#198)は 81,269、#201 の実装後は 111,705(+30,436)。
+    // Issue #219: 上限を 175,000 から 200,000 へ引き上げた。検証画面(取得・区分の切替・タイル/行の描画・整形・固定の文言)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #219 の前
+    // (6654946。#218 の承認後)は 164,764、実装後は 182,708(+17,944)。上限 200,000 は実装後の約 9.5% 増。大半は日本語の文言(`\u` エスケープ)。
+    // Issue #220: 上限は 200,000 のまま据え置いた(引き上げなし)。検証画面(2)(補正方向・キャリブレーション・印別・版別比較の取得の解釈・整形・描画)を足した実測(CLIENT_JS のバイト数):
+    // #220 の前(ac1f311。#230 の承認後)は 182,882、実装後は 192,460(+9,578)。上限までの余裕は約 3.9%(7,540 バイト)なので、**次に検証画面や他の画面を足す Issue は、ここで上限の引き上げが要る見込み**。
+    // Issue #236: 上限は据え置き。一覧と見出しに発走予定時刻を足した増分は +175(192,460 → 192,635。上限までの余裕は 7,365 バイト)。
+    // Issue #235: 上限を 200,000 から 235,000 へ引き上げた。日報画面(API の検証 `api-report.ts`・状態と制御 `report-screen.ts`・表示用データ `report-model.ts`(確定の注意・作られずに終わった案内の固定文言を含む)・VNode・ルート・入口のリンク)を足したため。
+    // 実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数。計り方: 18a2b55〈#236 の承認後〉の生成物と今の生成物を、それぞれ import して `Buffer.byteLength` を取った): 18a2b55 は 192,635、
+    // 実装後は 214,711(+22,076)。上限 235,000 は実装後の約 9.5% 増(余裕は 20,289 バイト)。大半は日本語の文言(`\u` エスケープ)。
+    // Issue #240: 上限は 235,000 のまま据え置き。結果の「3着内率の上位5頭」(並べ替え・見出し・描画)を足した増分は +851(214,711 → 215,562。上限までの余裕は 19,438 バイト)。
+    // Issue #238: 上限は据え置き。閲覧者の画面(役割の読み取り `role.ts`・管理者だけの案内 `admin-only.ts`・入口とボタンの出し分け・閲覧者向けの配分の注記)を足した増分は +1,659(215,562 → 217,221。
+    // 計り方: 51541b0〈#240 の承認後〉の生成物と今の生成物を、それぞれ import して `Buffer.byteLength` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 17,779 バイト)。
+    // Issue #247: 上限は据え置き。馬のカードの単勝の想定・実際の表示(API の検証 `api-analysis.ts` の3項目と `oddsStatus`・カードの表示用データ `result.ts`・VNode `view.ts`・表示の整形 `src/win-odds-format.ts`)を足した増分は +1,686
+    // (218,081 → 219,767。計り方: cd78fc2〈#246 の承認後〉の生成物と今の生成物を、それぞれ import して `Buffer.byteLength` を取った。上限までの余裕は 15,233 バイト)。勝率の計算はサーバで行い、クライアントに Plackett-Luce を入れていない
+    // (クライアントが推定を呼ぶと束に Plackett-Luce が入って増える。下の「Plackett-Luce が入っていない」テストが、生成物にモデルの文言が無いことで固定する)。
+    // Issue #254: 上限を 235,000 から 245,000 へ引き上げた。検証画面の対応表の信頼区間(Wilson 区間と判定 `@keiba/core/ev/binomial-interval`・補正後/補正前の切替・平均予測/95%区間/判定の cell・
+    // 説明文・throttled の文言の出し分け・回収率の丸め〈`src/recovery-format`〉)を足した増分は、#254 だけで見ると +3,883(230,093 → 233,976。d99276a〈#255 の承認後〉の生成物との比較)で、
+    // その時点では上限 235,000 に収まっていた(余裕 1,024 バイト)。その後 main に入った #261・#260・#262(設定画面のプレビューで client にも入るプロンプトの文面の増加)が重なり、
+    // 24e3325 の生成物が 231,913(d99276a から +1,820)、それに #254 を載せた今の生成物が **235,792**(24e3325 から +3,879)で、235,000 を 792 バイト超えた。
+    // 計り方: 各コミットの `cloud/src/client-bundle.generated.ts` を import して `Buffer.byteLength(CLIENT_JS)` を取った(今の値は `pnpm run build:client` の出力)。
+    // 新しい上限 245,000 は今の大きさの約 3.9% 増(余裕は 9,208 バイト)。増えたのは日本語の文言(`\u` エスケープ)とロジックで、Plackett-Luce などの重い依存は入っていない。
+    // Issue #263: 上限は据え置き。閲覧者の検証画面(更新ボタンの出し分け・閲覧者の注記と『まだ集計されていません』の固定文言・追加指示の『あり/なし』の要約・`not-computed` の読み取り・
+    // 失敗の文言の閲覧者版)を足した増分は +2,773(235,792 → 238,565。計り方: f867ee9〈#254 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。
+    // 今の値は `pnpm run build:client` の出力。上限までの余裕は 6,435 バイト)。
+    // Issue #264: 上限は据え置き。日報の画面に、見込みの項目(全体・券種別)と直近 28 日の累計(`parseOptionalGroup`・`parsePeriod`・`parseRolling`・`statTiles`・`rollingOf`・VNode)、
+    // 共有の `src/expected-format` を足した増分は +1,836(238,565 → 240,401。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して
+    // `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 4,599 バイト)。10/12 公開予定の #259・#226 が先に入るので、リベース後に測り直すこと。
+    // Issue #253: 上限は据え置き。馬のカードの複勝の想定・実際(下限〜上限)の表示(API の検証 `api-analysis.ts` の3項目と `race.placeBasis`・カードの表示用データ `result.ts`・VNode `view.ts`・
+    // 表示の整形 `src/place-odds-format.ts`〈1.0倍未満・幅・上限なし・強調の判定〉と説明文)を足した増分は +2,374(238,565 → 240,939。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、
+    // それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 4,061 バイト)。想定の計算(Plackett-Luce)はサーバで、束には入っていない(下のテストが固定する)。
+    // **余裕が 4,061 バイトまで減った**ので、次に画面や文言を足す Issue は、先に上限の引き上げを見込むこと。
+    // Issue #72: 上限は据え置き。配分ベースの回収率の返還の表示(応答の検査の 2 項目・「うち返還 N点(金額)」の 1 行・2 つの系の取消・除外の扱いを言う説明文の 2 文)を足した増分は +660
+    // (238,565 → 239,225。計り方: 6d345a6〈#263 の承認後〉の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。
+    // 今の値は `pnpm run build:client` の出力。上限までの余裕は 5,775 バイト)。
+    // Issue #271: 上限を 245,000 から 252,000 へ引き上げた。検証画面の版別カードに、補正前〈統計モデル〉の Brier の 1 行(レース数の足りない版は値を隠す)・補正前の対応表・
+    // 応答の検査(`priorCalibration`・`quality`)を足した増分は +1,384(240,298 → 241,682。計り方: origin/issue-16-flat-compare の先端 d34b548 の `cloud/src/client-bundle.generated.ts` と今の生成物を、
+    // それぞれ `Buffer.byteLength(CLIENT_JS)` で測った。今の値は `pnpm run build:client` の出力)。この枝だけなら 245,000 に収まる(余裕 3,318 バイト)が、**公開待ちの枝と合わせると超える**:
+    // 同じ計り方で、6d345a6〈#263 の承認後〉の 238,565 に対し #253(origin/issue-253-fair-place-odds)の先端は 240,939(+2,374)・#264(origin/issue-264-report-rolling)の先端は 240,401(+1,836)で、
+    // 足し合わせた見積もりは 240,298 + 2,374 + 1,836 + 1,384 = 245,892(**加算の見積もりで、4 枝を実際に合流させた測定ではない**。合流で view.ts などが重なれば数百バイトはずれうる)。
+    // 新しい上限 252,000 は、その見積もりの約 2.5% 増(余裕は 6,108 バイト)。増えたのは日本語の文言(`\u` エスケープ)とロジックで、Plackett-Luce などの重い依存は入っていない。
+    // 実測(2026-10-12 の公開。#259・#226・#264・#253・#266・#267・#72・#16・#271 を本番の先端に合流させた後の `pnpm run build:client` の出力): **245,611 バイト**(見積もりより 281 少ない)。上限までの余裕は 6,389 バイト。
+    // Issue #272(日報の「もしも」。印の定型の成績・惜しかったレースの画面と、サーバと共有する `src/whatif-format`)の増分は +3,644(245,611 → 249,255。計り方: 上と同じ。
+    // 本番の先端 85db4b3 の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ `Buffer.byteLength(CLIENT_JS)` で測った)。上限は上げていない(余裕は 2,745 バイト)。
+    // Issue #273(日報の日付のカレンダー)の公開後の実測: 249,596。
+    // Issue #268: 上限を 252,000 から 260,000 へ引き上げた。日報がある日の管理者の「日報を作り直す」(確認の段階・依頼・作り直し中の確認のポーリング・完了と失敗の表示・API の解釈)を足したため。
+    //  - 実測値(`Buffer.byteLength(CLIENT_JS)`): 253,654(249,596 → 253,654 で +4,058)。計り方: 本番の先端 6a62599 の `cloud/src/client-bundle.generated.ts`(`git show 6a62599:cloud/src/client-bundle.generated.ts`)と今の生成物を、それぞれ import して測った。
+    //    今の値は `pnpm run build:client` の出力〈「253654 バイト」〉と、このテストの対象の `CLIENT_JS` が同じ。
+    //  - 増分の内訳: **文言は上界で +1,463**(追加した 9 本の固定文言 1,643 バイト − 差し替えた作成の注意〈「…その日は作り直せません。」〉180 バイト。esbuild の `\u` エスケープに合わせ、ASCII は 1・それ以外は 6 バイトで数えた。
+    //    数えたのは `cloud/client/report-model.ts` の `REGEN_*` 5 本・ボタン/確認のラベル 3 本・`CREATE_CAUTION`)、**ロジックは差し引きで約 +2,595**(状態遷移 `report-screen.ts`・モデルの出し分け `report-model.ts`・VNode `view.ts`・
+    //    `api-report.ts` の 429 とジョブの `regenerate` の解釈。文言とロジックを別々に測ったものではなく、全体の増分から文言の上界を引いた値)。ロジックを削って収めることはしなかった(確認の文面の事実〈費用・置き換え・上限・Discord に送らない〉は必須)。
+    //  - 前の上限 252,000 の根拠: #271 のときに、公開待ちの 4 枝の足し合わせの見積もり 245,892 の約 2.5% 増として置いた(上の #271 の記述)。#272 の公開後は余裕が 2,745 バイト、#273 の公開後は 2,404 バイトで、今回の増分 +4,058 は収まらなかった。
+    //  - 新しい上限 260,000 の根拠: 実測 253,654 の約 2.5% 増(253,654 × 1.025 ≈ 259,995 を切り上げ)。余裕は 6,346 バイト。
+    // Issue #279(#265-A 月報の統計・保存・画面): 上限を 260,000 から 273,000 へ引き上げた。日報の画面の中に「日 / 月」の切り替えと月報の画面(一覧・本文・日ごとの行・券種別・印別・もしも・版ごと・前後の月への移動)を足したため。
+    //  - 実測値(`Buffer.byteLength(CLIENT_JS)`): 266,283(254,415 → 266,283 で +11,868)。計り方: 本番の先端 1cb2924 の `cloud/src/client-bundle.generated.ts`(`git show 1cb2924:cloud/src/client-bundle.generated.ts`)と今の生成物を、
+    //    それぞれ import して測った。今の値は `pnpm run build:client` の出力〈「266283 バイト」〉と、このテストの対象の `CLIENT_JS` が同じ。
+    //  - 増えた中身: 月報の API の解釈(`api-monthly.ts`)・表示用データ(`monthly-model.ts`)・画面の制御(`monthly-screen.ts`)・VNode(`view.ts`)・ハッシュの解釈(`route.ts`)・アプリの配線(`app.ts`)。
+    //    日本語の文言は束の中で 1 字 6 バイト(`\u` エスケープ)になるので、固定の注記の文言が大きな割合を占める。取得の失敗の文言は日報のもの(`reportFetchFailureMessage`)の「日報」を「月報」に読み替えて二重に持たない(実測: 月報専用の文言を持つ版の 267,910 バイトが、読み替えにして 266,283 バイトになった = 1,627 バイト減)。
+    //    統計の読み方(`parsePeriod`)・タイルと券種別・印別・もしもの行は日報と共有している(日報側の関数を export しただけ)。
+    //  - 事前の見積もりは +8,000〜12,000(日報の画面関連ファイルの束の中の大きさ 29,445 バイトの約 3 分の 1 程度という比例の推定)。実測は見積もりの上端の近くだった。
+    //  - 前の上限 260,000 の根拠: Issue #268 のとき、実測 253,654 の約 2.5% 増。#264〜#278 の公開後の実測は 254,415 で、余裕は 5,585 バイトだった。今回の増分 +11,868 は収まらなかった。
+    //  - 新しい上限 273,000 の根拠: 実測 266,283 の約 2.5% 増(266,283 × 1.025 ≈ 272,940 を切り上げ)。余裕は 6,717 バイト。段階 B(#280。LLM の文章・作り直しのボタン)は、さらに増える見込みで、そのとき実測値を添えて上げ直す。
+    // Issue #280(#265-B 月報の LLM の文章・管理者の作成と作り直し): 上限を 273,000 から 282,200 へ引き上げた。月報の画面に、LLM の文章(総括・良かった点・改善点・来月に向けて・生の文章)、
+    // 管理者だけの「この月の月報を作る」「月報を作り直す」(確認つき)、作成中・作り直し中の確認のポーリング(完了・失敗・進行状況を取れない場合の表示)を足したため。
+    //  - 実測値(`Buffer.byteLength(CLIENT_JS)`): 275,246(266,283 → 275,246 で +8,963)。計り方: B-1 のコミット 70daa8a の `cloud/src/client-bundle.generated.ts`(`git show 70daa8a:cloud/src/client-bundle.generated.ts`)と今の生成物を、
+    //    それぞれ import して測った。今の値は `pnpm run build:client` の出力〈「275246 バイト」〉と、このテストの対象の `CLIENT_JS` が同じ。
+    //  - 増えた中身: 月報の API の解釈(`api-monthly.ts`。文章・進行状況・POST。進行状況の読み方と POST の分類は日報のもの〈`api-report.ts`〉を `parseJobOf`・`postRun` として共有した)・表示用データ(`monthly-model.ts`)・
+    //    画面の制御(`monthly-screen.ts`。作成・作り直し・ポーリング)・VNode(`view.ts`。日報と月報で操作のボタンを共有)・アプリの配線(`app.ts`)。
+    //  - 文言は約 2,726 バイト(月報専用の固定文言 10 本。日本語は束の中で 1 字 6 バイトで数えた。`cloud/client/monthly-model.ts` の `MONTHLY_RAW_NOTE`・`MONTHLY_CREATE_CAUTION`・`MONTHLY_REGEN_*`・`MONTHLY_CREAT*`・`MONTHLY_NO_REPORT_NOTICE`)。
+    //    残りの約 6,200 はロジック(全体の増分から文言を引いた値)。日報の文言・関数は再利用して二重に持たない(`JOB_UNAVAILABLE_NOTICE`・`REGEN_LIMIT_MESSAGE`・`reportRunFailureMessage`・`REPORT_POLL_MS` ほか)。
+    //  - 事前の見積もり(B-1 の着手前の報告)は +5,000〜7,000(日報の作り直し #268 の +4,058 からの類推)。実測は見積もりを上回った。ロジックを削って収めることはしなかった(確認の文面の事実〈費用・置き換え・上限・Discord に送らない〉と、進行状況を取れない場合の確認の継続は必須)。
+    //  - 前の上限 273,000 の根拠: Issue #279 のとき、実測 266,283 の約 2.5% 増。今回の増分 +8,963 は余裕 6,717 に収まらなかった。
+    //  - 新しい上限 282,200 の根拠: 実測 275,246 の約 2.5% 増(275,246 × 1.025 ≈ 282,127 を 100 バイト単位に切り上げ)。余裕は 6,954 バイト。
+    // Issue #295: 上限は据え置き(収まった)。設定画面のプレビューが束に入れる `buildPrompt` に、当日の馬場の節(`day-baba.ts`: 正規化・コース種別での絞り込み・行の整形・固定の注記)を足したことと、
+    // 分析の画面の「AI に渡した当日の馬場」の節(API の `baba` の解釈 `api-analysis.ts`・表示用データ `result.ts`・VNode `view.ts`)・設定画面の注記を足した増分は +5,895(275,202 → 281,097)。
+    // 計り方: a1b185d〈#294 の承認後〉の `cloud/src/client-bundle.generated.ts` の `CLIENT_JS` と今の生成物を、それぞれ文字列として取り出して `Buffer.byteLength` を取った。今の値は `pnpm run build:client` の出力〈「281097 バイト」〉。
+    // 上限 282,200 までの余裕は **1,103 バイトまで減った**ので、次に画面や文言を足す Issue は、先に上限の引き上げを見込むこと。
+    // Issue #296: 上限は据え置き(収まった)。分析の画面の「配分の提案」の下の組合せの券種ごとの行(API の `combos` の解釈 `api-analysis.ts`・表示用データ `result.ts`・VNode `view.ts`)を足した増分は +222(281,097 → 281,319。
+    // `pnpm run build:client` の出力〈「281319 バイト」〉)。文言はサーバ(`src/combo-counts-view.ts`)で組み立ててクライアントには置かず〈日本語は `\u` エスケープで 1 文字 6 バイト〉、
+    // `parseBaba` を `baba` と `combos` で共有する `parseLines` に改めたので小さく収まった。余裕は **881 バイト**。
+    // **さらに上げるときは、増える理由と実測値をここに書く。**
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(282_200);
+  });
+});
+
+
+/** クライアントが取り込んでよい core 側のモジュール(相対 import の指定子。拡張子なし)。`packages/core/src/view/`・`analysis/` の純関数だけ(もとは exe の renderer・shared。#286 で core へ移した)。#185 で配分の表示(`buildAllocationProposalView`)を流用するため。 */
+const ALLOWED_EXTERNAL_IMPORTS = new Set([
+  "../../packages/core/src/view/allocation-proposal-view",
+  "../../packages/core/src/view/bet-allocation-view",
+  "../../packages/core/src/view/format",
+  "../../packages/core/src/analysis/analysis-types",
+  // Issue #189(設定画面): ラベルと版 ID は exe と共有していた定数(`packages/core/src/analysis/app-settings.ts`。import なしの純モジュール)、範囲の述語は cloud/src の純モジュール(サーバと同じ述語を使う)。
+  "../../packages/core/src/analysis/app-settings",
+  "../src/settings",
+  // Issue #201(設定画面のプロンプトのプレビュー): **core を直接 import する唯一の例外**。exe の設定画面と同じ関数(`buildPromptPreview`)を直接呼んで、プレビューの文面を exe と
+  // 一致させるため(`view/` に再 export の薄いモジュールを置くと、web が使う core のモジュールが増える)。この入口は core の `exports` の宣言済みサブパスで、閉包に `node:`・`node_modules`・バレルは入らない
+  // (下の閉包の検査と生成物の検査が固定する)。ほかの core のサブパス・バレルは引き続き拒否する(下の「対照」)。
+  "@keiba/core/analyzer/build-prompt",
+  // Issue #222(移行画面): 移行ファイルの形式の検証(`parseMigrationLine`・`MigrationTally`)を、サーバ・exe と同じ実装で行うため。core を直接 import する 2 つ目の例外(上と同じ理由:
+  // `exports` の宣言済みサブパスで、**import が 1 つも無い**〈`node:`・`node_modules`・バレルが入らない〉モジュール。`packages/core/test/ev/native-free-modules.test.ts` も閉包を固定している)。
+  "@keiba/core/ev/cloud-migration-format",
+  // Issue #254(検証画面の対応表の信頼区間): Wilson 区間と判定(`wilsonInterval`・`judgeCalibration`)を、サーバ・テストと同じ実装で行うため。core を直接 import する 3 つ目の例外
+  // (上と同じ理由: `exports` の宣言済みサブパスで、**import が 1 つも無い**〈`node:`・`node_modules`・バレルが入らない〉モジュール。`packages/core/test/ev/binomial-interval.test.ts` が
+  // import の無いことを、`native-free-modules.test.ts` が閉包を固定している)。
+  "@keiba/core/ev/binomial-interval",
+  // Issue #222: サーバと同じ行の分割(`readLines`。区切りは 0x0A だけ・U+2028/2029 を壊さない)。**import を持たない**ことを下のテストが固定する(Worker 専用のモジュールを引き込まない)。
+  "../src/migration-reader",
+  // Issue #245: 回収率の表示(`formatRecoveryPercent`)。Discord の日報(Worker)と日報の画面が同じ丸めを使うため。**import を持たない**ことを下のテストが固定する。
+  "../src/recovery-format",
+  // Issue #247: 単勝の想定・実際のオッズの表示(丸め・「1000倍超」・ラベル・強調の判定・説明文)。Discord の通知(Worker)と馬のカードが同じ表示を使うため。**import を持たない**ことを下のテストが固定する。
+  "../src/win-odds-format",
+  // Issue #264: 見込みの的中数の表示(`formatExpectedHits`)。Discord の日報(Worker)と日報の画面が同じ書き方を使うため。**import を持たない**ことを下のテストが固定する。
+  "../src/expected-format",
+  // Issue #253: 複勝の想定・実際(下限〜上限)の表示(1.0倍未満・幅・上限なし・強調の判定・説明文)。Discord の通知(Worker)と馬のカードが同じ表示を使うため。取り込むのは `./win-odds-format`(上)だけで、下のテストが固定する。
+  "../src/place-odds-format",
+  // Issue #272: 日報の「もしも」の型の名前と成績の文(`templateLabel`・`formatTemplateStat`)。Discord の日報・LLM のプロンプト(Worker)と日報の画面が同じ書き方を使うため。取り込むのは `./recovery-format`(上)だけで、下のテストが固定する。
+  "../src/whatif-format",
+]);
+
+function importAllowed(specifier: string): boolean {
+  return specifier.startsWith("./") || ALLOWED_EXTERNAL_IMPORTS.has(specifier);
+}
+
+/** バンドルの入力(metafile)のうち、入れてはいけないもの: node_modules・バレル・better-sqlite3 に依存する core のモジュール・クライアントに入れない `packages/core/src/analysis/` の 4 本(旧 exe の main の共有部分)・Node の組込み。 */
+function forbiddenInputs(inputs: readonly string[]): string[] {
+  return inputs.filter(
+    (f) =>
+      /node_modules/.test(f) ||
+      /packages\/core\/src\/index\.ts$/.test(f) ||
+      /packages\/core\/src\/(?:ev\/analysis-store|scraper\/cache)\.ts$/.test(f) ||
+      // Issue #287(#285 の段階B): 旧 `packages/app/src/main/` 全体の禁止の規則は、パッケージごと削除したので外した。
+      // Issue #286(#285 の段階A): 旧 `packages/app/src/main/` の共有部分 4 本(analysis-pipeline・analysis-export・allocation-record・venue-codes)は
+      // `packages/core/src/analysis/` へ移った。**「main の4本はクライアントに入れない」を、移設先の同じ4本で維持する**(同じ名前の `analysis-types`・`app-settings` などは、移設前も許可していた)。
+      /packages\/core\/src\/analysis\/(?:analysis-pipeline|analysis-export|allocation-record|venue-codes)\.ts$/.test(f) ||
+      /^node:/.test(f) ||
+      // Issue #222: 移行の取り込み(変換・DO・予算・サーバの検証)は Worker 専用。クライアントには「形式の検証」と「行の分割」だけを入れる。
+      /(^|\/)src\/migration-(?:core|do|convert|verify)\.ts$/.test(f) ||
+      /packages\/core\/src\/ev\/analysis-store-codec\.ts$/.test(f),
+  );
+}
+
+/** 外から来た文字列を HTML・コードとして解釈させる API と、ブラウザで使えない Node の組込み。 */
+const FORBIDDEN: readonly [string, RegExp][] = [
+  ["innerHTML", /\binnerHTML\b/],
+  ["outerHTML", /\bouterHTML\b/],
+  ["insertAdjacentHTML", /insertAdjacentHTML/],
+  ["document.write", /document\s*\.\s*write/],
+  ["eval(", /\beval\s*\(/],
+  ["new Function", /new\s+Function\b/],
+  ["setAttribute('style')", /setAttribute\(\s*["']style["']/],
+  ["node: の組込み", /["']node:/],
+  ["require(", /\brequire\s*\(/],
+  ["動的 import", /\bimport\s*\(/],
+];
+
+describe("静的ガード(クライアントのソースと生成物)", () => {
+  it("ソース(コメントを除く)と生成物に、禁止の API が無い", () => {
+    for (const file of clientFiles) {
+      const code = stripComments(readFileSync(file, "utf-8"));
+      for (const [name, pattern] of FORBIDDEN) {
+        expect(pattern.test(code), `${path.basename(file)} に ${name}`).toBe(false);
+      }
+    }
+    for (const [name, pattern] of FORBIDDEN) {
+      expect(pattern.test(CLIENT_JS), `生成物に ${name}`).toBe(false);
+    }
+  });
+
+  it("対照: 検出の正規表現は、実際に書かれたときに拾える(空振りでない)", () => {
+    const samples: Record<string, string> = {
+      innerHTML: "el.innerHTML = x;",
+      outerHTML: "el.outerHTML = x;",
+      insertAdjacentHTML: "el.insertAdjacentHTML('beforeend', x);",
+      "document.write": "document.write(x);",
+      "eval(": "eval(x);",
+      "new Function": "new Function('return 1');",
+      "setAttribute('style')": "el.setAttribute('style', x);",
+      "node: の組込み": 'import "node:fs";',
+      "require(": "require('fs');",
+      "動的 import": "import('./x.js');",
+    };
+    expect(Object.keys(samples).sort()).toEqual(FORBIDDEN.map(([n]) => n).sort());
+    for (const [name, pattern] of FORBIDDEN) {
+      expect(pattern.test(samples[name]!), name).toBe(true);
+    }
+  });
+
+  it("クライアントの import は、client/ の中(`./`)と、許可リストの core の表示関数(`view/`・`analysis/`。もとは exe の renderer・shared)だけ(バレル・core の直接 import・node_modules・Node の組込みを取り込まない)", () => {
+    let count = 0;
+    let external = 0;
+    for (const file of clientFiles) {
+      const code = stripComments(readFileSync(file, "utf-8"));
+      for (const m of code.matchAll(/(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?[^;"']*?\bfrom\s*["']([^"']+)["']/g)) {
+        count += 1;
+        const spec = m[1]!;
+        if (!spec.startsWith("./")) external += 1;
+        expect(importAllowed(spec), `${path.basename(file)} の import ${spec}`).toBe(true);
+      }
+    }
+    expect(count).toBeGreaterThan(5); // 前提: import を実際に拾えている
+    expect(external, "前提: 表示関数(view/・analysis/)の import を実際に拾えている(0 だと許可リストの検査が空振り)").toBeGreaterThan(0);
+  });
+
+  it("対照: import の許可判定は、バレル・core の直接 import・bare specifier・許可外の表示関数・旧 exe のパスを拒否する(上の検査が空振りでない)", () => {
+    for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/core/src/analysis/analysis-export"]) {
+      expect(importAllowed(bad), bad).toBe(false);
+    }
+    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings", "@keiba/core/analyzer/build-prompt", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader"]) {
+      expect(importAllowed(good), good).toBe(true);
+    }
+  });
+
+  it("バンドルの閉包(esbuild の metafile): core の表示関数(`view/`。もとは exe の renderer)の純関数が実際に入っており、node_modules・バレル・better-sqlite3 に依存するモジュール・Node の組込みは入っていない", async () => {
+    const inputs = await listBundledInputs();
+    expect(inputs.some((f) => f.endsWith("packages/core/src/view/allocation-proposal-view.ts")), "前提: 表示関数(view/)の流用が閉包に入っている").toBe(true);
+    expect(inputs.some((f) => f.endsWith("packages/core/src/ev/combo-bet-allocation.ts")), "前提: core のサブパスが tsconfig の paths で解決されている").toBe(true);
+    // Issue #201: プレビューが呼ぶ exe と同じ関数(`buildPromptPreview`)の閉包が入っている(入っていなければ、下の禁止の検査は何も見ていない)
+    expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/build-prompt.ts")), "前提: build-prompt が閉包に入っている").toBe(true);
+    expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/clip-variants.ts")), "前提: clip-variants が閉包に入っている").toBe(true);
+    // Issue #222: 移行ファイルの検証が使う 2 つ(形式の検証と、サーバと同じ行の分割)が閉包に入っている。入っていなければ、下の禁止の検査は何も見ていない。
+    expect(inputs.some((f) => f.endsWith("packages/core/src/ev/cloud-migration-format.ts")), "前提: 移行の形式の検証が閉包に入っている").toBe(true);
+    expect(inputs.some((f) => f.endsWith("src/migration-reader.ts")), "前提: 移行の行の分割が閉包に入っている").toBe(true);
+    expect(inputs.some((f) => f.endsWith("src/recovery-format.ts")), "前提: 回収率の表示(Issue #245)が閉包に入っている").toBe(true);
+    expect(forbiddenInputs(inputs)).toEqual([]);
+  }, 60_000);
+
+  it("対照: 閉包の検査は、node_modules・バレル・better-sqlite3 に依存するモジュール・node: を拾える(空振りでない)", () => {
+    const bad = [
+      "../node_modules/cheerio/lib/index.js",
+      "../packages/core/src/index.ts",
+      "../packages/core/src/ev/analysis-store.ts",
+      "../packages/core/src/scraper/cache.ts",
+      "node:zlib",
+      "../packages/core/src/analysis/analysis-export.ts",
+    ];
+    expect(forbiddenInputs([...bad, "src/migration-core.ts", "src/migration-do.ts", "src/migration-convert.ts", "src/migration-verify.ts", "../packages/core/src/ev/analysis-store-codec.ts"])).toEqual([
+      ...bad,
+      "src/migration-core.ts",
+      "src/migration-do.ts",
+      "src/migration-convert.ts",
+      "src/migration-verify.ts",
+      "../packages/core/src/ev/analysis-store-codec.ts",
+    ]);
+    expect(forbiddenInputs(["client/main.ts", "../packages/core/src/view/format.ts", "../packages/core/src/ev/bet-allocation.ts", "src/migration-reader.ts", "../packages/core/src/ev/cloud-migration-format.ts"])).toEqual([]);
+  });
+});
+
+describe("日報の画面がクライアントに取り込む Worker 側のモジュール(Issue #245)", () => {
+  it("recovery-format.ts は import を 1 つも持たない(Worker 専用のモジュール・node: を引き込まない)。クライアントの閉包に入っている", () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "recovery-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(300);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/recovery-format")).toBe(true);
+  });
+});
+
+describe("日報の画面がクライアントに取り込む Worker 側のモジュール(Issue #264)", () => {
+  it("expected-format.ts は import を 1 つも持たない(Worker 専用のモジュール・node: を引き込まない)。クライアントの閉包に入っている", async () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "expected-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(200);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/expected-format")).toBe(true);
+    const inputs = await listBundledInputs();
+    expect(inputs.some((f) => f.endsWith("src/expected-format.ts")), "前提: 見込みの表示が閉包に入っている").toBe(true);
+  }, 60_000);
+});
+
+describe("馬のカードがクライアントに取り込む Worker 側のモジュール(Issue #247)", () => {
+  it("win-odds-format.ts は import を 1 つも持たない(core の Plackett-Luce・Worker 専用のモジュール・node: を引き込まない)。クライアントの閉包に入っている", async () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "win-odds-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(300);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/win-odds-format")).toBe(true);
+    const inputs = await listBundledInputs();
+    expect(inputs.some((f) => f.endsWith("src/win-odds-format.ts")), "前提: 単勝の想定の表示が閉包に入っている").toBe(true);
+  }, 60_000);
+
+  it("クライアントの束に Plackett-Luce(勝率の推定)が入っていない: 勝率の計算はサーバで行う(束の増加を抑える)。入ると、モデルの実行時の文言(エラーの文)が生成物に残る", () => {
+    // 閉包(metafile)には combo-bet-allocation 経由で PL のファイルが載るが、使われないので tree-shaking で出力には残らない。クライアントが推定を呼ぶと、下の文言が出力に現れる。
+    expect(CLIENT_JS).not.toContain("PLACKETT_LUCE_MODEL.");
+    expect(CLIENT_JS).not.toContain("winProbabilitiesFromStrengths");
+  });
+});
+
+describe("馬のカードがクライアントに取り込む Worker 側のモジュール(複勝。Issue #253)", () => {
+  /** import / export-from の指定子(コメントを除いた本体から)。 */
+  const importSpecifiers = (file: string): string[] =>
+    [...stripComments(readFileSync(path.join(ROOT, "cloud", "src", file), "utf-8")).matchAll(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["']([^"']+)["']/g)].map((m) => m[1]!);
+
+  it("place-odds-format.ts が取り込むのは `./win-odds-format`(import を持たない純モジュール)だけ。core の推定・Worker 専用のモジュール・node: を引き込まない。クライアントの閉包に入っている", async () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "place-odds-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(1000);
+    expect(importSpecifiers("place-odds-format.ts")).toEqual(["./win-odds-format"]);
+    expect(importSpecifiers("win-odds-format.ts"), "前提: 取り込み先は import を持たない").toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/place-odds-format")).toBe(true);
+    const inputs = await listBundledInputs();
+    expect(inputs.some((f) => f.endsWith("src/place-odds-format.ts")), "前提: 複勝の想定の表示が閉包に入っている").toBe(true);
+  }, 60_000);
+
+  it("クライアントの束に、複勝の想定の計算(core の推定・頭数の判定・API の整形)が入っていない: 計算はサーバで行う。閉包にも入っていない(単勝の推定 `win-odds-estimate.ts` は combo-bet-allocation 経由で閉包に載るが、使われないので出力には残らない)", async () => {
+    const inputs = await listBundledInputs();
+    for (const server of ["ev/place-odds-estimate.ts", "src/place-odds-view.ts", "src/analysis-view.ts"]) {
+      expect(
+        inputs.filter((f) => f.endsWith(server)),
+        `${server} はクライアントの閉包に入れない`,
+      ).toEqual([]);
+    }
+    expect(CLIENT_JS).not.toContain("PLACKETT_LUCE_MODEL.");
+  }, 60_000);
+});
+
+describe("日報の画面がクライアントに取り込む Worker 側のモジュール(Issue #272)", () => {
+  const importSpecifiers = (file: string): string[] =>
+    [...stripComments(readFileSync(path.join(ROOT, "cloud", "src", file), "utf-8")).matchAll(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["']([^"']+)["']/g)].map((m) => m[1]!);
+
+  it("whatif-format.ts が取り込むのは `./recovery-format`(import を持たない純モジュール)だけ。Worker 専用のモジュール(判定・集計)・node: を引き込まない。クライアントの閉包に入っている", async () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "whatif-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(500);
+    expect(importSpecifiers("whatif-format.ts")).toEqual(["./recovery-format"]);
+    expect(importSpecifiers("recovery-format.ts"), "前提: 取り込み先は import を持たない").toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/whatif-format")).toBe(true);
+    const inputs = await listBundledInputs();
+    expect(inputs.some((f) => f.endsWith("src/whatif-format.ts")), "前提: 型の表示が閉包に入っている").toBe(true);
+    // 判定・集計(Worker 側の `daily-report-whatif.ts`・`daily-report-bets.ts`)は、クライアントの閉包に入れない
+    for (const server of ["src/daily-report-whatif.ts", "src/daily-report-bets.ts", "src/daily-report-digest.ts"]) {
+      expect(inputs.filter((f) => f.endsWith(server)), `${server} はクライアントの閉包に入れない`).toEqual([]);
+    }
+  }, 60_000);
+});
+
+describe("移行画面がクライアントに取り込む Worker 側のモジュール(Issue #222)", () => {
+  it("migration-reader.ts は import を 1 つも持たない(Worker 専用のモジュール・node: を引き込まないことを、クライアントの閉包に入れる前提として固定する)", () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "migration-reader.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(1000);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+  });
+
+  it("対照: 上の検出は、import が書かれていれば拾える(空振りでない)", () => {
+    expect('import { x } from "node:zlib";\nexport const y = 1;'.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g)).toHaveLength(1);
+  });
+
+  it("packages/core の cloud-migration-format.ts も import を持たない(閉包が自分だけで完結する)", () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "packages", "core", "src", "ev", "cloud-migration-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(5000);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+  });
+});
+
+describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", () => {
+  const FIXED = new Date("2026-06-28T00:00:00Z").getTime(); // JST 2026-06-28 09:00
+  const DATE = "20260628";
+  const RACE_ID = "202603020211";
+  const ANALYSIS = {
+    id: 5,
+    raceId: RACE_ID,
+    analyzedAt: "2026-06-28T05:00:00.000Z",
+    kaisaiDate: DATE,
+    evEstimated: false,
+    model: null,
+    llmNote: null,
+    llmCalls: null,
+    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", oddsStatus: "result", placeBasis: "top3" },
+    horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null }],
+    allocation: {
+      route: "mixed", unavailableReason: null, fallbackReason: "no-combo-candidates", skipReasonCode: null, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.1,
+      includeComboOdds: true, includeWide: true, includeTrio: false, includeQuinella: null, includeExacta: true, includeTrifecta: false, includeBracketQuinella: null, betUnit: 100, oddsStatus: "result",
+      bets: [{ betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 }],
+    },
+    detail: "present",
+  };
+
+  const SETTINGS = {
+    evThreshold: 1, additionalInstruction: "", clipVariant: "default", analysisModel: "auto", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, includeComboOdds: false,
+    includeWideInAllocation: true, includeTrioInAllocation: true, includeQuinellaInAllocation: true, includeExactaInAllocation: true, includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true, preRaceOffsetMinutes: 45,
+    // Issue #218: スコアリングの重み13項目(既定値)
+    biasWeightTrackCondition: 1, biasWeightVenue: 1, biasWeightSeason: 1, biasWeightFrame: 1, biasWeightSummerFatigue: 1, biasWeightTransport: 1, biasWeightRotation: 1,
+    baseScoreWeightRecentForm: 0.2, baseScoreWeightLast3f: 0.1, baseScoreWeightCourseDistance: 0.15, baseScoreWeightJockey: 0.15, baseScoreWeightWeightChange: 1, baseScoreWeightCourseFrameBias: 1,
+  };
+
+  class FakeText {
+    constructor(readonly data: string) {}
+  }
+  class FakeElement {
+    readonly attrs = new Map<string, string>();
+    readonly children: (FakeElement | FakeText)[] = [];
+    readonly listeners = new Map<string, ((event: unknown) => void)[]>();
+    value = "";
+    checked: boolean | undefined = undefined;
+    constructor(readonly tag: string) {}
+    setAttribute(name: string, value: string): void {
+      this.attrs.set(name, value);
+    }
+    appendChild(child: FakeElement | FakeText): void {
+      this.children.push(child);
+    }
+    addEventListener(type: string, listener: (event: unknown) => void): void {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+    }
+  }
+  const flat = (n: FakeElement | FakeText): (FakeElement | FakeText)[] => (n instanceof FakeText ? [n] : [n, ...n.children.flatMap(flat)]);
+  const textOf = (n: FakeElement | FakeText): string => flat(n).filter((x): x is FakeText => x instanceof FakeText).map((x) => x.data).join(" ");
+
+  /** 条件が成り立つまで、I/O の 1 巡ずつ待つ(上限つき。実時間の待ちを使わない=CI で不安定にならない)。 */
+  async function until(cond: () => boolean): Promise<void> {
+    for (let i = 0; i < 200 && !cond(); i += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  /** 取得の後始末(マイクロタスク・I/O)を流す(上限つきの有限回)。 */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  /** Issue #192: get-identity の応答(偽)。既定は 404(HTML が返った場合と同じく json() が失敗する)=メールアドレスのまま。 */
+  type IdentityReply = { status: number; json: () => Promise<unknown> } | "network-error";
+  const NOT_FOUND: IdentityReply = { status: 404, json: async () => { throw new SyntaxError("Unexpected token <"); } };
+
+  /** `role`: `#app` の `data-role`(Issue #238。サーバが渡す)。既定は admin(従来のテストは管理者の画面を見る)。null は属性が無い場合(閲覧者に倒れる)。 */
+  function run(initialHash = "", identityReply: IdentityReply = NOT_FOUND, role: string | null = "admin") {
+    const root = {
+      children: [] as (FakeElement | FakeText)[],
+      replaced: 0,
+      replaceChildren(...nodes: (FakeElement | FakeText)[]) { this.replaced += 1; this.children = nodes; },
+      getAttribute: (name: string): string | null => (name === "data-role" ? role : null),
+    };
+    const listeners = new Map<string, (() => void)[]>();
+    const calls: { url: string; init: { method?: string; credentials?: string; referrerPolicy?: string; body?: unknown; headers?: Record<string, string> } }[] = [];
+    const location = { hash: initialHash };
+    // Issue #192: get-identity の呼び出しは calls と別に数える(既存のテストが数える取得の本数に混ぜない)。表示の行は `.who .email`(偽の要素。textContent を持つ)。
+    const identityCalls: { url: string; init: { method?: string; credentials?: string } }[] = [];
+    const who = { textContent: "taro@example.com" as string | null };
+    // 追跡のタイマー(偽。時間は進めない=張られた数だけを見る)と、可視状態(偽の document)。
+    const timers = new Map<number, () => void>();
+    let timerId = 0;
+    const documentListeners = new Map<string, (() => void)[]>();
+    const doc = {
+      visibilityState: "visible",
+      getElementById: (id: string) => (id === "app" ? root : null),
+      querySelector: (selector: string) => (selector === ".who .email" ? who : null),
+      createElement: (tag: string) => new FakeElement(tag),
+      createTextNode: (t: string) => new FakeText(t),
+      addEventListener: (type: string, fn: () => void) => void documentListeners.set(type, [...(documentListeners.get(type) ?? []), fn]),
+    };
+    const fetchStub = async (url: string, init: { method?: string; credentials?: string; referrerPolicy?: string; body?: unknown; headers?: Record<string, string> }) => {
+      if (url === "/cdn-cgi/access/get-identity") {
+        identityCalls.push({ url, init });
+        if (identityReply === "network-error") throw new TypeError("Failed to fetch");
+        return identityReply;
+      }
+      calls.push({ url, init });
+      if (url === "/api/migration" || url === "/api/migration/upload") {
+        // Issue #222: 移行の進捗(GET)と、アップロードの受け付け(POST は 202 で「検証中」の進捗を返す)
+        const state = init.method === "POST" ? "verifying" : "idle";
+        const body = { ok: true, state, upload: state === "idle" ? null : { size: 1, uploadedAt: "2026-06-28T00:00:00.000Z", exportedAt: null, appVersion: null }, analyses: { total: null, processed: 0, imported: 0, alreadyImported: 0, conflicts: 0 }, results: { total: null, processed: 0 }, resumeAt: null, failure: null, conflictSamples: [], attempts: 0, budget: { day: "20260628", usedRows: 0, limitRows: 60000 } };
+        return { status: init.method === "POST" ? 202 : 200, json: async () => body };
+      }
+      if (init.method === "POST" && url === "/api/analyses/run") {
+        const body = JSON.parse(init.body as string) as { race_id: string; kaisai_date: string; mode: string };
+        return { status: 202, json: async () => ({ ok: true, accepted: true, race_id: body.race_id, kaisai_date: body.kaisai_date, mode: body.mode, status: "queued" }) };
+      }
+      if (url === "/api/settings") {
+        // Issue #189: 設定の取得(GET)と保存(POST は受けた本文をそのまま返す)
+        const settings = init.method === "POST" ? JSON.parse(init.body as string) : SETTINGS;
+        return { status: 200, json: async () => (init.method === "POST" ? { ok: true, settings } : { ok: true, settings, source: "d1" }) };
+      }
+      if (url.startsWith("/api/races")) {
+        return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, venue: "central", races: [{ race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null }] }) };
+      }
+      if (url === `/api/analyses/status?kaisai_date=${DATE}&race_id=${RACE_ID}`) {
+        return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, races: [{ race_id: RACE_ID, mode: "morning", status: "done", attempts: 1, error: null, queued_at: 1, updated_at: 2, prior: true, analysis_id: null, detail: null, children_ok: null }], prior: { race_name: "福島民報杯", venue_name: "福島", date: "2026-06-28", computed_at: 5, rows: [{ rank: 1, umaban: 3, horse_name: "アルファ", prior: 0.523 }] } }) };
+      }
+      if (url.startsWith("/api/analyses?race_id=")) {
+        return { status: 200, json: async () => ({ ok: true, analyses: [] }) };
+      }
+      if (url === "/api/analyses/5") {
+        return { status: 200, json: async () => ({ ok: true, analysis: ANALYSIS }) };
+      }
+      return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, races: [] }) };
+    };
+    class FixedDate extends Date {
+      constructor(...args: unknown[]) {
+        super(...((args.length === 0 ? [FIXED] : args) as [number]));
+      }
+      static override now(): number {
+        return FIXED;
+      }
+    }
+    const context = {
+      document: doc,
+      setTimeout: (fn: () => void) => {
+        timerId += 1;
+        timers.set(timerId, fn);
+        return timerId;
+      },
+      clearTimeout: (id: number) => void timers.delete(id),
+      window: { addEventListener: (type: string, fn: () => void) => void listeners.set(type, [...(listeners.get(type) ?? []), fn]) },
+      location,
+      fetch: fetchStub,
+      Date: FixedDate,
+      URLSearchParams,
+      Promise,
+      // Issue #222: 移行ファイルのブラウザ検証が使うグローバル(生成物は new で呼ぶ)。vm の新しいコンテキストには無いので、Node のものを渡す。
+      TextDecoder,
+      TransformStream,
+      DecompressionStream,
+      console,
+    };
+    vm.runInNewContext(CLIENT_JS, context);
+    return { root, listeners, calls, location, timers, doc, documentListeners, identityCalls, who };
+  }
+
+  it("Issue #192: ロード時に get-identity を 1 回だけ呼び(GET・同じオリジンの資格情報)、name を「ログイン中」の行(`.who .email`)の textContent に入れる。メールアドレスはどこにも残らない", async () => {
+    const { who, identityCalls } = run("", { status: 200, json: async () => ({ name: "テスト 太郎", email: "taro@example.com" }) });
+    await until(() => who.textContent !== "taro@example.com");
+    expect(who.textContent).toBe("テスト 太郎");
+    expect(identityCalls).toHaveLength(1);
+    expect(identityCalls[0]!.init.method).toBe("GET");
+    expect(identityCalls[0]!.init.credentials).toBe("same-origin");
+  });
+
+  it.each([
+    ["404(HTML が返る)", NOT_FOUND],
+    ["ネットワークエラー", "network-error" as const],
+    ["name が空", { status: 200, json: async () => ({ name: "" }) }],
+    ["name が無い", { status: 200, json: async () => ({ email: "taro@example.com" }) }],
+  ] as [string, IdentityReply][])("Issue #192: get-identity が %s のときは、メールアドレスのまま(例外にならず、画面の描画も続く)", async (_label, reply) => {
+    const { who, identityCalls, root, calls } = run("", reply);
+    await until(() => identityCalls.length >= 1 && calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    await settle();
+    expect(identityCalls).toHaveLength(1); // 前提: 呼ばれた(呼ばれていなければ、メールのままは自明)
+    expect(who.textContent).toBe("taro@example.com");
+    expect(root.children.some((c) => textOf(c).includes("福島民報杯"))).toBe(true);
+  });
+
+  it("Issue #192: ハッシュの遷移・「更新」・設定画面への遷移でも、get-identity は呼ばれない(1 回だけ)", async () => {
+    const { listeners, location, identityCalls, calls, root } = run("", { status: 200, json: async () => ({ name: "テスト 太郎" }) });
+    await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    await settle();
+    expect(identityCalls).toHaveLength(1);
+    location.hash = "#settings";
+    listeners.get("hashchange")![0]!();
+    await settle();
+    location.hash = "";
+    listeners.get("hashchange")![0]!();
+    await settle();
+    expect(identityCalls).toHaveLength(1);
+  });
+
+  it("ロードで例外にならず、今日(JST)の一覧と板を 1 回ずつ取り(GET・同じオリジンの資格情報)、描画する。hashchange を購読する。ハッシュを書き換えない", async () => {
+    const { root, listeners, calls, location } = run();
+    await until(() => calls.length >= 2 && root.children.length > 0 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    expect(calls.map((c) => c.url).sort()).toEqual([`/api/analyses/status?kaisai_date=${DATE}`, `/api/races?kaisai_date=${DATE}&venue=central`].sort());
+    for (const call of calls) {
+      expect(call.init.method).toBe("GET");
+      expect(call.init.credentials).toBe("same-origin");
+      expect(call.init.body).toBeUndefined();
+    }
+    expect(root.children).toHaveLength(1);
+    expect(textOf(root.children[0]!)).toContain("福島民報杯");
+    expect((listeners.get("hashchange") ?? []).length).toBe(1);
+    expect(location.hash).toBe("");
+  });
+
+  // Issue #238: 役割(サーバが `#app` の `data-role` で渡す)が、生成物の実行(main.ts の配線)で効く。閲覧者・属性なし・未知の値は、管理者の入口を出さず、管理者だけの画面では取得しない。
+  const linkClasses = (root: { children: (FakeElement | FakeText)[] }): string[] =>
+    root.children.flatMap(flat).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "a").map((n) => n.attrs.get("class") ?? "");
+
+  it("Issue #238: 管理者(data-role=admin)の一覧には「検証」「設定」「日報」の入口が出る(対照)", async () => {
+    const { root, calls } = run("", NOT_FOUND, "admin");
+    await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    expect(linkClasses(root)).toEqual(expect.arrayContaining(["verify-link", "report-link", "settings-link"]));
+  });
+
+  it.each([
+    ["viewer", "viewer"],
+    ["属性なし", null],
+    ["未知の値", "root"],
+    ["大文字の ADMIN(完全一致でない)", "ADMIN"],
+  ] as [string, string | null][])("Issue #238: data-role が %s のとき、一覧に「設定」の入口が出ない(日報は出る。検証の入口は Issue #263 で閲覧者にも出す)", async (_label, role) => {
+    const { root, calls } = run("", NOT_FOUND, role);
+    await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    const classes = linkClasses(root);
+    expect(classes).toContain("report-link"); // 前提: 一覧が描画されている
+    expect(classes).toContain("verify-link");
+    expect(classes).not.toContain("settings-link");
+  });
+
+  it.each([["設定", "#settings"], ["移行", "#migration"]])("Issue #238: 閲覧者が %s の画面(%s)を直接開いても、API を取らず「管理者だけが使えます」を出す(生成物の実行)", async (_label, hash) => {
+    const { root, calls } = run(hash, NOT_FOUND, "viewer");
+    await until(() => root.children.some((c) => textOf(c).includes("管理者だけが使えます")));
+    await settle();
+    expect(root.children.some((c) => textOf(c).includes("管理者だけが使えます"))).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("Issue #263: 閲覧者が検証の画面(#verify)を開くと、GET /api/verify?venue=all を 1 回だけ取る(refresh は付けない)。「管理者だけが使えます」は出ず、更新ボタンが無い。管理者には更新ボタンがある(生成物の実行)", async () => {
+    const buttonClasses = (root: { children: (FakeElement | FakeText)[] }): string[] =>
+      root.children.flatMap(flat).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "button").map((n) => n.attrs.get("class") ?? "");
+    const viewer = run("#verify", NOT_FOUND, "viewer");
+    await until(() => viewer.calls.length >= 1 && viewer.root.children.some((c) => textOf(c).includes("検証")));
+    await settle();
+    expect(viewer.calls.map((c) => c.url)).toEqual(["/api/verify?venue=all"]);
+    expect(viewer.root.children.some((c) => textOf(c).includes("管理者だけが使えます"))).toBe(false);
+    expect(buttonClasses(viewer.root)).toContain("verify-venue"); // 前提: 検証の画面が描画されている
+    expect(buttonClasses(viewer.root)).not.toContain("refresh");
+    const admin = run("#verify", NOT_FOUND, "admin");
+    await until(() => admin.calls.length >= 1 && admin.root.children.some((c) => textOf(c).includes("検証")));
+    await settle();
+    expect(buttonClasses(admin.root)).toContain("refresh");
+  });
+
+  it("Issue #238: レース画面は、管理者には起動のボタンが 2 つ、閲覧者には 0 個(生成物の実行)", async () => {
+    const buttonsOf = async (role: string): Promise<number> => {
+      const { root, calls } = run(`#date=${DATE}&venue=central&race=${RACE_ID}`, NOT_FOUND, role);
+      await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("事前分析")));
+      await settle();
+      return root.children.flatMap(flat).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && (n.attrs.get("class") ?? "") === "run").length;
+    };
+    expect(await buttonsOf("admin")).toBe(2);
+    expect(await buttonsOf("viewer")).toBe(0);
+  });
+
+  it("同じ状態の再描画(同じハッシュの hashchange)では DOM を触らない(Issue #186 段階1。createMounter が main.ts に配線されている)", async () => {
+    const { root, listeners, calls } = run();
+    await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    await settle(); // 取得の後始末の再描画を待つ
+    const settled = root.replaced;
+    const shown = root.children[0];
+    expect(settled).toBeGreaterThanOrEqual(1);
+    expect((listeners.get("hashchange") ?? []).length).toBe(1); // 前提: hashchange を購読している
+    listeners.get("hashchange")![0]!();
+    listeners.get("hashchange")![0]!();
+    expect(root.replaced).toBe(settled);
+    expect(root.children[0]).toBe(shown);
+  });
+
+  it("「更新」を連打しても、取得は 1 回分(一覧と板で 2 本)だけ増える。起動のボタンを押さない限り POST は呼ばれない", async () => {
+    const { root, calls } = run();
+    await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    const before = calls.length;
+    const refresh = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.tag === "button")!;
+    const click = refresh.listeners.get("click")![0]!;
+    click(undefined);
+    click(undefined);
+    click(undefined);
+    await until(() => calls.length >= before + 2);
+    await settle();
+    expect(calls.length).toBe(before + 2);
+    expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
+  });
+
+  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、28 個の入力欄(既存の 15 + スコアリングの重み 13。textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 28 項目の POST になる(一覧・板は取らない)", async () => {
+    const { root, calls } = run("#settings");
+    await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
+    const fields = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.has("data-field"));
+    expect(fields.length).toBe(28);
+    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", ...Array(13).fill("input"), "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)。重み13項目は input(Issue #218)
+    const field = (key: string) => fields.find((n) => n.attrs.get("data-field") === key)!;
+    expect(field("bankroll").value).toBe("500000");
+    expect(field("clipVariant").value).toBe("default"); // select は option を入れたあとに value が設定される
+    expect(field("analysisModel").value).toBe("auto"); // Issue #158: 分析モデルも select(既定 auto)
+    expect(field("includeWideInAllocation").checked).toBe(true);
+    expect(field("includeComboOdds").checked).toBeFalsy();
+    field("bankroll").listeners.get("change")![0]!({ target: { value: "123456" } });
+    field("analysisModel").listeners.get("change")![0]!({ target: { value: "opus" } });
+    field("includeComboOdds").listeners.get("change")![0]!({ target: { value: "on", checked: true } });
+    field("biasWeightVenue").listeners.get("input")![0]!({ target: { value: "0.75" } }); // Issue #218: 重みの欄(生成物の実行)
+    const save = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("class") === "settings-save")!;
+    save.listeners.get("click")![0]!(undefined);
+    await until(() => calls.some((c) => c.init.method === "POST"));
+    const post = calls.find((c) => c.init.method === "POST")!;
+    expect(post.url).toBe("/api/settings");
+    expect(post.init.referrerPolicy).toBe("same-origin");
+    expect(JSON.parse(post.init.body as string)).toEqual({ ...SETTINGS, bankroll: 123456, includeComboOdds: true, analysisModel: "opus", biasWeightVenue: 0.75 });
+    await until(() => root.children.some((c) => textOf(c).includes("保存しました")));
+  });
+
+  it("Issue #201: 設定画面のプロンプトのプレビュー(生成物の実行): 開くと、exe と同じ関数の文面(【予想印】・サンプルレース)が、打った追加指示つきで出る。ネットワークには出ない(GET /api/settings だけ)。閉じると消える", async () => {
+    const { root, calls } = run("#settings");
+    const elements = () => flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement);
+    await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
+    const toggleOf = () => elements().find((n) => n.attrs.get("class") === "preview-toggle")!;
+    expect(toggleOf().attrs.get("aria-expanded")).toBe("false");
+    expect(elements().some((n) => n.attrs.get("class") === "prompt-preview")).toBe(false); // 前提: 開くまで文面は無い
+    const area = elements().find((n) => n.attrs.get("data-field") === "additionalInstruction")!;
+    area.listeners.get("input")![0]!({ target: { value: "スモークの追加指示" } });
+    toggleOf().listeners.get("click")![0]!(undefined);
+    const body = elements().find((n) => n.attrs.get("class") === "prompt-preview");
+    expect(body, "開くと文面が出る").toBeDefined();
+    const text = textOf(body!);
+    expect(text).toContain("サンプルレース(プレビュー用)");
+    expect(text).toContain("【予想印】");
+    expect(text).toContain("±10%(絶対値0.10)");
+    expect(text).toContain("スモークの追加指示");
+    expect(toggleOf().attrs.get("aria-expanded")).toBe("true");
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
+    toggleOf().listeners.get("click")![0]!(undefined);
+    expect(elements().some((n) => n.attrs.get("class") === "prompt-preview")).toBe(false);
+  });
+
+  it("Issue #222: 移行画面(#migration)(生成物の実行): GET /api/migration だけを取り、ファイルを選ぶとブラウザで検証して件数を出し、「取り込みを始める」で選んだファイルそのものを application/gzip で POST する(一覧・板・設定は取らない)", async () => {
+    const { root, calls } = run("#migration");
+    const elements = () => flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement);
+    /** 検証は gzip の展開(スレッドプール)を含むので、I/O の巡ではなく実時間の短い待ちで上限つきに待つ。 */
+    const waitFor = async (cond: () => boolean): Promise<void> => {
+      for (let i = 0; i < 400 && !cond(); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    };
+    await waitFor(() => root.children.length > 0 && elements().some((n) => n.attrs.get("type") === "file"));
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/migration"]);
+    const picker = elements().find((n) => n.attrs.get("type") === "file")!;
+    expect(picker.attrs.get("accept")).toBe(".gz,application/gzip,application/x-gzip");
+    const fixture = Buffer.from(GOLDEN_TEXT, "utf-8"); // Windows のチェックアウトの CRLF は LF にそろえてある(`migration-fixture.ts`)
+    const file = Object.assign(new Blob([new Uint8Array(gzipSync(fixture))]), { name: "keiba-cloud-migration.ndjson.gz" });
+    picker.listeners.get("change")![0]!({ target: { files: [file], value: "C:\\fakepath\\keiba-cloud-migration.ndjson.gz" } });
+    await waitFor(() => root.children.some((c) => textOf(c).includes("分析 5 件・結果 5 レース")));
+    expect(textOf(root.children[0]!)).toContain("分析 5 件・結果 5 レース");
+    expect(calls.filter((c) => c.init.method === "POST")).toEqual([]); // 検証の間はアップロードしない
+    const start = elements().find((n) => n.attrs.get("class") === "migration-start")!;
+    start.listeners.get("click")![0]!(undefined);
+    await waitFor(() => calls.some((c) => c.init.method === "POST"));
+    const post = calls.find((c) => c.init.method === "POST")!;
+    expect(post.url).toBe("/api/migration/upload");
+    expect(post.init.body).toBe(file);
+    expect(post.init.headers).toEqual({ "content-type": "application/gzip" });
+    expect(post.init.credentials).toBe("same-origin");
+    expect(post.init.referrerPolicy).toBe("same-origin");
+    await waitFor(() => root.children.some((c) => textOf(c).includes("アップロードしました")));
+    expect(textOf(root.children[0]!)).toContain("サーバでファイルを検証しています");
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/migration", "POST /api/migration/upload"]);
+  });
+
+  it("Issue #222: 設定画面の「exe から移行」の節(生成物の実行)は #migration へのリンクを持ち、/api/migration は取らない", async () => {
+    const { root, calls } = run("#settings");
+    await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
+    const link = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("class") === "migration-link")!;
+    expect(link.attrs.get("href")).toBe("#migration");
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
+  });
+
+  it("レース画面(#…&race=): 状態(race_id つき)と過去の分析の 2 本だけを取り、カードと朝の prior を描画する。一覧・板・分析の詳細・POST は呼ばない", async () => {
+    const { root, calls } = run(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    await until(() => root.children.some((c) => textOf(c).includes("アルファ")));
+    expect(calls.map((c) => c.url).sort()).toEqual([`/api/analyses/status?kaisai_date=${DATE}&race_id=${RACE_ID}`, `/api/analyses?race_id=${RACE_ID}&kaisai_date=${DATE}&limit=20`].sort());
+    expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
+    const text = textOf(root.children[0]!);
+    expect(text).toContain("事前分析");
+    expect(text).toContain("発走前");
+    expect(text).toContain("3着内率 52.3%");
+  });
+
+  it("起動のボタン(生成物の実行): 押すと POST が 1 回(同じオリジンの資格情報・referrerPolicy: same-origin・fetch の mode なし)出て、「待ち」になり、追跡のタイマーが張られる。非表示でタイマーが止まる", async () => {
+    const { root, calls, timers, doc, documentListeners } = run(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    await until(() => root.children.some((c) => textOf(c).includes("アルファ")));
+    expect((documentListeners.get("visibilitychange") ?? []).length).toBe(1); // 可視状態を購読している
+    expect(calls.filter((c) => c.init.method === "POST")).toHaveLength(0); // 前提: 押すまで POST は無い
+    expect(timers.size).toBe(0); // 前提: 実行中の行が無いので追跡していない
+    const buttons = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && n.attrs.get("data-mode") === "pre_race");
+    expect(buttons).toHaveLength(1);
+    expect(textOf(buttons[0]!)).toBe("発走前の分析を実行");
+    expect(buttons[0]!.attrs.get("data-race")).toBe(RACE_ID);
+    buttons[0]!.listeners.get("click")![0]!(undefined);
+    buttons[0]!.listeners.get("click")![0]!(undefined); // 二重押し
+    await until(() => calls.some((c) => c.init.method === "POST"));
+    await settle();
+    const posts = calls.filter((c) => c.init.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe("/api/analyses/run");
+    expect(JSON.parse(posts[0]!.init.body as string)).toEqual({ race_id: RACE_ID, kaisai_date: DATE, mode: "pre_race" });
+    expect(posts[0]!.init.credentials).toBe("same-origin");
+    expect(posts[0]!.init.referrerPolicy).toBe("same-origin");
+    expect(Object.keys(posts[0]!.init)).not.toContain("mode"); // fetch の mode は入れない
+    const after = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && n.attrs.get("data-mode") === "pre_race")[0]!;
+    expect(textOf(after)).toBe("待ち");
+    expect(timers.size).toBe(1); // 追跡のタイマー
+    doc.visibilityState = "hidden";
+    documentListeners.get("visibilitychange")![0]!();
+    expect(timers.size).toBe(0); // 非表示で止まる
+  });
+
+  it("結果画面(#analysis=): /api/analyses/{id} を 1 回だけ取り、馬のカードと配分(core の表示関数〈`view/`。もとは exe の renderer〉の純関数を、Node の組込みの無い環境で実行)を描画する", async () => {
+    const { root, calls } = run("#analysis=5");
+    await until(() => root.children.some((c) => textOf(c).includes("配分の提案")));
+    expect(calls.map((c) => c.url)).toEqual(["/api/analyses/5"]);
+    const text = textOf(root.children[0]!);
+    expect(text).toContain("福島11R テストステークス");
+    expect(text).toContain("3着内率 20.0%");
+    expect(text).toContain("組合せ券種にEVプラスの候補が無かったため複勝のみの配分になっています。"); // fallbackReason が exe の注記になる
+    expect(text).toContain("300円");
+    expect(text).not.toContain("AI補正後");
+  });
+});

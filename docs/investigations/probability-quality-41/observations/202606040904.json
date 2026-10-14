@@ -1,0 +1,245 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040904",
+  "region": "central",
+  "requestedDate": "20260927",
+  "kaisaiDate": "20260927",
+  "venueCode": "06",
+  "raceNumber": 4,
+  "raceName": "2歳新馬",
+  "listedEntryCount": 15,
+  "status": "ok",
+  "courseType": "芝",
+  "distance": 1200,
+  "runnerCount": 15,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "リゼスカーレット",
+      "prior": 0.21500000000000002,
+      "placeOddsMin": 1.9,
+      "placeOddsMax": 2.9,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 2,
+      "horseName": "アイファーティアラ",
+      "prior": 0.21500000000000002,
+      "placeOddsMin": 17,
+      "placeOddsMax": 28.5,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 3,
+      "horseName": "マルジョレーヌ",
+      "prior": 0.21500000000000002,
+      "placeOddsMin": 29.5,
+      "placeOddsMax": 49.8,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 4,
+      "horseName": "ジョワリヴレ",
+      "prior": 0.21500000000000002,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.6,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 5,
+      "horseName": "ミエノヴィヴィッド",
+      "prior": 0.21500000000000002,
+      "placeOddsMin": 3.4,
+      "placeOddsMax": 5.4,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 6,
+      "horseName": "アッパレヤ",
+      "prior": 0.185,
+      "placeOddsMin": 11.5,
+      "placeOddsMax": 19.3,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 7,
+      "horseName": "ピンクダイアモンド",
+      "prior": 0.185,
+      "placeOddsMin": 2,
+      "placeOddsMax": 3,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 8,
+      "horseName": "ナムラジョン",
+      "prior": 0.185,
+      "placeOddsMin": 34.6,
+      "placeOddsMax": 58.5,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 9,
+      "horseName": "ダブルスプリング",
+      "prior": 0.185,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 2.1,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 10,
+      "horseName": "ブランカバローズ",
+      "prior": 0.185,
+      "placeOddsMin": 3,
+      "placeOddsMax": 4.8,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 11,
+      "horseName": "コックコート",
+      "prior": 0.185,
+      "placeOddsMin": 29.9,
+      "placeOddsMax": 50.4,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 12,
+      "horseName": "フレンチネイル",
+      "prior": 0.15500000000000003,
+      "placeOddsMin": 28.8,
+      "placeOddsMax": 48.6,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 13,
+      "horseName": "エコロヴィータ",
+      "prior": 0.15500000000000003,
+      "placeOddsMin": 4.8,
+      "placeOddsMax": 7.9,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 14,
+      "horseName": "ユーサイコー",
+      "prior": 0.15500000000000003,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 15,
+      "horseName": "リオビーチ",
+      "prior": 0.15500000000000003,
+      "placeOddsMin": 35,
+      "placeOddsMax": 59.2,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/27",
+      "totalResultCount": 15,
+      "removedCount": 15,
+      "removedByCutoffCount": 15,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:35:00.116Z"
+}

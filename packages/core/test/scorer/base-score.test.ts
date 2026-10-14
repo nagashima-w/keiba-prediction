@@ -219,93 +219,169 @@ describe("computeCourseDistanceScore(コース・距離適性)", () => {
   });
 });
 
-describe("computeJockeyScore(騎手の当該コース複勝率・optional入力)", () => {
+describe("computeJockeyScore(騎手の全体の複勝率〈前年+当年〉・optional入力。Issue #226)", () => {
+  /** 騎手の項だけを見るための設定: 最小騎乗数10・中立は中央0.3/地方0.2・重み1(補正 = 複勝率 − 中立)。 */
+  const jc = cfg({
+    jockeyMinStarts: 10,
+    jockeyNeutralPlaceRate: { central: 0.3, nar: 0.2 },
+    weights: { jockey: 1 },
+  });
+
   it("騎手データがなければデータなしとして補正なしになること", () => {
     const c = computeJockeyScore(undefined, DEFAULT_SCORER_CONFIG);
+    expect(c.biasName).toBe("騎手成績");
     expect(c.applied).toBe(false);
     expect(c.correction).toBe(0);
     expect(c.reason).toContain("データなし");
   });
 
-  it("騎手の複勝率で補正されること", () => {
-    const c = computeJockeyScore(
-      { starts: 10, placed: 4 },
-      cfg({ neutralPlaceRate: 0.3, weights: { jockey: 1 } }),
-    );
+  it("騎手の複勝率で補正されること(補正 = 複勝率 − 中立 × 重み)", () => {
+    const c = computeJockeyScore({ starts: 10, placed: 4 }, jc);
     expect(c.applied).toBe(true);
     expect(c.targetRate).toBeCloseTo(0.4, 10);
+    expect(c.overallRate).toBeCloseTo(0.3, 10);
+    expect(c.sampleCount).toBe(10);
     expect(c.correction).toBeCloseTo(0.4 - 0.3, 10);
   });
 
-  it("騎乗数が最小サンプル未満なら補正なしになること", () => {
-    const c = computeJockeyScore({ starts: 1, placed: 1 }, DEFAULT_SCORER_CONFIG);
+  it("重みが補正に掛かること(既定の重み 0.15 なら (複勝率 − 中立) × 0.15)", () => {
+    const c = computeJockeyScore(
+      { starts: 1000, placed: 370 },
+      cfg({ jockeyNeutralPlaceRate: { central: 0.22, nar: 0.29 } }),
+    );
+    expect(c.weight).toBe(0.15);
+    expect(c.correction).toBeCloseTo((0.37 - 0.22) * 0.15, 10);
+  });
+
+  it("騎乗数が最小(jockeyMinStarts)未満なら補正なし、ちょうどなら補正あり(境界値)", () => {
+    const below = computeJockeyScore({ starts: 9, placed: 9 }, jc);
+    expect(below.applied).toBe(false);
+    expect(below.correction).toBe(0);
+    expect(below.sampleCount).toBe(9);
+    expect(below.targetRate).toBeCloseTo(1, 10); // 複勝率は参考値として残す
+    const at = computeJockeyScore({ starts: 10, placed: 9 }, jc);
+    expect(at.applied).toBe(true);
+    expect(at.correction).toBeCloseTo(0.9 - 0.3, 10);
+  });
+
+  it("既定の最小騎乗数は100: 99走は補正なし・100走は補正あり", () => {
+    expect(DEFAULT_SCORER_CONFIG.baseScore.jockeyMinStarts).toBe(100);
+    expect(computeJockeyScore({ starts: 99, placed: 40 }, DEFAULT_SCORER_CONFIG).applied).toBe(false);
+    expect(computeJockeyScore({ starts: 100, placed: 40 }, DEFAULT_SCORER_CONFIG).applied).toBe(true);
+    // 旧版のテスト(騎乗数 1 走・複勝圏内 1 回・既定設定)と同じ入力も、補正なしで騎乗数が寄与度に残る。
+    const one = computeJockeyScore({ starts: 1, placed: 1 }, DEFAULT_SCORER_CONFIG);
+    expect(one.applied).toBe(false);
+    expect(one.sampleCount).toBe(1);
+  });
+
+  it("騎乗数0なら補正なしで、複勝率は null(0除算にならない)", () => {
+    const c = computeJockeyScore({ starts: 0, placed: 0 }, jc);
     expect(c.applied).toBe(false);
-    expect(c.sampleCount).toBe(1);
+    expect(c.targetRate).toBeNull();
+    expect(c.sampleCount).toBe(0);
+  });
+
+  it("中立は開催区分で切り替わる: 同じ成績でも、中央は0.3・地方は0.2との差になる", () => {
+    const stats = { starts: 100, placed: 40 };
+    const central = computeJockeyScore(stats, jc, "central");
+    const nar = computeJockeyScore(stats, jc, "nar");
+    expect(central.correction).toBeCloseTo(0.4 - 0.3, 10);
+    expect(nar.correction).toBeCloseTo(0.4 - 0.2, 10);
+    expect(nar.correction).not.toBeCloseTo(central.correction, 5); // 切り替えが効いていることの前提
+    // 区分を省略したら中央。
+    expect(computeJockeyScore(stats, jc).correction).toBeCloseTo(central.correction, 10);
+  });
+
+  it("複勝率が中立より低い騎手は負の補正になる(複勝率 0 なら −中立 × 重み)", () => {
+    const c = computeJockeyScore({ starts: 100, placed: 0 }, jc);
+    expect(c.applied).toBe(true);
+    expect(c.correction).toBeCloseTo(-0.3, 10);
   });
 });
 
-describe("computeWeightChangeScore(斤量変化・馬体重増減の小補正)", () => {
+describe("computeWeightChangeScore(斤量変化の小補正。馬体重は Issue #213 で撤去)", () => {
   it("斤量増はマイナス方向・上限でクリップされること", () => {
-    // 前走54→今回56(+2)。スケール0.01・上限3・重み1 → -2*0.01 = -0.02。馬体重変化なし。
+    // 前走54→今回56(+2)。スケール0.01・上限3・重み1 → -2*0.01 = -0.02。
     const features = deriveRaceFeatures([
       makeResult({ date: "2025/01/01", kinryo: 54 }),
     ]);
     const c = computeWeightChangeScore(
       features,
-      { kinryo: 56, bodyWeightDiff: null },
+      { kinryo: 56 },
       cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 1 } }),
     );
     expect(c.applied).toBe(true);
     expect(c.correction).toBeCloseTo(-0.02, 10);
   });
 
-  it("大幅な馬体重減はマイナス補正になること", () => {
-    // 斤量同値(前走55→55)、馬体重-10。減スケール0.004・上限-20 → -10*0.004 = -0.04。
+  it("斤量増の絶対値が上限を超えたらクリップされること(+5kg → 上限3kgの -0.03)", () => {
     const features = deriveRaceFeatures([
-      makeResult({ date: "2025/01/01", kinryo: 55 }),
+      makeResult({ date: "2025/01/01", kinryo: 52 }),
     ]);
     const c = computeWeightChangeScore(
       features,
-      { kinryo: 55, bodyWeightDiff: -10 },
-      cfg({
-        kinryoScale: 0.01,
-        bodyWeightDropScale: 0.004,
-        bodyWeightDropCapKg: -20,
-        weights: { weightChange: 1 },
-      }),
+      { kinryo: 57 },
+      cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 1 } }),
     );
-    expect(c.correction).toBeCloseTo(-0.04, 10);
+    expect(c.correction).toBeCloseTo(-0.03, 10);
   });
 
-  it("馬体重増(プラス)は補正0(ペナルティなし)になること", () => {
-    // 斤量同値(55→55)、馬体重+10。増は罰しない設計 → 馬体重項0。斤量項0 → 補正0(ただし applied)。
+  it("斤量減はプラス方向になること(前走56→今回55 で +0.01)", () => {
     const features = deriveRaceFeatures([
-      makeResult({ date: "2025/01/01", kinryo: 55 }),
+      makeResult({ date: "2025/01/01", kinryo: 56 }),
     ]);
     const c = computeWeightChangeScore(
       features,
-      { kinryo: 55, bodyWeightDiff: 10 },
-      cfg({
-        kinryoScale: 0.01,
-        bodyWeightDropScale: 0.004,
-        weights: { weightChange: 1 },
-      }),
+      { kinryo: 55 },
+      cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 1 } }),
     );
-    expect(c.applied).toBe(true);
-    expect(c.correction).toBeCloseTo(0, 10);
+    expect(c.correction).toBeCloseTo(0.01, 10);
   });
 
-  it("前走斤量が取れず馬体重変化もなければ補正なしになること", () => {
+  it("馬体重の増減は補正に一切影響しないこと(Issue #213。-20kg でも +20kg でも未指定でも斤量項だけ)", () => {
+    // 斤量は前走54→今回56(+2)で、斤量項は非ゼロの -0.02。
+    // 馬体重の減点が残っていれば、-20kg の結果が未指定と食い違う(-0.02 + -0.08)。
+    const features = deriveRaceFeatures([
+      makeResult({ date: "2025/01/01", kinryo: 54 }),
+    ]);
+    const config = cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 1 } });
+    const base = computeWeightChangeScore(features, { kinryo: 56 }, config);
+    // 型から外したフィールドを、古い呼び出し元が渡してきた場合を想定する(オブジェクトリテラル直書きだと
+    // 過剰プロパティ検査で型エラーになるため、変数経由で渡す)。
+    const legacyDrop = { kinryo: 56, bodyWeightDiff: -20 };
+    const legacyGain = { kinryo: 56, bodyWeightDiff: 20 };
+    const drop = computeWeightChangeScore(features, legacyDrop, config);
+    const gain = computeWeightChangeScore(features, legacyGain, config);
+    expect(base.correction).toBeCloseTo(-0.02, 10); // 比較の前提: 斤量項は非ゼロ
+    expect(drop.correction).toBeCloseTo(base.correction, 10);
+    expect(gain.correction).toBeCloseTo(base.correction, 10);
+    expect(drop.applied).toBe(true);
+  });
+
+  it("前走斤量が取れなければ補正なしになること(馬体重が取れていても適用しない)", () => {
     const features = deriveRaceFeatures([
       makeResult({ date: "2025/01/01", kinryo: null }),
     ]);
-    const c = computeWeightChangeScore(
-      features,
-      { kinryo: 56, bodyWeightDiff: null },
-      DEFAULT_SCORER_CONFIG,
-    );
+    const c = computeWeightChangeScore(features, { kinryo: 56 }, DEFAULT_SCORER_CONFIG);
     expect(c.applied).toBe(false);
     expect(c.correction).toBe(0);
+    expect(c.reason).toContain("前走斤量");
+    // 古い呼び出し元が馬体重を渡してきても、以前のように applied=true にはならない(旧: 馬体重だけで適用)。
+    const legacy = { kinryo: 56, bodyWeightDiff: -10 };
+    const c2 = computeWeightChangeScore(features, legacy, DEFAULT_SCORER_CONFIG);
+    expect(c2.applied).toBe(false);
+    expect(c2.correction).toBe(0);
+  });
+
+  it("戦績が空(前走なし)でも補正なしになること", () => {
+    const c = computeWeightChangeScore([], { kinryo: 56 }, DEFAULT_SCORER_CONFIG);
+    expect(c.applied).toBe(false);
+    expect(c.correction).toBe(0);
+  });
+
+  it("寄与度の表示名は「斤量」であること", () => {
+    const c = computeWeightChangeScore([], { kinryo: 56 }, DEFAULT_SCORER_CONFIG);
+    expect(c.biasName).toBe("斤量");
   });
 });
 
@@ -358,7 +434,7 @@ describe("computeBaseScore(基礎スコア統合)", () => {
     ]);
     const r = computeBaseScore(
       features,
-      { courseType: "ダ", distance: 1800, venueName: "中山", frameZone: "内", kinryo: 55, bodyWeightDiff: 0 },
+      { courseType: "ダ", distance: 1800, venueName: "中山", frameZone: "内", kinryo: 55 },
       { starts: 10, placed: 3 },
       DEFAULT_SCORER_CONFIG,
     );
@@ -366,12 +442,33 @@ describe("computeBaseScore(基礎スコア統合)", () => {
     expect(names).toContain("近走着順");
     expect(names).toContain("上がり3F");
     expect(names).toContain("コース・距離適性");
-    expect(names).toContain("騎手当該コース");
-    expect(names).toContain("斤量・馬体重");
+    expect(names).toContain("騎手成績");
+    expect(names).toContain("斤量");
+    expect(names).not.toContain("斤量・馬体重");
     expect(names).toContain("コース枠順バイアス");
     expect(r.contributions).toHaveLength(6);
     const sum = r.contributions.reduce((s, c) => s + c.correction, 0);
     expect(r.correctionSum).toBeCloseTo(sum, 10);
+  });
+
+  it("venueKind が騎手の中立の切り替えまで届く(computeBaseScore → computeJockeyScore。Issue #226)", () => {
+    const features = deriveRaceFeatures([
+      makeResult({ date: "2025/03/01", courseType: "ダ", distance: 1800, finishPosition: rank(1), last3f: 36, kinryo: 55 }),
+    ]);
+    const config = cfg({
+      jockeyMinStarts: 10,
+      jockeyNeutralPlaceRate: { central: 0.3, nar: 0.2 },
+      weights: { jockey: 1 },
+    });
+    const today = { courseType: "ダ" as const, distance: 1800, venueName: "中山", frameZone: "内" as const, kinryo: 55 };
+    const stats = { starts: 100, placed: 40 };
+    const jockeyOf = (venueKind?: "central" | "nar") =>
+      computeBaseScore(features, { ...today, venueKind }, stats, config).contributions.find(
+        (c) => c.biasName === "騎手成績",
+      )!;
+    expect(jockeyOf("central").correction).toBeCloseTo(0.1, 10);
+    expect(jockeyOf("nar").correction).toBeCloseTo(0.2, 10);
+    expect(jockeyOf(undefined).correction).toBeCloseTo(0.1, 10); // 省略は中央
   });
 
   it("venueKind: nar を computeCourseFrameBiasScore にそのまま渡すこと(NARでは対象外)", () => {
@@ -386,7 +483,6 @@ describe("computeBaseScore(基礎スコア統合)", () => {
         venueName: "中山",
         frameZone: "内",
         kinryo: 55,
-        bodyWeightDiff: 0,
         venueKind: "nar",
       },
       undefined,
@@ -404,14 +500,14 @@ describe("computeBaseScore 実フィクスチャ(ウィンターガーデン23�
     const features = deriveRaceFeatures(winter);
     const r = computeBaseScore(
       features,
-      { courseType: "ダ", distance: 1800, venueName: "中山", frameZone: "内", kinryo: 56, bodyWeightDiff: 2 },
+      { courseType: "ダ", distance: 1800, venueName: "中山", frameZone: "内", kinryo: 56 },
       undefined,
       DEFAULT_SCORER_CONFIG,
     );
     expect(r.contributions).toHaveLength(6);
     expect(Number.isFinite(r.correctionSum)).toBe(true);
     // 騎手データなしはデータなしログになること。
-    const jockey = r.contributions.find((c) => c.biasName === "騎手当該コース");
+    const jockey = r.contributions.find((c) => c.biasName === "騎手成績");
     expect(jockey?.applied).toBe(false);
   });
 });

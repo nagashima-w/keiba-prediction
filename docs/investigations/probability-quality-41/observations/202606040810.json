@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040810",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 10,
+  "raceName": "勝浦特別",
+  "listedEntryCount": 16,
+  "status": "ok",
+  "courseType": "芝",
+  "distance": 1200,
+  "runnerCount": 16,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "デンプシー",
+      "prior": 0.22743582892798975,
+      "placeOddsMin": 2.1,
+      "placeOddsMax": 2.8,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 2,
+      "horseName": "イゾラフェリーチェ",
+      "prior": 0.05767046080927852,
+      "placeOddsMin": 1.9,
+      "placeOddsMax": 2.4,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 18
+    },
+    {
+      "umaban": 3,
+      "horseName": "ウィングブルー",
+      "prior": 0.28426952201861283,
+      "placeOddsMin": 2.8,
+      "placeOddsMax": 3.9,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    },
+    {
+      "umaban": 4,
+      "horseName": "ジョヴィアン",
+      "prior": 0.08202452595417738,
+      "placeOddsMin": 5.3,
+      "placeOddsMax": 7.4,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 23
+    },
+    {
+      "umaban": 5,
+      "horseName": "ヴィヴァクラウン",
+      "prior": 0.1647193495608918,
+      "placeOddsMin": 6,
+      "placeOddsMax": 8.4,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 26
+    },
+    {
+      "umaban": 6,
+      "horseName": "トラスコンガーデン",
+      "prior": 0.25639264079393764,
+      "placeOddsMin": 6.6,
+      "placeOddsMax": 9.2,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 9
+    },
+    {
+      "umaban": 7,
+      "horseName": "ドリーミングアップ",
+      "prior": 0.3072270613213488,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 1.9,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 31
+    },
+    {
+      "umaban": 8,
+      "horseName": "レオアジャイル",
+      "prior": 0.15150683977846696,
+      "placeOddsMin": 3,
+      "placeOddsMax": 4.1,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 9,
+      "horseName": "ビッグフラワー",
+      "prior": 0.23561712429468798,
+      "placeOddsMin": 2.1,
+      "placeOddsMax": 2.8,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 19
+    },
+    {
+      "umaban": 10,
+      "horseName": "セレッソデアモール",
+      "prior": 0.0629386925446462,
+      "placeOddsMin": 16.7,
+      "placeOddsMax": 23.6,
+      "finish": {
+        "kind": "順位",
+        "value": 16
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    },
+    {
+      "umaban": 11,
+      "horseName": "ビービーエフォート",
+      "prior": 0.31436901859924404,
+      "placeOddsMin": 5.9,
+      "placeOddsMax": 8.2,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 12
+    },
+    {
+      "umaban": 12,
+      "horseName": "アイムインディ",
+      "prior": 0.22885626061926612,
+      "placeOddsMin": 3.5,
+      "placeOddsMax": 4.8,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 13,
+      "horseName": "レザンノワール",
+      "prior": 0.14243743298259598,
+      "placeOddsMin": 11.2,
+      "placeOddsMax": 15.9,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 16
+    },
+    {
+      "umaban": 14,
+      "horseName": "スミッコディスコ",
+      "prior": 0.29570608112826013,
+      "placeOddsMin": 5.7,
+      "placeOddsMax": 8,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 9
+    },
+    {
+      "umaban": 15,
+      "horseName": "メローネ",
+      "prior": 0.07810549484563761,
+      "placeOddsMin": 15.8,
+      "placeOddsMax": 22.4,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 16,
+      "horseName": "ピコアーガイル",
+      "prior": 0.11072366582095827,
+      "placeOddsMin": 5.7,
+      "placeOddsMax": 8,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 14
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 255,
+      "removedCount": 16,
+      "removedByCutoffCount": 16,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:24:56.081Z"
+}

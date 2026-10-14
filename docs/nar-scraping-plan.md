@@ -2,6 +2,7 @@
 
 調査日: 2026-07-12(ユーザー許可のもと実サイトへ最小限のリクエストで実測)。
 中央競馬(JRA)版の調査は `docs/phase1-scraping-plan.md` を参照。本書はNAR固有の差分に絞って記録する。
+地方競馬情報サイト(keiba.go.jp)の月次 ZIP と netkeiba の突き合わせ(Issue #66)は `docs/keibago-zip-investigation.md` を参照。
 
 ## 結論サマリ
 

@@ -1,5 +1,23 @@
 import Database from "better-sqlite3";
-import type { FetchTextOptions } from "./http-client.js";
+import type {
+  CacheEntry,
+  CacheStore,
+  NowFn,
+  ScrapeCacheGetOptions,
+} from "./cached-fetcher.js";
+
+// Issue #168(#163-a): CachedFetcher・TextFetcher・型は better-sqlite3 に依存しない cached-fetcher.ts へ切り出した。
+// 既存の import 元(`./cache.js`・バレル)を壊さないよう、ここから再 export する。
+export {
+  CachedFetcher,
+  type CacheEntry,
+  type CachedFetcherOptions,
+  type CachedFetchTextOptions,
+  type CacheStore,
+  type NowFn,
+  type ScrapeCacheGetOptions,
+  type TextFetcher,
+} from "./cached-fetcher.js";
 
 /**
  * キャッシュ用テーブル名。分析履歴・検証結果などの将来のテーブルとは独立させる。
@@ -7,17 +25,6 @@ import type { FetchTextOptions } from "./http-client.js";
  * 鮮度は取得側(get)の maxAgeMs で判定する設計とする。
  */
 const TABLE_NAME = "scrape_cache";
-
-/** 時刻取得関数。テストでフェイク時刻を注入できるよう外部化する。 */
-export type NowFn = () => number;
-
-/** キャッシュから取り出したエントリ。 */
-export interface CacheEntry {
-  /** 保存されている本文(スクレイピング結果のHTML等)。 */
-  readonly value: string;
-  /** 取得(保存)された時刻(エポックミリ秒)。 */
-  readonly fetchedAt: number;
-}
 
 /** ScrapeCache の構築オプション。 */
 export interface ScrapeCacheOptions {
@@ -32,18 +39,6 @@ export interface ScrapeCacheOptions {
   now?: NowFn;
 }
 
-/** get() の取得オプション。 */
-export interface ScrapeCacheGetOptions {
-  /**
-   * 許容する鮮度(ミリ秒)。保存からの経過時間がこの値を超えるエントリはミス扱いとする。
-   * 未指定なら期限を無視して常にヒットさせる(確定済みデータ向け)。
-   * 0 を指定すると保存と同一ミリ秒の取得のみヒットするが、実クロックでは同一ms内の
-   * 連続アクセスはヒットしうるため「確実な再取得」の手段にはならない。
-   * 常に最新を取りたい場合は CachedFetcher の bypassCache を用いること。
-   */
-  maxAgeMs?: number;
-}
-
 /**
  * スクレイピング結果のSQLiteキャッシュ層。
  *
@@ -53,7 +48,7 @@ export interface ScrapeCacheGetOptions {
  *   同一のキャッシュ本文を、確定済みデータには長い maxAgeMs、揮発性オッズには短い(または0の)
  *   maxAgeMs、という異なる鮮度要件で使い分けられるため柔軟性が高い。
  */
-export class ScrapeCache {
+export class ScrapeCache implements CacheStore {
   private readonly db: Database.Database;
   private readonly now: NowFn;
 
@@ -129,85 +124,5 @@ export class ScrapeCache {
   /** データベース接続を閉じる。 */
   close(): void {
     this.db.close();
-  }
-}
-
-/**
- * テキストを取得できる最小限のフェッチャインターフェース。
- * HttpClient がこれを満たすため、CachedFetcher と合成できる。
- */
-export interface TextFetcher {
-  fetchText(url: string, options?: FetchTextOptions): Promise<string>;
-}
-
-/** CachedFetcher の構築オプション。 */
-export interface CachedFetcherOptions {
-  /** 実際にHTTP取得を行うフェッチャ(通常は HttpClient)。 */
-  fetcher: TextFetcher;
-  /** 取得結果を保存・参照するキャッシュ。 */
-  cache: ScrapeCache;
-}
-
-/** CachedFetcher.fetchText の呼び出しオプション。 */
-export interface CachedFetchTextOptions extends FetchTextOptions {
-  /**
-   * キャッシュを有効とみなす鮮度(ミリ秒)。ScrapeCache.get と同じ意味。
-   * 未指定なら鮮度無制限でヒットを許可する。
-   */
-  maxAgeMs?: number;
-  /**
-   * true のとき、キャッシュヒット可能でも必ずフェッチを発行してキャッシュを更新する。
-   * 発走直前のオッズ再取得など、常に最新が必要な場面で使う。
-   */
-  bypassCache?: boolean;
-  /**
-   * キャッシュキーを明示指定する(タスク機能B。省略時は url をキーとして使う従来どおりの挙動)。
-   *
-   * ⚠️ 重要: race.netkeiba.com/race_api/ のような「URLが固定でrace_id等がPOSTボディに入る」API
-   * では、URLだけをキーにすると全レースで同一キーになり、最初に取得したレースのデータが
-   * 以降すべてのレースに誤って返る事故になる(boss着手前ゲート指摘)。POSTボディに識別子が
-   * 入るエンドポイントを呼ぶ側は、必ずこのオプションで一意なキー(例:
-   * `race_api#AplGradeWinner#{race_id}`)を指定すること。
-   */
-  cacheKey?: string;
-}
-
-/**
- * ScrapeCache と TextFetcher を合成した「キャッシュ付きフェッチ」。
- *
- * - キャッシュヒット時はフェッチを発行しない。よってレート制限待ちも発生しない。
- * - ミス時(またはbypassCache時)はフェッチして結果を保存し、その値を返す。
- */
-export class CachedFetcher {
-  private readonly fetcher: TextFetcher;
-  private readonly cache: ScrapeCache;
-
-  constructor(options: CachedFetcherOptions) {
-    this.fetcher = options.fetcher;
-    this.cache = options.cache;
-  }
-
-  /**
-   * URLをキャッシュ経由で取得する。
-   * @param url 取得対象URL(キャッシュキーにもなる。cacheKey指定時はそちらを優先する)
-   * @param options 鮮度・バイパス指定、キャッシュキー指定、およびフェッチャへ渡すオプション(encoding等)
-   */
-  async fetchText(
-    url: string,
-    options: CachedFetchTextOptions = {},
-  ): Promise<string> {
-    const { maxAgeMs, bypassCache, cacheKey, ...fetchOptions } = options;
-    const key = cacheKey ?? url;
-
-    if (!bypassCache) {
-      const hit = this.cache.get(key, { maxAgeMs });
-      if (hit) {
-        return hit.value;
-      }
-    }
-
-    const text = await this.fetcher.fetchText(url, fetchOptions);
-    this.cache.set(key, text);
-    return text;
   }
 }

@@ -6,14 +6,22 @@
  * 合成式(設計判断):
  *   raw_i = 中立確率 + Σ(基礎スコア6項目の補正) + Σ(環境・状態バイアス7項目の補正)
  *   中立確率 = min(3, 頭数) / 頭数   (頭数Nのレースで概ね3頭が複勝圏に入る前提の起点)
- *   prior_i = clamp(raw_i, [minPrior, maxPrior])
+ *   prior_i = clamp(sigmoid(logit(clamp(raw_i)) + c), [minPrior, maxPrior])
+ *             (c: レース内で全馬に共通。Σ prior_i = min(3, 頭数) となるように決める。下の「健全性」)
+ *   単独の computePrior は頭数レベルの正規化をせず prior_i = clamp(raw_i, [minPrior, maxPrior]) のみ。
  *
  * 健全性(仕様の意識点):
  * - 全馬が同一データなら全補正が同一 → 全馬同一 prior(決定論的に自明)。
- * - 頭数Nのレースで prior の合計は概ね「目標(min(3,N))」付近であるべき。各馬を独立に計算するため
- *   合計は目標からずれ得る。computeFieldPriors は raw の合計が目標から大きく逸脱(逸脱比率 >
- *   normalizeTolerance)した場合のみ、raw を目標に合わせて一律スケール(正規化)してからクランプする。
- *   一律スケールは「全馬同一 → 全馬同一」を保つ。
+ * - 頭数Nのレースで prior の合計は「目標(min(3,N))」にちょうど一致させる。各馬を独立に計算するため
+ *   raw の合計は目標からずれる(実測では全馬で平均 +0.08 ほど上にずれる)。computeFieldPriors は
+ *   `normalizeFieldPriors` で、各馬の raw を [minPrior, maxPrior] に収めて logit に変え、**全馬に共通の
+ *   c を足して** Σ clamp(sigmoid(logit_i + c)) = 目標 となる c を求める(ロジットシフト。Issue #258)。
+ *   共通項を足すだけなので、クランプに当たらない馬どうしのロジット差(オッズ比)は保たれ、順序も保たれる。
+ *   「全馬同一 → 全馬同一」も保たれる。
+ *   旧版(〜#226)は、Σ が目標から ±10% を超えたときだけ全馬に同じ倍率を掛けていた。raw の偏りが
+ *   正方向なので倍率は 1 より小さく、確率の広がり(sd)を raw の中央値で 0.77 倍に縮めていた(#258 の調査)。
+ *   ロジットシフトでは、この比が 0.86 倍(33 レース・429 頭の中央値)まで戻る。完全には戻らない: c が負のとき、
+ *   確率の差は p(1−p) 倍に縮むため(下位ほど縮む)。比較は `docs/investigations/prior-normalization-258/report.md`。
  *
  * 寄与度ログ: 基礎6項目 + 環境7項目(馬場・競馬場・季節・夏負け・枠順個別・輸送滞在・ローテ)の
  * 計13項目を contributions として返す(仕様「各バイアスの寄与度をログ出力し、verifyで重みを調整」)。
@@ -34,7 +42,7 @@ import type {
   ShutubaHorse,
   StableLocation,
 } from "../scraper/types.js";
-import { DEFAULT_SCORER_CONFIG, type ScorerConfig } from "./config.js";
+import { DEFAULT_SCORER_CONFIG, type PriorConfig, type ScorerConfig } from "./config.js";
 import { computeBaseScore, type JockeyCourseStats } from "./base-score.js";
 import { computeTrackConditionBias } from "./bias-track-condition.js";
 import { computeVenueBias } from "./bias-venue.js";
@@ -87,8 +95,6 @@ export interface TodayRaceConditions {
   readonly stableLocation: StableLocation;
   /** 今回の斤量(kg)。 */
   readonly kinryo: number;
-  /** 今回の馬体重増減(kg、前走比)。未発表なら null。 */
-  readonly bodyWeightDiff: number | null;
   /**
    * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
    * "nar"(地方競馬)では COURSE_TRAITS・COURSE_FRAME_BIAS_TABLE・美浦/栗東輸送負荷テーブルが
@@ -145,7 +151,6 @@ function collectContributions(input: PriorInput): {
       venueName: today.venueName,
       frameZone: today.frameZone,
       kinryo: today.kinryo,
-      bodyWeightDiff: today.bodyWeightDiff,
       venueKind: today.venueKind,
     },
     input.jockeyCourseStats,
@@ -231,17 +236,126 @@ export function computePrior(input: PriorInput): PriorResult {
   return { prior, rawPrior, neutralProb, correctionSum, contributions };
 }
 
+/** ロジット。p は (0,1) の内側に収めてから渡すこと。 */
+function logit(p: number): number {
+  return Math.log(p / (1 - p));
+}
+
+/** シグモイド。 */
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-x));
+}
+
+/** 共通項 c の二分法の反復回数。区間幅 120 を 2^100 で割るので c は倍精度の限界まで収束する(決定的)。 */
+const SHIFT_BISECTION_ITERATIONS = 100;
+
+/** 共通項 c の探索区間。c=±60 では全馬のシグモイドが床・天井のどちらかに完全に飽和する。 */
+const SHIFT_SEARCH_BOUND = 60;
+
+/** logit の前に raw を収める区間の余白(minPrior が 0 以下・maxPrior が 1 以上の設定でも logit が有限になるように)。 */
+const LOGIT_EPSILON = 1e-12;
+
 /**
- * 頭数レベルで prior を算出する。各馬の raw prior を求め、合計が目標(min(3,頭数))から
- * 大きく逸脱した場合のみ一律スケールで正規化してからクランプする。
+ * 頭数レベルの正規化(Issue #258): 各馬の raw prior に**ロジットの共通項 c を足して**、合計を
+ * `min(targetPlaceCount, 頭数)` にちょうど合わせる。
+ *
+ * ## 手順
+ * 1. 各馬の raw を `[minPrior, maxPrior]` に収める(raw ≤ 0 や ≥ 1 もここで収まり、logit は常に有限。
+ *    同じ値に収まった馬どうしは、以後も同じ出力になる)。
+ * 2. 収めた値を logit に変える: `l_i = logit(clamp(raw_i))`。
+ * 3. `g(c) = Σ clamp(sigmoid(l_i + c), minPrior, maxPrior)` が目標に等しくなる c を二分法で求める。
+ *    `g` は c について連続・単調非減少なので、解は(実現可能なら)存在し、固定回数の二分法で決定的に求まる。
+ * 4. 出力は `clamp(sigmoid(l_i + c), minPrior, maxPrior)`。
+ *
+ * ## 性質
+ * - **ロジットの広がりが縮まない**: 床・天井に当たらない馬どうしでは `logit(出力_i) − logit(出力_j) = l_i − l_j`
+ *   (旧版の乗算は、raw の偏りが正のとき倍率が 1 より小さく、広がりを縮めていた)。ただし**確率の差は保たれない**
+ *   (c<0 のとき、確率の差は p(1−p) 倍に縮む。確率の sd は raw の 0.86 倍。確率の差を保つ「加算シフト」は、
+ *   床に 25/429 頭が同値で張り付いたため採用しなかった)。
+ * - **順序の保存**: 入力 a < b → 出力 a ≤ b。床・天井に当たらない限り厳密な不等号で、同値を新たに作らない。
+ * - **水詰め**: 床・天井に当たった馬は固定され、残りの馬が同じ c で動いて合計を合わせる
+ *   (再分配の反復は要らない。`g` を直接解くため)。飽和した 1 頭が他の馬を巻き添えにしない。
+ * - **常に 0.02〜0.95**: 負や 1 超は出ない。
+ * - **実現不能は throw しない**: 目標 ≥ 頭数 × maxPrior(頭数 3 以下など)なら全頭 maxPrior、
+ *   目標 ≤ 頭数 × minPrior なら全頭 minPrior に飽和させる(合計は目標に届かない)。
+ * - **NaN の raw は、その馬だけ NaN のまま**で、他の馬は有限の馬だけで合計を合わせる(全頭 NaN なら全頭 NaN。
+ *   throw しない)。±Infinity は片側に収まる。
+ * - 頭数 0 は空配列。入力は変更しない。
+ *
+ * @param rawPriors 全頭の raw prior(中立確率 + 補正合計。クランプ前)。
+ * @param config prior 設定(minPrior・maxPrior・targetPlaceCount を使う)。
+ */
+export function normalizeFieldPriors(
+  rawPriors: readonly number[],
+  config: PriorConfig,
+): number[] {
+  const n = rawPriors.length;
+  if (n === 0) {
+    return [];
+  }
+  const { minPrior, maxPrior, targetPlaceCount } = config;
+  const target = Math.min(targetPlaceCount, n);
+
+  // NaN の馬は二分法から除き、出力も NaN のままにする(影響をその 1 頭に閉じ込める。旧版の乗算も、NaN の馬だけが
+  // NaN になり他の馬は有限だった)。NaN を含めると total(c) が NaN になり、`NaN > target` が常に偽で探索が
+  // 片側に倒れて、他の全頭が maxPrior に張り付く。有限の馬だけで Σ を目標に合わせる(目標は NaN の馬を含む
+  // 頭数 n で決める。NaN の馬の取り分は不明なので、残りの馬にその分だけ多く配られる)。±Infinity は NaN ではなく、
+  // [minPrior, maxPrior] への収め込みで片側に寄る。
+  const out = new Array<number>(n).fill(Number.NaN);
+  const finiteIndices: number[] = [];
+  rawPriors.forEach((v, i) => {
+    if (!Number.isNaN(v)) {
+      finiteIndices.push(i);
+    }
+  });
+  const m = finiteIndices.length;
+  if (m === 0) {
+    return out;
+  }
+  if (target >= m * maxPrior) {
+    finiteIndices.forEach((i) => (out[i] = maxPrior));
+    return out;
+  }
+  if (target <= m * minPrior) {
+    finiteIndices.forEach((i) => (out[i] = minPrior));
+    return out;
+  }
+
+  const logitLow = Math.max(minPrior, LOGIT_EPSILON);
+  const logitHigh = Math.min(maxPrior, 1 - LOGIT_EPSILON);
+  const logits = finiteIndices.map((i) => logit(clamp(rawPriors[i]!, logitLow, logitHigh)));
+  const shifted = (l: number, c: number): number =>
+    clamp(sigmoid(l + c), minPrior, maxPrior);
+  const total = (c: number): number =>
+    logits.reduce((s, l) => s + shifted(l, c), 0);
+
+  // g(−bound) = m×minPrior < 目標 < m×maxPrior = g(+bound)(上の実現可能性の判定で保証)。
+  let lo = -SHIFT_SEARCH_BOUND;
+  let hi = SHIFT_SEARCH_BOUND;
+  for (let i = 0; i < SHIFT_BISECTION_ITERATIONS; i++) {
+    const mid = (lo + hi) / 2;
+    if (total(mid) > target) {
+      hi = mid;
+    } else {
+      lo = mid;
+    }
+  }
+  const c = (lo + hi) / 2;
+  finiteIndices.forEach((idx, k) => {
+    out[idx] = shifted(logits[k]!, c);
+  });
+  return out;
+}
+
+/**
+ * 頭数レベルで prior を算出する。各馬の raw prior を求め、`normalizeFieldPriors` で
+ * 合計を目標(min(3,頭数))にちょうど合わせる(ロジットシフト。Issue #258)。
  *
  * - inputs はレース全頭を表す前提。各馬の fieldSize は inputs.length と一致していなければならない
  *   (中立確率の頭数と正規化目標の頭数を一致させる。提案3の参照源二重化の解消)。不一致は契約違反として throw。
- * - スケール計算には **クランプ後([minPrior, maxPrior])の値** を使う(要修正2)。飽和した1頭の巨大 raw を
- *   そのまま分母に入れると、補正ゼロの平均馬まで巻き添えで過度に引き下げられるため。
- * - 一律スケールなので「全馬同一データ → 全馬同一 prior」は保たれる。
- * - 正規化後になお maxPrior を超える馬は最終クランプで maxPrior に収める。
- * - クランプ後の合計は目標から多少ずれ得る(クランプの丸め)。「概ね目標付近」を担保する設計。
+ * - 旧版の「合計が目標から許容(±10%)を超えたときだけ正規化」は撤去した。常に合計が目標に一致する。
+ * - 一律の共通項なので「全馬同一データ → 全馬同一 prior」は保たれる。
+ * - 飽和した 1 頭の巨大 raw は [minPrior, maxPrior] に収めてから扱うので、補正ゼロの平均馬を巻き添えにしない。
  */
 export function computeFieldPriors(
   inputs: readonly PriorInput[],
@@ -250,7 +364,6 @@ export function computeFieldPriors(
     return [];
   }
   const config = inputs[0]!.config ?? DEFAULT_SCORER_CONFIG;
-  const { minPrior, maxPrior, normalizeTolerance } = config.prior;
   const fieldSize = inputs.length;
 
   // 各馬の寄与度・raw を計算する(中立確率は頭数=inputs.length で統一)。
@@ -267,34 +380,18 @@ export function computeFieldPriors(
     return { contributions, correctionSum, neutralProb, rawPrior };
   });
 
-  // 正規化の目標は頭数に対する min(3, 頭数)。
-  const target = Math.min(config.prior.targetPlaceCount, fieldSize);
+  const priors = normalizeFieldPriors(
+    perHorse.map((h) => h.rawPrior),
+    config.prior,
+  );
 
-  // スケール計算は raw をクランプ([minPrior, maxPrior])した値で行う。
-  // 飽和馬(raw≫maxPrior)を maxPrior 止まりにすることで、平均馬への巻き添え引き下げを防ぐ。
-  const clamped = perHorse.map((h) => clamp(h.rawPrior, minPrior, maxPrior));
-  const sumClamped = clamped.reduce((s, v) => s + v, 0);
-
-  // 目標からの逸脱比率が許容を超えたら一律スケール。
-  let scale = 1;
-  if (
-    sumClamped > 0 &&
-    Math.abs(sumClamped - target) / target > normalizeTolerance
-  ) {
-    scale = target / sumClamped;
-  }
-
-  return perHorse.map((h, i) => {
-    // クランプ後の値をスケールし、正規化後に上下限を超える場合は再度クランプする。
-    const prior = clamp(clamped[i]! * scale, minPrior, maxPrior);
-    return {
-      prior,
-      rawPrior: h.rawPrior,
-      neutralProb: h.neutralProb,
-      correctionSum: h.correctionSum,
-      contributions: h.contributions,
-    };
-  });
+  return perHorse.map((h, i) => ({
+    prior: priors[i]!,
+    rawPrior: h.rawPrior,
+    neutralProb: h.neutralProb,
+    correctionSum: h.correctionSum,
+    contributions: h.contributions,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +470,7 @@ function monthOf(date: string): number | null {
 
 /**
  * 出馬表馬 + 全戦績 + 今回レース条件から PriorInput を組み立てる(任意ヘルパ)。
- * 枠ゾーン・季節・休み明け走番・馬体重増減などの今回条件を scraper 出力から導出する。
+ * 枠ゾーン・季節・休み明け走番・斤量などの今回条件を scraper 出力から導出する。
  * 枠ゾーン・季節が確定できない異常入力(枠範囲外・日付不正)は呼び出し側の想定外とし、
  * それぞれ「中」枠・「春秋」に丸めてフォールバックする(prior自体は落とさない)。
  */
@@ -408,7 +505,6 @@ export function buildPriorInput(args: BuildPriorInputArgs): PriorInput {
     restRunNumber: todayRestRunNumber(features, race.date),
     stableLocation,
     kinryo: horse.kinryo,
-    bodyWeightDiff: horse.bodyWeight?.diff ?? null,
     venueKind: race.venueKind,
   };
 

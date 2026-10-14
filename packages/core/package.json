@@ -6,18 +6,20 @@
   "main": "./src/index.ts",
   "//sideEffects": "副作用のないモジュール群のため、バンドラのツリーシェイクを許可する(未使用のscraper/ev一式を落とせる)。",
   "sideEffects": false,
-  "//exports": "バレル(.)に加え、native依存を巻き込まない純ロジックだけを取り込む narrow import 用サブパスを公開する(app の renderer/main が native依存を巻き込まないため)。",
+  "//exports": "バレル(.)に加え、native依存を巻き込まない純ロジックだけを取り込む narrow import 用サブパスを公開する(web の cloud/ が native依存を巻き込まないため)。",
   "exports": {
     ".": "./src/index.ts",
     "./scorer/config": "./src/scorer/config.ts",
-    "./ev/race-opportunity": "./src/ev/race-opportunity.ts",
     "./ev/place-joint-model": "./src/ev/place-joint-model.ts",
     "./ev/bet-allocation": "./src/ev/bet-allocation.ts",
     "./ev/combo-bet-allocation": "./src/ev/combo-bet-allocation.ts",
     "./ev/probability-quality": "./src/ev/probability-quality.ts",
+    "./ev/cloud-migration-format": "./src/ev/cloud-migration-format.ts",
+    "./ev/binomial-interval": "./src/ev/binomial-interval.ts",
     "./scorer/snapshot-filter": "./src/scorer/snapshot-filter.ts",
     "./analyzer/build-prompt": "./src/analyzer/build-prompt.ts",
-    "./scraper/validate-period-input": "./src/scraper/validate-period-input.ts"
+    "./pipeline": "./src/pipeline.ts",
+    "./llm": "./src/llm.ts"
   },
   "scripts": {
     "test": "vitest run",

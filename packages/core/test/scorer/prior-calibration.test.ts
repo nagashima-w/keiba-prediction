@@ -39,7 +39,6 @@ describe("prior較正(既定重みでの過剰補正防止)", () => {
         restRunNumber: 1,
         stableLocation: "栗東",
         kinryo: 56,
-        bodyWeightDiff: 2,
       },
       fieldSize: 16,
     });
@@ -80,7 +79,6 @@ describe("prior較正(既定重みでの過剰補正防止)", () => {
         restRunNumber: null,
         stableLocation: "美浦",
         kinryo: 55,
-        bodyWeightDiff: 0,
       },
       fieldSize: 12,
     });
@@ -103,7 +101,6 @@ describe("prior較正(既定重みでの過剰補正防止)", () => {
         restRunNumber: null,
         stableLocation: "美浦",
         kinryo: 55,
-        bodyWeightDiff: null,
       },
       fieldSize: 16,
     });
@@ -132,7 +129,7 @@ describe("computeFieldPriors 正規化の巻き添え防止(要修正2)", () => 
     };
     const inputs = [strong, ...new Array(15).fill(avg)];
     const priors = computeFieldPriors(inputs);
-    // 平均馬(index 1..15)は中立0.1875から大きく下がらない(クランプ後値でスケール計算するため)。
+    // 平均馬(index 1..15)は中立0.1875から大きく下がらない(raw を [minPrior,maxPrior] に収めてから共通項を求めるため)。
     for (let i = 1; i < priors.length; i++) {
       expect(priors[i]!.prior).toBeGreaterThan(0.13);
       expect(priors[i]!.prior).toBeLessThanOrEqual(0.1875);
@@ -141,14 +138,11 @@ describe("computeFieldPriors 正規化の巻き添え防止(要修正2)", () => 
     expect(priors[0]!.prior).toBeGreaterThan(0.5);
   });
 
-  it("全馬弱め(scale>1が実際に発動)で、正規化後にmaxPriorを超える馬がクランプされること", () => {
-    // 全馬弱め(raw合計が目標を大きく下回る)ケースで一律スケール(scale>1)を実発動させ、
-    // 「正規化後になお maxPrior を超える馬はクランプ」の分岐を実効化する。
-    // 構成: fieldSize=10。平均馬1頭(補正0 → clamped=中立0.3)+ 弱い馬9頭(大敗続き → clamped=minPrior0.02)。
-    //   target = min(3,10) = 3、sumClamped = 0.3 + 9×0.02 = 0.48、逸脱比率 |0.48-3|/3 ≈ 0.84 > 許容0.1 →
-    //   scale = 3/0.48 = 6.25。
-    //   平均馬: 0.3×6.25 = 1.875 → maxPrior(0.95)へ再クランプ(スケール前0.3は上限未満だった点が要点)。
-    //   弱い馬: 0.02×6.25 = 0.125(上限未満)。
+  it("全馬弱め(Σraw が目標を大きく下回る)でも Σ=目標 に持ち上げられ、広がり(ロジット差)と順序が保たれること(Issue #258 でロジットシフトに書き換え)", () => {
+    // 旧版は「scale>1 が実際に発動し、平均馬が maxPrior に再クランプされる」ことを 0.125・0.95 の
+    // 乗算の数値で固定していた。ロジットシフトでは乗算の数値は無意味になるため、性質に書き換える
+    // (新旧の保証の対応は prior-normalize.test.ts 冒頭の表)。
+    // 構成: fieldSize=10。平均馬1頭(補正0 → raw=中立0.3)+ 弱い馬9頭(大敗続き → raw は minPrior 0.02 以下)。
     const fieldSize = 10;
     const average: PriorInput = {
       features: deriveRaceFeatures([]),
@@ -166,14 +160,33 @@ describe("computeFieldPriors 正規化の巻き添え防止(要修正2)", () => 
     };
     const priors = computeFieldPriors([average, ...new Array(9).fill(weak)]);
 
-    // 平均馬(index0)はスケール前0.3(上限未満)からスケールアップで上限超過 → maxPriorにクランプ。
-    expect(priors[0]!.prior).toBeCloseTo(DEFAULT_SCORER_CONFIG.prior.maxPrior, 10);
-    // 弱い馬はスケール前0.02から実際にスケールアップ(scale>1の実発動)し、かつ上限未満のまま。
+    // 前提(無条件): 弱い馬の raw は minPrior 以下、平均馬の raw は 0.3 で、合計は目標 3 を大きく下回る
+    // (旧版が scale>1 を発動した状況と同じ)。
+    const { minPrior, maxPrior } = DEFAULT_SCORER_CONFIG.prior;
+    expect(priors[0]!.rawPrior).toBeCloseTo(0.3, 10);
     for (let i = 1; i < priors.length; i++) {
-      expect(priors[i]!.prior).toBeCloseTo(0.125, 10);
-      expect(priors[i]!.prior).toBeGreaterThan(DEFAULT_SCORER_CONFIG.prior.minPrior);
-      expect(priors[i]!.prior).toBeLessThan(DEFAULT_SCORER_CONFIG.prior.maxPrior);
+      expect(priors[i]!.rawPrior).toBeLessThanOrEqual(minPrior);
     }
+    const rawSum = priors.reduce((s, p) => s + Math.min(maxPrior, Math.max(minPrior, p.rawPrior)), 0);
+    expect(rawSum).toBeLessThan(1);
+
+    // Σ=目標(3)に持ち上げられる。
+    expect(priors.reduce((s, p) => s + p.prior, 0)).toBeCloseTo(3, 10);
+    // 弱い馬は全員同じ値で、minPrior から実際に持ち上がり、上限未満。
+    for (let i = 1; i < priors.length; i++) {
+      expect(priors[i]!.prior).toBeCloseTo(priors[1]!.prior, 12);
+      expect(priors[i]!.prior).toBeGreaterThan(minPrior + 0.1);
+      expect(priors[i]!.prior).toBeLessThan(maxPrior);
+    }
+    // 平均馬は弱い馬より上(順序の保存)で、上限を超えない。
+    expect(priors[0]!.prior).toBeGreaterThan(priors[1]!.prior);
+    expect(priors[0]!.prior).toBeLessThanOrEqual(maxPrior);
+    // 広がり(ロジット差)は、raw を [minPrior, maxPrior] に収めた値の差のまま保たれる。
+    const logit = (p: number): number => Math.log(p / (1 - p));
+    expect(logit(priors[0]!.prior) - logit(priors[1]!.prior)).toBeCloseTo(
+      logit(0.3) - logit(minPrior),
+      9,
+    );
   });
 });
 
@@ -187,7 +200,6 @@ const NEUTRAL_TODAY: TodayRaceConditions = {
   restRunNumber: null,
   stableLocation: "美浦",
   kinryo: 55,
-  bodyWeightDiff: null,
 };
 
 /** 近走重みを極端に大きくして raw を天井超過させる設定(正規化テスト用)。 */

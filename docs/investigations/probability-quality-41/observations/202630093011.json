@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202630093011",
+  "region": "nar",
+  "requestedDate": "20260930",
+  "kaisaiDate": "20260930",
+  "venueCode": "30",
+  "raceNumber": 11,
+  "raceName": "胆振軽種馬 中・西...(B3)",
+  "listedEntryCount": 12,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1000,
+  "runnerCount": 12,
+  "placedCount": 3,
+  "oddsStatus": "middle",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "サヤオンニ",
+      "prior": 0.34611620056205156,
+      "placeOddsMin": 3.6,
+      "placeOddsMax": 6.7,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 63
+    },
+    {
+      "umaban": 2,
+      "horseName": "キアキア",
+      "prior": 0.30845976706654493,
+      "placeOddsMin": 2,
+      "placeOddsMax": 3.6,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 37
+    },
+    {
+      "umaban": 3,
+      "horseName": "グラストップロード",
+      "prior": 0.11493967251775915,
+      "placeOddsMin": 7.8,
+      "placeOddsMax": 15.3,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 26
+    },
+    {
+      "umaban": 4,
+      "horseName": "ニシケンカバル",
+      "prior": 0.2839401195004724,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 2.5,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 31
+    },
+    {
+      "umaban": 5,
+      "horseName": "スティールブライト",
+      "prior": 0.19743688935480994,
+      "placeOddsMin": 3.3,
+      "placeOddsMax": 6.2,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 31
+    },
+    {
+      "umaban": 6,
+      "horseName": "ヨシノカムイ",
+      "prior": 0.2546826398926662,
+      "placeOddsMin": 6.5,
+      "placeOddsMax": 12.7,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 31
+    },
+    {
+      "umaban": 7,
+      "horseName": "クアトロソバージュ",
+      "prior": 0.3250734207609572,
+      "placeOddsMin": 1,
+      "placeOddsMax": 1.3,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 39
+    },
+    {
+      "umaban": 8,
+      "horseName": "ササキンメロディ",
+      "prior": 0.2494411950240283,
+      "placeOddsMin": 1.3,
+      "placeOddsMax": 1.9,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    },
+    {
+      "umaban": 9,
+      "horseName": "ワールドウィスラー",
+      "prior": 0.16624156228461315,
+      "placeOddsMin": 64.2,
+      "placeOddsMax": 99.9,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 124
+    },
+    {
+      "umaban": 10,
+      "horseName": "ロアリングフレイム",
+      "prior": 0.24510155059381075,
+      "placeOddsMin": 4.5,
+      "placeOddsMax": 8.5,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 22
+    },
+    {
+      "umaban": 11,
+      "horseName": "アニマルフルーツ",
+      "prior": 0.32473138105957083,
+      "placeOddsMin": 8,
+      "placeOddsMax": 15.7,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 33
+    },
+    {
+      "umaban": 12,
+      "horseName": "マイラーズドーン",
+      "prior": 0.1838356013827156,
+      "placeOddsMin": 1.8,
+      "placeOddsMax": 3.2,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 9
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/30",
+      "totalResultCount": 479,
+      "removedCount": 12,
+      "removedByCutoffCount": 12,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:46:45.476Z"
+}

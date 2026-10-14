@@ -1,0 +1,334 @@
+{
+  "schemaVersion": 1,
+  "promptVersion": "2026-07-28.2",
+  "clipVariant": "default",
+  "maxAdjust": 0.1,
+  "caseIdSeed": 20261002,
+  "gitCommit": "397beb3e244a70c2de56751879379e85ebcb1719",
+  "entries": [
+    {
+      "caseId": "case-21",
+      "raceId": "202606040801",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "25ca65be4af1fc4ebcc8023dc7607143d15c3fe303a981c82778a98f8ae3463d",
+      "promptChars": 5758,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-04",
+      "raceId": "202606040802",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "3f99d195fde1991cd8f5358b3ae3bb980309054c5253a522c5fecd30149772d2",
+      "promptChars": 5429,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-36",
+      "raceId": "202606040803",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "f2135cc1aafd8fc249a37370ae69be0d49e71841dc7fbc20fa3eb558385e1611",
+      "promptChars": 4676,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-22",
+      "raceId": "202606040804",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "582e58991aae87d624e1d76712cf506a53f04a6a9215efbe46e97f37c1b21029",
+      "promptChars": 3916,
+      "gradeWinnerFetched": true
+    },
+    {
+      "caseId": "case-25",
+      "raceId": "202606040805",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "083f9fdfe152e6209cf7b2a662359fe6d5fb2606a5aabc6361e6364c7de9720e",
+      "promptChars": 4422,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-23",
+      "raceId": "202606040806",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "23da8e613e181f4fe662f8763348f2b414a8ad906bd9aed3fbfc09cb06d564ff",
+      "promptChars": 4251,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-08",
+      "raceId": "202606040807",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "8662488dc6c71c69b473f129949058f8820451b9137e1e29d49806dcae9945ce",
+      "promptChars": 8054,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-34",
+      "raceId": "202606040808",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "9de0485adefde056f6594389d38eb805ed2c0f02412ab5caaf4ae20487041c9b",
+      "promptChars": 7179,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-07",
+      "raceId": "202606040809",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "ea676996147d19912b11fb99a3937986f2babae21491a819439d62f380b6fd5d",
+      "promptChars": 4513,
+      "gradeWinnerFetched": true
+    },
+    {
+      "caseId": "case-32",
+      "raceId": "202606040810",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "60fe75b17df798b83a0b6391115290a417c55e1cbdb7cfb8473cbf35c7d9de0a",
+      "promptChars": 7352,
+      "gradeWinnerFetched": true
+    },
+    {
+      "caseId": "case-09",
+      "raceId": "202606040811",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "51f6187d75c3b8c16964c81de39c75fe9d6caf557608787df63c82dc585cb6a8",
+      "promptChars": 6684,
+      "gradeWinnerFetched": true
+    },
+    {
+      "caseId": "case-26",
+      "raceId": "202606040812",
+      "region": "central",
+      "kaisaiDate": "20260926",
+      "promptSha256": "5746affc82f27c1c73c54a955baa00a22f0330e905a81b0cd8a1d59cb7b234a7",
+      "promptChars": 7155,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-27",
+      "raceId": "202606040901",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "defc2937964c00b6c027898e1b444c953e4b9bda3afc3ecf095361375f72435d",
+      "promptChars": 6391,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-33",
+      "raceId": "202606040902",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "a7ac094c681ecb932805d6e40ec8a9cb0339d24d5b58ce3b5dd569e3522e6e51",
+      "promptChars": 5615,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-35",
+      "raceId": "202606040903",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "8d212a96c79966d00b7683aa89eecf52ce4d8d0d46f1d1debaf030f6853b402c",
+      "promptChars": 4653,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-20",
+      "raceId": "202606040904",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "517976425520ade95a4f7e8edc5c3f6345cf04dc625ee2a90366b0720dbb6437",
+      "promptChars": 4592,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-12",
+      "raceId": "202606040905",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "a35c99e31d4959095cfdfd622dd863b235a5e485e52999d96b88ff08dd2dc547",
+      "promptChars": 3762,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-06",
+      "raceId": "202606040906",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "e88a26f8a559b946a79a90bee6a86d9d99c0691338de40e6b8d27d4bd03476b1",
+      "promptChars": 7289,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-14",
+      "raceId": "202606040907",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "07617d62c743665d628c64df5336efffb8c6a31aca4db16dc2fe22598a70092e",
+      "promptChars": 7410,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-15",
+      "raceId": "202606040908",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "1df27ecc563489a789f05eb8d342203a40e867d394a2eb0b097daab62b374482",
+      "promptChars": 6931,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-02",
+      "raceId": "202606040909",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "39f54031ce1363df4bbcd7d0e2ce864f3bbdab22d0bb8f6d73b879733886e238",
+      "promptChars": 4022,
+      "gradeWinnerFetched": true
+    },
+    {
+      "caseId": "case-10",
+      "raceId": "202606040910",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "2af29199bdaa70853ad2f9b64340307aff483e4cfefb9c03ab8bea08317d52cb",
+      "promptChars": 8014,
+      "gradeWinnerFetched": true
+    },
+    {
+      "caseId": "case-11",
+      "raceId": "202606040911",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "9a525036233a7eecca97400d622b8b426636af50dcd54bdd30c1e474d3e3b97d",
+      "promptChars": 7445,
+      "gradeWinnerFetched": true
+    },
+    {
+      "caseId": "case-05",
+      "raceId": "202606040912",
+      "region": "central",
+      "kaisaiDate": "20260927",
+      "promptSha256": "8fe6e3dffba20208660ff93c1b30766340f36b67a78493e7d3bbb5a64c4be24f",
+      "promptChars": 7262,
+      "gradeWinnerFetched": true
+    },
+    {
+      "caseId": "case-24",
+      "raceId": "202630093001",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "7c061a5ec6cd77cf3d73556d2965378e400c5ac9132e3a5e3578cba939d55812",
+      "promptChars": 4880,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-29",
+      "raceId": "202630093002",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "8ab3a43164ef77fff55dbc529bde42e45eb34c0065dc925f2facd62430d0b346",
+      "promptChars": 4963,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-19",
+      "raceId": "202630093003",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "4c0bcf9862e6aaced17924ed8b06c35b4393a40368cb04c0c20f24cf0deff3f8",
+      "promptChars": 4782,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-28",
+      "raceId": "202630093004",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "59b6e57765db913cf6ce2dccb590f9dd26020d794202fe599104994ae92d13ab",
+      "promptChars": 4402,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-30",
+      "raceId": "202630093005",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "1126a85152a81f419704f4b1c01da1c0034d581930878c0d82c6c59113732118",
+      "promptChars": 4414,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-01",
+      "raceId": "202630093006",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "77dd00f3075601de1ed6e6eef675cd0da8032360aa1e541b0a2ba3ccaddc771d",
+      "promptChars": 5799,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-17",
+      "raceId": "202630093007",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "b8ec38cc2eff4bbe4982436c7f12c5a701feaaf2ec1ef151cc7dbeffd3b8c0d2",
+      "promptChars": 5369,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-31",
+      "raceId": "202630093008",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "6c87b972cf1d433fdd9e617f5ba957187b8c3cded3e441b6cc26431fb742a2da",
+      "promptChars": 5800,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-03",
+      "raceId": "202630093009",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "831e5399c06185aeddb918ffee2020bbde59322cb74a8a199577c265d4acc6d4",
+      "promptChars": 5782,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-13",
+      "raceId": "202630093010",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "4be39d69ab112f56bfcac84faea1970c03fda4d98fce7c7dd50917b17d04a16b",
+      "promptChars": 5783,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-18",
+      "raceId": "202630093011",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "3a276977c9a12df7e1cabe62c3b9dfd3c598288183f78579cf9298f1f08db711",
+      "promptChars": 5723,
+      "gradeWinnerFetched": false
+    },
+    {
+      "caseId": "case-16",
+      "raceId": "202630093012",
+      "region": "nar",
+      "kaisaiDate": "20260930",
+      "promptSha256": "1da1f6f333ac3270ecec565b759d77e0fc172ed01a779add5f8ca3ef1c485579",
+      "promptChars": 5830,
+      "gradeWinnerFetched": true
+    }
+  ]
+}

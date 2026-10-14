@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202630093005",
+  "region": "nar",
+  "requestedDate": "20260930",
+  "kaisaiDate": "20260930",
+  "venueCode": "30",
+  "raceNumber": 5,
+  "raceName": "2歳 3組",
+  "listedEntryCount": 8,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1700,
+  "runnerCount": 8,
+  "placedCount": 3,
+  "oddsStatus": "middle",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "オーバークラウド",
+      "prior": 0.4037008187810879,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.7,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    },
+    {
+      "umaban": 2,
+      "horseName": "マインドエンジェル",
+      "prior": 0.4270405962095388,
+      "placeOddsMin": 1.3,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 3,
+      "horseName": "ブロンドナイト",
+      "prior": 0.2719795752124856,
+      "placeOddsMin": 2.4,
+      "placeOddsMax": 4.2,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 4,
+      "horseName": "ケイキカーネ",
+      "prior": 0.3858647993324987,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.4,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 5,
+      "horseName": "ブリエテーション",
+      "prior": 0.2695001553459457,
+      "placeOddsMin": 3.8,
+      "placeOddsMax": 6.7,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 3
+    },
+    {
+      "umaban": 6,
+      "horseName": "バージンレインボー",
+      "prior": 0.3321957648194451,
+      "placeOddsMin": 5,
+      "placeOddsMax": 8.9,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 7,
+      "horseName": "コンチワッチ",
+      "prior": 0.46891409672348816,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 8,
+      "horseName": "オリザレコルト",
+      "prior": 0.4408041935755096,
+      "placeOddsMin": 2.4,
+      "placeOddsMax": 4.1,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/30",
+      "totalResultCount": 50,
+      "removedCount": 8,
+      "removedByCutoffCount": 8,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:43:46.818Z"
+}

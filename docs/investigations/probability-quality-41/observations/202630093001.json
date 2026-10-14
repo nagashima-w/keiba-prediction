@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202630093001",
+  "region": "nar",
+  "requestedDate": "20260930",
+  "kaisaiDate": "20260930",
+  "venueCode": "30",
+  "raceNumber": 1,
+  "raceName": "2歳 未勝利",
+  "listedEntryCount": 10,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1000,
+  "runnerCount": 10,
+  "placedCount": 3,
+  "oddsStatus": "middle",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "レディタマ",
+      "prior": 0.2680710796546772,
+      "placeOddsMin": 4.3,
+      "placeOddsMax": 9.4,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 2,
+      "horseName": "オーキクナアレ",
+      "prior": 0.21811801967272923,
+      "placeOddsMin": 10.8,
+      "placeOddsMax": 24.6,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 3,
+      "horseName": "マウンテントップ",
+      "prior": 0.34372487926860384,
+      "placeOddsMin": 1,
+      "placeOddsMax": 1.3,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    },
+    {
+      "umaban": 4,
+      "horseName": "エイシントープ",
+      "prior": 0.2203519453365182,
+      "placeOddsMin": 16.2,
+      "placeOddsMax": 37.2,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 5,
+      "horseName": "ケリーグランメイ",
+      "prior": 0.28883361570902394,
+      "placeOddsMin": 9.5,
+      "placeOddsMax": 21.5,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 8
+    },
+    {
+      "umaban": 6,
+      "horseName": "チュラヒメ",
+      "prior": 0.288176410628778,
+      "placeOddsMin": 2.1,
+      "placeOddsMax": 4.3,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 7,
+      "horseName": "ブラビット",
+      "prior": 0.29433352868569657,
+      "placeOddsMin": 32,
+      "placeOddsMax": 73.7,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 8,
+      "horseName": "オケアニディマーレ",
+      "prior": 0.4269900692369986,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.8,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 9,
+      "horseName": "ラディアントレイ",
+      "prior": 0.35882278384059635,
+      "placeOddsMin": 1.7,
+      "placeOddsMax": 3.4,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 10,
+      "horseName": "クラエンデバー",
+      "prior": 0.29257766796637846,
+      "placeOddsMin": 1,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/30",
+      "totalResultCount": 45,
+      "removedCount": 10,
+      "removedByCutoffCount": 10,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:42:12.571Z"
+}

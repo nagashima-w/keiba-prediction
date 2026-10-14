@@ -14,8 +14,9 @@
  * - (2)上がり3F: 戦績には同一レース内の上がり順位がないため、自身の上がりタイムが「速い」水準
  *   (fastLast3fThresholdSec 以下)を使えた率で代替する。上がりはコース・距離・ペース依存が強く
  *   粗い代替のため既定重みは控えめ。将来、同一レースの上がり順位が取れれば相対順位評価に差し替える。
- * - (4)騎手当該コース複勝率: 騎手コース成績のscraper拡張が未実装のため入力を optional にする。
+ * - (4)騎手の複勝率: 騎手の成績(前年+当年の全体。Issue #226)を optional 入力にする。
  *   与えられれば複勝率で補正し、なければ「データなし」を寄与度ログに残して補正なし。
+ *   競馬場・距離ごとの成績は netkeiba のプレミアム限定のため、当該コースの複勝率ではない。
  */
 
 import type { DerivedRaceFeature, FrameZone } from "./derive-features.js";
@@ -33,7 +34,7 @@ const PLACE_MAX_RANK = 3;
  *
  * 複勝率系項目(近走着順・上がり3F・コース距離・騎手)では sampleCount/targetRate/overallRate を
  * 埋め、targetRate と overallRate の差 × weight が correction になる。
- * 斤量馬体重・コース枠順バイアスは複勝率差分ではないため、これらの内訳は省略(undefined)する。
+ * 斤量・コース枠順バイアスは複勝率差分ではないため、これらの内訳は省略(undefined)する。
  */
 export interface BaseScoreContribution {
   /** 項目名(ログ識別用)。 */
@@ -248,54 +249,63 @@ export function computeCourseDistanceScore(
 }
 
 // ---------------------------------------------------------------------------
-// (4) 騎手の当該コース複勝率(optional入力)
+// (4) 騎手の複勝率(前年+当年の全体の成績。optional入力。Issue #226)
 // ---------------------------------------------------------------------------
 
-const JOCKEY_NAME = "騎手当該コース";
+const JOCKEY_NAME = "騎手成績";
 
-/** 騎手の当該コース成績(scraper拡張が未実装のため optional に渡す)。 */
+/**
+ * 騎手の成績。**全体**の成績(当該コースではない)で、集計の窓は分析日の前年+当年
+ * (過去日の分析は前々年+前年。`jockey-stats.ts`)。型名の「Course」は歴史的な名前で、
+ * 競馬場・距離ごとの内訳は netkeiba のプレミアム限定で取得できないため(`parse-jockey-results.ts`)、
+ * 現在は渡していない(競馬場・距離ごとの成績は第2段階の Issue #256)。
+ */
 export interface JockeyCourseStats {
-  /** 当該コースの騎乗数。 */
+  /** 騎乗数(窓の年の合計)。 */
   readonly starts: number;
   /** うち複勝圏内(3着以内)の回数。 */
   readonly placed: number;
 }
 
 /**
- * 騎手の当該コース複勝率の補正を計算する。
- * 入力がなければ「データなし」を寄与度ログに残して補正なし(scraper拡張は別タスク)。
- * 騎乗数が最小サンプル(minSampleForBias)未満なら補正なし。
+ * 騎手の複勝率の補正を計算する。
+ * - 入力がなければ「データなし」を寄与度ログに残して補正なし。
+ * - 騎乗数が最小(`jockeyMinStarts`、既定100)未満なら補正なし(複勝率は参考値として残す)。
+ * - それ以外は `(複勝率 − 中立) × 重み`。中立は開催区分で別(`jockeyNeutralPlaceRate`)。
+ * @param venueKind 今回のレースの開催区分。省略時は "central"。
  */
 export function computeJockeyScore(
   stats: JockeyCourseStats | undefined,
   config: ScorerConfig = DEFAULT_SCORER_CONFIG,
+  venueKind: RaceIdVenueKind = "central",
 ): BaseScoreContribution {
-  const { neutralPlaceRate } = config.baseScore;
+  const { jockeyMinStarts } = config.baseScore;
+  const neutral = config.baseScore.jockeyNeutralPlaceRate[venueKind];
   const weight = config.baseScore.weights.jockey;
 
   if (stats === undefined) {
     return {
       biasName: JOCKEY_NAME,
       applied: false,
-      reason: "騎手コース成績データなし(scraper拡張は別タスク)のため補正なし",
+      reason: "騎手の成績データなし(取得していない・取得できなかった)のため補正なし",
       weight,
       correction: 0,
       sampleCount: 0,
       targetRate: null,
-      overallRate: neutralPlaceRate,
+      overallRate: neutral,
     };
   }
 
-  if (stats.starts < config.minSampleForBias) {
+  if (stats.starts < jockeyMinStarts) {
     return {
       biasName: JOCKEY_NAME,
       applied: false,
-      reason: "騎手の当該コース騎乗数が2走未満のため補正なし",
+      reason: `騎手の騎乗数が${jockeyMinStarts}走未満のため補正なし`,
       weight,
       correction: 0,
       sampleCount: stats.starts,
       targetRate: stats.starts === 0 ? null : stats.placed / stats.starts,
-      overallRate: neutralPlaceRate,
+      overallRate: neutral,
     };
   }
 
@@ -303,42 +313,43 @@ export function computeJockeyScore(
   return {
     biasName: JOCKEY_NAME,
     applied: true,
-    reason: "騎手の当該コース複勝率で補正",
+    reason: "騎手の複勝率(前年+当年)で補正",
     weight,
-    correction: (rate - neutralPlaceRate) * weight,
+    correction: (rate - neutral) * weight,
     sampleCount: stats.starts,
     targetRate: rate,
-    overallRate: neutralPlaceRate,
+    overallRate: neutral,
   };
 }
 
 // ---------------------------------------------------------------------------
-// (5) 斤量変化・馬体重増減
+// (5) 斤量変化
 // ---------------------------------------------------------------------------
 
-const WEIGHT_CHANGE_NAME = "斤量・馬体重";
+const WEIGHT_CHANGE_NAME = "斤量";
 
-/** 斤量・馬体重の今回条件。 */
+/** 斤量の今回条件。 */
 export interface WeightChangeInput {
   /** 今回の斤量(kg)。 */
   readonly kinryo: number;
-  /** 今回の馬体重増減(kg、前走比)。出馬表で未発表なら null。 */
-  readonly bodyWeightDiff: number | null;
 }
 
 /**
- * 斤量変化・馬体重増減の小補正を計算する。
+ * 斤量変化の小補正を計算する。
  * - 斤量: 前走(直近走)比の増減。増はマイナス方向、kinryoCapKg で絶対値をクリップ。
- * - 馬体重: 大幅減(負値)のみマイナス補正、bodyWeightDropCapKg で下限クリップ。増・微減は0。
- * どちらのスケールも控えめ(仕様「小補正・控えめに設計」)。前走斤量が取れず馬体重も未発表なら補正なし。
+ * スケールは控えめ(仕様「小補正・控えめに設計」)。前走斤量が取れなければ補正なし。
+ *
+ * 馬体重の増減による減点は Issue #213(#210-B)で撤去した。休み明け・馬体重の増減は、LLM が
+ * その馬自身の実績(休み明け実績・ベスト体重。Issue #212)と照らして判断する。scorer でも機械的に
+ * 減点すると二重に数えることになり、馬体重の減少が「ベスト体重に戻した」結果でも減点してしまうため。
+ * 重みのキー(weights.weightChange)は、保存済みの設定を壊さないため名前を据え置いている(今は斤量だけに効く)。
  */
 export function computeWeightChangeScore(
   features: readonly DerivedRaceFeature[],
   today: WeightChangeInput,
   config: ScorerConfig = DEFAULT_SCORER_CONFIG,
 ): BaseScoreContribution {
-  const { kinryoScale, kinryoCapKg, bodyWeightDropScale, bodyWeightDropCapKg } =
-    config.baseScore;
+  const { kinryoScale, kinryoCapKg } = config.baseScore;
   const weight = config.baseScore.weights.weightChange;
 
   // 前走(直近走)の斤量。取得できなければ斤量項は評価しない。
@@ -352,25 +363,12 @@ export function computeWeightChangeScore(
     hasKin = true;
   }
 
-  let bwTerm = 0;
-  let hasBw = false;
-  if (today.bodyWeightDiff !== null) {
-    hasBw = true;
-    if (today.bodyWeightDiff < 0) {
-      const capped = Math.max(today.bodyWeightDiff, bodyWeightDropCapKg);
-      bwTerm = capped * bodyWeightDropScale; // 減(負値)でマイナス。
-    }
-  }
-
-  const applied = hasKin || hasBw;
   return {
     biasName: WEIGHT_CHANGE_NAME,
-    applied,
-    reason: applied
-      ? "斤量増減・馬体重増減による小補正"
-      : "前走斤量・馬体重増減とも取得できないため補正なし",
+    applied: hasKin,
+    reason: hasKin ? "斤量増減による小補正" : "前走斤量が取得できないため補正なし",
     weight,
-    correction: (kinTerm + bwTerm) * weight,
+    correction: kinTerm * weight,
   };
 }
 
@@ -451,8 +449,6 @@ export interface BaseScoreInput {
   readonly frameZone: FrameZone;
   /** 今回の斤量(kg)。 */
   readonly kinryo: number;
-  /** 今回の馬体重増減(kg、前走比)。未発表なら null。 */
-  readonly bodyWeightDiff: number | null;
   /**
    * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
    * computeCourseFrameBiasScore にそのまま渡す(NARではコースレベル枠順バイアスを対象外にする)。
@@ -489,10 +485,10 @@ export function computeBaseScore(
       { courseType: today.courseType, distance: today.distance },
       config,
     ),
-    computeJockeyScore(jockeyCourseStats, config),
+    computeJockeyScore(jockeyCourseStats, config, today.venueKind),
     computeWeightChangeScore(
       features,
-      { kinryo: today.kinryo, bodyWeightDiff: today.bodyWeightDiff },
+      { kinryo: today.kinryo },
       config,
     ),
     computeCourseFrameBiasScore(

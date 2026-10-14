@@ -19,6 +19,7 @@ export {
   type CacheEntry,
   type CachedFetcherOptions,
   type CachedFetchTextOptions,
+  type CacheStore,
   type NowFn,
   type ScrapeCacheGetOptions,
   type ScrapeCacheOptions,
@@ -29,12 +30,15 @@ export {
   InvalidIdError,
   kaisaiDateFromNarRaceId,
   parseHorseId,
+  parseJockeyId,
   parseKaisaiDate,
   parseRaceId,
+  precedingRaceIdsSameDay,
   siblingRaceIdsSameDay,
   venueKindOfRaceId,
   type CentralVenueInfo,
   type HorseId,
+  type JockeyId,
   type KaisaiDate,
   type RaceId,
   type RaceIdVenueKind,
@@ -46,6 +50,7 @@ export {
   gradeWinnerRefererUrl,
   horseResultsApiUrl,
   horseUrl,
+  jockeyResultsUrl,
   narOddsPageUrl,
   narRaceListSubUrl,
   narTrioOddsAxisUrl,
@@ -75,29 +80,39 @@ export {
   type GradeWinnerFetcher,
 } from "./scraper/fetch-grade-winner.js";
 export { filterJpnOnlyEntries, isJpnGrade } from "./scraper/jpn-grade.js";
-export { enumerateDates } from "./scraper/enumerate-dates.js";
-export {
-  validatePeriodInput,
-  type PeriodInputValidationResult,
-} from "./scraper/validate-period-input.js";
 export { parseShutuba, ShutubaParseError } from "./scraper/parse-shutuba.js";
 export {
   HorseProfileParseError,
   parseHorseProfile,
 } from "./scraper/parse-horse-profile.js";
 export {
+  excludeNonStartResults,
   HorseResultsParseError,
+  isNonStartResult,
   parseHorseResults,
 } from "./scraper/parse-horse-results.js";
+export type {
+  JockeyResultsSaveEntry,
+  JockeyResultsStore,
+  StoredJockeyResults,
+} from "./scraper/jockey-results-store.js";
+export {
+  JockeyResultsParseError,
+  parseJockeyResults,
+  type JockeyYearRecord,
+} from "./scraper/parse-jockey-results.js";
 export { OddsParseError, parseOdds } from "./scraper/parse-odds.js";
 export { NarOddsParseError, parseNarOdds } from "./scraper/parse-nar-odds.js";
 export {
+  parseRaceFieldSize,
   parseRaceResult,
   RaceResultNotConfirmedError,
   RaceResultParseError,
 } from "./scraper/parse-race-result.js";
 export { OikiriParseError, parseOikiri } from "./scraper/parse-oikiri.js";
 export {
+  DEFAULT_JOCKEY_REQUEST_LIMIT,
+  DEFAULT_JOCKEY_TTL_MS,
   DEFAULT_ODDS_TTL_MS,
   DEFAULT_OIKIRI_TTL_MS,
   DEFAULT_RACE_LIST_TTL_MS,
@@ -228,9 +243,15 @@ export {
   type WeightChangeInput,
 } from "./scorer/base-score.js";
 export {
+  isLiveAnalysisDate,
+  jockeyStatsWindow,
+  selectJockeyStats,
+} from "./scorer/jockey-stats.js";
+export {
   buildPriorInput,
   computeFieldPriors,
   computePrior,
+  normalizeFieldPriors,
   type BuildPriorInputArgs,
   type BuildPriorRaceInfo,
   type PriorInput,
@@ -250,33 +271,74 @@ export {
   type HorseEv,
   type HorsePrior,
 } from "./ev/expected-value.js";
+// Issue #287(#285 の段階B): exe の SQLite 保存 `AnalysisStore`(値)は `test/support/` へ移し、バレルからは外した。
+// 型は better-sqlite3 に依存しない `analysis-store-types.ts` から出す(名前は従来どおり)。
+export type {
+  AnalysisAllocationMetaRecord,
+  AnalysisAllocationRecord,
+  AnalysisBetRecord,
+  AnalysisFilter,
+  AnalysisHorseRecord,
+  AnalysisRecord,
+  RaceComboPayoutsReadResult,
+  RaceComboPayoutsSaveInput,
+  RaceResultDetail,
+  RaceResultDetailHorse,
+  RaceResultEntry,
+  StoredAllocation,
+  StoredAllocationBetDetail,
+  StoredAnalysis,
+  StoredAnalysisHorse,
+  StoredComboPayout,
+} from "./ev/analysis-store-types.js";
+// Issue #215(#167-A): クラウド移行ファイルの形式(better-sqlite3 に依存しない純ロジック)。
+// Issue #287(#285 の段階B)で exe の書き出し側(生成器 lines・読み出し reader)は削除した。形式の検証側だけが残る。
+// ブラウザ/Worker(#216)は、バレルではなくサブパス `@keiba/core/ev/cloud-migration-format` から import すること。
 export {
-  computeRaceOpportunity,
-  DEFAULT_RACE_OPPORTUNITY_CONFIG,
-  type RaceOddsStatus,
-  type RaceOpportunity,
-  type RaceOpportunityBestPick,
-  type RaceOpportunityConfig,
-  type RaceOpportunityHorse,
-  type RaceOpportunityMeta,
-} from "./ev/race-opportunity.js";
+  buildAnalysisLine,
+  buildHeaderLine,
+  buildResultLine,
+  MIGRATION_FORMAT_NAME,
+  MIGRATION_FORMAT_VERSION,
+  MIGRATION_TABLE_NAMES,
+  MIGRATION_TABLES,
+  MigrationFormatError,
+  MigrationTally,
+  parseMigrationLine,
+  serializeMigrationLine,
+  validateMigrationLine,
+  type MigrationAnalysisLine,
+  type MigrationColumnSpec,
+  type MigrationColumnType,
+  type MigrationFooterLine,
+  type MigrationHeaderLine,
+  type MigrationLine,
+  type MigrationResultLine,
+  type MigrationRow,
+  type MigrationTableCounts,
+  type MigrationTableName,
+  type MigrationTableSpec,
+} from "./ev/cloud-migration-format.js";
 export {
-  AnalysisStore,
-  type AnalysisFilter,
-  type AnalysisHorseRecord,
-  type AnalysisRecord,
-  type AnalysisStoreOptions,
-  type RaceResultDetail,
-  type RaceResultDetailHorse,
-  type RaceResultEntry,
-  type StoredAnalysis,
-  type StoredAnalysisHorse,
-} from "./ev/analysis-store.js";
+  importRaceResult,
+  summarizeImport,
+  toResultEntries,
+  type ImportResultDeps,
+  type ImportResultOutcome,
+} from "./ev/result-import.js";
+export {
+  classifyLookaheadSuspicion,
+  extractStartTime,
+  isLookaheadGuarded,
+  type LookaheadSuspicion,
+  type LookaheadSuspicionInput,
+} from "./ev/lookahead-suspicion.js";
 export {
   computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
   DEFAULT_VERIFY_CONFIG,
+  PRODUCTION_VERIFY_CONFIG,
   type AdjustmentDirection,
   type CalibrationBiasBin,
   type CalibrationBin,
@@ -339,8 +401,10 @@ export {
 export { assessTurfWear, type TurfWearHint } from "./analyzer/turf-wear.js";
 export {
   collectGradeWinnerTrend,
+  excludeLookaheadEntries,
   summarizeGradeWinnerTrend,
   type GradeWinnerConditions,
+  type LookaheadGuard,
   type GradeWinnerRange,
   type GradeWinnerTrendSummary,
   type GradeWinnerValueCount,
@@ -352,6 +416,17 @@ export {
   type BodyWeightTrendToday,
   type SummarizeBodyWeightTrendOptions,
 } from "./analyzer/body-weight-trend.js";
+export {
+  summarizeRestRecord,
+  type RestRecordSummary,
+} from "./analyzer/rest-record.js";
+export {
+  summarizeBestWeight,
+  type BestWeightPastRun,
+  type BestWeightPlacement,
+  type BestWeightPosition,
+  type BestWeightSummary,
+} from "./analyzer/best-weight.js";
 export {
   summarizeMarketGap,
   type MarketGapJudgement,
@@ -398,6 +473,7 @@ export {
 } from "./analyzer/build-prompt.js";
 export {
   AnalyzerMarkViolationError,
+  AnalyzerRefusalError,
   AnalyzerResponseParseError,
   AnalyzerTruncationError,
   extractJsonObject,
@@ -414,22 +490,40 @@ export {
   analyzeRace,
   FALLBACK_REASON_INVOCATION_ERROR,
   FALLBACK_REASON_PARSE_ERROR,
+  FALLBACK_REASON_REFUSED,
   FALLBACK_REASON_TRUNCATED,
   type AnalyzeRaceDeps,
   type AnalyzeRaceResult,
   type LlmClient,
+  type LlmCompletion,
 } from "./analyzer/analyze-race.js";
 export {
   AnthropicLlmClient,
   buildRequestParams,
+  createSdkMessageSender,
   DEFAULT_ANALYZER_CONFIG,
   extractText,
   type AnalyzerConfig,
+  type AnalyzerEffort,
   type AnthropicLlmClientDeps,
   type AnthropicMessageResponse,
   type AnthropicRequestParams,
   type MessageSender,
+  type SdkMessageSenderOptions,
 } from "./analyzer/anthropic-client.js";
+export {
+  createModelSelector,
+  createSdkModelLister,
+  MODEL_FAMILIES,
+  pickLatestOfFamily,
+  pickLatestSonnet,
+  type ModelFamily,
+  type ModelInfoLite,
+  type ModelLister,
+  type ModelSelector,
+  type ModelSelectorOptions,
+  type SdkModelListerOptions,
+} from "./analyzer/model-selection.js";
 export {
   buildAnalysisEmbed,
   DEFAULT_DISCORD_TIMEOUT_MS,
@@ -459,11 +553,16 @@ export type {
   OikiriResult,
   OikiriSkippedRow,
   PlaceOdds,
+  RaceComboPayoutAnomaly,
+  RaceComboPayoutEntry,
+  RaceComboPayoutResult,
   RaceListEntry,
   RacePayoutEntry,
   RaceResult,
   RaceResultHorse,
   RaceVenue,
+  ScratchedHorse,
+  ScratchStatus,
   Shutuba,
   ShutubaHorse,
   ShutubaRaceInfo,

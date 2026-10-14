@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_BERNOULLI_MODEL,
+  isOrderedPlaceJointModel,
   type JointModelHorse,
 } from "../../src/ev/place-joint-model.js";
+import { PLACKETT_LUCE_MODEL } from "../../src/ev/plackett-luce-model.js";
 
 /** 出走馬を umaban 昇順で組み立てる補助関数。 */
 function horses(probs: readonly number[]): JointModelHorse[] {
@@ -204,5 +206,15 @@ describe("CONDITIONAL_BERNOULLI_MODEL(条件付きベルヌーイ同時分布)",
     ];
     const distribution = CONDITIONAL_BERNOULLI_MODEL.buildDistribution(shuffled, 5);
     expect(distribution).toEqual([{ placed: [3, 5, 8], probability: 1 }]);
+  });
+});
+
+describe("isOrderedPlaceJointModel(Issue #92: 順序展開能力の型ガード)", () => {
+  it("PLACKETT_LUCE_MODELはtrue(buildOrderedDistributionを実装している)", () => {
+    expect(isOrderedPlaceJointModel(PLACKETT_LUCE_MODEL)).toBe(true);
+  });
+
+  it("CONDITIONAL_BERNOULLI_MODELはfalse(定式化上、順序展開を持てない)", () => {
+    expect(isOrderedPlaceJointModel(CONDITIONAL_BERNOULLI_MODEL)).toBe(false);
   });
 });

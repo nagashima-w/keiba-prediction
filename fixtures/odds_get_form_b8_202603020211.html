@@ -1,0 +1,2734 @@
+
+<!-- block=odds_view__normal (cp) -->
+<a id="housiki_select" name="housiki_select"></a>
+<div class="RaceOddsArea">
+<div class="RaceOddsMenu">
+<ul>
+<li class="MenuText">方式選択</li>
+<li><div><a href="javascript:void(0)" class="Active">オッズ一覧</a></div></li>
+<li><a href="javascript:void(0)" class="" id="btn_c1" onclick="SwitchingDisplay('b8','c1');return false;">通常／フォーメーション</a></li>
+<li><div><a href="javascript:void(0)" class="" id="btn_c3" onclick="SwitchingDisplay('b8','c3');return false;">ながし</a></div></li>
+<li><div><a href="javascript:void(0)" class="" id="btn_c2" onclick="SwitchingDisplay('b8','c2');return false;">ボックス</a></div></li>
+<li><div><a href="javascript:void(0)" class="" id="btn_c99" onclick="SwitchingDisplay('b8','c99');return false;">人気順</a></div></li>
+</ul>
+</div>
+</div>
+<div class="Update_Btn_Group fc LiveOddsUpdate" style="display:none;">
+<div class="OddsUpdateBox fc  ">
+<div class="OddsUpBtnWrap">
+<p>オッズ最終更新: <span id="official_time"></span></p>
+</div><!-- /.OddsUpBtnWrap -->
+<div class="OddsUpdateBtn01">
+<button type="button" id="act-manual_update" class="OddsUpdataBtn LiveOddsUpdate" style="display:none">
+<span class="OddsUpLimitTxt01">オッズ更新</span>
+<span style="display:none" class="OddsUpLimitTxt02">あと<span id="OddsUpLimitCount"></span>回</span>
+</button>
+</div><!-- /.OddsUpdateBtn01 -->
+</div><!-- /.OddsUpdateBox -->
+</div><!-- /.Update_Btn_Group -->
+<div class="W1100">
+<div class="RaceOdds_HorseList Normal fc mt0">
+<div class="RaceOdds_HorseList Ren3_Normal fc mt0">
+<div class="Axis_Horse_Container">
+<div class="Axis_Horse_selectbox">
+<select name="Horse" id="list_select_horse" onchange="view_3odds()">
+<option value="1" selected="selected">
+<span class="Num">1</span> ルージュボヤージュ
+</option>
+<option value="1"><span class="Num">1</span> ルージュボヤージュ</option><option value="2"><span class="Num">2</span> クカイリモク</option><option value="3"><span class="Num">3</span> ジーネキング</option><option value="4"><span class="Num">4</span> サイモンシャリオ</option><option value="5"><span class="Num">5</span> リッツパーティー</option><option value="6"><span class="Num">6</span> コルテオソレイユ</option><option value="7"><span class="Num">7</span> ショウナンガルフ</option><option value="8"><span class="Num">8</span> ディールメーカー</option><option value="9"><span class="Num">9</span> キンググローリー</option><option value="10"><span class="Num">10</span> ガリレア</option><option value="11"><span class="Num">11</span> コロナドブリッジ</option><option value="12"><span class="Num">12</span> ローベルクランツ</option><option value="13"><span class="Num">13</span> サノノグレーター</option><option value="14"><span class="Num">14</span> スカイスプレンダー</option><option value="15"><span class="Num">15</span> バドリナート</option><option value="16"><span class="Num">16</span> スペルーチェ</option>
+</select>
+</div><!-- /.Axis_Horse_selectbox -->
+</div><!-- /.Axis_Horse_Container -->
+<script>
+$(function() {
+Axis_Horse_selectbox = function(select, obj){
+var set_selectbox = function(){
+var value = jQuery(this).find('option:selected').html();
+jQuery(select).find(obj).find('span').html(value);
+}
+jQuery(select).find('select').each(set_selectbox).on('change', set_selectbox);
+}
+jQuery(function(){
+Axis_Horse_selectbox('.Axis_Horse_selectbox', '.Inner');
+});
+});
+</script>
+</div>
+</div>
+<div class="GraphOdds   GraphOdds_02 clearfix">
+<div class="Axis_Horse">
+<div class="Inner">
+<span class="Num">1</span>
+ルージュボヤージュ
+</div>
+</div>
+<table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku1">2</th>
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_3" cart-item="a1-3-11_b8_c0_1_2_3" name="a1-3-11_b8_c0_1_2_3">
+<span id="odds-8-010203">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_3">
+<label for="chk_b_a1-3-11_b8_c0_1_2_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010203"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_4" cart-item="a1-3-11_b8_c0_1_2_4" name="a1-3-11_b8_c0_1_2_4">
+<span id="odds-8-010204">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_4">
+<label for="chk_b_a1-3-11_b8_c0_1_2_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010204"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_5" cart-item="a1-3-11_b8_c0_1_2_5" name="a1-3-11_b8_c0_1_2_5">
+<span id="odds-8-010205">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_5">
+<label for="chk_b_a1-3-11_b8_c0_1_2_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010205"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_6" cart-item="a1-3-11_b8_c0_1_2_6" name="a1-3-11_b8_c0_1_2_6">
+<span id="odds-8-010206">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_6">
+<label for="chk_b_a1-3-11_b8_c0_1_2_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010206"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_7" cart-item="a1-3-11_b8_c0_1_2_7" name="a1-3-11_b8_c0_1_2_7">
+<span id="odds-8-010207">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_7">
+<label for="chk_b_a1-3-11_b8_c0_1_2_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010207"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_8" cart-item="a1-3-11_b8_c0_1_2_8" name="a1-3-11_b8_c0_1_2_8">
+<span id="odds-8-010208">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_8">
+<label for="chk_b_a1-3-11_b8_c0_1_2_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010208"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_9" cart-item="a1-3-11_b8_c0_1_2_9" name="a1-3-11_b8_c0_1_2_9">
+<span id="odds-8-010209">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_9">
+<label for="chk_b_a1-3-11_b8_c0_1_2_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010209"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_10" cart-item="a1-3-11_b8_c0_1_2_10" name="a1-3-11_b8_c0_1_2_10">
+<span id="odds-8-010210">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_10">
+<label for="chk_b_a1-3-11_b8_c0_1_2_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010210"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_11" cart-item="a1-3-11_b8_c0_1_2_11" name="a1-3-11_b8_c0_1_2_11">
+<span id="odds-8-010211">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_11">
+<label for="chk_b_a1-3-11_b8_c0_1_2_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010211"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_12" cart-item="a1-3-11_b8_c0_1_2_12" name="a1-3-11_b8_c0_1_2_12">
+<span id="odds-8-010212">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_12">
+<label for="chk_b_a1-3-11_b8_c0_1_2_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010212"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_13" cart-item="a1-3-11_b8_c0_1_2_13" name="a1-3-11_b8_c0_1_2_13">
+<span id="odds-8-010213">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_13">
+<label for="chk_b_a1-3-11_b8_c0_1_2_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010213"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_14" cart-item="a1-3-11_b8_c0_1_2_14" name="a1-3-11_b8_c0_1_2_14">
+<span id="odds-8-010214">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_14">
+<label for="chk_b_a1-3-11_b8_c0_1_2_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010214"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_15" cart-item="a1-3-11_b8_c0_1_2_15" name="a1-3-11_b8_c0_1_2_15">
+<span id="odds-8-010215">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_15">
+<label for="chk_b_a1-3-11_b8_c0_1_2_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010215"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_2_16" cart-item="a1-3-11_b8_c0_1_2_16" name="a1-3-11_b8_c0_1_2_16">
+<span id="odds-8-010216">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_2_16">
+<label for="chk_b_a1-3-11_b8_c0_1_2_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010216"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku2">3</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_2" cart-item="a1-3-11_b8_c0_1_3_2" name="a1-3-11_b8_c0_1_3_2">
+<span id="odds-8-010302">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_2">
+<label for="chk_b_a1-3-11_b8_c0_1_3_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010302"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_4" cart-item="a1-3-11_b8_c0_1_3_4" name="a1-3-11_b8_c0_1_3_4">
+<span id="odds-8-010304">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_4">
+<label for="chk_b_a1-3-11_b8_c0_1_3_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010304"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_5" cart-item="a1-3-11_b8_c0_1_3_5" name="a1-3-11_b8_c0_1_3_5">
+<span id="odds-8-010305">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_5">
+<label for="chk_b_a1-3-11_b8_c0_1_3_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010305"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_6" cart-item="a1-3-11_b8_c0_1_3_6" name="a1-3-11_b8_c0_1_3_6">
+<span id="odds-8-010306">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_6">
+<label for="chk_b_a1-3-11_b8_c0_1_3_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010306"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_7" cart-item="a1-3-11_b8_c0_1_3_7" name="a1-3-11_b8_c0_1_3_7">
+<span id="odds-8-010307">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_7">
+<label for="chk_b_a1-3-11_b8_c0_1_3_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010307"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_8" cart-item="a1-3-11_b8_c0_1_3_8" name="a1-3-11_b8_c0_1_3_8">
+<span id="odds-8-010308">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_8">
+<label for="chk_b_a1-3-11_b8_c0_1_3_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010308"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_9" cart-item="a1-3-11_b8_c0_1_3_9" name="a1-3-11_b8_c0_1_3_9">
+<span id="odds-8-010309">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_9">
+<label for="chk_b_a1-3-11_b8_c0_1_3_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010309"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_10" cart-item="a1-3-11_b8_c0_1_3_10" name="a1-3-11_b8_c0_1_3_10">
+<span id="odds-8-010310">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_10">
+<label for="chk_b_a1-3-11_b8_c0_1_3_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010310"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_11" cart-item="a1-3-11_b8_c0_1_3_11" name="a1-3-11_b8_c0_1_3_11">
+<span id="odds-8-010311">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_11">
+<label for="chk_b_a1-3-11_b8_c0_1_3_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010311"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_12" cart-item="a1-3-11_b8_c0_1_3_12" name="a1-3-11_b8_c0_1_3_12">
+<span id="odds-8-010312">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_12">
+<label for="chk_b_a1-3-11_b8_c0_1_3_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010312"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_13" cart-item="a1-3-11_b8_c0_1_3_13" name="a1-3-11_b8_c0_1_3_13">
+<span id="odds-8-010313">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_13">
+<label for="chk_b_a1-3-11_b8_c0_1_3_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010313"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_14" cart-item="a1-3-11_b8_c0_1_3_14" name="a1-3-11_b8_c0_1_3_14">
+<span id="odds-8-010314">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_14">
+<label for="chk_b_a1-3-11_b8_c0_1_3_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010314"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_15" cart-item="a1-3-11_b8_c0_1_3_15" name="a1-3-11_b8_c0_1_3_15">
+<span id="odds-8-010315">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_15">
+<label for="chk_b_a1-3-11_b8_c0_1_3_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010315"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_3_16" cart-item="a1-3-11_b8_c0_1_3_16" name="a1-3-11_b8_c0_1_3_16">
+<span id="odds-8-010316">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_3_16">
+<label for="chk_b_a1-3-11_b8_c0_1_3_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010316"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku2">4</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_2" cart-item="a1-3-11_b8_c0_1_4_2" name="a1-3-11_b8_c0_1_4_2">
+<span id="odds-8-010402">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_2">
+<label for="chk_b_a1-3-11_b8_c0_1_4_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010402"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_3" cart-item="a1-3-11_b8_c0_1_4_3" name="a1-3-11_b8_c0_1_4_3">
+<span id="odds-8-010403">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_3">
+<label for="chk_b_a1-3-11_b8_c0_1_4_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010403"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_5" cart-item="a1-3-11_b8_c0_1_4_5" name="a1-3-11_b8_c0_1_4_5">
+<span id="odds-8-010405">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_5">
+<label for="chk_b_a1-3-11_b8_c0_1_4_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010405"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_6" cart-item="a1-3-11_b8_c0_1_4_6" name="a1-3-11_b8_c0_1_4_6">
+<span id="odds-8-010406">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_6">
+<label for="chk_b_a1-3-11_b8_c0_1_4_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010406"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_7" cart-item="a1-3-11_b8_c0_1_4_7" name="a1-3-11_b8_c0_1_4_7">
+<span id="odds-8-010407">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_7">
+<label for="chk_b_a1-3-11_b8_c0_1_4_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010407"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_8" cart-item="a1-3-11_b8_c0_1_4_8" name="a1-3-11_b8_c0_1_4_8">
+<span id="odds-8-010408">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_8">
+<label for="chk_b_a1-3-11_b8_c0_1_4_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010408"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_9" cart-item="a1-3-11_b8_c0_1_4_9" name="a1-3-11_b8_c0_1_4_9">
+<span id="odds-8-010409">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_9">
+<label for="chk_b_a1-3-11_b8_c0_1_4_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010409"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_10" cart-item="a1-3-11_b8_c0_1_4_10" name="a1-3-11_b8_c0_1_4_10">
+<span id="odds-8-010410">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_10">
+<label for="chk_b_a1-3-11_b8_c0_1_4_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010410"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_11" cart-item="a1-3-11_b8_c0_1_4_11" name="a1-3-11_b8_c0_1_4_11">
+<span id="odds-8-010411">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_11">
+<label for="chk_b_a1-3-11_b8_c0_1_4_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010411"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_12" cart-item="a1-3-11_b8_c0_1_4_12" name="a1-3-11_b8_c0_1_4_12">
+<span id="odds-8-010412">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_12">
+<label for="chk_b_a1-3-11_b8_c0_1_4_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010412"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_13" cart-item="a1-3-11_b8_c0_1_4_13" name="a1-3-11_b8_c0_1_4_13">
+<span id="odds-8-010413">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_13">
+<label for="chk_b_a1-3-11_b8_c0_1_4_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010413"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_14" cart-item="a1-3-11_b8_c0_1_4_14" name="a1-3-11_b8_c0_1_4_14">
+<span id="odds-8-010414">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_14">
+<label for="chk_b_a1-3-11_b8_c0_1_4_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010414"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_15" cart-item="a1-3-11_b8_c0_1_4_15" name="a1-3-11_b8_c0_1_4_15">
+<span id="odds-8-010415">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_15">
+<label for="chk_b_a1-3-11_b8_c0_1_4_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010415"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_4_16" cart-item="a1-3-11_b8_c0_1_4_16" name="a1-3-11_b8_c0_1_4_16">
+<span id="odds-8-010416">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_4_16">
+<label for="chk_b_a1-3-11_b8_c0_1_4_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010416"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku3">5</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_2" cart-item="a1-3-11_b8_c0_1_5_2" name="a1-3-11_b8_c0_1_5_2">
+<span id="odds-8-010502">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_2">
+<label for="chk_b_a1-3-11_b8_c0_1_5_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010502"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_3" cart-item="a1-3-11_b8_c0_1_5_3" name="a1-3-11_b8_c0_1_5_3">
+<span id="odds-8-010503">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_3">
+<label for="chk_b_a1-3-11_b8_c0_1_5_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010503"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_4" cart-item="a1-3-11_b8_c0_1_5_4" name="a1-3-11_b8_c0_1_5_4">
+<span id="odds-8-010504">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_4">
+<label for="chk_b_a1-3-11_b8_c0_1_5_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010504"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_6" cart-item="a1-3-11_b8_c0_1_5_6" name="a1-3-11_b8_c0_1_5_6">
+<span id="odds-8-010506">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_6">
+<label for="chk_b_a1-3-11_b8_c0_1_5_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010506"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_7" cart-item="a1-3-11_b8_c0_1_5_7" name="a1-3-11_b8_c0_1_5_7">
+<span id="odds-8-010507">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_7">
+<label for="chk_b_a1-3-11_b8_c0_1_5_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010507"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_8" cart-item="a1-3-11_b8_c0_1_5_8" name="a1-3-11_b8_c0_1_5_8">
+<span id="odds-8-010508">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_8">
+<label for="chk_b_a1-3-11_b8_c0_1_5_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010508"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_9" cart-item="a1-3-11_b8_c0_1_5_9" name="a1-3-11_b8_c0_1_5_9">
+<span id="odds-8-010509">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_9">
+<label for="chk_b_a1-3-11_b8_c0_1_5_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010509"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_10" cart-item="a1-3-11_b8_c0_1_5_10" name="a1-3-11_b8_c0_1_5_10">
+<span id="odds-8-010510">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_10">
+<label for="chk_b_a1-3-11_b8_c0_1_5_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010510"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_11" cart-item="a1-3-11_b8_c0_1_5_11" name="a1-3-11_b8_c0_1_5_11">
+<span id="odds-8-010511">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_11">
+<label for="chk_b_a1-3-11_b8_c0_1_5_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010511"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_12" cart-item="a1-3-11_b8_c0_1_5_12" name="a1-3-11_b8_c0_1_5_12">
+<span id="odds-8-010512">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_12">
+<label for="chk_b_a1-3-11_b8_c0_1_5_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010512"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_13" cart-item="a1-3-11_b8_c0_1_5_13" name="a1-3-11_b8_c0_1_5_13">
+<span id="odds-8-010513">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_13">
+<label for="chk_b_a1-3-11_b8_c0_1_5_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010513"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_14" cart-item="a1-3-11_b8_c0_1_5_14" name="a1-3-11_b8_c0_1_5_14">
+<span id="odds-8-010514">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_14">
+<label for="chk_b_a1-3-11_b8_c0_1_5_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010514"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_15" cart-item="a1-3-11_b8_c0_1_5_15" name="a1-3-11_b8_c0_1_5_15">
+<span id="odds-8-010515">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_15">
+<label for="chk_b_a1-3-11_b8_c0_1_5_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010515"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_5_16" cart-item="a1-3-11_b8_c0_1_5_16" name="a1-3-11_b8_c0_1_5_16">
+<span id="odds-8-010516">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_5_16">
+<label for="chk_b_a1-3-11_b8_c0_1_5_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010516"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku3">6</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_2" cart-item="a1-3-11_b8_c0_1_6_2" name="a1-3-11_b8_c0_1_6_2">
+<span id="odds-8-010602">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_2">
+<label for="chk_b_a1-3-11_b8_c0_1_6_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010602"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_3" cart-item="a1-3-11_b8_c0_1_6_3" name="a1-3-11_b8_c0_1_6_3">
+<span id="odds-8-010603">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_3">
+<label for="chk_b_a1-3-11_b8_c0_1_6_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010603"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_4" cart-item="a1-3-11_b8_c0_1_6_4" name="a1-3-11_b8_c0_1_6_4">
+<span id="odds-8-010604">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_4">
+<label for="chk_b_a1-3-11_b8_c0_1_6_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010604"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_5" cart-item="a1-3-11_b8_c0_1_6_5" name="a1-3-11_b8_c0_1_6_5">
+<span id="odds-8-010605">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_5">
+<label for="chk_b_a1-3-11_b8_c0_1_6_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010605"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_7" cart-item="a1-3-11_b8_c0_1_6_7" name="a1-3-11_b8_c0_1_6_7">
+<span id="odds-8-010607">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_7">
+<label for="chk_b_a1-3-11_b8_c0_1_6_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010607"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_8" cart-item="a1-3-11_b8_c0_1_6_8" name="a1-3-11_b8_c0_1_6_8">
+<span id="odds-8-010608">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_8">
+<label for="chk_b_a1-3-11_b8_c0_1_6_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010608"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_9" cart-item="a1-3-11_b8_c0_1_6_9" name="a1-3-11_b8_c0_1_6_9">
+<span id="odds-8-010609">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_9">
+<label for="chk_b_a1-3-11_b8_c0_1_6_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010609"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_10" cart-item="a1-3-11_b8_c0_1_6_10" name="a1-3-11_b8_c0_1_6_10">
+<span id="odds-8-010610">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_10">
+<label for="chk_b_a1-3-11_b8_c0_1_6_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010610"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_11" cart-item="a1-3-11_b8_c0_1_6_11" name="a1-3-11_b8_c0_1_6_11">
+<span id="odds-8-010611">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_11">
+<label for="chk_b_a1-3-11_b8_c0_1_6_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010611"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_12" cart-item="a1-3-11_b8_c0_1_6_12" name="a1-3-11_b8_c0_1_6_12">
+<span id="odds-8-010612">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_12">
+<label for="chk_b_a1-3-11_b8_c0_1_6_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010612"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_13" cart-item="a1-3-11_b8_c0_1_6_13" name="a1-3-11_b8_c0_1_6_13">
+<span id="odds-8-010613">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_13">
+<label for="chk_b_a1-3-11_b8_c0_1_6_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010613"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_14" cart-item="a1-3-11_b8_c0_1_6_14" name="a1-3-11_b8_c0_1_6_14">
+<span id="odds-8-010614">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_14">
+<label for="chk_b_a1-3-11_b8_c0_1_6_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010614"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_15" cart-item="a1-3-11_b8_c0_1_6_15" name="a1-3-11_b8_c0_1_6_15">
+<span id="odds-8-010615">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_15">
+<label for="chk_b_a1-3-11_b8_c0_1_6_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010615"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_6_16" cart-item="a1-3-11_b8_c0_1_6_16" name="a1-3-11_b8_c0_1_6_16">
+<span id="odds-8-010616">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_6_16">
+<label for="chk_b_a1-3-11_b8_c0_1_6_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010616"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku4">7</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_2" cart-item="a1-3-11_b8_c0_1_7_2" name="a1-3-11_b8_c0_1_7_2">
+<span id="odds-8-010702">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_2">
+<label for="chk_b_a1-3-11_b8_c0_1_7_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010702"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_3" cart-item="a1-3-11_b8_c0_1_7_3" name="a1-3-11_b8_c0_1_7_3">
+<span id="odds-8-010703">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_3">
+<label for="chk_b_a1-3-11_b8_c0_1_7_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010703"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_4" cart-item="a1-3-11_b8_c0_1_7_4" name="a1-3-11_b8_c0_1_7_4">
+<span id="odds-8-010704">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_4">
+<label for="chk_b_a1-3-11_b8_c0_1_7_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010704"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_5" cart-item="a1-3-11_b8_c0_1_7_5" name="a1-3-11_b8_c0_1_7_5">
+<span id="odds-8-010705">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_5">
+<label for="chk_b_a1-3-11_b8_c0_1_7_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010705"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_6" cart-item="a1-3-11_b8_c0_1_7_6" name="a1-3-11_b8_c0_1_7_6">
+<span id="odds-8-010706">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_6">
+<label for="chk_b_a1-3-11_b8_c0_1_7_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010706"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_8" cart-item="a1-3-11_b8_c0_1_7_8" name="a1-3-11_b8_c0_1_7_8">
+<span id="odds-8-010708">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_8">
+<label for="chk_b_a1-3-11_b8_c0_1_7_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010708"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_9" cart-item="a1-3-11_b8_c0_1_7_9" name="a1-3-11_b8_c0_1_7_9">
+<span id="odds-8-010709">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_9">
+<label for="chk_b_a1-3-11_b8_c0_1_7_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010709"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_10" cart-item="a1-3-11_b8_c0_1_7_10" name="a1-3-11_b8_c0_1_7_10">
+<span id="odds-8-010710">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_10">
+<label for="chk_b_a1-3-11_b8_c0_1_7_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010710"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_11" cart-item="a1-3-11_b8_c0_1_7_11" name="a1-3-11_b8_c0_1_7_11">
+<span id="odds-8-010711">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_11">
+<label for="chk_b_a1-3-11_b8_c0_1_7_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010711"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_12" cart-item="a1-3-11_b8_c0_1_7_12" name="a1-3-11_b8_c0_1_7_12">
+<span id="odds-8-010712">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_12">
+<label for="chk_b_a1-3-11_b8_c0_1_7_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010712"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_13" cart-item="a1-3-11_b8_c0_1_7_13" name="a1-3-11_b8_c0_1_7_13">
+<span id="odds-8-010713">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_13">
+<label for="chk_b_a1-3-11_b8_c0_1_7_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010713"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_14" cart-item="a1-3-11_b8_c0_1_7_14" name="a1-3-11_b8_c0_1_7_14">
+<span id="odds-8-010714">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_14">
+<label for="chk_b_a1-3-11_b8_c0_1_7_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010714"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_15" cart-item="a1-3-11_b8_c0_1_7_15" name="a1-3-11_b8_c0_1_7_15">
+<span id="odds-8-010715">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_15">
+<label for="chk_b_a1-3-11_b8_c0_1_7_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010715"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_7_16" cart-item="a1-3-11_b8_c0_1_7_16" name="a1-3-11_b8_c0_1_7_16">
+<span id="odds-8-010716">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_7_16">
+<label for="chk_b_a1-3-11_b8_c0_1_7_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010716"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku4">8</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_2" cart-item="a1-3-11_b8_c0_1_8_2" name="a1-3-11_b8_c0_1_8_2">
+<span id="odds-8-010802">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_2">
+<label for="chk_b_a1-3-11_b8_c0_1_8_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010802"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_3" cart-item="a1-3-11_b8_c0_1_8_3" name="a1-3-11_b8_c0_1_8_3">
+<span id="odds-8-010803">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_3">
+<label for="chk_b_a1-3-11_b8_c0_1_8_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010803"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_4" cart-item="a1-3-11_b8_c0_1_8_4" name="a1-3-11_b8_c0_1_8_4">
+<span id="odds-8-010804">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_4">
+<label for="chk_b_a1-3-11_b8_c0_1_8_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010804"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_5" cart-item="a1-3-11_b8_c0_1_8_5" name="a1-3-11_b8_c0_1_8_5">
+<span id="odds-8-010805">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_5">
+<label for="chk_b_a1-3-11_b8_c0_1_8_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010805"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_6" cart-item="a1-3-11_b8_c0_1_8_6" name="a1-3-11_b8_c0_1_8_6">
+<span id="odds-8-010806">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_6">
+<label for="chk_b_a1-3-11_b8_c0_1_8_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010806"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_7" cart-item="a1-3-11_b8_c0_1_8_7" name="a1-3-11_b8_c0_1_8_7">
+<span id="odds-8-010807">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_7">
+<label for="chk_b_a1-3-11_b8_c0_1_8_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010807"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_9" cart-item="a1-3-11_b8_c0_1_8_9" name="a1-3-11_b8_c0_1_8_9">
+<span id="odds-8-010809">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_9">
+<label for="chk_b_a1-3-11_b8_c0_1_8_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010809"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_10" cart-item="a1-3-11_b8_c0_1_8_10" name="a1-3-11_b8_c0_1_8_10">
+<span id="odds-8-010810">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_10">
+<label for="chk_b_a1-3-11_b8_c0_1_8_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010810"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_11" cart-item="a1-3-11_b8_c0_1_8_11" name="a1-3-11_b8_c0_1_8_11">
+<span id="odds-8-010811">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_11">
+<label for="chk_b_a1-3-11_b8_c0_1_8_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010811"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_12" cart-item="a1-3-11_b8_c0_1_8_12" name="a1-3-11_b8_c0_1_8_12">
+<span id="odds-8-010812">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_12">
+<label for="chk_b_a1-3-11_b8_c0_1_8_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010812"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_13" cart-item="a1-3-11_b8_c0_1_8_13" name="a1-3-11_b8_c0_1_8_13">
+<span id="odds-8-010813">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_13">
+<label for="chk_b_a1-3-11_b8_c0_1_8_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010813"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_14" cart-item="a1-3-11_b8_c0_1_8_14" name="a1-3-11_b8_c0_1_8_14">
+<span id="odds-8-010814">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_14">
+<label for="chk_b_a1-3-11_b8_c0_1_8_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010814"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_15" cart-item="a1-3-11_b8_c0_1_8_15" name="a1-3-11_b8_c0_1_8_15">
+<span id="odds-8-010815">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_15">
+<label for="chk_b_a1-3-11_b8_c0_1_8_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010815"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_8_16" cart-item="a1-3-11_b8_c0_1_8_16" name="a1-3-11_b8_c0_1_8_16">
+<span id="odds-8-010816">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_8_16">
+<label for="chk_b_a1-3-11_b8_c0_1_8_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010816"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku5">9</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_2" cart-item="a1-3-11_b8_c0_1_9_2" name="a1-3-11_b8_c0_1_9_2">
+<span id="odds-8-010902">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_2">
+<label for="chk_b_a1-3-11_b8_c0_1_9_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010902"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_3" cart-item="a1-3-11_b8_c0_1_9_3" name="a1-3-11_b8_c0_1_9_3">
+<span id="odds-8-010903">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_3">
+<label for="chk_b_a1-3-11_b8_c0_1_9_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010903"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_4" cart-item="a1-3-11_b8_c0_1_9_4" name="a1-3-11_b8_c0_1_9_4">
+<span id="odds-8-010904">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_4">
+<label for="chk_b_a1-3-11_b8_c0_1_9_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010904"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_5" cart-item="a1-3-11_b8_c0_1_9_5" name="a1-3-11_b8_c0_1_9_5">
+<span id="odds-8-010905">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_5">
+<label for="chk_b_a1-3-11_b8_c0_1_9_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010905"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_6" cart-item="a1-3-11_b8_c0_1_9_6" name="a1-3-11_b8_c0_1_9_6">
+<span id="odds-8-010906">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_6">
+<label for="chk_b_a1-3-11_b8_c0_1_9_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010906"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_7" cart-item="a1-3-11_b8_c0_1_9_7" name="a1-3-11_b8_c0_1_9_7">
+<span id="odds-8-010907">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_7">
+<label for="chk_b_a1-3-11_b8_c0_1_9_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010907"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_8" cart-item="a1-3-11_b8_c0_1_9_8" name="a1-3-11_b8_c0_1_9_8">
+<span id="odds-8-010908">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_8">
+<label for="chk_b_a1-3-11_b8_c0_1_9_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010908"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_10" cart-item="a1-3-11_b8_c0_1_9_10" name="a1-3-11_b8_c0_1_9_10">
+<span id="odds-8-010910">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_10">
+<label for="chk_b_a1-3-11_b8_c0_1_9_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010910"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_11" cart-item="a1-3-11_b8_c0_1_9_11" name="a1-3-11_b8_c0_1_9_11">
+<span id="odds-8-010911">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_11">
+<label for="chk_b_a1-3-11_b8_c0_1_9_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010911"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_12" cart-item="a1-3-11_b8_c0_1_9_12" name="a1-3-11_b8_c0_1_9_12">
+<span id="odds-8-010912">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_12">
+<label for="chk_b_a1-3-11_b8_c0_1_9_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010912"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_13" cart-item="a1-3-11_b8_c0_1_9_13" name="a1-3-11_b8_c0_1_9_13">
+<span id="odds-8-010913">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_13">
+<label for="chk_b_a1-3-11_b8_c0_1_9_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010913"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_14" cart-item="a1-3-11_b8_c0_1_9_14" name="a1-3-11_b8_c0_1_9_14">
+<span id="odds-8-010914">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_14">
+<label for="chk_b_a1-3-11_b8_c0_1_9_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010914"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_15" cart-item="a1-3-11_b8_c0_1_9_15" name="a1-3-11_b8_c0_1_9_15">
+<span id="odds-8-010915">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_15">
+<label for="chk_b_a1-3-11_b8_c0_1_9_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010915"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_9_16" cart-item="a1-3-11_b8_c0_1_9_16" name="a1-3-11_b8_c0_1_9_16">
+<span id="odds-8-010916">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_9_16">
+<label for="chk_b_a1-3-11_b8_c0_1_9_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-010916"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku5">10</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_2" cart-item="a1-3-11_b8_c0_1_10_2" name="a1-3-11_b8_c0_1_10_2">
+<span id="odds-8-011002">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_2">
+<label for="chk_b_a1-3-11_b8_c0_1_10_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011002"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_3" cart-item="a1-3-11_b8_c0_1_10_3" name="a1-3-11_b8_c0_1_10_3">
+<span id="odds-8-011003">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_3">
+<label for="chk_b_a1-3-11_b8_c0_1_10_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011003"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_4" cart-item="a1-3-11_b8_c0_1_10_4" name="a1-3-11_b8_c0_1_10_4">
+<span id="odds-8-011004">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_4">
+<label for="chk_b_a1-3-11_b8_c0_1_10_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011004"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_5" cart-item="a1-3-11_b8_c0_1_10_5" name="a1-3-11_b8_c0_1_10_5">
+<span id="odds-8-011005">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_5">
+<label for="chk_b_a1-3-11_b8_c0_1_10_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011005"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_6" cart-item="a1-3-11_b8_c0_1_10_6" name="a1-3-11_b8_c0_1_10_6">
+<span id="odds-8-011006">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_6">
+<label for="chk_b_a1-3-11_b8_c0_1_10_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011006"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_7" cart-item="a1-3-11_b8_c0_1_10_7" name="a1-3-11_b8_c0_1_10_7">
+<span id="odds-8-011007">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_7">
+<label for="chk_b_a1-3-11_b8_c0_1_10_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011007"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_8" cart-item="a1-3-11_b8_c0_1_10_8" name="a1-3-11_b8_c0_1_10_8">
+<span id="odds-8-011008">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_8">
+<label for="chk_b_a1-3-11_b8_c0_1_10_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011008"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_9" cart-item="a1-3-11_b8_c0_1_10_9" name="a1-3-11_b8_c0_1_10_9">
+<span id="odds-8-011009">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_9">
+<label for="chk_b_a1-3-11_b8_c0_1_10_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011009"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_11" cart-item="a1-3-11_b8_c0_1_10_11" name="a1-3-11_b8_c0_1_10_11">
+<span id="odds-8-011011">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_11">
+<label for="chk_b_a1-3-11_b8_c0_1_10_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011011"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_12" cart-item="a1-3-11_b8_c0_1_10_12" name="a1-3-11_b8_c0_1_10_12">
+<span id="odds-8-011012">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_12">
+<label for="chk_b_a1-3-11_b8_c0_1_10_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011012"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_13" cart-item="a1-3-11_b8_c0_1_10_13" name="a1-3-11_b8_c0_1_10_13">
+<span id="odds-8-011013">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_13">
+<label for="chk_b_a1-3-11_b8_c0_1_10_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011013"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_14" cart-item="a1-3-11_b8_c0_1_10_14" name="a1-3-11_b8_c0_1_10_14">
+<span id="odds-8-011014">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_14">
+<label for="chk_b_a1-3-11_b8_c0_1_10_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011014"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_15" cart-item="a1-3-11_b8_c0_1_10_15" name="a1-3-11_b8_c0_1_10_15">
+<span id="odds-8-011015">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_15">
+<label for="chk_b_a1-3-11_b8_c0_1_10_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011015"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_10_16" cart-item="a1-3-11_b8_c0_1_10_16" name="a1-3-11_b8_c0_1_10_16">
+<span id="odds-8-011016">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_10_16">
+<label for="chk_b_a1-3-11_b8_c0_1_10_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011016"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku6">11</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_2" cart-item="a1-3-11_b8_c0_1_11_2" name="a1-3-11_b8_c0_1_11_2">
+<span id="odds-8-011102">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_2">
+<label for="chk_b_a1-3-11_b8_c0_1_11_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011102"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_3" cart-item="a1-3-11_b8_c0_1_11_3" name="a1-3-11_b8_c0_1_11_3">
+<span id="odds-8-011103">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_3">
+<label for="chk_b_a1-3-11_b8_c0_1_11_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011103"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_4" cart-item="a1-3-11_b8_c0_1_11_4" name="a1-3-11_b8_c0_1_11_4">
+<span id="odds-8-011104">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_4">
+<label for="chk_b_a1-3-11_b8_c0_1_11_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011104"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_5" cart-item="a1-3-11_b8_c0_1_11_5" name="a1-3-11_b8_c0_1_11_5">
+<span id="odds-8-011105">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_5">
+<label for="chk_b_a1-3-11_b8_c0_1_11_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011105"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_6" cart-item="a1-3-11_b8_c0_1_11_6" name="a1-3-11_b8_c0_1_11_6">
+<span id="odds-8-011106">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_6">
+<label for="chk_b_a1-3-11_b8_c0_1_11_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011106"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_7" cart-item="a1-3-11_b8_c0_1_11_7" name="a1-3-11_b8_c0_1_11_7">
+<span id="odds-8-011107">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_7">
+<label for="chk_b_a1-3-11_b8_c0_1_11_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011107"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_8" cart-item="a1-3-11_b8_c0_1_11_8" name="a1-3-11_b8_c0_1_11_8">
+<span id="odds-8-011108">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_8">
+<label for="chk_b_a1-3-11_b8_c0_1_11_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011108"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_9" cart-item="a1-3-11_b8_c0_1_11_9" name="a1-3-11_b8_c0_1_11_9">
+<span id="odds-8-011109">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_9">
+<label for="chk_b_a1-3-11_b8_c0_1_11_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011109"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_10" cart-item="a1-3-11_b8_c0_1_11_10" name="a1-3-11_b8_c0_1_11_10">
+<span id="odds-8-011110">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_10">
+<label for="chk_b_a1-3-11_b8_c0_1_11_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011110"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_12" cart-item="a1-3-11_b8_c0_1_11_12" name="a1-3-11_b8_c0_1_11_12">
+<span id="odds-8-011112">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_12">
+<label for="chk_b_a1-3-11_b8_c0_1_11_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011112"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_13" cart-item="a1-3-11_b8_c0_1_11_13" name="a1-3-11_b8_c0_1_11_13">
+<span id="odds-8-011113">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_13">
+<label for="chk_b_a1-3-11_b8_c0_1_11_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011113"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_14" cart-item="a1-3-11_b8_c0_1_11_14" name="a1-3-11_b8_c0_1_11_14">
+<span id="odds-8-011114">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_14">
+<label for="chk_b_a1-3-11_b8_c0_1_11_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011114"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_15" cart-item="a1-3-11_b8_c0_1_11_15" name="a1-3-11_b8_c0_1_11_15">
+<span id="odds-8-011115">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_15">
+<label for="chk_b_a1-3-11_b8_c0_1_11_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011115"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_11_16" cart-item="a1-3-11_b8_c0_1_11_16" name="a1-3-11_b8_c0_1_11_16">
+<span id="odds-8-011116">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_11_16">
+<label for="chk_b_a1-3-11_b8_c0_1_11_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011116"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku6">12</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_2" cart-item="a1-3-11_b8_c0_1_12_2" name="a1-3-11_b8_c0_1_12_2">
+<span id="odds-8-011202">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_2">
+<label for="chk_b_a1-3-11_b8_c0_1_12_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011202"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_3" cart-item="a1-3-11_b8_c0_1_12_3" name="a1-3-11_b8_c0_1_12_3">
+<span id="odds-8-011203">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_3">
+<label for="chk_b_a1-3-11_b8_c0_1_12_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011203"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_4" cart-item="a1-3-11_b8_c0_1_12_4" name="a1-3-11_b8_c0_1_12_4">
+<span id="odds-8-011204">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_4">
+<label for="chk_b_a1-3-11_b8_c0_1_12_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011204"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_5" cart-item="a1-3-11_b8_c0_1_12_5" name="a1-3-11_b8_c0_1_12_5">
+<span id="odds-8-011205">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_5">
+<label for="chk_b_a1-3-11_b8_c0_1_12_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011205"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_6" cart-item="a1-3-11_b8_c0_1_12_6" name="a1-3-11_b8_c0_1_12_6">
+<span id="odds-8-011206">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_6">
+<label for="chk_b_a1-3-11_b8_c0_1_12_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011206"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_7" cart-item="a1-3-11_b8_c0_1_12_7" name="a1-3-11_b8_c0_1_12_7">
+<span id="odds-8-011207">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_7">
+<label for="chk_b_a1-3-11_b8_c0_1_12_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011207"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_8" cart-item="a1-3-11_b8_c0_1_12_8" name="a1-3-11_b8_c0_1_12_8">
+<span id="odds-8-011208">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_8">
+<label for="chk_b_a1-3-11_b8_c0_1_12_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011208"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_9" cart-item="a1-3-11_b8_c0_1_12_9" name="a1-3-11_b8_c0_1_12_9">
+<span id="odds-8-011209">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_9">
+<label for="chk_b_a1-3-11_b8_c0_1_12_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011209"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_10" cart-item="a1-3-11_b8_c0_1_12_10" name="a1-3-11_b8_c0_1_12_10">
+<span id="odds-8-011210">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_10">
+<label for="chk_b_a1-3-11_b8_c0_1_12_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011210"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_11" cart-item="a1-3-11_b8_c0_1_12_11" name="a1-3-11_b8_c0_1_12_11">
+<span id="odds-8-011211">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_11">
+<label for="chk_b_a1-3-11_b8_c0_1_12_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011211"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_13" cart-item="a1-3-11_b8_c0_1_12_13" name="a1-3-11_b8_c0_1_12_13">
+<span id="odds-8-011213">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_13">
+<label for="chk_b_a1-3-11_b8_c0_1_12_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011213"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_14" cart-item="a1-3-11_b8_c0_1_12_14" name="a1-3-11_b8_c0_1_12_14">
+<span id="odds-8-011214">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_14">
+<label for="chk_b_a1-3-11_b8_c0_1_12_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011214"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_15" cart-item="a1-3-11_b8_c0_1_12_15" name="a1-3-11_b8_c0_1_12_15">
+<span id="odds-8-011215">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_15">
+<label for="chk_b_a1-3-11_b8_c0_1_12_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011215"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_12_16" cart-item="a1-3-11_b8_c0_1_12_16" name="a1-3-11_b8_c0_1_12_16">
+<span id="odds-8-011216">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_12_16">
+<label for="chk_b_a1-3-11_b8_c0_1_12_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011216"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku7">13</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_2" cart-item="a1-3-11_b8_c0_1_13_2" name="a1-3-11_b8_c0_1_13_2">
+<span id="odds-8-011302">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_2">
+<label for="chk_b_a1-3-11_b8_c0_1_13_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011302"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_3" cart-item="a1-3-11_b8_c0_1_13_3" name="a1-3-11_b8_c0_1_13_3">
+<span id="odds-8-011303">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_3">
+<label for="chk_b_a1-3-11_b8_c0_1_13_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011303"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_4" cart-item="a1-3-11_b8_c0_1_13_4" name="a1-3-11_b8_c0_1_13_4">
+<span id="odds-8-011304">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_4">
+<label for="chk_b_a1-3-11_b8_c0_1_13_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011304"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_5" cart-item="a1-3-11_b8_c0_1_13_5" name="a1-3-11_b8_c0_1_13_5">
+<span id="odds-8-011305">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_5">
+<label for="chk_b_a1-3-11_b8_c0_1_13_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011305"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_6" cart-item="a1-3-11_b8_c0_1_13_6" name="a1-3-11_b8_c0_1_13_6">
+<span id="odds-8-011306">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_6">
+<label for="chk_b_a1-3-11_b8_c0_1_13_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011306"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_7" cart-item="a1-3-11_b8_c0_1_13_7" name="a1-3-11_b8_c0_1_13_7">
+<span id="odds-8-011307">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_7">
+<label for="chk_b_a1-3-11_b8_c0_1_13_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011307"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_8" cart-item="a1-3-11_b8_c0_1_13_8" name="a1-3-11_b8_c0_1_13_8">
+<span id="odds-8-011308">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_8">
+<label for="chk_b_a1-3-11_b8_c0_1_13_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011308"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_9" cart-item="a1-3-11_b8_c0_1_13_9" name="a1-3-11_b8_c0_1_13_9">
+<span id="odds-8-011309">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_9">
+<label for="chk_b_a1-3-11_b8_c0_1_13_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011309"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_10" cart-item="a1-3-11_b8_c0_1_13_10" name="a1-3-11_b8_c0_1_13_10">
+<span id="odds-8-011310">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_10">
+<label for="chk_b_a1-3-11_b8_c0_1_13_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011310"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_11" cart-item="a1-3-11_b8_c0_1_13_11" name="a1-3-11_b8_c0_1_13_11">
+<span id="odds-8-011311">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_11">
+<label for="chk_b_a1-3-11_b8_c0_1_13_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011311"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_12" cart-item="a1-3-11_b8_c0_1_13_12" name="a1-3-11_b8_c0_1_13_12">
+<span id="odds-8-011312">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_12">
+<label for="chk_b_a1-3-11_b8_c0_1_13_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011312"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_14" cart-item="a1-3-11_b8_c0_1_13_14" name="a1-3-11_b8_c0_1_13_14">
+<span id="odds-8-011314">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_14">
+<label for="chk_b_a1-3-11_b8_c0_1_13_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011314"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_15" cart-item="a1-3-11_b8_c0_1_13_15" name="a1-3-11_b8_c0_1_13_15">
+<span id="odds-8-011315">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_15">
+<label for="chk_b_a1-3-11_b8_c0_1_13_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011315"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_13_16" cart-item="a1-3-11_b8_c0_1_13_16" name="a1-3-11_b8_c0_1_13_16">
+<span id="odds-8-011316">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_13_16">
+<label for="chk_b_a1-3-11_b8_c0_1_13_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011316"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku7">14</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_2" cart-item="a1-3-11_b8_c0_1_14_2" name="a1-3-11_b8_c0_1_14_2">
+<span id="odds-8-011402">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_2">
+<label for="chk_b_a1-3-11_b8_c0_1_14_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011402"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_3" cart-item="a1-3-11_b8_c0_1_14_3" name="a1-3-11_b8_c0_1_14_3">
+<span id="odds-8-011403">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_3">
+<label for="chk_b_a1-3-11_b8_c0_1_14_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011403"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_4" cart-item="a1-3-11_b8_c0_1_14_4" name="a1-3-11_b8_c0_1_14_4">
+<span id="odds-8-011404">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_4">
+<label for="chk_b_a1-3-11_b8_c0_1_14_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011404"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_5" cart-item="a1-3-11_b8_c0_1_14_5" name="a1-3-11_b8_c0_1_14_5">
+<span id="odds-8-011405">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_5">
+<label for="chk_b_a1-3-11_b8_c0_1_14_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011405"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_6" cart-item="a1-3-11_b8_c0_1_14_6" name="a1-3-11_b8_c0_1_14_6">
+<span id="odds-8-011406">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_6">
+<label for="chk_b_a1-3-11_b8_c0_1_14_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011406"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_7" cart-item="a1-3-11_b8_c0_1_14_7" name="a1-3-11_b8_c0_1_14_7">
+<span id="odds-8-011407">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_7">
+<label for="chk_b_a1-3-11_b8_c0_1_14_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011407"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_8" cart-item="a1-3-11_b8_c0_1_14_8" name="a1-3-11_b8_c0_1_14_8">
+<span id="odds-8-011408">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_8">
+<label for="chk_b_a1-3-11_b8_c0_1_14_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011408"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_9" cart-item="a1-3-11_b8_c0_1_14_9" name="a1-3-11_b8_c0_1_14_9">
+<span id="odds-8-011409">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_9">
+<label for="chk_b_a1-3-11_b8_c0_1_14_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011409"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_10" cart-item="a1-3-11_b8_c0_1_14_10" name="a1-3-11_b8_c0_1_14_10">
+<span id="odds-8-011410">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_10">
+<label for="chk_b_a1-3-11_b8_c0_1_14_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011410"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_11" cart-item="a1-3-11_b8_c0_1_14_11" name="a1-3-11_b8_c0_1_14_11">
+<span id="odds-8-011411">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_11">
+<label for="chk_b_a1-3-11_b8_c0_1_14_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011411"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_12" cart-item="a1-3-11_b8_c0_1_14_12" name="a1-3-11_b8_c0_1_14_12">
+<span id="odds-8-011412">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_12">
+<label for="chk_b_a1-3-11_b8_c0_1_14_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011412"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_13" cart-item="a1-3-11_b8_c0_1_14_13" name="a1-3-11_b8_c0_1_14_13">
+<span id="odds-8-011413">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_13">
+<label for="chk_b_a1-3-11_b8_c0_1_14_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011413"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_15" cart-item="a1-3-11_b8_c0_1_14_15" name="a1-3-11_b8_c0_1_14_15">
+<span id="odds-8-011415">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_15">
+<label for="chk_b_a1-3-11_b8_c0_1_14_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011415"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_14_16" cart-item="a1-3-11_b8_c0_1_14_16" name="a1-3-11_b8_c0_1_14_16">
+<span id="odds-8-011416">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_14_16">
+<label for="chk_b_a1-3-11_b8_c0_1_14_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011416"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku8">15</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_2" cart-item="a1-3-11_b8_c0_1_15_2" name="a1-3-11_b8_c0_1_15_2">
+<span id="odds-8-011502">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_2">
+<label for="chk_b_a1-3-11_b8_c0_1_15_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011502"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_3" cart-item="a1-3-11_b8_c0_1_15_3" name="a1-3-11_b8_c0_1_15_3">
+<span id="odds-8-011503">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_3">
+<label for="chk_b_a1-3-11_b8_c0_1_15_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011503"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_4" cart-item="a1-3-11_b8_c0_1_15_4" name="a1-3-11_b8_c0_1_15_4">
+<span id="odds-8-011504">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_4">
+<label for="chk_b_a1-3-11_b8_c0_1_15_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011504"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_5" cart-item="a1-3-11_b8_c0_1_15_5" name="a1-3-11_b8_c0_1_15_5">
+<span id="odds-8-011505">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_5">
+<label for="chk_b_a1-3-11_b8_c0_1_15_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011505"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_6" cart-item="a1-3-11_b8_c0_1_15_6" name="a1-3-11_b8_c0_1_15_6">
+<span id="odds-8-011506">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_6">
+<label for="chk_b_a1-3-11_b8_c0_1_15_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011506"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_7" cart-item="a1-3-11_b8_c0_1_15_7" name="a1-3-11_b8_c0_1_15_7">
+<span id="odds-8-011507">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_7">
+<label for="chk_b_a1-3-11_b8_c0_1_15_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011507"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_8" cart-item="a1-3-11_b8_c0_1_15_8" name="a1-3-11_b8_c0_1_15_8">
+<span id="odds-8-011508">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_8">
+<label for="chk_b_a1-3-11_b8_c0_1_15_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011508"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_9" cart-item="a1-3-11_b8_c0_1_15_9" name="a1-3-11_b8_c0_1_15_9">
+<span id="odds-8-011509">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_9">
+<label for="chk_b_a1-3-11_b8_c0_1_15_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011509"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_10" cart-item="a1-3-11_b8_c0_1_15_10" name="a1-3-11_b8_c0_1_15_10">
+<span id="odds-8-011510">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_10">
+<label for="chk_b_a1-3-11_b8_c0_1_15_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011510"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_11" cart-item="a1-3-11_b8_c0_1_15_11" name="a1-3-11_b8_c0_1_15_11">
+<span id="odds-8-011511">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_11">
+<label for="chk_b_a1-3-11_b8_c0_1_15_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011511"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_12" cart-item="a1-3-11_b8_c0_1_15_12" name="a1-3-11_b8_c0_1_15_12">
+<span id="odds-8-011512">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_12">
+<label for="chk_b_a1-3-11_b8_c0_1_15_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011512"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_13" cart-item="a1-3-11_b8_c0_1_15_13" name="a1-3-11_b8_c0_1_15_13">
+<span id="odds-8-011513">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_13">
+<label for="chk_b_a1-3-11_b8_c0_1_15_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011513"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_14" cart-item="a1-3-11_b8_c0_1_15_14" name="a1-3-11_b8_c0_1_15_14">
+<span id="odds-8-011514">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_14">
+<label for="chk_b_a1-3-11_b8_c0_1_15_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011514"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">16</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_15_16" cart-item="a1-3-11_b8_c0_1_15_16" name="a1-3-11_b8_c0_1_15_16">
+<span id="odds-8-011516">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_15_16">
+<label for="chk_b_a1-3-11_b8_c0_1_15_16" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011516"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table><table class="Odds_Table">
+<tbody>
+<tr class="col_label">
+<th colspan="3" class="Waku8">16</th>
+</tr>
+<tr>
+<td class="Waku_Normal">2</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_2" cart-item="a1-3-11_b8_c0_1_16_2" name="a1-3-11_b8_c0_1_16_2">
+<span id="odds-8-011602">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_2">
+<label for="chk_b_a1-3-11_b8_c0_1_16_2" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011602"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">3</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_3" cart-item="a1-3-11_b8_c0_1_16_3" name="a1-3-11_b8_c0_1_16_3">
+<span id="odds-8-011603">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_3">
+<label for="chk_b_a1-3-11_b8_c0_1_16_3" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011603"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">4</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_4" cart-item="a1-3-11_b8_c0_1_16_4" name="a1-3-11_b8_c0_1_16_4">
+<span id="odds-8-011604">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_4">
+<label for="chk_b_a1-3-11_b8_c0_1_16_4" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011604"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">5</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_5" cart-item="a1-3-11_b8_c0_1_16_5" name="a1-3-11_b8_c0_1_16_5">
+<span id="odds-8-011605">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_5">
+<label for="chk_b_a1-3-11_b8_c0_1_16_5" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011605"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">6</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_6" cart-item="a1-3-11_b8_c0_1_16_6" name="a1-3-11_b8_c0_1_16_6">
+<span id="odds-8-011606">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_6">
+<label for="chk_b_a1-3-11_b8_c0_1_16_6" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011606"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">7</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_7" cart-item="a1-3-11_b8_c0_1_16_7" name="a1-3-11_b8_c0_1_16_7">
+<span id="odds-8-011607">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_7">
+<label for="chk_b_a1-3-11_b8_c0_1_16_7" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011607"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">8</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_8" cart-item="a1-3-11_b8_c0_1_16_8" name="a1-3-11_b8_c0_1_16_8">
+<span id="odds-8-011608">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_8">
+<label for="chk_b_a1-3-11_b8_c0_1_16_8" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011608"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">9</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_9" cart-item="a1-3-11_b8_c0_1_16_9" name="a1-3-11_b8_c0_1_16_9">
+<span id="odds-8-011609">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_9">
+<label for="chk_b_a1-3-11_b8_c0_1_16_9" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011609"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">10</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_10" cart-item="a1-3-11_b8_c0_1_16_10" name="a1-3-11_b8_c0_1_16_10">
+<span id="odds-8-011610">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_10">
+<label for="chk_b_a1-3-11_b8_c0_1_16_10" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011610"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">11</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_11" cart-item="a1-3-11_b8_c0_1_16_11" name="a1-3-11_b8_c0_1_16_11">
+<span id="odds-8-011611">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_11">
+<label for="chk_b_a1-3-11_b8_c0_1_16_11" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011611"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">12</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_12" cart-item="a1-3-11_b8_c0_1_16_12" name="a1-3-11_b8_c0_1_16_12">
+<span id="odds-8-011612">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_12">
+<label for="chk_b_a1-3-11_b8_c0_1_16_12" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011612"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">13</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_13" cart-item="a1-3-11_b8_c0_1_16_13" name="a1-3-11_b8_c0_1_16_13">
+<span id="odds-8-011613">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_13">
+<label for="chk_b_a1-3-11_b8_c0_1_16_13" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011613"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">14</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_14" cart-item="a1-3-11_b8_c0_1_16_14" name="a1-3-11_b8_c0_1_16_14">
+<span id="odds-8-011614">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_14">
+<label for="chk_b_a1-3-11_b8_c0_1_16_14" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011614"></span></span>
+</td>
+
+</tr>
+<tr>
+<td class="Waku_Normal">15</td>
+<td class="Odds Popular" id="check_b_a1-3-11_b8_c0_1_16_15" cart-item="a1-3-11_b8_c0_1_16_15" name="a1-3-11_b8_c0_1_16_15">
+<span id="odds-8-011615">---.-</span>
+<input type="checkbox" style="display: none;" value="" id="chk_b_a1-3-11_b8_c0_1_16_15">
+<label for="chk_b_a1-3-11_b8_c0_1_16_15" class="Check01Btn_Off" style="display: none;"></label>
+<span class="Hyphen" id="odds_min_Hyphen" style="display:none"></span>
+<span class="Odds" id="odds_min_b5"><span id="oddsmin-8-011615"></span></span>
+</td>
+
+</tr>
+
+</tbody>
+</table>
+</div>
+<div class="OnOffSwitch_Area ">
+<div class="RaceInfo_Notice mt18">
+<ul class="RaceInfo_Notice01">
+<li>※結果・成績・オッズなどのデータは、必ず主催者発表のものと照合しご確認ください。</li>
+</ul>
+</div>
+<div class="OddsAutoCheck ToggleCheck LiveOddsUpdate" style="display:none">
+<label class="OddsAutoCheckLabel">
+<span class="OddsAutoTxt">オッズの自動更新をONにする</span>
+<input type="checkbox" id="act-auto_update">
+<span class="CheckLabelTxt"></span>
+</label>
+</div><!-- /.OddsAutoCheck ToggleCheck -->
+</div>
+</div>
+<div style="display:none;" id="free_odds_limit_overlay"></div>
+<div class="InputFixedArea_Wrap" style="margin-top: 10px;" >
+<div class="InputFixedArea01 Odds Sticky">
+<dl class="TotalBetDL">
+<dd id="caution_50bet" style="display: none;">
+<font color="#f20">件数オーバー(1度の投票は255件まで)</font>
+</dd>
+<dt id="total_bet">選択済み：<span id="odds_select">0</span>件</dt>
+</dl>
+<div class="InputBtnBox">
+<!-- <a href="?pid=bet&race_id=201905020212"> -->
+<a href="../ipat/dispatch.html?race_id=202603020211" target="_blank" class="SubmitBtn" id="action_bet">金額入力へすすむ</a>
+<button class="AddBtn" type="button" onclick="location.href='../odds/index.html?race_id=202603020211'"><span class="Icon_addBtn"></span>買い目追加</button>
+</div><!-- /.InputBtnBox -->
+</div><!-- /.InputFixedArea01 -->
+</div>
+<script type="text/javascript">
+// オッズ更新click
+$(function(){
+$(".OddsUpdataBtn").on({"click":
+function(){
+$(".OddsUpdataBtn").removeClass("OddsUpdataClick");
+$(".OddsUpdataBtn").addClass("OddsUpdataClick");
+}
+});
+});
+</script>
+<!-- オッズ -->
+<script>
+var _isPremium = '0';
+var diff_odds = {};
+var diff_first_flg = true;
+$(function(){
+// function do_update_odds (_odds_type_param) {
+$.oddsUpdate({
+apiUrl:'/api/api_get_jra_odds.html',
+raceId:'202603020211',
+isPremium:_isPremium,
+oddsType:'8',
+compress:true,
+PremiumLinkReturnUrl : 'http%3A%2F%2Frace.netkeiba.com%2Fodds%2Fodds_get_form.html%3Ftype%3Db8%26race_id%3D202603020211%26rf%3Dshutuba_submenu',
+callbackApiLoad : function(){
+//更新オッズ比較用
+$('[id^="odds-"]').each(function(){
+var key = $(this).prop('id');
+var val = $(this).text();
+diff_odds[key] = val;
+$(this).parents('.Popular').removeClass("UpdateOdds");
+$(this).removeClass('transition-color');
+});
+},
+callbackApiOverrideView:function(_this, _resp){
+console.log(_resp.data.odds);
+var data = _resp.data.odds;
+var time =_resp.data.official_datetime;
+$('#official_time').text(_this.format_update_time(time));
+$('[id^="odds-"]').each(function(){
+var diff_key = $(this).prop('id');
+var data_key = $(this).attr('id').split('-');
+var type = data_key[1];
+var odds_key = data_key[2];
+var row = data[type][odds_key];
+if(type == 5) {
+$(this).html(row[0]);
+$(this).parent().find('#odds_min_Hyphen').show();
+$('#oddsmin-'+type+'-'+odds_key).html(row[1]);
+} else {
+$(this).html(row[0]);
+$('#oddsmin-'+type+'-'+odds_key).hide();
+$('#oddsmin-'+type+'-'+odds_key).parent().hide();
+}
+if(!diff_first_flg && _this.updateManual && !_this.autoUpdateOdds) {
+$(this).parents('.Popular').addClass('UpdateOdds');
+}
+if(diff_odds[diff_key] != row[0]){
+diff_odds[diff_key] = row[0];
+$(this).addClass('transition-color');
+}
+});
+diff_first_flg = false;
+}
+});
+// }
+});
+</script>
+<script>
+$(function() {
+$('.InputFixedArea01').show();
+var param = location.search.split('&');
+if (param[1] == "type=b5") {
+$('.RaceOdds_HorseList').addClass('Wide_Normal');
+}
+});
+</script>
+<script>
+$(document).off("click", ".GraphOdds td.Odds").on("click", ".GraphOdds td.Odds", function () {
+var $td = $(this);
+var $checkbox = $td.find("input[type=checkbox]");
+var _group = 'bet_202603020211';
+var _item_id = $(this).attr("cart-item");
+var _item_value = 1;
+var _client_data = '';
+if (typeof _item_id != "undefined" && _item_id != "") {
+if ($checkbox.prop("checked")) {
+cart_remove_item( _group, _item_id );
+view_check_count();
+$checkbox.prop("checked", false);
+$td.parent().removeClass("Selected");
+view_check_count();
+} else {
+view_check_count();
+$checkbox.prop("checked", true);
+cart_add_item( _group, _item_id, _item_value, '', _client_data );
+$td.parent().addClass("Selected");
+view_check_count();
+}
+}
+})
+</script>
+<script language="JavaScript" type="text/JavaScript">
+//===========================================================
+// 選択方式の表示切り替え処理
+//===========================================================
+function SwitchingDisplay(type,housiki)
+{
+// location.href = "../odds/index.html?type=" + type + "&race_id=202603020211&housiki=" + housiki + "#odds_view";
+$("#odds_view_result").html('');
+var url = "../odds/odds_get_form.html?type=" + type + "&race_id=202603020211&housiki=" + housiki;
+$.ajax({
+type: "GET",
+url: url,
+data: null,
+cache: false,
+success: function(data)
+{
+window.history.pushState(null,null, url.replace('odds_get_form','index'));
+$("#odds_view_form").html(data); // show response from the php script.
+}
+});
+}
+//===========================================================
+// Docment Readyになったときに処理するもの
+//===========================================================
+$(document).ready(function ()
+{
+//オッズ表示時の買い目チェック
+cart_get_itemlist( 'bet_202603020211', init_select_kaime_normal );
+});
+//===========================================================
+// オッズ検索結果にて、
+// すでにチェック済みの買い目にチェックを入れる
+// in: _cart       = cart_get_itemlist()の戻り(item_id)
+//     _aryID['0'] = チェック対象のchkboxのidタグ検索キー
+//===========================================================
+function init_select_kaime_normal( _cart )
+{
+$("[id^='check_b']").each(function() {
+var chkbox = $(this);
+// var count = chkbox.val();
+var select_name = chkbox.attr('name');
+for (var item_id in _cart) {
+if (item_id == select_name) { // すでにチェック済みの買い目と一致したとき
+chkbox.find("input[type=checkbox]").prop("checked", true); // 該当chkboxをチェック
+$(this).parent().addClass('Selected');
+} else {
+chkbox.prop("checked", false);
+}
+}
+});
+view_check_count();        // チェック数をカウント(初期表示)
+}
+//------------------------------------------------------------
+// 買い目点数のカウント・表示
+//------------------------------------------------------------
+function view_check_count()
+{
+var cnt = 0;
+$("[id^='chk_b_']").each(function()
+{
+var chkbox = $(this);
+if ( chkbox.prop("checked") == true )
+{
+cnt++;
+}
+});
+$('#odds_select').text( cnt);
+//51件以上の買い目が選択されている場合はアラートメッセージ
+if(cnt>255)
+{
+$('#caution_50bet').css("display", "block");
+}
+else
+{
+$('#caution_50bet').css("display", "none");
+}
+}
+//------------------------------------------------------------
+//
+//------------------------------------------------------------
+function update_cart_checkbox( _group, _item_id, _item_value, _client_data, _checked )
+{
+console.log('update_cart_checkbox');
+if(true == _checked){
+cart_add_item( _group, _item_id, _item_value, '', _client_data );
+}else{
+cart_remove_item( _group, _item_id );
+}
+}
+function view_3odds()
+{
+umaban = $('#list_select_horse').val();
+$("#odds_view_result").html('');
+var url = "../odds/odds_get_form.html?type=b8&race_id=202603020211&jiku=" + umaban;
+// var url = "../odds/odds_get_form.html?type=" + _odds_ranking_bet_type + "&race_id=" + _odds_ranking_page_race_id + "&housiki=c99&ninki=" + umaban + "#odds_view";
+$.ajax({
+type: "GET",
+url: url,
+data: null,
+cache: false,
+success: function(data)
+{
+$("#odds_view_form").html(data); // show response from the php script.
+}
+});
+// umaban = $('#list_select_horse').val();
+// location.href = "../odds/index.html?type=b8&race_id=202603020211&jiku=" + umaban + "#odds_view";
+}
+$(function(){
+if($('.GraphOdds').length) {
+var wT = 0;
+wT = $('.GraphOdds').width();
+if(wT) {
+$('.Update_Btn_Group ').css('width',wT+'px')
+$('.OddsUpdateBox').css('max-width',wT+'px')
+}
+}
+})
+</script>

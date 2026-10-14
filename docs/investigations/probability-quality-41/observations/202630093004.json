@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202630093004",
+  "region": "nar",
+  "requestedDate": "20260930",
+  "kaisaiDate": "20260930",
+  "venueCode": "30",
+  "raceNumber": 4,
+  "raceName": "3歳以上 C4ー3",
+  "listedEntryCount": 8,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1700,
+  "runnerCount": 8,
+  "placedCount": 3,
+  "oddsStatus": "middle",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "バブリーダッシュ",
+      "prior": 0.3888684191828416,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 2.1,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 114
+    },
+    {
+      "umaban": 2,
+      "horseName": "サルデグラス",
+      "prior": 0.3401610809670325,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.6,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 16
+    },
+    {
+      "umaban": 3,
+      "horseName": "シャンアリーズ",
+      "prior": 0.3986177338539137,
+      "placeOddsMin": 2.9,
+      "placeOddsMax": 4.6,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 49
+    },
+    {
+      "umaban": 4,
+      "horseName": "ザフォロワーズ",
+      "prior": 0.40789676651529144,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 5,
+      "horseName": "アクティブテーラー",
+      "prior": 0.37918777291059197,
+      "placeOddsMin": 4.7,
+      "placeOddsMax": 7.4,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 75
+    },
+    {
+      "umaban": 6,
+      "horseName": "シャア",
+      "prior": 0.35726761542618435,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.6,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 20
+    },
+    {
+      "umaban": 7,
+      "horseName": "ダークディザイア",
+      "prior": 0.3361034051666823,
+      "placeOddsMin": 1.8,
+      "placeOddsMax": 2.6,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 8,
+      "horseName": "アースウルフ",
+      "prior": 0.39189720597746236,
+      "placeOddsMin": 5.9,
+      "placeOddsMax": 9.4,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 110
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/30",
+      "totalResultCount": 399,
+      "removedCount": 8,
+      "removedByCutoffCount": 8,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:43:24.772Z"
+}

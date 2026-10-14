@@ -1,0 +1,426 @@
+{
+  "//": "Issue #168(#163-a)AC-a6: 保存→取得の契約を固定する共有フィクスチャ。exe の AnalysisStore(better-sqlite3。packages/core/test/ev/analysis-store-contract.test.ts)と、後続 #169 の D1 実装(cloud)が同じファイルを相対パスで読み、同じ期待値に一致することで、両実装の変換が食い違わないことを保つ。各ケースは新しい空のストアに1件だけ保存して取得した結果(id は採番に依存するので期待値から除く)。JSON で表せない値(undefined・NaN)は使わない。省略は「キーが無い」で表す。",
+  "cases": [
+    {
+      "name": "全項目あり(配分あり。真偽値は true/false が混在、modelApproximate は true)",
+      "record": {
+        "raceId": "202603020211",
+        "analyzedAt": "2026-10-06T09:00:00.000Z",
+        "kaisaiDate": "2026/10/06",
+        "promptVersion": "v-test",
+        "additionalInstruction": "追加指示\n2行目",
+        "model": "claude-test",
+        "rawResponse": "応答 \"引用\" と改行\nと日本語",
+        "historyCutoffDate": "2026/10/06",
+        "promptLookaheadGuarded": false,
+        "evEstimated": true,
+        "raceSnapshot": {
+          "race": {
+            "raceName": "テスト記念",
+            "distance": 2000
+          },
+          "horses": [
+            {
+              "umaban": 1,
+              "name": "ウマ"
+            }
+          ],
+          "nested": {
+            "a": [
+              1,
+              2,
+              {
+                "b": null
+              }
+            ]
+          }
+        },
+        "horses": [
+          {
+            "umaban": 1,
+            "prior": 0.30000000000000004,
+            "adjustedProb": 0.25,
+            "placeOddsMin": 1.5,
+            "ev": 1.125,
+            "isPositive": true,
+            "contributions": {
+              "pace": 0.01,
+              "nested": {
+                "x": [
+                  1,
+                  2
+                ]
+              }
+            },
+            "mark": "◎",
+            "reason": "根拠その1",
+            "highlights": [
+              "追い切り好時計",
+              "内枠有利"
+            ],
+            "concerns": [
+              "距離延長"
+            ]
+          },
+          {
+            "umaban": 2,
+            "prior": 0,
+            "adjustedProb": 0,
+            "placeOddsMin": 0,
+            "ev": 0,
+            "isPositive": false,
+            "contributions": {},
+            "mark": "注",
+            "reason": "",
+            "highlights": [],
+            "concerns": [
+              "\"引用\"と改行\nを含む句"
+            ]
+          },
+          {
+            "umaban": 10,
+            "prior": 0.1,
+            "adjustedProb": 0.1,
+            "placeOddsMin": null,
+            "ev": null,
+            "isPositive": false,
+            "contributions": null,
+            "mark": null
+          }
+        ],
+        "allocation": {
+          "meta": {
+            "route": "mixed",
+            "unavailableReason": null,
+            "fallbackReason": "fb",
+            "skipReasonCode": null,
+            "comboOddsWide": "ok",
+            "comboOddsTrio": "not-sold",
+            "bankroll": 10000,
+            "perRaceCap": 3000.5,
+            "kellyFraction": 0.25,
+            "evThreshold": 1.05,
+            "includeComboOdds": true,
+            "includeWide": true,
+            "includeTrio": false,
+            "includeQuinella": true,
+            "includeExacta": false,
+            "includeTrifecta": true,
+            "includeBracketQuinella": false,
+            "betUnit": 100,
+            "greedySteps": 5,
+            "candidateCap": 50,
+            "modelId": "pl",
+            "modelApproximate": true,
+            "oddsStatus": "kakutei"
+          },
+          "bets": [
+            {
+              "betType": "place",
+              "comboKey": "01",
+              "stake": 300,
+              "odds": 1.5,
+              "ev": 1.125
+            },
+            {
+              "betType": "wide",
+              "comboKey": "0110",
+              "stake": 100,
+              "odds": null,
+              "ev": null
+            },
+            {
+              "betType": "place",
+              "comboKey": "02",
+              "stake": 200,
+              "odds": 0,
+              "ev": 0
+            }
+          ]
+        }
+      },
+      "expectedAnalysis": {
+        "raceId": "202603020211",
+        "analyzedAt": "2026-10-06T09:00:00.000Z",
+        "horses": [
+          {
+            "umaban": 1,
+            "prior": 0.30000000000000004,
+            "adjustedProb": 0.25,
+            "placeOddsMin": 1.5,
+            "ev": 1.125,
+            "isPositive": true,
+            "contributions": {
+              "pace": 0.01,
+              "nested": {
+                "x": [
+                  1,
+                  2
+                ]
+              }
+            },
+            "mark": "◎",
+            "reason": "根拠その1",
+            "highlights": [
+              "追い切り好時計",
+              "内枠有利"
+            ],
+            "concerns": [
+              "距離延長"
+            ]
+          },
+          {
+            "umaban": 2,
+            "prior": 0,
+            "adjustedProb": 0,
+            "placeOddsMin": 0,
+            "ev": 0,
+            "isPositive": false,
+            "contributions": {},
+            "mark": "注",
+            "reason": "",
+            "highlights": [],
+            "concerns": [
+              "\"引用\"と改行\nを含む句"
+            ]
+          },
+          {
+            "umaban": 10,
+            "prior": 0.1,
+            "adjustedProb": 0.1,
+            "placeOddsMin": null,
+            "ev": null,
+            "isPositive": false,
+            "contributions": null,
+            "mark": null,
+            "reason": null,
+            "highlights": [],
+            "concerns": []
+          }
+        ],
+        "evEstimated": true,
+        "promptVersion": "v-test",
+        "additionalInstruction": "追加指示\n2行目",
+        "kaisaiDate": "2026/10/06",
+        "model": "claude-test",
+        "rawResponse": "応答 \"引用\" と改行\nと日本語",
+        "raceSnapshot": {
+          "race": {
+            "raceName": "テスト記念",
+            "distance": 2000
+          },
+          "horses": [
+            {
+              "umaban": 1,
+              "name": "ウマ"
+            }
+          ],
+          "nested": {
+            "a": [
+              1,
+              2,
+              {
+                "b": null
+              }
+            ]
+          }
+        },
+        "historyCutoffDate": "2026/10/06",
+        "promptLookaheadGuarded": false
+      },
+      "expectedAllocation": {
+        "route": "mixed",
+        "unavailableReason": null,
+        "fallbackReason": "fb",
+        "skipReasonCode": null,
+        "bankroll": 10000,
+        "perRaceCap": 3000.5,
+        "kellyFraction": 0.25,
+        "evThreshold": 1.05,
+        "includeComboOdds": true,
+        "includeWide": true,
+        "includeTrio": false,
+        "includeQuinella": true,
+        "includeExacta": false,
+        "includeTrifecta": true,
+        "includeBracketQuinella": false,
+        "betUnit": 100,
+        "oddsStatus": "kakutei",
+        "bets": [
+          {
+            "betType": "place",
+            "comboKey": "01",
+            "stake": 300,
+            "odds": 1.5,
+            "ev": 1.125
+          },
+          {
+            "betType": "place",
+            "comboKey": "02",
+            "stake": 200,
+            "odds": 0,
+            "ev": 0
+          },
+          {
+            "betType": "wide",
+            "comboKey": "0110",
+            "stake": 100,
+            "odds": null,
+            "ev": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "必須項目だけ(旧来の呼び出し。省略した項目は NULL から null/false へ復元され、配分なしは null)",
+      "record": {
+        "raceId": "202654071210",
+        "analyzedAt": "2026-10-06T10:00:00.000Z",
+        "horses": [
+          {
+            "umaban": 3,
+            "prior": 0.5,
+            "adjustedProb": 0.5,
+            "placeOddsMin": null,
+            "ev": null,
+            "isPositive": false,
+            "contributions": null,
+            "mark": null
+          }
+        ]
+      },
+      "expectedAnalysis": {
+        "raceId": "202654071210",
+        "analyzedAt": "2026-10-06T10:00:00.000Z",
+        "horses": [
+          {
+            "umaban": 3,
+            "prior": 0.5,
+            "adjustedProb": 0.5,
+            "placeOddsMin": null,
+            "ev": null,
+            "isPositive": false,
+            "contributions": null,
+            "mark": null,
+            "reason": null,
+            "highlights": [],
+            "concerns": []
+          }
+        ],
+        "evEstimated": false,
+        "promptVersion": null,
+        "additionalInstruction": null,
+        "kaisaiDate": null,
+        "model": null,
+        "rawResponse": null,
+        "raceSnapshot": null,
+        "historyCutoffDate": null,
+        "promptLookaheadGuarded": null
+      },
+      "expectedAllocation": null
+    },
+    {
+      "name": "配分あり・買い目なし・フラグはすべて false・modelApproximate は false・promptLookaheadGuarded は true",
+      "record": {
+        "raceId": "202603020212",
+        "analyzedAt": "2026-10-06T11:00:00.000Z",
+        "evEstimated": false,
+        "promptLookaheadGuarded": true,
+        "horses": [
+          {
+            "umaban": 1,
+            "prior": 1,
+            "adjustedProb": 1,
+            "placeOddsMin": 2,
+            "ev": 2,
+            "isPositive": true,
+            "contributions": [
+              1,
+              2
+            ],
+            "mark": "▲"
+          }
+        ],
+        "allocation": {
+          "meta": {
+            "route": "unavailable",
+            "unavailableReason": "odds-missing",
+            "fallbackReason": null,
+            "skipReasonCode": "no-ev",
+            "comboOddsWide": null,
+            "comboOddsTrio": null,
+            "bankroll": 0,
+            "perRaceCap": 0,
+            "kellyFraction": 0,
+            "evThreshold": 0,
+            "includeComboOdds": false,
+            "includeWide": false,
+            "includeTrio": false,
+            "includeQuinella": false,
+            "includeExacta": false,
+            "includeTrifecta": false,
+            "includeBracketQuinella": false,
+            "betUnit": null,
+            "greedySteps": null,
+            "candidateCap": null,
+            "modelId": null,
+            "modelApproximate": false,
+            "oddsStatus": "yoso"
+          },
+          "bets": []
+        }
+      },
+      "expectedAnalysis": {
+        "raceId": "202603020212",
+        "analyzedAt": "2026-10-06T11:00:00.000Z",
+        "horses": [
+          {
+            "umaban": 1,
+            "prior": 1,
+            "adjustedProb": 1,
+            "placeOddsMin": 2,
+            "ev": 2,
+            "isPositive": true,
+            "contributions": [
+              1,
+              2
+            ],
+            "mark": "▲",
+            "reason": null,
+            "highlights": [],
+            "concerns": []
+          }
+        ],
+        "evEstimated": false,
+        "promptVersion": null,
+        "additionalInstruction": null,
+        "kaisaiDate": null,
+        "model": null,
+        "rawResponse": null,
+        "raceSnapshot": null,
+        "historyCutoffDate": null,
+        "promptLookaheadGuarded": true
+      },
+      "expectedAllocation": {
+        "route": "unavailable",
+        "unavailableReason": "odds-missing",
+        "fallbackReason": null,
+        "skipReasonCode": "no-ev",
+        "bankroll": 0,
+        "perRaceCap": 0,
+        "kellyFraction": 0,
+        "evThreshold": 0,
+        "includeComboOdds": false,
+        "includeWide": false,
+        "includeTrio": false,
+        "includeQuinella": false,
+        "includeExacta": false,
+        "includeTrifecta": false,
+        "includeBracketQuinella": false,
+        "betUnit": null,
+        "oddsStatus": "yoso",
+        "bets": []
+      }
+    }
+  ]
+}

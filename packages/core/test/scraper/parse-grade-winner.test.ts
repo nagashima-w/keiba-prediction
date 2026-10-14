@@ -266,6 +266,48 @@ describe("parseGradeWinnerResponse(異常系・型の揺れへの耐性)", () =>
     });
   });
 
+  // Issue #75(H4): 人気は1始まりの整数。0・負・小数は値域外であり、生成側で null にする
+  // (消費側 grade-winner-trend の isPositiveFinite が弾いていても、生成側が値域外を通さない)。
+  // 実データは number のファイルと数字文字列のファイルの両方があるため、両方を表にする。
+  it.each<[unknown, number | null, string]>([
+    [0, null, "数値の0"],
+    ["0", null, '文字列の"0"'],
+    [-2, null, "負の数値"],
+    [4.5, null, "非整数の数値"],
+    ["", null, "空文字"],
+    [4, 4, "数値の正の整数"],
+    ["4", 4, "数字文字列の正の整数"],
+  ])(
+    "result[].ninki と payback.fuku_ninki1..3 は、入力 %j のとき %j になること(%s)",
+    (input, expected) => {
+      const entries = [
+        {
+          race_id: "202001010101",
+          jyo: "テスト場",
+          kyori: 2000,
+          track: "芝",
+          tosu: 10,
+          result: [{ umaban: 1, kakutei: 1, ninki: input }],
+          payback: {
+            fuku_pay1: 280,
+            fuku_ninki1: input,
+            fuku_pay2: 300,
+            fuku_ninki2: input,
+            fuku_pay3: 430,
+            fuku_ninki3: input,
+          },
+        },
+      ];
+      const parsed = parseGradeWinnerResponse(makeOkResponse(entries));
+      expect(parsed![0]!.result[0]!.ninki).toBe(expected);
+      expect(parsed![0]!.payback!.fukuNinki1).toBe(expected);
+      expect(parsed![0]!.payback!.fukuNinki2).toBe(expected);
+      expect(parsed![0]!.payback!.fukuNinki3).toBe(expected);
+      // 人気以外のフィールドは無変更(fuku_pay は 0 でなくても素通り)
+      expect(parsed![0]!.payback!.fukuPay1).toBe(280);
+    },
+  );
+
   it("status:OKなのにdataが欠損している場合はGradeWinnerParseErrorを投げること", () => {
     const raw = JSON.stringify({ status: "OK", reason: null });
     expect(() => parseGradeWinnerResponse(raw)).toThrow(GradeWinnerParseError);

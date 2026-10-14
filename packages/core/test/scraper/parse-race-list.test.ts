@@ -265,3 +265,142 @@ describe("parseRaceList(グレードラベルの抽出)", () => {
     expect(entries[0]!.grade).toBe("Jpn1");
   });
 });
+
+describe("parseRaceList(発走時刻 startTime の抽出。Issue #202)", () => {
+  /**
+   * 独立に数えた期待値(フィクスチャ HTML を python の正規表現で走査。帯広〈場コード65〉の行は除く)。
+   * 「全行に時刻がある」ことを件数で固定する(0件でも通る空振りを避けるため、行数を無条件に expect する)。
+   */
+  const NAR_FIXTURES: readonly (readonly [string, number])[] = [
+    ["nar_race_list_sub_20260624.html", 48],
+    ["nar_race_list_sub_20260712.html", 32],
+    ["nar_race_list_sub_20260713.html", 36],
+    ["nar_race_list_sub_20260808.html", 10],
+    ["nar_race_list_sub_20260924.html", 47],
+    ["nar_race_list_sub_20260927.html", 33],
+  ];
+
+  it.each(NAR_FIXTURES)("地方 %s: %i 行すべてが HH:MM(ゼロ詰め2桁:2桁)の startTime を持つ", (name, count) => {
+    const parsed = parseRaceList(loadFixture(name));
+    expect(parsed).toHaveLength(count);
+    for (const e of parsed) {
+      expect(e.startTime, e.raceId).toMatch(/^\d{2}:\d{2}$/);
+    }
+  });
+
+  it.each([
+    ["race_list_sub_20260628.html", 36],
+    ["race_list_sub_20260808.html", 36],
+    ["race_list_sub_20260927.html", 24],
+  ] as const)("中央 %s: %i 行すべてが HH:MM の startTime を持つ", (name, count) => {
+    const parsed = parseRaceList(loadFixture(name));
+    expect(parsed).toHaveLength(count);
+    for (const e of parsed) {
+      expect(e.startTime, e.raceId).toMatch(/^\d{2}:\d{2}$/);
+    }
+  });
+
+  it("実測値: 中央 福島11R ラジオNIKKEI賞=15:45・福島1R 障害=10:05・函館1R=09:50(先頭ゼロ付きの2桁)", () => {
+    expect(byRaceId("202603020211").startTime).toBe("15:45");
+    expect(byRaceId("202603020201").startTime).toBe("10:05");
+    expect(byRaceId("202602010601").startTime).toBe("09:50");
+  });
+
+  it("実測値: 地方(div.RaceData 直下の最初の span)さきたま杯 Jpn1(浦和 11R)=18:50", () => {
+    const e = parseRaceList(loadFixture("nar_race_list_sub_20260624.html")).find((x) => x.raceId === "202642062411");
+    expect(e).toBeDefined();
+    expect(e!.startTime).toBe("18:50");
+  });
+
+  it("中央の発走後に取得した一覧(20260926)では、時刻が空の17行は startTime のキー自体が無く、時刻のある7行だけが値を持つ", () => {
+    const parsed = parseRaceList(loadFixture("race_list_sub_20260926.html"));
+    expect(parsed).toHaveLength(24);
+    const withTime = parsed.filter((e) => e.startTime !== undefined);
+    const without = parsed.filter((e) => e.startTime === undefined);
+    expect(withTime).toHaveLength(7);
+    expect(without).toHaveLength(17);
+    for (const e of without) {
+      // 空文字・"undefined" 文字列を拾わない(キーを持たない形。JSON に出ない)
+      expect("startTime" in e, e.raceId).toBe(false);
+    }
+    for (const e of withTime) {
+      expect(e.startTime).toMatch(/^\d{2}:\d{2}$/);
+    }
+  });
+
+  it("時間が1桁の表記(`9:05`)は先頭ゼロを補って `09:05` にする(中央・地方の両方の構造)", () => {
+    const build = (timeMarkup: string): string => `
+<dl class="RaceList_DataList">
+<dt class="RaceList_DataHeader"><p class="RaceList_DataTitle"><small>1回</small> 福島 <small>1日目</small></p></dt>
+<dd class="RaceList_Data"><ul>
+<li class="RaceList_DataItem">
+<a href="../race/shutuba.html?race_id=202603020201&rf=race_list">
+<div class="Race_Num"><span>1R</span></div>
+<div class="RaceList_ItemContent">
+<div class="RaceList_ItemTitle"><span class="ItemTitle">未勝利</span></div>
+<div class="RaceData">${timeMarkup}<span class="Dart">ダ1200m</span>16頭</div>
+</div>
+</a>
+</li>
+</ul></dd>
+</dl>`;
+    const central = parseRaceList(build('<span class="RaceList_Itemtime">9:05 </span>'));
+    expect(central).toHaveLength(1);
+    expect(central[0]!.startTime).toBe("09:05");
+    const nar = parseRaceList(build("<span>9:05</span>"));
+    expect(nar).toHaveLength(1);
+    expect(nar[0]!.startTime).toBe("09:05");
+  });
+
+  it("範囲外の時刻(`25:00`・`24:00`・`10:60`・`10:75`。境界の 24 時・60 分を含む)は拾わず、startTime のキーを持たない(startTimeEpochMs が投げる値を渡さない)", () => {
+    const build = (time: string): string => `
+<dl class="RaceList_DataList">
+<dt class="RaceList_DataHeader"><p class="RaceList_DataTitle"><small>1回</small> 福島 <small>1日目</small></p></dt>
+<dd class="RaceList_Data"><ul>
+<li class="RaceList_DataItem">
+<a href="../race/shutuba.html?race_id=202603020201&rf=race_list">
+<div class="Race_Num"><span>1R</span></div>
+<div class="RaceList_ItemContent">
+<div class="RaceList_ItemTitle"><span class="ItemTitle">未勝利</span></div>
+<div class="RaceData"><span class="RaceList_Itemtime">${time}</span><span class="Dart">ダ1200m</span>16頭</div>
+</div>
+</a>
+</li>
+</ul></dd>
+</dl>`;
+    for (const bad of ["25:00", "24:00", "10:60", "10:75"]) {
+      const parsed = parseRaceList(build(bad));
+      expect(parsed, bad).toHaveLength(1);
+      expect("startTime" in parsed[0]!, bad).toBe(false);
+    }
+    // 対照(境界。空振りでない): 23:59・00:00 は拾う
+    for (const ok of ["23:59", "00:00"]) {
+      const parsed = parseRaceList(build(ok));
+      expect(parsed[0]!.startTime, ok).toBe(ok);
+    }
+  });
+
+  it("startTime を足しても既存のフィールドは変わらない(ラジオNIKKEI賞の既存の期待値と同じ)", () => {
+    const e = byRaceId("202603020211");
+    expect(e.name).toBe("ラジオNIK");
+    expect(e.courseType).toBe("芝");
+    expect(e.distance).toBe(1800);
+    expect(e.entryCount).toBe(16);
+    expect(e.venue).toBe("福島");
+    expect(e.raceNumber).toBe(11);
+    // 中央のグレードはアイコンの番号から読むようになった(Issue #250。番号 3 = G3)。他のフィールドは従来どおり。
+    expect(e.grade).toBe("G3");
+  });
+
+  it("合成フィクスチャ(20260927 の地方に Jpn3 を1件足したもの): 水沢 10R(202636092710)だけが Jpn3 で、実測の地方重賞(202636092711)は 重賞 のまま", () => {
+    const parsed = parseRaceList(loadFixture("synthetic_nar_race_list_sub_20260927_jpn3.html"));
+    expect(parsed).toHaveLength(33);
+    const jpn = parsed.filter((e) => e.grade === "Jpn3");
+    expect(jpn.map((e) => e.raceId)).toEqual(["202636092710"]);
+    expect(jpn[0]!.venue).toBe("水沢");
+    expect(jpn[0]!.raceNumber).toBe(10);
+    expect(jpn[0]!.startTime).toBe("16:55");
+    const graded = parsed.find((e) => e.raceId === "202636092711");
+    expect(graded?.grade).toBe("重賞");
+  });
+});

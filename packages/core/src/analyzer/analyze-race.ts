@@ -30,6 +30,7 @@
 import { buildPrompt, type BuildPromptInput } from "./build-prompt.js";
 import {
   AnalyzerMarkViolationError,
+  AnalyzerRefusalError,
   AnalyzerResponseParseError,
   AnalyzerTruncationError,
   parseAnalyzerResponse,
@@ -42,11 +43,11 @@ import {
  *
  * 背景: 従来は生の例外メッセージ(lastError.message等)をそのまま fallbackReason に埋め込んでいたが、
  * これは analyzeRace 内部専用のフィールドで、UI/DBには露出していなかった。今回 fallbackReason を
- * UI(BatchAnalysisView の「LLM補正:」行tooltip)へ新規露出させるにあたり、CLAUDE.mdに記録された
+ * UI(exe の BatchAnalysisView(#287 で削除。3c1664e まで) の「LLM補正:」行tooltip)へ新規露出させるにあたり、CLAUDE.mdに記録された
  * 過去の秘密漏洩事故の重さを踏まえ、生の例外内容(万一 apiKey・プロンプト本文の断片等を含んでいても)が
  * 構造的にUI/DBへ混入しないよう、fallbackReason は必ずこの3種の固定文字列のいずれかとする
- * (診断に必要な生の詳細は diagnosticMessage に別途保持し、ログ経路〈main/pipeline-deps.ts の
- * onFallback→main/logger.ts の logWarn〉でのみ、既存の秘密マスキング〈log-formatter.ts〉を通して使う。
+ * (診断に必要な生の詳細は diagnosticMessage に別途保持し、ログ経路〈exe の main/pipeline-deps.ts(#287 で削除。3c1664e まで)の
+ * onFallback→exe の main/logger.ts の logWarn〉でのみ、既存の秘密マスキング〈exe の log-formatter.ts〉を通して使う。
  * UI/DB(AnalysisResult/AnalysisRecord)へは diagnosticMessage を一切渡さない)。
  */
 export const FALLBACK_REASON_TRUNCATED =
@@ -59,12 +60,34 @@ export const FALLBACK_REASON_INVOCATION_ERROR =
   "LLM呼び出しに失敗したため、3着内率をそのまま採用しました";
 
 /**
+ * 拒否(stop_reason==="refusal")時の固定分類文言(Issue #157)。
+ * 切り詰め・汎用パース失敗とは別の原因なので、別の文言で区別する(汎用の「JSON解析失敗」に埋もれると
+ * 拒否されたことが分からなくなる)。
+ */
+export const FALLBACK_REASON_REFUSED =
+  "LLMが応答を拒否(refusal)したため、3着内率をそのまま採用しました";
+
+/** completeDetailed の戻り値: 生出力テキストと実際に使ったモデルID。 */
+export interface LlmCompletion {
+  /** LLMの生出力テキスト。 */
+  readonly text: string;
+  /** 実際に使ったモデルID(レスポンスの model を優先し、無ければリクエストしたID)。 */
+  readonly model: string;
+}
+
+/**
  * analyzer が使う LLM クライアントの最小インターフェース。
  * プロンプト文字列を渡すと、LLMの生出力テキストを返す。実装は anthropic-client.ts。
  */
 export interface LlmClient {
   /** プロンプトを送り、LLMの生出力テキストを返す。 */
   complete(prompt: string): Promise<string>;
+  /**
+   * プロンプトを送り、生出力テキストと実際に使ったモデルを返す(Issue #157。後方互換の追加で、
+   * 実装しない LlmClient〈既存のモック等〉は complete だけで動く)。あれば analyzeRace はこちらを使い、
+   * AnalyzeRaceResult.modelUsed に載せる。
+   */
+  completeDetailed?(prompt: string): Promise<LlmCompletion>;
 }
 
 /** analyzeRace の依存(注入)。 */
@@ -117,9 +140,9 @@ export interface AnalyzeRaceResult {
   readonly stopReason?: string | null;
   /**
    * fallback:true 時の診断用の生詳細(例外メッセージ等)。UI(AnalysisResult)にもDB
-   * (AnalysisRecord)にも絶対に伝播させないこと。main/analysis-pipeline.ts の onFallback
-   * コールバック経由で main/logger.ts の logWarn に渡し、既存の秘密マスキング
-   * (shared/log-formatter.ts)を通してのみ記録する(#35 ログ基盤: LLM呼び出し失敗の原因を
+   * (AnalysisRecord)にも絶対に伝播させないこと。analysis/analysis-pipeline.ts の onFallback
+   * コールバック経由で exe の main/logger.ts の logWarn に渡し、既存の秘密マスキング
+   * (exe の shared/log-formatter.ts)を通してのみ記録する(#35 ログ基盤: LLM呼び出し失敗の原因を
    * 完全不可視にしないための診断ログ保持)。truncated:true の場合は stopReason で診断可能なため
    * 生の例外メッセージではなく固定文言(FALLBACK_REASON_TRUNCATED)を入れる。fallback:true の
    * 失敗時は必ず値が入り、成功時・印救済時(fallback:false)は省略(undefined)。
@@ -135,6 +158,15 @@ export interface AnalyzeRaceResult {
    * (analyzeRace 自身は必ずこのフィールドを明示的に設定して返す)。
    */
   readonly rawResponse?: string | null;
+  /**
+   * 実際に応答したモデルID(Issue #157)。LlmClient.completeDetailed を持つ実装のときだけ載り、
+   * 応答を得られた最後の試行のモデルが入る(リトライで切り替わった場合は採用した試行のもの)。
+   * 拒否(refusal)・切り詰め(max_tokens)は応答自体は得ているため、例外が運ぶ model で埋める。
+   * 応答を得られなかった(HTTPエラー・ネットワーク断等の)呼び出しが毎回の場合・
+   * completeDetailed を持たない LlmClient では
+   * キー自体を持たない(呼び出し側は静的なモデル名で代用する)。
+   */
+  readonly modelUsed?: string;
 }
 
 /**
@@ -150,6 +182,8 @@ function priorFallbackHorses(priors: readonly PriorRef[]): ParsedHorseResult[] {
     prior: p.prior,
     adjustedProb: p.prior,
     reason: null,
+    highlights: [],
+    concerns: [],
     clipped: false,
     usedPrior: true,
     mark: null,
@@ -179,15 +213,34 @@ export async function analyzeRace(
   // LLM呼び出しとパースを別tryに分け、パース例外(印違反含む)のcatch節でも呼び出し済みの
   // テキストを参照できるようにする(tryブロック内のconstはcatch節から見えないため)。
   let lastMarkViolationText: string | null = null;
+  // 応答を得られた最後の試行のモデル(Issue #157)。completeDetailed を持たない LlmClient や、
+  // 毎回例外で応答が無い場合は undefined のまま(結果にキー自体を載せない)。
+  let modelUsed: string | undefined;
+  const withModel = (): { modelUsed?: string } =>
+    modelUsed === undefined ? {} : { modelUsed };
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let text: string;
     try {
-      text = await deps.llm.complete(prompt);
+      if (deps.llm.completeDetailed !== undefined) {
+        const completion = await deps.llm.completeDetailed(prompt);
+        text = completion.text;
+        modelUsed = completion.model;
+      } else {
+        text = await deps.llm.complete(prompt);
+      }
     } catch (e) {
       // LLM呼び出し自体の例外(認証エラー・レート制限・ネットワーク断等)。テキスト自体を
       // 取得できていないため、rawResponse は次の試行に持ち越さず null のままにする。
       lastError = e;
+      // 拒否・切り詰めは応答したモデルを例外に載せて返す(応答は得ているため、使ったモデルとして残す。
+      // 残さないと、呼び出し側が静的な固定モデル名で代用して実際と違う値を記録してしまう)。
+      if (
+        (e instanceof AnalyzerRefusalError || e instanceof AnalyzerTruncationError) &&
+        e.model !== undefined
+      ) {
+        modelUsed = e.model;
+      }
       continue;
     }
     try {
@@ -202,6 +255,7 @@ export async function analyzeRace(
         marksDropped: false,
         marksDroppedReason: null,
         rawResponse: text,
+        ...withModel(),
       };
     } catch (e) {
       // パース失敗(印関連違反を含む)。残り試行があればリトライ。
@@ -225,6 +279,7 @@ export async function analyzeRace(
       marksDropped: true,
       marksDroppedReason: `印関連の制約違反のため2回目応答でも印を採用できず、確率補正のみ採用して印は全馬nullにしました: ${lastError.message}`,
       rawResponse: lastMarkViolationText,
+      ...withModel(),
     };
   }
 
@@ -245,14 +300,34 @@ export async function analyzeRace(
       diagnosticMessage: FALLBACK_REASON_TRUNCATED,
       // 切り詰め検出はLLM呼び出し自体の例外(text未取得)のため rawResponse は null(Issue#10)。
       rawResponse: null,
+      ...withModel(),
+    };
+  }
+
+  // 拒否(stop_reason==="refusal"。Issue #157)。切り詰めと同じく、汎用のJSON解析失敗より先に判定し、
+  // 専用の固定文言・stopReason を返す(content が空のため汎用文言では原因が分からなくなる)。
+  // truncated は「切り詰めが原因か」なので、拒否では false。
+  if (lastError instanceof AnalyzerRefusalError) {
+    return {
+      horses: priorFallbackHorses(priors),
+      fallback: true,
+      retryCount: maxAttempts - 1,
+      fallbackReason: FALLBACK_REASON_REFUSED,
+      marksDropped: false,
+      marksDroppedReason: null,
+      truncated: false,
+      stopReason: lastError.stopReason,
+      diagnosticMessage: FALLBACK_REASON_REFUSED,
+      rawResponse: null,
+      ...withModel(),
     };
   }
 
   // 印・切り詰めのいずれとも無関係な失敗 → prior をそのまま採用(フェイルセーフ)。
   // fallbackReason(UI/DB向け)は固定分類文言のみとし、生の例外メッセージ(万一秘密を含んでいても)が
   // 構造的に混入しないようにする。生の詳細は diagnosticMessage に保持し、ログ経路
-  // (main/analysis-pipeline.ts の onFallback → main/logger.ts の logWarn)でのみ、
-  // 既存の秘密マスキング(shared/log-formatter.ts)を通して使う(#35 診断ログ保持)。
+  // (analysis/analysis-pipeline.ts の onFallback → exe の main/logger.ts の logWarn)でのみ、
+  // 既存の秘密マスキング(exe の shared/log-formatter.ts)を通して使う(#35 診断ログ保持)。
   const isParseError = lastError instanceof AnalyzerResponseParseError;
   const reason = isParseError ? FALLBACK_REASON_PARSE_ERROR : FALLBACK_REASON_INVOCATION_ERROR;
   const diagnosticMessage = isParseError
@@ -273,6 +348,7 @@ export async function analyzeRace(
     // テキストを取得できていても(パース失敗の場合)UI/DB向けrawResponseには載せない
     // (欠損は明示null。Issue#10「text未取得の失敗時はnull」と同じ扱いに統一する)。
     rawResponse: null,
+    ...withModel(),
   };
 }
 

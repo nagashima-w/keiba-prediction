@@ -61,13 +61,6 @@ export interface RotationBiasConfig {
    * 既定0.1(複勝率差10ポイント)に設定。verifyの寄与度ログを見て調整する。
    */
   readonly clearlyLowerThreshold: number;
-  /**
-   * 休み明け実績が2走未満で型判定できない(不明)とき、今回が休み明けの場合に適用する
-   * 弱いマイナス補正の大きさ(正の値)。実際の補正は -unknownRestPenalty × 重み。
-   * 仕様「休み明け実績2走未満は不明として弱いマイナス補正のみ(休み明けは平均的に割引が妥当)」。
-   * 控えめに 0.05 を既定とする(チューニング対象)。
-   */
-  readonly unknownRestPenalty: number;
 }
 
 /** 競馬場適性(代替評価)の設定。 */
@@ -92,7 +85,10 @@ export interface BaseScoreWeights {
   readonly courseDistance: number;
   /** 騎手の当該コース複勝率。 */
   readonly jockey: number;
-  /** 斤量変化・馬体重増減。 */
+  /**
+   * 斤量変化。キー名は「斤量・馬体重」だった頃のまま据え置いている(設定に保存済みの値を黙って既定値に
+   * 戻さないため)。馬体重の減点は Issue #213 で撤去したので、今は斤量だけに効く。
+   */
   readonly weightChange: number;
   /** コースレベル枠順バイアス(定数テーブル・仕様の枠2層のうち①)。 */
   readonly courseFrameBias: number;
@@ -103,8 +99,13 @@ export interface BaseScoreWeights {
  *
  * 近走着順・コース距離適性・騎手複勝率などの「複勝率系」項目は、対象複勝率と中立基準
  * (neutralPlaceRate)の差分に重みを掛けて補正を作る(バイアス補正と同じ差分パターン)。
- * 中立基準はリーグ平均的な複勝率の目安であり、頭数正規化(prior.ts)で系統的な偏りは吸収するため
- * 概算で足りる。すべてチューニング対象(verifyの寄与度ログを見て調整する)。
+ * 中立基準はリーグ平均的な複勝率の目安であり、全馬に共通の偏りは頭数正規化(prior.ts の
+ * `normalizeFieldPriors`。Issue #258 で乗算からロジットシフトに替えた)が吸収するため概算で足りる。
+ * すべてチューニング対象(verifyの寄与度ログを見て調整する)。
+ * ただし**騎手の項だけは中立が別**(`jockeyNeutralPlaceRate`。中央・地方別。Issue #226): 全騎乗の平均複勝率は
+ * 0.33 よりずっと低く、流用すると平均的な騎手が全員マイナス補正になり、寄与度ログ上の騎手項が
+ * 「平均的な騎手 = 0」にならない(Issue #258 以降、全馬共通の偏りはレース内で正規化が吸収するが、
+ * 補正値の読みやすさのために平均的な騎手を中立に置く設計は変えていない)。
  *
  * 既定重みの較正根拠(過剰補正・クランプ飽和の防止。仕様L135):
  * - recentForm・courseDistance・jockey はいずれも「馬の総合能力」を別スライスで測る相関の強い
@@ -121,6 +122,26 @@ export interface BaseScoreConfig {
    * 平均的な馬の複勝率の目安(既定0.33)。差分 = 対象複勝率 − この値。
    */
   readonly neutralPlaceRate: number;
+  /**
+   * 騎手の複勝率(前年+当年の全体の成績。Issue #226)の中立基準。**中央と地方で別の値**。
+   * 差分 = 騎手の複勝率 − この値。`neutralPlaceRate`(0.33。「馬」の複勝率の目安)を流用しないのは、
+   * 全騎乗の平均複勝率はもっと低いため(平均的な騎手が全員マイナス補正になる)。
+   *
+   * 既定値の根拠: 全騎乗の平均複勝率 = Σ min(3,頭数) / Σ 頭数。レース一覧のフィクスチャで
+   * 中央 0.2159(8開催日・252レース・3,501頭)→ 0.22、地方 0.2906(7開催日・254レース・2,622頭)→ 0.29
+   * (小数2桁に丸めた)。再現: `test/scorer/jockey-neutral-rate.test.ts`(フィクスチャのファイル名を固定して再計算し、
+   * 既定値と一致することを検査している)。
+   */
+  readonly jockeyNeutralPlaceRate: {
+    readonly central: number;
+    readonly nar: number;
+  };
+  /**
+   * 騎手の複勝率で補正を掛ける最小の騎乗数(前年+当年の合計。既定100)。これ未満は補正なし(縮小推定はしない。
+   * ユーザー決定 2026-10-11)。バイアス項目の `minSampleForBias`(2)とは別: 年単位の集計は数百走が普通で、
+   * 数走の騎手(海外の短期免許・デビュー直後)の複勝率で補正しないための下限。
+   */
+  readonly jockeyMinStarts: number;
   /**
    * 近走着順の幾何減衰率(0<r≤1)。直近走の重み1、1走ごとに r 倍に減衰する(既定0.8)。
    */
@@ -149,10 +170,6 @@ export interface BaseScoreConfig {
   readonly kinryoScale: number;
   /** 斤量変化の絶対値の上限(kg)。極端な値を抑える。既定3。 */
   readonly kinryoCapKg: number;
-  /** 馬体重減1kgあたりの補正スケール(減でマイナス方向)。既定0.004。 */
-  readonly bodyWeightDropScale: number;
-  /** 馬体重減補正の下限(kg、負値)。これより大きい減は同じ扱いにする。既定-20。 */
-  readonly bodyWeightDropCapKg: number;
 }
 
 /** prior(事前複勝確率)合成の設定。 */
@@ -163,14 +180,10 @@ export interface PriorConfig {
   readonly maxPrior: number;
   /**
    * 頭数レベル正規化の目標となる「1レースの複勝圏内数」(既定3)。
-   * 実際の目標は min(この値, 頭数)。全馬のraw合計をこの目標に寄せる。
+   * 実際の目標は min(この値, 頭数)。全馬の prior の合計をこの目標にちょうど合わせる
+   * (Issue #258: 旧版の「逸脱が許容〈normalizeTolerance=0.1〉を超えたときだけ」のゲートは撤去した)。
    */
   readonly targetPlaceCount: number;
-  /**
-   * 頭数正規化を発動する逸脱の許容比率(既定0.1)。
-   * |raw合計 − 目標| / 目標 がこの値を超えたときだけ正規化する(仕様「大きく逸脱する場合は正規化」)。
-   */
-  readonly normalizeTolerance: number;
   /**
    * 環境・状態バイアス7項目(馬場・競馬場・季節・夏負け・枠順個別・輸送滞在・ローテ)の補正合計に
    * 掛ける減衰係数(既定0.3)。各バイアスは小さいバケットの複勝率差でノイズが乗りやすく、重み1のまま
@@ -246,11 +259,13 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
       last3f: 0.1,
       courseDistance: 0.15,
       jockey: 0.15,
-      // 斤量・馬体重・コース枠順は補正値自体が小さい(±0.05以内)ため重み1でよい。
+      // 斤量・コース枠順は補正値自体が小さい(±0.05以内)ため重み1でよい。
       weightChange: 1,
       courseFrameBias: 1,
     },
     neutralPlaceRate: 0.33,
+    jockeyNeutralPlaceRate: { central: 0.22, nar: 0.29 },
+    jockeyMinStarts: 100,
     recentFormDecay: 0.8,
     recentFormMaxRuns: 6,
     outOfPlaceStep: 0.1,
@@ -259,14 +274,11 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
     distanceBandMeters: 200,
     kinryoScale: 0.01,
     kinryoCapKg: 3,
-    bodyWeightDropScale: 0.004,
-    bodyWeightDropCapKg: -20,
   },
   prior: {
     minPrior: 0.02,
     maxPrior: 0.95,
     targetPlaceCount: 3,
-    normalizeTolerance: 0.1,
     biasCorrectionScale: 0.3,
   },
   summerFatigue: {
@@ -284,6 +296,5 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
   },
   rotation: {
     clearlyLowerThreshold: 0.1,
-    unknownRestPenalty: 0.05,
   },
 };

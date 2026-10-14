@@ -6,7 +6,8 @@
  */
 
 import * as cheerio from "cheerio";
-import { InvalidIdError, parseRaceId } from "./ids.js";
+import { centralGradeFromClassNames } from "./grade-label.js";
+import { InvalidIdError, parseRaceId, venueKindOfRaceId } from "./ids.js";
 import { PATTERNS, RACE_LIST_SELECTORS as SEL } from "./selectors.js";
 import type { CourseType, RaceListEntry } from "./types.js";
 
@@ -21,6 +22,23 @@ function toCourseType(raw: string): CourseType {
       // 正規表現側で3種のみ捕捉するため、ここには到達しない想定。
       throw new Error(`未知のコース種別です: ${raw}`);
   }
+}
+
+/**
+ * 一覧のデータ枠のテキストから、発走時刻を `HH:MM`(ゼロ詰め)で取り出す。無い・範囲外(0〜23 時・0〜59 分の外)は undefined。
+ * 範囲外を落とすのは、cloud の `startTimeEpochMs` が `00:00〜23:59` 以外で投げるため(壊れた表記で定時の予約を落とさない)。
+ */
+function toStartTime(dataText: string): string | undefined {
+  const match = PATTERNS.raceListStartTime.exec(dataText);
+  if (match === null) {
+    return undefined;
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) {
+    return undefined;
+  }
+  return `${String(hour).padStart(2, "0")}:${match[2]}`;
 }
 
 /**
@@ -86,12 +104,22 @@ export function parseRaceList(html: string): RaceListEntry[] {
         PATTERNS.raceNumber.exec($item.find(SEL.raceNumber).text())?.[1] ?? "0",
       );
 
+      // 発走時刻(Issue #202)。中央・地方とも、データ枠のテキストに含まれる `H:MM`/`HH:MM`。空の行(発走後に取得した中央の一覧)・範囲外の値は undefined(キーを持たない)。
+      const startTime = toStartTime(dataText);
+
       // レース名(切り詰められている場合あり)。
       const name = $item.find(SEL.itemTitle).text().trim();
 
-      // グレードラベル(生テキストのまま)。存在しない/複数存在する場合は先頭のspanを採用し、
-      // 内テキストが空(中央の画像アイコン方式)なら undefined にする(空文字を拾わない)。
-      const grade = $item.find(SEL.grade).first().text().trim() || undefined;
+      // グレードラベル。地方(テキスト方式)は生テキストのまま: 存在しない/複数存在する場合は先頭のspanを採用し、
+      // 内テキストが空なら undefined にする(空文字を拾わない)。
+      // 中央は画像アイコン方式で内テキストが空のため、レース名の横のアイコンのクラス番号から読む(Issue #250。
+      // 実測した重賞の番号だけがラベルになる=grade-label.ts)。番号の表は中央専用なので、地方の行には当てない。
+      const textGrade = $item.find(SEL.grade).first().text().trim() || undefined;
+      const grade =
+        textGrade ??
+        (venueKindOfRaceId(raceId) === "central"
+          ? centralGradeFromClassNames($item.find(SEL.gradeIcon).map((___, el) => $(el).attr("class") ?? "").get())
+          : undefined);
 
       entries.push({
         raceId,
@@ -101,6 +129,7 @@ export function parseRaceList(html: string): RaceListEntry[] {
         entryCount,
         venue,
         raceNumber,
+        ...(startTime !== undefined ? { startTime } : {}),
         grade,
       });
     });

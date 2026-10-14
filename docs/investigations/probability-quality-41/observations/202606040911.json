@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040911",
+  "region": "central",
+  "requestedDate": "20260927",
+  "kaisaiDate": "20260927",
+  "venueCode": "06",
+  "raceNumber": 11,
+  "raceName": "スプリンター",
+  "listedEntryCount": 16,
+  "status": "ok",
+  "courseType": "芝",
+  "distance": 1200,
+  "runnerCount": 16,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "レッドモンレーヴ",
+      "prior": 0.02,
+      "placeOddsMin": 9.2,
+      "placeOddsMax": 13.8,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 26
+    },
+    {
+      "umaban": 2,
+      "horseName": "アイサンサン",
+      "prior": 0.10595838593709724,
+      "placeOddsMin": 9.5,
+      "placeOddsMax": 14.2,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    },
+    {
+      "umaban": 3,
+      "horseName": "ママコチャ",
+      "prior": 0.1641953797317341,
+      "placeOddsMin": 3.3,
+      "placeOddsMax": 4.7,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 29
+    },
+    {
+      "umaban": 4,
+      "horseName": "ジューンブレア",
+      "prior": 0.41820472405067277,
+      "placeOddsMin": 5.3,
+      "placeOddsMax": 7.8,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    },
+    {
+      "umaban": 5,
+      "horseName": "サウンドモリアーナ",
+      "prior": 0.24039613523789768,
+      "placeOddsMin": 5.8,
+      "placeOddsMax": 8.7,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 15
+    },
+    {
+      "umaban": 6,
+      "horseName": "ワールズエンド",
+      "prior": 0.279740042767186,
+      "placeOddsMin": 2.8,
+      "placeOddsMax": 4.1,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 11
+    },
+    {
+      "umaban": 7,
+      "horseName": "ペアポルックス",
+      "prior": 0.0719579806874722,
+      "placeOddsMin": 7,
+      "placeOddsMax": 10.5,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 19
+    },
+    {
+      "umaban": 8,
+      "horseName": "エーティーマクフィ",
+      "prior": 0.24784455764603505,
+      "placeOddsMin": 4.1,
+      "placeOddsMax": 6,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 34
+    },
+    {
+      "umaban": 9,
+      "horseName": "スターアニス",
+      "prior": 0.16833822362181647,
+      "placeOddsMin": 1.7,
+      "placeOddsMax": 2.1,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 10,
+      "horseName": "レイピア",
+      "prior": 0.20057776725133108,
+      "placeOddsMin": 4.6,
+      "placeOddsMax": 6.7,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 20
+    },
+    {
+      "umaban": 11,
+      "horseName": "ルガル",
+      "prior": 0.16740485512764747,
+      "placeOddsMin": 2.6,
+      "placeOddsMax": 3.7,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 22
+    },
+    {
+      "umaban": 12,
+      "horseName": "ブラックチャリス",
+      "prior": 0.23622745156465108,
+      "placeOddsMin": 18,
+      "placeOddsMax": 26.9,
+      "finish": {
+        "kind": "順位",
+        "value": 16
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 13,
+      "horseName": "パンジャタワー",
+      "prior": 0.26726074824764906,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 1.8,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 11
+    },
+    {
+      "umaban": 14,
+      "horseName": "ウインカーネリアン",
+      "prior": 0.1863633675242665,
+      "placeOddsMin": 2.8,
+      "placeOddsMax": 3.9,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 37
+    },
+    {
+      "umaban": 15,
+      "horseName": "フリッカージャブ",
+      "prior": 0.09069449116931115,
+      "placeOddsMin": 2.4,
+      "placeOddsMax": 3.4,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 12
+    },
+    {
+      "umaban": 16,
+      "horseName": "ピューロマジック",
+      "prior": 0.142378712111961,
+      "placeOddsMin": 5.9,
+      "placeOddsMax": 8.8,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/27",
+      "totalResultCount": 312,
+      "removedCount": 16,
+      "removedByCutoffCount": 16,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:41:03.389Z"
+}

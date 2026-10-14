@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202630093009",
+  "region": "nar",
+  "requestedDate": "20260930",
+  "kaisaiDate": "20260930",
+  "venueCode": "30",
+  "raceNumber": 9,
+  "raceName": "門別で4倍!SPA...(B4)",
+  "listedEntryCount": 12,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1200,
+  "runnerCount": 12,
+  "placedCount": 3,
+  "oddsStatus": "middle",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "ウインプロティア",
+      "prior": 0.12867048703666173,
+      "placeOddsMin": 56.2,
+      "placeOddsMax": 99.9,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 29
+    },
+    {
+      "umaban": 2,
+      "horseName": "サンゼントカガヤク",
+      "prior": 0.30218433492354335,
+      "placeOddsMin": 3.4,
+      "placeOddsMax": 6.1,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    },
+    {
+      "umaban": 3,
+      "horseName": "セイゲン",
+      "prior": 0.14215109512536306,
+      "placeOddsMin": 9.5,
+      "placeOddsMax": 17.7,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 36
+    },
+    {
+      "umaban": 4,
+      "horseName": "ブレイヴァリーボス",
+      "prior": 0.22086835576668645,
+      "placeOddsMin": 23.8,
+      "placeOddsMax": 44.9,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 64
+    },
+    {
+      "umaban": 5,
+      "horseName": "ポリッキー",
+      "prior": 0.24325620142932405,
+      "placeOddsMin": 2.8,
+      "placeOddsMax": 4.9,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 8
+    },
+    {
+      "umaban": 6,
+      "horseName": "キュータロー",
+      "prior": 0.22087002218896423,
+      "placeOddsMin": 22.4,
+      "placeOddsMax": 42.1,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 23
+    },
+    {
+      "umaban": 7,
+      "horseName": "ジューンランド",
+      "prior": 0.345802059878095,
+      "placeOddsMin": 2.9,
+      "placeOddsMax": 5,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 17
+    },
+    {
+      "umaban": 8,
+      "horseName": "メイショウマーブル",
+      "prior": 0.26675445458535296,
+      "placeOddsMin": 2.1,
+      "placeOddsMax": 3.5,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 36
+    },
+    {
+      "umaban": 9,
+      "horseName": "サクラピアチェーレ",
+      "prior": 0.40568842681397815,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    },
+    {
+      "umaban": 10,
+      "horseName": "エマダイヤモンド",
+      "prior": 0.3880430166613902,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.7,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    },
+    {
+      "umaban": 11,
+      "horseName": "キングリーエアー",
+      "prior": 0.10422893423237076,
+      "placeOddsMin": 6.4,
+      "placeOddsMax": 11.7,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 12
+    },
+    {
+      "umaban": 12,
+      "horseName": "フークシャイニー",
+      "prior": 0.23148261135827045,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.7,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 12
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/30",
+      "totalResultCount": 295,
+      "removedCount": 12,
+      "removedByCutoffCount": 12,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:45:45.533Z"
+}
