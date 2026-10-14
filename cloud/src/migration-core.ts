@@ -16,7 +16,7 @@
  *  - **1 回のアラームの問い合わせ数**: D1 の文(batch は文の数)+ R2 の操作が {@link MIGRATION_TICK_QUERY_LIMIT}(40)以内。Free の「1 回の呼び出しで 50 クエリ」を超えないため。
  *    本番の数え方〈batch を 1 と数えるか〉は未確認で、ローカルでは強制されない。保守的に文ごとに数える。数え方が分かったら定数を上げる。
  *  - **D1 の書き込み行数**: 1 日 {@link MIGRATION_DAILY_ROW_LIMIT}(6 万行。Free は 10 万行/日で、通常の運用のぶんを残す)。**D1 が報告する `meta.rows_written` の合計**で数える
- *    (索引の更新を含む)。達したら `waiting-budget` で、翌 UTC 日の 00:05 に再開する(D1 の日次の枠は UTC 0:00 に戻る。定時の cron〈UTC 0:00〉と同時刻にぶつけない)。
+ *    (索引の更新を含む)。達したら、または**次の行を足すと超える見積もり**({@link estimateRowsWritten}。Issue #309。日の最初の行は例外で必ず処理する)なら、その行を処理する前に `waiting-budget` で、翌 UTC 日の 00:05 に再開する(D1 の日次の枠は UTC 0:00 に戻る。定時の cron〈UTC 0:00〉と同時刻にぶつけない)。
  *  - **R2 の操作回数の柵**(#173): 書き込み(Class A)か読み出し(Class B)が柵に達していたら、**「要約だけ保存」にせず**止めて `waiting-r2`、翌月 1 日の 00:05 UTC に再開する(詳細が永久に欠けるため)。
  *
  * ## 中断・失敗
@@ -58,6 +58,66 @@ const RESULT_QUERY_ESTIMATE = 4;
 const MAX_PLANNED_LINES = 60;
 /** 衝突の記録に残す件数の上限。 */
 const MAX_CONFLICT_SAMPLES = 5;
+/** kv に保存して `GET /api/migration` の応答に載る長い文字列(`failure.message`・`conflictSamples` の各要素)の長さの上限(Issue #309)。クライアントの表示の上限(`REASON_MAX`)と同じ。 */
+export const MIGRATION_KV_TEXT_MAX = 300;
+/** ヘッダ値(`exportedAt`・`appVersion`)の長さの上限(Issue #309)。実際の値は ISO 日時(最長 40 文字)と版数(数文字)。 */
+export const MIGRATION_KV_HEADER_VALUE_MAX = 64;
+
+/**
+ * kv に保存する文字列を長さ `max`(UTF-16 単位)以内に切り詰める(Issue #309)。超えたら先頭 `max − 1` 単位 + `…`(先頭の文言は保つ)。
+ * サロゲートペアの途中では切らない(孤立した上位サロゲートを残さない)。
+ */
+export function clipForKv(text: string, max: number): string {
+  if (text.length <= max) {
+    return text;
+  }
+  let end = Math.max(0, max - 1);
+  const last = text.charCodeAt(end - 1);
+  if (end > 0 && last >= 0xd800 && last <= 0xdbff) {
+    end -= 1;
+  }
+  return `${text.slice(0, end)}…`;
+}
+
+/** {@link estimateRowsWritten} の追加情報。 */
+export interface EstimateContext {
+  /** この分析は取り込み済み(D1 に同じ exe の id がある。衝突を含む)。新しい行を書かない。 */
+  readonly alreadyImported?: boolean;
+  /** この分析は詳細(R2)が未完了で、取り込み済みとして飛ばす前に作り直す(カウンタの 1 行を書く)。 */
+  readonly detailPending?: boolean;
+}
+
+/**
+ * 1 行の処理が D1 に書く行数(`meta.rows_written` の合計)の**見積もり**(Issue #309)。行を処理する**前**に予算と比べるために使う。
+ * 実際より小さくならない(新しい行は実測と一致し、既存の行に当たれば実測はそれより小さい)。
+ *
+ * 式は `cloud/test/rows-written.test.ts` と同じ方法(本物の保存経路が返す `meta.rows_written`、ローカルの workerd の D1)で測った。再現:
+ * `cd cloud && pnpm exec vitest run test/migration-rows-estimate.test.ts`(馬・買い目・結果・払戻・マーカーの数を変えた表で、見積もりと実測の一致を固定している)。
+ *  - 分析: **12 + 2H + (配分メタあり ? 1 + 2B : 0)**(H = 馬の数、B = 買い目の数)。12 = R2 の操作回数のカウンタ 1 + analyses 8〈表 1・索引 6・sqlite_sequence 1〉
+ *    + detail_key の UPDATE 1 + exe の分析 id の UPDATE 2〈行 1 + 部分一意索引 1〉。馬・買い目は複合主キーの自動索引で 1 行あたり 2 行。配分メタは 1 行(索引なし)。
+ *  - 結果: **2R + (面あり ? 2 : 0) + 2C + 2M**(R = 結果の馬の数、C = 払戻の行数、M = 取込マーカーの行数)。どの表も主キーの自動索引で 1 行あたり 2 行。
+ *    既に結果のあるレースは書かない(`NOT EXISTS`・`INSERT OR IGNORE`)ので、実測は見積もりより小さくなる。
+ *  - 取り込み済みの分析: 0。ただし詳細が未完了(`detailPending`)なら、作り直しのカウンタの 1 行。
+ *  - 最大: 子の行数が上限(`MIGRATION_MAX_CHILD_ROWS`。馬 18・買い目 6396・払戻 6360・マーカー 6)のとき、分析 12 + 36 + 1 + 12792 行・結果 36 + 2 + 12720 + 12 行で、
+ *    どちらも {@link MIGRATION_DAILY_ROW_LIMIT} と D1 Free の 1 日の上限より小さい(テストが固定)。
+ *
+ * 限界: ローカルの D1 が報告する値で、本番の D1 が数える行数と同じとは限らない(最初の本番の実保存の `meta.rows_written` で確かめる)。
+ * 索引を足す migration は式を変える(テストの一致が外れて気づく)。
+ */
+export function estimateRowsWritten(line: MigrationLine, context: EstimateContext = {}): number {
+  switch (line.type) {
+    case "header":
+    case "footer":
+      return 0;
+    case "analysis":
+      if (context.alreadyImported === true) {
+        return context.detailPending === true ? 1 : 0;
+      }
+      return 12 + 2 * line.horses.length + (line.allocationMeta === null ? 0 : 1 + 2 * line.bets.length);
+    case "result":
+      return 2 * line.results.length + (line.meta === null ? 0 : 2) + 2 * line.comboPayouts.length + 2 * line.comboPayoutImports.length;
+  }
+}
 
 export type MigrationState = "idle" | "verifying" | "importing" | "waiting-budget" | "waiting-r2" | "completed" | "failed";
 
@@ -120,6 +180,8 @@ interface Job {
 interface Budget {
   day: string;
   rows: number;
+  /** この日に着手した分析・結果の行の数(エラーで止まった行を含む。ヘッダ・フッタは数えない)。0 なら、次の行は「日の最初の行」で、見積もりが上限を超えていても処理する(進捗の保証。Issue #309)。無い古い保存値は `rows > 1` なら着手済みとみなす。 */
+  lines?: number;
 }
 
 export interface MigrationStatus {
@@ -376,7 +438,7 @@ export class MigrationCore {
 
   private async fail(job: Job, phase: "verify" | "import", message: string, deleteFile: boolean): Promise<void> {
     job.state = "failed";
-    job.failure = { phase, message };
+    job.failure = { phase, message: clipForKv(message, MIGRATION_KV_TEXT_MAX) };
     job.resumeAt = null;
     this.saveJob(job);
     if (deleteFile) {
@@ -425,8 +487,9 @@ export class MigrationCore {
     const verifyStartedAt = this.deps.now();
     const verified = await verifyMigrationFile(stream, { now: verifyStartedAt });
     job.verified = { bytes: verified.bytes, lines: verified.lines, ms: this.deps.now() - verifyStartedAt };
-    job.exportedAt = verified.header.exportedAt;
-    job.appVersion = verified.header.appVersion;
+    // ヘッダ値は拒否せず切り詰める(長さの制限は形式の規則にない。kv と応答に載せる分だけ短くする。Issue #309)。
+    job.exportedAt = clipForKv(verified.header.exportedAt, MIGRATION_KV_HEADER_VALUE_MAX);
+    job.appVersion = clipForKv(verified.header.appVersion, MIGRATION_KV_HEADER_VALUE_MAX);
     job.totalAnalyses = verified.footer.analysisLines;
     job.totalResults = verified.footer.resultLines;
     job.state = "importing";
@@ -487,7 +550,11 @@ export class MigrationCore {
     let waiting = false;
     let failure: Error | null = null;
     for (const item of planned) {
-      if (budget.rows >= this.dailyRowLimit) {
+      // 予算: 使用量が上限に達した、または**この行を足すと上限を超える見積もり**なら、処理する前に翌日へ回す(Issue #309)。
+      // その日の最初の行だけは必ず処理する(見積もりが上限より大きい小さな上限でも進む。本番では見積もりの最大が上限より小さいので、この例外は働かない)。
+      const firstOfDay = budget.lines === undefined ? budget.rows <= 1 : budget.lines === 0;
+      const estimate = this.estimateItem(item.line, existing, pending);
+      if (budget.rows >= this.dailyRowLimit || (!firstOfDay && budget.rows + estimate > this.dailyRowLimit)) {
         stoppedEarly = true;
         waiting = true;
         await this.waitFor(job, "waiting-budget", nextDayResumeAt(startedAt));
@@ -506,6 +573,9 @@ export class MigrationCore {
       queries += outcome.queries;
       rows += outcome.rows;
       budget.rows += outcome.rows;
+      if (item.line.type === "analysis" || item.line.type === "result") {
+        budget.lines = (budget.lines ?? 0) + 1; // ヘッダ・フッタは数えない(書かない行で「日の最初の行」の例外を使い切らない)
+      }
       if (outcome.stop === "waiting-r2") {
         stoppedEarly = true;
         waiting = true;
@@ -539,6 +609,19 @@ export class MigrationCore {
     job.attempts = 0;
     this.saveJob(job);
     await this.deps.setAlarm(this.deps.now() + MIGRATION_TICK_DELAY_MS);
+  }
+
+  /** 1 行の書き込み行数の見積もり。取り込み済みの分析(`existing`)は新しい行を書かない。 */
+  private estimateItem(
+    line: MigrationLine,
+    existing: ReadonlyMap<number, { readonly id: number; readonly raceId: string; readonly analyzedAt: string }>,
+    pending: PendingDetails,
+  ): number {
+    if (line.type !== "analysis") {
+      return estimateRowsWritten(line);
+    }
+    const exeId = line.analysis["id"] as number;
+    return estimateRowsWritten(line, { alreadyImported: existing.has(exeId), detailPending: pending[String(exeId)] !== undefined });
   }
 
   /** 状態を待機にして、再開時刻にアラームを張る。 */
@@ -603,7 +686,9 @@ export class MigrationCore {
           if (ref.raceId !== imp.record.raceId || ref.analyzedAt !== imp.record.analyzedAt) {
             job.conflicts += 1;
             if (job.conflictSamples.length < MAX_CONFLICT_SAMPLES) {
-              job.conflictSamples.push(`exe の分析 id ${imp.exeId}(${imp.record.raceId}・${imp.record.analyzedAt})は、取り込み済みの別の分析(${ref.raceId}・${ref.analyzedAt})と id が同じため飛ばした`);
+              job.conflictSamples.push(
+                clipForKv(`exe の分析 id ${imp.exeId}(${imp.record.raceId}・${imp.record.analyzedAt})は、取り込み済みの別の分析(${ref.raceId}・${ref.analyzedAt})と id が同じため飛ばした`, MIGRATION_KV_TEXT_MAX),
+              );
             }
             job.analysesProcessed += 1;
             return { queries: 0, rows: 0 };

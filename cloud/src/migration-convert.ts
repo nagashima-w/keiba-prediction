@@ -172,6 +172,31 @@ export function toAnalysisImport(line: MigrationAnalysisLine): AnalysisImport {
   return { exeId: id, record, metaParams };
 }
 
+/**
+ * 取り込みで `JSON.stringify` される JSON 列(`race_snapshot_json`・各馬の `contributions_json`)が、再直列化できることを確かめる(Issue #309)。
+ * `JSON.parse` は深い入れ子を通すが、`JSON.stringify` は深さ数千で `RangeError` になる(取り込みの `encodeDetail`・`toJsonOrNull` が同じ列を直列化する)。
+ * 検証の段階(書き始める前)で拒否するために、{@link toAnalysisImport} とは別に**検証だけが呼ぶ**(取り込みのたびに走らせて CPU を二重にしない)。
+ * 直列化する列は、取り込みで JSON にされる値のうち文字列でないもの(`rawResponse` は文字列、`highlights`・`concerns` は文字列の配列で、いずれも浅い)。
+ * 注意: `RangeError` はスタックの残りで決まるので、検証時と取り込み時で呼び出しの深さが違うと、閾値すれすれの入れ子だけ結果が分かれうる(その場合は従来どおり、取り込みで再試行の後 failed)。
+ * @throws MigrationFormatError 再直列化で RangeError になる(深すぎる入れ子)
+ */
+export function assertDetailSerializable(imp: AnalysisImport, where: string): void {
+  const columns: [string, unknown][] = [["race_snapshot_json", imp.record.raceSnapshot]];
+  for (const horse of imp.record.horses) {
+    columns.push([`馬 ${horse.umaban} の contributions_json`, horse.contributions]);
+  }
+  for (const [column, value] of columns) {
+    try {
+      JSON.stringify(value);
+    } catch (e) {
+      if (e instanceof RangeError) {
+        throw new MigrationFormatError(`${where}: ${column} の入れ子が深すぎて直列化できない`);
+      }
+      throw e;
+    }
+  }
+}
+
 /** 表の行を、先頭の列(race_id)を除いた列の並びの配列にする。 */
 function rowsOf(table: MigrationTableName, rows: readonly MigrationRow[]): (string | number | null)[][] {
   const columns = MIGRATION_TABLES[table].columns.slice(1);

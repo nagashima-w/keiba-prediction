@@ -7,6 +7,7 @@
  *    **分析日時の上限(サーバの現在時刻 + 7 日)はここだけが渡す**(ブラウザのアップロード前の検証は時計を持たず、未来の日時を見ない)
  *  - `MigrationTally`: 行の並び(ヘッダ → 分析 → 結果 → フッタ)・id/raceId の昇順・フッタの件数と読んだ行数の一致・**フッタが来ていること**
  *  - **取り込みの変換が通ること**(`toAnalysisImport`・`toResultImport`): JSON の列が壊れている・馬番/買い目のキーが重複する、といった「形式は通るが取り込みの途中で落ちる」行を、書き始める前に見つける
+ *  - **取り込みで JSON.stringify される列が再直列化できること**(`assertDetailSerializable`。Issue #309): `JSON.parse` は通る深い入れ子が、取り込みの直列化で RangeError になり、再試行の末に failed になるのを防ぐ
  */
 
 import {
@@ -16,7 +17,7 @@ import {
   type MigrationFooterLine,
   type MigrationHeaderLine,
 } from "../../packages/core/src/ev/cloud-migration-format";
-import { toAnalysisImport, toResultImport } from "./migration-convert";
+import { assertDetailSerializable, toAnalysisImport, toResultImport } from "./migration-convert";
 import { MigrationFileError, readLines } from "./migration-reader";
 
 /** 検証の結果。 */
@@ -67,7 +68,9 @@ export async function verifyMigrationFile(gz: ReadableStream<Uint8Array>, option
       } else {
         try {
           if (line.type === "analysis") {
-            toAnalysisImport(line);
+            const imp = toAnalysisImport(line);
+            // 取り込みで JSON.stringify される列が再直列化できること(深い入れ子は RangeError。Issue #309)
+            assertDetailSerializable(imp, `分析の行(analysis.id=${imp.exeId})`);
           } else {
             toResultImport(line);
           }
