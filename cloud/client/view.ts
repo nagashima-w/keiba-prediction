@@ -16,6 +16,8 @@ import type { VerifyVenue } from "./api-verify";
 import type { MonthlyBodyView, MonthlyModel } from "./monthly-model";
 import type { RaceRowView, ReportBodyView, ReportModel, WhatIfView } from "./report-model";
 import type { AdminOnlyModel } from "./admin-only";
+import type { ReplaySection } from "./replay-model";
+import { REPLAY_CANVAS_LABEL } from "./replay-model";
 import { h, type PickedFile, type VNode } from "./vnode";
 
 export interface ViewActions {
@@ -64,6 +66,10 @@ export interface ViewActions {
   readonly onReportRegenOpen: () => void;
   readonly onReportRegenGo: () => void;
   readonly onReportRegenCancel: () => void;
+  /** 結果の「レース再生」の再生ボタン(Issue #311)。引数(分析 id)は、ボタンの `data-analysis-id` と同じ値。再生中に押すと中断して抽選し直す。 */
+  readonly onReplayPlay: (analysisId: number) => void;
+  /** 「レース再生」の速度ボタン(Issue #311)。引数(×1・×2・×4 の数)は、ボタンの `data-speed` と同じ値。 */
+  readonly onReplaySpeed: (speed: number) => void;
   /** 日報画面の日付の入力(`<input type="date">`の値 YYYY-MM-DD)。Issue #273。 */
   readonly onReportDateChange: (value: string) => void;
 }
@@ -225,7 +231,7 @@ function cardResult(result: CardResult, actions: ViewActions): VNode {
     ...(open
       ? [
           ...resultMeta(content),
-          ...resultSections(content, "h3"),
+          ...resultSections(content, "h3", actions),
         ]
       : []),
   ]);
@@ -347,10 +353,29 @@ function topProbRow(r: TopProbHorse): VNode {
 }
 
 /**
+ * 「レース再生」の節(Issue #311)。演出の注記・再生/速度のボタン・(再生を始めたら)キャンバス・(走り終えたら)着順のテキスト。
+ * キャンバスは静的な要素で、1コマごとの描画は木の外(`replay-player.ts`)。ボタンのクリック処理に渡す値は `data-*` にも出す(`createMounter` は関数を比較しない)。
+ */
+function replaySection(r: ReplaySection, heading: "h2" | "h3", actions: ViewActions): VNode {
+  return h("section", { class: "replay" }, [
+    h(heading, {}, [r.heading]),
+    h("p", { class: "meta replay-note" }, [r.note]),
+    h("div", { class: "replay-controls" }, [
+      h("button", { class: "replay-play", "data-analysis-id": String(r.analysisId) }, [r.playLabel], { click: () => actions.onReplayPlay(r.analysisId) }),
+      ...r.speeds.map((sp) =>
+        h("button", { class: "replay-speed", "aria-pressed": sp.pressed ? "true" : "false", "data-speed": String(sp.value) }, [sp.label], { click: () => actions.onReplaySpeed(sp.value) }),
+      ),
+    ]),
+    ...(r.started ? [h("canvas", { class: "replay-canvas", role: "img", "aria-label": REPLAY_CANVAS_LABEL, "data-replay-id": String(r.analysisId) })] : []),
+    ...(r.finish === null ? [] : [h("div", { class: "replay-finish" }, [h("p", { class: "meta" }, [r.finishHeading ?? ""]), h("ul", { class: "horse-list" }, r.finish.map((line) => h("li", {}, [line])))])]),
+  ]);
+}
+
+/**
  * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「3着内率の上位5頭」(Issue #240。印の付いた馬の直後)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
  * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
  */
-function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
+function resultSections(content: ResultContent, heading: "h2" | "h3", actions: ViewActions): VNode[] {
   const allocation = content.allocation;
   return [
     // 印の付いた馬(Issue #211)。印が1頭も無ければ section ごと出さない。凡例はここ(見出しの下)に1回だけ(「馬ごとの評価」の中には出さない)。
@@ -365,6 +390,8 @@ function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
         ]),
     // 3着内率の上位5頭(Issue #240)。印の有無と独立。率が有限な馬が1頭も無ければ section ごと出さない。凡例は足さない(印の付いた馬の凡例が1回出ている)。
     ...(content.topProbs === null ? [] : [h("section", { class: "top-probs" }, [h(heading, {}, [content.topProbs.heading]), h("ul", { class: "horse-list" }, content.topProbs.rows.map(topProbRow))])]),
+    // レース再生(Issue #311)。勝率が判定不能・2頭未満の分析は section ごと出さない。
+    ...(content.replay === null ? [] : [replaySection(content.replay, heading, actions)]),
     // そのとき LLM が見た当日の馬場の値(Issue #295)。無ければ section ごと出さない。行はサーバの整形(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
     ...(content.baba === null ? [] : [h("section", { class: "baba" }, [h(heading, {}, [content.baba.heading]), ...content.baba.lines.map((line) => h("p", { class: "meta baba-line" }, [line]))])]),
     h("section", { class: "horses" }, [
@@ -411,7 +438,7 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
   if (content !== null) {
     body.push(h("h1", { class: "title" }, [content.title]));
     body.push(...resultMeta(content));
-    body.push(...resultSections(content, "h2"));
+    body.push(...resultSections(content, "h2", actions));
   }
   return h("div", { class: "screen" }, [controls, ...body]);
 }

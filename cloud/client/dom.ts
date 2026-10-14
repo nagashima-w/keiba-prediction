@@ -12,6 +12,7 @@
  *  - 要素 `progress`(属性 `value`・`max` は数字だけ。`max` は progress だけ)。
  *  - 属性 `accept`(`input type="file"` だけ。値は拡張子・MIME の並び〈`.gz,application/gzip` 形式〉だけ)。
  *  - イベント `on.file`(`input type="file"` だけ。`change` で、選ばれた最初の File〈無ければ null〉を渡す。`value`〈偽のパス〉は読まない)。
+ * Issue #311(レース再生)で足した許可: 要素 `canvas` だけ(属性は既存の `class`・`role`・`aria-*`・`data-*` の範囲。キャンバスの大きさ・描画は `replay-player.ts` がプロパティ・2D コンテキストで行い、HTML としては解釈しない)。
  */
 import type { VNode } from "./vnode";
 
@@ -39,7 +40,7 @@ export interface DomRoot {
   replaceChildren(...nodes: any[]): void;
 }
 
-const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress"]);
+const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress", "canvas"]);
 const ALLOWED_ATTRS = new Set(["class", "type", "value", "disabled", "href", "role", "checked", "inputmode", "maxlength", "accept", "max"]);
 /** `accept` の値: 拡張子(`.gz`)・MIME(`application/gzip`)をカンマで並べたもの。 */
 const ACCEPT_PATTERN = /^(?:\.[a-z0-9]{1,10}|[a-z]+\/[a-z0-9.+-]{1,40})(?:,(?:\.[a-z0-9]{1,10}|[a-z]+\/[a-z0-9.+-]{1,40})){0,5}$/;

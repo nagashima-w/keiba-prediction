@@ -22,6 +22,7 @@ import type { PlaceOddsBasis } from "../../packages/core/src/ev/place-odds-estim
 import type { AnalysisDetailResult, DetailStatus } from "./analysis-repository";
 import type { LlmCallRecord } from "./llm-calls";
 import { buildComboCountLines } from "./combo-counts-view";
+import { courseTurnOf, type CourseTurn } from "./course-turn";
 import { estimatePlaceOddsForRace } from "./place-odds-view";
 
 export interface AnalysisViewHorse {
@@ -63,6 +64,11 @@ export interface AnalysisViewHorse {
   readonly actualPlaceOddsMin: number | null;
   /** 分析時点の実際の複勝オッズの上限(Issue #253。raceSnapshot の `placeOddsMax`)。**上限を保存する前の過去の分析は null**(下限だけ出る)。仕様は下限と同じ。 */
   readonly actualPlaceOddsMax: number | null;
+  /**
+   * スタート直後の位置(Issue #311。レース再生の演出用。0〜1 で小さいほど前)。近走の第1コーナーの通過順位 ÷ 出走頭数の平均(分析の時点で計算してスナップショットに保存した値)。
+   * 戦績が取れない馬・**Issue #311 より前の分析**・詳細が present でない・範囲外の値は null。確率・配分には使わない。`buildAnalysisView` は常にキーを持つ。型で省略可なのは、この項目を使わない呼び出し側の固定データ(日報の材料など)を壊さないため。
+   */
+  readonly earlyPos?: number | null;
 }
 
 export interface AnalysisViewRace {
@@ -85,6 +91,8 @@ export interface AnalysisViewRace {
    * 画面が「2着まで」を添える・複勝の行を「-」にするのに使う。分析した馬の数から決まり、詳細〈R2〉の状態に依らない。
    */
   readonly placeBasis: PlaceOddsBasis | null;
+  /** コースの回り(Issue #311。レース再生のコース図の向き。raceId の場コードと距離から `courseTurnOf` で決める。不明は "right")。詳細〈R2〉の状態に依らないが、大井の 1650m の特例は距離が要るので詳細が無いと右になる。`buildAnalysisView` は常にキーを持つ(型で省略可なのは `earlyPos` と同じ理由)。 */
+  readonly turn?: CourseTurn;
 }
 
 export interface AnalysisViewAllocation {
@@ -160,6 +168,12 @@ export interface AnalysisView {
 const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
 const num = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
 
+/** スタート直後の位置(Issue #311)。0〜1 の有限の数だけ。それ以外(null・文字列・範囲外)は null。 */
+function earlyPosOf(value: unknown): number | null {
+  const n = num(value);
+  return n !== null && n >= 0 && n <= 1 ? n : null;
+}
+
 /** 実際の単勝オッズ。有限の数で、配分の候補ビルダーと同じ基準(`isUsableOdds`。1.0 以上)を満たすものだけ。それ以外(未確定の null・文字列・NaN・1.0 未満)は null。 */
 function usableOdds(value: unknown): number | null {
   const n = num(value);
@@ -228,6 +242,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       trackCondition: str(race?.trackCondition),
       oddsStatus: str(race?.oddsStatus),
       placeBasis: placeOdds.basis,
+      turn: courseTurnOf(analysis.raceId, num(race?.distance)),
     },
     // 詳細が present でないときは、スナップショットを一切使わない(null)。
     baba: detail === "present" ? babaViewOf(analysis.raceSnapshot) : null,
@@ -250,6 +265,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       fairPlaceOdds: placeOdds.byUmaban.get(h.umaban) ?? null,
       actualPlaceOddsMin: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.placeOddsMin),
       actualPlaceOddsMax: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.placeOddsMax),
+      earlyPos: earlyPosOf(snapshot?.horsesByUmaban.get(h.umaban)?.earlyPos),
     })),
     allocation:
       allocation === undefined

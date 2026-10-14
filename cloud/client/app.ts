@@ -76,6 +76,7 @@ import { createReportScreen } from "./report-screen";
 import { buildHash, buildReportHash, parseHash, screenOf, type Route, type Screen, type Venue } from "./route";
 import { buildAdminOnlyModel } from "./admin-only";
 import { isAdmin, type Role } from "./role";
+import { buildReplayInit, REPLAY_SPEEDS, type ReplayInit, type ReplayUi } from "./replay-model";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
 import { renderScreen } from "./view";
 import type { VNode } from "./vnode";
@@ -99,6 +100,15 @@ export interface AppDeps {
    * 検証は Issue #263 で閲覧者にも開いた(入口も出る)。閲覧者には「更新」ボタンを出さず、集計のやり直しを起こさない(サーバがキャッシュを返すだけ)。
    */
   readonly role: Role;
+  /**
+   * レース再生のプレーヤ(Issue #311。`replay-player.ts`)の操作。省略は「再生しない」(押しても何も始まらない)。プレーヤが走り終えたら、呼び出し側が `App.onReplayFinish` を呼ぶ。
+   * アプリは再生ボタンで、**先にキャンバスを木に入れて描画してから** `start` を呼び、画面遷移(ハッシュの変化)で `stop` を呼ぶ。
+   */
+  readonly replay?: {
+    readonly start: (init: ReplayInit, speed: number) => void;
+    readonly setSpeed: (speed: number) => void;
+    readonly stop: () => void;
+  };
 }
 
 export interface App {
@@ -106,6 +116,8 @@ export interface App {
   onHashChange(): void;
   /** `visibilitychange` のとき(Issue #186)。 */
   onVisibilityChange(): void;
+  /** レース再生が走り終えたとき(Issue #311。プレーヤの `onFinish`)。着順(馬番を 1 着から並べたもの)を画面に出す。始めていない・別の分析・止めたあとの通知は無視する。 */
+  onReplayFinish(analysisId: number, order: readonly number[]): void;
   /** 取得中のものがすべて終わるまで待つ(テスト用。画面は使わない)。 */
   whenIdle(): Promise<void>;
 }
@@ -181,6 +193,11 @@ export function createApp(deps: AppDeps): App {
   /** 発走前のカードの結果の開閉(Issue #188)。(開催日, race_id) ごとに、利用者が押した値だけを持つ(既定は開)。 */
   const resultOpenChoices = new Map<string, boolean>();
   const analyses = new Map<number, AnalysisDetail>();
+  // レース再生(Issue #311)の画面の状態。再生を始めた分析・速度の選択・走り終えた着順。画面遷移(ハッシュの変化)で始めた分析と着順を捨てる(速度の選択は残す)。メモリだけ(ハッシュ・localStorage には持たない)。
+  let replayStartedId: number | null = null;
+  let replaySpeed: number = REPLAY_SPEEDS[0];
+  let replayFinish: readonly number[] | null = null;
+  const replayUi = (): ReplayUi => ({ startedId: replayStartedId, speed: replaySpeed, finishOrder: replayFinish });
   const analysisErrors = new Map<number, string>();
   const analysisInflight = new Map<number, Promise<void>>();
 
@@ -349,6 +366,8 @@ export function createApp(deps: AppDeps): App {
     onReportRegenGo: () => (isMonthlyRoute() ? monthly.onRegenGo() : report.onRegenGo()),
     onReportRegenCancel: () => (isMonthlyRoute() ? monthly.onRegenCancel() : report.onRegenCancel()),
     onReportDateChange,
+    onReplayPlay,
+    onReplaySpeed,
   };
 
   function render(force = false): void {
@@ -359,7 +378,7 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       case "result": {
-        deps.render(renderScreen(buildResultModel({ route, source: analysisSource(route.analysis!), readOnly: !admin }), actions), force);
+        deps.render(renderScreen(buildResultModel({ route, source: analysisSource(route.analysis!), readOnly: !admin, replay: replayUi() }), actions), force);
         return;
       }
       case "race": {
@@ -380,6 +399,7 @@ export function createApp(deps: AppDeps): App {
               ...(latestId === null ? {} : { result: analysisSource(latestId) }),
               resultOpen: resultOpenChoices.get(key) ?? true,
               readOnly: !admin,
+              replay: replayUi(),
             }),
             actions,
           ),
@@ -904,7 +924,35 @@ export function createApp(deps: AppDeps): App {
 
   // ---- 画面の操作 ----
 
+  /** レース再生の再生ボタン(Issue #311): 先にキャンバスを木に入れて描画し、そのあとプレーヤを始める(プレーヤはキャンバスを引いて描く)。再生できない分析・プレーヤが無い環境では何もしない。 */
+  function onReplayPlay(analysisId: number): void {
+    const analysis = analyses.get(analysisId);
+    const init = analysis === undefined ? null : buildReplayInit(analysis);
+    if (init === null || deps.replay === undefined) return;
+    replayStartedId = analysisId;
+    replayFinish = null;
+    render();
+    deps.replay.start(init, replaySpeed);
+  }
+
+  function onReplaySpeed(speed: number): void {
+    if (!REPLAY_SPEEDS.some((v) => v === speed)) return;
+    replaySpeed = speed;
+    deps.replay?.setSpeed(speed);
+    render();
+  }
+
+  function onReplayFinish(analysisId: number, order: readonly number[]): void {
+    if (replayStartedId !== analysisId) return;
+    replayFinish = order;
+    render();
+  }
+
   function onHashChange(): void {
+    // レース再生は画面を離れたら止める(裏で回り続けない)。始めた分析・着順も捨てる。
+    deps.replay?.stop();
+    replayStartedId = null;
+    replayFinish = null;
     const wasSettings = currentScreen() === "settings";
     const wasMigration = currentScreen() === "migration";
     const wasVerify = currentScreen() === "verify";
@@ -1032,6 +1080,7 @@ export function createApp(deps: AppDeps): App {
       render();
     },
     onHashChange,
+    onReplayFinish,
     onVisibilityChange: () => {
       tracker.onVisibilityChange();
       migration.onVisibilityChange();

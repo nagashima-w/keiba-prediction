@@ -274,6 +274,11 @@ ${paletteCss()}
   /* Issue #188: 発走前のカードの中の結果(開閉の見出しは h3 の中のボタン。文字の ▾/▸ でも開閉が分かる) */
   .card-result { margin-top: 8px; }
   .card-result h3 { margin: 8px 0 4px; font-size: 1rem; }
+  /* Issue #311: レース再生(キャンバスは幅いっぱいに縮める。縦横比は内部の大きさ〈client/replay-draw.ts〉で決まる) */
+  .replay-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .replay-play { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  .replay-speed[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  .replay-canvas { display: block; width: 100%; height: auto; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; }
   .result-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; }
 </style>
 </head>

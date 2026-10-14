@@ -290,6 +290,22 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     expect(model.content!.placeOddsNote).not.toBeNull();
   });
 
+  it("スタート直後の位置・コースの回り(Issue #311): 本物の応答をクライアントが読む。earlyPos は保存したスナップショットの値(馬ごと)、turn は raceId の場コードから(福島=right)", async () => {
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    const { race } = await scrapeFixtureRace();
+    const base = await record({}, []);
+    const saved = await store.saveAnalysis(base);
+    const { fetch } = await connect(realEnv());
+    const result = await fetchAnalysis(fetch, saved.id);
+    expect(result.ok, "前提: 読める(サーバのキー名・形がクライアントの検査を通る)").toBe(true);
+    if (!result.ok) return;
+    const written = buildRaceSnapshot(race).horses.map((h) => h.earlyPos ?? null);
+    expect(written.filter((v) => v !== null).length, "前提: 通過順位から earlyPos が計算された馬がいる").toBeGreaterThan(0);
+    expect(new Set(written.filter((v) => v !== null)).size, "前提: 値が馬ごとに違う(取り違えを検出できる)").toBeGreaterThan(1);
+    expect(result.analysis.horses.map((h) => h.earlyPos)).toEqual(written);
+    expect(result.analysis.race.turn).toBe("right");
+  });
+
   it("配分あり(買い目)と、記録が無い分析(allocation: null)", async () => {
     const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
     const withBets = await store.saveAnalysis(

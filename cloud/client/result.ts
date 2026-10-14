@@ -31,6 +31,7 @@ import { nameWithGrade } from "./grade";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
 import { buildPlaceOddsLine, PLACE_ODDS_NOTE, type PlaceOddsLine } from "../src/place-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
+import { replaySectionOf, type ReplaySection, type ReplayUi } from "./replay-model";
 import { buildHash, type Route } from "./route";
 
 /** 画面のラベル(core の共有定数〈旧 exe と共有していた〉。`view.ts` は core を直接 import しない=ここを通す)。 */
@@ -146,6 +147,8 @@ export interface AllocationSection {
 }
 
 export interface ResultContent {
+  /** レース再生の節(Issue #311。「3着内率の上位5頭」の後・「当日の馬場」の前)。勝率が判定不能・2頭未満の分析は null(節ごと出さない)。 */
+  readonly replay: ReplaySection | null;
   readonly title: string;
   readonly analyzedAt: string;
   readonly model: string;
@@ -240,11 +243,12 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
 }
 
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。`readOnly`(閲覧者。Issue #238)は設定への案内を外す。省略は管理者。 */
-export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
+export function contentOf(a: AnalysisDetail, readOnly = false, replay?: ReplayUi): ResultContent {
   // LLM が効いたか = モデル ID があるか(core の `view/format.ts` の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
   const llmEffective = a.model !== null && a.model !== "";
   const markedHorses = markedHorsesOf(a.horses);
   return {
+    replay: replaySectionOf(a, replay),
     title: titleOf(a),
     analyzedAt: formatJstDateTime(a.analyzedAt),
     model: llmEffective ? a.model! : MODEL_NONE_TEXT,
@@ -283,12 +287,12 @@ function backToRace(route: Route, a: AnalysisDetail): string {
   return buildHash({ date, venue: route.venue, race });
 }
 
-export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean }): ResultModel {
+export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean; readonly replay?: ReplayUi }): ResultModel {
   const { route, source } = input;
   const readOnly = input.readOnly === true;
   const listHref = buildHash({ date: route.date, venue: route.venue });
   if (source.kind === "ready") {
-    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly), backHref: backToRace(route, source.analysis) };
+    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly, input.replay), backHref: backToRace(route, source.analysis) };
   }
   return {
     kind: "result",

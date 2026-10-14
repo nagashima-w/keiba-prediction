@@ -5003,6 +5003,7 @@
             "popularity": 5,
             "placeOddsMin": 3.1,
             "placeOddsMax": 4.1,
+            "earlyPos": 0.183,
             "oikiriCritic": "動き良化",
             "oikiriRank": "B"
           },
@@ -5020,6 +5021,7 @@
             "popularity": 10,
             "placeOddsMin": 4.2,
             "placeOddsMax": 5.6,
+            "earlyPos": 0.727,
             "oikiriCritic": "上積十分",
             "oikiriRank": "B"
           },
@@ -5037,6 +5039,7 @@
             "popularity": 6,
             "placeOddsMin": 3.2,
             "placeOddsMax": 4.1,
+            "earlyPos": 0.278,
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -5054,6 +5057,7 @@
             "popularity": 14,
             "placeOddsMin": 9.5,
             "placeOddsMax": 12.8,
+            "earlyPos": 0.9,
             "oikiriCritic": "気配平凡",
             "oikiriRank": "C"
           },
@@ -5071,6 +5075,7 @@
             "popularity": 2,
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
+            "earlyPos": 0.727,
             "oikiriCritic": "気配抜群",
             "oikiriRank": "A"
           },
@@ -5088,6 +5093,7 @@
             "popularity": 4,
             "placeOddsMin": 2.5,
             "placeOddsMax": 3.2,
+            "earlyPos": 0.727,
             "oikiriCritic": "更に上昇",
             "oikiriRank": "B"
           },
@@ -5105,6 +5111,7 @@
             "popularity": 15,
             "placeOddsMin": 15.4,
             "placeOddsMax": 20.7,
+            "earlyPos": 0.727,
             "oikiriCritic": "一歩前進",
             "oikiriRank": "B"
           },
@@ -5122,6 +5129,7 @@
             "popularity": 8,
             "placeOddsMin": 3.6,
             "placeOddsMax": 4.7,
+            "earlyPos": 0.727,
             "oikiriCritic": "動き上々",
             "oikiriRank": "B"
           },
@@ -5139,6 +5147,7 @@
             "popularity": 9,
             "placeOddsMin": 4.5,
             "placeOddsMax": 5.9,
+            "earlyPos": 0.727,
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -5156,6 +5165,7 @@
             "popularity": 16,
             "placeOddsMin": 21.2,
             "placeOddsMax": 28.4,
+            "earlyPos": 0.727,
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -5173,6 +5183,7 @@
             "popularity": 12,
             "placeOddsMin": 8.3,
             "placeOddsMax": 11.1,
+            "earlyPos": 0.727,
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -5190,6 +5201,7 @@
             "popularity": 3,
             "placeOddsMin": 2,
             "placeOddsMax": 2.5,
+            "earlyPos": 0.727,
             "oikiriCritic": "好気配",
             "oikiriRank": "B"
           },
@@ -5207,6 +5219,7 @@
             "popularity": 1,
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
+            "earlyPos": 0.727,
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -5224,6 +5237,7 @@
             "popularity": 7,
             "placeOddsMin": 4.4,
             "placeOddsMax": 5.8,
+            "earlyPos": 0.727,
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -5241,6 +5255,7 @@
             "popularity": 13,
             "placeOddsMin": 6.5,
             "placeOddsMax": 8.6,
+            "earlyPos": 0.727,
             "oikiriCritic": "やや良化",
             "oikiriRank": "C"
           },
@@ -5258,6 +5273,7 @@
             "popularity": 11,
             "placeOddsMin": 5,
             "placeOddsMax": 6.6,
+            "earlyPos": 0.727,
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           }
@@ -19851,6 +19867,7 @@
             "popularity": 5,
             "placeOddsMin": 3.1,
             "placeOddsMax": 4.1,
+            "earlyPos": 0.183,
             "oikiriCritic": "動き良化",
             "oikiriRank": "B"
           },
@@ -19868,6 +19885,7 @@
             "popularity": 10,
             "placeOddsMin": 4.2,
             "placeOddsMax": 5.6,
+            "earlyPos": 0.727,
             "oikiriCritic": "上積十分",
             "oikiriRank": "B"
           },
@@ -19885,6 +19903,7 @@
             "popularity": 6,
             "placeOddsMin": 3.2,
             "placeOddsMax": 4.1,
+            "earlyPos": 0.278,
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -19902,6 +19921,7 @@
             "popularity": 14,
             "placeOddsMin": 9.5,
             "placeOddsMax": 12.8,
+            "earlyPos": 0.9,
             "oikiriCritic": "気配平凡",
             "oikiriRank": "C"
           },
@@ -19919,6 +19939,7 @@
             "popularity": 2,
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
+            "earlyPos": 0.727,
             "oikiriCritic": "気配抜群",
             "oikiriRank": "A"
           },
@@ -19936,6 +19957,7 @@
             "popularity": 4,
             "placeOddsMin": 2.5,
             "placeOddsMax": 3.2,
+            "earlyPos": 0.727,
             "oikiriCritic": "更に上昇",
             "oikiriRank": "B"
           },
@@ -19953,6 +19975,7 @@
             "popularity": 15,
             "placeOddsMin": 15.4,
             "placeOddsMax": 20.7,
+            "earlyPos": 0.727,
             "oikiriCritic": "一歩前進",
             "oikiriRank": "B"
           },
@@ -19970,6 +19993,7 @@
             "popularity": 8,
             "placeOddsMin": 3.6,
             "placeOddsMax": 4.7,
+            "earlyPos": 0.727,
             "oikiriCritic": "動き上々",
             "oikiriRank": "B"
           },
@@ -19987,6 +20011,7 @@
             "popularity": 9,
             "placeOddsMin": 4.5,
             "placeOddsMax": 5.9,
+            "earlyPos": 0.727,
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -20004,6 +20029,7 @@
             "popularity": 16,
             "placeOddsMin": 21.2,
             "placeOddsMax": 28.4,
+            "earlyPos": 0.727,
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -20021,6 +20047,7 @@
             "popularity": 12,
             "placeOddsMin": 8.3,
             "placeOddsMax": 11.1,
+            "earlyPos": 0.727,
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -20038,6 +20065,7 @@
             "popularity": 3,
             "placeOddsMin": 2,
             "placeOddsMax": 2.5,
+            "earlyPos": 0.727,
             "oikiriCritic": "好気配",
             "oikiriRank": "B"
           },
@@ -20055,6 +20083,7 @@
             "popularity": 1,
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
+            "earlyPos": 0.727,
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -20072,6 +20101,7 @@
             "popularity": 7,
             "placeOddsMin": 4.4,
             "placeOddsMax": 5.8,
+            "earlyPos": 0.727,
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -20089,6 +20119,7 @@
             "popularity": 13,
             "placeOddsMin": 6.5,
             "placeOddsMax": 8.6,
+            "earlyPos": 0.727,
             "oikiriCritic": "やや良化",
             "oikiriRank": "C"
           },
@@ -20106,6 +20137,7 @@
             "popularity": 11,
             "placeOddsMin": 5,
             "placeOddsMax": 6.6,
+            "earlyPos": 0.727,
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           }
@@ -41576,6 +41608,7 @@
             "popularity": 5,
             "placeOddsMin": 3.1,
             "placeOddsMax": 4.1,
+            "earlyPos": 0.183,
             "oikiriCritic": "動き良化",
             "oikiriRank": "B"
           },
@@ -41593,6 +41626,7 @@
             "popularity": 10,
             "placeOddsMin": 4.2,
             "placeOddsMax": 5.6,
+            "earlyPos": 0.727,
             "oikiriCritic": "上積十分",
             "oikiriRank": "B"
           },
@@ -41610,6 +41644,7 @@
             "popularity": 6,
             "placeOddsMin": 3.2,
             "placeOddsMax": 4.1,
+            "earlyPos": 0.278,
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -41627,6 +41662,7 @@
             "popularity": 14,
             "placeOddsMin": 9.5,
             "placeOddsMax": 12.8,
+            "earlyPos": 0.9,
             "oikiriCritic": "気配平凡",
             "oikiriRank": "C"
           },
@@ -41644,6 +41680,7 @@
             "popularity": 2,
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
+            "earlyPos": 0.727,
             "oikiriCritic": "気配抜群",
             "oikiriRank": "A"
           },
@@ -41661,6 +41698,7 @@
             "popularity": 4,
             "placeOddsMin": 2.5,
             "placeOddsMax": 3.2,
+            "earlyPos": 0.727,
             "oikiriCritic": "更に上昇",
             "oikiriRank": "B"
           },
@@ -41678,6 +41716,7 @@
             "popularity": 15,
             "placeOddsMin": 15.4,
             "placeOddsMax": 20.7,
+            "earlyPos": 0.727,
             "oikiriCritic": "一歩前進",
             "oikiriRank": "B"
           },
@@ -41695,6 +41734,7 @@
             "popularity": 8,
             "placeOddsMin": 3.6,
             "placeOddsMax": 4.7,
+            "earlyPos": 0.727,
             "oikiriCritic": "動き上々",
             "oikiriRank": "B"
           },
@@ -41712,6 +41752,7 @@
             "popularity": 9,
             "placeOddsMin": 4.5,
             "placeOddsMax": 5.9,
+            "earlyPos": 0.727,
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -41729,6 +41770,7 @@
             "popularity": 16,
             "placeOddsMin": 21.2,
             "placeOddsMax": 28.4,
+            "earlyPos": 0.727,
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -41746,6 +41788,7 @@
             "popularity": 12,
             "placeOddsMin": 8.3,
             "placeOddsMax": 11.1,
+            "earlyPos": 0.727,
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -41763,6 +41806,7 @@
             "popularity": 3,
             "placeOddsMin": 2,
             "placeOddsMax": 2.5,
+            "earlyPos": 0.727,
             "oikiriCritic": "好気配",
             "oikiriRank": "B"
           },
@@ -41780,6 +41824,7 @@
             "popularity": 1,
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
+            "earlyPos": 0.727,
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -41797,6 +41842,7 @@
             "popularity": 7,
             "placeOddsMin": 4.4,
             "placeOddsMax": 5.8,
+            "earlyPos": 0.727,
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -41814,6 +41860,7 @@
             "popularity": 13,
             "placeOddsMin": 6.5,
             "placeOddsMax": 8.6,
+            "earlyPos": 0.727,
             "oikiriCritic": "やや良化",
             "oikiriRank": "C"
           },
@@ -41831,6 +41878,7 @@
             "popularity": 11,
             "placeOddsMin": 5,
             "placeOddsMax": 6.6,
+            "earlyPos": 0.727,
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           }

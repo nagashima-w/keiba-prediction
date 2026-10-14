@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 288,600 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 296,400 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -142,8 +142,17 @@ describe("生成物のドリフトと決定性", () => {
     // `scraper/combo-odds-key.ts` は 519(もとから入っていた。`parseComboOddsKey` などで少量増えた)。計り方: 9ce3776 の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して
     // `Buffer.byteLength` を取り、内訳は `cloud/` で esbuild を `build-client.ts` と同じ設定(minify・metafile)で呼び、`outputs[...].inputs[ファイル].bytesInOutput` を読んだ。
     // 新しい上限 288,600 の根拠: 実測 287,525 に約 1KB の余裕(287,525 + 1,075 を 100 バイト単位に切り上げ)。余裕は 1,075 バイト。
+    // Issue #311(レース再生): 上限を 288,600 から 296,400 へ引き上げた。結果の画面とレース画面の発走前のカードに「レース再生」(Plackett-Luce の逐次抽選・位置の計算・簡略化したコース図のキャンバス描画・
+    // アニメーションのプレーヤ〈rAF・可視状態・reduced-motion〉・再生/速度のボタン・演出の注記)を足したため。実測(`Buffer.byteLength(CLIENT_JS)`): 2cb0b5c〈#306 の承認後の main〉は 287,525、
+    // 段階 A のコミット c9691eb は 287,715(+190。API の `earlyPos`・`turn`・`distance` の読み取りだけ。純関数は未配線で束に入らない)、実装後は 295,327(2cb0b5c から +7,802)。
+    // 計り方: 2cb0b5c と c9691eb の `cloud/src/client-bundle.generated.ts`(`git show <コミット>:cloud/src/client-bundle.generated.ts`)と今の生成物を、それぞれ import して `Buffer.byteLength` を取った
+    // (今の値は `pnpm run build:client` の出力〈「295327 バイト」〉)。内訳(`cloud/` で esbuild を `build-client.ts` と同じ設定〈minify・metafile〉で呼び、`outputs[...].inputs[ファイル].bytesInOutput` を読んだ):
+    // 新しいファイル `replay-model.ts` 2,621(抽選・開始順位・位置の計算・再生の材料・表示用データ。日本語の文言を含む)・`replay-player.ts` 1,536・`replay-draw.ts` 1,510 の計 5,667。
+    // 残りの 2,135 は `view.ts`(節の VNode)・`app.ts`(再生の状態と配線)・`api-analysis.ts`・`result.ts`・`race.ts`・`main.ts`(プレーヤの配線・色の読み取り)・`dom.ts` の増分(ファイル別の差は測っていない)。
+    // 事前の見積もり(着手前の報告)は +6〜9KB で、実測はその範囲。外部ライブラリは使っていない。Plackett-Luce は client 専用の自前の逐次抽選で、core の `PLACKETT_LUCE_MODEL`・`winProbabilitiesFromStrengths` は束に入っていない(下のテストが固定する)。
+    // 新しい上限 296,400 の根拠: 実測 295,327 に約 1KB の余裕(295,327 + 1,073 を 100 バイト単位に切り上げ)。余裕は 1,073 バイト。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(288_600);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(296_400);
   });
 });
 

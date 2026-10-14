@@ -42,6 +42,7 @@ import type {
   StoredAnalysis,
 } from "../pipeline.js";
 import type { DayBaba } from "../analyzer/day-baba.js";
+import { computeEarlyPosition } from "../analyzer/early-position.js";
 
 /** schemaVersion の現行値(第一版)。 */
 export const ANALYSIS_EXPORT_SCHEMA_VERSION = 1 as const;
@@ -84,6 +85,11 @@ export interface RaceSnapshotHorse {
    * 未確定・取れない馬・複勝が未発売(発売前の予想)は null。
    */
   readonly placeOddsMax?: number | null;
+  /**
+   * スタート直後の位置(Issue #311。レース再生の演出用)。近走の第1コーナーの通過順位 ÷ 出走頭数の平均(0〜1。小さいほど前。`computeEarlyPosition`)。
+   * 戦績が無い・通過順位や頭数が取れない馬は null。**任意項目**: このキーを保存する前に作った過去のスナップショットは持たない(読み出し〈`toSafeRaceSnapshot`〉では null になる)。
+   */
+  readonly earlyPos?: number | null;
   readonly oikiriCritic: string | null;
   readonly oikiriRank: string | null;
 }
@@ -199,6 +205,7 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         popularity: race.odds.win[umaban]?.ninki ?? null,
         placeOddsMin: race.odds.place[umaban]?.oddsMin ?? null,
         placeOddsMax: race.odds.place[umaban]?.oddsMax ?? null,
+        earlyPos: computeEarlyPosition(h.results),
         oikiriCritic: h.oikiri?.critic ?? null,
         oikiriRank: h.oikiri?.rank ?? null,
       };
@@ -285,6 +292,7 @@ export function toSafeRaceSnapshot(raw: unknown): {
         popularity: horse.popularity ?? null,
         placeOddsMin: horse.placeOddsMin ?? null,
         placeOddsMax: horse.placeOddsMax ?? null,
+        earlyPos: horse.earlyPos ?? null,
         oikiriCritic: horse.oikiriCritic ?? null,
         oikiriRank: horse.oikiriRank ?? null,
       });
