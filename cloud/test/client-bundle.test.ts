@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 282,200 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 288,600 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -135,8 +135,15 @@ describe("生成物のドリフトと決定性", () => {
     // Issue #296: 上限は据え置き(収まった)。分析の画面の「配分の提案」の下の組合せの券種ごとの行(API の `combos` の解釈 `api-analysis.ts`・表示用データ `result.ts`・VNode `view.ts`)を足した増分は +222(281,097 → 281,319。
     // `pnpm run build:client` の出力〈「281319 バイト」〉)。文言はサーバ(`src/combo-counts-view.ts`)で組み立ててクライアントには置かず〈日本語は `\u` エスケープで 1 文字 6 バイト〉、
     // `parseBaba` を `baba` と `combos` で共有する `parseLines` に改めたので小さく収まった。余裕は **881 バイト**。
+    // Issue #308(#302-B 移行ファイルの値の検証): 上限を 282,200 から 288,600 へ引き上げた。移行ファイルの値の規則(race_id・kaisai_date・analyzed_at・umaban・bet_type・combo_key・長さ・子の行数)を
+    // core の `cloud-migration-format.ts` に足し、ブラウザのアップロード前の検証にも効かせるため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): 9ce3776〈#307 の承認後〉は 281,319、
+    // 実装後は 287,525(+6,206)。増分の内訳(esbuild の metafile の `bytesInOutput`。minify あり): `scraper/ids.ts` 2,205(`parseRaceId`・`parseKaisaiDate` を使うため新たにバンドルへ入った。
+    // 大半は `InvalidIdError` の日本語メッセージで、移行の検証では捨てている)・`ev/cloud-migration-format.ts` 14,146(#222 の実装時は 10,437 で、以後は JSDoc の変更だけなので +約 3.7KB。規則・日本語メッセージ・定数)・
+    // `scraper/combo-odds-key.ts` は 519(もとから入っていた。`parseComboOddsKey` などで少量増えた)。計り方: 9ce3776 の `cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して
+    // `Buffer.byteLength` を取り、内訳は `cloud/` で esbuild を `build-client.ts` と同じ設定(minify・metafile)で呼び、`outputs[...].inputs[ファイル].bytesInOutput` を読んだ。
+    // 新しい上限 288,600 の根拠: 実測 287,525 に約 1KB の余裕(287,525 + 1,075 を 100 バイト単位に切り上げ)。余裕は 1,075 バイト。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(282_200);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(288_600);
   });
 });
 
@@ -403,10 +410,28 @@ describe("移行画面がクライアントに取り込む Worker 側のモジ�
     expect('import { x } from "node:zlib";\nexport const y = 1;'.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g)).toHaveLength(1);
   });
 
-  it("packages/core の cloud-migration-format.ts も import を持たない(閉包が自分だけで完結する)", () => {
-    const code = stripComments(readFileSync(path.join(ROOT, "packages", "core", "src", "ev", "cloud-migration-format.ts"), "utf-8"));
-    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(5000);
-    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+  // Issue #308(#302-B): 移行ファイルの値の検証に `parseRaceId`・`parseKaisaiDate`(`scraper/ids.ts`)と `parseComboOddsKey`・`COMBO_SIZE` など(`scraper/combo-odds-key.ts`)を使うため、
+  // 「import を 1 つも持たない」を「許す import を明示した形」に改めた。**弱めたのではなく、守る範囲を明示した**: 許すのはこの 2 本だけで、その 2 本も import を持たない葉
+  // (閉包は 3 ファイルで完結し、`node:`・パッケージ・バレル・Worker 専用のモジュールは入らない)。
+  const IMPORT_RE = /(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["']([^"']+)["']/g;
+  const importsOf = (file: string): string[] => [...stripComments(readFileSync(file, "utf-8")).matchAll(IMPORT_RE)].map((m) => m[1]!);
+  const CORE_SRC = path.join(ROOT, "packages", "core", "src");
+
+  it("packages/core の cloud-migration-format.ts の import は scraper/ids.js と scraper/combo-odds-key.js の 2 本だけ。その 2 本は import を 1 つも持たない(閉包が葉だけで完結する)", () => {
+    const format = path.join(CORE_SRC, "ev", "cloud-migration-format.ts");
+    expect(stripComments(readFileSync(format, "utf-8")).length, "前提: 本体を読めている").toBeGreaterThan(5000);
+    expect(importsOf(format).sort()).toEqual(["../scraper/combo-odds-key.js", "../scraper/ids.js"]);
+    for (const leaf of ["ids.ts", "combo-odds-key.ts"]) {
+      const file = path.join(CORE_SRC, "scraper", leaf);
+      expect(stripComments(readFileSync(file, "utf-8")).length, `前提: ${leaf} を読めている`).toBeGreaterThan(1000);
+      expect(importsOf(file), `${leaf} の import`).toEqual([]);
+      expect(/\brequire\s*\(|\bimport\s*\(/.test(stripComments(readFileSync(file, "utf-8"))), `${leaf} に動的 import・require が無い`).toBe(false);
+    }
+  });
+
+  it("対照: 上の検出は、許していない import(node:zlib や別のモジュール)が増えれば拾える(空振りでない)", () => {
+    const sample = 'import { a } from "../scraper/ids.js";\nimport { z } from "node:zlib";\nexport { b } from "./other.js";\n';
+    expect([...sample.matchAll(IMPORT_RE)].map((m) => m[1])).toEqual(["../scraper/ids.js", "node:zlib", "./other.js"]);
   });
 });
 

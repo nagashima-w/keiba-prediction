@@ -423,7 +423,7 @@ export class MigrationCore {
     }
     await this.deps.analyses.countR2Read(); // 検証の読み出し 1 回(Class B)。柵の確認は取り込みのアラームで行う(検証は 1 回だけの読み出し)。
     const verifyStartedAt = this.deps.now();
-    const verified = await verifyMigrationFile(stream);
+    const verified = await verifyMigrationFile(stream, { now: verifyStartedAt });
     job.verified = { bytes: verified.bytes, lines: verified.lines, ms: this.deps.now() - verifyStartedAt };
     job.exportedAt = verified.header.exportedAt;
     job.appVersion = verified.header.appVersion;
@@ -566,6 +566,7 @@ export class MigrationCore {
     let reachedEnd = true;
     try {
       for await (const raw of readLines(stream, offset)) {
+        // 分析日時の上限(取り込み時刻 + 7 日)は渡さない: 検証(`verifyMigrationFile`)で全行が通過済みで、ここは同じ行の読み直し(Issue #308)。
         const line = parseMigrationLine(raw.text);
         const cost = line.type === "analysis" ? ANALYSIS_QUERY_ESTIMATE : line.type === "result" ? RESULT_QUERY_ESTIMATE : 0;
         if (planned.length >= MAX_PLANNED_LINES || (planned.some((p) => p.line.type === "analysis" || p.line.type === "result") && used + cost > queryRoom)) {

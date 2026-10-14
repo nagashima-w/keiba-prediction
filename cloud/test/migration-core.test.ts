@@ -282,6 +282,24 @@ describe("検証: 書き始める前に全体を検証する", () => {
     expect(h.alarm.at).toBeNull();
   });
 
+  it("取り込み時刻 + 7 日より後の分析日時を含むファイル(Issue #308): failed(phase: verify)。D1 には何も書かれない。ちょうど 7 日後は通る", async () => {
+    const withStamp = (iso: string): string => `${lines.map((l, i) => (i === 1 ? l.replace('"analyzed_at":"2026-03-02T01:00:00.000Z"', `"analyzed_at":"${iso}"`) : l)).join("\n")}\n`;
+    expect(withStamp("2099-01-01T00:00:00.000Z")).not.toBe(`${lines.join("\n")}\n`); // 置換が効いている
+    const limit = T0 + 7 * 24 * 60 * 60 * 1000;
+    const over = harness();
+    await upload(over, withStamp(new Date(limit + 1).toISOString()));
+    await over.run();
+    expect(over.core.getStatus().state).toBe("failed");
+    expect(over.core.getStatus().failure?.phase).toBe("verify");
+    expect(over.core.getStatus().failure?.message).toMatch(/analyzed_at/);
+    expect(await count("analyses")).toBe(0);
+    await local.reset();
+    const exact = harness();
+    await upload(exact, withStamp(new Date(limit).toISOString()));
+    await exact.run();
+    expect(exact.core.getStatus().state).toBe("completed");
+  });
+
   it("最後の分析の行が壊れているファイル(前の分析の行は正常): 最初の行も書かれない(全体を先に検証している)", async () => {
     const h = harness();
     const broken = lines.map((l, i) => (i === 5 ? l.replace('"model":', '"modelx":') : l)); // 5 行目 = 分析 5

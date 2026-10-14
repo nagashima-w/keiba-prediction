@@ -2,7 +2,7 @@ import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { MigrationFormatError } from "../../packages/core/src/ev/cloud-migration-format";
 import { MAX_LINE_BYTES, MigrationFileError, readLines, type RawLine } from "../src/migration-reader";
-import { verifyMigrationFile } from "../src/migration-verify";
+import { MIGRATION_ANALYZED_AT_FUTURE_MARGIN_MS, verifyMigrationFile } from "../src/migration-verify";
 import { GOLDEN_TEXT, gz, streamOf } from "./migration-fixture";
 
 /**
@@ -94,11 +94,14 @@ describe("readLines: 行・バイトオフセット", () => {
   });
 });
 
+/** サーバの現在時刻(検証の `now`)。golden の分析日時(2026-03-02)より後。 */
+const NOW = Date.UTC(2026, 9, 9, 3, 0, 0);
+
 describe("verifyMigrationFile: 書き込みの前の全体の検証", () => {
   const ok = (text: string = GOLDEN_TEXT, size = 4096): ReadableStream<Uint8Array> => streamOf(gz(text), size);
 
   it("実物のファイル: 通る。ヘッダ・フッタの件数・行数・展開後の大きさ・結果の行の開始オフセットを返す", async () => {
-    const v = await verifyMigrationFile(ok());
+    const v = await verifyMigrationFile(ok(), { now: NOW });
     expect(v.header.appVersion).toBe("1.27.0");
     expect(v.footer.analysisLines).toBe(5);
     expect(v.footer.resultLines).toBe(5);
@@ -108,8 +111,8 @@ describe("verifyMigrationFile: 書き込みの前の全体の検証", () => {
   });
 
   it("チャンクの切れ目が違っても結果は同じ", async () => {
-    const a = await verifyMigrationFile(ok(GOLDEN_TEXT, 7));
-    const b = await verifyMigrationFile(ok(GOLDEN_TEXT, 1 << 20));
+    const a = await verifyMigrationFile(ok(GOLDEN_TEXT, 7), { now: NOW });
+    const b = await verifyMigrationFile(ok(GOLDEN_TEXT, 1 << 20), { now: NOW });
     expect(a).toEqual(b);
   });
 
@@ -133,14 +136,48 @@ describe("verifyMigrationFile: 書き込みの前の全体の検証", () => {
   it.each(bad)("拒否: %s", async (_name, make, pattern) => {
     const made = make();
     const stream = typeof made === "string" ? streamOf(gz(made), 100) : made;
-    const error = await verifyMigrationFile(stream).then(() => null, (e: unknown) => e);
+    const error = await verifyMigrationFile(stream, { now: NOW }).then(() => null, (e: unknown) => e);
     expect(error).toBeInstanceOf(MigrationFormatError);
     expect((error as Error).message).toMatch(pattern);
+  });
+
+  it("値の形の違反(Issue #308): レース ID が不正な行は、行番号つきで拒否する(書き始める前にファイル全体を拒否する)", async () => {
+    const broken = lines.map((l, i) => (i === 2 ? l.replace('"race_id":"202603020211"', '"race_id":"202500000001"') : l));
+    expect(broken[2]).not.toBe(lines[2]);
+    const error = await verifyMigrationFile(streamOf(gz(join(broken)), 100), { now: NOW }).then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(MigrationFormatError);
+    expect((error as Error).message).toMatch(/3 行目.*race_id/);
   });
 
   it("前提(空振り防止): 変異に使った置換は、実物に効いている", () => {
     expect(lines[footerIdx]).toContain('"analysisLines":5');
     expect(lines[1]).toContain('"model":');
     expect(lines.slice(1).some((l) => /"race_snapshot_json":"\{\\"raceName/.test(l))).toBe(true);
+  });
+});
+
+describe("verifyMigrationFile: 分析日時の上限は『サーバの現在時刻 + 7 日』(Issue #308。ブラウザ側の検証は見ない)", () => {
+  const lines = GOLDEN_TEXT.trimEnd().split("\n");
+  const withAnalyzedAt = (iso: string): string => `${lines.map((l, i) => (i === 1 ? l.replace('"analyzed_at":"2026-03-02T01:00:00.000Z"', `"analyzed_at":"${iso}"`) : l)).join("\n")}\n`;
+  const limit = NOW + MIGRATION_ANALYZED_AT_FUTURE_MARGIN_MS;
+
+  it("固定値: 余裕は 7 日", () => {
+    expect(MIGRATION_ANALYZED_AT_FUTURE_MARGIN_MS).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it("前提(空振り防止): 置換は実物の分析日時に効いている", () => {
+    expect(withAnalyzedAt("2099-01-01T00:00:00.000Z")).not.toBe(`${lines.join("\n")}\n`);
+  });
+
+  it("ちょうど 7 日後は通り、1 ミリ秒超過は拒否する(2 行目 = 最初の分析)", async () => {
+    await expect(verifyMigrationFile(streamOf(gz(withAnalyzedAt(new Date(limit).toISOString())), 4096), { now: NOW })).resolves.toMatchObject({ lines: 12 });
+    const error = await verifyMigrationFile(streamOf(gz(withAnalyzedAt(new Date(limit + 1).toISOString())), 4096), { now: NOW }).then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(MigrationFormatError);
+    expect((error as Error).message).toMatch(/2 行目.*analyzed_at/);
+  });
+
+  it("now が違えば上限も動く(上限は検証のたびの現在時刻から出す)", async () => {
+    const text = withAnalyzedAt(new Date(limit + 1).toISOString());
+    await expect(verifyMigrationFile(streamOf(gz(text), 4096), { now: NOW + 1 })).resolves.toMatchObject({ lines: 12 });
   });
 });

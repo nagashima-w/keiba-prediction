@@ -156,19 +156,19 @@ describe("toResultImport: 結果の行 → 保存の入力", () => {
   });
 
   it("取込記録だけのレース(結果なし)・メタだけのレース: 無い表は null", () => {
-    const markersOnly = toResultImport(at("202603020213"));
+    const markersOnly = toResultImport(at("202603030101"));
     expect(markersOnly.resultsJson).toBeNull();
     expect(markersOnly.courseType).toBeNull();
     expect(markersOnly.comboRowsJson).toBeNull();
     expect(JSON.parse(markersOnly.markerRowsJson!)).toEqual([["wide"]]);
-    const metaOnly = toResultImport(at("202603020214"));
+    const metaOnly = toResultImport(at("202603030102"));
     expect(metaOnly.courseType).toBe("ダ");
     expect(metaOnly.resultsJson).toBeNull();
     expect(metaOnly.markerRowsJson).toBeNull();
   });
 
   it("払戻の行だけがあるレース(取込記録なし): 払戻は入力に載る(マーカーは無い)", () => {
-    const imp = toResultImport(at("202603020215"));
+    const imp = toResultImport(at("202603030103"));
     expect(imp.comboRowsJson).not.toBeNull();
     expect(imp.markerRowsJson).toBeNull();
   });

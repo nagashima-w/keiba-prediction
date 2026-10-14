@@ -156,6 +156,21 @@ describe("validateMigrationFile: 壊れたファイルは理由を返す(アッ�
   });
 });
 
+describe("validateMigrationFile: 値の形の検証(Issue #308)", () => {
+  it("値の形の違反(レース ID が不正)は、位置(行番号・表・列)つきで拒否する", async () => {
+    const broken = LINES.map((l, i) => (i === 2 ? l.replace('"race_id":"202603020211"', '"race_id":"202500000001"') : l));
+    expect(broken[2]).not.toBe(LINES[2]);
+    const message = invalidMessage(await run(gz(`${broken.join("\n")}\n`)));
+    expect(message).toMatch(/3 行目.*analyses.*race_id/);
+  });
+
+  it("ブラウザ側は分析日時の『未来』を見ない(サーバだけが取り込み時刻で見る)。形が正しければ 9999 年も通る", async () => {
+    const future = LINES.map((l, i) => (i === 1 ? l.replace('"analyzed_at":"2026-03-02T01:00:00.000Z"', '"analyzed_at":"9999-12-31T23:59:59.999Z"') : l));
+    expect(future[1]).not.toBe(LINES[1]);
+    expect((await run(gz(`${future.join("\n")}\n`))).kind).toBe("ok");
+  });
+});
+
 describe("validateMigrationFile: 流し読み・進捗・取り消し", () => {
   it("進捗は、読んだ(圧縮の)バイト数が単調に増え、最後は全体と一致する。行数も増える", async () => {
     const bytes = gz(FIXTURE);

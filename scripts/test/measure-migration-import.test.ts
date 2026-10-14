@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MigrationTally, parseMigrationLine } from "../../packages/core/src/ev/cloud-migration-format.js";
-import { perturbDecimals, seededRandom, syntheticLines } from "../measure-migration-import.js";
+import { MAX_SYNTHETIC_BETS, perturbDecimals, seededRandom, syntheticBetKeys, syntheticLines, syntheticRaceId } from "../measure-migration-import.js";
 
 /**
  * Issue #216(#167-B1): 移行の取り込みの実測スクリプト(scripts/measure-migration-import.ts)の、合成ファイルの作り方の検査。
@@ -48,6 +48,42 @@ describe("syntheticLines(合成ファイル)", () => {
     for (const l of lines) {
       if (l.type === "analysis") expect(resultIds).toContain(l.analysis["race_id"]);
     }
+  });
+});
+
+describe("合成するレース ID・買い目は、Issue #308 の値の検証に適う(以前の 202500000000 + n や 8 桁のキーは拒否される形だった)", () => {
+  it("syntheticRaceId: 容量いっぱい(4800)まで有効なレース ID で、文字列としても昇順・重複なし。範囲外は throw", () => {
+    const ids = Array.from({ length: 4800 }, (_, i) => syntheticRaceId(i + 1));
+    expect(ids).toHaveLength(4800);
+    expect(new Set(ids).size).toBe(4800);
+    expect(ids).toEqual([...ids].sort());
+    const line = (raceId: string): string => JSON.stringify({ type: "result", raceId, results: [], meta: null, comboPayouts: [], comboPayoutImports: [] });
+    for (const id of [ids[0]!, ids[11]!, ids[12]!, ids[479]!, ids[480]!, ids[4799]!]) {
+      expect(() => parseMigrationLine(line(id)), id).not.toThrow();
+    }
+    expect(() => syntheticRaceId(0)).toThrow();
+    expect(() => syntheticRaceId(4801)).toThrow();
+  });
+
+  it("syntheticBetKeys: 最大数(6342)まで重複なしで、すべて有効な買い目。上限を超えれば throw", () => {
+    expect(MAX_SYNTHETIC_BETS).toBe(6342);
+    const all = syntheticBetKeys(MAX_SYNTHETIC_BETS);
+    expect(all).toHaveLength(6342);
+    expect(new Set(all.map((b) => `${b.betType}/${b.key}`)).size).toBe(6342);
+    expect(new Set(all.map((b) => b.betType)).size).toBe(6);
+    expect(() => syntheticBetKeys(MAX_SYNTHETIC_BETS + 1)).toThrow();
+  });
+
+  it("最大規模(結果 300・馬 18・買い目 6342 件)でも、全行が検証と並びの集計を通る。馬が 19 頭なら throw", () => {
+    const big = { analyses: 2, results: 300, horses: 18, bets: MAX_SYNTHETIC_BETS, comboEvery: 0 } as const;
+    const tally = new MigrationTally();
+    const lines = [...syntheticLines(big)].map((l) => parseMigrationLine(l));
+    for (const line of lines) tally.accept(line);
+    tally.assertComplete();
+    const first = lines.find((l) => l.type === "analysis");
+    expect(first?.type === "analysis" ? [first.horses.length, first.bets.length] : null).toEqual([18, 6342]);
+    expect(lines.filter((l) => l.type === "result")).toHaveLength(300);
+    expect(() => [...syntheticLines({ ...big, horses: 19 })]).toThrow(/18/);
   });
 });
 
