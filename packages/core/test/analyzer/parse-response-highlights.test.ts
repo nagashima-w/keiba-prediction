@@ -3,7 +3,7 @@
  *
  * ゲートの決定(Issue #196 のコメント 2026-10-07):
  *  - 欠落・配列でない値は `[]`。文字列でない要素と空(trim 後)の要素は捨て、trim した値を保存する。
- *  - 4項目以上は、**空を除いたあとに**先頭3つに切る。1項目の長さ(全角30字)は解析では切らない(プロンプトの指示のみ)。
+ *  - 4項目以上は、**空を除いたあとに**先頭3つに切る。1項目の長さ(全角30字)は、プロンプトの指示を超えても100コードポイントまでは切らない(100超は Issue #303 で切る。parse-response-truncate.test.ts)。
  *  - place_prob が欠落・不正で prior を採用した馬(usedPrior:true)は、reason と同じく `[]`。
  *  - 分析は止めない: clippedCount・missingCount・usedPrior・fallback の判定に影響させない。
  *  - 印の制約違反の救済(AnalyzerMarkViolationError が運ぶ horses)でも、この2つは保持する。
@@ -84,7 +84,7 @@ describe("highlights / concerns の解析(欠落・形違い・整形。表駆�
     { label: "ちょうど3項目はそのまま", raw: ["a", "b", "c"], expected: ["a", "b", "c"] },
     { label: "4項目は先頭3つに切る", raw: ["a", "b", "c", "d"], expected: ["a", "b", "c"] },
     { label: "空を除いたあとに切る(先頭の空・非文字列で枠を消費しない)", raw: ["", 5, "a", "  ", "b", "c", "d"], expected: ["a", "b", "c"] },
-    { label: "全角30字を超える項目も、解析では切らない", raw: ["あ".repeat(45)], expected: ["あ".repeat(45)] },
+    { label: "全角30字を超える項目も、100字以内なら解析では切らない", raw: ["あ".repeat(45)], expected: ["あ".repeat(45)] },
   ];
 
   it.each(cases)("$label", ({ raw, missingKey, expected }) => {

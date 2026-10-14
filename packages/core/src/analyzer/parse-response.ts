@@ -211,9 +211,48 @@ export interface ParseAnalyzerResult {
 export const MAX_ITEMS_PER_LIST = 3;
 
 /**
+ * `reason` の最大文字数(コードポイント単位。Issue #303)。
+ * 根拠: プロンプト(build-prompt.ts)は reason に文字数を指示していない(「総合の根拠の一文」)。実際の応答は、
+ * `docs/investigations/probability-quality-41-llm/responses/` の LLM 応答 36 ファイル(n=449 頭)で、
+ * 中央値 92・p99 141・最大 197 コードポイントだった(各ファイルの最初の `{` から最後の `}` を JSON.parse し、
+ * `horses[].reason` を `Array.from(...).length` で数えた値)。最大の約 2 倍にして、通常の応答を切らず、
+ * 暴走した応答(保存・表示・日報の入力の肥大化)だけを切る。
+ */
+export const PARSE_REASON_MAX_CODEPOINTS = 400;
+
+/**
+ * 強調材料・懸念事項の 1 項目の最大文字数(コードポイント単位。Issue #303)。
+ * 根拠: プロンプトの指示が「1項目は全角30字以内の短い句」(build-prompt.ts)。指示を多少守れない応答は
+ * 通すため、指示の約 3.3 倍にした。highlights・concerns の実データ(production の D1)は参照できておらず、
+ * この値は指示からの導出である(#197 より前の応答群には両キーが無く、実測できない)。
+ */
+export const PARSE_ITEM_MAX_CODEPOINTS = 100;
+
+/**
+ * 未知の予想印の説明文に入れる、生値(`JSON.stringify` した結果)の最大文字数(コードポイント単位。Issue #303)。
+ * 正当な印は 1 字なので、何が来たかの診断に足りる長さだけ残す。
+ */
+export const PARSE_MARK_VALUE_MAX_CODEPOINTS = 40;
+
+/**
+ * 文字列をコードポイント数 `max` 以下に切る(例外にしない。Issue #303)。
+ * `max` 以下ならそのまま返す。超えるときは先頭 `max-1` コードポイント + `…` を返す(合計ちょうど `max`。
+ * 日報の digest の `cut()`〈cloud/src/daily-report-digest.ts〉と同じ形。違いは、あちらが UTF-16 の長さで数えて
+ * サロゲートの片割れを落とすのに対し、こちらはコードポイントで数えるのでペアを割らない点)。
+ * UTF-16 長が `max` 以下なら必ずコードポイント数も `max` 以下なので、通常の(短い)値では配列化しない。
+ */
+export function truncateByCodePoints(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const points = Array.from(text);
+  if (points.length <= max) return text;
+  return `${points.slice(0, max - 1).join("")}…`;
+}
+
+/**
  * 強調材料・懸念事項の生の値を `string[]` に整える(例外を投げない。Issue #197)。
  * 配列でなければ `[]`。文字列でない要素は捨て、各要素は trim して空なら捨て、**空を除いたあとに**先頭
- * {@link MAX_ITEMS_PER_LIST} 個に切る。1項目の長さは切らない(全角30字はプロンプトの指示のみ)。
+ * {@link MAX_ITEMS_PER_LIST} 個に切る。1項目の長さは、trim したあとに {@link PARSE_ITEM_MAX_CODEPOINTS}
+ * コードポイントを超えるときだけ切る(末尾「…」。Issue #303。全角30字の指示は、これより厳しくプロンプト側で出す)。
  */
 function coerceItemList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -222,7 +261,7 @@ function coerceItemList(raw: unknown): string[] {
     if (typeof el !== "string") continue;
     const t = el.trim();
     if (t === "") continue;
-    items.push(t);
+    items.push(truncateByCodePoints(t, PARSE_ITEM_MAX_CODEPOINTS));
     if (items.length >= MAX_ITEMS_PER_LIST) break;
   }
   return items;
@@ -321,7 +360,10 @@ export function parseAnalyzerResponse(
     const prob = rec["place_prob"];
     byNumber.set(num, typeof prob === "number" ? prob : NaN);
     const reason = rec["reason"];
-    reasonByNumber.set(num, typeof reason === "string" ? reason : null);
+    reasonByNumber.set(
+      num,
+      typeof reason === "string" ? truncateByCodePoints(reason, PARSE_REASON_MAX_CODEPOINTS) : null,
+    );
     // 強調材料・懸念事項(Issue #197)。欠落・形違いは `[]`(分析は止めない)。
     highlightsByNumber.set(num, coerceItemList(rec["highlights"]));
     concernsByNumber.set(num, coerceItemList(rec["concerns"]));
@@ -341,7 +383,10 @@ export function parseAnalyzerResponse(
     const { mark, isUnknown } = classifyMark(rawMarkByNumber.get(p.umaban));
     if (isUnknown) {
       unknownMarkMessages.push(
-        `未知の予想印です(馬番${p.umaban}): ${JSON.stringify(rawMarkByNumber.get(p.umaban))}`,
+        `未知の予想印です(馬番${p.umaban}): ${truncateByCodePoints(
+          JSON.stringify(rawMarkByNumber.get(p.umaban)),
+          PARSE_MARK_VALUE_MAX_CODEPOINTS,
+        )}`,
       );
     }
 
