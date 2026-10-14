@@ -15,6 +15,9 @@
  *    (Issue #226)も騎手 ID で一意にして取る**: まず保存先(`jockeyStore`。本番は D1。日をまたいで共有)から読み、取得日時から 7 日以内なら netkeiba に
  *    出ない(週に 1 回の更新)。保存先に無い・古い騎手だけを 1 人 1 本、その後ろに足す(16 頭・騎手 16 人で最大 35 本。保存先が空の最初の週と冷えた状態だけ)。
  *    1 回の取得の fetcher 呼び出しの合計は上限 40(`DEFAULT_JOCKEY_REQUEST_LIMIT`)で、届いたら残りの騎手は取らず補正なしで続ける。重みが 0 なら 19 本のまま。
+ *    発走前の取得ステップは、この `scrapeRace` のほかに、重賞の過去10年傾向(`prefetchGradeWinner`。LLM が有効で重賞のときだけ、最大 1 本)と、日報の時刻の下限のためのレース一覧(`recordReportHold`→`getRaceList`。最大 1 本・取得キャッシュにあれば 0 本)を引く。
+ *    したがって gate への呼び出しは最大 40 + 1 + 1 = 42 本で、Free の 50 に対して余裕は 8 本(再現: `grep -n "recordReportHold(\|prefetchGradeWinner(" cloud/src/race-day-core.ts` で、どちらも `runPreRaceFetch` の呼び出しが 1 箇所ずつ。
+ *    `fetchText(` はそれぞれ `fetchGradeWinnerEntries` に 1 回、`listRaces`・`listNarRaces` に 1 回ずつ)。D1・R2 への呼び出しは数えていない。
  *  - **ステップ2(計算 `compute`)**: **netkeiba には出ず**(gate は0回)、キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)` を走らせ、
  *    朝の prior(`AnalysisResult`)を **DO のストレージにだけ**置く(**D1・R2 には書かない**。ユーザー判断 2026-10-06: 保存するのは発走前の分析だけ)。
  *    ただし**各馬の戦績**(キャッシュ済みの事実。Issue #256 段階A)は、prior の保存とタスクの完了の後に D1 の `horse_runs` へ貯める(`horseRunsStore`。取得は増やさない。
@@ -28,7 +31,7 @@
  * 発走前(pre_race)の取得ステップは、地方の三連単(軸=1着固定ごとに頭数ぶんのリクエスト)を取らない(`scrapeRace` の `deferNarTrifecta`)。組合せが ON の地方では、取得ステップが成功したあと、
  * 出走馬の全馬番を `race_day_nar_trifecta`(`race-day-nar-trifecta.ts`)に pending で登録し、タスクは `fetched` になる。`fetched` の発走前のタスクに pending の軸があれば、`runStep` は計算より先に
  * {@link RaceDayCore.runNarTrifectaStep}(**別のアラーム**。1回に最大 {@link NAR_TRIFECTA_AXES_PER_STEP} 軸を取って `fetch_cache` に積む)を呼ぶ。pending が尽きたら計算ステップ(ネットワークに出ない。キャッシュから三連単をインラインで読む)。
- * 1アラームあたりの gate への呼び出しは、取得ステップ ≤ 40(騎手の上限)・段階 ≤ 9・計算 0。外から見える `status` は増やさない(段階の間も `fetched`)。失敗・打ち切りでも三連単なしで計算に進む。
+ * 1アラームあたりの gate への呼び出しは、取得ステップ ≤ 42(`scrapeRace` が ≤ 40〈騎手の上限〉+ 重賞の傾向 1 + 日報の下限の一覧 1)・段階 ≤ 9・計算 0。外から見える `status` は増やさない(段階の間も `fetched`)。失敗・打ち切りでも三連単なしで計算に進む。
  *
  * ## 予約(schedule)
  * 予約だけをして戻る(`setAlarm(now)`)。本処理はアラームの中(`runNextStep`)。同じレースが実行中(queued・fetched)なら受け付けない。
@@ -156,6 +159,12 @@ const REPORT_REQUESTED_KEY = "report_requested";
  */
 export const REPORT_HOLD_KEY = "report_hold";
 
+/**
+ * 日報の時刻の下限を過ぎたあとの判定({@link RaceDayCore.maybeRequestReport})を**1回行った**印(Issue #298)を永続化するキー。値は判定したときの下限(`String(下限)`)。
+ * 下限が後から伸びれば値が食い違い、新しい下限を過ぎたあとにもう一度判定の機会が来る。判定の結果(静かか・依頼の成否)は問わない。
+ */
+const REPORT_HOLD_JUDGED_KEY = "report_hold_judged";
+
 /** 掃除の時刻(エポックミリ秒)を永続化するキー。 */
 const PURGE_DUE_KEY = "purge_due_at";
 
@@ -229,6 +238,13 @@ export interface AlarmInputs {
    * (他の候補と違い「過去は now」にしない: 下限を過ぎたあとに候補に残ると、即時のアラームのループになる)。
    */
   readonly reportHoldAtMs?: number | null;
+  /**
+   * 日報の時刻の下限を過ぎていて、その下限での判定がまだ行われていない(Issue #298)。真なら now を候補にする。下限の時刻の起床が、日報を判定しない分岐
+   * (計画・通知・馬場・タスク)に消費されたあとでも、判定の機会が来るようにするため。判定を1回行うと印が付いて偽に戻るので、アラームの即時のループにならない
+   * (印は判定の結果を問わず付く)。**呼び出し側は、タスク(queued・fetched)が無いときだけ真にする**: `pickNext` は再試行待ちのタスクを時刻を見ずに返し、タスクの分岐は
+   * 印を付けないので、タスクがあるあいだに now を張ると再試行の間隔を無視した撃ち直しが続く({@link RaceDayCore.resultsRunnable} と同じ考え方)。省略・偽は候補なし。
+   */
+  readonly reportJudgePending?: boolean;
 }
 
 /**
@@ -237,6 +253,7 @@ export interface AlarmInputs {
  *  - 計画の次の試行・期限 → `max(それ, now)`(過去の時刻は now。仕事の有無によらず候補)
  *  - 結果の取り込みの次の試行 → `max(それ, now)`(呼び出し側が、動けるときだけ入れる)
  *  - 日報の時刻の下限 → **未来のときだけ**その時刻(過去は候補にしない。Issue #291)
+ *  - 下限を過ぎて、その下限での判定が未了(`reportJudgePending`。Issue #298) → now(判定を1回行うと印が付いて消える。呼び出し側が、タスクが無いときだけ真にする)
  *  - 掃除の期限 → `max(それ, now)`。**ただし、仕事(即時・再試行待ち)があるあいだは候補にしない**: 仕事が終われば `armAlarm` が掃除の期限を延ばして張り直す。
  *    古い掃除の期限を候補に入れると、再試行待ちの間隔を無効にして、すぐ起こしてしまう(今の `armAlarm` もそうしている)。
  */
@@ -265,6 +282,9 @@ export function nextAlarmAt(i: AlarmInputs): number | null {
   }
   if (i.reportHoldAtMs !== undefined && i.reportHoldAtMs !== null && i.reportHoldAtMs > i.nowMs) {
     candidates.push(i.reportHoldAtMs);
+  }
+  if (i.reportJudgePending === true) {
+    candidates.push(i.nowMs);
   }
   if (i.purgeDueMs !== null && !i.immediateWork && !i.retryWork) {
     candidates.push(Math.max(i.purgeDueMs, i.nowMs));
@@ -365,7 +385,8 @@ export interface RaceDayDeps {
   readonly resultStore?: ResultStoreDeps;
   /**
    * 日報の作成の依頼(Issue #235。DO のラッパが、日報の DO〈`DailyReportDO`〉の `requestReport` を呼ぶ関数を渡す)。**無ければ依頼しない**。
-   * その日が静かになった({@link isDayQuiet}: 計画が確定し、計画中のレースも発走前のタスクも結果の取り込み待ちも無い)とき、1 回だけ開催日を渡して呼ぶ。
+   * その日が静かになった({@link isDayQuiet}: 計画が確定し、計画中のレースも発走前のタスクも結果の取り込み待ちも無く、**日報の時刻の下限〈手動で分析したレースの開催の最終レースの発走時刻。Issue #291〉を過ぎている**)とき、1 回だけ開催日を渡して呼ぶ。
+   * 下限の時刻にはアラームで起きて判定する。下限の起床が別の仕事に消費されても、下限を過ぎた判定は(タスクが尽きたあとの起床で)1 回行われる(Issue #298。印は meta の `report_hold_judged`)。
    * 成功したら依頼済みの印を書く(以降は呼ばない)。失敗は固定の警告だけを残し、印を書かない(次の起床で再び依頼する)。
    */
   readonly requestReport?: (kaisaiDate: string) => Promise<void>;
@@ -1922,6 +1943,7 @@ export class RaceDayCore {
       resultAtMs: this.resultsRunnable() ? this.results.nextTryAtMs() : null,
       babaAtMs: this.baba.dueAtMs(),
       reportHoldAtMs: this.pendingReportHoldAt(),
+      reportJudgePending: rows.length === 0 && this.reportJudgePending(),
     });
     if (at !== null) {
       await this.setAlarm(at);
@@ -1958,6 +1980,27 @@ export class RaceDayCore {
     }
     const hold = this.reportHoldAt();
     return hold !== null && this.now() < hold ? hold : null;
+  }
+
+  /**
+   * 下限を過ぎていて、その下限での判定({@link maybeRequestReport})がまだ行われていない(Issue #298)。日報の依頼先があり、未依頼のときだけ。
+   * タスクが無い条件は呼び出し側({@link rearm})が付ける({@link AlarmInputs.reportJudgePending})。
+   */
+  private reportJudgePending(): boolean {
+    if (this.requestReport === undefined || this.metaGet(REPORT_REQUESTED_KEY) !== null) {
+      return false;
+    }
+    const hold = this.reportHoldAt();
+    return hold !== null && this.now() >= hold && this.metaGet(REPORT_HOLD_JUDGED_KEY) !== String(hold);
+  }
+
+  /** 下限を過ぎた判定を行った印を書く(下限がある・過ぎているときだけ。値は下限)。判定の結果は問わない。 */
+  private markReportHoldJudged(): void {
+    const hold = this.reportHoldAt();
+    if (hold === null || this.now() < hold) {
+      return;
+    }
+    this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", REPORT_HOLD_JUDGED_KEY, String(hold));
   }
 
   /**
@@ -2022,6 +2065,8 @@ export class RaceDayCore {
     if (this.requestReport === undefined || this.metaGet(REPORT_REQUESTED_KEY) !== null) {
       return;
     }
+    // 下限を過ぎた判定を行った印(Issue #298)。判定の結果は問わない(静かでなくても、依頼が失敗しても付く = アラームの即時のループにならない)。
+    this.markReportHoldJudged();
     const kaisaiDate = this.metaGet("kaisai_date");
     if (kaisaiDate === null) {
       return;
@@ -2459,7 +2504,7 @@ export class RaceDayCore {
    * 本文を取得キャッシュ(`fetch_cache`)に積む(パースは計算ステップに任せる=二重に解析しない)。軸の結果(fetched・failed)は**取得の直後に、次の軸を取る前に**表に書く
    * (再開・二重のアラームで、書けた軸を取り直さない。取り直すのは、書く前に落ちた 1 軸だけ)。未取得の軸が尽きたら、次のステップで計算に進む。
    *
-   * 外への呼び出しの上限: このステップは gate への取得が最大 9 本(取得ステップの 2N+4+M ≤ 40 とは別のアラーム)で、計算ステップは 0 本。
+   * 外への呼び出しの上限: このステップは gate への取得が最大 9 本(取得ステップの `scrapeRace` の 2N+4+M ≤ 40〈重賞の傾向・日報の下限の一覧を足して最大 42〉とは別のアラーム)で、計算ステップは 0 本。
    * 失敗は軸ごとに隔離する: 1軸の失敗(404・通信エラー・タイムアウト・`queue-full`)はその軸だけ failed にして次へ。**ブレーカー(blocked)・許可リスト外は残りを撃たずに全部 failed**
    * にして打ち切る(30 分のブレーカーの間に撃ち直さない)。どの場合も計算に進み、取れなかった軸は、計算ステップの `scrapeRace` がキャッシュに無い軸として `fetchFailed`
    * (部分被覆の警告)にする。三連単なしでも他の券種で分析は完了する。
