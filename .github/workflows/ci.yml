@@ -9,7 +9,7 @@
 #   **ここは公開しない。** リリースへの書き込み・タグでの起動・秘密の参照は持たない(scripts/test/ci-workflow.test.ts が固定している)。
 #
 # ★本番デプロイとは独立: 本番へのデプロイの関門(承認印 `[PUBLISH-APPROVED]` と「レビュー継続中」)は deploy-cloud.yml にあり、
-#   このワークフローは承認印の有無に関わらず作業ブランチへの push のたびに走る。デプロイはこのワークフローの結果を待たない
+#   このワークフローは承認印の有無に関わらず作業ブランチへの push のたび(と、作業ブランチ宛ての PR。Issue #310)に走る。cloud-verify ジョブだけは PR のときだけ走る(下のジョブのコメント)。デプロイはこのワークフローの結果を待たない
 #   (needs はワークフロー間では張れない)。承認印付きの push の後は、本ワークフローの成否と、deploy-cloud.yml の
 #   deploy ジョブが実際に走ったことの両方を確かめる(CLAUDE.md「報告と承認の方針」)。
 #
@@ -28,11 +28,19 @@
 # ★uses: はコミット SHA でピン留めしている(Issue #305)。タグ(v4)は付け替えで中身が差し替わりうるため、行末のコメントに版数を書く。
 #   SHA は `git ls-remote https://github.com/<owner>/<repo>` の実出力から取った、ピン留めの時点で `v4` タグが指していたコミット(CI が動かすコードは変えていない)。
 #   pnpm/action-setup の `v4` タグは最新の v4.4.0 ではなく v4.3.0 のコミットを指す(だから # v4.3.0)。
-#   版を上げるときは、全 uses 行と scripts/test/actions-pinned.test.ts の期待表を揃えて直す(テストが全 uses 行を固定している)。
+#   版の更新は Dependabot(.github/dependabot.yml)の PR が、SHA と行末の版数コメントを同時に書き換える。scripts/test/actions-pinned.test.ts は
+#   特定の SHA・版数ではなく規則を検査する(全 uses が SHA 固定 + `# vX.Y.Z`・全ワークフローで同じ action は同じ SHA と版数・許可リスト内の action だけ)ので、
+#   PR をそのままマージしても緑のままである。手で上げるときも、全 uses 行(ci.yml・deploy-cloud.yml)を揃えて直せばよい(食い違いはテストが検出する)。
+#   新しい action を使うときは、テストの許可リスト(ALLOWED_ACTIONS)に意図して足す。
 name: 型検査・テストの関門
 
 on:
   push:
+    branches:
+      - claude/issue-order-processing-wjgpdd
+  # 作業ブランチ宛ての PR(Dependabot の更新 PR。Issue #310)でも関門を走らせる。pull_request_target ではない(PR のコードを秘密のある状態で動かさない)。
+  # このワークフローは秘密を参照せず、権限は contents: read だけなので、PR の側が書き換えても得られるものは無い。
+  pull_request:
     branches:
       - claude/issue-order-processing-wjgpdd
   workflow_dispatch:
@@ -75,3 +83,45 @@ jobs:
       # ルートの `pnpm test`(= `pnpm -r test && vitest run`)。`pnpm -r test` のままだと scripts/ のテストが CI で実行されない。
       - name: テストを実行
         run: pnpm test
+
+  # Issue #310: Dependabot の PR(pull_request)のときだけ走る、cloud/ の検査。cloud の依存(wrangler・esbuild・sdk 等)の PR は
+  # ルートの検査(上の verify)では cloud の型検査・テスト・スモークが走らないので、PR の段階で赤を知るために足した。
+  # push では走らない: 作業ブランチへの push では deploy-cloud.yml の check・smoke が同じ検査をするので、重複させない。
+  # 手順は deploy-cloud.yml の check・smoke ジョブと同じ形(同じ SHA の actions)。秘密は使わない(スモークは外部へ出ない)。
+  # dry-run と D1 の migration は、cloud の依存の PR で壊れうるが、重複を抑えるため含めない(マージ後の push の check ジョブが走らせる)。
+  cloud-verify:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: cloud/pnpm-lock.yaml
+
+      # cloud/ は pnpm workspace の外。ロックファイルで固定し、独立にインストールする。
+      - name: 依存をインストール(cloud)
+        working-directory: cloud
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      - name: 型検査(cloud)
+        working-directory: cloud
+        run: pnpm run typecheck
+
+      - name: テスト(cloud)
+        working-directory: cloud
+        run: pnpm test
+
+      - name: ローカルスモークテスト(cloud)
+        working-directory: cloud
+        run: pnpm run smoke

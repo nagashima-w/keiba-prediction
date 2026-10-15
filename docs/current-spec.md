@@ -941,13 +941,20 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 `.github/workflows/build-windows.yml` は削除した(内容は版管理の履歴にある)。以後の機能追加と統計モデルの
 見直しは web(cloud)だけを対象にする。
 
-- **現在の CI**(いずれも `ubuntu-latest`。作業ブランチ 1 本への push と `workflow_dispatch` で起動):
+- **現在の CI**(いずれも `ubuntu-latest`。作業ブランチ 1 本への push と `workflow_dispatch` で起動。`ci.yml` だけは作業ブランチ宛ての `pull_request` でも起動する〈#310。`deploy-cloud.yml` は秘密を持つので PR では起動しない〉):
   - `.github/workflows/ci.yml`: `pnpm typecheck`・`pnpm test`(packages/core・scripts のテスト)の関門。公開はしない(`scripts/test/ci-workflow.test.ts` が固定)。
     cloud は packages/core のソースを相対 import しているので、core のテストは残してある。
     (`pnpm --filter @keiba/app build` は #287 で packages/app を削除したので無くなった。実行しても何もせず exit 0 になる。)
   - `.github/workflows/deploy-cloud.yml`: 3 つのジョブ(Issue #288 で check から smoke を分けた)。**check**(cloud の型検査・テスト・dry-run・D1 の migration のローカル適用)と **smoke**(ローカルスモーク)は並列に走り、**deploy**(本番デプロイ。10 節)は `needs: [check, smoke]` で両方の成功を待つ。
     **承認印 `[PUBLISH-APPROVED]` は、この本番デプロイの関門として残っている**(先端コミットに承認印があり、
     「レビュー継続中」を含まない push、または許可ブランチでの手動実行)。
+- **Dependabot(#310。`.github/dependabot.yml`)**: Actions の SHA ピン留め(#305)と固定した依存の更新を知らせる。対象は github-actions と npm(ルート・`packages/*`・`cloud/`)、週 1 回、PR の宛先は作業ブランチ(`target-branch`)。
+  Dependabot の PR が作業ブランチに来たら、レビュー(SHA と版数のコメントの差分)してマージする。**承認印の無いマージは本番にデプロイされず、次の承認印付きの公開で出る**。
+  - **Actions**: SHA と行末の `# vX.Y.Z` が同時に書き換わる想定(未確認。最初の PR で確かめる)。`scripts/test/actions-pinned.test.ts` は期待表の固定をやめ、規則(SHA 固定・版数コメント・全ワークフローで同じ action は同じ SHA と版数・許可リスト内の action)を検査するので、PR をそのままマージしても CI は緑のまま。
+  - **npm**: `@anthropic-ai/sdk`・`cheerio`・`iconv-lite`(core と cloud が同じ版を揃える)は先頭の group で、core と cloud の更新を 1 つの PR にまとめさせる(ディレクトリをまたぐ group が 1 つの PR になるかは未確認)。**片方だけの PR が来たら** `scripts/test/cloud-config-guard.test.ts` が赤になる。その場合は手で両方(core の `^X.Y.Z` と cloud の exact `X.Y.Z`、`cloud/pnpm-lock.yaml`)を揃えて取り込む。cloud の `esbuild` が上がると `cloud/src/client-bundle.generated.ts` のドリフトの検査(`test/client-bundle.test.ts`)が落ちうる(`pnpm run build:client` で再生成して同じ PR に載せる)。
+  - **CI の範囲**: PR では `ci.yml` が走る。`verify`(ルートの型検査・テスト)と、PR のときだけ走る `cloud-verify`(cloud/ の型検査・テスト・スモーク。`deploy-cloud.yml` の check・smoke と同じコマンド。秘密なし)。cloud の依存(wrangler・esbuild・sdk 等)の PR も PR の段階で赤が分かる。デプロイの dry-run と D1 の migration は `deploy-cloud.yml` の check にあり PR では走らず、マージ後の push で走る(deploy は承認印が無ければ走らない)。
+  - **セキュリティ更新(脆弱性の自動修正 PR)**: `dependabot.yml` では扱わない(宛先を main 以外にできない見込み。未確認)。リポジトリ設定の「Dependabot alerts」を有効にして通知を受け、**alerts が来たら作業ブランチで対応する**(`pnpm audit` で確かめ、版を上げる)。この設定は GitHub 上の操作でユーザーが行う。
+  - `dependabot.yml` は GitHub が**既定ブランチ(main)のもの**を読むので、main に取り込まれるまで Dependabot は動かない。
 - **版数は 1.44.0(exe の最終版)で凍結**した。以後は上げない([`docs/versioning.md`](./versioning.md))。
 - **削除したもの**: web が使っていた共有部分は `packages/core/src/analysis/`・`packages/core/src/view/` へ移した(#286)。
   exe 専用のコード(`packages/app` 全体・`packages/app/electron-builder.yml`・`scripts/release-gate.ts`・`scripts/artifact-gate.ts`・

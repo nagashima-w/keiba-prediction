@@ -1,0 +1,58 @@
+# Dependabot の設定(Issue #310)。
+#
+# ★何のためか: Issue #305 で Actions を SHA でピン留めし、依存の版を固定した。固定すると更新が自動で入らず、通知も来ない。
+#   Dependabot の「バージョン更新」で更新の PR を作らせ、レビューしてマージする。
+#
+# ★PR の宛先は作業ブランチ(target-branch)。main へ直接取り込まない規則のため、main 宛てにしない(CLAUDE.md「その他」)。
+#   PR をマージすると作業ブランチへの push になる。承認印 [PUBLISH-APPROVED] を含まないので、deploy-cloud.yml の deploy ジョブは走らず、
+#   次の承認印付きの公開で本番に出る。コミットメッセージの接頭辞に承認印・「レビュー継続中」を入れてはならない(scripts/test/dependabot-config.test.ts が固定)。
+#
+# ★この設定ファイルは、GitHub が既定ブランチ(main)のものを読む。作業ブランチにあるだけでは Dependabot は動かない
+#   (main への取り込みはユーザーの指示で PR のマージとして行う)。
+#
+# ★自動の脆弱性修正(セキュリティ更新)の PR は、このファイルでは扱わない。宛先を main 以外にできない見込みなので(未確認)、
+#   リポジトリの「Dependabot alerts」で通知を受け、作業ブランチで対応する(docs/current-spec.md「Dependabot」)。
+#
+# ★PR の CI: ci.yml が作業ブランチ宛ての pull_request で走る。verify ジョブ(ルートの型検査・テスト)に加え、cloud-verify ジョブ
+#   (cloud/ の型検査・テスト・スモーク。PR のときだけ)が走るので、cloud/ の依存の PR も PR の段階で赤を知れる。どちらも秘密を持たない。
+#   deploy-cloud.yml は秘密を持つので pull_request では走らせない(dry-run と D1 の migration は、マージ後の push の check ジョブが走らせる)。
+#
+# ★cloud/ は pnpm workspace の外にあり、別の pnpm-lock.yaml を持つ。core と cloud が同じ版を揃えている依存
+#   (@anthropic-ai/sdk は core が `^0.70.1`、cloud が exact `0.70.1`。cheerio・iconv-lite も同様)は、先頭の group で 1 つの PR にして同時に上げる。
+#   片方だけの PR が来た場合は scripts/test/cloud-config-guard.test.ts が赤になる(安全網)。手で揃えて取り込む。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: claude/issue-order-processing-wjgpdd
+    schedule:
+      interval: weekly
+    # Actions の更新は 1 つの PR にまとめる(SHA と行末の版数コメントが同時に書き換わる。scripts/test/actions-pinned.test.ts が規則を検査する)。
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "Dependabot(Actions)"
+
+  - package-ecosystem: npm
+    directories:
+      - "/"
+      - "/packages/*"
+      - "/cloud"
+    target-branch: claude/issue-order-processing-wjgpdd
+    schedule:
+      interval: weekly
+    # group は先頭から最初に一致したものに入る。先頭は、core と cloud で版を揃えている依存(両方のディレクトリの更新を 1 つの PR にする)。
+    groups:
+      core-cloud-shared:
+        patterns:
+          - "@anthropic-ai/sdk"
+          - "cheerio"
+          - "iconv-lite"
+      production-dependencies:
+        dependency-type: production
+      development-dependencies:
+        dependency-type: development
+    commit-message:
+      prefix: "Dependabot(npm)"
