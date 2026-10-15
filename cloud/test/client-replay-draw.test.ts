@@ -162,8 +162,8 @@ class FakeCtx {
 
 const COLORS: DrawColors = { fg: "#111111", bg: "#fefefe", muted: "#666666", line: "#cccccc", card: "#eeeeee", accent: "#0a58ca" };
 
-function init(n: number, turn: "right" | "left" = "left", distance: number | null = 1600): ReplayInit {
-  return { analysisId: 1, distance, turn, pace: "平均", horses: Array.from({ length: n }, (_, i) => ({ umaban: i + 1, name: null, strength: 0.1, fallback: 0.1, early: null, style: "差し" as const })) };
+function init(n: number, turn: "right" | "left" = "left", distance: number | null = 1600, focus = 0): ReplayInit {
+  return { analysisId: 1, distance, turn, pace: "平均", focus, horses: Array.from({ length: n }, (_, i) => ({ umaban: i + 1, name: null, strength: 0.1, fallback: 0.1, early: null, style: "差し" as const })) };
 }
 
 /** 前方位置の配列から frame を作る(横位置は既定で中央)。 */
@@ -225,18 +225,37 @@ describe("drawReplay(キャンバスへの描画)", () => {
     expect(numbers.sort()).toEqual(["1", "2", "3", "4", "5", "6"]);
   });
 
-  it("先頭の馬(位置が最大)だけ accent で塗る。その丸の直後の馬番が先頭の馬のもの", () => {
+  it("強調の馬(init.focus)だけ accent で塗る。前方位置の順位に依らない: 強調の馬が最後尾でも、その馬だけが accent で、先頭の馬は accent でない", () => {
+    // 馬番 4(添字 3)が強調。先頭は馬番 1(添字 0)・強調の馬は最後尾
     const ctx = new FakeCtx();
-    // 馬番 4(添字 3)が先頭
-    drawReplay(ctx, init(6), frameOf([0.3, 0.2, 0.25, 0.9, 0.1, 0.15]), COLORS);
+    drawReplay(ctx, init(6, "left", 1600, 3), frameOf([0.9, 0.5, 0.4, 0.1, 0.6, 0.3]), COLORS);
     const arcs = ctx.ops.map((o, i) => ({ o, i })).filter((e) => e.o.op === "arc");
     const accentArcs = arcs.filter((e) => e.o.fillStyle === COLORS.accent);
+    expect(arcs.length).toBe(6);
     expect(accentArcs.length).toBe(1);
     expect(arcs.filter((e) => e.o.fillStyle === COLORS.card).length).toBe(5);
+    // その丸の直後の馬番が強調の馬(4)で、数字は bg 色
     const next = ctx.ops.slice(accentArcs[0]!.i + 1).find((o) => o.op === "fillText");
     expect(next?.args[0]).toBe("4");
-    // 重なりでは先頭が一番上(最後に描く)
-    expect(arcs[arcs.length - 1]!.o.fillStyle).toBe(COLORS.accent);
+    expect(next?.fillStyle).toBe(COLORS.bg);
+    // 先頭の馬(馬番 1)の丸は card 色で、数字は fg 色
+    const textOf = (n: string) => ctx.ops.find((o) => o.op === "fillText" && o.args[0] === n);
+    expect(textOf("1")?.fillStyle).toBe(COLORS.fg);
+    expect(textOf("4")?.fillStyle).toBe(COLORS.bg);
+    // 描画順は後ろから先頭へ重ねる(先頭=馬番 1 が最後、最後尾=強調の馬が最初)
+    const order = ctx.ops.filter((o) => o.op === "fillText" && /^\d+$/.test(o.args[0] as string)).map((o) => o.args[0]);
+    expect(order).toEqual(["4", "6", "3", "2", "5", "1"]);
+  });
+
+  it("同じ強調の馬は、フレームごとに前方位置の順位が入れ替わっても同じ馬が accent(先頭が入れ替わっても色は飛ばない)", () => {
+    const accentNumber = (x: number[]): string => {
+      const ctx = new FakeCtx();
+      drawReplay(ctx, init(3, "left", 1600, 1), frameOf(x), COLORS);
+      const at = ctx.ops.findIndex((o) => o.op === "arc" && o.fillStyle === COLORS.accent);
+      expect(at, "前提: accent の丸がある").toBeGreaterThanOrEqual(0);
+      return ctx.ops.slice(at + 1).find((o) => o.op === "fillText")!.args[0] as string;
+    };
+    expect([accentNumber([0.9, 0.5, 0.4]), accentNumber([0.5, 0.9, 0.4]), accentNumber([0.4, 0.5, 0.9]), accentNumber([0.9, 0.1, 0.8])]).toEqual(["2", "2", "2", "2"]);
   });
 
   it("馬の丸の中心は、その馬の位置のコース上の点(lateral 込み)。位置の違う2頭は違う場所に描かれる", () => {

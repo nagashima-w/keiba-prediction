@@ -34,6 +34,21 @@ export interface ReplayInit {
   readonly turn: "right" | "left";
   /** 想定ペース(Issue #314。サーバがプロンプトの展開想定と同じ判定で求めた値。無ければ「不明」=平均として描く)。 */
   readonly pace: PaceEstimate;
+  /** 色を付けて強調する馬の添字(`horses` の中。Issue #316)。始めから終わりまで同じ馬を塗る(先頭の判定で色を切り替えない)。 */
+  readonly focus: number;
+}
+
+/** 本命の印(core の `PREDICTION_MARKS` の先頭。クライアントの束に core の解析器を入れないため値を写し、テストで一致を確かめる)。 */
+const MAIN_MARK = "◎";
+
+/**
+ * 強調する馬の添字(Issue #316)。印が「◎」の馬、無ければ全馬から、勝率(`strength`)が最も高い馬。同値は馬番の小さい方(◎が複数のときも◎の中で同じ順)。
+ * 乱数・再生の状態に依らず、同じ分析なら同じ馬。
+ */
+function focusOf(horses: readonly ReplayHorse[], marks: readonly (string | null)[]): number {
+  const marked = horses.map((_, i) => i).filter((i) => marks[i] === MAIN_MARK);
+  const pool = marked.length > 0 ? marked : horses.map((_, i) => i);
+  return pool.reduce((best, i) => (horses[i]!.strength > horses[best]!.strength || (horses[i]!.strength === horses[best]!.strength && horses[i]!.umaban < horses[best]!.umaban) ? i : best));
 }
 
 /** 脚質が無い馬の脚質(Issue #314)。`earlyPos` があれば粗く決める(逃げは決めない)。無ければ差し(中団)。 */
@@ -67,13 +82,8 @@ export function buildReplayInit(a: AnalysisDetail): ReplayInit | null {
   if (!(total > 0)) {
     return null;
   }
-  return {
-    analysisId: a.id,
-    distance: a.race.distance ?? null,
-    turn: a.race.turn ?? "right",
-    pace: a.race.pace ?? "不明",
-    horses: a.horses.map((h) => ({ umaban: h.umaban, name: h.name, strength: h.winProb!, fallback: h.adjustedProb, early: h.earlyPos ?? null, style: styleOf(h.legStyle, h.earlyPos ?? null) })),
-  };
+  const horses: ReplayHorse[] = a.horses.map((h) => ({ umaban: h.umaban, name: h.name, strength: h.winProb!, fallback: h.adjustedProb, early: h.earlyPos ?? null, style: styleOf(h.legStyle, h.earlyPos ?? null) }));
+  return { analysisId: a.id, distance: a.race.distance ?? null, turn: a.race.turn ?? "right", pace: a.race.pace ?? "不明", focus: focusOf(horses, a.horses.map((h) => h.mark)), horses };
 }
 
 /**
@@ -154,6 +164,8 @@ export function rankingAt(positions: readonly number[]): number[] {
 
 export const REPLAY_HEADING = "レース再生";
 export const REPLAY_NOTE = "確率モデルから1回分の着順を抽選して見せる演出です。物理的なシミュレーションではなく、確率・配分は変わりません。隊列は馬の脚質と想定ペースから描きます。";
+/** 色の意味の説明(Issue #316)。強調する馬の選び方は `focusOf`。 */
+export const REPLAY_COLOR_NOTE = "色の付いた丸は◎の馬(◎が無ければ勝率が最も高い馬)です。";
 export const REPLAY_PLAY_LABEL = "レースを再生";
 export const REPLAY_AGAIN_LABEL = "別の展開で再生";
 /** 直前と同じ展開(同じ着順・同じ動き)を最初から再生し直すボタン(Issue #314)。最初の再生の前は出さない。 */
@@ -173,6 +185,8 @@ export interface ReplayUi {
 export interface ReplaySection {
   readonly heading: string;
   readonly note: string;
+  /** 色の意味の説明(Issue #316)。 */
+  readonly colorNote: string;
   /** ボタンのクリック処理に渡す値(`data-analysis-id` にも出す)。 */
   readonly analysisId: number;
   /** この分析の再生を始めたか(始めたら canvas を出す)。 */
@@ -198,6 +212,7 @@ export function replaySectionOf(a: AnalysisDetail, ui: ReplayUi | undefined): Re
   return {
     heading: REPLAY_HEADING,
     note: REPLAY_NOTE,
+    colorNote: REPLAY_COLOR_NOTE,
     analysisId: a.id,
     started,
     playLabel: started ? REPLAY_AGAIN_LABEL : REPLAY_PLAY_LABEL,

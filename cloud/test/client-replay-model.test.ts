@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
+import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-response";
 import { buildReplayInit, drawFinishOrder, finalRanksOf, rankingAt, REPLAY_SPREAD, startRanksOf } from "../client/replay-model";
 
 /**
@@ -208,6 +209,7 @@ describe("buildReplayInit(再生の材料)", () => {
       analysisId: 7,
       distance: 1800,
       turn: "left",
+      focus: 0,
       horses: [
         { umaban: 1, name: "馬1", strength: 0.4, fallback: 0.6, early: 0.1, style: "先行" },
         { umaban: 2, name: "馬2", strength: 0.3, fallback: 0.5, early: 0.5, style: "差し" },
@@ -295,5 +297,42 @@ describe("buildReplayInit(再生の材料)", () => {
   it("詳細なし(馬名が null)でも作れる", () => {
     const init = buildReplayInit(analysis(four().map((h) => horse(h.umaban, { name: null }))));
     expect(init?.horses.every((h) => h.name === null)).toBe(true);
+  });
+});
+
+describe("buildReplayInit の強調する馬(Issue #316。先頭の判定で色を切り替えず、始めから終わりまで同じ馬を塗る)", () => {
+  const MAIN = PREDICTION_MARKS[0];
+  /** 馬番 1〜n、勝率と印を指定して作る(winProb の合計は 0 より大きい)。 */
+  const field = (rows: readonly (readonly [number, number, string | null])[]): AnalysisHorse[] => rows.map(([umaban, winProb, mark]) => horse(umaban, { winProb, mark }));
+  const focusUmaban = (horses: AnalysisHorse[]): number => {
+    const init = buildReplayInit(analysis(horses));
+    expect(init, "前提: 再生できる分析").not.toBeNull();
+    return init!.horses[init!.focus]!.umaban;
+  };
+
+  it("前提: 本命の印は core の PREDICTION_MARKS の先頭(◎)", () => {
+    expect(MAIN).toBe("◎");
+  });
+
+  const TABLE: readonly { name: string; horses: AnalysisHorse[]; expected: number }[] = [
+    { name: "◎が 1 頭: 勝率が最大でなくても◎の馬", horses: field([[1, 0.4, null], [2, 0.3, MAIN], [3, 0.2, "〇"], [4, 0.1, null]]), expected: 2 },
+    { name: "◎が最低勝率の馬でも◎の馬", horses: field([[1, 0.4, "〇"], [2, 0.3, null], [3, 0.2, null], [4, 0.1, MAIN]]), expected: 4 },
+    { name: "◎なし(印はあるが◎以外): 勝率が最も高い馬", horses: field([[1, 0.2, "〇"], [2, 0.4, "▲"], [3, 0.3, "△"], [4, 0.1, "☆"]]), expected: 2 },
+    { name: "印なし(全員 null・LLM 無効の分析): 勝率が最も高い馬", horses: field([[1, 0.2, null], [2, 0.1, null], [3, 0.5, null], [4, 0.2, null]]), expected: 3 },
+    { name: "◎が複数: ◎の中で勝率が高い方(◎でない最高勝率の馬は選ばない)", horses: field([[1, 0.5, null], [2, 0.1, MAIN], [3, 0.3, MAIN], [4, 0.1, null]]), expected: 3 },
+    { name: "◎が複数で勝率も同値: 馬番の小さい方", horses: field([[1, 0.3, null], [2, 0.2, MAIN], [3, 0.2, MAIN], [4, 0.3, null]]), expected: 2 },
+    { name: "◎なしで最高勝率が同値: 馬番の小さい方(並び順ではなく馬番)", horses: field([[3, 0.4, null], [1, 0.1, null], [2, 0.4, null], [4, 0.1, null]]), expected: 2 },
+    { name: "印が空白だけ・未知の文字列は◎として扱わない", horses: field([[1, 0.1, " "], [2, 0.5, "?"], [3, 0.2, ""], [4, 0.2, null]]), expected: 2 },
+  ];
+  for (const c of TABLE) {
+    it(c.name, () => {
+      expect(focusUmaban(c.horses)).toBe(c.expected);
+    });
+  }
+
+  it("同じ分析からは何度作っても同じ馬(「もう一度再生」「別の展開で再生」でも変わらない。抽選に依らない)", () => {
+    const a = analysis(field([[1, 0.4, null], [2, 0.3, MAIN], [3, 0.2, null], [4, 0.1, null]]));
+    const picks = [0, 1, 2, 3, 4].map(() => buildReplayInit(a)!.focus);
+    expect(picks).toEqual([1, 1, 1, 1, 1]);
   });
 });

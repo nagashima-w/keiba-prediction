@@ -362,6 +362,7 @@ function replaySection(r: ReplaySection, heading: "h2" | "h3", actions: ViewActi
   return h("section", { class: "replay" }, [
     h(heading, {}, [r.heading]),
     h("p", { class: "meta replay-note" }, [r.note]),
+    h("p", { class: "meta replay-color-note" }, [r.colorNote]),
     h("div", { class: "replay-controls" }, [
       h("button", { class: "replay-play", "data-analysis-id": String(r.analysisId) }, [r.playLabel], { click: () => actions.onReplayPlay(r.analysisId) }),
       ...(r.repeatLabel === null ? [] : [h("button", { class: "replay-repeat", "data-analysis-id": String(r.analysisId) }, [r.repeatLabel], { click: () => actions.onReplayRepeat(r.analysisId) })]),

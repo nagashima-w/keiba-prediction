@@ -59,6 +59,7 @@ const INIT: ReplayInit = {
   distance: 1600,
   turn: "left",
   pace: "平均",
+  focus: 0,
   horses: [
     { umaban: 1, name: "一", strength: 0.5, fallback: 0.5, early: 0.1, style: "先行" },
     { umaban: 2, name: "二", strength: 0.3, fallback: 0.3, early: 0.5, style: "差し" },

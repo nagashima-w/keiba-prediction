@@ -121,7 +121,7 @@ export interface Ctx2D {
 const px = (p: Point): [number, number] => [PAD + p.x * SCALE, PAD + p.y * SCALE];
 
 /**
- * 1 コマを描く。`frame` は馬ごとの前方位置と横位置(`frameAt`。Issue #314)。コース・S・G・馬の丸と馬番を描く。先頭の馬だけ accent で塗る。
+ * 1 コマを描く。`frame` は馬ごとの前方位置と横位置(`frameAt`。Issue #314)。コース・S・G・馬の丸と馬番を描く。強調の馬(`init.focus`。Issue #316)だけ accent で塗る。前方位置の順位では塗り分けない(先頭争いで色が隣の丸へ飛ぶのを避ける)。
  * 横ずれは馬ごとの横位置(0 が内ラチ側〜1)から決める。順位から決めない(追い抜きで丸が車線を交換して、数字が入れ替わって見えるのを避ける)。
  */
 export function drawReplay(ctx: Ctx2D, init: ReplayInit, frame: Frame, colors: DrawColors): void {
@@ -159,22 +159,22 @@ export function drawReplay(ctx: Ctx2D, init: ReplayInit, frame: Frame, colors: D
   ctx.fillText("G", ...px(pointAt(turn, GOAL_LAP, label)));
   ctx.fillText("S", ...px(pointAt(turn, lapPositionOf(0, init.distance), label)));
 
-  // 馬。後ろの順位から描き、先頭が一番上に重なる。
+  // 馬。後ろの順位から描き、先頭が一番上に重なる(強調の馬の色は順位に依らない)。
   const ranking = rankingAt(positions);
   ctx.font = "bold 16px sans-serif";
   for (let rank = ranking.length - 1; rank >= 0; rank--) {
     const i = ranking[rank]!;
     const lateral = (frame.lat[i]! - 0.5) * LATERAL_RANGE;
     const [x, y] = px(pointAt(turn, lapPositionOf(positions[i]!, init.distance), lateral));
-    const leader = rank === 0;
-    ctx.fillStyle = leader ? colors.accent : colors.card;
+    const focused = i === init.focus;
+    ctx.fillStyle = focused ? colors.accent : colors.card;
     ctx.strokeStyle = colors.fg;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(x, y, HORSE_R, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = leader ? colors.bg : colors.fg;
+    ctx.fillStyle = focused ? colors.bg : colors.fg;
     ctx.fillText(String(init.horses[i]!.umaban), x, y);
   }
 }

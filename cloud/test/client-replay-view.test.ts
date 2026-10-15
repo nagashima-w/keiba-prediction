@@ -3,7 +3,7 @@ import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
 import { mount, type DomDocument } from "../client/dom";
 import { buildRaceModel } from "../client/race";
 import { buildResultModel } from "../client/result";
-import { REPLAY_AGAIN_LABEL, REPLAY_HEADING, REPLAY_NOTE, REPLAY_PLAY_LABEL, REPLAY_REPEAT_LABEL, REPLAY_SPEEDS, replaySectionOf } from "../client/replay-model";
+import { REPLAY_AGAIN_LABEL, REPLAY_COLOR_NOTE, REPLAY_HEADING, REPLAY_NOTE, REPLAY_PLAY_LABEL, REPLAY_REPEAT_LABEL, REPLAY_SPEEDS, replaySectionOf } from "../client/replay-model";
 import { renderScreen, type ViewActions } from "../client/view";
 import type { VNode } from "../client/vnode";
 import { noopActions } from "./client-fakes";
@@ -47,6 +47,7 @@ describe("replaySectionOf(表示用データ)", () => {
     expect(s).toEqual({
       heading: REPLAY_HEADING,
       note: REPLAY_NOTE,
+      colorNote: REPLAY_COLOR_NOTE,
       analysisId: 7,
       started: false,
       playLabel: REPLAY_PLAY_LABEL,
@@ -66,6 +67,7 @@ describe("replaySectionOf(表示用データ)", () => {
     expect(REPLAY_NOTE).toContain("演出");
     expect(REPLAY_NOTE).toContain("物理的なシミュレーションではなく");
     expect(REPLAY_NOTE).toContain("確率・配分は変わりません");
+    expect(REPLAY_COLOR_NOTE).toBe("色の付いた丸は◎の馬(◎が無ければ勝率が最も高い馬)です。");
     expect(REPLAY_PLAY_LABEL).toBe("レースを再生");
     expect(REPLAY_AGAIN_LABEL).toBe("別の展開で再生");
     expect(REPLAY_REPEAT_LABEL).toBe("もう一度再生");
@@ -114,6 +116,8 @@ describe("結果画面のレース再生の節(VNode)", () => {
     const sec = sections[0]!;
     expect(textOf(sec)).toContain(REPLAY_HEADING);
     expect(byClass(sec, "replay-note").map(textOf)).toEqual([REPLAY_NOTE]);
+    // 色の意味の説明(Issue #316)。再生前から出す
+    expect(byClass(sec, "replay-color-note").map(textOf)).toEqual([REPLAY_COLOR_NOTE]);
     const play = byClass(sec, "replay-play");
     expect(play.map(textOf)).toEqual([REPLAY_PLAY_LABEL]);
     expect(play[0]!.attrs?.["data-analysis-id"]).toBe("7");
