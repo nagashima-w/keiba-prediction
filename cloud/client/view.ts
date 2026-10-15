@@ -8,7 +8,7 @@ import type { TaskMode } from "./api";
 import type { BulkModel, BulkPanel } from "./bulk";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
-import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
+import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type DevelopmentSection, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
@@ -354,6 +354,15 @@ function topProbRow(r: TopProbHorse): VNode {
   ]);
 }
 
+/** AI の展開予想の節(Issue #315)。本文と想定ペースの行は、無ければ要素ごと出さない。 */
+function developmentSection(d: DevelopmentSection, heading: "h2" | "h3"): VNode {
+  return h("section", { class: "development" }, [
+    h(heading, {}, [d.heading]),
+    ...(d.text === null ? [] : [h("p", { class: "development-text" }, [d.text])]),
+    ...(d.paceLine === null ? [] : [h("p", { class: "meta development-pace" }, [d.paceLine])]),
+  ]);
+}
+
 /**
  * 「レース再生」の節(Issue #311)。演出の注記・再生/速度のボタン・(再生を始めたら)キャンバス・(走り終えたら)着順のテキスト。
  * キャンバスは静的な要素で、1コマごとの描画は木の外(`replay-player.ts`)。ボタンのクリック処理に渡す値は `data-*` にも出す(`createMounter` は関数を比較しない)。
@@ -394,6 +403,8 @@ function resultSections(content: ResultContent, heading: "h2" | "h3", actions: V
         ]),
     // 3着内率の上位5頭(Issue #240)。印の有無と独立。率が有限な馬が1頭も無ければ section ごと出さない。凡例は足さない(印の付いた馬の凡例が1回出ている)。
     ...(content.topProbs === null ? [] : [h("section", { class: "top-probs" }, [h(heading, {}, [content.topProbs.heading]), h("ul", { class: "horse-list" }, content.topProbs.rows.map(topProbRow))])]),
+    // AI の展開予想(Issue #315)。無ければ section ごと出さない。本文は LLM の出力(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
+    ...(content.development === null ? [] : [developmentSection(content.development, heading)]),
     // レース再生(Issue #311)。勝率が判定不能・2頭未満の分析は section ごと出さない。
     ...(content.replay === null ? [] : [replaySection(content.replay, heading, actions)]),
     // そのとき LLM が見た当日の馬場の値(Issue #295)。無ければ section ごと出さない。行はサーバの整形(外から来た文字列。子の文字列はアダプタがテキストノードにする)。

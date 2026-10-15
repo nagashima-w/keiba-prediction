@@ -29,6 +29,10 @@
  *    (○ U+25CB WHITE CIRCLE・◯ U+25EF LARGE CIRCLE)を出力した場合、既知の印として正規化して受理する。
  *    正規化後も PREDICTION_MARKS のいずれとも一致しなければ、従来どおり未知の印としてエラーにする。
  *
+ * Issue #315(想定ペースを LLM が展開予想して決める):
+ *  - 応答の最上位の `development`(展開予想の短文)と `pace`(スロー・平均・ハイ)を取り出す。**欠落・不正でも例外にせず null**
+ *    (馬の確率・印の解析と独立。分析の失敗・再試行にしない)。保存済みの生応答からは `extractDevelopment` で取り出す。
+ *
  * 予想印の制約緩和(B-1)とフォールバック分離(A)(2026-07-19合意):
  *  - 頭数制約緩和: ◎はちょうど1頭のまま。〇・▲は0〜1頭、△は0〜3頭に緩和(☆・注は0〜1頭で不変)。
  *  - 本線印(◎〇▲△)は gapless な優先順位を持つ: ▲を付けるなら〇が1頭以上必要、
@@ -205,7 +209,14 @@ export interface ParseAnalyzerResult {
   readonly clippedCount: number;
   /** prior をそのまま採用した(欠け/不正)馬の数。 */
   readonly missingCount: number;
+  /** LLM の展開予想(短文。Issue #315)。欠落・不正・空は null。分析の成否には影響しない。 */
+  readonly development: string | null;
+  /** LLM の想定ペース(Issue #315)。「スロー」「平均」「ハイ」以外・欠落は null。分析の成否には影響しない。 */
+  readonly pace: LlmPace | null;
 }
+
+/** LLM が出力する想定ペース(Issue #315)。leg-style.ts の `PaceEstimate` から「不明」を除いた 3 値。 */
+export type LlmPace = "スロー" | "平均" | "ハイ";
 
 /** 強調材料・懸念事項の1馬あたりの最大項目数(Issue #197。プロンプトの指示と同じ値)。 */
 export const MAX_ITEMS_PER_LIST = 3;
@@ -233,6 +244,61 @@ export const PARSE_ITEM_MAX_CODEPOINTS = 100;
  * 正当な印は 1 字なので、何が来たかの診断に足りる長さだけ残す。
  */
 export const PARSE_MARK_VALUE_MAX_CODEPOINTS = 40;
+
+/**
+ * 展開予想(`development`)の最大文字数(コードポイント単位。Issue #315)。
+ * 根拠: プロンプト(build-prompt.ts)の指示が「全角200字以内の日本語1段落」。指示を多少守れない応答は通し、暴走した応答
+ * (画面・保存の肥大化)だけを切るため、指示の 2.5 倍にした(reason の上限 400 が実測最大 197 の約 2 倍、項目の上限 100 が
+ * 指示 30 字の約 3.3 倍だったのと同じ考え方)。**実際の応答での実測は無い**(この項目を持つ応答が、まだ存在しない)。指示からの導出。
+ */
+export const PARSE_DEVELOPMENT_MAX_CODEPOINTS = 500;
+
+/**
+ * 想定ペースの生の値を 3 値に整える(例外を投げない。Issue #315)。文字列でなければ null。trim し、末尾の「ペース」を
+ * 除いたうえで、「スロー」「平均」「ハイ」の完全一致だけ受ける(「ハイペース」→「ハイ」)。「ミドル」は「平均」と同じ意味の
+ * よくある表記なので「平均」に写す。それ以外(「不明」・複数の語・部分一致・例の文言のコピー)は null。
+ */
+function coercePace(raw: unknown): LlmPace | null {
+  if (typeof raw !== "string") return null;
+  const t = raw.trim().replace(/ペース$/, "");
+  if (t === "スロー" || t === "ハイ" || t === "平均") return t;
+  if (t === "ミドル") return "平均";
+  return null;
+}
+
+/** 展開予想の生の値を整える(例外を投げない。Issue #315)。文字列でなければ null。trim して空なら null。長すぎるときは切る。 */
+function coerceDevelopment(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const t = raw.trim();
+  if (t === "") return null;
+  return truncateByCodePoints(t, PARSE_DEVELOPMENT_MAX_CODEPOINTS);
+}
+
+/** パース済みの JSON から展開予想と想定ペースを取り出す(例外を投げない)。オブジェクトでなければ両方 null。 */
+function developmentFieldsOf(obj: unknown): { development: string | null; pace: LlmPace | null } {
+  if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
+    return { development: null, pace: null };
+  }
+  const rec = obj as Record<string, unknown>;
+  return { development: coerceDevelopment(rec["development"]), pace: coercePace(rec["pace"]) };
+}
+
+/**
+ * 保存済みの生応答のテキストから、展開予想と想定ペースだけを取り出す(Issue #315。cloud の分析の画面が使う入口)。
+ * **例外を投げない**: 読めない応答(空・JSON でない・壊れている・型の外の値)は両方 null。馬の解析(確率・印)とは独立なので、
+ * 印の制約違反で `parseAnalyzerResponse` が失敗する応答や、horses が無い応答でも取り出せる。整形の規則は
+ * `parseAnalyzerResponse` の返す値と同じ(同じ関数を共有)。
+ */
+export function extractDevelopment(text: string): { development: string | null; pace: LlmPace | null } {
+  if (typeof text !== "string") {
+    return { development: null, pace: null };
+  }
+  try {
+    return developmentFieldsOf(extractJsonObject(text));
+  } catch {
+    return { development: null, pace: null };
+  }
+}
 
 /**
  * 文字列をコードポイント数 `max` 以下に切る(例外にしない。Issue #303)。
@@ -463,7 +529,8 @@ export function parseAnalyzerResponse(
     }
   }
 
-  return { horses, clippedCount, missingCount };
+  // 展開予想・想定ペース(Issue #315): 欠落・不正でも例外にしない(馬の解析・印の検証とは独立)。
+  return { horses, clippedCount, missingCount, ...developmentFieldsOf(obj) };
 }
 
 /**

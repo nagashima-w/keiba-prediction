@@ -32,17 +32,30 @@ function relativeFirstCorner(run: EarlyPositionRun): number | null {
   return pos / n;
 }
 
+/** 位置の平均と、平均に使った走数(Issue #315。プロンプトの各馬の行の「テンの位置」が、何走の平均かを添えるため)。 */
+export interface EarlyPositionSummary {
+  /** 相対位置の平均(小数3桁に丸める。0〜1 で小さいほど前)。 */
+  readonly position: number;
+  /** 平均に使った走数(1〜maxRuns)。 */
+  readonly runs: number;
+}
+
 /**
- * 新しい順に、採用できた走を最大 {@link EARLY_POSITION_RUNS} 走集め、相対位置の平均(小数3桁に丸める)を返す。
- * 採用できる走が1つも無い(戦績 null・空・通過順位なし・頭数不明など)は null。1走だけでも採用する。
+ * 新しい順に、採用できた走を最大 `maxRuns`(既定 {@link EARLY_POSITION_RUNS}。正の整数でなければ既定)走集め、
+ * 相対位置の平均(小数3桁に丸める)と使った走数を返す。採用できる走が1つも無い(戦績 null・空・通過順位なし・頭数不明など)は null。
+ * 1走だけでも採用する。
  */
-export function computeEarlyPosition(results: readonly EarlyPositionRun[] | null): number | null {
+export function summarizeEarlyPosition(
+  results: readonly EarlyPositionRun[] | null,
+  maxRuns: number = EARLY_POSITION_RUNS,
+): EarlyPositionSummary | null {
   if (results === null) {
     return null;
   }
+  const limit = Number.isInteger(maxRuns) && maxRuns > 0 ? maxRuns : EARLY_POSITION_RUNS;
   const ratios: number[] = [];
   for (const run of results) {
-    if (ratios.length >= EARLY_POSITION_RUNS) {
+    if (ratios.length >= limit) {
       break;
     }
     const r = relativeFirstCorner(run);
@@ -54,5 +67,13 @@ export function computeEarlyPosition(results: readonly EarlyPositionRun[] | null
     return null;
   }
   const mean = ratios.reduce((a, b) => a + b, 0) / ratios.length;
-  return Math.round(mean * 1000) / 1000;
+  return { position: Math.round(mean * 1000) / 1000, runs: ratios.length };
+}
+
+/**
+ * 新しい順に、採用できた走を最大 {@link EARLY_POSITION_RUNS} 走集め、相対位置の平均(小数3桁に丸める)を返す。
+ * 採用できる走が1つも無い(戦績 null・空・通過順位なし・頭数不明など)は null。1走だけでも採用する。
+ */
+export function computeEarlyPosition(results: readonly EarlyPositionRun[] | null): number | null {
+  return summarizeEarlyPosition(results)?.position ?? null;
 }

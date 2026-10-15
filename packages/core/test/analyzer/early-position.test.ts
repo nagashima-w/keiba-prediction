@@ -3,7 +3,7 @@
  * 新しい順に最大3走(第1コーナーの通過順位 ÷ 出走頭数)を平均する。0〜1 で小さいほど前。判定不能は null。
  */
 import { describe, expect, it } from "vitest";
-import { computeEarlyPosition, EARLY_POSITION_RUNS } from "../../src/analyzer/early-position.js";
+import { computeEarlyPosition, EARLY_POSITION_RUNS, summarizeEarlyPosition } from "../../src/analyzer/early-position.js";
 
 type Run = { readonly passing: number[]; readonly entryCount: number | null };
 const run = (passing: number[], entryCount: number | null): Run => ({ passing, entryCount });
@@ -38,6 +38,29 @@ describe("computeEarlyPosition(第1コーナーの相対位置の平均)", () =>
   for (const t of table) {
     it(t.name, () => {
       expect(computeEarlyPosition(t.runs)).toBe(t.expected);
+    });
+  }
+});
+
+describe("summarizeEarlyPosition(位置と、平均に使った走数。Issue #315 のプロンプトの『テンの位置』用)", () => {
+  it("前提: 既定の走数は computeEarlyPosition と同じ(EARLY_POSITION_RUNS)", () => {
+    const runs = [run([1], 10), run([2], 10), run([3], 10), run([10], 10)];
+    expect(summarizeEarlyPosition(runs)).toEqual({ position: 0.2, runs: 3 });
+    expect(summarizeEarlyPosition(runs)!.position).toBe(computeEarlyPosition(runs));
+  });
+
+  const table: ReadonlyArray<{ readonly name: string; readonly runs: readonly Run[] | null; readonly maxRuns?: number; readonly expected: { position: number; runs: number } | null }> = [
+    { name: "戦績 null は null", runs: null, expected: null },
+    { name: "採れる走が無ければ null", runs: [run([], 16), run([3], null)], expected: null },
+    { name: "1走だけなら runs=1", runs: [run([4, 4], 16)], expected: { position: 0.25, runs: 1 } },
+    { name: "採れない走は数に入れない(runs は採用した走数)", runs: [run([], 16), run([2], 10), run([6], 10)], expected: { position: 0.4, runs: 2 } },
+    { name: "maxRuns=2 なら新しい順に 2 走だけ((0.1+0.2)/2 = 0.15)", runs: [run([1], 10), run([2], 10), run([9], 10)], maxRuns: 2, expected: { position: 0.15, runs: 2 } },
+    { name: "maxRuns=1 なら直近 1 走だけ", runs: [run([1], 10), run([9], 10)], maxRuns: 1, expected: { position: 0.1, runs: 1 } },
+    { name: "maxRuns が 0 以下・非整数なら既定の 3 走(防御)", runs: [run([1], 10), run([2], 10), run([3], 10), run([10], 10)], maxRuns: 0, expected: { position: 0.2, runs: 3 } },
+  ];
+  for (const t of table) {
+    it(t.name, () => {
+      expect(summarizeEarlyPosition(t.runs, t.maxRuns)).toEqual(t.expected);
     });
   }
 });

@@ -157,8 +157,15 @@ describe("生成物のドリフトと決定性", () => {
     // 内訳(`cloud/` で esbuild を `build-client.ts` と同じ設定〈minify・metafile〉で呼び、`outputs[...].inputs[ファイル].bytesInOutput` を読んだ。今の値): 新しいファイル `replay-plan.ts` 2,492、`replay-player.ts` 1,960・`replay-draw.ts` 1,651・`replay-model.ts` 2,753
     // (#311 のコメントに書いた値は 1,536・1,510・2,621 で、その差は +424・+141・+132)。残りの約 550 は `api-analysis.ts`・`view.ts`・`app.ts` の増分(ファイル別の差は測っていない)。外部ライブラリは使っていない。
     // 新しい上限 300,000 の根拠: 最初の実測 298,997 に約 1KB の余裕(298,997 + 1,003 を 100 バイト単位に切り上げ)。防御を足した今の実測 299,066 での余裕は 934 バイト(上限は据え置き)。
+    // Issue #315(想定ペースを LLM に展開予想させて決める): 上限を 300,000 から 305,300 へ引き上げた。増える理由は 2 つ。
+    //  (1) **クライアントの束は設定画面のプロンプトのプレビューのために core の `buildPromptPreview`(`@keiba/core/analyzer/build-prompt`)を含むので、プロンプトの文面が増えると束も増える**。
+    //      【指示】の先頭に判断の手順と development・pace の出力仕様(2 段落)、【展開想定】の導入と注記の行、各馬の行の「テンの位置」の組み立て(新しい `early-position.ts` の `summarizeEarlyPosition`)を足し、規則の結論 3 行を外した。
+    //  (2) 分析の画面に「AI の展開予想」の節を足した(`api-analysis.ts` の `parseDevelopment`・`result.ts` の `DevelopmentSection`・`view.ts` の `developmentSection`)。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`): #316 の公開先端 eab84df は 299,571、core だけを #316 の先端に merge した時点は 303,457(+3,886。(1) の増分。`cloud/client/` を変えないで core だけ変えた版は、daa1301 の 299,066 から 302,952 で、同じ +3,886)、
+    // 画面を足した最終は 304,261(+804。(2) の増分)。計り方: `pnpm run build:client` の出力〈「生成しました: …(N バイト)」〉と、`git show eab84df:cloud/src/client-bundle.generated.ts` を import して `Buffer.byteLength` を取った値。外部ライブラリは使っていない。
+    // 新しい上限 305,300 の根拠: 実測 304,261 に約 1KB の余裕(304,261 + 1,039 を 100 バイト単位に切り上げ)。余裕は 1,039 バイト。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(300_000);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(305_300);
   });
 });
 

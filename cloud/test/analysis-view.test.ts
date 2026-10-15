@@ -181,8 +181,8 @@ describe("buildAnalysisView(Issue #183)", () => {
 
   it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・戦績の基準日は、応答のどこにも現れない(fallbackReason・betUnit は #185 で意図して返す)", () => {
     const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
-    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "baba", "combos", "detail", "evEstimated", "horses", "id", "kaisaiDate", "llmCalls", "llmNote", "model", "promptVersion", "race", "raceId"]);
-    expect(sorted(view.race)).toEqual(["courseType", "distance", "grade", "oddsStatus", "pace", "placeBasis", "raceName", "raceNumber", "startTime", "trackCondition", "turn", "venueName", "weather"]);
+    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "baba", "combos", "detail", "development", "evEstimated", "horses", "id", "kaisaiDate", "llmCalls", "llmNote", "model", "promptVersion", "race", "raceId"]);
+    expect(sorted(view.race)).toEqual(["courseType", "distance", "grade", "oddsStatus", "pace", "paceSource", "placeBasis", "raceName", "raceNumber", "startTime", "trackCondition", "turn", "venueName", "weather"]);
     for (const h of view.horses) {
       expect(sorted(h)).toEqual(["actualPlaceOddsMax", "actualPlaceOddsMin", "adjustedProb", "concerns", "earlyPos", "ev", "fairPlaceOdds", "fairWinOdds", "highlights", "isPositive", "legStyle", "mark", "name", "placeOddsMin", "prior", "reason", "umaban", "winOdds", "winProb"]);
     }
@@ -243,7 +243,7 @@ describe("buildAnalysisView(Issue #183)", () => {
     expect(sorted(view)).toEqual(sorted(present));
     expect(sorted(view.race)).toEqual(sorted(present.race));
     expect(view.horses.map((h) => h.name)).toEqual([null, null, null]);
-    expect(view.race).toEqual({ venueName: "福島", raceNumber: 11, raceName: null, grade: null, startTime: null, courseType: null, distance: null, weather: null, trackCondition: null, oddsStatus: null, placeBasis: null, turn: "right", pace: "不明" });
+    expect(view.race).toEqual({ venueName: "福島", raceNumber: 11, raceName: null, grade: null, startTime: null, courseType: null, distance: null, weather: null, trackCondition: null, oddsStatus: null, placeBasis: null, turn: "right", pace: "不明", paceSource: "rule" });
     // D1 の値(馬の prior・印・配分)は残る
     expect(view.horses.map((h) => [h.umaban, h.prior, h.mark])).toEqual([[1, 0.2, "◎"], [2, 0.2, null], [3, 0.2, "◎"]]);
     expect(view.allocation).not.toBeNull();
