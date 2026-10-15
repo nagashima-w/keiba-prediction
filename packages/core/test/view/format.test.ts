@@ -6,6 +6,9 @@ import {
   formatEstimatedEvSuffix,
   formatEv,
   formatMark,
+  formatMarkRepair,
+  MARK_ORIGIN_VALUES,
+  MARK_REPAIRED_BADGE,
   formatOdds,
   formatOpportunityScore,
   formatPercent,
@@ -23,6 +26,7 @@ import {
   raceHeading,
 } from "../../src/view/format.js";
 import type { AnalysisRow } from "../../src/analysis/analysis-types.js";
+import { PREDICTION_MARKS } from "../../src/analyzer/parse-response.js";
 
 describe("表示ラベル(prior→3着内率 / 補正後→AI補正後 の統一)", () => {
   it("prior 列のラベルは「3着内率」", () => {
@@ -433,5 +437,27 @@ describe("buildReasonCellView(LLM根拠セルの表示。Issue #199)", () => {
     const view = buildReasonCellView(input(null, ["A"], ["B"]));
     expect(view.reason).toBe("-");
     expect(view.sections.map((s) => s.kind)).toEqual(["highlights", "concerns"]);
+  });
+});
+
+describe("formatMarkRepair(印の補修の表示「元の印→今の印」。Issue #317)", () => {
+  it.each([
+    ["◎", "〇", "◎→〇"],
+    ["▲", "〇", "▲→〇"],
+    ["☆", null, "☆→印なし"],
+    ["なし", "◎", "印なし→◎"],
+    ["不明", null, "不明な印→印なし"],
+    ["不明", "◎", "不明な印→◎"],
+  ] as const)("%s → %s は「%s」", (from, to, expected) => {
+    expect(formatMarkRepair(from, to)).toBe(expected);
+  });
+
+  it("目印の文字は「直」", () => {
+    expect(MARK_REPAIRED_BADGE).toBe("直");
+  });
+
+  it("補修前の印の語彙は、既知の6種 + 「なし」+「不明」の8つ(core の PREDICTION_MARKS と一致する6種を含む)", () => {
+    expect(MARK_ORIGIN_VALUES).toEqual(["◎", "〇", "▲", "△", "☆", "注", "なし", "不明"]);
+    expect(MARK_ORIGIN_VALUES.slice(0, 6)).toEqual([...PREDICTION_MARKS]);
   });
 });

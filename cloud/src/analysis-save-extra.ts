@@ -1,3 +1,4 @@
+import type { MarkRepairReport } from "@keiba/core/llm";
 import type { LlmCallRecord } from "./llm-calls";
 
 /**
@@ -15,6 +16,11 @@ export interface AnalysisSaveExtra {
    * D1 の `analyses.llm_calls_json` に保存される。
    */
   readonly llmCalls?: readonly LlmCallRecord[] | null;
+  /**
+   * 印の補修の記録(Issue #317。違反の種類・補修で印が変わった馬)。印の違反が無かった・LLM を呼ばなかった・旧い経路は null・省略(いずれも NULL で保存)。
+   * D1 の `analyses.mark_repair_json` に保存される(固定の語彙だけ。`mark-repair.ts`)。
+   */
+  readonly markRepair?: MarkRepairReport | null;
 }
 
 /**

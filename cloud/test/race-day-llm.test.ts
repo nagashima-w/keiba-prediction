@@ -14,7 +14,7 @@ import { buildPreviewText } from "../client/prompt-preview";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
 import type { LlmCallRecord } from "../src/llm-calls";
-import { LLM_NOTE_MARKS_DROPPED, LLM_NOTE_NO_KEY } from "../src/llm-run";
+import { LLM_NOTE_MARKS_REPAIRED, LLM_NOTE_NO_KEY } from "../src/llm-run";
 import type { CloudLlm } from "../src/llm-sender";
 import { RaceDayCore, type AnalysisSink, type RaceDayDeps } from "../src/race-day-core";
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
@@ -65,11 +65,13 @@ interface SaveExtra {
   readonly llmNote: string | null;
   /** LLM を呼んだ1回ごとの記録(Issue #197 段2)。キー未登録は null。 */
   readonly llmCalls?: readonly LlmCallRecord[] | null;
+  /** 印の補修の記録(Issue #317)。 */
+  readonly markRepair?: unknown;
 }
 
-/** 保存の追加情報のうち、理由(llmNote)だけを取り出す(llmCalls は別に確かめる。ほかのキーが増えたら、この比較が落ちる)。 */
+/** 保存の追加情報のうち、理由(llmNote)だけを取り出す(llmCalls・markRepair は別に確かめる。ほかのキーが増えたら、この比較が落ちる)。 */
 const noteOnly = (extra: SaveExtra | undefined): { readonly llmNote: string | null } => {
-  const { llmCalls: _calls, ...rest } = extra as SaveExtra;
+  const { llmCalls: _calls, markRepair: _repair, ...rest } = extra as SaveExtra;
   return rest;
 };
 
@@ -367,16 +369,40 @@ describe("e5: 切り詰め・拒否・解析失敗・印の救済", () => {
     expect(h.sink.saved[0]!.horses.some((x) => x.adjustedProb !== x.prior)).toBe(true);
   });
 
-  it("印の制約違反が続いたとき(◎が16頭)は、確率の補正は採用し、印は付けない。LLM は効いている(モデルは保存)・理由は印の救済の固定文", async () => {
+  it("印の制約違反が続いたとき(◎が16頭)は、確率の補正は採用し、印は規則に合わせて直して付ける。LLM は効いている(モデルは保存)・理由は印の補修の固定文(Issue #317)", async () => {
     const llm = fakeLlm(() => ok(llmJson(0.99, () => "◎")));
     const h = harness(llm);
     await runPreRace(h);
     expect(llm.calls).toHaveLength(2);
     const record = h.sink.saved[0]!;
     expect(record.model).toBe(FIXED_MODEL);
-    expect(record.horses.every((x) => x.mark === null)).toBe(true);
     expect(record.horses.some((x) => x.adjustedProb !== x.prior)).toBe(true);
-    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: LLM_NOTE_MARKS_DROPPED });
+    // 全馬が◎だった応答 → ◎1・〇1・▲1・△3 に詰め、残りは印なし(全消しではない)。
+    const count = (m: string) => record.horses.filter((x) => x.mark === m).length;
+    expect(record.horses).toHaveLength(16);
+    expect([count("◎"), count("〇"), count("▲"), count("△")]).toEqual([1, 1, 1, 3]);
+    expect(record.horses.filter((x) => x.mark === null)).toHaveLength(10);
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: LLM_NOTE_MARKS_REPAIRED });
+    // 補修の記録が保存に渡る(D1 の mark_repair_json の材料)。
+    expect(h.sink.extras[0]!.markRepair).toMatchObject({ repaired: true, adoptedAttempt: 2, attempts: [{ n: 1, kinds: ["over-◎"] }, { n: 2, kinds: ["over-◎"] }] });
+  });
+
+  it("聞き直し(2回目)のプロンプトには、前回の印の違反の固定文が末尾に付く。1回目のプロンプトは変わらない(Issue #317)", async () => {
+    const llm = fakeLlm(() => ok(llmJson(0.99, () => "◎")));
+    const h = harness(llm);
+    await runPreRace(h);
+    const first = promptOf(llm, 0);
+    const second = promptOf(llm, 1);
+    expect(first).not.toContain("【前回の応答の訂正】");
+    expect(second.startsWith(first)).toBe(true);
+    expect(second.slice(first.length)).toContain("【前回の応答の訂正】");
+    expect(second.slice(first.length)).toContain("◎が2頭以上ありました");
+  });
+
+  it("印の違反が無い成功では、markRepair は null(渡すが空)", async () => {
+    const h = harness(fakeLlm(() => ok(llmJson(0.99))));
+    await runPreRace(h);
+    expect(h.sink.extras[0]!.markRepair ?? null).toBeNull();
   });
 });
 

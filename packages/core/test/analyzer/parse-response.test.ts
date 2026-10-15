@@ -31,6 +31,8 @@ import {
   AnalyzerResponseParseError,
   AnalyzerTruncationError,
   extractJsonObject,
+  findMarkViolationKinds,
+  MARK_VIOLATION_KINDS,
   parseAnalyzerResponse,
   type ParsedHorseResult,
   type PredictionMark,
@@ -684,5 +686,79 @@ describe("parseAnalyzerResponse(A: 印関連違反時のフォールバック分
     }
     expect(caught).toBeInstanceOf(AnalyzerResponseParseError);
     expect(caught).not.toBeInstanceOf(AnalyzerMarkViolationError);
+  });
+});
+
+describe("parseAnalyzerResponse(Issue #317: 違反の種類と、補修に使う元の印を運ぶ)", () => {
+  function priorsN(n: number): PriorRef[] {
+    return Array.from({ length: n }, (_, i) => ({ umaban: i + 1, prior: 0.3 }));
+  }
+
+  /** 馬番 1..n に印を割り当てた応答を作る。 */
+  function responseOf(marks: ReadonlyArray<unknown>): string {
+    return JSON.stringify({
+      horses: marks.map((m, i) => ({ number: i + 1, place_prob: 0.3 + i * 0.01, reason: `根拠${i + 1}`, mark: m })),
+    });
+  }
+
+  function capture(text: string, n: number): AnalyzerMarkViolationError {
+    try {
+      parseAnalyzerResponse(text, priorsN(n));
+    } catch (e) {
+      expect(e).toBeInstanceOf(AnalyzerMarkViolationError);
+      return e as AnalyzerMarkViolationError;
+    }
+    throw new Error("AnalyzerMarkViolationError が投げられませんでした");
+  }
+
+  /** [名前, 馬の印の割り当て, 期待する違反の種類(順不同)]。10種すべてを1つずつ。 */
+  const CASES: ReadonlyArray<readonly [string, ReadonlyArray<unknown>, readonly string[]]> = [
+    ["unknown-char", ["◎", "◇", null], ["unknown-char"]],
+    ["missing-◎", [null, "〇", null], ["missing-◎"]],
+    ["over-◎", ["◎", "◎", null], ["over-◎"]],
+    ["over-〇", ["◎", "〇", "〇"], ["over-〇"]],
+    ["over-▲", ["◎", "〇", "▲", "▲"], ["over-▲"]],
+    ["over-△", ["◎", "〇", "▲", "△", "△", "△", "△"], ["over-△"]],
+    ["over-☆", ["◎", "☆", "☆"], ["over-☆"]],
+    ["over-注", ["◎", "注", "注"], ["over-注"]],
+    ["gap-〇", ["◎", null, "▲"], ["gap-〇"]],
+    ["gap-▲", ["◎", "〇", null, "△"], ["gap-▲"]],
+  ];
+
+  for (const [name, marks, kinds] of CASES) {
+    it(`違反の種類 ${name}: kinds に ${name} だけが載る`, () => {
+      const err = capture(responseOf(marks), marks.length);
+      expect([...err.kinds].sort()).toEqual([...kinds].sort());
+    });
+  }
+
+  it("表の前提: 上の表は MARK_VIOLATION_KINDS の10種をすべて1回ずつ含む(取りこぼし・重複がない)", () => {
+    expect(CASES.map(([, , k]) => k[0]!).sort()).toEqual([...MARK_VIOLATION_KINDS].sort());
+  });
+
+  it("複数の違反は、すべて kinds に載る(◎2頭 + 〇なしの▲)", () => {
+    const err = capture(responseOf(["◎", "◎", "▲"]), 3);
+    expect([...err.kinds].sort()).toEqual(["gap-〇", "over-◎"]);
+  });
+
+  it("markedHorses は LLM の元の印を保つ(horses は従来どおり全馬 null)。未知の印の馬は null で、unknownUmabans に載る", () => {
+    const err = capture(responseOf(["◎", "◇", "◎"]), 3);
+    expect(err.horses.every((h) => h.mark === null)).toBe(true);
+    expect(err.markedHorses.map((h) => h.mark)).toEqual(["◎", null, "◎"]);
+    expect(err.unknownUmabans).toEqual([2]);
+    // 印以外は horses と同じ(確率補正を保持)。
+    expect(err.markedHorses.map(({ mark: _m, ...rest }) => rest)).toEqual(err.horses.map(({ mark: _m, ...rest }) => rest));
+  });
+
+  it("全馬の印が無い応答(旧形式。mark キー欠落)は missing-◎ になる", () => {
+    const text = JSON.stringify({ horses: [{ number: 1, place_prob: 0.3 }, { number: 2, place_prob: 0.31 }] });
+    const err = capture(text, 2);
+    expect(err.kinds).toEqual(["missing-◎"]);
+  });
+
+  it("findMarkViolationKinds: 合法な印は空配列。未知の印の個数が1以上なら unknown-char が載る", () => {
+    const legal = [{ mark: "◎" }, { mark: "〇" }, { mark: null }] as const;
+    expect(findMarkViolationKinds(legal as never, 0)).toEqual([]);
+    expect(findMarkViolationKinds(legal as never, 1)).toEqual(["unknown-char"]);
   });
 });

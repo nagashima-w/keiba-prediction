@@ -1,0 +1,13 @@
+-- クラウド版(D1)の migration 0018: 印の補修の記録(Issue #317)。exe の SQLite には無い、D1 専用の列。
+-- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧い行は NULL のまま)。
+-- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言した追加分」(D1_EXTRA_COLUMNS)も同時に直す。
+-- ★デプロイの順序: この列を SELECT する新しい Worker は、migration の適用より前に出してはならない(読み出しが落ちる)。
+--   deploy-cloud.yml は migration を wrangler deploy より前に適用する。列を UPDATE するのは、補修の記録がある保存だけ(記録が無い保存は列に触れない)。
+--
+-- analyses.mark_repair_json: LLM の予想印が規則に違反したときの記録(JSON の文字列)。違反が一度も無かった分析は NULL。
+--   {"v":1,"repaired":true|false,"adoptedAttempt":1|2,
+--    "attempts":[{"n":1|2,"kinds":["over-◎",...]}],           違反があった試行ごとの違反の種類(固定の語彙 10 種)
+--    "horses":[{"umaban":3,"from":"◎","to":"〇"}]}             補修で印が変わった馬(from は 6 種の印か「なし」「不明」、to は 6 種の印か null)
+--   repaired:false は、初回が違反で、聞き直しで解消した(印は LLM の元のまま)。LLM の生の文字列は入らない。
+--   集計の例: SELECT k.value, count(*) FROM analyses a, json_each(a.mark_repair_json, '$.attempts') t, json_each(t.value, '$.kinds') k GROUP BY k.value;
+ALTER TABLE analyses ADD COLUMN mark_repair_json TEXT;

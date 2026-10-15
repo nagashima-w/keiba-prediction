@@ -6,6 +6,7 @@ import {
   FALLBACK_REASON_REFUSED,
   FALLBACK_REASON_TRUNCATED,
   type AnalyzeRaceResult,
+  type MarkRepairReport,
   type AnthropicMessageResponse,
   type AnthropicRequestParams,
 } from "@keiba/core/llm";
@@ -15,7 +16,7 @@ import {
   createMeteredSender,
   createRecordingSender,
   describeLlmErrorForLog,
-  LLM_NOTE_MARKS_DROPPED,
+  LLM_NOTE_MARKS_REPAIRED,
   LLM_NOTE_NO_KEY,
   LLM_NOTE_UNKNOWN_FALLBACK,
   outcomeOf,
@@ -505,13 +506,35 @@ describe("outcomeOf(analyzeRace の結果から、LLM が効いたか・画面�
   });
 
   it("成功(fallback:false・印も採用)は、効いている・理由なし", () => {
-    expect(outcomeOf(base)).toEqual({ effective: true, note: null });
+    expect(outcomeOf(base)).toEqual({ effective: true, note: null, markRepair: null });
   });
 
-  it("印の救済(marksDropped:true。確率の補正は採用)は、効いている・理由は固定の短文(core の marksDroppedReason〈例外のメッセージを含む〉は出さない)", () => {
+  const REPAIRED: MarkRepairReport = {
+    repaired: true,
+    adoptedAttempt: 2,
+    attempts: [{ n: 1, kinds: ["over-◎"] }, { n: 2, kinds: ["over-◎"] }],
+    changes: [{ umaban: 2, from: "◎", to: "〇" }],
+  };
+
+  it("印を補修して採用した(markRepair.repaired:true。確率の補正も採用)は、効いている・理由は固定の短文。補修の記録も返す(Issue #317)", () => {
+    const outcome = outcomeOf({ ...base, markRepair: REPAIRED });
+    expect(outcome).toEqual({ effective: true, note: LLM_NOTE_MARKS_REPAIRED, markRepair: REPAIRED });
+  });
+
+  it("聞き直しで印の違反が解消した(repaired:false)は、理由なし(印は LLM の元のまま)。記録だけ返す", () => {
+    const resolved: MarkRepairReport = { repaired: false, adoptedAttempt: 2, attempts: [{ n: 1, kinds: ["over-◎"] }], changes: [] };
+    expect(outcomeOf({ ...base, markRepair: resolved })).toEqual({ effective: true, note: null, markRepair: resolved });
+  });
+
+  it("違反が無い成功は markRepair を持たない(null)", () => {
+    expect(outcomeOf({ ...base, markRepair: null }).markRepair).toBeNull();
+    expect(outcomeOf(base).markRepair).toBeNull();
+  });
+
+  it("生の例外メッセージを含む旧い marksDroppedReason があっても、理由に出さない(固定文言だけ)", () => {
     const outcome = outcomeOf({ ...base, marksDropped: true, marksDroppedReason: "印関連の制約違反のため…: ◎が2頭 sk-ant-LEAK" });
-    expect(outcome).toEqual({ effective: true, note: LLM_NOTE_MARKS_DROPPED });
-    expect(outcome.note).not.toContain("sk-ant-");
+    expect(outcome.note).toBeNull();
+    expect(JSON.stringify(outcome)).not.toContain("sk-ant-");
   });
 
   it.each([
@@ -531,7 +554,7 @@ describe("outcomeOf(analyzeRace の結果から、LLM が効いたか・画面�
 
   it("固定文言のリテラル(利用者に見える文。変えるときは、画面〈#195〉・README・このテストを一緒に直す)", () => {
     expect(LLM_NOTE_NO_KEY).toBe("LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました");
-    expect(LLM_NOTE_MARKS_DROPPED).toBe("印の制約違反のため、印は付けていません(3着内率の補正は反映しています)");
+    expect(LLM_NOTE_MARKS_REPAIRED).toBe("印の一部を規則に合わせて直しました(3着内率の補正は反映しています)");
     expect(LLM_NOTE_UNKNOWN_FALLBACK).toBe("LLM を使えなかったため、3着内率をそのまま採用しました");
     // core 由来の4つも、cloud の画面に出る(D1 の llm_note に保存される)ので、文面をここで固定する
     expect(FALLBACK_REASON_TRUNCATED).toBe("応答が長さ上限(max_tokens)で切り詰められたため、3着内率をそのまま採用しました");
@@ -541,7 +564,7 @@ describe("outcomeOf(analyzeRace の結果から、LLM が効いたか・画面�
   });
 
   it("固定文言は、互いに違う(画面で区別できる)", () => {
-    const notes = [LLM_NOTE_NO_KEY, LLM_NOTE_MARKS_DROPPED, LLM_NOTE_UNKNOWN_FALLBACK, FALLBACK_REASON_TRUNCATED, FALLBACK_REASON_PARSE_ERROR, FALLBACK_REASON_INVOCATION_ERROR, FALLBACK_REASON_REFUSED];
+    const notes = [LLM_NOTE_NO_KEY, LLM_NOTE_MARKS_REPAIRED, LLM_NOTE_UNKNOWN_FALLBACK, FALLBACK_REASON_TRUNCATED, FALLBACK_REASON_PARSE_ERROR, FALLBACK_REASON_INVOCATION_ERROR, FALLBACK_REASON_REFUSED];
     expect(new Set(notes).size).toBe(notes.length);
   });
 });

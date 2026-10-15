@@ -64,11 +64,20 @@ export async function applyRace(input: ApplyInput): Promise<ApplyOutcome> {
   if (result === null || client.prompts.length === 0) {
     throw new Error(`${input.drive.raceId}: analyze が呼ばれなかった`);
   }
-  for (const prompt of client.prompts) {
-    if (sha256Hex(prompt) !== input.promptSha256) {
+  // 1回目のプロンプトは、段階1の記録と SHA-256 で一致しなければならない。
+  // Issue #317: 印の違反の聞き直し(2回目以降)は、production が前回の違反の固定文を**末尾に追記**する(`analyzer/mark-retry-notice.ts`)ので、
+  // 段階1のプロンプトで始まっていればよい(2回目以降の応答は、追記なしの段階1のプロンプトに対して作られている。近似の限界として #41 の報告に書く)。
+  const [firstPrompt, ...laterPrompts] = client.prompts;
+  if (sha256Hex(firstPrompt!) !== input.promptSha256) {
+    throw new Error(
+      `${input.drive.raceId}: 段階3で組み立てたプロンプトが段階1の記録と一致しない` +
+        `(SHA-256: ${sha256Hex(firstPrompt!)} ≠ ${input.promptSha256})`,
+    );
+  }
+  for (const prompt of laterPrompts) {
+    if (!prompt.startsWith(firstPrompt!)) {
       throw new Error(
-        `${input.drive.raceId}: 段階3で組み立てたプロンプトが段階1の記録と一致しない` +
-          `(SHA-256: ${sha256Hex(prompt)} ≠ ${input.promptSha256})`,
+        `${input.drive.raceId}: 段階3の聞き直しのプロンプトが、段階1のプロンプトで始まっていない(追記以外の差がある)`,
       );
     }
   }

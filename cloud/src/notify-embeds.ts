@@ -15,6 +15,8 @@
  */
 import { buildAnalysisEmbed, truncate, type DiscordEmbed, type EmbedHorse, type EmbedRaceInfo } from "../../packages/core/src/notify/discord";
 import { dropDanglingBackslash, escapeDiscordMarkdown } from "../../packages/core/src/notify/discord-escape";
+import type { MarkRepairReport } from "@keiba/core/llm";
+import { formatMarkRepair, MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import type { AnalysisAllocationMetaRecord, AnalysisAllocationRecord, AnalysisBetRecord, AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import type { SkipReasonCode } from "../../packages/core/src/ev/combo-bet-allocation";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
@@ -277,13 +279,28 @@ interface OddsInfo {
 }
 
 /**
+ * 印を補修した馬の「元の印→今の印」(Issue #317。馬番 → 文字列)。補修した(repaired:true)記録のうち、**現在の印が記録の補修後の印と一致する馬だけ**
+ * (保存する record の印と食い違う馬に「直」を付けると、表示が事実と違うため)。記録なし・聞き直しで解消した(repaired:false)は空。
+ */
+function repairsOf(record: AnalysisRecord, markRepair: MarkRepairReport | null): ReadonlyMap<number, string> {
+  const out = new Map<number, string>();
+  if (markRepair === null || !markRepair.repaired) return out;
+  const current = new Map(record.horses.map((h) => [h.umaban, h.mark]));
+  for (const c of markRepair.changes) {
+    if (current.has(c.umaban) && current.get(c.umaban) === c.to) out.set(c.umaban, formatMarkRepair(c.from, c.to));
+  }
+  return out;
+}
+
+/**
  * 印の付いた馬の field。印の順 → 馬番の昇順(web の結果画面の一覧と同じ)。印の無い馬(null・空白だけ)は載せない。
  * 行には単勝・複勝の想定・実際を添える(Issue #247・#253): `◎ 3番 馬名 単勝 想定8.5倍/実際12.3倍 ↑想定より高い 複勝 想定1.5倍/実際1.6〜2.3倍 ↑想定より高い`。
  *  - 単勝: 想定も実際も無い馬は『単勝』の部分を足さない。複勝: 基準が無い(4頭以下)・想定も実際の下限も無い馬は『複勝』の部分を足さない
  *  - 複勝は出走5〜7頭のとき見出しが『複勝(2着まで)』。『↑想定より高い』は、単勝は実際のオッズ、複勝は実際の**下限**が想定より高いとき(丸めた値どうし)
+ * 印を補修した馬(Issue #317)には、馬名の直後に「直 元の印→今の印」を足す(`MARK_REPAIRED_BADGE`・`formatMarkRepair`。固定の語彙だけ)。
  * どちらかの部分を足したときは、末尾に説明の1行(収まらないときは、既存の行の切り詰めで末尾=説明から落ちる)。
  */
-function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, string | null>, odds: OddsInfo): EmbedField {
+function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, string | null>, odds: OddsInfo, repairs: ReadonlyMap<number, string>): EmbedField {
   const marked = record.horses
     .flatMap((h) => (h.mark === null || h.mark.trim() === "" ? [] : [{ umaban: h.umaban, mark: h.mark as string }]))
     .sort((a, b) => markRank(a.mark) - markRank(b.mark) || a.umaban - b.umaban);
@@ -293,7 +310,9 @@ function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, stri
   let withOdds = 0;
   const lines = marked.map((h) => {
     const name = names.get(h.umaban);
-    const head = name === null || name === undefined || name === "" ? `${h.mark} ${h.umaban}番` : `${h.mark} ${h.umaban}番 ${escapeDiscordMarkdown(truncate(name, MARK_NAME_MAX))}`;
+    const base = name === null || name === undefined || name === "" ? `${h.mark} ${h.umaban}番` : `${h.mark} ${h.umaban}番 ${escapeDiscordMarkdown(truncate(name, MARK_NAME_MAX))}`;
+    const repair = repairs.get(h.umaban);
+    const head = repair === undefined ? base : `${base} ${MARK_REPAIRED_BADGE} ${repair}`;
     const parts: string[] = [];
     const fair = odds.fair.get(h.umaban) ?? null;
     const actual = odds.actual.get(h.umaban) ?? null;
@@ -526,7 +545,7 @@ export function buildPlanRequestFailedEmbed(kaisaiDate: string): CloudEmbed {
  * 分析の完了の embed(AC-D1。狙い目あり=緑・なし=灰色)。core の `buildAnalysisEmbed` を流用し、LLM が効かなかった(または一部だけ)ときは、固定の理由文(`outcome.note`)を末尾に足す。
  * @throws `record.raceSnapshot` が想定の形でないとき(呼び出し側は {@link buildMinimalAnalysisEmbed} に代える。分析は止めない)
  */
-export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: { readonly effective: boolean; readonly note: string | null }, label: RaceLabel): CloudEmbed {
+export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: { readonly effective: boolean; readonly note: string | null; readonly markRepair?: MarkRepairReport | null }, label: RaceLabel): CloudEmbed {
   const snapshot = readSnapshot(record.raceSnapshot);
   const raceInfo: EmbedRaceInfo = {
     raceName: snapshot.raceName ?? label.raceName ?? "",
@@ -565,7 +584,7 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
       fairPlace: placeOdds.byUmaban,
       placeMin: snapshot.placeMin,
       placeMax: snapshot.placeMax,
-    }),
+    }, repairsOf(record, outcome.markRepair ?? null)),
     buildAllocationField(record.allocation),
   ];
   // タイトルは失敗・手動スキップ・最小の通知と同じ関数で作る(Issue #230。「会場 NR レース名」)。core のタイトルは番号を持たない(core は変えない)。

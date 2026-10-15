@@ -138,12 +138,37 @@ export class AnalyzerRefusalError extends AnalyzerResponseParseError {
 }
 
 /**
+ * 予想印の違反の種類(Issue #317。固定の語彙)。どの規則でよく外れるかを後から数えるために保存する(D1 の `analyses.mark_repair_json`)。
+ *  - `unknown-char`: 既知の6種(◎〇▲△☆注)でない印の文字が1頭以上あった
+ *  - `missing-◎` / `over-◎`: ◎が0頭 / 2頭以上
+ *  - `over-〇`・`over-▲`・`over-△`・`over-☆`・`over-注`: 上限(〇▲☆注は1頭、△は3頭)を超えた
+ *  - `gap-〇`: ▲があるのに〇が無い / `gap-▲`: △があるのに▲が無い(本線が途切れている)
+ */
+export const MARK_VIOLATION_KINDS = [
+  "unknown-char",
+  "missing-◎",
+  "over-◎",
+  "over-〇",
+  "over-▲",
+  "over-△",
+  "over-☆",
+  "over-注",
+  "gap-〇",
+  "gap-▲",
+] as const;
+
+/** 予想印の違反の種類({@link MARK_VIOLATION_KINDS} のいずれか)。 */
+export type MarkViolationKind = (typeof MARK_VIOLATION_KINDS)[number];
+
+/**
  * 予想印関連の違反(頭数制約・優先順位・未知の印文字の3種)を表すエラー(A: フォールバック分離)。
  * AnalyzerResponseParseError のサブクラスなので既存の `toThrow(AnalyzerResponseParseError)` は
  * 引き続き成立する。印以外は正常に計算できた確率補正(adjustedProb/clipped/reason/usedPrior)を
- * 失わないよう、全馬 mark=null にした horses をペイロードとして運ぶ。
- * analyze-race 側は、リトライしてもなおこのエラーなら horses をそのまま採用し、
- * fallback:false・marksDropped:true として返す(prior に戻さない)。
+ * 失わないよう、horses をペイロードとして運ぶ。
+ *
+ * Issue #317: analyze-race 側は、リトライしてもなお(または、聞き直しが別の失敗で終わったとき)このエラーなら、
+ * `markedHorses`(LLM の元の印を保った horses)を `repairMarks` で規則に合わせて直して採用する(全消しにしない)。
+ * `horses`(全馬 mark=null)は従来との互換のために残す。
  */
 export class AnalyzerMarkViolationError extends AnalyzerResponseParseError {
   /**
@@ -151,11 +176,31 @@ export class AnalyzerMarkViolationError extends AnalyzerResponseParseError {
    * ParseAnalyzerResult.horses と型を揃え(ParsedHorseResult[])、呼び出し側でキャスト不要にする。
    */
   readonly horses: ParsedHorseResult[];
+  /**
+   * `horses` と同じ(確率補正を保持した prior順)だが、**LLM の元の印を保った**もの(Issue #317。補修の入力)。
+   * 未知の印文字の馬だけは mark=null(その馬番は {@link unknownUmabans} に載る)。
+   */
+  readonly markedHorses: ParsedHorseResult[];
+  /** 未知の印文字だった馬の馬番(Issue #317)。 */
+  readonly unknownUmabans: number[];
+  /** 違反の種類(Issue #317。固定の語彙。重複なし・{@link MARK_VIOLATION_KINDS} の順)。 */
+  readonly kinds: MarkViolationKind[];
 
-  constructor(message: string, horses: ParsedHorseResult[]) {
+  constructor(
+    message: string,
+    horses: ParsedHorseResult[],
+    detail: {
+      readonly markedHorses: ParsedHorseResult[];
+      readonly unknownUmabans: number[];
+      readonly kinds: MarkViolationKind[];
+    },
+  ) {
     super(message);
     this.name = "AnalyzerMarkViolationError";
     this.horses = horses;
+    this.markedHorses = detail.markedHorses;
+    this.unknownUmabans = detail.unknownUmabans;
+    this.kinds = detail.kinds;
   }
 }
 
@@ -441,6 +486,8 @@ export function parseAnalyzerResponse(
   let missingCount = 0;
   // 未知の印文字が見つかった馬の説明文(A: 他馬の確率補正計算は止めず、最後にまとめて例外にする)。
   const unknownMarkMessages: string[] = [];
+  // 未知の印文字だった馬の馬番(Issue #317。補修が「元の印は不明」と記録するため)。
+  const unknownUmabans: number[] = [];
 
   const horses: ParsedHorseResult[] = priors.map((p) => {
     const value = byNumber.get(p.umaban);
@@ -448,6 +495,7 @@ export function parseAnalyzerResponse(
     // 未知の印文字列は例外にせず mark=null 扱いにして、他馬の確率補正計算を継続する(A)。
     const { mark, isUnknown } = classifyMark(rawMarkByNumber.get(p.umaban));
     if (isUnknown) {
+      unknownUmabans.push(p.umaban);
       unknownMarkMessages.push(
         `未知の予想印です(馬番${p.umaban}): ${truncateByCodePoints(
           JSON.stringify(rawMarkByNumber.get(p.umaban)),
@@ -525,7 +573,11 @@ export function parseAnalyzerResponse(
     ];
     if (violations.length > 0) {
       const rescuedHorses = horses.map((h) => ({ ...h, mark: null }));
-      throw new AnalyzerMarkViolationError(violations.join("; "), rescuedHorses);
+      throw new AnalyzerMarkViolationError(violations.join("; "), rescuedHorses, {
+        markedHorses: horses,
+        unknownUmabans,
+        kinds: findMarkViolationKinds(horses, unknownUmabans.length),
+      });
     }
   }
 
@@ -582,7 +634,7 @@ const MARK_COUNT_RANGES: ReadonlyArray<{
 ];
 
 /** horses から予想印ごとの頭数を集計する。 */
-function countMarks(horses: readonly ParsedHorseResult[]): Record<PredictionMark, number> {
+function countMarks(horses: readonly { readonly mark: PredictionMark | null }[]): Record<PredictionMark, number> {
   const counts: Record<PredictionMark, number> = {
     "◎": 0,
     "〇": 0,
@@ -635,6 +687,29 @@ function collectMarkPriorityViolations(counts: Record<PredictionMark, number>): 
     );
   }
   return violations;
+}
+
+/**
+ * 予想印の違反の種類を返す(Issue #317。例外は投げない)。規則は {@link collectMarkCountViolations}・{@link collectMarkPriorityViolations} と同じ。
+ * @param horses 印を持つ馬(未知の印文字の馬は mark=null で渡す)
+ * @param unknownCount 未知の印文字だった馬の数(1以上なら `unknown-char`)
+ * @returns {@link MARK_VIOLATION_KINDS} の順で重複なし。違反が無ければ空配列
+ */
+export function findMarkViolationKinds(
+  horses: readonly { readonly mark: PredictionMark | null }[],
+  unknownCount: number,
+): MarkViolationKind[] {
+  const counts = countMarks(horses);
+  const found = new Set<MarkViolationKind>();
+  if (unknownCount > 0) found.add("unknown-char");
+  // 頭数の上限・下限は MARK_COUNT_RANGES から導く(規則の定義を1箇所に保つ)。◎だけが下限(1)を持つ。
+  for (const { mark, min, max } of MARK_COUNT_RANGES) {
+    if (counts[mark] > max) found.add(`over-${mark}` as MarkViolationKind);
+    if (counts[mark] < min) found.add(`missing-${mark}` as MarkViolationKind);
+  }
+  if (counts["▲"] >= 1 && counts["〇"] < 1) found.add("gap-〇");
+  if (counts["△"] >= 1 && counts["▲"] < 1) found.add("gap-▲");
+  return MARK_VIOLATION_KINDS.filter((k) => found.has(k));
 }
 
 /** パース済みオブジェクトから horses 配列を取り出す(形不正は空配列扱い)。 */

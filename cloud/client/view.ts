@@ -8,6 +8,7 @@ import type { TaskMode } from "./api";
 import type { BulkModel, BulkPanel } from "./bulk";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
+import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type DevelopmentSection, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
@@ -308,6 +309,7 @@ function horseCard(horse: HorseCard): VNode {
       h("strong", {}, [`${horse.umaban}`]),
       ...(horse.name === null ? [] : [h("span", { class: "horse-name" }, [horse.name])]),
       ...(horse.mark === null ? [] : [h("span", { class: "mark" }, [horse.mark])]),
+      ...(horse.markRepair === null ? [] : [" ", markFixedBadge(horse.markRepair)]),
     ]),
     h("span", { class: "horse-line" }, [`${LABEL_PRIOR} ${horse.prior}`]),
     // 補正後の3着内率は LLM が効いたときだけ(LLM なしでは 3着内率と同じ値になるので出さない。EV は LLM が効いたとき補正後の確率から計算される)。
@@ -331,7 +333,12 @@ function horseCard(horse: HorseCard): VNode {
   ]);
 }
 
-/** 印の付いた馬の1行(Issue #211)。印・馬番・馬名。馬名が無ければ印と馬番だけ。数値は出さない。 */
+/** 印を補修した馬の目印(Issue #317)。「直」と、あれば「元の印→今の印」。固定の語彙だけ(LLM の生の文字列は出さない)。 */
+function markFixedBadge(change: string | null): VNode {
+  return h("span", { class: "mark-fixed" }, [change === null ? MARK_REPAIRED_BADGE : `${MARK_REPAIRED_BADGE} ${change}`]);
+}
+
+/** 印の付いた馬の1行(Issue #211)。印・馬番・馬名。馬名が無ければ印と馬番だけ。数値は出さない。補修した馬には「直」と元の印(Issue #317)。 */
 function markedHorseRow(m: MarkedHorse): VNode {
   return h("li", { class: "marked" }, [
     h("span", { class: "marked-mark" }, [m.mark]),
@@ -339,6 +346,7 @@ function markedHorseRow(m: MarkedHorse): VNode {
     " ",
     h("strong", {}, [`${m.umaban}`]),
     ...(m.name === null ? [] : [" ", h("span", { class: "marked-name" }, [m.name])]),
+    ...(m.markRepair === null ? [] : [" ", markFixedBadge(m.markRepair)]),
   ]);
 }
 
@@ -351,6 +359,7 @@ function topProbRow(r: TopProbHorse): VNode {
     " ",
     h("span", { class: "top-prob-rate" }, [r.rate]),
     ...(r.mark === null ? [] : [" ", h("span", { class: "top-prob-mark" }, [r.mark])]),
+    ...(r.repaired ? [" ", markFixedBadge(null)] : []),
   ]);
 }
 

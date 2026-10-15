@@ -14,7 +14,7 @@ import { D1_HEALTH_SQL } from "../src/d1-health";
 
 const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 const read = (name: string): string => readFileSync(path.join(MIGRATIONS, name), "utf-8");
-const ALL = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0013_result_scratched.sql", "0016_result_wakuban.sql"]; // 0010〜0012・0014・0015 は検査の文が読む列に関わらない(0013 は race_results.scratched。Issue #72。0016 は race_results.wakuban。Issue #269)
+const ALL = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0013_result_scratched.sql", "0016_result_wakuban.sql", "0018_mark_repair.sql"]; // 0010〜0012・0014・0015・0017 は検査の文が読む列に関わらない(0013 は race_results.scratched。Issue #72。0016 は race_results.wakuban。Issue #269。0018 は analyses.mark_repair_json。Issue #317)
 
 describe("migration 0007: 行のある DB への適用", () => {
   it("0001〜0006 のあとに分析の行(馬の子つき・理由つき)を入れ、0007 を適用すると、行は残り、llm_calls_json は NULL。以後は JSON 文字列を書ける", () => {
@@ -56,7 +56,7 @@ describe("D1_HEALTH_SQL(/api/health の D1 の検査): 必要な列が1つでも
     return db;
   }
 
-  it("全 migration(0001〜0009 と 0013・0016)を適用した空の D1(行が1つも無い)で成功する(行が無くても、列の有無は文の準備で検査される)", () => {
+  it("全 migration(0001〜0009 と 0013・0016・0018)を適用した空の D1(行が1つも無い)で成功する(行が無くても、列の有無は文の準備で検査される)", () => {
     const db = dbWith(ALL);
     expect(() => db.prepare(D1_HEALTH_SQL).get()).not.toThrow();
     db.close();
@@ -82,6 +82,8 @@ describe("D1_HEALTH_SQL(/api/health の D1 の検査): 必要な列が1つでも
     ["0013(race_results.scratched)", ALL.filter((f) => !f.startsWith("0013")), /scratched/],
     // Issue #269: 結果の保存(UPSERT)と検証・日報の読み取りが使う race_results.wakuban。未適用のまま新しい Worker が出ると、結果の保存がすべて失敗する。
     ["0016(race_results.wakuban)", ALL.filter((f) => !f.startsWith("0016")), /wakuban/],
+    // Issue #317: 詳細の読み出し(getAnalysisDetail)が読む analyses.mark_repair_json。未適用のまま新しい Worker が出ると、分析の詳細がすべて読めなくなる。
+    ["0018(analyses.mark_repair_json)", ALL.filter((f) => !f.startsWith("0018")), /mark_repair_json/],
   ];
   it.each(missing)("%s が未適用の D1 では失敗する(migration の反映漏れを、/api/health が d1.ok=false にできる)", (_name, files, column) => {
     const db = dbWith(files);

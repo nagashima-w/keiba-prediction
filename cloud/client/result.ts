@@ -25,7 +25,7 @@
  */
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/core/src/view/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/core/src/view/bet-allocation-view";
-import { formatEstimatedEvSuffix, formatEv, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, MARK_LEGEND } from "../../packages/core/src/view/format";
+import { formatEstimatedEvSuffix, formatEv, formatMarkRepair, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, MARK_LEGEND } from "../../packages/core/src/view/format";
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { nameWithGrade } from "./grade";
@@ -67,6 +67,8 @@ export interface HorseCard {
   readonly name: string | null;
   /** 印。`mark` が non-null のときだけ。 */
   readonly mark: string | null;
+  /** 印を補修した馬の「元の印→今の印」(Issue #317。例「◎→〇」「☆→印なし」)。補修していない馬は null。画面は「直」の目印と一緒に印の横に出す。 */
+  readonly markRepair: string | null;
   /** 3着内率(prior。「52.3%」)。 */
   readonly prior: string;
   /** 補正後の3着内率(「25.0%」)。**LLM が効いたとき(モデル ID があるとき)だけ**。LLM なしでは prior と同じ値になるので null(重複して出さない)。 */
@@ -101,6 +103,8 @@ export interface MarkedHorse {
   /** 馬名。null・空文字は null(印と馬番だけを出す)。 */
   readonly name: string | null;
   readonly mark: string;
+  /** 印を補修した馬の「元の印→今の印」(Issue #317)。補修していない馬は null。 */
+  readonly markRepair: string | null;
 }
 
 /**
@@ -118,6 +122,8 @@ export interface TopProbHorse {
   readonly rate: string;
   /** 印。`markedHorses` と同じ基準(null・空白だけは null、他は未知の印もそのまま)。 */
   readonly mark: string | null;
+  /** 印を補修した馬か(Issue #317)。画面は「直」だけを出す(元の印は出さない。印が消えた馬も true になりうる)。 */
+  readonly repaired: boolean;
 }
 
 /** 「そのとき LLM が見た当日の馬場の値」の節の見出し(Issue #295)。 */
@@ -230,10 +236,15 @@ const markRank = (mark: string): number => {
   return i === -1 ? KNOWN_MARK_ORDER.length : i;
 };
 
+/** 印を補修した馬の「元の印→今の印」(Issue #317)。補修していない馬(`markFrom` が null・キー無し)は null。 */
+function markRepairOf(h: AnalysisDetail["horses"][number]): string | null {
+  return h.markFrom === null || h.markFrom === undefined ? null : formatMarkRepair(h.markFrom, h.mark === null || h.mark.trim() === "" ? null : h.mark);
+}
+
 /** 印の付いた馬の一覧(Issue #211)。印の順 → 馬番の昇順(同じ印・同じ馬番は入力順。`Array.prototype.sort` は安定)。 */
 function markedHorsesOf(horses: AnalysisDetail["horses"]): MarkedHorse[] {
   return horses
-    .flatMap((h) => (h.mark === null || h.mark.trim() === "" ? [] : [{ umaban: h.umaban, name: h.name === null || h.name === "" ? null : h.name, mark: h.mark }]))
+    .flatMap((h) => (h.mark === null || h.mark.trim() === "" ? [] : [{ umaban: h.umaban, name: h.name === null || h.name === "" ? null : h.name, mark: h.mark, markRepair: markRepairOf(h) }]))
     .sort((a, b) => markRank(a.mark) - markRank(b.mark) || a.umaban - b.umaban);
 }
 
@@ -252,6 +263,7 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
       name: h.name === null || h.name === "" ? null : h.name,
       rate: formatPercent(rateOf(h)),
       mark: h.mark === null || h.mark.trim() === "" ? null : h.mark,
+      repaired: markRepairOf(h) !== null,
     }));
   if (rows.length === 0) return null;
   return { heading: llmEffective ? `${LABEL_ADJUSTED_PROB}の3着内率 上位${TOP_PROB_COUNT}頭` : `${LABEL_PRIOR} 上位${TOP_PROB_COUNT}頭`, rows };
@@ -281,6 +293,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, replay?: ReplayUi
       umaban: h.umaban,
       name: h.name,
       mark: h.mark,
+      markRepair: markRepairOf(h),
       prior: formatPercent(h.prior),
       adjusted: llmEffective ? formatPercent(h.adjustedProb) : null,
       reason: llmEffective && h.reason !== null && h.reason !== "" ? h.reason : null,

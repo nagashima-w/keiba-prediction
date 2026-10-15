@@ -161,15 +161,20 @@ describe("applyRace: 応答を production の analyzeRace に通して補正後�
     }
   });
 
-  it("印の制約違反(◎が2頭)が2回続くと、確率補正は採用し印だけ全馬 null にする(marksDropped)", async () => {
+  it("印の制約違反(◎が2頭)が2回続くと、確率補正は採用し、印は補修して付ける(Issue #317。全消し〈marksDropped〉にはしない)", async () => {
     const cap = await capture();
     const marks = new Map([[1, "◎"], [2, "◎"]]);
     const bad = responseText(cap.priors, new Map([[3, 0.05]]), marks);
     const out = await applyRace(await makeInput([bad, bad]));
     if (out.status !== "final") throw new Error("前提");
     expect(out.record.fallback).toBe(false);
-    expect(out.record.marksDropped).toBe(true);
-    expect(out.record.horses.every((x) => x.mark === null)).toBe(true);
+    expect(out.record.marksDropped).toBe(false);
+    // 聞き直し(2回目)のプロンプトは、段階1のプロンプトに固定の追記文が付く(Issue #317)。それでも照合を通り、2回試行した記録になる。
+    expect(out.record.attempts).toBe(2);
+    // ◎2頭 → ◎1頭 + 〇1頭に補修される(印が付いている。全消しではない)。
+    expect(out.record.horses.filter((x) => x.mark === "◎")).toHaveLength(1);
+    expect(out.record.horses.filter((x) => x.mark === "〇")).toHaveLength(1);
+    expect(out.record.horses.filter((x) => x.mark !== null)).toHaveLength(2);
     expect(out.record.horses.find((x) => x.umaban === 3)!.adjustedProb).toBeCloseTo(cap.priors.get(3)! + 0.05, 12);
   });
 });

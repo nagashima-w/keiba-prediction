@@ -144,6 +144,8 @@ const D1_EXTRA_COLUMNS: Readonly<Record<string, readonly ColumnInfo[]>> = {
     { name: "exe_analysis_id", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
     // 0009 の start_time(Issue #219。発走時刻の写し。NULL=未確認・''=スナップショットに無い・'HH:MM'=値。検証画面の先読み判定が使う。検証の DO が R2 の詳細から遅延で埋める)。
     { name: "start_time", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+    // 0018 の mark_repair_json(Issue #317。印の補修の記録。JSON の文字列。違反が一度も無かった分析は NULL)。
+    { name: "mark_repair_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
   ],
   // 0011 の win_odds・ninki(Issue #259。結果ページの確定の単勝オッズ・人気。NULL=未取得。exe の codec・移行の形式〈MIGRATION_TABLES〉・共有 golden は読まない・書かない D1 専用の列。結果の補完の段階 2 と取り込みが NULL の列だけを埋める)。
   race_results: [
@@ -338,8 +340,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql の17本だけで、番号は 0001 から連続している(後から足すときは 0018 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql の18本だけで、番号は 0001 から連続している(後から足すときは 0019 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {

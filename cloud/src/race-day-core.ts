@@ -325,7 +325,7 @@ export type TaskMode = "morning" | "pre_race";
  *  - `countChildren`: 保存した分析の子の行(馬・買い目)の件数。子の行が正しい親 id に紐づいたかを、最初の実保存から確かめるため(#175 の `max(id)` の前提)。
  */
 export interface AnalysisSink {
-  /** `extra.llmNote`(発走前の計算ステップは常に渡す): LLM が使われなかった・一部しか使われなかった理由(固定文言。問題なく効いたときは null)。D1 の `analyses.llm_note` に保存される(Issue #194 b2)。`extra.llmCalls`: LLM を呼んだ1回ごとの記録(キー未登録は null)。D1 の `analyses.llm_calls_json` に保存される(Issue #197 段2)。 */
+  /** `extra.llmNote`(発走前の計算ステップは常に渡す): LLM が使われなかった・一部しか使われなかった理由(固定文言。問題なく効いたときは null)。D1 の `analyses.llm_note` に保存される(Issue #194 b2)。`extra.llmCalls`: LLM を呼んだ1回ごとの記録(キー未登録は null)。D1 の `analyses.llm_calls_json` に保存される(Issue #197 段2)。`extra.markRepair`: 印を補修した・補修が要る違反があった記録(固定の語彙だけ。D1 の `analyses.mark_repair_json`。Issue #317)。 */
   save(record: AnalysisRecord, extra?: AnalysisSaveExtra): Promise<{ readonly id: number; readonly detail: "stored" | "failed" | "skipped" }>;
   findByAnalyzedAt(raceId: string, analyzedAt: string): Promise<number | null>;
   /**
@@ -2621,7 +2621,7 @@ export class RaceDayCore {
               return;
             }
             // LLM を呼んだ1回ごとの記録(所要時間・usage・stop_reason。Issue #197 段2)。キー未登録(cloudAnalyze なし)は null(NULL で保存)。
-            const saved = await sink.save(toSave, { llmNote: outcome.note, llmCalls: cloudAnalyze === null ? null : cloudAnalyze.calls() });
+            const saved = await sink.save(toSave, { llmNote: outcome.note, llmCalls: cloudAnalyze === null ? null : cloudAnalyze.calls(), markRepair: outcome.markRepair ?? null });
             analysisId = saved.id;
             // 通知の材料を、analysis_id の永続化より前に積む(Issue #205。同じ同期区間。以降の再実行が、材料の無い done にならない)。
             this.putAnalysisMaterial(task, record, outcome, saved.id);

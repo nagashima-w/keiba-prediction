@@ -302,9 +302,9 @@ describe("印の付いた馬の一覧(Issue #211)", () => {
   it("1行は印・馬番・馬名だけ(数値を持たない)。馬名が null・空文字なら馬名は null", () => {
     const out = marked([horse(1, { mark: "◎", name: "エートラックス" }), horse(2, { mark: "〇", name: null }), horse(3, { mark: "▲", name: "" })]);
     expect(out).toEqual([
-      { umaban: 1, name: "エートラックス", mark: "◎" },
-      { umaban: 2, name: null, mark: "〇" },
-      { umaban: 3, name: null, mark: "▲" },
+      { umaban: 1, name: "エートラックス", mark: "◎", markRepair: null },
+      { umaban: 2, name: null, mark: "〇", markRepair: null },
+      { umaban: 3, name: null, mark: "▲", markRepair: null },
     ]);
   });
 
@@ -595,11 +595,11 @@ describe("3着内率の上位5頭(Issue #240)", () => {
       h(5, 0.2, 0.2, { name: "ファイブ", mark: "?" }),
     ];
     expect(top(input, null)?.rows).toEqual([
-      { umaban: 1, name: "エコー", rate: "60.0%", mark: "◎" },
-      { umaban: 2, name: null, rate: "50.0%", mark: "▲" },
-      { umaban: 3, name: null, rate: "40.0%", mark: null },
-      { umaban: 4, name: "デルタ", rate: "30.0%", mark: null },
-      { umaban: 5, name: "ファイブ", rate: "20.0%", mark: "?" },
+      { umaban: 1, name: "エコー", rate: "60.0%", mark: "◎", repaired: false },
+      { umaban: 2, name: null, rate: "50.0%", mark: "▲", repaired: false },
+      { umaban: 3, name: null, rate: "40.0%", mark: null, repaired: false },
+      { umaban: 4, name: "デルタ", rate: "30.0%", mark: null, repaired: false },
+      { umaban: 5, name: "ファイブ", rate: "20.0%", mark: "?", repaired: false },
     ]);
   });
 

@@ -21,6 +21,7 @@ import {
   FALLBACK_REASON_TRUNCATED,
   type AnalyzeRaceResult,
   type AnthropicMessageResponse,
+  type MarkRepairReport,
   type MessageSender,
   type ModelFamily,
   type ModelInfoLite,
@@ -216,8 +217,8 @@ export function createRecordingSender(inner: MessageSender, store: LlmResponseSt
 
 /** キー未登録(LLM を呼ばなかった)のときの理由。 */
 export const LLM_NOTE_NO_KEY = "LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました";
-/** 印の制約違反が続き、印は付けず、確率の補正だけ採用したときの理由(core の `marksDroppedReason` は例外のメッセージを含むので使わない)。 */
-export const LLM_NOTE_MARKS_DROPPED = "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)";
+/** 印の制約違反が続き、印を規則に合わせて直して採用したときの理由(Issue #317。固定文言。違反の中身〈LLM の生の文字列〉は出さない)。 */
+export const LLM_NOTE_MARKS_REPAIRED = "印の一部を規則に合わせて直しました(3着内率の補正は反映しています)";
 /** core の固定文言のどれでもない fallbackReason のときの理由(未知の文字列をそのまま出さない)。 */
 export const LLM_NOTE_UNKNOWN_FALLBACK = "LLM を使えなかったため、3着内率をそのまま採用しました";
 
@@ -228,6 +229,11 @@ export interface LlmOutcome {
   readonly effective: boolean;
   /** 画面に出す理由(固定文言)。LLM が問題なく効いたときは null。 */
   readonly note: string | null;
+  /**
+   * 印の補修の記録(Issue #317)。LLM が効いたとき(`effective`)だけ持つ。印の違反が無ければ null、フォールバック・キー未登録は持たない(省略)。
+   * `repaired:true` のとき、`note` は {@link LLM_NOTE_MARKS_REPAIRED}。
+   */
+  readonly markRepair?: MarkRepairReport | null;
 }
 
 /** `analyzeRace` の結果(LLM を呼ばなかったときは null)から、効いたか・理由を決める。出す文字列は、この module と core の固定文言だけ。 */
@@ -239,10 +245,8 @@ export function outcomeOf(result: AnalyzeRaceResult | null): LlmOutcome {
     const reason = result.fallbackReason;
     return { effective: false, note: reason !== null && KNOWN_FALLBACK_REASONS.includes(reason) ? reason : LLM_NOTE_UNKNOWN_FALLBACK };
   }
-  if (result.marksDropped === true) {
-    return { effective: true, note: LLM_NOTE_MARKS_DROPPED };
-  }
-  return { effective: true, note: null };
+  const markRepair = result.markRepair ?? null;
+  return { effective: true, note: markRepair !== null && markRepair.repaired ? LLM_NOTE_MARKS_REPAIRED : null, markRepair };
 }
 
 // ---- 組み立て ----

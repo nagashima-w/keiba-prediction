@@ -3,19 +3,23 @@
  *
  * 仕様「3. analyzer」:
  *  - LLMクライアントは注入(LlmClient.complete)。テストはモックのみで実APIは呼ばない。
- *  - フェイルセーフ(仕様L107): JSONパース失敗時は1回だけ同一プロンプトでリトライし、再失敗時は
+ *  - フェイルセーフ(仕様L107): JSONパース失敗時は1回だけ同一プロンプトでリトライし(Issue #317: 印の違反の後の聞き直しだけは、前回の違反の種類から作った固定の追記文を末尾に添える)、再失敗時は
  *    prior をそのまま採用して fallback:true と理由を返す。LLM呼び出し自体の例外も同様に扱う。
  *  - 出力: 馬ごと {umaban, prior, adjustedProb, reason, clipped, usedPrior} + メタ(fallback有無・リトライ回数)。
  *
- * A(フォールバック分離・2026-07-19合意): 印関連の違反(頭数制約・優先順位・未知の印文字の3種)は、
- * リトライ(同一プロンプトで最大2回試行)してもなお印関連違反(AnalyzerMarkViolationError)なら、
- * その最終試行の確率補正(adjustedProb/clipped/reason)を採用したまま全馬 mark=null で返し、
- * fallback:false・marksDropped:true とする(prior には戻さない)。
- * fallback は「通常時は false」という既存の不変条件(fallbackReason はfallback:trueの時のみ非null)を
- * 崩さないため、印救済でも fallbackReason は null のままにし、印救済の理由は専用の
- * marksDroppedReason フィールドに入れる。
- * 印と無関係な失敗(JSON破損・horses配列なし・有効な補正0件など)は従来どおり
- * priorFallbackHorses で全馬 prior を採用し、fallback:true・marksDropped:false のまま返す。
+ * A(フォールバック分離・2026-07-19合意): 印関連の違反(頭数制約・優先順位・未知の印文字の3種)は、確率補正
+ * (adjustedProb/clipped/reason)を捨てず、prior には戻さない(fallback:false。fallbackReason は null のまま)。
+ * Issue #317: 印は全消しにせず、`repairMarks` で規則に合わせて直して採用する(「全レースに印を付けたい」というユーザー要望。
+ * Task#22 の「印は LLM 判断が本質のため機械生成の代替はしない」から、確率補正が有効な応答に限って変更した)。
+ *  - 1回目が印の違反なら、今までどおり聞き直す(最大2試行)
+ *  - 最後の試行が印の違反 → その応答を補修して採用する
+ *  - 1回目が印の違反で、2回目が**別の失敗**(解析不能・切り詰め・拒否・LLM 例外) → 1回目の応答を補修して採用する
+ *    (確率の補正・根拠・生応答・使ったモデルも1回目のもの)。全馬 prior に戻すより「全レースに印」の趣旨に合う
+ *  - 両方が印の違反なら最後(2回目)の応答を採用する
+ *  - 印と無関係な失敗のみ(JSON破損・horses配列なし・有効な補正0件など)は従来どおり priorFallbackHorses
+ *    で全馬 prior・全馬 mark=null(fallback:true)。LLM 自体が失敗したレースには印を付けない
+ * 補修の有無・違反の種類・変更した馬は `markRepair` に載る(D1 の `analyses.mark_repair_json` に保存して、どの規則でよく外れるかを数える)。
+ * `marksDropped` は互換のために型に残すが、常に false(印を全消しにする経路はもう無い)。
  *
  * maxTokens引き上げ・切り詰め検出の可視化(2026-07-19改定・小倉記念18頭切り詰め事故の再発防止):
  * AnthropicLlmClient.complete() が stop_reason==="max_tokens" を検出すると
@@ -34,9 +38,12 @@ import {
   AnalyzerResponseParseError,
   AnalyzerTruncationError,
   parseAnalyzerResponse,
+  type MarkViolationKind,
   type ParsedHorseResult,
   type PriorRef,
 } from "./parse-response.js";
+import { buildMarkRetryNotice } from "./mark-retry-notice.js";
+import { repairMarks, type MarkRepairChange } from "./repair-marks.js";
 
 /**
  * fallbackReason(UI/DB向け)に使う固定分類文言(2026-07-19改定: 秘密安全性のための再設計)。
@@ -101,6 +108,20 @@ export interface AnalyzeRaceDeps {
   readonly maxAdjust?: number;
 }
 
+/**
+ * 印の補修の記録(Issue #317)。固定の語彙だけで、LLM の生の文字列は含まない。
+ */
+export interface MarkRepairReport {
+  /** 採用した応答の印を、実際に補修したか。聞き直して解消した(違反が初回だけだった)ときは false。 */
+  readonly repaired: boolean;
+  /** 採用した応答の試行番号(1 = 初回、2 = 聞き直し)。 */
+  readonly adoptedAttempt: 1 | 2;
+  /** 印の違反があった試行ごとの違反の種類(試行の順)。どの規則でよく外れるかを数えるための記録。 */
+  readonly attempts: ReadonlyArray<{ readonly n: 1 | 2; readonly kinds: readonly MarkViolationKind[] }>;
+  /** 補修で印が変わった馬(元の印→今の印)。repaired:false のときは空。 */
+  readonly changes: readonly MarkRepairChange[];
+}
+
 /** analyzeRace の結果(全馬 + メタ)。 */
 export interface AnalyzeRaceResult {
   /** 全馬の補正後確率(入力馬番順)。 */
@@ -116,14 +137,19 @@ export interface AnalyzeRaceResult {
    */
   readonly fallbackReason: string | null;
   /**
-   * 印関連の違反(頭数・優先順位・未知の印文字)によりリトライ後も印を採用できず、
-   * 確率補正のみ採用して全馬 mark=null にした場合 true(A: フォールバック分離・2026-07-19合意)。
+   * (Issue #317 以降は常に false。以前は、印関連の違反によりリトライ後も印を採用できず、
+   * 確率補正のみ採用して全馬 mark=null にした場合 true だった〈A: フォールバック分離・2026-07-19合意〉。)
    * 下流(pipeline/store/UI)が無改変で動作する既存契約を壊さないため optional にしている
    * (analyzeRace 自身は必ず true/false のいずれかを明示的に返す)。
    */
   readonly marksDropped?: boolean;
-  /** marksDropped:true の場合の理由説明(通常時・非印失敗時は null)。 */
+  /** marksDropped:true の場合の理由説明(通常時・非印失敗時は null)。Issue #317 以降は常に null。 */
   readonly marksDroppedReason?: string | null;
+  /**
+   * 印の補修の記録(Issue #317)。採用した応答、または聞き直す前の応答に印の違反が1度もなければ null
+   * (印と無関係な失敗で prior に戻ったときも null)。省略可なのは、既存の結果リテラルを使うテストを壊さないため。
+   */
+  readonly markRepair?: MarkRepairReport | null;
   /**
    * fallback:true の原因が応答の切り詰め(stop_reason==="max_tokens")だった場合 true
    * (2026-07-19改定: 小倉記念18頭切り詰め事故の再発防止・可視化)。切り詰め以外の失敗では
@@ -206,13 +232,24 @@ export async function analyzeRace(
   }));
   const prompt = buildPrompt(input);
 
-  // 初回 + リトライ1回(同一プロンプト)。
+  // 初回 + リトライ1回(同一プロンプト。ただし印の違反の後の聞き直しだけ、固定の追記文つき。Issue #317)。
   const maxAttempts = 2;
   let lastError: unknown = null;
-  // 印関連違反(AnalyzerMarkViolationError)発生時点で取得できていた応答テキスト(Issue#10)。
+  // 印関連違反(AnalyzerMarkViolationError)を起こした最後の試行(Issue #317)。応答テキスト(Issue#10)・そのときのモデル・
+  // 試行番号を覚え、最後まで全試行が失敗したとき、この応答を補修して採用する。
   // LLM呼び出しとパースを別tryに分け、パース例外(印違反含む)のcatch節でも呼び出し済みの
   // テキストを参照できるようにする(tryブロック内のconstはcatch節から見えないため)。
-  let lastMarkViolationText: string | null = null;
+  let lastMarkViolation: {
+    readonly error: AnalyzerMarkViolationError;
+    readonly text: string;
+    readonly model: string | undefined;
+    readonly attempt: 1 | 2;
+  } | null = null;
+  // 印の違反があった試行ごとの違反の種類(試行の順。補修の記録に載せる)。
+  const violationAttempts: Array<{ n: 1 | 2; kinds: readonly MarkViolationKind[] }> = [];
+  // 直前の試行が印の違反だったときの、違反の種類(Issue #317)。次の試行(聞き直し)のプロンプトの末尾に、固定の追記文として添える。
+  // 印と無関係な失敗の後は null(従来どおり同一のプロンプトで聞き直す)。1回目のプロンプトは常に追記なし。
+  let previousViolationKinds: readonly MarkViolationKind[] | null = null;
   // 応答を得られた最後の試行のモデル(Issue #157)。completeDetailed を持たない LlmClient や、
   // 毎回例外で応答が無い場合は undefined のまま(結果にキー自体を載せない)。
   let modelUsed: string | undefined;
@@ -221,13 +258,15 @@ export async function analyzeRace(
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let text: string;
+    const attemptPrompt = previousViolationKinds === null ? prompt : prompt + buildMarkRetryNotice(previousViolationKinds);
+    previousViolationKinds = null;
     try {
       if (deps.llm.completeDetailed !== undefined) {
-        const completion = await deps.llm.completeDetailed(prompt);
+        const completion = await deps.llm.completeDetailed(attemptPrompt);
         text = completion.text;
         modelUsed = completion.model;
       } else {
-        text = await deps.llm.complete(prompt);
+        text = await deps.llm.complete(attemptPrompt);
       }
     } catch (e) {
       // LLM呼び出し自体の例外(認証エラー・レート制限・ネットワーク断等)。テキスト自体を
@@ -254,6 +293,11 @@ export async function analyzeRace(
         fallbackReason: null,
         marksDropped: false,
         marksDroppedReason: null,
+        // 初回が印の違反で、聞き直しで解消したときだけ、初回の違反の種類を残す(repaired:false)。
+        markRepair:
+          violationAttempts.length === 0
+            ? null
+            : { repaired: false, adoptedAttempt: (attempt + 1) as 1 | 2, attempts: violationAttempts, changes: [] },
         rawResponse: text,
         ...withModel(),
       };
@@ -261,25 +305,35 @@ export async function analyzeRace(
       // パース失敗(印関連違反を含む)。残り試行があればリトライ。
       lastError = e;
       if (e instanceof AnalyzerMarkViolationError) {
-        lastMarkViolationText = text;
+        const n = (attempt + 1) as 1 | 2;
+        lastMarkViolation = { error: e, text, model: modelUsed, attempt: n };
+        violationAttempts.push({ n, kinds: e.kinds });
+        previousViolationKinds = e.kinds;
       }
     }
   }
 
-  // 全試行失敗。最終試行(2回目)の失敗が印関連違反(AnalyzerMarkViolationError)なら、
-  // 確率補正(adjustedProb/clipped/reason)は捨てずに全馬 mark=null で採用する(A: フォールバック分離)。
-  // fallback:false の不変条件(fallbackReason は null)を保つため、理由は marksDroppedReason に入れる。
-  // この経路は実質「成功(確率補正は有効)」に近いため、rawResponse も最終試行の応答テキストを載せる。
-  if (lastError instanceof AnalyzerMarkViolationError) {
+  // 全試行失敗。どれかの試行が印関連違反(AnalyzerMarkViolationError)だったなら、その応答(最後の違反)を補修して採用する
+  // (Issue #317。全消しにしない)。違反の後の試行が別の失敗(解析不能・切り詰め・拒否・LLM 例外)で終わっていても、
+  // 確率補正が有効な違反の応答があるので、全馬 prior に戻さずそちらを採用する。確率補正(adjustedProb/clipped/reason)は
+  // 違反した応答のもの。fallback:false の不変条件(fallbackReason は null)を保つ。rawResponse・モデルも採用した試行のもの。
+  if (lastMarkViolation !== null) {
+    const repaired = repairMarks(lastMarkViolation.error.markedHorses, lastMarkViolation.error.unknownUmabans);
     return {
-      horses: lastError.horses,
+      horses: repaired.horses,
       fallback: false,
       retryCount: maxAttempts - 1,
       fallbackReason: null,
-      marksDropped: true,
-      marksDroppedReason: `印関連の制約違反のため2回目応答でも印を採用できず、確率補正のみ採用して印は全馬nullにしました: ${lastError.message}`,
-      rawResponse: lastMarkViolationText,
-      ...withModel(),
+      marksDropped: false,
+      marksDroppedReason: null,
+      markRepair: {
+        repaired: true,
+        adoptedAttempt: lastMarkViolation.attempt,
+        attempts: violationAttempts,
+        changes: repaired.changes,
+      },
+      rawResponse: lastMarkViolation.text,
+      ...(lastMarkViolation.model === undefined ? withModel() : { modelUsed: lastMarkViolation.model }),
     };
   }
 

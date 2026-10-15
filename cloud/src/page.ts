@@ -161,6 +161,8 @@ ${paletteCss()}
   .horse.positive { border-color: var(--ok); border-width: 2px; }
   .horse-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
   .mark { font-weight: bold; }
+  /* Issue #317: 印を補修した馬の目印(「直」と元の印→今の印)。色だけに頼らない=文字がある */
+  .mark-fixed { font-size: 0.75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
   .horse-line { font-size: 0.9rem; }
   .horse-reason { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
   .ev-plus { margin-left: 8px; color: var(--ok); }
