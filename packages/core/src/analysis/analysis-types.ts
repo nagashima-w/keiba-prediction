@@ -27,18 +27,7 @@ export type RaceVenueKind = "central" | "nar";
  */
 export type VerifyVenueFilter = "all" | RaceVenueKind;
 
-/**
- * レース一覧の取得対象(UI表示用の3択。タスクB1で導入、タスクB2b-1でrendererからshared移設)。
- * 旧 exe では main(期間バッチのlistDayRaces呼び分け)・renderer(3択UI)双方が参照するため共有の置き場に置いた。
- * 写像関数(raceListTargetToSelection/selectionToRaceListTarget)は exe の shared/race-list-target.ts(#287 で削除。3c1664e まで)。
- */
-export type RaceListTarget = "central" | "nar-all" | "nar-jpn";
 
-/** venueKind と jpnOnly の組(内部状態。タスクB1)。 */
-export interface RaceListSelection {
-  readonly venueKind: RaceVenueKind;
-  readonly jpnOnly: boolean;
-}
 
 /**
  * 予想印(core PredictionMark のプレーン写し。旧 exe では IPC越しの共有用)。
@@ -335,7 +324,7 @@ export interface AnalysisResult {
   /**
    * 予想印の制約違反(頭数・優先順位・未知の印文字)によりリトライ後も印を採用できず、
    * 確率補正(AI補正後確率)は有効なまま全馬の印だけを非表示にした場合 true
-   * (A: フォールバック分離・2026-07-19合意)。fallback とは意味が異なる点に注意:
+   * (A: フォールバック分離・2026-07-19合意)。**Issue #317 以降は常に false**(印は補修して採用するので、全消しにする経路が無い。型は互換のために残してある)。fallback とは意味が異なる点に注意:
    * fallback は確率補正そのものを prior に戻す(補正無効)のに対し、marksDropped は
    * 確率補正は有効なまま印だけを諦めた状態を示す(fallback:false のまま true になり得る)。
    * optional なのは既存の AnalysisResult リテラルを使うテストを無改変で通すため
@@ -473,70 +462,8 @@ export interface AnalysisResult {
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
 }
 
-/**
- * 一括分析: 1レース分の最終結果(旧 exe では main→renderer に invoke の戻り値として返した。exe は #287 で削除。3c1664e まで)。
- * - "success": result に AnalysisResult が入る(error は null)。
- * - "failure": error にユーザー向けメッセージが入る(result は null)。
- * - "skipped": 中断により未実行(result・error ともに null)。
- */
-export interface BatchRaceOutcome {
-  /** レースID(12桁)。 */
-  readonly raceId: string;
-  /** レース名(一覧から引けない場合は null。成功時は result.raceName を優先表示)。 */
-  readonly raceName: string | null;
-  /** 実行結果の区分。 */
-  readonly status: "success" | "failure" | "skipped";
-  /** 成功時の分析結果(それ以外は null)。 */
-  readonly result: AnalysisResult | null;
-  /** 失敗時のエラーメッセージ(それ以外は null)。 */
-  readonly error: string | null;
-}
 
-/**
- * 一括分析の全体進捗(旧 exe では main→renderer に webContents.send で通知した。exe は #287 で削除。3c1664e まで)。
- * 既存の1レース内段階(AnalysisProgress)を stage に内包し、全体の何レース目かを併せて伝える。
- */
-export interface BatchProgress {
-  /** 完了したレース数(0起点。実行中レースは含まない)。 */
-  readonly completedRaces: number;
-  /** 対象レースの総数。 */
-  readonly totalRaces: number;
-  /** 現在実行中のレースID(境界・完了時は null)。 */
-  readonly currentRaceId: string | null;
-  /** 現在実行中のレース名(引けない場合・完了時は null)。 */
-  readonly currentRaceName: string | null;
-  /** 現在のレース内段階(レース境界・全体完了時は null)。 */
-  readonly stage: AnalysisProgress | null;
-}
 
-/**
- * 横断「EVプラス馬サマリ」の1行(全レースのEVプラス馬を1つに集約したもの)。
- * EV降順に並べて画面最上部に表示する。
- */
-export interface EvPlusSummaryRow {
-  /** そのEVプラス馬が属するレースID。 */
-  readonly raceId: string;
-  /** 会場名(レース見出しの組み立てに使う。Task#29)。 */
-  readonly venueName: string;
-  /** レース番号(1〜12。レース見出しの組み立てに使う。Task#29)。 */
-  readonly raceNumber: number;
-  /** レース名(表示用)。空文字の場合があるため、識別には venueName+raceNumber も併用する(Task#29)。 */
-  readonly raceName: string;
-  /** 馬番。 */
-  readonly umaban: number;
-  /** 馬名。 */
-  readonly horseName: string;
-  /** 補正後複勝確率(0〜1)。 */
-  readonly adjustedProb: number;
-  /** 複勝オッズ下限(欠損なら null)。 */
-  readonly placeOddsMin: number | null;
-  /** 期待値(EVプラスなので閾値超え)。 */
-  readonly ev: number;
-  /** 予想印(◎〇▲△☆注のいずれか。印なし・LLM未使用時は null)。Task#23。 */
-  readonly mark: PredictionMark | null;
-  /** このEVが推定値(発売前・単勝オッズからの複勝下限概算)によるものか(Task#25)。 */
-  readonly evEstimated: boolean;
-}
 
 /** 検証画面: キャリブレーション帯(表示用。core CalibrationBin のプレーン写し)。 */
 export interface CalibrationBinView {
@@ -796,15 +723,6 @@ export interface PromptVersionVerifyReportView {
   readonly additionalInstructions: readonly (string | null)[];
 }
 
-/**
- * プロンプト版不明(prompt_version が null)の分析を削除した結果(表示用。Task#33)。
- * 削除操作の直後に検証データ(レポート・版別比較・レース一覧)を再読込したうえで、
- * この件数を画面にフィードバック表示する。
- */
-export interface DeleteUnknownPromptVersionAnalysesResult {
-  /** 削除した分析(analyses行)の件数。関連する analysis_horses(馬単位の子行)も併せて削除される。 */
-  readonly deletedCount: number;
-}
 
 /**
  * 結果取込の結果(1レース分)。status で確定/未確定を判別する判別共用体。
@@ -833,79 +751,10 @@ export type ImportResultOutcome =
       readonly raceId: string;
     };
 
-/**
- * 一括取込: 1レース分の結果(旧 exe では main→renderer に invoke の戻り値として返した。exe は #287 で削除。3c1664e まで)。Task#31。
- * - "imported": 結果を確定・取込済み(複勝払戻の有無は問わない)。
- * - "not_confirmed": まだ発走前・確定前(#30の判定を自動スキップとして扱う。エラーではない)。
- * - "failure": 取込処理中に例外が発生した(error にメッセージが入る)。
- * - "skipped": 中断要求により未実行のまま打ち切られた。
- */
-export interface BulkImportRaceOutcome {
-  /** レースID(12桁)。 */
-  readonly raceId: string;
-  /** 実行結果の区分。 */
-  readonly status: "imported" | "not_confirmed" | "failure" | "skipped";
-  /** 失敗時のエラーメッセージ(それ以外は null)。 */
-  readonly error: string | null;
-}
 
-/**
- * 一括取込の全体進捗(旧 exe では main→renderer に webContents.send で通知した。exe は #287 で削除。3c1664e まで)。Task#31。
- * 既存の一括分析(BatchProgress)と異なり、取込にはレース内段階が無いため単純な件数のみ持つ。
- */
-export interface BulkImportProgress {
-  /** 完了したレース数(0起点。実行中レースは含まない)。 */
-  readonly completedRaces: number;
-  /** 対象レースの総数。 */
-  readonly totalRaces: number;
-  /** 現在処理中のレースID(境界・完了時は null)。 */
-  readonly currentRaceId: string | null;
-}
 
-/**
- * ログエクスポート(旧 exe では main→renderer に invoke の戻り値として返した。exe は #287 で削除。3c1664e まで)。Task#36。
- * - "saved": 保存先ダイアログでファイルを選び、集約ログ(現行+ローテーション済み)を書き出した。
- * - "canceled": 保存先ダイアログをキャンセルした(何もしていない)。
- */
-export type LogExportOutcome =
-  | { readonly status: "saved"; readonly filePath: string }
-  | { readonly status: "canceled" };
 
-/**
- * クラウド移行用の書き出し(Issue #215・#167-A。旧 exe では main→renderer に invoke の戻り値として返した。exe は #287 で削除。3c1664e まで)。
- * - "saved": 保存先ダイアログでファイルを選び、gzip 圧縮の NDJSON を書き出した。
- *   件数は**実際に書いた行数**(分析は 1 分析 1 行、結果は 1 レース 1 行)。
- * - "canceled": 保存先ダイアログをキャンセルした(何も書き込んでいない)。
- * 失敗は例外(reject)で伝える(ログエクスポートと同じ流儀。メッセージに「どの表・どの id/race_id・どの列か」を含みうる)。
- */
-export type CloudMigrationExportOutcome =
-  | {
-      readonly status: "saved";
-      readonly filePath: string;
-      /** 書き出した分析の数。 */
-      readonly analysisCount: number;
-      /** 書き出した結果のレース数。 */
-      readonly resultRaceCount: number;
-      /** ファイルの大きさ(バイト)。 */
-      readonly fileBytes: number;
-    }
-  | { readonly status: "canceled" };
 
-/**
- * 分析データのエクスポート(第一版、GitHub Issue#10。旧 exe では main→renderer に invoke の戻り値として返した。exe は #287 で削除。3c1664e まで)。
- * - "saved": 保存先ダイアログでJSONの保存先を選び、schemaVersion=1のJSON+馬別CSVの2ファイルを
- *   書き出した(CSVパスはJSON保存先から拡張子を置き換えて自動決定。log-exportとの契約差分は
- *   filePathが2本〈jsonPath/csvPath〉になる点のみ)。
- * - "canceled": 保存先ダイアログをキャンセルした(何も書き込んでいない)。
- * - "error": 保存先パスの検証に失敗し、書き込みを行わなかった(code-reviewer指摘対応。
- *   例: 導出したCSV保存先〈csvPath〉がJSON保存先〈jsonPath〉と一致してしまう異常なケースの
- *   多層防御。通常はanalysis-export.tsのderiveCsvPathFromJsonPathが構造的にこの衝突を
- *   起こさない設計のため到達しない想定だが、万一の再発防止として例外の代わりにこの状態を返す)。
- */
-export type AnalysisExportOutcome =
-  | { readonly status: "saved"; readonly jsonPath: string; readonly csvPath: string }
-  | { readonly status: "canceled" }
-  | { readonly status: "error"; readonly message: string };
 
 /**
  * 検証画面: レース単体の予実ブレークダウンの1頭分(表示用。core RaceBreakdownHorse の
@@ -1060,77 +909,4 @@ export interface RaceLedgerView {
    * null(「記録なし」。allocation-proposal-view.tsの判別状態の1つ)。
    */
   readonly allocation: StoredAllocationView | null;
-}
-
-/**
- * 期間バッチ「先取得+件数算出」フェーズ(phase1)の日ごとのアウトカム(表示用。タスクB2b-1)。
- * core RangeCollectResult.perDayOutcome(exe の main/range-collect.ts(#287 で削除。3c1664e まで))のプレーン写し(旧 exe では IPC越しの共有用)。
- */
-export type PeriodBatchDayOutcomeView =
-  | { readonly date: string; readonly status: "hasRaces"; readonly raceCount: number }
-  | { readonly date: string; readonly status: "empty" }
-  | { readonly date: string; readonly status: "failure"; readonly error: string };
-
-/**
- * 期間バッチ「先取得」(phase1)の全体進捗(旧 exe では main→renderer に webContents.send で通知した。exe は #287 で削除。3c1664e まで。タスクC2)。
- * exe の main/range-collect.ts(#287 で削除。3c1664e まで)の onProgress コールバックのペイロードと同じ形(日単位の単純な件数。
- * レース内段階が無い点は BulkImportProgress と同じ流儀)。
- */
-export interface PeriodBatchCollectProgress {
-  /** 収集を完了した日数(0起点ではなく、処理し終えた日数。1件目完了時点で1)。 */
-  readonly completedDays: number;
-  /** 期間内の総日数。 */
-  readonly totalDays: number;
-}
-
-/**
- * 期間バッチの実行対象1レース(表示用。旧 exe では IPC共有用。タスクC1)。
- * 中央のraceIdは暦日を持たないため、収集時にそのレースが見つかった開催日(kaisaiDate)を
- * レースごとに運ぶ(exe の main/range-collect.ts(#287 で削除。3c1664e まで)の RangeCollectTargetRace のプレーン写し)。
- * phase2(期間バッチ実行ハンドラ)はこの kaisaiDate でレースごとに runAnalysis を呼び分け、
- * 日跨ぎのレースで開催日を取り違えない(単一共有dateを渡すバグを構造的に防ぐ)。
- */
-export interface PeriodBatchTargetRace {
-  /** レースID(12桁)。 */
-  readonly raceId: string;
-  /** このレースが見つかった開催日(YYYYMMDD)。 */
-  readonly kaisaiDate: string;
-}
-
-/**
- * 期間バッチ「先取得+件数算出」フェーズ(phase1)の結果(タスクB2b-1、targetRacesはタスクC1で導入)。
- * 実際の分析実行(phase2)は行わず、対象レース(raceId+kaisaiDate)と件数の算出までを表す
- * (exe の main/range-collect.ts の RangeCollectResult のプレーン写し。旧 exe では IPC越しの共有用)。
- */
-export interface PeriodBatchCollectResult {
-  /** 収集成功レース総数(dedup前)。failureになった日のレースは含まれない。 */
-  readonly totalRaces: number;
-  /** dedupにより除外(現行版で分析済み)された件数。 */
-  readonly skippedAlreadyAnalyzed: number;
-  /** 実行対象のレース(dedup後、収集順。raceIdごとに自分のkaisaiDateを持つ。タスクC1)。 */
-  readonly targetRaces: readonly PeriodBatchTargetRace[];
-  /** lister が失敗(throw)した日の一覧。 */
-  readonly failureDays: readonly string[];
-  /** 日ごとのアウトカム(処理した日のみ)。 */
-  readonly perDayOutcome: readonly PeriodBatchDayOutcomeView[];
-  /** 先取得の中断要求により途中で打ち切られたか。 */
-  readonly cancelled: boolean;
-}
-
-/** レース一覧の1レース(旧 exe では renderer 表示用)。 */
-export interface RaceListItem {
-  /** レースID(12桁)。 */
-  readonly raceId: string;
-  /** レース名(一覧では切り詰められている場合あり)。 */
-  readonly name: string;
-  /** コース種別(芝/ダ/障)。 */
-  readonly courseType: string;
-  /** 距離(m)。 */
-  readonly distance: number;
-  /** 出走頭数。 */
-  readonly entryCount: number;
-  /** 会場名(取得できない構造では null)。 */
-  readonly venue: string | null;
-  /** レース番号(1〜12)。 */
-  readonly raceNumber: number;
 }

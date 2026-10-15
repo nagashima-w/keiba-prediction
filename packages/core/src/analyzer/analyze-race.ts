@@ -132,8 +132,8 @@ export interface AnalyzeRaceResult {
   readonly retryCount: number;
   /**
    * フォールバックの理由(通常時は null)。不変条件: fallback:false の場合は必ず null。
-   * 印関連違反によるA救済(marksDropped:true)は fallback:false のため、ここは null のままになる
-   * (理由は marksDroppedReason に入る)。
+   * 印関連違反は補修して採用する(Issue #317。`markRepair` に記録する)ので fallback:false で、ここは null のままになる
+   * (旧仕様の「印を全消しにする A 救済〈marksDropped:true〉」は、#317 で無くなった)。
    */
   readonly fallbackReason: string | null;
   /**
@@ -153,7 +153,7 @@ export interface AnalyzeRaceResult {
   /**
    * fallback:true の原因が応答の切り詰め(stop_reason==="max_tokens")だった場合 true
    * (2026-07-19改定: 小倉記念18頭切り詰め事故の再発防止・可視化)。切り詰め以外の失敗では
-   * 明示的に false を返す。成功時・印救済時(AnalyzerMarkViolationError経由)はこのフィールド
+   * 明示的に false を返す。成功時・印の補修時(AnalyzerMarkViolationError経由)はこのフィールド
    * 自体を省略する(値は undefined。既存呼び出し元との互換のため optional にしている)。
    */
   readonly truncated?: boolean;
@@ -176,7 +176,7 @@ export interface AnalyzeRaceResult {
   readonly diagnosticMessage?: string | null;
   /**
    * LLMの生応答テキスト(Issue#10 分析データのエクスポート)。
-   * 成功時(fallback:false。印救済〈marksDropped:true〉を含む)は、実際に採用した試行の
+   * 成功時(fallback:false。印の補修〈Issue #317〉を含む)は、実際に採用した試行の
    * 応答テキストをそのまま載せる。text自体を取得できなかった失敗時(パース失敗・LLM呼び出し例外・
    * 切り詰め検出によりprior採用へフォールバックした場合)は null にする(欠損は明示nullで表す。
    * 秘密安全性: これはLLMが返したモデル出力テキストのみで、プロンプト本文・apiKey等は含まない)。
@@ -199,8 +199,8 @@ export interface AnalyzeRaceResult {
  * 全馬を prior のまま採用する(印と無関係な失敗時のフォールバック専用)結果を組み立てる。
  * 予想印(mark)はLLM判断が本質のため機械生成の代替はせず、全馬 null とする(Task#22: ユーザー決定事項)。
  * 印関連違反(頭数・優先順位・未知の印文字)のみの失敗は、この関数を使わず
- * AnalyzerMarkViolationError が運ぶ確率補正済みの horses(既に mark=null)をそのまま採用する
- * (A: フォールバック分離・2026-07-19合意。prior には戻さない)。
+ * AnalyzerMarkViolationError が運ぶ印つきの horses(`markedHorses`)を `repairMarks` で規則に合わせて直して採用する
+ * (Issue #317。A: フォールバック分離・2026-07-19合意の「prior には戻さない」は維持。旧仕様はそれを全馬 mark=null で採用していた)。
  */
 function priorFallbackHorses(priors: readonly PriorRef[]): ParsedHorseResult[] {
   return priors.map((p) => ({

@@ -528,6 +528,12 @@ describe("手動で分析するときの案内(guide。Issue #312)", () => {
     expect(guide!.length, "短く(スマホで数行)").toBeLessThan(150);
   });
 
+  it("案内の全文(言い換えを素通りさせない。文言を変えるときはここも変える)", () => {
+    expect(buildRaceModel(input()).guide).toBe(
+      "手動で分析するときは、下の「発走前」だけを実行すれば足ります(事前分析は不要)。事前分析は、朝の時点の統計モデルの見立てを見るためと、取得のキャッシュを温めて発走前を速くするためのものです。",
+    );
+  });
+
   it("起動のボタンを出さない閲覧者(readOnly)・状態を取得できていないとき(読み込み中・失敗)は案内を出さない", () => {
     expect(buildRaceModel(input({ readOnly: true })).guide).toBeNull();
     expect(buildRaceModel(input({ status: { kind: "loading" } })).guide).toBeNull();

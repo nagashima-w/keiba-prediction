@@ -949,11 +949,11 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     **承認印 `[PUBLISH-APPROVED]` は、この本番デプロイの関門として残っている**(先端コミットに承認印があり、
     「レビュー継続中」を含まない push、または許可ブランチでの手動実行)。
 - **Dependabot(#310。`.github/dependabot.yml`)**: Actions の SHA ピン留め(#305)と固定した依存の更新を知らせる。対象は github-actions と npm(ルート・`packages/*`・`cloud/`)、週 1 回、PR の宛先は作業ブランチ(`target-branch`)。
-  Dependabot の PR が作業ブランチに来たら、レビュー(SHA と版数のコメントの差分)してマージする。**承認印の無いマージは本番にデプロイされず、次の承認印付きの公開で出る**。
+  Dependabot の PR が作業ブランチに来たら、レビュー(SHA と版数のコメントの差分)してマージする。**マージは merge commit で行う**(squash にすると、PR の説明〈上流のリリースノートの引用〉がコミットの本文に入る。万一そこに `[PUBLISH-APPROVED]` の文字列が含まれると、承認印なしで本番デプロイが走りうる。確率は極めて低いが、merge commit なら本文は PR のタイトルだけ)。マージはレビュー後にメインが行う。**承認印の無いマージは本番にデプロイされず、次の承認印付きの公開で出る**。
   - **Actions**: SHA と行末の `# vX.Y.Z` が同時に書き換わる想定(未確認。最初の PR で確かめる)。`scripts/test/actions-pinned.test.ts` は期待表の固定をやめ、規則(SHA 固定・版数コメント・全ワークフローで同じ action は同じ SHA と版数・許可リスト内の action)を検査するので、PR をそのままマージしても CI は緑のまま。
   - **npm**: `@anthropic-ai/sdk`・`cheerio`・`iconv-lite`(core と cloud が同じ版を揃える)は先頭の group で、core と cloud の更新を 1 つの PR にまとめさせる(ディレクトリをまたぐ group が 1 つの PR になるかは未確認)。**片方だけの PR が来たら** `scripts/test/cloud-config-guard.test.ts` が赤になる。その場合は手で両方(core の `^X.Y.Z` と cloud の exact `X.Y.Z`、`cloud/pnpm-lock.yaml`)を揃えて取り込む。cloud の `esbuild` が上がると `cloud/src/client-bundle.generated.ts` のドリフトの検査(`test/client-bundle.test.ts`)が落ちうる(`pnpm run build:client` で再生成して同じ PR に載せる)。
   - **CI の範囲**: PR では `ci.yml` が走る。`verify`(ルートの型検査・テスト)と、PR のときだけ走る `cloud-verify`(cloud/ の型検査・テスト・スモーク。`deploy-cloud.yml` の check・smoke と同じコマンド。秘密なし)。cloud の依存(wrangler・esbuild・sdk 等)の PR も PR の段階で赤が分かる。デプロイの dry-run と D1 の migration は `deploy-cloud.yml` の check にあり PR では走らず、マージ後の push で走る(deploy は承認印が無ければ走らない)。
-  - **セキュリティ更新(脆弱性の自動修正 PR)**: `dependabot.yml` では扱わない(宛先を main 以外にできない見込み。未確認)。リポジトリ設定の「Dependabot alerts」を有効にして通知を受け、**alerts が来たら作業ブランチで対応する**(`pnpm audit` で確かめ、版を上げる)。この設定は GitHub 上の操作でユーザーが行う。
+  - **セキュリティ更新(脆弱性の自動修正 PR)**: `dependabot.yml` では扱わない(宛先を main 以外にできない見込み。未確認)。リポジトリ設定の「Dependabot alerts」を有効にして通知を受け、**alerts が来たら作業ブランチで対応する**(`pnpm audit` で確かめ、版を上げる)。**alerts は main のマニフェスト(`package.json`・lockfile)を見る**ので、作業ブランチで版を上げても、main に取り込むまで alert は消えない(消えないのは遅れであって、直っていないわけではない)。この設定は GitHub 上の操作でユーザーが行う。
   - `dependabot.yml` は GitHub が**既定ブランチ(main)のもの**を読むので、main に取り込まれるまで Dependabot は動かない。
 - **版数は 1.44.0(exe の最終版)で凍結**した。以後は上げない([`docs/versioning.md`](./versioning.md))。
 - **削除したもの**: web が使っていた共有部分は `packages/core/src/analysis/`・`packages/core/src/view/` へ移した(#286)。
@@ -2100,7 +2100,7 @@ upload(26.2MB を R2 にそのまま置く): 532ms
 - **Origin(⚠️ 仕様の読み。実機で確認)**: ページは全応答に `Referrer-Policy: no-referrer` を付け、サーバは Origin の完全一致を見る(無い・`null`・違うものは 403)。
   - **現行の Fetch 仕様**(fetch.spec.whatwg.org の「append a request `Origin` header」。2026-10-07 に取得して手順を確認): 「mode が cors 以外」のときに限り、参照元ポリシーが no-referrer だと Origin が `null` になる。`fetch("/path", {method: "POST"})` の既定は mode が cors(`new Request(string)` が mode を "cors" にする)なので、**仕様どおりなら Origin は実際のオリジンになり、`referrerPolicy` の指定は不要**。
   - **それでも init に `referrerPolicy: "same-origin"` を付ける**のは、仕様と違うブラウザがあっても Origin が付くための**保険**(同じオリジンの Referer が付くだけで害はない)。**fetch の `mode` は指定しない**(`same-origin` などを入れると、no-referrer のとき実際に `Origin: null` になる)。
-  - Node の undici(7.29.1)は、この「mode が cors 以外」の条件を持たない古い仕様の実装で、Node のテストでは Origin の挙動を確かめられない(テストは init の内容と、実際の `handle()` との契約を固定する)。**実ブラウザでの確認は本番での実機確認項目**: スマホで起動して、403 にならないこと。
+  - Node の undici(core の依存。8.11.2 のソース `lib/web/fetch/util.js` の `appendRequestOriginHeader` で確認)は、この「mode が cors 以外」の条件を持たない古い仕様の実装で、Node のテストでは Origin の挙動を確かめられない(テストは init の内容と、実際の `handle()` との契約を固定する)。**実ブラウザでの確認は本番での実機確認項目**: スマホで起動して、403 にならないこと。
   - (#186 の Issue 本文・`issue-order.md` の旧記述は「Origin: null になるはずで、付けないと 403 になる」だった。これは誤りで、2026-10-07 の着手前確認で訂正した。)
 
 **追跡(`client/tracker.ts`・`board-state.ts`・`app.ts`)**
@@ -2315,7 +2315,7 @@ upload(26.2MB を R2 にそのまま置く): 532ms
 
 ### レース再生の見た目の改善(#314。版数・`PROMPT_VERSION` は変えない)
 #311 の「順位 % 車線で丸が車線を交換する」「全馬が等間隔のまま同時に入れ替わる」見た目を、**脚質と想定ペースで決まる隊列**と、**馬ごとに連続な横位置**に置き換えた。**着順の抽選(`drawFinishOrder`。勝率 `winProb` を強さにした Plackett-Luce)は変えない**(想定ペースで重みを変えない: 勝率にはプロンプトの展開想定を通じてペースが織り込み済み)。
-- **データ**: 分析の時点(`buildRaceSnapshot`)で各馬の脚質 `legStyle` をスナップショットに保存する(`analyzer/replay-leg-style.ts`。プロンプトの展開想定と同じ `analyzeHorseLegStyle`〈全コーナー版〉・同じ参照走数 3・同じ写し方〈`passing`、`entryCount` → `fieldSize`〉)。API の馬に `legStyle`、レースに `race.pace`(スロー・平均・ハイ・不明)を載せる。**`pace` はプロンプトと同じ `buildRaceDevelopment` の判定**(逃げ馬 0 頭=スロー・1 頭=平均・2 頭以上=ハイ。全頭の脚質が不明なら不明)で、サーバ(`cloud/src/analysis-view.ts`)がスナップショットの全馬の脚質から求める。**#314 より前の分析は `legStyle` が無い**: 脚質は `earlyPos` から粗く決め(≤1/3 先行・≤2/3 差し・他 追込。逃げは決めない)、それも無ければ差し。ペースは不明(=平均として描く)。golden は `legStyle` の追加だけが差分。
+- **データ**: 分析の時点(`buildRaceSnapshot`)で各馬の脚質 `legStyle` をスナップショットに保存する(`analyzer/replay-leg-style.ts`。プロンプトの展開想定と同じ `analyzeHorseLegStyle`〈全コーナー版〉・同じ参照走数 3・同じ写し方〈`passing`、`entryCount` → `fieldSize`〉)。API の馬に `legStyle`、レースに `race.pace`(スロー・平均・ハイ・不明)を載せる。**`pace` はプロンプトと同じ `buildRaceDevelopment` の判定**(逃げ馬 0 頭=スロー・1 頭=平均・2 頭以上=ハイ。全頭の脚質が不明なら不明)で、サーバ(`cloud/src/analysis-view.ts`)がスナップショットの全馬の脚質から求める(**#315 以降は LLM が展開予想して出した想定ペースを優先し、無いときだけこの規則の値**。出どころは `race.paceSource`)。**#314 より前の分析は `legStyle` が無い**: 脚質は `earlyPos` から粗く決め(≤1/3 先行・≤2/3 差し・他 追込。逃げは決めない)、それも無ければ差し。ペースは不明(=平均として描く)。golden は `legStyle` の追加だけが差分。
 - **前計算(`client/replay-plan.ts`)**: 再生の開始時に 1 回、全馬の前方位置・横位置を 360 刻みで計算し、1 コマごとに `frameAt` が線形補間で返す。**隊列と動き出しは乱数に依らない**(乱数は横位置の目標だけ。頭数 × 2 回)。道中は脚質の集団(逃げ→先行→差し→追込)が、集団の中は詰まり・集団の間は空く。ペースが速いほど隊列が長く(ハイ ×1.25・スロー ×0.75)、動き出し(`MOVE_START`)が早い。集団の中は小さな決定的な揺らぎで入れ替わる。勝負どころは脚質ごとの動き出しから着順の位置へ動く(差しは 3〜4 コーナー、追込は直線)。進み具合 `0.97/(1+S)` 以降は着順どおりに固定するので、**ゴールの通過順 = 抽選した着順**が構成上保証される。
 - **横位置**: 馬ごとに連続(0=内ラチ側〜1。1 刻みの変化に上限)。前方の距離が近い 2 頭を、**その時点の横の相対位置の向き**に互いに押し離す(抜く側を内・外に固定しない)。コースの幅は 5 → 7 車線に広げた(キャンバスは 748×458)。
 - **もう一度再生**: 直前と同じ展開(同じ着順・同じ動き)を最初から再生し直す。プレーヤが展開を保持し、乱数を引かない。分析を移ると展開を捨てる。「別の展開で再生」は従来どおり抽選し直す。
@@ -2334,7 +2334,7 @@ upload(26.2MB を R2 にそのまま置く): 532ms
 - **保存**: 新しい列は足さない。展開予想は **生応答(`raw_response`。D1 では NULL で R2 の詳細にだけある)から読み出し時に取り出す**。`detail` が present のときだけ出る(R2 に無い・柵に達した分析・LLM を使わない分析・解析に失敗してフォールバックした分析は出ない)。reason・印は D1 にあるので、これらは R2 が無くても出るが、展開予想は出ない。
 - **API**(`analysis-view.ts`): `development: {text, pace} | null` と `race.paceSource: "llm"|"rule"` を足した。`race.pace`(レース再生の隊列の長さに使う)は、LLM の pace があればそれ、無ければ従来の規則の値(`paceSource` が区別)。生応答の本文は返さない。
 - **画面**: 結果画面の「3着内率の上位5頭」の後・レース再生の前に、節「AI の展開予想」(本文と「想定ペース(AI): ハイ」)。無ければ節ごと出さない。レース再生は `race.pace` が LLM 優先になるだけで変更なし。
-- **max_tokens**: 据え置き(16000。thinking を含む)。18頭の応答は、旧スキーマの実応答で 2,566〜2,760 字。現行スキーマの最大(highlights・concerns 各3項目×30字)でも約7,300字で、追加分は約240字。thinking の増加は実 API を使わないので測っていない。デプロイ後は D1 の `llm_calls_json` の `outputTokens`・`stopReason` で、16頭以上のレースを旧版と比べる。
+- **max_tokens**: 据え置き(16000。thinking を含む)。18頭の応答は、旧スキーマの実応答で 2,566〜2,760 字(測定した一次データはリポジトリに無いので、桁の目安として読む)。現行スキーマの最大(highlights・concerns 各3項目×30字)でも約7,300字(見積り)で、追加分は約240字(見積り)。thinking の増加は実 API を使わないので測っていない。デプロイ後は D1 の `llm_calls_json` の `outputTokens`・`stopReason` で、16頭以上のレースを旧版と比べる。
 - **検証(集計)**: `prompt_version` で版別に集計されるので、旧版(規則の結論を渡した版)と分けて比べられる。版が変わるので、期間一括の重複判定は過去のレースを再分析の対象にする。
 - **近似の確認**(実 API は使っていない): `scripts/print-analysis-prompt.ts` でシナリオ(S0 実フィクスチャ・S1〜S6 合成)のプロンプト全文を出し、新しいサブエージェントを LLM の代わりにして応答を作り、`scripts/check-llm-approx-response.ts` で本番の解析にかける。結果は Issue #315 のコメント。本番のモデルとは別物で、max_tokens・thinking の量・JSON の破損率は測れない。
 - **渡さなかったもの**(別 Issue の判断): 回り(右・左)・直線長・坂の数値(中央は `COURSE_TRAITS` が概算値、地方の回りの表は cloud にあり core に無い)。各馬の `frontRunningScore` の数値(脚質・主導権候補の元で、行の「脚質」と重なる)。
@@ -2342,7 +2342,7 @@ upload(26.2MB を R2 にそのまま置く): 532ms
 
 ### 手動の分析の案内と、AI補正後の変化量(#312。版数は 1.44.0 のまま・`PROMPT_VERSION` は変えない)
 手動の分析で「事前分析」と「発走前の分析(LLM の補正)」をワンボタンにまとめたい、という要望(#312)に対し、調べたうえで**ワンボタンは作らず、説明を足す**ことにした(利用者の決定 2026-10-15)。
-- **根拠**: 発走前の分析(`race-day-core.ts` の `runPreRaceFetch`)は、事前分析と同じ `scrapeRace` を取得キャッシュ経由で呼び、出馬表・オッズ・戦績・騎手・調教まで自分で取る。計算ステップが、その材料から統計モデルの3着内率(prior)を**毎回計算し直して** LLM の補正・EV・配分を作る。事前分析の結果(DO の `race_day_morning_prior`)を読むのは「事前分析」カードの表示(`handler.ts` の `getMorningPrior`)だけで、発走前の計算は読まない。したがって手動では「発走前の分析」だけを押せば、事前分析ありと同じ結果になる。事前分析を先に押す効果は、取得キャッシュが温まって発走前の取得が速くなること・朝の時点の統計モデルの順位を画面で見られること、の2つだけ。
+- **根拠**: 発走前の分析(`race-day-core.ts` の `runPreRaceFetch`)は、事前分析と同じ `scrapeRace` を取得キャッシュ経由で呼び、出馬表・オッズ・戦績・騎手・調教まで自分で取る。計算ステップが、その材料から統計モデルの3着内率(prior)を**毎回計算し直して** LLM の補正・EV・配分を作る。事前分析の結果(DO の `race_day_morning_prior`)を読むのは「事前分析」カードの表示(`handler.ts` の `getMorningPrior`)だけで、発走前の計算は読まない。したがって手動では「発走前の分析」だけを押せば、事前分析ありと同じ結果になる。事前分析を先に押す**分析結果への**効果は、取得キャッシュが温まって発走前の取得が速くなること・朝の時点の統計モデルの順位を画面で見られること、の2つだけ。分析結果以外には1つある: 各馬の戦績の D1 への蓄積(`horse_runs`。#256 段階A)は事前分析の計算ステップだけが行う(`race-day-core.ts`、`horse-runs-repository.ts` の `STATUS_NOTE`)ので、**手動で発走前だけを実行したレースの戦績は貯まらない**(分析結果には影響しない。案内の文には書いていない)。
 - **案内**(`client/race.ts` の `RACE_GUIDE`・`RaceModel.guide`): レースの画面の見出しの下・2枚のカードの前に1段落(`p.race-guide`)。「手動で分析するときは、下の「発走前」だけを実行すれば足ります(事前分析は不要)。事前分析は、朝の時点の統計モデルの見立てを見るためと、取得のキャッシュを温めて発走前を速くするためのものです。」起動のボタンを出す管理者にだけ出し、閲覧者(`readOnly`)・状態を取得できていないときは出さない。
 - **変化量**(`client/result.ts` の `probShiftOf`・`HorseCard.adjustedShift`・`TopProbHorse.shift`): 結果画面と発走前のカードの中の**両方**(`contentOf` を共有)で、補正後の3着内率の横に統計モデル(3着内率 = prior)からの変化量を「(統計比 +2.0pt)」の形で添える。馬のカードの「AI補正後 25.0%(統計比 +5.0pt)」と、「AI補正後の3着内率 上位5頭」の各行「60.0%(統計比 +50.0pt)」。補正後 − prior を百分率の差(pt)で小数第1位。符号は検証画面の補正幅(`formatAdjustment`)と同じ ASCII の「+」「-」(画面の他の符号付きの数値に合わせた)。**丸めて 0.0 になる差(絶対値 0.05pt 未満)は「±0.0pt」**。**LLM が効いていない(補正後を出さない)分析では出さない**。prior か補正後が非有限の馬も出さない。色分けはしない(符号が文字で出ているため)。
 - **束の大きさ**: 上限は `test/client-bundle.test.ts` のコメントに実測を記録した。

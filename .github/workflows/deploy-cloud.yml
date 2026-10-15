@@ -48,9 +48,9 @@
 #   承認印付きの push の後は、ci.yml の成否と、この deploy ジョブが実際に走った(スキップされていない)ことの両方を確かめる。
 #   exe の公開は Issue #248 で止めた(旧 build-windows.yml は削除済み)。承認印は、このデプロイの関門としてだけ残っている。
 #
-# ★uses: はコミット SHA でピン留めしている(Issue #305)。タグ(v4)は付け替えで中身が差し替わりうるため、行末のコメントに版数を書く(deploy ジョブは Cloudflare の API トークンを持つ)。
-#   SHA は `git ls-remote https://github.com/<owner>/<repo>` の実出力から取った、ピン留めの時点で `v4` タグが指していたコミット(CI が動かすコードは変えていない)。
-#   pnpm/action-setup の `v4` タグは最新の v4.4.0 ではなく v4.3.0 のコミットを指す(だから # v4.3.0)。
+# ★uses: はコミット SHA でピン留めしている(Issue #305)。タグは付け替えで中身が差し替わりうるため、行末のコメントに版数を書く(deploy ジョブは Cloudflare の API トークンを持つ)。
+#   SHA は `git ls-remote https://github.com/<owner>/<repo>` の実出力から取った、ピン留めの時点でタグが指していたコミット(CI が動かすコードは変えていない)。
+#   タグが最新の版を指していないことがあるので、行末の版数は、SHA が指す版を確かめて書く(特定の action・版の説明は、Dependabot の更新で古くなるので、ここには書かない)。
 #   版の更新は Dependabot(.github/dependabot.yml)の PR が、SHA と行末の版数コメントを同時に書き換える。scripts/test/actions-pinned.test.ts は
 #   特定の SHA・版数ではなく規則を検査する(全 uses が SHA 固定 + `# vX.Y.Z`・全ワークフローで同じ action は同じ SHA と版数・許可リスト内の action だけ)ので、
 #   PR をそのままマージしても緑のままである。このワークフローは秘密を持つので、pull_request では起動しない(PR の関門は ci.yml)。

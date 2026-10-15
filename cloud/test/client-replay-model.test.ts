@@ -150,6 +150,14 @@ describe("startRanksOf(スタート直後の順位。0 が先頭)", () => {
     expect(startRanksOf([0.2, 0.4, 0.6, 0.8, null])).toEqual([0, 1, 3, 4, 2]);
   });
 
+  it("null の補完は『値のある馬の中央値』であって 0.5 固定ではない(中央値が 0.5 以外の入力)", () => {
+    // 既知 [0.1, 0.2, 0.3] の中央値 0.2。null(添字 3)は 0.2 と同値になり、同値は添字の若い方が前なので、添字 1 の次・添字 2 の前に入る。
+    // 0.5 固定なら null は最後尾(0.3 より後)になる。
+    expect(startRanksOf([0.1, 0.2, 0.3, null])).toEqual([0, 1, 3, 2]);
+    // 既知が大きい側に寄る入力: 中央値 0.8(0.5 固定なら null は先頭になる)
+    expect(startRanksOf([0.7, 0.8, 0.9, null])).toEqual([0, 1, 3, 2]);
+  });
+
   it("全馬 null は全員同値で、並び順どおり(馬番順)", () => {
     expect(startRanksOf([null, null, null])).toEqual([0, 1, 2]);
   });

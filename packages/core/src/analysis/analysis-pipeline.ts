@@ -256,8 +256,8 @@ export interface AnalysisPipelineDeps {
   readonly onBabaError?: (info: { readonly raceId: RaceId; readonly message: string }) => void;
   /**
    * fallback:true(LLMがフェイルセーフでpriorに復帰)発生時に呼ばれる任意の診断ログ用フック
-   * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(marksDroppedのみの
-   * A救済を含む)では呼ばない。
+   * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(印の補修〈Issue #317。
+   * 旧仕様ではmarksDroppedのみのA救済〉を含む)では呼ばない。
    *
    * 秘密安全性: context に相当する raceId・stopReason は構造化情報のみで apiKey・Webhook等は
    * 一切積まない。diagnosticMessage は LLM呼び出し例外・JSONパース失敗時の生の詳細を含みうる
@@ -759,7 +759,7 @@ export async function runAnalysis(
     // そのまま伝播する(固定分類文言のみ・秘密非混入。論点C)。
     fallbackReason = analysis.fallbackReason;
     // core AnalyzeRaceResult.marksDropped/marksDroppedReason は既存呼び出し元との互換のため
-    // optional になっている(未設定=印関連の救済は発生していない)。ここで明示的に false/null へ
+    // optional になっている(未設定=印を全消しにする救済は発生していない。#317 以降 core は常に false/null を返す)。ここで明示的に false/null へ
     // 正規化してから AnalysisResult に伝播する(呼び出し元は必ず true/false を受け取れる)。
     marksDropped = analysis.marksDropped ?? false;
     marksDroppedReason = analysis.marksDroppedReason ?? null;

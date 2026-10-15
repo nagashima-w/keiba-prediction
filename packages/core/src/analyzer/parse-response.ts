@@ -17,8 +17,9 @@
  *  - 未知の印文字列、または頭数制約・優先順位の違反は、専用の AnalyzerMarkViolationError
  *    (AnalyzerResponseParseError のサブクラス)で送出する。このエラーは印以外の確率補正
  *    (adjustedProb/clipped/reason)を保持したまま全馬 mark=null にした horses を運び、
- *    analyze-race 側がリトライしてもなお印関連違反ならその horses を採用して
- *    fallback:false・marksDropped:true として救済する(prior には戻さない。A: フォールバック分離)。
+ *    analyze-race 側がリトライしてもなお印関連違反なら、運んできた印つきの horses(`markedHorses`)を
+ *    `repairMarks` で規則に合わせて直して fallback:false で採用する(prior には戻さない。A: フォールバック分離。
+ *    Issue #317 より前は、この全馬 mark=null の horses を marksDropped:true として採用していた)。
  *  - mark がJSON上に完全に欠けている(旧形式の応答)場合、全馬 mark=null となり◎が0頭のため
  *    自動的に制約違反としてエラーになる(意図した挙動)。
  *  - priors に無い余分な馬番の mark は place_prob と同様に無視する(制約カウントに含めない)。
@@ -41,12 +42,13 @@
  *    関わらず各0〜1頭)で、☆注間の順序依存もない。
  *  - A(フォールバック分離): 印関連の違反(頭数・優先順位・未知の印文字の3種)は、確率補正
  *    (adjustedProb/clipped/reason)自体は計算できているため捨てない。専用の
- *    AnalyzerMarkViolationError で「確率補正は保持したまま全馬 mark=null にした horses」を運び、
- *    analyze-race 側がリトライしてもなお印関連違反なら、その horses を fallback:false・
- *    marksDropped:true として採用できるようにする(印と無関係な失敗は従来どおり汎用の
- *    AnalyzerResponseParseError のみを投げ、全馬 prior フォールバックに回る)。
+ *    AnalyzerMarkViolationError で「確率補正は保持した horses」(`markedHorses` は印つき、
+ *    `horses` は全馬 mark=null)を運び、analyze-race 側がリトライしてもなお印関連違反なら、
+ *    `repairMarks` で直した horses を fallback:false で採用できるようにする(Issue #317。
+ *    旧仕様は全馬 mark=null の horses を marksDropped:true で採用していた)。印と無関係な失敗は
+ *    従来どおり汎用の AnalyzerResponseParseError のみを投げ、全馬 prior フォールバックに回る。
  *  - 判定順序: 「有効な補正0件(全馬 usedPrior)」チェックは印関連チェックより必ず先に行う。
- *    そのため、全馬の place_prob が不正な応答は、mark が違反していても印救済の対象にはならず、
+ *    そのため、全馬の place_prob が不正な応答は、mark が違反していても印の補修の対象にはならず、
  *    従来どおり汎用のフォールバックに回る。
  *  - 未知の印文字は、その馬1頭の判定を諦める(mark=null 扱い)だけで他馬の確率補正計算は継続し、
  *    horses 配列全体を最後まで構築してから違反として例外を投げる(1頭の不正のために他馬の
@@ -563,7 +565,8 @@ export function parseAnalyzerResponse(
   // 予想印の頭数制約・優先順位・未知の印文字を検証する(B-1+A)。
   // horses が空(priorsが空)の場合は印を割り当てる馬がいないため検証しない(従来どおり)。
   // 3種いずれかの違反があれば、印以外の確率補正(adjustedProb/clipped/reason)は保持したまま
-  // 全馬 mark=null にした horses を AnalyzerMarkViolationError で運ぶ(捨てずにレスキューする)。
+  // AnalyzerMarkViolationError で運ぶ(捨てずに補修して採用する。Issue #317)。運ぶのは、全馬 mark=null の horses と、
+  // 補修の入力にする印つきの horses(`markedHorses`)。
   if (horses.length > 0) {
     const counts = countMarks(horses);
     const violations = [

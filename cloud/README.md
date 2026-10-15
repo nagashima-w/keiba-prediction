@@ -154,7 +154,7 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 - **Webhook の作り方**: Discord の対象チャンネルの設定 > 連携サービス > ウェブフック > 新しいウェブフック > URL をコピー(コピーしたものは、下の入力欄にだけ貼る)。
 - **方法1: ダッシュボード**: Workers & Pages > 対象の Worker(`keiba-cloud`)> 設定 > 変数とシークレット > 追加。**名前は `DISCORD_WEBHOOK_URL`**、**種類は「シークレット」**(「テキスト」にすると次のデプロイで上書きされる)、値の欄に URL を入力して保存・デプロイする。
 - **方法2: wrangler**: ユーザーが自分の端末で、`cloud/` に移って `pnpm exec wrangler secret put DISCORD_WEBHOOK_URL` を実行し、**対話の入力欄**に URL を入力する(コマンドの引数や環境変数に URL を書かない)。
-- **形式**: `https://discord.com/api/webhooks/` か `https://discordapp.com/api/webhooks/` で始まる URL だけが有効(それ以外は「形式不正」で、通知は送られない)。前後の空白・末尾の改行(貼り付けで付く)は、Worker が取り除いて使う。空白だけの値は「未登録」と同じ扱い。
+- **形式**: ホストが `discord.com` か `discordapp.com` と**完全に一致**し、パスが `/api/webhooks/` で始まる `https` の URL だけが有効(Issue #301。前方一致をやめた)。`ptb.discord.com` などのサブドメイン、`user:pass@` の認証情報つき、ポート番号つきの URL は無効(それ以外は「形式不正」で、通知は送られない)。前後の空白・末尾の改行(貼り付けで付く)は、Worker が取り除いて使う。空白だけの値は「未登録」と同じ扱い。
 - **確認**: Access でログインしたブラウザで `/api/health` を開き、`secrets.discord` が `true` になっていること(値は表示されない)。**`false` は「未登録」か「形式が不正」のどちらか**(区別は返さない)。**secret は `wrangler deploy` で消えない**。登録・更新・削除すると、Worker に新しいデプロイが作られ、次に DO が起きたときから反映される。
 - **反映のされ方**: 登録した**あと**に完了した発走前の分析から通知される(登録前に完了したレースは通知しない)。通知は、発走前の分析の結果(狙い目あり・なし・LLM なしの理由つき。**印の付いた馬の一覧と買い目〈配分〉も載る**: Issue #230。買い目は金額の大きい順で、収まらない分は「…ほか N 件」。配分が未設定のときは、その旨の一文)・失敗(赤)・手動の分析があって自動を見送ったとき(灰色)と、事前分析のまとめ(1日に1回)。**手動の分析では通知しない**。送信が失敗しても自動では再送しない(分析は失敗にならない)。
 - **削除**(通知を止めたいとき): ダッシュボードで `DISCORD_WEBHOOK_URL` を削除する(または `wrangler secret delete DISCORD_WEBHOOK_URL`)。Webhook を Discord 側で削除・再作成したときも、古い URL は 404 で失敗する(通知は failed になるだけ)ので、新しい URL に更新する。

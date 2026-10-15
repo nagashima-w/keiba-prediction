@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { MarkRepairReport } from "@keiba/core/llm";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { analysesInsertIndex, buildSaveStatements, D1AnalysisStore, type AnalysisDb } from "../src/analysis-repository";
+import { detailKeyOf } from "../src/analysis-detail";
 import { createAnalysisSink } from "../src/analysis-sink";
 import { serializeMarkRepair } from "../src/mark-repair";
 import { R2_FENCE_LIMITS } from "../src/r2-fence";
@@ -189,6 +190,24 @@ describe("読み出し: 詳細に markRepair が載る。一覧には載せな�
     const saved = await s.saveAnalysis(mkRecord(1), { llmNote: NOTE, markRepair: REPAIRED });
     const result = (await s.getAnalysisDetail(saved.id))!;
     expect(result.detail).toBe("none");
+    expect(result.markRepair?.repaired).toBe(true);
+  });
+
+  it("詳細が missing のときも(R2 の読み出しの柵に達している場合)、markRepair は D1 の値で返る", async () => {
+    const s = store(() => new Date("2026-10-06T12:00:00Z"));
+    const saved = await s.saveAnalysis(mkRecord(1), { llmNote: NOTE, markRepair: REPAIRED });
+    await local.db.prepare("INSERT OR REPLACE INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?)").bind(202610, R2_FENCE_LIMITS.classB).run();
+    const result = (await s.getAnalysisDetail(saved.id))!;
+    expect(result.detail, "前提: 柵で詳細を読まない").toBe("missing");
+    expect(result.markRepair?.repaired).toBe(true);
+  });
+
+  it("詳細が missing のときも(R2 にオブジェクトが無い場合)、markRepair は D1 の値で返る", async () => {
+    const s = store(() => new Date("2026-10-06T12:00:00Z"));
+    const saved = await s.saveAnalysis(mkRecord(1), { llmNote: NOTE, markRepair: REPAIRED });
+    await local.r2.delete(detailKeyOf(saved.id));
+    const result = (await s.getAnalysisDetail(saved.id))!;
+    expect(result.detail, "前提: R2 に詳細が無い").toBe("missing");
     expect(result.markRepair?.repaired).toBe(true);
   });
 

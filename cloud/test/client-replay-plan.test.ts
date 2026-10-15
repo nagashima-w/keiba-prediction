@@ -507,3 +507,22 @@ describe("退化", () => {
     expect(frameAt(one, 0.5).lat[0]).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe("横位置: 逃げ・先行は内寄り、差し・追込は広め(道中)", () => {
+  it("道中(進み具合 0.6)の横位置の平均は、差し・追込の方が逃げ・先行より外側(平均の差が 0.08 以上)", () => {
+    // 目標の車線は `(逃げ・先行 0.7 / 差し・追込 0.9) × 乱数`。理論上の差は期待値で 0.1(乱数の期待値 0.5)で、押し離しの分だけ個々の展開は揺れる(1 展開では逆転もある)。
+    // そこで固定のシード 40 個 × 4 ペース = 160 展開の平均の差を見る。実測は 0.128。全脚質を同じ係数(0.8)にすると 0.031 になる(160 展開の平均なので、0.08 の閾値で区別できる)。
+    const diffs: number[] = [];
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const pace of PACES) {
+        const plan = planRace(groupedInput(pace), mulberry32(seed * 7919), GEO);
+        const at = Math.round(plan.steps * 0.6);
+        const mean = (idx: readonly number[]): number => idx.reduce((sum, i) => sum + plan.lat[i]![at]!, 0) / idx.length;
+        diffs.push(mean([6, 7, 8, 9, 10, 11, 12, 13]) - mean([0, 1, 2, 3, 4, 5])); // groupedInput: 0〜5 が逃げ・先行、6〜13 が差し・追込
+      }
+    }
+    expect(diffs).toHaveLength(160); // 前提: 空振りしない
+    const meanDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+    expect(meanDiff).toBeGreaterThanOrEqual(0.08);
+  });
+});

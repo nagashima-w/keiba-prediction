@@ -84,7 +84,7 @@ pnpm tsx scripts/dump-race.ts --date 20260628
 - **最後の版**: GitHub の Releases → `開発版(最新ビルド)`(タグ `dev-latest`)に、`keiba-ev-tool-1.44.0-portable.exe`(portable 版・インストール不要。ダブルクリックで起動)を残してあります。これ以上は更新されません。
 - **版数は 1.44.0 で凍結**しました([`docs/versioning.md`](./docs/versioning.md))。
 - **exe のコードが最後に残っているコミットは `3c1664e`** です(`git checkout 3c1664e` で参照できます)。web 版が使っていた共有部分は `packages/core/src/analysis/`・`packages/core/src/view/` へ移しました(#286)。exe 専用のコード・スクリプト・依存は削除しました(#287)。
-- exe のビルドと `dev-latest` への公開をしていたワークフローは削除しました。いまの CI は [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)(型検査・テストの関門。公開はしない)と [`.github/workflows/deploy-cloud.yml`](./.github/workflows/deploy-cloud.yml)(web 版の検査〈check ジョブと smoke ジョブ。並列〉と、両方が通った後の本番デプロイ)です。
+- exe のビルドと `dev-latest` への公開をしていたワークフローは削除しました。いまの CI は [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)(型検査・テストの関門。作業ブランチ宛ての PR では、cloud の型検査・テスト・スモークを走らせる `cloud-verify` ジョブも走る。公開はしない)と [`.github/workflows/deploy-cloud.yml`](./.github/workflows/deploy-cloud.yml)(web 版の検査〈check ジョブと smoke ジョブ。並列〉と、両方が通った後の本番デプロイ)です。
 - **個人利用専用**である点は本ツール全体と同様です。
 - exe に残っている過去の分析・結果を web 版へ移す手順は、`cloud/README.md` と、web 版の設定画面の「exe から移行」を参照してください。
 
@@ -94,7 +94,7 @@ pnpm tsx scripts/dump-race.ts --date 20260628
 
 ### トラブルシュート(最後の exe)
 
-- **レース一覧取得などで「ネットワークエラーによりリクエストに失敗しました」**: Electron 内蔵 Node(20)と、以前 core が直接依存していた undici 8(engines は Node22+)の非互換で HTTP 取得が実行時に失敗していました。修正済み: main プロセスは Electron の `net.fetch` を注入して取得し(undici の fetch を呼ばない)、加えて core の undici を Electron 互換の ^7 へ整合させています(多層防御)。それでも失敗する場合はエラーメッセージ末尾の「(原因: …)」を確認してください。
+- **レース一覧取得などで「ネットワークエラーによりリクエストに失敗しました」**: (exe 版の記録。exe は削除済み〈#285〉)Electron 内蔵 Node(20)と、core が直接依存していた undici 8(engines は Node22+)の非互換で HTTP 取得が実行時に失敗していました。exe では、main プロセスが Electron の `net.fetch` を注入して取得し、core の undici を Electron 互換の ^7 へ下げていました。Electron を削除した後は、core の undici は ^8 に戻っています(#322。cloud の Worker には入らず、`cloud/src/undici-stub.ts` に置換される)。それでも失敗する場合はエラーメッセージ末尾の「(原因: …)」を確認してください。
 
 ## Discord 通知(Webhook)の設定
 
