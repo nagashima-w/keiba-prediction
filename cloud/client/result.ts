@@ -21,6 +21,8 @@
  *  - **組合せの券種ごとの行**(Issue #296。`combos`): 「配分の提案」の節の最後(設定の行の後)。オッズの取得点数・EV プラスの点数・配分の点数。サーバが文章にしたものをそのまま出す(クライアントに文言を置かない)。無ければ何も出さない
  *  - **AI の展開予想**(Issue #315。`development`): 「3着内率の上位5頭」の後・レース再生の前の節。LLM が材料から予想した展開の短文と想定ペース。どちらか一方だけのこともある。LLM を使わない・旧い分析・詳細なしは節ごと出さない。
  *  - **そのとき LLM が見た当日の馬場の値**(Issue #295。`baba`): 「3着内率の上位5頭」の後・「馬ごとの評価」の前の節。行はサーバがプロンプトと同じ整形にしたもの。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null(節ごと出さない)
+ *  - **統計モデルからの変化量**(Issue #312。`HorseCard.adjustedShift`・`TopProbHorse.shift`): 補正後の3着内率の横に「(統計比 +2.0pt)」。補正後 − prior を百分率の差(pt)で、小数第1位。符号は検証画面の補正幅(`formatAdjustment`)と同じ ASCII の「+」「-」で、
+ *    丸めて 0.0 になる差(絶対値 0.05pt 未満)は「±0.0pt」。補正後を出さない(LLM が効いていない)分析・prior か補正後が非有限の馬は null(出さない)。上位5頭の行も同じ値(並べる値は補正後)
  * ⚠️ core の `view/` の純関数(`format.ts`・`allocation-proposal-view.ts`・`bet-allocation-view.ts`。旧 exe の画面と共有していた)を import する層。許可リストは `test/client-bundle.test.ts`。
  */
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/core/src/view/allocation-proposal-view";
@@ -29,6 +31,7 @@ import { formatEstimatedEvSuffix, formatEv, formatMarkRepair, formatOdds, format
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { nameWithGrade } from "./grade";
+import { formatAdjustment } from "./verify-format";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
 import { buildPlaceOddsLine, PLACE_ODDS_NOTE, type PlaceOddsLine } from "../src/place-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
@@ -58,6 +61,10 @@ export const UNSET_ALLOCATION_NOTE =
  */
 export const UNSET_ALLOCATION_NOTE_VIEWER =
   "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です。";
+/** 変化量の基準の呼び名(Issue #312。「(統計比 +2.0pt)」)。基準は統計モデルの3着内率(prior)。 */
+export const LABEL_SHIFT_BASE = "統計比";
+/** 変化量を画面に添える形(Issue #312。例「(統計比 +2.0pt)」)。カードの「AI補正後」の行と上位5頭の行で共通。 */
+export const shiftNote = (shift: string): string => `(${LABEL_SHIFT_BASE} ${shift})`;
 export const MODEL_NONE_TEXT = "LLM 未使用(統計のみ)";
 export const DETAIL_MISSING_NOTE = "馬名などの詳細を取得できませんでした(取得の上限に達したか、保存された詳細が見つかりません)。";
 export const DETAIL_NONE_NOTE = "この分析には詳細が保存されていません(馬名は表示されません)。";
@@ -73,6 +80,8 @@ export interface HorseCard {
   readonly prior: string;
   /** 補正後の3着内率(「25.0%」)。**LLM が効いたとき(モデル ID があるとき)だけ**。LLM なしでは prior と同じ値になるので null(重複して出さない)。 */
   readonly adjusted: string | null;
+  /** 補正後の統計モデル(prior)からの変化量(「+2.0pt」「-3.5pt」「±0.0pt」。Issue #312)。補正後を出すときだけ(`adjusted` が null なら null)。prior か補正後が非有限なら null。 */
+  readonly adjustedShift: string | null;
   /** LLM の根拠。LLM が効いていて、根拠が空でないときだけ(null・空文字は null)。 */
   readonly reason: string | null;
   /** LLM の強調材料(各最大3項目)。**LLM が効いたとき(モデル ID があるとき)だけ**。空文字・空白だけの項目は捨てる。無ければ `[]`(塊ごと出さない)。外から来た文字列(画面ではテキストとしてだけ入れる)。 */
@@ -124,6 +133,8 @@ export interface TopProbHorse {
   readonly mark: string | null;
   /** 印を補修した馬か(Issue #317)。画面は「直」だけを出す(元の印は出さない。印が消えた馬も true になりうる)。 */
   readonly repaired: boolean;
+  /** 統計モデル(prior)からの変化量(`HorseCard.adjustedShift` と同じ値。Issue #312)。LLM が効いたときだけ(率が補正後のとき)。無ければ null。 */
+  readonly shift: string | null;
 }
 
 /** 「そのとき LLM が見た当日の馬場の値」の節の見出し(Issue #295)。 */
@@ -227,6 +238,16 @@ function allocationOf(a: AnalysisDetail, readOnly: boolean): AllocationSection {
   return { kind: view.kind, notices, bets: view.bets, settingsRows: view.settingsRows, comboLines };
 }
 
+/**
+ * 補正後の3着内率の、統計モデル(prior)からの変化量(Issue #312)。「+2.0pt」「-3.5pt」。丸めて 0.0 になる差は「±0.0pt」(符号を付けない)。非有限の入力は null。
+ * 符号と小数1桁は検証画面の補正幅(`formatAdjustment`)に任せ、「+0.0pt」「-0.0pt」だけ「±0.0pt」へ置き換える。
+ */
+function probShiftOf(prior: number, adjusted: number): string | null {
+  if (!Number.isFinite(prior) || !Number.isFinite(adjusted)) return null;
+  const text = formatAdjustment(adjusted - prior);
+  return text === "+0.0pt" || text === "-0.0pt" ? "±0.0pt" : text;
+}
+
 /** 強調材料・懸念事項の項目(空文字・空白だけは捨てる。文字列は加工しない)。 */
 const pointsOf = (items: readonly string[]): readonly string[] => items.filter((item) => item.trim() !== "");
 
@@ -264,6 +285,7 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
       rate: formatPercent(rateOf(h)),
       mark: h.mark === null || h.mark.trim() === "" ? null : h.mark,
       repaired: markRepairOf(h) !== null,
+      shift: llmEffective ? probShiftOf(h.prior, h.adjustedProb) : null,
     }));
   if (rows.length === 0) return null;
   return { heading: llmEffective ? `${LABEL_ADJUSTED_PROB}の3着内率 上位${TOP_PROB_COUNT}頭` : `${LABEL_PRIOR} 上位${TOP_PROB_COUNT}頭`, rows };
@@ -296,6 +318,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, replay?: ReplayUi
       markRepair: markRepairOf(h),
       prior: formatPercent(h.prior),
       adjusted: llmEffective ? formatPercent(h.adjustedProb) : null,
+      adjustedShift: llmEffective ? probShiftOf(h.prior, h.adjustedProb) : null,
       reason: llmEffective && h.reason !== null && h.reason !== "" ? h.reason : null,
       highlights: llmEffective ? pointsOf(h.highlights) : [],
       concerns: llmEffective ? pointsOf(h.concerns) : [],

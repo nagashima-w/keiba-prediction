@@ -877,6 +877,19 @@ describe("LLM の結果の表示(Issue #195。結果画面とカードの中の�
         expect(textOf(t)).not.toContain("LLM 未使用");
       });
 
+      it("Issue #312: LLM が効いたとき、「AI補正後」の行に統計モデル(3着内率)からの変化量を添える(「AI補正後 25.0%(統計比 +5.0pt)」。下がれば -、差が丸めて 0 なら ±0.0pt)。LLM なしでは出ない", () => {
+        const t = tree(analysis({ model: "claude-sonnet-x", horses: [...llmHorses, { ...llmHorses[1]!, umaban: 3, prior: 0.1, adjustedProb: 0.1 }] }));
+        const lines = (cardIndex: number) => byClass(byClass(t, "horse")[cardIndex]!, "horse-line").map(rawTextOf).filter((x) => x.startsWith("AI補正後"));
+        expect(byClass(t, "horse")).toHaveLength(3);
+        expect(lines(0)).toEqual(["AI補正後 25.0%(統計比 +5.0pt)"]);
+        expect(lines(1)).toEqual(["AI補正後 9.0%(統計比 -1.0pt)"]);
+        expect(lines(2)).toEqual(["AI補正後 10.0%(統計比 ±0.0pt)"]);
+        const none = tree(analysis({ model: null, horses: llmHorses }));
+        expect(byClass(none, "horse")).toHaveLength(2); // 前提: 馬のカードは出ている
+        expect(textOf(none)).not.toContain("統計比");
+        expect(textOf(none)).not.toContain("pt)");
+      });
+
       it("LLM なし(モデル null): 「AI補正後」の行・根拠の行は、データに値があっても出ない。3着内率とモデル欄「LLM 未使用(統計のみ)」は出る", () => {
         const t = tree(analysis({ model: null, horses: [{ ...llmHorses[0]!, isPositive: false }, llmHorses[1]!] }));
         expect(llmHorses[0]!.adjustedProb, "前提: 補正後が prior と違う").not.toBe(llmHorses[0]!.prior);
@@ -1178,7 +1191,7 @@ describe("3着内率の上位5頭の section(Issue #240。結果画面とカー�
         expect(findAll(sections[0]!, (n) => n.tag === heading).map(textOf)).toEqual(["AI補正後の3着内率 上位5頭"]);
         const items = byClass(sections[0]!, "top-prob");
         for (const li of items) expect(li.tag).toBe("li");
-        expect(items.map(rawTextOf)).toEqual(["6 シックス 60.0%", "5 ファイブ 50.0%", "4 フォー 40.0%", "3 スリー 30.0% ▲", "2 20.0%"]); // 実 DOM の textContent 相当(要素の間に空白のテキストノードが要る)
+        expect(items.map(rawTextOf)).toEqual(["6 シックス 60.0%(統計比 +50.0pt)", "5 ファイブ 50.0%(統計比 +30.0pt)", "4 フォー 40.0%(統計比 +10.0pt)", "3 スリー 30.0%(統計比 -10.0pt) ▲", "2 20.0%(統計比 -30.0pt)"]); // 実 DOM の textContent 相当(要素の間に空白のテキストノードが要る)
       });
 
       it("LLM なし(モデル null)→ 「3着内率 上位5頭」で prior の降順。印は ◎ の馬1に付く", () => {
@@ -1202,7 +1215,7 @@ describe("3着内率の上位5頭の section(Issue #240。結果画面とカー�
       it("印が1頭も無くても出る(「印の付いた馬」の section は出ない)", () => {
         const t = tree(analysis({ model: "claude-x", horses: noMarkHorses }));
         expect(byClass(t, "marked-horses")).toHaveLength(0);
-        expect(byClass(byClass(t, "top-probs")[0]!, "top-prob").map(rawTextOf)).toEqual(["1 アイ 30.0%", "2 ウー 20.0%"]);
+        expect(byClass(byClass(t, "top-probs")[0]!, "top-prob").map(rawTextOf)).toEqual(["1 アイ 30.0%(統計比 ±0.0pt)", "2 ウー 20.0%(統計比 ±0.0pt)"]); // Issue #312: この入力は prior = 補正後なので変化量は ±0.0pt
         const all = findAll(t, (n) => n.tag === "section").map((n) => String(n.attrs?.["class"]));
         expect(all.indexOf("top-probs")).toBeLessThan(all.indexOf("horses"));
       });
@@ -1417,4 +1430,31 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
       });
     });
   }
+});
+
+/** Issue #312: 手動で分析するときの案内は、見出しの下・最初のカードの前に 1 つ(`p.race-guide`。カードの説明 `card-desc` とは別)。 */
+describe("手動で分析するときの案内の VNode(Issue #312)", () => {
+  it("管理者: 見出し(h1)の後・最初のカードの前に p.race-guide が 1 つ、子はテキスト 1 つ。カードの説明(card-desc)は 2 枚のまま", () => {
+    const tree = renderScreen(buildRaceModel(raceInput()), noopActions);
+    const guides = byClass(tree, "race-guide");
+    expect(guides).toHaveLength(1);
+    expect(guides[0]!.tag).toBe("p");
+    expect(guides[0]!.children).toHaveLength(1);
+    expect(typeof guides[0]!.children![0]).toBe("string");
+    expect(textOf(guides[0]!)).toContain("事前分析は不要");
+    const kids = tree.children ?? [];
+    const at = (pred: (n: VNode) => boolean) => kids.findIndex((k) => typeof k !== "string" && pred(k));
+    const h1 = at((n) => n.tag === "h1");
+    const guide = at((n) => String(n.attrs?.["class"]) === "race-guide");
+    const firstCard = at((n) => String(n.attrs?.["class"]) === "card");
+    expect(h1).toBeGreaterThanOrEqual(0);
+    expect(guide).toBeGreaterThan(h1);
+    expect(firstCard).toBeGreaterThan(guide);
+    expect(byClass(tree, "card-desc")).toHaveLength(2);
+  });
+
+  it("閲覧者(readOnly)・状態を取得できていないときは出ない", () => {
+    expect(byClass(renderScreen(buildRaceModel(raceInput({ readOnly: true })), noopActions), "race-guide")).toHaveLength(0);
+    expect(byClass(renderScreen(buildRaceModel(raceInput({ status: { kind: "loading" } })), noopActions), "race-guide")).toHaveLength(0);
+  });
 });

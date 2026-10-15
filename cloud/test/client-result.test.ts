@@ -595,11 +595,11 @@ describe("3着内率の上位5頭(Issue #240)", () => {
       h(5, 0.2, 0.2, { name: "ファイブ", mark: "?" }),
     ];
     expect(top(input, null)?.rows).toEqual([
-      { umaban: 1, name: "エコー", rate: "60.0%", mark: "◎", repaired: false },
-      { umaban: 2, name: null, rate: "50.0%", mark: "▲", repaired: false },
-      { umaban: 3, name: null, rate: "40.0%", mark: null, repaired: false },
-      { umaban: 4, name: "デルタ", rate: "30.0%", mark: null, repaired: false },
-      { umaban: 5, name: "ファイブ", rate: "20.0%", mark: "?", repaired: false },
+      { umaban: 1, name: "エコー", rate: "60.0%", mark: "◎", repaired: false, shift: null },
+      { umaban: 2, name: null, rate: "50.0%", mark: "▲", repaired: false, shift: null },
+      { umaban: 3, name: null, rate: "40.0%", mark: null, repaired: false, shift: null },
+      { umaban: 4, name: "デルタ", rate: "30.0%", mark: null, repaired: false, shift: null },
+      { umaban: 5, name: "ファイブ", rate: "20.0%", mark: "?", repaired: false, shift: null },
     ]);
   });
 
@@ -618,6 +618,91 @@ describe("3着内率の上位5頭(Issue #240)", () => {
     expect(c.horses.map((x) => x.umaban)).toEqual([3, 1, 2]);
     expect(c.markedHorses.map((m) => m.umaban)).toEqual([1, 3]);
     expect(c.topProbs?.rows.map((r) => r.umaban)).toEqual([1, 2, 3]);
+  });
+});
+
+/**
+ * Issue #312: 補正後の3着内率の横に、統計モデル(3着内率 = prior)からの変化量を添える(`HorseCard.adjustedShift`・`TopProbHorse.shift`)。
+ * 書式は検証画面の補正幅(`formatAdjustment`)と同じ「+2.0pt」「-3.5pt」(ASCII のマイナス)。丸めて 0.0 になる差(絶対値 0.05pt 未満)は「±0.0pt」。
+ * LLM が効いていない分析(補正後を出さない)・非有限の値では出さない(null)。
+ */
+describe("統計モデルからの変化量(Issue #312)", () => {
+  const withShift = (prior: number, adjustedProb: number, model: string | null = "claude-x") => content(analysis({ model, horses: [horse(1, { prior, adjustedProb })] }));
+  const cardShift = (prior: number, adjustedProb: number, model: string | null = "claude-x") => withShift(prior, adjustedProb, model).horses[0]!.adjustedShift;
+  const topShift = (prior: number, adjustedProb: number, model: string | null = "claude-x") => withShift(prior, adjustedProb, model).topProbs?.rows[0]?.shift;
+
+  // 丸めの境界(単位は 0〜1 の確率の差。±0.0005 が 0.05pt)。0.0005 ちょうどは浮動小数の誤差で向きが定まらないので、両側の値で固定する。
+  const cases: readonly [string, number, number, string][] = [
+    ["上がる", 0.2, 0.25, "+5.0pt"],
+    ["下がる", 0.3, 0.265, "-3.5pt"],
+    ["差が 0 ちょうど", 0.2, 0.2, "±0.0pt"],
+    ["上がる側の境界の内側(+0.049pt)", 0.2, 0.20049, "±0.0pt"],
+    ["上がる側の境界の外側(+0.051pt)", 0.2, 0.20051, "+0.1pt"],
+    ["下がる側の境界の内側(-0.049pt)", 0.2, 0.19951, "±0.0pt"],
+    ["下がる側の境界の外側(-0.051pt)", 0.2, 0.19949, "-0.1pt"],
+    ["大きく上がる", 0.05, 0.6, "+55.0pt"],
+    ["大きく下がる", 0.6, 0.05, "-55.0pt"],
+    ["小数 1 桁へ丸める(+2.04pt)", 0.1, 0.1204, "+2.0pt"],
+    ["小数 1 桁へ丸める(+2.06pt)", 0.1, 0.1206, "+2.1pt"],
+  ];
+  for (const [name, prior, adjusted, expected] of cases) {
+    it(`${name}: ${expected}(カードと上位5頭の行で同じ文字列)`, () => {
+      expect(cardShift(prior, adjusted)).toBe(expected);
+      expect(topShift(prior, adjusted)).toBe(expected);
+    });
+  }
+
+  it("前提: 境界の表の入力は、実際に補正後 ≠ prior で、表示のパーセントは(丸めると)同じに見える値を含む(出し分けを取り違えても検出できる)", () => {
+    expect(cases.filter(([, p, a]) => p !== a).length).toBeGreaterThan(8);
+    // 上の「±0.0pt」の行は、補正後と prior が内部では違う値(差が 0 でない)。0 ちょうどだけを ±0.0 と読む実装を弾く
+    expect(0.20049 - 0.2).not.toBe(0);
+    expect(withShift(0.2, 0.20049).horses[0]!.adjusted).toBe("20.0%");
+  });
+
+  it("LLM が効いていない(モデルが null・空文字)分析では、カードにも上位5頭の行にも出さない(補正後の値自体が出ないのと同じ規則)", () => {
+    for (const model of [null, ""]) {
+      expect(prior20vs25(model), `model=${JSON.stringify(model)}`).toEqual({ card: null, top: null });
+    }
+    // 対照: LLM が効けば出る
+    expect(prior20vs25("claude-x")).toEqual({ card: "+5.0pt", top: "+5.0pt" });
+    function prior20vs25(model: string | null) {
+      const c = withShift(0.2, 0.25, model);
+      return { card: c.horses[0]!.adjustedShift, top: c.topProbs?.rows[0]?.shift };
+    }
+  });
+
+  it("prior・補正後のどちらかが非有限なら出さない(null。「NaNpt」を出さない)", () => {
+    for (const [p, a] of [
+      [Number.NaN, 0.2],
+      [0.2, Number.NaN],
+      [Number.POSITIVE_INFINITY, 0.2],
+      [0.2, Number.NEGATIVE_INFINITY],
+    ] as const) {
+      expect(cardShift(p, a), `prior=${p} adjusted=${a}`).toBeNull();
+    }
+    // 上位5頭の行は並べる値(補正後)が有限なら残り、変化量だけ null(prior が非有限の馬)
+    expect(topShift(Number.NaN, 0.2)).toBeNull();
+    expect(withShift(Number.NaN, 0.2).topProbs?.rows).toHaveLength(1); // 前提: 行は残っている(null と「行が無い」を取り違えない)
+  });
+
+  it("上位5頭の行の変化量は、その馬自身の prior と補正後の差(並べ替えで取り違えない)", () => {
+    const hs = [horse(1, { prior: 0.5, adjustedProb: 0.1 }), horse(2, { prior: 0.1, adjustedProb: 0.5 }), horse(3, { prior: 0.3, adjustedProb: 0.3 })];
+    const c = content(analysis({ model: "claude-x", horses: hs }));
+    expect(c.topProbs?.rows.map((r) => [r.umaban, r.shift])).toEqual([
+      [2, "+40.0pt"],
+      [3, "±0.0pt"],
+      [1, "-40.0pt"],
+    ]);
+    expect(c.horses.map((x) => [x.umaban, x.adjustedShift])).toEqual([
+      [1, "-40.0pt"],
+      [2, "+40.0pt"],
+      [3, "±0.0pt"],
+    ]);
+  });
+
+  it("LLM なしの上位5頭の行は shift が null(率は prior で、比べる相手が無い)。行の他の項目は変えない", () => {
+    const c = content(analysis({ model: null, horses: [horse(1, { prior: 0.3, adjustedProb: 0.1, name: "アイ", mark: "◎" })] }));
+    expect(c.topProbs?.rows).toEqual([{ umaban: 1, name: "アイ", rate: "30.0%", mark: "◎", repaired: false, shift: null }]);
   });
 });
 

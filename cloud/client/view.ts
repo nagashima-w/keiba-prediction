@@ -9,7 +9,7 @@ import type { BulkModel, BulkPanel } from "./bulk";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
-import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type DevelopmentSection, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
+import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type DevelopmentSection, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
@@ -280,7 +280,7 @@ function raceScreen(model: RaceModel, actions: ViewActions): VNode {
   } else {
     pastBody.push(h("ul", { class: "past" }, past.items.map((item) => h("li", {}, [h("a", { class: "past-link", href: item.href }, [item.label])]))));
   }
-  return h("div", { class: "screen" }, [controls, ...trackingNotice(model.tracking, actions), h("h1", { class: "title" }, [model.title]), ...body, h("section", { class: "past-section" }, [h("h2", {}, ["過去の分析"]), ...pastBody])]);
+  return h("div", { class: "screen" }, [controls, ...trackingNotice(model.tracking, actions), h("h1", { class: "title" }, [model.title]), ...(model.guide === null ? [] : [h("p", { class: "race-guide" }, [model.guide])]), ...body, h("section", { class: "past-section" }, [h("h2", {}, ["過去の分析"]), ...pastBody])]);
 }
 
 /**
@@ -313,7 +313,8 @@ function horseCard(horse: HorseCard): VNode {
     ]),
     h("span", { class: "horse-line" }, [`${LABEL_PRIOR} ${horse.prior}`]),
     // 補正後の3着内率は LLM が効いたときだけ(LLM なしでは 3着内率と同じ値になるので出さない。EV は LLM が効いたとき補正後の確率から計算される)。
-    ...(horse.adjusted === null ? [] : [h("span", { class: "horse-line" }, [`${LABEL_ADJUSTED_PROB} ${horse.adjusted}`])]),
+    // 補正後の横に、統計モデル(3着内率)からの変化量(Issue #312。「AI補正後 25.0%(統計比 +5.0pt)」)。1つの文字列にして、行の textContent を 1 続きにする。
+    ...(horse.adjusted === null ? [] : [h("span", { class: "horse-line" }, [`${LABEL_ADJUSTED_PROB} ${horse.adjusted}${horse.adjustedShift === null ? "" : shiftNote(horse.adjustedShift)}`])]),
     h("span", { class: "horse-line" }, [`複勝オッズ下限 ${horse.odds}`]),
     h("span", { class: "horse-line" }, [`EV ${horse.ev}`, ...(horse.positive ? [h("strong", { class: "ev-plus" }, ["EVプラス"])] : [])]),
     // 単勝の想定(目安)と実際(Issue #247)。実際が想定より高いときは文字で示す(色に頼らない)。欠損は「-」。
@@ -358,6 +359,8 @@ function topProbRow(r: TopProbHorse): VNode {
     ...(r.name === null ? [] : [" ", h("span", { class: "top-prob-name" }, [r.name])]),
     " ",
     h("span", { class: "top-prob-rate" }, [r.rate]),
+    // 統計モデル(3着内率)からの変化量(Issue #312。LLM が効いたときだけ)。率の直後に詰める(「60.0%(統計比 +50.0pt)」)。
+    ...(r.shift === null ? [] : [h("span", { class: "top-prob-shift" }, [shiftNote(r.shift)])]),
     ...(r.mark === null ? [] : [" ", h("span", { class: "top-prob-mark" }, [r.mark])]),
     ...(r.repaired ? [" ", markFixedBadge(null)] : []),
   ]);
