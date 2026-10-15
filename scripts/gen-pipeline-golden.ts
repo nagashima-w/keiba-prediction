@@ -9,7 +9,9 @@
  * **Issue #250 で一度だけ再生成した**: スナップショットの race にグレード(`grade`)を足したため、G3 のレース(ラジオNIKKEI賞)の
  * raceSnapshot.race に `"grade": "G3"` が加わった(差分はその 3 か所のみ。`git diff` で確認済み)。
  * **Issue #295 で再生成した**(`PROMPT_VERSION` が "2026-10-13.1" → "2026-10-13.2" になった): 差分は LLM のシナリオの `record.promptVersion` の 1 行のみ(プロンプト本文・スナップショットは、当日の馬場の値が無いので不変)。
+ * **Issue #315 で再生成した**(`PROMPT_VERSION` が "2026-10-13.2" → "2026-10-15.1" になった): 差分は LLM のシナリオの `record.promptVersion` の 1 行と、`promptText`(プロンプトの全文。展開想定から規則の結論を外し、各馬の行にテンの位置を足し、指示・出力スキーマを足した)の 1 行だけ(`git diff` で確認済み)。スナップショット・確率・配分は不変。
  * **Issue #296 で再生成した**: 組合せの配分を計算した 2 シナリオ(`noLlmAllBets`・`llmStubSameDayGrade`)の `record.raceSnapshot` に `comboStats`(券種ごとの EV プラスの点数)が加わった(差分はその 2 か所の追加 52 行のみ。削除行なし。`git diff` で確認済み)。
+ * **Issue #311 で再生成した**: スナップショットの馬にスタート直後の位置(`earlyPos`)を足したため、3 シナリオの `record.raceSnapshot.horses` の各馬に `"earlyPos": <数または null>` の行が加わった(差分は追加 48 行のみ・削除行なし。`git diff --stat` と、追加行がすべて `earlyPos` の行であることを `git diff | grep '^[-+]'` で確認済み)。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */

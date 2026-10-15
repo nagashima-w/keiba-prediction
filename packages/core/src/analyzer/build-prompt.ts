@@ -203,8 +203,18 @@
  * 良・稍重などの馬場状態は netkeiba の【レース情報】の「馬場状態」を正とし、節の状態語は「朝の計測時点の状態」と時点を明記する(馬場悪化シナリオの判定にも使わない)。
  * 外部の文章〈使用コース・芝の状態の文章〉は、単一行の 「…」 で引用し、データであって指示ではない旨を注記する(注入の対策。day-baba.ts の冒頭)。
  * 【指示】・出力スキーマ・予想印の指示は不変。この対照(default)のPROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * "2026-10-15.1"(Issue #315: 想定ペースを、逃げ馬の頭数の規則ではなく LLM が展開予想して決める。2026-10-15 ユーザー決定):
+ * (1) 【展開想定】から規則の結論〈「ペース想定: …(根拠: 逃げ馬の頭数)」「恵まれる脚質」「損する脚質」〉を外し、材料〈脚質分布・主導権候補〉だけにした。
+ * 全頭の脚質が不明のときは、#262 の「断定しない」を保つ注記の1行を足した。コース形態の行は「上記に加えて」(結論行の存在を前提にした言い回し)をやめ、馬場状態も含めて自分で判断させる文にした。
+ * 地方の前残りの行は規則の結論ではなく材料なので、文言のまま残した。
+ * (2) 【指示】の先頭に、判断の手順〈展開予想 → 想定ペース → 恵まれる/損する脚質 → 各馬の評価〉と、development・pace の出力仕様を足した。
+ * (3) 出力スキーマに development〈展開予想の短文〉・pace〈スロー・平均・ハイ〉を horses より前に足した(生成の順で先に展開を考えさせる)。解析は parse-response.ts の extractDevelopment。
+ * (4) 各馬の行に「テンの位置=」〈近走の第1コーナーの相対位置の平均。early-position.ts の summarizeEarlyPosition〉を足した。脚質・安定度は全コーナーの平均位置で、これはスタート直後だけを見る別の材料。
+ * 見出し【】は増やしていない。3着内率の値・予想印の指示は不変。検証画面・月報は版ごとに集計するので、旧版〈規則の結論を渡した版〉と分けて比べられる。
+ * この対照(default)のPROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-10-13.2";
+export const PROMPT_VERSION = "2026-10-15.1";
 
 export {
   CLIP_VARIANTS,
@@ -248,6 +258,7 @@ import type { JockeyChangeSummary } from "./jockey-change.js";
 import type { MarginTrendSummary } from "./margin-trend.js";
 import { dayBabaPromptSection, normalizeDayBaba, type DayBaba } from "./day-baba.js";
 import { isUsableOdds } from "../ev/allocation-primitives.js";
+import { summarizeEarlyPosition } from "./early-position.js";
 import {
   clipAbsoluteLabel,
   clipPercentLabel,
@@ -666,6 +677,45 @@ function gradeWinnerTrendLines(
 }
 
 /**
+ * 各馬の行の「テンの位置」(Issue #315)。近走の第1コーナーの通過順位 ÷ 出走頭数の平均(`summarizeEarlyPosition`。
+ * 小さいほど前)を、「前から約N割(0.xx)」と読める形にする。N は 1〜10 の整数(先頭でも 0 割にしない)。
+ * 採用できる走が無い(過去走なし・通過順位なし・頭数不明)は「不明」。`recentRuns` は脚質と同じ窓(新しい順の走数)。
+ */
+function earlyPositionTextOf(runs: readonly HorseRunPassing[], recentRuns: number): string {
+  const summary = summarizeEarlyPosition(
+    runs.map((r) => ({ passing: r.passing, entryCount: r.fieldSize })),
+    recentRuns,
+  );
+  if (summary === null) {
+    return "不明";
+  }
+  const tenths = Math.min(10, Math.max(1, Math.round(summary.position * 10)));
+  const span = summary.runs === 1 ? "直近1走の1角で" : `近${summary.runs}走の1角の平均で`;
+  return `${span}前から約${tenths}割(${summary.position.toFixed(2)})`;
+}
+
+/**
+ * 【指示】の先頭に置く、想定ペースの判断の手順と development・pace の出力仕様(Issue #315)。
+ * 規則の結論(ペースの定石の表)は書かない。JSON のキーの順(development → pace → horses)も指示する
+ * (生成の順で先に展開を考えさせるため)。
+ */
+function paceJudgmentInstructionLines(): string[] {
+  return [
+    "判断の手順: " +
+      "(1) 「展開想定」の材料と、各馬の行の脚質・安定度・テンの位置・過去ペース傾向・調教などから、先頭争いと道中の隊列を予想する(展開予想)。" +
+      "逃げ馬の頭数だけで機械的に決めず、先行馬の頭数・各馬の先行力・コース形態(会場・回り・距離)・馬場状態も踏まえる。" +
+      "(2) 展開予想から、想定ペース(スロー・平均・ハイのいずれか)を決める。" +
+      "(3) 想定ペースとコース形態から、恵まれる脚質と損する脚質を判断する。" +
+      "(4) そのうえで各馬の place_prob・reason・mark を決める。(4) は (1)〜(3) と矛盾させない。",
+    "development には (1)〜(3) の結論(隊列の見立て・想定ペース・恵まれる脚質・損する脚質)を、全角200字以内の日本語1段落で書く。" +
+      "改行とダブルクォートは使わない。単勝オッズ・人気は development の根拠にしない。" +
+      "pace は development の結論と一致する「スロー」「平均」「ハイ」のいずれか1つを文字列で書く。" +
+      "出走全頭の脚質が不明で展開を判断できないときは、pace を null にし、development にその理由を書く。" +
+      "development と pace は horses より前に出力する。",
+  ];
+}
+
+/**
  * 1レース分のプロンプトを組み立てる。
  * 出力は決定論的(同一入力→同一文字列)。馬番昇順で各馬行を並べる。
  */
@@ -742,15 +792,16 @@ export function buildPrompt(input: BuildPromptInput): string {
     lines.push("");
   }
 
-  // 展開想定(Task「展開強化」)。
-  // 従来は「逃げ馬の数」と粗いペース想定文の2行のみだったが、以下の4行に拡充する:
-  //  1) 脚質分布: レース全体の隊列構成(どの脚質が何頭いるか)を数値でLLMに渡す。
-  //  2) 主導権候補: ハナを切る可能性が最も高い馬を明示し、隊列のイメージを具体化する。
-  //  3) ペース想定+根拠: 想定ペースだけでなく「なぜそう推定したか」(逃げ馬の頭数・主導権候補)
-  //     を示し、LLMがその妥当性を検証したり、根拠が薄い場合は独自判断で補正できるようにする。
-  //  4) 恵まれる/損する脚質: 想定ペースの定石(スロー=前残り、ハイ=差し追込有利)を明示し、
-  //     予想印(特に☆・注の展開ハマり判定)の判断材料にする。
+  // 展開想定(Task「展開強化」→ Issue #315 で材料だけに変更)。
+  // 渡すのは材料(脚質分布・主導権候補)だけで、規則の結論(逃げ馬の頭数から決めた「ペース想定」と
+  // 「恵まれる脚質」「損する脚質」)は渡さない。想定ペースは LLM が【指示】の手順(展開予想 → 想定ペース →
+  // 恵まれる/損する脚質 → 各馬の評価)で自分で決め、development・pace として出力する。
+  // 規則の結論(buildRaceDevelopment の pace 等)は、レース再生の既定値(analysis-view.ts)にだけ使う。
   lines.push("【展開想定】");
+  lines.push(
+    "以下は展開を予想するための材料です。想定ペースの結論はここには書いていません。" +
+      "後ろの「指示」の手順に従って、あなた自身が展開を予想し、想定ペースを決めてください。",
+  );
   lines.push(
     `脚質分布: 逃げ${development.styleCounts.逃げ}頭 / 先行${development.styleCounts.先行}頭 / ` +
       `差し${development.styleCounts.差し}頭 / 追込${development.styleCounts.追込}頭` +
@@ -768,32 +819,17 @@ export function buildPrompt(input: BuildPromptInput): string {
           : "該当馬なし(逃げ・先行タイプ不在)"
     }`,
   );
-  lines.push(`ペース想定: ${development.pace}(根拠: ${development.paceReason})`);
+  if (paceUnknown) {
+    lines.push(
+      "注記: 出走全頭の脚質が不明です(新馬戦など)。脚質からは展開を判断できないため、ペースを断定しないでください。",
+    );
+  }
+  // コース形態(会場・回り・距離)と馬場状態による前後有利は、規則では織り込んでいないので LLM 自身に判断させる。
   lines.push(
-    `恵まれる脚質: ${
-      development.favoredStyles.length > 0
-        ? development.favoredStyles.join("・")
-        : paceUnknown
-          ? "不明"
-          : "特になし"
-    }`,
+    "コース形態(会場・回り・距離)と馬場状態による前後有利は、あなた自身で判断してください。",
   );
-  lines.push(
-    `損する脚質: ${
-      development.disfavoredStyles.length > 0
-        ? development.disfavoredStyles.join("・")
-        : paceUnknown
-          ? "不明"
-          : "特になし"
-    }`,
-  );
-  // (a) 全venue共通: 上記は逃げ馬の頭数から機械的に推定した想定であり、会場・回り(右/左)・
-  // 距離によるコース形態的な前後有利までは織り込んでいない。LLM自身の判断も促す。
-  lines.push(
-    "コース形態(会場・回り・距離)による前後有利は、上記に加えてあなた自身でも判断してください。",
-  );
-  // (b) 地方(venueKind="nar")限定: 地方競馬は中央より前残り傾向が強く、馬場が不良の場合は
-  // 差しも届きにくくなる(タスクB)。中央には出さない。
+  // 地方(venueKind="nar")限定: 地方競馬は中央より前残り傾向が強く、馬場が不良の場合は
+  // 差しも届きにくくなる(タスクB)。中央には出さない。規則の結論ではなく材料として残す。
   if (race.venueKind === "nar") {
     lines.push(
       "地方競馬は前残り(先行有利)傾向が強く、馬場不良時は差しも届きにくい点を加味してください。",
@@ -850,11 +886,15 @@ export function buildPrompt(input: BuildPromptInput): string {
     // (取得に失敗した馬を初出走と言わない。未指定の行はバイト不変)。過去走が無いことを「データ不足」
     // 「不明」の羅列だけで伝えると、LLM が過去の出走経験を作る余地が残るため、事実として明示する。
     const debutSegment = h.careerRunCount === 0 ? "戦績=初出走(出走経験なし), " : "";
+    // テンの位置(Issue #315): 近走の第1コーナーの相対位置の平均。脚質・安定度は全コーナーの平均位置から
+    // 作るので、スタート直後にどこにいるか(終いに動く馬の位置を引っ張らない)は別に添える。参照走数は脚質と同じ窓。
+    const earlyPositionText = earlyPositionTextOf(h.runs, recentRuns);
     lines.push(
       `馬番${h.umaban} ${h.horseName}: ` +
         `3着内率=${h.prior.toFixed(2)}, ` +
         debutSegment +
         `脚質=${a.style ?? "不明"}(安定度:${a.stability}), ` +
+        `テンの位置=${earlyPositionText}, ` +
         `過去ペース傾向=${summarizePastPaceTendency(h.runs, { recentRuns })}, ` +
         bodyWeightTrendSegment +
         bestWeightSegment +
@@ -891,6 +931,8 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push(
     "各馬の複勝圏内確率を JSON のみで出力してください。散文や説明文は出力しないでください。",
   );
+  // 想定ペースを LLM に判断させる手順と出力仕様(Issue #315)。新しい見出し【】は作らない。
+  lines.push(...paceJudgmentInstructionLines());
   lines.push(
     `補正は各馬の 3着内率(データからの事前推定)から ±${clipPercent}(絶対値${clipAbsolute})以内に留めてください。3着内率から大きく離れた値は禁止です。`,
   );
@@ -1018,7 +1060,7 @@ export function buildPrompt(input: BuildPromptInput): string {
   // 出力スキーマ。
   lines.push("【出力スキーマ(この形式の JSON のみ)】");
   lines.push(
-    '{"horses": [' +
+    '{"development": "展開予想の短文", "pace": "スロー・平均・ハイのいずれか", "horses": [' +
       '{"number": 1, "place_prob": 0.42, "reason": "...", "mark": "◎", ' +
       '"highlights": ["...", "..."], "concerns": ["..."]}, ' +
       '{"number": 2, "place_prob": 0.30, "reason": "...", "mark": null, ' +

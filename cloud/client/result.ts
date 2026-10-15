@@ -19,6 +19,7 @@
  *  - **3着内率の上位5頭**(Issue #240。「印の付いた馬」の直後。印が無くても出す): 馬番・馬名・率・印。**LLM が効いたとき(モデル ID があるとき)は補正後の3着内率(`adjustedProb`)で並べ、見出しは「AI補正後の3着内率 上位5頭」、
  *    効いていないときは3着内率(`prior`)で並べ、見出しは「3着内率 上位5頭」**(率がどちらの値かを見出しで取り違えない)。並びは率(生の数値)の降順 → 同率は馬番の昇順。5頭未満なら全頭。率が非有限の馬は除き、全頭が欠けていれば出さない
  *  - **組合せの券種ごとの行**(Issue #296。`combos`): 「配分の提案」の節の最後(設定の行の後)。オッズの取得点数・EV プラスの点数・配分の点数。サーバが文章にしたものをそのまま出す(クライアントに文言を置かない)。無ければ何も出さない
+ *  - **AI の展開予想**(Issue #315。`development`): 「3着内率の上位5頭」の後・レース再生の前の節。LLM が材料から予想した展開の短文と想定ペース。どちらか一方だけのこともある。LLM を使わない・旧い分析・詳細なしは節ごと出さない。
  *  - **そのとき LLM が見た当日の馬場の値**(Issue #295。`baba`): 「3着内率の上位5頭」の後・「馬ごとの評価」の前の節。行はサーバがプロンプトと同じ整形にしたもの。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null(節ごと出さない)
  * ⚠️ core の `view/` の純関数(`format.ts`・`allocation-proposal-view.ts`・`bet-allocation-view.ts`。旧 exe の画面と共有していた)を import する層。許可リストは `test/client-bundle.test.ts`。
  */
@@ -31,6 +32,7 @@ import { nameWithGrade } from "./grade";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
 import { buildPlaceOddsLine, PLACE_ODDS_NOTE, type PlaceOddsLine } from "../src/place-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
+import { replaySectionOf, type ReplaySection, type ReplayUi } from "./replay-model";
 import { buildHash, type Route } from "./route";
 
 /** 画面のラベル(core の共有定数〈旧 exe と共有していた〉。`view.ts` は core を直接 import しない=ここを通す)。 */
@@ -121,6 +123,18 @@ export interface TopProbHorse {
 /** 「そのとき LLM が見た当日の馬場の値」の節の見出し(Issue #295)。 */
 export const BABA_HEADING = "AI に渡した当日の馬場(朝の計測値)";
 
+/** 「AI の展開予想」の節の見出し(Issue #315)。 */
+export const DEVELOPMENT_HEADING = "AI の展開予想";
+
+/** 展開予想の節(Issue #315)。LLM が材料から予想した展開の短文と、決めた想定ペース。どちらか一方が無いこともある。 */
+export interface DevelopmentSection {
+  readonly heading: string;
+  /** 展開予想の短文。無ければ null。 */
+  readonly text: string | null;
+  /** 想定ペースの行(「想定ペース(AI): ハイ」)。LLM が pace を出さなかった(全頭の脚質が不明など)ときは null。 */
+  readonly paceLine: string | null;
+}
+
 /** 当日の馬場の節(Issue #295)。行はサーバがプロンプトと同じ整形にしたもの。 */
 export interface BabaSection {
   readonly heading: string;
@@ -146,6 +160,8 @@ export interface AllocationSection {
 }
 
 export interface ResultContent {
+  /** レース再生の節(Issue #311。「3着内率の上位5頭」の後・「当日の馬場」の前)。勝率が判定不能・2頭未満の分析は null(節ごと出さない)。 */
+  readonly replay: ReplaySection | null;
   readonly title: string;
   readonly analyzedAt: string;
   readonly model: string;
@@ -161,6 +177,8 @@ export interface ResultContent {
   readonly topProbs: TopProbs | null;
   /** そのとき LLM が見た当日の馬場の値(Issue #295。「3着内率の上位5頭」の後・「馬ごとの評価」の前)。地方・値が無い・古い分析は null(節ごと出さない)。 */
   readonly baba: BabaSection | null;
+  /** AI の展開予想の節(Issue #315)。LLM を使わない・旧い分析・詳細なし・キー無しは null。 */
+  readonly development: DevelopmentSection | null;
   readonly detailNote: string | null;
   /** 単勝の想定の説明文(Issue #247。「馬ごとの評価」の見出しの下に1回)。想定か実際が1頭でもあるときだけ(全頭が「-」なら null)。 */
   readonly winOddsNote: string | null;
@@ -240,11 +258,12 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
 }
 
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。`readOnly`(閲覧者。Issue #238)は設定への案内を外す。省略は管理者。 */
-export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
+export function contentOf(a: AnalysisDetail, readOnly = false, replay?: ReplayUi): ResultContent {
   // LLM が効いたか = モデル ID があるか(core の `view/format.ts` の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
   const llmEffective = a.model !== null && a.model !== "";
   const markedHorses = markedHorsesOf(a.horses);
   return {
+    replay: replaySectionOf(a, replay),
     title: titleOf(a),
     analyzedAt: formatJstDateTime(a.analyzedAt),
     model: llmEffective ? a.model! : MODEL_NONE_TEXT,
@@ -254,6 +273,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
     markLegend: markedHorses.length > 0 ? MARK_LEGEND : null,
     topProbs: topProbsOf(a.horses, llmEffective),
     baba: a.baba == null ? null : { heading: BABA_HEADING, lines: a.baba.lines },
+    development: a.development == null ? null : { heading: DEVELOPMENT_HEADING, text: a.development.text, paceLine: a.development.pace === null ? null : `想定ペース(AI): ${a.development.pace}` },
     detailNote: detailNoteOf(a.detail),
     winOddsNote: a.horses.some((h) => h.fairWinOdds !== null || h.winOdds !== null) ? WIN_ODDS_NOTE : null,
     placeOddsNote: a.race.placeBasis !== null && a.horses.some((h) => h.fairPlaceOdds !== null || h.actualPlaceOddsMin !== null) ? PLACE_ODDS_NOTE : null,
@@ -283,12 +303,12 @@ function backToRace(route: Route, a: AnalysisDetail): string {
   return buildHash({ date, venue: route.venue, race });
 }
 
-export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean }): ResultModel {
+export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean; readonly replay?: ReplayUi }): ResultModel {
   const { route, source } = input;
   const readOnly = input.readOnly === true;
   const listHref = buildHash({ date: route.date, venue: route.venue });
   if (source.kind === "ready") {
-    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly), backHref: backToRace(route, source.analysis) };
+    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly, input.replay), backHref: backToRace(route, source.analysis) };
   }
   return {
     kind: "result",

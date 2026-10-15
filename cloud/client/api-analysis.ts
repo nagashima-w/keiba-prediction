@@ -50,7 +50,18 @@ export interface AnalysisHorse {
   readonly actualPlaceOddsMin: number | null;
   /** 分析時点の実際の複勝オッズの上限(Issue #253。上限を保存する前の過去の分析は null=下限だけ出す)。 */
   readonly actualPlaceOddsMax: number | null;
+  /** スタート直後の位置(Issue #311。レース再生の演出用。0〜1 で小さいほど前)。戦績が取れない馬・過去の分析・詳細なし・キー無し(古いサーバの応答)は null。パーサは常にキーを持つ。型で省略可なのは、この項目を使わない固定データ(テスト・画面の材料)を壊さないため(`baba`・`combos` と同じ流儀)。 */
+  readonly earlyPos?: number | null;
+  /** 脚質(Issue #314。レース再生の隊列を脚質で決める演出用)。戦績が取れない馬・過去の分析・詳細なし・キー無し(古いサーバの応答)・4 値以外の値は null。パーサは常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。 */
+  readonly legStyle?: LegStyle | null;
 }
+
+/** 脚質(Issue #314。core の `LegStyle` と同じ 4 値。クライアントは core のバレルを import しないので、ここに持つ)。 */
+export type LegStyle = "逃げ" | "先行" | "差し" | "追込";
+/** 想定ペース(Issue #314。core の `PaceEstimate` と同じ 4 値)。 */
+export type PaceEstimate = "スロー" | "平均" | "ハイ" | "不明";
+const LEG_STYLES: readonly LegStyle[] = ["逃げ", "先行", "差し", "追込"];
+const PACES: readonly PaceEstimate[] = ["スロー", "平均", "ハイ", "不明"];
 
 /**
  * LLM を呼んだ1回の記録(Issue #198。サーバの `LlmCallRecord` と同じ形)。費用(トークン数)・時間・切り詰め(`stopReason` が `max_tokens`)を確かめるための値。
@@ -77,6 +88,35 @@ export interface AnalysisBaba {
 /** `baba.lines` の上限(Issue #295)。サーバが作る行は最大 6 行・各 400 字程度。想定外に大きい応答は読まない(null にする)。 */
 const BABA_MAX_LINES = 12;
 const BABA_MAX_LINE_LENGTH = 600;
+
+/**
+ * LLM の展開予想と想定ペース(Issue #315。サーバの `AnalysisViewDevelopment` と同じ形)。pace は core の `LlmPace`(「不明」を除く 3 値)と同じで、
+ * クライアントは core のバレルを import しないのでここに持つ。
+ */
+export interface AnalysisDevelopment {
+  /** 展開予想の短文。無ければ null。 */
+  readonly text: string | null;
+  /** LLM の想定ペース。無ければ null。 */
+  readonly pace: "スロー" | "平均" | "ハイ" | null;
+}
+
+/**
+ * `development.text` の上限(UTF-16 の長さ。Issue #315)。サーバ(core)が 500 コードポイントで切るので、最大でも 1,000(サロゲートペアばかりの場合)。
+ * それを超える想定外に大きい応答は読まない(null にする)。
+ */
+const DEVELOPMENT_MAX_TEXT_LENGTH = 1000;
+const DEVELOPMENT_PACES = ["スロー", "平均", "ハイ"] as const;
+
+/** `{ text: string|null, pace: 3 値|null }`(両方 null は不可)だけを受け、それ以外(キー無し・null・不正)は null。補助の表示なので、分析全体の解析は失敗させない。 */
+function parseDevelopment(value: unknown): AnalysisDevelopment | null {
+  if (!isRecord(value)) return null;
+  const { text, pace } = value;
+  if (text !== null && (typeof text !== "string" || text.length > DEVELOPMENT_MAX_TEXT_LENGTH)) return null;
+  const parsedPace = pace === null ? null : (DEVELOPMENT_PACES.find((p) => p === pace) ?? undefined);
+  if (parsedPace === undefined) return null;
+  if (text === null && parsedPace === null) return null;
+  return { text, pace: parsedPace };
+}
 
 /** 組合せの券種ごとの行(Issue #296)。サーバが組み立てた文章(取得の点数・EV プラスの点数・配分の点数)。 */
 export interface AnalysisCombos {
@@ -112,12 +152,23 @@ export interface AnalysisDetail {
     readonly oddsStatus: string | null;
     /** 想定複勝オッズの基準(Issue #253。top3=3着内率〈8頭以上〉・top2=2着内率〈5〜7頭。複勝は2着まで〉・null=出さない〈4頭以下〉)。 */
     readonly placeBasis: "top3" | "top2" | null;
+    /** 距離(m。Issue #311。レース再生のコース図に使う)。詳細なし・キー無し(古いサーバの応答)は null。パーサは常にキーを持つ(型で省略可なのは `turn` と同じ理由)。 */
+    readonly distance?: number | null;
+    /** コースの回り(Issue #311。レース再生のコース図の向き)。キー無し(古いサーバの応答)は right。 */
+    readonly turn?: "right" | "left";
+    /** 想定ペース(Issue #314。レース再生の隊列の長さ・動き出しの演出用。サーバがプロンプトの展開想定と同じ判定で求める)。キー無し(古いサーバの応答)・形が不正な値は「不明」(補助の演出なので、分析全体の解析は失敗させない)。 */
+    readonly pace?: PaceEstimate;
   };
   /**
    * そのとき LLM が見た当日の馬場の値(Issue #295)。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null。キー無し(古いサーバの応答)・形が不正な値も null にする
    * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
    */
   readonly baba?: AnalysisBaba | null;
+  /**
+   * LLM の展開予想と想定ペース(Issue #315)。LLM を使わない分析・旧い分析(development・pace を出さない版)・読めない応答・詳細なし・キー無し(古いサーバの応答)・形が不正な値は null
+   * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
+   */
+  readonly development?: AnalysisDevelopment | null;
   /**
    * 組合せの券種ごとの行(Issue #296。オッズの取得点数・EV プラスの点数・配分の点数)。組合せの記録が無い・詳細なし・キー無し(古いサーバの応答)・形が不正な値は null にする
    * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
@@ -174,8 +225,13 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   if (!numOrNull(winProb) || !numOrNull(fairWinOdds) || !numOrNull(winOdds)) return null;
   // Issue #253: 想定複勝・実際の複勝の下限と上限も同じ(キーが欠けたら想定外)。
   if (!numOrNull(fairPlaceOdds) || !numOrNull(actualPlaceOddsMin) || !numOrNull(actualPlaceOddsMax)) return null;
+  // Issue #311: スタート直後の位置は、キー無し(古いサーバの応答)は null。数・null 以外の型は想定外。
+  const earlyPos = row["earlyPos"] ?? null;
+  if (!numOrNull(earlyPos)) return null;
+  // Issue #314: 脚質は、キー無し・4 値以外は null(補助の演出なので、応答ごと不正にはしない)。
+  const legStyle = LEG_STYLES.find((s) => s === row["legStyle"]) ?? null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, legStyle };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
@@ -280,6 +336,13 @@ function parseDetail(value: unknown): AnalysisDetail | null {
   // 想定複勝オッズの基準(Issue #253): キーが欠けたら(undefined)想定外。top3・top2・null だけ。
   const placeBasis = race["placeBasis"];
   if (placeBasis !== "top3" && placeBasis !== "top2" && placeBasis !== null) return null;
+  // コースの回り(Issue #311): キー無し(古いサーバの応答)は right。right・left 以外の値は想定外。
+  const distance = race["distance"] ?? null;
+  if (!numOrNull(distance)) return null;
+  const turn = race["turn"] === undefined ? "right" : race["turn"];
+  if (turn !== "right" && turn !== "left") return null;
+  // Issue #314: 想定ペースは、キー無し・4 値以外は「不明」(補助の演出なので、応答ごと不正にはしない)。
+  const pace = PACES.find((p) => p === race["pace"]) ?? "不明";
   if (!Array.isArray(horses)) return null;
   const parsedHorses: AnalysisHorse[] = [];
   for (const raw of horses as unknown[]) {
@@ -301,8 +364,9 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     model,
     llmNote,
     llmCalls: parsedCalls,
-    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis },
+    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis, distance, turn, pace },
     baba: parseLines(value["baba"], BABA_MAX_LINES, BABA_MAX_LINE_LENGTH),
+    development: parseDevelopment(value["development"]),
     combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
     horses: parsedHorses,
     allocation: parsedAllocation,
