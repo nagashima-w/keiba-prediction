@@ -35,9 +35,9 @@
   "//vitest": "Issue #305: 範囲を ^4.1.9 → ^4.1.11 に上げた(4.1.11 未満の vitest・@vitest/mocker に Path Traversal の脆弱性。テスト時のみ)。",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.70.1",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "cheerio": "^1.2.0",
     "iconv-lite": "^0.6.3",
-    "undici": "^7.29.1"
+    "undici": "^8.11.2"
   }
 }
