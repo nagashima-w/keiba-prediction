@@ -27,9 +27,9 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "@types/better-sqlite3": "^9.6.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
   },
   "//undici": "Issue #305: 範囲を ^7.19.0 → ^7.29.1 に上げた(7.29.1 未満に high を含む脆弱性が複数ある。`pnpm audit`)。cloud の Worker には入らない(cloud/wrangler.toml の [alias] で src/undici-stub.ts に置換される)。",
   "//vitest": "Issue #305: 範囲を ^4.1.9 → ^4.1.11 に上げた(4.1.11 未満の vitest・@vitest/mocker に Path Traversal の脆弱性。テスト時のみ)。",
