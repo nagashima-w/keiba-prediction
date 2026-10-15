@@ -96,6 +96,28 @@ export function formatMark(mark: PredictionMark | null): string {
 }
 
 /**
+ * 印の補修(Issue #317)で印が変わった馬の目印。結果画面・通知で、印の横に小さく出す。
+ */
+export const MARK_REPAIRED_BADGE = "直";
+
+/**
+ * 補修前の印の語彙(固定): 既知の6種(◎〇▲△☆注。core の `PREDICTION_MARKS` と同じ順)、「なし」(印が無かった馬に補修で印が付いた)、
+ * 「不明」(未知の印文字だった馬。LLM の生の文字列は保存も表示もしない)。クライアントの束に parse-response を引き込まないため、ここに持つ
+ * (`test/view/format.test.ts` が `PREDICTION_MARKS` との一致を固定する)。
+ */
+export const MARK_ORIGIN_VALUES = ["◎", "〇", "▲", "△", "☆", "注", "なし", "不明"] as const;
+
+/**
+ * 印の補修の表示「元の印→今の印」(Issue #317)。例: 「◎→〇」「☆→印なし」「印なし→◎」「不明な印→印なし」。
+ * @param from 補修前の印({@link MARK_ORIGIN_VALUES} のいずれか)
+ * @param to 補修後の印(印なしは null)
+ */
+export function formatMarkRepair(from: string, to: string | null): string {
+  const fromText = from === "なし" ? "印なし" : from === "不明" ? "不明な印" : from;
+  return `${fromText}→${to ?? "印なし"}`;
+}
+
+/**
  * 予想印の凡例(結果テーブルの列見出し title 属性に使う短文)。
  * ◎本命/〇対抗/▲単穴/△連下/☆穴(勝ち目)/注 穴(3着)の意味を簡潔に示す。
  */

@@ -26,6 +26,7 @@ import type { AnalysisDetailResult, DetailStatus } from "./analysis-repository";
 import type { LlmCallRecord } from "./llm-calls";
 import { buildComboCountLines } from "./combo-counts-view";
 import { courseTurnOf, type CourseTurn } from "./course-turn";
+import { markFromByUmaban } from "./mark-repair";
 import { estimatePlaceOddsForRace } from "./place-odds-view";
 
 export interface AnalysisViewHorse {
@@ -38,6 +39,12 @@ export interface AnalysisViewHorse {
   readonly ev: number | null;
   readonly isPositive: boolean;
   readonly mark: string | null;
+  /**
+   * 補修で印が変わった馬の、補修前の印(Issue #317。LLM の印が規則に違反したため直した馬)。**固定の語彙だけ**: 6種の印・「なし」(印が無かった)・「不明」(未知の印文字だった)。
+   * LLM の生の文字列は載せない。補修していない馬・記録の無い分析・旧い分析は null(画面は null なら「直」を出さない)。
+   * `buildAnalysisView` は常にキーを持つ(型で省略可なのは `earlyPos` と同じ理由)。
+   */
+  readonly markFrom?: string | null;
   readonly reason: string | null;
   /** LLM が挙げた強調材料(Issue #197。各最大3項目の短い句。項目なし・旧い分析は `[]`。D1 の馬の行にあるので、詳細〈R2〉の状態に依らない)。 */
   readonly highlights: readonly string[];
@@ -275,6 +282,8 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
   // LLM の展開予想と想定ペース(Issue #315): 詳細が present のときだけ(スナップショットと同じく、present でないときは生応答を使わない)。
   const extracted = detail === "present" && analysis.rawResponse !== null ? extractDevelopment(analysis.rawResponse) : { development: null, pace: null };
   const development: AnalysisViewDevelopment | null = extracted.development === null && extracted.pace === null ? null : { text: extracted.development, pace: extracted.pace };
+  // 補修で印が変わった馬の、補修前の印(Issue #317)。現在の印と記録が食い違う馬には付けない。
+  const markFromOf = markFromByUmaban(result.markRepair ?? null, new Map(analysis.horses.map((h) => [h.umaban, h.mark])));
   return {
     id: analysis.id,
     raceId: analysis.raceId,
@@ -319,6 +328,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       ev: h.ev,
       isPositive: h.isPositive,
       mark: h.mark,
+      markFrom: markFromOf.get(h.umaban) ?? null,
       reason: h.reason,
       highlights: [...h.highlights],
       concerns: [...h.concerns],

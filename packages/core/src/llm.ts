@@ -27,6 +27,7 @@ export type {
   AnalyzeRaceResult,
   LlmClient,
   LlmCompletion,
+  MarkRepairReport,
 } from "./analyzer/analyze-race.js";
 
 export {

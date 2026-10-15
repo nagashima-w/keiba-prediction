@@ -473,6 +473,9 @@ export {
 } from "./analyzer/build-prompt.js";
 export {
   AnalyzerMarkViolationError,
+  findMarkViolationKinds,
+  MARK_VIOLATION_KINDS,
+  type MarkViolationKind,
   AnalyzerRefusalError,
   AnalyzerResponseParseError,
   AnalyzerTruncationError,
@@ -499,7 +502,14 @@ export {
   type AnalyzeRaceResult,
   type LlmClient,
   type LlmCompletion,
+  type MarkRepairReport,
 } from "./analyzer/analyze-race.js";
+export {
+  repairMarks,
+  type MarkOrigin,
+  type MarkRepairChange,
+  type RepairMarksResult,
+} from "./analyzer/repair-marks.js";
 export {
   AnthropicLlmClient,
   buildRequestParams,

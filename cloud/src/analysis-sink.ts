@@ -24,8 +24,8 @@ export function createAnalysisSink(store: D1AnalysisStore): AnalysisSink {
           throw new Error(`買い目が大きすぎます(${bets.length} 件・${bytes} バイト。上限 ${MAX_BETS_JSON_BYTES} バイト)`);
         }
       }
-      // 理由(固定文言。Issue #194)は analyses.llm_note に、LLM 呼び出しの記録(Issue #197 段2)は analyses.llm_calls_json に入る。無ければ null。
-      return store.saveAnalysis(record, { llmNote: extra?.llmNote ?? null, llmCalls: extra?.llmCalls ?? null });
+      // 理由(固定文言。Issue #194)は analyses.llm_note に、LLM 呼び出しの記録(Issue #197 段2)は analyses.llm_calls_json に、印の補修の記録(Issue #317)は analyses.mark_repair_json に入る。無ければ null。
+      return store.saveAnalysis(record, { llmNote: extra?.llmNote ?? null, llmCalls: extra?.llmCalls ?? null, markRepair: extra?.markRepair ?? null });
     },
     async findByAnalyzedAt(raceId: string, analyzedAt: string) {
       const summaries = await store.listAnalysisSummaries({ raceId, limit: LIST_MAX_LIMIT });

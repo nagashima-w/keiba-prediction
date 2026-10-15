@@ -8,6 +8,7 @@
  * サーバ側のキー名・形のドリフトは `test/client-api-analysis-contract.test.ts`(実際の `handle()` の応答を通す)が検出する。
  */
 import type { StoredAllocationBetView, StoredAllocationView } from "../../packages/core/src/analysis/analysis-types";
+import { MARK_ORIGIN_VALUES } from "../../packages/core/src/view/format";
 import { classify, getJson, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 /** 過去の分析の一覧の 1 件(`GET /api/analyses` の要約から、画面に使う項目だけ)。 */
@@ -28,6 +29,11 @@ export interface AnalysisHorse {
   readonly ev: number | null;
   readonly isPositive: boolean;
   readonly mark: string | null;
+  /**
+   * 補修で印が変わった馬の、補修前の印(Issue #317)。6種の印・「なし」(印が無かった)・「不明」(未知の印文字だった)のどれか。
+   * 補修していない馬・キー無し(古いサーバの応答)・語彙の外の値は null/省略(補助の表示なので、応答全体は失敗させない。LLM の生の文字列を画面に持ち込まない)。
+   */
+  readonly markFrom?: string | null;
   readonly reason: string | null;
   /** LLM が挙げた強調材料(Issue #198。各最大3項目の短い句。項目なし・旧い分析は `[]`)。外から来た文字列なので、画面ではテキストとしてだけ入れる。 */
   readonly highlights: readonly string[];
@@ -230,8 +236,10 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   if (!numOrNull(earlyPos)) return null;
   // Issue #314: 脚質は、キー無し・4 値以外は null(補助の演出なので、応答ごと不正にはしない)。
   const legStyle = LEG_STYLES.find((s) => s === row["legStyle"]) ?? null;
+  // Issue #317: 補修前の印は、キー無し・語彙(6種の印・なし・不明)の外は null(補助の表示なので、応答ごと不正にはしない)。
+  const markFrom = MARK_ORIGIN_VALUES.find((v) => v === row["markFrom"]) ?? null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, legStyle };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, legStyle };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
