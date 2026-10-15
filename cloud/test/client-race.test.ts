@@ -512,3 +512,26 @@ describe("Issue #238: 閲覧者(readOnly)のレース画面のカードの結果
     expect(notices(false)).not.toEqual(notices(true));
   });
 });
+
+/**
+ * Issue #312: 手動で分析するときの案内(`guide`)。発走前の分析は戦績などを取り直して prior を自前で計算し直すので、事前分析なしでも結果は同じ
+ * (事前分析の prior は「事前分析」のカードの表示にだけ使う)。そこで、ボタンを押せる管理者にだけ「発走前だけで足りる」ことを短く書く。
+ */
+describe("手動で分析するときの案内(guide。Issue #312)", () => {
+  it("カードが出る状態(管理者)では案内がある。発走前だけで足りること・事前分析の役割(朝の時点の統計モデルの見立て・キャッシュ)に触れる", () => {
+    const guide = buildRaceModel(input()).guide;
+    expect(guide).not.toBeNull();
+    expect(guide).toContain("発走前");
+    expect(guide).toContain("事前分析は不要");
+    expect(guide).toContain("朝の時点の統計モデルの見立て");
+    expect(guide).toContain("キャッシュ");
+    expect(guide!.length, "短く(スマホで数行)").toBeLessThan(150);
+  });
+
+  it("起動のボタンを出さない閲覧者(readOnly)・状態を取得できていないとき(読み込み中・失敗)は案内を出さない", () => {
+    expect(buildRaceModel(input({ readOnly: true })).guide).toBeNull();
+    expect(buildRaceModel(input({ status: { kind: "loading" } })).guide).toBeNull();
+    expect(buildRaceModel(input({ status: { kind: "error", message: "x" } })).guide).toBeNull();
+    expect(buildRaceModel(input({ readOnly: false })).guide, "対照: 管理者なら出る").not.toBeNull();
+  });
+});

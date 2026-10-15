@@ -122,6 +122,8 @@ export interface RaceModel {
   readonly statusNotice: string | null;
   /** 状態を取得できていないとき null(「未実行」と誤読させない。このとき起動のボタンも出ない)。 */
   readonly cards: readonly TaskCard[] | null;
+  /** 手動で分析するときの案内(Issue #312)。カードが出ていて、起動のボタンを出す(管理者の)ときだけ。それ以外は null。 */
+  readonly guide: string | null;
   /** 追跡の停止の注記(「状態を更新」つき)。止まっていないとき null。 */
   readonly tracking: string | null;
   readonly past: PastModel;
@@ -148,6 +150,14 @@ export const CARD_DESCRIPTIONS: Readonly<Record<TaskMode, string>> = {
   pre_race:
     "出馬表とオッズを取り直し、3着内率・EV を出して記録に残します。API キーがあれば LLM が3着内率を補正して印と根拠を付け(EV は補正後の値で計算)、キーが無い間は統計のみです。資金と1レースの上限があれば配分も出します。",
 };
+
+/**
+ * 手動で分析するときの案内(Issue #312。起動のボタンを出す管理者にだけ、2 枚のカードの前に 1 つ)。**根拠**: 発走前の分析(`runPreRaceFetch`)は事前分析と同じ `scrapeRace` を取得キャッシュ経由で呼び、
+ * 出馬表・オッズ・戦績・騎手・調教まで自分で取って、計算ステップが統計モデルの 3着内率(prior)を毎回計算し直す。事前分析の prior(DO の朝の prior)を読むのは「事前分析」のカードの表示だけで、発走前の計算は読まない。
+ * したがって事前分析を先に押す効果は、取得キャッシュが温まって発走前の取得が速くなること・朝の時点の順位を見られること、の 2 つだけ。**画面に出す文には、Issue 番号を書かない**。
+ */
+export const RACE_GUIDE =
+  "手動で分析するときは、下の「発走前」だけを実行すれば足ります(事前分析は不要)。事前分析は、朝の時点の統計モデルの見立てを見るためと、取得のキャッシュを温めて発走前を速くするためのものです。";
 
 function titleOf(route: Route, listRow: RaceRow | undefined, prior: MorningPriorView | null): string {
   const raceId = route.race!;
@@ -246,6 +256,7 @@ export function buildRaceModel(input: RaceModelInput): RaceModel {
     loading: status.kind === "loading" || past.kind === "loading" || (cards ?? []).some((c) => c.result?.kind === "loading"),
     statusNotice: status.kind === "error" ? status.message : null,
     cards,
+    guide: cards !== null && input.readOnly !== true ? RACE_GUIDE : null,
     tracking: input.tracking ?? null,
     past:
       past.kind === "ready"

@@ -182,6 +182,7 @@ ${paletteCss()}
   .card-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--muted); }
   /* Issue #191: カードの説明(何をするか。1〜2行) */
   .card-desc { margin: 6px 0 0; font-size: 0.85rem; color: var(--muted); }
+  .race-guide { margin: 8px 0 0; font-size: 0.85rem; color: var(--muted); }
   /* Issue #189: 設定画面(トップの入口のリンク・入力欄。タップしやすい高さ 44px 以上。色だけに頼らない=エラーは文字と role=alert) */
   .settings-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   /* Issue #219: 検証画面(一覧の入口のリンク・区分の切替・数値のタイル・内訳の行。スマホ幅で横に伸ばさない=タイルは 2 列・行は折り返す。色だけに頼らない=回収率は太字) */

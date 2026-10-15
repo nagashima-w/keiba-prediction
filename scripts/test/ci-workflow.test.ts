@@ -12,15 +12,18 @@
  *
  * 検証する不変条件:
  * 1. 起動条件: push は作業ブランチ 1 本だけ。タグ・ワイルドカードを含まず、workflow_dispatch を併設する。
- *    トップレベルの `on:` のキーは push と workflow_dispatch だけ(pull_request 系・schedule などを足せない。Issue #255)。
+ *    トップレベルの `on:` のキーは push・pull_request・workflow_dispatch だけ(pull_request_target・schedule などを足せない。Issue #255)。
+ *    pull_request は作業ブランチ宛ての PR 1 本だけ(Issue #310: Dependabot の PR で関門を走らせる。秘密を参照せず、権限は contents: read のまま)。
  * 2. 権限は contents: read のみ(リリースへ書き込まない)。
  * 3. runner は ubuntu-latest(Windows ではない)。
- * 4. 全ステップの名前と出現順序が期待する配列と完全一致する(挿入・削除・並べ替えを一括で検出する)。
+ * 4. ジョブは verify と cloud-verify の 2 つ。各ジョブの全ステップの名前と出現順序が期待する配列と完全一致する(挿入・削除・並べ替えを一括で検出する)。
  * 5. 関門の 2 コマンドが完全一致で、型検査 → テストの順に並ぶ(Issue #287 で app のビルドを外した。代わりの守りは deploy-cloud.yml の check ジョブ)。
  *    ルートの `pnpm typecheck`/`pnpm test` は `-r` 付きの下位互換ではない(Issue #38)。
  * 6. 依存のインストールは `--frozen-lockfile`。
- * 7. 関門のステップは無条件に実行される(if: が無い)・失敗を握りつぶさない(continue-on-error が無い)。
- *    秘密(secrets.)を参照しない。
+ * 7. verify の関門のステップは無条件に実行される(if: が無い)・失敗を握りつぶさない(continue-on-error が無い)。
+ *    ワークフロー全体で秘密(secrets.)を参照しない。
+ * 11. (Issue #310)cloud-verify ジョブは pull_request のときだけ走り(ファイル全体で `if:` はこの 1 つだけ)、cloud/ の型検査・テスト・スモークを
+ *    deploy-cloud.yml の check・smoke と同じコマンドで走らせる。秘密も書き込み権限も持たない(上の 2・7 がワークフロー全体にかかる)。
  * 8. exe の公開が戻っていない: リポジトリの全ワークフローに action-gh-release と contents: write が無く、
  *    build-windows.yml が存在しない。
  * 9. 検査する側の自己検証(正の対照): コメント除去・ステップ名抽出が、合成テキストで期待どおりに働く。
@@ -155,9 +158,24 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
     expect(code).toContain("\n  workflow_dispatch:");
   });
 
-  it("起動条件(Issue #255): トップレベルの on: のキーは push と workflow_dispatch だけ(pull_request・pull_request_target・schedule などを足せない)", () => {
+  it("起動条件(Issue #255・#310): トップレベルの on: のキーは push・pull_request・workflow_dispatch だけ(pull_request_target・schedule などを足せない)", () => {
     // push の形は上のテストが固定している。ここは「ほかのトリガが無い」ことを、on: 直下のキーの全数で固定する。
-    expect(extractOnKeys(code)).toEqual(["push", "workflow_dispatch"]);
+    expect(extractOnKeys(code)).toEqual(["push", "pull_request", "workflow_dispatch"]);
+    // pull_request_target は秘密と書き込み権限を持った状態で PR のコードを動かしうるので、名前の出現そのものを禁じる
+    expect(code).not.toContain("pull_request_target");
+  });
+
+  it("起動条件(Issue #310): pull_request の対象ブランチは作業ブランチ 1 本だけ(main などへの PR では走らない)。types・paths の絞り込みも付けない", () => {
+    const m = /\n {2}pull_request:\n {4}branches:\n((?: {6}- .+\n)+)/.exec(yml);
+    expect(m).not.toBeNull();
+    const branches = m![1]!.trim().split("\n").map((l) => l.replace(/^\s*-\s*/, "").trim());
+    expect(branches).toEqual([ALLOWED_BRANCH]);
+    // Dependabot の PR は opened/synchronize/reopened(既定)で走れば足りる。paths で絞ると、文書だけの PR で関門が走らず緑の印が付かない
+    expect(code).not.toMatch(/\n {4}(types|paths|paths-ignore|branches-ignore):/);
+  });
+
+  it("concurrency のキーに github.ref を含み(PR では refs/pull/N/merge になり、作業ブランチへの push の run と互いに取り消し合わない)、cancel-in-progress は true", () => {
+    expect(code).toMatch(/\nconcurrency:\n {2}group: ci-\$\{\{ github\.ref \}\}\n {2}cancel-in-progress: true\n/);
   });
 
   it("権限は contents: read のみで、書き込み権限が無い", () => {
@@ -166,12 +184,16 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
   });
 
   it("runner は ubuntu-latest で、Windows のジョブが無い", () => {
-    expect([...code.matchAll(/^\s+runs-on:\s*(.+)$/gm)].map((m) => (m[1] ?? "").trim())).toEqual(["ubuntu-latest"]);
+    expect([...code.matchAll(/^\s+runs-on:\s*(.+)$/gm)].map((m) => (m[1] ?? "").trim())).toEqual(["ubuntu-latest", "ubuntu-latest"]);
     expect(code).not.toMatch(/windows/i);
   });
 
-  it("全ステップの名前と出現順序が期待する配列と完全一致する(挿入・削除・並べ替えを一括で検出する)", () => {
-    expect(extractAllStepNames(yml)).toEqual([
+  it("ジョブは verify と cloud-verify の 2 つだけ(増減・改名を検出する)", () => {
+    expect([...code.slice(code.indexOf("\njobs:\n")).matchAll(/^ {2}([A-Za-z0-9_-]+):$/gm)].map((m) => m[1])).toEqual(["verify", "cloud-verify"]);
+  });
+
+  it("verify: 全ステップの名前と出現順序が期待する配列と完全一致する(挿入・削除・並べ替えを一括で検出する)", () => {
+    expect(extractAllStepNames(extractJob(yml, "verify"))).toEqual([
       STEP_NAMES.checkout,
       STEP_NAMES.pnpm,
       STEP_NAMES.node,
@@ -182,31 +204,85 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
   });
 
   it("関門の 2 コマンドが完全一致で、型検査 → テストの順に並ぶ(ルートの pnpm typecheck / pnpm test。-r 付きで代替しない)。app のビルドは無い(Issue #287)", () => {
-    expect(extractRunLine(extractStep(yml, STEP_NAMES.typecheck))).toBe("pnpm typecheck");
-    expect(extractRunLine(extractStep(yml, STEP_NAMES.test))).toBe("pnpm test");
-    const index = (name: string): number => yml.indexOf(`      - name: ${name}`);
+    const verify = extractJob(yml, "verify");
+    expect(extractRunLine(extractStep(verify, STEP_NAMES.typecheck))).toBe("pnpm typecheck");
+    expect(extractRunLine(extractStep(verify, STEP_NAMES.test))).toBe("pnpm test");
+    const index = (name: string): number => verify.indexOf(`      - name: ${name}`);
     expect(index(STEP_NAMES.install)).toBeGreaterThanOrEqual(0);
     expect(index(STEP_NAMES.install)).toBeLessThan(index(STEP_NAMES.typecheck));
     expect(index(STEP_NAMES.typecheck)).toBeLessThan(index(STEP_NAMES.test));
   });
 
   it("依存のインストールは --frozen-lockfile", () => {
-    expect(extractRunLine(extractStep(yml, STEP_NAMES.install))).toBe("pnpm install --frozen-lockfile");
+    expect(extractRunLine(extractStep(extractJob(yml, "verify"), STEP_NAMES.install))).toBe("pnpm install --frozen-lockfile");
   });
 
   it("pnpm と Node.js は package.json の packageManager と Node 22 に従う(pnpm はバージョン未指定・Node は 22)", () => {
-    expect(extractStep(yml, STEP_NAMES.pnpm)).toContain("uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0");
-    expect(extractStep(yml, STEP_NAMES.pnpm)).not.toMatch(/^\s+version:/m);
-    expect(extractStep(yml, STEP_NAMES.node)).toMatch(/node-version: 22\b/);
+    // SHA と版数は Dependabot が更新するので固定しない(形と一致の検査は actions-pinned.test.ts)
+    const verify = extractJob(yml, "verify");
+    expect(extractStep(verify, STEP_NAMES.pnpm)).toMatch(/uses: pnpm\/action-setup@[0-9a-f]{40} # v\d+\.\d+\.\d+\n/);
+    expect(extractStep(verify, STEP_NAMES.pnpm)).not.toMatch(/^\s+version:/m);
+    expect(extractStep(verify, STEP_NAMES.node)).toMatch(/node-version: 22\b/);
   });
 
-  it("関門のステップは無条件に実行され(if: が無い)、失敗を握りつぶさず(continue-on-error が無い)、秘密を参照しない", () => {
+  it("verify の関門のステップは無条件に実行され(if: が無い)、失敗を握りつぶさず(continue-on-error が無い)、ワークフロー全体で秘密を参照しない", () => {
     // 前提固定: 本文が空のまま「無い」を主張する空振りにしない。
-    expect(code).toContain("jobs:");
-    expect(code).toContain("run: pnpm test");
-    expect(code).not.toMatch(/^\s+if:/m);
+    const verify = withoutComments(extractJob(yml, "verify"));
+    expect(verify).toContain("run: pnpm test");
+    expect(verify).not.toMatch(/^\s+if:/m);
     expect(code).not.toMatch(/continue-on-error/);
     expect(code).not.toContain("secrets.");
+    expect(code).not.toMatch(/\$\{\{\s*secrets/);
+  });
+
+  describe("cloud-verify ジョブ(Issue #310: pull_request のときだけ。cloud/ の型検査・テスト・スモーク)", () => {
+    const job = extractJob(yml, "cloud-verify");
+    const jobCode = withoutComments(job);
+
+    it("ファイル全体の if: はこのジョブの `if: github.event_name == 'pull_request'` の 1 つだけ(push では走らない=deploy-cloud.yml の check と重複しない。verify は無条件のまま)", () => {
+      expect([...code.matchAll(/^\s+if:\s*(.+)$/gm)].map((m) => (m[1] ?? "").trim())).toEqual(["github.event_name == 'pull_request'"]);
+      expect(jobCode).toMatch(/^ {4}if: github\.event_name == 'pull_request'$/m);
+    });
+
+    it("ステップの名前と順序が完全一致する", () => {
+      expect(extractAllStepNames(job)).toEqual([
+        STEP_NAMES.checkout,
+        STEP_NAMES.pnpm,
+        STEP_NAMES.node,
+        "依存をインストール(cloud)",
+        "型検査(cloud)",
+        "テスト(cloud)",
+        "ローカルスモークテスト(cloud)",
+      ]);
+    });
+
+    it("cloud/ で、deploy-cloud.yml の check・smoke と同じコマンドを走らせる(frozen-lockfile のインストール → 型検査 → テスト → スモーク。cloud のロックファイルでキャッシュ)", () => {
+      const run = (name: string): string => extractRunLine(extractStep(job, name));
+      expect(run("依存をインストール(cloud)")).toBe("pnpm install --ignore-workspace --frozen-lockfile");
+      expect(run("型検査(cloud)")).toBe("pnpm run typecheck");
+      expect(run("テスト(cloud)")).toBe("pnpm test");
+      expect(run("ローカルスモークテスト(cloud)")).toBe("pnpm run smoke");
+      for (const name of ["依存をインストール(cloud)", "型検査(cloud)", "テスト(cloud)", "ローカルスモークテスト(cloud)"]) {
+        expect(extractStep(job, name), `${name} は cloud/ で実行する`).toContain("working-directory: cloud");
+      }
+      expect(extractStep(job, STEP_NAMES.node)).toContain("cache-dependency-path: cloud/pnpm-lock.yaml");
+      expect(extractStep(job, STEP_NAMES.node)).toMatch(/node-version: 22\b/);
+    });
+
+    it("同じ手順が deploy-cloud.yml の check・smoke にもある(コマンドの食い違いを検出する)", () => {
+      const deployCode = withoutComments(readTextLf(path.join(WORKFLOWS_DIR, "deploy-cloud.yml")));
+      for (const cmd of ["pnpm install --ignore-workspace --frozen-lockfile", "pnpm run typecheck", "pnpm test", "pnpm run smoke"]) {
+        expect(deployCode, cmd).toContain(`run: ${cmd}\n`);
+        expect(jobCode, cmd).toContain(`run: ${cmd}\n`);
+      }
+    });
+
+    it("失敗を握りつぶさない(continue-on-error が無い)。秘密も書き込み権限も無い(ワークフロー全体の contents: read のまま)", () => {
+      expect(jobCode).not.toMatch(/continue-on-error/);
+      expect(jobCode).not.toContain("secrets.");
+      expect(jobCode).not.toMatch(/permissions:/);
+      expect(jobCode).not.toMatch(/: write/);
+    });
   });
 });
 

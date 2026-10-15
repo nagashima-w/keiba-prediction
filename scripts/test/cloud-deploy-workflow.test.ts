@@ -102,6 +102,11 @@ describe("起動条件", () => {
     expect(yml).toContain("\n  workflow_dispatch:");
   });
 
+  it("Issue #310: pull_request・pull_request_target では起動しない(deploy-cloud.yml は Cloudflare の秘密を持つので、Dependabot の PR では走らせない。PR の関門は ci.yml)", () => {
+    expect(withoutComments(yml)).not.toMatch(/pull_request/);
+    expect(withoutComments(yml)).toMatch(/\non:\n {2}push:\n/);
+  });
+
   it("paths フィルタを持たない(承認印付きの最終コミットが文書・版数だけでも、cloud/ の変更を本番に出すため)", () => {
     expect(withoutComments(yml)).not.toMatch(/^\s+paths(-ignore)?:/m);
   });
@@ -188,7 +193,8 @@ describe.each([
     const job = jobBody(jobName);
     const names = [...job.matchAll(/^ {6}- name: (.+)$/gm)].map((m) => m[1]!.trim());
     expect(names.slice(0, 4)).toEqual(["リポジトリを取得", "pnpm をセットアップ", "Node.js をセットアップ", "依存をインストール(cloud)"]);
-    expect(stepBody(job, "pnpm をセットアップ")).toContain("uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0");
+    // SHA と版数は Dependabot が更新するので固定しない(形と一致の検査は actions-pinned.test.ts)
+    expect(stepBody(job, "pnpm をセットアップ")).toMatch(/uses: pnpm\/action-setup@[0-9a-f]{40} # v\d+\.\d+\.\d+(\n|$)/);
     const node = stepBody(job, "Node.js をセットアップ");
     expect(node).toMatch(/node-version: 22\b/);
     expect(node).toContain("cache: pnpm");
