@@ -5,6 +5,7 @@
  * 左回りは反時計回り(下の直線を東へ走る)、右回りはその鏡映(x を反転)。ゴールは下の直線の 80% の位置で、スタートはそこから距離だけ手前(周を超える距離は何周か手前)。
  * 1周の長さは見た目の都合で 2000m 相当に固定する(競馬場の実際の周長ではない)。
  */
+import type { Frame, PlanGeometry } from "./replay-plan";
 import type { ReplayInit } from "./replay-model";
 import { rankingAt } from "./replay-model";
 
@@ -66,14 +67,28 @@ export function lapPositionOf(x: number, distance: number | null): number {
 // ---- 描画 ----
 
 /** キャンバスの内部の大きさ(CSS で幅いっぱいに縮める。縦横比はここで決まる)。 */
-const PAD = 70;
+const PAD = 84;
 const SCALE = 580;
 export const CANVAS_W = 2 * PAD + SCALE;
 export const CANVAS_H = Math.round(2 * PAD + TRACK_HEIGHT * SCALE);
 
-const LANES = 5;
+/** コースの幅(車線の数 × 1 車線の幅。単位座標)。Issue #314 で 5 → 7 車線に広げた(馬が横に並ぶ余地を増やし、丸の重なりを減らす)。 */
+const LANES = 7;
 const LANE_STEP = 0.034;
-const HORSE_R = 14;
+/** 馬の丸の半径(キャンバスの内部の画素)。 */
+export const HORSE_RADIUS = 14;
+const HORSE_R = HORSE_RADIUS;
+/** 丸の中心が横に動ける幅(単位座標。コースの幅 − 丸の直径)。`lat` の 0〜1 がこの幅に対応する(0 が内ラチ側)。 */
+export const LATERAL_RANGE = LANES * LANE_STEP - (2 * HORSE_R) / SCALE;
+
+/**
+ * 丸 1 個分の大きさ(前計算の押し離しの単位。Issue #314)。`along` はレース方向(レース全体の距離を 1 とした長さ)、`across` は横方向(`lat` の 0〜1 を 1 とした長さ)。
+ * レース全体の画面上の長さは「距離 ÷ 1 周 × 周の長さ」なので、距離が長いほど `along` は小さい(丸が重なりにくい)。距離が分からない・不正なときは 1600m。
+ */
+export function overlapGeometry(distance: number | null): PlanGeometry {
+  const d = distance !== null && Number.isFinite(distance) && distance > 0 ? distance : DEFAULT_DISTANCE_M;
+  return { along: (2 * HORSE_R) / ((d / PERIMETER_M) * PERIMETER_U * SCALE), across: (2 * HORSE_R) / SCALE / LATERAL_RANGE };
+}
 
 export interface DrawColors {
   readonly fg: string;
@@ -106,10 +121,11 @@ export interface Ctx2D {
 const px = (p: Point): [number, number] => [PAD + p.x * SCALE, PAD + p.y * SCALE];
 
 /**
- * 1 コマを描く。`positions` は馬ごとの前方位置(`positionsAt`)。コース・S・G・馬の丸と馬番を描く。先頭の馬だけ accent で塗る。
- * 横ずれは今の順位から決める(隣り合う順位が別の車線になる)ので、追い抜きで丸が車線を移る。
+ * 1 コマを描く。`frame` は馬ごとの前方位置と横位置(`frameAt`。Issue #314)。コース・S・G・馬の丸と馬番を描く。先頭の馬だけ accent で塗る。
+ * 横ずれは馬ごとの横位置(0 が内ラチ側〜1)から決める。順位から決めない(追い抜きで丸が車線を交換して、数字が入れ替わって見えるのを避ける)。
  */
-export function drawReplay(ctx: Ctx2D, init: ReplayInit, positions: readonly number[], colors: DrawColors): void {
+export function drawReplay(ctx: Ctx2D, init: ReplayInit, frame: Frame, colors: DrawColors): void {
+  const positions = frame.x;
   const turn = init.turn;
   ctx.fillStyle = colors.bg;
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
@@ -148,7 +164,7 @@ export function drawReplay(ctx: Ctx2D, init: ReplayInit, positions: readonly num
   ctx.font = "bold 16px sans-serif";
   for (let rank = ranking.length - 1; rank >= 0; rank--) {
     const i = ranking[rank]!;
-    const lateral = ((rank % LANES) - (LANES - 1) / 2) * LANE_STEP;
+    const lateral = (frame.lat[i]! - 0.5) * LATERAL_RANGE;
     const [x, y] = px(pointAt(turn, lapPositionOf(positions[i]!, init.distance), lateral));
     const leader = rank === 0;
     ctx.fillStyle = leader ? colors.accent : colors.card;

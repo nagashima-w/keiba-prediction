@@ -251,6 +251,7 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       placeOddsMin: 1.2,
       placeOddsMax: 1.4,
       earlyPos: null, // Issue #311: 戦績の通過順位が無いフィクスチャなので null
+      legStyle: null, // Issue #314: 同上
       oikiriCritic: "動き良好",
       oikiriRank: "A",
     });
@@ -796,6 +797,7 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
         placeOddsMin: 1.6,
         placeOddsMax: 1.9,
         earlyPos: null, // Issue #311: 戦績の通過順位が無いフィクスチャなので null
+        legStyle: null, // Issue #314: 同上
         oikiriCritic: "動き良好",
         oikiriRank: "A",
       });
@@ -814,6 +816,7 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
         placeOddsMin: 3.3,
         placeOddsMax: 3.9,
         earlyPos: null, // Issue #311: 戦績の通過順位が無いフィクスチャなので null
+        legStyle: null, // Issue #314: 同上
         oikiriCritic: "平凡",
         oikiriRank: "B",
       });

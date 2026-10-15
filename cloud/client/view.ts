@@ -68,6 +68,8 @@ export interface ViewActions {
   readonly onReportRegenCancel: () => void;
   /** 結果の「レース再生」の再生ボタン(Issue #311)。引数(分析 id)は、ボタンの `data-analysis-id` と同じ値。再生中に押すと中断して抽選し直す。 */
   readonly onReplayPlay: (analysisId: number) => void;
+  /** 「レース再生」の「もう一度再生」ボタン(Issue #314)。直前と同じ展開を最初から再生し直す(抽選し直さない)。引数(分析 id)は、ボタンの `data-analysis-id` と同じ値。 */
+  readonly onReplayRepeat: (analysisId: number) => void;
   /** 「レース再生」の速度ボタン(Issue #311)。引数(×1・×2・×4 の数)は、ボタンの `data-speed` と同じ値。 */
   readonly onReplaySpeed: (speed: number) => void;
   /** 日報画面の日付の入力(`<input type="date">`の値 YYYY-MM-DD)。Issue #273。 */
@@ -362,6 +364,7 @@ function replaySection(r: ReplaySection, heading: "h2" | "h3", actions: ViewActi
     h("p", { class: "meta replay-note" }, [r.note]),
     h("div", { class: "replay-controls" }, [
       h("button", { class: "replay-play", "data-analysis-id": String(r.analysisId) }, [r.playLabel], { click: () => actions.onReplayPlay(r.analysisId) }),
+      ...(r.repeatLabel === null ? [] : [h("button", { class: "replay-repeat", "data-analysis-id": String(r.analysisId) }, [r.repeatLabel], { click: () => actions.onReplayRepeat(r.analysisId) })]),
       ...r.speeds.map((sp) =>
         h("button", { class: "replay-speed", "aria-pressed": sp.pressed ? "true" : "false", "data-speed": String(sp.value) }, [sp.label], { click: () => actions.onReplaySpeed(sp.value) }),
       ),

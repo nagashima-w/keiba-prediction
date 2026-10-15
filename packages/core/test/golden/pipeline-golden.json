@@ -5004,6 +5004,7 @@
             "placeOddsMin": 3.1,
             "placeOddsMax": 4.1,
             "earlyPos": 0.183,
+            "legStyle": "先行",
             "oikiriCritic": "動き良化",
             "oikiriRank": "B"
           },
@@ -5022,6 +5023,7 @@
             "placeOddsMin": 4.2,
             "placeOddsMax": 5.6,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "上積十分",
             "oikiriRank": "B"
           },
@@ -5040,6 +5042,7 @@
             "placeOddsMin": 3.2,
             "placeOddsMax": 4.1,
             "earlyPos": 0.278,
+            "legStyle": "先行",
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -5058,6 +5061,7 @@
             "placeOddsMin": 9.5,
             "placeOddsMax": 12.8,
             "earlyPos": 0.9,
+            "legStyle": "追込",
             "oikiriCritic": "気配平凡",
             "oikiriRank": "C"
           },
@@ -5076,6 +5080,7 @@
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "気配抜群",
             "oikiriRank": "A"
           },
@@ -5094,6 +5099,7 @@
             "placeOddsMin": 2.5,
             "placeOddsMax": 3.2,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "更に上昇",
             "oikiriRank": "B"
           },
@@ -5112,6 +5118,7 @@
             "placeOddsMin": 15.4,
             "placeOddsMax": 20.7,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "一歩前進",
             "oikiriRank": "B"
           },
@@ -5130,6 +5137,7 @@
             "placeOddsMin": 3.6,
             "placeOddsMax": 4.7,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "動き上々",
             "oikiriRank": "B"
           },
@@ -5148,6 +5156,7 @@
             "placeOddsMin": 4.5,
             "placeOddsMax": 5.9,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -5166,6 +5175,7 @@
             "placeOddsMin": 21.2,
             "placeOddsMax": 28.4,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -5184,6 +5194,7 @@
             "placeOddsMin": 8.3,
             "placeOddsMax": 11.1,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -5202,6 +5213,7 @@
             "placeOddsMin": 2,
             "placeOddsMax": 2.5,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "好気配",
             "oikiriRank": "B"
           },
@@ -5220,6 +5232,7 @@
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -5238,6 +5251,7 @@
             "placeOddsMin": 4.4,
             "placeOddsMax": 5.8,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -5256,6 +5270,7 @@
             "placeOddsMin": 6.5,
             "placeOddsMax": 8.6,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "やや良化",
             "oikiriRank": "C"
           },
@@ -5274,6 +5289,7 @@
             "placeOddsMin": 5,
             "placeOddsMax": 6.6,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           }
@@ -19868,6 +19884,7 @@
             "placeOddsMin": 3.1,
             "placeOddsMax": 4.1,
             "earlyPos": 0.183,
+            "legStyle": "先行",
             "oikiriCritic": "動き良化",
             "oikiriRank": "B"
           },
@@ -19886,6 +19903,7 @@
             "placeOddsMin": 4.2,
             "placeOddsMax": 5.6,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "上積十分",
             "oikiriRank": "B"
           },
@@ -19904,6 +19922,7 @@
             "placeOddsMin": 3.2,
             "placeOddsMax": 4.1,
             "earlyPos": 0.278,
+            "legStyle": "先行",
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -19922,6 +19941,7 @@
             "placeOddsMin": 9.5,
             "placeOddsMax": 12.8,
             "earlyPos": 0.9,
+            "legStyle": "追込",
             "oikiriCritic": "気配平凡",
             "oikiriRank": "C"
           },
@@ -19940,6 +19960,7 @@
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "気配抜群",
             "oikiriRank": "A"
           },
@@ -19958,6 +19979,7 @@
             "placeOddsMin": 2.5,
             "placeOddsMax": 3.2,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "更に上昇",
             "oikiriRank": "B"
           },
@@ -19976,6 +19998,7 @@
             "placeOddsMin": 15.4,
             "placeOddsMax": 20.7,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "一歩前進",
             "oikiriRank": "B"
           },
@@ -19994,6 +20017,7 @@
             "placeOddsMin": 3.6,
             "placeOddsMax": 4.7,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "動き上々",
             "oikiriRank": "B"
           },
@@ -20012,6 +20036,7 @@
             "placeOddsMin": 4.5,
             "placeOddsMax": 5.9,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -20030,6 +20055,7 @@
             "placeOddsMin": 21.2,
             "placeOddsMax": 28.4,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -20048,6 +20074,7 @@
             "placeOddsMin": 8.3,
             "placeOddsMax": 11.1,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -20066,6 +20093,7 @@
             "placeOddsMin": 2,
             "placeOddsMax": 2.5,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "好気配",
             "oikiriRank": "B"
           },
@@ -20084,6 +20112,7 @@
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -20102,6 +20131,7 @@
             "placeOddsMin": 4.4,
             "placeOddsMax": 5.8,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -20120,6 +20150,7 @@
             "placeOddsMin": 6.5,
             "placeOddsMax": 8.6,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "やや良化",
             "oikiriRank": "C"
           },
@@ -20138,6 +20169,7 @@
             "placeOddsMin": 5,
             "placeOddsMax": 6.6,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           }
@@ -41609,6 +41641,7 @@
             "placeOddsMin": 3.1,
             "placeOddsMax": 4.1,
             "earlyPos": 0.183,
+            "legStyle": "先行",
             "oikiriCritic": "動き良化",
             "oikiriRank": "B"
           },
@@ -41627,6 +41660,7 @@
             "placeOddsMin": 4.2,
             "placeOddsMax": 5.6,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "上積十分",
             "oikiriRank": "B"
           },
@@ -41645,6 +41679,7 @@
             "placeOddsMin": 3.2,
             "placeOddsMax": 4.1,
             "earlyPos": 0.278,
+            "legStyle": "先行",
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -41663,6 +41698,7 @@
             "placeOddsMin": 9.5,
             "placeOddsMax": 12.8,
             "earlyPos": 0.9,
+            "legStyle": "追込",
             "oikiriCritic": "気配平凡",
             "oikiriRank": "C"
           },
@@ -41681,6 +41717,7 @@
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "気配抜群",
             "oikiriRank": "A"
           },
@@ -41699,6 +41736,7 @@
             "placeOddsMin": 2.5,
             "placeOddsMax": 3.2,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "更に上昇",
             "oikiriRank": "B"
           },
@@ -41717,6 +41755,7 @@
             "placeOddsMin": 15.4,
             "placeOddsMax": 20.7,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "一歩前進",
             "oikiriRank": "B"
           },
@@ -41735,6 +41774,7 @@
             "placeOddsMin": 3.6,
             "placeOddsMax": 4.7,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "動き上々",
             "oikiriRank": "B"
           },
@@ -41753,6 +41793,7 @@
             "placeOddsMin": 4.5,
             "placeOddsMax": 5.9,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "気配上々",
             "oikiriRank": "B"
           },
@@ -41771,6 +41812,7 @@
             "placeOddsMin": 21.2,
             "placeOddsMax": 28.4,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -41789,6 +41831,7 @@
             "placeOddsMin": 8.3,
             "placeOddsMax": 11.1,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -41807,6 +41850,7 @@
             "placeOddsMin": 2,
             "placeOddsMax": 2.5,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "好気配",
             "oikiriRank": "B"
           },
@@ -41825,6 +41869,7 @@
             "placeOddsMin": 1.9,
             "placeOddsMax": 2.3,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           },
@@ -41843,6 +41888,7 @@
             "placeOddsMin": 4.4,
             "placeOddsMax": 5.8,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "態勢整う",
             "oikiriRank": "B"
           },
@@ -41861,6 +41907,7 @@
             "placeOddsMin": 6.5,
             "placeOddsMax": 8.6,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "やや良化",
             "oikiriRank": "C"
           },
@@ -41879,6 +41926,7 @@
             "placeOddsMin": 5,
             "placeOddsMax": 6.6,
             "earlyPos": 0.727,
+            "legStyle": "差し",
             "oikiriCritic": "キビキビ",
             "oikiriRank": "B"
           }

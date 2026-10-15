@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
-import { buildReplayInit, drawFinishOrder, finalRanksOf, positionsAt, rankingAt, REPLAY_SPREAD, startRanksOf } from "../client/replay-model";
+import { buildReplayInit, drawFinishOrder, finalRanksOf, rankingAt, REPLAY_SPREAD, startRanksOf } from "../client/replay-model";
 
 /**
- * Issue #311(レース再生): 純関数 — 着順の抽選(AC2)・位置の計算(AC3)・再生の材料(`buildReplayInit`)。
+ * Issue #311(レース再生): 純関数 — 着順の抽選(AC2)・再生の材料(`buildReplayInit`)。
+ * (位置の計算は Issue #314 で `replay-plan.ts` の `planRace`/`frameAt` に置き換わった。テストは `client-replay-plan.test.ts`。)
  * 演出であって、確率・配分・保存される値は変えない(読むだけ)。
  */
 
@@ -169,82 +170,6 @@ describe("finalRanksOf(着順 → 馬ごとの最終順位)", () => {
   });
 });
 
-describe("positionsAt(進み具合 p に対する各馬の前方位置。AC3)", () => {
-  /** 12頭の開始順と、それとは大きく違う最終順(開始順の逆 + 一部入れ替え)。 */
-  const N = 12;
-  const early = Array.from({ length: N }, (_, i) => (i + 1) / (N + 1));
-  const start = startRanksOf(early); // 添字 i の馬が先頭から i 番目
-  const order = [11, 3, 0, 8, 5, 10, 1, 6, 9, 2, 7, 4]; // 最終着順(1着が添字 11)
-  const final = finalRanksOf(order);
-
-  it("前提: 開始順と最終順が一致しない(入れ替えが起こる)。位置の差がゼロにならない", () => {
-    expect(start).not.toEqual(final);
-    expect(start.filter((s, i) => s !== final[i]).length).toBeGreaterThan(6);
-  });
-
-  it("ゴール(p=1)では、抽選した着順どおりに並ぶ(前方位置の降順 = 着順)。1着が最も前", () => {
-    const xs = positionsAt(1, start, final);
-    expect(rankingAt(xs)).toEqual(order);
-    // 順位どうしの間隔が 0 でない(退化していない)
-    const sorted = [...xs].sort((a, b) => b - a);
-    for (let k = 1; k < sorted.length; k++) expect(sorted[k - 1]! - sorted[k]!).toBeGreaterThan(1e-6);
-  });
-
-  it("スタート(p=0)では、先頭の馬がライン上(0)で、他は開始順に後ろへ並ぶ(隊列の幅は S の 30%)", () => {
-    const xs = positionsAt(0, start, final);
-    expect(Math.max(...xs)).toBe(0);
-    expect(rankingAt(xs)).toEqual([...Array(N).keys()].sort((a, b) => start[a]! - start[b]!));
-    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(REPLAY_SPREAD * 0.3, 10);
-  });
-
-  it("序盤(p=0.2)の並びは開始順どおり(脚質の位置)で、最終順とは違う。直線(p=1)で入れ替わる", () => {
-    const early20 = rankingAt(positionsAt(0.2, start, final));
-    const byStart = [...Array(N).keys()].sort((a, b) => start[a]! - start[b]!);
-    expect(early20).toEqual(byStart);
-    expect(early20).not.toEqual(order);
-  });
-
-  it("全馬が単調に前へ進む(どの p の刻みでも後退しない)。ゴール通過(位置 ≥ 1)は着順どおり", () => {
-    const steps = 2000;
-    let prev = positionsAt(0, start, final);
-    const crossedAt: number[] = Array(N).fill(Number.POSITIVE_INFINITY);
-    for (let s = 1; s <= steps; s++) {
-      const p = s / steps;
-      const cur = positionsAt(p, start, final);
-      for (let i = 0; i < N; i++) {
-        expect(cur[i]!, `馬${i} p=${p}`).toBeGreaterThanOrEqual(prev[i]!);
-        if (crossedAt[i] === Number.POSITIVE_INFINITY && cur[i]! >= 1 - 1e-9) crossedAt[i] = p; // 最後尾はちょうど p=1 でゴール(浮動小数点の誤差の許容)
-      }
-      prev = cur;
-    }
-    expect(crossedAt.every((c) => Number.isFinite(c)), "前提: 全馬が p=1 までにゴールを通る").toBe(true);
-    // 通過の順(早い順)= 着順(同時の通過がないこと=厳密に増える)
-    const crossOrder = [...Array(N).keys()].sort((a, b) => crossedAt[a]! - crossedAt[b]!);
-    expect(crossOrder).toEqual(order);
-    const sortedTimes = order.map((i) => crossedAt[i]!);
-    for (let k = 1; k < N; k++) expect(sortedTimes[k]!).toBeGreaterThan(sortedTimes[k - 1]!);
-  });
-
-  it("p は 0〜1 に丸める(範囲外でも投げず、端と同じ)", () => {
-    expect(positionsAt(-1, start, final)).toEqual(positionsAt(0, start, final));
-    expect(positionsAt(2, start, final)).toEqual(positionsAt(1, start, final));
-  });
-
-  it("先頭と最後尾の差は p=1 で REPLAY_SPREAD(全体の幅)に一致する", () => {
-    const xs = positionsAt(1, start, final);
-    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(REPLAY_SPREAD, 10);
-  });
-
-  it("退化: 2頭(開始順 = 最終順でも入れ替えでも、ゴールで着順どおり)・1頭(投げない)・全馬の開始順が同値", () => {
-    expect(rankingAt(positionsAt(1, [0, 1], [1, 0]))).toEqual([1, 0]);
-    expect(rankingAt(positionsAt(1, [0, 1], [0, 1]))).toEqual([0, 1]);
-    expect(positionsAt(1, [0], [0])).toEqual([1 + REPLAY_SPREAD]); // 1 頭: 隊列の幅がなく、先頭の位置(ゴールを S だけ過ぎた位置)
-    const allNull = startRanksOf([null, null, null, null]);
-    const ord = [2, 0, 3, 1];
-    expect(rankingAt(positionsAt(1, allNull, finalRanksOf(ord)))).toEqual(ord);
-  });
-});
-
 describe("rankingAt(位置の降順の馬の添字。同位置は添字の若い順)", () => {
   it("降順に並べる", () => {
     expect(rankingAt([0.2, 0.9, 0.5])).toEqual([1, 2, 0]);
@@ -284,12 +209,53 @@ describe("buildReplayInit(再生の材料)", () => {
       distance: 1800,
       turn: "left",
       horses: [
-        { umaban: 1, name: "馬1", strength: 0.4, fallback: 0.6, early: 0.1 },
-        { umaban: 2, name: "馬2", strength: 0.3, fallback: 0.5, early: 0.5 },
-        { umaban: 3, name: "馬3", strength: 0.2, fallback: 0.4, early: null },
-        { umaban: 4, name: "馬4", strength: 0.1, fallback: 0.2, early: 0.9 },
+        { umaban: 1, name: "馬1", strength: 0.4, fallback: 0.6, early: 0.1, style: "先行" },
+        { umaban: 2, name: "馬2", strength: 0.3, fallback: 0.5, early: 0.5, style: "差し" },
+        { umaban: 3, name: "馬3", strength: 0.2, fallback: 0.4, early: null, style: "差し" },
+        { umaban: 4, name: "馬4", strength: 0.1, fallback: 0.2, early: 0.9, style: "追込" },
       ],
+      pace: "不明",
     });
+  });
+
+  it("脚質(Issue #314): legStyle があればそれを使う(earlyPos と食い違っても legStyle が優先)。想定ペース(race.pace)も写す", () => {
+    const horses = [horse(1, { legStyle: "逃げ", earlyPos: 0.9 }), horse(2, { legStyle: "追込", earlyPos: 0.1 }), horse(3, { legStyle: "先行" }), horse(4, { legStyle: "差し" })];
+    const init = buildReplayInit(analysis(horses, { pace: "ハイ" }));
+    expect(init?.horses.map((h) => h.style)).toEqual(["逃げ", "追込", "先行", "差し"]);
+    expect(init?.pace).toBe("ハイ");
+    for (const pace of ["スロー", "平均", "不明"] as const) {
+      expect(buildReplayInit(analysis(horses, { pace }))?.pace).toBe(pace);
+    }
+  });
+
+  it("脚質が無い馬(デプロイ前の分析・判定不能)は earlyPos から粗く決める(≤1/3 先行・≤2/3 差し・それ以外 追込。逃げは決めない)。境界を含む", () => {
+    const table: ReadonlyArray<readonly [number | null, string]> = [
+      [0, "先行"],
+      [0.05, "先行"],
+      [1 / 3, "先行"],
+      [0.334, "差し"],
+      [2 / 3, "差し"],
+      [0.667, "追込"],
+      [1, "追込"],
+    ];
+    for (const [early, expected] of table) {
+      const init = buildReplayInit(analysis([horse(1, { earlyPos: early, legStyle: null }), horse(2), horse(3)]));
+      expect(init?.horses[0]!.style, `earlyPos=${early}`).toBe(expected);
+    }
+  });
+
+  it("脚質も earlyPos も無い馬は「差し」(中団)。legStyle のキー自体が無い(古い固定データ)場合も", () => {
+    const horses = [horse(1, { earlyPos: null }), horse(2, { earlyPos: null }), horse(3, { earlyPos: null })];
+    delete (horses[1] as { legStyle?: unknown }).legStyle;
+    const init = buildReplayInit(analysis(horses));
+    expect(init?.horses.map((h) => h.style)).toEqual(["差し", "差し", "差し"]);
+    expect(init?.horses.every((h) => h.style !== "逃げ")).toBe(true);
+  });
+
+  it("race.pace が無い(古い固定データ)は「不明」", () => {
+    const a = analysis(four());
+    delete (a.race as { pace?: unknown }).pace;
+    expect(buildReplayInit(a)?.pace).toBe("不明");
   });
 
   it("turn が無ければ right。距離が無ければ null", () => {

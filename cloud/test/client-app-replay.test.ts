@@ -22,11 +22,11 @@ const horseBody = (umaban: number, over: Record<string, unknown> = {}) => ({
   umaban, name: `馬${umaban}`, prior: 0.3, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.1, isPositive: false, mark: null, reason: null, highlights: [], concerns: [],
   winProb: 0.25, fairWinOdds: 3.2, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, earlyPos: umaban / 10, ...over,
 });
-const analysisBody = (horses: unknown[]) => ({
+const analysisBody = (horses: unknown[], racePace?: string) => ({
   ok: true,
   analysis: {
     id: 5, raceId: RACE_ID, analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: DATE, evEstimated: false, model: null, llmNote: null, llmCalls: null, promptVersion: null,
-    race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, startTime: null, courseType: "芝", distance: 1800, weather: null, trackCondition: null, oddsStatus: null, placeBasis: "top3", turn: "right" },
+    race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, startTime: null, courseType: "芝", distance: 1800, weather: null, trackCondition: null, oddsStatus: null, placeBasis: "top3", turn: "right", ...(racePace === undefined ? {} : { pace: racePace }) },
     horses, allocation: null, detail: "present",
   },
 });
@@ -46,14 +46,18 @@ interface Harness {
   readonly log: string[];
   readonly starts: { init: ReplayInit; speed: number; treeHadCanvas: boolean }[];
   readonly speeds: number[];
+  /** `replay` の呼び出し(分析 id)。 */
+  readonly repeats: number[];
+  /** `replay` の戻り値(false にすると、プレーヤが展開を持っていない状況を作れる)。 */
+  repeatResult: boolean;
   hash: string;
   tree(): VNode;
   go(hash: string): void;
 }
 
-function harness(initialHash: string, horses: unknown[] = [1, 2, 3, 4].map((u) => horseBody(u)), withReplay = true): Harness {
+function harness(initialHash: string, horses: unknown[] = [1, 2, 3, 4].map((u) => horseBody(u)), withReplay = true, racePace?: string): Harness {
   const responders = new Map<string, () => Promise<Resp>>([
-    [ANALYSIS_5, async () => ok(analysisBody(horses))],
+    [ANALYSIS_5, async () => ok(analysisBody(horses, racePace))],
     [RACE_STATUS, async () => ok({ ok: true, kaisai_date: DATE, races: [boardRow("pre_race", "done", { analysis_id: 5 })], prior: null })],
     [PAST, async () => ok({ ok: true, analyses: [] })],
   ]);
@@ -66,11 +70,14 @@ function harness(initialHash: string, horses: unknown[] = [1, 2, 3, 4].map((u) =
   const log: string[] = [];
   const starts: Harness["starts"] = [];
   const speeds: number[] = [];
+  const repeats: number[] = [];
   const h: Harness = {
     hash: initialHash,
     log,
     starts,
     speeds,
+    repeats,
+    repeatResult: true,
     tree: () => tree!,
     go: (hash) => {
       h.hash = hash;
@@ -100,6 +107,11 @@ function harness(initialHash: string, horses: unknown[] = [1, 2, 3, 4].map((u) =
               log.push("setSpeed");
               speeds.push(speed);
             },
+            replay: (analysisId: number) => {
+              log.push("replay");
+              repeats.push(analysisId);
+              return h.repeatResult;
+            },
             stop: () => {
               log.push("stop");
             },
@@ -116,6 +128,7 @@ async function open(h: Harness): Promise<void> {
 }
 
 const play = (h: Harness): void => byClass(h.tree(), "replay-play")[0]!.on!.click!();
+const repeatBtn = (h: Harness): VNode | undefined => byClass(h.tree(), "replay-repeat")[0];
 const speedBtn = (h: Harness, v: number): VNode => byClass(h.tree(), "replay-speed").find((b) => b.attrs?.["data-speed"] === String(v))!;
 
 describe("レース再生の制御(結果画面 #analysis=5)", () => {
@@ -149,6 +162,78 @@ describe("レース再生の制御(結果画面 #analysis=5)", () => {
     play(h);
     expect(byClass(h.tree(), "replay-finish").length).toBe(0);
     expect(h.starts.length).toBe(2);
+  });
+
+  it("脚質・想定ペース(Issue #314): API の legStyle・race.pace が再生の材料に届く。脚質が無い馬は earlyPos から、どちらも無ければ差し。pace が無い(古いサーバ)は不明", async () => {
+    const horses = [horseBody(1, { legStyle: "逃げ", earlyPos: 0.9 }), horseBody(2, { legStyle: null, earlyPos: 0.1 }), horseBody(3, { legStyle: null, earlyPos: 0.5 }), horseBody(4, { legStyle: null, earlyPos: null })];
+    const h = harness(`#date=${DATE}&analysis=5`, horses, true, "ハイ");
+    await open(h);
+    play(h);
+    expect(h.starts[0]!.init.horses.map((x) => x.style)).toEqual(["逃げ", "先行", "差し", "差し"]);
+    expect(h.starts[0]!.init.pace).toBe("ハイ");
+    const old = harness(`#date=${DATE}&analysis=5`);
+    await open(old);
+    play(old);
+    expect(old.starts[0]!.init.pace).toBe("不明");
+  });
+
+  it("『もう一度再生』(Issue #314): 最初の再生の前は無い。再生を始めると出る。押すとプレーヤの replay を分析 id で呼び、start(抽選)は呼ばない", async () => {
+    const h = harness(`#date=${DATE}&analysis=5`);
+    await open(h);
+    expect(repeatBtn(h)).toBeUndefined();
+    play(h);
+    expect(byClass(h.tree(), "replay-repeat").map(textOf)).toEqual(["もう一度再生"]);
+    h.log.length = 0;
+    repeatBtn(h)!.on!.click!();
+    expect(h.log).toEqual(["replay"]);
+    expect(h.repeats).toEqual([5]);
+    expect(h.starts.length, "抽選し直さない").toBe(1);
+  });
+
+  it("走り終えたあとに『もう一度再生』: 着順の表を消して最初から(同じ展開なので、終わるとまた同じ着順が通知される)", async () => {
+    const h = harness(`#date=${DATE}&analysis=5`);
+    await open(h);
+    play(h);
+    h.app.onReplayFinish(5, [3, 1, 2, 4]);
+    expect(byClass(h.tree(), "replay-finish").length).toBe(1);
+    repeatBtn(h)!.on!.click!();
+    expect(byClass(h.tree(), "replay-finish").length).toBe(0);
+    expect(findAll(h.tree(), (n) => n.tag === "canvas").length).toBe(1);
+    expect(h.repeats).toEqual([5]);
+    h.app.onReplayFinish(5, [3, 1, 2, 4]);
+    expect(findAll(byClass(h.tree(), "replay-finish")[0]!, (n) => n.tag === "li").map(textOf)[0]).toBe("1着 3 馬3");
+  });
+
+  it("プレーヤが展開を持っていない(replay が false)ときは、着順の表を消さない", async () => {
+    const h = harness(`#date=${DATE}&analysis=5`);
+    await open(h);
+    play(h);
+    h.app.onReplayFinish(5, [3, 1, 2, 4]);
+    h.repeatResult = false;
+    repeatBtn(h)!.on!.click!();
+    expect(h.repeats).toEqual([5]);
+    expect(byClass(h.tree(), "replay-finish").length).toBe(1);
+  });
+
+  it("別の分析に切り替えた後は、ボタンが出ない。古い画面のボタンのクリック処理が遅れて呼ばれても、プレーヤの replay を呼ばない", async () => {
+    const h = harness(`#date=${DATE}&analysis=5`);
+    await open(h);
+    play(h);
+    const stale = repeatBtn(h)!.on!.click!;
+    h.go(`#date=${DATE}&analysis=5&x=1`);
+    await h.app.whenIdle();
+    expect(repeatBtn(h)).toBeUndefined();
+    h.log.length = 0;
+    stale();
+    expect(h.log, "始めていない状態では無視する").toEqual([]);
+    expect(h.repeats).toEqual([]);
+  });
+
+  it("replay の依存が無い環境では、再生が始まらないので『もう一度再生』も出ない(投げない)", async () => {
+    const bare = harness(`#date=${DATE}&analysis=5`, undefined, false);
+    await open(bare);
+    expect(() => play(bare)).not.toThrow();
+    expect(repeatBtn(bare)).toBeUndefined();
   });
 
   it("別の分析の終了通知・始めていない再生の終了通知は無視する(着順を出さない)", async () => {

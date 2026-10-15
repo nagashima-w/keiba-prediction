@@ -101,3 +101,78 @@ describe("buildAnalysisView の race.turn(コースの回り。Issue #311)", () 
     expect(turnOf("202605020211", "missing")).toBe("left");
   });
 });
+
+describe("buildAnalysisView の legStyle(脚質。Issue #314)", () => {
+  it("present: スナップショットの馬の legStyle を写す(4 値だけ通す。null・不正な文字列・数は null。馬を取り違えない)", () => {
+    const a = analysis({
+      raceSnapshot: {
+        race: {},
+        horses: [{ umaban: 1, legStyle: "逃げ" }, { umaban: 2, legStyle: "追込" }, { umaban: 3, legStyle: null }, { umaban: 4, legStyle: "まくり" }],
+      },
+    });
+    expect(buildAnalysisView(detail(a, "present"), undefined).horses.map((h) => [h.umaban, h.legStyle])).toEqual([
+      [1, "逃げ"],
+      [2, "追込"],
+      [3, null],
+      [4, null],
+    ]);
+  });
+
+  it("4 値すべてを通す(先行・差しを含む)。数や真偽値は null", () => {
+    const a = analysis({
+      raceSnapshot: { race: {}, horses: [{ umaban: 1, legStyle: "先行" }, { umaban: 2, legStyle: "差し" }, { umaban: 3, legStyle: 2 }, { umaban: 4, legStyle: true }] },
+    });
+    expect(buildAnalysisView(detail(a, "present"), undefined).horses.map((h) => h.legStyle)).toEqual(["先行", "差し", null, null]);
+  });
+
+  it("Issue #314 より前のスナップショット(キー無し)は null。詳細が present でない(none・missing)ときも null", () => {
+    const old = analysis({ raceSnapshot: { race: {}, horses: [{ umaban: 1, name: "A" }] } });
+    expect(buildAnalysisView(detail(old, "present"), undefined).horses[0]!.legStyle).toBeNull();
+    for (const status of ["none", "missing"] as const) {
+      const withStyle = analysis({ raceSnapshot: { race: {}, horses: [{ umaban: 1, legStyle: "逃げ" }] } });
+      expect(buildAnalysisView(detail(withStyle, status), undefined).horses.map((h) => h.legStyle), status).toEqual([null, null, null, null]);
+    }
+  });
+
+  it("書き込み側との drift: 実フィクスチャの RaceData から buildRaceSnapshot で作ったスナップショットを通すと、書き込んだ脚質がそのまま届く", async () => {
+    const { race } = await scrapeFixtureRace();
+    const snapshot = JSON.parse(JSON.stringify(buildRaceSnapshot(race))) as { horses: { umaban: number; legStyle: string | null }[] };
+    const written = snapshot.horses.map((h) => h.legStyle);
+    expect(written.filter((v) => v !== null).length, "前提: 脚質が取れた馬がいる").toBeGreaterThan(0);
+    const horses = race.horses.map((h) => horse(h.shutuba.umaban));
+    const view = buildAnalysisView(detail(analysis({ horses, raceSnapshot: snapshot }), "present"), undefined);
+    expect(view.horses.map((h) => h.legStyle)).toEqual(written);
+  });
+});
+
+describe("buildAnalysisView の race.pace(想定ペース。Issue #314)", () => {
+  /** 逃げの頭数を指定したスナップショット(残りは差し)。 */
+  const withRunners = (runners: number, total = 6): StoredAnalysis =>
+    analysis({
+      horses: Array.from({ length: total }, (_, i) => horse(i + 1)),
+      raceSnapshot: { race: {}, horses: Array.from({ length: total }, (_, i) => ({ umaban: i + 1, legStyle: i < runners ? "逃げ" : "差し" })) },
+    });
+  const paceOf = (a: StoredAnalysis, status: DetailStatus = "present") => buildAnalysisView(detail(a, status), undefined).race.pace;
+
+  it("プロンプトの展開想定(buildRaceDevelopment)と同じ判定: 逃げ 0 頭=スロー・1 頭=平均・2 頭以上=ハイ", () => {
+    expect(paceOf(withRunners(0))).toBe("スロー");
+    expect(paceOf(withRunners(1))).toBe("平均");
+    expect(paceOf(withRunners(2))).toBe("ハイ");
+    expect(paceOf(withRunners(4))).toBe("ハイ");
+  });
+
+  it("脚質の判定できた馬が 1 頭もいない(古いスナップショット・全員 null)は「不明」。詳細が present でないときも「不明」", () => {
+    const allNull = analysis({ raceSnapshot: { race: {}, horses: [{ umaban: 1 }, { umaban: 2, legStyle: null }] } });
+    expect(paceOf(allNull)).toBe("不明");
+    expect(paceOf(withRunners(3), "none")).toBe("不明");
+    expect(paceOf(withRunners(3), "missing")).toBe("不明");
+  });
+
+  it("一部の馬だけ脚質が判定できたとき(他は null)は、判定できた馬の分布から決める(従来の展開想定と同じ)", () => {
+    const a = analysis({
+      horses: [horse(1), horse(2), horse(3), horse(4)],
+      raceSnapshot: { race: {}, horses: [{ umaban: 1, legStyle: "逃げ" }, { umaban: 2, legStyle: "逃げ" }, { umaban: 3 }, { umaban: 4, legStyle: null }] },
+    });
+    expect(paceOf(a)).toBe("ハイ");
+  });
+});

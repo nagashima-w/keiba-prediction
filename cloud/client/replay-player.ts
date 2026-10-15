@@ -10,9 +10,13 @@
  *  - タブが非表示になったら rAF を取り消して一時停止し、表示に戻ったら再開する(復帰直後のコマは経過 0)。
  *  - 1コマの経過は 100ms で頭打ち。
  *  - `prefers-reduced-motion` ではアニメなしで、最終状態を 1 コマ描いて終了を通知する。
+ *
+ * 展開(着順の抽選と、全馬の位置の前計算 `RacePlan`)は `start()` で 1 回だけ作り、`replay()`(Issue #314「もう一度再生」)は同じ展開を最初から再生し直す(乱数を引かない)。
+ * 展開は状態(`State`)に入っていて、止めたとき(`stop()`)・画面遷移で止まったときに状態ごと捨てる。別の分析の展開を流用しない。
  */
-import { CANVAS_H, CANVAS_W, drawReplay, type Ctx2D, type DrawColors } from "./replay-draw";
-import { drawFinishOrder, finalRanksOf, positionsAt, startRanksOf, type ReplayInit } from "./replay-model";
+import { CANVAS_H, CANVAS_W, drawReplay, overlapGeometry, type Ctx2D, type DrawColors } from "./replay-draw";
+import { drawFinishOrder, finalRanksOf, startRanksOf, type ReplayInit } from "./replay-model";
+import { frameAt, planRace, type RacePlan } from "./replay-plan";
 
 /** 速度 ×1 で走り切るまでの時間(ms)。 */
 export const BASE_DURATION_MS = 12000;
@@ -48,6 +52,11 @@ export type PlayerStatus = "idle" | "playing" | "paused" | "finished";
 export interface ReplayPlayer {
   /** 新しく着順を抽選して、最初から再生する(再生中なら中断して抽選し直す)。`speed` は ×1・×2・×4。 */
   start(init: ReplayInit, speed: number): void;
+  /**
+   * 直前と同じ展開(同じ着順・同じ動き)を最初から再生し直す(Issue #314)。再生中でも走り終えたあとでも押せる。抽選も前計算もやり直さない(乱数を引かない)。
+   * 展開が無い(始める前・止めたあと)・分析 id が違うときは何もせず false。
+   */
+  replay(analysisId: number): boolean;
   /** 速度を変える(以降のコマから)。 */
   setSpeed(speed: number): void;
   /** 止めて状態を捨てる。 */
@@ -62,14 +71,24 @@ export interface ReplayPlayer {
 
 interface State {
   readonly init: ReplayInit;
-  readonly startRanks: number[];
-  readonly finalRanks: number[];
+  /** 前計算した展開(`start()` で 1 回だけ作る。`replay()` が共有する)。 */
+  readonly plan: RacePlan;
   readonly order: number[];
   progress: number;
   speed: number;
   status: Exclude<PlayerStatus, "idle">;
   lastT: number | null;
   handle: number | null;
+}
+
+/** 馬番の昇順位(0 が最内。スタートの横位置)。馬番が同じ・飛びがあっても 0〜n−1 の並べ替えになる。 */
+function gatesOf(umabans: readonly number[]): number[] {
+  const order = umabans.map((_, i) => i).sort((a, b) => umabans[a]! - umabans[b]! || a - b);
+  const gates: number[] = Array(umabans.length).fill(0);
+  order.forEach((horseIndex, k) => {
+    gates[horseIndex] = k;
+  });
+  return gates;
 }
 
 export function createReplayPlayer(deps: PlayerDeps): ReplayPlayer {
@@ -86,7 +105,7 @@ export function createReplayPlayer(deps: PlayerDeps): ReplayPlayer {
     if (canvas.height !== CANVAS_H) canvas.height = CANVAS_H;
     const ctx = canvas.getContext("2d");
     if (ctx === null) return;
-    drawReplay(ctx, s.init, positionsAt(s.progress, s.startRanks, s.finalRanks), deps.colors(canvas));
+    drawReplay(ctx, s.init, frameAt(s.plan, s.progress), deps.colors(canvas));
   }
 
   function cancel(s: State): void {
@@ -139,10 +158,20 @@ export function createReplayPlayer(deps: PlayerDeps): ReplayPlayer {
     start(init, speed) {
       if (state !== null) cancel(state);
       const order = drawFinishOrder(init.horses, deps.random);
+      const plan = planRace(
+        {
+          styles: init.horses.map((h) => h.style),
+          startRanks: startRanksOf(init.horses.map((h) => h.early)),
+          finalRanks: finalRanksOf(order),
+          gates: gatesOf(init.horses.map((h) => h.umaban)),
+          pace: init.pace,
+        },
+        deps.random,
+        overlapGeometry(init.distance),
+      );
       const s: State = {
         init,
-        startRanks: startRanksOf(init.horses.map((h) => h.early)),
-        finalRanks: finalRanksOf(order),
+        plan,
         order,
         progress: 0,
         speed,
@@ -158,6 +187,22 @@ export function createReplayPlayer(deps: PlayerDeps): ReplayPlayer {
       const canvas = canvasOf(s);
       if (canvas !== null) draw(s, canvas);
       request(s);
+    },
+    replay(analysisId) {
+      const s = state;
+      if (s === null || s.init.analysisId !== analysisId) return false;
+      cancel(s);
+      s.progress = 0;
+      s.status = "playing";
+      s.lastT = null;
+      if (deps.reducedMotion()) {
+        finish(s, canvasOf(s));
+        return true;
+      }
+      const canvas = canvasOf(s);
+      if (canvas !== null) draw(s, canvas);
+      request(s);
+      return true;
     },
     setSpeed(speed) {
       if (state !== null) state.speed = speed;

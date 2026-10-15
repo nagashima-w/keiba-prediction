@@ -1,13 +1,14 @@
 /**
  * レース再生の純関数(Issue #311)。DOM・乱数源・時刻に触れない(乱数は引数で注入)。
  *
- * **演出であって物理的なシミュレーションではない**: 分析の勝率の推定(`winProb`)を強さにして着順を 1 回分抽選し(Plackett-Luce の逐次抽選。
- * 分析の勝率はこのモデルの 1 着確率なので、強さは勝率に比例する)、馬の丸が S → G に走る位置を、スタート直後の位置(`earlyPos`)から抽選した着順へ入れ替える形で計算する。
+ * **演出であって物理的なシミュレーションではない**: 分析の勝率の推定(`winProb`)を強さにして着順を 1 回分抽選する(Plackett-Luce の逐次抽選。
+ * 分析の勝率はこのモデルの 1 着確率なので、強さは勝率に比例する。想定ペースでは重みを変えない: 勝率にはプロンプトの展開想定を通じてペースが織り込み済み)。
+ * 馬の丸が S → G に走る位置は、脚質と想定ペースから `replay-plan.ts` が計算する(Issue #314)。
  * 確率・配分・保存される分析の値は読むだけで、一切変えない。
  */
-import type { AnalysisDetail } from "./api-analysis";
+import type { AnalysisDetail, LegStyle, PaceEstimate } from "./api-analysis";
 
-/** 先頭と最後尾の差(ゴール時。レース全体の距離に対する割合)。演出のための誇張で、実際の着差ではない。 */
+/** 先頭と最後尾の差の基準(ゴール時。レース全体の距離に対する割合)。演出のための誇張で、実際の着差ではない。位置の計算は `replay-plan.ts`(Issue #314)。 */
 export const REPLAY_SPREAD = 0.16;
 
 /** 再生の材料(馬ごと)。 */
@@ -19,8 +20,10 @@ export interface ReplayHorse {
   readonly strength: number;
   /** 強さが残りすべて 0 になったときの重み(補正後の3着内率 `adjustedProb`)。 */
   readonly fallback: number;
-  /** スタート直後の位置(0〜1、小さいほど前)。無ければ null。 */
+  /** スタート直後の位置(0〜1、小さいほど前)。無ければ null。集団の中の並びに使う。 */
   readonly early: number | null;
+  /** 脚質(Issue #314)。分析の `legStyle`。無ければ `early` から粗く決める(≤1/3 先行・≤2/3 差し・他 追込。逃げは決めない)。`early` も無ければ差し。 */
+  readonly style: LegStyle;
 }
 
 export interface ReplayInit {
@@ -29,6 +32,19 @@ export interface ReplayInit {
   /** 距離(m)。分からなければ null。 */
   readonly distance: number | null;
   readonly turn: "right" | "left";
+  /** 想定ペース(Issue #314。サーバがプロンプトの展開想定と同じ判定で求めた値。無ければ「不明」=平均として描く)。 */
+  readonly pace: PaceEstimate;
+}
+
+/** 脚質が無い馬の脚質(Issue #314)。`earlyPos` があれば粗く決める(逃げは決めない)。無ければ差し(中団)。 */
+function styleOf(legStyle: LegStyle | null | undefined, early: number | null): LegStyle {
+  if (legStyle !== null && legStyle !== undefined) {
+    return legStyle;
+  }
+  if (early === null || !Number.isFinite(early)) {
+    return "差し";
+  }
+  return early <= 1 / 3 ? "先行" : early <= 2 / 3 ? "差し" : "追込";
 }
 
 const isWeight = (v: number): boolean => Number.isFinite(v) && v >= 0;
@@ -55,7 +71,8 @@ export function buildReplayInit(a: AnalysisDetail): ReplayInit | null {
     analysisId: a.id,
     distance: a.race.distance ?? null,
     turn: a.race.turn ?? "right",
-    horses: a.horses.map((h) => ({ umaban: h.umaban, name: h.name, strength: h.winProb!, fallback: h.adjustedProb, early: h.earlyPos ?? null })),
+    pace: a.race.pace ?? "不明",
+    horses: a.horses.map((h) => ({ umaban: h.umaban, name: h.name, strength: h.winProb!, fallback: h.adjustedProb, early: h.earlyPos ?? null, style: styleOf(h.legStyle, h.earlyPos ?? null) })),
   };
 }
 
@@ -128,38 +145,6 @@ export function finalRanksOf(order: readonly number[]): number[] {
   return ranks;
 }
 
-const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
-const smoothstep = (t: number): number => {
-  const c = clamp01(t);
-  return c * c * (3 - 2 * c);
-};
-
-/** スタート時点で、すでに広がっている隊列の割合(丸が重なりすぎないように。開始順に縦に並ぶ)。 */
-const START_SPREAD = 0.3;
-/** 序盤の隊列が広がり切る進み具合。 */
-const SPREAD_OUT_END = 0.3;
-/** 直線で開始順から最終順へ入れ替わる区間。ゴールを最初の馬が通る前(`1/(1+S)` ≒ 0.86)に終える。 */
-const SWAP_START = 0.35;
-const SWAP_END = 0.8;
-
-/**
- * 進み具合 p(0〜1)に対する、馬ごとの前方位置(レース全体の距離を 1 としたときの位置。ゴールが 1。スタートのラインが 0)。
- * `x_i = p·(1 + S) − S·e(p)·r_i(p)/(n − 1)`(S = {@link REPLAY_SPREAD})。`e` は序盤に隊列が広がる係数(スタート時点で {@link START_SPREAD} → 1)、
- * `r_i(p)` はその馬の順位(0 が先頭)で、開始順 → 最終順へ入れ替わる(`SWAP_START`〜`SWAP_END`。滑らかな補間)。
- * p=0 は先頭の馬がライン上(0)で、他は開始順に後ろへ並ぶ。p=1 の並びは最終順どおり(先頭と最後尾の差は S)。全馬が単調に前へ進む(S ≤ 0.16 のとき 1 コマの速さは常に正)。p は 0〜1 に丸める。
- */
-export function positionsAt(progress: number, startRanks: readonly number[], finalRanks: readonly number[]): number[] {
-  const p = clamp01(progress);
-  const n = startRanks.length;
-  const spreadOut = START_SPREAD + (1 - START_SPREAD) * smoothstep(p / SPREAD_OUT_END);
-  const swap = smoothstep((p - SWAP_START) / (SWAP_END - SWAP_START));
-  return startRanks.map((s, i) => {
-    const rank = s + (finalRanks[i]! - s) * swap;
-    const off = n <= 1 ? 0 : (REPLAY_SPREAD * spreadOut * rank) / (n - 1);
-    return p * (1 + REPLAY_SPREAD) - off;
-  });
-}
-
 /** 前方位置の降順の馬の添字(今の順位。同位置は添字の若い順)。 */
 export function rankingAt(positions: readonly number[]): number[] {
   return positions.map((_, i) => i).sort((a, b) => positions[b]! - positions[a]! || a - b);
@@ -168,9 +153,11 @@ export function rankingAt(positions: readonly number[]): number[] {
 // ---- 画面の表示用データ ----
 
 export const REPLAY_HEADING = "レース再生";
-export const REPLAY_NOTE = "確率モデルから1回分の着順を抽選して見せる演出です。物理的なシミュレーションではなく、確率・配分は変わりません。";
+export const REPLAY_NOTE = "確率モデルから1回分の着順を抽選して見せる演出です。物理的なシミュレーションではなく、確率・配分は変わりません。隊列は馬の脚質と想定ペースから描きます。";
 export const REPLAY_PLAY_LABEL = "レースを再生";
 export const REPLAY_AGAIN_LABEL = "別の展開で再生";
+/** 直前と同じ展開(同じ着順・同じ動き)を最初から再生し直すボタン(Issue #314)。最初の再生の前は出さない。 */
+export const REPLAY_REPEAT_LABEL = "もう一度再生";
 export const REPLAY_FINISH_HEADING = "今回の着順(抽選)";
 export const REPLAY_CANVAS_LABEL = "馬番の丸がスタートからゴールへ走るアニメーション";
 /** 速度の選択肢(×1 は約 12 秒で走り切る)。 */
@@ -191,6 +178,8 @@ export interface ReplaySection {
   /** この分析の再生を始めたか(始めたら canvas を出す)。 */
   readonly started: boolean;
   readonly playLabel: string;
+  /** 「もう一度再生」のボタンの文言(Issue #314)。この分析の再生を始めたあと(再生中・終了後)だけ。始める前は null(ボタンを出さない)。 */
+  readonly repeatLabel: string | null;
   readonly speeds: readonly { readonly value: number; readonly label: string; readonly pressed: boolean }[];
   /** 走り終えたあとの着順の見出しと行。走り終えるまで null。 */
   readonly finishHeading: string | null;
@@ -212,6 +201,7 @@ export function replaySectionOf(a: AnalysisDetail, ui: ReplayUi | undefined): Re
     analysisId: a.id,
     started,
     playLabel: started ? REPLAY_AGAIN_LABEL : REPLAY_PLAY_LABEL,
+    repeatLabel: started ? REPLAY_REPEAT_LABEL : null,
     speeds: REPLAY_SPEEDS.map((v) => ({ value: v, label: `×${v}`, pressed: v === speed })),
     finishHeading: finishOrder === null ? null : REPLAY_FINISH_HEADING,
     finish: finishOrder === null ? null : finishOrder.map((umaban, i) => `${i + 1}着 ${umaban}${nameOf.get(umaban) ? ` ${nameOf.get(umaban)}` : ""}`),

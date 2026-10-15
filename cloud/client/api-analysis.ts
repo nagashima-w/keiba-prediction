@@ -52,7 +52,16 @@ export interface AnalysisHorse {
   readonly actualPlaceOddsMax: number | null;
   /** スタート直後の位置(Issue #311。レース再生の演出用。0〜1 で小さいほど前)。戦績が取れない馬・過去の分析・詳細なし・キー無し(古いサーバの応答)は null。パーサは常にキーを持つ。型で省略可なのは、この項目を使わない固定データ(テスト・画面の材料)を壊さないため(`baba`・`combos` と同じ流儀)。 */
   readonly earlyPos?: number | null;
+  /** 脚質(Issue #314。レース再生の隊列を脚質で決める演出用)。戦績が取れない馬・過去の分析・詳細なし・キー無し(古いサーバの応答)・4 値以外の値は null。パーサは常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。 */
+  readonly legStyle?: LegStyle | null;
 }
+
+/** 脚質(Issue #314。core の `LegStyle` と同じ 4 値。クライアントは core のバレルを import しないので、ここに持つ)。 */
+export type LegStyle = "逃げ" | "先行" | "差し" | "追込";
+/** 想定ペース(Issue #314。core の `PaceEstimate` と同じ 4 値)。 */
+export type PaceEstimate = "スロー" | "平均" | "ハイ" | "不明";
+const LEG_STYLES: readonly LegStyle[] = ["逃げ", "先行", "差し", "追込"];
+const PACES: readonly PaceEstimate[] = ["スロー", "平均", "ハイ", "不明"];
 
 /**
  * LLM を呼んだ1回の記録(Issue #198。サーバの `LlmCallRecord` と同じ形)。費用(トークン数)・時間・切り詰め(`stopReason` が `max_tokens`)を確かめるための値。
@@ -118,6 +127,8 @@ export interface AnalysisDetail {
     readonly distance?: number | null;
     /** コースの回り(Issue #311。レース再生のコース図の向き)。キー無し(古いサーバの応答)は right。 */
     readonly turn?: "right" | "left";
+    /** 想定ペース(Issue #314。レース再生の隊列の長さ・動き出しの演出用。サーバがプロンプトの展開想定と同じ判定で求める)。キー無し(古いサーバの応答)・形が不正な値は「不明」(補助の演出なので、分析全体の解析は失敗させない)。 */
+    readonly pace?: PaceEstimate;
   };
   /**
    * そのとき LLM が見た当日の馬場の値(Issue #295)。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null。キー無し(古いサーバの応答)・形が不正な値も null にする
@@ -183,8 +194,10 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   // Issue #311: スタート直後の位置は、キー無し(古いサーバの応答)は null。数・null 以外の型は想定外。
   const earlyPos = row["earlyPos"] ?? null;
   if (!numOrNull(earlyPos)) return null;
+  // Issue #314: 脚質は、キー無し・4 値以外は null(補助の演出なので、応答ごと不正にはしない)。
+  const legStyle = LEG_STYLES.find((s) => s === row["legStyle"]) ?? null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, legStyle };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
@@ -294,6 +307,8 @@ function parseDetail(value: unknown): AnalysisDetail | null {
   if (!numOrNull(distance)) return null;
   const turn = race["turn"] === undefined ? "right" : race["turn"];
   if (turn !== "right" && turn !== "left") return null;
+  // Issue #314: 想定ペースは、キー無し・4 値以外は「不明」(補助の演出なので、応答ごと不正にはしない)。
+  const pace = PACES.find((p) => p === race["pace"]) ?? "不明";
   if (!Array.isArray(horses)) return null;
   const parsedHorses: AnalysisHorse[] = [];
   for (const raw of horses as unknown[]) {
@@ -315,7 +330,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     model,
     llmNote,
     llmCalls: parsedCalls,
-    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis, distance, turn },
+    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis, distance, turn, pace },
     baba: parseLines(value["baba"], BABA_MAX_LINES, BABA_MAX_LINE_LENGTH),
     combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
     horses: parsedHorses,

@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 296,400 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 300,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -151,8 +151,14 @@ describe("生成物のドリフトと決定性", () => {
     // 残りの 2,135 は `view.ts`(節の VNode)・`app.ts`(再生の状態と配線)・`api-analysis.ts`・`result.ts`・`race.ts`・`main.ts`(プレーヤの配線・色の読み取り)・`dom.ts` の増分(ファイル別の差は測っていない)。
     // 事前の見積もり(着手前の報告)は +6〜9KB で、実測はその範囲。外部ライブラリは使っていない。Plackett-Luce は client 専用の自前の逐次抽選で、core の `PLACKETT_LUCE_MODEL`・`winProbabilitiesFromStrengths` は束に入っていない(下のテストが固定する)。
     // 新しい上限 296,400 の根拠: 実測 295,327 に約 1KB の余裕(295,327 + 1,073 を 100 バイト単位に切り上げ)。余裕は 1,073 バイト。
+    // Issue #314(レース再生の見た目の改善): 上限を 296,400 から 300,000 へ引き上げた。脚質と想定ペースで決まる隊列・馬ごとに連続な横位置の前計算(新しいファイル `replay-plan.ts`)・API の `legStyle`/`race.pace` の読み取り・
+    // 「もう一度再生」のボタンと制御・コース幅の拡張(5 → 7 車線)を足したため。実測(`Buffer.byteLength(CLIENT_JS)`): fd6d0c0〈#311 の承認後〉は 295,327、実装後は 299,066(+3,739。最初の実装は 298,997 で、前方位置の後退の防御〈`replay-plan.ts` の 7 行〉で +69)。
+    // 計り方: fd6d0c0 の `cloud/src/client-bundle.generated.ts`(`git show fd6d0c0:cloud/src/client-bundle.generated.ts`)と今の生成物を、それぞれ import して `Buffer.byteLength` を取った(今の値は `pnpm run build:client` の出力〈「299066 バイト」〉)。
+    // 内訳(`cloud/` で esbuild を `build-client.ts` と同じ設定〈minify・metafile〉で呼び、`outputs[...].inputs[ファイル].bytesInOutput` を読んだ。今の値): 新しいファイル `replay-plan.ts` 2,492、`replay-player.ts` 1,960・`replay-draw.ts` 1,651・`replay-model.ts` 2,753
+    // (#311 のコメントに書いた値は 1,536・1,510・2,621 で、その差は +424・+141・+132)。残りの約 550 は `api-analysis.ts`・`view.ts`・`app.ts` の増分(ファイル別の差は測っていない)。外部ライブラリは使っていない。
+    // 新しい上限 300,000 の根拠: 最初の実測 298,997 に約 1KB の余裕(298,997 + 1,003 を 100 バイト単位に切り上げ)。防御を足した今の実測 299,066 での余裕は 934 バイト(上限は据え置き)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(296_400);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(300_000);
   });
 });
 

@@ -3,7 +3,7 @@ import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
 import { mount, type DomDocument } from "../client/dom";
 import { buildRaceModel } from "../client/race";
 import { buildResultModel } from "../client/result";
-import { REPLAY_AGAIN_LABEL, REPLAY_HEADING, REPLAY_NOTE, REPLAY_PLAY_LABEL, REPLAY_SPEEDS, replaySectionOf } from "../client/replay-model";
+import { REPLAY_AGAIN_LABEL, REPLAY_HEADING, REPLAY_NOTE, REPLAY_PLAY_LABEL, REPLAY_REPEAT_LABEL, REPLAY_SPEEDS, replaySectionOf } from "../client/replay-model";
 import { renderScreen, type ViewActions } from "../client/view";
 import type { VNode } from "../client/vnode";
 import { noopActions } from "./client-fakes";
@@ -50,6 +50,7 @@ describe("replaySectionOf(表示用データ)", () => {
       analysisId: 7,
       started: false,
       playLabel: REPLAY_PLAY_LABEL,
+      repeatLabel: null,
       speeds: [
         { value: 1, label: "×1", pressed: true },
         { value: 2, label: "×2", pressed: false },
@@ -67,6 +68,7 @@ describe("replaySectionOf(表示用データ)", () => {
     expect(REPLAY_NOTE).toContain("確率・配分は変わりません");
     expect(REPLAY_PLAY_LABEL).toBe("レースを再生");
     expect(REPLAY_AGAIN_LABEL).toBe("別の展開で再生");
+    expect(REPLAY_REPEAT_LABEL).toBe("もう一度再生");
   });
 
   it("勝率が判定不能(winProb が null)・2頭未満なら null(ボタンを出さない)", () => {
@@ -143,6 +145,30 @@ describe("結果画面のレース再生の節(VNode)", () => {
     const fin = byClass(tree, "replay-finish")[0]!;
     const items = findAll(fin, (n) => n.tag === "li").map(textOf);
     expect(items).toEqual(["1着 1 <b>x</b>", "2着 2 馬2", "3着 3 馬3", "4着 4 馬4"]);
+  });
+
+  it("『もう一度再生』(Issue #314): 最初の再生の前は出さない。再生を始めたあとは(再生中・終了後とも)出る。別の分析を再生した状態では出ない", () => {
+    expect(replaySectionOf(analysis(), undefined)!.repeatLabel).toBeNull();
+    expect(replaySectionOf(analysis(), { startedId: 7, speed: 1, finishOrder: null })!.repeatLabel).toBe(REPLAY_REPEAT_LABEL);
+    expect(replaySectionOf(analysis(), { startedId: 7, speed: 1, finishOrder: [1, 2, 3, 4] })!.repeatLabel).toBe(REPLAY_REPEAT_LABEL);
+    expect(replaySectionOf(analysis(), { startedId: 8, speed: 1, finishOrder: [1, 2, 3, 4] })!.repeatLabel).toBeNull();
+    expect(replaySectionOf(analysis(), { startedId: null, speed: 1, finishOrder: null })!.repeatLabel).toBeNull();
+  });
+
+  it("『もう一度再生』のボタン(VNode): 再生前は無い。再生中・終了後はある(『別の展開で再生』とは別のボタン)。クリックは分析 id を渡す", () => {
+    const before = byClass(byClass(view(analysis()), "replay")[0]!, "replay-repeat");
+    expect(before.length).toBe(0);
+    for (const finishOrder of [null, [1, 2, 3, 4]] as const) {
+      const calls: unknown[] = [];
+      const actions: ViewActions = { ...noopActions, onReplayPlay: (id) => calls.push(["play", id]), onReplayRepeat: (id) => calls.push(["repeat", id]) };
+      const sec = byClass(view(analysis(), { startedId: 7, speed: 1, finishOrder }, actions), "replay")[0]!;
+      const repeat = byClass(sec, "replay-repeat");
+      expect(repeat.map(textOf)).toEqual([REPLAY_REPEAT_LABEL]);
+      expect(repeat[0]!.attrs?.["data-analysis-id"]).toBe("7");
+      expect(byClass(sec, "replay-play").map(textOf), "別の展開は別のボタン").toEqual([REPLAY_AGAIN_LABEL]);
+      repeat[0]!.on!.click!();
+      expect(calls).toEqual([["repeat", 7]]);
+    }
   });
 
   it("勝率が判定不能の分析には節ごと出さない", () => {

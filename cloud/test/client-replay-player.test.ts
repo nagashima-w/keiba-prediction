@@ -16,16 +16,29 @@ class FakeCtx implements Ctx2D {
   textAlign = "";
   textBaseline = "";
   arcs = 0;
+  /** 描いた丸の中心(コマごとの末尾 = 直近の 1 コマ分は `lastCenters()`)。 */
+  centers: [number, number][] = [];
   frames = 0; // fillRect(背景)の回数 = 1コマ
   beginPath(): void {}
   moveTo(): void {}
   lineTo(): void {}
   closePath(): void {}
-  arc(): void { this.arcs += 1; }
+  arc(x: number, y: number): void {
+    this.arcs += 1;
+    this.centers.push([x, y]);
+  }
   fill(): void {}
   stroke(): void {}
   fillRect(): void { this.frames += 1; }
-  fillText(): void {}
+  /** 描いた馬番(数字の文字だけ。S・G は除く)。1 コマに頭数ぶん、後ろの順位から先頭の順に並ぶ。 */
+  numbers: string[] = [];
+  fillText(text: string): void {
+    if (/^\d+$/.test(text)) this.numbers.push(text);
+  }
+  /** 直近の 1 コマの丸の中心(馬の数だけ後ろから)。 */
+  lastCenters(n: number): [number, number][] {
+    return this.centers.slice(-n);
+  }
 }
 
 class FakeCanvas implements PlayerCanvas {
@@ -45,10 +58,11 @@ const INIT: ReplayInit = {
   analysisId: 7,
   distance: 1600,
   turn: "left",
+  pace: "平均",
   horses: [
-    { umaban: 1, name: "一", strength: 0.5, fallback: 0.5, early: 0.1 },
-    { umaban: 2, name: "二", strength: 0.3, fallback: 0.3, early: 0.5 },
-    { umaban: 3, name: "三", strength: 0.2, fallback: 0.2, early: 0.9 },
+    { umaban: 1, name: "一", strength: 0.5, fallback: 0.5, early: 0.1, style: "先行" },
+    { umaban: 2, name: "二", strength: 0.3, fallback: 0.3, early: 0.5, style: "差し" },
+    { umaban: 3, name: "三", strength: 0.2, fallback: 0.2, early: 0.9, style: "追込" },
   ],
 };
 
@@ -326,5 +340,205 @@ describe("createReplayPlayer", () => {
     env.canvas = Object.assign(new FakeCanvas("7"), { getContext: () => null });
     player.start(INIT, 1);
     expect(player.status()).toBe("playing");
+  });
+
+  describe("画面のゴール通過順 = 着順の表(AC1 の結線。プレーヤが抽選した着順を前計算に渡している)", () => {
+    const N = 6;
+    const INIT6: ReplayInit = {
+      ...INIT,
+      horses: Array.from({ length: N }, (_, i) => ({ umaban: i + 1, name: null, strength: 0.2, fallback: 0.2, early: (i + 1) / (N + 1), style: (["逃げ", "先行", "差し", "差し", "追込", "追込"] as const)[i]! })),
+    };
+    /** 最終コマ(progress=1)の描画順は後ろから先頭の順。反転して 1 着から並べた馬番。 */
+    const finalOrderDrawn = (ctx: FakeCtx): number[] => ctx.numbers.slice(-N).reverse().map(Number);
+    const run = (frame: (t: number) => void, from: number): void => {
+      frame(from);
+      for (let t = from + 100; t <= from + 12000; t += 100) frame(t);
+    };
+
+    it("走り終えた最終コマの丸の並び(先頭が最後に描かれる)が、onFinish に渡った着順と一致する。抽選の結果が 1,2,3… の昇順でも逆順でもない", () => {
+      const { env, player, frame } = setup();
+      env.randoms = [0.5, 0.1, 0.9, 0.3, 0.7]; // 抽選(頭数 − 1 回)。着順は下の前提で固定する
+      player.start(INIT6, 1);
+      run(frame, 0);
+      expect(player.status()).toBe("finished");
+      const order = env.finished[0]!.order;
+      expect(order.length).toBe(N);
+      expect([...order].sort((a, b) => a - b), "前提: 着順は馬番の並べ替え").toEqual([1, 2, 3, 4, 5, 6]);
+      expect(order, "前提: 昇順ではない(恒等の取り違えを検出できる)").not.toEqual([1, 2, 3, 4, 5, 6]);
+      expect(order, "前提: 逆順でもない(反転の取り違えを検出できる)").not.toEqual([6, 5, 4, 3, 2, 1]);
+      expect(finalOrderDrawn(env.canvas!.ctx)).toEqual(order);
+    });
+
+    it("もう一度再生でも、最終コマの並びは同じ着順(onFinish の 2 回目とも一致)。別の展開で再生すると、新しい着順と一致する", () => {
+      const { env, player, frame } = setup();
+      env.randoms = [0.5, 0.1, 0.9, 0.3, 0.7];
+      player.start(INIT6, 1);
+      run(frame, 0);
+      const first = env.finished[0]!.order;
+      expect(player.replay(7)).toBe(true);
+      run(frame, 50000);
+      expect(env.finished.length).toBe(2);
+      expect(env.finished[1]!.order).toEqual(first);
+      expect(finalOrderDrawn(env.canvas!.ctx)).toEqual(first);
+      env.randoms = [0.95, 0.9, 0.05, 0.6, 0.2];
+      player.start(INIT6, 1);
+      run(frame, 100000);
+      const second = env.finished[2]!.order;
+      expect(second, "前提: 抽選し直すと着順が変わる").not.toEqual(first);
+      expect(finalOrderDrawn(env.canvas!.ctx)).toEqual(second);
+    });
+
+    it("reduced-motion の最終コマも、着順と一致する", () => {
+      const { env, player } = setup();
+      env.reduced = true;
+      env.randoms = [0.5, 0.1, 0.9, 0.3, 0.7];
+      player.start(INIT6, 1);
+      expect(finalOrderDrawn(env.canvas!.ctx)).toEqual(env.finished[0]!.order);
+    });
+  });
+
+  describe("replay(もう一度再生。Issue #314): 直前と同じ展開を最初から。抽選・前計算をやり直さない", () => {
+    /** 乱数を何回引いたかを数える環境。 */
+    function counted(over: Partial<PlayerDeps> = {}) {
+      let calls = 0;
+      const base = setup({ random: () => { calls += 1; return 0.3; }, ...over });
+      return { ...base, calls: () => calls };
+    }
+
+    it("走り終えたあと: 乱数を一度も引かず、進み具合 0・再生中に戻り、同じ着順で終わる(onFinish はもう一度、同じ着順で呼ばれる)", () => {
+      const { env, player, frame, calls } = counted();
+      player.start(INIT, 1);
+      const drawn = calls();
+      expect(drawn, "前提: 抽選(頭数 − 1 回)と前計算(2 × 頭数回)で乱数を引いている").toBe(INIT.horses.length - 1 + 2 * INIT.horses.length);
+      frame(0);
+      for (let t = 100; t <= 12000; t += 100) frame(t);
+      expect(player.status()).toBe("finished");
+      expect(env.finished.length).toBe(1);
+      const framesBefore = env.canvas!.ctx.frames;
+      expect(player.replay(7)).toBe(true);
+      expect(calls(), "乱数を消費しない").toBe(drawn);
+      expect(player.progress()).toBe(0);
+      expect(player.status()).toBe("playing");
+      expect(env.canvas!.ctx.frames, "すぐ最初のコマを描く").toBe(framesBefore + 1);
+      expect(env.pending.size).toBe(1);
+      frame(20000);
+      for (let t = 20100; t <= 20000 + 12000; t += 100) frame(t);
+      expect(player.status()).toBe("finished");
+      expect(env.finished.length).toBe(2);
+      expect(env.finished[1]).toEqual(env.finished[0]);
+      expect(calls(), "最後まで乱数を引かない").toBe(drawn);
+    });
+
+    it("同じ時点のコマは、最初の再生と全く同じ絵(丸の位置が完全に一致)。前計算を共有している", () => {
+      const { env, player, frame } = counted();
+      const n = INIT.horses.length;
+      player.start(INIT, 1);
+      frame(0);
+      for (let t = 100; t <= 6000; t += 100) frame(t);
+      expect(player.progress()).toBeCloseTo(0.5, 6);
+      const first = env.canvas!.ctx.lastCenters(n);
+      player.replay(7);
+      frame(50000);
+      for (let t = 50100; t <= 56000; t += 100) frame(t);
+      expect(player.progress()).toBeCloseTo(0.5, 6);
+      expect(env.canvas!.ctx.lastCenters(n)).toEqual(first);
+      expect(new Set(first.map((c) => c.join(","))).size, "前提: 丸は別々の場所にある").toBe(n);
+    });
+
+    it("再生中に押しても: 前の rAF を取り消して最初から(二重に回らない)。速度は保たれる", () => {
+      const { env, player, frame, calls } = counted();
+      player.start(INIT, 2);
+      frame(0);
+      frame(100);
+      const before = calls();
+      expect(player.progress()).toBeGreaterThan(0);
+      const pendingBefore = [...env.pending.keys()];
+      expect(player.replay(7)).toBe(true);
+      expect(player.progress()).toBe(0);
+      expect(env.cancelled).toEqual(pendingBefore);
+      expect(env.pending.size).toBe(1);
+      expect(calls()).toBe(before);
+      frame(1000);
+      frame(1100); // 100ms × 速度 2 = 1/60 進む
+      expect(player.progress()).toBeCloseTo((100 * 2) / BASE_DURATION_MS, 9);
+    });
+
+    it("別の分析の id では効かない(false)。止めた(stop)あと・始める前も効かない。描かず・rAF も要求しない", () => {
+      const { env, player, frame } = counted();
+      expect(player.replay(7), "始める前").toBe(false);
+      player.start(INIT, 1);
+      const rafBefore = env.rafCalls;
+      expect(player.replay(8), "別の分析").toBe(false);
+      expect(env.rafCalls).toBe(rafBefore);
+      expect(player.progress()).toBe(0);
+      frame(0);
+      frame(100);
+      const p = player.progress();
+      expect(player.replay(8)).toBe(false);
+      expect(player.progress(), "別の分析の id では進み具合も戻らない").toBe(p);
+      player.stop();
+      const frames = env.canvas!.ctx.frames;
+      expect(player.replay(7), "stop したあと(分析を移った)は展開を保持しない").toBe(false);
+      expect(env.canvas!.ctx.frames).toBe(frames);
+      expect(env.pending.size).toBe(0);
+      expect(player.status()).toBe("idle");
+    });
+
+    it("画面遷移で止まった(キャンバスが消えた)あとも、展開を捨てている: replay は効かない", () => {
+      const { env, player, frame } = counted();
+      player.start(INIT, 1);
+      frame(0);
+      env.canvas = null;
+      frame(100); // 次のコマで検知して状態を捨てる
+      expect(player.status()).toBe("idle");
+      env.canvas = new FakeCanvas("7");
+      expect(player.replay(7)).toBe(false);
+      expect(env.canvas.ctx.frames).toBe(0);
+    });
+
+    it("start(別の展開で再生)のあとの replay は、新しい展開(新しい抽選の着順)を再生する。古い展開に戻らない", () => {
+      const { env, player, frame } = setup();
+      env.randoms = [0.0, 0.0];
+      player.start(INIT, 1);
+      env.randoms = [0.999, 0.999]; // 着順 3, 2, 1
+      player.start(INIT, 1);
+      player.replay(7);
+      frame(0);
+      for (let t = 100; t <= 12000; t += 100) frame(t);
+      expect(env.finished).toEqual([{ id: 7, order: [3, 2, 1] }]);
+    });
+
+    it("reduced-motion: 最終状態を描き直して終了をもう一度通知する(同じ着順)。rAF は要求せず、乱数も引かない", () => {
+      const { env, player, calls } = counted();
+      env.reduced = true;
+      player.start(INIT, 1);
+      const drawn = calls();
+      const frames = env.canvas!.ctx.frames;
+      expect(player.replay(7)).toBe(true);
+      expect(env.rafCalls).toBe(0);
+      expect(env.canvas!.ctx.frames).toBe(frames + 1);
+      expect(player.status()).toBe("finished");
+      expect(player.progress()).toBe(1);
+      expect(env.finished.length).toBe(2);
+      expect(env.finished[1]).toEqual(env.finished[0]);
+      expect(calls()).toBe(drawn);
+    });
+
+    it("タブが非表示のあいだに押しても、進めずに待つ(表示に戻ったら再開)", () => {
+      const { env, player, frame } = counted();
+      player.start(INIT, 1);
+      frame(0);
+      env.visible = false;
+      player.onVisibilityChange();
+      expect(player.replay(7)).toBe(true);
+      expect(player.progress()).toBe(0);
+      frame(100); // 非表示のコールバックは進めない
+      expect(player.progress()).toBe(0);
+      env.visible = true;
+      player.onVisibilityChange();
+      frame(200);
+      frame(300);
+      expect(player.progress()).toBeGreaterThan(0);
+    });
   });
 });

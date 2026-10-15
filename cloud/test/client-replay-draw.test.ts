@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CANVAS_H, CANVAS_W, drawReplay, GOAL_LAP, lapPositionOf, pointAt, PERIMETER_M, TRACK_HEIGHT, type DrawColors } from "../client/replay-draw";
+import { CANVAS_H, CANVAS_W, drawReplay, GOAL_LAP, HORSE_RADIUS, lapPositionOf, LATERAL_RANGE, overlapGeometry, pointAt, PERIMETER_M, TRACK_HEIGHT, type DrawColors } from "../client/replay-draw";
 import type { ReplayInit } from "../client/replay-model";
 
 /**
@@ -163,19 +163,62 @@ class FakeCtx {
 const COLORS: DrawColors = { fg: "#111111", bg: "#fefefe", muted: "#666666", line: "#cccccc", card: "#eeeeee", accent: "#0a58ca" };
 
 function init(n: number, turn: "right" | "left" = "left", distance: number | null = 1600): ReplayInit {
-  return { analysisId: 1, distance, turn, horses: Array.from({ length: n }, (_, i) => ({ umaban: i + 1, name: null, strength: 0.1, fallback: 0.1, early: null })) };
+  return { analysisId: 1, distance, turn, pace: "平均", horses: Array.from({ length: n }, (_, i) => ({ umaban: i + 1, name: null, strength: 0.1, fallback: 0.1, early: null, style: "差し" as const })) };
 }
 
+/** 前方位置の配列から frame を作る(横位置は既定で中央)。 */
+function frameOf(x: number[], lat: number[] = x.map(() => 0.5)): { x: number[]; lat: number[] } {
+  return { x, lat };
+}
+
+describe("overlapGeometry(丸 1 個分の大きさ。前計算の押し離しの単位。Issue #314)", () => {
+  it("レース方向は『丸の直径 ÷ (1 レース分の画面上の長さ)』: 距離が長いほど小さい(1600m で約 0.0235)。横方向は直径 ÷ 横位置が動ける幅", () => {
+    const a = overlapGeometry(1600);
+    expect(a.along).toBeCloseTo((2 * HORSE_RADIUS) / ((1600 / PERIMETER_M) * (2 * (1 - 0.5) + Math.PI * 0.5) * 580), 12);
+    expect(a.along).toBeGreaterThan(0.0234);
+    expect(a.along).toBeLessThan(0.0236);
+    expect(overlapGeometry(3200).along).toBeCloseTo(a.along / 2, 12);
+    expect(overlapGeometry(1200).along).toBeGreaterThan(a.along);
+    expect(a.across).toBeCloseTo((2 * HORSE_RADIUS) / 580 / LATERAL_RANGE, 12);
+    expect(a.across, "丸が 1 つ横に並べる余地が複数ある(across < 1/3)").toBeLessThan(1 / 3);
+  });
+
+  it("距離が分からない(null)・0 以下・非有限は 1600m として扱う", () => {
+    const base = overlapGeometry(1600);
+    expect(overlapGeometry(null)).toEqual(base);
+    expect(overlapGeometry(0)).toEqual(base);
+    expect(overlapGeometry(Number.NaN)).toEqual(base);
+  });
+});
+
 describe("drawReplay(キャンバスへの描画)", () => {
-  it("前提: キャンバスの大きさは 720 × (余白 2 つ + 高さ 0.5 の目盛り)", () => {
-    expect(CANVAS_W).toBe(720);
-    expect(CANVAS_H).toBe(Math.round(2 * 70 + 0.5 * 580));
+  it("横位置は frame の lat から決める(順位ではない): lat=0 は内ラチ側・lat=1 は外側で、同じ前方位置の 2 頭の距離は横の幅 LATERAL_RANGE ちょうど。順位が入れ替わっても、馬ごとの lat が同じならその馬の丸は同じ車線", () => {
+    const byNumber = (ctx: FakeCtx): Map<string, [number, number]> =>
+      new Map(ctx.ops.filter((o) => o.op === "fillText" && /^\d+$/.test(o.args[0] as string)).map((o) => [o.args[0] as string, [o.args[1] as number, o.args[2] as number]] as const));
+    const a = new FakeCtx();
+    drawReplay(a, init(2), frameOf([0.5, 0.5], [0.0, 1.0]), COLORS);
+    const pa = byNumber(a);
+    expect(Math.hypot(pa.get("1")![0] - pa.get("2")![0], pa.get("1")![1] - pa.get("2")![1])).toBeCloseTo(LATERAL_RANGE * 580, 6);
+    // lat を入れ替えると、丸の位置も入れ替わる(馬番 1 の丸が、さっきの馬番 2 の丸の位置に来る)
+    const b = new FakeCtx();
+    drawReplay(b, init(2), frameOf([0.5, 0.5], [1.0, 0.0]), COLORS);
+    const pb = byNumber(b);
+    expect(pb.get("1")![0]).toBeCloseTo(pa.get("2")![0], 6);
+    expect(pb.get("1")![1]).toBeCloseTo(pa.get("2")![1], 6);
+    // 前方位置の順位が逆転しても(x を入れ替えても)、同じ lat の馬は同じ車線: 下の直線(x=1 のゴール付近)で y が lat だけで決まる
+    const c = new FakeCtx();
+    const d = new FakeCtx();
+    drawReplay(c, init(2), frameOf([0.99, 0.97], [0.0, 1.0]), COLORS);
+    drawReplay(d, init(2), frameOf([0.97, 0.99], [0.0, 1.0]), COLORS);
+    expect(byNumber(c).get("1")![1]).toBeCloseTo(byNumber(d).get("1")![1], 6);
+    expect(byNumber(c).get("2")![1]).toBeCloseTo(byNumber(d).get("2")![1], 6);
+    expect(byNumber(c).get("1")![1], "前提: lat が違えば y が違う").not.toBeCloseTo(byNumber(c).get("2")![1], 1);
   });
 
   it("背景を塗り、馬の数だけ丸(arc)と馬番(fillText)を描く。馬番はすべて現れる", () => {
     const ctx = new FakeCtx();
     const positions = [0.5, 0.45, 0.4, 0.35, 0.3, 0.25];
-    drawReplay(ctx, init(6), positions, COLORS);
+    drawReplay(ctx, init(6), frameOf(positions), COLORS);
     expect(ctx.ops[0]).toMatchObject({ op: "fillRect", args: [0, 0, CANVAS_W, CANVAS_H], fillStyle: COLORS.bg });
     expect(ctx.ops.filter((o) => o.op === "arc").length).toBe(6);
     const numbers = ctx.ops.filter((o) => o.op === "fillText" && /^\d+$/.test(o.args[0] as string)).map((o) => o.args[0]);
@@ -185,7 +228,7 @@ describe("drawReplay(キャンバスへの描画)", () => {
   it("先頭の馬(位置が最大)だけ accent で塗る。その丸の直後の馬番が先頭の馬のもの", () => {
     const ctx = new FakeCtx();
     // 馬番 4(添字 3)が先頭
-    drawReplay(ctx, init(6), [0.3, 0.2, 0.25, 0.9, 0.1, 0.15], COLORS);
+    drawReplay(ctx, init(6), frameOf([0.3, 0.2, 0.25, 0.9, 0.1, 0.15]), COLORS);
     const arcs = ctx.ops.map((o, i) => ({ o, i })).filter((e) => e.o.op === "arc");
     const accentArcs = arcs.filter((e) => e.o.fillStyle === COLORS.accent);
     expect(accentArcs.length).toBe(1);
@@ -198,7 +241,7 @@ describe("drawReplay(キャンバスへの描画)", () => {
 
   it("馬の丸の中心は、その馬の位置のコース上の点(lateral 込み)。位置の違う2頭は違う場所に描かれる", () => {
     const ctx = new FakeCtx();
-    drawReplay(ctx, init(2), [0.9, 0.3], COLORS);
+    drawReplay(ctx, init(2), frameOf([0.9, 0.3], [0.2, 0.8]), COLORS);
     const centers = ctx.ops.filter((o) => o.op === "arc").map((o) => [o.args[0] as number, o.args[1] as number]);
     expect(centers.length).toBe(2);
     expect(centers[0]).not.toEqual(centers[1]);
@@ -214,25 +257,25 @@ describe("drawReplay(キャンバスへの描画)", () => {
   it("コース(折れ線)・S・G の文字を描く。回りで S/G の位置が左右に入れ替わる", () => {
     const left = new FakeCtx();
     const right = new FakeCtx();
-    drawReplay(left, init(3, "left"), [0.3, 0.2, 0.1], COLORS);
-    drawReplay(right, init(3, "right"), [0.3, 0.2, 0.1], COLORS);
+    drawReplay(left, init(3, "left"), frameOf([0.3, 0.2, 0.1]), COLORS);
+    drawReplay(right, init(3, "right"), frameOf([0.3, 0.2, 0.1]), COLORS);
     const gx = (c: FakeCtx): number => c.ops.find((o) => o.op === "fillText" && o.args[0] === "G")!.args[1] as number;
     expect(gx(left) + gx(right)).toBeCloseTo(CANVAS_W, 6); // 鏡映
     expect(gx(left)).not.toBeCloseTo(gx(right), 1);
     expect(left.ops.filter((o) => o.op === "lineTo").length).toBeGreaterThan(50);
-    // S・G の文字はコースの内側(下の直線の中心線 y = 70 + 0.5 × 580 = 360 より上)に描く(外側はキャンバスの縁で切れる)
+    // S・G の文字はコースの内側(下の直線の中心線 y = 84 + 0.5 × 580 = 374 より上)に描く(外側はキャンバスの縁で切れる)
     for (const t of ["S", "G"]) {
       const o = left.ops.find((op) => op.op === "fillText" && op.args[0] === t)!;
-      expect(o.args[2] as number, t).toBeLessThan(360);
+      expect(o.args[2] as number, t).toBeLessThan(374);
     }
   });
 
   it("退化: 位置の配列が空・1頭でも投げない。馬番が 2 桁でも描く", () => {
     const ctx = new FakeCtx();
-    drawReplay(ctx, init(0), [], COLORS);
-    drawReplay(ctx, init(1), [0.4], COLORS);
+    drawReplay(ctx, init(0), frameOf([]), COLORS);
+    drawReplay(ctx, init(1), frameOf([0.4]), COLORS);
     const c2 = new FakeCtx();
-    drawReplay(c2, init(18), Array.from({ length: 18 }, (_, i) => 0.05 * i), COLORS);
+    drawReplay(c2, init(18), frameOf(Array.from({ length: 18 }, (_, i) => 0.05 * i)), COLORS);
     expect(c2.ops.filter((o) => o.op === "arc").length).toBe(18);
     expect(c2.ops.some((o) => o.op === "fillText" && o.args[0] === "18")).toBe(true);
   });

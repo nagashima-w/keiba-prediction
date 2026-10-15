@@ -13,6 +13,7 @@
  * 値は文字列・有限の数だけに絞る(それ以外は null)。書き込み側との食い違いは、`test/analysis-view.test.ts` の drift のテストが検出する。
  */
 import { dayBabaLines, normalizeDayBaba } from "../../packages/core/src/analyzer/day-baba";
+import { buildRaceDevelopment, type LegStyle, type PaceEstimate } from "../../packages/core/src/analyzer/leg-style";
 import { toSafeRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
@@ -69,6 +70,11 @@ export interface AnalysisViewHorse {
    * 戦績が取れない馬・**Issue #311 より前の分析**・詳細が present でない・範囲外の値は null。確率・配分には使わない。`buildAnalysisView` は常にキーを持つ。型で省略可なのは、この項目を使わない呼び出し側の固定データ(日報の材料など)を壊さないため。
    */
   readonly earlyPos?: number | null;
+  /**
+   * 脚質(Issue #314。レース再生の隊列を脚質で決める演出用)。プロンプトの展開想定と同じ分類・同じ参照走数(分析の時点で計算してスナップショットに保存した値)。
+   * 戦績が取れない馬・**Issue #314 より前の分析**・詳細が present でない・4 値以外の値は null。確率・配分には使わない。`buildAnalysisView` は常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。
+   */
+  readonly legStyle?: LegStyle | null;
 }
 
 export interface AnalysisViewRace {
@@ -93,6 +99,11 @@ export interface AnalysisViewRace {
   readonly placeBasis: PlaceOddsBasis | null;
   /** コースの回り(Issue #311。レース再生のコース図の向き。raceId の場コードと距離から `courseTurnOf` で決める。不明は "right")。詳細〈R2〉の状態に依らないが、大井の 1650m の特例は距離が要るので詳細が無いと右になる。`buildAnalysisView` は常にキーを持つ(型で省略可なのは `earlyPos` と同じ理由)。 */
   readonly turn?: CourseTurn;
+  /**
+   * 想定ペース(Issue #314。レース再生の隊列の長さ・動き出しの演出用)。**プロンプトの展開想定と同じ判定**(core の `buildRaceDevelopment` の `pace`。逃げ馬の頭数から。脚質の判定できた馬が 1 頭もいなければ「不明」)に、
+   * スナップショットの馬ごとの脚質を渡して求める。詳細が present でない・古い分析〈脚質のキーが無い〉は「不明」。確率・配分には使わない(着順の抽選も変えない)。`buildAnalysisView` は常にキーを持つ。
+   */
+  readonly pace?: PaceEstimate;
 }
 
 export interface AnalysisViewAllocation {
@@ -174,6 +185,25 @@ function earlyPosOf(value: unknown): number | null {
   return n !== null && n >= 0 && n <= 1 ? n : null;
 }
 
+const LEG_STYLES: readonly LegStyle[] = ["逃げ", "先行", "差し", "追込"];
+
+/** 脚質(Issue #314)。4 値の文字列だけ。それ以外(null・数・知らない文字列)は null。 */
+function legStyleOf(value: unknown): LegStyle | null {
+  return LEG_STYLES.find((s) => s === value) ?? null;
+}
+
+/**
+ * 想定ペース(Issue #314)。プロンプトの展開想定と同じ `buildRaceDevelopment` に、スナップショットの全馬の脚質を渡す
+ * (ペースは逃げ馬の頭数と「脚質が全頭不明か」だけで決まる。安定度・先行力・開催区分・馬場は「恵まれる脚質」の表にしか効かないので渡さない)。
+ */
+function paceOf(snapshot: ReturnType<typeof toSafeRaceSnapshot> | null): PaceEstimate {
+  if (snapshot === null) {
+    return "不明";
+  }
+  const horses = [...snapshot.horsesByUmaban.values()].map((h) => ({ umaban: h.umaban, style: legStyleOf(h.legStyle), stability: "不明" as const, frontRunningScore: null }));
+  return buildRaceDevelopment(horses).pace;
+}
+
 /** 実際の単勝オッズ。有限の数で、配分の候補ビルダーと同じ基準(`isUsableOdds`。1.0 以上)を満たすものだけ。それ以外(未確定の null・文字列・NaN・1.0 未満)は null。 */
 function usableOdds(value: unknown): number | null {
   const n = num(value);
@@ -243,6 +273,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       oddsStatus: str(race?.oddsStatus),
       placeBasis: placeOdds.basis,
       turn: courseTurnOf(analysis.raceId, num(race?.distance)),
+      pace: paceOf(snapshot),
     },
     // 詳細が present でないときは、スナップショットを一切使わない(null)。
     baba: detail === "present" ? babaViewOf(analysis.raceSnapshot) : null,
@@ -266,6 +297,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       actualPlaceOddsMin: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.placeOddsMin),
       actualPlaceOddsMax: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.placeOddsMax),
       earlyPos: earlyPosOf(snapshot?.horsesByUmaban.get(h.umaban)?.earlyPos),
+      legStyle: legStyleOf(snapshot?.horsesByUmaban.get(h.umaban)?.legStyle),
     })),
     allocation:
       allocation === undefined

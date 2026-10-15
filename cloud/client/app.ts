@@ -107,6 +107,8 @@ export interface AppDeps {
   readonly replay?: {
     readonly start: (init: ReplayInit, speed: number) => void;
     readonly setSpeed: (speed: number) => void;
+    /** 直前と同じ展開を最初から再生し直す(Issue #314「もう一度再生」)。展開を持っていない(始める前・止めたあと・別の分析)ときは false。 */
+    readonly replay: (analysisId: number) => boolean;
     readonly stop: () => void;
   };
 }
@@ -367,6 +369,7 @@ export function createApp(deps: AppDeps): App {
     onReportRegenCancel: () => (isMonthlyRoute() ? monthly.onRegenCancel() : report.onRegenCancel()),
     onReportDateChange,
     onReplayPlay,
+    onReplayRepeat,
     onReplaySpeed,
   };
 
@@ -933,6 +936,21 @@ export function createApp(deps: AppDeps): App {
     replayFinish = null;
     render();
     deps.replay.start(init, replaySpeed);
+  }
+
+  /**
+   * 「もう一度再生」(Issue #314): この分析の再生を始めている(再生中・走り終えたあと)ときだけ、直前と同じ展開をプレーヤに最初から再生し直させる(抽選し直さない)。
+   * 着順の表は消す(走り終えたらまた同じ着順が通知される)。プレーヤが展開を持っていなければ(false)、表はそのまま残す。
+   */
+  function onReplayRepeat(analysisId: number): void {
+    if (deps.replay === undefined || replayStartedId !== analysisId) return;
+    const previous = replayFinish;
+    replayFinish = null;
+    render();
+    if (!deps.replay.replay(analysisId)) {
+      replayFinish = previous;
+      render();
+    }
   }
 
   function onReplaySpeed(speed: number): void {
