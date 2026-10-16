@@ -168,7 +168,6 @@ describe("applyRace: 応答を production の analyzeRace に通して補正後�
     const out = await applyRace(await makeInput([bad, bad]));
     if (out.status !== "final") throw new Error("前提");
     expect(out.record.fallback).toBe(false);
-    expect(out.record.marksDropped).toBe(false);
     // 聞き直し(2回目)のプロンプトは、段階1のプロンプトに固定の追記文が付く(Issue #317)。それでも照合を通り、2回試行した記録になる。
     expect(out.record.attempts).toBe(2);
     // ◎2頭 → ◎1頭 + 〇1頭に補修される(印が付いている。全消しではない)。

@@ -317,22 +317,10 @@ export interface AnalysisResult {
    * 秘密安全性のため、生のLLM例外メッセージ等は含まない固定分類文言のみが入る
    * (core analyzeRace の FALLBACK_REASON_TRUNCATED / FALLBACK_REASON_PARSE_ERROR /
    * FALLBACK_REASON_INVOCATION_ERROR のいずれか。論点C: 2026-07-19合意)。
-   * DB(AnalysisRecord)には保存しない(marksDroppedReasonと同方針。論点D)。
+   * DB(AnalysisRecord)には保存しない(live 専用。論点D)。
    * UI では、旧 exe の BatchAnalysisView(#287 で削除。3c1664e まで)が「LLM補正:」行のtooltip(title)に表示した。クラウド版の画面は、LLM が効かなかった理由の固定文言 `llmNote`(`cloud/client/result.ts`)を出す。
    */
   readonly fallbackReason: string | null;
-  /**
-   * 予想印の制約違反(頭数・優先順位・未知の印文字)によりリトライ後も印を採用できず、
-   * 確率補正(AI補正後確率)は有効なまま全馬の印だけを非表示にした場合 true
-   * (A: フォールバック分離・2026-07-19合意)。**Issue #317 以降は常に false**(印は補修して採用するので、全消しにする経路が無い。型は互換のために残してある)。fallback とは意味が異なる点に注意:
-   * fallback は確率補正そのものを prior に戻す(補正無効)のに対し、marksDropped は
-   * 確率補正は有効なまま印だけを諦めた状態を示す(fallback:false のまま true になり得る)。
-   * optional なのは既存の AnalysisResult リテラルを使うテストを無改変で通すため
-   * (runAnalysis 自身は必ず true/false のいずれかを明示的に返す)。
-   */
-  readonly marksDropped?: boolean;
-  /** marksDropped:true の場合の理由説明(通常時・非印失敗時は null)。 */
-  readonly marksDroppedReason?: string | null;
   /**
    * 分析に使ったLLMモデルID(Issue #157。保存レコードの `analyses.model` と同じ値)。
    * analyzeRace が応答を得たモデル(自動選択の結果。固定モデルへ切り替わればそちら)を優先し、

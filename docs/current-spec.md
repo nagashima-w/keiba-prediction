@@ -384,7 +384,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **フェイルセーフ**(`analyze-race.ts` / `parse-response.ts`): JSON 破損・切り詰め(`AnalyzerTruncationError`、
   stop_reason=max_tokens)・呼び出し失敗は 1 回リトライ後に**全馬 prior 採用**(`fallback:true`、理由を
   3 分類 `FALLBACK_REASON_TRUNCATED` / `_PARSE_ERROR` / `_INVOCATION_ERROR` で可視化)。印制約違反
-  (`AnalyzerMarkViolationError`)は確率補正は残し、**印は全消しにせず規則に合わせて補修して採用**する(#317。`marksDropped` は常に false)。
+  (`AnalyzerMarkViolationError`)は確率補正は残し、**印は全消しにせず規則に合わせて補修して採用**する(#317。以前あった全消しの `marksDropped` は #329 で型ごと削除した)。
   - **補修**(`analyzer/repair-marks.ts` の `repairMarks`。決定的な純関数): 未知の印文字は印なし / ☆・注は補正後の3着内率の最上位の1頭だけ残す /
     本線(◎〇▲△)は「元の印の格 → 3着内率の降順(同値は馬番の小さい方)」に並べて枠 ◎〇▲△△△ へ上から詰める(超過は下の印へ繰り下げ、途切れは上へ詰め、◎が無ければ最上位が◎) /
     本線が1頭も無ければ率最大の馬を◎(その馬の☆・注は外れる)。補修後は必ず規則を満たす。

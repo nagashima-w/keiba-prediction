@@ -494,8 +494,6 @@ describe("outcomeOf(analyzeRace の結果から、LLM が効いたか・画面�
     fallback: false,
     retryCount: 0,
     fallbackReason: null,
-    marksDropped: false,
-    marksDroppedReason: null,
     rawResponse: "x",
     modelUsed: "claude-sonnet-5-5",
   };
@@ -529,12 +527,6 @@ describe("outcomeOf(analyzeRace の結果から、LLM が効いたか・画面�
   it("違反が無い成功は markRepair を持たない(null)", () => {
     expect(outcomeOf({ ...base, markRepair: null }).markRepair).toBeNull();
     expect(outcomeOf(base).markRepair).toBeNull();
-  });
-
-  it("生の例外メッセージを含む旧い marksDroppedReason があっても、理由に出さない(固定文言だけ)", () => {
-    const outcome = outcomeOf({ ...base, marksDropped: true, marksDroppedReason: "印関連の制約違反のため…: ◎が2頭 sk-ant-LEAK" });
-    expect(outcome.note).toBeNull();
-    expect(JSON.stringify(outcome)).not.toContain("sk-ant-");
   });
 
   it.each([

@@ -112,7 +112,6 @@ function record(
     retryCount: 0,
     fallback: false,
     fallbackReason: null,
-    marksDropped: false,
     truncated: false,
     horses,
     ...over,
@@ -258,14 +257,13 @@ describe("aggregateLlm: fallback したレースの感度(主表は production �
 });
 
 describe("aggregateLlm: LLM の実行の要約と補正量の記述統計", () => {
-  it("クリップ・prior 採用の馬数、リトライ・印救済・切り詰めのレースを数える", () => {
+  it("クリップ・prior 採用の馬数、リトライ・切り詰めのレースを数える", () => {
     const recs = allRecords().map((rec) => {
       if (rec.raceId === "202606040801") {
         return {
           ...rec,
           retryCount: 1,
           attempts: 2,
-          marksDropped: true,
           horses: rec.horses.map((h) => (h.umaban === 1 ? { ...h, clipped: true } : h.umaban === 2 ? { ...h, usedPrior: true } : h)),
         };
       }
@@ -273,7 +271,6 @@ describe("aggregateLlm: LLM の実行の要約と補正量の記述統計", () =
     });
     const r = aggregateLlm(ALL_OBS, recs);
     expect(r.central.llmRun.retriedRaceIds).toEqual(["202606040801"]);
-    expect(r.central.llmRun.marksDroppedRaceIds).toEqual(["202606040801"]);
     expect(r.central.llmRun.truncatedRaceIds).toEqual([]);
     expect(r.central.adjustment.clippedHorseCount).toBe(1);
     expect(r.central.adjustment.usedPriorHorseCount).toBe(1);
@@ -495,7 +492,7 @@ describe("parseAggregateArgs: CLI の引数(Issue #200)", () => {
   });
 });
 
-describe("実データ: コミット済みの #156 の観測を旧版のまま集計し直すと、記録した aggregate.json と一致する(Issue #200)", () => {
+describe("実データ: コミット済みの #156 の観測を旧版のまま集計し直すと、記録した aggregate.json と一致する(Issue #200。ただし #329 で出力から消えた llmRun.marksDroppedRaceIds の 1 キーを除く)", () => {
   const llmDir = path.join(LLM_ROOT, "llm-observations");
   const records = loadLlmRecords(llmDir);
   const observations = loadObservations(OBS_ROOT);
@@ -514,10 +511,22 @@ describe("実データ: コミット済みの #156 の観測を旧版のまま�
     expect(() => aggregateLlm(observations, records)).toThrow(/promptVersion が 2026-07-28\.2/);
   });
 
-  it("旧版を指定すると、aggregate.json(JSON 全体。中央・地方の Brier・対比較・補正量・方向性を含む)と完全に一致する", () => {
+  it("前提: 記録済みの aggregate.json の llmRun.marksDroppedRaceIds は、中央・地方とも空配列(印の全消しは観測 36 本に無かった)。再集計の出力にはこのキーが無い(#329)", () => {
+    expect(recorded.central.llmRun).toHaveProperty("marksDroppedRaceIds", []);
+    expect(recorded.nar.llmRun).toHaveProperty("marksDroppedRaceIds", []);
+    const again = aggregateLlm(observations, records, { expectedPromptVersion: OLD_PROMPT_VERSION });
+    expect(again.central.llmRun).not.toHaveProperty("marksDroppedRaceIds");
+    expect(again.nar.llmRun).not.toHaveProperty("marksDroppedRaceIds");
+  });
+
+  it("旧版を指定すると、aggregate.json(JSON 全体。中央・地方の Brier・対比較・補正量・方向性を含む)と、llmRun.marksDroppedRaceIds の 1 キーを除いて完全に一致する", () => {
     const again = aggregateLlm(observations, records, { expectedPromptVersion: OLD_PROMPT_VERSION });
     expect(again.central.raceCount).toBe(24);
     expect(again.nar.raceCount).toBe(12);
-    expect(JSON.parse(JSON.stringify(again))).toEqual(recorded);
+    // 取り除くのは llmRun.marksDroppedRaceIds だけ(上の前提テストが、それが空配列で、再集計の出力には無いことを固定する)。
+    const { marksDroppedRaceIds: _c, ...centralRun } = (recorded.central.llmRun as typeof recorded.central.llmRun & { marksDroppedRaceIds: readonly string[] });
+    const { marksDroppedRaceIds: _n, ...narRun } = (recorded.nar.llmRun as typeof recorded.nar.llmRun & { marksDroppedRaceIds: readonly string[] });
+    const expected = { ...recorded, central: { ...recorded.central, llmRun: centralRun }, nar: { ...recorded.nar, llmRun: narRun } };
+    expect(JSON.parse(JSON.stringify(again))).toEqual(expected);
   });
 });

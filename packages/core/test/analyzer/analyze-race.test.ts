@@ -11,7 +11,7 @@
  *
  * A(フォールバック分離・2026-07-19合意): 印関連の違反(頭数・優先順位・未知の印文字)があっても、確率補正
  * (adjustedProb/clipped/reason)は捨てず prior に戻さない(fallback:false・fallbackReason:null)。
- * Issue #317: 印は全消しにせず、規則に合わせて補修して採用する(repairMarks)。`marksDropped` は常に false。
+ * Issue #317: 印は全消しにせず、規則に合わせて補修して採用する(repairMarks)。以前あった印の全消し〈marksDropped〉は #329 で型ごと削除した。
  * 印と無関係な失敗(JSON破損・horses配列なし・有効な補正0件)は従来どおり全馬 prior・fallback:true・全馬 mark=null とする。
  */
 
@@ -83,7 +83,6 @@ describe("analyzeRace(1レース分の分析)", () => {
     expect(r.fallback).toBe(false);
     expect(r.retryCount).toBe(0);
     expect(r.fallbackReason).toBeNull();
-    expect(r.marksDropped).toBe(false);
     const h1 = r.horses.find((h) => h.umaban === 1)!;
     expect(h1.adjustedProb).toBeCloseTo(0.45, 10);
     expect(h1.prior).toBeCloseTo(0.4, 10);
@@ -122,7 +121,6 @@ describe("analyzeRace(1レース分の分析)", () => {
     expect(r.diagnosticMessage!.length).toBeGreaterThan(0);
     expect(r.truncated).toBe(false);
     expect(r.stopReason ?? null).toBeNull();
-    expect(r.marksDropped).toBe(false); // 印と無関係な失敗(JSON破損)は従来どおりの全馬prior。
     expect(llm.complete).toHaveBeenCalledTimes(2);
     const h1 = r.horses.find((h) => h.umaban === 1)!;
     expect(h1.adjustedProb).toBeCloseTo(0.4, 10); // prior
@@ -153,7 +151,6 @@ describe("analyzeRace(1レース分の分析)", () => {
     const r = await analyzeRace(input(), { llm });
     expect(r.fallback).toBe(true);
     expect(r.retryCount).toBe(1);
-    expect(r.marksDropped).toBe(false); // 印と無関係な失敗(LLM例外)は従来どおりの全馬prior。
     expect(r.horses.find((h) => h.umaban === 1)!.adjustedProb).toBeCloseTo(0.4, 10);
     // 固定分類文言(UI/DBに秘密が混入しない設計)の厳密表明。
     expect(r.fallbackReason).toBe(FALLBACK_REASON_INVOCATION_ERROR);
@@ -209,7 +206,6 @@ describe("analyzeRace(1レース分の分析)", () => {
     expect(r.retryCount).toBe(1);
     expect(llm.complete).toHaveBeenCalledTimes(2);
     expect(r.horses.every((h) => h.usedPrior)).toBe(true);
-    expect(r.marksDropped).toBe(false); // 有効な補正0件(印と無関係)は従来どおりの全馬prior。
   });
 
   it("空の horses→リトライで有効応答なら成功すること", async () => {
@@ -306,7 +302,6 @@ describe("analyzeRace(応答の切り詰め検出・小倉記念18頭切り詰�
     expect(r.fallbackReason).toBe(FALLBACK_REASON_TRUNCATED);
     expect(r.truncated).toBe(true);
     expect(r.stopReason).toBe("max_tokens");
-    expect(r.marksDropped).toBe(false);
     expect(r.horses.every((h) => h.usedPrior)).toBe(true);
     expect(r.horses.every((h) => h.mark === null)).toBe(true);
   });
@@ -354,7 +349,6 @@ describe("analyzeRace(予想印 mark の統合・Task#22)", () => {
     };
     const r = await analyzeRace(input(), { llm });
     expect(r.fallback).toBe(true);
-    expect(r.marksDropped).toBe(false);
     expect(r.horses.every((h) => h.mark === null)).toBe(true);
   });
 
@@ -362,7 +356,6 @@ describe("analyzeRace(予想印 mark の統合・Task#22)", () => {
     const llm = fixedLlm("こわれ1", "こわれ2");
     const r = await analyzeRace(input(), { llm });
     expect(r.fallback).toBe(true);
-    expect(r.marksDropped).toBe(false);
     expect(r.horses.every((h) => h.mark === null)).toBe(true);
   });
 });
@@ -380,13 +373,11 @@ describe("analyzeRace(Issue #317: 印の違反は全消しにせず補修する�
   // 頭数違反: ◎が2頭。本線は「元の格 → 率」の順に並べて枠(◎〇▲△△△)へ詰めるので、◎2 以降が1段ずつ下がる。
   const OVER_DOUBLE_HONMEI = body(["◎", "◎", "〇", "▲", "△", "△"]);
 
-  it("頭数違反(◎が2頭)でも補修して採用: fallback:false・fallbackReason:null・marksDropped:false・全馬に規則を満たす印・確率補正保持", async () => {
+  it("頭数違反(◎が2頭)でも補修して採用: fallback:false・fallbackReason:null・全馬に規則を満たす印・確率補正保持", async () => {
     const llm = fixedLlm(OVER_DOUBLE_HONMEI, OVER_DOUBLE_HONMEI);
     const r = await analyzeRace(input(), { llm });
     expect(r.fallback).toBe(false);
     expect(r.fallbackReason).toBeNull();
-    expect(r.marksDropped).toBe(false);
-    expect(r.marksDroppedReason).toBeNull();
     expect(r.retryCount).toBe(1);
     expect(llm.complete).toHaveBeenCalledTimes(2);
     // ◎1(0.45) ◎2(0.15) 〇3 ▲4 △5 △6 → 枠 ◎〇▲△△△ に順序を保って詰める。
@@ -420,7 +411,6 @@ describe("analyzeRace(Issue #317: 印の違反は全消しにせず補修する�
     const bad = body(["◎", "▲", null, null, null, null]);
     const r = await analyzeRace(input(), { llm: fixedLlm(bad, bad) });
     expect(r.fallback).toBe(false);
-    expect(r.marksDropped).toBe(false);
     expect(r.retryCount).toBe(1);
     expect(marksOf(r)).toEqual(["◎", "〇", null, null, null, null]);
     expect(r.markRepair?.attempts.map((a) => a.kinds)).toEqual([["gap-〇"], ["gap-〇"]]);
@@ -433,7 +423,6 @@ describe("analyzeRace(Issue #317: 印の違反は全消しにせず補修する�
     const bad = body(["◎", "◇", "〇", "▲", "△", null]);
     const r = await analyzeRace(input(), { llm: fixedLlm(bad, bad) });
     expect(r.fallback).toBe(false);
-    expect(r.marksDropped).toBe(false);
     expect(marksOf(r)).toEqual(["◎", null, "〇", "▲", "△", null]);
     expect(r.markRepair?.changes).toEqual([{ umaban: 2, from: "不明", to: null }]);
     expect(JSON.stringify(r.markRepair)).not.toContain("◇");
@@ -454,7 +443,6 @@ describe("analyzeRace(Issue #317: 印の違反は全消しにせず補修する�
     const llm = fixedLlm(OVER_DOUBLE_HONMEI, okBody); // リトライ(2回目)は正常応答。
     const r = await analyzeRace(input(), { llm });
     expect(r.fallback).toBe(false);
-    expect(r.marksDropped).toBe(false);
     expect(r.retryCount).toBe(1);
     expect(r.horses.find((h) => h.umaban === 3)!.mark).toBe("◎");
     expect(r.markRepair).toEqual({ repaired: false, adoptedAttempt: 2, attempts: [{ n: 1, kinds: ["over-◎"] }], changes: [] });
@@ -659,7 +647,6 @@ describe("analyzeRace(拒否 stop_reason='refusal'・Issue #157)", () => {
     expect(r.fallbackReason).toBe(FALLBACK_REASON_REFUSED);
     expect(r.truncated).toBe(false);
     expect(r.stopReason).toBe("refusal");
-    expect(r.marksDropped).toBe(false);
     expect(r.rawResponse).toBeNull();
     expect(r.horses.every((h) => h.usedPrior)).toBe(true);
     expect(r.horses.every((h) => h.mark === null)).toBe(true);

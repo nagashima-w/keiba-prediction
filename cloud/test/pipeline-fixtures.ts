@@ -139,8 +139,6 @@ export function stubAnalyze(captured: BuildPromptInput[]): (input: BuildPromptIn
       fallback: false,
       retryCount: 0,
       fallbackReason: null,
-      marksDropped: false,
-      marksDroppedReason: null,
       rawResponse: "スタブの生応答",
       modelUsed: "claude-stub-model",
     };

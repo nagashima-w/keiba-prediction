@@ -393,9 +393,9 @@ describe("buildAnalysisNotificationEmbed(AC-D1: 狙い目あり=緑・なし=灰
     expect(out.description).toContain("LLM補正: スキップ");
     expect(out.description).toContain(`LLM補正の注記: ${note}`);
     expect(out.color).toBe(DISCORD_COLORS.ok);
-    const marksDropped = buildAnalysisNotificationEmbed(record(), { effective: true, note: "印の一部を規則に合わせて直しました(3着内率の補正は反映しています)" }, label());
-    expect(marksDropped.description).toContain("LLM補正: 実行"); // 補正は効いている
-    expect(marksDropped.description).toContain("LLM補正の注記: 印の一部を規則に合わせて直しました");
+    const markRepaired = buildAnalysisNotificationEmbed(record(), { effective: true, note: "印の一部を規則に合わせて直しました(3着内率の補正は反映しています)" }, label());
+    expect(markRepaired.description).toContain("LLM補正: 実行"); // 補正は効いている
+    expect(markRepaired.description).toContain("LLM補正の注記: 印の一部を規則に合わせて直しました");
   });
 
   it("note が無いときは注記の行を出さない", () => {
