@@ -22,7 +22,7 @@ Issue #161(#21-C)の土台と、#162(#21-D)段階2の netkeiba 取得の出口(�
 
 ## コマンド(cloud/ で)
 ```
-pnpm install --ignore-workspace --frozen-lockfile
+pnpm install --ignore-workspace --frozen-lockfile   # cloud/pnpm-workspace.yaml(空のワークスペース)は Dependabot が cloud/ の lockfile を更新するための目印。この install の動作は変わらない(Issue #324)
 pnpm run typecheck
 pnpm test
 pnpm run deploy:dry   # デプロイせずバンドルと設定を確かめる
@@ -391,11 +391,12 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 ## LLM の土台(Issue #193〈#179-a〉。**この Issue は挙動を変えない**。実行本体は #194〈下の「発走前の分析の LLM」〉)
 発走前の分析で LLM(Anthropic の API)を使うための**依存と入口**を足した(#193)。#193 の時点では、本番の入口(`worker.ts`)・`RaceDay` は LLM を呼ばなかった。
 - **`@anthropic-ai/sdk` を cloud の依存に足した理由**: core の `anthropic-client.ts`(メッセージ送信)・`model-selection.ts`(Models API)が値で import する。cloud は workspace の外で `packages/core/node_modules` が CI に無いので、cheerio と同じく cloud/node_modules に入れ、**3か所の alias**(`wrangler.toml`・`tsconfig.json`・`vitest.config.ts`)で向ける。
-  版は core の `package.json` の範囲(`^0.70.1`)と同じ **0.70.1 を exact で固定**(`scripts/test/cloud-config-guard.test.ts` が一致と、`pnpm-lock.yaml` への固定を検査)。推移的に増えるのは 3 パッケージ(json-schema-to-ts・@babel/runtime・ts-algebra)。
+  版は core の `package.json` の範囲と同じ版を **exact で固定**する(#193 の時点は 0.70.1。**Issue #324 で 0.133.0 に更新**。`scripts/test/cloud-config-guard.test.ts` が一致と、`pnpm-lock.yaml` への固定を検査)。推移的に増えるのは、#193 の時点では 3 パッケージ(json-schema-to-ts・@babel/runtime・ts-algebra)。0.133.0 では standardwebhooks・@stablelib/base64・fast-sha256 が増えた(`@opentelemetry/api` は 0.134.0 から。0.133.0 には無い)。
 - **`@keiba/core/llm`**(core の `src/llm.ts`): `analyze-race`・`anthropic-client`・`model-selection` の再 export だけの狭い入口。better-sqlite3 を値でも型でも経由しない(`packages/core/test/ev/native-free-modules.test.ts`)。`@keiba/core/pipeline` に足さない理由は、SDK がバンドルに入る経路を「この入口を import したとき」だけにするため(`test/bundle-guard.test.ts` が、pipeline だけの入口に SDK の文字列が無いことを検査)。
 - **`src/llm-sender.ts`**: クラウド版の呼び出しの設定値を1か所に置く(sender の上限時間 180 秒〈**暫定**。実 API で測ってから調整〉・モデル一覧 30 秒・SDK の内部再試行 0 回)。core の `createSdkMessageSender`・`createSdkModelLister` に、省略可の `timeout`・`maxRetries` を足した(exe は渡さない。省略時は SDK の既定のまま)。
   再試行を 0 にする理由: SDK の既定(2 回)と `analyzeRace` の再送(1 回)が重なると、1 レースの HTTP が最大 9 本になる。cloud は `analyzeRace` の再送だけに任せる。
 - **バンドルの実測**(`wrangler deploy --dry-run`): SDK + `analyzeRace` 一式の入口(NetkeibaGate の export を含む probe)で 309.94 KiB・gzip 63.10 KiB(本番の現状は 1952.76 KiB・gzip 512.63 KiB)(`test/bundle-guard.test.ts` が、本番との和が 3 MB に収まることと、単体 512 KiB 以内を検査)。
+  - **Issue #324(SDK 0.70.1 → 0.133.0、iconv-lite 0.6.3 → 0.7.3)の前後の本番の dry-run**(`cloud/` で `npx wrangler deploy --dry-run --outdir dist-dry` の `Total Upload`): 更新前 3276.39 KiB・gzip 869.44 KiB → 更新後 3992.01 KiB・gzip 975.54 KiB。`node:` の import は更新前後とも `node:stream` 1・`node:zlib` 3 で増えていない。
 - **Workers での実行**: 偽 fetch を注入した workerd(`wrangler dev --local`)で、Models API の取得 → メッセージ送信が通ること、`timeout` が効くこと、429 で `maxRetries` の既定が 3 本・0 が 1 本であることを確かめた。**実 API には出ていない。**
 
 ## 発走前の分析の LLM(Issue #194〈#179-b〉。b1: 実行・記録と再生・追加指示の切り詰め・理由・ログ / b2: 理由の永続化・health)

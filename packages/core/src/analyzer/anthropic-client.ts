@@ -20,7 +20,8 @@ import type { ModelSelector } from "./model-selection.js";
 import { AnalyzerRefusalError, AnalyzerTruncationError } from "./parse-response.js";
 
 /**
- * 推論の深さ(output_config.effort)。SDK 0.70.1 の型には無いため、型の外(キャスト)で送る。
+ * 推論の深さ(output_config.effort)。SDK 0.70.1 の型には無かったため、型の外(キャスト)で送ってきた。
+ * SDK 0.133.0 で型に入った(Issue #324)が、送る本文を変えないため、キャストはそのまま残す。
  * Claude Sonnet 5.5 が受け付ける値。
  */
 export type AnalyzerEffort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -58,11 +59,12 @@ export interface AnalyzerConfig {
  * maxTokens=16000: thinking(既定の adaptive)を含む出力の上限。旧値8192は、予想印+馬ごとの和文根拠を
  * 加えた現行スキーマで18頭分の応答が2048トークン付近に達した小倉記念の切り詰め事故(2026-07-19)を
  * 踏まえた値だったが、Sonnet 5.5 では thinking の出力トークンも max_tokens に数えられるため
- * 16000 に引き上げた。非ストリーミング(`messages.create`)のまま使うので、SDK 0.70.1 が
+ * 16000 に引き上げた。非ストリーミング(`messages.create`)のまま使うので、SDK が
  * 非ストリーミングで例外を投げる 21333 を超えない値に留める
- * (`node_modules/@anthropic-ai/sdk/client.js` の _calculateNonstreamingTimeout が、
+ * (`node_modules/@anthropic-ai/sdk/client.js` の calculateNonstreamingTimeout〈0.70.1 では _calculateNonstreamingTimeout〉が、
  * 想定所要時間 3600×max_tokens/128000 秒が 600 秒以上になる max_tokens で投げる。
  * 600×128000/3600 = 21333.3…)。ストリーミング化は本改定のスコープ外。
+ * この検査は、クライアントに timeout を渡さないときだけ働く(クラウド版は渡すので通らない)。
  *
  * effort="low": ユーザー判断(2026-10-03)。thinking を含む出力トークンの実測は実 API が要るため、
  * 実装後にユーザー承認を得て行う。
@@ -276,9 +278,9 @@ export interface SdkMessageSenderOptions {
  * 既定 sender: 初回呼び出し時に @anthropic-ai/sdk のクライアントを生成する。
  * APIキー未解決の場合、SDK のエラーは「呼び出し時」に発生する(インスタンス化時ではない)。
  *
- * output_config(effort)は SDK 0.70.1 の型に無いが、SDK はリクエスト本文をそのまま送る
- * (テストで fetch を差し替えて本文に載ることを確認している)。SDK の更新は別途判断(#157)なので、
- * ここでは型の外(キャスト)で渡す。temperature・thinking は送らない。
+ * output_config(effort)は SDK 0.70.1 の型に無かった(0.133.0 で型に入った)が、SDK はリクエスト本文をそのまま送る
+ * (テストで fetch を差し替えて本文に載ることを確認している)。0.133.0 で型に入った後も、送る本文を変えないため
+ * 型の外(キャスト)で渡す(Issue #324)。temperature・thinking は送らない。
  */
 export function createSdkMessageSender(options: SdkMessageSenderOptions = {}): MessageSender {
   let client: Anthropic | null = null;

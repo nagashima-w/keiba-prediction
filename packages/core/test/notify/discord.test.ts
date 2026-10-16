@@ -547,6 +547,37 @@ describe("sendDiscordNotification(Webhook送信)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("不正な URL のエラー文言は、実際の判定条件(https・ホスト・userinfo/ポート・パス)に合い、URL そのもの(秘密)を含まない(Issue #328)", async () => {
+    const expectedMessage =
+      "Discord Webhook URL が不正です(https:// で始まり、ホストが discord.com または discordapp.com そのもの(サブドメインは不可)で、ユーザー名・パスワード・ポート番号を含まず、パスが /api/webhooks/ で始まる URL が必要です)";
+    // 秘密(トークン)を含みうる不正な URL。形式の違反ごとに、どれでも同じ固定の文言になり、URL の断片が混ざらないこと。
+    const secret = "SECRETTOKEN-9f8e7d";
+    const badUrls = [
+      `http://discord.com/api/webhooks/123/${secret}`,
+      `https://example.com/api/webhooks/123/${secret}`,
+      `https://ptb.discord.com/api/webhooks/123/${secret}`,
+      `https://user:pw@discord.com/api/webhooks/123/${secret}`,
+      `https://discord.com:444/api/webhooks/123/${secret}`,
+      `https://discord.com/other/123/${secret}`,
+      `not a url ${secret}`,
+    ];
+    for (const url of badUrls) {
+      // 前提: 実装が本当にこの URL を不正と判定している(判定と文言の対応を取る)
+      expect(isDiscordWebhookUrl(url)).toBe(false);
+      const fetchMock = vi.fn<DiscordFetchLike>();
+      const error = await sendDiscordNotification(url, payload, { fetch: fetchMock }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(DiscordNotifyError);
+      const message = (error as DiscordNotifyError).message;
+      expect(message).toBe(expectedMessage);
+      expect(message).not.toContain(secret);
+      expect(message).not.toContain(url);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
+
   it("非2xx(4xx)は理由付きの DiscordNotifyError を投げる", async () => {
     const fetchMock = vi.fn<DiscordFetchLike>(async () =>
       makeResponse({ status: 400, body: "bad" }),

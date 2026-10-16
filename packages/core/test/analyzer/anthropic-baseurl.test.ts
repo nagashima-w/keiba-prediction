@@ -1,7 +1,7 @@
 /**
  * Issue #304: Anthropic の宛先(baseURL)の固定。
  *
- * `@anthropic-ai/sdk` 0.70.1 のコンストラクタは `baseURL` の既定値を環境変数 `ANTHROPIC_BASE_URL` から読む
+ * `@anthropic-ai/sdk` のコンストラクタ(0.70.1 で確認。0.133.0 でも同じ)は `baseURL` の既定値を環境変数 `ANTHROPIC_BASE_URL` から読む
  * (`client.js` の `baseURL = readEnv('ANTHROPIC_BASE_URL')`)。Worker は `nodejs_compat` で secret が `process.env` に入りうるので、
  * その名前の secret を誤って登録すると、API キーが別のホストへ送られる。
  * そこで `new Anthropic({...})` に `baseURL: ANTHROPIC_API_BASE_URL`(`https://api.anthropic.com`)を固定で渡す。

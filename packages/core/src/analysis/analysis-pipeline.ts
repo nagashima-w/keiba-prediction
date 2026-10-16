@@ -256,8 +256,8 @@ export interface AnalysisPipelineDeps {
   readonly onBabaError?: (info: { readonly raceId: RaceId; readonly message: string }) => void;
   /**
    * fallback:true(LLMがフェイルセーフでpriorに復帰)発生時に呼ばれる任意の診断ログ用フック
-   * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(印の補修〈Issue #317。
-   * 旧仕様ではmarksDroppedのみのA救済〉を含む)では呼ばない。
+   * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(印の補修〈Issue #317〉を含む)では
+   * 呼ばない。
    *
    * 秘密安全性: context に相当する raceId・stopReason は構造化情報のみで apiKey・Webhook等は
    * 一切積まない。diagnosticMessage は LLM呼び出し例外・JSONパース失敗時の生の詳細を含みうる
@@ -498,10 +498,6 @@ export async function runAnalysis(
   let fallback = false;
   // フォールバックの理由(固定分類文言。論点C)。不変条件: fallback:false の場合は必ず null。
   let fallbackReason: string | null = null;
-  // A(フォールバック分離・2026-07-19合意): 予想印の制約違反により印だけを諦めた場合 true。
-  // fallback(確率補正そのものを prior に戻す)とは意味が異なるため別フィールドで伝播する。
-  let marksDropped = false;
-  let marksDroppedReason: string | null = null;
   // LLMの生応答テキスト(Issue#10 分析データのエクスポート)。LLMスキップ時は保存しない
   // (record組み立て時に llmUsed で判定して null にする。偽値混入を避けるため、この変数自体は
   // LLM使用時のみ analyzeRace の結果で上書きする)。
@@ -758,11 +754,6 @@ export async function runAnalysis(
     // fallbackReason は core 側が必ず不変条件(fallback:false ⇒ null)を守って返すため、
     // そのまま伝播する(固定分類文言のみ・秘密非混入。論点C)。
     fallbackReason = analysis.fallbackReason;
-    // core AnalyzeRaceResult.marksDropped/marksDroppedReason は既存呼び出し元との互換のため
-    // optional になっている(未設定=印を全消しにする救済は発生していない。#317 以降 core は常に false/null を返す)。ここで明示的に false/null へ
-    // 正規化してから AnalysisResult に伝播する(呼び出し元は必ず true/false を受け取れる)。
-    marksDropped = analysis.marksDropped ?? false;
-    marksDroppedReason = analysis.marksDroppedReason ?? null;
     // LLMの生応答テキスト(Issue#10)。core AnalyzeRaceResult.rawResponse は既存呼び出し元との
     // 互換のため optional(未設定時はtext未取得の失敗)なので、明示的にnullへ正規化する。
     rawResponse = analysis.rawResponse ?? null;
@@ -1011,8 +1002,6 @@ export async function runAnalysis(
     llmSkippedReason,
     fallback,
     fallbackReason,
-    marksDropped,
-    marksDroppedReason,
     // 分析に使ったLLMモデル(Issue #157)。保存レコードの model と同じ値(LLMスキップ時は null)。
     model: llmUsed ? modelUsed : null,
     oddsStatus: race.odds.oddsStatus,

@@ -167,38 +167,6 @@ export function formatEstimatedEvSuffix(evEstimated: boolean): string {
 }
 
 /**
- * LLM補正状態の表示文言(exe の BatchAnalysisView(#287 で削除。3c1664e まで) の「LLM補正:」行、A: フォールバック分離2026-07-19合意)。
- *
- * fallback(確率補正そのものを prior に戻す)と marksDropped(確率補正〈AI補正後確率〉は
- * 有効なまま、印の制約違反により印だけを全馬非表示にする)は意味が異なるため、区別した文言にする。
- * fallback:true は確率補正自体が無効という、より重大な事象のため marksDropped より優先表示する
- * (両方 true になるケースは通常発生しないが、優先順位を明示しておく)。
- * **注(Issue #317・#300)**: `marksDropped:true` は、印を全消しにしていた旧仕様でだけ立った。#317 で印は補修して採用するようになり、
- * core の `analyzeRace` は常に false を返す(`marksDropped` の分岐は production では通らない。型と分岐は互換のために残してある)。
- * - LLMスキップ: 「スキップ(理由)」
- * - 実行・fallback:false かつ marksDropped が true でない: 「実行」
- * - 実行・fallback:true: 「実行(フェイルセーフで3着内率に復帰)」
- * - 実行・fallback:false かつ marksDropped:true: 「実行(印: 制約不成立のため非表示。確率補正は有効)」
- */
-export function llmCorrectionStatusText(result: {
-  readonly llmUsed: boolean;
-  readonly llmSkippedReason: string | null;
-  readonly fallback: boolean;
-  readonly marksDropped?: boolean;
-}): string {
-  if (!result.llmUsed) {
-    return `スキップ(${result.llmSkippedReason ?? "理由不明"})`;
-  }
-  if (result.fallback) {
-    return "実行(フェイルセーフで3着内率に復帰)";
-  }
-  if (result.marksDropped === true) {
-    return "実行(印: 制約不成立のため非表示。確率補正は有効)";
-  }
-  return "実行";
-}
-
-/**
  * 分析結果の「分析モデル: …」行の文言(Issue #157)。LLM を実行し、モデルIDが分かるときだけ返す。
  * LLMスキップ時は(model が入っていても)null: スキップした分析にモデル名を出すと偽の表示になる。
  * モデル不明(null・未設定・空文字)も null(行自体を出さない)。
@@ -210,30 +178,6 @@ export function analysisModelText(result: {
   if (!result.llmUsed) return null;
   if (typeof result.model !== "string" || result.model === "") return null;
   return `分析モデル: ${result.model}`;
-}
-
-/**
- * 「LLM補正:」行のtooltip(title属性)に表示する理由文言(論点C: fallbackReasonのUI伝播、
- * 2026-07-19合意)。llmCorrectionStatusText と同じ優先順位で、fallback:true(確率補正自体が
- * 無効・より重大)を marksDropped:true(印だけ非表示・確率補正は有効。旧仕様の状態で、#317 以降 production では立たない)より優先する。
- * 両方とも理由が無ければ title 属性を付けない意図で undefined を返す
- * (呼び出し側の React の title={undefined} は属性自体を出力しない)。
- * fallbackReason は core analyzeRace が返す固定分類文言のみ(秘密非混入・論点C)なので、
- * ここでは追加の加工なしにそのまま表示できる。
- */
-export function llmCorrectionTooltip(result: {
-  readonly fallback: boolean;
-  readonly fallbackReason: string | null;
-  readonly marksDropped?: boolean;
-  readonly marksDroppedReason?: string | null;
-}): string | undefined {
-  if (result.fallback && result.fallbackReason) {
-    return result.fallbackReason;
-  }
-  if (result.marksDropped === true && result.marksDroppedReason) {
-    return result.marksDroppedReason;
-  }
-  return undefined;
 }
 
 /**

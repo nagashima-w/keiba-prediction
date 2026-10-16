@@ -12,8 +12,6 @@
       "llmSkippedReason": "golden: LLM なし",
       "fallback": false,
       "fallbackReason": null,
-      "marksDropped": false,
-      "marksDroppedReason": null,
       "model": null,
       "oddsStatus": "result",
       "rows": [
@@ -14849,8 +14847,6 @@
       "llmSkippedReason": null,
       "fallback": false,
       "fallbackReason": null,
-      "marksDropped": false,
-      "marksDroppedReason": null,
       "model": "claude-stub-model",
       "oddsStatus": "result",
       "rows": [
@@ -36649,8 +36645,6 @@
       "llmSkippedReason": "LLM分析はスキップされました",
       "fallback": false,
       "fallbackReason": null,
-      "marksDropped": false,
-      "marksDroppedReason": null,
       "model": null,
       "oddsStatus": "result",
       "rows": [

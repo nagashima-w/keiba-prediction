@@ -429,7 +429,8 @@ export async function sendDiscordNotification(
 ): Promise<void> {
   if (!isDiscordWebhookUrl(webhookUrl)) {
     throw new DiscordNotifyError(
-      "Discord Webhook URL が不正です(https://discord.com/api/webhooks/ で始まる必要があります)",
+      // 判定条件(isDiscordWebhookUrl)と対応させた固定の文言。URL そのもの(トークンを含む秘密)は含めない(Issue #328)。
+      "Discord Webhook URL が不正です(https:// で始まり、ホストが discord.com または discordapp.com そのもの(サブドメインは不可)で、ユーザー名・パスワード・ポート番号を含まず、パスが /api/webhooks/ で始まる URL が必要です)",
     );
   }
 

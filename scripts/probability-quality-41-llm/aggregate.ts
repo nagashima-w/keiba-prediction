@@ -11,7 +11,8 @@
  * ## 実行
  *   pnpm tsx scripts/probability-quality-41-llm/aggregate.ts [--prompt-version <版>]
  * `--prompt-version` は、照合する記録のプロンプト版(省略なら現行の `PROMPT_VERSION`)。コミット済みの #156 の観測
- * (版 `2026-07-28.2`)を集計し直すときは `--prompt-version 2026-07-28.2` を付ける(Issue #200。結果は `aggregate.json` と一致する)。
+ * (版 `2026-07-28.2`)を集計し直すときは `--prompt-version 2026-07-28.2` を付ける(Issue #200。結果は `aggregate.json` と一致する。
+ * ただし #329 で `llmRun.marksDroppedRaceIds`〈印を全消しにしたレース。過去の観測では常に空配列〉を出力から削除したので、そのキーだけは `aggregate.json` にあって再集計の出力には無い)。
  * 出力先は版にかかわらず下の `aggregate.json`(別の版の観測で実行すると上書きされる点に注意)。
  * 既定の入力は `docs/investigations/probability-quality-41/observations` と
  * `docs/investigations/probability-quality-41-llm/llm-observations`。出力は
@@ -171,7 +172,6 @@ export interface TowardMarketSummary {
 /** LLM の実行の要約(レースID)。 */
 export interface LlmRunSummary {
   readonly fallbackRaceIds: readonly string[];
-  readonly marksDroppedRaceIds: readonly string[];
   readonly retriedRaceIds: readonly string[];
   readonly truncatedRaceIds: readonly string[];
 }
@@ -384,7 +384,6 @@ function aggregateRegion(region: "central" | "nar", races: readonly JoinedRace[]
     },
     llmRun: {
       fallbackRaceIds: fallbackIds,
-      marksDroppedRaceIds: mine.filter((r) => r.rec.marksDropped).map((r) => r.obs.raceId),
       retriedRaceIds: mine.filter((r) => r.rec.retryCount > 0).map((r) => r.obs.raceId),
       truncatedRaceIds: mine.filter((r) => r.rec.truncated).map((r) => r.obs.raceId),
     },

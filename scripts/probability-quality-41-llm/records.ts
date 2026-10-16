@@ -73,8 +73,6 @@ export interface LlmRaceRecord {
   /** 補正を捨てて prior に戻ったか(補正後=prior)。 */
   readonly fallback: boolean;
   readonly fallbackReason: string | null;
-  /** 印だけを諦めたか(確率補正は有効)。 */
-  readonly marksDropped: boolean;
   /** 応答の切り詰めによる fallback か(サブエージェントでは起きない見込み)。 */
   readonly truncated: boolean;
   readonly horses: readonly LlmHorseRecord[];

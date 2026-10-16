@@ -12,6 +12,7 @@
  * **Issue #315 で再生成した**(`PROMPT_VERSION` が "2026-10-13.2" → "2026-10-15.1" になった): 差分は LLM のシナリオの `record.promptVersion` の 1 行と、`promptText`(プロンプトの全文。展開想定から規則の結論を外し、各馬の行にテンの位置を足し、指示・出力スキーマを足した)の 1 行だけ(`git diff` で確認済み)。スナップショット・確率・配分は不変。
  * **Issue #296 で再生成した**: 組合せの配分を計算した 2 シナリオ(`noLlmAllBets`・`llmStubSameDayGrade`)の `record.raceSnapshot` に `comboStats`(券種ごとの EV プラスの点数)が加わった(差分はその 2 か所の追加 52 行のみ。削除行なし。`git diff` で確認済み)。
  * **Issue #311 で再生成した**: スナップショットの馬にスタート直後の位置(`earlyPos`)を足したため、3 シナリオの `record.raceSnapshot.horses` の各馬に `"earlyPos": <数または null>` の行が加わった(差分は追加 48 行のみ・削除行なし。`git diff --stat` と、追加行がすべて `earlyPos` の行であることを `git diff | grep '^[-+]'` で確認済み)。
+ * **Issue #329 で再生成した**: 印を全消しにする旧経路の `marksDropped`・`marksDroppedReason` を `AnalysisResult` から削除したため、3 シナリオの `result` から該当の 2 行ずつが消えた(差分は削除 6 行のみ・追加行なし。`git diff --stat` と `git diff | grep '^[-+]'` で確認済み)。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */

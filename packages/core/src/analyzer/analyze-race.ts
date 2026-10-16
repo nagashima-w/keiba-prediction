@@ -19,7 +19,7 @@
  *  - 印と無関係な失敗のみ(JSON破損・horses配列なし・有効な補正0件など)は従来どおり priorFallbackHorses
  *    で全馬 prior・全馬 mark=null(fallback:true)。LLM 自体が失敗したレースには印を付けない
  * 補修の有無・違反の種類・変更した馬は `markRepair` に載る(D1 の `analyses.mark_repair_json` に保存して、どの規則でよく外れるかを数える)。
- * `marksDropped` は互換のために型に残すが、常に false(印を全消しにする経路はもう無い)。
+ * 以前あった「印を全消しにして確率補正だけ採用する」経路(`marksDropped`)は #317 で無くなり、#329 で型からも削除した。
  *
  * maxTokens引き上げ・切り詰め検出の可視化(2026-07-19改定・小倉記念18頭切り詰め事故の再発防止):
  * AnthropicLlmClient.complete() が stop_reason==="max_tokens" を検出すると
@@ -136,15 +136,6 @@ export interface AnalyzeRaceResult {
    * (旧仕様の「印を全消しにする A 救済〈marksDropped:true〉」は、#317 で無くなった)。
    */
   readonly fallbackReason: string | null;
-  /**
-   * (Issue #317 以降は常に false。以前は、印関連の違反によりリトライ後も印を採用できず、
-   * 確率補正のみ採用して全馬 mark=null にした場合 true だった〈A: フォールバック分離・2026-07-19合意〉。)
-   * 下流(pipeline/store/UI)が無改変で動作する既存契約を壊さないため optional にしている
-   * (analyzeRace 自身は必ず true/false のいずれかを明示的に返す)。
-   */
-  readonly marksDropped?: boolean;
-  /** marksDropped:true の場合の理由説明(通常時・非印失敗時は null)。Issue #317 以降は常に null。 */
-  readonly marksDroppedReason?: string | null;
   /**
    * 印の補修の記録(Issue #317)。採用した応答、または聞き直す前の応答に印の違反が1度もなければ null
    * (印と無関係な失敗で prior に戻ったときも null)。省略可なのは、既存の結果リテラルを使うテストを壊さないため。
@@ -291,8 +282,6 @@ export async function analyzeRace(
         fallback: false,
         retryCount: attempt, // 成功時: 実施したリトライ回数 = attempt。
         fallbackReason: null,
-        marksDropped: false,
-        marksDroppedReason: null,
         // 初回が印の違反で、聞き直しで解消したときだけ、初回の違反の種類を残す(repaired:false)。
         markRepair:
           violationAttempts.length === 0
@@ -324,8 +313,6 @@ export async function analyzeRace(
       fallback: false,
       retryCount: maxAttempts - 1,
       fallbackReason: null,
-      marksDropped: false,
-      marksDroppedReason: null,
       markRepair: {
         repaired: true,
         adoptedAttempt: lastMarkViolation.attempt,
@@ -347,8 +334,6 @@ export async function analyzeRace(
       fallback: true,
       retryCount: maxAttempts - 1,
       fallbackReason: FALLBACK_REASON_TRUNCATED,
-      marksDropped: false,
-      marksDroppedReason: null,
       truncated: true,
       stopReason: lastError.stopReason,
       diagnosticMessage: FALLBACK_REASON_TRUNCATED,
@@ -367,8 +352,6 @@ export async function analyzeRace(
       fallback: true,
       retryCount: maxAttempts - 1,
       fallbackReason: FALLBACK_REASON_REFUSED,
-      marksDropped: false,
-      marksDroppedReason: null,
       truncated: false,
       stopReason: lastError.stopReason,
       diagnosticMessage: FALLBACK_REASON_REFUSED,
@@ -393,8 +376,6 @@ export async function analyzeRace(
     fallback: true,
     retryCount: maxAttempts - 1,
     fallbackReason: reason,
-    marksDropped: false,
-    marksDroppedReason: null,
     truncated: false,
     stopReason: null,
     diagnosticMessage,

@@ -120,7 +120,6 @@ export async function applyRace(input: ApplyInput): Promise<ApplyOutcome> {
     retryCount: result.retryCount,
     fallback: result.fallback,
     fallbackReason: result.fallbackReason,
-    marksDropped: result.marksDropped ?? false,
     truncated: result.truncated ?? false,
     horses: [...result.horses]
       .sort((a, b) => a.umaban - b.umaban)

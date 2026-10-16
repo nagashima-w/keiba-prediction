@@ -13,9 +13,9 @@
     "monthly:prompt": "tsx print-monthly-prompt.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.70.1",
+    "@anthropic-ai/sdk": "0.133.0",
     "cheerio": "1.2.0",
-    "iconv-lite": "0.6.3",
+    "iconv-lite": "0.7.3",
     "jose": "6.2.12"
   },
   "devDependencies": {
@@ -28,7 +28,7 @@
     "wrangler": "4.149.0"
   },
   "//deps": {
-    "@anthropic-ai/sdk": "発走前の分析の LLM 呼び出し(Issue #179〈#164-d〉。土台は #193)。core の anthropic-client.ts・model-selection.ts が値で import する(Models API と messages.create)。cloud は workspace の外で packages/core/node_modules が CI に無いため、wrangler.toml の alias・tsconfig の paths・vitest の alias でここから解決させる(cheerio と同じ)。版は core の package.json の範囲(^0.70.1)と同じ 0.70.1 で exact 固定(scripts/test/cloud-config-guard.test.ts が一致を検査)。Workers でバンドル・実行できることは、偽 fetch での workerd 実行とバンドルのガード(test/bundle-guard.test.ts)で確認した",
+    "@anthropic-ai/sdk": "発走前の分析の LLM 呼び出し(Issue #179〈#164-d〉。土台は #193)。core の anthropic-client.ts・model-selection.ts が値で import する(Models API と messages.create)。cloud は workspace の外で packages/core/node_modules が CI に無いため、wrangler.toml の alias・tsconfig の paths・vitest の alias でここから解決させる(cheerio と同じ)。版は core の package.json の範囲(^0.133.0)と同じ 0.133.0 で exact 固定(scripts/test/cloud-config-guard.test.ts が一致を検査)。Issue #324 で 0.70.1 → 0.133.0 に上げた(0.135.0 は公開から 1 日で、OpenTelemetry の自動計装〈0.134.0〉を持ち込むため見送った。Dependabot の提案は 0.133.0)。Workers でバンドル・実行できることは、偽 fetch での workerd 実行とバンドルのガード(test/bundle-guard.test.ts)で確認した",
     "esbuild": "スマホ画面(Issue #184)のクライアントの TS を、ブラウザ向けの 1 ファイル(IIFE)にバンドルし、出力を固定する(build-client.ts。生成物 src/client-bundle.generated.ts はコミットし、test/client-bundle.test.ts が再ビルドとの一致を固定する)。wrangler・tsx・vite が推移的に引く 0.28.1/0.28.2 のうち、tsx・vite と同じ 0.28.2 を直接の依存にして exact で固定(出力の決定性のため)",
     "jose": "Cloudflare Access の JWT(RS256)の署名・iss・aud・exp の検証に使う。署名検証を自前で書かず、検証済みの実装(Cloudflare 公式の例も同じ)に任せるため。依存ゼロで WebCrypto だけで動く。バージョン固定。",
     "wrangler": "デプロイ・ローカル検証(wrangler dev)。バージョン固定(スパイク #159 で確認した版)。Issue #305 で 4.147.0 → 4.149.0 に上げた: 4.147.0 が引く miniflare 経由の sharp 0.35.4 に high の脆弱性(`pnpm audit --ignore-workspace`。0.35.5 以上が修正版)があり、4.149.0 は sharp 0.35.5 を引く最小の版(4.148.0 は 0.35.4 のまま)。デプロイ・ローカル検証のツール内で、本番の Worker の束には入らない(上げる前後で dry-run の worker.js がバイト単位で同一であることを確かめた)",
@@ -37,7 +37,7 @@
     "tsx": "ローカルのスモークテスト(smoke.ts)の実行",
     "@types/node": "テスト・スモークテスト(Node で動く)の型検査",
     "cheerio": "core の出馬表などのパーサ(parseShutuba 等)が使う(Issue #162 段階2。確認用エンドポイントと、後続の分析で使う)。cloud は workspace の外で packages/core/node_modules が CI に無いため、wrangler.toml の alias・tsconfig の paths・vitest の alias でここから解決させる。バージョンは spikes/cloudflare(Issue #290 で削除済み)と packages/core/package.json の範囲に揃えて固定",
-    "iconv-lite": "core の HttpClient が EUC-JP(db.netkeiba.com の馬ページ等)のデコードに使う。cheerio と同じく alias でここから解決させる。バージョン固定"
+    "iconv-lite": "core の HttpClient が EUC-JP(db.netkeiba.com の馬ページ等)のデコードに使う。cheerio と同じく alias でここから解決させる。バージョン固定。Issue #324 で 0.6.3 → 0.7.3 に上げた(EUC-JP の変換結果が変わらないことは packages/core/test/scraper/iconv-eucjp-regression.test.ts が更新前の値で固定)。cheerio 経由の推移的な iconv-lite 0.6.3 は lock に残るが、Worker のバンドルでは wrangler.toml の alias により 0.7.3 の 1 つになる"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
