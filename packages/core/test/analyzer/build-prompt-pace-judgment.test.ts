@@ -202,8 +202,8 @@ describe("buildPrompt(Issue #315: 出力スキーマ)", () => {
 });
 
 describe("buildPrompt(Issue #315: プロンプトの版)", () => {
-  it("版は 2026-10-15.1", () => {
-    expect(PROMPT_VERSION).toBe("2026-10-15.1");
+  it("版は 2026-10-15.1 以降(Issue #315 の版。現行の値の固定は build-prompt.test.ts)", () => {
+    expect(PROMPT_VERSION >= "2026-10-15.1").toBe(true);
   });
 });
 

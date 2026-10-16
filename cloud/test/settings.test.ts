@@ -49,9 +49,9 @@ describe("既定値", () => {
       biasWeightSummerFatigue: 1,
       biasWeightTransport: 1,
       biasWeightRotation: 1,
-      baseScoreWeightRecentForm: 0.2,
-      baseScoreWeightLast3f: 0.1,
-      baseScoreWeightCourseDistance: 0.15,
+      baseScoreWeightRecentForm: 0.7,
+      baseScoreWeightLast3f: 0.15,
+      baseScoreWeightCourseDistance: 0.3,
       baseScoreWeightJockey: 0.15,
       baseScoreWeightWeightChange: 1,
       baseScoreWeightCourseFrameBias: 1,
@@ -118,7 +118,7 @@ describe("スコアリングの重み13項目(Issue #218。exe のバイアス7�
     }
   });
 
-  it("既定値は core の DEFAULT_SCORER_CONFIG(= exe の既定値)と、13項目すべて同じ。既定値は1種類ではない(0.2 などを含む=取り違えを検出できる)", () => {
+  it("既定値は core の DEFAULT_SCORER_CONFIG(= exe の既定値)と、13項目すべて同じ。既定値は1種類ではない(0.7・0.15・0.3 などを含む=取り違えを検出できる)", () => {
     for (const f of SCORING_WEIGHT_FIELDS) {
       const expected = f.group === "bias" ? (DEFAULT_SCORER_CONFIG.weights as unknown as Record<string, number>)[f.exeKey] : (DEFAULT_SCORER_CONFIG.baseScore.weights as unknown as Record<string, number>)[f.exeKey];
       expect(typeof expected, f.exeKey).toBe("number");

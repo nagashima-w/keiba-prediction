@@ -129,7 +129,7 @@ describe("設定画面を開く", () => {
     const h = await started();
     expect(findAll(h.tree(), (n) => n.attrs?.["data-field"] !== undefined).length).toBe(28);
     expect(h.field("biasWeightVenue").attrs?.["value"]).toBe("1");
-    expect(h.field("baseScoreWeightRecentForm").attrs?.["value"]).toBe("0.2");
+    expect(h.field("baseScoreWeightRecentForm").attrs?.["value"]).toBe("0.7");
     expect(h.field("bankroll").attrs?.["value"]).toBe("500000");
     expect(h.field("includeComboOdds").attrs?.["checked"]).toBe(true);
     expect(h.field("preRaceOffsetMinutes").attrs?.["value"]).toBe("90");
@@ -251,7 +251,7 @@ describe("入力と描画(change は下書きを書くだけ)", () => {
     expect(h.posts).toHaveLength(1);
     expect(Object.keys(h.posts[0]!).length).toBe(28);
     expect(h.posts[0]!["biasWeightVenue"]).toBe(1);
-    expect(h.posts[0]!["baseScoreWeightRecentForm"]).toBe(0.2);
+    expect(h.posts[0]!["baseScoreWeightRecentForm"]).toBe(0.7);
     expect(h.posts[0]!["bankroll"]).toBe(500_000);
     expect(typeof h.posts[0]!["kellyFraction"]).toBe("number");
     expect(h.renders.length).toBe(before + 1);
@@ -392,7 +392,7 @@ describe("Issue #218: スコアリングの重み", () => {
     expect(h.posts).toEqual([]);
     expect(h.field("biasWeightVenue").attrs?.["value"]).toBe("1");
     expect(h.field("biasWeightFrame").attrs?.["value"]).toBe("1");
-    expect(h.field("baseScoreWeightRecentForm").attrs?.["value"]).toBe("0.2");
+    expect(h.field("baseScoreWeightRecentForm").attrs?.["value"]).toBe("0.7");
     expect(h.field("baseScoreWeightJockey").attrs?.["value"]).toBe("0.15");
     expect(h.field("bankroll").attrs?.["value"]).toBe("123"); // 他の項目の入力は残る
     h.clickSave();

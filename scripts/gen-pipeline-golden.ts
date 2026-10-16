@@ -13,6 +13,7 @@
  * **Issue #296 で再生成した**: 組合せの配分を計算した 2 シナリオ(`noLlmAllBets`・`llmStubSameDayGrade`)の `record.raceSnapshot` に `comboStats`(券種ごとの EV プラスの点数)が加わった(差分はその 2 か所の追加 52 行のみ。削除行なし。`git diff` で確認済み)。
  * **Issue #311 で再生成した**: スナップショットの馬にスタート直後の位置(`earlyPos`)を足したため、3 シナリオの `record.raceSnapshot.horses` の各馬に `"earlyPos": <数または null>` の行が加わった(差分は追加 48 行のみ・削除行なし。`git diff --stat` と、追加行がすべて `earlyPos` の行であることを `git diff | grep '^[-+]'` で確認済み)。
  * **Issue #329 で再生成した**: 印を全消しにする旧経路の `marksDropped`・`marksDroppedReason` を `AnalysisResult` から削除したため、3 シナリオの `result` から該当の 2 行ずつが消えた(差分は削除 6 行のみ・追加行なし。`git diff --stat` と `git diff | grep '^[-+]'` で確認済み)。
+ * **Issue #339 で再生成した**(既定の重みを当て直した: 近走着順 0.2→0.7・上がり3F 0.1→0.15・コース距離 0.15→0.30・バイアスの一律減衰 0.3→0.05。`PROMPT_VERSION` が "2026-10-15.1" → "2026-10-16.1" になった): 差分は、(1) LLM のシナリオの `record.promptVersion` の 1 行、(2) `promptText`(プロンプトの全文)の 15 行(各馬の「3着内率=」と「参考EV=」の数字だけ。数字以外は同一)、(3) 3 シナリオの全 16 頭の `prior`・`adjustedProb`・`ev`(`result.rows` と `record.horses`)と `promptInput.horses` の `prior`・`referenceEv`、(4) 寄与度の `weight`(各 160 個。基礎 3 項目とバイアス 7 項目)・`correction`・`differenceCorrection`、(5) 配分(`record.allocation.bets` の `ev`・`odds`・`stake` と、EV の順に並ぶ買い目の `betType`・`comboKey`、買い目の数 278→289〈noLlmAllBets〉・283→289〈llmStubSameDayGrade〉)と `comboStats` の `positive`(EV プラスの点数)。キーの追加・削除、数値以外・prior と配分に関わらない項目の変化は無い(新旧の JSON を構造で比べて確認済み)。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */

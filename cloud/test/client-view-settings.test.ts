@@ -204,7 +204,7 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
     const byField = Object.fromEntries(inputs(section(tree({ draft: setDraftValue(draftFromSettings(CUSTOM), "biasWeightVenue", "0.75") }))).map((n) => [String(n.attrs?.["data-field"]), n]));
     const venue = byField["biasWeightVenue"]!;
     expect([venue.tag, venue.attrs?.["type"], venue.attrs?.["value"], venue.attrs?.["inputmode"]]).toEqual(["input", "text", "0.75", "decimal"]);
-    expect(byField["baseScoreWeightRecentForm"]!.attrs?.["value"]).toBe("0.2");
+    expect(byField["baseScoreWeightRecentForm"]!.attrs?.["value"]).toBe("0.7");
     const labels = byClass(section(tree()), "field-label").map(textOf);
     expect(labels.length).toBe(13);
     expect(labels).toContain("競馬場適性 ");

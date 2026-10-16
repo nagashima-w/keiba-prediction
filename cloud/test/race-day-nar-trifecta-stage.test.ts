@@ -58,14 +58,16 @@ function narShutuba(n: number): string {
   return base.slice(0, lastEnd) + extra + base.slice(lastEnd);
 }
 
-/** 1軸ぶんの合成NAR三連単HTML(軸=1着固定。値は大きく、期待値が閾値を超えて買い目に入りうる値 = 軸*1000+2着*10+3着)。 */
+/** 1軸ぶんの合成NAR三連単HTML(軸=1着固定。値は大きく、期待値が閾値を超えて買い目に入りうる値 = 軸*10000+2着*100+3着。
+ * Issue #339 で 10 倍にした: 既定の重みの当て直しで prior の差が大きくなり、他の券種〈馬連・ワイド〉の EV が上がって、旧い値〈軸*1000+2着*10+3着〉では三連単が配分に入らなくなった〈
+ * 配分は券種をまたいで EV の高い順に選ぶ。新しい prior と旧い値の組合せでは、三連単の判定済み 1,320 点のうち EV プラスは 1,210 点あっても、配分の 33 点に三連単が入らなかった〉。このテストは三連単の取得の段階を調べるもので、prior の値には依らない)。 */
 function axisHtml(axis: number, umabans: readonly number[]): string {
   const cells: string[] = [];
   for (const b of umabans) {
     if (b === axis) continue;
     for (const c of umabans) {
       if (c === axis || c === b) continue;
-      cells.push(`<tr><td class="Odds" id="chk_x_b8_c0_${axis}_${b}_${c}">${axis * 1000 + b * 10 + c}.0</td></tr>`);
+      cells.push(`<tr><td class="Odds" id="chk_x_b8_c0_${axis}_${b}_${c}">${axis * 10000 + b * 100 + c}.0</td></tr>`);
     }
   }
   return `<div id="odds_view_form"><table class="Odds_Table">${cells.join("")}</table></div>`;
