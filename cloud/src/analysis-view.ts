@@ -20,6 +20,7 @@ import { toSafeRaceSnapshot } from "../../packages/core/src/analysis/analysis-ex
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
 import { diffAllocationBets, type AllocationDiff } from "../../packages/core/src/analysis/allocation-diff";
+import { CLOSE_NOTE, closeDiffLines, closeLabelOf, closeSummaryLines } from "./close-view";
 import { CLOSE_ROUNDS, type CloseReason, type CloseStatus, type StoredCloseRound } from "./analysis-close";
 import type { StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
@@ -190,11 +191,19 @@ export interface AnalysisViewCloseRound {
   readonly oddsOfficialDatetime: string | null;
   readonly allocation: AnalysisViewAllocation | null;
   readonly diff: AllocationDiff | null;
+  /** 回の見出し(Issue #344。「発走5分前」。サーバが組み立てた文言)。 */
+  readonly label: string;
+  /** 状態と理由・動いた時刻と遅れの行(Issue #344。表の前に出す。`close-view.ts`)。 */
+  readonly summaryLines: readonly string[];
+  /** 分析時の提案との差分の要約と主な行(Issue #344。表の後に出す。`ok` で差分を出せるときだけ。空配列は何も出さない)。 */
+  readonly diffLines: readonly string[];
 }
 
 /** 締切の直前の再計算の結果(回の昇順。Issue #338)。結果が無い分析は、`AnalysisView.close` が null。 */
 export interface AnalysisViewClose {
   readonly rounds: readonly AnalysisViewCloseRound[];
+  /** 節の先頭に添える説明(Issue #344。確率は分析時のまま、という固定文)。 */
+  readonly note: string;
 }
 
 export interface AnalysisView {
@@ -338,19 +347,27 @@ function closeViewOf(close: readonly StoredCloseRound[] | undefined, proposal: S
   }
   const rounds = [...close]
     .sort((a, b) => a.round - b.round)
-    .map((r): AnalysisViewCloseRound => ({
-      round: r.round,
-      leadMinutes: CLOSE_ROUNDS.find((c) => c.round === r.round) === undefined ? null : CLOSE_ROUNDS.find((c) => c.round === r.round)!.leadMs / 60_000,
-      status: r.status,
-      reason: r.reason,
-      dueAt: r.dueAt,
-      firedAt: r.firedAt,
-      lateMs: r.lateMs,
-      oddsOfficialDatetime: r.oddsOfficialDatetime,
-      allocation: r.allocation === null ? null : allocationViewOf(r.allocation),
-      diff: r.allocation === null || proposal === undefined ? null : diffAllocationBets(proposal.bets, r.allocation.bets),
-    }));
-  return { rounds };
+    .map((r): AnalysisViewCloseRound => {
+      const lead = CLOSE_ROUNDS.find((c) => c.round === r.round);
+      const leadMinutes = lead === undefined ? null : lead.leadMs / 60_000;
+      const diff = r.allocation === null || proposal === undefined ? null : diffAllocationBets(proposal.bets, r.allocation.bets);
+      return {
+        round: r.round,
+        leadMinutes,
+        status: r.status,
+        reason: r.reason,
+        dueAt: r.dueAt,
+        firedAt: r.firedAt,
+        lateMs: r.lateMs,
+        oddsOfficialDatetime: r.oddsOfficialDatetime,
+        allocation: r.allocation === null ? null : allocationViewOf(r.allocation),
+        diff,
+        label: closeLabelOf(r.round, leadMinutes),
+        summaryLines: closeSummaryLines(r),
+        diffLines: r.allocation === null ? [] : closeDiffLines(diff, r.allocation.bets.length),
+      };
+    });
+  return { rounds, note: CLOSE_NOTE };
 }
 
 export function buildAnalysisView(result: AnalysisDetailResult, allocation: StoredAllocation | undefined, close?: readonly StoredCloseRound[]): AnalysisView {

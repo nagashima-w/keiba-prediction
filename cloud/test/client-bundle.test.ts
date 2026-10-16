@@ -168,8 +168,16 @@ describe("生成物のドリフトと決定性", () => {
     // 馬のカードと「3着内率の上位5頭」の行に添える統計モデルからの変化量(`result.ts` の `probShiftOf`・`shiftNote`・`HorseCard.adjustedShift`・`TopProbHorse.shift`、検証画面の `formatAdjustment` の再利用)。日本語の文言は `\u` エスケープで大きくなる。
     // 実測(`Buffer.byteLength(CLIENT_JS)`): de78787〈#310 の承認後〉は 304,953、実装後は 306,008(+1,055)。計り方: `git show de78787:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength` を取った(今の値は `pnpm run build:client` の出力〈「306008 バイト」〉)。
     // 新しい上限 307,100 の根拠: 実測 306,008 に約 1KB の余裕(306,008 + 1,092 を 100 バイト単位に切り上げ)。余裕は 1,092 バイト。外部ライブラリは使っていない。
+    // Issue #344(#335-A2 結果画面の「締切直前の再計算」の節): 上限を 307,100 から 308,600 へ引き上げた。足したもの: API の `close` の解釈(`api-analysis.ts` の `parseClose`)・表示用データ(`result.ts` の `closeOf`・
+    // 注記の差し替えの共有関数 `noticesOf`)・VNode(`view.ts` の `closeSection`・買い目の表の 1 行 `betRow`〈配分の提案と共有〉)・core の `betRowLabels`(サーバが差分の行に使う関数で、束には薄い包みだけが入る)。
+    // 文言(状態・理由・時刻・遅れ・差分の行・説明文)はサーバ(`src/close-view.ts`)で組み立てて、クライアントには置かない〈日本語は `\u` エスケープで 1 文字 6 バイト〉。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`): 30790e1〈#338 の公開後の作業ブランチ〉は 306,008、実装後は 307,564(+1,556。`pnpm run build:client` の出力〈「307564 バイト」〉)。
+    // 内訳(`cloud/` で esbuild を `build-client.ts` と同じ設定〈minify・metafile〉で呼び、`outputs[...].inputs[ファイル].bytesInOutput` を読んだ。30790e1 → 実装後): `client/api-analysis.ts` 5,201 → 5,850(+649)・
+    // `client/view.ts` 30,257 → 30,752(+495)・`client/result.ts` 4,928 → 5,312(+384)・`packages/core/src/view/allocation-proposal-view.ts` 6,214 → 6,242(+28)。4 つの和は 1,556 で全体の増分と一致する。
+    // 計り方(全体): 30790e1 の `cloud/src/client-bundle.generated.ts`(`git show 30790e1:cloud/src/client-bundle.generated.ts`)と今の生成物を、それぞれ import して `Buffer.byteLength` を取った。外部ライブラリは使っていない。
+    // 新しい上限 308,600 の根拠: 実測 307,564 に約 1KB の余裕(307,564 + 1,036 を 100 バイト単位に切り上げ)。余裕は 1,036 バイト。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(307_100);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(308_600);
   });
 });
 

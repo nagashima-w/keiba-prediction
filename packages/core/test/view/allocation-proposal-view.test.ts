@@ -13,6 +13,7 @@ import { comboSkipReasonText } from "../../src/ev/combo-bet-allocation.js";
 
 import type { StoredAllocationBetView, StoredAllocationView } from "../../src/analysis/analysis-types.js";
 import {
+  betRowLabels,
   buildAllocationProposalView,
   CAP_TOO_SMALL_MISSING_UNIT_NOTE,
   FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE,
@@ -904,5 +905,30 @@ describe("固定文言(AC3: yoso/invalid/記録なし)", () => {
 
   it("YOSO_NOTE・INVALID_NOTE・NO_RECORD_NOTEが互いに異なる値であること(3定数間の取り違え検出)", () => {
     expect(new Set([YOSO_NOTE, INVALID_NOTE, NO_RECORD_NOTE]).size).toBe(3);
+  });
+});
+
+describe("betRowLabels(Issue #344: 買い目1件の券種ラベル・組合せラベル。買い目の表の行と同じ表記)", () => {
+  const cases: readonly (readonly [string, string])[] = [
+    ["place", "04"],
+    ["win", "03"],
+    ["wide", "0102"],
+    ["quinella", "0508"],
+    ["bracketQuinella", "0407"],
+    ["exacta", "1308"],
+    ["trio", "010203"],
+    ["trifecta", "130802"],
+    ["unknown-type", "zz"], // 未知の券種・復号できないキーは生の値(throwしない)
+  ];
+
+  it.each(cases)("%s %s: 買い目の表の行(buildAllocationProposalView の bets)と同じラベルを返す", (betType, comboKey) => {
+    const row = buildAllocationProposalView(allocation({ bets: [bet({ betType, comboKey })] })).bets[0]!;
+    expect(betRowLabels(betType, comboKey)).toEqual({ betTypeLabel: row.betTypeLabel, comboLabel: row.comboLabel });
+  });
+
+  it("前提(空振りでない): 馬単は「→」、枠連は「枠」、未知の券種は生の値が実際に出る", () => {
+    expect(betRowLabels("exacta", "1308")).toEqual({ betTypeLabel: "馬単", comboLabel: "13→8" });
+    expect(betRowLabels("bracketQuinella", "0407")).toEqual({ betTypeLabel: "枠連", comboLabel: "枠4-7" });
+    expect(betRowLabels("unknown-type", "zz")).toEqual({ betTypeLabel: "unknown-type", comboLabel: "zz" });
   });
 });

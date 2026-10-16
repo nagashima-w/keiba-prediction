@@ -133,6 +133,29 @@ export interface AnalysisCombos {
 const COMBOS_MAX_LINES = 6;
 const COMBOS_MAX_LINE_LENGTH = 300;
 
+/**
+ * 締切直前の再計算の 1 回ぶん(Issue #344)。文言(見出し・状態と時刻の行・差分の行)はサーバが組み立てたもの。`allocation` は再計算できた回だけ(分析時の提案と同じ形)。
+ * サーバの応答には状態・理由・時刻・差分の構造なども載るが、画面が使わないものは読まない。
+ */
+export interface AnalysisCloseRound {
+  readonly label: string;
+  readonly summaryLines: readonly string[];
+  readonly allocation: StoredAllocationView | null;
+  readonly diffLines: readonly string[];
+}
+
+/** 締切直前の再計算(Issue #344)。回の昇順。 */
+export interface AnalysisClose {
+  readonly note: string;
+  readonly rounds: readonly AnalysisCloseRound[];
+}
+
+/** `close` の上限(Issue #344)。回は 2 つ・1 回の文言の行は多くても 10。想定外に大きい応答は読まない(null にする)。 */
+const CLOSE_MAX_ROUNDS = 4;
+const CLOSE_MAX_SUMMARY_LINES = 4;
+const CLOSE_MAX_DIFF_LINES = 10;
+const CLOSE_MAX_LINE_LENGTH = 300;
+
 export interface AnalysisDetail {
   readonly id: number;
   readonly raceId: string;
@@ -180,6 +203,11 @@ export interface AnalysisDetail {
    * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
    */
   readonly combos?: AnalysisCombos | null;
+  /**
+   * 締切直前の再計算(Issue #344。発走 5 分前・2 分前の、オッズを取り直した配分と、分析時の提案との差分)。結果が無い(旧い分析・まだ回が来ていない)・キー無し(古いサーバの応答)・
+   * 形が不正な値は null にする(補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
+   */
+  readonly close?: AnalysisClose | null;
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
   readonly detail: DetailState;
@@ -321,6 +349,29 @@ function parseLines(value: unknown, maxLines: number, maxLength: number): { read
   return { lines: [...lines] };
 }
 
+/** 文字列の配列(要素数 min〜max・各 CLOSE_MAX_LINE_LENGTH 字以内)。それ以外は null。 */
+function parseCloseLines(value: unknown, min: number, max: number): string[] | null {
+  if (!Array.isArray(value) || value.length < min || value.length > max) return null;
+  return value.every((l): l is string => typeof l === "string" && l.length <= CLOSE_MAX_LINE_LENGTH) ? [...value] : null;
+}
+
+/** 締切直前の再計算(Issue #344)。どこか 1 つでも形が違えば null(節ごと出さない)。 */
+function parseClose(value: unknown): AnalysisClose | null {
+  if (!isRecord(value) || !isStr(value["note"]) || value["note"].length > CLOSE_MAX_LINE_LENGTH || !Array.isArray(value["rounds"])) return null;
+  const raw = value["rounds"] as unknown[];
+  if (raw.length < 1 || raw.length > CLOSE_MAX_ROUNDS) return null;
+  const rounds: AnalysisCloseRound[] = [];
+  for (const r of raw) {
+    if (!isRecord(r) || !isStr(r["label"]) || r["label"].length > CLOSE_MAX_LINE_LENGTH) return null;
+    const summaryLines = parseCloseLines(r["summaryLines"], 1, CLOSE_MAX_SUMMARY_LINES);
+    const diffLines = parseCloseLines(r["diffLines"], 0, CLOSE_MAX_DIFF_LINES);
+    const allocation = r["allocation"] === null ? null : parseAllocation(r["allocation"]);
+    if (summaryLines === null || diffLines === null || (r["allocation"] !== null && allocation === null)) return null;
+    rounds.push({ label: r["label"], summaryLines, allocation, diffLines });
+  }
+  return { note: value["note"], rounds };
+}
+
 function parseDetail(value: unknown): AnalysisDetail | null {
   if (!isRecord(value)) return null;
   const { id, raceId, analyzedAt, kaisaiDate, evEstimated, model, llmNote, llmCalls, race, horses, allocation, detail } = value;
@@ -376,6 +427,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     baba: parseLines(value["baba"], BABA_MAX_LINES, BABA_MAX_LINE_LENGTH),
     development: parseDevelopment(value["development"]),
     combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
+    close: parseClose(value["close"]),
     horses: parsedHorses,
     allocation: parsedAllocation,
     detail,

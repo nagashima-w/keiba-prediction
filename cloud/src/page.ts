@@ -157,6 +157,9 @@ ${paletteCss()}
   .past li { margin: 0; }
   .past-link { margin-top: 0; }
   .meta { margin: 0 0 4px; font-size: 0.9rem; color: var(--muted); }
+  /* Issue #344: 締切直前の再計算(回ごとの塊。見出しの段落は strong) */
+  .close-round { margin: 12px 0 0; }
+  .close-round-title { margin: 0 0 4px; }
   .horse { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
   .horse.positive { border-color: var(--ok); border-width: 2px; }
   .horse-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }

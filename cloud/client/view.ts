@@ -9,7 +9,8 @@ import type { BulkModel, BulkPanel } from "./bulk";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
-import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type DevelopmentSection, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
+import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
+import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type CloseSection, type DevelopmentSection, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
@@ -396,6 +397,29 @@ function replaySection(r: ReplaySection, heading: "h2" | "h3", actions: ViewActi
   ]);
 }
 
+/** 買い目の表の 1 行(配分の提案と、締切直前の再計算で共通)。 */
+const betRow = (b: AllocationBetRowView): VNode =>
+  h("li", { class: "bet" }, [h("strong", {}, [b.betTypeLabel]), h("span", {}, [b.comboLabel]), h("span", {}, [b.stake]), h("small", {}, [`オッズ ${b.odds}・EV ${b.ev}`])]);
+
+/** 締切直前の再計算の節(Issue #344)。回ごとに、見出し・状態の行・表・差分の行。回の見出しは見出しの要素ではなく強調の段落(許可リスト〈`dom.ts`〉に h4 が無く、h2/h3 のどちらの下でも同じ形にできる)。 */
+function closeSection(close: CloseSection, heading: "h2" | "h3"): VNode {
+  return h("section", { class: "close" }, [
+    h(heading, {}, [close.heading]),
+    h("p", { class: "meta close-note" }, [close.note]),
+    ...close.rounds.map((r) =>
+      h("div", { class: "close-round" }, [
+        h("p", { class: "close-round-title" }, [h("strong", {}, [r.heading])]),
+        ...r.summaryLines.map((l) => h("p", { class: "meta" }, [l])),
+        ...r.notices.map((n) => h("p", { class: "notice" }, [n])),
+        ...(r.bets.length === 0
+          ? []
+          : [h("ul", { class: "bets" }, r.bets.map(betRow))]),
+        ...r.diffLines.map((l) => h("p", { class: "meta" }, [l])),
+      ]),
+    ),
+  ]);
+}
+
 /**
  * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「3着内率の上位5頭」(Issue #240。印の付いた馬の直後)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
  * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
@@ -437,15 +461,15 @@ function resultSections(content: ResultContent, heading: "h2" | "h3", actions: V
             h(
               "ul",
               { class: "bets" },
-              allocation.bets.map((b) =>
-                h("li", { class: "bet" }, [h("strong", {}, [b.betTypeLabel]), h("span", {}, [b.comboLabel]), h("span", {}, [b.stake]), h("small", {}, [`オッズ ${b.odds}・EV ${b.ev}`])]),
-              ),
+              allocation.bets.map(betRow),
             ),
           ]),
       ...(allocation.settingsRows.length === 0 ? [] : [h("ul", { class: "settings" }, allocation.settingsRows.map((r) => h("li", {}, [h("small", {}, [r])])))]),
       // 組合せの券種ごとの行(Issue #296)。設定の行の後ろ。サーバの文章(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
       ...(allocation.comboLines.length === 0 ? [] : [h("ul", { class: "settings combo-counts" }, allocation.comboLines.map((r) => h("li", {}, [h("small", {}, [r])])))]),
     ]),
+    // 締切直前の再計算(Issue #344)。「配分の提案」の下。無ければ section ごと出さない。文言はサーバの整形(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
+    ...(content.close === null ? [] : [closeSection(content.close, heading)]),
   ];
 }
 
