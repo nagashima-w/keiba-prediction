@@ -181,7 +181,7 @@ describe("buildAnalysisView(Issue #183)", () => {
 
   it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・戦績の基準日は、応答のどこにも現れない(fallbackReason・betUnit は #185 で意図して返す)", () => {
     const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
-    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "baba", "combos", "detail", "development", "evEstimated", "horses", "id", "kaisaiDate", "llmCalls", "llmNote", "model", "promptVersion", "race", "raceId"]);
+    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "baba", "close", "combos", "detail", "development", "evEstimated", "horses", "id", "kaisaiDate", "llmCalls", "llmNote", "model", "promptVersion", "race", "raceId"]);
     expect(sorted(view.race)).toEqual(["courseType", "distance", "grade", "oddsStatus", "pace", "paceSource", "placeBasis", "raceName", "raceNumber", "startTime", "trackCondition", "turn", "venueName", "weather"]);
     for (const h of view.horses) {
       expect(sorted(h)).toEqual(["actualPlaceOddsMax", "actualPlaceOddsMin", "adjustedProb", "concerns", "earlyPos", "ev", "fairPlaceOdds", "fairWinOdds", "highlights", "isPositive", "legStyle", "mark", "markFrom", "name", "placeOddsMin", "prior", "reason", "umaban", "winOdds", "winProb"]);

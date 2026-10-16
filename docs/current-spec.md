@@ -238,12 +238,15 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
 数値データから各馬の**複勝圏内(3着以内)確率の事前推定値 prior** を決定論的に算出する。設定は
 `scorer/config.ts` の `DEFAULT_SCORER_CONFIG`(重み等はすべて設定画面/verify を見てチューニング可能)。
 
-- **基礎スコア6項目**(`base-score.ts`、既定重み): 近走着順(重み減衰 0.8・直近6走)0.2 / 上がり3F水準
-  0.1 / コース・距離適性 0.15 / 騎手の複勝率(前年+当年の**全体**の成績。当該コースではない。Issue #226。下の「騎手の成績」)0.15 / 斤量変化 1.0(寄与度の表示名は「斤量」。重みのキーは
+- **基礎スコア6項目**(`base-score.ts`、既定重み): 近走着順(重み減衰 0.8・直近6走)0.7 / 上がり3F水準
+  0.15 / コース・距離適性 0.30 / 騎手の複勝率(前年+当年の**全体**の成績。当該コースではない。Issue #226。下の「騎手の成績」)0.15 / 斤量変化 1.0(寄与度の表示名は「斤量」。重みのキーは
   保存済みの設定を壊さないため `weightChange` のまま) / コースレベル枠順
-  バイアス(定数テーブル `frame-bias-table.ts`)1.0。相関の強い能力推定は多重計上を避けて控えめ。
+  バイアス(定数テーブル `frame-bias-table.ts`)1.0。
+  **近走着順・上がり3F・コース距離の重みは Issue #339(#258 第 2 段 a)で、本番の書き出し〈#266。871 レース・11,339 頭。2026-07-19〜10-15〉に当て直した値**
+  〈旧: 0.2・0.1・0.15。旧い値は「相関の強い能力推定の多重計上を避けて控えめ」に置いたが、データでは弱すぎた。倍率は 3.5・1.5・2 倍〉。
+  騎手 0.15 は据え置き(旧データに騎手の項が無く、当てられない。たまってから当てる)。
   **馬体重の増減による減点は無い**(Issue #213 で撤去。馬体重は LLM が「ベスト体重」と照らして判断する)。
-- **環境・状態バイアス7項目**(既定重み各1.0): 馬場状態適性(道悪、`bias-track-condition.ts`)/
+- **環境・状態バイアス7項目**(既定重み各1.0。prior 合成で `biasCorrectionScale=0.05` を掛けて減衰する): 馬場状態適性(道悪、`bias-track-condition.ts`)/
   競馬場適性(`bias-venue.ts`、出走歴が無い場は `course-traits.ts` の類似度で代替評価)/ 季節適性
   (`bias-season.ts`)/ 枠順適性(馬個別、`bias-frame.ts`)/ 夏負けフラグ / 輸送・滞在バイアス
   (`bias-transport.ts`)/ ローテーション適性(鉄砲・叩き良化・使い込み下降、`bias-rotation.ts`。
@@ -287,13 +290,17 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   サンプル 2 走未満は補正なし(`minSampleForBias=2`)。各バイアスの寄与度は内訳(`BiasContribution`)として
   ログ可能。
 - **prior 合成**(`prior.ts`): 基礎スコア + バイアス補正合計(バイアスは過剰補正防止のため
-  `biasCorrectionScale=0.3` で一律減衰)を、頭数レベル正規化(目標複勝圏内数 min(3, 頭数)に**ちょうど**合わせる。
+  `biasCorrectionScale=0.05` で一律減衰。**Issue #339 で 0.3 から替えた**〈バイアス 7 項目は結果とほぼ無関係なノイズで、補正のレース内の分散の 66% を占めていた〉)を、頭数レベル正規化(目標複勝圏内数 min(3, 頭数)に**ちょうど**合わせる。
   **Issue #258 でロジットシフトに替えた**: 各馬の raw を [0.02, 0.95] に収めて logit にし、全馬に共通の c を足して
   Σ clamp(sigmoid(logit_i + c)) = 目標 となる c を二分法で求める〈`normalizeFieldPriors`。実現不能は飽和・throw しない〉。
   旧〈〜#226〉は、Σ が目標から ±10% を超えたときだけ全馬に同じ倍率を掛けていた〈許容 `normalizeTolerance` は撤去〉。
   raw の偏りが正のため倍率が 1 より小さく、確率の sd を raw の中央値で 0.77 倍に縮めていた〈ロジットシフトでは 0.86 倍〉。
   33 レース・429 頭の前後比較は `docs/investigations/prior-normalization-258/report.md`〉したうえで prior を算出。
-  prior は [0.02, 0.95] にクランプ。分析の版は `PROMPT_VERSION` "2026-10-15.1"〈#315 で想定ペースを LLM が展開予想して決める形にした版。直前の "2026-10-13.2" は #295 で当日の馬場の節を足した版。直前の "2026-10-13.1" は #258 でロジットシフトにした版で、文面は "2026-10-11.1" から不変〉。
+  prior は [0.02, 0.95] にクランプ。
+  **Issue #339(#258 第 2 段 a)の効果**(本番の書き出し 871 レースで、時間で分けて当てた〔当てた範囲より後の期間で比べた〕。5 通りの検証で Brier が 0.0091〜0.0107 良くなった。
+  全 871 レースの再計算: Brier 0.16775 → 0.15731、人気帯〔1 番人気 / 2〜3 / 4〜6 / 7 以下〕の prior の平均 31.1 / 28.6 / 25.6 / 18.8% → 42.0 / 34.4 / 26.6 / 15.2%〔実際は 66.0 / 47.0 / 27.3 / 8.4%〕。
+  人気順の表は、統計モデルだけでは実際には届かない〔識別力の差。prior の帯ごとの信頼度表は、新しい値でほぼ一致する〕。根拠は #258 のコメント〈2026-10-16〉と `config.ts` の JSDoc)。
+  分析の版は `PROMPT_VERSION` "2026-10-16.1"〈#339 で基礎スコアの重みとバイアスの減衰を当て直した版。文面は "2026-10-15.1" から不変。直前の "2026-10-15.1" は #315 で想定ペースを LLM が展開予想して決める形にした版。直前の "2026-10-13.2" は #295 で当日の馬場の節を足した版。直前の "2026-10-13.1" は #258 でロジットシフトにした版で、文面は "2026-10-11.1" から不変〉。
 - **EV(期待値)**(`ev/expected-value.ts`): 複勝期待値 = place_prob × **複勝オッズ下限(oddsMin)**。
   EV > 閾値(既定 1.0、厳密不等号)の馬のみ `isPositive=true`。オッズ欠損馬(馬番が無い/下限が
   null)、および複勝オッズ下限が**値域外**(オッズの値域は1.0以上であり、0を含む1.0未満・非有限は
@@ -351,11 +358,11 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   ときだけ呼び出す(`parseShutuba` の `hasGradeBadge`。判定不能〈旧データ等〉なら fail-open で
   呼ぶ)。これにより非重賞レースへの無駄なリクエストを避ける(重賞判定はバッジの有無のみで、
   グレード番号は解釈しない)。地方(NAR)にも対応(`nar.netkeiba.com` の同一API)。
-- **プロンプト版の記録**: `PROMPT_VERSION`(現行 `"2026-10-15.1"`。Issue #315 で想定ペースを LLM が展開予想して決める形にした版。直前の `2026-10-13.2` は Issue #295 で当日の馬場の節〈中央のレースで朝の計測値があるときだけ。値が無いときはプロンプトが "2026-10-13.1" とバイト一致〉を足した版。直前の `2026-10-13.1` は Issue #258 で prior の頭数正規化を乗算からロジットシフトに替えた版。直前の `2026-10-12.1` は Issue #226 で騎手の成績を prior に入れた版。プロンプトの文面は `2026-10-11.1` から変わらず、各馬の「3着内率=」の値だけが変わる)を分析ごとに保存し、版別に検証比較する。
+- **プロンプト版の記録**: `PROMPT_VERSION`(現行 `"2026-10-16.1"`。Issue #339 で基礎スコアの重みとバイアスの減衰を当て直した版〈文面は不変。3着内率の値だけが変わる〉。直前の `2026-10-15.1` は Issue #315 で想定ペースを LLM が展開予想して決める形にした版。直前の `2026-10-13.2` は Issue #295 で当日の馬場の節〈中央のレースで朝の計測値があるときだけ。値が無いときはプロンプトが "2026-10-13.1" とバイト一致〉を足した版。直前の `2026-10-13.1` は Issue #258 で prior の頭数正規化を乗算からロジットシフトに替えた版。直前の `2026-10-12.1` は Issue #226 で騎手の成績を prior に入れた版。プロンプトの文面は `2026-10-11.1` から変わらず、各馬の「3着内率=」の値だけが変わる)を分析ごとに保存し、版別に検証比較する。
   設定画面の追加指示(`additionalInstruction`)も版とは別軸で記録する。
 - **クリップ幅の A/B(`clip-variants.ts`、単一の真実源 `CLIP_VARIANTS`)**: prior からの補正上限を
   版として切替。`default`=±10%(絶対値0.10、対照)、`wide15`=±15%(絶対値0.15)。版文字列に幅を内包
-  (例 `2026-10-15.1-clip015`)し、プロンプト文面・クリップ幅・版文字列をレジストリから機械導出して
+  (例 `2026-10-16.1-clip015`)し、プロンプト文面・クリップ幅・版文字列をレジストリから機械導出して
   食い違いを防ぐ。実際のクリップは `parseAnalyzerResponse` の `maxAdjust` で行う。
 - **予想印**: ◎〇▲△☆注(`PREDICTION_MARKS`)。◎はちょうど1頭必須、本線印は飛ばさない優先順位制約。
 - **強調材料・懸念事項**(Issue #197〈#196-a〉。`PROMPT_VERSION` `2026-10-07.1`): 馬ごとに、総合の根拠 `reason`(一文。残す)に加えて `highlights`(強調材料)・`concerns`(懸念事項)を出させる。
@@ -1560,6 +1567,18 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   「今すぐの仕事(now)・再試行待ち(now + 60 秒)・計画の次の試行/期限(段階2。`max(それ, now)`)・掃除の期限」のうち**最も早い時刻**を選ぶ(掃除の期限は、仕事〈即時・再試行待ち〉があるあいだは候補にしない)。
   予約が無いときの `setAlarm` の回数・値は従来と同じ。`pickNext` は **発走前(pre_race)を朝(morning)より先**に処理する(計算待ち → 取得待ちの順は従来どおり。取得待ちのうち**再試行待ち〈試行済み〉は最後**にして、再試行の間隔を保つ)。
 - **状態**: `GET /api/analyses/status` の各レースに `mode`・`analysis_id`・`detail`・`children_ok`。
+- **締切の直前の再計算**(Issue #338〈#335-A1〉。親 #335。画面は A-2 で未着手。**通知はしない**):
+  - **何をするか**: 発走前の分析(`pre_race`)が保存されたら、発走の **5 分前(回 1)** と **2 分前(回 2。暫定値)** の 2 回、**オッズだけを取り直し**、確率は分析時のまま(**LLM は呼ばない**)で EV と配分を作り直して D1 に残す。分析時の提案の行(`analysis_allocation_meta`・`analysis_bets`)は上書きしない。時刻は定数(`cloud/src/analysis-close.ts` の `CLOSE_FIRST_LEAD_MS`・`CLOSE_FINAL_LEAD_MS`)。**2 分前は暫定**(締切の正確な時刻はリポジトリに根拠が無く未確認。ユーザー決定 2026-10-16)。設定項目は作らず、**常時 ON**(止めるにはデプロイで止める)。
+  - **対象**: 自動・手動のどちらの発走前の分析も対象(自動の印を見ない)。**中央だけ**(地方は回の行を積んだうえで `skipped`〈`nar-unsupported`〉。地方は後段 N)。保存先が `saveClose` を持たない構成・分析の保存が発走を過ぎているときは、行も入力も積まない。
+  - **入力の登録**: 計算ステップの保存と**同じ同期区間**(`registerClose`)で、DO の新しい表 `race_day_close_input`(馬ごとの馬番・枠番・馬名・prior・adjustedProb と、分析時にオッズがあったか、配分に使う設定 10 項目、EV 閾値、分析時の配分の route)と `race_day_close`(回ごとの行。`due_ms` = 発走 − リード)に積む。**D1 だけでは確率が揃わない**(`analysis_horses` に枠番・馬名が無く、R2 の詳細を読むと Class B 操作に数える)ため。登録の失敗は握って警告(分析は止めない)。同じレースの発走前の分析を予約し直すと(`enqueueTask`)、そのレースの行と入力は消える。
+  - **起床と処理の順**: アラームの候補 `closeAtMs`(`nextAlarmAt`)。`runNextStep` では、通知の後・馬場とタスクの前に 1 ステップ(待っている取得・計算より先。ただし実行中のステップは中断できない)。起床の遅れ(`late_ms` = 最初に動いた時刻 − 本来の時刻)を記録する(再試行では進めない)。
+  - **取り直し**(`computeClosePayload`): `scrapeRace` を、**出馬表・戦績・調教はキャッシュ専用**(無ければ投げる=ネットワークに出ない)、**オッズ(`ODDS_URL_PATTERN`)だけ `bypassCache`**、騎手の成績なしで呼ぶ。取る券種は分析時の設定のスナップショット(`includeComboOdds`)と同じ(**単勝・複勝だけを差し替えると、配分が連立なので比べられない**)。中央は組合せ OFF(既定)で 1 本、ON で 7 本(単勝複勝 1 + 組合せ 6)。リクエスト数は式からの導出値で、本番の実測ではない。
+  - **結果の種類**: `ok`(再計算できた)・`failed`・`skipped`。理由の固定の語彙: failed = `analysis-failed`(入力が無い・壊れている)・`fetch-failed`・`horse-set-mismatch`(出馬表の馬の集合が分析時と違う、または分析時にオッズのあった馬のオッズが無い)・`compute-failed`(再計算の例外、または配分が無効〈route=invalid〉)・`blocked`(ブレーカー・許可リスト外。再試行しない)/ skipped = `too-late`(起きたのが遅く、次の回の時刻〈最後の回は発走〉を過ぎていた)・`unset`(分析時の提案が未設定で、取り直しても出ない=オッズを取らない)・`nar-unsupported`。判断の順は 地方 → 未設定 → 遅れ → 取得 → 組合せの警告 → 馬の集合 → 再計算。組合せオッズの取得に警告(失敗・部分被覆・構造異常)があれば、券種が配分から静かに抜けて見かけの買い目の削除になるので、`fetch-failed` にする。
+  - **再試行と冪等性**(アラームは少なくとも 1 回実行される): 取得の失敗は 1 回だけ 15 秒後に再試行(再試行の時刻が次の回の時刻より前のときだけ。出馬表がキャッシュに無いときは再試行しない)。**結果は D1 に保存する前に DO(`payload_json`)へ書く**ので、保存の再試行・再実行で取り直さない。D1 への保存は最大 3 回(20 秒間隔)で、尽きたらその回は諦める(DO の状態 `abandoned`。D1 に行は残らず、警告だけ)。D1 の書き込みは (分析 id, 回) の UPSERT。
+  - **D1**(migration 0019): `analysis_close`((分析 id, 回)で 1 行。status・reason・due_at・fired_at・late_ms・odds_official_datetime と、`ok` のときだけ配分のメタ 17 列)・`analysis_close_bets`(`ok` の回の買い目)。保存は 1 回の batch・3 文以内(`D1AnalysisStore.saveClose`)。読み出しは `getStoredClose`(2 文の batch)。
+  - **API**: `GET /api/analyses/{id}` に `close`(`rounds`: 回の昇順の配列。各要素は `round`・`leadMinutes`・`status`・`reason`・`dueAt`・`firedAt`・`lateMs`・`oddsOfficialDatetime`・`allocation`〈`ok` のときだけ。分析時の提案と同じ形〉・`diff`〈`ok` で分析時の配分もあるときだけ。`added`・`removed`・`changed`・`unchanged`・`hasChange`・`totalStakeBefore`・`totalStakeAfter`。賭け金が同じでオッズだけ動いた買い目は変化に数えない〉)を足した。結果が無い分析・表が無い間・読み出しの失敗は `null`(配分と違い、無くても「買い目なし」と誤読されないため、全体を 503 にしない)。
+  - **core**: `runAnalysis` の EV・配分の部分を `packages/core/src/analysis/recompute-allocation.ts`(`computeEvForProbs`・`buildAllocationForRows`・`recomputeAllocationFromProbs`)に抽出し、`runAnalysis` もそれを呼ぶ(`pipeline-golden.json` はバイト同一)。配分の差分は `allocation-diff.ts` の `diffAllocationBets`。
+  - **【記録】**: (1) 取り直しの所要時間はゲートの最小間隔 2 秒 × 本数の導出値(中央の組合せ ON で約 14 秒)で、本番の実測は無い。(2) アラームは非プリエンプティブで、別レースの LLM 計算(最大 180 秒)や取得ステップの最中は起床が遅れる(`late_ms` で観測できる)。(3) 確率は分析時(発走の 45 分前など)のままで、LLM が見ていた市場情報は古くなる。(4) `scrapeRace` を非オッズのキャッシュ専用で呼ぶため、出馬表・戦績のパースが毎回走る(CPU は分析の計算ステップの部分集合)。(5) 日報の買い目・検証は分析時の提案のまま(検証への反映は C)。
 
 ### スマホ画面のための読み取り API(#183〈#165-a〉。v1.19.15)
 画面(#184)が「開催日を選ぶ → レース一覧 → 起動(`POST /api/analyses/run`)→ 結果を見る」を行うための、読み取りの API を2つ(`cloud/src/handler.ts`)。**exe のアプリコードは無変更**(`toSafeRaceSnapshot` に `export` を付けただけ)。
@@ -1573,7 +1592,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - 取得の失敗の直後に呼んでも、もう一度取りに行く。公開前の日・遠い未来・過去の日付で netkeiba が何を返すか(200 の空 HTML か別のステータスか)は**実測していない**(別のステータスなら 503 になり、「開催なし」と区別できる)。**本番での確認項目**。
   - 一覧の取得が、同じ日に走っている分析の取得(gate への呼び出しを RaceDay の中で直列にしている)の後ろに並ぶことがある(中央16頭の冷えた状態で約 40 秒。gate の呼び出しは 60 秒で諦める)。超えれば 503 `failed` で、再読み込みで回復する。
 - **`GET /api/analyses/{id}`**: 分析1件。`{ ok: true, analysis: {...} }`(**camelCase**。`GET /api/analyses` の形に揃えた。`/api/races`・`/status`・`/run` は snake_case で、API のキー名は**不統一のまま**)。
-  - 返す項目: `id`・`raceId`・`analyzedAt`・`kaisaiDate`・`evEstimated`・`model`・`promptVersion`・`detail`(`present`・`missing`・`none`)/ `race`(`venueName`〈raceId の場コードから〉・`raceNumber`〈raceId の末尾2桁から〉・`raceName`・**`grade`**〈グレードの生の値。`G3`・`J・G1`・`Jpn1`・`重賞` など。raceSnapshot の `race.grade` から。過去の分析〈グレードを保存する前のもの〉・詳細なしは `null`。見出しに出すのは重賞だけ。Issue #250〉・`startTime`・`courseType`・`distance`・`weather`・`trackCondition`・**`oddsStatus`**〈分析時点のオッズの状態。`result`=確定・`middle`=発売中〈暫定〉・`yoso`=発売前〈予想〉。Issue #247〉〈raceSnapshot から。取れなければ `null`〉・**`placeBasis`**〈想定複勝オッズの基準。`top3`=3着内率〈出走8頭以上〉・`top2`=2着内率〈5〜7頭。複勝は2着まで〉・`null`=出さない〈4頭以下〉。Issue #253〉)/ `horses`(`umaban`・**`name`**〈raceSnapshot から〉・`prior`・`adjustedProb`・`placeOddsMin`・`ev`・`isPositive`・`mark`・`reason`・**`highlights`・`concerns`**〈強調材料・懸念事項。文字列の配列。項目なし・旧い分析は `[]`。D1 の馬の行にあるので、詳細〈R2〉の状態に依らず載る。Issue #197。一覧 `GET /api/analyses` の馬には載せない〉・**`winProb`・`fairWinOdds`・`winOdds`**〈単勝の勝率の推定・想定オッズ・分析時点の実際のオッズ。Issue #247。下の「単勝の想定オッズ」〉・**`fairPlaceOdds`・`actualPlaceOddsMin`・`actualPlaceOddsMax`**〈複勝の想定オッズ・分析時点の実際の複勝オッズの下限・上限。Issue #253。下の「複勝の想定オッズ」〉)/ `allocation`(`route`・`skipReasonCode`・`unavailableReason`・設定の要約〈`bankroll`・`perRaceCap`・`kellyFraction`・`evThreshold`・`include*`〉・`oddsStatus`・`bets`〈`betType`・`comboKey`・`stake`・`odds`・`ev`〉。配分の行が無ければ `null`。合計額は返さない)。
+  - 返す項目: `id`・`raceId`・`analyzedAt`・`kaisaiDate`・`evEstimated`・`model`・`promptVersion`・`detail`(`present`・`missing`・`none`)/ `race`(`venueName`〈raceId の場コードから〉・`raceNumber`〈raceId の末尾2桁から〉・`raceName`・**`grade`**〈グレードの生の値。`G3`・`J・G1`・`Jpn1`・`重賞` など。raceSnapshot の `race.grade` から。過去の分析〈グレードを保存する前のもの〉・詳細なしは `null`。見出しに出すのは重賞だけ。Issue #250〉・`startTime`・`courseType`・`distance`・`weather`・`trackCondition`・**`oddsStatus`**〈分析時点のオッズの状態。`result`=確定・`middle`=発売中〈暫定〉・`yoso`=発売前〈予想〉。Issue #247〉〈raceSnapshot から。取れなければ `null`〉・**`placeBasis`**〈想定複勝オッズの基準。`top3`=3着内率〈出走8頭以上〉・`top2`=2着内率〈5〜7頭。複勝は2着まで〉・`null`=出さない〈4頭以下〉。Issue #253〉)/ `horses`(`umaban`・**`name`**〈raceSnapshot から〉・`prior`・`adjustedProb`・`placeOddsMin`・`ev`・`isPositive`・`mark`・`reason`・**`highlights`・`concerns`**〈強調材料・懸念事項。文字列の配列。項目なし・旧い分析は `[]`。D1 の馬の行にあるので、詳細〈R2〉の状態に依らず載る。Issue #197。一覧 `GET /api/analyses` の馬には載せない〉・**`winProb`・`fairWinOdds`・`winOdds`**〈単勝の勝率の推定・想定オッズ・分析時点の実際のオッズ。Issue #247。下の「単勝の想定オッズ」〉・**`fairPlaceOdds`・`actualPlaceOddsMin`・`actualPlaceOddsMax`**〈複勝の想定オッズ・分析時点の実際の複勝オッズの下限・上限。Issue #253。下の「複勝の想定オッズ」〉)/ `allocation`(`route`・`skipReasonCode`・`unavailableReason`・設定の要約〈`bankroll`・`perRaceCap`・`kellyFraction`・`evThreshold`・`include*`〉・`oddsStatus`・`bets`〈`betType`・`comboKey`・`stake`・`odds`・`ev`〉。配分の行が無ければ `null`。合計額は返さない)/ **`close`**(締切の直前の再計算の結果。Issue #338。上の「締切の直前の再計算」)。
   - **返さないもの**: `rawResponse`・馬の `contributions`・raceSnapshot の全体(騎手・調教師・オッズ・組合せオッズなど)・追加指示・戦績の基準日・配分の `fallbackReason`・`betUnit`。許可したキーを明示的に組み立てる(`analysis-view.ts`。キーの集合をテストが固定する)。
   - **`detail` が `present` でない**(R2 の操作回数の柵に達した・R2 に無い・壊れている・`detail_key` が無い)ときは、**スナップショットを使わず**、馬名なし(`name: null`)・レース情報は `venueName`・`raceNumber` だけ、で**同じキーの形**を返す。D1 の値(prior・印・配分)は残る。
   - id は 1〜2,147,483,647 の整数(先頭の 0 は 400)。不正・クエリつきは 400(D1・R2 に触れない)。無ければ 404 `{ ok: false, error: { type: "not-found" } }`。D1 の失敗は 503 `d1-error`(文面なし)。**配分の読み出しだけが失敗したときも全体を 503 にする**(配分だけ欠けた 200 は「買い目なし」と誤読される)。GET だけ(HEAD は 405)。`/api/analyses/status`・`/run` とは衝突しない(完全一致を先に処理する)。
@@ -1853,6 +1872,7 @@ LLM が失敗して統計だけで確定した日などを、**管理者が手�
 ### クラウド版のスコアリングの重み(#218〈#167 の洗い出しから〉。v1.31.0)
 exe の設定にある重み13項目(バイアス7: 馬場状態・競馬場・季節・枠順・夏負け・輸送・ローテ / 基礎6: 近走着順・上がり3F・コース距離・騎手・斤量・コース枠順バイアス)を、クラウド版の設定画面で変えられる。変更は `cloud/` のみ(exe・core のコードは無変更)。
 - **設定のキー**: 平坦な接頭辞つきの13キー(`biasWeight` + exe のキーの先頭大文字: `biasWeightTrackCondition`・`biasWeightVenue`・`biasWeightSeason`・`biasWeightFrame`・`biasWeightSummerFatigue`・`biasWeightTransport`・`biasWeightRotation`、`baseScoreWeight` + 同: `baseScoreWeightRecentForm`・`baseScoreWeightLast3f`・`baseScoreWeightCourseDistance`・`baseScoreWeightJockey`・`baseScoreWeightWeightChange`・`baseScoreWeightCourseFrameBias`)。exe のキーとの対応は `cloud/src/settings.ts` の `SCORING_WEIGHT_FIELDS`(唯一の定義元)。設定の項目は全部で28(既存の15 + 13)。
+- **既定値の変更と保存済みの設定(Issue #339)**: 近走着順・上がり3F・コース距離の既定値を 0.2・0.1・0.15 から 0.7・0.15・0.30 に替えた。`saveSettings` は全項目を書くので、設定画面で一度でも保存していると、重み13項目が旧い既定値のまま保存されていて、新しい既定値が効かない。**自動で置き換える処理は入れない**(ユーザー決定)。公開後に設定画面で重みを確認し、旧い既定値のままなら「重みを既定値に戻す」を押す。バイアスの一律減衰(`biasCorrectionScale`)は設定に出ない core の定数なので、この影響を受けない。
 - **既定値・検証**: 既定値は core の `DEFAULT_SCORER_CONFIG`(= exe の `DEFAULT_APP_SETTINGS`)の写しで、一致は `scripts/test/cloud-settings-defaults.test.ts`(exe・core の両方と13項目すべて)が固定する。検証は exe の `isValidWeight`/`coerceSettings` と同じ(**有限な数で 0 以上。上限は無い**。読む側と書く側で同じ述語)。同じ値を exe の `coerceSettings` と cloud の述語に通して採否が一致することもテストで固定した。保存済みの設定に重みの項目が無い行(今の本番)は、13項目とも既定値で読む(**今までと同じ結果**)。1項目だけ不正な行は、その項目だけ既定値に戻る。画面の入力の違い: 16 進(`0x10`)など、exe の `Number()` が受ける一部の書き方を cloud の数値欄は受けない(既存の数値欄と同じ流儀)。
 - **ScorerConfig**: `cloud/src/scorer-config.ts` の `buildCloudScorerConfig(settings)` が、`DEFAULT_SCORER_CONFIG` へ重み2グループだけをマージする(exe の `buildScorerConfig` と同じ出力。テストで固定)。
 - **分析への配線**(`runCloudAnalysis` の呼び出し箇所は2つ): 発走前の分析(`runPreRaceCompute`)と朝の prior(`runCompute`)の両方が `scorerConfig` を渡す。**どちらも、取得ステップで固定した設定のスナップショット(`race_day_tasks.settings_json`)の重みを使う**ので、各タスクの中で重みが変わらない(取得のあとに設定を保存しても、そのタスクは取得時の重み)。朝の取得ステップは、このために設定を1回読むようになった(読めなければ再試行 → 尽きたら `failed`。既定値の重みで黙って prior を作らない。`loadSettings` を渡さない構成では読まず、既定値の重み)。スナップショットの無い(この変更の前に取得まで済んだ)朝のタスク、重みの項目が無い旧いスナップショットの発走前のタスクは、既定値の重みで計算する。
@@ -1941,7 +1961,16 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
   - 失敗・柵: `failed`(連続 5 回の tick の失敗か書き込みの柵)・`blocked`(R2 の読み出しの柵)は 503 + 固定の種類名のみ。失敗のあとの通常の GET は勝手に始め直さない(`?refresh=1` で始め直す)。DO の例外・binding なしは 503 `export-error`。
 - **DO `PriorExportDO`**(`PRIOR_EXPORT`。wrangler の migration **タグ v7**〈追加のみ〉。`idFromName("main")`。D1 の migration は足していない): 項目ごとの補正(`contributions`)が **D1 に無く、R2 の詳細オブジェクトにしかない**(`analysis-repository.ts` は馬の保存で `contributions` を null にし、実体を R2 の `analyses/{id}.json.gz` に置く。移行した分析も同じ)ため、Worker(Free の CPU 10ms)でも、1 回の呼び出し(Free は 50 クエリ)でも作れない。**アラームで少しずつ進める多段のジョブ**(`prior-export-core.ts`)にした: 計画(適格な分析を選んで 30 件ずつの batch に分ける)→ 処理(1 tick に D1 の 3 文 + R2 の GET 30 件 + 使用量の確認・加算。行を整形して**その tick ぶんだけ gzip** し kv に置く)→ 仕上げ(メタ行 + 各 tick のメンバーを連結して R2 の固定キー `exports/prior-dataset.ndjson.gz` に put〈原子的な上書き〉)。gzip の複数メンバーの連結は 1 回の gunzip で読めるので、全体を 1 文字列にしない(DO のメモリ 128MB のため)。検証の DO に足さなかったのは、アラームが 1 つしか張れず発走時刻の補完と干渉するため。
 - **母集団**(`prior-export-format.ts` の `selectPriorExportAnalyses`): 結果のあるレースの分析のうち、**先読みの遮断済み(`history_cutoff_date` あり。`leak_class = guarded`)または、遮断なしでも分析が発走より前(検証画面と同じ `classifyLookaheadSuspicion` が clean。`pre_race`)**で、レースごとに最新 1 件(`analyzed_at` 最大、同時刻は id 最大。最新選択は適格な候補だけが対象で、clean が新しい非 clean に負けない)。`start_time` が NULL(検証の DO の補完待ち)の遮断なしの行は判定できないので入れず、メタ行と状態の `excluded.unchecked` に数える。ほかの除外は `suspect`(発走後)・`unknown`(判定不能)・`superseded`(最新でない)。除外の内訳の和 + 採用 = 候補の総数。`prompt_lookahead_guarded` は列で持つ(prior・寄与度は履歴だけから決まりプロンプトに依らないが、`adjusted_prob` を使うときは絞ること)。`ev_estimated` の分析も除外せず列で持つ。
-- **列**(1 行 1 頭。`PRIOR_ROW_KEYS`。許可リスト): `analysis_id`〈analyses.id〉・`race_id`〈analyses.race_id〉・`kaisai_date`〈analyses.kaisai_date。NULL なら地方のレース ID から補う。中央で NULL は null〉・`venue_kind`〈`venueKindOfRaceId`〉・`course_type`〈race_result_meta.course_type〉・`field_size`〈その分析の `analysis_horses` の行数〉・`umaban`・`prior`・`adjusted_prob`・`place_odds_min`〈analysis_horses〉・`contributions`〈R2 の詳細。13 項目の `biasName`・`applied`・`weight`・`correction`・`sampleCount`・`targetRate`・`overallRate`。**自由文の `reason` は除く**。詳細が無い・読めなければ null〉・`finish_position`・`win_odds`・`ninki`〈race_results。#259 の列。NULL あり〉・`prompt_version`・`analyzed_at`・`ev_estimated`・`prompt_lookahead_guarded`〈analyses〉・`leak_class`。**含めない**: 追加指示・LLM の生応答・`reason`・強調材料・懸念事項・買い目と配分・印・EV・設定・馬名。先頭行はメタ(`{"_meta": {format, generatedAt, rows, races, missingDetail, excluded, columns, notes}}`)。
+- **列**(1 行 1 頭。`PRIOR_ROW_KEYS`。許可リスト。**形式 v2〈#341〉で 19 列 → 30 列**。v1 の 19 列は先頭にそのまま残り、足した 11 列は末尾。下の「形式 v2」): `analysis_id`〈analyses.id〉・`race_id`〈analyses.race_id〉・`kaisai_date`〈analyses.kaisai_date。NULL なら地方のレース ID から補う。中央で NULL は null〉・`venue_kind`〈`venueKindOfRaceId`〉・`course_type`〈race_result_meta.course_type〉・`field_size`〈その分析の `analysis_horses` の行数〉・`umaban`・`prior`・`adjusted_prob`・`place_odds_min`〈analysis_horses〉・`contributions`〈R2 の詳細。13 項目の `biasName`・`applied`・`weight`・`correction`・`sampleCount`・`targetRate`・`overallRate`。**自由文の `reason` は除く**。詳細が無い・読めなければ null〉・`finish_position`・`win_odds`・`ninki`〈race_results。#259 の列。NULL あり〉・`prompt_version`・`analyzed_at`・`ev_estimated`・`prompt_lookahead_guarded`〈analyses〉・`leak_class`。**含めない**: 追加指示・LLM の生応答・`reason`・強調材料・懸念事項・買い目と配分・印・EV・設定・馬名・騎手名・調教師名・スナップショットの市場の値(単勝オッズ・人気・複勝オッズ)。先頭行はメタ(`{"_meta": {format, generatedAt, rows, races, missingDetail, excluded, columns, notes}}`)。
+  - **形式 v2(#341〈#340-1〉)で足した 11 列**(`PRIOR_ROW_KEYS_V2_ADDED`。出どころは R2 の詳細に**既に入っている `raceSnapshot`**〈分析時点の出馬表〉。`toSnapshotColumns` が取り出す。**追加の R2 の取得・D1 の読み取りはない**。`fetchDetails` が既に `decodeDetail` で読んだ中身を使う):
+    - レースの列(全頭に同じ値): `race_name`〈文字列〉・`grade`〈文字列。"G1"〜"G3"・"Jpn1"・"重賞" など〉・`distance`〈整数〉・`track_condition`〈文字列。**分析時点の値で確定ではない**〉。
+    - 馬の列(馬番で結ぶ): `wakuban`〈整数〉・`sex`〈牡・牝・セ〉・`age`〈整数〉・`body_weight`〈kg。増減は保存していない〉・`kinryo`〈kg〉・`oikiri_rank`〈A・B・C〉・`oikiri_critic`〈調教の短評〉。
+    - **null の意味**: どの列も、詳細(R2)が無い・スナップショットが null や壊れている(そのレースの 11 列とも null)、その列の型が想定と違う(その列だけ null。推測で直さない)、スナップショットに無い馬(馬の列だけ null でレースの列は入る)、で null。
+      個別には: `body_weight` は馬体重の発表前(前日の分析など)、`oikiri_rank`・`oikiri_critic` は**地方で常に null**(調教は中央だけ取る。`scrape-race.ts` の `if (!isNar)`)。
+    - **`grade` の null は曖昧**: キー自体が無い(グレードなしのレース)場合と、グレードを保存する前〈#250 より前〉の旧スナップショットの場合のどちらも null で、**区別できない**【記録】。
+    - **`oikiri_critic` は短評〈netkeiba の `td.Training_Critic`〉で、16 文字(コードポイント)を超えるものは自由文の疑いで null にする**(`CRITIC_MAX_LENGTH`)。実フィクスチャ `fixtures/oikiri_202603020211.html` の 16 頭では 4 文字前後の定型句だったが、**1 つのフィクスチャの 16 頭だけで、語彙が閉じていることは確認していない**【記録】。notes にも書いてある。
+    - **`course_type` は既存の列〈D1 の `race_result_meta`、結果ページ〉を流用**し、スナップショットの `courseType` は足していない。`wakuban` は D1 の `race_results.wakuban`〈#269。旧い行は NULL〉ではなくスナップショットから取る(他の v2 の列と同じ時点・同じ出どころで、`RESULTS_SQL` を変えない)。
+    - **市場の値は取り出さない**: スナップショットの `winOdds`・`popularity`・`placeOddsMin`・`placeOddsMax` は列にしない(#340 の方針「市場のオッズ・人気は特徴量に混ぜない」。既存の `win_odds`・`ninki` は結果ページの確定値、`place_odds_min` は分析が EV に使った値のまま)。馬名・騎手名・調教師名も取り出さない。いずれもテスト(`prior-export-format.test.ts`)で固定。
   - **`field_size` について**: 出馬表の取消・除外は分析の前に除かれる(`scrape-race.ts` が `meta.scratched` に移し「分析から除きました」と警告する)ので `analysis_horses` に入らない。ただし**分析後の取消・中止は入りうる**(そのとき `finish_position` は null。中止・取消・除外は区別できない)。
   - **scorer の設定の版は記録されていない**(D1・R2 のどこにも保存していない)。有効な重みは `contributions[].weight`(バイアスは `biasCorrectionScale` 乗算後の値)から読み、コードの版との対応は `analyzed_at`・`prompt_version`(scorer の変更を兼ねて上げた版がある)・コミット履歴で引く。メタ行の `notes` に書いてある。
 - **柵**: 作成を始める回数は **1 日(JST)に 3 回まで**(始めたときに数える。環境変数 `PRIOR_EXPORT_DAILY_LIMIT` で**下げる方向にだけ**上書きできる)。R2 の読み出しの柵(`isReadAllowed`)は始めるときと tick ごと、書き込みの柵(`isWriteAllowed`)は put の前に見る。Class B は取得を試みた回数(失敗も)を tick ごとに `r2_ops` に加算し、Class A は put の前に +1。**ダウンロード(Worker の R2 の get 1 回)の Class B は数えない**(1 回/ダウンロードで無視できる。【記録】)。
@@ -1951,10 +1980,14 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
   - ファイル: gzip 5,646,422 バイト(展開後 40,953,232 バイトの約 13.8%。1 行平均 2,338 バイト)。kv に置く 1 tick ぶんの塊は約 134KB(5,646,422 ÷ 42 batch)。
   - 壁時計 45.9 秒(44 tick = 計画 1 + 処理 42 + 仕上げ 1。tick の間隔 1 秒)、workerd の CPU 合計 3,820ms と 3,840ms(1 tick あたり約 87ms)。ダウンロード: 壁時計 30ms・workerd の CPU 30ms(Worker は本体を流すだけ)。
   - 開発側のローダ(`scripts/prior-dataset.ts`)で全 17,514 行を読め、自由文(`"reason"`)を含まないことを確認。
+  - **形式 v2(#341)の実測**(同じコマンド・同じ合成データ〈同じ種〉を、変更前〈起点 9bd9967〉と変更後で 1 回ずつ測った。`--repeat 2`。**N=1 の実行で、下位桁に意味を読まない**): **D1 の読み取り行数 53,324/回・R2 の GET 1,251 回/回は、変更前後で同じ**(2 回の作成とも)。
+    ファイル: gzip 5,646,423 → 5,993,631 バイト(+347,208 バイト・+6.1%)、展開後 40,953,232 → 44,404,891 バイト(+8.4%)、1 行平均 2,535 バイト。kv に置く 1 tick ぶんの塊は 5,993,631 ÷ 42 batch で約 143KB(変更前 約 134KB。同じ割り算の導出値)。
+    workerd の CPU は 3,750〜4,060ms(変更前 3,750〜4,000ms。10ms 刻みで負荷の高い機械での値のため差は読まない)。**増加は下限**: 合成データのスナップショットは実フィクスチャ 1 つの小数を摂動した複製(全レースで文字列が同じ)なので、実データより圧縮が効く。`grade` は合成のスナップショットに無く 0 件(他の 10 列は全 17,514 行が非 null)。
+    再現: `pnpm tsx scripts/measure-prior-export.ts --repeat 2`(変更前は起点コミットで同じコマンド)。出力に v2 の列の非 null の件数が出る。
   - **本番では、DO の CPU の上限・D1 の rows_read・本番の件数が未確認**(最初の作成の `?status=1` の `file.diag` で確かめる)。1 tick の CPU 約 87ms は、既存の発走時刻の補完〈1 tick に R2 の GET 36 件 + gunzip + parse〉と同種の負荷で、同じ前提(DO は Worker Free の 10ms と別枠)に立っている。
-- **開発側**: `scripts/prior-dataset.ts`(`loadPriorDataset`・`parsePriorDataset`・`guardedOnly`〈`leak_class = guarded` = `history_cutoff_date` ありだけ〉・`groupByRace`・`summarize`)。**黙って捨てない**: 読めない版・メタ行の無いファイル・件数の食い違い・壊れた行(JSON でない・列の過不足・型の違い)は行番号つきの例外。`pnpm tsx scripts/prior-dataset.ts <ファイル>` で要約。当て直しの分析そのものは #258 の範囲で、ここでは作っていない。
-- **変わらないもの**: クライアント(`cloud/client/**`・`client-bundle.generated.ts`)・D1 のスキーマ(migration は足していない)・既存の DO・cron・exe・`packages/core`。netkeiba にも LLM にも出ない。
-- **【記録】**: (1) 本番の遮断済み(`guarded`)・発走前(`pre_race`)の件数は未確認(合成の 70% は仮定)。標本が #258 の見積もり(確かめる側 150〜370 レース + 当てる側)に足りるかは、最初のファイルの `summarize` で分かる。(2) ダウンロードの Class B を数えない。(3) 作成の途中で結果・オッズの補完(#259)が走ると、レースごとの一貫性は tick の単位(同じ tick の D1 の読みは 1 回の batch)に限られる。(4) ローダの「列が足りない」の検査は、型の検査と二重で、片方を外してもテストは赤くならない(同じ例外になる等価な変異)。
+- **開発側**: `scripts/prior-dataset.ts`(`loadPriorDataset`・`parsePriorDataset`・`guardedOnly`〈`leak_class = guarded` = `history_cutoff_date` ありだけ〉・`groupByRace`・`summarize`・`v2ColumnCoverage`)。**v1・v2 の両方を読む**(#341): v1 の行は v2 の 11 列を null に補った v2 の型の行にし、`meta.format` は元の版のまま。列の過不足は版ごとに検査し(v2 と名乗るファイルに v1 の行が混ざったら例外)、3 以上の版は読めない版の例外。`v2ColumnCoverage` は v2 の列ごとの非 null の件数(v1 を読むと全列 0 になり、欠損と取り違えない。CLI の要約にも出す)。**黙って捨てない**: 読めない版・メタ行の無いファイル・件数の食い違い・壊れた行(JSON でない・列の過不足・型の違い)は行番号つきの例外。`pnpm tsx scripts/prior-dataset.ts <ファイル>` で要約。当て直しの分析そのものは #258 の範囲で、ここでは作っていない。
+- **変わらないもの**: クライアント(`cloud/client/**`・`client-bundle.generated.ts`。v2 でも無変更)・D1 のスキーマ(migration は足していない)・既存の DO・cron・exe・`packages/core`。netkeiba にも LLM にも出ない。**v2 でも D1 の文は 1 文字も変えていない**(`prior-export-store.ts` の SQL 定数は無変更。候補・馬・結果・面の SQL がスナップショットの列にも枠番にも触れないことをテストが固定)。
+- **【記録】**: (1) 本番の遮断済み(`guarded`)・発走前(`pre_race`)の件数は未確認(合成の 70% は仮定)。標本が #258 の見積もり(確かめる側 150〜370 レース + 当てる側)に足りるかは、最初のファイルの `summarize` で分かる。(2) ダウンロードの Class B を数えない。(3) 作成の途中で結果・オッズの補完(#259)が走ると、レースごとの一貫性は tick の単位(同じ tick の D1 の読みは 1 回の batch)に限られる。(4) ローダの「列が足りない」の検査は、型の検査と二重で、片方を外してもテストは赤くならない(同じ例外になる等価な変異)。(5) #341: `grade` の null の曖昧さ・`oikiri_critic` の語彙が未確認(上の v2 の列)。(6) #341: 本番の R2 の固定キーのファイルは `?refresh=1` で作り直すまで v1 のまま(通常の GET は v1 を返す)。作成の途中でデプロイが挟まると、旧コードの塊〈v1 の行〉と新コードの塊が 1 つのファイルに混ざりうるが、v2 のローダは「列が足りません」の例外にする(黙って壊れない)。公開後に `?refresh=1` を案内する。
 
 ### クラウド版の移行画面(#222〈#167-B2〉。v1.29.0)
 変更は `cloud/` のクライアント(`client/`)と `page.ts` の CSS、生成物 `client-bundle.generated.ts` だけ(**サーバ・D1・DO・wrangler.toml・exe・core は無変更**)。API は #216 のまま(上の「exe から移したファイルの取り込み」)。運用の詳細は `cloud/README.md` の「移行画面」。

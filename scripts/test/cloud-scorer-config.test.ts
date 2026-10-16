@@ -71,9 +71,9 @@ const EXPECTED_DEFAULT: ScorerConfig = {
   baseScore: {
     ...DEFAULT_SCORER_CONFIG.baseScore,
     weights: {
-      recentForm: 0.2,
-      last3f: 0.1,
-      courseDistance: 0.15,
+      recentForm: 0.7,
+      last3f: 0.15,
+      courseDistance: 0.3,
       jockey: 0.15,
       weightChange: 1,
       courseFrameBias: 1,

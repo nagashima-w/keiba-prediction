@@ -44,6 +44,17 @@
  * | [前後比較・リークあり参照値] ρ=0.2369…・klModel=0.0153467… | ρ は無改変。klModel は 0.0279291… に更新(同じ理由) |
  * | [前後比較・遮断後] ρ=-0.0073583…・klModel=0.0229221… | ρ は無改変。klModel は 0.0365121… に更新 |
  * | [戦績0走] Σprior=3.04(raw 合計が許容内で正規化が発動せず)・範囲 [0.1675, 0.2075] | **意図して反転**: 許容のゲートを撤去したので Σprior=3(10 桁)・範囲 [0.165232…, 0.204824…]。順序は無改変で、全頭が 0 でも 1 でもない |
+ *
+ * ## #339 での改訂(既定の重みを本番の書き出しに当て直した。#258 第 2 段 a)
+ * 近走着順 0.2→0.7・上がり3F 0.1→0.15・コース距離 0.15→0.30・バイアスの一律減衰 0.3→0.05。prior の順序そのものが変わるので、#258 第 1 段と違って ρ も動く。
+ * 旧(#258 第 1 段後)の保証と新版の対応(実測し直して固定。保証の内容は弱めていない):
+ * | 旧の保証 | 新版 |
+ * |---|---|
+ * | [固定値] 中央 ρ=-0.0073583…・sd比=0.5709254…・klModel=0.0365121…・klMarket=0.1039745…、地方 ρ=0.5288974…・sd比=1.0014875…・klModel=0.0618690…・klMarket=0.0532515… | klMarket は**無改変**(市場側は prior に無関係)。**中央**: ρ=0.4061811…・sd比=1.3417026…・klModel=0.1751253…、**地方**: ρ=0.4308237…・sd比=0.9758610…・klModel=0.0516186…(実行して得た値) |
+ * | [前後比較・リークあり参照値] ρ=0.2369389…・klModel=0.0279291… | ρ=0.5386314…・klModel=0.1790966…。遮断後との差が 0 でないこと(`not.toBeCloseTo`)は無改変で成り立つ |
+ * | [前後比較・遮断後] ρ=-0.0073583…・klModel=0.0365121… | ρ=0.4061811…・klModel=0.1751253… |
+ * | [戦績0走] Σprior=3・範囲 [0.165232…, 0.204824…] | **無改変**(戦績が無いと重みは効かない。このテストは重みを替えても変わらない) |
+ * | [その他] dateApproximate=false・oddsStatus・conditions・KL 算出可・三連複 EV の診断値 0・リーク混入 21 走 | 無改変 |
  */
 
 import { readFileSync } from "node:fs";
@@ -93,13 +104,13 @@ const FIXTURES: readonly FixtureCase[] = [
     label: "中央16頭",
     fixtureFileName: "central-on.json",
     kaisaiDate: "20260628",
-    expected: { spearmanRho: -0.007358353721315753, sdRatio: 0.5709254965131206, klModel: 0.03651212643083496, klMarket: 0.10397453475016975 },
+    expected: { spearmanRho: 0.4061811254166296, sdRatio: 1.3417026542724222, klModel: 0.17512531822157498, klMarket: 0.10397453475016975 },
   },
   {
     label: "地方12頭",
     fixtureFileName: "nar-on.json",
     kaisaiDate: "20260712",
-    expected: { spearmanRho: 0.5288974835954514, sdRatio: 1.0014875352607635, klModel: 0.06186901117145247, klMarket: 0.053251532406149917 },
+    expected: { spearmanRho: 0.4308237780280829, sdRatio: 0.9758610447561655, klModel: 0.05161867600144968, klMarket: 0.053251532406149917 },
   },
 ];
 
@@ -319,10 +330,12 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     // (旧: リークあり ρ=0.2104489…・klModel=0.0155563…、遮断後 ρ=-0.0058866…・klModel=0.0235949…)。
     // Issue #258 で頭数正規化をロジットシフトに替えたため、klModel を実測し直した(ρ は順序だけに依存するので不変。
     // 旧 #213 後: リークあり klModel=0.0153467…、遮断後 klModel=0.0229221…)。
-    expect(leakyReport.spearmanRho.value).toBeCloseTo(0.23693898982636727, 9);
-    expect(filteredReport.spearmanRho.value).toBeCloseTo(-0.007358353721315753, 9);
-    expect(leakyReport.normalizedJointKlModel.value).toBeCloseTo(0.027929117780105397, 9);
-    expect(filteredReport.normalizedJointKlModel.value).toBeCloseTo(0.03651212643083496, 9);
+    // Issue #339 で既定の重みを当て直したため、ρ・klModel を実測し直した(旧 #258 後: リークあり ρ=0.2369389…・klModel=0.0279291…、
+    // 遮断後 ρ=-0.0073583…・klModel=0.0365121…)。重みで prior の順序が変わるので、今回は ρ も動く。
+    expect(leakyReport.spearmanRho.value).toBeCloseTo(0.5386314924003132, 9);
+    expect(filteredReport.spearmanRho.value).toBeCloseTo(0.4061811254166296, 9);
+    expect(leakyReport.normalizedJointKlModel.value).toBeCloseTo(0.179096663197534, 9);
+    expect(filteredReport.normalizedJointKlModel.value).toBeCloseTo(0.17512531822157498, 9);
 
     // conditionsにリーク遮断の実際の診断値が反映されていること。
     // (leakFilter は計測側が渡す診断値。#39 以降 production は常に遮断するので、diagnostics を

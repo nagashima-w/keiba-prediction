@@ -49,6 +49,7 @@
  * build-prompt.ts の PROMPT_VERSION が "2026-10-12.1" → "2026-10-13.1" に更新されたため、この対照(default)の値もここで追随した。
  * Issue #295 で "2026-10-13.1" → "2026-10-13.2" に更新(当日の馬場の節。build-prompt.ts)したため、同じく追随した。
  * Issue #315 で "2026-10-13.2" → "2026-10-15.1" に更新(想定ペースを LLM が展開予想して決める。規則の結論を外し、development・pace を出力させる。build-prompt.ts)したため、同じく追随した。
+ * Issue #339 で "2026-10-15.1" → "2026-10-16.1" に更新(基礎スコアの重みとバイアスの一律減衰の当て直し。プロンプトの文面は不変で 3着内率の値が変わる。build-prompt.ts)したため、同じく追随した。
  *
  * 新版(wide15)は幅0.15(絶対値)・PROMPT_VERSION="{対照のPROMPT_VERSION}-clip015"(版文字列に幅を
  * 内包し、対照と必ず異なる値にする。DB列は追加しない: analyses.prompt_version は既存の文字列カラムの
@@ -85,13 +86,13 @@ export const CLIP_VARIANTS: Readonly<Record<ClipVariantId, ClipVariant>> = {
     id: "default",
     maxAdjust: 0.1,
     // build-prompt.ts の PROMPT_VERSION と同一の値を手動同期する(Issue #261・#260・#262、#226、#258、#315 で追随)。
-    promptVersion: "2026-10-15.1",
+    promptVersion: "2026-10-16.1",
   },
   wide15: {
     id: "wide15",
     maxAdjust: 0.15,
     // 対照(default)のPROMPT_VERSIONに"-clip015"を付けた値。対照更新時は必ず追随する(Issue #261・#260・#262、#226、#258、#315 で追随)。
-    promptVersion: "2026-10-15.1-clip015",
+    promptVersion: "2026-10-16.1-clip015",
   },
 };
 

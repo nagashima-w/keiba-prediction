@@ -873,6 +873,7 @@ const ANALYSIS_ID_MAX = 2_147_483_647;
  * **R2 の詳細は、操作回数の柵の内側で読む**(`getAnalysisDetail`。柵に達した・R2 に無い・壊れているときは `detail: "missing"` で馬名なし。`detail_key` が無ければ `none`)。
  * ⚠️ 詳細が present のときは、R2 の GET に加えて D1 の `r2_ops` を +1 する(書き込み1行)。**無害な読み取りではない**ので、画面から自動で繰り返し呼ばないこと。
  * 配分(D1)の読み出しが失敗したら、配分だけ欠けた 200 にせず、全体を 503 にする(「買い目なし」と誤読されないため)。
+ * 締切の直前の再計算の結果(`close`。Issue #338)の読み出しは別: 失敗(表が無い間を含む)は close だけ null の 200。
  */
 async function handleAnalysisDetail(url: URL, idText: string, env: Env): Promise<Response> {
   if ([...url.searchParams.keys()].length > 0) {
@@ -889,7 +890,15 @@ async function handleAnalysisDetail(url: URL, idText: string, env: Env): Promise
       return json({ ok: false, error: { type: "not-found" } }, 404);
     }
     const allocation = await store.getStoredAllocation(id);
-    return json({ ok: true, analysis: buildAnalysisView(result, allocation) });
+    // 締切の直前の再計算の結果(Issue #338)。表が無い間(migration の適用前に Worker が先に出た場合)や読み出しの失敗は、close だけ null にする
+    // (配分と違い、無くても「買い目なし」と誤読されない。分析時の提案と詳細の応答は壊さない)。例外の文面は出さない。
+    let close: Awaited<ReturnType<typeof store.getStoredClose>> | undefined;
+    try {
+      close = await store.getStoredClose(id);
+    } catch {
+      close = undefined;
+    }
+    return json({ ok: true, analysis: buildAnalysisView(result, allocation, close) });
   } catch {
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "d1-error" } }, 503);

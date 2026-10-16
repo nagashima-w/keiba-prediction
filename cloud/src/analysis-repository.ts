@@ -77,6 +77,21 @@ import { parseLlmCalls, serializeLlmCalls, type LlmCallRecord } from "./llm-call
 import { parseMarkRepair, serializeMarkRepair, type MarkRepairRecord } from "./mark-repair";
 export type { AnalysisSaveExtra, RecentAnalysis };
 import { contributionsOf, decodeDetail, DETAIL_KEY_SQL, detailKeyOf, encodeDetail } from "./analysis-detail";
+import {
+  assertClosePayload,
+  closeBetsJson,
+  closeRowParams,
+  DELETE_CLOSE_BETS_SQL,
+  INSERT_CLOSE_BETS_SQL,
+  SELECT_CLOSE_BETS_SQL,
+  SELECT_CLOSE_SQL,
+  toStoredClose,
+  UPSERT_CLOSE_SQL,
+  type CloseBetRow,
+  type CloseRow,
+  type CloseSavePayload,
+  type StoredCloseRound,
+} from "./analysis-close";
 import { isReadAllowed, isWriteAllowed, monthKey, R2_FENCE_LIMITS, type R2Usage } from "./r2-fence";
 
 /** D1 のうち、ストアが使う部分だけ(テストで記録つきの転送・偽物を渡せる)。 */
@@ -592,6 +607,33 @@ export class D1AnalysisStore implements AnalysisRepository {
       return undefined;
     }
     return toStoredAllocation(metaRow, (bets?.results ?? []) as StoredAllocationBetDetail[]);
+  }
+
+  /**
+   * 締切の直前の再計算の 1 回ぶんの結果を保存する(Issue #338。migration 0019)。**1 回の batch・買い目の数によらず 3 文以内**
+   * (買い目の削除 → 回の行の UPSERT → 買い目の挿入〈`json_each` で 1 文。買い目が無い回は文を足さない〉。D1 の batch はトランザクション)。
+   * 同じ (分析, 回) の再保存は上書き(前の買い目は残らない=冪等)。分析時の提案の行(`analysis_allocation_meta`・`analysis_bets`)には触れない。
+   * @throws 結果が不整合(`assertClosePayload`)・存在しない分析 id(外部キー違反)・D1 の失敗。いずれも何も書かれない。
+   */
+  async saveClose(analysisId: number, payload: CloseSavePayload): Promise<void> {
+    assertClosePayload(payload);
+    const statements: D1PreparedStatement[] = [
+      this.db.prepare(DELETE_CLOSE_BETS_SQL).bind(analysisId, payload.round),
+      this.db.prepare(UPSERT_CLOSE_SQL).bind(...closeRowParams(analysisId, payload)),
+    ];
+    if ((payload.allocation?.bets.length ?? 0) > 0) {
+      statements.push(this.db.prepare(INSERT_CLOSE_BETS_SQL).bind(analysisId, payload.round, closeBetsJson(payload)));
+    }
+    await this.db.batch(statements);
+  }
+
+  /**
+   * 締切の直前の再計算の結果(回の昇順。D1 の 2 文の batch)。結果が無い分析・古い分析は空の配列。
+   * **表が無い間(migration の適用前に Worker が先に出た場合など)の失敗は、呼び出し側が握る**(ここでは投げる)。
+   */
+  async getStoredClose(analysisId: number): Promise<StoredCloseRound[]> {
+    const [rows, bets] = await this.db.batch<unknown>([this.db.prepare(SELECT_CLOSE_SQL).bind(analysisId), this.db.prepare(SELECT_CLOSE_BETS_SQL).bind(analysisId)]);
+    return toStoredClose((rows?.results ?? []) as CloseRow[], (bets?.results ?? []) as CloseBetRow[]);
   }
 
   /** 同じレースの、分析時刻が `[fromIso, toIso]`(両端を含む)の分析の要約(id・分析時刻・prompt_version・model だけ)。 */

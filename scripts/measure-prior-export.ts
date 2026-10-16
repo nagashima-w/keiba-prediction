@@ -7,7 +7,7 @@
  *  (i) 作成(refresh を含めて `--repeat` 回): 作成の壁時計(最初の要求から ready まで)・要求の回数(ポーリング)・workerd の CPU 時間(`/proc/<pid>/stat` の utime+stime。刻み 10ms)・
  *      DO が数えた D1 の読み取り行数(`meta.rows_read` の合計。状態の `file.diag.rowsRead`)・R2 の取得を試みた回数(`file.diag.gets`)・ファイルの大きさ(gzip 後)
  *  (ii) ダウンロード: 壁時計・workerd の CPU(Worker が R2 の本体を流すだけ)・本体のバイト数・展開後のバイト数と、開発側のローダ(`scripts/prior-dataset.ts`)で全行を読めること・
- *       自由文(reason)が含まれないこと
+ *       自由文(reason)が含まれないこと・v2 の列(Issue #341)の非 null の件数
  *
  * 合成データ: 詳細(race_snapshot_json・raw_response)は `scripts/measure-d1-size.ts` と同じ実フィクスチャ・LLM の実応答 36 本から作り、寄与度(contributions)は本番の形(core の `ScoreContribution` の
  * 13 項目の配列)の合成({@link syntheticContributions})に差し替える。分析・結果・レース ID は `scripts/measure-verify.ts` の合成(`syntheticAnalyses`・`syntheticRaceId`)をそのまま使う
@@ -43,7 +43,7 @@ import {
 import { syntheticAnalyses, syntheticResult, type SyntheticVerifyOptions } from "./measure-verify.js";
 import { descendantsOf, parseProcStat } from "./measure-worker-cpu.js";
 import { seededRandom } from "./measure-migration-import.js";
-import { parsePriorDataset, summarize } from "./prior-dataset.js";
+import { parsePriorDataset, summarize, v2ColumnCoverage } from "./prior-dataset.js";
 
 interface SeedStatement {
   bind(...values: unknown[]): SeedStatement;
@@ -244,6 +244,7 @@ async function main(): Promise<void> {
     const loaded = parsePriorDataset(body);
     console.log(`\n## (ii) ダウンロード: ${dl.status}・${dl.headers.get("content-disposition")}・本体 ${body.length} バイト(展開後 ${raw.length} バイト)、壁時計 ${dlWall}ms、workerd の CPU ${dlCpu.toFixed(0)}ms`);
     console.log(`  ローダで全行を読めた: ${loaded.rows.length} 行・要約 ${JSON.stringify(summarize(loaded.rows))}`);
+    console.log(`  形式 ${loaded.meta.format}・v2 の列の非 null の件数(Issue #341。合成データのスナップショットは実フィクスチャ 1 つの小数を摂動した複製): ${JSON.stringify(v2ColumnCoverage(loaded.rows))}`);
     console.log(`  自由文(reason)を含まない: ${!raw.toString("utf-8").includes('"reason"')}・1 行の平均 ${Math.round(raw.length / Math.max(1, loaded.rows.length))} バイト`);
   } finally {
     stop();

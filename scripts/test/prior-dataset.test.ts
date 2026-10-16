@@ -9,11 +9,14 @@ import {
   encodeChunk,
   PRIOR_EXPORT_FORMAT,
   PRIOR_ROW_KEYS,
+  PRIOR_ROW_KEYS_V1,
+  PRIOR_ROW_KEYS_V2_ADDED,
   toContributions,
+  toSnapshotColumns,
   type ChosenAnalysis,
   type PriorDatasetRow,
 } from "../../cloud/src/prior-export-format.js";
-import { groupByRace, guardedOnly, loadPriorDataset, parsePriorDataset, summarize } from "../prior-dataset.js";
+import { groupByRace, guardedOnly, loadPriorDataset, parsePriorDataset, summarize, v2ColumnCoverage } from "../prior-dataset.js";
 
 /**
  * Issue #266: 書き出したファイル(NDJSON を gzip。メタ行 + 行)を、開発側で読み込んで型つきの行にするローダ。
@@ -36,8 +39,8 @@ const results = [{ umaban: 1, finishPosition: 2, winOdds: 4.5, ninki: 2 }, { uma
 
 function sampleRows(): PriorDatasetRow[] {
   return [
-    ...buildRaceRows(chosen(1, "202606030801"), horses, results, "芝", contributions),
-    ...buildRaceRows(chosen(2, "202606030802", "pre_race"), horses, results, null, new Map()),
+    ...buildRaceRows(chosen(1, "202606030801"), horses, results, "芝", contributions, null),
+    ...buildRaceRows(chosen(2, "202606030802", "pre_race"), horses, results, null, new Map(), null),
   ];
 }
 
@@ -127,5 +130,119 @@ describe("guardedOnly・groupByRace・summarize", () => {
     expect(summarize(loaded.rows)).toEqual({
       rows: 4, races: 2, byVenueKind: { central: 4, nar: 0 }, byLeakClass: { guarded: 2, pre_race: 2 }, withoutContributions: 3, withoutFinish: 2,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #341(#340-1): 形式 v2(出馬表の列を足した)。ローダは v1・v2 の両方を読む。
+// ---------------------------------------------------------------------------
+
+const SNAPSHOT = {
+  race: { raceName: "テストS", grade: "G3", distance: 1600, trackCondition: "良" },
+  horses: [
+    { umaban: 1, wakuban: 1, sex: "牡", age: 3, kinryo: 56, bodyWeight: 480, oikiriRank: "A", oikiriCritic: "動き良化" },
+    { umaban: 2, wakuban: 2, sex: "牝", age: 4, kinryo: 54, bodyWeight: null, oikiriRank: null, oikiriCritic: null },
+  ],
+};
+
+/** v2 の列が入った行(レース 1 はスナップショットあり、レース 2 はなし)。 */
+function v2Rows(): PriorDatasetRow[] {
+  return [
+    ...buildRaceRows(chosen(1, "202606030801"), horses, results, "芝", contributions, toSnapshotColumns(SNAPSHOT)),
+    ...buildRaceRows(chosen(2, "202606030802"), horses, results, "芝", new Map(), null),
+  ];
+}
+
+const gz = (meta: object, rows: readonly object[]): Uint8Array => gzipSync(Buffer.from(`${[{ _meta: meta }, ...rows].map((x) => JSON.stringify(x)).join("\n")}\n`));
+
+/** v1 の行: v1 の 19 列だけ(v2 の列を持たない)。 */
+function toV1(row: PriorDatasetRow): Record<string, unknown> {
+  return Object.fromEntries(PRIOR_ROW_KEYS_V1.map((k) => [k, (row as unknown as Record<string, unknown>)[k]]));
+}
+
+describe("parsePriorDataset: 形式 v2", () => {
+  it("v2 のファイルを往復で読む。v2 の 11 列が値のまま戻り、スナップショットの無いレースは 11 列とも null", () => {
+    const rows = v2Rows();
+    expect(rows).toHaveLength(4); // 前提: 2 レース × 2 頭
+    const loaded = parsePriorDataset(assembleFile({ ...META, rows: rows.length }, [encodeChunk(rows)]));
+    expect(loaded.meta.format).toBe(2);
+    expect(loaded.rows).toEqual(JSON.parse(JSON.stringify(rows)));
+    expect(loaded.rows[0]).toMatchObject({ race_name: "テストS", grade: "G3", distance: 1600, track_condition: "良", wakuban: 1, sex: "牡", age: 3, body_weight: 480, kinryo: 56, oikiri_rank: "A", oikiri_critic: "動き良化" });
+    expect(loaded.rows[1]).toMatchObject({ sex: "牝", body_weight: null, oikiri_critic: null });
+    for (const r of loaded.rows.slice(2)) expect(PRIOR_ROW_KEYS_V2_ADDED.map((k) => r[k])).toEqual(Array(11).fill(null));
+  });
+
+  it.each([
+    ["列が足りない(v2 の列 sex がない)", (r: Record<string, unknown>) => { delete r["sex"]; }, /列が足りません.*sex/],
+    ["race_name が数", (r: Record<string, unknown>) => { r["race_name"] = 3; }, /型が違います.*race_name/],
+    ["grade が数", (r: Record<string, unknown>) => { r["grade"] = 3; }, /型が違います.*grade/],
+    ["distance が小数", (r: Record<string, unknown>) => { r["distance"] = 1600.5; }, /型が違います.*distance/],
+    ["track_condition が数", (r: Record<string, unknown>) => { r["track_condition"] = 1; }, /型が違います.*track_condition/],
+    ["wakuban が小数", (r: Record<string, unknown>) => { r["wakuban"] = 1.5; }, /型が違います.*wakuban/],
+    ["sex が数", (r: Record<string, unknown>) => { r["sex"] = 1; }, /型が違います.*sex/],
+    ["age が文字列", (r: Record<string, unknown>) => { r["age"] = "3"; }, /型が違います.*age/],
+    ["body_weight が文字列", (r: Record<string, unknown>) => { r["body_weight"] = "480"; }, /型が違います.*body_weight/],
+    ["kinryo が文字列", (r: Record<string, unknown>) => { r["kinryo"] = "56"; }, /型が違います.*kinryo/],
+    ["oikiri_rank が数", (r: Record<string, unknown>) => { r["oikiri_rank"] = 1; }, /型が違います.*oikiri_rank/],
+    ["oikiri_critic が数", (r: Record<string, unknown>) => { r["oikiri_critic"] = 1; }, /型が違います.*oikiri_critic/],
+    ["馬名の列が混ざった(知らない列)", (r: Record<string, unknown>) => { r["horse_name"] = "x"; }, /知らない列.*horse_name/],
+  ])("v2 の行が壊れている(%s)と、行番号と列名つきの例外", (_name, mutate, pattern) => {
+    const row = JSON.parse(JSON.stringify(v2Rows()[0])) as Record<string, unknown>;
+    mutate(row);
+    expect(() => parsePriorDataset(gz({ format: 2, rows: 1 }, [row]))).toThrow(pattern);
+    expect(() => parsePriorDataset(gz({ format: 2, rows: 1 }, [row]))).toThrow(/2 行目/);
+  });
+});
+
+describe("parsePriorDataset: 形式 v1 も読める(v2 の列は null に補う)", () => {
+  it("v1 のファイル(19 列だけ)を読み、meta.format は 1 のまま。v1 の列は値が変わらず、v2 の 11 列は null。型は v2 の行", () => {
+    const rows = v2Rows();
+    const loaded = parsePriorDataset(gz({ format: 1, generatedAt: "x", rows: rows.length, races: 2, missingDetail: 0 }, rows.map(toV1)));
+    expect(loaded.meta.format).toBe(1);
+    expect(loaded.rows).toHaveLength(4);
+    for (const [i, r] of loaded.rows.entries()) {
+      expect(PRIOR_ROW_KEYS_V1.map((k) => r[k])).toEqual(PRIOR_ROW_KEYS_V1.map((k) => JSON.parse(JSON.stringify(rows[i]))[k]));
+      expect(PRIOR_ROW_KEYS_V2_ADDED.map((k) => r[k])).toEqual(Array(11).fill(null));
+      expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
+    }
+    expect(loaded.rows[0]!.contributions).not.toBeNull(); // 前提: v1 の列が実際に値を持っている(null 同士の一致ではない)
+  });
+
+  it.each([
+    ["v2 の列が混ざっている(sex)", (r: Record<string, unknown>) => { r["sex"] = "牡"; }, /知らない列.*sex/],
+    ["v1 の列が足りない(ninki)", (r: Record<string, unknown>) => { delete r["ninki"]; }, /列が足りません.*ninki/],
+    ["v1 の列の型が違う(prior)", (r: Record<string, unknown>) => { r["prior"] = "0.3"; }, /型が違います.*prior/],
+  ])("v1 のファイルの行が壊れている(%s)と、行番号つきの例外", (_name, mutate, pattern) => {
+    const row = toV1(v2Rows()[0]!);
+    mutate(row);
+    expect(() => parsePriorDataset(gz({ format: 1, rows: 1 }, [row]))).toThrow(pattern);
+    expect(() => parsePriorDataset(gz({ format: 1, rows: 1 }, [row]))).toThrow(/2 行目/);
+  });
+
+  it("v1 と v2 以外の版(0・3)は読めない版の例外", () => {
+    for (const format of [0, 3]) {
+      expect(() => parsePriorDataset(gz({ format, rows: 0 }, []))).toThrow(/版/);
+    }
+  });
+
+  it("v2 と名乗るファイルに v1 の行(v2 の列がない)が混ざったら、黙って v1 として読まず例外(デプロイ中のジョブの混在)", () => {
+    const rows = v2Rows();
+    expect(() => parsePriorDataset(gz({ format: 2, rows: 2 }, [rows[0]!, toV1(rows[1]!)]))).toThrow(/3 行目: 列が足りません/);
+  });
+});
+
+describe("v2ColumnCoverage: v2 の列の非 null の件数(v1 を v2 の型で読んだときの全 null を欠損として見分ける)", () => {
+  it("列ごとの非 null の行数を返す。スナップショットありのレース(2 頭)だけが数えられる", () => {
+    const loaded = parsePriorDataset(assembleFile({ ...META, rows: 4 }, [encodeChunk(v2Rows())]));
+    expect(v2ColumnCoverage(loaded.rows)).toEqual({
+      race_name: 2, grade: 2, distance: 2, track_condition: 2, wakuban: 2, sex: 2, age: 2, body_weight: 1, kinryo: 2, oikiri_rank: 1, oikiri_critic: 1,
+    });
+  });
+
+  it("v1 のファイルを読むと、全列が 0", () => {
+    const rows = v2Rows();
+    const loaded = parsePriorDataset(gz({ format: 1, rows: rows.length }, rows.map(toV1)));
+    expect(Object.values(v2ColumnCoverage(loaded.rows))).toEqual(Array(11).fill(0));
+    expect(Object.keys(v2ColumnCoverage(loaded.rows))).toEqual([...PRIOR_ROW_KEYS_V2_ADDED]);
   });
 });

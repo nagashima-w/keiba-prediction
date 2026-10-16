@@ -287,11 +287,19 @@ describe("wrangler.toml", () => {
     // 【Issue #283で改訂】旧: `bypassCache` が race-day-core.ts に 0 件(結果のページを、キャッシュを通す取得〈CachedFetcher〉の bypassCache では取らない)。
     // 地方三連単の段階(`runNarTrifectaStep`)が、オッズの軸の本文をキャッシュに積むために `{ bypassCache: true }` で CachedFetcher を呼ぶので、1 件になった。
     // 保証していたことは変わらない: 結果のページの取得(runResultStep)に `bypassCache` は無く(下の本体の検査)、この 1 件は runNarTrifectaStep の中にだけある。
-    expect(count(/bypassCache/g)).toBe(1);
+    // 【Issue #338で改訂】旧: 1 件(runNarTrifectaStep の中だけ)。締切の直前の再計算の取得口(`closeFetcher`)が、オッズの URL だけ `{ ...options, bypassCache: true }` で CachedFetcher を呼ぶので、2 件になった。
+    // 保証していたことは変わらない: 結果のページの取得(runResultStep)に `bypassCache` は無く(下の本体の検査)、2 件は runNarTrifectaStep と closeFetcher の中にだけある(どちらもオッズ。それ以外の URL は cacheOnly)。
+    expect(count(/bypassCache/g)).toBe(2);
     const stageStart = core.indexOf("private async runNarTrifectaStep(");
     expect(stageStart).toBeGreaterThan(-1);
     const stageEnd = core.indexOf("\n  }\n", stageStart);
     expect(core.slice(stageStart, stageEnd)).toContain("bypassCache");
+    const closeStart = core.indexOf("private closeFetcher(");
+    expect(closeStart).toBeGreaterThan(-1);
+    const closeBody = core.slice(closeStart, core.indexOf("\n  }\n", closeStart));
+    expect(closeBody).toContain("ODDS_URL_PATTERN.test(url)"); // オッズの URL だけ
+    expect(closeBody).toContain("bypassCache: true");
+    expect(closeBody).toContain("this.cacheOnly.fetchText("); // それ以外(出馬表・戦績・調教)はキャッシュ専用=ネットワークに出ない
     expect(count(/this\.setAlarm\(/g)).toBe(1); // アラームを張るのは rearm の 1 箇所だけ
     // runResultStep の本体は、キャッシュ付きの取得(networkFetcher・cacheOnly)を使わず、D1 は saveResult の 1 経路だけ
     const start = core.indexOf("private async runResultStep(");

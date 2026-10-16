@@ -43,6 +43,7 @@ import {
   type PriorContribution,
   type PriorHorseInput,
   type PriorResultInput,
+  type PriorSnapshotColumns,
 } from "./prior-export-format";
 
 /** 1 日(JST)に始められる回数の既定(上限)。上書きは下げる方向にだけ。 */
@@ -70,7 +71,12 @@ export interface ExportKv {
 }
 
 export type DetailOutcome =
-  | { readonly kind: "ok"; readonly contributions: Readonly<Record<string, unknown>> }
+  | {
+      readonly kind: "ok";
+      readonly contributions: Readonly<Record<string, unknown>>;
+      /** 詳細の `raceSnapshot` から取り出した v2 の列(Issue #341。スナップショットが null・壊れていれば全列 null)。追加の取得ではなく、同じ詳細の中身。 */
+      readonly snapshot: PriorSnapshotColumns;
+    }
   /** 詳細が無い(`detail_key` が NULL・R2 に無い・壊れている・別のレースのもの)。失敗ではない。 */
   | { readonly kind: "none" }
   /** 取得が例外になった(再試行する)。 */
@@ -350,7 +356,10 @@ export class PriorExportCore {
       } else {
         missing += 1;
       }
-      return buildRaceRows(analysis, horsesByAnalysis.get(analysis.id) ?? [], resultsByRace.get(analysis.raceId) ?? [], courseTypes.get(analysis.raceId) ?? null, contributions);
+      return buildRaceRows(
+        analysis, horsesByAnalysis.get(analysis.id) ?? [], resultsByRace.get(analysis.raceId) ?? [], courseTypes.get(analysis.raceId) ?? null, contributions,
+        outcome.kind === "ok" ? outcome.snapshot : null,
+      );
     });
     kv.put(chunkKey(job.done), encodeChunk(rows));
     const done = job.done + 1;

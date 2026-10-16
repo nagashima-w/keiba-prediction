@@ -22,9 +22,17 @@ function loadFixture(name: string): string {
  * prior の較正(過剰補正・クランプ飽和の防止)。仕様L135「バイアス項目が多いため過剰補正に注意」。
  * 既定重みで、中堅馬が床/天井に張り付かず、強馬も天井に飽和しない分布になることを担保する。
  * analyzer の「priorから±10%補正」(仕様L105)が意味を持つ範囲に prior を収めるのが目的。
+ *
+ * **Issue #339(#258 第 2 段 a)で、既定重みを本番の書き出しに当て直した**(近走着順 0.2→0.7・上がり3F 0.1→0.15・コース距離 0.15→0.30・
+ * バイアスの一律減衰 0.3→0.05)。当てていない期間の検証で Brier が良くなったので、prior の広がりは意図して大きくなった。
+ * それに合わせて、(a)(b)の範囲を次のように見直した。保証していた内容は変えていない(床・天井に飽和しない / 中堅馬と強馬の相対的な序列):
+ *  - (a) 中堅馬の上限 0.30 → 0.40(新しい値は 0.330。16 頭立ての中立確率 0.1875 の約 1.8 倍。床 0.02 や天井 0.95 には遠い)。
+ *  - (b) 強馬の単独の prior の上限 0.65 → 天井(0.95)未満(新しい値は 0.92)。天井に当たってクランプされていないことは rawPrior で確かめる。
+ *  - (b2) 追加: レースの中(computeFieldPriors。production が使う正規化後)でも、強馬が天井に飽和せず、平均馬を過度に引き下げないこと。
+ *    単独の prior(b)が天井近くまで上がるようになったので、実際に使われる値の側で飽和を固定する。
  */
 describe("prior較正(既定重みでの過剰補正防止)", () => {
-  it("(a) 中堅馬(フィクスチャ23走)の prior が常識的範囲[0.08, 0.30]に収まること", () => {
+  it("(a) 中堅馬(フィクスチャ23走)の prior が常識的範囲[0.08, 0.40]に収まること(Issue #339 で上限を 0.30 から 0.40 に見直した。理由は冒頭の JSDoc)", () => {
     const winter = parseHorseResults(loadFixture("horse_results_2021105857.json"));
     const features = deriveRaceFeatures(winter);
     const r = computePrior({
@@ -43,10 +51,10 @@ describe("prior較正(既定重みでの過剰補正防止)", () => {
       fieldSize: 16,
     });
     expect(r.prior).toBeGreaterThanOrEqual(0.08);
-    expect(r.prior).toBeLessThanOrEqual(0.3);
+    expect(r.prior).toBeLessThanOrEqual(0.4);
   });
 
-  it("(b) 強馬合成(直近5走全複勝圏+コース適性抜群)の prior が[0.35, 0.65]で天井飽和しないこと", () => {
+  it("(b) 強馬合成(直近5走全複勝圏+コース適性抜群)の単独の prior が[0.35, 0.95)で、天井に飽和しないこと(Issue #339 で上限を 0.65 から天井未満に見直した)", () => {
     // 直近5走すべて1着・今回と同じ芝1600・同一場/枠/季節(条件系バイアスは自己平均比0)。
     const runs: HorseRaceResult[] = [
       "2025/11/01",
@@ -83,8 +91,29 @@ describe("prior較正(既定重みでの過剰補正防止)", () => {
       fieldSize: 12,
     });
     expect(r.prior).toBeGreaterThanOrEqual(0.35);
-    expect(r.prior).toBeLessThanOrEqual(0.65);
     expect(r.prior).toBeLessThan(DEFAULT_SCORER_CONFIG.prior.maxPrior);
+    // 前提(空振り防止): 天井に当たってクランプされたのではなく、raw そのものが天井未満(クランプ前後で同じ値)。
+    expect(r.rawPrior).toBe(r.prior);
+  });
+
+  it("(b2) 同じ強馬が、補正ゼロの平均馬11頭の中にいる(レースの prior = 正規化後)と、天井に飽和せず[0.5, 0.95)で、平均馬を過度に引き下げないこと(Issue #339 で追加)", () => {
+    // 単独の prior(b)は天井近くまで上がるので、レースの中での値(production が使う computeFieldPriors の出力)でも飽和しないことを固定する。
+    const runs: HorseRaceResult[] = ["2025/11/01", "2025/10/01", "2025/05/01", "2025/04/01", "2025/03/01"].map((date) =>
+      makeResult({ date, courseType: "芝", distance: 1600, finishPosition: rank(1), kinryo: 55, wakuban: 5, venue: venue("東京"), venueKind: "中央", bodyWeight: { weight: 480, diff: 0 } }),
+    );
+    const today: TodayRaceConditions = { courseType: "芝", distance: 1600, venueName: "東京", isWet: false, season: "春秋", frameZone: "中", restRunNumber: null, stableLocation: "美浦", kinryo: 55 };
+    const strong: PriorInput = { features: deriveRaceFeatures(runs), today, fieldSize: 12 };
+    const avg: PriorInput = { features: deriveRaceFeatures([]), today, fieldSize: 12 };
+    const priors = computeFieldPriors([strong, ...new Array(11).fill(avg)]);
+    expect(priors).toHaveLength(12);
+    expect(priors[0]!.prior).toBeGreaterThanOrEqual(0.8);
+    expect(priors[0]!.prior).toBeLessThan(DEFAULT_SCORER_CONFIG.prior.maxPrior);
+    // 平均馬(中立 3/12 = 0.25)は、強馬に引っ張られても 0.1 以上のまま。
+    for (let i = 1; i < priors.length; i++) {
+      expect(priors[i]!.prior).toBeGreaterThan(0.1);
+      expect(priors[i]!.prior).toBeLessThanOrEqual(0.25);
+    }
+    expect(priors.reduce((sum, p) => sum + p.prior, 0)).toBeCloseTo(3, 9);
   });
 
   it("(c) 平均的な馬(強い偏りなし)がクランプ床に張り付かず中立確率付近に来ること", () => {

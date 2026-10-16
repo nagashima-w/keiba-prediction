@@ -299,6 +299,55 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     indexes: [{ origin: "pk", unique: 1, columns: ["kaisai_date", "venue_code"], name: null }],
   },
+  // 0019 の中身(Issue #338〈#335-A1〉)。締切の直前の再計算の結果。回(round)ごとに 1 行(主キーは (analysis_id, round))と、ok の回の買い目(主キーは (analysis_id, round, bet_type, combo_key))。
+  // 外部キーは analysis_close.analysis_id → analyses.id と、analysis_close_bets の (analysis_id, round) → analysis_close。副索引なし。exe の SQLite には無い。
+  analysis_close: {
+    columns: [
+      { name: "analysis_id", type: "INTEGER", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "bankroll", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "bet_unit", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "due_at", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "ev_threshold", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "fallback_reason", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "fired_at", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "include_bracket_quinella", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "include_combo_odds", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "include_exacta", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "include_quinella", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "include_trifecta", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "include_trio", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "include_wide", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "kelly_fraction", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "late_ms", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "odds_official_datetime", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "odds_status", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "per_race_cap", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "reason", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "round", type: "INTEGER", notnull: 1, dflt_value: null, pk: 2 },
+      { name: "route", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "skip_reason_code", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "status", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "unavailable_reason", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [{ table: "analyses", from: "analysis_id", to: "id", on_update: "NO ACTION", on_delete: "NO ACTION" }],
+    indexes: [{ origin: "pk", unique: 1, columns: ["analysis_id", "round"], name: null }],
+  },
+  analysis_close_bets: {
+    columns: [
+      { name: "analysis_id", type: "INTEGER", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "bet_type", type: "TEXT", notnull: 1, dflt_value: null, pk: 3 },
+      { name: "combo_key", type: "TEXT", notnull: 1, dflt_value: null, pk: 4 },
+      { name: "ev", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "odds", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "round", type: "INTEGER", notnull: 1, dflt_value: null, pk: 2 },
+      { name: "stake", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [
+      { table: "analysis_close", from: "analysis_id", to: "analysis_id", on_update: "NO ACTION", on_delete: "NO ACTION" },
+      { table: "analysis_close", from: "round", to: "round", on_update: "NO ACTION", on_delete: "NO ACTION" },
+    ],
+    indexes: [{ origin: "pk", unique: 1, columns: ["analysis_id", "round", "bet_type", "combo_key"], name: null }],
+  },
 };
 
 /** exe のスキーマに、宣言した D1 専用の追加分(列・索引・表)を足した「期待する D1 の構造」。 */
@@ -340,8 +389,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql の18本だけで、番号は 0001 から連続している(後から足すときは 0019 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql の19本だけで、番号は 0001 から連続している(後から足すときは 0020 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {

@@ -15,7 +15,13 @@
  *  - `leak_class`: `guarded` = `history_cutoff_date` あり(ブリーフの A の母集団)、`pre_race` = 遮断なしだが発走前の分析。
  *
  * ## 行の列(`PRIOR_ROW_KEYS`。許可リスト。テストが完全一致を固定する)
- * 追加指示・LLM の生応答・`reason` などの自由文・馬名・設定・買い目は列にない。
+ * 追加指示・LLM の生応答・`reason` などの自由文・馬名・騎手名・調教師名・設定・買い目は列にない。
+ *
+ * ## 形式の版
+ *  - v1(Issue #266): 19 列(`PRIOR_ROW_KEYS_V1`)。
+ *  - v2(Issue #341): v1 の 19 列の**後ろに** 11 列(`PRIOR_ROW_KEYS_V2_ADDED`)を足した。出どころは R2 の詳細に既にある `raceSnapshot`(分析時点の出馬表。{@link toSnapshotColumns})で、
+ *    **追加の R2 の取得・D1 の読み取りはない**(`decodeDetail` が既にスナップショットを持っている)。スナップショットの市場の値(単勝オッズ・人気・複勝オッズ)は取り出さない
+ *    (既存の `win_odds`・`ninki` は結果ページの確定値、`place_odds_min` は分析が EV に使った値。#340 の方針「市場の値は特徴量に混ぜない」)。
  */
 
 import { classifyLookaheadSuspicion } from "../../packages/core/src/ev/lookahead-suspicion.js";
@@ -23,8 +29,8 @@ import { kaisaiDateFromNarRaceId, venueKindOfRaceId } from "../../packages/core/
 import type { RaceId } from "../../packages/core/src/scraper/ids.js";
 import { gzipSync } from "node:zlib";
 
-/** ファイルの形式の版。列を足す・意味を変えるときに上げる(ローダは読めない版を例外にする)。 */
-export const PRIOR_EXPORT_FORMAT = 1;
+/** ファイルの形式の版。列を足す・意味を変えるときに上げる(ローダは読めない版を例外にする)。2 = Issue #341 で出馬表の列を足した。 */
+export const PRIOR_EXPORT_FORMAT = 2;
 
 /** R2 のキー。固定(完成のたびに原子的に上書きする)。 */
 export const PRIOR_EXPORT_KEY = "exports/prior-dataset.ndjson.gz";
@@ -170,8 +176,8 @@ export function toContributions(raw: unknown): PriorContribution[] | null {
   return out;
 }
 
-/** 書き出す行の列(この順で JSON にする)。許可リスト。 */
-export const PRIOR_ROW_KEYS = [
+/** 形式 v1 の行の列(19 列。凍結: v1 のファイルを読むローダが使う。変えない)。 */
+export const PRIOR_ROW_KEYS_V1 = [
   "analysis_id",
   "race_id",
   "kaisai_date",
@@ -193,7 +199,109 @@ export const PRIOR_ROW_KEYS = [
   "leak_class",
 ] as const;
 
-export interface PriorDatasetRow {
+/** 形式 v2 で足した列(11 列。v1 の列の後ろに、この順で並ぶ)。馬名・騎手名・調教師名・市場の値は含めない。 */
+export const PRIOR_ROW_KEYS_V2_ADDED = [
+  "race_name",
+  "grade",
+  "distance",
+  "track_condition",
+  "wakuban",
+  "sex",
+  "age",
+  "body_weight",
+  "kinryo",
+  "oikiri_rank",
+  "oikiri_critic",
+] as const;
+
+/** 書き出す行の列(この順で JSON にする)。許可リスト。v1 の 19 列 + v2 で足した 11 列。 */
+export const PRIOR_ROW_KEYS = [...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED] as const;
+
+/** レースごとの出馬表の列(スナップショットの `race`。全頭に同じ値が入る)。 */
+export interface PriorRaceColumns {
+  readonly race_name: string | null;
+  /** グレード("G1"〜"G3"・"Jpn1"・"重賞" など)。キー自体が無い(グレードなし・#250 より前の旧スナップショット)ときは null で、この 2 つは区別できない。 */
+  readonly grade: string | null;
+  readonly distance: number | null;
+  /** 分析時点の馬場状態(確定値ではない)。 */
+  readonly track_condition: string | null;
+}
+
+/** 馬ごとの出馬表の列(スナップショットの `horses[]`)。 */
+export interface PriorHorseColumns {
+  readonly wakuban: number | null;
+  readonly sex: string | null;
+  readonly age: number | null;
+  /** 馬体重(kg。増減は保存していない)。未発表(前日の分析など)は null。 */
+  readonly body_weight: number | null;
+  /** 斤量(kg)。 */
+  readonly kinryo: number | null;
+  /** 調教ランク(A・B・C)。地方は調教を取らないので常に null。 */
+  readonly oikiri_rank: string | null;
+  /** 調教の短評(netkeiba の定型句。{@link CRITIC_MAX_LENGTH} 文字を超えるものは自由文の疑いで null)。地方は常に null。 */
+  readonly oikiri_critic: string | null;
+}
+
+/** スナップショットから取り出した v2 の列: レースの列と、馬番 → 馬の列。 */
+export interface PriorSnapshotColumns {
+  readonly race: PriorRaceColumns;
+  readonly horses: ReadonlyMap<number, PriorHorseColumns>;
+}
+
+/** `oikiri_critic` の最大文字数(コードポイント)。超える値は自由文の疑いで null にする(実フィクスチャの 16 頭では 4 文字前後の定型句だった。語彙が閉じていることは確認していない)。 */
+export const CRITIC_MAX_LENGTH = 16;
+
+const NULL_RACE_COLUMNS: PriorRaceColumns = { race_name: null, grade: null, distance: null, track_condition: null };
+const NULL_HORSE_COLUMNS: PriorHorseColumns = { wakuban: null, sex: null, age: null, body_weight: null, kinryo: null, oikiri_rank: null, oikiri_critic: null };
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const nonEmptyStringOrNull = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+const integerOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
+
+/**
+ * R2 の詳細の `raceSnapshot`(core の `buildRaceSnapshot` の形。型は未検証の unknown)から、v2 の列を取り出す。純関数。
+ * **想定外の形・型は例外にせず、その列だけ null**(`toContributions` と同じ「推測で直さない」)。スナップショット全体が無い・壊れているときは全列 null・馬は 0 頭。
+ * 取り出すのは {@link PRIOR_ROW_KEYS_V2_ADDED} の列だけ。馬名・騎手名・調教師名・単勝オッズ・人気・複勝オッズ(分析時点の市場の値)は読まない。
+ * 馬番が整数でない要素は飛ばし、馬番が重複したら最初の 1 頭を使う。
+ */
+export function toSnapshotColumns(raw: unknown): PriorSnapshotColumns {
+  if (!isRecord(raw)) {
+    return { race: NULL_RACE_COLUMNS, horses: new Map() };
+  }
+  const race = isRecord(raw["race"])
+    ? {
+        race_name: nonEmptyStringOrNull(raw["race"]["raceName"]),
+        grade: nonEmptyStringOrNull(raw["race"]["grade"]),
+        distance: integerOrNull(raw["race"]["distance"]),
+        track_condition: nonEmptyStringOrNull(raw["race"]["trackCondition"]),
+      }
+    : NULL_RACE_COLUMNS;
+  const horses = new Map<number, PriorHorseColumns>();
+  if (Array.isArray(raw["horses"])) {
+    for (const h of raw["horses"] as unknown[]) {
+      if (!isRecord(h)) {
+        continue;
+      }
+      const umaban = integerOrNull(h["umaban"]);
+      if (umaban === null || horses.has(umaban)) {
+        continue;
+      }
+      const critic = nonEmptyStringOrNull(h["oikiriCritic"]);
+      horses.set(umaban, {
+        wakuban: integerOrNull(h["wakuban"]),
+        sex: nonEmptyStringOrNull(h["sex"]),
+        age: integerOrNull(h["age"]),
+        body_weight: finiteOrNull(h["bodyWeight"]),
+        kinryo: finiteOrNull(h["kinryo"]),
+        oikiri_rank: nonEmptyStringOrNull(h["oikiriRank"]),
+        oikiri_critic: critic !== null && Array.from(critic).length <= CRITIC_MAX_LENGTH ? critic : null,
+      });
+    }
+  }
+  return { race, horses };
+}
+
+export interface PriorDatasetRow extends PriorRaceColumns, PriorHorseColumns {
   readonly analysis_id: number;
   readonly race_id: string;
   readonly kaisai_date: string | null;
@@ -230,13 +338,18 @@ export interface PriorResultInput {
   readonly ninki: number | null;
 }
 
-/** 分析 1 件ぶんの行(馬番の昇順)。結果の無い馬は着順・オッズ・人気が null。寄与度は馬番 → 書き出す形(無い・読めない馬は null)。 */
+/**
+ * 分析 1 件ぶんの行(馬番の昇順)。結果の無い馬は着順・オッズ・人気が null。寄与度は馬番 → 書き出す形(無い・読めない馬は null)。
+ * `snapshot`(v2 の列。{@link toSnapshotColumns})は、詳細(R2)が無いレースでは null(11 列とも null)。スナップショットに無い馬は、馬の列だけ null でレースの列は入る。
+ * 引数を省略可にしないのは、呼び出し側の配線漏れをコンパイルで検出するため。
+ */
 export function buildRaceRows(
   analysis: ChosenAnalysis,
   horses: readonly PriorHorseInput[],
   results: readonly PriorResultInput[],
   courseType: string | null,
   contributions: ReadonlyMap<number, PriorContribution[] | null>,
+  snapshot: PriorSnapshotColumns | null,
 ): PriorDatasetRow[] {
   const resultByUmaban = new Map(results.map((r) => [r.umaban, r] as const));
   const venueKind = venueKindOfRaceId(analysis.raceId as RaceId);
@@ -265,6 +378,8 @@ export function buildRaceRows(
         ev_estimated: analysis.evEstimated,
         prompt_lookahead_guarded: analysis.promptLookaheadGuarded,
         leak_class: analysis.leakClass,
+        ...(snapshot?.race ?? NULL_RACE_COLUMNS),
+        ...(snapshot?.horses.get(h.umaban) ?? NULL_HORSE_COLUMNS),
       };
     });
 }
@@ -290,6 +405,9 @@ const NOTES: readonly string[] = [
   "field_size は分析に載っている馬の数。出馬表の取消・除外は分析前に除かれるが、分析後の取消は入りうる(着順は null)。着順が null の馬は中止・取消・除外のいずれか(区別できない)。",
   "win_odds・ninki は結果ページの確定値。取り込み前の旧い行・欄が空の馬は null(Issue #259)。",
   "contributions は寄与度ログ(自由文の reason は除く)。詳細(R2)が無い・読めないレースは null。",
+  "format 2(v2。Issue #341): v1 の列の後ろに race_name・grade・distance・track_condition・wakuban・sex・age・body_weight・kinryo・oikiri_rank・oikiri_critic の 11 列を足した。出どころは R2 の詳細の raceSnapshot(分析時点の出馬表。追加の取得はしていない)。詳細が無い・スナップショットが壊れているレースは 11 列とも null。型が違う値はその列だけ null。馬名・騎手名・調教師名と、スナップショットの市場の値(単勝オッズ・人気・複勝オッズ)は含めない。",
+  "grade は、グレードなしのレースと、グレードを保存する前(Issue #250 より前)の旧いスナップショットのどちらも null で、区別できない。track_condition は分析時点の値(確定ではない)。body_weight は馬体重の発表前(前日の分析など)は null で、増減は保存していない。",
+  "oikiri_rank・oikiri_critic: 調教は中央だけ取るので、地方は常に null。oikiri_critic は netkeiba の短評で、16 文字を超えるものは自由文の疑いで null にしている。実フィクスチャの 16 頭では 4 文字前後の定型句だったが、語彙が閉じていることは確認していない。",
 ];
 
 /** ファイルを組み立てる: メタ行のメンバー + チャンクの連結。 */
