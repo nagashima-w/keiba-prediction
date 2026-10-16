@@ -271,7 +271,7 @@ exe 版の公開を止め(#248)、コードも削除した(#285)。運用は web
 - **main ブランチへ直接 push してはならない**(ユーザー指定・2026-10-14)。公開の push は作業ブランチだけに行い、main への取り込みはユーザーの指示があったときに PR のマージで行う。
 - netkeibaへの実リクエストを伴う動作確認は、ユーザーに確認してから最小限の回数で行う
 - 依存パッケージの追加時は理由を一言記録する
-- **Dependabot の PR(Issue #310・#323)**: Dependabot は GitHub Actions と npm(ルート・packages/core)の更新を、週1回、**作業ブランチ宛ての PR** で知らせる(main 宛てにしない)。PR では `ci.yml` の verify と、PR のときだけ走る cloud-verify(cloud の install・typecheck・test・smoke)が走る。**code-reviewer のレビューとメタレビューを通してから、merge commit で作業ブランチに取り込む**(squash しない。PR の本文〈上流のリリースノート〉が承認印の判定に混ざらないようにするため)。承認印の無いマージは本番に出ないので、次の承認印付きの公開で deploy ジョブが通ることを確かめる。cloud(workspace 外の別 lockfile)の依存は Dependabot の対象から漏れる(扱いは #324)。脆弱性はリポジトリの Dependabot alerts(main のマニフェストを見る)で受け、作業ブランチで対応する。
+- **Dependabot の PR(Issue #310・#323)**: Dependabot は GitHub Actions と npm(ルート・packages/core・cloud)の更新を、週1回、**作業ブランチ宛ての PR** で知らせる(main 宛てにしない)。PR では `ci.yml` の verify と、PR のときだけ走る cloud-verify(cloud の install・typecheck・test・smoke)が走る。**code-reviewer のレビューとメタレビューを通してから、merge commit で作業ブランチに取り込む**(squash しない。PR の本文〈上流のリリースノート〉が承認印の判定に混ざらないようにするため)。承認印の無いマージは本番に出ないので、次の承認印付きの公開で deploy ジョブが通ることを確かめる。cloud は別の lockfile だが、`cloud/pnpm-workspace.yaml` があるので Dependabot が `cloud/pnpm-lock.yaml` も更新する(#324。2026-10-16 に PR #331 で確認)。脆弱性はリポジトリの Dependabot alerts(main のマニフェストを見る)で受け、作業ブランチで対応する。
 
 ## ドキュメント一覧
 本リポジトリの主要ドキュメント。参照漏れを防ぐため一箇所に集約する(規約の唯一の正は本 `CLAUDE.md`)。

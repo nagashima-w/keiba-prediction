@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import { describe, expect, it } from "vitest";
 import type { GatePostRequest, GateResult, GateStatus } from "../src/gate-core";
 import { D1_HEALTH_SQL } from "../src/d1-health";
@@ -506,7 +506,7 @@ describe("ログ(経路名と理由コードだけ。値は出さない)", () =>
 });
 
 
-const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
+const FIXTURES = pathFromMeta("../../fixtures/", import.meta.url);
 const fixtureBytes = (name: string): Uint8Array => new Uint8Array(readFileSync(`${FIXTURES}${name}`));
 
 function responseOf(body: Uint8Array, init: { status?: number; queuedMs?: number; elapsedMs?: number } = {}): GateResult {

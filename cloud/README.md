@@ -135,7 +135,13 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 | `APP_BASE_URL` | 通知のタイトルのリンク(分析画面)の基点となる、このサイトの URL(Issue #230)。**登録は任意**: 未登録・形式不正なら、通知にリンクが付かないだけ(通知自体は送られる。分析も止まらない)。**https のオリジンだけ**有効(例は `https://<あなたのサイトのホスト名>`。パス・クエリ・`#`・ユーザー名とパスワードを含むものは「形式不正」)。登録の手順は、この表の下の「`APP_BASE_URL` の登録」 |
 | `BABA_API_URL` | 馬場の API(外部の API。JRA の競馬場の最新の馬場状態を返す JSON。Issue #294〈#293-A〉)の URL。**登録は任意**: 未登録・https の URL として読めない形なら、取得の仕組み全体が無効(印も書かず、アラームの候補にもしない。分析は従来どおり)。**利用の条件は「JRA の開催日に、利用者全体で 1 日 1 回」**。登録の手順と注意は、この表の下の「`BABA_API_URL` の登録」 |
 
-**`ANTHROPIC_BASE_URL` は登録しない(登録しても効かない)**: コードが Anthropic の宛先を `https://api.anthropic.com` に固定している(Issue #304。SDK は既定で環境変数 `ANTHROPIC_BASE_URL` を読み、`nodejs_compat` では secret が `process.env` に入りうるため、固定しないと API キーが別のホストへ送られる)。
+**次の名前の secret は登録しない**(`ANTHROPIC_API_KEY` 以外の `ANTHROPIC_*` は、どれも登録しない)。`@anthropic-ai/sdk` 0.133.0 は、クライアントの生成時に環境変数(`process.env`)から次の名前を読み、`nodejs_compat` では secret が `process.env` に入りうる。コードで止めているのは宛先(`ANTHROPIC_BASE_URL`。Issue #304)だけで、他の名前はコードで止めていない。登録しない限り無害だが、登録すると次のようになる:
+- `ANTHROPIC_BASE_URL`: **登録しても効かない**。コードが Anthropic の宛先を `https://api.anthropic.com` に固定している(Issue #304。固定しないと、API キーが別のホストへ送られる)。
+- `ANTHROPIC_CUSTOM_HEADERS`: 改行区切りの `名前: 値` が、**すべてのリクエストの任意のヘッダとして付く**(任意ヘッダの注入)。
+- `ANTHROPIC_LOG`: `debug` にすると、リクエストの詳細が Worker のログに出る。認証のヘッダは `***` に伏せられるが、リクエストの本文(分析のプロンプト)は伏せられない。
+- `ANTHROPIC_AUTH_TOKEN`: `Authorization: Bearer <値>` のヘッダが、`x-api-key` に加えて付く(別の資格情報が送られる)。
+
+(根拠: SDK の `client.js` の `readEnv(...)` の呼び出し。SDK を更新したら、`grep -rhoE "readEnv\)?\('[A-Z_]+'\)" cloud/node_modules/@anthropic-ai/sdk --include=*.js` で、読む名前が増えていないか確かめる。`ANTHROPIC_PROFILE` 系の資格情報の名前は、`apiKey` が無いときだけ効くので、キーを渡すときには効かない。)
 
 未設定の間は、Worker が全リクエストに 403 を返す(これが正しい動作。`ADMIN_USER` を除く 3 つのどれかが欠けている場合)。
 

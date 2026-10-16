@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import iconv from "iconv-lite";
 import { describe, expect, it } from "vitest";
 import { HttpError } from "../../packages/core/src/scraper/http-client.js";
@@ -18,7 +18,7 @@ import type { GateResult } from "../src/gate-core";
  * `HttpClient` を正しい設定で作る `createGateHttpClient`。ゲートは偽(fixture のバイト列を返す)。実ネットワークには出ない。
  */
 
-const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
+const FIXTURES = pathFromMeta("../../fixtures/", import.meta.url);
 const fixtureText = (name: string): string => readFileSync(`${FIXTURES}${name}`, "utf-8");
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   const copy = new Uint8Array(bytes.length);

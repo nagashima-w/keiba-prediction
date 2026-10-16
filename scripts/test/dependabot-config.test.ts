@@ -197,6 +197,20 @@ describe("dependabot.yml(Issue #310)", () => {
       }
     });
 
+    it("Issue #332: @types/node の semver-major は ignore する(Node の実行環境〈CI の node-version〉のメジャーに合わせて手で上げる。minor・patch は受ける)", () => {
+      const m = /\n {4}ignore:\n((?: {6,}.+\n)+)/.exec(`${e}\n`);
+      expect(m, "npm の項目に ignore ブロックがある").not.toBeNull();
+      const block = m![1]!;
+      // ignore の項目は @types/node の 1 つだけ(他の依存を巻き込んで握りつぶさない)
+      expect([...block.matchAll(/^ {6}- dependency-name: (.+)$/gm)].map((x) => (x[1] ?? "").replace(/^["']|["']$/g, ""))).toEqual(["@types/node"]);
+      // 種類は semver-major だけ(minor・patch まで無視すると、型定義の修正が届かない)
+      expect([...block.matchAll(/^ {10}- (.+)$/gm)].map((x) => (x[1] ?? "").replace(/^["']|["']$/g, ""))).toEqual(["version-update:semver-major"]);
+      expect(block).toMatch(/\n? {8}update-types:\n/);
+      // 実体がある(@types/node は cloud の devDependencies にある。名前だけが残って依存が消えた、を防ぐ)
+      const cloud = JSON.parse(readTextLf("cloud", "package.json")) as { devDependencies: Record<string, string> };
+      expect(cloud.devDependencies["@types/node"]).toBeDefined();
+    });
+
     it("上の group のあとに、本番の依存(production)と開発の依存(development)の group があり、PR の数を抑える", () => {
       expect(e).toMatch(/\n {6}[\w-]+:\n {8}dependency-type: ["']?production["']?\n/);
       expect(e).toMatch(/\n {6}[\w-]+:\n {8}dependency-type: ["']?development["']?\n/);

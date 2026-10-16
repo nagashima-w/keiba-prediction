@@ -7,7 +7,7 @@
  * 型だけの import でも、CI の型検査〈packages/core/node_modules が無い〉が better-sqlite3 を解決しに行って失敗する)。
  */
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import type { RaceComboPayoutsSaveInput, RaceResultDetail, RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
 import type { CourseType } from "../../packages/core/src/scraper/types.js";
 
@@ -54,6 +54,6 @@ export interface ResultContractCase {
   readonly expectedDetails: Record<string, RaceResultDetail | null>;
 }
 
-const FIXTURE_PATH = fileURLToPath(new URL("../../packages/core/test/golden/race-result-contract.json", import.meta.url));
+const FIXTURE_PATH = pathFromMeta("../../packages/core/test/golden/race-result-contract.json", import.meta.url);
 
 export const resultContractCases: readonly ResultContractCase[] = (JSON.parse(readFileSync(FIXTURE_PATH, "utf-8")) as { cases: ResultContractCase[] }).cases;

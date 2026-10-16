@@ -317,8 +317,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     クラウド版の設定画面で系統を選ぶ。exe は系統を渡さず sonnet のまま)。自動選択モデルが **HTTP 400/403/404** を返したら固定モデルで
     1回やり直し(以降その deps の間は固定モデル。切り替えは `onWarn` に記録)、401・429・5xx・
     ネットワーク・refusal・max_tokens では切り替えない。`analyzeRace` のリトライ構造は変えない。
-  - **リクエスト**: `max_tokens=16000`(thinking を含む。非ストリーミングのまま。SDK は timeout 未指定のとき 21333 超で
-    例外)、`output_config: { effort: "low" }`(SDK 0.70.1 の型には無く、0.133.0 で型に入ったが、本文を変えないため型の外で送るまま。設定可能な値として
+  - **リクエスト**: `max_tokens=16000`(thinking を含む。非ストリーミングのまま。SDK 0.133.0 は、非ストリーミングで timeout が未指定のときだけ、`max_tokens` が 21333 を超える〈`60*60*1000*max_tokens/128000` が 10 分を超える〉か、
+    モデル別の非ストリーミング上限〈`MODEL_NONSTREAMING_TOKENS`。`claude-opus-4@20250514` など旧い Opus 4 系の 3 つの ID が 8192〉を超えると例外にする〈`client.js` の `calculateNonstreamingTimeout`〉。
+    cloud は `createCloudLlm` が常に timeout を渡すので、この検査に当たらない。timeout を渡さない経路〈core の `AnthropicClient` が sender を注入されないときの既定、`createSdkMessageSender({ apiKey })`〉でも、16000 は両方の上限以下で通る)、`output_config: { effort: "low" }`(SDK 0.70.1 の型には無く、0.133.0 で型に入ったが、本文を変えないため型の外で送るまま。設定可能な値として
     `AnalyzerConfig.effort` を持つ)。**`temperature` は送らない**(Sonnet 5.5 は既定値以外を拒否する)。
     thinking は指定しない(既定の adaptive)。応答は `type==="text"` のブロックだけを連結する。
   - **停止理由**: `max_tokens` は `AnalyzerTruncationError`、`refusal` は `AnalyzerRefusalError`
@@ -950,16 +951,20 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     「レビュー継続中」を含まない push、または許可ブランチでの手動実行)。
 - **Dependabot(#310。`.github/dependabot.yml`)**: Actions の SHA ピン留め(#305)と固定した依存の更新を知らせる。対象は github-actions と npm(ルート・`packages/*`・`cloud/`)、週 1 回、PR の宛先は作業ブランチ(`target-branch`)。
   Dependabot の PR が作業ブランチに来たら、レビュー(SHA と版数のコメントの差分)してマージする。**マージは merge commit で行う**(squash にすると、PR の説明〈上流のリリースノートの引用〉がコミットの本文に入る。万一そこに `[PUBLISH-APPROVED]` の文字列が含まれると、承認印なしで本番デプロイが走りうる。確率は極めて低いが、merge commit なら本文は PR のタイトルだけ)。マージはレビュー後にメインが行う。**承認印の無いマージは本番にデプロイされず、次の承認印付きの公開で出る**。
-  - **Actions**: SHA と行末の `# vX.Y.Z` が同時に書き換わる想定(未確認。最初の PR で確かめる)。`scripts/test/actions-pinned.test.ts` は期待表の固定をやめ、規則(SHA 固定・版数コメント・全ワークフローで同じ action は同じ SHA と版数・許可リスト内の action)を検査するので、PR をそのままマージしても CI は緑のまま。
+  - **Actions**: SHA と行末の `# vX.Y.Z` が同時に書き換わる(2026-10-16 に PR #320 の差分で確認。例: `actions/checkout` の SHA と `# v4.4.0` が `# v7.0.1` の SHA とコメントに同時に変わった)。`scripts/test/actions-pinned.test.ts` は期待表の固定をやめ、規則(SHA 固定・版数コメント・全ワークフローで同じ action は同じ SHA と版数・許可リスト内の action)を検査するので、PR をそのままマージしても CI は緑のまま。
   - **npm**: `@anthropic-ai/sdk`・`cheerio`・`iconv-lite`(core と cloud が同じ版を揃える)は先頭の group で、core と cloud の更新を 1 つの PR にまとめさせる。**片方だけの PR が来たら** `scripts/test/cloud-config-guard.test.ts` が赤になる。その場合は手で両方(core の `^X.Y.Z` と cloud の exact `X.Y.Z`、`cloud/pnpm-lock.yaml`)を揃えて取り込む。cloud の `esbuild` が上がると `cloud/src/client-bundle.generated.ts` のドリフトの検査(`test/client-bundle.test.ts`)が落ちうる(`pnpm run build:client` で再生成して同じ PR に載せる)。
   - **cloud/ が更新されなかった原因と対策(Issue #324)**: #321 など最初の数回の PR は、cloud/ を更新せず、ルートと `packages/core` だけを更新した(PR の変更ファイルに `cloud/` が 1 つも無い)。
     実ログ(Dependabot の job)で、Dependabot は cloud/ で `pnpm update <pkg>@<版> --lockfile-only --no-save -r --config.minimum-release-age=4320` を実行しており、出力は `Scope: all 2 workspace projects` で、
     エラー表示も `packages/core` だった。**cloud/ に `pnpm-workspace.yaml` が無いため、pnpm が親(ルート)のワークスペースを見つけて、そちらを更新していた**(`--ignore-workspace` は Dependabot から渡せない)。
     手元で同じコマンドを実行して再現した(cloud/ に空の `pnpm-workspace.yaml` を置くと `cloud/pnpm-lock.yaml` が更新される)。対策は **`cloud/pnpm-workspace.yaml`(`packages: []`)の新設**
     (`scripts/test/cloud-config-guard.test.ts` が内容と、ルート側に cloud が無いことを検査)。`pnpm install --ignore-workspace --frozen-lockfile` の動作は変わらない。
-    **効いたかは未確認**: 作業ブランチに載せたあと、GitHub の Dependabot のページ(Insights → Dependency graph → Dependabot)の「Check for updates」で、cloud/ の更新を含む PR が来るかを確かめる。
-    **案 B(フォールバック。効かなかったときだけ)**: `@anthropic-ai/sdk`・`iconv-lite`・`cheerio` を npm の更新から `ignore` し、Dependabot alerts とこの種のタスクで手動に更新する(通常の更新の通知は失う)。
+    **効いた(2026-10-16 に確認)**: 作業ブランチに載せたあと、Dependabot の PR #331(cloud の development-dependencies グループ)が `cloud/package.json` と `cloud/pnpm-lock.yaml` を更新して来た
+    (`gh api repos/<owner>/<repo>/pulls/331/files` の変更ファイルはこの 2 つだけ)。案 B(`@anthropic-ai/sdk`・`iconv-lite`・`cheerio` を npm の更新から `ignore` して手動で扱う)は不要になった。
     cloud/ の devDependencies(typescript・vitest・`@cloudflare/workers-types` 等)の PR も、これまで一度も来ていなかった。対策後は来るので、メジャー更新も ignore せずレビューして取り込む(ルートはすでに TypeScript 7・vitest 5)。
+    **ただし `@types/node` の semver-major だけは例外で、`dependabot.yml` の `ignore` で提案させない(#332)。** @types/node のメジャーは実行環境の Node(`ci.yml`・`deploy-cloud.yml` の `node-version`。現在 22)に合わせるもので、
+    **Node を上げるときに `cloud/package.json` の @types/node も同じメジャーに手で上げる**(`scripts/test/cloud-config-guard.test.ts` が両者のメジャーの一致を検査)。minor・patch は受ける。
+    24 以上へ上げても cloud の型検査が通るよう、`fileURLToPath(new URL(…, import.meta.url))`(グローバルの URL は workers-types のもので、@types/node 24 以上では node:url の URL と型が合わず TS2345)を
+    `cloud/test/meta-path.ts` の `pathFromMeta` に置き換えた(26.6.5 で cloud の typecheck が 0 件になることを実測。Node 22 は 2027-04 に EOL)。
     一時的な失敗(公開直後の依存が最小経過日数〈`minimum-release-age=4320` 分 = 3 日〉に満たず `ERR_PNPM_NO_MATURE_MATCHING_VERSION`)は、日が経てば自然に解ける。
   - **CI の範囲**: PR では `ci.yml` が走る。`verify`(ルートの型検査・テスト)と、PR のときだけ走る `cloud-verify`(cloud/ の型検査・テスト・スモーク。`deploy-cloud.yml` の check・smoke と同じコマンド。秘密なし)。cloud の依存(wrangler・esbuild・sdk 等)の PR も PR の段階で赤が分かる。デプロイの dry-run と D1 の migration は `deploy-cloud.yml` の check にあり PR では走らず、マージ後の push で走る(deploy は承認印が無ければ走らない)。
   - **セキュリティ更新(脆弱性の自動修正 PR)**: `dependabot.yml` では扱わない(宛先を main 以外にできない見込み。未確認)。リポジトリ設定の「Dependabot alerts」を有効にして通知を受け、**alerts が来たら作業ブランチで対応する**(`pnpm audit` で確かめ、版を上げる)。**alerts は main のマニフェスト(`package.json`・lockfile)を見る**ので、作業ブランチで版を上げても、main に取り込むまで alert は消えない(消えないのは遅れであって、直っていないわけではない)。この設定は GitHub 上の操作でユーザーが行う。

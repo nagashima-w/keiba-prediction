@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import { D1JockeyResultsStore, JOCKEY_SAVE_CHUNK } from "../src/jockey-results-repository";
 import { parseJockeyResults } from "../../packages/core/src/scraper/parse-jockey-results";
 import { openLocalBindings, spyDb, type LocalBindings } from "./local-bindings";
@@ -125,7 +125,7 @@ describe("D1JockeyResultsStore", () => {
   });
 
   it("容量の見積りの根拠: 実フィクスチャ(横山武史 10 年分)の years_json は 1 行あたり数百バイト(コミット済みのフィクスチャから再現できる)", async () => {
-    const page = readFileSync(fileURLToPath(new URL("../../fixtures/jockey_results_01170.html", import.meta.url)), "utf-8");
+    const page = readFileSync(pathFromMeta("../../fixtures/jockey_results_01170.html", import.meta.url), "utf-8");
     const parsed = parseJockeyResults(page);
     expect(parsed).toHaveLength(10);
     const store = new D1JockeyResultsStore({ db: local.db });
