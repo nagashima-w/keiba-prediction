@@ -18,6 +18,7 @@ import type { VerifyVenue } from "./api-verify";
 import type { MonthlyBodyView, MonthlyModel } from "./monthly-model";
 import type { RaceRowView, ReportBodyView, ReportModel, WhatIfView } from "./report-model";
 import type { AdminOnlyModel } from "./admin-only";
+import type { TargetRow, TargetsModel } from "./targets-model";
 import type { ReplaySection } from "./replay-model";
 import { REPLAY_CANVAS_LABEL } from "./replay-model";
 import { h, type PickedFile, type VNode } from "./vnode";
@@ -163,6 +164,8 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
       model.venueTabs.map((t) => h("a", { class: "tab", href: t.href, "aria-current": t.current ? "page" : undefined }, [t.label])),
     ),
     h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+    // 今日の狙い目への入口(Issue #336)。閲覧者にも出す(読み取りだけ)。
+    h("a", { class: "targets-link", href: model.targetsHref }, ["狙い目"]),
     // 検証への入口は閲覧者にも出す(Issue #263。閲覧者の要求は集計のやり直しを起こさない)。設定への入口は管理者だけ(Issue #238。閲覧者は href が null)。日報は閲覧者にも出す。
     h("a", { class: "verify-link", href: model.verifyHref }, ["検証"]),
     h("a", { class: "report-link", href: model.reportHref }, ["日報"]),
@@ -1026,7 +1029,34 @@ function adminOnlyScreen(model: AdminOnlyModel): VNode {
   ]);
 }
 
-export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel | MonthlyModel | AdminOnlyModel, actions: ViewActions): VNode {
+/** 行。発走済み(`past`)は薄く出す(隠さず下に回す。決定)。見送り(`skipped`)も薄い。 */
+function targetRow(r: TargetRow, past: boolean): VNode {
+  return h("li", {}, [
+    h("a", { class: `race${r.skipped ? " skipped" : ""}${past ? " past" : ""}`, href: r.href }, [
+      h("div", { class: "race-head" }, [h("strong", {}, [r.time]), h("span", {}, [r.place]), ...(r.pick === "" ? [] : [h("span", {}, [r.pick])]), h("span", { class: r.soon ? "t-left soon" : "t-left" }, [r.left])]),
+      h("span", { class: "race-detail" }, [r.detail]),
+    ]),
+  ]);
+}
+
+/** 今日の狙い目(Issue #336)。未発走の行が先、発走済みは見出しの下。0 件のときはサーバの要約(理由)を出す。 */
+function targetsScreen(model: TargetsModel, actions: ViewActions): VNode {
+  const body: VNode[] = [
+    h("div", { class: "controls" }, [
+      h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
+      h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+    ]),
+    h("h1", { class: "title" }, [`狙い目 ${model.dateLabel}`]),
+  ];
+  if (model.summary === null && model.loading) body.push(h("p", { class: "empty" }, ["読み込み中…"]));
+  if (model.error !== null) body.push(notice("error", model.error));
+  if (model.summary !== null) body.push(h("p", { class: "meta" }, [model.summary]));
+  if (model.upcoming.length > 0) body.push(h("ul", { class: "races" }, model.upcoming.map((r) => targetRow(r, false))));
+  if (model.past.length > 0) body.push(h("h2", {}, ["発走済み"]), h("ul", { class: "races" }, model.past.map((r) => targetRow(r, true))));
+  return h("div", { class: "screen" }, body);
+}
+
+export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel | MonthlyModel | TargetsModel | AdminOnlyModel, actions: ViewActions): VNode {
   switch (model.kind) {
     case "list":
       return listScreen(model, actions);
@@ -1044,6 +1074,8 @@ export function renderScreen(model: ListModel | RaceModel | ResultModel | Settin
       return reportScreen(model, actions);
     case "monthly":
       return monthlyScreen(model, actions);
+    case "targets":
+      return targetsScreen(model, actions);
     case "admin-only":
       return adminOnlyScreen(model);
   }

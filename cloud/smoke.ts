@@ -172,6 +172,11 @@ async function expectViewer(port: number, label: string, email: string): Promise
   check(`${label}: GET /api/analyses は 200(読み取り)`, analyses.status === 200 && parseJson(analyses.text)["ok"] === true, `${analyses.status} ${analyses.text.slice(0, 80)}`);
   const plan = await req(port, "GET", "/api/plan?kaisai_date=20261008");
   check(`${label}: GET /api/plan は 200(読み取り)`, plan.status === 200 && parseJson(plan.text)["ok"] === true, `${plan.status} ${plan.text.slice(0, 80)}`);
+  // Issue #336: 今日の狙い目は閲覧者にも GET を開く(読み取りだけ)。空の D1 では、分析なしの固定の要約・空の一覧(DO は呼ばない)。HEAD は 403(admin-only)・日付なしは 400。
+  const targets = await req(port, "GET", "/api/targets?kaisai_date=20261008");
+  const targetsJson = parseJson(targets.text);
+  check(`${label}: GET /api/targets は 200(読み取り)。空の D1 では races が空・要約は「まだ分析されたレースがありません」`, targets.status === 200 && targetsJson["ok"] === true && targetsJson["kaisai_date"] === "20261008" && typeof targetsJson["now_ms"] === "number" && targetsJson["summary"] === "まだ分析されたレースがありません" && Array.isArray(targetsJson["races"]) && (targetsJson["races"] as unknown[]).length === 0, `${targets.status} ${targets.text.slice(0, 120)}`);
+  check(`${label}: GET /api/targets は日付なしで 400(役割の関門を通って入力の検証に届く)・HEAD は 403(admin-only)`, (await req(port, "GET", "/api/targets")).status === 400 && (await req(port, "HEAD", "/api/targets?kaisai_date=20261008")).status === 403);
   const reports = await req(port, "GET", "/api/reports");
   check(`${label}: GET /api/reports は 200(日報は閲覧できる)`, reports.status === 200 && parseJson(reports.text)["ok"] === true, `${reports.status} ${reports.text.slice(0, 80)}`);
   const monthly = await req(port, "GET", "/api/monthly-reports");
@@ -337,10 +342,16 @@ async function main(): Promise<void> {
       // golden の 202603030101 は、結果の行に馬の行が無い(組合せの取込記録だけ)ので、`race_results` に行が無く「未取込」と数えられる(残り 1)。開催日不明は 0(同じレースの別の分析に開催日がある)。
       check(`${label}: 移行の完了後は migrationState completed・状態 disabled・残り 1・開催日不明 0・取得済み 0・取得できなかった 0・次の実行なし(golden の馬の行が無い 1 レースが未取込として数えられる。本物の DO 同士の RPC)`, backfillDone["migrationState"] === "completed" && backfillDone["state"] === "disabled" && backfillDone["remaining"] === 1 && backfillDone["undated"] === 0 && backfillDone["imported"] === 0 && (backfillDone["abandoned"] as { total: number }).total === 0 && typeof (backfillDone["winOdds"] as { remaining: number }).remaining === "number" && backfillDone["nextRunAt"] === null, JSON.stringify(backfillDone).slice(0, 400));
       const list = parseJson((await req(port, "GET", "/api/analyses?limit=200")).text);
-      const items = list["analyses"] as { id: number; raceId: string; analyzedAt: string }[];
+      const items = list["analyses"] as { id: number; raceId: string; analyzedAt: string; kaisaiDate: string | null }[];
       check(`${label}: 一覧に 5 件。分析日時の降順(id の順ではない)`, items.length === 5 && items.every((a, i) => i === 0 || items[i - 1]!.analyzedAt >= a.analyzedAt) && items[0]!.analyzedAt === "2026-03-02T05:00:00.000Z", JSON.stringify(items.map((a) => [a.id, a.analyzedAt])));
       const detail = await req(port, "GET", `/api/analyses/${items[items.length - 2]!.id}`);
       check(`${label}: 詳細(D1 + R2)が読める(detail present)`, detail.status === 200 && detail.text.includes('"detail":"present"'), `${detail.status} ${detail.text.slice(0, 200)}`);
+
+      // Issue #336: 今日の狙い目(本物の D1 と、本物の日単位の DO の getPlanProgress)。移行した分析のどれかの開催日で、200・形が揃い、分析済みの要約になる。R2 には触れない。
+      const targetsDate = items.map((a) => a.kaisaiDate?.replace(/\D/g, "") ?? "").find((d) => d.length === 8);
+      check(`${label}: 移行した分析に 8 桁の開催日がある(今日の狙い目の確認の前提)`, targetsDate !== undefined, JSON.stringify(items.map((a) => a.kaisaiDate)));
+      const targetsMigrated = parseJson((await req(port, "GET", `/api/targets?kaisai_date=${targetsDate ?? "20260302"}`)).text);
+      check(`${label}: GET /api/targets は移行した分析の開催日で 200・要約が「分析済み N レース…」・races が配列(本物の D1・DO。計画が無いので発走時刻は null)`, targetsMigrated["ok"] === true && typeof targetsMigrated["summary"] === "string" && /^分析済み [1-9][0-9]* レース/.test(targetsMigrated["summary"] as string) && Array.isArray(targetsMigrated["races"]) && (targetsMigrated["races"] as { start_ms: unknown }[]).every((r) => r.start_ms === null), JSON.stringify(targetsMigrated).slice(0, 300));
 
       // Issue #219: 検証の集計(本物の DO `VerifyReportDO`)。移行した 5 件は start_time が NULL なので、DO がアラームで R2 の詳細から写してから(preparing → ready)、本物の D1 を読んで集計する。
       let verifyJson: Record<string, unknown> = {};

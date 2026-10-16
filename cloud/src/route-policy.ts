@@ -8,9 +8,9 @@
  * **表に無い (method, path) は管理者専用に倒れる(fail-closed)**。新しいルートを足して表に書き忘れても、閲覧者に開く方向には倒れない。
  * 表との突き合わせ(`test/route-policy.test.ts`)は、handler.ts の `pathname` の比較を走査し、表に無いルートが増えたら落とす。
  *
- * 閲覧者に開くもの(19 ルート):
+ * 閲覧者に開くもの(20 ルート):
  *   画面 `GET|HEAD /`・`GET|HEAD /app.js`、一覧 `GET /api/races`(netkeiba への取得を起こしうるが、キャッシュと gate が効く)、
- *   `GET /api/plan`、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、`GET /api/monthly-reports`・`/api/monthly-reports/{month}`(月報も見せる。Issue #279)、
+ *   `GET /api/plan`、`GET /api/targets`(今日の狙い目。Issue #336)、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、`GET /api/monthly-reports`・`/api/monthly-reports/{month}`(月報も見せる。Issue #279)、
  *   `GET /api/verify`(検証。Issue #263。閲覧者の要求は集計のやり直しを起こさない〈キャッシュを返すだけ〉、`refresh` は管理者だけ)、
  *   アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244。{@link ICON_PATHS}。表に無いと閲覧者の画面でアイコンが 403 になる)。
  * それ以外(設定・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・統計モデル用の書き出し〈Issue #266〉・各馬の戦績の蓄積の診断〈Issue #256〉・確認ページと確認 API・health)は管理者だけ。
@@ -48,7 +48,7 @@ function exact(path: string, viewerMethods: readonly string[]): RouteRule {
 }
 
 /**
- * 表。完全一致のルートが 30(画面・API・管理者専用が 23、アイコンが 7)、パターンのルートが 3(`/api/analyses/{id}`・`/api/reports/{date}`・`/api/monthly-reports/{month}`)。
+ * 表。完全一致のルートが 31(画面・API・管理者専用が 24、アイコンが 7)、パターンのルートが 3(`/api/analyses/{id}`・`/api/reports/{date}`・`/api/monthly-reports/{month}`)。
  * パターンは、同じ階層の固定の path(`/api/analyses/run`・`/api/reports/run`・`/api/monthly-reports/run`)に化けないよう、`run` を除く。
  */
 export const ROUTE_RULES: readonly RouteRule[] = [
@@ -57,6 +57,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/app.js", PAGE),
   exact("/api/races", GET),
   exact("/api/plan", GET),
+  // 今日の狙い目(Issue #336)。D1 の集計と DO の計画の読み取りだけ(R2・netkeiba・LLM に触れない)。配分の提案は `GET /api/analyses/{id}` で閲覧者にもすでに見えるので、新しい露出は無い。GET だけ
+  exact("/api/targets", GET),
   exact("/api/analyses", GET),
   exact("/api/analyses/status", GET),
   {
