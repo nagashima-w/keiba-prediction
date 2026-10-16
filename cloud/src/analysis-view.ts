@@ -19,6 +19,8 @@ import { extractDevelopment, type LlmPace } from "../../packages/core/src/analyz
 import { toSafeRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
+import { diffAllocationBets, type AllocationDiff } from "../../packages/core/src/analysis/allocation-diff";
+import { CLOSE_ROUNDS, type CloseReason, type CloseStatus, type StoredCloseRound } from "./analysis-close";
 import type { StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
 import type { PlaceOddsBasis } from "../../packages/core/src/ev/place-odds-estimate";
@@ -166,6 +168,35 @@ export interface AnalysisViewCombos {
   readonly lines: readonly string[];
 }
 
+/**
+ * 締切の直前の再計算(Issue #338)の 1 回ぶん。`allocation` は `status === "ok"` のときだけ(分析時の提案と同じ形)。`diff` は、`ok` で、分析時の提案の配分もあるときだけ
+ * (分析時の提案の買い目との差分。追加・削除・賭け金の変化。賭け金が同じでオッズだけ動いた買い目は変化に数えない)。
+ */
+export interface AnalysisViewCloseRound {
+  /** 回の番号(1 = 発走 5 分前、2 = 発走 2 分前〈暫定〉)。 */
+  readonly round: number;
+  /** その回の発走前のリード(分)。定数にない回の番号は null。 */
+  readonly leadMinutes: number | null;
+  readonly status: CloseStatus;
+  /** 固定の語彙(`analysis-close.ts`)。`ok` のときは null。 */
+  readonly reason: CloseReason | null;
+  /** 本来起こすはずだった時刻(ISO 8601 の UTC)。 */
+  readonly dueAt: string;
+  /** 実際に動き始めた時刻(ISO 8601 の UTC)。 */
+  readonly firedAt: string;
+  /** 起床の遅れ(ミリ秒)。 */
+  readonly lateMs: number;
+  /** 取り直したオッズの netkeiba 側の時刻(`ok` のときだけ。取れなければ null)。 */
+  readonly oddsOfficialDatetime: string | null;
+  readonly allocation: AnalysisViewAllocation | null;
+  readonly diff: AllocationDiff | null;
+}
+
+/** 締切の直前の再計算の結果(回の昇順。Issue #338)。結果が無い分析は、`AnalysisView.close` が null。 */
+export interface AnalysisViewClose {
+  readonly rounds: readonly AnalysisViewCloseRound[];
+}
+
 export interface AnalysisView {
   readonly id: number;
   readonly raceId: string;
@@ -206,6 +237,11 @@ export interface AnalysisView {
   readonly horses: readonly AnalysisViewHorse[];
   /** 配分(D1 の配分の行が無ければ null)。 */
   readonly allocation: AnalysisViewAllocation | null;
+  /**
+   * 締切の直前の再計算(発走の 5 分前・2 分前。Issue #338)の結果。結果が無い(旧い分析・まだ回が来ていない・D1 の表が無い間)は null。`buildAnalysisView` は常にキーを持つ(null を含む)。
+   * 分析時の提案(`allocation`)は上書きされない。画面は A-2。型で省略可なのは、この項目を使わない呼び出し側の固定データ(日報のテストなど)を壊さないため(`baba`・`combos`・`development` と同じ)。
+   */
+  readonly close?: AnalysisViewClose | null;
   readonly detail: DetailStatus;
 }
 
@@ -271,7 +307,53 @@ function combosViewOf(rawSnapshot: unknown, allocation: StoredAllocation | undef
   return lines === null ? null : { lines };
 }
 
-export function buildAnalysisView(result: AnalysisDetailResult, allocation: StoredAllocation | undefined): AnalysisView {
+/** 保存済みの配分(分析時の提案、または締切の再計算)を、応答の形にする。許可したキーを明示して写す。 */
+function allocationViewOf(allocation: StoredAllocation): AnalysisViewAllocation {
+  return {
+    route: allocation.route,
+    skipReasonCode: allocation.skipReasonCode,
+    unavailableReason: allocation.unavailableReason,
+    fallbackReason: allocation.fallbackReason,
+    betUnit: allocation.betUnit,
+    bankroll: allocation.bankroll,
+    perRaceCap: allocation.perRaceCap,
+    kellyFraction: allocation.kellyFraction,
+    evThreshold: allocation.evThreshold,
+    includeComboOdds: allocation.includeComboOdds,
+    includeWide: allocation.includeWide,
+    includeTrio: allocation.includeTrio,
+    includeQuinella: allocation.includeQuinella,
+    includeExacta: allocation.includeExacta,
+    includeTrifecta: allocation.includeTrifecta,
+    includeBracketQuinella: allocation.includeBracketQuinella,
+    oddsStatus: allocation.oddsStatus,
+    bets: allocation.bets.map((b) => ({ betType: b.betType, comboKey: b.comboKey, stake: b.stake, odds: b.odds, ev: b.ev })),
+  };
+}
+
+/** 締切の直前の再計算の結果を、応答の形にする(回の昇順。無ければ null)。差分は分析時の提案との比較。 */
+function closeViewOf(close: readonly StoredCloseRound[] | undefined, proposal: StoredAllocation | undefined): AnalysisViewClose | null {
+  if (close === undefined || close.length === 0) {
+    return null;
+  }
+  const rounds = [...close]
+    .sort((a, b) => a.round - b.round)
+    .map((r): AnalysisViewCloseRound => ({
+      round: r.round,
+      leadMinutes: CLOSE_ROUNDS.find((c) => c.round === r.round) === undefined ? null : CLOSE_ROUNDS.find((c) => c.round === r.round)!.leadMs / 60_000,
+      status: r.status,
+      reason: r.reason,
+      dueAt: r.dueAt,
+      firedAt: r.firedAt,
+      lateMs: r.lateMs,
+      oddsOfficialDatetime: r.oddsOfficialDatetime,
+      allocation: r.allocation === null ? null : allocationViewOf(r.allocation),
+      diff: r.allocation === null || proposal === undefined ? null : diffAllocationBets(proposal.bets, r.allocation.bets),
+    }));
+  return { rounds };
+}
+
+export function buildAnalysisView(result: AnalysisDetailResult, allocation: StoredAllocation | undefined, close?: readonly StoredCloseRound[]): AnalysisView {
   const { analysis, detail } = result;
   // 詳細が present でないときは、スナップショットを一切使わない(馬名なしの同じ形で返す)。
   const snapshot = detail === "present" ? toSafeRaceSnapshot(analysis.raceSnapshot) : null;
@@ -342,29 +424,8 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       earlyPos: earlyPosOf(snapshot?.horsesByUmaban.get(h.umaban)?.earlyPos),
       legStyle: legStyleOf(snapshot?.horsesByUmaban.get(h.umaban)?.legStyle),
     })),
-    allocation:
-      allocation === undefined
-        ? null
-        : {
-            route: allocation.route,
-            skipReasonCode: allocation.skipReasonCode,
-            unavailableReason: allocation.unavailableReason,
-            fallbackReason: allocation.fallbackReason,
-            betUnit: allocation.betUnit,
-            bankroll: allocation.bankroll,
-            perRaceCap: allocation.perRaceCap,
-            kellyFraction: allocation.kellyFraction,
-            evThreshold: allocation.evThreshold,
-            includeComboOdds: allocation.includeComboOdds,
-            includeWide: allocation.includeWide,
-            includeTrio: allocation.includeTrio,
-            includeQuinella: allocation.includeQuinella,
-            includeExacta: allocation.includeExacta,
-            includeTrifecta: allocation.includeTrifecta,
-            includeBracketQuinella: allocation.includeBracketQuinella,
-            oddsStatus: allocation.oddsStatus,
-            bets: allocation.bets.map((b) => ({ betType: b.betType, comboKey: b.comboKey, stake: b.stake, odds: b.odds, ev: b.ev })),
-          },
+    allocation: allocation === undefined ? null : allocationViewOf(allocation),
+    close: closeViewOf(close, allocation),
     detail,
   };
 }

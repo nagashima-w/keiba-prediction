@@ -345,3 +345,19 @@ describe("アラームの合成: nextAlarmAt の日報の判定の候補(Issue #
     expect(nextAlarmAt({ ...base, reportHoldAtMs: NOW - 1_000, reportJudgePending: true })).toBe(NOW);
   });
 });
+
+describe("アラームの合成: nextAlarmAt の締切の直前の再計算の候補(Issue #338)", () => {
+  it("closeAtMs が未来ならその時刻、過去なら now(仕事の有無によらず候補)。null・省略は候補なし", () => {
+    expect(nextAlarmAt({ ...base, closeAtMs: NOW + 5_000 })).toBe(NOW + 5_000);
+    expect(nextAlarmAt({ ...base, closeAtMs: NOW - 5_000 })).toBe(NOW);
+    expect(nextAlarmAt({ ...base, closeAtMs: null })).toBeNull();
+    expect(nextAlarmAt(base)).toBeNull();
+  });
+
+  it("他の候補と最小を取る: 計画の期限より早ければ closeAtMs、遅ければ計画の期限。仕事(再試行待ち)があっても候補に残る(掃除のように止められない)", () => {
+    expect(nextAlarmAt({ ...base, closeAtMs: NOW + 1_000, planNextDueMs: NOW + 9_000 })).toBe(NOW + 1_000);
+    expect(nextAlarmAt({ ...base, closeAtMs: NOW + 9_000, planNextDueMs: NOW + 1_000 })).toBe(NOW + 1_000);
+    expect(nextAlarmAt({ ...base, retryWork: true, closeAtMs: NOW + 1_000 })).toBe(NOW + 1_000);
+    expect(nextAlarmAt({ ...base, purgeDueMs: NOW + 9_000, closeAtMs: NOW + 1_000 })).toBe(NOW + 1_000);
+  });
+});

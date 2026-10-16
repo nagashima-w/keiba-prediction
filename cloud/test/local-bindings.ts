@@ -38,7 +38,7 @@ export async function openLocalBindings(): Promise<LocalBindings> {
     db,
     r2: proxy.env.ANALYSIS_DETAIL,
     async reset() {
-      for (const table of ["analysis_bets", "analysis_horses", "analysis_allocation_meta", "analyses", "race_combo_payouts", "race_combo_payout_imports", "race_result_meta", "race_results", "daily_reports", "monthly_reports", "jockey_results", "horse_runs", "horse_run_saves", "baba_fetches", "baba_conditions", "r2_ops", "cloud_settings"]) {
+      for (const table of ["analysis_close_bets", "analysis_close", "analysis_bets", "analysis_horses", "analysis_allocation_meta", "analyses", "race_combo_payouts", "race_combo_payout_imports", "race_result_meta", "race_results", "daily_reports", "monthly_reports", "jockey_results", "horse_runs", "horse_run_saves", "baba_fetches", "baba_conditions", "r2_ops", "cloud_settings"]) {
         await db.prepare(`DELETE FROM ${table}`).run();
       }
     },

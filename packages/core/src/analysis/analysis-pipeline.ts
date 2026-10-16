@@ -43,13 +43,9 @@ import {
   classifyTrackWetness,
   collectSameDayTrend,
   computeConditionChangeTags,
-  computeEstimatedRaceEv,
   computeFieldPriors,
-  computeRaceEv,
   computeReferenceEv,
   daysBetweenDates,
-  DEFAULT_ESTIMATED_PLACE_CONFIG,
-  DEFAULT_EV_CONFIG,
   resolveClipVariant,
   summarizeBestWeight,
   summarizeBodyWeightTrend,
@@ -87,20 +83,14 @@ import type {
   AnalysisResult,
   AnalysisRow,
 } from "./analysis-types.js";
-import type { MixedCandidateBuildInput } from "./mixed-candidates.js";
-import { buildMixedRaceAllocationWithOutcome } from "./mixed-race-allocation.js";
-import {
-  buildAllocationRecord,
-  buildInvalidAllocationRecordForException,
-  toMixedAllocationSettings,
-  type AnalysisAllocationSettings,
-} from "./allocation-record.js";
+import { buildAllocationForRows, computeEvForProbs } from "./recompute-allocation.js";
+import type { AnalysisAllocationSettings } from "./allocation-record.js";
 import {
   excludeOwnRaceResults,
   filterRaceDataBefore,
 } from "../scorer/snapshot-filter.js";
 import { buildRaceSnapshot } from "./analysis-export.js";
-import { buildComboStats, COMBO_STATS_SNAPSHOT_KEY, type ComboStats } from "./combo-stats.js";
+import { COMBO_STATS_SNAPSHOT_KEY, type ComboStats } from "./combo-stats.js";
 import { centralVenueInfoFromRaceId } from "../scraper/ids.js";
 import { normalizeDayBaba, selectDayBabaForCourse, type DayBaba } from "../analyzer/day-baba.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
@@ -798,15 +788,13 @@ export async function runAnalysis(
     umaban: h.shutuba.umaban,
     placeProb: adjustedByUmaban.get(h.shutuba.umaban)!.adjustedProb,
   }));
-  const evEstimated = race.odds.oddsStatus === "yoso";
-  const evResults = evEstimated
-    ? computeEstimatedRaceEv(
-        evPriors,
-        race.odds,
-        deps.evConfig ?? DEFAULT_EV_CONFIG,
-        deps.estimatedPlaceConfig ?? DEFAULT_ESTIMATED_PLACE_CONFIG,
-      )
-    : computeRaceEv(evPriors, race.odds, deps.evConfig ?? DEFAULT_EV_CONFIG);
+  // 計算本体は recompute-allocation.ts に抽出した(Issue #338。クラウド版の締切の直前の再計算と共有する。出力は抽出の前後で同じ)。
+  const { evEstimated, evResults } = computeEvForProbs(
+    evPriors,
+    race.odds,
+    deps.evConfig,
+    deps.estimatedPlaceConfig,
+  );
   const evByUmaban = new Map(evResults.map((e) => [e.umaban, e]));
 
   // (5) 結果行の組み立て(馬番昇順)。本来は手順(6)相当だったが、Issue #59で
@@ -859,57 +847,19 @@ export async function runAnalysis(
   // 組合せの券種ごとの EV プラスの点数(Issue #296)。配分の候補を作った経路だけ非 null(R2 のスナップショットに残す)。
   let comboStats: ComboStats | null = null;
   if (deps.allocationSettings !== null) {
-    // EV閾値は evConfig から導出する単一ソース(#59 3節。allocationSettings には持たせない)。
-    const evThreshold = (deps.evConfig ?? DEFAULT_EV_CONFIG).threshold;
-    const mixedSettings = toMixedAllocationSettings(deps.allocationSettings, evThreshold);
-    // MixedCandidateBuildInput は条件付きspreadで組む(scripts/bench-mixed-allocation.tsの
-    // toMixedCandidateInputと同じ形。戻り値末尾のwideCombo/trioCombo/quinellaCombo/exactaCombo/
-    // trifectaCombo/bracketQuinellaCombo/comboOddsの条件付きspreadと同一データソースなので、その部分は結果を
-    // 待たずここで組み立てられる)。quinellaComboはIssue #116・#24-D3b-1で追加。
-    // Issue #117(#24-D3b-2)で`resolveMixedBetTypes`が`includeQuinellaInAllocation`設定を
-    // 実際に参照するようになったため、このフィールドは production の配分結果に実際に
-    // 影響する(`analysis-pipeline-allocation.test.ts`のAC-10参照)。
-    // exactaComboはIssue #122・#24-E2で追加した。Issue #125(#24-E3b)で`resolveMixedBetTypes`
-    // が`includeExactaInAllocation`設定を実際に参照するようになったため、quinellaComboと
-    // 同じく、このフィールドも production の配分結果に実際に影響する
-    // (`analysis-pipeline-allocation.test.ts`のAC-10参照)。
-    // trifectaComboはIssue #137・#25-E2で追加した。Issue #138で`includeTrifectaInAllocation`を
-    // 配管し、Issue #139(#25-E3b)で`resolveMixedBetTypes`への実際の接続を行ったため、
-    // このフィールドは production の配分結果に実際に影響する(quinellaCombo・exactaComboが
-    // #117・#125で接続されたのと同じ経緯。`analysis-pipeline-allocation.test.ts`のAC-10参照)。
-    // bracketQuinellaComboはIssue #148・#26-E2で追加した。#149で`includeBracketQuinellaInAllocation`の
-    // 配管を完了し、Issue #150(#26-E3b)で`resolveMixedBetTypes`への実際の接続を行ったため、
-    // このフィールドは production の配分結果に実際に影響する(quinellaCombo・exactaCombo・
-    // trifectaComboが接続されたのと同じ経緯。`analysis-pipeline-allocation.test.ts`のIssue #148
-    // (AC-2・AC-4)テスト参照)。
-    // raceIdはIssue #139(#25-E3b・AC4)で追加した。三連単の状態注記の中央/地方の判別に使っていたが、
-    // Issue #283で地方の三連単も取得するようになり、その特別扱いを除去したため、現在は参照する箇所が無い
-    // (フィールド自体の削除はスコープ外として残している)。本ファイル自身は参照しない。
-    const raceForAllocation: MixedCandidateBuildInput = {
-      oddsStatus,
+    // 配分の計算本体(組合せオッズの受け渡しの条件付き spread・EV 閾値の導出・例外時の無効の記録)は recompute-allocation.ts に抽出した
+    // (Issue #338。クラウド版の締切の直前の再計算と共有する。出力は抽出の前後で同じ)。
+    // 券種ごとの設定の配管の経緯(#116・#122・#137・#148 ほか)を書いていた抽出前のコメントは、`git show 9bd9967:packages/core/src/analysis/analysis-pipeline.ts` で読める。
+    const computed = buildAllocationForRows({
       rows,
       raceId,
-      ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
-      ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
-      ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),
-      ...(race.odds.exactaCombo !== undefined ? { exactaCombo: race.odds.exactaCombo } : {}),
-      ...(race.odds.trifectaCombo !== undefined ? { trifectaCombo: race.odds.trifectaCombo } : {}),
-      ...(race.odds.bracketQuinellaCombo !== undefined
-        ? { bracketQuinellaCombo: race.odds.bracketQuinellaCombo }
-        : {}),
-      ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
-    };
-    try {
-      const outcome = buildMixedRaceAllocationWithOutcome(raceForAllocation, mixedSettings);
-      allocation = buildAllocationRecord(outcome, mixedSettings, oddsStatus);
-      comboStats = buildComboStats(outcome);
-    } catch {
-      // AC6: buildMixedRaceAllocationWithOutcome自体の例外(呼び出し元の前提が崩れている
-      // 場合の防御。極めて稀)を捕捉し、分析本体の保存を失わせない(この分析はLLM呼び出し
-      // 〈実課金〉を済ませている可能性があるため、無料で再計算できる配分の例外で失わせない)。
-      // 診断ログは持たない(#59スコープ外。メタ行のroute="invalid"で十分)。
-      allocation = buildInvalidAllocationRecordForException(mixedSettings, oddsStatus);
-    }
+      odds: race.odds,
+      comboOdds: race.meta.comboOdds,
+      allocationSettings: deps.allocationSettings,
+      evConfig: deps.evConfig,
+    });
+    allocation = computed.allocation;
+    comboStats = computed.comboStats;
   }
 
   // (7) 保存。

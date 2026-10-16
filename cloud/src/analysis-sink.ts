@@ -6,8 +6,10 @@
  *  - `findByAnalyzedAt`: 同じレース・同じ分析時刻の分析の id(重複の確認。DO の計算ステップの再実行で、2件目を保存しないため)。D1 の読み出しは一覧の2文。
  *  - `findRecentByRace`: 同じレースの、分析時刻が `[fromIso, toIso]` の分析(id・分析時刻・prompt_version・model だけ)。発走前の自動実行が、手動の分析との重複を確かめる(Issue #204)。D1 の読み出しは1文。
  *  - `countChildren`: 保存した分析の子の行(馬・買い目)の件数(最初の実保存で、子の行が正しい親 id に紐づいたかを確かめる)。
+ *  - `saveClose`: 締切の直前の再計算の 1 回ぶんの結果を保存する(Issue #338。1 回の batch・3 文以内。分析時の提案の行には触れない)。
  */
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
+import type { CloseSavePayload } from "./analysis-close";
 import { LIST_MAX_LIMIT, type D1AnalysisStore } from "./analysis-repository";
 import type { AnalysisSaveExtra, AnalysisSink } from "./race-day-core";
 
@@ -36,6 +38,9 @@ export function createAnalysisSink(store: D1AnalysisStore): AnalysisSink {
     },
     countChildren(analysisId: number) {
       return store.countChildren(analysisId);
+    },
+    saveClose(analysisId: number, payload: CloseSavePayload) {
+      return store.saveClose(analysisId, payload);
     },
   };
 }
