@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { encodeDetail } from "../src/analysis-detail";
 import { D1AnalysisStore } from "../src/analysis-repository";
 import { D1PriorExportStore, type PriorExportBucket } from "../src/prior-export-store";
-import { PRIOR_EXPORT_BATCH_SIZE, PRIOR_EXPORT_TICK_OVERHEAD_QUERIES } from "../src/prior-export-core";
+import { PRIOR_EXPORT_BATCH_SIZE, PRIOR_EXPORT_TICK_OVERHEAD_QUERIES, type DetailOutcome } from "../src/prior-export-core";
 import { D1ResultStore } from "../src/result-repository";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { openLocalBindings, spyBucket, spyDb, type LocalBindings } from "./local-bindings";
@@ -96,6 +96,23 @@ describe("readRaceData", () => {
   });
 });
 
+describe("Issue #341: 形式 v2 は D1 の読み取りを増やさない", () => {
+  it("候補・馬・結果・面の SQL は、スナップショットの列(race_snapshot_json)にも枠番(wakuban)にも触れず、readRaceData の batch は 3 文のまま", async () => {
+    await analyses().saveAnalysis(mkRecord(1));
+    await results().saveResult(mkRecord(1).raceId, [{ umaban: 1, finishPosition: 1 }]);
+    const spy = spyDb(local.db);
+    const s = store(local.r2, spy.db as never);
+    await s.readCandidates();
+    await s.readRaceData([1], [mkRecord(1).raceId]);
+    expect(spy.batches).toEqual([3]);
+    expect(spy.prepared).toHaveLength(4); // 候補 1 + 馬・結果・面 3
+    for (const sql of spy.prepared) {
+      expect(sql, "SQL が race_snapshot_json を読まない").not.toContain("race_snapshot_json");
+      expect(sql, "SQL が wakuban を読まない").not.toContain("wakuban");
+    }
+  });
+});
+
 describe("fetchDetails", () => {
   it("詳細の寄与度を返す。detail_key が無い・R2 に無い・壊れている・別のレースのものは none(失敗ではない)。取得を試みた回数だけ gets に数える", async () => {
     await analyses().saveAnalysis(mkRecord(1));
@@ -118,6 +135,39 @@ describe("fetchDetails", () => {
     expect(out.gets).toBe(4); // detail_key が NULL の 1 件は取得しない
     expect(spy.calls.filter((c) => c.op === "get")).toHaveLength(4);
     expect(spy.calls.filter((c) => c.op === "put")).toHaveLength(0);
+  });
+
+  it("Issue #341(形式 v2): 詳細の raceSnapshot から v2 の列を返す。追加の R2 操作はない(get は取得を試みた回数だけ。この窓口は get と put しか持たず、list・head は呼べない)", async () => {
+    const snapshot = {
+      race: { raceName: "テストS", grade: "G2", distance: 2000, trackCondition: "稍重", courseType: "芝" },
+      horses: [
+        { umaban: 1, wakuban: 1, name: "SECRET-HORSE", sex: "牝", age: 4, kinryo: 54, jockeyName: "SECRET-JOCKEY", trainerName: "SECRET-TRAINER", bodyWeight: 456, winOdds: 99.9, oikiriCritic: "気配上々", oikiriRank: "B" },
+        { umaban: 2, wakuban: 2, sex: "牡", age: 3, kinryo: 56, bodyWeight: null, oikiriCritic: null, oikiriRank: null },
+      ],
+    };
+    await analyses().saveAnalysis(mkRecord(1, { raceSnapshot: snapshot }));
+    await analyses().saveAnalysis(mkRecord(2, { raceSnapshot: null }));
+    const spy = spyBucket(local.r2);
+    const out = await store(spy.bucket as unknown as PriorExportBucket).fetchDetails([
+      { id: 1, raceId: mkRecord(1).raceId, detailKey: "analyses/1.json.gz" },
+      { id: 2, raceId: mkRecord(2).raceId, detailKey: "analyses/2.json.gz" },
+    ]);
+    const snapshotOf = (o: DetailOutcome | undefined) => {
+      if (o?.kind !== "ok") throw new Error("ok のはず");
+      return o.snapshot;
+    };
+    const a = snapshotOf(out.outcomes[0]);
+    const b = snapshotOf(out.outcomes[1]);
+    expect(a.race).toEqual({ race_name: "テストS", grade: "G2", distance: 2000, track_condition: "稍重" });
+    expect(a.horses.get(1)).toEqual({ wakuban: 1, sex: "牝", age: 4, body_weight: 456, kinryo: 54, oikiri_rank: "B", oikiri_critic: "気配上々" });
+    expect(a.horses.get(2)).toMatchObject({ wakuban: 2, sex: "牡", body_weight: null, oikiri_rank: null });
+    // スナップショットが null の詳細は ok のまま、列がすべて null(詳細なし〈none〉とは別)
+    expect(b.race).toEqual({ race_name: null, grade: null, distance: null, track_condition: null });
+    expect(b.horses.size).toBe(0);
+    expect(out.gets).toBe(2);
+    expect(spy.calls.map((c) => c.op)).toEqual(["get", "get"]);
+    // 人名・馬名は取り出した結果のどこにも無い
+    expect(JSON.stringify(out.outcomes.map((o) => (o.kind === "ok" ? { race: o.snapshot.race, horses: [...o.snapshot.horses.values()] } : null)))).not.toContain("SECRET");
   });
 
   it("R2 の get が例外のときは failed(none にしない。再試行できる)", async () => {

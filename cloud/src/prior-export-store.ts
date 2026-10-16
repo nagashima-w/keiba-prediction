@@ -7,6 +7,7 @@
  *    読む行数は束縛した ID の行だけ。D1 が返す `meta.rows_read` を合計して返す。
  *  - 詳細(`fetchDetails`): R2 の `get` だけ(LIST・HEAD は使わない)。同時実行は {@link GET_CONCURRENCY}。取得を試みた回数を返す(Class B に数える)。
  *    `detail_key` が NULL の行は取得しない(none)。R2 に無い・壊れている・別のレースのものも none(失敗ではない)。get の例外だけ failed(再試行する)。
+ *    形式 v2(Issue #341)の出馬表の列は、**同じ get で読んだ詳細の `raceSnapshot`** から取り出す(`toSnapshotColumns`)。取得の回数も D1 の文も増えない。
  *
  * ## 書き
  *  - `r2_ops` の Class B の加算(`countReads`)と、Class A の加算 + R2 の put(`putFile`)。put の前に Class A を数える(`analysis-repository.ts` の流儀: 先に数えて、put の失敗は過少でなく過大に倒す)。
@@ -15,7 +16,7 @@
 
 import { decodeDetail } from "./analysis-detail";
 import { monthKey, type R2Usage } from "./r2-fence";
-import type { CandidateRow } from "./prior-export-format";
+import { toSnapshotColumns, type CandidateRow } from "./prior-export-format";
 import type { DetailOutcome, DetailRequest, PriorExportStorePort, RaceDataBatch } from "./prior-export-core";
 
 export type PriorExportDb = Pick<D1Database, "prepare" | "batch">;
@@ -106,7 +107,10 @@ export class D1PriorExportStore implements PriorExportStorePort {
         return;
       }
       const payload = bytes === null ? null : decodeDetail(bytes);
-      outcomes[index] = payload === null || payload.raceId !== item.raceId ? { kind: "none" } : { kind: "ok", contributions: payload.contributions };
+      outcomes[index] =
+        payload === null || payload.raceId !== item.raceId
+          ? { kind: "none" }
+          : { kind: "ok", contributions: payload.contributions, snapshot: toSnapshotColumns(payload.raceSnapshot) };
     };
     for (let start = 0; start < items.length; start += GET_CONCURRENCY) {
       await Promise.all(Array.from({ length: Math.min(GET_CONCURRENCY, items.length - start) }, (_, k) => one(start + k)));

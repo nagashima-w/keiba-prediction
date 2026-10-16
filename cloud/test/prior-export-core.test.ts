@@ -12,7 +12,7 @@ import {
   type PriorExportStorePort,
   type RaceDataBatch,
 } from "../src/prior-export-core";
-import { PRIOR_EXPORT_KEY, type CandidateRow, type PriorDatasetRow } from "../src/prior-export-format";
+import { PRIOR_EXPORT_KEY, toSnapshotColumns, type CandidateRow, type PriorDatasetRow } from "../src/prior-export-format";
 
 /**
  * Issue #266: 書き出しのジョブ(`PriorExportCore`)。D1・R2・時計・アラームは偽物(`cloudflare:workers` なしで Node で動く)。
@@ -78,9 +78,19 @@ class FakeStore implements PriorExportStorePort {
       outcomes: items.map((it) =>
         this.noDetail.has(it.id)
           ? { kind: "none" as const }
-          : { kind: "ok" as const, contributions: Object.fromEntries(Array.from({ length: this.horsesPerRace }, (_, k) => [String(k + 1), [{ biasName: "a", applied: true, reason: "SECRET-REASON", weight: 0.1, correction: 0.01 * (k + 1) }]])) },
+          : { kind: "ok" as const, snapshot: toSnapshotColumns(this.rawSnapshot(it.id)), contributions: Object.fromEntries(Array.from({ length: this.horsesPerRace }, (_, k) => [String(k + 1), [{ biasName: "a", applied: true, reason: "SECRET-REASON", weight: 0.1, correction: 0.01 * (k + 1) }]])) },
       ),
       gets: items.length,
+    };
+  }
+  /** R2 の詳細に入っているスナップショットの偽物(分析 id で値が変わる)。人名・馬名・市場の値は、書き出されないことを確かめるための目立つ値。 */
+  rawSnapshot(id: number): unknown {
+    return {
+      race: { raceName: `レース${id}`, grade: "G3", distance: 1600, trackCondition: "良", courseType: "芝" },
+      horses: Array.from({ length: this.horsesPerRace }, (_, k) => ({
+        umaban: k + 1, wakuban: k + 1, sex: "牡", age: 3 + k, kinryo: 55, bodyWeight: 480 + k, oikiriRank: "A", oikiriCritic: "動き良化",
+        name: "SECRET-NAME", jockeyName: "SECRET-JOCKEY", trainerName: "SECRET-TRAINER", winOdds: 99.9, popularity: 13, placeOddsMin: 77.7, placeOddsMax: 88.8,
+      })),
     };
   }
   async countReads(gets: number) {
@@ -180,7 +190,7 @@ describe("要求と状態", () => {
     expect(w.store.puts).toHaveLength(1);
     expect(w.store.puts[0]!.key).toBe(PRIOR_EXPORT_KEY);
     const { meta, rows } = readFile(w.store.puts[0]!.bytes);
-    expect(meta).toMatchObject({ format: 1, rows: 15, races: 5, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } });
+    expect(meta).toMatchObject({ format: 2, rows: 15, races: 5, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } });
     expect(rows).toHaveLength(15);
     expect(rows.map((r) => r.race_id)).toEqual(Array.from({ length: 15 }, (_, i) => raceIdOf(Math.floor(i / 3) + 1)));
     expect(rows.slice(0, 3).map((r) => r.umaban)).toEqual([1, 2, 3]);
@@ -188,6 +198,14 @@ describe("要求と状態", () => {
     expect(rows[0]!.contributions).toEqual([{ biasName: "a", applied: true, weight: 0.1, correction: 0.01, sampleCount: null, targetRate: null, overallRate: null }]);
     // 自由文(reason)はファイルのどこにも出ない
     expect(new TextDecoder().decode(gunzipSync(w.store.puts[0]!.bytes))).not.toContain("SECRET-REASON");
+    // v2 の列(Issue #341): R2 の詳細のスナップショットから、レースの列は全頭に・馬の列は馬番で入る。人名・馬名・市場の値はファイルのどこにも出ない
+    expect(rows[0]).toMatchObject({ race_name: "レース100", grade: "G3", distance: 1600, track_condition: "良", wakuban: 1, sex: "牡", age: 3, body_weight: 480, kinryo: 55, oikiri_rank: "A", oikiri_critic: "動き良化" });
+    expect(rows[2]).toMatchObject({ race_name: "レース100", umaban: 3, wakuban: 3, age: 5, body_weight: 482 });
+    expect(rows[3]).toMatchObject({ race_name: "レース101", umaban: 1 });
+    const text = new TextDecoder().decode(gunzipSync(w.store.puts[0]!.bytes));
+    for (const secret of ["SECRET-NAME", "SECRET-JOCKEY", "SECRET-TRAINER", "99.9", "77.7", "88.8"]) {
+      expect(text, `ファイルに ${secret} が無い`).not.toContain(secret);
+    }
     // 仕上げのあとは中間データを残さない
     expect([...w.kv.map.keys()].filter((k) => k.startsWith("plan:") || k.startsWith("chunk:"))).toEqual([]);
     expect(w.kv.get("job")).toBeUndefined();
@@ -226,6 +244,12 @@ describe("要求と状態", () => {
     expect(meta["missingDetail"]).toBe(1);
     expect(rows).toHaveLength(9);
     expect(rows.filter((r) => r.contributions === null).map((r) => r.race_id)).toEqual(Array(3).fill(raceIdOf(2)));
+    // 詳細が無いレースは v2 の 11 列もすべて null(ほかのレースには入っている)
+    const keys = ["race_name", "grade", "distance", "track_condition", "wakuban", "sex", "age", "body_weight", "kinryo", "oikiri_rank", "oikiri_critic"] as const;
+    const noDetailRows = rows.filter((r) => r.race_id === raceIdOf(2));
+    expect(noDetailRows).toHaveLength(3);
+    for (const r of noDetailRows) expect(keys.map((k) => r[k])).toEqual(Array(11).fill(null));
+    for (const r of rows.filter((x) => x.race_id !== raceIdOf(2))) expect(keys.every((k) => r[k] !== null)).toBe(true);
   });
 });
 
