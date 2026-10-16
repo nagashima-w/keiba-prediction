@@ -655,17 +655,23 @@ describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)",
     }
   });
 
-  it("@anthropic-ai/sdk は core と同じ版(core の範囲 `^X.Y.Z` の X.Y.Z)で、cloud/pnpm-lock.yaml にその版で固定されている(CI の --frozen-lockfile が通る前提)", () => {
-    const cloudPkg = JSON.parse(readTextLf("cloud", "package.json")) as { dependencies: Record<string, string> };
-    const corePkg = JSON.parse(readTextLf("packages", "core", "package.json")) as { dependencies: Record<string, string> };
-    const version = cloudPkg.dependencies["@anthropic-ai/sdk"] ?? "";
-    // 前提(空振り防止): 両方の版を実際に読めている
-    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(corePkg.dependencies["@anthropic-ai/sdk"]).toMatch(/^\^\d+\.\d+\.\d+$/);
-    expect(corePkg.dependencies["@anthropic-ai/sdk"]).toBe(`^${version}`);
-    const lock = readTextLf("cloud", "pnpm-lock.yaml");
-    expect(lock).toMatch(new RegExp(`'@anthropic-ai/sdk':\\n\\s+specifier: ${version.replace(/\./g, "\\.")}\\n\\s+version: ${version.replace(/\./g, "\\.")}`));
-  });
+  // Issue #324: 以前は SDK だけを検査していた。Dependabot が core 側だけを上げて cloud を上げなかった(#321)ので、core と cloud が版を揃えている 3 つ全部を同じ形で検査する。
+  it.each(["@anthropic-ai/sdk", "iconv-lite", "cheerio"])(
+    "%s は core と同じ版(core の範囲 `^X.Y.Z` の X.Y.Z)で、cloud/pnpm-lock.yaml にその版で固定されている(CI の --frozen-lockfile が通る前提)",
+    (name) => {
+      const cloudPkg = JSON.parse(readTextLf("cloud", "package.json")) as { dependencies: Record<string, string> };
+      const corePkg = JSON.parse(readTextLf("packages", "core", "package.json")) as { dependencies: Record<string, string> };
+      const version = cloudPkg.dependencies[name] ?? "";
+      // 前提(空振り防止): 両方の版を実際に読めている
+      expect(version, `cloud の ${name}`).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(corePkg.dependencies[name], `core の ${name}`).toMatch(/^\^\d+\.\d+\.\d+$/);
+      expect(corePkg.dependencies[name]).toBe(`^${version}`);
+      const lock = readTextLf("cloud", "pnpm-lock.yaml");
+      const escaped = version.replace(/\./g, "\\.");
+      const key = name.replace(/[/@]/g, (c) => `\\${c}`);
+      expect(lock).toMatch(new RegExp(`\n {6}'?${key}'?:\n\\s+specifier: ${escaped}\n\\s+version: ${escaped}\n`));
+    },
+  );
 });
 
 describe("cloud/ はワークスペースの外(既存の CI のインストールを重くしない)", () => {
@@ -673,6 +679,20 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     const workspace = readTextLf("pnpm-workspace.yaml");
     expect(workspace).toContain("packages/*");
     expect(workspace).not.toMatch(/cloud/);
+  });
+
+  it("Issue #324: cloud/pnpm-workspace.yaml は空のワークスペース(`packages: []`)。Dependabot の pnpm が親(ルート)のワークスペースを更新せず、cloud の lockfile を更新するための目印", () => {
+    // 背景: Dependabot は `cloud/` で `pnpm update … -r` を実行するが、`--ignore-workspace` は渡せない。cloud/ に pnpm-workspace.yaml が無いと、
+    // pnpm が親のルートの pnpm-workspace.yaml を見つけて「ルート+packages/core」を更新し、cloud/pnpm-lock.yaml は更新されなかった(#321 の実ログ: `Scope: all 2 workspace projects`)。
+    // 空のワークスペースを置くと cloud/ 自身がルートになる。`pnpm install --ignore-workspace` はそのまま使える(CI・deploy-cloud.yml)。
+    expect(existsSync(path.join(ROOT, "cloud", "pnpm-workspace.yaml"))).toBe(true);
+    const code = readTextLf("cloud", "pnpm-workspace.yaml")
+      .split("\n")
+      .filter((l) => l.trim() !== "" && !l.trim().startsWith("#"))
+      .map((l) => l.trim());
+    expect(code).toEqual(["packages: []"]);
+    // ルート側は変えない(packages/* だけ)。cloud/ をメンバーにすると、既存の CI のインストールが重くなる
+    expect(readTextLf("pnpm-workspace.yaml")).not.toMatch(/cloud/);
   });
 
   it("依存は固定され(jose・wrangler・workers-types は ^ ~ なし)、jose の追加理由が //deps にある", () => {

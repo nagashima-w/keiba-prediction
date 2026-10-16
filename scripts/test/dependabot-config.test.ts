@@ -7,7 +7,7 @@
  * 方針:
  *  - PR の宛先は作業ブランチ(main へ直接取り込まない規則。CLAUDE.md「その他」)。すべての更新に `target-branch` を付ける。
  *  - 対象は github-actions と npm(ルート・packages/*・cloud/)。cloud/ は pnpm workspace の外にあり、別の pnpm-lock.yaml を持つ。
- *  - `@anthropic-ai/sdk`(core は `^0.70.1`、cloud は exact `0.70.1`)など、core と cloud が同じ版を揃えている依存は、
+ *  - `@anthropic-ai/sdk`・`iconv-lite`・`cheerio`(core は `^X.Y.Z`、cloud は exact `X.Y.Z`)など、core と cloud が同じ版を揃えている依存は、
  *    1 つの group にして 1 つの PR で同時に上げさせる(片方だけの PR は cloud-config-guard.test.ts が赤にして気づける)。
  *  - 自動の脆弱性修正(セキュリティ更新)の PR はこのファイルでは扱えない(宛先を main 以外にできない見込み。未確認)ので、
  *    リポジトリの「Dependabot alerts」で通知を受け、作業ブランチで対応する(docs/current-spec.md)。

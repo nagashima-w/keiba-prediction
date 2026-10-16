@@ -5,7 +5,7 @@
  *  - 既定(固定)モデルは claude-sonnet-5-5。config で指定可能。
  *  - temperature は送らない(Sonnet 5.5 は既定値以外を 400 で拒否する)。
  *    代わりに output_config.effort(既定 "low")を送る。thinking は送らない。
- *  - max_tokens は 16000(非ストリーミングのまま。SDK 0.70.1 は 21333 超で例外を投げる)。
+ *  - max_tokens は 16000(非ストリーミングのまま。SDK は timeout 未指定のとき 21333 超で例外を投げる)。
  *  - APIキー未設定でもインスタンス化はエラーにしない(呼び出し時にエラー)。
  *  - stop_reason==="refusal" は AnalyzerRefusalError、"max_tokens" は AnalyzerTruncationError。
  *  - モデルの自動選択(ModelSelector)を注入すると、最新 Sonnet を使い、400/403/404 のときだけ
@@ -63,7 +63,7 @@ describe("buildRequestParams(SDKへ渡すパラメータの組み立て)", () =>
     expect(p.model).toBe("claude-sonnet-5-5");
   });
 
-  it("既定の maxTokens は16000であること(非ストリーミングのまま。SDK 0.70.1 の上限21333未満)", () => {
+  it("既定の maxTokens は16000であること(非ストリーミングのまま。SDK の非ストリーミングの上限21333未満)", () => {
     expect(DEFAULT_ANALYZER_CONFIG.maxTokens).toBe(16000);
     expect(DEFAULT_ANALYZER_CONFIG.maxTokens).toBeLessThanOrEqual(21333);
     const p = buildRequestParams("PROMPT");

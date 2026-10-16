@@ -1,0 +1,11 @@
+# Issue #324: 空のワークスペース。cloud/ をそれ自身の pnpm のルートにするための目印で、メンバーは持たない。
+#
+# ★なぜ要るか: cloud/ はルートの pnpm workspace(../pnpm-workspace.yaml は packages/* だけ)の外にあり、別の pnpm-lock.yaml を持つ。
+#   手元と CI は `pnpm install --ignore-workspace` で独立に入れる。しかし Dependabot は `cloud/` で `pnpm update … --lockfile-only -r` を実行し、
+#   `--ignore-workspace` を渡せない。cloud/ にこのファイルが無いと、pnpm は親のルートの pnpm-workspace.yaml を見つけて
+#   「ルートと packages/core」のワークスペースを更新し(実ログ: `Scope: all 2 workspace projects`)、cloud/pnpm-lock.yaml は一度も更新されなかった(#321)。
+#   このファイルがあると、cloud/ 自身がルートとして扱われ、cloud/pnpm-lock.yaml が更新される。
+# ★`pnpm install --ignore-workspace --frozen-lockfile`(ci.yml・deploy-cloud.yml)の動作は変わらない。
+# ★ルートの pnpm-workspace.yaml に cloud を足してはならない(既存の CI のインストールに wrangler / workerd の巨大な依存が入る)。
+#   scripts/test/cloud-config-guard.test.ts が、このファイルが `packages: []` だけであることと、ルート側に cloud が無いことを検査する。
+packages: []
