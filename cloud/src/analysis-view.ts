@@ -109,14 +109,14 @@ export interface AnalysisViewRace {
   /** コースの回り(Issue #311。レース再生のコース図の向き。raceId の場コードと距離から `courseTurnOf` で決める。不明は "right")。詳細〈R2〉の状態に依らないが、大井の 1650m の特例は距離が要るので詳細が無いと右になる。`buildAnalysisView` は常にキーを持つ(型で省略可なのは `earlyPos` と同じ理由)。 */
   readonly turn?: CourseTurn;
   /**
-   * 想定ペース(Issue #314。レース再生の隊列の長さ・動き出しの演出用)。**プロンプトの展開想定と同じ判定**(core の `buildRaceDevelopment` の `pace`。逃げ馬の頭数から。脚質の判定できた馬が 1 頭もいなければ「不明」)に、
+   * 想定ペース(Issue #314。レース再生の隊列の長さ・動き出しの演出用)。**規則の値**(core の `buildRaceDevelopment` の `pace`。プロンプトの材料〈脚質分布・主導権候補〉と同じ関数だが、#315 以降この結論自体はプロンプトに渡していない。逃げ馬の頭数から。脚質の判定できた馬が 1 頭もいなければ「不明」)に、
    * スナップショットの馬ごとの脚質を渡して求める。詳細が present でない・古い分析〈脚質のキーが無い〉は「不明」。確率・配分には使わない(着順の抽選も変えない)。`buildAnalysisView` は常にキーを持つ。
    * **Issue #315 以降は、LLM が展開予想して出した想定ペース〈`development.pace`〉があればそれを使う**(出どころは `paceSource`)。無いとき(LLM を使わなかった・古い分析・LLM が pace を出さなかった)は上の規則の値。
    */
   readonly pace?: PaceEstimate;
   /**
    * `pace` の出どころ(Issue #315)。"llm" = LLM が展開予想して出した想定ペース(`AnalysisView.development.pace`)、"rule" = 従来の規則の値
-   * (プロンプトの展開想定と同じ判定。LLM を使わなかった・古い分析・LLM が pace を出さなかった〈全頭脚質不明など〉・詳細が present でないとき)。`buildAnalysisView` は常にキーを持つ。
+   * (規則の値〈上の `pace` の説明〉。LLM を使わなかった・古い分析・LLM が pace を出さなかった〈全頭脚質不明など〉・詳細が present でないとき)。`buildAnalysisView` は常にキーを持つ。
    */
   readonly paceSource?: PaceSource;
 }
@@ -226,8 +226,9 @@ function legStyleOf(value: unknown): LegStyle | null {
 }
 
 /**
- * 想定ペース(Issue #314)。プロンプトの展開想定と同じ `buildRaceDevelopment` に、スナップショットの全馬の脚質を渡す
+ * 想定ペース(Issue #314。規則の値)。プロンプトの材料と同じ `buildRaceDevelopment` に、スナップショットの全馬の脚質を渡す
  * (ペースは逃げ馬の頭数と「脚質が全頭不明か」だけで決まる。安定度・先行力・開催区分・馬場は「恵まれる脚質」の表にしか効かないので渡さない)。
+ * 注: スナップショットがあるのに馬が 0 頭のときは、`buildRaceDevelopment([])` が「スロー」を返す(「不明」ではない)。分析は 1 頭以上の馬から作るので、production からは到達しない(#315 のレビューの判断)。
  */
 function paceOf(snapshot: ReturnType<typeof toSafeRaceSnapshot> | null): PaceEstimate {
   if (snapshot === null) {

@@ -1985,6 +1985,11 @@ export class RaceDayCore {
   /**
    * 下限を過ぎていて、その下限での判定({@link maybeRequestReport})がまだ行われていない(Issue #298)。日報の依頼先があり、未依頼のときだけ。
    * タスクが無い条件は呼び出し側({@link rearm})が付ける({@link AlarmInputs.reportJudgePending})。
+   *
+   * **冗長な防御が 2 つある**(Issue #300。外しても結果は変わらず、テストでは区別できない。残す理由は、将来の変更で前提が崩れたときの安全側):
+   *  - 「依頼済みなら偽」: 依頼より前に印が書かれ(判定は依頼の前に行う)、依頼後は下限が動かない({@link recordReportHold} も依頼済みなら引かない)ので、外しても全緑。
+   *  - 印の値の照合(`!== String(hold)`): 下限が未来へ伸びたときは、未来の下限のアラーム({@link pendingReportHoldAt})が起床させて判定するので、照合を `=== null` に変えても全緑。
+   *    照合が単独で効くのは「印が過去の下限の値のまま、下限を過ぎている」場合だけで、下限は後退しない(開催ごとに記録できたら再び引かず、下限はその最大なので、新しい開催の分析で伸びるだけ)ので構成上到達しない。
    */
   private reportJudgePending(): boolean {
     if (this.requestReport === undefined || this.metaGet(REPORT_REQUESTED_KEY) !== null) {

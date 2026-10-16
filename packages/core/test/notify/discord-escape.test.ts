@@ -48,6 +48,7 @@ describe("escapeDiscordMarkdown(行頭の規則)", () => {
     ["番号付きリスト 1. ", "1. 項目", "1\\. 項目"],
     ["番号付きリスト 12. ", "12. 項目", "12\\. 項目"],
     ["先頭に空白があっても効く見出し", "  # 見出し", "  \\# 見出し"],
+    ["先頭に空白があっても効く番号付きリスト(インデントを保つ)", "  1. a", "  1\\. a"],
     ["引用 > は行頭に限らず escape する", "> 引用", "\\> 引用"],
   ] as const)("%s", (_name, input, expected) => {
     expect(escapeDiscordMarkdown(input)).toBe(expected);

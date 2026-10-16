@@ -12,7 +12,7 @@ import { allocationRecord, betRecord } from "./allocation-fixtures";
 
 /**
  * Issue #230: Discord の通知の「買い目」の整形は、core の `buildAllocationProposalView`(web の結果画面が流用しているもの)を import せず、cloud/src に小さな自前の整形を持つ
- * (`cloud/src` が辿る app のファイルを増やさないため。`test/import-guard.test.ts` の完全一致リストを広げない)。二重持ちの食い違いはここで固定する:
+ * (#230 の時点の理由は、`cloud/src` が辿る packages/app のファイルを増やさないこと〈その表示関数は当時 packages/app にあり、#286 で core へ移した〉。いまは core の中に収まるが、Worker 側に自前の小さな整形を持つ設計は変えていない)。二重持ちの食い違いはここで固定する:
  * 状態の分類(kind)・未設定の内訳・券種ラベル・組合せラベル・金額表記・印の並び順が、core の関数(と web の画面)と一致すること。
  */
 
@@ -93,8 +93,8 @@ describe("未設定(unset)の内訳は、core が選ぶ注記と同じ分岐", (
     ["both(負の値も未設定)", { bankroll: -1, perRaceCap: -5 }, BET_ALLOCATION_UNSET_NOTE],
   ] as const)("%s", (_name, over, note) => {
     const allocation = allocationRecord({ route: "unset", ...over });
-    const exe = buildAllocationProposalView(storedViewOf(allocation));
-    expect(exe.notices).toEqual([note]); // 前提: core の関数がこの注記を選んでいる
+    const coreView = buildAllocationProposalView(storedViewOf(allocation));
+    expect(coreView.notices).toEqual([note]); // 前提: core の関数がこの注記を選んでいる
     const kind = unsetKindOf(allocation.meta);
     expect(kind).toBe(_name.split("(")[0]);
   });
@@ -118,10 +118,10 @@ describe("買い目の行(券種・組合せ・金額)は、core の買い目行
 
   it("全 8 券種(複勝・単勝・ワイド・馬連・枠連・馬単・三連複・三連単)の券種ラベル・組合せラベル・金額が、並びを問わず一致する(多重集合として)", () => {
     expect(new Set(ALL_TYPES.map((b) => b.betType)).size, "前提: 8 券種すべて入っている").toBe(8);
-    const exe = buildAllocationProposalView(storedViewOf(allocationRecord({ route: "mixed" }, ALL_TYPES)));
-    expect(exe.kind).toBe("allocated");
+    const coreView = buildAllocationProposalView(storedViewOf(allocationRecord({ route: "mixed" }, ALL_TYPES)));
+    expect(coreView.kind).toBe("allocated");
     const key = (r: { betTypeLabel: string; comboLabel: string }, stake: string): string => `${r.betTypeLabel}|${r.comboLabel}|${stake}`;
-    const theirs = exe.bets.map((r) => key(r, r.stake)).sort();
+    const theirs = coreView.bets.map((r) => key(r, r.stake)).sort();
     const mine = allocationBetRows(ALL_TYPES).map((r) => key(r, r.stakeText)).sort();
     expect(mine).toHaveLength(ALL_TYPES.length);
     expect(mine).toEqual(theirs);
@@ -129,9 +129,9 @@ describe("買い目の行(券種・組合せ・金額)は、core の買い目行
 
   it("未知の券種・読めない comboKey も、core と同じく生の文字列のまま出す", () => {
     const odd = [betRecord("mystery", "0102", 100), betRecord("place", "xx", 200), betRecord("trio", "010", 300)];
-    const exe = buildAllocationProposalView(storedViewOf(allocationRecord({ route: "mixed" }, odd)));
+    const coreView = buildAllocationProposalView(storedViewOf(allocationRecord({ route: "mixed" }, odd)));
     const key = (b: string, c: string, s: string): string => `${b}|${c}|${s}`;
-    expect(allocationBetRows(odd).map((r) => key(r.betTypeLabel, r.comboLabel, r.stakeText)).sort()).toEqual(exe.bets.map((r) => key(r.betTypeLabel, r.comboLabel, r.stake)).sort());
+    expect(allocationBetRows(odd).map((r) => key(r.betTypeLabel, r.comboLabel, r.stakeText)).sort()).toEqual(coreView.bets.map((r) => key(r.betTypeLabel, r.comboLabel, r.stake)).sort());
   });
 });
 

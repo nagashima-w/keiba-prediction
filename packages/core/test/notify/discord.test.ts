@@ -101,6 +101,11 @@ describe("isDiscordWebhookUrl(送信前のURL検証)", () => {
       note: "ホストが正規でも userinfo 付きは不可",
     },
     {
+      url: "https://:pass@discord.com/api/webhooks/1/x",
+      expected: false,
+      note: "ユーザー名が空でパスワードだけの userinfo(`:pass@`)も不可(password の検査を固定する)",
+    },
+    {
       url: "https://discord.com:444/api/webhooks/1/x",
       expected: false,
       note: "明示ポート付きは不可",
@@ -453,6 +458,14 @@ describe("buildAnalysisEmbed(外から来た文字列の無害化。Issue #301)"
     expect(line).toContain("\\[押す\\](https://evil.example/x)");
     // 素の `[` は 1 つも残らない(escape の対を除いて確認)
     expect((embed.description ?? "").replace(/\\\[/g, "")).not.toContain("[");
+  });
+
+  it("会場名の記号も escape される: title と、説明のメタ行の両方(production では title は cloud が上書きし、メタ行は cloud のテストが固定するので、core 側でも固定する)", () => {
+    const embed = buildAnalysisEmbed({ ...raceInfo, raceName: "テストステークス", venueName: "[東京](https://evil.example) *x*" }, hostileHorses);
+    expect(embed.title).toBe("\\[東京\\](https://evil.example) \\*x\\* テストステークス");
+    const meta = (embed.description ?? "").split("\n")[0]!;
+    expect(meta).toContain("\\[東京\\](https://evil.example) \\*x\\*");
+    expect(meta.replace(/\\\[/g, "")).not.toContain("[");
   });
 
   it("馬名の切り詰め(32 コードポイント)は escape の前: 見える文字数が escape で減らない", () => {

@@ -173,6 +173,8 @@ export function formatEstimatedEvSuffix(evEstimated: boolean): string {
  * 有効なまま、印の制約違反により印だけを全馬非表示にする)は意味が異なるため、区別した文言にする。
  * fallback:true は確率補正自体が無効という、より重大な事象のため marksDropped より優先表示する
  * (両方 true になるケースは通常発生しないが、優先順位を明示しておく)。
+ * **注(Issue #317・#300)**: `marksDropped:true` は、印を全消しにしていた旧仕様でだけ立った。#317 で印は補修して採用するようになり、
+ * core の `analyzeRace` は常に false を返す(`marksDropped` の分岐は production では通らない。型と分岐は互換のために残してある)。
  * - LLMスキップ: 「スキップ(理由)」
  * - 実行・fallback:false かつ marksDropped が true でない: 「実行」
  * - 実行・fallback:true: 「実行(フェイルセーフで3着内率に復帰)」
@@ -213,7 +215,7 @@ export function analysisModelText(result: {
 /**
  * 「LLM補正:」行のtooltip(title属性)に表示する理由文言(論点C: fallbackReasonのUI伝播、
  * 2026-07-19合意)。llmCorrectionStatusText と同じ優先順位で、fallback:true(確率補正自体が
- * 無効・より重大)を marksDropped:true(印だけ非表示・確率補正は有効)より優先する。
+ * 無効・より重大)を marksDropped:true(印だけ非表示・確率補正は有効。旧仕様の状態で、#317 以降 production では立たない)より優先する。
  * 両方とも理由が無ければ title 属性を付けない意図で undefined を返す
  * (呼び出し側の React の title={undefined} は属性自体を出力しない)。
  * fallbackReason は core analyzeRace が返す固定分類文言のみ(秘密非混入・論点C)なので、

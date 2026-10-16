@@ -220,7 +220,9 @@ describe("buildPrompt(Issue #315: 各馬の行の『テンの位置』)", () => 
     { name: "通過順位が無い走だけなら不明", runs: [{ passing: [], fieldSize: 16 }], expected: "不明" },
     { name: "過去走が無い(初出走)なら不明", runs: [], expected: "不明" },
     { name: "最後尾(16/16 = 1.0 → 約10割)", runs: [{ passing: [16], fieldSize: 16 }], expected: "直近1走の1角で前から約10割(1.00)" },
-    { name: "先頭(1/18 = 0.056 → 0 割に丸めず 1 割)", runs: [{ passing: [1], fieldSize: 18 }], expected: "直近1走の1角で前から約1割(0.06)" },
+    { name: "先頭(1/18 = 0.056 → 丸めても 1 割。下限に頼らない通常の頭数)", runs: [{ passing: [1], fieldSize: 18 }], expected: "直近1走の1角で前から約1割(0.06)" },
+    // 下限 `Math.max(1, …)` を検査する行: 位置は小数 3 桁に丸まって 0.045 → ×10 = 0.45 → 丸めると 0。下限が無いと「約0割」になる(実運用の最大頭数を超える入力なので、この行は下限そのものの固定)。
+    { name: "先頭(1/22 → 0.045 → 丸めると 0 になるが下限で 1 割)", runs: [{ passing: [1], fieldSize: 22 }], expected: "直近1走の1角で前から約1割(0.04)" },
   ];
   for (const t of table) {
     it(t.name, () => {

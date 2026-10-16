@@ -32,7 +32,7 @@ export interface ReplayInit {
   /** 距離(m)。分からなければ null。 */
   readonly distance: number | null;
   readonly turn: "right" | "left";
-  /** 想定ペース(Issue #314。サーバがプロンプトの展開想定と同じ判定で求めた値。無ければ「不明」=平均として描く)。 */
+  /** 想定ペース(Issue #314。サーバが求めた値: Issue #315 以降は LLM の pace を優先し、無いときは逃げ馬の頭数から求める規則の値。無ければ「不明」=平均として描く)。 */
   readonly pace: PaceEstimate;
   /** 色を付けて強調する馬の添字(`horses` の中。Issue #316)。始めから終わりまで同じ馬を塗る(先頭の判定で色を切り替えない)。 */
   readonly focus: number;

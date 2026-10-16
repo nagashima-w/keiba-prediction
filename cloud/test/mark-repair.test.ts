@@ -47,6 +47,13 @@ describe("serializeMarkRepair / parseMarkRepair", () => {
     },
   );
 
+  it("版数が違う記録(v が 1 以外)は、ほかの項目が正しくても null(将来の版を今の形で読まない)", () => {
+    const body = { repaired: true, adoptedAttempt: 1, attempts: [{ n: 1, kinds: ["over-◎"] }], horses: [{ umaban: 2, from: "◎", to: "〇" }] };
+    expect(parseMarkRepair(JSON.stringify({ v: 1, ...body })), "前提: v=1 なら読める").not.toBeNull();
+    expect(parseMarkRepair(JSON.stringify({ v: 2, ...body }))).toBeNull();
+    expect(parseMarkRepair(JSON.stringify(body)), "v が無い").toBeNull();
+  });
+
   it("語彙の外の値は捨てる: 未知の違反の種類・未知の印・不正な馬番・不正な試行番号(LLM の生の文字列を画面に出さない)", () => {
     const raw = JSON.stringify({
       v: 1,

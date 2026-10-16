@@ -25,9 +25,9 @@
 #   Issue #288 で deploy-cloud.yml のスモークを別ジョブ(smoke)に分けたが、型検査とテストは check ジョブに残っている
 #   (scripts/test/ci-workflow.test.ts が、check が cloud の型検査とテストを無条件で走らせていることを固定している)。
 #
-# ★uses: はコミット SHA でピン留めしている(Issue #305)。タグ(v4)は付け替えで中身が差し替わりうるため、行末のコメントに版数を書く。
-#   SHA は `git ls-remote https://github.com/<owner>/<repo>` の実出力から取った、ピン留めの時点で `v4` タグが指していたコミット(CI が動かすコードは変えていない)。
-#   pnpm/action-setup の `v4` タグは最新の v4.4.0 ではなく v4.3.0 のコミットを指す(だから # v4.3.0)。
+# ★uses: はコミット SHA でピン留めしている(Issue #305)。タグは付け替えで中身が差し替わりうるため、行末のコメントに版数を書く。
+#   SHA は `git ls-remote https://github.com/<owner>/<repo>` の実出力から取った、ピン留めの時点でタグが指していたコミット(CI が動かすコードは変えていない)。
+#   タグが最新の版を指していないことがあるので、行末の版数は、SHA が指す版を確かめて書く(特定の action・版の説明は、Dependabot の更新で古くなるので、ここには書かない)。
 #   版の更新は Dependabot(.github/dependabot.yml)の PR が、SHA と行末の版数コメントを同時に書き換える。scripts/test/actions-pinned.test.ts は
 #   特定の SHA・版数ではなく規則を検査する(全 uses が SHA 固定 + `# vX.Y.Z`・全ワークフローで同じ action は同じ SHA と版数・許可リスト内の action だけ)ので、
 #   PR をそのままマージしても緑のままである。手で上げるときも、全 uses 行(ci.yml・deploy-cloud.yml)を揃えて直せばよい(食い違いはテストが検出する)。
@@ -60,14 +60,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: リポジトリを取得
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # pnpm はバージョン未指定にして package.json の packageManager フィールド(pnpm@10.33.0)に従わせる。
       - name: pnpm をセットアップ
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Node.js をセットアップ
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -97,13 +97,13 @@ jobs:
       WRANGLER_SEND_METRICS: "false"
     steps:
       - name: リポジトリを取得
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: pnpm をセットアップ
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Node.js をセットアップ
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
