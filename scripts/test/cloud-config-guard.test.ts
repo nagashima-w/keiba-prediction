@@ -708,6 +708,33 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     expect(existsSync(path.join(ROOT, "cloud", "pnpm-lock.yaml"))).toBe(true);
   });
 
+  it("Issue #332: @types/node のメジャーは CI の Node(node-version)のメジャーと同じ。Node を上げるときは両方を手で上げる(Dependabot は @types/node の semver-major を提案しない)", () => {
+    const pkg = JSON.parse(readTextLf("cloud", "package.json")) as { devDependencies: Record<string, string> };
+    const typesMajor = /^\^?(\d+)\./.exec(pkg.devDependencies["@types/node"] ?? "")?.[1];
+    expect(typesMajor, "cloud/package.json の @types/node の範囲からメジャーが読める").toBeDefined();
+    const nodeMajors = new Set<string>();
+    let count = 0;
+    for (const wf of ["ci.yml", "deploy-cloud.yml"]) {
+      for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\d+)\s*$/gm)) {
+        nodeMajors.add(m[1]!);
+        count++;
+      }
+    }
+    expect(count, "node-version の指定を実際に読めている(空振り防止)").toBeGreaterThanOrEqual(5);
+    expect([...nodeMajors], "ワークフローの node-version は全部同じメジャー").toHaveLength(1);
+    expect([...nodeMajors][0]).toBe(typesMajor);
+  });
+
+  it("Issue #332: cloud の .ts は `fileURLToPath(new URL(…))` と書かない(グローバルの URL は workers-types のもので、@types/node 24 以上では node:url の URL と型が合わず TS2345)。test/meta-path.ts の pathFromMeta を使う", () => {
+    const helper = readTextLf("cloud", "test", "meta-path.ts");
+    expect(helper).toMatch(/new URL\(relative, metaUrl\)\.href/); // 文字列で渡す
+    // 変換ヘルパ自身は `.href` で文字列にして渡す形で、上で固定済み。それ以外の .ts を検査する
+    const tsFiles = scanTargets().filter((f) => f.startsWith("cloud/") && f.endsWith(".ts") && f !== "cloud/test/meta-path.ts");
+    expect(tsFiles.length, "走査した .ts が十分ある(空振り防止)").toBeGreaterThan(100);
+    const offenders = tsFiles.filter((f) => /fileURLToPath\(\s*new\s+URL\(/.test(readTextLf(...f.split("/"))));
+    expect(offenders).toEqual([]);
+  });
+
   it(".gitignore が node_modules・.wrangler・スモークの一時設定を除外する", () => {
     const gi = readTextLf("cloud", ".gitignore");
     for (const entry of ["node_modules/", ".wrangler/", "dist-dry/", "wrangler.smoke.generated.toml", "wrangler.smoke-fake.generated.toml", "wrangler.bundle-guard.generated.toml", "native-probe.generated.ts", "wrangler.native-probe.generated.toml"]) {

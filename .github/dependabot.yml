@@ -60,5 +60,12 @@ updates:
         dependency-type: production
       development-dependencies:
         dependency-type: development
+    # ★Issue #332: @types/node のメジャー更新(semver-major)は提案させない。@types/node のメジャーは実行環境の Node(ワークフローの node-version)に合わせるもので、
+    #   最新の Node の型定義へ勝手に上げない。**CI の Node(ci.yml・deploy-cloud.yml の node-version)を上げるときに、cloud/package.json の @types/node も同じメジャーに手で上げる**
+    #   (scripts/test/cloud-config-guard.test.ts が両者のメジャーの一致を検査)。minor・patch は受ける。ルートと packages/core は @types/node を直接の依存に持たないので、実質 cloud/ の設定。
+    ignore:
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
     commit-message:
       prefix: "Dependabot(npm)"

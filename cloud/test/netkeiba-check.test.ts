@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import { describe, expect, it } from "vitest";
 import type { GatePostRequest, GateResult } from "../src/gate-core";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId } from "../src/netkeiba-check";
@@ -10,7 +10,7 @@ import { parseRaceId } from "../../packages/core/src/scraper/ids.js";
  * ゲートは偽(fixture のバイト列を返す)。実ネットワークには出ない。
  */
 
-const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
+const FIXTURES = pathFromMeta("../../fixtures/", import.meta.url);
 const fixtureBytes = (name: string): Uint8Array => new Uint8Array(readFileSync(`${FIXTURES}${name}`));
 
 function response(body: Uint8Array, init: { status?: number; queuedMs?: number; elapsedMs?: number } = {}): GateResult {

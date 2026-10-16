@@ -1,7 +1,9 @@
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-const here = (relative: string): string => fileURLToPath(new URL(relative, import.meta.url));
+// URL オブジェクトを fileURLToPath に渡さず、文字列で解決する(workers-types と @types/node 24 以上の URL 型が衝突するため。test/meta-path.ts)。
+const here = (relative: string): string => path.resolve(path.dirname(fileURLToPath(import.meta.url)), relative);
 
 // cloud/ のテスト専用の設定。ルートの vitest.config.ts(scripts/test のみ)とは独立している。
 //

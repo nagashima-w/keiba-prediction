@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { D1ResultStore, MIGRATED_RESULTS_SQL, withScratchedColumn } from "../src/result-repository";
 import { UPSERT_RACE_RESULT_SQL } from "../../packages/core/src/ev/analysis-store-codec.js";
@@ -87,7 +87,7 @@ describe("保存: scratched の書き込み", () => {
   });
 
   it("実フィクスチャ(中山1R。6番が取消): パース → toResultEntries → 保存で、6番だけが 1、他の15頭は 0", async () => {
-    const html = readFileSync(fileURLToPath(new URL("../../fixtures/result_202606040901.html", import.meta.url)), "utf-8");
+    const html = readFileSync(pathFromMeta("../../fixtures/result_202606040901.html", import.meta.url), "utf-8");
     const parsed = parseRaceResult(html);
     await store().saveResult("202606040901", toResultEntries(parsed), parsed.courseType ?? null);
     const col = await scratchedColumn("202606040901");

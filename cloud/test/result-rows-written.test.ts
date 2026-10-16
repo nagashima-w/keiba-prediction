@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildSaveResultStatements, buildScratchedStatement, buildWinOddsStatement } from "../src/result-repository";
 import { toResultEntries } from "../../packages/core/src/ev/result-import";
@@ -49,7 +49,7 @@ const FIXTURES = [
   "nar_result_202654092706.html",
   "nar_result_202654092711.html",
 ];
-const load = (name: string): string => readFileSync(fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url)), "utf-8");
+const load = (name: string): string => readFileSync(pathFromMeta(`../../fixtures/${name}`, import.meta.url), "utf-8");
 
 async function save(fixture: string) {
   const raceId = parseRaceId(/(\d{12})/.exec(fixture)![1]!);

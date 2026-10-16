@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261013.1",
-    "@types/node": "^26.6.5",
+    "@types/node": "^22.0.0",
     "esbuild": "0.28.2",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",
@@ -33,9 +33,9 @@
     "jose": "Cloudflare Access の JWT(RS256)の署名・iss・aud・exp の検証に使う。署名検証を自前で書かず、検証済みの実装(Cloudflare 公式の例も同じ)に任せるため。依存ゼロで WebCrypto だけで動く。バージョン固定。",
     "wrangler": "デプロイ・ローカル検証(wrangler dev)。バージョン固定(スパイク #159 で確認した版)。Issue #305 で 4.147.0 → 4.149.0 に上げた: 4.147.0 が引く miniflare 経由の sharp 0.35.4 に high の脆弱性(`pnpm audit --ignore-workspace`。0.35.5 以上が修正版)があり、4.149.0 は sharp 0.35.5 を引く最小の版(4.148.0 は 0.35.4 のまま)。デプロイ・ローカル検証のツール内で、本番の Worker の束には入らない(上げる前後で dry-run の worker.js がバイト単位で同一であることを確かめた)",
     "@cloudflare/workers-types": "Worker / Durable Object の型検査(ctx.access の型を含む)。バージョン固定。Issue #305 で 5.20261004.1 → 5.20261006.1 に上げた: wrangler 4.149.0 の peer 要件が ^5.20261006.1 のため(wrangler と連動して上げる)",
-    "vitest": "JWT 検証・ハンドラの単体テスト(Node の WebCrypto で動く)。Issue #305 で範囲を ^4.1.9 → ^4.1.11 に上げた: 4.1.11 未満の vitest・@vitest/mocker に Path Traversal の脆弱性(`pnpm audit`)があるため。cloud のロックファイルはすでに 4.1.11 を引いており、範囲を揃えただけ",
+    "vitest": "JWT 検証・ハンドラの単体テスト(Node の WebCrypto で動く)。Issue #305 で範囲を ^4.1.9 → ^4.1.11 に上げた: 4.1.11 未満の vitest・@vitest/mocker に Path Traversal の脆弱性(`pnpm audit`)があるため。cloud のロックファイルはすでに 4.1.11 を引いており、範囲を揃えただけ。Issue #332 で 5.x(^5.0.4)に上げた(Dependabot の PR #331。typescript も 7.x へ)",
     "tsx": "ローカルのスモークテスト(smoke.ts)の実行",
-    "@types/node": "テスト・スモークテスト(Node で動く)の型検査",
+    "@types/node": "テスト・スモークテスト(Node で動く)の型検査。メジャーは CI の Node(ワークフローの node-version。現在 22)に合わせる。Node を上げるときに手で同じメジャーに上げる(Dependabot の semver-major は ignore。scripts/test/cloud-config-guard.test.ts が一致を検査)。Issue #332: 24 以上は workers-types と node の URL 型が衝突して `fileURLToPath(new URL(…))` が TS2345 になるため、test/meta-path.ts の pathFromMeta に置き換えた(26.6.5 で typecheck 0 件を実測)",
     "cheerio": "core の出馬表などのパーサ(parseShutuba 等)が使う(Issue #162 段階2。確認用エンドポイントと、後続の分析で使う)。cloud は workspace の外で packages/core/node_modules が CI に無いため、wrangler.toml の alias・tsconfig の paths・vitest の alias でここから解決させる。バージョンは spikes/cloudflare(Issue #290 で削除済み)と packages/core/package.json の範囲に揃えて固定",
     "iconv-lite": "core の HttpClient が EUC-JP(db.netkeiba.com の馬ページ等)のデコードに使う。cheerio と同じく alias でここから解決させる。バージョン固定。Issue #324 で 0.6.3 → 0.7.3 に上げた(EUC-JP の変換結果が変わらないことは packages/core/test/scraper/iconv-eucjp-regression.test.ts が更新前の値で固定)。cheerio 経由の推移的な iconv-lite 0.6.3 は lock に残るが、Worker のバンドルでは wrangler.toml の alias により 0.7.3 の 1 つになる"
   },

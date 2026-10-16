@@ -5,11 +5,11 @@
  * 書き出しの経路が最後に残っているコミットは 3c1664e)。
  */
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import { gzipSync } from "node:zlib";
 import { parseMigrationLine, type MigrationAnalysisLine, type MigrationLine, type MigrationResultLine } from "../../packages/core/src/ev/cloud-migration-format";
 
-const GOLDEN_PATH = fileURLToPath(new URL("../../packages/core/test/fixtures/cloud-migration-small.ndjson", import.meta.url));
+const GOLDEN_PATH = pathFromMeta("../../packages/core/test/fixtures/cloud-migration-small.ndjson", import.meta.url);
 
 /** 実物の NDJSON(非圧縮。末尾に改行)。 */
 // Windows のチェックアウトは改行を CRLF にすることがあるので、行末を LF にそろえる(値の中の改行・CR は JSON でエスケープされるので、情報は失われない)。

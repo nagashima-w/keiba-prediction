@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   buildSaveResultStatements,
@@ -657,7 +657,7 @@ describe("実フィクスチャ(中央8・地方6): パース → core の impor
     "nar_result_202654092706.html",
     "nar_result_202654092711.html",
   ];
-  const load = (name: string): string => readFileSync(fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url)), "utf-8");
+  const load = (name: string): string => readFileSync(pathFromMeta(`../../fixtures/${name}`, import.meta.url), "utf-8");
 
   it("前提: フィクスチャは14本で、全て実在する", () => {
     expect(FIXTURES).toHaveLength(14);

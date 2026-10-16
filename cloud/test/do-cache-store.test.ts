@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { CachedFetcher } from "../../packages/core/src/scraper/cached-fetcher";
 import { DoSqlCacheStore, MAX_CACHE_VALUE_BYTES } from "../src/do-cache-store";
@@ -15,7 +15,7 @@ type Step =
   | { op: "get"; key: string; at: number; maxAgeMs?: number; expect: { value: string; fetchedAt: number } | null };
 
 const contract = JSON.parse(
-  readFileSync(fileURLToPath(new URL("../../packages/core/test/fixtures/cache-store-contract.json", import.meta.url)), "utf-8"),
+  readFileSync(pathFromMeta("../../packages/core/test/fixtures/cache-store-contract.json", import.meta.url), "utf-8"),
 ) as { cases: { name: string; steps: Step[] }[] };
 
 const opened: NodeSql[] = [];

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildScratchedStatement, D1ResultStore, type ResultDb } from "../src/result-repository";
 import type { RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
@@ -25,7 +25,7 @@ beforeEach(async () => {
 });
 
 const store = (db: ResultDb = local.db): D1ResultStore => new D1ResultStore({ db });
-const loadFixture = (name: string): string => readFileSync(fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url)), "utf-8");
+const loadFixture = (name: string): string => readFileSync(pathFromMeta(`../../fixtures/${name}`, import.meta.url), "utf-8");
 
 async function scratchedColumn(raceId: string): Promise<Array<[number, number | null]>> {
   const r = await local.db.prepare("SELECT umaban, scratched FROM race_results WHERE race_id = ? ORDER BY umaban").bind(raceId).all<{ umaban: number; scratched: number | null }>();

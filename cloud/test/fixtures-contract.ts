@@ -4,7 +4,7 @@
  * 両実装の変換が食い違わないことを保つ。
  */
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { pathFromMeta } from "./meta-path.js";
 import type { AnalysisRecord, StoredAllocation, StoredAnalysis } from "../../packages/core/src/ev/analysis-store-types.js";
 
 export interface ContractCase {
@@ -14,6 +14,6 @@ export interface ContractCase {
   readonly expectedAllocation: StoredAllocation | null;
 }
 
-const FIXTURE_PATH = fileURLToPath(new URL("../../packages/core/test/fixtures/analysis-store-contract.json", import.meta.url));
+const FIXTURE_PATH = pathFromMeta("../../packages/core/test/fixtures/analysis-store-contract.json", import.meta.url);
 
 export const contractCases: readonly ContractCase[] = (JSON.parse(readFileSync(FIXTURE_PATH, "utf-8")) as { cases: ContractCase[] }).cases;
