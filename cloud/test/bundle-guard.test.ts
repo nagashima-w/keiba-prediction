@@ -628,8 +628,8 @@ describe("通知(Discord)のバンドル(Issue #205)", () => {
       expect(doSource.includes(NOTIFIER_WIRING_LINE), "race-day-do.ts に配線の行がある").toBe(true);
       expect(handlerSource.includes(NOTIFIER_WIRING_LINE), "handler.ts には配線の行が無い(health の参照とは別の文字列)").toBe(false);
       const code = bundle(null, "worker.js");
-      // 前提(空振り防止): 配線・表・core の Discord クライアント(ASCII の識別子。日本語の文字列は wrangler が \\uXXXX に直すので、検査に使えない。`/api/webhooks/`・`discordapp.com` は core の `isDiscordWebhookUrl` の判定の定数。Issue #328 でエラー文言から URL を外したため、文言ではなく定数を見る)が実際に本番のバンドルにある
-      for (const marker of [NOTIFIER_WIRING_LINE, "race_day_notify", "/api/webhooks/", "discordapp.com", "DiscordNotifyError"]) {
+      // 前提(空振り防止): 配線・表・core の Discord クライアント(ASCII の識別子。日本語の文字列は wrangler が \\uXXXX に直すので、検査に使えない。`/api/webhooks/`・`discordapp.com` は core の `isDiscordWebhookUrl` の判定の定数。Issue #328 でエラー文言から URL を外したため、文言ではなく定数を見る。ただし判定の定数は `notify-send.ts` からも参照されるので、送信関数 `sendDiscordNotification` だけがバンドルから外れても残る。`allowed_mentions` は送信関数にしか現れない ASCII〈`discord.ts` の `allowed_mentions: { parse: [] }`〉なので、送信関数がバンドルにあることの目印にする。Issue #300)が実際に本番のバンドルにある
+      for (const marker of [NOTIFIER_WIRING_LINE, "race_day_notify", "/api/webhooks/", "discordapp.com", "DiscordNotifyError", "allowed_mentions"]) {
         expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
       }
       expect(code.includes("better-sqlite3"), "バンドルに better-sqlite3 が無い").toBe(false);

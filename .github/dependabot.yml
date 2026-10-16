@@ -24,8 +24,8 @@
 # ★Issue #324: 最初の数回の PR(#321 等)は cloud/ を更新しなかった。原因は、Dependabot が cloud/ で `pnpm update … --lockfile-only -r` を実行するのに
 #   `--ignore-workspace` を渡せず、cloud/ に pnpm-workspace.yaml が無かったため pnpm が親のルートのワークスペースを更新していたこと
 #   (実ログ: `Scope: all 2 workspace projects`。PR の変更ファイルに cloud/ が 1 つも無い)。対策として cloud/pnpm-workspace.yaml(`packages: []`)を置いた。
-#   これで cloud/ 自身がルートとして扱われ、cloud/pnpm-lock.yaml が更新される見込み。効いたかは、作業ブランチに載せたあと、GitHub の Dependabot のページの
-#   「Check for updates」で確かめる(未確認)。効かなければ、SDK・iconv-lite・cheerio を下の npm の更新から ignore し、Dependabot alerts と手動の更新で扱う(案 B。docs/current-spec.md「Dependabot」)。
+#   これで cloud/ 自身がルートとして扱われ、cloud/pnpm-lock.yaml が更新される。**効いた**(2026-10-16。cloud の PR #331 が cloud/package.json と cloud/pnpm-lock.yaml を更新して来た)。
+#   フォールバックの案 B(SDK・iconv-lite・cheerio を下の npm の更新から ignore する)は不要になった(docs/current-spec.md「Dependabot」)。
 version: 2
 updates:
   - package-ecosystem: github-actions
