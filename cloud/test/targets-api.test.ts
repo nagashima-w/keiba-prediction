@@ -9,6 +9,7 @@ import type { AnalysisAllocationRecord, AnalysisRecord } from "../../packages/co
 import { contractCases } from "./fixtures-contract";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
+import { pathFromMeta } from "./meta-path.js";
 
 /**
  * Issue #336 段階 A: 実際の `handle()` の `GET /api/targets` を、ローカルの本物の D1(migration は CI と同じ実コマンドで適用)に通す(DO だけ偽物)。
@@ -193,7 +194,7 @@ describe("GET /api/targets(本物の D1。Issue #336)", () => {
       ]);
     } finally {
       const { readFileSync } = await import("node:fs");
-      const sql = readFileSync(new URL("../migrations/0019_close.sql", import.meta.url), "utf-8");
+      const sql = readFileSync(pathFromMeta("../migrations/0019_close.sql", import.meta.url), "utf-8");
       const statements = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n").split(";").map((s) => s.replace(/\s+/g, " ").trim()).filter((s) => s !== "");
       for (const s of statements) await local.db.prepare(s).run();
     }

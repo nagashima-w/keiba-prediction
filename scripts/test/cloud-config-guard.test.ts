@@ -771,6 +771,18 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     expect(offenders).toEqual([]);
   });
 
+  it("Issue #333: cloud の .ts は `new URL(…, import.meta.url)` を URL のまま Node の API(readFileSync 等)へ渡さない(@types/node 24 以上では TS2769。`.href` の文字列で渡すか、test/meta-path.ts の pathFromMeta を使う)", () => {
+    const tsFiles = scanTargets().filter((f) => f.startsWith("cloud/") && f.endsWith(".ts") && f !== "cloud/test/meta-path.ts");
+    expect(tsFiles.length, "走査した .ts が十分ある(空振り防止)").toBeGreaterThan(100);
+    // 正規表現の自己検査: 検出すべき形は検出し、`.href` で文字列にした形は検出しない(これが無いと、空振りの正規表現で常に緑になる)
+    const bare = /new\s+URL\([^()]*import\.meta\.url\)(?!\.href)/;
+    expect(bare.test('readFileSync(new URL("../a.sql", import.meta.url), "utf-8")')).toBe(true);
+    expect(bare.test("readFileSync(new URL(`../${x}`, import.meta.url), \"utf-8\")")).toBe(true);
+    expect(bare.test('fileURLToPath(new URL("../a.sql", import.meta.url).href)')).toBe(false);
+    const offenders = tsFiles.filter((f) => bare.test(readTextLf(...f.split("/"))));
+    expect(offenders).toEqual([]);
+  });
+
   it(".gitignore が node_modules・.wrangler・スモークの一時設定を除外する", () => {
     const gi = readTextLf("cloud", ".gitignore");
     for (const entry of ["node_modules/", ".wrangler/", "dist-dry/", "wrangler.smoke.generated.toml", "wrangler.smoke-fake.generated.toml", "wrangler.bundle-guard.generated.toml", "native-probe.generated.ts", "wrangler.native-probe.generated.toml"]) {
