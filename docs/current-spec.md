@@ -968,10 +968,10 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     **効いた(2026-10-16 に確認)**: 作業ブランチに載せたあと、Dependabot の PR #331(cloud の development-dependencies グループ)が `cloud/package.json` と `cloud/pnpm-lock.yaml` を更新して来た
     (`gh api repos/<owner>/<repo>/pulls/331/files` の変更ファイルはこの 2 つだけ)。案 B(`@anthropic-ai/sdk`・`iconv-lite`・`cheerio` を npm の更新から `ignore` して手動で扱う)は不要になった。
     cloud/ の devDependencies(typescript・vitest・`@cloudflare/workers-types` 等)の PR も、これまで一度も来ていなかった。対策後は来るので、メジャー更新も ignore せずレビューして取り込む(ルートはすでに TypeScript 7・vitest 5)。
-    **ただし `@types/node` の semver-major だけは例外で、`dependabot.yml` の `ignore` で提案させない(#332)。** @types/node のメジャーは実行環境の Node(`ci.yml`・`deploy-cloud.yml` の `node-version`。現在 22)に合わせるもので、
+    **ただし `@types/node` の semver-major だけは例外で、`dependabot.yml` の `ignore` で提案させない(#332)。** @types/node のメジャーは実行環境の Node(`ci.yml`・`deploy-cloud.yml` の `node-version`。現在 24。**Issue #333 で 22 から 24 に上げた**)に合わせるもので、
     **Node を上げるときに `cloud/package.json` の @types/node も同じメジャーに手で上げる**(`scripts/test/cloud-config-guard.test.ts` が両者のメジャーの一致を検査)。minor・patch は受ける。
     24 以上へ上げても cloud の型検査が通るよう、`fileURLToPath(new URL(…, import.meta.url))`(グローバルの URL は workers-types のもので、@types/node 24 以上では node:url の URL と型が合わず TS2345)を
-    `cloud/test/meta-path.ts` の `pathFromMeta` に置き換えた(26.6.5 で cloud の typecheck が 0 件になることを実測。Node 22 は 2027-04 に EOL)。
+    `cloud/test/meta-path.ts` の `pathFromMeta` に置き換えた(26.6.5 で cloud の typecheck が 0 件になることを実測。Node 22 は 2027-04 に EOL のため、#333 で CI を Node 24・@types/node を ^24.0.0 に上げた。root の `engines`〈`>=22.19`〉は、undici 8 が要求する「サポートする最低版」で CI の版とは別の概念なので変えていない)。
     一時的な失敗(公開直後の依存が最小経過日数〈`minimum-release-age=4320` 分 = 3 日〉に満たず `ERR_PNPM_NO_MATURE_MATCHING_VERSION`)は、日が経てば自然に解ける。
   - **CI の範囲**: PR では `ci.yml` が走る。`verify`(ルートの型検査・テスト)と、PR のときだけ走る `cloud-verify`(cloud/ の型検査・テスト・スモーク。`deploy-cloud.yml` の check・smoke と同じコマンド。秘密なし)。cloud の依存(wrangler・esbuild・sdk 等)の PR も PR の段階で赤が分かる。デプロイの dry-run と D1 の migration は `deploy-cloud.yml` の check にあり PR では走らず、マージ後の push で走る(deploy は承認印が無ければ走らない)。
   - **セキュリティ更新(脆弱性の自動修正 PR)**: `dependabot.yml` では扱わない(宛先を main 以外にできない見込み。未確認)。リポジトリ設定の「Dependabot alerts」を有効にして通知を受け、**alerts が来たら作業ブランチで対応する**(`pnpm audit` で確かめ、版を上げる)。**alerts は main のマニフェスト(`package.json`・lockfile)を見る**ので、作業ブランチで版を上げても、main に取り込むまで alert は消えない(消えないのは遅れであって、直っていないわけではない)。この設定は GitHub 上の操作でユーザーが行う。
@@ -1420,7 +1420,7 @@ exe の出力は変わらない(`packages/core/test/golden/pipeline-golden.json`
 - **Node の版を上げるとき**: `packages/core/test/golden/pipeline-golden.json` との完全一致を見るテスト(`packages/core/test/analysis/analysis-pipeline-golden.test.ts`・`cloud/test/pipeline-run.test.ts` ほか)が、同じ種類の差で赤になりうる。新しい Node の V8 が `Math.log`・`Math.exp` の実装を変えると、golden を作った Node と最後の 1 ビットが違う値が出るため。
   手順: (1) 赤になった箇所の差が、1ulp 程度の浮動小数点だけであること(整数・文字列・項目の集合・順序の差が無いこと)を確かめる。差が大きい、または整数や項目が変わっているなら、版の差ではなく実装の変更なので、golden を更新してはいけない。
   (2) 確かめられたら `pnpm tsx scripts/gen-pipeline-golden.ts`(リポジトリルート)で golden を再生成し、差分が浮動小数点の末尾の桁だけであることを再確認してからコミットする。(3) ルートの `pnpm test` と、cloud の `npx vitest run`・`pnpm run smoke` を通す。
-  なお CI の Node の版は `.github/workflows/ci.yml` の `node-version`(22)。
+  なお CI の Node の版は `.github/workflows/ci.yml` の `node-version`(24。#333 で 22 から上げた。Node 24〈V8 13.6〉でも golden は再生成なしで全緑だった)。
 
 ### 日単位の DO `RaceDay`・取得キャッシュ・朝の取得と prior(#177〈#164-b〉。v1.19.12)
 **呼び出す入口は、手動の `POST /api/analyses/run`〈#180〉と、cron の `scheduled`〈#206。`requestPlan`〉**。`worker.ts` が `RaceDay` を export する(wrangler が binding のクラスを要求する)。ローカルの smoke も RPC を呼んで通す。
