@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 313,800 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 317,500 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -187,8 +187,15 @@ describe("生成物のドリフトと決定性", () => {
     // 新しい上限 313,800 の根拠: 実測 312,373 に約 1.5KB の余裕(312,373 + 1,427 を 100 バイト単位に切り上げ)。余裕は 1,427 バイト。
     // Issue #346(一覧の発走済みを下へ回して薄く出す): 上限は 313,800 のまま据え置き。実測(`Buffer.byteLength(CLIENT_JS)`。`pnpm run build:client` の出力)は 312,373 → 313,031(+658)で、余裕は 769 バイト(レビューの修正で、発走済みのクラスを `past` から `started` に変えた分が +6)。
     // 増えた理由: 共通の判定 `hasStarted`(`bulk.ts`)・並べ替えと `past` の印・`needsListClock`(`list.ts`)・30 秒の再描画のタイマー(新規 `list-clock.ts`)・`view.ts` のクラス・`app.ts` の配線(`render` の末尾の `sync`・表示の復帰)。
+    // Issue #352(#335-C 検証画面の「締切直前の再計算との比較」の節): 上限を 313,800 から 317,500 へ引き上げた。足したもの: API の `closeComparison` の解釈(`api-verify.ts` の `parseCloseComparison`ほか。壊れた値はこの節だけ null に落とす)・
+    // 表示用データ(`verify-model.ts` の `closeSection`。行のラベル・件数・回収率・投資額・「参考」の印・固定の注記)・VNode(`view.ts` の節)。文言は日本語で `\u` エスケープ(1 文字 6 バイト)になるので、説明と注記の固定文が大きな割合を占める。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`): 313,031(#346 の後。`git show HEAD:cloud/src/client-bundle.generated.ts` を測った)→ 316,070(+3,039。`pnpm run build:client` の出力〈「316070 バイト」〉)。
+    // 内訳(`cloud/` で esbuild を `build-client.ts` と同じ設定〈minify・metafile〉で呼び、`metafile.outputs[...].inputs[ファイル].bytesInOutput` を前後で比べた。HEAD を `git archive` で展開したものと今の作業ツリー): `client/verify-model.ts` 17,189 → 19,298(+2,109)・
+    // `client/api-verify.ts` 9,637 → 10,329(+692)・`client/view.ts` 31,971 → 32,186(+215)。残り +23 は、ソースを変えていない 7 ファイルの +2〜+8(minify の識別子の割り当てが変わった分。`app.ts` +8・`replay-plan.ts` +5・ほか 5 ファイルが +2 ずつ)。
+    // 全 10 ファイルの増分の和は 2 + 692 + 8 + 2 + 2 + 5 + 2 + 2,109 + 2 + 215 = 3,039 で、全体の増分と一致する。外部ライブラリは使っていない。
+    // 新しい上限 317,500 の根拠: 実測 316,070 に約 1.4KB の余裕(316,070 + 1,430 を 100 バイト単位に切り上げ)。余裕は 1,430 バイト。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(313_800);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(317_500);
   });
 });
 

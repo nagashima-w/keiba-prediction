@@ -14,6 +14,10 @@
  * 3. 集計が新しい(透かしが同じで TTL 内)ならそのまま返す。そうでなければ再計算するが、**費用の柵**(最短間隔・1 日の回数)に当たったら古い集計を返す(`stale`)。
  * 4. 再計算: `readAll`(7 文の batch)→ `buildVerifySource` → 3 区分の `computeVerifyReport`(`PRODUCTION_VERIFY_CONFIG` = 旧 exe の検証画面と同じ設定)と、プロンプト版別の比較(`computePromptVersionSummaries`。全体のみ・画面が使う項目だけ。D1 は追加で読まない。Issue #220)。
  *    読んだ行に NULL の行が混ざっていたら(確認と読みの間に保存された)、キャッシュせず `preparing`(集計は旧 exe と一致するときだけ出す)。
+ *    続けて、締切直前の再計算との比較(`closeComparison`。`verify-close.ts`。Issue #352)を計算する。再計算の行(`readAll` の `close`。別の batch)が無い・読めない(表が無い)ときは null。
+ *    **比較の計算が例外を投げても、本体の集計は出す**(比較だけ null にして、固定の警告を残す)。形式の版(`CACHE_VERSION`)は上げない: 項目は省略可能で、無い旧い集計は null として返す(次の再計算で埋まる)。
+ *    **透かし(`Watermark`)に再計算の表は足さない**: 比較に入るのは結果が出ている分析だけで、再計算の行は発走の 5 分前・直前に書かれ(結果の取込より前)、結果の取込は `race_results` の透かしを動かす。
+ *    同じ行の再保存〈UPSERT。rowid が変わらない〉が結果の後に起きても、TTL(1 時間)で拾う。
  *
  * ## 閲覧者の要求(`getViewerReport`。Issue #263)
  * 閲覧者(友人)にも検証画面を見せるが、**閲覧者の要求は集計のやり直しを起こさない**。`getReport` とは別のメソッドにしてあり(`refresh` の引数も無い)、kv のキャッシュを読むだけ:
@@ -37,6 +41,7 @@ import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG, type VerifyReport, type 
 import { isReadAllowed, type R2Usage } from "./r2-fence";
 import { buildVerifySource, countStartTimeGaps } from "./verify-read";
 import { computePromptVersionSummaries, type PromptVersionSummary } from "./verify-versions";
+import { computeCloseComparison, type CloseComparison } from "./verify-close";
 import type { PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "./verify-store";
 
 /** 集計の有効期間(透かしが同じ間)。既存の行の更新〈`race_results` の UPSERT〉は透かしに出ないため、この時間で拾う。 */
@@ -136,6 +141,8 @@ export interface VerifyDiag {
   readonly computeMs: number;
   /** プロンプト版別の比較の集計にかかった壁時計(ミリ秒。Issue #220)。 */
   readonly promptVersionsMs: number;
+  /** 締切直前の再計算との比較の集計にかかった壁時計(ミリ秒。Issue #352)。この項目を持たない旧い集計では無い。 */
+  readonly closeMs?: number;
   /**
    * 発走時刻を確認できなかった分析(詳細が無い・壊れている)。`lost` はその数、`affecting` はそのうち**先読み判定が時刻に依る**(遮断済みでない)もの。
    * `affecting` > 0 のとき、exe には時刻があった旧い行が、web では「時刻なし」として判定される可能性がある。
@@ -150,6 +157,11 @@ interface CacheEntry {
   readonly reports: Readonly<Record<VerifyVenueFilter, VerifyReport>>;
   /** プロンプト版別の比較(全体のみ。区分に依らない。画面が使う項目だけ)。Issue #220。 */
   readonly promptVersions: readonly PromptVersionSummary[];
+  /**
+   * 締切直前の再計算との比較(Issue #352。区分に依らず中央のみ)。再計算の行が無い・表が読めない・計算が失敗したときは null。
+   * **省略可能**: この項目を持たない旧い集計(形式の版は上げていない)は、null として扱う(次の再計算で埋まる)。
+   */
+  readonly closeComparison?: CloseComparison | null;
   readonly diag: VerifyDiag;
 }
 
@@ -178,6 +190,8 @@ export type VerifyResponse =
       readonly report: VerifyReport;
       /** プロンプト版別の比較(Issue #220)。**区分(venue)に依らず全体**(旧 exe の版別比較と同じ)。画面が使う項目だけを持つ。 */
       readonly promptVersions: readonly PromptVersionSummary[];
+      /** 締切直前の再計算との比較(Issue #352)。区分に依らず中央のみ。比較できるものが無いときは null。 */
+      readonly closeComparison: CloseComparison | null;
       /** 集計した時刻(ISO)。 */
       readonly computedAt: string;
       /** データの更新に追いついていない集計か(費用の柵・補完中)。 */
@@ -217,6 +231,8 @@ export type ViewerVerifyResponse =
       readonly report: VerifyReport;
       /** 版別比較。追加指示の全文は {@link VIEWER_REDACTED_INSTRUCTION} に置き換えてある(なしは null のまま)。 */
       readonly promptVersions: readonly PromptVersionSummary[];
+      /** 締切直前の再計算との比較(Issue #352)。管理者向けの情報を含まないので、そのまま渡す。 */
+      readonly closeComparison: CloseComparison | null;
       readonly computedAt: string;
       readonly stale: false;
       readonly staleReason: null;
@@ -333,6 +349,7 @@ export class VerifyCore {
       venue,
       report: cache.reports[venue],
       promptVersions: cache.promptVersions.map((v) => ({ ...v, additionalInstructions: v.additionalInstructions.map((i) => (i === null ? null : VIEWER_REDACTED_INSTRUCTION)) })),
+      closeComparison: cache.closeComparison ?? null,
       computedAt: new Date(cache.computedAt).toISOString(),
       stale: false,
       staleReason: null,
@@ -352,6 +369,7 @@ export class VerifyCore {
       venue,
       report: cache.reports[venue],
       promptVersions: cache.promptVersions,
+      closeComparison: cache.closeComparison ?? null,
       computedAt: new Date(cache.computedAt).toISOString(),
       stale: reason !== null,
       staleReason: reason,
@@ -396,13 +414,24 @@ export class VerifyCore {
     const t2 = now();
     const promptVersions = computePromptVersionSummaries(source);
     const t3 = now();
+    // 締切直前の再計算との比較(Issue #352)。読めなかった(close が無い・null)・計算が失敗したときは null。**比較の失敗で本体の集計を失わない**(例外は握り、固定の警告だけ残す)。
+    let closeComparison: CloseComparison | null = null;
+    if (read.close !== undefined && read.close !== null) {
+      try {
+        closeComparison = computeCloseComparison(source, read.close);
+      } catch {
+        this.deps.onWarn?.("検証の再計算との比較の計算で例外が起きました(比較なしで集計します)");
+      }
+    }
+    const t4 = now();
     const entry: CacheEntry = {
       v: CACHE_VERSION,
       computedAt: t3,
       watermark,
       reports,
       promptVersions,
-      diag: { rowsRead: read.rowsRead, counts: read.counts, readMs: t1 - t0, computeMs: t2 - t1, promptVersionsMs: t3 - t2, startTimeGaps: countStartTimeGaps(read.rows.analyses) },
+      closeComparison,
+      diag: { rowsRead: read.rowsRead, counts: read.counts, readMs: t1 - t0, computeMs: t2 - t1, promptVersionsMs: t3 - t2, closeMs: t4 - t3, startTimeGaps: countStartTimeGaps(read.rows.analyses) },
     };
     kv.put("cache", entry);
     const prev = kv.get<Runs>("runs");

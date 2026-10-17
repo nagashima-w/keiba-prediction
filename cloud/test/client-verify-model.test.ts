@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProposedSummaryView, VerifyOutcome, VerifyReportView } from "../client/api-verify";
 import { exclusionRows, formatRate, formatUnknownBetTypeNotice, formatYen, PROPOSED_BET_LABELS, venueLabel } from "../client/verify-format";
 import { buildVerifyModel, type VerifyModelInput } from "../client/verify-model";
-import { calibrationFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
+import { calibrationFixture, closeFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /** Issue #219: 検証画面の表示用データ。数値の整形は exe と同じ(一致は scripts/test/cloud-verify-format.test.ts が exe の関数と比べる)。 */
 
@@ -40,7 +40,7 @@ function report(over: Partial<VerifyReportView> = {}): VerifyReportView {
 }
 
 const ready = (over: Partial<Extract<VerifyOutcome, { kind: "ready" }>> = {}, r: VerifyReportView = report()): VerifyOutcome => ({
-  kind: "ready", venue: "all", report: r, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 }, ...over,
+  kind: "ready", venue: "all", report: r, promptVersions: versionsFixture(), closeComparison: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 }, ...over,
 });
 
 const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: ready() }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, ...over });
@@ -795,5 +795,65 @@ describe("Issue #271: 版別カードに、補正前(統計モデル)の対応�
     expect(viewer?.priorCalibrationRows).toHaveLength(20);
     expect(admin?.fullInstructions).not.toBeNull();
     expect(viewer?.fullInstructions).toBeNull();
+  });
+});
+
+describe("Issue #352: 締切直前の再計算との比較の節(model.close)", () => {
+  const withClose = (close = closeFixture(), over: Partial<VerifyModelInput> = {}) => buildVerifyModel(input({ load: { kind: "ready", outcome: ready({ closeComparison: close }) }, ...over }));
+
+  it("比較が null(再計算の行が無い・表が読めない)なら節を出さない。集計が出せない状態でも出さない", () => {
+    expect(buildVerifyModel(input()).close).toBeNull();
+    expect(buildVerifyModel(input({ load: { kind: "loading" } })).close).toBeNull();
+    expect(buildVerifyModel(input({ load: { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T03:05:00.000Z", reason: "min-interval" } } })).close).toBeNull();
+  });
+
+  it("行は 5 分前・直前。ラベルは leadMinutes から作る(直前は暫定と明記)。件数は 「ok/対象」、回収率は分析時と再計算を別の項目に、投資額は分析時と再計算の両方", () => {
+    const close = withClose().close!;
+    expect(close.heading).toBe("締切直前の再計算との比較");
+    expect(close.rows.map((r) => r.label)).toEqual(["5分前", "直前(発走2分前・暫定)"]);
+    expect(close.rows[0]!.cells).toEqual([
+      { name: "件数(再計算できた/対象)", value: "12/15件" },
+      { name: "回収率(分析時)", value: "90.0%" },
+      { name: "回収率(再計算)", value: "110.0%" },
+      { name: "投資額(分析時→再計算)", value: "12,000円→11,000円" },
+      { name: "注意", value: "参考(件数が少ない)" },
+    ]);
+    expect(close.rows[1]!.cells.map((c) => c.value)).toEqual(["30/31件", "110.0%", "90.0%", "30,000円→29,000円"]);
+  });
+
+  it("直前のリードがサーバの値で変わると、ラベルも変わる(クライアントに分を固定しない)", () => {
+    const fx = closeFixture();
+    const changed = { rounds: [fx.rounds[0]!, { ...fx.rounds[1]!, leadMinutes: 3 }] };
+    expect(withClose(changed).close!.rows[1]!.label).toBe("直前(発走3分前・暫定)");
+  });
+
+  it("★「参考」の印は ok の件数が 30 件未満の行だけ(29 件は付き、30 件は付かない。置き値の境界)", () => {
+    const fx = closeFixture();
+    const at = (okCount: number) => ({ rounds: [{ ...fx.rounds[0]!, okCount, targetCount: okCount + 1 }] });
+    const hasMark = (okCount: number) => withClose(at(okCount)).close!.rows[0]!.cells.some((c) => c.name === "注意");
+    expect([hasMark(0), hasMark(29), hasMark(30), hasMark(31)]).toEqual([true, true, false, false]);
+  });
+
+  it("回収率が null(ok が 0 件・賭け金 0)は「-」。ok が 0 件でも行は出る", () => {
+    const fx = closeFixture();
+    const empty = { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null };
+    const close = withClose({ rounds: [{ ...fx.rounds[0]!, okCount: 0, targetCount: 4, base: empty, recalc: empty }] }).close!;
+    expect(close.rows[0]!.cells.map((c) => c.value).slice(0, 4)).toEqual(["0/4件", "-", "-", "0円→0円"]);
+  });
+
+  it("説明と注記は日付に依らない固定の文(件数が少ないうちは回収率の差に意味がない旨・区分に依らず中央のみの旨)。閲覧者(admin=false)にも出る", () => {
+    for (const admin of [true, false]) {
+      const close = withClose(closeFixture(), { admin }).close!;
+      expect(close.note).toBe("件数が少ないうちは、回収率の差に意味がありません。「参考」の行は、再計算できた件数が 30 件未満です。");
+      expect(close.description).toContain("中央");
+      expect(close.description).toContain("区分");
+      expect(`${close.description}${close.note}`).not.toMatch(/\d{1,2}\/\d{1,2}|\d{4}|月/); // 日付を含まない(古くならない)
+    }
+  });
+
+  it("区分のタブに依らない(全体・中央のみ・地方のみのどれでも同じ節が出る)", () => {
+    const rows = (["all", "central", "nar"] as const).map((venue) => withClose(closeFixture(), { venue }).close!.rows);
+    expect(rows[1]).toEqual(rows[0]);
+    expect(rows[2]).toEqual(rows[0]);
   });
 });

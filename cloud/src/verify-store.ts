@@ -14,6 +14,8 @@
  *
  * ## 集計用の読み(`readAll`)
  * 7 文を **1 回の batch**(D1 の batch は 1 つのトランザクション=表をまたいだ一貫した読み取り)で読む。SQL は `verify-read.ts`。D1 が返す `meta.rows_read` を合計して返す(Free の 500 万行/日の実測用)。
+ * **続けて、締切直前の再計算の 2 文(`verify-close.ts`。Issue #352)を別の batch で読む**。表が無い(migration 前)・読めないときの失敗を握って `close: null` にするため、主の batch には入れない
+ * (入れると、再計算の表の障害が検証全体を壊す)。別のトランザクションだが、再計算の行は結果の取込より前に書かれ(発走の前)、結果のある分析しか比較に入らないので、読みのずれは害にならない。
  *
  * ## 透かし(`readWatermark`)
  * 再計算の要否の判定用。各表の `MAX(id)` / `MAX(rowid)` を 1 クエリで読む(各 1 行しか読まない)。既存の行の更新(`race_results` の UPSERT)では rowid が変わらず検知できない
@@ -24,6 +26,7 @@ import { decodeDetail } from "./analysis-detail";
 import { extractStartTime } from "../../packages/core/src/ev/lookahead-suspicion.js";
 import { monthKey, type R2Usage } from "./r2-fence";
 import { START_TIME_ABSENT, START_TIME_LOST, VERIFY_READ_SQL, type VerifyReadRows } from "./verify-read";
+import { VERIFY_CLOSE_READ_SQL, type VerifyCloseRows } from "./verify-close";
 
 export type VerifyDb = Pick<D1Database, "prepare" | "batch">;
 /** R2 のうち使う部分。**get だけ**。 */
@@ -70,9 +73,15 @@ export interface ResolveOutcome {
 
 export interface ReadAllResult {
   readonly rows: VerifyReadRows;
-  /** D1 が報告した読み取り行数の合計(`meta.rows_read`)。 */
+  /** D1 が報告した読み取り行数の合計(`meta.rows_read`。主の 7 文と、再計算の 2 文の分)。 */
   readonly rowsRead: number;
-  readonly counts: Readonly<Record<keyof VerifyReadRows, number>>;
+  /** 表ごとの行数。再計算の表を読めたときは `closeMeta`・`closeBets` も入る(読めなかったときは入らない。0 行と区別する)。 */
+  readonly counts: Readonly<Record<string, number>>;
+  /**
+   * 締切直前の再計算の行(Issue #352)。**表が無い(migration 前)・読めなかったときは null**(主の集計は影響を受けない)。
+   * 省略可能(この項目を持たない読み取り口〈既存のテストの偽物〉は、再計算の比較なしとして扱う)。
+   */
+  readonly close?: VerifyCloseRows | null;
 }
 
 const WATERMARK_SQL =
@@ -196,8 +205,18 @@ export class D1VerifyStore {
     const results = await this.db.batch<Record<string, unknown>>(READ_ORDER.map((name) => this.db.prepare(VERIFY_READ_SQL[name])));
     const rowsOf = (i: number): never => (results[i]?.results ?? []) as never;
     const rows = Object.fromEntries(READ_ORDER.map((name, i) => [name, rowsOf(i)])) as unknown as VerifyReadRows;
-    const counts = Object.fromEntries(READ_ORDER.map((name) => [name, rows[name].length])) as Record<keyof VerifyReadRows, number>;
-    const rowsRead = results.reduce((n, r) => n + (r.meta.rows_read ?? 0), 0);
-    return { rows, rowsRead, counts };
+    const counts: Record<string, number> = Object.fromEntries(READ_ORDER.map((name) => [name, rows[name].length]));
+    let rowsRead = results.reduce((n, r) => n + (r.meta.rows_read ?? 0), 0);
+    const closeResults = await this.db
+      .batch<Record<string, unknown>>([this.db.prepare(VERIFY_CLOSE_READ_SQL.meta), this.db.prepare(VERIFY_CLOSE_READ_SQL.bets)])
+      .catch(() => null);
+    if (closeResults === null) {
+      return { rows, rowsRead, counts, close: null };
+    }
+    const close = { meta: (closeResults[0]?.results ?? []) as never, bets: (closeResults[1]?.results ?? []) as never } as VerifyCloseRows;
+    rowsRead += closeResults.reduce((n, r) => n + (r.meta.rows_read ?? 0), 0);
+    counts["closeMeta"] = close.meta.length;
+    counts["closeBets"] = close.bets.length;
+    return { rows, rowsRead, counts, close };
   }
 }

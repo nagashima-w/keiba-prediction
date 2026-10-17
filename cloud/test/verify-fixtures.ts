@@ -1,4 +1,4 @@
-import type { CalibrationBinView, PromptVersionView, VerifyReportView } from "../client/api-verify";
+import type { CalibrationBinView, CloseComparisonView, PromptVersionView, VerifyReportView } from "../client/api-verify";
 
 /**
  * Issue #220: 検証画面のテストが共有する、キャリブレーション(20 帯)と補正傾向の見本。
@@ -79,4 +79,17 @@ export function versionsFixture(): PromptVersionView[] {
     { promptVersion: "2026-10-09.2-clip015", additionalInstructions: [null], includedAnalysisCount: 25, bet: { betCount: 10, totalStake: 1000, totalReturn: 1250, recoveryRate: 1.25 }, calibration: emptyBins, priorCalibration: emptyBins, quality: { evaluatedCount: 0, priorBrier: null, adjustedBrier: null }, overconfidenceGaps: emptyBins.map(() => null) },
     { promptVersion: null, additionalInstructions: [null], includedAnalysisCount: 15, bet: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null }, calibration: bins, priorCalibration: priorBins, quality: { evaluatedCount: 150, priorBrier: 0.1802, adjustedBrier: 0.1799 }, overconfidenceGaps: gaps },
   ];
+}
+
+/**
+ * 締切直前の再計算との比較の見本(Issue #352)。回 1(5 分前): ok 12 件/対象 15 件(30 件未満=参考)・再計算のほうが回収率が高い。
+ * 回 2(直前): ok 30 件/対象 31 件(ちょうど 30 件=参考の印が付かない境界)・再計算のほうが低い。**値は行ごとに違う**(取り違えを検出できる)。
+ */
+export function closeFixture(): CloseComparisonView {
+  return {
+    rounds: [
+      { round: 1, leadMinutes: 5, okCount: 12, targetCount: 15, base: { betCount: 30, totalStake: 12000, totalReturn: 10800, recoveryRate: 0.9 }, recalc: { betCount: 28, totalStake: 11000, totalReturn: 12100, recoveryRate: 1.1 } },
+      { round: 2, leadMinutes: 2, okCount: 30, targetCount: 31, base: { betCount: 70, totalStake: 30000, totalReturn: 33000, recoveryRate: 1.1 }, recalc: { betCount: 65, totalStake: 29000, totalReturn: 26100, recoveryRate: 0.9 } },
+    ],
+  };
 }

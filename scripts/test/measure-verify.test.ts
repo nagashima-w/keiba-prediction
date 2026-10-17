@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids.js";
-import { syntheticAdditionalInstruction, syntheticPromptVersion, syntheticRaceId } from "../measure-verify.js";
+import type { AnalysisAllocationRecord } from "../../packages/core/src/ev/analysis-store-types.js";
+import { assertClosePayload } from "../../cloud/src/analysis-close.js";
+import { hasSyntheticClose, syntheticAdditionalInstruction, syntheticClosePayload, syntheticPromptVersion, syntheticRaceId } from "../measure-verify.js";
 
 /** Issue #219: 検証の実測スクリプト(scripts/measure-verify.ts)の合成データの作り方の検査。測定そのもの(wrangler dev・/proc)は機械に依存するため固定しない。 */
 describe("syntheticRaceId(合成のレース ID)", () => {
@@ -36,5 +38,27 @@ describe("syntheticPromptVersion / syntheticAdditionalInstruction(合成の版�
     expect(texts.filter((x) => x !== null)).toHaveLength(50);
     expect(texts.filter((x): x is string => x !== null).every((x) => x.length === 300)).toBe(true);
     expect(new Set(texts.filter((x) => x !== null)).size).toBeGreaterThan(1);
+  });
+});
+
+/** Issue #352: 締切直前の再計算の行(analysis_close・analysis_close_bets)の実測用の合成。`--close-ratio R`(既定 0=なし)で、分析の割合 R に回 1・回 2 の ok の行を付ける。 */
+describe("hasSyntheticClose / syntheticClosePayload(合成の再計算の行)", () => {
+  it("R=0 は 1 件も付かず、R=1 は全件に付く。R=0.25 は 100 件中ちょうど 25 件(同じ引数なら同じ分析に付く)", () => {
+    const pick = (ratio: number) => Array.from({ length: 100 }, (_, k) => hasSyntheticClose(k + 1, ratio));
+    expect(pick(0).filter(Boolean)).toHaveLength(0);
+    expect(pick(1).filter(Boolean)).toHaveLength(100);
+    expect(pick(0.25).filter(Boolean)).toHaveLength(25);
+    expect(pick(0.25)).toEqual(pick(0.25));
+  });
+
+  it("合成の行は ok の結果(保存の前の形の検査 assertClosePayload を通る)で、配分は分析時のもの(買い目の数が同じ)", () => {
+    const allocation = { meta: { route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOddsWide: null, comboOddsTrio: null, bankroll: 1, perRaceCap: 1, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: false, includeWide: false, includeTrio: false, betUnit: 100 } as unknown as AnalysisAllocationRecord["meta"], bets: [{ betType: "place", comboKey: "01", stake: 100, odds: 2, ev: 1.1 }] };
+    for (const round of [1, 2] as const) {
+      const payload = syntheticClosePayload(round, allocation);
+      expect(() => assertClosePayload(payload)).not.toThrow();
+      expect(payload.status).toBe("ok");
+      expect(payload.allocation!.bets).toHaveLength(1);
+      expect(payload.round).toBe(round);
+    }
   });
 });

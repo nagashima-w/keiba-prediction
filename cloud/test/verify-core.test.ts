@@ -15,6 +15,7 @@ import { R2_FENCE_LIMITS, type R2Usage } from "../src/r2-fence";
 import { computeVerifyReport, computeVerifyReportByPromptVersion, DEFAULT_VERIFY_CONFIG, PRODUCTION_VERIFY_CONFIG, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
 import { summarizePromptVersions } from "../src/verify-versions";
 import { buildVerifySource } from "../src/verify-read";
+import { computeCloseComparison, type VerifyCloseRows } from "../src/verify-close";
 
 /**
  * Issue #219: 検証の DO の純ロジック(`VerifyCore`)。D1・R2・時計・アラームは偽物で、キャッシュ・費用の柵・単一飛行・発走時刻の補完の進め方を確かめる。
@@ -58,6 +59,8 @@ interface FakeState {
   rows: VerifyReadRows;
   /** resolveStartTimes の結果を差し替える。省略時は全行を '' で解決。 */
   resolve?: (rows: readonly PendingRow[]) => ResolveOutcome;
+  /** readAll が返す再計算の行(Issue #352)。省略(undefined)なら、この項目を持たない読み取り口(既存の偽物と同じ)。null は表が読めなかった場合。 */
+  close?: VerifyCloseRows | null;
   failReadAll?: boolean;
   failResolve?: boolean;
   /** readAll の途中で呼ぶ(競合の再現)。 */
@@ -107,7 +110,10 @@ function fakeStore() {
       state.duringReadAll?.();
       if (state.failReadAll === true) throw new Error("D1_ERROR");
       const rows = state.rows;
-      return { rows, rowsRead: 123, counts: { analyses: rows.analyses.length, horses: rows.horses.length, allocationMeta: 0, bets: 0, results: rows.results.length, comboPayouts: 0, comboImports: 0 } };
+      const counts = { analyses: rows.analyses.length, horses: rows.horses.length, allocationMeta: 0, bets: 0, results: rows.results.length, comboPayouts: 0, comboImports: 0 };
+      if (state.close === undefined) return { rows, rowsRead: 123, counts };
+      if (state.close === null) return { rows, rowsRead: 123, counts, close: null };
+      return { rows, rowsRead: 123, counts: { ...counts, closeMeta: state.close.meta.length, closeBets: state.close.bets.length }, close: state.close };
     },
   };
   return { port, state, calls, listPendingArgs, committed };
@@ -839,7 +845,7 @@ describe("Issue #263: getViewerReport(閲覧者の要求。集計のやり直し
     const { core } = await withCache();
     const res = core.getViewerReport("all");
     if (res.status !== "ready") throw new Error("ready のはず");
-    expect(Object.keys(res).sort()).toEqual(["computedAt", "diag", "nextRecomputeAt", "promptVersions", "report", "stale", "staleReason", "status", "venue"]);
+    expect(Object.keys(res).sort()).toEqual(["closeComparison", "computedAt", "diag", "nextRecomputeAt", "promptVersions", "report", "stale", "staleReason", "status", "venue"]);
     expect(res.stale).toBe(false);
     expect(res.staleReason).toBeNull();
     expect(res.nextRecomputeAt).toBeNull();
@@ -871,5 +877,106 @@ describe("Issue #263: getViewerReport(閲覧者の要求。集計のやり直し
     expect(res.promptVersions[1]!.additionalInstructions).toHaveLength(2);
     // ほかの項目は変えない
     expect(res.promptVersions.map((v) => ({ ...v, additionalInstructions: [] }))).toEqual(admin.promptVersions.map((v) => ({ ...v, additionalInstructions: [] })));
+  });
+});
+
+describe("Issue #352: 締切直前の再計算との比較(closeComparison)", () => {
+  /** 分析 1(中央・的中する 1 番に分析時は 1,000 円)に対して、再計算の回 1 は 外れる 2 番に 500 円。 */
+  function withAllocation(): { rows: VerifyReadRows; close: VerifyCloseRows } {
+    const rows: VerifyReadRows = {
+      ...rowsOf([analysisRow(1, CENTRAL)]),
+      allocationMeta: [{ analysisId: 1, route: "place-only", skipReasonCode: null }],
+      bets: [{ analysisId: 1, betType: "place", comboKey: "01", stake: 1000 }],
+    };
+    const close: VerifyCloseRows = {
+      meta: [{ analysisId: 1, round: 1, status: "ok", route: "place-only", skipReasonCode: null }],
+      bets: [{ analysisId: 1, round: 1, betType: "place", comboKey: "02", stake: 500 }],
+    };
+    return { rows, close };
+  }
+
+  it("再計算で比較を作り、kv のキャッシュにも応答にも載せる。値は純関数 computeCloseComparison と同じ。区分に依らず同じ(中央固定)", async () => {
+    const { core, store, kv } = setup();
+    const { rows, close } = withAllocation();
+    store.state.rows = rows;
+    store.state.close = close;
+    const expected = computeCloseComparison(buildVerifySource(rows), close);
+    // 前提(空振り防止): 比較があり、分析時と再計算で賭け金が違う(取り違えを検出できる)
+    expect(expected!.rounds[0]!.base.totalStake).toBe(1000);
+    expect(expected!.rounds[0]!.recalc.totalStake).toBe(500);
+    for (const venue of ["all", "central", "nar"] as const) {
+      const res = await core.getReport(venue);
+      if (res.status !== "ready") throw new Error("ready のはず");
+      expect(res.closeComparison, venue).toEqual(expected);
+    }
+    expect(kv.get<{ closeComparison: unknown }>("cache")!.closeComparison).toEqual(JSON.parse(JSON.stringify(expected)));
+    expect(store.calls.filter((c) => c === "readAll")).toHaveLength(1); // D1 の読みは増えない(読むのは readAll の中)
+  });
+
+  it("診断: 比較の所要時間(closeMs)を、3 区分(computeMs)・版別(promptVersionsMs)とは別に出す(それらの意味を変えない)。表ごとの行数に再計算の表が出る", async () => {
+    const { core, store, clock } = setup();
+    const { rows, close } = withAllocation();
+    store.state.rows = rows;
+    store.state.close = close;
+    let ticks = 0;
+    Object.defineProperty(clock, "now", { get: () => T0 + 7 * (ticks += 1) });
+    const res = await core.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect([res.diag.readMs, res.diag.computeMs, res.diag.promptVersionsMs, res.diag.closeMs]).toEqual([7, 7, 7, 7]);
+    expect(res.diag.counts).toMatchObject({ closeMeta: 1, closeBets: 1 });
+  });
+
+  it("★再計算の表が読めない(close: null)・この項目を持たない読み取り口でも、比較は null になるだけで、本体の集計は出る(既存の応答を壊さない)", async () => {
+    for (const close of [null, undefined]) {
+      const { core, store } = setup();
+      store.state.close = close;
+      const res = await core.getReport("all");
+      if (res.status !== "ready") throw new Error("ready のはず");
+      expect(res.closeComparison).toBeNull();
+      expect(res.report.includedAnalysisCount).toBeGreaterThan(0); // 前提: 本体の集計は出ている
+      expect(res.promptVersions.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("★比較の計算が例外を投げても、本体の集計は出る(比較は null。固定の警告だけを残し、例外の文面は持ち込まない)", async () => {
+    const { core, store, warns } = setup();
+    store.state.close = { meta: [null as never], bets: [] }; // 壊れた行
+    const res = await core.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(res.closeComparison).toBeNull();
+    expect(res.report.includedAnalysisCount).toBeGreaterThan(0);
+    expect(warns).toEqual(["検証の再計算との比較の計算で例外が起きました(比較なしで集計します)"]);
+  });
+
+  it("★比較の項目を持たない旧い集計(版 6 のまま)も使える: 再計算せず、closeComparison は null で返す。形式の版は上げていない", async () => {
+    const { core, store, kv } = setup();
+    expect((await core.getReport("all")).status).toBe("ready");
+    const cache = kv.get<Record<string, unknown>>("cache")!;
+    expect(cache["v"]).toBe(6); // 形式の版は据え置き(#245 の副作用を避ける。上げるときはこの assert を直す)
+    const { closeComparison: _drop, ...old } = cache;
+    kv.put("cache", old);
+    store.calls.length = 0;
+    const res = await core.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(res.closeComparison).toBeNull();
+    expect(store.calls).not.toContain("readAll");
+    const viewer = core.getViewerReport("all");
+    if (viewer.status !== "ready") throw new Error("ready のはず");
+    expect(viewer.closeComparison).toBeNull();
+  });
+
+  it("閲覧者の応答にも同じ比較が載る(管理者向けの情報ではないので伏せない)。閲覧者の要求は store に触れない", async () => {
+    const { core, store } = setup();
+    const { rows, close } = withAllocation();
+    store.state.rows = rows;
+    store.state.close = close;
+    const admin = await core.getReport("all");
+    if (admin.status !== "ready") throw new Error("ready のはず");
+    expect(admin.closeComparison!.rounds).toHaveLength(2); // 前提: 比較がある(undefined・null ではない)
+    store.calls.length = 0;
+    const viewer = core.getViewerReport("all");
+    if (viewer.status !== "ready") throw new Error("ready のはず");
+    expect(viewer.closeComparison).toEqual(admin.closeComparison);
+    expect(store.calls).toEqual([]);
   });
 });

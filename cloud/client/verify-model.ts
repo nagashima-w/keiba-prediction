@@ -8,7 +8,7 @@
 import { judgeCalibration, MIN_COUNT_FOR_JUDGMENT, type CalibrationVerdict, type ProportionInterval } from "@keiba/core/ev/binomial-interval";
 import { formatRecoveryPercent } from "../src/recovery-format";
 import { formatJstDateTime } from "./date";
-import type { CalibrationBinView, ProposedSummaryView, PromptVersionView, VerifyOutcome, VerifyReportView, VerifyVenue } from "./api-verify";
+import type { CalibrationBinView, CloseComparisonView, CloseRoundView, ProposedSummaryView, PromptVersionView, VerifyOutcome, VerifyReportView, VerifyVenue } from "./api-verify";
 import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
@@ -181,6 +181,14 @@ export interface VersionsSection {
   readonly cards: readonly VersionCard[];
 }
 
+/**
+ * 締切直前の再計算との比較の節(Issue #352)。行は回(5 分前・直前)。**区分のタブに依らない**(再計算は中央だけ)。
+ * `note` は日付に依らない固定の文(件数が少ないうちは回収率の差に意味がない旨)。
+ */
+export interface CloseSection extends StatSection {
+  readonly note: string;
+}
+
 export interface VerifyNotice {
   readonly tone: Tone;
   readonly text: string;
@@ -206,6 +214,8 @@ export interface VerifyModel {
   readonly proposed: ProposedSection | null;
   /** プロンプト版別の比較(Issue #220。区分に依らず全体)。 */
   readonly versions: VersionsSection | null;
+  /** 締切直前の再計算との比較(Issue #352。区分に依らず中央のみ)。比較できるものが無ければ null。 */
+  readonly close: CloseSection | null;
   /** 補正方向×結果(Issue #220)。 */
   readonly direction: StatSection | null;
   /** キャリブレーション(Issue #220)。 */
@@ -406,6 +416,37 @@ function versionsSection(versions: readonly PromptVersionView[], expandedVersion
   };
 }
 
+/**
+ * 「参考」の印を付ける、再計算できた件数の境界(未満なら付ける)。**根拠のない置き値**(着手前ゲートで置いた既定値〈2026-10-17〉の 30 件。ユーザーの決定ではない。統計的な検定の閾値ではない。
+ * キャリブレーションの判定の最小件数 `MIN_COUNT_FOR_JUDGMENT` と同じ 30 だが、別の定数で、連動しない)。
+ */
+export const CLOSE_REFERENCE_MIN_COUNT = 30;
+
+function closeRoundLabel(r: CloseRoundView): string {
+  if (r.round === 1) return `${r.leadMinutes}分前`;
+  if (r.round === 2) return `直前(発走${r.leadMinutes}分前・暫定)`;
+  return `回${r.round}(発走${r.leadMinutes}分前)`;
+}
+
+function closeSection(close: CloseComparisonView): CloseSection {
+  return {
+    heading: "締切直前の再計算との比較",
+    description: "発走の前にオッズだけを取り直して配分を作り直した結果(中央のレースだけ)を、分析時の配分と比べます。回ごとに、再計算できた分析だけを集め、同じレースどうしで回収率を計算しています(失敗・行わなかった分析は除く。件数の「/」の右は、その回の行がある分析の数)。区分のタブには依りません。",
+    note: `件数が少ないうちは、回収率の差に意味がありません。「参考」の行は、再計算できた件数が ${CLOSE_REFERENCE_MIN_COUNT} 件未満です。`,
+    rows: close.rounds.map((r) => ({
+      label: closeRoundLabel(r),
+      bar: null,
+      cells: [
+        { name: "件数(再計算できた/対象)", value: `${r.okCount}/${r.targetCount}件` },
+        { name: "回収率(分析時)", value: recoveryText(r.base.recoveryRate) },
+        { name: "回収率(再計算)", value: recoveryText(r.recalc.recoveryRate) },
+        { name: "投資額(分析時→再計算)", value: `${formatYen(r.base.totalStake)}→${formatYen(r.recalc.totalStake)}` },
+        ...(r.okCount < CLOSE_REFERENCE_MIN_COUNT ? [{ name: "注意", value: "参考(件数が少ない)" }] : []),
+      ],
+    })),
+  };
+}
+
 function directionSection(report: VerifyReportView): StatSection {
   return {
     heading: "補正方向×結果",
@@ -539,6 +580,7 @@ export function buildVerifyModel(input: VerifyModelInput): VerifyModel {
     bet: ready === null ? null : betSection(ready.report),
     proposed: ready === null ? null : proposedSection(ready.report),
     versions: ready === null ? null : versionsSection(ready.promptVersions, input.expandedVersions, input.admin),
+    close: ready === null || ready.closeComparison === null ? null : closeSection(ready.closeComparison),
     direction: ready === null ? null : directionSection(ready.report),
     calibration: ready === null ? null : calibrationSection(ready.report, input.calibrationTarget),
     marks: ready === null ? null : marksSection(ready.report),
