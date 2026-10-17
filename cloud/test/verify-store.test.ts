@@ -4,6 +4,9 @@ import { D1AnalysisStore } from "../src/analysis-repository";
 import { D1ResultStore } from "../src/result-repository";
 import { D1VerifyStore, type VerifyBucket } from "../src/verify-store";
 import { buildVerifySource } from "../src/verify-read";
+import { VERIFY_CLOSE_READ_SQL } from "../src/verify-close";
+import type { CloseSavePayload } from "../src/analysis-close";
+import { contractCases } from "./fixtures-contract";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { openLocalBindings, spyBucket, spyDb, type LocalBindings } from "./local-bindings";
 
@@ -203,7 +206,7 @@ describe("readUsage(R2 の柵の判定の元)", () => {
 });
 
 describe("readAll(集計に使う行を 1 回の batch で読む)", () => {
-  it("D1 に 7 文を 1 回の batch で発行し、行数・読み取り行数を返す。読んだ行から exe と同じ型の読み取り口ができる", async () => {
+  it("D1 に 7 文を 1 回の batch で発行し、続けて再計算の 2 文を別の batch で発行する(Issue #352)。行数・読み取り行数を返す。読んだ行から exe と同じ型の読み取り口ができる", async () => {
     await analyses().saveAnalysis(mkRecord(1, { startTime: "15:45" }));
     await analyses().saveAnalysis(mkRecord(2));
     await new D1ResultStore({ db: local.db }).saveResult("202606030811", [{ umaban: 1, finishPosition: 1, placePayout: 150, winPayout: 300 }]);
@@ -211,12 +214,83 @@ describe("readAll(集計に使う行を 1 回の batch で読む)", () => {
     const spy = spyDb(local.db);
     const s = new D1VerifyStore({ db: spy.db, bucket: local.r2, now: () => NOW });
     const out = await s.readAll();
-    expect(spy.batches).toEqual([7]);
-    expect(out.counts).toEqual({ analyses: 2, horses: 2, allocationMeta: 0, bets: 0, results: 1, comboPayouts: 0, comboImports: 0 });
+    expect(spy.batches).toEqual([7, 2]);
+    expect(out.counts).toEqual({ analyses: 2, horses: 2, allocationMeta: 0, bets: 0, results: 1, comboPayouts: 0, comboImports: 0, closeMeta: 0, closeBets: 0 });
+    expect(out.close).toEqual({ meta: [], bets: [] });
     expect(out.rowsRead).toBeGreaterThanOrEqual(5);
     const source = buildVerifySource(out.rows);
     expect(source.listAnalyses()).toHaveLength(2);
     // saveResult で書いた行は scratched=0(記録済み・取消でない)で、読み取り口では false(Issue #72)。
     expect(source.getResult("202606030811")).toEqual([{ umaban: 1, finishPosition: 1, placePayout: 150, winPayout: 300, scratched: false }]);
+  });
+});
+
+describe("readAll: 締切直前の再計算の行(Issue #352。analysis_close・analysis_close_bets)", () => {
+  const DUE = Date.parse("2026-10-17T06:40:00Z");
+  const baseMeta = contractCases[0]!.record.allocation!.meta;
+  function okPayload(round: 1 | 2, stakes: readonly number[]): CloseSavePayload {
+    return {
+      round, status: "ok", reason: null, dueAtMs: DUE, firedAtMs: DUE + 1500, lateMs: 1500, oddsOfficialDatetime: "2026-10-17 15:41:30",
+      allocation: {
+        meta: { ...baseMeta, route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, bankroll: 100000, perRaceCap: 30000, oddsStatus: "middle" },
+        bets: stakes.map((stake, i) => ({ betType: "place", comboKey: `0${i + 1}`, stake, odds: 2.5, ev: 1.1 })),
+      },
+    };
+  }
+
+  async function seed(): Promise<number> {
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(contractCases[0]!.record);
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    await store.saveClose(saved.id, okPayload(1, [300, 200]));
+    await store.saveClose(saved.id, { round: 2, status: "skipped", reason: "too-late", dueAtMs: DUE, firedAtMs: DUE + 1, lateMs: 1, oddsOfficialDatetime: null, allocation: null });
+    return saved.id;
+  }
+
+  it("回のメタ(状態・経路・見送りの理由)と ok の回の買い目(券種・キー・賭け金)を読む。診断の行数に closeMeta・closeBets が出て、読み取り行数に加わる", async () => {
+    const id = await seed();
+    const out = await verifyStore().readAll();
+    expect(out.close).toEqual({
+      meta: [
+        { analysisId: id, round: 1, status: "ok", route: "mixed", skipReasonCode: null },
+        { analysisId: id, round: 2, status: "skipped", route: null, skipReasonCode: null },
+      ],
+      bets: [
+        { analysisId: id, round: 1, betType: "place", comboKey: "01", stake: 300 },
+        { analysisId: id, round: 1, betType: "place", comboKey: "02", stake: 200 },
+      ],
+    });
+    expect(out.counts["closeMeta"]).toBe(2);
+    expect(out.counts["closeBets"]).toBe(2);
+    // 読み取り行数は、主の 7 文の分(再計算の行を足す前の値)より、再計算の行の数(2 + 2)以上に増える
+    const mainOnly = out.rowsRead;
+    const withoutClose = await new D1VerifyStore({ db: failingCloseDb(), bucket: local.r2, now: () => NOW }).readAll();
+    expect(mainOnly - withoutClose.rowsRead).toBeGreaterThanOrEqual(4);
+  });
+
+  it("2 つの SQL は主キーの順で、並べ替えの一時領域(TEMP B-TREE)を使わない", async () => {
+    await seed();
+    for (const sql of Object.values(VERIFY_CLOSE_READ_SQL)) {
+      const plan = await local.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all<{ detail: string }>();
+      expect(plan.results.length).toBeGreaterThan(0);
+      expect(plan.results.map((r) => r.detail).join("\n")).not.toMatch(/TEMP B-TREE/);
+    }
+  });
+
+  /** 再計算の表が無い(migration 前)ときの D1 の失敗を再現する: 再計算の文だけ、存在しない表を読む文に差し替える。 */
+  function failingCloseDb() {
+    const real = local.db;
+    return {
+      prepare: (sql: string) => real.prepare(Object.values(VERIFY_CLOSE_READ_SQL).includes(sql as never) ? "SELECT 1 FROM no_such_table_for_close" : sql),
+      batch: (statements: D1PreparedStatement[]) => real.batch(statements),
+    } as unknown as ConstructorParameters<typeof D1VerifyStore>[0]["db"];
+  }
+
+  it("★再計算の表が読めない(表が無い)ときは close が null になり、主の 7 表の行・件数は読める(既存の検証を壊さない)。診断の行数に closeMeta・closeBets は出ない", async () => {
+    await seed();
+    const out = await new D1VerifyStore({ db: failingCloseDb(), bucket: local.r2, now: () => NOW }).readAll();
+    expect(out.close).toBeNull();
+    expect(out.rows.analyses).toHaveLength(1); // 前提: 主の行が読めている
+    expect(out.counts).toEqual({ analyses: 1, horses: out.rows.horses.length, allocationMeta: 1, bets: out.rows.bets.length, results: 0, comboPayouts: 0, comboImports: 0 });
+    expect(out.rowsRead).toBeGreaterThan(0);
   });
 });

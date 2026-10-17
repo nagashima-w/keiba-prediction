@@ -132,6 +132,35 @@ export interface PromptVersionView {
   readonly overconfidenceGaps: readonly (number | null)[];
 }
 
+/** 締切直前の再計算との比較の 1 側(サーバの `CloseSummary`。Issue #352)。 */
+export interface CloseSummaryView {
+  readonly betCount: number;
+  readonly totalStake: number;
+  readonly totalReturn: number;
+  readonly recoveryRate: number | null;
+}
+
+/** 締切直前の再計算との比較の 1 回ぶん(サーバの `CloseRoundComparison`。Issue #352)。 */
+export interface CloseRoundView {
+  /** 回の番号(1 = 5 分前、2 = 直前)。 */
+  readonly round: number;
+  /** 発走の何分前に再計算したか(サーバの定数。直前は暫定値で変わりうる)。 */
+  readonly leadMinutes: number;
+  /** 集計に入った分析のうち、その回で再計算できた(ok)数。 */
+  readonly okCount: number;
+  /** 集計に入った分析のうち、その回の行がある(failed・skipped を含む)数。 */
+  readonly targetCount: number;
+  /** 分析時の配分(再計算できた分析だけ)。 */
+  readonly base: CloseSummaryView;
+  /** 再計算の配分(同じ分析だけ)。 */
+  readonly recalc: CloseSummaryView;
+}
+
+/** 締切直前の再計算との比較(サーバの `CloseComparison`。区分に依らず中央のみ)。 */
+export interface CloseComparisonView {
+  readonly rounds: readonly CloseRoundView[];
+}
+
 export type StaleReason = "backfilling" | "min-interval" | "daily-limit";
 
 export type VerifyOutcome =
@@ -141,6 +170,8 @@ export type VerifyOutcome =
       readonly report: VerifyReportView;
       /** プロンプト版別の比較(区分に依らず全体。Issue #220)。 */
       readonly promptVersions: readonly PromptVersionView[];
+      /** 締切直前の再計算との比較(Issue #352。区分に依らず中央のみ)。無い・読めないときは null。 */
+      readonly closeComparison: CloseComparisonView | null;
       /** 集計した時刻(ISO)。 */
       readonly computedAt: string;
       readonly stale: boolean;
@@ -297,6 +328,31 @@ function parsePromptVersions(v: unknown): PromptVersionView[] | null {
   return list;
 }
 
+function parseCloseSummary(v: unknown): CloseSummaryView | null {
+  if (!isRecord(v) || !isCount(v["betCount"]) || !isMoney(v["totalStake"]) || !isMoney(v["totalReturn"]) || !rateOrNull(v["recoveryRate"])) return null;
+  return { betCount: v["betCount"], totalStake: v["totalStake"], totalReturn: v["totalReturn"], recoveryRate: v["recoveryRate"] };
+}
+
+function parseCloseRound(v: unknown): CloseRoundView | null {
+  if (!isRecord(v) || !isCount(v["round"]) || v["round"] < 1 || !isNum(v["leadMinutes"]) || v["leadMinutes"] <= 0 || !isCount(v["okCount"]) || !isCount(v["targetCount"]) || v["okCount"] > v["targetCount"]) return null;
+  const base = parseCloseSummary(v["base"]);
+  const recalc = parseCloseSummary(v["recalc"]);
+  if (base === null || recalc === null) return null;
+  return { round: v["round"], leadMinutes: v["leadMinutes"], okCount: v["okCount"], targetCount: v["targetCount"], base, recalc };
+}
+
+/**
+ * 締切直前の再計算との比較(Issue #352)。**無い(旧い集計・旧い Worker)・null・壊れている値は、いずれも null(比較なし)**:
+ * 補助の節なので、この節の不整合で応答全体(本体の検証)を捨てない(`promptVersions` と違い、応答全体を unexpected にしない)。
+ * 回は 1 つ以上で重複しない。
+ */
+function parseCloseComparison(v: unknown): CloseComparisonView | null {
+  if (!isRecord(v)) return null;
+  const rounds = parseList(v["rounds"], parseCloseRound);
+  if (rounds === null || rounds.length === 0 || new Set(rounds.map((r) => r.round)).size !== rounds.length) return null;
+  return { rounds };
+}
+
 const VENUES: ReadonlySet<string> = new Set<VerifyVenue>(["all", "central", "nar"]);
 const STALE_REASONS: ReadonlySet<string> = new Set<StaleReason>(["backfilling", "min-interval", "daily-limit"]);
 
@@ -331,6 +387,7 @@ export function parseVerifyResponse(body: unknown): VerifyOutcome | null {
     venue: venue as VerifyVenue,
     report,
     promptVersions,
+    closeComparison: parseCloseComparison(body["closeComparison"]),
     computedAt: body["computedAt"],
     stale: body["stale"],
     staleReason: reason as StaleReason | null,

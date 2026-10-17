@@ -84,7 +84,7 @@ async function connect(): Promise<Connected> {
   const token = await signToken(key);
   const state: Connected = {
     fetch: undefined as never,
-    response: { status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), computedAt: "2026-10-10T03:00:00.000Z", stale: true, staleReason: "min-interval", nextRecomputeAt: "2026-10-10T03:05:00.000Z", diag: { rowsRead: 5, counts: {}, readMs: 1, computeMs: 1, promptVersionsMs: 1, startTimeGaps: { lost: 3, affecting: 2 } } },
+    response: { status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), closeComparison: null, computedAt: "2026-10-10T03:00:00.000Z", stale: true, staleReason: "min-interval", nextRecomputeAt: "2026-10-10T03:05:00.000Z", diag: { rowsRead: 5, counts: {}, readMs: 1, computeMs: 1, promptVersionsMs: 1, startTimeGaps: { lost: 3, affecting: 2 } } },
     fails: false,
     calls: [],
   };
@@ -477,3 +477,127 @@ describe("fetchVerify の失敗の分類", () => {
     expect(verifyFetchFailureMessage({ kind: "server-error" }, false)).toContain("再読み込み");
   });
 });
+
+describe("Issue #352: closeComparison(締切直前の再計算との比較)の読み取り", () => {
+  const ready = (): Record<string, any> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as Record<string, unknown>) });
+  const valid = () => ({
+    rounds: [
+      { round: 1, leadMinutes: 5, okCount: 2, targetCount: 3, base: { betCount: 4, totalStake: 400, totalReturn: 300, recoveryRate: 0.75 }, recalc: { betCount: 3, totalStake: 300, totalReturn: 450, recoveryRate: 1.5 } },
+      { round: 2, leadMinutes: 2, okCount: 0, targetCount: 1, base: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null }, recalc: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null } },
+    ],
+  });
+
+  it("項目が無い(旧い集計・旧い Worker)・null は、比較なし(null)として読める。ほかの節は読める", () => {
+    const absent = parseVerifyResponse(ready());
+    expect(absent).toMatchObject({ kind: "ready", closeComparison: null });
+    const body = ready();
+    body["closeComparison"] = null;
+    expect(parseVerifyResponse(body)).toMatchObject({ kind: "ready", closeComparison: null });
+  });
+
+  it("正しい値は、そのまま読める(回・リード・件数・両側の 4 値)", () => {
+    const body = ready();
+    body["closeComparison"] = valid();
+    const outcome = parseVerifyResponse(body);
+    expect(outcome?.kind === "ready" ? outcome.closeComparison : "ready でない").toEqual(valid());
+  });
+
+  const bad: ReadonlyArray<readonly [string, (c: any) => void]> = [
+    ["rounds が配列でない", (c) => { c.rounds = {}; }],
+    ["rounds が空", (c) => { c.rounds = []; }],
+    ["回の番号が 0", (c) => { c.rounds[0].round = 0; }],
+    ["回の番号が小数", (c) => { c.rounds[0].round = 1.5; }],
+    ["回が重複する", (c) => { c.rounds[1].round = 1; }],
+    ["leadMinutes が 0", (c) => { c.rounds[0].leadMinutes = 0; }],
+    ["leadMinutes が負", (c) => { c.rounds[0].leadMinutes = -2; }],
+    ["leadMinutes が文字列", (c) => { c.rounds[0].leadMinutes = "5"; }],
+    ["ok の件数が対象より多い", (c) => { c.rounds[0].okCount = 4; }],
+    ["件数が負", (c) => { c.rounds[0].targetCount = -1; }],
+    ["件数が小数", (c) => { c.rounds[0].okCount = 1.5; }],
+    ["分析時の側が欠ける", (c) => { delete c.rounds[0].base; }],
+    ["再計算の投資額が負", (c) => { c.rounds[0].recalc.totalStake = -1; }],
+    ["再計算の回収率が文字列", (c) => { c.rounds[0].recalc.recoveryRate = "150%"; }],
+    ["賭け数が小数", (c) => { c.rounds[0].base.betCount = 0.5; }],
+  ];
+  it.each(bad)("★壊れた closeComparison(%s)は、この節だけ null に落とす。ほかの節(集計・版別)は読める", (_name, mutate) => {
+    const body = ready();
+    const close = valid();
+    mutate(close);
+    body["closeComparison"] = close;
+    const outcome = parseVerifyResponse(body);
+    expect(outcome).not.toBeNull(); // 応答全体は捨てない
+    expect(outcome).toMatchObject({ kind: "ready", closeComparison: null });
+    expect(outcome?.kind === "ready" ? outcome.report.includedAnalysisCount : -1).toBeGreaterThan(0);
+    expect(outcome?.kind === "ready" ? outcome.promptVersions.length : -1).toBeGreaterThan(0);
+  });
+});
+
+describe("Issue #352: 契約(本物の VerifyCore → 本物の handle() → クライアント)で比較が読める", () => {
+  it("管理者・閲覧者のどちらの要求でも、サーバが作った比較(回・リード・件数・両側の回収率)をクライアントが読める。表が読めなければ null", async () => {
+    for (const close of [true, false]) {
+      const s = await closeSetup(close);
+      const result = await fetchVerify(s.fetch, "central", false);
+      if (!result.ok || result.outcome.kind !== "ready") throw new Error("ready のはず");
+      if (!close) {
+        expect(result.outcome.closeComparison).toBeNull();
+        continue;
+      }
+      const c = result.outcome.closeComparison;
+      if (c === null) throw new Error("比較があるはず");
+      expect(c.rounds.map((r) => [r.round, r.leadMinutes, r.okCount, r.targetCount])).toEqual([[1, 5, 1, 1], [2, 2, 0, 0]]);
+      // 空振り防止: 分析時と再計算で賭け金が違う
+      expect([c.rounds[0]!.base.totalStake, c.rounds[0]!.recalc.totalStake]).toEqual([300, 100]);
+      expect([c.rounds[0]!.base.recoveryRate, c.rounds[0]!.recalc.recoveryRate]).toEqual([1.5, 0]);
+    }
+  });
+});
+
+/** 閲覧者の要求(`handle()`)で、本物の VerifyCore の比較を読む。`withClose` が偽なら、再計算の表が読めなかった場合(close: null)。 */
+async function closeSetup(withClose: boolean) {
+  const data = new Map<string, unknown>();
+  const kv: VerifyKv = { get: <T,>(key: string) => data.get(key) as T | undefined, put: (key, value) => void data.set(key, JSON.parse(JSON.stringify(value))) };
+  const analysis: VerifyAnalysisRow = {
+    id: 1, raceId: "202606030811", analyzedAt: "2026-07-05T05:00:00.000Z", evEstimated: 0, promptVersion: "v1", additionalInstruction: null, kaisaiDate: "20260705",
+    model: null, rawResponse: null, raceSnapshotJson: null, historyCutoffDate: "20260705", promptLookaheadGuarded: 1, startTime: "15:45",
+  };
+  const rows: VerifyReadRows = {
+    analyses: [analysis],
+    horses: [{ analysisId: 1, umaban: 1, prior: 0.5, adjusted_prob: 0.5, place_odds_min: 2, ev: 1.2, is_positive: 1, contributions_json: null, mark: "◎", reason: null, highlights_json: null, concerns_json: null }],
+    allocationMeta: [{ analysisId: 1, route: "place-only", skipReasonCode: null }],
+    bets: [{ analysisId: 1, betType: "place", comboKey: "01", stake: 300 }],
+    results: [{ raceId: "202606030811", umaban: 1, finishPosition: 1, placePayout: 150, winPayout: null }, { raceId: "202606030811", umaban: 2, finishPosition: 5, placePayout: null, winPayout: null }],
+    comboPayouts: [], comboImports: [],
+  };
+  const close = withClose
+    ? { meta: [{ analysisId: 1, round: 1, status: "ok", route: "place-only", skipReasonCode: null }], bets: [{ analysisId: 1, round: 1, betType: "place", comboKey: "02", stake: 100 }] }
+    : null;
+  const store: VerifyStorePort = {
+    readWatermark: async () => ({ analyses: 1, results: 2, comboPayouts: null, comboImports: null }),
+    listPending: async () => ({ rows: [], total: 0 }),
+    readUsage: async () => ({ classA: 0, classB: 0 }),
+    resolveStartTimes: async () => ({ resolved: [], missing: [], failed: [], gets: 0 }),
+    commitStartTimes: async () => 0,
+    readAll: async () => ({ rows, rowsRead: 1, counts: {}, close }),
+  };
+  const core = new VerifyCore({ kv, now: () => Date.parse("2026-10-10T03:00:00.000Z"), setAlarm: () => {}, getAlarm: async () => null, store });
+  await core.getReport("all");
+  const key = await makeKey("k1");
+  const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
+  const token = await signToken(key, { email: "friend@example.com" });
+  const env: Env = {
+    ...GOOD_ENV,
+    NETKEIBA_GATE: { idFromName: NOT_CALLED, get: NOT_CALLED },
+    RACE_DAY: { idFromName: NOT_CALLED, get: NOT_CALLED },
+    DB: {} as unknown as Env["DB"],
+    ANALYSIS_DETAIL: {} as unknown as Env["ANALYSIS_DETAIL"],
+    VERIFY_REPORT: { idFromName: (name: string) => name, get: () => ({ getReport: async (venue, options) => core.getReport(venue, options), getViewerReport: async (venue) => core.getViewerReport(venue) }) },
+  };
+  const fetchLike: FetchLike = async (url, init) => {
+    const headers = new Headers(init.headers);
+    headers.set("Cf-Access-Jwt-Assertion", token);
+    headers.set("Sec-Fetch-Site", "same-origin");
+    const response = await handle(new Request(`${ORIGIN}${url}`, { method: init.method, headers }), env, {}, deps);
+    return { status: response.status, json: () => response.json() };
+  };
+  return { fetch: fetchLike };
+}

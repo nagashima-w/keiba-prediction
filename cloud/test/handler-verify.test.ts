@@ -9,11 +9,17 @@ import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
  */
 const ORIGIN = "https://cloud.invalid";
 
+/** 締切直前の再計算との比較(Issue #352)の見本。ハンドラは中身を見ずにそのまま返す(下の toEqual が、項目を落とさないことを固定する)。 */
+const CLOSE_COMPARISON = {
+  rounds: [{ round: 1, leadMinutes: 5, okCount: 1, targetCount: 2, base: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5 }, recalc: { betCount: 1, totalStake: 200, totalReturn: 0, recoveryRate: 0 } }],
+};
+
 const READY: VerifyResponse = {
   status: "ready",
   venue: "all",
   report: { includedAnalysisCount: 3 } as never,
   promptVersions: [],
+  closeComparison: CLOSE_COMPARISON,
   computedAt: "2026-10-10T03:00:00.000Z",
   stale: false,
   staleReason: null,
@@ -26,6 +32,7 @@ const VIEWER_READY: ViewerVerifyResponse = {
   venue: "all",
   report: { includedAnalysisCount: 3 } as never,
   promptVersions: [],
+  closeComparison: CLOSE_COMPARISON,
   computedAt: "2026-10-10T03:00:00.000Z",
   stale: false,
   staleReason: null,

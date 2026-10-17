@@ -727,10 +727,10 @@ function typeRowsNode(rows: readonly { readonly label: string; readonly count: s
 }
 
 /** 補正方向・キャリブレーションの帯・印の行(Issue #220)。ラベルと「名前 値」の項目を、狭い幅では折り返す(表は使わない)。帯グラフは `progress`(style を使わない)。 */
-function statRowsNode(rows: readonly StatRow[]): VNode {
+function statRowsNode(rows: readonly StatRow[], extraClass = ""): VNode {
   return h(
     "ul",
-    { class: "verify-stats" },
+    { class: extraClass === "" ? "verify-stats" : `verify-stats ${extraClass}` },
     rows.map((r) =>
       h("li", { class: "verify-stat" }, [
         h("span", { class: "verify-stat-label" }, [r.label]),
@@ -848,6 +848,10 @@ function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
   }
   if (model.versions !== null) {
     body.push(...versionsNodes(model.versions, actions));
+  }
+  if (model.close !== null) {
+    const c = model.close;
+    body.push(h("h2", {}, [c.heading]), h("p", { class: "meta" }, [c.description]), statRowsNode(c.rows, "verify-close-stats"), h("p", { class: "meta verify-close-note" }, [c.note]));
   }
   if (model.direction !== null) {
     body.push(...statSectionNodes(model.direction));

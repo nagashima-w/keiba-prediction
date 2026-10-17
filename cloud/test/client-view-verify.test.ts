@@ -6,7 +6,7 @@ import { buildVerifyModel, type VerifyModelInput } from "../client/verify-model"
 import { renderScreen, type ViewActions } from "../client/view";
 import type { VNode } from "../client/vnode";
 import { noopActions } from "./client-fakes";
-import { calibrationFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
+import { calibrationFixture, closeFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /**
  * Issue #219: 検証画面の VNode と、一覧の入口のリンク。モデル(`client-verify-model.test.ts`)→ VNode の写し間違い、許可リスト(`dom.ts`)を通ること、ボタンが動作に繋がること。
@@ -39,7 +39,7 @@ const REPORT: VerifyReportView = {
     unknownBetType: { count: 1, totalStake: 100, betTypes: ["x"] },
   },
 };
-const READY: VerifyOutcome = { kind: "ready", venue: "all", report: REPORT, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 5, affecting: 2 } };
+const READY: VerifyOutcome = { kind: "ready", venue: "all", report: REPORT, promptVersions: versionsFixture(), closeComparison: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 5, affecting: 2 } };
 const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: READY }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, ...over });
 const tree = (over: Partial<VerifyModelInput> = {}, actions: ViewActions = noopActions): VNode => renderScreen(buildVerifyModel(input(over)), actions);
 
@@ -366,5 +366,32 @@ describe("一覧の入口", () => {
     const t = renderScreen(model, noopActions);
     const links = findAll(t, (n) => n.tag === "a" && (n.attrs?.["class"] === "verify-link" || n.attrs?.["class"] === "settings-link"));
     expect(links.map((n) => [n.attrs?.["class"], n.attrs?.["href"], textOf(n)])).toEqual([["verify-link", "#verify", "検証"]]);
+  });
+});
+
+describe("Issue #352: 締切直前の再計算との比較の VNode", () => {
+  const withClose = (over: Partial<VerifyModelInput> = {}): VNode => tree({ load: { kind: "ready", outcome: { ...READY, closeComparison: closeFixture() } }, ...over });
+
+  it("比較がなければ節を出さない", () => {
+    expect(textOf(tree())).not.toContain("締切直前の再計算との比較");
+  });
+
+  it("見出し・説明・行(5 分前・直前)・固定の注記を出す。行は他の統計と同じ行の形(表〈table〉は使わない)。閲覧者にも出る", () => {
+    for (const admin of [true, false]) {
+      const t = withClose({ admin });
+      expect(textOf(t)).toContain("締切直前の再計算との比較");
+      expect(findAll(t, (n) => n.tag === "table")).toHaveLength(0);
+      const section = byClass(t, "verify-close-stats")[0]!;
+      const rows = byClass(section, "verify-stat");
+      expect(rows.map((r) => textOf(byClass(r, "verify-stat-label")[0]!))).toEqual(["5分前", "直前(発走2分前・暫定)"]);
+      expect(textOf(rows[0]!)).toContain("12/15件");
+      expect(textOf(rows[0]!)).toContain("参考(件数が少ない)");
+      expect(textOf(rows[1]!)).not.toContain("参考");
+      expect(textOf(t)).toContain("件数が少ないうちは、回収率の差に意味がありません。");
+    }
+  });
+
+  it("許可リスト(dom.ts)の範囲で組める", () => {
+    mountAll(withClose());
   });
 });

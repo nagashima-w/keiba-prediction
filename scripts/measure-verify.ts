@@ -17,7 +17,9 @@
  * 買い目の件数は **本番の `analysis_bets` の実数が未確認**なので `--bets`(既定 12)で変えて測る(読み取り行数の最大の不確定要素)。
  *
  * 使い方(リポジトリのルートで。Linux のみ。/proc を使う):
- *   pnpm tsx scripts/measure-verify.ts [--analyses 2225] [--results 1301] [--horses 13] [--bets 12] [--legacy-ratio 0.7] [--versions 1] [--instruction-length 0] [--repeat 5] [--port 8942]
+ *   pnpm tsx scripts/measure-verify.ts [--analyses 2225] [--results 1301] [--horses 13] [--bets 12] [--legacy-ratio 0.7] [--versions 1] [--instruction-length 0] [--close-ratio 0] [--repeat 5] [--port 8942]
+ *   再計算との比較(Issue #352)の実測: `--close-ratio R`(0〜1。既定 0=再計算の行なし)で、分析の割合 R に回 1・回 2 の ok の行(配分は分析時と同じ=買い目の数が同じ)を付ける。**読み取り行数の増分は、
+ *   `--close-ratio 0` と `--close-ratio R` を同じ引数で 2 回流し、`diag.rowsRead` の差で見る**(表ごとの行数は `diag.counts` の `closeMeta`・`closeBets`、比較の集計の所要時間は `diag.closeMs`)。
  *   版別比較(Issue #220)の実測: `--versions N`(プロンプト版の種類の数。既定 1=#219 のとおり 'v8' だけ)・`--instruction-length L`(追加指示の文字数。0 ならなし。0 より大きいと 4 件に 1 件に付く)
  *
  * 限界:
@@ -33,6 +35,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { encodeDetail } from "../cloud/src/analysis-detail.js";
+import { closeBetsJson, closeRowParams, INSERT_CLOSE_BETS_SQL, UPSERT_CLOSE_SQL, type CloseRound, type CloseSavePayload } from "../cloud/src/analysis-close.js";
 import {
   allocationBetParams,
   allocationMetaParams,
@@ -50,7 +53,7 @@ import {
   UPSERT_RACE_RESULT_META_SQL,
   UPSERT_RACE_RESULT_SQL,
 } from "../packages/core/src/ev/analysis-store-codec.js";
-import type { AnalysisRecord, RaceComboPayoutsSaveInput, RaceResultEntry } from "../packages/core/src/ev/analysis-store-types.js";
+import type { AnalysisAllocationRecord, AnalysisRecord, RaceComboPayoutsSaveInput, RaceResultEntry } from "../packages/core/src/ev/analysis-store-types.js";
 import { buildComboOddsKeyFor, type ComboBetType } from "../packages/core/src/scraper/combo-odds-key.js";
 import { buildDetailText } from "./measure-d1-size.js";
 import { descendantsOf, parseProcStat } from "./measure-worker-cpu.js";
@@ -83,6 +86,20 @@ export interface SyntheticVerifyOptions {
   readonly versions: number;
   /** 追加指示の文字数(Issue #220。0 なら追加指示なし。0 より大きいと 4 件に 1 件に、版ごとに別の文面を付ける)。 */
   readonly instructionLength: number;
+}
+
+/**
+ * 合成した分析 `index`(1 始まり)に、締切直前の再計算の行(回 1・回 2。Issue #352)を付けるか。割合 `ratio`(0〜1。既定の `--close-ratio` は 0=付けない)を、
+ * 100 件ごとの先頭 `round(ratio × 100)` 件に付ける決定的な選び方(乱数を使わない=同じ引数なら同じ分析に付く)。
+ */
+export function hasSyntheticClose(index: number, ratio: number): boolean {
+  return index % 100 < Math.round(ratio * 100);
+}
+
+/** 合成の再計算の結果(ok。配分は分析時のものをそのまま使う=買い目の数が同じで、読み取り行数の見積もりが「1 分析あたり 2 回ぶん」になる)。 */
+export function syntheticClosePayload(round: CloseRound, allocation: AnalysisAllocationRecord): CloseSavePayload {
+  const due = Date.UTC(2025, 0, 5, 6, 40, 0);
+  return { round, status: "ok", reason: null, dueAtMs: due, firedAtMs: due + 1500, lateMs: 1500, oddsOfficialDatetime: "2025-01-05 15:41:30", allocation };
 }
 
 /** 合成した分析 `i`(1 始まり)のプロンプト版。6 件に 1 件が版不明(null)。残りは `versions` 種類に均等に割り当てる(1 種類なら #219 のとおり 'v8')。 */
@@ -229,7 +246,8 @@ interface VerifyView {
   computedAt?: string;
   report?: { includedAnalysisCount: number; excludedLookaheadSuspectCount: number; excludedLookaheadUnknownCount: number; proposedBet: { overall: { betCount: number } } };
   promptVersions?: unknown[];
-  diag?: { rowsRead: number; counts: Record<string, number>; readMs: number; computeMs: number; promptVersionsMs?: number; startTimeGaps: { lost: number; affecting: number } };
+  closeComparison?: unknown;
+  diag?: { rowsRead: number; counts: Record<string, number>; readMs: number; computeMs: number; promptVersionsMs?: number; closeMs?: number; startTimeGaps: { lost: number; affecting: number } };
 }
 
 const range = (xs: readonly number[]): string => (xs.length === 0 ? "-" : `${Math.min(...xs)}〜${Math.max(...xs)}`);
@@ -245,6 +263,7 @@ async function main(): Promise<void> {
     versions: argNumber("--versions", 1),
     instructionLength: argNumber("--instruction-length", 0),
   };
+  const closeRatio = argNumber("--close-ratio", 0);
   const repeat = argNumber("--repeat", 5);
   const port = argNumber("--port", 8942);
   const clkTck = Number(execFileSync("getconf", ["CLK_TCK"], { encoding: "utf-8" }).trim());
@@ -288,6 +307,14 @@ async function main(): Promise<void> {
         statements.push(db.prepare(INSERT_ALLOCATION_META_SQL).bind(...allocationMetaParams(id, rec.allocation.meta)));
         for (const b of rec.allocation.bets) statements.push(db.prepare(INSERT_ALLOCATION_BET_SQL).bind(...allocationBetParams(id, b)));
       }
+      // 締切直前の再計算の行(Issue #352。`--close-ratio`)。本番の保存(analysis-repository.ts の `saveClose`)と同じ文・同じ束縛値(analysis-close.ts)。
+      if (rec.allocation !== undefined && hasSyntheticClose(saved + 1, closeRatio)) {
+        for (const round of [1, 2] as const) {
+          const payload = syntheticClosePayload(round, rec.allocation);
+          statements.push(db.prepare(UPSERT_CLOSE_SQL).bind(...closeRowParams(id, payload)));
+          statements.push(db.prepare(INSERT_CLOSE_BETS_SQL).bind(id, round, closeBetsJson(payload)));
+        }
+      }
       await db.batch(statements);
       await proxy.env.ANALYSIS_DETAIL.put(`analyses/${id}.json.gz`, encodeDetail(rec));
       saved += 1;
@@ -304,7 +331,7 @@ async function main(): Promise<void> {
       await db.batch(statements);
     }
     const tableCounts: Record<string, number> = {};
-    for (const table of ["analyses", "analysis_horses", "analysis_allocation_meta", "analysis_bets", "race_results", "race_combo_payouts", "race_combo_payout_imports"]) {
+    for (const table of ["analyses", "analysis_horses", "analysis_allocation_meta", "analysis_bets", "race_results", "race_combo_payouts", "race_combo_payout_imports", "analysis_close", "analysis_close_bets"]) {
       tableCounts[table] = (await db.prepare(`SELECT count(*) AS c FROM ${table}`).first<{ c: number }>())!.c;
     }
     await proxy.dispose();
@@ -370,6 +397,7 @@ async function main(): Promise<void> {
     const walls: number[] = [];
     const cpus: number[] = [];
     const versionMs: number[] = [];
+    const closeMs: number[] = [];
     let lastView: VerifyView | null = null;
     for (let i = 0; i < repeat; i += 1) {
       const { view, wallMs, cpuMs } = await call("?venue=all&refresh=1");
@@ -378,6 +406,7 @@ async function main(): Promise<void> {
       reads.push(view.diag.readMs);
       computes.push(view.diag.computeMs);
       versionMs.push(view.diag.promptVersionsMs ?? Number.NaN);
+      closeMs.push(view.diag.closeMs ?? Number.NaN);
       walls.push(wallMs);
       cpus.push(cpuMs);
       lastView = view;
@@ -385,7 +414,7 @@ async function main(): Promise<void> {
     }
     console.log(`\n## (ii) 集計の再計算(refresh=1)を ${repeat} 回`);
     console.log(`  D1 の読み取り行数(meta.rows_read の合計): ${range(rows)} 行/回。表ごとの行数: ${JSON.stringify(lastView?.diag?.counts)}`);
-    console.log(`  D1 の読み ${range(reads)}ms、3 区分の集計 ${range(computes)}ms、版別比較の集計 ${range(versionMs)}ms、呼び出し全体の壁時計 ${range(walls)}ms、workerd の CPU ${range(cpus.map((c) => Math.round(c)))}ms(10ms 刻み)`);
+    console.log(`  D1 の読み ${range(reads)}ms、3 区分の集計 ${range(computes)}ms、版別比較の集計 ${range(versionMs)}ms、再計算との比較の集計(Issue #352。--close-ratio ${closeRatio})${range(closeMs)}ms、呼び出し全体の壁時計 ${range(walls)}ms、workerd の CPU ${range(cpus.map((c) => Math.round(c)))}ms(10ms 刻み)`);
     console.log(`  集計の中身(区分 all): 集計 ${lastView?.report?.includedAnalysisCount} 件・先読み疑いで除外 ${lastView?.report?.excludedLookaheadSuspectCount} 件・判定不能で除外 ${lastView?.report?.excludedLookaheadUnknownCount} 件・配分ベースの点数 ${lastView?.report?.proposedBet.overall.betCount}`);
 
     // 4b. (iv) 版別比較の大きさ(区分 all の ready 応答と、central・nar の report の JSON の長さから、kv に保存する値を概算する)。
