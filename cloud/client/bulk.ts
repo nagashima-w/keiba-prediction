@@ -36,6 +36,14 @@ export function jstHm(now: Date): string {
   return `${pad(jst.getUTCHours())}:${pad(jst.getUTCMinutes())}`;
 }
 
+/**
+ * 発走済みか(一括実行と一覧の並べ替え〈Issue #346〉の共通の判定)。**今日(JST)の開催日のときだけ**、発走予定時刻が現在(`hm`)以前なら発走済み(ちょうども含む)。
+ * 時刻が無い(不明)は発走済みとしない。今日でない開催日は、時刻が過ぎていても発走済みとしない。端末の時計をそのまま使う(サーバの時刻での補正はしない)。
+ */
+export function hasStarted(startTime: string | null, today: boolean, hm: string): boolean {
+  return today && startTime !== null && startTime <= hm;
+}
+
 export interface SelectInput {
   readonly mode: TaskMode;
   readonly races: readonly RaceRow[];
@@ -65,7 +73,7 @@ export function selectBulkTargets(input: SelectInput): BulkSelection {
       done += 1;
     } else if (input.mode === "pre_race" && today && race.startTime === null) {
       timeUnknown += 1;
-    } else if (input.mode === "pre_race" && today && race.startTime !== null && race.startTime <= hm) {
+    } else if (input.mode === "pre_race" && hasStarted(race.startTime, today, hm)) {
       started += 1;
     } else {
       raceIds.push(race.raceId);

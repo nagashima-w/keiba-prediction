@@ -185,6 +185,8 @@ describe("生成物のドリフトと決定性", () => {
     // 計り方(全体): d3fccb2 の `cloud/client` と今の `cloud/client` を、それぞれ同じ設定で esbuild に通して `Buffer.byteLength` を取った(前は `git show d3fccb2:cloud/src/client-bundle.generated.ts` の長さとも一致)。外部ライブラリは使っていない。
     // 転送量への影響は小さい: 圧縮後は #336 の前で約 80 KB(出力を `zlib.gzipSync` に通した長さ)。上限は転送量ではなく肥大の検知。
     // 新しい上限 313,800 の根拠: 実測 312,373 に約 1.5KB の余裕(312,373 + 1,427 を 100 バイト単位に切り上げ)。余裕は 1,427 バイト。
+    // Issue #346(一覧の発走済みを下へ回して薄く出す): 上限は 313,800 のまま据え置き。実測(`Buffer.byteLength(CLIENT_JS)`。`pnpm run build:client` の出力)は 312,373 → 313,031(+658)で、余裕は 769 バイト(レビューの修正で、発走済みのクラスを `past` から `started` に変えた分が +6)。
+    // 増えた理由: 共通の判定 `hasStarted`(`bulk.ts`)・並べ替えと `past` の印・`needsListClock`(`list.ts`)・30 秒の再描画のタイマー(新規 `list-clock.ts`)・`view.ts` のクラス・`app.ts` の配線(`render` の末尾の `sync`・表示の復帰)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(313_800);
   });

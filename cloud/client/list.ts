@@ -3,8 +3,8 @@
  * `view.ts` がこれを VNode にする。
  */
 import type { BoardRow, RaceRow, TaskMode } from "./api";
-import { buildBulkModel, type BulkModel, type BulkUi } from "./bulk";
-import { ymdToInput } from "./date";
+import { buildBulkModel, hasStarted, jstHm, type BulkModel, type BulkUi } from "./bulk";
+import { todayJst, ymdToInput } from "./date";
 import { gradeLabelForDisplay } from "./grade";
 import { buildHash, buildTargetsHash, REPORT_HASH, SETTINGS_HASH, VERIFY_HASH, type Route, type Venue } from "./route";
 
@@ -119,6 +119,11 @@ export interface ListModelInput {
    * **省略、または閲覧者(`readOnly`)のときは、どの場も `bulk` を作らない(null)**。
    */
   readonly bulk?: { readonly now: Date; readonly states: ReadonlyMap<string, BulkUi> };
+  /**
+   * 現在時刻(Issue #346。端末の時計。補正しない)。渡すと、開催日が今日(JST)のとき、場の中で発走済みのレースを下へ回して `past` の印を付ける(画面のクラスは `started`)。
+   * **省略は並べ替えない**(従来どおり)。閲覧者にも効く(`bulk` とは別)。
+   */
+  readonly now?: Date;
 }
 
 export interface RaceItem {
@@ -129,6 +134,8 @@ export interface RaceItem {
   /** 「芝 1800m・16頭」。発走予定時刻があれば先頭に「15:40 発走・」(Issue #236)。 */
   readonly detail: string;
   readonly grade: string | null;
+  /** 発走済み(今日の開催日で、発走予定時刻が現在以前。Issue #346)。薄く出す。`now` を渡さない・今日でない・時刻不明は false。 */
+  readonly past: boolean;
   readonly href: string;
   /** 板が取れていないときは null(バッジを出さない)。 */
   readonly badges: { readonly morning: Badge; readonly preRace: Badge } | null;
@@ -173,6 +180,13 @@ export interface ListModel {
   readonly groups: readonly RaceGroupItem[];
 }
 
+/** 今日(JST)の開催日の一覧に、時間の経過で並び・薄さが変わるレースがあるか(Issue #346。再描画のタイマーを張るかの判定)。時刻の無いレースだけ・全部発走済み・今日でない日は false。 */
+export function needsListClock(races: readonly RaceRow[], date: string, now: Date): boolean {
+  if (todayJst(now) !== date) return false; // 今日でない日は、並びも薄さも変わらない
+  const hm = jstHm(now);
+  return races.some((r) => r.startTime !== null && !hasStarted(r.startTime, true, hm));
+}
+
 /** 板の失敗の注記の前置き(バッジが出ない理由を示す。Issue #186 段階1)。 */
 export const BOARD_NOTICE_PREFIX = "実行状態(バッジ)を取得できませんでした。";
 
@@ -183,6 +197,9 @@ export function buildListModel(input: ListModelInput): ListModel {
   const keys = keysOf(rawGroups);
   // 既定: 場が 2 つ以上なら全部閉じる(畳む意味がある)・1 つなら開く。利用者が押した値だけが上書きする。
   const defaultOpen = rawGroups.length < 2;
+  // 発走済み(Issue #346): 今日の開催日で `now` があるときだけ判定する(それ以外は全部 false=並べ替えない)。
+  const today = input.now !== undefined && todayJst(input.now) === route.date;
+  const hm = input.now === undefined ? "" : jstHm(input.now);
   return {
     kind: "list",
     date: route.date,
@@ -212,20 +229,24 @@ export function buildListModel(input: ListModelInput): ListModel {
         input.bulk === undefined || input.readOnly === true
           ? null
           : buildBulkModel({ date: route.date, groupName: g.name, races: g.races, board: board.kind === "ready" ? board.rows : null, now: input.bulk.now, ui: input.bulk.states.get(keys[i]!) }),
-      races: g.races.map(
-        (r): RaceItem => ({
-          raceId: r.raceId,
-          label: `${r.raceNumber}R`,
-          name: r.raceName,
-          detail: `${r.startTime === null ? "" : `${r.startTime} 発走・`}${r.courseType} ${r.distance}m・${r.entryCount}頭`,
-          grade: gradeLabelForDisplay(r.grade), // 重賞だけ(Issue #250。OP・L などは出さない)
-          href: buildHash({ date: route.date, venue: route.venue, race: r.raceId }),
-          badges:
-            board.kind === "ready"
-              ? { morning: badgeOf(pick(board.rows, r.raceId, "morning")), preRace: badgeOf(pick(board.rows, r.raceId, "pre_race")) }
-              : null,
-        }),
-      ),
+      // 並べ替えるのは表示用だけ(要約・一括実行は元の R 順で数える)。未発走(時刻不明を含む)→ 発走済みの順で、どちらも R 順(安定)。
+      races: g.races
+        .map(
+          (r): RaceItem => ({
+            raceId: r.raceId,
+            label: `${r.raceNumber}R`,
+            name: r.raceName,
+            detail: `${r.startTime === null ? "" : `${r.startTime} 発走・`}${r.courseType} ${r.distance}m・${r.entryCount}頭`,
+            grade: gradeLabelForDisplay(r.grade), // 重賞だけ(Issue #250。OP・L などは出さない)
+            past: hasStarted(r.startTime, today, hm),
+            href: buildHash({ date: route.date, venue: route.venue, race: r.raceId }),
+            badges:
+              board.kind === "ready"
+                ? { morning: badgeOf(pick(board.rows, r.raceId, "morning")), preRace: badgeOf(pick(board.rows, r.raceId, "pre_race")) }
+                : null,
+          }),
+        )
+        .sort((a, b) => Number(a.past) - Number(b.past)), // 安定ソート(ES2019。同じ区分の中は R 順のまま)
     })),
   };
 }
