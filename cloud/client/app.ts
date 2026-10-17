@@ -64,7 +64,8 @@ import { postRun, runFailureMessage, type RunOutcome } from "./api-run";
 import { bulkAcceptedText, bulkDayCapText, selectBulkTargets, type BulkUi } from "./bulk";
 import { createBoardStore, type BoardCompletion } from "./board-state";
 import { inputToYmd, todayJst } from "./date";
-import { buildListModel, groupKeys, groupRaces, type BoardSource, type ListSource } from "./list";
+import { buildListModel, groupKeys, groupRaces, needsListClock, type BoardSource, type ListSource } from "./list";
+import { createListClock } from "./list-clock";
 import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSource, type RunUi } from "./race";
 import { fetchSettings, postSettings, settingsFailureMessage } from "./api-settings";
 import { buildResultModel, type ResultSource } from "./result";
@@ -385,7 +386,16 @@ export function createApp(deps: AppDeps): App {
     onReplaySpeed,
   };
 
+  /** 一覧の並べ替えの再描画のタイマー(Issue #346)。`render` の末尾で毎回 `sync` する(冪等)。 */
+  const listClock = createListClock({ timers: deps.timers, isVisible: deps.isVisible, onChange: () => render() });
+
   function render(force = false): void {
+    draw(force);
+    const shown = listSource();
+    listClock.sync(currentScreen() === "list" && shown.kind === "ready" && needsListClock(shown.races, route.date, deps.now()));
+  }
+
+  function draw(force: boolean): void {
     const screen = currentScreen();
     switch (screen) {
       case "admin-only": {
@@ -458,6 +468,7 @@ export function createApp(deps: AppDeps): App {
               tracking: trackingNotice(),
               choices: openChoices.get(listKey(route.date, route.venue)),
               readOnly: !admin,
+              now: deps.now(),
               bulk: { now: deps.now(), states: bulkStates.get(listKey(route.date, route.venue)) ?? new Map<string, BulkUi>() },
             }),
             actions,
@@ -1132,6 +1143,7 @@ export function createApp(deps: AppDeps): App {
       report.onVisibilityChange();
       monthly.onVisibilityChange();
       targets.onVisibilityChange();
+      render(); // 一覧の並べ替えのタイマー: 隠れたら止め、見えたら今の時刻で並べ直して張り直す(Issue #346。他の画面は木が同じなら何も起きない)
     },
     async whenIdle() {
       // 取得が終わるたびに新しい取得は始まらない(失敗の自動再試行なし。追跡のタイマーは偽・実物とも待たない)ので、数回の確認で必ず止まる。

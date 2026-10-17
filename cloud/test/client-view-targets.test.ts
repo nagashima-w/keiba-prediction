@@ -67,19 +67,19 @@ describe("狙い目画面(view.ts)", () => {
     expect(byClass(t, "race").map((n) => String(n.attrs?.["class"]).includes("skipped"))).toEqual([false, true, false, false]);
   });
 
-  it("発走済みの行だけが past のクラスを持つ(未発走の行・見送りの行は持たない)。見送りの発走済みは skipped と past の両方", () => {
+  it("発走済みの行だけが started のクラスを持つ(未発走の行・見送りの行は持たない)。見送りの発走済みは skipped と started の両方", () => {
     const t = tree([race(R(1), NOW - 30 * MIN), race(R(2), NOW - 5 * MIN, { skipped: true }), race(R(3), NOW + 5 * MIN), race(R(4), NOW + 40 * MIN, { skipped: true }), race(R(5), null)]);
     const rows = byClass(t, "race");
     expect(rows).toHaveLength(5); // 前提: 全行がある
     const classes = rows.map((n) => String(n.attrs?.["class"]).split(" "));
     // 並びは 未発走(R3・R4・R5)→ 発走済み(新しい順: R2・R1)
     expect(rows.map((n) => textOf(n).includes("発走済み"))).toEqual([false, false, false, true, true]);
-    expect(classes.map((c) => c.includes("past"))).toEqual([false, false, false, true, true]);
+    expect(classes.map((c) => c.includes("started"))).toEqual([false, false, false, true, true]);
     expect(classes.map((c) => c.includes("skipped"))).toEqual([false, true, false, true, false]);
-    // 「発走済み」の見出しの下の一覧の行がすべて past で、未発走の一覧の行に past は無い
+    // 「発走済み」の見出しの下の一覧の行がすべて started で、未発走の一覧の行に started は無い
     const lists = findAll(t, (n) => n.tag === "ul");
-    expect(byClass(lists[0]!, "past")).toHaveLength(0);
-    expect(byClass(lists[1]!, "past")).toHaveLength(2);
+    expect(byClass(lists[0]!, "started")).toHaveLength(0);
+    expect(byClass(lists[1]!, "started")).toHaveLength(2);
   });
 
   it("発走済みが無ければ、発走済みの見出しも出さない。未発走が無ければ、未発走の一覧を出さない", () => {

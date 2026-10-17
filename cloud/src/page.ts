@@ -194,7 +194,7 @@ ${paletteCss()}
   /* Issue #336: 今日の狙い目(一覧の入口のリンクは検証の左。行は一覧のレースの行〈.race〉を流用し、残り時間を右端に寄せる。見送りと発走済みは薄く、10 分以内は色+太字で強調する) */
   .targets-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   .targets-link + .verify-link { margin-left: 0; }
-  .race.skipped, .race.past { opacity: 0.65; }
+  .race.skipped, .race.started { opacity: 0.65; }
   .t-left { margin-left: auto; font-weight: bold; white-space: nowrap; }
   .t-left.soon { color: var(--wait); }
   /* Issue #235: 日報画面(一覧の入口のリンク・レースごとのカード・箇条書き・生の文章。スマホ幅で横に伸ばさない=改行で折り返す) */

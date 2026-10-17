@@ -87,7 +87,8 @@ function raceRow(item: RaceItem): VNode {
   const head = h("span", { class: "race-head" }, [h("strong", {}, [item.label]), h("span", { class: "race-name" }, [item.name]), ...(item.grade === null ? [] : [h("span", { class: "grade" }, [item.grade])])]);
   const detail = h("span", { class: "race-detail" }, [item.detail]);
   const badges = item.badges === null ? [] : [h("span", { class: "badges" }, [badge("事前", item.badges.morning), badge("発走前", item.badges.preRace)])];
-  return h("li", {}, [h("a", { class: "race", href: item.href }, [head, detail, ...badges])]);
+  // 発走済みは薄く出す(Issue #346。`.race.started` は狙い目と同じ。並べ替えはモデルが済ませている)。クラス名を `past` にしない: 詳細カードの `ul.past` の規則〈padding・margin〉が `.race` に勝ってしまう。
+  return h("li", {}, [h("a", { class: item.past ? "race started" : "race", href: item.href }, [head, detail, ...badges])]);
 }
 
 /**
@@ -1029,10 +1030,10 @@ function adminOnlyScreen(model: AdminOnlyModel): VNode {
   ]);
 }
 
-/** 行。発走済み(`past`)は薄く出す(隠さず下に回す。決定)。見送り(`skipped`)も薄い。 */
+/** 行。発走済み(クラス `started`。`past` は詳細カードの `ul.past` の規則と衝突する)は薄く出す(隠さず下に回す。決定)。見送り(`skipped`)も薄い。 */
 function targetRow(r: TargetRow, past: boolean): VNode {
   return h("li", {}, [
-    h("a", { class: `race${r.skipped ? " skipped" : ""}${past ? " past" : ""}`, href: r.href }, [
+    h("a", { class: `race${r.skipped ? " skipped" : ""}${past ? " started" : ""}`, href: r.href }, [
       h("div", { class: "race-head" }, [h("strong", {}, [r.time]), h("span", {}, [r.place]), ...(r.pick === "" ? [] : [h("span", {}, [r.pick])]), h("span", { class: r.soon ? "t-left soon" : "t-left" }, [r.left])]),
       h("span", { class: "race-detail" }, [r.detail]),
     ]),
