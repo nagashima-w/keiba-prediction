@@ -46,6 +46,7 @@ function offCfg(
         jockey: 0,
         weightChange: 0,
         courseFrameBias: 0,
+        timeIndex: 0,
         ...baseWeights,
       },
     },

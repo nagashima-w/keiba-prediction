@@ -31,7 +31,7 @@ const EXPECTED_SHARED_DEFAULTS = {
   includeBracketQuinellaInAllocation: true,
 } as const;
 
-/** スコアリングの重み13項目の既定値(固定値)。 */
+/** スコアリングの重み14項目の既定値(固定値。14 番目のタイム指数は Issue #353 で足した)。 */
 const EXPECTED_WEIGHT_DEFAULTS = {
   biasWeightTrackCondition: 1,
   biasWeightVenue: 1,
@@ -46,6 +46,7 @@ const EXPECTED_WEIGHT_DEFAULTS = {
   baseScoreWeightJockey: 0.15,
   baseScoreWeightWeightChange: 1,
   baseScoreWeightCourseFrameBias: 1,
+  baseScoreWeightTimeIndex: 0.12,
 } as const;
 
 /**
@@ -54,17 +55,17 @@ const EXPECTED_WEIGHT_DEFAULTS = {
  */
 const CLOUD_ONLY_KEYS = ["analysisModel", "preRaceOffsetMinutes"] as const;
 
-/** スコアリングの重み13項目(Issue #218)。cloud では平坦な接頭辞つきのキー。対応表は cloud/src/settings.ts の SCORING_WEIGHT_FIELDS。 */
+/** スコアリングの重み14項目(Issue #218。タイム指数は Issue #353)。cloud では平坦な接頭辞つきのキー。対応表は cloud/src/settings.ts の SCORING_WEIGHT_FIELDS。 */
 const WEIGHT_FIELDS: readonly string[] = SCORING_WEIGHT_FIELDS.map((f) => f.field);
 
 describe("クラウド版の設定の既定値(固定値との比較)", () => {
-  it("cloud の項目 = 共有の13項目 + スコアリングの重み13項目 + cloud 専用の項目(CLOUD_ONLY_KEYS)。共有の13項目は、固定値と既定値が同じ(項目の取りこぼし・意図しない追加もない)", () => {
+  it("cloud の項目 = 共有の13項目 + スコアリングの重み14項目 + cloud 専用の項目(CLOUD_ONLY_KEYS)。共有の13項目は、固定値と既定値が同じ(項目の取りこぼし・意図しない追加もない)", () => {
     const keys = Object.keys(DEFAULT_CLOUD_SETTINGS);
     const sharedKeys = Object.keys(EXPECTED_SHARED_DEFAULTS);
     const sameNamed = keys.filter((k) => !(CLOUD_ONLY_KEYS as readonly string[]).includes(k) && !WEIGHT_FIELDS.includes(k));
     expect(sameNamed.length).toBe(13);
     expect(sharedKeys.length).toBe(13);
-    expect(WEIGHT_FIELDS.length).toBe(13);
+    expect(WEIGHT_FIELDS.length).toBe(14);
     expect(keys.length).toBe(sameNamed.length + WEIGHT_FIELDS.length + CLOUD_ONLY_KEYS.length);
     expect([...keys].sort()).toEqual([...sameNamed, ...WEIGHT_FIELDS, ...CLOUD_ONLY_KEYS].sort());
     expect([...sameNamed].sort()).toEqual([...sharedKeys].sort());
@@ -73,7 +74,7 @@ describe("クラウド版の設定の既定値(固定値との比較)", () => {
     }
   });
 
-  it("Issue #218: スコアリングの重み13項目 — 対応表は core のキー(BIAS_WEIGHT_KEYS 7・BASE_SCORE_WEIGHT_KEYS 6)と過不足なく対応し、cloud の既定値は固定値・core の DEFAULT_SCORER_CONFIG のどちらとも、13項目すべて同じ", () => {
+  it("Issue #218・#353: スコアリングの重み14項目 — 対応表は core のキー(BIAS_WEIGHT_KEYS 7・BASE_SCORE_WEIGHT_KEYS 7)と過不足なく対応し、cloud の既定値は固定値・core の DEFAULT_SCORER_CONFIG のどちらとも、13項目すべて同じ", () => {
     expect(SCORING_WEIGHT_FIELDS.filter((f) => f.group === "bias").map((f) => f.exeKey)).toEqual([...BIAS_WEIGHT_KEYS]);
     expect(SCORING_WEIGHT_FIELDS.filter((f) => f.group === "base").map((f) => f.exeKey)).toEqual([...BASE_SCORE_WEIGHT_KEYS]);
     expect(SCORING_WEIGHT_FIELDS.length).toBe(BIAS_WEIGHT_KEYS.length + BASE_SCORE_WEIGHT_KEYS.length);

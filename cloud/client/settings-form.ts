@@ -7,7 +7,7 @@
  *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
  *  - LLM を使うときだけ効く: 追加指示・クリップ幅(発走前の分析の LLM〈Issue #194〉で使う。Worker の API キーが未登録の間は LLM を使わないので効かない。補助文はキーの有無のどちらでも嘘にならない書き方)
  *  - LLM を使うときだけ効く(分析モデル。Issue #158): 選んだ系統の最新のモデルで、保存後に次に始まる発走前の分析から使う
- *  - 事前分析と発走前の分析の両方で効く: スコアリングの重み13項目(Issue #218。`WEIGHT_FIELD_ORDER`。`fields` ではなく専用の節〈`weights`〉に出す)。取得ステップで固定した設定のスナップショットで計算する
+ *  - 事前分析と発走前の分析の両方で効く: スコアリングの重み14項目(Issue #218・#353。`WEIGHT_FIELD_ORDER`。`fields` ではなく専用の節〈`weights`〉に出す)。取得ステップで固定した設定のスナップショットで計算する
  *  - 次の計画から効く: 発走何分前(定時の自動実行〈Issue #166・#206・#249〉の毎晩 21:00 の翌日分の計画で読み、計画の行に固定する。すでに計画した日の分は変わらない)
  */
 import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/core/src/analysis/app-settings";
@@ -53,7 +53,7 @@ export const FIELD_ORDER: readonly FieldKey[] = [
   "preRaceOffsetMinutes",
 ];
 
-/** スコアリングの重み13項目の並び(Issue #218。対応表 `SCORING_WEIGHT_FIELDS` の並び = 旧 exe の設定画面の並び: バイアス7 → 基礎6)。画面では `fields` とは別の節に出す。 */
+/** スコアリングの重み14項目の並び(Issue #218・#353。対応表 `SCORING_WEIGHT_FIELDS` の並び = 旧 exe の設定画面の並び: バイアス7 → 基礎6、末尾にタイム指数)。画面では `fields` とは別の節に出す。 */
 export const WEIGHT_FIELD_ORDER: readonly FieldKey[] = SCORING_WEIGHT_FIELDS.map((f) => f.field);
 
 const BOOLEAN_KEYS: ReadonlySet<FieldKey> = new Set(CLOUD_SETTINGS_KEYS.filter((k) => typeof CLOUD_SETTINGS_RULES[k].fallback === "boolean"));
@@ -69,7 +69,7 @@ export function draftFromSettings(settings: CloudSettings): SettingsDraft {
   return draft as SettingsDraft;
 }
 
-/** 「重みを既定値に戻す」(Issue #218): 重み13項目の下書きだけを既定値(文字列)に戻した新しい下書きを返す(保存はしない。元は変えない。重み以外の項目は変えない)。 */
+/** 「重みを既定値に戻す」(Issue #218): 重み14項目の下書きだけを既定値(文字列)に戻した新しい下書きを返す(保存はしない。元は変えない。重み以外の項目は変えない)。 */
 export function resetWeightsInDraft(draft: SettingsDraft): SettingsDraft {
   const next: Record<string, DraftValue> = { ...draft };
   for (const key of WEIGHT_FIELD_ORDER) {
@@ -111,7 +111,7 @@ const ERROR_TEXT: Readonly<Record<FieldKey, (draftValue: DraftValue) => string>>
   includeTrifectaInAllocation: () => "チェックの状態が不正です。",
   includeBracketQuinellaInAllocation: () => "チェックの状態が不正です。",
   preRaceOffsetMinutes: () => `${PRE_RACE_OFFSET_MIN}以上${PRE_RACE_OFFSET_MAX}以下の整数(分)を入力してください(半角)。`,
-  // スコアリングの重み13項目(Issue #218): exe の isValidWeight(有限な数で 0 以上。上限なし)と同じ範囲
+  // スコアリングの重み14項目(Issue #218・#353): exe の isValidWeight(有限な数で 0 以上。上限なし)と同じ範囲
   ...(Object.fromEntries(WEIGHT_FIELD_ORDER.map((key) => [key, () => "0以上の数値を入力してください(半角)。"])) as Record<(typeof SCORING_WEIGHT_FIELDS)[number]["field"], () => string>),
 };
 
@@ -183,7 +183,7 @@ export interface WeightsModel {
   readonly heading: string;
   /** 節の説明(段落ごと)。 */
   readonly help: readonly string[];
-  /** 小見出し付きの入力欄(exe と同じ: 環境・状態バイアス補正 7 → 基礎スコア 6)。 */
+  /** 小見出し付きの入力欄(環境・状態バイアス補正 7 → 基礎スコア 7。末尾がタイム指数)。 */
   readonly groups: readonly { readonly heading: string; readonly fields: readonly FieldModel[] }[];
   /** 「重みを既定値に戻す」ボタンの文言と、押せないか(保存中)。 */
   readonly resetLabel: string;
@@ -245,9 +245,12 @@ const ANALYSIS_MODEL_HELP =
 const WEIGHTS_HEADING = "スコアリングの重み";
 /** 節の説明(画面に出る文なので、Issue 番号は書かない)。重みはバイアス補正・基礎スコアの補正の倍率。事前分析と発走前の分析の両方で使う。 */
 const WEIGHTS_HELP: readonly string[] = [
-  "各項目の補正の強さの倍率です(0 以上の数値。上限はありません)。既定値は exe と同じです。大きくしすぎると補正が過剰になり、確率が極端に偏ることがあるので、少しずつ変えてください。",
+  "各項目の補正の強さの倍率です(0 以上の数値。上限はありません)。既定値は、タイム指数を除いて exe と同じです。大きくしすぎると補正が過剰になり、確率が極端に偏ることがあるので、少しずつ変えてください。",
   "事前分析と発走前の分析の両方で使われます。保存後に始まる準備・分析から反映され、すでに始まったタスクは始めたときの設定のままです。",
 ];
+/** タイム指数の重みの補助文(画面に出る文なので Issue 番号は書かない)。 */
+const TIME_INDEX_WEIGHT_HELP = "秒/km の差にかける量(他の重みと単位が違う)。中央のレースだけに効く。";
+
 const WEIGHT_GROUP_HEADINGS: Readonly<Record<"bias" | "base", string>> = { bias: "環境・状態バイアス補正", base: "基礎スコア" };
 const WEIGHTS_RESET_LABEL = "重みを既定値に戻す";
 
@@ -291,14 +294,15 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
     help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。変更は、毎晩 21:00(日本時間)に行う翌日分の事前分析の計画から反映されます。その時刻より前に保存した変更は、翌日の分から効きます。すでに計画した日の分は変わりません。`,
     inputmode: "numeric",
   },
-  // スコアリングの重み13項目(Issue #218)。ラベルは core の共有定数(`app-settings.ts`。旧 exe と共有していた)。
+  // スコアリングの重み14項目(Issue #218・#353)。ラベルは core の共有定数(`app-settings.ts`。旧 exe と共有していた)。
   ...(Object.fromEntries(
     SCORING_WEIGHT_FIELDS.map((f): [string, FieldSpec] => [
       f.field,
       {
         kind: "text",
         label: f.group === "bias" ? BIAS_WEIGHT_LABELS[f.exeKey] : BASE_SCORE_WEIGHT_LABELS[f.exeKey],
-        help: null, // 13項目とも補助文なし(騎手成績の重みも、年度別成績を取得して prior に入れるようになったので、注記は要らない)
+        // タイム指数(Issue #353)だけは単位が違う(他は複勝率の差にかける倍率、これは秒/km の差にかける量)ので補助文を付ける。ほかの13項目は補助文なし(騎手成績の重みも、年度別成績を取得して prior に入れるようになったので、注記は要らない)。
+        help: f.field === "baseScoreWeightTimeIndex" ? TIME_INDEX_WEIGHT_HELP : null,
         inputmode: "decimal",
       },
     ]),

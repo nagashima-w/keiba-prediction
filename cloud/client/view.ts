@@ -49,7 +49,7 @@ export interface ViewActions {
   readonly onSettingsPreviewToggle: (open: boolean) => void;
   /** プロンプトのプレビューの「入力中の内容を反映」ボタン(Issue #201。開いているときだけ出る)。引数なし。 */
   readonly onSettingsPreviewRefresh: () => void;
-  /** 「重みを既定値に戻す」(Issue #218): 下書きの重み13項目だけを既定値に戻す(保存はしない)。 */
+  /** 「重みを既定値に戻す」(Issue #218): 下書きの重み14項目だけを既定値に戻す(保存はしない)。 */
   readonly onSettingsWeightsReset: () => void;
   /** 移行画面のファイル選択(Issue #222)。選ばれた File(選択が空なら null)。 */
   readonly onMigrationFile: (file: PickedFile | null) => void;

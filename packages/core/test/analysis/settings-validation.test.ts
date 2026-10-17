@@ -131,9 +131,12 @@ describe("設定フォームの入力検証(純関数)", () => {
   });
 
   describe("重みキーの定義", () => {
-    it("バイアス7種・基礎6種のキーが揃っている(仕様の重み項目)", () => {
+    it("バイアス7種・基礎7種のキーが揃っている(仕様の重み項目 + タイム指数〈Issue #353〉)", () => {
       expect(BIAS_WEIGHT_KEYS).toHaveLength(7);
-      expect(BASE_SCORE_WEIGHT_KEYS).toHaveLength(6);
+      expect(BASE_SCORE_WEIGHT_KEYS).toHaveLength(7);
+      // 末尾がタイム指数(既存の6項目の並びは変えない)。
+      expect(BASE_SCORE_WEIGHT_KEYS[6]).toBe("timeIndex");
+      expect(BASE_SCORE_WEIGHT_LABELS.timeIndex).toBe("タイム指数");
       // すべてのキーに日本語ラベルが対応する。
       for (const key of BIAS_WEIGHT_KEYS) {
         expect(BIAS_WEIGHT_LABELS[key]).toBeTruthy();

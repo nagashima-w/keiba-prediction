@@ -29,7 +29,7 @@ export interface BiasWeightValues {
   readonly rotation: number;
 }
 
-/** 基礎スコア重み6項目(core の BaseScoreWeights と構造一致)。 */
+/** 基礎スコア重み7項目(core の BaseScoreWeights と構造一致。7 つ目の timeIndex は Issue #353 で足した)。 */
 export interface BaseScoreWeightValues {
   /** 近走着順(重み減衰付き)。 */
   readonly recentForm: number;
@@ -43,6 +43,8 @@ export interface BaseScoreWeightValues {
   readonly weightChange: number;
   /** コースレベル枠順バイアス。 */
   readonly courseFrameBias: number;
+  /** タイム指数(Issue #353)。 */
+  readonly timeIndex: number;
 }
 
 /** バイアス重みのキー一覧(表示順・coerce の走査順の唯一の定義元)。 */
@@ -64,6 +66,7 @@ export const BASE_SCORE_WEIGHT_KEYS = [
   "jockey",
   "weightChange",
   "courseFrameBias",
+  "timeIndex",
 ] as const satisfies readonly (keyof BaseScoreWeightValues)[];
 
 /** バイアス重みキー。 */
@@ -319,6 +322,7 @@ export const BASE_SCORE_WEIGHT_LABELS: Record<BaseScoreWeightKey, string> = {
   jockey: "騎手成績",
   weightChange: "斤量",
   courseFrameBias: "コース枠順バイアス",
+  timeIndex: "タイム指数",
 };
 
 /**

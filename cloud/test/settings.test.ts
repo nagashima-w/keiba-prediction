@@ -41,7 +41,7 @@ describe("既定値", () => {
       includeTrifectaInAllocation: true,
       includeBracketQuinellaInAllocation: true,
       preRaceOffsetMinutes: 45,
-      // Issue #218: スコアリングの重み13項目の既定値は core の DEFAULT_SCORER_CONFIG(= exe の既定値)。ここは数値を直書きして、実装の取り違えを検出する
+      // Issue #218: スコアリングの重み14項目(タイム指数は Issue #353)の既定値は core の DEFAULT_SCORER_CONFIG(= exe の既定値)。ここは数値を直書きして、実装の取り違えを検出する
       biasWeightTrackCondition: 1,
       biasWeightVenue: 1,
       biasWeightSeason: 1,
@@ -55,6 +55,7 @@ describe("既定値", () => {
       baseScoreWeightJockey: 0.15,
       baseScoreWeightWeightChange: 1,
       baseScoreWeightCourseFrameBias: 1,
+      baseScoreWeightTimeIndex: 0.12,
     });
   });
 
@@ -100,25 +101,25 @@ describe("分析モデル(analysisModel。Issue #158)", () => {
   });
 });
 
-describe("スコアリングの重み13項目(Issue #218。exe のバイアス7・基礎6。キーは平坦な接頭辞つき)", () => {
+describe("スコアリングの重み14項目(Issue #218・#353。exe のバイアス7・基礎7〈タイム指数を足した〉。キーは平坦な接頭辞つき)", () => {
   const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
-  it("対応表は13行: exe のキー(BIAS_WEIGHT_KEYS 7 → BASE_SCORE_WEIGHT_KEYS 6)と同じ順・同じ集合で、cloud のキー名 = 接頭辞(biasWeight / baseScoreWeight)+ exe のキー(先頭大文字)。cloud のキーは重複しない", () => {
-    expect(SCORING_WEIGHT_FIELDS.length).toBe(13);
-    expect(BIAS_WEIGHT_KEYS.length + BASE_SCORE_WEIGHT_KEYS.length).toBe(13);
+  it("対応表は14行: exe のキー(BIAS_WEIGHT_KEYS 7 → BASE_SCORE_WEIGHT_KEYS 7)と同じ順・同じ集合で、cloud のキー名 = 接頭辞(biasWeight / baseScoreWeight)+ exe のキー(先頭大文字)。cloud のキーは重複しない", () => {
+    expect(SCORING_WEIGHT_FIELDS.length).toBe(14);
+    expect(BIAS_WEIGHT_KEYS.length + BASE_SCORE_WEIGHT_KEYS.length).toBe(14);
     expect(SCORING_WEIGHT_FIELDS.filter((f) => f.group === "bias").map((f) => f.exeKey)).toEqual([...BIAS_WEIGHT_KEYS]);
     expect(SCORING_WEIGHT_FIELDS.filter((f) => f.group === "base").map((f) => f.exeKey)).toEqual([...BASE_SCORE_WEIGHT_KEYS]);
     for (const f of SCORING_WEIGHT_FIELDS) {
       expect(f.field, f.exeKey).toBe(`${f.group === "bias" ? "biasWeight" : "baseScoreWeight"}${cap(f.exeKey)}`);
     }
-    expect(new Set(SCORING_WEIGHT_FIELDS.map((f) => f.field)).size).toBe(13);
+    expect(new Set(SCORING_WEIGHT_FIELDS.map((f) => f.field)).size).toBe(14);
     // 表の並びは、CloudSettings の項目(CLOUD_SETTINGS_KEYS)にそのまま含まれる
     for (const f of SCORING_WEIGHT_FIELDS) {
       expect(CLOUD_SETTINGS_KEYS.includes(f.field), f.field).toBe(true);
     }
   });
 
-  it("既定値は core の DEFAULT_SCORER_CONFIG(= exe の既定値)と、13項目すべて同じ。既定値は1種類ではない(0.7・0.15・0.3 などを含む=取り違えを検出できる)", () => {
+  it("既定値は core の DEFAULT_SCORER_CONFIG(= exe の既定値)と、14項目すべて同じ。既定値は1種類ではない(0.7・0.15・0.3 などを含む=取り違えを検出できる)", () => {
     for (const f of SCORING_WEIGHT_FIELDS) {
       const expected = f.group === "bias" ? (DEFAULT_SCORER_CONFIG.weights as unknown as Record<string, number>)[f.exeKey] : (DEFAULT_SCORER_CONFIG.baseScore.weights as unknown as Record<string, number>)[f.exeKey];
       expect(typeof expected, f.exeKey).toBe("number");
@@ -127,14 +128,14 @@ describe("スコアリングの重み13項目(Issue #218。exe のバイアス7�
     expect(new Set(SCORING_WEIGHT_FIELDS.map((f) => DEFAULT_CLOUD_SETTINGS[f.field])).size).toBeGreaterThan(3);
   });
 
-  it("後方互換: 重みの項目が無い旧い行(今の本番)は、13項目すべて既定値で読め、他の項目は壊れない", () => {
+  it("後方互換: 重みの項目が無い旧い行(今の本番)は、14項目すべて既定値で読め、他の項目は壊れない", () => {
     const old = coerceCloudSettings({ bankroll: 1_000_000, evThreshold: 1.5 });
     for (const f of SCORING_WEIGHT_FIELDS) expect(old[f.field], f.field).toBe(DEFAULT_CLOUD_SETTINGS[f.field]);
     expect(old.bankroll).toBe(1_000_000);
     expect(old.evThreshold).toBe(1.5);
   });
 
-  it("読む側: 1項目が不正でも、その項目だけ既定値に戻り、他の12項目の保存値は残る(exe の coerceBiasWeights と同じ粒度)", () => {
+  it("読む側: 1項目が不正でも、その項目だけ既定値に戻り、他の13項目の保存値は残る(exe の coerceBiasWeights と同じ粒度)", () => {
     for (const target of SCORING_WEIGHT_FIELDS) {
       const raw: Record<string, unknown> = { ...FULL, [target.field]: -1 };
       const read = coerceCloudSettings(raw);
@@ -281,7 +282,7 @@ const FULL: CloudSettings = {
   includeTrifectaInAllocation: true,
   includeBracketQuinellaInAllocation: false,
   preRaceOffsetMinutes: 60,
-  // Issue #218: 重み13項目は、すべて既定値とは別の値(保存・読み戻しで取り違えないことの確認に使う)
+  // Issue #218・#353: 重み14項目は、すべて既定値とは別の値(保存・読み戻しで取り違えないことの確認に使う)
   biasWeightTrackCondition: 0.5,
   biasWeightVenue: 0.6,
   biasWeightSeason: 0.7,
@@ -295,6 +296,7 @@ const FULL: CloudSettings = {
   baseScoreWeightJockey: 0.55,
   baseScoreWeightWeightChange: 0.65,
   baseScoreWeightCourseFrameBias: 0.75,
+  baseScoreWeightTimeIndex: 0.85,
 };
 
 /** スコアリングの重みの境界値(Issue #218。exe の `isValidWeight` と同じ: 有限な数で 0 以上。上限は無い)。読む側も書く側も同じ。 */
@@ -464,7 +466,7 @@ describe("saveSettings(D1 の1行に UPSERT)", () => {
     expect(record[0]!.args.length).toBe(2);
     expect(record[0]!.args[1]).toBe("2026-10-07T01:02:03.000Z");
     expect(JSON.parse(record[0]!.args[0] as string)).toEqual(FULL);
-    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(28); // 既存の15項目 + 重み13項目
+    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(29); // 既存の15項目 + 重み14項目
     expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(Object.keys(DEFAULT_CLOUD_SETTINGS).length);
   });
 

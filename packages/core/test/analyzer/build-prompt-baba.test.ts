@@ -103,7 +103,7 @@ describe("buildPrompt の当日の馬場の節(値があるとき)", () => {
 
 describe("プロンプト版(Issue #295)", () => {
   it("版が新しい値になり、wide15 も追随する", () => {
-    expect(PROMPT_VERSION).toBe("2026-10-16.1");
+    expect(PROMPT_VERSION).toBe("2026-10-18.1");
     expect(CLIP_VARIANTS.default.promptVersion).toBe(PROMPT_VERSION);
     expect(CLIP_VARIANTS.wide15.promptVersion).toBe(`${PROMPT_VERSION}-clip015`);
   });
