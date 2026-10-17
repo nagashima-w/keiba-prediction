@@ -74,6 +74,7 @@ const ROUTES: readonly { readonly sample: string; readonly viewer: readonly stri
   { sample: "/app.js", viewer: ["GET", "HEAD"] },
   { sample: "/api/races", viewer: ["GET"] },
   { sample: "/api/plan", viewer: ["GET"] },
+  { sample: "/api/targets", viewer: ["GET"] }, // Issue #336: 今日の狙い目(読み取りだけ)
   { sample: "/api/analyses", viewer: ["GET"] },
   { sample: "/api/analyses/status", viewer: ["GET"] },
   { sample: "/api/analyses/123", viewer: ["GET"] },
@@ -120,10 +121,10 @@ async function call(env: Env, deps: Parameters<typeof handle>[3], req: Request):
 describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-only。裏側にもリクエスト本文にも触れない", () => {
   const cases = ROUTES.flatMap((r) => METHODS.filter((m) => !r.viewer.includes(m)).map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者が管理者専用に当たる組は 160 通り(31 ルート × 6 method = 186 から、閲覧者に許す 26 を引く)", () => {
-    expect(ROUTES).toHaveLength(31);
-    expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(26);
-    expect(cases).toHaveLength(160);
+  it("前提: 閲覧者が管理者専用に当たる組は 165 通り(32 ルート × 6 method = 192 から、閲覧者に許す 27 を引く)", () => {
+    expect(ROUTES).toHaveLength(32);
+    expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(27);
+    expect(cases).toHaveLength(165);
   });
 
   it.each(cases)("%s %s → 403(本文は admin-only の固定)。バインディングに触れず、本文を読まない", async (method, path) => {
@@ -156,8 +157,8 @@ describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-onl
 describe("閲覧者(viewer): 許された (path, method) は関門を通る(管理者専用の 403 にならない)", () => {
   const allowed = ROUTES.flatMap((r) => r.viewer.map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者に許す組は 26 通り(画面と API の 12 + アイコン 7 本の GET・HEAD で 14)", () => {
-    expect(allowed).toHaveLength(26);
+  it("前提: 閲覧者に許す組は 27 通り(画面と API の 13 + アイコン 7 本の GET・HEAD で 14)", () => {
+    expect(allowed).toHaveLength(27);
   });
 
   it.each(allowed)("%s %s → 管理者専用の 403 ではない", async (method, path) => {
@@ -195,9 +196,9 @@ describe("閲覧者(viewer): 許された (path, method) は関門を通る(管�
     }
   });
 
-  it("入力の検証(400)の応答が返る: 閲覧者の GET /api/races・/api/plan・/api/analyses/status は、日付なしで 400(関門を通って各ハンドラの検証に届いている)", async () => {
+  it("入力の検証(400)の応答が返る: 閲覧者の GET /api/races・/api/plan・/api/targets・/api/analyses/status は、日付なしで 400(関門を通って各ハンドラの検証に届いている)", async () => {
     const { deps, viewerToken } = await setup();
-    for (const path of ["/api/races", "/api/plan", "/api/analyses/status"]) {
+    for (const path of ["/api/races", "/api/plan", "/api/targets", "/api/analyses/status"]) {
       const response = await handle(request("GET", path, viewerToken), trackedEnv(throwingBackends()).env, {}, deps);
       expect(response.status, path).toBe(400);
     }

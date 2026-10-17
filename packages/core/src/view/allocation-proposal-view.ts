@@ -382,6 +382,14 @@ function betTypeRank(betType: string): number {
   return BET_TYPE_ORDER[betType] ?? 99;
 }
 
+/**
+ * 買い目1件の券種ラベルと組合せラベル(Issue #344)。買い目の表の行(`buildBetRows`)と同じ表記を、表の外(締切直前の再計算の差分の行)でも使うために出す。
+ * 未知の券種・復号できないキーは生の値(throwしない)。
+ */
+export function betRowLabels(betType: string, comboKey: string): { readonly betTypeLabel: string; readonly comboLabel: string } {
+  return { betTypeLabel: betTypeLabel(betType), comboLabel: comboLabelOf(comboKey, betType) };
+}
+
 /** 買い目行(AC4)を券種の表示順→comboKey昇順で決定的に並べる(DBのORDER BYに依存しない)。 */
 function buildBetRows(bets: readonly StoredAllocationBetView[]): readonly AllocationBetRowView[] {
   return [...bets]
@@ -397,8 +405,7 @@ function buildBetRows(bets: readonly StoredAllocationBetView[]): readonly Alloca
       return a.comboKey < b.comboKey ? -1 : a.comboKey > b.comboKey ? 1 : 0;
     })
     .map((b) => ({
-      betTypeLabel: betTypeLabel(b.betType),
-      comboLabel: comboLabelOf(b.comboKey, b.betType),
+      ...betRowLabels(b.betType, b.comboKey),
       stake: formatYen(b.stake),
       odds: formatOdds(b.odds),
       ev: formatEv(b.ev),

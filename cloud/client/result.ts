@@ -176,6 +176,28 @@ export interface AllocationSection {
   readonly comboLines: readonly string[];
 }
 
+/** 締切直前の再計算の節の見出し(Issue #344)。 */
+export const CLOSE_HEADING = "締切直前の再計算";
+
+/** 締切直前の再計算の 1 回ぶん(Issue #344)。 */
+export interface CloseRoundSection {
+  readonly heading: string;
+  /** 状態と理由・動いた時刻と遅れ(表の前)。 */
+  readonly summaryLines: readonly string[];
+  /** 配分の注記(再計算できた回だけ。見送りの理由など)。 */
+  readonly notices: readonly string[];
+  /** 買い目の表(再計算できた回で、買い目があるときだけ)。 */
+  readonly bets: readonly AllocationBetRowView[];
+  /** 分析時の提案との差分の行(表の後)。 */
+  readonly diffLines: readonly string[];
+}
+
+export interface CloseSection {
+  readonly heading: string;
+  readonly note: string;
+  readonly rounds: readonly CloseRoundSection[];
+}
+
 export interface ResultContent {
   /** レース再生の節(Issue #311。「3着内率の上位5頭」の後・「当日の馬場」の前)。勝率が判定不能・2頭未満の分析は null(節ごと出さない)。 */
   readonly replay: ReplaySection | null;
@@ -203,6 +225,8 @@ export interface ResultContent {
   readonly placeOddsNote: string | null;
   readonly horses: readonly HorseCard[];
   readonly allocation: AllocationSection;
+  /** 締切直前の再計算(Issue #344。「配分の提案」の下)。結果が無い・旧い分析・古いサーバの応答は null(節ごと出さない)。 */
+  readonly close: CloseSection | null;
 }
 
 export interface ResultModel {
@@ -233,9 +257,28 @@ function allocationOf(a: AnalysisDetail, readOnly: boolean): AllocationSection {
     return { kind: "none", notices: [NO_ALLOCATION_NOTE], bets: [], settingsRows: [], comboLines };
   }
   const view = buildAllocationProposalView(a.allocation);
-  // core の「両方未設定」の注記(import した定数と一致するもの)だけを差し替える。片方だけ・判定不能・フォールバックなどの他の注記と、注記の並び・件数は変えない。
-  const notices = view.notices.map((n) => (n === BET_ALLOCATION_UNSET_NOTE ? (readOnly ? UNSET_ALLOCATION_NOTE_VIEWER : UNSET_ALLOCATION_NOTE) : n));
-  return { kind: view.kind, notices, bets: view.bets, settingsRows: view.settingsRows, comboLines };
+  return { kind: view.kind, notices: noticesOf(view.notices, readOnly), bets: view.bets, settingsRows: view.settingsRows, comboLines };
+}
+
+/**
+ * core の「両方未設定」の注記(import した定数と一致するもの)だけを差し替える。片方だけ・判定不能・フォールバックなどの他の注記と、注記の並び・件数は変えない。
+ * 配分の提案と、締切直前の再計算(Issue #344)の表が共有する(閲覧者の扱いを同じにする)。
+ */
+function noticesOf(notices: readonly string[], readOnly: boolean): readonly string[] {
+  return notices.map((n) => (n === BET_ALLOCATION_UNSET_NOTE ? (readOnly ? UNSET_ALLOCATION_NOTE_VIEWER : UNSET_ALLOCATION_NOTE) : n));
+}
+
+/** 締切直前の再計算の節(Issue #344)。文言はサーバが組み立てたもの。表は分析時の配分と同じ部品(core の `buildAllocationProposalView`)で、実効設定の行は分析時の節と重複するので出さない。 */
+function closeOf(a: AnalysisDetail, readOnly: boolean): CloseSection | null {
+  if (a.close == null) return null;
+  return {
+    heading: CLOSE_HEADING,
+    note: a.close.note,
+    rounds: a.close.rounds.map((r) => {
+      const view = r.allocation === null ? null : buildAllocationProposalView(r.allocation);
+      return { heading: r.label, summaryLines: r.summaryLines, notices: view === null ? [] : noticesOf(view.notices, readOnly), bets: view === null ? [] : view.bets, diffLines: r.diffLines };
+    }),
+  };
 }
 
 /**
@@ -329,6 +372,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, replay?: ReplayUi
       placeOdds: buildPlaceOddsLine(h.fairPlaceOdds, h.actualPlaceOddsMin, h.actualPlaceOddsMax, a.race.oddsStatus, a.race.placeBasis),
     })),
     allocation: allocationOf(a, readOnly),
+    close: closeOf(a, readOnly),
   };
 }
 

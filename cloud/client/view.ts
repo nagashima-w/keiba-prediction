@@ -9,7 +9,8 @@ import type { BulkModel, BulkPanel } from "./bulk";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
-import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type DevelopmentSection, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
+import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
+import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type CloseSection, type DevelopmentSection, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
@@ -17,6 +18,7 @@ import type { VerifyVenue } from "./api-verify";
 import type { MonthlyBodyView, MonthlyModel } from "./monthly-model";
 import type { RaceRowView, ReportBodyView, ReportModel, WhatIfView } from "./report-model";
 import type { AdminOnlyModel } from "./admin-only";
+import type { TargetRow, TargetsModel } from "./targets-model";
 import type { ReplaySection } from "./replay-model";
 import { REPLAY_CANVAS_LABEL } from "./replay-model";
 import { h, type PickedFile, type VNode } from "./vnode";
@@ -162,6 +164,8 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
       model.venueTabs.map((t) => h("a", { class: "tab", href: t.href, "aria-current": t.current ? "page" : undefined }, [t.label])),
     ),
     h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+    // 今日の狙い目への入口(Issue #336)。閲覧者にも出す(読み取りだけ)。
+    h("a", { class: "targets-link", href: model.targetsHref }, ["狙い目"]),
     // 検証への入口は閲覧者にも出す(Issue #263。閲覧者の要求は集計のやり直しを起こさない)。設定への入口は管理者だけ(Issue #238。閲覧者は href が null)。日報は閲覧者にも出す。
     h("a", { class: "verify-link", href: model.verifyHref }, ["検証"]),
     h("a", { class: "report-link", href: model.reportHref }, ["日報"]),
@@ -396,6 +400,29 @@ function replaySection(r: ReplaySection, heading: "h2" | "h3", actions: ViewActi
   ]);
 }
 
+/** 買い目の表の 1 行(配分の提案と、締切直前の再計算で共通)。 */
+const betRow = (b: AllocationBetRowView): VNode =>
+  h("li", { class: "bet" }, [h("strong", {}, [b.betTypeLabel]), h("span", {}, [b.comboLabel]), h("span", {}, [b.stake]), h("small", {}, [`オッズ ${b.odds}・EV ${b.ev}`])]);
+
+/** 締切直前の再計算の節(Issue #344)。回ごとに、見出し・状態の行・表・差分の行。回の見出しは見出しの要素ではなく強調の段落(許可リスト〈`dom.ts`〉に h4 が無く、h2/h3 のどちらの下でも同じ形にできる)。 */
+function closeSection(close: CloseSection, heading: "h2" | "h3"): VNode {
+  return h("section", { class: "close" }, [
+    h(heading, {}, [close.heading]),
+    h("p", { class: "meta close-note" }, [close.note]),
+    ...close.rounds.map((r) =>
+      h("div", { class: "close-round" }, [
+        h("p", { class: "close-round-title" }, [h("strong", {}, [r.heading])]),
+        ...r.summaryLines.map((l) => h("p", { class: "meta" }, [l])),
+        ...r.notices.map((n) => h("p", { class: "notice" }, [n])),
+        ...(r.bets.length === 0
+          ? []
+          : [h("ul", { class: "bets" }, r.bets.map(betRow))]),
+        ...r.diffLines.map((l) => h("p", { class: "meta" }, [l])),
+      ]),
+    ),
+  ]);
+}
+
 /**
  * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「3着内率の上位5頭」(Issue #240。印の付いた馬の直後)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
  * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
@@ -437,15 +464,15 @@ function resultSections(content: ResultContent, heading: "h2" | "h3", actions: V
             h(
               "ul",
               { class: "bets" },
-              allocation.bets.map((b) =>
-                h("li", { class: "bet" }, [h("strong", {}, [b.betTypeLabel]), h("span", {}, [b.comboLabel]), h("span", {}, [b.stake]), h("small", {}, [`オッズ ${b.odds}・EV ${b.ev}`])]),
-              ),
+              allocation.bets.map(betRow),
             ),
           ]),
       ...(allocation.settingsRows.length === 0 ? [] : [h("ul", { class: "settings" }, allocation.settingsRows.map((r) => h("li", {}, [h("small", {}, [r])])))]),
       // 組合せの券種ごとの行(Issue #296)。設定の行の後ろ。サーバの文章(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
       ...(allocation.comboLines.length === 0 ? [] : [h("ul", { class: "settings combo-counts" }, allocation.comboLines.map((r) => h("li", {}, [h("small", {}, [r])])))]),
     ]),
+    // 締切直前の再計算(Issue #344)。「配分の提案」の下。無ければ section ごと出さない。文言はサーバの整形(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
+    ...(content.close === null ? [] : [closeSection(content.close, heading)]),
   ];
 }
 
@@ -1002,7 +1029,34 @@ function adminOnlyScreen(model: AdminOnlyModel): VNode {
   ]);
 }
 
-export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel | MonthlyModel | AdminOnlyModel, actions: ViewActions): VNode {
+/** 行。発走済み(`past`)は薄く出す(隠さず下に回す。決定)。見送り(`skipped`)も薄い。 */
+function targetRow(r: TargetRow, past: boolean): VNode {
+  return h("li", {}, [
+    h("a", { class: `race${r.skipped ? " skipped" : ""}${past ? " past" : ""}`, href: r.href }, [
+      h("div", { class: "race-head" }, [h("strong", {}, [r.time]), h("span", {}, [r.place]), ...(r.pick === "" ? [] : [h("span", {}, [r.pick])]), h("span", { class: r.soon ? "t-left soon" : "t-left" }, [r.left])]),
+      h("span", { class: "race-detail" }, [r.detail]),
+    ]),
+  ]);
+}
+
+/** 今日の狙い目(Issue #336)。未発走の行が先、発走済みは見出しの下。0 件のときはサーバの要約(理由)を出す。 */
+function targetsScreen(model: TargetsModel, actions: ViewActions): VNode {
+  const body: VNode[] = [
+    h("div", { class: "controls" }, [
+      h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
+      h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+    ]),
+    h("h1", { class: "title" }, [`狙い目 ${model.dateLabel}`]),
+  ];
+  if (model.summary === null && model.loading) body.push(h("p", { class: "empty" }, ["読み込み中…"]));
+  if (model.error !== null) body.push(notice("error", model.error));
+  if (model.summary !== null) body.push(h("p", { class: "meta" }, [model.summary]));
+  if (model.upcoming.length > 0) body.push(h("ul", { class: "races" }, model.upcoming.map((r) => targetRow(r, false))));
+  if (model.past.length > 0) body.push(h("h2", {}, ["発走済み"]), h("ul", { class: "races" }, model.past.map((r) => targetRow(r, true))));
+  return h("div", { class: "screen" }, body);
+}
+
+export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel | MonthlyModel | TargetsModel | AdminOnlyModel, actions: ViewActions): VNode {
   switch (model.kind) {
     case "list":
       return listScreen(model, actions);
@@ -1020,6 +1074,8 @@ export function renderScreen(model: ListModel | RaceModel | ResultModel | Settin
       return reportScreen(model, actions);
     case "monthly":
       return monthlyScreen(model, actions);
+    case "targets":
+      return targetsScreen(model, actions);
     case "admin-only":
       return adminOnlyScreen(model);
   }

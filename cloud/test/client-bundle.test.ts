@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 307,100 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 313,800 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -168,8 +168,25 @@ describe("生成物のドリフトと決定性", () => {
     // 馬のカードと「3着内率の上位5頭」の行に添える統計モデルからの変化量(`result.ts` の `probShiftOf`・`shiftNote`・`HorseCard.adjustedShift`・`TopProbHorse.shift`、検証画面の `formatAdjustment` の再利用)。日本語の文言は `\u` エスケープで大きくなる。
     // 実測(`Buffer.byteLength(CLIENT_JS)`): de78787〈#310 の承認後〉は 304,953、実装後は 306,008(+1,055)。計り方: `git show de78787:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength` を取った(今の値は `pnpm run build:client` の出力〈「306008 バイト」〉)。
     // 新しい上限 307,100 の根拠: 実測 306,008 に約 1KB の余裕(306,008 + 1,092 を 100 バイト単位に切り上げ)。余裕は 1,092 バイト。外部ライブラリは使っていない。
+    // Issue #344(#335-A2 結果画面の「締切直前の再計算」の節): 上限を 307,100 から 308,600 へ引き上げた。足したもの: API の `close` の解釈(`api-analysis.ts` の `parseClose`)・表示用データ(`result.ts` の `closeOf`・
+    // 注記の差し替えの共有関数 `noticesOf`)・VNode(`view.ts` の `closeSection`・買い目の表の 1 行 `betRow`〈配分の提案と共有〉)・core の `betRowLabels`(サーバが差分の行に使う関数で、束には薄い包みだけが入る)。
+    // 文言(状態・理由・時刻・遅れ・差分の行・説明文)はサーバ(`src/close-view.ts`)で組み立てて、クライアントには置かない〈日本語は `\u` エスケープで 1 文字 6 バイト〉。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`): 30790e1〈#338 の公開後の作業ブランチ〉は 306,008、実装後は 307,564(+1,556。`pnpm run build:client` の出力〈「307564 バイト」〉)。
+    // 内訳(`cloud/` で esbuild を `build-client.ts` と同じ設定〈minify・metafile〉で呼び、`outputs[...].inputs[ファイル].bytesInOutput` を読んだ。30790e1 → 実装後): `client/api-analysis.ts` 5,201 → 5,850(+649)・
+    // `client/view.ts` 30,257 → 30,752(+495)・`client/result.ts` 4,928 → 5,312(+384)・`packages/core/src/view/allocation-proposal-view.ts` 6,214 → 6,242(+28)。4 つの和は 1,556 で全体の増分と一致する。
+    // 計り方(全体): 30790e1 の `cloud/src/client-bundle.generated.ts`(`git show 30790e1:cloud/src/client-bundle.generated.ts`)と今の生成物を、それぞれ import して `Buffer.byteLength` を取った。外部ライブラリは使っていない。
+    // 新しい上限 308,600 の根拠: 実測 307,564 に約 1KB の余裕(307,564 + 1,036 を 100 バイト単位に切り上げ)。余裕は 1,036 バイト。
+    // Issue #336(段階 B 今日の狙い目の画面): 上限を 308,600 から 313,800 へ引き上げた。新しい画面(`#targets`)を 1 つ足したため: API の解釈(`api-targets.ts`)・表示用データ(`targets-model.ts`。未発走/発走済みの分け方と残り時間の文言)・
+    // 画面の制御(`targets-screen.ts`。取得・30 秒ごとの再描画・3 分ごとの取り直し・見えている間だけ・回数の上限)・VNode(`view.ts` の `targetsScreen`・`targetRow`)・ルート(`#targets`)・一覧の入口のリンク・`app.ts` の配線。
+    // 文言(要約・場と R・◎・2 行目)はサーバ(`src/targets-view.ts`)で組み立てて、クライアントには置かない〈日本語は `\u` エスケープで 1 文字 6 バイト〉。置いた日本語は、見出し・ボタン・残り時間の語(あと・分・時間・まもなく・発走済み・時刻不明)だけ。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`): d3fccb2〈#344 の公開後〉は 307,564、実装後は 312,373(+4,809。`pnpm run build:client` の出力〈「312373 バイト」〉)。
+    // 内訳(`cloud/` で esbuild を `build-client.ts` と同じ設定〈minify・metafile〉で呼び、`metafile.outputs[...].inputs[ファイル].bytesInOutput` を前後で比べた。d3fccb2 → 実装後): 新規 `client/targets-screen.ts` 0 → 1,154・`client/targets-model.ts` 0 → 963・`client/api-targets.ts` 0 → 786・
+    // `client/view.ts` 30,752 → 31,946(+1,194。発走済みの行を薄くする `past` のクラスを含む)・`client/app.ts` 13,059 → 13,426(+367)・`client/route.ts` 1,652 → 1,974(+322)・`client/list.ts` 2,409 → 2,432(+23)。7 つの和は 786 + 367 + 23 + 322 + 963 + 1,154 + 1,194 = 4,809 で全体の増分と一致する。
+    // 計り方(全体): d3fccb2 の `cloud/client` と今の `cloud/client` を、それぞれ同じ設定で esbuild に通して `Buffer.byteLength` を取った(前は `git show d3fccb2:cloud/src/client-bundle.generated.ts` の長さとも一致)。外部ライブラリは使っていない。
+    // 転送量への影響は小さい: 圧縮後は #336 の前で約 80 KB(出力を `zlib.gzipSync` に通した長さ)。上限は転送量ではなく肥大の検知。
+    // 新しい上限 313,800 の根拠: 実測 312,373 に約 1.5KB の余裕(312,373 + 1,427 を 100 バイト単位に切り上げ)。余裕は 1,427 バイト。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(307_100);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(313_800);
   });
 });
 

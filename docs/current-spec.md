@@ -1182,11 +1182,11 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
   - **登録済みで有効な項目が 0 件**(セミコロン・空白・改行区切り、文字列でない値など)なら**管理者なし**(全員が閲覧者。`ACCESS_ALLOWED_EMAIL` にもフォールバックしない。`admins=none`)。`ADMIN_USER` の不備は設定全体を無効にしない(閲覧者を締め出さない)。
   - `ACCESS_ALLOWED_EMAIL` は**必須のまま**(欠落・`@` なしは `config-missing`/`config-invalid` で全拒否)。`ADMIN_USER` が有効なときは、管理者の判定には使われない。
   - 役割は**検証済みのメールと管理者の一覧の完全一致**だけで決める(JWT のメールは分割も部分一致もしない)。メールが文字列でない・判定中に例外が起きたら viewer。ヘッダ・クッキー・`ctx.access` のどの経路でも同じ判定。
-- **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 28 + パターン 2 = 30 ルート。#244 でアイコン 7 本、#251 で `/api/analyses/run/bulk`、#266 で `/api/export/prior-dataset`、#256 で `/api/horse-runs` を足した)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
+- **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 31 + パターン 3 = 34 ルート。#244 でアイコン 7 本、#251 で `/api/analyses/run/bulk`、#266 で `/api/export/prior-dataset`、#256 で `/api/horse-runs`、#279・#280 で月報、#336 で `/api/targets` を足した)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
   **リクエスト本文を読まず・DO/D1/R2/gate に触れず**に 403 `{"ok":false,"error":{"type":"admin-only"}}`(固定。認証の拒否の `forbidden` とは本文で区別する)を返す。**表に無い (method, path) は管理者専用**(フェイルクローズ)。
-  - 閲覧者に許す(17 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`・`GET /api/verify`(#263。下の「閲覧者の検証画面」)、
+  - 閲覧者に許す(20 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/targets`(#336。今日の狙い目)・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`・`GET /api/monthly-reports`・`GET /api/monthly-reports/{month}`(#279)・`GET /api/verify`(#263。下の「閲覧者の検証画面」)、
     アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/favicon-16.png`・`/icons/favicon-32.png`・`/icons/header-32.png`・`/icons/header-64.png`・`/icons/header-96.png`。#244。下の「アイコン」の節)。
-  - 管理者だけ(13 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/export/prior-dataset`(#266)・`/api/horse-runs`(#256 段階A。各馬の戦績の蓄積の診断)。
+  - 管理者だけ(14 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/monthly-reports/run`(#280)・`/api/export/prior-dataset`(#266)・`/api/horse-runs`(#256 段階A。各馬の戦績の蓄積の診断)。
   - 閲覧者が表の外の method(HEAD・POST など)を送ると、405 ではなく 403 になる。`{id}`・`{date}` のパターンは `run` に化けない(`/api/analyses/run`・`/api/reports/run` は管理者専用)。
   - `GET /api/races` は閲覧者でも netkeiba への取得を起こしうる(DO のキャッシュと gate が効く)。利用者の決定(2026-10-10)で許可した。
 - **画面**: サーバが `renderPage(email, role)` で `#app` に `data-role="admin|viewer"` を渡す(インラインスクリプトは使えないため属性。`client/main.ts` が `roleFromAttribute` で読み、欠落・不明は viewer)。
@@ -1557,6 +1557,25 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
     日単位の DO の `getPlanProgress`(朝の計画)・`getAutoRunResults`(各レースの結果)・`getNotifications`(通知の一覧)を読んで返す(`RaceDay` に `getPlanProgress` の RPC を足した)。**netkeiba にも LLM にも D1・R2 にも出ず、状態も変えない**。
     応答は**明示のホワイトリスト**のキーだけ(`ok`・`kaisai_date`・`plan`・`results`・`notifications`。snake_case)。自由文(会場の失敗の理由・自動実行の失敗の文面)は 200 文字に切る。**Webhook の URL は含まない**(URL は通知の仕組みの中にだけあり、この関数は `env.DISCORD_WEBHOOK_URL` を読まない)。
     理由: 対象が 0 件の日は通知が何も出ないので、自動実行が動いたのか壊れているのかを、外から確かめる手段が要る。画面での表示は範囲外。
+  - **`GET /api/targets?kaisai_date=YYYYMMDD`**(今日の狙い目。Issue #336。**読み取り専用。閲覧者にも開く**。画面は下の「画面 `#targets`」): GET だけ(HEAD などは 405)・`Sec-Fetch-Site` が別サイトなら 403・クエリは `kaisai_date` だけ(必須。重複・未知のキー・不正な日付は 400。D1・DO を呼ばない)。
+    その日の各レースの**最新の分析**(分析日時の降順・同時刻は id の降順)から、配分の提案(買い目の点数・合計・最大 EV)と◎の馬番を、発走時刻・場・R つきで返す。**R2・netkeiba・LLM・Webhook には触れない**(馬名は R2 のスナップショットにしか無いので出さない。◎は馬番だけ)。
+    - 採る提案: 締切の直前の再計算(#338)の回のうち、**`status` が `ok` で番号が最大のもの**(2 分前 > 5 分前)。無ければ分析時の提案。採った提案の買い目が 1 点以上なら「狙い目」(EV のしきい値は重ねない。配分はすでに設定の `evThreshold` を通っている)。
+      分析時に 1 点以上あったのに採った再計算の回が 0 点なら「見送り」として行を残す(`skipped: true`)。もともと 0 点のレースは載せない(分析済みの件数にだけ数える)。
+    - 発走時刻は日単位の DO の `getPlanProgress().rows`(前日 21 時の計画)から。**DO は分析が 1 件でもあるときだけ呼ぶ**。DO の失敗・計画が無い日は 503 にせず、`start_ms`・`start_time` を null にして 200(場・R は `race_id` から導く)。
+    - 応答(snake_case。明示のホワイトリスト): `{ ok, kaisai_date, now_ms, summary, races: [{ race_id, analysis_id, start_ms, start_time, place, pick, source("analysis"|"close"), round, bet_count, total_stake, max_ev, skipped, detail }] }`。
+      文言(`summary`・`place`〈「東京11R」〉・`pick`〈「◎7」〉・`detail`〈「5点 1,200円 EV 1.42・分析時」「見送り・発走2分前の再計算で0点」〉)は**サーバで組み立てる**(`targets-view.ts`。クライアントの束を太らせない)。`now_ms` は端末の時計のずれの補正用。
+      `races` は発走時刻の昇順(時刻なしは末尾)。クライアントが現在時刻で未発走・発走済みに分ける(段階 B)。
+    - D1 の読み取り(`targets-repository.ts`): 最新の分析の id を 1 回求め、その id を整数リテラルの列で渡して、買い目の batch と再計算の batch(回の状態・回ごとの買い目の集計)を並べて流し、最後に◎の batch を流す。
+      **◎は表示対象(分析時に買い目がある、または再計算の ok の回に買い目がある分析)の id だけ**を引く(買い目のない分析の `markUmaban` は常に null)。
+      **再計算の batch の失敗(migration 0019 の適用前に Worker が先に出た場合など)は握って、分析時の提案で 200**。買い目・◎の batch の失敗は 503(`{ ok: false, error: { type: "d1-error" } }`。文面なし)。
+      読み取り行数は `test/targets-repository.test.ts` が実測で固定(最悪の日〈72 レース全部が分析済み・買い目 10 点・再計算 2 回〉で 5,000 行未満。現実的な日〈3 分の 1 が狙い目〉はその約半分)。
+    - **画面 `#targets`・`#targets=YYYYMMDD`**(Issue #336 段階 B。一覧の操作欄の「狙い目」から、一覧で選んでいる日付で開く。閲覧者にも同じに開く): 取得は `GET /api/targets` だけ(一覧・板・設定・レース・分析は取らない)。
+      行は 2 段(1 段目: 発走時刻・場と R・◎・残り時間 / 2 段目: 点数・合計・最大 EV・どの回の提案か)で、タップすると結果画面(`#date=…&venue=…&analysis=…`。#344 の「締切直前の再計算」の節もそこ)へ。
+      未発走を発走の近い順(時刻不明は末尾)、発走済みを下に薄く(新しいものが先)。再計算で 0 点になった行は「見送り」として残す。狙い目が 0 件のときはサーバの要約(「分析済み N レースのうち、狙い目はありません」など)を出す。
+      残り時間は「発走まで」(締切の時刻は未確認なので「締切まで」とは書かない)。端末の時計は、取得時のサーバの時刻(`now_ms`)で補正する。
+      **更新**: 残り時間は取得なしで 30 秒ごとに再描画する。取り直しは 3 分ごと(`targets-screen.ts`)で、次をすべて満たすときだけ: 画面が見えている・開催日が今日(JST)・発走前のレースが残っている(まだ 1 件も分析されていない朝は続ける)・
+      自動の取り直しが 120 回未満・通信の失敗が 3 回続いていない。止まった状態は「更新」(数え直す)と、画面が見えるようになったとき(最後の取得から 1 分以上なら取り直す)で動き出す。
+      既知の限界: 発走前のレースが一時的に 0 件になる時間帯(次のレースの分析が始まる前の谷間)は自動の取り直しが止まる。「更新」か、画面を開き直すと再開する。
   - **止め方**: `wrangler.toml` を **`crons = []`(空配列)**にしてデプロイする。**`[triggers]` を消すだけでは止まらない**(wrangler は `crons` が未設定だと schedule を更新しない。コード読みで確認〈wrangler 4.147.0〉。**本番では確かめていない**)。ダッシュボードで消しても**次のデプロイで toml の内容に戻る**(`wrangler deploy` は toml の `crons` で schedule を上書きする)。課金だけ止めるなら Worker の secret `ANTHROPIC_API_KEY` を削除する(統計のみで保存。**netkeiba への取得は続く**)。
   - **検査**(Issue #206 当時): `scripts/test/cloud-config-guard.test.ts`(cron がちょうど `["0 0 * * *"]`〈現行は #249 の 2 本〉・取得の起点は手動 3 + 定時 1 + 結果の依頼 1〈#208〉・binding の使用箇所の走査・`handlePlan` が読み取りの RPC だけを呼ぶ)・`bundle-guard`(本番のバンドルに `async scheduled(` がある)・smoke の構成 G(`wrangler dev` の `/cdn-cgi/local/scheduled` で cron を手動発火。偽ソケット・過去の開催日で全件 skip)。
   - **【記録】**:
@@ -1567,7 +1586,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   「今すぐの仕事(now)・再試行待ち(now + 60 秒)・計画の次の試行/期限(段階2。`max(それ, now)`)・掃除の期限」のうち**最も早い時刻**を選ぶ(掃除の期限は、仕事〈即時・再試行待ち〉があるあいだは候補にしない)。
   予約が無いときの `setAlarm` の回数・値は従来と同じ。`pickNext` は **発走前(pre_race)を朝(morning)より先**に処理する(計算待ち → 取得待ちの順は従来どおり。取得待ちのうち**再試行待ち〈試行済み〉は最後**にして、再試行の間隔を保つ)。
 - **状態**: `GET /api/analyses/status` の各レースに `mode`・`analysis_id`・`detail`・`children_ok`。
-- **締切の直前の再計算**(Issue #338〈#335-A1〉。親 #335。画面は A-2 で未着手。**通知はしない**):
+- **締切の直前の再計算**(Issue #338〈#335-A1〉。親 #335。画面は A-2〈#344〉で、下の「画面」の項。**通知はしない**):
   - **何をするか**: 発走前の分析(`pre_race`)が保存されたら、発走の **5 分前(回 1)** と **2 分前(回 2。暫定値)** の 2 回、**オッズだけを取り直し**、確率は分析時のまま(**LLM は呼ばない**)で EV と配分を作り直して D1 に残す。分析時の提案の行(`analysis_allocation_meta`・`analysis_bets`)は上書きしない。時刻は定数(`cloud/src/analysis-close.ts` の `CLOSE_FIRST_LEAD_MS`・`CLOSE_FINAL_LEAD_MS`)。**2 分前は暫定**(締切の正確な時刻はリポジトリに根拠が無く未確認。ユーザー決定 2026-10-16)。設定項目は作らず、**常時 ON**(止めるにはデプロイで止める)。
   - **対象**: 自動・手動のどちらの発走前の分析も対象(自動の印を見ない)。**中央だけ**(地方は回の行を積んだうえで `skipped`〈`nar-unsupported`〉。地方は後段 N)。保存先が `saveClose` を持たない構成・分析の保存が発走を過ぎているときは、行も入力も積まない。
   - **入力の登録**: 計算ステップの保存と**同じ同期区間**(`registerClose`)で、DO の新しい表 `race_day_close_input`(馬ごとの馬番・枠番・馬名・prior・adjustedProb と、分析時にオッズがあったか、配分に使う設定 10 項目、EV 閾値、分析時の配分の route)と `race_day_close`(回ごとの行。`due_ms` = 発走 − リード)に積む。**D1 だけでは確率が揃わない**(`analysis_horses` に枠番・馬名が無く、R2 の詳細を読むと Class B 操作に数える)ため。登録の失敗は握って警告(分析は止めない)。同じレースの発走前の分析を予約し直すと(`enqueueTask`)、そのレースの行と入力は消える。
@@ -1577,6 +1596,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - **再試行と冪等性**(アラームは少なくとも 1 回実行される): 取得の失敗は 1 回だけ 15 秒後に再試行(再試行の時刻が次の回の時刻より前のときだけ。出馬表がキャッシュに無いときは再試行しない)。**結果は D1 に保存する前に DO(`payload_json`)へ書く**ので、保存の再試行・再実行で取り直さない。D1 への保存は最大 3 回(20 秒間隔)で、尽きたらその回は諦める(DO の状態 `abandoned`。D1 に行は残らず、警告だけ)。D1 の書き込みは (分析 id, 回) の UPSERT。
   - **D1**(migration 0019): `analysis_close`((分析 id, 回)で 1 行。status・reason・due_at・fired_at・late_ms・odds_official_datetime と、`ok` のときだけ配分のメタ 17 列)・`analysis_close_bets`(`ok` の回の買い目)。保存は 1 回の batch・3 文以内(`D1AnalysisStore.saveClose`)。読み出しは `getStoredClose`(2 文の batch)。
   - **API**: `GET /api/analyses/{id}` に `close`(`rounds`: 回の昇順の配列。各要素は `round`・`leadMinutes`・`status`・`reason`・`dueAt`・`firedAt`・`lateMs`・`oddsOfficialDatetime`・`allocation`〈`ok` のときだけ。分析時の提案と同じ形〉・`diff`〈`ok` で分析時の配分もあるときだけ。`added`・`removed`・`changed`・`unchanged`・`hasChange`・`totalStakeBefore`・`totalStakeAfter`。賭け金が同じでオッズだけ動いた買い目は変化に数えない〉)を足した。結果が無い分析・表が無い間・読み出しの失敗は `null`(配分と違い、無くても「買い目なし」と誤読されないため、全体を 503 にしない)。
+  - **画面**(Issue #344〈#335-A2〉。結果画面と、レース画面の発走前のカード〈開いたとき〉の**両方**。閲覧者にも出す): 「配分の提案(分析時点)」の節の直後に **「締切直前の再計算」** の節。`close` が null・空・形が不正(旧い分析・古いサーバの応答を含む)のときは節ごと出さない。節の先頭に説明 1 行(確率は分析時のまま)、回(発走5分前・発走2分前。`leadMinutes` から出す)ごとに、状態と理由(再計算した/失敗〈理由〉/行わなかった〈理由〉)・動いた時刻(JST の時:分。`firedAt`)と遅れ(1 分以上のときだけ「N分遅れ」。切り捨て)・`ok` の回は買い目の表(分析時と同じ部品=core の `buildAllocationProposalView`。実効設定の行は出さない)・差分の要約(追加・削除・賭け金の変化の点数。合計が変わったときだけ合計の増減)と主な行(賭け金の変化の絶対値が大きい順に最大 5 行・超えた分は「ほか N 点」。変化が無ければ「分析時から変わりませんでした」、配分が 0 点なら「配分は0点です」)。**文言はサーバ**(`cloud/src/close-view.ts`。理由の語彙ごとの文は `Record<CloseReason, string>` で網羅を型が強制する)が組み立て、API の各回に `label`・`summaryLines`・`diffLines`、`close` に `note` を足した(既存のキーは変えていない。構造の `diff` も残す)。クライアントは行をそのまま出す(`api-analysis.ts` の `parseClose`・`result.ts` の `closeOf`・`view.ts` の `closeSection`)。
   - **core**: `runAnalysis` の EV・配分の部分を `packages/core/src/analysis/recompute-allocation.ts`(`computeEvForProbs`・`buildAllocationForRows`・`recomputeAllocationFromProbs`)に抽出し、`runAnalysis` もそれを呼ぶ(`pipeline-golden.json` はバイト同一)。配分の差分は `allocation-diff.ts` の `diffAllocationBets`。
   - **【記録】**: (1) 取り直しの所要時間はゲートの最小間隔 2 秒 × 本数の導出値(中央の組合せ ON で約 14 秒)で、本番の実測は無い。(2) アラームは非プリエンプティブで、別レースの LLM 計算(最大 180 秒)や取得ステップの最中は起床が遅れる(`late_ms` で観測できる)。(3) 確率は分析時(発走の 45 分前など)のままで、LLM が見ていた市場情報は古くなる。(4) `scrapeRace` を非オッズのキャッシュ専用で呼ぶため、出馬表・戦績のパースが毎回走る(CPU は分析の計算ステップの部分集合)。(5) 日報の買い目・検証は分析時の提案のまま(検証への反映は C)。
 

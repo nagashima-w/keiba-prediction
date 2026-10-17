@@ -304,6 +304,17 @@ describe("見出しの要約(summarizeGroup。レース単位)", () => {
   });
 });
 
+describe("Issue #336: 一覧の「狙い目」への入口", () => {
+  it("リンク先は、一覧で選んでいる日付の #targets=YYYYMMDD。管理者にも閲覧者にも同じ(読み取りだけの画面)", () => {
+    const races = [race("202603020211")];
+    const admin = buildListModel(input({ list: { kind: "ready", races } }));
+    const viewer = buildListModel(input({ list: { kind: "ready", races }, readOnly: true }));
+    expect(admin.targetsHref).toBe(`#targets=${admin.date}`);
+    expect(admin.date).toMatch(/^[0-9]{8}$/); // 前提: 日付が入っている
+    expect(viewer.targetsHref).toBe(admin.targetsHref);
+  });
+});
+
 describe("Issue #238: 閲覧者(readOnly)の一覧: 設定への入口を出さない(日報への入口は残す。検証への入口は Issue #263 で閲覧者にも出す)", () => {
   it("管理者(既定)は 3 つの入口のリンク先を持つ。readOnly は設定だけが null で、検証(Issue #263)と日報は残る。一覧そのもの(場・レース)は同じ", () => {
     const races = [race("202603020211")];

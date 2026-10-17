@@ -41,6 +41,8 @@ import type { GetReportOptions, VerifyResponse, ViewerVerifyResponse } from "./v
 import type { ExportMode, ExportResponse } from "./prior-export-core";
 import { exportFilename, PRIOR_EXPORT_KEY } from "./prior-export-format";
 import { toRaceListRows } from "./race-list";
+import { D1TargetsStore } from "./targets-repository";
+import { buildTargetsView, type TargetsPlanRow } from "./targets-view";
 import type { JWTVerifyGetKey } from "jose";
 
 /** Durable Object(NetkeibaGate)のスタブの、使う部分だけの型(RPC なので、同期のメソッドも Promise になる)。 */
@@ -509,6 +511,17 @@ export async function handle(
       });
     }
     return handlePlan(request, env);
+  }
+
+  if (pathname === "/api/targets") {
+    // 読み取り専用(D1 の集計と DO の計画の読み取りだけ。R2・netkeiba・LLM・Webhook には触れない)。GET だけ(HEAD で D1・DO を引かない)。Issue #336。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handleTargets(request, env, (deps.now ?? (() => new Date()))());
   }
 
   if (pathname === "/api/races") {
@@ -1405,6 +1418,55 @@ async function handlePlan(request: Request, env: Env): Promise<Response> {
     // 例外の文面・SQL は返さない。
     return raceDayError();
   }
+}
+
+/**
+ * `GET /api/targets?kaisai_date=YYYYMMDD`(Issue #336): 「今日の狙い目」。その日の各レースの**最新の分析**から、配分の提案(買い目の点数・合計・最大 EV)と◎の馬番を、
+ * 発走時刻・場・R つきで返す(整形は `targets-view.ts`。**文言はサーバで組み立てる**)。締切の直前の再計算(Issue #338)の回があれば、ok の回のうち番号が最大のものを優先する。
+ *
+ * **読み取り専用。D1(集計)と日単位の DO の `getPlanProgress`(発走時刻)だけを読む**。R2 の詳細は読まない(馬名は出さない。◎は馬番だけ)ので、操作回数の柵を使わない。
+ * netkeiba・LLM・Webhook・gate にも触れない(`cloud-config-guard.test.ts` が固定)。閲覧者にも開く(route-policy.ts。`GET /api/analyses/{id}` で配分はすでに見える)。
+ * 順序: `Sec-Fetch-Site`(別サイトなら 403。DO の名前は開催日なので、日付を変えて DO を作らせる cross-site の GET を拒否する。`handlePlan` と同じ)→ クエリの検証(400。ここまでで D1・DO は呼ばない)→ D1(失敗は 503・文面なし)→ DO。
+ * **DO は分析が 1 件でもあるときだけ呼ぶ**(分析の無い日付で DO を作らない)。DO の失敗(計画が無い・読めない)は 503 にせず、発走時刻なしで 200 を返す(場・R は race_id から導ける)。
+ * 再計算の表が無い間(migration の適用前に Worker が先に出た場合)は、再計算なし(分析時の提案)で 200(`D1TargetsStore.readDay`)。
+ */
+async function handleTargets(request: Request, env: Env, now: Date): Promise<Response> {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin" && site !== "none") {
+    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  }
+  const url = new URL(request.url);
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((k) => k !== "kaisai_date") || new Set(keys).size !== keys.length) {
+    return badRequest("クエリは kaisai_date だけを1つ指定できます");
+  }
+  const kaisaiDate = url.searchParams.get("kaisai_date");
+  if (kaisaiDate === null) {
+    return badRequest("kaisai_date を YYYYMMDD の 8 桁で指定してください");
+  }
+  // 検証のメッセージに入力を写すので、長い入力は先頭だけにする(切っても、無効なままであることは変わらない)。
+  const dateCheck = checkKaisaiDate(kaisaiDate.slice(0, 32));
+  if (!dateCheck.ok) {
+    return badRequest(dateCheck.message);
+  }
+  let day;
+  try {
+    day = await new D1TargetsStore({ db: env.DB }).readDay(kaisaiDate);
+  } catch {
+    // 例外の文面・SQL は返さない。
+    return json({ ok: false, error: { type: "d1-error" } }, 503);
+  }
+  let plan: TargetsPlanRow[] | null = null;
+  if (day.analyses.length > 0) {
+    try {
+      const progress = await raceDayStub(env, kaisaiDate).getPlanProgress();
+      plan = progress.rows.map((r) => ({ raceId: r.raceId, venueName: r.venueName, raceNumber: r.raceNumber, startTime: r.startTime }));
+    } catch {
+      plan = null; // 計画を読めない: 発走時刻なしで出す
+    }
+  }
+  const view = buildTargetsView({ kaisaiDate, nowMs: now.getTime(), analyses: day.analyses, closeRounds: day.closeRounds, plan });
+  return json({ ok: true, ...view });
 }
 
 /** 手動の結果の取り込みの本文の上限(バイト)。入力は from・to だけ。 */

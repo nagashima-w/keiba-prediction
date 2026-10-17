@@ -368,6 +368,34 @@ describe("wrangler.toml", () => {
     expect((body + "\nstub.getRaceList(a, b);").includes(".getRaceList(")).toBe(true);
   });
 
+  it("Issue #336: GET /api/targets の関数(handleTargets)と、その部品(targets-repository.ts・targets-view.ts)は読み取りだけ。D1 の集計と DO の getPlanProgress の 1 つ以外は呼ばない。R2・netkeiba・gate・LLM・Webhook に触れない", () => {
+    const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = code.indexOf("async function handleTargets(");
+    expect(start).toBeGreaterThan(-1);
+    const end = code.indexOf("\n}\n", start);
+    const body = code.slice(start, end);
+    expect(body.length).toBeGreaterThan(500); // 前提: 本体を実際に読めている(空振りでない)
+    for (const required of [".getPlanProgress(", "sec-fetch-site", "raceDayStub(", "D1TargetsStore", "env.DB"]) {
+      expect(body, `handleTargets に ${required} がある`).toContain(required);
+    }
+    // DO の RPC は getPlanProgress の 1 つだけ(`.get〇〇(` の出現を数える。時刻の `.getTime(` は DO ではないので除く)
+    expect((body.match(/\.get(?!Time\()[A-Z][A-Za-z]*\(/g) ?? []).sort()).toEqual([".getPlanProgress("]);
+    for (const forbidden of [".schedule(", ".scheduleMany(", ".requestPlan(", ".requestResultImport(", "dispatchResultImports(", ".getRaceList(", ".fetchRaw(", ".getBoard(", ".getAutoRunResults(", ".getNotifications(", ".getResultImportProgress(", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "D1AnalysisStore", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
+      expect(body, `handleTargets に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 部品(D1 の読み取りと整形)も、R2・取得・LLM・通知を import も参照もしない
+    for (const file of ["targets-repository.ts", "targets-view.ts"]) {
+      const part = stripCode(readTextLf("cloud", "src", file));
+      expect(part.length, file).toBeGreaterThan(500); // 前提: 実際に読めている
+      for (const forbidden of ["R2", "bucket", "Bucket", "gate", "Gate", "netkeiba", "anthropic", "Anthropic", "webhook", "Webhook", "fetch(", "cloudflare:workers"]) {
+        expect(part, `${file} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+    }
+    // 対照(検出の確認。空振りでない): 取得口・R2 を足した本文は拾う
+    expect((body + "\nstub.getRaceList(a, b);").includes(".getRaceList(")).toBe(true);
+    expect(("const b = env.ANALYSIS_DETAIL;").includes("ANALYSIS_DETAIL")).toBe(true);
+  });
+
   it("Issue #184: 静的アセット([assets])を使わない。クライアントの JS は Worker が認証の後ろで配る(run_worker_first を付け忘れると認証を素通りする配信の経路ができるため、そもそも置かない)", () => {
     expect(tomlCode).not.toMatch(/^\[assets\]/m);
     expect(tomlCode).not.toMatch(/^\s*run_worker_first\s*=/m);
