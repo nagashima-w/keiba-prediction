@@ -29,7 +29,7 @@ const FULL: CloudSettings = {
   includeTrifectaInAllocation: true,
   includeBracketQuinellaInAllocation: false,
   preRaceOffsetMinutes: 60,
-  // Issue #218: スコアリングの重み14項目(すべて既定値とは別の値。タイム指数は Issue #353)
+  // Issue #218: スコアリングの重み15項目(すべて既定値とは別の値。タイム指数は Issue #353)
   biasWeightTrackCondition: 0.5,
   biasWeightVenue: 0.6,
   biasWeightSeason: 0.7,
@@ -44,6 +44,7 @@ const FULL: CloudSettings = {
   baseScoreWeightWeightChange: 0.65,
   baseScoreWeightCourseFrameBias: 0.75,
   baseScoreWeightTimeIndex: 0.85,
+  baseScoreWeightTrainer: 0.95,
 };
 
 interface FakeDb {
@@ -127,12 +128,12 @@ describe("GET /api/settings", () => {
     expect(f.sqls).toEqual([SELECT_SETTINGS_SQL]);
   });
 
-  it("行があれば、その設定(source: d1)。camelCase の全 29 項目(既存の 15 + スコアリングの重み 14)", async () => {
+  it("行があれば、その設定(source: d1)。camelCase の全 30 項目(既存の 15 + スコアリングの重み 15)", async () => {
     const { deps, token } = await setup();
     const f = fakeDb(JSON.stringify(FULL));
     const body = (await (await handle(get(token), envOf(f), {}, deps)).json()) as { ok: boolean; settings: CloudSettings; source: string };
     expect(body).toEqual({ ok: true, settings: FULL, source: "d1" });
-    expect(Object.keys(body.settings).length).toBe(29);
+    expect(Object.keys(body.settings).length).toBe(30);
   });
 
   it("手で入れた不正な値の行は、その項目だけ既定値(読む側)。kelly の 0 は読む側では有効で、そのまま返る", async () => {

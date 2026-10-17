@@ -55,6 +55,7 @@ import {
   summarizeRestRecord,
   precedingRaceIdsSameDay,
   selectJockeyStats,
+  selectTrainerStats,
   venueKindOfRaceId,
   type AnalysisAllocationRecord,
   type AnalysisRecord,
@@ -353,12 +354,22 @@ function conditionChangeRunsOf(
  * 名前が Object.prototype の関数を返さないように)。
  */
 function jockeyRecordsOf(race: RaceData, jockeyId: string | null) {
-  if (jockeyId === null || race.jockeyStats === undefined) {
+  return personRecordsOf(race.jockeyStats, jockeyId);
+}
+
+/** 調教師の年度別成績(`RaceData.trainerStats`。Issue #354)から、その調教師の記録を取り出す。騎手と同じ規則。 */
+function trainerRecordsOf(race: RaceData, trainerId: string | null) {
+  return personRecordsOf(race.trainerStats, trainerId);
+}
+
+function personRecordsOf(
+  stats: RaceData["jockeyStats"] | undefined,
+  id: string | null,
+) {
+  if (id === null || stats === undefined) {
     return undefined;
   }
-  return Object.prototype.hasOwnProperty.call(race.jockeyStats, jockeyId)
-    ? race.jockeyStats[jockeyId]
-    : undefined;
+  return Object.prototype.hasOwnProperty.call(stats, id) ? stats[id] : undefined;
 }
 
 /**
@@ -473,6 +484,9 @@ export async function runAnalysis(
         analysisDate,
         now(),
       ),
+      // 調教師の成績(Issue #354)。`race.trainerStats` から、分析日の年の前2年(ライブも過去日も同じ)を足し合わせる。
+      // 取得していない・取得に失敗した・調教師IDが無い馬は undefined(「データなし」)。地方・障害のレースは prior 側で対象外にする。
+      trainerStats: selectTrainerStats(trainerRecordsOf(race, horseData.shutuba.trainerId), analysisDate),
       config: deps.scorerConfig,
     });
   });

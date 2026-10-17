@@ -47,6 +47,7 @@ function offCfg(
         weightChange: 0,
         courseFrameBias: 0,
         timeIndex: 0,
+        trainer: 0,
         ...baseWeights,
       },
     },

@@ -33,6 +33,7 @@ export {
   parseJockeyId,
   parseKaisaiDate,
   parseRaceId,
+  parseTrainerId,
   precedingRaceIdsSameDay,
   siblingRaceIdsSameDay,
   venueKindOfRaceId,
@@ -42,6 +43,7 @@ export {
   type KaisaiDate,
   type RaceId,
   type RaceIdVenueKind,
+  type TrainerId,
 } from "./scraper/ids.js";
 export {
   commentUrl,
@@ -51,6 +53,7 @@ export {
   horseResultsApiUrl,
   horseUrl,
   jockeyResultsUrl,
+  trainerResultsUrl,
   narOddsPageUrl,
   narRaceListSubUrl,
   narTrioOddsAxisUrl,
@@ -96,6 +99,11 @@ export type {
   JockeyResultsStore,
   StoredJockeyResults,
 } from "./scraper/jockey-results-store.js";
+export type {
+  StoredTrainerResults,
+  TrainerResultsSaveEntry,
+  TrainerResultsStore,
+} from "./scraper/trainer-results-store.js";
 export {
   JockeyResultsParseError,
   parseJockeyResults,
@@ -118,6 +126,7 @@ export {
   DEFAULT_RACE_LIST_TTL_MS,
   DEFAULT_RESULTS_TTL_MS,
   DEFAULT_SHUTUBA_TTL_MS,
+  DEFAULT_TRAINER_TTL_MS,
   listNarRaces,
   listRaces,
   scrapeRace,
@@ -247,6 +256,17 @@ export {
   jockeyStatsWindow,
   selectJockeyStats,
 } from "./scorer/jockey-stats.js";
+export {
+  computeFieldTrainerContributions,
+  selectTrainerStats,
+  shrunkTrainerRate,
+  trainerStatsWindow,
+  TRAINER_NAME,
+  TRAINER_PLACE_RATE_BASE,
+  TRAINER_SHRINK_STARTS,
+  type FieldTrainerContext,
+  type TrainerStats,
+} from "./scorer/trainer-stats.js";
 export {
   buildPriorInput,
   computeFieldPriors,

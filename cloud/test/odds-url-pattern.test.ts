@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseHorseId, parseJockeyId, parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
+import { parseHorseId, parseJockeyId, parseKaisaiDate, parseRaceId, parseTrainerId } from "../../packages/core/src/scraper/ids";
 import * as urls from "../../packages/core/src/scraper/urls";
 import { ODDS_URL_PATTERN } from "../src/race-day-core";
 
@@ -19,6 +19,7 @@ const NAR = parseRaceId("202654071210");
 const DATE = parseKaisaiDate("20260628");
 const HORSE = parseHorseId("2023103386");
 const JOCKEY = parseJockeyId("01170");
+const TRAINER = parseTrainerId("01126");
 
 /** オッズを返すビルダー → そのビルダーの呼び出し(中央用・地方用の引数)。 */
 const ODDS_BUILDERS: Record<string, () => string[]> = {
@@ -51,6 +52,8 @@ const NON_ODDS_BUILDERS: Record<string, () => string[]> = {
   horseResultsApiUrl: () => [urls.horseResultsApiUrl(HORSE)],
   // 騎手の年度別成績(Issue #226)。中央は既定のページ、地方は &syusai=20。どちらもオッズと判定されない(`/jockey/result.html` はオッズの語を含まない)。
   jockeyResultsUrl: () => [urls.jockeyResultsUrl(JOCKEY, "central"), urls.jockeyResultsUrl(JOCKEY, "nar")],
+  // 調教師の年度別成績(Issue #354)。騎手と同じ形で、`/trainer/result.html` もオッズの語を含まない。
+  trainerResultsUrl: () => [urls.trainerResultsUrl(TRAINER, "central"), urls.trainerResultsUrl(TRAINER, "nar")],
   raceResultUrl: () => [urls.raceResultUrl(CENTRAL), urls.raceResultUrl(NAR)],
   gradeWinnerApiUrl: () => [urls.gradeWinnerApiUrl(CENTRAL), urls.gradeWinnerApiUrl(NAR)],
   gradeWinnerRefererUrl: () => [urls.gradeWinnerRefererUrl(CENTRAL), urls.gradeWinnerRefererUrl(NAR)],

@@ -8,12 +8,12 @@ import { DEFAULT_SCORER_CONFIG, type ScorerConfig } from "../../packages/core/sr
  *
  * Issue #287(#285 の段階B)で、比べる相手を変えた。以前は exe の `buildScorerConfig`(`packages/app/src/main/settings-store.ts`。
  * `{ ...DEFAULT_SCORER_CONFIG, weights: 重み7項目, baseScore: { ...DEFAULT_SCORER_CONFIG.baseScore, weights: 重み6項目 } }` を返す)と
- * 同じ出力になることを検査していた。exe を削除したため、**重み14項目に具体的な数値を渡し、期待する `ScorerConfig` をリテラルで書いて**比べる。
+ * 同じ出力になることを検査していた。exe を削除したため、**重み15項目に具体的な数値を渡し、期待する `ScorerConfig` をリテラルで書いて**比べる。
  * 重み以外の項目(prior・minSampleForBias など)は、core の `DEFAULT_SCORER_CONFIG` のままであることを期待する(exe と同じ出力、の中身)。
  * ここ(ルートの scripts/test/)に置く理由は従来どおり: cloud/test から core のバレルを import できない配置のため。
  */
 
-/** 14項目すべてを既定値とは別の値にした設定(取り違え・欠落を検出できる)。 */
+/** 15項目すべてを既定値とは別の値にした設定(取り違え・欠落を検出できる)。 */
 const CHANGED: CloudSettings = {
   ...DEFAULT_CLOUD_SETTINGS,
   biasWeightTrackCondition: 0.5,
@@ -30,6 +30,7 @@ const CHANGED: CloudSettings = {
   baseScoreWeightWeightChange: 0.65,
   baseScoreWeightCourseFrameBias: 0.75,
   baseScoreWeightTimeIndex: 0.85,
+  baseScoreWeightTrainer: 0.95,
 };
 
 /** CHANGED が渡す重みから期待する `ScorerConfig`(リテラル)。重み以外は core の既定のまま。 */
@@ -54,6 +55,7 @@ const EXPECTED_CHANGED: ScorerConfig = {
       weightChange: 0.65,
       courseFrameBias: 0.75,
       timeIndex: 0.85,
+      trainer: 0.95,
     },
   },
 };
@@ -80,17 +82,18 @@ const EXPECTED_DEFAULT: ScorerConfig = {
       weightChange: 1,
       courseFrameBias: 1,
       timeIndex: 0.12,
+      trainer: 0.77,
     },
   },
 };
 
 describe("buildCloudScorerConfig は期待する ScorerConfig(リテラル)と同じ出力", () => {
-  it("既定値・14項目すべてを変えた値の両方で、期待値のリテラルと深く等しい", () => {
+  it("既定値・15項目すべてを変えた値の両方で、期待値のリテラルと深く等しい", () => {
     expect(buildCloudScorerConfig(DEFAULT_CLOUD_SETTINGS)).toEqual(EXPECTED_DEFAULT);
     expect(buildCloudScorerConfig(CHANGED)).toEqual(EXPECTED_CHANGED);
   });
 
-  it("前提: 14項目すべてが既定値と別の値で、変えた設定の出力は既定値の出力と違う(比較が自明に成り立たない)。重み以外の項目は core の既定のまま", () => {
+  it("前提: 15項目すべてが既定値と別の値で、変えた設定の出力は既定値の出力と違う(比較が自明に成り立たない)。重み以外の項目は core の既定のまま", () => {
     for (const f of SCORING_WEIGHT_FIELDS) {
       expect(CHANGED[f.field], `前提: ${f.field}`).not.toBe(DEFAULT_CLOUD_SETTINGS[f.field]);
     }
@@ -100,7 +103,7 @@ describe("buildCloudScorerConfig は期待する ScorerConfig(リテラル)と�
     expect(restChanged).toEqual(restDefault);
   });
 
-  it("1項目だけ変えた設定でも、14項目それぞれで、その1項目だけが期待値(リテラル)に反映される", () => {
+  it("1項目だけ変えた設定でも、15項目それぞれで、その1項目だけが期待値(リテラル)に反映される", () => {
     for (const f of SCORING_WEIGHT_FIELDS) {
       const settings = { ...DEFAULT_CLOUD_SETTINGS, [f.field]: 7.5 };
       const expected: ScorerConfig =

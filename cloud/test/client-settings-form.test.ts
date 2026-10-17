@@ -38,7 +38,7 @@ const FULL: CloudSettings = {
   includeTrifectaInAllocation: true,
   includeBracketQuinellaInAllocation: false,
   preRaceOffsetMinutes: 60,
-  // Issue #218・#353: 重み14項目は、すべて既定値とは別の値
+  // Issue #218・#353: 重み15項目は、すべて既定値とは別の値
   biasWeightTrackCondition: 0.5,
   biasWeightVenue: 0.6,
   biasWeightSeason: 0.7,
@@ -53,6 +53,7 @@ const FULL: CloudSettings = {
   baseScoreWeightWeightChange: 0.65,
   baseScoreWeightCourseFrameBias: 0.75,
   baseScoreWeightTimeIndex: 0.85,
+  baseScoreWeightTrainer: 0.95,
 };
 
 describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何分前は cloud 専用で後ろ)", () => {
@@ -76,11 +77,11 @@ describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何
     ]);
   });
 
-  it("設定の全項目 = FIELD_ORDER(15項目)+ WEIGHT_FIELD_ORDER(スコアリングの重み14項目。Issue #218・#353)を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
+  it("設定の全項目 = FIELD_ORDER(15項目)+ WEIGHT_FIELD_ORDER(スコアリングの重み15項目。Issue #218・#353)を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
     expect(FIELD_ORDER.length).toBe(15);
-    expect(WEIGHT_FIELD_ORDER.length).toBe(14);
+    expect(WEIGHT_FIELD_ORDER.length).toBe(15);
     const all = [...FIELD_ORDER, ...WEIGHT_FIELD_ORDER];
-    expect(new Set(all).size).toBe(29);
+    expect(new Set(all).size).toBe(30);
     expect(all.length).toBe(CLOUD_SETTINGS_KEYS.length);
     expect([...all].sort()).toEqual([...CLOUD_SETTINGS_KEYS].sort());
   });
@@ -171,7 +172,7 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     ["追加指示 2000 文字", "additionalInstruction", "あ".repeat(2000), true],
     ["追加指示 2001 文字", "additionalInstruction", "あ".repeat(2001), false],
     ["追加指示 空", "additionalInstruction", "", true],
-    // Issue #218: スコアリングの重み(有限な数で 0 以上。上限なし)。14項目すべてで同じ境界を、下の it.each が回す
+    // Issue #218: スコアリングの重み(有限な数で 0 以上。上限なし)。15項目すべてで同じ境界を、下の it.each が回す
     ["重み 0", "biasWeightVenue", "0", true],
     ["重み 小数", "baseScoreWeightRecentForm", "0.05", true],
     ["重み 大きい値(上限なし)", "biasWeightSeason", "1000000", true],
@@ -191,7 +192,7 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     }
   });
 
-  it.each(WEIGHT_FIELD_ORDER.flatMap((key) => [[key, "0", true], [key, "0.5", true], [key, "12", true], [key, "-0.5", false], [key, "", false], [key, "x", false]] as const))("Issue #218: 重み %s = %j は ok=%s(14項目すべて同じ境界。不正なら、その項目だけがエラー)", (key, text, ok) => {
+  it.each(WEIGHT_FIELD_ORDER.flatMap((key) => [[key, "0", true], [key, "0.5", true], [key, "12", true], [key, "-0.5", false], [key, "", false], [key, "x", false]] as const))("Issue #218: 重み %s = %j は ok=%s(15項目すべて同じ境界。不正なら、その項目だけがエラー)", (key, text, ok) => {
     const result = validateDraft(setDraftValue(draftFromSettings(DEFAULT_CLOUD_SETTINGS), key, text));
     expect(result.ok).toBe(ok);
     if (!result.ok) {
@@ -541,17 +542,17 @@ describe("Issue #218: スコアリングの重みの節(buildSettingsModel の w
     expect(buildSettingsModel(READY_INPUT()).weights).not.toBeNull();
   });
 
-  it("重みの14項目は fields(既存の15項目)に混ざらず、節の groups にだけある: 見出しは exe と同じ「環境・状態バイアス補正」(7)→「基礎スコア」(7。末尾がタイム指数)", () => {
+  it("重みの15項目は fields(既存の15項目)に混ざらず、節の groups にだけある: 見出しは exe と同じ「環境・状態バイアス補正」(7)→「基礎スコア」(8。末尾が調教師成績、その前がタイム指数)", () => {
     const m = buildSettingsModel(READY_INPUT());
     expect(m.fields.map((f) => f.key)).toEqual([...FIELD_ORDER]);
     const w = m.weights!;
-    expect(w.groups.map((g) => [g.heading, g.fields.length])).toEqual([["環境・状態バイアス補正", 7], ["基礎スコア", 7]]);
+    expect(w.groups.map((g) => [g.heading, g.fields.length])).toEqual([["環境・状態バイアス補正", 7], ["基礎スコア", 8]]);
     expect(allFields(w).map((f) => f.key)).toEqual([...WEIGHT_FIELD_ORDER]);
   });
 
-  it("ラベルは exe と同じ日本語(BIAS_WEIGHT_LABELS・BASE_SCORE_WEIGHT_LABELS)。14項目すべて、対応表の exe のキーのラベル", () => {
+  it("ラベルは exe と同じ日本語(BIAS_WEIGHT_LABELS・BASE_SCORE_WEIGHT_LABELS)。15項目すべて、対応表の exe のキーのラベル", () => {
     const byKey = Object.fromEntries(allFields(weights()).map((f) => [f.key, f.label]));
-    expect(Object.keys(byKey).length).toBe(14);
+    expect(Object.keys(byKey).length).toBe(15);
     for (const f of SCORING_WEIGHT_FIELDS) {
       const expected = f.group === "bias" ? BIAS_WEIGHT_LABELS[f.exeKey] : BASE_SCORE_WEIGHT_LABELS[f.exeKey];
       expect(expected.length, f.field).toBeGreaterThan(1); // 前提: exe 側にラベルがある
@@ -561,9 +562,9 @@ describe("Issue #218: スコアリングの重みの節(buildSettingsModel の w
     expect(byKey["baseScoreWeightWeightChange"]).toBe("斤量");
   });
 
-  it("入力の種類: 14項目とも text で、小数のキーボード(decimal)。値は下書きの文字のまま。maxlength なし", () => {
+  it("入力の種類: 15項目とも text で、小数のキーボード(decimal)。値は下書きの文字のまま。maxlength なし", () => {
     const fields = allFields(weights());
-    expect(fields.length).toBe(14);
+    expect(fields.length).toBe(15);
     for (const f of fields) {
       expect(f.kind, f.key).toBe("text");
       expect(f.inputmode, f.key).toBe("decimal");
@@ -584,15 +585,16 @@ describe("Issue #218: スコアリングの重みの節(buildSettingsModel の w
       baseScoreWeightWeightChange: "0.65",
       baseScoreWeightCourseFrameBias: "0.75",
       baseScoreWeightTimeIndex: "0.85",
+      baseScoreWeightTrainer: "0.95",
     });
   });
 
-  it("エラーは渡した項目だけに付く。保存中は14項目とも disabled(通常は disabled でない)", () => {
+  it("エラーは渡した項目だけに付く。保存中は15項目とも disabled(通常は disabled でない)", () => {
     const w = weights({ errors: { biasWeightVenue: "エラーA", baseScoreWeightJockey: "エラーB", bankroll: "別の項目" } });
     expect(Object.fromEntries(allFields(w).filter((f) => f.error !== null).map((f) => [f.key, f.error]))).toEqual({ biasWeightVenue: "エラーA", baseScoreWeightJockey: "エラーB" });
     expect(allFields(weights()).every((f) => !f.disabled)).toBe(true);
     const saving = weights({ save: { kind: "saving" } });
-    expect(allFields(saving).length).toBe(14);
+    expect(allFields(saving).length).toBe(15);
     expect(allFields(saving).every((f) => f.disabled)).toBe(true);
   });
 
@@ -609,10 +611,10 @@ describe("Issue #218: スコアリングの重みの節(buildSettingsModel の w
     expect(weights({ save: { kind: "saving" } }).resetDisabled).toBe(true);
   });
 
-  it("補助文: 騎手成績の重みに「変わりません」の注記は無い(騎手の年度別成績を取得して prior に入れるようになった。Issue #226。旧: 分析が成績を渡さず効かない旨を書いていた)。14項目のどれにも書かない。画面に出る文に Issue 番号を書かない", () => {
+  it("補助文: 騎手成績の重みに「変わりません」の注記は無い(騎手の年度別成績を取得して prior に入れるようになった。Issue #226。旧: 分析が成績を渡さず効かない旨を書いていた)。15項目のどれにも書かない。画面に出る文に Issue 番号を書かない", () => {
     const w = weights();
     const byKey = Object.fromEntries(allFields(w).map((f) => [f.key, f.help ?? ""]));
-    expect(SCORING_WEIGHT_FIELDS).toHaveLength(14); // 下のループが14項目すべてを見ていることの前提
+    expect(SCORING_WEIGHT_FIELDS).toHaveLength(15); // 下のループが15項目すべてを見ていることの前提
     expect(Object.keys(byKey)).toContain("baseScoreWeightJockey");
     for (const f of SCORING_WEIGHT_FIELDS) {
       expect(byKey[f.field], f.field).not.toContain("変わりません");
@@ -625,36 +627,43 @@ describe("Issue #218: スコアリングの重みの節(buildSettingsModel の w
   });
 });
 
-describe("Issue #353: タイム指数の重みの欄", () => {
+describe("Issue #353・#354: タイム指数・調教師成績の重みの欄", () => {
   const weights = () => buildSettingsModel(READY_INPUT()).weights!;
   const allFields = (w: NonNullable<ReturnType<typeof buildSettingsModel>["weights"]>) => w.groups.flatMap((g) => g.fields);
 
-  it("補助文があるのはタイム指数の欄だけ(単位が他の重みと違うため)。ほかの13欄は補助文なし。画面に出る文に Issue 番号を書かない", () => {
+  it("補助文があるのはタイム指数と調教師成績の欄だけ(ほかの13欄は補助文なし)。画面に出る文に Issue 番号を書かない", () => {
     const byKey = Object.fromEntries(allFields(weights()).map((f) => [f.key, f.help]));
-    expect(Object.keys(byKey)).toHaveLength(14);
+    expect(Object.keys(byKey)).toHaveLength(15);
     expect(byKey["baseScoreWeightTimeIndex"]).toContain("秒/km");
     expect(byKey["baseScoreWeightTimeIndex"]).toContain("単位が違う");
-    expect(Object.entries(byKey).filter(([k, v]) => k !== "baseScoreWeightTimeIndex" && v !== null)).toEqual([]);
-    expect(byKey["baseScoreWeightTimeIndex"]).not.toMatch(/#\d/);
+    expect(byKey["baseScoreWeightTrainer"]).toContain("3着内率");
+    expect(byKey["baseScoreWeightTrainer"]).toContain("中央のレースだけ");
+    expect(byKey["baseScoreWeightTrainer"]).toContain("0 にすると調教師の成績を取得しない");
+    const others = Object.entries(byKey).filter(([k]) => k !== "baseScoreWeightTimeIndex" && k !== "baseScoreWeightTrainer");
+    expect(others).toHaveLength(13);
+    expect(others.filter(([, v]) => v !== null)).toEqual([]);
+    for (const k of ["baseScoreWeightTimeIndex", "baseScoreWeightTrainer"]) expect(byKey[k]).not.toMatch(/#\d/);
   });
 
-  it("節の説明は、既定値が exe と同じなのはタイム指数を除く、と事実どおりに書く(タイム指数は exe にない項目)", () => {
+  it("節の説明は、既定値が exe と同じなのはタイム指数と調教師成績を除く、と事実どおりに書く(この2つは exe にない項目)", () => {
     const text = buildSettingsModel(READY_INPUT()).weights!.help.join("\n");
-    expect(text).toContain("既定値は、タイム指数を除いて exe と同じです");
+    expect(text).toContain("既定値は、タイム指数と調教師成績を除いて exe と同じです");
     expect(text).not.toContain("既定値は exe と同じです");
   });
 
-  it("ラベルは「タイム指数」で、基礎スコアの小見出しの末尾(14 番目)に並ぶ", () => {
+  it("ラベルは「タイム指数」「調教師成績」で、基礎スコアの小見出しの末尾(14・15 番目)に並ぶ", () => {
     const w = weights();
     const labels = Object.fromEntries(allFields(w).map((f) => [f.key, f.label]));
     expect(labels["baseScoreWeightTimeIndex"]).toBe("タイム指数");
-    expect(allFields(w).at(-1)!.key).toBe("baseScoreWeightTimeIndex");
-    expect(w.groups[1]!.fields.at(-1)!.key).toBe("baseScoreWeightTimeIndex");
+    expect(labels["baseScoreWeightTrainer"]).toBe("調教師成績");
+    expect(allFields(w).at(-1)!.key).toBe("baseScoreWeightTrainer");
+    expect(w.groups[1]!.fields.at(-1)!.key).toBe("baseScoreWeightTrainer");
+    expect(w.groups[1]!.fields.at(-2)!.key).toBe("baseScoreWeightTimeIndex");
   });
 });
 
 describe("Issue #218: resetWeightsInDraft(「重みを既定値に戻す」。下書きだけを戻す)", () => {
-  it("14項目の下書きを既定値(文字列)に戻し、重み以外の15項目は変えない。元の下書きは変えない", () => {
+  it("15項目の下書きを既定値(文字列)に戻し、重み以外の15項目は変えない。元の下書きは変えない", () => {
     const draft = draftFromSettings(FULL);
     for (const k of WEIGHT_FIELD_ORDER) expect(draft[k], `前提: ${k} は既定値と別の値`).not.toBe(String(DEFAULT_CLOUD_SETTINGS[k]));
     const reset = resetWeightsInDraft(draft);

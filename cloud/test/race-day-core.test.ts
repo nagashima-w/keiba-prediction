@@ -87,7 +87,8 @@ afterEach(() => {
  * Issue #226 で、既定の重み(騎手 0.15)のときは騎手の年度別成績も取る(16頭・騎手16人で35本。cloud/test/race-day-jockey.test.ts が固定する)ようになったので、
  * ここでは騎手の重みを 0(= 取らない)にして、従来の検査の意味を保つ(検査の内容・期待値は変えていない)。
  */
-const NO_JOCKEY_SETTINGS = { ...DEFAULT_CLOUD_SETTINGS, baseScoreWeightJockey: 0 };
+// 騎手・調教師の成績を取らない設定(取得の本数を 19 本に固定する。Issue #226・#354)。名前は歴史的経緯で NO_JOCKEY のまま。
+const NO_JOCKEY_SETTINGS = { ...DEFAULT_CLOUD_SETTINGS, baseScoreWeightJockey: 0, baseScoreWeightTrainer: 0 };
 
 function harness(overrides: Partial<RaceDayDeps> = {}, gate: FakeGate = fakeGate()): Harness {
   const sql = openNodeSql();

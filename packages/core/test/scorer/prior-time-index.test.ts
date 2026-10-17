@@ -26,7 +26,7 @@ function onlyTimeIndexCfg(timeIndex: number): ScorerConfig {
     weights: { trackCondition: 0, venue: 0, season: 0, frame: 0, summerFatigue: 0, transport: 0, rotation: 0 },
     baseScore: {
       ...DEFAULT_SCORER_CONFIG.baseScore,
-      weights: { recentForm: 0, last3f: 0, courseDistance: 0, jockey: 0, weightChange: 0, courseFrameBias: 0, timeIndex },
+      weights: { recentForm: 0, last3f: 0, courseDistance: 0, jockey: 0, weightChange: 0, courseFrameBias: 0, timeIndex, trainer: 0 },
     },
   };
 }
@@ -88,12 +88,12 @@ describe("computeFieldPriors × タイム指数", () => {
     expect(expectedIndex(95.5)).toBeCloseTo(-0.775, 10);
   });
 
-  it("寄与度は 14 項目で、タイム指数は末尾(13 項目の並びは computePrior と同じ)", () => {
+  it("寄与度は 15 項目で、タイム指数は 14 番目(13 項目の並びは computePrior と同じ。末尾の 15 番目は調教師成績。Issue #354)", () => {
     const priors = computeFieldPriors(inputsOf(TIMES, onlyTimeIndexCfg(W)));
     const single = computePrior(inputsOf(TIMES, onlyTimeIndexCfg(W))[0]!);
     expect(single.contributions).toHaveLength(13);
     for (const p of priors) {
-      expect(p.contributions).toHaveLength(14);
+      expect(p.contributions).toHaveLength(15);
       expect(p.contributions.slice(0, 13).map((c) => c.biasName)).toEqual(single.contributions.map((c) => c.biasName));
       expect(p.contributions[13]!.biasName).toBe("タイム指数");
     }

@@ -10084,6 +10084,16 @@
               "sampleCount": 3,
               "targetRate": 0.22499999999999076,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -10279,6 +10289,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -10474,6 +10494,16 @@
               "sampleCount": 1,
               "targetRate": -0.1349206349206295,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -10669,6 +10699,16 @@
               "sampleCount": 1,
               "targetRate": -0.7333333333333296,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -10864,6 +10904,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -11059,6 +11109,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -11254,6 +11314,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -11449,6 +11519,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -11644,6 +11724,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -11839,6 +11929,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -12034,6 +12134,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -12229,6 +12339,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -12424,6 +12544,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -12619,6 +12749,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -12814,6 +12954,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -13009,6 +13159,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -19969,7 +20129,7 @@
       "raceId": "202603020211",
       "analyzedAt": "2026-06-28T12:00:00.000Z",
       "evEstimated": false,
-      "promptVersion": "2026-10-18.1",
+      "promptVersion": "2026-10-18.2",
       "additionalInstruction": null,
       "kaisaiDate": "20260628",
       "historyCutoffDate": "20260628",
@@ -25087,6 +25247,16 @@
               "sampleCount": 3,
               "targetRate": 0.22499999999999076,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "〇",
@@ -25284,6 +25454,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "▲",
@@ -25484,6 +25664,16 @@
               "sampleCount": 1,
               "targetRate": -0.1349206349206295,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "△",
@@ -25679,6 +25869,16 @@
               "sampleCount": 1,
               "targetRate": -0.7333333333333296,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "☆",
@@ -25878,6 +26078,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -26076,6 +26286,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "◎",
@@ -26273,6 +26493,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "〇",
@@ -26470,6 +26700,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "▲",
@@ -26670,6 +26910,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "△",
@@ -26865,6 +27115,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "☆",
@@ -27064,6 +27324,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -27262,6 +27532,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "◎",
@@ -27459,6 +27739,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "〇",
@@ -27656,6 +27946,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "▲",
@@ -27856,6 +28156,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "△",
@@ -28051,6 +28361,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": "☆",
@@ -46934,6 +47254,16 @@
               "sampleCount": 3,
               "targetRate": 0.22499999999999076,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -47129,6 +47459,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -47324,6 +47664,16 @@
               "sampleCount": 1,
               "targetRate": -0.1349206349206295,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -47519,6 +47869,16 @@
               "sampleCount": 1,
               "targetRate": -0.7333333333333296,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -47714,6 +48074,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -47909,6 +48279,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -48104,6 +48484,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -48299,6 +48689,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -48494,6 +48894,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -48689,6 +49099,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -48884,6 +49304,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -49079,6 +49509,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -49274,6 +49714,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -49469,6 +49919,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -49664,6 +50124,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,
@@ -49859,6 +50329,16 @@
               "sampleCount": 5,
               "targetRate": 0.5317460317460387,
               "overallRate": 0.5317460317460387
+            },
+            {
+              "biasName": "調教師成績",
+              "applied": false,
+              "reason": "調教師の成績がなく、レース内で比べられる馬も2頭未満のため補正なし",
+              "weight": 0.77,
+              "correction": 0,
+              "sampleCount": 0,
+              "targetRate": null,
+              "overallRate": null
             }
           ],
           "mark": null,

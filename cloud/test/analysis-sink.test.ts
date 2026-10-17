@@ -166,7 +166,7 @@ describe("DO(RaceDayCore)から保存まで通す(本物の D1・R2。AC-c1・c6
   const encoder = new TextEncoder();
   // 騎手の重みは 0(= 騎手の成績を取らない)。このテストの関心は D1・R2 への保存(文の数・親子の紐づけ・警告が無いこと)で、組合せ ON・冷えた状態・騎手の保存先なしだと
   // 騎手の取得が 1 回の取得の上限(40 本)に当たって警告が 1 件出る(Issue #226。cloud/test/race-day-jockey.test.ts の j12 が固定する)。それとは別の関心にするため外す。
-  const SETTINGS: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 1_000_000, perRaceCap: 100_000, includeComboOdds: true, baseScoreWeightJockey: 0 };
+  const SETTINGS: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 1_000_000, perRaceCap: 100_000, includeComboOdds: true, baseScoreWeightJockey: 0, baseScoreWeightTrainer: 0 };
 
   function setup(extra: { failPut?: (n: number) => boolean } = {}) {
     const spiedDb = spyDb(local.db);

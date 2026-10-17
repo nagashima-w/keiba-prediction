@@ -110,6 +110,7 @@ const ALL_ON: CloudSettings = {
   // 年度別成績も取る(16頭・騎手16人で+16本)ようになったので、ここでは騎手の重みを 0(= 取らない)にして従来の検査の意味を保つ
   // (期待値は変えていない)。騎手を取る場合の本数・キャッシュの使い回しは cloud/test/race-day-jockey.test.ts が固定する。
   baseScoreWeightJockey: 0,
+  baseScoreWeightTrainer: 0, // 調教師の成績も取らない(取得の本数を固定する。Issue #354)
 };
 
 interface Harness {
@@ -452,7 +453,8 @@ describe("発走前の分析: 計算・保存ステップ(AC-c5・c1・c6)", () 
     await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
     await h.core.runNextStep();
     // 組合せオッズは取らない(既定 OFF): 冷えた状態で 19 本 + 騎手の年度別成績 16 本(既定の騎手の重みは 0.15 で 0 より大きい。Issue #226)
-    expect(h.gate.urls).toHaveLength(19 + 16);
+    // + 調教師の年度別成績 5 本(既定の調教師の重みは 0.77。騎手と共有する上限 40 に届くまで。残り 11 人は補正なし。Issue #354)
+    expect(h.gate.urls).toHaveLength(19 + 16 + 5);
     await h.core.runNextStep();
     expect(h.sink.saved).toHaveLength(1);
     expect(h.sink.saved[0]!.allocation?.bets.length ?? 0).toBe(0);

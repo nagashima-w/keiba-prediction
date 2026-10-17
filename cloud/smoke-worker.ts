@@ -12,6 +12,8 @@
 import centralHtml from "../fixtures/shutuba_202603020211.html";
 import jockeyResults01170Html from "../fixtures/jockey_results_01170.html";
 import jockeyResults01220Html from "../fixtures/jockey_results_01220.html";
+import trainerResults01126Html from "../fixtures/trainer_results_01126.html";
+import trainerResults01213Html from "../fixtures/trainer_results_01213.html";
 import oikiriHtml from "../fixtures/oikiri_202603020211.html";
 import oddsJson from "../fixtures/odds_202603020211.json";
 import oddsWideJson from "../fixtures/odds_wide_202603020211.json";
@@ -112,6 +114,11 @@ function route(host: string, path: string): { status: number; body: string } {
   if (host === "db.netkeiba.com" && path.startsWith("/jockey/result.html")) {
     return { status: 200, body: fixtureText(`https://db.netkeiba.com${path}`) };
   }
+  // Issue #354: 調教師の年度別成績(db ホスト)。事前分析の取得ステップが、調教師の重み > 0(既定)のとき、騎手の後ろに調教師ごとに1本ずつ取る(騎手と共有する上限 40 まで)。
+  // 01126 は前2年の出走が十分にある実ページ、ほかは前2年の行が無い新人の実ページで代用する。
+  if (host === "db.netkeiba.com" && path.startsWith("/trainer/result.html")) {
+    return { status: 200, body: fixtureText(`https://db.netkeiba.com${path}`) };
+  }
   if (host === "race.netkeiba.com" && path.startsWith("/api/api_get_jra_odds.html") && raceId === "202603020211" && /[?&]type=1(&|$)/.test(path)) {
     return { status: 200, body: JSON.stringify(oddsJson) };
   }
@@ -202,6 +209,7 @@ function fixtureText(url: string): string {
   }
   if (url.includes("oikiri.html")) return oikiriHtml;
   if (url.includes("/jockey/result.html")) return url.includes("id=01170") ? jockeyResults01170Html : jockeyResults01220Html;
+  if (url.includes("/trainer/result.html")) return url.includes("id=01126") ? trainerResults01126Html : trainerResults01213Html;
   if (url.includes("type=5")) return JSON.stringify(oddsWideJson);
   if (url.includes("type=7")) return JSON.stringify(oddsTrioJson);
   if (url.includes("type=4")) return JSON.stringify(oddsQuinellaJson);

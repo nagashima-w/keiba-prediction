@@ -8,7 +8,7 @@
  * 対応表: docs/phase1-scraping-plan.md「対象ページとURL一覧」
  */
 
-import type { HorseId, JockeyId, KaisaiDate, RaceId, RaceIdVenueKind } from "./ids.js";
+import type { HorseId, JockeyId, KaisaiDate, RaceId, RaceIdVenueKind, TrainerId } from "./ids.js";
 import { venueKindOfRaceId } from "./ids.js";
 
 /** race.netkeiba.com のベースURL(PC版・中央レースページ群)。 */
@@ -122,6 +122,18 @@ export function horseUrl(horseId: HorseId): string {
  */
 export function jockeyResultsUrl(jockeyId: JockeyId, kind: RaceIdVenueKind): string {
   const base = `${DB_BASE}/jockey/result.html?id=${jockeyId}`;
+  return kind === "nar" ? `${base}&syusai=20` : base;
+}
+
+/**
+ * 調教師の年度別成績ページ(Issue #354)のURL。表の形は騎手(`jockeyResultsUrl`)と同じで `parseJockeyResults` が読む(ログイン不要)。
+ * 中央の成績が既定のページで、地方の成績は `&syusai=20`(2026-10-17 の実測: 地方所属の 05231 は `&syusai=20` で 2025 年 96 走・
+ * 付けないと 2000 年の 3 走だけ。中央の 01126 に付けると地方の数走だけが返る)。競馬場別・距離別の内訳は無い。
+ * 現在、取得するのは中央のレースだけ(`scrapeRace` は地方のレースの調教師を対象外にする。検証したのが中央だけのため)。
+ * @param kind 今回のレースの開催区分(`venueKindOfRaceId`)。
+ */
+export function trainerResultsUrl(trainerId: TrainerId, kind: RaceIdVenueKind): string {
+  const base = `${DB_BASE}/trainer/result.html?id=${trainerId}`;
   return kind === "nar" ? `${base}&syusai=20` : base;
 }
 
