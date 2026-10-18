@@ -88,12 +88,12 @@ export interface RaceSnapshotHorse {
    */
   readonly placeOddsMax?: number | null;
   /**
-   * スタート直後の位置(Issue #311。レース再生の演出用)。近走の第1コーナーの通過順位 ÷ 出走頭数の平均(0〜1。小さいほど前。`computeEarlyPosition`)。
+   * スタート直後の位置(Issue #311。想定隊列図〈#362〉の道中の並びに使う)。近走の第1コーナーの通過順位 ÷ 出走頭数の平均(0〜1。小さいほど前。`computeEarlyPosition`)。
    * 戦績が無い・通過順位や頭数が取れない馬は null。**任意項目**: このキーを保存する前に作った過去のスナップショットは持たない(読み出し〈`toSafeRaceSnapshot`〉では null になる)。
    */
   readonly earlyPos?: number | null;
   /**
-   * 脚質(Issue #314。レース再生の隊列を脚質で決める演出用)。プロンプトの展開想定と同じ分類・同じ参照走数(`computeReplayLegStyle`)。
+   * 脚質(Issue #314。想定隊列図〈#362〉の位置を決める材料)。プロンプトの展開想定と同じ分類・同じ参照走数(`computeReplayLegStyle`)。
    * 戦績が無い・通過順位が取れない馬は null。**任意項目**: このキーを保存する前に作った過去のスナップショットは持たない(読み出し〈`toSafeRaceSnapshot`〉では null になる)。
    */
   readonly legStyle?: LegStyle | null;

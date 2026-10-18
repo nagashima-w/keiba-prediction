@@ -19,8 +19,7 @@ import type { MonthlyBodyView, MonthlyModel } from "./monthly-model";
 import type { RaceRowView, ReportBodyView, ReportModel, WhatIfView } from "./report-model";
 import type { AdminOnlyModel } from "./admin-only";
 import type { TargetRow, TargetsModel } from "./targets-model";
-import type { ReplaySection } from "./replay-model";
-import { REPLAY_CANVAS_LABEL } from "./replay-model";
+import type { FormationSection } from "./formation-model";
 import { h, type PickedFile, type VNode } from "./vnode";
 
 export interface ViewActions {
@@ -69,12 +68,6 @@ export interface ViewActions {
   readonly onReportRegenOpen: () => void;
   readonly onReportRegenGo: () => void;
   readonly onReportRegenCancel: () => void;
-  /** 結果の「レース再生」の再生ボタン(Issue #311)。引数(分析 id)は、ボタンの `data-analysis-id` と同じ値。再生中に押すと中断して抽選し直す。 */
-  readonly onReplayPlay: (analysisId: number) => void;
-  /** 「レース再生」の「もう一度再生」ボタン(Issue #314)。直前と同じ展開を最初から再生し直す(抽選し直さない)。引数(分析 id)は、ボタンの `data-analysis-id` と同じ値。 */
-  readonly onReplayRepeat: (analysisId: number) => void;
-  /** 「レース再生」の速度ボタン(Issue #311)。引数(×1・×2・×4 の数)は、ボタンの `data-speed` と同じ値。 */
-  readonly onReplaySpeed: (speed: number) => void;
   /** 日報画面の日付の入力(`<input type="date">`の値 YYYY-MM-DD)。Issue #273。 */
   readonly onReportDateChange: (value: string) => void;
 }
@@ -381,23 +374,28 @@ function developmentSection(d: DevelopmentSection, heading: "h2" | "h3"): VNode 
 }
 
 /**
- * 「レース再生」の節(Issue #311)。演出の注記・再生/速度のボタン・(再生を始めたら)キャンバス・(走り終えたら)着順のテキスト。
- * キャンバスは静的な要素で、1コマごとの描画は木の外(`replay-player.ts`)。ボタンのクリック処理に渡す値は `data-*` にも出す(`createMounter` は関数を比較しない)。
+ * 「想定隊列図」の節(Issue #362)。注記・想定ペースの行・局面(道中・4コーナー)ごとの図・位置を推定できない馬の行・凡例。
+ * 図は 10 列の格子(`.formation-track`)で、チップ(`.formation-chip`)の列は `data-slot`(CSS が `grid-column` に割り当てる)。`style` 属性・`canvas`・`svg` は使わない(`dom.ts` の許可リストのまま)。
+ * 図は `role="img"` で、読み上げは `aria-label`(前から後ろの馬番)。文字での代替は凡例(全馬の馬番と馬名)。馬名は外から来た文字列(子の文字列はアダプタがテキストノードにする)。
  */
-function replaySection(r: ReplaySection, heading: "h2" | "h3", actions: ViewActions): VNode {
-  return h("section", { class: "replay" }, [
-    h(heading, {}, [r.heading]),
-    h("p", { class: "meta replay-note" }, [r.note]),
-    h("p", { class: "meta replay-color-note" }, [r.colorNote]),
-    h("div", { class: "replay-controls" }, [
-      h("button", { class: "replay-play", "data-analysis-id": String(r.analysisId) }, [r.playLabel], { click: () => actions.onReplayPlay(r.analysisId) }),
-      ...(r.repeatLabel === null ? [] : [h("button", { class: "replay-repeat", "data-analysis-id": String(r.analysisId) }, [r.repeatLabel], { click: () => actions.onReplayRepeat(r.analysisId) })]),
-      ...r.speeds.map((sp) =>
-        h("button", { class: "replay-speed", "aria-pressed": sp.pressed ? "true" : "false", "data-speed": String(sp.value) }, [sp.label], { click: () => actions.onReplaySpeed(sp.value) }),
-      ),
-    ]),
-    ...(r.started ? [h("canvas", { class: "replay-canvas", role: "img", "aria-label": REPLAY_CANVAS_LABEL, "data-replay-id": String(r.analysisId) })] : []),
-    ...(r.finish === null ? [] : [h("div", { class: "replay-finish" }, [h("p", { class: "meta" }, [r.finishHeading ?? ""]), h("ul", { class: "horse-list" }, r.finish.map((line) => h("li", {}, [line])))])]),
+function formationSection(f: FormationSection, heading: "h2" | "h3"): VNode {
+  return h("section", { class: "formation" }, [
+    h(heading, {}, [f.heading]),
+    h("p", { class: "meta formation-note" }, [f.note]),
+    h("p", { class: "meta formation-pace" }, [f.paceLine]),
+    ...f.phases.map((p) =>
+      h("div", { class: "formation-phase" }, [
+        h("p", { class: "formation-phase-title" }, [h("strong", {}, [p.label])]),
+        h("div", { class: "formation-axis" }, [h("span", {}, ["先頭"]), h("span", {}, ["後方"])]),
+        h(
+          "div",
+          { class: "formation-track", role: "img", "aria-label": p.ariaLabel },
+          p.chips.map((c) => h("span", { class: c.main ? "formation-chip formation-main" : "formation-chip", "data-slot": String(c.slot) }, [String(c.umaban)])),
+        ),
+      ]),
+    ),
+    ...(f.unknownLine === null ? [] : [h("p", { class: "meta formation-unknown" }, [f.unknownLine])]),
+    h("ul", { class: "formation-legend" }, f.legend.map((l) => h("li", { class: l.main ? "formation-main" : "" }, [l.text]))),
   ]);
 }
 
@@ -445,8 +443,8 @@ function resultSections(content: ResultContent, heading: "h2" | "h3", actions: V
     ...(content.topProbs === null ? [] : [h("section", { class: "top-probs" }, [h(heading, {}, [content.topProbs.heading]), h("ul", { class: "horse-list" }, content.topProbs.rows.map(topProbRow))])]),
     // AI の展開予想(Issue #315)。無ければ section ごと出さない。本文は LLM の出力(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
     ...(content.development === null ? [] : [developmentSection(content.development, heading)]),
-    // レース再生(Issue #311)。勝率が判定不能・2頭未満の分析は section ごと出さない。
-    ...(content.replay === null ? [] : [replaySection(content.replay, heading, actions)]),
+    // 想定隊列図(Issue #362。旧「レース再生」の位置)。脚質の分かる馬が 2 頭未満の分析は section ごと出さない。
+    ...(content.formation === null ? [] : [formationSection(content.formation, heading)]),
     // そのとき LLM が見た当日の馬場の値(Issue #295)。無ければ section ごと出さない。行はサーバの整形(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
     ...(content.baba === null ? [] : [h("section", { class: "baba" }, [h(heading, {}, [content.baba.heading]), ...content.baba.lines.map((line) => h("p", { class: "meta baba-line" }, [line]))])]),
     h("section", { class: "horses" }, [

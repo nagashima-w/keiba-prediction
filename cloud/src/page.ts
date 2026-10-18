@@ -288,11 +288,27 @@ ${paletteCss()}
   /* Issue #188: 発走前のカードの中の結果(開閉の見出しは h3 の中のボタン。文字の ▾/▸ でも開閉が分かる) */
   .card-result { margin-top: 8px; }
   .card-result h3 { margin: 8px 0 4px; font-size: 1rem; }
-  /* Issue #311: レース再生(キャンバスは幅いっぱいに縮める。縦横比は内部の大きさ〈client/replay-draw.ts〉で決まる) */
-  .replay-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
-  .replay-play { border-color: var(--accent); color: var(--accent); font-weight: bold; }
-  .replay-speed[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
-  .replay-canvas { display: block; width: 100%; height: auto; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; }
+  /* Issue #362: 想定隊列図(旧レース再生〈#311〉の置き換え)。位置は VNode に style 属性を持てないため、data-slot + grid-column で決める(列の本数 10 は client/formation-model.ts の FORMATION_SLOTS)。
+     チップは円形で幅は列に合わせる(上限 28px)。同じ列の馬は縦に積む。◎は accent の太枠(色だけに頼らず、凡例の「◎」でも示す)。 */
+  .formation-phase { margin: 8px 0; }
+  .formation-phase-title { margin: 0 0 2px; }
+  .formation-axis { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--muted); }
+  .formation-track { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 3px; align-items: start; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+  .formation-chip { box-sizing: border-box; justify-self: center; display: flex; align-items: center; justify-content: center; width: 100%; max-width: 28px; aspect-ratio: 1; border: 1px solid var(--fg); border-radius: 50%; background: var(--card); color: var(--fg); font-size: 0.75rem; line-height: 1; }
+  .formation-chip.formation-main { border: 3px solid var(--accent); font-weight: bold; }
+  .formation-chip[data-slot="0"] { grid-column: 1; }
+  .formation-chip[data-slot="1"] { grid-column: 2; }
+  .formation-chip[data-slot="2"] { grid-column: 3; }
+  .formation-chip[data-slot="3"] { grid-column: 4; }
+  .formation-chip[data-slot="4"] { grid-column: 5; }
+  .formation-chip[data-slot="5"] { grid-column: 6; }
+  .formation-chip[data-slot="6"] { grid-column: 7; }
+  .formation-chip[data-slot="7"] { grid-column: 8; }
+  .formation-chip[data-slot="8"] { grid-column: 9; }
+  .formation-chip[data-slot="9"] { grid-column: 10; }
+  .formation-legend { list-style: none; margin: 8px 0 0; padding: 0; columns: 2; font-size: 0.85rem; }
+  .formation-legend li { break-inside: avoid; }
+  .formation-legend li.formation-main { font-weight: bold; }
   .result-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; }
 </style>
 </head>

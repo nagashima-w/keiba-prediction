@@ -14,7 +14,6 @@ import type { PastAnalysis } from "./api-analysis";
 import { formatJstDateTime } from "./date";
 import { nameWithGrade } from "./grade";
 import { badgeOf, pick, type Badge } from "./list";
-import type { ReplayUi } from "./replay-model";
 import { contentOf, type ResultContent, type ResultSource } from "./result";
 import { buildHash, type Route } from "./route";
 
@@ -54,8 +53,6 @@ export interface RaceModelInput {
   readonly resultOpen?: boolean;
   /** 閲覧者(Issue #238)。分析の実行ボタンを出さない(カードと状態は同じ)。省略は false(管理者)。 */
   readonly readOnly?: boolean;
-  /** レース再生の画面の状態(Issue #311)。発走前のカードの結果の「レース再生」の節に渡す。省略は「何も始めていない」。 */
-  readonly replay?: ReplayUi;
 }
 
 /**
@@ -202,12 +199,12 @@ export function latestAnalysisIdOf(rows: readonly BoardRow[], raceId: string): n
   return found !== undefined && found.status === "done" ? found.analysisId : null;
 }
 
-function cardResult(route: Route, rows: readonly BoardRow[], result: ResultSource | undefined, open: boolean, readOnly: boolean, replay: ReplayUi | undefined): CardResult | null {
+function cardResult(route: Route, rows: readonly BoardRow[], result: ResultSource | undefined, open: boolean, readOnly: boolean): CardResult | null {
   const raceId = route.race!;
   if (latestAnalysisIdOf(rows, raceId) === null) return null;
   if (result === undefined || result.kind === "loading") return { kind: "loading" };
   if (result.kind === "error") return { kind: "error", message: result.message };
-  return { kind: "ready", content: contentOf(result.analysis, readOnly, replay), open, date: route.date, raceId };
+  return { kind: "ready", content: contentOf(result.analysis, readOnly), open, date: route.date, raceId };
 }
 
 function card(
@@ -220,7 +217,6 @@ function card(
   result: ResultSource | undefined,
   resultOpen: boolean,
   readOnly: boolean,
-  replay: ReplayUi | undefined,
 ): TaskCard {
   const raceId = route.race!;
   const found = pick(rows, raceId, mode);
@@ -237,7 +233,7 @@ function card(
     title: mode === "morning" ? "事前分析" : "発走前",
     badge: badgeOf(found),
     error: failedError,
-    result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen, readOnly, replay) : null,
+    result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen, readOnly) : null,
     prior: showPrior ? prior.rows.map((r) => ({ rank: r.rank, umaban: r.umaban, name: r.horseName, value: formatPercent(r.prior) })) : null,
   };
 }
@@ -247,7 +243,7 @@ export function buildRaceModel(input: RaceModelInput): RaceModel {
   const prior = status.kind === "ready" ? status.prior : null;
   const cards =
     status.kind === "ready"
-      ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true, input.readOnly === true, input.replay))
+      ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true, input.readOnly === true))
       : null;
   return {
     kind: "race",

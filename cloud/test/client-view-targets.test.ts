@@ -149,7 +149,7 @@ describe("収支の途中経過(Issue #361)", () => {
 });
 
 describe("DOM への組み立て(dom.ts の許可リストの範囲だけで組める。外から来た文字列は HTML として解釈しない)", () => {
-  const ALLOWED = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress", "canvas"]);
+  const ALLOWED = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress"]);
   const mountTags = (t: VNode): { tags: string[]; texts: string[] } => {
     const tags: string[] = [];
     const texts: string[] = [];
