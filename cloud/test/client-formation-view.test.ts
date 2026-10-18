@@ -94,6 +94,16 @@ describe("結果画面の想定隊列図の節(VNode)", () => {
     expect(byClass(view(analysis()), "formation-unknown").length).toBe(0);
   });
 
+  it("凡例の◎の行だけに class formation-main が付く(Issue #373。強調の CSS は li.formation-main に掛かる)。◎が無ければどの行にも付かない", () => {
+    const horses = [...four().map((h) => (h.umaban === 2 ? { ...h, mark: "◎" } : h)), horse(5, { legStyle: null })];
+    const legend = byClass(view(analysis(horses)), "formation-legend")[0]!;
+    const items = findAll(legend, (n) => n.tag === "li");
+    expect(items.length, "前提: 凡例は 5 行(◎の行と、そうでない行がある)").toBe(5);
+    expect(items.filter((li) => classesOf(li).includes("formation-main")).map(textOf)).toEqual(["◎ 2 馬2"]);
+    const noMain = byClass(view(analysis(four())), "formation-legend")[0]!;
+    expect(findAll(noMain, (n) => n.tag === "li").filter((li) => classesOf(li).includes("formation-main"))).toEqual([]);
+  });
+
   it("脚質の分かる馬が 2 頭未満の分析(#314 より前の分析など)は節ごと出さない", () => {
     const old = [1, 2, 3, 4].map((u) => horse(u, { legStyle: u === 1 ? "逃げ" : null }));
     expect(byClass(view(analysis(old)), "formation").length).toBe(0);

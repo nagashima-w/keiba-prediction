@@ -827,6 +827,13 @@ describe("Issue #352: 締切直前の再計算との比較の節(model.close)", 
     expect(withClose(changed).close!.rows[1]!.label).toBe("直前(発走3分前・暫定)");
   });
 
+  it("回 1 のリードがサーバの値で変わると、ラベルも変わる(Issue #373。「5分前」をクライアントに固定しない。サーバの定数 CLOSE_FIRST_LEAD_MS を変えたときの追随)", () => {
+    const fx = closeFixture();
+    expect(fx.rounds[0]!.leadMinutes).toBe(5); // 前提: 元の値は 5(7 に変えて初めて、ベタ書きの「5分前」と区別できる)
+    const changed = { rounds: [{ ...fx.rounds[0]!, leadMinutes: 7 }, fx.rounds[1]!] };
+    expect(withClose(changed).close!.rows.map((r) => r.label)).toEqual(["7分前", "直前(発走2分前・暫定)"]);
+  });
+
   it("★「参考」の印は ok の件数が 30 件未満の行だけ(29 件は付き、30 件は付かない。置き値の境界)", () => {
     const fx = closeFixture();
     const at = (okCount: number) => ({ rounds: [{ ...fx.rounds[0]!, okCount, targetCount: okCount + 1 }] });
