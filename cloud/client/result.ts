@@ -23,6 +23,7 @@
  *  - **そのとき LLM が見た当日の馬場の値**(Issue #295。`baba`): 「3着内率の上位5頭」の後・「馬ごとの評価」の前の節。行はサーバがプロンプトと同じ整形にしたもの。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null(節ごと出さない)
  *  - **統計モデルからの変化量**(Issue #312。`HorseCard.adjustedShift`・`TopProbHorse.shift`): 補正後の3着内率の横に「(統計比 +2.0pt)」。補正後 − prior を百分率の差(pt)で、小数第1位。符号は検証画面の補正幅(`formatAdjustment`)と同じ ASCII の「+」「-」で、
  *    丸めて 0.0 になる差(絶対値 0.05pt 未満)は「±0.0pt」。補正後を出さない(LLM が効いていない)分析・prior か補正後が非有限の馬は null(出さない)。上位5頭の行も同じ値(並べる値は補正後)
+ *  - **タイム指数の行**(Issue #359。`HorseCard.timeIndexLine`・`timeIndexNote`): 馬のカードの複勝の行の下(根拠の上)に「タイム指数 +1.2(レース内 2位)」、説明の 1 行は「馬ごとの評価」の見出しの下に 1 回。文言は**サーバが組み立てたものをそのまま**出す(クライアントに日本語を置かない)。出さない分析は null
  * ⚠️ core の `view/` の純関数(`format.ts`・`allocation-proposal-view.ts`・`bet-allocation-view.ts`。旧 exe の画面と共有していた)を import する層。許可リストは `test/client-bundle.test.ts`。
  */
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/core/src/view/allocation-proposal-view";
@@ -104,6 +105,8 @@ export interface HorseCard {
    * 出走4頭以下(`race.placeBasis` が null)は想定も実際も「-」。強調(`higher`)は実際の**下限**と想定を丸めた値どうしで比べる(想定が 1.0倍未満のときは比べない)。
    */
   readonly placeOdds: PlaceOddsLine;
+  /** タイム指数の行(Issue #359。サーバが組み立てた「タイム指数 +1.2(レース内 2位)」〈値のない馬は「タイム指数 —」〉をそのまま)。出さない分析・古いサーバの応答は null。LLM の有無・閲覧者かどうかに依らない。 */
+  readonly timeIndexLine: string | null;
 }
 
 /** 印の付いた馬の一覧の1行(Issue #211)。印・馬番・馬名だけ(数値は出さない)。 */
@@ -223,6 +226,8 @@ export interface ResultContent {
   readonly winOddsNote: string | null;
   /** 複勝の想定の説明文(Issue #253。単勝の説明とは別の段落。「馬ごとの評価」の見出しの下に1回)。複勝の基準があり、想定か実際の下限が1頭でもあるときだけ(全頭が「-」なら null)。 */
   readonly placeOddsNote: string | null;
+  /** タイム指数の説明の 1 行(Issue #359。「複勝の説明」の次の段落。サーバの文をそのまま)。出さない分析・古いサーバの応答は null。 */
+  readonly timeIndexNote: string | null;
   readonly horses: readonly HorseCard[];
   readonly allocation: AllocationSection;
   /** 締切直前の再計算(Issue #344。「配分の提案」の下)。結果が無い・旧い分析・古いサーバの応答は null(節ごと出さない)。 */
@@ -354,6 +359,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
     detailNote: detailNoteOf(a.detail),
     winOddsNote: a.horses.some((h) => h.fairWinOdds !== null || h.winOdds !== null) ? WIN_ODDS_NOTE : null,
     placeOddsNote: a.race.placeBasis !== null && a.horses.some((h) => h.fairPlaceOdds !== null || h.actualPlaceOddsMin !== null) ? PLACE_ODDS_NOTE : null,
+    timeIndexNote: a.timeIndexNote ?? null,
     horses: a.horses.map((h) => ({
       umaban: h.umaban,
       name: h.name,
@@ -370,6 +376,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
       positive: h.isPositive,
       winOdds: buildWinOddsLine(h.fairWinOdds, h.winOdds, a.race.oddsStatus),
       placeOdds: buildPlaceOddsLine(h.fairPlaceOdds, h.actualPlaceOddsMin, h.actualPlaceOddsMax, a.race.oddsStatus, a.race.placeBasis),
+      timeIndexLine: h.timeIndexLine ?? null,
     })),
     allocation: allocationOf(a, readOnly),
     close: closeOf(a, readOnly),

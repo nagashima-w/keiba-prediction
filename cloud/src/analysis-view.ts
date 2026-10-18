@@ -2,7 +2,7 @@
  * `GET /api/analyses/{id}` の応答の整形(Issue #183〈#165-a〉)。純関数だけで、D1・R2 には触れない。
  *
  * **画面に必要なものだけ**を、許可したキーで明示的に組み立てる(`...analysis` のような展開は使わない)。返さないもの:
- * `rawResponse`〈の本文〉・馬の `contributions`・raceSnapshot の全体(騎手・調教師・オッズ・組合せオッズなど)・追加指示・戦績の基準日。
+ * `rawResponse`〈の本文〉・馬の `contributions`〈の中身。タイム指数の代表値だけは Issue #359 で、順位つきの 1 行の文言にして返す〉・raceSnapshot の全体(騎手・調教師・オッズ・組合せオッズなど)・追加指示・戦績の基準日。
  * (`rawResponse` から取り出した LLM の展開予想と想定ペースだけは `development` として返す〈Issue #315。core の `extractDevelopment`。他の項目は返さない〉。)
  * (単勝オッズ〈馬ごとの `winOdds` だけ〉とオッズの状態〈`race.oddsStatus`〉は Issue #247 で返すようにした。馬ごとの勝率・想定単勝オッズも同じ Issue で足した〈D1 の補正後の3着内率から計算〉。
  * 複勝オッズの下限・上限〈馬ごとの `actualPlaceOddsMin`・`actualPlaceOddsMax`〉と、想定複勝オッズ〈`fairPlaceOdds`〉・想定の基準〈`race.placeBasis`〉は Issue #253 で足した。組合せオッズは返さない。)
@@ -16,6 +16,7 @@
 import { dayBabaLines, normalizeDayBaba } from "../../packages/core/src/analyzer/day-baba";
 import { buildRaceDevelopment, type LegStyle, type PaceEstimate } from "../../packages/core/src/analyzer/leg-style";
 import { extractDevelopment, type LlmPace } from "../../packages/core/src/analyzer/parse-response";
+import { TIME_INDEX_NAME, TIME_INDEX_RECENT_RUNS } from "../../packages/core/src/scorer/time-index";
 import { toSafeRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
@@ -87,6 +88,12 @@ export interface AnalysisViewHorse {
    * 戦績が取れない馬・**Issue #314 より前の分析**・詳細が present でない・4 値以外の値は null。確率・配分には使わない。`buildAnalysisView` は常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。
    */
   readonly legStyle?: LegStyle | null;
+  /**
+   * タイム指数の行(Issue #359。「タイム指数 +1.2(レース内 2位)」。値のない馬は「タイム指数 —」)。材料は R2 の詳細に保存済みの寄与度のうち、`biasName` がタイム指数の要素の `targetRate`(馬の代表値。秒/km)。
+   * 順位は、同じ分析の中で値のある馬だけを大きい順に並べた順位(同値は同順位で 1,2,2,4。丸める前の値で比べる)。**分析の中に値のある馬が 1 頭もいない**(地方・障害・Issue #353 より前の版・詳細が present でない)ときは、全馬 null。
+   * `buildAnalysisView` は常にキーを持つ。型で省略可なのは `earlyPos` と同じ理由。
+   */
+  readonly timeIndexLine?: string | null;
 }
 
 export interface AnalysisViewRace {
@@ -243,6 +250,11 @@ export interface AnalysisView {
    * `buildAnalysisView` は常にキーを持つ(null を含む)。型で省略可なのは、この項目を使わない呼び出し側の固定データを壊さないため。
    */
   readonly development?: AnalysisViewDevelopment | null;
+  /**
+   * タイム指数の説明の 1 行(Issue #359。馬の一覧の上に 1 回だけ出す。単位と定義の要約)。`horses[].timeIndexLine` を 1 頭でも出すときだけ。1 頭も出さない分析は null。
+   * `buildAnalysisView` は常にキーを持つ(null を含む)。型で省略可なのは、この項目を使わない呼び出し側の固定データを壊さないため。
+   */
+  readonly timeIndexNote?: string | null;
   readonly horses: readonly AnalysisViewHorse[];
   /** 配分(D1 の配分の行が無ければ null)。 */
   readonly allocation: AnalysisViewAllocation | null;
@@ -287,6 +299,45 @@ function paceOf(snapshot: ReturnType<typeof toSafeRaceSnapshot> | null): PaceEst
 function usableOdds(value: unknown): number | null {
   const n = num(value);
   return n !== null && isUsableOdds(n) ? n : null;
+}
+
+/** タイム指数の説明の 1 行(Issue #359)。単位は #353 の定義のまま(基準タイムより 1000m あたり何秒速いか)。名前と走数は core の定数から。 */
+const TIME_INDEX_NOTE = `${TIME_INDEX_NAME}: 基準タイムより 1000m あたり何秒速いか(指数を出せた直近${TIME_INDEX_RECENT_RUNS}走の最高。大きいほど速い)。中央の芝・ダートのみ。`;
+
+/** 馬の寄与度(JSON から戻しただけの unknown)から、タイム指数の代表値(秒/km)を取り出す。無い・壊れている(配列でない・要素が違う・数でない・非有限)は null。投げない。 */
+function timeIndexValueOf(contributions: unknown): number | null {
+  if (!Array.isArray(contributions)) {
+    return null;
+  }
+  for (const c of contributions as unknown[]) {
+    if (typeof c === "object" && c !== null && (c as Record<string, unknown>)["biasName"] === TIME_INDEX_NAME) {
+      return num((c as Record<string, unknown>)["targetRate"]);
+    }
+  }
+  return null;
+}
+
+/** 値の書き方: 小数 1 桁・正は「+」付き・負は ASCII の「-」。丸めて 0 になる値は「0.0」(符号を付けない)。 */
+function formatTimeIndex(value: number): string {
+  const rounded = Number(value.toFixed(1));
+  return rounded === 0 ? "0.0" : `${rounded > 0 ? "+" : ""}${rounded.toFixed(1)}`;
+}
+
+/**
+ * 馬ごとのタイム指数の行(Issue #359)。馬番 → 行。値のある馬が 1 頭もいなければ空の Map(全馬 null にする)。
+ * 順位 = 自分より大きい値を持つ馬の数 + 1(同値は同順位で 1,2,2,4)。比べるのは丸める前の値。
+ */
+function timeIndexLines(horses: readonly { readonly umaban: number; readonly contributions: unknown }[]): Map<number, string> {
+  const values = horses.map((h) => ({ umaban: h.umaban, value: timeIndexValueOf(h.contributions) }));
+  const known = values.flatMap((v) => (v.value === null ? [] : [v.value]));
+  const lines = new Map<number, string>();
+  if (known.length === 0) {
+    return lines;
+  }
+  for (const { umaban, value } of values) {
+    lines.set(umaban, value === null ? `${TIME_INDEX_NAME} —` : `${TIME_INDEX_NAME} ${formatTimeIndex(value)}(レース内 ${known.filter((k) => k > value).length + 1}位)`);
+  }
+  return lines;
 }
 
 function venueNameOf(raceId: string): string | null {
@@ -383,6 +434,8 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
   const extracted = detail === "present" && analysis.rawResponse !== null ? extractDevelopment(analysis.rawResponse) : { development: null, pace: null };
   const development: AnalysisViewDevelopment | null = extracted.development === null && extracted.pace === null ? null : { text: extracted.development, pace: extracted.pace };
   // 補修で印が変わった馬の、補修前の印(Issue #317)。現在の印と記録が食い違う馬には付けない。
+  // タイム指数の行(Issue #359): 詳細が present のときだけ(contributions は R2 にあり、present でなければ null)。値のある馬が 0 頭なら空で、全馬 null・説明も null。
+  const timeIndex = detail === "present" ? timeIndexLines(analysis.horses) : new Map<number, string>();
   const markFromOf = markFromByUmaban(result.markRepair ?? null, new Map(analysis.horses.map((h) => [h.umaban, h.mark])));
   return {
     id: analysis.id,
@@ -419,6 +472,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
     baba: detail === "present" ? babaViewOf(analysis.raceSnapshot) : null,
     combos: detail === "present" ? combosViewOf(analysis.raceSnapshot, allocation) : null,
     development,
+    timeIndexNote: timeIndex.size > 0 ? TIME_INDEX_NOTE : null,
     horses: analysis.horses.map((h) => ({
       umaban: h.umaban,
       name: str(snapshot?.horsesByUmaban.get(h.umaban)?.name),
@@ -440,6 +494,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       actualPlaceOddsMax: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.placeOddsMax),
       earlyPos: earlyPosOf(snapshot?.horsesByUmaban.get(h.umaban)?.earlyPos),
       legStyle: legStyleOf(snapshot?.horsesByUmaban.get(h.umaban)?.legStyle),
+      timeIndexLine: timeIndex.get(h.umaban) ?? null,
     })),
     allocation: allocation === undefined ? null : allocationViewOf(allocation),
     close: closeViewOf(close, allocation),

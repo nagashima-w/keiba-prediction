@@ -60,6 +60,8 @@ export interface AnalysisHorse {
   readonly earlyPos?: number | null;
   /** 脚質(Issue #314。想定隊列図〈#362〉の位置を決める材料)。戦績が取れない馬・過去の分析・詳細なし・キー無し(古いサーバの応答)・4 値以外の値は null。パーサは常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。 */
   readonly legStyle?: LegStyle | null;
+  /** タイム指数の行(Issue #359。サーバが組み立てた「タイム指数 +1.2(レース内 2位)」。値のない馬は「タイム指数 —」)。出さない分析・キー無し(古いサーバの応答)・文字列以外は null。パーサは常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。 */
+  readonly timeIndexLine?: string | null;
 }
 
 /** 脚質(Issue #314。core の `LegStyle` と同じ 4 値。クライアントは core のバレルを import しないので、ここに持つ)。 */
@@ -198,6 +200,8 @@ export interface AnalysisDetail {
    * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
    */
   readonly development?: AnalysisDevelopment | null;
+  /** タイム指数の説明の 1 行(Issue #359。サーバが組み立てた文。馬の一覧の上に 1 回出す)。出さない分析・キー無し(古いサーバの応答)・文字列以外は null(補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。 */
+  readonly timeIndexNote?: string | null;
   /**
    * 組合せの券種ごとの行(Issue #296。オッズの取得点数・EV プラスの点数・配分の点数)。組合せの記録が無い・詳細なし・キー無し(古いサーバの応答)・形が不正な値は null にする
    * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
@@ -266,8 +270,10 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   const legStyle = LEG_STYLES.find((s) => s === row["legStyle"]) ?? null;
   // Issue #317: 補修前の印は、キー無し・語彙(6種の印・なし・不明)の外は null(補助の表示なので、応答ごと不正にはしない)。
   const markFrom = MARK_ORIGIN_VALUES.find((v) => v === row["markFrom"]) ?? null;
+  // Issue #359: タイム指数の行は、キー無し・文字列以外は null(補助の表示なので、応答ごと不正にはしない)。
+  const timeIndexLine = typeof row["timeIndexLine"] === "string" ? row["timeIndexLine"] : null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, legStyle };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, legStyle, timeIndexLine };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
@@ -426,6 +432,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis, distance, turn, pace },
     baba: parseLines(value["baba"], BABA_MAX_LINES, BABA_MAX_LINE_LENGTH),
     development: parseDevelopment(value["development"]),
+    timeIndexNote: typeof value["timeIndexNote"] === "string" ? value["timeIndexNote"] : null,
     combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
     close: parseClose(value["close"]),
     horses: parsedHorses,
