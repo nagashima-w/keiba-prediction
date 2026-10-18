@@ -302,7 +302,7 @@ export function createApp(deps: AppDeps): App {
   });
 
   // ---- 今日の狙い目の画面(Issue #336) ----
-  // 閲覧者にも同じに開く(読み取りだけ)。取得は GET /api/targets だけ。残り時間は取得なしで 30 秒ごとに再描画し、取り直しは 3 分ごと(見えている間・今日・発走前のレースが残る間・上限つき)。
+  // 閲覧者にも同じに開く(読み取りだけ)。取得は GET /api/targets だけ。残り時間は取得なしで 30 秒ごとに再描画し、取り直しは 3 分ごと(見えている間・今日・発走前のレースか結果待ちの行が残る間〈まだ分析が 1 件も無い間も〉・上限つき)。
   const targets = createTargetsScreen({
     fetch: deps.fetch,
     now: () => deps.now().getTime(),

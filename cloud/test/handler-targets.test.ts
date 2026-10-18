@@ -6,7 +6,7 @@ import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
  * Issue #336 段階 A: `GET /api/targets?kaisai_date=YYYYMMDD`(今日の狙い目)。D1 の集計(最新の分析・買い目・◎・再計算の回)と、日単位の DO の計画の行(発走時刻)を合わせて返す、読み取り専用の入口。
- * R2・netkeiba・LLM・Webhook には触れない。D1 と DO は偽物(呼び出しを記録する)。
+ * R2・netkeiba・LLM・Webhook には触れない。D1 と DO は偽物(呼び出しを記録する)。DO は計画の行(`getPlanProgress`)のほか、収支の途中経過(Issue #361。`getTargetsLedger`。下の describe)も呼ぶ。
  * 順序: メソッド(GET だけ)→ Sec-Fetch-Site(別サイトなら 403)→ クエリの検証(400。ここまでで D1・DO は呼ばない)→ D1(失敗は 503・文面なし)→ DO(分析が 1 件でもあるときだけ。失敗は時刻なしで 200)。
  */
 
@@ -178,7 +178,7 @@ describe("GET /api/targets(Issue #336)", () => {
     expect(((await response.json()) as { ok: boolean }).ok).toBe(true);
   });
 
-  it("200: 狙い目・見送りを、計画の発走時刻つきで返す。キャッシュしない。DO は読み取りの getPlanProgress だけ", async () => {
+  it("200: 狙い目・見送りを、計画の発走時刻つきで返す。キャッシュしない。DO は読み取りの getPlanProgress と getTargetsLedger だけ", async () => {
     const { deps, token } = await setup();
     const db = fakeDb();
     const day = fakeDay();

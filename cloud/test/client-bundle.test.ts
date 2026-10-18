@@ -210,6 +210,7 @@ describe("生成物のドリフトと決定性", () => {
     // (サーバの `analysis-view.ts` が組み立てる。日本語は `\uXXXX` で 1 文字 6 バイトになるため)。順位の計算・値の書式・core のタイム指数の定数もサーバ側で、束には入っていない。
     // Issue #363(想定隊列図の4コーナーの位置に、馬ごとの近走の4コーナーの通過順位を使う): 上限は 312,500 のまま据え置き。実測(`Buffer.byteLength(CLIENT_JS)`。`pnpm run build:client` の出力)は 311,070(14104ec)→ 311,412(+342)で、余裕は 1,088 バイト。
     // 増えた理由: 応答のパーサに 1 項目(馬ごとの `latePos`。`api-analysis.ts`)・4コーナーの位置の計算(`formation-model.ts` の `cornerGaps`)・図の注記(`FORMATION_NOTE`)の文言の追加。日本語は `\uXXXX` で 1 文字 6 バイトになる。
+    // Issue #371(設定画面の補助文〈タイム指数・調教師成績〉に「障害には効かない」を足す): 上限は 312,500 のまま据え置き。実測(`Buffer.byteLength(CLIENT_JS)`。`pnpm run build:client` の出力)は 311,412 → 311,512(+100)で、余裕は 988 バイト。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(312_500);
   });
@@ -810,7 +811,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
   });
 
-  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、30 個の入力欄(既存の 15 + スコアリングの重み 15。textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 29 項目の POST になる(一覧・板は取らない)", async () => {
+  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、30 個の入力欄(既存の 15 + スコアリングの重み 15。textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 30 項目の POST になる(一覧・板は取らない)", async () => {
     const { root, calls } = run("#settings");
     await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);

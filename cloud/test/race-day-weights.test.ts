@@ -12,7 +12,7 @@ import { fixtureForUrl } from "./pipeline-fixtures";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
 /**
- * Issue #218: スコアリングの重み(14項目。Issue #353 でタイム指数を足した)が、事前分析(prior)と発走前の分析の両方で使われる。
+ * Issue #218: スコアリングの重み(15項目。Issue #353 でタイム指数、Issue #354 で調教師成績を足した)が、事前分析(prior)と発走前の分析の両方で使われる。
  * AC: w1 発走前の分析が保存済みの重みを使う / w2 朝の prior も同じ重みを使い、同じ設定なら発走前の prior と一致する / w3 各タスクは取得時の設定のスナップショットで計算する(取得後に設定を保存しても、
  * そのタスクの重みは変わらない。朝・発走前とも) / w4 朝の取得で設定を読めなければ再試行し、尽きたら failed(既定値の重みで prior を作らない) / w5 loadSettings が無い構成は既定値で続ける /
  * w6 スナップショットが無い・重みの項目が無い旧いタスクは既定値の重み(今までと同じ結果) / w7 本番の DO は loadSettings を渡す(事前分析が既定値に黙って落ちない) / w8 極端に大きい重みでもクラッシュ・NaN にならない。
@@ -195,7 +195,7 @@ describe("w1・w2: 重みが分析に効く(発走前・朝の両方)", () => {
     expect(maxDiff).toBeGreaterThan(0.001);
   });
 
-  it("w1: 発走前の分析は保存済みの重みを使う — 1項目ずつ 4 に変えると(ほかは既定値のまま)、このレース(良馬場の 16 頭)では14項目のうち12項目が prior を動かす", async () => {
+  it("w1: 発走前の分析は保存済みの重みを使う — 1項目ずつ 4 に変えると(ほかは既定値のまま)、このレース(良馬場の 16 頭)では15項目のうち12項目が prior を動かす", async () => {
     const base = harness();
     base.settings = DEFAULT_CLOUD_SETTINGS;
     const basePriors = await preRacePriors(base);
@@ -206,9 +206,13 @@ describe("w1・w2: 重みが分析に効く(発走前・朝の両方)", () => {
       const priors = await preRacePriors(h);
       if (priors.some((p, i) => Math.abs(p - basePriors[i]!) > 1e-12)) moved.push(f.field);
     }
-    // 動かない2項目(実測。いずれも重みの渡し漏れではない: scorer-config.test.ts が14項目の対応を固定している):
+    // 動かない3項目(実測。いずれも重みの渡し漏れではない: scorer-config.test.ts が15項目の対応を固定している):
     //  - biasWeightTrackCondition: 道悪(稍重以下)のレースのときだけ発動する補正(bias-track-condition.ts)。このレースでは補正が 0
     //  - biasWeightSummerFatigue: 夏負けの判定(bias-season.ts)に、このレースの出走馬が当たらない
+    //  - baseScoreWeightTrainer: このテストの取得では、調教師ページを 5 人ぶんしか取れない(取得の上限 40 を騎手と共有するため。`race-day-core.ts` の冒頭)。
+    //    取れた 5 人(01126・01070・01086・01084・01051)のうち、前2年(2024・2025)の行がある実ページは 01126 だけ(`pipeline-fixtures.ts` の対応では、ほかは前2年の行が無い新人のページ)。
+    //    値のある馬が 1 頭だけだと全頭 0(`trainer-stats.ts`: 値のある馬が 2 頭未満なら比べる相手がいない)。残りの 11 人は計算ステップが「キャッシュに無い取得先」の警告を出す。
+    //    調教師の重みが prior を動かすことは、この `it` では固定していない(Issue #373 で扱う)。
     // 騎手成績(baseScoreWeightJockey)は、Issue #226 で動くようになった(分析が騎手の年度別成績を取得して prior に渡す。旧: 入力が無く動かない3項目の1つだった)。
     expect(moved.sort()).toEqual(
       [
@@ -226,7 +230,7 @@ describe("w1・w2: 重みが分析に効く(発走前・朝の両方)", () => {
         "baseScoreWeightTimeIndex", // Issue #353: 動く(実測。タイム指数の重みが渡っていること)
       ].sort(),
     );
-  }, 120_000); // 15 回(14 項目 + 基準)の取得・計算を回す。Issue #226 で騎手の年度別成績(16 本ぶんの取得と70KB の HTML のパース)が各回に加わり、単独で約 14 秒(既定の 30 秒の約半分)になったので、並列で遅い環境でも落ちないよう上限を延ばした(期待値は変えていない)
+  }, 120_000); // 16 回(15 項目 + 基準)の取得・計算を回す。Issue #226 で騎手の年度別成績(16 本ぶんの取得と70KB の HTML のパース)が各回に加わり、単独で約 14 秒(既定の 30 秒の約半分)になったので、並列で遅い環境でも落ちないよう上限を延ばした(期待値は変えていない)
 
   it("w2: 朝の prior も保存済みの重みを使い、HEAVY の朝の prior は既定値の朝の prior と別の値", async () => {
     const a = harness();
@@ -410,7 +414,7 @@ describe("w7: 本番の DO は loadSettings を渡す(事前分析が、設定�
 });
 
 describe("w8: 極端に大きい重み(上限は無い。exe と同じ)でも、分析は失敗せず、prior は有限で 0〜1 に収まる", () => {
-  it("14項目すべてを Number.MAX_VALUE にしても、発走前の分析は成功して保存される。prior・補正後確率はすべて有限で 0 以上 1 以下(実測: 1e6 以上では16頭とも同じ prior 0.1875 に飽和する。クラッシュ・NaN はしない)", async () => {
+  it("15項目すべてを Number.MAX_VALUE にしても、発走前の分析は成功して保存される。prior・補正後確率はすべて有限で 0 以上 1 以下(実測: 1e6 以上では16頭とも同じ prior 0.1875 に飽和する。クラッシュ・NaN はしない)", async () => {
     const h = harness();
     h.settings = { ...DEFAULT_CLOUD_SETTINGS, ...Object.fromEntries(SCORING_WEIGHT_FIELDS.map((f) => [f.field, Number.MAX_VALUE])) } as CloudSettings;
     const priors = await preRacePriors(h);
