@@ -355,12 +355,6 @@ export class PlanStore {
     return rows[0]?.state === "ok" && (rows[0].listed ?? 0) > 0;
   }
 
-  /** 中央の計画の行のうち、最も早い発走前の分析の期限(エポックミリ秒)。期限のある行が無ければ null。馬場の API の取得(Issue #294)の期限の上限に使う。 */
-  firstCentralDueMs(): number | null {
-    const rows = this.sql.exec("SELECT MIN(due_ms) AS at FROM race_day_plan WHERE venue = 'central' AND due_ms IS NOT NULL").toArray() as { at: number | null }[];
-    return rows[0]?.at ?? null;
-  }
-
   plannedCount(): number {
     return (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_plan WHERE state = 'planned'").toArray() as { n: number }[])[0]?.n ?? 0;
   }

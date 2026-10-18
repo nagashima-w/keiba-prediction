@@ -8,9 +8,9 @@
  *
  * ## いつ動くか({@link BabaStage.dueAtMs})
  * 取得口と保存先があり(secret が有効)、開催日が固定されて計画が確定し、中央の一覧が 1 件以上あり、まだ試みていない日。
- * 期限は `max(07:30, min(08:00, 最初の中央の発走前の分析の期限))`(JST):
- *  - 7:00 ごろに計測された値が API に載るまでの遅れが分からないので、通常は 08:00(最初の発走前の分析の期限〈発走 − 45 分〉は 9:15 前後で、それより前)。
- *  - offset が大きい日は、最初の発走前の分析の期限より後ろにならないよう、その期限に合わせる。ただし 07:30 を下限にする(計測の前に取りに行かない)。
+ * 期限は **09:00 JST で固定**({@link BABA_FETCH_JST}。Issue #360):
+ *  - 7:00 ごろに計測された値が API に載るまでには遅れがある。08:00 では載っておらず、全競馬場の値を「今日ではない」として捨てた。値が載る前に取りに行かないことを優先する。
+ *  - 最初の発走前の分析の期限(発走 − 45 分で 9:05〜9:20 ごろ)が 09:00 より前の日は、その分析は値なしで進む。`runNextStep` では馬場の取得がタスクより先に動くので、期限が 09:00 ちょうどの分析は値を受け取れる。
  *  - 今日(JST)が開催日と同じでなければ動かない(API は「最新の値」しか返さない。前夜の計画の段階・過去の日には使えない)。期限は前夜のうちから候補になり、アラームが朝に起こす。
  * `runNextStep` での順序は、通知の後・タスクの前。期限が来ていれば 1 起床(上限はタイムアウトの 10 秒)を使い、失敗しても次の起床でタスクがそのまま進む。
  *
@@ -24,7 +24,7 @@
  * ## 失敗しても分析を止めない・秘匿
  * {@link BabaStage.run} は例外を投げない(DO のアラームは例外で再実行される)。警告は固定の文と分類だけ(例外の文面・URL・応答の本文は出さない・保存しない)。
  */
-import { BabaFetchError, parseBabaResponse, type BabaFetcher, type BabaResultClass, type BabaVenueRecord } from "./baba-conditions";
+import { BabaFetchError, parseBabaResponse, type BabaDroppedDetail, type BabaFetcher, type BabaResultClass, type BabaVenueRecord } from "./baba-conditions";
 import { startTimeEpochMs } from "./pre-race-time";
 import { jstKaisaiDate } from "./auto-run-plan";
 import type { SqlLike } from "./sql-like";
@@ -32,10 +32,12 @@ import type { DayBaba } from "../../packages/core/src/analyzer/day-baba";
 
 export type { BabaFetcher };
 
-/** 取得の期限の下限(JST の時刻)。7:00 ごろの計測の前に取りに行かない。 */
-export const BABA_EARLIEST_JST = "07:30";
-/** 取得の期限の既定(JST の時刻)。最初の発走前の分析の期限が遅いときの期限。 */
-export const BABA_DEFAULT_JST = "08:00";
+/**
+ * 取得の期限(JST の時刻)。**固定**で、最初の発走前の分析の期限には左右されない。
+ * 08:00 では、外部の API に当日 7:00 の計測値がまだ載っておらず、前日以前の値が返った(Issue #360。2 開催日とも、全競馬場を「今日ではない」として捨てた)。
+ * 値が載る前に取りに行かないことを、最初の 1〜2 レースの発走前の分析(9:05〜9:20 ごろ)に間に合うことより優先する。間に合わないレースは、値なしで分析する(従来どおり)。
+ */
+export const BABA_FETCH_JST = "09:00";
 
 /** DO の meta のキー: 試みた時刻(エポックミリ秒)。**あれば二度と取得しない**(API に出る前に書く)。 */
 export const BABA_META_ATTEMPTED = "baba_attempted_at";
@@ -54,6 +56,8 @@ export interface BabaFinish {
   readonly venues: readonly BabaVenueRecord[];
   /** 捨てた競馬場の件数。 */
   readonly dropped: number;
+  /** 捨てた競馬場の理由と計測日時の文字列(診断用。`baba_fetches.dropped_json`)。失敗の分類のときは空。 */
+  readonly droppedDetails: readonly BabaDroppedDetail[];
 }
 
 /**
@@ -81,8 +85,6 @@ export interface BabaFacts {
   readonly planFinalized: boolean;
   /** 中央の一覧が取得できて 1 件以上ある(= JRA の開催日)。 */
   readonly centralListed: boolean;
-  /** 中央の計画の行のうち、最も早い発走前の分析の期限(エポックミリ秒)。無ければ null。 */
-  readonly firstCentralDueMs: number | null;
 }
 
 export interface BabaStageDeps {
@@ -141,9 +143,7 @@ export class BabaStage {
     if (jstKaisaiDate(this.deps.now()) > facts.kaisaiDate) {
       return null;
     }
-    const floor = startTimeEpochMs(facts.kaisaiDate, BABA_EARLIEST_JST);
-    const fallback = startTimeEpochMs(facts.kaisaiDate, BABA_DEFAULT_JST);
-    let due = Math.max(floor, Math.min(fallback, facts.firstCentralDueMs ?? fallback));
+    let due = startTimeEpochMs(facts.kaisaiDate, BABA_FETCH_JST);
     const retryAt = this.metaGet(BABA_META_RETRY_AT);
     if (retryAt !== null) {
       due = Math.max(due, Number(retryAt));
@@ -213,6 +213,7 @@ export class BabaStage {
     let result: BabaResultClass;
     let venues: readonly BabaVenueRecord[] = [];
     let dropped = 0;
+    let droppedDetails: readonly BabaDroppedDetail[] = [];
     let apiFetchedAt: string | null = null;
     try {
       const text = await fetcher();
@@ -220,6 +221,7 @@ export class BabaStage {
       result = parsed.result;
       venues = parsed.venues;
       dropped = parsed.dropped;
+      droppedDetails = parsed.droppedDetails;
       apiFetchedAt = parsed.apiFetchedAt;
     } catch (error) {
       result = error instanceof BabaFetchError ? error.result : "other";
@@ -229,7 +231,7 @@ export class BabaStage {
     // 4. 結果の記録。失敗しても再試行しない(API は既に使った)。
     let saved = true;
     try {
-      await store.finish(date, { finishedAt: this.deps.now(), result, apiFetchedAt, venues, dropped });
+      await store.finish(date, { finishedAt: this.deps.now(), result, apiFetchedAt, venues, dropped, droppedDetails });
     } catch {
       saved = false;
       this.deps.onWarn(`馬場の API: 結果(${result})を D1 に保存できませんでした(この日(${date})は再取得しません)`);

@@ -5,8 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { BabaFetchError, type BabaResultClass, type BabaVenueRecord } from "../src/baba-conditions";
 import {
-  BABA_EARLIEST_JST,
-  BABA_DEFAULT_JST,
+  BABA_FETCH_JST,
   BABA_META_ATTEMPTED,
   BABA_META_CLAIM_TRIES,
   BABA_META_RESULT,
@@ -32,8 +31,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const SAMPLE_TEXT = readFileSync(path.join(ROOT, "fixtures", "baba_latest_20261012.json"), "utf-8");
 const DATE = "20261012";
 const jst = (s: string): number => Date.parse(`${s}+09:00`);
-const AT_0800 = jst("2026-10-12T08:00:00");
-const DUE_0915 = jst("2026-10-12T09:15:00");
+const AT_0900 = jst("2026-10-12T09:00:00");
 
 const opened: NodeSql[] = [];
 afterEach(() => {
@@ -90,7 +88,7 @@ interface Harness {
   readonly atFetch: { claimRowExists: boolean; metaAttempted: string | null }[];
 }
 
-const GOOD_FACTS: BabaFacts = { kaisaiDate: DATE, planFinalized: true, centralListed: true, firstCentralDueMs: DUE_0915 };
+const GOOD_FACTS: BabaFacts = { kaisaiDate: DATE, planFinalized: true, centralListed: true };
 
 function harness(options: { facts?: Partial<BabaFacts>; sql?: NodeSql; store?: FakeStore; noFetcher?: boolean; noStore?: boolean; now?: number } = {}): Harness {
   const sql = options.sql ?? openNodeSql();
@@ -99,7 +97,7 @@ function harness(options: { facts?: Partial<BabaFacts>; sql?: NodeSql; store?: F
   }
   sql.exec("CREATE TABLE IF NOT EXISTS race_day_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   const store = options.store ?? fakeStore();
-  const clock = { now: options.now ?? AT_0800 };
+  const clock = { now: options.now ?? AT_0900 };
   const facts: BabaFacts = { ...GOOD_FACTS, ...options.facts };
   const warns: string[] = [];
   const fetchCalls = { n: 0 };
@@ -129,28 +127,22 @@ function harness(options: { facts?: Partial<BabaFacts>; sql?: NodeSql; store?: F
 const meta = (h: Pick<Harness, "sql">, key: string): string | null =>
   (h.sql.exec("SELECT value FROM race_day_meta WHERE key = ?", key).toArray() as { value: string }[])[0]?.value ?? null;
 
-describe("期限(dueAtMs): max(07:30, min(08:00, 最初の中央の発走前の期限))", () => {
-  it("定数: 07:30 と 08:00", () => {
-    expect([BABA_EARLIEST_JST, BABA_DEFAULT_JST]).toEqual(["07:30", "08:00"]);
+describe("期限(dueAtMs): 開催日の 09:00 JST で固定(最初の発走前の分析の期限には左右されない)", () => {
+  it("定数: 09:00", () => {
+    expect(BABA_FETCH_JST).toBe("09:00");
   });
 
-  const cases: { name: string; firstDue: number | null; expected: number }[] = [
-    { name: "最初の期限が 9:15 → 08:00(最初の発走前の分析より前)", firstDue: DUE_0915, expected: AT_0800 },
-    { name: "最初の期限が 08:00 ちょうど → 08:00", firstDue: AT_0800, expected: AT_0800 },
-    { name: "最初の期限が 07:45(offset が大きい日)→ 07:45(分析より後ろにしない)", firstDue: jst("2026-10-12T07:45:00"), expected: jst("2026-10-12T07:45:00") },
-    { name: "最初の期限が 06:50(offset 180 分の日)→ 07:30 の下限(7:00 の計測より前に取りに行かない)", firstDue: jst("2026-10-12T06:50:00"), expected: jst("2026-10-12T07:30:00") },
-    { name: "最初の期限が無い(期限のある中央の行が無い)→ 08:00", firstDue: null, expected: AT_0800 },
-  ];
-  for (const c of cases) {
-    it(c.name, () => {
-      const h = harness({ now: jst("2026-10-11T21:30:00"), facts: { firstCentralDueMs: c.firstDue } });
-      expect(h.stage.dueAtMs()).toBe(c.expected);
-    });
-  }
+  // 取得は 09:00 に固定する。外部の API は 08:00 の時点では当日 7:00 の計測値をまだ載せていなかった(Issue #360)ので、値が載る前に取りに行かないことを、最初の1〜2レースの分析に間に合うことより優先する。
+  // 最初の発走前の分析の期限(計画の行)が 09:00 より前でも 09:00 より後でも、取得は 09:00(`BabaFacts` に最初の期限は渡さない)。
+  it("開催日が確定していれば、どの時刻から数えても期限は 09:00(前夜の計画の段階から候補になる)", () => {
+    for (const now of [jst("2026-10-11T21:30:00"), jst("2026-10-12T06:00:00"), jst("2026-10-12T08:59:59")]) {
+      const h = harness({ now });
+      expect(h.stage.dueAtMs()).toBe(AT_0900);
+    }
+  });
 
-  it("前提の確認: 期限は 3 通り(07:30・07:45・08:00)すべて違う値で、上の表は区別できている", () => {
-    const values = new Set(cases.map((c) => c.expected));
-    expect(values.size).toBe(3);
+  it("BabaFacts は最初の発走前の分析の期限を持たない(期限の式から外した)", () => {
+    expect(Object.keys(GOOD_FACTS).sort()).toEqual(["centralListed", "kaisaiDate", "planFinalized"]);
   });
 
   const none: { name: string; options: Parameters<typeof harness>[0] }[] = [
@@ -178,8 +170,8 @@ describe("期限(dueAtMs): max(07:30, min(08:00, 最初の中央の発走前の�
 
   it("claim の再試行待ちがあれば、期限と再試行の時刻の遅いほう", () => {
     const h = harness();
-    h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?)", BABA_META_RETRY_AT, String(AT_0800 + 60_000));
-    expect(h.stage.dueAtMs()).toBe(AT_0800 + 60_000);
+    h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?)", BABA_META_RETRY_AT, String(AT_0900 + 60_000));
+    expect(h.stage.dueAtMs()).toBe(AT_0900 + 60_000);
   });
 
   it("secret 未登録のとき、何度確かめても印を書かない(後から登録した同じ日に取得できる)", async () => {
@@ -190,16 +182,16 @@ describe("期限(dueAtMs): max(07:30, min(08:00, 最初の中央の発走前の�
 });
 
 describe("動ける時刻(runnable)", () => {
-  it("08:00 の 1ms 前は動けず、08:00 ちょうどから動ける", () => {
-    const h = harness({ now: AT_0800 - 1 });
+  it("09:00 の 1ms 前は動けず、09:00 ちょうどから動ける", () => {
+    const h = harness({ now: AT_0900 - 1 });
     expect(h.stage.runnable()).toBe(false);
-    h.clock.now = AT_0800;
+    h.clock.now = AT_0900;
     expect(h.stage.runnable()).toBe(true);
   });
 
   it("前夜(21:00 の計画の直後)は、期限が翌朝でも動けない", () => {
     const h = harness({ now: jst("2026-10-11T21:30:00") });
-    expect(h.stage.dueAtMs()).toBe(AT_0800); // 前提: 候補(アラーム)にはなる
+    expect(h.stage.dueAtMs()).toBe(AT_0900); // 前提: 候補(アラーム)にはなる
     expect(h.stage.runnable()).toBe(false);
   });
 
@@ -215,15 +207,16 @@ describe("run: 試みを先に永続化して、1 回だけ取得する", () => 
     const outcome = await h.stage.run();
     expect(outcome).toEqual({ kind: "ran", raceId: DATE, mode: "baba", step: "fetch", result: "ok" });
     expect(h.fetchCalls.n).toBe(1);
-    expect(h.atFetch).toEqual([{ claimRowExists: true, metaAttempted: String(AT_0800) }]);
-    expect(h.store.claims).toEqual([{ date: DATE, at: AT_0800 }]);
+    expect(h.atFetch).toEqual([{ claimRowExists: true, metaAttempted: String(AT_0900) }]);
+    expect(h.store.claims).toEqual([{ date: DATE, at: AT_0900 }]);
     expect(h.store.finishes).toHaveLength(1);
     const finish = h.store.finishes[0]!.finish;
     expect(finish.result).toBe("ok");
     expect(finish.venues.map((v: BabaVenueRecord) => v.venueCode)).toEqual(["05", "08"]); // 札幌(9/6)は捨てる
     expect(finish.dropped).toBe(1);
-    expect(finish.finishedAt).toBe(AT_0800);
-    expect(meta(h, BABA_META_ATTEMPTED)).toBe(String(AT_0800));
+    expect(finish.droppedDetails).toEqual([{ venue: "01", reason: "not-today", measured: "9月6日（日曜）8時20分" }]);
+    expect(finish.finishedAt).toBe(AT_0900);
+    expect(meta(h, BABA_META_ATTEMPTED)).toBe(String(AT_0900));
     expect(meta(h, BABA_META_RESULT)).toBe("ok");
     expect(h.warns).toEqual([]);
     // 動けなくなる(再度の実行・アラームの候補にならない)
@@ -313,7 +306,7 @@ describe("run: 試みを先に永続化して、1 回だけ取得する", () => 
     void h.stage.run();
     for (let i = 0; i < 50; i++) await Promise.resolve();
     expect(h.fetchCalls.n).toBe(1);
-    expect(meta(h, BABA_META_ATTEMPTED)).toBe(String(AT_0800));
+    expect(meta(h, BABA_META_ATTEMPTED)).toBe(String(AT_0900));
     const restarted = harness({ sql: h.sql, store: h.store });
     expect(restarted.stage.runnable()).toBe(false);
     expect(restarted.fetchCalls.n).toBe(0);
@@ -328,12 +321,12 @@ describe("claim の失敗(API に何も送っていないので再試行して�
     expect(first.result).toBe("retry");
     expect(h.fetchCalls.n).toBe(0);
     expect(meta(h, BABA_META_ATTEMPTED)).toBeNull(); // 印は書かない(取得していない)
-    expect(meta(h, BABA_META_RETRY_AT)).toBe(String(AT_0800 + 60_000));
+    expect(meta(h, BABA_META_RETRY_AT)).toBe(String(AT_0900 + 60_000));
     expect(meta(h, BABA_META_CLAIM_TRIES)).toBe("1");
     // 再試行の時刻まで動けない・候補はその時刻
     expect(h.stage.runnable()).toBe(false);
-    expect(h.stage.dueAtMs()).toBe(AT_0800 + 60_000);
-    h.clock.now = AT_0800 + 60_000;
+    expect(h.stage.dueAtMs()).toBe(AT_0900 + 60_000);
+    h.clock.now = AT_0900 + 60_000;
     expect(h.stage.runnable()).toBe(true);
     const second = await h.stage.run();
     expect(second.result).toBe("ok");

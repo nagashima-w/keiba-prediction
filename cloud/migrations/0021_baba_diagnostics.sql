@@ -1,0 +1,14 @@
+-- クラウド版(D1)の migration 0021: 馬場の API の取得の診断の記録(Issue #360)。exe の SQLite には無い、D1 専用の列。
+-- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧い行は NULL のまま)。
+-- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言した追加分」(D1_EXTRA_COLUMNS)も同時に直す。
+-- ★デプロイの順序: この列を UPDATE する新しい Worker は、migration の適用より前に出してはならない(結果の記録の batch が落ち、その日の馬場の値が保存されない)。
+--   deploy-cloud.yml は migration を wrangler deploy より前に適用する。旧い Worker はこの列を指さないので、適用後も壊れない(共存)。
+--
+-- baba_fetches.dropped_json: 捨てた競馬場ごとの診断(JSON の配列の文字列)。外部の API の応答の競馬場のうち、保存しなかったものの記録。
+--   [{"venue":"01"|null,"reason":"not-today"|"unparsed"|"invalid"|"duplicate","measured":"10月17日（土曜）7時00分"|null}, ...]
+--   venue     場コード(応答が文字列で持っていたもの。読めなければ null)
+--   reason    not-today = 計測日時を読めて今日でない / unparsed = 計測日時が読めない(書式の変更など。曜日の検算の失敗を含む) / invalid = 形が不正 / duplicate = 場コードの重複
+--   measured  応答の measuredAt の文字列(40 字まで。文字列でなければ null)
+--   20 件まで(件数そのものは venues_dropped)。競馬場の値や元の JSON は入らない。結果を記録した試みは、捨てた競馬場が無くても "[]"。NULL = この列が無かった旧版の記録。
+--   見方の例: SELECT kaisai_date, result, venues_dropped, dropped_json FROM baba_fetches ORDER BY kaisai_date DESC;
+ALTER TABLE baba_fetches ADD COLUMN dropped_json TEXT;

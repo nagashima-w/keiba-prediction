@@ -1554,10 +1554,36 @@ describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所�
     expect(pick).toBeGreaterThan(baba);
   });
 
-  it("他の DO・cron・日報・月報は、馬場の API の取得を参照しない(アラームは DO ごとに 1 つ。干渉しない)", () => {
-    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["race-day-core.ts", "race-day-do.ts", "race-day-plan.ts"].includes(n))) {
+  it("他の DO・cron・日報・月報は、馬場の API の取得を参照しない(アラームは DO ごとに 1 つ。干渉しない)。入口(handler.ts)と ルートの表(route-policy.ts)は診断の入口 /api/baba-fetch だけが例外(次のテスト)", () => {
+    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["race-day-core.ts", "race-day-do.ts", "race-day-plan.ts", "handler.ts", "route-policy.ts"].includes(n))) {
       expect(code(f), `${f} は馬場の API を参照しない`).not.toMatch(/baba-(conditions|fetch|repository)|race-day-baba|BabaStage|BABA_API_URL/);
     }
+  });
+
+  it("Issue #360: 診断の入口 GET /api/baba-fetch の関数(handleBabaFetch)は、D1 に触れる前に Sec-Fetch-Site を見る。baba-repository の読み出し(loadFetches)だけを使い、外部の API・取得口・段階・URL の secret・取得・LLM・Webhook・DO・R2・書き込みに触れない。handler.ts と route-policy.ts が馬場について参照するのはこの入口だけ", () => {
+    const handler = code("handler.ts");
+    const start = handler.indexOf("async function handleBabaFetch(");
+    expect(start).toBeGreaterThan(-1);
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(800); // 前提: 本体を実際に読めている(空振りでない)
+    expect(body).toContain(".loadFetches(");
+    for (const needle of ["sec-fetch-site", "same-origin", '"none"', "origin-mismatch", "403"]) {
+      expect(body, `handleBabaFetch に ${needle} がある`).toContain(needle);
+    }
+    expect(body.indexOf("sec-fetch-site"), "Sec-Fetch-Site の検査は D1 に触れるより前").toBeLessThan(body.indexOf("env.DB"));
+    for (const forbidden of ["NETKEIBA_GATE", "RACE_DAY", "RESULT_BACKFILL", "CLOUD_MIGRATION", "VERIFY_REPORT", "PRIOR_EXPORT", "ANALYSIS_DETAIL", "BABA_API_URL", ".fetchRaw(", ".prepare(", ".batch(", ".run(", ".claim(", ".finish(", "INSERT", "UPDATE", "DELETE", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "fetch("]) {
+      expect(body, `handleBabaFetch に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    expect((handler.match(/\bhandleBabaFetch\(/g) ?? []).length).toBe(2); // 定義 1 + 呼び出し 1
+    // handler.ts の馬場への参照は、baba-repository からの import(D1BabaStore・FETCH_LIST_LIMIT_DEFAULT)と、このルートの文字列だけ
+    const imports = [...handler.matchAll(/import\s*\{([^}]*)\}\s*from\s*"\.\/baba-repository"/g)].map((m) => m[1]!.replace(/\s+/g, " ").trim());
+    expect(imports).toEqual(["D1BabaStore, FETCH_LIST_LIMIT_DEFAULT"]);
+    const strip = (text: string): string => text.replaceAll("/api/baba-fetch", "").replaceAll("baba-fetch-error", "").replaceAll("./baba-repository", "");
+    expect(strip(handler), "handler.ts は、診断の入口(ルートの文字列・エラーの種類名・baba-repository の import)のほかに取得の部品を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|race-day-baba|BabaStage|BABA_API_URL|createBabaFetcher/);
+    expect(strip(code("route-policy.ts")), "route-policy.ts は、ルートの文字列のほかに馬場を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|race-day-baba|BabaStage|BABA_API_URL/);
+    // 対照(検出の確認。空振りでない): 検査より後に D1 に触れる本体は「前」の検査を満たさない
+    const bad = 'async function handleBabaFetch(request: Request, env: Env) {\n  await new D1BabaStore({ db: env.DB });\n  const site = request.headers.get("sec-fetch-site");\n}';
+    expect(bad.indexOf("sec-fetch-site") < bad.indexOf("env.DB")).toBe(false);
   });
 
   it("deploy-cloud.yml は BABA_API_URL を必須の secret にしない(任意の secret。未登録なら機能が止まるだけ)", () => {

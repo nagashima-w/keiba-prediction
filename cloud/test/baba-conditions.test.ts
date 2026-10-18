@@ -251,3 +251,127 @@ describe("全部捨てたときの分類", () => {
     expect(r.dropped).toBe(1);
   });
 });
+
+describe("捨てた競馬場の理由と計測日時の文字列(Issue #360。朝に値が載っていたか・読めなかったかを後から区別する診断)", () => {
+  const jst = (s: string): number => Date.parse(`${s}+09:00`);
+  const at = (nowText: string, venues: unknown[]): ReturnType<typeof parseBabaResponse> => {
+    const now = jst(nowText);
+    return parseBabaResponse(body(venues, new Date(now).toISOString()), now);
+  };
+
+  it("見本: 札幌(9/6)は not-today で、場コードと計測日時の文字列を残す。保存した東京・京都は詳細に入らない", () => {
+    const r = parseBabaResponse(SAMPLE_TEXT, NOW);
+    expect(r.dropped).toBe(1);
+    expect(r.droppedDetails).toEqual([{ venue: "01", reason: "not-today", measured: "9月6日（日曜）8時20分" }]);
+  });
+
+  // 計測日時が「読めて今日でない」(not-today)と「読めない」(unparsed)の区別。後者は書式の変更などの不具合の兆候。
+  const measuredCases: { name: string; now: string; measuredAt: string; reason: "not-today" | "unparsed" }[] = [
+    { name: "前日の値(10/11 日曜)", now: "2026-10-12T08:00:00", measuredAt: "10月11日（日曜）7時00分", reason: "not-today" },
+    { name: "年をまたぐ古い値(1/3 の取得で 12/28 月曜)", now: "2027-01-03T08:00:00", measuredAt: "12月28日（月曜）7時00分", reason: "not-today" },
+    { name: "年末の取得で来年の月日(未来)", now: "2026-12-27T08:00:00", measuredAt: "1月3日（日曜）7時00分", reason: "not-today" },
+    // 既知の限界: 半年(182 日)を超えて古い値は、年の補いで別の年(3/1 は 2027 年。140 日先)に当てはまる。その年の曜日(月曜)と合わなければ「読めない」側に分類される(7 通り中 6 通り)。計測日時の文字列は残るので、管理者は読める。
+    { name: "半年を超えて古い値(10/12 の取得で 3/1 日曜。2027-03-01 は月曜なので曜日が合わない)", now: "2026-10-12T08:00:00", measuredAt: "3月1日（日曜）7時00分", reason: "unparsed" },
+    { name: "1 年前の同じ月日(曜日の検算に失敗)", now: "2026-10-12T08:00:00", measuredAt: "10月12日（日曜）7時00分", reason: "unparsed" },
+    { name: "曜日が合わない(10/12 は月曜。火曜は誤り)", now: "2026-10-12T08:00:00", measuredAt: "10月12日（火曜）7時00分", reason: "unparsed" },
+    { name: "実在しない日(平年の 2/29)", now: "2026-10-12T08:00:00", measuredAt: "2月29日（日曜）7時00分", reason: "unparsed" },
+    { name: "実在しない日(2/30)", now: "2026-10-12T08:00:00", measuredAt: "2月30日（月曜）7時00分", reason: "unparsed" },
+    { name: "月が範囲外(13 月)", now: "2026-10-12T08:00:00", measuredAt: "13月1日（月曜）7時00分", reason: "unparsed" },
+    { name: "時が範囲外(24 時)", now: "2026-10-12T08:00:00", measuredAt: "10月12日（月曜）24時00分", reason: "unparsed" },
+    { name: "分が範囲外(60 分)", now: "2026-10-12T08:00:00", measuredAt: "10月12日（月曜）7時60分", reason: "unparsed" },
+    { name: "形が違う(曜日が無い)", now: "2026-10-12T08:00:00", measuredAt: "10月12日 7時00分", reason: "unparsed" },
+    { name: "空の文字列", now: "2026-10-12T08:00:00", measuredAt: "", reason: "unparsed" },
+    { name: "書式の変更(ISO 形式)", now: "2026-10-12T08:00:00", measuredAt: "2026-10-12T07:00:00+09:00", reason: "unparsed" },
+  ];
+  for (const c of measuredCases) {
+    it(`${c.name} → ${c.reason}。計測日時の文字列をそのまま残す`, () => {
+      const r = at(c.now, [{ ...tokyo(), measuredAt: c.measuredAt }]);
+      expect(r.venues).toEqual([]);
+      expect(r.dropped).toBe(1);
+      expect(r.droppedDetails).toEqual([{ venue: "05", reason: c.reason, measured: c.measuredAt }]);
+    });
+  }
+
+  it("前提: 上の表は not-today と unparsed の両方を含む(区別できている)", () => {
+    expect(new Set(measuredCases.map((c) => c.reason))).toEqual(new Set(["not-today", "unparsed"]));
+    expect(measuredCases.filter((c) => c.reason === "not-today").length).toBeGreaterThanOrEqual(3);
+    expect(measuredCases.filter((c) => c.reason === "unparsed").length).toBeGreaterThanOrEqual(8);
+  });
+
+  // 形が不正(invalid)。場コードが読めなければ venue は null、計測日時が文字列でなければ measured は null。
+  const withTokyo = (mutate: (v: Record<string, unknown>) => void): Record<string, unknown> => {
+    const v = tokyo();
+    mutate(v);
+    return v;
+  };
+  const invalidCases: { name: string; venue: unknown; expected: { venue: string | null; measured: string | null } }[] = [
+    { name: "クッション値が範囲外(場コード・計測日時は読める)", venue: withTokyo((v) => (v["cushion"] = 99)), expected: { venue: "05", measured: "10月12日（月曜）7時00分" } },
+    { name: "場コードが範囲外(11。文字列なので残る)", venue: withTokyo((v) => (v["venueCode"] = "11")), expected: { venue: "11", measured: "10月12日（月曜）7時00分" } },
+    { name: "場コードが数値(venue は null)", venue: withTokyo((v) => (v["venueCode"] = 5)), expected: { venue: null, measured: "10月12日（月曜）7時00分" } },
+    { name: "measuredAt が文字列でない(measured は null)", venue: withTokyo((v) => (v["measuredAt"] = 7)), expected: { venue: "05", measured: null } },
+    { name: "競馬場が null(両方 null)", venue: null, expected: { venue: null, measured: null } },
+    { name: "競馬場が配列(両方 null)", venue: [], expected: { venue: null, measured: null } },
+  ];
+  for (const c of invalidCases) {
+    it(`invalid: ${c.name}`, () => {
+      const r = parseBabaResponse(body([c.venue, kyoto()]), NOW);
+      expect(r.venues.map((v) => v.venueCode)).toEqual(["08"]);
+      expect(r.dropped).toBe(1);
+      expect(r.droppedDetails).toEqual([{ ...c.expected, reason: "invalid" }]);
+    });
+  }
+
+  it("duplicate: 場コードの重複の 2 件目。最初の 1 件は保存され、詳細には 2 件目の計測日時の文字列が残る", () => {
+    const second = withTokyo((v) => (v["cushion"] = 5));
+    const r = parseBabaResponse(body([tokyo(), second]), NOW);
+    expect(r.venues).toHaveLength(1);
+    expect(r.droppedDetails).toEqual([{ venue: "05", reason: "duplicate", measured: "10月12日（月曜）7時00分" }]);
+  });
+
+  it("複数の理由が混ざる応答: 並びは応答の並びのまま、件数 dropped と詳細の件数が一致する", () => {
+    const r = parseBabaResponse(body([tokyo(), withTokyo((v) => (v["venueCode"] = "99")), sapporo(), { ...kyoto(), measuredAt: "壊れた" }, tokyo()]), NOW);
+    expect(r.venues.map((v) => v.venueCode)).toEqual(["05"]);
+    expect(r.dropped).toBe(4);
+    expect(r.droppedDetails.map((d) => [d.venue, d.reason])).toEqual([
+      ["99", "invalid"],
+      ["01", "not-today"],
+      ["08", "unparsed"],
+      ["05", "duplicate"],
+    ]);
+    expect(r.droppedDetails).toHaveLength(r.dropped);
+  });
+
+  it("計測日時の文字列は制御文字を除いて 40 字に切る(外部の文字列をそのまま保存しない)", () => {
+    const r = at("2026-10-12T08:00:00", [{ ...tokyo(), measuredAt: `10月\u0000\n${"あ".repeat(100)}` }]);
+    const detail = r.droppedDetails[0]!;
+    expect(detail.reason).toBe("unparsed");
+    expect(detail.measured).toHaveLength(40);
+    expect(detail.measured).toBe(`10月${"あ".repeat(37)}`); // 「10月」は 3 字
+    expect(detail.measured).not.toMatch(/[\u0000-\u001f\u007f]/);
+  });
+
+  it("詳細は 20 件まで。それを超えても dropped は真の件数(25)のまま", () => {
+    const many = Array.from({ length: 25 }, () => ({ ...sapporo(), venueCode: "01" }));
+    const r = parseBabaResponse(body(many), NOW);
+    expect(r.dropped).toBe(25); // 最初の 1 件は not-today、残り 24 件は duplicate
+    expect(r.droppedDetails).toHaveLength(20);
+    expect(r.droppedDetails[0]?.reason).toBe("not-today");
+  });
+
+  it("全体の失敗(JSON でない・形の不一致・stale)と、捨てた競馬場が無い応答では、詳細は空", () => {
+    expect(parseBabaResponse("<html></html>", NOW).droppedDetails).toEqual([]);
+    expect(parseBabaResponse("[]", NOW).droppedDetails).toEqual([]);
+    expect(parseBabaResponse(body([tokyo(), kyoto()], "2026-10-11T08:00:00.000Z"), NOW).droppedDetails).toEqual([]);
+    const clean = parseBabaResponse(body([tokyo(), kyoto()]), NOW);
+    expect(clean.result).toBe("ok");
+    expect(clean.dropped).toBe(0);
+    expect(clean.droppedDetails).toEqual([]);
+  });
+
+  it("詳細に、競馬場の値(クッション値・文章)や元の JSON を入れない(場コード・理由・計測日時の文字列だけ)", () => {
+    const r = parseBabaResponse(body([{ ...sapporo(), turfCondition: "本文の断片-CANARY" }]), NOW);
+    expect(r.droppedDetails).toHaveLength(1);
+    expect(Object.keys(r.droppedDetails[0]!).sort()).toEqual(["measured", "reason", "venue"]);
+    expect(JSON.stringify(r.droppedDetails)).not.toContain("CANARY");
+  });
+});

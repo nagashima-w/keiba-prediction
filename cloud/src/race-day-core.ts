@@ -864,7 +864,6 @@ export class RaceDayCore {
         kaisaiDate: this.metaGet("kaisai_date"),
         planFinalized: this.plan.finalizedAt() !== null,
         centralListed: this.plan.centralListed(),
-        firstCentralDueMs: this.plan.firstCentralDueMs(),
       }),
       retryDelayMs: RETRY_DELAY_MS,
       maxClaimAttempts: MAX_ATTEMPTS,

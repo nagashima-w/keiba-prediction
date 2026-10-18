@@ -14,7 +14,8 @@
  * ## 捨てる・保存しない
  * - 全体の形が想定と違う(JSON でない・`fetchedAt` が無い・`venues` が配列でない)→ 何も保存しない(`not-json`・`shape-mismatch`)。
  * - `fetchedAt` の JST の日付が今日でない(API 側の古いキャッシュ)→ 何も保存しない(`stale`)。
- * - 競馬場 1 件の不正(場コードが JRA の 01〜10 でない・型が違う・数値が範囲外・計測日が当日でない・場コードの重複)→ その 1 件だけ捨てて件数に数える。
+ * - 競馬場 1 件の不正(場コードが JRA の 01〜10 でない・型が違う・数値が範囲外・計測日時が読めない・計測日が当日でない・場コードの重複)→ その 1 件だけ捨てて件数に数える。
+ *   捨てた理由は {@link BabaDropReason} の 4 つに分け、場コードと計測日時の文字列(例: `10月17日（土曜）7時00分`)を {@link BabaDroppedDetail} として残す(Issue #360。診断用。競馬場の値や元の JSON は入れない)。
  *   数値の範囲(クッション値 0〜20・含水率 0〜100・降水量 0〜500)は私の目安: 見本の値は クッション値 7.8〜10.7・含水率 1.7〜13.2。外部の API の誤値が、後続(#295)で LLM に渡るのを避けるための歯止め。
  * - 見本に無い形(`turf`・`dirt` が null、降水量などの欠落)は NULL として許容する。
  * - 文字列は制御文字を除き、長さを切る(外部の API の応答の文章が、後続で LLM に入るため)。元の JSON は {@link BABA_RAW_JSON_LIMIT} 以内なら `rawJson` に残す。
@@ -105,17 +106,43 @@ export interface BabaVenueRecord {
   readonly rawJson: string | null;
 }
 
+/**
+ * 競馬場を捨てた理由(診断用。Issue #360)。
+ *  - `not-today`: 計測日時を読めて、日付が今日でない(API に当日の値がまだ載っていない・開催していない競馬場の古い値)。
+ *  - `unparsed`: `measuredAt` が文字列だが、読めない(書式の不一致・実在しない日・時刻の範囲外・曜日の検算の失敗)。書式の変更などの不具合の兆候。
+ *  - `invalid`: 形が不正(場コードが JRA の 01〜10 でない・型が違う・数値が範囲外・`measuredAt` が文字列でない・競馬場がオブジェクトでない)。
+ *  - `duplicate`: 場コードの重複(2 件目以降)。
+ */
+export type BabaDropReason = "not-today" | "unparsed" | "invalid" | "duplicate";
+
+/** 捨てた競馬場 1 件の診断(`baba_fetches.dropped_json` の要素)。競馬場の値や元の JSON は含めない。 */
+export interface BabaDroppedDetail {
+  /** 場コード(応答が文字列で持っていたもの。制御文字を除いて 4 字まで)。読めなければ null。 */
+  readonly venue: string | null;
+  readonly reason: BabaDropReason;
+  /** 応答の `measuredAt` の文字列(例: `10月17日（土曜）7時00分`)。制御文字を除いて {@link BABA_MEASURED_TEXT_LIMIT} 字まで。文字列でなければ null。 */
+  readonly measured: string | null;
+}
+
+/** 捨てた競馬場の詳細を残す件数の上限(件数そのものは `dropped` に残る)。 */
+export const BABA_DROPPED_DETAIL_LIMIT = 20;
+/** 詳細に残す計測日時の文字列の長さの上限。 */
+export const BABA_MEASURED_TEXT_LIMIT = 40;
+const MAX_VENUE_TEXT = 4;
+
 export interface BabaParseResult {
   readonly result: "ok" | "no-today-venues" | "not-json" | "shape-mismatch" | "stale";
   /** 当日の競馬場だけ(`result` が `ok` のときだけ 1 件以上)。 */
   readonly venues: readonly BabaVenueRecord[];
-  /** 捨てた競馬場の件数(当日でない・不正・重複)。 */
+  /** 捨てた競馬場の件数(当日でない・読めない・不正・重複)。 */
   readonly dropped: number;
+  /** 捨てた競馬場の理由と計測日時の文字列(応答の並び順。{@link BABA_DROPPED_DETAIL_LIMIT} 件まで)。全体の失敗のときは空。 */
+  readonly droppedDetails: readonly BabaDroppedDetail[];
   /** 応答の `fetchedAt`(形が読めたときだけ。読めなければ null)。 */
   readonly apiFetchedAt: string | null;
 }
 
-const fail = (result: "not-json" | "shape-mismatch" | "stale", apiFetchedAt: string | null = null): BabaParseResult => ({ result, venues: [], dropped: 0, apiFetchedAt });
+const fail = (result: "not-json" | "shape-mismatch" | "stale", apiFetchedAt: string | null = null): BabaParseResult => ({ result, venues: [], dropped: 0, droppedDetails: [], apiFetchedAt });
 
 /** 不正な競馬場を表す印(型が違う・範囲外)。 */
 const INVALID = Symbol("invalid");
@@ -204,10 +231,24 @@ function readMeasuredAt(text: string, todayYear: number, todayMonth: number, tod
   return null;
 }
 
+/** 捨てた競馬場の診断(場コードと計測日時の文字列。読めなければ null)。 */
+function describeDropped(value: unknown, reason: BabaDropReason): BabaDroppedDetail {
+  if (!isRecord(value)) {
+    return { venue: null, reason, measured: null };
+  }
+  const code = value["venueCode"];
+  const measured = value["measuredAt"];
+  return {
+    venue: typeof code === "string" ? sanitize(code, MAX_VENUE_TEXT) : null,
+    reason,
+    measured: typeof measured === "string" ? sanitize(measured, BABA_MEASURED_TEXT_LIMIT) : null,
+  };
+}
+
 /**
- * 競馬場 1 件を読む。形の不正(型・範囲・場コード・計測日時の形)なら "invalid"、当日でなければ "not-today"。
+ * 競馬場 1 件を読む。形の不正(型・範囲・場コード・計測日時が文字列でない)なら "invalid"、計測日時が読めなければ "unparsed"、読めて当日でなければ "not-today"。
  */
-function readVenue(value: unknown, today: { year: number; month: number; day: number; date: string }): BabaVenueRecord | "invalid" | "not-today" {
+function readVenue(value: unknown, today: { year: number; month: number; day: number; date: string }): BabaVenueRecord | Exclude<BabaDropReason, "duplicate"> {
   if (!isRecord(value)) {
     return "invalid";
   }
@@ -234,7 +275,10 @@ function readVenue(value: unknown, today: { year: number; month: number; day: nu
     return "invalid";
   }
   const measured = readMeasuredAt(measuredText, today.year, today.month, today.day);
-  if (measured === null || measured.date !== today.date) {
+  if (measured === null) {
+    return "unparsed";
+  }
+  if (measured.date !== today.date) {
     return "not-today";
   }
   const raw = JSON.stringify(value);
@@ -277,16 +321,21 @@ export function parseBabaResponse(text: string, nowMs: number): BabaParseResult 
   }
   const today = { year: Number(todayDate.slice(0, 4)), month: Number(todayDate.slice(4, 6)), day: Number(todayDate.slice(6, 8)), date: todayDate };
   const venues: BabaVenueRecord[] = [];
+  const droppedDetails: BabaDroppedDetail[] = [];
   const seen = new Set<string>();
   let dropped = 0;
   for (const entry of json["venues"] as unknown[]) {
     const read = readVenue(entry, today);
-    if (read === "invalid" || read === "not-today" || seen.has(read.venueCode)) {
+    const reason: BabaDropReason | null = typeof read === "string" ? read : seen.has(read.venueCode) ? "duplicate" : null;
+    if (reason !== null) {
       dropped += 1;
+      if (droppedDetails.length < BABA_DROPPED_DETAIL_LIMIT) {
+        droppedDetails.push(describeDropped(entry, reason));
+      }
       continue;
     }
-    seen.add(read.venueCode);
-    venues.push(read);
+    seen.add((read as BabaVenueRecord).venueCode);
+    venues.push(read as BabaVenueRecord);
   }
-  return { result: venues.length > 0 ? "ok" : "no-today-venues", venues, dropped, apiFetchedAt: fetchedAt };
+  return { result: venues.length > 0 ? "ok" : "no-today-venues", venues, dropped, droppedDetails, apiFetchedAt: fetchedAt };
 }
