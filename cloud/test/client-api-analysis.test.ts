@@ -172,7 +172,7 @@ const ALLOCATION = {
     { betType: "wide", comboKey: "0102", stake: 200, odds: null, ev: null },
   ],
 };
-const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, legStyle: "差し" as const };
+const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, legStyle: "差し" as const, timeIndexLine: null };
 const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良", oddsStatus: "result", placeBasis: "top3", turn: "left" };
 const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, llmCalls: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
 const wrap = (analysis: unknown) => ({ ok: true, analysis });
@@ -379,6 +379,36 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
       expect(read({ markFrom: "◇" })).toBeNull(); // 語彙の外
       expect(read({ markFrom: "<script>" })).toBeNull();
       expect(read({ markFrom: 3 })).toBeNull();
+    });
+
+    it("Issue #359 timeIndexLine: サーバが組み立てた文字列はそのまま読む。キー無し(古いサーバの応答)・null・文字列以外は null(補助の表示なので応答全体は失敗させない)", () => {
+      const read = (over: Record<string, unknown>, drop = false) => {
+        const horse: Record<string, unknown> = { ...HORSE, ...over };
+        if (drop) delete horse["timeIndexLine"];
+        const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, horses: [horse] }));
+        return result.ok ? result.analysis.horses[0]!.timeIndexLine : "unexpected";
+      };
+      expect(read({ timeIndexLine: "タイム指数 +1.2(レース内 2位)" })).toBe("タイム指数 +1.2(レース内 2位)");
+      expect(read({ timeIndexLine: "タイム指数 —" })).toBe("タイム指数 —");
+      expect(read({ timeIndexLine: null })).toBeNull();
+      expect(read({}, true)).toBeNull();
+      expect(read({ timeIndexLine: 1.2 })).toBeNull();
+      expect(read({ timeIndexLine: { text: "x" } })).toBeNull();
+      expect(read({ timeIndexLine: ["x"] })).toBeNull();
+    });
+
+    it("Issue #359 timeIndexNote: 文字列はそのまま読む。キー無し(古いサーバの応答)・null・文字列以外は null(応答全体は失敗させない)", () => {
+      const read = (value: unknown, drop = false) => {
+        const analysis: Record<string, unknown> = { ...ANALYSIS, timeIndexNote: value };
+        if (drop) delete analysis["timeIndexNote"];
+        const result = parseAnalysisResponse(200, wrap(analysis));
+        return result.ok ? result.analysis.timeIndexNote : "unexpected";
+      };
+      expect(read("タイム指数: 説明")).toBe("タイム指数: 説明");
+      expect(read(null)).toBeNull();
+      expect(read(undefined, true)).toBeNull();
+      expect(read(3)).toBeNull();
+      expect(read({})).toBeNull();
     });
 
     it("Issue #314 legStyle: 4 値は読む。キー無し(古いサーバの応答)・null・不正な値は null(補助の演出なので応答全体は失敗させない)", () => {

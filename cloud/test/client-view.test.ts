@@ -1458,3 +1458,92 @@ describe("手動で分析するときの案内の VNode(Issue #312)", () => {
     expect(byClass(renderScreen(buildRaceModel(raceInput({ status: { kind: "loading" } })), noopActions), "race-guide")).toHaveLength(0);
   });
 });
+
+/**
+ * Issue #359: 馬のカードに「タイム指数 +1.2(レース内 2位)」の行を出し、説明の 1 行を「馬ごとの評価」の見出しの下に 1 回だけ出す。
+ * 結果画面と発走前のカードの中の**両方**(`resultSections` を共有)で同じ表示になること。文言はサーバが組み立てたものをそのまま出す(クライアントに日本語を置かない)。
+ */
+describe("タイム指数の行と説明の表示(Issue #359。結果画面とカードの中の両方)", () => {
+  const tiHorse = (umaban: number, timeIndexLine: string | null): AnalysisDetail["horses"][number] => ({
+    umaban,
+    name: `馬${umaban}`,
+    prior: 0.2,
+    adjustedProb: 0.18,
+    placeOddsMin: 1.8,
+    ev: 1.05,
+    isPositive: false,
+    mark: null,
+    reason: "根拠の文",
+    highlights: [],
+    concerns: [],
+    winProb: null,
+    fairWinOdds: null,
+    winOdds: null,
+    fairPlaceOdds: null,
+    actualPlaceOddsMin: null,
+    actualPlaceOddsMax: null,
+    timeIndexLine,
+  });
+  const NOTE = "タイム指数: 基準タイムより 1000m あたり何秒速いか(説明の文)。";
+  const HORSES = [tiHorse(1, "タイム指数 +1.2(レース内 2位)"), tiHorse(2, "タイム指数 —"), tiHorse(3, "タイム指数 +3.0(レース内 1位)")];
+  const cardTree = (a: AnalysisDetail, readOnly = false): VNode => {
+    const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
+    return renderScreen(buildRaceModel(raceInput({ readOnly, status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
+  };
+  const resultOf = (a: AnalysisDetail, readOnly = false): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, readOnly }), noopActions);
+  const screens: readonly [string, (a: AnalysisDetail, readOnly?: boolean) => VNode][] = [
+    ["結果画面", resultOf],
+    ["発走前のカードの中", cardTree],
+  ];
+
+  for (const [name, tree] of screens) {
+    describe(name, () => {
+      it("各馬のカードに、サーバの文言をそのまま 1 行出す(複勝の行の下・根拠の上)", () => {
+        // 根拠の行は LLM が効いたとき(モデル ID があるとき)だけ出るので、順序の確認のためにモデルを入れる
+        const cards = byClass(tree(analysis({ model: "claude-x", horses: HORSES, timeIndexNote: NOTE })), "horse");
+        expect(cards).toHaveLength(3);
+        expect(cards.map((c) => byClass(c, "time-index").map(textOf))).toEqual([["タイム指数 +1.2(レース内 2位)"], ["タイム指数 —"], ["タイム指数 +3.0(レース内 1位)"]]);
+        // 並び: 複勝の行 → タイム指数の行 → 根拠
+        const classes = (c: VNode): string[] => (c.children ?? []).filter((x): x is VNode => typeof x !== "string").map((x) => String(x.attrs?.["class"] ?? ""));
+        const order = classes(cards[0]!);
+        const place = order.findIndex((c) => c.includes("place-odds"));
+        const ti = order.findIndex((c) => c.includes("time-index"));
+        const reason = order.findIndex((c) => c.includes("horse-reason"));
+        expect(place).toBeGreaterThan(-1);
+        expect(ti).toBe(place + 1);
+        expect(reason).toBe(ti + 1);
+      });
+
+      it("説明は『馬ごとの評価』の見出しの下に 1 回だけ(カードごとには出さない)。カードの一覧より前", () => {
+        const t = tree(analysis({ horses: HORSES, timeIndexNote: NOTE }));
+        const notes = byClass(t, "time-index-note");
+        expect(notes).toHaveLength(1);
+        expect(textOf(notes[0]!)).toBe(NOTE);
+        const section = byClass(t, "horses")[0]!;
+        expect(byClass(section, "time-index-note")).toHaveLength(1);
+        const kids = (section.children ?? []).filter((x): x is VNode => typeof x !== "string");
+        const noteAt = kids.findIndex((k) => String(k.attrs?.["class"] ?? "").includes("time-index-note"));
+        const listAt = kids.findIndex((k) => String(k.attrs?.["class"] ?? "").includes("horse-list"));
+        expect(noteAt).toBeGreaterThan(-1);
+        expect(listAt).toBeGreaterThan(noteAt);
+      });
+
+      it("null(出さない分析・古いサーバの応答)のときは、行も説明も出さない", () => {
+        const t = tree(analysis({ horses: [tiHorse(1, null), tiHorse(2, null)], timeIndexNote: null }));
+        expect(byClass(t, "horse")).toHaveLength(2); // 前提: カードは出る
+        expect(byClass(t, "time-index")).toEqual([]);
+        expect(byClass(t, "time-index-note")).toEqual([]);
+        expect(textOf(t)).not.toContain("タイム指数");
+      });
+
+      it("閲覧者(readOnly)にも同じ行と説明を出す", () => {
+        const admin = textOf(tree(analysis({ horses: HORSES, timeIndexNote: NOTE }), false));
+        const viewer = tree(analysis({ horses: HORSES, timeIndexNote: NOTE }), true);
+        expect(byClass(viewer, "time-index")).toHaveLength(3);
+        expect(byClass(viewer, "time-index-note")).toHaveLength(1);
+        expect(admin).toContain(NOTE);
+        expect(textOf(viewer)).toContain(NOTE);
+      });
+    });
+  }
+});

@@ -897,3 +897,29 @@ describe("複勝の想定・実際の下限と上限(Issue #253)", () => {
     expect(content(a).winOddsNote).toBe(WIN_ODDS_NOTE);
   });
 });
+
+describe("タイム指数の行と説明(Issue #359。サーバが組み立てた文字列をそのまま通す)", () => {
+  it("馬ごとの timeIndexLine と、レースの timeIndexNote を内容に通す(加工しない)", () => {
+    const a = analysis({
+      horses: [horse(1, { timeIndexLine: "タイム指数 +1.2(レース内 2位)" }), horse(2, { timeIndexLine: "タイム指数 —" }), horse(3, { timeIndexLine: "タイム指数 +3.0(レース内 1位)" })],
+      timeIndexNote: "タイム指数: 説明の文",
+    });
+    const c = content(a);
+    expect(c.horses.map((h) => h.timeIndexLine)).toEqual(["タイム指数 +1.2(レース内 2位)", "タイム指数 —", "タイム指数 +3.0(レース内 1位)"]);
+    expect(c.timeIndexNote).toBe("タイム指数: 説明の文");
+  });
+
+  it("null・キー無し(古いサーバの応答や固定データ)は null(行も説明も出さない)。LLM の有無・閲覧者かどうかに依らない", () => {
+    const c = content(analysis({ horses: [horse(1), horse(2, { timeIndexLine: null })] }));
+    expect(c.horses.map((h) => h.timeIndexLine)).toEqual([null, null]);
+    expect(c.timeIndexNote).toBeNull();
+    for (const model of [null, "claude-x"]) {
+      const a = analysis({ model, horses: [horse(1, { timeIndexLine: "タイム指数 —" })], timeIndexNote: "説明" });
+      for (const readOnly of [false, true]) {
+        const built = buildResultModel({ route: ROUTE, source: ready(a), readOnly }).content!;
+        expect(built.horses[0]!.timeIndexLine, `${String(model)}/${String(readOnly)}`).toBe("タイム指数 —");
+        expect(built.timeIndexNote).toBe("説明");
+      }
+    }
+  });
+});

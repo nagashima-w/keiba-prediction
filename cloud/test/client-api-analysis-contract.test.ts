@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { TIME_INDEX_NAME } from "../../packages/core/src/scorer/time-index";
 import { buildRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { fetchRaceStatus, type FetchLike } from "../client/api";
@@ -228,6 +229,34 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     expect(old.ok, "前提: 項目なし・記録なしの旧い分析も読める").toBe(true);
     expect(old.ok && old.analysis.horses.every((h) => h.highlights.length === 0 && h.concerns.length === 0)).toBe(true);
     expect(old.ok && old.analysis.llmCalls).toBeNull();
+  });
+
+  it("タイム指数の行(Issue #359): R2 に保存した寄与度から、本物の応答がサーバの文言を運び、クライアントが読み、カードの画面用データまで届く。値のない馬は『—』、古い分析(要素なし)は全馬 null", async () => {
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    const base = await record({}, []);
+    const ti = (targetRate: number | null) => [{ biasName: TIME_INDEX_NAME, applied: targetRate !== null, reason: "r", weight: 0.12, correction: 0, sampleCount: 3, targetRate, overallRate: 1 }];
+    // 馬0=+1.5, 馬1=+3.0, 馬2=値なし, 以降は要素なし(null と同じ扱い)
+    const withIndex = await store.saveAnalysis({ ...base, horses: base.horses.map((h, i) => (i === 0 ? { ...h, contributions: ti(1.5) } : i === 1 ? { ...h, contributions: ti(3.0) } : i === 2 ? { ...h, contributions: ti(null) } : h)) } as AnalysisRecord);
+    const legacy = await store.saveAnalysis({ ...base, analyzedAt: "2026-06-28T06:00:00.000Z" });
+    const { fetch } = await connect(realEnv());
+    const route = (id: number) => ({ date: DATE, venue: "central" as const, race: null, analysis: id, settings: false });
+
+    const a = await fetchAnalysis(fetch, withIndex.id);
+    expect(a.ok, "前提: 読める").toBe(true);
+    if (!a.ok) return;
+    expect(a.analysis.detail).toBe("present");
+    expect(a.analysis.horses.length, "前提: 3頭以上").toBeGreaterThanOrEqual(4);
+    expect(a.analysis.horses.slice(0, 4).map((h) => h.timeIndexLine)).toEqual(["タイム指数 +1.5(レース内 2位)", "タイム指数 +3.0(レース内 1位)", "タイム指数 —", "タイム指数 —"]);
+    expect(a.analysis.timeIndexNote).toContain("1000m あたり何秒速いか");
+    const model = buildResultModel({ route: route(withIndex.id), source: { kind: "ready", analysis: a.analysis } });
+    expect(model.content!.horses.slice(0, 2).map((h) => h.timeIndexLine)).toEqual(["タイム指数 +1.5(レース内 2位)", "タイム指数 +3.0(レース内 1位)"]);
+    expect(model.content!.timeIndexNote).toBe(a.analysis.timeIndexNote);
+
+    const old = await fetchAnalysis(fetch, legacy.id);
+    expect(old.ok, "前提: 要素なしの旧い分析も読める").toBe(true);
+    expect(old.ok && old.analysis.horses.every((h) => h.timeIndexLine === null)).toBe(true);
+    expect(old.ok && old.analysis.horses.length).toBeGreaterThan(0);
+    expect(old.ok && old.analysis.timeIndexNote).toBeNull();
   });
 
   it("単勝の想定・実際のオッズ(Issue #247): 本物の応答をクライアントが読み、カードの画面用データまで通る。実際は保存したスナップショットの winOdds、想定は adjustedProb から。旧い分析(詳細あり・勝率の推定が可能な入力)でも読める", async () => {

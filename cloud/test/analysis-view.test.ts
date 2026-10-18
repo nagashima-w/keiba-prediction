@@ -175,16 +175,16 @@ describe("buildAnalysisView(Issue #183)", () => {
       [2, "ブラボー"],
       [3, null], // スナップショットに無い馬は null
     ]);
-    expect(view.horses[1]).toEqual({ umaban: 2, name: "ブラボー", prior: 0.2, adjustedProb: 0.18, placeOddsMin: null, ev: null, isPositive: false, mark: null, markFrom: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, earlyPos: null, legStyle: null });
-    expect(view.horses[0]).toEqual({ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, earlyPos: null, legStyle: null });
+    expect(view.horses[1]).toEqual({ umaban: 2, name: "ブラボー", prior: 0.2, adjustedProb: 0.18, placeOddsMin: null, ev: null, isPositive: false, mark: null, markFrom: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, earlyPos: null, legStyle: null, timeIndexLine: null });
+    expect(view.horses[0]).toEqual({ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, earlyPos: null, legStyle: null, timeIndexLine: null });
   });
 
   it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・戦績の基準日は、応答のどこにも現れない(fallbackReason・betUnit は #185 で意図して返す)", () => {
     const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
-    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "baba", "close", "combos", "detail", "development", "evEstimated", "horses", "id", "kaisaiDate", "llmCalls", "llmNote", "model", "promptVersion", "race", "raceId"]);
+    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "baba", "close", "combos", "detail", "development", "evEstimated", "horses", "id", "kaisaiDate", "llmCalls", "llmNote", "model", "promptVersion", "race", "raceId", "timeIndexNote"]);
     expect(sorted(view.race)).toEqual(["courseType", "distance", "grade", "oddsStatus", "pace", "paceSource", "placeBasis", "raceName", "raceNumber", "startTime", "trackCondition", "turn", "venueName", "weather"]);
     for (const h of view.horses) {
-      expect(sorted(h)).toEqual(["actualPlaceOddsMax", "actualPlaceOddsMin", "adjustedProb", "concerns", "earlyPos", "ev", "fairPlaceOdds", "fairWinOdds", "highlights", "isPositive", "legStyle", "mark", "markFrom", "name", "placeOddsMin", "prior", "reason", "umaban", "winOdds", "winProb"]);
+      expect(sorted(h)).toEqual(["actualPlaceOddsMax", "actualPlaceOddsMin", "adjustedProb", "concerns", "earlyPos", "ev", "fairPlaceOdds", "fairWinOdds", "highlights", "isPositive", "legStyle", "mark", "markFrom", "name", "placeOddsMin", "prior", "reason", "timeIndexLine", "umaban", "winOdds", "winProb"]);
     }
     expect(sorted(view.allocation!)).toEqual([
       "bankroll", "betUnit", "bets", "evThreshold", "fallbackReason", "includeBracketQuinella", "includeComboOdds", "includeExacta", "includeQuinella", "includeTrifecta", "includeTrio", "includeWide",
