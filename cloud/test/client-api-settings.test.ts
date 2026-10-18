@@ -131,6 +131,21 @@ describe("postSettings(POST /api/settings)", () => {
     expect(JSON.stringify(result)).not.toContain("秘密");
   });
 
+  it("Issue #375: 400 で error.reason が \"keys-mismatch\" のときだけ staleScreen(画面が古い)。reason の無い 400・ほかの値・413/415 は従来の bad-request", async () => {
+    const stale = await postSettings(fake(async () => resp(400, { ok: false, error: { type: "bad-request", message: "秘密の文面", fields: ["x"], reason: "keys-mismatch" } })).fetch, SAVED);
+    expect(stale).toEqual({ ok: false, error: { kind: "bad-request", staleScreen: true } });
+    expect(JSON.stringify(stale)).not.toContain("秘密");
+    for (const [status, error] of [
+      [400, { type: "bad-request", fields: ["x"] }],
+      [400, { type: "bad-request", reason: "other" }],
+      [400, { type: "bad-request", reason: 1 }],
+      [413, { type: "payload-too-large", reason: "keys-mismatch" }],
+      [415, { type: "unsupported-media-type", reason: "keys-mismatch" }],
+    ] as const) {
+      expect(await postSettings(fake(async () => resp(status, { ok: false, error })).fetch, SAVED), `${status} ${JSON.stringify(error)}`).toEqual({ ok: false, error: { kind: "bad-request" } });
+    }
+  });
+
   it("fetch が投げたら network", async () => {
     expect(await postSettings(() => Promise.reject(new Error("x")), SAVED)).toEqual({ ok: false, error: { kind: "network" } });
     expect(
@@ -171,6 +186,20 @@ describe("settingsFailureMessage(固定の文言。サーバの文面・HTTP の
     for (const failure of [{ kind: "network" }, { kind: "server-error" }, { kind: "unexpected", httpStatus: 500 }, { kind: "bad-request" }] as const) {
       expect(settingsFailureMessage(failure, "save"), failure.kind).toContain("入力した内容は残っています");
     }
+  });
+
+  it("Issue #375: 画面が古い(bad-request の staleScreen)ときの保存の文言は、項目の更新と再読み込みを案内し、範囲外の案内(範囲外の値かもしれません)は出さない。通常の bad-request の文言は変えない", () => {
+    const stale = settingsFailureMessage({ kind: "bad-request", staleScreen: true }, "save");
+    const plain = settingsFailureMessage({ kind: "bad-request" }, "save");
+    expect(stale).toContain("保存できませんでした");
+    expect(stale).toContain("項目が更新されています");
+    expect(stale).toContain("控えてから");
+    expect(stale).toContain("再読み込み");
+    expect(stale).not.toContain("範囲外");
+    expect(stale).not.toBe(plain);
+    expect(plain).toBe("設定を保存できませんでした。サーバが入力を受け付けませんでした(範囲外の値かもしれません)。入力した内容は残っています。内容を確認してください。");
+    // 取得の文言は変わらない
+    expect(settingsFailureMessage({ kind: "bad-request", staleScreen: true }, "load")).toBe(settingsFailureMessage({ kind: "bad-request" }, "load"));
   });
 
   it("origin-mismatch は Origin の不一致であること・ページの再読み込みを案内する。unexpected は HTTP の状態を示す", () => {

@@ -185,10 +185,8 @@ export interface AnalysisDetail {
     readonly oddsStatus: string | null;
     /** 想定複勝オッズの基準(Issue #253。top3=3着内率〈8頭以上〉・top2=2着内率〈5〜7頭。複勝は2着まで〉・null=出さない〈4頭以下〉)。 */
     readonly placeBasis: "top3" | "top2" | null;
-    /** 距離(m。Issue #311)。詳細なし・キー無し(古いサーバの応答)は null。パーサは常にキーを持つ(型で省略可なのは `turn` と同じ理由)。 */
+    /** 距離(m。Issue #311)。詳細なし・キー無し(古いサーバの応答)は null。パーサは常にキーを持つ(型で省略可なのは `pace` と同じ理由)。 */
     readonly distance?: number | null;
-    /** コースの回り(Issue #311。レース再生のコース図の向き。#362 でレース再生を廃止したあと、クライアントでは使わない)。キー無し(古いサーバの応答)は right。 */
-    readonly turn?: "right" | "left";
     /** 想定ペース(Issue #314。想定隊列図〈#362〉の隊列の長さ・4コーナーの動きに使う。サーバが求める: Issue #315 以降は LLM が展開予想して出した pace を優先し、無いときは逃げ馬の頭数から求める規則の値)。キー無し(古いサーバの応答)・形が不正な値は「不明」(補助の演出なので、分析全体の解析は失敗させない)。 */
     readonly pace?: PaceEstimate;
   };
@@ -406,11 +404,9 @@ function parseDetail(value: unknown): AnalysisDetail | null {
   // 想定複勝オッズの基準(Issue #253): キーが欠けたら(undefined)想定外。top3・top2・null だけ。
   const placeBasis = race["placeBasis"];
   if (placeBasis !== "top3" && placeBasis !== "top2" && placeBasis !== null) return null;
-  // コースの回り(Issue #311): キー無し(古いサーバの応答)は right。right・left 以外の値は想定外。
   const distance = race["distance"] ?? null;
   if (!numOrNull(distance)) return null;
-  const turn = race["turn"] === undefined ? "right" : race["turn"];
-  if (turn !== "right" && turn !== "left") return null;
+  // コースの回り(`race.turn`。Issue #311)は Issue #375 で廃止した。古いサーバの応答にキーがあっても読まない(値が不正でも応答を拒否しない)。
   // Issue #314: 想定ペースは、キー無し・4 値以外は「不明」(補助の演出なので、応答ごと不正にはしない)。
   const pace = PACES.find((p) => p === race["pace"]) ?? "不明";
   if (!Array.isArray(horses)) return null;
@@ -434,7 +430,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     model,
     llmNote,
     llmCalls: parsedCalls,
-    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis, distance, turn, pace },
+    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis, distance, pace },
     baba: parseLines(value["baba"], BABA_MAX_LINES, BABA_MAX_LINE_LENGTH),
     development: parseDevelopment(value["development"]),
     timeIndexNote: typeof value["timeIndexNote"] === "string" ? value["timeIndexNote"] : null,

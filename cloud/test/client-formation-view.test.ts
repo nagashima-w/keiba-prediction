@@ -30,7 +30,7 @@ function analysis(horses: AnalysisHorse[] = four(), development: AnalysisDetail[
     model: null,
     llmNote: null,
     llmCalls: null,
-    race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, oddsStatus: "result", placeBasis: "top3", distance: 1800, turn: "right", pace: "平均" },
+    race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, oddsStatus: "result", placeBasis: "top3", distance: 1800, pace: "平均" },
     development,
     horses,
     allocation: null,

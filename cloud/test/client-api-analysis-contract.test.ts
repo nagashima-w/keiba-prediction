@@ -319,7 +319,7 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     expect(model.content!.placeOddsNote).not.toBeNull();
   });
 
-  it("スタート直後の位置・コースの回り(Issue #311): 本物の応答をクライアントが読む。earlyPos は保存したスナップショットの値(馬ごと)、turn は raceId の場コードから(福島=right)", async () => {
+  it("スタート直後の位置(Issue #311): 本物の応答をクライアントが読む。earlyPos は保存したスナップショットの値(馬ごと)。コースの回り(turn)は Issue #375 で廃止したので、読んだ race にも無い", async () => {
     const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
     const { race } = await scrapeFixtureRace();
     const base = await record({}, []);
@@ -332,7 +332,7 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     expect(written.filter((v) => v !== null).length, "前提: 通過順位から earlyPos が計算された馬がいる").toBeGreaterThan(0);
     expect(new Set(written.filter((v) => v !== null)).size, "前提: 値が馬ごとに違う(取り違えを検出できる)").toBeGreaterThan(1);
     expect(result.analysis.horses.map((h) => h.earlyPos)).toEqual(written);
-    expect(result.analysis.race.turn).toBe("right");
+    expect(Object.prototype.hasOwnProperty.call(result.analysis.race, "turn")).toBe(false);
   });
 
   it("脚質・想定ペース(Issue #314): 本物の応答をクライアントが読む。legStyle は保存したスナップショットの値(馬ごと)、race.pace は逃げ馬の頭数から(プロンプトの展開想定と同じ判定)", async () => {

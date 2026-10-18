@@ -92,6 +92,17 @@ describe("契約: GET・POST /api/settings の本物の応答をクライアン�
     expect(await fetchSettings(c.fetch)).toEqual({ ok: true, settings: CHANGED, source: "d1" });
   });
 
+  it("POST: キーが欠けた・未知のキーがある(古い画面が送る形)は、サーバが 400(keys-mismatch)にし、クライアントは staleScreen。範囲外は staleScreen にならない。D1 に書かない (Issue #375)", async () => {
+    const { bankroll: _omit, ...missing } = CHANGED;
+    for (const body of [missing, { ...CHANGED, removedItem: 1 }]) {
+      const c = await connect();
+      expect(await postSettings(c.fetch, body as unknown as typeof CHANGED)).toEqual({ ok: false, error: { kind: "bad-request", staleScreen: true } });
+      expect(c.writes).toBe(0);
+    }
+    const c = await connect();
+    expect(await postSettings(c.fetch, { ...CHANGED, kellyFraction: 0.01 })).toEqual({ ok: false, error: { kind: "bad-request" } });
+  });
+
   it("POST: 範囲外(kelly 0.01・追加指示 2,001 文字・発走 5 分前)は、サーバが 400 にし、クライアントは bad-request。D1 に書かない", async () => {
     for (const bad of [{ ...CHANGED, kellyFraction: 0.01 }, { ...CHANGED, additionalInstruction: "a".repeat(2001) }, { ...CHANGED, preRaceOffsetMinutes: 5 }]) {
       const c = await connect();

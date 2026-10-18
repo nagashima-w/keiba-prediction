@@ -461,6 +461,25 @@ describe("t13: 騎手と共有する gate の呼び出しの上限(40)", () => {
     expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "compute", result: "ok" });
   });
 
+  it("Issue #375: 取得の上限で取らなかった調教師(11 人)の計算ステップの警告は「取得に失敗しました」と言わず、取得の失敗か上限のどちらともとれる文言で、次回以降の取得で取ることを言う。1 人 1 行・URL は出さない", async () => {
+    const h = harness(DEFAULT_CLOUD_SETTINGS);
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    expect(trainerUrls(h), "前提: 取得の上限で 5 人しか取れていない").toHaveLength(5);
+    h.warnings.length = 0;
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "compute", result: "ok" });
+    const trainerWarnings = h.warnings.filter((w) => w.includes(": 調教師: "));
+    expect(trainerWarnings, "前提: 取らなかった 11 人ぶんの警告が出ている").toHaveLength(11);
+    for (const w of trainerWarnings) {
+      expect(w).not.toContain("取得に失敗しました");
+      expect(w).not.toContain("http");
+      expect(w).toMatch(/調教師ID \d{5} の成績は保存先に無いため補正なし/);
+      expect(w).toContain("取得の失敗、または取得の上限で取らなかった");
+      expect(w).toContain("次回以降のレースの取得で取る");
+    }
+    expect(new Set(trainerWarnings).size, "11 人が別々の行").toBe(11);
+  });
+
   it("騎手が保存先にあれば調教師の枠が増え、16 人全員を取れる(合計 19 + 16 = 35 本。騎手は保存先から読む)", async () => {
     const jockeyStore = {
       async loadMany(ids: readonly string[]) {

@@ -173,7 +173,7 @@ const ALLOCATION = {
   ],
 };
 const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, latePos: 0.6, legStyle: "差し" as const, timeIndexLine: null };
-const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良", oddsStatus: "result", placeBasis: "top3", turn: "left" };
+const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良", oddsStatus: "result", placeBasis: "top3" };
 const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, llmCalls: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
 const wrap = (analysis: unknown) => ({ ok: true, analysis });
 
@@ -470,18 +470,19 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
       expect(read({ ...RACE, distance: "1800" })).toBe("unexpected");
     });
 
-    it("Issue #311 race.turn: right・left を読む。キー無し(古いサーバの応答)は right。それ以外の値は unexpected", () => {
+    it("Issue #375 race.turn: 読まない(使い道がなくなったため削除)。キーがあっても(新旧どちらのサーバ)、値が不正でも、応答を拒否せず、結果の race は turn を持たない", () => {
       const read = (race: unknown) => {
         const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, race }));
-        return result.ok ? result.analysis.race.turn : "unexpected";
+        return result.ok ? result.analysis.race : "unexpected";
       };
-      expect(read({ ...RACE, turn: "left" })).toBe("left");
-      expect(read({ ...RACE, turn: "right" })).toBe("right");
-      const { turn: _drop, ...noTurn } = RACE;
-      expect(read(noTurn)).toBe("right");
-      expect(read({ ...RACE, turn: "up" })).toBe("unexpected");
-      expect(read({ ...RACE, turn: null })).toBe("unexpected");
-      expect(read({ ...RACE, turn: 1 })).toBe("unexpected");
+      const noTurn = read(RACE);
+      expect(noTurn, "前提: RACE は読める").not.toBe("unexpected");
+      for (const turn of ["left", "right", "up", null, 1]) {
+        const race = read({ ...RACE, turn });
+        expect(race, String(turn)).not.toBe("unexpected");
+        expect(race, String(turn)).toEqual(noTurn);
+        expect(Object.prototype.hasOwnProperty.call(race, "turn"), String(turn)).toBe(false);
+      }
     });
 
     it("race.oddsStatus が欠けたら unexpected。文字列でも null でもなければ unexpected", () => {
