@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { parseBabaResponse, type BabaVenueRecord } from "../src/baba-conditions";
-import { D1BabaStore } from "../src/baba-repository";
+import { parseBabaResponse, type BabaDroppedDetail, type BabaVenueRecord } from "../src/baba-conditions";
+import { D1BabaStore, FETCH_LIST_LIMIT_DEFAULT } from "../src/baba-repository";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,7 @@ const SAMPLE_TEXT = readFileSync(path.join(ROOT, "fixtures", "baba_latest_202610
 const NOW = Date.parse("2026-10-12T08:05:52.863Z");
 const DATE = "20261012";
 
-const parsed = (): { venues: readonly BabaVenueRecord[]; apiFetchedAt: string | null; dropped: number } => parseBabaResponse(SAMPLE_TEXT, NOW);
+const parsed = (): { venues: readonly BabaVenueRecord[]; apiFetchedAt: string | null; dropped: number; droppedDetails: readonly BabaDroppedDetail[] } => parseBabaResponse(SAMPLE_TEXT, NOW);
 
 async function all(sql: string, ...binds: unknown[]): Promise<Record<string, unknown>[]> {
   return (await local.db.prepare(sql).bind(...binds).all<Record<string, unknown>>()).results;
@@ -42,7 +42,7 @@ describe("claim(試みの先行記録)", () => {
     const store = new D1BabaStore({ db: local.db });
     expect(await store.claim(DATE, 1_000)).toBe("claimed");
     expect(await all("SELECT * FROM baba_fetches")).toEqual([
-      { kaisai_date: DATE, attempted_at: 1_000, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null },
+      { kaisai_date: DATE, attempted_at: 1_000, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null, dropped_json: null },
     ]);
   });
 
@@ -58,7 +58,7 @@ describe("claim(試みの先行記録)", () => {
     const store = new D1BabaStore({ db: local.db });
     await store.claim(DATE, 1_000);
     const p = parsed();
-    await store.finish(DATE, { finishedAt: 5_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: p.venues, dropped: p.dropped });
+    await store.finish(DATE, { finishedAt: 5_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: p.venues, dropped: p.dropped, droppedDetails: p.droppedDetails });
     expect(await store.claim(DATE, 6_000)).toBe("exists");
   });
 
@@ -83,10 +83,10 @@ describe("finish(結果の記録)", () => {
     await store.claim(DATE, 1_000);
     const p = parsed();
     expect(p.venues).toHaveLength(2); // 前提: 保存する競馬場がある(空振りでない)
-    await store.finish(DATE, { finishedAt: 9_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: p.venues, dropped: p.dropped });
+    await store.finish(DATE, { finishedAt: 9_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: p.venues, dropped: p.dropped, droppedDetails: p.droppedDetails });
 
     expect(await all("SELECT * FROM baba_fetches")).toEqual([
-      { kaisai_date: DATE, attempted_at: 1_000, finished_at: 9_000, result: "ok", api_fetched_at: "2026-10-12T08:05:52.863Z", venues_saved: 2, venues_dropped: 1 },
+      { kaisai_date: DATE, attempted_at: 1_000, finished_at: 9_000, result: "ok", api_fetched_at: "2026-10-12T08:05:52.863Z", venues_saved: 2, venues_dropped: 1, dropped_json: JSON.stringify([{ venue: "01", reason: "not-today", measured: "9月6日（日曜）8時20分" }]) },
     ]);
     const rows = await all("SELECT * FROM baba_conditions ORDER BY venue_code");
     expect(rows.map((r) => [r["kaisai_date"], r["venue_code"], r["venue_name"]])).toEqual([
@@ -119,9 +119,9 @@ describe("finish(結果の記録)", () => {
   it("失敗: 競馬場の行は作らず、分類だけを記録する(venues_saved = 0)", async () => {
     const store = new D1BabaStore({ db: local.db });
     await store.claim(DATE, 1_000);
-    await store.finish(DATE, { finishedAt: 2_000, result: "http-503", apiFetchedAt: null, venues: [], dropped: 0 });
-    expect(await all("SELECT result, finished_at, api_fetched_at, venues_saved, venues_dropped FROM baba_fetches")).toEqual([
-      { result: "http-503", finished_at: 2_000, api_fetched_at: null, venues_saved: 0, venues_dropped: 0 },
+    await store.finish(DATE, { finishedAt: 2_000, result: "http-503", apiFetchedAt: null, venues: [], dropped: 0, droppedDetails: [] });
+    expect(await all("SELECT result, finished_at, api_fetched_at, venues_saved, venues_dropped, dropped_json FROM baba_fetches")).toEqual([
+      { result: "http-503", finished_at: 2_000, api_fetched_at: null, venues_saved: 0, venues_dropped: 0, dropped_json: "[]" },
     ]);
     expect(await all("SELECT COUNT(*) AS n FROM baba_conditions")).toEqual([{ n: 0 }]);
   });
@@ -131,7 +131,7 @@ describe("finish(結果の記録)", () => {
     await store.claim(DATE, 1_000);
     const p = parsed();
     const broken = { ...p.venues[1]!, venueName: null as unknown as string }; // NOT NULL の違反
-    await expect(store.finish(DATE, { finishedAt: 9_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: [p.venues[0]!, broken], dropped: 0 })).rejects.toThrow();
+    await expect(store.finish(DATE, { finishedAt: 9_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: [p.venues[0]!, broken], dropped: 0, droppedDetails: [] })).rejects.toThrow();
     expect(await all("SELECT result, finished_at FROM baba_fetches")).toEqual([{ result: null, finished_at: null }]);
     expect(await all("SELECT COUNT(*) AS n FROM baba_conditions")).toEqual([{ n: 0 }]);
   });
@@ -140,12 +140,79 @@ describe("finish(結果の記録)", () => {
     const store = new D1BabaStore({ db: local.db });
     await store.claim(DATE, 1_000);
     const p = parsed();
-    await store.finish(DATE, { finishedAt: 2_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: p.venues, dropped: p.dropped });
+    await store.finish(DATE, { finishedAt: 2_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: p.venues, dropped: p.dropped, droppedDetails: p.droppedDetails });
     const changed = { ...p.venues[0]!, cushion: 1.1 };
-    await store.finish(DATE, { finishedAt: 3_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: [changed], dropped: 0 });
+    await store.finish(DATE, { finishedAt: 3_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: [changed], dropped: 0, droppedDetails: [] });
     expect(await all("SELECT venue_code, cushion FROM baba_conditions ORDER BY venue_code")).toEqual([
       { venue_code: "05", cushion: 9.6 },
       { venue_code: "08", cushion: 10.7 },
     ]);
+  });
+});
+
+describe("loadFetches(管理者の診断用の読み出し。Issue #360)", () => {
+  async function seed(store: D1BabaStore): Promise<void> {
+    // 10/10: 値あり(見本の東京・京都を保存)、10/17: 全部捨てた(no-today-venues)、10/18: 試みたが結果が無い(クラッシュ相当)。10/11: 旧版の行(dropped_json が NULL)
+    await store.claim("20261010", 100);
+    const p = parsed();
+    await store.finish("20261010", { finishedAt: 200, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: p.venues, dropped: p.dropped, droppedDetails: p.droppedDetails });
+    await local.db.prepare("INSERT INTO baba_fetches (kaisai_date, attempted_at, finished_at, result, api_fetched_at, venues_saved, venues_dropped) VALUES ('20261011', 300, 310, 'no-today-venues', '2026-10-10T23:00:00.000Z', 0, 3)").run();
+    await store.claim("20261017", 400);
+    await store.finish("20261017", { finishedAt: 410, result: "no-today-venues", apiFetchedAt: "2026-10-16T23:00:00.000Z", venues: [], dropped: 1, droppedDetails: [{ venue: "01", reason: "not-today", measured: "10月17日（土曜）7時00分" }] });
+    await store.claim("20261018", 500);
+  }
+
+  it("日付の新しい順に返す。結果・件数・捨てた詳細・保存した競馬場を持つ(旧版の行の詳細は null、結果の無い行は結果 null)", async () => {
+    const store = new D1BabaStore({ db: local.db });
+    await seed(store);
+    const rows = await store.loadFetches({ limit: 14 });
+    expect(rows.map((r) => r.kaisaiDate)).toEqual(["20261018", "20261017", "20261011", "20261010"]);
+    expect(rows[0]).toEqual({ kaisaiDate: "20261018", attemptedAt: 500, finishedAt: null, result: null, apiFetchedAt: null, venuesSaved: null, venuesDropped: null, dropped: null, saved: [] });
+    expect(rows[1]).toEqual({
+      kaisaiDate: "20261017",
+      attemptedAt: 400,
+      finishedAt: 410,
+      result: "no-today-venues",
+      apiFetchedAt: "2026-10-16T23:00:00.000Z",
+      venuesSaved: 0,
+      venuesDropped: 1,
+      dropped: [{ venue: "01", reason: "not-today", measured: "10月17日（土曜）7時00分" }],
+      saved: [],
+    });
+    expect(rows[2]!.dropped).toBeNull(); // 旧版の行
+    expect(rows[2]!.venuesDropped).toBe(3);
+    expect(rows[3]!.saved).toEqual([
+      { venueCode: "05", venueName: "東京", measuredAt: "2026-10-12T07:00+09:00" },
+      { venueCode: "08", venueName: "京都", measuredAt: "2026-10-12T07:00+09:00" },
+    ]);
+    expect(rows[3]!.dropped).toEqual([{ venue: "01", reason: "not-today", measured: "9月6日（日曜）8時20分" }]);
+  });
+
+  it("開催日を指定すると、その日の 1 行だけ(無ければ空)", async () => {
+    const store = new D1BabaStore({ db: local.db });
+    await seed(store);
+    expect((await store.loadFetches({ kaisaiDate: "20261017", limit: 14 })).map((r) => r.kaisaiDate)).toEqual(["20261017"]);
+    expect(await store.loadFetches({ kaisaiDate: "20250101", limit: 14 })).toEqual([]);
+  });
+
+  it("件数の上限で新しいほうから切る。saved は返した日の分だけ", async () => {
+    const store = new D1BabaStore({ db: local.db });
+    await seed(store);
+    const rows = await store.loadFetches({ limit: 2 });
+    expect(rows.map((r) => r.kaisaiDate)).toEqual(["20261018", "20261017"]);
+    expect(rows.flatMap((r) => r.saved)).toEqual([]); // 10/10 の保存分は含めない
+    expect(FETCH_LIST_LIMIT_DEFAULT).toBe(14);
+  });
+
+  it("dropped_json が壊れている・想定外の形でも落とさず、読める要素だけ(想定外の理由の語は捨てる)。文字列は長さを切る", async () => {
+    const store = new D1BabaStore({ db: local.db });
+    await local.db.prepare("INSERT INTO baba_fetches (kaisai_date, attempted_at, finished_at, result, venues_saved, venues_dropped, dropped_json) VALUES ('20261001', 1, 2, 'no-today-venues', 0, 2, ?)").bind("{壊れた").run();
+    await local.db
+      .prepare("INSERT INTO baba_fetches (kaisai_date, attempted_at, finished_at, result, venues_saved, venues_dropped, dropped_json) VALUES ('20261002', 1, 2, 'no-today-venues', 0, 3, ?)")
+      .bind(JSON.stringify([{ venue: "05", reason: "unparsed", measured: "あ".repeat(100) }, { venue: "05", reason: "任意の語", measured: "x" }, "文字列", null]))
+      .run();
+    const rows = await store.loadFetches({ limit: 14 });
+    expect(rows.map((r) => [r.kaisaiDate, r.dropped === null ? null : r.dropped.length])).toEqual([["20261002", 1], ["20261001", null]]);
+    expect(rows[0]!.dropped![0]!.measured).toHaveLength(40);
   });
 });

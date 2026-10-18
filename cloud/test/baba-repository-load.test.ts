@@ -39,9 +39,9 @@ async function seedGrid(store: D1BabaStore): Promise<void> {
   const kyoto = parsed().venues[1]!; // 08
   const cell = (v: typeof tokyo, cushion: number, course: string, day: string) => ({ ...v, cushion, usedCourse: course, measuredAt: `2026-10-${day}T07:00+09:00` });
   await store.claim("20261012", 1);
-  await store.finish("20261012", { finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [cell(tokyo, 9.1, "12日の東京", "12"), cell(kyoto, 9.2, "12日の京都", "12")], dropped: 0 });
+  await store.finish("20261012", { finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [cell(tokyo, 9.1, "12日の東京", "12"), cell(kyoto, 9.2, "12日の京都", "12")], dropped: 0, droppedDetails: [] });
   await store.claim("20261011", 3);
-  await store.finish("20261011", { finishedAt: 4, result: "ok", apiFetchedAt: null, venues: [cell(tokyo, 9.3, "11日の東京", "11"), cell(kyoto, 9.4, "11日の京都", "11")], dropped: 0 });
+  await store.finish("20261011", { finishedAt: 4, result: "ok", apiFetchedAt: null, venues: [cell(tokyo, 9.3, "11日の東京", "11"), cell(kyoto, 9.4, "11日の京都", "11")], dropped: 0, droppedDetails: [] });
 }
 
 describe("load(開催日 × 場コードで 1 行を読み、DayBaba にする)", () => {
@@ -73,7 +73,7 @@ describe("load(開催日 × 場コードで 1 行を読み、DayBaba にする)"
     expect(new Set([turf.condition, turf.goalCondition, turf.corner4Condition]).size, "前提: 芝の状態 3 か所が違う").toBe(3);
     expect(new Set([dirt.condition, dirt.goalCondition, dirt.corner4Condition]).size, "前提: ダートの状態 3 か所が違う").toBe(3);
     expect(new Set([turf.goalMoisture, turf.corner4Moisture, dirt.goalMoisture, dirt.corner4Moisture]).size, "前提: 含水率 4 つが違う").toBe(4);
-    await store.finish(DATE, { finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [{ ...tokyo, turf, dirt }], dropped: 0 });
+    await store.finish(DATE, { finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [{ ...tokyo, turf, dirt }], dropped: 0, droppedDetails: [] });
 
     // 書き込み側の列の対応(列名で固定)
     const row = (await local.db.prepare("SELECT * FROM baba_conditions WHERE kaisai_date = ? AND venue_code = ?").bind(DATE, "05").first<Record<string, unknown>>())!;

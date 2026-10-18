@@ -14,7 +14,7 @@ import { installFetchTrap } from "./fetch-trap";
 
 /**
  * Issue #294: 日単位の DO(`RaceDayCore`)の中の、馬場の API の取得(開催日の朝に 1 回だけ)。
- * 前夜 21:00 の計画(中央の一覧あり)→ 翌朝 08:00 にアラームで 1 回取得 → 保存。「1 日 1 回」を、再起動・並行・再計画(救済)でも守る。
+ * 前夜 21:00 の計画(中央の一覧あり)→ 翌朝 09:00 にアラームで 1 回取得 → 保存。「1 日 1 回」を、再起動・並行・再計画(救済)でも守る。
  * ゲート・保存先・取得口は偽(実 netkeiba にも実 API にも触れない)。ストレージは `node:sqlite`。
  */
 
@@ -25,7 +25,7 @@ const fixture = (name: string): string => readFileSync(path.join(ROOT, "fixtures
 const DATE = "20261012";
 const jst = (s: string): number => Date.parse(`${s}+09:00`);
 const T_2100 = jst("2026-10-11T21:00:00");
-const AT_0800 = jst("2026-10-12T08:00:00");
+const AT_0900 = jst("2026-10-12T09:00:00");
 const SAMPLE_TEXT = fixture("baba_latest_20261012.json");
 const CENTRAL_HTML = fixture("race_list_sub_20260927.html");
 const NAR_HTML = fixture("synthetic_nar_race_list_sub_20260927_jpn3.html");
@@ -190,24 +190,60 @@ async function plan2100(h: Harness): Promise<void> {
 }
 
 describe("開催日の朝に 1 回だけ取得する", () => {
-  it("計画の後のアラームは 08:00 JST(最初の発走前の分析の期限より前)。そこで取得して保存し、取得の候補は残らない", async () => {
+  it("計画の後のアラームは 09:00 JST。この見本の日は、最初の発走前の分析の期限も 09:00 ちょうど(境界)。同じ起床で馬場の取得が先、最初のレースの分析がその次に動く", async () => {
     const h = harness();
     await plan2100(h);
-    // 前提: 最初の発走前の分析の期限は 08:00 より後(取得が分析より前に済む。空振りでない)
-    expect(firstCentralDue(h)).toBeGreaterThan(AT_0800);
-    expect(firstPlannedDue(h)).toBeGreaterThan(AT_0800);
+    // 前提(実測): この見本の最初の発走前の分析の期限(中央・全体とも)は、取得の期限と同じ 09:00 ちょうど。空振りでない境界。
+    expect(firstCentralDue(h)).toBe(AT_0900);
+    expect(firstPlannedDue(h)).toBe(AT_0900);
     expect(h.api.calls).toBe(0);
-    expect(h.alarm.at).toBe(AT_0800);
+    expect(h.alarm.at).toBe(AT_0900);
 
-    expect(await tick(h)).toBe(`${DATE}:baba:fetch:ok`);
+    expect(await tick(h)).toBe(`${DATE}:baba:fetch:ok`); // 順序: 通知 → 馬場 → タスク。馬場が先
     expect(h.api.calls).toBe(1);
     expect(h.store.finishes).toHaveLength(1);
     expect(h.store.finishes[0]!.finish.venues.map((v) => v.venueCode)).toEqual(["05", "08"]);
-    // 次のアラームは 08:00 の取得の続きではなく、発走前の分析の期限(即時のアラームが続かない)
-    expect(h.alarm.at).not.toBeNull();
-    expect(h.alarm.at!).toBeGreaterThan(AT_0800);
-    expect(h.alarm.at).toBe(firstPlannedDue(h));
+    // 取得は保存まで済んでいて、最初のレースの分析はその後に動く(値を受け取れる境界)
+    expect(h.alarm.at).toBe(AT_0900); // 期限 09:00 の分析がまだ残っている(即時)
+    const second = await tick(h);
+    expect(second).not.toContain(":baba:");
+    expect(second).toMatch(/^\d+:(morning|pre_race):/);
+    expect(h.store.finishes).toHaveLength(1);
+    expect(h.api.calls).toBe(1);
   });
+
+  // 取得の期限は、最初の発走前の分析の期限に左右されない(計画の行の期限をずらして確かめる)。
+  const firstDueCases: { name: string; first: string }[] = [
+    { name: "08:30(取得より前。この分析は値なしで進む)", first: "2026-10-12T08:30:00" },
+    { name: "09:05", first: "2026-10-12T09:05:00" },
+    { name: "09:20", first: "2026-10-12T09:20:00" },
+    { name: "10:00", first: "2026-10-12T10:00:00" },
+  ];
+  for (const c of firstDueCases) {
+    it(`最初の発走前の分析の期限が ${c.name} でも、取得は 09:00 の 1 回(08:59:59 までは 0 回)`, async () => {
+      const h = harness();
+      await plan2100(h);
+      // 計画の行の期限を、最初の期限が c.first になるようにずらす(前提を無条件に固定する)
+      const delta = jst(c.first) - firstCentralDue(h);
+      expect(delta).not.toBe(0);
+      h.sql.exec("UPDATE race_day_plan SET due_ms = due_ms + ?", delta);
+      expect(firstCentralDue(h)).toBe(jst(c.first));
+
+      h.clock.now = AT_0900 - 1000;
+      for (let i = 0; i < 30; i++) {
+        const outcome = await h.core.runNextStep();
+        expect(label(outcome)).not.toContain(":baba:");
+      }
+      expect(h.api.calls).toBe(0);
+
+      h.clock.now = AT_0900;
+      const labels: string[] = [];
+      for (let i = 0; i < 30 && h.api.calls === 0; i++) labels.push(label(await h.core.runNextStep()));
+      expect(labels.filter((l) => l.includes(":baba:"))).toEqual([`${DATE}:baba:fetch:ok`]);
+      expect(h.api.calls).toBe(1);
+      expect(h.store.finishes[0]!.finish.finishedAt).toBe(AT_0900);
+    });
+  }
 
   it("前夜のうち(21:00〜23:59)は取得しない(取得口は 0 回)", async () => {
     const h = harness();
@@ -221,8 +257,8 @@ describe("開催日の朝に 1 回だけ取得する", () => {
   it("取得口が無い構成(secret 未登録)では、アラームの候補にならず、取得も印もない", async () => {
     const h = harness({ baba: false });
     await plan2100(h);
-    expect(h.alarm.at).toBe(firstPlannedDue(h)); // 08:00 の候補が無い
-    h.clock.now = AT_0800 + 3600_000;
+    expect(h.alarm.at).toBe(firstPlannedDue(h)); // 09:00 の取得の候補が無い
+    h.clock.now = AT_0900 + 3600_000;
     await h.core.runNextStep();
     expect(h.api.calls).toBe(0);
     expect(meta(h, BABA_META_ATTEMPTED)).toBeNull();
@@ -254,7 +290,7 @@ describe("2 回目を送らない(再起動・並行・再計画)", () => {
     await plan2100(h);
     await tick(h);
     restart(h);
-    h.clock.now = AT_0800 + 3600_000;
+    h.clock.now = AT_0900 + 3600_000;
     for (let i = 0; i < 5; i++) await h.core.runNextStep();
     expect(h.api.calls).toBe(1);
   });
@@ -265,7 +301,7 @@ describe("2 回目を送らない(再起動・並行・再計画)", () => {
     await tick(h);
     h.sql.exec("DELETE FROM race_day_meta WHERE key = ?", BABA_META_ATTEMPTED);
     restart(h);
-    h.clock.now = AT_0800 + 3600_000;
+    h.clock.now = AT_0900 + 3600_000;
     await h.core.runNextStep();
     await h.core.runNextStep();
     expect(h.api.calls).toBe(1);
@@ -274,7 +310,7 @@ describe("2 回目を送らない(再起動・並行・再計画)", () => {
   it("並行して runNextStep を呼んでも、取得口は 1 回だけ", async () => {
     const h = harness();
     await plan2100(h);
-    h.clock.now = AT_0800;
+    h.clock.now = AT_0900;
     h.alarm.at = null;
     const outcomes = await Promise.all([h.core.runNextStep(), h.core.runNextStep()]);
     expect(h.api.calls).toBe(1);
@@ -286,7 +322,7 @@ describe("2 回目を送らない(再起動・並行・再計画)", () => {
     await plan2100(h);
     await tick(h);
     expect(h.api.calls).toBe(1);
-    h.clock.now = AT_0800 + 60_000;
+    h.clock.now = AT_0900 + 60_000;
     expect(await h.core.requestPlan({ kaisaiDate: DATE, rescue: true })).toEqual({ accepted: false, reason: "already-planned" });
     expect(await h.core.requestPlan({ kaisaiDate: DATE })).toEqual({ accepted: false, reason: "already-planned" });
     await runDue(h, jst("2026-10-12T23:59:00"));
@@ -297,16 +333,16 @@ describe("2 回目を送らない(再起動・並行・再計画)", () => {
     const h = harness();
     h.gate.failures.central = [blocked()];
     await plan2100(h);
-    // 前提: 中央は失敗(中央の行が無い)で、08:00 を過ぎても取得しない
+    // 前提: 中央は失敗(中央の行が無い)で、09:00 を過ぎても取得しない
     expect((h.sql.exec("SELECT state FROM race_day_plan_venue WHERE venue = 'central'").toArray() as { state: string }[])[0]?.state).toBe("failed");
-    await runDue(h, jst("2026-10-12T08:30:00"));
-    h.clock.now = jst("2026-10-12T08:30:00");
+    await runDue(h, jst("2026-10-12T09:30:00"));
+    h.clock.now = jst("2026-10-12T09:30:00");
     await h.core.runNextStep();
     expect(h.api.calls).toBe(0);
     expect(h.store.claimCalls.n).toBe(0);
 
     expect(await h.core.requestPlan({ kaisaiDate: DATE, rescue: true })).toEqual({ accepted: false, reason: "already-planned" });
-    const labels = await runDue(h, jst("2026-10-12T08:59:00"));
+    const labels = await runDue(h, jst("2026-10-12T09:59:00"));
     expect(labels.filter((l) => l.includes(":baba:"))).toEqual([`${DATE}:baba:fetch:ok`]);
     expect(h.api.calls).toBe(1);
 
@@ -323,12 +359,17 @@ describe("分析を止めない・遅らせない", () => {
     const h = harness();
     h.api.respond = () => Promise.reject(new BabaFetchError("timeout"));
     await plan2100(h);
-    h.clock.now = AT_0800;
+    h.clock.now = AT_0900;
     const raceId = (h.sql.exec("SELECT race_id FROM race_day_plan WHERE venue = 'central' ORDER BY race_id LIMIT 1").toArray() as { race_id: string }[])[0]!.race_id;
     expect(await h.core.schedule({ raceId, kaisaiDate: DATE })).toMatchObject({ accepted: true });
     h.alarm.at = null;
     expect(label(await h.core.runNextStep())).toBe(`${DATE}:baba:fetch:failed`); // 先に 1 ステップだけ
-    expect(label(await h.core.runNextStep())).toBe(`${raceId}:morning:fetch:failed`); // タスクはそのまま進む(ゲートは偽でブレーカー拒否)
+    // 次のステップはタスク(馬場ではない)。09:00 は最初の発走前の分析の期限でもあるので、先に期限の来た分析が動くことがあるが、手動の予約の morning もそのまま進む(ゲートは偽でブレーカー拒否)
+    const following: string[] = [label(await h.core.runNextStep())];
+    expect(following[0]).not.toContain(":baba:");
+    for (let i = 0; i < 20 && !following.includes(`${raceId}:morning:fetch:failed`); i++) following.push(label(await h.core.runNextStep()));
+    expect(following).toContain(`${raceId}:morning:fetch:failed`);
+    expect(following.filter((l) => l.includes(":baba:"))).toEqual([]);
     expect(h.api.calls).toBe(1);
   });
 
@@ -338,7 +379,7 @@ describe("分析を止めない・遅らせない", () => {
       throw new TypeError("想定外 https://secret.test.invalid/x");
     };
     await plan2100(h);
-    h.clock.now = AT_0800;
+    h.clock.now = AT_0900;
     h.alarm.at = null;
     await expect(h.core.runNextStep()).resolves.toMatchObject({ mode: "baba", result: "failed" });
     expect(h.warns.join("\n")).not.toContain("secret.test.invalid");

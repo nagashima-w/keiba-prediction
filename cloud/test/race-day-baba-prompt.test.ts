@@ -220,9 +220,9 @@ describe("統合(本物の D1BabaStore。ローカルの workerd の D1)", () =>
     const tokyo = parseBabaResponse(SAMPLE, Date.parse("2026-10-12T08:05:52.863Z")).venues[0]!;
     const cell = (venueCode: string, cushion: number, day: string) => ({ ...tokyo, venueCode, cushion, measuredAt: `2026-06-${day}T07:00+09:00` });
     await store.claim("20260628", 1);
-    await store.finish("20260628", { finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [cell("03", 8.1, "28"), cell("05", 8.2, "28")], dropped: 0 });
+    await store.finish("20260628", { finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [cell("03", 8.1, "28"), cell("05", 8.2, "28")], dropped: 0, droppedDetails: [] });
     await store.claim("20260627", 3);
-    await store.finish("20260627", { finishedAt: 4, result: "ok", apiFetchedAt: null, venues: [cell("03", 8.3, "27"), cell("05", 8.4, "27")], dropped: 0 });
+    await store.finish("20260627", { finishedAt: 4, result: "ok", apiFetchedAt: null, venues: [cell("03", 8.3, "27"), cell("05", 8.4, "27")], dropped: 0, droppedDetails: [] });
     const h = harness({ reader: store });
     expect((await runPreRace(h)).outcome).toBe("pre_race:compute:ok");
     const prompt = promptOf(h.llm!);

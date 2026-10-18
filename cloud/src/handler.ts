@@ -42,6 +42,7 @@ import type { ExportMode, ExportResponse } from "./prior-export-core";
 import { exportFilename, PRIOR_EXPORT_KEY } from "./prior-export-format";
 import { toRaceListRows } from "./race-list";
 import { D1TargetsStore } from "./targets-repository";
+import { D1BabaStore, FETCH_LIST_LIMIT_DEFAULT } from "./baba-repository";
 import { buildTargetsView, type TargetsPlanRow } from "./targets-view";
 import type { JWTVerifyGetKey } from "jose";
 
@@ -480,6 +481,17 @@ export async function handle(
     return handleHorseRuns(request, env, deps.now ?? (() => new Date()));
   }
 
+  if (pathname === "/api/baba-fetch") {
+    // 管理者専用(route-policy.ts)。D1 の baba_fetches・baba_conditions を読むだけ(外部の API にも netkeiba にも LLM にも出ない)。GET だけ。Issue #360。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handleBabaFetch(request, env);
+  }
+
   if (pathname === "/api/results/backfill") {
     // 読み取り専用(補完の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #217。
     if (method !== "GET") {
@@ -639,6 +651,57 @@ async function handleHorseRuns(request: Request, env: Env, now: () => Date): Pro
     return json({ ok: true, ...status });
   } catch {
     return json({ ok: false, error: { type: "horse-runs-error" } }, 503);
+  }
+}
+
+/**
+ * `GET /api/baba-fetch[?kaisai_date=YYYYMMDD]`(Issue #360。管理者専用): 外部の馬場の API の取得の結果(D1 の `baba_fetches`・`baba_conditions`)。
+ * 開催日ごとに、結果の分類・取得の時刻・保存した競馬場の数と中身・捨てた競馬場の理由と計測日時の文字列(`dropped`。旧版の記録は null)を返す。
+ * 「当日の値がまだ載っていなかった」のか「計測日時が読めなかった」のかを、D1 のコンソールを開かずに確かめるための入口。
+ * `kaisai_date` を省くと直近 {@link FETCH_LIST_LIMIT_DEFAULT} 日ぶん(新しい順)、指定するとその日だけ。
+ * **外部の API の URL・応答の本文・元の JSON は、保存もしておらず、応答にも出ない**(応答は明示の許可リストで作る)。
+ * 閲覧者には開かない(route-policy.ts の表に管理者専用として載せる): 外部の API の利用の記録(利用の条件は 1 日 1 回)は運用の情報で、`/api/health` などと同じ扱い。
+ * 読み取り専用。順序は: `Sec-Fetch-Site`(別サイトからなら 403)→ 入力の検証(400。ここまでで D1 に触れない)→ D1(失敗は 503 の固定の種類名だけ)。
+ */
+async function handleBabaFetch(request: Request, env: Env): Promise<Response> {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin" && site !== "none") {
+    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  }
+  const url = new URL(request.url);
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((k) => k !== "kaisai_date") || new Set(keys).size !== keys.length) {
+    return badRequest("クエリは kaisai_date だけを1つ指定できます");
+  }
+  const kaisaiDate = url.searchParams.get("kaisai_date");
+  if (kaisaiDate !== null) {
+    // 検証のメッセージに入力を写すので、長い入力は先頭だけにする(切っても、無効なままであることは変わらない)。
+    const dateCheck = checkKaisaiDate(kaisaiDate.slice(0, 32));
+    if (!dateCheck.ok) {
+      return badRequest(dateCheck.message);
+    }
+  }
+  try {
+    const fetches = await new D1BabaStore({ db: env.DB }).loadFetches({ ...(kaisaiDate === null ? {} : { kaisaiDate }), limit: FETCH_LIST_LIMIT_DEFAULT });
+    return json({
+      ok: true,
+      kaisai_date: kaisaiDate,
+      limit: FETCH_LIST_LIMIT_DEFAULT,
+      fetches: fetches.map((f) => ({
+        kaisai_date: f.kaisaiDate,
+        attempted_at: f.attemptedAt,
+        finished_at: f.finishedAt,
+        result: f.result,
+        api_fetched_at: f.apiFetchedAt,
+        venues_saved: f.venuesSaved,
+        venues_dropped: f.venuesDropped,
+        dropped: f.dropped === null ? null : f.dropped.map((d) => ({ venue: d.venue, reason: d.reason, measured: d.measured })),
+        saved: f.saved.map((v) => ({ venue_code: v.venueCode, venue_name: v.venueName, measured_at: v.measuredAt })),
+      })),
+    });
+  } catch {
+    // 例外の文面・SQL は返さない。
+    return json({ ok: false, error: { type: "baba-fetch-error" } }, 503);
   }
 }
 
