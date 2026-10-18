@@ -416,6 +416,10 @@ export class VerifyCore {
     const t3 = now();
     // 締切直前の再計算との比較(Issue #352)。読めなかった(close が無い・null)・計算が失敗したときは null。**比較の失敗で本体の集計を失わない**(例外は握り、固定の警告だけ残す)。
     let closeComparison: CloseComparison | null = null;
+    // 表が無い(migration 前)・読めなかった(`close: null`)ときだけ、固定の警告を残す(Issue #375。「表が無い」と「障害」は区別できない)。項目を持たない読み取り口(undefined)では出さない。応答は変えない。
+    if (read.close === null) {
+      this.deps.onWarn?.("検証の再計算との比較の表を読めませんでした(比較なしで集計します)");
+    }
     if (read.close !== undefined && read.close !== null) {
       try {
         closeComparison = computeCloseComparison(source, read.close);

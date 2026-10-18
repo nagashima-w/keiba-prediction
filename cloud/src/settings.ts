@@ -261,6 +261,19 @@ export function validateCloudSettingsForSave(raw: unknown): SaveValidation {
   return { ok: true, settings: settings as unknown as CloudSettings };
 }
 
+/**
+ * 保存する設定のキーが、サーバの項目と**過不足**があるか(欠けている項目がある・未知のキーがある)。値の範囲外・型違いだけなら false。
+ * 古い画面(項目の追加・削除より前の画面を開いたままデプロイをまたいだ)が送る形を、`POST /api/settings` の 400 の `reason: "keys-mismatch"` で知らせるのに使う(Issue #375)。
+ * 本文がオブジェクトでないときは false(画面の古さではない)。
+ */
+export function hasSettingsKeysMismatch(raw: unknown): boolean {
+  const rec = asRecord(raw);
+  if (rec === null) {
+    return false;
+  }
+  return CLOUD_SETTINGS_KEYS.some((key) => !Object.prototype.hasOwnProperty.call(rec, key)) || Object.keys(rec).some((key) => !KNOWN_KEYS.has(key));
+}
+
 /** 設定の行を読む SQL(id = 1 の1行だけ)。 */
 export const SELECT_SETTINGS_SQL = "SELECT settings_json FROM cloud_settings WHERE id = 1";
 

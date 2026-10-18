@@ -10,6 +10,7 @@ import {
   CLOUD_SETTINGS_RULES,
   coerceCloudSettings,
   DEFAULT_CLOUD_SETTINGS,
+  hasSettingsKeysMismatch,
   loadSettings,
   saveSettings,
   SCORING_WEIGHT_FIELDS,
@@ -394,6 +395,26 @@ describe("範囲の述語(項目ごとに1か所。読む側 coerce と書く側
       const roundTripped = coerceCloudSettings(JSON.parse(JSON.stringify(checked.settings)));
       expect(roundTripped).toEqual(checked.settings);
       expect(roundTripped[b.key]).toBe(b.raw);
+    }
+  });
+});
+
+describe("hasSettingsKeysMismatch(項目の過不足。古い画面の判定。Issue #375)", () => {
+  it("全項目が揃い余計なキーが無ければ false。値が範囲外・型違いでも、キーが揃っていれば false", () => {
+    expect(hasSettingsKeysMismatch({ ...FULL })).toBe(false);
+    expect(hasSettingsKeysMismatch({ ...FULL, bankroll: -1, includeComboOdds: "x" })).toBe(false);
+  });
+
+  it.each(CLOUD_SETTINGS_KEYS.map((key) => [key] as const))("キー %s が欠けていたら true", (key) => {
+    const body: Record<string, unknown> = { ...FULL };
+    delete body[key];
+    expect(hasSettingsKeysMismatch(body)).toBe(true);
+  });
+
+  it("未知のキーがあれば true。オブジェクトでない(null・配列・文字列)は false(画面の古さではない)", () => {
+    expect(hasSettingsKeysMismatch({ ...FULL, extra: 1 })).toBe(true);
+    for (const raw of [null, [], "x", 1, undefined]) {
+      expect(hasSettingsKeysMismatch(raw)).toBe(false);
     }
   });
 });

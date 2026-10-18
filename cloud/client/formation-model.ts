@@ -9,9 +9,11 @@
  *  - 道中: 脚質の集団(逃げ→先行→差し→追込)の順に並べ、集団の中は {@link INTRA}・集団の間は {@link INTER} の間隔を積む。集団の中は `earlyPos` の昇順
  *    (null は値のある馬の中央値。同値は馬番の小さい方が前)。旧再生の `replay-plan.ts` の `layout` と同じ考え方。想定ペースで隊列の長さを変える({@link PACE_SCALE})。
  *    長すぎる隊列は {@link BASE_MAX} で一律に縮める(縮めたあとにペースの倍率を掛けるので、頭数が多くてもペースの差が残る)。
- *  - 4コーナー(Issue #363): 近走の最終コーナーの通過順位から決める。`latePos`(0〜1。小さいほど前)のある馬は「先頭との差」を `latePos × (FORMATION_SLOTS − 1)` とし、
- *    **ペースの補正({@link CORNER_FADE} 等)はかけない**(実データがあるため)。`latePos` の無い馬は、従来どおり道中の「先頭との差」に脚質ごとの係数({@link CORNER_FACTOR}。差し・追込が詰める)を掛け、
+ *  - 4コーナー(Issue #363): 近走の最終コーナーの通過順位から決める。`latePos`(0〜1。小さいほど前)のある馬は「`latePos` のある馬の中の最小値との差」を
+ *    `(FORMATION_SLOTS − 1)` 倍した値を「先頭との差」とし(Issue #375。最小の馬が 0)、**ペースの補正({@link CORNER_FADE} 等)はかけない**(実データがあるため)。
+ *    `latePos` の無い馬は、従来どおり道中の「先頭との差」に脚質ごとの係数({@link CORNER_FACTOR}。差し・追込が詰める)を掛け、
  *    逃げ・先行はペースが速いほど後退({@link CORNER_FADE})させた値で補う。そのあと**全頭の最小値**を 0 に取り直す。並びの同値は馬番の小さい方が前。
+ *    **補う馬は、`latePos` のある先頭の馬より前には出ない**(両者の先頭をどちらも 0 にそろえる式の帰結。{@link cornerGaps} 参照)。
  *    全馬の `latePos` が無い(Issue #363 より前の分析など)ときは、従来と同じ結果になる。道中の位置は `latePos` に影響されない。
  *
  * **係数({@link INTRA}・{@link INTER}・{@link PACE_SCALE}・{@link CORNER_FACTOR}・{@link CORNER_FADE})は根拠の薄い経験則である。** 実際のレースのデータで当てはめたものではなく、
@@ -24,8 +26,12 @@ import type { AnalysisDetail, AnalysisHorse, LegStyle, PaceEstimate } from "./ap
 export const FORMATION_SLOTS = 10;
 
 export const FORMATION_HEADING = "想定隊列図";
-export const FORMATION_NOTE =
-  "道中は馬の脚質と近走の序盤の位置から、4コーナーは近走の4コーナーの通過順位から(無い馬は脚質と想定ペースから)の想定です(実際の隊列とは異なることがあります)。馬の実力・勝率は反映していません。縦の並びは重なりを避けるためで、内外を表しません。位置の計算に使う係数は経験則です。";
+/** 注記の共通の尾(材料の頭の文言は {@link FORMATION_NOTE} と {@link FORMATION_NOTE_NO_LATE} で違う)。 */
+const NOTE_TAIL = "(実際の隊列とは異なることがあります)。馬の実力・勝率は反映していません。縦の並びは重なりを避けるためで、内外を表しません。位置の計算に使う係数は経験則です。";
+/** 注記(1 頭でも `latePos` がある分析。4コーナーに近走の通過順位を使う)。 */
+export const FORMATION_NOTE = `道中は馬の脚質と近走の序盤の位置から、4コーナーは近走の4コーナーの通過順位から(無い馬は脚質と想定ペースから)の想定です${NOTE_TAIL}`;
+/** 注記(全馬の `latePos` が無い分析〈Issue #363 より前〉。4コーナーも脚質と想定ペースだけで決めるので、#362 のときの文言に戻す。Issue #375)。 */
+export const FORMATION_NOTE_NO_LATE = `馬の脚質と想定ペースからの想定です${NOTE_TAIL}`;
 /** 本命の印(core の `PREDICTION_MARKS` の先頭。クライアントの束に core の解析器を入れないため値を写し、テストで一致を確かめる)。 */
 export const MAIN_MARK = "◎";
 /** 馬名の最大の長さ(コードポイント)。超えたら「…」を付ける。 */
@@ -132,11 +138,21 @@ function middleGaps(placed: readonly Placed[], pace: PaceEstimate): number[] {
 
 /**
  * 4コーナーの「先頭との差」(チップ 1 個分。先頭が 0)。
- * `latePos` のある馬は `latePos × (FORMATION_SLOTS − 1)`(ペースの補正はかけない)。無い馬は道中の差に脚質の係数と後退をかけた値で補う。
- * 両者を混ぜたあとに、全頭の最小値を 0 に取り直す(補う馬だけで先に取り直さない)。
+ * `latePos` のある馬は、「`latePos` のある馬の中の最小値」を先頭(0)とした差 `(latePos − 最小値) × (FORMATION_SLOTS − 1)` にする(ペースの補正はかけない)。
+ * 無い馬は道中の差に脚質の係数と後退をかけた値で補う(道中の差は全頭の先頭が 0 なので、補う値は 0 以上)。両者を混ぜたあとに、全頭の最小値を 0 に取り直す。
+ *
+ * **性質(Issue #375)**: `latePos` が 1 頭でもあれば、その最小の馬が 0 に置かれ、補う値は 0 以上なので、**補う馬は `latePos` のある先頭より前には出ない**(同じ 0 なら馬番の順)。
+ * 取り直しが効くのは `latePos` が 1 頭もない(全馬を補う)ときだけで、ハイペースの後退で全頭が 0 より後ろにあるのを先頭 0 に戻す。
+ * 旧式は `latePos × 9` の絶対位置で混ぜていたため、補う馬が先頭のとき `latePos` のある馬が(その最小値 × 9 だけ)後ろへずれていた。
+ *
+ * 式を `late×S − minLate×S` と書き、`(late − minLate)×S` と書かない理由: 全馬に `latePos` があるとき、`min(late×S)` は `minLate×S` とビット単位で等しいので、
+ * 旧式(`late×S` から全頭の最小値を引く)と**浮動小数点まで一致**する(丸め `Math.round` の 0.5 境界の結果が変わらない)。`(late − minLate)×S` は丸め誤差で最後の桁がずれうる。
  */
 function cornerGaps(placed: readonly Placed[], middle: readonly number[], pace: PaceEstimate): number[] {
-  const raw = placed.map((h, i) => (h.late !== null ? h.late * (FORMATION_SLOTS - 1) : middle[i]! * CORNER_FACTOR[pace][h.style] + CORNER_FADE[pace][h.style]));
+  const scale = FORMATION_SLOTS - 1;
+  const lates = placed.map((h) => h.late).filter((v): v is number => v !== null);
+  const lateBase = lates.length === 0 ? 0 : Math.min(...lates) * scale;
+  const raw = placed.map((h, i) => (h.late !== null ? h.late * scale - lateBase : middle[i]! * CORNER_FACTOR[pace][h.style] + CORNER_FADE[pace][h.style]));
   const lead = Math.min(...raw);
   return raw.map((v) => v - lead);
 }
@@ -191,7 +207,7 @@ export function buildFormation(a: AnalysisDetail): FormationSection | null {
   const unknown = a.horses.filter((h) => !isLegStyle(h.legStyle)).map((h) => h.umaban).sort((x, y) => x - y);
   return {
     heading: FORMATION_HEADING,
-    note: FORMATION_NOTE,
+    note: placed.some((h) => h.late !== null) ? FORMATION_NOTE : FORMATION_NOTE_NO_LATE,
     paceLine: paceLineOf(a, pace),
     phases: [phase("道中", placed, middle, mains), phase("4コーナー", placed, corner, mains)],
     legend: [...a.horses].sort((x, y) => x.umaban - y.umaban).map(legendRow),

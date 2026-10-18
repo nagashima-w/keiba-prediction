@@ -300,6 +300,34 @@ describe("POST /api/settings", () => {
     }
   });
 
+  it("400 の本文の error.reason: キーの過不足(欠け・未知・__proto__)は \"keys-mismatch\"(画面が古い可能性。Issue #375)。範囲外の値・JSON として読めない本文・オブジェクトでない本文には付けない", async () => {
+    const { deps, token } = await setup();
+    const { bankroll: _omit, ...missing } = FULL;
+    const reasonOf = async (raw: string): Promise<{ status: number; reason: unknown }> => {
+      const response = await handle(post(token, null, raw), envOf(fakeDb(null)), {}, deps);
+      const body = (await response.json()) as { error: { reason?: unknown } };
+      return { status: response.status, reason: body.error.reason };
+    };
+    for (const [name, raw] of [
+      ["欠け", JSON.stringify(missing)],
+      ["未知のキー", JSON.stringify({ ...FULL, newItem: 1 })],
+      ["__proto__", `{"__proto__":{"bankroll":1},${JSON.stringify(FULL).slice(1)}`],
+      ["欠けと範囲外が同時", JSON.stringify({ ...missing, perRaceCap: -1 })],
+    ] as const) {
+      expect(await reasonOf(raw), name).toEqual({ status: 400, reason: "keys-mismatch" });
+    }
+    for (const [name, raw] of [
+      ["範囲外", JSON.stringify({ ...FULL, bankroll: 10.5 })],
+      ["型違い", JSON.stringify({ ...FULL, includeComboOdds: "true" })],
+      ["JSON でない", "{"],
+      ["配列", "[]"],
+    ] as const) {
+      const out = await reasonOf(raw);
+      expect(out.status, name).toBe(400); // 前提: 400 になっている(reason が無いのは別の理由ではない)
+      expect(out.reason, name).toBeUndefined();
+    }
+  });
+
   it("D1 の書き込みが失敗したら 503(d1-error)。例外の文面・SQL を返さない", async () => {
     const { deps, token } = await setup();
     const f = fakeDb(null);

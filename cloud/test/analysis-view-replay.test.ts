@@ -6,8 +6,8 @@ import type { AnalysisDetailResult, DetailStatus } from "../src/analysis-reposit
 import { scrapeFixtureRace } from "./pipeline-fixtures";
 
 /**
- * 応答に足した材料: 馬ごとの `earlyPos`(Issue #311。スナップショットの馬から)・`latePos`(Issue #363)・`legStyle`(#314)・`race.pace`(#314)・`race.turn`(#311。raceId・距離から)。
- * Issue #362 でレース再生を廃止したあとも、`earlyPos`・`latePos`・`legStyle`・`race.pace` は想定隊列図(`client/formation-model.ts`)の材料として使う(`race.turn` は使い道がなくなったが、別 Issue で整理するまで残す)。
+ * 応答に足した材料: 馬ごとの `earlyPos`(Issue #311。スナップショットの馬から)・`latePos`(Issue #363)・`legStyle`(#314)・`race.pace`(#314)。
+ * Issue #362 でレース再生を廃止したあとも、`earlyPos`・`latePos`・`legStyle`・`race.pace` は想定隊列図(`client/formation-model.ts`)の材料として使う(`race.turn`〈コースの回り。Issue #311〉は使い道がなくなったので Issue #375 で削除した)。
  * 画面の表示の材料で、確率・配分には使わない。
  */
 
@@ -127,22 +127,6 @@ describe("buildAnalysisView の latePos(終盤の位置。Issue #363)", () => {
     const horses = race.horses.map((h) => horse(h.shutuba.umaban));
     const view = buildAnalysisView(detail(analysis({ horses, raceSnapshot: snapshot }), "present"), undefined);
     expect(view.horses.map((h) => h.latePos)).toEqual(written);
-  });
-});
-
-describe("buildAnalysisView の race.turn(コースの回り。Issue #311)", () => {
-  it("raceId の場コードと距離から決める(東京=left・中山=right・川崎=left・大井 1650m=left)。詳細の状態に依らない", () => {
-    const turnOf = (raceId: string, status: DetailStatus = "present", distance = 1600): string | undefined => {
-      const a = analysis({ raceId, raceSnapshot: { race: { distance }, horses: [] } });
-      return buildAnalysisView(detail(a, status), undefined).race.turn;
-    };
-    expect(turnOf("202605020211")).toBe("left"); // 東京
-    expect(turnOf("202606020211")).toBe("right"); // 中山
-    expect(turnOf("202645020211")).toBe("left"); // 川崎
-    expect(turnOf("202644020211", "present", 1650)).toBe("left"); // 大井 1650m
-    expect(turnOf("202644020211", "present", 1600)).toBe("right"); // 大井 1600m
-    expect(turnOf("202644020211", "none", 1650), "詳細なしは距離が分からないので大井は右").toBe("right");
-    expect(turnOf("202605020211", "missing")).toBe("left");
   });
 });
 

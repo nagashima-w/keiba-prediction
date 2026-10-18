@@ -706,10 +706,13 @@ class StaleOddsError extends Error {
   }
 }
 
+/** {@link CacheMissError} の文面の頭(警告の書き換え {@link describeScrapeWarning} が、この語で計算ステップのキャッシュ無しを見分ける)。 */
+const CACHE_MISS_HEAD = "キャッシュに無い取得先です(計算ステップは netkeiba には出ません)";
+
 /** 計算ステップで、キャッシュに無いものをネットワークに取りに行かないための取得器(呼ばれたら投げる)。 */
 class CacheMissError extends Error {
   constructor(url: string) {
-    super(`キャッシュに無い取得先です(計算ステップは netkeiba には出ません): ${url}`);
+    super(`${CACHE_MISS_HEAD}: ${url}`);
     this.name = "CacheMissError";
   }
 }
@@ -719,6 +722,19 @@ const cacheOnlyFetcher: TextFetcher = {
     throw new CacheMissError(url);
   },
 };
+
+/**
+ * 計算ステップが残す、取得時の警告の文面(Issue #375)。騎手・調教師の成績が計算ステップのキャッシュ・保存先に無かった警告は、`scrapeRace` の文面が「取得に失敗しました」だが、
+ * 計算ステップは**取得ステップの結果を区別できない**(取得の失敗も、1 回の取得の呼び出しの上限〈騎手と調教師で共有〉で取らなかったのも、同じ `CacheMissError` になる)。
+ * そこで、どちらともとれる文面に書き換える(URL は出さない)。取得ステップの警告そのものは変えない。ほかの警告はそのまま。
+ */
+function describeScrapeWarning(w: { readonly kind: string; readonly message: string; readonly jockeyId?: string; readonly trainerId?: string }): string {
+  const id = w.kind === "騎手" ? w.jockeyId : w.kind === "調教師" ? w.trainerId : undefined;
+  if (id === undefined || !w.message.includes(CACHE_MISS_HEAD)) {
+    return w.message;
+  }
+  return `${w.kind}ID ${id} の成績は保存先に無いため補正なし(取得の失敗、または取得の上限で取らなかった。次回以降のレースの取得で取る)`;
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof HttpError && error.cause instanceof GateRefusedError) {
@@ -2666,7 +2682,7 @@ export class RaceDayCore {
       const settings = coerceCloudSettings(JSON.parse(task.settings_json));
       let analysisId = task.analysis_id;
       let expected: { horses: number; bets: number } | null = null;
-      let scrapeWarnings: readonly { readonly kind: string; readonly message: string }[] = [];
+      let scrapeWarnings: readonly { readonly kind: string; readonly message: string; readonly jockeyId?: string; readonly trainerId?: string }[] = [];
       if (analysisId === null) {
         const raceId = parseRaceId(task.race_id);
         // LLM(Issue #194)。clipVariant は1回だけ解決し、補正の最大幅(analyzeRace)と、プロンプト・promptVersion(runAnalysis の deps.clipVariant)の両方に同じ値を使う
@@ -2751,7 +2767,7 @@ export class RaceDayCore {
         }
         // 取得時の警告(取消馬・組合せオッズの取得失敗〈その券種は配分に入っていない〉など)を、警告として残す。
         for (const warning of scrapeWarnings) {
-          this.onWarn(`発走前の分析(${task.race_id}): ${warning.kind}: ${warning.message}`);
+          this.onWarn(`発走前の分析(${task.race_id}): ${warning.kind}: ${describeScrapeWarning(warning)}`);
         }
         // 保存した子の行(馬・買い目)が、正しい親 id に、保存したレコードの件数だけ紐づいたかを確かめる(最初の実保存で、max(id) の前提を確かめる)。
         if (analysisId !== null && expected !== null) {

@@ -31,6 +31,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { compareWithFloatTolerance } from "./smoke-compare";
+import { DEFAULT_CLOUD_SETTINGS } from "./src/settings";
 
 const BASE_PORT = Number(process.env["SMOKE_PORT"] ?? "8801");
 const CONFIG_PATH = "wrangler.smoke.generated.toml";
@@ -583,7 +584,7 @@ async function main(): Promise<void> {
     });
 
     // F. (Issue #177)日単位の DO `RaceDay` を、workerd の実環境で通す: 予約(RPC は予約だけ)→ アラーム(取得 → 計算の2ステップ)→ 朝の prior が DO に残る。
-    //    取得は NetkeibaGate の偽ソケット経由(中央16頭・騎手16人の 35 本のあと、調教師は騎手と共有する上限 40 までの 5 本で、計 40 本〈出馬表1・戦績16・調教1・オッズ1・騎手16・調教師5。Issue #226 の前は騎手を取らず 19 本、Issue #354 の前は調教師を取らず 35 本〉。gate の間隔 2 秒で、約 80 秒かかる)。2回目はキャッシュで、gate の間隔の待ちが無く速い。
+    //    取得は NetkeibaGate の偽ソケット経由(中央16頭・騎手16人の 35 本のあと、調教師は騎手と共有する上限 40 までの 5 本で、計 40 本〈出馬表1・戦績16・調教1・オッズ1・騎手16・調教師5。Issue #226 の前は騎手を取らず 19 本、Issue #354 の前は調教師を取らず 35 本〉。gate の間隔 2 秒で、約 80 秒かかる)。2回目は(調教師の重みを 0 にして)キャッシュで、gate の間隔の待ちが無く速い。3回目は重みを戻し、調教師の取り足し(11 本)を確かめる(Issue #375)。
     //    D1 には何も書かれない(GET /api/analyses が空のまま)。E とは別の起動(E はブレーカーを開くので、その前の別の状態で動かす)。
     await withWorker(BASE_PORT + 5, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 5;
@@ -653,16 +654,31 @@ async function main(): Promise<void> {
         JSON.stringify(priorDiffs),
       );
 
-      // 2回目: キャッシュ(出馬表 10 分・戦績・調教 24 時間・オッズ 60 秒の内側)で、gate への取得が0本 = 間隔の待ちが無く速い
+      // 2回目: キャッシュ(出馬表 10 分・戦績・調教 24 時間・オッズ 60 秒の内側)で、gate への取得が0本 = 間隔の待ちが無く速い。
+      // Issue #375: 1回目は調教師が上限(40 本)で 5 人しか取れず、残りの 11 人は補正なしだった(Issue #354)。そのまま2回目を回すと不足の 11 人を取り足す(11 本 × 2 秒 ≈ 22 秒)ので、
+      // 厳密な検査(10 秒以内。#354 より前の形)が成り立たなくなり、いったん 15〜45 秒に緩めていた。**2回目の前に調教師の重みを 0 にして**(調教師を取らない = 取得ステップは `wantsTrainerStats` が false)、
+      // 厳密な検査に戻す。調教師の取り足しは、重みを戻した **3回目で別に**確かめる。設定の保存(POST /api/settings。管理者の入口)は D1 の設定の行に書く(analyses には書かない)。
+      const postSettings = (settings: unknown) =>
+        fetch(`http://127.0.0.1:${port}/api/settings`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(settings), signal: AbortSignal.timeout(30_000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
+      const noTrainer = await postSettings({ ...DEFAULT_CLOUD_SETTINGS, baseScoreWeightTrainer: 0 });
+      check(`${label}: 設定の保存(調教師の重み 0。2回目で調教師を取らないため)は 200`, noTrainer.status === 200 && parseJson(noTrainer.text)["ok"] === true, `${noTrainer.status} ${noTrainer.text.slice(0, 200)}`);
       const second = await run(goodBody);
       check(`${label}: 完了済みのレースは再び起動できる(202)`, second.status === 202, `${second.status} ${second.text.slice(0, 200)}`);
       const secondStarted = Date.now();
       const secondBoard = await waitDone();
       const secondMs = Date.now() - secondStarted;
-      // Issue #354: 1回目は調教師が上限(40 本)で 5 人しか取れず、残りの 11 人は補正なしだった。2回目は、戦績・調教・騎手はキャッシュ・保存先に当たり、
-      // 調教師は取れた 5 人がキャッシュ・保存先に当たり、取れなかった 11 人だけを追加で取る(11 本 × gate の間隔 2 秒 ≈ 22 秒)。取り直しではなく不足分の補充なので、
-      // 3回目以降(一括の起動・発走前の分析)は調教師も全員が保存先に揃い、gate への取得が無い。
-      check(`${label}: 2回目は戦績・調教・騎手がキャッシュ・保存先に当たり、調教師は不足の 11 人だけを取る(11 本 × 2 秒。45 秒以内に done。1回目の約 80 秒より速い)`, (secondBoard["races"] as { status: string }[])[0]?.status === "done" && secondMs < 45_000 && secondMs >= 15_000, `${secondMs}ms`);
+      check(`${label}: 2回目はキャッシュに当たり、gate の取得が無い(調教師の重み 0。10 秒以内に done)`, (secondBoard["races"] as { status: string }[])[0]?.status === "done" && secondMs < 10_000, `${secondMs}ms`);
+
+      // 3回目(Issue #354・#375): 重みを既定値に戻すと、戦績・調教・騎手はキャッシュ・保存先に当たり、調教師は取れた 5 人がキャッシュ・保存先に当たり、取れなかった 11 人だけを追加で取る(11 本 × gate の間隔 2 秒 ≈ 22 秒)。
+      // 取り直しではなく不足分の補充なので、4回目以降(一括の起動・発走前の分析)は調教師も全員が保存先に揃い、gate への取得が無い。
+      const restored = await postSettings(DEFAULT_CLOUD_SETTINGS);
+      check(`${label}: 設定の保存(既定の重みに戻す)は 200`, restored.status === 200 && parseJson(restored.text)["ok"] === true, `${restored.status} ${restored.text.slice(0, 200)}`);
+      const third = await run(goodBody);
+      check(`${label}: 重みを戻した3回目も起動できる(202)`, third.status === 202, `${third.status} ${third.text.slice(0, 200)}`);
+      const thirdStarted = Date.now();
+      const thirdBoard = await waitDone();
+      const thirdMs = Date.now() - thirdStarted;
+      check(`${label}: 3回目は戦績・調教・騎手がキャッシュ・保存先に当たり、調教師は不足の 11 人だけを取る(11 本 × 2 秒。45 秒以内に done。1回目の約 80 秒より速い)`, (thirdBoard["races"] as { status: string }[])[0]?.status === "done" && thirdMs < 45_000 && thirdMs >= 15_000, `${thirdMs}ms`);
 
       // Issue #251: 一括の手動起動(POST /api/analyses/run/bulk)。本物の DO の RPC(scheduleMany)を通す。守り(Origin・415・400)→ 予約(202。レースごとの結果)→ アラームで done。
       //   朝(morning)のキャッシュが効くので速い。morning は D1 に書かない(下の「D1 には何も書かれない」の確認が引き続き成り立つ)。
@@ -696,7 +712,7 @@ async function main(): Promise<void> {
       check(`${label}: D1 には何も書かれない(GET /api/analyses が空のまま)`, analyses.status === 200 && analyses.text === JSON.stringify({ ok: true, analyses: [] }), `${analyses.status} ${analyses.text.slice(0, 120)}`);
 
       // Issue #178: 発走前の分析(mode: "pre_race"。LLM なし)。朝のキャッシュがあるので、取得は(出馬表は TTL 内・戦績・調教はキャッシュ)オッズだけを取り直す。
-      //   D1(本物のローカルの D1・R2)に1件保存され、子の行が正しい親 id に紐づく(childrenOk)。設定の行は無いので、既定値(資金 0 = 配分なし・組合せ取得なし)。
+      //   D1(本物のローカルの D1・R2)に1件保存され、子の行が正しい親 id に紐づく(childrenOk)。設定の行は、2回目の前後の設定の保存(Issue #375)で既定値と同じ内容になっているので、既定値(資金 0 = 配分なし・組合せ取得なし)と同じ挙動。
       const preBody = { ...goodBody, mode: "pre_race" };
       const preStarted = Date.now();
       const pre = await run(preBody);

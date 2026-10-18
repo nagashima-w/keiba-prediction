@@ -954,6 +954,30 @@ describe("Issue #352: 締切直前の再計算との比較(closeComparison)", ()
     }
   });
 
+  it("★再計算の表を読めなかったとき(close: null)だけ、固定の警告を 1 行出す。項目を持たない読み取り口(undefined)・読めた場合(行 0 件を含む)では出さない。応答は変えない(Issue #375)", async () => {
+    const WARN = "検証の再計算との比較の表を読めませんでした(比較なしで集計します)";
+    const none = setup();
+    none.store.state.close = null;
+    const failed = await none.core.getReport("all");
+    expect(none.warns).toEqual([WARN]);
+    // 応答は警告の有無に依らない: undefined(項目を持たない)と同じ形で、比較は null・本体の集計は出る
+    const absent = setup();
+    absent.store.state.close = undefined;
+    const withoutKey = await absent.core.getReport("all");
+    expect(absent.warns, "項目を持たない読み取り口では出さない").toEqual([]);
+    if (failed.status !== "ready" || withoutKey.status !== "ready") throw new Error("ready のはず");
+    expect(failed.closeComparison).toBeNull();
+    expect(failed.report).toEqual(withoutKey.report);
+    // 読めた場合(行 0 件)では出さない
+    const empty = setup();
+    empty.store.state.close = { meta: [], bets: [] };
+    expect((await empty.core.getReport("all")).status).toBe("ready");
+    expect(empty.warns, "読めた(0 行)なら警告なし").toEqual([]);
+    // キャッシュに当たる 2 回目は再計算しないので、同じ警告を重ねない
+    await none.core.getReport("all");
+    expect(none.warns).toEqual([WARN]);
+  });
+
   it("★比較の計算が例外を投げても、本体の集計は出る(比較は null。固定の警告だけを残し、例外の文面は持ち込まない)", async () => {
     const { core, store, warns } = setup();
     store.state.close = { meta: [null as never], bets: [] }; // 壊れた行

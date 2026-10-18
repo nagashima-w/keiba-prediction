@@ -276,6 +276,25 @@ describe("j7: 騎手の成績の取得に失敗しても、レースの取得・
     expect(c.reason).toContain("データなし");
   });
 
+  it("Issue #375: 取得ステップで取れなかった騎手(ここでは 404)の計算ステップの警告は「取得に失敗しました」と言わず、取得の失敗か上限のどちらともとれる文言で、次回以降の取得で取ることを言う。1 人 1 行・URL は出さない", async () => {
+    const h = harness();
+    h.gate.body = (url) => (url.includes(JOCKEY_URL) ? null : fixtureForUrl(url));
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    h.warnings.length = 0;
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "compute", result: "ok" });
+    const jockeyWarnings = h.warnings.filter((w) => w.includes(": 騎手: "));
+    expect(jockeyWarnings, "前提: 16 人ぶんの警告が出ている").toHaveLength(16);
+    for (const w of jockeyWarnings) {
+      expect(w).not.toContain("取得に失敗しました");
+      expect(w).not.toContain("http");
+      expect(w).toMatch(/騎手ID \d{5} の成績は保存先に無いため補正なし/);
+      expect(w).toContain("取得の失敗、または取得の上限で取らなかった");
+      expect(w).toContain("次回以降のレースの取得で取る");
+    }
+    expect(new Set(jockeyWarnings).size, "16 人が別々の行").toBe(16);
+  });
+
   it("1人だけ失敗(01170 のみ 404)なら、その騎手の馬だけ補正なしで、ほかの15人は補正される", async () => {
     const h = harness();
     h.gate.body = (url) => (url.includes(JOCKEY_URL) && url.includes("id=01170") ? null : fixtureForUrl(url));

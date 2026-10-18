@@ -131,30 +131,58 @@ describe("buildFormation: 4コーナーの位置に馬ごとの latePos を使�
     expect(slotsOf(analysis(withLate([0.2, 0.3, 0.5, 0.9]), { pace: "平均" }), 1)).not.toEqual(slotsOf(analysis(four(), { pace: "平均" }), 1));
   });
 
-  it("一部の馬だけ latePos が無いとき、その馬は従来の値(道中の差×係数+後退)で補い、そのあと全頭の最小値を 0 に取り直す: 平均ペースで 逃げ0.4・先行なし・差し0.5・追込なし → 3.6・1.6・4.5・2.64 → 先頭(馬2)を 0 に取り直して 2・0・2.9・1.04 → 列 2・0・3・1", () => {
+  it("一部の馬だけ latePos が無いとき、latePos のある馬は「その中の最小値」を先頭(0)とし、その馬は従来の値(道中の差×係数+後退)で補う: 平均ペースで 逃げ0.4・先行なし・差し0.5・追込なし → latePos の差 0・0.9、補い 1.6・2.64 → 列 0・2・1・3 (Issue #375)", () => {
     const a = analysis(withLate([0.4, null, 0.5, null]), { pace: "平均" });
-    expect(slotsOf(a, 1)).toEqual({ 1: 2, 2: 0, 3: 3, 4: 1 });
-    // 補う馬が先頭になる(0 に取り直す基準は全頭の最小値で、補う馬だけで取り直してから混ぜるのではない)
-    const f = buildFormation(a)!;
-    expect(f.phases[1]!.chips.map((c) => c.umaban)).toEqual([2, 4, 1, 3]);
+    expect(slotsOf(a, 1)).toEqual({ 1: 0, 2: 2, 3: 1, 4: 3 });
+    // 前提: latePos を絶対位置(0.4×9=3.6・0.5×9=4.5)のまま混ぜる旧式とは別の列(旧式は 2・0・3・1)
+    expect(slotsOf(a, 1)).not.toEqual({ 1: 2, 2: 0, 3: 3, 4: 1 });
+    expect(buildFormation(a)!.phases[1]!.chips.map((c) => c.umaban)).toEqual([1, 3, 2, 4]);
   });
 
-  it("混在で latePos のある馬が最小になるとき、先頭に取り直す基準は全頭の最小値(補う馬だけの最小値ではない): 平均ペースで 逃げ0.05・先行なし・差し なし・追込0.3 → 0.45・1.6・1.92・2.7 → 先頭(馬1)を 0 に取り直して 0・1.15・1.47・2.25 → 列 0・1・1・2 (Issue #373)", () => {
+  it("混在で latePos のある馬が最小になるとき、先頭に取り直す基準は全頭の最小値(補う馬だけの最小値ではない): 平均ペースで 逃げ0.05・先行なし・差し なし・追込0.3 → latePos の差 0・2.25、補い 1.6・1.92 → 列 0・2・2・2 (Issue #373・#375)", () => {
     const a = analysis(withLate([0.05, null, null, 0.3]), { pace: "平均" });
-    expect(slotsOf(a, 1)).toEqual({ 1: 0, 2: 1, 3: 1, 4: 2 });
-    // 前提(取り直しの基準が効いている): 補う馬の最小(馬2 の 1.6)で取り直すと全員の列が前へ寄る(0・0・0・1)ので、期待値とは別の列になる
-    expect(slotsOf(a, 1)).not.toEqual({ 1: 0, 2: 0, 3: 0, 4: 1 });
-    // 取り直しをしない(最小値を引かない)と 0.45・1.6・1.92・2.7 → 列 0・2・2・3 で、これとも別の列
-    expect(slotsOf(a, 1)).not.toEqual({ 1: 0, 2: 2, 3: 2, 4: 3 });
-    // 先頭は latePos のある馬(補う馬ではない)
+    expect(slotsOf(a, 1)).toEqual({ 1: 0, 2: 2, 3: 2, 4: 2 });
+    // 前提(補う馬だけの最小値〈馬2 の 1.6〉で取り直す変異): 補いが 0・0.32、latePos の馬が 0・2.25 → 列 0・0・0・2 で、期待値とは別の列
+    expect(slotsOf(a, 1)).not.toEqual({ 1: 0, 2: 0, 3: 0, 4: 2 });
+    // 前提(latePos を絶対位置で混ぜる旧式〈Issue #375 より前〉): 0.45・1.6・1.92・2.7 を 0 に取り直して 列 0・1・1・2 で、これとも別の列
+    expect(slotsOf(a, 1)).not.toEqual({ 1: 0, 2: 1, 3: 1, 4: 2 });
+    // 先頭は latePos のある馬(補う馬は、latePos のある馬の先頭より前には出ない)
     expect(buildFormation(a)!.phases[1]!.chips.map((c) => c.umaban)).toEqual([1, 2, 3, 4]);
   });
 
+  it("補う馬が道中で先頭でも、latePos のある馬は後ろへずれない(Issue #375): 平均ペースで 逃げなし・先行0.5・差し0.7・追込なし → 補い 0・2.64、latePos の差 0・1.8 → 列 逃げ0・先行0・差し2・追込3(旧式は先行 5・差し 6)", () => {
+    const a = analysis(withLate([null, 0.5, 0.7, null]), { pace: "平均" });
+    expect(slotsOf(a, 1)).toEqual({ 1: 0, 2: 0, 3: 2, 4: 3 });
+    expect(slotsOf(a, 1)).not.toEqual({ 1: 0, 2: 5, 3: 6, 4: 3 });
+  });
+
+  it("全馬に latePos があるときの結果は、latePos×9 を最小値で取り直した値と一致する(頭数・並びを変えた表。Issue #375 の式の変更で変わらない)", () => {
+    const table: readonly { late: readonly number[]; slots: readonly number[] }[] = [
+      // [0.1, 0.1, 0.4, 0.9, 0.55, 0.3] → ×9 = 0.9・0.9・3.6・8.1・4.95・2.7 → 最小 0.9 を引いて 0・0・2.7・7.2・4.05・1.8 → 列 0・0・3・7・4・2
+      { late: [0.1, 0.1, 0.4, 0.9, 0.55, 0.3], slots: [0, 0, 3, 7, 4, 2] },
+      // [0.6, 0.2, 0.2] → 5.4・1.8・1.8 → 3.6・0・0 → 列 4・0・0
+      { late: [0.6, 0.2, 0.2], slots: [4, 0, 0] },
+    ];
+    const styles: LegStyle[] = ["逃げ", "先行", "差し", "追込", "差し", "先行"];
+    for (const { late, slots } of table) {
+      expect(late.length).toBe(slots.length); // 前提: 表の長さが合っている
+      const horses = late.map((l, i) => horse(i + 1, { legStyle: styles[i]!, earlyPos: 0.1 * (i + 1), latePos: l }));
+      for (const pace of ["スロー", "平均", "ハイ"] as const) {
+        expect(Object.values(slotsOf(analysis(horses, { pace }), 1)), pace).toEqual(slots);
+      }
+    }
+  });
+
   it("latePos が無い馬の補いにはペースの補正がかかる(ハイペース: 先行 +0.5。latePos のある馬にはかからない)", () => {
-    // ハイ: 道中 0・2・4・6。逃げ latePos 0.3(2.7)・先行 なし(2×1+0.5=2.5)・差し latePos 0.4(3.6)・追込 なし(6×0.45=2.7)
-    // 最小は先行の 2.5 → 0.2・0・1.1・0.2 → 列 0・0・1・0
-    const a = analysis(withLate([0.3, null, 0.4, null]), { pace: "ハイ" });
-    expect(slotsOf(a, 1)).toEqual({ 1: 0, 2: 0, 3: 1, 4: 0 });
+    // ハイ: 道中 0・2・4・6。逃げ latePos 0.3・先行 なし(2×1+0.5=2.5)・差し latePos 0.4・追込 なし(6×0.45=2.7)
+    // latePos の差は 0・0.9。列 0・3・1・3 (Issue #375)
+    const high = analysis(withLate([0.3, null, 0.4, null]), { pace: "ハイ" });
+    expect(slotsOf(high, 1)).toEqual({ 1: 0, 2: 3, 3: 1, 4: 3 });
+    // 平均なら先行は 1.6×1=1.6 → 列 2(後退 +0.5 の有無で先行の列が変わる)。latePos の馬は同じ列
+    const avg = analysis(withLate([0.3, null, 0.4, null]), { pace: "平均" });
+    expect(slotsOf(avg, 1)).toEqual({ 1: 0, 2: 2, 3: 1, 4: 3 });
+    expect(slotsOf(high, 1)[2]).not.toBe(slotsOf(avg, 1)[2]);
+    expect(slotsOf(high, 1)[3]).toBe(slotsOf(avg, 1)[3]);
   });
 
   it("全馬の latePos が null(古い分析)なら従来と同じ結果。キー自体が無い(古いサーバの応答)ときも同じ", () => {
@@ -293,19 +321,44 @@ describe("buildFormation: ◎の強調・凡例・注記", () => {
     expect(unknown.paceLine).toBe("想定ペース: 不明(平均として描きます)");
   });
 
-  it("見出しと注記: 勝率を反映しないこと・縦の並びに意味がないこと・係数が経験則であることを言う", () => {
-    const f = buildFormation(analysis(four()))!;
-    expect(f.heading).toBe("想定隊列図");
-    expect(f.note).toContain("脚質と想定ペース");
-    expect(f.note).toContain("勝率");
-    expect(f.note).toContain("縦");
-    expect(f.note).toContain("経験則");
+  const OLD_NOTE = "馬の脚質と想定ペースからの想定です(実際の隊列とは異なることがあります)。馬の実力・勝率は反映していません。縦の並びは重なりを避けるためで、内外を表しません。位置の計算に使う係数は経験則です。";
+  const NEW_NOTE = "道中は馬の脚質と近走の序盤の位置から、4コーナーは近走の4コーナーの通過順位から(無い馬は脚質と想定ペースから)の想定です(実際の隊列とは異なることがあります)。馬の実力・勝率は反映していません。縦の並びは重なりを避けるためで、内外を表しません。位置の計算に使う係数は経験則です。";
+
+  it("見出しと注記: 勝率を反映しないこと・縦の並びに意味がないこと・係数が経験則であることを言う(latePos のある分析でも、ない分析でも)", () => {
+    const withLate = four().map((h) => ({ ...h, latePos: 0.5 }));
+    for (const horses of [withLate, four()]) {
+      const f = buildFormation(analysis(horses))!;
+      expect(f.heading).toBe("想定隊列図");
+      expect(f.note).toContain("脚質と想定ペース");
+      expect(f.note).toContain("勝率");
+      expect(f.note).toContain("縦");
+      expect(f.note).toContain("経験則");
+    }
   });
 
-  it("注記は 4コーナーの材料(近走の4コーナーの通過順位。無い馬は脚質と想定ペース)を言う", () => {
-    const f = buildFormation(analysis(four()))!;
-    expect(f.note).toContain("近走の4コーナーの通過順位");
-    expect(f.note).toContain("無い馬は脚質と想定ペース");
+  it("注記は 4コーナーの材料(近走の4コーナーの通過順位。無い馬は脚質と想定ペース)を言う: 1 頭でも latePos がある分析では今の文言(Issue #375)", () => {
+    const one = four().map((h, i) => (i === 2 ? { ...h, latePos: 0.4 } : h));
+    expect(buildFormation(analysis(one))!.note).toBe(NEW_NOTE);
+    const all = four().map((h) => ({ ...h, latePos: 0.4 }));
+    expect(buildFormation(analysis(all))!.note).toBe(NEW_NOTE);
+  });
+
+  it("全馬の latePos が無い分析(#363 より前。null・キー無しとも)の注記は、#362 のときの文言(4コーナーの材料に触れない。Issue #375)", () => {
+    expect(buildFormation(analysis(four()))!.note).toBe(OLD_NOTE);
+    const stripped = four().map((h) => {
+      const copy: Record<string, unknown> = { ...h };
+      delete copy["latePos"];
+      return copy as unknown as AnalysisHorse;
+    });
+    expect(buildFormation(analysis(stripped))!.note).toBe(OLD_NOTE);
+    expect(OLD_NOTE).not.toContain("4コーナーの通過順位");
+  });
+
+  it("latePos があっても脚質が分からず図に置かない馬だけが持っているなら、図は latePos を使わないので #362 の文言(Issue #375)", () => {
+    const horses = [...four(), horse(5, { legStyle: null as unknown as LegStyle, latePos: 0.3 })];
+    const f = buildFormation(analysis(horses))!;
+    expect(f.phases[0]!.chips).toHaveLength(4); // 前提: 馬5 は図に置かれていない
+    expect(f.note).toBe(OLD_NOTE);
   });
 
   it("図の読み上げ文(ariaLabel): 局面名と、前から後ろへ 同じ列の馬を「・」でつないだ馬番", () => {

@@ -43,9 +43,13 @@ async function readBody(response: { json: () => Promise<unknown> }): Promise<unk
   }
 }
 
-/** 失敗(200 以外)の分類。400・413・415 は bad-request、503 は(netkeiba の形でも)server-error。 */
+/**
+ * 失敗(200 以外)の分類。400・413・415 は bad-request、503 は(netkeiba の形でも)server-error。
+ * 400 で `error.reason` が `"keys-mismatch"`(項目の過不足。Issue #375)のときだけ `staleScreen: true`(画面が古い可能性)を付ける。読むのはこの固定の語だけで、`message`・`fields` は読まない。
+ */
 function classifyFailure(status: number, body: unknown): ApiFailure {
   if (status === 413 || status === 415) return { kind: "bad-request" };
+  if (status === 400 && isRecord(body) && isRecord(body["error"]) && body["error"]["reason"] === "keys-mismatch") return { kind: "bad-request", staleScreen: true };
   const failure = classify(status, body);
   return failure.kind === "netkeiba-unavailable" ? { kind: "server-error" } : failure;
 }
@@ -122,6 +126,7 @@ export function settingsFailureMessage(failure: ApiFailure, op: "load" | "save")
     case "network":
       return "設定の保存の通信に失敗しました。入力した内容は残っています。ログインの期限切れかもしれません。もう一度「保存」を押して再試行できます。";
     case "bad-request":
+      if (failure.staleScreen === true) return "設定を保存できませんでした。項目が更新されています。入力した内容を控えてから、ページを再読み込みしてください。";
       return "設定を保存できませんでした。サーバが入力を受け付けませんでした(範囲外の値かもしれません)。入力した内容は残っています。内容を確認してください。";
     case "server-error":
     case "netkeiba-unavailable":

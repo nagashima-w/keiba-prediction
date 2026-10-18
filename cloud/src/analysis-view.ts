@@ -29,7 +29,6 @@ import type { PlaceOddsBasis } from "../../packages/core/src/ev/place-odds-estim
 import type { AnalysisDetailResult, DetailStatus } from "./analysis-repository";
 import type { LlmCallRecord } from "./llm-calls";
 import { buildComboCountLines } from "./combo-counts-view";
-import { courseTurnOf, type CourseTurn } from "./course-turn";
 import { markFromByUmaban } from "./mark-repair";
 import { estimatePlaceOddsForRace } from "./place-odds-view";
 
@@ -121,8 +120,6 @@ export interface AnalysisViewRace {
    * 画面が「2着まで」を添える・複勝の行を「-」にするのに使う。分析した馬の数から決まり、詳細〈R2〉の状態に依らない。
    */
   readonly placeBasis: PlaceOddsBasis | null;
-  /** コースの回り(Issue #311。レース再生のコース図の向き。#362 でレース再生を廃止したあと、クライアントでは使わない。raceId の場コードと距離から `courseTurnOf` で決める。不明は "right")。詳細〈R2〉の状態に依らないが、大井の 1650m の特例は距離が要るので詳細が無いと右になる。`buildAnalysisView` は常にキーを持つ(型で省略可なのは `earlyPos` と同じ理由)。 */
-  readonly turn?: CourseTurn;
   /**
    * 想定ペース(Issue #314。想定隊列図〈#362〉の隊列の長さ・4コーナーの動きに使う)。**規則の値**(core の `buildRaceDevelopment` の `pace`。プロンプトの材料〈脚質分布・主導権候補〉と同じ関数だが、#315 以降この結論自体はプロンプトに渡していない。逃げ馬の頭数から。脚質の判定できた馬が 1 頭もいなければ「不明」)に、
    * スナップショットの馬ごとの脚質を渡して求める。詳細が present でない・古い分析〈脚質のキーが無い〉は「不明」。確率・配分には使わない(着順の抽選も変えない)。`buildAnalysisView` は常にキーを持つ。
@@ -471,7 +468,6 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       trackCondition: str(race?.trackCondition),
       oddsStatus: str(race?.oddsStatus),
       placeBasis: placeOdds.basis,
-      turn: courseTurnOf(analysis.raceId, num(race?.distance)),
       // 想定ペース: LLM の値があればそれ(Issue #315)、無ければ従来の規則の値(Issue #314)。
       pace: extracted.pace ?? paceOf(snapshot),
       paceSource: extracted.pace === null ? "rule" : "llm",

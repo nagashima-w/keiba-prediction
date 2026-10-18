@@ -41,7 +41,8 @@ export type ApiFailure =
   | { readonly kind: "forbidden" }
   /** 403 で、本文の `error.type` が `origin-mismatch`(サーバの Origin の完全一致の検査に落ちた。Access の拒否〈本文が平文〉とは区別する。Issue #186)。 */
   | { readonly kind: "origin-mismatch" }
-  | { readonly kind: "bad-request" }
+  /** 400 など。`staleScreen: true` は設定の保存だけ(サーバの `reason: "keys-mismatch"`。項目の過不足=画面が古い可能性。Issue #375)。 */
+  | { readonly kind: "bad-request"; readonly staleScreen?: true }
   | { readonly kind: "netkeiba-unavailable"; readonly reason: "blocked" | "busy" | "failed" }
   | { readonly kind: "server-error" }
   /** 404(分析 id が無い。`api-analysis.ts` だけが返す)。 */

@@ -23,7 +23,7 @@ import { CLIENT_JS } from "./client-bundle.generated";
 import { ICON_CACHE_CONTROL, iconAsset } from "./icons";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
-import { loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
+import { hasSettingsKeysMismatch, loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
 import { redactSecrets } from "./llm-run";
 import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgress, RaceListResult, RaceListVenue, RequestPlanResult, RequestResultImportResult, ResultImportProgress, ScheduleInput, ScheduleManyInput, ScheduleManyResult, ScheduleResult } from "./race-day-core";
 import { BULK_BODY_MAX_BYTES, MAX_BULK_RACES } from "./bulk-limits";
@@ -1297,7 +1297,7 @@ async function handleSettingsGet(env: Env): Promise<Response> {
 /**
  * `POST /api/settings`(Issue #189): 設定を D1 に保存する。**全項目の置き換え**(キーが欠けている・未知のキーがある・範囲外は 400。黙って既定値に戻さない)。
  * 順序: 守り(`readJsonObjectBody`。上限は 16 KiB)→ 検証(書く側の範囲。400。ここまでで D1 に書かない)→ UPSERT(失敗は 503。文面なし)。
- * 成功は 200 で、保存した設定を返す(`{ ok: true, settings }`)。400 の本文は固定の message と、欠けた・範囲外の**既知の項目名**(`fields`。入力の値・未知のキー名は写さない)。
+ * 成功は 200 で、保存した設定を返す(`{ ok: true, settings }`)。400 の本文は固定の message と、欠けた・範囲外の**既知の項目名**(`fields`。入力の値・未知のキー名は写さない)。項目の過不足(欠け・未知)があるときは `reason: "keys-mismatch"` も付く(Issue #375。古い画面の案内用)。
  */
 async function handleSettingsSave(request: Request, env: Env, now: () => Date): Promise<Response> {
   const guarded = await readJsonObjectBody(request, SETTINGS_BODY_MAX_BYTES);
@@ -1306,7 +1306,9 @@ async function handleSettingsSave(request: Request, env: Env, now: () => Date): 
   }
   const checked = validateCloudSettingsForSave(guarded.body);
   if (!checked.ok) {
-    return json({ ok: false, error: { type: "bad-request", message: "設定の項目が足りない・未知の項目がある・範囲外の値があります", fields: checked.fields } }, 400);
+    // `reason: "keys-mismatch"`(Issue #375): 項目の過不足(欠け・未知)があるとき。画面を開いたままデプロイをまたいだ古い画面が送る形で、クライアントは再読み込みを案内する。範囲外の値だけなら付けない。
+    const reason = hasSettingsKeysMismatch(guarded.body) ? { reason: "keys-mismatch" } : {};
+    return json({ ok: false, error: { type: "bad-request", message: "設定の項目が足りない・未知の項目がある・範囲外の値があります", fields: checked.fields, ...reason } }, 400);
   }
   try {
     await saveSettings(env.DB, checked.settings, now().toISOString());
