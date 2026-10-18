@@ -799,7 +799,7 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     expect(offenders).toEqual([]);
   });
 
-  it("Issue #333: cloud の .ts は `new URL(…, import.meta.url)` を URL のまま Node の API(readFileSync 等)へ渡さない(@types/node 24 以上では TS2769。`.href` の文字列で渡すか、test/meta-path.ts の pathFromMeta を使う)", () => {
+  it("Issue #333: cloud の .ts は `new URL(…, import.meta.url)` を URL のまま Node の API(readFileSync 等)へ渡さない(@types/node 24 以上では型が合わない: 呼び方によって TS2769(`readFileSync(URL, 'utf8')`・`readdirSync(URL)` など)または TS2345(`readFileSync(URL)`〈エンコーディング引数なし〉・`existsSync`・`fileURLToPath` など)になる。`.href` の文字列にするとファイルとして開けず実行時に落ちるので、test/meta-path.ts の pathFromMeta でファイルシステムのパスにして渡す)", () => {
     const tsFiles = scanTargets().filter((f) => f.startsWith("cloud/") && f.endsWith(".ts") && f !== "cloud/test/meta-path.ts");
     expect(tsFiles.length, "走査した .ts が十分ある(空振り防止)").toBeGreaterThan(100);
     // 正規表現の自己検査: 検出すべき形は検出し、`.href` で文字列にした形は検出しない(これが無いと、空振りの正規表現で常に緑になる)

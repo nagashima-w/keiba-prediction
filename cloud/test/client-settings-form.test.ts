@@ -636,6 +636,10 @@ describe("Issue #353・#354: タイム指数・調教師成績の重みの欄", 
     expect(Object.keys(byKey)).toHaveLength(15);
     expect(byKey["baseScoreWeightTimeIndex"]).toContain("秒/km");
     expect(byKey["baseScoreWeightTimeIndex"]).toContain("単位が違う");
+    // 中央のレースだけに効き、障害のレースには効かない(core の time-index.ts・trainer-stats.ts がどちらも障害を対象外にする)
+    expect(byKey["baseScoreWeightTimeIndex"]).toContain("中央のレースだけ");
+    expect(byKey["baseScoreWeightTimeIndex"]).toContain("障害には効かない");
+    expect(byKey["baseScoreWeightTrainer"]).toContain("障害には効かない");
     expect(byKey["baseScoreWeightTrainer"]).toContain("3着内率");
     expect(byKey["baseScoreWeightTrainer"]).toContain("中央のレースだけ");
     expect(byKey["baseScoreWeightTrainer"]).toContain("0 にすると調教師の成績を取得しない");

@@ -1493,9 +1493,9 @@ async function handlePlan(request: Request, env: Env): Promise<Response> {
  * `GET /api/targets?kaisai_date=YYYYMMDD`(Issue #336): 「今日の狙い目」。その日の各レースの**最新の分析**から、配分の提案(買い目の点数・合計・最大 EV)と◎の馬番を、
  * 発走時刻・場・R つきで返す(整形は `targets-view.ts`。**文言はサーバで組み立てる**)。締切の直前の再計算(Issue #338)の回があれば、ok の回のうち番号が最大のものを優先する。
  *
- * **読み取り専用。D1(集計)と日単位の DO の `getPlanProgress`(発走時刻)だけを読む**。R2 の詳細は読まない(馬名は出さない。◎は馬番だけ)ので、操作回数の柵を使わない。
+ * **読み取り専用。D1(集計)と、日単位の DO の読み取り専用の RPC 2 つ(`getPlanProgress`=発走時刻、`getTargetsLedger`=収支。Issue #361)だけを読む**。R2 の詳細は読まない(馬名は出さない。◎は馬番だけ)ので、操作回数の柵を使わない。
  * netkeiba・LLM・Webhook・gate にも触れない(`cloud-config-guard.test.ts` が固定)。閲覧者にも開く(route-policy.ts。`GET /api/analyses/{id}` で配分はすでに見える)。
- * 順序: `Sec-Fetch-Site`(別サイトなら 403。DO の名前は開催日なので、日付を変えて DO を作らせる cross-site の GET を拒否する。`handlePlan` と同じ)→ クエリの検証(400。ここまでで D1・DO は呼ばない)→ D1(失敗は 503・文面なし)→ DO。
+ * 順序: `Sec-Fetch-Site`(別サイトなら 403。DO の名前は開催日なので、日付を変えて DO を作らせる cross-site の GET を拒否する。`handlePlan` と同じ)→ クエリの検証(400。ここまでで D1・DO は呼ばない)→ D1(失敗は 503・文面なし)→ DO(計画と収支。どちらの失敗も一覧を巻き込まない)。
  * **DO は分析が 1 件でもあるときだけ呼ぶ**(分析の無い日付で DO を作らない)。DO の失敗(計画が無い・読めない)は 503 にせず、発走時刻なしで 200 を返す(場・R は race_id から導ける)。
  * 再計算の表が無い間(migration の適用前に Worker が先に出た場合)は、再計算なし(分析時の提案)で 200(`D1TargetsStore.readDay`)。
  *

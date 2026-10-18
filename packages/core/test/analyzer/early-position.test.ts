@@ -1,5 +1,5 @@
 /**
- * スタート直後の位置の指標 `computeEarlyPosition`(Issue #311。レース再生の演出用)。
+ * スタート直後の位置の指標 `computeEarlyPosition`(Issue #311。想定隊列図〈#362〉の道中の並びに使う表示用。もとはレース再生〈#362 で廃止〉の演出用)。
  * 新しい順に最大3走(第1コーナーの通過順位 ÷ 出走頭数)を平均する。0〜1 で小さいほど前。判定不能は null。
  */
 import { describe, expect, it } from "vitest";

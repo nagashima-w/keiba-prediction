@@ -6,7 +6,7 @@
  *
  * 呼び出す入口は、手動の `POST /api/analyses/run`(#180)と、cron の `scheduled`(#206。`requestPlan`)、結果の取り込みの依頼(#208。`requestResultImport`。cron の `scheduled` と手動の `POST /api/results/import` が `dispatchResultImports` 経由で呼ぶ)。この DO は `worker.ts` から export される(wrangler が binding のクラスを要求する)。
  * **朝のタスクは、分析の結果(prior)を D1・R2 に書かない**(DO のストレージにだけ置く)。朝のタスクが D1 に触れるのは、設定の読み出し(#218)・
- * 騎手の成績の保存先 `jockey_results`(#226)・各馬の戦績の蓄積 `horse_runs`(#256 段階A)だけで、R2 には触れない。分析履歴(D1 の要約と R2 の詳細)を保存するのは
+ * 騎手の成績の保存先 `jockey_results`(#226)・調教師の成績の保存先 `trainer_results`(#354)・各馬の戦績の蓄積 `horse_runs`(#256 段階A)だけで、R2 には触れない。分析履歴(D1 の要約と R2 の詳細)を保存するのは
  * 発走前の分析(`pre_race`。#178)だけ。結果の取り込み(#208)は D1 に結果を保存する(`D1ResultStore`。取得は gate 経由・キャッシュなし)。
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v2)に固定される。
@@ -40,7 +40,7 @@ export const R2_PUT_TIMEOUT_MS = 15_000;
 
 /**
  * RaceDay が使う binding。NetkeibaGate の名前空間(取得)と、**発走前の分析(`pre_race`)の保存先・設定の D1・R2**(Issue #178)。
- * 朝のタスクは、この保存先(分析履歴の D1・R2)を呼ばない(`RaceDayCore` が朝のタスクでは `save` を呼ばない)。朝のタスクが D1 に触れるのは、設定の読み出し・騎手の成績・各馬の戦績だけ(上の冒頭の説明)。
+ * 朝のタスクは、この保存先(分析履歴の D1・R2)を呼ばない(`RaceDayCore` が朝のタスクでは `save` を呼ばない)。朝のタスクが D1 に触れるのは、設定の読み出し・騎手の成績・調教師の成績・各馬の戦績だけ(上の冒頭の説明)。
  */
 export interface RaceDayEnv {
   DB: AnalysisDb & Pick<D1Database, "prepare">;

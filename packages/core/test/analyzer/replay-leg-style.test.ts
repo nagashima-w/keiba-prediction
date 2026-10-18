@@ -1,5 +1,5 @@
 /**
- * 馬ごとの脚質 `computeReplayLegStyle`(Issue #314。レース再生の隊列を脚質で決めるための材料)。
+ * 馬ごとの脚質 `computeReplayLegStyle`(Issue #314。想定隊列図〈#362〉の位置を脚質で決めるための材料。もとはレース再生〈#362 で廃止〉の隊列用で、名前の replay はその名残)。
  * プロンプトの展開想定(`build-prompt.ts` → `analyzeHorseLegStyle`)と同じ分類・同じ参照走数(3)を使う。
  * 入力は戦績(`passing`・`entryCount`)で、プロンプトの経路(`analysis-pipeline.ts` の `runs`)と同じ写し方
  * (`passing` → `passing`、`entryCount` → `fieldSize`)で `analyzeHorseLegStyle` に渡す。

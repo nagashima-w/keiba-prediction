@@ -85,7 +85,7 @@ describe("fetchSettings(GET /api/settings)", () => {
 });
 
 describe("postSettings(POST /api/settings)", () => {
-  it("リクエスト: POST /api/settings に、29 項目すべての JSON を送る(content-type: application/json・同じオリジンの資格情報・referrerPolicy: same-origin。mode は指定しない)", async () => {
+  it("リクエスト: POST /api/settings に、30 項目すべての JSON を送る(content-type: application/json・同じオリジンの資格情報・referrerPolicy: same-origin。mode は指定しない)", async () => {
     const f = fake(async () => resp(200, { ok: true, settings: SAVED }));
     await postSettings(f.fetch, SAVED);
     expect(f.calls).toHaveLength(1);

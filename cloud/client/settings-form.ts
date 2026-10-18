@@ -249,9 +249,9 @@ const WEIGHTS_HELP: readonly string[] = [
   "事前分析と発走前の分析の両方で使われます。保存後に始まる準備・分析から反映され、すでに始まったタスクは始めたときの設定のままです。",
 ];
 /** タイム指数の重みの補助文(画面に出る文なので Issue 番号は書かない)。 */
-const TIME_INDEX_WEIGHT_HELP = "秒/km の差にかける量(他の重みと単位が違う)。中央のレースだけに効く。";
+const TIME_INDEX_WEIGHT_HELP = "秒/km の差にかける量(他の重みと単位が違う)。中央のレースだけに効く(障害には効かない)。";
 /** 調教師成績の重みの補助文(画面に出る文なので Issue 番号は書かない)。0 にすると調教師の成績を取得しない(リクエストが増えない)。 */
-const TRAINER_WEIGHT_HELP = "調教師の前2年の3着内率の差にかける量。中央のレースだけに効く。0 にすると調教師の成績を取得しない。";
+const TRAINER_WEIGHT_HELP = "調教師の前2年の3着内率の差にかける量。中央のレースだけに効く(障害には効かない)。0 にすると調教師の成績を取得しない。";
 
 const WEIGHT_GROUP_HEADINGS: Readonly<Record<"bias" | "base", string>> = { bias: "環境・状態バイアス補正", base: "基礎スコア" };
 const WEIGHTS_RESET_LABEL = "重みを既定値に戻す";
