@@ -181,6 +181,33 @@ describe("取り直し(3 分ごと・見えている間だけ・発走前が残�
     expect(h.calls).toHaveLength(3); // 新しい発走前のレースがあるので再開した
   });
 
+  it("すべて発走済みでも、結果待ち(pending・pending_payout)の行が残るあいだは取り直しを続ける。結果待ちが無くなったら止まる(Issue #361)", async () => {
+    const h = harness();
+    const waiting = (state: string): Row => ({ ...raceRow("202605050811", BASE - 30 * MIN), result_state: state, result: "結果待ち" });
+    for (const state of ["pending", "pending_payout"]) {
+      h.calls.length = 0;
+      h.rows = [waiting(state)];
+      h.screen.leave();
+      await started(h, h.rows);
+      await h.timers.advance(TARGETS_POLL_MS);
+      expect(h.calls, state).toHaveLength(2); // 3 分で取り直した
+    }
+    // 結果が確定したら、次の周期から止まる
+    h.rows = [{ ...raceRow("202605050811", BASE - 30 * MIN), result_state: "settled", result: "的中 +1,200円" }];
+    await h.timers.advance(TARGETS_POLL_MS);
+    const settledCalls = h.calls.length;
+    await h.timers.advance(TARGETS_POLL_MS * 5);
+    expect(h.calls).toHaveLength(settledCalls);
+  });
+
+  it("結果待ちが他の状態(結果なし・確定・集計対象外・提案なし)なら、すべて発走済みで取り直さない", async () => {
+    const h = harness();
+    const rows = ["settled", "none", "excluded", "no_proposal"].map((state, i) => ({ ...raceRow(`20260505081${i}`, BASE - 30 * MIN), result_state: state, result: "x" }));
+    await started(h, rows);
+    await h.timers.advance(TARGETS_POLL_MS * 3);
+    expect(h.calls).toHaveLength(1);
+  });
+
   it("まだ 1 件も分析されていない朝(races が空)は、取り直しを続ける(これから増える)", async () => {
     const h = harness();
     await started(h, []);

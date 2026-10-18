@@ -29,11 +29,11 @@ describe("remainingText(境界値)", () => {
 });
 
 function race(id: string, startMs: number | null, overrides: Partial<TargetRace> = {}): TargetRace {
-  return { raceId: id, analysisId: Number(id.slice(-4)), startMs, startTime: startMs === null ? null : "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", ...overrides };
+  return { raceId: id, analysisId: Number(id.slice(-4)), startMs, startTime: startMs === null ? null : "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", resultState: null, result: null, ...overrides };
 }
 
 function data(races: TargetRace[], overrides: Partial<TargetsData> = {}): TargetsData {
-  return { date: "20261017", nowMs: NOW, summary: "分析済み 5 レース中、狙い目 5", races, ...overrides };
+  return { date: "20261017", nowMs: NOW, summary: "分析済み 5 レース中、狙い目 5", ledger: null, races, ...overrides };
 }
 
 const R = (n: number) => `2026050508${String(n).padStart(2, "0")}`;
@@ -100,5 +100,40 @@ describe("buildTargetsModel: リンクと画面の要素", () => {
     expect(model.summary).toBe("分析済み 12 レースのうち、狙い目はありません");
     expect(model.upcoming).toEqual([]);
     expect(model.past).toEqual([]);
+  });
+});
+
+describe("buildTargetsModel: 収支の途中経過(Issue #361)", () => {
+  const settled = (id: string, startMs: number | null, result = "的中 +1,200円"): TargetRace => race(id, startMs, { resultState: "settled", result });
+
+  it("上部の合計はサーバの文言のまま。データなしは null", () => {
+    expect(build(data([], { ledger: "確定 2R: 投資 3,000円 / 回収 4,200円 / 回収率 140.0%" })).ledger).toBe("確定 2R: 投資 3,000円 / 回収 4,200円 / 回収率 140.0%");
+    expect(build(data([])).ledger).toBeNull();
+    expect(build(null).ledger).toBeNull();
+  });
+
+  it("発走済みの行にだけ結果の文言を出す。未発走の行は(サーバが結果を持っていても)空", () => {
+    const model = build(data([settled(R(1), NOW - 30 * MIN), settled(R(2), NOW + 30 * MIN, "結果待ち")]));
+    expect(model.past.map((r) => r.result)).toEqual(["的中 +1,200円"]);
+    expect(model.upcoming.map((r) => r.result)).toEqual([""]);
+    // 前提: 未発走の行の元データには文言がある(隠したのが表示側であって、データが無いからではない)
+    expect(data([settled(R(2), NOW + 30 * MIN, "結果待ち")]).races[0]!.result).toBe("結果待ち");
+  });
+
+  it("「今」が進んで行が発走済みに移ると、取り直さなくてもサーバが持っていた文言(結果待ち)が出る。発走の瞬間ちょうどから", () => {
+    const d = data([race(R(1), NOW + 10 * MIN, { resultState: "pending", result: "結果待ち" })]);
+    expect(build(d, { nowMs: NOW + 10 * MIN - 1 }).upcoming[0]!.result).toBe("");
+    expect(build(d, { nowMs: NOW + 10 * MIN }).past[0]!.result).toBe("結果待ち");
+  });
+
+  it("発走時刻が不明な行は、確定・結果なし・集計対象外のときだけ出す(待ち・提案なしは、発走前かもしれないので出さない)", () => {
+    const states: [string, string, string][] = [["settled", "的中 +100円", "的中 +100円"], ["none", "結果なし", "結果なし"], ["excluded", "集計対象外", "集計対象外"], ["pending", "結果待ち", ""], ["pending_payout", "結果待ち(払戻)", ""], ["no_proposal", "分析時の提案なし", ""]];
+    for (const [state, text, shown] of states) {
+      expect(build(data([race(R(5), null, { resultState: state, result: text })])).upcoming[0]!.result, state).toBe(shown);
+    }
+  });
+
+  it("結果の文言が null(収支なし・ledger に無い行)は空", () => {
+    expect(build(data([race(R(1), NOW - MIN)])).past[0]!.result).toBe("");
   });
 });

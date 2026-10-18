@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
+import type { LedgerRaceResult, TargetsLedger } from "../src/targets-ledger";
 import { buildTargetsView, type TargetsAnalysisRow, type TargetsCloseRoundRow, type TargetsPlanRow } from "../src/targets-view";
 
 /**
@@ -230,6 +231,115 @@ describe("並びと要約", () => {
 
   it("応答の各レースのキーは許可したものだけ(内部の列を展開して漏らさない)", () => {
     const race = build([analysis(R11)], [], [planRow(R11, "15:40")]).races[0]!;
-    expect(Object.keys(race).sort()).toEqual(["analysis_id", "bet_count", "detail", "max_ev", "pick", "place", "race_id", "round", "skipped", "source", "start_ms", "start_time", "total_stake"]);
+    expect(Object.keys(race).sort()).toEqual(["analysis_id", "bet_count", "detail", "max_ev", "pick", "place", "race_id", "result", "result_state", "round", "skipped", "source", "start_ms", "start_time", "total_stake"]);
+  });
+});
+
+
+/**
+ * Issue #361: 収支の途中経過(上部の合計と各行の結果)。数字は `targets-ledger.ts` が作り、ここは文言にするだけ(文言はサーバで組み立てる)。
+ */
+describe("収支の途中経過の文言", () => {
+  const money = { stake: 0, payout: 0, refundedStake: 0, hit: false, reason: null } as const;
+  const settled = (raceId: string, stake: number, payout: number, extra: Partial<LedgerRaceResult> = {}): LedgerRaceResult => ({ raceId, state: "settled", stake, payout, refundedStake: 0, hit: payout > 0, reason: null, ...extra });
+  const other = (raceId: string, state: LedgerRaceResult["state"], reason: LedgerRaceResult["reason"] = null): LedgerRaceResult => ({ raceId, state, ...money, reason });
+  function ledgerOf(races: LedgerRaceResult[], overrides: Partial<TargetsLedger> = {}): TargetsLedger {
+    const done = races.filter((r) => r.state === "settled");
+    const stake = done.reduce((n, r) => n + r.stake, 0);
+    const payout = done.reduce((n, r) => n + r.payout, 0);
+    return { races: new Map(races.map((r) => [r.raceId, r])), total: { raceCount: done.length, stake, payout, recoveryRate: stake === 0 ? null : payout / stake }, waitingCount: 0, noneCount: 0, ...overrides };
+  }
+  const withLedger = (analyses: TargetsAnalysisRow[], ledger: TargetsLedger | null, closeRounds: TargetsCloseRoundRow[] | null = []) => buildTargetsView({ kaisaiDate: DATE, nowMs: NOW, analyses, closeRounds, plan: null, ledger });
+
+  it("ledger を渡さない / null: 合計も各行の結果も null(収支なしで一覧だけ出す)", () => {
+    const view = buildTargetsView({ kaisaiDate: DATE, nowMs: NOW, analyses: [analysis(R11)], closeRounds: [], plan: null });
+    expect(view.ledger).toBeNull();
+    expect(view.races[0]).toMatchObject({ result_state: null, result: null });
+    expect(withLedger([analysis(R11)], null).ledger).toBeNull();
+  });
+
+  it("各行(分析時の提案を採った行): 的中は「的中 +差額円」、差額は払戻 − 賭け金", () => {
+    const view = withLedger([analysis(R11)], ledgerOf([settled(R11, 300, 1500)]));
+    expect(view.races[0]).toMatchObject({ result_state: "settled", result: "的中 +1,200円" });
+  });
+
+  it("各行: 不的中は「不的中 −300円」(マイナスは U+2212)。的中でも損なら「的中 −100円」。差額 0 の的中は「的中 ±0円」", () => {
+    const view = withLedger(
+      [analysis(R11), analysis(R12), analysis("202605050813")],
+      ledgerOf([settled(R11, 300, 0), settled(R12, 1000, 900, { hit: true }), settled("202605050813", 500, 500, { hit: true })]),
+    );
+    expect(view.races.map((r) => r.result)).toEqual(["不的中 \u2212300円", "的中 \u2212100円", "的中 ±0円"]);
+    expect(view.races[0]!.result).toContain("\u2212"); // 前提: ASCII のハイフンではない
+  });
+
+  it("各行: 返還だけ(払戻 = 賭け金・的中なし)は「返還 ±0円」", () => {
+    const view = withLedger([analysis(R11)], ledgerOf([settled(R11, 300, 300, { refundedStake: 300, hit: false })]));
+    expect(view.races[0]!.result).toBe("返還 ±0円");
+  });
+
+  it("各行: 再計算を採った行は、基準(分析時の提案)と分析時の投資額を明記する。見送りの行も同じ", () => {
+    const a = analysis(R11);
+    const b = analysis(R12);
+    const view = withLedger(
+      [a, b],
+      ledgerOf([settled(R11, 500, 1700), settled(R12, 300, 0)]),
+      [closeRound(a, 1), closeRound(b, 2, { betCount: 0, totalStake: 0, maxEv: null })],
+    );
+    expect(view.races.map((r) => [r.source, r.skipped, r.result])).toEqual([
+      ["close", false, "分析時の提案: 的中 +1,200円(投資 500円)"],
+      ["close", true, "分析時の提案: 不的中 \u2212300円(投資 300円)"],
+    ]);
+  });
+
+  it("各行: 結果待ち・結果待ち(払戻)・結果なし・集計対象外(理由別)・提案なし", () => {
+    const ids = ["202605050801", "202605050802", "202605050803", "202605050804", "202605050805", "202605050806", "202605050807"];
+    const states: LedgerRaceResult[] = [
+      other(ids[0]!, "pending"),
+      other(ids[1]!, "pending_payout"),
+      other(ids[2]!, "none"),
+      other(ids[3]!, "excluded", "lookahead-suspect"),
+      other(ids[4]!, "excluded", "lookahead-unknown"),
+      other(ids[5]!, "excluded", "estimated"),
+      other(ids[6]!, "no_proposal"),
+    ];
+    const view = withLedger(ids.map((id) => analysis(id)), ledgerOf(states));
+    expect(view.races.map((r) => [r.result_state, r.result])).toEqual([
+      ["pending", "結果待ち"],
+      ["pending_payout", "結果待ち(払戻)"],
+      ["none", "結果なし"],
+      ["excluded", "集計対象外(発走後の分析)"],
+      ["excluded", "集計対象外(発走前の分析か判定できません)"],
+      ["excluded", "集計対象外(発売前の推定)"],
+      ["no_proposal", "分析時の提案なし"],
+    ]);
+  });
+
+  it("ledger に無いレースの行は結果なし(null)", () => {
+    const view = withLedger([analysis(R11)], ledgerOf([settled(R12, 100, 0)]));
+    expect(view.races[0]).toMatchObject({ result_state: null, result: null });
+  });
+
+  it("上部の合計: 確定 N R・投資・回収・回収率(小数第 1 位)", () => {
+    const view = withLedger([analysis(R11), analysis(R12)], ledgerOf([settled(R11, 1000, 1500), settled(R12, 2000, 2700)]));
+    expect(view.ledger).toBe("確定 2R: 投資 3,000円 / 回収 4,200円 / 回収率 140.0%");
+  });
+
+  it("上部の合計: 結果待ち・結果なしの件数を添える", () => {
+    const view = withLedger([analysis(R11)], ledgerOf([settled(R11, 1000, 500)], { waitingCount: 3, noneCount: 1 }));
+    expect(view.ledger).toBe("確定 1R: 投資 1,000円 / 回収 500円 / 回収率 50.0%(結果待ち 3R・結果なし 1R)");
+    expect(withLedger([analysis(R11)], ledgerOf([settled(R11, 1000, 500)], { waitingCount: 2 })).ledger).toBe("確定 1R: 投資 1,000円 / 回収 500円 / 回収率 50.0%(結果待ち 2R)");
+  });
+
+  it("上部の合計: 確定が 0 件で待ちがあるとき「確定したレースはまだありません(結果待ち 3R)」。待ちも結果なしも無ければ null(何も出さない)", () => {
+    const pending = ledgerOf([other(R11, "pending")], { waitingCount: 3 });
+    expect(withLedger([analysis(R11)], pending).ledger).toBe("確定したレースはまだありません(結果待ち 3R)");
+    expect(withLedger([analysis(R11)], ledgerOf([other(R11, "pending")])).ledger).toBeNull();
+    expect(withLedger([analysis(R11)], ledgerOf([other(R11, "none")], { noneCount: 1 })).ledger).toBe("確定したレースはまだありません(結果なし 1R)");
+  });
+
+  it("金額は円に丸める(払戻が小数でも、差額と表示の円が食い違わない)", () => {
+    const view = withLedger([analysis(R11)], ledgerOf([settled(R11, 300, 1049.6)]));
+    expect(view.races[0]!.result).toBe("的中 +750円");
+    expect(view.ledger).toContain("回収 1,050円");
   });
 });

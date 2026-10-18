@@ -5,7 +5,7 @@
  *  - 開く(`enter`): `GET /api/targets` を 1 回(D1 の読み取りだけ。R2・netkeiba には出ない)。同じ日で重ねて呼んでも取得は増えない。「更新」(`onRefresh`)は取り直し(取得中は無視)。
  *  - **残り時間は取得なしで更新する**: {@link TARGETS_TICK_MS}(30 秒)ごとに再描画だけ行う(`setInterval` は使わない。`setTimeout` の連鎖)。「今」は端末の時計を、取得時のサーバの時刻(`now_ms`)で補正した値。
  *  - **取り直し(自動)は {@link TARGETS_POLL_MS}(3 分)ごと**。次のすべてを満たすときだけ: 画面が見えている・開催日が今日(JST)・前回の取得に成功している・
- *    発走前のレースが残っている(または、まだ 1 件も分析されていない=これから増える)・自動の取り直しが {@link TARGETS_MAX_POLLS} 回未満・通信の失敗が {@link MAX_FAILURES} 回続いていない。
+ *    発走前のレースが残っている(または、まだ 1 件も分析されていない=これから増える、または**結果待ちの行が残っている**=収支の途中経過〈Issue #361〉が更新される)・自動の取り直しが {@link TARGETS_MAX_POLLS} 回未満・通信の失敗が {@link MAX_FAILURES} 回続いていない。
  *    止まった状態は、「更新」(回数と失敗を数え直す)と、画面が見えるようになったとき(最後の取得から {@link RETURN_STALE_MS} 以上なら取り直す)で動き出す。
  *    1 回の取得は D1 を数千行読む(`targets-repository.ts`)ので、Free の 1 日の読み取り行数のために、間隔・回数・止める条件を持つ。
  *  - 取り直しの失敗は前の表示を残す(注記だけ出す)。最初の取得の失敗はエラー表示(固定の文言)で、自動では再試行しない。
@@ -87,7 +87,8 @@ export function createTargetsScreen(deps: TargetsScreenDeps): TargetsScreen {
     if (date === null || data === null || busy || !deps.isVisible() || date !== deps.today()) return false;
     if (polls >= TARGETS_MAX_POLLS || failures >= MAX_FAILURES || deps.now() - fetchedAt < TARGETS_POLL_MS) return false;
     const now = nowMs();
-    return data.races.length === 0 || data.races.some((r) => r.startMs !== null && r.startMs > now);
+    // 発走前のレースが残っている、またはまだ 1 件も分析されていない、または結果待ち(取り込みが続いている。Issue #361)の行が残っている。
+    return data.races.length === 0 || data.races.some((r) => (r.startMs !== null && r.startMs > now) || r.resultState === "pending" || r.resultState === "pending_payout");
   }
 
   function tick(): void {

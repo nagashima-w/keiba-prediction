@@ -23,12 +23,12 @@ const textOf = (node: VNode | string): string => (typeof node === "string" ? nod
 const byClass = (tree: VNode, cls: string): VNode[] => findAll(tree, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes(cls));
 
 function race(id: string, startMs: number | null, overrides: Partial<TargetRace> = {}): TargetRace {
-  return { raceId: id, analysisId: Number(id.slice(-4)), startMs, startTime: startMs === null ? null : "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", ...overrides };
+  return { raceId: id, analysisId: Number(id.slice(-4)), startMs, startTime: startMs === null ? null : "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", resultState: null, result: null, ...overrides };
 }
 const R = (n: number) => `2026050508${String(n).padStart(2, "0")}`;
 
-function tree(races: TargetRace[], extra: { loading?: boolean; error?: string | null; summary?: string; actions?: ViewActions; noData?: boolean } = {}): VNode {
-  const data: TargetsData | null = extra.noData === true ? null : { date: "20261017", nowMs: NOW, summary: extra.summary ?? "分析済み 5 レース中、狙い目 4", races };
+function tree(races: TargetRace[], extra: { loading?: boolean; error?: string | null; summary?: string; actions?: ViewActions; noData?: boolean; ledger?: string | null } = {}): VNode {
+  const data: TargetsData | null = extra.noData === true ? null : { date: "20261017", nowMs: NOW, summary: extra.summary ?? "分析済み 5 レース中、狙い目 4", ledger: extra.ledger ?? null, races };
   return renderScreen(buildTargetsModel({ date: "20261017", data, error: extra.error ?? null, loading: extra.loading ?? false, nowMs: NOW }), extra.actions ?? noopActions);
 }
 
@@ -116,6 +116,35 @@ describe("狙い目画面(view.ts)", () => {
     const t = tree(races, { actions: { ...noopActions, onRefresh: () => (called += 1) } });
     byClass(t, "refresh")[0]!.on!.click!();
     expect(called).toBe(1);
+  });
+});
+
+describe("収支の途中経過(Issue #361)", () => {
+  it("上部の合計: 要約の下に、サーバの文言のまま出す(クラス ledger)。無ければ出さない", () => {
+    const t = tree([race(R(1), NOW - 30 * MIN)], { ledger: "確定 2R: 投資 3,000円 / 回収 4,200円 / 回収率 140.0%" });
+    expect(byClass(t, "ledger").map(textOf)).toEqual(["確定 2R: 投資 3,000円 / 回収 4,200円 / 回収率 140.0%"]);
+    expect(byClass(tree([race(R(1), NOW - 30 * MIN)]), "ledger")).toEqual([]);
+  });
+
+  it("各行: 発走済みの行に結果の文言(クラス race-result)を出す。未発走の行・文言の無い行には出さない", () => {
+    const t = tree([
+      race(R(1), NOW - 30 * MIN, { resultState: "settled", result: "的中 +1,200円" }),
+      race(R(2), NOW + 30 * MIN, { resultState: "pending", result: "結果待ち" }),
+      race(R(3), NOW - 5 * MIN),
+    ]);
+    const results = byClass(t, "race-result");
+    expect(results.map(textOf)).toEqual(["的中 +1,200円"]);
+    // 結果は行(リンク)の中にある
+    const rows = byClass(t, "race");
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => byClass(r, "race-result").length).reduce((a, b) => a + b, 0)).toBe(1);
+  });
+
+  it("結果の状態に応じたクラス(settled・pending など)を持つ。色分けはクラスで行う", () => {
+    const t = tree([race(R(1), NOW - 30 * MIN, { resultState: "settled", result: "不的中 \u2212300円" }), race(R(2), NOW - 20 * MIN, { resultState: "pending", result: "結果待ち" })]);
+    const results = byClass(t, "race-result");
+    // 発走済みは新しい行が先(R2 → R1)
+    expect(results.map((n) => String(n.attrs?.["class"]))).toEqual(["race-detail race-result result-pending", "race-detail race-result result-settled"]);
   });
 });
 

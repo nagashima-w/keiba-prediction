@@ -103,6 +103,7 @@ function fakePlanDay(): FakePlanDay {
     getRaceList: forbid("getRaceList"),
     requestPlan: forbid("requestPlan"),
     requestResultImport: forbid("requestResultImport"),
+    getTargetsLedger: forbid("getTargetsLedger"),
     getResultImportProgress: () => {
       f.calls.push("getResultImportProgress");
       return f.resultImportImpl();

@@ -32,28 +32,80 @@ import type {
   VerifyDataSource,
 } from "../../packages/core/src/ev/analysis-store-types.js";
 
-/** 集計が D1 から読む表ごとの SQL(束縛値なし)。 */
-export const VERIFY_READ_SQL = {
-  analyses: `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
+/** 各 SQL の `FROM 表` までの部分(列の選び方)。全件の読み({@link VERIFY_READ_SQL})と、1 日ぶんの読み({@link verifyDaySql})で同じ列を共有する(片方だけ列が変わって読み取り口の入力がずれるのを避ける)。 */
+const ANALYSES_HEAD = `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
        prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
        kaisai_date AS kaisaiDate, NULL AS model, NULL AS rawResponse,
        CASE WHEN start_time GLOB '[0-9]*:[0-9][0-9]'
             THEN json_object('race', json_object('startTime', start_time)) ELSE NULL END AS raceSnapshotJson,
        history_cutoff_date AS historyCutoffDate, prompt_lookahead_guarded AS promptLookaheadGuarded,
        start_time AS startTime
-  FROM analyses ORDER BY id`,
+  FROM analyses`;
+const ALLOCATION_META_HEAD = `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode FROM analysis_allocation_meta`;
+const BETS_HEAD = `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake
+  FROM analysis_bets`;
+const BETS_ORDER = `ORDER BY analysis_id, bet_type, combo_key`;
+const RESULTS_HEAD = `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban
+  FROM race_results`;
+const RESULTS_ORDER = `ORDER BY race_id, umaban`;
+const COMBO_PAYOUTS_HEAD = `SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout
+  FROM race_combo_payouts`;
+const COMBO_PAYOUTS_ORDER = `ORDER BY race_id, bet_type, combo_key`;
+const COMBO_IMPORTS_HEAD = `SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports`;
+
+/** 集計が D1 から読む表ごとの SQL(束縛値なし)。 */
+export const VERIFY_READ_SQL = {
+  analyses: `${ANALYSES_HEAD} ORDER BY id`,
   horses: `SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive,
        NULL AS contributions_json, mark, NULL AS reason, NULL AS highlights_json, NULL AS concerns_json
   FROM analysis_horses ORDER BY analysis_id, umaban`,
-  allocationMeta: `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode FROM analysis_allocation_meta`,
-  bets: `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake
-  FROM analysis_bets ORDER BY analysis_id, bet_type, combo_key`,
-  results: `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban
-  FROM race_results ORDER BY race_id, umaban`,
-  comboPayouts: `SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout
-  FROM race_combo_payouts ORDER BY race_id, bet_type, combo_key`,
-  comboImports: `SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports`,
+  allocationMeta: ALLOCATION_META_HEAD,
+  bets: `${BETS_HEAD} ${BETS_ORDER}`,
+  results: `${RESULTS_HEAD} ${RESULTS_ORDER}`,
+  comboPayouts: `${COMBO_PAYOUTS_HEAD} ${COMBO_PAYOUTS_ORDER}`,
+  comboImports: COMBO_IMPORTS_HEAD,
 } as const;
+
+/** 1 日ぶんの分析(束縛値は開催日)。全件の読みと同じ列・同じ並び。 */
+export const VERIFY_DAY_ANALYSES_SQL = `${ANALYSES_HEAD} WHERE kaisai_date = ? ORDER BY id`;
+
+/** 整数の列(`1,2,3`)。値は D1 から読んだ整数だけ(整数でなければ投げる。利用者の入力は入らない)。空の配列は `NULL`(`IN (NULL)` は常に偽で、文として有効)。 */
+function intList(ids: readonly number[]): string {
+  if (!ids.every((id) => Number.isSafeInteger(id))) {
+    throw new TypeError("分析 id が整数ではありません");
+  }
+  return ids.length === 0 ? "NULL" : ids.join(",");
+}
+
+/** race_id の文字列リテラルの列(`'a','b'`)。値は D1 から読んだ race_id だけだが、念のため英数字・`_`・`-` 以外は投げる(引用符を含められない)。 */
+function raceIdList(raceIds: readonly string[]): string {
+  if (!raceIds.every((id) => /^[0-9A-Za-z_-]{1,32}$/.test(id))) {
+    throw new TypeError("race_id の形が想定と違います");
+  }
+  return raceIds.length === 0 ? "NULL" : raceIds.map((id) => `'${id}'`).join(",");
+}
+
+/**
+ * 1 日ぶんの配分(メタと買い目)の SQL。`analysisIds` はその日の分析の id。全件の読みと同じ列・同じ並びで、`WHERE` だけを足したもの
+ * (主キーの先頭で引くので、並べ替えの一時領域は使わない)。
+ */
+export function verifyDayAllocationSql(analysisIds: readonly number[]): { readonly allocationMeta: string; readonly bets: string } {
+  const ids = intList(analysisIds);
+  return {
+    allocationMeta: `${ALLOCATION_META_HEAD} WHERE analysis_id IN (${ids})`,
+    bets: `${BETS_HEAD} WHERE analysis_id IN (${ids}) ${BETS_ORDER}`,
+  };
+}
+
+/** 1 日ぶんの結果・組合せ払戻・取込印の SQL。`raceIds` は読むレース。全件の読みと同じ列・同じ並びで、`WHERE` だけを足したもの。 */
+export function verifyDayResultSql(raceIds: readonly string[]): { readonly results: string; readonly comboPayouts: string; readonly comboImports: string } {
+  const ids = raceIdList(raceIds);
+  return {
+    results: `${RESULTS_HEAD} WHERE race_id IN (${ids}) ${RESULTS_ORDER}`,
+    comboPayouts: `${COMBO_PAYOUTS_HEAD} WHERE race_id IN (${ids}) ${COMBO_PAYOUTS_ORDER}`,
+    comboImports: `${COMBO_IMPORTS_HEAD} WHERE race_id IN (${ids})`,
+  };
+}
 
 /** 分析の行。`startTime` は D1 の `start_time` の生の値(NULL・''・'?'・'HH:MM')。 */
 export interface VerifyAnalysisRow extends AnalysisRow {

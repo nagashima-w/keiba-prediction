@@ -16,11 +16,29 @@
  * 読み取り行数は買い目の行数にほぼ比例する(1 分析あたりの買い目が 10 点を大きく超える日は予算を超えうる)。
  */
 import type { TargetsAnalysisRow, TargetsCloseRoundRow } from "./targets-view";
+import {
+  VERIFY_DAY_ANALYSES_SQL,
+  verifyDayAllocationSql,
+  verifyDayResultSql,
+  type VerifyAnalysisRow,
+  type VerifyBetRow,
+  type VerifyAllocationMetaRow,
+  type VerifyComboImportRow,
+  type VerifyComboPayoutRow,
+  type VerifyReadRows,
+  type VerifyResultRow,
+} from "./verify-read";
 
 export type TargetsDb = Pick<D1Database, "prepare" | "batch">;
 
 /** 1 日ぶんの読み取り行数の予算(`meta.rows_read` の合計がこれ未満)。Free の 1 日 500 万行に対して、1 回の取得を約 0.1% に抑える目安。 */
 export const TARGETS_ROWS_READ_BUDGET = 5000;
+
+/**
+ * 収支の途中経過(Issue #361。{@link D1TargetsStore.readLedger})の読み取り行数の予算(`meta.rows_read` の合計がこれ未満)。**上の {@link TARGETS_ROWS_READ_BUDGET} とは別の読みで、1 回の取得では両方が流れる**
+ * (合計は `TARGETS_ROWS_READ_BUDGET` + この値)。根拠は `test/targets-repository.test.ts` の最悪の日の実測(出力の `[targets-ledger]` 行)。
+ */
+export const TARGETS_LEDGER_ROWS_READ_BUDGET = 5000;
 
 /** ◎の印(予想印の文字)。 */
 const MARK_HONMEI = "◎";
@@ -155,5 +173,39 @@ export class D1TargetsStore {
       rowsRead += rowsReadOf(close);
     }
     return { analyses, closeRounds, rowsRead };
+  }
+
+  /**
+   * 収支の途中経過(Issue #361)が使う行を読む。**検証画面の全件の読み(`VERIFY_READ_SQL`)と同じ列・同じ並びを、その日で絞ったもの**(`verify-read.ts` の `verifyDay*Sql`)。
+   * 検証の最新の選択(先読みを除いた clean の中で最新)を再現するため、`readDay` と違って**最新だけでなく、その日の全分析**を読む。馬の行は読まない(判定に使わない)。
+   *  - ① 分析(開催日で絞る。`idx_analyses_kaisai_date`)。0 件ならここで終わる。
+   *  - ② 配分のメタと買い目(分析 id の整数リテラルの列で引く。主キーの先頭)。
+   *  - ③ 結果・組合せ払戻・取込印: **買い目のあるレースだけ**(買い目が無いレースの結果は収支に影響しないので読まない)。買い目のあるレースが無ければ流さない。
+   * 失敗は握らず投げる(呼び出し側が、収支なしで一覧を出す)。
+   */
+  async readLedger(kaisaiDate: string): Promise<{ readonly rows: VerifyReadRows; readonly rowsRead: number }> {
+    const first = await this.db.batch([this.db.prepare(VERIFY_DAY_ANALYSES_SQL).bind(kaisaiDate)]);
+    const analyses = rowsOf<VerifyAnalysisRow>(first[0]);
+    let rowsRead = rowsReadOf(first);
+    const empty = { analyses, horses: [], allocationMeta: [], bets: [], results: [], comboPayouts: [], comboImports: [] } satisfies VerifyReadRows;
+    if (analyses.length === 0) return { rows: empty, rowsRead };
+
+    const allocation = verifyDayAllocationSql(analyses.map((a) => a.id));
+    const second = await this.db.batch([this.db.prepare(allocation.allocationMeta), this.db.prepare(allocation.bets)]);
+    const allocationMeta = rowsOf<VerifyAllocationMetaRow>(second[0]);
+    const bets = rowsOf<VerifyBetRow>(second[1]);
+    rowsRead += rowsReadOf(second);
+
+    const raceOfAnalysis = new Map(analyses.map((a) => [a.id, a.raceId] as const));
+    const betRaceIds = [...new Set(bets.flatMap((b) => raceOfAnalysis.get(b.analysisId) ?? []))].sort();
+    if (betRaceIds.length === 0) return { rows: { ...empty, allocationMeta, bets }, rowsRead };
+
+    const result = verifyDayResultSql(betRaceIds);
+    const third = await this.db.batch([this.db.prepare(result.results), this.db.prepare(result.comboPayouts), this.db.prepare(result.comboImports)]);
+    rowsRead += rowsReadOf(third);
+    return {
+      rows: { analyses, horses: [], allocationMeta, bets, results: rowsOf<VerifyResultRow>(third[0]), comboPayouts: rowsOf<VerifyComboPayoutRow>(third[1]), comboImports: rowsOf<VerifyComboImportRow>(third[2]) },
+      rowsRead,
+    };
   }
 }

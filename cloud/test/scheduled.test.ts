@@ -56,6 +56,7 @@ function fakeNamespace(): FakeNamespace {
     getAutoRunResults: NOT_CALLED,
     getNotifications: NOT_CALLED,
     getResultImportProgress: NOT_CALLED,
+    getTargetsLedger: NOT_CALLED,
     requestResultImport: (input) => {
       f.events.push(`result:${input.kaisaiDate}`);
       f.resultRequests.push({ kaisaiDate: input.kaisaiDate, raceIds: [...input.raceIds] });

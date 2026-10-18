@@ -37,6 +37,10 @@ export interface TargetRow {
   readonly left: string;
   readonly soon: boolean;
   readonly skipped: boolean;
+  /** 結果の文言(収支の途中経過。Issue #361)。発走済みの行だけ。無いとき空。 */
+  readonly result: string;
+  /** 結果の状態(クラス名に使う)。`result` が空のとき空。 */
+  readonly resultState: string;
 }
 
 export interface TargetsModel {
@@ -50,6 +54,8 @@ export interface TargetsModel {
   readonly error: string | null;
   /** サーバの要約(件数の内訳。0 件の理由を区別する)。取れていなければ null。 */
   readonly summary: string | null;
+  /** 上部の合計の文言(サーバが組み立てる)。無いとき null。 */
+  readonly ledger: string | null;
   readonly upcoming: readonly TargetRow[];
   readonly past: readonly TargetRow[];
 }
@@ -63,10 +69,20 @@ export interface TargetsModelInput {
   readonly nowMs: number;
 }
 
+/** 時刻不明の行に出してよい結果の状態(待ち・提案なしは、発走前かもしれないので出さない)。 */
+const SHOWN_WITHOUT_START = new Set(["settled", "none", "excluded"]);
+
+/** 結果の文言を出すか。発走済みの行だけ(未発走の行は、サーバが文言を持っていても隠す。「今」が進めば取り直さなくても出る)。 */
+function showsResult(r: TargetRace, nowMs: number): boolean {
+  if (r.result === null || r.resultState === null) return false;
+  return r.startMs === null ? SHOWN_WITHOUT_START.has(r.resultState) : r.startMs <= nowMs;
+}
+
 function rowOf(date: string, r: TargetRace, nowMs: number): TargetRow {
   const left = remainingText(r.startMs, nowMs);
+  const shown = showsResult(r, nowMs);
   const venue = Number(r.raceId.slice(4, 6)) >= NAR_TRACK_CODE_MIN ? "nar" : "central";
-  return { key: r.raceId, href: buildHash({ date, venue, analysis: r.analysisId }), time: r.startTime ?? "--:--", place: r.place, pick: r.pick ?? "", detail: r.detail, left: left.text, soon: left.soon, skipped: r.skipped };
+  return { key: r.raceId, href: buildHash({ date, venue, analysis: r.analysisId }), time: r.startTime ?? "--:--", place: r.place, pick: r.pick ?? "", detail: r.detail, left: left.text, soon: left.soon, skipped: r.skipped, result: shown ? r.result! : "", resultState: shown ? r.resultState! : "" };
 }
 
 export function buildTargetsModel(input: TargetsModelInput): TargetsModel {
@@ -80,6 +96,7 @@ export function buildTargetsModel(input: TargetsModelInput): TargetsModel {
     loading: input.loading,
     error: input.error,
     summary: input.data === null ? null : input.data.summary,
+    ledger: input.data === null ? null : input.data.ledger,
     upcoming: races.filter((r) => !started(r)).map((r) => rowOf(date, r, nowMs)),
     past: races.filter(started).map((r) => rowOf(date, r, nowMs)).reverse(),
   };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { handle, type Env, type RaceDayStubLike } from "../src/handler";
 import type { PlanProgress } from "../src/race-day-core";
+import type { TargetsLedgerWire } from "../src/targets-ledger";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
@@ -68,7 +69,10 @@ function fakeDb(): FakeDb {
 interface FakeDay {
   readonly names: string[];
   readonly calls: string[];
+  /** `getTargetsLedger` に渡された引数(収支の計算は日単位の DO が行う。Issue #361)。 */
+  readonly ledgerInputs: { kaisaiDate: string; nowMs: number }[];
   planImpl: () => Promise<PlanProgress>;
+  ledgerImpl: () => Promise<TargetsLedgerWire | null>;
   readonly namespace: Env["RACE_DAY"];
 }
 
@@ -87,7 +91,7 @@ const PLAN: PlanProgress = {
 };
 
 function fakeDay(): FakeDay {
-  const f: FakeDay = { names: [], calls: [], planImpl: async () => PLAN, namespace: undefined as never };
+  const f: FakeDay = { names: [], calls: [], ledgerInputs: [], planImpl: async () => PLAN, ledgerImpl: async () => null, namespace: undefined as never };
   const forbid = (name: string) => () => {
     f.calls.push(`FORBIDDEN:${name}`);
     throw new Error(`${name} は呼ばれない想定`);
@@ -106,6 +110,11 @@ function fakeDay(): FakeDay {
     getPlanProgress: () => {
       f.calls.push("getPlanProgress");
       return f.planImpl();
+    },
+    getTargetsLedger: (input) => {
+      f.calls.push("getTargetsLedger");
+      f.ledgerInputs.push(input);
+      return f.ledgerImpl();
     },
   };
   (f as { namespace: Env["RACE_DAY"] }).namespace = {
@@ -134,11 +143,12 @@ function envOf(db: FakeDb, day: FakeDay, overrides: Partial<Env> = {}): Env {
   };
 }
 
-async function setup() {
+async function setup(now: Date = NOW) {
   const key = await makeKey("k1");
-  const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
-  const token = await signToken(key);
-  const viewer = await signToken(key, { email: "stranger@example.com" });
+  const deps = { keys: () => localKeys(key), now: () => now, log: () => {} };
+  const exp = Math.floor(now.getTime() / 1000) + 3600; // 時計を進めたときも、トークンが期限切れにならない
+  const token = await signToken(key, { exp });
+  const viewer = await signToken(key, { email: "stranger@example.com", exp });
   return { deps, token, viewer };
 }
 
@@ -177,9 +187,10 @@ describe("GET /api/targets(Issue #336)", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("content-type")).toContain("application/json");
     expect(day.names).toEqual([DATE]);
-    expect(day.calls).toEqual(["getPlanProgress"]);
+    expect([...day.calls].sort()).toEqual(["getPlanProgress", "getTargetsLedger"]); // 収支は DO が作る(読み取り)。この日は発走前なので null
     const body = (await response.json()) as Record<string, unknown>;
-    expect(sortedKeys(body)).toEqual(["kaisai_date", "now_ms", "ok", "races", "summary"]);
+    expect(sortedKeys(body)).toEqual(["kaisai_date", "ledger", "now_ms", "ok", "races", "summary"]);
+    expect(body["ledger"]).toBeNull();
     expect(body["ok"]).toBe(true);
     expect(body["kaisai_date"]).toBe(DATE);
     expect(body["now_ms"]).toBe(NOW.getTime());
@@ -337,6 +348,95 @@ describe("GET /api/targets(Issue #336)", () => {
     expect(text).not.toContain("CANARY");
     const races = (JSON.parse(text) as { races: unknown[] }).races;
     expect(races).toHaveLength(2); // 前提: 行がある(キーの検査が空振りしない)
-    expect(sortedKeys(races[0])).toEqual(["analysis_id", "bet_count", "detail", "max_ev", "pick", "place", "race_id", "round", "skipped", "source", "start_ms", "start_time", "total_stake"]);
+    expect(sortedKeys(races[0])).toEqual(["analysis_id", "bet_count", "detail", "max_ev", "pick", "place", "race_id", "result", "result_state", "round", "skipped", "source", "start_ms", "start_time", "total_stake"]);
+  });
+});
+
+/**
+ * Issue #361: 収支の途中経過。**計算は日単位の DO の RPC `getTargetsLedger` が行う**(Worker Free の CPU 10ms に収まらないため)。Worker は、その結果(素の配列・数値)を
+ * 応答の `ledger`・各行の `result` に載せるだけで、収支のために D1 は読まない。DO の失敗は収支だけ null にして一覧は 200 のまま。
+ */
+describe("GET /api/targets: 収支の途中経過(DO の RPC の結果を載せる。Issue #361)", () => {
+  const AFTER = new Date("2026-10-17T07:30:00Z");
+  const settled = (raceId: string, stake: number, payout: number) => ({ raceId, state: "settled" as const, stake, payout, refundedStake: 0, hit: payout > 0, reason: null });
+  const pending = (raceId: string) => ({ raceId, state: "pending" as const, stake: 0, payout: 0, refundedStake: 0, hit: false, reason: null });
+  const WIRE: TargetsLedgerWire = { races: [settled(R11, 300, 4500), pending(R12)], total: { raceCount: 1, stake: 300, payout: 4500, recoveryRate: 15 }, waitingCount: 1, noneCount: 0 };
+  const run = async (db: FakeDb, day: FakeDay, now: Date = AFTER, asViewer = false) => {
+    const { deps, token, viewer } = await setup(now);
+    const response = await handle(get(`/api/targets?kaisai_date=${DATE}`, asViewer ? viewer : token), envOf(db, day), {}, deps);
+    return { response, body: (await response.json()) as Record<string, any> };
+  };
+
+  it("DO の結果を、上部の合計と各行の結果に載せる。再計算を採った行(R12)には基準を明記しない(R12 は未確定)。サーバの時刻と開催日を DO に渡す", async () => {
+    const day = fakeDay();
+    day.ledgerImpl = async () => WIRE;
+    const { response, body } = await run(fakeDb(), day);
+    expect(response.status).toBe(200);
+    expect(day.ledgerInputs).toEqual([{ kaisaiDate: DATE, nowMs: AFTER.getTime() }]);
+    expect(body["ledger"]).toBe("確定 1R: 投資 300円 / 回収 4,500円 / 回収率 1500.0%(結果待ち 1R)");
+    const races = body["races"] as Record<string, any>[];
+    expect(races.map((r) => [r["race_id"], r["source"], r["result_state"], r["result"]])).toEqual([
+      [R11, "analysis", "settled", "的中 +4,200円"],
+      [R12, "close", "pending", "結果待ち"],
+    ]);
+  });
+
+  it("Worker は収支のために D1 を読まない(分析・配分・買い目・結果・払戻の SQL を流さない)。読み取りの文は一覧のものだけ", async () => {
+    const db = fakeDb();
+    const day = fakeDay();
+    day.ledgerImpl = async () => WIRE;
+    await run(db, day);
+    expect(db.sqls.some((sql) => sql.includes("race_results") || sql.includes("race_combo_payout") || sql.includes("analysis_allocation_meta") || sql.includes("history_cutoff_date"))).toBe(false);
+    expect(db.sqls.length).toBeGreaterThan(0); // 前提: 一覧の読みは流れている(検査が空振りでない)
+  });
+
+  it("閲覧者にも同じ内容(ユーザーの決定)", async () => {
+    const day = fakeDay();
+    day.ledgerImpl = async () => WIRE;
+    const admin = await run(fakeDb(), day);
+    const viewer = await run(fakeDb(), day, AFTER, true);
+    expect(viewer.response.status).toBe(200);
+    expect(viewer.body).toEqual(admin.body);
+    expect(admin.body["ledger"]).not.toBeNull(); // 前提
+  });
+
+  it("DO の RPC が null(発走前)なら、収支は null・各行の結果も null", async () => {
+    const { body } = await run(fakeDb(), fakeDay());
+    expect(body["ledger"]).toBeNull();
+    const races = body["races"] as Record<string, any>[];
+    expect(races).toHaveLength(2);
+    expect(races.every((r) => r["result"] === null && r["result_state"] === null)).toBe(true);
+  });
+
+  it("DO の RPC が失敗(同期の例外も含む)しても一覧は 200 のまま。収支だけ null。例外の文面は出さない", async () => {
+    for (const impl of [async () => { throw new Error("DO injected"); }, () => { throw new Error("DO sync injected"); }]) {
+      const day = fakeDay();
+      day.ledgerImpl = impl as never;
+      const { response, body } = await run(fakeDb(), day);
+      expect(response.status).toBe(200);
+      expect(body["ledger"]).toBeNull();
+      expect((body["races"] as unknown[]).length).toBe(2); // 前提: 一覧は出ている
+      expect(JSON.stringify(body)).not.toContain("injected");
+    }
+  });
+
+  it("計画の失敗(getPlanProgress)でも収支の RPC は流れる(DO が自分の計画で判断する)", async () => {
+    const day = fakeDay();
+    day.planImpl = async () => {
+      throw new Error("DO down");
+    };
+    day.ledgerImpl = async () => WIRE;
+    const { response, body } = await run(fakeDb(), day);
+    expect(response.status).toBe(200);
+    expect(body["ledger"]).toContain("確定 1R");
+  });
+
+  it("分析が 1 件も無い日は DO を呼ばない(収支の RPC も)", async () => {
+    const db = fakeDb();
+    db.rows.analyses = [];
+    const day = fakeDay();
+    const { body } = await run(db, day);
+    expect(body["ledger"]).toBeNull();
+    expect(day.calls).toEqual([]);
   });
 });

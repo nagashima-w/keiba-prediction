@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { CloseSavePayload } from "../src/analysis-close";
 import { D1AnalysisStore } from "../src/analysis-repository";
-import { D1TargetsStore, TARGETS_ROWS_READ_BUDGET } from "../src/targets-repository";
+import { D1ResultStore } from "../src/result-repository";
+import { D1TargetsStore, TARGETS_LEDGER_ROWS_READ_BUDGET, TARGETS_ROWS_READ_BUDGET } from "../src/targets-repository";
+import { buildVerifySource, VERIFY_READ_SQL, type VerifyReadRows } from "../src/verify-read";
+import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
+import type { RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
 import type { AnalysisAllocationRecord, AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { contractCases } from "./fixtures-contract";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
@@ -266,4 +270,125 @@ describe("読み取り行数(D1 の `meta.rows_read`。Free は 1 日 500 万行
     expect(result.rowsRead).toBeGreaterThan(500);
     expect(result.rowsRead).toBeLessThan(TARGETS_ROWS_READ_BUDGET * 0.6);
   }, 120_000);
+});
+
+
+/**
+ * Issue #361: 収支の途中経過が読む行(`D1TargetsStore.readLedger`)。その日の**全分析**(最新だけでなく。検証の最新の選択を再現するため)と、その配分・
+ * 買い目、買い目のあるレースの結果・組合せ払戻・取込印。馬の行は読まない。検証画面の全件の読み(`VERIFY_READ_SQL`)と同じ列・同じ並びで、日で絞っただけ。
+ */
+describe("D1TargetsStore.readLedger: 収支の途中経過の読み取り", () => {
+  const wideBets = (n: number): { stake: number; ev: number | null }[] => Array.from({ length: n }, (_, i) => ({ stake: 100 * (i + 1), ev: 1.1 }));
+  const entries = (): RaceResultEntry[] => Array.from({ length: 16 }, (_, i) => ({ umaban: i + 1, finishPosition: i + 1, placePayout: i < 3 ? 150 : null, winPayout: i === 0 ? 300 : null }));
+  const COMBOS = {
+    wide: { state: "parsed" as const, payouts: [{ umabans: [1, 2], payout: 500 }, { umabans: [1, 3], payout: 700 }, { umabans: [2, 3], payout: 900 }] },
+    trio: { state: "parsed" as const, payouts: [{ umabans: [1, 2, 3], payout: 3000 }] },
+    quinella: { state: "parsed" as const, payouts: [{ umabans: [1, 2], payout: 800 }] },
+    exacta: { state: "parsed" as const, payouts: [{ umabans: [1, 2], payout: 1500 }] },
+    trifecta: { state: "parsed" as const, payouts: [{ umabans: [1, 2, 3], payout: 9000 }] },
+  };
+  const saveResult = (raceId: string): Promise<void> => new D1ResultStore({ db: local.db }).saveResult(raceId, entries(), "芝", COMBOS);
+
+  it("その日の全分析を読む(最新だけでなく古い分析も)。別の開催日の分析・その買い目は混ざらない", async () => {
+    const older = await store().saveAnalysis(record(R1, "2026-10-17T01:00:00.000Z"));
+    const newer = await store().saveAnalysis(record(R1, "2026-10-17T02:00:00.000Z"));
+    await store().saveAnalysis(record(R2, "2026-10-17T02:00:00.000Z", { kaisaiDate: "20261018" }));
+    const { rows } = await targets().readLedger(DATE);
+    expect(rows.analyses.map((a) => a.id)).toEqual([older.id, newer.id]);
+    expect(rows.allocationMeta.map((m) => m.analysisId).sort()).toEqual([older.id, newer.id].sort());
+    // 前提: 買い目は 1 分析 3 点(読まれた買い目が 0 件でない。別の日の分は含まない)
+    expect(rows.bets).toHaveLength(6);
+    expect(rows.horses).toEqual([]);
+  });
+
+  it("結果・組合せ払戻・取込印は、買い目のあるレースだけ読む(買い目の無いレースの結果は読まない=読み取りを減らす)", async () => {
+    await store().saveAnalysis(record(R1, "2026-10-17T02:00:00.000Z"));
+    await store().saveAnalysis(record(R2, "2026-10-17T02:00:00.000Z", { bets: [] }));
+    await saveResult(R1);
+    await saveResult(R2);
+    // 前提: D1 には両方のレースの結果がある
+    expect((await local.db.prepare("SELECT count(DISTINCT race_id) AS c FROM race_results").first<{ c: number }>())!.c).toBe(2);
+    const { rows } = await targets().readLedger(DATE);
+    expect(new Set(rows.results.map((r) => r.raceId))).toEqual(new Set([R1]));
+    expect(rows.results).toHaveLength(16);
+    expect(new Set(rows.comboPayouts.map((r) => r.raceId))).toEqual(new Set([R1]));
+    expect(rows.comboPayouts.length).toBeGreaterThan(0);
+    expect(new Set(rows.comboImports.map((r) => r.raceId))).toEqual(new Set([R1]));
+    expect(rows.comboImports.map((i) => i.betType).sort()).toEqual(["exacta", "quinella", "trifecta", "trio", "wide"]);
+  });
+
+  it("分析が無い日は空(結果の読みを流さない=batch は 1 回)", async () => {
+    let batches = 0;
+    const counting = { prepare: (sql: string) => local.db.prepare(sql), batch: (statements: D1PreparedStatement[]) => ((batches += 1), local.db.batch(statements)) } as unknown as ConstructorParameters<typeof D1TargetsStore>[0]["db"];
+    const { rows } = await new D1TargetsStore({ db: counting }).readLedger("20300101");
+    expect(batches).toBe(1);
+    expect(rows).toEqual({ analyses: [], horses: [], allocationMeta: [], bets: [], results: [], comboPayouts: [], comboImports: [] });
+  });
+
+  it("検証画面の全件の読みと同じ列・同じ並び: 日で絞った行を検証の関数に通した値が、全件の読みを通した値と一致する(その日の分析だけがある DB で)", async () => {
+    for (const raceId of [R1, R2]) {
+      const a = await store().saveAnalysis(record(raceId, "2026-10-17T02:00:00.000Z", { bets: wideBets(4) }));
+      await local.db.prepare("UPDATE analyses SET start_time = '15:40', history_cutoff_date = '20261016', prompt_lookahead_guarded = 1 WHERE id = ?").bind(a.id).run();
+      await saveResult(raceId);
+    }
+    const all = async <T>(sql: string): Promise<T[]> => (await local.db.prepare(sql).all()).results as T[];
+    const full: VerifyReadRows = { analyses: await all(VERIFY_READ_SQL.analyses), horses: [], allocationMeta: await all(VERIFY_READ_SQL.allocationMeta), bets: await all(VERIFY_READ_SQL.bets), results: await all(VERIFY_READ_SQL.results), comboPayouts: await all(VERIFY_READ_SQL.comboPayouts), comboImports: await all(VERIFY_READ_SQL.comboImports) };
+    const { rows } = await targets().readLedger(DATE);
+    // 行そのものが一致する(列・並び)。取込印は全件の読みも ORDER BY を持たず、集合(`Set`)にしか使われないので、並びは問わない。
+    const byKey = (x: { raceId: string; betType: string }, y: { raceId: string; betType: string }): number => (x.raceId + x.betType < y.raceId + y.betType ? -1 : 1);
+    expect({ ...rows, comboImports: [...rows.comboImports].sort(byKey) }).toEqual({ ...full, comboImports: [...full.comboImports].sort(byKey) });
+    const day = computeVerifyReport(buildVerifySource(rows), PRODUCTION_VERIFY_CONFIG, "all").proposedBet;
+    const whole = computeVerifyReport(buildVerifySource(full), PRODUCTION_VERIFY_CONFIG, "all").proposedBet;
+    // 前提: 集計が空でない(自明な一致ではない)
+    expect(whole.overall.betCount).toBe(8);
+    expect(whole.overall.totalStake).toBe(2000);
+    expect(day).toEqual(whole);
+  });
+
+  it("読み取りの失敗は握らず投げる(呼び出し側が、収支なしで一覧を出す)", async () => {
+    await store().saveAnalysis(record(R1, "2026-10-17T02:00:00.000Z"));
+    const failing = { prepare: (sql: string) => local.db.prepare(sql), batch: async () => { throw new Error("D1_ERROR: injected"); } } as unknown as ConstructorParameters<typeof D1TargetsStore>[0]["db"];
+    await expect(new D1TargetsStore({ db: failing }).readLedger(DATE)).rejects.toThrow("injected");
+  });
+
+  describe("読み取り行数(`meta.rows_read`)", () => {
+    /** 72 レース(中央 3 場・地方 3 場の各 12R)。各レースを 2 回分析し(買い目 10 点)、`resulted` レースに結果と組合せ払戻を入れる。 */
+    async function seedDay(resulted: number): Promise<void> {
+      const raceIds: string[] = [];
+      for (const place of ["05", "06", "09"]) for (let r = 1; r <= 12; r += 1) raceIds.push(`2026${place}0508${String(r).padStart(2, "0")}`);
+      for (const place of ["42", "43", "44"]) for (let r = 1; r <= 12; r += 1) raceIds.push(`2026${place}1017${String(r).padStart(2, "0")}`);
+      for (const [index, raceId] of raceIds.entries()) {
+        await store().saveAnalysis(record(raceId, "2026-10-17T01:00:00.000Z", { bets: wideBets(10) }));
+        await store().saveAnalysis(record(raceId, "2026-10-17T02:00:00.000Z", { bets: wideBets(10) }));
+        if (index < resulted) await saveResult(raceId);
+      }
+    }
+
+    it(`最悪の日(72 レースすべて 2 回分析・買い目 10 点・結果と払戻が取り込み済み)でも、${TARGETS_LEDGER_ROWS_READ_BUDGET} 行未満`, async () => {
+      await seedDay(72);
+      const total = async (table: string) => (await local.db.prepare(`SELECT count(*) AS c FROM ${table}`).first<{ c: number }>())!.c;
+      // 前提: 実際に大量の行がある
+      expect(await total("analyses")).toBe(144);
+      expect(await total("analysis_bets")).toBe(1440);
+      expect(await total("race_results")).toBe(72 * 16);
+      const { rows, rowsRead } = await targets().readLedger(DATE);
+      expect(rows.analyses).toHaveLength(144);
+      expect(rows.bets).toHaveLength(1440);
+      expect(rows.results).toHaveLength(72 * 16);
+      expect(rows.comboPayouts.length).toBeGreaterThan(72 * 5);
+      console.log(`[targets-ledger] 最悪の日 rows_read = ${rowsRead}(analyses ${rows.analyses.length}・meta ${rows.allocationMeta.length}・bets ${rows.bets.length}・results ${rows.results.length}・payouts ${rows.comboPayouts.length}・imports ${rows.comboImports.length})`);
+      expect(rowsRead).toBeGreaterThan(rows.bets.length + rows.results.length);
+      expect(rowsRead).toBeLessThan(TARGETS_LEDGER_ROWS_READ_BUDGET);
+    }, 180_000);
+
+    it("結果がまだ 1 件も無い日(午前中)は、結果・払戻の読みが増えない(結果の行 0・読み取りは最悪の日より少ない)", async () => {
+      await seedDay(0);
+      const { rows, rowsRead } = await targets().readLedger(DATE);
+      expect(rows.results).toEqual([]);
+      expect(rows.bets).toHaveLength(1440);
+      console.log(`[targets-ledger] 結果なしの日 rows_read = ${rowsRead}`);
+      expect(rowsRead).toBeGreaterThan(rows.bets.length);
+      expect(rowsRead).toBeLessThan(TARGETS_LEDGER_ROWS_READ_BUDGET * 0.5);
+    }, 180_000);
+  });
 });

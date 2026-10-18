@@ -175,7 +175,7 @@ async function expectViewer(port: number, label: string, email: string): Promise
   // Issue #336: 今日の狙い目は閲覧者にも GET を開く(読み取りだけ)。空の D1 では、分析なしの固定の要約・空の一覧(DO は呼ばない)。HEAD は 403(admin-only)・日付なしは 400。
   const targets = await req(port, "GET", "/api/targets?kaisai_date=20261008");
   const targetsJson = parseJson(targets.text);
-  check(`${label}: GET /api/targets は 200(読み取り)。空の D1 では races が空・要約は「まだ分析されたレースがありません」`, targets.status === 200 && targetsJson["ok"] === true && targetsJson["kaisai_date"] === "20261008" && typeof targetsJson["now_ms"] === "number" && targetsJson["summary"] === "まだ分析されたレースがありません" && Array.isArray(targetsJson["races"]) && (targetsJson["races"] as unknown[]).length === 0, `${targets.status} ${targets.text.slice(0, 120)}`);
+  check(`${label}: GET /api/targets は 200(読み取り)。空の D1 では races が空・要約は「まだ分析されたレースがありません」`, targets.status === 200 && targetsJson["ok"] === true && targetsJson["kaisai_date"] === "20261008" && typeof targetsJson["now_ms"] === "number" && targetsJson["summary"] === "まだ分析されたレースがありません" && Array.isArray(targetsJson["races"]) && (targetsJson["races"] as unknown[]).length === 0 && targetsJson["ledger"] === null, `${targets.status} ${targets.text.slice(0, 120)}`);
   check(`${label}: GET /api/targets は日付なしで 400(役割の関門を通って入力の検証に届く)・HEAD は 403(admin-only)`, (await req(port, "GET", "/api/targets")).status === 400 && (await req(port, "HEAD", "/api/targets?kaisai_date=20261008")).status === 403);
   const reports = await req(port, "GET", "/api/reports");
   check(`${label}: GET /api/reports は 200(日報は閲覧できる)`, reports.status === 200 && parseJson(reports.text)["ok"] === true, `${reports.status} ${reports.text.slice(0, 80)}`);
@@ -351,7 +351,9 @@ async function main(): Promise<void> {
       const targetsDate = items.map((a) => a.kaisaiDate?.replace(/\D/g, "") ?? "").find((d) => d.length === 8);
       check(`${label}: 移行した分析に 8 桁の開催日がある(今日の狙い目の確認の前提)`, targetsDate !== undefined, JSON.stringify(items.map((a) => a.kaisaiDate)));
       const targetsMigrated = parseJson((await req(port, "GET", `/api/targets?kaisai_date=${targetsDate ?? "20260302"}`)).text);
-      check(`${label}: GET /api/targets は移行した分析の開催日で 200・要約が「分析済み N レース…」・races が配列(本物の D1・DO。計画が無いので発走時刻は null)`, targetsMigrated["ok"] === true && typeof targetsMigrated["summary"] === "string" && /^分析済み [1-9][0-9]* レース/.test(targetsMigrated["summary"] as string) && Array.isArray(targetsMigrated["races"]) && (targetsMigrated["races"] as { start_ms: unknown }[]).every((r) => r.start_ms === null), JSON.stringify(targetsMigrated).slice(0, 300));
+      check(`${label}: GET /api/targets は移行した分析の開催日で 200・要約が「分析済み N レース…」・races が配列(本物の D1・DO。計画が無いので発走時刻は null)`, targetsMigrated["ok"] === true && typeof targetsMigrated["summary"] === "string" && /^分析済み [1-9][0-9]* レース/.test(targetsMigrated["summary"] as string) && Array.isArray(targetsMigrated["races"]) && (targetsMigrated["races"] as { start_ms: unknown }[]).every((r) => r.start_ms === null) && (targetsMigrated["ledger"] === null || typeof targetsMigrated["ledger"] === "string") && (targetsMigrated["races"] as Record<string, unknown>[]).every((r) => "result_state" in r && "result" in r), JSON.stringify(targetsMigrated).slice(0, 300));
+      // Issue #361: 収支の途中経過は日単位の DO の RPC(getTargetsLedger)で計算する。計画が無い日は発走済みか分からないので読む=本物の DO・D1 で RPC と計算が動く(RPC が失敗すると行の result_state は null のままなので、行がある限り検出できる)。
+      check(`${label}: 収支の途中経過(本物の DO の getTargetsLedger)が動く: 計画の無い日でも 200 で、ledger のキーがあり、一覧の行はすべて result_state を持つ(null でない)`, targetsMigrated["ok"] === true && "ledger" in targetsMigrated && (targetsMigrated["races"] as { result_state: unknown }[]).every((r) => r.result_state !== null), JSON.stringify(targetsMigrated).slice(0, 300));
 
       // Issue #219: 検証の集計(本物の DO `VerifyReportDO`)。移行した 5 件は start_time が NULL なので、DO がアラームで R2 の詳細から写してから(preparing → ready)、本物の D1 を読んで集計する。
       let verifyJson: Record<string, unknown> = {};
