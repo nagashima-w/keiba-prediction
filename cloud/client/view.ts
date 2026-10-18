@@ -1040,6 +1040,7 @@ function targetRow(r: TargetRow, past: boolean): VNode {
     h("a", { class: `race${r.skipped ? " skipped" : ""}${past ? " started" : ""}`, href: r.href }, [
       h("div", { class: "race-head" }, [h("strong", {}, [r.time]), h("span", {}, [r.place]), ...(r.pick === "" ? [] : [h("span", {}, [r.pick])]), h("span", { class: r.soon ? "t-left soon" : "t-left" }, [r.left])]),
       h("span", { class: "race-detail" }, [r.detail]),
+      ...(r.result === "" ? [] : [h("span", { class: `race-detail race-result result-${r.resultState}` }, [r.result])]),
     ]),
   ]);
 }
@@ -1056,6 +1057,7 @@ function targetsScreen(model: TargetsModel, actions: ViewActions): VNode {
   if (model.summary === null && model.loading) body.push(h("p", { class: "empty" }, ["読み込み中…"]));
   if (model.error !== null) body.push(notice("error", model.error));
   if (model.summary !== null) body.push(h("p", { class: "meta" }, [model.summary]));
+  if (model.ledger !== null) body.push(h("p", { class: "meta ledger" }, [model.ledger]));
   if (model.upcoming.length > 0) body.push(h("ul", { class: "races" }, model.upcoming.map((r) => targetRow(r, false))));
   if (model.past.length > 0) body.push(h("h2", {}, ["発走済み"]), h("ul", { class: "races" }, model.past.map((r) => targetRow(r, true))));
   return h("div", { class: "screen" }, body);

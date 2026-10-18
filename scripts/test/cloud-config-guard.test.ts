@@ -368,23 +368,23 @@ describe("wrangler.toml", () => {
     expect((body + "\nstub.getRaceList(a, b);").includes(".getRaceList(")).toBe(true);
   });
 
-  it("Issue #336: GET /api/targets の関数(handleTargets)と、その部品(targets-repository.ts・targets-view.ts)は読み取りだけ。D1 の集計と DO の getPlanProgress の 1 つ以外は呼ばない。R2・netkeiba・gate・LLM・Webhook に触れない", () => {
+  it("Issue #336・#361: GET /api/targets の関数(handleTargets)と、その部品(targets-repository.ts・targets-view.ts・targets-ledger.ts)は読み取りだけ。D1 の集計と DO の getPlanProgress・getTargetsLedger(どちらも読み取り)の 2 つ以外は呼ばない。収支の計算は Worker でしない。R2・netkeiba・gate・LLM・Webhook に触れない", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     const start = code.indexOf("async function handleTargets(");
     expect(start).toBeGreaterThan(-1);
     const end = code.indexOf("\n}\n", start);
     const body = code.slice(start, end);
     expect(body.length).toBeGreaterThan(500); // 前提: 本体を実際に読めている(空振りでない)
-    for (const required of [".getPlanProgress(", "sec-fetch-site", "raceDayStub(", "D1TargetsStore", "env.DB"]) {
+    for (const required of [".getPlanProgress(", ".getTargetsLedger(", "sec-fetch-site", "raceDayStub(", "D1TargetsStore", "env.DB"]) {
       expect(body, `handleTargets に ${required} がある`).toContain(required);
     }
-    // DO の RPC は getPlanProgress の 1 つだけ(`.get〇〇(` の出現を数える。時刻の `.getTime(` は DO ではないので除く)
-    expect((body.match(/\.get(?!Time\()[A-Z][A-Za-z]*\(/g) ?? []).sort()).toEqual([".getPlanProgress("]);
-    for (const forbidden of [".schedule(", ".scheduleMany(", ".requestPlan(", ".requestResultImport(", "dispatchResultImports(", ".getRaceList(", ".fetchRaw(", ".getBoard(", ".getAutoRunResults(", ".getNotifications(", ".getResultImportProgress(", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "D1AnalysisStore", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
+    // DO の RPC は getPlanProgress と getTargetsLedger(Issue #361。収支の途中経過の計算。読み取りだけ。下の専用の検査)の 2 つだけ(`.get〇〇(` の出現を数える。時刻の `.getTime(` は DO ではないので除く)
+    expect((body.match(/\.get(?!Time\()[A-Z][A-Za-z]*\(/g) ?? []).sort()).toEqual([".getPlanProgress(", ".getTargetsLedger("]);
+    for (const forbidden of [".schedule(", ".scheduleMany(", ".requestPlan(", ".requestResultImport(", "dispatchResultImports(", ".getRaceList(", ".fetchRaw(", ".getBoard(", ".getAutoRunResults(", ".getNotifications(", ".getResultImportProgress(", "readLedger(", "buildTargetsLedger(", "computeVerifyReport", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "D1AnalysisStore", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
       expect(body, `handleTargets に ${forbidden} が無い`).not.toContain(forbidden);
     }
     // 部品(D1 の読み取りと整形)も、R2・取得・LLM・通知を import も参照もしない
-    for (const file of ["targets-repository.ts", "targets-view.ts"]) {
+    for (const file of ["targets-repository.ts", "targets-view.ts", "targets-ledger.ts"]) {
       const part = stripCode(readTextLf("cloud", "src", file));
       expect(part.length, file).toBeGreaterThan(500); // 前提: 実際に読めている
       for (const forbidden of ["R2", "bucket", "Bucket", "gate", "Gate", "netkeiba", "anthropic", "Anthropic", "webhook", "Webhook", "fetch(", "cloudflare:workers"]) {
@@ -394,6 +394,34 @@ describe("wrangler.toml", () => {
     // 対照(検出の確認。空振りでない): 取得口・R2 を足した本文は拾う
     expect((body + "\nstub.getRaceList(a, b);").includes(".getRaceList(")).toBe(true);
     expect(("const b = env.ANALYSIS_DETAIL;").includes("ANALYSIS_DETAIL")).toBe(true);
+  });
+
+  it("Issue #361: 日単位の DO の RPC getTargetsLedger(収支の途中経過の計算)は読み取りだけ。状態を変えず、netkeiba・gate・R2・LLM・通知に出ない。Worker Free の CPU 10ms に収まらない計算なので、Worker ではなくここで行う", () => {
+    const code = stripCode(readTextLf("cloud", "src", "race-day-do.ts"));
+    const start = code.indexOf("getTargetsLedger(input");
+    expect(start).toBeGreaterThan(-1);
+    const end = code.indexOf("\n  }\n", start);
+    const body = code.slice(start, end);
+    expect(body.length).toBeGreaterThan(200); // 前提: 本体を実際に読めている(空振りでない)
+    for (const required of ["getTargetsLedgerWire(", "this.core.getPlanProgress()", "this.core.getResultImportProgress()", "D1TargetsStore", "readLedger("]) {
+      expect(body, `getTargetsLedger に ${required} がある`).toContain(required);
+    }
+    // 状態を変える・外に出る経路を呼ばない(this.core の呼び出しは、読み取りの 2 つだけ)
+    expect((body.match(/this\.core\.[A-Za-z]+\(/g) ?? []).sort()).toEqual(["this.core.getPlanProgress(", "this.core.getResultImportProgress("]);
+    for (const forbidden of ["schedule", "requestPlan", "requestResultImport", "fetchRaw", "postRaw", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD", "webhook", "fetch(", "setAlarm", "storage", ".put(", "D1ResultStore", "D1AnalysisStore", ".run(", ".exec("]) {
+      expect(body, `getTargetsLedger に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 計算の本体(targets-ledger.ts)が呼ぶ DO・D1 は、渡された読み取り口だけ(自分では何にも触れない)。D1 の読み取り(targets-repository.ts)の SQL は SELECT だけ
+    const ledger = stripCode(readTextLf("cloud", "src", "targets-ledger.ts"));
+    expect(ledger).not.toMatch(/\b(INSERT|UPDATE|DELETE|REPLACE)\b/);
+    const repo = stripCode(readTextLf("cloud", "src", "targets-repository.ts"));
+    const verifyRead = stripCode(readTextLf("cloud", "src", "verify-read.ts"));
+    for (const [file, source] of [["targets-repository.ts", repo], ["verify-read.ts", verifyRead]] as const) {
+      expect(source, `${file} に書き込みの SQL が無い`).not.toMatch(/\b(INSERT INTO|UPDATE \w+ SET|DELETE FROM|REPLACE INTO)\b/);
+    }
+    // 対照(検出の確認。空振りでない): 書き込み・取得を足した本文は拾う
+    expect(("this.core.requestPlan(x);").match(/this\.core\.[A-Za-z]+\(/g)).toEqual(["this.core.requestPlan("]);
+    expect(/\b(INSERT INTO|UPDATE \w+ SET)\b/.test("UPDATE analyses SET a = 1")).toBe(true);
   });
 
   it("Issue #184: 静的アセット([assets])を使わない。クライアントの JS は Worker が認証の後ろで配る(run_worker_first を付け忘れると認証を素通りする配信の経路ができるため、そもそも置かない)", () => {

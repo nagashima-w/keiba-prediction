@@ -84,6 +84,9 @@ function fakeRaceDay(): FakeRaceDay {
       getResultImportProgress: () => {
         throw new Error("getResultImportProgress は呼ばれない想定");
       },
+      getTargetsLedger: () => {
+        throw new Error("getTargetsLedger は呼ばれない想定");
+      },
     }),
   };
   return f;

@@ -43,6 +43,7 @@ import { exportFilename, PRIOR_EXPORT_KEY } from "./prior-export-format";
 import { toRaceListRows } from "./race-list";
 import { D1TargetsStore } from "./targets-repository";
 import { D1BabaStore, FETCH_LIST_LIMIT_DEFAULT } from "./baba-repository";
+import { ledgerFromWire, type TargetsLedger, type TargetsLedgerWire } from "./targets-ledger";
 import { buildTargetsView, type TargetsPlanRow } from "./targets-view";
 import type { JWTVerifyGetKey } from "jose";
 
@@ -85,6 +86,11 @@ export interface RaceDayStubLike {
   requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[]; readonly winOddsOnly?: boolean }): Promise<RequestResultImportResult>;
   /** 結果の取り込みの観測（Issue #208 `GET /api/plan`。状態は変えない）。 */
   getResultImportProgress(): Promise<ResultImportProgress>;
+  /**
+   * 収支の途中経過の計算(Issue #361 `GET /api/targets`。**読み取りだけ**。状態を変えない・netkeiba・R2・LLM に出ない)。計算は Worker Free の CPU 10ms に収まらないので DO で行う。
+   * 計画のどのレースも発走していなければ null。D1 の読み取りの失敗は例外(Worker が収支なしにする)。呼ぶのは `handleTargets` だけ(ガードテストが固定)。
+   */
+  getTargetsLedger(input: { readonly kaisaiDate: string; readonly nowMs: number }): Promise<TargetsLedgerWire | null>;
 }
 
 /** 日単位の DO(RaceDay)の名前空間の、使う部分だけの型。名前は開催日(YYYYMMDD)。 */
@@ -1492,6 +1498,10 @@ async function handlePlan(request: Request, env: Env): Promise<Response> {
  * 順序: `Sec-Fetch-Site`(別サイトなら 403。DO の名前は開催日なので、日付を変えて DO を作らせる cross-site の GET を拒否する。`handlePlan` と同じ)→ クエリの検証(400。ここまでで D1・DO は呼ばない)→ D1(失敗は 503・文面なし)→ DO。
  * **DO は分析が 1 件でもあるときだけ呼ぶ**(分析の無い日付で DO を作らない)。DO の失敗(計画が無い・読めない)は 503 にせず、発走時刻なしで 200 を返す(場・R は race_id から導ける)。
  * 再計算の表が無い間(migration の適用前に Worker が先に出た場合)は、再計算なし(分析時の提案)で 200(`D1TargetsStore.readDay`)。
+ *
+ * **収支の途中経過(Issue #361)**: 計算は**日単位の DO の読み取り専用の RPC `getTargetsLedger`** が行い(分析・配分・結果の読み取りと、core の検証と同じ関数での計算。Worker Free の CPU 10ms に収まらないため。検証の集計を DO で行うのと同じ理由)、
+ * Worker は返された素のデータを応答の `ledger`・各行の `result` に載せるだけ(Worker は収支のために D1 を読まない)。計画のどのレースも発走していない間、DO は null を返す(読み取りを増やさない)。
+ * **失敗は一覧を巻き込まない**: DO の失敗は収支なし(`ledger`・各行の `result` が null)。閲覧者にも同じ内容を返す(ユーザーの決定)。
  */
 async function handleTargets(request: Request, env: Env, now: Date): Promise<Response> {
   const site = request.headers.get("sec-fetch-site");
@@ -1520,15 +1530,25 @@ async function handleTargets(request: Request, env: Env, now: Date): Promise<Res
     return json({ ok: false, error: { type: "d1-error" } }, 503);
   }
   let plan: TargetsPlanRow[] | null = null;
+  let ledger: TargetsLedger | null = null;
   if (day.analyses.length > 0) {
-    try {
-      const progress = await raceDayStub(env, kaisaiDate).getPlanProgress();
-      plan = progress.rows.map((r) => ({ raceId: r.raceId, venueName: r.venueName, raceNumber: r.raceNumber, startTime: r.startTime }));
-    } catch {
-      plan = null; // 計画を読めない: 発走時刻なしで出す
-    }
+    const stub = raceDayStub(env, kaisaiDate);
+    // 計画(発走時刻)と収支の途中経過(Issue #361。計算は DO の RPC)を並べて読む。どちらの失敗も一覧を巻き込まない:
+    // 計画の失敗は発走時刻なし、収支の失敗は収支なし(null)。例外の文面は返さない。DO の呼び出しが同期に投げても握る。
+    const [planRows, wire] = await Promise.all([
+      (async () => (await stub.getPlanProgress()).rows)().then(
+        (rows) => rows,
+        () => null,
+      ),
+      (async () => stub.getTargetsLedger({ kaisaiDate, nowMs: now.getTime() }))().then(
+        (w) => w,
+        () => null,
+      ),
+    ]);
+    plan = planRows === null ? null : planRows.map((r) => ({ raceId: r.raceId, venueName: r.venueName, raceNumber: r.raceNumber, startTime: r.startTime }));
+    ledger = wire === null ? null : ledgerFromWire(wire);
   }
-  const view = buildTargetsView({ kaisaiDate, nowMs: now.getTime(), analyses: day.analyses, closeRounds: day.closeRounds, plan });
+  const view = buildTargetsView({ kaisaiDate, nowMs: now.getTime(), analyses: day.analyses, closeRounds: day.closeRounds, plan, ledger });
   return json({ ok: true, ...view });
 }
 

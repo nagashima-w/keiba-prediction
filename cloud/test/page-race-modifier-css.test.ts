@@ -36,8 +36,8 @@ function listTree(): VNode {
 }
 
 function targetsTree(): VNode {
-  const r = (n: number, startMs: number, skipped: boolean): TargetRace => ({ raceId: `2026050508${String(n).padStart(2, "0")}`, analysisId: n, startMs, startTime: "15:40", place: "東京11R", pick: "◎7", skipped, detail: "x" });
-  const data = { date: "20261017", nowMs: NOW_MS, summary: "s", races: [r(1, NOW_MS - 600_000, false), r(2, NOW_MS - 300_000, true), r(3, NOW_MS + 300_000, true), r(4, NOW_MS + 900_000, false)] };
+  const r = (n: number, startMs: number, skipped: boolean): TargetRace => ({ raceId: `2026050508${String(n).padStart(2, "0")}`, analysisId: n, startMs, startTime: "15:40", place: "東京11R", pick: "◎7", skipped, detail: "x", resultState: null, result: null });
+  const data = { date: "20261017", nowMs: NOW_MS, summary: "s", ledger: null, races: [r(1, NOW_MS - 600_000, false), r(2, NOW_MS - 300_000, true), r(3, NOW_MS + 300_000, true), r(4, NOW_MS + 900_000, false)] };
   return renderScreen(buildTargetsModel({ date: "20261017", data, error: null, loading: false, nowMs: NOW_MS }), noopActions);
 }
 

@@ -59,6 +59,7 @@ function fakeRaceDay(): FakeRaceDay {
       getNotifications: never("getNotifications"),
       requestResultImport: never("requestResultImport"),
       getResultImportProgress: never("getResultImportProgress"),
+      getTargetsLedger: never("getTargetsLedger"),
     }),
   };
   return f;

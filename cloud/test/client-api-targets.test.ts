@@ -19,9 +19,23 @@ describe("parseTargetsResponse", () => {
         date: "20261017",
         nowMs: 999_000,
         summary: "分析済み 1 レース中、狙い目 1",
-        races: [{ raceId: "202605050811", analysisId: 11, startMs: 1_000_000, startTime: "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時" }],
+        ledger: null,
+        races: [{ raceId: "202605050811", analysisId: 11, startMs: 1_000_000, startTime: "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", resultState: null, result: null }],
       },
     });
+  });
+
+  it("収支の途中経過(Issue #361): 上部の合計と各行の結果(状態と文言)を、サーバの文言のまま写す。キーが無い(旧い応答)・null は null", () => {
+    const withLedger = { ...BODY, ledger: "確定 1R: 投資 300円 / 回収 4,500円 / 回収率 1500.0%", races: [{ ...RACE, result_state: "settled", result: "的中 +4,200円" }] };
+    const parsed = parseTargetsResponse(200, withLedger);
+    expect(parsed.ok && parsed.data.ledger).toBe("確定 1R: 投資 300円 / 回収 4,500円 / 回収率 1500.0%");
+    expect(parsed.ok && parsed.data.races[0]).toMatchObject({ resultState: "settled", result: "的中 +4,200円" });
+    const nulls = parseTargetsResponse(200, { ...BODY, ledger: null, races: [{ ...RACE, result_state: null, result: null }] });
+    expect(nulls.ok && [nulls.data.ledger, nulls.data.races[0]!.resultState, nulls.data.races[0]!.result]).toEqual([null, null, null]);
+    // BODY / RACE はこれらのキーを持たない(前提)。キーが無くても null として読める
+    expect("ledger" in BODY || "result" in RACE).toBe(false);
+    const absent = parseTargetsResponse(200, BODY);
+    expect(absent.ok && [absent.data.ledger, absent.data.races[0]!.resultState, absent.data.races[0]!.result]).toEqual([null, null, null]);
   });
 
   it("時刻なし・◎なし(null)は null のまま。races が空の配列でも成功", () => {
@@ -51,6 +65,9 @@ describe("parseTargetsResponse", () => {
     ["detail が欠落", { ...BODY, races: [{ ...RACE, detail: undefined }] }],
     ["2 行目だけが不正(一部の行だけを黙って落とさない)", { ...BODY, races: [RACE, { ...RACE, race_id: undefined }] }],
     ["行が null", { ...BODY, races: [null] }],
+    ["ledger が数値", { ...BODY, ledger: 1 }],
+    ["result が数値", { ...BODY, races: [{ ...RACE, result_state: "settled", result: 1 }] }],
+    ["result_state が数値", { ...BODY, races: [{ ...RACE, result_state: 1, result: "x" }] }],
   ])("想定外: %s", (_name, body) => {
     expect(parseTargetsResponse(200, body)).toEqual({ ok: false, error: { kind: "unexpected", httpStatus: 200 } });
   });

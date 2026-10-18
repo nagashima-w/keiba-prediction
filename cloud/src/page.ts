@@ -137,6 +137,8 @@ ${paletteCss()}
   .race { display: block; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); text-decoration: none; }
   .race-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
   .race-detail { display: block; font-size: 0.85rem; color: var(--muted); }
+  .race-result { font-weight: 600; color: inherit; }
+  .result-pending, .result-pending_payout, .result-none, .result-excluded, .result-no_proposal { font-weight: normal; color: var(--muted); }
   .grade { font-size: 0.75rem; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; }
   .badges { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 0.8rem; }
   .badge.ok { color: var(--ok); }

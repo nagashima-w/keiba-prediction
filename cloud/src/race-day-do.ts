@@ -28,6 +28,8 @@ import { D1JockeyResultsStore } from "./jockey-results-repository";
 import { D1TrainerResultsStore } from "./trainer-results-repository";
 import { D1HorseRunsStore } from "./horse-runs-repository";
 import { D1ResultStore } from "./result-repository";
+import { getTargetsLedgerWire, type TargetsLedgerWire } from "./targets-ledger";
+import { D1TargetsStore } from "./targets-repository";
 import { loadSettings } from "./settings";
 
 /** netkeiba への取得の出口(NetkeibaGate)の固定名。handler.ts の GATE_NAME と同じ(全取得をこの1つのインスタンスに通す)。 */
@@ -181,6 +183,22 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
   /** 結果の取り込みの観測（RPC。Issue #208 `GET /api/plan` が使う。状態は変えない。固定の語と数値だけ）。 */
   getResultImportProgress(): ResultImportProgress {
     return this.core.getResultImportProgress();
+  }
+
+  /**
+   * 「今日の狙い目」の収支の途中経過の計算(RPC。Issue #361 `GET /api/targets` が使う。**読み取りだけ**: 状態を変えない・netkeiba・R2・LLM・通知に出ない)。
+   * Worker Free の CPU 10ms に収まらない計算(core の検証と同じ関数をレースごとと合計で呼ぶ)をここで行う。この DO の計画・結果の取り込み状態と、D1 の分析・配分・結果を読む。
+   * 計画のどのレースも発走していなければ null(`getTargetsLedgerWire`)。D1 の失敗は例外(Worker が収支なしにする)。
+   */
+  getTargetsLedger(input: { readonly kaisaiDate: string; readonly nowMs: number }): Promise<TargetsLedgerWire | null> {
+    return getTargetsLedgerWire(
+      {
+        plan: () => this.core.getPlanProgress().rows,
+        importProgress: () => this.core.getResultImportProgress().races,
+        readRows: async (kaisaiDate) => (await new D1TargetsStore({ db: this.env.DB }).readLedger(kaisaiDate)).rows,
+      },
+      input,
+    );
   }
 
   /** 事前分析の計画の読み取り(RPC。Issue #206 `GET /api/plan` が使う。状態は変えない)。 */
