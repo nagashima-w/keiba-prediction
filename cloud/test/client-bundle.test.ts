@@ -208,6 +208,8 @@ describe("生成物のドリフトと決定性", () => {
     // Issue #359(結果の各馬の行にタイム指数の値とレース内の順位を出す): 上限は 312,500 のまま据え置き。実測(`Buffer.byteLength(CLIENT_JS)`。`pnpm run build:client` の出力)は 310,680(d44a467=#362 の後)→ 311,070(+390)で、余裕は 1,430 バイト。
     // 増えた理由: 応答のパーサに 2 項目(馬ごとの `timeIndexLine` と分析の `timeIndexNote`。`api-analysis.ts`)・表示用データに 2 項目(`result.ts`)・VNode 2 要素(馬の行と説明の 1 段落。`view.ts`)。**文言は 1 つもクライアントに置いていない**
     // (サーバの `analysis-view.ts` が組み立てる。日本語は `\uXXXX` で 1 文字 6 バイトになるため)。順位の計算・値の書式・core のタイム指数の定数もサーバ側で、束には入っていない。
+    // Issue #363(想定隊列図の4コーナーの位置に、馬ごとの近走の4コーナーの通過順位を使う): 上限は 312,500 のまま据え置き。実測(`Buffer.byteLength(CLIENT_JS)`。`pnpm run build:client` の出力)は 311,070(14104ec)→ 311,412(+342)で、余裕は 1,088 バイト。
+    // 増えた理由: 応答のパーサに 1 項目(馬ごとの `latePos`。`api-analysis.ts`)・4コーナーの位置の計算(`formation-model.ts` の `cornerGaps`)・図の注記(`FORMATION_NOTE`)の文言の追加。日本語は `\uXXXX` で 1 文字 6 バイトになる。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(312_500);
   });

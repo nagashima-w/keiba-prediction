@@ -84,6 +84,11 @@ export interface AnalysisViewHorse {
    */
   readonly earlyPos?: number | null;
   /**
+   * 終盤の位置(Issue #363。想定隊列図〈#362〉の4コーナーの位置に使う。0〜1 で小さいほど前)。近走の最終コーナーの通過順位 ÷ 出走頭数の平均(分析の時点で計算してスナップショットに保存した値)。
+   * 戦績が取れない馬・**Issue #363 より前の分析**・詳細が present でない・範囲外の値は null。確率・配分には使わない。`buildAnalysisView` は常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。
+   */
+  readonly latePos?: number | null;
+  /**
    * 脚質(Issue #314。想定隊列図〈#362〉の位置を決める材料)。プロンプトの展開想定と同じ分類・同じ参照走数(分析の時点で計算してスナップショットに保存した値)。
    * 戦績が取れない馬・**Issue #314 より前の分析**・詳細が present でない・4 値以外の値は null。確率・配分には使わない。`buildAnalysisView` は常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。
    */
@@ -274,6 +279,9 @@ function earlyPosOf(value: unknown): number | null {
   const n = num(value);
   return n !== null && n >= 0 && n <= 1 ? n : null;
 }
+
+/** 終盤の位置(Issue #363)。`earlyPosOf` と同じ検査(0〜1 の有限の数だけ)。 */
+const latePosOf = earlyPosOf;
 
 const LEG_STYLES: readonly LegStyle[] = ["逃げ", "先行", "差し", "追込"];
 
@@ -493,6 +501,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       actualPlaceOddsMin: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.placeOddsMin),
       actualPlaceOddsMax: usableOdds(snapshot?.horsesByUmaban.get(h.umaban)?.placeOddsMax),
       earlyPos: earlyPosOf(snapshot?.horsesByUmaban.get(h.umaban)?.earlyPos),
+      latePos: latePosOf(snapshot?.horsesByUmaban.get(h.umaban)?.latePos),
       legStyle: legStyleOf(snapshot?.horsesByUmaban.get(h.umaban)?.legStyle),
       timeIndexLine: timeIndex.get(h.umaban) ?? null,
     })),

@@ -43,6 +43,7 @@ import type {
 } from "../pipeline.js";
 import type { DayBaba } from "../analyzer/day-baba.js";
 import { computeEarlyPosition } from "../analyzer/early-position.js";
+import { computeLatePosition } from "../analyzer/late-position.js";
 import type { LegStyle } from "../analyzer/leg-style.js";
 import { computeReplayLegStyle } from "../analyzer/replay-leg-style.js";
 
@@ -92,6 +93,11 @@ export interface RaceSnapshotHorse {
    * 戦績が無い・通過順位や頭数が取れない馬は null。**任意項目**: このキーを保存する前に作った過去のスナップショットは持たない(読み出し〈`toSafeRaceSnapshot`〉では null になる)。
    */
   readonly earlyPos?: number | null;
+  /**
+   * 終盤の位置(Issue #363。想定隊列図〈#362〉の4コーナーの位置に使う)。近走の最終コーナー(`passing` の最後の要素。通過点が 2 つ以上ある走だけ)の通過順位 ÷ 出走頭数の平均(0〜1。小さいほど前。`computeLatePosition`)。
+   * 戦績が無い・通過順位や頭数が取れない馬は null。**任意項目**: このキーを保存する前に作った過去のスナップショットは持たない(読み出し〈`toSafeRaceSnapshot`〉では null になる)。
+   */
+  readonly latePos?: number | null;
   /**
    * 脚質(Issue #314。想定隊列図〈#362〉の位置を決める材料)。プロンプトの展開想定と同じ分類・同じ参照走数(`computeReplayLegStyle`)。
    * 戦績が無い・通過順位が取れない馬は null。**任意項目**: このキーを保存する前に作った過去のスナップショットは持たない(読み出し〈`toSafeRaceSnapshot`〉では null になる)。
@@ -213,6 +219,7 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         placeOddsMin: race.odds.place[umaban]?.oddsMin ?? null,
         placeOddsMax: race.odds.place[umaban]?.oddsMax ?? null,
         earlyPos: computeEarlyPosition(h.results),
+        latePos: computeLatePosition(h.results),
         legStyle: computeReplayLegStyle(h.results),
         oikiriCritic: h.oikiri?.critic ?? null,
         oikiriRank: h.oikiri?.rank ?? null,
@@ -301,6 +308,7 @@ export function toSafeRaceSnapshot(raw: unknown): {
         placeOddsMin: horse.placeOddsMin ?? null,
         placeOddsMax: horse.placeOddsMax ?? null,
         earlyPos: horse.earlyPos ?? null,
+        latePos: horse.latePos ?? null,
         legStyle: horse.legStyle ?? null,
         oikiriCritic: horse.oikiriCritic ?? null,
         oikiriRank: horse.oikiriRank ?? null,
