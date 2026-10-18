@@ -36,6 +36,7 @@ export type HorseId = Branded<string, "HorseId">;
  * 1〜10文字の英数字を受理する(URLに埋め込むので、記号・空白・全角は拒否する)。
  */
 export type JockeyId = Branded<string, "JockeyId">;
+export type TrainerId = Branded<string, "TrainerId">;
 
 /**
  * ID・開催日の検証失敗を表す例外。理由を日本語メッセージに含める。
@@ -356,4 +357,17 @@ export function parseJockeyId(input: string): JockeyId {
     );
   }
   return input as JockeyId;
+}
+
+/**
+ * 調教師IDを検証してブランド型にする(Issue #354)。1〜10文字の半角英数字のみ受理する(騎手IDと同じ形式。番号体系は別)。
+ * @throws InvalidIdError 形式が不正な場合
+ */
+export function parseTrainerId(input: string): TrainerId {
+  if (!/^[0-9a-zA-Z]{1,10}$/.test(input)) {
+    throw new InvalidIdError(
+      `調教師IDは1〜10文字の半角英数字である必要があります(入力: "${input}")`,
+    );
+  }
+  return input as TrainerId;
 }

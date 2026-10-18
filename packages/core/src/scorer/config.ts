@@ -92,6 +92,16 @@ export interface BaseScoreWeights {
   readonly weightChange: number;
   /** コースレベル枠順バイアス(定数テーブル・仕様の枠2層のうち①)。 */
   readonly courseFrameBias: number;
+  /**
+   * タイム指数(Issue #353〈#274-B〉)の重み w。補正 = w × 特徴量(単位は秒/km。他の項目の「複勝率の差 × 重み」とは単位が違う)。
+   * `computeFieldPriors` が足す(レース内の中央値との差なので、1頭ごとの計算には入らない)。算出は `time-index.ts`。
+   */
+  readonly timeIndex: number;
+  /**
+   * 調教師の前2年の3着内率(Issue #354〈#348 の TR1〉)の重み w。補正 = w × (縮小した率 − レース内の平均)。単位は騎手と同じ「3着内率の差 × 重み」。
+   * `computeFieldPriors` が足す(レース内の平均との差なので、1頭ごとの計算には入らない)。算出は `trainer-stats.ts`。
+   */
+  readonly trainer: number;
 }
 
 /**
@@ -270,6 +280,15 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
       // 斤量・コース枠順は補正値自体が小さい(±0.05以内)ため重み1でよい。
       weightChange: 1,
       courseFrameBias: 1,
+      // Issue #353(#274-B): タイム指数。探索の 200 レース(#342・#348)で Brier が最小だった w ≈ 0.118(本番と同じ入れ方で当てた値)を
+      // 丸めた。単位は 3着内率のスケール ÷ (秒/km)。検証の 100 レース(#274。w を固定)で ΔBrier −0.003。根拠は #274・#353 のコメント。
+      // 基準タイム表を作り直しても、この値は当て直さない(表に検証期間の走が入るため、当て直しは先読みを含む)。
+      timeIndex: 0.12,
+      // Issue #354(#348 の TR1): 調教師の前2年の3着内率。探索の 200 レース・2,801 頭(#342・#348。タイム指数込みの本番の基準線に足して、
+      // 本番と同じ入れ方〈`normalizeFieldPriors`〉で当てた)で Brier が最小だった w ≈ 0.767 を 0.01 刻みに丸めた(基準線との差 −0.00133)。
+      // 作業用の照合スクリプトはリポジトリに入れていない(取得済みの戦績・調教師ページが要る)。結果と手順は Issue #354 のコメント。
+      // タイム指数(0.12)より大きいのは、特徴量が 3着内率の差(レース内の sd は 0.06 前後)で、秒/km の差(数秒)より桁が小さいため。
+      trainer: 0.77,
     },
     neutralPlaceRate: 0.33,
     jockeyNeutralPlaceRate: { central: 0.22, nar: 0.29 },

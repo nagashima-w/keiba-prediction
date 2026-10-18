@@ -5,6 +5,8 @@
  *
  * 合成式(設計判断):
  *   raw_i = 中立確率 + Σ(基礎スコア6項目の補正) + Σ(環境・状態バイアス7項目の補正)
+ *   (computeFieldPriors はこれに + w × タイム指数の特徴量〈レース内の中央値との差。Issue #353。`time-index.ts`〉
+ *    + w × 調教師成績の特徴量〈縮小した前2年の3着内率 − レース内の平均。Issue #354。`trainer-stats.ts`〉を足す)
  *   中立確率 = min(3, 頭数) / 頭数   (頭数Nのレースで概ね3頭が複勝圏に入る前提の起点)
  *   prior_i = clamp(sigmoid(logit(clamp(raw_i)) + c), [minPrior, maxPrior])
  *             (c: レース内で全馬に共通。Σ prior_i = min(3, 頭数) となるように決める。下の「健全性」)
@@ -25,6 +27,10 @@
  *
  * 寄与度ログ: 基礎6項目 + 環境7項目(馬場・競馬場・季節・夏負け・枠順個別・輸送滞在・ローテ)の
  * 計13項目を contributions として返す(仕様「各バイアスの寄与度をログ出力し、verifyで重みを調整」)。
+ * `computeFieldPriors` は、これに**タイム指数**(Issue #353〈#274-B〉。`time-index.ts`)を末尾の 14 番目として足す。
+ * タイム指数は「馬の過去走の指数 − レース内の中央値」なので 1 頭では決まらず、レース全頭を見る `computeFieldPriors` が足す
+ * (raw = 中立確率 + Σ13項目 + w × 特徴量 を、上のロジットシフトで正規化する)。末尾に置くのは、既存の 13 項目の位置を変えないため。
+ * さらに末尾の 15 番目として**調教師成績**(Issue #354〈#348 の TR1〉。`trainer-stats.ts`)を足す。同じくレース内の平均との差なので `computeFieldPriors` が足す。
  */
 
 import type { DerivedRaceFeature, FrameZone, Season } from "./derive-features.js";
@@ -50,6 +56,8 @@ import { computeSeasonBias, computeSummerFatigueBias } from "./bias-season.js";
 import { computeFrameBias } from "./bias-frame.js";
 import { computeTransportBias } from "./bias-transport.js";
 import { computeRotationBias } from "./bias-rotation.js";
+import { computeFieldTimeIndexContributions } from "./time-index.js";
+import { computeFieldTrainerContributions, type TrainerStats } from "./trainer-stats.js";
 
 /**
  * prior合成で扱う寄与度ログの最小共通形。
@@ -116,6 +124,11 @@ export interface PriorInput {
   readonly fieldSize: number;
   /** 騎手の当該コース成績(なければ省略)。 */
   readonly jockeyCourseStats?: JockeyCourseStats;
+  /**
+   * 調教師の前2年(Y−2, Y−1)の出走数と3着内の数(Issue #354。なければ省略 = 「データなし」)。
+   * 1頭では使われず、`computeFieldPriors` がレース全頭の分を比べて足す(`trainer-stats.ts`)。
+   */
+  readonly trainerStats?: TrainerStats;
   /** scorer 設定。省略時は既定値。 */
   readonly config?: ScorerConfig;
 }
@@ -128,9 +141,12 @@ export interface PriorResult {
   readonly rawPrior: number;
   /** 起点の中立確率(min(3,頭数)/頭数)。 */
   readonly neutralProb: number;
-  /** 基礎6項目 + バイアス7項目の補正合計。 */
+  /** 基礎6項目 + バイアス7項目の補正合計(`computeFieldPriors` の結果にはタイム指数・調教師成績の補正も含む)。 */
   readonly correctionSum: number;
-  /** 全13項目の寄与度ログ。 */
+  /**
+   * 全項目の寄与度ログ。`computePrior`(1頭用)は基礎6 + バイアス7 の 13 項目。
+   * `computeFieldPriors` は末尾にタイム指数(Issue #353)・調教師成績(Issue #354)を足した 15 項目(レース内の比較が要るので、レース全頭を見られる側でだけ足す)。
+   */
   readonly contributions: ScoreContribution[];
 }
 
@@ -376,16 +392,45 @@ export function computeFieldPriors(
     const c = input.config ?? DEFAULT_SCORER_CONFIG;
     const { contributions, correctionSum } = collectContributions(input);
     const neutralProb = neutralProbFor(fieldSize, c);
-    const rawPrior = neutralProb + correctionSum;
-    return { contributions, correctionSum, neutralProb, rawPrior };
+    return { contributions, correctionSum, neutralProb };
+  });
+
+  // タイム指数(Issue #353): レース内の中央値との差なので、全頭の戦績がそろってから 14 番目の寄与度として足す。
+  // 今回のレースの条件(開催区分・コース種別)と重みはレースで共通(先頭の入力の値を使う。正規化の設定と同じ流儀)。
+  const timeIndex = computeFieldTimeIndexContributions(
+    inputs.map((input) => input.features.map((f) => f.result)),
+    {
+      venueKind: inputs[0]!.today.venueKind ?? "central",
+      courseType: inputs[0]!.today.courseType,
+      weight: config.baseScore.weights.timeIndex,
+    },
+  );
+  // 調教師成績(Issue #354): 同じくレース内の平均との差なので、全頭がそろってから 15 番目の寄与度として足す(開催区分・コース種別・重みはタイム指数と同じ流儀)。
+  const trainer = computeFieldTrainerContributions(
+    inputs.map((input) => input.trainerStats),
+    {
+      venueKind: inputs[0]!.today.venueKind ?? "central",
+      courseType: inputs[0]!.today.courseType,
+      weight: config.baseScore.weights.trainer,
+    },
+  );
+  const withFieldItems = perHorse.map((h, i) => {
+    const contributions = [...h.contributions, timeIndex[i]!, trainer[i]!];
+    const correctionSum = h.correctionSum + timeIndex[i]!.correction + trainer[i]!.correction;
+    return {
+      contributions,
+      correctionSum,
+      neutralProb: h.neutralProb,
+      rawPrior: h.neutralProb + correctionSum,
+    };
   });
 
   const priors = normalizeFieldPriors(
-    perHorse.map((h) => h.rawPrior),
+    withFieldItems.map((h) => h.rawPrior),
     config.prior,
   );
 
-  return perHorse.map((h, i) => ({
+  return withFieldItems.map((h, i) => ({
     prior: priors[i]!,
     rawPrior: h.rawPrior,
     neutralProb: h.neutralProb,
@@ -431,6 +476,8 @@ export interface BuildPriorInputArgs {
   readonly fieldSize: number;
   /** 騎手の当該コース成績(なければ省略)。 */
   readonly jockeyCourseStats?: JockeyCourseStats;
+  /** 調教師の前2年の出走数と3着内の数(なければ省略。Issue #354)。 */
+  readonly trainerStats?: TrainerStats;
   /** scorer 設定。省略時は既定値。 */
   readonly config?: ScorerConfig;
 }
@@ -513,6 +560,7 @@ export function buildPriorInput(args: BuildPriorInputArgs): PriorInput {
     today,
     fieldSize: args.fieldSize,
     jockeyCourseStats: args.jockeyCourseStats,
+    ...(args.trainerStats !== undefined ? { trainerStats: args.trainerStats } : {}),
     config: args.config,
   };
 }

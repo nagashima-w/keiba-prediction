@@ -110,6 +110,7 @@ const ALL_ON: CloudSettings = {
   kellyFraction: 0.5,
   includeComboOdds: true,
   baseScoreWeightJockey: 0, // 騎手の成績を取らない(取得の本数を固定する。race-day-pre-race.test.ts と同じ理由)
+  baseScoreWeightTrainer: 0, // 調教師の成績も取らない(同じ理由。Issue #354)
 };
 
 interface Harness {

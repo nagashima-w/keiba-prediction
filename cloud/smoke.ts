@@ -581,7 +581,7 @@ async function main(): Promise<void> {
     });
 
     // F. (Issue #177)日単位の DO `RaceDay` を、workerd の実環境で通す: 予約(RPC は予約だけ)→ アラーム(取得 → 計算の2ステップ)→ 朝の prior が DO に残る。
-    //    取得は NetkeibaGate の偽ソケット経由(中央16頭・騎手16人の 35 本〈出馬表1・戦績16・調教1・オッズ1・騎手16。Issue #226 の前は騎手を取らず 19 本〉。gate の間隔 2 秒で、約 70 秒かかる)。2回目はキャッシュで、gate の間隔の待ちが無く速い。
+    //    取得は NetkeibaGate の偽ソケット経由(中央16頭・騎手16人の 35 本のあと、調教師は騎手と共有する上限 40 までの 5 本で、計 40 本〈出馬表1・戦績16・調教1・オッズ1・騎手16・調教師5。Issue #226 の前は騎手を取らず 19 本、Issue #354 の前は調教師を取らず 35 本〉。gate の間隔 2 秒で、約 80 秒かかる)。2回目はキャッシュで、gate の間隔の待ちが無く速い。
     //    D1 には何も書かれない(GET /api/analyses が空のまま)。E とは別の起動(E はブレーカーを開くので、その前の別の状態で動かす)。
     await withWorker(BASE_PORT + 5, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 5;
@@ -632,7 +632,7 @@ async function main(): Promise<void> {
       const firstMs = Date.now() - started;
       const race = (board["races"] as Record<string, unknown>[] | undefined)?.[0];
       check(`${label}: アラームで取得 → 計算が進み、状態が done になる(約 ${Math.round(firstMs / 1000)} 秒)`, race?.["status"] === "done" && race["error"] === null && race["prior"] === true && board["kaisai_date"] === date, JSON.stringify(board).slice(0, 300));
-      check(`${label}: 取得は gate の間隔(2 秒 × 35 本)を守っている(冷えた状態で 60 秒以上かかる)`, firstMs >= 60_000, `${firstMs}ms`);
+      check(`${label}: 取得は gate の間隔(2 秒 × 40 本)を守っている(冷えた状態で 60 秒以上かかる)`, firstMs >= 60_000, `${firstMs}ms`);
       const withPrior = parseJson((await req(port, "GET", `/api/analyses/status?kaisai_date=${date}&race_id=${raceId}`)).text);
       const priorRows = (withPrior["prior"] as { rows: { prior: number }[] } | null)?.rows ?? [];
       check(`${label}: GET /api/analyses/status?race_id= が朝の prior の最小限(16頭・prior の高い順)を返す`, priorRows.length === 16 && priorRows.every((r, i) => i === 0 || priorRows[i - 1]!.prior >= r.prior), JSON.stringify(withPrior).slice(0, 200));
@@ -657,7 +657,10 @@ async function main(): Promise<void> {
       const secondStarted = Date.now();
       const secondBoard = await waitDone();
       const secondMs = Date.now() - secondStarted;
-      check(`${label}: 2回目はキャッシュに当たり、gate の取得が無い(10 秒以内に done)`, (secondBoard["races"] as { status: string }[])[0]?.status === "done" && secondMs < 10_000, `${secondMs}ms`);
+      // Issue #354: 1回目は調教師が上限(40 本)で 5 人しか取れず、残りの 11 人は補正なしだった。2回目は、戦績・調教・騎手はキャッシュ・保存先に当たり、
+      // 調教師は取れた 5 人がキャッシュ・保存先に当たり、取れなかった 11 人だけを追加で取る(11 本 × gate の間隔 2 秒 ≈ 22 秒)。取り直しではなく不足分の補充なので、
+      // 3回目以降(一括の起動・発走前の分析)は調教師も全員が保存先に揃い、gate への取得が無い。
+      check(`${label}: 2回目は戦績・調教・騎手がキャッシュ・保存先に当たり、調教師は不足の 11 人だけを取る(11 本 × 2 秒。45 秒以内に done。1回目の約 80 秒より速い)`, (secondBoard["races"] as { status: string }[])[0]?.status === "done" && secondMs < 45_000 && secondMs >= 15_000, `${secondMs}ms`);
 
       // Issue #251: 一括の手動起動(POST /api/analyses/run/bulk)。本物の DO の RPC(scheduleMany)を通す。守り(Origin・415・400)→ 予約(202。レースごとの結果)→ アラームで done。
       //   朝(morning)のキャッシュが効くので速い。morning は D1 に書かない(下の「D1 には何も書かれない」の確認が引き続き成り立つ)。
@@ -708,7 +711,7 @@ async function main(): Promise<void> {
       const preMs = Date.now() - preStarted;
       check(`${label}: 発走前の分析が done になる(約 ${Math.round(preMs / 1000)} 秒。朝のキャッシュで取得は少ない)`, preRow?.["status"] === "done" && preRow["error"] === null && typeof preRow["analysis_id"] === "number", JSON.stringify(preRow).slice(0, 300));
       check(`${label}: 保存した子の行(馬・買い目)の件数が一致し(children_ok)、R2 の詳細が置かれた(detail: stored)`, preRow?.["children_ok"] === true && preRow["detail"] === "stored", JSON.stringify(preRow).slice(0, 300));
-      check(`${label}: 発走前の取得は、朝の 35 本よりずっと速い(キャッシュ。戦績・調教・騎手の成績は取り直さない。gate の間隔 2 秒 × 35 本の約 70 秒を待たない)`, preMs < 20_000, `${preMs}ms`);
+      check(`${label}: 発走前の取得は、朝の 40 本よりずっと速い(キャッシュ・保存先。戦績・調教・騎手・調教師の成績は取り直さない。gate の間隔 2 秒 × 40 本の約 80 秒を待たない)`, preMs < 20_000, `${preMs}ms`);
       const saved = parseJson((await req(port, "GET", `/api/analyses?race_id=${raceId}`)).text);
       const savedList = (saved["analyses"] as { id: number; raceId: string; kaisaiDate: string | null; horses: unknown[]; hasDetail: boolean }[] | undefined) ?? [];
       check(`${label}: D1 に分析が1件だけ保存された(GET /api/analyses。16頭・開催日・R2 の詳細あり)`, savedList.length === 1 && savedList[0]!.raceId === raceId && savedList[0]!.kaisaiDate === date && savedList[0]!.horses.length === 16 && savedList[0]!.hasDetail === true && savedList[0]!.id === preRow?.["analysis_id"], JSON.stringify(saved).slice(0, 300));

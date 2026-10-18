@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseHorseId,
   parseJockeyId,
+  parseTrainerId,
   parseKaisaiDate,
   parseRaceId,
 } from "../../src/scraper/ids.js";
@@ -15,6 +16,7 @@ import {
   horseResultsApiUrl,
   horseUrl,
   jockeyResultsUrl,
+  trainerResultsUrl,
   narBracketQuinellaOddsPageUrl,
   narExactaOddsPageUrl,
   narOddsPageUrl,
@@ -457,6 +459,26 @@ describe("jockeyResultsUrl(騎手の年度別成績ページ。Issue #226)", () 
   it("英字つきの騎手IDも、そのままクエリに入る", () => {
     expect(jockeyResultsUrl(parseJockeyId("a01ad"), "central")).toBe(
       "https://db.netkeiba.com/jockey/result.html?id=a01ad",
+    );
+  });
+});
+
+describe("trainerResultsUrl(調教師の年度別成績ページ。Issue #354)", () => {
+  it("中央のレースの調教師は、db.netkeiba.com の trainer/result.html?id=…(中央の成績が既定)", () => {
+    expect(trainerResultsUrl(parseTrainerId("01126"), "central")).toBe(
+      "https://db.netkeiba.com/trainer/result.html?id=01126",
+    );
+  });
+
+  it("地方の成績は &syusai=20(2026-10-17 の実測: 地方所属の 05231 は &syusai=20 で 2025 年 96 走、付けないと 2000 年の 3 走だけ)", () => {
+    expect(trainerResultsUrl(parseTrainerId("05231"), "nar")).toBe(
+      "https://db.netkeiba.com/trainer/result.html?id=05231&syusai=20",
+    );
+  });
+
+  it("英字つきの調教師IDも、そのままクエリに入る", () => {
+    expect(trainerResultsUrl(parseTrainerId("a030b"), "central")).toBe(
+      "https://db.netkeiba.com/trainer/result.html?id=a030b",
     );
   });
 });

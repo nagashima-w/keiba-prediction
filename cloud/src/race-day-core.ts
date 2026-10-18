@@ -15,6 +15,10 @@
  *    (Issue #226)も騎手 ID で一意にして取る**: まず保存先(`jockeyStore`。本番は D1。日をまたいで共有)から読み、取得日時から 7 日以内なら netkeiba に
  *    出ない(週に 1 回の更新)。保存先に無い・古い騎手だけを 1 人 1 本、その後ろに足す(16 頭・騎手 16 人で最大 35 本。保存先が空の最初の週と冷えた状態だけ)。
  *    1 回の取得の fetcher 呼び出しの合計は上限 40(`DEFAULT_JOCKEY_REQUEST_LIMIT`)で、届いたら残りの騎手は取らず補正なしで続ける。重みが 0 なら 19 本のまま。
+ *    **調教師の年度別成績(Issue #354)も同じ流れ**で、騎手の後ろに調教師 ID で一意にして取る(調教師の重み `baseScoreWeightTrainer` が 0 より大きいとき。既定 0.77。中央のレースだけ)。
+ *    保存先は D1 の `trainer_results`(`trainerStore`)で、取得日時が**レースの年の 1 月 1 日〈JST〉以降**なら netkeiba に出ない(前2年の行は確定値なので年に 1 回)。
+ *    **上限 40 は騎手と調教師で共有**する(騎手の後ろの調教師から先に締め出される)ので、gate への最悪の呼び出しは下の 42 本のまま増えない。
+ *    騎手が保存先にあれば 16 頭の調教師は全員取れる(19 + 16 = 35 本)。騎手も冷えていれば調教師は 5 人まで(19 + 16 + 5 = 40 本)で、残りは補正なし。
  *    発走前の取得ステップは、この `scrapeRace` のほかに、重賞の過去10年傾向(`prefetchGradeWinner`。LLM が有効で重賞のときだけ、最大 1 本)と、日報の時刻の下限のためのレース一覧(`recordReportHold`→`getRaceList`。最大 1 本・取得キャッシュにあれば 0 本)を引く。
  *    したがって gate への呼び出しは最大 40 + 1 + 1 = 42 本で、Free の 50 に対して余裕は 8 本(再現: `grep -n "recordReportHold(\|prefetchGradeWinner(" cloud/src/race-day-core.ts` で、どちらも `runPreRaceFetch` の呼び出しが 1 箇所ずつ。
  *    `fetchText(` はそれぞれ `fetchGradeWinnerEntries` に 1 回、`listRaces`・`listNarRaces` に 1 回ずつ)。D1・R2 への呼び出しは数えていない。
@@ -93,6 +97,7 @@ import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceF
 import { parseKaisaiDate, parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
 import { deriveNarTrifectaAxisUmabans } from "../../packages/core/src/scraper/nar-trifecta-axis";
 import type { JockeyResultsStore } from "../../packages/core/src/scraper/jockey-results-store";
+import type { TrainerResultsStore } from "../../packages/core/src/scraper/trainer-results-store";
 import type { HorseRunsStore } from "./horse-runs";
 import type { RaceData } from "../../packages/core/src/scraper/scrape-race";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
@@ -320,6 +325,7 @@ const CACHE_ONLY_TTL: ScrapeTtlConfig = {
   oddsMs: FOREVER_MS,
   raceListMs: FOREVER_MS,
   jockeyMs: FOREVER_MS,
+  trainerMs: FOREVER_MS,
 };
 
 /**
@@ -348,6 +354,14 @@ function allocationSettingsOf(settings: CloudSettings): AnalysisAllocationSettin
  */
 function wantsJockeyStats(settings: Pick<CloudSettings, "baseScoreWeightJockey">): boolean {
   return settings.baseScoreWeightJockey > 0;
+}
+
+/**
+ * 調教師の年度別成績(Issue #354)を取得するか。**調教師の重みが 0 より大きいときだけ**({@link wantsJockeyStats} と同じ理由と、同じ設定のスナップショットの扱い)。
+ * 中央のレースだけが対象(地方は `scrapeRace` が取得せずに対象外にする)。
+ */
+function wantsTrainerStats(settings: Pick<CloudSettings, "baseScoreWeightTrainer">): boolean {
+  return settings.baseScoreWeightTrainer > 0;
 }
 
 export type TaskStatus = "queued" | "fetched" | "done" | "failed";
@@ -400,6 +414,11 @@ export interface RaceDayDeps {
    * 取得ステップ・発走前の取得・計算ステップ(キャッシュだけ。許容鮮度は実質無期限)のすべてに同じものを渡す。
    */
   readonly jockeyStore?: JockeyResultsStore;
+  /**
+   * 調教師の年ごとの成績の保存先(Issue #354。本番は D1 の `trainer_results`)。日をまたいで共有し、取得日時が**レースの年の 1 月 1 日(JST)以降**なら
+   * netkeiba に出ない(前2年の行は確定値なので、年に 1 回の取得で足りる)。省略時は保存先なしで、キャッシュ(DO の日単位)だけ。
+   */
+  readonly trainerStore?: TrainerResultsStore;
   /**
    * 各馬の戦績の蓄積先(Issue #256 段階A。本番は D1 の `horse_runs`・`horse_run_saves`〈migration 0014〉)。**事前分析(morning)の計算ステップの末尾だけ**で、
    * キャッシュ済みの出走馬全頭の戦績を渡す(取得は増やさない)。prior を保存してタスクを done にした**後**に呼び、失敗は握って警告にする(分析は止めない。再試行もしない)。
@@ -756,6 +775,7 @@ export class RaceDayCore {
   private readonly sink: AnalysisSink | undefined;
   private readonly loadSettings: (() => Promise<CloudSettings>) | undefined;
   private readonly jockeyStore: JockeyResultsStore | undefined;
+  private readonly trainerStore: TrainerResultsStore | undefined;
   private readonly horseRunsStore: HorseRunsStore | undefined;
   private readonly llm: CloudLlm | undefined;
   /** 分析モデルの選択(`analysisModel`)に応じたモデルの自動選択(系統ごとの取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined。Issue #158)。 */
@@ -797,6 +817,7 @@ export class RaceDayCore {
     this.sink = deps.sink;
     this.loadSettings = deps.loadSettings;
     this.jockeyStore = deps.jockeyStore;
+    this.trainerStore = deps.trainerStore;
     this.horseRunsStore = deps.horseRunsStore;
     this.llm = deps.llm;
     this.modelSelectorFor = deps.llm === undefined ? undefined : createCloudModelSelectors(deps.llm, onWarn);
@@ -2324,8 +2345,8 @@ export class RaceDayCore {
       // 騎手の年度別成績(Issue #226)は、ここ(netkeiba に出る取得ステップ)で取っておく。計算ステップはキャッシュだけを読む。
       const race = await scrapeRace(
         parseRaceId(task.race_id),
-        { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore },
-        { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings) },
+        { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore, trainerStore: this.trainerStore },
+        { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings) },
       );
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
       if (missing.length > 0) {
@@ -2358,7 +2379,7 @@ export class RaceDayCore {
       let scraped: RaceData | undefined;
       const result = await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
         scrape: async (id) => {
-          scraped = await this.scrapeFromCache(id, { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings) });
+          scraped = await this.scrapeFromCache(id, { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings) });
           return scraped;
         },
         analyze: null,
@@ -2413,7 +2434,7 @@ export class RaceDayCore {
    */
   private async scrapeFromCache(
     raceId: Parameters<typeof scrapeRace>[0],
-    options: { readonly includeComboOdds: boolean; readonly includeJockeyStats: boolean },
+    options: { readonly includeComboOdds: boolean; readonly includeJockeyStats: boolean; readonly includeTrainerStats: boolean },
     oddsSince?: number,
   ) {
     const fetcher: RaceFetcher =
@@ -2436,7 +2457,7 @@ export class RaceDayCore {
     // 保存先に無い騎手をキャッシュから読めなくなる(Issue #283)。取得ステップの `scrapeRace` には渡さない(そちらの上限は有効のまま)。
     const race = await scrapeRace(
       raceId,
-      { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL, jockeyStore: this.jockeyStore },
+      { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL, jockeyStore: this.jockeyStore, trainerStore: this.trainerStore },
       { ...options, jockeyRequestLimit: Number.MAX_SAFE_INTEGER },
     );
     // 騎手の成績(種別=騎手)はキャッシュに無くても失敗にしない(その騎手は補正なし。戦績は無いと prior が作れないので失敗にする)。
@@ -2511,9 +2532,9 @@ export class RaceDayCore {
       }
       const race = await scrapeRace(
         parseRaceId(task.race_id),
-        { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore },
+        { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore, trainerStore: this.trainerStore },
         // 地方の三連単は軸ごとに頭数ぶんのリクエストが要るので、この取得ステップ(1回のアラーム)では取らず、次の段階(別のアラーム)に分ける(`deferNarTrifecta`。中央は無視される。Issue #283)。
-        { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), bypassOddsCache: true, deferNarTrifecta: true },
+        { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), bypassOddsCache: true, deferNarTrifecta: true },
       );
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
       if (missing.length > 0) {
@@ -2670,7 +2691,7 @@ export class RaceDayCore {
               });
         await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
           scrape: async (id) => {
-            const race = await this.scrapeFromCache(id, { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings) }, oddsSince);
+            const race = await this.scrapeFromCache(id, { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings) }, oddsSince);
             scrapeWarnings = race.meta.warnings;
             return race;
           },

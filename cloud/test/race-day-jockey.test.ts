@@ -98,7 +98,7 @@ afterEach(() => {
   for (const sql of opened.splice(0)) sql.close();
 });
 
-function harness(settings: CloudSettings = DEFAULT_CLOUD_SETTINGS, overrides: Partial<RaceDayDeps> = {}): Harness {
+function harness(settings: CloudSettings = JOCKEY_ONLY, overrides: Partial<RaceDayDeps> = {}): Harness {
   const sql = openNodeSql();
   opened.push(sql);
   const clock = { now: Date.parse("2026-06-28T00:00:00Z") }; // JST 2026/06/28 09:00 = 分析日(開催日)と同じ日 → ライブ
@@ -149,7 +149,9 @@ type Contribution = { biasName: string; applied: boolean; correction: number; sa
 const jockeyContributionOf = (record: AnalysisRecord, umaban: number): Contribution =>
   (record.horses.find((h) => h.umaban === umaban)!.contributions as Contribution[]).find((c) => c.biasName === "騎手成績")!;
 
-const NO_JOCKEY: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, baseScoreWeightJockey: 0 };
+/** このファイルは騎手の取得だけを検査する。調教師の成績(Issue #354)は取らない設定を既定にして、本数・キャッシュの検査の意味を保つ(期待値は変えていない)。調教師の取得は race-day-trainer.test.ts が固定する。 */
+const JOCKEY_ONLY: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, baseScoreWeightTrainer: 0 };
+const NO_JOCKEY: CloudSettings = { ...JOCKEY_ONLY, baseScoreWeightJockey: 0 };
 
 /** 出馬表の騎手ID → 馬番。 */
 const SHUTUBA = parseShutuba(loadFixture("shutuba_202603020211.html"));
@@ -251,7 +253,7 @@ describe("j6: 取得時の設定のスナップショットに従う(取得後�
   it("重み 0 で取得したあとに重みを 0.15 に変えても、計算は取得時の設定(騎手なし)で行い、失敗もしない", async () => {
     const h = harness(NO_JOCKEY);
     await morningFetch(h);
-    h.settings = DEFAULT_CLOUD_SETTINGS; // 取得のあとに設定が変わった
+    h.settings = JOCKEY_ONLY; // 取得のあとに設定が変わった
     expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "compute", result: "ok" });
     expect(h.gate.urls).toHaveLength(19);
     const ref = harness(NO_JOCKEY);
@@ -319,7 +321,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 describe("j8・j9: 保存先(D1)で、騎手の成績を日をまたいで共有する(週に 1 回の更新)", () => {
   it("j8: 前の日に取った成績が保存先にあれば、翌日の DO(空のキャッシュ)でも騎手のURLは 0 本。取得は既存の 19 本だけで、成績は同じ値で使われる", async () => {
     const store = new MemoryJockeyStore();
-    const day1 = harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store });
+    const day1 = harness(JOCKEY_ONLY, { jockeyStore: store });
     const priors1 = await morningPriors(day1);
     expect(jockeyUrls(day1)).toHaveLength(16);
     expect(store.entries.size).toBe(16);
@@ -327,7 +329,7 @@ describe("j8・j9: 保存先(D1)で、騎手の成績を日をまたいで共有
     expect(store.loads).toBe(2); // 読みは取得ステップと計算ステップで 1 回ずつ
     store.shift(-DAY_MS); // 1 日前に取ったことにする
 
-    const day2 = harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store }); // 別の DO = 空のキャッシュ
+    const day2 = harness(JOCKEY_ONLY, { jockeyStore: store }); // 別の DO = 空のキャッシュ
     const priors2 = await morningPriors(day2);
     expect(jockeyUrls(day2)).toHaveLength(0);
     expect(day2.gate.urls).toHaveLength(19);
@@ -336,14 +338,14 @@ describe("j8・j9: 保存先(D1)で、騎手の成績を日をまたいで共有
 
   it("j9: 保存が 6 日前なら使い、8 日前なら取り直して保存し直す(境界は 7 日)", async () => {
     const store = new MemoryJockeyStore();
-    await morningPriors(harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store })); // 保存を作る(取得日時 = 時計の今)
+    await morningPriors(harness(JOCKEY_ONLY, { jockeyStore: store })); // 保存を作る(取得日時 = 時計の今)
     store.shift(-6 * DAY_MS);
-    const sixDays = harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store });
+    const sixDays = harness(JOCKEY_ONLY, { jockeyStore: store });
     await morningFetch(sixDays);
     expect(jockeyUrls(sixDays)).toHaveLength(0);
 
     store.shift(-2 * DAY_MS); // 合計 8 日前
-    const eightDays = harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store });
+    const eightDays = harness(JOCKEY_ONLY, { jockeyStore: store });
     await morningFetch(eightDays);
     expect(jockeyUrls(eightDays)).toHaveLength(16);
     expect([...store.entries.values()].every((e) => e.fetchedAtMs === eightDays.clock.now)).toBe(true); // 取り直して取得日時が新しくなった
@@ -352,20 +354,20 @@ describe("j8・j9: 保存先(D1)で、騎手の成績を日をまたいで共有
   it("j10: 保存先の読みが失敗しても、取得ステップ・計算ステップは ok。騎手は netkeiba から取得して使う(フォールバック)", async () => {
     const store = new MemoryJockeyStore();
     store.failLoad = true;
-    const h = harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store });
+    const h = harness(JOCKEY_ONLY, { jockeyStore: store });
     const priors = await morningPriors(h);
     expect(jockeyUrls(h)).toHaveLength(16);
-    const reference = await morningPriors(harness(DEFAULT_CLOUD_SETTINGS)); // 保存先なしの構成と同じ prior
+    const reference = await morningPriors(harness(JOCKEY_ONLY)); // 保存先なしの構成と同じ prior
     expect(priors).toEqual(reference);
   });
 
   it("j11: 保存先の書き込みが失敗しても、取得ステップ・計算ステップは ok で、成績は使われる(次回も取得する)", async () => {
     const store = new MemoryJockeyStore();
     store.failSave = true;
-    const h = harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store });
+    const h = harness(JOCKEY_ONLY, { jockeyStore: store });
     const priors = await morningPriors(h);
     expect(store.entries.size).toBe(0);
-    expect(priors).toEqual(await morningPriors(harness(DEFAULT_CLOUD_SETTINGS)));
+    expect(priors).toEqual(await morningPriors(harness(JOCKEY_ONLY)));
   });
 
   it("j8 の配線: 本番の DO は保存先(D1)を渡す", () => {
@@ -387,7 +389,7 @@ describe("j8・j9: 保存先(D1)で、騎手の成績を日をまたいで共有
 
 describe("j12: 1 ステップの gate の呼び出しの上限(40)", () => {
   it("中央 16 頭・組合せ ON・冷えた状態の発走前の取得は、騎手以外が 25 本 → 騎手は 15 人まで(合計 40 本)。取らなかった 1 人は補正なしで、分析は保存される", async () => {
-    const h = harness({ ...DEFAULT_CLOUD_SETTINGS, includeComboOdds: true });
+    const h = harness({ ...JOCKEY_ONLY, includeComboOdds: true });
     await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
     expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
     expect(h.gate.urls).toHaveLength(40);
@@ -404,8 +406,8 @@ describe("j12: 1 ステップの gate の呼び出しの上限(40)", () => {
 
   it("保存先に全員が保存済みなら、同じ条件(組合せ ON・冷えた状態)でも騎手の取得は 0 本で、16 人全員に補正が掛かる(合計 25 本)", async () => {
     const store = new MemoryJockeyStore();
-    await morningPriors(harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store })); // 保存先を作る
-    const h = harness({ ...DEFAULT_CLOUD_SETTINGS, includeComboOdds: true }, { jockeyStore: store });
+    await morningPriors(harness(JOCKEY_ONLY, { jockeyStore: store })); // 保存先を作る
+    const h = harness({ ...JOCKEY_ONLY, includeComboOdds: true }, { jockeyStore: store });
     const record = await preRaceSaved(h);
     expect(h.gate.urls).toHaveLength(25);
     expect(record.horses.filter((x) => jockeyContributionOf(record, x.umaban).applied)).toHaveLength(16);
@@ -418,7 +420,7 @@ describe("j13: 取得と計算のあいだで時計が進んでも、計算ス�
 
   it("保存先あり: 取得の 8 日後(許容鮮度 7 日を超える)に計算しても、保存先の成績を使う。騎手を取らない設定の prior とは別の値", async () => {
     const store = new MemoryJockeyStore();
-    const h = harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store });
+    const h = harness(JOCKEY_ONLY, { jockeyStore: store });
     await morningFetch(h);
     expect(store.entries.size).toBe(16);
     h.clock.now += 8 * DAY_MS;
@@ -434,7 +436,7 @@ describe("j13: 取得と計算のあいだで時計が進んでも、計算ス�
   });
 
   it("保存先なし(取得キャッシュだけ): 取得の 8 日後に計算しても、取得キャッシュの成績を使う", async () => {
-    const h = harness(DEFAULT_CLOUD_SETTINGS);
+    const h = harness(JOCKEY_ONLY);
     await morningFetch(h);
     h.clock.now += 8 * DAY_MS;
     expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "compute", result: "ok" });
@@ -447,7 +449,7 @@ describe("j13: 取得と計算のあいだで時計が進んでも、計算ス�
 
   it("発走前の分析でも同じ: 取得の 8 日後に計算・保存しても、16 人全員に騎手の補正が掛かっている", async () => {
     const store = new MemoryJockeyStore();
-    const h = harness(DEFAULT_CLOUD_SETTINGS, { jockeyStore: store });
+    const h = harness(JOCKEY_ONLY, { jockeyStore: store });
     await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
     expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
     h.clock.now += 8 * DAY_MS;

@@ -24,12 +24,12 @@ const SAVE_HEAD = "INSERT INTO jockey_results (jockey_id, kind, years_json, fetc
 const SAVE_TAIL = " ON CONFLICT (jockey_id, kind) DO UPDATE SET years_json = excluded.years_json, fetched_at = excluded.fetched_at";
 
 /** 年ごとの成績を保存する形(`[[年, 騎乗数, 3着内], ...]`)にする。 */
-function encodeYears(years: readonly JockeyYearRecord[]): string {
+export function encodeYears(years: readonly JockeyYearRecord[]): string {
   return JSON.stringify(years.map((y) => [y.year, y.starts, y.placed]));
 }
 
 /** 保存した形から年ごとの成績に戻す。形が違えば null(その行は無いものとして扱う)。 */
-function decodeYears(json: string): JockeyYearRecord[] | null {
+export function decodeYears(json: string): JockeyYearRecord[] | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);

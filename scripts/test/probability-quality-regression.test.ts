@@ -55,6 +55,17 @@
  * | [前後比較・遮断後] ρ=-0.0073583…・klModel=0.0365121… | ρ=0.4061811…・klModel=0.1751253… |
  * | [戦績0走] Σprior=3・範囲 [0.165232…, 0.204824…] | **無改変**(戦績が無いと重みは効かない。このテストは重みを替えても変わらない) |
  * | [その他] dateApproximate=false・oddsStatus・conditions・KL 算出可・三連複 EV の診断値 0・リーク混入 21 走 | 無改変 |
+ *
+ * ## #353 での改訂(タイム指数を統計モデルの 14 番目の項目に入れた。重み既定 0.12)
+ * 中央のレースの prior が変わる(地方・戦績なしは変わらない)。旧(#339 後)の保証と新版の対応(実測し直して固定。保証の内容は弱めていない):
+ * | 旧の保証 | 新版 |
+ * |---|---|
+ * | [固定値] 中央 ρ=0.4061811…・sd比=1.3417026…・klModel=0.1751253…・klMarket=0.1039745… | ρ=0.4753496…・sd比=1.1444427…・klModel=0.1322555…。klMarket は**無改変**(市場側は prior に無関係) |
+ * | [固定値] 地方 ρ=0.4308237…・sd比=0.9758610…・klModel=0.0516186…・klMarket=0.0532515… | **無改変**(地方のレースはタイム指数の対象外〈全頭 0〉。この不変が「地方に効かない」の回帰にもなる) |
+ * | [前後比較・リークあり参照値] ρ=0.5386314…・klModel=0.1790966… | ρ=0.5768949…・klModel=0.2351036…(リークあり側は、当該レース自身の走もタイム指数に入る参照値) |
+ * | [前後比較・遮断後] ρ=0.4061811…・klModel=0.1751253… | ρ=0.4753496…・klModel=0.1322555…(上の中央の固定値と同じ) |
+ * | [戦績0走] Σprior=3・範囲 [0.165232…, 0.204824…] | **無改変**(戦績が無いと指数が出ない) |
+ * | [その他] dateApproximate=false・oddsStatus・conditions・KL 算出可・三連複 EV の診断値 0・リーク混入 21 走 | 無改変 |
  */
 
 import { readFileSync } from "node:fs";
@@ -104,7 +115,7 @@ const FIXTURES: readonly FixtureCase[] = [
     label: "中央16頭",
     fixtureFileName: "central-on.json",
     kaisaiDate: "20260628",
-    expected: { spearmanRho: 0.4061811254166296, sdRatio: 1.3417026542724222, klModel: 0.17512531822157498, klMarket: 0.10397453475016975 },
+    expected: { spearmanRho: 0.47534965039699767, sdRatio: 1.1444427565946245, klModel: 0.13225559031094195, klMarket: 0.10397453475016975 },
   },
   {
     label: "地方12頭",
@@ -332,10 +343,11 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     // 旧 #213 後: リークあり klModel=0.0153467…、遮断後 klModel=0.0229221…)。
     // Issue #339 で既定の重みを当て直したため、ρ・klModel を実測し直した(旧 #258 後: リークあり ρ=0.2369389…・klModel=0.0279291…、
     // 遮断後 ρ=-0.0073583…・klModel=0.0365121…)。重みで prior の順序が変わるので、今回は ρ も動く。
-    expect(leakyReport.spearmanRho.value).toBeCloseTo(0.5386314924003132, 9);
-    expect(filteredReport.spearmanRho.value).toBeCloseTo(0.4061811254166296, 9);
-    expect(leakyReport.normalizedJointKlModel.value).toBeCloseTo(0.179096663197534, 9);
-    expect(filteredReport.normalizedJointKlModel.value).toBeCloseTo(0.17512531822157498, 9);
+    // Issue #353 でタイム指数を足したため、中央の値を実測し直した(旧 #339 後: リークあり ρ=0.5386314…・klModel=0.1790966…、遮断後 ρ=0.4061811…・klModel=0.1751253…)。
+    expect(leakyReport.spearmanRho.value).toBeCloseTo(0.576894931751155, 9);
+    expect(filteredReport.spearmanRho.value).toBeCloseTo(0.47534965039699767, 9);
+    expect(leakyReport.normalizedJointKlModel.value).toBeCloseTo(0.2351036645903763, 9);
+    expect(filteredReport.normalizedJointKlModel.value).toBeCloseTo(0.13225559031094195, 9);
 
     // conditionsにリーク遮断の実際の診断値が反映されていること。
     // (leakFilter は計測側が渡す診断値。#39 以降 production は常に遮断するので、diagnostics を

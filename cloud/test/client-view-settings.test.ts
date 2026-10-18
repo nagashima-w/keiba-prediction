@@ -41,9 +41,9 @@ describe("設定画面の VNode", () => {
     expect(() => mountAll(renderScreen(buildSettingsModel({ load: { kind: "loading" }, draft: null, errors: {}, save: { kind: "idle" } }), noopActions))).not.toThrow();
   });
 
-  it("入力欄は 28 個(既存の 15 + スコアリングの重み 13。Issue #218)で、すべて data-field に項目名を持つ(FIELD_ORDER の順、そのあとに WEIGHT_FIELD_ORDER の順)", () => {
+  it("入力欄は 30 個(既存の 15 + スコアリングの重み 15。Issue #218・#353)で、すべて data-field に項目名を持つ(FIELD_ORDER の順、そのあとに WEIGHT_FIELD_ORDER の順)", () => {
     const fields = inputs(tree());
-    expect(fields.length).toBe(28);
+    expect(fields.length).toBe(30);
     expect(fields.map((n) => n.attrs?.["data-field"])).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER]);
   });
 
@@ -94,7 +94,7 @@ describe("設定画面の VNode", () => {
       }
     }
     expect(calls).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER].filter((k) => typed.has(k)).map((k) => [k, `入力:${k}`]));
-    expect(typed.size).toBe(6 + 13); // 既存の6項目 + 重み13項目(数値の text 欄)
+    expect(typed.size).toBe(6 + 15); // 既存の6項目 + 重み15項目(数値の text 欄)
   });
 
   it("保存ボタン(class=settings-save。文言は「保存」)のクリックは onSettingsSave。保存中は disabled・文言「保存中…」。入力欄も disabled", () => {
@@ -190,13 +190,13 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
   };
   const reset = (t: VNode): VNode[] => byClass(t, "weights-reset");
 
-  it("節(section.weights)に、見出し(h2)・説明・小見出し(h3)2つ・入力欄13個がある。小見出しは「環境・状態バイアス補正」→「基礎スコア」で、各小見出しの下に 7 個・6 個の入力欄が並ぶ", () => {
+  it("節(section.weights)に、見出し(h2)・説明・小見出し(h3)2つ・入力欄15個がある。小見出しは「環境・状態バイアス補正」→「基礎スコア」で、各小見出しの下に 7 個・8 個の入力欄が並ぶ", () => {
     const s = section(tree());
     expect(findAll(s, (n) => n.tag === "h2").map(textOf)).toEqual(["スコアリングの重み"]);
     expect(findAll(s, (n) => n.tag === "h3").map(textOf)).toEqual(["環境・状態バイアス補正", "基礎スコア"]);
     expect(inputs(s).map((n) => n.attrs?.["data-field"])).toEqual([...WEIGHT_FIELD_ORDER]);
     const groups = byClass(s, "weights-group");
-    expect(groups.map((g) => inputs(g).length)).toEqual([7, 6]);
+    expect(groups.map((g) => inputs(g).length)).toEqual([7, 8]);
     expect(byClass(s, "weights-help").map(textOf).join("\n")).toContain("事前分析と発走前の分析の両方で使われ");
   });
 
@@ -206,7 +206,7 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
     expect([venue.tag, venue.attrs?.["type"], venue.attrs?.["value"], venue.attrs?.["inputmode"]]).toEqual(["input", "text", "0.75", "decimal"]);
     expect(byField["baseScoreWeightRecentForm"]!.attrs?.["value"]).toBe("0.7");
     const labels = byClass(section(tree()), "field-label").map(textOf);
-    expect(labels.length).toBe(13);
+    expect(labels.length).toBe(15);
     expect(labels).toContain("競馬場適性 ");
     expect(labels.some((l) => l.startsWith("馬場状態適性(道悪)"))).toBe(true);
   });
@@ -249,7 +249,7 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
     expect(byClass(section(tree()), "weights-reset").length).toBe(1); // ボタンは節の中にある
   });
 
-  it("重みの欄のエラーは、その欄の近くに role=alert で出し、aria-invalid=true を付ける。保存中は13欄とも disabled", () => {
+  it("重みの欄のエラーは、その欄の近くに role=alert で出し、aria-invalid=true を付ける。保存中は全欄 disabled", () => {
     const t = tree({ errors: { biasWeightVenue: "重みのエラー" } });
     expect(findAll(section(t), (n) => n.attrs?.["role"] === "alert").map(textOf)).toEqual(["重みのエラー"]);
     expect(inputs(t).filter((n) => n.attrs?.["aria-invalid"] === "true").map((n) => n.attrs?.["data-field"])).toEqual(["biasWeightVenue"]);
@@ -379,7 +379,7 @@ describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
     const previewIndex = top.findIndex((c) => typeof c !== "string" && byClass(c, "preview-toggle").length > 0);
     expect(saveIndex).toBeGreaterThan(0);
     expect(previewIndex).toBeGreaterThan(saveIndex);
-    expect(inputs(t).length).toBe(28);
+    expect(inputs(t).length).toBe(30);
   });
 
   it("読み込み中・取得の失敗では、プレビューのボタンも出ない", () => {

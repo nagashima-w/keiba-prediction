@@ -194,6 +194,8 @@ describe("生成物のドリフトと決定性", () => {
     // `client/api-verify.ts` 9,637 → 10,329(+692)・`client/view.ts` 31,971 → 32,186(+215)。残り +23 は、ソースを変えていない 7 ファイルの +2〜+8(minify の識別子の割り当てが変わった分。`app.ts` +8・`replay-plan.ts` +5・ほか 5 ファイルが +2 ずつ)。
     // 全 10 ファイルの増分の和は 2 + 692 + 8 + 2 + 2 + 5 + 2 + 2,109 + 2 + 215 = 3,039 で、全体の増分と一致する。外部ライブラリは使っていない。
     // 新しい上限 317,500 の根拠: 実測 316,070 に約 1.4KB の余裕(316,070 + 1,430 を 100 バイト単位に切り上げ)。余裕は 1,430 バイト。
+    // Issue #353(タイム指数の重みを設定画面の 14 番目に足した): 上限は 317,500(#352)のまま据え置き。実測(`Buffer.byteLength(CLIENT_JS)`。`pnpm run build:client` の出力)は 316,070(#352 の後)→ 316,507(+437)で、余裕は 993 バイト。
+    // 増えた理由: 重みの対応表の 1 行(`settings.ts`)・既定値・ラベル「タイム指数」(core の `app-settings.ts`)・タイム指数の欄の補助文(`settings-form.ts`。単位が他の重みと違うため。1 文字 6 バイトで出力される)。節の説明の「既定値は、タイム指数を除いて exe と同じです」への修正(+60)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(317_500);
   });
@@ -514,9 +516,9 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     evThreshold: 1, additionalInstruction: "", clipVariant: "default", analysisModel: "auto", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, includeComboOdds: false,
     includeWideInAllocation: true, includeTrioInAllocation: true, includeQuinellaInAllocation: true, includeExactaInAllocation: true, includeTrifectaInAllocation: true,
     includeBracketQuinellaInAllocation: true, preRaceOffsetMinutes: 45,
-    // Issue #218: スコアリングの重み13項目(既定値)
+    // Issue #218・#353: スコアリングの重み15項目(既定値)
     biasWeightTrackCondition: 1, biasWeightVenue: 1, biasWeightSeason: 1, biasWeightFrame: 1, biasWeightSummerFatigue: 1, biasWeightTransport: 1, biasWeightRotation: 1,
-    baseScoreWeightRecentForm: 0.2, baseScoreWeightLast3f: 0.1, baseScoreWeightCourseDistance: 0.15, baseScoreWeightJockey: 0.15, baseScoreWeightWeightChange: 1, baseScoreWeightCourseFrameBias: 1,
+    baseScoreWeightRecentForm: 0.2, baseScoreWeightLast3f: 0.1, baseScoreWeightCourseDistance: 0.15, baseScoreWeightJockey: 0.15, baseScoreWeightWeightChange: 1, baseScoreWeightCourseFrameBias: 1, baseScoreWeightTimeIndex: 0.12, baseScoreWeightTrainer: 0.77,
   };
 
   class FakeText {
@@ -794,13 +796,13 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
   });
 
-  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、28 個の入力欄(既存の 15 + スコアリングの重み 13。textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 28 項目の POST になる(一覧・板は取らない)", async () => {
+  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、30 個の入力欄(既存の 15 + スコアリングの重み 15。textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 29 項目の POST になる(一覧・板は取らない)", async () => {
     const { root, calls } = run("#settings");
     await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
     const fields = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.has("data-field"));
-    expect(fields.length).toBe(28);
-    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", ...Array(13).fill("input"), "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)。重み13項目は input(Issue #218)
+    expect(fields.length).toBe(30);
+    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", ...Array(15).fill("input"), "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)。重み15項目は input(Issue #218・#353)
     const field = (key: string) => fields.find((n) => n.attrs.get("data-field") === key)!;
     expect(field("bankroll").value).toBe("500000");
     expect(field("clipVariant").value).toBe("default"); // select は option を入れたあとに value が設定される

@@ -1,7 +1,7 @@
 /**
  * 設定の取得 `GET /api/settings` と保存 `POST /api/settings` の呼び出しと応答の分類(Issue #189)。DOM に触れない純ロジックで、`fetch` は注入する。
  *
- * **応答を信用しない**: 成功は、`settings` が全 14 項目を持ち(余計なキーなし)、各値が**読む側**の範囲(`isReadable`。サーバが返すのは読む側の値なので、
+ * **応答を信用しない**: 成功は、`settings` が全項目を持ち(余計なキーなし)、各値が**読む側**の範囲(`isReadable`。サーバが返すのは読む側の値なので、
  * 書く側より広い: kelly の 0・2,000 文字超の追加指示も含む)を満たすときだけ。型違い・欠損・余計なキーは「想定外」(`unexpected`)で、一部の項目だけを採用しない。
  * サーバの文面(`error.message`・例外の文面・`fields`)は読まない・出さない。種類ごとの固定の文言(`settingsFailureMessage`)にする。
  * Origin(サーバは完全一致で CSRF を拒否する): `referrerPolicy: "same-origin"` を付け、fetch の `mode` は指定しない(`api-run.ts` と同じ。理由はそちらの説明)。

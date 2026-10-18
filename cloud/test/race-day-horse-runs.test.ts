@@ -130,7 +130,8 @@ function harness(overrides: Partial<RaceDayDeps> = {}): Harness {
     setAlarm: () => undefined,
     onWarn: (message) => warnings.push(message),
     sink,
-    loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
+    // 調教師の成績は取らない(取得の本数を固定する。再実行で取得が増えないことの検査が、冷えた状態の上限〈40 本〉に左右されないように。Issue #354)
+    loadSettings: async () => ({ ...DEFAULT_CLOUD_SETTINGS, baseScoreWeightTrainer: 0 }),
     ...overrides,
   });
   return { core, sql, gate, sink, clock, warnings };

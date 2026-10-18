@@ -3828,3 +3828,115 @@ describe("runAnalysis(騎手の成績を prior に渡す。Issue #226)", () => {
     expect(j1.reason).toContain("100走未満");
   });
 });
+
+describe("runAnalysis(調教師の成績を prior に渡す。Issue #354)", () => {
+  let saved: AnalysisRecord[];
+
+  beforeEach(() => {
+    (buildPriorInput as unknown as Mock).mockClear();
+    saved = [];
+  });
+
+  /** 調教師ID入りの出馬表馬にして、調教師の年度別成績を載せたレースデータを作る(3頭: 1番=T0001・2番=T0002・3番=調教師IDなし)。 */
+  function raceWithTrainers(
+    raceId: string,
+    trainerStats: RaceData["trainerStats"] | undefined,
+  ): RaceData {
+    const base = fakeRaceData(raceId);
+    const ids: Array<string | null> = ["T0001", "T0002", null];
+    const horses = base.horses.map((h, i) => ({ ...h, shutuba: { ...h.shutuba, trainerId: ids[i]! } }));
+    return { ...base, horses, ...(trainerStats === undefined ? {} : { trainerStats }) };
+  }
+
+  /** 4年分の記録。年ごとに出走・3着内が違う値(窓の年を取り違えると合計が食い違う)。 */
+  const RECORDS_1 = [
+    { year: 2026, starts: 90, placed: 70 },
+    { year: 2025, starts: 600, placed: 200 },
+    { year: 2024, starts: 500, placed: 100 },
+    { year: 2023, starts: 450, placed: 400 },
+  ];
+  const RECORDS_2 = [
+    { year: 2026, starts: 80, placed: 1 },
+    { year: 2025, starts: 300, placed: 30 },
+    { year: 2024, starts: 200, placed: 20 },
+  ];
+
+  const deps = (race: RaceData): AnalysisPipelineDeps => ({
+    scrape: vi.fn(async () => race),
+    analyze: null,
+    saveAnalysis: vi.fn((rec: AnalysisRecord) => {
+      saved.push(rec);
+      return saved.length;
+    }),
+    now: () => FIXED_NOW, // 2026-07-09T12:34Z = JST 2026/07/09 21:34
+    llmSkipReason: "APIキー未設定",
+    allocationSettings: null,
+  });
+
+  const statsArgs = (): Array<unknown> =>
+    (buildPriorInput as unknown as Mock).mock.calls.map((c) => c[0].trainerStats);
+
+  type Contribution = {
+    biasName: string;
+    applied: boolean;
+    correction: number;
+    sampleCount?: number;
+    targetRate?: number | null;
+    overallRate?: number | null;
+    reason: string;
+  };
+  const trainerContribution = (umaban: number, rec: AnalysisRecord = saved[0]!): Contribution =>
+    (rec.horses.find((h) => h.umaban === umaban)!.contributions as Contribution[]).find((c) => c.biasName === "調教師成績")!;
+
+  it("ライブ(分析日=今日): レースの年の前2年(2024+2025)の合計を、調教師IDで突合した馬に渡す(当年 2026 の行も 2023 の行も入らない)。成績の無い馬・IDなしの馬は undefined", async () => {
+    const race = raceWithTrainers(RACE_ID, { T0001: RECORDS_1 });
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps(race));
+    expect(statsArgs()).toEqual([{ starts: 1100, placed: 300 }, undefined, undefined]);
+  });
+
+  it("過去日の分析でも窓は同じ(ライブと過去日の区別はない): 分析日の年の前2年", async () => {
+    const race = raceWithTrainers(RACE_ID, { T0001: RECORDS_1 });
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate("20260101"), deps(race));
+    expect(statsArgs()).toEqual([{ starts: 1100, placed: 300 }, undefined, undefined]);
+  });
+
+  it("寄与度ログに『調教師成績』が載る: 2頭に成績があれば、縮小した率とレース内の平均の差 × 重み 0.77。成績の無い馬は補正なし", async () => {
+    const race = raceWithTrainers(RACE_ID, { T0001: RECORDS_1, T0002: RECORDS_2 });
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps(race));
+    // 馬1: (300 + 50×0.222) ÷ (1100 + 50)、馬2: (50 + 11.1) ÷ (500 + 50)。
+    const r1 = 311.1 / 1150;
+    const r2 = 61.1 / 550;
+    const mean = (r1 + r2) / 2;
+    const c1 = trainerContribution(1);
+    const c2 = trainerContribution(2);
+    expect(c1.applied).toBe(true);
+    expect(c1.sampleCount).toBe(1100);
+    expect(c1.targetRate).toBeCloseTo(r1, 12);
+    expect(c1.overallRate).toBeCloseTo(mean, 12);
+    expect(c1.correction).toBeCloseTo(0.77 * (r1 - mean), 12);
+    expect(c1.correction).toBeGreaterThan(0.01);
+    expect(c2.correction).toBeCloseTo(0.77 * (r2 - mean), 12);
+    expect(c2.correction).toBeLessThan(-0.01);
+    const c3 = trainerContribution(3);
+    expect(c3.applied).toBe(false);
+    expect(c3.correction).toBe(0);
+  });
+
+  it("成績を載せていない(trainerStats なし = 取得しない設定・重み 0)ときは、全頭 undefined のまま・補正なし(従来どおり)", async () => {
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps(raceWithTrainers(RACE_ID, undefined)));
+    expect(statsArgs()).toEqual([undefined, undefined, undefined]);
+    for (const umaban of [1, 2, 3]) {
+      expect(trainerContribution(umaban).applied).toBe(false);
+      expect(trainerContribution(umaban).correction).toBe(0);
+    }
+  });
+
+  it("地方のレースは対象外: 成績が載っていても寄与度は『NARのため対象外』で補正 0", async () => {
+    const race = raceWithTrainers(NAR_RACE_ID, { T0001: RECORDS_1, T0002: RECORDS_2 });
+    await runAnalysis(parseRaceId(NAR_RACE_ID), parseKaisaiDate("20260709"), deps(race));
+    for (const umaban of [1, 2, 3]) {
+      expect(trainerContribution(umaban).reason).toBe("NARのため対象外");
+      expect(trainerContribution(umaban).correction).toBe(0);
+    }
+  });
+});

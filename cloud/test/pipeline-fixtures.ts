@@ -52,6 +52,14 @@ export function fixtureForUrl(url: string): string {
   if (url.includes("/jockey/result.html")) {
     return loadFixture(url.includes("id=01170") ? "jockey_results_01170.html" : "jockey_results_01220.html");
   }
+  // 調教師の年度別成績(Issue #354)。実ページ 4 種で代用する: 01126・01175・01092(実ページは 01214)は前2年の出走が十分にある調教師、それ以外の調教師は
+  // 前2年の行が無い新人(実ページは 01213。2026 年の行だけ)。16 頭のうち 3 頭だけに成績があり、調教師の項が実際に prior を動かす(取り違えも検出できる)。
+  if (url.includes("/trainer/result.html")) {
+    if (url.includes("id=01126")) return loadFixture("trainer_results_01126.html");
+    if (url.includes("id=01175")) return loadFixture("trainer_results_01175.html");
+    if (url.includes("id=01092")) return loadFixture("trainer_results_01214.html");
+    return loadFixture("trainer_results_01213.html");
+  }
   if (url.includes("type=5")) return loadFixture("odds_wide_202603020211.json");
   if (url.includes("type=7")) return loadFixture("odds_trio_202603020211.json");
   if (url.includes("type=4")) return loadFixture("odds_quinella_202603020211.json");

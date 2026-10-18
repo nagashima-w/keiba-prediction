@@ -263,7 +263,7 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
     { name: "レース画面(発走前の結果が ready。開閉の見出し)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 5 })], prior: null }, result: { kind: "ready", analysis: analysis({ id: 5 }) } })), noopActions) },
     { name: "結果画面(失敗の「更新」)", tree: renderScreen(buildResultModel({ route: { ...route, analysis: 5 }, source: { kind: "error", message: "失敗" } }), noopActions) },
     {
-      name: "設定画面(取得済み。入力欄 28 個〈既存 15 + 重み 13〉・保存・再読込・重みを既定値に戻す・プレビューを開いた状態の開閉と反映)",
+      name: "設定画面(取得済み。入力欄 30 個〈既存 15 + 重み 14〉・保存・再読込・重みを既定値に戻す・プレビューを開いた状態の開閉と反映)",
       tree: renderScreen(buildSettingsModel({ load: { kind: "ready", source: "d1" }, draft: draftFromSettings(DEFAULT_CLOUD_SETTINGS), errors: {}, save: { kind: "idle" }, previewOpen: true }), noopActions),
     },
   ];
@@ -282,8 +282,8 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
         withData += 1;
       }
     }
-    // 空振り防止: 場の見出し(2)・起動のボタン(2+2)・結果の開閉の見出し(1)・設定の入力欄(15 + 重み 13 = 28)・プレビューの開閉(1)が data-* の対象として数えられ、除外も使われている(保存・再読込・重みを既定値に戻す・プレビューの反映を含む)
-    expect(withData).toBe(7 + 28 + 1);
+    // 空振り防止: 場の見出し(2)・起動のボタン(2+2)・結果の開閉の見出し(1)・設定の入力欄(15 + 重み 15 = 30)・プレビューの開閉(1)が data-* の対象として数えられ、除外も使われている(保存・再読込・重みを既定値に戻す・プレビューの反映を含む)
+    expect(withData).toBe(7 + 30 + 1);
     expect(exemptCount).toBeGreaterThanOrEqual(4 + 2 + 1 + 1);
   });
 

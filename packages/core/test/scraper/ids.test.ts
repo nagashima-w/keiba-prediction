@@ -7,6 +7,7 @@ import {
   parseJockeyId,
   parseKaisaiDate,
   parseRaceId,
+  parseTrainerId,
   precedingRaceIdsSameDay,
   siblingRaceIdsSameDay,
   venueKindOfRaceId,
@@ -466,6 +467,23 @@ describe("parseJockeyId(騎手ID。Issue #226)", () => {
     ["全角数字", "０１１７０"],
   ])("%s は InvalidIdError", (_name, id) => {
     expect(() => parseJockeyId(id)).toThrow(InvalidIdError);
+  });
+});
+
+describe("parseTrainerId(調教師ID。Issue #354)", () => {
+  it.each(["01126", "05231", "a030b", "A030B", "z"])("URLに入れてよい英数字(1〜10文字)はそのまま返す: %s", (id) => {
+    expect(parseTrainerId(id)).toBe(id);
+  });
+
+  it.each([
+    ["空文字", ""],
+    ["11文字(上限超え)", "01234567890"],
+    ["記号(URLの区切りを持ち込める)", "01126&x=1"],
+    ["スラッシュ", "01/26"],
+    ["空白", "01 26"],
+    ["全角数字", "０１１２６"],
+  ])("%s は InvalidIdError", (_name, id) => {
+    expect(() => parseTrainerId(id)).toThrow(InvalidIdError);
   });
 });
 

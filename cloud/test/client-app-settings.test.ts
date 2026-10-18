@@ -125,9 +125,9 @@ describe("設定画面を開く", () => {
     expect(h.calls).toEqual(["GET /api/settings"]);
   });
 
-  it("取得できたら、サーバの値で 28 個の入力欄(既存の 15 + スコアリングの重み 13。Issue #218)を出す。source: default なら「まだ保存されていません」の注記", async () => {
+  it("取得できたら、サーバの値で 30 個の入力欄(既存の 15 + スコアリングの重み 15。Issue #218・#353)を出す。source: default なら「まだ保存されていません」の注記", async () => {
     const h = await started();
-    expect(findAll(h.tree(), (n) => n.attrs?.["data-field"] !== undefined).length).toBe(28);
+    expect(findAll(h.tree(), (n) => n.attrs?.["data-field"] !== undefined).length).toBe(30);
     expect(h.field("biasWeightVenue").attrs?.["value"]).toBe("1");
     expect(h.field("baseScoreWeightRecentForm").attrs?.["value"]).toBe("0.7");
     expect(h.field("bankroll").attrs?.["value"]).toBe("500000");
@@ -243,13 +243,13 @@ describe("入力と描画(change は下書きを書くだけ)", () => {
     expect(h.field("bankroll").attrs?.["value"]).toBe("777000"); // 保存後の表示も、打った値(サーバが返した値)
   });
 
-  it("保存の押下: 検証 OK なら、全 28 項目(数値は数値型。重み13項目を含む)を 1 回 POST する。保存中は強制の再描画で、入力欄・保存ボタンが disabled", async () => {
+  it("保存の押下: 検証 OK なら、全 30 項目(数値は数値型。重み15項目を含む)を 1 回 POST する。保存中は強制の再描画で、入力欄・保存ボタンが disabled", async () => {
     const gate = deferred<Resp>();
     const h = await started({ postResponder: () => gate.promise });
     const before = h.renders.length;
     h.clickSave();
     expect(h.posts).toHaveLength(1);
-    expect(Object.keys(h.posts[0]!).length).toBe(28);
+    expect(Object.keys(h.posts[0]!).length).toBe(30);
     expect(h.posts[0]!["biasWeightVenue"]).toBe(1);
     expect(h.posts[0]!["baseScoreWeightRecentForm"]).toBe(0.7);
     expect(h.posts[0]!["bankroll"]).toBe(500_000);
@@ -379,7 +379,7 @@ describe("Issue #218: スコアリングの重み", () => {
     await h.app.whenIdle();
   });
 
-  it("「重みを既定値に戻す」: 重み13項目の欄だけを既定値にし(強制描画)、他の項目の入力は残る。ネットワークには出ない(保存もしない)。そのあと保存すると既定値の重みが POST される", async () => {
+  it("「重みを既定値に戻す」: 重み15項目の欄だけを既定値にし(強制描画)、他の項目の入力は残る。ネットワークには出ない(保存もしない)。そのあと保存すると既定値の重みが POST される", async () => {
     const h = await started({ getResponder: async () => ok({ ok: true, settings: WEIGHTED, source: "d1" }) });
     h.type("bankroll", "123");
     h.type("biasWeightFrame", "9"); // 未保存の入力

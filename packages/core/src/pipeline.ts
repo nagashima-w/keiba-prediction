@@ -117,6 +117,10 @@ export {
 } from "./scorer/jockey-stats.js";
 
 export {
+  selectTrainerStats,
+} from "./scorer/trainer-stats.js";
+
+export {
   buildPriorInput,
   computeFieldPriors,
 } from "./scorer/prior.js";

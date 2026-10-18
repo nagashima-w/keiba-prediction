@@ -95,7 +95,7 @@ describe("締切の直前の再計算: 自動の発走前の分析でも動く(I
         closes.push({ analysisId, payload });
       },
     };
-    const settings: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 1_000_000, perRaceCap: 100_000, includeComboOdds: false, baseScoreWeightJockey: 0 };
+    const settings: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 1_000_000, perRaceCap: 100_000, includeComboOdds: false, baseScoreWeightJockey: 0, baseScoreWeightTrainer: 0 };
     const sent: unknown[] = [];
     const notifier = { send: async (payload: unknown) => void sent.push(payload) };
     const core = new RaceDayCore({ sql, now: () => clock.now, gate, setAlarm: (at) => void (alarm.at = at), onWarn: () => undefined, sink, loadSettings: async () => settings, notifier });
