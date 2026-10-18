@@ -231,8 +231,12 @@ ${paletteCss()}
   .verify-tile-label { font-size: 0.8rem; color: var(--muted); }
   .verify-tile-value { font-size: 1.1rem; }
   .verify-rows { list-style: none; margin: 4px 0 12px; padding: 0; }
-  .verify-rows li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
-  .verify-row-value { flex: none; font-variant-numeric: tabular-nums; }
+  /* Issue #369: 値が長い行(日報・月報の「もしも」。『判定できた 36 レース中 …(対象外 18 レース)』)は、値を次の行へ回し、値の中でも折り返す(ラベルは潰さない)。
+     1 行に収まる行は、ラベルが左・値の箱が右(margin-left: auto。text-align は付けない = 折り返した値の中は左揃えで、行頭がそろう)。
+     ラベルは行の幅から 5em を引いた幅まで(長いラベルの行で、短い値〈N 件〉が次の行へ回らない = 検証画面の既存の行の見た目を変えない)。 */
+  .verify-rows li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 12px; row-gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+  .verify-row-label { flex: 0 1 auto; max-width: calc(100% - 5em); overflow-wrap: anywhere; }
+  .verify-row-value { flex: 0 1 auto; min-width: 0; margin-left: auto; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
   .verify-screen h3 { font-size: 0.95rem; margin: 16px 0 4px; }
   /* Issue #220: 補正方向・キャリブレーション・印別(ラベル+「名前 値」の項目。狭い幅では折り返す=表も横スクロールも使わない)。帯グラフは progress */
   .verify-stats { list-style: none; margin: 4px 0 12px; padding: 0; }
