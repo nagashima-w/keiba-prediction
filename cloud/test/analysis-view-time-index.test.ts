@@ -144,6 +144,15 @@ describe("buildAnalysisView の timeIndexLine(Issue #359)", () => {
     expect(view.horses.map((h) => h.timeIndexLine)).toEqual(["タイム指数 +0.5(レース内 2位)", "タイム指数 +1.5(レース内 1位)", "タイム指数 —"]);
   });
 
+  it("タイム指数の要素が複数あるときは、最初の 1 つを使う(Issue #373。値が有効で異なる重複だけを固定する。順位の比較にも最初の値を使う)", () => {
+    // 馬1: 最初が +1.0・あとが +9.0。馬2: 最初が +9.0・あとが +1.0。馬3: 単独 +5.0(最初の値で比べると 馬2 > 馬3 > 馬1、最後の値で比べると 馬1 > 馬3 > 馬2)
+    const view = buildAnalysisView(
+      result([horse(1, [OTHER, tiContribution(1.0), tiContribution(9.0)]), horse(2, [tiContribution(9.0), OTHER, tiContribution(1.0)]), horse(3, [tiContribution(5.0)])]),
+      undefined,
+    );
+    expect(view.horses.map((h) => h.timeIndexLine)).toEqual(["タイム指数 +1.0(レース内 3位)", "タイム指数 +9.0(レース内 1位)", "タイム指数 +5.0(レース内 2位)"]);
+  });
+
   it("値のある馬が 2 頭未満のレース(applied:false だが targetRate は入る)でも、targetRate を値として使う", () => {
     const only = horse(1, [{ ...tiContribution(0.8), applied: false, overallRate: null }]);
     expect(buildAnalysisView(result([only, horse(2, [tiContribution(null)])]), undefined).horses.map((h) => h.timeIndexLine)).toEqual(["タイム指数 +0.8(レース内 1位)", "タイム指数 —"]);

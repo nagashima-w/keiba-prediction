@@ -802,12 +802,33 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
   it("Issue #333: cloud の .ts は `new URL(…, import.meta.url)` を URL のまま Node の API(readFileSync 等)へ渡さない(@types/node 24 以上では型が合わない: 呼び方によって TS2769(`readFileSync(URL, 'utf8')`・`readdirSync(URL)` など)または TS2345(`readFileSync(URL)`〈エンコーディング引数なし〉・`existsSync`・`fileURLToPath` など)になる。`.href` の文字列にするとファイルとして開けず実行時に落ちるので、test/meta-path.ts の pathFromMeta でファイルシステムのパスにして渡す)", () => {
     const tsFiles = scanTargets().filter((f) => f.startsWith("cloud/") && f.endsWith(".ts") && f !== "cloud/test/meta-path.ts");
     expect(tsFiles.length, "走査した .ts が十分ある(空振り防止)").toBeGreaterThan(100);
-    // 正規表現の自己検査: 検出すべき形は検出し、`.href` で文字列にした形は検出しない(これが無いと、空振りの正規表現で常に緑になる)
-    const bare = /new\s+URL\([^()]*import\.meta\.url\)(?!\.href)/;
-    expect(bare.test('readFileSync(new URL("../a.sql", import.meta.url), "utf-8")')).toBe(true);
-    expect(bare.test("readFileSync(new URL(`../${x}`, import.meta.url), \"utf-8\")")).toBe(true);
-    expect(bare.test('fileURLToPath(new URL("../a.sql", import.meta.url).href)')).toBe(false);
-    const offenders = tsFiles.filter((f) => bare.test(readTextLf(...f.split("/"))));
+    // 走査関数の自己検査: 検出すべき形は検出し、許す形(`fileURLToPath(…).href`・meta URL を含まない `new URL`)は検出しない(これが無いと、空振りの走査で常に緑になる)
+    const violations = findMetaUrlViolations;
+    // 従来から検出していた形(単行。ダブルクォート・テンプレートリテラル)
+    expect(violations('readFileSync(new URL("../a.sql", import.meta.url), "utf-8")')).toHaveLength(1);
+    expect(violations("readFileSync(new URL(`../${x}`, import.meta.url), \"utf-8\")")).toHaveLength(1);
+    // 従来は取りこぼしていた形(Issue #373)
+    expect(violations('readFileSync(new URL(\n  "../a.sql",\n  import.meta.url\n), "utf-8")'), "複数行(import.meta.url の後ろに改行)").toHaveLength(1);
+    expect(violations('readFileSync(new URL("../a.sql", import.meta.url,), "utf-8")'), "末尾のカンマ").toHaveLength(1);
+    expect(violations('readFileSync(new URL(\n  "../a.sql",\n  import.meta.url,\n))'), "複数行 + 末尾のカンマ").toHaveLength(1);
+    expect(violations("readFileSync(new URL(`../${name(x)}.sql`, import.meta.url))"), "引数の中の括弧").toHaveLength(1);
+    expect(violations("readFileSync(new URL(`../${a(b(c))}.sql`, import.meta.url))"), "引数の中の括弧(入れ子)").toHaveLength(1);
+    expect(violations('readFileSync(new URL("../a(1).sql", import.meta.url))'), "文字列リテラルの中の括弧(対応している)").toHaveLength(1);
+    expect(violations('readFileSync(new URL("../a).sql", import.meta.url))'), "文字列リテラルの中の閉じ括弧だけ(対応していない)").toHaveLength(1);
+    expect(violations("readFileSync(new URL(`../a).sql`, import.meta.url))"), "テンプレートリテラルの中の閉じ括弧だけ(対応していない)").toHaveLength(1);
+    expect(violations('readFileSync(new URL("../a.sql", import.meta.url).href, "utf-8")'), "`.href` を fs の API へ直接渡す").toHaveLength(1);
+    expect(violations('const u = new URL("../a.sql", import.meta.url).href;\nreadFileSync(u)'), "`.href` を fileURLToPath 以外へ渡す(変数に入れる)").toHaveLength(1);
+    expect(violations('fileURLToPath(new URL("../a.sql", import.meta.url))'), "`.href` なしの fileURLToPath の引数").toHaveLength(1);
+    expect(violations('a(new URL("x", import.meta.url));\nb(new URL("y", import.meta.url));'), "1 ファイルに 2 件").toHaveLength(2);
+    // 検出してはいけない形
+    expect(violations('fileURLToPath(new URL("../a.sql", import.meta.url).href)'), "fileURLToPath の直接の引数の `.href`(test/meta-path.ts と同じ形)").toHaveLength(0);
+    expect(violations('fileURLToPath(\n  new URL("../a.sql", import.meta.url).href,\n)'), "同(複数行)").toHaveLength(0);
+    expect(violations("const u = new URL(request.url);\nfoo(import.meta.url);"), "meta URL が別の文にあるだけ").toHaveLength(0);
+    expect(violations('readFileSync(pathFromMeta("../a.sql", import.meta.url), "utf-8")'), "pathFromMeta を使う正しい形").toHaveLength(0);
+    expect(violations('new URL("x", base)'), "meta URL を含まない new URL").toHaveLength(0);
+    expect(violations('new URL(")" + y); foo(import.meta.url)'), "文字列の中の閉じ括弧に惑わされない").toHaveLength(0);
+    expect(violations('new URL("(" + y); foo(import.meta.url)'), "文字列の中の開き括弧に惑わされない").toHaveLength(0);
+    const offenders = tsFiles.filter((f) => findMetaUrlViolations(readTextLf(...f.split("/"))).length > 0);
     expect(offenders).toEqual([]);
   });
 
@@ -818,6 +839,46 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     }
   });
 });
+
+/**
+ * `new URL(…)` の引数に `import.meta.url` を含む呼び出しのうち、違反の形のものを(該当箇所の文字列で)返す(Issue #333・#373)。
+ * 違反でないのは、`.href` の文字列にして **`fileURLToPath(` の直接の引数**に渡す形(test/meta-path.ts の形。`fileURLToPath(new URL(…))` と書く形は #332 の検査が別に禁じる)だけ。
+ * 括弧の対応を数えて引数の範囲を決める(複数行・末尾のカンマ・引数の中の括弧に依らない)。文字列リテラル(' " `)の中の括弧は数えない。
+ * 限界:
+ *  - 正規表現ではなく字句の走査だが、構文解析ではない。テンプレートリテラルの `${…}` の中に別のテンプレートリテラル(入れ子のバッククォート)があると、閉じ括弧の位置を誤りうる。
+ *  - データフロー(`const u = new URL(…, import.meta.url).href;` を作ってから fs の API に渡す)は追わない。`.href` は `fileURLToPath(` の直接の引数でなければ、その時点で違反とする(変数に入れた形も違反として検出する)。
+ *    `.href` を fs 以外の用途(例: import() の指定)に使う正当な形は想定しない。必要になったら、この関数の許可条件を見直す。
+ *  - **コメントの中の記述も違反として数える**(従来の正規表現と同じ挙動。コメント除去で本物の違反を隠すより、コメントを書き換える方を選ぶ)。
+ */
+function findMetaUrlViolations(source: string): string[] {
+  const found: string[] = [];
+  for (const m of source.matchAll(/new\s+URL\s*\(/g)) {
+    const open = m.index! + m[0].length;
+    let depth = 1;
+    let i = open;
+    let quote: string | null = null;
+    while (i < source.length && depth > 0) {
+      const c = source[i]!;
+      if (quote !== null) {
+        if (c === "\\") i++; // エスケープ(次の 1 字を飛ばす)
+        else if (c === quote) quote = null;
+      } else if (c === "'" || c === '"' || c === "`") {
+        quote = c;
+      } else if (c === "(") {
+        depth++;
+      } else if (c === ")") {
+        depth--;
+      }
+      i++;
+    }
+    const args = source.slice(open, i - 1);
+    if (!args.includes("import.meta.url")) continue;
+    const href = /^\s*\.href\b/.test(source.slice(i));
+    const wrapped = /fileURLToPath\(\s*$/.test(source.slice(0, m.index!));
+    if (!(href && wrapped)) found.push(source.slice(m.index!, Math.min(source.length, i + 8)));
+  }
+  return found;
+}
 
 /**
  * 検査対象のファイル: cloud/ 配下の全ファイル(cloud/.gitignore が除外するもの、すなわち node_modules などの

@@ -926,6 +926,22 @@ describe("Issue #352: 締切直前の再計算との比較(closeComparison)", ()
     expect(res.diag.counts).toMatchObject({ closeMeta: 1, closeBets: 1 });
   });
 
+  it("診断の 4 つの所要時間は、隣り合う時刻の差(Issue #373): 時計を呼ぶたびに刻みが 2 倍になるようにして、式の取り違えを検出する(readMs:computeMs:promptVersionsMs:closeMs = 1:2:4:8)", async () => {
+    // 上のテストは刻みが一定(7)なので、closeMs を promptVersionsMs と同じ式(t3 - t2)にしても緑になる。ここでは差が 1:2:4:8 になる時計を使う。
+    // 限界: `const t4 = now()` を比較の計算の前へ動かす変異は検出しない(now() の呼び出し回数が変わらず、純関数の中で時計を進める手段もない)。検出するのは区間の式の取り違えだけ。
+    const { core, store, clock } = setup();
+    const { rows, close } = withAllocation();
+    store.state.rows = rows;
+    store.state.close = close;
+    let ticks = 0;
+    Object.defineProperty(clock, "now", { get: () => T0 + 2 ** (ticks += 1) });
+    const res = await core.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    const d = [res.diag.readMs, res.diag.computeMs, res.diag.promptVersionsMs, res.diag.closeMs] as number[];
+    expect(d[0], "前提: 最初の区間が 0 でない(以降の比が自明に成立しない)").toBeGreaterThan(0);
+    expect([d[1]! / d[0]!, d[2]! / d[0]!, d[3]! / d[0]!]).toEqual([2, 4, 8]);
+  });
+
   it("★再計算の表が読めない(close: null)・この項目を持たない読み取り口でも、比較は null になるだけで、本体の集計は出る(既存の応答を壊さない)", async () => {
     for (const close of [null, undefined]) {
       const { core, store } = setup();

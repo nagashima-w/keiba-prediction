@@ -395,6 +395,62 @@ describe("t8・t9: 保存先(D1)で、調教師の成績を日をまたいで共
   });
 });
 
+describe("t12b: 発走前の取得ステップも調教師の保存先(D1)を使う(Issue #373。race-day-core.ts の発走前の取得の scrapeRace への trainerStore の配線)", () => {
+  it("読み: 保存先に全員が保存済みなら、組合せ ON・冷えた状態の発走前の取得でも調教師の取得は 0 本(合計 25 本)で、成績のある 3 頭に補正が掛かる", async () => {
+    const store = new MemoryTrainerStore();
+    await morningPriors(harness(TRAINER_ONLY, { trainerStore: store })); // 保存先を作る
+    expect(store.entries.size).toBe(16); // 前提: 16 人ぶん保存されている
+    const h = harness({ ...TRAINER_ONLY, includeComboOdds: true }, { trainerStore: store }); // 別の DO(空のキャッシュ)
+    const record = await preRaceSaved(h);
+    expect(trainerUrls(h)).toHaveLength(0);
+    expect(h.gate.urls).toHaveLength(25);
+    for (const id of ["01126", "01175", "01092"]) {
+      expect(trainerContributionOf(record, umabanOfTrainer(id)).applied, id).toBe(true);
+    }
+  });
+
+  it("書き: 空の保存先で発走前の取得ステップを回すと、その時点で 16 人ぶんが保存先に書かれている(計算ステップより前。計算ステップは書き込みで代用されない)", async () => {
+    const store = new MemoryTrainerStore();
+    const h = harness(TRAINER_ONLY, { trainerStore: store });
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    expect(trainerUrls(h)).toHaveLength(16); // 前提: 保存先が空なので netkeiba から取った
+    expect(store.loads).toBe(1);
+    expect(store.saves).toBe(1);
+    expect(store.entries.size).toBe(16);
+  });
+});
+
+describe("t15: 調教師の重みは既定値以外でも取得〜計算を通って届く(Issue #373。騎手を取らない構成なので取得の上限 40 に掛からず、成績のある 3 頭が揃う)", () => {
+  const WEIGHT = 2;
+  const withWeight = (w: number): CloudSettings => ({ ...TRAINER_ONLY, baseScoreWeightTrainer: w });
+
+  it("発走前の分析: 補正は 重み × (縮小した率 − レース内の平均)。重み 2 の補正は、既定の 0.77 の補正と別の値", async () => {
+    const record = await preRaceSaved(harness(withWeight(WEIGHT)));
+    const rates = [rateOf(W_01126), rateOf(W_01175), rateOf(W_01092)];
+    const mean = rates.reduce((a, b) => a + b, 0) / 3;
+    const ids = ["01126", "01175", "01092"];
+    ids.forEach((id, i) => {
+      const c = trainerContributionOf(record, umabanOfTrainer(id));
+      expect(c.applied, id).toBe(true);
+      expect(Math.abs(rates[i]! - mean), `${id}: 前提 率と平均の差が 0 でない`).toBeGreaterThan(0.001);
+      expect(c.correction, id).toBeCloseTo(WEIGHT * (rates[i]! - mean), 10);
+      expect(c.correction, id).not.toBeCloseTo(0.77 * (rates[i]! - mean), 5);
+    });
+  });
+
+  it("朝の prior: 重み 2・既定の 0.77・0 の 3 通りが互いに別の列になる(重みの大きさが prior に届いている)", async () => {
+    const at2 = await morningPriors(harness(withWeight(WEIGHT)));
+    const at077 = await morningPriors(harness(withWeight(0.77)));
+    const at0 = await morningPriors(harness(NO_TRAINER));
+    const maxDiff = (a: number[], b: number[]): number => Math.max(...a.map((p, i) => Math.abs(p - b[i]!)));
+    expect(at2).toHaveLength(16);
+    expect(maxDiff(at2, at077)).toBeGreaterThan(0.001);
+    expect(maxDiff(at077, at0)).toBeGreaterThan(0.001);
+    expect(maxDiff(at2, at0)).toBeGreaterThan(0.001);
+  });
+});
+
 describe("t13: 騎手と共有する gate の呼び出しの上限(40)", () => {
   it("騎手も調教師も ON・冷えた状態の事前分析の取得は、騎手 16 人のあと調教師は 5 人まで(合計 40 本)。取らなかった 11 人は補正なしで、計算は ok", async () => {
     const h = harness(DEFAULT_CLOUD_SETTINGS);

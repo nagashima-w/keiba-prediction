@@ -350,6 +350,15 @@ describe("捨てた競馬場の理由と計測日時の文字列(Issue #360。�
     expect(detail.measured).not.toMatch(/[\u0000-\u001f\u007f]/);
   });
 
+  it("場コードの文字列は、制御文字を除いてから 4 字に切る(外部の文字列をそのまま保存しない。Issue #373)", () => {
+    // 先頭に制御文字 2 字 + 数字 8 字。除いてから切れば「1234」、切ってから除けば「12」、どちらもしなければ元のまま。
+    const code = "\u0000\n12345678";
+    const r = parseBabaResponse(body([withTokyo((v) => (v["venueCode"] = code)), kyoto()]), NOW);
+    expect(r.droppedDetails).toHaveLength(1);
+    expect(r.droppedDetails[0]).toMatchObject({ reason: "invalid" });
+    expect(r.droppedDetails[0]!.venue).toBe("1234");
+  });
+
   it("詳細は 20 件まで。それを超えても dropped は真の件数(25)のまま", () => {
     const many = Array.from({ length: 25 }, () => ({ ...sapporo(), venueCode: "01" }));
     const r = parseBabaResponse(body(many), NOW);

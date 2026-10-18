@@ -204,6 +204,18 @@ describe("loadFetches(管理者の診断用の読み出し。Issue #360)", () =>
     expect(FETCH_LIST_LIMIT_DEFAULT).toBe(14);
   });
 
+  it("dropped_json の場コードの文字列は 4 字に切って返す(D1 に直接入れた長い値でも、そのまま返さない。Issue #373)", async () => {
+    const store = new D1BabaStore({ db: local.db });
+    await local.db
+      .prepare("INSERT INTO baba_fetches (kaisai_date, attempted_at, finished_at, result, venues_saved, venues_dropped, dropped_json) VALUES ('20261003', 1, 2, 'no-today-venues', 0, 1, ?)")
+      .bind(JSON.stringify([{ venue: "ABCDEFGH", reason: "invalid", measured: null }]))
+      .run();
+    const rows = await store.loadFetches({ limit: 14 });
+    const row = rows.find((r) => r.kaisaiDate === "20261003");
+    expect(row).toBeDefined();
+    expect(row!.dropped).toEqual([{ venue: "ABCD", reason: "invalid", measured: null }]);
+  });
+
   it("dropped_json が壊れている・想定外の形でも落とさず、読める要素だけ(想定外の理由の語は捨てる)。文字列は長さを切る", async () => {
     const store = new D1BabaStore({ db: local.db });
     await local.db.prepare("INSERT INTO baba_fetches (kaisai_date, attempted_at, finished_at, result, venues_saved, venues_dropped, dropped_json) VALUES ('20261001', 1, 2, 'no-today-venues', 0, 2, ?)").bind("{壊れた").run();

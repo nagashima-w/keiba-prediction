@@ -28,6 +28,10 @@ describe("想定隊列図の CSS", () => {
     expect(css).toMatch(/\.formation-chip\.formation-main \{[^}]*border: 3px solid var\(--accent\);/);
   });
 
+  it("凡例の◎の行(li.formation-main)は太字にする(Issue #373。view.ts が付ける class に対応する規則)", () => {
+    expect(css).toMatch(/\.formation-legend li\.formation-main \{[^}]*font-weight: bold;/);
+  });
+
   it("レース再生の CSS(.replay-*)は残っていない", () => {
     expect(css).not.toContain(".replay-");
   });

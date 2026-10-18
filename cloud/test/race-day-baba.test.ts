@@ -362,13 +362,16 @@ describe("分析を止めない・遅らせない", () => {
     h.clock.now = AT_0900;
     const raceId = (h.sql.exec("SELECT race_id FROM race_day_plan WHERE venue = 'central' ORDER BY race_id LIMIT 1").toArray() as { race_id: string }[])[0]!.race_id;
     expect(await h.core.schedule({ raceId, kaisaiDate: DATE })).toMatchObject({ accepted: true });
+    // 09:00 は最初の発走前の分析の期限でもある。そのままだと、期限の来た発走前の分析(計画の行の昇格)が手動の予約の morning より先に動いてしまうので、
+    // 計画の行の期限を 1 時間後へずらして、割り込みの無い状態にする(馬場のステップの前に。昇格は runNextStep の先頭で行われるため、後からずらしても効かない)。
+    h.sql.exec("UPDATE race_day_plan SET due_ms = due_ms + 3600000 WHERE state = 'planned'");
     h.alarm.at = null;
     expect(label(await h.core.runNextStep())).toBe(`${DATE}:baba:fetch:failed`); // 先に 1 ステップだけ
-    // 次のステップはタスク(馬場ではない)。09:00 は最初の発走前の分析の期限でもあるので、先に期限の来た分析が動くことがあるが、手動の予約の morning もそのまま進む(ゲートは偽でブレーカー拒否)
-    const following: string[] = [label(await h.core.runNextStep())];
-    expect(following[0]).not.toContain(":baba:");
-    for (let i = 0; i < 20 && !following.includes(`${raceId}:morning:fetch:failed`); i++) following.push(label(await h.core.runNextStep()));
-    expect(following).toContain(`${raceId}:morning:fetch:failed`);
+    // 同じ起床の次のステップは、すぐ手動の予約の morning(厳密。ゲートは偽でブレーカー拒否)。起床を無駄にしない
+    expect(label(await h.core.runNextStep())).toBe(`${raceId}:morning:fetch:failed`);
+    const following: string[] = [];
+    for (let i = 0; i < 5 && h.alarm.at !== null; i++) following.push(await tick(h));
+    expect(following.length, "前提: 続きのステップがある(空の列で馬場が出ないと言っても意味がない)").toBeGreaterThan(0);
     expect(following.filter((l) => l.includes(":baba:"))).toEqual([]);
     expect(h.api.calls).toBe(1);
   });

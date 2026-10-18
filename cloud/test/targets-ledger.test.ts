@@ -264,6 +264,35 @@ describe("結果待ちと結果なし(取り込みの状態と発走からの経
   });
 });
 
+describe("結果待ちの発走済みの判定: 計画の時刻だけでなく、取り込みの依頼が来ていれば発走済みとして数える(Issue #373)", () => {
+  /** 買い目のある分析 1 件・結果なしのレース R1 の waitingCount と状態。 */
+  const waiting = (options: { plan: { raceId: string; startTime: string | null }[] | null; importStates: ReadonlyMap<string, string> | null; nowMs?: number }): { state: string; waitingCount: number } => {
+    const f = emptyFixture();
+    addAnalysis(f, 1, R1, [bet(1, "wide", "0102", 300)]);
+    const ledger = ledgerOf(f, options);
+    return { state: race(ledger, R1).state, waitingCount: ledger.waitingCount };
+  };
+  const NO_TIME = [{ raceId: R1, startTime: null }];
+
+  it("発走時刻が分からない(計画の行に時刻が無い・計画が取れない)レースでも、取り込みの依頼(queued)が来ていれば結果待ちに数える", () => {
+    expect(waiting({ plan: NO_TIME, importStates: new Map([[R1, "queued"]]) })).toEqual({ state: "pending", waitingCount: 1 });
+    expect(waiting({ plan: null, importStates: new Map([[R1, "queued"]]) })).toEqual({ state: "pending", waitingCount: 1 });
+  });
+
+  it("発走時刻が計画ではまだ先でも、取り込みの依頼が来ていれば結果待ちに数える(依頼が来た = 発走済みとみなす)", () => {
+    const beforeStart = Date.parse("2026-10-17T04:00:00Z"); // 計画の発走 14:00 JST(05:00Z)の 1 時間前
+    expect(waiting({ plan: plan(), importStates: new Map([[R1, "queued"]]), nowMs: beforeStart })).toEqual({ state: "pending", waitingCount: 1 });
+    // 対照: 依頼が無ければ、同じ時刻では数えない(発走前)
+    expect(waiting({ plan: plan(), importStates: new Map(), nowMs: beforeStart })).toEqual({ state: "pending", waitingCount: 0 });
+  });
+
+  it("依頼が無い(空の Map・取れなかった null・別のレースの依頼だけ)ときは、発走時刻が分からないレースを数えない", () => {
+    expect(waiting({ plan: NO_TIME, importStates: new Map() })).toEqual({ state: "pending", waitingCount: 0 });
+    expect(waiting({ plan: NO_TIME, importStates: null })).toEqual({ state: "pending", waitingCount: 0 });
+    expect(waiting({ plan: NO_TIME, importStates: new Map([[R2, "queued"]]) })).toEqual({ state: "pending", waitingCount: 0 });
+  });
+});
+
 describe("集計対象外(検証画面と同じ除外)と提案なし", () => {
   it("発走後の分析(遮断の印なし・計画の発走時刻より後)は集計対象外(lookahead-suspect)。結果があっても合計に入らない", () => {
     const f = emptyFixture();
@@ -313,6 +342,33 @@ describe("集計対象外(検証画面と同じ除外)と提案なし", () => {
     addAnalysis(f, 1, R1, [bet(1, "wide", "0102", 300)], { evEstimated: 1 });
     addResult(f, R1);
     expect(race(ledgerOf(f), R1)).toMatchObject({ state: "excluded", reason: "estimated" });
+  });
+
+  it("除外の理由が混在する 1 レースでは、理由は suspect > unknown > estimated の優先順で 1 つに決まる(Issue #373)", () => {
+    const unguarded = { historyCutoffDate: null, promptLookaheadGuarded: null };
+    /** 種類ごとの分析(id, 買い目つき): suspect = 計画の時刻(14:00)より後の遮断なし / unknown = 発走時刻が '?' の遮断なし / estimated = 推定 EV の clean。 */
+    const make = {
+      suspect: (f: Fixture, id: number) => addAnalysis(f, id, R1, [bet(id, "wide", "0102", 300)], { ...unguarded, analyzedAt: "2026-10-17T05:10:00.000Z" }),
+      unknown: (f: Fixture, id: number) => addAnalysis(f, id, R1, [bet(id, "wide", "0102", 300)], { ...unguarded, analyzedAt: "2026-10-17T04:30:00.000Z", startTime: "?" }),
+      estimated: (f: Fixture, id: number) => addAnalysis(f, id, R1, [bet(id, "wide", "0102", 300)], { evEstimated: 1 }),
+    } as const;
+    const cases: { kinds: (keyof typeof make)[]; expected: LedgerRaceResult["reason"]; counts: [number, number, number] }[] = [
+      { kinds: ["suspect", "unknown"], expected: "lookahead-suspect", counts: [1, 1, 0] },
+      { kinds: ["suspect", "estimated"], expected: "lookahead-suspect", counts: [1, 0, 1] },
+      { kinds: ["unknown", "estimated"], expected: "lookahead-unknown", counts: [0, 1, 1] },
+      { kinds: ["suspect", "unknown", "estimated"], expected: "lookahead-suspect", counts: [1, 1, 1] },
+    ];
+    for (const c of cases) {
+      const f = emptyFixture();
+      c.kinds.forEach((kind, i) => make[kind](f, i + 1));
+      addResult(f, R1);
+      const label = c.kinds.join("+");
+      // 前提: 検証画面の 3 つの除外カウンタが想定どおり(混在していて、どれも集計に入っていない)
+      const report = computeVerifyReport(buildVerifySource(withStartTime(toRows(f), "14:00")), PRODUCTION_VERIFY_CONFIG, "all");
+      expect([report.excludedLookaheadSuspectCount, report.excludedLookaheadUnknownCount, report.excludedEstimatedCount], label).toEqual(c.counts);
+      expect(report.includedAnalysisCount, label).toBe(0);
+      expect(race(ledgerOf(f), R1), label).toMatchObject({ state: "excluded", reason: c.expected });
+    }
   });
 
   it("最新の選択は先読みを除いた clean の最新: 発走後の再分析(suspect)が最新でも、発走前の分析が採られる(一覧の最新とは違う)", () => {
