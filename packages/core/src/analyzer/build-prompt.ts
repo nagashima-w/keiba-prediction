@@ -765,7 +765,7 @@ export function buildPrompt(input: BuildPromptInput): string {
   // 各馬の脚質分析から、レース全体の展開想定(脚質分布・主導権候補。ほかに想定ペース・恵まれる/損する脚質も
   // 求まる)を構造化する。Issue #315 以降、プロンプトに渡すのは材料(脚質分布・主導権候補)だけで、規則の結論
   // (ペース想定・恵まれる/損する脚質)は渡さない(下の【展開想定】の組み立てを参照)。ペースの結論は LLM が
-  // 自分で決めて development・pace として出力し、規則の pace はレース再生の既定値(analysis-view.ts)にだけ使う。
+  // 自分で決めて development・pace として出力し、規則の pace は想定隊列図の既定値(analysis-view.ts)にだけ使う。
   const developmentInputs: RaceDevelopmentHorseInput[] = horses.map((h) => {
     const a = legStyleAnalyses.get(h.umaban)!;
     return {
@@ -823,7 +823,7 @@ export function buildPrompt(input: BuildPromptInput): string {
   // 渡すのは材料(脚質分布・主導権候補)だけで、規則の結論(逃げ馬の頭数から決めた「ペース想定」と
   // 「恵まれる脚質」「損する脚質」)は渡さない。想定ペースは LLM が【指示】の手順(展開予想 → 想定ペース →
   // 恵まれる/損する脚質 → 各馬の評価)で自分で決め、development・pace として出力する。
-  // 規則の結論(buildRaceDevelopment の pace 等)は、レース再生の既定値(analysis-view.ts)にだけ使う。
+  // 規則の結論(buildRaceDevelopment の pace 等)は、想定隊列図の既定値(analysis-view.ts)にだけ使う。
   lines.push("【展開想定】");
   lines.push(
     "以下は展開を予想するための材料です。想定ペースの結論はここには書いていません。" +

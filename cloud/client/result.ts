@@ -19,7 +19,7 @@
  *  - **3着内率の上位5頭**(Issue #240。「印の付いた馬」の直後。印が無くても出す): 馬番・馬名・率・印。**LLM が効いたとき(モデル ID があるとき)は補正後の3着内率(`adjustedProb`)で並べ、見出しは「AI補正後の3着内率 上位5頭」、
  *    効いていないときは3着内率(`prior`)で並べ、見出しは「3着内率 上位5頭」**(率がどちらの値かを見出しで取り違えない)。並びは率(生の数値)の降順 → 同率は馬番の昇順。5頭未満なら全頭。率が非有限の馬は除き、全頭が欠けていれば出さない
  *  - **組合せの券種ごとの行**(Issue #296。`combos`): 「配分の提案」の節の最後(設定の行の後)。オッズの取得点数・EV プラスの点数・配分の点数。サーバが文章にしたものをそのまま出す(クライアントに文言を置かない)。無ければ何も出さない
- *  - **AI の展開予想**(Issue #315。`development`): 「3着内率の上位5頭」の後・レース再生の前の節。LLM が材料から予想した展開の短文と想定ペース。どちらか一方だけのこともある。LLM を使わない・旧い分析・詳細なしは節ごと出さない。
+ *  - **AI の展開予想**(Issue #315。`development`): 「3着内率の上位5頭」の後・想定隊列図(Issue #362)の前の節。LLM が材料から予想した展開の短文と想定ペース。どちらか一方だけのこともある。LLM を使わない・旧い分析・詳細なしは節ごと出さない。
  *  - **そのとき LLM が見た当日の馬場の値**(Issue #295。`baba`): 「3着内率の上位5頭」の後・「馬ごとの評価」の前の節。行はサーバがプロンプトと同じ整形にしたもの。地方・LLM を使わない分析・計測が無い日・詳細なし・古い分析は null(節ごと出さない)
  *  - **統計モデルからの変化量**(Issue #312。`HorseCard.adjustedShift`・`TopProbHorse.shift`): 補正後の3着内率の横に「(統計比 +2.0pt)」。補正後 − prior を百分率の差(pt)で、小数第1位。符号は検証画面の補正幅(`formatAdjustment`)と同じ ASCII の「+」「-」で、
  *    丸めて 0.0 になる差(絶対値 0.05pt 未満)は「±0.0pt」。補正後を出さない(LLM が効いていない)分析・prior か補正後が非有限の馬は null(出さない)。上位5頭の行も同じ値(並べる値は補正後)
@@ -35,7 +35,7 @@ import { formatAdjustment } from "./verify-format";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
 import { buildPlaceOddsLine, PLACE_ODDS_NOTE, type PlaceOddsLine } from "../src/place-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
-import { replaySectionOf, type ReplaySection, type ReplayUi } from "./replay-model";
+import { buildFormation, type FormationSection } from "./formation-model";
 import { buildHash, type Route } from "./route";
 
 /** 画面のラベル(core の共有定数〈旧 exe と共有していた〉。`view.ts` は core を直接 import しない=ここを通す)。 */
@@ -199,8 +199,8 @@ export interface CloseSection {
 }
 
 export interface ResultContent {
-  /** レース再生の節(Issue #311。「3着内率の上位5頭」の後・「当日の馬場」の前)。勝率が判定不能・2頭未満の分析は null(節ごと出さない)。 */
-  readonly replay: ReplaySection | null;
+  /** 想定隊列図の節(Issue #362。AI の展開予想の後・「当日の馬場」の前)。脚質の分かる馬が 2 頭未満の分析は null(節ごと出さない)。 */
+  readonly formation: FormationSection | null;
   readonly title: string;
   readonly analyzedAt: string;
   readonly model: string;
@@ -335,12 +335,12 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
 }
 
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。`readOnly`(閲覧者。Issue #238)は設定への案内を外す。省略は管理者。 */
-export function contentOf(a: AnalysisDetail, readOnly = false, replay?: ReplayUi): ResultContent {
+export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
   // LLM が効いたか = モデル ID があるか(core の `view/format.ts` の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
   const llmEffective = a.model !== null && a.model !== "";
   const markedHorses = markedHorsesOf(a.horses);
   return {
-    replay: replaySectionOf(a, replay),
+    formation: buildFormation(a),
     title: titleOf(a),
     analyzedAt: formatJstDateTime(a.analyzedAt),
     model: llmEffective ? a.model! : MODEL_NONE_TEXT,
@@ -383,12 +383,12 @@ function backToRace(route: Route, a: AnalysisDetail): string {
   return buildHash({ date, venue: route.venue, race });
 }
 
-export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean; readonly replay?: ReplayUi }): ResultModel {
+export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean }): ResultModel {
   const { route, source } = input;
   const readOnly = input.readOnly === true;
   const listHref = buildHash({ date: route.date, venue: route.venue });
   if (source.kind === "ready") {
-    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly, input.replay), backHref: backToRace(route, source.analysis) };
+    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly), backHref: backToRace(route, source.analysis) };
   }
   return {
     kind: "result",

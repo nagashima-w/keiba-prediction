@@ -6,8 +6,9 @@ import type { AnalysisDetailResult, DetailStatus } from "../src/analysis-reposit
 import { scrapeFixtureRace } from "./pipeline-fixtures";
 
 /**
- * Issue #311(レース再生): 応答に足した 2 つ — 馬ごとの `earlyPos`(スナップショットの馬から)と `race.turn`(raceId・距離から)。
- * 画面の演出の材料で、確率・配分には使わない。
+ * 応答に足した材料: 馬ごとの `earlyPos`(Issue #311。スナップショットの馬から)・`legStyle`(#314)・`race.pace`(#314)・`race.turn`(#311。raceId・距離から)。
+ * Issue #362 でレース再生を廃止したあとも、`earlyPos`・`legStyle`・`race.pace` は想定隊列図(`client/formation-model.ts`)の材料として使う(`race.turn` は使い道がなくなったが、別 Issue で整理するまで残す)。
+ * 画面の表示の材料で、確率・配分には使わない。
  */
 
 function horse(umaban: number): StoredAnalysisHorse {
