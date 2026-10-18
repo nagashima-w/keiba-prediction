@@ -6,8 +6,8 @@ import type { AnalysisDetailResult, DetailStatus } from "../src/analysis-reposit
 import { scrapeFixtureRace } from "./pipeline-fixtures";
 
 /**
- * 応答に足した材料: 馬ごとの `earlyPos`(Issue #311。スナップショットの馬から)・`legStyle`(#314)・`race.pace`(#314)・`race.turn`(#311。raceId・距離から)。
- * Issue #362 でレース再生を廃止したあとも、`earlyPos`・`legStyle`・`race.pace` は想定隊列図(`client/formation-model.ts`)の材料として使う(`race.turn` は使い道がなくなったが、別 Issue で整理するまで残す)。
+ * 応答に足した材料: 馬ごとの `earlyPos`(Issue #311。スナップショットの馬から)・`latePos`(Issue #363)・`legStyle`(#314)・`race.pace`(#314)・`race.turn`(#311。raceId・距離から)。
+ * Issue #362 でレース再生を廃止したあとも、`earlyPos`・`latePos`・`legStyle`・`race.pace` は想定隊列図(`client/formation-model.ts`)の材料として使う(`race.turn` は使い道がなくなったが、別 Issue で整理するまで残す)。
  * 画面の表示の材料で、確率・配分には使わない。
  */
 
@@ -30,10 +30,10 @@ function analysis(over: Partial<StoredAnalysis> = {}): StoredAnalysis {
     raceSnapshot: {
       race: { raceName: "テスト", courseType: "芝", distance: 1600 },
       horses: [
-        { umaban: 1, name: "A", earlyPos: 0.125 },
-        { umaban: 2, name: "B", earlyPos: 0.9 },
-        { umaban: 3, name: "C", earlyPos: null },
-        { umaban: 4, name: "D", earlyPos: "0.5" }, // 不正(文字列)
+        { umaban: 1, name: "A", earlyPos: 0.125, latePos: 0.35 },
+        { umaban: 2, name: "B", earlyPos: 0.9, latePos: 0.7 },
+        { umaban: 3, name: "C", earlyPos: null, latePos: null },
+        { umaban: 4, name: "D", earlyPos: "0.5", latePos: "0.5" }, // 不正(文字列)
       ],
     },
     historyCutoffDate: "20260627",
@@ -84,6 +84,49 @@ describe("buildAnalysisView の earlyPos(スタート直後の位置。Issue #31
     const horses = race.horses.map((h) => horse(h.shutuba.umaban));
     const view = buildAnalysisView(detail(analysis({ horses, raceSnapshot: snapshot }), "present"), undefined);
     expect(view.horses.map((h) => h.earlyPos)).toEqual(written);
+  });
+});
+
+describe("buildAnalysisView の latePos(終盤の位置。Issue #363)", () => {
+  it("present: スナップショットの馬の latePos を写す(null・文字列などの不正は null。馬を取り違えない。earlyPos とは別の値)", () => {
+    const view = buildAnalysisView(detail(analysis(), "present"), undefined);
+    expect(view.horses.map((h) => [h.umaban, h.latePos])).toEqual([
+      [1, 0.35],
+      [2, 0.7],
+      [3, null],
+      [4, null],
+    ]);
+    expect(view.horses.map((h) => h.latePos)).not.toEqual(view.horses.map((h) => h.earlyPos));
+  });
+
+  it("Issue #363 より前のスナップショット(キー無し)は null", () => {
+    const a = analysis({ raceSnapshot: { race: {}, horses: [{ umaban: 1, name: "A", earlyPos: 0.2 }] } });
+    expect(buildAnalysisView(detail(a, "present"), undefined).horses[0]!.latePos).toBeNull();
+  });
+
+  it("範囲外(負・1 超)は null、境界の 0 と 1 は通す(画面の契約は 0〜1)", () => {
+    const a = analysis({
+      raceSnapshot: { race: {}, horses: [{ umaban: 1, latePos: -0.1 }, { umaban: 2, latePos: 1.5 }, { umaban: 3, latePos: 0 }, { umaban: 4, latePos: 1 }] },
+    });
+    expect(buildAnalysisView(detail(a, "present"), undefined).horses.map((h) => h.latePos)).toEqual([null, null, 0, 1]);
+  });
+
+  it("詳細が present でない(none・missing)ときは、スナップショットを使わず null", () => {
+    for (const status of ["none", "missing"] as const) {
+      const view = buildAnalysisView(detail(analysis(), status), undefined);
+      expect(view.horses.map((h) => h.latePos), status).toEqual([null, null, null, null]);
+    }
+  });
+
+  it("書き込み側との drift: 実フィクスチャの RaceData から buildRaceSnapshot で作ったスナップショットを通すと、書き込んだ値がそのまま届く", async () => {
+    const { race } = await scrapeFixtureRace();
+    expect(race.horses.length).toBeGreaterThan(0); // 前提(空振り防止)
+    const snapshot = JSON.parse(JSON.stringify(buildRaceSnapshot(race))) as { horses: { umaban: number; latePos: number | null }[] };
+    const written = snapshot.horses.map((h) => h.latePos);
+    expect(written.filter((v) => v !== null).length, "前提: latePos が数の馬がいる").toBeGreaterThan(0);
+    const horses = race.horses.map((h) => horse(h.shutuba.umaban));
+    const view = buildAnalysisView(detail(analysis({ horses, raceSnapshot: snapshot }), "present"), undefined);
+    expect(view.horses.map((h) => h.latePos)).toEqual(written);
   });
 });
 

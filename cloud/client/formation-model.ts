@@ -2,19 +2,21 @@
  * 想定隊列図の純関数(Issue #362。レース再生〈#311・#314・#316〉の置き換え)。DOM・乱数源・時刻に触れない。
  *
  * **静止した図で、物理的なシミュレーションではない。** 道中と4コーナーの2つの局面について、各馬が先頭からどのあたりにいる想定かを
- * 「列」(左が先頭、右が後方。{@link FORMATION_SLOTS} 本)で返す。材料は馬ごとの脚質(`legStyle`)・序盤の位置(`earlyPos`)と、レースの想定ペース(`race.pace`)だけ。
+ * 「列」(左が先頭、右が後方。{@link FORMATION_SLOTS} 本)で返す。材料は馬ごとの脚質(`legStyle`)・序盤の位置(`earlyPos`)・終盤の位置(`latePos`。Issue #363)と、レースの想定ペース(`race.pace`)だけ。
  * **勝率・3着内率は位置に使わない**(使うと図が確率の言い換えになり、旧再生の「着順へ引っ張る不自然な動き」を弱い形で再現する)。抽選もしない。
  *
  * 位置の単位は「チップ 1 個分」(列 1 本分)。
  *  - 道中: 脚質の集団(逃げ→先行→差し→追込)の順に並べ、集団の中は {@link INTRA}・集団の間は {@link INTER} の間隔を積む。集団の中は `earlyPos` の昇順
  *    (null は値のある馬の中央値。同値は馬番の小さい方が前)。旧再生の `replay-plan.ts` の `layout` と同じ考え方。想定ペースで隊列の長さを変える({@link PACE_SCALE})。
  *    長すぎる隊列は {@link BASE_MAX} で一律に縮める(縮めたあとにペースの倍率を掛けるので、頭数が多くてもペースの差が残る)。
- *  - 4コーナー: 道中の「先頭との差」に脚質ごとの係数({@link CORNER_FACTOR}。差し・追込が詰める)を掛け、逃げ・先行はペースが速いほど後退({@link CORNER_FADE})させ、先頭を 0 に取り直す。
- *    集団の中の並びは道中のまま(係数が同じなので入れ替わらない)。
+ *  - 4コーナー(Issue #363): 近走の最終コーナーの通過順位から決める。`latePos`(0〜1。小さいほど前)のある馬は「先頭との差」を `latePos × (FORMATION_SLOTS − 1)` とし、
+ *    **ペースの補正({@link CORNER_FADE} 等)はかけない**(実データがあるため)。`latePos` の無い馬は、従来どおり道中の「先頭との差」に脚質ごとの係数({@link CORNER_FACTOR}。差し・追込が詰める)を掛け、
+ *    逃げ・先行はペースが速いほど後退({@link CORNER_FADE})させた値で補う。そのあと**全頭の最小値**を 0 に取り直す。並びの同値は馬番の小さい方が前。
+ *    全馬の `latePos` が無い(Issue #363 より前の分析など)ときは、従来と同じ結果になる。道中の位置は `latePos` に影響されない。
  *
  * **係数({@link INTRA}・{@link INTER}・{@link PACE_SCALE}・{@link CORNER_FACTOR}・{@link CORNER_FADE})は根拠の薄い経験則である。** 実際のレースのデータで当てはめたものではなく、
  * 「ハイペースなら隊列が長く、前が早く止まり、差し・追込が詰める。スローなら隊列が詰まり、前が残る」という一般的な傾向を見た目に出すための値。
- * 馬ごとの実データ(近走の4コーナーの通過順位)で置き換える案は別の Issue にある。
+ * 4コーナーは `latePos` のある馬ではこの係数を使わない(係数は道中と、`latePos` の無い馬の補いに残る)。
  */
 import type { AnalysisDetail, AnalysisHorse, LegStyle, PaceEstimate } from "./api-analysis";
 
@@ -23,7 +25,7 @@ export const FORMATION_SLOTS = 10;
 
 export const FORMATION_HEADING = "想定隊列図";
 export const FORMATION_NOTE =
-  "馬の脚質と想定ペースからの想定です(実際の隊列とは異なることがあります)。馬の実力・勝率は反映していません。縦の並びは重なりを避けるためで、内外を表しません。位置の計算に使う係数は経験則です。";
+  "道中は馬の脚質と近走の序盤の位置から、4コーナーは近走の4コーナーの通過順位から(無い馬は脚質と想定ペースから)の想定です(実際の隊列とは異なることがあります)。馬の実力・勝率は反映していません。縦の並びは重なりを避けるためで、内外を表しません。位置の計算に使う係数は経験則です。";
 /** 本命の印(core の `PREDICTION_MARKS` の先頭。クライアントの束に core の解析器を入れないため値を写し、テストで一致を確かめる)。 */
 export const MAIN_MARK = "◎";
 /** 馬名の最大の長さ(コードポイント)。超えたら「…」を付ける。 */
@@ -90,6 +92,8 @@ interface Placed {
   readonly umaban: number;
   readonly style: LegStyle;
   readonly early: number | null;
+  /** 近走の最終コーナーの相対位置(0〜1。小さいほど前)。無い馬は null。 */
+  readonly late: number | null;
 }
 
 const isLegStyle = (v: unknown): v is LegStyle => STYLE_ORDER.some((s) => s === v);
@@ -126,9 +130,13 @@ function middleGaps(placed: readonly Placed[], pace: PaceEstimate): number[] {
   return layout.map((v) => v * shrink * PACE_SCALE[pace]);
 }
 
-/** 4コーナーの「先頭との差」(チップ 1 個分。先頭が 0)。 */
+/**
+ * 4コーナーの「先頭との差」(チップ 1 個分。先頭が 0)。
+ * `latePos` のある馬は `latePos × (FORMATION_SLOTS − 1)`(ペースの補正はかけない)。無い馬は道中の差に脚質の係数と後退をかけた値で補う。
+ * 両者を混ぜたあとに、全頭の最小値を 0 に取り直す(補う馬だけで先に取り直さない)。
+ */
 function cornerGaps(placed: readonly Placed[], middle: readonly number[], pace: PaceEstimate): number[] {
-  const raw = placed.map((h, i) => middle[i]! * CORNER_FACTOR[pace][h.style] + CORNER_FADE[pace][h.style]);
+  const raw = placed.map((h, i) => (h.late !== null ? h.late * (FORMATION_SLOTS - 1) : middle[i]! * CORNER_FACTOR[pace][h.style] + CORNER_FADE[pace][h.style]));
   const lead = Math.min(...raw);
   return raw.map((v) => v - lead);
 }
@@ -172,7 +180,7 @@ function paceLineOf(a: AnalysisDetail, pace: PaceEstimate): string {
  * 脚質の分からない馬は図に置かず、`unknownLine` に別記する(差しなどに仮置きしない)。
  */
 export function buildFormation(a: AnalysisDetail): FormationSection | null {
-  const placed: Placed[] = a.horses.filter((h) => isLegStyle(h.legStyle)).map((h) => ({ umaban: h.umaban, style: h.legStyle as LegStyle, early: h.earlyPos ?? null }));
+  const placed: Placed[] = a.horses.filter((h) => isLegStyle(h.legStyle)).map((h) => ({ umaban: h.umaban, style: h.legStyle as LegStyle, early: h.earlyPos ?? null, late: h.latePos ?? null }));
   if (placed.length < 2) {
     return null;
   }

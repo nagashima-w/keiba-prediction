@@ -58,6 +58,8 @@ export interface AnalysisHorse {
   readonly actualPlaceOddsMax: number | null;
   /** スタート直後の位置(Issue #311。想定隊列図〈#362〉の道中の並びに使う。0〜1 で小さいほど前)。戦績が取れない馬・過去の分析・詳細なし・キー無し(古いサーバの応答)は null。パーサは常にキーを持つ。型で省略可なのは、この項目を使わない固定データ(テスト・画面の材料)を壊さないため(`baba`・`combos` と同じ流儀)。 */
   readonly earlyPos?: number | null;
+  /** 終盤の位置(Issue #363。想定隊列図〈#362〉の4コーナーの位置に使う。0〜1 で小さいほど前)。近走の最終コーナーの通過順位 ÷ 出走頭数の平均。戦績が取れない馬・過去の分析・詳細なし・キー無し(古いサーバの応答)は null。パーサは常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。範囲(0〜1)の検査はサーバで行う。 */
+  readonly latePos?: number | null;
   /** 脚質(Issue #314。想定隊列図〈#362〉の位置を決める材料)。戦績が取れない馬・過去の分析・詳細なし・キー無し(古いサーバの応答)・4 値以外の値は null。パーサは常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。 */
   readonly legStyle?: LegStyle | null;
   /** タイム指数の行(Issue #359。サーバが組み立てた「タイム指数 +1.2(レース内 2位)」。値のない馬は「タイム指数 —」)。出さない分析・キー無し(古いサーバの応答)・文字列以外は null。パーサは常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。 */
@@ -266,6 +268,9 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   // Issue #311: スタート直後の位置は、キー無し(古いサーバの応答)は null。数・null 以外の型は想定外。
   const earlyPos = row["earlyPos"] ?? null;
   if (!numOrNull(earlyPos)) return null;
+  // Issue #363: 終盤の位置も同じ(キー無しは null。数・null 以外の型は想定外)。
+  const latePos = row["latePos"] ?? null;
+  if (!numOrNull(latePos)) return null;
   // Issue #314: 脚質は、キー無し・4 値以外は null(補助の演出なので、応答ごと不正にはしない)。
   const legStyle = LEG_STYLES.find((s) => s === row["legStyle"]) ?? null;
   // Issue #317: 補修前の印は、キー無し・語彙(6種の印・なし・不明)の外は null(補助の表示なので、応答ごと不正にはしない)。
@@ -273,7 +278,7 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   // Issue #359: タイム指数の行は、キー無し・文字列以外は null(補助の表示なので、応答ごと不正にはしない)。
   const timeIndexLine = typeof row["timeIndexLine"] === "string" ? row["timeIndexLine"] : null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, legStyle, timeIndexLine };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, latePos, legStyle, timeIndexLine };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
