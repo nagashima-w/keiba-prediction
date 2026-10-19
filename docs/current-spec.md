@@ -985,6 +985,14 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **現在の CI**(いずれも `ubuntu-latest`。作業ブランチ 1 本への push と `workflow_dispatch` で起動。`ci.yml` だけは作業ブランチ宛ての `pull_request` でも起動する〈#310。`deploy-cloud.yml` は秘密を持つので PR では起動しない〉):
   - `.github/workflows/ci.yml`: `pnpm typecheck`・`pnpm test`(packages/core・scripts のテスト)の関門。公開はしない(`scripts/test/ci-workflow.test.ts` が固定)。
     cloud は packages/core のソースを相対 import しているので、core のテストは残してある。
+    **確率の質の測定のテスト(ルートの `scripts/test/probability-quality-41-*.test.ts` の 13 ファイルと、`packages/core` の `probability-quality`・`brier-quality-report`・`paired-brier-comparison` の 3 ファイル)は、
+    普段の `pnpm test` から外してある**(Issue #395。#390 D-4)。一覧は `vitest.research-tests.ts`・`packages/core/vitest.research-tests.ts`、流すのは `pnpm test:research`。
+    型検査(`pnpm typecheck`)は外していない。production の守りを含むテスト(`probability-quality-regression.test.ts`・`brier-decomposition.test.ts`・`binomial-interval.test.ts`・`verify-quality.test.ts`)は普段の CI に残している。
+    **確率の質のコード(`packages/core/src/ev/probability-quality*.ts`・`scripts/probability-quality-41*/`)に触れる変更は、`pnpm test:research` も走らせて確かめる**(普段の `pnpm test` は、それらのテストを流さない)。
+    整合は `scripts/test/research-split-guard.test.ts` が固定している。
+  - `.github/workflows/research.yml`(Issue #395): 確率の質の測定の手動実行。起動は `workflow_dispatch` だけで、secret・API キーを使わない。
+    `pnpm test:research` と、#41・#41-llm のオフラインの集計を流し、コミット済みの `aggregate.json` との差分を `git diff --stat` でログに出す(失敗の条件にしない)。
+    「Run workflow」のボタンは、このファイルが既定ブランチ(main)にあるときだけ Actions の画面に出る。性質は `scripts/test/research-workflow.test.ts` が固定している。
     (`pnpm --filter @keiba/app build` は #287 で packages/app を削除したので無くなった。実行しても何もせず exit 0 になる。)
   - `.github/workflows/deploy-cloud.yml`: 3 つのジョブ(Issue #288 で check から smoke を分けた)。**check**(cloud の型検査・テスト・dry-run・D1 の migration のローカル適用)と **smoke**(ローカルスモーク)は並列に走り、**deploy**(本番デプロイ。10 節)は `needs: [check, smoke]` で両方の成功を待つ。
     **承認印 `[PUBLISH-APPROVED]` は、この本番デプロイの関門として残っている**(先端コミットに承認印があり、

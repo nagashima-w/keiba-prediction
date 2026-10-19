@@ -1,0 +1,67 @@
+# 確率の質の測定(#41・#156)のテストと集計を、必要なときにだけ手動で流すワークフロー(Issue #395。#390 D-4)。
+#
+# ★何のためか: 確率の質の測定のテスト(`pnpm test:research`。ルートの scripts/test/probability-quality-41-*.test.ts と
+#   packages/core の確率の質のテスト 3 ファイル)は、測定を再実行するときにだけ要るので、普段の CI(ci.yml の verify)から外した。
+#   このワークフローは、それを GitHub の Actions の画面の「Run workflow」から流すための入口である。
+#   ローカルでは `pnpm test:research` の 1 コマンドで同じテストが流れる。型検査は外していない(ci.yml の `pnpm typecheck` が引き続き検査する)。
+#
+# ★起動は workflow_dispatch だけ。push・pull_request・schedule では走らない(普段の CI と本番デプロイ〈deploy-cloud.yml〉に干渉しない)。
+#   注意: GitHub の仕様で、「Run workflow」のボタンは、このファイルが**既定ブランチ(main)にあるときだけ**Actions の画面に出る。
+#   作業ブランチにだけある間は出ない(作業ブランチの変更を PR で main に取り込んだ後に使える)。
+#
+# ★秘密を一切使わない: 権限は contents: read だけで、secrets・API キー・環境変数を参照しない。確率の質の測定に実 Claude API は使わない
+#   (#41-llm はサブエージェントによる近似)。netkeiba にも出ない(取得系の fetch.ts・run.ts・build-prompts.ts・apply-all.ts は流さない。
+#   それらは raw データ〈リポジトリ外〉か実取得を要する)。流すのはコミット済みの観測だけから計算するオフラインの集計 2 本である。
+#
+# ★集計の結果とコミット済みの aggregate.json の差分は、ログに出す(`git diff --stat`)だけで、失敗の条件にしない。
+#   #41-llm の aggregate.json は、#329 で消した marksDroppedRaceIds の 2 行が残っていて、再集計すると差分が出る(数値の内容は同じ)。
+#   既知の食い違いとして docs/investigations/probability-quality-41-llm/measurement-plan.md に書いてある。
+#   #41-llm の集計は、記録の版(2026-07-28.2)を --prompt-version で指定する(既定の現行 PROMPT_VERSION では記録の版と合わず throw する)。
+#   artifact のアップロードは使わない(許可リスト外の action を増やさないため)。
+#
+# ★uses: は ci.yml と同じコミット SHA(版数のコメント付き)。規則は scripts/test/actions-pinned.test.ts が検査する。
+#   このワークフローの性質は scripts/test/research-workflow.test.ts が固定している。
+name: 確率の質の測定(手動実行)
+
+on:
+  workflow_dispatch:
+
+# リポジトリへは何も書き戻さない。
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # pnpm はバージョン未指定にして package.json の packageManager フィールド(pnpm@10.33.0)に従わせる。
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 依存をインストール
+        run: pnpm install --frozen-lockfile
+
+      # ルートの scripts/test と packages/core の確率の質のテスト(普段の `pnpm test` が除いているもの)。
+      - name: 確率の質のテストを実行
+        run: pnpm test:research
+
+      # オフラインの集計。docs/investigations/probability-quality-41/aggregate.json を観測 JSON から再計算する。
+      - name: 集計を再実行(#41)
+        run: pnpm tsx scripts/probability-quality-41/aggregate.ts
+
+      - name: 集計を再実行(#41-llm)
+        run: pnpm tsx scripts/probability-quality-41-llm/aggregate.ts --prompt-version 2026-07-28.2
+
+      # コミット済みの aggregate.json との差分をログに出すだけ(失敗の条件にしない)。
+      - name: コミット済みの記録との差分を表示
+        run: git diff --stat

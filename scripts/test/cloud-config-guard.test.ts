@@ -779,7 +779,7 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     expect(typesMajor, "cloud/package.json の @types/node の範囲からメジャーが読める").toBeDefined();
     const nodeMajors = new Set<string>();
     let count = 0;
-    for (const wf of ["ci.yml", "deploy-cloud.yml"]) {
+    for (const wf of ["ci.yml", "deploy-cloud.yml", "research.yml"]) {
       for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\d+)\s*$/gm)) {
         nodeMajors.add(m[1]!);
         count++;

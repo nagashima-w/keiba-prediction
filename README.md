@@ -118,7 +118,8 @@ web 版(Uma Driller)は、分析・日報・月報などの結果を Discord の
 
 ```bash
 pnpm install                       # 依存インストール(リポジトリルート)
-pnpm test                          # packages/core・scripts/ のテスト(vitest。cloud/ は含まない)
+pnpm test                          # packages/core・scripts/ のテスト(vitest。cloud/ と、確率の質の測定のテストは含まない)
+pnpm test:research                 # 確率の質の測定のテスト(普段の pnpm test から外したもの。Issue #395)
 pnpm typecheck                     # 型検査(packages/core と scripts/)
 ```
 

@@ -294,3 +294,20 @@ Go/No-Go の判断は書かない)。raw(`race-data`・`result-html`)はリポ�
   `SubagentHandback.input.message` と完全一致している(2099・1925・2201 文字)ため、応答・`llm-observations`・`aggregate.json` の値は正しい。
   `subagent-runs.json` は書き換えず、記録をそのまま残している。したがって実際の応答の取り方は 36 体すべて (a)(handback 経由)で、
   記録上の「handback 33・final-message 3」は実態と異なる。本文の規則は変更していない。詳細は `report.md` §1。
+
+## 再実行の手順(Issue #395 で追記。2026-10-19。本文は変更していない)
+
+確率の質の測定のテストは、Issue #395 で**普段の `pnpm test`(`ci.yml` の verify)から外した**。型検査は外していない。
+テストの流し方・GitHub の画面からの流し方(`.github/workflows/research.yml`。「Run workflow」のボタンは `research.yml` が main にあるときだけ出る)・
+取得を流せない理由は、`docs/investigations/probability-quality-41/measurement-plan.md` の同じ見出しに書いた。ここでは #41-llm に固有の点だけを書く。
+
+- **集計の再実行には `--prompt-version` が要る**: §11 の `aggregate.ts` は、記録の `promptVersion`(`2026-07-28.2`)が現行の `PROMPT_VERSION` と違うと throw する
+  (2026-10-19 に、現行の `2026-10-18.2` で既定のまま実行して throw することを確かめた)。
+  `pnpm tsx scripts/probability-quality-41-llm/aggregate.ts --prompt-version 2026-07-28.2` と版を指定する。`research.yml` も指定している。
+- **既知の食い違い**: 上の版を指定して再集計すると、コミット済みの `aggregate.json` と **2 行だけ食い違う**
+  (`llmRun` の `marksDroppedRaceIds: []` が、central と nar の 2 か所で、再集計の出力から消える)。
+  原因は Issue #329(c754432)が印の全消し(`marksDropped` 系)の型・分岐・出力を削除したこと。値は空配列で、**数値の内容は同じ**。
+  `aggregate.json` は書き換えていない(記録をそのまま残す。Issue #395 のゲートの判断)。
+  そのため `research.yml` は、差分をログに出すだけで、失敗の条件にしていない。
+- LLM の応答(`responses/`)と LLM 補正後の観測(`llm-observations/`)はコミット済みなので、集計の再実行に raw(リポジトリ外)は要らない。
+  `apply-all.ts` 以前(応答の取り出し・適用の再実行)は raw と作業ディレクトリが要り、ワークフローでは流せない。

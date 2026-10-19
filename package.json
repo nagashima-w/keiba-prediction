@@ -6,6 +6,7 @@
   "description": "netkeibaのデータから複勝期待値プラスの馬券を抽出する分析ツール(個人利用専用)",
   "scripts": {
     "test": "pnpm -r test && vitest run",
+    "test:research": "pnpm -r test:research && vitest run -c vitest.research.config.ts",
     "typecheck": "pnpm -r typecheck && tsc -p tsconfig.scripts.json"
   },
   "engines": {

@@ -22,6 +22,7 @@
   },
   "scripts": {
     "test": "vitest run",
+    "test:research": "vitest run -c vitest.research.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

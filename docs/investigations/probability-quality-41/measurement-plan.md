@@ -216,3 +216,19 @@ pnpm tsx scripts/probability-quality-41/aggregate.ts                            
   取消を判別して `runAnalysis` の前に除いた出走馬で作られているため、**測定の結果にも影響しない**
   (リポジトリにある根拠: `observations/202606040901.json` の `runnerCount: 15`・`listedEntryCount: 16`。
   取消馬6番を含む16頭の生の `race-data` はリポジトリの外〈スクラッチ〉にあり、リポジトリからは確かめられない)。
+
+## 再実行の手順(Issue #395 で追記。2026-10-19。本文は変更していない)
+
+確率の質の測定のテストは、Issue #395 で**普段の `pnpm test`(`ci.yml` の verify)から外した**。型検査(`pnpm typecheck`)は外していない。
+
+- **テストを流す**: リポジトリルートで `pnpm test:research`(ルートの `scripts/test/probability-quality-41-*.test.ts` と、`packages/core` の確率の質のテスト 3 ファイルを流す)。
+  どのファイルが対象かは `vitest.research-tests.ts`・`packages/core/vitest.research-tests.ts` の一覧にある。
+  - `scripts/test/probability-quality-regression.test.ts`(production の prior の回帰)は**外していない**。普段の `pnpm test` で走る。
+- **GitHub の画面から流す**: Actions の「確率の質の測定(手動実行)」(`.github/workflows/research.yml`)の「Run workflow」。
+  起動は `workflow_dispatch` だけ。secret も API キーも使わない。テストのあと、このディレクトリの集計(`aggregate.ts`)と #41-llm の集計を再実行し、
+  コミット済みの `aggregate.json` との差分(`git diff --stat`)をログに出す(差分は失敗の条件にしない)。
+  **注意**: 「Run workflow」のボタンは、`research.yml` が既定ブランチ(main)にあるときだけ Actions の画面に出る。
+- **集計だけを再実行する**: 上の「実行方法」の `aggregate.ts`(オフライン)。2026-10-19 に再実行して、コミット済みの `aggregate.json` と**差分が出ないこと**を確かめた
+  (`git status` がクリーンのまま)。
+- **取得(`fetch.ts`)は流せない**: netkeiba への実取得が要り、raw データはリポジトリの外にある。ワークフローにも入れていない。
+- 確率の質の測定に実 Claude API は使わない(#41-llm はサブエージェントによる近似)。
