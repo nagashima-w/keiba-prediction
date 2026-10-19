@@ -251,8 +251,8 @@ describe("readAll: 締切直前の再計算の行(Issue #352。analysis_close・
     const out = await verifyStore().readAll();
     expect(out.close).toEqual({
       meta: [
-        { analysisId: id, round: 1, status: "ok", route: "mixed", skipReasonCode: null },
-        { analysisId: id, round: 2, status: "skipped", route: null, skipReasonCode: null },
+        { analysisId: id, round: 1, status: "ok", route: "mixed", skipReasonCode: null, reason: null }, // reason は Issue #379 で足した列(旧い nar-unsupported の行を比較から除くため)
+        { analysisId: id, round: 2, status: "skipped", route: null, skipReasonCode: null, reason: "too-late" },
       ],
       bets: [
         { analysisId: id, round: 1, betType: "place", comboKey: "01", stake: 300 },

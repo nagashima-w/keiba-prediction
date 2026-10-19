@@ -80,6 +80,21 @@ describe("D1AnalysisStore.saveClose / getStoredClose(Issue #338)", () => {
     expect(await count("analysis_close_bets")).toBe(0);
   });
 
+  it("Issue #379: combo-missing(failed)を保存して読める(migration なしで通る=理由の列に CHECK が無い)。Issue #338 の時点で書かれた旧い nar-unsupported の skipped 行も、理由つきで読める", async () => {
+    const id = await saveBase();
+    await store().saveClose(id, { round: 1, status: "failed", reason: "combo-missing", dueAtMs: DUE, firedAtMs: DUE + 10, lateMs: 10, oddsOfficialDatetime: null, allocation: null });
+    // 旧い行(Issue #338 の Worker が書いた形)を直接入れる。新しい Worker は nar-unsupported を書かないが、読めなければならない
+    await local.db
+      .prepare("INSERT INTO analysis_close (analysis_id, round, status, reason, due_at, fired_at, late_ms) VALUES (?, 2, 'skipped', 'nar-unsupported', '2026-06-28T06:43:00.000Z', '2026-06-28T06:43:00.000Z', 0)")
+      .bind(id)
+      .run();
+    const rounds = await store().getStoredClose(id);
+    expect(rounds.map((r) => [r.round, r.status, r.reason, r.allocation])).toEqual([
+      [1, "failed", "combo-missing", null],
+      [2, "skipped", "nar-unsupported", null],
+    ]);
+  });
+
   it("2 回ぶん(回 1・回 2)が別の行になり、回の昇順で戻る(買い目は回ごとに分かれる)", async () => {
     const id = await saveBase();
     await store().saveClose(id, okPayload(2, [500]));

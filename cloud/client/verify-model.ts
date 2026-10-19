@@ -182,8 +182,8 @@ export interface VersionsSection {
 }
 
 /**
- * 締切直前の再計算との比較の節(Issue #352)。行は回(5 分前・直前)。**区分のタブに依らない**(再計算は中央だけ)。
- * `note` は日付に依らない固定の文(件数が少ないうちは回収率の差に意味がない旨)。
+ * 締切直前の再計算との比較の節(Issue #352)。行は回(5 分前・直前)× 取り直しの基準(Issue #379。組合せは分析時のオッズの行は見出しに語が付く)。**区分のタブに従う**(区分ごとの値をサーバが渡す)。
+ * `description` はサーバが組み立てた説明文(クライアントの束に日本語を置かない)。`note` は日付に依らない固定の文(件数が少ないうちは回収率の差に意味がない旨)。
  */
 export interface CloseSection extends StatSection {
   readonly note: string;
@@ -214,7 +214,7 @@ export interface VerifyModel {
   readonly proposed: ProposedSection | null;
   /** プロンプト版別の比較(Issue #220。区分に依らず全体)。 */
   readonly versions: VersionsSection | null;
-  /** 締切直前の再計算との比較(Issue #352。区分に依らず中央のみ)。比較できるものが無ければ null。 */
+  /** 締切直前の再計算との比較(Issue #352。区分のタブに従う〈Issue #379〉)。比較できるものが無ければ null。 */
   readonly close: CloseSection | null;
   /** 補正方向×結果(Issue #220)。 */
   readonly direction: StatSection | null;
@@ -423,15 +423,14 @@ function versionsSection(versions: readonly PromptVersionView[], expandedVersion
 export const CLOSE_REFERENCE_MIN_COUNT = 30;
 
 function closeRoundLabel(r: CloseRoundView): string {
-  if (r.round === 1) return `${r.leadMinutes}分前`;
-  if (r.round === 2) return `直前(発走${r.leadMinutes}分前・暫定)`;
-  return `回${r.round}(発走${r.leadMinutes}分前)`;
+  const lead = r.round === 1 ? `${r.leadMinutes}分前` : r.round === 2 ? `直前(発走${r.leadMinutes}分前・暫定)` : `回${r.round}(発走${r.leadMinutes}分前)`;
+  return r.basisLabel === null ? lead : `${lead}・${r.basisLabel}`;
 }
 
 function closeSection(close: CloseComparisonView): CloseSection {
   return {
     heading: "締切直前の再計算との比較",
-    description: "発走の前にオッズだけを取り直して配分を作り直した結果(中央のレースだけ)を、分析時の配分と比べます。回ごとに、再計算できた分析だけを集め、同じレースどうしで回収率を計算しています(失敗・行わなかった分析は除く。件数の「/」の右は、その回の行がある分析の数)。区分のタブには依りません。",
+    description: close.description,
     note: `件数が少ないうちは、回収率の差に意味がありません。「参考」の行は、再計算できた件数が ${CLOSE_REFERENCE_MIN_COUNT} 件未満です。`,
     rows: close.rounds.map((r) => ({
       label: closeRoundLabel(r),

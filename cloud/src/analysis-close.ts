@@ -11,6 +11,7 @@
  *   配分のメタ(`route` ほか 17 列)は `ok` のときだけ入る(`getStoredAllocation` が読むものと同じ列。`toStoredAllocation` で同じ形に戻す)。
  * - `analysis_close_bets`: `ok` の回の買い目(stake>0 の行だけ。`analysis_bets` と同じ形)。
  */
+import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids.js";
 import { toStoredAllocation, type AllocationMetaRow } from "../../packages/core/src/ev/analysis-store-codec.js";
 import type { AnalysisAllocationRecord, StoredAllocation, StoredAllocationBetDetail } from "../../packages/core/src/ev/analysis-store-types.js";
 
@@ -34,7 +35,7 @@ export type CloseRound = 1 | 2;
 export type CloseStatus = "ok" | "failed" | "skipped";
 
 /** 失敗(`failed`)の理由。固定の語彙(例外の文面・URL・本文は残さない)。 */
-export const CLOSE_FAILED_REASONS = ["analysis-failed", "fetch-failed", "horse-set-mismatch", "compute-failed", "blocked"] as const;
+export const CLOSE_FAILED_REASONS = ["analysis-failed", "fetch-failed", "horse-set-mismatch", "compute-failed", "blocked", "combo-missing"] as const;
 /** 行わなかった(`skipped`)理由。固定の語彙。 */
 export const CLOSE_SKIPPED_REASONS = ["too-late", "unset", "nar-unsupported"] as const;
 
@@ -46,17 +47,43 @@ export type CloseReason = CloseFailedReason | CloseSkippedReason;
  * 理由の意味(コードの読み手向け。画面の文言は A-2)。
  *  - `too-late`: 起きたのが遅く、次の回の時刻(2 回目は発走)を過ぎていた。
  *  - `unset`: 分析時の提案が「総資金・1レース上限が未設定」で、配分が出ない(取り直しても変わらないので、オッズを取らない)。
- *  - `nar-unsupported`: 地方のレース(初回は中央だけ。Issue #338)。
+ *  - `nar-unsupported`: **廃止した理由**(地方は Issue #379 から対象。新しくは書かない)。Issue #338 の時点で保存された旧い行(skipped)を読むために語彙には残す(消すと、理由が null に落ちる)。
  *  - `analysis-failed`: 再計算の入力(分析時に控えた確率)が無い・壊れている。
  *  - `fetch-failed`: オッズを取れなかった(通信の失敗・キャッシュに出馬表が無い・組合せオッズの取得の警告)。
  *  - `horse-set-mismatch`: 分析時にオッズのあった馬のオッズが無い(取消など)、または出馬表の馬の集合が分析時と違う。
  *  - `compute-failed`: 再計算が例外を投げた、または配分の計算が無効(route=invalid)になった。
  *  - `blocked`: ブレーカーが開いている・許可リスト外(再試行しない)。
+ *  - `combo-missing`: 地方で組合せが ON の分析(部分的な取り直し。{@link closeComboBasis})で、分析時の組合せオッズを DO の取得キャッシュから読めなかった(掃除された・保存されなかった・
+ *    分析の後に別の取得で上書きされた・入力に期間が無い)。待っても直らないので再試行しない。分析時にすでに組合せの取得に警告があった分析も同じ(中央の `fetch-failed` と同じ性質)。
  */
 
 const REASONS: readonly string[] = [...CLOSE_FAILED_REASONS, ...CLOSE_SKIPPED_REASONS];
 export function isCloseReason(value: unknown): value is CloseReason {
   return typeof value === "string" && REASONS.includes(value);
+}
+
+/**
+ * 再計算で、組合せのオッズをどう扱ったか(Issue #379)。**新しい列は持たず、既存の値から導く**(migration なし): 場(race_id の場コード)と、分析時の設定 `includeComboOdds`。
+ *  - `analysis`: 地方で組合せが ON。**単勝・複勝だけ取り直し、組合せは分析時のオッズ**のまま配分を作り直す(部分的な取り直し。地方の三連複・三連単は軸馬別でリクエストが多いため、取り直さない)。
+ *  - `refetched`: それ以外。中央は組合せ ON なら組合せも取り直す。組合せ OFF なら配分に組合せが無いので、単勝・複勝だけの取り直しが全部。
+ *
+ * ★将来、地方の組合せも取り直すようにするなら、この導出は過去の行を誤分類する(過去の地方の ON の行も `refetched` になる)。そのときは、追加のみの列(例: `combo_basis`。
+ * NULL = 旧い行は、この関数と同じ規則で導く)を足すこと。既存の列・制約は壊さない。
+ */
+export type CloseComboBasis = "refetched" | "analysis";
+
+/** 場と分析時の設定から、組合せの扱い({@link CloseComboBasis})を導く。画面(サーバが文言を組み立てる)と検証の集計が同じ規則を使う。 */
+export function closeComboBasis(venueKind: "central" | "nar", includeComboOdds: boolean): CloseComboBasis {
+  return venueKind === "nar" && includeComboOdds ? "analysis" : "refetched";
+}
+
+/** race_id の場(中央/地方)。12 桁の形・場コードが不正なら `central`(画面・集計を落とさない。保存前に `parseRaceId` を通っているので通常は起きない)。 */
+export function venueKindOfRaceIdSafe(raceId: string): "central" | "nar" {
+  try {
+    return venueKindOfRaceId(parseRaceId(raceId));
+  } catch {
+    return "central";
+  }
 }
 
 /** D1 に書く 1 回ぶんの結果(DO が作り、`AnalysisSink.saveClose` に渡す)。 */

@@ -41,7 +41,7 @@ const ANALYSES_HEAD = `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, 
        history_cutoff_date AS historyCutoffDate, prompt_lookahead_guarded AS promptLookaheadGuarded,
        start_time AS startTime
   FROM analyses`;
-const ALLOCATION_META_HEAD = `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode FROM analysis_allocation_meta`;
+const ALLOCATION_META_HEAD = `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode, include_combo_odds AS includeComboOdds FROM analysis_allocation_meta`;
 const BETS_HEAD = `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake
   FROM analysis_bets`;
 const BETS_ORDER = `ORDER BY analysis_id, bet_type, combo_key`;
@@ -118,6 +118,11 @@ export interface VerifyAllocationMetaRow {
   readonly analysisId: number;
   readonly route: string;
   readonly skipReasonCode: string | null;
+  /**
+   * 分析時の「組合せオッズを取得する」の設定(1 = ON、0 = OFF、NULL = 記録なし)。集計そのものは使わず、締切直前の再計算との比較が、地方の組合せ ON の分析
+   * (組合せは分析時のオッズの混成の配分。Issue #379)を見分けるために読む。メインの読みの 1 列を足しただけで、D1 の読み取り行数は変わらない。省略可能なのは、この列を持たない固定データを壊さないため。
+   */
+  readonly includeComboOdds?: number | null;
 }
 export interface VerifyBetRow {
   readonly analysisId: number;

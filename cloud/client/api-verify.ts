@@ -144,6 +144,8 @@ export interface CloseSummaryView {
 export interface CloseRoundView {
   /** 回の番号(1 = 5 分前、2 = 直前)。 */
   readonly round: number;
+  /** 行の見出しに添える語(Issue #379。サーバが渡す。「組合せは分析時のオッズ」など。基準が通常の行は null)。同じ回に、基準の違う行が並びうる。 */
+  readonly basisLabel: string | null;
   /** 発走の何分前に再計算したか(サーバの定数。直前は暫定値で変わりうる)。 */
   readonly leadMinutes: number;
   /** 集計に入った分析のうち、その回で再計算できた(ok)数。 */
@@ -156,8 +158,10 @@ export interface CloseRoundView {
   readonly recalc: CloseSummaryView;
 }
 
-/** 締切直前の再計算との比較(サーバの `CloseComparison`。区分に依らず中央のみ)。 */
+/** 締切直前の再計算との比較(サーバの `CloseComparison`。リクエストの区分のもの。Issue #379)。 */
 export interface CloseComparisonView {
+  /** 節の説明文(サーバが組み立てる。クライアントの束に日本語を置かない)。 */
+  readonly description: string;
   readonly rounds: readonly CloseRoundView[];
 }
 
@@ -170,7 +174,7 @@ export type VerifyOutcome =
       readonly report: VerifyReportView;
       /** プロンプト版別の比較(区分に依らず全体。Issue #220)。 */
       readonly promptVersions: readonly PromptVersionView[];
-      /** 締切直前の再計算との比較(Issue #352。区分に依らず中央のみ)。無い・読めないときは null。 */
+      /** 締切直前の再計算との比較(Issue #352。リクエストの区分のもの〈Issue #379〉)。無い・読めないときは null。 */
       readonly closeComparison: CloseComparisonView | null;
       /** 集計した時刻(ISO)。 */
       readonly computedAt: string;
@@ -338,19 +342,20 @@ function parseCloseRound(v: unknown): CloseRoundView | null {
   const base = parseCloseSummary(v["base"]);
   const recalc = parseCloseSummary(v["recalc"]);
   if (base === null || recalc === null) return null;
-  return { round: v["round"], leadMinutes: v["leadMinutes"], okCount: v["okCount"], targetCount: v["targetCount"], base, recalc };
+  if (!strOrNull(v["basisLabel"])) return null;
+  return { round: v["round"], basisLabel: v["basisLabel"], leadMinutes: v["leadMinutes"], okCount: v["okCount"], targetCount: v["targetCount"], base, recalc };
 }
 
 /**
  * 締切直前の再計算との比較(Issue #352)。**無い(旧い集計・旧い Worker)・null・壊れている値は、いずれも null(比較なし)**:
  * 補助の節なので、この節の不整合で応答全体(本体の検証)を捨てない(`promptVersions` と違い、応答全体を unexpected にしない)。
- * 回は 1 つ以上で重複しない。
+ * 行は 1 つ以上で、(回, 見出しの語)が重複しない(同じ回に基準の違う行が並びうる。Issue #379)。説明文は 1000 字以内。
  */
 function parseCloseComparison(v: unknown): CloseComparisonView | null {
-  if (!isRecord(v)) return null;
+  if (!isRecord(v) || !isStr(v["description"]) || v["description"].length > 1000) return null;
   const rounds = parseList(v["rounds"], parseCloseRound);
-  if (rounds === null || rounds.length === 0 || new Set(rounds.map((r) => r.round)).size !== rounds.length) return null;
-  return { rounds };
+  if (rounds === null || rounds.length === 0 || new Set(rounds.map((r) => `${r.round}:${r.basisLabel}`)).size !== rounds.length) return null;
+  return { description: v["description"], rounds };
 }
 
 const VENUES: ReadonlySet<string> = new Set<VerifyVenue>(["all", "central", "nar"]);

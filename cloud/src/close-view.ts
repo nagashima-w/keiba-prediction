@@ -7,7 +7,7 @@
 import type { AllocationDiff } from "../../packages/core/src/analysis/allocation-diff";
 import { betRowLabels } from "../../packages/core/src/view/allocation-proposal-view";
 import { formatYen } from "../../packages/core/src/view/verify-format";
-import type { CloseReason, CloseStatus } from "./analysis-close";
+import type { CloseComboBasis, CloseReason, CloseStatus } from "./analysis-close";
 
 /** 節の先頭に 1 行だけ添える説明(確率は分析時のまま。AI の再実行ではないことを伝える)。 */
 export const CLOSE_NOTE = "オッズだけを取り直し、確率は分析時のまま計算した結果です(分析時の提案は変わりません)。";
@@ -25,7 +25,11 @@ const REASON_TEXT: Readonly<Record<CloseReason, string>> = {
   "horse-set-mismatch": "出走馬が分析時と変わったため行いませんでした",
   "analysis-failed": "計算できませんでした",
   "compute-failed": "計算できませんでした",
+  "combo-missing": "分析時の組合せのオッズを読めませんでした",
 };
+
+/** 組合せは分析時のオッズのまま(地方で組合せ ON の部分的な取り直し。Issue #379)であることを伝える 1 行。検証画面の説明文(`verify-close.ts`)とは別の文。 */
+export const CLOSE_COMBO_ANALYSIS_NOTE = "組合せのオッズは分析時のまま(単勝・複勝だけ取り直し)";
 
 export function closeReasonText(reason: CloseReason): string {
   return REASON_TEXT[reason];
@@ -47,13 +51,23 @@ function jstHm(iso: string): string | null {
   return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
 }
 
-/** 状態と理由・動いた時刻と遅れ(表の前に出す行)。遅れは 1 分以上のときだけ(分未満は切り捨て)。 */
-export function closeSummaryLines(r: { readonly status: CloseStatus; readonly reason: CloseReason | null; readonly firedAt: string; readonly lateMs: number }): string[] {
+/**
+ * 状態と理由・動いた時刻と遅れ(表の前に出す行)。遅れは 1 分以上のときだけ(分未満は切り捨て)。
+ * `comboBasis` が `analysis`(組合せは分析時のオッズ)で、再計算できた(ok)回には、末尾に {@link CLOSE_COMBO_ANALYSIS_NOTE} を足す(失敗・行わなかった回は配分が無いので足さない)。
+ */
+export function closeSummaryLines(r: {
+  readonly status: CloseStatus;
+  readonly reason: CloseReason | null;
+  readonly firedAt: string;
+  readonly lateMs: number;
+  readonly comboBasis?: CloseComboBasis;
+}): string[] {
   const reason = r.reason === null ? "" : `(${closeReasonText(r.reason)})`;
   const head = r.status === "ok" ? "再計算した" : r.status === "failed" ? `失敗${reason}` : `行わなかった${reason}`;
   const hm = jstHm(r.firedAt);
   const lateMin = Math.floor(r.lateMs / 60_000);
-  return hm === null ? [head] : [head, `${hm}に実行${lateMin >= 1 ? `(${lateMin}分遅れ)` : ""}`];
+  const lines = hm === null ? [head] : [head, `${hm}に実行${lateMin >= 1 ? `(${lateMin}分遅れ)` : ""}`];
+  return r.status === "ok" && r.comboBasis === "analysis" ? [...lines, CLOSE_COMBO_ANALYSIS_NOTE] : lines;
 }
 
 interface DiffRow {

@@ -7,7 +7,6 @@ import { parseRaceId } from "../../packages/core/src/scraper/ids";
 import { CLOSE_FINAL_LEAD_MS, CLOSE_FIRST_LEAD_MS, type CloseSavePayload } from "../src/analysis-close";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
-import { CloseStore } from "../src/race-day-close";
 import { RaceDayCore, type AnalysisSink, type RaceDayDeps, type StepOutcome } from "../src/race-day-core";
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { fixtureForUrl } from "./pipeline-fixtures";
@@ -422,22 +421,10 @@ describe("締切の直前の再計算: 行わない・失敗の語彙", () => {
     expect(h.sink.closes[0]!.payload).toMatchObject({ status: "skipped", reason: "unset", allocation: null });
   });
 
-  it("地方のレースは、オッズを取らずに skipped(nar-unsupported)", async () => {
-    const h = harness();
-    const NAR = "202644070111";
-    new CloseStore(h.sql).register({
-      raceId: NAR,
-      instance: 1,
-      analysisId: 5,
-      startMs: START_MS,
-      now: h.clock.now,
-      input: { v: 1, kaisaiDate: DATE, horses: [{ umaban: 1, wakuban: 1, horseName: "テスト", prior: 0.3, adjustedProb: 0.3, hadWinOdds: true, hadPlaceOdds: true }], allocationSettings: { bankroll: 1000, perRaceCap: 1000, kellyFraction: 0.5, includeComboOdds: false, includeWideInAllocation: true, includeTrioInAllocation: true, includeQuinellaInAllocation: true, includeExactaInAllocation: true, includeTrifectaInAllocation: true, includeBracketQuinellaInAllocation: true }, evThreshold: 1, baseRoute: "place-only" },
-    });
-    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE }); // DO の開催日を固定し、rearm でアラームを張る
-    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "failed", reason: "nar-unsupported" });
-    expect(h.gate.urls).toHaveLength(0);
-    expect(h.sink.closes[0]).toMatchObject({ analysisId: 5, payload: { status: "skipped", reason: "nar-unsupported" } });
-  });
+  // 旧「地方のレースは、オッズを取らずに skipped(nar-unsupported)」は Issue #379 で廃止した(地方も再計算の対象になった)。保証していた 3 点の行き先:
+  //   ① 地方はオッズを取らない → 組合せ ON の地方は単勝・複勝の 1 本だけ(`race-day-close-nar.test.ts`)。旧い入力(期間なし)は何も取らない(同ファイルの「入力に期間が無い」)
+  //   ② 行わなかった回も理由つきで 1 行を保存する → 同ファイルの combo-missing(failed)の保存。skipped の保存は上の unset・too-late のテストが引き続き固定する
+  //   ③ 理由は固定の語彙 → `close-view.test.ts`・`analysis-close-reasons.test.ts`(旧 `nar-unsupported` を読めることを含む)
 
   it("起きたのが遅く、2 回目の時刻を過ぎていたら、1 回目は skipped(too-late)。2 回目はまだ発走前なので実行する", async () => {
     const h = harness();
