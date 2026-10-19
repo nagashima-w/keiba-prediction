@@ -37,10 +37,14 @@ interface Harness {
   /** "METHOD url" の記録。 */
   readonly calls: string[];
   readonly posts: Record<string, unknown>[];
+  /** プロンプトのプレビューの取得(`POST /api/settings/prompt-preview`。Issue #396)の本文の記録。 */
+  readonly previews: { additionalInstruction: string; clipVariant: string }[];
   /** 描画の記録: 木と force の印。 */
   readonly renders: { tree: VNode; force: boolean }[];
   getResponder: () => Promise<Resp>;
   postResponder: (body: Record<string, unknown>) => Promise<Resp>;
+  /** プレビューの取得の応答(既定: 受けた本文を写した文面を返す=サーバが組み立てた文面の代わり)。 */
+  previewResponder: (body: { additionalInstruction: string; clipVariant: string }) => Promise<Resp>;
   hash: string;
   tree(): VNode;
   field(key: string): VNode;
@@ -53,9 +57,15 @@ interface Harness {
   clickRefresh(): void;
 }
 
+/** プレビューの既定の応答: 受けた入力を写した文面(サーバの組み立ては `handler-prompt-preview.test.ts` が固定する。ここは画面の制御の確認)。 */
+function echoPreview(body: { additionalInstruction: string; clipVariant: string }): Resp {
+  return ok({ ok: true, text: `【予想印】サンプルレース 指示=[${body.additionalInstruction}] 幅=${body.clipVariant}`, clamped: body.additionalInstruction.length > 2000, promptVersion: `pv-${body.clipVariant}` });
+}
+
 function harness(initialHash: string): Harness {
   const calls: string[] = [];
   const posts: Record<string, unknown>[] = [];
+  const previews: { additionalInstruction: string; clipVariant: string }[] = [];
   const renders: { tree: VNode; force: boolean }[] = [];
   const fetchLike: FetchLike = (url, init) => {
     calls.push(`${init.method} ${url}`);
@@ -65,12 +75,19 @@ function harness(initialHash: string): Harness {
       posts.push(body);
       return h.postResponder(body);
     }
+    if (url === "/api/settings/prompt-preview" && init.method === "POST") {
+      const body = JSON.parse(init.body as string) as { additionalInstruction: string; clipVariant: string };
+      previews.push(body);
+      return h.previewResponder(body);
+    }
     throw new Error(`想定外の取得: ${init.method} ${url}`);
   };
   const h: Harness = {
     hash: initialHash,
     calls,
     posts,
+    previews,
+    previewResponder: async (body) => echoPreview(body),
     renders,
     getResponder: async () => ok({ ok: true, settings: SERVER, source: "d1" }),
     postResponder: async (body) => ok({ ok: true, settings: body }),
@@ -103,7 +120,7 @@ function harness(initialHash: string): Harness {
   return h;
 }
 
-async function started(over: Partial<Pick<Harness, "getResponder" | "postResponder">> = {}): Promise<Harness> {
+async function started(over: Partial<Pick<Harness, "getResponder" | "postResponder" | "previewResponder">> = {}): Promise<Harness> {
   const h = harness("#settings");
   Object.assign(h, over);
   h.app.start();
@@ -525,6 +542,9 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
           posts.push(body);
           return ok({ ok: true, settings: body });
         }
+        if (url === "/api/settings/prompt-preview" && init.method === "POST") {
+          return echoPreview(JSON.parse(init.body as string) as { additionalInstruction: string; clipVariant: string });
+        }
         throw new Error(`想定外の取得: ${url}`);
       },
       now: () => new Date("2026-06-28T00:00:00Z"),
@@ -604,15 +624,18 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
     expect(field("bankroll").attrs?.["value"]).toBe("500000");
   });
 
-  it("Issue #201: プレビューを開いたまま追跡のポーリングが動いても、文面は変わらず、DOM を置き換えない(打った追加指示は「入力中の内容を反映」を押すまで文面に出ない)", async () => {
+  it("Issue #201・#396: プレビューを開いたまま追跡のポーリングが動いても、文面は変わらず、DOM を置き換えず、取得も増えない(打った追加指示は「入力中の内容を反映」を押すまで文面に出ない)", async () => {
     const t = await trackedHarness();
     t.go("#settings");
     await t.app.whenIdle();
     const field = (key: string): VNode => findAll(t.tree(), (n) => n.attrs?.["data-field"] === key)[0]!;
     const previewOf = (): string => String(findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "prompt-preview")[0]!.children![0]);
     findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "preview-toggle")[0]!.on!.click!();
+    await t.app.whenIdle();
     const opened = previewOf();
-    expect(opened, "前提: 開いている").toContain("サンプルレース");
+    expect(opened, "前提: 開いている(サーバが返した文面)").toContain("サンプルレース");
+    const previewCalls = (): number => t.calls.filter((c) => c === "POST /api/settings/prompt-preview").length;
+    expect(previewCalls(), "前提: 開いたときの取得が 1 回").toBe(1);
     const treeBefore = JSON.stringify(t.tree());
     const replacedBefore = t.root.replaced;
     const rendersBefore = t.renderCalls();
@@ -623,7 +646,10 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
     expect(previewOf()).not.toContain("ポーリング中に打った指示");
     expect(JSON.stringify(t.tree())).toBe(treeBefore);
     expect(t.root.replaced, "DOM を置き換えない").toBe(replacedBefore);
+    expect(previewCalls(), "打つたび・ポーリングでは取得しない").toBe(1);
     findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "preview-refresh")[0]!.on!.click!();
+    await t.app.whenIdle();
+    expect(previewCalls()).toBe(2);
     expect(previewOf()).toContain("ポーリング中に打った指示");
   });
 
@@ -642,94 +668,270 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
 });
 
 /**
- * Issue #201: プロンプトのプレビュー。開閉・反映は**ネットワークに出ない**(`GET /api/settings` 以外の取得を起こさない。偽の fetch は想定外の取得で投げる)。
+ * Issue #201・#396: プロンプトのプレビュー。文面は**サーバが組み立てて返す**(`POST /api/settings/prompt-preview`。偽の fetch は受けた入力を写した文面を返す)。
+ * 取りに行くのは、開いたとき・「入力中の内容を反映」・強制描画で写しの入力(追加指示とクリップ幅)が前回の取得と変わったときだけ。打つたび・ポーリングでは取らない。
  * 入力のたびには再描画しない(#189 の設計)ので、プレビューの文面が入力に追いつくのは「入力中の内容を反映」(と、保存・再読込などの強制描画)を押した時点。
  * **押したときは `render(true)` で、写し(`settingsShown`)を現在の下書きへ更新してから描く**(強制なしで描くと、古い写しで入力欄が作り直され、打った文字が消える)。
+ * 応答が届いたとき、下書きが写しと違えば(反映を押した後に打ち始めた)強制描画に切り替える(打った文字を失わない)。
  */
-describe("Issue #201: プロンプトのプレビュー(開閉・入力の反映)", () => {
+describe("Issue #201・#396: プロンプトのプレビュー(開閉・入力の反映・取得)", () => {
   const toggleOf = (h: Harness): VNode => byClass(h.tree(), "preview-toggle")[0]!;
   const refreshOf = (h: Harness): VNode | undefined => byClass(h.tree(), "preview-refresh")[0];
   const previewText = (h: Harness): string | null => {
     const node = byClass(h.tree(), "prompt-preview")[0];
     return node === undefined ? null : String(node.children![0]);
   };
+  const previewCalls = (h: Harness): number => h.calls.filter((c) => c === "POST /api/settings/prompt-preview").length;
+  const LOADING = "プロンプトのプレビューを組み立てています…";
 
-  it("画面に入った直後は閉じている(文面なし)。開くと強制描画で文面が出る。取得は増えない。閉じると文面は消える", async () => {
+  it("画面に入った直後は閉じている(文面なし・取得なし)。開くと強制描画で取得中の文言が出て、応答で文面に変わる(取得は 1 回)。閉じると文面は消え、取得は増えない", async () => {
     const h = await started();
     expect(previewText(h)).toBeNull();
     expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("false");
-    const calls = [...h.calls];
+    expect(previewCalls(h)).toBe(0);
     const before = h.renders.length;
     toggleOf(h).on!.click!();
-    expect(h.renders.length).toBe(before + 1);
     expect(h.renders[before]!.force).toBe(true);
+    expect(h.renders.length).toBe(before + 1);
     expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("true");
+    expect(previewText(h), "応答が届くまでは取得中の固定の文言").toBe(LOADING);
+    await h.app.whenIdle();
     expect(previewText(h)).toContain("サンプルレース");
-    expect(h.calls).toEqual(calls); // ネットワークに出ない
+    expect(h.calls.filter((c) => c === "GET /api/settings")).toHaveLength(1); // 設定の取得は増えない
+    expect(previewCalls(h)).toBe(1);
     toggleOf(h).on!.click!();
     expect(h.renders[h.renders.length - 1]!.force).toBe(true);
     expect(previewText(h)).toBeNull();
     expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("false");
-    expect(h.calls).toEqual(calls);
+    await h.app.whenIdle();
+    expect(previewCalls(h)).toBe(1);
   });
 
-  it("開いた文面は、保存済み(サーバ)の追加指示・クリップ幅ではなく、その時点の下書きから作る", async () => {
+  it("開いた文面は、保存済み(サーバ)の追加指示・クリップ幅ではなく、その時点の下書きから作る(送った本文が下書きの値)", async () => {
     const h = await started();
     h.type("additionalInstruction", "未保存の指示");
     h.type("clipVariant", "wide15");
     toggleOf(h).on!.click!();
+    await h.app.whenIdle();
+    expect(h.previews).toEqual([{ additionalInstruction: "未保存の指示", clipVariant: "wide15" }]);
     expect(previewText(h)).toContain("未保存の指示");
-    expect(previewText(h)).toContain("±15%(絶対値0.15)");
+    expect(previewText(h)).toContain("幅=wide15");
     expect(h.field("additionalInstruction").attrs?.["value"]).toBe("未保存の指示"); // 入力欄の打った文字は消えない
     expect(h.field("clipVariant").attrs?.["value"]).toBe("wide15");
   });
 
-  it("開いたあとの入力は、再描画もプレビューの更新もしない。「入力中の内容を反映」で、強制描画して文面が入力に追いつく(入力欄は下書きのまま)", async () => {
+  it("送る追加指示は先頭の 2,001 単位だけ(D1 へ直接入れた長い値でも、本文の上限に収まり、切った旨の注記が出る)。2,000 単位なら注記なし", async () => {
+    const h = await started({ getResponder: async () => ok({ ok: true, settings: { ...SERVER, additionalInstruction: "あ".repeat(2500) }, source: "d1" }) });
+    toggleOf(h).on!.click!();
+    await h.app.whenIdle();
+    expect(h.previews).toHaveLength(1);
+    expect(h.previews[0]!.additionalInstruction).toBe("あ".repeat(2001));
+    expect(byClass(h.tree(), "preview-note").map((n) => textOf(n)).join("\n")).toContain("切った");
+    const exact = await started({ getResponder: async () => ok({ ok: true, settings: { ...SERVER, additionalInstruction: "あ".repeat(2000) }, source: "d1" }) });
+    toggleOf(exact).on!.click!();
+    await exact.app.whenIdle();
+    expect(exact.previews[0]!.additionalInstruction).toBe("あ".repeat(2000));
+    expect(byClass(exact.tree(), "preview-note").map((n) => textOf(n)).join("\n")).not.toContain("切った");
+  });
+
+  it("開いたあとの入力は、再描画も取得もしない。「入力中の内容を反映」で、強制描画して取り直し、文面が入力に追いつく(入力欄は下書きのまま)", async () => {
     const h = await started();
     toggleOf(h).on!.click!();
+    await h.app.whenIdle();
     const opened = previewText(h)!;
     expect(opened).not.toContain("あとから打った指示");
     const before = h.renders.length;
     h.typeInput("additionalInstruction", "あとから打った指示");
     h.type("clipVariant", "wide15");
     expect(h.renders.length).toBe(before); // 再描画しない
+    expect(previewCalls(h)).toBe(1); // 取得もしない
     expect(previewText(h)).toBe(opened); // 文面もそのまま
     expect(refreshOf(h)).toBeDefined();
     refreshOf(h)!.on!.click!();
     expect(h.renders.length).toBe(before + 1);
     expect(h.renders[before]!.force).toBe(true);
+    await h.app.whenIdle();
+    expect(previewCalls(h)).toBe(2);
+    expect(h.previews[1]).toEqual({ additionalInstruction: "あとから打った指示", clipVariant: "wide15" });
     expect(previewText(h)).not.toBe(opened); // 前提: 変わった
     expect(previewText(h)).toContain("あとから打った指示");
-    expect(previewText(h)).toContain("±15%(絶対値0.15)");
+    expect(previewText(h)).toContain("幅=wide15");
     expect(h.field("additionalInstruction").attrs?.["value"]).toBe("あとから打った指示");
     expect(h.field("clipVariant").attrs?.["value"]).toBe("wide15");
-    expect(h.calls.filter((c) => c !== "GET /api/settings")).toEqual([]);
+    expect(h.calls.filter((c) => c !== "GET /api/settings" && c !== "POST /api/settings/prompt-preview")).toEqual([]);
   });
 
-  it("反映ボタンは開いているときだけ。閉じているときの反映の呼び出し(古いボタンの click など)は何もしない", async () => {
+  it("入力が前回と同じでも、「入力中の内容を反映」は取り直す(押すたびに 1 回。サーバが返す文面が変わっていれば追いつく)", async () => {
+    const h = await started();
+    toggleOf(h).on!.click!();
+    await h.app.whenIdle();
+    let n = 0;
+    h.previewResponder = async (body) => ok({ ok: true, text: `二回目以降の文面 ${(n += 1)} ${body.clipVariant}`, clamped: false, promptVersion: "pv" });
+    refreshOf(h)!.on!.click!();
+    await h.app.whenIdle();
+    expect(previewCalls(h)).toBe(2);
+    expect(previewText(h)).toBe("二回目以降の文面 1 default");
+    refreshOf(h)!.on!.click!();
+    await h.app.whenIdle();
+    expect(previewCalls(h)).toBe(3);
+    expect(previewText(h)).toBe("二回目以降の文面 2 default");
+  });
+
+  it("取り直している間は、前回の文面を出し続ける(取得中の固定の文言に戻さない)。応答で新しい文面に変わる", async () => {
+    const h = await started();
+    toggleOf(h).on!.click!();
+    await h.app.whenIdle();
+    const first = previewText(h)!;
+    const gate = deferred<Resp>();
+    h.previewResponder = () => gate.promise;
+    h.type("additionalInstruction", "二回目の指示");
+    refreshOf(h)!.on!.click!();
+    expect(previewText(h), "取得中も前回の文面").toBe(first);
+    gate.resolve(echoPreview({ additionalInstruction: "二回目の指示", clipVariant: "default" }));
+    await h.app.whenIdle();
+    expect(previewText(h)).toContain("二回目の指示");
+  });
+
+  it("取得の失敗(500・形が違う・例外)は固定の文言(サーバの文面は出さない)。「入力中の内容を反映」で再試行でき、成功すると文面に戻る", async () => {
+    for (const bad of [
+      async () => ({ status: 500, json: async () => ({ ok: false, error: { type: "race-day-error", message: "秘密の内部エラー" } }) }),
+      async () => ok({ ok: true, text: 5, clamped: false, promptVersion: "pv" }),
+      async () => ok({ ok: true, text: "x", clamped: "no", promptVersion: "pv" }),
+      async () => {
+        throw new TypeError("Failed to fetch 秘密の例外");
+      },
+    ] as (() => Promise<Resp>)[]) {
+      const h = await started({ previewResponder: bad });
+      toggleOf(h).on!.click!();
+      await h.app.whenIdle();
+      expect(previewText(h)).toContain("プレビューを取得できませんでした");
+      expect(JSON.stringify(h.tree())).not.toContain("秘密");
+      expect(refreshOf(h), "失敗でも反映ボタンは出る").toBeDefined();
+      h.previewResponder = async (body) => echoPreview(body);
+      refreshOf(h)!.on!.click!();
+      await h.app.whenIdle();
+      expect(previewText(h)).toContain("サンプルレース");
+    }
+  });
+
+  it("連打: 古い取得の応答があとから届いても採らない(最後に押した取得の結果が出る)", async () => {
+    const h = await started();
+    const gates = [deferred<Resp>(), deferred<Resp>()];
+    let i = 0;
+    h.previewResponder = () => gates[i++]!.promise;
+    toggleOf(h).on!.click!(); // 1 本目(開く)
+    h.type("additionalInstruction", "二本目の指示");
+    refreshOf(h)!.on!.click!(); // 2 本目
+    expect(previewCalls(h)).toBe(2);
+    gates[1]!.resolve(echoPreview({ additionalInstruction: "二本目の指示", clipVariant: "default" }));
+    await flush();
+    expect(previewText(h)).toContain("二本目の指示");
+    gates[0]!.resolve(echoPreview({ additionalInstruction: "", clipVariant: "default" })); // 古い応答があとから届く
+    await h.app.whenIdle();
+    expect(previewText(h), "古い応答で上書きしない").toContain("二本目の指示");
+  });
+
+  it("強制描画で写しの入力が前回の取得と変わったときだけ取り直す: 検証エラーの強制描画(入力は同じ)では取得せず、追加指示を打ったあとの強制描画では取得する", async () => {
+    const h = await started();
+    toggleOf(h).on!.click!();
+    await h.app.whenIdle();
+    expect(previewCalls(h)).toBe(1);
+    h.type("bankroll", "abc"); // 追加指示・クリップ幅は変わらない
+    h.clickSave(); // 検証エラーの強制描画
+    await h.app.whenIdle();
+    expect(h.posts).toEqual([]);
+    expect(previewCalls(h), "鍵(追加指示・クリップ幅)が同じなら取得しない").toBe(1);
+    h.type("additionalInstruction", "強制描画で追いつく指示");
+    h.clickSave(); // 同じく検証エラー(bankroll が不正のまま)の強制描画。写しが現在の下書きになる
+    await h.app.whenIdle();
+    expect(h.posts).toEqual([]);
+    expect(previewCalls(h), "鍵が変わった強制描画では取得する").toBe(2);
+    expect(previewText(h)).toContain("強制描画で追いつく指示");
+  });
+
+  it("応答が届いたとき、反映を押した後に別の欄へ打ち始めていても、打った文字を失わない(強制描画に切り替えて写しを更新する)。このとき新しい取得は起こさず、文面には出ない", async () => {
+    const h = await started();
+    toggleOf(h).on!.click!();
+    await h.app.whenIdle();
+    const gate = deferred<Resp>();
+    h.previewResponder = () => gate.promise;
+    h.type("additionalInstruction", "反映を押した時点の指示");
+    refreshOf(h)!.on!.click!();
+    h.typeInput("bankroll", "123456"); // 応答が来る前に打ち始めた(input イベント。描画はしない)
+    h.typeInput("additionalInstruction", "反映を押したあとに打った指示");
+    const before = h.renders.length;
+    gate.resolve(echoPreview({ additionalInstruction: "反映を押した時点の指示", clipVariant: "default" }));
+    await h.app.whenIdle();
+    expect(h.renders.length, "応答で描画された").toBeGreaterThan(before);
+    expect(h.renders[h.renders.length - 1]!.force, "下書きが写しと違うので強制描画").toBe(true);
+    expect(h.field("bankroll").attrs?.["value"], "打った文字が入力欄に残っている").toBe("123456");
+    expect(h.field("additionalInstruction").attrs?.["value"]).toBe("反映を押したあとに打った指示");
+    expect(previewText(h), "文面は反映を押した時点の入力で作ったもの").toContain("反映を押した時点の指示");
+    expect(previewText(h)).not.toContain("反映を押したあとに打った指示");
+    expect(previewCalls(h), "新しい取得は起こさない(開いたとき 1 + 反映 1 のまま)").toBe(2);
+  });
+
+  it("対照: 応答が届いたとき打っていなければ、強制なしの描画(DOM の無用な置き換えをしない)", async () => {
+    const h = await started();
+    toggleOf(h).on!.click!();
+    await h.app.whenIdle();
+    const gate = deferred<Resp>();
+    h.previewResponder = () => gate.promise;
+    refreshOf(h)!.on!.click!();
+    const before = h.renders.length;
+    gate.resolve(echoPreview({ additionalInstruction: "", clipVariant: "default" }));
+    await h.app.whenIdle();
+    expect(h.renders.length).toBeGreaterThan(before);
+    expect(h.renders[h.renders.length - 1]!.force).toBe(false);
+  });
+
+  it("反映ボタンは開いているときだけ。閉じているときの反映の呼び出し(古いボタンの click など)は何もしない(描画も取得も増えない)", async () => {
     const h = await started();
     expect(refreshOf(h)).toBeUndefined();
     const before = h.renders.length;
     toggleOf(h).on!.click!();
+    await h.app.whenIdle();
     const refresh = refreshOf(h)!.on!.click!;
     toggleOf(h).on!.click!(); // 閉じる
     const afterClose = h.renders.length;
-    expect(afterClose).toBe(before + 2);
+    expect(afterClose).toBeGreaterThanOrEqual(before + 2);
+    const calls = previewCalls(h);
     refresh(); // 閉じたあとに届いた反映
+    await h.app.whenIdle();
     expect(h.renders.length).toBe(afterClose);
+    expect(previewCalls(h)).toBe(calls);
   });
 
-  it("保存の成功: 開いたまま、サーバが返した設定で文面が更新される(保存した追加指示が文面に出る)", async () => {
+  it("閉じた後に届いた応答は捨てる(閉じた画面に文面は出ない)。開き直すと取り直す", async () => {
+    const h = await started();
+    const gate = deferred<Resp>();
+    h.previewResponder = () => gate.promise;
+    toggleOf(h).on!.click!();
+    toggleOf(h).on!.click!(); // 取得中に閉じる
+    gate.resolve(echoPreview({ additionalInstruction: "", clipVariant: "default" }));
+    await h.app.whenIdle();
+    expect(previewText(h)).toBeNull();
+    h.previewResponder = async (body) => echoPreview(body);
+    toggleOf(h).on!.click!();
+    expect(previewText(h), "開き直すと取得中から").toBe(LOADING);
+    await h.app.whenIdle();
+    expect(previewText(h)).toContain("サンプルレース");
+    expect(previewCalls(h)).toBe(2);
+  });
+
+  it("保存の成功: 開いたまま、保存した追加指示が文面に出る(保存の強制描画で写しが更新され、サーバが返した設定の描画では同じ入力なので取り直さない)", async () => {
     const h = await started();
     toggleOf(h).on!.click!();
+    await h.app.whenIdle();
     h.type("additionalInstruction", "保存する指示");
     h.clickSave();
     await h.app.whenIdle();
     expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("true"); // 開いたまま
     expect(previewText(h)).toContain("保存する指示");
+    expect(previewCalls(h), "開いたとき 1 + 保存の強制描画で入力が変わった 1。保存完了の描画では増えない").toBe(2);
   });
 
-  it("保存中の開閉・反映は無視する(描画は増えない)。入力を無視するのと同じ", async () => {
+  it("保存中の開閉・反映は無視する(描画も取得も増えない)。入力を無視するのと同じ", async () => {
     const gate = deferred<Resp>();
     const h = await started({ postResponder: () => gate.promise });
     h.clickSave();
@@ -737,30 +939,69 @@ describe("Issue #201: プロンプトのプレビュー(開閉・入力の反映
     toggleOf(h).on!.click!();
     expect(h.renders.length).toBe(before);
     expect(previewText(h)).toBeNull();
+    expect(previewCalls(h)).toBe(0);
     gate.resolve(ok({ ok: true, settings: SERVER }));
     await h.app.whenIdle();
   });
 
-  it("画面を離れて戻ると、閉じた状態に戻る(開閉はメモリだけ。戻ると設定を取り直す)", async () => {
+  it("画面を離れて戻ると、閉じた状態に戻る(開閉はメモリだけ。戻ると設定を取り直す)。取得中に離れたときの応答は捨てる", async () => {
     const h = await started();
+    const gate = deferred<Resp>();
+    h.previewResponder = () => gate.promise;
     toggleOf(h).on!.click!();
-    expect(previewText(h)).not.toBeNull();
     h.go("#date=20260628&venue=central");
     h.go("#settings");
+    gate.resolve(echoPreview({ additionalInstruction: "", clipVariant: "default" })); // 離れる前に出した取得の応答
     await h.app.whenIdle();
     expect(previewText(h)).toBeNull();
     expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("false");
+    expect(previewCalls(h)).toBe(1);
   });
 
-  it("「再読込」は未保存の入力を捨てるので、開いたままの文面もサーバの値に戻る", async () => {
+  it("「再読込」は未保存の入力を捨てるので、開いたままの文面もサーバの値に戻る(取り直す)", async () => {
     const h = await started();
     h.type("additionalInstruction", "捨てられる指示");
     toggleOf(h).on!.click!();
+    await h.app.whenIdle();
     expect(previewText(h)).toContain("捨てられる指示");
     h.clickRefresh();
     await h.app.whenIdle();
     expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("true");
     expect(previewText(h)).not.toContain("捨てられる指示");
+    expect(previewText(h)).toContain("サンプルレース");
+  });
+
+  it("R1: 取得中に画面全体の「更新」で設定を取り直しても、同じ設定が返れば文面が出る(古い応答は捨て、取り直した設定の描画で取得し直す。「組み立てています…」のまま止まらない)", async () => {
+    const h = await started();
+    const gate = deferred<Resp>();
+    let calls = 0;
+    h.previewResponder = (body) => (calls++ === 0 ? gate.promise : Promise.resolve(echoPreview(body)));
+    toggleOf(h).on!.click!();
+    expect(previewText(h), "前提: 取得が飛んでいる間は取得中の文言").toBe(LOADING);
+    expect(previewCalls(h)).toBe(1);
+    h.clickRefresh(); // 設定を取り直す(世代が進み、飛んでいる応答は捨てられる)
+    gate.resolve(echoPreview({ additionalInstruction: "", clipVariant: "default" })); // 古い応答があとから届く
+    await h.app.whenIdle();
+    expect(toggleOf(h).attrs?.["aria-expanded"], "前提: 開いたまま").toBe("true");
+    expect(previewText(h), "取り直した設定の描画で取得し直して、文面が出る").toContain("サンプルレース");
+    expect(previewCalls(h)).toBe(2);
+  });
+
+  it("開閉で文面を捨てる: ready → 閉じる → 打つ → 開き直す、の取得中は前回の古い文面ではなく取得中の文言。応答で新しい入力の文面になる", async () => {
+    const h = await started();
+    toggleOf(h).on!.click!();
+    await h.app.whenIdle();
+    expect(previewText(h)).toContain("指示=[]"); // 前提: 最初の文面(追加指示は空)
+    toggleOf(h).on!.click!(); // 閉じる
+    h.type("additionalInstruction", "閉じている間に打った指示");
+    const gate = deferred<Resp>();
+    h.previewResponder = () => gate.promise;
+    toggleOf(h).on!.click!(); // 開き直す
+    expect(previewText(h), "取得中は前回(閉じる前)の文面を出さない").toBe(LOADING);
+    gate.resolve(echoPreview({ additionalInstruction: "閉じている間に打った指示", clipVariant: "default" }));
+    await h.app.whenIdle();
+    expect(previewText(h)).toContain("閉じている間に打った指示");
+    expect(previewCalls(h)).toBe(2);
   });
 
   it("取得前(読み込み中)は、プレビューのボタンが無い。取得できると出る", async () => {

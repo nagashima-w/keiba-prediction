@@ -48,7 +48,7 @@ function exact(path: string, viewerMethods: readonly string[]): RouteRule {
 }
 
 /**
- * 表。完全一致のルートが 32(画面・API・管理者専用が 25、アイコンが 7)、パターンのルートが 3(`/api/analyses/{id}`・`/api/reports/{date}`・`/api/monthly-reports/{month}`)。
+ * 表。完全一致のルートが 31(画面・API・管理者専用が 24、アイコンが 7)、パターンのルートが 3(`/api/analyses/{id}`・`/api/reports/{date}`・`/api/monthly-reports/{month}`)。
  * パターンは、同じ階層の固定の path(`/api/analyses/run`・`/api/reports/run`・`/api/monthly-reports/run`)に化けないよう、`run` を除く。
  */
 export const ROUTE_RULES: readonly RouteRule[] = [
@@ -93,6 +93,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/health", ADMIN_ONLY), // 設定の有無(API キー・Webhook・サイトの URL)が見える
   exact("/api/netkeiba/check", ADMIN_ONLY), // netkeiba への取得を起こす確認
   exact("/api/settings", ADMIN_ONLY), // GET も含む(設定の中身を見せない)
+  // 設定画面のプロンプトのプレビュー(Issue #396)。純関数の組み立てだけ(D1・LLM・netkeiba に触れない)。設定の画面そのものが管理者専用なので、同じ扱い。POST だけ
+  exact("/api/settings/prompt-preview", ADMIN_ONLY),
   exact("/api/analyses/run", ADMIN_ONLY), // 手動の分析(LLM を呼ぶ)
   // 一括の手動の分析(Issue #251。LLM を呼ぶ)。**run の下の階層(`run/bulk`)にしてある**: 同じ階層の名前(`run-bulk`・`bulk` など)にすると `/api/analyses/{id}` のパターンに当たり、閲覧者に GET が開く
   exact("/api/analyses/run/bulk", ADMIN_ONLY),

@@ -327,11 +327,11 @@ describe("cloud/client の閉包(型だけの import も含む。Issue #201)", (
   const { coreFiles, outsideFiles, bareSpecifiers, unresolvedCoreSpecifiers } = closureOf(clientSources, { includeTypes: true });
   const relCore = (f: string): string => path.relative(CORE_SRC, f).split(path.sep).join("/");
 
-  it("前提(空振り防止): クライアントのファイルがあり、core(view/・analysis/・build-prompt・配分)の閉包を実際に辿れている", () => {
+  it("前提(空振り防止): クライアントのファイルがあり、core(view/・analysis/・配分)の閉包を実際に辿れている。build-prompt は閉包に無い(Issue #396: プレビューの文面はサーバが組み立てる)", () => {
     expect(clientSources.length).toBeGreaterThan(5);
     const names = [...coreFiles].map(relCore);
-    expect(names).toContain("analyzer/build-prompt.ts");
-    expect(names).toContain("analyzer/clip-variants.ts");
+    expect(names, "型だけの import でも build-prompt に届かない").not.toContain("analyzer/build-prompt.ts");
+    expect(names.filter((n) => n.startsWith("analyzer/")), "core の analyzer/ のモジュールは閉包に 1 つも入らない").toEqual([]);
     expect(names).toContain("ev/combo-bet-allocation.ts");
     // Issue #286(#285 の段階A): 流用している共有部分は packages/core/src/view/・analysis/ にある。packages/app は閉包に入らない。
     expect(names).toContain("view/allocation-proposal-view.ts");

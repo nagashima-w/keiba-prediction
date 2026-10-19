@@ -202,7 +202,7 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 
 | 閲覧者にも許す(読み取りだけ) | 管理者だけ |
 |---|---|
-| `GET /`(画面)・`GET /app.js`<br>アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244)<br>`GET /api/races`(一覧)<br>`GET /api/plan`<br>`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`<br>`GET /api/reports`・`/api/reports/{date}`(日報)<br>`GET /api/verify`(検証。Issue #263。**閲覧者の要求は集計のやり直しを起こさない**) | 設定(`/api/settings`。GET も)<br>統計モデル用の書き出し(`/api/export/prior-dataset`。Issue #266)<br>各馬の戦績の蓄積の診断(`GET /api/horse-runs`。Issue #256 段階A。読み取り専用)<br>手動の分析(`POST /api/analyses/run`・一括の `POST /api/analyses/run/bulk`)・日報の手動作成(`POST /api/reports/run`)<br>結果の取り込み(`POST /api/results/import`)・補完の状況(`GET /api/results/backfill`)<br>`/api/health`(設定の有無が見える)・`/check`・`/api/netkeiba/check`<br>**表に無いルートと、表の外の method(HEAD・POST など)** |
+| `GET /`(画面)・`GET /app.js`<br>アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244)<br>`GET /api/races`(一覧)<br>`GET /api/plan`<br>`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`<br>`GET /api/reports`・`/api/reports/{date}`(日報)<br>`GET /api/verify`(検証。Issue #263。**閲覧者の要求は集計のやり直しを起こさない**) | 設定(`/api/settings`。GET も)・設定画面のプロンプトのプレビュー(`POST /api/settings/prompt-preview`。Issue #396)<br>統計モデル用の書き出し(`/api/export/prior-dataset`。Issue #266)<br>各馬の戦績の蓄積の診断(`GET /api/horse-runs`。Issue #256 段階A。読み取り専用)<br>手動の分析(`POST /api/analyses/run`・一括の `POST /api/analyses/run/bulk`)・日報の手動作成(`POST /api/reports/run`)<br>結果の取り込み(`POST /api/results/import`)・補完の状況(`GET /api/results/backfill`)<br>`/api/health`(設定の有無が見える)・`/check`・`/api/netkeiba/check`<br>**表に無いルートと、表の外の method(HEAD・POST など)** |
 
 - 閲覧者の画面には、「設定」への入口・分析の実行ボタン・日報の作成ボタン・結果の取り込みの操作が出ない。結果の「配分が未設定」の注記と日報の案内文からも、設定・ボタンへの案内の文は外れる(総資金・1レース上限・買い目・日報の賭け金や払戻などの数値は、閲覧者にもそのまま見せる)。`#settings` を直接開くと「管理者だけが使えます」と出る(検証は Issue #263 で閲覧者にも開いた。下の「検証画面」)。「ログイン中」の行には、管理者と同じくメールアドレスだけを出す(「閲覧専用」などの役割の表示は出さない。Issue #243)。
 - **`GET /api/races` は、閲覧者でも netkeiba への取得を起こしうる**(開催日の一覧を見るために必要。DO のキャッシュ 6 時間と gate〈取得の間隔・ブレーカー〉が効くが、友人が日付を次々に変えれば、そのぶんの取得が走る)。
@@ -449,6 +449,15 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **R1**(`test/analysis-llm-calls.test.ts`): `getAnalysisDetail` が `detail: "missing"` を返す経路(Class B の柵・R2 のオブジェクトが無い・壊れている・get が例外)でも、`llmNote`・`llmCalls`・馬の `highlights`・`concerns` は D1 の値のまま返る。
 
 ## 設定画面にプロンプトのプレビューを出す(Issue #201。v1.20.2)
+**Issue #396 で、文面の組み立てをクライアントからサーバへ移した**(下の「Issue #396」の箇条書き)。以下の箇条書きのうち、「クライアントで呼ぶ」「ネットワークには出ない」「ビルド」「型検査の閉包」「検査」の記述は #201 のときの記録で、今は #396 の記述が正しい。
+- **Issue #396(文面はサーバが組み立てる)**: `POST /api/settings/prompt-preview`(管理者専用。route-policy の表。D1・DO・R2・netkeiba・LLM に触れない)が、`{ additionalInstruction, clipVariant }` の 2 キーを受け、`{ ok, text, clamped, promptVersion }` を返す。組み立ては `src/prompt-preview.ts`
+  (`clampAdditionalInstruction` → `resolveClipVariant` → core の `buildPromptPreview`。手順は #201 のクライアント実装をそのまま移した)。core は `pipeline.ts` に `buildPromptPreview` を再 export しただけ。クライアントは `client/api-prompt-preview.ts` で取って表示するだけで、`build-prompt` を束に入れない。
+  **`CLIENT_JS` は 264,471 → 226,688 バイト(-37,783)、サイズの上限は 266,000 → 228,500 バイト**(内訳は `test/client-bundle.test.ts` のコメント)。core のプロンプト文面を変えても `CLIENT_JS` は変わらなくなった(以前の「ドリフトの検査が落ちる」は無くなった)。
+  - **取りに行くタイミング**: 開いたとき・「入力中の内容を反映」・強制描画(保存・再読込・検証エラーなど)で写しの入力(追加指示とクリップ幅)が前回の取得と変わったときだけ。打つたび・ポーリングでは取らない(通信は上の操作ごとに 1 往復)。
+  - **表示**: 最初の取得中は「プロンプトのプレビューを組み立てています…」、取り直している間は前回の文面を出し続ける、失敗は「プレビューを取得できませんでした…」(サーバの文面は出さない。「入力中の内容を反映」で再試行)。連打は連番で最後の応答だけを採り、画面を離れた後の応答は世代で捨てる。
+  - **応答が届いたとき打ち始めていた場合**: 下書きが写しと違えば、強制描画に切り替えて写しを現在の下書きへ更新する(通常の描画だと古い写しで入力欄が作り直され、打った文字が消える。`createMounter` は DOM を丸ごと置き換える)。このとき新しい取得は起こさない(次に押すまで文面に出ない契約を保つ)。入力欄のフォーカスはこのとき外れうる(まれな競合)。
+  - **送る追加指示は先頭の 2,001 単位だけ**: D1 に直接入れた長い値でも本文の上限(16 KiB)に収まり、サーバの切り詰めは元の長文と同じ位置・同じ `clamped` になる(`test/handler-prompt-preview.test.ts`)。
+  - **検査**: `test/prompt-preview.test.ts`(旧 `client-prompt-preview.test.ts`。アサーションは移しただけ)・`handler-prompt-preview.test.ts`・`client-api-prompt-preview-contract.test.ts`・`client-app-settings.test.ts`(取得・連番・入力の保護)・`handler-json-guard.test.ts`・`route-policy.test.ts`・`handler-roles.test.ts`・`client-bundle.test.ts`(束に `analyzer/` が入らないこと)・`race-day-llm.test.ts`(e10。実際に LLM へ渡った prompt との一致)・`smoke.ts`。
 サーバ・D1・exe は無変更。`cloud/` のクライアントと `page.ts` の CSS、`clampAdditionalInstruction` の置き場所(`llm-run.ts` → `settings.ts`。`llm-run.ts` から再 export)だけ。core のプロンプト文面は変えていない。
 - **何を出すか**: 設定画面の末尾(保存ボタンの後ろ)に「LLMへ送るプロンプトのプレビューを開く」ボタン。開くと、exe の設定画面と同じ `buildPromptPreview`(固定のサンプルレースを `buildPrompt` に通した文面)を出す。**クライアントで呼ぶ**(サーバの API は作っていない。ネットワークには出ない)。
 - **送信と同じ文面にする**(`client/prompt-preview.ts`): 追加指示を `clampAdditionalInstruction`(2,000 UTF-16 単位。サロゲートペアを割らない)で切り、クリップ幅は `resolveClipVariant` で解決した版の `id` を渡す(`race-day-core.ts` の送信と同じ手順)。

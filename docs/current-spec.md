@@ -2131,6 +2131,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
 - **スモーク**: 節 H は、移行のファイルを材料にしていた下流の確認(一覧の並び・詳細・今日の狙い目・検証・統計モデル用の書き出し・結果の補完の集計)を、`smoke-worker.ts` の `/smoke/analyses/seed`(本番と同じ `D1AnalysisStore.saveAnalysis` で分析 5 件・結果 2 レースを入れる)を材料にして維持した。移行専用の確認だけを削除した。
 
 ### 設定画面にプロンプトのプレビュー(#201。v1.20.2)
+**(Issue #396 の追記)文面の組み立てはサーバへ移った**: `POST /api/settings/prompt-preview`(管理者専用)がサーバの `src/prompt-preview.ts` で組み立てて返し、クライアントは表示するだけ(束から約 39 KB が減り、`CLIENT_JS` は 264,471 → 226,688 バイト、上限は 266,000 → 228,500)。表示される文面・注記は変えていない(取得中と失敗の短い固定の文言だけ増えた)。以下は #201 のときの記録で、「クライアントで呼ぶ」「ネットワークには出ない」「ビルド」の記述は今は当てはまらない。詳細は `cloud/README.md`。
 変更は `cloud/` のクライアントと `page.ts` の CSS、`clampAdditionalInstruction` の置き場所(`llm-run.ts` → `settings.ts`。再 export)だけ(サーバ・D1・exe・core のプロンプト文面は無変更)。詳細は `cloud/README.md` の「設定画面にプロンプトのプレビューを出す」。
 - **何を出すか**: 設定画面の末尾のボタンで開閉する、LLM へ送るプロンプトのプレビュー。exe の設定画面と同じ `buildPromptPreview`(固定のサンプルレース)を**クライアントで**呼ぶ(API は作らない。ネットワークには出ない)。
 - **送信と同じ文面**: 追加指示は 2,000 UTF-16 単位に切り(`clampAdditionalInstruction`)、クリップ幅は `resolveClipVariant` で解決する(送信と同じ手順)。`race-day-llm.test.ts` の e10 が、実際に LLM へ渡った prompt との一致を固定している。

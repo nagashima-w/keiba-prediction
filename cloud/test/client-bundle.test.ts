@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
+import { buildPreviewText } from "../src/prompt-preview";
 import { buildClientJs, CLIENT_DIR, GENERATED_PATH, listBundledInputs, renderGeneratedModule } from "../build-client";
 import { CLIENT_JS } from "../src/client-bundle.generated";
 
@@ -48,7 +49,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 266,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 228,500 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -230,7 +231,16 @@ describe("生成物のドリフトと決定性", () => {
     // 内訳: 移行の名前を持つ 6 つの入力(esbuild の metafile の `bytesInOutput`。46410ab で測った)は 14,146 + 12,202 + 8,482 + 2,728 + 2,020 + 1,476 = 41,054。残りの 48,034 - 41,054 = 6,980 は、
     // `view.ts`(設定画面の節・移行画面の描画)・`app.ts`(移行画面の配線)・`route.ts`・`settings-form.ts`・`dom.ts`(`accept`・`on.file` の許可)・`main.ts`・`vnode.ts` から減った分(ファイルごとの内訳は測っていない)。
     // 新しい上限 266,000 の根拠: 実測 264,471 に約 1.5KB の余裕(#362 の前例。264,471 + 1,529 を 1,000 バイト単位に切り上げ)。余裕は 1,529 バイト。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(266_000);
+    // Issue #396(#390 D-3。設定画面のプロンプトのプレビューを、サーバが組み立てて返す): 上限を 266,000 から 228,500 へ**下げた**。クライアントが `build-prompt` を動かして組み立てていたのをやめ、
+    // `POST /api/settings/prompt-preview`(`cloud/src/prompt-preview.ts`)の応答を表示するだけにしたため。実測(`Buffer.byteLength(CLIENT_JS)`): 264,471(10eaa26)→ 226,688(-37,783。`pnpm run build:client` の出力〈「226688 バイト」〉)。
+    // 内訳(esbuild の metafile の `bytesInOutput` を、10eaa26 と今の生成物で入力ごとに比べた。和が -37,783 に一致する): 外れた core の 8 つ(`analyzer/build-prompt.ts` 28,014・`leg-style.ts` 4,762・`day-baba.ts` 4,456・`condition-change.ts` 1,331・
+    // `early-position.ts` 416・`clip-variants.ts` 290・`scorer/derive-features.ts` 180・`ev/allocation-primitives.ts` の使われなくなった分 57)の和は -39,506。`client/prompt-preview.ts` -146、`src/settings.ts` -160(クライアントが追加指示を切らなくなった)、
+    // 増えたのは `client/api-prompt-preview.ts` +1,101(新設。API 呼び出し・応答の検査・固定の失敗文言)・`client/app.ts` +776(取得の状態・連番・応答の到着時の入力の保護)・`client/settings-form.ts` +160(取得中の固定の文言・状態の入力)で、
+    // ほかに `report-screen.ts` -10・`verify-screen.ts` +2(圧縮の名前の割り当ての揺れ)。-39,506 - 146 - 160 + 1,101 + 776 + 160 - 10 + 2 = -37,783。
+    // 副次効果: core のプロンプトの文面(`build-prompt.ts` ほか)を変えても `CLIENT_JS` が変わらなくなった(以前は変えるたびに、この生成物のドリフトの検査が落ちた)。
+    // 新しい上限 228,500 の根拠: 実測 226,688 に約 1.8KB の余裕(226,688 + 1,812 を 500 バイト単位に切り上げ)。余裕は 1,812 バイト。
+    // (追記)レビューの R1(設定を取り直したとき、飛んでいるプレビューの状態を捨てる 2 行)で 226,688 → 226,702(+14)。上限は 228,500 のまま(余裕 1,798 バイト)。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(228_500);
   });
 });
 
@@ -244,11 +254,9 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   // Issue #189(設定画面): ラベルと版 ID は exe と共有していた定数(`packages/core/src/analysis/app-settings.ts`。import なしの純モジュール)、範囲の述語は cloud/src の純モジュール(サーバと同じ述語を使う)。
   "../../packages/core/src/analysis/app-settings",
   "../src/settings",
-  // Issue #201(設定画面のプロンプトのプレビュー): **core を直接 import する唯一の例外**。exe の設定画面と同じ関数(`buildPromptPreview`)を直接呼んで、プレビューの文面を exe と
-  // 一致させるため(`view/` に再 export の薄いモジュールを置くと、web が使う core のモジュールが増える)。この入口は core の `exports` の宣言済みサブパスで、閉包に `node:`・`node_modules`・バレルは入らない
-  // (下の閉包の検査と生成物の検査が固定する)。ほかの core のサブパス・バレルは引き続き拒否する(下の「対照」)。
-  "@keiba/core/analyzer/build-prompt",
-  // Issue #254(検証画面の対応表の信頼区間): Wilson 区間と判定(`wilsonInterval`・`judgeCalibration`)を、サーバ・テストと同じ実装で行うため。core を直接 import する 3 つ目の例外
+  // Issue #396: 設定画面のプロンプトのプレビューは**サーバが組み立てる**ので、クライアントは core の `build-prompt`(`@keiba/core/analyzer/build-prompt`)を import しない
+  // (Issue #201 で入れていた「core を直接 import する例外」を外した。束から約 39 KB が減った)。下の「対照」と閉包の検査が、再び入ることを拒否する。
+  // Issue #254(検証画面の対応表の信頼区間): Wilson 区間と判定(`wilsonInterval`・`judgeCalibration`)を、サーバ・テストと同じ実装で行うため。core を直接 import する例外(Issue #396 の後は、この 1 つだけ)
   // (上と同じ理由: `exports` の宣言済みサブパスで、**import が 1 つも無い**〈`node:`・`node_modules`・バレルが入らない〉モジュール。`packages/core/test/ev/binomial-interval.test.ts` が
   // import の無いことを、`native-free-modules.test.ts` が閉包を固定している)。
   "@keiba/core/ev/binomial-interval",
@@ -347,10 +355,10 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
   });
 
   it("対照: import の許可判定は、バレル・core の直接 import・bare specifier・許可外の表示関数・旧 exe のパスを拒否する(上の検査が空振りでない)", () => {
-    for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/core/src/analysis/analysis-export"]) {
+    for (const bad of ["@keiba/core", "@keiba/core/analyzer/build-prompt", "../src/prompt-preview", "../../packages/core/src/analyzer/build-prompt", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/core/src/analysis/analysis-export"]) {
       expect(importAllowed(bad), bad).toBe(false);
     }
-    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings", "@keiba/core/analyzer/build-prompt"]) {
+    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings"]) {
       expect(importAllowed(good), good).toBe(true);
     }
   });
@@ -359,9 +367,13 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
     const inputs = await listBundledInputs();
     expect(inputs.some((f) => f.endsWith("packages/core/src/view/allocation-proposal-view.ts")), "前提: 表示関数(view/)の流用が閉包に入っている").toBe(true);
     expect(inputs.some((f) => f.endsWith("packages/core/src/ev/combo-bet-allocation.ts")), "前提: core のサブパスが tsconfig の paths で解決されている").toBe(true);
-    // Issue #201: プレビューが呼ぶ exe と同じ関数(`buildPromptPreview`)の閉包が入っている(入っていなければ、下の禁止の検査は何も見ていない)
-    expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/build-prompt.ts")), "前提: build-prompt が閉包に入っている").toBe(true);
-    expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/clip-variants.ts")), "前提: clip-variants が閉包に入っている").toBe(true);
+    // Issue #396: プレビューの文面はサーバが組み立てるので、`buildPromptPreview` の閉包(build-prompt とその依存)はクライアントの束に入らない(Issue #201 で入れていたものを外した)。
+    // 逆向きの固定: 1 つでも入ったら落ちる(束が約 39 KB 増える。`analyzer/` はプロンプト・脚質などサーバ側の部品)。
+    for (const name of ["analyzer/build-prompt.ts", "analyzer/clip-variants.ts", "analyzer/leg-style.ts", "analyzer/day-baba.ts", "analyzer/condition-change.ts", "analyzer/early-position.ts", "scorer/derive-features.ts"]) {
+      expect(inputs.some((f) => f.endsWith(`packages/core/src/${name}`)), `${name} は束に入らない`).toBe(false);
+    }
+    expect(inputs.some((f) => f.includes("packages/core/src/analyzer/")), "core の analyzer/ のモジュールは 1 つも束に入らない").toBe(false);
+    expect(inputs.some((f) => f.endsWith("client/api-prompt-preview.ts")), "前提: 代わりに、サーバへ取りに行く API クライアントが入っている").toBe(true);
     expect(inputs.some((f) => f.endsWith("src/recovery-format.ts")), "前提: 回収率の表示(Issue #245)が閉包に入っている").toBe(true);
     expect(forbiddenInputs(inputs)).toEqual([]);
   }, 60_000);
@@ -583,6 +595,11 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
         const settings = init.method === "POST" ? JSON.parse(init.body as string) : SETTINGS;
         return { status: 200, json: async () => (init.method === "POST" ? { ok: true, settings } : { ok: true, settings, source: "d1" }) };
       }
+      if (url === "/api/settings/prompt-preview") {
+        // Issue #396: プレビューの文面はサーバが組み立てる。偽のサーバは、受けた本文を実際のサーバの関数(`buildPreviewText`)に通して返す。
+        const body = JSON.parse(init.body as string) as { additionalInstruction: string; clipVariant: string };
+        return { status: 200, json: async () => ({ ok: true, ...buildPreviewText(body) }) };
+      }
       if (url.startsWith("/api/races")) {
         return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, venue: "central", races: [{ race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null }] }) };
       }
@@ -792,7 +809,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     await until(() => root.children.some((c) => textOf(c).includes("保存しました")));
   });
 
-  it("Issue #201: 設定画面のプロンプトのプレビュー(生成物の実行): 開くと、exe と同じ関数の文面(【予想印】・サンプルレース)が、打った追加指示つきで出る。ネットワークには出ない(GET /api/settings だけ)。閉じると消える", async () => {
+  it("Issue #201・#396: 設定画面のプロンプトのプレビュー(生成物の実行): 開くと、サーバ(偽のサーバは実際の buildPreviewText)が組み立てた文面(【予想印】・サンプルレース)が、打った追加指示つきで出る。通信は GET /api/settings と POST /api/settings/prompt-preview 1 回だけ。閉じると消える", async () => {
     const { root, calls } = run("#settings");
     const elements = () => flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement);
     await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
@@ -802,6 +819,8 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     const area = elements().find((n) => n.attrs.get("data-field") === "additionalInstruction")!;
     area.listeners.get("input")![0]!({ target: { value: "スモークの追加指示" } });
     toggleOf().listeners.get("click")![0]!(undefined);
+    await until(() => calls.some((c) => c.url === "/api/settings/prompt-preview"));
+    await until(() => textOf(elements().find((n) => n.attrs.get("class") === "prompt-preview")!).includes("【予想印】"));
     const body = elements().find((n) => n.attrs.get("class") === "prompt-preview");
     expect(body, "開くと文面が出る").toBeDefined();
     const text = textOf(body!);
@@ -810,7 +829,11 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(text).toContain("±10%(絶対値0.10)");
     expect(text).toContain("スモークの追加指示");
     expect(toggleOf().attrs.get("aria-expanded")).toBe("true");
-    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings", "POST /api/settings/prompt-preview"]);
+    const sent = calls.find((c) => c.url === "/api/settings/prompt-preview")!;
+    expect(sent.init.credentials).toBe("same-origin");
+    expect(sent.init.referrerPolicy).toBe("same-origin");
+    expect(JSON.parse(sent.init.body as string)).toEqual({ additionalInstruction: "スモークの追加指示", clipVariant: "default" });
     toggleOf().listeners.get("click")![0]!(undefined);
     expect(elements().some((n) => n.attrs.get("class") === "prompt-preview")).toBe(false);
   });

@@ -10,7 +10,7 @@ import {
   type ModelInfoLite,
 } from "@keiba/core/llm";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
-import { buildPreviewText } from "../client/prompt-preview";
+import { buildPreviewText } from "../src/prompt-preview";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
 import type { LlmCallRecord } from "../src/llm-calls";

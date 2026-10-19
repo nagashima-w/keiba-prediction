@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildPromptPreview, resolveClipVariant } from "@keiba/core/analyzer/build-prompt";
-import { buildPreviewText } from "../client/prompt-preview";
+import { buildPreviewText } from "../src/prompt-preview";
 import { clampAdditionalInstruction } from "../src/llm-run";
 import { clampAdditionalInstruction as clampFromSettings } from "../src/settings";
 
 /**
- * Issue #201: 設定画面の「LLM へ送るプロンプトのプレビュー」の文面(純関数)。
+ * Issue #201: 設定画面の「LLM へ送るプロンプトのプレビュー」の文面(純関数)。Issue #396 で、ブラウザ側(`client/prompt-preview.ts`)からサーバ(`src/prompt-preview.ts`)へ移した(テストは移しただけで、アサーションは弱めていない)。
  * 実際の送信(`race-day-core.ts`: 追加指示を 2,000 UTF-16 単位に切り、クリップ幅を `resolveClipVariant` で解決する)と同じ手順で、
  * exe と同じ `buildPromptPreview` に通した文面を返す。**送信側の文面との一致は `race-day-llm.test.ts` の e10(実際に LLM へ渡った prompt との突き合わせ)が固定する**。
  */

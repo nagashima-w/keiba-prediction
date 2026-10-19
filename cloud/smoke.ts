@@ -183,7 +183,7 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const monthly = await req(port, "GET", "/api/monthly-reports");
   check(`${label}: GET /api/monthly-reports は 200(月報は閲覧できる。Issue #279)・POST は 403(admin-only)`, monthly.status === 200 && parseJson(monthly.text)["ok"] === true && (await req(port, "POST", "/api/monthly-reports")).status === 403, `${monthly.status} ${monthly.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/settings/prompt-preview"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
@@ -218,6 +218,21 @@ async function expectAdmin(port: number, label: string, email: string): Promise<
   check(`${label}: GET /api/horse-runs?cells=1 は 200(セルの分布も返す)・?days=0 は 400(役割の関門を通って、入力の検証に届く)`, (await req(port, "GET", "/api/horse-runs?cells=1")).status === 200 && (await req(port, "GET", "/api/horse-runs?days=0")).status === 400);
   const post = await req(port, "POST", "/api/analyses/run");
   check(`${label}: POST /api/analyses/run は(Origin が無いので)origin-mismatch の 403。admin-only ではない(役割の関門を通って、ハンドラの守りに届く)`, post.status === 403 && post.text !== ADMIN_ONLY_BODY && post.text.includes("origin-mismatch"), `${post.status} ${post.text.slice(0, 80)}`);
+  // Issue #396: 設定画面のプロンプトのプレビューはサーバが組み立てる。Origin が無ければ origin-mismatch の 403(admin-only ではない)。Origin つきの正しい本文は 200 で、サンプルのレースのプロンプトが返る。
+  const previewNoOrigin = await req(port, "POST", "/api/settings/prompt-preview");
+  check(`${label}: POST /api/settings/prompt-preview(Issue #396)は(Origin が無いので)origin-mismatch の 403。admin-only ではない`, previewNoOrigin.status === 403 && previewNoOrigin.text !== ADMIN_ONLY_BODY && previewNoOrigin.text.includes("origin-mismatch"), `${previewNoOrigin.status} ${previewNoOrigin.text.slice(0, 80)}`);
+  const previewResponse = await fetch(`http://127.0.0.1:${port}/api/settings/prompt-preview`, {
+    method: "POST",
+    headers: { Origin: `http://127.0.0.1:${port}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ additionalInstruction: "smoke の追加指示", clipVariant: "wide15" }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const previewBody = parseJson(await previewResponse.text());
+  check(
+    `${label}: POST /api/settings/prompt-preview(Origin つき)は 200・サンプルのプロンプト(【予想印】・追加指示・±15%)・clamped は false(Issue #396)`,
+    previewResponse.status === 200 && previewBody["ok"] === true && typeof previewBody["text"] === "string" && previewBody["text"].includes("【予想印】") && previewBody["text"].includes("smoke の追加指示") && previewBody["text"].includes("±15%(絶対値0.15)") && previewBody["clamped"] === false && typeof previewBody["promptVersion"] === "string",
+    `${previewResponse.status} ${JSON.stringify(previewBody).slice(0, 120)}`,
+  );
   const bulk = await req(port, "POST", "/api/analyses/run/bulk");
   check(`${label}: POST /api/analyses/run/bulk(Issue #251)も(Origin が無いので)origin-mismatch の 403。admin-only ではない`, bulk.status === 403 && bulk.text !== ADMIN_ONLY_BODY && bulk.text.includes("origin-mismatch"), `${bulk.status} ${bulk.text.slice(0, 80)}`);
 }

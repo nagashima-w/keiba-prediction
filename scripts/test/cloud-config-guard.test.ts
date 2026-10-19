@@ -218,14 +218,26 @@ describe("wrangler.toml", () => {
     expect(("await dispatchResultImports(x);\nexport async function dispatchResultImports(i) {}").match(/(?<!function\s)\bdispatchResultImports\(/g)).toHaveLength(1);
   });
 
-  it("Issue #208・#251・#394: 手動の POST を受けるルートは 6 つだけ(/api/settings・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/reports/run・/api/monthly-reports/run〈Issue #280〉。/api/migration/upload は Issue #394 で廃止)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
+  it("Issue #208・#251・#394・#396: 手動の POST を受けるルートは 7 つだけ(/api/settings・/api/settings/prompt-preview〈Issue #396〉・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/reports/run・/api/monthly-reports/run〈Issue #280〉。/api/migration/upload は Issue #394 で廃止)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
-    // POST の分岐は 6 つ(`method === "POST"`)
-    expect((code.match(/method === "POST"/g) ?? []).length).toBe(6);
+    // POST の分岐は 7 つ(`method === "POST"`。下の path つきの 6 つと、`/api/settings` の pathname の分岐の中で method を見る 1 つ)
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(7);
     const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
-    expect(routes).toEqual(["/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/reports/run", "/api/monthly-reports/run"]); // settings は pathname の分岐の中で method を見る
+    expect(routes).toEqual(["/api/settings/prompt-preview", "/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/reports/run", "/api/monthly-reports/run"]); // settings は pathname の分岐の中で method を見る
     expect(code).toMatch(/pathname === "\/api\/settings"/);
+    // Issue #396: handlePromptPreview は守りの後で純関数 buildPreviewText を呼ぶだけ。env・D1・DO・R2・netkeiba・LLM・Discord に触れない
+    const previewStart = code.indexOf("async function handlePromptPreview(");
+    expect(previewStart).toBeGreaterThan(-1);
+    const previewBody = code.slice(previewStart, code.indexOf("\n}\n", previewStart));
+    expect(previewBody.length).toBeGreaterThan(300); // 前提: 本体を実際に読めている(空振りでない)
+    expect(previewBody).toContain("readJsonObjectBody(request, PROMPT_PREVIEW_BODY_MAX_BYTES)");
+    expect(previewBody.indexOf("readJsonObjectBody(")).toBeLessThan(previewBody.indexOf("buildPreviewText(")); // 守りが先
+    expect(previewBody).toContain("buildPreviewText(");
+    for (const forbidden of ["env", ".DB", ".schedule", ".requestPlan(", ".getRaceList(", ".fetchRaw(", ".requestResultImport(", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD", "fetch("]) {
+      expect(previewBody, `handlePromptPreview に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    expect((previewBody + "\nawait env.DB.prepare(x);").includes("env")).toBe(true); // 対照(検出の確認。空振りでない)
     // handleResultsImport の本体
     const start = code.indexOf("async function handleResultsImport(");
     expect(start).toBeGreaterThan(-1);

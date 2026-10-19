@@ -23,6 +23,7 @@ import { CLIENT_JS } from "./client-bundle.generated";
 import { ICON_CACHE_CONTROL, iconAsset } from "./icons";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
+import { buildPreviewText } from "./prompt-preview";
 import { hasSettingsKeysMismatch, loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
 import { redactSecrets } from "./llm-run";
 import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgress, RaceListResult, RaceListVenue, RequestPlanResult, RequestResultImportResult, ResultImportProgress, ScheduleInput, ScheduleManyInput, ScheduleManyResult, ScheduleResult } from "./race-day-core";
@@ -278,7 +279,11 @@ export async function handle(
       headers: { ...SECURITY_HEADERS, allow: "GET, POST", "content-type": "text/plain; charset=utf-8" },
     });
   }
-  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/reports/run`・`/api/monthly-reports/run` の 6 本だけ**(`run/bulk` は Issue #251、下の 3 本は Issue #208・#235・#280。`/api/migration/upload` は Issue #394 で廃止)。認証(上)の後で、Origin の確認・入力の検証を行う。
+  // 設定画面のプロンプトのプレビュー(Issue #396)。設定の入口(上)の隣の別の path。純関数の組み立てだけ(D1・DO・R2・netkeiba・LLM に触れない)。管理者専用(route-policy.ts の表)。
+  if (method === "POST" && new URL(request.url).pathname === "/api/settings/prompt-preview") {
+    return handlePromptPreview(request);
+  }
+  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/settings/prompt-preview`(Issue #396)・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/reports/run`・`/api/monthly-reports/run` の 7 本だけ**(`run/bulk` は Issue #251、下の 3 本は Issue #208・#235・#280。`/api/migration/upload` は Issue #394 で廃止)。認証(上)の後で、Origin の確認・入力の検証を行う。
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run") {
     return handleRun(request, env);
   }
@@ -286,11 +291,11 @@ export async function handle(
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run/bulk") {
     return handleRunBulk(request, env);
   }
-  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 6 本(上の 3 つ〈`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`〉・ここ・下の `/api/reports/run`〈Issue #235〉・`/api/monthly-reports/run`〈Issue #280〉)。
+  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 7 本(上の 4 つ〈`/api/settings`・`/api/settings/prompt-preview`・`/api/analyses/run`・`/api/analyses/run/bulk`〉・ここ・下の `/api/reports/run`〈Issue #235〉・`/api/monthly-reports/run`〈Issue #280〉)。
   if (method === "POST" && new URL(request.url).pathname === "/api/results/import") {
     return handleResultsImport(request, env, deps.now ?? (() => new Date()), log);
   }
-  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 6 つだけ**(`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/reports/run`・`/api/monthly-reports/run`)。
+  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 7 つだけ**(`/api/settings`・`/api/settings/prompt-preview`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/reports/run`・`/api/monthly-reports/run`)。
   if (method === "POST" && new URL(request.url).pathname === "/api/reports/run") {
     return handleReportRun(request, env, deps.now ?? (() => new Date()));
   }
@@ -1191,6 +1196,30 @@ async function handleSettingsSave(request: Request, env: Env, now: () => Date): 
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "d1-error" } }, 503);
   }
+}
+
+/** プロンプトのプレビューの POST の本文の上限(バイト)。設定の保存と同じ(追加指示 2,000 単位が JSON のエスケープで最大 12,000 バイトになっても収まる)。 */
+const PROMPT_PREVIEW_BODY_MAX_BYTES = 16 * 1024;
+
+/**
+ * `POST /api/settings/prompt-preview`(Issue #396): 設定画面の「LLM へ送るプロンプトのプレビュー」の文面を組み立てて返す(管理者専用。route-policy.ts の表)。
+ * 本文は JSON `{ additionalInstruction: string, clipVariant: string }` の 2 キーだけ(欠け・型違い・余計なキーは 400)。未知の `clipVariant` は 400 にせず、送信と同じく対照(default)に解決する。
+ * 成功は 200 で `{ ok: true, text, clamped, promptVersion }`(`buildPreviewText`。追加指示は 2,000 UTF-16 単位に切る)。
+ * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413〈16 KiB〉→ JSON のオブジェクト 400)→ 入力の検証(400)→ 組み立て。
+ * **D1・DO・R2・env のどれにも触れない**(引数に env を取らない)。入力の値・文面を 400 の本文に写さない。
+ */
+async function handlePromptPreview(request: Request): Promise<Response> {
+  const guarded = await readJsonObjectBody(request, PROMPT_PREVIEW_BODY_MAX_BYTES);
+  if (!guarded.ok) {
+    return guarded.response;
+  }
+  const keys = Object.keys(guarded.body);
+  const { additionalInstruction, clipVariant } = guarded.body;
+  if (keys.length !== 2 || typeof additionalInstruction !== "string" || typeof clipVariant !== "string") {
+    return badRequest("本文は additionalInstruction(文字列)と clipVariant(文字列)の 2 項目だけにしてください");
+  }
+  const preview = buildPreviewText({ additionalInstruction, clipVariant });
+  return json({ ok: true, text: preview.text, clamped: preview.clamped, promptVersion: preview.promptVersion });
 }
 
 /**
