@@ -9,7 +9,6 @@ import {
   BACKFILL_MAX_DEFER_NIGHTS,
   BACKFILL_MAX_RELIST,
   BACKFILL_MAX_NIGHTS,
-  BACKFILL_MIGRATION_POLL_MS,
   BACKFILL_NIGHTLY_LIMIT,
   BACKFILL_POLL_MS,
   BACKFILL_WINDOW_END_HOUR_JST,
@@ -22,7 +21,6 @@ import {
   type BackfillOptions,
   type BackfillStore,
 } from "../src/result-backfill-core";
-import type { MigrationState } from "../src/migration-core";
 import type { ResultClass } from "../src/race-day-result";
 import type { ResultImportProgress } from "../src/race-day-core";
 import { openNodeSql, type NodeSql } from "./node-sql";
@@ -52,8 +50,6 @@ interface DayRow {
 class World {
   now = T0;
   alarm: number | null = null;
-  migration: MigrationState = "completed";
-  migrationError = false;
   gate: { blockedUntil: number | null; pending: number } = { blockedUntil: null, pending: 0 };
   gateError = false;
   /** 未取込のレース(取り込み済みになると消える)。 */
@@ -192,10 +188,6 @@ function make(world: World, options: BackfillOptions = {}, sql: NodeSql = openNo
         world.setAlarmCalls.push(at);
       },
       getAlarm: async () => world.alarm,
-      migrationState: async () => {
-        if (world.migrationError) throw new Error("RPC SECRET-MIGRATION");
-        return world.migration;
-      },
       gateStatus: async () => {
         if (world.gateError) throw new Error("RPC SECRET-GATE");
         return world.gate;
@@ -230,7 +222,6 @@ describe("定数", () => {
     expect(BACKFILL_GATE_BUSY_PENDING).toBe(4);
     expect(BACKFILL_GATE_BUSY_DELAY_MS).toBe(5 * MIN);
     expect(BACKFILL_ERROR_RETRY_MS).toBe(10 * MIN);
-    expect(BACKFILL_MIGRATION_POLL_MS).toBe(30 * MIN);
     expect(BACKFILL_MAX_NIGHTS).toBe(3);
     expect(BACKFILL_MAX_DEFER_NIGHTS).toBe(5);
   });
@@ -263,40 +254,24 @@ describe("窓(JST 01:00〜06:00。開始を含み、終了を含まない)", () 
   });
 });
 
-// ---- 起動の条件(移行の状態) ----
+// ---- 起動の条件(Issue #394: 移行の状態には依存しない) ----
 
-describe("移行の状態: completed のときだけ補完を動かす", () => {
-  const cases: Array<[MigrationState, boolean, boolean]> = [
-    // [移行の状態, 依頼するか, アラームを張るか]
-    ["idle", false, false],
-    ["failed", false, false],
-    ["verifying", false, true],
-    ["importing", false, true],
-    ["waiting-budget", false, true],
-    ["waiting-r2", false, true],
-    ["completed", true, true],
-  ];
-  it.each(cases)("%s → 依頼=%s・アラーム=%s", async (state, dispatches, alarms) => {
+describe("移行の状態には依存しない(Issue #394。以前は移行の DO が completed のときだけ動かしていた)", () => {
+  it("窓の中で未取込があれば、移行の状態を読まずに最初の runNextStep で依頼する(依存に migrationState が無い)", async () => {
     const w = new World();
     w.unimported = races(YESTERDAY, 3);
-    w.migration = state;
     const { core } = make(w);
     await core.runNextStep();
-    expect(w.day(YESTERDAY).requests.length).toBe(dispatches ? 1 : 0);
-    expect(w.alarm !== null).toBe(alarms);
-    if (alarms && !dispatches) {
-      expect(w.alarm).toBe(T0 + BACKFILL_MIGRATION_POLL_MS); // 移行が進行中なら 30 分後にもう一度見る
-    }
+    expect(w.day(YESTERDAY).requests.length).toBe(1);
+    expect(w.alarm).not.toBeNull();
   });
 
-  it("移行の状態を読めないときは、依頼せず、30 分後に見直す(例外にしない)", async () => {
+  it("getStatus は移行の状態を持たず、窓の中で未取込があれば ready(waiting-migration の状態は無い)", async () => {
     const w = new World();
     w.unimported = races(YESTERDAY, 3);
-    w.migrationError = true;
-    const { core } = make(w);
-    await expect(core.runNextStep()).resolves.toBeUndefined();
-    expect(w.day(YESTERDAY).requests).toEqual([]);
-    expect(w.alarm).toBe(T0 + BACKFILL_MIGRATION_POLL_MS);
+    const status = await make(w).core.getStatus();
+    expect(status.state).toBe("ready");
+    expect("migrationState" in status).toBe(false);
   });
 });
 
@@ -669,12 +644,12 @@ describe("補完を止める設定(disabled): 何もせず、アラームも張�
     expect(w.days.size).toBe(0);
   });
 
-  it("getStatus は state が disabled(移行の状態・残りは読める)。止めていなければ disabled にならない", async () => {
+  it("getStatus は state が disabled(残りは読める)。止めていなければ disabled にならない", async () => {
     const w = new World();
     w.unimported = races(YESTERDAY, 3);
     w.undated = 2;
     const status = await make(w, { disabled: true }).core.getStatus();
-    expect(status).toMatchObject({ state: "disabled", migrationState: "completed", remaining: 3, undated: 2 });
+    expect(status).toMatchObject({ state: "disabled", remaining: 3, undated: 2 });
     expect((await make(new World()).core.getStatus()).state).not.toBe("disabled");
   });
 
@@ -812,18 +787,8 @@ describe("getStatus: 残り・取得済み・取得できなかった・開催�
     expect(status.abandoned).toEqual({ total: 3, byClass: { "no-payout": 2, "parse-error": 1 } });
     expect(status.remaining).toBe(1); // 一時的な失敗の 1 件だけが残る(除外は数えない)
     expect(status.undated).toBe(7);
-    expect(status.migrationState).toBe("completed");
     expect(status.window).toEqual({ startHour: 1, endHour: 6 });
     expect(status.nextRunAt).toBe(new Date(w.alarm!).toISOString());
-  });
-
-  it("移行が完了していないときは waiting-migration(移行の状態も返す)。移行の状態を読めないときは migrationState が null", async () => {
-    const w = new World();
-    w.migration = "importing";
-    const { core } = make(w);
-    expect(await core.getStatus()).toMatchObject({ state: "waiting-migration", migrationState: "importing" });
-    w.migrationError = true;
-    expect(await core.getStatus()).toMatchObject({ state: "waiting-migration", migrationState: null });
   });
 
   it("窓の外では waiting-window、窓の中で未取込があれば ready", async () => {
@@ -871,10 +836,8 @@ describe("例外を投げない", () => {
     w.unimported = races(YESTERDAY, 3);
     w.listError = true;
     w.gateError = true;
-    w.migrationError = true;
     const { core } = make(w);
     await expect(core.runNextStep()).resolves.toBeUndefined();
-    w.migrationError = false;
     await expect(core.runNextStep()).resolves.toBeUndefined();
     w.gateError = false;
     await expect(core.runNextStep()).resolves.toBeUndefined();

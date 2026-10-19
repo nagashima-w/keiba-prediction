@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { pathFromMeta } from "./meta-path.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { buildSaveResultStatements, D1ResultStore, MIGRATED_RESULTS_SQL, withScratchedColumn, withWakubanColumn } from "../src/result-repository";
+import { buildSaveResultStatements, D1ResultStore, withScratchedColumn, withWakubanColumn } from "../src/result-repository";
 import { UPSERT_RACE_RESULT_SQL } from "../../packages/core/src/ev/analysis-store-codec.js";
 import { buildVerifySource, VERIFY_READ_SQL, type VerifyReadRows } from "../src/verify-read";
 import type { RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
@@ -134,8 +134,8 @@ describe("保存: wakuban の書き込み", () => {
     expect(col.find(([u]) => u === 9)).toEqual([9, 7]);
   });
 
-  it("移行で入れた行(MIGRATED_RESULTS_SQL。exe の列だけ)は wakuban に触れない = NULL のまま", async () => {
-    await local.db.prepare(MIGRATED_RESULTS_SQL).bind("R269E", JSON.stringify([[1, 1, 150, 300, "[]", null], [2, null, null, null, "[]", null]]), "R269E").run();
+  it("exe の列だけで入れた行(移行で入れた旧い行と同じ形。Issue #394 で移行の保存の文は削除したので、同じ列だけの INSERT で再現する)は wakuban に触れない = NULL のまま", async () => {
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f) VALUES (?, 1, 1, 150, 300, '[]', NULL), (?, 2, NULL, NULL, NULL, '[]', NULL)").bind("R269E", "R269E").run();
     expect(await wakubanColumn("R269E")).toEqual([
       [1, null],
       [2, null],

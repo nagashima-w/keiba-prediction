@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { buildHash, MIGRATION_HASH, parseHash, screenOf, SETTINGS_HASH, VERIFY_HASH, type Route } from "../client/route";
+import { buildHash, parseHash, screenOf, SETTINGS_HASH, VERIFY_HASH, type Route } from "../client/route";
 
 /**
  * Issue #184(#165-b): スマホ画面の状態(URL のハッシュ)の解析と組み立て。純関数。
@@ -109,7 +109,7 @@ describe("buildHash", () => {
  * 優先順位は既存のとおり analysis(結果画面)> race(レース画面)> 一覧。
  */
 describe("screenOf(今どの画面か)", () => {
-  const cases: readonly [string, Route, "list" | "race" | "result" | "settings" | "migration"][] = [
+  const cases: readonly [string, Route, "list" | "race" | "result" | "settings"][] = [
     ["race も analysis も無ければ一覧", { date: TODAY, venue: "central", race: null, analysis: null, settings: false }, "list"],
     ["race があればレース画面", { date: TODAY, venue: "central", race: NAR_RACE, analysis: null, settings: false }, "race"],
     ["analysis があれば結果画面", { date: TODAY, venue: "central", race: null, analysis: 7, settings: false }, "result"],
@@ -150,7 +150,7 @@ describe("app.ts は、画面の判定を screenOf だけに任せる(Issue #191
     expect(code.match(/route\.(analysis|race)\s*[!=]==\s*null/g) ?? []).toEqual([]);
   });
 
-  // Issue #238(契約変更): 旧「5 つの関数が screenOf(route) を使う」は、`screenOf` に役割(閲覧者は設定・移行を admin-only にする。検証は Issue #263 で閲覧者にも開いた)を足した `currentScreen()` を使う、に変わった。
+  // Issue #238(契約変更): 旧「5 つの関数が screenOf(route) を使う」は、`screenOf` に役割(閲覧者は設定を admin-only にする。検証は Issue #263 で閲覧者にも開いた)を足した `currentScreen()` を使う、に変わった。
   // 保証していたこと(画面の判定が 1 か所に集まり、画面を判定する 5 つの関数がそれを使う)は保つ。加えて、`screenOf(route)` を直接呼ぶのは `currentScreen` の中の 1 箇所だけであること(役割の判定を素通りしない)を固定する。
   it("currentScreen() を呼ぶ箇所が、画面を判定する 5 つの関数(render・onCompleted・syncLatestAnalysis・ensureLoaded・onRefresh)にあり、screenOf(route) を直接呼ぶのは currentScreen の中の 1 箇所だけ", () => {
     for (const fn of ["render", "onCompleted", "syncLatestAnalysis", "ensureLoaded", "onRefresh"]) {
@@ -200,38 +200,12 @@ describe("設定画面のハッシュ(#settings)", () => {
   });
 });
 
-/** Issue #222(#167-B2): `#migration`(完全一致のときだけ移行画面)。設定画面の「exe から移行」の節のリンク先。 */
-describe("移行画面のハッシュ(#migration)", () => {
-  it("MIGRATION_HASH は `#migration`", () => {
-    expect(MIGRATION_HASH).toBe("#migration");
-  });
-
-  it("`#migration` は移行画面の route(日付は今日・区分は central・race と analysis は null・settings は false)", () => {
-    expect(parseHash("#migration", TODAY)).toEqual({ date: TODAY, venue: "central", race: null, analysis: null, settings: false, migration: true });
-    expect(screenOf(parseHash("#migration", TODAY))).toBe("migration");
-  });
-
-  it.each([["#migration&date=20261003"], ["#migration=1"], ["#Migration"], ["#migration "], ["#migration/"], ["#date=20261003&migration"], ["migration"], ["#migrate"], ["#settings"], ["#"], [""]])(
-    "完全一致でない %j は移行画面にしない(従来どおりの解析)",
-    (hash) => {
-      expect(parseHash(hash, TODAY).migration ?? false).toBe(false);
-      expect(screenOf(parseHash(hash, TODAY))).not.toBe("migration");
-    },
-  );
-
-  it("移行画面は、設定画面とは別の画面(`#settings` は移行画面にならず、`#migration` は設定画面にならない)", () => {
-    expect(screenOf(parseHash("#settings", TODAY))).toBe("settings");
-    expect(screenOf(parseHash("#migration", TODAY))).toBe("migration");
-    expect(parseHash("#migration", TODAY).settings).toBe(false);
-  });
-
-  it("screenOf の優先順位: settings > migration > analysis > race > 一覧(migration が true なら race・analysis があっても移行画面)", () => {
-    expect(screenOf({ date: TODAY, venue: "central", race: NAR_RACE, analysis: 7, settings: false, migration: true })).toBe("migration");
-    expect(screenOf({ date: TODAY, venue: "central", race: null, analysis: null, settings: true, migration: true })).toBe("settings");
-  });
-
-  it("buildHash は migration を出さない(移行画面への入口は MIGRATION_HASH だけ)", () => {
-    expect(buildHash({ date: "20261003", venue: "nar" })).not.toContain("migration");
+/** Issue #394: 移行画面(`#migration`)は廃止した。ハッシュは特別な画面にならず、従来どおりの解析(一覧)になる。 */
+describe("廃止した移行画面のハッシュ(#migration)", () => {
+  it("`#migration` は特別な画面にならない(一覧。settings・verify・report・targets のどれでもない)", () => {
+    const route = parseHash("#migration", TODAY);
+    expect(route).toEqual(parseHash("#", TODAY));
+    expect(screenOf(route)).toBe("list");
   });
 });
 
@@ -254,18 +228,15 @@ describe("検証画面のハッシュ(#verify)", () => {
     },
   );
 
-  it("検証画面は、設定画面・移行画面とは別の画面", () => {
+  it("検証画面は、設定画面とは別の画面", () => {
     expect(screenOf(parseHash("#settings", TODAY))).toBe("settings");
-    expect(screenOf(parseHash("#migration", TODAY))).toBe("migration");
     expect(parseHash("#verify", TODAY).settings).toBe(false);
-    expect(parseHash("#verify", TODAY).migration ?? false).toBe(false);
     expect(parseHash("#settings", TODAY).verify ?? false).toBe(false);
   });
 
-  it("screenOf の優先順位: settings > migration > verify > analysis > race > 一覧", () => {
+  it("screenOf の優先順位: settings > verify > analysis > race > 一覧", () => {
     const base = { date: TODAY, venue: "central", race: NAR_RACE, analysis: 7, settings: false } as const;
     expect(screenOf({ ...base, verify: true })).toBe("verify");
-    expect(screenOf({ ...base, verify: true, migration: true })).toBe("migration");
     expect(screenOf({ ...base, verify: true, settings: true })).toBe("settings");
   });
 

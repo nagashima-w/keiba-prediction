@@ -33,10 +33,6 @@
  *    (`buildPreviewText`。送信と同じ手順)。**入力のたびには更新しない**(#189 の設計どおり)。開閉と「入力中の内容を反映」は `render(true)` で、写しを現在の下書きへ更新してから描く
  *    (強制なしだと古い写しで入力欄が作り直され、打った文字が消える)。ネットワークには出ない。保存中・下書きなしは無視。
  *
- * **Issue #222(移行画面。`#migration`)**: 設定画面の「exe から移行」の節のリンク先の**別の画面**。状態・取得・ポーリング・検証・アップロードは `migration-screen.ts` が持ち、ここは出入り(`enter`・`leave`)・描画・可視状態の中継だけ。
- *  - 開くと `GET /api/migration` だけを取る(一覧・板・設定・レース・分析は取らない)。設定画面は `/api/migration` を取らない。**別の画面なので、移行の再描画・ポーリングが設定フォームの入力を壊さない**
- *    (設定画面にいる間、移行のタイマー・取得は無い。移行画面を離れると状態を破棄し、遅れて届く応答は反映しない)。
- *
  * **Issue #219(検証画面。`#verify`)**: 一覧の入口のリンク先の**別の画面**。状態・取得・区分の切替・更新・ポーリングは `verify-screen.ts` が持ち、ここは出入り(`enter`・`leave`)・描画・可視状態の中継だけ。
  *  - 開くと `GET /api/verify?venue=all` だけを取る(一覧・板・設定・レース・分析は取らない)。他の画面は `/api/verify` を取らない。補完中だけ自動で取り直し(3〜5 秒)、離れると状態・タイマー・遅れて届く応答を捨てる。
  *
@@ -70,7 +66,6 @@ import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSou
 import { fetchSettings, postSettings, settingsFailureMessage } from "./api-settings";
 import { buildResultModel, type ResultSource } from "./result";
 import { buildSettingsModel, draftFromSettings, resetWeightsInDraft, setDraftValue, validateDraft, WEIGHT_FIELD_ORDER, type FieldErrors, type FieldKey, type SettingsDraft, type SettingsLoadState, type SettingsSaveState } from "./settings-form";
-import { createMigrationScreen } from "./migration-screen";
 import { createVerifyScreen } from "./verify-screen";
 import { createMonthlyScreen } from "./monthly-screen";
 import { createReportScreen } from "./report-screen";
@@ -93,11 +88,9 @@ export interface AppDeps {
   readonly timers: { readonly set: (fn: () => void, ms: number) => unknown; readonly clear: (handle: unknown) => void };
   /** ページが表示されているか(`document.visibilityState`)。非表示の間、追跡は一時停止する。 */
   readonly isVisible: () => boolean;
-  /** 画面に制御を返す(移行ファイルの検証が主スレッドを占有し続けないように。本番は `setTimeout(0)`。省略は何もしない)。Issue #222。 */
-  readonly yieldToUi?: () => Promise<void>;
   /**
    * 役割(Issue #238。サーバが `#app` の `data-role` で渡す)。**閲覧者(`admin` 以外のすべて)には、設定への入口・分析の実行ボタン・日報の作成ボタンを出さず、
-   * 設定・移行の画面を直接開いても API を取らずに案内だけを出す**。画面で隠すのは補助で、拒否はサーバ側(403)。
+   * 設定の画面を直接開いても API を取らずに案内だけを出す**。画面で隠すのは補助で、拒否はサーバ側(403)。
    * 検証は Issue #263 で閲覧者にも開いた(入口も出る)。閲覧者には「更新」ボタンを出さず、集計のやり直しを起こさない(サーバがキャッシュを返すだけ)。
    */
   readonly role: Role;
@@ -131,7 +124,7 @@ function assertNever(screen: never): never {
 const PRIOR_NOTICE_PREFIX = "順位を取得できませんでした。";
 
 /** 管理者だけの画面(Issue #238)。閲覧者が開いたときは、API を取らずに案内だけを出す(`admin-only`)。 */
-const ADMIN_SCREENS: ReadonlySet<Screen> = new Set<Screen>(["settings", "migration"]);
+const ADMIN_SCREENS: ReadonlySet<Screen> = new Set<Screen>(["settings"]);
 
 /** 今の画面(Issue #238)。route から決まる画面に、役割で決まる `admin-only` を足したもの。 */
 type AppScreen = Screen | "admin-only";
@@ -142,8 +135,8 @@ export function createApp(deps: AppDeps): App {
   const admin = isAdmin(deps.role);
 
   /**
-   * 今の画面の判定の**唯一の場所**(Issue #191 の `screenOf` に、Issue #238 の役割を足したもの)。閲覧者が管理者だけの画面(設定・移行。検証は Issue #263 で閲覧者にも開いた)の route に居るときは
-   * `admin-only` を返す。**app.ts の画面ごとの分岐は、すべてこの関数を通す**(`screenOf(route)` を直接使わない)ので、閲覧者は設定・移行の取得も下書きも始めない。
+   * 今の画面の判定の**唯一の場所**(Issue #191 の `screenOf` に、Issue #238 の役割を足したもの)。閲覧者が管理者だけの画面(設定。検証は Issue #263 で閲覧者にも開いた)の route に居るときは
+   * `admin-only` を返す。**app.ts の画面ごとの分岐は、すべてこの関数を通す**(`screenOf(route)` を直接使わない)ので、閲覧者は設定の取得も下書きも始めない。
    */
   function currentScreen(): AppScreen {
     const screen = screenOf(route);
@@ -281,16 +274,6 @@ export function createApp(deps: AppDeps): App {
   let settingsPreviewOpen = false;
   const settingsInflight = new Set<Promise<unknown>>();
 
-  // ---- 移行画面(Issue #222) ----
-  const migration = createMigrationScreen({
-    fetch: deps.fetch,
-    now: () => deps.now().getTime(),
-    timers: deps.timers,
-    isVisible: deps.isVisible,
-    yieldToUi: deps.yieldToUi ?? (async () => {}),
-    onChange: () => render(),
-  });
-
   // ---- 検証画面(Issue #219) ----
   // Issue #263: 閲覧者にも開く。閲覧者には更新ボタンを出さず、「更新」(refresh=1)も送らない(サーバも閲覧者の refresh は無視し、集計のやり直しを起こさない)。
   const verify = createVerifyScreen({
@@ -350,9 +333,6 @@ export function createApp(deps: AppDeps): App {
     onSettingsPreviewToggle,
     onSettingsPreviewRefresh,
     onSettingsWeightsReset,
-    onMigrationFile: migration.onFile,
-    onMigrationStart: migration.onStart,
-    onMigrationCancelCheck: migration.onCancelCheck,
     onVerifyVenue: verify.onVenue,
     onVerifyVersionToggle: verify.onVersionToggle,
     onVerifyCalibrationTarget: verify.onCalibrationTarget,
@@ -415,10 +395,6 @@ export function createApp(deps: AppDeps): App {
           settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave, previewOpen: settingsPreviewOpen };
         }
         deps.render(renderScreen(buildSettingsModel(settingsShown), actions), force);
-        return;
-      }
-      case "migration": {
-        deps.render(renderScreen(migration.model(), actions), force);
         return;
       }
       case "verify": {
@@ -620,9 +596,6 @@ export function createApp(deps: AppDeps): App {
         return;
       case "settings":
         if (settingsLoad === null) startSettingsLoad();
-        return;
-      case "migration":
-        migration.enter();
         return;
       case "verify":
         verify.enter();
@@ -937,13 +910,11 @@ export function createApp(deps: AppDeps): App {
 
   function onHashChange(): void {
     const wasSettings = currentScreen() === "settings";
-    const wasMigration = currentScreen() === "migration";
     const wasVerify = currentScreen() === "verify";
     const wasReport = currentScreen() === "report";
     const wasTargets = currentScreen() === "targets";
     route = parseHash(deps.getHash(), todayJst(deps.now()));
     if (wasSettings && currentScreen() !== "settings") leaveSettings(); // 画面を離れたら下書きを破棄する
-    if (wasMigration && currentScreen() !== "migration") migration.leave(); // 移行の状態(検証・タイマー・遅れて届く応答)を破棄する
     if (wasVerify && currentScreen() !== "verify") verify.leave(); // 検証の状態(タイマー・遅れて届く応答)を破棄する
     if (wasTargets && currentScreen() !== "targets") targets.leave(); // 狙い目の状態(タイマー・遅れて届く応答)を破棄する
     if (wasReport && currentScreen() !== "report") {
@@ -1034,10 +1005,6 @@ export function createApp(deps: AppDeps): App {
         render();
         return;
       }
-      case "migration":
-        // 取得中は何もしない(`onReload` が見る)。画面の再描画は状態の変化(`onChange`)で行われる。
-        migration.onReload();
-        return;
       case "verify":
         // 取得中は何もしない(`onRefresh` が見る)。再計算の要求(refresh=1)。画面の再描画は状態の変化(`onChange`)で行われる。
         verify.onRefresh();
@@ -1071,7 +1038,6 @@ export function createApp(deps: AppDeps): App {
     onHashChange,
     onVisibilityChange: () => {
       tracker.onVisibilityChange();
-      migration.onVisibilityChange();
       verify.onVisibilityChange();
       report.onVisibilityChange();
       monthly.onVisibilityChange();
@@ -1080,7 +1046,7 @@ export function createApp(deps: AppDeps): App {
     },
     async whenIdle() {
       // 取得が終わるたびに新しい取得は始まらない(失敗の自動再試行なし。追跡のタイマーは偽・実物とも待たない)ので、数回の確認で必ず止まる。
-      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight, ...migration.pending(), ...verify.pending(), ...report.pending(), ...monthly.pending(), ...targets.pending()];
+      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight, ...verify.pending(), ...report.pending(), ...monthly.pending(), ...targets.pending()];
       for (let i = 0; i < 10 && pending().length > 0; i += 1) {
         await Promise.all(pending());
       }

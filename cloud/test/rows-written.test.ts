@@ -74,14 +74,6 @@ describe("1回の保存の D1 の書き込み行数(meta.rows_written)", () => {
     expect(await rowsWritten(record(16, 0))).toEqual([1, 8, 1, 32, 1, 0]);
   });
 
-  it("Issue #216: 移行の保存(exe の分析 id の UPDATE が1文増える): 16 頭・買い目 10 件で [1, 8, 1, 2, 32, 1, 20] = 65。web の保存(63)より 2 行多い(UPDATE した行 1 + 部分一意索引の行 1)", async () => {
-    const rec = record(16, 10);
-    const results = await local.db.batch(buildSaveStatements(local.db, rec, 202610, null, null, { exeAnalysisId: 4242, metaParams: null }));
-    const per = results.map((r) => r.meta.rows_written);
-    expect(per).toEqual([1, 8, 1, 2, 32, 1, 20]);
-    expect(per.reduce((a, b) => a + b, 0)).toBe(65);
-  });
-
   it("R2 に書かない保存(柵でスキップ。カウンタ・detail_key の UPDATE なし): 8 + 2H + (配分ありなら 1 + 2B) = 16 頭・買い目 10 件で 61", async () => {
     const results = await local.db.batch(buildSaveStatements(local.db, record(16, 10), null));
     const per = results.map((r) => r.meta.rows_written);

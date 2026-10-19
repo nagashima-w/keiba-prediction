@@ -927,7 +927,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 手元の `keiba.db`(取得キャッシュが大半を占める)から、**分析と結果の 8 表だけ**(`analyses`・`analysis_horses`・
 `analysis_bets`・`analysis_allocation_meta`・`race_results`・`race_result_meta`・`race_combo_payouts`・
 `race_combo_payout_imports`)を、クラウド版(D1+R2)へ移すための 1 ファイルに書き出す。取得キャッシュの表は含めない。
-取り込みはクラウド版の API(#216〈v1.28.0〉。下の「exe から移したファイルの取り込み」)と、その画面(#222〈v1.29.0〉。下の「クラウド版の移行画面」)。
+取り込みはクラウド版の API(#216〈v1.28.0〉)と、その画面(#222〈v1.29.0〉)だったが、**移行の完了後に廃止した**(#394。下の「exe からの移行機能の廃止」。形式の検証 `cloud-migration-format.ts` も削除した。以下は削除前の記録)。
 
 - **画面**: 設定画面の「クラウドへの移行」→「クラウド移行用に書き出す」。保存ダイアログ(既定名
   `keiba-cloud-migration-YYYYMMDD.ndjson.gz`)→ 書き出し中はボタン無効+「書き出し中…」→ 完了で
@@ -1219,12 +1219,12 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
   **リクエスト本文を読まず・DO/D1/R2/gate に触れず**に 403 `{"ok":false,"error":{"type":"admin-only"}}`(固定。認証の拒否の `forbidden` とは本文で区別する)を返す。**表に無い (method, path) は管理者専用**(フェイルクローズ)。
   - 閲覧者に許す(20 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/targets`(#336。今日の狙い目)・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`・`GET /api/monthly-reports`・`GET /api/monthly-reports/{month}`(#279)・`GET /api/verify`(#263。下の「閲覧者の検証画面」)、
     アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/favicon-16.png`・`/icons/favicon-32.png`・`/icons/header-32.png`・`/icons/header-64.png`・`/icons/header-96.png`。#244。下の「アイコン」の節)。
-  - 管理者だけ(14 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/monthly-reports/run`(#280)・`/api/export/prior-dataset`(#266)・`/api/horse-runs`(#256 段階A。各馬の戦績の蓄積の診断)。
+  - 管理者だけ(12 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/reports/run`・`/api/monthly-reports/run`(#280)・`/api/export/prior-dataset`(#266)・`/api/horse-runs`(#256 段階A。各馬の戦績の蓄積の診断)。
   - 閲覧者が表の外の method(HEAD・POST など)を送ると、405 ではなく 403 になる。`{id}`・`{date}` のパターンは `run` に化けない(`/api/analyses/run`・`/api/reports/run` は管理者専用)。
   - `GET /api/races` は閲覧者でも netkeiba への取得を起こしうる(DO のキャッシュと gate が効く)。利用者の決定(2026-10-10)で許可した。
 - **画面**: サーバが `renderPage(email, role)` で `#app` に `data-role="admin|viewer"` を渡す(インラインスクリプトは使えないため属性。`client/main.ts` が `roleFromAttribute` で読み、欠落・不明は viewer)。
   閲覧者には、結果の「配分が未設定」の注記から設定への案内の括弧書きを外した固定文言(`UNSET_ALLOCATION_NOTE_VIEWER`。結果画面とレース画面のカードの両方)を出す。総資金・1レース上限・買い目・日報の賭け金や払戻などの数値は閲覧者にもそのまま見せる(利用者の判断)。
-  閲覧者には(「ログイン中」の行の役割の表示「閲覧専用」は #238 で足し、#243〈v1.41.0〉で外した)、一覧の「設定」の入口、レース画面の分析の実行ボタン、日報の作成ボタン(と、ボタンに言及する案内)を出さない(**検証への入口は #263 で閲覧者にも出す**)。`#settings`・`#migration` を直接開いても API を取らず、
+  閲覧者には(「ログイン中」の行の役割の表示「閲覧専用」は #238 で足し、#243〈v1.41.0〉で外した)、一覧の「設定」の入口、レース画面の分析の実行ボタン、日報の作成ボタン(と、ボタンに言及する案内)を出さない(**検証への入口は #263 で閲覧者にも出す**)。`#settings` を直接開いても API を取らず、
   固定文言「管理者だけが使えます」と一覧へ戻るリンクだけを出す。**画面で隠すのは補助で、拒否はサーバ側**。`test/client-app-viewer.test.ts` が、閲覧者の画面(と押せる操作)が出す要求がすべて表で viewer に足りることを、表(`requiredRole`)に直接つないで固定する。
 - **ログ**: `access: ok via=<経路> role=<admin|viewer> admins=<fallback|configured|none>`(アドレスは出さない)。拒否の `access: denied reason=…` は不変(`email-mismatch` の理由コードは無くなった)。
 - 検査: `test/access-jwt.test.ts`(`ADMIN_USER` の解釈・役割の判定のテーブル)・`test/authenticate.test.ts`・`test/route-policy.test.ts`(手書きの表と静的ガード)・`test/handler-roles.test.ts`(`handle()` を実際に呼ぶ)・`test/client-*.test.ts`・smoke(B・C・J・K・L)。
@@ -2022,7 +2022,7 @@ exe の設定にある重み13項目(バイアス7: 馬場状態・競馬場・�
 - **1 レースの実測(京都 12R、2026/10/11、16 頭)**: 前年+当年の複勝率で、騎手項の補正の範囲は −0.035〜+0.009(中立 0.33 のとき)。prior の変化は最大 +0.021 / −0.016。3 着内上位 3 頭は変わらず、中位で数頭の順位が入れ替わる。結果は未確定で、精度については何も言えない。
 - **検査**: `core/test/scraper/parse-jockey-results.test.ts`(実フィクスチャ 4 本〈中央上位・デビュー 2 年目・地方・中央の成績なし〉+合成)・`scrape-race-jockey.test.ts`・`core/test/scorer/jockey-stats.test.ts`・`jockey-neutral-rate.test.ts`・`base-score.test.ts`・`app/test/analysis-pipeline.test.ts`(末尾の describe)・`cloud/test/race-day-jockey.test.ts`(j1〜j13。j8・j9 が保存先〈週に 1 回の更新〉、j12 が上限 40、j13 が計算ステップの取りこぼし)・`cloud/test/jockey-results-repository.test.ts`(D1 の SQL をローカルの workerd で)・`scrape-race-jockey-store.test.ts`・`scripts/test/cloud-d1-schema.test.ts` と `cloud/test/d1-schema.test.ts`(migration 0012)・`race-day-weights.test.ts`(w1: 10 → 11 項目)。
 
-### クラウド版の結果の補完(#217〈#167-C〉。v1.30.0。**公開すると、移行の完了後の夜間から本番で動く**)
+### クラウド版の結果の補完(#217〈#167-C〉。v1.30.0。移行の完了後の夜間から本番で動いている。#394 で移行の状態への依存を外した)
 exe から移した分析のうち、exe で結果を取り込まなかったレース(`race_results` に行が無い)の結果を、クラウド版が**自動で**取り込む(ユーザー指定 2026-10-09:「レース結果の取り込みは自動でやっておいてほしい」。手動のボタンは無い)。運用の詳細・API の形は `cloud/README.md` の「結果の補完」。ここには決めたことと実測を残す。
 
 - **担当は新しい DO `ResultBackfill`**(wrangler.toml の migration v4。単一インスタンス)。検討した案: (A)`CloudMigration` に補完のフェーズを足す → DO のアラームは 1 つで、移行の状態機械(`BUSY_STATES`・`ensureAlarm`・再アップロード)と時刻を多重化することになり、不採用。(B)`RaceDay`/cron に足す → 朝の cron(JST 9:00)は事前分析(36 レース超の取得)と重なり、「毎日の自動実行を妨げない」に反する。`requestResultImport` は取得の遅延時刻を渡せない。不採用。(C)新設 → 独立したアラームと時間帯を持てる。移行の側は無変更。採用。
@@ -2030,18 +2030,18 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - **未取込の判定**: 既存どおり `NOT EXISTS (SELECT 1 FROM race_results …)`(行の有無。全頭が中止・除外のレースも行はあるので「取り込み済み」)。`race_result_meta`・`race_combo_payout_imports` は判定に使わない。移行ファイルの結果も `race_results` に入るので、移行の結果と重複して取得しない。
   補完用の列挙 `LIST_BACKFILL_SQL`(`result-repository.ts`): 窓の下限なし・開催日が昨日(JST)以前・**未取込のある最も新しい日を 1 日だけ**・レースID 昇順・除外するレース ID を JSON 配列 1 つの束縛で渡す(`NOT IN (SELECT value FROM json_each(?))`)。残りの数は `COUNT_BACKFILL_SQL`(`dated`・`undated`)。
 - **対象外**: 開催日(`kaisai_date`)が NULL の分析。日単位の DO の宛先が決まらず、中央の race_id から開催日は導出できない(`race-date.ts`)。**件数を `undated` で見せる**(本番の件数は D1 を見ないと分からない。見てから、地方だけ月日から導出する案などを別 Issue で判断する)。
-- **動く条件**: ①移行が `completed`(`idle`・`failed` は何もしない・取り込み中は 30 分おきに見直す) ②JST 01:00〜06:00 ③1 晩 150 レース・1 回 30 レース(1 つの開催日だけ) ④飛行中のチャンクは常に 1 つ ⑤依頼の前に gate の `status()` を読み、ブレーカーが開いていれば解除の 1 分後、待ちが 4 以上なら 5 分待つ。
+- **動く条件**: ①移行の状態は見ない(#394。以前は移行が `completed` のときだけ。`idle`・`failed` は何もしない・取り込み中は 30 分おきに見直していた) ②JST 01:00〜06:00 ③1 晩 150 レース・1 回 30 レース(1 つの開催日だけ) ④飛行中のチャンクは常に 1 つ ⑤依頼の前に gate の `status()` を読み、ブレーカーが開いていれば解除の 1 分後、待ちが 4 以上なら 5 分待つ。
   **gate との協調**: 日単位の DO は `serializeGate` で gate への呼び出しを 1 本に直列化するので、補完が gate に並べるのは同時に 1 本。当日の DO・cron が依頼した前日の DO と合わせても、待ち行列の上限(8)に届かない。1 レースの取得は 1 リクエスト(結果ページ 1 枚に払戻の全券種がある)で、150 レースは gate の最小間隔 2 秒で約 5 分。
 - **取得できないレース(無限に再試行しない)**: `backfill_race`(DO の SQLite)に記録する。永続的な分類(`not-confirmed`・`no-payout`・`parse-error`・`incomplete`、および依頼の前の検査 `checkRaceDate` で落ちる `invalid-race`)は 1 サイクルで永久に除外。
   **系統的な障害の緩和(レビューで追加)**: 1 つのチャンクで**取り込みが 0 件かつ失敗が全件、同じ永続的な分類**なら、netkeiba が夜間に 200 のメンテナンス画面を返したなど系統的な障害とみなして、一時的な扱い(晩数に数える。3 晩目に除外)にする。永続的な分類を鵜呑みにすると、その晩のレースが一括で永久に除外され二度と取り込まれないため。取り込めたレースが 1 つでもあれば、ページは読めているので分類を信用する。本当に未確定・払戻なしのレースも、3 晩後には除外される。一時的な分類(`fetch-failed`・`save-failed`・`stalled`)は 1 晩に 1 回で 3 晩目に除外。gate の都合(`blocked`・`busy`)・日単位の DO への依頼の失敗(`dispatch-failed`)は晩数に数えず、その晩は止め、5 晩続いたら除外。その晩に試したレースは列挙から除外する(日単位の DO は同じ日の `gave_up` を積み直さないので、除外しないと同じレースを延々と列挙する)。
   **既知の費用**: 古い地方のレースで結果ページが無い(404)と、HTTP エラーは `fetch-failed` に丸められるので、3 晩 × 3 試行 = 9 リクエストで除外される。
 - **D1 の書き込み(実測。再現: `cd cloud && pnpm exec vitest run test/result-rows-written.test.ts`。★Issue #259 で 6 文目〈確定オッズ・人気の UPDATE〉が加わり、現在は 43〜78 行。下の「確定単勝オッズ・人気の保存と補完」)**: 結果 1 レースの新規保存は〈5 文のときの値〉、保存済みの結果ページ 14 本(中央 8・地方 6)で **38〜62 行**(最大は 16 頭の 2 本)。文ごとの内訳は `[2H, 面 2, 削除 0, 2C, 2M]`(H = 馬の数、C = 組合せ払戻の行数、M = parsed の券種の数。`race_results` などは複合主キーの自動索引で行が 2 倍)。150 レース/晩なら多くとも約 **9,300 行**(Free の 10 万行/日の約 9%)。ローカルの workerd の D1 が報告する値で、本番の値と同じとは限らない(最初の本番の実保存で確かめる)。
 - **起動**: cron の `scheduled` が毎日、`requestPlan`・結果の依頼のあとに `kick()` を呼ぶ(アラームが無ければ張るだけ。失敗しても朝の計画・既存の結果の取り込みを失敗させない)。`GET /api/results/backfill`(読み取りの API)でも、アラームが無ければ張り直す。移行の完了を push で通知する経路は作らない(`CloudMigration` を無変更に保つため)。最悪で完了の翌日まで始まりが遅れるが、「数日かけて自動で進む」要件には支障がない。
-- **API と画面**: `GET /api/results/backfill`(`state`・`migrationState`・`remaining`・`undated`・`imported`・`abandoned`・`tonight`・`inflight`・`nextRunAt`・`window`)。移行画面(`#migration`)には、移行が `completed` だったときだけ 1 行(`GET /api/results/backfill` を 1 回取る。ポーリングはしない。「再読込」で取り直す)。失敗は黙って出さないだけで、移行の進捗は壊れない。
-- **クライアントのバンドル**: 157,309 → **160,159 バイト**(+2,850。`pnpm run build:client` が出力する。移行画面の 1 行の API・文言・節だけ。サーバ側のコードはクライアントに入らない)。
+- **API と画面**: `GET /api/results/backfill`(`state`・`remaining`・`undated`・`imported`・`abandoned`・`tonight`・`inflight`・`nextRunAt`・`window`)。移行画面の 1 行は、移行画面ごと #394 で廃止した(見る画面は無い。API を直接開く)。`migrationState` の項目と `waiting-migration` の状態も #394 で無くした。
+- **クライアントのバンドル**: 157,309 → **160,159 バイト**(+2,850。`pnpm run build:client` が出力する。移行画面の 1 行の API・文言・節だけ。サーバ側のコードはクライアントに入らない)。#394 で、この 1 行も移行画面ごとクライアントから消えた。
 - **止める設定**: Worker の var `RESULT_BACKFILL_NIGHTLY_LIMIT=0`(完全一致の `"0"` だけ。`isBackfillDisabled`)。`kick` もアラームも何もしない・`state` は `disabled`。**`cloud/smoke.ts` のすべての構成がこれで動く**(CI の smoke が補完の窓に当たっても netkeiba に出ない)。
-- **移行画面の文言**: `paused` は原因を断定しない(「今夜は一時停止中です。明晩に再開します」)。止まる経路は、gate の都合(ブレーカー・混雑)と、日単位の DO への依頼の失敗の両方なため。
-- **ガード**: `scripts/test/cloud-config-guard.test.ts` — DO の binding は 4 つ・migration は v1〜v4。補完のコードは gate の `fetchRaw`・`postRaw`・LLM・通知・R2 を持たない。`.kick()` は `scheduled.ts` と補完の DO の中だけ。`dispatchResultImports(` の呼び出しは `handler.ts`・`result-backfill-core.ts`・`scheduled.ts` の 1 つずつ。
+- **(廃止した画面の)文言**: `paused` は原因を断定しない(「今夜は一時停止中です。明晩に再開します」)。止まる経路は、gate の都合(ブレーカー・混雑)と、日単位の DO への依頼の失敗の両方なため。
+- **ガード**: `scripts/test/cloud-config-guard.test.ts` — (#217 の時点で)DO の binding は 4 つ・migration は v1〜v4。#394 の後は binding 7 つ・migration v1〜v8。補完のコードは gate の `fetchRaw`・`postRaw`・LLM・通知・R2 を持たない。`.kick()` は `scheduled.ts` と補完の DO の中だけ。`dispatchResultImports(` の呼び出しは `handler.ts`・`result-backfill-core.ts`・`scheduled.ts` の 1 つずつ。
 - **変わらないもの**: exe・`packages/core` のコード・D1 のスキーマ(migration 0009 は無い)・既存の DO(`NetkeibaGate`・`RaceDay`・`CloudMigration`)・`prompt_version`。
 
 ### クラウド版の確定単勝オッズ・人気の保存と補完(#259 の前半。版数は 1.44.0 で凍結のため上げない)
@@ -2059,7 +2059,7 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - **過去分の補完**(結果の補完〈#217〉の段階 2): 段階 1(未取込の結果)が尽きたら、**結果はあるがオッズが 1 頭も入っていないレース**(`LIST_WIN_ODDS_BACKFILL_SQL`。レース単位の判定なので、除外の馬だけ NULL のレースは再列挙されない)を、同じ仕組みで少しずつ埋める。
   - 依頼は同じ `dispatchResultImports`(呼び出し箇所は増えない)に `winOddsOnly: true` を渡し、日単位の DO が結果ページを取り直して **`saveWinOdds`(上の UPDATE の 1 文だけ)**で保存する。**着順・払戻・通過順・面・組合せ払戻には一切触れない**(全再取り込みにしない理由: `saveResult` は UPSERT と組合せ払戻の DELETE → INSERT で上書きするため、古いレースに後から対応した券種の払戻が加わり、検証画面の回収率が遡って変わる。exe 移行の「既存を優先」にも反する)。
   - 日単位の DO には、新しい表 `race_day_win_odds_only`(race_id)の**印**で伝える(`race_day_result` に列を足さない)。印は積むたびに依頼のとおりに付け直す(通常の依頼で積み直せば消える)。
-  - 1 晩 150 レース・1 回 30 レース・JST 01:00〜06:00・gate の都合・失敗の扱い(永続的な分類は除外・一時的は 3 晩目で除外)は**段階 1 と共有**。取り込めたレースは `backfill_race` に `fill_done` で残し(ページにオッズが無くても二度と列挙しない。Issue #270 より前の印 `odds_done` は除外に含めず、`fill_done` に上書きされる)、失敗は `odds_tried`・`odds_abandoned`(段階 1 の `tried`・`abandoned` とは別に数える)。結果のレースが約 1,301(ユーザーの実データ。`docs/current-spec.md` の移行画面の節の記述)なら、1,301 ÷ 150 ≈ 8.7 で約 9 晩。
+  - 1 晩 150 レース・1 回 30 レース・JST 01:00〜06:00・gate の都合・失敗の扱い(永続的な分類は除外・一時的は 3 晩目で除外)は**段階 1 と共有**。取り込めたレースは `backfill_race` に `fill_done` で残し(ページにオッズが無くても二度と列挙しない。Issue #270 より前の印 `odds_done` は除外に含めず、`fill_done` に上書きされる)、失敗は `odds_tried`・`odds_abandoned`(段階 1 の `tried`・`abandoned` とは別に数える)。結果のレースが約 1,301(ユーザーの実データ。`docs/current-spec.md` の移行画面の節〈#394 で削除。コミット `46410ab` で読める〉の記述)なら、1,301 ÷ 150 ≈ 8.7 で約 9 晩。
   - 開催日が NULL の分析のレースは対象外(段階 1 と同じ理由)。`GET /api/results/backfill` の応答に `winOdds: { remaining, undated, filled, abandoned: { total, byClass } }` を足した(追加のみ)。
 - **取消・除外の記録の補完(Issue #270。#72 の残り)**: `race_results.scratched` を記録する前(migration 0013 より前)に取り込んだ行・exe から移した行は NULL のままで、取消か中止か判別できず、検証は不的中として数える。**段階 2 の対象に「着順が NULL で scratched が NULL の行があるレース」(B)を足して**、オッズの補完(A)と**同じ取得 1 回**で埋める(`LIST_WIN_ODDS_BACKFILL_SQL` の条件は (A) OR (B)。取得の本数は和集合のレース数で、(A)・(B) の両方に当たるレースを 2 回取らない)。
   - 日単位の DO は、`winOddsOnly` の依頼で `saveWinOdds` の直後に **`saveScratched`**(`FILL_SCRATCHED_SQL` の 1 文。`UPDATE … FROM json_each`)を呼ぶ。**`scratched IS NULL` かつ `finish_position IS NULL` の行にだけ**、取消・除外は 1・それ以外は 0 を書く。着順のある馬(取消ではありえない)・記録済みの 0/1・他の列・組合せ払戻には触れない。冪等(2 回目は書き込み 0 行)。`winOddsOnly` の名前は #259 のまま、意味を「NULL の列だけを埋める」に広げた。
@@ -2110,84 +2110,17 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - **変わらないもの**: クライアント(`cloud/client/**`・`client-bundle.generated.ts`。v2 でも無変更)・D1 のスキーマ(migration は足していない)・既存の DO・cron・exe・`packages/core`。netkeiba にも LLM にも出ない。**v2 でも D1 の文は 1 文字も変えていない**(`prior-export-store.ts` の SQL 定数は無変更。候補・馬・結果・面の SQL がスナップショットの列にも枠番にも触れないことをテストが固定)。
 - **【記録】**: (1) 本番の遮断済み(`guarded`)・発走前(`pre_race`)の件数は未確認(合成の 70% は仮定)。標本が #258 の見積もり(確かめる側 150〜370 レース + 当てる側)に足りるかは、最初のファイルの `summarize` で分かる。(2) ダウンロードの Class B を数えない。(3) 作成の途中で結果・オッズの補完(#259)が走ると、レースごとの一貫性は tick の単位(同じ tick の D1 の読みは 1 回の batch)に限られる。(4) ローダの「列が足りない」の検査は、型の検査と二重で、片方を外してもテストは赤くならない(同じ例外になる等価な変異)。(5) #341: `grade` の null の曖昧さ・`oikiri_critic` の語彙が未確認(上の v2 の列)。(6) #341: 本番の R2 の固定キーのファイルは `?refresh=1` で作り直すまで v1 のまま(通常の GET は v1 を返す)。作成の途中でデプロイが挟まると、旧コードの塊〈v1 の行〉と新コードの塊が 1 つのファイルに混ざりうるが、v2 のローダは「列が足りません」の例外にする(黙って壊れない)。公開後に `?refresh=1` を案内する。
 
-### クラウド版の移行画面(#222〈#167-B2〉。v1.29.0)
-変更は `cloud/` のクライアント(`client/`)と `page.ts` の CSS、生成物 `client-bundle.generated.ts` だけ(**サーバ・D1・DO・wrangler.toml・exe・core は無変更**)。API は #216 のまま(上の「exe から移したファイルの取り込み」)。運用の詳細は `cloud/README.md` の「移行画面」。
-
-- **画面の構成**: 設定画面の末尾に「exe から移行」の節(要点の説明と、移行画面へのリンク。設定の取得に失敗していても出る)。操作は**別の画面 `#migration`**(`#migration` の完全一致だけ。`#settings` と同じ流儀)。
-  **別の画面にした理由**: 同じ画面に埋め込むと、検証の進捗・進捗のポーリングのたびに木が変わり、`createMounter` が DOM 全体を置き換えるので、**設定フォームの入力中の欄・未保存の入力が壊れる**(#189 が `settingsShown` の写しで守っている性質)。別の画面なら、設定画面にいる間は移行のタイマー・取得・再描画が一切ない(`test/client-app-migration.test.ts` が固定)。
-  注意: 移行画面へ移ると、設定画面の未保存の入力は、他の画面へ移るときと同じく破棄される。
-- **ブラウザでの検証(アップロードの前)**: ファイルを選ぶと、`file.stream()` → `DecompressionStream("gzip")` → サーバと同じ行の分割 `readLines`(`cloud/src/migration-reader.ts`。区切りは 0x0A だけ=U+2028/2029 を生で含む値を壊さない)→ `parseMigrationLine`・`MigrationTally`(core の `ev/cloud-migration-format`)で、**フッタまで全行**を通す。
-  保持するのは組み立て中の 1 行だけ(展開した全体をメモリに載せない)。壊れている(JSON・列・型)・途中で切れている(gzip・フッタ無し)・形式の版が違う・行の並びが違う・フッタの件数が合わない場合は、行番号つきの理由を出してアップロードさせない。通れば、分析の件数・結果のレース数・書き出し日時・exe の版を表示する。
-  **サーバの検証との差**: サーバはさらに取り込みの変換(`toAnalysisImport`・`toResultImport`)を通す。クライアントには入れない(バンドルに変換と codec を入れないため)。形式は通るが変換で落ちる内容は、アップロード後にサーバが検証で `failed`(phase `verify`。何も書かれない)にし、進捗の表示に理由が出る(画面の説明文にも書いてある)。
-  主スレッドで展開・JSON.parse するので、50ms ごとに `setTimeout(0)` で画面に制御を返し、進捗の再描画は 250ms に間引く(進捗は読んだ圧縮バイトの割合と行数。終わるまで 100% にしない)。検証は取り消せ、選び直す・離れると古い検証の結果は捨てる。
-- **アップロード**: 「取り込みを始める」→ 検証したファイルそのもの(`File`)を `POST /api/migration/upload`(`Content-Type: application/gzip`・`credentials: same-origin`・`referrerPolicy: same-origin`。`Content-Length` と `Origin` はブラウザが付ける)。押した瞬間に同期で「送信中」の印を立てて二重押しを防ぐ。
-  失敗は、ステータスと `error.type` だけで分類した固定の日本語の文言(409 取り込み中・413 大きすぎ〈50MB〉・503 の `r2-fence`〈R2 の書き込み上限。翌月〉・その他の 503・Origin 不一致・ログイン切れ・通信の失敗)。**サーバの文面・例外の文面は読まない**。409 のときは、サーバの今の状態を取り直して進捗を見せる。取り込み中は、ファイルを選ばせず・始めさせない(サーバも 409 で断る)。
-- **進捗(`GET /api/migration`)**: 状態・分析/結果の処理済み/全体・新規/取り込み済み/衝突の内訳・今日の書き込み行数・アップロード日時と書き出し日時(JST)・予算待ち/R2 待ちの再開時刻(**JST**)・完了(衝突があれば件数と例を最大 5 件)・失敗の理由(`failure.message` を 300 文字までに切り詰めてテキストで。phase で「検証で失敗〈何も取り込まれていない〉」「取り込みで失敗〈再度アップロードすると続きから〉」を出し分け)。サーバが決めた固定の文言で、`failure.message` と `conflictSamples` だけは例外的に画面に出す。
-  **更新の間隔**: 画面を開いたとき 1 回。その後は取り込み中の間だけ、verifying・importing は **10 秒**、waiting-budget・waiting-r2 は **60 秒**(再開は数時間〜翌月先)。idle・completed・failed では止める。非表示の間は止め、表示に戻ったら即時に 1 回取って再開する。通信の失敗が 3 回続いたら止めて「再読込」を促す(最後に取れた進捗は残す)。`GET /api/migration` は移行の DO の状態を読むだけで、D1 の読み取りも netkeiba・LLM も増やさない。画面を開き直すと進捗を取り直して見える。
-- **クライアントの取り込み**: core を直接 import する例外が 1 つ増えた(`@keiba/core/ev/cloud-migration-format`。#222 の時点では import を 1 つも持たなかったが、#308 で `scraper/ids.ts`・`scraper/combo-odds-key.ts` の 2 本だけを import する形になった。この 2 本は import を持たず、`test/client-bundle.test.ts` が固定している)。`cloud/src/migration-reader.ts`(import なし)もクライアントに入る。`test/client-bundle.test.ts` が、この 2 つが閉包に入っていること・`migration-core`・`-do`・`-convert`・`-verify`・`analysis-store-codec` が入らないこと・`node:` が入らないことを固定している。
-  DOM アダプタ(`dom.ts`)の許可を足した: 要素 `progress`(`value`・`max` は数字だけ)・属性 `accept`(`input type="file"` だけ。拡張子・MIME の並び)・イベント `on.file`(`input type="file"` だけ。選ばれた最初の File。`value`〈偽のパス〉は読まない)。
-  **バンドルの大きさ**: 117,977 → **157,309 バイト**(+39,332。`pnpm run build:client`)。内訳(metafile の `bytesInOutput`): 形式の検証 10,437・画面の文言 10,318・API の分類と固定の失敗文言 7,829・制御 2,565・検証 2,020・行の分割 1,475、残りは `view.ts`・`dom.ts`・`settings-form.ts`・`app.ts`・`route.ts` の増分。日本語が `\u` エスケープで 1 文字 6 バイトになるのが大半。サイズの上限を 125,000 → 175,000 に引き上げた(`charset` は変えていない)。
-- **実画面の確認(Playwright + Chromium 141。本番の `worker.ts` を `wrangler dev --local`〈ctx.access 注入。D1・R2・DO はローカル〉で動かし、スマホ幅 360px と PC 幅 1280px)**: 合成ファイル(`scripts/measure-migration-import.ts` の `syntheticLines`。分析 2,225 件・結果 1,301 レース・馬 10 頭・買い目 0 件。3,528 行・展開後 154.9MB・gzip 25.6MB。**ユーザーの実データ〈gzip 14.9MB〉より大きい**)を選ばせた結果:
-  検証は **約 1.4 秒**(3 回の実行で 1.37〜1.45 秒)で「分析 2,225 件・結果 1,301 レース」を表示。50ms 間隔の ticker の**最大の間隔は 112〜131ms**(3 回の実行。画面は固まらない)。進捗の表示は 0% → 32%(391 行)→ 49%(794)→ 65%(1,210)→ 81%(1,613)→ 99%(2,045 行)と更新された(最後の実行で 6 種類を観測)。
-  JS ヒープは開始 19.8MB → **最大 72.7MB**(3 回の実行で 72.7〜76.5MB。展開後の 154.9MB より小さい)で、**検証後に GC すると 2.4MB**(展開した本文を保持していない)。途中で切れた gzip・gzip でないファイル・版が違うファイルは、理由が出て POST しない。小さなフィクスチャは、検証 → アップロード(`Content-Type: application/gzip`・`Content-Length`・`Origin` が付く)→ 完了(分析 5/5・結果 5/5)。同じファイルをもう一度上げると「新規 0・取り込み済み 5」で完了(重複しない)。
-  1 日の上限を 2,000 行に下げて大きなファイルを上げると、「1 日の書き込み上限に達したため一時停止中です。2026-10-10 09:05(JST)ごろに自動で再開します」を表示し、ファイル選択は出ず、開き直しても進捗が見え、20 秒の間にポーリングしなかった(60 秒間隔)。**横スクロールは、設定画面・移行画面のどの状態でも出なかった**(360px・1280px)。
-  (Playwright のスクリプトはコミットしていない。再現するには、cloud/ で `wrangler dev --local` + `[access.dev]` を立て、Chromium で `#migration` を開いて `scripts/measure-migration-import.ts` の合成ファイル〈`--keep-file`〉を選ばせる。)
-
-### exe から移したファイルの取り込み(#216〈#167-B1〉。v1.28.0)
-exe の「クラウド移行用に書き出す」(上の「クラウド移行用の書き出し」。gzip の NDJSON 1 ファイル)を、クラウド版が受け取り、D1・R2 へ**少しずつ**取り込む。API と取り込みの仕組みまで(画面は #222。移行した分析の未取込の結果を netkeiba から取る処理は #217〈v1.30.0。上の「クラウド版の結果の補完」〉)。
-運用の詳細・API の形・予算の定数は `cloud/README.md` の同名の節。ここには決めたことと実測を残す。
-
-- **受け取り**: `POST /api/migration/upload`。gzip を**解釈せず R2 に置く**(`migration/<uuid>.ndjson.gz`。Workers Free の CPU 10ms のため)。Origin 確認・`Content-Length` 必須・上限 50MB・取り込み中は 409(本文を読まずに断る)・R2 の書き込みの柵。
-- **取り込みの担当**: 新しい DO `CloudMigration`(wrangler.toml の migration v3。単一インスタンス)。`RaceDay` の流用はしなかった(`RaceDay` のアラームは 1 本で、日単位の取得・分析専用。同居させると、取得系と状態が混ざる)。定時の自動実行(cron → `RaceDay`)とは別のインスタンス・別のアラームで、netkeiba・LLM・gate には触れない(`cloud-config-guard.test.ts` が固定)。
-- **検証 → 取り込み**: 書き始める前に全体を 1 回流して検証(`parseMigrationLine`・`MigrationTally`・取り込みの変換。JSON の列が壊れている・キーが重複する行も、ここで弾く)。その後、アラームごとに少しずつ。
-  **展開した全体をメモリに載せない進め方は「毎回先頭から流し直し、前回の位置〈展開後のバイトオフセット〉までを解釈せずに捨てる」**に決めた(塊に分けて R2 に置き直す案は、追加の R2 書き込みが約 100 回・後始末・実装の複雑さがあるため採らなかった。実測は下)。
-- **分析は web と同じ保存経路**(`buildSaveStatements` の 1 回の batch → R2 の put)。分析日時・開催日・版・モデル・追加指示・遮断の印は元の値のまま(保存経路は now() で上書きしない)。
-  **往復で落ちる列の洗い出し**: `AnalysisAllocationMetaRecord` の `include_quinella`・`include_exacta`・`include_trifecta`・`include_bracket_quinella` は非 nullable な boolean で、codec の `allocationMetaParams` は `? 1 : 0` と書くため、exe の NULL(「設定を記録していない」。OFF ではない。#31)が 0 に潰れる。
-  また `toStoredAllocation` 経由の復元は 6 列(`combo_odds_wide`・`combo_odds_trio`・`greedy_steps`・`candidate_cap`・`model_id`・`model_approximate`)を読まない。そこで**配分メタは行から直接 23 値を作って上書き**する(core は変更しない)。
-  軽微な差(意味は同じ): `ev_estimated` の NULL は 0 になる(codec の読み出しも NULL を false 扱い)・`race_snapshot_json`・`contributions_json` は JSON.parse → stringify で正規化される。`llm_note` は NULL(LLM を使わなかった理由を捏造しない)。
-- **冪等性**: `analyses.exe_analysis_id`(migration 0008。部分一意索引=web の分析〈NULL〉の保存で索引の行を増やさない)。取り込み済みは飛ばす。**exe の id が同じで race_id か分析日時が違うもの(exe の DB を作り直した等)は「衝突」として飛ばし、件数と例を進捗に出す**(失敗にしない・上書きしない)。
-  結果・結果メタ・組合せ払戻・取込記録は**既存の行を優先**(馬は、そのレースに 1 行でもあれば表ごと飛ばす。払戻は、その券種の取込記録があれば飛ばす)。同じファイルを 2 回 upload しても重複しない。
-- **予算**: D1 は 1 日 **6 万行**(`meta.rows_written` の実測の合計で数える。達したら `waiting-budget` で翌 UTC 日の 00:05 に自動で再開)。1 回のアラームの問い合わせ数は **40 以内**(batch は文の数で数える。Free の「1 回の呼び出しで 50 クエリ」の手前。**本番の数え方は未確認**)。
-  R2 の柵(#173)に達したら、**要約だけの保存にせず**止めて翌月 1 日の 00:05 UTC に再開する。
-  **処理前の見積もり**(#309。#302-C): 行を処理する**前**に、その行が書く行数を見積もり(`estimateRowsWritten`。分析 = 12 + 2×馬 + (配分メタあり ? 1 + 2×買い目 : 0)、結果 = 2×結果の馬 + (面あり ? 2 : 0) + 2×払戻 + 2×取込記録。ローカル D1 の `meta.rows_written` の実測と一致を固定: `cloud/test/migration-rows-estimate.test.ts`)、使用量に足して上限を超えるなら処理せず翌日へ回す。
-  取り込み済みの分析は 0、日の最初の行は必ず処理する(小さい上限でも進む)。#308 の子の行数の上限(馬 18・買い目 6,396・払戻 6,360・取込記録 6)でも、1 行の最大は分析 12,841 行・結果 12,770 行で、移行の 1 日の上限(6 万行)と D1 Free の上限(10 万行)より小さい。
-  したがって #308 の後は、予算の確認が処理後だけでも D1 Free の上限は超えなかった(最悪でも 6 万 + 約 1.3 万行)。この見積もりの効果は、移行の 1 日の上限(6 万行)を守ること。本番の `rows_written` の数え方はローカルと同じとは限らない(最初の本番の実保存で確かめる)。
-  kv に保存して応答に載る文字列は長さで切る(`failure.message`・`conflictSamples` の各要素は 300 文字、ヘッダの `exportedAt`・`appVersion` は 64 文字。ヘッダ値は拒否せず切り詰め)。
-  検証では、取り込みで `JSON.stringify` される列(`race_snapshot_json`・各馬の `contributions_json`)の再直列化を試し、深い入れ子(`RangeError`)は形式の拒否にする(CPU の測定: `cloud/measure-verify-cpu.ts`)。
-- **詳細(R2)の欠落を防ぐ記憶と、アラームの自己回復**(レビューで見つけた穴の対処): 分析を D1 に書く**前**に「詳細が未完了」の記憶(kv の `pending`)に加え、R2 の put の成功で外す。ジョブの状態(待機・失敗・再アップロード)とは独立に残り、次にその分析に当たったとき、取り込み済みとして飛ばす前に詳細を作り直す
-  (put の失敗のあとに日次予算・R2 の柵で待機に入る、連続失敗で `failed` になって R2 の復旧後に再アップロードする、といった経路でも、`completed` なのに詳細が欠ける状態にならない)。
-  取り込み系の状態なのにアラームが無ければ(アラームの再試行の上限を超えて落ちた)、`GET /api/migration` とアップロードの受付で張り直す。
-- **一覧の並び**: 移行した分析は D1 の id が新しいのに分析日時は古いので、`listAnalysisSummaries` を**分析日時の降順(同時刻は id の降順)**に直した(`GET /api/analyses`・レース画面の過去の分析)。索引は migration 0008 の 3 つ(絞り込みなし・race_id・kaisai_date それぞれで、一時ソートなしに先頭の N 件だけを読む)。
-  web の保存 1 回の D1 の書き込みは 60 → **63 行**。「id が新しい = 新しい分析」を前提にしている箇所の洗い出し: 直す必要があったのは一覧の並びだけ(`findByAnalyzedAt` は同一レースの集合の照合・`listRecentForRace` は `analyzed_at` で引く・板の最新の分析の id は DO が保存時に持つ・詳細は id 指定)。
-  **注意(影響は軽い)**: 移行の分析は `listAnalyzedRaceIdsByPromptVersion` にも入るので、同じ版で exe が分析した当日のレースを、cloud の自動実行が「分析済み」と見なすことがある。
-
-#### 実測(再現: `pnpm tsx scripts/measure-migration-import.ts`)
-実際の規模に近い**合成ファイル**を、ローカルの workerd(`wrangler dev --local` の本番の `worker.ts`・miniflare の D1・R2)に upload し、DO が最後まで取り込むのを観測した(2026-10-09。1 回の実行。引数は既定)。
-合成ファイル: 分析 2,300 件(馬 10 頭・買い目 0 件・組合せ全部入りの snapshot は 4 件に 1 件)・結果 300 レース。展開後 **156.5MB**・gzip **26.2MB**・2,602 行。詳細は `measure-d1-size.ts` と同じ実フィクスチャ(中央 16 頭)・LLM の実応答から作り、小数を分析ごとに変えている。
-(ユーザーの実データは分析 2,225 件・結果 1,301 レース・gzip 14.9MB なので、合成の方がファイルは大きい。D1 の 1 日の枠に収まるよう、馬・買い目・結果を少なめにしてあり、**行数は別途、式で見積もる**。)
-```
-upload(26.2MB を R2 にそのまま置く): 532ms
-(i) 検証パス(全行の JSON.parse・検証・変換): 壁時計 2,981ms、workerd の CPU 3,060ms(1 回のアラーム)
-(ii) 取り込みの 1 回のアラーム(位置別。壁時計 ms は DO の lastTick.ms、CPU は workerd の増分。tick 800 回)
-  位置  0〜20%: 壁時計 中央値 421・p95 517・最大 611、CPU 中央値 500・最大 710
-  位置 20〜40%: 壁時計 中央値 561・p95 710・最大 813、CPU 中央値 650・最大 880
-  位置 40〜60%: 壁時計 中央値 684・p95 810・最大 925、CPU 中央値 780・最大 1,030
-  位置 60〜80%: 壁時計 中央値 814・p95 1,009・最大 1,075、CPU 中央値 920・最大 1,210
-  位置 80〜100%: 壁時計 中央値 895・p95 1,097・最大 1,145、CPU 中央値 1,010・最大 1,340
-  終盤の最後の 10 tick: 壁時計 810〜1,137ms、CPU 930〜1,270ms
-  1 tick の問い合わせ数(D1 の文+R2)の最大: 39(上限 40)
-全体: 800 tick、経過 1,335 秒(本番は 1 日 6 万行で止まるので日をまたぐ)。分析 2,300・結果 300 すべて取り込み済み。
-```
-- **読み方**: 流し直しの CPU は位置に比例して増える(0〜20% の約 0.5 秒 → 終盤の約 1.0〜1.3 秒)。終盤でも 1 回のアラームは約 1 秒で、DO の 1 回の呼び出しの CPU 上限(Free でも桁違いに緩いという #159 の確認の範囲)に対して小さい。
-  塊に分ける方式へ切り替える必要は、この実測では出なかった。**本番の CPU・D1 の遅延はこの機械とは一致する保証がない**。ローカルの workerd は CPU 上限を強制しない(判定ではなく、使う量の実測)。
-  tick ごとの CPU は workerd プロセス全体(miniflare の D1 の SQLite を含む)の増分で、10ms の刻みに丸まる。
-- **D1 の書き込み行数**(`meta.rows_written` の合計。索引・カウンタを含む):
-  - 分析 1 件: **13 + 2×馬 + 2×買い目** 行(1〔カウンタ〕+ 8〔analyses の表・索引 6・sqlite_sequence〕+ 1〔detail_key〕+ 2〔exe の id の UPDATE と部分一意索引〕+ 馬 2 行ずつ + 配分メタ 1 + 買い目 2 行ずつ)。`rows-written.test.ts` が 16 頭・買い目 10 件で `[1, 8, 1, 2, 32, 1, 20]` = 65 を固定。
-    合成ファイル(馬 10 頭・買い目 0 件)の実測は**1 件あたり 33.0 行**(式の 33 と一致。tick ごとの読み出しの計上 1 行を除く)。
-  - 結果 1 レース: 合成(14〜18 頭・6 券種・払戻 8 行・取込記録 6 行)で実測 **約 61 行**(300 レースで 18,381 行、tick の読み出しの計上 34 行を含む)。実際の払戻の件数は未測定。
-  - 全体の見積もり(ユーザーの実データ: 分析 2,225 件〈馬 16 頭と仮定〉・結果 1,301 レース。**買い目の件数が未測定**なので、仮定ごとに出す): 買い目 10 件/分析で約 22.4 万行(**約 3.7 日**)、30 件で約 31.4 万行(**約 5.2 日**)、50 件で約 40.2 万行(**約 6.7 日**)。いずれも 1 日 6 万行で割った値。
-    結果の行数は合成の 61 行/レースを使った(実際の払戻の件数が違えば変わる)。
-- 限界: 合成ファイルは実データではない(詳細の大きさと圧縮率は実フィクスチャ由来だが、分析ごとの違いは小数の入れ替えだけ)。1 回の実行で、繰り返しのばらつきは測っていない。
+### exe からの移行機能の廃止(#394〈#390 D-2〉。ユーザー決定 2026-10-19。版数は 1.44.0 で凍結のため上げない)
+exe からクラウド版への移行は #167 で完了した。**移行画面(#222)・取り込みの API と DO(#216)・形式の検証(#215 の取り込み側)を削除した**。設定画面の「exe から移行」の節も無い。
+削除前の仕様・実測(取り込みの予算・流し直しの CPU・D1 の書き込み行数の式・ブラウザでの検証の実画面の確認)は、コミット `46410ab` のこの節(「クラウド版の移行画面」「exe から移したファイルの取り込み」)で読める。
+- **削除したもの**: `POST /api/migration/upload`・`GET /api/migration`、`cloud/src/migration-{core,convert,reader,verify}.ts`、`cloud/client/{api-migration,migration-file,migration-model,migration-screen}.ts`、
+  `packages/core/src/ev/cloud-migration-format.ts` とそのサブパス `@keiba/core/ev/cloud-migration-format`、`scripts/measure-migration-import.ts`、`cloud/measure-verify-cpu.ts`、保存側の移行専用のメソッド(`saveMigratedAnalysis`・`repairDetail`・`findMigrated`・`saveMigratedResult`)。
+  `dom.ts` の `accept` 属性・`on.file` イベントの許可も外した(`progress` は検証画面が使うので残す)。補助関数は、`parseLimitOverride` を `cloud/src/limit-override.ts` へ、`seededRandom`・`perturbDecimals` を `scripts/synthetic-random.ts` へ、本体を変えずに移した。
+- **クライアントのバンドル**(`CLIENT_JS`): 312,505 → **264,471 バイト**(-48,034。`pnpm run build:client`)。移行の名前を持つ 6 つの入力(metafile の `bytesInOutput`)が 41,054 で、残りの 6,980 は `view.ts`・`app.ts`・`route.ts`・`settings-form.ts`・`dom.ts` ほかから減った分。上限は 313,500 → 266,000。
+- **意図して残したもの**: 空の殻の DO `CloudMigration`(`src/migration-do.ts`)と wrangler.toml の migration v3(binding は外した)。完全削除(`deleted_classes`)は本番の DO と保存データを不可逆に消すので、別の Issue で、ユーザーの明示の承認を得てから行う。
+  D1 の `analyses.exe_analysis_id` 列と索引 `idx_analyses_exe_id`(migration 0008。追加のみ)。取り込んだ分析・結果。R2 の `migration/` の下に失敗した取り込みのファイルが残っている可能性(未確認・触っていない)。
+- **結果の補完**: 移行の DO の状態に依存しなくなった(上の「クラウド版の結果の補完」)。
+- **スモーク**: 節 H は、移行のファイルを材料にしていた下流の確認(一覧の並び・詳細・今日の狙い目・検証・統計モデル用の書き出し・結果の補完の集計)を、`smoke-worker.ts` の `/smoke/analyses/seed`(本番と同じ `D1AnalysisStore.saveAnalysis` で分析 5 件・結果 2 レースを入れる)を材料にして維持した。移行専用の確認だけを削除した。
 
 ### 設定画面にプロンプトのプレビュー(#201。v1.20.2)
 変更は `cloud/` のクライアントと `page.ts` の CSS、`clampAdditionalInstruction` の置き場所(`llm-run.ts` → `settings.ts`。再 export)だけ(サーバ・D1・exe・core のプロンプト文面は無変更)。詳細は `cloud/README.md` の「設定画面にプロンプトのプレビューを出す」。

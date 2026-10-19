@@ -86,7 +86,7 @@ pnpm tsx scripts/dump-race.ts --date 20260628
 - **exe のコードが最後に残っているコミットは `3c1664e`** です(`git checkout 3c1664e` で参照できます)。web 版が使っていた共有部分は `packages/core/src/analysis/`・`packages/core/src/view/` へ移しました(#286)。exe 専用のコード・スクリプト・依存は削除しました(#287)。
 - exe のビルドと `dev-latest` への公開をしていたワークフローは削除しました。いまの CI は [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)(型検査・テストの関門。作業ブランチ宛ての PR では、cloud の型検査・テスト・スモークを走らせる `cloud-verify` ジョブも走る。公開はしない)と [`.github/workflows/deploy-cloud.yml`](./.github/workflows/deploy-cloud.yml)(web 版の検査〈check ジョブと smoke ジョブ。並列〉と、両方が通った後の本番デプロイ)です。
 - **個人利用専用**である点は本ツール全体と同様です。
-- exe に残っている過去の分析・結果を web 版へ移す手順は、`cloud/README.md` と、web 版の設定画面の「exe から移行」を参照してください。
+- exe に残っている過去の分析・結果を web 版へ移す機能(設定画面の「exe から移行」)は、移行の完了後に廃止しました(Issue #394)。経緯は `cloud/README.md` の「exe からの移行機能の廃止」を参照してください。
 
 ### 最後の exe の補足(記録)
 

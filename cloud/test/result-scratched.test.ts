@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { pathFromMeta } from "./meta-path.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { D1ResultStore, MIGRATED_RESULTS_SQL, withScratchedColumn } from "../src/result-repository";
+import { D1ResultStore, withScratchedColumn } from "../src/result-repository";
 import { UPSERT_RACE_RESULT_SQL } from "../../packages/core/src/ev/analysis-store-codec.js";
 import { buildVerifySource, VERIFY_READ_SQL, type VerifyReadRows } from "../src/verify-read";
 import type { RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
@@ -96,8 +96,8 @@ describe("保存: scratched の書き込み", () => {
     expect(col.filter(([, s]) => s === 0)).toHaveLength(15);
   });
 
-  it("移行で入れた行(MIGRATED_RESULTS_SQL。exe の列だけ)は scratched に触れない = NULL のまま", async () => {
-    await local.db.prepare(MIGRATED_RESULTS_SQL).bind("R72C", JSON.stringify([[1, 1, 150, 300, "[]", null], [2, null, null, null, "[]", null]]), "R72C").run();
+  it("exe の列だけで入れた行(移行で入れた旧い行と同じ形。Issue #394 で移行の保存の文は削除したので、同じ列だけの INSERT で再現する)は scratched に触れない = NULL のまま", async () => {
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f) VALUES (?, 1, 1, 150, 300, '[]', NULL), (?, 2, NULL, NULL, NULL, '[]', NULL)").bind("R72C", "R72C").run();
     expect(await scratchedColumn("R72C")).toEqual([
       [1, null],
       [2, null],

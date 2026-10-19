@@ -12,7 +12,7 @@ import { calibrationFixture, priorCalibrationFixture, trendFixture, versionsFixt
  * Issue #238: 閲覧者(viewer)の画面。ボタンを隠すのは補助で、拒否はサーバ側だが、**画面が管理者専用の API を叩いて 403 を出さない**ことを固定する。
  *  - **不変条件**: 閲覧者が開ける画面(と、そこで押せるすべての操作)が出す要求は、サーバの表(`route-policy.ts` の `requiredRole`)で viewer に足りるものだけ。
  *    表をクライアントのテストに直接つなぐので、画面が管理者専用の API を読む変更を足すと、ここで落ちる。
- *  - 設定・移行の画面を直接(`#settings` など)開いた閲覧者には、API を取らずに固定文言「管理者だけが使えます」を出す(検証は Issue #263 で閲覧者にも開いた。下の専用の describe)。
+ *  - 設定の画面を直接(`#settings` など)開いた閲覧者には、API を取らずに固定文言「管理者だけが使えます」を出す(検証は Issue #263 で閲覧者にも開いた。下の専用の describe)。
  *  - 対照として、管理者は同じ操作で入口・ボタンが出る(隠す条件が逆でも気づけるように、毎回、管理者側の存在を無条件に確かめる)。
  * 今日は 2026-06-28(JST)。
  */
@@ -136,7 +136,6 @@ const SCREENS: readonly (readonly [string, string])[] = [
   ["日報(日報の無い日)", "#report=20260628"],
   ["設定", "#settings"],
   ["検証", "#verify"],
-  ["移行", "#migration"],
 ];
 
 describe("不変条件: 閲覧者の画面が出す要求は、サーバの表で viewer に足りるものだけ(管理者専用の API を叩いて 403 を出さない)", () => {
@@ -150,14 +149,14 @@ describe("不変条件: 閲覧者の画面が出す要求は、サーバの表�
   });
 
   it("前提(検出が空振りでない): 閲覧者が開ける 8 つの画面〈検証を含む。Issue #263〉は実際に要求を出し、管理者専用の画面を管理者が開くと admin の要求が出る(= この検査は admin の要求を検出できる)", async () => {
-    const viewable = SCREENS.filter(([, hash]) => !["#settings", "#migration"].includes(hash));
+    const viewable = SCREENS.filter(([, hash]) => hash !== "#settings");
     expect(viewable).toHaveLength(8);
     for (const [name, hash] of viewable) {
       const h = harness("viewer", hash);
       await exercise(h);
       expect(h.calls.length, name).toBeGreaterThan(0);
     }
-    for (const hash of ["#settings", "#migration"]) {
+    for (const hash of ["#settings"]) {
       const admin = harness("admin", hash);
       await exercise(admin);
       expect(admin.calls.some((c) => requiredRole(c.method, c.url.split("?")[0]!) === "admin"), hash).toBe(true);
@@ -174,18 +173,17 @@ describe("不変条件: 閲覧者の画面が出す要求は、サーバの表�
   });
 });
 
-describe("設定・移行の画面を直接開いた閲覧者: API を取らず、固定文言で案内する(検証は Issue #263 で閲覧者にも開いた)", () => {
-  it.each([["設定", "#settings"], ["移行", "#migration"]])("%s(%s): 要求が 0 件で、「管理者だけが使えます」と、一覧へ戻るリンクが出る", async (_name, hash) => {
+describe("設定の画面を直接開いた閲覧者: API を取らず、固定文言で案内する(検証は Issue #263 で閲覧者にも開いた)", () => {
+  it.each([["設定", "#settings"]])("%s(%s): 要求が 0 件で、「管理者だけが使えます」と、一覧へ戻るリンクが出る", async (_name, hash) => {
     const viewer = harness("viewer", hash);
     viewer.app.start();
     await viewer.app.whenIdle();
     expect(viewer.calls).toEqual([]);
     expect(textOf(viewer.tree())).toContain("管理者だけが使えます");
     expect(byClass(viewer.tree(), "back").map((n) => n.attrs?.["href"])).toEqual(["#"]);
-    // 設定の入力欄・保存ボタン・移行のファイル選択のような操作部品が無い
+    // 設定の入力欄・保存ボタンのような操作部品が無い
     expect(findAll(viewer.tree(), (n) => n.tag === "input" || n.tag === "textarea" || n.tag === "select")).toEqual([]);
     expect(byClass(viewer.tree(), "settings-save")).toHaveLength(0);
-    expect(byClass(viewer.tree(), "migration-start")).toHaveLength(0);
     // 対照: 管理者は同じハッシュで、その画面が開く(固定文言は出ず、取得が走る)
     const admin = harness("admin", hash);
     admin.app.start();

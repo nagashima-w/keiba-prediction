@@ -97,14 +97,12 @@ function world(startAt: number, options: { badRaceIds?: ReadonlySet<string>; bac
   const backfillAlarm: Alarm = { at: null };
   const sql = openNodeSql();
   opened.push(sql);
-  const migration = { state: "completed" as "completed" | "importing" };
   const core = new ResultBackfillCore(
     {
       sql,
       now: () => clock.now,
       setAlarm: (at) => void (backfillAlarm.at = at),
       getAlarm: async () => backfillAlarm.at,
-      migrationState: async () => migration.state,
       gateStatus: async () => ({ blockedUntil: null, pending: 0 }),
       store: new D1ResultStore({ db: local.db }),
       stubFor,
@@ -132,7 +130,7 @@ function world(startAt: number, options: { badRaceIds?: ReadonlySet<string>; bac
     }
     return steps;
   }
-  return { clock, gate, days, core, backfillAlarm, migration, run };
+  return { clock, gate, days, core, backfillAlarm, run };
 }
 
 const savedRaceIds = async (): Promise<string[]> =>
@@ -298,18 +296,5 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
     expect(await savedRaceIds()).toHaveLength(6);
     expect(w.gate.urls).toHaveLength(6);
     expect(await w.core.getStatus()).toMatchObject({ state: "done", imported: 6, remaining: 0 });
-  });
-
-  it("移行が完了していない間は取得しない(importing)。完了したら始まる", async () => {
-    await addAnalysis(idOf(8, 1), "20261008", 1);
-    const w = world(jst(10, 10, 2));
-    w.migration.state = "importing";
-    await w.core.kick();
-    await w.run(jst(10, 10, 5)); // 窓の中の 3 時間のあいだ、30 分おきに見直すだけ
-    expect(w.gate.urls).toEqual([]);
-    expect(await savedRaceIds()).toEqual([]);
-    w.migration.state = "completed";
-    await w.run(jst(10, 10, 5, 59));
-    expect(await savedRaceIds()).toEqual([idOf(8, 1)]);
   });
 });

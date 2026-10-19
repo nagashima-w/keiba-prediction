@@ -98,8 +98,6 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/analyses/run/bulk", ADMIN_ONLY),
   exact("/api/results/import", ADMIN_ONLY),
   exact("/api/results/backfill", ADMIN_ONLY),
-  exact("/api/migration", ADMIN_ONLY),
-  exact("/api/migration/upload", ADMIN_ONLY),
   exact("/api/reports/run", ADMIN_ONLY), // 日報の手動作成(LLM を呼ぶ)
   exact("/api/monthly-reports/run", ADMIN_ONLY), // 月報の手動作成と作り直し(Issue #280。LLM を呼ぶ)
   // 統計モデルの見直し用の書き出し(Issue #266)。分析・結果の全件に近い内容(prior・補正・着順・オッズ)が出るので管理者だけ。作成は DO が R2 の詳細を大量に読む

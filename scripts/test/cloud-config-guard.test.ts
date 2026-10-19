@@ -41,7 +41,7 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
-  it("Issue #177・#216・#217・#219・#235・#266・#279: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6、統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)は migration v7、月報の DO(MONTHLY_REPORT・MonthlyReportDO)は migration v8 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
+  it("Issue #177・#216・#217・#219・#235・#266・#279: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CloudMigration。Issue #394 で binding は廃止。空の殻のクラスと migration v3 だけを残す)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6、統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)は migration v7、月報の DO(MONTHLY_REPORT・MonthlyReportDO)は migration v8 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
     const migrations = [...tomlCode.matchAll(/^\[\[migrations\]\]\ntag = "(v\d+)"\n(?:[^\n]*\n)*?new_sqlite_classes = \[([^\]]*)\]/gm)].map((m) => [m[1], m[2]]);
     expect(migrations).toEqual([
       ["v1", '"NetkeibaGate"'],
@@ -55,8 +55,9 @@ describe("wrangler.toml", () => {
     ]);
     expect(tomlCode).toMatch(/^name = "RACE_DAY"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceDay"$/m);
-    expect(tomlCode).toMatch(/^name = "CLOUD_MIGRATION"$/m);
-    expect(tomlCode).toMatch(/^class_name = "CloudMigration"$/m);
+    // Issue #394: CloudMigration の binding は無い(クラスは空の殻として worker.ts が export し、migration v3 は残す)
+    expect(tomlCode).not.toMatch(/CLOUD_MIGRATION/);
+    expect(tomlCode).not.toMatch(/^class_name = "CloudMigration"$/m);
     expect(tomlCode).toMatch(/^name = "RESULT_BACKFILL"$/m);
     expect(tomlCode).toMatch(/^class_name = "ResultBackfill"$/m);
     expect(tomlCode).toMatch(/^name = "VERIFY_REPORT"$/m);
@@ -68,8 +69,8 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^name = "MONTHLY_REPORT"$/m);
     expect(tomlCode).toMatch(/^class_name = "MonthlyReportDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|deleted_classes|transferred_classes)\s*=/m);
-    // DO のバインディングはちょうど8つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(8);
+    // DO のバインディングはちょうど7つ(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT。Issue #394 で CLOUD_MIGRATION を外した)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(7);
   });
 
   it("Issue #206・#249: cron はちょうど2本で `0 12 * * *`(UTC 12:00 = JST 21:00)と `0 14 * * *`(UTC 14:00 = JST 23:00)。朝 9 時の定時実行は無い。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -217,13 +218,13 @@ describe("wrangler.toml", () => {
     expect(("await dispatchResultImports(x);\nexport async function dispatchResultImports(i) {}").match(/(?<!function\s)\bdispatchResultImports\(/g)).toHaveLength(1);
   });
 
-  it("Issue #208・#216・#251: 手動の POST を受けるルートは 7 つだけ(/api/settings・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/migration/upload・/api/reports/run・/api/monthly-reports/run〈Issue #280〉)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
+  it("Issue #208・#251・#394: 手動の POST を受けるルートは 6 つだけ(/api/settings・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/reports/run・/api/monthly-reports/run〈Issue #280〉。/api/migration/upload は Issue #394 で廃止)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
-    // POST の分岐は 7 つ(`method === "POST"`)
-    expect((code.match(/method === "POST"/g) ?? []).length).toBe(7);
+    // POST の分岐は 6 つ(`method === "POST"`)
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(6);
     const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
-    expect(routes).toEqual(["/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/migration/upload", "/api/reports/run", "/api/monthly-reports/run"]); // settings は pathname の分岐の中で method を見る
+    expect(routes).toEqual(["/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/reports/run", "/api/monthly-reports/run"]); // settings は pathname の分岐の中で method を見る
     expect(code).toMatch(/pathname === "\/api\/settings"/);
     // handleResultsImport の本体
     const start = code.indexOf("async function handleResultsImport(");
@@ -991,18 +992,14 @@ describe("公開リポジトリへの値の混入(実在のメール・チーム
   });
 });
 
-describe("Issue #216: 移行の取り込み(CloudMigration)は netkeiba にも LLM にも出ず、定時の自動実行(cron → RaceDay)と干渉しない", () => {
-  const migrationSources = ["migration-core.ts", "migration-do.ts", "migration-convert.ts", "migration-reader.ts", "migration-verify.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
-
-  it("移行のソース(5 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch が無い", () => {
-    expect(migrationSources).toHaveLength(5);
-    for (const [name, code] of migrationSources) {
-      expect(code.length, `${name} を読めている`).toBeGreaterThan(500);
-      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket"]) {
-        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
-      }
-      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+describe("Issue #216・#394: 移行の DO(CloudMigration)は空の殻で、netkeiba にも LLM にも出ず、定時の自動実行(cron → RaceDay)と干渉しない", () => {
+  it("殻のソース(migration-do.ts)は、クラス CloudMigration を空のまま定義するだけで、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・D1・R2 が無い", () => {
+    const code = stripCode(readTextLf("cloud", "src", "migration-do.ts"));
+    expect(code).toMatch(/export class CloudMigration extends DurableObject \{\}/); // 前提: 読めていて、メソッドを持たない殻
+    for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket", "env.DB", "ANALYSIS_DETAIL", "alarm", "setAlarm"]) {
+      expect(code, `殻に ${forbidden} が無い`).not.toContain(forbidden);
     }
+    expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, "殻にグローバルの fetch が無い").toBe(0);
   });
 
   it("cron の scheduled・RaceDay・result-dispatch は、移行の DO を呼ばない(CLOUD_MIGRATION・CloudMigration・migration-* を参照しない)", () => {
@@ -1030,9 +1027,10 @@ describe("Issue #216: 移行の取り込み(CloudMigration)は netkeiba にも L
     // 補完が日単位の DO に呼ぶのは、dispatchResultImports 経由の依頼と、進行の読み取り(getResultImportProgress)だけ
     expect((core.match(/\.getResultImportProgress\(/g) ?? []).length).toBe(1);
     expect((core.match(/(?<!function\s)\bdispatchResultImports\(/g) ?? []).length).toBe(1);
-    // DO の中: gate は status()、移行の DO は getStatus() を 1 回ずつ読むだけ
+    // DO の中: gate は status() を 1 回読むだけ(Issue #394: 移行の DO は読まない。CLOUD_MIGRATION を参照しない)
     expect((doCode.match(/\.status\(\)/g) ?? []).length).toBe(1);
-    expect((doCode.match(/CLOUD_MIGRATION\.idFromName\(MIGRATION_NAME\)\)\.getStatus\(\)/g) ?? []).length).toBe(1);
+    expect(doCode).not.toMatch(/CLOUD_MIGRATION|CloudMigration|MIGRATION_NAME|migrationState/);
+    expect(core).not.toMatch(/MigrationState|migrationState|waiting-migration/);
     expect(doCode).not.toMatch(/\.start\(/); // 移行の取り込みを始めさせない
     // 補完の DO の呼び出し箇所(cloud/src の全ファイルを概念で走査)
     const kickSites: Record<string, number> = {};
@@ -1064,25 +1062,13 @@ describe("Issue #216: 移行の取り込み(CloudMigration)は netkeiba にも L
     expect((core + "\nstub.fetchRaw(x);").includes(".fetchRaw(")).toBe(true);
   });
 
-  it("移行の DO の呼び出し(stub の start・getStatus)は handler.ts の移行の 2 つの API だけ。start の呼び出しは 1 箇所", () => {
+  it("Issue #394: 移行の DO は呼ばれない(handler.ts に migrationStub・CLOUD_MIGRATION・/api/migration が無い)。stub.start( の呼び出しも無い", () => {
     const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
-    expect((handler.match(/migrationStub\(env\)/g) ?? []).length).toBe(2); // GET /api/migration と POST /api/migration/upload
-    expect((handler.match(/\bstub\.start\(/g) ?? []).length).toBe(1);
+    expect(handler.length).toBeGreaterThan(1000); // 前提: 読めている
+    expect(handler).not.toMatch(/migrationStub|CLOUD_MIGRATION|MigrationStubLike|\/api\/migration/);
+    expect((handler.match(/\bstub\.start\(/g) ?? []).length).toBe(0);
     // 検出の確認(空振りでない)
     expect(("a stub.start(x);\nb stub.start(y);".match(/\bstub\.start\(/g) ?? []).length).toBe(2);
-  });
-
-  it("アップロードの本文は解釈しない: handleMigrationUpload は request.body をそのまま R2 の put に渡す(text()・json()・arrayBuffer()・getReader で読まない)", () => {
-    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
-    const start = handler.indexOf("async function handleMigrationUpload(");
-    expect(start).toBeGreaterThan(-1);
-    const end = handler.indexOf("\n}\n", start);
-    const body = handler.slice(start, end);
-    expect(body.length).toBeGreaterThan(1200); // 前提: 本体を実際に読めている
-    expect(body).toContain("bucket.put(key, request.body");
-    for (const forbidden of [".text()", ".json()", ".arrayBuffer()", ".blob()", "getReader(", "readLimitedText", "readJsonObjectBody"]) {
-      expect(body, `handleMigrationUpload に ${forbidden} が無い`).not.toContain(forbidden);
-    }
   });
 });
 
@@ -1230,7 +1216,7 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
   });
 
   it("cron の scheduled・RaceDay・result-dispatch・他の DO は、検証の DO を参照しない", () => {
-    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "migration-do.ts", "migration-core.ts", "result-backfill-do.ts", "result-backfill-core.ts"]) {
+    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts"]) {
       const code = stripCode(readTextLf("cloud", "src", f));
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は検証を参照しない`).not.toMatch(/VERIFY_REPORT|VerifyReport|verify-core|verify-do|verify-store/);
@@ -1404,7 +1390,7 @@ describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkei
   });
 
   it("cron の scheduled・RaceDay・result-dispatch・他の DO は、書き出しの DO を参照しない。route-policy は管理者専用の行を持つ", () => {
-    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "migration-do.ts", "migration-core.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "daily-report-do.ts"]) {
+    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "daily-report-do.ts"]) {
       const code = stripCode(readTextLf("cloud", "src", f));
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は書き出しを参照しない`).not.toMatch(/PRIOR_EXPORT|PriorExport|prior-export/);
@@ -1546,7 +1532,7 @@ describe("Issue #279・#280: 月報(MonthlyReportDO)は netkeiba に出ず、LLM
   });
 
   it("他の DO(日報・検証・日単位・結果の補完・移行・書き出し)と日報のソースは、月報を参照しない(干渉しない。アラームは DO ごとに 1 つ)", () => {
-    for (const f of ["daily-report-core.ts", "daily-report-do.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "migration-do.ts", "migration-core.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "prior-export-do.ts"]) {
+    for (const f of ["daily-report-core.ts", "daily-report-do.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "prior-export-do.ts"]) {
       const code = stripCode(readTextLf("cloud", "src", f));
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は月報を参照しない`).not.toMatch(/MONTHLY_REPORT|MonthlyReport|monthly-report/);

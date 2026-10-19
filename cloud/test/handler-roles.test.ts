@@ -39,7 +39,6 @@ function throwingBackends(): Record<string, unknown> {
   return {
     NETKEIBA_GATE: { idFromName: boom, get: boom },
     RACE_DAY: { idFromName: boom, get: boom },
-    CLOUD_MIGRATION: { idFromName: boom, get: boom },
     RESULT_BACKFILL: { idFromName: boom, get: boom },
     VERIFY_REPORT: { idFromName: boom, get: boom },
     PRIOR_EXPORT: { idFromName: boom, get: boom },
@@ -97,8 +96,6 @@ const ROUTES: readonly { readonly sample: string; readonly viewer: readonly stri
   { sample: "/api/analyses/run/bulk", viewer: [] }, // Issue #251
   { sample: "/api/results/import", viewer: [] },
   { sample: "/api/results/backfill", viewer: [] },
-  { sample: "/api/migration", viewer: [] },
-  { sample: "/api/migration/upload", viewer: [] },
   { sample: "/api/reports/run", viewer: [] },
   { sample: "/api/monthly-reports/run", viewer: [] }, // Issue #280
   { sample: "/api/export/prior-dataset", viewer: [] }, // Issue #266
@@ -122,10 +119,10 @@ async function call(env: Env, deps: Parameters<typeof handle>[3], req: Request):
 describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-only。裏側にもリクエスト本文にも触れない", () => {
   const cases = ROUTES.flatMap((r) => METHODS.filter((m) => !r.viewer.includes(m)).map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者が管理者専用に当たる組は 171 通り(33 ルート × 6 method = 198 から、閲覧者に許す 27 を引く)", () => {
-    expect(ROUTES).toHaveLength(33);
+  it("前提: 閲覧者が管理者専用に当たる組は 159 通り(31 ルート × 6 method = 186 から、閲覧者に許す 27 を引く)", () => {
+    expect(ROUTES).toHaveLength(31);
     expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(27);
-    expect(cases).toHaveLength(171);
+    expect(cases).toHaveLength(159);
   });
 
   it.each(cases)("%s %s → 403(本文は admin-only の固定)。バインディングに触れず、本文を読まない", async (method, path) => {

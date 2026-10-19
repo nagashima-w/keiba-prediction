@@ -24,7 +24,6 @@ import {
   type CloudSettings,
 } from "../src/settings";
 import type { SettingsSource } from "./api-settings";
-import { MIGRATION_SETTINGS_SECTION } from "./migration-model";
 import { buildPreviewText } from "./prompt-preview";
 
 export type FieldKey = keyof CloudSettings;
@@ -205,8 +204,6 @@ export interface SettingsModel {
   readonly weights: WeightsModel | null;
   /** プロンプトのプレビュー(Issue #201)。下書きを取得できていないとき(項目が出ないとき)は null。 */
   readonly preview: PreviewModel | null;
-  /** 「exe から移行」の節(Issue #222。要点と移行の画面へのリンク。設定の取得の成否によらず出す)。 */
-  readonly migration: typeof MIGRATION_SETTINGS_SECTION;
 }
 
 const COMBO_NAME = "ワイド・馬連・馬単・三連複・三連単・枠連";
@@ -397,6 +394,5 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
     fields,
     weights,
     preview: ready ? buildPreviewModel(draft, input.previewOpen === true) : null,
-    migration: MIGRATION_SETTINGS_SECTION,
   };
 }

@@ -132,10 +132,10 @@ describe("保存の文: 補修の記録があるときも、UPDATE は1文のま
 
   it("記録だけ: +1 文で mark_repair_json だけを更新する。何も無ければ、これまでと同じ 6 文(配分あり)", () => {
     const f = fake();
-    expect(buildSaveStatements(f.db, mkRecord(1), YM, null, null, null, null)).toHaveLength(6);
+    expect(buildSaveStatements(f.db, mkRecord(1), YM, null, null, null)).toHaveLength(6);
     expect(f.statements.some((st) => /mark_repair_json/.test(st.sql))).toBe(false);
     const g = fake();
-    expect(buildSaveStatements(g.db, mkRecord(1), YM, null, null, null, REPAIR_JSON)).toHaveLength(7);
+    expect(buildSaveStatements(g.db, mkRecord(1), YM, null, null, REPAIR_JSON)).toHaveLength(7);
     const update = g.statements.filter((st) => /mark_repair_json/.test(st.sql));
     expect(update).toHaveLength(1);
     expect(update[0]!.sql).toBe(`UPDATE analyses SET mark_repair_json = ? ${where}`);
@@ -144,7 +144,7 @@ describe("保存の文: 補修の記録があるときも、UPDATE は1文のま
 
   it("理由 + 記録: 1文で llm_note と mark_repair_json を更新(束縛値の順は SET の列の順)", () => {
     const f = fake();
-    expect(buildSaveStatements(f.db, mkRecord(1), YM, NOTE, null, null, REPAIR_JSON)).toHaveLength(7);
+    expect(buildSaveStatements(f.db, mkRecord(1), YM, NOTE, null, REPAIR_JSON)).toHaveLength(7);
     const update = f.statements.filter((st) => /llm_note|mark_repair_json/.test(st.sql));
     expect(update).toHaveLength(1);
     expect(update[0]!.sql).toBe(`UPDATE analyses SET llm_note = ?, mark_repair_json = ? ${where}`);
@@ -153,7 +153,7 @@ describe("保存の文: 補修の記録があるときも、UPDATE は1文のま
 
   it("3つ全部: 1文で llm_note・llm_calls_json・mark_repair_json。配分ありで 7・なしで 5。INSERT の位置は変わらず、UPDATE は馬の前", () => {
     const f = fake();
-    expect(buildSaveStatements(f.db, mkRecord(1), YM, NOTE, CALLS_JSON, null, REPAIR_JSON)).toHaveLength(7);
+    expect(buildSaveStatements(f.db, mkRecord(1), YM, NOTE, CALLS_JSON, REPAIR_JSON)).toHaveLength(7);
     const update = f.statements.filter((st) => /SET llm_note/.test(st.sql));
     expect(update).toHaveLength(1);
     expect(update[0]!.sql).toBe(`UPDATE analyses SET llm_note = ?, llm_calls_json = ?, mark_repair_json = ? ${where}`);
@@ -163,13 +163,13 @@ describe("保存の文: 補修の記録があるときも、UPDATE は1文のま
     expect(order.indexOf("update")).toBeGreaterThan(order.indexOf("analyses"));
     expect(order.indexOf("update")).toBeLessThan(order.indexOf("horses"));
     const g = fake();
-    expect(buildSaveStatements(g.db, mkRecord(1, false), YM, NOTE, CALLS_JSON, null, REPAIR_JSON)).toHaveLength(5);
+    expect(buildSaveStatements(g.db, mkRecord(1, false), YM, NOTE, CALLS_JSON, REPAIR_JSON)).toHaveLength(5);
   });
 
   it("記録が無い保存では、mark_repair_json を SQL に出さない(列が無い旧スキーマでも、補修の無い分析の保存は壊れない)", () => {
     for (const [note, calls] of [[null, null], [NOTE, null], [null, CALLS_JSON], [NOTE, CALLS_JSON]] as const) {
       const f = fake();
-      buildSaveStatements(f.db, mkRecord(1), YM, note, calls, null, null);
+      buildSaveStatements(f.db, mkRecord(1), YM, note, calls, null);
       expect(f.statements.some((st) => /mark_repair_json/.test(st.sql)), `${note}/${calls}`).toBe(false);
     }
   });

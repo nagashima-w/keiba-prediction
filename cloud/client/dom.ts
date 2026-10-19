@@ -8,10 +8,8 @@
  *  - `value`: `input`・`textarea` はプロパティ(HTML として解釈しない・改行をそのまま入れる)。`select` は **option を子に入れたあと**にプロパティで設定する(先だと選ばれない)。`option` は属性。
  *  - `checked`: `input` のプロパティ(属性にはしない)。`input` 以外に付けると投げる。
  *  - `inputmode`: `numeric`・`decimal`・`text` だけ。`maxlength`: 1〜5桁の数字だけ。それ以外は投げる。
- * Issue #222(移行画面)で足した許可:
- *  - 要素 `progress`(属性 `value`・`max` は数字だけ。`max` は progress だけ)。
- *  - 属性 `accept`(`input type="file"` だけ。値は拡張子・MIME の並び〈`.gz,application/gzip` 形式〉だけ)。
- *  - イベント `on.file`(`input type="file"` だけ。`change` で、選ばれた最初の File〈無ければ null〉を渡す。`value`〈偽のパス〉は読まない)。
+ * Issue #222(移行画面)で足した許可のうち、要素 `progress`(属性 `value`・`max` は数字だけ。`max` は progress だけ)は、検証画面が使うので残している。
+ * 属性 `accept` と イベント `on.file`(`input type="file"`)は、移行画面の廃止(Issue #394)で外した。
  * Issue #311(レース再生)で足した `canvas` は、Issue #362 でレース再生を廃止したので許可から外した(想定隊列図は div・span と `data-*` で描く)。
  */
 import type { VNode } from "./vnode";
@@ -24,13 +22,6 @@ export interface DomElement {
   checked?: boolean;
 }
 
-/** `change` イベントの target のうち、ここで読む部分。 */
-interface ChangeTarget {
-  value?: unknown;
-  checked?: unknown;
-  files?: ArrayLike<unknown> | null;
-}
-
 export interface DomDocument {
   createElement(tag: string): DomElement;
   createTextNode(text: string): unknown;
@@ -41,9 +32,7 @@ export interface DomRoot {
 }
 
 const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress"]);
-const ALLOWED_ATTRS = new Set(["class", "type", "value", "disabled", "href", "role", "checked", "inputmode", "maxlength", "accept", "max"]);
-/** `accept` の値: 拡張子(`.gz`)・MIME(`application/gzip`)をカンマで並べたもの。 */
-const ACCEPT_PATTERN = /^(?:\.[a-z0-9]{1,10}|[a-z]+\/[a-z0-9.+-]{1,40})(?:,(?:\.[a-z0-9]{1,10}|[a-z]+\/[a-z0-9.+-]{1,40})){0,5}$/;
+const ALLOWED_ATTRS = new Set(["class", "type", "value", "disabled", "href", "role", "checked", "inputmode", "maxlength", "max"]);
 const ALLOWED_INPUTMODES = new Set(["numeric", "decimal", "text"]);
 
 function attrAllowed(name: string): boolean {
@@ -82,9 +71,6 @@ function build(doc: DomDocument, node: VNode | string): unknown {
     if (name === "maxlength" && !/^[0-9]{1,5}$/.test(String(value))) {
       throw new Error("maxlength は 1〜5 桁の数字だけです");
     }
-    if (name === "accept" && (node.tag !== "input" || node.attrs?.["type"] !== "file" || typeof value !== "string" || !ACCEPT_PATTERN.test(value))) {
-      throw new Error("accept は input type=file の、拡張子・MIME の並びだけです");
-    }
     if (name === "max" && node.tag !== "progress") {
       throw new Error("max は progress だけです");
     }
@@ -119,17 +105,6 @@ function build(doc: DomDocument, node: VNode | string): unknown {
     el.addEventListener("change", (event: { target?: { value?: unknown; checked?: unknown } }) =>
       change(isCheckbox ? (event.target?.checked === true ? "true" : "false") : String(event.target?.value ?? "")),
     );
-  }
-  if (on?.file !== undefined) {
-    if (node.tag !== "input" || node.attrs?.["type"] !== "file") {
-      throw new Error("on.file は input type=file だけです");
-    }
-    const file = on.file;
-    // 選ばれた最初のファイルだけを渡す(value は偽のパスなので読まない)。
-    el.addEventListener("change", (event: { target?: ChangeTarget }) => {
-      const files = event.target?.files;
-      file(files !== undefined && files !== null && files.length > 0 ? (files[0] as Parameters<typeof file>[0]) : null);
-    });
   }
   if (on?.input !== undefined) {
     const input = on.input;

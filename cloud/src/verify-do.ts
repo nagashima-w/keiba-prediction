@@ -8,7 +8,7 @@
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v5)に固定される。クラスの名前は `VerifyReportDO`(binding は `VERIFY_REPORT`)。
  */
 import { DurableObject } from "cloudflare:workers";
-import { parseLimitOverride } from "./migration-core";
+import { parseLimitOverride } from "./limit-override";
 import { VerifyCore, VERIFY_DAILY_LIMIT, VERIFY_MIN_INTERVAL_MS, type GetReportOptions, type VerifyResponse, type ViewerVerifyResponse } from "./verify-core";
 import { D1VerifyStore, type VerifyBucket, type VerifyDb } from "./verify-store";
 import type { VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";

@@ -41,6 +41,7 @@ import type { ConnectFn, SocketLike } from "./src/socket-fetch";
 import type { Env } from "./src/handler";
 import { runCloudAnalysis } from "./src/pipeline";
 import { RaceDay } from "./src/race-day-do";
+import { D1AnalysisStore } from "./src/analysis-repository";
 import { D1ResultStore } from "./src/result-repository";
 import worker from "./src/worker";
 
@@ -225,7 +226,8 @@ async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function smokeAnalysis(): Promise<Response> {
+/** フィクスチャのレース(中央 202603020211)を、smoke の golden と同じ固定の条件で分析し、保存されるレコードを集める(保存の関数は集めるだけ)。 */
+async function runSmokeAnalysis(): Promise<{ readonly result: Awaited<ReturnType<typeof runCloudAnalysis>>; readonly saved: AnalysisRecord[] }> {
   const fixedNow = (): Date => new Date("2026-06-28T12:00:00.000Z");
   const raceId = parseRaceId("202603020211");
   const race = await scrapeRace(
@@ -256,6 +258,11 @@ async function smokeAnalysis(): Promise<Response> {
     llmSkipReason: "golden: LLM なし",
     now: fixedNow,
   });
+  return { result, saved };
+}
+
+async function smokeAnalysis(): Promise<Response> {
+  const { result, saved } = await runSmokeAnalysis();
   const record = saved[0];
   return Response.json({
     ok: true,
@@ -273,7 +280,7 @@ async function smokeAnalysis(): Promise<Response> {
 
 /** 日単位の DO(Issue #177)。本番の入口(#180)はまだ無いので、smoke だけが RPC を呼ぶ。 */
 export { RaceDay };
-// Issue #216: 移行の DO(本番の worker.ts と同じもの。偽ソケットも netkeiba への経路も持たない)。wrangler は binding のクラスが入口から export されていることを要求する。
+// Issue #216・#394: 移行の DO の空の殻(本番の worker.ts と同じもの。binding は無いが、wrangler.toml の migration v3 が指すクラスなので入口から export する)。
 export { CloudMigration } from "./src/migration-do";
 export { ResultBackfill } from "./src/result-backfill-do";
 export { VerifyReportDO } from "./src/verify-do";
@@ -345,6 +352,40 @@ async function smokeResults(url: URL, env: SmokeEnv): Promise<Response> {
 }
 
 /**
+ * Issue #394: 保存済みの分析・結果を材料にした確認(一覧の並び・詳細・今日の狙い目・検証・統計モデル用の書き出し・結果の補完の集計)のための材料の投入。smoke 専用
+ * (認証の関門の前に置く。netkeiba にも Anthropic にも出ない)。もとは移行ファイルの取り込みがその材料を入れていたが、移行を廃止したので、**本番と同じ保存経路**
+ * (`D1AnalysisStore.saveAnalysis`: D1 の batch + R2 の詳細)で入れる。
+ *  - 分析 5 件: フィクスチャのレースの分析(`runSmokeAnalysis`)のレコードを、レースID・分析日時・開催日(5 件とも 20260302)だけ変えて保存する。
+ *    3 レース(202603020211 を 2 件・202603020212 を 1 件・202603030101 を 2 件)。**保存の順は分析日時の順とずらす**(id の順 ≠ 分析日時の順。一覧が分析日時の降順であることの確認の材料)。
+ *    `start_time` は書かれない(NULL)ので、検証の DO が R2 の詳細から写す経路も通る。
+ *  - 結果 2 レース(202603020211・202603020212。1 着の馬の行だけ)。202603030101 は結果が無く、結果の補完の「未取込」に数えられる。
+ */
+async function smokeSeedAnalyses(env: SmokeEnv): Promise<Response> {
+  const { saved } = await runSmokeAnalysis();
+  const base = saved[0];
+  if (base === undefined) {
+    return Response.json({ ok: false, error: "record がありません" }, { status: 500 });
+  }
+  const store = new D1AnalysisStore({ db: env.DB, bucket: env.ANALYSIS_DETAIL });
+  const specs: ReadonlyArray<readonly [string, string]> = [
+    ["202603030101", "2026-03-02T05:00:00.000Z"],
+    ["202603020212", "2026-03-02T03:00:00.000Z"],
+    ["202603020211", "2026-03-02T01:00:00.000Z"],
+    ["202603030101", "2026-03-02T04:00:00.000Z"],
+    ["202603020211", "2026-03-02T02:00:00.000Z"],
+  ];
+  const results: Array<{ id: number; detail: string }> = [];
+  for (const [raceId, analyzedAt] of specs) {
+    const outcome = await store.saveAnalysis({ ...base, raceId, analyzedAt, kaisaiDate: "20260302" });
+    results.push({ id: outcome.id, detail: outcome.detail });
+  }
+  for (const raceId of ["202603020211", "202603020212"]) {
+    await env.DB.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, place_payout) VALUES (?, 1, 1, 400, 150)").bind(raceId).run();
+  }
+  return Response.json({ ok: true, saved: results });
+}
+
+/**
  * Issue #279・#280: 月報の DO `MonthlyReportDO` を、workerd の実環境(本物の DO の SQLite・アラーム・D1)で通すための材料の投入。smoke 専用(認証の関門の前に置く。netkeiba にも Anthropic にも Discord にも出ない)。
  *  - `/smoke/monthly/seed?month=YYYYMM`: ローカルの D1 に、その月の分析を 2 件(月初と月末の開催日。版は別々)と、月初の分の結果(1 着の馬の行)を入れる。
  * 月報の作成・作り直しの依頼は、本番の入口(管理者の `POST /api/monthly-reports/run`)を smoke.ts が直接叩く(Issue #280。ここに RPC の近道は持たない)。
@@ -379,6 +420,13 @@ export default {
     if (url.pathname.startsWith("/smoke/race-day/")) {
       try {
         return await smokeRaceDay(url, env);
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
+    if (url.pathname === "/smoke/analyses/seed") {
+      try {
+        return await smokeSeedAnalyses(env);
       } catch (error) {
         return Response.json({ ok: false, error: String(error) }, { status: 500 });
       }

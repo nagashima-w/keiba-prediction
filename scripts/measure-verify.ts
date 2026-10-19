@@ -12,7 +12,7 @@
  *       kv に保存する値の概算(3 区分の `report` の JSON + `promptVersions` の JSON。構造化複製の実サイズではなく JSON の長さ)
  *
  * 合成データ: 詳細(race_snapshot_json・contributions_json・raw_response)は `scripts/measure-d1-size.ts` と同じ実フィクスチャ(中央 16 頭の 202603020211・LLM の実応答 36 本)から作り、
- * 小数の値を固定の種で別の値にする(`measure-migration-import.ts` と同じ)。**乱数は固定の種で、同じ引数なら同じデータ**。分析の `historyCutoffDate` は `--legacy-ratio`(既定 0.7)の割合で NULL
+ * 小数の値を固定の種で別の値にする(`synthetic-random.ts`。Issue #394 で `measure-migration-import.ts` から移した)。**乱数は固定の種で、同じ引数なら同じデータ**。分析の `historyCutoffDate` は `--legacy-ratio`(既定 0.7)の割合で NULL
  * (旧い exe 由来の遮断なし=先読み判定が発走時刻を読む行)。レース ID は中央 70%・地方 30%(区分の絞り込みが効く形)。1 レースに平均 1.7 件の分析。
  * 買い目の件数は **本番の `analysis_bets` の実数が未確認**なので `--bets`(既定 12)で変えて測る(読み取り行数の最大の不確定要素)。
  *
@@ -57,7 +57,7 @@ import type { AnalysisAllocationRecord, AnalysisRecord, RaceComboPayoutsSaveInpu
 import { buildComboOddsKeyFor, type ComboBetType } from "../packages/core/src/scraper/combo-odds-key.js";
 import { buildDetailText } from "./measure-d1-size.js";
 import { descendantsOf, parseProcStat } from "./measure-worker-cpu.js";
-import { perturbDecimals, seededRandom } from "./measure-migration-import.js";
+import { perturbDecimals, seededRandom } from "./synthetic-random.js";
 
 /** ローカルの D1・R2 のうち、シードに使う部分だけ(wrangler の `getPlatformProxy` の env。cloud の型を root の型検査に持ち込まないため、最小の形を自前で宣言する)。 */
 interface SeedStatement {

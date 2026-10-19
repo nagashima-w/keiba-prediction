@@ -27,7 +27,7 @@
  */
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { gunzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { compareWithFloatTolerance } from "./smoke-compare";
@@ -183,7 +183,7 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const monthly = await req(port, "GET", "/api/monthly-reports");
   check(`${label}: GET /api/monthly-reports は 200(月報は閲覧できる。Issue #279)・POST は 403(admin-only)`, monthly.status === 200 && parseJson(monthly.text)["ok"] === true && (await req(port, "POST", "/api/monthly-reports")).status === 403, `${monthly.status} ${monthly.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
@@ -206,8 +206,6 @@ async function expectAdmin(port: number, label: string, email: string): Promise<
   check(`${label}: GET /api/health は 200(管理者だけ)`, health.status === 200 && parseJson(health.text)["ok"] === true, `${health.status} ${health.text.slice(0, 80)}`);
   const settings = await req(port, "GET", "/api/settings");
   check(`${label}: GET /api/settings は 200(管理者だけ)`, settings.status === 200 && parseJson(settings.text)["ok"] === true, `${settings.status} ${settings.text.slice(0, 80)}`);
-  const migration = await req(port, "GET", "/api/migration");
-  check(`${label}: GET /api/migration は 200(管理者だけ)`, migration.status === 200 && parseJson(migration.text)["ok"] === true, `${migration.status} ${migration.text.slice(0, 80)}`);
   check(`${label}: GET /api/verify?venue=bad は 400(役割の関門を通って、入力の検証に届く)・GET /check は 200`, (await req(port, "GET", "/api/verify?venue=bad")).status === 400 && (await req(port, "GET", "/check")).status === 200);
   // Issue #263 の対照: 閲覧者は同じ状態(使える集計が無い)で not-computed だった。管理者は集計して ready を返す(本物の DO・D1。空の保存先なので集計対象は 0 件)。
   const verifyAdmin = await req(port, "GET", "/api/verify?venue=all");
@@ -226,7 +224,7 @@ async function expectAdmin(port: number, label: string, email: string): Promise<
 
 async function expectAllForbidden(port: number, label: string): Promise<void> {
   const bogus = { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" };
-  for (const [method, path] of [["GET", "/"], ["GET", "/app.js"], ["GET", "/check"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["GET", "/api/plan?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["POST", "/api/migration/upload"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
+  for (const [method, path] of [["GET", "/"], ["GET", "/app.js"], ["GET", "/check"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["GET", "/api/plan?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["GET", "/api/results/backfill"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path} は 403(本文は forbidden だけ)`, r.status === 403 && r.text === "forbidden", `${r.status} ${r.text.slice(0, 80)}`);
   }
@@ -245,6 +243,13 @@ async function main(): Promise<void> {
     await withWorker(BASE_PORT, [], async () => {
       await expectAllForbidden(BASE_PORT, "A(設定なし)");
     });
+
+    // 偽ソケット・smoke 専用エンドポイントを持つ入口(smoke-worker.ts。それ以外のリクエストは本番の worker.ts にそのまま渡す)の一時設定。E・F・G と、H(Issue #394。シードの投入)が使う。
+    const fakeBase = base.replace('main = "src/worker.ts"', 'main = "smoke-worker.ts"');
+    if (fakeBase === base) {
+      throw new Error('wrangler.toml に main = "src/worker.ts" が見つかりません(smoke の一時設定を作れません)');
+    }
+    writeFileSync(FAKE_CONFIG_PATH, `${fakeBase}\n[access.dev]\naud = "${AUD}"\n\n[access.dev.identity]\nemail = "${EMAIL}"\n`);
 
     // B. 正しい構成(ctx.access の aud・メールが secret 相当の設定と一致)。
     writeFileSync(CONFIG_PATH, injected(AUD));
@@ -296,67 +301,50 @@ async function main(): Promise<void> {
       await expectAdmin(port, "B(ADMIN_USER 未登録 = ACCESS_ALLOWED_EMAIL が管理者)", EMAIL);
     });
 
-    // H. (Issue #216)移行ファイルの受け取りと取り込み(本番の worker.ts。偽ソケットは使わない=netkeiba・LLM に出る経路が無い)。
-    //    exe の書き出しの実物(core のテストが今の書き出しと一致を固定しているファイル)を gzip で upload → 本物の DO `CloudMigration` が workerd で
-    //    検証 → アラームで取り込み(D1・R2)→ 完了。同じファイルをもう一度 upload しても重複しない。一覧は分析日時の降順。
-    await withWorker(BASE_PORT + 7, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+    // H. (Issue #394 で移行を廃止。もとは Issue #216 の「移行ファイルの受け取りと取り込み」で、下流の確認はその取り込みで入れた分析を材料にしていた)
+    //    保存済みの分析・結果を材料にした、本物の D1・R2・DO の確認。入口は smoke-worker.ts(シードの投入口だけを足した入口で、ほかのリクエストは本番の worker.ts にそのまま渡す。この節は取得に出ない=netkeiba・LLM に出る経路を使わない)。
+    //    材料は smoke-worker の `/smoke/analyses/seed` が、**本番と同じ保存経路**(`D1AnalysisStore.saveAnalysis`: D1 の batch + R2 の詳細)で入れる 5 件の分析と 2 レースの結果。
+    //    移行の API(/api/migration・/api/migration/upload)は廃止したので 404。一覧は分析日時の降順、詳細・今日の狙い目・検証・統計モデル用の書き出しが、その材料を読む。
+    await withWorker(BASE_PORT + 7, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 7;
-      const label = "H(移行)";
+      const label = "H(保存済みの分析)";
       const origin = `http://127.0.0.1:${port}`;
-      const golden = gzipSync(readFileSync(path.join("..", "packages", "core", "test", "fixtures", "cloud-migration-small.ndjson")));
-      const upload = (body: Uint8Array, headers: Record<string, string> = { Origin: origin, "Content-Type": "application/gzip" }) =>
-        fetch(`${origin}/api/migration/upload`, { method: "POST", headers, body, signal: AbortSignal.timeout(30_000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
-      const waitState = async (done: (j: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> => {
-        let last: Record<string, unknown> = {};
-        for (let i = 0; i < 120; i += 1) {
-          last = parseJson((await req(port, "GET", "/api/migration")).text);
-          if (done(last)) return last;
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-        return last;
+      const seed = async (): Promise<{ status: number; text: string }> => {
+        const r = await fetch(`${origin}/smoke/analyses/seed`, { signal: AbortSignal.timeout(60_000) });
+        return { status: r.status, text: await r.text() };
       };
-      const idle = await req(port, "GET", "/api/migration");
-      check(`${label}: GET /api/migration は 200 で state idle(本物の DO を通る)`, idle.status === 200 && parseJson(idle.text)["state"] === "idle" && parseJson(idle.text)["ok"] === true, `${idle.status} ${idle.text.slice(0, 160)}`);
-      check(`${label}: POST は Origin 無しで 403・Content-Type が違えば 415・HEAD/POST の取り違え(GET /upload・POST /api/migration)は 405`, (await upload(golden, { "Content-Type": "application/gzip" })).status === 403 && (await upload(golden, { Origin: origin, "Content-Type": "application/json" })).status === 415 && (await req(port, "GET", "/api/migration/upload")).status === 405 && (await req(port, "POST", "/api/migration")).status === 405);
+      const gone = [await req(port, "GET", "/api/migration"), await req(port, "GET", "/api/migration/upload"), await req(port, "POST", "/api/migration"), await req(port, "POST", "/api/migration/upload")];
+      check(`${label}: 廃止した移行の API(GET /api/migration・GET と POST の /api/migration/upload・POST /api/migration)は、管理者でも受け付けない(GET は 404、POST は 405)`, gone.map((r) => r.status).join(",") === "404,404,405,405", gone.map((r) => `${r.status}`).join(","));
 
-      // Issue #217: 結果の補完の進捗(本物の DO `ResultBackfill` が、移行の DO `CloudMigration` の状態を RPC で読む)。移行が完了するまでは waiting-migration。
+      // Issue #217: 結果の補完の進捗(本物の DO `ResultBackfill`。Issue #394 で移行の DO の状態を読まなくなったので、応答に migrationState が無い)。
       const backfillIdle = await req(port, "GET", "/api/results/backfill");
       const backfillIdleJson = parseJson(backfillIdle.text);
-      check(`${label}: GET /api/results/backfill は 200 で state disabled(smoke は補完を止めている)・移行の状態は idle(本物の DO 同士の RPC を通る)・残り 0・開催日不明 0・段階 2〈確定オッズ・人気。Issue #259〉の残り 0・補完済み 0(本物の D1 で段階 2 の集計の SQL が動く)・次の実行なし(アラームを張っていない)`, backfillIdle.status === 200 && backfillIdleJson["ok"] === true && backfillIdleJson["state"] === "disabled" && backfillIdleJson["migrationState"] === "idle" && backfillIdleJson["nextRunAt"] === null && backfillIdleJson["remaining"] === 0 && backfillIdleJson["undated"] === 0 && (backfillIdleJson["winOdds"] as { remaining: number; undated: number; filled: number } | undefined)?.remaining === 0 && (backfillIdleJson["winOdds"] as { filled: number }).filled === 0, `${backfillIdle.status} ${backfillIdle.text.slice(0, 300)}`);
+      check(`${label}: GET /api/results/backfill は 200 で state disabled(smoke は補完を止めている)・移行の状態の項目は無い(Issue #394)・残り 0・開催日不明 0・段階 2〈確定オッズ・人気。Issue #259〉の残り 0・補完済み 0(本物の D1 で段階 2 の集計の SQL が動く)・次の実行なし(アラームを張っていない)`, backfillIdle.status === 200 && backfillIdleJson["ok"] === true && backfillIdleJson["state"] === "disabled" && !("migrationState" in backfillIdleJson) && backfillIdleJson["nextRunAt"] === null && backfillIdleJson["remaining"] === 0 && backfillIdleJson["undated"] === 0 && (backfillIdleJson["winOdds"] as { remaining: number; undated: number; filled: number } | undefined)?.remaining === 0 && (backfillIdleJson["winOdds"] as { filled: number }).filled === 0, `${backfillIdle.status} ${backfillIdle.text.slice(0, 300)}`);
       check(`${label}: POST /api/results/backfill は 405(GET だけ)`, (await req(port, "POST", "/api/results/backfill")).status === 405);
 
-      const broken = await upload(golden.subarray(0, Math.floor(golden.length / 2)));
-      check(`${label}: 途中で切れたファイルは 202 で受け付けたあと、検証で failed(phase verify)。D1 には何も書かれない`, broken.status === 202, `${broken.status} ${broken.text.slice(0, 160)}`);
-      const failed = await waitState((j) => j["state"] === "failed");
-      const failure = failed["failure"] as { phase?: string } | null;
-      check(`${label}: 検証の失敗が状態に出る(failure.phase が verify)`, failed["state"] === "failed" && failure?.phase === "verify", JSON.stringify(failed).slice(0, 300));
-      check(`${label}: 検証に失敗したので、分析の一覧は空のまま`, (await req(port, "GET", "/api/analyses?limit=200")).text === JSON.stringify({ ok: true, analyses: [] }));
-
-      const first = await upload(golden);
-      check(`${label}: 正しいファイルは 202(進捗が返る)`, first.status === 202 && parseJson(first.text)["ok"] === true, `${first.status} ${first.text.slice(0, 160)}`);
-      const completed = await waitState((j) => j["state"] === "completed" || j["state"] === "failed");
-      const analyses = completed["analyses"] as { total: number; processed: number; imported: number } | undefined;
-      const results = completed["results"] as { total: number; processed: number } | undefined;
-      check(`${label}: 取り込みが完了する(分析 5 件・結果 5 レース。すべて新規)`, completed["state"] === "completed" && analyses?.total === 5 && analyses.processed === 5 && analyses.imported === 5 && results?.total === 5 && results.processed === 5, JSON.stringify(completed).slice(0, 400));
-      // 移行の完了後の補完の進捗。smoke は補完を止めているので、窓(JST 1:00〜6:00)の中で実行しても netkeiba に出ない(state は disabled のまま、アラームは張られない)。
+      check(`${label}: シードの前は、分析の一覧が空`, (await req(port, "GET", "/api/analyses?limit=200")).text === JSON.stringify({ ok: true, analyses: [] }));
+      const seeded = await seed();
+      const seededJson = parseJson(seeded.text);
+      check(`${label}: 本番と同じ保存経路(D1 + R2)で分析 5 件を保存し、その詳細は R2 に置かれた(すべて stored)。id の順と分析日時の順は逆転している(分析日時の降順の確認の材料)`, seeded.status === 200 && seededJson["ok"] === true && Array.isArray(seededJson["saved"]) && (seededJson["saved"] as { detail: string }[]).length === 5 && (seededJson["saved"] as { detail: string }[]).every((s) => s.detail === "stored"), `${seeded.status} ${seeded.text.slice(0, 300)}`);
+      // シードのあとの補完の進捗。smoke は補完を止めているので、窓(JST 1:00〜6:00)の中で実行しても netkeiba に出ない(state は disabled のまま、アラームは張られない)。
       const backfillDone = parseJson((await req(port, "GET", "/api/results/backfill")).text);
-      // golden の 202603030101 は、結果の行に馬の行が無い(組合せの取込記録だけ)ので、`race_results` に行が無く「未取込」と数えられる(残り 1)。開催日不明は 0(同じレースの別の分析に開催日がある)。
-      check(`${label}: 移行の完了後は migrationState completed・状態 disabled・残り 1・開催日不明 0・取得済み 0・取得できなかった 0・次の実行なし(golden の馬の行が無い 1 レースが未取込として数えられる。本物の DO 同士の RPC)`, backfillDone["migrationState"] === "completed" && backfillDone["state"] === "disabled" && backfillDone["remaining"] === 1 && backfillDone["undated"] === 0 && backfillDone["imported"] === 0 && (backfillDone["abandoned"] as { total: number }).total === 0 && typeof (backfillDone["winOdds"] as { remaining: number }).remaining === "number" && backfillDone["nextRunAt"] === null, JSON.stringify(backfillDone).slice(0, 400));
+      // シードは 3 レース(202603020211・202603020212・202603030101)の分析を入れ、結果は前の 2 レースだけ入れる。202603030101 は `race_results` に行が無く「未取込」と数えられる(残り 1)。開催日不明は 0(5 件とも開催日がある)。
+      check(`${label}: シードのあとも migrationState の項目は無く・状態 disabled・残り 1・開催日不明 0・取得済み 0・取得できなかった 0・次の実行なし(結果を入れていない 1 レースが未取込として数えられる)`, !("migrationState" in backfillDone) && backfillDone["state"] === "disabled" && backfillDone["remaining"] === 1 && backfillDone["undated"] === 0 && backfillDone["imported"] === 0 && (backfillDone["abandoned"] as { total: number }).total === 0 && typeof (backfillDone["winOdds"] as { remaining: number }).remaining === "number" && backfillDone["nextRunAt"] === null, JSON.stringify(backfillDone).slice(0, 400));
       const list = parseJson((await req(port, "GET", "/api/analyses?limit=200")).text);
       const items = list["analyses"] as { id: number; raceId: string; analyzedAt: string; kaisaiDate: string | null }[];
-      check(`${label}: 一覧に 5 件。分析日時の降順(id の順ではない)`, items.length === 5 && items.every((a, i) => i === 0 || items[i - 1]!.analyzedAt >= a.analyzedAt) && items[0]!.analyzedAt === "2026-03-02T05:00:00.000Z", JSON.stringify(items.map((a) => [a.id, a.analyzedAt])));
+      check(`${label}: 一覧に 5 件。分析日時の降順(id の順ではない: id は降順に並んでいない)`, items.length === 5 && items.every((a, i) => i === 0 || items[i - 1]!.analyzedAt >= a.analyzedAt) && items.some((a, i) => i > 0 && items[i - 1]!.id < a.id) && items[0]!.analyzedAt === "2026-03-02T05:00:00.000Z", JSON.stringify(items.map((a) => [a.id, a.analyzedAt])));
       const detail = await req(port, "GET", `/api/analyses/${items[items.length - 2]!.id}`);
       check(`${label}: 詳細(D1 + R2)が読める(detail present)`, detail.status === 200 && detail.text.includes('"detail":"present"'), `${detail.status} ${detail.text.slice(0, 200)}`);
 
-      // Issue #336: 今日の狙い目(本物の D1 と、本物の日単位の DO の getPlanProgress)。移行した分析のどれかの開催日で、200・形が揃い、分析済みの要約になる。R2 には触れない。
+      // Issue #336: 今日の狙い目(本物の D1 と、本物の日単位の DO の getPlanProgress)。保存した分析のどれかの開催日で、200・形が揃い、分析済みの要約になる。R2 には触れない。
       const targetsDate = items.map((a) => a.kaisaiDate?.replace(/\D/g, "") ?? "").find((d) => d.length === 8);
-      check(`${label}: 移行した分析に 8 桁の開催日がある(今日の狙い目の確認の前提)`, targetsDate !== undefined, JSON.stringify(items.map((a) => a.kaisaiDate)));
+      check(`${label}: 保存した分析に 8 桁の開催日がある(今日の狙い目の確認の前提)`, targetsDate !== undefined, JSON.stringify(items.map((a) => a.kaisaiDate)));
       const targetsMigrated = parseJson((await req(port, "GET", `/api/targets?kaisai_date=${targetsDate ?? "20260302"}`)).text);
-      check(`${label}: GET /api/targets は移行した分析の開催日で 200・要約が「分析済み N レース…」・races が配列(本物の D1・DO。計画が無いので発走時刻は null)`, targetsMigrated["ok"] === true && typeof targetsMigrated["summary"] === "string" && /^分析済み [1-9][0-9]* レース/.test(targetsMigrated["summary"] as string) && Array.isArray(targetsMigrated["races"]) && (targetsMigrated["races"] as { start_ms: unknown }[]).every((r) => r.start_ms === null) && (targetsMigrated["ledger"] === null || typeof targetsMigrated["ledger"] === "string") && (targetsMigrated["races"] as Record<string, unknown>[]).every((r) => "result_state" in r && "result" in r), JSON.stringify(targetsMigrated).slice(0, 300));
+      check(`${label}: GET /api/targets は保存した分析の開催日で 200・要約が「分析済み N レース…」・races が配列(本物の D1・DO。計画が無いので発走時刻は null)`, targetsMigrated["ok"] === true && typeof targetsMigrated["summary"] === "string" && /^分析済み [1-9][0-9]* レース/.test(targetsMigrated["summary"] as string) && Array.isArray(targetsMigrated["races"]) && (targetsMigrated["races"] as { start_ms: unknown }[]).every((r) => r.start_ms === null) && (targetsMigrated["ledger"] === null || typeof targetsMigrated["ledger"] === "string") && (targetsMigrated["races"] as Record<string, unknown>[]).every((r) => "result_state" in r && "result" in r), JSON.stringify(targetsMigrated).slice(0, 300));
       // Issue #361: 収支の途中経過は日単位の DO の RPC(getTargetsLedger)で計算する。計画が無い日は発走済みか分からないので読む=本物の DO・D1 で RPC と計算が動く(RPC が失敗すると行の result_state は null のままなので、行がある限り検出できる)。
       check(`${label}: 収支の途中経過(本物の DO の getTargetsLedger)が動く: 計画の無い日でも 200 で、ledger のキーがあり、一覧の行はすべて result_state を持つ(null でない)`, targetsMigrated["ok"] === true && "ledger" in targetsMigrated && (targetsMigrated["races"] as { result_state: unknown }[]).every((r) => r.result_state !== null), JSON.stringify(targetsMigrated).slice(0, 300));
 
-      // Issue #219: 検証の集計(本物の DO `VerifyReportDO`)。移行した 5 件は start_time が NULL なので、DO がアラームで R2 の詳細から写してから(preparing → ready)、本物の D1 を読んで集計する。
+      // Issue #219: 検証の集計(本物の DO `VerifyReportDO`)。保存した 5 件は start_time が NULL なので、DO がアラームで R2 の詳細から写してから(preparing → ready)、本物の D1 を読んで集計する。
       let verifyJson: Record<string, unknown> = {};
       let verifyPolls = 0;
       for (; verifyPolls < 120; verifyPolls += 1) {
@@ -395,11 +383,7 @@ async function main(): Promise<void> {
       check(`${label}: ?refresh=1 は作り直しを始めて 202。作成中の通常の GET は古いファイルを返さず 202(進捗)`, exportAgain.status === 202 && exportAgainDuring.status === 202 && parseJson(exportAgainDuring.text)["status"] === "building", `${exportAgain.status} ${exportAgainDuring.status} ${exportAgainDuring.text.slice(0, 120)}`);
       check(`${label}: GET /api/export/prior-dataset の POST は 405`, (await req(port, "POST", "/api/export/prior-dataset")).status === 405);
 
-      const second = await upload(golden);
-      check(`${label}: 同じファイルをもう一度 upload しても 202`, second.status === 202, `${second.status}`);
-      const again = await waitState((j) => (j["state"] === "completed" || j["state"] === "failed") && (j["analyses"] as { alreadyImported: number }).alreadyImported === 5);
-      check(`${label}: 2 回目は全件が取り込み済み(alreadyImported 5・imported 0)で完了。一覧は 5 件のまま`, again["state"] === "completed" && (again["analyses"] as { imported: number; alreadyImported: number }).imported === 0 && (parseJson((await req(port, "GET", "/api/analyses?limit=200")).text)["analyses"] as unknown[]).length === 5, JSON.stringify(again).slice(0, 300));
-      check(`${label}: 応答にメール・AUD・チーム名が含まれない`, ![first.text, second.text, JSON.stringify(completed)].join("\n").includes(EMAIL));
+      check(`${label}: シードの応答にメール・AUD・チーム名が含まれない`, !seeded.text.includes(EMAIL));
     });
 
     // C. (Issue #238)ACCESS_ALLOWED_EMAIL と違うアカウントでログインする = 閲覧者。旧: 全リクエストが 403。
@@ -427,12 +411,7 @@ async function main(): Promise<void> {
       await expectAllForbidden(BASE_PORT + 3, "D(AUD が違う)");
     });
 
-    // E. 偽ソケットで、確認用エンドポイントを通す(netkeiba へは出ない)。
-    const fakeBase = base.replace('main = "src/worker.ts"', 'main = "smoke-worker.ts"');
-    if (fakeBase === base) {
-      throw new Error('wrangler.toml に main = "src/worker.ts" が見つかりません(smoke の一時設定を作れません)');
-    }
-    writeFileSync(FAKE_CONFIG_PATH, `${fakeBase}\n[access.dev]\naud = "${AUD}"\n\n[access.dev.identity]\nemail = "${EMAIL}"\n`);
+    // E. 偽ソケットで、確認用エンドポイントを通す(netkeiba へは出ない)。一時設定(FAKE_CONFIG_PATH)は、H の前に作っている。
     await withWorker(BASE_PORT + 4, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 4;
       const label = "E(偽ソケット)";
