@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ProposedSummaryView, VerifyOutcome, VerifyReportView } from "../client/api-verify";
-import { exclusionRows, formatRate, formatUnknownBetTypeNotice, formatYen, PROPOSED_BET_LABELS, venueLabel } from "../client/verify-format";
+import { exclusionRows, formatRate, formatUnknownBetTypeNotice, formatYen, venueFilterLabel } from "../../packages/core/src/view/verify-format";
+import { PROPOSED_BET_LABELS } from "../client/verify-format";
 import { buildVerifyModel, type VerifyModelInput } from "../client/verify-model";
 import { breakdownFixture, calibrationFixture, closeFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
 
-/** Issue #219: 検証画面の表示用データ。数値の整形は exe と同じ(一致は scripts/test/cloud-verify-format.test.ts が exe の関数と比べる)。 */
+/** Issue #219: 検証画面の表示用データ。数値の整形は core の `view/verify-format.ts` を直接使う(Issue #397 R-3 で、client の複製と、一致を固定していた scripts/test/cloud-verify-format.test.ts をなくした。境界値は core の verify-format.test.ts が持つ)。 */
 
 const summary = (over: Partial<ProposedSummaryView> = {}): ProposedSummaryView => ({ betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0, refundedCount: 0, refundedStake: 0, flatStake: 0, flatReturn: 0, flatRecoveryRate: null, ...over });
 
@@ -56,7 +57,7 @@ describe("整形(exe と同じ)", () => {
     expect(formatYen(1234567)).toBe("1,234,567円");
   });
   it("区分の名前は 全体・中央のみ・地方のみ", () => {
-    expect(["all", "central", "nar"].map((v) => venueLabel(v as "all"))).toEqual(["全体", "中央のみ", "地方のみ"]);
+    expect(["all", "central", "nar"].map((v) => venueFilterLabel(v as "all"))).toEqual(["全体", "中央のみ", "地方のみ"]);
   });
   it("券種の並びは exe の内訳と同じ(複勝・単勝・ワイド・馬連・枠連・馬単・3連複・三連単)で、8 つすべて", () => {
     expect(PROPOSED_BET_LABELS.map((x) => x.label)).toEqual(["複勝", "単勝", "ワイド", "馬連", "枠連", "馬単", "3連複", "三連単"]);

@@ -9,6 +9,7 @@ import {
   additionalInstructionsSummary,
   calibrationBarWidthPercent,
   directionLabel,
+  exclusionRows,
   formatAdjustment,
   formatBinRange,
   formatExclusionSummary,
@@ -322,4 +323,182 @@ describe("verify画面の表示整形(純関数)", () => {
     });
   });
 
+});
+
+/**
+ * Issue #397(R-3): クラウド版の検証画面(`cloud/client`)の整形を、この core の実装 1 本に統合した。
+ * 統合前は `cloud/client/verify-format.ts` に同名・同出力の関数が複製されており、`scripts/test/cloud-verify-format.test.ts` が 2 つの出力の一致を固定していた。
+ * 実装が 1 つになれば一致は構造的に保証されるので、そのテストは消した。**そのテストが持っていた境界値の表だけを、ここへ期待値の直書き(golden)にして移した**
+ * (「2 つが同じ」ではなく「この入力ならこの文字列」を固定する。統合前の client 版・core 版の両方の出力と一致することを、移す前に確かめた)。
+ */
+describe("境界値の golden(#397 R-3。旧 cloud-verify-format.test.ts の表を引き継ぐ)", () => {
+  it.each([
+    [null, "-"],
+    [0, "0.0%"],
+    [0.0004, "0.0%"],
+    [0.05, "5.0%"],
+    [0.9603846, "96.0%"],
+    [1, "100.0%"],
+    [1.0525, "105.3%"],
+    [2.25, "225.0%"],
+    [12.3456, "1234.6%"],
+  ] as const)("formatRate(%s) は %s", (rate, expected) => {
+    expect(formatRate(rate)).toBe(expected);
+  });
+
+  it.each([
+    [0, "0円"],
+    [1, "1円"],
+    [999, "999円"],
+    [1000, "1,000円"],
+    [1060, "1,060円"],
+    [123456, "123,456円"],
+    [1234567, "1,234,567円"],
+    [4994.5, "4,994.5円"],
+  ] as const)("formatYen(%s) は %s", (amount, expected) => {
+    expect(formatYen(amount)).toBe(expected);
+  });
+
+  // 符号・0・-0・丸めの境目(0.00049 は +0.0、0.0005 は +0.1)。-0.0004 は「-0.0pt」になる(符号は値の符号で付き、丸めた結果の 0 でも消えない)。
+  it.each([
+    [null, "-"],
+    [0, "+0.0pt"],
+    [-0, "+0.0pt"],
+    [0.052, "+5.2pt"],
+    [-0.031, "-3.1pt"],
+    [0.0004, "+0.0pt"],
+    [-0.0004, "-0.0pt"],
+    [0.00049, "+0.0pt"],
+    [0.0005, "+0.1pt"],
+    [0.005, "+0.5pt"],
+    [-0.005, "-0.5pt"],
+    [0.1234, "+12.3pt"],
+    [1, "+100.0pt"],
+    [-1, "-100.0pt"],
+  ] as const)("formatAdjustment(%s) は %s", (value, expected) => {
+    expect(formatAdjustment(value)).toBe(expected);
+  });
+
+  it.each([
+    [null, "-"],
+    [0, "一致"],
+    [-0, "一致"],
+    [0.0001, "過信"],
+    [-0.0001, "過小評価"],
+    [0.2, "過信"],
+    [-0.2, "過小評価"],
+  ] as const)("overconfidenceLabel(%s) は %s", (gap, expected) => {
+    expect(overconfidenceLabel(gap)).toBe(expected);
+  });
+
+  it.each([
+    ["◎", "◎"],
+    ["〇", "〇"],
+    ["▲", "▲"],
+    ["△", "△"],
+    ["☆", "☆"],
+    ["注", "注"],
+    [null, "印なし"],
+  ] as const)("markLabel(%s) は %s", (mark, expected) => {
+    expect(markLabel(mark)).toBe(expected);
+  });
+
+  it("directionLabel は 3 方向で互いに異なるラベルになる", () => {
+    const labels = (["raised", "lowered", "unchanged"] as const).map((d) => directionLabel(d));
+    expect(labels).toEqual(["上げ", "下げ", "据え置き"]);
+    expect(new Set(labels).size).toBe(3);
+  });
+
+  it("formatBinRange は 20 帯(i/20〜(i+1)/20)すべてで、5% 刻みの別々のラベルになる", () => {
+    const bins = Array.from({ length: 20 }, (_, i) => ({ lowerBound: i / 20, upperBound: (i + 1) / 20, predictedCount: 0, placedCount: 0, actualPlaceRate: null }));
+    expect(bins).toHaveLength(20);
+    const labels = bins.map((bin) => formatBinRange(bin));
+    expect(labels).toEqual([
+      "0〜5%", "5〜10%", "10〜15%", "15〜20%", "20〜25%", "25〜30%", "30〜35%", "35〜40%", "40〜45%", "45〜50%",
+      "50〜55%", "55〜60%", "60〜65%", "65〜70%", "70〜75%", "75〜80%", "80〜85%", "85〜90%", "90〜95%", "95〜100%",
+    ]);
+    expect(new Set(labels).size).toBe(20);
+  });
+
+  it.each([
+    [null, 0],
+    [0, 0],
+    [0.0001, 0.01],
+    [0.417, 41.699999999999996],
+    [0.5, 50],
+    [1, 100],
+  ] as const)("calibrationBarWidthPercent(%s) は %s", (rate, expected) => {
+    expect(calibrationBarWidthPercent(rate)).toBe(expected);
+  });
+
+  it.each([
+    [null, "版不明"],
+    ["2026-10-09.2", "2026-10-09.2"],
+    ["2026-10-09.2-clip015", "2026-10-09.2-clip015"],
+    ["", ""],
+  ] as const)("promptVersionLabel(%j) は %j", (version, expected) => {
+    expect(promptVersionLabel(version)).toBe(expected);
+  });
+
+  describe("追加指示の要約・全文・見出し(30 文字の境目・null・空配列・極端に長い文)", () => {
+    const long30 = "あ".repeat(30);
+    const long31 = "あ".repeat(31);
+    const huge = "x".repeat(2000);
+    const cases: ReadonlyArray<{ readonly name: string; readonly list: readonly (string | null)[]; readonly summary: string; readonly full: string }> = [
+      { name: "空配列", list: [], summary: "なし", full: "なし" },
+      { name: "[null]", list: [null], summary: "なし", full: "なし" },
+      { name: "短い 1 件", list: ["指示A"], summary: "指示A", full: "指示A" },
+      { name: "ちょうど 30 文字は切らない", list: [long30], summary: long30, full: long30 },
+      { name: "31 文字は 30 文字+「…」に切る(全文は切らない)", list: [long31], summary: `${long30}…`, full: long31 },
+      { name: "指示と null の混在", list: ["b指示", null], summary: "b指示 / なし", full: "b指示 / なし" },
+      { name: "3 件", list: ["a", "b", "c"], summary: "a / b / c", full: "a / b / c" },
+      { name: "null と 2000 文字", list: [null, huge], summary: `なし / ${"x".repeat(30)}…`, full: `なし / ${huge}` },
+    ];
+    expect(cases).toHaveLength(8);
+
+    it.each(cases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
+      expect(additionalInstructionsSummary(c.list)).toBe(c.summary);
+      expect(additionalInstructionsFullText(c.list)).toBe(c.full);
+      expect(promptVersionCalibrationHeading(null, c.list)).toBe(`版不明 (追加指示: ${c.summary})`);
+      expect(promptVersionCalibrationHeading("2026-10-09.2", c.list)).toBe(`2026-10-09.2 (追加指示: ${c.summary})`);
+    });
+  });
+
+  it("formatUnknownBetTypeNotice: 券種コードが空配列でも、点数と賭け金合計の文を出す(0 点だけが null)", () => {
+    expect(formatUnknownBetTypeNotice({ count: 1, totalStake: 1234567, betTypes: [] })).toBe(
+      "未対応の券種コード()の買い目が1点 (賭け金合計1,234,567円)あり、回収率の集計から除外しています。",
+    );
+  });
+
+  // exclusionRows は #397 R-3 で cloud/client から core へ移した。formatExclusionSummary はこの行を ` / ` で連ねたもの(文言の定義は 1 か所)。
+  describe("exclusionRows(集計の内訳の行)", () => {
+    const counts = {
+      includedAnalysisCount: 11,
+      excludedAnalysisCount: 12,
+      supersededAnalysisCount: 13,
+      excludedEstimatedCount: 14,
+      excludedLookaheadSuspectCount: 15,
+      excludedLookaheadUnknownCount: 16,
+    };
+
+    it("6 項目が、この順序・このラベル・自分の件数で並ぶ(件数は全部異なる値で、ラベルの取り違えを検出する)", () => {
+      expect(exclusionRows(counts)).toEqual([
+        { label: "集計", value: "11件" },
+        { label: "結果未取込で除外", value: "12件" },
+        { label: "旧分析除外", value: "13件" },
+        { label: "発売前推定のため除外", value: "14件" },
+        { label: "リーク疑い(発走後に分析・先読み未遮断)のため除外", value: "15件" },
+        { label: "発走前後を判定できず除外", value: "16件" },
+      ]);
+    });
+
+    it("`label+value` を ` / ` で連ねたものが formatExclusionSummary と一致する(前提: 6 項目・件数が 0 でない)", () => {
+      const rows = exclusionRows(counts);
+      expect(rows).toHaveLength(6);
+      const report = verifyReport(counts);
+      const joined = rows.map((r) => `${r.label}${r.value}`).join(" / ");
+      expect(joined).toBe(formatExclusionSummary(report));
+      expect(joined).toContain("15件");
+    });
+  });
 });

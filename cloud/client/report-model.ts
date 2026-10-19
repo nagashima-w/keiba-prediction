@@ -1,6 +1,6 @@
 /**
  * 日報画面(`#report`・`#report=YYYYMMDD`)の表示用データ(Issue #235。純関数)。`view.ts` がこれを VNode にする。状態(一覧・本文・作成の依頼の状態)を受け取り、
- * 文言・数値の整形だけを行う(DOM・fetch・時計に触れない)。数値の整形は検証画面と同じ(`verify-format.ts`)。
+ * 文言・数値の整形だけを行う(DOM・fetch・時計に触れない)。数値の整形は検証画面と同じ(core の `view/verify-format.ts`)。
  *
  * **サーバ由来の「文」は、LLM が書いた文章(総括・良かった点・改善点・レースごとの一言・生の文章)だけ**を、そのまま(テキストとして)出す。それ以外の文言
  * (文章が無い理由・状態の説明)はすべてクライアントの固定の文言(サーバの `note` は読まない)。
@@ -11,7 +11,8 @@ import { buildMonthlyHash, buildReportHash } from "./route";
 import { formatExpectedHits } from "../src/expected-format";
 import { formatRecoveryPercent } from "../src/recovery-format";
 import { formatTemplateStat, TEMPLATE_LABELS, templateLabel } from "../src/whatif-format";
-import { formatYen, PROPOSED_BET_LABELS } from "./verify-format";
+import { formatYen } from "../../packages/core/src/view/verify-format";
+import { PROPOSED_BET_LABELS } from "./verify-format";
 
 /** 一覧(日付の並び)の状態。 */
 export type ReportListState =

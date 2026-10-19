@@ -1,6 +1,6 @@
 /**
  * 検証画面(`#verify`)の表示用データ(Issue #219。純関数)。`view.ts` がこれを VNode にする。状態(取得の状態・区分・通信中)を受け取り、文言・数値の整形・注記を導く
- * (DOM・fetch・時計に触れない)。数値の整形は exe と同じ(`verify-format.ts`)。
+ * (DOM・fetch・時計に触れない)。数値の整形は core の `view/verify-format.ts` を直接使う(Issue #397 R-3)。
  *
  * **スマホ幅(360px 前後)で横に伸びない形**にする: exe が「/」区切りの 1 行で出していた内訳は、項目ごとの行に分ける(数値の 4 つ組は 2×2 のタイル)。横スクロールは使わない。
  * **サーバ由来の文は読まない**: 出す文言はすべてクライアントの固定の文言(サーバが返す日時・件数・券種コードは、整形して埋め込むだけ)。
@@ -23,11 +23,11 @@ import {
   formatYen,
   markLabel,
   overconfidenceLabel,
-  PROPOSED_BET_LABELS,
   promptVersionCalibrationHeading,
   promptVersionLabel,
-  venueLabel,
-} from "./verify-format";
+  venueFilterLabel,
+} from "../../packages/core/src/view/verify-format";
+import { PROPOSED_BET_LABELS } from "./verify-format";
 
 /** 取得の状態。 */
 export type VerifyLoadState =
@@ -581,7 +581,7 @@ export function buildVerifyModel(input: VerifyModelInput): VerifyModel {
   return {
     kind: "verify",
     backHref: "#",
-    venueTabs: (["all", "central", "nar"] as const).map((venue) => ({ venue, label: venueLabel(venue), current: venue === input.venue })),
+    venueTabs: (["all", "central", "nar"] as const).map((venue) => ({ venue, label: venueFilterLabel(venue), current: venue === input.venue })),
     loading: load.kind === "loading" || input.busy,
     canRefresh: input.admin,
     refreshDisabled: load.kind === "loading" || input.busy,

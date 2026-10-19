@@ -337,6 +337,7 @@ describe("cloud/client の閉包(型だけの import も含む。Issue #201)", (
     expect(names).toContain("view/allocation-proposal-view.ts");
     expect(names).toContain("view/bet-allocation-view.ts");
     expect(names).toContain("view/format.ts");
+    expect(names, "Issue #397 R-3: 検証画面の整形は core の view/verify-format.ts を直接 import する(client の複製をなくした)").toContain("view/verify-format.ts");
     expect(names).toContain("analysis/analysis-types.ts");
     expect(names).toContain("analysis/app-settings.ts");
     expect(outsideFiles.size).toBe(0);
