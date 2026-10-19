@@ -24,8 +24,7 @@ import {
   type CloudSettings,
 } from "../src/settings";
 import type { SettingsSource } from "./api-settings";
-import { MIGRATION_SETTINGS_SECTION } from "./migration-model";
-import { buildPreviewText } from "./prompt-preview";
+import { PREVIEW_FAILURE_TEXT, type PromptPreview } from "./api-prompt-preview";
 
 export type FieldKey = keyof CloudSettings;
 export type DraftValue = string | boolean;
@@ -149,9 +148,20 @@ export interface SettingsModelInput {
   readonly save: SettingsSaveState;
   /** プロンプトのプレビューを開いているか(Issue #201。省略は閉じている)。 */
   readonly previewOpen?: boolean;
+  /** プロンプトのプレビューの文面の取得の状態(Issue #396。文面はサーバが組み立てる)。開いていて、まだ取得を始めていない(省略)ときは取得中と同じ表示。 */
+  readonly previewFetch?: PreviewFetchState | null;
 }
 
-/** プロンプトのプレビューの表示用データ(Issue #201)。閉じているときは文面・注記・反映ボタンを持たない(文面は開いたときだけ組み立てる)。 */
+/**
+ * プレビューの文面の取得の状態(Issue #396)。`loading.previous` は、取り直している間も出し続ける前回の文面(最初の取得は null)。
+ * `error` は失敗(固定の文言を文面の場所に出す)。
+ */
+export type PreviewFetchState =
+  | { readonly kind: "loading"; readonly previous: PromptPreview | null }
+  | { readonly kind: "ready"; readonly preview: PromptPreview }
+  | { readonly kind: "error" };
+
+/** プロンプトのプレビューの表示用データ(Issue #201)。閉じているときは文面・注記・反映ボタンを持たない(文面は開いたときだけ取りに行く)。 */
 export interface PreviewModel {
   readonly open: boolean;
   readonly toggleLabel: string;
@@ -205,8 +215,6 @@ export interface SettingsModel {
   readonly weights: WeightsModel | null;
   /** プロンプトのプレビュー(Issue #201)。下書きを取得できていないとき(項目が出ないとき)は null。 */
   readonly preview: PreviewModel | null;
-  /** 「exe から移行」の節(Issue #222。要点と移行の画面へのリンク。設定の取得の成否によらず出す)。 */
-  readonly migration: typeof MIGRATION_SETTINGS_SECTION;
 }
 
 const COMBO_NAME = "ワイド・馬連・馬単・三連複・三連単・枠連";
@@ -336,21 +344,31 @@ const PREVIEW_NOTES: readonly string[] = [
   "当日の馬場の節【当日の馬場(朝の計測値)】(クッション値・含水率・使用コース・芝の状態の文章)は、中央のレースで、その日の朝の計測値が取得できているときだけ、【レース情報】の直後に足されます。このサンプルには含まれません。馬場状態(良・稍重など)は【レース情報】の値が正で、節の値は朝の計測時点のものです。",
 ];
 
-function buildPreviewModel(draft: SettingsDraft, open: boolean): PreviewModel {
+/** 最初の取得が終わるまで、文面の場所に出す固定の文言(Issue #396)。 */
+export const PREVIEW_LOADING_TEXT = "プロンプトのプレビューを組み立てています…";
+
+/**
+ * 文面はサーバが組み立てて返す(Issue #396。もとはここで `buildPromptPreview` を動かしていた)。取得中は前回の文面があればそれを出し続け(ちらつかせない)、無ければ固定の文言。
+ * 失敗は固定の文言(注記は静的な分だけ。切り詰めの注記・プロンプト版は文面に付くものなので出さない)。
+ */
+function buildPreviewModel(open: boolean, fetched: PreviewFetchState | null | undefined): PreviewModel {
   if (!open) {
     return { open: false, toggleLabel: PREVIEW_TOGGLE_OPEN, refreshLabel: null, notes: [], text: null };
   }
-  const preview = buildPreviewText({ additionalInstruction: String(draft.additionalInstruction), clipVariant: String(draft.clipVariant) });
+  const shown: PromptPreview | null = fetched?.kind === "ready" ? fetched.preview : fetched?.kind === "loading" ? fetched.previous : null;
   return {
     open: true,
     toggleLabel: PREVIEW_TOGGLE_CLOSE,
     refreshLabel: PREVIEW_REFRESH,
-    notes: [
-      ...PREVIEW_NOTES,
-      ...(preview.clamped ? [`追加指示が ${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)} 文字(UTF-16 の単位)を超えているため、先頭から切った文面が送られます(このプレビューも切った後の文面です)。`] : []),
-      `プロンプト版: ${preview.promptVersion}`,
-    ],
-    text: preview.text,
+    notes:
+      shown === null
+        ? PREVIEW_NOTES
+        : [
+            ...PREVIEW_NOTES,
+            ...(shown.clamped ? [`追加指示が ${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)} 文字(UTF-16 の単位)を超えているため、先頭から切った文面が送られます(このプレビューも切った後の文面です)。`] : []),
+            `プロンプト版: ${shown.promptVersion}`,
+          ],
+    text: shown !== null ? shown.text : fetched?.kind === "error" ? PREVIEW_FAILURE_TEXT : PREVIEW_LOADING_TEXT,
   };
 }
 
@@ -396,7 +414,6 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
     saveNotice: save.kind === "saved" ? { tone: "ok", text: SAVED_NOTICE } : save.kind === "error" ? { tone: "error", text: save.message } : null,
     fields,
     weights,
-    preview: ready ? buildPreviewModel(draft, input.previewOpen === true) : null,
-    migration: MIGRATION_SETTINGS_SECTION,
+    preview: ready ? buildPreviewModel(input.previewOpen === true, input.previewFetch) : null,
   };
 }

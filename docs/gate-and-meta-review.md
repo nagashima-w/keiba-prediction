@@ -91,6 +91,11 @@
   漏れを誰も検出できず、CI で初めて落ちた(当時の `packages/app` は #285 で削除済み。パスは 3c1664e のもの)。
   いまの実行場所は次のとおり: ルートの vitest は `scripts/test/**` だけを含む。packages/core のテストは
   ルートの `pnpm test`(`pnpm -r test` を含む)で、cloud のテストは `cd cloud && npx vitest run` で実行する。
+  **ただし確率の質の測定のテストは、Issue #395 で普段の `pnpm test` から外した**(ルートの `scripts/test/probability-quality-41-*.test.ts` と、
+  packages/core の `probability-quality`・`brier-quality-report`・`paired-brier-comparison` の 3 ファイル。一覧は `vitest.research-tests.ts`・
+  `packages/core/vitest.research-tests.ts`)。それらのテストは **`pnpm test:research`** で流す(型検査は外していない)。
+  `packages/core/src/ev/probability-quality*.ts` や `scripts/probability-quality-41*/` に触れるブリーフには、検証要件に `pnpm test:research` を入れる
+  (入れないと、普段の `pnpm test` が全緑でも、それらのテストは一度も走っていない)。件数を確かめるときは、`pnpm test` と `pnpm test:research` の合計で見る
   コマンドを指定するときは、**件数・ファイル数が増えたことまで**確かめさせる
 - **実装者の提案を採るときは、設定値の境界(最小値・最大値)と組み合わせて確かめる。** #204 では、
   ゲートが「昇格の時点でも `planPreRaceDue` を再利用して too-late を判定する」提案を採った。しかし

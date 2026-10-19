@@ -1,6 +1,6 @@
 /**
  * 結果の補完(Issue #217・#167-C。親は #167)。**純ロジック**(`cloudflare:workers` を import しない。Node でテストできる)。本物の `ctx.storage.sql`・時計・アラーム・D1・
- * 日単位の DO・移行の DO・gate は `result-backfill-do.ts`(DO `ResultBackfill`)が配線する。
+ * 日単位の DO・gate は `result-backfill-do.ts`(DO `ResultBackfill`)が配線する。
  *
  * ## 何をするか
  * exe から移した分析のうち、exe で結果を取り込まなかったレースは、移行後も `race_results` に行が無いまま残る。cron の自動取り込み(`result-dispatch.ts`)は前日までの 7 日(新しい 2 日)だけなので、
@@ -10,10 +10,10 @@
  * 日単位の DO が、gate 経由・キャッシュなし・1 レースずつ・最も低い優先度で、中央/地方のホストの違い(`raceResultUrl`)も含めて取得・保存する(`runResultStep`)。
  *
  * ## いつ動くか
- *  - **移行が `completed` のときだけ**。`idle`(一度も移行していない)・`failed` は何もしない(アラームも張らない。cron の `kick` が翌日に張り直す)。`verifying`・`importing`・`waiting-*` は 30 分おきに見直す。
- *    移行中に取ると、移行ファイルに入っている結果と重複して取得する無駄が出る・移行の D1 の書き込み予算と競合するため。
+ *  - **移行の状態は見ない**(Issue #394)。以前は移行の DO が `completed` のときだけ動かしていた(移行中に取ると、移行ファイルの結果と重複して取得する無駄が出る・移行の D1 の書き込み予算と競合するため)が、
+ *    移行機能の廃止で、その前提ごと外した。
  *  - **JST 01:00〜06:00 の間だけ**({@link BACKFILL_WINDOW_START_HOUR_JST}〜{@link BACKFILL_WINDOW_END_HOUR_JST}。開始を含み終了を含まない)。事前分析の cron(21:00・23:00 JST)・発走前の分析の時間帯を避ける。
- *    D1 の日次の書き込み枠(UTC 0:00 = JST 9:00 に戻る)の終わりに近いが、移行の予算(同じ UTC 日)が使い終わった後に動くので競合しない。
+ *    D1 の日次の書き込み枠(UTC 0:00 = JST 9:00 に戻る)の終わりに近い。
  *  - **1 晩 {@link BACKFILL_NIGHTLY_LIMIT} レースまで**、**1 回 {@link BACKFILL_CHUNK_SIZE} レースまで**(1 つの開催日だけ)。飛行中のチャンクは常に 1 つ: 日単位の DO は gate への呼び出しを 1 本に直列化するので、
  *    補完が gate に並べるのは同時に 1 本。当日の DO・cron が依頼した前日の DO と合わせても、gate の待ち行列の上限(8)に届かない。
  *  - **既存の自動実行より常に後回し**: 依頼の前に gate の状態を読み、ブレーカーが開いていれば解除の 1 分後まで待ち、待ちが {@link BACKFILL_GATE_BUSY_PENDING} 以上なら 5 分待つ。
@@ -54,7 +54,6 @@
  */
 import { jstKaisaiDate } from "./auto-run-plan";
 import { checkRaceDate } from "./race-date";
-import type { MigrationState } from "./migration-core";
 import type { ResultImportProgress } from "./race-day-core";
 import { addDaysToKaisaiDate, dispatchResultImports, errorKind, type DispatchStore, type ResultDayStub } from "./result-dispatch";
 import type { BackfillCounts, CountBackfillOptions, ListBackfillOptions, UnimportedRace, WinOddsBackfillCounts } from "./result-repository";
@@ -74,8 +73,6 @@ export const BACKFILL_CHUNK_SIZE = 30;
 export const BACKFILL_POLL_MS = 30_000;
 /** 飛行中のチャンクを待つ上限(ミリ秒)。日単位の DO は失敗するレースを 10 分おきに最大 3 回試す(約 20 分)ので、それに余裕を足した値。超えたら queued のまま stalled として数える。 */
 export const BACKFILL_INFLIGHT_MAX_MS = 40 * 60_000;
-/** 移行が進行中のとき、見直す間隔(ミリ秒)。 */
-export const BACKFILL_MIGRATION_POLL_MS = 30 * 60_000;
 /** gate の待ち(進行中 + 待ち)がこの数以上なら依頼しない。gate の待ち行列の上限(8)の半分。 */
 export const BACKFILL_GATE_BUSY_PENDING = 4;
 /** gate が混んでいるとき、見直す間隔(ミリ秒)。 */
@@ -101,7 +98,6 @@ const DAY_MS = 86_400_000;
 const PERMANENT_CLASSES: ReadonlySet<string> = new Set(["not-confirmed", "no-payout", "parse-error", "incomplete", "invalid-race"]);
 /** 晩数に数えない分類(gate の都合・依頼の失敗)。 */
 const DEFERRAL_CLASSES: ReadonlySet<string> = new Set(["blocked", "busy", "dispatch-failed"]);
-const BUSY_MIGRATION_STATES: readonly MigrationState[] = ["verifying", "importing", "waiting-budget", "waiting-r2"];
 
 /**
  * 補完を止める設定の判定(Worker の var `RESULT_BACKFILL_NIGHTLY_LIMIT`)。**文字列 `"0"`(前後の空白は無視)だけ**が「無効」。それ以外(未設定・空・数でない値・`"00"` など)は無効にしない
@@ -141,8 +137,6 @@ export interface BackfillDeps {
   readonly now: () => number;
   readonly setAlarm: (at: number) => void | Promise<void>;
   readonly getAlarm: () => Promise<number | null>;
-  /** 移行の DO の状態(`CloudMigration.getStatus().state`)。失敗は throw。 */
-  readonly migrationState: () => Promise<MigrationState>;
   /** gate の状態(ブレーカーの解除時刻・進行中 + 待ちの数)。失敗は throw。 */
   readonly gateStatus: () => Promise<{ readonly blockedUntil: number | null; readonly pending: number }>;
   readonly store: BackfillStore;
@@ -151,16 +145,14 @@ export interface BackfillDeps {
   readonly onWarn: (message: string) => void;
 }
 
-export type BackfillState = "disabled" | "waiting-migration" | "ready" | "running" | "paused" | "waiting-window" | "done";
+export type BackfillState = "disabled" | "ready" | "running" | "paused" | "waiting-window" | "done";
 
 export interface BackfillStatus {
   /**
-   * `disabled`: 止める設定(`RESULT_BACKFILL_NIGHTLY_LIMIT=0`)。自動では何も取り込まない / `waiting-migration`: 移行が完了していない(移行の状態を読めないときを含む) / `running`: チャンクが飛行中 / `done`: 残りが 0 /
+   * `disabled`: 止める設定(`RESULT_BACKFILL_NIGHTLY_LIMIT=0`)。自動では何も取り込まない / `running`: チャンクが飛行中 / `done`: 残りが 0 /
    * `paused`: その晩は止めている(gate の都合・依頼の失敗) / `waiting-window`: 窓の外、または 1 晩の上限に達した / `ready`: 窓の中で、次の依頼を待っている。
    */
   readonly state: BackfillState;
-  /** 移行の状態。読めなかったときは null。 */
-  readonly migrationState: MigrationState | null;
   /** 残り: 開催日があり、昨日(JST)以前で、結果が無く、永久に除外していないレースの数。 */
   readonly remaining: number;
   /** 開催日が分からず(`kaisai_date` が NULL)、補完の対象外のレースの数。 */
@@ -384,7 +376,7 @@ export class ResultBackfillCore {
 
   private async step(): Promise<void> {
     const startedAt = this.deps.now();
-    // 1. 飛行中のチャンクの進行を見る(窓の外でも、移行が進行中でも回収する: 依頼済みの分の記録を落とさない)。
+    // 1. 飛行中のチャンクの進行を見る(窓の外でも回収する: 依頼済みの分の記録を落とさない)。
     const inflight = this.loadInflight();
     if (inflight !== null && !(await this.harvest(inflight, startedAt))) {
       await this.setAlarm(startedAt + BACKFILL_POLL_MS);
@@ -392,22 +384,7 @@ export class ResultBackfillCore {
     }
     const now = this.deps.now();
 
-    // 2. 移行が完了しているか。
-    let migration: MigrationState;
-    try {
-      migration = await this.deps.migrationState();
-    } catch {
-      await this.setAlarm(now + BACKFILL_MIGRATION_POLL_MS);
-      return;
-    }
-    if (migration !== "completed") {
-      if (BUSY_MIGRATION_STATES.includes(migration)) {
-        await this.setAlarm(now + BACKFILL_MIGRATION_POLL_MS);
-      }
-      return; // idle・failed: アラームを張らない(cron の kick が翌日に張り直す)
-    }
-
-    // 3. 窓・その晩の停止・上限。
+    // 2. 窓・その晩の停止・上限。
     if (!inBackfillWindow(now, this.startHour, this.endHour)) {
       await this.setAlarm(nextBackfillWindowStart(now, false, this.startHour, this.endHour));
       return;
@@ -420,7 +397,7 @@ export class ResultBackfillCore {
       return;
     }
 
-    // 4. gate が混んでいたら引く(既存の自動実行が先)。
+    // 3. gate が混んでいたら引く(既存の自動実行が先)。
     let gate: { readonly blockedUntil: number | null; readonly pending: number };
     try {
       gate = await this.deps.gateStatus();
@@ -437,7 +414,7 @@ export class ResultBackfillCore {
       return;
     }
 
-    // 5. 列挙 → 日単位の DO に依頼(既存の dispatchResultImports。列挙だけを補完用に差し替える)。不正なレースは依頼の前に除外し、チャンクが全部不正だったら列挙し直す。
+    // 4. 列挙 → 日単位の DO に依頼(既存の dispatchResultImports。列挙だけを補完用に差し替える)。不正なレースは依頼の前に除外し、チャンクが全部不正だったら列挙し直す。
     //    段階 1(未取込の結果)が尽きたら(列挙が空で、不正な除外もなかったとき)、段階 2(確定の単勝オッズ・人気の補完。Issue #259)を同じ仕組みで列挙・依頼する。
     const to = addDaysToKaisaiDate(night, -1);
     const limit = Math.min(this.chunkSize, remainingTonight);
@@ -579,19 +556,13 @@ export class ResultBackfillCore {
 
   // ---- 観測 ----
 
-  /** 進捗(D1 を 1 回、移行の DO を 1 回読む。状態は変えない)。 */
+  /** 進捗(D1 を読む。状態は変えない)。 */
   async getStatus(): Promise<BackfillStatus> {
     const now = this.deps.now();
     const night = jstKaisaiDate(now);
     const to = addDaysToKaisaiDate(night, -1);
     const counts = await this.deps.store.countBackfill({ to, exclude: this.abandonedIds() });
     const oddsCounts = await this.deps.store.countWinOddsBackfill({ to, exclude: this.oddsExcludedIds() });
-    let migrationState: MigrationState | null = null;
-    try {
-      migrationState = await this.deps.migrationState();
-    } catch {
-      migrationState = null;
-    }
     const inflight = this.loadInflight();
     const dispatched = this.dispatchedTonight(night);
     const byClass: Record<string, number> = {};
@@ -610,8 +581,6 @@ export class ResultBackfillCore {
     let state: BackfillState;
     if (this.disabled) {
       state = "disabled";
-    } else if (migrationState !== "completed") {
-      state = "waiting-migration";
     } else if (inflight !== null) {
       state = "running";
     } else if (counts.dated === 0 && oddsCounts.dated === 0) {
@@ -626,7 +595,6 @@ export class ResultBackfillCore {
     const alarm = await this.deps.getAlarm();
     return {
       state,
-      migrationState,
       remaining: counts.dated,
       undated: counts.undated,
       imported: this.count("imported"),

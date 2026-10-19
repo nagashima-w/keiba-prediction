@@ -8,7 +8,7 @@
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v7)に固定される。クラスの名前は `PriorExportDO`(binding は `PRIOR_EXPORT`)。
  */
 import { DurableObject } from "cloudflare:workers";
-import { parseLimitOverride } from "./migration-core";
+import { parseLimitOverride } from "./limit-override";
 import { PriorExportCore, PRIOR_EXPORT_DAILY_LIMIT, type ExportMode, type ExportResponse } from "./prior-export-core";
 import { D1PriorExportStore, type PriorExportBucket, type PriorExportDb } from "./prior-export-store";
 

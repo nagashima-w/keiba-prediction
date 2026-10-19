@@ -22,8 +22,6 @@ if (root !== null) {
     // 追跡(Issue #186)のタイマーと可視状態。非表示の間は追跡を止め、表示に戻ったら即時に 1 回取って再開する。
     timers: { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle as number) },
     isVisible: () => document.visibilityState !== "hidden",
-    // 移行ファイルの検証(Issue #222)は主スレッドで展開・JSON.parse するので、一定時間ごとに描画・入力へ制御を返す。
-    yieldToUi: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
     // 役割(Issue #238)。サーバが `#app` の `data-role` で渡す。欠落・不明は閲覧者(管理者の入口を出さない)。画面で隠すのは補助で、拒否はサーバ側。
     role: roleFromAttribute(root.getAttribute("data-role")),
   });

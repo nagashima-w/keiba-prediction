@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DomDocument } from "../client/dom";
 import { mount } from "./support/dom-mount";
 import { buildListModel } from "../client/list";
-import { buildSettingsModel, draftFromSettings, FIELD_ORDER, setDraftValue, WEIGHT_FIELD_ORDER, type SettingsModelInput } from "../client/settings-form";
+import { buildSettingsModel, draftFromSettings, FIELD_ORDER, setDraftValue, WEIGHT_FIELD_ORDER, type PreviewFetchState, type SettingsModelInput } from "../client/settings-form";
 import { renderScreen, type ViewActions } from "../client/view";
 import type { VNode } from "../client/vnode";
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
@@ -294,7 +294,10 @@ describe("トップ(一覧)の設定への入口", () => {
   });
 });
 
-describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
+describe("Issue #201・#396: プロンプトのプレビュー(VNode。文面はサーバが組み立てて返すので、取得した文面を入力に渡す)", () => {
+  /** サーバが返した文面(改行を含む)の例。組み立てそのものは `prompt-preview.test.ts` が固定する。 */
+  const FETCHED: PreviewFetchState = { kind: "ready", preview: { text: "サンプルの文面\n1行目\n2行目", clamped: false, promptVersion: "v-test" } };
+  const OPEN = { previewOpen: true, previewFetch: FETCHED } as const;
   const toggle = (t: VNode): VNode[] => byClass(t, "preview-toggle");
   const refresh = (t: VNode): VNode[] => byClass(t, "preview-refresh");
   const body = (t: VNode): VNode[] => byClass(t, "prompt-preview");
@@ -311,7 +314,7 @@ describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
   });
 
   it("開いているとき: 開閉ボタン(aria-expanded=true・「閉じる」)・反映ボタン・注記・文面が出る", () => {
-    const t = tree({ previewOpen: true });
+    const t = tree({ ...OPEN });
     expect(toggle(t)[0]!.attrs?.["aria-expanded"]).toBe("true");
     expect(textOf(toggle(t)[0]!)).toBe("LLMへ送るプロンプトのプレビューを閉じる");
     expect(refresh(t).length).toBe(1);
@@ -321,18 +324,18 @@ describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
   });
 
   it("文面は、改行を含むそのままの文字列 1 つをテキストノードとして入れる(div。許可リストに pre は無い)。モデルの文面と一致する", () => {
-    const t = tree({ previewOpen: true });
-    const model = buildSettingsModel(input({ previewOpen: true }));
+    const t = tree({ ...OPEN });
+    const model = buildSettingsModel(input({ ...OPEN }));
     const node = body(t)[0]!;
     expect(node.tag).toBe("div");
     expect(node.children).toEqual([model.preview!.text!]);
     expect(model.preview!.text!).toContain("\n");
-    expect(model.preview!.text!).toContain("1行目\n2行目"); // CUSTOM の追加指示が文面に入っている
+    expect(model.preview!.text!).toBe("サンプルの文面\n1行目\n2行目"); // 取得した文面がそのまま入っている
   });
 
-  it("外から来た文字列(追加指示)は、文面の中でもテキストノードのまま。HTML として解釈される要素を作らない", () => {
+  it("外から来た文字列(追加指示を含む、サーバが返した文面)は、文面の中でもテキストノードのまま。HTML として解釈される要素を作らない", () => {
     const evil = `</div><script>alert(1)</script>`;
-    const t = tree({ previewOpen: true, draft: setDraftValue(draftFromSettings(CUSTOM), "additionalInstruction", evil) });
+    const t = tree({ previewOpen: true, previewFetch: { kind: "ready", preview: { text: `前${evil}後`, clamped: false, promptVersion: "v-test" } } });
     expect(findAll(t, (n) => n.tag === "script")).toEqual([]);
     expect(body(t)[0]!.children).toHaveLength(1);
     expect(String(body(t)[0]!.children![0])).toContain(evil);
@@ -342,7 +345,7 @@ describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
     const calls: boolean[] = [];
     const actions: ViewActions = { ...noopActions, onSettingsPreviewToggle: (open) => void calls.push(open) };
     toggle(tree({}, actions))[0]!.on!.click!();
-    toggle(tree({ previewOpen: true }, actions))[0]!.on!.click!();
+    toggle(tree({ ...OPEN }, actions))[0]!.on!.click!();
     expect(calls).toEqual([true, false]);
   });
 
@@ -350,7 +353,7 @@ describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
     const calls: boolean[] = [];
     const actions: ViewActions = { ...noopActions, onSettingsPreviewToggle: (open) => void calls.push(open) };
     const closed = toggle(tree({}, actions))[0]!;
-    const opened = toggle(tree({ previewOpen: true }, actions))[0]!;
+    const opened = toggle(tree({ ...OPEN }, actions))[0]!;
     expect([closed.attrs?.["data-open-after"], opened.attrs?.["data-open-after"]]).toEqual(["true", "false"]);
     closed.on!.click!();
     opened.on!.click!();
@@ -360,21 +363,21 @@ describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
   it("反映ボタンのクリックは onSettingsPreviewRefresh", () => {
     let n = 0;
     const actions: ViewActions = { ...noopActions, onSettingsPreviewRefresh: () => void (n += 1) };
-    refresh(tree({ previewOpen: true }, actions))[0]!.on!.click!();
+    refresh(tree({ ...OPEN }, actions))[0]!.on!.click!();
     expect(n).toBe(1);
   });
 
   it("保存中は開閉・反映のボタンも disabled。通常は disabled でない", () => {
-    const saving = tree({ previewOpen: true, save: { kind: "saving" } });
+    const saving = tree({ ...OPEN, save: { kind: "saving" } });
     expect(toggle(saving)[0]!.attrs?.["disabled"]).toBe(true);
     expect(refresh(saving)[0]!.attrs?.["disabled"]).toBe(true);
-    const normal = tree({ previewOpen: true });
+    const normal = tree({ ...OPEN });
     expect(toggle(normal)[0]!.attrs?.["disabled"]).toBeFalsy();
     expect(refresh(normal)[0]!.attrs?.["disabled"]).toBeFalsy();
   });
 
   it("プレビューは保存ボタンより後ろ(画面の末尾)にある。入力欄(data-field)は増えない(15 個のまま)", () => {
-    const t = tree({ previewOpen: true });
+    const t = tree({ ...OPEN });
     const top = t.children as VNode[];
     const saveIndex = top.findIndex((c) => typeof c !== "string" && (c.attrs?.["class"] === "settings-save"));
     const previewIndex = top.findIndex((c) => typeof c !== "string" && byClass(c, "preview-toggle").length > 0);
@@ -391,14 +394,15 @@ describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
   });
 
   it("許可リスト(dom.ts)の範囲で組める(開いているとき・閉じているとき)", () => {
-    expect(() => mountAll(tree({ previewOpen: true }))).not.toThrow();
+    expect(() => mountAll(tree({ ...OPEN }))).not.toThrow();
     expect(() => mountAll(tree({ previewOpen: false }))).not.toThrow();
   });
 
   it("開閉・文面の違いは木の JSON に出る(同じ木は DOM を触らないので、違いが木に出ていること)", () => {
     const closed = JSON.stringify(tree());
-    const opened = JSON.stringify(tree({ previewOpen: true }));
-    const other = JSON.stringify(tree({ previewOpen: true, draft: setDraftValue(draftFromSettings(CUSTOM), "additionalInstruction", "別の指示") }));
-    expect(new Set([closed, opened, other]).size).toBe(3);
+    const opened = JSON.stringify(tree({ ...OPEN }));
+    const other = JSON.stringify(tree({ previewOpen: true, previewFetch: { kind: "ready", preview: { text: "別の文面", clamped: false, promptVersion: "v-test" } } }));
+    const loading = JSON.stringify(tree({ previewOpen: true, previewFetch: { kind: "loading", previous: null } }));
+    expect(new Set([closed, opened, other, loading]).size).toBe(4);
   });
 });

@@ -45,14 +45,8 @@ class_name = "NetkeibaGate"
 name = "RACE_DAY"
 class_name = "RaceDay"
 
-# exe から移したファイルの取り込みの Durable Object(Issue #216〈#167-B1〉)。`idFromName("main")` の単一インスタンスが、アップロードされたファイル(R2)の検証と、
-# アラームでの少しずつの取り込み(D1 の書き込みの 1 日の上限・R2 の柵を尊重)を行う。日単位の DO とは別のインスタンス・別のアラームで、netkeiba には出ない。クラス名は migration に固定される。
-[[durable_objects.bindings]]
-name = "CLOUD_MIGRATION"
-class_name = "CloudMigration"
-
-# 移行したあとに結果が無いレースの結果を、自動で少しずつ取り込む Durable Object(Issue #217〈#167-C〉)。`idFromName("main")` の単一インスタンス。
-# 移行が完了してから、JST 1:00〜6:00 の間だけ、1 晩 150 レースまで、日単位の DO に結果の取り込みを依頼する(gate が混んでいれば引く)。cron の `scheduled` が毎日 kick してアラームを張る。
+# 結果が無いレースの結果を、自動で少しずつ取り込む Durable Object(Issue #217〈#167-C〉。Issue #394 で、移行の完了を待つ条件は外した)。`idFromName("main")` の単一インスタンス。
+# JST 1:00〜6:00 の間だけ、1 晩 150 レースまで、日単位の DO に結果の取り込みを依頼する(gate が混んでいれば引く)。cron の `scheduled` が毎日 kick してアラームを張る。
 # 取得は日単位の DO が行い、この DO は netkeiba に直接は出ない。クラス名は migration に固定される。
 [[durable_objects.bindings]]
 name = "RESULT_BACKFILL"
@@ -95,6 +89,9 @@ tag = "v2"
 new_sqlite_classes = ["RaceDay"]
 
 # 追加だけ(v1・v2 には触れない)。Issue #216。
+# ★Issue #394(#390 D-2)で、移行の機能・binding を廃止した。**この migration と `CloudMigration` クラス(src/migration-do.ts の空の殻。src/worker.ts が export する)は、意図して残している**:
+#   本番にはこのクラスの DO の namespace と保存データ(kv 3 キー)があり、クラスを消すには `deleted_classes` の migration が要る。それは本番の DO と保存データを不可逆に消す
+#   (Cloudflare のドキュメント: 削除のあとは、その版より前へロールバックできない)。完全削除は、別の Issue で、ユーザーの明示の承認を得てから行う。
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["CloudMigration"]

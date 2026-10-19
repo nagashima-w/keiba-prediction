@@ -70,9 +70,7 @@ import type {
   StoredAnalysis,
   StoredAnalysisHorse,
 } from "../../packages/core/src/ev/analysis-store-types.js";
-import type { SqlParams } from "../../packages/core/src/ev/analysis-store-codec.js";
 import type { AnalysisSaveExtra, RecentAnalysis } from "./analysis-save-extra";
-import type { AnalysisImport } from "./migration-convert";
 import { parseLlmCalls, serializeLlmCalls, type LlmCallRecord } from "./llm-calls";
 import { parseMarkRepair, serializeMarkRepair, type MarkRepairRecord } from "./mark-repair";
 export type { AnalysisSaveExtra, RecentAnalysis };
@@ -161,25 +159,6 @@ export interface R2UsageReport extends R2Usage {
   readonly readAllowed: boolean;
 }
 
-
-/** {@link D1AnalysisStore.saveMigratedAnalysis} の結果(Issue #216)。`queries` は D1 の問い合わせ(batch は文数で数える)+ R2 の操作の数(1 回の alarm の上限の計算に使う)。 */
-export type MigratedSaveOutcome =
-  | { readonly kind: "fenced"; readonly queries: number }
-  | { readonly kind: "saved"; readonly id: number; readonly detail: "stored" | "failed"; readonly rowsWritten: number; readonly queries: number };
-
-/** {@link D1AnalysisStore.repairDetail} の結果。 */
-export interface RepairOutcome {
-  readonly kind: "stored" | "failed" | "fenced";
-  readonly queries: number;
-}
-
-/** 取り込み済みの分析(exe の id で引いたもの)。 */
-export interface MigratedAnalysisRef {
-  readonly id: number;
-  readonly raceId: string;
-  readonly analyzedAt: string;
-}
-
 export interface AnalysisRepository {
   saveAnalysis(record: AnalysisRecord, extra?: AnalysisSaveExtra): Promise<SaveResult>;
   listAnalysisSummaries(filter?: AnalysisListFilter): Promise<AnalysisSummary[]>;
@@ -236,12 +215,6 @@ function updateExtrasSql(columns: readonly string[]): string {
   return `UPDATE analyses SET ${columns.map((c) => `${c} = ?`).join(", ")} WHERE id = ${NEW_ID}`;
 }
 const CLEAR_DETAIL_KEY_SQL = "UPDATE analyses SET detail_key = NULL WHERE id = ?";
-/** exe の分析 id(Issue #216。移行の冪等性の鍵)。`detail_key` の UPDATE と同じ形で、移行のときだけ直後に UPDATE する(core の codec の INSERT は変えない)。 */
-const UPDATE_EXE_ID_SQL = `UPDATE analyses SET exe_analysis_id = ? WHERE id = ${NEW_ID}`;
-/** 取り込み済みの分析を exe の id で引く(部分索引 `idx_analyses_exe_id` を使う。`IS NOT NULL` を添えないと索引が使われない)。束縛値は exe の id の配列の JSON 1 つ。 */
-const SELECT_MIGRATED_SQL = `SELECT id, exe_analysis_id AS exeId, race_id AS raceId, analyzed_at AS analyzedAt FROM analyses
-           WHERE exe_analysis_id IS NOT NULL AND exe_analysis_id IN (SELECT value FROM json_each(?))`;
-
 /** 今月の R2 の操作回数(柵の判定のための読み取り。書き込み行を増やさない)。 */
 const SELECT_R2_USAGE_SQL = "SELECT class_a AS classA, class_b AS classB FROM r2_ops WHERE ym = ?";
 /** Class A(書き込み)の +1。保存の batch の最初の文(月の行が無ければ作る)。 */
@@ -311,7 +284,7 @@ function listStatements(db: AnalysisDb, filter: AnalysisListFilter, limit: numbe
  *
  * テストが「batch を使わず逐次実行したときの対照」にも使うため export している。
  */
-export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: number | null, llmNote: string | null = null, llmCallsJson: string | null = null, migration: MigrationSaveOptions | null = null, markRepairJson: string | null = null): D1PreparedStatement[] {
+export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: number | null, llmNote: string | null = null, llmCallsJson: string | null = null, markRepairJson: string | null = null): D1PreparedStatement[] {
   const statements: D1PreparedStatement[] = [];
   if (ym !== null) {
     statements.push(db.prepare(COUNT_WRITE_SQL).bind(ym));
@@ -319,9 +292,6 @@ export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: num
   statements.push(db.prepare(INSERT_ANALYSIS_SQL).bind(...analysisParams({ ...rec, rawResponse: null, raceSnapshot: null })));
   if (ym !== null) {
     statements.push(db.prepare(UPDATE_DETAIL_KEY_SQL));
-  }
-  if (migration !== null) {
-    statements.push(db.prepare(UPDATE_EXE_ID_SQL).bind(migration.exeAnalysisId));
   }
   const extras: Array<readonly [string, string]> = [];
   if (llmNote !== null) extras.push(["llm_note", llmNote]);
@@ -333,19 +303,10 @@ export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: num
   // 馬: 1 文・bind 1 個(JSON の配列)。analysis_id(先頭)を除いた束縛値の並びは codec のもの。contributions は R2 なので null。
   statements.push(db.prepare(INSERT_HORSES_SQL).bind(JSON.stringify(rec.horses.map((h) => horseParams(0, { ...h, contributions: null }).slice(1)))));
   if (rec.allocation !== undefined) {
-    // 移行(Issue #216)は、行から直接作った束縛値で上書きする(record の meta を codec に通すと、NULL の設定列が 0 に潰れる。migration-convert.ts)。
-    statements.push(db.prepare(INSERT_META_SQL).bind(...(migration?.metaParams ?? allocationMetaParams(0, rec.allocation.meta).slice(1))));
+    statements.push(db.prepare(INSERT_META_SQL).bind(...allocationMetaParams(0, rec.allocation.meta).slice(1)));
     statements.push(db.prepare(INSERT_BETS_SQL).bind(JSON.stringify(rec.allocation.bets.map((b) => allocationBetParams(0, b).slice(1)))));
   }
   return statements;
-}
-
-/** 移行(Issue #216)の保存の追加指定。 */
-export interface MigrationSaveOptions {
-  /** exe の分析 id。`exe_analysis_id` の UPDATE を、detail_key の UPDATE の直後に1文足す(一意の索引に違反すれば batch 全体が巻き戻る)。 */
-  readonly exeAnalysisId: number;
-  /** 配分メタの束縛値(analysis_id を除く 23 値)。省略(null)は record の meta を codec に通す(web の保存と同じ)。 */
-  readonly metaParams: SqlParams | null;
 }
 
 /** {@link buildSaveStatements} の結果の中で、analyses の INSERT(採番された id を返す文)の位置。 */
@@ -409,7 +370,7 @@ export class D1AnalysisStore implements AnalysisRepository {
     // R2 の操作回数の柵(Class A)。達していたら、R2 に書かず D1 に要約だけを保存する(カウンタは増やさない)。
     const ym = monthKey(this.now());
     const writeYm = isWriteAllowed(await this.readUsage(ym)) ? ym : null;
-    const results = await this.db.batch(buildSaveStatements(this.db, record, writeYm, extra.llmNote, serializeLlmCalls(extra.llmCalls), null, serializeMarkRepair(extra.markRepair)));
+    const results = await this.db.batch(buildSaveStatements(this.db, record, writeYm, extra.llmNote, serializeLlmCalls(extra.llmCalls), serializeMarkRepair(extra.markRepair)));
     const id = results[analysesInsertIndex(writeYm)]?.meta.last_row_id;
     if (typeof id !== "number" || !(id > 0)) {
       throw new Error("analyses の採番 id を取得できませんでした");
@@ -432,78 +393,6 @@ export class D1AnalysisStore implements AnalysisRepository {
       // detail_key が残っても、読み出し側は R2 に無いオブジェクトを「詳細なし」として扱う。保存は失敗にしない。
     }
     return { id, detail: "failed" };
-  }
-
-
-  /**
-   * 詳細(R2)を put する(失敗なら最大 {@link DETAIL_PUT_RETRIES} 回まで再試行)。成功/失敗と、試みた回数。
-   */
-  private async putDetail(id: number, body: Uint8Array): Promise<{ readonly ok: boolean; readonly attempts: number }> {
-    const key = detailKeyOf(id);
-    for (let attempt = 0; attempt <= DETAIL_PUT_RETRIES; attempt += 1) {
-      try {
-        await this.bucket.put(key, body, { httpMetadata: { contentType: "application/gzip" } });
-        return { ok: true, attempts: attempt + 1 };
-      } catch {
-        // 同じキー・同じ本文で再試行する(冪等)。
-      }
-    }
-    return { ok: false, attempts: DETAIL_PUT_RETRIES + 1 };
-  }
-
-  /**
-   * exe から移した分析を保存する(Issue #216・#167-B1)。**web の分析と同じ保存経路**(`buildSaveStatements` の 1 回の batch → R2 の put)で、
-   * 元の値(分析日時ほか)はそのまま。違いは次の 3 点だけ:
-   *  1. `exe_analysis_id` の UPDATE が 1 文足される(冪等性の鍵。一意の索引に違反すれば batch ごと巻き戻る=何も書かれない・カウンタも増えない)
-   *  2. 配分メタの束縛値を行から直接作る(record の meta を codec に通すと NULL の設定列が 0 に潰れる。migration-convert.ts)
-   *  3. **R2 の Class A の柵に達していたら、D1 にも R2 にも何も書かず `fenced` を返す**(web の保存のように「要約だけ」にはしない。詳細が永久に欠けるため。呼び出し側が止めて翌月に再開する)
-   * R2 の put が失敗しても `detail_key` は消さない(`detail: "failed"` を返す。呼び出し側が {@link repairDetail} で直す。消すと、取り込み済みとして飛ばされて詳細が永久に欠ける)。
-   * @throws D1 の失敗(一意の索引の違反を含む)
-   */
-  async saveMigratedAnalysis(imp: AnalysisImport): Promise<MigratedSaveOutcome> {
-    // D1 に書く前に、詳細を符号化する(JSON にできない値はここで例外になり、何も書かれない)。
-    const body = encodeDetail(imp.record);
-    const ym = monthKey(this.now());
-    if (!isWriteAllowed(await this.readUsage(ym))) {
-      return { kind: "fenced", queries: 1 };
-    }
-    const statements = buildSaveStatements(this.db, imp.record, ym, null, null, { exeAnalysisId: imp.exeId, metaParams: imp.metaParams });
-    const results = await this.db.batch(statements);
-    const id = results[analysesInsertIndex(ym)]?.meta.last_row_id;
-    if (typeof id !== "number" || !(id > 0)) {
-      throw new Error("analyses の採番 id を取得できませんでした");
-    }
-    const rowsWritten = results.reduce((n, r) => n + (r.meta.rows_written ?? 0), 0);
-    const put = await this.putDetail(id, body);
-    return { kind: "saved", id, detail: put.ok ? "stored" : "failed", rowsWritten, queries: 1 + statements.length + put.attempts };
-  }
-
-  /**
-   * 取り込み済みの分析の詳細(R2)を作り直す(Issue #216)。前回の取り込みが D1 の batch と R2 の put の間で止まった・put が失敗した分析のため。
-   * R2 の Class A を +1 してから put する(柵に達していたら `fenced` で何もしない)。キーは分析 id で決まるので、既に詳細があっても上書きするだけ(冪等)。
-   */
-  async repairDetail(id: number, record: AnalysisRecord): Promise<RepairOutcome> {
-    const body = encodeDetail(record);
-    const ym = monthKey(this.now());
-    if (!isWriteAllowed(await this.readUsage(ym))) {
-      return { kind: "fenced", queries: 1 };
-    }
-    await this.db.prepare(COUNT_WRITE_SQL).bind(ym).run();
-    const put = await this.putDetail(id, body);
-    return { kind: put.ok ? "stored" : "failed", queries: 2 + put.attempts };
-  }
-
-  /** 取り込み済みの分析を exe の id で引く(1 クエリ。空配列なら D1 に何も発行しない)。 */
-  async findMigrated(exeIds: readonly number[]): Promise<Map<number, MigratedAnalysisRef>> {
-    const out = new Map<number, MigratedAnalysisRef>();
-    if (exeIds.length === 0) {
-      return out;
-    }
-    const { results } = await this.db.prepare(SELECT_MIGRATED_SQL).bind(JSON.stringify(exeIds)).all<{ id: number; exeId: number; raceId: string; analyzedAt: string }>();
-    for (const r of results) {
-      out.set(r.exeId, { id: r.id, raceId: r.raceId, analyzedAt: r.analyzedAt });
-    }
-    return out;
   }
 
   async listAnalysisSummaries(filter: AnalysisListFilter = {}): Promise<AnalysisSummary[]> {

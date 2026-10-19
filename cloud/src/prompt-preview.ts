@@ -1,5 +1,5 @@
 /**
- * 設定画面の「LLM へ送るプロンプトのプレビュー」の文面(Issue #201。純関数)。
+ * 設定画面の「LLM へ送るプロンプトのプレビュー」の文面(Issue #201。純関数)。**サーバが組み立てる**(Issue #396。もとは `cloud/client/prompt-preview.ts`)。
  *
  * **送信と同じ手順**(`race-day-core.ts` の発走前の分析):
  *  1. 追加指示を `clampAdditionalInstruction`(2,000 UTF-16 単位。サロゲートペアを割らない)で切る
@@ -7,10 +7,11 @@
  *  3. exe の設定画面と同じ `buildPromptPreview`(固定のサンプルレースを `buildPrompt` に通す)に通す
  * 送信側の文面との一致は、`test/race-day-llm.test.ts` の e10(実際に LLM へ渡った prompt との突き合わせ)が固定している。
  *
- * クライアントのバンドルが core から取り込むのは `@keiba/core/analyzer/build-prompt` だけ(許可リスト。`test/client-bundle.test.ts`)。
+ * Issue #396 で、ブラウザ側(クライアントの束)に入れていた `build-prompt` とその依存(約 39 KB)を外すため、`POST /api/settings/prompt-preview`(handler.ts)がこの関数を呼んで返す。
+ * クライアントは、この関数も core の `build-prompt` も import しない(`test/client-bundle.test.ts`・`import-guard.test.ts` が固定)。
  */
-import { buildPromptPreview, resolveClipVariant } from "@keiba/core/analyzer/build-prompt";
-import { clampAdditionalInstruction } from "../src/settings";
+import { buildPromptPreview, resolveClipVariant } from "@keiba/core/pipeline";
+import { clampAdditionalInstruction } from "./settings";
 
 export interface PreviewInput {
   /** 下書きの追加指示(入力した文字のまま)。 */

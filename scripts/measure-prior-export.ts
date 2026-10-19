@@ -42,7 +42,7 @@ import {
 } from "../packages/core/src/ev/analysis-store-codec.js";
 import { syntheticAnalyses, syntheticResult, type SyntheticVerifyOptions } from "./measure-verify.js";
 import { descendantsOf, parseProcStat } from "./measure-worker-cpu.js";
-import { seededRandom } from "./measure-migration-import.js";
+import { seededRandom } from "./synthetic-random.js";
 import { parsePriorDataset, summarize, v2ColumnCoverage } from "./prior-dataset.js";
 
 interface SeedStatement {

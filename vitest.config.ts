@@ -1,4 +1,5 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
+import { RESEARCH_TEST_GLOBS } from "./vitest.research-tests.js";
 
 // リポジトリルート直下の scripts/ 配下(パッケージに属さない調査・計測スクリプト)専用の
 // vitest 設定(Issue #38)。scripts/ はどの workspace package にも属さないため、
@@ -8,8 +9,13 @@ import { defineConfig } from "vitest/config";
 // `packages/**` を巻き込まないことを明示するため、include は `scripts/` 配下限定にする
 // (packages/core のテストは `pnpm test`(`pnpm -r test`)が担当し、
 // ここで二重に実行しない)。
+//
+// Issue #395: 確率の質の測定のテスト(`vitest.research-tests.ts` の一覧)は、普段の `pnpm test` から外した。
+// 走らせるには `pnpm test:research`(`vitest.research.config.ts`)か、手動実行のワークフロー(research.yml)を使う。
+// 型検査(`pnpm typecheck`)は外していないので、外したテストも型は検査される。
 export default defineConfig({
   test: {
     include: ["scripts/test/**/*.test.ts"],
+    exclude: [...configDefaults.exclude, ...RESEARCH_TEST_GLOBS],
   },
 });

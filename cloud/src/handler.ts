@@ -23,6 +23,7 @@ import { CLIENT_JS } from "./client-bundle.generated";
 import { ICON_CACHE_CONTROL, iconAsset } from "./icons";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
+import { buildPreviewText } from "./prompt-preview";
 import { hasSettingsKeysMismatch, loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
 import { redactSecrets } from "./llm-run";
 import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgress, RaceListResult, RaceListVenue, RequestPlanResult, RequestResultImportResult, ResultImportProgress, ScheduleInput, ScheduleManyInput, ScheduleManyResult, ScheduleResult } from "./race-day-core";
@@ -35,7 +36,6 @@ import { D1MonthlyStore } from "./monthly-report-repository";
 import { MONTHLY_REPORT_NAME, type MonthlyMode, type MonthlyStatus, type RequestMonthlyResult } from "./monthly-report-core";
 import { isValidMonth, monthRange } from "./monthly-month";
 import { DAILY_REPORT_NAME, type ReportMode, type ReportStatus, type RequestReportResult } from "./daily-report-core";
-import type { MigrationStatus, StartResult } from "./migration-core";
 import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-core";
 import type { GetReportOptions, VerifyResponse, ViewerVerifyResponse } from "./verify-core";
 import type { ExportMode, ExportResponse } from "./prior-export-core";
@@ -98,23 +98,6 @@ export interface RaceDayNamespaceLike {
   idFromName(name: string): any;
   get(id: any): RaceDayStubLike;
 }
-
-/** 移行の DO(CloudMigration)のスタブの、使う部分だけの型(RPC なので、同期のメソッドも Promise になる)。Issue #216。 */
-export interface MigrationStubLike {
-  /** アップロードされたファイル(R2 のキー)の取り込みを頼む。取り込み中なら `busy`。 */
-  start(input: { readonly key: string; readonly size: number }): Promise<StartResult>;
-  /** 進捗の読み取り(状態は変えない)。 */
-  getStatus(): Promise<MigrationStatus>;
-}
-
-/** 移行の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名)。 */
-export interface MigrationNamespaceLike {
-  idFromName(name: string): any;
-  get(id: any): MigrationStubLike;
-}
-
-/** 移行の DO の固定名(単一インスタンス)。 */
-const MIGRATION_NAME = "main";
 
 /** 結果の補完の DO(ResultBackfill)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #217。 */
 export interface BackfillStubLike {
@@ -195,8 +178,6 @@ export interface Env extends AccessEnv {
   NETKEIBA_GATE: GateNamespaceLike;
   /** 日単位の DO(RaceDay。wrangler.toml の binding)。Issue #177・#180。 */
   RACE_DAY: RaceDayNamespaceLike;
-  /** exe から移したファイルの取り込みの DO(CloudMigration。wrangler.toml の binding)。Issue #216。本番では常にある。無い構成(binding の設定漏れ)では、移行の 2 つの API が 503 になる。 */
-  CLOUD_MIGRATION?: MigrationNamespaceLike;
   /** 結果の補完の DO(ResultBackfill。wrangler.toml の binding)。Issue #217。本番では常にある。無い構成では `GET /api/results/backfill` が 503 になり、cron は kick を呼ばない。 */
   RESULT_BACKFILL?: BackfillNamespaceLike;
   /** 検証の集計の DO(VerifyReportDO。wrangler.toml の binding)。Issue #219。本番では常にある。無い構成では `GET /api/verify` が 503 になる。 */
@@ -298,7 +279,11 @@ export async function handle(
       headers: { ...SECURITY_HEADERS, allow: "GET, POST", "content-type": "text/plain; charset=utf-8" },
     });
   }
-  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run`・`/api/monthly-reports/run` の 7 本だけ**(`run/bulk` は Issue #251、下の 4 本は Issue #208・#216・#235・#280)。認証(上)の後で、Origin の確認・入力の検証を行う。
+  // 設定画面のプロンプトのプレビュー(Issue #396)。設定の入口(上)の隣の別の path。純関数の組み立てだけ(D1・DO・R2・netkeiba・LLM に触れない)。管理者専用(route-policy.ts の表)。
+  if (method === "POST" && new URL(request.url).pathname === "/api/settings/prompt-preview") {
+    return handlePromptPreview(request);
+  }
+  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/settings/prompt-preview`(Issue #396)・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/reports/run`・`/api/monthly-reports/run` の 7 本だけ**(`run/bulk` は Issue #251、下の 3 本は Issue #208・#235・#280。`/api/migration/upload` は Issue #394 で廃止)。認証(上)の後で、Origin の確認・入力の検証を行う。
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run") {
     return handleRun(request, env);
   }
@@ -306,15 +291,11 @@ export async function handle(
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run/bulk") {
     return handleRunBulk(request, env);
   }
-  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 7 本(上の 3 つ〈`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`〉・ここ・下の `/api/migration/upload`・`/api/reports/run`〈Issue #235〉・`/api/monthly-reports/run`〈Issue #280〉)。
+  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 7 本(上の 4 つ〈`/api/settings`・`/api/settings/prompt-preview`・`/api/analyses/run`・`/api/analyses/run/bulk`〉・ここ・下の `/api/reports/run`〈Issue #235〉・`/api/monthly-reports/run`〈Issue #280〉)。
   if (method === "POST" && new URL(request.url).pathname === "/api/results/import") {
     return handleResultsImport(request, env, deps.now ?? (() => new Date()), log);
   }
-  // 移行ファイルの受け取り(Issue #216)。
-  if (method === "POST" && new URL(request.url).pathname === "/api/migration/upload") {
-    return handleMigrationUpload(request, env, log);
-  }
-  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 7 つだけ**(`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run`・`/api/monthly-reports/run`)。
+  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 7 つだけ**(`/api/settings`・`/api/settings/prompt-preview`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/reports/run`・`/api/monthly-reports/run`)。
   if (method === "POST" && new URL(request.url).pathname === "/api/reports/run") {
     return handleReportRun(request, env, deps.now ?? (() => new Date()));
   }
@@ -395,25 +376,6 @@ export async function handle(
       });
     }
     return handleCheck(request, env);
-  }
-
-  if (pathname === "/api/migration/upload") {
-    // POST だけ(上で処理済み)。GET・HEAD などは 405。
-    return new Response("method not allowed", {
-      status: 405,
-      headers: { ...SECURITY_HEADERS, allow: "POST", "content-type": "text/plain; charset=utf-8" },
-    });
-  }
-
-  if (pathname === "/api/migration") {
-    // 読み取り専用(移行の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #216。
-    if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
-    }
-    return handleMigrationStatus(env);
   }
 
   if (pathname === "/api/reports/run") {
@@ -588,28 +550,6 @@ export async function handle(
   return json({ ok: false, error: "not found" }, 404);
 }
 
-
-/** 移行ファイルのアップロードの上限(バイト)。実データは gzip で約 15MB(分析 2,225 件・結果 1,301 レース)。 */
-export const MIGRATION_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
-const UPLOAD_CONTENT_TYPES: ReadonlySet<string> = new Set(["application/gzip", "application/x-gzip", "application/octet-stream"]);
-
-/** 移行の DO のスタブ(単一インスタンス)。 */
-function migrationStub(env: Env): MigrationStubLike {
-  const namespace = env.CLOUD_MIGRATION;
-  if (namespace === undefined) {
-    throw new Error("CLOUD_MIGRATION binding がありません");
-  }
-  return namespace.get(namespace.idFromName(MIGRATION_NAME));
-}
-
-/** `GET /api/migration`: 移行の進捗(状態・取り込んだ件数・全体の件数・予算・再開時刻・失敗の理由)。DO の失敗は 503(文面は返さない)。 */
-async function handleMigrationStatus(env: Env): Promise<Response> {
-  try {
-    return json({ ok: true, ...(await migrationStub(env).getStatus()) });
-  } catch {
-    return json({ ok: false, error: { type: "migration-error" } }, 503);
-  }
-}
 
 /** `GET /api/results/backfill`: 結果の補完の進捗(状態・残り・取得済み・取得できなかった数・開催日不明の数・今夜の依頼数・次の実行)。DO の失敗・binding なしは 503(文面は返さない)。Issue #217。 */
 async function handleBackfillStatus(env: Env): Promise<Response> {
@@ -838,67 +778,6 @@ async function handlePriorExport(request: Request, env: Env): Promise<Response> 
       return json({ ok: false, error: { type: "export-failed", reason: response.reason }, file: response.file }, 503);
     case "empty":
       return json({ ok: true, ...response });
-  }
-}
-
-/** アップロードで R2 に置くファイルを消すときに使う窓口(本物のバケットは delete を持つ。型 `AnalysisBucket` は get/put だけ)。 */
-type UploadBucket = AnalysisBucket & Pick<R2Bucket, "delete">;
-
-/**
- * `POST /api/migration/upload`(Issue #216〈#167-B1〉): exe の「クラウド移行用に書き出す」で作った gzip を受け取る。**本文は解釈せず、R2 にそのまま置く**
- * (Workers Free の CPU は 10ms。検証・取り込みは移行の DO がアラームで少しずつ行う)。本文は gzip のバイト列(JSON ではない)。
- * 順序: Origin(403)→ Content-Type(415)→ Content-Length(411。無い・不正なとき。413。上限 {@link MIGRATION_UPLOAD_MAX_BYTES} を超えるとき)→
- * **取り込み中でないか**(409 `migration-busy`。**本文を読まずに断る**)→ R2 の書き込み(Class A)の柵(503 `r2-fence`)→ R2 に置く(キーは毎回別。取り込み中のファイルを上書きしない)→
- * Class A を 1 回数える → DO に取り込みを頼む(受け付けなければ置いたファイルを消して 409。例外なら消して 503)。202 で進捗を返す。
- * 失敗の応答に、例外の文面は含めない。
- */
-async function handleMigrationUpload(request: Request, env: Env, log: (line: string) => void): Promise<Response> {
-  if (!originAllowed(request)) {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
-  }
-  const contentType = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-  if (!UPLOAD_CONTENT_TYPES.has(contentType)) {
-    return json({ ok: false, error: { type: "unsupported-media-type", message: "Content-Type は application/gzip にしてください" } }, 415);
-  }
-  const declared = request.headers.get("content-length");
-  if (declared === null || !/^[1-9][0-9]*$/.test(declared)) {
-    return json({ ok: false, error: { type: "length-required", message: "Content-Length が必要です" } }, 411);
-  }
-  const size = Number(declared);
-  if (size > MIGRATION_UPLOAD_MAX_BYTES) {
-    return json({ ok: false, error: { type: "payload-too-large", message: `ファイルは ${MIGRATION_UPLOAD_MAX_BYTES} バイトまでです` } }, 413);
-  }
-  if (request.body === null) {
-    return badRequest("本文がありません");
-  }
-
-  const bucket = env.ANALYSIS_DETAIL as UploadBucket;
-  const store = new D1AnalysisStore({ db: env.DB, bucket });
-  let key: string | null = null;
-  try {
-    const stub = migrationStub(env);
-    const status = await stub.getStatus();
-    if (status.state === "verifying" || status.state === "importing" || status.state === "waiting-budget" || status.state === "waiting-r2") {
-      return json({ ok: false, error: { type: "migration-busy", message: "取り込み中です。完了(または失敗)してから、もう一度アップロードしてください" } }, 409);
-    }
-    if (!(await store.getR2Usage()).writeAllowed) {
-      return json({ ok: false, error: { type: "r2-fence", message: "R2 の書き込み回数の上限に達しています。翌月に再開してください" } }, 503);
-    }
-    key = `migration/${crypto.randomUUID()}.ndjson.gz`;
-    await bucket.put(key, request.body, { httpMetadata: { contentType: "application/gzip" } });
-    await store.countR2Write().catch(() => undefined); // 数えられなくても、置いたファイルの取り込みは続ける(カウンタは best-effort)
-    const started = await stub.start({ key, size });
-    if (!started.accepted) {
-      await bucket.delete(key).catch(() => undefined);
-      return json({ ok: false, error: { type: "migration-busy", message: "取り込み中です。完了(または失敗)してから、もう一度アップロードしてください" } }, 409);
-    }
-    return json({ ok: true, ...(await stub.getStatus()) }, 202);
-  } catch {
-    log("migration: upload failed");
-    if (key !== null) {
-      await bucket.delete(key).catch(() => undefined);
-    }
-    return json({ ok: false, error: { type: "migration-error" } }, 503);
   }
 }
 
@@ -1317,6 +1196,30 @@ async function handleSettingsSave(request: Request, env: Env, now: () => Date): 
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "d1-error" } }, 503);
   }
+}
+
+/** プロンプトのプレビューの POST の本文の上限(バイト)。設定の保存と同じ(追加指示 2,000 単位が JSON のエスケープで最大 12,000 バイトになっても収まる)。 */
+const PROMPT_PREVIEW_BODY_MAX_BYTES = 16 * 1024;
+
+/**
+ * `POST /api/settings/prompt-preview`(Issue #396): 設定画面の「LLM へ送るプロンプトのプレビュー」の文面を組み立てて返す(管理者専用。route-policy.ts の表)。
+ * 本文は JSON `{ additionalInstruction: string, clipVariant: string }` の 2 キーだけ(欠け・型違い・余計なキーは 400)。未知の `clipVariant` は 400 にせず、送信と同じく対照(default)に解決する。
+ * 成功は 200 で `{ ok: true, text, clamped, promptVersion }`(`buildPreviewText`。追加指示は 2,000 UTF-16 単位に切る)。
+ * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413〈16 KiB〉→ JSON のオブジェクト 400)→ 入力の検証(400)→ 組み立て。
+ * **D1・DO・R2・env のどれにも触れない**(引数に env を取らない)。入力の値・文面を 400 の本文に写さない。
+ */
+async function handlePromptPreview(request: Request): Promise<Response> {
+  const guarded = await readJsonObjectBody(request, PROMPT_PREVIEW_BODY_MAX_BYTES);
+  if (!guarded.ok) {
+    return guarded.response;
+  }
+  const keys = Object.keys(guarded.body);
+  const { additionalInstruction, clipVariant } = guarded.body;
+  if (keys.length !== 2 || typeof additionalInstruction !== "string" || typeof clipVariant !== "string") {
+    return badRequest("本文は additionalInstruction(文字列)と clipVariant(文字列)の 2 項目だけにしてください");
+  }
+  const preview = buildPreviewText({ additionalInstruction, clipVariant });
+  return json({ ok: true, text: preview.text, clamped: preview.clamped, promptVersion: preview.promptVersion });
 }
 
 /**

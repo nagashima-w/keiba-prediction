@@ -5,6 +5,7 @@ import {
   buildSettingsModel,
   draftFromSettings,
   FIELD_ORDER,
+  PREVIEW_LOADING_TEXT,
   resetWeightsInDraft,
   setDraftValue,
   SOURCE_NOTE_DEFAULT,
@@ -12,9 +13,10 @@ import {
   validateDraft,
   WEIGHT_FIELD_ORDER,
   type FieldKind,
+  type PreviewFetchState,
   type SettingsModelInput,
 } from "../client/settings-form";
-import { buildPreviewText } from "../client/prompt-preview";
+import { PREVIEW_FAILURE_TEXT, type PromptPreview } from "../client/api-prompt-preview";
 import { ANALYSIS_MODEL_IDS, CLOUD_SETTINGS_KEYS, DEFAULT_CLOUD_SETTINGS, SCORING_WEIGHT_FIELDS, type CloudSettings } from "../src/settings";
 
 /**
@@ -470,20 +472,24 @@ describe("buildSettingsModel", () => {
   });
 });
 
-describe("Issue #201: プロンプトのプレビューの表示用データ(buildSettingsModel の preview)", () => {
-  const open = (over: Partial<SettingsModelInput> = {}) => buildSettingsModel(READY_INPUT({ previewOpen: true, ...over })).preview!;
+describe("Issue #201・#396: プロンプトのプレビューの表示用データ(buildSettingsModel の preview。文面はサーバが組み立てて返す=取得の状態を入力に取る)", () => {
+  /** サーバが返した文面(取得に成功したときの 1 件)。文面そのものの組み立ては `prompt-preview.test.ts`・`handler-prompt-preview.test.ts` が固定する。 */
+  const FETCHED: PromptPreview = { text: "サンプルの文面\n【予想印】\n人気薄は慎重に", clamped: false, promptVersion: CLIP_VARIANTS.wide15.promptVersion };
+  const ready = (preview: PromptPreview = FETCHED): PreviewFetchState => ({ kind: "ready", preview });
+  const open = (previewFetch: PreviewFetchState | null | undefined = ready(), over: Partial<SettingsModelInput> = {}) =>
+    buildSettingsModel(READY_INPUT({ previewOpen: true, previewFetch, ...over })).preview!;
   const notesOf = (p: { notes: readonly string[] }): string => p.notes.join("\n");
 
   it("下書きを取得できていないとき(読み込み中・取得の失敗)は、プレビューの項目自体を出さない(previewOpen が true でも)", () => {
     for (const load of [{ kind: "loading" }, { kind: "error", message: "失敗" }] as const) {
-      const m = buildSettingsModel({ load, draft: null, errors: {}, save: { kind: "idle" }, previewOpen: true });
+      const m = buildSettingsModel({ load, draft: null, errors: {}, save: { kind: "idle" }, previewOpen: true, previewFetch: ready() });
       expect(m.preview, load.kind).toBeNull();
     }
     expect(buildSettingsModel(READY_INPUT()).preview, "前提: 取得済みなら出る").not.toBeNull();
   });
 
-  it("閉じているとき: 開くボタンの文言だけ。注記・文面は無い(文面は開いたときだけ組み立てる)。previewOpen を渡さなければ閉じている", () => {
-    for (const m of [buildSettingsModel(READY_INPUT()), buildSettingsModel(READY_INPUT({ previewOpen: false }))]) {
+  it("閉じているとき: 開くボタンの文言だけ。注記・文面は無い(取得の状態を渡されても出さない)。previewOpen を渡さなければ閉じている", () => {
+    for (const m of [buildSettingsModel(READY_INPUT()), buildSettingsModel(READY_INPUT({ previewOpen: false })), buildSettingsModel(READY_INPUT({ previewOpen: false, previewFetch: ready() }))]) {
       expect(m.preview).toEqual({ open: false, toggleLabel: "LLMへ送るプロンプトのプレビューを開く", refreshLabel: null, notes: [], text: null });
     }
   });
@@ -497,20 +503,36 @@ describe("Issue #201: プロンプトのプレビューの表示用データ(bui
     expect(p.text).not.toBeNull();
   });
 
-  it("文面は下書きの追加指示とクリップ幅から作る(FULL: 追加指示「人気薄は慎重に」・wide15)。送信と同じ手順の buildPreviewText と一致する", () => {
+  it("文面は取得した文面そのまま(サーバが組み立てた文字列を、加工せずに出す)。取得した文面が変われば表示も変わる", () => {
     const p = open();
-    expect(p.text).toBe(buildPreviewText({ additionalInstruction: "人気薄は慎重に", clipVariant: "wide15" }).text);
+    expect(p.text).toBe(FETCHED.text);
     expect(p.text).toContain("人気薄は慎重に");
-    expect(p.text).toContain("±15%(絶対値0.15)");
-    // 下書きを変えると文面が変わる(前提: 変わらないなら、上は下書きを使った証明にならない)
-    const draft = setDraftValue(setDraftValue(draftFromSettings(FULL), "additionalInstruction", "別の指示"), "clipVariant", "default");
-    const changed = open({ draft });
-    expect(changed.text).not.toBe(p.text);
-    expect(changed.text).toContain("別の指示");
-    expect(changed.text).toContain("±10%(絶対値0.10)");
+    const other = open(ready({ ...FETCHED, text: "別の文面\n二行目" }));
+    expect(other.text).toBe("別の文面\n二行目");
+    expect(other.text).not.toBe(p.text); // 前提: 取得した文面を使っている証拠
   });
 
-  it("注記: サンプルで作った例・実分析で置き換わるセクション・保存後の次回から反映・「入力中の内容を反映」で更新・同日の傾向は前のレースが2つ以上あるときだけ(実質、中央)・重賞の傾向は重賞で取得できて条件に合う過去回が3回以上あるときだけ送る・プロンプト版", () => {
+  it("取得の状態: 最初の取得中(前回なし・取得の状態を渡さない場合も)は固定の文言。前回の文面があれば取得中も出し続ける。失敗は固定の文言(サーバの文面は出さない)", () => {
+    const first = open({ kind: "loading", previous: null });
+    expect(first.text).toBe(PREVIEW_LOADING_TEXT);
+    expect(open(null).text).toBe(PREVIEW_LOADING_TEXT);
+    expect(buildSettingsModel(READY_INPUT({ previewOpen: true })).preview!.text, "previewFetch を渡さない").toBe(PREVIEW_LOADING_TEXT);
+    expect(notesOf(first), "切り詰めの注記・プロンプト版は文面に付くもの。文面が無い間は出さない").not.toContain("プロンプト版");
+    expect(first.refreshLabel, "取得中も反映ボタンは出る").toBe("入力中の内容を反映");
+    const again = open({ kind: "loading", previous: FETCHED });
+    expect(again.text).toBe(FETCHED.text);
+    expect(notesOf(again)).toContain(`プロンプト版: ${FETCHED.promptVersion}`);
+    const failed = open({ kind: "error" });
+    expect(failed.text).toBe(PREVIEW_FAILURE_TEXT);
+    expect(failed.refreshLabel, "失敗でも反映ボタンは出る(再試行できる)").toBe("入力中の内容を反映");
+    expect(notesOf(failed)).not.toContain("プロンプト版");
+    expect(again.text, "取得中(前回あり)は成功と同じ文面").toBe(open().text);
+    expect(new Set([first.text, failed.text, open().text]).size, "前提: 取得中(前回なし)・失敗・成功で表示が互いに違う").toBe(3);
+    expect(PREVIEW_LOADING_TEXT).not.toMatch(/#\d/);
+    expect(PREVIEW_FAILURE_TEXT).not.toMatch(/#\d/);
+  });
+
+  it("注記: サンプルで作った例・実分析で置き換わるセクション・保存後の次回から反映・「入力中の内容を反映」で更新・同日の傾向は前のレースが2つ以上あるときだけ(実質、中央)・重賞の傾向は条件に合う過去回が3回以上あるときだけ・当日の馬場の節は含まれない・プロンプト版", () => {
     const p = open();
     const notes = notesOf(p);
     expect(notes).toContain("サンプルレース");
@@ -532,22 +554,23 @@ describe("Issue #201: プロンプトのプレビューの表示用データ(bui
     expect(notes).not.toContain("今後追加予定");
     expect(notes).not.toContain("#"); // 画面の文に Issue 番号を書かない
     expect(notes).toContain(`プロンプト版: ${CLIP_VARIANTS.wide15.promptVersion}`);
-    const d = open({ draft: setDraftValue(draftFromSettings(FULL), "clipVariant", "default") });
+    const d = open(ready({ ...FETCHED, promptVersion: CLIP_VARIANTS.default.promptVersion }));
     expect(notesOf(d)).toContain(`プロンプト版: ${CLIP_VARIANTS.default.promptVersion}`);
     expect(notesOf(d)).not.toContain(CLIP_VARIANTS.wide15.promptVersion);
+    expect(CLIP_VARIANTS.default.promptVersion, "前提: 2 つの版でプロンプト版が違う").not.toBe(CLIP_VARIANTS.wide15.promptVersion);
   });
 
-  it("追加指示が 2,000 単位を超えるとき(D1 へ直接入れた長い値)だけ、切って送られる旨の注記を出す", () => {
-    const long = open({ draft: setDraftValue(draftFromSettings(FULL), "additionalInstruction", "あ".repeat(2500)) });
+  it("追加指示が 2,000 単位を超えて切ったとき(取得した文面の clamped が true)だけ、切って送られる旨の注記を出す", () => {
+    const long = open(ready({ ...FETCHED, clamped: true }));
     expect(notesOf(long)).toContain("2,000 文字");
     expect(notesOf(long)).toContain("切った");
-    const exact = open({ draft: setDraftValue(draftFromSettings(FULL), "additionalInstruction", "あ".repeat(2000)) });
-    expect(notesOf(exact)).not.toContain("切った");
+    expect(notesOf(open(ready({ ...FETCHED, clamped: false })))).not.toContain("切った");
     expect(notesOf(open())).not.toContain("切った");
+    expect(notesOf(open({ kind: "loading", previous: { ...FETCHED, clamped: true } })), "取得中でも前回の文面の注記を出し続ける").toContain("切った");
   });
 
   it("画面に出る文(ボタンの文言・注記)に、Issue 番号(#数字)を書かない", () => {
-    const p = open({ draft: setDraftValue(draftFromSettings(FULL), "additionalInstruction", "あ".repeat(2500)) });
+    const p = open(ready({ ...FETCHED, clamped: true }));
     expect(p.notes.length, "前提: 注記が出ている(0 だと検査が空振り)").toBeGreaterThan(3);
     for (const s of [p.toggleLabel, p.refreshLabel ?? "", ...p.notes]) {
       expect(s).not.toMatch(/#\d/);

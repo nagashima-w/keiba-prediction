@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toContributions } from "../../cloud/src/prior-export-format.js";
 import { syntheticContributions } from "../measure-prior-export.js";
-import { seededRandom } from "../measure-migration-import.js";
+import { seededRandom } from "../synthetic-random.js";
 
 /** Issue #266: 書き出しの実測スクリプト(scripts/measure-prior-export.ts)の合成データの作り方の検査。測定そのもの(wrangler dev・/proc)は機械に依存するため固定しない。 */
 describe("syntheticContributions(合成の寄与度)", () => {

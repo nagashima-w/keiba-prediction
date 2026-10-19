@@ -11,7 +11,6 @@ import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
 import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type CloseSection, type DevelopmentSection, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
-import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
@@ -20,7 +19,7 @@ import type { RaceRowView, ReportBodyView, ReportModel, WhatIfView } from "./rep
 import type { AdminOnlyModel } from "./admin-only";
 import type { TargetRow, TargetsModel } from "./targets-model";
 import type { FormationSection } from "./formation-model";
-import { h, type PickedFile, type VNode } from "./vnode";
+import { h, type VNode } from "./vnode";
 
 export interface ViewActions {
   /** 日付の入力欄の値(YYYY-MM-DD。空・不正なこともある)。 */
@@ -50,12 +49,6 @@ export interface ViewActions {
   readonly onSettingsPreviewRefresh: () => void;
   /** 「重みを既定値に戻す」(Issue #218): 下書きの重み15項目だけを既定値に戻す(保存はしない)。 */
   readonly onSettingsWeightsReset: () => void;
-  /** 移行画面のファイル選択(Issue #222)。選ばれた File(選択が空なら null)。 */
-  readonly onMigrationFile: (file: PickedFile | null) => void;
-  /** 移行画面の「取り込みを始める」(Issue #222)。引数なし(検証したファイルは `migration-screen.ts` が持つ)。 */
-  readonly onMigrationStart: () => void;
-  /** 移行画面の検証の取り消し(Issue #222)。 */
-  readonly onMigrationCancelCheck: () => void;
   /** 検証画面の区分の切替(Issue #219）。 */
   readonly onVerifyVenue: (venue: VerifyVenue) => void;
   /** 検証画面の版別キャリブレーションの開閉(Issue #220)。`key` は版のキー、`open` は押したあとの状態。 */
@@ -606,104 +599,11 @@ function settingsScreen(model: SettingsModel, actions: ViewActions): VNode {
       body.push(previewSection(model.preview, model.saving, actions));
     }
   }
-  body.push(migrationSection(model.migration));
   return h("div", { class: "screen" }, [controls, h("h1", { class: "title" }, ["設定"]), ...body]);
-}
-
-/** 設定画面の「exe から移行」の節(Issue #222)。要点とリンクだけ(詳細・操作は別画面 `#migration`。設定フォームの入力を移行の再描画から切り離す)。取得の失敗でも出す。 */
-function migrationSection(section: SettingsModel["migration"]): VNode {
-  return h("section", { class: "migration-section" }, [
-    h("h2", {}, [section.heading]),
-    ...section.lines.map((line) => h("p", { class: "meta" }, [line])),
-    h("a", { class: "migration-link", href: section.href }, [section.linkLabel]),
-  ]);
-}
-
-// ---- 移行画面(Issue #222) ----
-
-function barNode(bar: { readonly value: number; readonly max: number }, label: string): VNode {
-  return h("progress", { class: "migration-bar", value: String(bar.value), max: String(bar.max), "aria-label": label }, []);
 }
 
 function notice(tone: "info" | "ok" | "error" | "wait", text: string): VNode {
   return tone === "error" ? h("p", { class: "notice error", role: "alert" }, [text]) : h("p", { class: tone === "info" ? "notice" : `notice ${tone}` }, [text]);
-}
-
-function progressSection(p: ProgressView): VNode {
-  return h("section", { class: "migration-progress" }, [
-    h("h2", {}, ["取り込みの進捗"]),
-    notice(p.tone, p.headline),
-    ...(p.bar === null ? [] : [barNode(p.bar, "取り込みの進捗")]),
-    ...(p.lines.length === 0 ? [] : [h("ul", { class: "migration-lines" }, p.lines.map((line) => h("li", {}, [line])))]),
-    ...(p.conflicts === null ? [] : [h("p", { class: "notice" }, [p.conflicts.text]), h("ul", { class: "migration-lines" }, p.conflicts.samples.map((sample) => h("li", {}, [sample])))]),
-    ...(p.failure === null ? [] : [notice("error", `${p.failure.heading}理由: ${p.failure.reason}`), h("p", { class: "meta" }, [p.failure.hint])]),
-  ]);
-}
-
-/** 結果の補完の 1 行(Issue #217)。 */
-function backfillSection(b: BackfillView): VNode {
-  return h("section", { class: "migration-backfill" }, [notice(b.tone, b.text), ...(b.note === null ? [] : [h("p", { class: "meta" }, [b.note])])]);
-}
-
-function checkSection(check: CheckView, cancelable: boolean, actions: ViewActions): VNode[] {
-  // エラーは理由まで 1 つの role=alert にまとめる(読み上げが途切れない)。それ以外は 1 行目を通知、残りを補足にする。
-  const [first, ...rest] = check.tone === "error" ? [check.lines.join(" ")] : check.lines;
-  return [
-    notice(check.tone, first ?? ""),
-    ...rest.map((line) => h("p", { class: "meta" }, [line])),
-    ...(check.bar === null ? [] : [barNode(check.bar, "検証の進捗")]),
-    ...(cancelable ? [h("button", { class: "migration-cancel" }, ["検証をやめる"], { click: actions.onMigrationCancelCheck })] : []),
-  ];
-}
-
-function migrationScreen(model: MigrationModel, actions: ViewActions): VNode {
-  const controls = h("div", { class: "controls" }, [
-    h("a", { class: "back", href: model.backHref }, ["設定へ戻る"]),
-    h("button", { class: "refresh", disabled: model.reloadDisabled }, [model.loading ? "読み込み中…" : "再読込"], { click: actions.onRefresh }),
-  ]);
-  const body: VNode[] = [h("h1", { class: "title" }, ["exe から移行"]), ...model.intro.map((line) => h("p", { class: "meta" }, [line]))];
-  if (model.loading) {
-    body.push(h("p", { class: "empty" }, ["読み込み中…"]));
-  }
-  if (model.error !== null) {
-    body.push(notice("error", model.error));
-  }
-  if (model.pollNotice !== null) {
-    body.push(notice("info", model.pollNotice));
-  }
-  if (model.progress !== null) {
-    body.push(progressSection(model.progress));
-  }
-  if (model.backfill !== null) {
-    body.push(backfillSection(model.backfill));
-  }
-  if (model.canPick || model.file !== null || model.pickNote !== null) {
-    body.push(h("h2", {}, ["ファイルを選ぶ"]));
-  }
-  if (model.canPick) {
-    body.push(
-      h("label", { class: "field-label" }, [
-        h("span", { class: "field-name" }, ["exe で書き出したファイル(.ndjson.gz)"]),
-        h("input", { class: "migration-file", type: "file", accept: ".gz,application/gzip,application/x-gzip" }, [], { file: actions.onMigrationFile }),
-      ]),
-    );
-  }
-  if (model.pickNote !== null) {
-    body.push(notice("wait", model.pickNote));
-  }
-  if (model.file !== null) {
-    body.push(h("p", { class: "meta" }, [`選んだファイル: ${model.file.name}(${model.file.sizeText})`]));
-  }
-  if (model.check !== null) {
-    body.push(...checkSection(model.check, model.canCancelCheck, actions));
-  }
-  if (model.start.visible) {
-    body.push(h("button", { class: "migration-start", disabled: !model.start.enabled }, [model.start.label], { click: actions.onMigrationStart }));
-  }
-  if (model.uploadNotice !== null) {
-    body.push(notice(model.uploadNotice.tone, model.uploadNotice.text));
-  }
-  return h("div", { class: "screen" }, [controls, ...body]);
 }
 
 // ---- 検証画面(Issue #219) ----
@@ -1070,7 +970,7 @@ function targetsScreen(model: TargetsModel, actions: ViewActions): VNode {
   return h("div", { class: "screen" }, body);
 }
 
-export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel | MonthlyModel | TargetsModel | AdminOnlyModel, actions: ViewActions): VNode {
+export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | VerifyModel | ReportModel | MonthlyModel | TargetsModel | AdminOnlyModel, actions: ViewActions): VNode {
   switch (model.kind) {
     case "list":
       return listScreen(model, actions);
@@ -1080,8 +980,6 @@ export function renderScreen(model: ListModel | RaceModel | ResultModel | Settin
       return resultScreen(model, actions);
     case "settings":
       return settingsScreen(model, actions);
-    case "migration":
-      return migrationScreen(model, actions);
     case "verify":
       return verifyScreen(model, actions);
     case "report":

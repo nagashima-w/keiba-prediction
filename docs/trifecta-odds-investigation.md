@@ -459,6 +459,8 @@ pnpm tsx scripts/fetch-quinella-exacta-raw.ts \
 候補数・性能を測るため、18頭立て・確定済みの中央レースで7券種(単勝・複勝・ワイド・馬連・
 馬単・3連複・三連単)すべての確定オッズを実測した(`scripts/bench-trifecta-allocation.ts`の
 AC1〈16頭〉に続く18頭ケース)。
+(★`scripts/bench-trifecta-allocation.ts` は Issue #395 で削除した。再現するには `git checkout 46410ab`。
+`docs/investigations/bench-scripts-removed.md` を参照。)
 
 ### 10.1 対象レースの選定
 

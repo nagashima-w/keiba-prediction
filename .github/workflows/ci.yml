@@ -25,6 +25,10 @@
 #   Issue #288 で deploy-cloud.yml のスモークを別ジョブ(smoke)に分けたが、型検査とテストは check ジョブに残っている
 #   (scripts/test/ci-workflow.test.ts が、check が cloud の型検査とテストを無条件で走らせていることを固定している)。
 #
+# ★`pnpm test` は、確率の質の測定のテスト(ルートの scripts/test/probability-quality-41-*.test.ts と packages/core の確率の質のテスト 3 ファイル)を含まない(Issue #395)。
+#   それらは `pnpm test:research` と、手動実行のワークフロー research.yml で流す。型検査(`pnpm typecheck`)は外していないので、外したテストの型はここで検査される。
+#   確率の質のコード(packages/core/src/ev/probability-quality*.ts・scripts/probability-quality-41*/)に触れる変更は、`pnpm test:research` も走らせて確かめる。
+#
 # ★uses: はコミット SHA でピン留めしている(Issue #305)。タグは付け替えで中身が差し替わりうるため、行末のコメントに版数を書く。
 #   SHA は `git ls-remote https://github.com/<owner>/<repo>` の実出力から取った、ピン留めの時点でタグが指していたコミット(CI が動かすコードは変えていない)。
 #   タグが最新の版を指していないことがあるので、行末の版数は、SHA が指す版を確かめて書く(特定の action・版の説明は、Dependabot の更新で古くなるので、ここには書かない)。

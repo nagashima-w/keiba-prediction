@@ -1,11 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
-import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
+import { buildPreviewText } from "../src/prompt-preview";
 import { buildClientJs, CLIENT_DIR, GENERATED_PATH, listBundledInputs, renderGeneratedModule } from "../build-client";
 import { CLIENT_JS } from "../src/client-bundle.generated";
-import { GOLDEN_TEXT } from "./migration-fixture";
 
 /**
  * Issue #184: クライアントのバンドル(`client/` → `src/client-bundle.generated.ts`)の検査。
@@ -50,7 +49,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 312,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 228,500 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -227,7 +226,21 @@ describe("生成物のドリフトと決定性", () => {
     // **文言は 1 つもクライアントに置いていない**: 節の見出し・説明・注記・行の見出し・項目の名前と値を、サーバが文字列に組み立てて渡し(`cloud/src/verify-breakdown.ts`)、クライアントは汎用の表として描くだけ(日本語は `\uXXXX` で 1 文字 6 バイトになるため。#379 と同じ流儀)。
     // 節の数・帯の数・券種のグループ(複勝・単勝・ワイド・組合せ・単複のずれ)はサーバ側の定義で、後から増やしてもクライアントの束は変わらない(Issue #385-A の条件別の節〈競馬場・頭数・開催区分〉もこの汎用の表に載せた。応答の検査の行数の上限を 30 から 50 に上げたが、桁数が同じなので束は 312,519 バイトのまま変わらない)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(313_500);
+    // Issue #394(#390 D-2。exe からの移行機能の廃止): 上限を 313,500 から 266,000 へ**下げた**。移行画面(`client/api-migration.ts`・`migration-model.ts`・`migration-screen.ts`・`migration-file.ts`)と、
+    // それだけが使っていた core の `ev/cloud-migration-format.ts` と `src/migration-reader.ts` を、クライアントから外したため。実測(`Buffer.byteLength(CLIENT_JS)`): 312,505(46410ab)→ 264,471(-48,034。`pnpm run build:client` の出力〈「264471 バイト」〉)。
+    // 内訳: 移行の名前を持つ 6 つの入力(esbuild の metafile の `bytesInOutput`。46410ab で測った)は 14,146 + 12,202 + 8,482 + 2,728 + 2,020 + 1,476 = 41,054。残りの 48,034 - 41,054 = 6,980 は、
+    // `view.ts`(設定画面の節・移行画面の描画)・`app.ts`(移行画面の配線)・`route.ts`・`settings-form.ts`・`dom.ts`(`accept`・`on.file` の許可)・`main.ts`・`vnode.ts` から減った分(ファイルごとの内訳は測っていない)。
+    // 新しい上限 266,000 の根拠: 実測 264,471 に約 1.5KB の余裕(#362 の前例。264,471 + 1,529 を 1,000 バイト単位に切り上げ)。余裕は 1,529 バイト。
+    // Issue #396(#390 D-3。設定画面のプロンプトのプレビューを、サーバが組み立てて返す): 上限を 266,000 から 228,500 へ**下げた**。クライアントが `build-prompt` を動かして組み立てていたのをやめ、
+    // `POST /api/settings/prompt-preview`(`cloud/src/prompt-preview.ts`)の応答を表示するだけにしたため。実測(`Buffer.byteLength(CLIENT_JS)`): 264,471(10eaa26)→ 226,688(-37,783。`pnpm run build:client` の出力〈「226688 バイト」〉)。
+    // 内訳(esbuild の metafile の `bytesInOutput` を、10eaa26 と今の生成物で入力ごとに比べた。和が -37,783 に一致する): 外れた core の 8 つ(`analyzer/build-prompt.ts` 28,014・`leg-style.ts` 4,762・`day-baba.ts` 4,456・`condition-change.ts` 1,331・
+    // `early-position.ts` 416・`clip-variants.ts` 290・`scorer/derive-features.ts` 180・`ev/allocation-primitives.ts` の使われなくなった分 57)の和は -39,506。`client/prompt-preview.ts` -146、`src/settings.ts` -160(クライアントが追加指示を切らなくなった)、
+    // 増えたのは `client/api-prompt-preview.ts` +1,101(新設。API 呼び出し・応答の検査・固定の失敗文言)・`client/app.ts` +776(取得の状態・連番・応答の到着時の入力の保護)・`client/settings-form.ts` +160(取得中の固定の文言・状態の入力)で、
+    // ほかに `report-screen.ts` -10・`verify-screen.ts` +2(圧縮の名前の割り当ての揺れ)。-39,506 - 146 - 160 + 1,101 + 776 + 160 - 10 + 2 = -37,783。
+    // 副次効果: core のプロンプトの文面(`build-prompt.ts` ほか)を変えても `CLIENT_JS` が変わらなくなった(以前は変えるたびに、この生成物のドリフトの検査が落ちた)。
+    // 新しい上限 228,500 の根拠: 実測 226,688 に約 1.8KB の余裕(226,688 + 1,812 を 500 バイト単位に切り上げ)。余裕は 1,812 バイト。
+    // (追記)レビューの R1(設定を取り直したとき、飛んでいるプレビューの状態を捨てる 2 行)で 226,688 → 226,702(+14)。上限は 228,500 のまま(余裕 1,798 バイト)。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(228_500);
   });
 });
 
@@ -241,19 +254,12 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   // Issue #189(設定画面): ラベルと版 ID は exe と共有していた定数(`packages/core/src/analysis/app-settings.ts`。import なしの純モジュール)、範囲の述語は cloud/src の純モジュール(サーバと同じ述語を使う)。
   "../../packages/core/src/analysis/app-settings",
   "../src/settings",
-  // Issue #201(設定画面のプロンプトのプレビュー): **core を直接 import する唯一の例外**。exe の設定画面と同じ関数(`buildPromptPreview`)を直接呼んで、プレビューの文面を exe と
-  // 一致させるため(`view/` に再 export の薄いモジュールを置くと、web が使う core のモジュールが増える)。この入口は core の `exports` の宣言済みサブパスで、閉包に `node:`・`node_modules`・バレルは入らない
-  // (下の閉包の検査と生成物の検査が固定する)。ほかの core のサブパス・バレルは引き続き拒否する(下の「対照」)。
-  "@keiba/core/analyzer/build-prompt",
-  // Issue #222(移行画面): 移行ファイルの形式の検証(`parseMigrationLine`・`MigrationTally`)を、サーバ・exe と同じ実装で行うため。core を直接 import する 2 つ目の例外(上と同じ理由:
-  // `exports` の宣言済みサブパスで、**import が 1 つも無い**〈`node:`・`node_modules`・バレルが入らない〉モジュール。`packages/core/test/ev/native-free-modules.test.ts` も閉包を固定している)。
-  "@keiba/core/ev/cloud-migration-format",
-  // Issue #254(検証画面の対応表の信頼区間): Wilson 区間と判定(`wilsonInterval`・`judgeCalibration`)を、サーバ・テストと同じ実装で行うため。core を直接 import する 3 つ目の例外
+  // Issue #396: 設定画面のプロンプトのプレビューは**サーバが組み立てる**ので、クライアントは core の `build-prompt`(`@keiba/core/analyzer/build-prompt`)を import しない
+  // (Issue #201 で入れていた「core を直接 import する例外」を外した。束から約 39 KB が減った)。下の「対照」と閉包の検査が、再び入ることを拒否する。
+  // Issue #254(検証画面の対応表の信頼区間): Wilson 区間と判定(`wilsonInterval`・`judgeCalibration`)を、サーバ・テストと同じ実装で行うため。core を直接 import する例外(Issue #396 の後は、この 1 つだけ)
   // (上と同じ理由: `exports` の宣言済みサブパスで、**import が 1 つも無い**〈`node:`・`node_modules`・バレルが入らない〉モジュール。`packages/core/test/ev/binomial-interval.test.ts` が
   // import の無いことを、`native-free-modules.test.ts` が閉包を固定している)。
   "@keiba/core/ev/binomial-interval",
-  // Issue #222: サーバと同じ行の分割(`readLines`。区切りは 0x0A だけ・U+2028/2029 を壊さない)。**import を持たない**ことを下のテストが固定する(Worker 専用のモジュールを引き込まない)。
-  "../src/migration-reader",
   // Issue #245: 回収率の表示(`formatRecoveryPercent`)。Discord の日報(Worker)と日報の画面が同じ丸めを使うため。**import を持たない**ことを下のテストが固定する。
   "../src/recovery-format",
   // Issue #247: 単勝の想定・実際のオッズの表示(丸め・「1000倍超」・ラベル・強調の判定・説明文)。Discord の通知(Worker)と馬のカードが同じ表示を使うため。**import を持たない**ことを下のテストが固定する。
@@ -282,8 +288,6 @@ function forbiddenInputs(inputs: readonly string[]): string[] {
       // `packages/core/src/analysis/` へ移った。**「main の4本はクライアントに入れない」を、移設先の同じ4本で維持する**(同じ名前の `analysis-types`・`app-settings` などは、移設前も許可していた)。
       /packages\/core\/src\/analysis\/(?:analysis-pipeline|analysis-export|allocation-record|venue-codes)\.ts$/.test(f) ||
       /^node:/.test(f) ||
-      // Issue #222: 移行の取り込み(変換・DO・予算・サーバの検証)は Worker 専用。クライアントには「形式の検証」と「行の分割」だけを入れる。
-      /(^|\/)src\/migration-(?:core|do|convert|verify)\.ts$/.test(f) ||
       /packages\/core\/src\/ev\/analysis-store-codec\.ts$/.test(f),
   );
 }
@@ -351,10 +355,10 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
   });
 
   it("対照: import の許可判定は、バレル・core の直接 import・bare specifier・許可外の表示関数・旧 exe のパスを拒否する(上の検査が空振りでない)", () => {
-    for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/core/src/analysis/analysis-export"]) {
+    for (const bad of ["@keiba/core", "@keiba/core/analyzer/build-prompt", "../src/prompt-preview", "../../packages/core/src/analyzer/build-prompt", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/core/src/analysis/analysis-export"]) {
       expect(importAllowed(bad), bad).toBe(false);
     }
-    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings", "@keiba/core/analyzer/build-prompt", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader"]) {
+    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings"]) {
       expect(importAllowed(good), good).toBe(true);
     }
   });
@@ -363,12 +367,13 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
     const inputs = await listBundledInputs();
     expect(inputs.some((f) => f.endsWith("packages/core/src/view/allocation-proposal-view.ts")), "前提: 表示関数(view/)の流用が閉包に入っている").toBe(true);
     expect(inputs.some((f) => f.endsWith("packages/core/src/ev/combo-bet-allocation.ts")), "前提: core のサブパスが tsconfig の paths で解決されている").toBe(true);
-    // Issue #201: プレビューが呼ぶ exe と同じ関数(`buildPromptPreview`)の閉包が入っている(入っていなければ、下の禁止の検査は何も見ていない)
-    expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/build-prompt.ts")), "前提: build-prompt が閉包に入っている").toBe(true);
-    expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/clip-variants.ts")), "前提: clip-variants が閉包に入っている").toBe(true);
-    // Issue #222: 移行ファイルの検証が使う 2 つ(形式の検証と、サーバと同じ行の分割)が閉包に入っている。入っていなければ、下の禁止の検査は何も見ていない。
-    expect(inputs.some((f) => f.endsWith("packages/core/src/ev/cloud-migration-format.ts")), "前提: 移行の形式の検証が閉包に入っている").toBe(true);
-    expect(inputs.some((f) => f.endsWith("src/migration-reader.ts")), "前提: 移行の行の分割が閉包に入っている").toBe(true);
+    // Issue #396: プレビューの文面はサーバが組み立てるので、`buildPromptPreview` の閉包(build-prompt とその依存)はクライアントの束に入らない(Issue #201 で入れていたものを外した)。
+    // 逆向きの固定: 1 つでも入ったら落ちる(束が約 39 KB 増える。`analyzer/` はプロンプト・脚質などサーバ側の部品)。
+    for (const name of ["analyzer/build-prompt.ts", "analyzer/clip-variants.ts", "analyzer/leg-style.ts", "analyzer/day-baba.ts", "analyzer/condition-change.ts", "analyzer/early-position.ts", "scorer/derive-features.ts"]) {
+      expect(inputs.some((f) => f.endsWith(`packages/core/src/${name}`)), `${name} は束に入らない`).toBe(false);
+    }
+    expect(inputs.some((f) => f.includes("packages/core/src/analyzer/")), "core の analyzer/ のモジュールは 1 つも束に入らない").toBe(false);
+    expect(inputs.some((f) => f.endsWith("client/api-prompt-preview.ts")), "前提: 代わりに、サーバへ取りに行く API クライアントが入っている").toBe(true);
     expect(inputs.some((f) => f.endsWith("src/recovery-format.ts")), "前提: 回収率の表示(Issue #245)が閉包に入っている").toBe(true);
     expect(forbiddenInputs(inputs)).toEqual([]);
   }, 60_000);
@@ -382,15 +387,8 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
       "node:zlib",
       "../packages/core/src/analysis/analysis-export.ts",
     ];
-    expect(forbiddenInputs([...bad, "src/migration-core.ts", "src/migration-do.ts", "src/migration-convert.ts", "src/migration-verify.ts", "../packages/core/src/ev/analysis-store-codec.ts"])).toEqual([
-      ...bad,
-      "src/migration-core.ts",
-      "src/migration-do.ts",
-      "src/migration-convert.ts",
-      "src/migration-verify.ts",
-      "../packages/core/src/ev/analysis-store-codec.ts",
-    ]);
-    expect(forbiddenInputs(["client/main.ts", "../packages/core/src/view/format.ts", "../packages/core/src/ev/bet-allocation.ts", "src/migration-reader.ts", "../packages/core/src/ev/cloud-migration-format.ts"])).toEqual([]);
+    expect(forbiddenInputs([...bad, "../packages/core/src/ev/analysis-store-codec.ts"])).toEqual([...bad, "../packages/core/src/ev/analysis-store-codec.ts"]);
+    expect(forbiddenInputs(["client/main.ts", "../packages/core/src/view/format.ts", "../packages/core/src/ev/bet-allocation.ts"])).toEqual([]);
   });
 });
 
@@ -480,43 +478,6 @@ describe("日報の画面がクライアントに取り込む Worker 側のモ�
       expect(inputs.filter((f) => f.endsWith(server)), `${server} はクライアントの閉包に入れない`).toEqual([]);
     }
   }, 60_000);
-});
-
-describe("移行画面がクライアントに取り込む Worker 側のモジュール(Issue #222)", () => {
-  it("migration-reader.ts は import を 1 つも持たない(Worker 専用のモジュール・node: を引き込まないことを、クライアントの閉包に入れる前提として固定する)", () => {
-    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "migration-reader.ts"), "utf-8"));
-    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(1000);
-    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
-    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
-  });
-
-  it("対照: 上の検出は、import が書かれていれば拾える(空振りでない)", () => {
-    expect('import { x } from "node:zlib";\nexport const y = 1;'.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g)).toHaveLength(1);
-  });
-
-  // Issue #308(#302-B): 移行ファイルの値の検証に `parseRaceId`・`parseKaisaiDate`(`scraper/ids.ts`)と `parseComboOddsKey`・`COMBO_SIZE` など(`scraper/combo-odds-key.ts`)を使うため、
-  // 「import を 1 つも持たない」を「許す import を明示した形」に改めた。**弱めたのではなく、守る範囲を明示した**: 許すのはこの 2 本だけで、その 2 本も import を持たない葉
-  // (閉包は 3 ファイルで完結し、`node:`・パッケージ・バレル・Worker 専用のモジュールは入らない)。
-  const IMPORT_RE = /(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["']([^"']+)["']/g;
-  const importsOf = (file: string): string[] => [...stripComments(readFileSync(file, "utf-8")).matchAll(IMPORT_RE)].map((m) => m[1]!);
-  const CORE_SRC = path.join(ROOT, "packages", "core", "src");
-
-  it("packages/core の cloud-migration-format.ts の import は scraper/ids.js と scraper/combo-odds-key.js の 2 本だけ。その 2 本は import を 1 つも持たない(閉包が葉だけで完結する)", () => {
-    const format = path.join(CORE_SRC, "ev", "cloud-migration-format.ts");
-    expect(stripComments(readFileSync(format, "utf-8")).length, "前提: 本体を読めている").toBeGreaterThan(5000);
-    expect(importsOf(format).sort()).toEqual(["../scraper/combo-odds-key.js", "../scraper/ids.js"]);
-    for (const leaf of ["ids.ts", "combo-odds-key.ts"]) {
-      const file = path.join(CORE_SRC, "scraper", leaf);
-      expect(stripComments(readFileSync(file, "utf-8")).length, `前提: ${leaf} を読めている`).toBeGreaterThan(1000);
-      expect(importsOf(file), `${leaf} の import`).toEqual([]);
-      expect(/\brequire\s*\(|\bimport\s*\(/.test(stripComments(readFileSync(file, "utf-8"))), `${leaf} に動的 import・require が無い`).toBe(false);
-    }
-  });
-
-  it("対照: 上の検出は、許していない import(node:zlib や別のモジュール)が増えれば拾える(空振りでない)", () => {
-    const sample = 'import { a } from "../scraper/ids.js";\nimport { z } from "node:zlib";\nexport { b } from "./other.js";\n';
-    expect([...sample.matchAll(IMPORT_RE)].map((m) => m[1])).toEqual(["../scraper/ids.js", "node:zlib", "./other.js"]);
-  });
 });
 
 describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", () => {
@@ -625,12 +586,6 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
         return identityReply;
       }
       calls.push({ url, init });
-      if (url === "/api/migration" || url === "/api/migration/upload") {
-        // Issue #222: 移行の進捗(GET)と、アップロードの受け付け(POST は 202 で「検証中」の進捗を返す)
-        const state = init.method === "POST" ? "verifying" : "idle";
-        const body = { ok: true, state, upload: state === "idle" ? null : { size: 1, uploadedAt: "2026-06-28T00:00:00.000Z", exportedAt: null, appVersion: null }, analyses: { total: null, processed: 0, imported: 0, alreadyImported: 0, conflicts: 0 }, results: { total: null, processed: 0 }, resumeAt: null, failure: null, conflictSamples: [], attempts: 0, budget: { day: "20260628", usedRows: 0, limitRows: 60000 } };
-        return { status: init.method === "POST" ? 202 : 200, json: async () => body };
-      }
       if (init.method === "POST" && url === "/api/analyses/run") {
         const body = JSON.parse(init.body as string) as { race_id: string; kaisai_date: string; mode: string };
         return { status: 202, json: async () => ({ ok: true, accepted: true, race_id: body.race_id, kaisai_date: body.kaisai_date, mode: body.mode, status: "queued" }) };
@@ -639,6 +594,11 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
         // Issue #189: 設定の取得(GET)と保存(POST は受けた本文をそのまま返す)
         const settings = init.method === "POST" ? JSON.parse(init.body as string) : SETTINGS;
         return { status: 200, json: async () => (init.method === "POST" ? { ok: true, settings } : { ok: true, settings, source: "d1" }) };
+      }
+      if (url === "/api/settings/prompt-preview") {
+        // Issue #396: プレビューの文面はサーバが組み立てる。偽のサーバは、受けた本文を実際のサーバの関数(`buildPreviewText`)に通して返す。
+        const body = JSON.parse(init.body as string) as { additionalInstruction: string; clipVariant: string };
+        return { status: 200, json: async () => ({ ok: true, ...buildPreviewText(body) }) };
       }
       if (url.startsWith("/api/races")) {
         return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, venue: "central", races: [{ race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null }] }) };
@@ -676,10 +636,6 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
       Date: FixedDate,
       URLSearchParams,
       Promise,
-      // Issue #222: 移行ファイルのブラウザ検証が使うグローバル(生成物は new で呼ぶ)。vm の新しいコンテキストには無いので、Node のものを渡す。
-      TextDecoder,
-      TransformStream,
-      DecompressionStream,
       console,
     };
     vm.runInNewContext(CLIENT_JS, context);
@@ -762,7 +718,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(classes).not.toContain("settings-link");
   });
 
-  it.each([["設定", "#settings"], ["移行", "#migration"]])("Issue #238: 閲覧者が %s の画面(%s)を直接開いても、API を取らず「管理者だけが使えます」を出す(生成物の実行)", async (_label, hash) => {
+  it.each([["設定", "#settings"]])("Issue #238: 閲覧者が %s の画面(%s)を直接開いても、API を取らず「管理者だけが使えます」を出す(生成物の実行)", async (_label, hash) => {
     const { root, calls } = run(hash, NOT_FOUND, "viewer");
     await until(() => root.children.some((c) => textOf(c).includes("管理者だけが使えます")));
     await settle();
@@ -853,7 +809,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     await until(() => root.children.some((c) => textOf(c).includes("保存しました")));
   });
 
-  it("Issue #201: 設定画面のプロンプトのプレビュー(生成物の実行): 開くと、exe と同じ関数の文面(【予想印】・サンプルレース)が、打った追加指示つきで出る。ネットワークには出ない(GET /api/settings だけ)。閉じると消える", async () => {
+  it("Issue #201・#396: 設定画面のプロンプトのプレビュー(生成物の実行): 開くと、サーバ(偽のサーバは実際の buildPreviewText)が組み立てた文面(【予想印】・サンプルレース)が、打った追加指示つきで出る。通信は GET /api/settings と POST /api/settings/prompt-preview 1 回だけ。閉じると消える", async () => {
     const { root, calls } = run("#settings");
     const elements = () => flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement);
     await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
@@ -863,6 +819,8 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     const area = elements().find((n) => n.attrs.get("data-field") === "additionalInstruction")!;
     area.listeners.get("input")![0]!({ target: { value: "スモークの追加指示" } });
     toggleOf().listeners.get("click")![0]!(undefined);
+    await until(() => calls.some((c) => c.url === "/api/settings/prompt-preview"));
+    await until(() => textOf(elements().find((n) => n.attrs.get("class") === "prompt-preview")!).includes("【予想印】"));
     const body = elements().find((n) => n.attrs.get("class") === "prompt-preview");
     expect(body, "開くと文面が出る").toBeDefined();
     const text = textOf(body!);
@@ -871,50 +829,24 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(text).toContain("±10%(絶対値0.10)");
     expect(text).toContain("スモークの追加指示");
     expect(toggleOf().attrs.get("aria-expanded")).toBe("true");
-    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings", "POST /api/settings/prompt-preview"]);
+    const sent = calls.find((c) => c.url === "/api/settings/prompt-preview")!;
+    expect(sent.init.credentials).toBe("same-origin");
+    expect(sent.init.referrerPolicy).toBe("same-origin");
+    expect(JSON.parse(sent.init.body as string)).toEqual({ additionalInstruction: "スモークの追加指示", clipVariant: "default" });
     toggleOf().listeners.get("click")![0]!(undefined);
     expect(elements().some((n) => n.attrs.get("class") === "prompt-preview")).toBe(false);
   });
 
-  it("Issue #222: 移行画面(#migration)(生成物の実行): GET /api/migration だけを取り、ファイルを選ぶとブラウザで検証して件数を出し、「取り込みを始める」で選んだファイルそのものを application/gzip で POST する(一覧・板・設定は取らない)", async () => {
-    const { root, calls } = run("#migration");
-    const elements = () => flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement);
-    /** 検証は gzip の展開(スレッドプール)を含むので、I/O の巡ではなく実時間の短い待ちで上限つきに待つ。 */
-    const waitFor = async (cond: () => boolean): Promise<void> => {
-      for (let i = 0; i < 400 && !cond(); i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-    };
-    await waitFor(() => root.children.length > 0 && elements().some((n) => n.attrs.get("type") === "file"));
-    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/migration"]);
-    const picker = elements().find((n) => n.attrs.get("type") === "file")!;
-    expect(picker.attrs.get("accept")).toBe(".gz,application/gzip,application/x-gzip");
-    const fixture = Buffer.from(GOLDEN_TEXT, "utf-8"); // Windows のチェックアウトの CRLF は LF にそろえてある(`migration-fixture.ts`)
-    const file = Object.assign(new Blob([new Uint8Array(gzipSync(fixture))]), { name: "keiba-cloud-migration.ndjson.gz" });
-    picker.listeners.get("change")![0]!({ target: { files: [file], value: "C:\\fakepath\\keiba-cloud-migration.ndjson.gz" } });
-    await waitFor(() => root.children.some((c) => textOf(c).includes("分析 5 件・結果 5 レース")));
-    expect(textOf(root.children[0]!)).toContain("分析 5 件・結果 5 レース");
-    expect(calls.filter((c) => c.init.method === "POST")).toEqual([]); // 検証の間はアップロードしない
-    const start = elements().find((n) => n.attrs.get("class") === "migration-start")!;
-    start.listeners.get("click")![0]!(undefined);
-    await waitFor(() => calls.some((c) => c.init.method === "POST"));
-    const post = calls.find((c) => c.init.method === "POST")!;
-    expect(post.url).toBe("/api/migration/upload");
-    expect(post.init.body).toBe(file);
-    expect(post.init.headers).toEqual({ "content-type": "application/gzip" });
-    expect(post.init.credentials).toBe("same-origin");
-    expect(post.init.referrerPolicy).toBe("same-origin");
-    await waitFor(() => root.children.some((c) => textOf(c).includes("アップロードしました")));
-    expect(textOf(root.children[0]!)).toContain("サーバでファイルを検証しています");
-    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/migration", "POST /api/migration/upload"]);
-  });
-
-  it("Issue #222: 設定画面の「exe から移行」の節(生成物の実行)は #migration へのリンクを持ち、/api/migration は取らない", async () => {
-    const { root, calls } = run("#settings");
-    await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
-    const link = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("class") === "migration-link")!;
-    expect(link.attrs.get("href")).toBe("#migration");
-    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
+  it("Issue #394: 移行画面は廃止した(生成物の実行): 設定画面に #migration へのリンクが無く、`#migration` を開いても /api/migration は取らない", async () => {
+    const settings = run("#settings");
+    await until(() => settings.root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
+    expect(flat(settings.root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && String(n.attrs.get("class") ?? "").startsWith("migration"))).toEqual([]);
+    expect(flat(settings.root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("href") === "#migration")).toEqual([]);
+    expect(settings.calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
+    const migration = run("#migration");
+    await until(() => migration.root.children.length > 0);
+    expect(migration.calls.some((c) => c.url.includes("/api/migration"))).toBe(false);
   });
 
   it("レース画面(#…&race=): 状態(race_id つき)と過去の分析の 2 本だけを取り、カードと朝の prior を描画する。一覧・板・分析の詳細・POST は呼ばない", async () => {

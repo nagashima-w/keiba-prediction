@@ -12,7 +12,6 @@ const ORIGIN = "https://cloud.invalid";
 
 const STATUS: BackfillStatus = {
   state: "ready",
-  migrationState: "completed",
   remaining: 321,
   undated: 12,
   imported: 100,

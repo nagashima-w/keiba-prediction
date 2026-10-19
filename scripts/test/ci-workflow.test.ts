@@ -289,8 +289,8 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
 describe("exe の公開が戻っていない(Issue #248: 公開を止め、運用を web に一本化した)", () => {
   const files = readdirSync(WORKFLOWS_DIR).filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
 
-  it("前提: 検査対象のワークフローが 2 つある(ci・deploy-cloud。Issue #290 で cloudflare-spike を削除した)。空振りしていない", () => {
-    expect([...files].sort()).toEqual(["ci.yml", "deploy-cloud.yml"]);
+  it("前提: 検査対象のワークフローが 3 つある(ci・deploy-cloud・research。Issue #290 で cloudflare-spike を削除し、Issue #395 で手動実行の research を足した)。空振りしていない", () => {
+    expect([...files].sort()).toEqual(["ci.yml", "deploy-cloud.yml", "research.yml"]);
   });
 
   it("build-windows.yml が存在しない", () => {

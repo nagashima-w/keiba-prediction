@@ -147,8 +147,8 @@ export const KELLY_FRACTION_WRITE_MIN = 0.05;
 /**
  * 追加指示を `max` UTF-16 コード単位(既定 2,000。`String#length` と同じ単位)までに切る。上位サロゲートで終わってしまうとき(ペアの途中)は、そのペアごと落とす。
  * 先頭から切るだけで、途中は書き換えない。`clamped` は、実際に切ったか。
- * 読む側(`coerceCloudSettings`)には上限が無いので、LLM へ送る側(`race-day-core.ts`)が使う。**設定画面のプレビュー(Issue #201)も同じ関数で切る**(送信と同じ文面にするため。
- * 定義がこのファイルにあるのは、クライアントのバンドルに入れられる依存なしの純モジュールだから。`llm-run.ts` から再 export している)。
+ * 読む側(`coerceCloudSettings`)には上限が無いので、LLM へ送る側(`race-day-core.ts`)が使う。**設定画面のプレビュー(Issue #201)も同じ関数で切る**(送信と同じ文面にするため。Issue #396 以降、プレビューはサーバ〈`prompt-preview.ts`〉が組み立てるので、クライアントはこの関数を使わない。
+ * 定義がこのファイルにあるのは、Issue #201 のときクライアントのバンドルに入れられる依存なしの純モジュールだったため。`llm-run.ts` から再 export している)。
  */
 export function clampAdditionalInstruction(text: string, max: number = ADDITIONAL_INSTRUCTION_MAX_LENGTH): { readonly text: string; readonly clamped: boolean } {
   if (text.length <= max) {

@@ -307,34 +307,6 @@ export type {
   StoredAnalysisHorse,
   StoredComboPayout,
 } from "./ev/analysis-store-types.js";
-// Issue #215(#167-A): クラウド移行ファイルの形式(better-sqlite3 に依存しない純ロジック)。
-// Issue #287(#285 の段階B)で exe の書き出し側(生成器 lines・読み出し reader)は削除した。形式の検証側だけが残る。
-// ブラウザ/Worker(#216)は、バレルではなくサブパス `@keiba/core/ev/cloud-migration-format` から import すること。
-export {
-  buildAnalysisLine,
-  buildHeaderLine,
-  buildResultLine,
-  MIGRATION_FORMAT_NAME,
-  MIGRATION_FORMAT_VERSION,
-  MIGRATION_TABLE_NAMES,
-  MIGRATION_TABLES,
-  MigrationFormatError,
-  MigrationTally,
-  parseMigrationLine,
-  serializeMigrationLine,
-  validateMigrationLine,
-  type MigrationAnalysisLine,
-  type MigrationColumnSpec,
-  type MigrationColumnType,
-  type MigrationFooterLine,
-  type MigrationHeaderLine,
-  type MigrationLine,
-  type MigrationResultLine,
-  type MigrationRow,
-  type MigrationTableCounts,
-  type MigrationTableName,
-  type MigrationTableSpec,
-} from "./ev/cloud-migration-format.js";
 export {
   importRaceResult,
   summarizeImport,
