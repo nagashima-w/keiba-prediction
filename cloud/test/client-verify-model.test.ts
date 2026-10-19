@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProposedSummaryView, VerifyOutcome, VerifyReportView } from "../client/api-verify";
 import { exclusionRows, formatRate, formatUnknownBetTypeNotice, formatYen, PROPOSED_BET_LABELS, venueLabel } from "../client/verify-format";
 import { buildVerifyModel, type VerifyModelInput } from "../client/verify-model";
-import { calibrationFixture, closeFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
+import { breakdownFixture, calibrationFixture, closeFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /** Issue #219: 検証画面の表示用データ。数値の整形は exe と同じ(一致は scripts/test/cloud-verify-format.test.ts が exe の関数と比べる)。 */
 
@@ -40,7 +40,7 @@ function report(over: Partial<VerifyReportView> = {}): VerifyReportView {
 }
 
 const ready = (over: Partial<Extract<VerifyOutcome, { kind: "ready" }>> = {}, r: VerifyReportView = report()): VerifyOutcome => ({
-  kind: "ready", venue: "all", report: r, promptVersions: versionsFixture(), closeComparison: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 }, ...over,
+  kind: "ready", venue: "all", report: r, promptVersions: versionsFixture(), closeComparison: null, breakdown: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 }, ...over,
 });
 
 const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: ready() }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, ...over });
@@ -869,5 +869,35 @@ describe("Issue #352: 締切直前の再計算との比較の節(model.close)", 
     const rows = (["all", "central", "nar"] as const).map((venue) => withClose(closeFixture(), { venue }).close!.rows);
     expect(rows[1]).toEqual(rows[0]);
     expect(rows[2]).toEqual(rows[0]);
+  });
+});
+
+
+describe("Issue #384: 人気帯ごとの期待値と回収率の節(model.breakdown)", () => {
+  const withBreakdown = (breakdown = breakdownFixture(), over: Partial<VerifyModelInput> = {}) => buildVerifyModel(input({ load: { kind: "ready", outcome: ready({ breakdown }) }, ...over }));
+
+  it("内訳がない・集計が出せない状態では、節は空(null ではなく空配列)", () => {
+    expect(buildVerifyModel(input()).breakdown).toEqual([]);
+    expect(buildVerifyModel(input({ load: { kind: "loading" } })).breakdown).toEqual([]);
+    expect(buildVerifyModel(input({ load: { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T03:05:00.000Z", reason: "min-interval" } } })).breakdown).toEqual([]);
+  });
+
+  it("サーバが渡した文字列をそのまま、節ごとに見出し・説明・注記・行(見出しと項目の名前と値)にする(クライアントは整形も文言の追加もしない)。帯グラフは付けない", () => {
+    const sections = withBreakdown().breakdown;
+    expect(sections).toHaveLength(2);
+    expect(sections.map((x) => [x.heading, x.description, x.note])).toEqual([
+      ["人気帯ごとの期待値と回収率(複勝)", "サーバが組み立てた説明文(複勝)", "サーバが組み立てた注記(複勝)"],
+      ["単勝人気と複勝順位のずれ", "サーバが組み立てた説明文(ずれ)", "サーバが組み立てた注記(ずれ)"],
+    ]);
+    expect(sections[0]!.rows).toEqual([
+      { label: "1〜3番人気", bar: null, cells: [{ name: "件数(レース)", value: "2点(1R)" }, { name: "予想した期待値", value: "115.0%" }, { name: "実際の回収率", value: "162.5%" }, { name: "注意", value: "参考(30レース未満)" }] },
+      { label: "4〜6番人気", bar: null, cells: [{ name: "件数(レース)", value: "0点(0R)" }] },
+    ]);
+    expect(sections[1]!.rows).toEqual([]);
+  });
+
+  it("管理者でも閲覧者でも同じ(検証画面の他の節と同じ扱い)", () => {
+    expect(withBreakdown(breakdownFixture(), { admin: false }).breakdown).toEqual(withBreakdown(breakdownFixture(), { admin: true }).breakdown);
+    expect(withBreakdown(breakdownFixture(), { admin: false }).breakdown).toHaveLength(2);
   });
 });

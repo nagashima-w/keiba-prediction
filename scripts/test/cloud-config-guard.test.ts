@@ -1087,10 +1087,10 @@ describe("Issue #216: 移行の取り込み(CloudMigration)は netkeiba にも L
 });
 
 describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM にも出ず、他の DO・cron と干渉せず、Worker は D1・R2 に触れない", () => {
-  const verifySources = ["verify-core.ts", "verify-do.ts", "verify-store.ts", "verify-read.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
+  const verifySources = ["verify-core.ts", "verify-do.ts", "verify-store.ts", "verify-read.ts", "verify-breakdown.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
 
-  it("検証のソース(4 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・他の DO が無い", () => {
-    expect(verifySources).toHaveLength(4);
+  it("検証のソース(5 ファイル。Issue #384 で verify-breakdown.ts を足した)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・他の DO が無い", () => {
+    expect(verifySources).toHaveLength(5);
     for (const [name, code] of verifySources) {
       expect(code.length, `${name} を読めている`).toBeGreaterThan(500);
       for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket"]) {
@@ -1111,7 +1111,7 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     // 型 VerifyBucket は get だけを許す
     expect(store).toMatch(/type VerifyBucket = Pick<R2Bucket, "get">/);
     // ほかの検証のソースは D1・R2 に直接触れない(core は注入された窓口だけを使う)
-    for (const [name, code] of verifySources.filter(([n]) => n === "verify-core.ts" || n === "verify-read.ts")) {
+    for (const [name, code] of verifySources.filter(([n]) => n === "verify-core.ts" || n === "verify-read.ts" || n === "verify-breakdown.ts")) {
       for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", ".prepare(", ".batch("]) {
         expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
       }

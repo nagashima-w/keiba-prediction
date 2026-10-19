@@ -7,6 +7,7 @@ import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../packages/co
 import { VerifyCore, type VerifyKv, type VerifyResponse, type VerifyStorePort } from "../src/verify-core";
 import { buildVerifySource, type VerifyAnalysisRow, type VerifyReadRows } from "../src/verify-read";
 import { computePromptVersionSummaries } from "../src/verify-versions";
+import { computeVerifyBreakdowns } from "../src/verify-breakdown";
 import { CLOSE_COMPARISON_DESCRIPTION } from "../src/verify-close";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
@@ -85,7 +86,7 @@ async function connect(): Promise<Connected> {
   const token = await signToken(key);
   const state: Connected = {
     fetch: undefined as never,
-    response: { status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), closeComparison: null, computedAt: "2026-10-10T03:00:00.000Z", stale: true, staleReason: "min-interval", nextRecomputeAt: "2026-10-10T03:05:00.000Z", diag: { rowsRead: 5, counts: {}, readMs: 1, computeMs: 1, promptVersionsMs: 1, startTimeGaps: { lost: 3, affecting: 2 } } },
+    response: { status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), closeComparison: null, breakdown: null, computedAt: "2026-10-10T03:00:00.000Z", stale: true, staleReason: "min-interval", nextRecomputeAt: "2026-10-10T03:05:00.000Z", diag: { rowsRead: 5, counts: {}, readMs: 1, computeMs: 1, promptVersionsMs: 1, startTimeGaps: { lost: 3, affecting: 2 } } },
     fails: false,
     calls: [],
   };
@@ -539,6 +540,115 @@ describe("Issue #352: closeComparison(締切直前の再計算との比較)の�
     expect(outcome).toMatchObject({ kind: "ready", closeComparison: null });
     expect(outcome?.kind === "ready" ? outcome.report.includedAnalysisCount : -1).toBeGreaterThan(0);
     expect(outcome?.kind === "ready" ? outcome.promptVersions.length : -1).toBeGreaterThan(0);
+  });
+});
+
+describe("Issue #384: breakdown(人気帯ごとの期待値と回収率の節)の読み取り", () => {
+  const ready = (): Record<string, any> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as Record<string, unknown>) });
+  const valid = () => [
+    {
+      heading: "人気帯ごとの期待値と回収率(複勝)",
+      description: "サーバが組み立てた説明文",
+      note: "サーバが組み立てた注記",
+      rows: [
+        { label: "1〜3番人気", cells: [{ name: "件数(レース)", value: "2点(1R)" }, { name: "実際の回収率", value: "162.5%(100.0〜200.0%)" }] },
+        { label: "4〜6番人気", cells: [{ name: "件数(レース)", value: "0点(0R)" }] },
+      ],
+    },
+    { heading: "単勝人気と複勝順位のずれ", description: "説明", note: "注記", rows: [] },
+  ];
+
+  it("項目が無い(旧い集計・旧い Worker)・null は、内訳なし(null)として読める。ほかの節は読める", () => {
+    expect(parseVerifyResponse(ready())).toMatchObject({ kind: "ready", breakdown: null });
+    const body = ready();
+    body["breakdown"] = null;
+    expect(parseVerifyResponse(body)).toMatchObject({ kind: "ready", breakdown: null });
+  });
+
+  it("正しい値は、そのまま読める(節の見出し・説明・注記と、行の見出し・項目の名前と値)", () => {
+    const body = ready();
+    body["breakdown"] = valid();
+    const outcome = parseVerifyResponse(body);
+    expect(outcome?.kind === "ready" ? outcome.breakdown : "ready でない").toEqual(valid());
+  });
+
+  const bad: ReadonlyArray<readonly [string, (b: any) => void]> = [
+    ["配列でない", (b) => { b.splice(0, b.length); b.push(1); }],
+    ["節が 0 個", (b) => { b.length = 0; }],
+    ["節が 9 個(上限 8)", (b) => { while (b.length < 9) b.push({ ...b[0] }); }],
+    ["見出しが無い", (b) => { delete b[0].heading; }],
+    ["見出しが長すぎる(100 字超)", (b) => { b[0].heading = "あ".repeat(101); }],
+    ["説明が文字列でない", (b) => { b[0].description = 1; }],
+    ["説明が長すぎる(1000 字超)", (b) => { b[0].description = "あ".repeat(1001); }],
+    ["注記が無い", (b) => { delete b[0].note; }],
+    ["注記が長すぎる(1000 字超)", (b) => { b[0].note = "あ".repeat(1001); }],
+    ["rows が配列でない", (b) => { b[0].rows = {}; }],
+    ["行が 51 本(上限 50)", (b) => { b[0].rows = Array.from({ length: 51 }, () => ({ label: "a", cells: [] })); }],
+    ["行の見出しが無い", (b) => { delete b[0].rows[0].label; }],
+    ["行の見出しが長すぎる(100 字超)", (b) => { b[0].rows[0].label = "あ".repeat(101); }],
+    ["cells が配列でない", (b) => { b[0].rows[0].cells = "x"; }],
+    ["項目が 13 個(上限 12)", (b) => { b[0].rows[0].cells = Array.from({ length: 13 }, () => ({ name: "a", value: "b" })); }],
+    ["項目の名前が文字列でない", (b) => { b[0].rows[0].cells[0].name = 1; }],
+    ["項目の値が無い", (b) => { delete b[0].rows[0].cells[0].value; }],
+    ["項目の値が長すぎる(100 字超)", (b) => { b[0].rows[0].cells[0].value = "あ".repeat(101); }],
+  ];
+  it.each(bad)("★壊れた breakdown(%s)は、この節だけ null に落とす。ほかの節(集計・版別)は読める", (_name, mutate) => {
+    const body = ready();
+    const breakdown = valid();
+    mutate(breakdown);
+    body["breakdown"] = breakdown;
+    const outcome = parseVerifyResponse(body);
+    expect(outcome).not.toBeNull(); // 応答全体は捨てない
+    expect(outcome).toMatchObject({ kind: "ready", breakdown: null });
+    expect(outcome?.kind === "ready" ? outcome.report.includedAnalysisCount : -1).toBeGreaterThan(0);
+    expect(outcome?.kind === "ready" ? outcome.promptVersions.length : -1).toBeGreaterThan(0);
+  });
+
+  it("★競馬場の行が最大級(中央 10 場 + 地方の実測 14 場。どの場も 5 レース以上)でも、サーバの出力をクライアントが読める(行数・文字数の上限に収まる)", () => {
+    const codes = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "30", "35", "36", "42", "43", "44", "45", "46", "47", "48", "50", "51", "54", "55"];
+    const raceIds = codes.flatMap((code) => Array.from({ length: 5 }, (_, i) => `2026${code}0505${String(i + 1).padStart(2, "0")}`));
+    const analyses: VerifyAnalysisRow[] = raceIds.map((raceId, i) => ({
+      id: i + 1, raceId, analyzedAt: "2026-07-05T05:00:00.000Z", evEstimated: 0, promptVersion: "v1", additionalInstruction: null, kaisaiDate: "20260705",
+      model: null, rawResponse: null, raceSnapshotJson: null, historyCutoffDate: "20260705", promptLookaheadGuarded: 1, startTime: "15:45",
+    }));
+    const rows: VerifyReadRows = {
+      analyses,
+      horses: analyses.map((a) => ({ analysisId: a.id, umaban: 1, prior: 0.5, adjusted_prob: 0.5, place_odds_min: 2, ev: 1.2, is_positive: 1, contributions_json: null, mark: "◎", reason: null, highlights_json: null, concerns_json: null })),
+      allocationMeta: analyses.map((a) => ({ analysisId: a.id, route: "place-only", skipReasonCode: null })),
+      bets: analyses.map((a) => ({ analysisId: a.id, betType: "place", comboKey: "01", stake: 100, odds: 2, ev: 1.2 })),
+      results: raceIds.map((raceId) => ({ raceId, umaban: 1, finishPosition: 1, placePayout: 150, winPayout: null })),
+      comboPayouts: [], comboImports: [],
+    };
+    const sections = computeVerifyBreakdowns(buildVerifySource(rows), rows.bets).all!.sections;
+    const venue = sections.find((s) => s.heading.endsWith("(競馬場)"))!;
+    expect(venue.rows).toHaveLength(1 + codes.length); // 前提: 全体 + 24 場(まとめた行なし)。上限の近くまで行がある
+    const body = ready();
+    body["breakdown"] = JSON.parse(JSON.stringify(sections));
+    const outcome = parseVerifyResponse(body);
+    expect(outcome?.kind === "ready" ? outcome.breakdown : null).toEqual(JSON.parse(JSON.stringify(sections)));
+  });
+
+  it("★契約(本物の VerifyCore → 本物の handle() → クライアント): サーバが作った内訳の 7 つの節(人気帯 5 + 条件別 2)を、管理者・閲覧者のどちらの要求でもクライアントが読める(長さの上限に収まる)", async () => {
+    const s = await closeSetup(true);
+    const result = await fetchVerify(s.fetch, "central", false);
+    if (!result.ok || result.outcome.kind !== "ready") throw new Error("ready のはず");
+    const sections = result.outcome.breakdown;
+    if (sections === null) throw new Error("内訳があるはず");
+    expect(sections.map((x) => x.heading)).toEqual([
+      "人気帯ごとの期待値と回収率(複勝)",
+      "人気帯ごとの期待値と回収率(単勝)",
+      "人気帯ごとの期待値と回収率(ワイド)",
+      "人気帯ごとの期待値と回収率(馬連・馬単・3連複・3連単)",
+      "単勝人気と複勝順位のずれ",
+      "条件ごとの的中率と回収率(競馬場)",
+      "条件ごとの的中率と回収率(頭数)",
+    ]);
+    // 空振り防止: 複勝の帯 1 に買い目が 1 点ある(件数の項目が "1点(1R)")
+    expect(sections[0]!.rows[0]!.cells[0]).toEqual({ name: "件数(レース)", value: "1点(1R)" });
+    // 地方の区分には買い目が無いので内訳なし(null)
+    const nar = await fetchVerify(s.fetch, "nar", false);
+    if (!nar.ok || nar.outcome.kind !== "ready") throw new Error("ready のはず");
+    expect(nar.outcome.breakdown).toBeNull();
   });
 });
 

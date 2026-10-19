@@ -1,4 +1,4 @@
-import type { CalibrationBinView, CloseComparisonView, PromptVersionView, VerifyReportView } from "../client/api-verify";
+import type { BreakdownSectionView, CalibrationBinView, CloseComparisonView, PromptVersionView, VerifyReportView } from "../client/api-verify";
 
 /**
  * Issue #220: 検証画面のテストが共有する、キャリブレーション(20 帯)と補正傾向の見本。
@@ -94,4 +94,23 @@ export function closeFixture(): CloseComparisonView {
       { round: 2, basisLabel: null, leadMinutes: 2, okCount: 30, targetCount: 31, base: { betCount: 70, totalStake: 30000, totalReturn: 33000, recoveryRate: 1.1 }, recalc: { betCount: 65, totalStake: 29000, totalReturn: 26100, recoveryRate: 0.9 } },
     ],
   };
+}
+
+/**
+ * 人気帯ごとの期待値と回収率の見本(Issue #384)。サーバが組み立てた文字列をそのまま持つ(クライアントは整形しない)。
+ * 2 つの節: 行が 2 本(うち 1 本は買い目なしで項目が 1 つ)の節と、行が 0 本の節(退化した形)。**値は節・行ごとに違う**(取り違えを検出できる)。
+ */
+export function breakdownFixture(): BreakdownSectionView[] {
+  return [
+    {
+      heading: "人気帯ごとの期待値と回収率(複勝)",
+      description: "サーバが組み立てた説明文(複勝)",
+      note: "サーバが組み立てた注記(複勝)",
+      rows: [
+        { label: "1〜3番人気", cells: [{ name: "件数(レース)", value: "2点(1R)" }, { name: "予想した期待値", value: "115.0%" }, { name: "実際の回収率", value: "162.5%" }, { name: "注意", value: "参考(30レース未満)" }] },
+        { label: "4〜6番人気", cells: [{ name: "件数(レース)", value: "0点(0R)" }] },
+      ],
+    },
+    { heading: "単勝人気と複勝順位のずれ", description: "サーバが組み立てた説明文(ずれ)", note: "サーバが組み立てた注記(ずれ)", rows: [] },
+  ];
 }

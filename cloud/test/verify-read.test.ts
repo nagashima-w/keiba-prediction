@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { buildVerifySource, countStartTimeGaps, VERIFY_READ_SQL, type VerifyAnalysisRow, type VerifyReadRows } from "../src/verify-read";
+import { buildVerifySource, countStartTimeGaps, VERIFY_READ_SQL, verifyDayAllocationSql, verifyDayResultSql, type VerifyAnalysisRow, type VerifyReadRows } from "../src/verify-read";
 
 /**
  * Issue #219: 検証の読み取り(`VERIFY_READ_SQL` と `buildVerifySource`)。実際の D1 のスキーマ(migration 0001〜0009)を Node 組込みの SQLite に流して、
@@ -11,7 +11,7 @@ import { buildVerifySource, countStartTimeGaps, VERIFY_READ_SQL, type VerifyAnal
  * (cloud は better-sqlite3 を持たない)。
  */
 const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
-const FILES = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0013_result_scratched.sql", "0016_result_wakuban.sql"]; // 0013 は race_results.scratched(Issue #72)、0016 は race_results.wakuban(Issue #269)。どちらも VERIFY_READ_SQL が読む。0010〜0012・0014・0015 はこのテストが読む表に関わらない
+const FILES = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0011_win_odds.sql", "0013_result_scratched.sql", "0016_result_wakuban.sql"]; // 0011 は race_results.ninki(Issue #384。VERIFY_READ_SQL.results が読む)、0013 は race_results.scratched(Issue #72)、0016 は race_results.wakuban(Issue #269)。どちらも VERIFY_READ_SQL が読む。0010・0012・0014・0015 はこのテストが読む表に関わらない
 
 function openDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
@@ -121,5 +121,71 @@ describe("countStartTimeGaps(発走時刻を確認できなかった行のうち
   });
   it("行が無いと 0", () => {
     expect(countStartTimeGaps([])).toEqual({ lost: 0, affecting: 0 });
+  });
+});
+
+describe("Issue #384: 買い目の odds・ev を読みに足す(行数は変えない。1 日ぶんの読みと列を揃える)", () => {
+  function seed(db: DatabaseSync): void {
+    db.prepare("INSERT INTO analyses (race_id, analyzed_at) VALUES ('202606030811', '2026-07-05T00:00:00.000Z')").run();
+    db.prepare("INSERT INTO analysis_allocation_meta (analysis_id, route, bankroll, per_race_cap, kelly_fraction, ev_threshold, include_combo_odds, include_wide, include_trio, odds_status) VALUES (1, 'mixed', 10000, 2000, 0.25, 1, 0, 0, 0, 'result')").run();
+    db.prepare("INSERT INTO analysis_bets (analysis_id, bet_type, combo_key, stake, odds, ev) VALUES (1, 'place', '01', 200, 2.4, 1.32), (1, 'wide', '0102', 300, NULL, NULL)").run();
+  }
+
+  it("読み(VERIFY_READ_SQL.bets)は odds・ev を持ち、NULL はそのまま NULL。行数は買い目の数のまま", () => {
+    const db = openDb();
+    seed(db);
+    const rows = db.prepare(VERIFY_READ_SQL.bets).all();
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => ({ ...r }))).toEqual([
+      { analysisId: 1, betType: "place", comboKey: "01", stake: 200, odds: 2.4, ev: 1.32 },
+      { analysisId: 1, betType: "wide", comboKey: "0102", stake: 300, odds: null, ev: null },
+    ]);
+    db.close();
+  });
+
+  it("読み取り口(getAllocationForVerify)の買い目は従来の 3 項目のまま(odds・ev は漏らさない)", () => {
+    const db = openDb();
+    seed(db);
+    const source = buildVerifySource(readRows(db));
+    expect(source.getAllocationForVerify(1)!.bets).toEqual([
+      { betType: "place", comboKey: "01", stake: 200 },
+      { betType: "wide", comboKey: "0102", stake: 300 },
+    ]);
+    db.close();
+  });
+
+  it("1 日ぶんの配分の読み(今日の狙い目が使う)も、全件の読みと同じ列(行の一致は targets-repository.test.ts が固定)", () => {
+    const db = openDb();
+    seed(db);
+    const rows = db.prepare(verifyDayAllocationSql([1]).bets).all();
+    expect(rows).toHaveLength(2);
+    expect(Object.keys(rows[0]!).sort()).toEqual(["analysisId", "betType", "comboKey", "ev", "odds", "stake"]);
+    db.close();
+  });
+});
+
+describe("Issue #384: 結果の確定の単勝人気(ninki)を読みに足す", () => {
+  function seed(db: DatabaseSync): void {
+    db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, ninki) VALUES ('202606030811', 1, 1, 150, 320, 2), ('202606030811', 2, NULL, NULL, NULL, NULL)").run();
+  }
+
+  it("読みは ninki を持ち、読み取り口(getResult)は値があるときだけ ninki を付ける(NULL はキー自体を付けない)", () => {
+    const db = openDb();
+    seed(db);
+    const source = buildVerifySource(readRows(db));
+    expect(source.getResult("202606030811")).toEqual([
+      { umaban: 1, finishPosition: 1, placePayout: 150, winPayout: 320, ninki: 2 },
+      { umaban: 2, finishPosition: null, placePayout: null, winPayout: null },
+    ]);
+    db.close();
+  });
+
+  it("1 日ぶんの結果の読み(今日の狙い目が使う)も、全件の読みと同じ列", () => {
+    const db = openDb();
+    seed(db);
+    const rows = db.prepare(verifyDayResultSql(["202606030811"]).results).all();
+    expect(rows).toHaveLength(2);
+    expect(Object.keys(rows[0]!).sort()).toEqual(["finishPosition", "ninki", "placePayout", "raceId", "scratched", "umaban", "wakuban", "winPayout"]);
+    db.close();
   });
 });

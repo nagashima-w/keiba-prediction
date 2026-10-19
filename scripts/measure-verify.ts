@@ -247,7 +247,8 @@ interface VerifyView {
   report?: { includedAnalysisCount: number; excludedLookaheadSuspectCount: number; excludedLookaheadUnknownCount: number; proposedBet: { overall: { betCount: number } } };
   promptVersions?: unknown[];
   closeComparison?: unknown;
-  diag?: { rowsRead: number; counts: Record<string, number>; readMs: number; computeMs: number; promptVersionsMs?: number; closeMs?: number; startTimeGaps: { lost: number; affecting: number } };
+  breakdown?: unknown;
+  diag?: { rowsRead: number; counts: Record<string, number>; readMs: number; computeMs: number; promptVersionsMs?: number; closeMs?: number; breakdownMs?: number; startTimeGaps: { lost: number; affecting: number } };
 }
 
 const range = (xs: readonly number[]): string => (xs.length === 0 ? "-" : `${Math.min(...xs)}〜${Math.max(...xs)}`);
@@ -324,6 +325,9 @@ async function main(): Promise<void> {
       const { raceId, entries, combo } = syntheticResult(r, rand);
       const statements: SeedStatement[] = entries.map((e) => db.prepare(UPSERT_RACE_RESULT_SQL).bind(...raceResultParams(raceId, e)));
       statements.push(db.prepare(UPSERT_RACE_RESULT_META_SQL).bind(raceId, "芝"));
+      // 確定の単勝人気(Issue #384。人気帯の内訳が `race_results.ninki` を読む)。人気は馬番を r だけずらした並び(分析時の複勝順位と一部ずれる)。本番の補完(`cloud/src/result-repository.ts` の `FILL_WIN_ODDS_SQL`)は
+      // D1 の型を持たない root の型検査に持ち込めないので、同じ列を直接書く(測定用の合成データ)。
+      for (const [k, e] of entries.entries()) statements.push(db.prepare("UPDATE race_results SET ninki = ? WHERE race_id = ? AND umaban = ?").bind(((k + r) % entries.length) + 1, raceId, e.umaban));
       for (const { betType, payouts } of planComboWrites(combo)) {
         for (const entry of payouts) statements.push(db.prepare(INSERT_COMBO_PAYOUT_SQL).bind(...comboPayoutParams(raceId, betType, entry)));
         statements.push(db.prepare(MARK_COMBO_IMPORTED_SQL).bind(raceId, betType));
@@ -398,6 +402,7 @@ async function main(): Promise<void> {
     const cpus: number[] = [];
     const versionMs: number[] = [];
     const closeMs: number[] = [];
+    const breakdownMs: number[] = [];
     let lastView: VerifyView | null = null;
     for (let i = 0; i < repeat; i += 1) {
       const { view, wallMs, cpuMs } = await call("?venue=all&refresh=1");
@@ -407,6 +412,7 @@ async function main(): Promise<void> {
       computes.push(view.diag.computeMs);
       versionMs.push(view.diag.promptVersionsMs ?? Number.NaN);
       closeMs.push(view.diag.closeMs ?? Number.NaN);
+      breakdownMs.push(view.diag.breakdownMs ?? Number.NaN);
       walls.push(wallMs);
       cpus.push(cpuMs);
       lastView = view;
@@ -414,7 +420,7 @@ async function main(): Promise<void> {
     }
     console.log(`\n## (ii) 集計の再計算(refresh=1)を ${repeat} 回`);
     console.log(`  D1 の読み取り行数(meta.rows_read の合計): ${range(rows)} 行/回。表ごとの行数: ${JSON.stringify(lastView?.diag?.counts)}`);
-    console.log(`  D1 の読み ${range(reads)}ms、3 区分の集計 ${range(computes)}ms、版別比較の集計 ${range(versionMs)}ms、再計算との比較の集計(Issue #352。--close-ratio ${closeRatio})${range(closeMs)}ms、呼び出し全体の壁時計 ${range(walls)}ms、workerd の CPU ${range(cpus.map((c) => Math.round(c)))}ms(10ms 刻み)`);
+    console.log(`  D1 の読み ${range(reads)}ms、3 区分の集計 ${range(computes)}ms、版別比較の集計 ${range(versionMs)}ms、再計算との比較の集計(Issue #352。--close-ratio ${closeRatio})${range(closeMs)}ms、人気帯の内訳の集計(Issue #384)${range(breakdownMs)}ms、呼び出し全体の壁時計 ${range(walls)}ms、workerd の CPU ${range(cpus.map((c) => Math.round(c)))}ms(10ms 刻み)`);
     console.log(`  集計の中身(区分 all): 集計 ${lastView?.report?.includedAnalysisCount} 件・先読み疑いで除外 ${lastView?.report?.excludedLookaheadSuspectCount} 件・判定不能で除外 ${lastView?.report?.excludedLookaheadUnknownCount} 件・配分ベースの点数 ${lastView?.report?.proposedBet.overall.betCount}`);
 
     // 4b. (iv) 版別比較の大きさ(区分 all の ready 応答と、central・nar の report の JSON の長さから、kv に保存する値を概算する)。
@@ -425,6 +431,8 @@ async function main(): Promise<void> {
     const versionsBytes = Buffer.byteLength(JSON.stringify(allCall.view.promptVersions));
     console.log(`\n## (iv) 版別比較(--versions ${options.versions}・--instruction-length ${options.instructionLength})`);
     console.log(`  版の数 ${allCall.view.promptVersions?.length}(版不明を含む)。promptVersions の JSON ${versionsBytes} バイト、ready 応答の本文 ${allCall.bodyBytes} バイト(区分 all)`);
+    const breakdownBytes = (view: VerifyView): number => Buffer.byteLength(JSON.stringify(view.breakdown ?? null));
+    console.log(`  人気帯の内訳(Issue #384)の JSON: all ${breakdownBytes(allCall.view)}・central ${breakdownBytes(centralCall.view)}・nar ${breakdownBytes(narCall.view)} バイト(kv に保存する値に、3 区分ぶんが足される)`);
     console.log(`  report の JSON: all ${reportBytes(allCall.view)}・central ${reportBytes(centralCall.view)}・nar ${reportBytes(narCall.view)} バイト`);
     console.log(`  kv に保存する値の概算(3 区分の report + promptVersions の JSON の長さ。diag は含まない): ${reportBytes(allCall.view) + reportBytes(centralCall.view) + reportBytes(narCall.view) + versionsBytes} バイト`);
 

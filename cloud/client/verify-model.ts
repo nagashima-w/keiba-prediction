@@ -8,7 +8,7 @@
 import { judgeCalibration, MIN_COUNT_FOR_JUDGMENT, type CalibrationVerdict, type ProportionInterval } from "@keiba/core/ev/binomial-interval";
 import { formatRecoveryPercent } from "../src/recovery-format";
 import { formatJstDateTime } from "./date";
-import type { CalibrationBinView, CloseComparisonView, CloseRoundView, ProposedSummaryView, PromptVersionView, VerifyOutcome, VerifyReportView, VerifyVenue } from "./api-verify";
+import type { BreakdownSectionView, CalibrationBinView, CloseComparisonView, CloseRoundView, ProposedSummaryView, PromptVersionView, VerifyOutcome, VerifyReportView, VerifyVenue } from "./api-verify";
 import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
@@ -189,6 +189,14 @@ export interface CloseSection extends StatSection {
   readonly note: string;
 }
 
+/**
+ * 人気帯ごとの期待値と回収率の節(Issue #384)。見出し・説明・注記・行の見出し・項目の名前と値は、すべてサーバが組み立てた文字列で、クライアントは整形も文言の追加もしない
+ * (日本語を束に置かない。#379 と同じ流儀)。行は他の統計と同じ形(帯グラフなし)。
+ */
+export interface BreakdownSection extends StatSection {
+  readonly note: string;
+}
+
 export interface VerifyNotice {
   readonly tone: Tone;
   readonly text: string;
@@ -216,6 +224,8 @@ export interface VerifyModel {
   readonly versions: VersionsSection | null;
   /** 締切直前の再計算との比較(Issue #352。区分のタブに従う〈Issue #379〉)。比較できるものが無ければ null。 */
   readonly close: CloseSection | null;
+  /** 人気帯ごとの期待値と回収率(Issue #384。区分のタブに従う)。内訳が無ければ空。 */
+  readonly breakdown: readonly BreakdownSection[];
   /** 補正方向×結果(Issue #220)。 */
   readonly direction: StatSection | null;
   /** キャリブレーション(Issue #220)。 */
@@ -446,6 +456,10 @@ function closeSection(close: CloseComparisonView): CloseSection {
   };
 }
 
+function breakdownSections(breakdown: readonly BreakdownSectionView[] | null): BreakdownSection[] {
+  return (breakdown ?? []).map((s) => ({ heading: s.heading, description: s.description, note: s.note, rows: s.rows.map((r) => ({ label: r.label, bar: null, cells: r.cells })) }));
+}
+
 function directionSection(report: VerifyReportView): StatSection {
   return {
     heading: "補正方向×結果",
@@ -580,6 +594,7 @@ export function buildVerifyModel(input: VerifyModelInput): VerifyModel {
     proposed: ready === null ? null : proposedSection(ready.report),
     versions: ready === null ? null : versionsSection(ready.promptVersions, input.expandedVersions, input.admin),
     close: ready === null || ready.closeComparison === null ? null : closeSection(ready.closeComparison),
+    breakdown: ready === null ? [] : breakdownSections(ready.breakdown),
     direction: ready === null ? null : directionSection(ready.report),
     calibration: ready === null ? null : calibrationSection(ready.report, input.calibrationTarget),
     marks: ready === null ? null : marksSection(ready.report),

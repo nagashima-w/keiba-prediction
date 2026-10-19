@@ -42,6 +42,7 @@ import { isReadAllowed, type R2Usage } from "./r2-fence";
 import { buildVerifySource, countStartTimeGaps } from "./verify-read";
 import { computePromptVersionSummaries, type PromptVersionSummary } from "./verify-versions";
 import { computeCloseComparison, type CloseComparison } from "./verify-close";
+import { computeVerifyBreakdowns, type BreakdownSection } from "./verify-breakdown";
 import type { PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "./verify-store";
 
 /** 集計の有効期間(透かしが同じ間)。既存の行の更新〈`race_results` の UPSERT〉は透かしに出ないため、この時間で拾う。 */
@@ -143,6 +144,8 @@ export interface VerifyDiag {
   readonly promptVersionsMs: number;
   /** 締切直前の再計算との比較の集計にかかった壁時計(ミリ秒。Issue #352)。この項目を持たない旧い集計では無い。 */
   readonly closeMs?: number;
+  /** 人気帯ごとの内訳の集計にかかった壁時計(ミリ秒。Issue #384)。この項目を持たない旧い集計では無い。 */
+  readonly breakdownMs?: number;
   /**
    * 発走時刻を確認できなかった分析(詳細が無い・壊れている)。`lost` はその数、`affecting` はそのうち**先読み判定が時刻に依る**(遮断済みでない)もの。
    * `affecting` > 0 のとき、exe には時刻があった旧い行が、web では「時刻なし」として判定される可能性がある。
@@ -163,6 +166,11 @@ interface CacheEntry {
    * **省略可能**: この項目を持たない旧い集計(形式の版は上げていない。旧い `closeComparison` は中央だけで区分ごとの値ではないので読まない)は、null として扱う(次の再計算で埋まる)。
    */
   readonly closeByVenue?: Readonly<Record<VerifyVenueFilter, CloseComparison | null>>;
+  /**
+   * 人気帯ごとの期待値と回収率(Issue #384)の表示用の節を、区分ごとに。買い目が無い区分・計算が失敗したときは、その区分の値が null。**節だけを持つ**(集計の途中は持たない。kv の値を小さく保つ)。
+   * **省略可能**: この項目を持たない旧い集計(形式の版は上げていない)は、null として扱う(次の再計算で埋まる)。
+   */
+  readonly breakdownByVenue?: Readonly<Record<VerifyVenueFilter, { readonly sections: readonly BreakdownSection[] } | null>>;
   readonly diag: VerifyDiag;
 }
 
@@ -193,6 +201,8 @@ export type VerifyResponse =
       readonly promptVersions: readonly PromptVersionSummary[];
       /** 締切直前の再計算との比較(Issue #352)。**リクエストの区分のもの**(Issue #379。地方を含む。基準ごとに行が分かれる)。比較できるものが無いときは null。 */
       readonly closeComparison: CloseComparison | null;
+      /** 人気帯ごとの期待値と回収率の節(Issue #384)。**リクエストの区分のもの**。サーバが文字列に組み立てて渡す。無い・計算できなかったときは null。 */
+      readonly breakdown: readonly BreakdownSection[] | null;
       /** 集計した時刻(ISO)。 */
       readonly computedAt: string;
       /** データの更新に追いついていない集計か(費用の柵・補完中)。 */
@@ -234,6 +244,8 @@ export type ViewerVerifyResponse =
       readonly promptVersions: readonly PromptVersionSummary[];
       /** 締切直前の再計算との比較(Issue #352)。管理者向けの情報を含まないので、そのまま渡す。 */
       readonly closeComparison: CloseComparison | null;
+      /** 人気帯ごとの期待値と回収率の節(Issue #384)。管理者向けの情報を含まないので、そのまま渡す。 */
+      readonly breakdown: readonly BreakdownSection[] | null;
       readonly computedAt: string;
       readonly stale: false;
       readonly staleReason: null;
@@ -351,6 +363,7 @@ export class VerifyCore {
       report: cache.reports[venue],
       promptVersions: cache.promptVersions.map((v) => ({ ...v, additionalInstructions: v.additionalInstructions.map((i) => (i === null ? null : VIEWER_REDACTED_INSTRUCTION)) })),
       closeComparison: cache.closeByVenue?.[venue] ?? null,
+      breakdown: cache.breakdownByVenue?.[venue]?.sections ?? null,
       computedAt: new Date(cache.computedAt).toISOString(),
       stale: false,
       staleReason: null,
@@ -371,6 +384,7 @@ export class VerifyCore {
       report: cache.reports[venue],
       promptVersions: cache.promptVersions,
       closeComparison: cache.closeByVenue?.[venue] ?? null,
+      breakdown: cache.breakdownByVenue?.[venue]?.sections ?? null,
       computedAt: new Date(cache.computedAt).toISOString(),
       stale: reason !== null,
       staleReason: reason,
@@ -436,6 +450,19 @@ export class VerifyCore {
       }
     }
     const t4 = now();
+    // 人気帯ごとの期待値と回収率(Issue #384)。**内訳の失敗で本体の集計を失わない**(例外は握り、固定の警告だけ残す)。
+    let breakdownByVenue: Record<VerifyVenueFilter, { readonly sections: readonly BreakdownSection[] } | null> = { all: null, central: null, nar: null };
+    try {
+      const out = computeVerifyBreakdowns(source, read.rows.bets);
+      breakdownByVenue = {
+        all: out.all === null ? null : { sections: out.all.sections },
+        central: out.central === null ? null : { sections: out.central.sections },
+        nar: out.nar === null ? null : { sections: out.nar.sections },
+      };
+    } catch {
+      this.deps.onWarn?.("検証の人気帯の内訳の計算で例外が起きました(内訳なしで集計します)");
+    }
+    const t5 = now();
     const entry: CacheEntry = {
       v: CACHE_VERSION,
       computedAt: t3,
@@ -443,7 +470,8 @@ export class VerifyCore {
       reports,
       promptVersions,
       closeByVenue,
-      diag: { rowsRead: read.rowsRead, counts: read.counts, readMs: t1 - t0, computeMs: t2 - t1, promptVersionsMs: t3 - t2, closeMs: t4 - t3, startTimeGaps: countStartTimeGaps(read.rows.analyses) },
+      breakdownByVenue,
+      diag: { rowsRead: read.rowsRead, counts: read.counts, readMs: t1 - t0, computeMs: t2 - t1, promptVersionsMs: t3 - t2, closeMs: t4 - t3, breakdownMs: t5 - t4, startTimeGaps: countStartTimeGaps(read.rows.analyses) },
     };
     kv.put("cache", entry);
     const prev = kv.get<Runs>("runs");

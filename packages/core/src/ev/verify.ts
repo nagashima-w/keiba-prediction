@@ -1583,6 +1583,43 @@ function finalizeProposedBetOverall(
   });
 }
 
+/** 配分ベースの買い目 1 件の判定結果(Issue #384)。 */
+export type ProposedBetOutcome = "hit" | "miss" | "refund" | "unjudged";
+
+/**
+ * 配分ベースの買い目 1 件の判定の事象(Issue #384)。`computeProposedBetReport` が各買い目を判定するのと**同じ場所**から出す。
+ * 人気帯・条件ごとの内訳(cloud の `verify-breakdown.ts`)が、本体の集計と同じ判定を使うための窓口で、判定の規則はここにしか無い。
+ * 未知の券種の行(`unknownBetType` に数える行)は判定していないので事象に出ない。
+ */
+export interface ProposedBetEvent {
+  readonly analysisId: number;
+  readonly raceId: string;
+  /** 券種(既知の 8 つ: place・win・wide・trio・quinella・exacta・trifecta・bracketQuinella)。 */
+  readonly betType: string;
+  readonly comboKey: string;
+  /** 配分額(円)。 */
+  readonly stake: number;
+  /**
+   * `hit` = 的中、`miss` = 外れ、`refund` = 取消・除外による返還(Issue #72)、`unjudged` = 払戻表の取込状態により判定不能(規則U。賭け金・払戻のどちらにも計上しない)。
+   * 本体の `betCount` に数えるのは hit・miss・refund、`unjudgedCount` に数えるのは unjudged。
+   */
+  readonly outcome: ProposedBetOutcome;
+  /** 払戻(円。賭け金を含む)。hit = 100 円あたりの払戻 × 賭け金 / 100、refund = 賭け金そのもの、miss・unjudged = 0。 */
+  readonly payout: number;
+}
+
+/**
+ * 集計対象の分析(`computeVerifyReport` の `proposedBet` と同じ選別)の配分ベースの買い目を、1 件ずつの判定の事象にして返す(Issue #384)。
+ * 区分は絞らない(all)。区分ごとの内訳は、事象の `raceId` から呼び出し側が分ける(最新選択・先読みの除外はレース単位なので、区分で絞った集計と一致する)。
+ * 券種ごとに事象を足し上げると、`computeVerifyReport` の `proposedBet` の券種別の要約と一致する。
+ */
+export function collectProposedBetEvents(store: VerifyDataSource, config: VerifyConfig = DEFAULT_VERIFY_CONFIG): ProposedBetEvent[] {
+  const selected = selectIncludedAnalyses(store, store.listAnalyses(), config);
+  const events: ProposedBetEvent[] = [];
+  computeProposedBetReport(store, selected.included, (event) => events.push(event));
+  return events;
+}
+
 /**
  * 配分ベースの回収率(proposedBet系、Issue #71・#54-B)を算出する。
  * `selectIncludedAnalyses` が選定した母集団(`included`)をそのまま使い、独自に再実装しない
@@ -1636,6 +1673,7 @@ function finalizeProposedBetOverall(
 function computeProposedBetReport(
   store: VerifyDataSource,
   included: ReadonlyArray<{ analysis: StoredAnalysis; results: readonly RaceResultEntry[] }>,
+  onEvent?: (event: ProposedBetEvent) => void,
 ): ProposedBetReport {
   let allocated = 0;
   let skipped = 0;
@@ -1675,6 +1713,28 @@ function computeProposedBetReport(
     const result = store.getComboPayouts(raceId, betType);
     comboCache.set(key, result);
     return result;
+  }
+
+  // 判定の計上は 2 つの関数に集める(Issue #384)。本体の集計と、人気帯・条件ごとの内訳に渡す事象が、同じ判定から出るようにするため。
+  // 事象の払戻は `recordJudgedBet` が `totalReturn` に足す値と同じ式(返還 = 賭け金、的中 = `payoutForStake`、外れ = 0)。
+  function judgedBet(
+    analysis: StoredAnalysis,
+    bet: StoredAllocationSummary["bets"][number],
+    accumulator: ProposedBetAccumulator,
+    unitPayout: number | undefined,
+    refund: boolean,
+  ): void {
+    recordJudgedBet(accumulator, bet.stake, unitPayout, refund);
+    if (onEvent === undefined) {
+      return;
+    }
+    const outcome: ProposedBetOutcome = refund ? "refund" : unitPayout !== undefined ? "hit" : "miss";
+    const payout = refund ? bet.stake : unitPayout !== undefined ? payoutForStake(unitPayout, bet.stake) : 0;
+    onEvent({ analysisId: analysis.id, raceId: analysis.raceId, betType: bet.betType, comboKey: bet.comboKey, stake: bet.stake, outcome, payout });
+  }
+  function unjudgedBet(analysis: StoredAnalysis, bet: StoredAllocationSummary["bets"][number], accumulator: ProposedBetAccumulator): void {
+    accumulator.unjudgedCount += 1;
+    onEvent?.({ analysisId: analysis.id, raceId: analysis.raceId, betType: bet.betType, comboKey: bet.comboKey, stake: bet.stake, outcome: "unjudged", payout: 0 });
   }
 
   for (const { analysis, results } of included) {
@@ -1768,23 +1828,23 @@ function computeProposedBetReport(
       // 枠番が未記録の旧い行があるレースは `bracketCensus` が null で、返還にせず従来どおり不的中として数える。
       if (bet.betType === "bracketQuinella") {
         if (isBracketQuinellaRefund(bet.comboKey, bracketCensus)) {
-          recordJudgedBet(accumulator, bet.stake, undefined, true);
+          judgedBet(analysis, bet, accumulator, undefined, true);
           continue;
         }
       } else if (scratchedUmabans.size > 0) {
         const umabans = parseComboOddsKey(bet.comboKey);
         if (umabans !== null && umabans.some((u) => scratchedUmabans.has(u))) {
-          recordJudgedBet(accumulator, bet.stake, undefined, true);
+          judgedBet(analysis, bet, accumulator, undefined, true);
           continue;
         }
       }
 
       if (bet.betType === "place") {
         if (!racePayoutAvailable) {
-          accumulator.unjudgedCount += 1;
+          unjudgedBet(analysis, bet, accumulator);
           continue;
         }
-        recordJudgedBet(accumulator, bet.stake, placePayoutByComboKey.get(bet.comboKey), false);
+        judgedBet(analysis, bet, accumulator, placePayoutByComboKey.get(bet.comboKey), false);
         continue;
       }
 
@@ -1792,10 +1852,10 @@ function computeProposedBetReport(
         // place分岐の鏡写し(Issue #100・#23-C)。単勝はplaceと同じ「1頭=1買い目」の構造を
         // 持つため、判定ロジックも同型(raceHasWinPayout→winPayoutByComboKeyの取込状態ゲート)。
         if (!winPayoutAvailable) {
-          accumulator.unjudgedCount += 1;
+          unjudgedBet(analysis, bet, accumulator);
           continue;
         }
-        recordJudgedBet(accumulator, bet.stake, winPayoutByComboKey.get(bet.comboKey), false);
+        judgedBet(analysis, bet, accumulator, winPayoutByComboKey.get(bet.comboKey), false);
         continue;
       }
 
@@ -1808,14 +1868,14 @@ function computeProposedBetReport(
       // 〈例: 馬単0813〉が正順の払戻〈1308〉と誤って一致することはない)。
       const comboResult = comboPayoutsOf(analysis.raceId, bet.betType);
       if (comboResult.state === "not_imported") {
-        accumulator.unjudgedCount += 1;
+        unjudgedBet(analysis, bet, accumulator);
         continue;
       }
       if (comboResult.payouts.length === 0) {
-        accumulator.unjudgedCount += 1;
+        unjudgedBet(analysis, bet, accumulator);
         continue;
       }
-      recordJudgedBet(accumulator, bet.stake, comboResult.payouts.find((p) => p.comboKey === bet.comboKey)?.payout, false);
+      judgedBet(analysis, bet, accumulator, comboResult.payouts.find((p) => p.comboKey === bet.comboKey)?.payout, false);
     }
   }
 

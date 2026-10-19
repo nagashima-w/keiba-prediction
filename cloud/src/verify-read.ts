@@ -11,8 +11,9 @@
  *   スナップショットなし(NULL)として渡す(形で判定するので、将来 '' や '?' 以外の印を足しても、時刻として誤読しない)。
  *   **NULL の行が残っている間は集計してはならない**(`VerifyCore` が補完の完了を待つ。ここでは判定しない)。
  * - 馬: 集計が使う列だけ(寄与度・理由・強調材料・懸念事項は NULL)。
- * - 配分: メタ(route・skip_reason_code)と買い目(券種・キー・賭け金。`odds`/`ev` は読まない。exe の `getAllocationForVerify` と同じ)。
- * - 結果: 着順・複勝/単勝の払戻。組合せ払戻と取込印。
+ * - 配分: メタ(route・skip_reason_code)と買い目(券種・キー・賭け金)。**全件の読みの買い目は `odds`・`ev` も読む**(Issue #384。人気帯の内訳が使う。読み取り口〈`getAllocationForVerify`〉には渡さない
+ *   ので、exe の `getAllocationForVerify` と同じ)。
+ * - 結果: 着順・複勝/単勝の払戻。確定の単勝人気 `ninki` も読む(Issue #384。読み取り口では値があるときだけ `RaceResultEntry.ninki` に付ける)。組合せ払戻と取込印。
  *
  * ## 並び順(exe と同じにする)
  * 浮動小数の加算順が変わると合計の最下位ビットが変わりうるので、exe の SELECT と同じ並びにする: 買い目は (bet_type, combo_key)、組合せ払戻は combo_key、馬と結果は馬番、分析は id。
@@ -42,10 +43,12 @@ const ANALYSES_HEAD = `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, 
        start_time AS startTime
   FROM analyses`;
 const ALLOCATION_META_HEAD = `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode, include_combo_odds AS includeComboOdds FROM analysis_allocation_meta`;
-const BETS_HEAD = `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake
+/** 買い目の `odds`・`ev`(Issue #384)は、人気帯の内訳が「予想した期待値」(`ev`)と「予想した的中確率」(`ev ÷ odds`)に使う。列を足すだけで読み取り行数は変わらない。1 日ぶんの読み(今日の狙い目)と列を揃える(`targets-repository.test.ts` が行の一致を固定している)。 */
+const BETS_HEAD = `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev
   FROM analysis_bets`;
 const BETS_ORDER = `ORDER BY analysis_id, bet_type, combo_key`;
-const RESULTS_HEAD = `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban
+/** 結果の `ninki`(確定の単勝人気。migration 0011。取消や旧い行は NULL。Issue #384)は、単勝・馬連・馬単・3連複・3連単の人気帯の内訳が使う。列を足すだけで読み取り行数は変わらない。1 日ぶんの読みと列を揃える。 */
+const RESULTS_HEAD = `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban, ninki
   FROM race_results`;
 const RESULTS_ORDER = `ORDER BY race_id, umaban`;
 const COMBO_PAYOUTS_HEAD = `SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout
@@ -129,6 +132,12 @@ export interface VerifyBetRow {
   readonly betType: string;
   readonly comboKey: string;
   readonly stake: number;
+  /**
+   * 分析時に採用したオッズ(倍)と期待値(的中確率 × odds。1.0 が損益分岐。Issue #384)。NULL = 欠損。省略可能なのは、この列を持たない行(既存のテストの固定データ)を壊さないため。
+   * 読み取り口(`buildVerifySource`)は渡さない: core の `StoredAllocationBet` は odds・ev を持たない契約で、exe とのパリティを保つ。
+   */
+  readonly odds?: number | null;
+  readonly ev?: number | null;
 }
 export interface VerifyResultRow {
   readonly raceId: string;
@@ -140,6 +149,11 @@ export interface VerifyResultRow {
   readonly scratched?: number | null;
   /** 枠番(migration 0016。Issue #269)。1〜8、NULL=記録なし(旧い行・移行した行)。 */
   readonly wakuban?: number | null;
+  /**
+   * 確定の単勝人気(migration 0011。Issue #384 で読みに足した)。NULL=記録なし(旧い行・取消や除外で欄が空だった馬)。
+   * 読み取り口では `RaceResultEntry.ninki`(NULL のときはキー自体を付けない)になる。
+   */
+  readonly ninki?: number | null;
 }
 export interface VerifyComboPayoutRow {
   readonly raceId: string;
@@ -198,6 +212,8 @@ export function buildVerifySource(rows: VerifyReadRows): VerifyDataSource {
         ...(r.scratched === null || r.scratched === undefined ? {} : { scratched: r.scratched === 1 }),
         // 枠番(Issue #269)。NULL(記録なし)はキー自体を付けない(`scratched` と同じ。枠連の返還は、枠番が1頭でも欠けるレースを判定しない)。
         ...(r.wakuban === null || r.wakuban === undefined ? {} : { wakuban: r.wakuban }),
+        // 確定の単勝人気(Issue #384)。NULL(記録なし)はキー自体を付けない。exe の AnalysisStore は保存しない列で、パリティでは全行 NULL。
+        ...(r.ninki === null || r.ninki === undefined ? {} : { ninki: r.ninki }),
       })),
     );
   }
