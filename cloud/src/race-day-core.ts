@@ -2367,6 +2367,7 @@ export class RaceDayCore {
       if (missing.length > 0) {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
       }
+      this.warnPersonStats(`朝の取得(${task.race_id})`, race.meta.warnings);
       this.updateTask(task, "fetched", attempts, null);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "fetch", result: "ok" };
     } catch (error) {
@@ -2378,6 +2379,19 @@ export class RaceDayCore {
       }
       this.updateTask(task, "queued", attempts, message);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "fetch", result: "retry" };
+    }
+  }
+
+  /**
+   * 取得ステップの `scrapeRace` が残した警告のうち、騎手・調教師のものを onWarn に出す(Issue #380)。応答・保存は変えない。
+   * 出すのは `scrapeRace` の文面そのまま(取得に失敗した人は 1 人 1 行〈URL を含む。取得ステップの他の警告と同じ〉、取得の上限で取らなかった人は人数をまとめた 1 行、保存先の読み書きの失敗)。
+   * ほかの種別(調教・組合せオッズ・出走取消)は出さない(増えすぎる)。戦績が欠けて取得ステップが再試行になる回では呼ばない(同じ警告が試行の回数だけ重なるため)。
+   */
+  private warnPersonStats(where: string, warnings: readonly { readonly kind: string; readonly message: string }[]): void {
+    for (const w of warnings) {
+      if (w.kind === "騎手" || w.kind === "調教師") {
+        this.onWarn(`${where}: ${w.kind}: ${w.message}`);
+      }
     }
   }
 
@@ -2555,6 +2569,7 @@ export class RaceDayCore {
       if (missing.length > 0) {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
       }
+      this.warnPersonStats(`発走前の取得(${task.race_id})`, race.meta.warnings);
       await this.prefetchGradeWinner(task, parseRaceId(task.race_id), race.race.hasGradeBadge);
       // 日報の時刻の下限(Issue #291)を記録する。出馬表の取得が成功した後・結果の行を積む前(取得が失敗した試行では引かない)。失敗しても取得ステップは失敗にしない。
       await this.recordReportHold(task.race_id);

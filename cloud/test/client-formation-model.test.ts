@@ -173,6 +173,26 @@ describe("buildFormation: 4コーナーの位置に馬ごとの latePos を使�
     }
   });
 
+  it("丸めの 0.5 の境界: 全馬に latePos があるとき、列は `late×9 − min×9`(旧式と浮動小数点まで同一)で決まり、`(late − min)×9` とは別の列になる対がある(Issue #380。式の書き方を固定する)", () => {
+    // 差がちょうど 1/18 の奇数倍の対は、2 つの書き方で 0.5 の境界の両側に分かれる(JS の浮動小数点で確認した値):
+    //   [0.32, 0.82]   : 0.82×9 − 0.32×9 = 4.5(丸めて 5)       / (0.82 − 0.32)×9 = 4.499999999999999(丸めて 4)
+    //   [0.092, 0.592] : 0.592×9 − 0.092×9 = 4.499999999999999(丸めて 4) / (0.592 − 0.092)×9 = 4.5(丸めて 5)  ← 逆向き
+    const table: readonly { min: number; late: number; slot: number }[] = [
+      { min: 0.32, late: 0.82, slot: 5 },
+      { min: 0.092, late: 0.592, slot: 4 },
+    ];
+    for (const { min, late, slot } of table) {
+      const current = Math.round(late * 9 - min * 9);
+      const rewritten = Math.round((late - min) * 9);
+      expect(current, `前提: 現行式の列 (${min}, ${late})`).toBe(slot);
+      expect(rewritten, `前提: 書き換えた式は別の列になる (${min}, ${late})`).not.toBe(current);
+      const horses = [horse(1, { legStyle: "逃げ", earlyPos: 0.1, latePos: min }), horse(2, { legStyle: "先行", earlyPos: 0.3, latePos: late })];
+      for (const pace of ["スロー", "平均", "ハイ"] as const) {
+        expect(slotsOf(analysis(horses, { pace }), 1), `${pace} (${min}, ${late})`).toEqual({ 1: 0, 2: slot });
+      }
+    }
+  });
+
   it("latePos が無い馬の補いにはペースの補正がかかる(ハイペース: 先行 +0.5。latePos のある馬にはかからない)", () => {
     // ハイ: 道中 0・2・4・6。逃げ latePos 0.3・先行 なし(2×1+0.5=2.5)・差し latePos 0.4・追込 なし(6×0.45=2.7)
     // latePos の差は 0・0.9。列 0・3・1・3 (Issue #375)
