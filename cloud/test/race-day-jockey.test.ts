@@ -295,6 +295,53 @@ describe("j7: 騎手の成績の取得に失敗しても、レースの取得・
     expect(new Set(jockeyWarnings).size, "16 人が別々の行").toBe(16);
   });
 
+  it("Issue #380: 取得ステップ(朝)は、取得に失敗した騎手を 1 人 1 行で onWarn に出す(core の文面のまま。URL を含む)。調教師の警告は無い", async () => {
+    const h = harness();
+    h.gate.body = (url) => (url.includes(JOCKEY_URL) ? null : fixtureForUrl(url));
+    await morningFetch(h);
+    expect(jockeyUrls(h), "前提: 16 人ぶん試みた").toHaveLength(16);
+    const jockeyWarnings = h.warnings.filter((w) => w.includes(": 騎手: "));
+    expect(jockeyWarnings).toHaveLength(16);
+    expect(new Set(jockeyWarnings).size, "16 人が別々の行").toBe(16);
+    for (const w of jockeyWarnings) {
+      expect(w).toMatch(new RegExp(`^朝の取得\\(${RACE}\\): 騎手: 騎手ID \\d{5} の年度別成績の取得に失敗しました: `));
+      expect(w).toMatch(/\/jockey\/result\.html\?id=\d{5}/);
+    }
+    expect(h.warnings.filter((w) => w.includes(": 調教師: ")), "調教師は取らない設定").toHaveLength(0);
+  });
+
+  it("Issue #380: 取得ステップ(発走前)も同じ。1 人(01170)だけ失敗なら、その 1 行だけが出る。取得ステップは ok のまま", async () => {
+    const h = harness();
+    h.gate.body = (url) => (url.includes(JOCKEY_URL) && url.includes("id=01170") ? null : fixtureForUrl(url));
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    expect(jockeyUrls(h), "前提: 16 人ぶん試みた").toHaveLength(16);
+    const jockeyWarnings = h.warnings.filter((w) => w.includes(": 騎手: "));
+    expect(jockeyWarnings).toHaveLength(1);
+    expect(jockeyWarnings[0]).toContain(`発走前の取得(${RACE}): 騎手: 騎手ID 01170 の年度別成績の取得に失敗しました: `);
+  });
+
+  it("Issue #380: 取得ステップは、騎手の保存先の読みの失敗も onWarn に出す。取得ステップは ok のまま", async () => {
+    const store = new MemoryJockeyStore();
+    store.failLoad = true;
+    const h = harness(JOCKEY_ONLY, { jockeyStore: store });
+    await morningFetch(h);
+    expect(h.warnings.filter((w) => w.includes(": 騎手: "))).toEqual([`朝の取得(${RACE}): 騎手: 騎手の成績の保存先を読めなかったため、netkeiba から取得します: D1 を読めません`]);
+  });
+
+  it("Issue #380: ID 付きでもキャッシュ無し以外の騎手の警告(ここでは本文が壊れた)は、計算ステップでも文面をそのまま素通しする", async () => {
+    const h = harness();
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    h.sql.exec("UPDATE fetch_cache SET value = '<html></html>' WHERE key LIKE '%/jockey/result.html?id=01170%'");
+    h.warnings.length = 0;
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "compute", result: "ok" });
+    const jockeyWarnings = h.warnings.filter((w) => w.includes(": 騎手: "));
+    expect(jockeyWarnings, "前提: 壊した 1 人ぶんだけ警告が出ている").toHaveLength(1);
+    expect(jockeyWarnings[0]).toContain("騎手ID 01170 の年度別成績の取得に失敗しました: 年度別成績の表が見つかりません");
+    expect(jockeyWarnings[0]).not.toContain("保存先に無いため補正なし");
+  });
+
   it("1人だけ失敗(01170 のみ 404)なら、その騎手の馬だけ補正なしで、ほかの15人は補正される", async () => {
     const h = harness();
     h.gate.body = (url) => (url.includes(JOCKEY_URL) && url.includes("id=01170") ? null : fixtureForUrl(url));

@@ -7,6 +7,9 @@ import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-t
 import type { RaceIdVenueKind } from "../../packages/core/src/scraper/ids";
 import type { StoredTrainerResults, TrainerResultsSaveEntry, TrainerResultsStore } from "../../packages/core/src/scraper/trainer-results-store";
 import { parseShutuba } from "../../packages/core/src/scraper/parse-shutuba";
+import { DEFAULT_SCORER_CONFIG } from "../../packages/core/src/scorer/config";
+import { normalizeFieldPriors } from "../../packages/core/src/scorer/prior";
+import { buildCloudScorerConfig } from "../src/scorer-config";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
 import { RaceDayCore, type AnalysisSink, type RaceDayDeps } from "../src/race-day-core";
@@ -449,6 +452,34 @@ describe("t15: 調教師の重みは既定値以外でも取得〜計算を通�
     expect(maxDiff(at077, at0)).toBeGreaterThan(0.001);
     expect(maxDiff(at2, at0)).toBeGreaterThan(0.001);
   });
+
+  it("Issue #380: 朝の prior は期待値に一致する: 重み 0 の補正の合計 + 重み × (縮小した率 − レース内の平均) を、頭数レベルの正規化に通した値(重み 2。既定の 0.77 の期待値とは別の列)", async () => {
+    // 期待値の作り方と限界: 調教師の項(重み × (率 − 平均))だけを手計算で足し、ほかの補正は重み 0 の発走前の保存の寄与度の合計をそのまま使う。
+    // 最後の頭数レベルの正規化(二分法)は閉じた式で書けないので、本番の `normalizeFieldPriors` を使う。確かめるのは「重みが朝の計算まで届くこと」で、正規化の正しさではない
+    // (正規化は packages/core 側のテストが確かめる)。重みを別の値(2 の 2 乗など)で渡す・スナップショットの重みを無視して既定値を使う変異は、述語(差が 0.001 超)では見逃すが、ここで捕まる。
+    const prior = buildCloudScorerConfig(withWeight(WEIGHT)).prior;
+    expect(prior, "前提: 調教師の重みの違いは prior の設定に影響しない(既定の prior 設定を期待値に使える)").toEqual(DEFAULT_SCORER_CONFIG.prior);
+    const base = [...(await preRaceSaved(harness(NO_TRAINER))).horses].sort((a, b) => a.umaban - b.umaban); // 重み 0: 調教師の項は 0
+    expect(base).toHaveLength(16);
+    const neutral = Math.min(prior.targetPlaceCount, base.length) / base.length;
+    const rates = new Map([["01126", rateOf(W_01126)], ["01175", rateOf(W_01175)], ["01092", rateOf(W_01092)]]);
+    const mean = [...rates.values()].reduce((a, b) => a + b, 0) / 3;
+    const expectedAt = (weight: number): number[] =>
+      normalizeFieldPriors(
+        base.map((h) => {
+          const others = (h.contributions as Contribution[]).reduce((sum, c) => sum + c.correction, 0);
+          const trainerId = SHUTUBA.horses.find((s) => s.umaban === h.umaban)!.trainerId!;
+          return neutral + others + (rates.has(trainerId) ? weight * (rates.get(trainerId)! - mean) : 0);
+        }),
+        prior,
+      );
+    const actual = await morningPriors(harness(withWeight(WEIGHT)));
+    const expected = expectedAt(WEIGHT);
+    const expectedDefault = expectedAt(0.77);
+    expect(actual).toHaveLength(16);
+    expect(Math.max(...expected.map((p, i) => Math.abs(p - expectedDefault[i]!))), "前提: 期待値は重み 2 と 0.77 を区別できる").toBeGreaterThan(0.001);
+    actual.forEach((p, i) => expect(p, `${i + 1} 番目の馬`).toBeCloseTo(expected[i]!, 10));
+  });
 });
 
 describe("t13: 騎手と共有する gate の呼び出しの上限(40)", () => {
@@ -478,6 +509,92 @@ describe("t13: 騎手と共有する gate の呼び出しの上限(40)", () => {
       expect(w).toContain("次回以降のレースの取得で取る");
     }
     expect(new Set(trainerWarnings).size, "11 人が別々の行").toBe(11);
+  });
+
+  it("Issue #380: 取得ステップ(朝)は、取得の上限で取らなかった調教師の警告を onWarn に出す。core の文面のとおり 1 行(11 人ぶんをまとめた行)で、騎手の警告は無い", async () => {
+    const h = harness(DEFAULT_CLOUD_SETTINGS);
+    await morningFetch(h);
+    expect(trainerUrls(h), "前提: 取得の上限で 5 人しか取れていない").toHaveLength(5);
+    const trainerWarnings = h.warnings.filter((w) => w.includes(": 調教師: "));
+    expect(trainerWarnings).toHaveLength(1);
+    expect(trainerWarnings[0]).toBe(`朝の取得(${RACE}): 調教師: この取得の呼び出しが上限(40本)に達したため、調教師 11 人の成績は取得せず、補正なしで続行します`);
+    expect(h.warnings.filter((w) => w.includes(": 騎手: ")), "騎手の 16 人は取れているので警告なし").toHaveLength(0);
+  });
+
+  it("Issue #380: 取得ステップ(朝)は、取得に失敗した調教師を 1 人 1 行で onWarn に出す(core の文面のまま。URL を含む)", async () => {
+    const h = harness(TRAINER_ONLY);
+    h.gate.body = (url) => (url.includes(TRAINER_URL) ? null : fixtureForUrl(url));
+    await morningFetch(h);
+    expect(trainerUrls(h), "前提: 16 人ぶん試みた").toHaveLength(16);
+    const trainerWarnings = h.warnings.filter((w) => w.includes(": 調教師: "));
+    expect(trainerWarnings).toHaveLength(16);
+    expect(new Set(trainerWarnings).size, "16 人が別々の行").toBe(16);
+    for (const w of trainerWarnings) {
+      expect(w).toMatch(new RegExp(`^朝の取得\\(${RACE}\\): 調教師: 調教師ID \\d{5} の年度別成績の取得に失敗しました: `));
+      expect(w).toMatch(/\/trainer\/result\.html\?id=\d{5}/);
+    }
+  });
+
+  it("Issue #380: 取得ステップ(発走前)も同じ。1 人(01126)だけ失敗なら、その 1 行だけが出る。取得ステップは ok のまま", async () => {
+    const h = harness(TRAINER_ONLY);
+    h.gate.body = (url) => (url.includes(TRAINER_URL) && url.includes("id=01126") ? null : fixtureForUrl(url));
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    expect(trainerUrls(h), "前提: 16 人ぶん試みた").toHaveLength(16);
+    const trainerWarnings = h.warnings.filter((w) => w.includes(": 調教師: "));
+    expect(trainerWarnings).toHaveLength(1);
+    expect(trainerWarnings[0]).toContain(`発走前の取得(${RACE}): 調教師: 調教師ID 01126 の年度別成績の取得に失敗しました: `);
+  });
+
+  it("Issue #380: 取得ステップは、調教師の保存先の読み・書きの失敗も onWarn に出す(D1 の障害が見える)。取得ステップは ok のまま", async () => {
+    const loadFail = new MemoryTrainerStore();
+    loadFail.failLoad = true;
+    const a = harness(TRAINER_ONLY, { trainerStore: loadFail });
+    await morningFetch(a);
+    expect(a.warnings.filter((w) => w.includes(": 調教師: "))).toEqual([`朝の取得(${RACE}): 調教師: 調教師の成績の保存先を読めなかったため、netkeiba から取得します: D1 を読めません`]);
+    const saveFail = new MemoryTrainerStore();
+    saveFail.failSave = true;
+    const b = harness(TRAINER_ONLY, { trainerStore: saveFail });
+    await morningFetch(b);
+    expect(b.warnings.filter((w) => w.includes(": 調教師: "))).toEqual([`朝の取得(${RACE}): 調教師: 調教師の成績を保存先に保存できなかったため、次回も取得します: D1 に書けません`]);
+  });
+
+  it("Issue #380: 取得ステップが出すのは騎手・調教師の警告だけ(調教の取得失敗は出さない。計算ステップでは従来どおり出る)", async () => {
+    const h = harness(NO_TRAINER);
+    h.gate.body = (url) => (url.includes("oikiri.html") ? null : fixtureForUrl(url));
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    expect(h.gate.urls.some((u) => u.includes("oikiri.html")), "前提: 調教のページを試みた").toBe(true);
+    expect(h.warnings.filter((w) => w.includes("調教(追い切り)")), "取得ステップは出さない").toHaveLength(0);
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "compute", result: "ok" });
+    expect(h.warnings.filter((w) => w.includes("調教(追い切り)")), "前提: 調教の警告は存在し、計算ステップが出す").toHaveLength(1);
+  });
+
+  it("Issue #380: 計算ステップの警告の書き換えは、キャッシュ無し(取得の失敗か上限か分からないもの)だけ。ID 付きでもキャッシュ無し以外の調教師の警告(ここでは本文が壊れた)は、文面をそのまま素通しする", async () => {
+    const h = harness(TRAINER_ONLY);
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    h.sql.exec("UPDATE fetch_cache SET value = '<html></html>' WHERE key LIKE '%/trainer/result.html?id=01126%'");
+    h.warnings.length = 0;
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "compute", result: "ok" });
+    const trainerWarnings = h.warnings.filter((w) => w.includes(": 調教師: "));
+    expect(trainerWarnings, "前提: 壊した 1 人ぶんだけ警告が出ている").toHaveLength(1);
+    expect(trainerWarnings[0]).toContain("調教師ID 01126 の年度別成績の取得に失敗しました: 年度別成績の表が見つかりません");
+    expect(trainerWarnings[0]).not.toContain("保存先に無いため補正なし");
+  });
+
+  it("Issue #380: ID を持たない種別(ここでは調教)の警告は、本文にキャッシュ無しの語を含んでも書き換えない(「調教ID undefined …」にならない)", async () => {
+    const h = harness(NO_TRAINER);
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    h.sql.exec("DELETE FROM fetch_cache WHERE key LIKE '%oikiri.html%'");
+    h.warnings.length = 0;
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "compute", result: "ok" });
+    const oikiriWarnings = h.warnings.filter((w) => w.includes(": 調教: "));
+    expect(oikiriWarnings, "前提: 調教の警告が 1 行出ている").toHaveLength(1);
+    expect(oikiriWarnings[0]).toContain("調教(追い切り)の取得に失敗しました: キャッシュに無い取得先です");
+    expect(oikiriWarnings[0]).not.toContain("undefined");
+    expect(oikiriWarnings[0]).not.toContain("保存先に無いため補正なし");
   });
 
   it("騎手が保存先にあれば調教師の枠が増え、16 人全員を取れる(合計 19 + 16 = 35 本。騎手は保存先から読む)", async () => {

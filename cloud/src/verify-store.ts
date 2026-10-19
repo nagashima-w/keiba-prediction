@@ -79,6 +79,7 @@ export interface ReadAllResult {
   readonly counts: Readonly<Record<string, number>>;
   /**
    * 締切直前の再計算の行(Issue #352)。**表が無い(migration 前)・読めなかったときは null**(主の集計は影響を受けない)。
+   * **`null` のとき、検証のコア(`verify-core.ts`)は「検証の再計算との比較の表を読めませんでした(比較なしで集計します)」を `onWarn` に出す**(Issue #375)。`undefined` では出さない。
    * 省略可能(この項目を持たない読み取り口〈既存のテストの偽物〉は、再計算の比較なしとして扱う)。
    */
   readonly close?: VerifyCloseRows | null;
