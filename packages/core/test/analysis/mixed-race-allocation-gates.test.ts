@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAllocationBetComboKey, buildComboOddsKey, type AllocationCandidate } from "../../src/ev/combo-bet-allocation.js";
+import { buildComboOddsKey, type AllocationCandidate } from "../../src/ev/combo-bet-allocation.js";
 import type {
   AnalysisRow,
   ComboOddsFetchDiagnosticsView,

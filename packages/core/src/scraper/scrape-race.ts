@@ -32,7 +32,7 @@ import {
 } from "./fetch-combo-odds.js";
 import type { HorseId, KaisaiDate, RaceId } from "./ids.js";
 import { parseJockeyId, parseTrainerId, venueKindOfRaceId } from "./ids.js";
-import type { JockeyResultsSaveEntry, JockeyResultsStore, StoredJockeyResults } from "./jockey-results-store.js";
+import type { JockeyResultsStore } from "./jockey-results-store.js";
 import { excludeNonStartResults, parseHorseResults } from "./parse-horse-results.js";
 import { parseJockeyResults, type JockeyYearRecord } from "./parse-jockey-results.js";
 import { parseNarOdds } from "./parse-nar-odds.js";

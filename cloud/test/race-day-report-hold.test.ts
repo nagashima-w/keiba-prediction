@@ -29,7 +29,6 @@ const jst = (time: string, date = "2026-10-13"): number => Date.parse(`${date}T$
 const JST_0900 = jst("09:00");
 const MIN = 60_000;
 
-const EMPTY_HTML = "<html><body></body></html>";
 /** 地方の結果ページ(実フィクスチャ。12 頭・単勝の払戻あり。どの地方のレースにも使い回す)。 */
 const NAR_RESULT = fixture("nar_result_202654071210.html");
 /** 中央の 16 頭の確定した結果ページ。 */

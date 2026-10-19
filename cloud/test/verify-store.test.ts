@@ -44,7 +44,7 @@ function mkRecord(i: number, over: Partial<AnalysisRecord> & { startTime?: strin
   };
 }
 
-const analyses = (bucket: VerifyBucket = local.r2, now: Date = NOW) => new D1AnalysisStore({ db: local.db, bucket: local.r2, now: () => now });
+const analyses = (now: Date = NOW) => new D1AnalysisStore({ db: local.db, bucket: local.r2, now: () => now });
 const verifyStore = (bucket: VerifyBucket = local.r2, now: Date = NOW) => new D1VerifyStore({ db: local.db, bucket, now: () => now });
 async function startTimeOf(id: number): Promise<string | null> {
   return (await local.db.prepare("SELECT start_time AS t FROM analyses WHERE id = ?").bind(id).first<{ t: string | null }>())!.t;

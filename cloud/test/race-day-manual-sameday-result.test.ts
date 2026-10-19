@@ -24,7 +24,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const fixture = (name: string): string => readFileSync(path.join(ROOT, "fixtures", name), "utf-8");
 const DATE = "20260628";
 const NEXT_DATE = "20260629";
-const MIN = 60_000;
 const jst = (time: string, date = "2026-06-28"): number => Date.parse(`${date}T${time}:00+09:00`);
 const JST_0900 = jst("09:00");
 /** 手動の分析の対象(出馬表のフィクスチャの発走時刻は 15:45)。 */

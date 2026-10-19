@@ -81,7 +81,6 @@ import {
 import { filterRaceDataBefore } from "../../packages/core/src/scorer/snapshot-filter.js";
 import {
   buildProbabilityQualityReport,
-  type ProbabilityQualityReport,
   type ProbabilityQualityReportInput,
 } from "../../packages/core/src/ev/probability-quality.js";
 import {

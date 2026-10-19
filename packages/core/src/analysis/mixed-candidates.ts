@@ -106,7 +106,6 @@ import {
   type ComboCandidateDiagnostics,
   type EvConfig,
   type JointModelHorse,
-  type WinCandidateDiagnostics,
 } from "../ev/combo-bet-allocation.js";
 
 import type {

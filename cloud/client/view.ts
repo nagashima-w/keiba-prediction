@@ -232,7 +232,7 @@ function cardResult(result: CardResult, actions: ViewActions): VNode {
     ...(open
       ? [
           ...resultMeta(content),
-          ...resultSections(content, "h3", actions),
+          ...resultSections(content, "h3"),
         ]
       : []),
   ]);
@@ -428,7 +428,7 @@ function closeSection(close: CloseSection, heading: "h2" | "h3"): VNode {
  * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「3着内率の上位5頭」(Issue #240。印の付いた馬の直後)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
  * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
  */
-function resultSections(content: ResultContent, heading: "h2" | "h3", actions: ViewActions): VNode[] {
+function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
   const allocation = content.allocation;
   return [
     // 印の付いた馬(Issue #211)。印が1頭も無ければ section ごと出さない。凡例はここ(見出しの下)に1回だけ(「馬ごとの評価」の中には出さない)。
@@ -495,7 +495,7 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
   if (content !== null) {
     body.push(h("h1", { class: "title" }, [content.title]));
     body.push(...resultMeta(content));
-    body.push(...resultSections(content, "h2", actions));
+    body.push(...resultSections(content, "h2"));
   }
   return h("div", { class: "screen" }, [controls, ...body]);
 }

@@ -5,6 +5,9 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    // Issue #392: 未使用の宣言(import・ローカル変数・引数)を型検査で落とす。実装上使わない引数は先頭に _ を付ける。
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

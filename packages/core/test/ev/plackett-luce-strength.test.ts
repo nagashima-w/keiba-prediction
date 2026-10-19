@@ -6,7 +6,6 @@ import {
   MAX_FIT_ITERATIONS,
   PlackettLuceFitError,
   type PlackettLuceFitFailureReason,
-  type PlackettLuceFitSuccess,
 } from "../../src/ev/plackett-luce-strength.js";
 import { PLACKETT_LUCE_MODEL } from "../../src/ev/plackett-luce-model.js";
 import type { JointModelHorse } from "../../src/ev/place-joint-model.js";
@@ -566,7 +565,6 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
     // する探索)がこの入力を見つけられなかったのは、両極端を「同時に」振る必要があったため
     // (どちらか一方だけを極端にしても、もう一方が中庸だと条件数が上がりきらない)。
     it("(正)n=14・k=7・tiny=1e-6を7頭+rest=0.999999を7頭 -> not-convergedになる", () => {
-      const n = 14;
       const k = 7;
       const tiny = 1e-6;
       const rest = 0.999999;
@@ -586,7 +584,6 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
     it("(負の対照)tinyとrestをわずかに変えるとok:trueに戻る(ガードが無差別に発火していないことの確認)", () => {
       // (正)からtiny/restを1桁だけ変えた近傍の入力。ガードが「常に発火する」壊れた実装
       // ではないことを示す対照(#31「判定不能と判定結果を混同しない」の逆側の確認)。
-      const n = 14;
       const k = 7;
       const tiny = 1e-7;
       const rest = 0.9999999;

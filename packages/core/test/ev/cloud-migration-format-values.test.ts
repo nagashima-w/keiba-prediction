@@ -26,7 +26,6 @@ import {
   MigrationFormatError,
   MigrationTally,
   buildAnalysisLine,
-  buildHeaderLine,
   buildResultLine,
   parseMigrationLine,
   serializeMigrationLine,

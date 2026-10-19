@@ -1842,7 +1842,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     it("外部キー有効化はDB共有中の ScrapeCache 操作に影響しないこと", () => {
       const db = new Database(":memory:");
       // AnalysisStore が foreign_keys=ON にした後も ScrapeCache は正常動作する。
-      const store = new AnalysisStore({ database: db });
+      new AnalysisStore({ database: db });
       const cache = new ScrapeCache({ database: db });
       cache.set("k", "v");
       cache.set("k", "v2"); // 上書き(FK制約とは無関係)
