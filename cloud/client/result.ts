@@ -32,7 +32,7 @@ import { formatEstimatedEvSuffix, formatEv, formatMarkRepair, formatOdds, format
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { nameWithGrade } from "./grade";
-import { formatAdjustment } from "./verify-format";
+import { formatAdjustment } from "../../packages/core/src/view/verify-format";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
 import { buildPlaceOddsLine, PLACE_ODDS_NOTE, type PlaceOddsLine } from "../src/place-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";

@@ -10,7 +10,7 @@ import { formatJstDateTime } from "./date";
 import { dateLabel, JOB_UNAVAILABLE_NOTICE, MARK_HEADING, markRowsOf, refundText, statTiles, templateRows, typeRowsOf, WHATIF_HEADING, WHATIF_NOTE, ymd, type ReportModel, type ReportRegenState, type ReportRunState, type RowView, type TileView, type Tone } from "./report-model";
 import { buildMonthlyHash, buildReportHash, REPORT_HASH } from "./route";
 import { formatRecoveryPercent } from "../src/recovery-format";
-import { formatYen } from "./verify-format";
+import { formatYen } from "../../packages/core/src/view/verify-format";
 
 /** 一覧(月の並び)の状態。 */
 export type MonthlyListState =

@@ -3,6 +3,11 @@
  *
  * 回収率・複勝率のパーセント表示、金額の桁区切り、キャリブレーション帯グラフの幅、
  * 実配当/近似の内訳注記を JSX から切り離してここに集約し、単体テストで固定する。
+ *
+ * **クラウド版の検証画面(`cloud/client`)・Worker(`cloud/src`)もこのファイルを直接 import する**(Issue #397 R-3)。
+ * 以前は `cloud/client/verify-format.ts` に同名・同出力の関数が複製され、出力の一致をテストで固定していた(exe の renderer が app の閉包から引けなかったため)。
+ * #287 で exe がなくなり複製の理由が消えたので、1 本にまとめた。
+ * クライアントの束に入るので、**実行時の import を持たない**(型の import だけ)こと。
  */
 
 import type {
@@ -63,18 +68,44 @@ export function formatUnknownBetTypeNotice(unknownBetType: ProposedBetUnknownBet
   );
 }
 
+/** 集計の内訳に要る 6 つの件数(`VerifyReportView` の部分)。 */
+export type ExclusionCounts = Pick<
+  VerifyReportView,
+  | "includedAnalysisCount"
+  | "excludedAnalysisCount"
+  | "supersededAnalysisCount"
+  | "excludedEstimatedCount"
+  | "excludedLookaheadSuspectCount"
+  | "excludedLookaheadUnknownCount"
+>;
+
 /**
- * 検証画面の集計の内訳(集計件数と、除外した件数の理由別内訳)の1行表示(Issue #152 B)。
+ * 検証画面の集計の内訳(集計件数と、除外した件数の理由別内訳)の行(Issue #152 B。Issue #397 R-3 でクラウド版の `exclusionRows` をここへ移した)。
  * 除外が0件の項目も出す(フィルタが有効であることが画面から分かるように)。
  * 「判定不能」という語は使わない(配分ベースの回収率の「判定不能」と混同させないため)。
+ * 順序・文言の定義はここの1か所で、`formatExclusionSummary` はこの行を ` / ` で連ねたもの。
  */
-export function formatExclusionSummary(report: VerifyReportView): string {
-  return (
-    `集計${report.includedAnalysisCount}件 / 結果未取込で除外${report.excludedAnalysisCount}件 / ` +
-    `旧分析除外${report.supersededAnalysisCount}件 / 発売前推定のため除外${report.excludedEstimatedCount}件 / ` +
-    `リーク疑い(発走後に分析・先読み未遮断)のため除外${report.excludedLookaheadSuspectCount}件 / ` +
-    `発走前後を判定できず除外${report.excludedLookaheadUnknownCount}件`
-  );
+export function exclusionRows(
+  report: ExclusionCounts,
+): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+  return [
+    { label: "集計", value: `${report.includedAnalysisCount}件` },
+    { label: "結果未取込で除外", value: `${report.excludedAnalysisCount}件` },
+    { label: "旧分析除外", value: `${report.supersededAnalysisCount}件` },
+    { label: "発売前推定のため除外", value: `${report.excludedEstimatedCount}件` },
+    {
+      label: "リーク疑い(発走後に分析・先読み未遮断)のため除外",
+      value: `${report.excludedLookaheadSuspectCount}件`,
+    },
+    { label: "発走前後を判定できず除外", value: `${report.excludedLookaheadUnknownCount}件` },
+  ];
+}
+
+/** 集計の内訳の1行表示(Issue #152 B)。`exclusionRows` の各項目を ` / ` で連ねる。 */
+export function formatExclusionSummary(report: ExclusionCounts): string {
+  return exclusionRows(report)
+    .map((row) => `${row.label}${row.value}`)
+    .join(" / ");
 }
 
 /** 補正方向(raised/lowered/unchanged)を日本語ラベルにする(Task#26)。 */

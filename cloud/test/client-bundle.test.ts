@@ -240,6 +240,7 @@ describe("生成物のドリフトと決定性", () => {
     // 副次効果: core のプロンプトの文面(`build-prompt.ts` ほか)を変えても `CLIENT_JS` が変わらなくなった(以前は変えるたびに、この生成物のドリフトの検査が落ちた)。
     // 新しい上限 228,500 の根拠: 実測 226,688 に約 1.8KB の余裕(226,688 + 1,812 を 500 バイト単位に切り上げ)。余裕は 1,812 バイト。
     // (追記)レビューの R1(設定を取り直したとき、飛んでいるプレビューの状態を捨てる 2 行)で 226,688 → 226,702(+14)。上限は 228,500 のまま(余裕 1,798 バイト)。
+    // (追記)Issue #397 R-3(検証画面の整形を core の 1 本にまとめた): 226,702 → 226,641(-61。`pnpm run build:client` の出力〈「226641 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。client に複製していた `formatYen` が core 版と二重に入っていたのが 1 つになった分。上限は 228,500 のまま(余裕 1,859 バイト)。
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(228_500);
   });
 });
@@ -250,6 +251,9 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   "../../packages/core/src/view/allocation-proposal-view",
   "../../packages/core/src/view/bet-allocation-view",
   "../../packages/core/src/view/format",
+  // Issue #397(R-3): 検証画面の整形(率・金額・補正幅・各種ラベル)は、client に複製せず core の 1 本を直接 import する。**実行時の import を持たない**(型の import だけ)。
+  // もとは `allocation-proposal-view`・`bet-allocation-view` の import で閉包に入っていた(`formatYen`)ので、束に入るモジュールは増えない。
+  "../../packages/core/src/view/verify-format",
   "../../packages/core/src/analysis/analysis-types",
   // Issue #189(設定画面): ラベルと版 ID は exe と共有していた定数(`packages/core/src/analysis/app-settings.ts`。import なしの純モジュール)、範囲の述語は cloud/src の純モジュール(サーバと同じ述語を使う)。
   "../../packages/core/src/analysis/app-settings",
@@ -358,7 +362,7 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
     for (const bad of ["@keiba/core", "@keiba/core/analyzer/build-prompt", "../src/prompt-preview", "../../packages/core/src/analyzer/build-prompt", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/core/src/analysis/analysis-export"]) {
       expect(importAllowed(bad), bad).toBe(false);
     }
-    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings"]) {
+    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/view/verify-format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings"]) {
       expect(importAllowed(good), good).toBe(true);
     }
   });
