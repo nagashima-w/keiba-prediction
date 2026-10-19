@@ -19,10 +19,13 @@ describe("closeReasonText: 理由の語彙すべてに日本語の文がある(�
     "horse-set-mismatch": "出走馬が分析時と変わったため行いませんでした",
     "analysis-failed": "計算できませんでした",
     "compute-failed": "計算できませんでした",
+    "combo-missing": "分析時の組合せのオッズを読めませんでした",
   };
-  it("前提: 語彙の数(失敗 5 + 行わなかった 3)と、期待表の数が一致する", () => {
-    expect(CLOSE_FAILED_REASONS.length + CLOSE_SKIPPED_REASONS.length).toBe(8);
-    expect(Object.keys(EXPECTED).length).toBe(8);
+  it("前提: 語彙の数(失敗 6 + 行わなかった 3)と、期待表の数が一致する(Issue #379 で失敗に combo-missing を足した。旧 nar-unsupported は旧い行のために残す)", () => {
+    expect(CLOSE_FAILED_REASONS.length).toBe(6);
+    expect(CLOSE_SKIPPED_REASONS.length).toBe(3);
+    expect(CLOSE_FAILED_REASONS.length + CLOSE_SKIPPED_REASONS.length).toBe(9);
+    expect(Object.keys(EXPECTED).length).toBe(9);
   });
   it.each([...CLOSE_FAILED_REASONS, ...CLOSE_SKIPPED_REASONS])("%s", (reason) => {
     expect(closeReasonText(reason)).toBe(EXPECTED[reason]);
@@ -46,6 +49,14 @@ describe("closeSummaryLines: 状態と理由・動いた時刻(JST の時:分)�
   it("failed・skipped: 状態の後ろに理由を括弧で添える", () => {
     expect(closeSummaryLines({ ...base, status: "failed", reason: "fetch-failed" })).toEqual(["失敗(オッズを取り直せませんでした)", "14:55に実行"]);
     expect(closeSummaryLines({ ...base, status: "skipped", reason: "nar-unsupported" })).toEqual(["行わなかった(地方は対象外です)", "14:55に実行"]);
+  });
+  it("組合せは分析時のまま(Issue #379。地方で組合せ ON の部分的な取り直し): ok の回にだけ、時刻の後ろに 1 行を足す。failed・skipped・組合せも取り直した回には足さない", () => {
+    const note = "組合せのオッズは分析時のまま(単勝・複勝だけ取り直し)";
+    expect(closeSummaryLines({ ...base, status: "ok", reason: null, comboBasis: "analysis" })).toEqual(["再計算した", "14:55に実行", note]);
+    expect(closeSummaryLines({ ...base, status: "ok", reason: null, comboBasis: "refetched" })).toEqual(["再計算した", "14:55に実行"]);
+    expect(closeSummaryLines({ ...base, status: "ok", reason: null })).toEqual(["再計算した", "14:55に実行"]);
+    expect(closeSummaryLines({ ...base, status: "failed", reason: "combo-missing", comboBasis: "analysis" })).toEqual(["失敗(分析時の組合せのオッズを読めませんでした)", "14:55に実行"]);
+    expect(closeSummaryLines({ firedAt: "壊れた値", lateMs: 0, status: "ok", reason: null, comboBasis: "analysis" })).toEqual(["再計算した", note]);
   });
   it("遅れの境界: 59,999ms は出さず、60,000ms は「1分遅れ」。119,999ms は切り捨てて「1分遅れ」、120,000ms は「2分遅れ」", () => {
     const line = (lateMs: number): string => closeSummaryLines({ ...base, lateMs, status: "ok", reason: null })[1]!;

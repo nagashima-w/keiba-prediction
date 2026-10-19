@@ -11,7 +11,8 @@ const ORIGIN = "https://cloud.invalid";
 
 /** 締切直前の再計算との比較(Issue #352)の見本。ハンドラは中身を見ずにそのまま返す(下の toEqual が、項目を落とさないことを固定する)。 */
 const CLOSE_COMPARISON = {
-  rounds: [{ round: 1, leadMinutes: 5, okCount: 1, targetCount: 2, base: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5 }, recalc: { betCount: 1, totalStake: 200, totalReturn: 0, recoveryRate: 0 } }],
+  description: "説明文(Issue #379。サーバが組み立てる)",
+  rounds: [{ round: 1, basis: "analysis" as const, basisLabel: "組合せは分析時のオッズ", leadMinutes: 5, okCount: 1, targetCount: 2, base: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5 }, recalc: { betCount: 1, totalStake: 200, totalReturn: 0, recoveryRate: 0 } }],
 };
 
 const READY: VerifyResponse = {

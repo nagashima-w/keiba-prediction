@@ -14,7 +14,7 @@
  * 3. 集計が新しい(透かしが同じで TTL 内)ならそのまま返す。そうでなければ再計算するが、**費用の柵**(最短間隔・1 日の回数)に当たったら古い集計を返す(`stale`)。
  * 4. 再計算: `readAll`(7 文の batch)→ `buildVerifySource` → 3 区分の `computeVerifyReport`(`PRODUCTION_VERIFY_CONFIG` = 旧 exe の検証画面と同じ設定)と、プロンプト版別の比較(`computePromptVersionSummaries`。全体のみ・画面が使う項目だけ。D1 は追加で読まない。Issue #220)。
  *    読んだ行に NULL の行が混ざっていたら(確認と読みの間に保存された)、キャッシュせず `preparing`(集計は旧 exe と一致するときだけ出す)。
- *    続けて、締切直前の再計算との比較(`closeComparison`。`verify-close.ts`。Issue #352)を計算する。再計算の行(`readAll` の `close`。別の batch)が無い・読めない(表が無い)ときは null。
+ *    続けて、締切直前の再計算との比較(`verify-close.ts`。Issue #352)を、**区分(all・central・nar)ごとに**計算してキャッシュの `closeByVenue` に載せる(Issue #379。応答の `closeComparison` はリクエストの区分のもの)。再計算の行(`readAll` の `close`。別の batch)が無い・読めない(表が無い)ときは null。
  *    **比較の計算が例外を投げても、本体の集計は出す**(比較だけ null にして、固定の警告を残す)。形式の版(`CACHE_VERSION`)は上げない: 項目は省略可能で、無い旧い集計は null として返す(次の再計算で埋まる)。
  *    **透かし(`Watermark`)に再計算の表は足さない**: 比較に入るのは結果が出ている分析だけで、再計算の行は発走の 5 分前・直前に書かれ(結果の取込より前)、結果の取込は `race_results` の透かしを動かす。
  *    同じ行の再保存〈UPSERT。rowid が変わらない〉が結果の後に起きても、TTL(1 時間)で拾う。
@@ -158,10 +158,11 @@ interface CacheEntry {
   /** プロンプト版別の比較(全体のみ。区分に依らない。画面が使う項目だけ)。Issue #220。 */
   readonly promptVersions: readonly PromptVersionSummary[];
   /**
-   * 締切直前の再計算との比較(Issue #352。区分に依らず中央のみ)。再計算の行が無い・表が読めない・計算が失敗したときは null。
-   * **省略可能**: この項目を持たない旧い集計(形式の版は上げていない)は、null として扱う(次の再計算で埋まる)。
+   * 締切直前の再計算との比較(Issue #352)を、区分(all・central・nar)ごとに(Issue #379。以前は区分に依らず中央のみの `closeComparison` 1 つ)。区分に対象が無い・再計算の行が無い・
+   * 表が読めない・計算が失敗したときは、その区分の値が null。
+   * **省略可能**: この項目を持たない旧い集計(形式の版は上げていない。旧い `closeComparison` は中央だけで区分ごとの値ではないので読まない)は、null として扱う(次の再計算で埋まる)。
    */
-  readonly closeComparison?: CloseComparison | null;
+  readonly closeByVenue?: Readonly<Record<VerifyVenueFilter, CloseComparison | null>>;
   readonly diag: VerifyDiag;
 }
 
@@ -190,7 +191,7 @@ export type VerifyResponse =
       readonly report: VerifyReport;
       /** プロンプト版別の比較(Issue #220)。**区分(venue)に依らず全体**(旧 exe の版別比較と同じ)。画面が使う項目だけを持つ。 */
       readonly promptVersions: readonly PromptVersionSummary[];
-      /** 締切直前の再計算との比較(Issue #352)。区分に依らず中央のみ。比較できるものが無いときは null。 */
+      /** 締切直前の再計算との比較(Issue #352)。**リクエストの区分のもの**(Issue #379。地方を含む。基準ごとに行が分かれる)。比較できるものが無いときは null。 */
       readonly closeComparison: CloseComparison | null;
       /** 集計した時刻(ISO)。 */
       readonly computedAt: string;
@@ -349,7 +350,7 @@ export class VerifyCore {
       venue,
       report: cache.reports[venue],
       promptVersions: cache.promptVersions.map((v) => ({ ...v, additionalInstructions: v.additionalInstructions.map((i) => (i === null ? null : VIEWER_REDACTED_INSTRUCTION)) })),
-      closeComparison: cache.closeComparison ?? null,
+      closeComparison: cache.closeByVenue?.[venue] ?? null,
       computedAt: new Date(cache.computedAt).toISOString(),
       stale: false,
       staleReason: null,
@@ -369,7 +370,7 @@ export class VerifyCore {
       venue,
       report: cache.reports[venue],
       promptVersions: cache.promptVersions,
-      closeComparison: cache.closeComparison ?? null,
+      closeComparison: cache.closeByVenue?.[venue] ?? null,
       computedAt: new Date(cache.computedAt).toISOString(),
       stale: reason !== null,
       staleReason: reason,
@@ -415,14 +416,21 @@ export class VerifyCore {
     const promptVersions = computePromptVersionSummaries(source);
     const t3 = now();
     // 締切直前の再計算との比較(Issue #352)。読めなかった(close が無い・null)・計算が失敗したときは null。**比較の失敗で本体の集計を失わない**(例外は握り、固定の警告だけ残す)。
-    let closeComparison: CloseComparison | null = null;
+    let closeByVenue: Record<VerifyVenueFilter, CloseComparison | null> = { all: null, central: null, nar: null };
     // 表が無い(migration 前)・読めなかった(`close: null`)ときだけ、固定の警告を残す(Issue #375。「表が無い」と「障害」は区別できない)。項目を持たない読み取り口(undefined)では出さない。応答は変えない。
     if (read.close === null) {
       this.deps.onWarn?.("検証の再計算との比較の表を読めませんでした(比較なしで集計します)");
     }
     if (read.close !== undefined && read.close !== null) {
       try {
-        closeComparison = computeCloseComparison(source, read.close);
+        // 基準(組合せ ON か)は、分析時の配分メタの include_combo_odds から(Issue #379)。
+        const comboOnIds = new Set(read.rows.allocationMeta.filter((m) => m.includeComboOdds === 1).map((m) => m.analysisId));
+        const close = read.close;
+        closeByVenue = {
+          all: computeCloseComparison(source, close, { venue: "all", comboOnIds }),
+          central: computeCloseComparison(source, close, { venue: "central", comboOnIds }),
+          nar: computeCloseComparison(source, close, { venue: "nar", comboOnIds }),
+        };
       } catch {
         this.deps.onWarn?.("検証の再計算との比較の計算で例外が起きました(比較なしで集計します)");
       }
@@ -434,7 +442,7 @@ export class VerifyCore {
       watermark,
       reports,
       promptVersions,
-      closeComparison,
+      closeByVenue,
       diag: { rowsRead: read.rowsRead, counts: read.counts, readMs: t1 - t0, computeMs: t2 - t1, promptVersionsMs: t3 - t2, closeMs: t4 - t3, startTimeGaps: countStartTimeGaps(read.rows.analyses) },
     };
     kv.put("cache", entry);

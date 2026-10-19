@@ -823,20 +823,20 @@ describe("Issue #352: 締切直前の再計算との比較の節(model.close)", 
 
   it("直前のリードがサーバの値で変わると、ラベルも変わる(クライアントに分を固定しない)", () => {
     const fx = closeFixture();
-    const changed = { rounds: [fx.rounds[0]!, { ...fx.rounds[1]!, leadMinutes: 3 }] };
+    const changed = { ...fx, rounds: [fx.rounds[0]!, { ...fx.rounds[1]!, leadMinutes: 3 }] };
     expect(withClose(changed).close!.rows[1]!.label).toBe("直前(発走3分前・暫定)");
   });
 
   it("回 1 のリードがサーバの値で変わると、ラベルも変わる(Issue #373。「5分前」をクライアントに固定しない。サーバの定数 CLOSE_FIRST_LEAD_MS を変えたときの追随)", () => {
     const fx = closeFixture();
     expect(fx.rounds[0]!.leadMinutes).toBe(5); // 前提: 元の値は 5(7 に変えて初めて、ベタ書きの「5分前」と区別できる)
-    const changed = { rounds: [{ ...fx.rounds[0]!, leadMinutes: 7 }, fx.rounds[1]!] };
+    const changed = { ...fx, rounds: [{ ...fx.rounds[0]!, leadMinutes: 7 }, fx.rounds[1]!] };
     expect(withClose(changed).close!.rows.map((r) => r.label)).toEqual(["7分前", "直前(発走2分前・暫定)"]);
   });
 
   it("★「参考」の印は ok の件数が 30 件未満の行だけ(29 件は付き、30 件は付かない。置き値の境界)", () => {
     const fx = closeFixture();
-    const at = (okCount: number) => ({ rounds: [{ ...fx.rounds[0]!, okCount, targetCount: okCount + 1 }] });
+    const at = (okCount: number) => ({ ...fx, rounds: [{ ...fx.rounds[0]!, okCount, targetCount: okCount + 1 }] });
     const hasMark = (okCount: number) => withClose(at(okCount)).close!.rows[0]!.cells.some((c) => c.name === "注意");
     expect([hasMark(0), hasMark(29), hasMark(30), hasMark(31)]).toEqual([true, true, false, false]);
   });
@@ -844,21 +844,28 @@ describe("Issue #352: 締切直前の再計算との比較の節(model.close)", 
   it("回収率が null(ok が 0 件・賭け金 0)は「-」。ok が 0 件でも行は出る", () => {
     const fx = closeFixture();
     const empty = { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null };
-    const close = withClose({ rounds: [{ ...fx.rounds[0]!, okCount: 0, targetCount: 4, base: empty, recalc: empty }] }).close!;
+    const close = withClose({ ...fx, rounds: [{ ...fx.rounds[0]!, okCount: 0, targetCount: 4, base: empty, recalc: empty }] }).close!;
     expect(close.rows[0]!.cells.map((c) => c.value).slice(0, 4)).toEqual(["0/4件", "-", "-", "0円→0円"]);
   });
 
-  it("説明と注記は日付に依らない固定の文(件数が少ないうちは回収率の差に意味がない旨・区分に依らず中央のみの旨)。閲覧者(admin=false)にも出る", () => {
+  it("注記は日付に依らない固定の文(件数が少ないうちは回収率の差に意味がない旨)。説明文はサーバの値をそのまま出す(Issue #379。クライアントの束に日本語の説明を置かない)。閲覧者(admin=false)にも出る", () => {
+    // 旧: 説明文をクライアントが持ち、「中央」「区分」を含むことを固定していた。説明文はサーバに移ったので、その内容(区分のタブに合わせること・混成の行が別の比較であること)は
+    // サーバ側の `verify-close-venue.test.ts` の「説明文はサーバが持つ」が固定する。ここでは、渡された文をそのまま出すこと(加工しない)を固定する。
     for (const admin of [true, false]) {
       const close = withClose(closeFixture(), { admin }).close!;
       expect(close.note).toBe("件数が少ないうちは、回収率の差に意味がありません。「参考」の行は、再計算できた件数が 30 件未満です。");
-      expect(close.description).toContain("中央");
-      expect(close.description).toContain("区分");
-      expect(`${close.description}${close.note}`).not.toMatch(/\d{1,2}\/\d{1,2}|\d{4}|月/); // 日付を含まない(古くならない)
+      expect(close.description).toBe(closeFixture().description);
+      expect(close.note).not.toMatch(/\d{1,2}\/\d{1,2}|\d{4}|月/); // 日付を含まない(古くならない)
     }
   });
 
-  it("区分のタブに依らない(全体・中央のみ・地方のみのどれでも同じ節が出る)", () => {
+  it("行の見出しに、サーバが渡した基準の語(basisLabel)を足す。null なら足さない(Issue #379。組合せは分析時のオッズの行を別の行として見分ける)", () => {
+    const fx = closeFixture();
+    const mixed = { ...fx, rounds: [fx.rounds[0]!, { ...fx.rounds[0]!, basisLabel: "組合せは分析時のオッズ" }, fx.rounds[1]!] };
+    expect(withClose(mixed).close!.rows.map((r) => r.label)).toEqual(["5分前", "5分前・組合せは分析時のオッズ", "直前(発走2分前・暫定)"]);
+  });
+
+  it("クライアントは区分で比較を加工しない(区分ごとの値はサーバが決めて渡す。Issue #379。同じ値を渡せば、どの区分のタブでも同じ節が出る)", () => {
     const rows = (["all", "central", "nar"] as const).map((venue) => withClose(closeFixture(), { venue }).close!.rows);
     expect(rows[1]).toEqual(rows[0]);
     expect(rows[2]).toEqual(rows[0]);

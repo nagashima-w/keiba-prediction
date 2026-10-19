@@ -895,22 +895,62 @@ describe("Issue #352: 締切直前の再計算との比較(closeComparison)", ()
     return { rows, close };
   }
 
-  it("再計算で比較を作り、kv のキャッシュにも応答にも載せる。値は純関数 computeCloseComparison と同じ。区分に依らず同じ(中央固定)", async () => {
+  /**
+   * Issue #379: 中央 1 件(id1)に加えて、地方の組合せ ON の分析(id2。分析時の配分メタの include_combo_odds = 1)と、地方の組合せ OFF の分析(id3)。
+   * どちらも分析時は place 01(的中)に 1,000 円、再計算の回 1 は 外れる 02 に 500 円。
+   */
+  function withVenues(): { rows: VerifyReadRows; close: VerifyCloseRows } {
+    const N2 = "202644071412";
+    const base = rowsOf([analysisRow(1, CENTRAL), analysisRow(2, NAR), analysisRow(3, N2)]);
+    const rows: VerifyReadRows = {
+      ...base,
+      allocationMeta: [1, 2, 3].map((id) => ({ analysisId: id, route: "place-only", skipReasonCode: null, includeComboOdds: id === 2 ? 1 : 0 })),
+      bets: [1, 2, 3].map((id) => ({ analysisId: id, betType: "place", comboKey: "01", stake: 1000 })),
+    };
+    const close: VerifyCloseRows = {
+      meta: [1, 2, 3].map((id) => ({ analysisId: id, round: 1, status: "ok", route: "place-only", skipReasonCode: null, reason: null })),
+      bets: [1, 2, 3].map((id) => ({ analysisId: id, round: 1, betType: "place", comboKey: "02", stake: 500 })),
+    };
+    return { rows, close };
+  }
+
+  it("再計算で比較を作り、kv のキャッシュにも応答にも載せる。値は純関数 computeCloseComparison と同じ。区分(all・central・nar)ごとに別の値で、応答はリクエストの区分のもの(Issue #379。旧: 区分に依らず中央固定)", async () => {
     const { core, store, kv } = setup();
-    const { rows, close } = withAllocation();
+    const { rows, close } = withVenues();
     store.state.rows = rows;
     store.state.close = close;
-    const expected = computeCloseComparison(buildVerifySource(rows), close);
-    // 前提(空振り防止): 比較があり、分析時と再計算で賭け金が違う(取り違えを検出できる)
-    expect(expected!.rounds[0]!.base.totalStake).toBe(1000);
-    expect(expected!.rounds[0]!.recalc.totalStake).toBe(500);
+    const source = buildVerifySource(rows);
+    const comboOnIds = new Set([2]);
+    const expected = {
+      all: computeCloseComparison(source, close, { venue: "all", comboOnIds }),
+      central: computeCloseComparison(source, close, { venue: "central", comboOnIds }),
+      nar: computeCloseComparison(source, close, { venue: "nar", comboOnIds }),
+    };
+    // 前提(空振り防止): 区分ごとに値が違う(取り違えを検出できる)。中央は 1 件、地方は基準で 2 行、全体は中央 + 地方の OFF が refetched・地方の ON が analysis
+    const targetOf = (c: typeof expected.all, basis: string) => c!.rounds.find((r) => r.round === 1 && r.basis === basis)?.targetCount;
+    expect([targetOf(expected.central, "refetched"), targetOf(expected.central, "analysis")]).toEqual([1, undefined]);
+    expect([targetOf(expected.nar, "refetched"), targetOf(expected.nar, "analysis")]).toEqual([1, 1]);
+    expect([targetOf(expected.all, "refetched"), targetOf(expected.all, "analysis")]).toEqual([2, 1]);
+    expect(expected.central!.rounds[0]!.base.totalStake).toBe(1000);
+    expect(expected.central!.rounds[0]!.recalc.totalStake).toBe(500);
     for (const venue of ["all", "central", "nar"] as const) {
       const res = await core.getReport(venue);
       if (res.status !== "ready") throw new Error("ready のはず");
-      expect(res.closeComparison, venue).toEqual(expected);
+      expect(res.closeComparison, venue).toEqual(expected[venue]);
     }
-    expect(kv.get<{ closeComparison: unknown }>("cache")!.closeComparison).toEqual(JSON.parse(JSON.stringify(expected)));
+    expect(kv.get<{ closeByVenue: unknown }>("cache")!.closeByVenue).toEqual(JSON.parse(JSON.stringify(expected)));
     expect(store.calls.filter((c) => c === "readAll")).toHaveLength(1); // D1 の読みは増えない(読むのは readAll の中)
+  });
+
+  it("基準(組合せ ON か)は分析時の配分メタの includeComboOdds から決める: 値が 0・NULL・無しの分析は ON に数えない", async () => {
+    const { core, store } = setup();
+    const { rows, close } = withVenues();
+    const noFlag: VerifyReadRows = { ...rows, allocationMeta: rows.allocationMeta.map((m) => ({ analysisId: m.analysisId, route: m.route, skipReasonCode: m.skipReasonCode })) };
+    store.state.rows = noFlag;
+    store.state.close = close;
+    const res = await core.getReport("nar");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(res.closeComparison!.rounds.map((r) => r.basis)).toEqual(["refetched", "refetched"]); // 回 1・回 2 とも refetched だけ(analysis の行なし)
   });
 
   it("診断: 比較の所要時間(closeMs)を、3 区分(computeMs)・版別(promptVersionsMs)とは別に出す(それらの意味を変えない)。表ごとの行数に再計算の表が出る", async () => {
@@ -993,8 +1033,9 @@ describe("Issue #352: 締切直前の再計算との比較(closeComparison)", ()
     expect((await core.getReport("all")).status).toBe("ready");
     const cache = kv.get<Record<string, unknown>>("cache")!;
     expect(cache["v"]).toBe(6); // 形式の版は据え置き(#245 の副作用を避ける。上げるときはこの assert を直す)
-    const { closeComparison: _drop, ...old } = cache;
-    kv.put("cache", old);
+    const { closeComparison: _dropOld, closeByVenue: _drop, ...old } = cache;
+    // Issue #379 より前の集計は、中央だけの `closeComparison` を持っていた。区分ごとの値ではないので読まない(次の再計算で埋まる)
+    kv.put("cache", { ...old, closeComparison: { description: "旧い中央だけの比較", rounds: [] } });
     store.calls.length = 0;
     const res = await core.getReport("all");
     if (res.status !== "ready") throw new Error("ready のはず");

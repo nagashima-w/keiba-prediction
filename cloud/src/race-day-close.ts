@@ -78,6 +78,14 @@ export interface CloseInput {
   readonly evThreshold: number;
   /** 分析時の配分の route(`unset` なら再計算しても出ないので、オッズを取らない)。配分が無かったときは null。 */
   readonly baseRoute: string | null;
+  /**
+   * 分析時の組合せオッズを、取得キャッシュ(`fetch_cache`)から読んでよい期間の下限(Issue #379。UTC のエポックミリ秒)= 発走前の取得ステップの開始時刻。
+   * これより古いエントリは、前の実行の残りで、今回の分析のオッズではない(計算ステップの `oddsSince` と同じ判定)。**省略可能**: 組合せが OFF のとき、およびこの項目を持たない旧い入力は省略。
+   * 地方で組合せが ON(部分的な取り直し)のとき、省略されていれば読めないとみなす(combo-missing)。
+   */
+  readonly comboFromMs?: number;
+  /** 同じ期間の上限 = 分析を保存した(この入力を積んだ)時刻。これより新しいエントリは、分析の後の別の取得で上書きされたもので、分析時のオッズではない。 */
+  readonly comboToMs?: number;
 }
 
 export interface CloseRegistration {
@@ -138,6 +146,10 @@ export function parseCloseInput(text: string): CloseInput | null {
     seen.add(h.umaban);
     horses.push({ umaban: h.umaban, wakuban: h.wakuban, horseName: h.horseName, prior: h.prior, adjustedProb: h.adjustedProb, hadWinOdds: h.hadWinOdds, hadPlaceOdds: h.hadPlaceOdds });
   }
+  // 期間は省略可能(型だけ検査する。数でない値は壊れた入力として弾く。片方だけのときは、期間が無いものとして扱う=下の組み立てで落とす)。
+  if ((raw.comboFromMs !== undefined && !isNum(raw.comboFromMs)) || (raw.comboToMs !== undefined && !isNum(raw.comboToMs))) {
+    return null;
+  }
   return {
     v: 1,
     kaisaiDate: raw.kaisaiDate,
@@ -156,6 +168,7 @@ export function parseCloseInput(text: string): CloseInput | null {
     },
     evThreshold: raw.evThreshold,
     baseRoute: raw.baseRoute,
+    ...(raw.comboFromMs !== undefined && raw.comboToMs !== undefined ? { comboFromMs: raw.comboFromMs, comboToMs: raw.comboToMs } : {}),
   };
 }
 

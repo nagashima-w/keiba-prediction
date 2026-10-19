@@ -5,6 +5,13 @@ import { buildVerifySource, type VerifyReadRows } from "../src/verify-read";
 import { pathFromMeta } from "./meta-path";
 
 /**
+ * Issue #379 で `computeCloseComparison` は区分と基準の入力を取るようになった。このファイルの既存のテストは、Issue #352 の仕様(中央の分析だけ・組合せの基準なし)を固定するもので、
+ * 区分 `central`・組合せ ON の分析なしで呼ぶ(中央の挙動の保証は弱めていない)。地方・基準・旧い行は `verify-close-venue.test.ts`。
+ */
+const compute = (source: Parameters<typeof computeCloseComparison>[0], close: Parameters<typeof computeCloseComparison>[1]) =>
+  computeCloseComparison(source, close, { venue: "central", comboOnIds: new Set<number>() });
+
+/**
  * Issue #373(#352 の【記録】): 検証画面の回の見出し「5分前」は、サーバの回の定義(`analysis-close.ts` の定数 → `CLOSE_ROUNDS`)に追随する。
  * 連鎖は 3 段(定数 → CLOSE_ROUNDS → `computeCloseComparison` の leadMinutes → クライアントのラベル)。ここでは前の 2 段を検査する(最後の段は client-verify-model.test.ts)。
  *  - leadMinutes が CLOSE_ROUNDS に追随すること: `CLOSE_ROUNDS` を 7 分・3 分に差し替えて(vi.mock)、`leadMinutes` が [7, 3] になることを見る。実値の 5・2 のままでは、leadMinutes をベタ書きしても緑になる。
@@ -44,7 +51,7 @@ const close: VerifyCloseRows = {
 
 describe("回のリード(分)は CLOSE_ROUNDS から作る(Issue #373)", () => {
   it("CLOSE_ROUNDS を 7 分・3 分に差し替えると、leadMinutes も [7, 3] になる(5・2 のベタ書きではない)", () => {
-    const c = computeCloseComparison(buildVerifySource(rows), close);
+    const c = compute(buildVerifySource(rows), close);
     expect(c).not.toBeNull();
     expect(c!.rounds.map((r) => [r.round, r.leadMinutes])).toEqual([[1, 7], [2, 3]]);
   });

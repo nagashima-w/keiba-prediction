@@ -7,6 +7,7 @@ import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../packages/co
 import { VerifyCore, type VerifyKv, type VerifyResponse, type VerifyStorePort } from "../src/verify-core";
 import { buildVerifySource, type VerifyAnalysisRow, type VerifyReadRows } from "../src/verify-read";
 import { computePromptVersionSummaries } from "../src/verify-versions";
+import { CLOSE_COMPARISON_DESCRIPTION } from "../src/verify-close";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
@@ -480,10 +481,13 @@ describe("fetchVerify の失敗の分類", () => {
 
 describe("Issue #352: closeComparison(締切直前の再計算との比較)の読み取り", () => {
   const ready = (): Record<string, any> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as Record<string, unknown>) });
+  // Issue #379: 説明文(description)・基準ごとの見出しの語(basisLabel。null か文字列)をサーバが渡す。同じ回に、基準の違う行が並びうる(3 行目)。
   const valid = () => ({
+    description: "説明文(サーバが組み立てる)",
     rounds: [
-      { round: 1, leadMinutes: 5, okCount: 2, targetCount: 3, base: { betCount: 4, totalStake: 400, totalReturn: 300, recoveryRate: 0.75 }, recalc: { betCount: 3, totalStake: 300, totalReturn: 450, recoveryRate: 1.5 } },
-      { round: 2, leadMinutes: 2, okCount: 0, targetCount: 1, base: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null }, recalc: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null } },
+      { round: 1, basisLabel: null, leadMinutes: 5, okCount: 2, targetCount: 3, base: { betCount: 4, totalStake: 400, totalReturn: 300, recoveryRate: 0.75 }, recalc: { betCount: 3, totalStake: 300, totalReturn: 450, recoveryRate: 1.5 } },
+      { round: 2, basisLabel: null, leadMinutes: 2, okCount: 0, targetCount: 1, base: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null }, recalc: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null } },
+      { round: 1, basisLabel: "組合せは分析時のオッズ", leadMinutes: 5, okCount: 1, targetCount: 1, base: { betCount: 2, totalStake: 200, totalReturn: 100, recoveryRate: 0.5 }, recalc: { betCount: 1, totalStake: 100, totalReturn: 300, recoveryRate: 3 } },
     ],
   });
 
@@ -504,6 +508,12 @@ describe("Issue #352: closeComparison(締切直前の再計算との比較)の�
 
   const bad: ReadonlyArray<readonly [string, (c: any) => void]> = [
     ["rounds が配列でない", (c) => { c.rounds = {}; }],
+    ["description が無い", (c) => { delete c.description; }],
+    ["description が文字列でない", (c) => { c.description = 1; }],
+    ["description が長すぎる(1000 字超)", (c) => { c.description = "あ".repeat(1001); }],
+    ["basisLabel が無い", (c) => { delete c.rounds[0].basisLabel; }],
+    ["basisLabel が文字列でも null でもない", (c) => { c.rounds[0].basisLabel = 1; }],
+    ["同じ回・同じ見出しの語の行が重複する", (c) => { c.rounds[2].basisLabel = null; }],
     ["rounds が空", (c) => { c.rounds = []; }],
     ["回の番号が 0", (c) => { c.rounds[0].round = 0; }],
     ["回の番号が小数", (c) => { c.rounds[0].round = 1.5; }],
@@ -545,6 +555,8 @@ describe("Issue #352: 契約(本物の VerifyCore → 本物の handle() → ク
       const c = result.outcome.closeComparison;
       if (c === null) throw new Error("比較があるはず");
       expect(c.rounds.map((r) => [r.round, r.leadMinutes, r.okCount, r.targetCount])).toEqual([[1, 5, 1, 1], [2, 2, 0, 0]]);
+      expect(c.description).toBe(CLOSE_COMPARISON_DESCRIPTION); // サーバの文がそのまま届く(クライアントは固定の説明文を持たない)
+      expect(c.rounds.map((r) => r.basisLabel)).toEqual([null, null]);
       // 空振り防止: 分析時と再計算で賭け金が違う
       expect([c.rounds[0]!.base.totalStake, c.rounds[0]!.recalc.totalStake]).toEqual([300, 100]);
       expect([c.rounds[0]!.base.recoveryRate, c.rounds[0]!.recalc.recoveryRate]).toEqual([1.5, 0]);

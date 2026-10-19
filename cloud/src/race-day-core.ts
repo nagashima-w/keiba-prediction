@@ -84,7 +84,8 @@
  * ## 締切の直前の再計算(Issue #338〈#335-A1〉。`race-day-close.ts`・`analysis-close.ts`)
  * 発走前の分析(`pre_race`。自動・手動とも)が保存されたら、その同じ同期区間で再計算の入力(馬ごとの確率ほか)と回の行(発走の 5 分前・2 分前〈暫定〉)を積む({@link RaceDayCore.registerClose})。
  * 時刻が来たら {@link RaceDayCore.runCloseStep}(通知・馬場・タスクの前に 1 ステップ)が、**オッズだけ**を取り直し(出馬表・戦績・調教はキャッシュ専用、オッズだけ `bypassCache`)、確率は分析時のまま
- * 配分を作り直して(`recomputeAllocationFromProbs`。LLM は呼ばない)D1 に保存する。結果が決まったら保存の前に DO に書く=保存の再試行・再実行で取り直さない。中央だけ(地方は `nar-unsupported` で skipped)。通知はしない。
+ * 配分を作り直して(`recomputeAllocationFromProbs`。LLM は呼ばない)D1 に保存する。結果が決まったら保存の前に DO に書く=保存の再試行・再実行で取り直さない。中央・地方とも対象(Issue #379)。
+ * 地方で組合せが ON のときは**部分的な取り直し**: 単勝・複勝(1 本)だけ取り直し、組合せは分析時のオッズ(取得キャッシュの、分析の取得〜保存の期間のエントリ)のまま配分を作り直す(読めなければ failed の `combo-missing`)。通知はしない。
  */
 import { CachedFetcher, type TextFetcher } from "../../packages/core/src/scraper/cached-fetcher";
 import { HttpError, type HttpClient } from "../../packages/core/src/scraper/http-client";
@@ -101,7 +102,7 @@ import type { TrainerResultsStore } from "../../packages/core/src/scraper/traine
 import type { HorseRunsStore } from "./horse-runs";
 import type { RaceData } from "../../packages/core/src/scraper/scrape-race";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
-import { narRaceListSubUrl, narTrifectaOddsAxisUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
+import { narOddsPageUrl, narRaceListSubUrl, narTrifectaOddsAxisUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
 import { MAX_BULK_RACES } from "./bulk-limits";
 import { checkRaceDate } from "./race-date";
 import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
@@ -147,7 +148,7 @@ import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelecto
 import { SqlLlmResponseStore } from "./llm-response-store";
 import type { CloudLlm } from "./llm-sender";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
-import type { CloseReason, CloseRound, CloseSavePayload } from "./analysis-close";
+import { closeComboBasis, type CloseReason, type CloseRound, type CloseSavePayload } from "./analysis-close";
 import { CLOSE_FETCH_MAX_ATTEMPTS, CLOSE_FETCH_RETRY_DELAY_MS, CLOSE_SAVE_MAX_ATTEMPTS, CLOSE_SAVE_RETRY_DELAY_MS, CloseStore, parseCloseInput, parseClosePayload, type CloseInput, type CloseTaskRow } from "./race-day-close";
 import { toSafeRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
 import type { AnalysisAllocationSettings } from "../../packages/core/src/analysis/allocation-record";
@@ -2860,6 +2861,8 @@ export class RaceDayCore {
         allocationSettings: allocationSettingsOf(settings),
         evThreshold: settings.evThreshold,
         baseRoute: record.allocation?.meta.route ?? null,
+        // 組合せが ON のときだけ、分析時の組合せオッズを取得キャッシュから読んでよい期間を控える(Issue #379。地方の部分的な取り直しが使う。下限 = 取得ステップの開始、上限 = いま=分析の保存)。
+        ...(settings.includeComboOdds && task.fetch_started_at !== null ? { comboFromMs: task.fetch_started_at, comboToMs: this.now() } : {}),
       };
       this.close.register({ raceId: task.race_id, instance: task.queued_at, analysisId, startMs, now: this.now(), input });
     } catch (error) {
@@ -2867,11 +2870,31 @@ export class RaceDayCore {
     }
   }
 
-  /** 締切の再計算の取得口: オッズ(`ODDS_URL_PATTERN`)はキャッシュを迂回して取り、それ以外(出馬表・戦績・調教)はキャッシュだけから読む(キャッシュに無ければ投げる=ネットワークに出ない)。 */
-  private closeFetcher(): RaceFetcher {
+  /**
+   * 締切の再計算の取得口。オッズ(`ODDS_URL_PATTERN`)はキャッシュを迂回して取り、それ以外(出馬表・戦績・調教)はキャッシュだけから読む(キャッシュに無ければ投げる=ネットワークに出ない)。
+   * **`comboWindow` を渡すと(地方で組合せが ON=部分的な取り直し。Issue #379)**、単勝・複勝のページ(`narOddsPageUrl`)だけをネットワークから取り、ほかのオッズ(組合せ。三連複・三連単は軸馬別)は
+   * **取得キャッシュの分析時のエントリを読む**(分析の計算ステップが組合せを読むのと同じ。ネットワークに出ない)。エントリは取得時刻が `[from, to]` の範囲にあるものだけ使う
+   * (範囲の外 = 前の実行の残り、または分析の後の別の取得で上書きされたもの = 分析時のオッズではない。無いものとして {@link CacheMissError} を投げる)。
+   *
+   * 同じ取得キャッシュ(`fetch_cache`)に組合せのキー(`/odds/` 配下の単勝・複勝以外)を書く経路は、このファイルの `networkFetcher` を使う箇所のうち、発走前の取得ステップ
+   * (`runPreRaceFetch`)・地方三連単の軸の取得(`runNarTrifectaStep`)・中央の組合せ ON の再計算(この取得口の `comboWindow` 無し)の 3 つだけ(`grep -n "networkFetcher" cloud/src/race-day-core.ts`)。
+   * 朝の取得(`includeComboOdds: false`)・一覧・重賞の過去10年は組合せのキーを書かない。地方の部分的な取り直しは単勝・複勝のキーしか書かない。
+   */
+  private closeFetcher(singleOddsUrl: string, comboWindow: { readonly from: number; readonly to: number } | null): RaceFetcher {
     return {
-      fetchText: (url, options) =>
-        ODDS_URL_PATTERN.test(url) ? this.networkFetcher.fetchText(url, { ...options, bypassCache: true }) : this.cacheOnly.fetchText(url, options),
+      fetchText: (url, options) => {
+        if (!ODDS_URL_PATTERN.test(url)) {
+          return this.cacheOnly.fetchText(url, options);
+        }
+        if (comboWindow !== null && url !== singleOddsUrl) {
+          const entry = this.cache.get(url);
+          if (entry === undefined || entry.fetchedAt < comboWindow.from || entry.fetchedAt > comboWindow.to) {
+            return Promise.reject(new CacheMissError(url));
+          }
+          return Promise.resolve(entry.value);
+        }
+        return this.networkFetcher.fetchText(url, { ...options, bypassCache: true });
+      },
     };
   }
 
@@ -2939,9 +2962,9 @@ export class RaceDayCore {
     const attempts = row.attempts + 1;
     const base = { round: row.round as CloseRound, dueAtMs: row.due_ms, firedAtMs, lateMs };
     const result = (payload: CloseSavePayload) => ({ kind: "payload" as const, payload, attempts });
-    const failed = (reason: "analysis-failed" | "fetch-failed" | "horse-set-mismatch" | "compute-failed" | "blocked") =>
+    const failed = (reason: "analysis-failed" | "fetch-failed" | "horse-set-mismatch" | "compute-failed" | "blocked" | "combo-missing") =>
       result({ ...base, status: "failed", reason, oddsOfficialDatetime: null, allocation: null });
-    const skipped = (reason: "too-late" | "unset" | "nar-unsupported") => result({ ...base, status: "skipped", reason, oddsOfficialDatetime: null, allocation: null });
+    const skipped = (reason: "too-late" | "unset") => result({ ...base, status: "skipped", reason, oddsOfficialDatetime: null, allocation: null });
 
     const inputRow = this.close.inputRow(row.race_id);
     const input = inputRow === null ? null : parseCloseInput(inputRow.input_json);
@@ -2954,9 +2977,6 @@ export class RaceDayCore {
     } catch {
       return failed("analysis-failed");
     }
-    if (venueKindOfRaceId(raceId) === "nar") {
-      return skipped("nar-unsupported");
-    }
     if (input.baseRoute === "unset") {
       return skipped("unset");
     }
@@ -2965,6 +2985,13 @@ export class RaceDayCore {
     if (now >= supersedeAt) {
       return skipped("too-late");
     }
+    // 地方で組合せが ON: 部分的な取り直し(単勝・複勝だけ取り、組合せは分析時のオッズ。Issue #379)。期間が無い入力(この機能の前に積まれたもの)は、読めないので何も取らずに combo-missing。
+    const venueKind = venueKindOfRaceId(raceId);
+    const partial = closeComboBasis(venueKind, input.allocationSettings.includeComboOdds) === "analysis";
+    if (partial && (input.comboFromMs === undefined || input.comboToMs === undefined)) {
+      return failed("combo-missing");
+    }
+    const comboWindow = partial ? { from: input.comboFromMs!, to: input.comboToMs! } : null;
     const fetchFailure = (error: unknown) => {
       this.onWarn(`締切の直前の再計算の取得に失敗しました(${row.race_id}。回 ${row.round}。試行 ${attempts} 回): ${errorMessage(error)}`);
       const retryAt = now + CLOSE_FETCH_RETRY_DELAY_MS;
@@ -2976,8 +3003,8 @@ export class RaceDayCore {
     try {
       race = await scrapeRace(
         raceId,
-        { fetcher: this.closeFetcher(), now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL },
-        // 騎手の成績は要らない(オッズだけを取り直す)。組合せは分析時の設定(スナップショット)と同じ。地方三連単の段階取得(`deferNarTrifecta`)は、地方を扱わないので使わない。
+        { fetcher: this.closeFetcher(venueKind === "nar" ? narOddsPageUrl(raceId) : "", comboWindow), now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL },
+        // 騎手の成績は要らない(オッズだけを取り直す)。組合せは分析時の設定(スナップショット)と同じ。地方三連単の段階取得(`deferNarTrifecta`)は使わない(部分的な取り直しは、軸ごとのページもキャッシュから読む)。
         { includeComboOdds: input.allocationSettings.includeComboOdds, includeJockeyStats: false, bypassOddsCache: true },
       );
     } catch (error) {
@@ -2986,7 +3013,8 @@ export class RaceDayCore {
     // 組合せオッズの取得に警告(失敗・部分被覆・構造異常)があれば、その券種が配分から静かに抜ける=見かけの買い目の削除になる。結果にしない。
     const comboWarning = race.meta.warnings.find((w) => w.kind === "組合せオッズ");
     if (comboWarning !== undefined) {
-      return fetchFailure(new Error(comboWarning.message));
+      // 部分的な取り直しでは、組合せはキャッシュからしか読まない=待っても直らない。再試行せず combo-missing。
+      return partial ? failed("combo-missing") : fetchFailure(new Error(comboWarning.message));
     }
     // 馬の集合の確認: 出馬表(キャッシュ)の馬が分析時と同じで、分析時にオッズのあった馬のオッズが今もあること(取消などで抜けた馬があれば、確率の前提が崩れる)。
     const racers = new Set(race.horses.map((h) => h.shutuba.umaban));

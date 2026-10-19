@@ -46,6 +46,13 @@ describe("どの回を採るか(status が ok の回のうち番号が最大。�
     expect(race!.bet_count).not.toBe(a.betCount);
   });
 
+  it("Issue #379: 地方のレースも同じ規則で再計算の回を採る(場で分けない=特性化。地方も再計算の対象になった)", () => {
+    const NAR = "202654071210";
+    const a = analysis(NAR);
+    const [race] = build([a], [closeRound(a, 1), closeRound(a, 2, { betCount: 2, totalStake: 400, maxEv: 1.2 })]).races;
+    expect(race).toMatchObject({ source: "close", round: 2, bet_count: 2, total_stake: 400, max_ev: 1.2 });
+  });
+
   it("回 1・回 2 がどちらも ok: 回 2(2 分前)を優先する。close 行が逆順で渡されても同じ", () => {
     const a = analysis(R11);
     const r1 = closeRound(a, 1);

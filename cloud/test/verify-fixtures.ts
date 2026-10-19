@@ -87,9 +87,11 @@ export function versionsFixture(): PromptVersionView[] {
  */
 export function closeFixture(): CloseComparisonView {
   return {
+    // 説明文と基準ごとの見出しの語は、Issue #379 からサーバが組み立てて渡す(クライアントは表示するだけ)。
+    description: "サーバが組み立てた説明文です。区分のタブに合わせて集計します。",
     rounds: [
-      { round: 1, leadMinutes: 5, okCount: 12, targetCount: 15, base: { betCount: 30, totalStake: 12000, totalReturn: 10800, recoveryRate: 0.9 }, recalc: { betCount: 28, totalStake: 11000, totalReturn: 12100, recoveryRate: 1.1 } },
-      { round: 2, leadMinutes: 2, okCount: 30, targetCount: 31, base: { betCount: 70, totalStake: 30000, totalReturn: 33000, recoveryRate: 1.1 }, recalc: { betCount: 65, totalStake: 29000, totalReturn: 26100, recoveryRate: 0.9 } },
+      { round: 1, basisLabel: null, leadMinutes: 5, okCount: 12, targetCount: 15, base: { betCount: 30, totalStake: 12000, totalReturn: 10800, recoveryRate: 0.9 }, recalc: { betCount: 28, totalStake: 11000, totalReturn: 12100, recoveryRate: 1.1 } },
+      { round: 2, basisLabel: null, leadMinutes: 2, okCount: 30, targetCount: 31, base: { betCount: 70, totalStake: 30000, totalReturn: 33000, recoveryRate: 1.1 }, recalc: { betCount: 65, totalStake: 29000, totalReturn: 26100, recoveryRate: 0.9 } },
     ],
   };
 }

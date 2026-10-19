@@ -14,10 +14,10 @@ function horse(umaban: number): StoredAnalysisHorse {
   return { umaban, prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, contributions: null, mark: null, reason: null, highlights: [], concerns: [] } as StoredAnalysisHorse;
 }
 
-function detail(): AnalysisDetailResult {
+function detail(raceId = "202603020211"): AnalysisDetailResult {
   const analysis = {
     id: 7,
-    raceId: "202603020211",
+    raceId,
     analyzedAt: "2026-06-28T05:00:00.000Z",
     horses: [horse(1), horse(2), horse(3)],
     evEstimated: false,
@@ -143,6 +143,19 @@ describe("buildAnalysisView の close の画面用の文言(Issue #344)", () => 
     expect(round.label).toBe("発走5分前");
     expect(round.summaryLines).toEqual(["再計算した", "15:40に実行"]);
     expect(round.diffLines).toEqual(["追加 0点・削除 1点・賭け金の変化 1点(合計 600円 → 700円)", "変化 複勝 1番 300円→500円", "削除 単勝 3番 100円"]);
+  });
+
+  it("組合せは分析時のまま(Issue #379): 地方 かつ 組合せ ON の ok の回にだけ、説明の 1 行が付く。中央の組合せ ON・地方の組合せ OFF には付かない", () => {
+    const note = "組合せのオッズは分析時のまま(単勝・複勝だけ取り直し)";
+    const NAR = "202654071210";
+    expect(BASE.includeComboOdds).toBe(true); // 前提: ON の設定で比べる(中央の ON で付かないことの足場)
+    const lines = (raceId: string, allocation: StoredAllocation): readonly string[] => buildAnalysisView(detail(raceId), BASE, [okRound(1, allocation)]).close!.rounds[0]!.summaryLines;
+    expect(lines(NAR, BASE)).toEqual(["再計算した", "15:40に実行", note]);
+    expect(lines("202603020211", BASE)).toEqual(["再計算した", "15:40に実行"]);
+    expect(lines(NAR, { ...BASE, includeComboOdds: false })).toEqual(["再計算した", "15:40に実行"]);
+    // 失敗の回(combo-missing)は理由だけ
+    const failed: StoredCloseRound = { round: 1, status: "failed", reason: "combo-missing", dueAt: "2026-06-28T06:40:00.000Z", firedAt: "2026-06-28T06:40:00.000Z", lateMs: 0, oddsOfficialDatetime: null, allocation: null };
+    expect(buildAnalysisView(detail(NAR), BASE, [failed]).close!.rounds[0]!.summaryLines).toEqual(["失敗(分析時の組合せのオッズを読めませんでした)", "15:40に実行"]);
   });
 
   it("failed・skipped の回: 理由つきの summaryLines、diffLines は空(配分も差分も無い)。遅れが 1 分以上なら添える", () => {

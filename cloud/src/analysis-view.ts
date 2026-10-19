@@ -22,7 +22,7 @@ import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-code
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
 import { diffAllocationBets, type AllocationDiff } from "../../packages/core/src/analysis/allocation-diff";
 import { CLOSE_NOTE, closeDiffLines, closeLabelOf, closeSummaryLines } from "./close-view";
-import { CLOSE_ROUNDS, type CloseReason, type CloseStatus, type StoredCloseRound } from "./analysis-close";
+import { closeComboBasis, CLOSE_ROUNDS, venueKindOfRaceIdSafe, type CloseReason, type CloseStatus, type StoredCloseRound } from "./analysis-close";
 import type { StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
 import type { PlaceOddsBasis } from "../../packages/core/src/ev/place-odds-estimate";
@@ -397,7 +397,7 @@ function allocationViewOf(allocation: StoredAllocation): AnalysisViewAllocation 
 }
 
 /** 締切の直前の再計算の結果を、応答の形にする(回の昇順。無ければ null)。差分は分析時の提案との比較。 */
-function closeViewOf(close: readonly StoredCloseRound[] | undefined, proposal: StoredAllocation | undefined): AnalysisViewClose | null {
+function closeViewOf(close: readonly StoredCloseRound[] | undefined, proposal: StoredAllocation | undefined, venueKind: "central" | "nar"): AnalysisViewClose | null {
   if (close === undefined || close.length === 0) {
     return null;
   }
@@ -419,7 +419,8 @@ function closeViewOf(close: readonly StoredCloseRound[] | undefined, proposal: S
         allocation: r.allocation === null ? null : allocationViewOf(r.allocation),
         diff,
         label: closeLabelOf(r.round, leadMinutes),
-        summaryLines: closeSummaryLines(r),
+        // 組合せの扱いは、場と、その回の配分の設定(ok のときだけ配分がある)から導く(Issue #379。`closeComboBasis`)。
+        summaryLines: closeSummaryLines(r.allocation === null ? r : { ...r, comboBasis: closeComboBasis(venueKind, r.allocation.includeComboOdds) }),
         diffLines: r.allocation === null ? [] : closeDiffLines(diff, r.allocation.bets.length),
       };
     });
@@ -502,7 +503,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       timeIndexLine: timeIndex.get(h.umaban) ?? null,
     })),
     allocation: allocation === undefined ? null : allocationViewOf(allocation),
-    close: closeViewOf(close, allocation),
+    close: closeViewOf(close, allocation, venueKindOfRaceIdSafe(analysis.raceId)),
     detail,
   };
 }
