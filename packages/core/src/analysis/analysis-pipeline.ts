@@ -856,7 +856,6 @@ export async function runAnalysis(
 
   // (6) 配分提案(Issue #59)。deps.allocationSettings===null(この呼び出しでは配分計算を
   // 行わない選択)のときは何もしない(record.allocationを省略=「未到達」のまま。#59 AC4)。
-  const oddsStatus = race.odds.oddsStatus;
   let allocation: AnalysisAllocationRecord | undefined;
   // 組合せの券種ごとの EV プラスの点数(Issue #296)。配分の候補を作った経路だけ非 null(R2 のスナップショットに残す)。
   let comboStats: ComboStats | null = null;

@@ -327,7 +327,7 @@ export function parseHorseResults(json: string): HorseRaceResult[] {
         `戦績の行のセル数(${$cells.length})がヘッダ列数(${columnCount})と一致しません`,
       );
     }
-    results.push(parseRow($, $cells));
+    results.push(parseRow($cells));
   });
 
   return results;
@@ -335,7 +335,6 @@ export function parseHorseResults(json: string): HorseRaceResult[] {
 
 /** 1データ行(td群)から1走分を抽出する。 */
 function parseRow(
-  $: CheerioAPI,
   $cells: ReturnType<CheerioAPI>,
 ): HorseRaceResult {
   const text = (index: number): string => $cells.eq(index).text();

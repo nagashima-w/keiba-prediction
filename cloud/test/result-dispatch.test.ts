@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
-import { RaceDayCore, type RequestResultImportResult } from "../src/race-day-core";
+import { RaceDayCore } from "../src/race-day-core";
 import {
   addDaysToKaisaiDate,
   CRON_RESULT_MAX_DAYS,

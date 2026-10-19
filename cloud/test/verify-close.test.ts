@@ -20,9 +20,6 @@ const R1 = "202606030801";
 const R2 = "202606030802";
 const R3 = "202606030803";
 const R4 = "202606030804";
-const R5 = "202606030805";
-const R6 = "202606030806";
-const R7 = "202606030807";
 const NAR = "202644071411";
 
 function analysis(id: number, raceId: string, over: Partial<VerifyAnalysisRow> = {}): VerifyAnalysisRow {

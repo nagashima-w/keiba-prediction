@@ -3312,7 +3312,6 @@ describe("buildExactaCandidates(馬単候補ビルダー・Issue #120・#24-E1)"
     });
 
     it("★中核(殺すべき変異: computeQuinellaHitProbと同じ順不同式を使う→P(1→2)+P(2→1)になる): 馬単[1→2]のhitProbが馬単[2→1]のhitProbと異なり、両者の和が馬連{1,2}のhitProbと一致すること", () => {
-      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses, 3)!;
       const oddsMap = new Map<string, number | null>([
         [buildOrderedComboOddsKey([1, 2]), 100],
         [buildOrderedComboOddsKey([2, 1]), 100],

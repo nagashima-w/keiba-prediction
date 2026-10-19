@@ -8,7 +8,7 @@
  * **唯一の例外は進捗の `failure.message` と `conflictSamples`**(サーバが検証・取り込みの失敗の理由・衝突の例として状態に残す、固定の文言+位置+列名。例外の本文は含まれない)。画面にはテキストとして出し、`migration-model.ts` で長さを切り詰める。
  * Origin(サーバは完全一致で CSRF を拒否する): `referrerPolicy: "same-origin"` を付け、fetch の `mode` は指定しない(`api-run.ts` と同じ)。`Content-Length` は、本文が Blob(File)なのでブラウザが付ける。
  */
-import { classify, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { classify, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 export type MigrationState = "idle" | "verifying" | "importing" | "waiting-budget" | "waiting-r2" | "completed" | "failed";
 

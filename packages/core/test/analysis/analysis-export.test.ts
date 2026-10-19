@@ -10,8 +10,6 @@ import { describe, expect, it } from "vitest";
 import type {
   ComboOddsFetchOutcome,
   RaceData,
-  RaceResultDetail,
-  RaceResultEntry,
   StoredAnalysis,
 } from "../../src/index.js";
 

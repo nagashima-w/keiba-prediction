@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildComboOddsKey, type SkipReasonCode } from "../../src/ev/combo-bet-allocation.js";
+import { buildComboOddsKey } from "../../src/ev/combo-bet-allocation.js";
 
 import type {
   AnalysisRow,

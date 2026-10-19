@@ -302,7 +302,6 @@ const planRows = (h: Harness): { race_id: string; state: string; skip_reason: st
 const notifyRows = (h: Harness): { key: string; kind: string; state: string; error_class: string | null; analysis_id: number | null; payload_json: string | null }[] =>
   h.sql.exec("SELECT key, kind, state, error_class, analysis_id, payload_json FROM race_day_notify ORDER BY key").toArray() as never;
 const embedOf = (payload: DiscordPayload): CloudEmbed => payload.embeds[0] as CloudEmbed;
-const sentKeys = (h: Harness): string[] => h.notifier.sent.map((p) => embedOf(p).title ?? "");
 
 /** DO のすべての表のすべての値を、1つの文字列にする(URL・トークンがどこにも入っていないことの検査に使う)。 */
 function dumpAllTables(h: Harness): string {

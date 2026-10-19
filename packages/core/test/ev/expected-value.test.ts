@@ -6,7 +6,6 @@ import {
   DEFAULT_EV_CONFIG,
   estimatePlaceOddsMinFromWin,
   resolveEvThreshold,
-  type EvConfig,
   type HorsePrior,
 } from "../../src/ev/expected-value.js";
 import { isUsableOdds } from "../../src/ev/allocation-primitives.js";
