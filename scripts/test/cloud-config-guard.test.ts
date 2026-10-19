@@ -26,6 +26,25 @@ function stripCode(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 }
 
+/**
+ * Issue #397(R-4): GET の入口の `Sec-Fetch-Site` の検査は、handler.ts の `crossSiteRejection(request)` に集約した(8 ルートが共有)。
+ * 各ハンドラの本体には、この呼び出しと「結果を返す」形が**1 回だけ**あり、**D1・DO・gate に触れる記述より前**にあることを検査する(旧版は本体の `sec-fetch-site` の文字列の位置で検査していた)。
+ * 検査の中身(`sec-fetch-site`・`same-origin`・`"none"`・`origin-mismatch`・403)はヘルパー自体の検査(下の「crossSiteRejection」のテスト)が持つ。
+ */
+const CROSS_SITE_CALL = "crossSiteRejection(request)";
+const CROSS_SITE_RETURNS = /const crossSite = crossSiteRejection\(request\);\s*if \(crossSite !== null\) \{\s*return crossSite;\s*\}/;
+function expectCrossSiteCheckFirst(name: string, body: string, touches: readonly string[]): void {
+  const at = body.indexOf(CROSS_SITE_CALL);
+  expect(at, `${name} に ${CROSS_SITE_CALL} がある`).toBeGreaterThan(-1);
+  expect((body.match(/crossSiteRejection\(/g) ?? []).length, `${name} の呼び出しは 1 回`).toBe(1);
+  expect(body, `${name} は検査の結果を返す`).toMatch(CROSS_SITE_RETURNS);
+  expect(touches.length, `${name}: 順序の検査の対象がある(空振りでない)`).toBeGreaterThan(0);
+  for (const touch of touches) {
+    expect(body, `${name} に ${touch} がある(前提)`).toContain(touch);
+    expect(at, `別サイトの検査は ${touch} より前(${name})`).toBeLessThan(body.indexOf(touch));
+  }
+}
+
 describe("wrangler.toml", () => {
   it("workers.dev に出し、独自ドメイン・routes・Version/Preview URL は使わない", () => {
     expect(tomlCode).toMatch(/^workers_dev = true$/m);
@@ -370,7 +389,7 @@ describe("wrangler.toml", () => {
     expect(body).toContain(".getAutoRunResults(");
     expect(body).toContain(".getNotifications(");
     expect(body).toContain(".getResultImportProgress("); // Issue #208: 結果の取り込みの観測(読み取り)
-    expect(body).toContain("sec-fetch-site");
+    expectCrossSiteCheckFirst("handlePlan", body, ["raceDayStub(", ".getPlanProgress("]);
     expect(body).toContain("raceDayStub(");
     for (const forbidden of [".schedule(", ".scheduleMany(", ".requestPlan(", ".requestResultImport(", "dispatchResultImports(", "D1ResultStore", ".getRaceList(", ".fetchRaw(", ".getBoard(", "NETKEIBA_GATE", "env.DB", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
       expect(body, `handlePlan に ${forbidden} が無い`).not.toContain(forbidden);
@@ -388,9 +407,10 @@ describe("wrangler.toml", () => {
     const end = code.indexOf("\n}\n", start);
     const body = code.slice(start, end);
     expect(body.length).toBeGreaterThan(500); // 前提: 本体を実際に読めている(空振りでない)
-    for (const required of [".getPlanProgress(", ".getTargetsLedger(", "sec-fetch-site", "raceDayStub(", "D1TargetsStore", "env.DB"]) {
+    for (const required of [".getPlanProgress(", ".getTargetsLedger(", "raceDayStub(", "D1TargetsStore", "env.DB"]) {
       expect(body, `handleTargets に ${required} がある`).toContain(required);
     }
+    expectCrossSiteCheckFirst("handleTargets", body, ["env.DB", "D1TargetsStore", "raceDayStub("]);
     // DO の RPC は getPlanProgress と getTargetsLedger(Issue #361。収支の途中経過の計算。読み取りだけ。下の専用の検査)の 2 つだけ(`.get〇〇(` の出現を数える。時刻の `.getTime(` は DO ではないので除く)
     expect((body.match(/\.get(?!Time\()[A-Z][A-Za-z]*\(/g) ?? []).sort()).toEqual([".getPlanProgress(", ".getTargetsLedger("]);
     for (const forbidden of [".schedule(", ".scheduleMany(", ".requestPlan(", ".requestResultImport(", "dispatchResultImports(", ".getRaceList(", ".fetchRaw(", ".getBoard(", ".getAutoRunResults(", ".getNotifications(", ".getResultImportProgress(", "readLedger(", "buildTargetsLedger(", "computeVerifyReport", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "D1AnalysisStore", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
@@ -1127,22 +1147,51 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     for (const touch of gateTouches) {
       expect(body, `handleCheck に ${touch} がある(前提)`).toContain(touch);
     }
-    expect(body).toContain("sec-fetch-site");
-    expect(body).toContain("same-origin");
-    expect(body).toContain('"none"');
-    expect(body).toContain("origin-mismatch");
-    expect(body).toContain("403");
-    for (const touch of gateTouches) {
-      expect(body.indexOf("sec-fetch-site"), `Sec-Fetch-Site の検査は ${touch} より前`).toBeLessThan(body.indexOf(touch));
-    }
+    expectCrossSiteCheckFirst("handleCheck", body, gateTouches);
     // ヘッダを見るには request が要る(url だけを受け取る形に戻すと、検査を書けない)
     expect(code.slice(start, code.indexOf("{", start))).toMatch(/\(\s*request\s*:\s*Request\s*,\s*env\s*:\s*Env\s*\)/);
     // 呼び出しは 1 箇所だけで、request を渡す
     expect((code.match(/\bhandleCheck\(/g) ?? []).length).toBe(2); // 定義 1 + 呼び出し 1
     expect(code).toContain("handleCheck(request, env)");
     // 対照(検出の確認。空振りでない): 検査より後にゲートに触れる本体は「前」の検査を満たさない
-    const bad = 'async function handleCheck(request: Request, env: Env) {\n  const g = env.NETKEIBA_GATE;\n  const site = request.headers.get("sec-fetch-site");\n}';
-    expect(bad.indexOf("sec-fetch-site") < bad.indexOf("NETKEIBA_GATE")).toBe(false);
+    const bad = 'async function handleCheck(request: Request, env: Env) {\n  const g = env.NETKEIBA_GATE;\n  const crossSite = crossSiteRejection(request);\n  if (crossSite !== null) {\n    return crossSite;\n  }\n}';
+    expect(bad.indexOf(CROSS_SITE_CALL) < bad.indexOf("NETKEIBA_GATE")).toBe(false);
+    expect(() => expectCrossSiteCheckFirst("bad", bad, ["NETKEIBA_GATE"])).toThrow(); // 検出器が悪い例を実際に拒否する(空振りでない)
+  });
+
+  it("Issue #397(R-4): 別サイトからの GET の拒否は crossSiteRejection の 1 つに集約されている。ヘルパーは Sec-Fetch-Site が none・same-origin 以外なら 403 origin-mismatch。呼び出しは 8 ルート(関数名の一覧つき)で、各ルートは D1・DO・gate に触れる前に呼ぶ。インラインの検査が戻っていない", () => {
+    const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
+    const bodyOf = (signature: string): string => {
+      const start = code.indexOf(signature);
+      expect(start, `${signature} がある`).toBeGreaterThan(-1);
+      return code.slice(start, code.indexOf("\n}\n", start));
+    };
+    // ヘルパー自体: 定義は 1 つ。ヘッダ名・none・same-origin を見て、拒否なら originMismatch() の応答、通すなら null
+    expect((code.match(/\bfunction crossSiteRejection\(/g) ?? []).length).toBe(1);
+    const helper = bodyOf("function crossSiteRejection(");
+    for (const needle of ['"sec-fetch-site"', '"same-origin"', '"none"', "originMismatch()", "null"]) {
+      expect(helper, `crossSiteRejection に ${needle} がある`).toContain(needle);
+    }
+    expect(helper).toMatch(/site !== null && site !== "same-origin" && site !== "none"/); // 3 値のうち「ヘッダなし・same-origin・none」だけを通す
+    // 拒否の応答: 固定の本文の 403
+    const mismatch = bodyOf("function originMismatch(");
+    expect(mismatch).toContain('{ ok: false, error: { type: "origin-mismatch" } }, 403');
+    // Sec-Fetch-Site を読む関数は、このヘルパーと POST の Origin の確認(originAllowed。別物)の 2 つだけ(インラインの検査が戻っていない)
+    const functionStarts = [...code.matchAll(/^(?:async )?function (\w+)\(/gm)].map((m) => ({ name: m[1]!, index: m.index! }));
+    const enclosing = (index: number): string => functionStarts.filter((f) => f.index <= index).at(-1)!.name;
+    const siteReaders = [...code.matchAll(/"sec-fetch-site"/g)].map((m) => enclosing(m.index!));
+    expect(siteReaders.sort()).toEqual(["crossSiteRejection", "originAllowed"]);
+    // 呼び出し箇所: 8 つで、関数名の一覧が固定(handleRaces を含む)
+    const callers = [...code.matchAll(/\bcrossSiteRejection\(request\)/g)].map((m) => enclosing(m.index!));
+    expect(callers.sort()).toEqual(["handleBabaFetch", "handleCheck", "handleHorseRuns", "handlePlan", "handlePriorExport", "handleRaces", "handleTargets", "handleVerify"]);
+    expect(callers).toHaveLength(8);
+    // handleRaces(GET が netkeiba に出る): DO を呼ぶ前に検査する(他の 7 つは各ハンドラの検査が持つ)
+    expectCrossSiteCheckFirst("handleRaces", bodyOf("async function handleRaces("), ["raceDayStub(", ".getRaceList("]);
+    // 対照(検出の確認。空振りでない): 呼び出しを足した本文は 9 つに数える。インラインの検査は「sec-fetch-site を読む関数」に数えられる
+    expect(((code + "\nasync function handleX(request: Request) {\n  crossSiteRejection(request);\n}").match(/\bcrossSiteRejection\(request\)/g) ?? []).length).toBe(9);
+    expect([...(code + '\nfunction handleY(request: Request) {\n  request.headers.get("sec-fetch-site");\n}').matchAll(/"sec-fetch-site"/g)]).toHaveLength(3);
+    expect(() => expectCrossSiteCheckFirst("結果を返さない", "async function f(request: Request) {\n  crossSiteRejection(request);\n  env.DB;\n}", ["env.DB"])).toThrow();
   });
 
   it("Issue #256: GET /api/horse-runs の関数(handleHorseRuns)は、D1 に触れる前に Sec-Fetch-Site を見て、request を受け取る。読み取り(readHorseRunsStatus)だけで、取得・LLM・Webhook・DO・R2・書き込みに触れない", () => {
@@ -1152,12 +1201,7 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     const body = code.slice(start, code.indexOf("\n}\n", start));
     expect(body.length).toBeGreaterThan(800); // 前提: 本体を実際に読めている(空振りでない)
     expect(body).toContain("readHorseRunsStatus(env.DB");
-    expect(body).toContain("sec-fetch-site");
-    expect(body).toContain("same-origin");
-    expect(body).toContain('"none"');
-    expect(body).toContain("origin-mismatch");
-    expect(body).toContain("403");
-    expect(body.indexOf("sec-fetch-site"), "Sec-Fetch-Site の検査は D1 に触れるより前").toBeLessThan(body.indexOf("env.DB"));
+    expectCrossSiteCheckFirst("handleHorseRuns", body, ["env.DB"]); // Sec-Fetch-Site の検査は D1 に触れるより前
     for (const forbidden of ["NETKEIBA_GATE", "RACE_DAY", "RESULT_BACKFILL", "CLOUD_MIGRATION", "VERIFY_REPORT", "PRIOR_EXPORT", "ANALYSIS_DETAIL", ".fetchRaw(", ".prepare(", ".batch(", ".run(", "INSERT", "UPDATE", "DELETE", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "fetch("]) {
       expect(body, `handleHorseRuns に ${forbidden} が無い`).not.toContain(forbidden);
     }
@@ -1166,8 +1210,9 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     expect((code.match(/\bhandleHorseRuns\(/g) ?? []).length).toBe(2); // 定義 1 + 呼び出し 1
     expect(code).toContain("handleHorseRuns(request, env,");
     // 対照(検出の確認。空振りでない): 検査より後に D1 に触れる本体は「前」の検査を満たさない
-    const bad = 'async function handleHorseRuns(request: Request, env: Env) {\n  await readHorseRunsStatus(env.DB, {});\n  const site = request.headers.get("sec-fetch-site");\n}';
-    expect(bad.indexOf("sec-fetch-site") < bad.indexOf("env.DB")).toBe(false);
+    const bad = 'async function handleHorseRuns(request: Request, env: Env) {\n  await readHorseRunsStatus(env.DB, {});\n  const crossSite = crossSiteRejection(request);\n  if (crossSite !== null) {\n    return crossSite;\n  }\n}';
+    expect(bad.indexOf(CROSS_SITE_CALL) < bad.indexOf("env.DB")).toBe(false);
+    expect(() => expectCrossSiteCheckFirst("bad", bad, ["env.DB"])).toThrow(); // 検出器が悪い例を実際に拒否する(空振りでない)
   });
 
   it("GET /api/verify の関数(handleVerify)は、検証の DO の getReport だけを呼ぶ。D1・R2・取得・LLM・Webhook に触れない", () => {
@@ -1177,7 +1222,7 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     const body = handler.slice(start, handler.indexOf("\n}\n", start));
     expect(body.length).toBeGreaterThan(800); // 前提: 本体を実際に読めている
     expect(body).toContain(".getReport(");
-    expect(body).toContain("sec-fetch-site");
+    expectCrossSiteCheckFirst("handleVerify", body, ["env.VERIFY_REPORT", ".getReport("]);
     for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", "NETKEIBA_GATE", "RACE_DAY", "RESULT_BACKFILL", "CLOUD_MIGRATION", ".kick(", ".start(", ".fetchRaw(", ".prepare(", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "fetch("]) {
       expect(body, `handleVerify に ${forbidden} が無い`).not.toContain(forbidden);
     }
@@ -1381,7 +1426,7 @@ describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkei
     const body = handler.slice(start, handler.indexOf("\n}\n", start));
     expect(body.length).toBeGreaterThan(1500); // 前提: 本体を実際に読めている
     expect(body).toContain(".request(mode)");
-    expect(body).toContain("sec-fetch-site");
+    expectCrossSiteCheckFirst("handlePriorExport", body, ["env.PRIOR_EXPORT", "env.ANALYSIS_DETAIL", ".request(mode)"]);
     expect((body.match(/env\.ANALYSIS_DETAIL\.get\(PRIOR_EXPORT_KEY\)/g) ?? []).length).toBe(1);
     expect((body.match(/env\.ANALYSIS_DETAIL/g) ?? []).length).toBe(1);
     expect(body).toContain("url=${PRIOR_EXPORT_PATH}");
@@ -1654,10 +1699,7 @@ describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所�
     const body = handler.slice(start, handler.indexOf("\n}\n", start));
     expect(body.length).toBeGreaterThan(800); // 前提: 本体を実際に読めている(空振りでない)
     expect(body).toContain(".loadFetches(");
-    for (const needle of ["sec-fetch-site", "same-origin", '"none"', "origin-mismatch", "403"]) {
-      expect(body, `handleBabaFetch に ${needle} がある`).toContain(needle);
-    }
-    expect(body.indexOf("sec-fetch-site"), "Sec-Fetch-Site の検査は D1 に触れるより前").toBeLessThan(body.indexOf("env.DB"));
+    expectCrossSiteCheckFirst("handleBabaFetch", body, ["env.DB", ".loadFetches("]); // Sec-Fetch-Site の検査は D1 に触れるより前
     for (const forbidden of ["NETKEIBA_GATE", "RACE_DAY", "RESULT_BACKFILL", "CLOUD_MIGRATION", "VERIFY_REPORT", "PRIOR_EXPORT", "ANALYSIS_DETAIL", "BABA_API_URL", ".fetchRaw(", ".prepare(", ".batch(", ".run(", ".claim(", ".finish(", "INSERT", "UPDATE", "DELETE", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "fetch("]) {
       expect(body, `handleBabaFetch に ${forbidden} が無い`).not.toContain(forbidden);
     }
@@ -1669,8 +1711,9 @@ describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所�
     expect(strip(handler), "handler.ts は、診断の入口(ルートの文字列・エラーの種類名・baba-repository の import)のほかに取得の部品を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|race-day-baba|BabaStage|BABA_API_URL|createBabaFetcher/);
     expect(strip(code("route-policy.ts")), "route-policy.ts は、ルートの文字列のほかに馬場を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|race-day-baba|BabaStage|BABA_API_URL/);
     // 対照(検出の確認。空振りでない): 検査より後に D1 に触れる本体は「前」の検査を満たさない
-    const bad = 'async function handleBabaFetch(request: Request, env: Env) {\n  await new D1BabaStore({ db: env.DB });\n  const site = request.headers.get("sec-fetch-site");\n}';
-    expect(bad.indexOf("sec-fetch-site") < bad.indexOf("env.DB")).toBe(false);
+    const bad = 'async function handleBabaFetch(request: Request, env: Env) {\n  await new D1BabaStore({ db: env.DB });\n  const crossSite = crossSiteRejection(request);\n  if (crossSite !== null) {\n    return crossSite;\n  }\n}';
+    expect(bad.indexOf(CROSS_SITE_CALL) < bad.indexOf("env.DB")).toBe(false);
+    expect(() => expectCrossSiteCheckFirst("bad", bad, ["env.DB"])).toThrow(); // 検出器が悪い例を実際に拒否する(空振りでない)
   });
 
   it("deploy-cloud.yml は BABA_API_URL を必須の secret にしない(任意の secret。未登録なら機能が止まるだけ)", () => {
