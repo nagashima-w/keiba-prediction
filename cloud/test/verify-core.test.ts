@@ -16,6 +16,7 @@ import { computeVerifyReport, computeVerifyReportByPromptVersion, DEFAULT_VERIFY
 import { summarizePromptVersions } from "../src/verify-versions";
 import { buildVerifySource } from "../src/verify-read";
 import { computeCloseComparison, type VerifyCloseRows } from "../src/verify-close";
+import { computeVerifyBreakdowns } from "../src/verify-breakdown";
 
 /**
  * Issue #219: 検証の DO の純ロジック(`VerifyCore`)。D1・R2・時計・アラームは偽物で、キャッシュ・費用の柵・単一飛行・発走時刻の補完の進め方を確かめる。
@@ -845,7 +846,7 @@ describe("Issue #263: getViewerReport(閲覧者の要求。集計のやり直し
     const { core } = await withCache();
     const res = core.getViewerReport("all");
     if (res.status !== "ready") throw new Error("ready のはず");
-    expect(Object.keys(res).sort()).toEqual(["closeComparison", "computedAt", "diag", "nextRecomputeAt", "promptVersions", "report", "stale", "staleReason", "status", "venue"]);
+    expect(Object.keys(res).sort()).toEqual(["breakdown", "closeComparison", "computedAt", "diag", "nextRecomputeAt", "promptVersions", "report", "stale", "staleReason", "status", "venue"]);
     expect(res.stale).toBe(false);
     expect(res.staleReason).toBeNull();
     expect(res.nextRecomputeAt).toBeNull();
@@ -1059,5 +1060,112 @@ describe("Issue #352: 締切直前の再計算との比較(closeComparison)", ()
     if (viewer.status !== "ready") throw new Error("ready のはず");
     expect(viewer.closeComparison).toEqual(admin.closeComparison);
     expect(store.calls).toEqual([]);
+  });
+});
+
+
+describe("Issue #384: 人気帯ごとの期待値と回収率(breakdown)", () => {
+  /** 中央 1 レース(1 番が 1 着・複勝 300)に、複勝 01 を 1,000 円(odds 2・ev 1.2)。馬は 1 頭(複勝オッズ下限 2 → 分析時の順位 1)。 */
+  function withBets(): VerifyReadRows {
+    return {
+      ...rowsOf([analysisRow(1, CENTRAL)]),
+      allocationMeta: [{ analysisId: 1, route: "place-only", skipReasonCode: null }],
+      bets: [{ analysisId: 1, betType: "place", comboKey: "01", stake: 1000, odds: 2, ev: 1.2 }],
+    };
+  }
+
+  it("再計算で内訳を作り、kv のキャッシュにも応答にも載せる。値は純関数 computeVerifyBreakdowns の節と同じ。区分ごとに別の値(地方のレースが無ければ nar は null)", async () => {
+    const { core, store, kv } = setup();
+    const rows = withBets();
+    store.state.rows = rows;
+    const expected = computeVerifyBreakdowns(buildVerifySource(rows), rows.bets);
+    // 前提(空振り防止): 全体には 8 つの節(人気帯 5 + 条件別の開催区分・競馬場・頭数)、中央のみには 7 つ(開催区分なし)があり、地方は無い。
+    expect(expected.all!.sections).toHaveLength(8);
+    expect(expected.central!.sections).toHaveLength(7);
+    expect(expected.nar).toBeNull();
+    const res = await core.getReport("central");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(res.breakdown).toEqual(expected.central!.sections);
+    const nar = await core.getReport("nar");
+    if (nar.status !== "ready") throw new Error("ready のはず");
+    expect(nar.breakdown).toBeNull();
+    const all = await core.getReport("all");
+    if (all.status !== "ready") throw new Error("ready のはず");
+    expect(all.breakdown).toEqual(expected.all!.sections);
+    expect(kv.get<{ breakdownByVenue: unknown }>("cache")!.breakdownByVenue).toEqual({ all: { sections: expected.all!.sections }, central: { sections: expected.central!.sections }, nar: null });
+    expect(store.calls.filter((c) => c === "readAll")).toHaveLength(1);
+  });
+
+  it("★キャッシュには集計の途中(stats)を持ち込まず、節だけを入れる(kv の値を小さく保つ)", async () => {
+    const { core, store, kv } = setup();
+    store.state.rows = withBets();
+    await core.getReport("all");
+    const cached = kv.get<{ breakdownByVenue: { all: Record<string, unknown> } }>("cache")!.breakdownByVenue.all;
+    expect(Object.keys(cached)).toEqual(["sections"]);
+  });
+
+  it("診断: 内訳の所要時間(breakdownMs)を、ほかの 4 つとは別に出す(隣り合う時刻の差。readMs:computeMs:promptVersionsMs:closeMs:breakdownMs = 1:2:4:8:16)", async () => {
+    const { core, store, clock } = setup();
+    store.state.rows = withBets();
+    store.state.close = { meta: [], bets: [] };
+    let ticks = 0;
+    Object.defineProperty(clock, "now", { get: () => T0 + 2 ** (ticks += 1) });
+    const res = await core.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    const d = [res.diag.readMs, res.diag.computeMs, res.diag.promptVersionsMs, res.diag.closeMs, res.diag.breakdownMs] as number[];
+    expect(d[0], "前提: 最初の区間が 0 でない").toBeGreaterThan(0);
+    expect([d[1]! / d[0]!, d[2]! / d[0]!, d[3]! / d[0]!, d[4]! / d[0]!]).toEqual([2, 4, 8, 16]);
+  });
+
+  it("★内訳の計算が例外を投げても、本体の集計は出る(内訳は null。固定の警告だけを残し、例外の文面は持ち込まない)", async () => {
+    const { core, store, warns } = setup();
+    const rows = withBets();
+    const broken = { ...rows.bets[0]! };
+    Object.defineProperty(broken, "ev", { get: () => { throw new Error("D1 の秘密の文面"); } }); // 内訳だけが ev を読む(読み取り口は読まない)
+    store.state.rows = { ...rows, bets: [broken] };
+    const res = await core.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(res.breakdown).toBeNull();
+    expect(res.report.includedAnalysisCount).toBeGreaterThan(0);
+    expect(warns).toEqual(["検証の人気帯の内訳の計算で例外が起きました(内訳なしで集計します)"]);
+    expect(JSON.stringify(warns)).not.toContain("秘密");
+  });
+
+  it("★内訳の項目を持たない旧い集計(版 6 のまま)も使える: 再計算せず、breakdown は null で返す。形式の版は上げていない", async () => {
+    const { core, store, kv } = setup();
+    store.state.rows = withBets();
+    expect((await core.getReport("all")).status).toBe("ready");
+    const { breakdownByVenue: _drop, ...old } = kv.get<Record<string, unknown>>("cache")!;
+    kv.put("cache", old);
+    store.calls.length = 0;
+    const res = await core.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(res.breakdown).toBeNull();
+    expect(store.calls).not.toContain("readAll");
+    const viewer = core.getViewerReport("all");
+    if (viewer.status !== "ready") throw new Error("ready のはず");
+    expect(viewer.breakdown).toBeNull();
+  });
+
+  it("閲覧者の応答にも同じ内訳が載る(検証画面の他の節と同じ扱い)。閲覧者の要求は store に触れない", async () => {
+    const { core, store } = setup();
+    store.state.rows = withBets();
+    const admin = await core.getReport("all");
+    if (admin.status !== "ready") throw new Error("ready のはず");
+    expect(admin.breakdown).toHaveLength(8); // 前提: 内訳がある
+    store.calls.length = 0;
+    const viewer = core.getViewerReport("all");
+    if (viewer.status !== "ready") throw new Error("ready のはず");
+    expect(viewer.breakdown).toEqual(admin.breakdown);
+    expect(store.calls).toEqual([]);
+  });
+
+  it("閲覧者の応答の診断は発走時刻の欠落だけのまま(内訳の所要時間 breakdownMs を漏らさない)", async () => {
+    const { core, store } = setup();
+    store.state.rows = withBets();
+    await core.getReport("all");
+    const viewer = core.getViewerReport("all");
+    if (viewer.status !== "ready") throw new Error("ready のはず");
+    expect(Object.keys(viewer.diag)).toEqual(["startTimeGaps"]);
   });
 });

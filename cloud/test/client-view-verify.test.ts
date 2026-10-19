@@ -6,7 +6,7 @@ import { buildVerifyModel, type VerifyModelInput } from "../client/verify-model"
 import { renderScreen, type ViewActions } from "../client/view";
 import type { VNode } from "../client/vnode";
 import { noopActions } from "./client-fakes";
-import { calibrationFixture, closeFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
+import { breakdownFixture, calibrationFixture, closeFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /**
  * Issue #219: 検証画面の VNode と、一覧の入口のリンク。モデル(`client-verify-model.test.ts`)→ VNode の写し間違い、許可リスト(`dom.ts`)を通ること、ボタンが動作に繋がること。
@@ -39,7 +39,7 @@ const REPORT: VerifyReportView = {
     unknownBetType: { count: 1, totalStake: 100, betTypes: ["x"] },
   },
 };
-const READY: VerifyOutcome = { kind: "ready", venue: "all", report: REPORT, promptVersions: versionsFixture(), closeComparison: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 5, affecting: 2 } };
+const READY: VerifyOutcome = { kind: "ready", venue: "all", report: REPORT, promptVersions: versionsFixture(), closeComparison: null, breakdown: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 5, affecting: 2 } };
 const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: READY }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, ...over });
 const tree = (over: Partial<VerifyModelInput> = {}, actions: ViewActions = noopActions): VNode => renderScreen(buildVerifyModel(input(over)), actions);
 
@@ -393,5 +393,39 @@ describe("Issue #352: 締切直前の再計算との比較の VNode", () => {
 
   it("許可リスト(dom.ts)の範囲で組める", () => {
     mountAll(withClose());
+  });
+});
+
+
+describe("Issue #384: 人気帯ごとの期待値と回収率の VNode", () => {
+  const withBreakdown = (over: Partial<VerifyModelInput> = {}): VNode => tree({ load: { kind: "ready", outcome: { ...READY, breakdown: breakdownFixture() } }, ...over });
+
+  it("内訳がなければ節を出さない", () => {
+    expect(textOf(tree())).not.toContain("人気帯ごとの期待値と回収率");
+    expect(byClass(tree(), "verify-breakdown-stats")).toHaveLength(0);
+  });
+
+  it("節ごとに見出し・説明・行・注記を出す。行は他の統計と同じ行の形(表〈table〉は使わない)。閲覧者にも出る", () => {
+    for (const admin of [true, false]) {
+      const t = withBreakdown({ admin });
+      const text = textOf(t);
+      expect(text).toContain("人気帯ごとの期待値と回収率(複勝)");
+      expect(text).toContain("サーバが組み立てた説明文(複勝)");
+      expect(text).toContain("サーバが組み立てた注記(複勝)");
+      expect(text).toContain("単勝人気と複勝順位のずれ");
+      expect(findAll(t, (n) => n.tag === "table")).toHaveLength(0);
+      // 行が 0 本の節は行の一覧を出さない(空の ul を作らない)ので、一覧は複勝の節の 1 つだけ。
+      const lists = byClass(t, "verify-breakdown-stats");
+      expect(lists).toHaveLength(1);
+      const rows = byClass(lists[0]!, "verify-stat");
+      expect(rows.map((r) => textOf(byClass(r, "verify-stat-label")[0]!))).toEqual(["1〜3番人気", "4〜6番人気"]);
+      expect(textOf(rows[0]!)).toContain("2点(1R)");
+      expect(textOf(rows[0]!)).toContain("参考(30レース未満)");
+      expect(textOf(rows[1]!)).toContain("0点(0R)");
+    }
+  });
+
+  it("許可リスト(dom.ts)の範囲で組める", () => {
+    mountAll(withBreakdown());
   });
 });

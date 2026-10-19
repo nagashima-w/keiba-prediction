@@ -165,6 +165,18 @@ export interface CloseComparisonView {
   readonly rounds: readonly CloseRoundView[];
 }
 
+/** 人気帯ごとの期待値と回収率の節の 1 行(サーバが文字列に組み立てて渡す。Issue #384)。項目は名前と値の文字列。 */
+export interface BreakdownRowView {
+  readonly label: string;
+  readonly cells: readonly { readonly name: string; readonly value: string }[];
+}
+export interface BreakdownSectionView {
+  readonly heading: string;
+  readonly description: string;
+  readonly note: string;
+  readonly rows: readonly BreakdownRowView[];
+}
+
 export type StaleReason = "backfilling" | "min-interval" | "daily-limit";
 
 export type VerifyOutcome =
@@ -176,6 +188,8 @@ export type VerifyOutcome =
       readonly promptVersions: readonly PromptVersionView[];
       /** 締切直前の再計算との比較(Issue #352。リクエストの区分のもの〈Issue #379〉)。無い・読めないときは null。 */
       readonly closeComparison: CloseComparisonView | null;
+      /** 人気帯ごとの期待値と回収率の節(Issue #384。リクエストの区分のもの)。無い・読めないときは null。 */
+      readonly breakdown: readonly BreakdownSectionView[] | null;
       /** 集計した時刻(ISO)。 */
       readonly computedAt: string;
       readonly stale: boolean;
@@ -358,6 +372,29 @@ function parseCloseComparison(v: unknown): CloseComparisonView | null {
   return { description: v["description"], rounds };
 }
 
+const isText = (v: unknown, max: number): v is string => isStr(v) && v.length <= max;
+
+function parseBreakdownRow(v: unknown): BreakdownRowView | null {
+  if (!isRecord(v) || !isText(v["label"], 100) || !Array.isArray(v["cells"]) || v["cells"].length > 12) return null;
+  const cells = parseList(v["cells"], (c) => (isRecord(c) && isText(c["name"], 100) && isText(c["value"], 100) ? { name: c["name"], value: c["value"] } : null));
+  return cells === null ? null : { label: v["label"], cells };
+}
+
+function parseBreakdownSection(v: unknown): BreakdownSectionView | null {
+  if (!isRecord(v) || !isText(v["heading"], 100) || !isText(v["description"], 1000) || !isText(v["note"], 1000) || !Array.isArray(v["rows"]) || v["rows"].length > 50) return null;
+  const rows = parseList(v["rows"], parseBreakdownRow);
+  return rows === null ? null : { heading: v["heading"], description: v["description"], note: v["note"], rows };
+}
+
+/**
+ * 人気帯ごとの期待値と回収率(Issue #384)。**無い(旧い集計・旧い Worker)・null・壊れている値は、いずれも null(内訳なし)**: 補助の節なので、この節の不整合で応答全体を捨てない。
+ * 節は 1〜8 個。文字列の長さの上限は、サーバが組み立てる文の長さに余裕を持たせたもの(契約テストが、本物のサーバの出力が収まることを固定している)。
+ */
+function parseBreakdown(v: unknown): BreakdownSectionView[] | null {
+  if (!Array.isArray(v) || v.length === 0 || v.length > 8) return null;
+  return parseList(v, parseBreakdownSection);
+}
+
 const VENUES: ReadonlySet<string> = new Set<VerifyVenue>(["all", "central", "nar"]);
 const STALE_REASONS: ReadonlySet<string> = new Set<StaleReason>(["backfilling", "min-interval", "daily-limit"]);
 
@@ -393,6 +430,7 @@ export function parseVerifyResponse(body: unknown): VerifyOutcome | null {
     report,
     promptVersions,
     closeComparison: parseCloseComparison(body["closeComparison"]),
+    breakdown: parseBreakdown(body["breakdown"]),
     computedAt: body["computedAt"],
     stale: body["stale"],
     staleReason: reason as StaleReason | null,

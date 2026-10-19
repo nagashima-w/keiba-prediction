@@ -13,7 +13,7 @@ import { computePromptVersionSummaries } from "../../cloud/src/verify-versions.j
  *
  * **ここ(ルートの scripts/test/)に置く理由**: exe 側の `AnalysisStore` は better-sqlite3 を使う。cloud の CI は cloud だけを install する(better-sqlite3 が無い)ので、cloud/test からは
  * import できない(#218 と同じ)。cloud の SQL 定数(`VERIFY_READ_SQL`)を、exe と同じスキーマの SQLite にそのまま流して行を取り、D1 の行の代わりにする。
- * D1 の列のうち exe に無いのは `start_time` と `scratched`(Issue #72。全行 NULL のまま)と `wakuban`(Issue #269。同じく全行 NULL のまま)で、これらは `ALTER TABLE` で足し、検証の DO の補完と同じ関数(`extractStartTime`)で埋める。
+ * D1 の列のうち exe に無いのは `start_time` と `scratched`(Issue #72。全行 NULL のまま)と `wakuban`(Issue #269。同じく全行 NULL のまま)と `ninki`(Issue #384。同じく全行 NULL のまま)で、これらは `ALTER TABLE` で足し、検証の DO の補完と同じ関数(`extractStartTime`)で埋める。
  *
  * 入力は乱数(固定の種)で作った 160 レース前後の分析・結果。**一致の検査が空振りでない**ことを、集計の各カウンタ・券種別の点数が 0 でないことで先に固定する。
  */
@@ -158,6 +158,8 @@ function build(seed: number): Dataset {
   db.exec("ALTER TABLE race_results ADD COLUMN scratched INTEGER");
   // 枠番(0016。Issue #269)。exe の AnalysisStore は wakuban を保存しないので、D1 の列は全行 NULL(記録なし)のまま = 枠連の返還の判定が働かない(scratched と同じ)。
   db.exec("ALTER TABLE race_results ADD COLUMN wakuban INTEGER");
+  // 確定の単勝人気(0011。Issue #384 で全件の読みに足した)。exe の AnalysisStore は ninki を保存しないので、D1 の列は全行 NULL(記録なし)のまま = 読み取り口は ninki を付けない。
+  db.exec("ALTER TABLE race_results ADD COLUMN ninki INTEGER");
   // 発走時刻の写し(0009)。検証の DO の補完と同じ手順: 保存済みのスナップショットから extractStartTime → なければ ''。
   db.exec("ALTER TABLE analyses ADD COLUMN start_time TEXT");
   const snapshots = db.prepare("SELECT id, race_snapshot_json AS json FROM analyses").all() as Array<{ id: number; json: string | null }>;

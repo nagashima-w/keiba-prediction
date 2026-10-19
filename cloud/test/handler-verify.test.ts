@@ -15,12 +15,16 @@ const CLOSE_COMPARISON = {
   rounds: [{ round: 1, basis: "analysis" as const, basisLabel: "組合せは分析時のオッズ", leadMinutes: 5, okCount: 1, targetCount: 2, base: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5 }, recalc: { betCount: 1, totalStake: 200, totalReturn: 0, recoveryRate: 0 } }],
 };
 
+/** 人気帯ごとの期待値と回収率の節(Issue #384)。API の応答にそのまま載る(Worker は加工しない)。 */
+const BREAKDOWN = [{ heading: "人気帯ごとの期待値と回収率(複勝)", description: "説明", note: "注記", rows: [{ label: "1〜3番人気", cells: [{ name: "件数(レース)", value: "1点(1R)" }] }] }];
+
 const READY: VerifyResponse = {
   status: "ready",
   venue: "all",
   report: { includedAnalysisCount: 3 } as never,
   promptVersions: [],
   closeComparison: CLOSE_COMPARISON,
+  breakdown: BREAKDOWN,
   computedAt: "2026-10-10T03:00:00.000Z",
   stale: false,
   staleReason: null,
@@ -34,6 +38,7 @@ const VIEWER_READY: ViewerVerifyResponse = {
   report: { includedAnalysisCount: 3 } as never,
   promptVersions: [],
   closeComparison: CLOSE_COMPARISON,
+  breakdown: BREAKDOWN,
   computedAt: "2026-10-10T03:00:00.000Z",
   stale: false,
   staleReason: null,

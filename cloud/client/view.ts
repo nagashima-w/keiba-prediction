@@ -855,6 +855,11 @@ function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
     const c = model.close;
     body.push(h("h2", {}, [c.heading]), h("p", { class: "meta" }, [c.description]), statRowsNode(c.rows, "verify-close-stats"), h("p", { class: "meta verify-close-note" }, [c.note]));
   }
+  for (const b of model.breakdown) {
+    body.push(h("h2", {}, [b.heading]), h("p", { class: "meta" }, [b.description]));
+    if (b.rows.length > 0) body.push(statRowsNode(b.rows, "verify-breakdown-stats"));
+    body.push(h("p", { class: "meta verify-breakdown-note" }, [b.note]));
+  }
   if (model.direction !== null) {
     body.push(...statSectionNodes(model.direction));
   }
