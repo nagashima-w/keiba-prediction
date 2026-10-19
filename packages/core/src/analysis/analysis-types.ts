@@ -694,25 +694,6 @@ export interface VerifyReportView {
 }
 
 /**
- * 検証画面: プロンプト版別verifyレポートの1件(表示用。core PromptVersionVerifyReport の
- * プレーン写し)。Task#27。版ごとに回収率・主要指標を並べて比較するために使う。
- */
-export interface PromptVersionVerifyReportView {
-  /** プロンプト版番号。版不明(旧データ・LLM未使用の分析)は null。 */
-  readonly promptVersion: string | null;
-  /** その版の分析集合のみを対象とした検証レポート(全体レポートと同型)。 */
-  readonly report: VerifyReportView;
-  /**
-   * この版グループ内で実際に使われた追加指示(表示用。core PromptVersionVerifyReport の
-   * additionalInstructions のプレーン写し)。Task#28。非null値は文字列昇順、
-   * 追加指示なし(null)は末尾という決定的な順序。「同じ版でも追加指示が違えば別条件」であることを
-   * 版別比較の解釈時に把握できるようにするための情報。
-   */
-  readonly additionalInstructions: readonly (string | null)[];
-}
-
-
-/**
  * 結果取込の結果(1レース分)。status で確定/未確定を判別する判別共用体。
  *
  * - "imported": 結果が確定していて着順を保存した(複勝払戻は無いこともある。hasPayout で判別)。

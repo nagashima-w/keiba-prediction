@@ -3,7 +3,6 @@ import {
   FENCE_PERCENT,
   R2_FENCE_LIMITS,
   R2_FREE_TIER,
-  fenceStatus,
   isReadAllowed,
   isWriteAllowed,
   monthKey,
@@ -62,13 +61,6 @@ describe("AC-c3: 閾値の境界(上限 −1 はまだ書く・読む。上限�
     // 桁の取り違え: Class B の値を Class A の上限で判定すると(A < B なので)読み出しが早すぎる位置で止まる。そうなっていない
     expect(isReadAllowed({ classA: 0, classB: A })).toBe(true);
     expect(isWriteAllowed({ classA: A, classB: 0 })).toBe(false);
-  });
-
-  it("fenceStatus は両方の判定をまとめる", () => {
-    expect(fenceStatus({ classA: 0, classB: 0 })).toEqual({ writeAllowed: true, readAllowed: true });
-    expect(fenceStatus({ classA: A, classB: 0 })).toEqual({ writeAllowed: false, readAllowed: true });
-    expect(fenceStatus({ classA: 0, classB: B })).toEqual({ writeAllowed: true, readAllowed: false });
-    expect(fenceStatus({ classA: A, classB: B })).toEqual({ writeAllowed: false, readAllowed: false });
   });
 });
 

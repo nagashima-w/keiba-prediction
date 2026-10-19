@@ -126,34 +126,34 @@ import {
  * EV閾値統一〈D-4〉・券種選択〈D-1・#24-D3a/b・#24-E3a/b・#25-E3a/b・#26-E3a〉の8項目を加えた形)。
  */
 export interface MixedAllocationSettings extends BetAllocationSettings {
-  /** EVプラス判定の閾値(`AppSettings.evThreshold`)。ワイド・馬連・三連複にも同じ値を適用する(D-4)。 */
+  /** EVプラス判定の閾値(設定の `evThreshold`(`cloud/src/settings.ts` の `CloudSettings`))。ワイド・馬連・三連複にも同じ値を適用する(D-4)。 */
   readonly evThreshold: number;
-  /** ワイド・馬連・三連複のオッズを取得するか(`AppSettings.includeComboOdds`)。 */
+  /** ワイド・馬連・三連複のオッズを取得するか(設定の `includeComboOdds`(`cloud/src/settings.ts` の `CloudSettings`))。 */
   readonly includeComboOdds: boolean;
-  /** ワイドを配分対象に含めるか(`AppSettings.includeWideInAllocation`)。 */
+  /** ワイドを配分対象に含めるか(設定の `includeWideInAllocation`(`cloud/src/settings.ts` の `CloudSettings`))。 */
   readonly includeWideInAllocation: boolean;
-  /** 三連複を配分対象に含めるか(`AppSettings.includeTrioInAllocation`)。 */
+  /** 三連複を配分対象に含めるか(設定の `includeTrioInAllocation`(`cloud/src/settings.ts` の `CloudSettings`))。 */
   readonly includeTrioInAllocation: boolean;
   /**
-   * 馬連を配分対象に含めるか(`AppSettings.includeQuinellaInAllocation`。#24-D3a・Issue #115で
+   * 馬連を配分対象に含めるか(設定の `includeQuinellaInAllocation`(`cloud/src/settings.ts` の `CloudSettings`)。#24-D3a・Issue #115で
    * 設定項目を新設し、Issue #117(#24-D3b-2)で`resolveMixedBetTypes`・`isComboBetTypesOff`
    * (D-2フォールバック規則の条件②③)へ実際に接続した)。
    */
   readonly includeQuinellaInAllocation: boolean;
   /**
-   * 馬単を配分対象に含めるか(`AppSettings.includeExactaInAllocation`。#24-E3a・Issue #124で
+   * 馬単を配分対象に含めるか(設定の `includeExactaInAllocation`(`cloud/src/settings.ts` の `CloudSettings`)。#24-E3a・Issue #124で
    * 設定項目を新設し、Issue #125(#24-E3b)で`resolveMixedBetTypes`・`isComboBetTypesOff`
    * (D-2フォールバック規則の条件②③)へ実際に接続した)。
    */
   readonly includeExactaInAllocation: boolean;
   /**
-   * 三連単を配分対象に含めるか(`AppSettings.includeTrifectaInAllocation`。#25-E3a・Issue #138で
+   * 三連単を配分対象に含めるか(設定の `includeTrifectaInAllocation`(`cloud/src/settings.ts` の `CloudSettings`)。#25-E3a・Issue #138で
    * 設定項目を新設し、Issue #139(#25-E3b)で`resolveMixedBetTypes`・`isComboBetTypesOff`
    * (D-2フォールバック規則の条件②③)へ実際に接続した)。
    */
   readonly includeTrifectaInAllocation: boolean;
   /**
-   * 枠連を配分対象に含めるか(`AppSettings.includeBracketQuinellaInAllocation`。#26-E3a・Issue #149で
+   * 枠連を配分対象に含めるか(設定の `includeBracketQuinellaInAllocation`(`cloud/src/settings.ts` の `CloudSettings`)。#26-E3a・Issue #149で
    * 設定項目を新設し、Issue #150(#26-E3b)で`resolveMixedBetTypes`・`isComboBetTypesOff`
    * (D-2フォールバック規則の条件②③)へ実際に接続した。三連単〈#138→#139〉と同じ切り方)。
    */

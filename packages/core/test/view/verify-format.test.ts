@@ -1,43 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type {
   CalibrationBinView,
-  PromptVersionVerifyReportView,
   VerifyBetView,
   VerifyReportView,
 } from "../../src/analysis/analysis-types.js";
-import type { RaceBreakdownHorseView, RaceLedgerView } from "../../src/analysis/analysis-types.js";
 import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
   calibrationBarWidthPercent,
-  deleteUnknownPromptVersionConfirmMessage,
-  deleteUnknownPromptVersionResultMessage,
   directionLabel,
   formatAdjustment,
   formatBinRange,
-  formatExclusionNote,
   formatExclusionSummary,
-  formatFinishPosition,
-  formatKaisaiDate,
   formatPayoutBreakdown,
   formatRate,
   formatUnknownBetTypeNotice,
   formatYen,
-  hasUnknownPromptVersionGroup,
-  importButtonLabel,
-  isRowImportDisabled,
   markLabel,
-  needsImport,
   overconfidenceLabel,
-  payoutSourceLabel,
-  placedLabel,
   promptVersionCalibrationHeading,
   promptVersionLabel,
-  raceBreakdownHeading,
-  raceLedgerFilterSummary,
-  raceLedgerPositiveCount,
-  raceLedgerStatusLabel,
-  unknownPromptVersionAnalysisCount,
   venueFilterLabel,
 } from "../../src/view/verify-format.js";
 
@@ -80,33 +62,6 @@ function verifyReport(over: Partial<VerifyReportView> = {}): VerifyReportView {
 /** テスト用の空のproposedBet券種別サマリ(Issue #71)。 */
 function emptyProposedBetTypeSummary() {
   return { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 };
-}
-
-/** テスト用の版別レポート1件を最小構成で組み立てる。 */
-function promptVersionReport(
-  over: Partial<PromptVersionVerifyReportView> = {},
-): PromptVersionVerifyReportView {
-  return {
-    promptVersion: null,
-    report: verifyReport(),
-    additionalInstructions: [],
-    ...over,
-  };
-}
-
-/**
- * テスト用の結果ステータス(hasResult/hasPayoutのみ)を最小構成で組み立てる。
- * needsImport/importButtonLabel は hasResult・hasPayout のみの構造的部分型を受け取るため、
- * 特定の型(AnalysisHistoryItem等)に依存しない最小オブジェクトで足りる。
- */
-function resultStatus(
-  over: { hasResult?: boolean; hasPayout?: boolean } = {},
-): { hasResult: boolean; hasPayout: boolean } {
-  return {
-    hasResult: false,
-    hasPayout: false,
-    ...over,
-  };
 }
 
 describe("verify画面の表示整形(純関数)", () => {
@@ -175,35 +130,6 @@ describe("verify画面の表示整形(純関数)", () => {
       expect(text).toBe(
         "未対応の券種コード(quinella、win)の買い目が3点 (賭け金合計600円)あり、回収率の集計から除外しています。",
       );
-    });
-  });
-
-  describe("needsImport(再取込が必要か)", () => {
-    it("結果未取込なら true", () => {
-      expect(needsImport(resultStatus({ hasResult: false }))).toBe(true);
-    });
-    it("結果取込済みでも払戻が未取込なら true(実配当への更新導線を残す)", () => {
-      expect(
-        needsImport(resultStatus({ hasResult: true, hasPayout: false })),
-      ).toBe(true);
-    });
-    it("結果も払戻も取込済みなら false", () => {
-      expect(
-        needsImport(resultStatus({ hasResult: true, hasPayout: true })),
-      ).toBe(false);
-    });
-  });
-
-  describe("importButtonLabel(取込ボタンの文言)", () => {
-    it("未取込は『結果を取り込む』", () => {
-      expect(importButtonLabel(resultStatus({ hasResult: false }))).toBe(
-        "結果を取り込む",
-      );
-    });
-    it("着順は取込済みだが払戻が無い場合は『再取込(払戻待ち)』", () => {
-      expect(
-        importButtonLabel(resultStatus({ hasResult: true, hasPayout: false })),
-      ).toBe("再取込(払戻待ち)");
     });
   });
 
@@ -335,21 +261,6 @@ describe("verify画面の表示整形(純関数)", () => {
     });
   });
 
-  describe("isRowImportDisabled(行単位の取込ボタンの無効化判定、Task#31 code-reviewer提案対応)", () => {
-    it("その行が取込中なら無効化すること", () => {
-      expect(isRowImportDisabled(true, false)).toBe(true);
-    });
-    it("一括取込が実行中なら、その行が取込中でなくても無効化すること", () => {
-      expect(isRowImportDisabled(false, true)).toBe(true);
-    });
-    it("行取込中かつ一括取込中でも無効化すること", () => {
-      expect(isRowImportDisabled(true, true)).toBe(true);
-    });
-    it("どちらでもなければ無効化しないこと", () => {
-      expect(isRowImportDisabled(false, false)).toBe(false);
-    });
-  });
-
   describe("additionalInstructionsFullText(title属性用のフルテキスト、Task#28 code-reviewer提案対応)", () => {
     // additionalInstructionsSummary はセル表示用に30文字で省略するが、
     // title属性(ホバー時のツールチップ)は省略なしの全文を表示したい。
@@ -376,129 +287,7 @@ describe("verify画面の表示整形(純関数)", () => {
     });
   });
 
-  describe("formatKaisaiDate(開催日の表示整形、Task#34)", () => {
-    it("YYYYMMDDをYYYY/MM/DDに整形すること", () => {
-      expect(formatKaisaiDate("20260708")).toBe("2026/07/08");
-    });
-    it("null(日付不明)は「日付不明」にすること", () => {
-      expect(formatKaisaiDate(null)).toBe("日付不明");
-    });
-    it("YYYYMMDD形式でない不正値は素通しで表示すること(防御的フォールバック)", () => {
-      expect(formatKaisaiDate("不正な値")).toBe("不正な値");
-    });
-  });
-
-  describe("raceBreakdownHeading(レース一覧統合の見出し)", () => {
-    const base: Pick<RaceLedgerView, "venueName" | "raceNumber" | "kaisaiDate"> = {
-      venueName: "東京",
-      raceNumber: 11,
-      kaisaiDate: "20260708",
-    };
-    it("会場名・R番号・開催日の3点を含む見出しにすること", () => {
-      expect(raceBreakdownHeading(base)).toBe("東京 11R (2026/07/08)");
-    });
-    it("開催日不明(null)は「日付不明」を含めること", () => {
-      expect(raceBreakdownHeading({ ...base, kaisaiDate: null })).toBe(
-        "東京 11R (日付不明)",
-      );
-    });
-  });
-
-  describe("formatFinishPosition(実着順の表示整形、Task#34)", () => {
-    it("数値はそのまま「N着」にすること", () => {
-      expect(formatFinishPosition(1)).toBe("1着");
-      expect(formatFinishPosition(12)).toBe("12着");
-    });
-    it("null(着順不明・中止/除外)は「不明」にすること", () => {
-      expect(formatFinishPosition(null)).toBe("不明");
-    });
-  });
-
-  describe("placedLabel(複勝的中の表示整形、Task#34)", () => {
-    it("trueは「的中」、falseは「不的中」にすること", () => {
-      expect(placedLabel(true)).toBe("的中");
-      expect(placedLabel(false)).toBe("不的中");
-    });
-    it("null(着順不明で判定不能)は「-」にすること", () => {
-      expect(placedLabel(null)).toBe("-");
-    });
-  });
-
-  describe("payoutSourceLabel(払戻算出根拠の表示整形、Task#34)", () => {
-    it("actualは「実配当」、approximateは「近似」にすること", () => {
-      expect(payoutSourceLabel("actual")).toBe("実配当");
-      expect(payoutSourceLabel("approximate")).toBe("近似");
-    });
-    it("null(賭けていない・不的中)は「-」にすること", () => {
-      expect(payoutSourceLabel(null)).toBe("-");
-    });
-  });
-
-  describe("raceLedgerStatusLabel(検証画面: レース一覧統合の結果ステータス表示)", () => {
-    it("hasResult=falseは『未取込』にすること", () => {
-      expect(raceLedgerStatusLabel({ hasResult: false, hasPayout: false })).toBe(
-        "未取込",
-      );
-    });
-    it("hasResult=trueかつhasPayout=falseは『未確定』にすること(着順のみ取込・払戻未確定)", () => {
-      expect(raceLedgerStatusLabel({ hasResult: true, hasPayout: false })).toBe(
-        "未確定",
-      );
-    });
-    it("hasResult=trueかつhasPayout=trueは『取込済』にすること", () => {
-      expect(raceLedgerStatusLabel({ hasResult: true, hasPayout: true })).toBe(
-        "取込済",
-      );
-    });
-  });
-
-  describe("raceLedgerPositiveCount(検証画面: レース一覧統合のEVプラス数)", () => {
-    const horse = (isPositive: boolean): RaceBreakdownHorseView => ({
-      umaban: 1,
-      mark: null,
-      adjustedProb: 0.3,
-      placeOddsMin: 2.0,
-      ev: isPositive ? 1.2 : 0.8,
-      isPositive,
-      finishPosition: null,
-      isPlaced: null,
-      stake: 0,
-      payout: 0,
-      payoutSource: null,
-    });
-    it("EVプラス(isPositive=true)の頭数を数えること", () => {
-      expect(raceLedgerPositiveCount([horse(true), horse(false), horse(true)])).toBe(
-        2,
-      );
-    });
-    it("EVプラスが0頭なら0を返すこと", () => {
-      expect(raceLedgerPositiveCount([horse(false), horse(false)])).toBe(0);
-    });
-    it("空配列なら0を返すこと", () => {
-      expect(raceLedgerPositiveCount([])).toBe(0);
-    });
-  });
-
-  describe("hasUnknownPromptVersionGroup(版不明グループの有無判定、Task#33)", () => {
-    it("promptVersion=nullのグループが含まれていればtrueにすること", () => {
-      const reports = [
-        promptVersionReport({ promptVersion: "2026-07-14.1" }),
-        promptVersionReport({ promptVersion: null }),
-      ];
-      expect(hasUnknownPromptVersionGroup(reports)).toBe(true);
-    });
-
-    it("版不明グループが無ければfalseにすること", () => {
-      const reports = [promptVersionReport({ promptVersion: "2026-07-14.1" })];
-      expect(hasUnknownPromptVersionGroup(reports)).toBe(false);
-    });
-
-    it("空配列(未取得・集計対象なし)はfalseにすること", () => {
-      expect(hasUnknownPromptVersionGroup([])).toBe(false);
-    });
-  });
-
-  describe("formatExclusionSummary / formatExclusionNote(集計の除外内訳、Issue #152 B)", () => {
+  describe("formatExclusionSummary(集計の除外内訳、Issue #152 B)", () => {
     const report = verifyReport({
       includedAnalysisCount: 11,
       excludedAnalysisCount: 12,
@@ -524,7 +313,6 @@ describe("verify画面の表示整形(純関数)", () => {
 
     it("「判定不能」という語を使わないこと(proposedBet の「判定不能」と混同させない)", () => {
       expect(formatExclusionSummary(report)).not.toContain("判定不能");
-      expect(formatExclusionNote(report) ?? "").not.toContain("判定不能");
     });
 
     it("除外が0件でも2項目を出すこと(フィルタが有効であることが分かる)", () => {
@@ -532,117 +320,6 @@ describe("verify画面の表示整形(純関数)", () => {
       expect(text).toContain("リーク疑い(発走後に分析・先読み未遮断)のため除外0件");
       expect(text).toContain("発走前後を判定できず除外0件");
     });
-
-    it("補足は、リーク疑いか判定不可の除外が1件でもあるときだけ出し、0件なら null にすること", () => {
-      const note = "一括分析(日付を選んで分析)で該当レースを分析し直すと集計に戻ります";
-      expect(formatExclusionNote(verifyReport({ excludedLookaheadSuspectCount: 1 }))).toBe(note);
-      expect(formatExclusionNote(verifyReport({ excludedLookaheadUnknownCount: 1 }))).toBe(note);
-      expect(formatExclusionNote(verifyReport())).toBeNull();
-    });
   });
 
-  describe("unknownPromptVersionAnalysisCount(版不明グループの分析件数、Task#33)", () => {
-    it("版不明グループの旧来の4カウンタ(集計・結果未取込除外・旧分析除外・推定EV除外。除外2カウンタは0)の合計を返すこと", () => {
-      const reports = [
-        promptVersionReport({
-          promptVersion: null,
-          report: verifyReport({
-            includedAnalysisCount: 3,
-            excludedAnalysisCount: 2,
-            supersededAnalysisCount: 1,
-            excludedEstimatedCount: 4,
-          }),
-        }),
-      ];
-      // 3+2+1+4=10件がprompt_version=nullのanalyses総数(削除対象件数)と一致する。
-      expect(unknownPromptVersionAnalysisCount(reports)).toBe(10);
-    });
-
-    it("リーク疑い・発走前後判定不可の除外件数も合計に含めること(6カウンタの和が分析総数。Issue #152 B)", () => {
-      const reports = [
-        promptVersionReport({
-          promptVersion: null,
-          report: verifyReport({
-            includedAnalysisCount: 1,
-            excludedAnalysisCount: 2,
-            supersededAnalysisCount: 4,
-            excludedEstimatedCount: 8,
-            excludedLookaheadSuspectCount: 16,
-            excludedLookaheadUnknownCount: 32,
-          }),
-        }),
-      ];
-      // 各カウンタを2の冪にしてあるので、どれか1つを落とすと和が一意に食い違う(1+2+4+8+16+32=63)。
-      expect(unknownPromptVersionAnalysisCount(reports)).toBe(63);
-    });
-
-    it("リーク疑いだけが多い版不明グループでも、削除確認の件数が0にならないこと(除外が効いていても削除対象は減らない)", () => {
-      const reports = [
-        promptVersionReport({
-          promptVersion: null,
-          report: verifyReport({ excludedLookaheadSuspectCount: 7, excludedLookaheadUnknownCount: 3 }),
-        }),
-      ];
-      expect(unknownPromptVersionAnalysisCount(reports)).toBe(10);
-    });
-
-    it("版不明グループが無ければ0を返すこと", () => {
-      const reports = [
-        promptVersionReport({
-          promptVersion: "2026-07-14.1",
-          report: verifyReport({ includedAnalysisCount: 5 }),
-        }),
-      ];
-      expect(unknownPromptVersionAnalysisCount(reports)).toBe(0);
-    });
-
-    it("空配列は0を返すこと", () => {
-      expect(unknownPromptVersionAnalysisCount([])).toBe(0);
-    });
-  });
-
-  describe("deleteUnknownPromptVersionConfirmMessage(削除確認メッセージ、Task#33 code-reviewer指摘対応)", () => {
-    it("取り消せない旨・削除対象の内訳(旧データ+LLM未使用分析)・件数が概算表示である旨・件数を含むメッセージにすること", () => {
-      expect(deleteUnknownPromptVersionConfirmMessage(5)).toBe(
-        "取り消せません。版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)" +
-          "5件(画面表示時点)と関連馬データを削除します。よろしいですか?",
-      );
-    });
-
-    it("0件でも同じ形式でメッセージを組み立てること", () => {
-      expect(deleteUnknownPromptVersionConfirmMessage(0)).toBe(
-        "取り消せません。版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)" +
-          "0件(画面表示時点)と関連馬データを削除します。よろしいですか?",
-      );
-    });
-  });
-
-  describe("deleteUnknownPromptVersionResultMessage(削除完了フィードバック、Task#33 code-reviewer指摘対応)", () => {
-    it("削除対象の内訳(旧データ+LLM未使用分析)と削除件数を含む完了メッセージにすること", () => {
-      expect(deleteUnknownPromptVersionResultMessage(3)).toBe(
-        "版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)3件を削除しました。",
-      );
-    });
-
-    it("0件でも同じ形式でメッセージを組み立てること", () => {
-      expect(deleteUnknownPromptVersionResultMessage(0)).toBe(
-        "版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)0件を削除しました。",
-      );
-    });
-  });
-
-  describe("raceLedgerFilterSummary(レース一覧の絞り込み結果件数表示)", () => {
-    it("『全N件中M件表示』の形式にすること", () => {
-      expect(raceLedgerFilterSummary(12, 5)).toBe("全12件中5件表示");
-    });
-    it("絞り込みなし(全件表示)でも同じ形式にすること", () => {
-      expect(raceLedgerFilterSummary(3, 3)).toBe("全3件中3件表示");
-    });
-    it("該当0件でも同じ形式にすること(穏やかな案内はUI側で別途出す)", () => {
-      expect(raceLedgerFilterSummary(3, 0)).toBe("全3件中0件表示");
-    });
-    it("元データ自体が0件でも同じ形式にすること", () => {
-      expect(raceLedgerFilterSummary(0, 0)).toBe("全0件中0件表示");
-    });
-  });
 });

@@ -1,19 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildReasonCellView,
-  formatConditionChangeTags,
   formatEstimatedEvSuffix,
   formatEv,
-  formatMark,
   formatMarkRepair,
   MARK_ORIGIN_VALUES,
   MARK_REPAIRED_BADGE,
   formatOdds,
-  formatOpportunityScore,
   formatPercent,
-  formatReason,
-  isHighlightRow,
   LABEL_ADJUSTED_PROB,
   LABEL_CONCERNS,
   LABEL_HIGHLIGHTS,
@@ -21,9 +15,7 @@ import {
   analysisModelText,
   MARK_LEGEND,
   oddsStatusNote,
-  raceHeading,
 } from "../../src/view/format.js";
-import type { AnalysisRow } from "../../src/analysis/analysis-types.js";
 import { PREDICTION_MARKS } from "../../src/analyzer/parse-response.js";
 
 describe("表示ラベル(prior→3着内率 / 補正後→AI補正後 の統一)", () => {
@@ -32,16 +24,6 @@ describe("表示ラベル(prior→3着内率 / 補正後→AI補正後 の統一
   });
   it("補正後 列のラベルは「AI補正後」", () => {
     expect(LABEL_ADJUSTED_PROB).toBe("AI補正後");
-  });
-});
-
-describe("formatOpportunityScore(妙味スコアの表示)", () => {
-  it("スコアを小数第2位まで表示する", () => {
-    expect(formatOpportunityScore(0.5)).toBe("0.50");
-    expect(formatOpportunityScore(0.123)).toBe("0.12");
-  });
-  it("スコアが null(対象外)のときは「-」", () => {
-    expect(formatOpportunityScore(null)).toBe("-");
   });
 });
 
@@ -67,51 +49,6 @@ describe("formatEv(期待値の表示)", () => {
     expect(formatEv(2.5)).toBe("2.50");
     expect(formatEv(1.005)).toBe("1.00");
     expect(formatEv(null)).toBe("-");
-  });
-});
-
-describe("formatReason(根拠の表示)", () => {
-  it("根拠が無い(null)場合はダッシュ、あればそのまま", () => {
-    expect(formatReason(null)).toBe("-");
-    expect(formatReason("調教良化")).toBe("調教良化");
-  });
-});
-
-describe("isHighlightRow(EVプラス行のハイライト判定)", () => {
-  const row = (isPositive: boolean): AnalysisRow => ({
-    umaban: 1,
-    wakuban: 1,
-    horseName: "テスト馬",
-    prior: 0.4,
-    adjustedProb: 0.4,
-    placeOddsMin: 3,
-    winOdds: 10,
-    ev: isPositive ? 1.2 : 0.8,
-    isPositive,
-    reason: null,
-    highlights: [],
-    concerns: [],
-    careerRunCount: 10,
-    mark: null,
-    evEstimated: false,
-    conditionChangeTags: [],
-  });
-
-  it("isPositive の行のみハイライト対象", () => {
-    expect(isHighlightRow(row(true))).toBe(true);
-    expect(isHighlightRow(row(false))).toBe(false);
-  });
-});
-
-describe("formatMark(予想印の表示・Task#23)", () => {
-  it("印があればそのまま表示し、無ければ(null)空欄にすること", () => {
-    expect(formatMark("◎")).toBe("◎");
-    expect(formatMark("〇")).toBe("〇");
-    expect(formatMark("▲")).toBe("▲");
-    expect(formatMark("△")).toBe("△");
-    expect(formatMark("☆")).toBe("☆");
-    expect(formatMark("注")).toBe("注");
-    expect(formatMark(null)).toBe("");
   });
 });
 
@@ -149,58 +86,6 @@ describe("formatEstimatedEvSuffix(推定EVの表記・Task#25)", () => {
 
   it("確定EV(evEstimated=false)のときは空文字を返す", () => {
     expect(formatEstimatedEvSuffix(false)).toBe("");
-  });
-});
-
-describe("raceHeading(レース見出しの組み立て・Task#29)", () => {
-  it("会場名+レース番号+レース名を「会場名 NR レース名」の形式で組み立てること", () => {
-    expect(
-      raceHeading({
-        venueName: "浦和",
-        raceNumber: 11,
-        raceName: "ランチタイム(C3)",
-      }),
-    ).toBe("浦和 11R ランチタイム(C3)");
-  });
-
-  it("レース名が空文字のときは会場名+レース番号だけになり、それでもレースを識別できること", () => {
-    expect(
-      raceHeading({ venueName: "浦和", raceNumber: 11, raceName: "" }),
-    ).toBe("浦和 11R");
-  });
-
-  it("レース番号1桁でも「NR」の形式は変わらないこと", () => {
-    expect(
-      raceHeading({ venueName: "東京", raceNumber: 1, raceName: "3歳未勝利" }),
-    ).toBe("東京 1R 3歳未勝利");
-  });
-
-  it("レース名が空白のみのときも会場名+レース番号だけになること(空文字と同様に扱う)", () => {
-    expect(
-      raceHeading({ venueName: "浦和", raceNumber: 11, raceName: "   " }),
-    ).toBe("浦和 11R");
-  });
-});
-
-describe("formatConditionChangeTags(条件替わり〈妙味材料〉タグの表示整形)", () => {
-  it("タグが無ければ空文字を返すこと(UIはこの場合バッジ等のノイズを出さない)", () => {
-    expect(formatConditionChangeTags([])).toBe("");
-  });
-
-  it("タグが1件ならそのラベルをそのまま返すこと", () => {
-    expect(
-      formatConditionChangeTags([{ kind: "surface", label: "ダ替わり(前走芝)" }]),
-    ).toBe("ダ替わり(前走芝)");
-  });
-
-  it("複数タグは「・」区切りで、渡された順序のまま連結すること(サーフェス→距離→開催の並びは呼び出し側が保証)", () => {
-    expect(
-      formatConditionChangeTags([
-        { kind: "surface", label: "ダ替わり(前走芝)" },
-        { kind: "distance", label: "距離延長(平均比+400m)" },
-        { kind: "venue", label: "地方→中央" },
-      ]),
-    ).toBe("ダ替わり(前走芝)・距離延長(平均比+400m)・地方→中央");
   });
 });
 
@@ -251,53 +136,6 @@ describe("強調材料・懸念事項のラベル(Issue #199。cloud と共有�
   it("強調材料・懸念事項の文言は、cloud の画面と同じ「強調材料」「懸念事項」", () => {
     expect(LABEL_HIGHLIGHTS).toBe("強調材料");
     expect(LABEL_CONCERNS).toBe("懸念事項");
-  });
-});
-
-describe("buildReasonCellView(LLM根拠セルの表示。Issue #199)", () => {
-  const input = (reason: string | null, highlights: readonly string[], concerns: readonly string[]) => ({ reason, highlights, concerns });
-
-  // 「2つとも空なら今と同じ表示」の保証: reason の文字列は formatReason と一致し、sections は空。
-  it.each([
-    { name: "reason のみ", reason: "調教良化", expected: "調教良化" },
-    { name: "reason が null なら「-」", reason: null, expected: "-" },
-    { name: "reason が空文字ならそのまま空文字(今の formatReason と同じ)", reason: "", expected: "" },
-  ])("項目なし: $name(sections は空で、formatReason と同じ表示)", ({ reason, expected }) => {
-    const view = buildReasonCellView(input(reason, [], []));
-    expect(view.reason).toBe(expected);
-    expect(view.reason).toBe(formatReason(reason));
-    expect(view.sections).toEqual([]);
-  });
-
-  it("強調材料のみ: sections は強調材料の1つだけ(ラベルは文字で出す)", () => {
-    const view = buildReasonCellView(input("調教良化", ["中間の併せ馬で先着", "距離短縮が合う"], []));
-    expect(view.sections).toEqual([{ kind: "highlights", label: "強調材料", items: ["中間の併せ馬で先着", "距離短縮が合う"] }]);
-  });
-
-  it("懸念事項のみ: sections は懸念事項の1つだけ", () => {
-    const view = buildReasonCellView(input("調教良化", [], ["外枠で距離ロス"]));
-    expect(view.sections).toEqual([{ kind: "concerns", label: "懸念事項", items: ["外枠で距離ロス"] }]);
-  });
-
-  it("両方あるとき: 順番は reason → 強調材料 → 懸念事項(各3項目はそのまま、順序も保つ)", () => {
-    const view = buildReasonCellView(input("総合は上位", ["A1", "A2", "A3"], ["B1", "B2", "B3"]));
-    expect(view.reason).toBe("総合は上位");
-    expect(view.sections.map((s) => s.kind)).toEqual(["highlights", "concerns"]);
-    expect(view.sections[0]!.items).toEqual(["A1", "A2", "A3"]);
-    expect(view.sections[1]!.items).toEqual(["B1", "B2", "B3"]);
-    expect(view.sections[0]!.label).toBe(LABEL_HIGHLIGHTS);
-    expect(view.sections[1]!.label).toBe(LABEL_CONCERNS);
-  });
-
-  it("空文字・空白だけの項目は捨てる(残りの文字列は加工しない)。全部捨てられたら、その塊ごと出さない", () => {
-    const view = buildReasonCellView(input("x", ["", "  ", " 先行力 "], ["", "\u3000"]));
-    expect(view.sections).toEqual([{ kind: "highlights", label: "強調材料", items: [" 先行力 "] }]);
-  });
-
-  it("reason が null でも、項目があれば「-」のあとに sections を続ける", () => {
-    const view = buildReasonCellView(input(null, ["A"], ["B"]));
-    expect(view.reason).toBe("-");
-    expect(view.sections.map((s) => s.kind)).toEqual(["highlights", "concerns"]);
   });
 });
 

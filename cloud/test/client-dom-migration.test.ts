@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mount } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { h, type VNode } from "../client/vnode";
 
 /**

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RaceRow } from "../client/api";
-import { mount, type DomDocument } from "../client/dom";
+import type { DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildListModel } from "../client/list";
 import { parseHash } from "../client/route";
 import { renderScreen } from "../client/view";

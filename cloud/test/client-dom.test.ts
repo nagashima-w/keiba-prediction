@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../client/app";
-import { createMounter, mount, type DomDocument } from "../client/dom";
+import { createMounter, type DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildListModel } from "../client/list";
 import type { RaceRow } from "../client/api";
 import { renderScreen } from "../client/view";

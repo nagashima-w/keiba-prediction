@@ -85,10 +85,6 @@ export {
 export { filterJpnOnlyEntries, isJpnGrade } from "./scraper/jpn-grade.js";
 export { parseShutuba, ShutubaParseError } from "./scraper/parse-shutuba.js";
 export {
-  HorseProfileParseError,
-  parseHorseProfile,
-} from "./scraper/parse-horse-profile.js";
-export {
   excludeNonStartResults,
   HorseResultsParseError,
   isNonStartResult,
@@ -383,7 +379,6 @@ export {
   classifyRunLegStyleFull,
   computeFrontRunningScore,
   computeLegStyleStability,
-  countFrontRunners,
   estimatePace,
   summarizePastPaceTendency,
   type ClassifyHorseOptions,
@@ -580,7 +575,6 @@ export type {
   BodyWeight,
   CourseType,
   FinishPosition,
-  HorseProfile,
   HorseRaceResult,
   OddsSnapshot,
   OikiriEntry,

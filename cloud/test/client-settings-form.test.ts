@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CLIP_VARIANTS } from "@keiba/core/analyzer/clip-variants";
-import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS, isValidWeight } from "../../packages/core/src/analysis/app-settings";
+import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/core/src/analysis/app-settings";
 import {
   buildSettingsModel,
   draftFromSettings,
@@ -149,14 +149,32 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     ["perRaceCap 1000万", "perRaceCap", "10000000", true],
     ["perRaceCap 1000万+1", "perRaceCap", "10000001", false],
     ["perRaceCap 小数", "perRaceCap", "0.5", false],
+    ["perRaceCap 0", "perRaceCap", "0", true],
+    ["perRaceCap 負", "perRaceCap", "-1", false],
+    ["perRaceCap 空", "perRaceCap", "", false],
+    ["perRaceCap 文字", "perRaceCap", "x", false],
+    ["bankroll 100000(旧 isValidBankroll の例)", "bankroll", "100000", true],
+    ["bankroll NaN", "bankroll", "NaN", false],
+    ["bankroll 1.5", "bankroll", "1.5", false],
     ["evThreshold 0", "evThreshold", "0", false],
     ["evThreshold 0.01", "evThreshold", "0.01", true],
     ["evThreshold 負", "evThreshold", "-1", false],
+    ["evThreshold 1.0", "evThreshold", "1.0", true],
+    ["evThreshold 2", "evThreshold", "2", true],
+    ["evThreshold 空", "evThreshold", "", false],
+    ["evThreshold 空白だけ", "evThreshold", "  ", false],
+    ["evThreshold 文字", "evThreshold", "abc", false],
     ["kelly 0.05", "kellyFraction", "0.05", true],
     ["kelly 1", "kellyFraction", "1", true],
     ["kelly 0.04999(読む側では有効だが書く側は不可)", "kellyFraction", "0.04999", false],
     ["kelly 0", "kellyFraction", "0", false],
     ["kelly 1.01", "kellyFraction", "1.01", false],
+    ["kelly 0.5", "kellyFraction", "0.5", true],
+    ["kelly 0.049", "kellyFraction", "0.049", false],
+    ["kelly 1.0000001", "kellyFraction", "1.0000001", false],
+    ["kelly 負", "kellyFraction", "-0.1", false],
+    ["kelly 空", "kellyFraction", "", false],
+    ["kelly 文字", "kellyFraction", "abc", false],
     ["発走何分前 10", "preRaceOffsetMinutes", "10", true],
     ["発走何分前 180", "preRaceOffsetMinutes", "180", true],
     ["発走何分前 9", "preRaceOffsetMinutes", "9", false],
@@ -201,16 +219,22 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     }
   });
 
-  it("Issue #218: 重みの入力の検証は exe の isValidWeight と一致する(同じ文字列で同じ判定)。違うのは、cloud が 16 進(0x10)・カンマなどを数値として受けない点だけ(既存の数値欄と同じ流儀)", () => {
-    const inputs = ["0", "0.0", "0.05", "1", "3", "10", "1e3", " 2 ", "-0.1", "-1", "", "   ", "abc", "Infinity", "-Infinity", "NaN", "1,5", "１", "1.2.3", "0x10"];
-    const differences: string[] = [];
-    for (const text of inputs) {
+  it("Issue #218: 重みの入力の検証の判定を、同じ 20 入力で明記する(旧 exe の isValidWeight と同じ判定だった。違うのは、cloud が 16 進(0x10)・カンマなどを数値として受けない点だけ。Issue #393 で isValidWeight を消したため、旧版の判定を期待値として固定した)", () => {
+    const expected: ReadonlyArray<readonly [string, boolean]> = [
+      ["0", true], ["0.0", true], ["0.05", true], ["1", true], ["3", true], ["10", true], ["1e3", true], [" 2 ", true],
+      ["-0.1", false], ["-1", false], ["", false], ["   ", false], ["abc", false], ["Infinity", false], ["-Infinity", false], ["NaN", false],
+      ["1,5", false], ["１", false], ["1.2.3", false],
+      ["0x10", false], // 旧 isValidWeight は Number("0x10") = 16 を有効としたが、cloud は 16 進を受けない(既存の数値欄と同じ流儀)
+    ];
+    expect(expected).toHaveLength(20);
+    expect(expected.filter(([, ok]) => ok).length).toBeGreaterThan(5); // 前提: 有効な入力が十分ある(空振りでない)
+    expect(expected.filter(([, ok]) => !ok).length).toBeGreaterThan(5);
+    const mismatches: string[] = [];
+    for (const [text, ok] of expected) {
       const cloud = validateDraft(setDraftValue(draftFromSettings(DEFAULT_CLOUD_SETTINGS), "biasWeightVenue", text)).ok;
-      if (cloud !== isValidWeight(text)) differences.push(text);
+      if (cloud !== ok) mismatches.push(text);
     }
-    expect(inputs.filter((t) => isValidWeight(t)).length).toBeGreaterThan(5); // 前提: 有効な入力が十分ある(空振りでない)
-    expect(inputs.filter((t) => !isValidWeight(t)).length).toBeGreaterThan(5);
-    expect(differences).toEqual(["0x10"]);
+    expect(mismatches).toEqual([]);
   });
 
   it("複数の項目が不正なら、項目ごとにエラー。有効な項目にはエラーを付けない", () => {

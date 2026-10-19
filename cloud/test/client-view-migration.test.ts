@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MigrationProgress } from "../client/api-migration";
-import { mount, type DomDocument } from "../client/dom";
+import type { DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildMigrationModel, type MigrationModelInput } from "../client/migration-model";
 import { buildSettingsModel, draftFromSettings } from "../client/settings-form";
 import { renderScreen, type ViewActions } from "../client/view";

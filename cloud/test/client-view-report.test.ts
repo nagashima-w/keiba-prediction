@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReportDetail } from "../client/api-report";
-import { mount, type DomDocument } from "../client/dom";
+import type { DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildReportModel, type ReportModelInput } from "../client/report-model";
 import { renderScreen } from "../client/view";
 import type { VNode } from "../client/vnode";

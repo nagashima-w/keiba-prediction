@@ -15,7 +15,6 @@ import {
   classifyRunLegStyleFull,
   computeFrontRunningScore,
   computeLegStyleStability,
-  countFrontRunners,
   estimatePace,
   summarizePastPaceTendency,
   type HorseRunPassing,
@@ -116,13 +115,6 @@ describe("classifyHorseLegStyle(直近複数走からの脚質)", () => {
       { passing: [13], fieldSize: 18 }, // 追込
     ];
     expect(classifyHorseLegStyle(runs, { recentRuns: 1 })).toBe("逃げ");
-  });
-});
-
-describe("countFrontRunners(逃げ馬の数)", () => {
-  it("脚質配列から逃げの数を数えること(null は無視)", () => {
-    const styles: (LegStyle | null)[] = ["逃げ", "先行", "逃げ", null, "追込"];
-    expect(countFrontRunners(styles)).toBe(2);
   });
 });
 

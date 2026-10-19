@@ -28,13 +28,6 @@ export interface R2Usage {
   readonly classB: number;
 }
 
-export interface FenceStatus {
-  /** R2 への書き込み(PUT。Class A)を続けてよいか。 */
-  readonly writeAllowed: boolean;
-  /** R2 からの読み出し(GET。Class B)を続けてよいか。 */
-  readonly readAllowed: boolean;
-}
-
 /** 書き込みを続けてよいか(Class A が上限に達していない)。Class B は見ない。 */
 export function isWriteAllowed(usage: R2Usage): boolean {
   return usage.classA < R2_FENCE_LIMITS.classA;
@@ -43,10 +36,6 @@ export function isWriteAllowed(usage: R2Usage): boolean {
 /** 読み出しを続けてよいか(Class B が上限に達していない)。Class A は見ない。 */
 export function isReadAllowed(usage: R2Usage): boolean {
   return usage.classB < R2_FENCE_LIMITS.classB;
-}
-
-export function fenceStatus(usage: R2Usage): FenceStatus {
-  return { writeAllowed: isWriteAllowed(usage), readAllowed: isReadAllowed(usage) };
 }
 
 /** 月の区切り: **UTC** の yyyymm(例: 2026-10-31T23:59:59Z → 202610、2026-11-01T00:00:00Z → 202611)。端末のタイムゾーンによらない。 */

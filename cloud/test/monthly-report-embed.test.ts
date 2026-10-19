@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildMonthlyEmbed } from "../src/monthly-report-embed";
 import { MONTHLY_NARRATIVE_LIMITS, type MonthlyNarrative } from "../src/monthly-report-prompt";
-import { EMBED_LIMITS, embedLength } from "../src/notify-embeds";
+import { EMBED_LIMITS } from "../src/notify-embeds";
+import { embedLength } from "./support/embed-length";
 import { DISCORD_COLORS } from "../src/palette";
 import { buildMonthlyLink } from "../src/notify-link";
 import { SMALL_MONTH_SPEC, syntheticMonthStats } from "./monthly-fixtures";

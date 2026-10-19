@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mount, type DomDocument } from "../client/dom";
+import type { DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildListModel } from "../client/list";
 import { buildSettingsModel, draftFromSettings, FIELD_ORDER, setDraftValue, WEIGHT_FIELD_ORDER, type SettingsModelInput } from "../client/settings-form";
 import { renderScreen, type ViewActions } from "../client/view";

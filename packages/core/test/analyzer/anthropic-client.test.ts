@@ -19,7 +19,7 @@
  *  - 「デフォルトモデルは claude-sonnet-4-6」→ 値のみ変更。固定モデルが DEFAULT_ANALYZER_CONFIG と
  *    buildRequestParams の両方に反映される保証は維持(「既定モデルは claude-sonnet-5-5」)
  *  - 「デフォルトの maxTokens は8192」→ 値のみ変更(16000)。config と params の両方で確認する保証は維持
- *  - 「maxAdjust のデフォルトは0.10」→ 無変更
+ *  - 「maxAdjust のデフォルトは0.10」→ Issue #393 で削除(AnalyzerConfig.maxAdjust は読む箇所のないデッドなフィールドだった。実際のクリップ幅の既定は MAX_ADJUST で、parse-response 側のテストが固定する)
  *  - 「プロンプトを user ロールのメッセージに載せる」→ 無変更
  *  - 「max_tokens・temperature がデフォルト値で入る」→ max_tokens の保証は維持。temperature の保証は
  *    「params に temperature キー自体が無い」に反転(Sonnet 5.5 の仕様)。effort の保証を追加
@@ -70,10 +70,6 @@ describe("buildRequestParams(SDKへ渡すパラメータの組み立て)", () =>
     expect(p.max_tokens).toBe(16000);
   });
 
-  it("クリップ幅 maxAdjust のデフォルトは絶対値0.10であること", () => {
-    expect(DEFAULT_ANALYZER_CONFIG.maxAdjust).toBe(0.1);
-  });
-
   it("プロンプトを user ロールのメッセージに載せること", () => {
     const p = buildRequestParams("PROMPT");
     expect(p.messages).toEqual([{ role: "user", content: "PROMPT" }]);
@@ -94,7 +90,7 @@ describe("buildRequestParams(SDKへ渡すパラメータの組み立て)", () =>
 
   it("AnalyzerConfig に temperature は無いこと(既定設定のキー列で固定)", () => {
     expect(Object.keys(DEFAULT_ANALYZER_CONFIG).sort()).toEqual(
-      ["effort", "maxAdjust", "maxTokens", "model"].sort(),
+      ["effort", "maxTokens", "model"].sort(),
     );
   });
 

@@ -37,16 +37,6 @@ export interface AnalyzerConfig {
    * temperature は削除した(Claude Sonnet 5.5 は既定値以外の temperature を 400 で拒否する)。
    */
   readonly effort: AnalyzerEffort;
-  /**
-   * 補正の最大幅(prior からの絶対値)。既定0.10(仕様「±10%以内」を絶対値0.10と解釈)。
-   *
-   * 注意(タスクD-2で判明した設計上の記録): この値は AnthropicLlmClient.complete() 内では
-   * 一切参照されない(実際のクリップは parseAnalyzerResponse が受け取る
-   * AnalyzeRaceDeps.maxAdjust〈analyze-race.ts〉で行われ、そちらは呼び出し側〈クラウド版は cloud/src/race-day-core.ts。旧 exe では pipeline-deps.ts(#287 で削除。3c1664e まで)〉が
-   * clip-variants.ts の CLIP_VARIANTS から別途解決して渡す設計にした)。このフィールドは
-   * 後方互換のために残すが、実際のクリップ幅制御には使われない(デッド。将来削除を検討)。
-   */
-  readonly maxAdjust: number;
   /** APIキー(省略時は環境変数 ANTHROPIC_API_KEY)。 */
   readonly apiKey?: string;
 }
@@ -73,7 +63,6 @@ export const DEFAULT_ANALYZER_CONFIG: AnalyzerConfig = {
   model: "claude-sonnet-5-5",
   maxTokens: 16000,
   effort: "low",
-  maxAdjust: 0.1,
 };
 
 /** SDK の messages.create へ渡す(このモジュールが組み立てる)パラメータ。 */

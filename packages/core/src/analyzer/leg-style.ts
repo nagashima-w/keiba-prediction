@@ -109,11 +109,6 @@ export function classifyHorseLegStyle(
   return pickMostFrequentStyle(styles);
 }
 
-/** 脚質配列から逃げ馬の数を数える(null は無視)。 */
-export function countFrontRunners(styles: readonly (LegStyle | null)[]): number {
-  return styles.reduce((n, s) => (s === "逃げ" ? n + 1 : n), 0);
-}
-
 /**
  * 逃げ馬の数からペース想定の文言を作る(展開想定の材料)。
  * 粗い目安であり、最終的な解釈は LLM に委ねる。

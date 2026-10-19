@@ -128,8 +128,8 @@ function parseBodyWeight(raw: string): BodyWeight | null {
  * 厩舎所在地ラベルを整形する。
  *
  * 中央は美浦/栗東が代表値だが、地方(NAR)では所属会場名(高知・浦和など)が入るため、
- * 値を丸めず取得した文字列をそのまま保持する(HorseProfile.stableLocation と同じ方針。
- * 詳細: docs/nar-scraping-plan.md)。ラベル自体が空(構造異常)の場合のみ失敗させる。
+ * 値を丸めず取得した文字列をそのまま保持する
+ * (詳細: docs/nar-scraping-plan.md)。ラベル自体が空(構造異常)の場合のみ失敗させる。
  */
 function toStableLocation(raw: string): string {
   const trimmed = raw.trim();

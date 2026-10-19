@@ -79,8 +79,8 @@ export interface ShutubaHorse {
   readonly jockeyId: string | null;
   /**
    * 厩舎所在地。中央は美浦/栗東が代表値だが、地方(NAR)では所属会場名(例: 高知・浦和)が
-   * 入るため、値を丸めず取得した文字列をそのまま保持する(HorseProfile.stableLocation と
-   * 同じ方針。中央限定の輸送バイアス計算では StableLocation 型に絞り込んで利用する)。
+   * 入るため、値を丸めず取得した文字列をそのまま保持する
+   * (中央限定の輸送バイアス計算では StableLocation 型に絞り込んで利用する)。
    */
   readonly stableLocation: string;
   /** 調教師名。 */
@@ -173,33 +173,6 @@ export interface Shutuba {
   readonly race: ShutubaRaceInfo;
   /** 出走馬(馬番昇順にソート済み)。 */
   readonly horses: ShutubaHorse[];
-}
-
-/**
- * 馬プロフィール(db.netkeiba.com/horse/{id}/ の db_prof_table + 見出し)。
- *
- * 取れない項目は null で表す(通算成績のように未出走馬では空になり得るため)。
- * comment パーサーは実装しない: 陣営コメント本文はプレミアム限定で無料では取得できない
- * (docs/phase1-scraping-plan.md「厩舎コメント」参照)。
- */
-export interface HorseProfile {
-  /** 馬ID(10桁)。 */
-  readonly horseId: HorseId;
-  /** 馬名(ページ見出し)。 */
-  readonly name: string;
-  /** 生年月日(例: 2023年2月17日)。取得できない場合は null。表記はそのまま保持する。 */
-  readonly birthDate: string | null;
-  /** 調教師名。取得できない場合は null。 */
-  readonly trainerName: string | null;
-  /** 調教師ID。リンク欠損などで抽出できない場合は null。 */
-  readonly trainerId: string | null;
-  /**
-   * 厩舎所在地。美浦/栗東が代表値だが、地方・海外所属では他の表記があり得るため、
-   * 既知値に丸めず取得した文字列をそのまま保持する(取得不可時のみ null)。
-   */
-  readonly stableLocation: string | null;
-  /** 通算成績テキスト(例: 4戦2勝 [2-0-0-2])。取得できない場合は null。 */
-  readonly totalResults: string | null;
 }
 
 /**

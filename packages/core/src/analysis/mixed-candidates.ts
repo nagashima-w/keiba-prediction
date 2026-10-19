@@ -85,7 +85,7 @@
  *
  * 第4段のboss裁定B-2「閾値を揃える」により、`options.evConfig`(省略時は
  * `DEFAULT_EV_CONFIG`=閾値1.0)を`buildComboCandidates`へそのまま渡す。複勝候補は
- * `row.isPositive`(呼び出し元が`AppSettings.evThreshold`で既に判定済みの値)をそのまま使う
+ * `row.isPositive`(呼び出し元が設定の `evThreshold`(`cloud/src/settings.ts` の `CloudSettings`)で既に判定済みの値)をそのまま使う
  * ため、呼び出し元(`mixed-race-allocation.ts` の `buildMixedRaceAllocation`)が**同じ`evThreshold`から組み立てた`evConfig`**を
  * ここへ渡すことで、複勝・ワイド・3連複が同一の閾値・同一の厳密不等号(`ev > threshold`)で
  * 判定される(`bet-allocation-view.ts`の`evThresholdFootnote`「配分の対象はEV閾値を上回った
