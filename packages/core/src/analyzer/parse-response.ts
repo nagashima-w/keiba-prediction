@@ -60,8 +60,8 @@
  *
  * 仕様「±10%以内」の解釈: 確率(0〜1)に対するパーセントポイントの自然な読みとして
  * **絶対値0.10** を正式採用する(prior=0.40 なら [0.30, 0.50])。将来 prior 相対の解釈や
- * 幅調整に切り替えられるよう、値は parseAnalyzerResponse の options.maxAdjust /
- * AnalyzerConfig.maxAdjust で上書きできる。この公開定数は後方互換のため既定値として残す。
+ * 幅調整に切り替えられるよう、値は parseAnalyzerResponse の options.maxAdjust
+ * (クラウド版は `clip-variants.ts` の `CLIP_VARIANTS` から解決して渡す)で上書きできる。この公開定数は既定値として残す。
  */
 export const MAX_ADJUST = 0.1;
 

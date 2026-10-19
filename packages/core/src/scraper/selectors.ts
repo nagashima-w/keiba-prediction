@@ -128,20 +128,6 @@ export const SHUTUBA_SELECTORS = {
   cancelText: "td.Cancel_Txt",
 } as const;
 
-/** 馬プロフィール(db.netkeiba.com/horse/{id}/)のセレクタ。 */
-export const HORSE_PROFILE_SELECTORS = {
-  /** 馬名(ページ見出し)。 */
-  name: "div.horse_title h1",
-  /** プロフィールテーブル(生年月日・調教師・通算成績など)。 */
-  profTable: "table.db_prof_table",
-  /** テーブル各行の見出しセル。 */
-  rowHeader: "th",
-  /** テーブル各行のデータセル。 */
-  rowData: "td",
-  /** 調教師リンク(href が /trainer/{id}/、title が調教師名)。 */
-  trainerLink: 'a[href*="/trainer/"]',
-} as const;
-
 /** 全戦績(ajax_horse_results)のセレクタ。 */
 export const HORSE_RESULTS_SELECTORS = {
   /** 戦績テーブル。 */
@@ -484,10 +470,6 @@ export const PATTERNS = {
    *   別の単語を誤って拾うことはない)。
    */
   fenceLetterToken: /(?:^|\s)([A-Z])(?:\s|$)/,
-  /** href から trainer_id を取り出す(プロフィール表: /trainer/01126/ 形式)。 */
-  trainerIdFromProfileHref: /\/trainer\/(\d+)/,
-  /** 括弧内の値を取り出す(例: 木村哲也 (美浦) → 美浦)。半角・全角括弧に対応。 */
-  parenContent: /[(（]\s*([^)）]+?)\s*[)）]/,
   /** 全戦績の距離表記(例: 芝1800 / ダ1700 / 障3000。m 表記なし)。 */
   courseAndDistanceCompact: /(芝|ダ|障)\s*(\d+)/,
   /** 開催表記を回次・会場・日目に分解する(例: 2福島2 → 2, 福島, 2)。 */

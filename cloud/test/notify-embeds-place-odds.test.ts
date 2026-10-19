@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { estimateFairPlaceOdds } from "../../packages/core/src/ev/place-odds-estimate";
-import { buildAnalysisNotificationEmbed, embedLength, ODDS_FIELD_NOTE, type CloudEmbed, type RaceLabel } from "../src/notify-embeds";
+import { buildAnalysisNotificationEmbed, ODDS_FIELD_NOTE, type CloudEmbed, type RaceLabel } from "../src/notify-embeds";
+import { embedLength } from "./support/embed-length";
 import { formatFairPlaceOdds } from "../src/place-odds-format";
 
 /**

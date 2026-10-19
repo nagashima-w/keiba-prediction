@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisDetail, AnalysisHorse, LegStyle } from "../client/api-analysis";
-import { mount, type DomDocument } from "../client/dom";
+import type { DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildFormation } from "../client/formation-model";
 import { buildRaceModel } from "../client/race";
 import { buildResultModel } from "../client/result";

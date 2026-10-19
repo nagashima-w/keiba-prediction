@@ -9,13 +9,11 @@ import type { AnalysisResult, AnalysisRow } from "../../src/analysis/analysis-ty
 import {
   BET_ALLOCATION_UNSET_NOTE,
   buildAllocationNotices,
-  CROSS_RACE_OVERBET_NOTE,
   evThresholdFootnote,
   formatAllocationSummary,
   NOT_DIVERSIFIED_NOTE,
   formatBetLabel,
   formatComboBetLabel,
-  KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
   probabilitySumWarning,
 } from "../../src/view/bet-allocation-view.js";
@@ -557,15 +555,7 @@ describe("buildAllocationNotices(注記の表示順: advisory→確率合計警�
   });
 });
 
-describe("固定注記3点(必ず表示。文言は数値込みで生成)", () => {
-  it("KELLY_CAP_EXPLANATION_NOTEはケリー基準の説明を含むこと", () => {
-    expect(KELLY_CAP_EXPLANATION_NOTE).toContain("ケリー基準");
-  });
-
-  it("CROSS_RACE_OVERBET_NOTEはレース横断オーバーベットの警告を含むこと", () => {
-    expect(CROSS_RACE_OVERBET_NOTE).toContain("レースごとに独立");
-  });
-
+describe("固定注記(EV閾値の脚注。文言は数値込みで生成)", () => {
   it("evThresholdFootnoteはEV閾値の数値を小数第2位で埋め込むこと", () => {
     expect(evThresholdFootnote(1.05)).toContain("1.05");
     expect(evThresholdFootnote(1)).toContain("1.00");

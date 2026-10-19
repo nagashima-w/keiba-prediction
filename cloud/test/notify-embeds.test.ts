@@ -2,26 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
-import {
-  buildAnalysisNotificationEmbed,
-  buildFailureEmbed,
-  buildManualSkipEmbed,
-  buildMinimalAnalysisEmbed,
-  buildSummaryEmbed,
-  CAP_TEXT,
-  embedLength,
-  EMBED_LIMITS,
-  failureText,
-  fitEmbed,
-  allocationBetRows,
-  allocationKindOf,
-  MARK_ORDER,
-  MANUAL_SKIP_TEXT,
-  NO_START_TIME_TEXT,
-  notificationText,
-  type CloudEmbed,
-  type RaceLabel,
-} from "../src/notify-embeds";
+import { buildAnalysisNotificationEmbed, buildFailureEmbed, buildManualSkipEmbed, buildMinimalAnalysisEmbed, buildSummaryEmbed, CAP_TEXT, EMBED_LIMITS, failureText, fitEmbed, allocationBetRows, allocationKindOf, MARK_ORDER, MANUAL_SKIP_TEXT, NO_START_TIME_TEXT, notificationText, type CloudEmbed, type RaceLabel } from "../src/notify-embeds";
+import { embedLength } from "./support/embed-length";
 import type { PlanProgress } from "../src/race-day-core";
 import { DISCORD_COLORS } from "../src/palette";
 import { estimatePlaceOddsForRace } from "../src/place-odds-view";

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { StoredAllocation, StoredAnalysis, StoredAnalysisHorse } from "../../packages/core/src/ev/analysis-store-types";
 import { parseAnalysisResponse, type AnalysisDetail } from "../client/api-analysis";
-import { mount, type DomDocument } from "../client/dom";
+import type { DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildResultModel } from "../client/result";
 import { renderScreen } from "../client/view";
 import type { VNode } from "../client/vnode";

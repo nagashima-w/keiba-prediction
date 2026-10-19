@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
-import { buildAnalysisNotificationEmbed, embedLength, type CloudEmbed, type RaceLabel } from "../src/notify-embeds";
+import { buildAnalysisNotificationEmbed, type CloudEmbed, type RaceLabel } from "../src/notify-embeds";
+import { embedLength } from "./support/embed-length";
 import { formatWinOdds, WIN_ODDS_DISPLAY_MAX } from "../src/win-odds-format";
 
 /**

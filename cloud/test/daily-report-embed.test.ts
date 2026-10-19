@@ -4,7 +4,8 @@ import { formatExpectedHits } from "../src/expected-format";
 import type { PeriodStats, RollingSummary } from "../src/period-stats";
 import { buildReportEmbed } from "../src/daily-report-embed";
 import { DISCORD_COLORS } from "../src/palette";
-import { EMBED_LIMITS, embedLength } from "../src/notify-embeds";
+import { EMBED_LIMITS } from "../src/notify-embeds";
+import { embedLength } from "./support/embed-length";
 
 /** Issue #235: Discord に送る日報の要約(embed)。上限を守り、リンクは基点があるときだけ付ける。 */
 

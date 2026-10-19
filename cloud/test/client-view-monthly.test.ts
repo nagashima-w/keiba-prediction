@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MonthlyDetail } from "../client/api-monthly";
-import { mount, type DomDocument } from "../client/dom";
+import type { DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildMonthlyModel, type MonthlyModelInput } from "../client/monthly-model";
 import { buildReportModel } from "../client/report-model";
 import { renderScreen } from "../client/view";

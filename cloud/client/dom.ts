@@ -138,11 +138,6 @@ function build(doc: DomDocument, node: VNode | string): unknown {
   return el;
 }
 
-/** root の中身を、VNode から作った 1 つの新しい要素に置き換える(積み増さない)。 */
-export function mount(doc: DomDocument, root: DomRoot, vnode: VNode): void {
-  root.replaceChildren(build(doc, vnode));
-}
-
 /**
  * 描画の関数を作る(Issue #186 段階1)。**直前に描いた木と JSON 直列化して同一なら、DOM を触らない**。
  * ポーリング(段階2)の再描画が、タップ中のボタン・日付ピッカー・フォーカスを壊さないための土台。

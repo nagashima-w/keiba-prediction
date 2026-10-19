@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TargetRace, TargetsData } from "../client/api-targets";
-import { mount, type DomDocument } from "../client/dom";
+import type { DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildListModel } from "../client/list";
 import { buildTargetsModel } from "../client/targets-model";
 import { renderScreen, type ViewActions } from "../client/view";

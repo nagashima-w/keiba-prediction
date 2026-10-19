@@ -103,7 +103,7 @@ export interface AnalyzeRaceDeps {
   readonly llm: LlmClient;
   /**
    * 補正の最大幅(prior からの絶対値)。省略時は parse-response 既定(MAX_ADJUST=0.10)。
-   * 呼び出し側は AnalyzerConfig.maxAdjust をそのまま渡せる。
+   * クラウド版は、クリップ幅の版(`clip-variants.ts` の `CLIP_VARIANTS`)から解決した値を渡す。
    */
   readonly maxAdjust?: number;
 }

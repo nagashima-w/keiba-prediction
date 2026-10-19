@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProposedSummaryView, VerifyOutcome, VerifyReportView } from "../client/api-verify";
-import { mount, type DomDocument } from "../client/dom";
+import type { DomDocument } from "../client/dom";
+import { mount } from "./support/dom-mount";
 import { buildListModel } from "../client/list";
 import { buildVerifyModel, type VerifyModelInput } from "../client/verify-model";
 import { renderScreen, type ViewActions } from "../client/view";

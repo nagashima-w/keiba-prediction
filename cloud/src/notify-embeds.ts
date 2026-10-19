@@ -96,15 +96,6 @@ function fitLines(lines: readonly string[], maxLen: number): string {
   return cut(`…ほか ${n} 件`, maxLen);
 }
 
-/** embed の長さ(Discord が全体の上限に数える部分: title・description・field の name と value)。 */
-export function embedLength(embed: CloudEmbed): number {
-  return (
-    (embed.title?.length ?? 0) +
-    (embed.description?.length ?? 0) +
-    (embed.fields ?? []).reduce((sum, f) => sum + f.name.length + f.value.length, 0)
-  );
-}
-
 /**
  * embed を Discord の上限に収める(AC-D4)。収まる入力は変えない。
  *  1. title 256・description 4096・field 25 個・field の name 256・value 1024 に収める(value は行単位で落として「…ほか N 件」)。

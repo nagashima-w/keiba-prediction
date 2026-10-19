@@ -10,9 +10,6 @@ import type {
   CalibrationBinView,
   PredictionMark,
   ProposedBetUnknownBetTypeView,
-  PromptVersionVerifyReportView,
-  RaceBreakdownHorseView,
-  RaceLedgerView,
   VerifyBetView,
   VerifyReportView,
   VerifyVenueFilter,
@@ -80,54 +77,6 @@ export function formatExclusionSummary(report: VerifyReportView): string {
   );
 }
 
-/**
- * 集計の除外内訳の補足(Issue #152 B)。リーク疑い・発走前後判定不可の除外が1件でもあるときだけ返し、
- * 0件なら null(呼び出し側は `!== null` で描画する。`formatUnknownBetTypeNotice` と同じ流儀)。
- */
-export function formatExclusionNote(report: VerifyReportView): string | null {
-  if (report.excludedLookaheadSuspectCount + report.excludedLookaheadUnknownCount === 0) {
-    return null;
-  }
-  return "一括分析(日付を選んで分析)で該当レースを分析し直すと集計に戻ります";
-}
-
-/**
- * 取込ボタンを出す(再取込が必要)か。
- * 結果が未取込、または着順は取れているが複勝払戻が未取込(確定直前など)なら true。
- * 後者は実配当への更新導線を残すため、取込済み表示でもボタンを出し続ける。
- *
- * 引数は hasResult・hasPayout のみの構造的部分型(検証画面UI統合。RaceLedgerViewが
- * この2フィールドを持つためそのまま渡せる。特定の型に依存させず判定ロジックを1箇所に保つ)。
- */
-export function needsImport(item: {
-  readonly hasResult: boolean;
-  readonly hasPayout: boolean;
-}): boolean {
-  return !item.hasResult || !item.hasPayout;
-}
-
-/**
- * 取込ボタンの文言。未取込は「結果を取り込む」、着順のみ取込(払戻待ち)は「再取込(払戻待ち)」。
- * 引数は hasResult のみの構造的部分型(needsImport と同じ理由)。
- */
-export function importButtonLabel(item: {
-  readonly hasResult: boolean;
-}): string {
-  return item.hasResult ? "再取込(払戻待ち)" : "結果を取り込む";
-}
-
-/**
- * レース一覧の行単位「取込」ボタンを無効化するか(Task#31 code-reviewer提案対応)。
- * その行自体が取込中の場合に加え、一括取込が実行中の場合も無効化する
- * (一括取込と同じレースへの行単位取込が競合して二重に保存されるのを防ぐため)。
- */
-export function isRowImportDisabled(
-  importing: boolean,
-  bulkImportRunning: boolean,
-): boolean {
-  return importing || bulkImportRunning;
-}
-
 /** 補正方向(raised/lowered/unchanged)を日本語ラベルにする(Task#26)。 */
 export function directionLabel(direction: AdjustmentDirection): string {
   switch (direction) {
@@ -181,78 +130,6 @@ export function markLabel(mark: PredictionMark | null): string {
  */
 export function promptVersionLabel(promptVersion: string | null): string {
   return promptVersion === null ? "版不明" : promptVersion;
-}
-
-/**
- * プロンプト版別比較(state.reportsByPromptVersion)に版不明(promptVersion=null)グループが
- * 含まれるか(Task#33)。computeVerifyReportByPromptVersion(core)は分析が1件以上存在する版のみを
- * グループとして返す(空グループは作られない)ため、この判定はそのまま「削除対象の分析が存在するか」
- * の判定を兼ねる。削除ボタンの表示/有効化条件として使う。
- */
-export function hasUnknownPromptVersionGroup(
-  reports: readonly PromptVersionVerifyReportView[],
-): boolean {
-  return reports.some((r) => r.promptVersion === null);
-}
-
-/**
- * 版不明(promptVersion=null)グループに属する分析の総件数(Task#33)。
- * 削除確認ダイアログに表示する「版不明の分析N件」の N を、追加のIPC往復無しで
- * 既に読み込み済みの版別レポートから求める。
- *
- * VerifyReportView の6つの内訳(集計対象・結果未取込で除外・旧分析除外・推定EVのため除外・
- * リーク疑いのため除外・発走前後を判定できず除外)はその版グループの分析集合を余さず分割する
- * (selectIncludedAnalyses、core/ev/verify.ts)ため、6つの合計がその版(=prompt_version IS NULL)の
- * analyses 総数と一致する(AnalysisStore.deleteAnalysesWithUnknownPromptVersion が実際に削除する
- * 件数と同じ母集団)。リーク疑いの除外(Issue #152)は表示上の集計から外すだけで、保存された行は
- * 削除対象のままなので、除外した件数も含めなければ確認ダイアログの件数が実際より少なくなる。
- * 版不明グループが無ければ0(削除対象なし)。
- */
-export function unknownPromptVersionAnalysisCount(
-  reports: readonly PromptVersionVerifyReportView[],
-): number {
-  const unknownGroup = reports.find((r) => r.promptVersion === null);
-  if (unknownGroup === undefined) {
-    return 0;
-  }
-  const { report } = unknownGroup;
-  return (
-    report.includedAnalysisCount +
-    report.excludedAnalysisCount +
-    report.supersededAnalysisCount +
-    report.excludedEstimatedCount +
-    report.excludedLookaheadSuspectCount +
-    report.excludedLookaheadUnknownCount
-  );
-}
-
-/**
- * 「版不明」の削除対象の説明(Task#33 code-reviewer指摘対応)。
- * prompt_version IS NULL は「版記録導入前(Task#27より前)の旧データ」と「APIキー未設定でLLMを
- * 使わずpriorをそのまま採用した現行分析」の両方を含み、DB上は区別できない(AnalysisStore.
- * deleteAnalysesWithUnknownPromptVersion のJSDoc参照)。確認・完了メッセージの両方で同じ説明を使い、
- * 削除対象の範囲をユーザーに明確に伝える。
- */
-const UNKNOWN_PROMPT_VERSION_DESCRIPTION =
-  "版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)";
-
-/**
- * 版不明分析の削除確認ダイアログのメッセージ(Task#33 code-reviewer指摘対応)。
- * 「取り消せません」という不可逆性の明示、削除対象の説明(旧データ+LLM未使用分析)、
- * 削除件数(分析N件+関連馬データ)を必ず含める。件数は呼び出し元が既に読み込み済みの版別レポート
- * から算出するため、押下時点のDB最新状態とズレうる(実削除は常にDB最新に対して行われる。
- * unknownPromptVersionAnalysisCount のコメント参照)。そのため「画面表示時点」の概算である旨を明記する。
- */
-export function deleteUnknownPromptVersionConfirmMessage(count: number): string {
-  return `取り消せません。${UNKNOWN_PROMPT_VERSION_DESCRIPTION}${count}件(画面表示時点)と関連馬データを削除します。よろしいですか?`;
-}
-
-/**
- * 版不明分析の削除完了フィードバックメッセージ(Task#33 code-reviewer指摘対応)。
- * 実際に削除された件数(IPC戻り値。DB最新に対する正確な件数)を、削除対象の説明とともに表示する。
- */
-export function deleteUnknownPromptVersionResultMessage(deletedCount: number): string {
-  return `${UNKNOWN_PROMPT_VERSION_DESCRIPTION}${deletedCount}件を削除しました。`;
 }
 
 /** 検証画面の地域フィルタ(全体/中央のみ/地方のみ)の表示ラベル(Task#32)。 */
@@ -323,108 +200,4 @@ export function promptVersionCalibrationHeading(
   additionalInstructions: readonly (string | null)[],
 ): string {
   return `${promptVersionLabel(promptVersion)} (追加指示: ${additionalInstructionsSummary(additionalInstructions)})`;
-}
-
-/** YYYYMMDD形式かどうか(8桁数字)。 */
-function isYyyymmdd(value: string): boolean {
-  return /^[0-9]{8}$/.test(value);
-}
-
-/**
- * 開催日(YYYYMMDD)をYYYY/MM/DDに整形する(Task#34)。
- * null(日付不明。旧データ・選択済み開催日が渡らなかった分析)は「日付不明」。
- * YYYYMMDD形式でない値は防御的に素通しで表示する(DB異常値でも画面が壊れないように)。
- */
-export function formatKaisaiDate(kaisaiDate: string | null): string {
-  if (kaisaiDate === null) {
-    return "日付不明";
-  }
-  if (!isYyyymmdd(kaisaiDate)) {
-    return kaisaiDate;
-  }
-  return `${kaisaiDate.slice(0, 4)}/${kaisaiDate.slice(4, 6)}/${kaisaiDate.slice(6, 8)}`;
-}
-
-/**
- * レース一覧統合の見出し(会場名・R番号・開催日の3点)。
- * 例: "東京 11R (2026/07/08)"。開催日不明は formatKaisaiDate の「日付不明」を含める。
- */
-export function raceBreakdownHeading(
-  input: Pick<RaceLedgerView, "venueName" | "raceNumber" | "kaisaiDate">,
-): string {
-  return `${input.venueName} ${input.raceNumber}R (${formatKaisaiDate(input.kaisaiDate)})`;
-}
-
-/**
- * 検証画面: レース一覧統合(旧「分析履歴」「レース別予実」を統合したレースID単位の折りたたみリスト)の
- * 結果ステータス表示。
- * - hasResult=false(結果未取込) → 「未取込」
- * - hasResult=true かつ hasPayout=false(着順のみ取込・複勝払戻は未確定) → 「未確定」
- * - hasResult=true かつ hasPayout=true(着順・払戻とも取込済み) → 「取込済」
- * 判定は needsImport と同じ hasResult/hasPayout の2値に基づく
- * (「着順のみ(払戻待ち)」の既存概念を「未確定」という短いラベルで表す)。
- */
-export function raceLedgerStatusLabel(entry: {
-  readonly hasResult: boolean;
-  readonly hasPayout: boolean;
-}): string {
-  if (!entry.hasResult) {
-    return "未取込";
-  }
-  return entry.hasPayout ? "取込済" : "未確定";
-}
-
-/**
- * 検証画面: レース一覧統合の見出しに出すEVプラス数(印付け・EV判定が効いた頭数)。
- * horses配列から都度数える(旧AnalysisHistoryItemのpositiveCountのような事前集計フィールドを
- * RaceLedgerViewには持たせず、常にhorsesを単一の情報源とする)。
- */
-export function raceLedgerPositiveCount(
-  horses: readonly RaceBreakdownHorseView[],
-): number {
-  return horses.filter((h) => h.isPositive).length;
-}
-
-/** 実着順の表示整形(Task#34)。null(着順不明。中止・除外・結果に馬番が無い)は「不明」。 */
-export function formatFinishPosition(finishPosition: number | null): string {
-  return finishPosition === null ? "不明" : `${finishPosition}着`;
-}
-
-/**
- * 複勝的中の有無の表示整形(Task#34)。
- * null(finishPositionが着順不明で判定不能)は「-」。true/falseはそれぞれ「的中」「不的中」。
- */
-export function placedLabel(isPlaced: boolean | null): string {
-  if (isPlaced === null) {
-    return "-";
-  }
-  return isPlaced ? "的中" : "不的中";
-}
-
-/**
- * 払戻算出根拠(実配当/近似)の表示整形(Task#34)。
- * null(賭けていない・不的中で払戻が発生していない)は「-」。
- */
-export function payoutSourceLabel(
-  source: "actual" | "approximate" | null,
-): string {
-  if (source === null) {
-    return "-";
-  }
-  return source === "actual" ? "実配当" : "近似";
-}
-
-/**
- * レース一覧の絞り込み結果件数表示(検索/絞り込み機能)。
- * shownCountには表示中の件数(Task#25以降は絞り込み未入力時も含めて旧 exe の VerifyView(#287 で削除。3c1664e まで)が実際に描画した
- * 件数=displayedRaceLedger.lengthを渡す)を受け取り、「全N件中M件表示」の形式で返す。
- * 絞り込み未入力(=一覧を表示しない)なら「全N件中0件表示」、該当0件の絞り込み結果も
- * 同様に「全N件中0件表示」になる(両者の穏やかな案内文の出し分けはUI側(旧 exe の VerifyView)が担った。
- * この関数は件数表示のみを担う)。
- */
-export function raceLedgerFilterSummary(
-  totalCount: number,
-  shownCount: number,
-): string {
-  return `全${totalCount}件中${shownCount}件表示`;
 }

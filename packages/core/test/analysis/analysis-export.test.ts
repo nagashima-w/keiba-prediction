@@ -1,28 +1,15 @@
 /**
- * analysis-export.ts(分析データのエクスポート・第一版)のテスト(GitHub Issue#10)。
+ * analysis-export.ts(レース情報スナップショット)のテスト(GitHub Issue#10・#393)。
  *
- * electron・IOに一切依存しない純関数(buildRaceSnapshot・buildAnalysisExportDocument・
- * serializeAnalysisExportJson・serializeAnalysisExportCsv・pickLatestAnalysis)を検証する。
- * 手本は log-export.test.ts 相当の純関数テスト流儀。
+ * electron・IOに一切依存しない純関数(buildRaceSnapshot・toSafeRaceSnapshot)を検証する。
+ * Issue #393(#390 R-2)で、旧 exe の分析エクスポート(buildAnalysisExportDocument・serializeAnalysisExportJson・
+ * serializeAnalysisExportCsv ほか)とそのテストを削除した。そのテストが間接的に固定していた
+ * `toSafeRaceSnapshot` の防御的復元(破損・旧形式・新形式)は、末尾の describe で直接固定する。
  */
 
 import { describe, expect, it } from "vitest";
-import type {
-  ComboOddsFetchOutcome,
-  RaceData,
-  StoredAnalysis,
-} from "../../src/index.js";
-
-import {
-  buildAnalysisExportDocument,
-  buildDefaultAnalysisExportFileName,
-  buildRaceSnapshot,
-  deriveCsvPathFromJsonPath,
-  pickLatestAnalysis,
-  serializeAnalysisExportCsv,
-  serializeAnalysisExportJson,
-  type BuildAnalysisExportInput,
-} from "../../src/analysis/analysis-export.js";
+import type { ComboOddsFetchOutcome, RaceData } from "../../src/index.js";
+import { buildRaceSnapshot, toSafeRaceSnapshot } from "../../src/analysis/analysis-export.js";
 
 /** テスト用の最小 RaceData を組み立てる。 */
 function makeRaceData(overrides: Partial<RaceData> = {}): RaceData {
@@ -139,67 +126,6 @@ describe("makeComboOddsFetchOutcome(テストヘルパーの自己検証)", () =
     expect(failed.diagnostics.obtainedComboCount).toBe(0);
   });
 });
-
-/** テスト用の最小 StoredAnalysis を組み立てる。 */
-function makeStoredAnalysis(overrides: Partial<StoredAnalysis> = {}): StoredAnalysis {
-  return {
-    id: 42,
-    raceId: "202605020811",
-    analyzedAt: "2026-07-24T09:05:00.000Z",
-    evEstimated: false,
-    promptVersion: "v1",
-    additionalInstruction: null,
-    kaisaiDate: "20260724",
-    model: "claude-sonnet-4-6",
-    rawResponse: '{"horses":[]}',
-    raceSnapshot: buildRaceSnapshot(makeRaceData()),
-    // 先読みリーク遮断の印(Issue #152)。エクスポートでは使わないので記録なし(null)にしておく。
-    historyCutoffDate: null,
-    promptLookaheadGuarded: null,
-    horses: [
-      {
-        umaban: 1,
-        prior: 0.4,
-        adjustedProb: 0.45,
-        placeOddsMin: 1.2,
-        ev: 0.9,
-        isPositive: false,
-        contributions: null,
-        mark: "◎",
-        reason: "調教良化",
-        highlights: [],
-        concerns: [],
-      },
-      {
-        umaban: 2,
-        prior: 0.2,
-        adjustedProb: 0.18,
-        placeOddsMin: 2.0,
-        ev: 1.2,
-        isPositive: true,
-        contributions: null,
-        mark: null,
-        reason: null,
-        highlights: [],
-        concerns: [],
-      },
-    ],
-    ...overrides,
-  };
-}
-
-function makeInput(overrides: Partial<BuildAnalysisExportInput> = {}): BuildAnalysisExportInput {
-  return {
-    analysis: makeStoredAnalysis(),
-    venueName: "東京",
-    results: undefined,
-    resultDetail: undefined,
-    toolName: "競馬期待値分析ツール",
-    toolVersion: "1.0.0",
-    exportedAt: "2026-07-24T10:00:00.000Z",
-    ...overrides,
-  };
-}
 
 describe("buildRaceSnapshot(取得したレース情報のスナップショット化)", () => {
   /**
@@ -825,241 +751,88 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
   });
 });
 
-describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSONを組み立てる)", () => {
-  it("schemaVersion:1と、meta・race・horses・results・rawLlmResponseを組み立てること", () => {
-    const doc = buildAnalysisExportDocument(
-      makeInput({
-        results: [
-          { umaban: 1, finishPosition: 1, placePayout: 120 },
-          { umaban: 2, finishPosition: 4, placePayout: null },
-        ],
-        resultDetail: {
-          courseType: "芝",
-          horses: [
-            { umaban: 1, finishPosition: 1, passing: [2, 1, 1, 1], last3f: 34.5 },
-            { umaban: 2, finishPosition: 4, passing: [5, 5, 5, 4], last3f: 35.8 },
-          ],
+/**
+ * toSafeRaceSnapshot(防御的復元)。Issue #393 で、旧 `buildAnalysisExportDocument` 経由の間接テスト
+ * (破損・旧レコード・組合せオッズの新旧形式・枠連)を、この関数の直接テストへ移した。
+ * 旧テストが固定していた点(例外を投げない・欠損はnull・新フィールドをraceへ漏らさない・枠連の有無で復元結果が変わらない)は、
+ * 出力 `{ race, horsesByUmaban }` に対して同じ強さで固定する。
+ */
+describe("toSafeRaceSnapshot(防御的復元。旧レコード・破損データ・新形式)", () => {
+  const ALL_NULL_RACE = {
+    raceName: null,
+    courseType: null,
+    distance: null,
+    weather: null,
+    trackCondition: null,
+    startTime: null,
+    fence: null,
+    oddsStatus: null,
+    officialDatetime: null,
+  };
+
+  it.each([
+    ["null(列追加前の旧レコード)", null],
+    ["undefined", undefined],
+    ["文字列(オブジェクトでない)", "x"],
+    ["数値(オブジェクトでない)", 42],
+    ["スキーマ不正なオブジェクト(破損JSON由来)", { unexpected: "shape" }],
+  ] as const)("%s は例外を投げず、レース情報は全項目null・馬は0頭になること", (_name, raw) => {
+    const safe = toSafeRaceSnapshot(raw);
+    expect(safe.race).toEqual(ALL_NULL_RACE);
+    expect(Object.keys(safe.race)).toHaveLength(9); // 前提: 全項目を比べている(空のオブジェクトで自明に一致していない)
+    expect(safe.horsesByUmaban.size).toBe(0);
+    expect(safe.horsesByUmaban.get(1)).toBeUndefined();
+  });
+
+  it("組合せオッズのキー自体が無い旧形式でも、あるだけの項目は復元し、無い項目はnullになること", () => {
+    // 機能D-2c第3段より前に保存された典型的なraceSnapshot(新フィールドのキー自体が無い)。
+    const legacyRaw = {
+      race: { raceName: "旧レコードのレース", courseType: "芝", distance: 1600 },
+      horses: [{ umaban: 1, name: "旧レコードの馬" }],
+    };
+    const safe = toSafeRaceSnapshot(legacyRaw);
+    expect(safe.race.raceName).toBe("旧レコードのレース");
+    expect(safe.race.courseType).toBe("芝");
+    expect(safe.race.distance).toBe(1600);
+    expect(safe.race.weather).toBeNull(); // 無い項目はnull
+    const horse = safe.horsesByUmaban.get(1)!;
+    expect(horse.name).toBe("旧レコードの馬");
+    expect(horse.jockeyName).toBeNull(); // 無い項目はnull
+    expect(horse.oikiriCritic).toBeNull();
+  });
+
+  it("wideCombo/comboOddsを持つ新形式のスナップショットでも例外を投げず、馬・レースを復元し、race に新フィールドが漏れないこと", () => {
+    const stored = buildRaceSnapshot(
+      makeRaceData({
+        odds: {
+          officialDatetime: "2026-07-24 09:00:00",
+          oddsStatus: "result",
+          win: { 1: { odds: 2.5, ninki: 1 } },
+          place: { 1: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 } },
+          wideCombo: { "1-2": 3.4 },
+        },
+        meta: {
+          fetchedAt: "2026-07-24T09:00:00.000Z",
+          oddsFetchedAt: "2026-07-24T09:00:00.000Z",
+          warnings: [],
+          comboOdds: { wide: makeComboOddsFetchOutcome("available") },
         },
       }),
     );
-    expect(doc.schemaVersion).toBe(1);
-    expect(doc.meta).toEqual({
-      toolName: "競馬期待値分析ツール",
-      toolVersion: "1.0.0",
-      exportedAt: "2026-07-24T10:00:00.000Z",
-      analysisId: 42,
-      analyzedAt: "2026-07-24T09:05:00.000Z",
-      kaisaiDate: "20260724",
-      promptVersion: "v1",
-      additionalInstruction: null,
-      model: "claude-sonnet-4-6",
-      evEstimated: false,
-    });
-    expect(doc.race).toEqual({
-      raceId: "202605020811",
-      venueName: "東京",
-      raceName: "テストステークス",
-      courseType: "芝",
-      distance: 1600,
-      weather: "晴",
-      trackCondition: "良",
-      startTime: "15:35",
-      fence: "A",
-      oddsStatus: "result",
-      officialDatetime: "2026-07-24 09:00:00",
-    });
-    const h1 = doc.horses.find((h) => h.umaban === 1)!;
-    expect(h1).toEqual({
-      umaban: 1,
-      wakuban: 1,
-      name: "アルファ",
-      sex: "牡",
-      age: 4,
-      kinryo: 57,
-      jockeyName: "テスト騎手",
-      trainerName: "テスト調教師",
-      bodyWeight: 480,
-      winOdds: 2.5,
-      popularity: 1,
-      placeOddsMin: 1.2,
-      oikiriCritic: "動き良好",
-      oikiriRank: "A",
-      prior: 0.4,
-      adjustedProb: 0.45,
-      ev: 0.9,
-      isPositive: false,
-      mark: "◎",
-      reason: "調教良化",
-      // Issue #199: 強調材料・懸念事項のキーが馬ごとに出る(このフィクスチャは項目なし = [])。既存キーの値は変わらない。
-      highlights: [],
-      concerns: [],
-    });
-    expect(doc.results).toEqual([
-      { umaban: 1, finishPosition: 1, placePayout: 120, passing: [2, 1, 1, 1], last3f: 34.5 },
-      { umaban: 2, finishPosition: 4, placePayout: null, passing: [5, 5, 5, 4], last3f: 35.8 },
-    ]);
-    expect(doc.rawLlmResponse).toBe('{"horses":[]}');
+    // 前提固定: このスナップショットには実際に新フィールドが載っていること。
+    expect(stored.wideCombo).toEqual({ "1-2": 3.4 });
+    expect(stored.comboOdds).toBeDefined();
+
+    // 保存時と同じく JSON を経由して復元する。
+    const safe = toSafeRaceSnapshot(JSON.parse(JSON.stringify(stored)) as unknown);
+    expect(safe.race.raceName).toBe("テストステークス");
+    expect(safe.horsesByUmaban.get(1)!.name).toBe("アルファ");
+    expect("wideCombo" in safe.race).toBe(false);
+    expect("trioCombo" in safe.race).toBe(false);
+    expect("comboOdds" in safe.race).toBe(false);
   });
 
-  it("欠損はキーを省略せず明示nullで表すこと(placeOddsMin/evなど)", () => {
-    const doc = buildAnalysisExportDocument(
-      makeInput({
-        analysis: makeStoredAnalysis({
-          horses: [
-            {
-              umaban: 1,
-              prior: 0.3,
-              adjustedProb: 0.3,
-              placeOddsMin: null,
-              ev: null,
-              isPositive: false,
-              contributions: null,
-              mark: null,
-              reason: null,
-              highlights: [],
-              concerns: [],
-            },
-          ],
-        }),
-      }),
-    );
-    const h1 = doc.horses[0]!;
-    expect("placeOddsMin" in h1).toBe(true);
-    expect(h1.placeOddsMin).toBeNull();
-    expect("ev" in h1).toBe(true);
-    expect(h1.ev).toBeNull();
-    expect("mark" in h1).toBe(true);
-    expect(h1.mark).toBeNull();
-    expect("reason" in h1).toBe(true);
-    expect(h1.reason).toBeNull();
-  });
-
-  it("LLMスキップ時(model/rawResponse/reasonがnull)は偽値を混入させずnullのまま出力すること", () => {
-    const doc = buildAnalysisExportDocument(
-      makeInput({
-        analysis: makeStoredAnalysis({
-          model: null,
-          rawResponse: null,
-          horses: [
-            {
-              umaban: 1,
-              prior: 0.4,
-              adjustedProb: 0.4,
-              placeOddsMin: 1.2,
-              ev: 0.9,
-              isPositive: false,
-              contributions: null,
-              mark: null,
-              reason: null,
-              highlights: [],
-              concerns: [],
-            },
-          ],
-        }),
-      }),
-    );
-    expect(doc.meta.model).toBeNull();
-    expect(doc.rawLlmResponse).toBeNull();
-    expect(doc.horses[0]!.reason).toBeNull();
-  });
-
-  it("旧レコード(raceSnapshot/model/rawResponseが全てnull)でも例外を投げず出力すること(スナップショット由来項目はnull)", () => {
-    const doc = buildAnalysisExportDocument(
-      makeInput({
-        analysis: makeStoredAnalysis({
-          model: null,
-          rawResponse: null,
-          raceSnapshot: null,
-          horses: [
-            {
-              umaban: 1,
-              prior: 0.4,
-              adjustedProb: 0.4,
-              placeOddsMin: 1.2,
-              ev: 0.9,
-              isPositive: false,
-              contributions: null,
-              mark: null,
-              reason: null,
-              highlights: [],
-              concerns: [],
-            },
-          ],
-        }),
-      }),
-    );
-    expect(doc.race.raceName).toBeNull();
-    expect(doc.race.courseType).toBeNull();
-    expect(doc.race.oddsStatus).toBeNull();
-    const h1 = doc.horses[0]!;
-    expect(h1.name).toBeNull();
-    expect(h1.jockeyName).toBeNull();
-    expect(h1.oikiriCritic).toBeNull();
-    // analysis_horses由来の項目(prior/adjustedProb等)は旧レコードでも保持される。
-    expect(h1.prior).toBe(0.4);
-    expect(h1.adjustedProb).toBe(0.4);
-  });
-
-  it("破損したraceSnapshot(スキーマ不正なJSON由来のunknown値)でも例外を投げずスナップショット由来項目をnullにすること", () => {
-    const doc = buildAnalysisExportDocument(
-      makeInput({
-        analysis: makeStoredAnalysis({ raceSnapshot: { unexpected: "shape" } }),
-      }),
-    );
-    expect(doc.race.raceName).toBeNull();
-    expect(doc.horses[0]!.name).toBeNull();
-  });
-
-  describe("組合せオッズ(機能D-2c第3段・Issue #28)を持たない旧レコード・持つ新レコードの復元(受け入れ条件8)", () => {
-    it("wideCombo/trioCombo/comboOddsキー自体が無い旧形式のraceSnapshotでも例外を投げず、他の項目は復元できること", () => {
-      // 機能D-2c第3段より前に保存された典型的なraceSnapshot(新フィールドのキー自体が無い)。
-      const legacyRaw = {
-        race: { raceName: "旧レコードのレース", courseType: "芝", distance: 1600 },
-        horses: [{ umaban: 1, name: "旧レコードの馬" }],
-      };
-      const doc = buildAnalysisExportDocument(
-        makeInput({
-          analysis: makeStoredAnalysis({ raceSnapshot: legacyRaw }),
-        }),
-      );
-      expect(doc.race.raceName).toBe("旧レコードのレース");
-      expect(doc.horses[0]!.name).toBe("旧レコードの馬");
-    });
-
-    it("wideCombo/trioCombo/comboOddsを持つ新形式のraceSnapshotを渡しても例外を投げず、エクスポートJSONへは新フィールドが漏れないこと(G2: 第3段では露出しない)", () => {
-      const newFormatRaceSnapshot = buildRaceSnapshot(
-        makeRaceData({
-          odds: {
-            officialDatetime: "2026-07-24 09:00:00",
-            oddsStatus: "result",
-            win: { 1: { odds: 2.5, ninki: 1 } },
-            place: { 1: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 } },
-            wideCombo: { "1-2": 3.4 },
-          },
-          meta: {
-            fetchedAt: "2026-07-24T09:00:00.000Z",
-            oddsFetchedAt: "2026-07-24T09:00:00.000Z",
-            warnings: [],
-            comboOdds: { wide: makeComboOddsFetchOutcome("available") },
-          },
-        }),
-      );
-      // 前提固定: このraceSnapshotには実際に新フィールドが載っていること。
-      expect(newFormatRaceSnapshot.wideCombo).toEqual({ "1-2": 3.4 });
-
-      const doc = buildAnalysisExportDocument(
-        makeInput({
-          analysis: makeStoredAnalysis({ raceSnapshot: newFormatRaceSnapshot }),
-        }),
-      );
-      expect(doc.race.raceName).toBe("テストステークス");
-      expect("wideCombo" in doc.race).toBe(false);
-      expect("trioCombo" in doc.race).toBe(false);
-      expect("comboOdds" in doc.race).toBe(false);
-    });
-  });
-
-  it("枠連(bracketQuinellaCombo。Issue #148)を持つ新形式のraceSnapshotを渡しても例外を投げず、他の項目は復元でき、エクスポートJSONへは漏れないこと(旧形式=枠連キー無しでも同じ)", () => {
+  it("枠連(bracketQuinellaCombo。Issue #148)の有無で、復元されるレース・馬の内容が変わらず、race へ漏れないこと(旧形式=枠連キー無しでも同じ)", () => {
     const baseOdds = {
       officialDatetime: "2026-07-24 09:00:00",
       oddsStatus: "result" as const,
@@ -1069,420 +842,27 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
     const withBracket = buildRaceSnapshot(
       makeRaceData({ odds: { ...baseOdds, bracketQuinellaCombo: { "0407": 31.5 } } }),
     );
-    // 前提固定: このraceSnapshotには実際に枠連が載っていること。
+    // 前提固定: このスナップショットには実際に枠連が載っていること。
     expect(withBracket.bracketQuinellaCombo).toEqual({ "0407": 31.5 });
     // 枠連以外は同一のオッズで、枠連キーだけ無い旧形式相当(キー無し)。
     const withoutBracket = buildRaceSnapshot(makeRaceData({ odds: baseOdds }));
     expect(withoutBracket.bracketQuinellaCombo).toBeUndefined();
 
-    const docWith = buildAnalysisExportDocument(
-      makeInput({ analysis: makeStoredAnalysis({ raceSnapshot: withBracket }) }),
-    );
-    const docWithout = buildAnalysisExportDocument(
-      makeInput({ analysis: makeStoredAnalysis({ raceSnapshot: withoutBracket }) }),
-    );
-    expect(docWith.race.raceName).toBe("テストステークス");
-    expect("bracketQuinellaCombo" in docWith.race).toBe(false);
-    // 枠連の有無でエクスポートされるレース・馬の内容が変わらないこと。
-    expect(docWith.race).toEqual(docWithout.race);
-    expect(docWith.horses).toEqual(docWithout.horses);
+    const safeWith = toSafeRaceSnapshot(JSON.parse(JSON.stringify(withBracket)) as unknown);
+    const safeWithout = toSafeRaceSnapshot(JSON.parse(JSON.stringify(withoutBracket)) as unknown);
+    expect(safeWith.race.raceName).toBe("テストステークス");
+    expect("bracketQuinellaCombo" in safeWith.race).toBe(false);
+    expect(safeWith.race).toEqual(safeWithout.race);
+    expect(safeWith.horsesByUmaban.get(1)).toEqual(safeWithout.horsesByUmaban.get(1));
+    expect(safeWith.horsesByUmaban.size).toBe(2); // 前提: 馬を比べている(空のMapで自明に一致していない)
   });
 
-  it("結果未取込(results/resultDetailともにundefined)ならresultsは空配列になること", () => {
-    const doc = buildAnalysisExportDocument(makeInput());
-    expect(doc.results).toEqual([]);
-  });
-
-  it("非数値着順(finishPosition=null。中止・除外)もそのままnullで出力すること", () => {
-    const doc = buildAnalysisExportDocument(
-      makeInput({
-        results: [{ umaban: 1, finishPosition: null, placePayout: null }],
-        resultDetail: {
-          courseType: null,
-          horses: [{ umaban: 1, finishPosition: null, passing: [], last3f: null }],
-        },
-      }),
-    );
-    expect(doc.results).toEqual([
-      { umaban: 1, finishPosition: null, placePayout: null, passing: [], last3f: null },
-    ]);
-  });
-
-  it("yoso(推定EV)はevEstimated:trueかつplaceOddsMinがnullのまま出力すること", () => {
-    const doc = buildAnalysisExportDocument(
-      makeInput({
-        analysis: makeStoredAnalysis({
-          evEstimated: true,
-          horses: [
-            {
-              umaban: 1,
-              prior: 0.4,
-              adjustedProb: 0.4,
-              placeOddsMin: null,
-              ev: 1.5,
-              isPositive: true,
-              contributions: null,
-              mark: null,
-              reason: null,
-              highlights: [],
-              concerns: [],
-            },
-          ],
-        }),
-      }),
-    );
-    expect(doc.meta.evEstimated).toBe(true);
-    expect(doc.horses[0]!.placeOddsMin).toBeNull();
-  });
-
-  it("秘密安全性: 出力ドキュメントに許可されたキー以外(apiKey・webhook・プロンプト本文相当)が混入しないこと", () => {
-    const doc = buildAnalysisExportDocument(makeInput());
-    expect(Object.keys(doc).sort()).toEqual(
-      ["schemaVersion", "meta", "race", "horses", "results", "rawLlmResponse"].sort(),
-    );
-    expect(Object.keys(doc.meta).sort()).toEqual(
-      [
-        "toolName",
-        "toolVersion",
-        "exportedAt",
-        "analysisId",
-        "analyzedAt",
-        "kaisaiDate",
-        "promptVersion",
-        "additionalInstruction",
-        "model",
-        "evEstimated",
-      ].sort(),
-    );
-    // rawLlmResponseは「LLMのモデル出力」のみで、プロンプト本文・apiKeyの文字列は
-    // buildAnalysisExportDocumentの入力(BuildAnalysisExportInput)自体に存在しないため、
-    // 関数のシグネチャ上構造的に混入しえない(このテストは入力に無い秘密が出力にも無いことの確認)。
-    const json = serializeAnalysisExportJson(doc);
-    expect(json).not.toContain("apiKey");
-    expect(json).not.toContain("webhook");
-    expect(json).not.toContain("Webhook");
-  });
-});
-
-describe("serializeAnalysisExportJson(JSON文字列化)", () => {
-  it("schemaVersion=1を含むJSON文字列を返し、パースするとドキュメントと一致すること", () => {
-    const doc = buildAnalysisExportDocument(makeInput());
-    const json = serializeAnalysisExportJson(doc);
-    expect(JSON.parse(json)).toEqual(doc);
-    expect(json).toContain('"schemaVersion": 1');
-  });
-});
-
-describe("serializeAnalysisExportCsv(馬別CSV文字列化・RFC4180準拠)", () => {
-  it("ヘッダ行付き・1行1頭で出力し、結果があればfinishPosition/placePayout/last3f/passing列を結合すること(code-reviewer提案対応: passing/last3f追加)", () => {
-    const doc = buildAnalysisExportDocument(
-      makeInput({
-        results: [{ umaban: 1, finishPosition: 1, placePayout: 120 }],
-        resultDetail: {
-          courseType: "芝",
-          horses: [{ umaban: 1, finishPosition: 1, passing: [2, 3, 4, 3], last3f: 34.5 }],
-        },
-      }),
-    );
-    const csv = serializeAnalysisExportCsv(doc);
-    const lines = csv.split("\r\n").filter((l) => l.length > 0);
-    // ヘッダ行 + 2頭分。
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("umaban");
-    expect(lines[0]).toContain("finishPosition");
-    expect(lines[0]).toContain("placePayout");
-    expect(lines[0]).toContain("last3f");
-    expect(lines[0]).toContain("passing");
-    const header = lines[0]!.split(",");
-    const row1 = parseCsvLine(lines[1]!);
-    expect(row1[0]).toBe("1"); // umaban
-    expect(lines[1]).toContain("120"); // placePayout
-    expect(row1[header.indexOf("last3f")]).toBe("34.5");
-    // passingは配列を "2-3-4-3" のようにハイフン連結した文字列にすること。
-    expect(row1[header.indexOf("passing")]).toBe("2-3-4-3");
-  });
-
-  it("欠損値は空セルとして出力すること(last3f/passingを含む)", () => {
-    const doc = buildAnalysisExportDocument(makeInput());
-    const csv = serializeAnalysisExportCsv(doc);
-    const lines = csv.split("\r\n").filter((l) => l.length > 0);
-    // 2頭目(reason=null・placeOddsMin=2.0はあるがfinishPositionは結果未取込でnull)。
-    const header = lines[0]!.split(",");
-    const finishPositionIdx = header.indexOf("finishPosition");
-    const row2 = parseCsvLine(lines[2]!);
-    expect(row2[finishPositionIdx]).toBe("");
-    expect(row2[header.indexOf("last3f")]).toBe("");
-    // passingが空配列(結果未取込)のときも空セルにすること(要素0件のハイフン連結="" の意味を明示)。
-    expect(row2[header.indexOf("passing")]).toBe("");
-  });
-
-  it("RFC4180エスケープ: 馬名にカンマ・ダブルクオート・改行を含む場合は正しくクオートされること", () => {
-    const doc = buildAnalysisExportDocument(
-      makeInput({
-        analysis: makeStoredAnalysis({
-          raceSnapshot: buildRaceSnapshot(
-            makeRaceData({
-              horses: [
-                {
-                  shutuba: {
-                    wakuban: 1,
-                    umaban: 1,
-                    name: '馬名,"引用",改行\n入り',
-                    horseId: "2020100001" as never,
-                    sex: "牡",
-                    age: 4,
-                    kinryo: 57,
-                    jockeyName: "騎手",
-                    jockeyId: "1",
-                    stableLocation: "美浦",
-                    trainerName: "調教師",
-                    trainerId: "1",
-                    bodyWeight: null,
-                  },
-                  results: [],
-                  oikiri: null,
-                },
-              ],
-            }),
-          ),
-          horses: [
-            {
-              umaban: 1,
-              prior: 0.3,
-              adjustedProb: 0.3,
-              placeOddsMin: null,
-              ev: null,
-              isPositive: false,
-              contributions: null,
-              mark: null,
-              reason: 'reasonにも,"引用"を含む',
-              highlights: [],
-              concerns: [],
-            },
-          ],
-        }),
-      }),
-    );
-    const csv = serializeAnalysisExportCsv(doc);
-    const header = csv.split("\r\n")[0]!.split(",");
-    const nameIdx = header.indexOf("name");
-    const reasonIdx = header.indexOf("reason");
-    const rows = parseCsvRecords(csv);
-    const dataRow = rows[1]!;
-    expect(dataRow[nameIdx]).toBe('馬名,"引用",改行\n入り');
-    expect(dataRow[reasonIdx]).toBe('reasonにも,"引用"を含む');
-  });
-});
-
-describe("pickLatestAnalysis(同一レースの複数分析から最新〈id最大〉を決定的に選ぶ)", () => {
-  it("id最大の分析を返すこと(保存順に関わらない)", () => {
-    const a1 = makeStoredAnalysis({ id: 5 });
-    const a2 = makeStoredAnalysis({ id: 12 });
-    const a3 = makeStoredAnalysis({ id: 7 });
-    expect(pickLatestAnalysis([a1, a2, a3])).toBe(a2);
-  });
-
-  it("1件のみなら、その1件を返すこと", () => {
-    const a1 = makeStoredAnalysis({ id: 1 });
-    expect(pickLatestAnalysis([a1])).toBe(a1);
-  });
-
-  it("空配列ならnullを返すこと", () => {
-    expect(pickLatestAnalysis([])).toBeNull();
-  });
-});
-
-describe("buildDefaultAnalysisExportFileName(既定ファイル名。log-export.tsのbuildDefaultLogExportFileNameと同流儀)", () => {
-  it("レースIDと当日日付(YYYYMMDD)を含むJSON既定ファイル名を返すこと", () => {
-    const name = buildDefaultAnalysisExportFileName(
-      "202605020811",
-      new Date(2026, 6, 16),
-    );
-    expect(name).toBe("keiba-ev-tool-analysis-202605020811-20260716.json");
-  });
-});
-
-describe("deriveCsvPathFromJsonPath(JSON保存先パスからCSVパスを導出。code-reviewer指摘対応: csvPathがjsonPathと衝突しないことを保証する)", () => {
-  it("拡張子.json(小文字)は.csvへ置き換えること", () => {
-    expect(deriveCsvPathFromJsonPath("/tmp/out/analysis.json")).toBe(
-      "/tmp/out/analysis.csv",
-    );
-  });
-
-  it("拡張子.JSON(大文字)も.csvへ置き換えること(大文字小文字を区別しない)", () => {
-    expect(deriveCsvPathFromJsonPath("/tmp/out/analysis.JSON")).toBe(
-      "/tmp/out/analysis.csv",
-    );
-  });
-
-  it("ユーザーが保存先に.csv拡張子を指定した場合は置き換えず末尾に.csvを付加すること(元のjsonPathと衝突させない。JSON消失防止)", () => {
-    const result = deriveCsvPathFromJsonPath("/tmp/out/analysis.csv");
-    expect(result).toBe("/tmp/out/analysis.csv.csv");
-    expect(result).not.toBe("/tmp/out/analysis.csv");
-  });
-
-  it("拡張子が無いファイル名は末尾に.csvを付与すること", () => {
-    expect(deriveCsvPathFromJsonPath("/tmp/out/analysis")).toBe(
-      "/tmp/out/analysis.csv",
-    );
-  });
-
-  it(".json以外の拡張子(.txt等)は置き換えず末尾に.csvを付加すること(置き換えると衝突を生みうるため常に付加のみ)", () => {
-    expect(deriveCsvPathFromJsonPath("/tmp/out/analysis.txt")).toBe(
-      "/tmp/out/analysis.txt.csv",
-    );
-  });
-
-  it("境界プロパティ: どの入力でも戻り値が入力jsonPathと一致しないこと(衝突不可能性の保証)", () => {
-    for (const p of [
-      "/a/b.json",
-      "/a/b.JSON",
-      "/a/b.csv",
-      "/a/b.CSV",
-      "/a/b",
-      "/a/b.txt",
-    ]) {
-      expect(deriveCsvPathFromJsonPath(p)).not.toBe(p);
-    }
-  });
-});
-
-/** 簡易CSV1行パーサ(RFC4180の最小サブセット。テスト専用)。 */
-function parseCsvLine(line: string): string[] {
-  return parseCsvRecords(line)[0]!;
-}
-
-/** 簡易CSV全体パーサ(RFC4180の最小サブセット。テスト専用。crlf区切り・""エスケープ対応)。 */
-function parseCsvRecords(text: string): string[][] {
-  const records: string[][] = [];
-  let field = "";
-  let record: string[] = [];
-  let inQuotes = false;
-  let i = 0;
-  while (i < text.length) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i += 2;
-          continue;
-        }
-        inQuotes = false;
-        i++;
-        continue;
-      }
-      field += c;
-      i++;
-      continue;
-    }
-    if (c === '"') {
-      inQuotes = true;
-      i++;
-      continue;
-    }
-    if (c === ",") {
-      record.push(field);
-      field = "";
-      i++;
-      continue;
-    }
-    if (c === "\r" && text[i + 1] === "\n") {
-      record.push(field);
-      field = "";
-      records.push(record);
-      record = [];
-      i += 2;
-      continue;
-    }
-    field += c;
-    i++;
-  }
-  if (field.length > 0 || record.length > 0) {
-    record.push(field);
-    records.push(record);
-  }
-  return records.filter((r) => !(r.length === 1 && r[0] === ""));
-}
-
-/**
- * Issue #199(#196-b): 強調材料・懸念事項(highlights・concerns)のエクスポート。
- * JSON は馬ごとに配列を足す(schemaVersion は 1 のまま)。CSV は既存列の位置を変えず末尾に2列を足し、
- * セルの中は ` / ` で連結する(`passing` が `-` 連結なのと同じ、1セル内の連結)。
- */
-describe("強調材料・懸念事項のエクスポート(Issue #199)", () => {
-  /** 旧版(#199 より前)の CSV ヘッダ。この並びと位置が変わらないことを固定する(位置が変わる変異を殺す)。 */
-  const LEGACY_CSV_COLUMNS = [
-    "umaban", "wakuban", "name", "sex", "age", "kinryo", "jockeyName", "trainerName", "bodyWeight", "winOdds",
-    "popularity", "placeOddsMin", "oikiriCritic", "oikiriRank", "prior", "adjustedProb", "ev", "isPositive", "mark", "reason",
-    "finishPosition", "placePayout", "last3f", "passing",
-  ];
-
-  const horseWith = (umaban: number, highlights: readonly string[], concerns: readonly string[]): StoredAnalysis["horses"][number] => ({
-    umaban,
-    prior: 0.3,
-    adjustedProb: 0.3,
-    placeOddsMin: 2,
-    ev: 0.6,
-    isPositive: false,
-    contributions: null,
-    mark: null,
-    reason: "根拠",
-    highlights,
-    concerns,
-  });
-
-  const docOf = (horses: StoredAnalysis["horses"]) => buildAnalysisExportDocument(makeInput({ analysis: makeStoredAnalysis({ horses }) }));
-
-  it("JSON: 馬ごとに highlights・concerns の配列が出る(空は [])。schemaVersion は 1 のまま", () => {
-    const doc = docOf([horseWith(1, ["A", "B", "C"], ["D"]), horseWith(2, [], [])]);
-    expect(doc.schemaVersion).toBe(1);
-    expect(doc.horses[0]!.highlights).toEqual(["A", "B", "C"]);
-    expect(doc.horses[0]!.concerns).toEqual(["D"]);
-    expect(doc.horses[1]!.highlights).toEqual([]);
-    expect(doc.horses[1]!.concerns).toEqual([]);
-    // 文字列化しても配列のまま(JSON 往復で形が変わらない)。
-    const parsed = JSON.parse(serializeAnalysisExportJson(doc)) as { schemaVersion: number; horses: { highlights: string[]; concerns: string[] }[] };
-    expect(parsed.schemaVersion).toBe(1);
-    expect(parsed.horses[0]!.highlights).toEqual(["A", "B", "C"]);
-    expect(parsed.horses[1]!.concerns).toEqual([]);
-  });
-
-  it("CSV: 既存24列の位置は変わらず、末尾に highlights・concerns の2列が付く", () => {
-    const csv = serializeAnalysisExportCsv(docOf([horseWith(1, ["A"], ["B"])]));
-    const header = csv.split("\r\n")[0]!.split(",");
-    expect(LEGACY_CSV_COLUMNS).toHaveLength(24);
-    expect(header.slice(0, 24)).toEqual(LEGACY_CSV_COLUMNS);
-    expect(header.slice(24)).toEqual(["highlights", "concerns"]);
-    expect(header).toHaveLength(26);
-  });
-
-  it("CSV: 複数項目は ` / ` で連結し、空配列は空セルになる", () => {
-    const csv = serializeAnalysisExportCsv(docOf([horseWith(1, ["A", "B", "C"], ["D", "E"]), horseWith(2, [], [])]));
-    const rows = parseCsvRecords(csv);
-    const header = rows[0]!;
-    const hi = header.indexOf("highlights");
-    const co = header.indexOf("concerns");
-    expect(hi).toBe(24);
-    expect(co).toBe(25);
-    expect(rows[1]![hi]).toBe("A / B / C");
-    expect(rows[1]![co]).toBe("D / E");
-    expect(rows[2]![hi]).toBe("");
-    expect(rows[2]![co]).toBe("");
-    // 全行が同じ列数(列がずれない)。
-    expect(rows[1]).toHaveLength(26);
-    expect(rows[2]).toHaveLength(26);
-  });
-
-  it("CSV: 項目にカンマ・引用符・改行・区切り(` / `)を含んでも、列数がずれず往復で同じ文字列に戻る", () => {
-    const tricky = ['脚質,先行"逃げ"', "改行\n入り", "前走1着 / 好タイム"];
-    const csv = serializeAnalysisExportCsv(docOf([horseWith(1, tricky, ["懸念,あり"])]));
-    const rows = parseCsvRecords(csv);
-    expect(rows).toHaveLength(2);
-    expect(rows[1]).toHaveLength(26);
-    expect(rows[1]![24]).toBe(tricky.join(" / "));
-    expect(rows[1]![25]).toBe("懸念,あり");
-    // 引用符で囲まれて出力されている(素のカンマで列が割れていない)。
-    expect(csv).toContain('"脚質,先行""逃げ""');
+  it("馬の配列に、オブジェクトでない要素・umabanが数値でない要素が混ざっていても、それらを飛ばして残りを復元すること", () => {
+    const safe = toSafeRaceSnapshot({
+      race: {},
+      horses: [null, "x", { umaban: "3", name: "文字列の馬番" }, { name: "馬番なし" }, { umaban: 5, name: "有効な馬" }],
+    });
+    expect([...safe.horsesByUmaban.keys()]).toEqual([5]);
+    expect(safe.horsesByUmaban.get(5)!.name).toBe("有効な馬");
   });
 });
