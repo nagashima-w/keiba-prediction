@@ -235,6 +235,42 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/**
+ * 別サイトからの要求の拒否の応答(403 `origin-mismatch`。本文は固定)。{@link crossSiteRejection}(GET の `Sec-Fetch-Site`)と、{@link readJsonObjectBody}(POST の Origin)が共有する。
+ */
+function originMismatch(): Response {
+  return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+}
+
+/**
+ * GET の入口の `Sec-Fetch-Site` の検査(Issue #183・#256・#266・#267・#336・#360 ほか。8 ルートが共有する)。別サイトのページから(ログイン中の利用者のブラウザで)呼ばれて、
+ * D1 の全件走査・DO・netkeiba への取得を起こされるのを拒否する。ブラウザは `Sec-Fetch-Site` を付ける(アドレスバー・ブックマークは `none`、同じオリジンの fetch は `same-origin`)。
+ * 付かない非ブラウザのクライアントは通す。拒否するなら 403 の応答、通すなら null。**D1・DO・gate に触れる前に呼ぶ**(順序は各ハンドラの JSDoc と cloud-config-guard.test.ts が固定する)。
+ * POST の入口の確認({@link originAllowed}。Origin の完全一致を見て、`none` も通さない)とは別物。
+ */
+function crossSiteRejection(request: Request): Response | null {
+  const site = request.headers.get("sec-fetch-site");
+  return site !== null && site !== "same-origin" && site !== "none" ? originMismatch() : null;
+}
+
+/**
+ * クエリのキーが許可リストの外にあるか、同じキーが重複しているか(どちらも不正。値は見ない)。文言は呼び出し側が持つ。
+ * 許可リストが空({@link NO_PARAMS})なら「クエリが 1 つでもあれば不正」になる(クエリを受け付けないパス用)。
+ */
+function hasInvalidQueryKeys(url: URL, allowed: ReadonlySet<string>): boolean {
+  const keys = [...url.searchParams.keys()];
+  return keys.some((key) => !allowed.has(key)) || new Set(keys).size !== keys.length;
+}
+
+/** クエリを受け付けないパスの許可リスト(空)。 */
+const NO_PARAMS: ReadonlySet<string> = new Set();
+/** `kaisai_date` だけを受けるルート(`/api/baba-fetch`・`/api/plan`・`/api/targets`)の許可リスト。 */
+const KAISAI_DATE_PARAMS: ReadonlySet<string> = new Set(["kaisai_date"]);
+/** `/api/analyses/status` の許可リスト(kaisai_date は必須・race_id は任意。必須の検査は呼び出し側)。 */
+const STATUS_PARAMS: ReadonlySet<string> = new Set(["kaisai_date", "race_id"]);
+/** `/api/netkeiba/check` の許可リスト(race_id は必須・type は省略可。必須の検査は呼び出し側)。 */
+const CHECK_PARAMS: ReadonlySet<string> = new Set(["race_id", "type"]);
+
 export async function handle(
   request: Request,
   env: Env,
@@ -574,13 +610,12 @@ const HORSE_RUNS_PARAMS = new Set(["days", "cells"]);
  * 読み取り専用。順序は: `Sec-Fetch-Site`(別サイトからなら 403。全件走査を外から起こされないため)→ 入力の検証(400。ここまでで D1 に触れない)→ D1(失敗は 503 の固定の種類名だけ)。
  */
 async function handleHorseRuns(request: Request, env: Env, now: () => Date): Promise<Response> {
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
   }
   const url = new URL(request.url);
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((k) => !HORSE_RUNS_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+  if (hasInvalidQueryKeys(url, HORSE_RUNS_PARAMS)) {
     return badRequest("クエリは days(1〜60 の整数)と cells(1 または 0)だけを、それぞれ1つまで指定できます");
   }
   const daysText = url.searchParams.get("days");
@@ -610,13 +645,12 @@ async function handleHorseRuns(request: Request, env: Env, now: () => Date): Pro
  * 読み取り専用。順序は: `Sec-Fetch-Site`(別サイトからなら 403)→ 入力の検証(400。ここまでで D1 に触れない)→ D1(失敗は 503 の固定の種類名だけ)。
  */
 async function handleBabaFetch(request: Request, env: Env): Promise<Response> {
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
   }
   const url = new URL(request.url);
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((k) => k !== "kaisai_date") || new Set(keys).size !== keys.length) {
+  if (hasInvalidQueryKeys(url, KAISAI_DATE_PARAMS)) {
     return badRequest("クエリは kaisai_date だけを1つ指定できます");
   }
   const kaisaiDate = url.searchParams.get("kaisai_date");
@@ -668,13 +702,12 @@ const VERIFY_VENUES = new Set(["all", "central", "nar"]);
  * **別サイトからの要求は 403**(`Sec-Fetch-Site`。D1 を数万行読む再計算を外から起こされないため)。入力の検証が先(400。DO は呼ばない)。DO の失敗・binding なしは 503(固定の種類名)。
  */
 async function handleVerify(request: Request, env: Env, role: "admin" | "viewer"): Promise<Response> {
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
   }
   const url = new URL(request.url);
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((k) => !VERIFY_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+  if (hasInvalidQueryKeys(url, VERIFY_PARAMS)) {
     return badRequest("クエリは venue(all・central・nar)と refresh(1 または 0)だけを、それぞれ1つまで指定できます");
   }
   const venue = url.searchParams.get("venue") ?? "all";
@@ -715,13 +748,12 @@ const PRIOR_EXPORT_REFRESH_SECONDS = 5;
  * 別サイトからの要求は 403(`Sec-Fetch-Site`。アドレスバーからは `none`)。入力の検証が先(400。DO は呼ばない)。失敗は固定の種類名だけ(例外の文面は返さない)。
  */
 async function handlePriorExport(request: Request, env: Env): Promise<Response> {
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
   }
   const url = new URL(request.url);
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((k) => !PRIOR_EXPORT_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+  if (hasInvalidQueryKeys(url, PRIOR_EXPORT_PARAMS)) {
     return badRequest("クエリは refresh(1 または 0)と status(1 または 0)だけを、それぞれ1つまで指定できます");
   }
   const refreshValue = url.searchParams.get("refresh");
@@ -788,8 +820,7 @@ const ANALYSES_PARAMS = new Set(["race_id", "kaisai_date", "limit"]);
  * 未知のパラメータ・重複・不正な値は 400(D1 に触れない)。limit は 1〜{@link LIST_MAX_LIMIT} の整数(既定 {@link LIST_DEFAULT_LIMIT})。
  */
 async function handleAnalyses(url: URL, env: Env): Promise<Response> {
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((k) => !ANALYSES_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+  if (hasInvalidQueryKeys(url, ANALYSES_PARAMS)) {
     return badRequest("クエリは race_id・kaisai_date・limit だけを、それぞれ1つまで指定できます");
   }
   const filter: { raceId?: string; kaisaiDate?: string; limit?: number } = {};
@@ -837,7 +868,7 @@ const ANALYSIS_ID_MAX = 2_147_483_647;
  * 締切の直前の再計算の結果(`close`。Issue #338)の読み出しは別: 失敗(表が無い間を含む)は close だけ null の 200。
  */
 async function handleAnalysisDetail(url: URL, idText: string, env: Env): Promise<Response> {
-  if ([...url.searchParams.keys()].length > 0) {
+  if (hasInvalidQueryKeys(url, NO_PARAMS)) {
     return badRequest("このパスにクエリは指定できません");
   }
   const id = /^[1-9][0-9]{0,9}$/.test(idText) ? Number(idText) : Number.NaN;
@@ -878,13 +909,12 @@ const RACES_PARAMS = new Set(["kaisai_date", "venue"]);
 async function handleRaces(request: Request, env: Env): Promise<Response> {
   // 別サイトのページから(ログイン中の利用者のブラウザで)呼ばれて、日付を変えて netkeiba への取得を起こされるのを拒否する。
   // ブラウザは Sec-Fetch-Site を付ける(アドレスバー・ブックマークは none、同じオリジンの fetch は same-origin)。付かない非ブラウザのクライアントは通す。
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
   }
   const url = new URL(request.url);
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((k) => !RACES_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+  if (hasInvalidQueryKeys(url, RACES_PARAMS)) {
     return badRequest("クエリは kaisai_date(必須)と venue(必須)だけを、それぞれ1つまで指定できます");
   }
   const kaisaiDate = url.searchParams.get("kaisai_date");
@@ -995,7 +1025,7 @@ type JsonObjectBody = { readonly ok: true; readonly body: Record<string, unknown
 
 async function readJsonObjectBody(request: Request, maxBytes: number): Promise<JsonObjectBody> {
   if (!originAllowed(request)) {
-    return { ok: false, response: json({ ok: false, error: { type: "origin-mismatch" } }, 403) };
+    return { ok: false, response: originMismatch() };
   }
   const contentType = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   if (contentType !== "application/json") {
@@ -1228,8 +1258,7 @@ async function handlePromptPreview(request: Request): Promise<Response> {
  * パラメータは kaisai_date(必須)と race_id(任意)を、それぞれ1つまで。不正なら 400(DO を呼ばない)。
  */
 async function handleStatus(url: URL, env: Env): Promise<Response> {
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((k) => k !== "kaisai_date" && k !== "race_id") || new Set(keys).size !== keys.length) {
+  if (hasInvalidQueryKeys(url, STATUS_PARAMS)) {
     return badRequest("クエリは kaisai_date(必須)と race_id(任意)だけを、それぞれ1つまで指定できます");
   }
   const kaisaiDate = url.searchParams.get("kaisai_date");
@@ -1305,13 +1334,12 @@ const clipText = (text: string | null): string | null => (text === null ? null :
  * (この関数は `env.DISCORD_WEBHOOK_URL` を読まない)。自由文は鍵の形を伏せてから 200 文字に切る({@link safeText}。Issue #245)。
  */
 async function handlePlan(request: Request, env: Env): Promise<Response> {
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
   }
   const url = new URL(request.url);
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((k) => k !== "kaisai_date") || new Set(keys).size !== keys.length) {
+  if (hasInvalidQueryKeys(url, KAISAI_DATE_PARAMS)) {
     return badRequest("クエリは kaisai_date だけを1つ指定できます");
   }
   const kaisaiDate = url.searchParams.get("kaisai_date");
@@ -1409,13 +1437,12 @@ async function handlePlan(request: Request, env: Env): Promise<Response> {
  * **失敗は一覧を巻き込まない**: DO の失敗は収支なし(`ledger`・各行の `result` が null)。閲覧者にも同じ内容を返す(ユーザーの決定)。
  */
 async function handleTargets(request: Request, env: Env, now: Date): Promise<Response> {
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
   }
   const url = new URL(request.url);
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((k) => k !== "kaisai_date") || new Set(keys).size !== keys.length) {
+  if (hasInvalidQueryKeys(url, KAISAI_DATE_PARAMS)) {
     return badRequest("クエリは kaisai_date だけを1つ指定できます");
   }
   const kaisaiDate = url.searchParams.get("kaisai_date");
@@ -1521,6 +1548,63 @@ async function handleResultsImport(request: Request, env: Env, now: () => Date, 
   }
 }
 
+/** 日報・月報の API の失敗(D1・DO の失敗、DO と食い違う理由)の応答。固定の種類名だけ(例外の文面は返さない)。 */
+function reportError(): Response {
+  return json({ ok: false, error: { type: "report-error" } }, 503);
+}
+
+/** {@link readReportJob} の `read` が返す「日報・月報の DO の binding が無い構成」の符号(`undefined` は DO の不正な応答と区別するため使わない)。 */
+const NO_REPORT_BINDING: unique symbol = Symbol("no-report-binding");
+
+/**
+ * 日報・月報の詳細の進行状況(DO の `getStatus`)の読み取り。固定の形だけを写す(DO から別の値が来ても、そのまま返さない)。`regenerate` は `true` のときだけ付ける(Issue #268・#280)。
+ * `read` は DO の取得を行う関数: {@link NO_REPORT_BINDING} を返すと「binding が無い構成」(ジョブが存在しえないので `ok`)、`null` は「ジョブなし」(`ok`)、例外は `unavailable`(ジョブがあるか分からない)。
+ * **DO が(型に反して)`undefined` などの読めない値を返したときも `unavailable`**(`status.phase` の読み取りで例外になり、下の catch に入る。binding なしとは符号で区別する)。
+ * **誰に読ませるか(役割の扱い)は呼び出し側が決める**(日報と月報で意図的に違う)。
+ */
+async function readReportJob<S extends ReportStatus | MonthlyStatus>(
+  read: () => Promise<S | null | typeof NO_REPORT_BINDING>,
+): Promise<{ job: { phase: S["phase"]; status: S["status"]; attempts: number; regenerate?: true } | null; jobStatus: "ok" | "unavailable" }> {
+  try {
+    const status = await read();
+    if (status === NO_REPORT_BINDING || status === null) {
+      return { job: null, jobStatus: "ok" };
+    }
+    return { job: { phase: status.phase, status: status.status, attempts: status.attempts, ...(status.regenerate === true ? { regenerate: true as const } : {}) }, jobStatus: "ok" };
+  } catch {
+    return { job: null, jobStatus: "unavailable" };
+  }
+}
+
+/** 手動の作成・作り直しの本文の `regenerate`(boolean だけ。無い・`false` は通常の作成)。型違いは 400。日報の run と月報の run が共有する。 */
+function parseRegenerateFlag(record: Record<string, unknown>): { readonly ok: true; readonly regenerate: boolean } | { readonly ok: false; readonly response: Response } {
+  const flag = record["regenerate"];
+  if (flag !== undefined && typeof flag !== "boolean") {
+    return { ok: false, response: badRequest("regenerate は true または false で指定してください") };
+  }
+  return { ok: true, regenerate: flag === true };
+}
+
+/**
+ * 日報・月報の DO が依頼を断ったときの応答(固定の型だけ): 作成済み(通常の作成)409 `already-exists`・作成中 409 `in-progress`・無い(作り直し)409 `not-exists`・1 日の回数の上限(作り直し)429 `daily-limit`。
+ * 作り直しだけが返す理由が通常の作成に返ってきたとき、検証で弾いたはずの理由(不正・未来・終わっていない)や、あり得ない理由が来たときは、食い違いなので 503。
+ */
+function reportRunRefusal(reason: string, regenerate: boolean): Response {
+  if (reason === "exists" && !regenerate) {
+    return json({ ok: false, error: { type: "already-exists" } }, 409);
+  }
+  if (reason === "in-progress") {
+    return json({ ok: false, error: { type: "in-progress" } }, 409);
+  }
+  if (regenerate && reason === "not-exists") {
+    return json({ ok: false, error: { type: "not-exists" } }, 409);
+  }
+  if (regenerate && reason === "daily-limit") {
+    return json({ ok: false, error: { type: "daily-limit" } }, 429);
+  }
+  return reportError();
+}
+
 /** 日報の一覧の件数(画面が最近の日付を並べる数。D1 の本文は読まない)。 */
 const REPORT_LIST_LIMIT = 60;
 
@@ -1528,7 +1612,7 @@ const REPORT_LIST_LIMIT = 60;
  * `GET /api/reports`(Issue #235): 日報の一覧(開催日の新しい順。本文を含まない)。クエリは受け付けない(400)。D1 の失敗は 503(固定の型だけ。例外の文面は返さない)。
  */
 async function handleReportList(url: URL, env: Env): Promise<Response> {
-  if ([...url.searchParams.keys()].length > 0) {
+  if (hasInvalidQueryKeys(url, NO_PARAMS)) {
     return badRequest("このパスにクエリは指定できません");
   }
   try {
@@ -1538,7 +1622,7 @@ async function handleReportList(url: URL, env: Env): Promise<Response> {
       reports: rows.map((r) => ({ date: r.kaisaiDate, created_at: r.createdAt, model: r.model, race_count: r.raceCount, total_stake: r.totalStake, total_return: r.totalReturn, summary: r.summary })),
     });
   } catch {
-    return json({ ok: false, error: { type: "report-error" } }, 503);
+    return reportError();
   }
 }
 
@@ -1558,28 +1642,21 @@ async function handleReportDetail(url: URL, dateText: string, env: Env, role: "a
   if (!/^[0-9]{8}$/.test(dateText) || !checkKaisaiDate(dateText).ok) {
     return json({ ok: false, error: { type: "not-found" } }, 404);
   }
-  if ([...url.searchParams.keys()].length > 0) {
+  if (hasInvalidQueryKeys(url, NO_PARAMS)) {
     return badRequest("このパスにクエリは指定できません");
   }
   let report;
   try {
     report = await new D1ReportStore({ db: env.DB }).getReport(dateText);
   } catch {
-    return json({ ok: false, error: { type: "report-error" } }, 503);
+    return reportError();
   }
-  // 進行状況(DO の getStatus)。固定の形だけを写す(DO から別の値が来ても、そのまま返さない)。`regenerate` は `true` のときだけ付ける(Issue #268)。
-  const readJob = async (): Promise<{ job: ReportStatus | null; jobStatus: "ok" | "unavailable" }> => {
-    try {
+  // 進行状況(DO の getStatus。形の写しと失敗の扱いは {@link readReportJob})。
+  const readJob = () =>
+    readReportJob(async () => {
       const namespace = env.DAILY_REPORT;
-      if (namespace === undefined) {
-        return { job: null, jobStatus: "ok" };
-      }
-      const status = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).getStatus(dateText);
-      return { job: status === null ? null : { phase: status.phase, status: status.status, attempts: status.attempts, ...(status.regenerate === true ? { regenerate: true as const } : {}) }, jobStatus: "ok" };
-    } catch {
-      return { job: null, jobStatus: "unavailable" };
-    }
-  };
+      return namespace === undefined ? NO_REPORT_BINDING : namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).getStatus(dateText);
+    });
   if (report !== null) {
     const { job, jobStatus } = role === "admin" ? await readJob() : { job: null, jobStatus: "ok" as const };
     return json({
@@ -1609,7 +1686,7 @@ const MONTHLY_LIST_LIMIT = 36;
  * `GET /api/monthly-reports`(Issue #279): 月報の一覧(月の新しい順。本文を含まない)。クエリは受け付けない(400)。D1 の失敗は 503(固定の型だけ。例外の文面は返さない)。
  */
 async function handleMonthlyList(url: URL, env: Env): Promise<Response> {
-  if ([...url.searchParams.keys()].length > 0) {
+  if (hasInvalidQueryKeys(url, NO_PARAMS)) {
     return badRequest("このパスにクエリは指定できません");
   }
   try {
@@ -1619,7 +1696,7 @@ async function handleMonthlyList(url: URL, env: Env): Promise<Response> {
       reports: rows.map((r) => ({ month: r.month, created_at: r.createdAt, model: r.model, race_count: r.raceCount, total_stake: r.totalStake, total_return: r.totalReturn, summary: r.summary })),
     });
   } catch {
-    return json({ ok: false, error: { type: "report-error" } }, 503);
+    return reportError();
   }
 }
 
@@ -1635,28 +1712,21 @@ async function handleMonthlyDetail(url: URL, monthText: string, env: Env, role: 
   if (!isValidMonth(monthText)) {
     return json({ ok: false, error: { type: "not-found" } }, 404);
   }
-  if ([...url.searchParams.keys()].length > 0) {
+  if (hasInvalidQueryKeys(url, NO_PARAMS)) {
     return badRequest("このパスにクエリは指定できません");
   }
   let report;
   try {
     report = await new D1MonthlyStore({ db: env.DB }).getReport(monthText);
   } catch {
-    return json({ ok: false, error: { type: "report-error" } }, 503);
+    return reportError();
   }
-  // 進行状況(DO の getStatus)。固定の形だけを写す(DO から別の値が来ても、そのまま返さない)。`regenerate` は `true` のときだけ付ける。
-  const readJob = async (): Promise<{ job: MonthlyStatus | null; jobStatus: "ok" | "unavailable" }> => {
-    try {
+  // 進行状況(DO の getStatus。形の写しと失敗の扱いは {@link readReportJob})。
+  const readJob = () =>
+    readReportJob(async () => {
       const namespace = env.MONTHLY_REPORT;
-      if (namespace === undefined) {
-        return { job: null, jobStatus: "ok" };
-      }
-      const status = await namespace.get(namespace.idFromName(MONTHLY_REPORT_NAME)).getStatus(monthText);
-      return { job: status === null ? null : { phase: status.phase, status: status.status, attempts: status.attempts, ...(status.regenerate === true ? { regenerate: true as const } : {}) }, jobStatus: "ok" };
-    } catch {
-      return { job: null, jobStatus: "unavailable" };
-    }
-  };
+      return namespace === undefined ? NO_REPORT_BINDING : namespace.get(namespace.idFromName(MONTHLY_REPORT_NAME)).getStatus(monthText);
+    });
   const { job, jobStatus } = role === "admin" ? await readJob() : { job: null, jobStatus: "ok" as const };
   return json({
     ok: true,
@@ -1705,11 +1775,11 @@ async function handleReportRun(request: Request, env: Env, now: () => Date): Pro
   if (!checked.ok) {
     return badRequest(checked.message);
   }
-  const flag = record["regenerate"];
-  if (flag !== undefined && typeof flag !== "boolean") {
-    return badRequest("regenerate は true または false で指定してください");
+  const flag = parseRegenerateFlag(record);
+  if (!flag.ok) {
+    return flag.response;
   }
-  const regenerate = flag === true;
+  const { regenerate } = flag;
   const today = jstKaisaiDate(now().getTime());
   if (date > today) {
     return badRequest(`date は今日(${today})以前にしてください`);
@@ -1721,25 +1791,12 @@ async function handleReportRun(request: Request, env: Env, now: () => Date): Pro
     }
     const result = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate: date, mode: regenerate ? "regenerate" : "manual" });
     if (!result.accepted) {
-      if (result.reason === "exists" && !regenerate) {
-        return json({ ok: false, error: { type: "already-exists" } }, 409);
-      }
-      if (result.reason === "in-progress") {
-        return json({ ok: false, error: { type: "in-progress" } }, 409);
-      }
-      // 作り直しだけが返す理由(通常の作成に返ってきたら食い違いなので、下の 503)。
-      if (regenerate && result.reason === "not-exists") {
-        return json({ ok: false, error: { type: "not-exists" } }, 409);
-      }
-      if (regenerate && result.reason === "daily-limit") {
-        return json({ ok: false, error: { type: "daily-limit" } }, 429);
-      }
-      // 検証で弾いたはずの理由(不正・未来の日付)が DO から来た: 食い違いなので 503。
-      return json({ ok: false, error: { type: "report-error" } }, 503);
+      // 断りの写し(作り直しだけが返す理由、検証で弾いたはずの理由が来たら食い違いで 503)は {@link reportRunRefusal}。
+      return reportRunRefusal(result.reason, regenerate);
     }
     return json({ ok: true, accepted: true, date }, 202);
   } catch {
-    return json({ ok: false, error: { type: "report-error" } }, 503);
+    return reportError();
   }
 }
 
@@ -1766,11 +1823,11 @@ async function handleMonthlyRun(request: Request, env: Env, now: () => Date): Pr
   if (typeof month !== "string" || !isValidMonth(month)) {
     return badRequest("month は YYYYMM の 6 桁の文字列(実在の月)で指定してください");
   }
-  const flag = record["regenerate"];
-  if (flag !== undefined && typeof flag !== "boolean") {
-    return badRequest("regenerate は true または false で指定してください");
+  const flag = parseRegenerateFlag(record);
+  if (!flag.ok) {
+    return flag.response;
   }
-  const regenerate = flag === true;
+  const { regenerate } = flag;
   const today = jstKaisaiDate(now().getTime());
   if (monthRange(month).toDate >= today) {
     return badRequest("month は終わった月(今月より前)にしてください。今月の月報は、月の最終日の夜に自動で作られます");
@@ -1782,25 +1839,12 @@ async function handleMonthlyRun(request: Request, env: Env, now: () => Date): Pr
     }
     const result = await namespace.get(namespace.idFromName(MONTHLY_REPORT_NAME)).requestMonthlyReport({ month, mode: regenerate ? "regenerate" : "manual" });
     if (!result.accepted) {
-      if (result.reason === "exists" && !regenerate) {
-        return json({ ok: false, error: { type: "already-exists" } }, 409);
-      }
-      if (result.reason === "in-progress") {
-        return json({ ok: false, error: { type: "in-progress" } }, 409);
-      }
-      // 作り直しだけが返す理由(通常の作成に返ってきたら食い違いなので、下の 503)。
-      if (regenerate && result.reason === "not-exists") {
-        return json({ ok: false, error: { type: "not-exists" } }, 409);
-      }
-      if (regenerate && result.reason === "daily-limit") {
-        return json({ ok: false, error: { type: "daily-limit" } }, 429);
-      }
-      // 検証で弾いたはずの理由(不正・終わっていない月)や、あり得ない理由が DO から来た: 食い違いなので 503。
-      return json({ ok: false, error: { type: "report-error" } }, 503);
+      // 断りの写し(作り直しだけが返す理由、検証で弾いたはずの理由やあり得ない理由が来たら食い違いで 503)は {@link reportRunRefusal}。
+      return reportRunRefusal(result.reason, regenerate);
     }
     return json({ ok: true, accepted: true, month }, 202);
   } catch {
-    return json({ ok: false, error: { type: "report-error" } }, 503);
+    return reportError();
   }
 }
 
@@ -1819,13 +1863,12 @@ function badRequest(message: string): Response {
  */
 async function handleCheck(request: Request, env: Env): Promise<Response> {
   // ブラウザは Sec-Fetch-Site を付ける(確認フォームの送信は same-origin、アドレスバー・ブックマークは none)。付かない非ブラウザのクライアントは通す。
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
   }
   const url = new URL(request.url);
-  const keys = [...url.searchParams.keys()];
-  if (keys.some((key) => key !== "race_id" && key !== "type") || new Set(keys).size !== keys.length || !keys.includes("race_id")) {
+  if (hasInvalidQueryKeys(url, CHECK_PARAMS) || !url.searchParams.has("race_id")) {
     return badRequest("クエリは race_id(必須)と type(省略可。shutuba または grade-winner)だけを、それぞれ1つ指定してください");
   }
   const typeParam = url.searchParams.get("type");
