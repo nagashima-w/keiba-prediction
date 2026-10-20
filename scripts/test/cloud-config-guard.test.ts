@@ -417,6 +417,33 @@ describe("wrangler.toml", () => {
     }
   });
 
+  it("Issue #399(R-9e e1): 計画の一覧と確定の段階(race-day-plan-stage.ts)は、アラーム・取得口・キャッシュに触れず、一覧の取得は注入された getRaceList だけを通る。段階を作る配線(core の new PlanStage)も、取得口・キャッシュ・アラームを渡さない", () => {
+    // 一覧と確定は、一覧の取得を本体の getRaceList(gate 経由のキャッシュ・合流・掃除のアラームを持つ)に任せ、計画の表・タスクの表(注入された関数)・結果の行(注入された関数)を書くだけで、
+    // netkeiba に直接出ず、アラームも張らない(張り直しは本体の armAlarm)。切り出しによって、取得口やアラームを段階に渡せる余地が配線に移ったため、段階の本文と配線の両方を検査する。
+    const stage = stripCode(readTextLf("cloud", "src", "race-day-plan-stage.ts"));
+    expect(stage.length).toBeGreaterThan(3000); // 前提: 段階のファイルを読めている
+    expect(stage).toContain("this.getRaceList(kaisaiDate, venue)"); // 前提: 一覧の取得の窓口はこれ(注入された本体の getRaceList)
+    expect(stage).toContain("this.enqueueSameDayResults(kaisaiDate, nowMs)"); // 前提: 結果の行を積む窓口はこれ(注入された本体の関数)
+    const stageForbidden = ["setAlarm(", "rearm(", "armAlarm(", "fetch(", "networkFetcher", "cacheOnly", "httpClient"];
+    const found = (text: string): string[] => stageForbidden.filter((f) => text.includes(f));
+    expect(found(stage)).toEqual([]);
+    // 対照(検出の確認。空振りでない): 禁止の文字列を含む本文は検出する
+    expect(found(`${stage}\nthis.setAlarm(1);\nthis.httpClient.get(x);`)).toEqual(["setAlarm(", "httpClient"]);
+    const core = stripCode(readTextLf("cloud", "src", "race-day-core.ts"));
+    const wireStart = core.indexOf("new PlanStage({");
+    expect(wireStart).toBeGreaterThan(-1);
+    expect(core.indexOf("new PlanStage({", wireStart + 1)).toBe(-1); // 段階を作る箇所は 1 つ
+    const wireEnd = core.indexOf("\n    });", wireStart);
+    expect(wireEnd).toBeGreaterThan(wireStart);
+    const wiring = core.slice(wireStart, wireEnd);
+    expect(wiring.length).toBeGreaterThan(400); // 前提: 配線を実際に読めている
+    expect(wiring).toContain("plan: this.plan,"); // 前提: 配線の中身を読めている(計画の表)
+    expect(wiring).toContain("getRaceList: (kaisaiDate, venue) => this.getRaceList(kaisaiDate, venue),"); // 一覧の取得は本体の getRaceList だけ(gate の取得口を直接渡さない)
+    for (const forbidden of ["setAlarm", "this.cache", "httpClient", "cacheOnly", "networkFetcher"]) {
+      expect(wiring, `PlanStage の配線に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+  });
+
   it("Issue #206: binding の使用箇所を概念で走査する(cloud/src の全ファイル)。env.RACE_DAY・env.NETKEIBA_GATE に触れるファイルと回数が固定で、新しい経路は赤になる", () => {
     const srcDir = path.join(ROOT, "cloud", "src");
     const files = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");

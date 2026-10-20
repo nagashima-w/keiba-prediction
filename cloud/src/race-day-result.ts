@@ -24,7 +24,7 @@
  *  | `gave_up` かつ `requested_on` < 今日 | 積み直す(1 日 1 回。試行・保留を 0 に戻す) |
  *
  * ## 当日中の取り込み(Issue #209)
- * 計画の確定時に、`requested_on` = **開催日**の行を積む(`RaceDayCore.runPlanFinalize`)。`requested_on` が開催日と同じ行を「当日の行」と呼ぶ(過去日の依頼の行は `requested_on` が開催日より後)。
+ * 計画の確定時に、`requested_on` = **開催日**の行を積む(`PlanStage.runFinalize`)。`requested_on` が開催日と同じ行を「当日の行」と呼ぶ(過去日の依頼の行は `requested_on` が開催日より後)。
  * 当日の行だけ、(1) 最初の試行は発走 + {@link SAME_DAY_RESULT_DELAY_MS}、(2) 保存の条件に「全頭の着順がそろった」が加わる(分類 `incomplete`)、
  * (3) 再試行は {@link SAME_DAY_RETRY_DELAY_MS} おきに {@link MAX_SAME_DAY_ATTEMPTS} 回まで。**スキーマは変えない**(列を足さない: 稼働中の DO の表に ALTER が要るため)。
  * 判定表は変わらない: 当日に `gave_up` になった行は、翌日以降の cron(`requested_on` < 今日)の依頼で 1 回だけ積み直され、過去日の方式(3 試行・10 分おき)で取り込まれる。
