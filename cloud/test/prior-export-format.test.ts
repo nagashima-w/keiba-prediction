@@ -9,6 +9,7 @@ import {
   PRIOR_ROW_KEYS,
   PRIOR_ROW_KEYS_V1,
   PRIOR_ROW_KEYS_V2_ADDED,
+  PRIOR_ROW_KEYS_V3_ADDED,
   selectPriorExportAnalyses,
   toContributions,
   toSnapshotColumns,
@@ -246,7 +247,7 @@ describe("NDJSON(gzip の複数メンバー)とファイル名", () => {
 
 /** 分析時点のスナップショット(core の `buildRaceSnapshot` の形)。市場の値・人名・馬名は、書き出さないことを確かめるために目立つ値にしてある。 */
 const SNAPSHOT = {
-  race: { raceName: "テストステークス", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", startTime: "10:05", fence: null, oddsStatus: "x", officialDatetime: null, grade: "G3" },
+  race: { raceName: "テストステークス", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", startTime: "10:05", fence: null, oddsStatus: "x", officialDatetime: null, grade: "G3", weightType: "ハンデ", filliesOnly: false },
   horses: [
     {
       umaban: 1, wakuban: 1, name: "SECRET-HORSE", sex: "牡", age: 3, kinryo: 56, jockeyName: "SECRET-JOCKEY", trainerName: "SECRET-TRAINER", bodyWeight: 480,
@@ -266,8 +267,8 @@ const NULL_RACE = { race_name: null, grade: null, distance: null, track_conditio
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 describe("v2 の列(許可リスト)", () => {
-  it("形式の版は 2。v1 の 19 列は v2 の先頭にそのまま残り、足した 11 列は末尾(順序も固定)", () => {
-    expect(PRIOR_EXPORT_FORMAT).toBe(2);
+  it("形式の版は 3(Issue #421)。v1 の 19 列は先頭にそのまま残り、v2 で足した 11 列・v3 で足した 2 列がこの順で続く(順序も固定)", () => {
+    expect(PRIOR_EXPORT_FORMAT).toBe(3);
     expect(PRIOR_ROW_KEYS_V1).toHaveLength(19);
     expect([...PRIOR_ROW_KEYS_V1]).toEqual([
       "analysis_id", "race_id", "kaisai_date", "venue_kind", "course_type", "field_size", "umaban", "prior", "adjusted_prob", "place_odds_min", "contributions",
@@ -276,8 +277,9 @@ describe("v2 の列(許可リスト)", () => {
     expect([...PRIOR_ROW_KEYS_V2_ADDED]).toEqual([
       "race_name", "grade", "distance", "track_condition", "wakuban", "sex", "age", "body_weight", "kinryo", "oikiri_rank", "oikiri_critic",
     ]);
-    expect([...PRIOR_ROW_KEYS]).toEqual([...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED]);
-    expect(PRIOR_ROW_KEYS).toHaveLength(30);
+    expect([...PRIOR_ROW_KEYS_V3_ADDED]).toEqual(["weight_type", "fillies_only"]);
+    expect([...PRIOR_ROW_KEYS]).toEqual([...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED]);
+    expect(PRIOR_ROW_KEYS).toHaveLength(32);
   });
 
   it("馬名・騎手名・調教師名と、スナップショットの市場の値(単勝オッズ・人気・複勝オッズ)は列にない。既存の win_odds・ninki(確定値)と place_odds_min だけが市場に近い列", () => {
@@ -430,16 +432,92 @@ describe("buildRaceRows: v2 の列", () => {
     }
   });
 
-  it("assembleFile のメタ行は format 2 で、列は 30 列。notes に v2 の列の出どころ・null の意味(grade の曖昧さ・地方の調教・critic の未確認)を書く", () => {
+  it("assembleFile のメタ行は format 3 で、列は 32 列。notes に v2 の列の出どころ・null の意味(grade の曖昧さ・地方の調教・critic の未確認)と、v3 の列の意味を書く", () => {
     const rows = buildRaceRows(CHOSEN, horses, results, null, new Map(), toSnapshotColumns(SNAPSHOT));
     const file = assembleFile({ generatedAt: "2026-10-10T12:00:00.000Z", rows: rows.length, races: 1, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } }, [encodeChunk(rows)]);
     const lines = new TextDecoder().decode(gunzipSync(file)).split("\n").filter((l) => l !== "");
     const head = JSON.parse(lines[0]!) as { _meta: { format: number; columns: string[]; notes: string[] } };
-    expect(head._meta.format).toBe(2);
-    expect(head._meta.columns).toHaveLength(30);
+    expect(head._meta.format).toBe(3);
+    expect(head._meta.columns).toHaveLength(32);
     const notes = head._meta.notes.join("\n");
-    for (const phrase of ["v2", "raceSnapshot", "grade", "地方", "oikiri_critic", "16 文字", "確認していない", "馬名・騎手名・調教師名"]) {
+    for (const phrase of ["v2", "raceSnapshot", "grade", "地方", "oikiri_critic", "16 文字", "確認していない", "馬名・騎手名・調教師名", "format 3", "weight_type", "fillies_only", "区別できない", "前走"]) {
       expect(notes, `notes に「${phrase}」`).toContain(phrase);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #421(段階 1): 形式 v3。レースの条件(負担重量の種別・牝馬限定)の 2 列。R2 の詳細の raceSnapshot.race から(追加の取得なし)。
+// ---------------------------------------------------------------------------
+
+describe("v3 の列: toSnapshotColumns がスナップショットの race から取り出す", () => {
+  it("weightType・filliesOnly を weight_type・fillies_only として返す(false は false のまま。null と区別する)", () => {
+    expect(toSnapshotColumns(SNAPSHOT).conditions).toEqual({ weight_type: "ハンデ", fillies_only: false });
+    const filly = clone(SNAPSHOT);
+    (filly.race as Record<string, unknown>)["weightType"] = "馬齢";
+    (filly.race as Record<string, unknown>)["filliesOnly"] = true;
+    expect(toSnapshotColumns(filly).conditions).toEqual({ weight_type: "馬齢", fillies_only: true });
+    // v2 の列は、v3 の列を足しても変わらない。
+    expect(toSnapshotColumns(filly).race).toEqual(toSnapshotColumns(SNAPSHOT).race);
+  });
+
+  it("キーが無い(地方・読めなかったレース・この項目を保存する前の旧スナップショット)は両列とも null", () => {
+    const old = clone(SNAPSHOT);
+    delete (old.race as Record<string, unknown>)["weightType"];
+    delete (old.race as Record<string, unknown>)["filliesOnly"];
+    expect(toSnapshotColumns(SNAPSHOT).conditions.weight_type).toBe("ハンデ"); // 前提: あるときは取れる
+    expect(toSnapshotColumns(old).conditions).toEqual({ weight_type: null, fillies_only: null });
+    // 種別だけ無い(牝馬限定は確定)の組合せは、牝馬限定の値を残す。
+    const noType = clone(SNAPSHOT);
+    delete (noType.race as Record<string, unknown>)["weightType"];
+    expect(toSnapshotColumns(noType).conditions).toEqual({ weight_type: null, fillies_only: false });
+  });
+
+  it.each([
+    ["weightType が空文字", "weightType", "", { weight_type: null, fillies_only: false }],
+    ["weightType が数", "weightType", 3, { weight_type: null, fillies_only: false }],
+    ["filliesOnly が文字列", "filliesOnly", "true", { weight_type: "ハンデ", fillies_only: null }],
+    ["filliesOnly が数", "filliesOnly", 1, { weight_type: "ハンデ", fillies_only: null }],
+    ["filliesOnly が null", "filliesOnly", null, { weight_type: "ハンデ", fillies_only: null }],
+  ])("型が違う(%s)と、その列だけ null(推測で直さない。1 を true にしない)", (_name, field, value, expected) => {
+    const raw = clone(SNAPSHOT);
+    (raw.race as Record<string, unknown>)[field] = value;
+    expect(toSnapshotColumns(raw).conditions).toEqual(expected);
+  });
+
+  it.each([
+    ["null", null],
+    ["文字列", "x"],
+    ["race が null", { race: null, horses: [] }],
+    ["race が文字列", { race: "x", horses: [] }],
+  ])("スナップショットが壊れている(%s)ときは両列とも null(例外を投げない)", (_name, raw) => {
+    expect(toSnapshotColumns(raw).conditions).toEqual({ weight_type: null, fillies_only: null });
+  });
+});
+
+describe("v3 の列: buildRaceRows が全頭に同じ値を載せる", () => {
+  const CHOSEN_V3 = CHOSEN;
+  const horsesV3 = [
+    { umaban: 1, prior: 0.4, adjustedProb: 0.35, placeOddsMin: 3.1 },
+    { umaban: 3, prior: 0.1, adjustedProb: 0.1, placeOddsMin: 9 },
+  ];
+
+  it("レースの条件は全頭に入る(スナップショットに無い馬にも)。キーの順序は PRIOR_ROW_KEYS で、v3 の 2 列が末尾", () => {
+    const rows = buildRaceRows(CHOSEN_V3, horsesV3, [], null, new Map(), toSnapshotColumns(SNAPSHOT));
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r.weight_type).toBe("ハンデ");
+      expect(r.fillies_only).toBe(false);
+      expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
+      expect(Object.keys(r).slice(-2)).toEqual([...PRIOR_ROW_KEYS_V3_ADDED]);
+    }
+  });
+
+  it("スナップショットが無い(null)ときは v3 の 2 列も null。ほかの列は変わらない", () => {
+    const rows = buildRaceRows(CHOSEN_V3, horsesV3, [], null, new Map(), null);
+    for (const r of rows) {
+      expect(PRIOR_ROW_KEYS_V3_ADDED.map((k) => r[k])).toEqual([null, null]);
+      expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
     }
   });
 });

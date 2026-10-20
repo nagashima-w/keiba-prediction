@@ -86,7 +86,7 @@ class FakeStore implements PriorExportStorePort {
   /** R2 の詳細に入っているスナップショットの偽物(分析 id で値が変わる)。人名・馬名・市場の値は、書き出されないことを確かめるための目立つ値。 */
   rawSnapshot(id: number): unknown {
     return {
-      race: { raceName: `レース${id}`, grade: "G3", distance: 1600, trackCondition: "良", courseType: "芝" },
+      race: { raceName: `レース${id}`, grade: "G3", distance: 1600, trackCondition: "良", courseType: "芝", weightType: "別定", filliesOnly: true },
       horses: Array.from({ length: this.horsesPerRace }, (_, k) => ({
         umaban: k + 1, wakuban: k + 1, sex: "牡", age: 3 + k, kinryo: 55, bodyWeight: 480 + k, oikiriRank: "A", oikiriCritic: "動き良化",
         name: "SECRET-NAME", jockeyName: "SECRET-JOCKEY", trainerName: "SECRET-TRAINER", winOdds: 99.9, popularity: 13, placeOddsMin: 77.7, placeOddsMax: 88.8,
@@ -190,7 +190,7 @@ describe("要求と状態", () => {
     expect(w.store.puts).toHaveLength(1);
     expect(w.store.puts[0]!.key).toBe(PRIOR_EXPORT_KEY);
     const { meta, rows } = readFile(w.store.puts[0]!.bytes);
-    expect(meta).toMatchObject({ format: 2, rows: 15, races: 5, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } });
+    expect(meta).toMatchObject({ format: 3, rows: 15, races: 5, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } });
     expect(rows).toHaveLength(15);
     expect(rows.map((r) => r.race_id)).toEqual(Array.from({ length: 15 }, (_, i) => raceIdOf(Math.floor(i / 3) + 1)));
     expect(rows.slice(0, 3).map((r) => r.umaban)).toEqual([1, 2, 3]);
@@ -202,6 +202,8 @@ describe("要求と状態", () => {
     expect(rows[0]).toMatchObject({ race_name: "レース100", grade: "G3", distance: 1600, track_condition: "良", wakuban: 1, sex: "牡", age: 3, body_weight: 480, kinryo: 55, oikiri_rank: "A", oikiri_critic: "動き良化" });
     expect(rows[2]).toMatchObject({ race_name: "レース100", umaban: 3, wakuban: 3, age: 5, body_weight: 482 });
     expect(rows[3]).toMatchObject({ race_name: "レース101", umaban: 1 });
+    // v3 の列(Issue #421): レースの条件は R2 の詳細のスナップショットから全頭に入る。
+    expect(rows.map((r) => [r.weight_type, r.fillies_only])).toEqual(Array(15).fill(["別定", true]));
     const text = new TextDecoder().decode(gunzipSync(w.store.puts[0]!.bytes));
     for (const secret of ["SECRET-NAME", "SECRET-JOCKEY", "SECRET-TRAINER", "99.9", "77.7", "88.8"]) {
       expect(text, `ファイルに ${secret} が無い`).not.toContain(secret);
@@ -249,6 +251,8 @@ describe("要求と状態", () => {
     const noDetailRows = rows.filter((r) => r.race_id === raceIdOf(2));
     expect(noDetailRows).toHaveLength(3);
     for (const r of noDetailRows) expect(keys.map((k) => r[k])).toEqual(Array(11).fill(null));
+    for (const r of noDetailRows) expect([r.weight_type, r.fillies_only]).toEqual([null, null]); // v3 の 2 列も null(Issue #421)
+    for (const r of rows.filter((x) => x.race_id !== raceIdOf(2))) expect([r.weight_type, r.fillies_only]).toEqual(["別定", true]);
     for (const r of rows.filter((x) => x.race_id !== raceIdOf(2))) expect(keys.every((k) => r[k] !== null)).toBe(true);
   });
 });

@@ -76,6 +76,7 @@ describe("migration の適用(ローカルの D1)", () => {
       "analysis_close", // Issue #338(0019。締切の直前の再計算の結果。回ごとに 1 行)
       "analysis_close_bets", // Issue #338(0019。ok の回の買い目)
       "trainer_results", // Issue #354(0020。調教師の年ごとの成績)
+      "race_conditions", // Issue #421 段階 1(0022。レースの条件〈負担重量の種別・牝馬限定〉)
     ].sort());
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("detail_key");
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("llm_note"); // Issue #194(0005)
@@ -88,8 +89,8 @@ describe("migration の適用(ローカルの D1)", () => {
     expect(indexes).toEqual(["idx_analyses_analyzed_at", "idx_analyses_exe_id", "idx_analyses_kaisai_analyzed", "idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race", "idx_analyses_race_analyzed"]);
   });
 
-  it("migration は21本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql"]);
+  it("migration は22本とも適用済みとして記録されている(d1_migrations)", async () => {
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql"]);
     expect((await rows("PRAGMA table_info(race_results)")).map((r) => r["name"])).toContain("scratched"); // Issue #72(0013)
     expect((await rows("PRAGMA table_info(race_results)")).map((r) => r["name"])).toContain("wakuban"); // Issue #269(0016)
   });

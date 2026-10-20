@@ -269,6 +269,17 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     indexes: [{ origin: "pk", unique: 1, columns: ["saved_at", "race_id"], name: null }],
   },
+  // 0022 の中身(Issue #421 段階 1)。レースの条件(負担重量の種別・牝馬限定)の記録。レース 1 件につき 1 行(WITHOUT ROWID。主キーは race_id。副索引なし)。
+  race_conditions: {
+    columns: [
+      { name: "fillies_only", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "race_id", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "saved_at", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "weight_type", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["race_id"], name: null }],
+  },
   // 0017 の中身(Issue #294。0021〈Issue #360〉で dropped_json を追加)。馬場の API の取得の試み(開催日が主キー = 1 日 1 行。WITHOUT ROWID。副索引なし)と、競馬場ごとの当日の馬場の値(主キーは (kaisai_date, venue_code)。WITHOUT ROWID。副索引なし)。
   baba_fetches: {
     columns: [
@@ -402,8 +413,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql の21本だけで、番号は 0001 から連続している(後から足すときは 0022 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql の22本だけで、番号は 0001 から連続している(後から足すときは 0023 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {

@@ -7,9 +7,10 @@
  *
  * **黙って捨てない**: 読めない版・メタ行の無いファイル・件数の食い違い(途中で切れた/混ざった)・壊れた行(JSON でない・列の過不足・型の違い)は、行番号つきの例外にする。
  *
- * **形式 v1 と v2 の両方を読む**(Issue #341)。v1(19 列)の行は、v2 で足した 11 列(出馬表の列)を null に補って、v2 の型の行にする。`meta.format` は元の版のまま。
- * 列の過不足は版ごとに検査する(v1 に v2 の列があれば「知らない列」、v2 に足りなければ「列が足りません」。**v2 と名乗るファイルに v1 の行が混ざっても、黙って v1 として読まず例外**)。
- * v1 を読んだときの「全部 null」を欠損と取り違えないよう、{@link v2ColumnCoverage} で v2 の列の非 null の件数を見られる(CLI の要約にも出す)。
+ * **形式 v1・v2・v3 をすべて読む**(Issue #341・#421)。v1(19 列)の行は、v2 で足した 11 列(出馬表の列)と v3 で足した 2 列(レースの条件)を null に補い、v2(30 列)の行は v3 の 2 列を null に補って、
+ * v3 の型の行にする。`meta.format` は元の版のまま。
+ * 列の過不足は版ごとに検査する(古い版に新しい版の列があれば「知らない列」、新しい版に足りなければ「列が足りません」。**v2 と名乗るファイルに v1 の行が混ざっても、v3 と名乗るファイルに v2 の行が混ざっても、黙って古い版として読まず例外**)。
+ * 古い版を読んだときの「全部 null」を欠損と取り違えないよう、{@link v2ColumnCoverage}・{@link v3ColumnCoverage} で v2・v3 の列の非 null の件数を見られる(CLI の要約にも出す)。
  *
  * 使い方(リポジトリのルートで): `pnpm tsx scripts/prior-dataset.ts <ファイル>` で要約(行数・レース数・区分別・欠落の件数)を出す。
  */
@@ -18,7 +19,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { PRIOR_ROW_KEYS, PRIOR_ROW_KEYS_V1, PRIOR_ROW_KEYS_V2_ADDED, type PriorDatasetRow } from "../cloud/src/prior-export-format.js";
+import { PRIOR_ROW_KEYS, PRIOR_ROW_KEYS_V1, PRIOR_ROW_KEYS_V2_ADDED, PRIOR_ROW_KEYS_V3_ADDED, type PriorDatasetRow } from "../cloud/src/prior-export-format.js";
 
 export type { PriorDatasetRow } from "../cloud/src/prior-export-format.js";
 
@@ -45,7 +46,9 @@ const isNumOrNull = (v: unknown): boolean => v === null || isNum(v);
 const isStrOrNull = (v: unknown): boolean => v === null || typeof v === "string";
 
 /** 読める形式の版。 */
-const READABLE_FORMATS = [1, 2] as const;
+const READABLE_FORMATS = [1, 2, 3] as const;
+
+type Format = (typeof READABLE_FORMATS)[number];
 
 /** v2 で足した列の型の検査(v2 の行だけ)。distance・wakuban・age は整数、body_weight・kinryo は有限の数、ほかは文字列。いずれも null あり。 */
 function v2Checks(row: Record<string, unknown>): Array<[string, boolean]> {
@@ -65,10 +68,25 @@ function v2Checks(row: Record<string, unknown>): Array<[string, boolean]> {
   ];
 }
 
-/** 行 1 つの列・型を検査する(`format` はメタ行の版: 1 は v1 の 19 列、2 は v2 の 30 列)。問題があれば理由の文字列、なければ null。 */
-function rowProblem(row: unknown, format: 1 | 2): string | null {
+/** v3 で足した列の型の検査(v3 の行だけ)。weight_type は文字列、fillies_only は真偽値。いずれも null あり。 */
+function v3Checks(row: Record<string, unknown>): Array<[string, boolean]> {
+  return [
+    ["weight_type", isStrOrNull(row["weight_type"])],
+    ["fillies_only", row["fillies_only"] === null || typeof row["fillies_only"] === "boolean"],
+  ];
+}
+
+/** 版ごとの列(1 は v1 の 19 列、2 は v2 の 30 列、3 は v3 の 32 列)。 */
+const KEYS_BY_FORMAT: Readonly<Record<Format, readonly string[]>> = {
+  1: PRIOR_ROW_KEYS_V1,
+  2: [...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED],
+  3: PRIOR_ROW_KEYS,
+};
+
+/** 行 1 つの列・型を検査する(`format` はメタ行の版。{@link KEYS_BY_FORMAT})。問題があれば理由の文字列、なければ null。 */
+function rowProblem(row: unknown, format: Format): string | null {
   if (!isObject(row)) return "オブジェクトではありません";
-  const expected: readonly string[] = format === 1 ? PRIOR_ROW_KEYS_V1 : PRIOR_ROW_KEYS;
+  const expected: readonly string[] = KEYS_BY_FORMAT[format];
   const keys = Object.keys(row);
   const missing = expected.filter((k) => !keys.includes(k));
   if (missing.length > 0) return `列が足りません(${missing.join("・")})`;
@@ -106,13 +124,16 @@ function rowProblem(row: unknown, format: 1 | 2): string | null {
           )),
     ],
   ];
-  if (format === 2) checks.push(...v2Checks(row));
+  if (format >= 2) checks.push(...v2Checks(row));
+  if (format === 3) checks.push(...v3Checks(row));
   const bad = checks.filter(([, ok]) => !ok).map(([k]) => k);
   return bad.length > 0 ? `型が違います(${bad.join("・")})` : null;
 }
 
 /** v2 で足した列をすべて null にしたもの(v1 の行に補う)。 */
 const V2_NULLS: Readonly<Record<string, null>> = Object.fromEntries(PRIOR_ROW_KEYS_V2_ADDED.map((k) => [k, null]));
+/** v3 で足した列をすべて null にしたもの(v1・v2 の行に補う)。 */
+const V3_NULLS: Readonly<Record<string, null>> = Object.fromEntries(PRIOR_ROW_KEYS_V3_ADDED.map((k) => [k, null]));
 
 /** gzip(複数メンバー可)のバイト列から読む。 */
 export function parsePriorDataset(bytes: Uint8Array): PriorDataset {
@@ -128,7 +149,7 @@ export function parsePriorDataset(bytes: Uint8Array): PriorDataset {
     throw new Error("先頭行がメタ行(_meta)ではありません。書き出しのファイルではない可能性があります");
   }
   const meta = head["_meta"] as unknown as PriorDatasetMeta;
-  const format = (READABLE_FORMATS as readonly unknown[]).includes(meta.format) ? (meta.format as 1 | 2) : null;
+  const format = (READABLE_FORMATS as readonly unknown[]).includes(meta.format) ? (meta.format as Format) : null;
   if (format === null) {
     throw new Error(`読めない版のファイルです(format ${String(meta.format)}。このローダは ${READABLE_FORMATS.join("・")} を読みます)`);
   }
@@ -144,8 +165,9 @@ export function parsePriorDataset(bytes: Uint8Array): PriorDataset {
     if (problem !== null) {
       throw new Error(`${i + 1} 行目: ${problem}`);
     }
-    // v1 の行は、v2 の列を null に補って v2 の型にする(v1 の列の値は変えない。列の順序は PRIOR_ROW_KEYS)。
-    rows.push((format === 1 ? { ...(parsed as Record<string, unknown>), ...V2_NULLS } : parsed) as PriorDatasetRow);
+    // 古い版の行は、足りない版の列を null に補って v3 の型にする(元の列の値は変えない。列の順序は PRIOR_ROW_KEYS)。
+    const padding = format === 1 ? { ...V2_NULLS, ...V3_NULLS } : format === 2 ? V3_NULLS : {};
+    rows.push((format === 3 ? parsed : { ...(parsed as Record<string, unknown>), ...padding }) as PriorDatasetRow);
   }
   if (rows.length !== meta.rows) {
     throw new Error(`件数が合いません(メタ行は ${String(meta.rows)} 行、実際は ${rows.length} 行。途中で切れたか、別のファイルが混ざった可能性があります)`);
@@ -203,6 +225,14 @@ export function v2ColumnCoverage(rows: readonly PriorDatasetRow[]): Record<(type
   return Object.fromEntries(PRIOR_ROW_KEYS_V2_ADDED.map((k) => [k, rows.filter((r) => r[k] !== null).length])) as Record<(typeof PRIOR_ROW_KEYS_V2_ADDED)[number], number>;
 }
 
+/**
+ * v3 で足した 2 列ごとの、非 null の行数(キーの順は `PRIOR_ROW_KEYS_V3_ADDED`)。v1・v2 のファイルを読むと全列 0。
+ * 地方・読めなかったレース・この項目を保存する前の旧スナップショットは null なので、中央の新しい分析の件数を見る目安になる。
+ */
+export function v3ColumnCoverage(rows: readonly PriorDatasetRow[]): Record<(typeof PRIOR_ROW_KEYS_V3_ADDED)[number], number> {
+  return Object.fromEntries(PRIOR_ROW_KEYS_V3_ADDED.map((k) => [k, rows.filter((r) => r[k] !== null).length])) as Record<(typeof PRIOR_ROW_KEYS_V3_ADDED)[number], number>;
+}
+
 if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const file = process.argv[2];
   if (file === undefined) {
@@ -214,5 +244,6 @@ if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLTo
     console.log(`要約: ${JSON.stringify(summarize(rows))}`);
     console.log(`除外: ${JSON.stringify(meta.excluded)}・詳細なしのレース ${meta.missingDetail}`);
     console.log(`v2 の列の非 null の件数${meta.format === 1 ? "(形式 1 のファイルなので全列 0)" : ""}: ${JSON.stringify(v2ColumnCoverage(rows))}`);
+    console.log(`v3 の列の非 null の件数${meta.format < 3 ? `(形式 ${meta.format} のファイルなので全列 0)` : ""}: ${JSON.stringify(v3ColumnCoverage(rows))}`);
   }
 }

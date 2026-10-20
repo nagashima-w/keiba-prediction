@@ -27,6 +27,7 @@ import { DAILY_REPORT_NAME, isRequestSettled, type RequestReportResult } from ".
 import { D1JockeyResultsStore } from "./jockey-results-repository";
 import { D1TrainerResultsStore } from "./trainer-results-repository";
 import { D1HorseRunsStore } from "./horse-runs-repository";
+import { D1RaceConditionsStore } from "./race-conditions-repository";
 import { D1ResultStore } from "./result-repository";
 import { getTargetsLedgerWire, type TargetsLedgerWire } from "./targets-ledger";
 import { D1TargetsStore } from "./targets-repository";
@@ -133,6 +134,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 各馬の戦績の蓄積先(Issue #256 段階A。D1 の horse_runs・horse_run_saves〈migration 0014〉)。事前分析の計算ステップの末尾だけで保存する(取得は増やさない)。
       // 失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
       horseRunsStore: new D1HorseRunsStore({ db: env.DB }),
+      // レースの条件(負担重量の種別・牝馬限定)の記録先(Issue #421 段階 1。D1 の race_conditions〈migration 0022〉)。朝・発走前の取得ステップで、出馬表を読んだ直後に 1 回書く(取得は増やさない)。
+      // 失敗は握って警告にする(取得ステップを止めない)ので、migration の適用前に Worker が先に出ても動く。
+      raceConditionsStore: new D1RaceConditionsStore({ db: env.DB }),
       // 馬場の API の取得(Issue #294)。secret が未登録・形式不正なら undefined(取得の段階全体が無効)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(baba_fetches・baba_conditions〈migration 0017〉)。
       fetchBaba: createBabaFetcher(env.BABA_API_URL),
       babaStore: new D1BabaStore({ db: env.DB }),

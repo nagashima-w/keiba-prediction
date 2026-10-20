@@ -6,6 +6,7 @@
  */
 
 import type { HorseId, RaceId } from "./ids.js";
+import type { WeightType } from "./race-condition.js";
 
 /** コース種別。芝・ダート・障害の3種。 */
 export type CourseType = "芝" | "ダ" | "障";
@@ -165,6 +166,17 @@ export interface ShutubaRaceInfo {
    * "J・G1"〜"J・G3")。グレードが無い・読めない(OP・L・条件クラス・未測定の番号)ときは**キー自体を持たない**。
    */
   readonly grade?: string;
+  /**
+   * 負担重量の種別(Issue #421 段階 1。`.RaceData02` の span と完全一致で読む。`race-condition.ts`)。
+   * **キーを持つのは、中央の出馬表を `readRaceConditions: true` で読み、種別が 1 つに決まったときだけ**:
+   * 地方(読まない)・種別の span が無い・異なる種別が複数出た(曖昧)ときはキー自体が無い。
+   */
+  readonly weightType?: WeightType;
+  /**
+   * 牝馬限定か(Issue #421 段階 1。条件の span が「牝」を含む)。**キーを持つのは、中央の出馬表を `readRaceConditions: true` で読み、
+   * `.RaceData02` が見つかったときだけ**(true/false は確定値)。地方(読まない)・`.RaceData02` が無いときはキー自体が無い。
+   */
+  readonly filliesOnly?: boolean;
 }
 
 /** 出馬表のパース結果(レース情報+出走馬)。 */

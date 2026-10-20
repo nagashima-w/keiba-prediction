@@ -26,6 +26,9 @@
  *   差分の検査: `git diff -U0 packages/core/test/golden | grep '^[-+]'` で、追加 48 行がすべて `"latePos"` の行で、削除行は 0(`grep -c '"earlyPos"'` も `grep -c '"latePos"'` も 48)。
  * **Issue #400 R-10b で再生成した**(開催日の近似の経路を撤去: `AnalysisResult.dateApproximate` を削除し、3 件目のシナリオを `noLlmNoAllocationNoDate`〈開催日なし〉から `noLlmNoAllocation`〈開催日あり〉へ改名した)。
  *   差分の検査: 新旧の JSON を構造で比べ、(a) 3 シナリオの `result.dateApproximate` の行が消える、(b) 3 件目の `record.kaisaiDate` が null から "20260628" になる、(c) 3 件目のシナリオ名、の 3 点だけであること。
+ * **Issue #421 段階 1 で再生成した**(スナップショットの race にレースの条件〈負担重量の種別・牝馬限定〉を足した。入力の出馬表 `shutuba_202603020211` はハンデ戦で牝馬限定でない)。
+ *   差分の検査: 新旧の JSON を構造で比べ、差分が「3 シナリオの `record.raceSnapshot.race` に `weightType: "ハンデ"` と `filliesOnly: false` の 2 キーが加わる」6 件だけで、
+ *   `promptInput`・`promptText`・確率・配分・その他のキーは 1 件も動かない(`git diff` の行としては、`"grade": "G3"` の末尾のカンマが加わる 3 行を含む 12 行)。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */
