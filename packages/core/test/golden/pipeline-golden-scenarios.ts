@@ -11,7 +11,7 @@
  *  - `noLlmAllBets`: LLM なし・配分(全券種 ON)あり・開催日あり
  *  - `llmStubSameDayGrade`: LLM はスタブ(確定的な補正)・当日傾向(前走10本分の合成結果)・重賞の過去10年傾向(実フィクスチャの
  *    実応答を collectGradeWinnerTrend で集計)あり。**LLM に渡る promptInput とプロンプト本文**も固定する
- *  - `noLlmNoAllocationNoDate`: LLM なし・配分なし・開催日なし(当日日付で近似する経路)
+ *  - `noLlmNoAllocation`: LLM なし・配分なし・開催日あり(Issue #400 R-10b までは「開催日なし〈当日日付で近似する経路〉」の `noLlmNoAllocationNoDate`)
  */
 
 import { readFileSync } from "node:fs";
@@ -167,7 +167,7 @@ export interface GoldenScenarioOutput {
 export interface GoldenFile {
   readonly noLlmAllBets: GoldenScenarioOutput;
   readonly llmStubSameDayGrade: GoldenScenarioOutput;
-  readonly noLlmNoAllocationNoDate: GoldenScenarioOutput;
+  readonly noLlmNoAllocation: GoldenScenarioOutput;
 }
 
 /** JSON を経由して Infinity・undefined など JSON で表せない値を落とした形にする(golden と同じ表現で比べるため)。 */
@@ -185,7 +185,7 @@ export async function computeGolden(
   const race = await scrapeFixtureRace();
 
   async function run(
-    kaisaiDate: typeof KAISAI_DATE | null,
+    kaisaiDate: typeof KAISAI_DATE,
     deps: Partial<AnalysisPipelineDeps>,
   ): Promise<{ result: AnalysisResult; record: AnalysisRecord }> {
     const saved: AnalysisRecord[] = [];
@@ -232,7 +232,7 @@ export async function computeGolden(
     throw new Error(`LLM スタブの呼び出しは1回のはずが ${captured.length} 回`);
   }
 
-  const noLlmNoAllocationNoDate = await run(null, {});
+  const noLlmNoAllocation = await run(KAISAI_DATE, {});
 
   return {
     noLlmAllBets,
@@ -242,6 +242,6 @@ export async function computeGolden(
       promptText: buildPrompt(captured[0]!),
       resultDetailLookups: [...lookups],
     },
-    noLlmNoAllocationNoDate,
+    noLlmNoAllocation,
   };
 }

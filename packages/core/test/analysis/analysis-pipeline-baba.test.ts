@@ -32,7 +32,7 @@ async function baseDeps(overrides: Partial<AnalysisPipelineDeps>): Promise<Analy
 }
 
 /** LLM ありで 1 回走らせ、保存レコードと LLM に渡った入力を返す。 */
-async function runWithLlm(overrides: Partial<AnalysisPipelineDeps>, raceId = RACE_ID, kaisaiDate: typeof KAISAI_DATE | null = KAISAI_DATE) {
+async function runWithLlm(overrides: Partial<AnalysisPipelineDeps>, raceId = RACE_ID, kaisaiDate: typeof KAISAI_DATE = KAISAI_DATE) {
   const captured: PromptIn[] = [];
   const saved: AnalysisRecord[] = [];
   await runAnalysis(raceId, kaisaiDate, await baseDeps({ analyze: stubAnalyze(captured), saveAnalysis: (r) => void saved.push(r), ...overrides }));
@@ -113,13 +113,6 @@ describe("当日の馬場の値が無い・読まない場合は、従来どお�
     await runAnalysis(RACE_ID, KAISAI_DATE, await baseDeps({ analyze: null, saveAnalysis: (r) => void saved.push(r), getBabaConditions: () => (called += 1, FULL) }));
     expect(called).toBe(0);
     expect("baba" in snapshotOf(saved[0]!)).toBe(false);
-  });
-
-  it("開催日が渡らない(近似日になる)分析では、今日の日付で推測して読まない", async () => {
-    let called = 0;
-    const { input } = await runWithLlm({ getBabaConditions: () => (called += 1, FULL) }, RACE_ID, null);
-    expect(called).toBe(0);
-    expect(input.race.baba ?? null).toBeNull();
   });
 });
 

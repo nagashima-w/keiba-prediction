@@ -30,7 +30,7 @@ import { buildPriorInput } from "../../src/pipeline.js";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import {
-  resolveAnalysisDate,
+  analysisDateOf,
   runAnalysis,
   type AnalysisPipelineDeps,
 } from "../../src/analysis/analysis-pipeline.js";
@@ -193,19 +193,9 @@ const NAR_RACE_ID = "202654071210"; // 場コード54 → 高知(2026/07/12・10
 const KAISAI = "20260709"; // 開催日(選択済みとして渡す)。
 const FIXED_NOW = new Date("2026-07-09T12:34:56.000Z");
 
-describe("resolveAnalysisDate(開催日の解決)", () => {
-  it("YYYYMMDD が渡れば YYYY/MM/DD に変換し、近似ではない", () => {
-    expect(resolveAnalysisDate("20250115", () => FIXED_NOW)).toEqual({
-      date: "2025/01/15",
-      approximate: false,
-    });
-  });
-
-  it("null(渡らない)なら当日日付で近似し、approximate=true", () => {
-    expect(resolveAnalysisDate(null, () => FIXED_NOW)).toEqual({
-      date: "2026/07/09",
-      approximate: true,
-    });
+describe("analysisDateOf(開催日の解決)", () => {
+  it("YYYYMMDD(8桁の KaisaiDate)を YYYY/MM/DD に変換する", () => {
+    expect(analysisDateOf(parseKaisaiDate("20250115"))).toBe("2025/01/15");
   });
 });
 
@@ -236,7 +226,7 @@ describe("runAnalysis(分析パイプライン)", () => {
     progress.push(p);
   };
 
-  it("選択済み開催日を buildPriorInput の race.date と結果に反映する(近似ではない)", async () => {
+  it("選択済み開催日を buildPriorInput の race.date と結果に反映する", async () => {
     const result = await runAnalysis(
       parseRaceId(RACE_ID),
       parseKaisaiDate("20250115"),
@@ -245,7 +235,6 @@ describe("runAnalysis(分析パイプライン)", () => {
     );
 
     expect(result.date).toBe("2025/01/15");
-    expect(result.dateApproximate).toBe(false);
 
     const calls = (buildPriorInput as unknown as Mock).mock.calls;
     expect(calls.length).toBe(3);
@@ -276,17 +265,6 @@ describe("runAnalysis(分析パイプライン)", () => {
     }
   });
 
-  it("開催日が渡らない(null)場合は当日日付で近似し dateApproximate=true", async () => {
-    const result = await runAnalysis(
-      parseRaceId(RACE_ID),
-      null,
-      baseDeps(),
-      onProgress,
-    );
-    expect(result.date).toBe("2026/07/09");
-    expect(result.dateApproximate).toBe(true);
-  });
-
   it("選択済み開催日(kaisaiDate)を保存レコードにそのまま記録すること(Task#34)", async () => {
     await runAnalysis(
       parseRaceId(RACE_ID),
@@ -295,11 +273,6 @@ describe("runAnalysis(分析パイプライン)", () => {
       onProgress,
     );
     expect(saved[0]!.kaisaiDate).toBe(KAISAI);
-  });
-
-  it("開催日が渡らない(null)場合は保存レコードのkaisaiDateもnullにすること(当日近似日付は保存しない、Task#34)", async () => {
-    await runAnalysis(parseRaceId(RACE_ID), null, baseDeps(), onProgress);
-    expect(saved[0]!.kaisaiDate).toBeNull();
   });
 
   it("LLM無し(analyze=null): prior をそのまま採用し、EV・保存まで実行して結果を返す", async () => {
@@ -2988,7 +2961,6 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
     expect(result.venueName).toBe("高知");
     expect(result.rows).toHaveLength(3);
     expect(result.date).toBe("2026/07/12");
-    expect(result.dateApproximate).toBe(false);
   });
 
   it("地方(NAR)の予想オッズ(yoso)でも単勝オッズから推定EVを算出できること(Task#25)", async () => {

@@ -7,7 +7,6 @@
       "courseType": "芝",
       "distance": 1800,
       "date": "2026/06/28",
-      "dateApproximate": false,
       "llmUsed": false,
       "llmSkippedReason": "golden: LLM なし",
       "fallback": false,
@@ -15143,7 +15142,6 @@
       "courseType": "芝",
       "distance": 1800,
       "date": "2026/06/28",
-      "dateApproximate": false,
       "llmUsed": true,
       "llmSkippedReason": null,
       "fallback": false,
@@ -37227,7 +37225,7 @@
       "202603020210"
     ]
   },
-  "noLlmNoAllocationNoDate": {
+  "noLlmNoAllocation": {
     "result": {
       "raceId": "202603020211",
       "venueName": "福島",
@@ -37235,7 +37233,6 @@
       "courseType": "芝",
       "distance": 1800,
       "date": "2026/06/28",
-      "dateApproximate": true,
       "llmUsed": false,
       "llmSkippedReason": "LLM分析はスキップされました",
       "fallback": false,
@@ -42196,7 +42193,7 @@
       "evEstimated": false,
       "promptVersion": null,
       "additionalInstruction": null,
-      "kaisaiDate": null,
+      "kaisaiDate": "20260628",
       "historyCutoffDate": "20260628",
       "promptLookaheadGuarded": true,
       "model": null,

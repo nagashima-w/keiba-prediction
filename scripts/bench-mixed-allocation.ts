@@ -26,9 +26,9 @@
  * - 保存済みの実オッズフィクスチャ `docs/investigations/combo-odds-real-fetch/central-on.json`
  *   (中央16頭・race_id=202603020211・確定オッズ・**実レース日 2026/06/28**)を入力にする。
  *   **ネットワークには一切出ない**
- * - `runAnalysis` には `kaisaiDate="20260628"`(実レース日)を明示して渡す。渡さないと
- *   `resolveAnalysisDate` が実行日(`now()`)へフォールバックし、季節分類・休み明け走目の
- *   基準日が壁時計時刻とともにドリフトする(#40「#35-1a」で判明した欠陥。
+ * - `runAnalysis` には `kaisaiDate="20260628"`(実レース日)を明示して渡す。(#40「#35-1a」当時は、渡さないと
+ *   実行日〈`now()`〉へフォールバックし、季節分類・休み明け走目の
+ *   基準日が壁時計時刻とともにドリフトした。#400 R-10b で近似の経路を撤去し、いまは `KaisaiDate` が必須。
  *   `docs/current-spec.md`「9. 確率の質の計測基盤」・Issue #40 参照)
  * - `runAnalysis` を `deps.analyze: null`(LLM未使用)で実行し、scorer が出す **実 prior**
  *   (LLM補正なし=adjustedProb===prior)をそのまま使う
@@ -224,9 +224,8 @@ export async function loadAnalysisResult(): Promise<AnalysisResult> {
     // Issue #59: このスクリプトでは配分提案の永続化を検証しない(この呼び出しでは配分計算を行わない)。
     allocationSettings: null,
   };
-  // kaisaiDateを明示する(実レース日2026/06/28。#40「#35-1a」)。渡さないとresolveAnalysisDateが
-  // 実行日(now())へフォールバックし、季節分類・休み明け走目の基準日が壁時計時刻とともに
-  // ドリフトする(計測条件のJSDoc参照)。
+  // kaisaiDateを明示する(実レース日2026/06/28。#40「#35-1a」)。当時は渡さないと実行日(now())へ
+  // フォールバックして基準日がドリフトした(計測条件のJSDoc参照。#400 R-10b で経路を撤去し、いまは必須)。
   return runAnalysis(raceData.raceId, parseKaisaiDate("20260628"), deps);
 }
 

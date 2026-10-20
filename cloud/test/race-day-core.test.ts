@@ -174,7 +174,6 @@ describe("朝の取得(ステップ1)と計算(ステップ2)(Issue #177 AC-b5�
     expect(prior).not.toBeNull();
     expect(prior!.result.rows).toHaveLength(16);
     expect(prior!.result.llmUsed).toBe(false);
-    expect(prior!.result.dateApproximate).toBe(false);
     expect(prior!.result.date).toBe("2026/06/28");
     expect("wideCombo" in prior!.result).toBe(false); // 朝は組合せオッズを取らない
     expect(prior!.result.rows.every((r) => r.prior > 0 && r.prior < 1)).toBe(true);
@@ -185,12 +184,12 @@ describe("朝の取得(ステップ1)と計算(ステップ2)(Issue #177 AC-b5�
   it("朝の prior は core の golden(LLM なし・配分なし)の rows と同じ prior になる(同じ runAnalysis)", async () => {
     const golden = JSON.parse(
       readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "packages", "core", "test", "golden", "pipeline-golden.json"), "utf-8"),
-    ) as { noLlmNoAllocationNoDate: { result: { rows: { umaban: number; prior: number }[] } } };
+    ) as { noLlmNoAllocation: { result: { rows: { umaban: number; prior: number }[] } } };
     const h = harness();
     await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
     await runAll(h);
     const rows = h.core.getMorningPrior(RACE_A)!.result.rows;
-    expect(rows.map((r) => [r.umaban, r.prior])).toEqual(golden.noLlmNoAllocationNoDate.result.rows.map((r) => [r.umaban, r.prior]));
+    expect(rows.map((r) => [r.umaban, r.prior])).toEqual(golden.noLlmNoAllocation.result.rows.map((r) => [r.umaban, r.prior]));
   });
 
   it("AC-b2: キャッシュに当たれば gate への取得は0本(TTL 内の再実行)。出馬表 10 分・オッズ 60 秒を過ぎたぶんだけ取り直す(2本)", async () => {

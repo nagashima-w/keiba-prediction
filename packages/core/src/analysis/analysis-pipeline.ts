@@ -39,7 +39,8 @@
  *   月日が直接埋め込まれているが、UI側で選択済みの日付と過不足なく一致する保証がないため、
  *   中央と同様に kaisaiDate をそのまま用いる方式で統一する)。UI 側で選択済みの開催日(kaisaiDate)を
  *   受け取り、これを race.date(季節分類・休み明け走目の起点)に用いる。
- *   万一 kaisaiDate が渡らなかった場合のみ、当日日付で近似し dateApproximate=true を結果に含める。
+ *   kaisaiDate は必須(非 null)。かつては渡らない場合に当日日付で近似する経路があったが、cloud から到達しないため
+ *   Issue #400 R-10b で撤去した(`AnalysisResult.dateApproximate` も削除)。
  */
 
 import {
@@ -263,32 +264,14 @@ export interface AnalysisPipelineDeps {
   }) => void;
 }
 
-/** Date を YYYY/MM/DD に整形する(buildPriorInput の date 形式に合わせる)。 */
-function toYmdSlash(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}/${m}/${d}`;
-}
-
 /**
- * 分析に用いる開催日(YYYY/MM/DD)を解決する純関数。
- * kaisaiDate(YYYYMMDD)が渡ればそれを変換して用い、近似ではない(approximate=false)。
- * 渡らない(null / 8桁でない)場合のみ当日日付で近似する(approximate=true)。
- * @param kaisaiDate 選択済み開催日(YYYYMMDD)。渡らない場合は null。
- * @param now 現在時刻取得関数(近似フォールバック用)。
+ * 分析に用いる開催日(YYYY/MM/DD)を、検証済みの開催日(YYYYMMDD の8桁)から導く純関数。
+ * 開催日は必須で、実行日による近似は存在しない(Issue #400 R-10b で撤去。cloud の入口が8桁を必須にしている)。
+ * @param kaisaiDate 選択済み開催日(YYYYMMDD。`parseKaisaiDate` で検証済み)。
  */
-export function resolveAnalysisDate(
-  kaisaiDate: string | null,
-  now: () => Date,
-): { date: string; approximate: boolean } {
-  if (kaisaiDate !== null && /^[0-9]{8}$/.test(kaisaiDate)) {
-    const date = `${kaisaiDate.slice(0, 4)}/${kaisaiDate.slice(4, 6)}/${kaisaiDate.slice(6, 8)}`;
-    return { date, approximate: false };
-  }
-  return { date: toYmdSlash(now()), approximate: true };
+export function analysisDateOf(kaisaiDate: KaisaiDate): string {
+  return `${kaisaiDate.slice(0, 4)}/${kaisaiDate.slice(4, 6)}/${kaisaiDate.slice(6, 8)}`;
 }
-
 
 /**
  * 騎手の年度別成績(`RaceData.jockeyStats`)から、その騎手の記録を取り出す。取得していない・取得に失敗した・
@@ -400,7 +383,7 @@ interface LlmStageOutcome {
 /** {@link runLlmStage} に渡す、runAnalysis が解決済みの文脈。 */
 interface LlmStageContext {
   readonly raceId: RaceId;
-  readonly kaisaiDate: KaisaiDate | null;
+  readonly kaisaiDate: KaisaiDate;
   /** 先読み遮断済みのレースデータ。 */
   readonly race: RaceData;
   readonly venueName: string;
@@ -524,13 +507,13 @@ async function runLlmStage(
 /**
  * 1レースを分析する。
  * @param raceId 対象レースID(検証済み)
- * @param kaisaiDate 選択済み開催日(YYYYMMDD)。null の場合のみ当日日付で近似する。
+ * @param kaisaiDate 選択済み開催日(YYYYMMDD。必須)。
  * @param deps 注入依存(scrape/analyze/saveAnalysis ほか)
  * @param onProgress 進捗コールバック(省略可)
  */
 export async function runAnalysis(
   raceId: RaceId,
-  kaisaiDate: KaisaiDate | null,
+  kaisaiDate: KaisaiDate,
   deps: AnalysisPipelineDeps,
   onProgress?: (progress: AnalysisProgress) => void,
 ): Promise<AnalysisResult> {
@@ -564,19 +547,16 @@ export async function runAnalysis(
   // 会場名・開催区分(中央/地方)はレースIDの場コードから、開催日は選択済み kaisaiDate から解決する。
   const venueName = venueNameFromRaceId(raceId);
   const venueKind = venueKindOfRaceId(raceId);
-  const { date: analysisDate, approximate: dateApproximate } =
-    resolveAnalysisDate(kaisaiDate, now);
+  const analysisDate = analysisDateOf(kaisaiDate);
   // (1b) 先読みリークの遮断(Issue #39)。netkeiba の馬ページの戦績は日付で絞られておらず、過去の
   // レースを分析すると、そのレース自身の走と施行日以降の走が戦績に含まれる(実測: 中央16頭で
   // 全114走のうち自レース16走・施行日より後5走。prior 上位3頭が実着順上位3頭と一致した)。
   // これらを prior・LLMプロンプト入力・結果行の材料から取り除くため、**ここで1回だけ**絞り、以降の
   // 戦績の消費箇所(buildPriorInput・runs・条件替わり・馬体重推移・人気着順乖離・乗り替わり・
   // 着差傾向・休養間隔・careerRunCount・条件替わりタグ)はすべて絞った `race` を使う。
-  //  - 当該 raceId の走は日付に依らず除外する(`raceIdRaw` 比較。中央・地方とも効く)。開催日が渡らず
-  //    実行日で近似(dateApproximate=true)した過去レースでも、自レースの走は日付だけでは残るため。
+  //  - 当該 raceId の走は日付に依らず除外する(`raceIdRaw` 比較。中央・地方とも効く)。日付の比較だけでは、
+  //    自レースの走の日付が欠損・不正なときに残りうるため。
   //  - 基準日(analysisDate)と同日以降の走・日付欠損の走を除外する(未来の走を混ぜない保守側)。
-  //    近似日のとき基準日は実行日になるため、施行日より後・実行日より前の走は残る(既知の限界。
-  //    近似日はUIから到達しない。画面には「近似」と表示される)。
   //  - 当日の未施行レースでは自レース・施行日以降の走がそもそも存在せず、何も変わらない。
   // 日付での絞り込みは scraper ではしない(scrapeRace は分析日を知らない)。
   // 出走しなかった行(除外・取消)は日付に依らない事実なので、Issue #261 から scrapeRace が戦績の取得時点で除いている(上の絞りはその後の戦績に掛かる)。
@@ -585,7 +565,7 @@ export async function runAnalysis(
     analysisDate,
   ).raceData;
   // 絞りに使った基準日(YYYYMMDD)。保存レコードの history_cutoff_date に書き、是正前の分析
-  // (この列が NULL)と区別できるようにする(dateApproximate=true でも使った基準日を書く)。
+  // (この列が NULL)と区別できるようにする。
   const historyCutoffDate = analysisDate.replaceAll("/", "");
   const isWet =
     classifyTrackWetness(race.race.trackCondition ?? null, race.race.courseType)
@@ -703,7 +683,6 @@ export async function runAnalysis(
     venueName,
     race,
     analysisDate,
-    dateApproximate,
     llmUsed,
     llmSkippedReason: llm.llmSkippedReason,
     fallback: llm.fallback,

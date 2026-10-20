@@ -102,7 +102,6 @@ describe("driveRunAnalysis: production の runAnalysis と同じプロンプト�
     for (const h of cap.inputs[0]!.horses) {
       expect(h.prior).toBe(reference.rows.find((r) => r.umaban === h.umaban)!.prior);
     }
-    expect(out.analysis.dateApproximate).toBe(false);
     expect(out.classification.runners).toHaveLength(12);
   });
 

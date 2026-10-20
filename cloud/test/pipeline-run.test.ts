@@ -69,11 +69,10 @@ describe("クラウド版から runAnalysis(analyze: null)が最後まで通る(
     expect(Object.keys(result.trifectaCombo ?? {}).length).toBeGreaterThan(1000);
   });
 
-  it("kaisaiDate が保存レコードに入り、近似日付にならない", async () => {
+  it("kaisaiDate が保存レコードに入り、結果の date は渡した開催日になる", async () => {
     const { deps, saved } = await depsFor();
     const result = await runCloudAnalysis(RACE_ID, KAISAI_DATE, deps);
     expect(saved[0]!.kaisaiDate).toBe("20260628");
-    expect(result.dateApproximate).toBe(false);
     expect(result.date).toBe("2026/06/28");
   });
 
@@ -82,7 +81,7 @@ describe("クラウド版から runAnalysis(analyze: null)が最後まで通る(
     ["空文字", ""],
     ["ハイフン区切り", "2026-06-28"],
     ["7桁", "2026062"],
-  ])("kaisaiDate が %s のときは、取得も保存もせずに拒否する(当日日付での近似に落とさない)", async (_name, bad) => {
+  ])("kaisaiDate が %s のときは、取得も保存もせずに拒否する(型を迂回した値を通さない。実行日での近似は撤去済み)", async (_name, bad) => {
     const { deps, saved, scrapeCalls } = await depsFor();
     await expect(runCloudAnalysis(RACE_ID, bad as never, deps)).rejects.toThrow(/kaisaiDate/);
     expect(scrapeCalls).toEqual([]);

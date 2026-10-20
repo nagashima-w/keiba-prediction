@@ -12,8 +12,10 @@
  *
  * ## 2関数の役割分担(#39 是正方式B)
  * - `filterRaceDataBefore`: 基準日で絞る(基準日と同日以降・日付欠損は除外)。
- * - `excludeOwnRaceResults`: 当該 raceId の走を**日付に依らず**除外する。基準日が実行日で近似される
- *   (`dateApproximate=true`)過去レースでは、日付だけでは自走が「実行日より前」として残るため。
+ * - `excludeOwnRaceResults`: 当該 raceId の走を**日付に依らず**除外する。日付の比較とは独立した除外で、
+ *   (#39 当時は、基準日が実行日で近似される過去レースで自走が「実行日より前」として残るために必要だった。
+ *   近似の経路は #400 R-10b で撤去した。いまは日付の比較でも自走は除かれるが、日付に依らない除外として残している。
+ *   日付が基準日より前の自走を除くことは no-lookahead.test.ts の「基準日の境界」で固定している。)
  *   比較は `HorseRaceResult.raceIdRaw` で行う(`raceId` は地方では常に null。実測: 地方12頭
  *   フィクスチャで raceId 一致 0 件・raceIdRaw 一致 12 件)。
  * 両者は独立に呼べる。`filterRaceDataBefore` の診断値の恒等式(#40)を保つため、raceId 除外は

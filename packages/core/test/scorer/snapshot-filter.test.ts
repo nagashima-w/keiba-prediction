@@ -185,7 +185,7 @@ describe("filterRaceDataBefore", () => {
 /**
  * excludeOwnRaceResults — 当該レース自身の走を日付に依らず除外する(#39 是正方式B)。
  *
- * `filterRaceDataBefore`(日付で絞る)は、`dateApproximate=true`(基準日が実行日になる)の過去レース
+ * `filterRaceDataBefore`(日付で絞る)は、基準日が実行日になる(#39 当時にあった近似日。#400 R-10b で撤去)過去レース
  * では当該レース自身の走を「実行日より前」として残してしまう。そこで raceId 一致による除外を
  * 別の純関数として持ち、pipeline で合成する(`filterRaceDataBefore` は #40 の恒等式を守るため無改変)。
  * 比較は `HorseRaceResult.raceIdRaw`(中央・地方とも12桁の生値が入る)で行う。`raceId` フィールドは

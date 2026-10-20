@@ -586,7 +586,7 @@ async function main(): Promise<void> {
       const date = "20260628";
       const raceId = "202603020211";
       const golden = JSON.parse(readFileSync(path.join("..", "packages", "core", "test", "golden", "pipeline-golden.json"), "utf-8")) as {
-        noLlmNoAllocationNoDate: { result: { rows: { umaban: number; prior: number }[] } };
+        noLlmNoAllocation: { result: { rows: { umaban: number; prior: number }[] } };
       };
 
       // Issue #180: 手動起動の入口(POST /api/analyses/run)。Origin・Content-Type・入力の検証 → 予約(202)→ 重複は 409。
@@ -635,11 +635,11 @@ async function main(): Promise<void> {
       check(`${label}: GET /api/analyses/status?race_id= が朝の prior の最小限(16頭・prior の高い順)を返す`, priorRows.length === 16 && priorRows.every((r, i) => i === 0 || priorRows[i - 1]!.prior >= r.prior), JSON.stringify(withPrior).slice(0, 200));
 
       const prior = parseJson((await req(port, "GET", `/smoke/race-day/prior?date=${date}&race_id=${raceId}`)).text)["prior"] as Record<string, unknown> | null;
-      check(`${label}: 朝の prior が DO に残る(16頭・LLM なし・組合せオッズなし・近似の日付ではない)`, prior !== null && prior["rows"] === 16 && prior["llmUsed"] === false && prior["hasWideCombo"] === false && prior["dateApproximate"] === false, JSON.stringify(prior).slice(0, 200));
+      check(`${label}: 朝の prior が DO に残る(16頭・LLM なし・組合せオッズなし・開催日は渡した日 2026/06/28)`, prior !== null && prior["rows"] === 16 && prior["llmUsed"] === false && prior["hasWideCombo"] === false && prior["date"] === "2026/06/28", JSON.stringify(prior).slice(0, 200));
       // Issue #226: 既定の重み(騎手 0.15)では騎手の年度別成績も prior に入る。core の golden(旧 exe の出力から作った)は騎手の成績を持たない分析なので、一致はしなくなった
       // (騎手を取らない場合の「core の golden と同じ値」は、上の E〈workerd の runAnalysis が golden と一致〉と vitest の race-day-core.test.ts が固定している)。
       // ここでは、騎手の項が workerd でも効いていること(馬の並びは同じで、1頭以上の prior が golden と違い、差はどの馬も 0.1 未満)を確かめる。
-      const goldenPriors = golden.noLlmNoAllocationNoDate.result.rows.map((r) => [r.umaban, r.prior] as const);
+      const goldenPriors = golden.noLlmNoAllocation.result.rows.map((r) => [r.umaban, r.prior] as const);
       const smokePriors = (prior?.["priors"] as [number, number][] | undefined) ?? [];
       const priorDiffs = smokePriors.map((p, i) => Math.abs(p[1] - (goldenPriors[i]?.[1] ?? Number.NaN)));
       check(

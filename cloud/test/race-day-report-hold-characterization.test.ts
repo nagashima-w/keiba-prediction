@@ -24,6 +24,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
  *  - **gate への取得**(一覧の呼び出しの引数と回数、ゲートに出た URL の系列)
  *  - 例外の扱い(`getRaceList` の例外・SQL の書き込みの例外を外へ漏らさない)
  *
+ * **Issue #400 R-10b で、SQL の SHA-1 の期待値を 5 か所更新した**: DO に保存する朝の prior の JSON から `AnalysisResult.dateApproximate` が消えたため(差は `sqlSha1` の値だけ。`buildAnalysisResult` に `dateApproximate: false` を足し戻すと、更新前の値で 30 件が通ることを確認した)。
  * 期待値は、切り出す前のコード(31b5c4e)の実出力から作った。ハーネスは `race-day-report-hold.test.ts` と同じ(ゲートは偽・保存先は偽・ストレージは `node:sqlite`)。
  */
 
@@ -3153,7 +3154,7 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold"
     ],
     "sqlCount": 83,
-    "sqlSha1": "7d9a4fa762c09b9004a5a3a561fbd3ad02a27541",
+    "sqlSha1": "897d87502144dca50fecaabcb67ccad92017d7f7",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3679,7 +3680,7 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold_judged"
     ],
     "sqlCount": 84,
-    "sqlSha1": "5d7b75d250ad00e2bacc680b81a20239df827173",
+    "sqlSha1": "3afb6cf4077a21dc664fd2e5c9fc0e0c633586ca",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3775,7 +3776,7 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold_judged"
     ],
     "sqlCount": 84,
-    "sqlSha1": "5d7b75d250ad00e2bacc680b81a20239df827173",
+    "sqlSha1": "3afb6cf4077a21dc664fd2e5c9fc0e0c633586ca",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3981,7 +3982,7 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold_judged"
     ],
     "sqlCount": 84,
-    "sqlSha1": "5d7b75d250ad00e2bacc680b81a20239df827173",
+    "sqlSha1": "3afb6cf4077a21dc664fd2e5c9fc0e0c633586ca",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -4105,7 +4106,7 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold_judged"
     ],
     "sqlCount": 84,
-    "sqlSha1": "5d7b75d250ad00e2bacc680b81a20239df827173",
+    "sqlSha1": "3afb6cf4077a21dc664fd2e5c9fc0e0c633586ca",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []

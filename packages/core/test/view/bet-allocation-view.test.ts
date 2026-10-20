@@ -55,7 +55,6 @@ function race(overrides: Partial<AnalysisResult> & { rows: readonly AnalysisRow[
     courseType: "芝",
     distance: 2000,
     date: "2026/07/30",
-    dateApproximate: false,
     llmUsed: false,
     llmSkippedReason: null,
     fallback: false,

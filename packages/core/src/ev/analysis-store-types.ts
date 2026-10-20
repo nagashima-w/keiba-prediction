@@ -78,8 +78,8 @@ export interface AnalysisRecord {
   /**
    * 戦績を絞るのに使った基準日(YYYYMMDD。`kaisaiDate` と同じ形式。Issue #39)。
    * `analysis/analysis-pipeline.ts` の `runAnalysis` が、先読みリーク遮断(基準日と同日以降・当該レース自身の走を
-   * 材料から除く)に**実際に使った基準日**をそのまま渡す。`dateApproximate=true`(開催日が
-   * 渡らず実行日で近似した)の分析でも、使った基準日(=実行日)を書く。
+   * 材料から除く)に**実際に使った基準日**をそのまま渡す。開催日が必須になった
+   * (#400 R-10b)ので、基準日は常に開催日と同じ日付。
    * 省略・null は「遮断の記録なし=是正前の呼び出し元/旧行」で、DBには NULL として保存する。
    * 読み出しは `StoredAnalysis.historyCutoffDate`。verify での除外(`classifyLookaheadSuspicion`)は
    * Issue #152 で行う。

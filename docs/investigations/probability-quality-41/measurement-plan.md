@@ -84,7 +84,7 @@ LLM を使った場合の確率の質について、この測定は何も述べ�
 - 結果が未確定(`RaceResultNotConfirmedError`)・結果ページの構造異常
 - 3着以内の馬が0頭・出走頭数が3頭未満・出馬表と結果の馬が対応しない
 - `runAnalysis` の例外(障害戦も他と同様に扱い、除外しない。例外が出たら除外)
-- 分析日が近似になった(`dateApproximate=true`。`kaisaiDate` を必ず渡すため通常は起きない)
+- ~~分析日が近似になった(`dateApproximate=true`)~~ — 計測の開始時点の記述。`runAnalysis` の開催日が必須になり近似の経路を撤去したため(#400 R-10b)、この除外理由(`date-approximate`)は無い
 
 **観測 JSON として保存しない**(`manifest.json` の実行記録に raceId・理由・文言を残し、**再実行で取り直す**):
 
@@ -135,7 +135,7 @@ LLM を使った場合の確率の質について、この測定は何も述べ�
 - 実行の記録は `manifest.json`(`runs` に再実行ごとの記録を追記。選定した開催日・会場・レース ID、
   処理結果、停止の有無、フェッチャへ渡した要求数、ブロックの兆候〈400・403・429〉を受けた URL、
   実行時の git commit hash〈`git rev-parse HEAD`〉)。
-- 計測には必ず実レース日の `kaisaiDate` を渡す(`dateApproximate=false`。`docs/current-spec.md` 9節)。
+- 計測には必ず実レース日の `kaisaiDate` を渡す(観測 JSON の `conditions.dateApproximate` は常に `false`。`runAnalysis` の `kaisaiDate` は #400 R-10b から必須で、近似の経路は無い。`docs/current-spec.md` 9節)。
   リーク遮断は `runAnalysis` が自分で行う(#39)。計測側でも `filterRaceDataBefore` の診断値を
   `conditions`(`cutoffDate`・`removedResultCount`)に残す。この診断値は**計測側が生の戦績に
   掛けた値**で、`runAnalysis` が(自レースの走を先に除いてから日付で絞るため)内部で除いた件数とは
