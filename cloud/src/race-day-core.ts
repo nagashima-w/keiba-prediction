@@ -6,7 +6,7 @@
  * ## 用語(Issue #249)
  * 「事前分析」= mode `morning`(旧「朝の準備」)。画面・Discord・docs の表示名だけを変えた。内部の識別子(`morning`・D1・DO の状態・API の値)と、コメントの「朝の prior」「朝のタスク」は旧称のまま。
  * 事前分析は**前日の 21:00 JST**(cron の 1 本目)に、翌日の開催日の DO で始まる。23:00 JST(2 本目)の再実行は `requestPlan({ rescue: true })` で、失敗した分を 1 回だけ救済し({@link RaceDayCore.requestPlan})、
- * 救済の後も失敗が残れば Discord に通知する({@link judgePlanRescue}・`judgeRescue`)。
+ * 救済の後も失敗が残れば Discord に通知する(`judgePlanRescue`・{@link RescueStage.judge})。
  *
  * ## 役割
  * 開催日(`idFromName(kaisaiDate)`)ごとに1つの DO が、その日の全レースの**事前分析**を直列に処理する(gate の待ち行列の上限 8 に当たらない)。
@@ -106,8 +106,6 @@ import { checkRaceDate } from "./race-date";
 import { jstKaisaiDate } from "./auto-run-plan";
 import { isDayQuiet } from "./day-quiet";
 import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, type AutoFailReason, type AutoRunOutcome } from "./auto-run-result";
-import { buildPlanFailureEmbed, buildPlanFailureMinimalEmbed, type CloudEmbed } from "./notify-embeds";
-import { judgePlanRescue } from "./plan-failure";
 import { type NotificationPlan, type NotifyKind, type NotifyState } from "./notify-plan";
 import type { DiscordNotifier } from "./notify-send";
 import { NotifyStore } from "./notify-store";
@@ -141,6 +139,7 @@ import { CloseStore } from "./race-day-close";
 import { CloseStage, type CloseStepOutcome } from "./race-day-close-stage";
 import { NotifyStage, type NotifyStepOutcome } from "./race-day-notify-stage";
 import { PlanStage, type PlanStepOutcome } from "./race-day-plan-stage";
+import { RescueStage } from "./race-day-rescue-stage";
 import { PromoteStage } from "./race-day-promote-stage";
 import { ResultStage, type ResultStepOutcome } from "./race-day-result-stage";
 import { REPORT_HOLD_KEY, REPORT_REQUESTED_KEY, ReportHoldStage } from "./race-day-report-hold-stage";
@@ -152,11 +151,7 @@ import { buildCloudScorerConfig } from "./scorer-config";
 import { ADDITIONAL_INSTRUCTION_MAX_LENGTH, coerceCloudSettings, DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "./settings";
 import type { SqlLike } from "./sql-like";
 
-/**
- * 23 時の再実行(救済)の後の失敗の判定の結果(`ok` か `failed`)を永続化するキー(Issue #249)。**判定は 1 回だけ**: 書かれたら二度と判定しない(後から手動で事前分析を再実行しても、通知は変わらない)。
- * webhook が無効(`notifier` なし)の構成では判定しない(書かない)。
- */
-const RESCUE_VERDICT_KEY = "plan_rescue_verdict";
+// 救済の後の失敗の判定の結果を永続化するキー(`plan_rescue_verdict`)は、段階 `race-day-rescue-stage.ts` にある(Issue #399〈R-9e の e3〉)。
 
 // 日報の時刻の下限・依頼済み・判定済みの印のキー(`REPORT_HOLD_KEY`・`REPORT_REQUESTED_KEY`・判定済み)と警告の文言は、段階 `race-day-report-hold-stage.ts` にある(Issue #399〈R-9b〉)。
 // `REPORT_HOLD_KEY` は従来の import 先を保つため再 export する。
@@ -727,6 +722,8 @@ export class RaceDayCore {
   private readonly promoteStage: PromoteStage;
   /** 計画の一覧と確定の段階(Issue #203。Issue #399〈R-9e の e1〉で切り出した。表は `plan`)。コンストラクタの最後に作る。 */
   private readonly planStage: PlanStage;
+  /** 救済(23 時の再実行)と、救済の後の失敗の判定の段階(Issue #249。Issue #399〈R-9e の e3〉で切り出した。表は `plan`・`notifyStore`)。コンストラクタの最後に作る。 */
+  private readonly rescueStage: RescueStage;
   /** Discord への送信。無ければ(webhook が無効)通知の仕組み全体が無効。 */
   private readonly notifier: DiscordNotifier | undefined;
   private readonly appBaseUrl: string | undefined;
@@ -887,6 +884,18 @@ export class RaceDayCore {
       maxAttempts: MAX_ATTEMPTS,
       retryDelayMs: RETRY_DELAY_MS,
       maxTasksPerDay: MAX_TASKS_PER_DAY,
+    });
+    // 救済の段階(Issue #399〈R-9e の e3〉。表の作成は上の `PlanStore`・`NotifyStore` だけ)。通知は材料(`putReady`)を積むだけで、送信の口(`notifier`)は渡さず、有無だけを値で渡す。`setAlarm` 系・取得口・キャッシュ系も渡さない。
+    this.rescueStage = new RescueStage({
+      plan: this.plan,
+      sql: this.sql,
+      now: this.now,
+      onWarn,
+      metaGet: (key) => this.metaGet(key),
+      notifierEnabled: this.notifier !== undefined,
+      notifyStore: this.notifyStore,
+      getPlanProgress: () => this.getPlanProgress(),
+      enqueueTask: (raceId, mode, now) => this.enqueueTask(raceId, mode, now),
     });
   }
 
@@ -1072,7 +1081,7 @@ export class RaceDayCore {
     if (this.plan.requested()) {
       // Issue #249: 23 時の再実行(rescue)は、21 時に失敗した分を **1 回だけ** 救う。2 回目以降(cron の重複配信)・rescue を渡さない呼び出しは、何もしない(従来の冪等性のまま)。
       if (input.rescue === true) {
-        this.rescuePlan();
+        this.rescueStage.rescue();
       }
       // Issue #206(G-E2。#203 の【記録】5): 依頼を書いたあとに `setAlarm` が失敗していると、アラームが無いまま止まる。cron の再配信(または再試行)が来たときに、
       // 状態からアラームを張り直す。`rearm` は状態を変えず、候補が無ければ何もしない(冪等)。
@@ -1089,29 +1098,6 @@ export class RaceDayCore {
     }
     await this.rearm();
     return { accepted: true };
-  }
-
-  /**
-   * 救済(Issue #249。{@link requestPlan} の `rescue`)。**同期**(`await` なし。途中で落ちても、記録が最後に書かれる前に落ちれば次の呼び出しがやり直し、書かれたあとなら完了している)。
-   *  1. 記録(`plan_rescue_at`)が既にあれば何もしない(1 回だけ)。
-   *  2. 一覧の取得に失敗した会場を pending に戻し、確定の印を外す(確定は冪等: 既にある計画の行は変わらず、足りない行と morning だけが足される。最初に決めた offset も残る)。
-   *  3. 計画中(planned)のレースの failed の morning を、新しい実行として積み直す(試行 0)。実行中(queued・fetched)・done・スキップの行は触れない。
-   * 戻した会場の取得と再確定・積み直した morning の実行は、いつもどおりアラームの中で行う(呼び出し側が `rearm` する)。
-   */
-  private rescuePlan(): void {
-    const now = this.now();
-    // 先に記録を書く: 同期の区間なので、途中で例外になっても記録だけが残ることはない(DO の入力ゲートが、書き込みの途中で別の呼び出しを割り込ませない)。
-    if (!this.plan.markRescueRequested(now)) {
-      return;
-    }
-    if (this.plan.resetFailedVenues(now) > 0) {
-      this.plan.reopenFinalize();
-    }
-    for (const row of this.plan.rowsWithMorning()) {
-      if (row.state === "planned" && row.morning === "failed") {
-        this.enqueueTask(row.race_id, "morning", now);
-      }
-    }
   }
 
   /** 事前分析のまとめ(#205)のための、計画の読み取り(状態は変えない)。 */
@@ -1398,7 +1384,7 @@ export class RaceDayCore {
 
   /**
    * 次のステップを1つだけ実行する(1レースの取得 or 計算)。続きの仕事があれば、アラームを設定してから戻る。
-   * 順序: (0)期限が来た計画の行を昇格(確定済みの日だけ。手動の分析との重複の確認で D1 に出ることがある)→ (1)計画の段階(次の試行の時刻が来た会場・確定)→ (1.4)救済の後の失敗の判定(`judgeRescue`。Issue #249)→ (1.5)**通知**(時刻が来ていれば1件。Issue #205)→ (2)タスク({@link pickNext}。取得済みで計算待ち、なければ取得待ち。発走前が朝より先)→ (3)**結果の取り込み**(タスクが無く、計画の段階が終わっているときだけ、時刻が来ている 1 レース。期限を待つ planned の行があっても動く。Issue #208・#209)。
+   * 順序: (0)期限が来た計画の行を昇格(確定済みの日だけ。手動の分析との重複の確認で D1 に出ることがある)→ (1)計画の段階(次の試行の時刻が来た会場・確定)→ (1.4)救済の後の失敗の判定({@link RescueStage.judge}。Issue #249)→ (1.5)**通知**(時刻が来ていれば1件。Issue #205)→ (2)タスク({@link pickNext}。取得済みで計算待ち、なければ取得待ち。発走前が朝より先)→ (3)**結果の取り込み**(タスクが無く、計画の段階が終わっているときだけ、時刻が来ている 1 レース。期限を待つ planned の行があっても動く。Issue #208・#209)。
    * 仕事が無ければ {@link wakeWithoutWork}。
    */
   async runNextStep(): Promise<StepOutcome> {
@@ -1417,7 +1403,7 @@ export class RaceDayCore {
       return outcome;
     }
     // 23 時の再実行(救済)の後の失敗の判定(Issue #249。同期。落ち着くか期限が来たら、結果を永続化し、失敗なら通知の材料を積む)。通知の計画より前(同じ起床で送れる)。
-    this.judgeRescue();
+    this.rescueStage.judge();
     // 通知(Issue #205)。**タスクより前**: 発走前の通知は時間に追われる(immediate の行が多い日に、pre_race の連続が通知を押しのけない)。
     // 送信の間隔(1 秒)と失敗のクールダウン(60 秒)があるので、通知がタスクを押しのけ続けることもない。
     const notice = this.notifyPlan().sendNow;
@@ -1461,55 +1447,6 @@ export class RaceDayCore {
 
   private earliest(a: number | null, b: number | null): number | null {
     return a === null ? b : b === null ? a : Math.min(a, b);
-  }
-
-  /** 失敗の判定の入力(今の状態から作る。状態は変えない)。 */
-  private rescueVerdictNow(): ReturnType<typeof judgePlanRescue> {
-    const rescueAtMs = this.plan.rescueRequestedAt();
-    if (rescueAtMs === null) {
-      return { kind: "none" }; // 救済の要求が無い日(21 時だけ・手動)は、計画の写しを作らない(毎回のアラームの張り直しを重くしない)
-    }
-    return judgePlanRescue({ progress: this.getPlanProgress(), rescueAtMs, nowMs: this.now() });
-  }
-
-  /**
-   * 失敗の判定のためにアラームを張る時刻(Issue #249)。webhook が無効・判定済み・救済の要求が無いときは null(判定のための起床を作らない)。
-   * 落ち着いた(ok・failed が決まる)なら今、落ち着くのを待つ(wait)なら判定の期限。**起きたら必ず {@link judgeRescue} が状態を変える**(空回りしない)。
-   */
-  private rescueJudgeAtMs(): number | null {
-    if (this.notifier === undefined || this.metaGet(RESCUE_VERDICT_KEY) !== null) {
-      return null;
-    }
-    const verdict = this.rescueVerdictNow();
-    return verdict.kind === "none" ? null : verdict.kind === "wait" ? verdict.dueMs : this.now();
-  }
-
-  /**
-   * 23 時の再実行(救済)の後の失敗の判定(Issue #249。同期)。落ち着いた・期限が来たときに 1 回だけ、結果(`ok`・`failed`)を {@link RESCUE_VERDICT_KEY} に永続化する。
-   * `failed` なら、通知の材料(`plan-failure` の `ready` の行)を同じ同期区間で積む(送るのは {@link NotifyStage.runStep}。`sending` を先に書くので多くとも 1 回)。
-   * 材料の組み立てが失敗しても判定は止めず、最小の通知に代える。webhook が無効・判定済み・救済の要求が無い・待つ(wait)あいだは何もしない。
-   */
-  private judgeRescue(): void {
-    if (this.notifier === undefined || this.metaGet(RESCUE_VERDICT_KEY) !== null) {
-      return;
-    }
-    const verdict = this.rescueVerdictNow();
-    if (verdict.kind === "none" || verdict.kind === "wait") {
-      return;
-    }
-    const now = this.now();
-    if (verdict.kind === "failed") {
-      const kaisaiDate = this.metaGet("kaisai_date") ?? "";
-      let embed: CloudEmbed;
-      try {
-        embed = buildPlanFailureEmbed({ kaisaiDate, progress: this.getPlanProgress(), reasons: verdict.reasons });
-      } catch (error) {
-        this.onWarn(`事前分析の失敗の通知の材料を組み立てられませんでした(最小の通知に代えます): ${errorMessage(error)}`);
-        embed = buildPlanFailureMinimalEmbed(kaisaiDate);
-      }
-      this.notifyStore.putReady("plan-failure", JSON.stringify(embed), null, now, "plan-failure");
-    }
-    this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", RESCUE_VERDICT_KEY, verdict.kind);
   }
 
   /**
@@ -1667,7 +1604,7 @@ export class RaceDayCore {
       planNextTryAtMs: this.plan.nextTryAtMs(),
       planNextDueMs: this.plan.nextDueMs(),
       purgeDueMs: purgeText === null ? null : Number(purgeText),
-      notifyAtMs: this.earliest(this.notifyPlan().nextAtMs, this.rescueJudgeAtMs()),
+      notifyAtMs: this.earliest(this.notifyPlan().nextAtMs, this.rescueStage.judgeAtMs()),
       resultAtMs: this.resultsRunnable() ? this.results.nextTryAtMs() : null,
       babaAtMs: this.baba.dueAtMs(),
       reportHoldAtMs: this.reportHold.pendingAlarmAt(),

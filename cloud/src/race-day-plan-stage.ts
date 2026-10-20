@@ -7,7 +7,7 @@
  *
  * ## 本体との境界
  *  - 本体の `runNextStep` が、**ステップの先頭の昇格のあと**、次の試行の時刻が来ている会場があれば {@link PlanStage.runList}、なければ確定の試行の時刻が来ていれば {@link PlanStage.runFinalize} を 1 回 await する(戻り値のあとの `armAlarm` は本体)。
- *  - 本体に残るもの: 依頼の受付(`requestPlan`)、救済(`rescuePlan`・`judgeRescue`。e3)、計画の観測(`getPlanProgress`・`getAutoRunResults`)、
+ *  - 本体に残るもの: 依頼の受付(`requestPlan`。救済は `race-day-rescue-stage.ts` の `RescueStage`〈e3〉に委ねる)、計画の観測(`getPlanProgress`・`getAutoRunResults`)、
  *    結果の取り込みの行を積む処理(`enqueueSameDayResults`。確定の同期区間から呼ぶ。結果の表は本体の `results` が持つので、関数で渡す)、タスクの表の操作(`task`・`taskCount`・`enqueueTask`)。
  *
  * 手順の仕様(試行回数は取得の前に永続化・再試行の上限・offset の決定と既定値へのフォールバック・原子性に頼らない冪等性・上限 cap)は {@link PlanStage.runList}・{@link PlanStage.runFinalize} の JSDoc を参照。

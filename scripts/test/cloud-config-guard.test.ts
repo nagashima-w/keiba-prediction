@@ -444,6 +444,38 @@ describe("wrangler.toml", () => {
     }
   });
 
+  it("Issue #399(R-9e e3): 救済の段階(race-day-rescue-stage.ts)は、アラーム・取得口・キャッシュに触れず、通知は材料を積むだけで送らない。段階を作る配線(core の new RescueStage)も、取得口・キャッシュ・アラームを渡さず、notifier そのものは渡さない(有無の boolean だけ)", () => {
+    // 救済は、計画の表(会場・タスク)と判定の永続化(meta)と通知の材料(race_day_notify の ready の行)を書くだけで、netkeiba に直接出ず、アラームも張らず、Discord にも送らない
+    // (張り直しは本体の armAlarm、送るのは NotifyStage)。切り出しによって、取得口・アラーム・送信の口を段階に渡せる余地が配線に移ったため、段階の本文と配線の両方を検査する。
+    const stage = stripCode(readTextLf("cloud", "src", "race-day-rescue-stage.ts"));
+    expect(stage.length).toBeGreaterThan(3000); // 前提: 段階のファイルを読めている
+    expect(stage).toContain("this.notifyStore.putReady("); // 前提: 通知は材料を積む窓口(putReady)だけ
+    expect(stage).toContain("this.enqueueTask(row.race_id,"); // 前提: タスクを積む窓口はこれ(注入された本体の関数)
+    const stageForbidden = ["setAlarm(", "rearm(", "armAlarm(", "fetch(", "networkFetcher", "cacheOnly", "httpClient", "notifier.send"];
+    const found = (text: string): string[] => stageForbidden.filter((f) => text.includes(f));
+    expect(found(stage)).toEqual([]);
+    // 対照(検出の確認。空振りでない): 禁止の文字列を含む本文は検出する
+    expect(found(`${stage}\nthis.setAlarm(1);\nthis.notifier.send(x);`)).toEqual(["setAlarm(", "notifier.send"]);
+    const core = stripCode(readTextLf("cloud", "src", "race-day-core.ts"));
+    const wireStart = core.indexOf("new RescueStage({");
+    expect(wireStart).toBeGreaterThan(-1);
+    expect(core.indexOf("new RescueStage({", wireStart + 1)).toBe(-1); // 段階を作る箇所は 1 つ
+    const wireEnd = core.indexOf("\n    });", wireStart);
+    expect(wireEnd).toBeGreaterThan(wireStart);
+    const wiring = core.slice(wireStart, wireEnd);
+    expect(wiring.length).toBeGreaterThan(300); // 前提: 配線を実際に読めている
+    expect(wiring).toContain("plan: this.plan,"); // 前提: 配線の中身を読めている(計画の表)
+    expect(wiring).toContain("notifierEnabled: this.notifier !== undefined,"); // 送信の口は渡さず、有無だけを値で渡す
+    for (const forbidden of ["setAlarm", "this.cache", "httpClient", "cacheOnly", "networkFetcher"]) {
+      expect(wiring, `RescueStage の配線に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // notifier オブジェクトそのものを渡さない: this.notifier の出現は `this.notifier !== undefined` の形だけ
+    const notifierRefs = wiring.match(/this\.notifier\b(?!\s*!==\s*undefined)/g) ?? [];
+    expect(notifierRefs, "RescueStage の配線に notifier そのもの(this.notifier の !== undefined 以外の参照)が無い").toEqual([]);
+    // 対照(検出の確認。空振りでない): notifier そのものを渡す配線は検出する
+    expect(`${wiring}\n      notifier: this.notifier,`.match(/this\.notifier\b(?!\s*!==\s*undefined)/g) ?? []).toEqual(["this.notifier"]);
+  });
+
   it("Issue #206: binding の使用箇所を概念で走査する(cloud/src の全ファイル)。env.RACE_DAY・env.NETKEIBA_GATE に触れるファイルと回数が固定で、新しい経路は赤になる", () => {
     const srcDir = path.join(ROOT, "cloud", "src");
     const files = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
