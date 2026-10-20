@@ -5,8 +5,8 @@
  * **応答を信用しない**: 202 は本文が整っている(開催日・mode が送ったものと同じ・結果が入力と同じ件数と順序・語が固定の値)ときだけ成功。整っていなければ `accepted-malformed`
  * (サーバは受理したので、呼び出し側は失敗の文言を出したうえで追跡は始める)。409 は `day-cap`(整数の limit・used・needed つき)のときだけ採用する。サーバの `error.message` は読まない・出さない。
  */
-import { isNum, isRecord, isStr, type ApiFailure, type FetchLike, type TaskMode } from "./api";
-import { classifyRunFailure, runFailureMessage } from "./api-run";
+import { classifyWrite, isNum, isRecord, isStr, postJson, type ApiFailure, type FetchLike, type TaskMode } from "./api";
+import { runFailureMessage } from "./api-run";
 
 export interface BulkRequest {
   /** 開催日(YYYYMMDD)。 */
@@ -58,35 +58,22 @@ function parseDayCap(body: unknown): { limit: number; used: number; needed: numb
 
 /** `POST /api/analyses/run/bulk`。例外(同期・非同期とも)は network にする(例外の文面は持ち込まない)。 */
 export async function postBulk(fetchLike: FetchLike, request: BulkRequest): Promise<BulkOutcome> {
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike("/api/analyses/run/bulk", {
-      method: "POST",
-      credentials: "same-origin",
-      // 参照元ポリシー(no-referrer)があっても Origin が付くようにする保険。fetch の mode は指定しない(`postRun` と同じ。api-run.ts の冒頭コメント)。
-      referrerPolicy: "same-origin",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ kaisai_date: request.date, mode: request.mode, race_ids: request.raceIds }),
-    });
-  } catch {
+  // Origin の扱い(referrerPolicy を付け、fetch の mode は指定しない)は `postJson` に集約している(`postRun` と同じ。api-run.ts の冒頭コメント)。
+  const got = await postJson(fetchLike, "/api/analyses/run/bulk", { kaisai_date: request.date, mode: request.mode, race_ids: request.raceIds });
+  if (got === null) {
     return { kind: "failed", failure: { kind: "network" } };
   }
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    body = undefined;
-  }
-  if (response.status === 202) {
+  const { status, body } = got;
+  if (status === 202) {
     const results = parseEntries(body, request);
     return results !== null ? { kind: "accepted", results } : { kind: "accepted-malformed" };
   }
-  if (response.status === 409) {
+  if (status === 409) {
     const cap = parseDayCap(body);
     return cap !== null ? { kind: "day-cap", ...cap } : { kind: "failed", failure: { kind: "unexpected", httpStatus: 409 } };
   }
   // 400・413・415 は bad-request、503 は(netkeiba の形でも)server-error。単独の起動と同じ分類。
-  return { kind: "failed", failure: classifyRunFailure(response.status, body) };
+  return { kind: "failed", failure: classifyWrite(status, body) };
 }
 
 /** 失敗の固定の文言(サーバの文面は含めない)。単独の起動と同じ。サーバは全か無かで受けるので、一時的な失敗は、もう一度押して再試行できる(実行中のレースは積まれない)。 */

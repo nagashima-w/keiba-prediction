@@ -10,7 +10,7 @@
  * サーバ側のキー名・形のドリフトは `test/client-api-prompt-preview-contract.test.ts`(実際の `handle()` の応答を通す)が検出する。
  */
 import { ADDITIONAL_INSTRUCTION_MAX_LENGTH } from "../src/settings";
-import { isRecord, type FetchLike } from "./api";
+import { isRecord, postInit, type FetchLike } from "./api";
 
 /** プレビューの 1 件(サーバが返した文面と、追加指示を切ったか、解決した版のプロンプト版)。 */
 export interface PromptPreview {
@@ -44,13 +44,8 @@ export function previewRequestKey(input: PreviewRequest): string {
 /** `POST /api/settings/prompt-preview`。例外(同期・非同期とも)・200 以外・想定外の形は、すべて `{ ok: false }`(例外の文面は持ち込まない)。 */
 export async function fetchPromptPreview(fetchLike: FetchLike, input: PreviewRequest): Promise<PromptPreviewResult> {
   try {
-    const response = await fetchLike("/api/settings/prompt-preview", {
-      method: "POST",
-      credentials: "same-origin",
-      referrerPolicy: "same-origin",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ additionalInstruction: sentInstruction(input.additionalInstruction), clipVariant: input.clipVariant }),
-    });
+    // init の組み立てだけ共通(`postInit`)。200 以外では本文を読まない流れは、ここに残す(`postJson` は常に本文を読む)。
+    const response = await fetchLike("/api/settings/prompt-preview", postInit({ additionalInstruction: sentInstruction(input.additionalInstruction), clipVariant: input.clipVariant }));
     if (response.status !== 200) return { ok: false };
     const body: unknown = await response.json();
     if (!isRecord(body) || body["ok"] !== true) return { ok: false };

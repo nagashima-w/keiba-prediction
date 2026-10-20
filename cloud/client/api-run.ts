@@ -12,7 +12,7 @@
  * **応答を信用しない**: 202 は本文が整っているときだけ成功(整っていなければ `accepted-malformed`=サーバは受理したので、呼び出し側は失敗の文言を出したうえで追跡は始める)。
  * 409 は本文が `already-running` で status が queued・fetched のときだけ採用する。サーバの `error.message` は読まない・出さない。
  */
-import { classify, isRecord, isStr, type ApiFailure, type FetchLike, type TaskMode } from "./api";
+import { classifyWrite, isRecord, isStr, postJson, type ApiFailure, type FetchLike, type TaskMode } from "./api";
 
 export type RunFailure = ApiFailure;
 
@@ -49,42 +49,22 @@ function parseAlreadyRunning(body: unknown): "queued" | "fetched" | null {
   return isStr(status) && (status === "queued" || status === "fetched") ? status : null;
 }
 
-/** 失敗(200・202・409 以外)を、起動用の分類にする。400・413・415 は bad-request、503 は(netkeiba の形でも)server-error。 */
-export function classifyRunFailure(status: number, body: unknown): RunFailure {
-  if (status === 400 || status === 413 || status === 415) return { kind: "bad-request" };
-  const failure = classify(status, body);
-  return failure.kind === "netkeiba-unavailable" ? { kind: "server-error" } : failure;
-}
-
 /** `POST /api/analyses/run`。例外(同期・非同期とも)は network にする(例外の文面は持ち込まない)。 */
 export async function postRun(fetchLike: FetchLike, request: RunRequest): Promise<RunOutcome> {
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike("/api/analyses/run", {
-      method: "POST",
-      credentials: "same-origin",
-      // 参照元ポリシー(no-referrer)があっても Origin が付くようにする保険。fetch の mode は指定しない(上の説明)。
-      referrerPolicy: "same-origin",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ race_id: request.raceId, kaisai_date: request.date, mode: request.mode }),
-    });
-  } catch {
+  // Origin の扱い(referrerPolicy を付け、fetch の mode は指定しない)は `postJson` に集約している(上の説明)。
+  const got = await postJson(fetchLike, "/api/analyses/run", { race_id: request.raceId, kaisai_date: request.date, mode: request.mode });
+  if (got === null) {
     return { kind: "failed", failure: { kind: "network" } };
   }
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    body = undefined;
-  }
-  if (response.status === 202) {
+  const { status: httpStatus, body } = got;
+  if (httpStatus === 202) {
     return parseAccepted(body, request) ? { kind: "accepted" } : { kind: "accepted-malformed" };
   }
-  if (response.status === 409) {
+  if (httpStatus === 409) {
     const status = parseAlreadyRunning(body);
     return status !== null ? { kind: "already-running", status } : { kind: "failed", failure: { kind: "unexpected", httpStatus: 409 } };
   }
-  return { kind: "failed", failure: classifyRunFailure(response.status, body) };
+  return { kind: "failed", failure: classifyWrite(httpStatus, body) };
 }
 
 /** 起動の失敗の固定の文言(サーバの文面は含めない)。一時的な失敗は、もう一度押して再試行できることを示す。 */
