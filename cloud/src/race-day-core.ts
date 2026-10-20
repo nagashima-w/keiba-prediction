@@ -46,9 +46,9 @@
  * 計画(段階2)の候補が入っても、掃除や一覧の取得が未来の予約を潰さない。`pickNext` は**発走前(pre_race)を朝(morning)より先**に処理する(再試行待ちは最後)。
  *
  * ## 事前分析の計画(Issue #203 段階2)
- * `requestPlan` → 計画の段階(会場の一覧)→ 確定(計画の表と morning の投入)→ 期限が来たら pre_race の投入。仕組みと冪等性の規則は {@link RaceDayCore.requestPlan}・`runPlanFinalize`・`promoteDuePlans`、表は `race-day-plan.ts`。
+ * `requestPlan` → 計画の段階(会場の一覧)→ 確定(計画の表と morning の投入)→ 期限が来たら pre_race の投入。仕組みと冪等性の規則は {@link RaceDayCore.requestPlan}・`runPlanFinalize`・{@link PromoteStage.promoteDue}、表は `race-day-plan.ts`。
  * ## 発走前の予約のガード(Issue #204 段階C)
- * 昇格は**確定済みの日だけ**。昇格の判定は {@link RaceDayCore.promoteRow}(実行中の手動・時刻・手動の分析との重複・上限)、自動で積んだ pre_race は印(`race_day_auto_pre_race`)で手動と区別し、
+ * 昇格は**確定済みの日だけ**。昇格の判定は {@link PromoteStage.promoteRow}(実行中の手動・時刻・手動の分析との重複・上限)、自動で積んだ pre_race は印(`race_day_auto_pre_race`)で手動と区別し、
  * 各ステップの直前に発走済みなら netkeiba にも LLM にも出ずに failed にする({@link RaceDayCore.failIfStarted})。結果は {@link RaceDayCore.getAutoRunResults} が状態から読む(`auto-run-result.ts`)。
  *
  * ## 通知(Issue #205 段階D)
@@ -140,6 +140,7 @@ import type { CloseSavePayload } from "./analysis-close";
 import { CloseStore } from "./race-day-close";
 import { CloseStage, type CloseStepOutcome } from "./race-day-close-stage";
 import { NotifyStage, type NotifyStepOutcome } from "./race-day-notify-stage";
+import { PromoteStage } from "./race-day-promote-stage";
 import { ResultStage, type ResultStepOutcome } from "./race-day-result-stage";
 import { REPORT_HOLD_KEY, REPORT_REQUESTED_KEY, ReportHoldStage } from "./race-day-report-hold-stage";
 import { allocationSettingsOf, CACHE_MISS_HEAD, CACHE_ONLY_TTL, CacheMissError, errorMessage, isFatalFetchError, ODDS_URL_PATTERN } from "./race-day-support";
@@ -724,6 +725,8 @@ export class RaceDayCore {
   private readonly notifyStage: NotifyStage;
   /** 結果の取り込みの段階(Issue #208。Issue #399〈R-9d〉で切り出した。表は `results`)。コンストラクタの最後に作る。 */
   private readonly resultStage: ResultStage;
+  /** 計画の昇格の段階(Issue #203・#204。Issue #399〈R-9e の e2〉で切り出した。表は `plan`)。コンストラクタの最後に作る。 */
+  private readonly promoteStage: PromoteStage;
   /** Discord への送信。無ければ(webhook が無効)通知の仕組み全体が無効。 */
   private readonly notifier: DiscordNotifier | undefined;
   private readonly appBaseUrl: string | undefined;
@@ -855,6 +858,19 @@ export class RaceDayCore {
       now: this.now,
       onWarn,
       metaGet: (key) => this.metaGet(key),
+    });
+    // 計画の昇格の段階(Issue #399〈R-9e の e2〉。表の作成は上の `PlanStore` だけ。ここでは SQL を出さない)。D1 は手動の分析の確認(`findRecentByRace`)だけを渡し、`setAlarm` 系・取得口は渡さない。
+    this.promoteStage = new PromoteStage({
+      plan: this.plan,
+      sink: this.sink,
+      loadSettings: this.loadSettings,
+      now: this.now,
+      onWarn,
+      task: (raceId, mode) => this.task(raceId, mode),
+      taskCount: () => this.taskCount(),
+      enqueueTask: (raceId, mode, now) => this.enqueueTask(raceId, mode, now),
+      maxTasksPerDay: MAX_TASKS_PER_DAY,
+      manualDuplicateWindowMs: MANUAL_DUPLICATE_WINDOW_MS,
     });
   }
 
@@ -1371,7 +1387,7 @@ export class RaceDayCore {
    */
   async runNextStep(): Promise<StepOutcome> {
     // 期限が来た計画の行を昇格する(同期。pre_race を積む)。続けて、同じ起床の中で、積んだ pre_race を処理できる。
-    await this.promoteDuePlans();
+    await this.promoteStage.promoteDue();
     // 事前分析の計画の段階(会場の一覧の取得・確定)。次の試行の時刻が来ているものだけ(再試行の待ちは、時刻で守る)。
     const venue = this.plan.nextListVenue(this.now());
     if (venue !== null) {
@@ -1490,111 +1506,6 @@ export class RaceDayCore {
   }
 
   // ---- 事前分析の計画(Issue #203 段階2)----
-
-  /**
-   * 期限が来た計画の行(planned で `due_ms ≤ now`)を昇格する。**確定済みの日だけ**(Issue #204 G-C3: 確定の途中で落ちた状態で先に昇格すると、その行には morning が積まれず、
-   * `morningAllTerminal` が偽のまま残る。確定の前の期限は、アラームの候補にもしない〈{@link PlanStore.nextDueMs}〉)。
-   * 行ごとに: 手動の分析との重複の確認(D1。必要なときだけ。{@link hasRecentManualAnalysis})→ 同期の判定と投入({@link promoteRow})。
-   * **起きたときに必ず状態が変わる**(積めなくても skipped にする)。
-   */
-  private async promoteDuePlans(): Promise<void> {
-    if (this.plan.finalizedAt() === null) {
-      return;
-    }
-    for (const row of this.plan.dueRows(this.now())) {
-      // D1 に出るのは、DO にそのレースの pre_race の行(done・failed)があるときだけ(D1 の analyses を書くのは pre_race の計算だけで、起動するのは schedule〈手動・この昇格〉だけ。
-      // 行が無ければ手動の分析は存在しえない)。時刻の判定でスキップになる行・実行中の手動(queued・fetched)も、D1 に聞くまでもない。
-      const existing = this.task(row.race_id, "pre_race");
-      const duplicate =
-        existing !== null && (existing.status === "done" || existing.status === "failed") && this.promotionTiming(row).kind !== "skip"
-          ? await this.hasRecentManualAnalysis(row)
-          : false;
-      this.promoteRow(row.race_id, duplicate);
-    }
-  }
-
-  /**
-   * 昇格の時点の時刻の判定: **発走済み(`now ≥ start_ms`)だけ**をスキップ(`started`)にする。発走前なら、何分前でも昇格する。
-   * 「発走まで 10 分未満〈too-late〉」は**計画の時点の判定にだけ**残す(`planPreRaceDue`)。昇格の時点でも判定すると、offset = 10 分(設定の最小値)では、アラームが期限から 1ms 遅れただけで
-   * 全レースが too-late になる(期限 = 発走 − 10 分のため)。昇格が遅れて発走が近いときは走らせ、発走を過ぎたら取得・計算の各ステップの直前のガード({@link failIfStarted})が止める。
-   * `start_ms` が null の行は計画の時点で `no-start-time` のスキップになっていて planned には来ない(到達しない分岐。来たらスキップにする)。
-   */
-  private promotionTiming(row: PlanRowRecord): { readonly kind: "ok" } | { readonly kind: "skip"; readonly reason: "started" | "no-start-time" } {
-    if (row.start_ms === null) {
-      return { kind: "skip", reason: "no-start-time" };
-    }
-    return this.now() >= row.start_ms ? { kind: "skip", reason: "started" } : { kind: "ok" };
-  }
-
-  /**
-   * 手動の分析が直前にあるか(Issue #204 AC-C4)。同じレースの、分析時刻が **[期限 − 15 分, 今]**(両端を含む)の分析のうち、**現行の prompt_version で、LLM が実際に効いた**もの
-   * (`model` あり。LLM が効かなかった fallback と、キー未登録の分析は数えない: 数えると、そのレースには prior のままの分析しか残らない)が 1 件でもあれば true。
-   * 現行 = `resolveClipVariant(設定の clipVariant).promptVersion`。設定は、候補があるときだけ読む。
-   * **読み取り(D1・設定)が失敗したら false(走らせる側に倒す)**: スキップに倒すと、そのレースの分析と通知が無くなる(利用者に見える損失)。重複した場合の被害は LLM 1 回分の費用と重複行だけ。
-   */
-  private async hasRecentManualAnalysis(row: PlanRowRecord): Promise<boolean> {
-    try {
-      const dueMs = row.due_ms;
-      if (dueMs === null) {
-        return false; // 到達しない(planned の行は期限を持つ)
-      }
-      const recent = await this.sink!.findRecentByRace(row.race_id, new Date(dueMs - MANUAL_DUPLICATE_WINDOW_MS).toISOString(), new Date(this.now()).toISOString());
-      const candidates = recent.filter((a) => a.promptVersion !== null && a.model !== null);
-      if (candidates.length === 0) {
-        return false;
-      }
-      const settings = await this.loadSettings!();
-      const current = resolveClipVariant(settings.clipVariant).promptVersion;
-      return candidates.some((a) => a.promptVersion === current);
-    } catch (error) {
-      this.onWarn(`事前分析の計画: ${row.race_id} の手動の分析の確認に失敗したため、重複なしとして続けます(${redactSecrets(errorMessage(error))})`);
-      return false;
-    }
-  }
-
-  /**
-   * 1行の昇格(同期。await なし)。`duplicate` は、手動の分析との重複の確認の結果(await の前に調べたもの)。**判定はここで、状態を読み直してから行う**(確認の await の間に、手動の予約が入りうる)。
-   *  1. 行が planned でなければ何もしない
-   *  2. 同じレースの pre_race が実行中(queued・fetched): 自動の印が今のタスクを指していれば(昇格で積んだあと、promoted にする前に落ちた再実行)promoted にするだけ。
-   *     そうでなければ手動の実行中なので、積み直さず skipped(manual)
-   *  3. 時刻の判定(発走済み〈started〉。時刻なしは到達しない)でスキップ(too-late は昇格の時点では判定しない: {@link promotionTiming})
-   *  4. 手動の分析との重複 → skipped(manual)
-   *  5. 上限に達していれば skipped(cap)
-   *  6. pre_race を積み、自動の印を書き、promoted にする(同じ `now`)
-   */
-  private promoteRow(raceId: string, duplicate: boolean): void {
-    const row = this.plan.planRow(raceId);
-    if (row === null || row.state !== "planned") {
-      return;
-    }
-    const now = this.now();
-    const existing = this.task(raceId, "pre_race");
-    if (existing !== null && (existing.status === "queued" || existing.status === "fetched")) {
-      const marker = this.plan.autoMarker(raceId);
-      if (marker !== null && marker.enqueuedAt === existing.queued_at) {
-        this.plan.markPromoted(raceId, now);
-      } else {
-        this.plan.markSkipped(raceId, "manual");
-      }
-      return;
-    }
-    const timing = this.promotionTiming(row);
-    if (timing.kind === "skip") {
-      this.plan.markSkipped(raceId, timing.reason);
-      return;
-    }
-    if (duplicate) {
-      this.plan.markSkipped(raceId, "manual");
-      return;
-    }
-    if (existing === null && this.taskCount() >= MAX_TASKS_PER_DAY) {
-      this.plan.markSkipped(raceId, "cap");
-      return;
-    }
-    this.enqueueTask(raceId, "pre_race", now);
-    this.plan.markAuto(raceId, now);
-    this.plan.markPromoted(raceId, now);
-  }
 
   /**
    * 計画の段階: 1会場の一覧を取る(1ステップ = gate への取得 1 本)。試行回数は取得の**前**に永続化する(クラッシュしても再実行が無限に続かない)。

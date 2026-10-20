@@ -295,7 +295,7 @@ export class PlanStore {
    * 計画の段階が終わっているか(Issue #209): 計画が依頼されていない、または、全会場の一覧が終端で確定済み。
    * `hasPlanWork` との違いは、**期限を待つ planned の行を「仕事」に数えない**こと。今日の DO では planned の行が最終レースまで残るので、
    * 結果の取り込み({@link RaceDayCore.resultsRunnable})が `hasPlanWork` を条件にすると、当日中は一度も動かない。
-   * 期限が来た planned の行は、各ステップの先頭の昇格(`promoteDuePlans`)でタスクになり、タスクがあるあいだ結果は動かないので、発走前の分析を押しのけない。
+   * 期限が来た planned の行は、各ステップの先頭の昇格(`PromoteStage.promoteDue`)でタスクになり、タスクがあるあいだ結果は動かないので、発走前の分析を押しのけない。
    */
   planStageSettled(): boolean {
     if (!this.requested()) {

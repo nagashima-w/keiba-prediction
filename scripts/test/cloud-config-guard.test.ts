@@ -391,6 +391,32 @@ describe("wrangler.toml", () => {
     expect(count(/this\.resultsRunnable\(\)/g)).toBe(2);
   });
 
+  it("Issue #399(R-9e e2): 計画の昇格の段階(race-day-promote-stage.ts)は、アラーム・取得口・キャッシュ・保存に触れない。段階を作る配線(core の new PromoteStage)も、取得口・キャッシュ・アラームを渡さない", () => {
+    // 昇格は D1 に手動の分析の有無を問い合わせる(findRecentByRace)だけで、netkeiba に出ず、D1 に書かず、アラームも張らない(張り直しは本体の armAlarm)。
+    // 切り出しによって、取得口やアラームを段階に渡せる余地が配線に移ったため、段階の本文と配線の両方を検査する。
+    const stage = stripCode(readTextLf("cloud", "src", "race-day-promote-stage.ts"));
+    expect(stage.length).toBeGreaterThan(3000); // 前提: 段階のファイルを読めている
+    expect(stage).toContain(".findRecentByRace("); // 前提: 段階が使う保存先の窓口はこれ(読み取りだけ)
+    const stageForbidden = ["setAlarm(", "rearm(", "armAlarm(", "fetch(", "networkFetcher", "cacheOnly", "httpClient", ".save(", "saveClose("];
+    const found = (text: string): string[] => stageForbidden.filter((f) => text.includes(f));
+    expect(found(stage)).toEqual([]);
+    // 対照(検出の確認。空振りでない): 禁止の文字列を含む本文は検出する
+    expect(found(`${stage}\nthis.setAlarm(1);\nthis.sink.save(x);`)).toEqual(["setAlarm(", ".save("]);
+    const core = stripCode(readTextLf("cloud", "src", "race-day-core.ts"));
+    const wireStart = core.indexOf("new PromoteStage({");
+    expect(wireStart).toBeGreaterThan(-1);
+    expect(core.indexOf("new PromoteStage({", wireStart + 1)).toBe(-1); // 段階を作る箇所は 1 つ
+    const wireEnd = core.indexOf("\n    });", wireStart);
+    expect(wireEnd).toBeGreaterThan(wireStart);
+    const wiring = core.slice(wireStart, wireEnd);
+    expect(wiring.length).toBeGreaterThan(200); // 前提: 配線を実際に読めている
+    expect(wiring).toContain("plan: this.plan,"); // 前提: 配線の中身を読めている(計画の表)
+    expect(wiring).toContain("sink: this.sink,"); // 保存先は本体の sink(段階の型が findRecentByRace だけに狭める)
+    for (const forbidden of ["setAlarm", "this.cache", "httpClient", "cacheOnly", "networkFetcher"]) {
+      expect(wiring, `PromoteStage の配線に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+  });
+
   it("Issue #206: binding の使用箇所を概念で走査する(cloud/src の全ファイル)。env.RACE_DAY・env.NETKEIBA_GATE に触れるファイルと回数が固定で、新しい経路は赤になる", () => {
     const srcDir = path.join(ROOT, "cloud", "src");
     const files = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
