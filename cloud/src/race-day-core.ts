@@ -58,7 +58,7 @@
  * **webhook が無効なら(`notifier` なし)、行も材料も積まず、通知のためのアラームも張らない。** URL は `notifier` のクロージャの中だけにあり、ここには渡らない。
  *
  * ## 結果の取り込み(Issue #208〈#182-B〉)
- * 過去の開催日の結果(着順・払戻)を、アラームの 1 ステップにつき **1 レース**だけ取り込む(`requestResultImport` で依頼 → {@link RaceDayCore.runResultStep})。状態は**専用の新しい表**(`race_day_result`。`race-day-result.ts`)。
+ * 過去の開催日の結果(着順・払戻)を、アラームの 1 ステップにつき **1 レース**だけ取り込む(`requestResultImport` で依頼 → {@link ResultStage.runStep})。状態は**専用の新しい表**(`race_day_result`。`race-day-result.ts`)。
  * 取得は gate 経由・キャッシュを通さない生の `HttpClient`(結果のページをキャッシュに溜めない)、保存は D1(`resultStore`)。**払戻のテーブルが出てから保存する**(審議中の暫定の着順を固めない)。
  * 優先度は最も低い: **タスク(queued・fetched)が無く、計画の段階〈会場の一覧・確定〉が終わっているときだけ**動く({@link RaceDayCore.resultsRunnable}。アラームの候補を入れるかと、動くかの両方がこれを使う)。通知は {@link RaceDayCore.runNextStep} の順序で、送るべきものがあれば先に出る。
  * **期限を待つ planned の行は止めない**ので、今日の DO でも、期限が来た行の昇格〈各ステップの先頭〉→ タスク → 結果の順で動く(Issue #209)。
@@ -92,8 +92,6 @@ import { HttpError, type HttpClient } from "../../packages/core/src/scraper/http
 import { collectGradeWinnerTrend } from "../../packages/core/src/analyzer/grade-winner-trend";
 import { fetchGradeWinnerEntries, gradeWinnerCacheKey } from "../../packages/core/src/scraper/fetch-grade-winner";
 import { GradeWinnerParseError } from "../../packages/core/src/scraper/parse-grade-winner";
-import { importRaceResult } from "../../packages/core/src/ev/result-import";
-import { parseRaceFieldSize, parseRaceResult, RaceResultNotConfirmedError } from "../../packages/core/src/scraper/parse-race-result";
 import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher } from "../../packages/core/src/scraper/scrape-race";
 import { parseKaisaiDate, parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
 import { deriveNarTrifectaAxisUmabans } from "../../packages/core/src/scraper/nar-trifecta-axis";
@@ -115,20 +113,12 @@ import type { DiscordNotifier } from "./notify-send";
 import { NotifyStore } from "./notify-store";
 import { DEFAULT_PRE_RACE_OFFSET_MINUTES, startTimeEpochMs } from "./pre-race-time";
 import {
-  MAX_RESULT_ATTEMPTS,
-  MAX_RESULT_DEFERRALS,
   MAX_RESULT_RACES_PER_REQUEST,
   MAX_RESULT_ROWS_PER_DAY,
-  MAX_SAME_DAY_ATTEMPTS,
   MAX_SAME_DAY_RESULT_ROWS,
-  MAX_SAME_DAY_UNKNOWN_SIZE_ATTEMPTS,
-  RESULT_BUSY_DELAY_MS,
-  RESULT_RETRY_DELAY_MS,
   ResultImportStore,
   SAME_DAY_RESULT_DELAY_MS,
-  SAME_DAY_RETRY_DELAY_MS,
   type ResultClass,
-  type ResultRow,
   type ResultState,
 } from "./race-day-result";
 import type { ResultRepository } from "./result-repository";
@@ -150,6 +140,7 @@ import type { CloseSavePayload } from "./analysis-close";
 import { CloseStore } from "./race-day-close";
 import { CloseStage, type CloseStepOutcome } from "./race-day-close-stage";
 import { NotifyStage, type NotifyStepOutcome } from "./race-day-notify-stage";
+import { ResultStage, type ResultStepOutcome } from "./race-day-result-stage";
 import { REPORT_HOLD_KEY, REPORT_REQUESTED_KEY, ReportHoldStage } from "./race-day-report-hold-stage";
 import { allocationSettingsOf, CACHE_MISS_HEAD, CACHE_ONLY_TTL, CacheMissError, errorMessage, isFatalFetchError, ODDS_URL_PATTERN } from "./race-day-support";
 
@@ -190,8 +181,6 @@ export const MAX_ATTEMPTS = 3;
 export const MANUAL_DUPLICATE_WINDOW_MS = 15 * 60_000;
 /** 取得ステップの再試行までの間隔(ミリ秒)。 */
 export const RETRY_DELAY_MS = 60_000;
-/** 結果の取り込みで、ブレーカーの解除を待つ時間の上限(ミリ秒)。ブレーカーは 30 分なので、それより長くは待たない(解除時刻が壊れていても、延々と先送りしない)。 */
-const MAX_BLOCKED_WAIT_MS = 60 * 60_000;
 /**
  * キャッシュ行の保持期間(ミリ秒)。使う鮮度の最長(戦績 24 時間)より長くする(短いと、まだヒットしうる行を消す)。
  * 仕事が無くなったら、`now + CACHE_RETENTION_MS + PURGE_MARGIN_MS` に**掃除専用のアラーム**を1回だけ設定し、そのアラームで、これを超えた行だけを消す。
@@ -470,10 +459,8 @@ export type StepOutcome =
   | { readonly kind: "ran"; readonly raceId: string; readonly mode: "plan"; readonly step: "list" | "finalize"; readonly result: "ok" | "retry" | "failed" }
   /** 通知の送信(Issue #205。`mode: "notify"`。形と各値の意味は {@link NotifyStepOutcome})。 */
   | NotifyStepOutcome
-  /**
-   * 結果の取り込みの 1 ステップ(Issue #208。`mode: "result"`)。`raceId` は取り込んだレース。`ok` は D1 に保存した、`retry` は再試行(保留を含む)、`failed` はこの依頼としては諦めた。
-   */
-  | { readonly kind: "ran"; readonly raceId: string; readonly mode: "result"; readonly step: "import"; readonly result: "ok" | "retry" | "failed" }
+  /** 結果の取り込みの 1 ステップ(Issue #208。`mode: "result"`。形と各値の意味は {@link ResultStepOutcome})。 */
+  | ResultStepOutcome
   /** 締切の直前の再計算の 1 ステップ(Issue #338。`mode: "close"`。形と各値の意味は {@link CloseStepOutcome})。 */
   | CloseStepOutcome
   /** 馬場の API の取得(Issue #294。`mode: "baba"`)。`raceId` は開催日。`ok` は当日の競馬場の値を D1 に保存した、`retry` は試みの記録(D1)の失敗で再試行待ち、`failed` はこの日は取得しない(再試行しない)。 */
@@ -735,6 +722,8 @@ export class RaceDayCore {
   private readonly notifyStore: NotifyStore;
   /** Discord への通知の段階(Issue #205。Issue #399〈R-9c〉で切り出した。表は `notifyStore`)。コンストラクタの最後に作る。 */
   private readonly notifyStage: NotifyStage;
+  /** 結果の取り込みの段階(Issue #208。Issue #399〈R-9d〉で切り出した。表は `results`)。コンストラクタの最後に作る。 */
+  private readonly resultStage: ResultStage;
   /** Discord への送信。無ければ(webhook が無効)通知の仕組み全体が無効。 */
   private readonly notifier: DiscordNotifier | undefined;
   private readonly appBaseUrl: string | undefined;
@@ -857,6 +846,15 @@ export class RaceDayCore {
       getPlanProgress: () => this.getPlanProgress(),
       planRow: (raceId) => this.plan.planRow(raceId),
       isAutoTask: (task) => this.isAutoTask(task),
+    });
+    // 結果の取り込みの段階(Issue #399〈R-9d〉。表の作成は上の `ResultImportStore` だけ。ここでは SQL を出さない)。取得口は gate 経由・キャッシュなしの `httpClient` だけ(`cache` 系は渡さない)。
+    this.resultStage = new ResultStage({
+      results: this.results,
+      resultStore: this.resultStore,
+      httpClient: this.httpClient,
+      now: this.now,
+      onWarn,
+      metaGet: (key) => this.metaGet(key),
     });
   }
 
@@ -1415,7 +1413,7 @@ export class RaceDayCore {
       // 結果の取り込み(Issue #208。最も低い優先度)。動けるとき({@link resultsRunnable})だけ、時刻が来ている 1 レース。
       const due = this.resultsRunnable() ? this.results.nextDue(this.now()) : null;
       if (due !== null) {
-        const outcome = await this.runResultStep(due);
+        const outcome = await this.resultStage.runStep(due);
         await this.maybeRequestReport();
         await this.armAlarm();
         return outcome;
@@ -1964,134 +1962,6 @@ export class RaceDayCore {
     const pending = (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks WHERE status IN ('queued', 'fetched')").toArray() as { n: number }[])[0]?.n ?? 0;
     // Issue #209: 期限を待つ planned の行は「仕事」に数えない(今日の DO では最終レースまで残る)。会場の一覧・確定の途中は数える。
     return pending === 0 && this.plan.planStageSettled();
-  }
-
-  /**
-   * 結果の 1 レースを取り込む(取得 → パース → **単勝の払戻が出ていれば**保存)。**多くとも 1 レース・D1 への書き込みは 1 レースぶん(最大 6 文の 1 batch。単勝オッズ・人気が無ければ最大 5 文)**。
-   * 取得は gate 経由・キャッシュなし。core の `importRaceResult` を、`parse` を包んで使う(単勝の払戻が 0 件なら `RaceResultNotConfirmedError` を投げる = 審議中の暫定の着順を保存しない)。
-   * 試行回数は取得の前に永続化する(クラッシュしても無限に続かない)。失敗の扱い:
-   *  - 未確定・払戻なし・構造の異常・取得の失敗・保存の失敗 → 試行を数えて、{@link RESULT_RETRY_DELAY_MS} 後に再試行。{@link MAX_RESULT_ATTEMPTS} 回で諦める
-   *  - gate の `queue-full`・`blocked` → **試行を数えない保留**({@link RESULT_BUSY_DELAY_MS} 後。`blocked` は解除時刻の 1 秒後)。{@link MAX_RESULT_DEFERRALS} 回を超えたら諦める
-   *  - 許可リスト外(`disallowed-url`) → 即座に諦める(再試行しても直らない)
-   * どの経路でも状態(試行・保留・状態・次の時刻)が変わる(アラームの候補が過去のまま残って、即時に起き続けない)。警告は諦めたときだけ、分類と回数だけ(メッセージは出さない)。
-   */
-  private async runResultStep(row: ResultRow): Promise<StepOutcome> {
-    const raceId = row.race_id;
-    const outcomeOf_ = (result: "ok" | "retry" | "failed"): StepOutcome => ({ kind: "ran", raceId, mode: "result", step: "import", result });
-    const attempts = row.attempts + 1;
-    this.results.markAttempt(raceId, attempts, this.now());
-    // 当日の行(Issue #209): 計画の確定で積んだ行 = 依頼の日が開催日。全頭の着順がそろった確認と、5 分おき・10 回の再試行が加わる。過去日の行(後日の cron の依頼)は従来どおり。
-    const sameDay = row.requested_on === this.metaGet("kaisai_date");
-    const progress: { stage: "fetch" | "parse" | "save"; noPayout: boolean; incomplete: "short" | "unknown-size" | null } = { stage: "fetch", noPayout: false, incomplete: null };
-    // 確定の単勝オッズ・人気だけを保存する依頼か(Issue #259。印は積むときに付け直す)。
-    const winOddsOnly = this.results.isWinOddsOnly(raceId);
-    let imported = false;
-    let failure: unknown = null;
-    try {
-      const outcome = await importRaceResult(parseRaceId(raceId), {
-        // bypassCache は無視する: この取得はキャッシュを通らない(HttpClient を直接使う)。
-        fetchText: (url) => this.httpClient.fetchText(url),
-        parse: (html) => {
-          progress.stage = "parse";
-          const parsed = parseRaceResult(html);
-          if (parsed.winPayouts.length === 0) {
-            // 着順の行はあるが払戻のテーブルが出ていない(審議中の暫定の着順)。保存しない。
-            progress.noPayout = true;
-            throw new RaceResultNotConfirmedError("払戻のテーブルがまだありません(審議中の可能性があります)");
-          }
-          if (sameDay) {
-            // 払戻が先に出て、全頭の着順が数分遅れて出るページ(地方で実測)を保存しない。**着順が確定している行**(`finishPosition !== null`。数値の着順と、取消・除外・中止などの非数値の着順を含む。
-            // 着順のセルが空の行は数えない = 行は全頭分あっても着順が空のページも未完了)の数が、ページ自身の「N頭」に満たなければ未完了。「N頭」が取れないときは判定できないので保存しない。
-            const fieldSize = parseRaceFieldSize(html);
-            if (fieldSize === null || parsed.horses.filter((h) => h.finishPosition !== null).length < fieldSize) {
-              progress.incomplete = fieldSize === null ? "unknown-size" : "short";
-              throw new RaceResultNotConfirmedError("全頭の着順がまだそろっていません");
-            }
-          }
-          return parsed;
-        },
-        saveResult: async (id, entries, courseType, comboPayouts) => {
-          progress.stage = "save";
-          if (winOddsOnly) {
-            // 過去分の補完(Issue #259・#270): 確定の単勝オッズ・人気と、取消・除外の記録(scratched)だけを、NULL の列に埋める。保存済みの着順・払戻・組合せ払戻には触れない。
-            // 同じ取得(同じ entries)で両方を埋める。どちらも冪等なので、片方が失敗して再試行になっても、埋まった分は書き直されない。
-            await this.resultStore!.saveWinOdds(id, entries);
-            await this.resultStore!.saveScratched(id, entries);
-            return;
-          }
-          await this.resultStore!.saveResult(id, entries, courseType, comboPayouts);
-        },
-      });
-      imported = outcome.status === "imported";
-    } catch (error) {
-      failure = error;
-    }
-    const now = this.now();
-    if (imported) {
-      this.results.markImported(raceId, now);
-      return outcomeOf_("ok");
-    }
-    if (failure === null) {
-      const lastClass: ResultClass = progress.noPayout ? "no-payout" : progress.incomplete !== null ? "incomplete" : "not-confirmed";
-      return this.failResult(row, attempts, lastClass, outcomeOf_, sameDay, progress.incomplete === "unknown-size" ? MAX_SAME_DAY_UNKNOWN_SIZE_ATTEMPTS : undefined);
-    }
-    if (progress.stage === "parse") {
-      return this.failResult(row, attempts, "parse-error", outcomeOf_, sameDay);
-    }
-    if (progress.stage === "save") {
-      return this.failResult(row, attempts, "save-failed", outcomeOf_, sameDay);
-    }
-    // 取得の失敗: gate の拒否は保留または即座の諦め、それ以外は試行を数える再試行。
-    if (failure instanceof HttpError && failure.cause instanceof GateRefusedError) {
-      const reason = failure.cause.reason;
-      if (reason === "disallowed-url") {
-        this.results.markGaveUp(raceId, row.deferrals, "blocked", now);
-        this.warnGaveUp(raceId, "blocked", attempts, row.deferrals);
-        return outcomeOf_("failed");
-      }
-      if (reason === "queue-full" || reason === "blocked") {
-        const deferrals = row.deferrals + 1;
-        const lastClass: ResultClass = reason === "blocked" ? "blocked" : "busy";
-        const until = failure.cause.blockedUntil;
-        const nextTryAt = reason === "blocked" && until !== undefined && until > now ? Math.min(until + 1000, now + MAX_BLOCKED_WAIT_MS) : now + RESULT_BUSY_DELAY_MS;
-        // 試行は数えない(取得の前に数えた分を戻す)。
-        this.results.markDeferred(raceId, row.attempts, deferrals, nextTryAt, lastClass, now);
-        if (deferrals > MAX_RESULT_DEFERRALS) {
-          this.results.markGaveUp(raceId, deferrals, lastClass, now);
-          this.warnGaveUp(raceId, lastClass, row.attempts, deferrals);
-          return outcomeOf_("failed");
-        }
-        return outcomeOf_("retry");
-      }
-    }
-    return this.failResult(row, attempts, "fetch-failed", outcomeOf_, sameDay);
-  }
-
-  /**
-   * 試行を数える失敗: 上限までは再試行、上限で諦める。過去日の行は {@link RESULT_RETRY_DELAY_MS} 後に {@link MAX_RESULT_ATTEMPTS} 回まで。
-   * 当日の行(Issue #209)は {@link SAME_DAY_RETRY_DELAY_MS} おきに {@link MAX_SAME_DAY_ATTEMPTS} 回まで(`maxAttempts` で、判定不能のときの上限〈{@link MAX_SAME_DAY_UNKNOWN_SIZE_ATTEMPTS}〉に絞れる)。
-   */
-  private failResult(
-    row: ResultRow,
-    attempts: number,
-    lastClass: ResultClass,
-    outcomeOf_: (r: "ok" | "retry" | "failed") => StepOutcome,
-    sameDay: boolean,
-    maxAttempts?: number,
-  ): StepOutcome {
-    const now = this.now();
-    const limit = maxAttempts ?? (sameDay ? MAX_SAME_DAY_ATTEMPTS : MAX_RESULT_ATTEMPTS);
-    if (attempts >= limit) {
-      this.results.markGaveUp(row.race_id, row.deferrals, lastClass, now);
-      this.warnGaveUp(row.race_id, lastClass, attempts, row.deferrals);
-      return outcomeOf_("failed");
-    }
-    this.results.markRetry(row.race_id, now + (sameDay ? SAME_DAY_RETRY_DELAY_MS : RESULT_RETRY_DELAY_MS), lastClass, now);
-    return outcomeOf_("retry");
-  }
-
-  private warnGaveUp(raceId: string, lastClass: ResultClass, attempts: number, deferrals: number): void {
-    this.onWarn(`結果の取り込みを諦めました(${raceId}。分類 ${lastClass}。試行 ${attempts} 回・保留 ${deferrals} 回)`);
   }
 
   // ---- 朝(morning) ----
