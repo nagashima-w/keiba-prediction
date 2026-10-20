@@ -47,8 +47,7 @@ describe("結果ストアのバンドル(Issue #207)", () => {
       const withoutRaceDay = base
         .replace(/\[\[durable_objects\.bindings\]\]\nname = "RACE_DAY"\nclass_name = "RaceDay"\n/, "")
         .replace(/\[\[migrations\]\]\ntag = "v2"\nnew_sqlite_classes = \["RaceDay"\]\n/, "")
-        // Issue #216: 移行の DO(CloudMigration)の migration v3 も、この入口は export しないので除く(Issue #394 で binding は無くなった)。
-        .replace(/\[\[migrations\]\]\ntag = "v3"\nnew_sqlite_classes = \["CloudMigration"\]\n/, "")
+        // Issue #216・#402: 移行の DO(CloudMigration)は binding が無く、migration は v3(追加)と v9(deleted_classes)。v3 だけを除くと v9 を wrangler が拒否するので、どちらも除かない。
         // Issue #217: 結果の補完の DO(RESULT_BACKFILL・ResultBackfill)と migration v4 も同じく除く。
         .replace(/\[\[durable_objects\.bindings\]\]\nname = "RESULT_BACKFILL"\nclass_name = "ResultBackfill"\n/, "")
         .replace(/\[\[migrations\]\]\ntag = "v4"\nnew_sqlite_classes = \["ResultBackfill"\]\n/, "")

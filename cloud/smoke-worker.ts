@@ -280,8 +280,6 @@ async function smokeAnalysis(): Promise<Response> {
 
 /** 日単位の DO(Issue #177)。本番の入口(#180)はまだ無いので、smoke だけが RPC を呼ぶ。 */
 export { RaceDay };
-// Issue #216・#394: 移行の DO の空の殻(本番の worker.ts と同じもの。binding は無いが、wrangler.toml の migration v3 が指すクラスなので入口から export する)。
-export { CloudMigration } from "./src/migration-do";
 export { ResultBackfill } from "./src/result-backfill-do";
 export { VerifyReportDO } from "./src/verify-do";
 // Issue #235: 日報の DO(本番の worker.ts と同じもの。binding のクラスが入口から export されている必要がある)。

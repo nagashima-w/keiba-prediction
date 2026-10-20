@@ -2049,7 +2049,7 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - **クライアントのバンドル**: 157,309 → **160,159 バイト**(+2,850。`pnpm run build:client` が出力する。移行画面の 1 行の API・文言・節だけ。サーバ側のコードはクライアントに入らない)。#394 で、この 1 行も移行画面ごとクライアントから消えた。
 - **止める設定**: Worker の var `RESULT_BACKFILL_NIGHTLY_LIMIT=0`(完全一致の `"0"` だけ。`isBackfillDisabled`)。`kick` もアラームも何もしない・`state` は `disabled`。**`cloud/smoke.ts` のすべての構成がこれで動く**(CI の smoke が補完の窓に当たっても netkeiba に出ない)。
 - **(廃止した画面の)文言**: `paused` は原因を断定しない(「今夜は一時停止中です。明晩に再開します」)。止まる経路は、gate の都合(ブレーカー・混雑)と、日単位の DO への依頼の失敗の両方なため。
-- **ガード**: `scripts/test/cloud-config-guard.test.ts` — (#217 の時点で)DO の binding は 4 つ・migration は v1〜v4。#394 の後は binding 7 つ・migration v1〜v8。補完のコードは gate の `fetchRaw`・`postRaw`・LLM・通知・R2 を持たない。`.kick()` は `scheduled.ts` と補完の DO の中だけ。`dispatchResultImports(` の呼び出しは `handler.ts`・`result-backfill-core.ts`・`scheduled.ts` の 1 つずつ。
+- **ガード**: `scripts/test/cloud-config-guard.test.ts` — (#217 の時点で)DO の binding は 4 つ・migration は v1〜v4。#394 の後は binding 7 つ・migration v1〜v8。#402 の後は migration v1〜v9(v9 は `deleted_classes = ["CloudMigration"]` だけ。他のクラスの削除は禁じる)。補完のコードは gate の `fetchRaw`・`postRaw`・LLM・通知・R2 を持たない。`.kick()` は `scheduled.ts` と補完の DO の中だけ。`dispatchResultImports(` の呼び出しは `handler.ts`・`result-backfill-core.ts`・`scheduled.ts` の 1 つずつ。
 - **変わらないもの**: exe・`packages/core` のコード・D1 のスキーマ(migration 0009 は無い)・既存の DO(`NetkeibaGate`・`RaceDay`・`CloudMigration`)・`prompt_version`。
 
 ### クラウド版の確定単勝オッズ・人気の保存と補完(#259 の前半。版数は 1.44.0 で凍結のため上げない)
@@ -2125,7 +2125,8 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
   `packages/core/src/ev/cloud-migration-format.ts` とそのサブパス `@keiba/core/ev/cloud-migration-format`、`scripts/measure-migration-import.ts`、`cloud/measure-verify-cpu.ts`、保存側の移行専用のメソッド(`saveMigratedAnalysis`・`repairDetail`・`findMigrated`・`saveMigratedResult`)。
   `dom.ts` の `accept` 属性・`on.file` イベントの許可も外した(`progress` は検証画面が使うので残す)。補助関数は、`parseLimitOverride` を `cloud/src/limit-override.ts` へ、`seededRandom`・`perturbDecimals` を `scripts/synthetic-random.ts` へ、本体を変えずに移した。
 - **クライアントのバンドル**(`CLIENT_JS`): 312,505 → **264,471 バイト**(-48,034。`pnpm run build:client`)。移行の名前を持つ 6 つの入力(metafile の `bytesInOutput`)が 41,054 で、残りの 6,980 は `view.ts`・`app.ts`・`route.ts`・`settings-form.ts`・`dom.ts` ほかから減った分。上限は 313,500 → 266,000。
-- **意図して残したもの**: 空の殻の DO `CloudMigration`(`src/migration-do.ts`)と wrangler.toml の migration v3(binding は外した)。完全削除(`deleted_classes`)は本番の DO と保存データを不可逆に消すので、別の Issue で、ユーザーの明示の承認を得てから行う。
+- **DO `CloudMigration` の削除(#402。ユーザー決定 2026-10-20)**: #394 では空の殻として残したが、wrangler.toml の migration v9(`deleted_classes = ["CloudMigration"]`)で本番の DO と保存データを不可逆に消した(ユーザーの明示の承認。記録は取り出さずに消す選択)。殻のクラスと export も削除。v3(作成)のエントリは、v9 が先行の migration を指す必要があるので残す(migration は追記のみ)。分析・結果のデータ(D1・R2)は影響しない。
+- **意図して残したもの**:
   D1 の `analyses.exe_analysis_id` 列と索引 `idx_analyses_exe_id`(migration 0008。追加のみ)。取り込んだ分析・結果。R2 の `migration/` の下に失敗した取り込みのファイルが残っている可能性(未確認・触っていない)。
 - **結果の補完**: 移行の DO の状態に依存しなくなった(上の「クラウド版の結果の補完」)。
 - **スモーク**: 節 H は、移行のファイルを材料にしていた下流の確認(一覧の並び・詳細・今日の狙い目・検証・統計モデル用の書き出し・結果の補完の集計)を、`smoke-worker.ts` の `/smoke/analyses/seed`(本番と同じ `D1AnalysisStore.saveAnalysis` で分析 5 件・結果 2 レースを入れる)を材料にして維持した。移行専用の確認だけを削除した。
