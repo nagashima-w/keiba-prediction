@@ -37,6 +37,7 @@
  */
 
 import type { FinishPosition } from "../scraper/types.js";
+import { isFiniteNumber } from "../common/guards.js";
 
 /** 1走分の人気・着順の乖離判定。中立事実のみ(評価語は含まない)。 */
 export type MarketGapJudgement =
@@ -101,11 +102,6 @@ const RANK_GAP_BAND = 0.15;
  * 境界値ちょうど(妥当帯側)の判定がentryCountの値によって不安定にならないようにする。
  */
 const EPSILON = 1e-9;
-
-/** 有限数値かどうかを判定する(null・undefined・NaN・Infinity を弾く)。 */
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
 
 /**
  * 人気・着順・頭数から乖離判定を行う(呼び出し前提: entryCount は2以上の有限数値)。

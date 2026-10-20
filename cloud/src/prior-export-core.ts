@@ -29,6 +29,7 @@
  * 詳細(R2)が無い・壊れているレースは失敗ではない(行は出し、`contributions` は null、メタ行の `missingDetail` に数える)。
  */
 
+import { jstIsoDate, nextJstMidnight } from "../../packages/core/src/common/jst";
 import { isReadAllowed, isWriteAllowed, type R2Usage } from "./r2-fence";
 import {
   assembleFile,
@@ -60,8 +61,6 @@ export const PRIOR_EXPORT_TICK_DELAY_MS = 1_000;
 export const PRIOR_EXPORT_MAX_ATTEMPTS = 5;
 /** 失敗後の再試行までの待ち。n 回目の失敗の後は `[n-1]`(最後の値を繰り返す)。 */
 export const PRIOR_EXPORT_BACKOFF_MS: readonly number[] = [30_000, 120_000, 600_000];
-
-const JST_OFFSET_MS = 9 * 60 * 60_000;
 
 /** `ctx.storage.kv`(同期 API)のうち、ここで使う部分。 */
 export interface ExportKv {
@@ -185,8 +184,6 @@ interface Runs {
   count: number;
 }
 
-const jstDay = (ms: number): string => new Date(ms + JST_OFFSET_MS).toISOString().slice(0, 10);
-const nextJstMidnight = (ms: number): number => Date.parse(`${jstDay(ms)}T00:00:00.000Z`) - JST_OFFSET_MS + 24 * 60 * 60_000;
 
 const planKey = (i: number): string => `plan:${i}`;
 const chunkKey = (i: number): string => `chunk:${i}`;
@@ -256,7 +253,7 @@ export class PriorExportCore {
     const { kv, now, store, setAlarm } = this.deps;
     const t = now();
     const runs = kv.get<Runs>("runs");
-    if (runs !== undefined && runs.day === jstDay(t) && runs.count >= this.dailyLimit) {
+    if (runs !== undefined && runs.day === jstIsoDate(t) && runs.count >= this.dailyLimit) {
       return { status: "throttled", nextAt: new Date(nextJstMidnight(t)).toISOString(), file };
     }
     const usage = await store.readUsage();
@@ -271,7 +268,7 @@ export class PriorExportCore {
     if (raced !== undefined) {
       this.cleanup(raced);
     }
-    const day = jstDay(t);
+    const day = jstIsoDate(t);
     kv.put("runs", { day, count: runs !== undefined && runs.day === day ? runs.count + 1 : 1 } satisfies Runs);
     const job: Job = {
       state: "running", phase: "planning", startedAt: t, batches: 0, done: 0, races: 0, rows: 0, missingDetail: 0,

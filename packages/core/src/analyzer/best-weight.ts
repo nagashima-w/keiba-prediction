@@ -31,6 +31,7 @@
  */
 
 import type { BodyWeight, FinishPosition } from "../scraper/types.js";
+import { isFiniteNumber } from "../common/guards.js";
 
 /** 好走の上限順位(scorer の isPlaced と同じ3着以内)。 */
 const GOOD_RUN_MAX_RANK = 3;
@@ -77,10 +78,6 @@ export interface BestWeightSummary {
   readonly 前走: BestWeightPlacement | null;
   /** プロンプトへそのまま載せる中立の材料文(評価語を含まない)。 */
   readonly note: string;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
 }
 
 /** 昇順の中央値(偶数個は中央2値の平均)。呼び出し側が1個以上を保証する。 */

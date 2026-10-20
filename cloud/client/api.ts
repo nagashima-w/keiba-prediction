@@ -5,6 +5,7 @@
  * サーバの文面(`error.message`・例外の文面)は画面に出さず、種類ごとの固定の文言(`failureMessage`)にする。
  * サーバ側のキー名・形のドリフトは `test/client-api-contract.test.ts`(実際の `handle()` の応答を通す)が検出する。
  */
+import { isFiniteNumber, isRecord as isRecordCore } from "../../packages/core/src/common/guards";
 import type { Venue } from "./route";
 
 export interface RaceRow {
@@ -80,10 +81,12 @@ export type FetchLike = (
   init: { method: "GET" | "POST"; headers?: Record<string, string>; credentials?: "same-origin"; referrerPolicy?: "same-origin"; body?: string | Blob },
 ) => Promise<{ status: number; json: () => Promise<unknown> }>;
 
-export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+export const isRecord = isRecordCore;
 export const isStr = (v: unknown): v is string => typeof v === "string";
-export const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+export const isNum = isFiniteNumber;
 export const strOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
+/** 有限の数か null(日報・月報・分析・検証の応答の検査が共有する。以前は 3 ファイルに同じ式があった)。 */
+export const numOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 
 /** エラー応答(200 以外、または ok が true でない)を分類する。成功の形の検査は呼び出し側。 */
 export function classify(status: number, body: unknown): ApiFailure {

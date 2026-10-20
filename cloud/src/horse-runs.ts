@@ -18,6 +18,7 @@
 
 import { HORSE_RUN_PARSER_VERSION, encodeHorseRun, horseRunKey } from "../../packages/core/src/scraper/horse-run-record";
 import type { HorseRaceResult } from "../../packages/core/src/scraper/types";
+import { JST_OFFSET_MS } from "../../packages/core/src/common/jst";
 
 /** 1回の保存で標本として残す不一致の件数の上限(不一致が多発しても、記録の大きさと書き込みが膨らまない)。 */
 export const MISMATCH_SAMPLE_LIMIT = 5;
@@ -142,7 +143,7 @@ export interface HorseRunsPlan {
 
 /** エポックミリ秒を JST の日付(YYYYMMDD)にする。 */
 export function jstDay(ms: number): string {
-  return new Date(ms + 9 * 3_600_000).toISOString().slice(0, 10).replace(/-/g, "");
+  return new Date(ms + JST_OFFSET_MS).toISOString().slice(0, 10).replace(/-/g, "");
 }
 
 function isEmptySlot(value: unknown): boolean {

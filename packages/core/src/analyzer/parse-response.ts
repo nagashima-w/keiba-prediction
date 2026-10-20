@@ -55,6 +55,8 @@
  *    確率補正まで失うことを防ぐ)。
  */
 
+import { PREDICTION_MARKS, type PredictionMark } from "../common/prediction-marks.js";
+
 /**
  * 補正の最大幅の既定値(prior からの絶対値)。
  *
@@ -214,14 +216,9 @@ export interface PriorRef {
   readonly prior: number;
 }
 
-/**
- * 予想印(Task#22: ユーザー要望)。
- * ◎本命/〇対抗/▲単穴/△連下/☆星/注注意。定義・頭数制約は build-prompt.ts のプロンプト指示を参照。
- */
-export const PREDICTION_MARKS = ["◎", "〇", "▲", "△", "☆", "注"] as const;
-
-/** 予想印の型(PREDICTION_MARKS のいずれか)。 */
-export type PredictionMark = (typeof PREDICTION_MARKS)[number];
+// 予想印(Task#22)の定義は、クライアントの束に parse-response を引き込まずに使えるよう `common/prediction-marks.ts` へ移した(Issue #397・R-5)。ここからの再 export は従来の import 元を壊さないため。
+export { PREDICTION_MARKS };
+export type { PredictionMark };
 
 /** 1頭分のパース結果。 */
 export interface ParsedHorseResult {

@@ -29,6 +29,7 @@
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/core/src/view/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/core/src/view/bet-allocation-view";
 import { formatEstimatedEvSuffix, formatEv, formatMarkRepair, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, MARK_LEGEND } from "../../packages/core/src/view/format";
+import { markRank, PREDICTION_MARKS } from "../../packages/core/src/common/prediction-marks";
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { nameWithGrade } from "./grade";
@@ -120,10 +121,10 @@ export interface MarkedHorse {
 }
 
 /**
- * 印の並び順(Issue #211)。**正は core の `PREDICTION_MARKS`**(◎〇▲△☆注。「〇」は U+3007)。クライアントの束に core の parse-response を引き込まない(`test/client-bundle.test.ts` の許可リストを広げない)ため、
- * ここに同じ順序を持ち、`test/client-result.test.ts` が `PREDICTION_MARKS` と一致することを固定する。
+ * 印の並び順(Issue #211)。**core の `PREDICTION_MARKS`**(◎〇▲△☆注。「〇」は U+3007)そのもの。クライアントの束に core の parse-response を引き込まないため、
+ * import のない共通部品 `common/prediction-marks.ts` から取る(Issue #397・R-5 で、ここに持っていた配列を寄せた)。`test/client-result.test.ts` が値を固定する。
  */
-export const KNOWN_MARK_ORDER: readonly string[] = ["◎", "〇", "▲", "△", "☆", "注"];
+export const KNOWN_MARK_ORDER: readonly string[] = PREDICTION_MARKS;
 
 /** 3着内率の上位5頭の1行(Issue #240)。 */
 export interface TopProbHorse {
@@ -298,12 +299,6 @@ function probShiftOf(prior: number, adjusted: number): string | null {
 
 /** 強調材料・懸念事項の項目(空文字・空白だけは捨てる。文字列は加工しない)。 */
 const pointsOf = (items: readonly string[]): readonly string[] => items.filter((item) => item.trim() !== "");
-
-/** 印の順位(既知の印は `KNOWN_MARK_ORDER` の添字、未知の印はその後ろ)。 */
-const markRank = (mark: string): number => {
-  const i = KNOWN_MARK_ORDER.indexOf(mark);
-  return i === -1 ? KNOWN_MARK_ORDER.length : i;
-};
 
 /** 印を補修した馬の「元の印→今の印」(Issue #317)。補修していない馬(`markFrom` が null・キー無し)は null。 */
 function markRepairOf(h: AnalysisDetail["horses"][number]): string | null {

@@ -38,6 +38,7 @@
  */
 
 import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG, type VerifyReport, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
+import { jstIsoDate, nextJstMidnight } from "../../packages/core/src/common/jst";
 import { isReadAllowed, type R2Usage } from "./r2-fence";
 import { buildVerifySource, countStartTimeGaps } from "./verify-read";
 import { computePromptVersionSummaries, type PromptVersionSummary } from "./verify-versions";
@@ -77,7 +78,6 @@ const VERIFY_REARM_AFTER_MS = 10 * 60_000;
 const RESUME_MARGIN_MS = 5 * 60_000;
 /** 補完の 1 tick の問い合わせ数のうち、R2 の get 以外(使用量 1・補完待ち 1・書き込みの batch 2 文)。 */
 const TICK_OVERHEAD_QUERIES = 4;
-const JST_OFFSET_MS = 9 * 60 * 60_000;
 /**
  * kv に保存する集計の形式の版。形が変わったら上げる(古い集計は使わず再計算する)。
  * 2: 版別比較(`promptVersions`。Issue #220)を足した。版 1 の集計は使わず、デプロイ後の最初の要求で再計算する(1 日の再計算の回数に数える)。
@@ -263,17 +263,6 @@ function sameWatermark(a: Watermark, b: Watermark): boolean {
   return a.analyses === b.analyses && a.results === b.results && a.comboPayouts === b.comboPayouts && a.comboImports === b.comboImports;
 }
 
-/** JST の日付(YYYY-MM-DD)。 */
-function jstDay(ms: number): string {
-  return new Date(ms + JST_OFFSET_MS).toISOString().slice(0, 10);
-}
-
-/** 次の JST 0:00 の時刻(ms)。 */
-function nextJstMidnight(ms: number): number {
-  const day = jstDay(ms);
-  return Date.parse(`${day}T00:00:00.000Z`) - JST_OFFSET_MS + 24 * 60 * 60_000;
-}
-
 /** 翌月 1 日 00:05 UTC。 */
 function nextMonthResume(ms: number): number {
   const d = new Date(ms);
@@ -401,7 +390,7 @@ export class VerifyCore {
     if (runs === undefined) {
       return { ok: true };
     }
-    if (runs.day === jstDay(t) && runs.count >= this.dailyLimit) {
+    if (runs.day === jstIsoDate(t) && runs.count >= this.dailyLimit) {
       return { ok: false, reason: "daily-limit", nextAt: nextJstMidnight(t) };
     }
     if (t - runs.lastAt < this.minIntervalMs) {
@@ -475,7 +464,7 @@ export class VerifyCore {
     };
     kv.put("cache", entry);
     const prev = kv.get<Runs>("runs");
-    const day = jstDay(t3);
+    const day = jstIsoDate(t3);
     kv.put("runs", { day, count: prev !== undefined && prev.day === day ? prev.count + 1 : 1, lastAt: t3 } satisfies Runs);
     return entry;
   }

@@ -9,7 +9,7 @@
  */
 import type { StoredAllocationBetView, StoredAllocationView } from "../../packages/core/src/analysis/analysis-types";
 import { MARK_ORIGIN_VALUES } from "../../packages/core/src/view/format";
-import { classify, getJson, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { classify, getJson, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 /** 過去の分析の一覧の 1 件(`GET /api/analyses` の要約から、画面に使う項目だけ)。 */
 export interface PastAnalysis {
@@ -222,7 +222,6 @@ export type AnalysisResult = { readonly ok: true; readonly analysis: AnalysisDet
 
 const isBool = (v: unknown): v is boolean => typeof v === "boolean";
 const boolOrNull = (v: unknown): v is boolean | null => v === null || typeof v === "boolean";
-const numOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 
 const unexpected = (status: number): { ok: false; error: ApiFailure } => ({ ok: false, error: { kind: "unexpected", httpStatus: status } });
 

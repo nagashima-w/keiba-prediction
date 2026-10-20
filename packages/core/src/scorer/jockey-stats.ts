@@ -16,8 +16,7 @@
 
 import type { JockeyCourseStats } from "./base-score.js";
 import type { JockeyYearRecord } from "../scraper/parse-jockey-results.js";
-
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+import { jstIsoDate } from "../common/jst.js";
 
 /** YYYY/MM/DD の分析日から年を取り出す。形式が違えば失敗させる(黙って別の窓にしない)。 */
 function yearOf(analysisDate: string): number {
@@ -30,7 +29,7 @@ function yearOf(analysisDate: string): number {
 
 /** JST の暦日(YYYY/MM/DD)。 */
 function todayJst(now: Date): string {
-  return new Date(now.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10).replaceAll("-", "/");
+  return jstIsoDate(now.getTime()).replaceAll("-", "/");
 }
 
 /**

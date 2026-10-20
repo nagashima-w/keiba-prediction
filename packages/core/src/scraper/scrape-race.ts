@@ -40,6 +40,7 @@ import { parseOdds } from "./parse-odds.js";
 import { parseOikiri } from "./parse-oikiri.js";
 import { parseRaceList } from "./parse-race-list.js";
 import { parseShutuba } from "./parse-shutuba.js";
+import { jstEpochMs } from "../common/jst.js";
 import type { TrainerResultsSaveEntry, TrainerResultsStore } from "./trainer-results-store.js";
 import type {
   HorseRaceResult,
@@ -501,7 +502,7 @@ async function collectPersonStats(
 
 /** レースの年の 1 月 1 日 00:00 JST(エポックミリ秒)。調教師の保存先の鮮度の判定に使う。 */
 function startOfRaceYearJstMs(raceId: RaceId): number {
-  return Date.UTC(Number(raceId.slice(0, 4)), 0, 1) - 9 * 60 * 60 * 1000;
+  return jstEpochMs(Number(raceId.slice(0, 4)), 1, 1);
 }
 
 /**

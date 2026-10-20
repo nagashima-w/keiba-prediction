@@ -23,6 +23,9 @@ import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key";
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
+import { formatYen } from "../../packages/core/src/view/verify-format";
+import { isRecord } from "../../packages/core/src/common/guards";
+import { markRank, PREDICTION_MARKS } from "../../packages/core/src/common/prediction-marks";
 import { nameWithGrade } from "../client/grade";
 import { kaisaiDateWeekday } from "./auto-run-plan";
 import { DISCORD_COLORS } from "./palette";
@@ -230,20 +233,15 @@ export function buildMinimalAnalysisEmbed(label: RaceLabel): CloudEmbed {
 // ---- 印の付いた馬・買い目の field(Issue #230)----
 
 /**
- * 印の並び順。**正は core の `PREDICTION_MARKS`**(◎〇▲△☆注。「〇」は U+3007)。web の画面(`cloud/client/result.ts` の `KNOWN_MARK_ORDER`)と同じ順で、
- * `test/notify-embeds.test.ts` が値を固定する(core の parse-response をここに引き込まない)。
+ * 印の並び順。**core の `PREDICTION_MARKS`**(◎〇▲△☆注。「〇」は U+3007)そのもの(Issue #397・R-5 で、ここに持っていた配列を共通部品 `common/prediction-marks.ts` に寄せた)。
+ * web の画面(`cloud/client/result.ts` の `KNOWN_MARK_ORDER`)も同じ配列で、`test/notify-embeds.test.ts` が値を固定する(core の parse-response をここに引き込まない)。
  */
-export const MARK_ORDER: readonly string[] = ["◎", "〇", "▲", "△", "☆", "注"];
+export const MARK_ORDER: readonly string[] = PREDICTION_MARKS;
 
 /** 馬名の上限(core の embed の馬の行と同じ 32 コードポイント)。 */
 const MARK_NAME_MAX = 32;
 
 const NO_MARKS_TEXT = "印の付いた馬はありません";
-
-const markRank = (mark: string): number => {
-  const i = MARK_ORDER.indexOf(mark);
-  return i === -1 ? MARK_ORDER.length : i;
-};
 
 /**
  * 印の field の末尾に1行だけ足す説明(想定の部分が1頭でもあるとき。Issue #247・#253)。目安であること・払戻率の仮定・複勝の的中率の基準・EV との違い。
@@ -415,7 +413,7 @@ export function allocationBetRows(bets: readonly AnalysisBetRecord[]): Allocatio
   const rank = (betType: string): number => BET_TYPE_ORDER[betType] ?? 99;
   return [...bets]
     .sort((a, b) => b.stake - a.stake || rank(a.betType) - rank(b.betType) || (a.betType < b.betType ? -1 : a.betType > b.betType ? 1 : 0) || (a.comboKey < b.comboKey ? -1 : a.comboKey > b.comboKey ? 1 : 0))
-    .map((b) => ({ betTypeLabel: BET_TYPE_LABELS[b.betType] ?? b.betType, comboLabel: comboLabelOf(b.comboKey, b.betType), stake: b.stake, stakeText: `${b.stake.toLocaleString("en-US")}円` }));
+    .map((b) => ({ betTypeLabel: BET_TYPE_LABELS[b.betType] ?? b.betType, comboLabel: comboLabelOf(b.comboKey, b.betType), stake: b.stake, stakeText: formatYen(b.stake) }));
 }
 
 /** 買い目の field。配分があれば name に点数と合計(行が落ちても合計は欠けない)、無ければ状態ごとの固定文。 */
@@ -425,7 +423,7 @@ function buildAllocationField(allocation: AnalysisAllocationRecord | undefined):
     case "allocated": {
       const rows = allocationBetRows(allocation!.bets);
       const total = rows.reduce((sum, r) => sum + r.stake, 0);
-      return { name: `買い目(${rows.length}点・合計${total.toLocaleString("en-US")}円)`, value: rows.map((r) => `${r.betTypeLabel} ${r.comboLabel} ${r.stakeText}`).join("\n") };
+      return { name: `買い目(${rows.length}点・合計${formatYen(total)})`, value: rows.map((r) => `${r.betTypeLabel} ${r.comboLabel} ${r.stakeText}`).join("\n") };
     }
     case "unset":
       return { name: "買い目", value: UNSET_TEXTS[unsetKindOf(allocation!.meta)] };
@@ -464,13 +462,9 @@ interface SnapshotView {
   readonly placeMax: ReadonlyMap<number, number | null>;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** `record.raceSnapshot`(型は unknown。`buildRaceSnapshot` の実物)から、embed に要る部分だけを読む。想定の形でなければ投げる(呼び出し側が最小の embed に代える)。 */
 function readSnapshot(raw: unknown): SnapshotView {
-  if (!isObject(raw) || !isObject(raw["race"]) || !Array.isArray(raw["horses"])) {
+  if (!isRecord(raw) || !isRecord(raw["race"]) || !Array.isArray(raw["horses"])) {
     throw new Error("レース情報のスナップショットが想定の形ではありません");
   }
   const race = raw["race"];
@@ -485,7 +479,7 @@ function readSnapshot(raw: unknown): SnapshotView {
   const placeMax = new Map<number, number | null>();
   const usable = (value: unknown): number | null => (typeof value === "number" && isUsableOdds(value) ? value : null);
   for (const horse of raw["horses"] as unknown[]) {
-    if (isObject(horse) && typeof horse["umaban"] === "number") {
+    if (isRecord(horse) && typeof horse["umaban"] === "number") {
       names.set(horse["umaban"], typeof horse["name"] === "string" ? horse["name"] : null);
       const odds = horse["winOdds"];
       winOdds.set(horse["umaban"], typeof odds === "number" && isUsableOdds(odds) ? odds : null);

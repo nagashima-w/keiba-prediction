@@ -18,6 +18,7 @@
 
 import { gunzipSync, gzipSync } from "node:zlib";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
+import { isRecord } from "../../packages/core/src/common/guards.js";
 
 export const DETAIL_FORMAT = 1;
 
@@ -60,10 +61,6 @@ export function buildDetailPayload(rec: AnalysisRecord): AnalysisDetailPayload {
 export function encodeDetail(rec: AnalysisRecord): Uint8Array {
   const json = JSON.stringify(buildDetailPayload(rec));
   return gzipSync(new TextEncoder().encode(json), { level: 1 });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** gzip → JSON を復元する。壊れている・形が違うときは**例外を投げず null**(読み出し側は「詳細なし」として扱う)。 */

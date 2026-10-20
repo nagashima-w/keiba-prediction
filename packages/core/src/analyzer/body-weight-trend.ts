@@ -27,6 +27,7 @@
  */
 
 import type { BodyWeight } from "../scraper/types.js";
+import { isFiniteNumber } from "../common/guards.js";
 
 /** 馬体重トレンドの傾向ラベル。有効過去走2走以上のときだけ算出する。 */
 export type BodyWeightTrendLabel = "増加傾向" | "減少傾向" | "おおむね安定" | "変動大";
@@ -62,11 +63,6 @@ export interface SummarizeBodyWeightTrendOptions {
 
 /** 傾向ラベル判定で「平坦(符号なし)」とみなす隣接走間の差分の絶対値上限(kg)。 */
 const STABLE_BAND_KG = 2;
-
-/** 有限数値かどうかを判定する(null・undefined・NaN・Infinity を弾く)。 */
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
 
 /**
  * 過去走(新しい順、null 混在可)から有効な馬体重を最大 recentRuns 件、新しい順に集める。

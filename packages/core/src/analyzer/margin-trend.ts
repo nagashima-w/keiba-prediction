@@ -43,6 +43,7 @@
  */
 
 import type { FinishPosition } from "../scraper/types.js";
+import { isFiniteNumber } from "../common/guards.js";
 
 /** 勝敗区分(finishPositionから判定。着差の符号では判定しない)。 */
 export type MarginTrendResult = "勝ち" | "敗け";
@@ -106,11 +107,6 @@ const CLOSE_MARGIN_THRESHOLD = 0.5;
 
 /** 大差の閾値(絶対値)。設計根拠はファイル先頭コメント参照。境界値ちょうどは大差側に含める。 */
 const BIG_MARGIN_THRESHOLD = 3;
-
-/** 有限数値かどうかを判定する(null・undefined・NaN・Infinity を弾く)。 */
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
 
 /** 着差の絶対値から大小区分を判定する(境界値ちょうどは僅差/大差に含める)。 */
 function classifyLevel(absMargin: number): MarginTrendLevel {

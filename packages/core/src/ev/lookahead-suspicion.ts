@@ -33,6 +33,7 @@
 
 import { kaisaiDateFromNarRaceId, parseKaisaiDate } from "../scraper/ids.js";
 import type { StoredAnalysis } from "./analysis-store-types.js";
+import { jstEpochMs } from "../common/jst.js";
 
 /** 分類の結果。 */
 export type LookaheadSuspicion = "clean" | "suspect" | "unknown";
@@ -48,9 +49,6 @@ export type LookaheadSuspicionInput = Pick<
   | "promptLookaheadGuarded"
   | "raceSnapshot"
 >;
-
-/** JST は UTC+9。JST の時刻から UTC の時刻へは 9 を引く。 */
-const JST_OFFSET_HOURS = 9;
 
 /** 発走時刻 `HH:MM`(24時間表記、時は1〜2桁)。 */
 const START_TIME_PATTERN = /^(\d{1,2}):(\d{2})$/;
@@ -198,5 +196,5 @@ function readStartTime(snapshot: unknown): { hour: number; minute: number; text:
  * 開催日の JST の時刻を UTC の ms に直す。`hour=24` で翌日 00:00 JST になる(`Date.UTC` が桁上がりを処理する)。
  */
 function jstToUtcMs(date: DateParts, hour: number, minute: number): number {
-  return Date.UTC(date.year, date.month - 1, date.day, hour - JST_OFFSET_HOURS, minute);
+  return jstEpochMs(date.year, date.month, date.day, hour, minute);
 }

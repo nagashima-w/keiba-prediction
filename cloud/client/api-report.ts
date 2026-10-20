@@ -6,7 +6,7 @@
  * **サーバの文面は読まない**(失敗は、ステータスと `error.type`〈サーバが決めた固定の識別子〉だけで分類し、固定の文言にする)。
  * キー名・形のドリフトは `test/client-api-report-contract.test.ts`(実際の `handle()` の応答と、日報の組み立て〈`DailyReportCore`〉の出力を通す)が検出する。
  */
-import { classify, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { classify, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 /** 一覧の 1 行(本文を含まない)。 */
 export interface ReportListItem {
@@ -182,9 +182,8 @@ export type ReportDetailResult =
   | { readonly ok: true; readonly report: ReportDetail | null; readonly job: ReportJob | null; readonly jobStatus: ReportJobStatus }
   | { readonly ok: false; readonly error: ApiFailure };
 
-/** 以下の `isCount`・`numOrNull`・`isYmd`・`parsePeriod`・`readBody` は月報の API(`api-monthly.ts`。Issue #279)も使う(統計の読み方を日報と共有する)。 */
+/** 以下の `isCount`・`isYmd`・`parsePeriod`・`readBody` は月報の API(`api-monthly.ts`。Issue #279)も使う(統計の読み方を日報と共有する)。 */
 export const isCount = (v: unknown): v is number => isNum(v) && Number.isInteger(v) && v >= 0;
-export const numOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 const isArr = (v: unknown): v is unknown[] => Array.isArray(v);
 
 function parseListItem(row: unknown): ReportListItem | null {

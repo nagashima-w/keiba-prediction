@@ -7,6 +7,7 @@
  * 入力は `buildAnalysisView`(`analysis-view.ts`。馬名・レース情報・根拠・強調材料・懸念事項・配分)の結果と、結果(`RaceResultData`)。
  * 結果が無いレース(`undefined`)は、着順なし・買い目は判定不能として載せる(中止・取り込み不能の可能性があるので、日報にも「結果なし」と出す)。
  */
+import { PREDICTION_MARKS } from "../../packages/core/src/common/prediction-marks";
 import type { AnalysisView } from "./analysis-view";
 import { betHitProb, judgeBets, type BetOutcome, type RaceResultData } from "./daily-report-bets";
 import { buildWhatIfStats, evaluateTemplates, mergeWhatIfStats, type TemplateOutcome, type WhatIfStats } from "./daily-report-whatif";
@@ -21,8 +22,8 @@ export const ITEM_MAX_COUNT = 2;
 /** 印も EV プラスも無いレースで、代わりに載せる馬の数(補正後の確率の高い順)。 */
 const FALLBACK_HORSE_COUNT = 3;
 
-/** 印の並び(exe の凡例と同じ)。ここに無い印は最後。 */
-const MARK_ORDER = "◎〇▲△☆注";
+/** 印の並び(exe の凡例と同じ。core の `PREDICTION_MARKS` を連ねた文字列)。ここに無い印は最後。**文字列のまま `indexOf` で引く**(`""` や部分文字列が先頭と同順位になる挙動を変えないため。共通の `markRank` には寄せていない)。 */
+const MARK_ORDER: string = PREDICTION_MARKS.join("");
 
 export interface DigestHorse {
   readonly umaban: number;

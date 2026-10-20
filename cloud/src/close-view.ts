@@ -6,6 +6,7 @@
  */
 import type { AllocationDiff } from "../../packages/core/src/analysis/allocation-diff";
 import { betRowLabels } from "../../packages/core/src/view/allocation-proposal-view";
+import { jstHm as jstHmOfMs } from "../../packages/core/src/common/jst";
 import { formatYen } from "../../packages/core/src/view/verify-format";
 import type { CloseComboBasis, CloseReason, CloseStatus } from "./analysis-close";
 
@@ -40,15 +41,12 @@ export function closeLabelOf(round: number, leadMinutes: number | null): string 
   return leadMinutes === null ? `第${round}回` : `発走${leadMinutes}分前`;
 }
 
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
-const pad2 = (n: number): string => String(n).padStart(2, "0");
 
 /** ISO 8601 → JST の「HH:mm」。解釈できなければ null。 */
 function jstHm(iso: string): string | null {
   const time = Date.parse(iso);
   if (!Number.isFinite(time)) return null;
-  const d = new Date(time + JST_OFFSET_MS);
-  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
+  return jstHmOfMs(time);
 }
 
 /**

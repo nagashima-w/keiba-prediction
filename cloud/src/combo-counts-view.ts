@@ -15,6 +15,7 @@
  */
 import { COMBO_STATS_BET_TYPES, normalizeComboStats, type ComboStats, type ComboStatsBetType } from "../../packages/core/src/analysis/combo-stats";
 import type { StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
+import { isRecord } from "../../packages/core/src/common/guards";
 
 const LABELS: Readonly<Record<ComboStatsBetType, string>> = {
   wide: "ワイド",
@@ -37,8 +38,6 @@ const COMBO_FIELDS: Readonly<Record<ComboStatsBetType, string>> = {
 
 /** 配分の経路のうち、組合せの候補を評価して配分を決めた(または決めようとした)もの。それ以外〈unset・yoso・unavailable〉は配分の点数を出さない。 */
 const ALLOCATED_ROUTES: ReadonlySet<string> = new Set(["mixed", "place-only", "invalid"]);
-
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 const formatCount = (n: number): string => n.toLocaleString("en-US");
 
