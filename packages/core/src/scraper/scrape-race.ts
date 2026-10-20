@@ -573,7 +573,7 @@ function comboOddsNeedsWarning(result: ComboOddsFetchResult): boolean {
  * 組合せオッズの警告メッセージを組み立てる(診断値の要約を含める)。
  *
  * **人間が読む唯一のチャネルであることへの対応(boss メタレビュー指摘・要修正3)**:
- * `packages/core/src/analysis/analysis-pipeline.ts:707` は `race.meta.warnings.map((w) =>
+ * `packages/core/src/analysis/analysis-record.ts` の `buildAnalysisResult`(`runAnalysis` の戻り値の組み立て)は `race.meta.warnings.map((w) =>
  * w.message)` で `message` 文字列のみを取り出しており、`kind` も `meta.comboOdds` の
  * 診断値(`attempts` の内訳)もユーザーには届かない。診断値では状態④(取得失敗)と
  * 構造異常(`parseError`)を別枠に分類しているが(Q2裁定)、この文言が丸められると
