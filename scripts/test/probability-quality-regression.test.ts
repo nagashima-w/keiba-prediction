@@ -19,8 +19,8 @@
  *   着手前ゲートの実測比較(中央 vs 地方)はこの oddsStatus の違いも交絡していた点に注意
  *   (boss自己申告・鉄則7)。
  * - `runAnalysis` は `deps.analyze: null`(LLM未使用)で実行し、`priorSource: "prior-only"`。
- * - `kaisaiDate` を明示する(中央="20260628"・地方="20260712")。`dateApproximate` が
- *   `false` であることをテストで固定する(受け入れ条件3)。
+ * - `kaisaiDate` を明示する(中央="20260628"・地方="20260712")。当初は `dateApproximate` が `false` であることを
+ *   テストで固定していた(受け入れ条件3)。Issue #400 R-10b で開催日が必須になり、近似の経路ごと撤去したため、その assert は削除した。
  * - リーク遮断の前後比較(受け入れ条件4)は、同一 `kaisaiDate` を渡したまま
  *   `filterRaceDataBefore` の適用有無だけを変える(変数を1つだけ変える)。
  *
@@ -210,12 +210,11 @@ function leakyPriorRows(
 
 describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
   for (const fixtureCase of FIXTURES) {
-    it(`${fixtureCase.label}: kaisaiDate明示でdateApproximate=falseになり、指標値が固定される`, async () => {
+    it(`${fixtureCase.label}: kaisaiDate明示で、指標値が固定される`, async () => {
       const raceData = loadFixtureRaceData(fixtureCase.fixtureFileName);
       const result = await runWithFixture(raceData, fixtureCase.kaisaiDate);
 
-      // 受け入れ条件3: kaisaiDateを明示したのでdateApproximateはfalse。
-      expect(result.dateApproximate).toBe(false);
+      // 受け入れ条件3(kaisaiDateを明示する)は、runAnalysis の型(KaisaiDate 必須)が担保する。
       expect(result.oddsStatus).not.toBe("yoso");
 
       const input = toReportInput(result, raceData, null);
@@ -296,8 +295,6 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     // #39 以降 production が自分で遮断するため、この2つは同値になる(旧版は「異なる」だった)。
     const rawResult = await runWithFixture(rawRaceData, fixtureCase.kaisaiDate);
     const filteredResult = await runWithFixture(filteredRaceData, fixtureCase.kaisaiDate);
-    expect(rawResult.dateApproximate).toBe(false);
-    expect(filteredResult.dateApproximate).toBe(false);
 
     const rawReport = buildProbabilityQualityReport(
       toReportInput(rawResult, rawRaceData, null),

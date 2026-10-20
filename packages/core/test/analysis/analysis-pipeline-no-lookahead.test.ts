@@ -116,13 +116,14 @@ interface RunOutput {
   readonly records: AnalysisRecord[];
 }
 
-// 実行日の近似(toYmdSlash はローカル時刻の暦日を使う)。タイムゾーンに依らず 2026/09/30 になるようローカル生成する。
+// 実行時刻(deps.now)。保存レコードの analyzedAt にだけ使われ、基準日(kaisaiDate から導く)には使われない。
+// 基準日と別の日(2026/09/30)にしてあるので、基準日が now から導かれる退行は日付の assert で検出される。
 const FIXED_NOW = new Date(2026, 8, 30, 12, 0, 0);
 
 /** LLMをフェイクにして(prior をそのまま返す)、プロンプト入力・結果・保存レコードを捕捉する。 */
 async function run(
   raceData: RaceData,
-  kaisaiDate: string | null,
+  kaisaiDate: string,
   extraDeps: Partial<AnalysisPipelineDeps> = {},
 ): Promise<RunOutput> {
   let prompt: BuildPromptInput | null = null;
@@ -157,17 +158,13 @@ async function run(
     allocationSettings: null,
     now: () => FIXED_NOW,
   };
-  const result = await runAnalysis(
-    raceData.raceId,
-    kaisaiDate === null ? null : parseKaisaiDate(kaisaiDate),
-    deps,
-  );
+  const result = await runAnalysis(raceData.raceId, parseKaisaiDate(kaisaiDate), deps);
   expect(prompt).not.toBeNull();
   return { result, prompt: prompt!, records };
 }
 
 /** LLM未使用(prior採用)で走らせ、保存レコードだけを返す。 */
-async function runWithoutLlm(raceData: RaceData, kaisaiDate: string | null): Promise<AnalysisRecord[]> {
+async function runWithoutLlm(raceData: RaceData, kaisaiDate: string): Promise<AnalysisRecord[]> {
   const records: AnalysisRecord[] = [];
   const deps: AnalysisPipelineDeps = {
     scrape: async () => raceData,
@@ -179,7 +176,7 @@ async function runWithoutLlm(raceData: RaceData, kaisaiDate: string | null): Pro
     allocationSettings: null,
     now: () => FIXED_NOW,
   };
-  await runAnalysis(raceData.raceId, kaisaiDate === null ? null : parseKaisaiDate(kaisaiDate), deps);
+  await runAnalysis(raceData.raceId, parseKaisaiDate(kaisaiDate), deps);
   return records;
 }
 
@@ -398,28 +395,13 @@ describe("runAnalysis の基準日の境界(中央16頭・馬番1に走を1本�
     expect(await count(withInjectedRun("2026/06/28", "202603020199"))).toBe(base); // 当日: 除かれる
     expect(await count(withInjectedRun("2026/06/29", "202603020199"))).toBe(base); // 翌日: 除かれる
   });
-});
 
-// ---------------------------------------------------------------------------
-// 近似日(kaisaiDate=null): 自レースの走は日付に依らず除外される
-// ---------------------------------------------------------------------------
-
-describe.each(CASES)("runAnalysis の先読みリーク遮断(kaisaiDate=null・実行日で近似): $label", (c) => {
-  const raw = loadFixture(c.fileName);
-  // 実行日(FIXED_NOW = 2026/09/30)。基準日は resolveAnalysisDate が当日日付で近似する。
-  const approxCutoff = "2026/09/30";
-
-  it("dateApproximate=true であり、自レースの走は raceIdRaw で除外される(日付だけでは残る走が除かれる)", async () => {
-    const { result } = await run(raw, null);
-    expect(result.dateApproximate).toBe(true);
-    // 前提: 生の戦績のうち、実行日より前(=日付だけの絞り込みでは残る)の自レースの走が実在する。
-    const own = allRuns(raw).filter((r) => r.raceIdRaw === raw.raceId);
-    expect(own).toHaveLength(c.ownRuns);
-    expect(own.every((r) => r.date !== null && r.date < approxCutoff)).toBe(true);
-    const total = result.rows.reduce((a, r) => a + (r.careerRunCount ?? 0), 0);
-    // 自レースの走が全て除かれ、その分だけ減る。
-    expect(total).toBeLessThan(c.rawTotal);
-    expect(total).toBe(allRuns(oracleTrim(raw, approxCutoff)).length);
+  it("自レースの走は、日付が施行日より前でも raceIdRaw で除かれる(日付に依らない除外。別レースの同日付の走は残る対照つき)", async () => {
+    const base = await count(raw);
+    // 対照: 同じ日付(施行日の前日)でも、別レースの走は残る(差が0でない)。
+    expect(await count(withInjectedRun("2026/06/27", "202603020199"))).toBe(base + 1);
+    // 自レースの raceIdRaw を持つ走は、日付が前日でも除かれる。
+    expect(await count(withInjectedRun("2026/06/27", raw.raceId))).toBe(base);
   });
 });
 
@@ -442,21 +424,11 @@ describe("保存レコードの基準日マーカー(historyCutoffDate)", () => 
     expect(records[0]!.historyCutoffDate).toBe("20260628");
   });
 
-  it("開催日が渡らず実行日で近似したときも、実際に使った基準日(実行日)を書く(null にしない)", async () => {
-    const { records, result } = await run(raw, null);
-    expect(result.dateApproximate).toBe(true);
-    // 実行日は resolveAnalysisDate(now) の当日日付(FIXED_NOW の暦日=2026/09/30)。
-    expect(result.date).toBe("2026/09/30");
-    expect(records[0]!.historyCutoffDate).toBe("20260930");
-    expect(records[0]!.historyCutoffDate).toMatch(/^[0-9]{8}$/);
-  });
-
-  it("kaisaiDate(開催日)の保存は従来どおり、近似のときは null のまま(基準日マーカーとは別の値)", async () => {
-    const approx = await run(raw, null);
-    expect(approx.records[0]!.kaisaiDate).toBeNull();
-    expect(approx.records[0]!.historyCutoffDate).not.toBeNull();
-    const exact = await run(raw, "20260628");
-    expect(exact.records[0]!.kaisaiDate).toBe("20260628");
+  it("kaisaiDate(開催日)の保存と基準日マーカーは同じ日付になる(開催日が必須になったため。Issue #400 R-10b)", async () => {
+    const { records, result } = await run(raw, "20260628");
+    expect(result.date).toBe("2026/06/28");
+    expect(records[0]!.kaisaiDate).toBe("20260628");
+    expect(records[0]!.historyCutoffDate).toBe("20260628");
   });
 });
 
@@ -476,12 +448,6 @@ describe("保存レコードの遮断済みマーカー(promptLookaheadGuarded)"
   it("LLM未使用(prior採用)の保存レコードにも true を書く(遮断を通る経路で作られたことの印)", async () => {
     const records = await runWithoutLlm(raw, "20260628");
     expect(records).toHaveLength(1);
-    expect(records[0]!.promptLookaheadGuarded).toBe(true);
-  });
-
-  it("開催日が渡らず実行日で近似した分析にも true を書く", async () => {
-    const { records, result } = await run(raw, null);
-    expect(result.dateApproximate).toBe(true);
     expect(records[0]!.promptLookaheadGuarded).toBe(true);
   });
 });
@@ -685,22 +651,6 @@ describe("LLMプロンプトの同レース過去傾向(gradeWinnerTrend)は先�
     expect(trend).not.toEqual(summarizeGradeWinnerTrend(raw, NAR_CONDITIONS));
     const text = buildPrompt(prompt);
     expect(text).toContain("対象6回中");
-  });
-
-  it("地方・開催日が渡らず実行日(2026/09/30)で近似した過去分析: 当該回は raceId で除かれるが、実行日より前の後の回(2024〜2026年)は残る(近似日の既知の限界)", async () => {
-    const name = "grade_winner_nar_202344062811.json";
-    const raw = rawEntries(name);
-    const { calls, getGradeWinnerTrend } = gradeWinnerDeps(name);
-
-    const { prompt, result } = await run(narRaceData("202344062811"), null, { getGradeWinnerTrend });
-
-    expect(result.dateApproximate).toBe(true);
-    expect(calls).toEqual([{ raceId: "202344062811", cutoffDate: "2026/09/30" }]);
-    // 当該回(2023年)だけが除かれ9回。2024〜2026年は残る(日付だけでは落とせないため)。
-    expect(prompt.race.gradeWinnerTrend!.対象回数).toBe(9);
-    expect(prompt.race.gradeWinnerTrend).toEqual(
-      summarizeGradeWinnerTrend(raw.filter((e) => e.raceId !== "202344062811"), NAR_CONDITIONS),
-    );
   });
 
   it("中央・当日運用(応答に当該回を含まず、全て施行日より前の実物): 何も除かれず、絞らない集計と全項目で一致する(no-op)", async () => {

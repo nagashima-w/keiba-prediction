@@ -212,18 +212,18 @@ export async function loadGradeWinnerTrend(
 }
 
 /**
- * 当日の馬場の値(Issue #295): LLM を使う中央のレースで、開催日が渡っているときだけ読む。失敗は握って値なしで続ける。
+ * 当日の馬場の値(Issue #295): LLM を使う中央のレースで、開催日(必須)で読む。失敗は握って値なしで続ける。
  * 返すのは LLM に渡す値(コース種別で絞った後)。読まない・地方・値なしは null。
  */
 export async function loadDayBaba(
   raceId: RaceId,
   courseType: RaceData["race"]["courseType"],
-  kaisaiDate: KaisaiDate | null,
+  kaisaiDate: KaisaiDate,
   deps: Pick<AnalysisPipelineDeps, "getBabaConditions" | "onBabaError">,
 ): Promise<DayBaba | null> {
   let baba: DayBaba | null = null;
   const centralVenue = centralVenueInfoFromRaceId(raceId);
-  if (deps.getBabaConditions && centralVenue !== null && kaisaiDate !== null) {
+  if (deps.getBabaConditions && centralVenue !== null) {
     try {
       baba = selectDayBabaForCourse(
         normalizeDayBaba(await deps.getBabaConditions(centralVenue.trackCode, kaisaiDate)),

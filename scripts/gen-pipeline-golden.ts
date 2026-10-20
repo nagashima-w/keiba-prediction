@@ -24,6 +24,8 @@
  *   差分の検算: 旧 golden と新 golden を構造で比べ、新しい側の寄与度配列から末尾の 1 件を除き `promptVersion` を戻すと完全に一致する(追加された 15 番目は 48 件、それ以外の差は promptVersion の 1 件だけ)。
  * **Issue #363 で再生成した**: スナップショットの馬に終盤の位置(`latePos`)を足したため、3 シナリオの `record.raceSnapshot.horses` の各馬に `"latePos": <数または null>` の行が加わった。
  *   差分の検査: `git diff -U0 packages/core/test/golden | grep '^[-+]'` で、追加 48 行がすべて `"latePos"` の行で、削除行は 0(`grep -c '"earlyPos"'` も `grep -c '"latePos"'` も 48)。
+ * **Issue #400 R-10b で再生成した**(開催日の近似の経路を撤去: `AnalysisResult.dateApproximate` を削除し、3 件目のシナリオを `noLlmNoAllocationNoDate`〈開催日なし〉から `noLlmNoAllocation`〈開催日あり〉へ改名した)。
+ *   差分の検査: 新旧の JSON を構造で比べ、(a) 3 シナリオの `result.dateApproximate` の行が消える、(b) 3 件目の `record.kaisaiDate` が null から "20260628" になる、(c) 3 件目のシナリオ名、の 3 点だけであること。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */

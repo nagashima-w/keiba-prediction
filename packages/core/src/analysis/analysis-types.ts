@@ -302,10 +302,8 @@ export interface AnalysisResult {
   readonly courseType: string;
   /** 距離(m)。 */
   readonly distance: number;
-  /** 開催日(YYYY/MM/DD)。取得できず当日日付で近似した場合は dateApproximate=true。 */
+  /** 開催日(YYYY/MM/DD)。分析に渡された開催日(`kaisaiDate`)そのもので、実行日による近似はしない(Issue #400 R-10b)。 */
   readonly date: string;
-  /** date が当日日付での近似値かどうか(仕様: 近似である旨を結果に含める)。 */
-  readonly dateApproximate: boolean;
   /** LLM分析を実行したか(false ならAPIキー未設定などでスキップし prior を採用)。 */
   readonly llmUsed: boolean;
   /** LLMをスキップした理由(実行時は null)。 */

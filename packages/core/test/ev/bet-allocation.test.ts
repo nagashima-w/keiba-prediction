@@ -1853,7 +1853,7 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
             );
 
             // 層2(BetAllocation): HorseEvをAllocationHorseへ橋渡しした入力で確認する
-            // (analysis-pipeline.ts:620のAnalysisRow生成と同じ「1箇所でのみ生成される」経路を
+            // (analysis-record.ts の buildAnalysisRows のAnalysisRow生成と同じ「1箇所でのみ生成される」経路を
             // 模す)。
             const horses: AllocationHorse[] = [
               candidate(1, 0.6, 3),

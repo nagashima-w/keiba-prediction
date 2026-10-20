@@ -274,7 +274,7 @@ describe("本番のバンドルと保存側のコード(Issue #175)", () => {
  * 無ければ「better-sqlite3 が無い」は自明に成立してしまう。対照: core のバレルを import する入口では、解決の失敗か better-sqlite3 が現れる。
  */
 // ASCII の識別子を使う(wrangler のバンドルは日本語の文字列を \uXXXX に直すので、日本語の文言では見つからない)。いずれも runAnalysis・runCloudAnalysis にだけある名前。
-const PIPELINE_MARKERS = ["runCloudAnalysis", "promptLookaheadGuarded", "historyCutoffDate", "careerRunCount", "dateApproximate"];
+const PIPELINE_MARKERS = ["runCloudAnalysis", "promptLookaheadGuarded", "historyCutoffDate", "careerRunCount", "llmSkippedReason", "analysisDateOf"];
 
 describe("本番相当のバンドルと runAnalysis(Issue #176)", () => {
   it("前提: 検出する文字列は、runAnalysis のソースに実際にある。cloud/src/pipeline.ts は narrow な入口だけを使う", () => {

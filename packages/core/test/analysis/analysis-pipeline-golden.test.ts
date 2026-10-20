@@ -38,9 +38,8 @@ describe("runAnalysis の golden(exe の出力が変わらないこと。Issue #
     expect(llm.resultDetailLookups).toEqual(
       Array.from({ length: 10 }, (_, i) => `2026030202${String(i + 1).padStart(2, "0")}`),
     );
-    // LLM なし・開催日なしは、近似日付になる
-    expect(golden.noLlmNoAllocationNoDate.result.dateApproximate).toBe(true);
-    expect(golden.noLlmNoAllocationNoDate.record.allocation).toBeUndefined();
+    // LLM なし・配分なし: 配分を持たない
+    expect(golden.noLlmNoAllocation.record.allocation).toBeUndefined();
   });
 
   // 個別のタイムアウト(Issue #255)。既定の 5000ms は、負荷のあるときに足りない。
@@ -53,6 +52,6 @@ describe("runAnalysis の golden(exe の出力が変わらないこと。Issue #
     const actual = await computeGolden();
     expect(actual.noLlmAllBets).toEqual(golden.noLlmAllBets);
     expect(actual.llmStubSameDayGrade).toEqual(golden.llmStubSameDayGrade);
-    expect(actual.noLlmNoAllocationNoDate).toEqual(golden.noLlmNoAllocationNoDate);
+    expect(actual.noLlmNoAllocation).toEqual(golden.noLlmNoAllocation);
   }, 30_000);
 });

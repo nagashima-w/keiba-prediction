@@ -319,7 +319,7 @@ async function smokeRaceDay(url: URL, env: SmokeEnv): Promise<Response> {
           prior: {
             rows: prior.result.rows.length,
             llmUsed: prior.result.llmUsed,
-            dateApproximate: prior.result.dateApproximate,
+            date: prior.result.date,
             hasWideCombo: "wideCombo" in prior.result,
             priors: prior.result.rows.map((r) => [r.umaban, r.prior]),
           },

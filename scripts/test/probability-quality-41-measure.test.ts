@@ -319,16 +319,6 @@ describe("measureRace: 観測から外すレース(全体は止めない。理�
     expect(obs.detail).toContain("analysis boom");
   });
 
-  it("runAnalysis が近似日(dateApproximate=true)を返したら date-approximate", async () => {
-    const obs = await excluded({
-      runAnalysisFn: async (raceId, kaisaiDate, d) => {
-        const r = await runAnalysis(raceId, kaisaiDate, d);
-        return { ...r, dateApproximate: true };
-      },
-    });
-    expect(obs.reason).toBe("date-approximate");
-  });
-
   it("runAnalysis の行数が出走頭数と一致しなければ analysis-error", async () => {
     const obs = await excluded({
       runAnalysisFn: async (raceId, kaisaiDate, d) => {

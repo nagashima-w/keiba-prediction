@@ -140,8 +140,5 @@ export async function driveRunAnalysis(
     },
   };
   const analysis = await runAnalysis(raceId, parseKaisaiDate(input.kaisaiDate), deps);
-  if (analysis.dateApproximate) {
-    throw new Error(`${input.raceId}: 分析日が近似(kaisaiDate が渡っていない)`);
-  }
   return { analysis, runnerRace, classification, gradeWinnerErrors, resultDetailLookups };
 }

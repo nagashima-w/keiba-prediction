@@ -27,8 +27,8 @@ export type { AnalysisPipelineDeps as CloudAnalysisDeps, AnalysisResult as Cloud
 
 /**
  * 1レースを分析する。**`kaisaiDate`(YYYYMMDD)は必須**。
- * runAnalysis は、開催日が渡らないと当日日付(実行環境のローカル時刻。Worker は UTC)で近似し、季節・休み明けの起点がずれうる。
- * クラウド版にはその近似に落ちる経路を作らない(取得も保存もする前に拒否する)。
+ * runAnalysis の第2引数も `KaisaiDate`(必須)で、実行日で近似する経路は Issue #400 R-10b で撤去した。
+ * 型は実行時には消えるので、8桁でない値は取得も保存もする前にここで拒否する(型を迂回した呼び出しへの保険)。
  */
 export async function runCloudAnalysis(
   raceId: RaceId,
@@ -39,10 +39,5 @@ export async function runCloudAnalysis(
   if (typeof kaisaiDate !== "string" || !/^[0-9]{8}$/.test(kaisaiDate)) {
     throw new Error(`kaisaiDate(YYYYMMDD の8桁)が必要です(渡された値: ${String(kaisaiDate)})`);
   }
-  const result = await runAnalysis(raceId, kaisaiDate, deps, onProgress);
-  if (result.dateApproximate) {
-    // 到達しない(上で8桁を確かめている)。万一 runAnalysis の仕様が変わって近似に落ちたら、静かに通さない。
-    throw new Error("開催日が近似になりました(クラウド版では許可しない)");
-  }
-  return result;
+  return runAnalysis(raceId, kaisaiDate, deps, onProgress);
 }

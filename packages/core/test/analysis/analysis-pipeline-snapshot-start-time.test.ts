@@ -29,7 +29,7 @@ describe("buildRaceSnapshot が保存する race.startTime を core の分類が
   /** 実フィクスチャのレースを production の保存経路(runAnalysis → deps.saveAnalysis)で保存し、保存済み行を返す。 */
   async function analyzeAndStore(
     raceData: RaceData,
-    kaisaiDate: string | null,
+    kaisaiDate: string,
     now: Date,
   ): Promise<ReturnType<AnalysisStore["listAnalyses"]>[number]> {
     const store = new AnalysisStore();
@@ -41,11 +41,7 @@ describe("buildRaceSnapshot が保存する race.startTime を core の分類が
         now: () => now,
         saveAnalysis: (record) => store.saveAnalysis(record),
       };
-      await runAnalysis(
-        raceData.raceId,
-        kaisaiDate === null ? null : parseKaisaiDate(kaisaiDate),
-        deps,
-      );
+      await runAnalysis(raceData.raceId, parseKaisaiDate(kaisaiDate), deps);
       const stored = store.listAnalyses();
       expect(stored).toHaveLength(1);
       return stored[0]!;
@@ -76,16 +72,17 @@ describe("buildRaceSnapshot が保存する race.startTime を core の分類が
     expect(classifyWithoutMarkers(atStart)).toBe("suspect");
   });
 
-  it("地方(20:50発走): 開催日は raceId から決まり、発走時刻が読まれて前後が判定される", async () => {
+  it("地方(20:50発走): 開催日は raceId から決まり(開催日の無い旧データの行)、発走時刻が読まれて前後が判定される", async () => {
     const raw = loadFixture("nar-on.json");
     expect(raw.race.startTime).toBe("20:50");
 
-    // 20:50 JST = 11:50Z。kaisaiDate を渡さない(地方は raceId の月日から決まる)。
-    const before = await analyzeAndStore(raw, null, new Date("2026-07-12T11:49:59.000Z"));
-    expect(classifyWithoutMarkers(before)).toBe("clean");
+    // 20:50 JST = 11:50Z。runAnalysis は開催日が必須になった(Issue #400 R-10b)ので "20260712" で保存し、
+    // 分類には kaisaiDate を null にした写し(D1 の開催日の無い旧データ)を渡す(地方は raceId の月日から決まる)。
+    const before = await analyzeAndStore(raw, "20260712", new Date("2026-07-12T11:49:59.000Z"));
+    expect(classifyWithoutMarkers({ ...before, kaisaiDate: null })).toBe("clean");
 
-    const atStart = await analyzeAndStore(raw, null, new Date("2026-07-12T11:50:00.000Z"));
-    expect(classifyWithoutMarkers(atStart)).toBe("suspect");
+    const atStart = await analyzeAndStore(raw, "20260712", new Date("2026-07-12T11:50:00.000Z"));
+    expect(classifyWithoutMarkers({ ...atStart, kaisaiDate: null })).toBe("suspect");
   });
 
   it("production で保存した新規分析は両方の遮断印を持ち、発走後に分析しても clean として集計される", async () => {

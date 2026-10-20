@@ -53,8 +53,7 @@ export type ExcludedReason =
   | "horse-mismatch"
   | "too-few-runners"
   | "no-placed-horse"
-  | "analysis-error"
-  | "date-approximate";
+  | "analysis-error";
 
 /** 出走した馬の着順と結果(3着以内=1)。 */
 export interface RunnerFinish {

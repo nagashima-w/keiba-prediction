@@ -117,8 +117,8 @@ export interface BuildAnalysisRecordArgs {
   readonly promptVersion: string;
   /** トリム済みの追加指示(空文字は注入なし)。 */
   readonly trimmedInstruction: string;
-  /** 選択済み開催日。渡らなかった場合は null(近似日付は保存しない)。 */
-  readonly kaisaiDate: KaisaiDate | null;
+  /** 選択済み開催日(必須)。 */
+  readonly kaisaiDate: KaisaiDate;
   /** 戦績の絞り込みに使った基準日(YYYYMMDD)。 */
   readonly historyCutoffDate: string;
   readonly modelUsed: string | null;
@@ -172,12 +172,11 @@ export function buildAnalysisRecord(args: BuildAnalysisRecordArgs): AnalysisReco
     // LLMスキップ(prior採用)はプロンプト自体を使っていないため null(promptVersionと同じ方針)。
     additionalInstruction:
       llmUsed && trimmedInstruction !== "" ? trimmedInstruction : null,
-    // 開催日(Task#34): 選択済み開催日(kaisaiDate引数)をそのまま保存する。渡らなかった場合は
-    // resolveAnalysisDate が当日日付で近似するが、その近似値は不確かなため保存しない
-    // (analysisDate は季節分類等のスコアリングにのみ使い、DB保存は生の kaisaiDate 引数のみ参照する)。
+    // 開催日(Task#34): 選択済み開催日(kaisaiDate引数)をそのまま保存する。
+    // (analysisDate は kaisaiDate から導いた表示用の形で、季節分類等のスコアリングに使う。DB保存は生の kaisaiDate 引数を参照する)。
+    // `AnalysisRecord.kaisaiDate` の型が `KaisaiDate | null` なのは、D1 に開催日が無い旧データ(null)を読むため。
     kaisaiDate,
-    // 戦績の絞り込みに使った基準日(Issue #39)。kaisaiDate と異なり、近似日のときも使った基準日
-    // (実行日)を書く。NULL の行は先読みリーク遮断より前に作られた分析(是正前)を意味する。
+    // 戦績の絞り込みに使った基準日(Issue #39)。kaisaiDate と同じ日付(YYYYMMDD)になる。NULL の行は先読みリーク遮断より前に作られた分析(是正前)を意味する。
     historyCutoffDate,
     // LLMプロンプト側の先読みリーク遮断を通った印(Issue #153)。新規の分析は必ず true を書く
     // (LLM未使用でも true。当日傾向は自レースより前のレース番号だけ、同レース過去傾向は当該回自身と
@@ -235,7 +234,6 @@ export interface BuildAnalysisResultArgs {
   readonly race: RaceData;
   /** 分析日(YYYY/MM/DD)。 */
   readonly analysisDate: string;
-  readonly dateApproximate: boolean;
   readonly llmUsed: boolean;
   readonly llmSkippedReason: string | null;
   readonly fallback: boolean;
@@ -252,7 +250,6 @@ export function buildAnalysisResult(args: BuildAnalysisResultArgs): AnalysisResu
     venueName,
     race,
     analysisDate,
-    dateApproximate,
     llmUsed,
     llmSkippedReason,
     fallback,
@@ -268,7 +265,6 @@ export function buildAnalysisResult(args: BuildAnalysisResultArgs): AnalysisResu
     courseType: race.race.courseType,
     distance: race.race.distance,
     date: analysisDate,
-    dateApproximate,
     llmUsed,
     llmSkippedReason,
     fallback,

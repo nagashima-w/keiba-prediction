@@ -316,7 +316,6 @@ describe("一時的な失敗・未知の着順文言は保存しない(§3.3 追
     { reason: "too-few-runners", saved: true },
     { reason: "no-placed-horse", saved: true },
     { reason: "analysis-error", saved: true },
-    { reason: "date-approximate", saved: true },
   ];
   it.each(cases)("$reason は 保存=$saved", async ({ reason, saved }) => {
     const h = harness({

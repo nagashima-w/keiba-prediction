@@ -262,9 +262,9 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   - `filterRaceDataBefore`: 基準日(`analysisDate`)**と同日以降**の走と、**日付欠損・不正形式の走**を
     除外する(未来の走を混ぜない保守側。手元フィクスチャ〔中央16頭・18頭・地方12頭〕の全走で日付欠損は0件で、
     通常運用の結果は変わらない)。
-  当日の未施行レースでは自レースの走も施行日以降の走も存在せず、何も変わらない。`kaisaiDate` が渡らず
-  実行日で近似(`dateApproximate=true`)した場合、自レースの走は raceId で除かれるが、施行日より後・
-  実行日より前の走は残る(既知の限界。近似日は UI から到達しない)。`results=null`(戦績取得失敗)は
+  当日の未施行レースでは自レースの走も施行日以降の走も存在せず、何も変わらない。
+  (経緯: かつては `kaisaiDate` が渡らず実行日で近似する経路〈`dateApproximate=true`〉があり、そのとき施行日より後・
+  実行日より前の走は残った。#400 R-10b で近似の経路を撤去した。現在は `kaisaiDate` が必須で、基準日は常に開催日。)`results=null`(戦績取得失敗)は
   null のまま、0走(新馬)は `[]` で、区別を保つ。絞りに使った基準日は保存レコードの
   `historyCutoffDate`(DB の `analyses.history_cutoff_date`。4節・後述の「先読みリーク遮断の記録」参照)
   に書く。LLM プロンプト側の先読みリーク(同日傾向への後続レース混入・地方の同レース過去10年結果への
@@ -282,8 +282,7 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
     比較)。`対象回数`(プロンプトの「対象N回中」)は**除いた後の件数**。実測
     (`docs/grade-winner-lookahead-investigation.md`)で、地方は、実測した2本(同じ大井の同一重賞
     シリーズ)では race_id に依らず同じ応答(最新10年。当該年を含む)を返し(別シリーズは未確認)、中央は要求した回の年より前の10年を返す(中央では何も除かれない)。
-    `kaisaiDate` が渡らず近似日(実行日)になった過去分析では、当該回は raceId で除かれるが当該回より後で
-    実行日より前の回は残る(既知の限界。近似日は UI から到達しない)。
+    (経緯: かつては近似日〈実行日〉の過去分析で、当該回より後で実行日より前の回が残る限界があった。#400 R-10b で近似の経路を撤去し、基準日は常に開催日になった。)
   - `PROMPT_VERSION` は据え置き(遮断済みかどうかは版ではなく `analyses.prompt_lookahead_guarded` で区別する。
     4節「先読みリーク遮断の記録」参照)。
 - **共通ルール**: 各バイアスは「対象条件の複勝率 − 全体複勝率 × 重み」の差分ベース(`aggregate.ts`)。
@@ -492,8 +491,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   推定 EV(evEstimated)は集計から除外して区別。既定は latest モード(レースごと最新分析のみ)。
 - **先読みリーク遮断の記録(Issue #39)**: `analyses.history_cutoff_date`(TEXT・NULL 許容、
   `YYYYMMDD`)に、戦績の絞り込みに**実際に使った基準日**を書く(`AnalysisRecord.historyCutoffDate`)。
-  `dateApproximate=true`(開催日が渡らず実行日で近似)の分析でも、使った基準日(=実行日)を書く
-  (`kaisai_date` は近似のとき NULL のままで、別の値)。**NULL は「遮断の記録なし=#39 より前に作られた
+  `kaisaiDate` は必須で、基準日は常に開催日(`kaisai_date` と同じ日付)になる。
+  (経緯: かつては近似〈実行日〉の分析があり、基準日=実行日・`kaisai_date`=NULL になりえた。#400 R-10b で近似の経路を撤去した。
+  `kaisai_date` が NULL の行は、それ以前に保存された旧データ。)**NULL は「遮断の記録なし=#39 より前に作られた
   分析(是正前)」を意味する**(0や空文字で「是正済み」と読ませない。#31の原則・`include_*` 列と同じ流儀)。
   既存 DB は開くときに `PRAGMA table_info` → `ALTER TABLE ADD COLUMN` で後付けする(冪等)。
   この値は `StoredAnalysis.historyCutoffDate`(NULL は null)として読み出せる(Issue #152 A)。
@@ -1143,11 +1143,12 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   #79(#20-C。`probability-quality-metrics.ts` の2関数を PL へ切り替えるか裁定。未着手、
   #81 が前提。切り替えない結論もあり得る)の順で進めている。
 - **着手前ゲートで判明した2つの計測条件欠陥**(#40がまず健全化した理由):
-  1. **実行日ドリフト**: `runAnalysis` に `kaisaiDate` を渡さないと `resolveAnalysisDate` が
+  1. **実行日ドリフト**: 当時は `runAnalysis` に `kaisaiDate` を渡さないと `resolveAnalysisDate` が
      実行日(`now()`)へフォールバックし、季節分類・休み明け走目の基準日が壁時計時刻とともに
-     動く(`dateApproximate=true`)。計測・回帰テストでは必ず実レース日の `kaisaiDate` を明示する
+     動いた(`dateApproximate=true`)。計測・回帰テストでは必ず実レース日の `kaisaiDate` を明示する
      こと。`scripts/bench-mixed-allocation.ts` もこの理由で `kaisaiDate` を明示するよう是正済み
-     (#40。それ以前は明示していなかった)。
+     (#40。それ以前は明示していなかった)。**#400 R-10b で近似の経路を撤去した。現在は `runAnalysis` の
+     `kaisaiDate` が必須(`KaisaiDate`)で、渡し忘れは型エラーになる。**
   2. **先読みリーク**: (#40 時点)`analysis-pipeline.ts` が戦績を日付でフィルタせず `buildPriorInput`
      に渡していたため、当該レース自身の着順が prior の材料に混入していた(実測: 中央16頭フィクスチャで
      出走16頭全頭・21走が該当。うち16走が当該レース自身、5走は基準日より後の日付)。
@@ -1444,11 +1445,11 @@ Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 
 exe の分析パイプライン(`packages/core/src/analysis/analysis-pipeline.ts` の `runAnalysis`。#286 で exe の `packages/app/src/main/analysis-pipeline.ts` から移した)を、**組み直さずに** cloud が相対 import で取り込む(`cloud/src/pipeline.ts` の `runCloudAnalysis`。呼び出し元は #177 以降で、本番のエントリはまだ呼ばない)。
 exe の出力は変わらない(`packages/core/test/golden/pipeline-golden.json`〈#286 で `packages/app/test/golden/` から移した〉を変更前のコミット b821c97 で生成して固定。生成手順 `scripts/gen-pipeline-golden.ts`)。
 - **core の狭い入口 `@keiba/core/pipeline`**(`packages/core/src/pipeline.ts`。値 20 個と型だけを再 export する): バレルは `cache.ts`・`analysis-store.ts`(better-sqlite3)を巻き込み、cloud のバンドルも型検査も(CI のように各 package の node_modules が無い配置では)失敗する(実測)。
-  この入口は型だけの import も含めて better-sqlite3 に依存するモジュールを経由しない(型は `ev/analysis-store-types.ts` から。`scrape-race.ts` ほか3ファイルの `CachedFetchTextOptions` も `cached-fetcher.ts` から取る)。core の `analysis/analysis-pipeline.ts`・`allocation-record.ts`・`analysis-export.ts` がこれを使う(当時の exe の `pipeline-deps.ts` ほかは従来どおりバレル。#287 で削除)。
+  この入口は型だけの import も含めて better-sqlite3 に依存するモジュールを経由しない(型は `ev/analysis-store-types.ts` から。`scrape-race.ts` ほか3ファイルの `CachedFetchTextOptions` も `cached-fetcher.ts` から取る)。core の `analysis/analysis-pipeline.ts`・`analysis-llm-materials.ts`・`analysis-record.ts`・`allocation-record.ts`・`analysis-export.ts` がこれを使う(当時の exe の `pipeline-deps.ts` ほかは従来どおりバレル。#287 で削除)。
 - **deps は非同期でもよい**: `saveAnalysis` の戻り値は `unknown`(Promise なら await。reject は runAnalysis の reject)。当日傾向は、`getRaceResultDetails`(任意。`precedingRaceIdsSameDay` の ID をまとめて1回で引く。D1 の1呼び出しあたりのクエリ数の上限〈Free は 50〉を避ける)を渡せる。
   同期の単発 `getRaceResultDetail`(exe の束縛)は従来どおり ID ごとに1回・昇順。両方あればバッチを使う。
 - **cloud の設定**: `wrangler.toml` の `[alias]` は完全一致で、**サブパスごとに1行**(`@keiba/core/pipeline`・`scorer/snapshot-filter`・`ev/bet-allocation`・`ev/combo-bet-allocation`)。`tsconfig.json` の `paths`・`vitest.config.ts` の `alias` は前方一致。
-  `kaisaiDate`(YYYYMMDD)は `runCloudAnalysis` が必須にする(渡らないと runAnalysis が当日日付〈Worker は UTC〉で近似するため)。
+  `kaisaiDate`(YYYYMMDD)は必須。型(`KaisaiDate`)で必須にしたうえで、`runCloudAnalysis` が 8 桁かを実行時にも確かめる(経緯: 当時は渡らないと runAnalysis が当日日付〈Worker は UTC〉で近似した。#400 R-10b でその経路を撤去した)。
 - **検査**: `packages/core/test/analysis/analysis-pipeline-golden.test.ts`(golden との一致)・同ディレクトリの `analysis-pipeline-async-deps.test.ts`(非同期 deps・バッチ)、core の `native-free-modules.test.ts`、cloud の `import-guard.test.ts`(型を含む閉包・alias の一致)・`bundle-guard.test.ts`(runAnalysis がバンドルに入り better-sqlite3 が入らない)・
   `pipeline-run.test.ts`(golden との一致)、smoke(workerd で `runAnalysis` が最後まで通り、golden と一致。浮動小数点は相対誤差 1e-12 の許容つきで比べ、整数・文字列・項目の集合は完全一致。`cloud/smoke-compare.ts`。SHA-256 の完全一致は成り立たない。次の節を参照)。
 - **限界**: 本番のエントリは `runCloudAnalysis` を参照しないので、本番のバンドルには入っていない(bundle-guard は、これを参照する一時の入口を本番と同じ `wrangler.toml` でバンドルして検査する)。重賞の「同レース過去10年傾向」は POST で取る。gate は #181 段階1(v1.22.2)で許可リスト付きの POST に対応し、段階2(v1.23.0)で発走前の取得ステップが POST を使うようになった(下の「重賞の過去10年傾向」)。
@@ -2397,7 +2398,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
 
 #294 で D1 の `baba_conditions` に貯めた当日の馬場の値(外部の API の朝の計測値)を、発走前の分析の LLM と分析の画面に出す。
 
-- **どのレースか**: **中央(場コード 01〜10)のレースで、LLM を使い、開催日が渡っている**発走前の分析だけ。地方・LLM を使わない分析(キー未登録)・近似日では読まず、スナップショットにも載せない(LLM が見ていない値を記録しない)。値が無い(計測が無い日・取得の前〈朝 9 時より前の分析など〉・D1 の読み出しの失敗)ときは、従来どおり(節なし・プロンプトは "2026-10-13.1" とバイト一致)。分析は朝の取得の完了を待たない。
+- **どのレースか**: **中央(場コード 01〜10)のレースで、LLM を使い、開催日が渡っている**発走前の分析だけ。地方・LLM を使わない分析(キー未登録)では読まず、スナップショットにも載せない(LLM が見ていない値を記録しない)。値が無い(計測が無い日・取得の前〈朝 9 時より前の分析など〉・D1 の読み出しの失敗)ときは、従来どおり(節なし・プロンプトは "2026-10-13.1" とバイト一致)。分析は朝の取得の完了を待たない。
 - **読み出し**: `runAnalysis` の `getBabaConditions(venueCode, kaisaiDate)`(core。省略時は機能オフ)。cloud は `D1BabaStore.load`(開催日 × 場コードの 1 行の SELECT 1 文。表の無い間・D1 の失敗は投げる)を `RaceDayCore` の `babaReader` 経由で渡す。失敗は `runAnalysis` が握って値なしで続け、警告は固定の語だけ(例外の文面は出さない)。
 - **整形**(`packages/core/src/analyzer/day-baba.ts`。純関数): `normalizeDayBaba`(検証・正規化。冪等)→ `selectDayBabaForCourse`(芝のレースは芝の項目〈クッション値・芝の含水率と状態・使用コース・芝の状態の文章〉、ダートはダートの含水率と状態だけ、障害は全部)→ `dayBabaLines`(データ行。プロンプトと画面で共有)。**芝丈・降水量は渡さない**(芝丈は低情報、降水量は見本で常に null で単位と期間が未確認)。
 - **プロンプトの節**: 【レース情報】の直後に `【当日の馬場(朝の計測値)】`(計測時刻・クッション値・含水率と「朝の計測時点の状態」・使用コース・芝の状態の文章の引用・注記 3 文)。**良・稍重などの馬場状態は netkeiba の【レース情報】の「馬場状態」が正**で、節の状態語は時点を明記し、食い違えば【レース情報】を優先する旨を注記する。馬場悪化シナリオの判定にも API の値は使わない。

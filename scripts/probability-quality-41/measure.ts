@@ -75,7 +75,7 @@ export interface MeasureDeps {
   /** `runAnalysis` の差し替え(テスト用。既定は本物)。 */
   readonly runAnalysisFn?: (
     raceId: RaceId,
-    kaisaiDate: KaisaiDate | null,
+    kaisaiDate: KaisaiDate,
     deps: AnalysisPipelineDeps,
   ) => Promise<AnalysisResult>;
   readonly now?: () => Date;
@@ -188,9 +188,6 @@ export async function measureRace(
       throw error;
     }
     return exclude("analysis-error", errorMessage(error));
-  }
-  if (analysis.dateApproximate) {
-    return exclude("date-approximate", "分析日が近似(kaisaiDate が渡っていない)");
   }
   if (analysis.rows.length !== classification.runners.length) {
     return exclude(
