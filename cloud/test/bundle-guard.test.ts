@@ -278,15 +278,20 @@ const PIPELINE_MARKERS = ["runCloudAnalysis", "promptLookaheadGuarded", "history
 
 describe("本番相当のバンドルと runAnalysis(Issue #176)", () => {
   it("前提: 検出する文字列は、runAnalysis のソースに実際にある。cloud/src/pipeline.ts は narrow な入口だけを使う", () => {
-    const pipelineSource = readFileSync(path.join(CLOUD, "..", "packages", "core", "src", "analysis", "analysis-pipeline.ts"), "utf-8");
+    // Issue #400(R-10a): runAnalysis は段ごとに 3 ファイルへ分かれた(本体 analysis-pipeline.ts・LLM の材料集め analysis-llm-materials.ts・結果行/保存レコード/結果の組み立て analysis-record.ts)。
+    const analysisDir = path.join(CLOUD, "..", "packages", "core", "src", "analysis");
+    const pipelineSources = ["analysis-pipeline.ts", "analysis-llm-materials.ts", "analysis-record.ts"].map((f) => readFileSync(path.join(analysisDir, f), "utf-8"));
+    const pipelineSource = pipelineSources.join("\n");
     const source = pipelineSource + readFileSync(path.join(CLOUD, "src", "pipeline.ts"), "utf-8");
     for (const marker of PIPELINE_MARKERS) {
       expect(source.includes(marker), `ソースに ${marker}`).toBe(true);
     }
     // Issue #286(#285 の段階A): runAnalysis は packages/core/src/analysis/ へ移り、core の中なので狭い入口を相対 import する(旧: `@keiba/core/pipeline`)。バレルは相対でも指定でも使わない。
-    expect(pipelineSource).toContain('from "../pipeline.js"');
-    expect(pipelineSource).not.toMatch(/from "@keiba\/core";/);
-    expect(pipelineSource).not.toMatch(/from "\.\.\/index\.js"/);
+    for (const src of pipelineSources) {
+      expect(src).toContain('from "../pipeline.js"');
+      expect(src).not.toMatch(/from "@keiba\/core";/);
+      expect(src).not.toMatch(/from "\.\.\/index\.js"/);
+    }
   });
 
   it(

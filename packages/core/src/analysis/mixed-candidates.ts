@@ -40,7 +40,7 @@
  * `race-allocation.ts` の `buildRaceAllocation` が `resolvePlaceBetTarget` より**手前**で
  * 判定している `oddsStatus==="yoso"` ガードを取りこぼしていた(反証Cで頭数判定だけを論じた際に
  * 一緒に落とした)。実コードで確認した事実:
- * - `analysis-pipeline.ts:587` は `oddsStatus==="yoso"` のとき `computeEstimatedRaceEv`
+ * - `runAnalysis`(`analysis-pipeline.ts`。EV 計算の本体は `recompute-allocation.ts` の `computeEvForProbs`)は `oddsStatus==="yoso"` のとき `computeEstimatedRaceEv`
  *   (単勝オッズからの推定複勝下限、誤差±20〜30%)を使い、`placeOddsMin`/`ev`/`isPositive` は
  *   **null にならず**(`evEstimated:true` として区別される)通常どおり算出される。
  * - `docs/current-spec.md`(180行目)は「オッズ未発売(`oddsStatus="yoso"` の推定EVは誤差
