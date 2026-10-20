@@ -6,7 +6,7 @@
  *
  * ## 本体との境界
  *  - 本体の `runNextStep` が、**ステップの先頭**で {@link PromoteStage.promoteDue} を 1 回 await する(続けて、同じ起床の中で、積んだ pre_race を処理できる)。
- *  - 本体に残るもの: 計画の一覧の取得・確定(`race-day-plan-stage.ts` の `PlanStage`。e1)、救済(e3)、タスクの表の操作(`task`・`taskCount`・`enqueueTask`)、`requestPlan`・`getPlanProgress` などの公開 RPC。
+ *  - 本体に残るもの: 計画の一覧の取得・確定(`race-day-plan-stage.ts` の `PlanStage`。e1)、救済(`race-day-rescue-stage.ts` の `RescueStage`。e3)、タスクの表の操作(`task`・`taskCount`・`enqueueTask`)、`requestPlan`・`getPlanProgress` などの公開 RPC。
  *
  * 手順の仕様(確定済みの日だけ・重複の確認の条件・昇格の判定の順序)は {@link PromoteStage.promoteDue}・{@link PromoteStage.promoteRow} の JSDoc を参照。メソッドの本体は切り出し前から変えていない。
  */

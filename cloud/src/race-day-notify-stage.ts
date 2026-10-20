@@ -8,7 +8,7 @@
  *  - 計画: 本体の `notifyPlan`(`runNextStep`・`peekNotifyPlan`・`rearm` の 3 箇所から呼ぶ薄い委譲)が {@link NotifyStage.plan} を呼ぶ。webhook が無効(`notifier` なし)なら、計画は何も返さない。
  *  - 送信: 本体の `runNextStep` が、昇格・計画の後・タスクの前に、計画の `sendNow` を {@link NotifyStage.runStep} に渡す。戻り値のあとの `armAlarm` は本体。
  *  - 材料: 本体の計算ステップ(`runPreRaceCompute`)の `saveAnalysis` が、分析の保存と**同じ同期区間**で、`analysis_id` の永続化より前に {@link NotifyStage.putAnalysisMaterial} を呼ぶ(2 箇所)。
- *  - 本体に残るもの: 23 時の再実行の後の失敗の判定(`judgeRescue`。救済の判定と一緒に計画の側に置く)。`plan-failure` の材料はそこが `NotifyStore` へ直接積み、送るのはこの段階。
+ *  - 他の段階に有るもの: 23 時の再実行の後の失敗の判定(`race-day-rescue-stage.ts` の `RescueStage.judge`。救済の判定と一緒に計画の側に置く)。`plan-failure` の材料はそこが `NotifyStore` へ直接積み、送るのはこの段階。
  *
  * 手順の仕様(**多くとも 1 回**・送る前に `sending` の行を書く・落ちたものは再送しない)は、各メソッドの JSDoc と `race-day-core.ts` 冒頭の「通知」の項を参照。メソッドの本体は切り出し前から変えていない。
  */
@@ -121,7 +121,7 @@ export class NotifyStage {
     let analysisId: number | null = null;
     try {
       if (item.kind === "analysis" || item.kind === "plan-failure") {
-        // 材料(`ready` の行)から送る。分析は計算ステップが、23 時の失敗の通知は本体の `judgeRescue` が、積んだもの。
+        // 材料(`ready` の行)から送る。分析は計算ステップが、23 時の失敗の通知は救済の段階の `RescueStage.judge` が、積んだもの。
         const row = this.store.row(item.key);
         if (row === null || row.payload_json === null) {
           throw new Error("通知の材料がありません");
