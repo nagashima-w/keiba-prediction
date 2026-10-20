@@ -740,7 +740,8 @@ export async function scrapeRace(
   const shutubaText = await fetcher.fetchText(shutubaUrl(raceId), {
     maxAgeMs: ttl.shutubaMs,
   });
-  const parsedShutuba = parseShutuba(shutubaText);
+  // レースの条件(負担重量の種別・牝馬限定。Issue #421 段階 1)は中央だけ読む(ユーザー決定: 地方は読まない)。
+  const parsedShutuba = parseShutuba(shutubaText, { readRaceConditions: !isNar });
 
   // (1b) 取消・除外の馬を出走馬から除く(Issue #154)。出馬表には発走前に取消になった馬が
   // 残ることがある(中央 202606040901 で観測。印は行の `Cancel` クラスと `td.Cancel_Txt`)。

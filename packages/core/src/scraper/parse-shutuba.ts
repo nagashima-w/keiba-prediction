@@ -17,6 +17,7 @@ import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
 import { centralGradeFromClassNames } from "./grade-label.js";
 import { parseHorseId } from "./ids.js";
+import { readRaceConditions } from "./race-condition.js";
 import { PATTERNS, SHUTUBA_SELECTORS as SEL } from "./selectors.js";
 import type {
   BodyWeight,
@@ -67,8 +68,20 @@ function parseFence(courseType: CourseType, data01: string): string | null | und
   return PATTERNS.fenceLetterToken.exec(parenContent)?.[1] ?? null;
 }
 
-/** レース情報(ページ上部)を抽出する。 */
-function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
+/**
+ * レースの条件(負担重量の種別・牝馬限定。Issue #421 段階 1)を `.RaceData02` の span から読む。`.RaceData02` が無いときは空(キーを付けない)。
+ * 位置に依存せず `.RaceData02` の中に限る(読み方は `race-condition.ts`)。
+ */
+function parseRaceConditions($: CheerioAPI): Pick<ShutubaRaceInfo, "weightType" | "filliesOnly"> {
+  const $data02 = $(SEL.raceData02);
+  if ($data02.length === 0) {
+    return {};
+  }
+  return readRaceConditions($data02.find("span").map((_, el) => $(el).text()).get());
+}
+
+/** レース情報(ページ上部)を抽出する。`readRaceConditions` が true のときだけ、レースの条件(種別・牝馬限定)も読む。 */
+function parseRaceInfo($: CheerioAPI, readConditions: boolean): ShutubaRaceInfo {
   // レース名(Issue #252)。地方の `div.RaceName` はグレードのテキスト("Jpn1" 等)を内側に持つので、
   // 要素を複製してアイコンを除いてから読む(元の DOM は後続のグレード読み取りに使うため変えない)。
   const $raceName = $(SEL.raceName).first().clone();
@@ -110,6 +123,7 @@ function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
     ...(fence !== undefined ? { fence } : {}),
     hasGradeBadge,
     ...(grade !== undefined ? { grade } : {}),
+    ...(readConditions ? parseRaceConditions($) : {}),
   };
 }
 
@@ -259,11 +273,14 @@ function parseHorseRow($r: CheerioSelection): ShutubaHorse {
  * 頭数は行数から動的に決まる。枠番・馬番が範囲外の場合は ShutubaParseError を投げる。
  *
  * @param html shutuba.html のHTML文字列(デコード済みUTF-8)
+ * @param options `readRaceConditions`: true のときだけ、レースの条件(`weightType`・`filliesOnly`。Issue #421 段階 1)を読む。
+ *   **既定は false**(地方は読まない方針。HTML だけでは中央・地方を区別できないので、中央と分かっている呼び出し側〈`scrapeRace`〉が true を渡す。
+ *   渡し忘れは「キーが付かない」安全側に倒れる)
  * @returns レース情報+出走馬
  */
-export function parseShutuba(html: string): Shutuba {
+export function parseShutuba(html: string, options: { readonly readRaceConditions?: boolean } = {}): Shutuba {
   const $ = cheerio.load(html);
-  const race = parseRaceInfo($);
+  const race = parseRaceInfo($, options.readRaceConditions === true);
 
   const horses: ShutubaHorse[] = [];
   $(SEL.horseRow).each((_, row) => {

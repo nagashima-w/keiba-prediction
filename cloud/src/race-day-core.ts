@@ -22,6 +22,8 @@
  *    発走前の取得ステップは、この `scrapeRace` のほかに、重賞の過去10年傾向(`prefetchGradeWinner`。LLM が有効で重賞のときだけ、最大 1 本)と、日報の時刻の下限のためのレース一覧(`ReportHoldStage.record`→`getRaceList`。最大 1 本・取得キャッシュにあれば 0 本)を引く。
  *    したがって gate への呼び出しは最大 40 + 1 + 1 = 42 本で、Free の 50 に対して余裕は 8 本(再現: `grep -n "this.reportHold.record(\|this.prefetchGradeWinner(" cloud/src/race-day-core.ts` で、どちらも `runPreRaceFetch` の呼び出しが 1 箇所ずつ。一覧の取得は段階が注入された取得口 `getRaceList` を呼ぶ 1 箇所〈`grep -n "this.getRaceList(" cloud/src/race-day-report-hold-stage.ts`〉。
  *    `fetchText(` はそれぞれ `fetchGradeWinnerEntries` に 1 回、`listRaces`・`listNarRaces` に 1 回ずつ)。D1・R2 への呼び出しは数えていない。
+ *    **レースの条件(Issue #421 段階 1)**: 朝・発走前のどちらの取得ステップも、`scrapeRace` が出馬表を読んだ直後に、負担重量の種別と牝馬限定を D1 の `race_conditions` へ渡す(`raceConditionsStore`。取得は増やさない・失敗は警告にして続ける・
+ *    地方と条件の欄を読めなかったレースは渡さない)。前走との照合(段階 2)で、前走のレース ID から引くための記録。段階 1 では統計モデル・LLM・画面に使わない。
  *  - **ステップ2(計算 `compute`)**: **netkeiba には出ず**(gate は0回)、キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)` を走らせ、
  *    朝の prior(`AnalysisResult`)を **DO のストレージにだけ**置く(**D1・R2 には書かない**。ユーザー判断 2026-10-06: 保存するのは発走前の分析だけ)。
  *    ただし**各馬の戦績**(キャッシュ済みの事実。Issue #256 段階A)は、prior の保存とタスクの完了の後に D1 の `horse_runs` へ貯める(`horseRunsStore`。取得は増やさない。
@@ -98,6 +100,7 @@ import { deriveNarTrifectaAxisUmabans } from "../../packages/core/src/scraper/na
 import type { JockeyResultsStore } from "../../packages/core/src/scraper/jockey-results-store";
 import type { TrainerResultsStore } from "../../packages/core/src/scraper/trainer-results-store";
 import type { HorseRunsStore } from "./horse-runs";
+import { toRaceConditionRecord, type RaceConditionsStore } from "./race-conditions";
 import type { RaceData } from "../../packages/core/src/scraper/scrape-race";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import { narRaceListSubUrl, narTrifectaOddsAxisUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
@@ -369,6 +372,12 @@ export interface RaceDayDeps {
    * 発走前の分析(pre_race)では呼ばない(朝のキャッシュを使い回すので同じ戦績。手動の発走前だけの分析の戦績は貯まらない=段階Aの限界)。省略時は何もしない。
    */
   readonly horseRunsStore?: HorseRunsStore;
+  /**
+   * レースの条件(負担重量の種別・牝馬限定)の記録先(Issue #421 段階 1。本番は D1 の `race_conditions`〈migration 0022〉)。**取得ステップ**(朝の `runFetch`・発走前の `runPreRaceFetch`)で、
+   * `scrapeRace` が出馬表を読んだ直後に 1 回渡す(netkeiba への取得は増やさない。計算ステップでは呼ばない)。条件の欄を読めなかったレース(地方・`RaceData02` 無し)は渡さない。
+   * 失敗は握って警告にする(取得ステップを止めない・再試行しない)。同じ値の再保存は D1 側が行を書かない。省略時は何もしない。
+   */
+  readonly raceConditionsStore?: RaceConditionsStore;
   /**
    * LLM の依存(Issue #194〈#179-b〉。sender・モデル一覧。DO のラッパが、Worker の secret `ANTHROPIC_API_KEY` から作る)。**キーが無ければ渡さない**: 発走前の分析は LLM なしで保存し、
    * 理由(固定文言)を残す。朝のタスクでは使わない。`lister` が無ければ、モデルの自動選択をせず、固定モデルで送る。
@@ -700,6 +709,7 @@ export class RaceDayCore {
   private readonly jockeyStore: JockeyResultsStore | undefined;
   private readonly trainerStore: TrainerResultsStore | undefined;
   private readonly horseRunsStore: HorseRunsStore | undefined;
+  private readonly raceConditionsStore: RaceConditionsStore | undefined;
   private readonly llm: CloudLlm | undefined;
   /** 分析モデルの選択(`analysisModel`)に応じたモデルの自動選択(系統ごとの取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined。Issue #158)。 */
   private readonly modelSelectorFor: ModelSelectorFor | undefined;
@@ -756,6 +766,7 @@ export class RaceDayCore {
     this.jockeyStore = deps.jockeyStore;
     this.trainerStore = deps.trainerStore;
     this.horseRunsStore = deps.horseRunsStore;
+    this.raceConditionsStore = deps.raceConditionsStore;
     this.llm = deps.llm;
     this.modelSelectorFor = deps.llm === undefined ? undefined : createCloudModelSelectors(deps.llm, onWarn);
     // ⚠️ スキーマ変更の仕組みは無い: DO の SQLite の表は `CREATE TABLE IF NOT EXISTS` だけで作る(既存の表に列を足す処理は無い)。
@@ -1702,6 +1713,7 @@ export class RaceDayCore {
         { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore, trainerStore: this.trainerStore },
         { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings) },
       );
+      await this.saveRaceCondition(task.race_id, race.race);
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
       if (missing.length > 0) {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
@@ -1718,6 +1730,26 @@ export class RaceDayCore {
       }
       this.updateTask(task, "queued", attempts, message);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "fetch", result: "retry" };
+    }
+  }
+
+  /**
+   * 出馬表から読んだレースの条件(負担重量の種別・牝馬限定)を記録先へ渡す(Issue #421 段階 1。朝・発走前の取得ステップで `scrapeRace` の直後に呼ぶ)。**投げない**:
+   * 失敗は警告(鍵の形を伏せる)にして戻る(取得ステップを止めない・再試行しない)。記録先が無い構成・条件の欄を読めなかったレース(地方・`RaceData02` 無し)は何もしない。
+   * 条件はレースの事実で、分析の成否とは独立なので、戦績の欠落で取得ステップが再試行になる場合でも先に渡す(同じ値の再保存は D1 側が行を書かない)。
+   */
+  private async saveRaceCondition(raceId: string, race: Parameters<typeof toRaceConditionRecord>[1]): Promise<void> {
+    if (this.raceConditionsStore === undefined) {
+      return;
+    }
+    const record = toRaceConditionRecord(raceId, race, this.now());
+    if (record === null) {
+      return;
+    }
+    try {
+      await this.raceConditionsStore.save(record);
+    } catch (error) {
+      this.onWarn(`レースの条件を保存できませんでした(${raceId})。取得は続けます: ${redactSecrets(errorMessage(error))}`);
     }
   }
 
@@ -1904,6 +1936,7 @@ export class RaceDayCore {
         // 地方の三連単は軸ごとに頭数ぶんのリクエストが要るので、この取得ステップ(1回のアラーム)では取らず、次の段階(別のアラーム)に分ける(`deferNarTrifecta`。中央は無視される。Issue #283)。
         { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), bypassOddsCache: true, deferNarTrifecta: true },
       );
+      await this.saveRaceCondition(task.race_id, race.race);
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
       if (missing.length > 0) {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);

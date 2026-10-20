@@ -37,6 +37,16 @@ export interface RaceSnapshotRace {
    * **値があるときだけキーを持つ任意項目**: グレードの無いレース・グレードを保存する前に作った過去のスナップショットはキー自体が無い。
    */
   readonly grade?: string;
+  /**
+   * 負担重量の種別(Issue #421 段階 1。"ハンデ"・"別定"・"定量"・"馬齢"。出馬表の `weightType` の写し)。
+   * **値があるときだけキーを持つ任意項目**: 地方(読まない)・種別を読めなかったレース・この項目を保存する前の過去のスナップショットはキー自体が無い。
+   */
+  readonly weightType?: string;
+  /**
+   * 牝馬限定か(Issue #421 段階 1。出馬表の `filliesOnly` の写し)。**値があるときだけキーを持つ任意項目**(true/false は確定値):
+   * 地方(読まない)・条件の欄を読めなかったレース・過去のスナップショットはキー自体が無い。
+   */
+  readonly filliesOnly?: boolean;
 }
 
 /** レース情報スナップショットの「馬」部分(Issue#10)。過去戦績は含めない。 */
@@ -172,6 +182,8 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
       oddsStatus: race.odds.oddsStatus,
       officialDatetime: race.odds.officialDatetime,
       ...(race.race.grade !== undefined ? { grade: race.race.grade } : {}),
+      ...(race.race.weightType !== undefined ? { weightType: race.race.weightType } : {}),
+      ...(race.race.filliesOnly !== undefined ? { filliesOnly: race.race.filliesOnly } : {}),
     },
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;

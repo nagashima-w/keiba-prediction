@@ -4983,7 +4983,9 @@
           "fence": "A",
           "oddsStatus": "result",
           "officialDatetime": "2026-06-28 15:52:30",
-          "grade": "G3"
+          "grade": "G3",
+          "weightType": "ハンデ",
+          "filliesOnly": false
         },
         "horses": [
           {
@@ -20161,7 +20163,9 @@
           "fence": "A",
           "oddsStatus": "result",
           "officialDatetime": "2026-06-28 15:52:30",
-          "grade": "G3"
+          "grade": "G3",
+          "weightType": "ハンデ",
+          "filliesOnly": false
         },
         "horses": [
           {
@@ -42209,7 +42213,9 @@
           "fence": "A",
           "oddsStatus": "result",
           "officialDatetime": "2026-06-28 15:52:30",
-          "grade": "G3"
+          "grade": "G3",
+          "weightType": "ハンデ",
+          "filliesOnly": false
         },
         "horses": [
           {
