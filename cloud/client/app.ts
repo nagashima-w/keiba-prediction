@@ -14,29 +14,17 @@
  * 表示は「現在のハッシュ + キャッシュ」から毎回導く(遅れて届いた結果は、キャッシュに入るだけで、今の画面を壊さない)。
  *
  * **Issue #186(起動と追跡)**:
- *  - 起動(`onRun`): `POST /api/analyses/run`。同期の印(`runStates`)を `await` の前に立てて二重押しを防ぐ。202・409 は板にオーバーレイ(待ち等)を重ねて追跡を始める。失敗は固定の文言(`runFailureMessage`)。
+ *  - 起動(`onRun`): `POST /api/analyses/run`。状態・POST・結果の表示は `run-control.ts` が持つ(Issue #400 R-11。同期の印を `await` の前に立てて二重押しを防ぐ。202・409 は板にオーバーレイ〈`setOverlay`〉を重ねて追跡を始める〈`forceTrack`〉)。
+ *    場ごとの一括実行(Issue #251)も同じ形で `bulk-control.ts` が持つ。ここは板・追跡の道具(`store`・`forceDates`・`tracker`)を関数で渡す。
  *  - 追跡(`tracker.ts`): `status`(race_id なし)を、実行中の開催日ごとに取る。持ち主はアプリ全体(一覧のバッジ・見出しの要約・レース画面のカードに反映)。
  *    追跡の開始: 起動の 202・409、画面を開いたとき(初めて取った板)に queued・fetched がある、手動の「更新」・「状態を更新」(停止中なら再開)。ポーリングの結果は追跡を再開しない。
  *  - 板は `board-state.ts`(開催日ごとの行・通し番号・オーバーレイ・完了の検知)に持つ。レース画面のカードの行は最新の板から導く(`status?race_id=` は prior と板の初期値)。
  *  - 完了への遷移(同じ完了は 1 回): 朝は prior(`status?race_id=`)、発走前は過去の分析を取り直す(そのレースの画面にいれば取り直し、いなければキャッシュを捨てて、開いたときに取る)。
  *  - `/api/analyses/{id}`・`/api/races`・`status?race_id=`(完了時の取り直しを除く)は、ポーリングの周期では呼ばない(`/api/analyses/{id}` は、レース画面で発走前の完了を検知したとき、新しい id を 1 回だけ。下の Issue #188)。
  *
- * **Issue #189(設定画面。`#settings`)**: 開くと `GET /api/settings` だけを取る(一覧・板・レース・分析は取らない)。失敗は自動で再試行しない(「再読込」だけ。取得中・保存中は無視)。
- *  - 状態は closure に持つ: 取得の状態・下書き(`settings-form.ts`。数値は入力した文字のまま)・検証エラー・保存の状態。**画面を離れたら破棄**し(`leaveSettings`)、戻ると取り直す。
- *  - **入力(数値欄・追加指示は `input`〈打つたび〉と `change`、チェックボックス・選択は `change`)は下書きを書くだけで、再描画しない**(入力中の欄・フォーカスを壊さない。保存中の入力は無視。
- *    `input` でも書くのは、`change` が blur で発火し、フォーカスがあるまま「保存」を押して click が先に届くと、直前の入力を取りこぼすため)。保存・再読込・取得・失敗の直後は **`render(true)`**
- *    (木が前回と同じでも DOM を置き換える。change では描画しないので、DOM が下書きと食い違ったまま残るのを、強制の再描画で直す)。
- *  - **強制なしの描画(追跡のポーリングなど、設定画面の外の原因)は、画面に出ている内容の写し(`settingsShown`)から木を作る**。`input` で下書きが変わっても木は変わらず、`createMounter` が DOM を置き換えない(打っている欄・キーボードを壊さない)。
- *  - 保存の押下: 検証(項目ごと。保存の押下時に1回)→ NG なら POST せず項目ごとのエラー / OK なら全項目を POST。保存中は二重に送らない。失敗しても入力は残る。成功したらサーバが返した設定で下書きを戻す。
- *  - 世代(`settingsGen`): 離れる・取り直すたびに増やし、**古い世代の応答(離れる前に出した取得・保存)は今の画面に反映しない**。
- *  - **Issue #201(プロンプトのプレビュー)**: 画面の末尾のボタンで開閉する(既定は閉じている。メモリだけ・画面を離れたら破棄)。文面は **画面に出ている写し(`settingsShown`)の下書き**から作る。
- *    **入力のたびには更新しない**(#189 の設計どおり)。開閉と「入力中の内容を反映」は `render(true)` で、写しを現在の下書きへ更新してから描く
- *    (強制なしだと古い写しで入力欄が作り直され、打った文字が消える)。保存中・下書きなしは無視。
- *  - **Issue #396(文面はサーバが組み立てる)**: 文面は `POST /api/settings/prompt-preview`(`api-prompt-preview.ts`)で取る(クライアントの束に `build-prompt` を入れない)。取りに行くのは、
- *    **開いたとき・「入力中の内容を反映」・強制描画で写しの入力(追加指示とクリップ幅)が前回の取得と変わったとき**だけ(打つたび・ポーリングでは取らない)。取り直している間は前回の文面を出し続ける
- *    (最初の取得だけ固定の文言)。失敗は固定の文言(「入力中の内容を反映」で再試行)。連打は最後の応答だけを採る(連番)。画面を離れたら応答を捨てる(世代)。
- *    **応答が届いたとき、下書きが写しと違う(反映を押した後に打ち始めた)なら、強制描画に切り替えて写しを現在の下書きへ更新する**
- *    (通常の描画だと古い写しで入力欄が作り直され、打った文字が消える。このときは新しい取得を起こさない=次に押すまで文面に出ない契約は保つ)。
+ * **Issue #189(設定画面。`#settings`)**: 開くと `GET /api/settings` だけを取る(一覧・板・レース・分析は取らない)。状態・取得・保存・プレビュー(#201・#396)・世代・下書きは `settings-screen.ts` が持ち(Issue #400 R-11 で切り出した。
+ *   詳細はそのファイルの先頭)、ここは出入り(`enter`・`leave`)・描画(`model(force)`)・「再読込」を渡すだけ。強制なしの描画は画面に出ている内容の写しから木を作る(打っている欄を壊さない)。
+ *   画面を離れたら破棄し(`leave`)、戻ると取り直す。
  *
  * **Issue #219(検証画面。`#verify`)**: 一覧の入口のリンク先の**別の画面**。状態・取得・区分の切替・更新・ポーリングは `verify-screen.ts` が持ち、ここは出入り(`enter`・`leave`)・描画・可視状態の中継だけ。
  *  - 開くと `GET /api/verify?venue=all` だけを取る(一覧・板・設定・レース・分析は取らない)。他の画面は `/api/verify` を取らない。補完中だけ自動で取り直し(3〜5 秒)、離れると状態・タイマー・遅れて届く応答を捨てる。
@@ -58,20 +46,18 @@
  *  - レース画面の「更新」は、**失敗した最新の分析だけ**を取り直す(成功した分析は取り直さない=R2 の操作回数)。取得中の「更新」は無視する。
  *  - 結果の開閉(`resultOpen`)は (開催日, race_id) ごとにメモリに持つ(#187 と同じ。既定は開・ハッシュ/localStorage には持たない・「更新」で消さない)。
  */
-import { failureMessage, fetchBoard, fetchRaces, fetchRaceStatus, type BoardRow, type FetchLike, type MorningPriorView, type RaceRow, type TaskMode } from "./api";
+import { failureMessage, fetchBoard, fetchRaces, fetchRaceStatus, type BoardRow, type FetchLike, type MorningPriorView, type RaceRow } from "./api";
 import { fetchAnalysis, fetchPastAnalyses, type AnalysisDetail, type PastAnalysis } from "./api-analysis";
-import { bulkFailureMessage, postBulk, type BulkOutcome } from "./api-bulk";
-import { postRun, runFailureMessage, type RunOutcome } from "./api-run";
-import { bulkAcceptedText, bulkDayCapText, selectBulkTargets, type BulkUi } from "./bulk";
+import { createBulkControl } from "./bulk-control";
+import { createRunControl } from "./run-control";
 import { createBoardStore, type BoardCompletion } from "./board-state";
 import { inputToYmd, todayJst } from "./date";
-import { buildListModel, groupKeys, groupRaces, needsListClock, type BoardSource, type ListSource } from "./list";
+import { listKey, raceKey } from "./keys";
+import { buildListModel, needsListClock, type BoardSource, type ListSource } from "./list";
 import { createListClock } from "./list-clock";
-import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSource, type RunUi } from "./race";
-import { fetchPromptPreview, previewRequestKey } from "./api-prompt-preview";
-import { fetchSettings, postSettings, settingsFailureMessage } from "./api-settings";
+import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSource } from "./race";
 import { buildResultModel, type ResultSource } from "./result";
-import { buildSettingsModel, draftFromSettings, resetWeightsInDraft, setDraftValue, validateDraft, WEIGHT_FIELD_ORDER, type FieldErrors, type FieldKey, type PreviewFetchState, type SettingsDraft, type SettingsLoadState, type SettingsSaveState } from "./settings-form";
+import { createSettingsScreen } from "./settings-screen";
 import { createVerifyScreen } from "./verify-screen";
 import { createMonthlyScreen } from "./monthly-screen";
 import { createReportScreen } from "./report-screen";
@@ -111,15 +97,11 @@ export interface App {
   whenIdle(): Promise<void>;
 }
 
-const listKey = (date: string, venue: Venue): string => `${date}:${venue}`;
-const raceKey = (date: string, raceId: string): string => `${date}:${raceId}`;
 
 interface RaceStatusEntry {
   readonly rows: readonly BoardRow[];
   readonly prior: MorningPriorView | null;
 }
-
-const runKey = (date: string, raceId: string, mode: TaskMode): string => `${date}:${raceId}:${mode}`;
 
 /** 画面の `switch` の網羅チェック(Issue #191)。`Screen` に画面を足して `case` を足し忘れると、ここで型エラーになる。 */
 function assertNever(screen: never): never {
@@ -163,7 +145,6 @@ export function createApp(deps: AppDeps): App {
   const forceDates = new Map<string, number>();
   /** 追跡の板の取得(whenIdle の待ち対象。手動の取得の束ねの対象ではない)。 */
   const pollInflight = new Set<Promise<unknown>>();
-  const runInflight = new Set<Promise<unknown>>();
 
   // 場ごとの開閉(Issue #187)。(開催日, 区分) ごとに、利用者が押した値だけを持つ(既定は描画のたびに導く)。「更新」では消さない。ハッシュ・localStorage には持たない。
   const openChoices = new Map<string, Map<string, boolean>>();
@@ -184,12 +165,6 @@ export function createApp(deps: AppDeps): App {
   const analyses = new Map<number, AnalysisDetail>();
   const analysisErrors = new Map<number, string>();
   const analysisInflight = new Map<number, Promise<void>>();
-
-  /** 起動の操作の表示((開催日, レース, モード)ごと)。送信中の印は `await` の前に同期で立てる(二重押しを防ぐ)。 */
-  const runStates = new Map<string, RunUi>();
-
-  /** 場ごとの一括実行(Issue #251)の操作の状態。(開催日, 区分) → 場のまとまりのキー(`groupKeys`)→ 状態。メモリだけ(「更新」では消さない)。送信中の印は `await` の前に同期で立てる。 */
-  const bulkStates = new Map<string, Map<string, BulkUi>>();
 
   function trackedDates(): string[] {
     return [...new Set([...store.activeDates(), ...forceDates.keys()])].sort();
@@ -252,41 +227,40 @@ export function createApp(deps: AppDeps): App {
     return { kind: "loading" };
   }
 
-  function runsFor(date: string, raceId: string): Map<TaskMode, RunUi> {
-    const runs = new Map<TaskMode, RunUi>();
-    for (const mode of ["morning", "pre_race"] as const) {
-      const state = runStates.get(runKey(date, raceId, mode));
-      if (state !== undefined) runs.set(mode, state);
-    }
-    return runs;
+  // ---- 起動(Issue #186)・場ごとの一括実行(Issue #251。管理者だけ) ----
+  // 状態・POST・結果の表示は `run-control.ts`・`bulk-control.ts` が持つ(Issue #400 R-11)。板・追跡の道具(オーバーレイ・追跡の開始)は、ここ(`store`・`forceDates`・`tracker`)を関数で渡す。
+
+  /** 追跡の対象にその開催日を足し(実行中の行が無くても取る)、追跡を始める。起動・一括実行を受け付けたあとに呼ぶ(`forceDates` に登録した通し番号より後に出した取得が届くまで残る)。 */
+  function forceTrack(date: string): void {
+    forceDates.set(date, store.nextSeq());
+    tracker.begin({ immediate: false });
   }
 
+  const run = createRunControl({ fetch: deps.fetch, now: deps.now, admin, onChange: () => render(), setOverlay: store.setOverlay, forceTrack });
+
+  const bulk = createBulkControl({
+    fetch: deps.fetch,
+    now: deps.now,
+    admin,
+    onChange: () => render(),
+    route: () => route,
+    isListScreen: () => currentScreen() === "list",
+    listSource,
+    boardRows: () => {
+      const source = boardSource();
+      return source.kind === "ready" ? source.rows : null;
+    },
+    setOverlay: store.setOverlay,
+    forceTrack,
+  });
+
   // ---- 設定画面(Issue #189) ----
-  /** 取得の状態。null は「まだ取っていない(この画面にいない)」。 */
-  let settingsLoad: SettingsLoadState | null = null;
-  let settingsDraft: SettingsDraft | null = null;
-  let settingsErrors: FieldErrors = {};
-  let settingsSave: SettingsSaveState = { kind: "idle" };
-  /** 世代。離れる・取り直すたびに増やし、古い世代の応答を捨てる。 */
-  let settingsGen = 0;
-  /**
-   * 画面に出ている内容(最後に**強制描画**したとき、または画面に入ったときの、取得の状態・下書き・エラー・保存の状態の写し)。
-   * **強制なしの描画(追跡のポーリング・他の取得の完了など、設定画面の外の原因)は、この写しから木を作る**=打っている途中の下書きは、
-   * 次の強制描画(保存・再読込・取得完了・検証エラー・失敗)まで木に出さない。木が同じなら `createMounter` は DOM を置き換えない(打っている欄がフォーカスを失わない・スマホのキーボードが閉じない)。
-   * 下書き(`settingsDraft`)自体は最新のまま(保存はそれを読む)。null は「まだ写していない(画面に入った直後)」。
-   */
-  let settingsShown: { load: SettingsLoadState; draft: SettingsDraft | null; errors: FieldErrors; save: SettingsSaveState; previewOpen: boolean } | null = null;
-  /** プロンプトのプレビューを開いているか(Issue #201)。メモリだけ(既定は閉じている。画面を離れたら破棄。「再読込」では変えない)。 */
-  let settingsPreviewOpen = false;
-  /** プレビューの文面の取得(Issue #396)。`key` は取得したときの入力の鍵(`previewRequestKey`)、`state` は取得中・成功・失敗。 */
-  let settingsPreview: { key: string; state: PreviewFetchState } | null = null;
-  /** プレビューの取得の連番(連打・開閉をまたいで、最後の応答だけを採る)。 */
-  let settingsPreviewSeq = 0;
-  /** 次の強制描画で、入力が前回の取得と同じでも取り直す(開いたとき・「入力中の内容を反映」)。 */
-  let settingsPreviewForce = false;
-  /** 次の強制描画で、プレビューの取得を起こさない(応答の到着時の入力の保護。`syncSettingsPreview`)。 */
-  let settingsPreviewHold = false;
-  const settingsInflight = new Set<Promise<unknown>>();
+  // 状態・取得・保存・プレビューは `settings-screen.ts` が持つ(Issue #400 R-11)。閲覧者の route は `currentScreen()` が admin-only にするので、`isActive()` は false になる。
+  const settings = createSettingsScreen({
+    fetch: deps.fetch,
+    isActive: () => currentScreen() === "settings",
+    onChange: (force) => render(force),
+  });
 
   // ---- 検証画面(Issue #219) ----
   // Issue #263: 閲覧者にも開く。閲覧者には更新ボタンを出さず、「更新」(refresh=1)も送らない(サーバも閲覧者の refresh は無視し、集計のやり直しを起こさない)。
@@ -337,16 +311,16 @@ export function createApp(deps: AppDeps): App {
     onRefresh,
     onToggleGroup,
     onToggleResult,
-    onRun,
-    onBulkOpen,
-    onBulkGo,
-    onBulkDismiss,
+    onRun: run.onRun,
+    onBulkOpen: bulk.onOpen,
+    onBulkGo: bulk.onGo,
+    onBulkDismiss: bulk.onDismiss,
     onRetrack,
-    onSettingsInput,
-    onSettingsSave,
-    onSettingsPreviewToggle,
-    onSettingsPreviewRefresh,
-    onSettingsWeightsReset,
+    onSettingsInput: settings.onInput,
+    onSettingsSave: settings.onSave,
+    onSettingsPreviewToggle: settings.onPreviewToggle,
+    onSettingsPreviewRefresh: settings.onPreviewRefresh,
+    onSettingsWeightsReset: settings.onWeightsReset,
     onVerifyVenue: verify.onVenue,
     onVerifyVersionToggle: verify.onVersionToggle,
     onVerifyCalibrationTarget: verify.onCalibrationTarget,
@@ -391,7 +365,7 @@ export function createApp(deps: AppDeps): App {
               status,
               past: pastSource(key),
               listRow,
-              runs: runsFor(route.date, raceId),
+              runs: run.runsFor(route.date, raceId),
               tracking: trackingNotice(),
               ...(latestId === null ? {} : { result: analysisSource(latestId) }),
               resultOpen: resultOpenChoices.get(key) ?? true,
@@ -404,12 +378,8 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       case "settings": {
-        // 強制描画のとき、または画面に入った直後(まだ写していない)は、今の状態を写す。それ以外(強制なし)は、画面に出ている内容の写しから作る。
-        if (force || settingsShown === null) {
-          settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave, previewOpen: settingsPreviewOpen };
-          syncSettingsPreview(); // 写しを更新したときだけ、プレビューの文面を取り直すかを決める(Issue #396)
-        }
-        deps.render(renderScreen(buildSettingsModel({ ...settingsShown, previewFetch: settingsPreview?.state ?? null }), actions), force);
+        // 強制描画のとき、または画面に入った直後(まだ写していない)は、今の状態を写す。それ以外(強制なし)は、画面に出ている内容の写しから作る(`settings-screen.ts`)。
+        deps.render(renderScreen(settings.model(force), actions), force);
         return;
       }
       case "verify": {
@@ -437,7 +407,7 @@ export function createApp(deps: AppDeps): App {
               choices: openChoices.get(listKey(route.date, route.venue)),
               readOnly: !admin,
               now: deps.now(),
-              bulk: { now: deps.now(), states: bulkStates.get(listKey(route.date, route.venue)) ?? new Map<string, BulkUi>() },
+              bulk: { now: deps.now(), states: bulk.statesOf(listKey(route.date, route.venue)) },
             }),
             actions,
           ),
@@ -610,7 +580,7 @@ export function createApp(deps: AppDeps): App {
         loadBoard(route.date);
         return;
       case "settings":
-        if (settingsLoad === null) startSettingsLoad();
+        settings.enter(); // まだ取っていなければ取る(重ねて呼んでも取得は増えない)
         return;
       case "verify":
         verify.enter();
@@ -631,158 +601,6 @@ export function createApp(deps: AppDeps): App {
       default:
         return assertNever(screen);
     }
-  }
-
-  // ---- 設定 ----
-
-  /** 設定を取り直す(下書き・エラー・保存の状態を捨てる)。**呼び出し側が描画する**。 */
-  function startSettingsLoad(): void {
-    settingsGen += 1;
-    const gen = settingsGen;
-    settingsLoad = { kind: "loading" };
-    settingsDraft = null;
-    settingsErrors = {};
-    settingsSave = { kind: "idle" };
-    // 飛んでいるプレビューの応答は世代(上)で捨てられるので、文面の状態も捨てる(Issue #396 R1)。残すと取得中のまま・同じ鍵で取り直されず、「組み立てています…」で止まる。
-    // 取り直した設定の描画(強制)で、開いていれば取得し直す(`leaveSettings` と同じく連番も進める)。
-    settingsPreview = null;
-    settingsPreviewSeq += 1;
-    const promise = fetchSettings(deps.fetch).then((result) => {
-      settingsInflight.delete(promise);
-      if (gen !== settingsGen) return; // 離れた・取り直した(古い応答)
-      if (result.ok) {
-        settingsLoad = { kind: "ready", source: result.source };
-        settingsDraft = draftFromSettings(result.settings);
-      } else {
-        settingsLoad = { kind: "error", message: settingsFailureMessage(result.error, "load") };
-      }
-      render(true);
-    });
-    settingsInflight.add(promise);
-  }
-
-  /**
-   * プレビューの文面を取り直すかを決め、要るなら取りに行く(Issue #396)。**写し(`settingsShown`)を更新した直後**に呼ぶ(文面は写しの下書きから作る=今までと同じ)。
-   * 取るのは、開いていて、写しに下書きがあり、(開く・「入力中の内容を反映」で取り直しを求められたか、写しの入力が前回の取得と違う)とき。
-   * 応答の到着時: 世代(離れた・取り直した)か連番(より新しい取得がある)が違えば捨てる。下書きが写しと違う(反映を押した後に打ち始めた)ときは、強制描画で写しを現在の下書きへ更新し
-   * (通常の描画は古い写しで入力欄を作り直し、打った文字が消える)、その描画では取得を起こさない(`settingsPreviewHold`。文面が入力に追いつくのは次に押したときだけ、の契約を保つ)。
-   */
-  function syncSettingsPreview(): void {
-    const forced = settingsPreviewForce;
-    const hold = settingsPreviewHold;
-    settingsPreviewForce = false;
-    settingsPreviewHold = false;
-    const shown = settingsShown;
-    if (hold || !settingsPreviewOpen || shown === null || shown.draft === null || shown.load.kind !== "ready") return;
-    const input = { additionalInstruction: String(shown.draft.additionalInstruction), clipVariant: String(shown.draft.clipVariant) };
-    const key = previewRequestKey(input);
-    if (!forced && settingsPreview !== null && settingsPreview.key === key) return;
-    const state = settingsPreview?.state;
-    const previous = state?.kind === "ready" ? state.preview : state?.kind === "loading" ? state.previous : null;
-    settingsPreviewSeq += 1;
-    const seq = settingsPreviewSeq;
-    const gen = settingsGen;
-    settingsPreview = { key, state: { kind: "loading", previous } };
-    const promise = fetchPromptPreview(deps.fetch, input).then((result) => {
-      settingsInflight.delete(promise);
-      if (gen !== settingsGen || seq !== settingsPreviewSeq) return; // 離れた・取り直した・より新しい取得がある(古い応答)
-      settingsPreview = { key, state: result.ok ? { kind: "ready", preview: result.preview } : { kind: "error" } };
-      if (settingsDraft !== null && settingsShown !== null && JSON.stringify(settingsDraft) !== JSON.stringify(settingsShown.draft)) {
-        settingsPreviewHold = true;
-        render(true);
-      } else {
-        render();
-      }
-    });
-    settingsInflight.add(promise);
-  }
-
-  /** 設定画面を離れる: 下書き・エラー・保存の状態を捨て、世代を進める(遅れて届く応答を捨てる)。戻ると取り直す。 */
-  function leaveSettings(): void {
-    settingsGen += 1;
-    settingsShown = null;
-    settingsPreviewOpen = false;
-    settingsPreview = null;
-    settingsPreviewSeq += 1;
-    settingsPreviewForce = false;
-    settingsPreviewHold = false;
-    settingsLoad = null;
-    settingsDraft = null;
-    settingsErrors = {};
-    settingsSave = { kind: "idle" };
-  }
-
-  /** 入力欄の変更。**下書きを書くだけで、再描画しない**(入力中の欄・フォーカスを壊さない)。保存中・取得前は無視。 */
-  function onSettingsInput(key: string, value: string): void {
-    if (currentScreen() !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
-    settingsDraft = setDraftValue(settingsDraft, key as FieldKey, value);
-    // 「保存しました」の通知は、未保存の入力が生まれた時点で状態から外す(描画はしない。次の描画から出さない)。
-    if (settingsSave.kind === "saved") settingsSave = { kind: "idle" };
-  }
-
-  /**
-   * プロンプトのプレビューの開閉(Issue #201)。開くと、文面の取得(Issue #396)が始まる。**`render(true)`**: 強制なしの描画は古い写し(`settingsShown`)から木を作るので、そのままだと
-   * 入力欄が古い下書きで作り直され、打った文字が消える。強制描画は、写しを現在の下書きへ更新してから描く(保存・検証エラーと同じ)。
-   * 下書きが無い(取得前・失敗)・保存中は無視する(入力を無視するのと同じ)。
-   */
-  function onSettingsPreviewToggle(open: boolean): void {
-    if (currentScreen() !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
-    settingsPreviewOpen = open;
-    // 開閉のたびに文面は捨てる(開くたびに今の下書きで取り直す)。取得中の応答は連番で捨てる。
-    settingsPreview = null;
-    settingsPreviewSeq += 1;
-    settingsPreviewForce = open;
-    render(true);
-  }
-
-  /** 「入力中の内容を反映」(Issue #201): 開いているときだけ。強制描画で写しを現在の下書きへ更新し、プレビューの文面を取り直して入力に追いつかせる(Issue #396 以降は、サーバへの取得を伴う)。 */
-  function onSettingsPreviewRefresh(): void {
-    if (currentScreen() !== "settings" || settingsDraft === null || settingsSave.kind === "saving" || !settingsPreviewOpen) return;
-    settingsPreviewForce = true; // 入力が前回と同じでも取り直す
-    render(true);
-  }
-
-  /**
-   * 「重みを既定値に戻す」(Issue #218): 下書きの重み15項目だけを既定値に戻す(保存はしない。ネットワークには出ない)。重みの欄のエラーも消す(戻した値は有効)。
-   * `render(true)`: 強制なしの描画は古い写し(`settingsShown`)から木を作るので、そのままだと欄が古い値のまま残る(プレビューの開閉と同じ)。
-   * 下書きが無い(取得前・失敗)・保存中は無視する。
-   */
-  function onSettingsWeightsReset(): void {
-    if (currentScreen() !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
-    settingsDraft = resetWeightsInDraft(settingsDraft);
-    const remaining: Partial<Record<FieldKey, string>> = { ...settingsErrors };
-    for (const key of WEIGHT_FIELD_ORDER) delete remaining[key];
-    settingsErrors = remaining;
-    if (settingsSave.kind === "saved") settingsSave = { kind: "idle" }; // 未保存の変更が生まれたので、「保存しました」を外す
-    render(true);
-  }
-
-  function onSettingsSave(): void {
-    if (currentScreen() !== "settings" || settingsLoad?.kind !== "ready" || settingsDraft === null || settingsSave.kind === "saving") return;
-    const checked = validateDraft(settingsDraft);
-    if (!checked.ok) {
-      settingsErrors = checked.errors;
-      settingsSave = { kind: "idle" };
-      render(true);
-      return;
-    }
-    settingsErrors = {};
-    settingsSave = { kind: "saving" }; // 同期の印(await の前)。二重押しを防ぐ
-    const gen = settingsGen;
-    render(true);
-    const promise = postSettings(deps.fetch, checked.settings).then((result) => {
-      settingsInflight.delete(promise);
-      if (gen !== settingsGen) return; // 離れた・取り直した(古い応答)
-      if (result.ok) {
-        settingsDraft = draftFromSettings(result.settings);
-        settingsLoad = { kind: "ready", source: "d1" };
-        settingsSave = { kind: "saved" };
-      } else {
-        settingsSave = { kind: "error", message: settingsFailureMessage(result.error, "save") };
-      }
-      render(true);
-    });
-    settingsInflight.add(promise);
   }
 
   // ---- 追跡 ----
@@ -814,158 +632,6 @@ export function createApp(deps: AppDeps): App {
     tracker.begin({ immediate: false });
   }
 
-  // ---- 起動 ----
-
-  function onRun(date: string, raceId: string, mode: TaskMode): void {
-    if (!admin) return; // 閲覧者(Issue #238)には起動のボタンが無い。万一呼ばれても POST しない(サーバも 403)
-    const key = runKey(date, raceId, mode);
-    if (runStates.get(key)?.kind === "sending") return; // 同期の印(await の前)。二重押しを防ぐ
-    runStates.set(key, { kind: "sending" });
-    render();
-    const promise = postRun(deps.fetch, { raceId, date, mode }).then((outcome) => {
-      finishRun(key, date, raceId, mode, outcome);
-      render();
-    });
-    runInflight.add(promise);
-    void promise.finally(() => runInflight.delete(promise));
-  }
-
-  function finishRun(key: string, date: string, raceId: string, mode: TaskMode, outcome: RunOutcome): void {
-    const nowMs = deps.now().getTime();
-    switch (outcome.kind) {
-      case "accepted":
-        runStates.delete(key);
-        store.setOverlay(date, raceId, mode, "queued", nowMs);
-        forceDates.set(date, store.nextSeq());
-        tracker.begin({ immediate: false });
-        return;
-      case "already-running":
-        runStates.set(key, { kind: "already" });
-        store.setOverlay(date, raceId, mode, outcome.status, nowMs);
-        forceDates.set(date, store.nextSeq());
-        tracker.begin({ immediate: false });
-        return;
-      case "accepted-malformed":
-        // サーバは受け付けている(202)が、本文が想定外。失敗の文言を出し、追跡は始める(板が真実を教える)。
-        runStates.set(key, { kind: "error", message: runFailureMessage({ kind: "unexpected", httpStatus: 202 }) });
-        forceDates.set(date, store.nextSeq());
-        tracker.begin({ immediate: false });
-        return;
-      case "failed":
-        runStates.set(key, { kind: "error", message: runFailureMessage(outcome.failure) });
-        return;
-    }
-  }
-
-  // ---- 場ごとの一括実行(Issue #251。管理者だけ)----
-
-  function bulkStatesFor(key: string): Map<string, BulkUi> {
-    const found = bulkStates.get(key);
-    if (found !== undefined) return found;
-    const created = new Map<string, BulkUi>();
-    bulkStates.set(key, created);
-    return created;
-  }
-
-  /** いま表示中の一覧の、場のまとまり(キー)のレース。一覧が取れていない・キーが無いときは null。 */
-  function racesOfGroup(groupKey: string): readonly RaceRow[] | null {
-    const source = listSource();
-    if (source.kind !== "ready") return null;
-    const index = groupKeys(source.races).indexOf(groupKey);
-    return index < 0 ? null : groupRaces(source.races)[index]!.races;
-  }
-
-  function boardRowsOrNull(): readonly BoardRow[] | null {
-    const source = boardSource();
-    return source.kind === "ready" ? source.rows : null;
-  }
-
-  /** ボタン: 確認画面を開く(この時点では POST しない)。過去の開催日・板が取れていない・対象が 0 件・送信中は何もしない(ボタンも無効)。 */
-  function onBulkOpen(groupKey: string, mode: TaskMode): void {
-    if (!admin) return; // 閲覧者(Issue #238)にはボタンが無い。万一呼ばれても何もしない(サーバも 403)
-    if (currentScreen() !== "list") return;
-    const date = route.date;
-    const now = deps.now();
-    if (date < todayJst(now)) return;
-    const board = boardRowsOrNull();
-    const races = racesOfGroup(groupKey);
-    if (board === null || races === null) return;
-    const states = bulkStatesFor(listKey(date, route.venue));
-    if (states.get(groupKey)?.kind === "sending") return;
-    const selection = selectBulkTargets({ mode, races, board, date, now });
-    if (selection.raceIds.length === 0) return;
-    states.set(groupKey, { kind: "confirm", mode, raceIds: selection.raceIds, excluded: selection.excluded });
-    render();
-  }
-
-  /**
-   * 確認画面の「実行する」: **実行の直前に対象を取り直し、確認した対象との共通部分だけを送る**(確認のあとで実行中・完了・発走済みになったものは外れる。増えることはない)。
-   * 共通部分が空なら POST しない。送信中の印は `await` の前に同期で立てる(二重押しを防ぐ。確認画面の状態でなければ何もしない)。
-   */
-  function onBulkGo(groupKey: string): void {
-    if (!admin) return;
-    const date = route.date;
-    const key = listKey(date, route.venue);
-    const states = bulkStatesFor(key);
-    const ui = states.get(groupKey);
-    if (ui === undefined || ui.kind !== "confirm") return;
-    const now = deps.now();
-    const board = boardRowsOrNull();
-    const races = racesOfGroup(groupKey);
-    const current = board !== null && races !== null && date >= todayJst(now) ? new Set(selectBulkTargets({ mode: ui.mode, races, board, date, now }).raceIds) : new Set<string>();
-    const raceIds = ui.raceIds.filter((id) => current.has(id));
-    if (raceIds.length === 0) {
-      states.set(groupKey, { kind: "result", tone: "error", text: "対象のレースがなくなったため、何も予約していません。" });
-      render();
-      return;
-    }
-    states.set(groupKey, { kind: "sending", mode: ui.mode });
-    render();
-    const mode = ui.mode;
-    const promise = postBulk(deps.fetch, { date, mode, raceIds }).then((outcome) => {
-      finishBulk(states, groupKey, date, mode, outcome);
-      render();
-    });
-    runInflight.add(promise);
-    void promise.finally(() => runInflight.delete(promise));
-  }
-
-  function finishBulk(states: Map<string, BulkUi>, groupKey: string, date: string, mode: TaskMode, outcome: BulkOutcome): void {
-    const nowMs = deps.now().getTime();
-    switch (outcome.kind) {
-      case "accepted":
-        for (const entry of outcome.results) {
-          store.setOverlay(date, entry.raceId, mode, entry.result === "accepted" ? "queued" : entry.status, nowMs);
-        }
-        forceDates.set(date, store.nextSeq());
-        tracker.begin({ immediate: false });
-        states.set(groupKey, { kind: "result", tone: "ok", text: bulkAcceptedText(outcome.results) });
-        return;
-      case "accepted-malformed":
-        // サーバは受け付けている(202)が、本文が想定外。失敗の文言を出し、追跡は始める(板が真実を教える)。
-        forceDates.set(date, store.nextSeq());
-        tracker.begin({ immediate: false });
-        states.set(groupKey, { kind: "result", tone: "error", text: runFailureMessage({ kind: "unexpected", httpStatus: 202 }) });
-        return;
-      case "day-cap":
-        states.set(groupKey, { kind: "result", tone: "error", text: bulkDayCapText(outcome) });
-        return;
-      case "failed":
-        states.set(groupKey, { kind: "result", tone: "error", text: bulkFailureMessage(outcome.failure) });
-        return;
-    }
-  }
-
-  /** 確認画面の「やめる」・結果の「閉じる」。送信中は消せない(結果が届くまで)。 */
-  function onBulkDismiss(groupKey: string): void {
-    if (!admin) return;
-    const states = bulkStatesFor(listKey(route.date, route.venue));
-    const ui = states.get(groupKey);
-    if (ui === undefined || ui.kind === "sending") return;
-    states.delete(groupKey);
-    render();
-  }
-
   function onRetrack(): void {
     tracker.begin({ immediate: true });
   }
@@ -978,7 +644,7 @@ export function createApp(deps: AppDeps): App {
     const wasReport = currentScreen() === "report";
     const wasTargets = currentScreen() === "targets";
     route = parseHash(deps.getHash(), todayJst(deps.now()));
-    if (wasSettings && currentScreen() !== "settings") leaveSettings(); // 画面を離れたら下書きを破棄する
+    if (wasSettings && currentScreen() !== "settings") settings.leave(); // 画面を離れたら下書きを破棄する
     if (wasVerify && currentScreen() !== "verify") verify.leave(); // 検証の状態(タイマー・遅れて届く応答)を破棄する
     if (wasTargets && currentScreen() !== "targets") targets.leave(); // 狙い目の状態(タイマー・遅れて届く応答)を破棄する
     if (wasReport && currentScreen() !== "report") {
@@ -1082,13 +748,10 @@ export function createApp(deps: AppDeps): App {
         if (isMonthlyRoute()) monthly.onRefresh();
         else report.onRefresh();
         return;
-      case "settings": {
-        // 取得中・保存中は何もしない(同じものを同時に 2 本取らない・保存中の入力を捨てない)。未保存の入力は捨てて、サーバの値を取り直す。
-        if (settingsLoad?.kind === "loading" || settingsSave.kind === "saving") return;
-        startSettingsLoad();
-        render(true);
+      case "settings":
+        // 取得中・保存中は何もしない(同じものを同時に 2 本取らない・保存中の入力を捨てない)。未保存の入力は捨てて、サーバの値を取り直す(強制の再描画も `settings` が行う)。
+        settings.onRefresh();
         return;
-      }
       default:
         return assertNever(screen);
     }
@@ -1110,7 +773,7 @@ export function createApp(deps: AppDeps): App {
     },
     async whenIdle() {
       // 取得が終わるたびに新しい取得は始まらない(失敗の自動再試行なし。追跡のタイマーは偽・実物とも待たない)ので、数回の確認で必ず止まる。
-      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight, ...verify.pending(), ...report.pending(), ...monthly.pending(), ...targets.pending()];
+      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...run.pending(), ...bulk.pending(), ...settings.pending(), ...verify.pending(), ...report.pending(), ...monthly.pending(), ...targets.pending()];
       for (let i = 0; i < 10 && pending().length > 0; i += 1) {
         await Promise.all(pending());
       }

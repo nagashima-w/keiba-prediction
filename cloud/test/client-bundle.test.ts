@@ -244,6 +244,9 @@ describe("生成物のドリフトと決定性", () => {
     // (追記)Issue #397 R-5(JST・印の並び・型ガードを core の `common/` の 1 本にまとめた): 226,641 → 226,589(-52。`pnpm run build:client` の出力〈「226589 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。上限は 228,500 のまま(余裕 1,911 バイト)。
     // (追記)Issue #397 R-6 の 1 つ目(client の API 層の送受信まわりを `api.ts` の `getJson`・`postJson`・`readBody`・`classifyWrite`・`classifyWithoutNetkeiba`・`isArr`・`isStrArr` にまとめた): 226,589 → 224,931(-1,658。`pnpm run build:client` の出力〈「224931 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。素書きの fetch の init と try/catch 11 か所(GET 6・POST 5。うち `fetchPromptPreview` は init の組み立てだけ共通)が小さな呼び出しになった分。上限は 228,500 のまま(余裕 3,569 バイト)。
     // (追記)Issue #397 R-6 の 2 つ目(日報と月報の一覧の取得・詳細の前半・先頭 7 項目を `getOkBody`・`fetchItemList`・`parseHeadOf` にまとめた): 224,931 → 224,062(-869。`pnpm run build:client` の出力〈「224062 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。R-6 全体で 226,589 → 224,062(-2,527)。上限は 228,500 のまま(余裕 4,438 バイト)。
+    // (追記)Issue #400 R-11a(`createApp` の設定・起動・一括実行を `settings-screen.ts`・`run-control.ts`・`bulk-control.ts`・`keys.ts` へ切り出した。振る舞いは変えない): 224,062 → 224,891(+829。上限は 228,500 のまま。余裕 3,609 バイト)。
+    // 内訳(`pnpm run build:client` の出力。各コミットの生成物の `Buffer.byteLength(CLIENT_JS)`): 設定の切り出し 224,062 → 224,408(+346)、起動・一括の切り出し 224,408 → 224,891(+483)。
+    // 増えたのは、minify されないプロパティ名(戻り値の `enter`・`onInput`・`model`・`statesOf` ほか、deps のキー)と、`app.ts` が関数で渡す道具(`forceTrack` ほか)の分。
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(228_500);
   });
 });
