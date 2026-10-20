@@ -53,8 +53,8 @@
  *
  * ## 通知(Issue #205 段階D)
  * Discord への通知は、コールバックではなく**状態から作る**(`planNotifications`〈`notify-plan.ts`。純関数〉が、`getAutoRunResults`・`getPlanProgress`・通知の表〈`race_day_notify`。`notify-store.ts`〉から、
- * 「いま送るもの」と「次にアラームを張る時刻」を同じ関数で返す)。送信は {@link RaceDayCore.runNotifyStep}(**多くとも1回**: 送る前に `sending` の行を書く。落ちたものは再送しない)。処理の順は
- * 昇格 → 計画 → **通知** → タスク。completed の embed は、計算ステップの `saveAnalysis` コールバックの中で、保存する `record` から作って `analysis_id` の永続化より前に積む({@link RaceDayCore.putAnalysisMaterial})。
+ * 「いま送るもの」と「次にアラームを張る時刻」を同じ関数で返す)。送信は {@link NotifyStage.runStep}(**多くとも1回**: 送る前に `sending` の行を書く。落ちたものは再送しない)。処理の順は
+ * 昇格 → 計画 → **通知** → タスク。completed の embed は、計算ステップの `saveAnalysis` コールバックの中で、保存する `record` から作って `analysis_id` の永続化より前に積む({@link NotifyStage.putAnalysisMaterial})。
  * **webhook が無効なら(`notifier` なし)、行も材料も積まず、通知のためのアラームも張らない。** URL は `notifier` のクロージャの中だけにあり、ここには渡らない。
  *
  * ## 結果の取り込み(Issue #208〈#182-B〉)
@@ -108,11 +108,10 @@ import { checkRaceDate } from "./race-date";
 import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
 import { isDayQuiet } from "./day-quiet";
 import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, type AutoFailReason, type AutoRunOutcome } from "./auto-run-result";
-import { buildAnalysisLink } from "./notify-link";
-import { buildAnalysisNotificationEmbed, buildFailureEmbed, buildManualSkipEmbed, buildMinimalAnalysisEmbed, buildPlanFailureEmbed, buildPlanFailureMinimalEmbed, buildSummaryEmbed, notificationText, type CloudEmbed, type RaceLabel } from "./notify-embeds";
+import { buildPlanFailureEmbed, buildPlanFailureMinimalEmbed, type CloudEmbed } from "./notify-embeds";
 import { judgePlanRescue } from "./plan-failure";
-import { FAILURE_COOLDOWN_MS, planNotifications, SEND_SPACING_MS, type NotificationPlan, type NotifyItem, type NotifyKind, type NotifyState } from "./notify-plan";
-import { classifyNotifyError, type DiscordNotifier } from "./notify-send";
+import { type NotificationPlan, type NotifyKind, type NotifyState } from "./notify-plan";
+import type { DiscordNotifier } from "./notify-send";
 import { NotifyStore } from "./notify-store";
 import { DEFAULT_PRE_RACE_OFFSET_MINUTES, startTimeEpochMs } from "./pre-race-time";
 import {
@@ -143,13 +142,14 @@ import { createGateHttpClient, GateRefusedError, type GateLike } from "./gate-fe
 import { resolveClipVariant } from "@keiba/core/pipeline";
 import type { AnalysisSaveExtra, RecentAnalysis } from "./analysis-save-extra";
 export type { AnalysisSaveExtra, RecentAnalysis };
-import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelectors, LLM_NOTE_NO_KEY, outcomeOf, redactSecrets, type LlmOutcome, type ModelSelectorFor } from "./llm-run";
+import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelectors, LLM_NOTE_NO_KEY, outcomeOf, redactSecrets, type ModelSelectorFor } from "./llm-run";
 import { SqlLlmResponseStore } from "./llm-response-store";
 import type { CloudLlm } from "./llm-sender";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
 import type { CloseSavePayload } from "./analysis-close";
 import { CloseStore } from "./race-day-close";
 import { CloseStage, type CloseStepOutcome } from "./race-day-close-stage";
+import { NotifyStage, type NotifyStepOutcome } from "./race-day-notify-stage";
 import { REPORT_HOLD_KEY, REPORT_REQUESTED_KEY, ReportHoldStage } from "./race-day-report-hold-stage";
 import { allocationSettingsOf, CACHE_MISS_HEAD, CACHE_ONLY_TTL, CacheMissError, errorMessage, isFatalFetchError, ODDS_URL_PATTERN } from "./race-day-support";
 
@@ -223,7 +223,7 @@ export interface AlarmInputs {
   /** 掃除専用のアラームの時刻(`purge_due_at`)。 */
   readonly purgeDueMs: number | null;
   /**
-   * 通知(Discord。Issue #205)の次の時刻: 送るものがあれば送れる時刻(送信の間隔・失敗のクールダウンの時刻)、まとめの保険の時刻だけが残っていればその時刻({@link planNotifications} の `nextAtMs`)。
+   * 通知(Discord。Issue #205)の次の時刻: 送るものがあれば送れる時刻(送信の間隔・失敗のクールダウンの時刻)、まとめの保険の時刻だけが残っていればその時刻({@link NotifyStage.plan} の `nextAtMs`)。
    * 計画の候補と同じ扱い(仕事の有無によらず候補。過去は now)。省略・null は候補なし(webhook が無効なとき・既存の呼び出し)。
    */
   readonly notifyAtMs?: number | null;
@@ -468,8 +468,8 @@ export type StepOutcome =
    * 既存の `ran` と同じ形にしてあるのは、結果を `${raceId}:${mode}:${step}:${result}` のように読む呼び出し側を壊さないため。
    */
   | { readonly kind: "ran"; readonly raceId: string; readonly mode: "plan"; readonly step: "list" | "finalize"; readonly result: "ok" | "retry" | "failed" }
-  /** 通知の送信(Issue #205。`mode: "notify"`)。`raceId` は、レースごとの通知ではそのレース、事前分析のまとめでは `summary`。`failed` は送信の失敗(再送しない)。 */
-  | { readonly kind: "ran"; readonly raceId: string; readonly mode: "notify"; readonly step: "send"; readonly result: "ok" | "failed" }
+  /** 通知の送信(Issue #205。`mode: "notify"`。形と各値の意味は {@link NotifyStepOutcome})。 */
+  | NotifyStepOutcome
   /**
    * 結果の取り込みの 1 ステップ(Issue #208。`mode: "result"`)。`raceId` は取り込んだレース。`ok` は D1 に保存した、`retry` は再試行(保留を含む)、`failed` はこの依頼としては諦めた。
    */
@@ -733,6 +733,8 @@ export class RaceDayCore {
   private readonly reportHold: ReportHoldStage;
   /** 通知の表(Issue #205。新しい表だけ)。 */
   private readonly notifyStore: NotifyStore;
+  /** Discord への通知の段階(Issue #205。Issue #399〈R-9c〉で切り出した。表は `notifyStore`)。コンストラクタの最後に作る。 */
+  private readonly notifyStage: NotifyStage;
   /** Discord への送信。無ければ(webhook が無効)通知の仕組み全体が無効。 */
   private readonly notifier: DiscordNotifier | undefined;
   private readonly appBaseUrl: string | undefined;
@@ -842,6 +844,19 @@ export class RaceDayCore {
       hasRequestReport: this.requestReport !== undefined,
       getRaceList: (kaisaiDate, venue) => this.getRaceList(kaisaiDate, venue),
       maxAttempts: MAX_ATTEMPTS,
+    });
+    // Discord への通知の段階(Issue #399〈R-9c〉。表の作成は上の `NotifyStore` だけ。ここでは SQL を出さない)。
+    this.notifyStage = new NotifyStage({
+      store: this.notifyStore,
+      notifier: this.notifier,
+      appBaseUrl: this.appBaseUrl,
+      now: this.now,
+      onWarn,
+      metaGet: (key) => this.metaGet(key),
+      getAutoRunResults: () => this.getAutoRunResults(),
+      getPlanProgress: () => this.getPlanProgress(),
+      planRow: (raceId) => this.plan.planRow(raceId),
+      isAutoTask: (task) => this.isAutoTask(task),
     });
   }
 
@@ -1377,7 +1392,7 @@ export class RaceDayCore {
     // 送信の間隔(1 秒)と失敗のクールダウン(60 秒)があるので、通知がタスクを押しのけ続けることもない。
     const notice = this.notifyPlan().sendNow;
     if (notice !== null) {
-      const outcome = await this.runNotifyStep(notice);
+      const outcome = await this.notifyStage.runStep(notice);
       await this.armAlarm();
       return outcome;
     }
@@ -1441,7 +1456,7 @@ export class RaceDayCore {
 
   /**
    * 23 時の再実行(救済)の後の失敗の判定(Issue #249。同期)。落ち着いた・期限が来たときに 1 回だけ、結果(`ok`・`failed`)を {@link RESCUE_VERDICT_KEY} に永続化する。
-   * `failed` なら、通知の材料(`plan-failure` の `ready` の行)を同じ同期区間で積む(送るのは {@link runNotifyStep}。`sending` を先に書くので多くとも 1 回)。
+   * `failed` なら、通知の材料(`plan-failure` の `ready` の行)を同じ同期区間で積む(送るのは {@link NotifyStage.runStep}。`sending` を先に書くので多くとも 1 回)。
    * 材料の組み立てが失敗しても判定は止めず、最小の通知に代える。webhook が無効・判定済み・救済の要求が無い・待つ(wait)あいだは何もしない。
    */
   private judgeRescue(): void {
@@ -1467,128 +1482,13 @@ export class RaceDayCore {
     this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", RESCUE_VERDICT_KEY, verdict.kind);
   }
 
-  /** 通知の計画。webhook が無効(`notifier` なし)なら何もしない(行も材料も積まず、アラームの候補も出さない)。 */
+  /**
+   * 通知の計画(手順は {@link NotifyStage.plan})。**委ねるだけの関数**で、本体の 3 箇所(`runNextStep`・`peekNotifyPlan`・`rearm`)がここを通る。
+   * 段階を直接呼ばずにこの関数を残すのは、静的ガード(cloud-config-guard 1695 行)が、`runNextStep` の中の通知・馬場・タスクの順序の検査に、
+   * `const notice = this.notifyPlan().sendNow;` という文字列を使うため(文字列が変わるとガードが読めなくなる)。
+   */
   private notifyPlan(): NotificationPlan {
-    if (this.notifier === undefined) {
-      return { sendNow: null, nextAtMs: null };
-    }
-    return planNotifications({
-      enabled: true,
-      nowMs: this.now(),
-      auto: this.getAutoRunResults(),
-      progress: this.getPlanProgress(),
-      rows: this.notifyStore.stateMap(),
-      paceUntilMs: this.notifyStore.paceUntil(),
-    });
-  }
-
-  /**
-   * 通知を1件送る(**多くとも1回**)。順序: (1)送る内容を作る(同期)→ (2)**送る前に `sending` の行を書く**(同期)→ (3)`await` で送る → (4)`sent`・`failed` を書き、次の送信の時刻(間隔・クールダウン)を置く(同期)。
-   * 落ちて `sending` のまま残った行は、計画({@link planNotifications})が二度と候補にしない(再送しない)。送信の失敗は分析の状態に影響しない(例外は握り、分類だけを残す)。
-   * **URL・例外のメッセージ・応答の本文は、状態にもログにも出さない**(`classifyNotifyError` の分類だけ)。
-   */
-  private async runNotifyStep(item: NotifyItem): Promise<StepOutcome> {
-    const raceId = item.kind === "summary" ? "summary" : item.kind === "plan-failure" ? "plan-failure" : item.raceId;
-    const outcomeOf_ = (result: "ok" | "failed"): StepOutcome => ({ kind: "ran", raceId, mode: "notify", step: "send", result });
-    let payloadJson: string;
-    let analysisId: number | null = null;
-    try {
-      if (item.kind === "analysis" || item.kind === "plan-failure") {
-        // 材料(`ready` の行)から送る。分析は計算ステップが、23 時の失敗の通知は {@link judgeRescue} が、積んだもの。
-        const row = this.notifyStore.row(item.key);
-        if (row === null || row.payload_json === null) {
-          throw new Error("通知の材料がありません");
-        }
-        payloadJson = row.payload_json;
-        analysisId = row.analysis_id;
-      } else if (item.kind === "summary") {
-        const kaisaiDate = this.metaGet("kaisai_date");
-        if (kaisaiDate === null) {
-          throw new Error("開催日が未確定です");
-        }
-        payloadJson = JSON.stringify(buildSummaryEmbed({ kaisaiDate, progress: this.getPlanProgress() }));
-      } else {
-        const result = this.getAutoRunResults().results.find((r) => r.raceId === item.raceId);
-        if (result === undefined) {
-          throw new Error("結果が見つかりません");
-        }
-        const label: RaceLabel = { raceId: result.raceId, venueName: result.venueName, raceNumber: result.raceNumber, raceName: result.raceName, startTime: result.startTime, grade: result.grade };
-        const embed = item.kind === "skipped-manual" ? buildManualSkipEmbed(label) : buildFailureEmbed(label, notificationText(result.outcome));
-        payloadJson = JSON.stringify(embed);
-      }
-    } catch (error) {
-      // 送る内容を作れなかった: 送らず、failed(分類 build)にして終える(同じ項目を、毎回の起床で作り直し続けない)。
-      const now = this.now();
-      this.notifyStore.begin(item.key, item.kind, null, analysisId, now);
-      this.notifyStore.finish(item.key, "failed", "build", now);
-      this.notifyStore.setPaceUntil(now + SEND_SPACING_MS);
-      this.onWarn(`Discord の通知の内容を作れませんでした(${item.key}): ${errorMessage(error)}`);
-      return outcomeOf_("failed");
-    }
-    // 送る前に sending を書く(ここまで同期。落ちても再送しない)。
-    if (!this.notifyStore.begin(item.key, item.kind, payloadJson, analysisId, this.now())) {
-      return outcomeOf_("failed"); // 到達しない(計画は ready か行なしだけを返す)。二重に送らない。
-    }
-    let errorClass: string | null = null;
-    try {
-      await this.notifier!.send({ embeds: [this.withAnalysisLink(JSON.parse(payloadJson) as CloudEmbed, item, analysisId)] });
-    } catch (error) {
-      errorClass = classifyNotifyError(error);
-    }
-    const end = this.now();
-    this.notifyStore.finish(item.key, errorClass === null ? "sent" : "failed", errorClass, end);
-    this.notifyStore.setPaceUntil(end + (errorClass === null ? SEND_SPACING_MS : FAILURE_COOLDOWN_MS));
-    if (errorClass !== null) {
-      this.onWarn(`Discord への通知に失敗しました(${item.key}。分類: ${errorClass}。再送しません)`);
-    }
-    return outcomeOf_(errorClass === null ? "ok" : "failed");
-  }
-
-  /**
-   * 分析の通知の embed に、タイトルのリンク(分析画面)を足す(Issue #230)。**送信の直前**に足す(材料には URL を入れない)。
-   * 足すのは分析の通知(`kind: "analysis"`)で、基点(`appBaseUrl`)があり、分析 id が分かるときだけ。それ以外は embed のまま(リンクなしで通知する)。
-   * 開催日は日のメタ(`kaisai_date`)、会場区分は計画の行(`venue`。行が無ければ中央)から取る。
-   */
-  private withAnalysisLink(embed: CloudEmbed, item: NotifyItem, analysisId: number | null): CloudEmbed {
-    if (this.appBaseUrl === undefined || item.kind !== "analysis" || analysisId === null) {
-      return embed;
-    }
-    const link = buildAnalysisLink(this.appBaseUrl, {
-      date: this.metaGet("kaisai_date") ?? "",
-      venue: this.plan.planRow(item.raceId)?.venue === "nar" ? "nar" : "central",
-      raceId: item.raceId,
-      analysisId,
-    });
-    return link === undefined ? embed : { ...embed, url: link };
-  }
-
-  /**
-   * 発走前の分析が保存された直後に、通知の材料(完成した embed)を積む。**保存した `record` から作る**(馬名・コース・距離は `record.raceSnapshot` にある。D1 の要約には無く、R2 は使えないことがある)。
-   * 呼び出しは、`analysis_id` を永続化する**より前**(同じ同期区間)。ここで例外になれば `analysis_id` は永続されず、再試行が保存済みを検出して、もう一度ここを通る
-   * (`analysis_id` があるのに材料が無い状態が、一瞬も現れない)。**webhook が無効・手動の pre_race(自動の印が無い)なら何もしない。**
-   * embed の構築の失敗は握り、最小の embed(画面で確認)に代える(通知の失敗が分析を止めない)。材料の書き込みの SQL の例外は握らない(上の理由)。
-   */
-  private putAnalysisMaterial(task: TaskRow, record: AnalysisRecord, outcome: LlmOutcome, analysisId: number): void {
-    if (this.notifier === undefined || !this.isAutoTask(task)) {
-      return;
-    }
-    const row = this.plan.planRow(task.race_id);
-    const label: RaceLabel = {
-      raceId: task.race_id,
-      venueName: row?.venue_name ?? null,
-      raceNumber: row?.race_number ?? null,
-      raceName: row?.race_name ?? null,
-      startTime: row?.start_time ?? null,
-      grade: row?.grade ?? null,
-    };
-    let embed: CloudEmbed;
-    try {
-      embed = buildAnalysisNotificationEmbed(record, outcome, label);
-    } catch (error) {
-      this.onWarn(`発走前の分析(${task.race_id}): 通知の材料を組み立てられませんでした(最小の通知に代えます): ${errorMessage(error)}`);
-      embed = buildMinimalAnalysisEmbed(label);
-    }
-    this.notifyStore.putReady(`race:${task.race_id}`, JSON.stringify(embed), analysisId, this.now());
+    return this.notifyStage.plan();
   }
 
   // ---- 事前分析の計画(Issue #203 段階2)----
@@ -2589,7 +2489,7 @@ export class RaceDayCore {
             const existing = await sink.findByAnalyzedAt(record.raceId, record.analyzedAt);
             if (existing !== null) {
               analysisId = existing;
-              this.putAnalysisMaterial(task, record, outcome, existing); // analysis_id より前(同じ同期区間。Issue #205)
+              this.notifyStage.putAnalysisMaterial(task, record, outcome, existing); // analysis_id より前(同じ同期区間。Issue #205)
               this.closeStage.register(task, record, existing, settings); // 同じ同期区間(Issue #338。積み済みなら何もしない)
               this.setTaskFields(task, { analysis_id: existing });
               return;
@@ -2598,7 +2498,7 @@ export class RaceDayCore {
             const saved = await sink.save(toSave, { llmNote: outcome.note, llmCalls: cloudAnalyze === null ? null : cloudAnalyze.calls(), markRepair: outcome.markRepair ?? null });
             analysisId = saved.id;
             // 通知の材料を、analysis_id の永続化より前に積む(Issue #205。同じ同期区間。以降の再実行が、材料の無い done にならない)。
-            this.putAnalysisMaterial(task, record, outcome, saved.id);
+            this.notifyStage.putAnalysisMaterial(task, record, outcome, saved.id);
             // 締切の直前の再計算の入力と回の行(Issue #338)も、同じ同期区間で積む。失敗は握る(分析は止めない)。
             this.closeStage.register(task, record, saved.id, settings);
             // 保存の直後に結果を書く(以降の再実行は、保存も計算もしない)。
