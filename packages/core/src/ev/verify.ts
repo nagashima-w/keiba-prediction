@@ -197,7 +197,7 @@ import type {
   VerifyDataSource,
 } from "./analysis-store-types.js";
 import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-response.js";
-import { buildComboOddsKey, parseComboOddsKey, type ComboBetType } from "../scraper/combo-odds-key.js";
+import type { ComboBetType } from "../scraper/combo-odds-key.js";
 import { parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "../scraper/ids.js";
 import {
   binIndexFor,
@@ -205,7 +205,15 @@ import {
   DEFAULT_VERIFY_BIN_COUNT,
 } from "./calibration-bins.js";
 import { isUsableOdds } from "./allocation-primitives.js";
-import { buildBracketFrameCensus, isBracketQuinellaRefund } from "./bracket-quinella-refund.js";
+import {
+  createRaceBetJudge,
+  isProposedBetType,
+  judgmentPayout,
+  payoutForStake,
+  raceHasPlacePayout,
+  type BetJudgment,
+  type ProposedBetOutcome,
+} from "./proposed-bet-judgment.js";
 import { computeBrierScore, type BrierObservation } from "./probability-quality-metrics.js";
 import { classifyLookaheadSuspicion } from "./lookahead-suspicion.js";
 
@@ -991,31 +999,7 @@ function selectIncludedAnalyses(
   };
 }
 
-/**
- * そのレースの実結果に複勝の確定払戻(placePayout)が1件以上あるか(規則H、Issue#70)。
- * computeRaceLedger の hasPayout(表示用)と computeHorseBetOutcome の racePayoutAvailable
- * (集計用)が同じ式を指す一本の定義(Issue#59で繰り返し問題になった二重定義を避けるため)。
- *
- * **真側の意味は#70/#71で共有するが、偽側(false)の扱いは呼び出し元ごとに異なる**(#71メタレビュー
- * 指摘)。#70(computeHorseBetOutcome)の偽側は複勝オッズ下限へ近似フォールバックし数値を出す。
- * #71(computeProposedBetReport)の偽側は判定不能として扱い数値を出さない(unjudgedCountに計上)。
- * この関数自体は「複勝払戻が取込済みか」という事実だけを返し、偽側で何をするかは決めていない
- * ——将来#70の残余(払戻未取込レースの過大計上)を塞ぐ際、片方の呼び出し元を直しても
- * もう片方が静かに壊れないよう、この違いを見落とさないこと。
- */
-function raceHasPlacePayout(results: readonly RaceResultEntry[]): boolean {
-  return results.some((r) => r.placePayout !== null && r.placePayout !== undefined);
-}
-
-/**
- * そのレースの実結果に単勝の確定払戻(winPayout)が1件以上あるか(Issue #100・#23-C)。
- * raceHasPlacePayout の鏡写し(winPayoutはplacePayoutと同型の後付け列のため、同じ
- * 「取込状態ゲート」を単勝側にも用意する。汎用化はしない——理由はcomputeProposedBetReport
- * のwin分岐のコメント参照)。
- */
-function raceHasWinPayout(results: readonly RaceResultEntry[]): boolean {
-  return results.some((r) => r.winPayout !== null && r.winPayout !== undefined);
-}
+// 規則H の取込状態ゲート `raceHasPlacePayout`・`raceHasWinPayout` は、配分ベースの判定と共有するため `proposed-bet-judgment.ts` に移した(Issue #398)。
 
 /** computeHorseBetOutcome の算出結果(Task#34。Issue#70で isPlaced を isInTopThree/isPlaceHit に分離)。 */
 interface HorseBetOutcome {
@@ -1421,14 +1405,6 @@ function emptyProposedBetAccumulator(): ProposedBetAccumulator {
 export const FLAT_COMPARISON_STAKE = 100;
 
 /**
- * 100円あたりの払戻から、賭け金 `stake` 円の払戻を出す(配分ベースと一律の比較で**同じ式を通す**ための唯一の定義)。
- * 配分ベースは実際の賭け金、一律は {@link FLAT_COMPARISON_STAKE} を与える。
- */
-function payoutForStake(unitPayout: number, stake: number): number {
-  return unitPayout * (stake / 100);
-}
-
-/**
  * 判定できた(的中・不的中・返還のいずれか)買い目を、配分ベースと一律の両方に計上する。
  * 一律側の集合が `betCount` と必ず一致するよう、計上はここ1か所に集める。
  * `unitPayout` は100円あたりの払戻(不的中は undefined)。返還は `refund:true` で賭け金そのものを払戻にする。
@@ -1583,8 +1559,8 @@ function finalizeProposedBetOverall(
   });
 }
 
-/** 配分ベースの買い目 1 件の判定結果(Issue #384)。 */
-export type ProposedBetOutcome = "hit" | "miss" | "refund" | "unjudged";
+/** 配分ベースの買い目 1 件の判定結果(Issue #384)。定義は `proposed-bet-judgment.ts`(Issue #398 で判定を 1 本にまとめた際に移した)。 */
+export type { ProposedBetOutcome };
 
 /**
  * 配分ベースの買い目 1 件の判定の事象(Issue #384)。`computeProposedBetReport` が各買い目を判定するのと**同じ場所**から出す。
@@ -1622,6 +1598,9 @@ export function collectProposedBetEvents(store: VerifyDataSource, config: Verify
 
 /**
  * 配分ベースの回収率(proposedBet系、Issue #71・#54-B)を算出する。
+ * **買い目 1 件の判定の規則(返還・払戻表の取込ゲート・組合せキーの完全一致)は `proposed-bet-judgment.ts` の `createRaceBetJudge` にある**(Issue #398)。
+ * 日報の `judgeBets`(cloud)も同じ関数を呼ぶ。以下の規則の説明は、その関数が実装している内容を、この集計の側から書いたもの。
+ * ここに残るのは、母集団の分類・券種別のカウンタへの計上・事象の発行・一律100円の比較。
  * `selectIncludedAnalyses` が選定した母集団(`included`)をそのまま使い、独自に再実装しない
  * (AC-B7)。母集団は各分析の配分提案メタ(`AnalysisStore.getAllocationForVerify`)を読み、
  * 4分類(配分あり/見送り/未到達/記録なし)へ振り分ける。**判定は必ず`route`を先に見る**
@@ -1629,7 +1608,7 @@ export function collectProposedBetEvents(store: VerifyDataSource, config: Verify
  * `skipReasonCode`を先に見ると「配分あり」に誤って混入する。#71着手前ゲートで実測確認済みの罠)。
  *
  * 払戻の突合は近似を一切行わない(実配当のみ。Q-C)。対象の券種は8つ(place/win/wide/trio/quinella/exacta/
- * trifecta/bracketQuinella。本関数内の許可リスト〈下の `bet.betType !== …` の連鎖〉と同じ。これ以外の券種コードは未知券種〈`unknownBetType`〉に数える):
+ * trifecta/bracketQuinella。`PROPOSED_BET_TYPES`〈`proposed-bet-judgment.ts`〉と同じ。これ以外の券種コードは未知券種〈`unknownBetType`〉に数える):
  * - 複勝・単勝は`results`(`selectIncludedAnalyses`が既に取得済みの実結果をそのまま再利用し、二重にDBへ
  *   問い合わせない)の各`umaban`に`buildComboOddsKey`を適用した逆引きマップ(複勝は`placePayout`、単勝は
  *   `winPayout`。Issue #100・#23-C)で突合する。
@@ -1716,21 +1695,20 @@ function computeProposedBetReport(
   }
 
   // 判定の計上は 2 つの関数に集める(Issue #384)。本体の集計と、人気帯・条件ごとの内訳に渡す事象が、同じ判定から出るようにするため。
-  // 事象の払戻は `recordJudgedBet` が `totalReturn` に足す値と同じ式(返還 = 賭け金、的中 = `payoutForStake`、外れ = 0)。
+  // 判定そのものは `createRaceBetJudge`(`proposed-bet-judgment.ts`。日報の `judgeBets` と共有する。Issue #398)が出す。
+  // 事象の払戻は `judgmentPayout`(返還 = 賭け金、的中 = `payoutForStake`、外れ = 0)で、`recordJudgedBet` が `totalReturn` に足す値と同じ式。
   function judgedBet(
     analysis: StoredAnalysis,
     bet: StoredAllocationSummary["bets"][number],
     accumulator: ProposedBetAccumulator,
-    unitPayout: number | undefined,
-    refund: boolean,
+    judgment: BetJudgment,
   ): void {
-    recordJudgedBet(accumulator, bet.stake, unitPayout, refund);
+    recordJudgedBet(accumulator, bet.stake, judgment.outcome === "hit" ? judgment.unitPayout : undefined, judgment.outcome === "refund");
     if (onEvent === undefined) {
       return;
     }
-    const outcome: ProposedBetOutcome = refund ? "refund" : unitPayout !== undefined ? "hit" : "miss";
-    const payout = refund ? bet.stake : unitPayout !== undefined ? payoutForStake(unitPayout, bet.stake) : 0;
-    onEvent({ analysisId: analysis.id, raceId: analysis.raceId, betType: bet.betType, comboKey: bet.comboKey, stake: bet.stake, outcome, payout });
+    const outcome: ProposedBetOutcome = judgment.outcome === "hit" || judgment.outcome === "refund" ? judgment.outcome : "miss";
+    onEvent({ analysisId: analysis.id, raceId: analysis.raceId, betType: bet.betType, comboKey: bet.comboKey, stake: bet.stake, outcome, payout: judgmentPayout(judgment, bet.stake) });
   }
   function unjudgedBet(analysis: StoredAnalysis, bet: StoredAllocationSummary["bets"][number], accumulator: ProposedBetAccumulator): void {
     accumulator.unjudgedCount += 1;
@@ -1757,53 +1735,16 @@ function computeProposedBetReport(
     }
     allocated += 1;
 
-    // 取消・除外の馬番(Issue #72)。`scratched === true` だけが対象で、中止・失格や未記録(旧い行。undefined)の
-    // `finishPosition=null` は含めない(取消か中止か判別できないものを返還にしない)。
-    const scratchedUmabans = new Set<number>();
-    for (const r of results) {
-      if (r.scratched === true) {
-        scratchedUmabans.add(r.umaban);
-      }
-    }
-
-    // 枠連の返還の判定に使う、枠ごとの出走馬の集計(Issue #269)。取消・除外の馬がいないレースは返還が起きないので作らない。
-    // 枠番か scratched が未記録の行があるレースは null(判定しない)。
-    const bracketCensus = scratchedUmabans.size > 0 ? buildBracketFrameCensus(results) : null;
-
-    // 複勝払戻の逆引きマップ(規則Hのracehasplacepayoutゲートを転用)。
-    const racePayoutAvailable = raceHasPlacePayout(results);
-    const placePayoutByComboKey = new Map<string, number>();
-    if (racePayoutAvailable) {
-      for (const r of results) {
-        if (r.placePayout !== null && r.placePayout !== undefined) {
-          placePayoutByComboKey.set(buildComboOddsKey([r.umaban]), r.placePayout);
-        }
-      }
-    }
-
-    // 単勝払戻の逆引きマップ(Issue #100・#23-C。placePayoutByComboKeyの鏡写し。
-    // raceHasWinPayoutが規則Hのwin版=「単勝payoutテーブル自体が取込済みか」を先に判定する)。
-    const winPayoutAvailable = raceHasWinPayout(results);
-    const winPayoutByComboKey = new Map<string, number>();
-    if (winPayoutAvailable) {
-      for (const r of results) {
-        if (r.winPayout !== null && r.winPayout !== undefined) {
-          winPayoutByComboKey.set(buildComboOddsKey([r.umaban]), r.winPayout);
-        }
-      }
-    }
+    // 買い目の判定(返還・払戻表の取込ゲート・キーの完全一致)は `createRaceBetJudge` に任せる(規則は `proposed-bet-judgment.ts` のヘッダ。Issue #398)。
+    // 組合せの払戻は、判定が必要としたときだけ `getComboPayouts` を引く(レース×券種ごとに 1 回のキャッシュ)。
+    const judge = createRaceBetJudge(results, (betType) => comboPayoutsOf(analysis.raceId, betType));
 
     for (const bet of allocation.bets) {
-      if (
-        bet.betType !== "place" &&
-        bet.betType !== "win" &&
-        bet.betType !== "wide" &&
-        bet.betType !== "trio" &&
-        bet.betType !== "quinella" &&
-        bet.betType !== "exacta" &&
-        bet.betType !== "trifecta" &&
-        bet.betType !== "bracketQuinella"
-      ) {
+      const judgment = judge(bet.betType, bet.comboKey);
+      // 券種→カウンタの対応は券種名で引く(Issue #145・#26-Fで、末尾を`: trifecta`で受ける三項演算子の連鎖から置き換えた。
+      // 連鎖だと、許可リストへ券種を足して分岐を足し忘れたとき、その券種の買い目が黙って末尾のカウンタ〈三連単〉に混入する)。
+      const accumulator = isProposedBetType(bet.betType) ? accumulatorByBetType[bet.betType] : undefined;
+      if (judgment.outcome === "unknownBetType" || accumulator === undefined) {
         // Issue #76: #59の保存経路はplace/win/wide/trio/quinella/exacta/trifecta/bracketQuinella
         // (馬連はIssue #114・#24-F1、馬単はIssue #121・#24-F2、三連単はIssue #131・#25-F、
         // 枠連はIssue #145・#26-Fで追加)のみを書く契約のため通常到達しないが、到達した場合に
@@ -1815,67 +1756,11 @@ function computeProposedBetReport(
         unknown.betTypes.add(bet.betType);
         continue;
       }
-      // 券種→カウンタの対応は券種名で引く(Issue #145・#26-Fで、末尾を`: trifecta`で受ける
-      // 三項演算子の連鎖から置き換えた。連鎖だと、許可リストへ券種を足して分岐を足し忘れた
-      // とき、その券種の買い目が黙って末尾のカウンタ〈三連単〉に混入する)。上の許可リストで
-      // 既知の券種に絞り込まれているため、ここでの添字は必ず存在する。
-      const accumulator = accumulatorByBetType[bet.betType];
-
-      // 返還(Issue #72): 取消・除外の馬を構成に含む買い目は、馬券が全額返還される。払戻表の取込状態
-      // (規則U)の判定より**前**に置く: 返還は払戻表に依らず確定するので、払戻が未取込でも判定不能にしない。
-      // 枠連(bracketQuinella。Issue #269)は comboKey が馬番ではなく枠番の組なので、構成馬では決まらない。
-      // 枠ごとの出走馬の残りで決める(`isBracketQuinellaRefund`。日報の `judgeBets` と同じ関数を共有する)。
-      // 枠番が未記録の旧い行があるレースは `bracketCensus` が null で、返還にせず従来どおり不的中として数える。
-      if (bet.betType === "bracketQuinella") {
-        if (isBracketQuinellaRefund(bet.comboKey, bracketCensus)) {
-          judgedBet(analysis, bet, accumulator, undefined, true);
-          continue;
-        }
-      } else if (scratchedUmabans.size > 0) {
-        const umabans = parseComboOddsKey(bet.comboKey);
-        if (umabans !== null && umabans.some((u) => scratchedUmabans.has(u))) {
-          judgedBet(analysis, bet, accumulator, undefined, true);
-          continue;
-        }
-      }
-
-      if (bet.betType === "place") {
-        if (!racePayoutAvailable) {
-          unjudgedBet(analysis, bet, accumulator);
-          continue;
-        }
-        judgedBet(analysis, bet, accumulator, placePayoutByComboKey.get(bet.comboKey), false);
-        continue;
-      }
-
-      if (bet.betType === "win") {
-        // place分岐の鏡写し(Issue #100・#23-C)。単勝はplaceと同じ「1頭=1買い目」の構造を
-        // 持つため、判定ロジックも同型(raceHasWinPayout→winPayoutByComboKeyの取込状態ゲート)。
-        if (!winPayoutAvailable) {
-          unjudgedBet(analysis, bet, accumulator);
-          continue;
-        }
-        judgedBet(analysis, bet, accumulator, winPayoutByComboKey.get(bet.comboKey), false);
-        continue;
-      }
-
-      // ワイド・3連複・馬連・馬単・三連単・枠連(Issue #114・#24-F1で馬連を、Issue #121・
-      // #24-F2で馬単を、Issue #131・#25-Fで三連単を、Issue #145・#26-Fで枠連を追加。6者とも
-      // 同じ組合せ判定。的中判定はcomboKeyの文字列完全一致のみで、券種別の順序方針
-      // 〈昇順化するか否か〉はここでは一切扱わない——
-      // 買い目側のcomboKeyは配分計算・払戻側のcomboKeyはparseComboPayoutRow/analysis-store.tsが
-      // 既にbuildComboOddsKeyForで正規化済みのものをそのまま比較するため、逆順の買い目
-      // 〈例: 馬単0813〉が正順の払戻〈1308〉と誤って一致することはない)。
-      const comboResult = comboPayoutsOf(analysis.raceId, bet.betType);
-      if (comboResult.state === "not_imported") {
+      if (judgment.outcome === "unjudged") {
         unjudgedBet(analysis, bet, accumulator);
         continue;
       }
-      if (comboResult.payouts.length === 0) {
-        unjudgedBet(analysis, bet, accumulator);
-        continue;
-      }
-      judgedBet(analysis, bet, accumulator, comboResult.payouts.find((p) => p.comboKey === bet.comboKey)?.payout, false);
+      judgedBet(analysis, bet, accumulator, judgment);
     }
   }
 
