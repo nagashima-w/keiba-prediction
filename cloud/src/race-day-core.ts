@@ -19,8 +19,8 @@
  *    保存先は D1 の `trainer_results`(`trainerStore`)で、取得日時が**レースの年の 1 月 1 日〈JST〉以降**なら netkeiba に出ない(前2年の行は確定値なので年に 1 回)。
  *    **上限 40 は騎手と調教師で共有**する(騎手の後ろの調教師から先に締め出される)ので、gate への最悪の呼び出しは下の 42 本のまま増えない。
  *    騎手が保存先にあれば 16 頭の調教師は全員取れる(19 + 16 = 35 本)。騎手も冷えていれば調教師は 5 人まで(19 + 16 + 5 = 40 本)で、残りは補正なし。
- *    発走前の取得ステップは、この `scrapeRace` のほかに、重賞の過去10年傾向(`prefetchGradeWinner`。LLM が有効で重賞のときだけ、最大 1 本)と、日報の時刻の下限のためのレース一覧(`recordReportHold`→`getRaceList`。最大 1 本・取得キャッシュにあれば 0 本)を引く。
- *    したがって gate への呼び出しは最大 40 + 1 + 1 = 42 本で、Free の 50 に対して余裕は 8 本(再現: `grep -n "recordReportHold(\|prefetchGradeWinner(" cloud/src/race-day-core.ts` で、どちらも `runPreRaceFetch` の呼び出しが 1 箇所ずつ。
+ *    発走前の取得ステップは、この `scrapeRace` のほかに、重賞の過去10年傾向(`prefetchGradeWinner`。LLM が有効で重賞のときだけ、最大 1 本)と、日報の時刻の下限のためのレース一覧(`ReportHoldStage.record`→`getRaceList`。最大 1 本・取得キャッシュにあれば 0 本)を引く。
+ *    したがって gate への呼び出しは最大 40 + 1 + 1 = 42 本で、Free の 50 に対して余裕は 8 本(再現: `grep -n "this.reportHold.record(\|this.prefetchGradeWinner(" cloud/src/race-day-core.ts` で、どちらも `runPreRaceFetch` の呼び出しが 1 箇所ずつ。一覧の取得は段階が注入された取得口 `getRaceList` を呼ぶ 1 箇所〈`grep -n "this.getRaceList(" cloud/src/race-day-report-hold-stage.ts`〉。
  *    `fetchText(` はそれぞれ `fetchGradeWinnerEntries` に 1 回、`listRaces`・`listNarRaces` に 1 回ずつ)。D1・R2 への呼び出しは数えていない。
  *  - **ステップ2(計算 `compute`)**: **netkeiba には出ず**(gate は0回)、キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)` を走らせ、
  *    朝の prior(`AnalysisResult`)を **DO のストレージにだけ**置く(**D1・R2 には書かない**。ユーザー判断 2026-10-06: 保存するのは発走前の分析だけ)。
@@ -107,7 +107,6 @@ import { MAX_BULK_RACES } from "./bulk-limits";
 import { checkRaceDate } from "./race-date";
 import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
 import { isDayQuiet } from "./day-quiet";
-import { holdHeadOf, isHoldSettled, lastStartMsOfHead, parseReportHold, reportHoldAtMs, withHoldFailure } from "./report-hold";
 import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, type AutoFailReason, type AutoRunOutcome } from "./auto-run-result";
 import { buildAnalysisLink } from "./notify-link";
 import { buildAnalysisNotificationEmbed, buildFailureEmbed, buildManualSkipEmbed, buildMinimalAnalysisEmbed, buildPlanFailureEmbed, buildPlanFailureMinimalEmbed, buildSummaryEmbed, notificationText, type CloudEmbed, type RaceLabel } from "./notify-embeds";
@@ -151,6 +150,7 @@ import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
 import type { CloseSavePayload } from "./analysis-close";
 import { CloseStore } from "./race-day-close";
 import { CloseStage, type CloseStepOutcome } from "./race-day-close-stage";
+import { REPORT_HOLD_KEY, REPORT_REQUESTED_KEY, ReportHoldStage } from "./race-day-report-hold-stage";
 import { allocationSettingsOf, CACHE_MISS_HEAD, CACHE_ONLY_TTL, CacheMissError, errorMessage, isFatalFetchError, ODDS_URL_PATTERN } from "./race-day-support";
 
 /** オッズの URL の分類(`race-day-support.ts` に移した。従来の import 先を保つため再 export する)。 */
@@ -165,23 +165,9 @@ import type { SqlLike } from "./sql-like";
  */
 const RESCUE_VERDICT_KEY = "plan_rescue_verdict";
 
-/** 日報の時刻の下限を求められなかったときの警告(固定の文言。末尾に race_id を添える)。 */
-const WARN_REPORT_HOLD = "日報の時刻の下限を求められませんでした";
-
-/** 日報の作成を依頼済みの印(Issue #235。依頼した時刻〈エポックミリ秒〉)を永続化するキー。 */
-const REPORT_REQUESTED_KEY = "report_requested";
-
-/**
- * 日報の時刻の下限(Issue #291)を永続化するキー。値は JSON(形は `report-hold.ts`): 開催(race_id の先頭 10 桁)ごとに、最終レースの発走時刻(epoch ms)か、記録できなかった試行の回数。
- * 下限はその最大。手動で分析したレースの開催の最終レースの発走まで、日報を依頼しない。
- */
-export const REPORT_HOLD_KEY = "report_hold";
-
-/**
- * 日報の時刻の下限を過ぎたあとの判定({@link RaceDayCore.maybeRequestReport})を**1回行った**印(Issue #298)を永続化するキー。値は判定したときの下限(`String(下限)`)。
- * 下限が後から伸びれば値が食い違い、新しい下限を過ぎたあとにもう一度判定の機会が来る。判定の結果(静かか・依頼の成否)は問わない。
- */
-const REPORT_HOLD_JUDGED_KEY = "report_hold_judged";
+// 日報の時刻の下限・依頼済み・判定済みの印のキー(`REPORT_HOLD_KEY`・`REPORT_REQUESTED_KEY`・判定済み)と警告の文言は、段階 `race-day-report-hold-stage.ts` にある(Issue #399〈R-9b〉)。
+// `REPORT_HOLD_KEY` は従来の import 先を保つため再 export する。
+export { REPORT_HOLD_KEY };
 
 /** 掃除の時刻(エポックミリ秒)を永続化するキー。 */
 const PURGE_DUE_KEY = "purge_due_at";
@@ -743,6 +729,8 @@ export class RaceDayCore {
   private readonly close: CloseStore;
   /** 締切の直前の再計算の段階(手順。表は `close`)。コンストラクタの最後に作る。 */
   private readonly closeStage: CloseStage;
+  /** 日報の時刻の下限の段階(Issue #291・#298。Issue #399〈R-9b〉で切り出した。値は meta に持つ)。コンストラクタの最後に作る。 */
+  private readonly reportHold: ReportHoldStage;
   /** 通知の表(Issue #205。新しい表だけ)。 */
   private readonly notifyStore: NotifyStore;
   /** Discord への送信。無ければ(webhook が無効)通知の仕組み全体が無効。 */
@@ -843,6 +831,17 @@ export class RaceDayCore {
       networkFetcher: this.networkFetcher,
       cacheOnly: this.cacheOnly,
       cache: this.cache,
+    });
+    // 日報の時刻の下限の段階(Issue #399〈R-9b〉。表は無く、`race_day_meta` の 3 キーだけ。ここでは SQL を出さない)。
+    this.reportHold = new ReportHoldStage({
+      sql: this.sql,
+      now: this.now,
+      onWarn,
+      metaGet: (key) => this.metaGet(key),
+      hasResultStore: this.resultStore !== undefined,
+      hasRequestReport: this.requestReport !== undefined,
+      getRaceList: (kaisaiDate, venue) => this.getRaceList(kaisaiDate, venue),
+      maxAttempts: MAX_ATTEMPTS,
     });
   }
 
@@ -1994,8 +1993,8 @@ export class RaceDayCore {
       notifyAtMs: this.earliest(this.notifyPlan().nextAtMs, this.rescueJudgeAtMs()),
       resultAtMs: this.resultsRunnable() ? this.results.nextTryAtMs() : null,
       babaAtMs: this.baba.dueAtMs(),
-      reportHoldAtMs: this.pendingReportHoldAt(),
-      reportJudgePending: rows.length === 0 && this.reportJudgePending(),
+      reportHoldAtMs: this.reportHold.pendingAlarmAt(),
+      reportJudgePending: rows.length === 0 && this.reportHold.judgePending(),
       closeAtMs: this.close.nextAtMs(),
     });
     if (at !== null) {
@@ -2015,105 +2014,6 @@ export class RaceDayCore {
 
   // ---- 結果の取り込み(Issue #208)----
 
-  /** 日報の時刻の下限(Issue #291。記録が無ければ null)。meta の値が壊れていても空として扱う。 */
-  private reportHoldAt(): number | null {
-    return reportHoldAtMs(parseReportHold(this.metaGet(REPORT_HOLD_KEY)));
-  }
-
-  /** 下限が無い、または過ぎている(`now >= 下限`)。{@link isDayQuiet} に渡す真偽値(下限ちょうどは過ぎたとみなす)。 */
-  private afterReportHold(): boolean {
-    const hold = this.reportHoldAt();
-    return hold === null || this.now() >= hold;
-  }
-
-  /** アラームの候補にする下限: 日報の依頼先があり、まだ依頼しておらず、下限が未来のときだけ(それ以外は null)。 */
-  private pendingReportHoldAt(): number | null {
-    if (this.requestReport === undefined || this.metaGet(REPORT_REQUESTED_KEY) !== null) {
-      return null;
-    }
-    const hold = this.reportHoldAt();
-    return hold !== null && this.now() < hold ? hold : null;
-  }
-
-  /**
-   * 下限を過ぎていて、その下限での判定({@link maybeRequestReport})がまだ行われていない(Issue #298)。日報の依頼先があり、未依頼のときだけ。
-   * タスクが無い条件は呼び出し側({@link rearm})が付ける({@link AlarmInputs.reportJudgePending})。
-   *
-   * **冗長な防御が 2 つある**(Issue #300。外しても結果は変わらず、テストでは区別できない。残す理由は、将来の変更で前提が崩れたときの安全側):
-   *  - 「依頼済みなら偽」: 依頼より前に印が書かれ(判定は依頼の前に行う)、依頼後は下限が動かない({@link recordReportHold} も依頼済みなら引かない)ので、外しても全緑。
-   *  - 印の値の照合(`!== String(hold)`): 下限が未来へ伸びたときは、未来の下限のアラーム({@link pendingReportHoldAt})が起床させて判定するので、照合を `=== null` に変えても全緑。
-   *    照合が単独で効くのは「印が過去の下限の値のまま、下限を過ぎている」場合だけで、下限は後退しない(開催ごとに記録できたら再び引かず、下限はその最大なので、新しい開催の分析で伸びるだけ)ので構成上到達しない。
-   */
-  private reportJudgePending(): boolean {
-    if (this.requestReport === undefined || this.metaGet(REPORT_REQUESTED_KEY) !== null) {
-      return false;
-    }
-    const hold = this.reportHoldAt();
-    return hold !== null && this.now() >= hold && this.metaGet(REPORT_HOLD_JUDGED_KEY) !== String(hold);
-  }
-
-  /** 下限を過ぎた判定を行った印を書く(下限がある・過ぎているときだけ。値は下限)。判定の結果は問わない。 */
-  private markReportHoldJudged(): void {
-    const hold = this.reportHoldAt();
-    if (hold === null || this.now() < hold) {
-      return;
-    }
-    this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", REPORT_HOLD_JUDGED_KEY, String(hold));
-  }
-
-  /**
-   * 発走前の分析(取得ステップ)を行ったレースの**開催の最終レースの発走時刻**を、日報の時刻の下限として記録する(Issue #291)。
-   * 手動の分析だけの日は、先に分析したレースの結果がそろっただけで日報が依頼され、あとから分析するレースが抜けていた。下限までは日報を依頼しない({@link maybeRequestReport})。
-   * 時刻は、その日のレース一覧({@link getRaceList}。手動の分析は画面でこの一覧から選ぶので、通常は取得キャッシュに載っていてリクエストは増えない)の、同じ開催(race_id の先頭 10 桁)の行の読める発走時刻の最大。
-   * 最大のレース番号の行の時刻が読めないと、下限は本当の最終レースより早まる(部分的な保護)。
-   *
-   * **一覧の参照は 1 つの開催につき 1 回まで**: 記録できた開催は引かない。記録できなかった試行(一覧が取れない・該当の開催が無い・時刻が読めない・例外)は開催ごとに {@link MAX_ATTEMPTS} 回まで数え、
-   * 上限に達したらその日はもう引かない(自動の分析も同じ取得ステップを通るので、一覧が取れない日に毎レース引き続けない)。
-   * 引かない条件: 結果ストアか日報の依頼先が無い / 開催日が過去(日報は後日の cron の経路) / 日報を依頼済み(作り直さない)。
-   * **失敗しても取得ステップは失敗にしない**(今と同じ動き = 待たない。固定の警告だけを残し、例外の本文・拒否の本文は出さない)。例外は外へ漏らさない。
-   */
-  private async recordReportHold(raceId: string): Promise<void> {
-    try {
-      const kaisaiDate = this.metaGet("kaisai_date");
-      if (
-        this.resultStore === undefined ||
-        this.requestReport === undefined ||
-        kaisaiDate === null ||
-        kaisaiDate < jstKaisaiDate(this.now()) ||
-        this.metaGet(REPORT_REQUESTED_KEY) !== null
-      ) {
-        return;
-      }
-      const head = holdHeadOf(raceId);
-      if (isHoldSettled(parseReportHold(this.metaGet(REPORT_HOLD_KEY)), head, MAX_ATTEMPTS)) {
-        return;
-      }
-      let startMs: number | null = null;
-      try {
-        const kind = venueKindOfRaceId(parseRaceId(raceId));
-        const list = await this.getRaceList(kaisaiDate, kind === "central" ? "central" : "nar");
-        if (list.ok) {
-          startMs = lastStartMsOfHead(list.races, head, kaisaiDate);
-        }
-      } catch {
-        startMs = null;
-      }
-      // 一覧を待つあいだに他の記録が増えうるので、読み直してから書く(await の後〜書き込みは同期)。
-      const holds = parseReportHold(this.metaGet(REPORT_HOLD_KEY));
-      const next = startMs === null ? withHoldFailure(holds, head) : { ...holds, [head]: startMs };
-      this.sql.exec(
-        "INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        REPORT_HOLD_KEY,
-        JSON.stringify(next),
-      );
-      if (startMs === null) {
-        this.onWarn(`${WARN_REPORT_HOLD}(${raceId})。待たずに続けます`);
-      }
-    } catch {
-      this.onWarn(`${WARN_REPORT_HOLD}(${raceId})。待たずに続けます`);
-    }
-  }
-
   /**
    * 日報の作成を依頼する(Issue #235)。**その日が静かになった**({@link isDayQuiet})とき、1 回だけ。呼ぶのは、結果の 1 レースを取り込んだ直後と、仕事が無い起床。
    * 依頼先が無い(`requestReport` なし)・開催日が未確定・依頼済み(meta の `report_requested`)・静かでないときは何もしない。
@@ -2124,7 +2024,7 @@ export class RaceDayCore {
       return;
     }
     // 下限を過ぎた判定を行った印(Issue #298)。判定の結果は問わない(静かでなくても、依頼が失敗しても付く = アラームの即時のループにならない)。
-    this.markReportHoldJudged();
+    this.reportHold.markJudged();
     const kaisaiDate = this.metaGet("kaisai_date");
     if (kaisaiDate === null) {
       return;
@@ -2137,7 +2037,7 @@ export class RaceDayCore {
       pendingTasks: pending,
       resultRows: resultRows.length,
       queuedResults: resultRows.filter((r) => r.state === "queued").length,
-      afterReportHold: this.afterReportHold(),
+      afterReportHold: this.reportHold.isAfterHold(),
     });
     if (!quiet) {
       return;
@@ -2525,7 +2425,7 @@ export class RaceDayCore {
       this.warnPersonStats(`発走前の取得(${task.race_id})`, race.meta.warnings);
       await this.prefetchGradeWinner(task, parseRaceId(task.race_id), race.race.hasGradeBadge);
       // 日報の時刻の下限(Issue #291)を記録する。出馬表の取得が成功した後・結果の行を積む前(取得が失敗した試行では引かない)。失敗しても取得ステップは失敗にしない。
-      await this.recordReportHold(task.race_id);
+      await this.reportHold.record(task.race_id);
       // 日報がこのレースの結果を待つように、結果の取り込みの行を積む(Issue #277)。タスクが未了(fetched)のあいだに積むので、日報の判定に隙間ができない。
       this.enqueueResultForAnalyzedRace(task.race_id, race.race.startTime);
       // 地方三連単の段階の軸を登録する(組合せが ON の地方だけ。取消馬を除いた出走馬の全馬番。3頭未満は空=段階に入らない)。`fetched` への更新と同じ同期区間。
