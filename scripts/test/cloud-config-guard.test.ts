@@ -1431,7 +1431,7 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
 describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discord を使う場所と、依頼の呼び出し箇所が固定されている", () => {
   const srcDir = path.join(ROOT, "cloud", "src");
   const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
-  const reportSources = ["daily-report-core.ts", "daily-report-digest.ts", "daily-report-bets.ts", "daily-report-prompt.ts", "daily-report-embed.ts", "daily-report-repository.ts", "daily-report-do.ts", "day-quiet.ts", "period-stats.ts"].map(
+  const reportSources = ["daily-report-core.ts", "daily-report-digest.ts", "daily-report-bets.ts", "daily-report-prompt.ts", "daily-report-embed.ts", "daily-report-repository.ts", "daily-report-do.ts", "day-quiet.ts", "period-stats.ts", "report-job-support.ts"].map(
     (f) => [f, stripCode(readTextLf("cloud", "src", f))] as const,
   );
   /** コメントを除いた cloud/src の全ファイルで、パターンの出現数をファイルごとに数える(関数の宣言は数えない呼び出しの走査用)。 */
@@ -1444,8 +1444,8 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
     return out;
   };
 
-  it("日報のソース(9 ファイル。Issue #264 で period-stats.ts が加わった)に、netkeiba の取得口・日単位の DO・他の DO・グローバルの fetch・socket が無い", () => {
-    expect(reportSources).toHaveLength(9);
+  it("日報のソース(10 ファイル。Issue #264 で period-stats.ts が、Issue #399 で日報・月報が共有する report-job-support.ts が加わった)に、netkeiba の取得口・日単位の DO・他の DO・グローバルの fetch・socket が無い", () => {
+    expect(reportSources).toHaveLength(10);
     for (const [name, code] of reportSources) {
       expect(code.length, `${name} を読めている`).toBeGreaterThan(300);
       for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "VERIFY_REPORT", "createGateHttpClient", "socket"]) {
@@ -1488,6 +1488,21 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
     // 作り直しの他のファイル（通知の埋め込み・DO）が、通知を足していない
     for (const f of ["daily-report-embed.ts", "daily-report-do.ts"]) {
       expect(reportSources.find(([n]) => n === f)![1], `${f} に regenerate の送信が無い`).not.toContain("regenerate");
+    }
+  });
+
+  it("Issue #399: 日報・月報が共有するジョブ機構の部品(report-job-support.ts)は、Discord への送信・通知の段階・D1 への保存を持たない(通知に入る経路と保存の呼び出しは、各 core の 1 箇所に残る)。葉のモジュールで、日報・月報の core を import しない", () => {
+    const shared = reportSources.find(([n]) => n === "report-job-support.ts")![1];
+    expect(shared.length, "report-job-support.ts を読めている").toBeGreaterThan(1000);
+    for (const forbidden of [".send(", 'phase: "notify"', "replaceReport", "saveReport"]) {
+      expect(shared, `report-job-support.ts に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    expect(shared).not.toMatch(/daily-report-core|monthly-report-core/);
+    // 日報・月報の core は、この部品を使っている(重複した実装に戻っていない)
+    for (const core of ["daily-report-core.ts", "monthly-report-core.ts"]) {
+      const code = stripCode(readTextLf("cloud", "src", core));
+      expect(code, `${core} が report-job-support.ts を使う`).toContain('from "./report-job-support"');
+      expect(code, `${core} に LLM を直接呼ぶ実装(AnthropicLlmClient)が無い`).not.toContain("AnthropicLlmClient");
     }
   });
 
@@ -1606,8 +1621,8 @@ describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkei
 describe("Issue #279・#280: 月報(MonthlyReportDO)は netkeiba に出ず、LLM・Discord の配線は DO だけで、他の DO・cron と干渉せず、D1 の書き込みは 2 文、Worker の GET は読むだけ(進行状況は管理者だけ)", () => {
   const srcDir = path.join(ROOT, "cloud", "src");
   const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
-  /** 純ロジックの 7 ファイル(LLM・Discord の本物に触れない。core は注入された口だけを使う)と、配線の DO。 */
-  const pureNames = ["monthly-month.ts", "monthly-stats.ts", "monthly-report-core.ts", "monthly-report-plan.ts", "monthly-report-repository.ts", "monthly-report-prompt.ts", "monthly-report-embed.ts"];
+  /** 純ロジックの 8 ファイル(LLM・Discord の本物に触れない。core は注入された口だけを使う。Issue #399 で日報と共有の report-job-support.ts が加わった)と、配線の DO。 */
+  const pureNames = ["monthly-month.ts", "monthly-stats.ts", "monthly-report-core.ts", "monthly-report-plan.ts", "monthly-report-repository.ts", "monthly-report-prompt.ts", "monthly-report-embed.ts", "report-job-support.ts"];
   const monthlySources = [...pureNames, "monthly-report-do.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
   const sites = (pattern: RegExp): Record<string, number> => {
     const out: Record<string, number> = {};
@@ -1619,8 +1634,8 @@ describe("Issue #279・#280: 月報(MonthlyReportDO)は netkeiba に出ず、LLM
   };
   const coreCode = monthlySources.find(([n]) => n === "monthly-report-core.ts")![1];
 
-  it("月報のソース(8 ファイル)に、netkeiba の取得口・日単位の DO・他の DO・グローバルの fetch・socket が無い。LLM・Discord の本物(secret・作る関数)に触れるのは DO だけ", () => {
-    expect(monthlySources).toHaveLength(8);
+  it("月報のソース(9 ファイル)に、netkeiba の取得口・日単位の DO・他の DO・グローバルの fetch・socket が無い。LLM・Discord の本物(secret・作る関数)に触れるのは DO だけ", () => {
+    expect(monthlySources).toHaveLength(9);
     for (const [name, code] of monthlySources) {
       expect(code.length, `${name} を読めている`).toBeGreaterThan(300);
       for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "VERIFY_REPORT", "DAILY_REPORT", "PRIOR_EXPORT", "createGateHttpClient", "socket"]) {

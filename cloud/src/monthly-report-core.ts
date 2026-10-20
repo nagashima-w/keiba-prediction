@@ -39,20 +39,20 @@
  *  - 1 日(JST)に受理できる回数は全体で {@link MONTHLY_REGEN_DAILY_LIMIT} 回(LLM の費用を守る。**日報の枠とは別**: この DO の kv に持つ)。受理したときだけ数え、失敗した作り直しも返さない。
  *  - 置き換えを断られた(`kept`。LLM の文章がある前の月報を、文章の無い新しい記録で潰さない規則)・分析が見つからない作り直しは、`failed` のジョブとして残す(画面が「前の月報のまま」と出せる)。
  */
-import { AnthropicLlmClient } from "@keiba/core/llm";
 import { isRealYmd } from "../client/date";
 import { jstKaisaiDate } from "./auto-run-plan";
 import { buildMonthlyEmbed } from "./monthly-report-embed";
 import { jstMsOf, isValidMonth, monthRange } from "./monthly-month";
 import { buildMonthlyPrompt, MONTHLY_MAX_TOKENS, MONTHLY_PROMPT_VERSION, parseMonthlyNarrative, type MonthlyNarrative } from "./monthly-report-prompt";
 import { serializeLlmCalls, type LlmCallRecord } from "./llm-calls";
-import { createCallLog, createCloudModelSelectors, createMeteredSender, redactSecrets, withErrorLog, type ModelSelectorFor } from "./llm-run";
+import { createCloudModelSelectors, type ModelSelectorFor } from "./llm-run";
 import type { CloudLlm } from "./llm-sender";
 import type { MonthStats } from "./monthly-stats";
 import { buildMonthlyLink } from "./notify-link";
 import { classifyNotifyError, type DiscordNotifier } from "./notify-send";
 import { addDaysToKaisaiDate } from "./result-dispatch";
-import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "./settings";
+import { attemptLlm, ReportJobStore, resolveNarrative, takeRegenQuota, type ReportLlmDeps } from "./report-job-support";
+import type { CloudSettings } from "./settings";
 
 /** 月報の DO の固定名(単一インスタンス)。依頼する側(scheduled.ts・handler.ts)が同じ名前を使う。 */
 export const MONTHLY_REPORT_NAME = "main";
@@ -76,22 +76,10 @@ export const MONTHLY_MAX_LLM_ATTEMPTS = 2;
  * 1 回の作り直しは LLM を最大 {@link MONTHLY_MAX_LLM_ATTEMPTS} 回呼ぶので、誤操作の連打で課金しないための柵。同じ月の連打は `in-progress` が既に防ぐ。受理したときだけ数える。
  */
 export const MONTHLY_REGEN_DAILY_LIMIT = 3;
-/** 作り直しの回数の記録(kv のキー `regen`)。日付が変わっていれば数え直すので、古い記録の掃除は要らない。 */
-const REGEN_KEY = "regen";
-interface RegenQuota {
-  /** 受理した日(JST の YYYYMMDD。依頼した日)。 */
-  day: string;
-  count: number;
-}
-
 /** 文章が無いときの理由(固定文言)。 */
 export const MONTHLY_NOTE_NO_KEY = "LLM の API キーが未登録のため、統計だけの月報です";
 export const MONTHLY_NOTE_FAILED = "LLM を使えなかったため、統計だけの月報です";
 export const MONTHLY_NOTE_UNPARSED = "LLM の応答を構造として読めなかったため、生の文章を載せています";
-
-/** 生の文章を残す上限と、総括に使う先頭の長さ(日報と同じ)。 */
-const RAW_MAX_CHARS = 20_000;
-const RAW_SUMMARY_CHARS = 300;
 
 // ---- 外への口(ポート) ----
 
@@ -221,8 +209,6 @@ interface Job {
   notify: "pending" | "sending";
 }
 
-const JOBS_KEY = "jobs";
-const jobKey = (month: string): string => `job:${month}`;
 
 export interface MonthlyReportDeps {
   readonly kv: MonthlyReportKv;
@@ -241,28 +227,17 @@ export interface MonthlyReportDeps {
   readonly appBaseUrl?: string;
 }
 
-function cut(text: string, max: number): string {
-  if (text.length <= max) {
-    return text;
-  }
-  let head = text.slice(0, max - 1);
-  const last = head.charCodeAt(head.length - 1);
-  if (last >= 0xd800 && last <= 0xdbff) {
-    head = head.slice(0, -1);
-  }
-  return `${head}…`;
-}
-
-/** 警告に出すエラーの文字列。API キーの形(`sk-ant-`)は伏せ、先頭 200 字に切る。 */
-function errorText(error: unknown): string {
-  return redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 200);
-}
-
 export class MonthlyReportCore {
   private readonly selectors: ModelSelectorFor | undefined;
+  /** LLM の呼び出しに要る口(`report-job-support.ts` の {@link attemptLlm} に渡す)。 */
+  private readonly llmDeps: ReportLlmDeps;
+  /** ジョブの保管(kv の `job:<鍵>` と索引・期限の来たジョブの選択・段階の失敗の包み・終わり方・アラーム。`report-job-support.ts`)。 */
+  private readonly jobs: ReportJobStore<Job>;
 
   constructor(private readonly deps: MonthlyReportDeps) {
     this.selectors = deps.llm === undefined ? undefined : createCloudModelSelectors(deps.llm, deps.onWarn);
+    this.llmDeps = { llm: deps.llm, selectors: this.selectors, now: deps.now, onWarn: deps.onWarn, loadSettings: deps.loadSettings };
+    this.jobs = new ReportJobStore<Job>(deps, (job) => job.month);
   }
 
   // ---- 依頼 ----
@@ -282,7 +257,7 @@ export class MonthlyReportCore {
     if ((mode === "auto" || mode === "catchup") && lastDay < addDaysToKaisaiDate(today, -MONTHLY_MAX_AGE_DAYS)) {
       return { accepted: false, reason: "too-old" };
     }
-    const existing = this.deps.kv.get<Job>(jobKey(month));
+    const existing = this.jobs.get(month);
     if (existing !== undefined && existing.status === "running") {
       return { accepted: false, reason: "in-progress" };
     }
@@ -292,34 +267,28 @@ export class MonthlyReportCore {
       return { accepted: false, reason: regenerate ? "not-exists" : "exists" };
     }
     // await を挟んだので、ここで同じ月のジョブが積まれていないかを見直す(並行した依頼の二重のジョブを作らない)。
-    const again = this.deps.kv.get<Job>(jobKey(month));
+    const again = this.jobs.get(month);
     if (again !== undefined && again.status === "running") {
       return { accepted: false, reason: "in-progress" };
     }
     const now = this.deps.now();
-    if (regenerate) {
-      // 1 日の回数。**最後の await のあと、ジョブを積むのと同じ同期の区間**で確かめて数える(並行した依頼が上限を超えない)。ここまでの断りは数えない。
-      const day = jstKaisaiDate(now);
-      const quota = this.deps.kv.get<RegenQuota>(REGEN_KEY);
-      const used = quota !== undefined && quota.day === day ? quota.count : 0;
-      if (used >= MONTHLY_REGEN_DAILY_LIMIT) {
-        return { accepted: false, reason: "daily-limit" };
-      }
-      this.deps.kv.put(REGEN_KEY, { day, count: used + 1 } satisfies RegenQuota);
+    // 1 日の回数。**最後の await のあと、ジョブを積むのと同じ同期の区間**で確かめて数える(並行した依頼が上限を超えない)。ここまでの断りは数えない。
+    if (regenerate && !takeRegenQuota(this.deps.kv, now, MONTHLY_REGEN_DAILY_LIMIT)) {
+      return { accepted: false, reason: "daily-limit" };
     }
     const startAt = input.startAt;
     const nextAt = startAt !== undefined && startAt > now && startAt <= now + MONTHLY_START_AT_MAX_AHEAD_MS ? startAt : now;
-    this.putJob({
+    this.jobs.put({
       month, mode, createdAt: now, phase: "read", status: "running", attempts: 0, waits: 0, nextAt,
       stats: null, lastDayPending: false, llmAttempts: 0, llmText: null, llmModel: null, llmGaveUp: false, calls: [], record: null, notify: "pending",
     });
-    this.addToIndex(month);
-    await this.rearm();
+    this.jobs.addToIndex(month);
+    await this.jobs.rearm();
     return { accepted: true };
   }
 
   getStatus(month: string): MonthlyStatus | null {
-    const job = this.deps.kv.get<Job>(jobKey(month));
+    const job = this.jobs.get(month);
     return job === undefined ? null : { phase: job.phase, status: job.status, attempts: job.attempts, ...(job.mode === "regenerate" ? { regenerate: true as const } : {}) };
   }
 
@@ -327,16 +296,13 @@ export class MonthlyReportCore {
 
   /** 時刻が来ているジョブを 1 つ選び、1 段階だけ進める。 */
   async runNextStep(): Promise<MonthlyStepOutcome> {
-    const now = this.deps.now();
-    const due = this.runningJobs()
-      .filter((j) => j.nextAt <= now)
-      .sort((a, b) => a.nextAt - b.nextAt || (a.month < b.month ? -1 : 1))[0];
+    const due = this.jobs.pickDue();
     if (due === undefined) {
-      await this.rearm();
+      await this.jobs.rearm();
       return { kind: "idle" };
     }
     const outcome = await this.runPhase(due);
-    await this.rearm();
+    await this.jobs.rearm();
     return outcome;
   }
 
@@ -355,16 +321,8 @@ export class MonthlyReportCore {
           return ran(await this.runNotify(job));
       }
     } catch (error) {
-      // 段階の失敗: 試行を数えて再試行、上限で failed。エラーの本文はログにだけ(redact して先頭 200 字)。状態には残さない。
-      const attempts = job.attempts + 1;
-      this.deps.onWarn(`月報(${job.month}): ${phase} に失敗しました(試行 ${attempts} 回): ${errorText(error)}`);
-      if (attempts >= MONTHLY_MAX_STEP_ATTEMPTS) {
-        this.putJob({ ...job, attempts, status: "failed" });
-        this.removeFromIndex(job.month);
-        return ran("failed");
-      }
-      this.putJob({ ...job, attempts, nextAt: this.deps.now() + MONTHLY_RETRY_DELAY_MS });
-      return ran("retry");
+      // 段階の失敗: 試行を数えて再試行、上限で failed(手順は `report-job-support.ts` の failStep)。
+      return ran(this.jobs.failStep(job, phase, error, { noun: "月報", maxAttempts: MONTHLY_MAX_STEP_ATTEMPTS, retryDelayMs: MONTHLY_RETRY_DELAY_MS }));
     }
   }
 
@@ -379,7 +337,7 @@ export class MonthlyReportCore {
       const pending = status.noResultRaceCount > 0 || (status.raceCount > 0 && !status.hasDailyReport);
       if (pending) {
         if (job.waits < MONTHLY_MAX_WAITS) {
-          this.putJob({ ...job, waits: job.waits + 1, attempts: 0, nextAt: this.deps.now() + MONTHLY_WAIT_INTERVAL_MS });
+          this.jobs.put({ ...job, waits: job.waits + 1, attempts: 0, nextAt: this.deps.now() + MONTHLY_WAIT_INTERVAL_MS });
           return "waiting";
         }
         lastDayPending = true; // 待ちきれなかった: そのまま作り、印を残す
@@ -390,7 +348,7 @@ export class MonthlyReportCore {
       this.endWithoutReport(job); // その月に分析したレースが無い: 月報は作らない
       return "no-analyses";
     }
-    this.putJob({ ...job, stats, lastDayPending, phase: "generate", attempts: 0, nextAt: this.deps.now() });
+    this.jobs.put({ ...job, stats, lastDayPending, phase: "generate", attempts: 0, nextAt: this.deps.now() });
     return "ok";
   }
 
@@ -400,70 +358,30 @@ export class MonthlyReportCore {
       throw new Error("文章を作る月の統計がありません");
     }
     let current = job;
-    if (this.deps.llm !== undefined && current.llmText === null && !current.llmGaveUp) {
-      // 試行は呼ぶ前に永続化する(落ちても無限に続かない)。
-      current = { ...current, llmAttempts: current.llmAttempts + 1 };
-      this.putJob(current);
-      const outcome = await this.callLlm(buildMonthlyPrompt({ month: job.month, stats, lastDayPending: job.lastDayPending }));
-      if (outcome.ok) {
-        // 応答は成功した直後に書く(保存の失敗の再試行で LLM を呼び直さない)。
-        current = { ...current, llmText: outcome.text, llmModel: outcome.model, calls: [...current.calls, ...outcome.calls] };
-        this.putJob(current);
-      } else {
-        const giveUp = current.llmAttempts >= MONTHLY_MAX_LLM_ATTEMPTS;
-        this.deps.onWarn(`月報(${job.month}): LLM の呼び出しに失敗しました(${outcome.description}。試行 ${current.llmAttempts} 回${giveUp ? "。統計だけの月報にします" : ""})`);
-        current = { ...current, llmGaveUp: giveUp, calls: [...current.calls, ...outcome.calls], nextAt: giveUp ? this.deps.now() : this.deps.now() + MONTHLY_RETRY_DELAY_MS };
-        this.putJob(current);
-        if (!giveUp) {
-          return "retry";
-        }
-      }
+    // LLM の試行(呼ぶ前に試行を永続化し、応答は成功の直後に永続化する。手順は `report-job-support.ts` の attemptLlm)。
+    const attempt = await attemptLlm(
+      this.llmDeps,
+      { noun: "月報", key: job.month, maxTokens: MONTHLY_MAX_TOKENS, maxAttempts: MONTHLY_MAX_LLM_ATTEMPTS, retryDelayMs: MONTHLY_RETRY_DELAY_MS },
+      current,
+      () => buildMonthlyPrompt({ month: job.month, stats, lastDayPending: job.lastDayPending }),
+      (next) => this.jobs.put(next),
+    );
+    if (attempt.retry) {
+      return "retry";
     }
+    current = attempt.job;
     const record = this.buildRecord(current, stats);
-    this.putJob({ ...current, record, phase: "save", attempts: 0, nextAt: this.deps.now() });
+    this.jobs.put({ ...current, record, phase: "save", attempts: 0, nextAt: this.deps.now() });
     return "ok";
   }
 
-  private async callLlm(prompt: string): Promise<{ ok: true; text: string; model: string | null; calls: LlmCallRecord[] } | { ok: false; description: string; calls: LlmCallRecord[] }> {
-    const llm = this.deps.llm!;
-    const log = createCallLog();
-    let settings: CloudSettings = DEFAULT_CLOUD_SETTINGS;
-    try {
-      settings = await this.deps.loadSettings();
-    } catch {
-      this.deps.onWarn("月報: 設定を読めなかったため、既定のモデルの選択で続けます");
-    }
-    const sender = createMeteredSender(withErrorLog(llm.sender, this.deps.onWarn), log, this.deps.now);
-    const selector = this.selectors?.(settings.analysisModel);
-    const client = new AnthropicLlmClient({ maxTokens: MONTHLY_MAX_TOKENS }, { sender, ...(selector === undefined ? {} : { modelSelector: selector }), onWarn: this.deps.onWarn });
-    try {
-      const done = await client.completeDetailed(prompt);
-      return { ok: true, text: done.text, model: done.model ?? null, calls: log.calls() as LlmCallRecord[] };
-    } catch (error) {
-      const calls = log.calls() as LlmCallRecord[];
-      return { ok: false, description: calls[calls.length - 1]?.error ?? "種別=other", calls };
-    }
-  }
-
   private buildRecord(job: Job, stats: MonthStats): MonthlyReportRecord {
-    let narrative: MonthlyNarrative | null = null;
-    let narrativeRaw: string | null = null;
-    let note: string | null = null;
-    let summary: string | null = null;
-    if (this.deps.llm === undefined) {
-      note = MONTHLY_NOTE_NO_KEY;
-    } else if (job.llmText === null) {
-      note = MONTHLY_NOTE_FAILED;
-    } else {
-      narrative = parseMonthlyNarrative(job.llmText);
-      if (narrative === null) {
-        narrativeRaw = cut(job.llmText.trim(), RAW_MAX_CHARS);
-        summary = cut(job.llmText.trim(), RAW_SUMMARY_CHARS);
-        note = MONTHLY_NOTE_UNPARSED;
-      } else {
-        summary = narrative.summary;
-      }
-    }
+    const { narrative, narrativeRaw, note, summary } = resolveNarrative<MonthlyNarrative>({
+      hasLlm: this.deps.llm !== undefined,
+      llmText: job.llmText,
+      parse: parseMonthlyNarrative,
+      notes: { noKey: MONTHLY_NOTE_NO_KEY, failed: MONTHLY_NOTE_FAILED, unparsed: MONTHLY_NOTE_UNPARSED },
+    });
     return {
       month: job.month,
       createdAt: new Date(this.deps.now()).toISOString(),
@@ -489,21 +407,21 @@ export class MonthlyReportCore {
         this.abandon(job);
         return "failed";
       }
-      this.finish(job.month);
+      this.jobs.finish(job.month);
       return "ok";
     }
     const saved = await this.deps.store.saveReport(job.record);
     if (saved === "exists") {
       // 別の経路が先に作った。上書きも通知もしない。
-      this.finish(job.month);
+      this.jobs.finish(job.month);
       return "exists";
     }
     if (job.mode === "manual") {
       // 手動の作成は Discord に送らない(自動の作成の通知とは別。ユーザーの決定)。
-      this.finish(job.month);
+      this.jobs.finish(job.month);
       return "ok";
     }
-    this.putJob({ ...job, phase: "notify", attempts: 0, nextAt: this.deps.now() });
+    this.jobs.put({ ...job, phase: "notify", attempts: 0, nextAt: this.deps.now() });
     return "ok";
   }
 
@@ -511,14 +429,14 @@ export class MonthlyReportCore {
     const record = job.record;
     if (this.deps.notifier === undefined || record === null || job.notify === "sending") {
       // 通知の仕組みが無い、または送信中に落ちた(再送しない)。
-      this.finish(job.month);
+      this.jobs.finish(job.month);
       return "ok";
     }
     const body = record.body;
     const link = this.deps.appBaseUrl === undefined ? undefined : buildMonthlyLink(this.deps.appBaseUrl, job.month);
     const embed = buildMonthlyEmbed({ month: job.month, stats: body.stats, narrative: body.narrative, note: body.note, link, lastDayPending: body.lastDayPending });
     // 送る前に sending を書く(ここまで同期。落ちても再送しない)。
-    this.putJob({ ...job, notify: "sending" });
+    this.jobs.put({ ...job, notify: "sending" });
     let ok = true;
     try {
       await this.deps.notifier.send({ embeds: [embed] });
@@ -526,76 +444,26 @@ export class MonthlyReportCore {
       ok = false;
       this.deps.onWarn(`Discord への月報の通知に失敗しました(${job.month}。分類: ${classifyNotifyError(error)}。再送しません)`);
     }
-    this.finish(job.month);
+    this.jobs.finish(job.month);
     return ok ? "ok" : "failed";
   }
 
   // ---- ジョブの保存 ----
 
   /**
-   * 月報を作れずに終わる(その月の分析が見つからない)。通常の作成はジョブを消すだけ。
-   * 作り直しは前の月報が残っているので、消すと画面が結果を知れない: `failed` のジョブとして残す({@link abandon})。
+   * 月報を作れずに終わる(その月の分析が見つからない)。通常の作成はジョブを消すだけ。作り直しは前の月報が残っているので、消すと画面が結果を知れない: `failed` のジョブとして残す({@link abandon})。
    */
   private endWithoutReport(job: Job): void {
-    if (job.mode === "regenerate") {
-      this.abandon(job);
-    } else {
-      this.finish(job.month);
-    }
+    this.jobs.endWithoutReport(job, this.abandonedFields());
   }
 
-  /** 作り直しを、前の月報を残したまま失敗として終える。本文(統計・記録・LLM の記録)は捨てて、kv を肥大させない。動かすジョブの一覧から外す(アラームを張らない)。 */
+  /** 作り直しを、前の月報を残したまま失敗として終える。本文は捨てて、kv を肥大させない。動かすジョブの一覧から外す(アラームを張らない)。 */
   private abandon(job: Job): void {
-    this.putJob({ ...job, status: "failed", stats: null, record: null, calls: [], llmText: null });
-    this.removeFromIndex(job.month);
+    this.jobs.abandon(job, this.abandonedFields());
   }
 
-  private putJob(job: Job): void {
-    this.deps.kv.put(jobKey(job.month), job);
-  }
-
-  private finish(month: string): void {
-    this.deps.kv.delete(jobKey(month));
-    this.removeFromIndex(month);
-  }
-
-  private index(): string[] {
-    return this.deps.kv.get<string[]>(JOBS_KEY) ?? [];
-  }
-
-  private addToIndex(month: string): void {
-    const index = this.index();
-    if (!index.includes(month)) {
-      this.deps.kv.put(JOBS_KEY, [...index, month]);
-    }
-  }
-
-  private removeFromIndex(month: string): void {
-    const rest = this.index().filter((m) => m !== month);
-    if (rest.length === 0) {
-      this.deps.kv.delete(JOBS_KEY);
-    } else {
-      this.deps.kv.put(JOBS_KEY, rest);
-    }
-  }
-
-  private runningJobs(): Job[] {
-    const jobs: Job[] = [];
-    for (const month of this.index()) {
-      const job = this.deps.kv.get<Job>(jobKey(month));
-      if (job !== undefined && job.status === "running") {
-        jobs.push(job);
-      }
-    }
-    return jobs;
-  }
-
-  /** 動かせるジョブの最も早い時刻にアラームを張る(無ければ張らない)。 */
-  private async rearm(): Promise<void> {
-    const jobs = this.runningJobs();
-    if (jobs.length === 0) {
-      return;
-    }
-    await this.deps.setAlarm(Math.max(Math.min(...jobs.map((j) => j.nextAt)), this.deps.now()));
+  /** 作り直しを諦めるときに捨てるジョブの本文(統計・記録・LLM の記録と応答の文章)。 */
+  private abandonedFields(): Partial<Job> {
+    return { stats: null, record: null, calls: [], llmText: null };
   }
 }
