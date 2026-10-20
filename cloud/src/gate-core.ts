@@ -17,7 +17,7 @@
  *     手動のリセットは用意しない(時間経過でのみ戻る。ユーザー判断 2026-10-06)。
  *  5. **待ち行列の上限 {@link GATE_MAX_QUEUE}**: 超えた呼び出しは接続せずに拒否する(呼び出し側が諦めた取得が、2 秒間隔で
  *     溜まり続けるのを防ぐ安全弁)。
- *  6. **POST({@link GateCore.postRaw}。Issue #181。重賞の過去10年傾向の API だけ)**: 許可リスト({@link checkAllowedPost})に合うものだけを通し、
+ *  6. **POST({@link GateCore.postRaw}。Issue #181。重賞の過去10年傾向と新聞形式の API だけ)**: 許可リスト({@link checkAllowedPost})に合うものだけを通し、
  *     順番待ち(2・3・5)は GET と**同じ**連鎖に入れる(POST だけが先に行かない)。ブレーカーは**別系統**: POST が拒否(400/403/429)されたら、
  *     **1 回で** POST だけを {@link GATE_BREAKER_MS} の間止める(`postBlockedUntil`。その間の POST は接続せずに `post-blocked`)。
  *     **POST の結果は GET の連続回数を変えない**(拒否も、成功によるリセットも)。GET のブレーカーが開いている間は POST も接続しない(`blocked`)。
@@ -147,20 +147,28 @@ const POST_ALLOWED_HOSTS: ReadonlySet<string> = new Set(["race.netkeiba.com", "n
 /** POST の宛先のパス(完全一致。クエリなし)。 */
 const POST_PATH = "/race_api/";
 
-/** POST の Referer のパス(中央が past10.html・地方が past5.html。ホストとの組は固定しない)。 */
-const POST_REFERER_PATHS: ReadonlySet<string> = new Set(["/race/past10.html", "/race/past5.html"]);
+/**
+ * POST の本文の class ごとに許す Referer のパス(Issue #421 段階 1-b で class ごとに分けた)。**class と Referer のページは対応させる**:
+ * 重賞の過去10年傾向(AplGradeWinner)は中央が past10.html・地方が past5.html、新聞形式(AplNewsPaper)は中央・地方とも newspaper.html。
+ * クラスを問わない集合にすると、一方の class の POST に他方のページの Referer を付けた取り違えが通ってしまう(ブラウザが実際に出す組合せだけを許す)。
+ * ホストとの組(中央が past10・地方が past5)は固定しない(従来どおり)。
+ */
+const POST_REFERER_PATHS_BY_CLASS: Readonly<Record<string, ReadonlySet<string>>> = {
+  AplGradeWinner: new Set(["/race/past10.html", "/race/past5.html"]),
+  AplNewsPaper: new Set(["/race/newspaper.html"]),
+};
 
 /** POST の本文の長さの上限(これを超えるものは、形を調べる前に拒否する)。形({@link POST_BODY_PATTERN})が長さを 87 に固定するので、実際の上限はそれ。 */
 const POST_BODY_MAX_LENGTH = 256;
 
-/** POST の本文の形(`fetch-grade-winner.ts` が組み立てるものと同じ。race_id は 12 桁)。 */
-const POST_BODY_PATTERN = /^input=UTF-8&output=json&class=AplGradeWinner&method=get&compress=1&race_id=(\d{12})$/;
+/** POST の本文の形(`fetch-grade-winner.ts`・`fetch-newspaper.ts` が組み立てるものと同じ。class は 2 つのどちらか、race_id は 12 桁)。class は {@link POST_REFERER_PATHS_BY_CLASS} のキーと一致させる。 */
+const POST_BODY_PATTERN = /^input=UTF-8&output=json&class=(AplGradeWinner|AplNewsPaper)&method=get&compress=1&race_id=(\d{12})$/;
 
 /** POST の指定(RPC で運べる値だけ)。ヘッダの `Content-Type`・`X-Requested-With`・`User-Agent` などは、ゲートが固定の値を付ける(呼び出し側は選べない)。 */
 export interface GatePostRequest {
   /** 宛先。`https://race.netkeiba.com/race_api/` または `https://nar.netkeiba.com/race_api/`。 */
   readonly url: string;
-  /** `Referer`。宛先と同じホストの `/race/past10.html?race_id=<12桁>`(または past5.html)。race_id は本文と同じ。 */
+  /** `Referer`。宛先と同じホストの、本文の class に対応するページ(`/race/past10.html`・`past5.html`・`newspaper.html`)の `?race_id=<12桁>`。race_id は本文と同じ。 */
   readonly referer: string;
   /** `Origin`。`https://<宛先のホスト>`(末尾のスラッシュなし)。 */
   readonly origin: string;
@@ -203,7 +211,8 @@ type PostCheck = { readonly ok: true; readonly url: string; readonly init: Socke
  * POST の指定が許可されているかを検査し、ソケット取得に渡す形を返す(Issue #181)。許可は次のすべてを満たすときだけ:
  *  - 宛先: https・ポートなし・ユーザー情報なし・ホストが race / nar.netkeiba.com・パスが `/race_api/`・クエリなし(空白・制御文字・バックスラッシュも不可)
  *  - 本文: {@link POST_BODY_PATTERN} の形(長さは {@link POST_BODY_MAX_LENGTH} まで)
- *  - Referer: 宛先と同じホストの past10.html / past5.html で、クエリは `race_id=<12桁>` だけ。その race_id は本文のものと同じ
+ *  - Referer: 宛先と同じホストの、本文の class に対応するページ(AplGradeWinner は past10.html / past5.html、AplNewsPaper は newspaper.html)で、
+ *    クエリは `race_id=<12桁>` だけ。その race_id は本文のものと同じ
  *  - Origin: `https://<宛先のホスト>` ちょうど
  * ヘッダのうち `Content-Type`・`X-Requested-With`・`User-Agent` などは、ソケット取得(`socket-fetch.ts`)が固定の値を付ける。
  */
@@ -248,10 +257,10 @@ export function checkAllowedPost(request: GatePostRequest): PostCheck {
     referer.username !== "" ||
     referer.password !== "" ||
     referer.hash !== "" ||
-    !POST_REFERER_PATHS.has(referer.pathname) ||
-    referer.search !== `?race_id=${bodyMatch[1]}`
+    POST_REFERER_PATHS_BY_CLASS[bodyMatch[1]!]?.has(referer.pathname) !== true ||
+    referer.search !== `?race_id=${bodyMatch[2]}`
   ) {
-    return refuse("Referer が許可している形ではありません(宛先と同じホストの past10 / past5 で、race_id が本文と同じ)");
+    return refuse("Referer が許可している形ではありません(宛先と同じホストの、本文の class に対応するページ〈past10 / past5 / newspaper〉で、race_id が本文と同じ)");
   }
   if (request.origin !== `https://${target.hostname}`) {
     return refuse("Origin が許可している形ではありません(https://<宛先のホスト> ちょうど)");

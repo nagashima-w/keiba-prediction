@@ -23,6 +23,7 @@
 
 import type { CachedFetchTextOptions } from "./cached-fetcher.js";
 import { toComboOddsScalarMap, type ComboBetType } from "./combo-odds-key.js";
+import { fetchNewspaperConditions, newspaperCacheKey } from "./fetch-newspaper.js";
 import {
   fetchBracketQuinellaOdds,
   fetchComboOdds,
@@ -36,6 +37,7 @@ import type { JockeyResultsStore } from "./jockey-results-store.js";
 import { excludeNonStartResults, parseHorseResults } from "./parse-horse-results.js";
 import { parseJockeyResults, type JockeyYearRecord } from "./parse-jockey-results.js";
 import { parseNarOdds } from "./parse-nar-odds.js";
+import { NewspaperParseError, type PrevRaceCondition } from "./parse-newspaper.js";
 import { parseOdds } from "./parse-odds.js";
 import { parseOikiri } from "./parse-oikiri.js";
 import { parseRaceList } from "./parse-race-list.js";
@@ -141,6 +143,13 @@ export const DEFAULT_ODDS_TTL_MS = 60 * 1000;
  */
 export const DEFAULT_RACE_LIST_TTL_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * 新聞形式 API(前走の条件。Issue #421 段階 1-b)のキャッシュ許容鮮度。6 時間。
+ * 前走の条件そのものは確定データだが、応答は「そのレースの出走時点の各馬の走」で、出馬表の確定(枠順・取消)後に作り直されうる。
+ * 朝と発走前の 2 回の取得ステップの間(数時間)で取り直す余地を残しつつ、同じ取得ステップの再実行では POST を増やさない。
+ */
+export const DEFAULT_NEWSPAPER_TTL_MS = 6 * 60 * 60 * 1000;
+
 /** カテゴリ別のキャッシュ許容鮮度(ミリ秒)設定。 */
 export interface ScrapeTtlConfig {
   /** 出馬表。 */
@@ -157,6 +166,8 @@ export interface ScrapeTtlConfig {
   readonly jockeyMs: number;
   /** 調教師の年度別成績(Issue #354)の fetcher のキャッシュの許容鮮度。保存先の鮮度の判定は別(`DEFAULT_TRAINER_TTL_MS` の説明)。 */
   readonly trainerMs: number;
+  /** 新聞形式 API(前走の条件。Issue #421 段階 1-b)の fetcher のキャッシュの許容鮮度。 */
+  readonly newspaperMs: number;
 }
 
 /** 既定のTTL設定。 */
@@ -168,6 +179,7 @@ const DEFAULT_TTL: ScrapeTtlConfig = {
   raceListMs: DEFAULT_RACE_LIST_TTL_MS,
   jockeyMs: DEFAULT_JOCKEY_TTL_MS,
   trainerMs: DEFAULT_TRAINER_TTL_MS,
+  newspaperMs: DEFAULT_NEWSPAPER_TTL_MS,
 };
 
 /**
@@ -237,6 +249,14 @@ export interface ScrapeRaceOptions {
    */
   readonly includeTrainerStats?: boolean;
   /**
+   * true のとき、新聞形式 API(`POST /race_api/`、class=AplNewsPaper)を 1 本取り、各馬の前走までの**レースの条件**(負担重量の種別・牝馬限定)を
+   * `RaceData.prevRaceConditions` に載せる(Issue #421 段階 1-b)。中央・地方とも取る(地方の条件の文言は空で、負担重量の種別だけが使える)。
+   * 既定は `false`(オプトイン。従来の呼び出し列を変えない)。
+   * **騎手・調教師の上限(`jockeyRequestLimit`)の外**: 数え込み付きの fetcher を通さず `deps.fetcher` で直接呼ぶので、上限を食わない(`gate` への呼び出しは +1 本)。
+   * 失敗(通信・読めない応答)は警告(kind=前走条件)にして続行し、`prevRaceConditions` のキーは付けない。
+   */
+  readonly includePrevConditions?: boolean;
+  /**
    * 騎手・調教師の取得に対する、この `scrapeRace` の fetcher 呼び出しの合計の上限(既定 {@link DEFAULT_JOCKEY_REQUEST_LIMIT}=40)。
    * テストが小さい値で上限の挙動を確かめるための上書き。`includeJockeyStats`・`includeTrainerStats` がともに false なら無関係。
    */
@@ -256,7 +276,7 @@ export interface ScrapeRaceOptions {
 }
 
 /** 取得中に発生した非致命的な問題の種別。 */
-export type ScrapeWarningKind = "戦績" | "調教" | "組合せオッズ" | "出走取消" | "騎手" | "調教師";
+export type ScrapeWarningKind = "戦績" | "調教" | "組合せオッズ" | "出走取消" | "騎手" | "調教師" | "前走条件";
 
 /** 取得中に発生した非致命的な問題(結果には含めるが失敗はさせない)。 */
 export interface ScrapeWarning {
@@ -270,6 +290,12 @@ export interface ScrapeWarning {
   readonly jockeyId?: string;
   /** 調教師単位の警告(種別=調教師。Issue #354)の場合の対象調教師ID。 */
   readonly trainerId?: string;
+  /**
+   * 読めない応答(status が OK でない・壊れている。種別=前走条件)のとき、その応答を保存したキャッシュのキー(`race_api#AplNewsPaper#<race_id>`)。
+   * `scrapeRace` はキャッシュの保存先を持たないので、呼び出し側がこのキーを消す(次の取得で取り直せるように。重賞の傾向の `prefetchGradeWinner` と同じ扱い)。
+   * 通信の失敗には付かない(何も保存されていない)。
+   */
+  readonly brokenCacheKey?: string;
 }
 
 /**
@@ -397,6 +423,12 @@ export interface RaceData {
    * 窓の年(レースの年の前2年)の選択は scorer 側(`scorer/trainer-stats.ts`)。
    */
   readonly trainerStats?: Readonly<Record<string, readonly JockeyYearRecord[]>>;
+  /**
+   * 各馬の前走までのレースの条件(race_id → 条件。Issue #421 段階 1-b)。`options.includePrevConditions` が true で、取得・解析できたときだけ設定される
+   * (キー自体が無ければ取得していない・取れなかった)。結合は呼び出し側が、馬の戦績の `results[0].raceIdRaw`(分析日で絞った後の先頭=前走)で引く
+   * (`buildRaceSnapshot`。`raceId` は地方で null になるので使わない)。プロンプト・統計モデル・画面には使わない(スナップショットに残すだけ)。
+   */
+  readonly prevRaceConditions?: Readonly<Record<string, PrevRaceCondition>>;
 }
 
 /** エラーオブジェクトから表示用メッセージを取り出す。 */
@@ -945,6 +977,24 @@ export async function scrapeRace(
     };
   }
 
+  // (5b) 前走の条件(optional・オプトイン。Issue #421 段階 1-b)。新聞形式 API を 1 本(POST)取り、race_id → 条件の表にする。
+  //   **騎手・調教師の上限の外**: 数え込み付きの `fetcher` ではなく `deps.fetcher` を直接呼ぶ(上限を食わない)。上限の判定に影響しないことを、騎手の取得の
+  //   前に置いたうえでテストが固定する(`scrape-race-prev-conditions.test.ts`)。
+  //   失敗は警告にして続行する(通信の失敗・読めない応答のどちらも。分析の本体は前走の条件を使わない)。読めない応答は CachedFetcher が保存した後に
+  //   パースで失敗するので、警告に消すべきキャッシュのキーを載せる(`brokenCacheKey`。消すのは呼び出し側)。
+  let prevRaceConditions: Readonly<Record<string, PrevRaceCondition>> | undefined;
+  if (options.includePrevConditions) {
+    try {
+      prevRaceConditions = await fetchNewspaperConditions(raceId, { fetcher: deps.fetcher, maxAgeMs: ttl.newspaperMs });
+    } catch (error) {
+      warnings.push({
+        kind: "前走条件",
+        message: `前走の条件の取得に失敗しました(補正の材料には使わないため、続行します): ${errorMessage(error)}`,
+        ...(error instanceof NewspaperParseError ? { brokenCacheKey: newspaperCacheKey(raceId) } : {}),
+      });
+    }
+  }
+
   // (6) 騎手の年ごとの成績(optional・オプトイン。Issue #226)。既存の取得がすべて済んだ後ろで、騎手IDで一意にして処理する。
   //   1. 保存先(`deps.jockeyStore`。クラウド版は D1)があれば、**取得の前にまとめて 1 回読む**。取得日時から ttl.jockeyMs(既定 7 日)以内なら
   //      その値を使い、netkeiba に出ない(週に 1 回の更新)。読めなかったら警告を 1 件残して、全員を取得へ回す(フォールバック)。
@@ -1044,6 +1094,7 @@ export async function scrapeRace(
     },
     ...(jockeyStats !== undefined ? { jockeyStats } : {}),
     ...(trainerStats !== undefined ? { trainerStats } : {}),
+    ...(prevRaceConditions !== undefined ? { prevRaceConditions } : {}),
   };
 }
 

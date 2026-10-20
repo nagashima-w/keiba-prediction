@@ -397,3 +397,99 @@ describe("status() の postBlockedUntil", () => {
     expect(h.make().status().postBlockedUntil).toBeNull();
   });
 });
+
+// ───────────── Issue #421 段階 1-b: 新聞形式 API(AplNewsPaper)の許可と、class ↔ Referer の対応 ─────────────
+
+const newspaperBodyOf = (raceId: string): string => `input=UTF-8&output=json&class=AplNewsPaper&method=get&compress=1&race_id=${raceId}`;
+
+/** 中央の新聞形式 API の POST(`fetch-newspaper.ts` が組み立てるものと同じ形。Referer は newspaper.html)。 */
+function centralNewspaperPost(raceId = "202608040711"): GatePostRequest {
+  return {
+    url: "https://race.netkeiba.com/race_api/",
+    referer: `https://race.netkeiba.com/race/newspaper.html?race_id=${raceId}`,
+    origin: "https://race.netkeiba.com",
+    body: newspaperBodyOf(raceId),
+  };
+}
+function narNewspaperPost(raceId = "202655090311"): GatePostRequest {
+  return {
+    url: "https://nar.netkeiba.com/race_api/",
+    referer: `https://nar.netkeiba.com/race/newspaper.html?race_id=${raceId}`,
+    origin: "https://nar.netkeiba.com",
+    body: newspaperBodyOf(raceId),
+  };
+}
+
+describe("POST の許可リスト: 新聞形式 API(AplNewsPaper)", () => {
+  it("中央・地方の標準の POST を通し、宛先・本文・Referer・Origin をそのままソケット取得に渡す", async () => {
+    const h = harness();
+    const core = h.make();
+    expect((await post(core, centralNewspaperPost())).kind).toBe("response");
+    expect((await post(core, narNewspaperPost())).kind).toBe("response");
+    expect(h.calls.map((c) => c.url)).toEqual(["https://race.netkeiba.com/race_api/", "https://nar.netkeiba.com/race_api/"]);
+    expect(h.calls[0]!.init).toEqual({
+      method: "POST",
+      body: newspaperBodyOf("202608040711"),
+      referer: "https://race.netkeiba.com/race/newspaper.html?race_id=202608040711",
+      origin: "https://race.netkeiba.com",
+    });
+    expect(h.calls[1]!.init!.referer).toBe("https://nar.netkeiba.com/race/newspaper.html?race_id=202655090311");
+  });
+
+  it("回帰: 重賞の過去10年傾向(AplGradeWinner)は、中央 past10・地方 past5 のままで通る", async () => {
+    const h = harness();
+    const core = h.make();
+    expect((await post(core, centralPost())).kind).toBe("response");
+    expect((await post(core, narPost())).kind).toBe("response");
+    expect(h.calls).toHaveLength(2);
+  });
+
+  const newspaper = centralNewspaperPost();
+  const grade = centralPost();
+  it.each<[string, GatePostRequest]>([
+    // class ↔ Referer の取り違え(どちらの向きも拒否する。許可を「どちらかの class × どちらかの Referer」にしない)
+    ["AplNewsPaper の本文に past10.html の Referer", { ...newspaper, referer: "https://race.netkeiba.com/race/past10.html?race_id=202608040711" }],
+    ["AplNewsPaper の本文に past5.html の Referer(地方)", { ...narNewspaperPost(), referer: "https://nar.netkeiba.com/race/past5.html?race_id=202655090311" }],
+    ["AplGradeWinner の本文に newspaper.html の Referer", { ...grade, referer: "https://race.netkeiba.com/race/newspaper.html?race_id=202603020211" }],
+    ["AplGradeWinner の本文に newspaper.html の Referer(地方)", { ...narPost(), referer: "https://nar.netkeiba.com/race/newspaper.html?race_id=202644070111" }],
+    // newspaper の Referer の形
+    ["newspaper の Referer の race_id が本文と違う", { ...newspaper, referer: "https://race.netkeiba.com/race/newspaper.html?race_id=202606010101" }],
+    ["newspaper の Referer にクエリ(rf=)が付く", { ...newspaper, referer: "https://race.netkeiba.com/race/newspaper.html?race_id=202608040711&rf=shutuba_submenu" }],
+    ["newspaper の Referer のホストが送り先と違う", { ...newspaper, referer: "https://nar.netkeiba.com/race/newspaper.html?race_id=202608040711" }],
+    ["newspaper の Referer のパスが別のページ", { ...newspaper, referer: "https://race.netkeiba.com/race/newspaper_sp.html?race_id=202608040711" }],
+    ["newspaper の Referer が http", { ...newspaper, referer: "http://race.netkeiba.com/race/newspaper.html?race_id=202608040711" }],
+    ["newspaper の Referer にフラグメント", { ...newspaper, referer: "https://race.netkeiba.com/race/newspaper.html?race_id=202608040711#x" }],
+    // 本文の形
+    ["class の綴り違い(大文字小文字)", { ...newspaper, body: newspaper.body.replace("AplNewsPaper", "aplnewspaper") }],
+    ["class の前方一致(AplNewsPaperX)", { ...newspaper, body: newspaper.body.replace("AplNewsPaper", "AplNewsPaperX") }],
+    ["class が 2 つ", { ...newspaper, body: newspaper.body.replace("class=AplNewsPaper", "class=AplNewsPaper&class=AplGradeWinner") }],
+    ["本文に余計なパラメータ", { ...newspaper, body: `${newspaper.body}&x=1` }],
+    ["本文の race_id が 11 桁", { ...newspaper, body: newspaperBodyOf("20260804071"), referer: "https://race.netkeiba.com/race/newspaper.html?race_id=20260804071" }],
+    ["db.netkeiba.com(POST は race / nar だけ)", { ...newspaper, url: "https://db.netkeiba.com/race_api/", origin: "https://db.netkeiba.com", referer: "https://db.netkeiba.com/race/newspaper.html?race_id=202608040711" }],
+    ["Origin が送り先と違うホスト", { ...newspaper, origin: "https://nar.netkeiba.com" }],
+  ])("拒否して、接続も状態の書き込みもしない: %s", async (_label, request) => {
+    const h = harness();
+    const result = await post(h.make(), request);
+    expect(reasonOf(result)).toBe("disallowed-url");
+    expect(h.calls).toHaveLength(0);
+    expect(h.kv.size).toBe(0);
+  });
+
+  it("前提: 上の拒否の例の元になった標準の POST は通る(拒否の理由が標準の形そのものにない)", async () => {
+    const h = harness();
+    const core = h.make();
+    expect((await post(core, newspaper)).kind).toBe("response");
+    expect((await post(core, grade)).kind).toBe("response");
+  });
+
+  it("新聞形式の POST も GET と同じ順番待ち(直列化・最小間隔)と POST 専用のブレーカーに入る: 拒否(403)で POST だけが止まる", async () => {
+    const h = harness();
+    h.script.push(403);
+    const core = h.make();
+    expect((await post(core, newspaper)).kind).toBe("response");
+    expect(core.status().postBlockedUntil).toBe(T0 + GATE_BREAKER_MS);
+    // 次は、grade-winner の POST も(POST のブレーカー)止まる。GET は通る。
+    expect(reasonOf(await post(core, grade))).toBe("post-blocked");
+    expect((await get(core)).kind).toBe("response");
+  });
+});

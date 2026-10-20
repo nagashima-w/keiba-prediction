@@ -24,6 +24,8 @@ import oddsTrifectaJson from "../fixtures/odds_trifecta_202603020211.json";
 import oddsWakurenJson from "../fixtures/odds_wakuren_202603020211.json";
 import gradeWinnerJson from "../fixtures/grade_winner_202603020211.json";
 import gradeWinnerNarJson from "../fixtures/grade_winner_nar_202644070111.json";
+import newspaperJson from "../fixtures/newspaper_api_202608040711.json";
+import newspaperNarJson from "../fixtures/newspaper_api_nar_202655090311.json";
 import results2023103386 from "../fixtures/horse_results_2023103386.json";
 import results2021105857 from "../fixtures/horse_results_2021105857.json";
 import results2021105727 from "../fixtures/horse_results_2021105727.json";
@@ -38,7 +40,7 @@ import resultNarPresaleHtml from "../fixtures/nar_result_presale_202642071612.ht
 import narListHtml from "../fixtures/nar_race_list_sub_20260927.html";
 import { NetkeibaGate as RealGate } from "./src/netkeiba-gate-do";
 import type { ConnectFn, SocketLike } from "./src/socket-fetch";
-import type { Env } from "./src/handler";
+import { GATE_NAME, type Env } from "./src/handler";
 import { runCloudAnalysis } from "./src/pipeline";
 import { RaceDay } from "./src/race-day-do";
 import { D1AnalysisStore } from "./src/analysis-repository";
@@ -50,33 +52,58 @@ const SMOKE_FAKE_SOCKET_MARKER = "keiba-smoke-fake-socket";
 
 const encoder = new TextEncoder();
 
+/** 偽ソケットが受けた POST の記録(Issue #421 段階 1-b)。class・race_id・返したステータス。ゲートの DO のモジュールの中にあり、{@link NetkeibaGate.smokePostLog} が読む。 */
+const postLog: Array<{ readonly class: string; readonly raceId: string; readonly host: string; readonly status: number }> = [];
+
 /**
- * POST の応答(Issue #181。重賞の過去10年傾向の API)。実際に送られたバイト列を見て、ヘッダ(Content-Type・X-Requested-With・Referer・Origin)と
+ * POST の応答(Issue #181。重賞の過去10年傾向の API。Issue #421 段階 1-b で新聞形式の API を足した)。実際に送られたバイト列を見て、ヘッダ(Content-Type・X-Requested-With・Referer・Origin)と
  * `Content-Length`(本文のバイト長と一致)が揃っていなければ 400 を返す(workerd の実環境で、組み立てたリクエストが正しいことの確認)。
- * 本文の race_id が中央 202603020211(race ホスト)・地方 202644070111(nar ホスト)なら fixture の JSON、202605010101 なら 403(POST のブレーカーの確認用)、それ以外は 404。
+ * **本文の class と Referer のページは対応させる**(AplGradeWinner は past10 / past5、AplNewsPaper は newspaper.html)。取り違えは 400。
+ * 本文の race_id が中央 202603020211(race ホスト)・地方 202644070111(nar ホスト)なら AplGradeWinner の fixture の JSON、AplNewsPaper は中央 202603020211・地方 202654071210 なら
+ * 新聞形式の fixture の JSON(race_id は別のレースの実応答だが、結合が引けないだけで読める)、202605010101 なら 403(POST のブレーカーの確認用)、それ以外は 404。
+ * 受けた POST は {@link postLog} に残す(smoke.ts が `/smoke/gate/post-log` で読み、取得ステップが実際に AplNewsPaper を POST したことを確かめる)。
  */
 function routePost(host: string, path: string, requestText: string): { status: number; body: string } {
+  const result = routePostInner(host, path, requestText);
+  const body = requestText.slice(requestText.indexOf("\r\n\r\n") + 4);
+  const parsed = /class=(\w+)&method=get&compress=1&race_id=(\d{12})$/.exec(body);
+  postLog.push({ class: parsed?.[1] ?? "?", raceId: parsed?.[2] ?? "?", host, status: result.status });
+  return result;
+}
+
+function routePostInner(host: string, path: string, requestText: string): { status: number; body: string } {
   const headEnd = requestText.indexOf("\r\n\r\n");
   const head = requestText.slice(0, headEnd);
   const body = requestText.slice(headEnd + 4);
   const length = /\r\nContent-Length: (\d+)\r\n/i.exec(`${head}\r\n`)?.[1];
+  const bodyMatch = /^input=UTF-8&output=json&class=(AplGradeWinner|AplNewsPaper)&method=get&compress=1&race_id=(\d{12})$/.exec(body);
+  const refererPage = bodyMatch?.[1] === "AplNewsPaper" ? "newspaper" : "past(?:10|5)";
   const wellFormed =
     path === "/race_api/" &&
+    bodyMatch !== null &&
     /\r\nContent-Type: application\/x-www-form-urlencoded; charset=UTF-8\r\n/.test(head) &&
     /\r\nX-Requested-With: XMLHttpRequest\r\n/.test(head) &&
-    new RegExp(`\\r\\nReferer: https://${host.replace(/\./g, "\\.")}/race/past(?:10|5)\\.html\\?race_id=\\d{12}\\r\\n`).test(head) &&
+    new RegExp(`\\r\\nReferer: https://${host.replace(/\./g, "\\.")}/race/${refererPage}\\.html\\?race_id=${bodyMatch?.[2]}\\r\\n`).test(head) &&
     head.includes(`\r\nOrigin: https://${host}\r\n`) &&
-    length === String(encoder.encode(body).length) &&
-    body.startsWith("input=UTF-8&output=json&class=AplGradeWinner&method=get&compress=1&race_id=");
+    length === String(encoder.encode(body).length);
   if (!wellFormed) {
     return { status: 400, body: "malformed POST by fake socket" };
   }
-  const raceId = /race_id=(\d{12})$/.exec(body)?.[1] ?? "";
-  if (host === "race.netkeiba.com" && raceId === "202603020211") {
-    return { status: 200, body: JSON.stringify(gradeWinnerJson) };
-  }
-  if (host === "nar.netkeiba.com" && raceId === "202644070111") {
-    return { status: 200, body: JSON.stringify(gradeWinnerNarJson) };
+  const raceId = bodyMatch?.[2] ?? "";
+  if (bodyMatch?.[1] === "AplNewsPaper") {
+    if (host === "race.netkeiba.com" && raceId === "202603020211") {
+      return { status: 200, body: JSON.stringify(newspaperJson) };
+    }
+    if (host === "nar.netkeiba.com" && raceId === "202654071210") {
+      return { status: 200, body: JSON.stringify(newspaperNarJson) };
+    }
+  } else {
+    if (host === "race.netkeiba.com" && raceId === "202603020211") {
+      return { status: 200, body: JSON.stringify(gradeWinnerJson) };
+    }
+    if (host === "nar.netkeiba.com" && raceId === "202644070111") {
+      return { status: 200, body: JSON.stringify(gradeWinnerNarJson) };
+    }
   }
   if (host === "race.netkeiba.com" && raceId === "202605010101") {
     return { status: 403, body: "forbidden by fake socket" };
@@ -183,6 +210,11 @@ const fakeConnect: ConnectFn = () => {
 export class NetkeibaGate extends RealGate {
   protected override connectFn(): ConnectFn {
     return fakeConnect;
+  }
+
+  /** smoke 専用(RPC): 偽ソケットが受けた POST の記録。本番のエントリ(`worker.ts`)はこのサブクラスを import しない。 */
+  async smokePostLog(): Promise<ReadonlyArray<{ readonly class: string; readonly raceId: string; readonly host: string; readonly status: number }>> {
+    return [...postLog];
   }
 }
 
@@ -411,6 +443,14 @@ export default {
     if (url.pathname === "/smoke/results" || url.pathname === "/smoke/results/clear") {
       try {
         return await smokeResults(url, env);
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
+    if (url.pathname === "/smoke/gate/post-log") {
+      try {
+        const gate = env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME)) as unknown as { smokePostLog(): Promise<unknown> };
+        return Response.json({ ok: true, log: await gate.smokePostLog() });
       } catch (error) {
         return Response.json({ ok: false, error: String(error) }, { status: 500 });
       }

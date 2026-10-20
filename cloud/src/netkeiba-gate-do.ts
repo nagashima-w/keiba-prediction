@@ -53,7 +53,7 @@ export class NetkeibaGate extends DurableObject {
   }
 
   /**
-   * POST を1本送る(RPC。Issue #181。重賞の過去10年傾向の API だけ)。許可リスト・GET と同じ順番待ち・POST 専用のブレーカーは {@link GateCore.postRaw}。
+   * POST を1本送る(RPC。Issue #181。重賞の過去10年傾向と新聞形式の API だけ)。許可リスト・GET と同じ順番待ち・POST 専用のブレーカーは {@link GateCore.postRaw}。
    * 引数は宛先・Referer・Origin・本文だけ(ヘッダの名前・順序・Content-Type などはソケット取得が固定の値を付ける)。期待される拒否は値で返す。
    */
   postRaw(request: GatePostRequest): Promise<GateResult> {

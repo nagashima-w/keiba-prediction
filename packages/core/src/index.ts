@@ -82,6 +82,19 @@ export {
   type FetchGradeWinnerDeps,
   type GradeWinnerFetcher,
 } from "./scraper/fetch-grade-winner.js";
+export {
+  NewspaperParseError,
+  parseNewspaperResponse,
+  PREV_WEIGHT_TYPES,
+  type PrevRaceCondition,
+  type PrevWeightType,
+} from "./scraper/parse-newspaper.js";
+export {
+  fetchNewspaperConditions,
+  newspaperCacheKey,
+  type FetchNewspaperDeps,
+  type NewspaperFetcher,
+} from "./scraper/fetch-newspaper.js";
 export { filterJpnOnlyEntries, isJpnGrade } from "./scraper/jpn-grade.js";
 export { parseShutuba, ShutubaParseError } from "./scraper/parse-shutuba.js";
 export {

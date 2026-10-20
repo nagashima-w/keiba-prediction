@@ -11,6 +11,7 @@ import type { GateLike } from "../src/gate-fetch";
 import { MAX_ATTEMPTS, RaceDayCore, REPORT_HOLD_KEY, type AnalysisSink, type StepOutcome } from "../src/race-day-core";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { fixtureForUrl } from "./pipeline-fixtures";
+import { newspaperOnlyPostRaw } from "./newspaper-post";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
 /**
@@ -25,6 +26,8 @@ import { openNodeSql, type NodeSql } from "./node-sql";
  *  - 例外の扱い(`getRaceList` の例外・SQL の書き込みの例外を外へ漏らさない)
  *
  * **Issue #400 R-10b で、SQL の SHA-1 の期待値を 5 か所更新した**: DO に保存する朝の prior の JSON から `AnalysisResult.dateApproximate` が消えたため(差は `sqlSha1` の値だけ。`buildAnalysisResult` に `dateApproximate: false` を足し戻すと、更新前の値で 30 件が通ることを確認した)。
+ * **Issue #421 段階 1-b で、SQL の件数と SHA-1 の期待値を更新した**(`sqlCount` 82 件・`sqlSha1` 82 件。それ以外の項目は 1 件も変えていない): 取得ステップが前走の条件(新聞形式 API)を取得キャッシュ経由で 1 本読むため、取得ステップは `fetch_cache` の読み(ミス)と書きで +2 文、計算ステップはキャッシュの読み(ヒット)で +1 文になる(同じ race_id のキャッシュが既にあれば取得ステップは +1 文。「中央の自動の日」の 202606040901・202606040902 がそれで、朝の取得で積まれたキャッシュに当たる)。
+ *   確認: 作り直した期待値と更新前の期待値を構造で比べ、差が `sqlCount`・`sqlSha1` だけであること、`sqlCount` の増分が成功した取得ステップ(+2、キャッシュ済みなら +1)・計算ステップ(+1)に限られること、警告・アラーム・ゲートへの GET の列・下限の記録・依頼の時刻が 1 件も動かないことを確かめた。
  * 期待値は、切り出す前のコード(31b5c4e)の実出力から作った。ハーネスは `race-day-report-hold.test.ts` と同じ(ゲートは偽・保存先は偽・ストレージは `node:sqlite`)。
  */
 
@@ -121,6 +124,8 @@ function fakeGate(centralList: string, narList: string, narRows: readonly ListRo
     narList,
     narListRefused: false,
     narStart: new Map(narRows.filter((r) => r.time !== null).map((r) => [r.raceId, r.time!])),
+    // 取得ステップが前走の条件(新聞形式 API。Issue #421 段階 1-b)を POST するので、警告を出さない応答を返す(このテストが固定する GET の列・警告は変わらない)。
+    postRaw: newspaperOnlyPostRaw,
     listUrls: (kind) => gate.urls.filter((u) => u.startsWith(kind === "central" ? "https://race.netkeiba.com/top/race_list_sub" : "https://nar.netkeiba.com/top/race_list_sub")),
     async fetchRaw(url): Promise<GateResult> {
       gate.urls.push(url);
@@ -788,8 +793,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 93,
-    "sqlSha1": "034af783dfb075ef9773b1d1d0883363e76583bd",
+    "sqlCount": 95,
+    "sqlSha1": "db13a724ff8c5bfa5cd5037e6238a7d46b566697",
     "listCalls": [
      [
       "20261013",
@@ -814,8 +819,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "f067560faad338b88920a3fe61c9b0d42a61f369",
+    "sqlCount": 67,
+    "sqlSha1": "2a8e36bee264050ded9fec2409c45cbcd47110f5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -985,8 +990,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 91,
-    "sqlSha1": "b8b23213b70d976950f5e356b95db6372bc19017",
+    "sqlCount": 93,
+    "sqlSha1": "0c2bc85c19fb75bdc8d52b9efe05f7768b4db73c",
     "listCalls": [
      [
       "20261013",
@@ -1011,8 +1016,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "f067560faad338b88920a3fe61c9b0d42a61f369",
+    "sqlCount": 67,
+    "sqlSha1": "2a8e36bee264050ded9fec2409c45cbcd47110f5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1086,8 +1091,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 89,
-    "sqlSha1": "96ec5063f5a95bf0e16c85f7041e8ca9a4a0bb4a",
+    "sqlCount": 91,
+    "sqlSha1": "7a485a0b3497e38b0a6ddb4b278bb42455d892da",
     "listCalls": [
      [
       "20261013",
@@ -1110,8 +1115,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "f067560faad338b88920a3fe61c9b0d42a61f369",
+    "sqlCount": 67,
+    "sqlSha1": "2a8e36bee264050ded9fec2409c45cbcd47110f5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1185,8 +1190,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 94,
-    "sqlSha1": "d47e82b80b1e417bd4971d19eac618cd48896db4",
+    "sqlCount": 96,
+    "sqlSha1": "b6e3fb95bd2bdf621e0dba9dec17e01af8d0c4f9",
     "listCalls": [
      [
       "20261013",
@@ -1211,8 +1216,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "f067560faad338b88920a3fe61c9b0d42a61f369",
+    "sqlCount": 67,
+    "sqlSha1": "2a8e36bee264050ded9fec2409c45cbcd47110f5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1286,8 +1291,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 94,
-    "sqlSha1": "8be87b08f6cd3b6749e9bb3f872e18d683ca2a4c",
+    "sqlCount": 96,
+    "sqlSha1": "8a46cb329046cf2868c56470efa9a63a765c5174",
     "listCalls": [
      [
       "20261013",
@@ -1312,8 +1317,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "f067560faad338b88920a3fe61c9b0d42a61f369",
+    "sqlCount": 67,
+    "sqlSha1": "2a8e36bee264050ded9fec2409c45cbcd47110f5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1385,8 +1390,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 93,
-    "sqlSha1": "744eed332cdc3afed80274ea56363394f38bc0e5",
+    "sqlCount": 95,
+    "sqlSha1": "d9f9f588ca2c170457afae5e2385d6ce720d6e5d",
     "listCalls": [
      [
       "20261013",
@@ -1411,8 +1416,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "f067560faad338b88920a3fe61c9b0d42a61f369",
+    "sqlCount": 67,
+    "sqlSha1": "2a8e36bee264050ded9fec2409c45cbcd47110f5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1508,8 +1513,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 91,
-    "sqlSha1": "f45199c35bfa9f4f80e88e78576fb154c34ed0f7",
+    "sqlCount": 93,
+    "sqlSha1": "b1a55f540e7801698e4b73b5530d87a83ba3f864",
     "listCalls": [
      [
       "20261013",
@@ -1534,8 +1539,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "88fffc367d2ca06dc3581e8d69f48186626dfa8d",
+    "sqlCount": 67,
+    "sqlSha1": "e1ba6192a9a654328b3e726468716d8fed55a713",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1557,8 +1562,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 67,
-    "sqlSha1": "673147dfe8e8ef627a29738885b685058848bfed",
+    "sqlCount": 69,
+    "sqlSha1": "74292a40bc3a45ed9000b576c7e22cd10d6a5830",
     "listCalls": [
      [
       "20261013",
@@ -1583,8 +1588,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "b0656db794bf74ec4322d4bd9ec273f1aa12695e",
+    "sqlCount": 67,
+    "sqlSha1": "97e00adc7f052a4ad40f5fa4a3990e053674a1fb",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1606,8 +1611,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 67,
-    "sqlSha1": "84b13a208de52c61537eedd55b588b2b3dd0bb51",
+    "sqlCount": 69,
+    "sqlSha1": "9967af0cfbb0a096e475a46fcd81783d270f0fd1",
     "listCalls": [
      [
       "20261013",
@@ -1632,8 +1637,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "6d41a7c8112d3c7b6f4d3dbde7bf11150e244b61",
+    "sqlCount": 67,
+    "sqlSha1": "9e32f981129f0e0a36c0b36bd4dd6942ad464cd3",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1651,8 +1656,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 62,
-    "sqlSha1": "ec645a78ff5766b885e2a2b44e404cd99423ba1b",
+    "sqlCount": 64,
+    "sqlSha1": "7e9db2ef394621b1f6b5767adeb81f0085caeba6",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1670,8 +1675,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "77f7bff62ec03cc2427ea57b61e11f9f78c6f0f1",
+    "sqlCount": 67,
+    "sqlSha1": "7425ab4c21d0f344d92526a4c1faafb8d165d43c",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1689,8 +1694,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 62,
-    "sqlSha1": "be24cba8fef8bf1593b44011dd860030e196c058",
+    "sqlCount": 64,
+    "sqlSha1": "2b20865eb88ba6ade065ecf3b366e23393a18d70",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1708,8 +1713,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "e0a5a39f1f3f15aa33121ff8c02ae11949379be4",
+    "sqlCount": 67,
+    "sqlSha1": "afa2bcb0f4c121fca67e0fd5e5211ec75ea7a302",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1769,8 +1774,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 91,
-    "sqlSha1": "f45199c35bfa9f4f80e88e78576fb154c34ed0f7",
+    "sqlCount": 93,
+    "sqlSha1": "b1a55f540e7801698e4b73b5530d87a83ba3f864",
     "listCalls": [
      [
       "20261013",
@@ -1795,8 +1800,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "88fffc367d2ca06dc3581e8d69f48186626dfa8d",
+    "sqlCount": 67,
+    "sqlSha1": "e1ba6192a9a654328b3e726468716d8fed55a713",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1818,8 +1823,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 67,
-    "sqlSha1": "673147dfe8e8ef627a29738885b685058848bfed",
+    "sqlCount": 69,
+    "sqlSha1": "74292a40bc3a45ed9000b576c7e22cd10d6a5830",
     "listCalls": [
      [
       "20261013",
@@ -1844,8 +1849,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "b0656db794bf74ec4322d4bd9ec273f1aa12695e",
+    "sqlCount": 67,
+    "sqlSha1": "97e00adc7f052a4ad40f5fa4a3990e053674a1fb",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1867,8 +1872,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 67,
-    "sqlSha1": "84b13a208de52c61537eedd55b588b2b3dd0bb51",
+    "sqlCount": 69,
+    "sqlSha1": "9967af0cfbb0a096e475a46fcd81783d270f0fd1",
     "listCalls": [
      [
       "20261013",
@@ -1893,8 +1898,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "6d41a7c8112d3c7b6f4d3dbde7bf11150e244b61",
+    "sqlCount": 67,
+    "sqlSha1": "9e32f981129f0e0a36c0b36bd4dd6942ad464cd3",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -1914,8 +1919,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 69,
-    "sqlSha1": "18311a55d51d181b6892940fd7326c1f4e121239",
+    "sqlCount": 71,
+    "sqlSha1": "30040413fade0c72a288624d2f001fbf4bf5c335",
     "listCalls": [
      [
       "20261013",
@@ -1941,8 +1946,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold",
      "R:report_hold_judged"
     ],
-    "sqlCount": 67,
-    "sqlSha1": "69842e7c4707fe83c9c70c5c4b17b07a195b99a7",
+    "sqlCount": 68,
+    "sqlSha1": "9a56a6f00081d73728337d6333ac0ed38b5299a3",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2022,8 +2027,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 93,
-    "sqlSha1": "15c3ee03fbd1daddd26c9396bb15ac713f5c94c5",
+    "sqlCount": 95,
+    "sqlSha1": "c42a5955065ceac6a5a12729b726e1e9149f0df0",
     "listCalls": [
      [
       "20261013",
@@ -2048,8 +2053,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "26653303064654ec8607a2977bcf7210552bae5e",
+    "sqlCount": 67,
+    "sqlSha1": "6e173a3651c0167a309abcbbf754346b313ca25b",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2069,8 +2074,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 68,
-    "sqlSha1": "b1d558fe119fb30c766658b6804174681d09953d",
+    "sqlCount": 70,
+    "sqlSha1": "a1e8754dd7603fc5215ae151a14be7ef35c581c2",
     "listCalls": [
      [
       "20261013",
@@ -2093,8 +2098,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "4c325ca562daf9a5c3af04efb02d6520cf0573cb",
+    "sqlCount": 67,
+    "sqlSha1": "074f36203e0974681ebc5710feb2b2ac17af51d4",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2214,8 +2219,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 93,
-    "sqlSha1": "b0a0b9c4c511e2247544fec68398ffd98f80d165",
+    "sqlCount": 95,
+    "sqlSha1": "33443920d8323bef3069a89e2aa2ec019b10d13d",
     "listCalls": [
      [
       "20261013",
@@ -2240,8 +2245,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "8b906d1eaaa0b0eb5e84dcd8dfce0b0418cc21aa",
+    "sqlCount": 67,
+    "sqlSha1": "6b4c8bcc5884db5fd13db99cdf046f88ad442673",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2261,8 +2266,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 68,
-    "sqlSha1": "e9ce608aa64584eafccf7da1649ec081ad39a2b2",
+    "sqlCount": 70,
+    "sqlSha1": "aa45af41ad85196e081ed80bf2ad60b93b89979b",
     "listCalls": [
      [
       "20261013",
@@ -2285,8 +2290,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "2ffb5c151256c86b602f7b34c3753a10de4a282a",
+    "sqlCount": 67,
+    "sqlSha1": "b3168e5b228064e2add244ef04a5bedee5915f34",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2408,8 +2413,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 124,
-    "sqlSha1": "a73f199ab859ba2f10f64b01c62240c7269ed413",
+    "sqlCount": 126,
+    "sqlSha1": "5a9bbd43c180199b4b4c97d4008c96a8c0e525cf",
     "listCalls": [
      [
       "20261013",
@@ -2444,8 +2449,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 102,
-    "sqlSha1": "e6e08d7941434f08658b12da5bbcfe892415546b",
+    "sqlCount": 103,
+    "sqlSha1": "d267478300e076ac8256e13d418f4d021f815ab5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2465,8 +2470,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 87,
-    "sqlSha1": "0394ffc7d90a8f9bbb8a8869d87e337a7cfc52a5",
+    "sqlCount": 89,
+    "sqlSha1": "024688df70a092f3ca1753caa7f4b8386c3b603e",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2496,8 +2501,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 103,
-    "sqlSha1": "27abd3b1e332c3844efe7d2dc99e0362ac3df7a2",
+    "sqlCount": 104,
+    "sqlSha1": "859ac43aab4a8057675b243df1e94b1f1fb3ccd4",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2647,8 +2652,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 93,
-    "sqlSha1": "b0a0b9c4c511e2247544fec68398ffd98f80d165",
+    "sqlCount": 95,
+    "sqlSha1": "33443920d8323bef3069a89e2aa2ec019b10d13d",
     "listCalls": [
      [
       "20261013",
@@ -2673,8 +2678,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "8b906d1eaaa0b0eb5e84dcd8dfce0b0418cc21aa",
+    "sqlCount": 67,
+    "sqlSha1": "6b4c8bcc5884db5fd13db99cdf046f88ad442673",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2692,8 +2697,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 62,
-    "sqlSha1": "942c3164c16596c7cd6e6f78f35f6858836458df",
+    "sqlCount": 64,
+    "sqlSha1": "682001fb8804423983aec32e5a749c3937169a7e",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2711,8 +2716,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "c36a0ed68dfc9488670d76b00566b8a08962ef5f",
+    "sqlCount": 67,
+    "sqlSha1": "837c2364d9cda4fcfad606eedd6e2cef361242d2",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2730,8 +2735,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 62,
-    "sqlSha1": "3848456f2eb1a909552f5419dffc3e32d900b7cb",
+    "sqlCount": 64,
+    "sqlSha1": "eea75d82d27e0da93e1bff961783089fbbe214ca",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2749,8 +2754,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "860170e772e638ec8e811453c994c88a141fe854",
+    "sqlCount": 67,
+    "sqlSha1": "0c88054e9a99741f5026806c08bf8a09cd7a3bbd",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2770,8 +2775,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 68,
-    "sqlSha1": "4c53d6e19a7e6f9a37e5cddc2ef43cd5244d16ae",
+    "sqlCount": 70,
+    "sqlSha1": "f17ae1edb228454cc98d704a7ee2ab207279611b",
     "listCalls": [
      [
       "20261013",
@@ -2794,8 +2799,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "7fa3e28c5ba4e163d422f7831f4ae89284652a29",
+    "sqlCount": 67,
+    "sqlSha1": "89be10b5b02dce4dfe01640a1c90aaebd978a27d",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2846,8 +2851,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 89,
-    "sqlSha1": "517b2c51612644b465e80c032a7a3fcaa44f8c43",
+    "sqlCount": 91,
+    "sqlSha1": "582c12e4a1a342c3717b0cd4232a0e0c10659086",
     "listCalls": [
      [
       "20261013",
@@ -2872,8 +2877,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 60,
-    "sqlSha1": "f87ade7bc66fbe08f83cd5696851586cfb4b6a48",
+    "sqlCount": 61,
+    "sqlSha1": "aac24dc67273167e3adb8f27c9e807e0806ac5ea",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2955,8 +2960,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 80,
-    "sqlSha1": "3fb6adceceaf8618243e1ed621fda2b5685ecbab",
+    "sqlCount": 82,
+    "sqlSha1": "ec30f6b28ee49690fc7f277f2b3329c937fa06e2",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -2974,8 +2979,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 61,
-    "sqlSha1": "00fe2c9d48896cfca8d3d11bb444ea9f2b06495e",
+    "sqlCount": 62,
+    "sqlSha1": "a4896420b0cf43510ec23f065a7387c460353ef6",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3010,8 +3015,8 @@ const EXPECTED: Record<string, unknown> = {
      1791887400000
     ],
     "reportSql": [],
-    "sqlCount": 82,
-    "sqlSha1": "1134758e9c9aa4427df732c9a915415459606db1",
+    "sqlCount": 84,
+    "sqlSha1": "18852337d475a953b7241636565056bac9e62590",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3024,8 +3029,8 @@ const EXPECTED: Record<string, unknown> = {
      1791888900000
     ],
     "reportSql": [],
-    "sqlCount": 62,
-    "sqlSha1": "b11c832c135d196a4031f3424d38fe98f7fac345",
+    "sqlCount": 63,
+    "sqlSha1": "b70902e7e2abacdd64b3a796cb0c699be9c42f49",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3078,8 +3083,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 77,
-    "sqlSha1": "85d0792360b5005a2d48495a87302d9f244d3c9a",
+    "sqlCount": 79,
+    "sqlSha1": "88791bc37cf23155bf74245e9667fab0c7600244",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3097,8 +3102,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 60,
-    "sqlSha1": "53d9ed09b96bd1bec6e0f939d4c41ae7aef83afb",
+    "sqlCount": 61,
+    "sqlSha1": "8bcf13e8c204090fc5918438ef60d2f00b521b52",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3134,8 +3139,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 107,
-    "sqlSha1": "de9e98ce7cb0d53e68e57367dd8a4f6212f1ee23",
+    "sqlCount": 109,
+    "sqlSha1": "f57916b9fb3b85df6ad79f44d9f658ba01595d58",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3153,8 +3158,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 83,
-    "sqlSha1": "897d87502144dca50fecaabcb67ccad92017d7f7",
+    "sqlCount": 84,
+    "sqlSha1": "9dfee0b692a40d626f57ffe37e7d4b9e14ed488b",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3238,8 +3243,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_requested"
     ],
-    "sqlCount": 60,
-    "sqlSha1": "8e4c623da386a4c01122542e322a5765406cb6f1",
+    "sqlCount": 62,
+    "sqlSha1": "72cf736d832c168ca35974401c0e6cf1d9922ead",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3255,8 +3260,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_requested"
     ],
-    "sqlCount": 64,
-    "sqlSha1": "09f70018e2f8ad4d44258cace634f37d7bb1c9d9",
+    "sqlCount": 65,
+    "sqlSha1": "ea281a51bfa3c193321c2538e1e43b22673c903c",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3348,8 +3353,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 93,
-    "sqlSha1": "034af783dfb075ef9773b1d1d0883363e76583bd",
+    "sqlCount": 95,
+    "sqlSha1": "db13a724ff8c5bfa5cd5037e6238a7d46b566697",
     "listCalls": [
      [
       "20261013",
@@ -3374,8 +3379,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "f067560faad338b88920a3fe61c9b0d42a61f369",
+    "sqlCount": 67,
+    "sqlSha1": "2a8e36bee264050ded9fec2409c45cbcd47110f5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3471,8 +3476,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 93,
-    "sqlSha1": "be98d909fe99b43432a598f3acf00547ba3ac86b",
+    "sqlCount": 95,
+    "sqlSha1": "bee36f054a7a81dc340fc407ca73ee7cbb617853",
     "listCalls": [
      [
       "20261013",
@@ -3497,8 +3502,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "f067560faad338b88920a3fe61c9b0d42a61f369",
+    "sqlCount": 67,
+    "sqlSha1": "2a8e36bee264050ded9fec2409c45cbcd47110f5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3569,8 +3574,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 86,
-    "sqlSha1": "5c75cbc1cef07ee5ed429b1d0143ad46f591aca5",
+    "sqlCount": 88,
+    "sqlSha1": "826a0259f7199025c9ef7d3a6a3b420316e7608e",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3588,8 +3593,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "f067560faad338b88920a3fe61c9b0d42a61f369",
+    "sqlCount": 67,
+    "sqlSha1": "2a8e36bee264050ded9fec2409c45cbcd47110f5",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3659,8 +3664,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 107,
-    "sqlSha1": "406c0950dcfdf2c97939a83647985dbac59a6b37",
+    "sqlCount": 109,
+    "sqlSha1": "f2b1055818640d452eed7326d35399403961c1af",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3679,8 +3684,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold",
      "R:report_hold_judged"
     ],
-    "sqlCount": 84,
-    "sqlSha1": "3afb6cf4077a21dc664fd2e5c9fc0e0c633586ca",
+    "sqlCount": 85,
+    "sqlSha1": "23d41e36cc4b64d4e7e083da00de1ac2227077f0",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3755,8 +3760,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 107,
-    "sqlSha1": "406c0950dcfdf2c97939a83647985dbac59a6b37",
+    "sqlCount": 109,
+    "sqlSha1": "f2b1055818640d452eed7326d35399403961c1af",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3775,8 +3780,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold",
      "R:report_hold_judged"
     ],
-    "sqlCount": 84,
-    "sqlSha1": "3afb6cf4077a21dc664fd2e5c9fc0e0c633586ca",
+    "sqlCount": 85,
+    "sqlSha1": "23d41e36cc4b64d4e7e083da00de1ac2227077f0",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3824,8 +3829,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 68,
-    "sqlSha1": "6febc677a877c2e9e98266b4713c253566775999",
+    "sqlCount": 70,
+    "sqlSha1": "6261da460f498df05e0294ab9e23f2a6a51dca42",
     "listCalls": [
      [
       "20261013",
@@ -3848,8 +3853,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 66,
-    "sqlSha1": "0e1ceee2521d5604dba468467115285ebae084c4",
+    "sqlCount": 67,
+    "sqlSha1": "92c365795893fa110dc352b9f43c8f90b3be133b",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3961,8 +3966,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 107,
-    "sqlSha1": "406c0950dcfdf2c97939a83647985dbac59a6b37",
+    "sqlCount": 109,
+    "sqlSha1": "f2b1055818640d452eed7326d35399403961c1af",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -3981,8 +3986,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold",
      "R:report_hold_judged"
     ],
-    "sqlCount": 84,
-    "sqlSha1": "3afb6cf4077a21dc664fd2e5c9fc0e0c633586ca",
+    "sqlCount": 85,
+    "sqlSha1": "23d41e36cc4b64d4e7e083da00de1ac2227077f0",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -4085,8 +4090,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 107,
-    "sqlSha1": "406c0950dcfdf2c97939a83647985dbac59a6b37",
+    "sqlCount": 109,
+    "sqlSha1": "f2b1055818640d452eed7326d35399403961c1af",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -4105,8 +4110,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_hold",
      "R:report_hold_judged"
     ],
-    "sqlCount": 84,
-    "sqlSha1": "3afb6cf4077a21dc664fd2e5c9fc0e0c633586ca",
+    "sqlCount": 85,
+    "sqlSha1": "23d41e36cc4b64d4e7e083da00de1ac2227077f0",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -4264,8 +4269,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 92,
-    "sqlSha1": "98e51dac0817079fcc894e253990361d394e3e04",
+    "sqlCount": 93,
+    "sqlSha1": "b080f05a9315d86eec1e1514b45a7beba9d7edca",
     "listCalls": [
      [
       "20261013",
@@ -4300,8 +4305,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 103,
-    "sqlSha1": "c8b359207da29bb2bc631b04c68a9f363831586d",
+    "sqlCount": 104,
+    "sqlSha1": "b1cab53b6da31132ed8793801ec3921963adf753",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -4321,8 +4326,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 86,
-    "sqlSha1": "f2aa247df06124d4a953e23073ae4b15338c939f",
+    "sqlCount": 87,
+    "sqlSha1": "3c7ee138e1ad0b68364978441911cc36c8b72377",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []
@@ -4352,8 +4357,8 @@ const EXPECTED: Record<string, unknown> = {
      "R:report_requested",
      "R:report_hold"
     ],
-    "sqlCount": 103,
-    "sqlSha1": "333d1033ad1f01f6d7af262d23f53cf6349dad7c",
+    "sqlCount": 104,
+    "sqlSha1": "4c665950ac3355c1eeb7a5b038f014ee0521f12e",
     "listCalls": [],
     "gateListUrls": [],
     "newReports": []

@@ -62,8 +62,8 @@ export interface GateNamespaceLike {
   get(id: any): GateStubLike;
 }
 
-/** netkeiba への取得の出口の DO の固定名(全取得をこの1つのインスタンスに通す)。 */
-const GATE_NAME = "gate";
+/** netkeiba への取得の出口の DO の固定名(全取得をこの1つのインスタンスに通す)。smoke(`smoke-worker.ts`)が偽ソケットの記録を読む DO を指すのにも使う。 */
+export const GATE_NAME = "gate";
 
 /** 日単位の DO(RaceDay)のスタブの、使う部分だけの型(RPC なので、同期のメソッドも Promise になる)。 */
 export interface RaceDayStubLike {

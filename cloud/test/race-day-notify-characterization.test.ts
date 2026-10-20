@@ -14,6 +14,7 @@ import { RaceDayCore, type AnalysisSink, type StepOutcome } from "../src/race-da
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import type { SqlLike } from "../src/sql-like";
 import { fixtureForUrl } from "./pipeline-fixtures";
+import { newspaperOnlyPostRaw } from "./newspaper-post";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
 /**
@@ -33,6 +34,8 @@ import { openNodeSql, type NodeSql } from "./node-sql";
  * なお `withAnalysisLink` の `item.kind !== "analysis"` の判定は `analysisId === null` の判定と重なる(分析以外の通知は `analysisId` を持たない)ので、外しても結果は変わらない。
  *
  * 期待値は、切り出す前のコード(35f2780)の実出力から作った。ハーネスは `race-day-notify.test.ts` と同じ(ゲートは偽・保存先は偽・送信は偽・ストレージは `node:sqlite`)。
+ * **Issue #421 段階 1-b で、SQL の件数と SHA-1 の期待値を更新した**(`sqlCount` 26 件・`sqlSha1` 26 件。それ以外の項目は 1 件も変えていない): 取得ステップが前走の条件(新聞形式 API)を取得キャッシュ経由で 1 本読むため、取得ステップは `fetch_cache` の読み(ミス)と書きで +2 文、計算ステップはキャッシュの読み(ヒット)で +1 文になる(同じ race_id のキャッシュが既にあれば取得ステップは +1 文)。
+ *   確認: 作り直した期待値と更新前の期待値を構造で比べ、差が `sqlCount`・`sqlSha1` だけであること、`sqlCount` の増分が成功した取得ステップ(+2、キャッシュ済みなら +1)・計算ステップ(+1)に限られること、警告・アラーム・ゲートへの GET の列・通知の内容が 1 件も動かないことを確かめた。
  * 期待値の作り直し: `CHAR_DUMP=<ファイル> npx vitest run test/race-day-notify-characterization.test.ts`(比べずに、実出力を書き出す。通常の実行では使わない)。
  */
 const DATE = "20260628";
@@ -136,6 +139,8 @@ function fakeGate(centralHtml: string, narHtml: string): FakeGate {
     central: { html: centralHtml, failures: [] },
     nar: { html: narHtml, failures: [] },
     others: "blocked",
+    // 取得ステップが前走の条件(新聞形式 API。Issue #421 段階 1-b)を POST するので、警告を出さない応答を返す(このテストが固定する GET の列・警告は変わらない)。
+    postRaw: newspaperOnlyPostRaw,
     async fetchRaw(url): Promise<GateResult> {
       gate.urls.push(url);
       await Promise.resolve();
@@ -829,8 +834,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "50f034a0b3b261638d188cecf4b899af0b71c62a",
+    "sqlCount": 146,
+    "sqlSha1": "d910f4ffe4d54d5ca92d942c70355486b673be55",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -874,8 +879,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 123,
-    "sqlSha1": "a34249184a23b03783d332e541f9d137eca47aa7",
+    "sqlCount": 124,
+    "sqlSha1": "094e4473f824db9c3d7832cb75f92390b4150eb4",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",
@@ -1099,8 +1104,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "50f034a0b3b261638d188cecf4b899af0b71c62a",
+    "sqlCount": 146,
+    "sqlSha1": "d910f4ffe4d54d5ca92d942c70355486b673be55",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -1144,8 +1149,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 123,
-    "sqlSha1": "a34249184a23b03783d332e541f9d137eca47aa7",
+    "sqlCount": 124,
+    "sqlSha1": "094e4473f824db9c3d7832cb75f92390b4150eb4",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",
@@ -1370,8 +1375,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "50f034a0b3b261638d188cecf4b899af0b71c62a",
+    "sqlCount": 146,
+    "sqlSha1": "d910f4ffe4d54d5ca92d942c70355486b673be55",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -1415,8 +1420,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 123,
-    "sqlSha1": "a34249184a23b03783d332e541f9d137eca47aa7",
+    "sqlCount": 124,
+    "sqlSha1": "094e4473f824db9c3d7832cb75f92390b4150eb4",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",
@@ -1641,8 +1646,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "1ff97a68183b7e39538c1ec2877c216e74d69597",
+    "sqlCount": 146,
+    "sqlSha1": "b57a070fda0c1632d8157cba1fac0830b5f0e1f0",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -1686,8 +1691,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 123,
-    "sqlSha1": "1d21aa0bf65cd1c4d824f457b3fad8214b20e007",
+    "sqlCount": 124,
+    "sqlSha1": "014f95a3a79a7f9f1317120272c20659deb3e503",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",
@@ -1912,8 +1917,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "50f034a0b3b261638d188cecf4b899af0b71c62a",
+    "sqlCount": 146,
+    "sqlSha1": "d910f4ffe4d54d5ca92d942c70355486b673be55",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -1959,8 +1964,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 124,
-    "sqlSha1": "6037865c4afb564a6e37e087b22a3c1b9f0c9ed4",
+    "sqlCount": 125,
+    "sqlSha1": "dc95cbe376d4f5c9e2b769b46a8f30cdf108870b",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",
@@ -2119,8 +2124,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 127,
-    "sqlSha1": "b6927ff2e30c2dc10d34e64f9a0d004be29ca04f",
+    "sqlCount": 129,
+    "sqlSha1": "e59713f26b1f0aacc5d888d122ce3fcdcbfd1426",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -2163,8 +2168,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 114,
-    "sqlSha1": "82d1dc6e036adaed8dcc18f8b01768bd816e9a9e",
+    "sqlCount": 115,
+    "sqlSha1": "d25570d6def032f34368a1905270446aafefa3f3",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -2230,8 +2235,8 @@ const EXPECTED: Record<string, unknown> = {
     "notifySql": [
      "onWarn 発走前の取得(202603020211): 調教師: この取得の呼び出しが上限(40本)に達したため、調教師 11 人の成績は取得せず、補正なしで続行します"
     ],
-    "sqlCount": 118,
-    "sqlSha1": "3711437e16786e8a1ded1eaab97af378202983b8",
+    "sqlCount": 120,
+    "sqlSha1": "2b8a16e66920d7f26772614b81053b8b8731fd36",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -2270,8 +2275,8 @@ const EXPECTED: Record<string, unknown> = {
      "onWarn 発走前の分析(202603020211): 調教師: 調教師ID 01092 の成績は保存先に無いため補正なし(取得の失敗、または取得の上限で取らなかった。次回以降のレースの取得で取る)",
      "onWarn 発走前の分析(202603020211): 調教師: 調教師ID 01175 の成績は保存先に無いため補正なし(取得の失敗、または取得の上限で取らなかった。次回以降のレースの取得で取る)"
     ],
-    "sqlCount": 94,
-    "sqlSha1": "00623859484d8eb21ad8abcae1ff512215d378f8",
+    "sqlCount": 95,
+    "sqlSha1": "2f0b96383af0c6e56a039732b42a7f654433e5f5",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -2434,8 +2439,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "50f034a0b3b261638d188cecf4b899af0b71c62a",
+    "sqlCount": 146,
+    "sqlSha1": "d910f4ffe4d54d5ca92d942c70355486b673be55",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -2479,8 +2484,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 123,
-    "sqlSha1": "a34249184a23b03783d332e541f9d137eca47aa7",
+    "sqlCount": 124,
+    "sqlSha1": "094e4473f824db9c3d7832cb75f92390b4150eb4",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",
@@ -2711,8 +2716,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "50f034a0b3b261638d188cecf4b899af0b71c62a",
+    "sqlCount": 146,
+    "sqlSha1": "d910f4ffe4d54d5ca92d942c70355486b673be55",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -2756,8 +2761,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 123,
-    "sqlSha1": "a34249184a23b03783d332e541f9d137eca47aa7",
+    "sqlCount": 124,
+    "sqlSha1": "094e4473f824db9c3d7832cb75f92390b4150eb4",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",
@@ -3948,8 +3953,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "50f034a0b3b261638d188cecf4b899af0b71c62a",
+    "sqlCount": 146,
+    "sqlSha1": "d910f4ffe4d54d5ca92d942c70355486b673be55",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -3969,8 +3974,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 103,
-    "sqlSha1": "38023469dfe7bddab724a1c69f97c50a00a07205",
+    "sqlCount": 104,
+    "sqlSha1": "6c5639ef0e5589518fd54bfa45d0ff4d189ecf60",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -4014,8 +4019,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 122,
-    "sqlSha1": "73e43cf4b62ac2b4f1665151ab362ebb18da7af6",
+    "sqlCount": 123,
+    "sqlSha1": "ecdb7498c557b9bf18c36b69763416e4bdf0f736",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",
@@ -4240,8 +4245,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "50f034a0b3b261638d188cecf4b899af0b71c62a",
+    "sqlCount": 146,
+    "sqlSha1": "d910f4ffe4d54d5ca92d942c70355486b673be55",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -4262,8 +4267,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 106,
-    "sqlSha1": "1780cbe1ddc074a3cfe2fb748734c5c4ef17ecbb",
+    "sqlCount": 107,
+    "sqlSha1": "8d0fa912c7afed4970c4a4ea5f4d267ff60856bb",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -4307,8 +4312,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 122,
-    "sqlSha1": "73e43cf4b62ac2b4f1665151ab362ebb18da7af6",
+    "sqlCount": 123,
+    "sqlSha1": "ecdb7498c557b9bf18c36b69763416e4bdf0f736",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",
@@ -4533,8 +4538,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 144,
-    "sqlSha1": "50f034a0b3b261638d188cecf4b899af0b71c62a",
+    "sqlCount": 146,
+    "sqlSha1": "d910f4ffe4d54d5ca92d942c70355486b673be55",
     "planAfter": {
      "sendNow": null,
      "nextAtMs": null
@@ -4580,8 +4585,8 @@ const EXPECTED: Record<string, unknown> = {
      "SELECT * FROM race_day_notify ORDER BY key | []",
      "SELECT value FROM race_day_meta WHERE key = ? | [\"notify_pace_until\"]"
     ],
-    "sqlCount": 124,
-    "sqlSha1": "f68cb9bfa920173276112cdb61e160d06035d6b8",
+    "sqlCount": 125,
+    "sqlSha1": "7a491ee1b6af006dc556e85681aacb30ab5a5aea",
     "planAfter": {
      "sendNow": {
       "key": "race:202603020211",

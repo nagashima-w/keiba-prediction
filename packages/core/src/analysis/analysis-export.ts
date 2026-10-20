@@ -19,6 +19,7 @@ import type { DayBaba } from "../analyzer/day-baba.js";
 import { computeEarlyPosition } from "../analyzer/early-position.js";
 import { computeLatePosition } from "../analyzer/late-position.js";
 import type { LegStyle } from "../analyzer/leg-style.js";
+import type { PrevRaceCondition } from "../scraper/parse-newspaper.js";
 import { computeReplayLegStyle } from "../analyzer/replay-leg-style.js";
 
 /** レース情報スナップショットの「レース」部分(Issue#10)。 */
@@ -86,6 +87,18 @@ export interface RaceSnapshotHorse {
   readonly legStyle?: LegStyle | null;
   readonly oikiriCritic: string | null;
   readonly oikiriRank: string | null;
+  /**
+   * 前走のレースの条件(Issue #421 段階 1-b。新聞形式 API から取る)。戦績の先頭(分析日で絞った後の `results[0]`)の `raceIdRaw` で引いた行に、そのレースの ID を添えたもの。
+   * **任意項目**: 表を取れたレース(`RaceData.prevRaceConditions` がある)だけ、全馬がキーを持つ。表を取れたレースで前走を引けない馬(新馬・戦績の取得失敗・海外・表に無い)は null
+   * (「取れなかった」=キー無しと区別できる)。表を取っていないレース(取得失敗・この項目を保存する前の過去のスナップショット)の馬はキー自体が無い。
+   * プロンプト・統計モデル・画面には使わない(貯めるだけ。前走との照合は段階 2)。`toSafeRaceSnapshot` は読み出さない。
+   */
+  readonly prevRace?: RaceSnapshotPrevRace | null;
+}
+
+/** {@link RaceSnapshotHorse.prevRace} の中身。前走のレース ID と、その条件。 */
+export interface RaceSnapshotPrevRace extends PrevRaceCondition {
+  readonly raceId: string;
 }
 
 /** 取得したレース情報のスナップショット(analyses.race_snapshot_jsonに保存する形)。 */
@@ -165,11 +178,27 @@ export interface RaceSnapshot {
 }
 
 /**
+ * 馬の前走(戦績の先頭)の条件を、表から引く。結合のキーは `raceIdRaw`(中央・地方とも 12 桁の生値。`raceId` は地方で null になるので使わない)。
+ * 前走が無い・戦績の取得失敗・海外(raceIdRaw=null)・表に無いときは null。
+ */
+function lookupPrevRace(
+  table: Readonly<Record<string, PrevRaceCondition>>,
+  results: RaceData["horses"][number]["results"],
+): RaceSnapshotPrevRace | null {
+  const raceId = results?.[0]?.raceIdRaw ?? null;
+  if (raceId === null || !Object.hasOwn(table, raceId)) {
+    return null;
+  }
+  return { raceId, ...table[raceId]! };
+}
+
+/**
  * scrapeRace が返した RaceData から、保存用のレース情報スナップショットを組み立てる。
  * 過去戦績(horseData.results)は意図的に含めない(サイズ大。承認済みスコープ外)。
  * @param race スクレイピング直後のレースデータ
  */
 export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
+  const prevTable = race.prevRaceConditions;
   return {
     race: {
       raceName: race.race.raceName,
@@ -206,6 +235,7 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         legStyle: computeReplayLegStyle(h.results),
         oikiriCritic: h.oikiri?.critic ?? null,
         oikiriRank: h.oikiri?.rank ?? null,
+        ...(prevTable !== undefined ? { prevRace: lookupPrevRace(prevTable, h.results) } : {}),
       };
     }),
     // 組合せオッズ(ワイド・三連複・馬連・馬単・三連単・枠連、機能D-2c第3段・Issue #28。

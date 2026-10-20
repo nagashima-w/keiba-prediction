@@ -630,6 +630,16 @@ async function main(): Promise<void> {
       const race = (board["races"] as Record<string, unknown>[] | undefined)?.[0];
       check(`${label}: アラームで取得 → 計算が進み、状態が done になる(約 ${Math.round(firstMs / 1000)} 秒)`, race?.["status"] === "done" && race["error"] === null && race["prior"] === true && board["kaisai_date"] === date, JSON.stringify(board).slice(0, 300));
       check(`${label}: 取得は gate の間隔(2 秒 × 40 本)を守っている(冷えた状態で 60 秒以上かかる)`, firstMs >= 60_000, `${firstMs}ms`);
+      // Issue #421 段階 1-b: 取得ステップが、前走の条件の API(AplNewsPaper)を**実際に POST し、偽ソケットが 200 を返した**ことの確認。偽ソケットが受けた POST の記録
+      //   (ゲートの DO の中にある。smoke 専用の `/smoke/gate/post-log`)を読む。routePost の対応(class ↔ Referer)を直しただけで、この経路を一度も通らないままにしないため。
+      const postLogOf = async (): Promise<{ class: string; raceId: string; host: string; status: number }[]> =>
+        ((parseJson((await req(port, "GET", "/smoke/gate/post-log")).text)["log"] as { class: string; raceId: string; host: string; status: number }[] | undefined) ?? []);
+      const afterFirst = await postLogOf();
+      check(
+        `${label}: 取得ステップ(朝)が AplNewsPaper を 1 本 POST し、偽ソケットが 200 を返した(受けた POST はそれだけ。Referer が newspaper.html でなければ偽ソケットは 400 を返す)`,
+        afterFirst.length === 1 && afterFirst[0]!.class === "AplNewsPaper" && afterFirst[0]!.raceId === raceId && afterFirst[0]!.host === "race.netkeiba.com" && afterFirst[0]!.status === 200,
+        JSON.stringify(afterFirst),
+      );
       const withPrior = parseJson((await req(port, "GET", `/api/analyses/status?kaisai_date=${date}&race_id=${raceId}`)).text);
       const priorRows = (withPrior["prior"] as { rows: { prior: number }[] } | null)?.rows ?? [];
       check(`${label}: GET /api/analyses/status?race_id= が朝の prior の最小限(16頭・prior の高い順)を返す`, priorRows.length === 16 && priorRows.every((r, i) => i === 0 || priorRows[i - 1]!.prior >= r.prior), JSON.stringify(withPrior).slice(0, 200));
@@ -673,6 +683,9 @@ async function main(): Promise<void> {
       const thirdBoard = await waitDone();
       const thirdMs = Date.now() - thirdStarted;
       check(`${label}: 3回目は戦績・調教・騎手がキャッシュ・保存先に当たり、調教師は不足の 11 人だけを取る(11 本 × 2 秒。45 秒以内に done。1回目の約 80 秒より速い)`, (thirdBoard["races"] as { status: string }[])[0]?.status === "done" && thirdMs < 45_000 && thirdMs >= 15_000, `${thirdMs}ms`);
+      // Issue #421 段階 1-b: 前走の条件は 6 時間キャッシュされる。2・3 回目(キャッシュの内側)で POST は増えない。
+      const afterThird = await postLogOf();
+      check(`${label}: 前走の条件の POST は、2・3 回目ではキャッシュに当たり増えない(6 時間のキャッシュ。1 本のまま)`, afterThird.length === 1 && afterThird[0]!.class === "AplNewsPaper", JSON.stringify(afterThird));
 
       // Issue #251: 一括の手動起動(POST /api/analyses/run/bulk)。本物の DO の RPC(scheduleMany)を通す。守り(Origin・415・400)→ 予約(202。レースごとの結果)→ アラームで done。
       //   朝(morning)のキャッシュが効くので速い。morning は D1 に書かない(下の「D1 には何も書かれない」の確認が引き続き成り立つ)。
