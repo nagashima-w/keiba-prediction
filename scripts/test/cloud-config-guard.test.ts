@@ -314,7 +314,17 @@ describe("wrangler.toml", () => {
     const count = (pattern: RegExp): number => (core.match(pattern) ?? []).length;
     expect(count(/createGateHttpClient\(/g)).toBe(1); // 取得のクライアントは 1 つ(gate 経由)
     expect(count(/serializeGate\(deps\.gate\)/g)).toBe(1); // 直列化した gate は 1 つ(キャッシュ付きの取得と結果の取得が同じ待ち行列を使う)
-    expect(count(/this\.httpClient\.fetchText\(/g)).toBe(1); // 結果のページの取得は 1 箇所
+    // 【Issue #399(R-9d)で改訂】旧: `this.httpClient.fetchText(` が race-day-core.ts にちょうど 1 件(結果のページの取得は 1 箇所)。結果の取り込みの段階を `race-day-result-stage.ts` に切り出したので、
+    // core には 0 件になり、1 件は段階のファイルに移った(cloud/src 全体でも 1 件のまま)。
+    // 保証していたことは変わらない: (1) 結果のページの取得は cloud/src 全体で 1 箇所(段階の `runStep`) (2) その取得口は、本体が gate 経由で作った `httpClient` そのもの(キャッシュを通る取得口ではない)。
+    // (2) は、段階を作る箇所(`new ResultStage({ ... })`)に何を渡すかの検査(下の「配線」)で守る: 切り出しによって、取得口を差し替える余地が配線に移ったため。
+    expect(count(/this\.httpClient\.fetchText\(/g)).toBe(0);
+    const fetchTextSites: Record<string, number> = {};
+    for (const f of readdirSync(path.join(ROOT, "cloud", "src")).filter((name) => name.endsWith(".ts") && name !== "client-bundle.generated.ts")) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(/this\.httpClient\.fetchText\(/g) ?? []).length;
+      if (n > 0) fetchTextSites[f] = n;
+    }
+    expect(fetchTextSites).toEqual({ "race-day-result-stage.ts": 1 });
     expect(count(/(\.|await\s+)fetch\(/g)).toBe(0); // グローバルの fetch に出ない
     // 【Issue #283で改訂】旧: `bypassCache` が race-day-core.ts に 0 件(結果のページを、キャッシュを通す取得〈CachedFetcher〉の bypassCache では取らない)。
     // 地方三連単の段階(`runNarTrifectaStep`)が、オッズの軸の本文をキャッシュに積むために `{ bypassCache: true }` で CachedFetcher を呼ぶので、1 件になった。
@@ -347,19 +357,35 @@ describe("wrangler.toml", () => {
     expect(closeBody).toContain("bypassCache: true");
     expect(closeBody).toContain("this.cacheOnly.fetchText("); // それ以外(出馬表・戦績・調教)はキャッシュ専用=ネットワークに出ない
     expect(count(/this\.setAlarm\(/g)).toBe(1); // アラームを張るのは rearm の 1 箇所だけ
-    // runResultStep の本体は、キャッシュ付きの取得(networkFetcher・cacheOnly)を使わず、D1 は saveResult の 1 経路だけ
-    const start = core.indexOf("private async runResultStep(");
+    // 【Issue #399(R-9d)で改訂】旧: core の `private async runResultStep(` の本体を検査していた。結果の取り込みの段階を `race-day-result-stage.ts` に切り出したので、
+    // 同じ検査(`toContain` の 4 項目・`forbidden` の全項目・本体長)を、段階の `async runStep(` の本体に対して行う。項目は 1 つも減らしていない。
+    // 保証していたことは変わらない: 結果のステップの本体は、キャッシュ付きの取得(networkFetcher・cacheOnly)を使わず、D1 は saveResult の 1 経路だけ。
+    // 加えて、段階を作る配線(core の `new ResultStage({ ... })`)に、取得口として `httpClient: this.httpClient` が渡り、キャッシュ系・分析の保存先が渡らないことを検査する(切り出しで新たに必要になった保証)。
+    const stage = stripCode(readTextLf("cloud", "src", "race-day-result-stage.ts"));
+    expect(stage.length).toBeGreaterThan(3000); // 前提: 段階のファイルを読めている
+    const start = stage.indexOf("async runStep(");
     expect(start).toBeGreaterThan(-1);
-    const end = core.indexOf("\n  }\n", start);
-    const body = core.slice(start, end);
+    const end = stage.indexOf("\n  }\n", start);
+    const body = stage.slice(start, end);
     expect(body.length).toBeGreaterThan(1500); // 前提: 本体を実際に読めている
+    const wireStart = core.indexOf("new ResultStage({");
+    expect(wireStart).toBeGreaterThan(-1);
+    expect(core.indexOf("new ResultStage({", wireStart + 1)).toBe(-1); // 段階を作る箇所は 1 つ
+    const wireEnd = core.indexOf("\n    });", wireStart);
+    expect(wireEnd).toBeGreaterThan(wireStart);
+    const wiring = core.slice(wireStart, wireEnd);
+    expect(wiring.length).toBeGreaterThan(100); // 前提: 配線を実際に読めている
+    expect(wiring).toContain("httpClient: this.httpClient,"); // 取得口は gate 経由・キャッシュなしの HttpClient そのもの
+    for (const forbidden of ["this.cache", "cacheOnly", "networkFetcher", "this.sink"]) {
+      expect(wiring, `ResultStage の配線に ${forbidden} が無い`).not.toContain(forbidden);
+    }
     expect(body).toContain("this.httpClient.fetchText(");
     expect(body).toContain("importRaceResult(");
     expect(body).toContain("this.resultStore!.saveResult(");
     expect(body).toContain("winPayouts.length === 0"); // 払戻のテーブルが出てから保存する
     expect(body).not.toContain("bypassCache"); // 結果の取得は、キャッシュを通す取得の bypassCache では取らない(旧: ファイル全体で 0 件)
     for (const forbidden of ["networkFetcher", "cacheOnly", "this.cache", "this.sink", "loadSettings", "fetch("]) {
-      expect(body.replace(/this\.httpClient\.fetchText\(/g, ""), `runResultStep に ${forbidden} が無い`).not.toContain(forbidden);
+      expect(body.replace(/this\.httpClient\.fetchText\(/g, ""), `ResultStage.runStep に ${forbidden} が無い`).not.toContain(forbidden);
     }
     // 結果のステップを動かす条件(resultsRunnable)を、アラームの候補(rearm)と実行(runNextStep)の両方が使う
     expect(count(/this\.resultsRunnable\(\)/g)).toBe(2);

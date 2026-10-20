@@ -7,7 +7,7 @@
  * それより古いレースは対象外。ここは**古いレースの結果を、少しずつ、自動で取り込む**(ユーザー指定 2026-10-09: 手動のボタンは要らない)。
  * 対象は `analyses` に行があって `race_results` に行が 1 件も無いレース全部(exe 由来かどうかは区別しない。cron が取りこぼした web の古い分析も拾う)。
  * **取得と保存は新しく書かない**: 既存の `dispatchResultImports`(`requestResultImport` の呼び出し箇所は `result-dispatch.ts` の 1 つのまま)で、その日の日単位の DO(`RaceDay`)に依頼する。
- * 日単位の DO が、gate 経由・キャッシュなし・1 レースずつ・最も低い優先度で、中央/地方のホストの違い(`raceResultUrl`)も含めて取得・保存する(`runResultStep`)。
+ * 日単位の DO が、gate 経由・キャッシュなし・1 レースずつ・最も低い優先度で、中央/地方のホストの違い(`raceResultUrl`)も含めて取得・保存する(`ResultStage.runStep`。`race-day-result-stage.ts`)。
  *
  * ## いつ動くか
  *  - **移行の状態は見ない**(Issue #394)。以前は移行の DO が `completed` のときだけ動かしていた(移行中に取ると、移行ファイルの結果と重複して取得する無駄が出る・移行の D1 の書き込み予算と競合するため)が、
