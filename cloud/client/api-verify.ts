@@ -11,7 +11,7 @@
  * 閲覧者の `ready` は管理者の `ready` と同じ形で読む(診断は発走時刻の欠落だけ・`stale` は偽・追加指示の全文は `"(非公開)"` に置き換わっている。サーバが落とす)。
  */
 import { PREDICTION_MARKS } from "../../packages/core/src/common/prediction-marks";
-import { classify, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { classifyWithoutNetkeiba, getJson, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 export type VerifyVenue = "all" | "central" | "nar";
 
@@ -444,21 +444,14 @@ export type VerifyFetchResult = { readonly ok: true; readonly outcome: VerifyOut
 /** `GET /api/verify`。例外(同期・非同期とも)は network にする(例外の文面は持ち込まない)。`refresh` は再計算の要求(サーバの最短間隔・1 日の上限は守られる)。 */
 export async function fetchVerify(fetchLike: FetchLike, venue: VerifyVenue, refresh: boolean): Promise<VerifyFetchResult> {
   const query = `venue=${venue}${refresh ? "&refresh=1" : ""}`;
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike(`/api/verify?${query}`, { method: "GET", credentials: "same-origin", headers: { accept: "application/json" } });
-  } catch {
+  const got = await getJson(fetchLike, `/api/verify?${query}`);
+  if (got === null) {
     return { ok: false, error: { kind: "network" } };
   }
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    body = undefined;
-  }
-  if (response.status !== 200) {
-    const failure = classify(response.status, body);
-    return { ok: false, error: failure.kind === "netkeiba-unavailable" ? { kind: "server-error" } : failure };
+  const { status, body } = got;
+  if (status !== 200) {
+    // 書き込みの分類〈`classifyWrite`〉と違い、413・415 を bad-request にしない(GET なので。unexpected のまま)。
+    return { ok: false, error: classifyWithoutNetkeiba(status, body) };
   }
   const outcome = parseVerifyResponse(body);
   return outcome === null ? { ok: false, error: { kind: "unexpected", httpStatus: 200 } } : { ok: true, outcome };

@@ -242,6 +242,8 @@ describe("生成物のドリフトと決定性", () => {
     // (追記)レビューの R1(設定を取り直したとき、飛んでいるプレビューの状態を捨てる 2 行)で 226,688 → 226,702(+14)。上限は 228,500 のまま(余裕 1,798 バイト)。
     // (追記)Issue #397 R-3(検証画面の整形を core の 1 本にまとめた): 226,702 → 226,641(-61。`pnpm run build:client` の出力〈「226641 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。client に複製していた `formatYen` が core 版と二重に入っていたのが 1 つになった分。上限は 228,500 のまま(余裕 1,859 バイト)。
     // (追記)Issue #397 R-5(JST・印の並び・型ガードを core の `common/` の 1 本にまとめた): 226,641 → 226,589(-52。`pnpm run build:client` の出力〈「226589 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。上限は 228,500 のまま(余裕 1,911 バイト)。
+    // (追記)Issue #397 R-6 の 1 つ目(client の API 層の送受信まわりを `api.ts` の `getJson`・`postJson`・`readBody`・`classifyWrite`・`classifyWithoutNetkeiba`・`isArr`・`isStrArr` にまとめた): 226,589 → 224,931(-1,658。`pnpm run build:client` の出力〈「224931 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。素書きの fetch の init と try/catch 11 か所(GET 6・POST 5。うち `fetchPromptPreview` は init の組み立てだけ共通)が小さな呼び出しになった分。上限は 228,500 のまま(余裕 3,569 バイト)。
+    // (追記)Issue #397 R-6 の 2 つ目(日報と月報の一覧の取得・詳細の前半・先頭 7 項目を `getOkBody`・`fetchItemList`・`parseHeadOf` にまとめた): 224,931 → 224,062(-869。`pnpm run build:client` の出力〈「224062 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。R-6 全体で 226,589 → 224,062(-2,527)。上限は 228,500 のまま(余裕 4,438 バイト)。
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(228_500);
   });
 });

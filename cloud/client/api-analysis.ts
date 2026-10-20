@@ -9,7 +9,7 @@
  */
 import type { StoredAllocationBetView, StoredAllocationView } from "../../packages/core/src/analysis/analysis-types";
 import { MARK_ORIGIN_VALUES } from "../../packages/core/src/view/format";
-import { classify, getJson, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { classify, getJson, isNum, isRecord, isStr, isStrArr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 /** 過去の分析の一覧の 1 件(`GET /api/analyses` の要約から、画面に使う項目だけ)。 */
 export interface PastAnalysis {
@@ -248,16 +248,13 @@ export function parsePastAnalysesResponse(status: number, body: unknown): PastAn
   return { ok: true, analyses };
 }
 
-/** 文字列だけの配列(キーの欠落・配列でない・文字列でない要素が1つでもあれば false。黙って落として空にしない)。 */
-const isStrArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
-
 function parseHorse(row: unknown): AnalysisHorse | null {
   if (!isRecord(row)) return null;
   const { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights, concerns, winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax } = row;
   if (!isNum(umaban) || !strOrNull(name) || !isNum(prior) || !isNum(adjustedProb) || !numOrNull(placeOddsMin) || !numOrNull(ev) || !isBool(isPositive) || !strOrNull(mark) || !strOrNull(reason)) {
     return null;
   }
-  if (!isStrArray(highlights) || !isStrArray(concerns)) return null;
+  if (!isStrArr(highlights) || !isStrArr(concerns)) return null;
   // Issue #247: 勝率・想定・実際は、キーが欠けたら(undefined)想定外。有限の数か null だけ(黙って null にしない)。
   if (!numOrNull(winProb) || !numOrNull(fairWinOdds) || !numOrNull(winOdds)) return null;
   // Issue #253: 想定複勝・実際の複勝の下限と上限も同じ(キーが欠けたら想定外)。

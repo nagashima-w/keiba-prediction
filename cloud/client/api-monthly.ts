@@ -6,8 +6,8 @@
  * **サーバの文面は読まない**(失敗は、ステータスと `error.type` だけで分類し、固定の文言にする)。統計の読み方は日報と共有する(`parsePeriod`)。
  * キー名・形のドリフトは `test/client-api-monthly-contract.test.ts`(実際の `handle()` の応答と、月報の組み立て〈`MonthlyReportCore`〉の出力を通す)が検出する。
  */
-import { classify, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
-import { isCount, isYmd, parseJobOf, parsePeriod, postRun, readBody, reportFetchFailureMessage, type JobOf, type ReportPeriod, type ReportRunOutcome } from "./api-report";
+import { getOkBody, isArr, isNum, isRecord, isStr, isStrArr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { fetchItemList, isCount, isYmd, parseHeadOf, parseJobOf, parsePeriod, postRun, reportFetchFailureMessage, type JobOf, type ReportPeriod, type ReportRunOutcome } from "./api-report";
 import { isRealMonth } from "./date";
 
 /** 一覧の 1 行(本文を含まない)。 */
@@ -94,16 +94,14 @@ export type MonthlyDetailResult =
   | { readonly ok: true; readonly report: MonthlyDetail | null; readonly job: MonthlyJob | null; readonly jobStatus: MonthlyJobStatus }
   | { readonly ok: false; readonly error: ApiFailure };
 
-const isArr = (v: unknown): v is unknown[] => Array.isArray(v);
 const isMonth = (v: unknown): v is string => isStr(v) && isRealMonth(v);
 
 function parseListItem(row: unknown): MonthlyListItem | null {
   if (!isRecord(row)) return null;
-  const { month, created_at, model, race_count, total_stake, total_return, summary } = row;
-  if (!isMonth(month) || !isStr(created_at) || !strOrNull(model) || !isCount(race_count) || !isNum(total_stake) || !isNum(total_return) || !strOrNull(summary)) {
-    return null;
-  }
-  return { month, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary };
+  const head = parseHeadOf(row, "month", isMonth);
+  if (head === null) return null;
+  const { id: month, ...rest } = head;
+  return { month, ...rest };
 }
 
 function parseDay(value: unknown): MonthlyDayRow | null {
@@ -154,8 +152,6 @@ function parseStats(value: unknown): MonthlyStats | null {
   return { ...period, days, byVersion };
 }
 
-const isStrArr = (v: unknown): v is string[] => isArr(v) && v.every(isStr);
-
 /** 文章を読む。無い(undefined)・null は文章なし(null)。形が壊れていれば undefined(一部だけを採用しない)。 */
 function parseNarrative(value: unknown): MonthlyNarrative | null | undefined {
   if (value === undefined || value === null) return null;
@@ -170,61 +166,36 @@ function strOrAbsent(v: unknown): string | null | undefined {
 
 function parseDetail(value: unknown): MonthlyDetail | null {
   if (!isRecord(value)) return null;
-  const { month, created_at, model, race_count, total_stake, total_return, summary, body } = value;
-  if (!isMonth(month) || !isStr(created_at) || !strOrNull(model) || !isCount(race_count) || !isNum(total_stake) || !isNum(total_return) || !strOrNull(summary) || !isRecord(body)) {
-    return null;
-  }
+  const head = parseHeadOf(value, "month", isMonth);
+  const body = value["body"];
+  if (head === null || !isRecord(body)) return null;
+  const { id: month, ...rest } = head;
   const stats = parseStats(body["stats"]);
   const narrative = parseNarrative(body["narrative"]);
   const narrativeRaw = strOrAbsent(body["narrativeRaw"]);
   const note = strOrAbsent(body["note"]);
   const promptVersion = strOrAbsent(body["promptVersion"]);
   if (stats === null || typeof body["lastDayPending"] !== "boolean" || narrative === undefined || narrativeRaw === undefined || note === undefined || promptVersion === undefined) return null;
-  return { month, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary, stats, lastDayPending: body["lastDayPending"], narrative, narrativeRaw, note, promptVersion };
+  return { month, ...rest, stats, lastDayPending: body["lastDayPending"], narrative, narrativeRaw, note, promptVersion };
 }
 
 const MONTHLY_PHASES = ["read", "generate", "save", "notify"] as const;
 
 /** `GET /api/monthly-reports`。例外(同期・非同期とも)は network にする。 */
-export async function fetchMonthlyList(fetchLike: FetchLike): Promise<MonthlyListResult> {
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike("/api/monthly-reports", { method: "GET", credentials: "same-origin", headers: { accept: "application/json" } });
-  } catch {
-    return { ok: false, error: { kind: "network" } };
-  }
-  const body = await readBody(response);
-  if (response.status !== 200 || !isRecord(body) || body["ok"] !== true) {
-    return { ok: false, error: classify(response.status, body) };
-  }
-  if (!isArr(body["reports"])) return { ok: false, error: { kind: "unexpected", httpStatus: response.status } };
-  const reports: MonthlyListItem[] = [];
-  for (const row of body["reports"]) {
-    const parsed = parseListItem(row);
-    if (parsed === null) return { ok: false, error: { kind: "unexpected", httpStatus: response.status } };
-    reports.push(parsed);
-  }
-  return { ok: true, reports };
+export function fetchMonthlyList(fetchLike: FetchLike): Promise<MonthlyListResult> {
+  return fetchItemList(fetchLike, "/api/monthly-reports", parseListItem);
 }
 
 /** `GET /api/monthly-reports/{month}`。月報が無い月は `report: null`。 */
 export async function fetchMonthly(fetchLike: FetchLike, month: string): Promise<MonthlyDetailResult> {
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike(`/api/monthly-reports/${month}`, { method: "GET", credentials: "same-origin", headers: { accept: "application/json" } });
-  } catch {
-    return { ok: false, error: { kind: "network" } };
-  }
-  const body = await readBody(response);
-  if (response.status === 404) return { ok: false, error: { kind: "not-found" } };
-  if (response.status !== 200 || !isRecord(body) || body["ok"] !== true) {
-    return { ok: false, error: classify(response.status, body) };
-  }
+  const got = await getOkBody(fetchLike, `/api/monthly-reports/${month}`, true);
+  if (!got.ok) return got;
+  const body = got.body;
   const raw = body["report"];
   // 進行状況(Issue #280)。キーが無い応答(古いサーバ)はジョブなし・ok。ある場合は形を確かめ、一部だけを採用しない。
   const job = body["job"] === undefined ? null : parseJobOf(body["job"], MONTHLY_PHASES);
   const jobStatus = body["job_status"] === undefined ? "ok" : body["job_status"];
-  const unexpected = { ok: false, error: { kind: "unexpected", httpStatus: response.status } } as const;
+  const unexpected = { ok: false, error: { kind: "unexpected", httpStatus: 200 } } as const;
   if (raw === undefined || job === undefined || (jobStatus !== "ok" && jobStatus !== "unavailable") || (jobStatus === "unavailable" && job !== null)) return unexpected;
   if (raw === null) return { ok: true, report: null, job, jobStatus };
   const report = parseDetail(raw);

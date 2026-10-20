@@ -6,7 +6,7 @@
  * **サーバの文面は読まない**(失敗は、ステータスと `error.type`〈サーバが決めた固定の識別子〉だけで分類し、固定の文言にする)。
  * キー名・形のドリフトは `test/client-api-report-contract.test.ts`(実際の `handle()` の応答と、日報の組み立て〈`DailyReportCore`〉の出力を通す)が検出する。
  */
-import { classify, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { classifyWrite, getOkBody, isArr, isNum, isRecord, isStr, numOrNull, postJson, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 /** 一覧の 1 行(本文を含まない)。 */
 export interface ReportListItem {
@@ -182,17 +182,39 @@ export type ReportDetailResult =
   | { readonly ok: true; readonly report: ReportDetail | null; readonly job: ReportJob | null; readonly jobStatus: ReportJobStatus }
   | { readonly ok: false; readonly error: ApiFailure };
 
-/** 以下の `isCount`・`isYmd`・`parsePeriod`・`readBody` は月報の API(`api-monthly.ts`。Issue #279)も使う(統計の読み方を日報と共有する)。 */
+/** 以下の `isCount`・`isYmd`・`parsePeriod` は月報の API(`api-monthly.ts`。Issue #279)も使う(統計の読み方を日報と共有する)。 */
 export const isCount = (v: unknown): v is number => isNum(v) && Number.isInteger(v) && v >= 0;
-const isArr = (v: unknown): v is unknown[] => Array.isArray(v);
+
+/** 日報・月報の一覧の行と詳細の頭に共通の 7 項目(ID・作成日時・モデル・レース数・賭け金・払戻・要約)。`id` は日報なら日付、月報なら月。 */
+export interface ReportHead {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly model: string | null;
+  readonly raceCount: number;
+  readonly totalStake: number;
+  readonly totalReturn: number;
+  readonly summary: string | null;
+}
+
+/**
+ * 先頭の 7 項目を読む(日報の一覧・詳細と月報の一覧・詳細の 4 か所が共有する)。違うのは ID のキー(`date`・`month`)とその検査(`isId`)だけ。
+ * どれか 1 つでも型・範囲を満たさなければ null(一部だけを採用しない)。呼び出し側は `{ id: date, ...rest }` のように ID を自分のキーに替える(キーの順は id・createdAt・…)。
+ */
+export function parseHeadOf(row: Record<string, unknown>, idKey: string, isId: (v: unknown) => v is string): ReportHead | null {
+  const id = row[idKey];
+  const { created_at, model, race_count, total_stake, total_return, summary } = row;
+  if (!isId(id) || !isStr(created_at) || !strOrNull(model) || !isCount(race_count) || !isNum(total_stake) || !isNum(total_return) || !strOrNull(summary)) {
+    return null;
+  }
+  return { id, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary };
+}
 
 function parseListItem(row: unknown): ReportListItem | null {
   if (!isRecord(row)) return null;
-  const { date, created_at, model, race_count, total_stake, total_return, summary } = row;
-  if (!isStr(date) || !/^[0-9]{8}$/.test(date) || !isStr(created_at) || !strOrNull(model) || !isCount(race_count) || !isNum(total_stake) || !isNum(total_return) || !strOrNull(summary)) {
-    return null;
-  }
-  return { date, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary };
+  const head = parseHeadOf(row, "date", isYmd);
+  if (head === null) return null;
+  const { id: date, ...rest } = head;
+  return { date, ...rest };
 }
 
 /**
@@ -343,10 +365,10 @@ function parseNarrative(value: unknown): ReportNarrative | null | undefined {
 
 function parseDetail(value: unknown): ReportDetail | null {
   if (!isRecord(value)) return null;
-  const { date, created_at, model, race_count, total_stake, total_return, summary, body } = value;
-  if (!isStr(date) || !/^[0-9]{8}$/.test(date) || !isStr(created_at) || !strOrNull(model) || !isCount(race_count) || !isNum(total_stake) || !isNum(total_return) || !strOrNull(summary) || !isRecord(body)) {
-    return null;
-  }
+  const head = parseHeadOf(value, "date", isYmd);
+  const body = value["body"];
+  if (head === null || !isRecord(body)) return null;
+  const { id: date, ...rest } = head;
   const stats = parseStats(body["stats"]);
   const narrative = parseNarrative(body["narrative"]);
   const rolling = "rolling" in body ? parseRolling(body["rolling"]) : undefined;
@@ -361,7 +383,7 @@ function parseDetail(value: unknown): ReportDetail | null {
     races.push(parsed);
   }
   return {
-    date, createdAt: created_at, model, raceCount: race_count, totalStake: total_stake, totalReturn: total_return, summary, stats, ...(rolling === undefined ? {} : { rolling }), ...(nearMisses === undefined ? {} : { nearMisses }), races, narrative,
+    date, ...rest, stats, ...(rolling === undefined ? {} : { rolling }), ...(nearMisses === undefined ? {} : { nearMisses }), races, narrative,
     narrativeRaw: body["narrativeRaw"], note: body["note"],
   };
 }
@@ -392,31 +414,24 @@ export function parseJobOf<P extends string>(value: unknown, phases: readonly P[
 const REPORT_PHASES = ["list", "gather", "generate", "save", "notify"] as const;
 const parseJob = (value: unknown): ReportJob | null | undefined => parseJobOf(value, REPORT_PHASES);
 
-export async function readBody(response: Awaited<ReturnType<FetchLike>>): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return undefined;
-  }
+/** `GET /api/reports`。例外(同期・非同期とも)は network にする。 */
+export function fetchReportList(fetchLike: FetchLike): Promise<ReportListResult> {
+  return fetchItemList(fetchLike, "/api/reports", parseListItem);
 }
 
-/** `GET /api/reports`。例外(同期・非同期とも)は network にする。 */
-export async function fetchReportList(fetchLike: FetchLike): Promise<ReportListResult> {
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike("/api/reports", { method: "GET", credentials: "same-origin", headers: { accept: "application/json" } });
-  } catch {
-    return { ok: false, error: { kind: "network" } };
-  }
-  const body = await readBody(response);
-  if (response.status !== 200 || !isRecord(body) || body["ok"] !== true) {
-    return { ok: false, error: classify(response.status, body) };
-  }
-  if (!isArr(body["reports"])) return { ok: false, error: { kind: "unexpected", httpStatus: response.status } };
-  const reports: ReportListItem[] = [];
-  for (const row of body["reports"]) {
-    const parsed = parseListItem(row);
-    if (parsed === null) return { ok: false, error: { kind: "unexpected", httpStatus: response.status } };
+/**
+ * 日報と月報の一覧の取得(共有)。`getOkBody` のあと、`reports` を 1 行ずつ `parseItem` で読む。配列でない、または 1 行でも読めなければ想定外(一部の行だけを採用しない)。
+ * 404 は特別扱いしない(一覧に 404 は無い)。
+ */
+export async function fetchItemList<T>(fetchLike: FetchLike, url: string, parseItem: (row: unknown) => T | null): Promise<{ ok: true; reports: T[] } | { ok: false; error: ApiFailure }> {
+  const got = await getOkBody(fetchLike, url, false);
+  if (!got.ok) return got;
+  const rows = got.body["reports"];
+  if (!isArr(rows)) return { ok: false, error: { kind: "unexpected", httpStatus: 200 } };
+  const reports: T[] = [];
+  for (const row of rows) {
+    const parsed = parseItem(row);
+    if (parsed === null) return { ok: false, error: { kind: "unexpected", httpStatus: 200 } };
     reports.push(parsed);
   }
   return { ok: true, reports };
@@ -424,23 +439,15 @@ export async function fetchReportList(fetchLike: FetchLike): Promise<ReportListR
 
 /** `GET /api/reports/{date}`。日報が無い日は `report: null`(進行状況が `job`。取れなかったときは `jobStatus: "unavailable"`。Issue #245)。 */
 export async function fetchReport(fetchLike: FetchLike, date: string): Promise<ReportDetailResult> {
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike(`/api/reports/${date}`, { method: "GET", credentials: "same-origin", headers: { accept: "application/json" } });
-  } catch {
-    return { ok: false, error: { kind: "network" } };
-  }
-  const body = await readBody(response);
-  if (response.status === 404) return { ok: false, error: { kind: "not-found" } };
-  if (response.status !== 200 || !isRecord(body) || body["ok"] !== true) {
-    return { ok: false, error: classify(response.status, body) };
-  }
+  const got = await getOkBody(fetchLike, `/api/reports/${date}`, true);
+  if (!got.ok) return got;
+  const body = got.body;
   const job = parseJob(body["job"]);
   const jobStatus = body["job_status"];
   const raw = body["report"];
   const report = raw === null ? null : parseDetail(raw);
   if (job === undefined || (jobStatus !== "ok" && jobStatus !== "unavailable") || (jobStatus === "unavailable" && job !== null) || (raw !== null && report === null) || raw === undefined) {
-    return { ok: false, error: { kind: "unexpected", httpStatus: response.status } };
+    return { ok: false, error: { kind: "unexpected", httpStatus: 200 } };
   }
   return { ok: true, report, job, jobStatus };
 }
@@ -468,32 +475,22 @@ export function postReportRun(fetchLike: FetchLike, date: string, regenerate: bo
  * 202 は応答が `{ ok: true, accepted: true, [key]: id }` のときだけ accepted。
  */
 export async function postRun(fetchLike: FetchLike, path: string, key: "date" | "month", id: string, regenerate: boolean): Promise<ReportRunOutcome> {
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike(path, {
-      method: "POST",
-      credentials: "same-origin",
-      referrerPolicy: "same-origin",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify(regenerate ? { [key]: id, regenerate: true } : { [key]: id }),
-    });
-  } catch {
+  const got = await postJson(fetchLike, path, regenerate ? { [key]: id, regenerate: true } : { [key]: id });
+  if (got === null) {
     return { kind: "failed", failure: { kind: "network" } };
   }
-  const body = await readBody(response);
-  if (response.status === 202) {
+  const { status, body } = got;
+  if (status === 202) {
     return isRecord(body) && body["ok"] === true && body["accepted"] === true && body[key] === id ? { kind: "accepted" } : { kind: "accepted-malformed" };
   }
-  if (response.status === 409) {
+  if (status === 409) {
     const error = isRecord(body) && isRecord(body["error"]) ? body["error"] : undefined;
     if (error?.["type"] === "already-exists") return { kind: "already-exists" };
     if (error?.["type"] === "in-progress") return { kind: "in-progress" };
     return { kind: "failed", failure: { kind: "unexpected", httpStatus: 409 } };
   }
-  if (response.status === 429 && isRecord(body) && isRecord(body["error"]) && body["error"]["type"] === "daily-limit") return { kind: "daily-limit" };
-  if (response.status === 400 || response.status === 413 || response.status === 415) return { kind: "failed", failure: { kind: "bad-request" } };
-  const failure = classify(response.status, body);
-  return { kind: "failed", failure: failure.kind === "netkeiba-unavailable" ? { kind: "server-error" } : failure };
+  if (status === 429 && isRecord(body) && isRecord(body["error"]) && body["error"]["type"] === "daily-limit") return { kind: "daily-limit" };
+  return { kind: "failed", failure: classifyWrite(status, body) };
 }
 
 /** 一覧・本文の取得の失敗の固定の文言(サーバの文面は含めない)。 */

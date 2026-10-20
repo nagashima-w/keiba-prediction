@@ -87,6 +87,10 @@ export const isNum = isFiniteNumber;
 export const strOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
 /** 有限の数か null(日報・月報・分析・検証の応答の検査が共有する。以前は 3 ファイルに同じ式があった)。 */
 export const numOrNull = (v: unknown): v is number | null => v === null || isNum(v);
+/** 配列(中身は見ない)。日報・月報の応答の検査が共有する(以前は `api-report.ts` と `api-monthly.ts` に同じ式があった)。 */
+export const isArr = (v: unknown): v is unknown[] => Array.isArray(v);
+/** 全要素が文字列の配列(空配列も通る)。月報の文章と分析の応答の検査が共有する(以前は `api-monthly.ts` の `isStrArr` と `api-analysis.ts` の `isStrArray` が同じ式だった)。 */
+export const isStrArr = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
 
 /** エラー応答(200 以外、または ok が true でない)を分類する。成功の形の検査は呼び出し側。 */
 export function classify(status: number, body: unknown): ApiFailure {
@@ -225,6 +229,34 @@ export function failureMessage(failure: ApiFailure): string {
   }
 }
 
+/**
+ * 失敗(200 以外)の分類のうち、`classify` に「netkeiba の 503 も server-error にする」を足したもの。
+ * 書き込み(起動・設定・日報の作成)と検証の取得が使う: これらの 503 は netkeiba の取得に失敗したのではなく、サーバ側のエラーとして扱う。
+ * `classify` そのまま(netkeiba の 503 を保つ)なのは、レース一覧と日報・月報の一覧/詳細の取得。
+ */
+export function classifyWithoutNetkeiba(status: number, body: unknown): ApiFailure {
+  const failure = classify(status, body);
+  return failure.kind === "netkeiba-unavailable" ? { kind: "server-error" } : failure;
+}
+
+/**
+ * 書き込み(`POST`)の失敗(202・409 など、各関数が先に扱う応答を除く)の分類。400・413・415 は bad-request、503 は(netkeiba の形でも)server-error。
+ * 分析の起動・一括の起動・設定の保存〈400 の `keys-mismatch` だけ先に扱う〉・日報と月報の作成が共有する。**検証の取得(GET)は 413・415 を bad-request にしない**ので `classifyWithoutNetkeiba` を使う。
+ */
+export function classifyWrite(status: number, body: unknown): ApiFailure {
+  if (status === 400 || status === 413 || status === 415) return { kind: "bad-request" };
+  return classifyWithoutNetkeiba(status, body);
+}
+
+/** 応答の本文を JSON として読む。読めなければ(JSON でない・例外)undefined(例外の文面は持ち込まない)。 */
+export async function readBody(response: { json: () => Promise<unknown> }): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
+  }
+}
+
 export async function getJson(fetchLike: FetchLike, url: string): Promise<{ status: number; body: unknown } | null> {
   let response: Awaited<ReturnType<FetchLike>>;
   try {
@@ -232,12 +264,50 @@ export async function getJson(fetchLike: FetchLike, url: string): Promise<{ stat
   } catch {
     return null; // 通信失敗(Access のリダイレクトによる CORS 失敗を含む)。例外の文面は持ち込まない
   }
-  let body: unknown;
+  const body = await readBody(response);
+  return { status: response.status, body };
+}
+
+/**
+ * GET して、200 かつ本文が `{ ok: true, … }` のものだけを通す(日報・月報の一覧と詳細が共有する前半)。
+ * 通信の失敗は network、`notFound` が true のときの 404 は not-found、それ以外の失敗は `classify`(netkeiba の 503 を保つ)。成功したときの status は 200。
+ */
+export async function getOkBody(fetchLike: FetchLike, url: string, notFound: boolean): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: ApiFailure }> {
+  const got = await getJson(fetchLike, url);
+  if (got === null) return { ok: false, error: { kind: "network" } };
+  const { status, body } = got;
+  if (notFound && status === 404) return { ok: false, error: { kind: "not-found" } };
+  if (status !== 200 || !isRecord(body) || body["ok"] !== true) return { ok: false, error: classify(status, body) };
+  return { ok: true, body };
+}
+
+/**
+ * `POST`(JSON)の fetch の init。`payload` はここで `JSON.stringify` する(投げうるので、呼ぶ側は try の内側で呼ぶ)。呼び出しごとに headers は新しいオブジェクト。
+ * Origin(サーバは完全一致で CSRF を拒否する)は `api-run.ts` の冒頭コメントのとおり: `referrerPolicy: "same-origin"` を付け、fetch の `mode` は指定しない。
+ */
+export function postInit(payload: unknown): Parameters<FetchLike>[1] {
+  return {
+    method: "POST",
+    credentials: "same-origin",
+    // 参照元ポリシー(no-referrer)があっても Origin が付くようにする保険。fetch の mode は指定しない(`api-run.ts` の説明)。
+    referrerPolicy: "same-origin",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(payload),
+  };
+}
+
+/**
+ * `POST`(JSON)。**stringify も try の内側**: 投げれば fetch を呼ばずに null。
+ * 戻り値は `getJson` と同じ(通信失敗は null、本文が読めなければ `body: undefined`)。
+ */
+export async function postJson(fetchLike: FetchLike, url: string, payload: unknown): Promise<{ status: number; body: unknown } | null> {
+  let response: Awaited<ReturnType<FetchLike>>;
   try {
-    body = await response.json();
+    response = await fetchLike(url, postInit(payload));
   } catch {
-    body = undefined;
+    return null;
   }
+  const body = await readBody(response);
   return { status: response.status, body };
 }
 

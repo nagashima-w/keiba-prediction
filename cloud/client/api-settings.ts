@@ -9,7 +9,7 @@
  * 述語(範囲)は `cloud/src/settings.ts`(依存を持たない純モジュール)をそのまま使う(クライアントとサーバで述語を2つ持たない)。
  */
 import { CLOUD_SETTINGS_KEYS, CLOUD_SETTINGS_RULES, type CloudSettings } from "../src/settings";
-import { classify, isRecord, type ApiFailure, type FetchLike } from "./api";
+import { classifyWrite, getJson, isRecord, postJson, type ApiFailure, type FetchLike } from "./api";
 
 export type SettingsSource = "default" | "d1" | "invalid";
 
@@ -17,8 +17,6 @@ export type SettingsLoadResult =
   | { readonly ok: true; readonly settings: CloudSettings; readonly source: SettingsSource }
   | { readonly ok: false; readonly error: ApiFailure };
 export type SettingsSaveResult = { readonly ok: true; readonly settings: CloudSettings } | { readonly ok: false; readonly error: ApiFailure };
-
-const JSON_HEADERS = { "content-type": "application/json", accept: "application/json" };
 
 /** 応答の settings を検査して作る(全項目あり・余計なキーなし・各値が読む側の範囲)。満たさなければ null。 */
 function parseSettings(raw: unknown): CloudSettings | null {
@@ -35,36 +33,24 @@ function parseSettings(raw: unknown): CloudSettings | null {
   return out as unknown as CloudSettings;
 }
 
-async function readBody(response: { json: () => Promise<unknown> }): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * 失敗(200 以外)の分類。400・413・415 は bad-request、503 は(netkeiba の形でも)server-error。
  * 400 で `error.reason` が `"keys-mismatch"`(項目の過不足。Issue #375)のときだけ `staleScreen: true`(画面が古い可能性)を付ける。読むのはこの固定の語だけで、`message`・`fields` は読まない。
  */
 function classifyFailure(status: number, body: unknown): ApiFailure {
-  if (status === 413 || status === 415) return { kind: "bad-request" };
   if (status === 400 && isRecord(body) && isRecord(body["error"]) && body["error"]["reason"] === "keys-mismatch") return { kind: "bad-request", staleScreen: true };
-  const failure = classify(status, body);
-  return failure.kind === "netkeiba-unavailable" ? { kind: "server-error" } : failure;
+  return classifyWrite(status, body);
 }
 
 /** `GET /api/settings`。例外(同期・非同期とも)は network にする(例外の文面は持ち込まない)。 */
 export async function fetchSettings(fetchLike: FetchLike): Promise<SettingsLoadResult> {
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike("/api/settings", { method: "GET", credentials: "same-origin", headers: { accept: "application/json" } });
-  } catch {
+  const got = await getJson(fetchLike, "/api/settings");
+  if (got === null) {
     return { ok: false, error: { kind: "network" } };
   }
-  const body = await readBody(response);
-  if (response.status !== 200) {
-    return { ok: false, error: classifyFailure(response.status, body) };
+  const { status, body } = got;
+  if (status !== 200) {
+    return { ok: false, error: classifyFailure(status, body) };
   }
   const source = isRecord(body) ? body["source"] : undefined;
   const settings = isRecord(body) && body["ok"] === true ? parseSettings(body["settings"]) : null;
@@ -76,22 +62,14 @@ export async function fetchSettings(fetchLike: FetchLike): Promise<SettingsLoadR
 
 /** `POST /api/settings`(全項目の置き換え)。成功は、サーバが返した(保存した)設定。 */
 export async function postSettings(fetchLike: FetchLike, settings: CloudSettings): Promise<SettingsSaveResult> {
-  let response: Awaited<ReturnType<FetchLike>>;
-  try {
-    response = await fetchLike("/api/settings", {
-      method: "POST",
-      credentials: "same-origin",
-      // 参照元ポリシー(no-referrer)があっても Origin が付くようにする保険。fetch の mode は指定しない(`api-run.ts` の説明)。
-      referrerPolicy: "same-origin",
-      headers: JSON_HEADERS,
-      body: JSON.stringify(settings),
-    });
-  } catch {
+  // Origin の扱い(referrerPolicy を付け、fetch の mode は指定しない)は `postJson` に集約している(`api-run.ts` の説明)。
+  const got = await postJson(fetchLike, "/api/settings", settings);
+  if (got === null) {
     return { ok: false, error: { kind: "network" } };
   }
-  const body = await readBody(response);
-  if (response.status !== 200) {
-    return { ok: false, error: classifyFailure(response.status, body) };
+  const { status, body } = got;
+  if (status !== 200) {
+    return { ok: false, error: classifyFailure(status, body) };
   }
   const saved = isRecord(body) && body["ok"] === true ? parseSettings(body["settings"]) : null;
   if (saved === null) {
