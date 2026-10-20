@@ -17,10 +17,11 @@
  *    1 回の取得の fetcher 呼び出しの合計は上限 40(`DEFAULT_JOCKEY_REQUEST_LIMIT`)で、届いたら残りの騎手は取らず補正なしで続ける。重みが 0 なら 19 本のまま。
  *    **調教師の年度別成績(Issue #354)も同じ流れ**で、騎手の後ろに調教師 ID で一意にして取る(調教師の重み `baseScoreWeightTrainer` が 0 より大きいとき。既定 0.77。中央のレースだけ)。
  *    保存先は D1 の `trainer_results`(`trainerStore`)で、取得日時が**レースの年の 1 月 1 日〈JST〉以降**なら netkeiba に出ない(前2年の行は確定値なので年に 1 回)。
- *    **上限 40 は騎手と調教師で共有**する(騎手の後ろの調教師から先に締め出される)ので、gate への最悪の呼び出しは下の 42 本のまま増えない。
+ *    **上限 40 は騎手と調教師で共有**する(騎手の後ろの調教師から先に締め出される)ので、gate への最悪の呼び出しは下の 43 本のまま増えない。
  *    騎手が保存先にあれば 16 頭の調教師は全員取れる(19 + 16 = 35 本)。騎手も冷えていれば調教師は 5 人まで(19 + 16 + 5 = 40 本)で、残りは補正なし。
  *    発走前の取得ステップは、この `scrapeRace` のほかに、重賞の過去10年傾向(`prefetchGradeWinner`。LLM が有効で重賞のときだけ、最大 1 本)と、日報の時刻の下限のためのレース一覧(`ReportHoldStage.record`→`getRaceList`。最大 1 本・取得キャッシュにあれば 0 本)を引く。
- *    したがって gate への呼び出しは最大 40 + 1 + 1 = 42 本で、Free の 50 に対して余裕は 8 本(再現: `grep -n "this.reportHold.record(\|this.prefetchGradeWinner(" cloud/src/race-day-core.ts` で、どちらも `runPreRaceFetch` の呼び出しが 1 箇所ずつ。一覧の取得は段階が注入された取得口 `getRaceList` を呼ぶ 1 箇所〈`grep -n "this.getRaceList(" cloud/src/race-day-report-hold-stage.ts`〉。
+ *    **前走の条件(Issue #421 段階 1-b)**: `scrapeRace` は新聞形式 API の POST を 1 本だけ足す(`includePrevConditions`。馬の数によらない。取得キャッシュに 6 時間あれば 0 本)。**騎手・調教師の上限 40 の外**(`deps.fetcher` を直接呼ぶ)ので、`scrapeRace` の呼び出しは最大 41 本になる。
+ *    したがって gate への呼び出しは最大 (40 + 1) + 1 + 1 = 43 本で、Free の 50 に対して余裕は 7 本(再現: `grep -n "this.reportHold.record(\|this.prefetchGradeWinner(" cloud/src/race-day-core.ts` で、どちらも `runPreRaceFetch` の呼び出しが 1 箇所ずつ。新聞形式の POST は `grep -n "fetchNewspaperConditions(" packages/core/src/scraper/scrape-race.ts` の 1 箇所。一覧の取得は段階が注入された取得口 `getRaceList` を呼ぶ 1 箇所〈`grep -n "this.getRaceList(" cloud/src/race-day-report-hold-stage.ts`〉。
  *    `fetchText(` はそれぞれ `fetchGradeWinnerEntries` に 1 回、`listRaces`・`listNarRaces` に 1 回ずつ)。D1・R2 への呼び出しは数えていない。
  *    **レースの条件(Issue #421 段階 1)**: 朝・発走前のどちらの取得ステップも、`scrapeRace` が出馬表を読んだ直後に、負担重量の種別と牝馬限定を D1 の `race_conditions` へ渡す(`raceConditionsStore`。取得は増やさない・失敗は警告にして続ける・
  *    地方と条件の欄を読めなかったレースは渡さない)。前走との照合(段階 2)で、前走のレース ID から引くための記録。段階 1 では統計モデル・LLM・画面に使わない。
@@ -37,7 +38,7 @@
  * 発走前(pre_race)の取得ステップは、地方の三連単(軸=1着固定ごとに頭数ぶんのリクエスト)を取らない(`scrapeRace` の `deferNarTrifecta`)。組合せが ON の地方では、取得ステップが成功したあと、
  * 出走馬の全馬番を `race_day_nar_trifecta`(`race-day-nar-trifecta.ts`)に pending で登録し、タスクは `fetched` になる。`fetched` の発走前のタスクに pending の軸があれば、`runStep` は計算より先に
  * {@link RaceDayCore.runNarTrifectaStep}(**別のアラーム**。1回に最大 {@link NAR_TRIFECTA_AXES_PER_STEP} 軸を取って `fetch_cache` に積む)を呼ぶ。pending が尽きたら計算ステップ(ネットワークに出ない。キャッシュから三連単をインラインで読む)。
- * 1アラームあたりの gate への呼び出しは、取得ステップ ≤ 42(`scrapeRace` が ≤ 40〈騎手の上限〉+ 重賞の傾向 1 + 日報の下限の一覧 1)・段階 ≤ 9・計算 0。外から見える `status` は増やさない(段階の間も `fetched`)。失敗・打ち切りでも三連単なしで計算に進む。
+ * 1アラームあたりの gate への呼び出しは、取得ステップ ≤ 43(`scrapeRace` が ≤ 40〈騎手の上限〉+ 前走の条件 1 + 重賞の傾向 1 + 日報の下限の一覧 1)・段階 ≤ 9・計算 0。外から見える `status` は増やさない(段階の間も `fetched`)。失敗・打ち切りでも三連単なしで計算に進む。
  *
  * ## 予約(schedule)
  * 予約だけをして戻る(`setAlarm(now)`)。本処理はアラームの中(`runNextStep`)。同じレースが実行中(queued・fetched)なら受け付けない。
@@ -93,6 +94,7 @@ import { CachedFetcher, type TextFetcher } from "../../packages/core/src/scraper
 import { HttpError, type HttpClient } from "../../packages/core/src/scraper/http-client";
 import { collectGradeWinnerTrend } from "../../packages/core/src/analyzer/grade-winner-trend";
 import { fetchGradeWinnerEntries, gradeWinnerCacheKey } from "../../packages/core/src/scraper/fetch-grade-winner";
+import { newspaperCacheKey } from "../../packages/core/src/scraper/fetch-newspaper";
 import { GradeWinnerParseError } from "../../packages/core/src/scraper/parse-grade-winner";
 import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher } from "../../packages/core/src/scraper/scrape-race";
 import { parseKaisaiDate, parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
@@ -101,7 +103,7 @@ import type { JockeyResultsStore } from "../../packages/core/src/scraper/jockey-
 import type { TrainerResultsStore } from "../../packages/core/src/scraper/trainer-results-store";
 import type { HorseRunsStore } from "./horse-runs";
 import { toRaceConditionRecord, type RaceConditionsStore } from "./race-conditions";
-import type { RaceData } from "../../packages/core/src/scraper/scrape-race";
+import type { RaceData, ScrapeWarning } from "../../packages/core/src/scraper/scrape-race";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import { narRaceListSubUrl, narTrifectaOddsAxisUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
 import { MAX_BULK_RACES } from "./bulk-limits";
@@ -647,6 +649,9 @@ class StaleOddsError extends Error {
     this.name = "StaleOddsError";
   }
 }
+
+/** 計算ステップで前走の条件(Issue #421 段階 1-b)がキャッシュに無いときのログの文面。取得先の URL を含まない。画面向けの警告には出さない。 */
+const PREV_CONDITIONS_MISSING_MESSAGE = "前走の条件は取得済みのキャッシュに無いため、記録に載せていません(取得ステップの失敗、またはキャッシュの期限切れ。分析の結果には影響しません)";
 
 const cacheOnlyFetcher: TextFetcher = {
   fetchText: async (url) => {
@@ -1710,15 +1715,19 @@ export class RaceDayCore {
       // 騎手の年度別成績(Issue #226)は、ここ(netkeiba に出る取得ステップ)で取っておく。計算ステップはキャッシュだけを読む。
       const race = await scrapeRace(
         parseRaceId(task.race_id),
-        { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore, trainerStore: this.trainerStore },
-        { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings) },
+        // 前走の条件(Issue #421 段階 1-b)の POST に cacheKey の付け忘れが起きないよう、取得器を包む(GET は素通し)。
+        { fetcher: requireCacheKeyForPost(this.networkFetcher), now: () => new Date(this.now()), jockeyStore: this.jockeyStore, trainerStore: this.trainerStore },
+        { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), includePrevConditions: true },
       );
+      const prevWarnings = this.takePrevConditionWarnings(race.meta.warnings);
+      this.dropBrokenNewspaperCache(task.race_id, prevWarnings);
       await this.saveRaceCondition(task.race_id, race.race);
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
       if (missing.length > 0) {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
       }
       this.warnPersonStats(`朝の取得(${task.race_id})`, race.meta.warnings);
+      this.warnPrevConditions(`朝の取得(${task.race_id})`, prevWarnings);
       this.updateTask(task, "fetched", attempts, null);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "fetch", result: "ok" };
     } catch (error) {
@@ -1766,6 +1775,49 @@ export class RaceDayCore {
     }
   }
 
+  /**
+   * `scrapeRace` が残した警告のうち、種別が「前走条件」のものを `meta.warnings` から**取り除いて**返す(その場で取り除く。他の種別の警告は順序も含めて残す)。
+   * 前走の条件は段階 1 では貯めるだけで、利用者に見せる機能が無い(分析の結果にも影響しない)。取得の失敗(NG の応答・キャッシュ切れを含む)を
+   * `result.warnings`(画面向けの警告)に並べると、影響の無いことで利用者を惑わせるので、**ログ(onWarn)だけ**に出す({@link warnPrevConditions})。ユーザー決定(2026-10-20)。
+   */
+  private takePrevConditionWarnings(warnings: ScrapeWarning[]): ScrapeWarning[] {
+    const taken = warnings.filter((w) => w.kind === "前走条件");
+    if (taken.length > 0) {
+      const kept = warnings.filter((w) => w.kind !== "前走条件");
+      warnings.splice(0, warnings.length, ...kept);
+    }
+    return taken;
+  }
+
+  /**
+   * 取り除いた「前走条件」の警告({@link takePrevConditionWarnings})を onWarn に出す(Issue #421 段階 1-b)。応答・保存は変えない。
+   * 鍵の形は伏せ、先頭 200 文字に切る(通信の失敗の文面は取得先の URL を含みうる)。戦績が欠けて取得ステップが再試行になる回では呼ばない({@link warnPersonStats} と同じ)。
+   */
+  private warnPrevConditions(where: string, warnings: readonly { readonly kind: string; readonly message: string }[]): void {
+    for (const w of warnings) {
+      if (w.kind === "前走条件") {
+        this.onWarn(`${where}: 前走条件: ${redactSecrets(w.message).slice(0, 200)}`);
+      }
+    }
+  }
+
+  /**
+   * 読めない応答を保存してしまった新聞形式 API のキャッシュを消す(Issue #421 段階 1-b。次の取得で取り直せるように。重賞の傾向の `prefetchGradeWinner` と同じ扱い)。
+   * `scrapeRace` が警告に載せる `brokenCacheKey` のうち、このレースの新聞形式のキーと一致するものだけを消す(ほかのキーは消さない)。消せなくても取得ステップは失敗にしない。
+   * 戦績の欠けで取得ステップが再試行になる回でも消す(再試行が同じ壊れた応答を読み続けないように)ため、警告の出力とは分けて、`scrapeRace` の直後に呼ぶ。
+   */
+  private dropBrokenNewspaperCache(raceId: string, warnings: readonly { readonly kind: string; readonly brokenCacheKey?: string }[]): void {
+    for (const w of warnings) {
+      if (w.kind === "前走条件" && w.brokenCacheKey !== undefined && w.brokenCacheKey === newspaperCacheKey(parseRaceId(raceId))) {
+        try {
+          this.cache.delete(w.brokenCacheKey);
+        } catch {
+          // 消せなくても、取得ステップは失敗にしない。
+        }
+      }
+    }
+  }
+
   private async runCompute(task: TaskRow): Promise<StepOutcome> {
     const kaisaiDate = this.metaGet("kaisai_date");
     try {
@@ -1779,7 +1831,7 @@ export class RaceDayCore {
       let scraped: RaceData | undefined;
       const result = await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
         scrape: async (id) => {
-          scraped = await this.scrapeFromCache(id, { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings) });
+          scraped = await this.scrapeFromCache(id, { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), includePrevConditions: true }, `朝の計算(${id})`);
           return scraped;
         },
         analyze: null,
@@ -1834,7 +1886,8 @@ export class RaceDayCore {
    */
   private async scrapeFromCache(
     raceId: Parameters<typeof scrapeRace>[0],
-    options: { readonly includeComboOdds: boolean; readonly includeJockeyStats: boolean; readonly includeTrainerStats: boolean },
+    options: { readonly includeComboOdds: boolean; readonly includeJockeyStats: boolean; readonly includeTrainerStats: boolean; readonly includePrevConditions: boolean },
+    warnLabel: string,
     oddsSince?: number,
   ) {
     const fetcher: RaceFetcher =
@@ -1865,6 +1918,13 @@ export class RaceDayCore {
     if (missing.length > 0) {
       throw new Error(`キャッシュに戦績がありません(${missing.length} 頭分)。取得をやり直してください`);
     }
+    // 前走の条件(Issue #421 段階 1-b)の警告は、画面向けの警告(`result.warnings`)に入れず、ログ(onWarn)だけに出す({@link takePrevConditionWarnings})。
+    // キャッシュに無い(取得ステップの失敗・キャッシュの掃除)ときの文面は取得先の URL を含むので、URL を含まない固定の文面に書き換えてから出す(分析は止めない)。
+    // 戦績が欠けて再試行になる回は上で投げているので、同じ警告が試行の回数だけ重ならない。
+    this.warnPrevConditions(
+      warnLabel,
+      this.takePrevConditionWarnings(race.meta.warnings).map((w) => (w.message.includes(CACHE_MISS_HEAD) ? { kind: w.kind, message: PREV_CONDITIONS_MISSING_MESSAGE } : w)),
+    );
     return race;
   }
 
@@ -1932,16 +1992,19 @@ export class RaceDayCore {
       }
       const race = await scrapeRace(
         parseRaceId(task.race_id),
-        { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore, trainerStore: this.trainerStore },
+        { fetcher: requireCacheKeyForPost(this.networkFetcher), now: () => new Date(this.now()), jockeyStore: this.jockeyStore, trainerStore: this.trainerStore },
         // 地方の三連単は軸ごとに頭数ぶんのリクエストが要るので、この取得ステップ(1回のアラーム)では取らず、次の段階(別のアラーム)に分ける(`deferNarTrifecta`。中央は無視される。Issue #283)。
-        { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), bypassOddsCache: true, deferNarTrifecta: true },
+        { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), includePrevConditions: true, bypassOddsCache: true, deferNarTrifecta: true },
       );
+      const prevWarnings = this.takePrevConditionWarnings(race.meta.warnings);
+      this.dropBrokenNewspaperCache(task.race_id, prevWarnings);
       await this.saveRaceCondition(task.race_id, race.race);
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
       if (missing.length > 0) {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
       }
       this.warnPersonStats(`発走前の取得(${task.race_id})`, race.meta.warnings);
+      this.warnPrevConditions(`発走前の取得(${task.race_id})`, prevWarnings);
       await this.prefetchGradeWinner(task, parseRaceId(task.race_id), race.race.hasGradeBadge);
       // 日報の時刻の下限(Issue #291)を記録する。出馬表の取得が成功した後・結果の行を積む前(取得が失敗した試行では引かない)。失敗しても取得ステップは失敗にしない。
       await this.reportHold.record(task.race_id);
@@ -1996,7 +2059,7 @@ export class RaceDayCore {
    * 本文を取得キャッシュ(`fetch_cache`)に積む(パースは計算ステップに任せる=二重に解析しない)。軸の結果(fetched・failed)は**取得の直後に、次の軸を取る前に**表に書く
    * (再開・二重のアラームで、書けた軸を取り直さない。取り直すのは、書く前に落ちた 1 軸だけ)。未取得の軸が尽きたら、次のステップで計算に進む。
    *
-   * 外への呼び出しの上限: このステップは gate への取得が最大 9 本(取得ステップの `scrapeRace` の 2N+4+M ≤ 40〈重賞の傾向・日報の下限の一覧を足して最大 42〉とは別のアラーム)で、計算ステップは 0 本。
+   * 外への呼び出しの上限: このステップは gate への取得が最大 9 本(取得ステップの `scrapeRace` の 2N+4+M ≤ 40〈前走の条件・重賞の傾向・日報の下限の一覧を足して最大 43〉とは別のアラーム)で、計算ステップは 0 本。
    * 失敗は軸ごとに隔離する: 1軸の失敗(404・通信エラー・タイムアウト・`queue-full`)はその軸だけ failed にして次へ。**ブレーカー(blocked)・許可リスト外は残りを撃たずに全部 failed**
    * にして打ち切る(30 分のブレーカーの間に撃ち直さない)。どの場合も計算に進み、取れなかった軸は、計算ステップの `scrapeRace` がキャッシュに無い軸として `fetchFailed`
    * (部分被覆の警告)にする。三連単なしでも他の券種で分析は完了する。
@@ -2093,7 +2156,7 @@ export class RaceDayCore {
               });
         await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
           scrape: async (id) => {
-            const race = await this.scrapeFromCache(id, { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings) }, oddsSince);
+            const race = await this.scrapeFromCache(id, { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), includePrevConditions: true }, `発走前の分析(${id})`, oddsSince);
             scrapeWarnings = race.meta.warnings;
             return race;
           },

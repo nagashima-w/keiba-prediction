@@ -8,7 +8,7 @@
  * 読み取りループ・EOF・サイズ上限・タイムアウト・後始末をテストできる。
  *
  * 送るヘッダは**この集合だけ**({@link NETKEIBA_REQUEST_HEADERS})。呼び出し側からヘッダを渡す口は無い。
- * POST(Issue #181。重賞の過去10年傾向の API)は、これに `Content-Type`・`X-Requested-With`(固定の値)・`Referer`・`Origin`(呼び出し側の値)の4つを足した形だけ
+ * POST(Issue #181。重賞の過去10年傾向の API と、Issue #421 段階 1-b の新聞形式 API)は、これに `Content-Type`・`X-Requested-With`(固定の値)・`Referer`・`Origin`(呼び出し側の値)の4つを足した形だけ
  * ({@link SocketPostInit})。実測(Issue #181 の着手コメント)で HTTP 200 だった並びと同じにする。段階1(#162)の実測で、
  * この4つ + `Host` + `Connection: close`(`Accept-Encoding` なし)の形が、race・db・nar の9本すべて HTTP 200 だった。
  * **圧縮は要求しない**(gzip を要求しても圧縮されずに返ったため)。

@@ -7,7 +7,7 @@
  * 守り:
  *  - GET でゲートへ渡すのは **URL だけ**。呼び出し側のヘッダ(`HttpClient` が付ける User-Agent を含む)・シグナルは捨てる
  *    (ヘッダはソケット取得クライアントの固定の集合だけ。送信元を1か所に閉じ込める)
- *  - **POST は許可リストに合うものだけ**(Issue #181。重賞の過去10年傾向の API)通す: ヘッダは `Content-Type`・`X-Requested-With`(値は固定)・`Referer`・`Origin`
+ *  - **POST は許可リストに合うものだけ**(Issue #181。重賞の過去10年傾向の API。Issue #421 段階 1-b で前走の条件の新聞形式 API を足した)通す: ヘッダは `Content-Type`・`X-Requested-With`(値は固定)・`Referer`・`Origin`
  *    の4つだけ(`User-Agent` は GET と同じく捨てる。そのほかのヘッダは拒否)で、宛先・本文・Referer・Origin の形は `checkAllowedPost`(`gate-core.ts`)で検査する。
  *    ゲートへ渡すのは宛先・Referer・Origin・本文だけ(`postRaw`)。合わないものと、GET・POST 以外のメソッドは、ゲートを呼ばずに拒否する
  *  - ゲートの拒否(ブレーカー・待ち行列・許可リスト・通信失敗など)は {@link GateRefusedError} として投げる(`HttpClient` が

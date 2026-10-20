@@ -58,6 +58,10 @@ const NON_ODDS_BUILDERS: Record<string, () => string[]> = {
   gradeWinnerApiUrl: () => [urls.gradeWinnerApiUrl(CENTRAL), urls.gradeWinnerApiUrl(NAR)],
   gradeWinnerRefererUrl: () => [urls.gradeWinnerRefererUrl(CENTRAL), urls.gradeWinnerRefererUrl(NAR)],
   gradeWinnerOriginUrl: () => [urls.gradeWinnerOriginUrl(CENTRAL), urls.gradeWinnerOriginUrl(NAR)],
+  // 新聞形式 API(Issue #421 段階 1-b)。オッズではない(前走の条件)。
+  newspaperApiUrl: () => [urls.newspaperApiUrl(CENTRAL), urls.newspaperApiUrl(NAR)],
+  newspaperRefererUrl: () => [urls.newspaperRefererUrl(CENTRAL), urls.newspaperRefererUrl(NAR)],
+  newspaperOriginUrl: () => [urls.newspaperOriginUrl(CENTRAL), urls.newspaperOriginUrl(NAR)],
 };
 
 const exportedBuilders = Object.entries(urls)

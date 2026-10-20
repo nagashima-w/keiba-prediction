@@ -21,7 +21,7 @@
  *   null(正常)、非空なら異常事由(取消・除外等)の文字列として扱う。
  */
 
-import { inflateSync } from "node:zlib";
+import { decodeRaceApiPayload, findEncodedPayload, RaceApiDecodeError } from "./decode-race-api.js";
 import { toNinkiFromJson } from "./ninki.js";
 
 /** 過去10年結果APIのパース失敗を表す例外(status:"OK"なのに構造が壊れている場合のみ)。 */
@@ -192,26 +192,6 @@ function parseEntry(raw: unknown): GradeWinnerEntry {
 }
 
 /**
- * data オブジェクトから、ハッシュ付きキー("_last_dt" で終わらないキー)の値(base64文字列)を取り出す。
- * キー名をハードコードしないための実装(recon合意事項)。
- */
-function findEncodedPayload(data: Record<string, unknown>): string {
-  const key = Object.keys(data).find((k) => !k.endsWith("_last_dt"));
-  if (key === undefined) {
-    throw new GradeWinnerParseError(
-      "同レース過去10年結果APIの応答からデータキー(_last_dtで終わらないキー)を特定できません",
-    );
-  }
-  const value = data[key];
-  if (typeof value !== "string") {
-    throw new GradeWinnerParseError(
-      "同レース過去10年結果APIの応答データがbase64文字列ではありません",
-    );
-  }
-  return value;
-}
-
-/**
  * 過去10年結果APIの生レスポンス文字列をパースする。
  *
  * @param raw HTTPレスポンスの本文(JSON文字列)
@@ -245,26 +225,28 @@ export function parseGradeWinnerResponse(
     );
   }
 
-  const encoded = findEncodedPayload(response.data as Record<string, unknown>);
-
-  let decodedText: string;
-  try {
-    // Buffer.from(...) で包むのは、型の解決のため(Issue #176: cloud の型検査は @cloudflare/workers-types と @types/node を併用し、
-    // 前者の inflateSync の戻り値の型では toString("utf-8") が通らない。実行時は inflateSync が返す Buffer のコピーで、結果は同じ)。
-    decodedText = Buffer.from(inflateSync(Buffer.from(encoded, "base64"))).toString("utf-8");
-  } catch (error) {
+  const found = findEncodedPayload(response.data as Record<string, unknown>);
+  if (!found.ok) {
     throw new GradeWinnerParseError(
-      `同レース過去10年結果APIの応答の復号(base64/zlib)に失敗しました: ${String(error)}`,
+      found.reason === "no-key"
+        ? "同レース過去10年結果APIの応答からデータキー(_last_dtで終わらないキー)を特定できません"
+        : "同レース過去10年結果APIの応答データがbase64文字列ではありません",
     );
   }
 
+  // 復号(base64 → zlib → JSON)は newspaper API と共有する(`decode-race-api.ts`)。文言は共有化の前から変えていない。
   let decoded: unknown;
   try {
-    decoded = JSON.parse(decodedText);
+    decoded = decodeRaceApiPayload(found.value);
   } catch (error) {
-    throw new GradeWinnerParseError(
-      `復号後データのJSON解析に失敗しました: ${String(error)}`,
-    );
+    if (error instanceof RaceApiDecodeError) {
+      throw new GradeWinnerParseError(
+        error.stage === "inflate"
+          ? `同レース過去10年結果APIの応答の復号(base64/zlib)に失敗しました: ${String(error.cause)}`
+          : `復号後データのJSON解析に失敗しました: ${String(error.cause)}`,
+      );
+    }
+    throw error;
   }
 
   if (!Array.isArray(decoded)) {

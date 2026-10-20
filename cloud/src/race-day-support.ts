@@ -34,6 +34,7 @@ export const CACHE_ONLY_TTL: ScrapeTtlConfig = {
   raceListMs: FOREVER_MS,
   jockeyMs: FOREVER_MS,
   trainerMs: FOREVER_MS,
+  newspaperMs: FOREVER_MS,
 };
 
 /**

@@ -9,6 +9,7 @@ import type { GateLike } from "../src/gate-fetch";
 import { RaceDayCore, type AnalysisSink, type RaceDayDeps } from "../src/race-day-core";
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { fixtureForUrl } from "./pipeline-fixtures";
+import { newspaperOnlyPostRaw } from "./newspaper-post";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
 /**
@@ -38,6 +39,8 @@ interface FakeGate extends GateLike {
 function fakeGate(): FakeGate {
   const gate: FakeGate = {
     urls: [],
+    // 取得ステップが前走の条件(新聞形式 API。Issue #421 段階 1-b)を POST するので、警告を出さない応答を返す(このテストが固定する GET の列・警告は変わらない)。
+    postRaw: newspaperOnlyPostRaw,
     body: (url) => fixtureForUrl(url),
     async fetchRaw(url): Promise<GateResult> {
       gate.urls.push(url);

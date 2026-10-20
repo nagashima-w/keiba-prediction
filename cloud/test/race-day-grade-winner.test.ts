@@ -11,6 +11,7 @@ import type { CloudLlm } from "../src/llm-sender";
 import { RaceDayCore, type AnalysisSink } from "../src/race-day-core";
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { fixtureForUrl, GRADE_WINNER_RESPONSE, loadFixture } from "./pipeline-fixtures";
+import { isNewspaperPost, newspaperPostResult } from "./newspaper-post";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
 /**
@@ -41,8 +42,11 @@ const SHUTUBA_WITHOUT_BADGE = (): string => loadFixture("shutuba_202603020211.ht
 
 interface FakeGate extends GateLike {
   readonly urls: string[];
+  /** 重賞の過去10年傾向(AplGradeWinner)の POST だけ。前走の条件(新聞形式 API。Issue #421 段階 1-b)の POST は `newspaperPosts` に分ける(このファイルの POST の本数の検査は重賞の傾向のもの)。 */
   readonly posts: GatePostRequest[];
-  /** POST の応答(既定は重賞の実フィクスチャ)。 */
+  /** 前走の条件(新聞形式 API)の POST。応答は実フィクスチャ(200)で、`postHandler` の影響を受けない。 */
+  readonly newspaperPosts: GatePostRequest[];
+  /** POST の応答(重賞の傾向。既定は重賞の実フィクスチャ)。 */
   postHandler: (request: GatePostRequest) => GateResult | Promise<GateResult>;
   /** 出馬表を非重賞にする。 */
   badge: boolean;
@@ -51,6 +55,7 @@ function fakeGate(): FakeGate {
   const gate: FakeGate = {
     urls: [],
     posts: [],
+    newspaperPosts: [],
     badge: true,
     postHandler: () => ok(GRADE_WINNER_RESPONSE()),
     async fetchRaw(url): Promise<GateResult> {
@@ -60,6 +65,10 @@ function fakeGate(): FakeGate {
       return ok(body);
     },
     async postRaw(request): Promise<GateResult> {
+      if (isNewspaperPost(request)) {
+        gate.newspaperPosts.push(request);
+        return newspaperPostResult();
+      }
       gate.posts.push(request);
       await Promise.resolve();
       return gate.postHandler(request);

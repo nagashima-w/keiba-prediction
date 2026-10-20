@@ -28,6 +28,7 @@ import {
   type PredictionMark,
   type RaceData,
   type RaceResultDetail,
+  type ScrapeRaceOptions,
 } from "../../src/index.js";
 import { buildPrompt } from "../../src/analyzer/build-prompt.js";
 
@@ -63,6 +64,17 @@ function fixtureForUrl(url: string): string {
     return loadFixture(RESULTS_BY_HORSE[horseId] ?? "horse_results_2021105857.json");
   }
   if (url.includes("oikiri.html")) return loadFixture("oikiri_202603020211.html");
+  // 騎手・調教師の年度別成績(`scrapeFixtureRace` に includeJockeyStats / includeTrainerStats を渡したときだけ呼ばれる。golden のシナリオは渡さない)。
+  // 割り当てはクラウド版の `cloud/test/pipeline-fixtures.ts` と同じ(騎手 01170 は実ページ、ほかは別の実ページ。調教師は実ページ 4 種)。
+  if (url.includes("/jockey/result.html")) {
+    return loadFixture(url.includes("id=01170") ? "jockey_results_01170.html" : "jockey_results_01220.html");
+  }
+  if (url.includes("/trainer/result.html")) {
+    if (url.includes("id=01126")) return loadFixture("trainer_results_01126.html");
+    if (url.includes("id=01175")) return loadFixture("trainer_results_01175.html");
+    if (url.includes("id=01092")) return loadFixture("trainer_results_01214.html");
+    return loadFixture("trainer_results_01213.html");
+  }
   if (url.includes("type=5")) return loadFixture("odds_wide_202603020211.json");
   if (url.includes("type=7")) return loadFixture("odds_trio_202603020211.json");
   if (url.includes("type=4")) return loadFixture("odds_quinella_202603020211.json");
@@ -74,14 +86,14 @@ function fixtureForUrl(url: string): string {
 }
 
 /** フィクスチャから組み立てる(全券種の組合せオッズ入り)。 */
-export async function scrapeFixtureRace(): Promise<RaceData> {
+export async function scrapeFixtureRace(extra: ScrapeRaceOptions = {}): Promise<RaceData> {
   return scrapeRace(
     RACE_ID,
     {
       fetcher: { fetchText: async (url) => fixtureForUrl(url) },
       now: FIXED_NOW,
     },
-    { includeComboOdds: true },
+    { includeComboOdds: true, ...extra },
   );
 }
 
@@ -181,8 +193,10 @@ export function viaJson<T>(value: T): T {
  */
 export async function computeGolden(
   overrides: Partial<AnalysisPipelineDeps> = {},
+  /** 入力のレースデータの差し替え(既定はフィクスチャから取得した `scrapeFixtureRace()`。Issue #421 段階 1-b の不変性の検査が、前走の表を載せたものを渡す)。 */
+  raceOverride?: RaceData,
 ): Promise<GoldenFile> {
-  const race = await scrapeFixtureRace();
+  const race = raceOverride ?? (await scrapeFixtureRace());
 
   async function run(
     kaisaiDate: typeof KAISAI_DATE,

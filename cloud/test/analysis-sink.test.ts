@@ -7,6 +7,7 @@ import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { contractCases } from "./fixtures-contract";
 import { openLocalBindings, spyBucket, spyDb, type LocalBindings } from "./local-bindings";
 import { fixtureForUrl } from "./pipeline-fixtures";
+import { newspaperOnlyPostRaw } from "./newspaper-post";
 import { openNodeSql } from "./node-sql";
 
 /**
@@ -187,6 +188,8 @@ describe("DO(RaceDayCore)から保存まで通す(本物の D1・R2。AC-c1・c6
           body.set(view);
           return { kind: "response", status: 200, contentType: "text/html; charset=UTF-8", body: body.buffer, queuedMs: 0, elapsedMs: 1 };
         },
+        // 取得ステップが前走の条件(新聞形式 API。Issue #421 段階 1-b)を POST するので、警告を出さない応答を返す。
+        postRaw: newspaperOnlyPostRaw,
       },
       setAlarm: (at) => {
         alarm.at = at;

@@ -201,6 +201,28 @@ export function gradeWinnerOriginUrl(raceId: RaceId): string {
 }
 
 /**
+ * 新聞形式API(AplNewsPaper。前走までの条件を返す。Issue #421 段階 1-b)の固定URL。過去10年結果API({@link gradeWinnerApiUrl})と同じ
+ * エンドポイント(`/race_api/`)で、race_idはPOSTボディに入る。ホスト(中央/地方)はrace_idの場コードで選ぶ。
+ */
+export function newspaperApiUrl(raceId: RaceId): string {
+  return `${raceBaseFor(raceId)}/race_api/`;
+}
+
+/**
+ * 新聞形式APIのReferer。ページ名は中央・地方とも `newspaper.html`(地方の出馬表のページに
+ * `https://nar.netkeiba.com/race/newspaper.html?race_id=…` へのリンクがあることを保存済みHTMLで確認した。
+ * 過去10年結果APIのような中央 past10 / 地方 past5 の違いは無い)。応答はヘッダを外しても同一だった(実測)ので、形式上の値。
+ */
+export function newspaperRefererUrl(raceId: RaceId): string {
+  return `${raceBaseFor(raceId)}/race/newspaper.html?race_id=${raceId}`;
+}
+
+/** 新聞形式APIのOrigin(ホストのみ)。 */
+export function newspaperOriginUrl(raceId: RaceId): string {
+  return raceBaseFor(raceId);
+}
+
+/**
  * 単勝・複勝オッズページのURL(地方のみ)。
  *
  * 中央と異なりJSON APIが存在しない(実測404)ため、静的HTML(odds/index.html?type=b1)を
