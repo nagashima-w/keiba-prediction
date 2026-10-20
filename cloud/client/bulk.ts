@@ -9,6 +9,7 @@
  *  - 過去の開催日・実行状態(板)が取れていないときは、ボタンを無効にして理由を出す。
  *  - 発走済みの判定はこの画面だけ(サーバは強制しない。単独の起動と同じ)。
  */
+import { jstHm as jstHmOfMs } from "../../packages/core/src/common/jst";
 import type { BoardRow, RaceRow, TaskMode } from "./api";
 import type { BulkEntry } from "./api-bulk";
 import { todayJst } from "./date";
@@ -31,9 +32,7 @@ export interface BulkSelection {
 
 /** 現在の JST の `HH:MM`(発走予定時刻と文字列で比べる)。UTC に 9 時間を足した時刻。 */
 export function jstHm(now: Date): string {
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const pad = (n: number): string => String(n).padStart(2, "0");
-  return `${pad(jst.getUTCHours())}:${pad(jst.getUTCMinutes())}`;
+  return jstHmOfMs(now.getTime());
 }
 
 /**

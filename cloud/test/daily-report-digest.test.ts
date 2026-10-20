@@ -32,6 +32,14 @@ describe("buildRaceDigest", () => {
     expect(d.horses.map((h) => h.mark)).toEqual(["◎", "〇", "▲", null]);
   });
 
+  it("Issue #397 R-5(特性): ダイジェストの印の順位は文字列の indexOf で引く。範囲外の入力では、空文字は ◎ と同順位(0)、未知の印は末尾の手前、印なし(null)は最後", () => {
+    // 共通の markRank(配列で引く)に寄せると、空文字は「未知の印」(6)になり、馬 4 の位置が変わる。digest は文字列版のまま残す(範囲外の入力の挙動を変えない)。
+    const v = view(raceId, [horse(1, { isPositive: true }), horse(2, { mark: "x" }), horse(3, { mark: "◎" }), horse(4, { mark: "" })]);
+    const d = buildRaceDigest(v, undefined);
+    expect(d.horses.map((h) => h.umaban)).toEqual([3, 4, 2, 1]);
+    expect(d.horses.map((h) => h.mark)).toEqual(["◎", "", "x", null]);
+  });
+
   it("印も EV プラスも無いレースは、補正後の確率が高い上位 3 頭を載せる(馬の欄が空にならない)", () => {
     const v = view(raceId, [horse(1, { adjustedProb: 0.1 }), horse(2, { adjustedProb: 0.4 }), horse(3, { adjustedProb: 0.3 }), horse(4, { adjustedProb: 0.2 })]);
     expect(buildRaceDigest(v, undefined).horses.map((h) => h.umaban)).toEqual([2, 3, 4]);

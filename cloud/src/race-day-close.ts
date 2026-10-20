@@ -14,6 +14,7 @@
  * 同じレースの発走前の分析を予約し直す(`enqueueTask`)と、そのレースの行と入力は消える({@link CloseStore.clear})=古い実行の再計算は起きない。
  */
 import type { AnalysisAllocationSettings } from "../../packages/core/src/analysis/allocation-record.js";
+import { isFiniteNumber, isRecord } from "../../packages/core/src/common/guards";
 import { assertClosePayload, CLOSE_ROUNDS, type CloseSavePayload } from "./analysis-close";
 import type { SqlLike } from "./sql-like";
 
@@ -98,8 +99,6 @@ export interface CloseRegistration {
   readonly input: CloseInput;
 }
 
-const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 const SETTING_BOOLEANS = [
   "includeComboOdds",
@@ -119,14 +118,14 @@ export function parseCloseInput(text: string): CloseInput | null {
   } catch {
     return null;
   }
-  if (!isObj(raw) || raw.v !== 1 || typeof raw.kaisaiDate !== "string" || !Array.isArray(raw.horses) || raw.horses.length === 0) {
+  if (!isRecord(raw) || raw.v !== 1 || typeof raw.kaisaiDate !== "string" || !Array.isArray(raw.horses) || raw.horses.length === 0) {
     return null;
   }
-  if (!isNum(raw.evThreshold) || !(raw.baseRoute === null || typeof raw.baseRoute === "string")) {
+  if (!isFiniteNumber(raw.evThreshold) || !(raw.baseRoute === null || typeof raw.baseRoute === "string")) {
     return null;
   }
   const settings = raw.allocationSettings;
-  if (!isObj(settings) || !isNum(settings.bankroll) || !isNum(settings.perRaceCap) || !isNum(settings.kellyFraction)) {
+  if (!isRecord(settings) || !isFiniteNumber(settings.bankroll) || !isFiniteNumber(settings.perRaceCap) || !isFiniteNumber(settings.kellyFraction)) {
     return null;
   }
   for (const key of SETTING_BOOLEANS) {
@@ -137,7 +136,7 @@ export function parseCloseInput(text: string): CloseInput | null {
   const seen = new Set<number>();
   const horses: CloseInputHorse[] = [];
   for (const h of raw.horses as unknown[]) {
-    if (!isObj(h) || !isNum(h.umaban) || !isNum(h.wakuban) || typeof h.horseName !== "string" || !isNum(h.prior) || !isNum(h.adjustedProb) || typeof h.hadWinOdds !== "boolean" || typeof h.hadPlaceOdds !== "boolean") {
+    if (!isRecord(h) || !isFiniteNumber(h.umaban) || !isFiniteNumber(h.wakuban) || typeof h.horseName !== "string" || !isFiniteNumber(h.prior) || !isFiniteNumber(h.adjustedProb) || typeof h.hadWinOdds !== "boolean" || typeof h.hadPlaceOdds !== "boolean") {
       return null;
     }
     if (seen.has(h.umaban)) {
@@ -147,7 +146,7 @@ export function parseCloseInput(text: string): CloseInput | null {
     horses.push({ umaban: h.umaban, wakuban: h.wakuban, horseName: h.horseName, prior: h.prior, adjustedProb: h.adjustedProb, hadWinOdds: h.hadWinOdds, hadPlaceOdds: h.hadPlaceOdds });
   }
   // 期間は省略可能(型だけ検査する。数でない値は壊れた入力として弾く。片方だけのときは、期間が無いものとして扱う=下の組み立てで落とす)。
-  if ((raw.comboFromMs !== undefined && !isNum(raw.comboFromMs)) || (raw.comboToMs !== undefined && !isNum(raw.comboToMs))) {
+  if ((raw.comboFromMs !== undefined && !isFiniteNumber(raw.comboFromMs)) || (raw.comboToMs !== undefined && !isFiniteNumber(raw.comboToMs))) {
     return null;
   }
   return {

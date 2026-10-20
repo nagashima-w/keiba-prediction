@@ -53,6 +53,9 @@ export class BabaFetchError extends Error {
   }
 }
 
+import { JST_OFFSET_MS } from "../../packages/core/src/common/jst";
+import { isRecord } from "../../packages/core/src/common/guards";
+
 /** `RaceDayCore` に渡す取得口: 2xx の本文を返す。失敗は {@link BabaFetchError} を投げる。URL はこの関数の外に出ない(作るのは `baba-fetch.ts`)。 */
 export type BabaFetcher = () => Promise<string>;
 
@@ -71,8 +74,6 @@ const MAX_TURF_LENGTH = 200;
 const MAX_TURF_TEXT = 500;
 const MAX_VENUE_NAME = 20;
 
-/** JST は UTC+9(夏時間なし)。 */
-const JST_OFFSET_MS = 9 * 3600_000;
 const DAY_MS = 86_400_000;
 /** 年の補いで、取得日との距離がこの日数以内の年を選ぶ。 */
 const YEAR_WINDOW_DAYS = 182;
@@ -147,8 +148,6 @@ const fail = (result: "not-json" | "shape-mismatch" | "stale", apiFetchedAt: str
 /** 不正な競馬場を表す印(型が違う・範囲外)。 */
 const INVALID = Symbol("invalid");
 type Maybe<T> = T | typeof INVALID;
-
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** undefined・null → null。範囲内の有限の数 → その数。それ以外 → INVALID。 */
 function numberOrNull(value: unknown, range: readonly [number, number]): Maybe<number | null> {

@@ -53,6 +53,7 @@ import {
 } from "../../packages/core/src/ev/analysis-store-codec.js";
 import type { RaceComboPayoutsSaveInput, RaceResultDetail, RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
 import type { CourseType } from "../../packages/core/src/scraper/types.js";
+import { finiteOrNull } from "../../packages/core/src/common/guards.js";
 
 /** D1 のうち、ストアが使う部分だけ(テストで記録つきの転送を渡せる)。 */
 export type ResultDb = Pick<D1Database, "prepare" | "batch">;
@@ -304,11 +305,6 @@ export const COUNT_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
 /** 枠番として書ける値(1〜8 の整数)ならそのまま、そうでなければ null(未記録の NULL にする。範囲外の値を書かない)。 */
 function validWakuban(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 8 ? value : null;
-}
-
-/** 値が有限数ならそのまま、そうでなければ null(JSON に NaN・Infinity・undefined を載せない)。 */
-function finiteOrNull(value: number | null | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /**

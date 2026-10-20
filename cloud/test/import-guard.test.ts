@@ -340,6 +340,11 @@ describe("cloud/client の閉包(型だけの import も含む。Issue #201)", (
     expect(names, "Issue #397 R-3: 検証画面の整形は core の view/verify-format.ts を直接 import する(client の複製をなくした)").toContain("view/verify-format.ts");
     expect(names).toContain("analysis/analysis-types.ts");
     expect(names).toContain("analysis/app-settings.ts");
+    // Issue #397(R-5): 共通部品(JST・型ガード・印の並び)を client が直接 import する。乱数(common/random.ts)は client から使わない。
+    expect(names).toContain("common/jst.ts");
+    expect(names).toContain("common/guards.ts");
+    expect(names).toContain("common/prediction-marks.ts");
+    expect(names).not.toContain("common/random.ts");
     expect(outsideFiles.size).toBe(0);
   });
 

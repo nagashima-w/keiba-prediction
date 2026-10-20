@@ -64,6 +64,7 @@ import type { JointModelHorse } from "./place-joint-model.js";
 import { CONDITIONAL_BERNOULLI_MODEL } from "./place-joint-model.js";
 import { resolveComboOdds } from "./combo-bet-allocation.js";
 import { isUsableOdds } from "./allocation-primitives.js";
+import { mulberry32 } from "../common/random.js";
 import {
   binIndexFor,
   calibrationBinBounds,
@@ -809,18 +810,6 @@ export type BrierDifferenceBootstrapResult =
       readonly raceCount: number;
       readonly reason: string;
     };
-
-/** 決定論的な擬似乱数 mulberry32。 */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /**
  * モデルと市場の Brier 差(model − market)の95%区間を、**レース単位**の再標本化(復元抽出)で求める。

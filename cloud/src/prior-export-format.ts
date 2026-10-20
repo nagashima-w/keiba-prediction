@@ -27,6 +27,8 @@
 import { classifyLookaheadSuspicion } from "../../packages/core/src/ev/lookahead-suspicion.js";
 import { kaisaiDateFromNarRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids.js";
 import type { RaceId } from "../../packages/core/src/scraper/ids.js";
+import { finiteOrNull, isRecord } from "../../packages/core/src/common/guards.js";
+import { JST_OFFSET_MS } from "../../packages/core/src/common/jst.js";
 import { gzipSync } from "node:zlib";
 
 /** ファイルの形式の版。列を足す・意味を変えるときに上げる(ローダは読めない版を例外にする)。2 = Issue #341 で出馬表の列を足した。 */
@@ -147,8 +149,6 @@ export interface PriorContribution {
   readonly overallRate: number | null;
 }
 
-const finiteOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
-
 /**
  * R2 の詳細に入っている馬 1 頭の寄与度(core の `ScoreContribution[]`)を、書き出す形にする。
  * 配列でない・項目が壊れている(オブジェクトでない・`biasName` が文字列でない)ときは null(想定外の形を推測で直さない)。
@@ -254,7 +254,6 @@ export const CRITIC_MAX_LENGTH = 16;
 const NULL_RACE_COLUMNS: PriorRaceColumns = { race_name: null, grade: null, distance: null, track_condition: null };
 const NULL_HORSE_COLUMNS: PriorHorseColumns = { wakuban: null, sex: null, age: null, body_weight: null, kinryo: null, oikiri_rank: null, oikiri_critic: null };
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const nonEmptyStringOrNull = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 const integerOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
 
@@ -428,6 +427,6 @@ export function assembleFile(meta: PriorExportMetaInput, chunks: readonly Uint8A
 
 /** ダウンロードのファイル名(JST の日時)。 */
 export function exportFilename(generatedAtIso: string): string {
-  const jst = new Date(Date.parse(generatedAtIso) + 9 * 60 * 60_000).toISOString();
+  const jst = new Date(Date.parse(generatedAtIso) + JST_OFFSET_MS).toISOString();
   return `prior-dataset-${jst.slice(0, 10).replaceAll("-", "")}-${jst.slice(11, 16).replace(":", "")}.ndjson.gz`;
 }

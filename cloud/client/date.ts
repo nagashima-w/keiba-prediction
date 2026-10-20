@@ -2,7 +2,7 @@
  * スマホ画面の日付の純関数(Issue #184)。開催日は JST の YYYYMMDD。`<input type="date">` の値は YYYY-MM-DD。
  */
 
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+import { JST_OFFSET_MS } from "../../packages/core/src/common/jst";
 
 /** JST の今日(YYYYMMDD)。UTC に 9 時間を足した暦日(UTC の 15:00 以降は JST の翌日)。 */
 export function todayJst(now: Date): string {

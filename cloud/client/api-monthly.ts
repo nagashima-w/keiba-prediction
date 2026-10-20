@@ -6,8 +6,8 @@
  * **サーバの文面は読まない**(失敗は、ステータスと `error.type` だけで分類し、固定の文言にする)。統計の読み方は日報と共有する(`parsePeriod`)。
  * キー名・形のドリフトは `test/client-api-monthly-contract.test.ts`(実際の `handle()` の応答と、月報の組み立て〈`MonthlyReportCore`〉の出力を通す)が検出する。
  */
-import { classify, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
-import { isCount, isYmd, numOrNull, parseJobOf, parsePeriod, postRun, readBody, reportFetchFailureMessage, type JobOf, type ReportPeriod, type ReportRunOutcome } from "./api-report";
+import { classify, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { isCount, isYmd, parseJobOf, parsePeriod, postRun, readBody, reportFetchFailureMessage, type JobOf, type ReportPeriod, type ReportRunOutcome } from "./api-report";
 import { isRealMonth } from "./date";
 
 /** 一覧の 1 行(本文を含まない)。 */

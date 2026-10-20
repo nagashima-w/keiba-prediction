@@ -10,7 +10,8 @@
  * `not-computed`(**閲覧者にだけ**返る。使える集計がまだ無い。閲覧者の要求は集計のやり直しを起こさないので、管理者が集計するまでこの状態になる。Issue #263)。
  * 閲覧者の `ready` は管理者の `ready` と同じ形で読む(診断は発走時刻の欠落だけ・`stale` は偽・追加指示の全文は `"(非公開)"` に置き換わっている。サーバが落とす)。
  */
-import { classify, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { PREDICTION_MARKS } from "../../packages/core/src/common/prediction-marks";
+import { classify, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 export type VerifyVenue = "all" | "central" | "nar";
 
@@ -60,8 +61,8 @@ export interface DirectionGroupView {
   readonly averageAdjustment: number | null;
 }
 
-/** 予想印(core の `PREDICTION_MARKS` と同じ。一致は契約テストが固定する)。 */
-export const MARKS = ["◎", "〇", "▲", "△", "☆", "注"] as const;
+/** 予想印(core の `PREDICTION_MARKS` そのもの。Issue #397・R-5 で、ここに持っていた配列を共通部品に寄せた。値は契約テストが固定する)。 */
+export const MARKS = PREDICTION_MARKS;
 export type MarkView = (typeof MARKS)[number];
 
 /** 印別的中率の 1 群(サーバの `MarkStat`)。`mark` が null は印なし。 */
@@ -209,7 +210,6 @@ const isMoney = (v: unknown): v is number => isNum(v) && v >= 0;
 const rateOrNull = (v: unknown): v is number | null => v === null || (isNum(v) && v >= 0);
 
 const rate01OrNull = (v: unknown): v is number | null => v === null || (isNum(v) && v >= 0 && v <= 1);
-const signedOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 
 function parseBin(v: unknown): CalibrationBinView | null {
   if (!isRecord(v) || !isNum(v["lowerBound"]) || !isNum(v["upperBound"]) || !isCount(v["predictedCount"]) || !isCount(v["placedCount"]) || !rate01OrNull(v["actualPlaceRate"]) || !rate01OrNull(v["meanPredictedProb"])) return null;
@@ -220,7 +220,7 @@ function parseBin(v: unknown): CalibrationBinView | null {
 }
 
 function parseDirectionGroup(v: unknown): DirectionGroupView | null {
-  if (!isRecord(v) || !isStr(v["direction"]) || !(ADJUSTMENT_DIRECTIONS as readonly string[]).includes(v["direction"]) || !isCount(v["count"]) || !rate01OrNull(v["actualPlaceRate"]) || !signedOrNull(v["averageAdjustment"])) return null;
+  if (!isRecord(v) || !isStr(v["direction"]) || !(ADJUSTMENT_DIRECTIONS as readonly string[]).includes(v["direction"]) || !isCount(v["count"]) || !rate01OrNull(v["actualPlaceRate"]) || !numOrNull(v["averageAdjustment"])) return null;
   return { direction: v["direction"] as AdjustmentDirectionView, count: v["count"], actualPlaceRate: v["actualPlaceRate"], averageAdjustment: v["averageAdjustment"] };
 }
 
@@ -247,7 +247,7 @@ function parseList<T>(v: unknown, parse: (item: unknown) => T | null): T[] | nul
 function parseTrend(v: unknown): VerifyReportView["trend"] | null {
   if (!isRecord(v)) return null;
   const directionGroups = parseList(v["directionGroups"], parseDirectionGroup);
-  const calibrationBias = parseList(v["calibrationBias"], (item) => (isRecord(item) && signedOrNull(item["overconfidenceGap"]) ? { overconfidenceGap: item["overconfidenceGap"] } : null));
+  const calibrationBias = parseList(v["calibrationBias"], (item) => (isRecord(item) && numOrNull(item["overconfidenceGap"]) ? { overconfidenceGap: item["overconfidenceGap"] } : null));
   const markStats = parseList(v["markStats"], parseMarkStat);
   if (directionGroups === null || calibrationBias === null || markStats === null) return null;
   // 3 群が 1 つずつ(core は raised・lowered・unchanged の順で必ず 3 件)
@@ -325,7 +325,7 @@ function parsePromptVersion(v: unknown): PromptVersionView | null {
   const calibration = parseList(v["calibration"], parseBin);
   const priorCalibration = parseList(v["priorCalibration"], parseBin);
   const quality = parseQuality(v["quality"]);
-  const gaps = parseList(v["overconfidenceGaps"], (g) => (signedOrNull(g) ? { gap: g } : null));
+  const gaps = parseList(v["overconfidenceGaps"], (g) => (numOrNull(g) ? { gap: g } : null));
   if (calibration === null || priorCalibration === null || quality === null || gaps === null || gaps.length !== calibration.length || priorCalibration.length !== calibration.length) return null;
   return {
     promptVersion: v["promptVersion"],

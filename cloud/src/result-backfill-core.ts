@@ -52,6 +52,7 @@
  * ## 例外を投げない
  * アラームの中の失敗は握って、10 分後に再試行する({@link BACKFILL_ERROR_RETRY_MS})。ログ・警告は固定の分類名と数だけ(例外の文面は出さない)。
  */
+import { JST_OFFSET_MS, jstHour } from "../../packages/core/src/common/jst";
 import { jstKaisaiDate } from "./auto-run-plan";
 import { checkRaceDate } from "./race-date";
 import type { ResultImportProgress } from "./race-day-core";
@@ -91,7 +92,6 @@ export const BACKFILL_MAX_RELIST = 5;
 const BACKFILL_FROM = "20000101";
 /** gate のブレーカーが解けた後、少し待つ時間(ミリ秒)。 */
 const BREAKER_MARGIN_MS = 60_000;
-const JST_OFFSET_MS = 9 * 3600_000;
 const DAY_MS = 86_400_000;
 
 /** 1 サイクルで永久に除外する分類(再試行しても直らない)。 */
@@ -208,7 +208,7 @@ interface RaceRecord {
 
 /** JST の時刻(時)で窓の中か。 */
 export function inBackfillWindow(nowMs: number, startHour = BACKFILL_WINDOW_START_HOUR_JST, endHour = BACKFILL_WINDOW_END_HOUR_JST): boolean {
-  const hour = new Date(nowMs + JST_OFFSET_MS).getUTCHours();
+  const hour = jstHour(nowMs);
   return hour >= startHour && hour < endHour;
 }
 

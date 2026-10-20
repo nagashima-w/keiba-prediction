@@ -23,6 +23,7 @@
  */
 
 import type { CourseType } from "../scraper/types.js";
+import { isRecord } from "../common/guards.js";
 
 /** 状態語の許可リスト。外れた語(外部の文章が紛れうる)は捨てる。 */
 export const BABA_CONDITION_WORDS: readonly string[] = ["良", "稍重", "重", "不良"];
@@ -60,8 +61,6 @@ export interface DayBaba {
   /** 芝の状態の文章(良・稍重などの状態ではない)。 */
   readonly turfStateText: string | null;
 }
-
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * 自由文を整える。制御文字(Cc)・書式文字(Cf。ゼロ幅・双方向制御・軟ハイフン・Unicode のタグ文字 U+E0000〜E007F を含む)・行区切り(Zl)・段落区切り(Zp)・異体字選択子(U+FE00〜FE0F・U+E0100〜E01EF)を除き(改行・タブは空白にする)、

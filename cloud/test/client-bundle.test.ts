@@ -241,6 +241,7 @@ describe("生成物のドリフトと決定性", () => {
     // 新しい上限 228,500 の根拠: 実測 226,688 に約 1.8KB の余裕(226,688 + 1,812 を 500 バイト単位に切り上げ)。余裕は 1,812 バイト。
     // (追記)レビューの R1(設定を取り直したとき、飛んでいるプレビューの状態を捨てる 2 行)で 226,688 → 226,702(+14)。上限は 228,500 のまま(余裕 1,798 バイト)。
     // (追記)Issue #397 R-3(検証画面の整形を core の 1 本にまとめた): 226,702 → 226,641(-61。`pnpm run build:client` の出力〈「226641 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。client に複製していた `formatYen` が core 版と二重に入っていたのが 1 つになった分。上限は 228,500 のまま(余裕 1,859 バイト)。
+    // (追記)Issue #397 R-5(JST・印の並び・型ガードを core の `common/` の 1 本にまとめた): 226,641 → 226,589(-52。`pnpm run build:client` の出力〈「226589 バイト」〉。`Buffer.byteLength(CLIENT_JS)`)。上限は 228,500 のまま(余裕 1,911 バイト)。
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(228_500);
   });
 });
@@ -255,6 +256,11 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   // もとは `allocation-proposal-view`・`bet-allocation-view` の import で閉包に入っていた(`formatYen`)ので、束に入るモジュールは増えない。
   "../../packages/core/src/view/verify-format",
   "../../packages/core/src/analysis/analysis-types",
+  // Issue #397(R-5): 小さな共通部品。client に複製していた定義(JST の計算・印の並び・型ガード)を core の 1 本に寄せたので、許可リストは**広がる**が、束に入る定義の数は増えない。
+  // どれも**import を持たない**(`packages/core/test/common/` の単体テストと、`test/import-guard.test.ts` の閉包の検査が固定する)。`common/random.ts` は client から使わないので許可しない。
+  "../../packages/core/src/common/jst",
+  "../../packages/core/src/common/guards",
+  "../../packages/core/src/common/prediction-marks",
   // Issue #189(設定画面): ラベルと版 ID は exe と共有していた定数(`packages/core/src/analysis/app-settings.ts`。import なしの純モジュール)、範囲の述語は cloud/src の純モジュール(サーバと同じ述語を使う)。
   "../../packages/core/src/analysis/app-settings",
   "../src/settings",
@@ -359,10 +365,10 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
   });
 
   it("対照: import の許可判定は、バレル・core の直接 import・bare specifier・許可外の表示関数・旧 exe のパスを拒否する(上の検査が空振りでない)", () => {
-    for (const bad of ["@keiba/core", "@keiba/core/analyzer/build-prompt", "../src/prompt-preview", "../../packages/core/src/analyzer/build-prompt", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/core/src/analysis/analysis-export"]) {
+    for (const bad of ["@keiba/core", "@keiba/core/analyzer/build-prompt", "../src/prompt-preview", "../../packages/core/src/analyzer/build-prompt", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/core/src/analysis/analysis-export", "../../packages/core/src/common/random"]) {
       expect(importAllowed(bad), bad).toBe(false);
     }
-    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/view/verify-format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings"]) {
+    for (const good of ["./api", "../../packages/core/src/view/allocation-proposal-view", "../../packages/core/src/view/bet-allocation-view", "../../packages/core/src/view/format", "../../packages/core/src/view/verify-format", "../../packages/core/src/analysis/analysis-types", "../../packages/core/src/analysis/app-settings", "../src/settings", "../../packages/core/src/common/jst", "../../packages/core/src/common/guards", "../../packages/core/src/common/prediction-marks"]) {
       expect(importAllowed(good), good).toBe(true);
     }
   });

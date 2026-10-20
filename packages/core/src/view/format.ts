@@ -6,6 +6,7 @@
  */
 
 import type { OddsStatus } from "../analysis/analysis-types.js";
+import { PREDICTION_MARKS } from "../common/prediction-marks.js";
 
 /**
  * 事前推定値(scorer の prior)の表示ラベル。
@@ -47,11 +48,11 @@ export const LABEL_CONCERNS = "懸念事項";
 export const MARK_REPAIRED_BADGE = "直";
 
 /**
- * 補修前の印の語彙(固定): 既知の6種(◎〇▲△☆注。core の `PREDICTION_MARKS` と同じ順)、「なし」(印が無かった馬に補修で印が付いた)、
- * 「不明」(未知の印文字だった馬。LLM の生の文字列は保存も表示もしない)。クライアントの束に parse-response を引き込まないため、ここに持つ
- * (`test/view/format.test.ts` が `PREDICTION_MARKS` との一致を固定する)。
+ * 補修前の印の語彙(固定): 既知の6種(◎〇▲△☆注。core の `PREDICTION_MARKS` そのもの)、「なし」(印が無かった馬に補修で印が付いた)、
+ * 「不明」(未知の印文字だった馬。LLM の生の文字列は保存も表示もしない)。クライアントの束に parse-response を引き込まないため、
+ * import のない共通部品 `common/prediction-marks.ts` から取る(Issue #397・R-5。`test/view/format.test.ts` と `packages/core/test/common/prediction-marks.test.ts` が並びを固定する)。
  */
-export const MARK_ORIGIN_VALUES = ["◎", "〇", "▲", "△", "☆", "注", "なし", "不明"] as const;
+export const MARK_ORIGIN_VALUES = [...PREDICTION_MARKS, "なし", "不明"] as const;
 
 /**
  * 印の補修の表示「元の印→今の印」(Issue #317)。例: 「◎→〇」「☆→印なし」「印なし→◎」「不明な印→印なし」。

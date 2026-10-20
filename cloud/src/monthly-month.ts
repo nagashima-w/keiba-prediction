@@ -3,9 +3,8 @@
  * 月の範囲は当月 1 日〜最終日(ユーザーの決定・2026-10-13)。暦日の足し引きは UTC の暦で行う(JST は夏時間が無いので同じ)。
  */
 import { isRealYmd } from "../client/date";
+import { jstEpochMs } from "../../packages/core/src/common/jst";
 import { addDaysToKaisaiDate } from "./result-dispatch";
-
-const JST_OFFSET_MS = 9 * 3_600_000;
 
 /** YYYYMM の 6 桁で、実在する月(01〜12)か。 */
 export function isValidMonth(month: string): boolean {
@@ -46,5 +45,5 @@ export function formatMonthLabel(month: string): string {
 
 /** JST の日付(YYYYMMDD)と時刻 → エポックミリ秒。 */
 export function jstMsOf(ymd: string, hour: number, minute: number = 0): number {
-  return Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)) - 1, Number(ymd.slice(6, 8)), hour, minute) - JST_OFFSET_MS;
+  return jstEpochMs(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)), Number(ymd.slice(6, 8)), hour, minute);
 }

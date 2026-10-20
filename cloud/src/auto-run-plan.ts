@@ -9,11 +9,9 @@
  */
 import { filterJpnOnlyEntries } from "../../packages/core/src/scraper/jpn-grade";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
+import { JST_OFFSET_MS, jstHour } from "../../packages/core/src/common/jst";
 import { preRaceAlarmAt, startTimeEpochMs } from "./pre-race-time";
 import { addDaysToKaisaiDate } from "./result-dispatch";
-
-/** JST は UTC+9(夏時間なし)。 */
-const JST_OFFSET_MS = 9 * 3600_000;
 
 /**
  * cron の `scheduledTime`(UTC のエポックミリ秒)の **JST の暦日**を YYYYMMDD で返す。
@@ -46,7 +44,7 @@ export type ScheduledRunKind = "first" | "retry";
  */
 export function scheduledRunKind(scheduledTimeMs: number): ScheduledRunKind {
   jstKaisaiDate(scheduledTimeMs); // 不正な時刻をここで弾く(同じ検査)
-  const hour = new Date(scheduledTimeMs + JST_OFFSET_MS).getUTCHours();
+  const hour = jstHour(scheduledTimeMs);
   return hour >= RETRY_RUN_FROM_JST_HOUR ? "retry" : "first";
 }
 

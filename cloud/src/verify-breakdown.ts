@@ -47,6 +47,7 @@ import { wilsonInterval } from "../../packages/core/src/ev/binomial-interval.js"
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes.js";
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key.js";
 import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids.js";
+import { mulberry32 } from "../../packages/core/src/common/random.js";
 import { formatRecoveryPercent } from "./recovery-format";
 import type { VerifyBetRow } from "./verify-read";
 
@@ -97,18 +98,6 @@ export interface RatioCluster {
 export interface RatioInterval {
   readonly lower: number;
   readonly upper: number;
-}
-
-/** 軽量で決定的な乱数(mulberry32)。 */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 function percentileInterval(values: Float64Array, count: number): RatioInterval | null {

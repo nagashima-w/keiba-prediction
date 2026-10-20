@@ -4,8 +4,7 @@
  * アラームの予約に使うのは #166(定時の自動実行)。ここは換算の関数だけ。
  */
 
-/** JST は UTC+9(夏時間なし)。 */
-const JST_OFFSET_MS = 9 * 3600_000;
+import { jstEpochMs } from "../../packages/core/src/common/jst.js";
 
 /**
  * 発走の何分前に分析するか(既定)。**設定 `preRaceOffsetMinutes`(`settings.ts`)の既定値と同じ定数**(定義は1か所)。
@@ -32,7 +31,7 @@ export function startTimeEpochMs(kaisaiDate: string, startTime: string): number 
   if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) {
     throw new RangeError(`存在しない開催日です(${kaisaiDate})`);
   }
-  return Date.UTC(year, month - 1, day, Number(t[1]), Number(t[2])) - JST_OFFSET_MS;
+  return jstEpochMs(year, month, day, Number(t[1]), Number(t[2]));
 }
 
 /** 発走の `offsetMinutes` 分前(UTC のエポックミリ秒)。0 以上の整数。 */
