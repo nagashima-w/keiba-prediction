@@ -321,14 +321,28 @@ describe("wrangler.toml", () => {
     // 保証していたことは変わらない: 結果のページの取得(runResultStep)に `bypassCache` は無く(下の本体の検査)、この 1 件は runNarTrifectaStep の中にだけある。
     // 【Issue #338で改訂】旧: 1 件(runNarTrifectaStep の中だけ)。締切の直前の再計算の取得口(`closeFetcher`)が、オッズの URL だけ `{ ...options, bypassCache: true }` で CachedFetcher を呼ぶので、2 件になった。
     // 保証していたことは変わらない: 結果のページの取得(runResultStep)に `bypassCache` は無く(下の本体の検査)、2 件は runNarTrifectaStep と closeFetcher の中にだけある(どちらもオッズ。それ以外の URL は cacheOnly)。
-    expect(count(/bypassCache/g)).toBe(2);
+    // 【Issue #399(R-9a)で改訂】旧: `bypassCache` が race-day-core.ts に 2 件(runNarTrifectaStep と closeFetcher)。締切の再計算の段階を `race-day-close-stage.ts` に切り出したので、
+    // core には runNarTrifectaStep の 1 件だけが残り、closeFetcher の 1 件は段階のファイルに移った(合計は 2 件のまま)。
+    // 保証していたことは変わらない: (1) 結果のページの取得(runResultStep)に `bypassCache` は無い(下の本体の検査) (2) `bypassCache` があるのはオッズの取得 2 箇所
+    // (core の runNarTrifectaStep と段階の closeFetcher)だけで、cloud/src の他のファイルには無い (3) 締切の取得口の形(オッズの URL だけ bypassCache・それ以外はキャッシュ専用)は段階のファイルで同じ検査をする。
+    expect(count(/bypassCache/g)).toBe(1);
+    const closeStage = stripCode(readTextLf("cloud", "src", "race-day-close-stage.ts"));
+    expect(closeStage.length).toBeGreaterThan(3000); // 前提: 段階のファイルを読めている
+    expect((closeStage.match(/bypassCache/g) ?? []).length).toBe(1);
+    const bypassSites: Record<string, number> = {};
+    for (const f of readdirSync(path.join(ROOT, "cloud", "src")).filter((name) => name.endsWith(".ts") && name !== "client-bundle.generated.ts")) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(/\bbypassCache\b/g) ?? []).length;
+      if (n > 0) bypassSites[f] = n;
+    }
+    expect(bypassSites).toEqual({ "race-day-core.ts": 1, "race-day-close-stage.ts": 1 });
     const stageStart = core.indexOf("private async runNarTrifectaStep(");
     expect(stageStart).toBeGreaterThan(-1);
     const stageEnd = core.indexOf("\n  }\n", stageStart);
     expect(core.slice(stageStart, stageEnd)).toContain("bypassCache");
-    const closeStart = core.indexOf("private closeFetcher(");
+    const closeStart = closeStage.indexOf("private closeFetcher(");
     expect(closeStart).toBeGreaterThan(-1);
-    const closeBody = core.slice(closeStart, core.indexOf("\n  }\n", closeStart));
+    const closeBody = closeStage.slice(closeStart, closeStage.indexOf("\n  }\n", closeStart));
+    expect(closeBody.length).toBeGreaterThan(500); // 前提: 本体を実際に読めている
     expect(closeBody).toContain("ODDS_URL_PATTERN.test(url)"); // オッズの URL だけ
     expect(closeBody).toContain("bypassCache: true");
     expect(closeBody).toContain("this.cacheOnly.fetchText("); // それ以外(出馬表・戦績・調教)はキャッシュ専用=ネットワークに出ない
