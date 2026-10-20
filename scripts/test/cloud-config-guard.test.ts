@@ -60,21 +60,36 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
-  it("Issue #177・#216・#217・#219・#235・#266・#279: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CloudMigration。Issue #394 で binding は廃止。空の殻のクラスと migration v3 だけを残す)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6、統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)は migration v7、月報の DO(MONTHLY_REPORT・MonthlyReportDO)は migration v8 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
-    const migrations = [...tomlCode.matchAll(/^\[\[migrations\]\]\ntag = "(v\d+)"\n(?:[^\n]*\n)*?new_sqlite_classes = \[([^\]]*)\]/gm)].map((m) => [m[1], m[2]]);
-    expect(migrations).toEqual([
-      ["v1", '"NetkeibaGate"'],
-      ["v2", '"RaceDay"'],
-      ["v3", '"CloudMigration"'],
-      ["v4", '"ResultBackfill"'],
-      ["v5", '"VerifyReportDO"'],
-      ["v6", '"DailyReportDO"'],
-      ["v7", '"PriorExportDO"'],
-      ["v8", '"MonthlyReportDO"'],
+  it("Issue #177・#216・#217・#219・#235・#266・#279・#402: 日単位の DO(RACE_DAY・RaceDay)は migration v2、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6、統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)は migration v7、月報の DO(MONTHLY_REPORT・MonthlyReportDO)は migration v8 で追加するだけ。v1(NetkeibaGate)は無変更。移行の DO(CloudMigration)は v3 で作られ、v9 の deleted_classes で削除される(Issue #402。binding は #394 で廃止済み)。それ以外のクラスの削除・new_classes・renamed・transferred は使わない", () => {
+    // migration のブロック(コメント除去済みの tomlCode から、[[migrations]] ごとに本体を取る)
+    const blocks = [...tomlCode.matchAll(/^\[\[migrations\]\]\n((?:(?!\[)[^\n]*\n?)*)/gm)].map((m) => m[1]!);
+    const field = (body: string, key: string): string | null => new RegExp(`^${key} = \\[([^\\]]*)\\]$`, "m").exec(body)?.[1] ?? null;
+    const tagOf = (body: string): string | null => /^tag = "(v\d+)"$/m.exec(body)?.[1] ?? null;
+    // 前提: migration を実際に読めている(空振りでない)。v1〜v9 の 9 ブロック
+    expect(blocks.length, "migration ブロックの数(v1〜v9)").toBe(9);
+    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"]);
+    // 追加(new_sqlite_classes)は v1〜v8 の各 1 クラス。v3 の CloudMigration は残す(v9 の deleted_classes が指す先行の migration。wrangler が同じ toml 内で存在を検査する)
+    expect(blocks.map((b) => field(b, "new_sqlite_classes"))).toEqual([
+      '"NetkeibaGate"',
+      '"RaceDay"',
+      '"CloudMigration"',
+      '"ResultBackfill"',
+      '"VerifyReportDO"',
+      '"DailyReportDO"',
+      '"PriorExportDO"',
+      '"MonthlyReportDO"',
+      null,
     ]);
+    // 削除(deleted_classes)は v9 の 1 回だけで、中身は CloudMigration ちょうど 1 クラス。他のクラスの削除は禁じる
+    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"']);
+    expect((tomlCode.match(/deleted_classes/g) ?? []).length, "deleted_classes は toml 全体で 1 回").toBe(1);
+    // v9 は削除だけ(同じブロックに追加・改名・移管を混ぜない)
+    expect(blocks[8]!.trim().split("\n")).toEqual(['tag = "v9"', 'deleted_classes = ["CloudMigration"]']);
+    // コメントを除いたとき、CloudMigration が出るのは v3 の追加と v9 の削除の 2 行だけ(binding・その他の参照は無い)
+    expect(tomlCode.split("\n").filter((l) => l.includes("CloudMigration"))).toEqual(['new_sqlite_classes = ["CloudMigration"]', 'deleted_classes = ["CloudMigration"]']);
     expect(tomlCode).toMatch(/^name = "RACE_DAY"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceDay"$/m);
-    // Issue #394: CloudMigration の binding は無い(クラスは空の殻として worker.ts が export し、migration v3 は残す)
+    // Issue #394・#402: CloudMigration の binding は無い(クラスの殻も無い。migration は v3 の追加と v9 の削除だけ)
     expect(tomlCode).not.toMatch(/CLOUD_MIGRATION/);
     expect(tomlCode).not.toMatch(/^class_name = "CloudMigration"$/m);
     expect(tomlCode).toMatch(/^name = "RESULT_BACKFILL"$/m);
@@ -87,7 +102,7 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "PriorExportDO"$/m);
     expect(tomlCode).toMatch(/^name = "MONTHLY_REPORT"$/m);
     expect(tomlCode).toMatch(/^class_name = "MonthlyReportDO"$/m);
-    expect(tomlCode).not.toMatch(/^(renamed_classes|deleted_classes|transferred_classes)\s*=/m);
+    expect(tomlCode).not.toMatch(/^(renamed_classes|transferred_classes|new_classes)\s*=/m);
     // DO のバインディングはちょうど7つ(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT。Issue #394 で CLOUD_MIGRATION を外した)
     expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(7);
   });
@@ -1149,14 +1164,21 @@ describe("公開リポジトリへの値の混入(実在のメール・チーム
   });
 });
 
-describe("Issue #216・#394: 移行の DO(CloudMigration)は空の殻で、netkeiba にも LLM にも出ず、定時の自動実行(cron → RaceDay)と干渉しない", () => {
-  it("殻のソース(migration-do.ts)は、クラス CloudMigration を空のまま定義するだけで、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・D1・R2 が無い", () => {
-    const code = stripCode(readTextLf("cloud", "src", "migration-do.ts"));
-    expect(code).toMatch(/export class CloudMigration extends DurableObject \{\}/); // 前提: 読めていて、メソッドを持たない殻
-    for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket", "env.DB", "ANALYSIS_DETAIL", "alarm", "setAlarm"]) {
-      expect(code, `殻に ${forbidden} が無い`).not.toContain(forbidden);
+describe("Issue #216・#394・#402: 移行の DO(CloudMigration)は削除済みで、殻のソースも export も無く、定時の自動実行(cron → RaceDay)と干渉しない", () => {
+  it("殻のソース(src/migration-do.ts)は存在せず、本番の入口(worker.ts)とスモークの入口(smoke-worker.ts)は CloudMigration を export しない。src の他のファイルも CloudMigration・migration-do を参照しない", () => {
+    expect(existsSync(path.join(ROOT, "cloud", "src", "migration-do.ts")), "migration-do.ts が無い").toBe(false);
+    // 前提(空振り防止): 入口を読めていて、他の DO のクラスを export している
+    for (const entry of [path.join("src", "worker.ts"), "smoke-worker.ts"]) {
+      const code = stripCode(readTextLf("cloud", entry));
+      expect(code, `${entry} を読めている(他の DO の export がある)`).toMatch(/export \{ ResultBackfill \} from/);
+      expect(code, `${entry} は CloudMigration を参照しない`).not.toMatch(/CloudMigration|CLOUD_MIGRATION|migration-do/);
     }
-    expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, "殻にグローバルの fetch が無い").toBe(0);
+    const srcDir = path.join(ROOT, "cloud", "src");
+    const files = readdirSync(srcDir).filter((f) => f.endsWith(".ts"));
+    expect(files.length, "src の .ts を読めている").toBeGreaterThan(20);
+    for (const f of files) {
+      expect(stripCode(readTextLf("cloud", "src", f)), `${f} は移行の DO を参照しない`).not.toMatch(/CloudMigration|CLOUD_MIGRATION|migration-do/);
+    }
   });
 
   it("cron の scheduled・RaceDay・result-dispatch は、移行の DO を呼ばない(CLOUD_MIGRATION・CloudMigration・migration-* を参照しない)", () => {

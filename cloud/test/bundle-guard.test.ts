@@ -48,8 +48,9 @@ function withoutRaceDay(toml: string): string {
   const stripped = toml
     .replace(/\[\[durable_objects\.bindings\]\]\nname = "RACE_DAY"\nclass_name = "RaceDay"\n/, "")
     .replace(/\[\[migrations\]\]\ntag = "v2"\nnew_sqlite_classes = \["RaceDay"\]\n/, "")
-    // Issue #216: 移行の DO(CloudMigration)の migration v3 も、probe の入口は export しないので除く(Issue #394 で binding は無くなった。クラスは空の殻として worker.ts に残っている)。
-    .replace(/\[\[migrations\]\]\ntag = "v3"\nnew_sqlite_classes = \["CloudMigration"\]\n/, "")
+    // Issue #216・#402: 移行の DO(CloudMigration)は、migration v3 で作られ v9 の deleted_classes で削除される(binding・クラスは無い)。
+    // v3 は除かない: wrangler は deleted_classes が先行の migration で作られたクラスを指すことを同じ設定の中で検査する(v3 だけ除くと失敗する)。
+    // binding の無いクラスは、入口が export していなくても wrangler は拒否しない(binding のクラスだけが export を要求される)。
     // Issue #217: 結果の補完の DO(RESULT_BACKFILL・ResultBackfill)も同じく除く(migration v4 も)。
     .replace(/\[\[durable_objects\.bindings\]\]\nname = "RESULT_BACKFILL"\nclass_name = "ResultBackfill"\n/, "")
     .replace(/\[\[migrations\]\]\ntag = "v4"\nnew_sqlite_classes = \["ResultBackfill"\]\n/, "")
@@ -67,8 +68,10 @@ function withoutRaceDay(toml: string): string {
     .replace(/\[\[migrations\]\]\ntag = "v8"\nnew_sqlite_classes = \["MonthlyReportDO"\]\n/, "");
   expect(stripped, "RACE_DAY の binding と migration v2 を除けている").not.toBe(toml);
   expect(stripped).not.toContain("RaceDay");
-  // コメント(Issue #394 で、v3 を残す理由を書いた)は除いて見る
-  expect(stripped.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n"), "CloudMigration の migration v3 を除けている").not.toContain("CloudMigration");
+  // CloudMigration の binding は無い(v3・v9 の migration の行だけが残る。コメントは除いて見る)
+  const strippedCode = stripped.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+  expect(strippedCode, "前提: v3 の追加と v9 の削除は残している").toContain('deleted_classes = ["CloudMigration"]');
+  expect(strippedCode, "CloudMigration の binding は無い").not.toMatch(/class_name = "CloudMigration"/);
   expect(stripped, "RESULT_BACKFILL の binding と migration v4 を除けている").not.toContain("ResultBackfill");
   expect(stripped, "VERIFY_REPORT の binding と migration v5 を除けている").not.toContain("VerifyReportDO");
   expect(stripped, "DAILY_REPORT の binding と migration v6 を除けている").not.toContain("DailyReportDO");
@@ -392,27 +395,26 @@ describe("本番のバンドルと日単位の DO(Issue #177)", () => {
 });
 
 /**
- * Issue #394(#390 D-2): 移行の DO `CloudMigration` は**空の殻**だけが本番のバンドル(`src/worker.ts`)に残る(本番の DO の namespace を消さないため。完全削除は別 Issue)。
- * 取り込み・形式の検証・コーデックのコードは入っていない。better-sqlite3・node:sqlite・偽ソケットも入らない。
- * **前提(空振り防止)**: バンドルに殻のクラス名 `CloudMigration` がある(= バンドルを実際に読めている)ことを、否定の検査より先に固定する。
+ * Issue #394・#402(#390 D-2): 移行の DO `CloudMigration` は**削除済み**(殻のクラスも無い。wrangler.toml の v9 の deleted_classes で本番の DO を消す)。
+ * 取り込み・形式の検証・コーデックのコードも、better-sqlite3・node:sqlite・偽ソケットも、本番のバンドルに入らない。
+ * **前提(空振り防止)**: バンドルに他の DO のクラス名(`ResultBackfill`)がある(= バンドルを実際に読めている)ことを、否定の検査より先に固定する。
  */
 const REMOVED_MIGRATION_MARKERS = ["keiba-cloud-migration", "MigrationFormatError", "MigrationTally", "saveMigratedAnalysis", "MIGRATION_DAILY_ROW_LIMIT"];
 
-describe("本番のバンドルと移行の DO の殻(Issue #394)", () => {
-  it("前提: worker.ts は CloudMigration を export し、その実体は何もしない殻(メソッドを持たない)", () => {
-    expect(readFileSync(path.join(CLOUD, "src", "worker.ts"), "utf-8")).toMatch(/export \{ CloudMigration \} from "\.\/migration-do"/);
-    const doSource = readFileSync(path.join(CLOUD, "src", "migration-do.ts"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
-    expect(doSource).toMatch(/export class CloudMigration extends DurableObject \{\}/);
-    for (const marker of REMOVED_MIGRATION_MARKERS) {
-      expect(doSource.includes(marker), `殻のソースに ${marker} が無い`).toBe(false);
-    }
+describe("本番のバンドルと移行の DO の削除(Issue #394・#402)", () => {
+  it("前提: worker.ts は他の DO を export し、CloudMigration は export しない。殻のソース(migration-do.ts)は無い", () => {
+    const worker = readFileSync(path.join(CLOUD, "src", "worker.ts"), "utf-8");
+    expect(worker).toMatch(/export \{ ResultBackfill \} from "\.\/result-backfill-do"/);
+    expect(worker).not.toMatch(/CloudMigration|migration-do/);
+    expect(existsSync(path.join(CLOUD, "src", "migration-do.ts")), "migration-do.ts が無い").toBe(false);
   });
 
   it(
-    "本番のバンドルに殻のクラス名 CloudMigration があり、取り込み・形式の検証の識別子は入っていない。better-sqlite3・node:sqlite・偽ソケットも入っていない",
+    "本番のバンドルに他の DO のクラス名 ResultBackfill があり、CloudMigration・取り込み・形式の検証の識別子は入っていない。better-sqlite3・node:sqlite・偽ソケットも入っていない",
     () => {
       const code = bundle(null, "worker.js");
-      expect(code.includes("CloudMigration"), "前提: 本番のバンドルに殻のクラスがある").toBe(true);
+      expect(code.includes("ResultBackfill"), "前提: 本番のバンドルに他の DO のクラスがある").toBe(true);
+      expect(code.includes("CloudMigration"), "本番のバンドルに CloudMigration が無い").toBe(false);
       for (const marker of REMOVED_MIGRATION_MARKERS) {
         expect(code.includes(marker), `本番のバンドルに ${marker} が無い`).toBe(false);
       }

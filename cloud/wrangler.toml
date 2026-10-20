@@ -89,9 +89,8 @@ tag = "v2"
 new_sqlite_classes = ["RaceDay"]
 
 # 追加だけ(v1・v2 には触れない)。Issue #216。
-# ★Issue #394(#390 D-2)で、移行の機能・binding を廃止した。**この migration と `CloudMigration` クラス(src/migration-do.ts の空の殻。src/worker.ts が export する)は、意図して残している**:
-#   本番にはこのクラスの DO の namespace と保存データ(kv 3 キー)があり、クラスを消すには `deleted_classes` の migration が要る。それは本番の DO と保存データを不可逆に消す
-#   (Cloudflare のドキュメント: 削除のあとは、その版より前へロールバックできない)。完全削除は、別の Issue で、ユーザーの明示の承認を得てから行う。
+# ★この移行の DO(CloudMigration)は、Issue #394(#390 D-2)で機能・binding を廃止し、Issue #402 で下の v9(deleted_classes)により削除した。
+#   **この v3 のエントリは消さない**: v9 の deleted_classes は、先行の migration で作られたクラスを指す必要がある(wrangler が同じ設定の中で検査する)。migration は追記のみ。
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["CloudMigration"]
@@ -120,6 +119,13 @@ new_sqlite_classes = ["PriorExportDO"]
 [[migrations]]
 tag = "v8"
 new_sqlite_classes = ["MonthlyReportDO"]
+
+# 削除だけ(v1〜v8 には触れない)。Issue #402(#390)。
+# ★**元に戻せない**: 移行の DO(CloudMigration)のすべての DO と保存データ(移行の進捗の記録。kv の job・budget・pending)を本番から消す(Cloudflare の仕様)。
+#   この変更を含む版より前へはロールバックできない。ユーザーが明示的に承認した(2026-10-20)。記録は取り出さずに消した。分析・結果のデータ(D1・R2)はこの DO に無く、影響しない。
+[[migrations]]
+tag = "v9"
+deleted_classes = ["CloudMigration"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。

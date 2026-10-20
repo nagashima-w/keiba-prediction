@@ -529,15 +529,14 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 exe からクラウド版への移行は #167 で完了した。取り込みの API・DO・画面・形式の検証は、使わなくなったので削除した。**動作の記述(API・予算・画面)は、削除前のコミット `46410ab` の本節と `docs/current-spec.md` で読める。**
 - **削除したもの**: `POST /api/migration/upload`・`GET /api/migration`、取り込みの DO のコード(`migration-core`・`migration-convert`・`migration-reader`・`migration-verify`)、移行画面(`#migration`)と設定画面の「exe から移行」の節、
   core の `ev/cloud-migration-format`(形式の検証。`@keiba/core/ev/cloud-migration-format` のサブパスも)、`scripts/measure-migration-import.ts`、保存側の移行専用のメソッド(`saveMigratedAnalysis`・`saveMigratedResult` ほか)。
+- **DO `CloudMigration` の削除(Issue #402。ユーザー決定 2026-10-20)**: #394 では空の殻として残していたが、wrangler.toml の migration **v9**(`deleted_classes = ["CloudMigration"]`)で本番の DO と保存データ(kv 3 キー: 取り込みの状態・当日の予算・詳細が未完了の分析の記憶)を**不可逆に消した**(ユーザーが明示的に承認。記録は取り出さずに消す選択)。殻のクラス(`src/migration-do.ts`)と `worker.ts`・`smoke-worker.ts` の export も削除した。v3(作成)のエントリは、v9 が先行の migration を指す必要があるので消さない(migration は追記のみ)。分析・結果のデータ(D1・R2)はこの DO に無く、影響しない。
 - **意図して残しているもの**:
-  - **DO `CloudMigration` の空の殻**(`src/migration-do.ts`)と wrangler.toml の migration **v3**。binding(`CLOUD_MIGRATION`)は外した。本番にはこの DO の namespace と保存データ(kv 3 キー)があり、クラスを消すには `deleted_classes` の migration が要る。
-    それは本番の DO と保存データを**不可逆に消す**(Cloudflare のドキュメント: 削除のあとは、その版より前へロールバックできない)ので、**完全削除は別の Issue で、ユーザーの明示の承認を得てから**行う。
   - **D1 の `analyses.exe_analysis_id` 列と部分一意索引 `idx_analyses_exe_id`**(migration 0008。D1 の migration は追加のみなので消さない)。移行で取り込んだ分析の行は、この列が NULL でない。書く経路も読む経路も無い。
   - 移行で取り込んだ分析・結果そのもの(D1 の `analyses` ほか・R2 の `analyses/{id}.json.gz`)。
   - **R2 の `migration/` の下**: 取り込みが失敗で終わっていたり途中で止まっていたりすると、アップロードされたファイル(`migration/<uuid>.ndjson.gz`)が残っている可能性がある(完了時は削除される)。本番の R2 は確認していない。**触っていない**。
 - **一覧の並び**: `GET /api/analyses`(とレース画面の過去の分析)は**分析日時の降順**(同時刻は id の降順)。migration `0008` の索引 3 つ(`idx_analyses_analyzed_at`・`_race_analyzed`・`_kaisai_analyzed`)で、並べ替えの一時領域を使わず先頭の N 件だけを読む。この並びと索引は、移行とは関係なく今も使う。
 - **結果の補完との関係**: 結果の補完(下)は、以前は移行の DO が `completed` のときだけ動いていたが、その条件は外した(本番の移行は `completed` だった)。
-- **検査**: `test/analysis-list-order.test.ts`(一覧の並び)、`test/bundle-guard.test.ts`(殻だけが本番のバンドルに入る)、`scripts/test/cloud-config-guard.test.ts`(binding は 7 つ・migration は v1〜v8・`deleted_classes` を使わない)、smoke の H(旧い移行の API は受け付けない)。
+- **検査**: `test/analysis-list-order.test.ts`(一覧の並び)、`test/bundle-guard.test.ts`(CloudMigration が本番のバンドルに無い)、`scripts/test/cloud-config-guard.test.ts`(binding は 7 つ・migration は v1〜v9・`deleted_classes` は v9 の `CloudMigration` だけ)、smoke の H(旧い移行の API は受け付けない)。
 
 ## 検証画面(Issue #219。v1.32.0。**デプロイ後の最初の `GET /api/verify` で、D1 の読み取り行数の実値を確かめる**)
 exe の検証画面のうち、累積回収率と配分ベースの回収率を、一覧の「検証」リンク(`#verify`)から見られる。集計は新しい DO `VerifyReportDO`(migration v5・binding `VERIFY_REPORT`)が、core の `computeVerifyReport`(exe と同じ関数・同じ設定)で行い、結果を 3 区分(全体/中央のみ/地方のみ)同時にキャッシュする。仕様と実測は `docs/current-spec.md` の「クラウド版の検証画面(回収率)」。
