@@ -513,6 +513,31 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     expect(sqls[3]).toMatch(/CHECK \(id = 1\)/);
   });
 
+  it("Issue #445: WITHOUT ROWID の表の集合が、宣言と一致する(主キーが行の実体になる表。外すと書き込みの行が増える。構造の比較〈列・索引〉には現れないので別に固定する)", () => {
+    // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
+    const declared = ["baba_conditions", "baba_fetches", "horse_run_saves", "horse_runs", "race_conditions"];
+    const wrTables = (sqlList: readonly string[]): string[] => {
+      const db = openEmptyDb();
+      try {
+        for (const sql of sqlList) {
+          db.exec(sql);
+        }
+        return (db.prepare("PRAGMA table_list").all() as Array<{ name: string; type: string; wr: number }>)
+          .filter((t) => t.type === "table" && t.wr === 1 && !t.name.startsWith("sqlite_"))
+          .map((t) => t.name)
+          .sort();
+      } finally {
+        db.close();
+      }
+    };
+    expect(wrTables(sqls)).toEqual(declared);
+    // 検出が空振りでない(対照): 0022 の `WITHOUT ROWID` を外すと、構造の比較は一致したまま、この集合だけが変わる
+    const stripped = sqls.map((q, i) => (FILES[i] === "0022_race_conditions.sql" ? q.replace(/\)\s*WITHOUT ROWID;/, ");") : q));
+    expect(stripped).not.toEqual(sqls);
+    expect(wrTables(stripped)).toEqual(declared.filter((t) => t !== "race_conditions"));
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter(stripped))).toEqual([]);
+  });
+
   it("Issue #389: course_type・distance・track_condition・grade・race_name・cond_read の6列は 0023 だけが足す。0001〜0022 までには無い。exe には無い D1 専用(D1_EXTRA_COLUMNS に宣言している)。追加のみ(ALTER TABLE ... ADD COLUMN の6文だけ・UPDATE なし・索引なし)", () => {
     const names = ["course_type", "distance", "track_condition", "grade", "race_name", "cond_read"];
     const before = schemaAfter(sqls.slice(0, 22));
