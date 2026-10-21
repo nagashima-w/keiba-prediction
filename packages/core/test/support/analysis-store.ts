@@ -8,80 +8,34 @@
  * 分析結果のSQLite保存(verify基盤)。仕様「4. ev」:
  *   「全推定結果をSQLiteに保存し、レース後に実際の結果と突き合わせて回収率を記録するverify機能」。
  *
- * スキーマ設計:
+ * スキーマ設計(列の意味。旧 exe の DB ファイルを新しい列へ移行する処理は、exe の削除〈#285〉に伴い
+ * Issue #400 R-12 で削除した。テストは新しい DB を作って使うだけなので、列はすべて CREATE TABLE が持つ):
  * - `analyses`(レース単位): id・race_id・analyzed_at。同一レースを複数回分析しうるため
  *   (発走前/直前オッズ再取得など)、race_id では一意にせず analyzed_at ごとに別行(別id)とする。
+ *   - ev_estimated: 発売前(oddsStatus=yoso)の推定EVか。複勝オッズ有無はレース単位で決まるため馬単位ではない。
+ *     推定EVは確定EVより誤差が大きく、verify では既定で除外する。NULL は false(確定EV)として読む。
+ *   - prompt_version: buildPrompt が使う PROMPT_VERSION の値。LLM未使用の分析は NULL=版不明。
+ *   - additional_instruction: 設定画面の自由記述欄の内容。PROMPT_VERSION とは別軸で、版別比較の解釈に使う。
+ *   - kaisai_date: 選択済みの開催日(YYYYMMDD)。渡らなかったときは NULL(不確かな近似日付では埋めない)。
+ *   - model・raw_response・race_snapshot_json: エクスポート用。LLM未使用なら model・raw_response は NULL。
+ *   - history_cutoff_date・prompt_lookahead_guarded: 先読みリーク遮断の記録。NULL は「記録なし=是正前」で、
+ *     0 や空文字で「是正済み」と読ませない。
  * - `analysis_horses`(馬単位): analysis_id(FK)・umaban・prior・adjusted_prob・place_odds_min・ev・
- *   is_positive・contributions_json・mark。Phase3(analyzer)まで adjusted_prob は prior と同値で保存する。
+ *   is_positive・contributions_json・mark・reason・highlights_json・concerns_json。
  *   寄与度ログ(仕様L135)は構造が可変のため JSON 文字列で保持する。
- * - `race_results`(レース結果): race_id・umaban・finish_position。(race_id, umaban) を主キーとし
- *   再保存は上書き。非数値着順(中止・除外)は finish_position を NULL で保持する。
+ * - `race_results`(レース結果): race_id・umaban・finish_position・place_payout・win_payout・
+ *   passing_json(通過順配列のJSON)・last3f。(race_id, umaban) を主キーとし再保存は上書き。
+ *   非数値着順(中止・除外)は finish_position を NULL で保持する。
+ * - `race_result_meta`(レース単位の面。course_type の芝/ダ/障): 面が取得できないレースは行を作らない
+ *   (「行が無い=面不明」に統一する)。
+ * - `race_combo_payouts`・`race_combo_payout_imports`(組合せ払戻とその取込マーカー。Issue #52)、
+ *   `analysis_allocation_meta`・`analysis_bets`(配分提案。Issue #59)。
+ * - saveResult は結果・面・組合せ払戻を単一の db.transaction 内で書く(例外で全ロールバック)。
+ * - getRaceResultDetail は復元専用で、getResult(umaban/finishPosition/placePayout のみを返す verify 専用)
+ *   は変更しない(verify のクエリ性能・出力契約を保つため)。
  *
  * 今後の拡張(LLM補正値・Discord送信履歴)は列/テーブル追加で対応する前提とし、今は必要列のみ持つ。
  * adjusted_prob 列は将来のLLM補正値の受け皿を兼ねる(現状は prior と同値)。
- *
- * 予想印(mark)列(Task#23): analysis_horses に mark TEXT(nullable)を持つ。旧バージョンで
- * 作成済みのDBファイルにはこの列が無いため、起動時に PRAGMA table_info で存在確認し、
- * 無ければ ALTER TABLE ADD COLUMN で後付けする(既存行は NULL=印なしとして読める。後方互換)。
- *
- * 推定EVフラグ(ev_estimated)列(Task#25): analyses に ev_estimated INTEGER(nullable)を持つ。
- * 発売前(oddsStatus=yoso)は複勝オッズが無いため単勝オッズから推定した複勝下限でEVを概算するが、
- * この推定EVは確定EVより誤差が大きく、verify(回収率集計)では既定で除外する必要がある(仕様Task#25)。
- * 複勝オッズ有無は馬ごとではなくレース単位(オッズ発売状態)で決まるため、馬単位ではなく
- * analyses(レース単位)テーブルに1列だけ持たせれば足りる(analysis_horgesへの追加は不要)。
- * 旧バージョンで作成済みのDBにはこの列が無いため、mark列と同じ流儀でALTER TABLEにより後付けし、
- * 既存行は NULL→false(確定EV扱い)として読む(後方互換。旧データは本機能導入前の分析のため
- * すべて確定EV経路で計算されている)。
- *
- * DB共有: ScrapeCache と同じ better-sqlite3 Database インスタンスを注入して共有できる。
- * テーブル名を分離しているため互いに干渉しない(scrape_cache とは独立)。
- *
- * プロンプト版番号(prompt_version)列(Task#27): analyses に prompt_version TEXT(nullable)を持つ。
- * プロンプトを改善したときに版ごとの verify 成績を比較できるようにするための記録で、
- * buildPrompt が使う PROMPT_VERSION 定数(analyzer/build-prompt.ts)の値をそのまま保存する
- * (LLM未使用〈prior採用〉の分析ではプロンプト自体を使っていないため呼び出し側は null を渡す想定)。
- * 旧バージョンで作成済みのDBにはこの列が無いため、mark/ev_estimated列と同じ流儀でALTER TABLEに
- * より後付けし、既存行は NULL=版不明として読む(後方互換。旧データは版記録導入前の分析のため
- * どのプロンプト文面で分析したか特定できない)。
- *
- * 追加指示(additional_instruction)列(Task#28 プロンプト改善C): analyses に
- * additional_instruction TEXT(nullable)を持つ。設定画面の自由記述欄(analyzer/build-prompt.ts の
- * BuildPromptInput.additionalInstruction)の内容をそのまま保存する。追加指示は実質的にプロンプトを
- * 変えるため、PROMPT_VERSION(テンプレート本体の版)とは別軸でこの列を記録し、
- * 「同じ版でも追加指示が違えば別条件」であることをverifyの版別比較の解釈時に追えるようにする
- * (PROMPT_VERSION定数自体は追加指示では更新しない運用)。LLM未使用・設定が空の分析は null を渡す想定。
- * 旧バージョンで作成済みのDBにはこの列が無いため、他の列と同じ流儀でALTER TABLEにより後付けし、
- * 既存行は NULL=追加指示なしとして読む(後方互換)。
- *
- * 開催日(kaisai_date)列(Task#34 レース単位の予実ブレークダウン): analyses に
- * kaisai_date TEXT(nullable、YYYYMMDD)を持つ。検証画面でレース単位に予実を表示する際、
- * 見出しに開催日を出したいが、中央のレースIDは回次・日次のみを埋め込み開催日を復元できない
- * (packages/core/src/scraper/ids.ts のコメント参照)。呼び出し側(`analysis/analysis-pipeline.ts` の `runAnalysis`)は分析実行時に選択済みの開催日
- * (kaisaiDate)を保持しているため、それをそのまま保存する経路をこの列で持たせる。
- * 選択済み開催日が渡らなかった場合(kaisaiDateがnull)は、この列もnull(日付不明)として保存する
- * (analysis-pipeline.ts の当日近似日付はUI表示専用の近似値であり、実際の開催日ではないため
- * kaisai_date列には保存しない=不確かな値で上書きしない)。
- * 旧バージョンで作成済みのDBにはこの列が無いため、他の列と同じ流儀でALTER TABLEにより後付けし、
- * 既存行は NULL=日付不明として読む(後方互換)。
- *
- * 通過順(passing_json)・上がり3F(last3f)列、面テーブル(race_result_meta)(タスク#27-A2):
- * #27-C(当日傾向のプロンプト反映)の土台として、結果取込の各馬に通過順・上がり3Fを、
- * レース単位に面(course_type、芝/ダ/障)を永続化・復元できるようにする。
- * - race_results に passing_json TEXT(通過順配列のJSON文字列)・last3f REAL を追加する。
- *   他の列(mark・ev_estimated 等)と同じ流儀で ALTER TABLE により後付けし、既存行は
- *   passing_json=NULL→復元時 passing=[]、last3f=NULLのまま読む(後方互換)。
- * - 面はレース単位の情報(馬ごとに変わらない)であり、馬単位の race_results に持たせると
- *   同一レース内の全行へ冗長に複製することになるため、正規化してレース単位の新テーブル
- *   race_result_meta(race_id PRIMARY KEY, course_type TEXT)に分離する。面が取得できない
- *   レース(courseType が null/未指定)は行そのものを作らない(読み出し側で
- *   「行が無い=面不明」と「行はあるが course_type が未知値=面不明」を区別する必要が無いよう、
- *   前者に統一する)。
- * - saveResult は race_results・race_result_meta の2テーブルを単一の db.transaction 内で書く
- *   (better-sqlite3 の transaction は例外で全ロールバックされるため、2テーブル書き込みの
- *   原子性を担保できる)。
- * - 復元専用の getRaceResultDetail(raceId) を新設する。既存の getResult(旧来の
- *   umaban/finishPosition/placePayoutのみを返す verify 専用メソッド)は一切変更しない
- *   (verify のクエリ性能・出力契約を保つため)。
  */
 
 import Database from "better-sqlite3";
@@ -168,7 +122,7 @@ export type {
 export interface AnalysisStoreOptions {
   /** SQLiteファイルパス。省略時は ":memory:"。`database` 指定時は無視。 */
   filename?: string;
-  /** 既存の better-sqlite3 Database を注入(ScrapeCache との共有時に使用)。 */
+  /** 既存の better-sqlite3 Database を注入(生 SQL で列を読むテストが同じ接続を使う)。 */
   database?: Database.Database;
 }
 
@@ -187,7 +141,6 @@ export class AnalysisStore {
   private initSchema(): void {
     // 外部キー制約を明示的に有効化する。SQLiteの外部キーは接続単位の設定で、ビルドによっては
     // 既定OFF(FK宣言が装飾扱い)になるため、環境に依存せず孤児行を弾けるよう接続時に必ずONにする。
-    // これは接続単位の設定であり、同一接続を共有する ScrapeCache(FK不使用)には副作用がない。
     this.db.pragma("foreign_keys = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS ${ANALYSES_TABLE} (
@@ -228,6 +181,8 @@ export class AnalysisStore {
         finish_position INTEGER,
         place_payout REAL,
         win_payout REAL,
+        passing_json TEXT,
+        last3f REAL,
         PRIMARY KEY (race_id, umaban)
       );
       CREATE TABLE IF NOT EXISTS ${RACE_RESULT_META_TABLE} (
@@ -235,13 +190,9 @@ export class AnalysisStore {
         course_type TEXT
       );
       -- 組合せ払戻(ワイド・3連複)の値テーブルとマーカーテーブル(Issue #52・AC12)。
-      -- race_result_meta(タスク#27-A2)と同じ理由・同じ流儀で CREATE TABLE IF NOT EXISTS
-      -- を使う(ALTER TABLE ADD COLUMN ではない): これらは既存テーブルへの列追加ではなく
-      -- 新規テーブルの追加であり、旧DBを開いた際に無ければ作成されるだけで既存データには
-      -- 触れない(冪等・非破壊)。2テーブルに分けた理由(R-4): 値テーブル(下記)だけでは
+      -- 2テーブルに分けた理由(R-4): 値テーブル(下記)だけでは
       -- 「未取込」と「取り込んだが該当券種の払戻が0件だった」を区別できない
-      -- (行の個数ではなく行の有無で判定する必要があるため。listUnimportedRaceIdsが
-      -- race_resultsの行の有無でNOT EXISTS判定する既存流儀と同じ)。
+      -- (行の個数ではなく行の有無〈マーカー行〉で判定する必要があるため)。
       --
       -- combo_key は buildComboOddsKeyFor(betType, umabans) による正規化キーであり、
       -- betTypeごとに順序方針(ソートする/しない)が異なる(ワイド・3連複は順不同、
@@ -268,8 +219,7 @@ export class AnalysisStore {
       -- 20→21列、Issue #126〈#24-E3c〉で include_exacta 列を追加し21→22列、Issue #140〈#25-E3c〉で
       -- include_trifecta 列を追加し22→23列、Issue #151〈#26-E3c〉で include_bracket_quinella 列を
       -- 追加し23→24列。列を読む人〈過去分析の再表示「馬連/馬単/三連単/枠連: ON/OFF/記録なし」〉が
-      -- 実在するに至ったため #59 の凍結を部分的に解除した4つの例外)。race_combo_payouts と同じ理由・同じ流儀で
-      -- CREATE TABLE IF NOT EXISTS を使う(新規テーブル追加であり既存データには触れない)。
+      -- 実在するに至ったため #59 の凍結を部分的に解除した4つの例外)。
       -- include_quinella・include_exacta・include_trifecta・include_bracket_quinella はいずれも
       -- NULL を許す(NOT NULL にしない・DEFAULT も付けない): 列追加前(それぞれIssue #118・#126・
       -- #140・#151より前)に保存された行は「馬連/馬単/三連単/枠連の設定を記録していない」のであって
@@ -319,293 +269,6 @@ export class AnalysisStore {
         FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
       );
     `);
-    this.migrateResultPayoutColumn();
-    this.migrateResultWinPayoutColumn();
-    this.migrateMarkColumn();
-    this.migrateEvEstimatedColumn();
-    this.migratePromptVersionColumn();
-    this.migrateAdditionalInstructionColumn();
-    this.migrateKaisaiDateColumn();
-    this.migrateResultDetailColumns();
-    this.migrateAnalysisExportColumns();
-    this.migrateHorseReasonColumn();
-    this.migrateHorseItemsColumns();
-    this.migrateAllocationQuinellaColumn();
-    this.migrateAllocationExactaColumn();
-    this.migrateAllocationTrifectaColumn();
-    this.migrateAllocationBracketQuinellaColumn();
-    this.migrateHistoryCutoffDateColumn();
-    this.migratePromptLookaheadGuardedColumn();
-  }
-
-  /**
-   * LLMプロンプト側の先読みリーク遮断の印(prompt_lookahead_guarded)列を後付けするマイグレーション
-   * (Issue #153)。この列が無い analyses(v1.14.x 以前)には追加する。既存行は ALTER TABLE で NULL が入る
-   * =「遮断の記録なし=是正前」として読める(0や1で誤読させない。history_cutoff_date の後付けと同じ流儀)。冪等。
-   */
-  private migratePromptLookaheadGuardedColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "prompt_lookahead_guarded")) {
-      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN prompt_lookahead_guarded INTEGER`);
-    }
-  }
-
-  /**
-   * 戦績の絞り込み基準日(history_cutoff_date)列を後付けするマイグレーション(Issue #39)。
-   * #39より前に作成済みの analyses にはこの列が無いため、存在しなければ追加する。既存行は
-   * ALTER TABLE で NULL が入る=「先読みリーク遮断の記録なし=是正前」として読める(0や空文字で
-   * 「是正済み」と誤読させない。#31の原則・include_*列の後付けと同じ流儀)。冪等。
-   */
-  private migrateHistoryCutoffDateColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "history_cutoff_date")) {
-      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN history_cutoff_date TEXT`);
-    }
-  }
-
-  /**
-   * 配分提案メタ行のinclude_quinella列を後付けするマイグレーション(Issue #118・#24-D3b-3)。
-   * Issue #118より前に作成済みの analysis_allocation_meta にはこの列が無いため、存在しなければ
-   * 追加する(既存行はALTER TABLEでNULLが入る=「馬連の設定を記録していない」として読める。
-   * #31: OFFと断定しない。上記CREATE TABLEのコメント参照)。
-   */
-  private migrateAllocationQuinellaColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "include_quinella")) {
-      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_quinella INTEGER`);
-    }
-  }
-
-  /**
-   * 配分提案メタ行のinclude_exacta列を後付けするマイグレーション(Issue #126・#24-E3c)。
-   * Issue #126より前に作成済みの analysis_allocation_meta にはこの列が無いため、存在しなければ
-   * 追加する(既存行はALTER TABLEでNULLが入る=「馬単の設定を記録していない」として読める。
-   * #31: OFFと断定しない。上記CREATE TABLEのコメント参照。`migrateAllocationQuinellaColumn`と同型)。
-   */
-  private migrateAllocationExactaColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "include_exacta")) {
-      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_exacta INTEGER`);
-    }
-  }
-
-  /**
-   * 配分提案メタ行のinclude_trifecta列を後付けするマイグレーション(Issue #140・#25-E3c)。
-   * Issue #140より前に作成済みの analysis_allocation_meta にはこの列が無いため、存在しなければ
-   * 追加する(既存行はALTER TABLEでNULLが入る=「三連単の設定を記録していない」として読める。
-   * #31: OFFと断定しない。上記CREATE TABLEのコメント参照。`migrateAllocationQuinellaColumn`/
-   * `migrateAllocationExactaColumn`と同型)。
-   */
-  private migrateAllocationTrifectaColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "include_trifecta")) {
-      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_trifecta INTEGER`);
-    }
-  }
-
-  /**
-   * 配分提案メタ行のinclude_bracket_quinella列を後付けするマイグレーション(Issue #151・#26-E3c)。
-   * Issue #151より前(v1.13.0まで)に作成済みの analysis_allocation_meta にはこの列が無いため、
-   * 存在しなければ追加する(既存行はALTER TABLEでNULLが入る=「枠連の設定を記録していない」として
-   * 読める。#31: OFFと断定しない。上記CREATE TABLEのコメント参照。`migrateAllocationQuinellaColumn`/
-   * `migrateAllocationExactaColumn`/`migrateAllocationTrifectaColumn`と同型)。
-   */
-  private migrateAllocationBracketQuinellaColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "include_bracket_quinella")) {
-      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_bracket_quinella INTEGER`);
-    }
-  }
-
-  /**
-   * エクスポート用列(model・raw_response・race_snapshot_json)を後付けするマイグレーション
-   * (Issue#10 分析データのエクスポート)。
-   * 旧バージョンで作成済みの analyses にはこれらの列が無いため、存在しなければ追加する
-   * (既存行は全列NULL=LLM未使用・スナップショット未保存として読める=後方互換)。
-   */
-  private migrateAnalysisExportColumns(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "model")) {
-      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN model TEXT`);
-    }
-    if (!columns.some((c) => c.name === "raw_response")) {
-      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN raw_response TEXT`);
-    }
-    if (!columns.some((c) => c.name === "race_snapshot_json")) {
-      this.db.exec(
-        `ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN race_snapshot_json TEXT`,
-      );
-    }
-  }
-
-  /**
-   * LLM根拠(reason)列を後付けするマイグレーション(Issue#10)。
-   * 旧バージョンで作成済みの analysis_horses には reason 列が無いため、存在しなければ追加する
-   * (既存行は NULL=根拠なしとして読める=後方互換)。
-   */
-  private migrateHorseReasonColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSIS_HORSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "reason")) {
-      this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN reason TEXT`);
-    }
-  }
-
-  /**
-   * 強調材料・懸念事項(highlights_json・concerns_json)列を後付けするマイグレーション(Issue #197・#196-a)。
-   * 旧バージョンで作成済みの analysis_horses には2列が無いため、無い列だけ追加する(既存行は NULL=項目なしとして
-   * `[]` で読める=後方互換)。列の並びは CREATE TABLE と同じ(reason の後ろ)で、クラウド版(D1)の migration 0006 の
-   * ALTER の並びとも一致する(構造の一致は scripts/test/cloud-d1-schema.test.ts が固定している)。
-   */
-  private migrateHorseItemsColumns(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSIS_HORSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    for (const name of ["highlights_json", "concerns_json"]) {
-      if (!columns.some((c) => c.name === name)) {
-        this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN ${name} TEXT`);
-      }
-    }
-  }
-
-  /**
-   * 開催日(kaisai_date)列を後付けするマイグレーション(Task#34)。
-   * 旧バージョンで作成済みの analyses には kaisai_date 列が無いため、存在しなければ追加する
-   * (既存行は NULL=日付不明となり、検証画面のレース単位ブレークダウンは「日付不明」表示に
-   * フォールバックする=後方互換)。
-   */
-  private migrateKaisaiDateColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "kaisai_date")) {
-      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN kaisai_date TEXT`);
-    }
-  }
-
-  /**
-   * プロンプト版番号(prompt_version)列を後付けするマイグレーション(Task#27)。
-   * 旧バージョンで作成済みの analyses には prompt_version 列が無いため、存在しなければ追加する
-   * (既存行は NULL=版不明となり、verifyの版別集計では「版不明」1グループとして扱う=後方互換)。
-   */
-  private migratePromptVersionColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "prompt_version")) {
-      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN prompt_version TEXT`);
-    }
-  }
-
-  /**
-   * 追加指示(additional_instruction)列を後付けするマイグレーション(Task#28)。
-   * 旧バージョンで作成済みの analyses には additional_instruction 列が無いため、存在しなければ追加する
-   * (既存行は NULL=追加指示なしとして読める=後方互換)。
-   */
-  private migrateAdditionalInstructionColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "additional_instruction")) {
-      this.db.exec(
-        `ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN additional_instruction TEXT`,
-      );
-    }
-  }
-
-  /**
-   * 推定EVフラグ(ev_estimated)列を後付けするマイグレーション(Task#25)。
-   * 旧バージョンで作成済みの analyses には ev_estimated 列が無いため、存在しなければ追加する
-   * (既存行は NULL=false=確定EV扱いとなり、verifyは従来どおり集計対象になる=後方互換)。
-   */
-  private migrateEvEstimatedColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "ev_estimated")) {
-      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN ev_estimated INTEGER`);
-    }
-  }
-
-  /**
-   * 予想印(mark)列を後付けするマイグレーション(Task#23)。
-   * 旧バージョンで作成済みの analysis_horses には mark 列が無いため、存在しなければ追加する
-   * (既存行は NULL=印なしとなり、UI・Discord通知は「印なし」表示にフォールバックする=後方互換)。
-   */
-  private migrateMarkColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${ANALYSIS_HORSES_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "mark")) {
-      this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN mark TEXT`);
-    }
-  }
-
-  /**
-   * 実配当列(place_payout)を後付けするマイグレーション。
-   * 旧バージョンで作成済みの race_results には place_payout 列が無いため、存在しなければ追加する
-   * (既存行は NULL=未取込となり、verifyは従来どおり近似にフォールバックする=後方互換)。
-   */
-  private migrateResultPayoutColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${RACE_RESULTS_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "place_payout")) {
-      this.db.exec(
-        `ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN place_payout REAL`,
-      );
-    }
-  }
-
-  /**
-   * 実配当列(win_payout)を後付けするマイグレーション(Issue #100・#23-C)。
-   * migrateResultPayoutColumn(place_payout)の逐語コピー。旧バージョンで作成済みの
-   * race_results には win_payout 列が無いため、存在しなければ追加する
-   * (既存行は NULL=未取込となり、verifyは判定不能として扱う=後方互換)。
-   */
-  private migrateResultWinPayoutColumn(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${RACE_RESULTS_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "win_payout")) {
-      this.db.exec(
-        `ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN win_payout REAL`,
-      );
-    }
-  }
-
-  /**
-   * 通過順(passing_json)・上がり3F(last3f)列を後付けするマイグレーション(タスク#27-A2)。
-   * 旧バージョンで作成済みの race_results にはこれらの列が無いため、存在しなければ追加する
-   * (既存行は passing_json=NULL→復元時 passing=[]、last3f=NULLのまま読める=後方互換)。
-   */
-  private migrateResultDetailColumns(): void {
-    const columns = this.db
-      .prepare(`PRAGMA table_info(${RACE_RESULTS_TABLE})`)
-      .all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === "passing_json")) {
-      this.db.exec(
-        `ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN passing_json TEXT`,
-      );
-    }
-    if (!columns.some((c) => c.name === "last3f")) {
-      this.db.exec(`ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN last3f REAL`);
-    }
   }
 
   /**
@@ -644,7 +307,7 @@ export class AnalysisStore {
    * (course_type)を保存する。(race_id, umaban) 主キーで再保存は上書きする。
    * placePayout/winPayout/passing/last3f を省略した場合はそれぞれ null/null/空配列/null で
    * 保存する(未取込項目=後続の復元・verifyは欠損値として扱う)。winPayout は placePayout と
-   * 同型の後付け列(win_payout、Issue #100・#23-C)。
+   * 同型の列(win_payout、Issue #100・#23-C)。
    *
    * race_results(馬単位)・race_result_meta(レース単位の面)・race_combo_payouts/
    * race_combo_payout_imports(組合せ払戻、Issue #52)は単一の db.transaction 内で書く
@@ -679,8 +342,7 @@ export class AnalysisStore {
     courseType?: CourseType | null,
     comboPayouts?: RaceComboPayoutsSaveInput,
   ): void {
-    // SQL と束縛値の組み立ては codec(クラウド版の D1 実装と共有。Issue #207)。文の発行は従来と同じ(同じ文・同じ回数・同じ順序。
-    // `analysis-store-result-sql-sequence.test.ts` が固定している)。
+    // SQL と束縛値の組み立ては codec(クラウド版の D1 実装と共有。Issue #207)。文の発行は従来と同じ(同じ文・同じ回数・同じ順序)。
     const upsertResult = this.db.prepare(UPSERT_RACE_RESULT_SQL);
     const upsertMeta = this.db.prepare(UPSERT_RACE_RESULT_META_SQL);
     const deleteCombo = this.db.prepare(DELETE_COMBO_PAYOUTS_SQL);
@@ -904,122 +566,6 @@ export class AnalysisStore {
 
     // 行 → StoredAnalysis の復元(NULL・0/1・JSON)は codec(D1 実装と共有)が担う。
     return analyses.map((a) => toStoredAnalysis(a, horseStmt.all(a.id) as HorseRow[]));
-  }
-
-  /**
-   * 分析済み(analyses に行がある)だが結果未取込(race_results に行が1件も無い)のレースIDを
-   * レースID昇順で列挙する(Task#31 一括取込)。
-   *
-   * 判定は必ず `NOT EXISTS`(race_results 側に行そのものが存在するか)で行う。
-   * `COUNT(finish_position)` 等の値の個数で判定してはならない: finish_position は
-   * 中止・除外で NULL を許容する列であり、COUNTはNULLを数えないため、全馬が中止・除外で
-   * finish_position が全行NULLのレース(=取込済み)を誤って未取込と判定してしまう
-   * (「値の有無」と「行の有無」の混同。docs/handover-next-session.md 4章)。
-   * DISTINCT により、同一レースを複数回分析していても1回だけ返す。
-   */
-  listUnimportedRaceIds(): string[] {
-    const rows = this.db
-      .prepare(
-        `SELECT DISTINCT race_id AS raceId
-           FROM ${ANALYSES_TABLE} a
-           WHERE NOT EXISTS (
-             SELECT 1 FROM ${RACE_RESULTS_TABLE} r WHERE r.race_id = a.race_id
-           )
-           ORDER BY race_id`,
-      )
-      .all() as Array<{ raceId: string }>;
-    return rows.map((r) => r.raceId);
-  }
-
-  /**
-   * 指定したプロンプト版(prompt_version)で分析済みのレースIDをレースID昇順で列挙する
-   * (タスクB2b-1 期間バッチのdedup bulk query)。
-   *
-   * `listUnimportedRaceIds` と同じ流儀で DISTINCT により、同一レースを同じ版で複数回
-   * 分析していても1回だけ返す。`prompt_version = ?` の等価比較は SQLite の NULL 比較の
-   * 性質上 NULL 行(版不明・LLM未使用)にはマッチしないため、版不明のレースは列挙されない
-   * (呼び出し側〈期間バッチのdedup〉は「別版のみ/null」を実行対象に含める前提のため、
-   * この非マッチは意図した挙動)。
-   */
-  listAnalyzedRaceIdsByPromptVersion(version: string): string[] {
-    const rows = this.db
-      .prepare(
-        `SELECT DISTINCT race_id AS raceId
-           FROM ${ANALYSES_TABLE}
-           WHERE prompt_version = ?
-           ORDER BY race_id`,
-      )
-      .all(version) as Array<{ raceId: string }>;
-    return rows.map((r) => r.raceId);
-  }
-
-  /**
-   * プロンプト版不明(prompt_version が null)の分析をまとめて削除する(Task#33)。
-   *
-   * 削除対象の母集団が持つ「二重の意味」(code-reviewer指摘対応): prompt_version IS NULL には
-   * 由来の異なる2種類の分析が混在し、DB上はどちらか区別できない。
-   *   (1) 版記録導入前(Task#27より前)に保存された旧データ。列追加前は promptVersion を
-   *       保存する手段自体が無かった。
-   *   (2) APIキー未設定でLLMを使わず prior をそのまま採用した現行の分析。この経路は
-   *       プロンプト自体を使わないため、常に promptVersion=null で保存される(現行でも今後も
-   *       発生し続ける。上のクラスコメント・StoredAnalysis.promptVersion のJSDoc参照)。
-   * 削除してよい理由(ユーザー合意済み・PM決定): プロンプト文面は予想印導入等で実質変わっており、
-   * 版不明(上記(1))は旧文面が混在しうるため版別比較の信頼性を損なう。検証画面の版別比較は
-   * 従来からこの母集団((1)+(2))をまとめて「版不明」グループとして表示しており、ユーザーが
-   * 合意した削除対象はこの表示グループ全体(=このメソッドが削除する範囲そのもの)である。
-   * (2)のLLM未使用分析は再分析(通常の分析実行、または一括取込 Task#31)によって復元できるため、
-   * 削除しても実質的な損失にならない。削除で減った件数は一括取込(Task#31)で埋め直せる。
-   *
-   * FK実装メモ(削除順序の根拠): analysis_horses の外部キー宣言
-   * (`FOREIGN KEY (analysis_id) REFERENCES analyses (id)`)には ON DELETE 句が無く、
-   * SQLite既定の NO ACTION になる。initSchema で foreign_keys=ON にしているため、
-   * 子行(analysis_horses)を残したまま親行(analyses)だけを削除しようとすると
-   * FOREIGN KEY constraint failed で失敗する。CASCADE化はテーブル再作成を要し既存DBファイルとの
-   * 互換性を崩す恐れがあるためスキーマは変更せず、このメソッド側で明示的に
-   * analysis_horses → analyses の順に削除することで対処する。
-   *
-   * race_results は削除しない: race_id は analyses への外部キーではない自由文字列であり、
-   * 結果データ(実着順・複勝払戻)はプロンプト版と無関係に他の分析(取込済みの版あり分析等)からも
-   * 再利用できるため、意図的に対象外とする。
-   *
-   * @returns 削除した分析(analyses行)の件数
-   */
-  deleteAnalysesWithUnknownPromptVersion(): number {
-    // 配分提案(Issue #59・analysis_allocation_meta/analysis_bets)も analyses(id) を
-    // 参照するFK(NO ACTION)を持つため、analysis_horsesと同様に親行より先に削除しないと
-    // FOREIGN KEY constraint failed で失敗する(#59 AC5-2。事前にこの経路の存在を実測確認済み)。
-    const deleteBets = this.db.prepare(
-      `DELETE FROM ${ANALYSIS_BETS_TABLE}
-         WHERE analysis_id IN (
-           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
-         )`,
-    );
-    const deleteAllocationMeta = this.db.prepare(
-      `DELETE FROM ${ANALYSIS_ALLOCATION_META_TABLE}
-         WHERE analysis_id IN (
-           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
-         )`,
-    );
-    const deleteHorses = this.db.prepare(
-      `DELETE FROM ${ANALYSIS_HORSES_TABLE}
-         WHERE analysis_id IN (
-           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
-         )`,
-    );
-    const deleteAnalyses = this.db.prepare(
-      `DELETE FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL`,
-    );
-    const tx = this.db.transaction((): number => {
-      // 先に子行(analysis_bets → analysis_allocation_meta → analysis_horses)を消してから
-      // 親行(analyses)を消す(FK制約違反を避けるため)。bets/meta と horses の間に順序制約は
-      // 無い(互いを参照しない兄弟テーブル)が、いずれも analyses より先である必要がある。
-      deleteBets.run();
-      deleteAllocationMeta.run();
-      deleteHorses.run();
-      const info = deleteAnalyses.run();
-      return info.changes;
-    });
-    return tx();
   }
 
   /** 内部の better-sqlite3 Database への参照(検証・拡張用)。 */

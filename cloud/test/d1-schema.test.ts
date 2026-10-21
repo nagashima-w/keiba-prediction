@@ -138,7 +138,7 @@ describe("AC-a2: 外部キーが効く(analyses を親とする3つの子の表)
 
 /**
  * #175(#172-b。分析履歴ストア `src/analysis-repository.ts`)が発行する想定の検索の文。race_id の絞り込みは exe の `listAnalyses` と同じ文(core の codec)。
- * 版別の列挙は exe の `listAnalyzedRaceIdsByPromptVersion` と同じ文(analysis-store.ts のインライン。codec に切り出されていないので写している)。
+ * 版別の列挙は exe の `listAnalyzedRaceIdsByPromptVersion` だった文(support の AnalysisStore からは Issue #400 R-12 で削除した。codec に切り出されていないので写している)。
  */
 const BY_RACE_SQL = "SELECT id FROM analyses WHERE race_id = ? ORDER BY id";
 const BY_KAISAI_DATE_SQL = "SELECT id FROM analyses WHERE kaisai_date = ? ORDER BY id";
