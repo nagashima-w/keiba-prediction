@@ -16,7 +16,7 @@
  *     推定EVは確定EVより誤差が大きく、verify では既定で除外する。NULL は false(確定EV)として読む。
  *   - prompt_version: buildPrompt が使う PROMPT_VERSION の値。LLM未使用の分析は NULL=版不明。
  *   - additional_instruction: 設定画面の自由記述欄の内容。PROMPT_VERSION とは別軸で、版別比較の解釈に使う。
- *   - kaisai_date: 選択済みの開催日(YYYYMMDD)。渡らなかったときは NULL(不確かな近似日付では埋めない)。
+ *   - kaisai_date: 選択済みの開催日(YYYYMMDD)。渡らなかったときは NULL(開催日の近似はしない。`runAnalysis` は開催日が必須。#400 R-10b)。
  *   - model・raw_response・race_snapshot_json: エクスポート用。LLM未使用なら model・raw_response は NULL。
  *   - history_cutoff_date・prompt_lookahead_guarded: 先読みリーク遮断の記録。NULL は「記録なし=是正前」で、
  *     0 や空文字で「是正済み」と読ませない。

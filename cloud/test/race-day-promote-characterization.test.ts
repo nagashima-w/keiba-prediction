@@ -14,6 +14,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 /**
  * Issue #399(R-9e の e2): 計画の「昇格」(`promoteDuePlans`・`promotionTiming`・`hasRecentManualAnalysis`・`promoteRow`)を `RaceDayCore` から切り出す前に、**今の挙動を固定する特性テスト**。
  * 切り出しの前後で、このファイルを書き換えずに緑のままであることが、挙動を変えていないことの根拠になる。
+ * **切り出しの後の名前**(このヘッダと本文の旧名の読み替え): `promoteDuePlans`→`PromoteStage.promoteDue`(`promotionTiming`・`hasRecentManualAnalysis`・`promoteRow` は名前のまま `PromoteStage` のメソッド)。実装は `cloud/src/race-day-promote-stage.ts`。
  *
  * 既存の `race-day-plan.test.ts`(AC-C4 ほか)が固定している面(行の状態・スキップの理由・D1 に聞く回数)に加えて、**値だけでは見えない面**を固定する:
  *  - **SQL の文と順序**(計画の表・印の表・タスクの表・meta への書き込みを読める形で、全体は SHA-1 で固定する。**D1 への問い合わせ〈`findRecentByRace`〉・設定の読み取り・警告・`setAlarm` も同じ列に挟む**ので、

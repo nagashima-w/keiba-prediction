@@ -302,7 +302,7 @@ const FULL: CloudSettings = {
   baseScoreWeightTrainer: 0.95,
 };
 
-/** スコアリングの重みの境界値(Issue #218。exe の `isValidWeight` と同じ: 有限な数で 0 以上。上限は無い)。読む側も書く側も同じ。 */
+/** スコアリングの重みの境界値(Issue #218。有限な数で 0 以上。上限は無い。exe の `isValidWeight`〈#393 で削除〉と同じ規則だった)。読む側も書く側も同じ。 */
 const WEIGHT_OK: readonly unknown[] = [0, 0.05, 0.15, 1, 100, 1e300, Number.MAX_VALUE];
 const WEIGHT_NG: readonly unknown[] = [-0.0001, -1, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY, Number.NaN, "1", "", null, true, [1], {}];
 

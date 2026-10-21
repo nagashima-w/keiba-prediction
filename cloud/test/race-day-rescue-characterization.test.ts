@@ -13,6 +13,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 /**
  * Issue #399(R-9e の e3): 救済の段階(`rescuePlan`・`rescueVerdictNow`・`rescueJudgeAtMs`・`judgeRescue`・定数 `RESCUE_VERDICT_KEY`)を `RaceDayCore` から切り出す前に、**今の挙動を固定する特性テスト**。
  * 切り出しの前後で、このファイルを書き換えずに緑のままであることが、挙動を変えていないことの根拠になる。
+ * **切り出しの後の名前**(このヘッダと本文の旧名の読み替え): `rescuePlan`→`RescueStage.rescue`・`rescueVerdictNow`→`RescueStage.verdictNow`・`rescueJudgeAtMs`→`RescueStage.judgeAtMs`・`judgeRescue`→`RescueStage.judge`(定数 `RESCUE_VERDICT_KEY` は名前のまま)。実装は `cloud/src/race-day-rescue-stage.ts`。
  *
  * 既存の `race-day-rescue.test.ts`(救済の冪等性・失敗の判定と通知の統合)が固定している面(行の状態・通知の本文・多くとも 1 回)に加えて、**値だけでは見えない面**を固定する:
  *  - **SQL の文と順序**(計画の表・会場の表・タスクの表・通知の表・meta への書き込みを読める形で、全体は SHA-1 で固定する。**gate への取得・警告・`setAlarm`・通知の送信も同じ列に挟む**ので、

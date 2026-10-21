@@ -123,7 +123,7 @@ export interface AnalysisPipelineDeps {
    * 旧分析と区別できない「未到達」のまま。#59 AC4)。
    */
   readonly allocationSettings: AnalysisAllocationSettings | null;
-  /** 現在時刻(analyzedAt・当日近似日付に使う)。既定 () => new Date()。 */
+  /** 現在時刻(analyzedAt と、騎手成績の窓の選択に使う)。開催日の近似には使わない(開催日は必須。#400 R-10b で近似の経路を撤去した)。既定 () => new Date()。 */
   readonly now?: () => Date;
   /** EV設定(閾値)。省略時は既定(閾値1.0)。 */
   readonly evConfig?: EvConfig;
@@ -239,7 +239,7 @@ export interface AnalysisPipelineDeps {
   /**
    * 当日の馬場の値(クッション値・含水率・使用コース・芝の状態の文章)の読み出し(Issue #295〈#293-B〉。クラウド版は D1 の `baba_conditions`)。
    * 引数は JRA の場コード(2桁。レースIDの5〜6桁目)と開催日(YYYYMMDD)。値が無い(地方・計測が無い日・取得の前)は null。
-   * **呼ぶのは、LLM を使う中央のレースで、開催日が渡っているときだけ**(地方・LLM スキップ・近似日では呼ばない。LLM が見ていない値を記録しないため)。
+   * **呼ぶのは、LLM を使う中央のレースで、開催日が渡っているときだけ**(地方・LLM スキップでは呼ばない。開催日は必須で、いつも渡る〈#400 R-10b〉。LLM が見ていない値を記録しないため)。
    * 返った値は正規化し(normalizeDayBaba)、コース種別で絞って(selectDayBabaForCourse)から、プロンプトとスナップショット(`raceSnapshot.baba`)の両方に同じものを渡す。
    * 省略時は何もしない(機能オフ。既存のプロンプト・保存内容はバイト不変)。失敗(throw・reject)は握って値なしで続け、`onBabaError` に渡す。
    */

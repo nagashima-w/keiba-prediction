@@ -10,7 +10,10 @@
  *  - `jyuryo[1]`: 負担重量の種別(ハンデ・別定・馬齢・定量。地方は `見込` も)。語と完全一致しなければ null。
  *
  * 出力は race_id をキーにした素のオブジェクト(IPC/`JSON.stringify` を通っても消えない。`RaceData.jockeyStats` と同じ流儀)。
- * 同じレースは馬が違っても同じ値だった(実測: 中央 88 件・地方 270 件で食い違い 0)ので、最初に出た行を採る。
+ * 同じレースは馬が違っても同じ値だった(実フィクスチャでの確認: `fixtures/newspaper_api_202608040711.json`〈中央。走の行に出るレースは 88 件で、うち 2 頭以上の行に出る 13 件〉と
+ * `fixtures/newspaper_api_nar_202655090311.json`〈地方。270 件のうち 2 頭以上の行に出る 10 件〉で、race_id ごとの `kigou[1]`・`jyuryo[1]` の組の食い違いは 0)ので、最初に出た行を採る。
+ * **食い違いを検査できるのは 2 頭以上の行に出るレースだけ**(上の 13 件・10 件)。確認の手順は、フィクスチャを `decodeRaceApiPayload` で展開し、race_id ごとに組を集めて異なる組が 2 つ以上あるレースを数えること
+ * (再現用のスクリプトはコミットしていない)。
  */
 
 import { decodeRaceApiPayload, findEncodedPayload, RaceApiDecodeError } from "./decode-race-api.js";

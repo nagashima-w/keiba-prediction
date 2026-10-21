@@ -613,8 +613,8 @@ describe("日報・月報の run(POST): 検証の順序・DO の断りの写し(
   it("daily: 検証の順序 — 余計なキー → date の型 → 開催日の形 → regenerate の型 → 今日以前(DO は呼ばない)", async () => {
     const { deps, admin } = await setup();
     const cases: Array<[unknown, Snapshot]> = [
-      [{ date: "20261005", zzz: 1 }, badRequestSnap("本文のキーは date だけです")],
-      [{ date: "bad", zzz: 1, regenerate: "x" }, badRequestSnap("本文のキーは date だけです")],
+      [{ date: "20261005", zzz: 1 }, badRequestSnap("本文のキーは date と regenerate だけです")],
+      [{ date: "bad", zzz: 1, regenerate: "x" }, badRequestSnap("本文のキーは date と regenerate だけです")],
       [{ date: 20261005 }, badRequestSnap("date は YYYYMMDD の 8 桁の文字列で指定してください")],
       [{}, badRequestSnap("date は YYYYMMDD の 8 桁の文字列で指定してください")],
       [{ date: "2026100", regenerate: "x" }, badRequestSnap((checkKaisaiDate("2026100") as { message: string }).message)],

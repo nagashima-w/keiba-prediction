@@ -77,7 +77,7 @@
 
 ### 同じ URL を `fetch_cache` に書く経路(上の期間の上限の根拠)
 
-`grep -n "networkFetcher" cloud/src/race-day-core.ts` の使用箇所(実装時に網羅した):
+`grep -n "networkFetcher" cloud/src/race-day-core.ts` の使用箇所(実装時に網羅した)。**中央の再計算の行だけは、#399 R-9a の切り出し(`CloseStage`)で `cloud/src/race-day-close-stage.ts` に移った**ので、今は core の grep には出ず、`grep -n "networkFetcher" cloud/src/race-day-close-stage.ts` に出る(2026-10-21 に確かめた)。前走の条件〈#421 段階 1-b〉の新聞形式の POST も、朝・発走前の取得の `networkFetcher` で書くが、組合せのキーではないので下の表には入れない:
 
 | 箇所 | 書くキー |
 |---|---|

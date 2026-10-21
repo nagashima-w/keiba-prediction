@@ -6,7 +6,7 @@
  * production との対応(`packages/core/src/analysis/analysis-pipeline.ts`):
  * - 取消・除外の馬は、結果ページで判別して出走馬から除く(#41 の `measure.ts` と同じ。#154 で
  *   `scrapeRace` が除くようになった production の入力と同じ形)。
- * - `kaisaiDate` を必ず渡す(近似日にならない)。#39・#153 の先読み遮断は `runAnalysis` が自分で行う。
+ * - `kaisaiDate` を必ず渡す(`runAnalysis` は開催日が必須で、実行日で近似する経路は #400 R-10b で撤去した)。#39・#153 の先読み遮断は `runAnalysis` が自分で行う。
  * - 同日傾向: `getRaceResultDetail` を、保存済みの結果ページ(`resultHtmlOf`)から作る。
  *   `runAnalysis`→`collectSameDayTrend` が**自レースより前**のレース番号だけを問い合わせる
  *   (後続レースの結果は構造的に見えない)。作り方は production の取込(`toResultEntries`)と同じ。
@@ -98,7 +98,7 @@ export function buildRaceResultDetail(html: string): RaceResultDetail | undefine
  * 1レースについて `runAnalysis` を駆動する。`analyze` に渡した関数が、production の
  * `deps.analyze` と同じ `BuildPromptInput` を受け取る。
  *
- * @throws 結果ページの着順が分類できない・分析日が近似になった場合
+ * @throws 結果ページの着順が分類できない場合(分析日が近似になる場合の検査は、開催日の近似の経路ごと #400 R-10b で撤去した)
  */
 export async function driveRunAnalysis(
   input: DriveInput,

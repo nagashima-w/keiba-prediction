@@ -33,7 +33,7 @@
  * `race.odds.win[umaban]?.ninki` を直接読む消費経路は次の2箇所(`grep -rn
  * "odds.win\[.*\]?\.ninki" packages/core/src cloud/src` で確認可能。このコメント自身の行を除く)であり、いずれも
  * 「nullish(`null`/`undefined`)のみ」を欠損として扱う契約になっている:
- * `analysis/analysis-pipeline.ts` の `const popularity = race.odds.win[umaban]?.ninki ?? null`
+ * `analysis/analysis-llm-materials.ts` の `const popularity = race.odds.win[umaban]?.ninki ?? null`(#400 R-10a で `analysis-pipeline.ts` から移った)
  * (LLMプロンプト用の `PromptHorse.popularity` を組み立てる)と、
  * `analysis/analysis-export.ts` の `popularity: race.odds.win[umaban]?.ninki ?? null`
  * (`buildRaceSnapshot`。`analyses.race_snapshot_json` への永続化・CSV/JSON出力の元)。

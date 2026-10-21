@@ -2,7 +2,11 @@
  * 型ガードの共通部品(Issue #397・R-5)。**import を持たない純モジュール**(クライアントの束にも入れてよい)。
  * 以前は `isRecord`(`isObject`・`isObj` の名前も含め 8 か所)・`isFiniteNumber`/`isNum`(6 か所)・`finiteOrNull`(2 か所)が、同じ式で別々に定義されていた。
  *
- * 統合していないもの(名前は似ていても中身が違う): `isCount`(`isInteger` と `isSafeInteger` で 2 通り)・`rateOrNull`・`numberOrNull`(範囲付き・`typeof` だけ・文字列を読むものがある)。
+ * 統合していないもの(名前は似ていても中身が違う): `isCount`(`isInteger` と `isSafeInteger` で 2 通り)・`rateOrNull`・`numberOrNull`(範囲付き・`typeof` だけ・文字列を読むものがある)・
+ * `cloud/src/verify-breakdown.ts` の `isFiniteNumber`(引数の型が `number | null | undefined` で、ここの `unknown` を受ける版とは型が違う)。
+ *
+ * 同じ式のまま、まだ統合していないもの(再現: `grep -rn -E "const (isRecord|isObject|isNum) =" cloud/src scripts`): `cloud/src/race-facts.ts` の `isRecord`(#389-a で足された。ここの `isRecord` と同じ式)・
+ * `scripts/prior-dataset.ts` の `isObject`(同じ式)・`isNum`(`isFiniteNumber` と同じ式)。
  */
 
 /** 配列でないオブジェクト(`null` は除く)。`Date` など配列でない object は通る。 */

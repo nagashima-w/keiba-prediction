@@ -382,7 +382,7 @@ netkeiba の取得が、本番(Cloudflare)で通ることを、出馬表1本で�
 
 ## 重賞の過去10年傾向(Issue #181 段階2。v1.23.0)
 重賞の LLM プロンプトの「同レース過去10年傾向」(【レース情報】末尾の最大3行)を、exe と同じく発走前の分析に入れる。
-- **POST は取得ステップ(`runPreRaceFetch`)の1本だけ**: 出馬表に重賞のバッジがあるレース(`hasGradeBadge !== false`。exe と同じ fail-open)で、**LLM を使う構成(API キー登録済み)のときだけ**、
+- **重賞の傾向の POST は取得ステップ(`runPreRaceFetch`)の1本だけ**(#421 段階 1-b から、取得ステップには前走の条件の新聞形式 API の POST が別に 1 本足される。`docs/current-spec.md` の「レースの条件と前走の条件の記録」): 出馬表に重賞のバッジがあるレース(`hasGradeBadge !== false`。exe と同じ fail-open)で、**LLM を使う構成(API キー登録済み)のときだけ**、
   core の `fetchGradeWinnerEntries` を `networkFetcher`(DO のキャッシュ付き)で呼ぶ。キャッシュのキーは `gradeWinnerCacheKey`(レースごと)・鮮度は無期限(確定データ)なので、同じレースの再実行で POST は増えない。
   `cacheKey` の無い POST は `post-cache-guard.ts` が取得・キャッシュの前に拒否する(URL が固定で、全レースが同じキーになるのを防ぐ)。
 - **計算ステップは netkeiba に出ない**(gate は GET も POST も 0 回): `cacheOnly` から `collectGradeWinnerTrend` を引き、基準日(分析日。#153)は `runAnalysis` が渡すものを素通しする。
@@ -570,7 +570,7 @@ exe の検証画面のうち、累積回収率と配分ベースの回収率を�
 
 ## スコアリングの重み(Issue #218。v1.31.0。**保存した重みは、保存後に始まる事前分析・発走前の分析から使われる**)
 - **何をするか**: exe の設定にある重み13項目(バイアス7・基礎6)を、設定(`cloud_settings`)と設定画面に足した。分析の `scorerConfig` に渡す(これまでは渡さず、core の既定値で動いていた)。キーは平坦な接頭辞つき(`biasWeightVenue`・`baseScoreWeightRecentForm` など。exe のキーとの対応は `src/settings.ts` の `SCORING_WEIGHT_FIELDS`)。
-- **既定値・検証**: 既定値は core の `DEFAULT_SCORER_CONFIG`(= exe)と同じ(一致をテストで固定)。検証は exe の `isValidWeight` と同じ(有限な数で 0 以上。上限なし)。D1 の行に重みが無ければ(今の本番)既定値で動くので、**重みを変えなければ今までと同じ結果**。D1 のスキーマは無変更(migration は無い)。
+- **既定値・検証**: 既定値は core の `DEFAULT_SCORER_CONFIG`(= exe)と同じ(一致をテストで固定)。検証は有限な数で 0 以上(上限なし。exe の `isValidWeight` と同じ規則だった。exe の述語は #393 で削除した)。D1 の行に重みが無ければ(今の本番)既定値で動くので、**重みを変えなければ今までと同じ結果**。D1 のスキーマは無変更(migration は無い)。
 - **どのタイミングの重みか**: 事前分析も発走前の分析も、**取得ステップで読んだ設定のスナップショット**の重みで計算する(`race_day_tasks.settings_json`)。取得のあとに設定を保存しても、実行中のタスクは取得時の重みのまま。朝の取得ステップが設定を1回読むようになった(読めなければ再試行 → 尽きたら failed)。朝の prior と発走前の分析は別のタスクなので、朝のあとに重みを保存すると、その日の両者は別の重みになる(朝の prior は画面表示用で、発走前の分析は自分で prior を計算する)。
 - **画面**: 設定画面に「スコアリングの重み」の節(13欄・「重みを既定値に戻す」ボタン〈下書きだけ戻す。保存はしない〉)。**騎手成績の重みは、今の分析が騎手の当該コース成績を scorer に渡さないため、変えても結果が変わらない**(exe も同じ。補助文に書いた)。
 - **検査**: `test/settings.test.ts`・`test/scorer-config.test.ts`・`test/race-day-weights.test.ts`・`scripts/test/cloud-settings-defaults.test.ts`、画面は `test/client-settings-form.test.ts`・`client-view-settings.test.ts`・`client-app-settings.test.ts`。**実機(スマホ)での13欄の見た目・入力は自動検査できない**(デプロイ後にユーザーが確認する)。
