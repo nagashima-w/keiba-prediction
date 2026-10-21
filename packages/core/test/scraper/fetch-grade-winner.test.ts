@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import {
@@ -8,12 +6,7 @@ import {
   type GradeWinnerFetcher,
 } from "../../src/scraper/fetch-grade-winner.js";
 import { parseRaceId } from "../../src/scraper/ids.js";
-
-/** フィクスチャ(JSON文字列)を読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** 呼び出しを記録するスタブフェッチャ。 */
 function makeFetcherStub(response: string): {

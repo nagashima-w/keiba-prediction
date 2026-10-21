@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { load } from "cheerio";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
@@ -18,12 +16,7 @@ import {
 import { buildComboCandidates } from "../../src/ev/combo-bet-allocation.js";
 import type { JointModelHorse } from "../../src/ev/place-joint-model.js";
 import { narTrioOddsAxisUrl } from "../../src/scraper/urls.js";
-
-/** フィクスチャを読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** テストで使うレース(ラジオNIKKEI賞・福島芝1800・16頭)。 */
 const RACE_ID = parseRaceId("202603020211");

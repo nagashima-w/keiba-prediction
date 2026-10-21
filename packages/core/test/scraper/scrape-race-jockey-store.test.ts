@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import type { RaceIdVenueKind } from "../../src/scraper/ids.js";
@@ -12,17 +10,13 @@ import {
   scrapeRace,
   type RaceFetcher,
 } from "../../src/scraper/scrape-race.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #226(週 1 回の更新): 騎手の年ごとの成績を、日をまたいで共有する保存先(`JockeyResultsStore`。クラウド版は D1)から先に読む。
  * 取得日時から TTL(既定 7 日)以内なら netkeiba に出ず、超えた・無いときだけ取得して保存する。保存先の失敗は取得にフォールバックする。
  * 1 回の `scrapeRace` の fetcher 呼び出しの合計に上限(既定 40)を設け、届いたら残りの騎手は取らずに警告にする。
  */
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 class RecordingFetcher implements RaceFetcher {
   readonly calls: Array<{ url: string; options?: CachedFetchTextOptions }> = [];

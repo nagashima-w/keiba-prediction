@@ -1,18 +1,13 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import { parseRaceId } from "../../src/scraper/ids.js";
 import { scrapeRace, type RaceFetcher } from "../../src/scraper/scrape-race.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #426: `scrapeRace` が出馬表のレースのクラス(`raceClass`)を `RaceData.race` に載せること。
  * 負担重量の種別・牝馬限定(Issue #421。地方は読まない)と違って、**中央も地方も読む**(中央は正準ラベル、地方は区分の生のトークン)。
  */
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
 
 class StubFetcher implements RaceFetcher {
   constructor(private readonly handler: (url: string) => string) {}

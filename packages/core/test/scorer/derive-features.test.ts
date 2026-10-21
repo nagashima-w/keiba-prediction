@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHorseResults } from "../../src/scraper/parse-horse-results.js";
 import type {
@@ -17,12 +15,7 @@ import {
   deriveRaceFeatures,
   isPlaced,
 } from "../../src/scorer/derive-features.js";
-
-/** フィクスチャ(JSON文字列)を読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** 着順(順位)を組み立てる小ヘルパ。 */
 function rank(value: number, demoted?: boolean): FinishPosition {

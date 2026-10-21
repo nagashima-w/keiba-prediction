@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { NewspaperParseError, parseNewspaperResponse, PREV_WEIGHT_TYPES } from "../../src/scraper/parse-newspaper.js";
 import { WEIGHT_TYPES } from "../../src/scraper/race-condition.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #421 段階 1-b: 新聞形式の API(AplNewsPaper)の応答から、前走の条件(負担重量の種別・条件の文言・牝馬限定)を読む。
@@ -13,10 +12,6 @@ import { WEIGHT_TYPES } from "../../src/scraper/race-condition.js";
  *  - 地方(サマーチャンピオン 202655090311): 9 頭・284 行 → 12 桁の数字の race_id で重複を除いて 270 件(海外の `2026P0010105` を除く)。
  *    牝馬限定 true 4・false 105・null(条件の文言が空)161。
  */
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
 
 /** 1 行(1 走)の合成。`kigou`・`jyuryo` は [コード, 表示, ""] の 3 要素。 */
 function row(raceId: string, kigou: string, jyuryo: string): Record<string, unknown> {

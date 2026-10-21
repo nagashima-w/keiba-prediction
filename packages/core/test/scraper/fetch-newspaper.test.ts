@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import { gradeWinnerCacheKey } from "../../src/scraper/fetch-grade-winner.js";
@@ -7,12 +5,9 @@ import { fetchNewspaperConditions, newspaperCacheKey, type NewspaperFetcher } fr
 import { parseRaceId } from "../../src/scraper/ids.js";
 import { NewspaperParseError } from "../../src/scraper/parse-newspaper.js";
 import { newspaperApiUrl, newspaperOriginUrl, newspaperRefererUrl } from "../../src/scraper/urls.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /** Issue #421 段階 1-b: 新聞形式の API(AplNewsPaper)の取得アダプタ。実ネットワークは使わない。 */
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
 
 function stub(response: string): { fetcher: NewspaperFetcher; calls: Array<{ url: string; options?: CachedFetchTextOptions }> } {
   const calls: Array<{ url: string; options?: CachedFetchTextOptions }> = [];

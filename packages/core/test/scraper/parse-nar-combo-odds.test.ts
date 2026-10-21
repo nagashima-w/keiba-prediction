@@ -10,8 +10,6 @@
  * その線引きに沿い、構造由来のテスト(件数完全性・AJAXフラグメント対応・型の取り違え)は
  * 実フィクスチャのみを使い、値の解釈・防御的不変条件は最小限の合成HTMLを使う。
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
 import {
@@ -21,12 +19,7 @@ import {
 } from "../../src/scraper/parse-nar-combo-odds.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
 import { parseShutuba } from "../../src/scraper/parse-shutuba.js";
-
-/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(既存テストと同じ解決方法)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** 「available」状態であることを前提として先に固定し、oddsマップを取り出す(空振り防止)。 */
 function expectAvailable(result: NarComboOddsParseResult) {

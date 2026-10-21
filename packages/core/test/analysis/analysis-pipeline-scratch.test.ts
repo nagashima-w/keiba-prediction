@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import {
   parseKaisaiDate,
   parseRaceId,
@@ -10,6 +8,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { runAnalysis, type AnalysisPipelineDeps } from "../../src/analysis/analysis-pipeline.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * analysis-pipeline-scratch.test.ts — Issue #154。
@@ -21,11 +20,6 @@ import { runAnalysis, type AnalysisPipelineDeps } from "../../src/analysis/analy
  * 印・「除外」の文言は未観測で、同じ雛形・同じ印と見込んでいる)。`scrapeRace` を実物のまま
  * 通すので、パーサ→除去→分析の配線全体が検証される。
  */
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 const RESULTS_FIXTURE = loadFixture("horse_results_2021105857.json");
 const RACE_ID = "202606040901";

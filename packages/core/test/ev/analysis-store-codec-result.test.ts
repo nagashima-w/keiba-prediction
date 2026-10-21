@@ -24,7 +24,7 @@ import type { RaceComboPayoutsSaveInput } from "../../src/ev/analysis-store-type
  *
  * exe の AnalysisStore.saveResult と、クラウド版(D1。cloud/src/result-repository.ts)が**同じ SQL・同じ束縛値の変換・同じ復元**を共有する。
  * 2実装で変換が食い違うと、同じ結果が実装によって違う値で保存・復元される(#168 の codec と同じ理由)。
- * exe 側の SQL の発行列は `analysis-store-result-sql-sequence.test.ts`(特性化テスト)が固定している。
+ * exe 側の SQL の発行列を固定していた特性化テスト `analysis-store-result-sql-sequence.test.ts` は、Issue #400 R-12 で削除した(SQL の文面はこのファイルが固定する)。
  */
 
 const normalize = (sql: string): string => sql.replace(/\s+/g, " ").trim();

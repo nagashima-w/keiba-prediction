@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #259(前半): 結果ページの「人気」「単勝オッズ」列を、馬ごとに `ninki`・`winOdds` として読む。
@@ -11,10 +10,6 @@ import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
  * 2026-10-11 に netkeiba から取得した 2 本(`result_202605040205.html`〈除外 1 頭〉・`result_202608040204.html`〈3 着同着〉)を足した。
  * 地方の除外・取消は実物のフィクスチャが無いので、合成 HTML(「合成」と明記したもの)で補う。
  */
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
 
 /** 馬番 → [人気, 単勝オッズ] の対応で比べる。 */
 function oddsByUmaban(html: string): Record<number, [number | null, number | null]> {

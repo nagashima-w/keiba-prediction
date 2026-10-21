@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   CachedFetcher,
@@ -13,6 +11,7 @@ import {
   DEFAULT_SHUTUBA_TTL_MS,
   scrapeRace,
 } from "../../src/scraper/scrape-race.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #155: 出馬表のキャッシュ TTL を10分にし、取消・馬体重・騎手の乗り替わりの更新を
@@ -26,11 +25,6 @@ import {
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const RACE_ID = parseRaceId("202603020211");
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 const FIXTURES = {
   shutuba: loadFixture("shutuba_202603020211.html"),

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import {
@@ -9,12 +7,7 @@ import {
   type StoredAllocation,
 } from "../support/analysis-store.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
-
-/** フィクスチャHTMLを読み込む(parse-race-result.test.ts の loadFixture と同じ流儀)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** テスト用の分析レコードを最小構成で組み立てる。 */
 function makeRecord(overrides: Partial<AnalysisRecord> = {}): AnalysisRecord {

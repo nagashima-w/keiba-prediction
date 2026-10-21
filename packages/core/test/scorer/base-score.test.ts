@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHorseResults } from "../../src/scraper/parse-horse-results.js";
 import { deriveRaceFeatures } from "../../src/scorer/derive-features.js";
@@ -15,11 +13,7 @@ import {
 } from "../../src/scorer/base-score.js";
 import type { BaseScoreConfig, BaseScoreWeights } from "../../src/scorer/config.js";
 import { makeResult, rank } from "./helpers.js";
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** DEFAULT_SCORER_CONFIG の baseScore を部分上書きした設定を作る(weights も部分指定可)。 */
 function cfg(

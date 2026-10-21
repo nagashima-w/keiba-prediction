@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHorseResults } from "../../src/scraper/parse-horse-results.js";
 import { deriveRaceFeatures } from "../../src/scorer/derive-features.js";
@@ -10,11 +8,7 @@ import {
 import { DEFAULT_SCORER_CONFIG } from "../../src/scorer/config.js";
 import type { HorseRaceResult, VenueKind } from "../../src/scraper/types.js";
 import { makeResult, rank, venue } from "./helpers.js";
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** 輸送テスト用の合成戦績。会場名・着順・馬体重増減・開催区分を最小構成で指定する。 */
 function tRun(

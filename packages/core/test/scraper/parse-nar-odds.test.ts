@@ -1,16 +1,9 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   NarOddsParseError,
   parseNarOdds,
 } from "../../src/scraper/parse-nar-odds.js";
-
-/** フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 describe("parseNarOdds(発売後: #odds_tan_block/#odds_fuku_blockから抽出)", () => {
   const html = loadFixture("nar_odds_b1_202654071210.html");

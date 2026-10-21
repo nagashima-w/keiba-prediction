@@ -5,17 +5,10 @@
  * 本ファイルは中央のグレード(G1〜G3・J・G1〜J・G3)の抽出と、その配線(読む範囲・地方に当てない)を固定する。
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseRaceList } from "../../src/scraper/parse-race-list.js";
 import type { RaceListEntry } from "../../src/scraper/types.js";
-
-/** フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 describe("parseRaceList(中央のグレード。画像アイコンのクラス番号から。Issue #250)", () => {
   /** 一覧のフィクスチャを読み、グレードが付いた行だけを [race_id, grade] で返す。 */

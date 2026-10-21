@@ -1,20 +1,15 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import { newspaperCacheKey } from "../../src/scraper/fetch-newspaper.js";
 import { parseRaceId } from "../../src/scraper/ids.js";
 import { DEFAULT_NEWSPAPER_TTL_MS, scrapeRace, type RaceFetcher } from "../../src/scraper/scrape-race.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #421 段階 1-b: `scrapeRace` の `options.includePrevConditions`(前走の条件。新聞形式 API を 1 本)。
  * 既定 OFF=従来と同じ呼び出し列。ON でも失敗は警告にして、分析に必要なデータは従来どおり返す。
  */
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
 
 type Call = { url: string; options?: CachedFetchTextOptions };
 

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { allocateBets, type AllocationHorse, DEFAULT_BET_ALLOCATION_CONFIG } from "../../src/ev/bet-allocation.js";
 import { DEFAULT_EV_CONFIG } from "../../src/ev/expected-value.js";
@@ -43,12 +41,7 @@ import { PLACKETT_LUCE_MODEL } from "../../src/ev/plackett-luce-model.js";
 import { fitPlackettLuceStrengths } from "../../src/ev/plackett-luce-strength.js";
 import { winProbabilitiesFromStrengths } from "../../src/ev/plackett-luce-win-prob.js";
 import { parseComboOdds } from "../../src/scraper/parse-combo-odds.js";
-
-/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(parse-combo-odds.test.tsと同じ解決方法)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * combo-bet-allocation — 機能D-2a(Issue #14)。買い目が「馬の組」になる券種

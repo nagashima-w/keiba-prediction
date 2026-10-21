@@ -1,15 +1,8 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { computeRaceEv } from "../../src/ev/expected-value.js";
 import { OddsParseError, parseOdds } from "../../src/scraper/parse-odds.js";
 import type { OddsSnapshot } from "../../src/scraper/types.js";
-
-/** フィクスチャ(JSON文字列)を読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 const odds: OddsSnapshot = parseOdds(loadFixture("odds_202603020211.json"));
 

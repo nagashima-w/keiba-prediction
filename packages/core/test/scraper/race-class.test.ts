@@ -7,16 +7,11 @@
  * どちらも「読めない・曖昧」は undefined(推測しない)。
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseRaceClassFromHtml } from "../../src/scraper/parse-race-class.js";
 import { CENTRAL_RACE_CLASSES, readRaceClass } from "../../src/scraper/race-class.js";
 import { parseShutuba } from "../../src/scraper/parse-shutuba.js";
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 describe("readRaceClass(中央。合成の span)", () => {
   it.each([

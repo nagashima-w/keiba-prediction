@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHorseResults } from "../../src/scraper/parse-horse-results.js";
 import { deriveRaceFeatures } from "../../src/scorer/derive-features.js";
@@ -12,11 +10,7 @@ import {
 } from "../../src/scorer/prior.js";
 import { makeResult, rank, venue } from "./helpers.js";
 import type { HorseRaceResult } from "../../src/scraper/types.js";
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * prior の較正(過剰補正・クランプ飽和の防止)。仕様L135「バイアス項目が多いため過剰補正に注意」。

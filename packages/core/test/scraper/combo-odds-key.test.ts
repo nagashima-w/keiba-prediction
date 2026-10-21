@@ -8,8 +8,6 @@
  * `mergeAxisComboOddsMaps`(#33 Q1裁定: 軸間の同一キー衝突は保守側〈oddsMin最小・nullは任意の数値より
  * 保守的〉を採用してマージする。throwしない)。
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildComboOddsCellMap,
@@ -32,12 +30,7 @@ import {
   type ComboOddsEntry,
 } from "../../src/scraper/combo-odds-key.js";
 import { parseNarComboOdds } from "../../src/scraper/parse-nar-combo-odds.js";
-
-/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(既存テストと同じ解決方法)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 describe("buildComboOddsKey(#14からの移設。既存の挙動を変えない)", () => {
   it("馬番を昇順ソートしてゼロ埋め連結すること", () => {

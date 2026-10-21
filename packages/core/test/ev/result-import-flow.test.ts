@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   parseRaceId,
@@ -12,6 +10,7 @@ import {
 import type { ImportResultOutcome as SharedImportResultOutcome } from "../../src/analysis/analysis-types.js";
 import { importRaceResult, summarizeImport, toResultEntries } from "../../src/ev/result-import.js";
 import { AnalysisStore } from "../support/analysis-store.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * 結果の取込フロー(変換・取込・組合せ払戻の素通し)の網羅テスト。
@@ -21,14 +20,6 @@ import { AnalysisStore } from "../support/analysis-store.js";
  * `result-import.test.ts`(core 版。同期/非同期の保存の契約)が「変換の網羅は app 側の既存テストが担う」と書いていたのは、このファイルのこと。
  * 末尾に、旧 `result-import-reexport.test.ts` の「型の同一性」の 1 件も統合した。
  */
-
-/** 実フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  return readFileSync(
-    fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)),
-    "utf-8",
-  );
-}
 
 /** テスト用のレース結果を最小構成で組み立てる。 */
 function buildRaceResult(overrides: Partial<RaceResult> = {}): RaceResult {

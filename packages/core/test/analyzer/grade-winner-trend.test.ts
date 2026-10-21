@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -14,12 +12,7 @@ import {
   type GradeWinnerEntry,
   type GradeWinnerResultHorse,
 } from "../../src/scraper/parse-grade-winner.js";
-
-/** フィクスチャ(JSON文字列)を読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** テスト用: 最小限のGradeWinnerResultHorseを組み立てる(正常=ijyo null・降着なし)。 */
 function horse(overrides: Partial<GradeWinnerResultHorse> = {}): GradeWinnerResultHorse {

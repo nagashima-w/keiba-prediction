@@ -6,15 +6,10 @@
  * 指定しない限り中央の出馬表でもキーを付けない(`scrapeRace` が `!isNar` を渡す)。
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { isFilliesOnlyCondition, WEIGHT_TYPES } from "../../src/scraper/race-condition.js";
 import { parseShutuba } from "../../src/scraper/parse-shutuba.js";
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 const READ = { readRaceConditions: true } as const;
 

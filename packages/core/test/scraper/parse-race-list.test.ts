@@ -1,14 +1,7 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseRaceList } from "../../src/scraper/parse-race-list.js";
 import type { RaceListEntry } from "../../src/scraper/types.js";
-
-/** フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 const html = loadFixture("race_list_sub_20260628.html");
 const entries = parseRaceList(html);

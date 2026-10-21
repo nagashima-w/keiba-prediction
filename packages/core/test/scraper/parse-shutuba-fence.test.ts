@@ -11,16 +11,9 @@
  * fence関連の観点はすべて本ファイルに集約する。
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseShutuba } from "../../src/scraper/parse-shutuba.js";
-
-/** フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * 出馬表ページ全体を組み立てる(RaceData01のみ可変。他要素は最小限のダミー1行)。

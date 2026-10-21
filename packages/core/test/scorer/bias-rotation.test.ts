@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHorseResults } from "../../src/scraper/parse-horse-results.js";
 import {
@@ -16,11 +14,7 @@ import type { PlaceRateAggregate } from "../../src/scorer/aggregate.js";
 import { DEFAULT_SCORER_CONFIG } from "../../src/scorer/config.js";
 import type { FinishPosition } from "../../src/scraper/types.js";
 import { makeResult, rank } from "./helpers.js";
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * ローテーションテスト用に、休み明け走目と着順だけを指定した派生特徴量を直接組み立てる。

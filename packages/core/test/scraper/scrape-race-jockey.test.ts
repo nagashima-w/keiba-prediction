@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import { parseRaceId } from "../../src/scraper/ids.js";
@@ -9,17 +7,13 @@ import {
   scrapeRace,
   type RaceFetcher,
 } from "../../src/scraper/scrape-race.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #226: 騎手の年度別成績の取得(`options.includeJockeyStats`。opt-in。既定OFF)。
  *
  * 保存済みの実フィクスチャだけを使い、実ネットワークには出ない。
  */
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 class RecordingFetcher implements RaceFetcher {
   readonly calls: Array<{ url: string; options?: CachedFetchTextOptions }> = [];
