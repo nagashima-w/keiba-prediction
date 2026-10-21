@@ -59,3 +59,30 @@ describe("toSafeRaceSnapshot(レースの条件。Issue #421)", () => {
     expect(race.filliesOnly).toBeUndefined();
   });
 });
+
+describe("buildRaceSnapshot / toSafeRaceSnapshot(レースのクラス。Issue #426)", () => {
+  function withClass(raceClass: string | undefined): RaceData {
+    const base = raceDataWith({});
+    return { ...base, race: { ...base.race, ...(raceClass !== undefined ? { raceClass } : {}) } } as RaceData;
+  }
+
+  it("出馬表に raceClass があるとき race.raceClass に入る(中央の正準ラベルも、地方の生のトークンも)", () => {
+    expect(buildRaceSnapshot(withClass("オープン")).race.raceClass).toBe("オープン");
+    expect(buildRaceSnapshot(withClass("A2B1")).race.raceClass).toBe("A2B1");
+  });
+
+  it("出馬表が raceClass を持たないとき、スナップショットにもキー自体が無い(JSON にも現れない)", () => {
+    // 対照: あればキーが現れる。
+    expect(JSON.stringify(buildRaceSnapshot(withClass("新馬")).race)).toContain("raceClass");
+    const race = buildRaceSnapshot(withClass(undefined)).race;
+    expect("raceClass" in race).toBe(false);
+    expect(JSON.stringify(race)).not.toContain("raceClass");
+  });
+
+  it("保存したスナップショットから race.raceClass を読み出せ(JSON の往復を含む)、持たない過去のスナップショットは undefined のまま", () => {
+    const stored = JSON.parse(JSON.stringify(buildRaceSnapshot(withClass("1勝クラス")))) as unknown;
+    expect(toSafeRaceSnapshot(stored).race.raceClass).toBe("1勝クラス");
+    const old = JSON.parse(JSON.stringify(buildRaceSnapshot(withClass(undefined)))) as unknown;
+    expect(toSafeRaceSnapshot(old).race.raceClass).toBeUndefined();
+  });
+});

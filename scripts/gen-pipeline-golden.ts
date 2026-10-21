@@ -29,6 +29,9 @@
  * **Issue #421 段階 1 で再生成した**(スナップショットの race にレースの条件〈負担重量の種別・牝馬限定〉を足した。入力の出馬表 `shutuba_202603020211` はハンデ戦で牝馬限定でない)。
  *   差分の検査: 新旧の JSON を構造で比べ、差分が「3 シナリオの `record.raceSnapshot.race` に `weightType: "ハンデ"` と `filliesOnly: false` の 2 キーが加わる」6 件だけで、
  *   `promptInput`・`promptText`・確率・配分・その他のキーは 1 件も動かない(`git diff` の行としては、`"grade": "G3"` の末尾のカンマが加わる 3 行を含む 12 行)。
+ * **Issue #426 で再生成した**(スナップショットの race にレースのクラス `raceClass` を足した。入力の出馬表 `shutuba_202603020211` のクラスは「オープン」)。
+ *   差分の検査: 新旧の JSON を構造で比べ、差分が「3 シナリオの `record.raceSnapshot.race` に `raceClass: "オープン"` のキーが加わる」3 件だけ
+ *   (キーの追加 3・削除 0・値の変更 0。`promptInput`・`promptText`・確率・配分は 1 件も動かない。`git diff` の行としては、`"filliesOnly": false` の末尾のカンマが加わる 3 行を含む 6 行の追加と 3 行の削除)。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */

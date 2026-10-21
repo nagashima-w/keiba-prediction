@@ -48,6 +48,11 @@ export interface RaceSnapshotRace {
    * 地方(読まない)・条件の欄を読めなかったレース・過去のスナップショットはキー自体が無い。
    */
   readonly filliesOnly?: boolean;
+  /**
+   * レースのクラス(Issue #426。出馬表の `raceClass` の写し。中央は "新馬"・"未勝利"・"1勝クラス"・"2勝クラス"・"3勝クラス"・"オープン"、地方は区分の生のトークン)。
+   * **値があるときだけキーを持つ任意項目**: 読めなかったレース・この項目を保存する前の過去のスナップショットはキー自体が無い。
+   */
+  readonly raceClass?: string;
 }
 
 /** レース情報スナップショットの「馬」部分(Issue#10)。過去戦績は含めない。 */
@@ -213,6 +218,7 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
       ...(race.race.grade !== undefined ? { grade: race.race.grade } : {}),
       ...(race.race.weightType !== undefined ? { weightType: race.race.weightType } : {}),
       ...(race.race.filliesOnly !== undefined ? { filliesOnly: race.race.filliesOnly } : {}),
+      ...(race.race.raceClass !== undefined ? { raceClass: race.race.raceClass } : {}),
     },
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;

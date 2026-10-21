@@ -342,8 +342,11 @@ export interface AnalysisSink {
   saveClose?(analysisId: number, payload: CloseSavePayload): Promise<void>;
 }
 
-/** 結果の保存先のうち、日単位の DO が使う部分: 取り込みの保存(`saveResult`)と、発走前の分析の当日傾向の読み出し(`getRaceResultDetails`。Issue #209)。 */
-export type ResultStoreDeps = Pick<ResultRepository, "saveResult" | "saveWinOdds" | "saveScratched" | "getRaceResultDetails">;
+/**
+ * 結果の保存先のうち、日単位の DO が使う部分: 取り込みの保存(`saveResult`)と、発走前の分析の当日傾向の読み出し(`getRaceResultDetails`。Issue #209)。
+ * `saveRaceClass`(Issue #426。結果ページから読んだレースのクラスを分析の行に書く)は**省略可**: 無い構成ではクラスの保存を黙って省く(結果の取り込みは変わらない)。本番の保存先(`D1ResultStore`)は常に持つ。
+ */
+export type ResultStoreDeps = Pick<ResultRepository, "saveResult" | "saveWinOdds" | "saveScratched" | "getRaceResultDetails"> & Partial<Pick<ResultRepository, "saveRaceClass">>;
 
 export interface RaceDayDeps {
   readonly sql: SqlLike;

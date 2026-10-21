@@ -16,7 +16,8 @@
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
 import { centralGradeFromClassNames } from "./grade-label.js";
-import { parseHorseId } from "./ids.js";
+import { parseHorseId, type RaceIdVenueKind } from "./ids.js";
+import { readRaceClass } from "./race-class.js";
 import { readRaceConditions } from "./race-condition.js";
 import { PATTERNS, SHUTUBA_SELECTORS as SEL } from "./selectors.js";
 import type {
@@ -80,8 +81,23 @@ function parseRaceConditions($: CheerioAPI): Pick<ShutubaRaceInfo, "weightType" 
   return readRaceConditions($data02.find("span").map((_, el) => $(el).text()).get());
 }
 
-/** レース情報(ページ上部)を抽出する。`readRaceConditions` が true のときだけ、レースの条件(種別・牝馬限定)も読む。 */
-function parseRaceInfo($: CheerioAPI, readConditions: boolean): ShutubaRaceInfo {
+/**
+ * レースのクラス(Issue #426)を `.RaceData02` の span から読む。`.RaceData02` が無い・クラスが読めない・曖昧なときは空(キーを付けない)。読み方は `race-class.ts`。
+ */
+function parseRaceClass($: CheerioAPI, kind: RaceIdVenueKind): Pick<ShutubaRaceInfo, "raceClass"> {
+  const $data02 = $(SEL.raceData02);
+  if ($data02.length === 0) {
+    return {};
+  }
+  const raceClass = readRaceClass($data02.find("span").map((_, el) => $(el).text()).get(), kind);
+  return raceClass !== undefined ? { raceClass } : {};
+}
+
+/**
+ * レース情報(ページ上部)を抽出する。`readConditions` が true のときだけ、レースの条件(種別・牝馬限定)も読み、
+ * `raceClassKind` を渡したときだけ、レースのクラス(Issue #426)も読む。
+ */
+function parseRaceInfo($: CheerioAPI, readConditions: boolean, raceClassKind: RaceIdVenueKind | undefined): ShutubaRaceInfo {
   // レース名(Issue #252)。地方の `div.RaceName` はグレードのテキスト("Jpn1" 等)を内側に持つので、
   // 要素を複製してアイコンを除いてから読む(元の DOM は後続のグレード読み取りに使うため変えない)。
   const $raceName = $(SEL.raceName).first().clone();
@@ -124,6 +140,7 @@ function parseRaceInfo($: CheerioAPI, readConditions: boolean): ShutubaRaceInfo 
     hasGradeBadge,
     ...(grade !== undefined ? { grade } : {}),
     ...(readConditions ? parseRaceConditions($) : {}),
+    ...(raceClassKind !== undefined ? parseRaceClass($, raceClassKind) : {}),
   };
 }
 
@@ -276,11 +293,16 @@ function parseHorseRow($r: CheerioSelection): ShutubaHorse {
  * @param options `readRaceConditions`: true のときだけ、レースの条件(`weightType`・`filliesOnly`。Issue #421 段階 1)を読む。
  *   **既定は false**(地方は読まない方針。HTML だけでは中央・地方を区別できないので、中央と分かっている呼び出し側〈`scrapeRace`〉が true を渡す。
  *   渡し忘れは「キーが付かない」安全側に倒れる)
+ * @param options `readRaceClass`: `"central"`・`"nar"` を渡したときだけ、レースのクラス(`raceClass`。Issue #426)を読む。中央は正準ラベル、地方は区分の生のトークン(`race-class.ts`)。
+ *   種別・牝馬限定と違って地方も読むので、呼び出し側が中央/地方を渡す(渡さなければキーを付けない)
  * @returns レース情報+出走馬
  */
-export function parseShutuba(html: string, options: { readonly readRaceConditions?: boolean } = {}): Shutuba {
+export function parseShutuba(
+  html: string,
+  options: { readonly readRaceConditions?: boolean; readonly readRaceClass?: RaceIdVenueKind } = {},
+): Shutuba {
   const $ = cheerio.load(html);
-  const race = parseRaceInfo($, options.readRaceConditions === true);
+  const race = parseRaceInfo($, options.readRaceConditions === true, options.readRaceClass);
 
   const horses: ShutubaHorse[] = [];
   $(SEL.horseRow).each((_, row) => {

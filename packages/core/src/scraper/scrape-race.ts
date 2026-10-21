@@ -773,7 +773,8 @@ export async function scrapeRace(
     maxAgeMs: ttl.shutubaMs,
   });
   // レースの条件(負担重量の種別・牝馬限定。Issue #421 段階 1)は中央だけ読む(ユーザー決定: 地方は読まない)。
-  const parsedShutuba = parseShutuba(shutubaText, { readRaceConditions: !isNar });
+  // レースのクラス(Issue #426)は、種別・牝馬限定と違って地方も読む(地方は区分の生のトークン。読み方は race-class.ts)。
+  const parsedShutuba = parseShutuba(shutubaText, { readRaceConditions: !isNar, readRaceClass: isNar ? "nar" : "central" });
 
   // (1b) 取消・除外の馬を出走馬から除く(Issue #154)。出馬表には発走前に取消になった馬が
   // 残ることがある(中央 202606040901 で観測。印は行の `Cancel` クラスと `td.Cancel_Txt`)。

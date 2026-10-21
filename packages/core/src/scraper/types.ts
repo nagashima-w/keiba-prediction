@@ -177,6 +177,12 @@ export interface ShutubaRaceInfo {
    * `.RaceData02` が見つかったときだけ**(true/false は確定値)。地方(読まない)・`.RaceData02` が無いときはキー自体が無い。
    */
   readonly filliesOnly?: boolean;
+  /**
+   * レースのクラス(Issue #426〈#389 の案 B〉。`.RaceData02` の span から。読み方は `race-class.ts`)。
+   * 中央は正準ラベル("新馬"・"未勝利"・"1勝クラス"・"2勝クラス"・"3勝クラス"・"オープン")、地方は区分の生のトークン("C1"・"A2B1"・"4上" など)。
+   * **キーを持つのは、`parseShutuba` に `readRaceClass` を渡し、クラスが 1 つに読めたときだけ**(読めない・曖昧・`.RaceData02` が無い・指定しないときはキー自体が無い)。
+   */
+  readonly raceClass?: string;
 }
 
 /** 出馬表のパース結果(レース情報+出走馬)。 */

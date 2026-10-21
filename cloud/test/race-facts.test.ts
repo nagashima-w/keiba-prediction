@@ -85,3 +85,21 @@ describe("extractRaceFacts: 長すぎる文字列(自由文の疑い)", () => {
     expect(extractRaceFacts({ race: { raceName: over, grade: over, trackCondition: over } })).toMatchObject({ raceName: null, grade: null, trackCondition: null });
   });
 });
+
+describe("extractRaceFacts: レースのクラス(Issue #426)", () => {
+  it("race.raceClass(中央の正準ラベル・地方の生のトークン)を取り出す。前後の空白は除く", () => {
+    expect(extractRaceFacts({ race: { ...FULL.race, raceClass: "2勝クラス" } })).toEqual({ courseType: "芝", distance: 1600, trackCondition: "稍", grade: "G3", raceName: "3歳以上1勝クラス", raceClass: "2勝クラス" });
+    expect(extractRaceFacts({ race: { raceClass: " A2B1 " } }).raceClass).toBe("A2B1");
+  });
+
+  it("★持たない・読めない値ではキー自体を付けない(クラスを保存する前のスナップショットの事実は従来のまま。null を足さない)", () => {
+    // 対照: あればキーが現れる。
+    expect("raceClass" in extractRaceFacts({ race: { raceClass: "新馬" } })).toBe(true);
+    for (const raceClass of [undefined, null, "", "  ", 1, ["オープン"], "あ".repeat(RACE_FACT_TEXT_MAX_LENGTH + 1)]) {
+      const facts = extractRaceFacts({ race: { ...FULL.race, raceClass } });
+      expect("raceClass" in facts, String(raceClass)).toBe(false);
+      expect(facts, String(raceClass)).toEqual({ courseType: "芝", distance: 1600, trackCondition: "稍", grade: "G3", raceName: "3歳以上1勝クラス" });
+    }
+    expect("raceClass" in extractRaceFacts(null)).toBe(false);
+  });
+});

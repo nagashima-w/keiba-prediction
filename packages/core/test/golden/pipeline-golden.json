@@ -4985,7 +4985,8 @@
           "officialDatetime": "2026-06-28 15:52:30",
           "grade": "G3",
           "weightType": "ハンデ",
-          "filliesOnly": false
+          "filliesOnly": false,
+          "raceClass": "オープン"
         },
         "horses": [
           {
@@ -20165,7 +20166,8 @@
           "officialDatetime": "2026-06-28 15:52:30",
           "grade": "G3",
           "weightType": "ハンデ",
-          "filliesOnly": false
+          "filliesOnly": false,
+          "raceClass": "オープン"
         },
         "horses": [
           {
@@ -42215,7 +42217,8 @@
           "officialDatetime": "2026-06-28 15:52:30",
           "grade": "G3",
           "weightType": "ハンデ",
-          "filliesOnly": false
+          "filliesOnly": false,
+          "raceClass": "オープン"
         },
         "horses": [
           {
