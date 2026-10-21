@@ -250,6 +250,7 @@ describe("生成物のドリフトと決定性", () => {
     // (追記)Issue #400 R-11b(`createApp` から読み込みと追跡を `race-data.ts` へ切り出した。振る舞いは変えない): 224,891 → 225,758(+867。上限は 228,500 のまま。余裕 2,742 バイト)。
     // 計り方: R-11a の公開時点(050ce5b)の生成物と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った(今の値は `pnpm run build:client` の出力)。ファイル別の内訳は測っていない。
     // 増えたのは、minify されないプロパティ名(`createRaceData` の戻り値 19 個の名前と、deps の 7 個のキー)と、`app.ts` が `data.` 経由で呼ぶ分。取得・追跡の本体は移しただけで増えていない。
+    // (追記)Issue #389(#385-B の b): 内訳の節の数の上限 `parseBreakdown` を 8 から 16 に上げた(桁が 1 つ増えた分だけ): 225,758 → 225,759(+1。`pnpm run build:client` の出力〈「225759 バイト」〉)。節の文言はサーバが組み立てるので、クライアントの束は増えない。上限は 228,500 のまま(余裕 2,741 バイト)。
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(228_500);
   });
 });

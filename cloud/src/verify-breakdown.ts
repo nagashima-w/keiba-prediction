@@ -35,7 +35,11 @@
  *  - 競馬場: race_id の場コードから(D1・R2 の追加の読みなし)。コード順(中央 01〜10、地方 30〜)。{@link CONDITION_MERGE_MIN_RACES} レース未満の場は「その他の場」にまとめる(区間を出しても読めないため)。
  *  - 頭数帯(〜8 / 9〜12 / 13〜15 / 16〜): 分析時の出走頭数(`analysis_horses` の行数。すでに読んでいる)。馬の行が無い分析は「頭数不明」。
  *  - 開催区分(中央 / 地方): 全体の区分のタブにだけ出す。
- *  - 距離帯・馬場状態・クラス・芝ダは D1 に無く(R2 のスナップショットにだけある)、別の Issue(migration と補完が要る)。
+ *
+ * ## 距離帯・馬場・芝ダ(Issue #389〈#385-B の b〉)
+ * 分析の行の条件の列(migration 0023。検証の DO が R2 のスナップショットから写した生の値)から、レースごとに 3 軸の行を決める(規則は `verify-race-conditions.ts`)。
+ * 条件は**ledger が採用した分析**(最新の分析。先読みの疑いで除かれたものは使わない)のもの。条件の行が無いレース(`cond_read` が 0)は各軸の『不明』の行に入るので、各軸の行の和は全体と一致する。
+ * **分類できたレースが 1 件もない軸(『不明』の行しかない軸)は節ごと出さない**。節の文言は既存の 3 節の長い説明を繰り返さず短くする。
  *
  * ## 画面への渡し方
  * 節の説明・注記・行の見出し・項目の名前と値は**サーバが文字列に組み立てて渡す**(日本語をクライアントの束に置かない。1 文字 6 バイト。#379 と同じ流儀)。
@@ -49,6 +53,7 @@ import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-ke
 import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids.js";
 import { mulberry32 } from "../../packages/core/src/common/random.js";
 import { formatRecoveryPercent } from "./recovery-format";
+import { axisLabelsOf, DISTANCE_LABELS, SURFACE_LABELS, TRACK_LABELS, type RaceConditionFacts } from "./verify-race-conditions";
 import type { VerifyBetRow } from "./verify-read";
 
 /** ブートストラップの反復回数(ユーザー指定)。 */
@@ -612,7 +617,11 @@ export interface ConditionRow {
   readonly diffFromAll: number | null;
 }
 
-export type ConditionKey = "kind" | "venue" | "field";
+/** 分析の行の条件(Issue #389)で分ける 3 つの軸。クラスは含めない(正確な値を保存する #426 のあとに #389-c で足す)。 */
+type AxisKey = "distance" | "track" | "surface";
+const AXIS_KEYS: readonly AxisKey[] = ["distance", "track", "surface"];
+
+export type ConditionKey = "kind" | "venue" | "field" | AxisKey;
 
 export interface ConditionStats {
   /** 区分のタブの合計(買い目のあったレース全体)。 */
@@ -657,7 +666,12 @@ function venueLabelOf(raceId: string): string {
  * 買い目のあったレースを、開催区分・競馬場・頭数帯の条件で分けて集計する(Issue #385-A)。`events` は呼び出し側が区分で絞ったもの。
  * 競馬場は場コード順(中央 01〜10、地方 30〜)で、{@link CONDITION_MERGE_MIN_RACES} 未満の場は「その他の場」にまとめる。頭数は分析時の出走頭数(馬の行の数)で、分からないレースは「頭数不明」。
  */
-export function buildConditionStats(source: VerifyDataSource, events: readonly ProposedBetEvent[], lookups: PopularityLookups = createPopularityLookups(source)): ConditionStats {
+export function buildConditionStats(
+  source: VerifyDataSource,
+  events: readonly ProposedBetEvent[],
+  lookups: PopularityLookups = createPopularityLookups(source),
+  facts: ReadonlyMap<number, RaceConditionFacts | null> = new Map(),
+): ConditionStats {
   const ledger = buildRaceLedger(events);
   const overall = summarizeRaces("全体", ledger, null);
 
@@ -665,12 +679,17 @@ export function buildConditionStats(source: VerifyDataSource, events: readonly P
   const kind: Record<"central" | "nar", RaceLedgerRow[]> = { central: [], nar: [] };
   const field: RaceBucket[] = FIELD_BAND_LABELS.map(() => ({ races: [] }));
   const fieldUnknown: RaceLedgerRow[] = [];
+  const axisRaces: Record<AxisKey, Map<string, RaceLedgerRow[]>> = { distance: new Map(), track: new Map(), surface: new Map() };
   for (const race of ledger) {
     const code = race.raceId.slice(4, 6);
     byVenue.set(code, [...(byVenue.get(code) ?? []), race]);
     const k = venueKindOf(race.raceId);
     if (k !== null) {
       kind[k].push(race);
+    }
+    const labels = axisLabelsOf(facts.get(race.analysisId) ?? null);
+    for (const axis of AXIS_KEYS) {
+      axisRaces[axis].set(labels[axis], [...(axisRaces[axis].get(labels[axis]) ?? []), race]);
     }
     const size = lookups.fieldSizeOf(race.analysisId);
     if (size <= 0) {
@@ -699,6 +718,12 @@ export function buildConditionStats(source: VerifyDataSource, events: readonly P
     fieldRows.push(row(FIELD_UNKNOWN_LABEL, fieldUnknown));
   }
   const kindRows = (["central", "nar"] as const).flatMap((k) => (kind[k].length > 0 ? [row(k === "central" ? "中央" : "地方", kind[k])] : []));
+  /** 軸の行: 見出しの並びの順で、レースのある行だけ(『不明』は並びの最後)。 */
+  const axisRows = (axis: AxisKey, order: readonly string[]): ConditionRow[] =>
+    order.flatMap((label) => {
+      const races = axisRaces[axis].get(label);
+      return races === undefined ? [] : [row(label, races)];
+    });
   return {
     overall: {
       races: overall.races, bets: overall.bets, hitRaces: overall.hitRaces, stake: overall.stake, payout: overall.payout, recovery: overall.recovery,
@@ -708,6 +733,9 @@ export function buildConditionStats(source: VerifyDataSource, events: readonly P
       { key: "kind", rows: kindRows },
       { key: "venue", rows: venueRows },
       { key: "field", rows: fieldRows },
+      { key: "distance", rows: axisRows("distance", DISTANCE_LABELS) },
+      { key: "track", rows: axisRows("track", TRACK_LABELS) },
+      { key: "surface", rows: axisRows("surface", SURFACE_LABELS) },
     ],
   };
 }
@@ -741,17 +769,50 @@ const CONDITION_HEADINGS: Readonly<Record<ConditionKey, string>> = {
   kind: "条件ごとの的中率と回収率(開催区分)",
   venue: "条件ごとの的中率と回収率(競馬場)",
   field: "条件ごとの的中率と回収率(頭数)",
+  distance: "条件ごとの的中率と回収率(距離帯)",
+  track: "条件ごとの的中率と回収率(馬場)",
+  surface: "条件ごとの的中率と回収率(芝ダ)",
 };
 
-/** 条件別の集計を、画面に渡す節に組み立てる。開催区分の節は全体の区分でだけ出す(中央のみ・地方のみでは行が 1 つになる)。条件の行が無い節は出さない。 */
+/**
+ * 距離帯・馬場・芝ダの節の文言(Issue #389)。上の既存 3 節の長い説明・注記を繰り返さず、軸ごとの定義と固有の注意だけを書く
+ * (区間・『参考』の見方は『上の節と同じ』)。画面の重さを抑えるため短く保つ(試験が上限を固定している)。
+ */
+const AXIS_SECTION_TEXT: Readonly<Record<AxisKey, { readonly description: string; readonly note: string }>> = {
+  distance: {
+    description: "距離(芝・ダート共通)で分けます。区切りは 1400m・1800m・2200m(置き値)。障害は距離でなく『障害』の行、読めなかったレースは『不明』です。",
+    note: "区間と『参考』の見方は上の節と同じです。",
+  },
+  track: {
+    description: "分析時点の馬場状態(良・稍重・重・不良)で分けます。未発表のレースと読めなかったレースは『未発表・不明』です。",
+    note: "分析時点の値で、その後の馬場の変化は反映しません。区間と『参考』の見方は上の節と同じです。",
+  },
+  surface: {
+    description: "芝・ダート・障害で分けます。読めなかったレースは『不明』です。",
+    note: "区間と『参考』の見方は上の節と同じです。",
+  },
+};
+
+/** 軸ごとの『不明』の行の見出し(分類できたレースがあるかの判定に使う)。 */
+const AXIS_UNKNOWN_LABEL: Readonly<Record<AxisKey, string>> = { distance: "不明", track: "未発表・不明", surface: "不明" };
+
+const isAxisKey = (key: ConditionKey): key is AxisKey => (AXIS_KEYS as readonly string[]).includes(key);
+
+/** 軸の行に、『不明』以外の行(分類できたレース)があるか。 */
+const hasClassifiedRow = (axis: AxisKey, rows: readonly ConditionRow[]): boolean => rows.some((r) => r.label !== AXIS_UNKNOWN_LABEL[axis]);
+
+/**
+ * 条件別の集計を、画面に渡す節に組み立てる。開催区分の節は全体の区分でだけ出す(中央のみ・地方のみでは行が 1 つになる)。条件の行が無い節は出さない。
+ * 距離帯・馬場・芝ダは、『不明』以外の行(分類できたレース)が 1 つも無い節も出さない(Issue #389)。
+ */
 export function renderConditionSections(stats: ConditionStats, venue: VerifyVenueFilter): BreakdownSection[] {
   const overallRow: BreakdownRow = { label: "全体", cells: conditionCells(stats.overall, false) };
   return stats.dimensions
-    .filter((d) => d.rows.length > 0 && (d.key !== "kind" || venue === "all"))
+    .filter((d) => d.rows.length > 0 && (d.key !== "kind" || venue === "all") && (!isAxisKey(d.key) || hasClassifiedRow(d.key, d.rows)))
     .map((d) => ({
       heading: CONDITION_HEADINGS[d.key],
-      description: CONDITION_DESCRIPTION,
-      note: CONDITION_NOTE,
+      description: isAxisKey(d.key) ? AXIS_SECTION_TEXT[d.key].description : CONDITION_DESCRIPTION,
+      note: isAxisKey(d.key) ? AXIS_SECTION_TEXT[d.key].note : CONDITION_NOTE,
       rows: [overallRow, ...d.rows.map((r) => ({ label: r.label, cells: conditionCells(r, true) }))],
     }));
 }
@@ -779,9 +840,13 @@ function venueKindOf(raceId: string): "central" | "nar" | null {
 /**
  * 人気帯の内訳を、区分(all・central・nar)ごとに作る。買い目の判定は core の `collectProposedBetEvents`(本体の `proposedBet` と同じ判定)を 1 回だけ回し、
  * 区分は race_id で分ける(最新選択・先読みの除外はレース単位なので、区分で絞った本体の集計と一致する)。判定できた買い目が 1 つも無い区分は null。
- * `betRows` は全件の読みの買い目の行(odds・ev を持つ)。
+ * `betRows` は全件の読みの買い目の行(odds・ev を持つ)。`facts` は分析 id → 条件の索引(`buildConditionFactsIndex`。省略は全レースが各軸の『不明』= 新しい 3 つの節は出ない)。
  */
-export function computeVerifyBreakdowns(source: VerifyDataSource, betRows: readonly VerifyBetRow[]): Record<VerifyVenueFilter, VerifyBreakdownResult | null> {
+export function computeVerifyBreakdowns(
+  source: VerifyDataSource,
+  betRows: readonly VerifyBetRow[],
+  facts: ReadonlyMap<number, RaceConditionFacts | null> = new Map(),
+): Record<VerifyVenueFilter, VerifyBreakdownResult | null> {
   const events = collectProposedBetEvents(source, PRODUCTION_VERIFY_CONFIG);
   const extras = buildBetExtras(betRows);
   const lookups = createPopularityLookups(source);
@@ -791,7 +856,7 @@ export function computeVerifyBreakdowns(source: VerifyDataSource, betRows: reado
       return null;
     }
     const stats = buildPopularityStats(source, scoped, extras, lookups);
-    const conditions = buildConditionStats(source, scoped, lookups);
+    const conditions = buildConditionStats(source, scoped, lookups, facts);
     return { stats, conditions, sections: [...renderPopularitySections(stats), ...renderConditionSections(conditions, filter)] };
   };
   return { all: build("all"), central: build("central"), nar: build("nar") };

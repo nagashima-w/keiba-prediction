@@ -1077,6 +1077,27 @@ describe("Issue #384: 人気帯ごとの期待値と回収率(breakdown)", () =>
     };
   }
 
+  it("★配線(Issue #389): 分析の行の条件(芝・1600m・稍・G3)が、再計算の内訳の 3 つの節(距離帯・馬場・芝ダ)に届く。条件の列が無い行は新しい節を出さない", async () => {
+    const withFacts = (): VerifyReadRows => {
+      const rows = withBets();
+      return { ...rows, analyses: rows.analyses.map((a) => ({ ...a, courseType: "芝", distance: 1600, trackCondition: "稍", grade: "G3", raceName: "毎日王冠", condRead: 1 })) };
+    };
+    const a = setup();
+    a.store.state.rows = withFacts();
+    const res = await a.core.getReport("central");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    const labelsOf = (heading: string): string[] => res.breakdown!.find((s) => s.heading === heading)!.rows.map((r) => r.label);
+    expect(labelsOf("条件ごとの的中率と回収率(距離帯)")).toEqual(["全体", "1401〜1800m"]);
+    expect(labelsOf("条件ごとの的中率と回収率(馬場)")).toEqual(["全体", "稍重"]);
+    expect(labelsOf("条件ごとの的中率と回収率(芝ダ)")).toEqual(["全体", "芝"]);
+    expect(res.breakdown).toHaveLength(10); // 中央のみ: 人気帯 5 + 競馬場・頭数 2 + 新 3
+    const b = setup();
+    b.store.state.rows = withBets(); // 条件の列を持たない行
+    const plain = await b.core.getReport("central");
+    if (plain.status !== "ready") throw new Error("ready のはず");
+    expect(plain.breakdown).toHaveLength(7);
+  });
+
   it("再計算で内訳を作り、kv のキャッシュにも応答にも載せる。値は純関数 computeVerifyBreakdowns の節と同じ。区分ごとに別の値(地方のレースが無ければ nar は null)", async () => {
     const { core, store, kv } = setup();
     const rows = withBets();

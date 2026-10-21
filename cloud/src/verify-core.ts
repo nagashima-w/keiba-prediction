@@ -45,6 +45,7 @@ import { buildVerifySource, countStartTimeGaps } from "./verify-read";
 import { computePromptVersionSummaries, type PromptVersionSummary } from "./verify-versions";
 import { computeCloseComparison, type CloseComparison } from "./verify-close";
 import { computeVerifyBreakdowns, type BreakdownSection } from "./verify-breakdown";
+import { buildConditionFactsIndex } from "./verify-race-conditions";
 import type { ConditionResolution, PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "./verify-store";
 
 /** 集計の有効期間(透かしが同じ間)。既存の行の更新〈`race_results` の UPSERT〉は透かしに出ないため、この時間で拾う。 */
@@ -450,7 +451,7 @@ export class VerifyCore {
     // 人気帯ごとの期待値と回収率(Issue #384)。**内訳の失敗で本体の集計を失わない**(例外は握り、固定の警告だけ残す)。
     let breakdownByVenue: Record<VerifyVenueFilter, { readonly sections: readonly BreakdownSection[] } | null> = { all: null, central: null, nar: null };
     try {
-      const out = computeVerifyBreakdowns(source, read.rows.bets);
+      const out = computeVerifyBreakdowns(source, read.rows.bets, buildConditionFactsIndex(read.rows.analyses));
       breakdownByVenue = {
         all: out.all === null ? null : { sections: out.all.sections },
         central: out.central === null ? null : { sections: out.central.sections },
