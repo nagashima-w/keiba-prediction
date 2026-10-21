@@ -228,6 +228,17 @@ function forbidden(): Response {
   });
 }
 
+/**
+ * 405 の応答(本文 `method not allowed`・`Allow` ヘッダ・固定のセキュリティヘッダ)。許すメソッドの一覧(`allow`)だけが呼び出し側で変わる。
+ * Issue #445 で、19 か所にあった同じ形の `new Response(…)` をこの関数にまとめた(応答のバイトは変えていない。handler-method-not-allowed.test.ts が固定する)。
+ */
+function methodNotAllowed(allow: string): Response {
+  return new Response("method not allowed", {
+    status: 405,
+    headers: { ...SECURITY_HEADERS, allow, "content-type": "text/plain; charset=utf-8" },
+  });
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -310,10 +321,7 @@ export async function handle(
     if (method === "POST") {
       return handleSettingsSave(request, env, deps.now ?? (() => new Date()));
     }
-    return new Response("method not allowed", {
-      status: 405,
-      headers: { ...SECURITY_HEADERS, allow: "GET, POST", "content-type": "text/plain; charset=utf-8" },
-    });
+    return methodNotAllowed("GET, POST");
   }
   // 設定画面のプロンプトのプレビュー(Issue #396)。設定の入口(上)の隣の別の path。純関数の組み立てだけ(D1・DO・R2・netkeiba・LLM に触れない)。管理者専用(route-policy.ts の表)。
   if (method === "POST" && new URL(request.url).pathname === "/api/settings/prompt-preview") {
@@ -340,10 +348,7 @@ export async function handle(
     return handleMonthlyRun(request, env, deps.now ?? (() => new Date()));
   }
   if (method !== "GET" && method !== "HEAD") {
-    return new Response("method not allowed", {
-      status: 405,
-      headers: { ...SECURITY_HEADERS, allow: "GET, HEAD", "content-type": "text/plain; charset=utf-8" },
-    });
+    return methodNotAllowed("GET, HEAD");
   }
 
   if (pathname === "/") {
@@ -406,48 +411,33 @@ export async function handle(
   if (pathname === "/api/netkeiba/check") {
     // netkeiba へ出る経路は GET だけ(HEAD で取得を起こさない)。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleCheck(request, env);
   }
 
   if (pathname === "/api/reports/run") {
     // POST だけ(上で処理済み)。GET・HEAD などは 405。
-    return new Response("method not allowed", {
-      status: 405,
-      headers: { ...SECURITY_HEADERS, allow: "POST", "content-type": "text/plain; charset=utf-8" },
-    });
+    return methodNotAllowed("POST");
   }
 
   if (pathname === "/api/reports" || pathname.startsWith(REPORTS_PREFIX)) {
     // 読み取り専用(D1 の daily_reports を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で D1 を引かない)。Issue #235。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return pathname === "/api/reports" ? handleReportList(new URL(request.url), env) : handleReportDetail(new URL(request.url), pathname.slice(REPORTS_PREFIX.length), env, auth.role);
   }
 
   if (pathname === "/api/monthly-reports/run") {
     // POST だけ(上で処理済み)。GET・HEAD などは 405(月の本文 `/api/monthly-reports/{YYYYMM}` として扱わない)。
-    return new Response("method not allowed", {
-      status: 405,
-      headers: { ...SECURITY_HEADERS, allow: "POST", "content-type": "text/plain; charset=utf-8" },
-    });
+    return methodNotAllowed("POST");
   }
 
   if (pathname === "/api/monthly-reports" || pathname.startsWith(MONTHLY_REPORTS_PREFIX)) {
     // 読み取り専用(D1 の monthly_reports を読むだけ。管理者の詳細だけ、月報の DO の進行状況〈getStatus〉も読む。netkeiba にも LLM にも出ない)。GET だけ(HEAD で D1 を引かない)。Issue #279・#280。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return pathname === "/api/monthly-reports" ? handleMonthlyList(new URL(request.url), env) : handleMonthlyDetail(new URL(request.url), pathname.slice(MONTHLY_REPORTS_PREFIX.length), env, auth.role);
   }
@@ -455,10 +445,7 @@ export async function handle(
   if (pathname === "/api/verify") {
     // 読み取り専用(検証の DO の集計を読むだけ。netkeiba にも LLM にも出ない。Worker は D1・R2 に触れない)。GET だけ(HEAD で DO を開かない)。Issue #219。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleVerify(request, env, auth.role);
   }
@@ -466,10 +453,7 @@ export async function handle(
   if (pathname === "/api/export/prior-dataset") {
     // 管理者専用(route-policy.ts)。DO の状態を読むか作成を始め、完成していれば R2 のファイルを返すだけ(Worker は D1 に触れない)。GET だけ(HEAD で DO を開かない)。Issue #266。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handlePriorExport(request, env);
   }
@@ -477,10 +461,7 @@ export async function handle(
   if (pathname === "/api/horse-runs") {
     // 管理者専用(route-policy.ts)。D1 の horse_runs・horse_run_saves を読むだけ(netkeiba にも LLM にも出ない)。GET だけ。Issue #256 段階A。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleHorseRuns(request, env, deps.now ?? (() => new Date()));
   }
@@ -488,10 +469,7 @@ export async function handle(
   if (pathname === "/api/baba-fetch") {
     // 管理者専用(route-policy.ts)。D1 の baba_fetches・baba_conditions を読むだけ(外部の API にも netkeiba にも LLM にも出ない)。GET だけ。Issue #360。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleBabaFetch(request, env);
   }
@@ -499,10 +477,7 @@ export async function handle(
   if (pathname === "/api/results/backfill") {
     // 読み取り専用(補完の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #217。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleBackfillStatus(env);
   }
@@ -510,10 +485,7 @@ export async function handle(
   if (pathname === "/api/analyses/status") {
     // 読み取り専用(DO の状態を読むだけ)。GET だけ。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleStatus(new URL(request.url), env);
   }
@@ -521,10 +493,7 @@ export async function handle(
   if (pathname === "/api/plan") {
     // 読み取り専用(DO の状態を読むだけ。netkeiba にも LLM にも D1・R2 にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #206。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handlePlan(request, env);
   }
@@ -532,10 +501,7 @@ export async function handle(
   if (pathname === "/api/targets") {
     // 読み取り専用(D1 の集計と DO の計画の読み取りだけ。R2・netkeiba・LLM・Webhook には触れない)。GET だけ(HEAD で D1・DO を引かない)。Issue #336。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleTargets(request, env, (deps.now ?? (() => new Date()))());
   }
@@ -543,29 +509,20 @@ export async function handle(
   if (pathname === "/api/races") {
     // netkeiba へ出る経路は GET だけ(HEAD で取得を起こさない)。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleRaces(request, env);
   }
 
   if (pathname === "/api/analyses/run" || pathname === "/api/analyses/run/bulk") {
     // POST だけ(上で処理済み)。GET・HEAD などは 405。
-    return new Response("method not allowed", {
-      status: 405,
-      headers: { ...SECURITY_HEADERS, allow: "POST", "content-type": "text/plain; charset=utf-8" },
-    });
+    return methodNotAllowed("POST");
   }
 
   if (pathname === "/api/analyses") {
     // 読み取り専用の一覧(D1 だけ。R2 には触れない)。GET だけ(HEAD で D1 を引かない)。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleAnalyses(new URL(request.url), env);
   }
@@ -575,10 +532,7 @@ export async function handle(
   if (detailMatch !== null) {
     // 読み取り専用(D1 + R2 の GET)。GET だけ(HEAD で D1・R2 を引かない)。
     if (method !== "GET") {
-      return new Response("method not allowed", {
-        status: 405,
-        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
-      });
+      return methodNotAllowed("GET");
     }
     return handleAnalysisDetail(new URL(request.url), detailMatch[1]!, env);
   }

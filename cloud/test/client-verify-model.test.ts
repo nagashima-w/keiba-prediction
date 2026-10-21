@@ -46,7 +46,7 @@ const ready = (over: Partial<Extract<VerifyOutcome, { kind: "ready" }>> = {}, r:
 
 const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: ready() }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, ...over });
 
-describe("整形(exe と同じ)", () => {
+describe("整形(core の view/verify-format の関数を直接使う。書式は exe の検証画面から引き継いだもの)", () => {
   it("率は小数第 1 位のパーセント(null は -)、金額は 3 桁区切りの円", () => {
     expect(formatRate(0.9603846)).toBe("96.0%");
     expect(formatRate(1)).toBe("100.0%");
@@ -243,7 +243,7 @@ describe("buildVerifyModel: 補正方向×結果・キャリブレーション�
     expect(rows[10]?.cells[3]).toEqual({ name: "予測−実績", value: "-17.0pt(過小評価)" });
     expect(rows[10]?.bar).toEqual({ value: 700, max: 1000, label: "実複勝率 70.0%" });
     // 実複勝率がちょうど平均予測(62.5%)= 一致
-    expect(rows[12]?.cells[3]).toEqual({ name: "予測−実績", value: "+0.0pt(一致)" });
+    expect(rows[12]?.cells[3]).toEqual({ name: "予測−実績", value: "0.0pt(一致)" });
     // 41.7%(5/12)の帯グラフは四捨五入して 417
     expect(rows[8]?.bar?.value).toBe(417);
     expect(rows[19]?.bar).toEqual({ value: 1000, max: 1000, label: "実複勝率 100.0%" });

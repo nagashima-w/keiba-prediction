@@ -1014,7 +1014,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     **効いた(2026-10-16 に確認)**: 作業ブランチに載せたあと、Dependabot の PR #331(cloud の development-dependencies グループ)が `cloud/package.json` と `cloud/pnpm-lock.yaml` を更新して来た
     (`gh api repos/<owner>/<repo>/pulls/331/files` の変更ファイルはこの 2 つだけ)。案 B(`@anthropic-ai/sdk`・`iconv-lite`・`cheerio` を npm の更新から `ignore` して手動で扱う)は不要になった。
     cloud/ の devDependencies(typescript・vitest・`@cloudflare/workers-types` 等)の PR も、これまで一度も来ていなかった。対策後は来るので、メジャー更新も ignore せずレビューして取り込む(ルートはすでに TypeScript 7・vitest 5)。
-    **ただし `@types/node` の semver-major だけは例外で、`dependabot.yml` の `ignore` で提案させない(#332)。** @types/node のメジャーは実行環境の Node(`ci.yml`・`deploy-cloud.yml` の `node-version`。現在 24。**Issue #333 で 22 から 24 に上げた**)に合わせるもので、
+    **ただし `@types/node` の semver-major だけは例外で、`dependabot.yml` の `ignore` で提案させない(#332)。** @types/node のメジャーは実行環境の Node(`ci.yml`・`deploy-cloud.yml` の `node-version`。現在 24。**Issue #333 で 22 から 24 に上げた**。さらに **Issue #441 で、メジャーだけの `24` から `24.22.1` に固定した**。「Node の版を上げるとき」の項参照)に合わせるもので、
     **Node を上げるときに `cloud/package.json` の @types/node も同じメジャーに手で上げる**(`scripts/test/cloud-config-guard.test.ts` が両者のメジャーの一致を検査)。minor・patch は受ける。
     24 以上へ上げても cloud の型検査が通るよう、`fileURLToPath(new URL(…, import.meta.url))`(グローバルの URL は workers-types のもので、@types/node 24 以上では node:url の URL と型が合わず TS2345)を
     `cloud/test/meta-path.ts` の `pathFromMeta` に置き換えた(26.6.5 で cloud の typecheck が 0 件になることを実測。Node 22 は 2027-04 に EOL のため、#333 で CI を Node 24・@types/node を ^24.0.0 に上げた。root の `engines`〈`>=22.19`〉は、undici 8 が要求する「サポートする最低版」で CI の版とは別の概念なので変えていない)。
@@ -1468,6 +1468,9 @@ exe の出力は変わらない(`packages/core/test/golden/pipeline-golden.json`
   手順: (1) 赤になった箇所の差が、1ulp 程度の浮動小数点だけであること(整数・文字列・項目の集合・順序の差が無いこと)を確かめる。差が大きい、または整数や項目が変わっているなら、版の差ではなく実装の変更なので、golden を更新してはいけない。
   (2) 確かめられたら `pnpm tsx scripts/gen-pipeline-golden.ts`(リポジトリルート)で golden を再生成し、差分が浮動小数点の末尾の桁だけであることを再確認してからコミットする。(3) ルートの `pnpm test` と、cloud の `npx vitest run`・`pnpm run smoke` を通す。
   なお CI の Node の版は `.github/workflows/ci.yml` の `node-version`(24。#333 で 22 から上げた。Node 24〈V8 13.6〉でも golden は再生成なしで全緑だった)。
+  **CI の Node は `24.22.1` に固定している(Issue #441。`ci.yml`・`deploy-cloud.yml`・`research.yml` の `node-version`)。** 2026-10-21 のセキュリティリリースの修正版で、`24` とだけ書くと、ランナーのツールキャッシュにある修正前の版が使われうるため。
+  **`24` に戻すときは、次の 3 つのテストの `node-version: 24\.22\.1` の期待を直す**: `scripts/test/ci-workflow.test.ts`・`scripts/test/cloud-deploy-workflow.test.ts`・`scripts/test/research-workflow.test.ts`
+  (さらに、`24.22.1` 以上であることを求める `scripts/test/cloud-config-guard.test.ts` の「Issue #441」の検査は、固定をやめるなら削除する。同ファイルの #332 の検査は、`24.22.1` のような完全な版でもメジャーだけを見るので、戻しても通る)。
 
 ### 日単位の DO `RaceDay`・取得キャッシュ・朝の取得と prior(#177〈#164-b〉。v1.19.12)
 **呼び出す入口は、手動の `POST /api/analyses/run`〈#180〉と、cron の `scheduled`〈#206。`requestPlan`〉**。`worker.ts` が `RaceDay` を export する(wrangler が binding のクラスを要求する)。ローカルの smoke も RPC を呼んで通す。
@@ -1538,7 +1541,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **子の行の確認**(#175 の申し送り): 保存後に、子の行(馬・買い目)の件数が保存したレコードと一致するかを確かめ、`children_ok` に記録する(不一致は警告。分析は保存済みなので `done`)。
   子の行は `(SELECT max(id) FROM analyses)` で親に紐づけているので、**最初の本番の実保存で `GET /api/analyses/status` の `children_ok` が true であること**を確かめる(ローカルの D1 では true。本番は未確認)。崩れた場合の代替は #175 の JSDoc(migration 0003 案)。
 - **設定**(`cloud/src/settings.ts`。D1 の `cloud_settings`〈migration 0004。`id = 1` の1行〉): bankroll・perRaceCap・kellyFraction・includeComboOdds・各 include・evThreshold・additionalInstruction・clipVariant、**スコアリングの重み15項目**(#218。#353 でタイム指数、#354 で調教師成績を足して 13 → 15。下の「クラウド版のスコアリングの重み」)、および cloud 専用の preRaceOffsetMinutes(発走何分前に評価するか。整数 10〜180・既定 45。定時の自動実行〈#166・#206・#249〉の毎晩 21:00 の翌日分の計画で読み、計画の行に固定する。**変更は次の 21:00〈日本時間〉の計画から反映され、すでに計画した日の分は変わらない**)。**exe と同名で共有する13項目〈配分・EV・クリップ幅など〉と、スコアリングの重みのうち exe にもある13項目〈キー名は接頭辞つき〉の既定値は exe の既定値と同じ。#353 のタイム指数と #354 の調教師成績は exe に無い cloud の項目で、既定値は cloud 独自**
-  (`scripts/test/cloud-settings-defaults.test.ts` が一致を固定): 資金・1レース上限は 0(配分提案を出さない)、組合せオッズの取得は OFF、各券種の配分は ON。不正な値は、その項目だけ既定値に戻す。**編集は `GET`/`POST /api/settings`(Issue #189)**: POST は全項目の置き換えで、欠け・未知のキー・範囲外は 400(項目の過不足があるときは本文に `reason: "keys-mismatch"` も付く。範囲外の値だけなら付かない。Issue #375)。範囲の述語は項目ごとに1か所(`CLOUD_SETTINGS_RULES`)で、書く側は読む側の部分集合(kellyFraction は書く側 0.05〜1・読む側 0〜1、追加指示は書く側 2,000 文字まで・読む側は上限なし)。POST の守り(Origin 403 → Content-Type 415 → 本文の大きさ 413 → 400)は run と共有し、上限は run 1 KiB・settings 16 KiB。画面は段階2で追加。
+  (`scripts/test/cloud-settings-defaults.test.ts` が一致を固定): 資金・1レース上限は 0(配分提案を出さない)、組合せオッズの取得は OFF、各券種の配分は ON。不正な値は、その項目だけ既定値に戻す。**編集は `GET`/`POST /api/settings`(Issue #189)**: POST は全項目の置き換えで、欠け・未知のキー・範囲外は 400(項目の過不足があるときは本文の `error.reason` に `"keys-mismatch"` も付く。範囲外の値だけなら付かない。Issue #375)。範囲の述語は項目ごとに1か所(`CLOUD_SETTINGS_RULES`)で、書く側は読む側の部分集合(kellyFraction は書く側 0.05〜1・読む側 0〜1、追加指示は書く側 2,000 文字まで・読む側は上限なし)。POST の守り(Origin 403 → Content-Type 415 → 本文の大きさ 413 → 400)は run と共有し、上限は run 1 KiB・settings 16 KiB。画面は段階2で追加。
 - **発走時刻の換算**(`cloud/src/pre-race-time.ts`): 出馬表の `startTime`(JST の HH:MM)から、UTC のエポックミリ秒と「発走の45分前」(既定。Issue #189 で 30 → 45。設定 `preRaceOffsetMinutes` の既定値と同じ定数)を求める(JST 0:00〜8:59 は UTC の前日)。アラームの予約に使うのは #166。
 - **定時の自動実行の純関数**(`cloud/src/auto-run-plan.ts`。Issue #202〈#166-A〉。`jstKaisaiDate` は #206 の `scheduled` が呼ぶ): `jstKaisaiDate(scheduledTimeMs)`(cron の `scheduledTime` から **JST の開催日**。UTC の日付をそのまま使うと UTC 15:00〜23:59 で1日ずれる)・
   `selectAutoRunTargets({ central, nar })`(**中央は全件、地方は Jpn1/2/3 だけ**。中央 → 地方の順・`venue` の印つき)・`planPreRaceDue({ kaisaiDate, startTime, offsetMinutes, nowMs })`
@@ -2175,11 +2178,11 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
 ### 設定画面にプロンプトのプレビュー(#201。v1.20.2)
 **(Issue #396 の追記)文面の組み立てはサーバへ移った**: `POST /api/settings/prompt-preview`(管理者専用)がサーバの `src/prompt-preview.ts` で組み立てて返し、クライアントは表示するだけ(束から約 39 KB が減り、`CLIENT_JS` は 264,471 → 226,688 バイト、上限は 266,000 → 228,500)。表示される文面・注記は変えていない(取得中と失敗の短い固定の文言だけ増えた)。以下は #201 のときの記録で、「クライアントで呼ぶ」「ネットワークには出ない」「ビルド」の記述は今は当てはまらない。詳細は `cloud/README.md`。
 変更は `cloud/` のクライアントと `page.ts` の CSS、`clampAdditionalInstruction` の置き場所(`llm-run.ts` → `settings.ts`。再 export)だけ(サーバ・D1・exe・core のプロンプト文面は無変更)。詳細は `cloud/README.md` の「設定画面にプロンプトのプレビューを出す」。
-- **何を出すか**: 設定画面の末尾のボタンで開閉する、LLM へ送るプロンプトのプレビュー。exe の設定画面と同じ `buildPromptPreview`(固定のサンプルレース)を**クライアントで**呼ぶ(API は作らない。ネットワークには出ない)。
+- **何を出すか**: 設定画面の末尾のボタンで開閉する、LLM へ送るプロンプトのプレビュー。exe の設定画面と同じ `buildPromptPreview`(固定のサンプルレース)を呼ぶ(**#201 の時点ではクライアントで呼んでいて API は無かったが、#396 でサーバの `POST /api/settings/prompt-preview` に移り、クライアントは取って表示するだけ**。上の追記)。
 - **送信と同じ文面**: 追加指示は 2,000 UTF-16 単位に切り(`clampAdditionalInstruction`)、クリップ幅は `resolveClipVariant` で解決する(送信と同じ手順)。`race-day-llm.test.ts` の e10 が、実際に LLM へ渡った prompt との一致を固定している。
 - **反映のタイミング**: 入力のたびには更新しない。開閉と「入力中の内容を反映」のボタンが強制描画(`render(true)`)で、写しを現在の下書きへ更新してから描く(#189 の設計と矛盾しない)。exe は入力の即時反映。
 - **注記**: 同日の傾向は、取り込み済みの前のレースが同じ場・同じ面で 2 つ以上あるときだけ実際の分析でも送る(中央が対象。地方は通過順が無くほとんど効かない)旨と、重賞のレースでは同じレースの過去10年の傾向も、取得できて条件に合う過去回が3回以上あるときだけ送る旨(#209 で書き換え、#181 で重賞の傾向の文を書き換えた)。
-- **ビルド**: クライアントが core を直接 import する唯一の例外として `@keiba/core/analyzer/build-prompt` を許可。生成物 81,269 → 111,705 バイト、サイズの上限は 125,000 バイト。core のプロンプト文面を変えるとドリフトの検査が落ちる(`pnpm run build:client`)。
+- **ビルド(#201 のときの記録。#396 で `build-prompt` は束に入らなくなり、この許可も無くなった)**: クライアントが core を直接 import する唯一の例外として `@keiba/core/analyzer/build-prompt` を許可。生成物 81,269 → 111,705 バイト、サイズの上限は 125,000 バイト。core のプロンプト文面を変えるとドリフトの検査が落ちる(`pnpm run build:client`)。
 
 ### クラウド版の画面に強調材料・懸念事項と LLM の usage を出す(#198〈#196-c〉。v1.20.1)
 変更は `cloud/` のクライアントと `page.ts` の CSS だけ(サーバ・D1・core・exe は無変更)。詳細は `cloud/README.md` の「スマホ画面に強調材料・懸念事項と LLM の usage を出す」。
@@ -2205,7 +2208,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
 
 ### 設定の API・設定画面(#189〈#165〉。v1.19.22)
 変更は `cloud/` のみ(exe のアプリコードは無変更)。詳細は `cloud/README.md` の「設定の API」「設定画面」。
-- **API**: `GET /api/settings`(`{ok, settings, source}`。`source` は default・d1・invalid〈JSON として読めない、またはオブジェクトでない〉)・`POST /api/settings`(全項目の置き換え。欠け・未知のキー・範囲外は 400。**項目の過不足〈欠け・未知のキー〉があるときは 400 の本文に `reason: "keys-mismatch"` が付く**。範囲外の値だけなら付かない。画面を開いたままデプロイをまたいだ古い画面が送る形を知らせるためで、クライアントは再読み込みを案内する。Issue #375)。POST の守り(Origin 403 → Content-Type 415 → 本文の大きさ 413 → 400)は run と共有(`readJsonObjectBody`。上限は run 1 KiB・settings 16 KiB)。
+- **API**: `GET /api/settings`(`{ok, settings, source}`。`source` は default・d1・invalid〈JSON として読めない、またはオブジェクトでない〉)・`POST /api/settings`(全項目の置き換え。欠け・未知のキー・範囲外は 400。**項目の過不足〈欠け・未知のキー〉があるときは 400 の本文の `error.reason` に `"keys-mismatch"` が付く**(`{ok: false, error: {type: "bad-request", message, fields, reason}}`)。範囲外の値だけなら付かない。画面を開いたままデプロイをまたいだ古い画面が送る形を知らせるためで、クライアントは再読み込みを案内する。Issue #375)。POST の守り(Origin 403 → Content-Type 415 → 本文の大きさ 413 → 400)は run と共有(`readJsonObjectBody`。上限は run 1 KiB・settings 16 KiB)。
 - **範囲の述語**: 項目ごとに1か所(`settings.ts` の `CLOUD_SETTINGS_RULES`)。書く側は読む側の部分集合(kelly は書く側 0.05〜1・読む側 0〜1、追加指示は書く側 2,000 文字まで・読む側は上限なし)。全境界値で「保存 → 読み戻し」の一致をテストで固定。
 - **新項目**: `preRaceOffsetMinutes`(発走何分前に評価するか。整数 10〜180・既定 45。cloud 専用。定時の自動実行〈#166・#206・#249〉の毎晩 21:00 の翌日分の計画で読み、計画の行に固定する。**変更は次の 21:00〈日本時間〉の計画から反映され、すでに計画した日の分は変わらない**)。`DEFAULT_PRE_RACE_OFFSET_MINUTES` は 30 → 45 で、設定の既定値と同じ定数。
 - **画面**: `#settings`(完全一致のときだけ)。トップに「設定」リンク。並びは exe の設定画面、ラベルは exe の共有定数、補助文は cloud の挙動に合わせて書き直し。下書きは入力のたび(数値欄・追加指示は `input`、チェックボックス・選択は `change`)に書くだけ(再描画しない)・保存の押下時に項目ごとに検証・保存/再読込/失敗の直後は強制再描画・離れたら破棄。**追跡のポーリングなど画面外の原因の再描画は、画面に出ている内容(最後の強制描画時の写し)から木を作り、打っている欄を壊さない**。結果の画面の「未設定」の注記は、トップの「設定」を案内する。
@@ -2494,7 +2497,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
 手動の分析で「事前分析」と「発走前の分析(LLM の補正)」をワンボタンにまとめたい、という要望(#312)に対し、調べたうえで**ワンボタンは作らず、説明を足す**ことにした(利用者の決定 2026-10-15)。
 - **根拠**: 発走前の分析(`race-day-core.ts` の `runPreRaceFetch`)は、事前分析と同じ `scrapeRace` を取得キャッシュ経由で呼び、出馬表・オッズ・戦績・騎手・調教まで自分で取る。計算ステップが、その材料から統計モデルの3着内率(prior)を**毎回計算し直して** LLM の補正・EV・配分を作る。事前分析の結果(DO の `race_day_morning_prior`)を読むのは「事前分析」カードの表示(`handler.ts` の `getMorningPrior`)だけで、発走前の計算は読まない。したがって手動では「発走前の分析」だけを押せば、事前分析ありと同じ結果になる。事前分析を先に押す**分析結果への**効果は、取得キャッシュが温まって発走前の取得が速くなること・朝の時点の統計モデルの順位を画面で見られること、の2つだけ。分析結果以外には1つある: 各馬の戦績の D1 への蓄積(`horse_runs`。#256 段階A)は事前分析の計算ステップだけが行う(`race-day-core.ts`、`horse-runs-repository.ts` の `STATUS_NOTE`)ので、**手動で発走前だけを実行したレースの戦績は貯まらない**(分析結果には影響しない。案内の文には書いていない)。
 - **案内**(`client/race.ts` の `RACE_GUIDE`・`RaceModel.guide`): レースの画面の見出しの下・2枚のカードの前に1段落(`p.race-guide`)。「手動で分析するときは、下の「発走前」だけを実行すれば足ります(事前分析は不要)。事前分析は、朝の時点の統計モデルの見立てを見るためと、取得のキャッシュを温めて発走前を速くするためのものです。」起動のボタンを出す管理者にだけ出し、閲覧者(`readOnly`)・状態を取得できていないときは出さない。
-- **変化量**(`client/result.ts` の `probShiftOf`・`HorseCard.adjustedShift`・`TopProbHorse.shift`): 結果画面と発走前のカードの中の**両方**(`contentOf` を共有)で、補正後の3着内率の横に統計モデル(3着内率 = prior)からの変化量を「(統計比 +2.0pt)」の形で添える。馬のカードの「AI補正後 25.0%(統計比 +5.0pt)」と、「AI補正後の3着内率 上位5頭」の各行「60.0%(統計比 +50.0pt)」。補正後 − prior を百分率の差(pt)で小数第1位。符号は検証画面の補正幅(`formatAdjustment`)と同じ ASCII の「+」「-」(画面の他の符号付きの数値に合わせた)。**丸めて 0.0 になる差(絶対値 0.05pt 未満)は「±0.0pt」**。**LLM が効いていない(補正後を出さない)分析では出さない**。prior か補正後が非有限の馬も出さない。色分けはしない(符号が文字で出ているため)。
+- **変化量**(`client/result.ts` の `probShiftOf`・`HorseCard.adjustedShift`・`TopProbHorse.shift`): 結果画面と発走前のカードの中の**両方**(`contentOf` を共有)で、補正後の3着内率の横に統計モデル(3着内率 = prior)からの変化量を「(統計比 +2.0pt)」の形で添える。馬のカードの「AI補正後 25.0%(統計比 +5.0pt)」と、「AI補正後の3着内率 上位5頭」の各行「60.0%(統計比 +50.0pt)」。補正後 − prior を百分率の差(pt)で小数第1位。符号は検証画面の補正幅(`formatAdjustment`)と同じ ASCII の「+」「-」(画面の他の符号付きの数値に合わせた)。**丸めて 0.0 になる差(絶対値 0.05pt 未満)は「±0.0pt」**(`formatAdjustment` は、丸めた後の値で符号を決め、丸めて 0.0 になる値を符号なしの「0.0pt」にする〈#445。検証画面の補正幅・予測−実績・内訳の「差」も同じ規則〉。この変化量は、その「0.0pt」だけを「±0.0pt」に置き換えている)。**LLM が効いていない(補正後を出さない)分析では出さない**。prior か補正後が非有限の馬も出さない。色分けはしない(符号が文字で出ているため)。
 - **束の大きさ**: 上限は `test/client-bundle.test.ts` のコメントに実測を記録した。
 
 ### 結果画面の各馬の行にタイム指数の値とレース内の順位を出す(#359。#353 の画面表示。版数・`PROMPT_VERSION` は変えない)

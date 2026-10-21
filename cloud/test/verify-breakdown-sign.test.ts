@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { formatSignedPt } from "../../packages/core/src/view/verify-format";
 import {
-  formatSignedPt,
   renderConditionSections,
   renderPopularitySections,
   WIN_PLACE_GAP_MIN,

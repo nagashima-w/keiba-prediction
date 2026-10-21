@@ -11,6 +11,7 @@ import {
   directionLabel,
   exclusionRows,
   formatAdjustment,
+  formatSignedPt,
   formatBinRange,
   formatExclusionSummary,
   formatPayoutBreakdown,
@@ -149,8 +150,8 @@ describe("verify画面の表示整形(純関数)", () => {
     it("負の値も符号付きでポイント表示にすること", () => {
       expect(formatAdjustment(-0.031)).toBe("-3.1pt");
     });
-    it("0は+0.0ptにすること", () => {
-      expect(formatAdjustment(0)).toBe("+0.0pt");
+    it("0は符号なしの0.0ptにすること(Issue #445: 旧版は+0.0pt)", () => {
+      expect(formatAdjustment(0)).toBe("0.0pt");
     });
     it("nullは'-'にすること(件数0の群)", () => {
       expect(formatAdjustment(null)).toBe("-");
@@ -359,17 +360,20 @@ describe("境界値の golden(#397 R-3。旧 cloud-verify-format.test.ts の表�
     expect(formatYen(amount)).toBe(expected);
   });
 
-  // 符号・0・-0・丸めの境目(0.00049 は +0.0、0.0005 は +0.1)。-0.0004 は「-0.0pt」になる(符号は値の符号で付き、丸めた結果の 0 でも消えない)。
+  // 符号・0・-0・丸めの境目。Issue #445: 符号は**丸めた後の値**で決める(丸めて 0.0 になる値は符号なしの「0.0pt」。旧版は値の符号で付けていたので、
+  // 0・-0・+0.0004・+0.00049 が「+0.0pt」、-0.0004 が「-0.0pt」と出ていた)。正の値だけ「+」、0.0005 以上(丸めて 0.1)から符号が付く。
   it.each([
     [null, "-"],
-    [0, "+0.0pt"],
-    [-0, "+0.0pt"],
+    [0, "0.0pt"],
+    [-0, "0.0pt"],
     [0.052, "+5.2pt"],
     [-0.031, "-3.1pt"],
-    [0.0004, "+0.0pt"],
-    [-0.0004, "-0.0pt"],
-    [0.00049, "+0.0pt"],
+    [0.0004, "0.0pt"],
+    [-0.0004, "0.0pt"],
+    [0.00049, "0.0pt"],
+    [-0.00049, "0.0pt"],
     [0.0005, "+0.1pt"],
+    [-0.0005, "-0.1pt"],
     [0.005, "+0.5pt"],
     [-0.005, "-0.5pt"],
     [0.1234, "+12.3pt"],
@@ -377,6 +381,32 @@ describe("境界値の golden(#397 R-3。旧 cloud-verify-format.test.ts の表�
     [-1, "-100.0pt"],
   ] as const)("formatAdjustment(%s) は %s", (value, expected) => {
     expect(formatAdjustment(value)).toBe(expected);
+  });
+
+  // Issue #445: 差(pt)の符号の規則。検証画面の内訳(cloud/src/verify-breakdown.ts)と formatAdjustment が共有する。引数は百分率の差(pt)。
+  it.each([
+    [-0.04, "0.0pt"],
+    [-0.049999, "0.0pt"],
+    [-0, "0.0pt"],
+    [0, "0.0pt"],
+    [0.04, "0.0pt"],
+    [0.0499, "0.0pt"],
+    [-0.05, "-0.1pt"],
+    [0.05, "+0.1pt"],
+    [-0.06, "-0.1pt"],
+    [0.06, "+0.1pt"],
+    [47.5, "+47.5pt"],
+    [-12.34, "-12.3pt"],
+  ] as const)("formatSignedPt(%s) は %s", (pt, expected) => {
+    expect(formatSignedPt(pt)).toBe(expected);
+  });
+
+  it("formatAdjustment は formatSignedPt(値 × 100) と同じ(境目の 0.0005 の前後で、0 の符号なしと +0.1 を取り違えない)", () => {
+    for (const value of [-0.0005, -0.00049, -0.0004, 0, 0.0004, 0.00049, 0.0005, 0.052, -0.031]) {
+      expect(formatAdjustment(value), String(value)).toBe(formatSignedPt(value * 100));
+    }
+    // 前提: 0 でない値を含み、丸めの前後で表示が変わる(0.0 → 0.1)
+    expect(formatAdjustment(0.00049)).not.toBe(formatAdjustment(0.0005));
   });
 
   it.each([

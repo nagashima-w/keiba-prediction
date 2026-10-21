@@ -3,7 +3,7 @@
  *
  * クラウド版のサーバ(`cloud/src/pipeline.ts` など)・ブラウザ向けの束(`cloud/client/api-analysis.ts` が `import type` で参照する)と、
  * core の純関数(`analysis/`・`view/`)が参照する。ブラウザ向けの束の閉包に core のバレル(`index.ts`)やネイティブ依存を引き込まないよう、
- * **このファイルは import を 1 つも持たない**(閉包の検査は `cloud/test/client-bundle.test.ts` の許可リストと `cloud/test/import-guard.test.ts`)。
+ * **このファイルが import するのは、それ自身が import を持たない `common/prediction-marks.ts` の型 1 つだけ**(Issue #445。`import type` なので実行時には何も引き込まない。閉包の検査は `cloud/test/client-bundle.test.ts` の許可リストと `cloud/test/import-guard.test.ts`)。
  * core の型と同じ形の型は import せず複製している。構造の一致を型検査で固定しているのは一部の型だけで、`StoredAllocation`(`bets` の `StoredAllocationBetDetail` を含む)・`ComboOddsFetchOutcome`・
  * `ComboOddsScrapeOutcome` の 3 組(`packages/core/test/analysis/analysis-types-*-pin.test.ts`)と、`ImportResultOutcome`(`packages/core/test/ev/result-import-flow.test.ts`)である。ほかの複製は固定していない。
  * すべて JSON でシリアライズ可能なプレーンオブジェクト(ブランド型・関数を含まない)であることを不変条件とする。
@@ -11,6 +11,8 @@
  * 旧 exe では main・preload・renderer が IPC で受け渡す型でもあった(exe は #287 で削除。最後に残っているコミットは 3c1664e)。
  * そのため、以下の JSDoc の「IPC越し」「main→renderer」は旧 exe での用途の説明で、exe 専用の型は exe の削除後も残っている。
  */
+
+import type { PredictionMark } from "../common/prediction-marks.js";
 
 /** 分析パイプラインの進捗段階(仕様「5. ui」の進捗表示要件)。 */
 export type ProgressStage = "スクレイピング" | "スコアリング" | "LLM分析" | "保存";
@@ -30,10 +32,10 @@ export type VerifyVenueFilter = "all" | RaceVenueKind;
 
 
 /**
- * 予想印(core PredictionMark のプレーン写し。旧 exe では IPC越しの共有用)。
- * ◎本命/〇対抗/▲単穴/△連下/☆穴(勝ち目)/注 穴(3着)。印なし・LLM未使用時は null。
+ * 予想印。◎本命/〇対抗/▲単穴/△連下/☆穴(勝ち目)/注 穴(3着)。印なし・LLM未使用時は null。
+ * 定義は `common/prediction-marks.ts`(import を持たない純モジュール)の 1 か所だけで、ここは再エクスポート(Issue #445。以前は文字列リテラルのユニオンで二重に持っていた)。
  */
-export type PredictionMark = "◎" | "〇" | "▲" | "△" | "☆" | "注";
+export type { PredictionMark };
 
 /**
  * オッズの発売状態(core OddsSnapshot.oddsStatus のプレーン写し)。
