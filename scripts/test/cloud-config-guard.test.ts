@@ -952,7 +952,7 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     const nodeMajors = new Set<string>();
     let count = 0;
     for (const wf of ["ci.yml", "deploy-cloud.yml", "research.yml"]) {
-      for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\d+)\s*$/gm)) {
+      for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\d+)(?:\.\d+\.\d+)?\s*$/gm)) {
         nodeMajors.add(m[1]!);
         count++;
       }
@@ -960,6 +960,23 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     expect(count, "node-version の指定を実際に読めている(空振り防止)").toBeGreaterThanOrEqual(5);
     expect([...nodeMajors], "ワークフローの node-version は全部同じメジャー").toHaveLength(1);
     expect([...nodeMajors][0]).toBe(typesMajor);
+  });
+
+  it("Issue #441: ワークフローの node-version は、2026-10-21 のセキュリティリリースの修正版(24.22.1)以上に固定されている(`24` だけだとランナーのツールキャッシュにある修正前の版が使われる)", () => {
+    const MIN = [24, 22, 1] as const;
+    const versions: string[] = [];
+    for (const wf of ["ci.yml", "deploy-cloud.yml", "research.yml"]) {
+      for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\S+)\s*$/gm)) versions.push(m[1]!);
+    }
+    expect(versions.length, "node-version の指定を実際に読めている(空振り防止。ci 2 + deploy-cloud 3 + research 1)").toBe(6);
+    for (const v of versions) {
+      const parts = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
+      expect(parts, `node-version: ${v} は major.minor.patch の正確な版(メジャーだけだとキャッシュの修正前の版になる)`).not.toBeNull();
+      const [maj, min, pat] = [Number(parts![1]), Number(parts![2]), Number(parts![3])];
+      expect(maj, `node-version: ${v} のメジャーは 24`).toBe(MIN[0]);
+      const atLeast = min > MIN[1] || (min === MIN[1] && pat >= MIN[2]);
+      expect(atLeast, `node-version: ${v} は 24.22.1 以上`).toBe(true);
+    }
   });
 
   it("Issue #332: cloud の .ts は `fileURLToPath(new URL(…))` と書かない(グローバルの URL は workers-types のもので、@types/node 24 以上では node:url の URL と型が合わず TS2345)。test/meta-path.ts の pathFromMeta を使う", () => {
