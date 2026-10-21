@@ -473,7 +473,9 @@ describe("AC-A6: listUnimportedRaces(分析済み・結果未取込のレース�
   it("クエリプラン: 開催日の索引(idx_analyses_kaisai_date)と、結果の主キーの索引(NOT EXISTS の探索)を使い、analyses を全走査しない", async () => {
     const plan = (await local.db.prepare(`EXPLAIN QUERY PLAN ${LIST_UNIMPORTED_SQL}`).bind("20261001", "20261003", 10).all()).results as Array<{ detail: string }>;
     const text = plan.map((p) => p.detail).join("\n");
-    expect(text).toContain("idx_analyses_kaisai_date");
+    // 開催日の範囲を引く索引は、idx_analyses_kaisai_date か 0008 の idx_analyses_kaisai_analyzed のどちらでもよい(`d1-schema.test.ts` の「開催日の絞り込み」と同じ扱い)。
+    // 0023(Issue #389)で analyses の列が増えると、SQLite の見積もり(表の行の幅)が変わり、選ばれる側が替わる。どちらも kaisai_date の範囲検索で、全走査ではない。
+    expect(text).toMatch(/SEARCH a USING (COVERING )?INDEX idx_analyses_kaisai_(date|analyzed) \(kaisai_date>\? AND kaisai_date<\?\)/);
     expect(text).toMatch(/SEARCH r USING (COVERING )?INDEX sqlite_autoindex_race_results_1 \(race_id=\?\)/);
     expect(text).not.toMatch(/SCAN a\b/);
   });
@@ -612,7 +614,9 @@ describe("Issue #208 AC-C: listUnimportedRacesByDay(窓の中の未取込を、�
   it("クエリプラン: 開催日の索引(idx_analyses_kaisai_date)と結果の主キーの索引(NOT EXISTS の探索)を使い、analyses を全走査しない", async () => {
     const plan = (await local.db.prepare(`EXPLAIN QUERY PLAN ${LIST_UNIMPORTED_BY_DAY_SQL}`).bind("20261001", "20261007", 60, 3, 120).all()).results as Array<{ detail: string }>;
     const text = plan.map((p) => p.detail).join("\n");
-    expect(text).toContain("idx_analyses_kaisai_date");
+    // 開催日の範囲を引く索引は、idx_analyses_kaisai_date か 0008 の idx_analyses_kaisai_analyzed のどちらでもよい(`d1-schema.test.ts` の「開催日の絞り込み」と同じ扱い)。
+    // 0023(Issue #389)で analyses の列が増えると、SQLite の見積もり(表の行の幅)が変わり、選ばれる側が替わる。どちらも kaisai_date の範囲検索で、全走査ではない。
+    expect(text).toMatch(/SEARCH a USING (COVERING )?INDEX idx_analyses_kaisai_(date|analyzed) \(kaisai_date>\? AND kaisai_date<\?\)/);
     expect(text).toMatch(/SEARCH r USING (COVERING )?INDEX sqlite_autoindex_race_results_1 \(race_id=\?\)/);
     expect(text).not.toMatch(/SCAN a\b/);
   });

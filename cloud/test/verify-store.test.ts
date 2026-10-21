@@ -3,6 +3,7 @@ import { encodeDetail } from "../src/analysis-detail";
 import { D1AnalysisStore } from "../src/analysis-repository";
 import { D1ResultStore } from "../src/result-repository";
 import { D1VerifyStore, type VerifyBucket } from "../src/verify-store";
+import { VerifyCore, VERIFY_TICK_QUERY_LIMIT, type VerifyKv } from "../src/verify-core";
 import { buildVerifySource } from "../src/verify-read";
 import { VERIFY_CLOSE_READ_SQL } from "../src/verify-close";
 import type { CloseSavePayload } from "../src/analysis-close";
@@ -84,7 +85,7 @@ describe("readWatermark(再計算の要否の透かし)", () => {
 describe("listPending(start_time が NULL の分析)", () => {
   it("カーソルより後で NULL の行を id 昇順に limit 件と、該当の総数を返す", async () => {
     for (let i = 1; i <= 5; i += 1) await analyses().saveAnalysis(mkRecord(i));
-    await local.db.prepare("UPDATE analyses SET start_time = '09:00' WHERE id = 2").run();
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00', cond_read = 1 WHERE id = 2").run();
     const s = verifyStore();
     const page = await s.listPending(0, 2);
     expect(page.rows.map((r) => r.id)).toEqual([1, 3]);
@@ -292,5 +293,260 @@ describe("readAll: 締切直前の再計算の行(Issue #352。analysis_close・
     expect(out.rows.analyses).toHaveLength(1); // 前提: 主の行が読めている
     expect(out.counts).toEqual({ analyses: 1, horses: out.rows.horses.length, allocationMeta: 1, bets: out.rows.bets.length, results: 0, comboPayouts: 0, comboImports: 0 });
     expect(out.rowsRead).toBeGreaterThan(0);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Issue #389(#385-B の a): レースの条件(芝ダ・距離・馬場・グレード・レース名)の補完。発走時刻の補完と同じ get に相乗りする
+// ---------------------------------------------------------------------------
+
+interface CondRow {
+  readonly start_time: string | null;
+  readonly course_type: string | null;
+  readonly distance: number | null;
+  readonly track_condition: string | null;
+  readonly grade: string | null;
+  readonly race_name: string | null;
+  readonly cond_read: number | null;
+}
+async function condRowOf(id: number): Promise<CondRow> {
+  return (await local.db.prepare("SELECT start_time, course_type, distance, track_condition, grade, race_name, cond_read FROM analyses WHERE id = ?").bind(id).first<CondRow>())!;
+}
+const SNAP = { raceName: "3歳以上1勝クラス", courseType: "芝", distance: 1600, trackCondition: "稍", grade: "G3", startTime: "15:45" };
+const SNAP_FACTS = { courseType: "芝", distance: 1600, trackCondition: "稍", grade: "G3", raceName: "3歳以上1勝クラス" };
+const record = (i: number, race: Record<string, unknown> = SNAP): AnalysisRecord => mkRecord(i, { raceSnapshot: { race } });
+
+describe("listPending(Issue #389): 発走時刻が済みでも、条件(cond_read)が NULL の行は候補", () => {
+  it("start_time NULL または cond_read NULL の行を候補にし、両方済みの行は除く。総数も同じ条件で数える", async () => {
+    for (let i = 1; i <= 4; i += 1) await analyses().saveAnalysis(mkRecord(i));
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00', cond_read = 1 WHERE id = 1").run(); // 両方済み
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00' WHERE id = 2").run(); // 発走時刻だけ済み(既存分の一度だけの補完の対象)
+    await local.db.prepare("UPDATE analyses SET cond_read = 0 WHERE id = 3").run(); // 条件だけ済み(読めなかった印も「済み」)
+    const page = await verifyStore().listPending(0, 10);
+    expect(page.rows.map((r) => r.id)).toEqual([2, 3, 4]);
+    expect(page.total).toBe(3);
+  });
+});
+
+describe("resolveStartTimes(Issue #389): 同じ get から条件も取り出す", () => {
+  it("1 行につき get は 1 回(発走時刻だけのときと同じ)。resolved は従来の形のまま、conditions に同じ id の事実が入る", async () => {
+    await analyses().saveAnalysis(record(1));
+    await analyses().saveAnalysis(record(2, { raceName: "", courseType: "ダ", distance: 1200 }));
+    const spy = spyBucket(local.r2);
+    const s = verifyStore(spy.bucket as unknown as VerifyBucket);
+    const out = await s.resolveStartTimes((await s.listPending(0, 10)).rows);
+    expect(out.resolved).toEqual([{ id: 1, value: "15:45" }, { id: 2, value: "" }]);
+    expect(out.gets).toBe(2);
+    expect(spy.calls.filter((c) => c.op === "get")).toHaveLength(2);
+    expect(out.conditions).toEqual([
+      { id: 1, facts: SNAP_FACTS },
+      { id: 2, facts: { courseType: "ダ", distance: 1200, trackCondition: null, grade: null, raceName: null } },
+    ]);
+  });
+
+  it("detail_key が無い行・壊れた詳細・別のレースの詳細は、条件も読めなかった(facts: null)。detail_key が無い行は get しない", async () => {
+    const recent = new Date(NOW.getTime() - 1000).toISOString();
+    await analyses().saveAnalysis(mkRecord(1, { analyzedAt: recent }));
+    await analyses().saveAnalysis(mkRecord(2, { analyzedAt: recent }));
+    await analyses().saveAnalysis(mkRecord(3, { analyzedAt: recent }));
+    await local.db.prepare("UPDATE analyses SET detail_key = NULL WHERE id = 1").run();
+    await local.r2.put("analyses/2.json.gz", new Uint8Array([1, 2, 3]));
+    await local.r2.put("analyses/3.json.gz", encodeDetail(mkRecord(9, { raceSnapshot: { race: SNAP } })));
+    const spy = spyBucket(local.r2);
+    const s = verifyStore(spy.bucket as unknown as VerifyBucket);
+    const out = await s.resolveStartTimes((await s.listPending(0, 10)).rows);
+    expect(out.resolved.map((r) => r.value)).toEqual(["?", "?", "?"]);
+    expect(out.conditions).toEqual([{ id: 1, facts: null }, { id: 2, facts: null }, { id: 3, facts: null }]);
+    expect(out.gets).toBe(2);
+    expect(spy.calls.filter((c) => c.op === "get")).toHaveLength(2);
+  });
+
+  it("R2 に詳細が無い行(missing)・get が例外の行(failed)には、条件の結果を出さない(NULL のまま再試行できる)", async () => {
+    await analyses().saveAnalysis(record(1));
+    await analyses().saveAnalysis(record(2));
+    await analyses().saveAnalysis(record(3));
+    await local.db.prepare("UPDATE analyses SET detail_key = 'analyses/none-' || id WHERE id = 1").run();
+    const flaky = { get: async (key: string) => { if (key.endsWith("/2.json.gz")) throw new Error("R2_ERROR"); return local.r2.get(key); } } as unknown as VerifyBucket;
+    const s = verifyStore(flaky);
+    const out = await s.resolveStartTimes((await s.listPending(0, 10)).rows);
+    expect(out.missing).toEqual([1]);
+    expect(out.failed).toEqual([2]);
+    expect(out.resolved.map((r) => r.id)).toEqual([3]);
+    expect(out.conditions).toEqual([{ id: 3, facts: SNAP_FACTS }]);
+  });
+
+  it("スナップショットに条件が何も無い詳細は、読めた(facts は全項目 null)。読めなかった(facts: null)とは別", async () => {
+    await analyses().saveAnalysis(mkRecord(1, { raceSnapshot: { race: {} } }));
+    const s = verifyStore();
+    const out = await s.resolveStartTimes((await s.listPending(0, 10)).rows);
+    expect(out.conditions).toEqual([{ id: 1, facts: { courseType: null, distance: null, trackCondition: null, grade: null, raceName: null } }]);
+  });
+});
+
+describe("commitStartTimes(Issue #389): 発走時刻と条件を 1 文で書く", () => {
+  it("新しい分析(両方 NULL): 発走時刻と条件を書き、cond_read=1。D1 は 1 回の batch(2 文)のまま", async () => {
+    await analyses().saveAnalysis(record(1));
+    const spy = spyDb(local.db);
+    const s = new D1VerifyStore({ db: spy.db, bucket: local.r2, now: () => NOW });
+    await s.commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: SNAP_FACTS }]);
+    expect(spy.batches).toEqual([2]);
+    expect(await condRowOf(1)).toEqual({ start_time: "15:45", course_type: "芝", distance: 1600, track_condition: "稍", grade: "G3", race_name: "3歳以上1勝クラス", cond_read: 1 });
+  });
+
+  it("読めなかった(facts: null)は cond_read=0 で、条件の列は NULL のまま", async () => {
+    await analyses().saveAnalysis(record(1));
+    await verifyStore().commitStartTimes([{ id: 1, value: "?" }], 0, [{ id: 1, facts: null }]);
+    expect(await condRowOf(1)).toEqual({ start_time: "?", course_type: null, distance: null, track_condition: null, grade: null, race_name: null, cond_read: 0 });
+  });
+
+  it("既存分(発走時刻は済み・cond_read NULL): 条件だけ書き、確認済みの発走時刻は上書きしない", async () => {
+    await analyses().saveAnalysis(record(1));
+    await local.db.prepare("UPDATE analyses SET start_time = '10:00' WHERE id = 1").run();
+    await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: SNAP_FACTS }]);
+    const row = await condRowOf(1);
+    expect(row.start_time).toBe("10:00");
+    expect(row).toMatchObject({ course_type: "芝", distance: 1600, cond_read: 1 });
+  });
+
+  it("★確認済みの条件(cond_read が NULL でない)は上書きしない。発走時刻が NULL の行でも、条件の列と cond_read は元のまま", async () => {
+    await analyses().saveAnalysis(record(1));
+    await local.db.prepare("UPDATE analyses SET cond_read = 1, course_type = 'ダ', distance = 1200 WHERE id = 1").run();
+    await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: SNAP_FACTS }]);
+    expect(await condRowOf(1)).toEqual({ start_time: "15:45", course_type: "ダ", distance: 1200, track_condition: null, grade: null, race_name: null, cond_read: 1 });
+  });
+
+  it("★確認の印も上書きしない: 「読めなかった」(cond_read=0)と確認済みの行は、あとから読めた事実(1)で書き換えない(発走時刻が NULL の行でも)", async () => {
+    await analyses().saveAnalysis(record(1));
+    await local.db.prepare("UPDATE analyses SET cond_read = 0 WHERE id = 1").run();
+    await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: SNAP_FACTS }]);
+    expect(await condRowOf(1)).toEqual({ start_time: "15:45", course_type: null, distance: null, track_condition: null, grade: null, race_name: null, cond_read: 0 });
+  });
+
+  it("両方済みの行は何も変えない", async () => {
+    await analyses().saveAnalysis(record(1));
+    await local.db.prepare("UPDATE analyses SET start_time = '10:00', cond_read = 0 WHERE id = 1").run();
+    const written = await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }], 0, [{ id: 1, facts: SNAP_FACTS }]);
+    expect(await condRowOf(1)).toEqual({ start_time: "10:00", course_type: null, distance: null, track_condition: null, grade: null, race_name: null, cond_read: 0 });
+    expect(written).toBe(0);
+  });
+
+  it("条件の引数を渡さない呼び出し(従来の呼び方)は、条件の列に触れない(cond_read は NULL のまま)", async () => {
+    await analyses().saveAnalysis(record(1));
+    await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }], 1);
+    expect(await condRowOf(1)).toEqual({ start_time: "15:45", course_type: null, distance: null, track_condition: null, grade: null, race_name: null, cond_read: null });
+  });
+
+  it("複数行を 1 文で書き分ける(行ごとに別の事実)", async () => {
+    await analyses().saveAnalysis(record(1));
+    await analyses().saveAnalysis(record(2, { courseType: "ダ", distance: 1800 }));
+    await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }, { id: 2, value: "" }], 2, [{ id: 1, facts: SNAP_FACTS }, { id: 2, facts: { courseType: "ダ", distance: 1800, trackCondition: null, grade: null, raceName: null } }]);
+    expect((await condRowOf(1)).distance).toBe(1600);
+    expect((await condRowOf(2)).distance).toBe(1800);
+    expect((await condRowOf(2)).course_type).toBe("ダ");
+  });
+});
+
+describe("readAll(Issue #389): 分析の行に条件の列が付く", () => {
+  it("courseType・distance・trackCondition・grade・raceName・condRead を読む(NULL の行は null)", async () => {
+    await analyses().saveAnalysis(record(1));
+    await analyses().saveAnalysis(record(2));
+    await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: SNAP_FACTS }]);
+    const out = await verifyStore().readAll();
+    expect(out.rows.analyses[0]).toMatchObject({ id: 1, courseType: "芝", distance: 1600, trackCondition: "稍", grade: "G3", raceName: "3歳以上1勝クラス", condRead: 1 });
+    expect(out.rows.analyses[1]).toMatchObject({ id: 2, courseType: null, distance: null, trackCondition: null, grade: null, raceName: null, condRead: null });
+  });
+});
+
+
+describe("補完の通し(Issue #389。実 D1・実 R2 + VerifyCore): 既存分の一度だけの補完と、新しい分析の相乗り", () => {
+  function core(bucket: VerifyBucket = local.r2) {
+    const data = new Map<string, unknown>();
+    const kv: VerifyKv = { get: <T>(k: string) => data.get(k) as T | undefined, put: (k: string, v: unknown) => void data.set(k, JSON.parse(JSON.stringify(v))) };
+    const alarms: number[] = [];
+    const c = new VerifyCore({ kv, now: () => NOW.getTime(), setAlarm: (at) => void alarms.push(at), getAlarm: async () => null, store: verifyStore(bucket) }, {});
+    return { c, kv, alarms };
+  }
+  const classB = async () => (await local.db.prepare("SELECT class_b AS b FROM r2_ops WHERE ym = 202610").first<{ b: number }>())?.b ?? 0;
+
+  it("発走時刻は済み・条件が未確認の既存分: 1 行につき R2 の get は 1 回で、発走時刻は変えずに条件だけが埋まる。Class B はその回数ぶん増える。全部済めば補完待ちは 0", async () => {
+    for (let i = 1; i <= 5; i += 1) await analyses().saveAnalysis(record(i, { ...SNAP, distance: 1000 + i * 100 }));
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00'").run(); // 公開前に発走時刻だけ補完されていた状態
+    expect((await verifyStore().listPending(0, 10)).total).toBe(5); // 前提: 条件が未確認なので全行が候補
+    const spy = spyBucket(local.r2);
+    const { c, kv } = core(spy.bucket as unknown as VerifyBucket);
+    await c.runBackfillTick();
+    expect(spy.calls.filter((x) => x.op === "get")).toHaveLength(5);
+    expect(await classB()).toBe(5);
+    for (let i = 1; i <= 5; i += 1) {
+      expect(await condRowOf(i)).toEqual({ start_time: "09:00", course_type: "芝", distance: 1000 + i * 100, track_condition: "稍", grade: "G3", race_name: "3歳以上1勝クラス", cond_read: 1 });
+    }
+    expect((await verifyStore().listPending(0, 10)).total).toBe(0);
+    expect(kv.get("cursor2")).toBe(5);
+    await c.runBackfillTick(); // 済んだ後の tick は何もしない
+    expect(spy.calls.filter((x) => x.op === "get")).toHaveLength(5);
+  });
+
+  it("新しい分析(両方 NULL): 1 回の get で発走時刻と条件の両方が埋まる(相乗り。追加の R2 読みは 0)", async () => {
+    await analyses().saveAnalysis(record(1));
+    const spy = spyBucket(local.r2);
+    await core(spy.bucket as unknown as VerifyBucket).c.runBackfillTick();
+    expect(spy.calls.filter((x) => x.op === "get")).toHaveLength(1);
+    expect(await condRowOf(1)).toEqual({ start_time: "15:45", course_type: "芝", distance: 1600, track_condition: "稍", grade: "G3", race_name: "3歳以上1勝クラス", cond_read: 1 });
+  });
+
+  it("1 tick の R2 の get は 問い合わせ数の上限 − 4 まで。残りは次の tick が続ける(途中で止まっても再開できる)", async () => {
+    const total = VERIFY_TICK_QUERY_LIMIT - 4 + 3;
+    for (let i = 1; i <= total; i += 1) await analyses().saveAnalysis(record(i));
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00'").run();
+    const spy = spyBucket(local.r2);
+    const { c, alarms } = core(spy.bucket as unknown as VerifyBucket);
+    await c.runBackfillTick();
+    expect(spy.calls.filter((x) => x.op === "get")).toHaveLength(VERIFY_TICK_QUERY_LIMIT - 4);
+    expect((await verifyStore().listPending(0, 100)).total).toBe(3);
+    expect(alarms).toHaveLength(1); // 残りがあるので次のアラームを張る
+    await c.runBackfillTick();
+    expect((await verifyStore().listPending(0, 100)).total).toBe(0);
+    expect(spy.calls.filter((x) => x.op === "get")).toHaveLength(total);
+  });
+
+  it("get が例外になった行は NULL のまま残り、次の tick が再試行して埋める(カーソルは手前で止まる)", async () => {
+    for (let i = 1; i <= 3; i += 1) await analyses().saveAnalysis(record(i));
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00'").run();
+    let broken = true;
+    const flaky = { get: async (key: string) => { if (broken && key.endsWith("/2.json.gz")) throw new Error("R2_ERROR"); return local.r2.get(key); } } as unknown as VerifyBucket;
+    const { c, kv } = core(flaky);
+    await c.runBackfillTick();
+    expect((await condRowOf(1)).cond_read).toBe(1);
+    expect((await condRowOf(2)).cond_read).toBeNull();
+    expect((await condRowOf(3)).cond_read).toBe(1);
+    expect(kv.get("cursor2")).toBe(1);
+    broken = false;
+    await c.runBackfillTick();
+    expect((await condRowOf(2)).cond_read).toBe(1);
+    expect((await verifyStore().listPending(0, 10)).total).toBe(0);
+  });
+
+  it("詳細が無い既存分(detail_key が NULL)は get せず cond_read=0(読めなかった)。発走時刻は変えない", async () => {
+    await analyses().saveAnalysis(record(1));
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00', detail_key = NULL").run();
+    const spy = spyBucket(local.r2);
+    await core(spy.bucket as unknown as VerifyBucket).c.runBackfillTick();
+    expect(spy.calls).toEqual([]);
+    expect(await condRowOf(1)).toEqual({ start_time: "09:00", course_type: null, distance: null, track_condition: null, grade: null, race_name: null, cond_read: 0 });
+  });
+
+  it("R2 に現れない既存分は、猶予(30 分)の間は未確認のまま保留し、猶予が過ぎたら cond_read=0 にする(発走時刻は変えない)", async () => {
+    await analyses().saveAnalysis(record(1));
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00', detail_key = 'analyses/none-1' WHERE id = 1").run();
+    const data = new Map<string, unknown>();
+    const kv: VerifyKv = { get: <T>(k: string) => data.get(k) as T | undefined, put: (k: string, v: unknown) => void data.set(k, JSON.parse(JSON.stringify(v))) };
+    let now = NOW.getTime();
+    const c = new VerifyCore({ kv, now: () => now, setAlarm: () => undefined, getAlarm: async () => null, store: verifyStore() }, {});
+    await c.runBackfillTick();
+    expect((await condRowOf(1)).cond_read).toBeNull();
+    now += 30 * 60_000;
+    await c.runBackfillTick();
+    expect(await condRowOf(1)).toEqual({ start_time: "09:00", course_type: null, distance: null, track_condition: null, grade: null, race_name: null, cond_read: 0 });
   });
 });

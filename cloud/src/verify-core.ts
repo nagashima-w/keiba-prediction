@@ -8,7 +8,7 @@
  * (区分の切替で D1 を読まない)。
  *
  * ## 流れ(`getReport`)
- * 1. 透かし(`readWatermark`。各表の `MAX(id)`/`MAX(rowid)`。各 1 行)と、発走時刻の補完待ち(`listPending`。カーソルより後の `start_time IS NULL`)を確認する。
+ * 1. 透かし(`readWatermark`。各表の `MAX(id)`/`MAX(rowid)`。各 1 行)と、補完待ち(`listPending`。カーソルより後の `start_time IS NULL` **または** 条件の印 `cond_read IS NULL`。Issue #389)を確認する。
  * 2. **補完待ちがあれば集計しない**(発走時刻を失ったまま計算すると、先読み疑いの判定が旧 exe(と同じ core の判定)とずれる)。集計があれば、それを「補完中」の印つきで返し、無ければ `preparing`(残り件数)。
  *    補完は `runBackfillTick`(アラーム)が少しずつ行う。
  * 3. 集計が新しい(透かしが同じで TTL 内)ならそのまま返す。そうでなければ再計算するが、**費用の柵**(最短間隔・1 日の回数)に当たったら古い集計を返す(`stale`)。
@@ -34,7 +34,8 @@
  * 1 回のアラームの問い合わせ数は {@link VERIFY_TICK_QUERY_LIMIT}(40)以内(Free の 1 呼び出し 50 クエリの手前。使用量 1 + 補完待ち 1 + 書き込みの batch 2 文 + R2 の get)。
  * R2 の Class B が柵に達していたら止めて、翌月 1 日の 00:05 UTC に再開する(`waiting-r2` 相当)。get の失敗・例外は退避の間隔で再試行し、連続 {@link VERIFY_MAX_ATTEMPTS} 回で止まる
  * (次の `getReport` が、最後の失敗から 10 分以上経っていれば張り直す)。保留(R2 に詳細が無い行を、初めて見てから {@link VERIFY_MISSING_GRACE_MS} 待つ)は失敗に数えない。
- * カーソル(kv の `cursor`)は「これ以下の id はすべて補完済み」を表し、補完待ちの確認が全件の走査にならないようにする(解決した行の先頭からの連続した範囲まで進める)。
+ * カーソル(kv の `cursor2`。Issue #389 で `cursor` から替えた)は「これ以下の id はすべて補完済み(発走時刻も条件も)」を表し、補完待ちの確認が全件の走査にならないようにする(解決した行の先頭からの連続した範囲まで進める)。
+ * **補完は発走時刻と条件(芝ダ・距離・馬場・グレード・レース名。migration 0023)を同じ get で決める**。解決した行は必ず条件の結果を持つ(store が返さなかった行・猶予切れの行は「読めなかった」)。
  */
 
 import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG, type VerifyReport, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
@@ -44,7 +45,7 @@ import { buildVerifySource, countStartTimeGaps } from "./verify-read";
 import { computePromptVersionSummaries, type PromptVersionSummary } from "./verify-versions";
 import { computeCloseComparison, type CloseComparison } from "./verify-close";
 import { computeVerifyBreakdowns, type BreakdownSection } from "./verify-breakdown";
-import type { PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "./verify-store";
+import type { ConditionResolution, PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "./verify-store";
 
 /** 集計の有効期間(透かしが同じ間)。既存の行の更新〈`race_results` の UPSERT〉は透かしに出ないため、この時間で拾う。 */
 export const VERIFY_TTL_MS = 60 * 60_000;
@@ -72,6 +73,11 @@ export const VERIFY_BACKOFF_MS: readonly number[] = [30_000, 120_000, 600_000, 1
  * 分析日時では判定できない(移行した分析の分析日時は exe の古い日時)ので、DO が初めて見た時刻(kv の `missingSince`)から数える。'?' は書くと直らないため、長めに待つ。
  */
 export const VERIFY_MISSING_GRACE_MS = 30 * 60_000;
+/**
+ * 補完の「ここまで済み」のカーソルを持つ kv のキー。**Issue #389 で `cursor` から替えた**: 旧いキーは「発走時刻が確定済みの最大 id」で、公開済みの環境では最大 id まで進んでいる。
+ * 候補に「条件(`cond_read`)が未確認」が加わったので、旧いキーを引き継ぐと発走時刻が済みの既存分が飛ばされる。新しいキーは 0 から数え直す(旧いキーは読まず・書かない)。
+ */
+const CURSOR_KEY = "cursor2";
 /** 失敗で止まったあと、`getReport` が張り直すまでに空ける時間。 */
 const VERIFY_REARM_AFTER_MS = 10 * 60_000;
 /** R2 の柵から再開する時刻を、月の変わり目からずらす分。 */
@@ -107,7 +113,8 @@ export interface VerifyStorePort {
   listPending(cursor: number, limit: number): Promise<PendingPage>;
   readUsage(): Promise<R2Usage>;
   resolveStartTimes(rows: readonly PendingRow[]): Promise<ResolveOutcome>;
-  commitStartTimes(resolved: readonly StartTimeResolution[], gets: number): Promise<number>;
+  /** `conditions` は `resolved` の行ごとの条件の結果(Issue #389)。 */
+  commitStartTimes(resolved: readonly StartTimeResolution[], gets: number, conditions?: readonly ConditionResolution[]): Promise<number>;
   readAll(): Promise<ReadAllResult>;
 }
 
@@ -296,7 +303,7 @@ export class VerifyCore {
     const watermark = await store.readWatermark();
 
     // 補完待ちの確認(カーソルより後の NULL の行だけを見る)。
-    const cursor = kv.get<number>("cursor") ?? 0;
+    const cursor = kv.get<number>(CURSOR_KEY) ?? 0;
     const page = await store.listPending(cursor, 1);
     const cache = this.readCache();
     if (page.total > 0) {
@@ -307,7 +314,7 @@ export class VerifyCore {
       return { status: "preparing", remaining: page.total, blocked: backfill.blocked, resumeAt: backfill.resumeAt === null ? null : new Date(backfill.resumeAt).toISOString() };
     }
     if (watermark.analyses !== null && watermark.analyses > cursor) {
-      kv.put("cursor", watermark.analyses);
+      kv.put(CURSOR_KEY, watermark.analyses);
     }
 
     // 透かしが同じなら、データは変わっていない=集計は最新(`stale` にしない)。TTL 切れ・「更新」で再計算を試みるが、柵に拒まれても古い集計とは言わない
@@ -405,7 +412,8 @@ export class VerifyCore {
     const read = await store.readAll();
     const t1 = now();
     // 確認と読みの間に保存された分析(start_time が NULL)が混ざっていたら、集計しない(旧 exe とずれうる)。
-    const unchecked = read.rows.analyses.filter((a) => a.startTime === null).length;
+    // 発走時刻が NULL、または条件の印(cond_read。Issue #389)が NULL の行。条件の印を持たない行(undefined。既存の偽物の固定データ)は確認済みとして扱う。
+    const unchecked = read.rows.analyses.filter((a) => a.startTime === null || a.condRead === null).length;
     if (unchecked > 0) {
       return { preparing: unchecked };
     }
@@ -523,7 +531,7 @@ export class VerifyCore {
         await setAlarm(resumeAt);
         return;
       }
-      const cursor = kv.get<number>("cursor") ?? 0;
+      const cursor = kv.get<number>(CURSOR_KEY) ?? 0;
       const limit = this.tickQueryLimit - TICK_OVERHEAD_QUERIES;
       const page = await store.listPending(cursor, limit);
       if (page.rows.length === 0) {
@@ -545,7 +553,11 @@ export class VerifyCore {
           deferred.push(id);
         }
       }
-      await store.commitStartTimes(resolved, outcome.gets);
+      // 条件(Issue #389): 解決した行は**必ず**条件の結果を持たせる(store が返さなかった行・猶予切れで '?' にした行は「読めなかった」)。
+      // 条件の印(cond_read)が NULL のまま残ると、集計が永久に待たされる。保留(deferred)・失敗(failed)の行は resolved に入らないので、条件も渡さない。
+      const factsById = new Map((outcome.conditions ?? []).map((c) => [c.id, c.facts] as const));
+      const conditions: ConditionResolution[] = resolved.map((r) => ({ id: r.id, facts: factsById.get(r.id) ?? null }));
+      await store.commitStartTimes(resolved, outcome.gets, conditions);
       kv.put("missingSince", since); // 書き込みが成功してから記録を更新する(失敗して再試行しても、初回観測時刻を失わない)
 
       // カーソル: 先頭から連続して解決できた行の末尾まで(保留・失敗の行の手前で止める)。
@@ -555,7 +567,7 @@ export class VerifyCore {
         if (!resolvedIds.has(row.id)) break;
         newCursor = row.id;
       }
-      if (newCursor !== cursor) kv.put("cursor", newCursor);
+      if (newCursor !== cursor) kv.put(CURSOR_KEY, newCursor);
 
       if (outcome.failed.length > 0) {
         await this.recordFailure(state, t);
