@@ -24,6 +24,14 @@ describe("extractRaceFacts: 正常な値", () => {
   });
 });
 
+describe("extractRaceFacts: 障害(Issue #389 の【記録】回収)", () => {
+  it("courseType の「障」は想定内の値として残す(障害レースを『不明』にしない。距離・グレードも生のまま)", () => {
+    expect(extractRaceFacts({ race: { raceName: "中山グランドJ", courseType: "障", distance: 4250, trackCondition: "良", grade: "J・G1" } })).toEqual({
+      courseType: "障", distance: 4250, trackCondition: "良", grade: "J・G1", raceName: "中山グランドJ",
+    });
+  });
+});
+
 describe("extractRaceFacts: スナップショット全体が壊れている(全項目 null)", () => {
   const cases: ReadonlyArray<readonly [string, unknown]> = [
     ["スナップショットが null", null],

@@ -8,6 +8,7 @@ import { VerifyCore, type VerifyKv, type VerifyResponse, type VerifyStorePort } 
 import { buildVerifySource, type VerifyAnalysisRow, type VerifyReadRows } from "../src/verify-read";
 import { computePromptVersionSummaries } from "../src/verify-versions";
 import { computeVerifyBreakdowns } from "../src/verify-breakdown";
+import { buildConditionFactsIndex } from "../src/verify-race-conditions";
 import { CLOSE_COMPARISON_DESCRIPTION } from "../src/verify-close";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
@@ -575,7 +576,7 @@ describe("Issue #384: breakdown(人気帯ごとの期待値と回収率の節)�
   const bad: ReadonlyArray<readonly [string, (b: any) => void]> = [
     ["配列でない", (b) => { b.splice(0, b.length); b.push(1); }],
     ["節が 0 個", (b) => { b.length = 0; }],
-    ["節が 9 個(上限 8)", (b) => { while (b.length < 9) b.push({ ...b[0] }); }],
+    ["節が 17 個(上限 16)", (b) => { while (b.length < 17) b.push({ ...b[0] }); }],
     ["見出しが無い", (b) => { delete b[0].heading; }],
     ["見出しが長すぎる(100 字超)", (b) => { b[0].heading = "あ".repeat(101); }],
     ["説明が文字列でない", (b) => { b[0].description = 1; }],
@@ -622,6 +623,45 @@ describe("Issue #384: breakdown(人気帯ごとの期待値と回収率の節)�
     const sections = computeVerifyBreakdowns(buildVerifySource(rows), rows.bets).all!.sections;
     const venue = sections.find((s) => s.heading.endsWith("(競馬場)"))!;
     expect(venue.rows).toHaveLength(1 + codes.length); // 前提: 全体 + 24 場(まとめた行なし)。上限の近くまで行がある
+    const body = ready();
+    body["breakdown"] = JSON.parse(JSON.stringify(sections));
+    const outcome = parseVerifyResponse(body);
+    expect(outcome?.kind === "ready" ? outcome.breakdown : null).toEqual(JSON.parse(JSON.stringify(sections)));
+  });
+
+  it("★節の数の上限(Issue #389): ちょうど 16 節は読め、17 節は null(内訳なし)に落ちる。応答全体は捨てない", () => {
+    const section = valid()[0]!;
+    for (const [count, readable] of [[16, true], [17, false]] as const) {
+      const body = ready();
+      body["breakdown"] = Array.from({ length: count }, () => ({ ...section }));
+      const outcome = parseVerifyResponse(body);
+      expect(outcome).not.toBeNull();
+      expect(outcome?.kind === "ready" ? (outcome.breakdown === null ? null : outcome.breakdown.length) : -1, `${count} 節`).toBe(readable ? count : null);
+    }
+  });
+
+  it("★契約(Issue #389): 全体の区分の 11 節(人気帯 5 + 条件別 6)を、サーバの出力のままクライアントが読める(長さ・行数の上限に収まる)", () => {
+    const specs: Array<[string, boolean, string, number, string, string | null, string]> = [
+      ["202605010501", true, "芝", 1600, "良", null, "3歳以上1勝クラス"],
+      ["202605010502", false, "ダ", 1200, "稍", null, "3歳未勝利"],
+      ["202605010503", false, "芝", 2400, "重", "G1", "有馬記念"],
+      ["202644010501", true, "ダ", 1870, "不", null, "ランチタイム(C3)"],
+    ];
+    const analyses: VerifyAnalysisRow[] = specs.map(([raceId, , courseType, distance, trackCondition, grade, raceName], i) => ({
+      id: i + 1, raceId, analyzedAt: "2026-07-05T05:00:00.000Z", evEstimated: 0, promptVersion: "v1", additionalInstruction: null, kaisaiDate: "20260705",
+      model: null, rawResponse: null, raceSnapshotJson: null, historyCutoffDate: "20260705", promptLookaheadGuarded: 1, startTime: "15:45",
+      courseType, distance, trackCondition, grade, raceName, condRead: 1,
+    }));
+    const rows: VerifyReadRows = {
+      analyses,
+      horses: analyses.map((a) => ({ analysisId: a.id, umaban: 1, prior: 0.5, adjusted_prob: 0.5, place_odds_min: 2, ev: 1.2, is_positive: 1, contributions_json: null, mark: "◎", reason: null, highlights_json: null, concerns_json: null })),
+      allocationMeta: analyses.map((a) => ({ analysisId: a.id, route: "place-only", skipReasonCode: null })),
+      bets: analyses.map((a) => ({ analysisId: a.id, betType: "place", comboKey: "01", stake: 100, odds: 2, ev: 1.2 })),
+      results: specs.map(([raceId, hit]) => ({ raceId, umaban: 1, finishPosition: hit ? 1 : 5, placePayout: hit ? 150 : null, winPayout: null })),
+      comboPayouts: [], comboImports: [],
+    };
+    const sections = computeVerifyBreakdowns(buildVerifySource(rows), rows.bets, buildConditionFactsIndex(rows.analyses)).all!.sections;
+    expect(sections).toHaveLength(11); // 前提: 11 節(旧い上限 8 を超える。上限 16 までは #389-c でクラスを足す余地)
     const body = ready();
     body["breakdown"] = JSON.parse(JSON.stringify(sections));
     const outcome = parseVerifyResponse(body);

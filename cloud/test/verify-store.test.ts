@@ -329,6 +329,18 @@ describe("listPending(Issue #389): 発走時刻が済みでも、条件(cond_rea
   });
 });
 
+describe("listPending(Issue #389 の【記録】回収): 『読めなかった』(cond_read=0)は済み", () => {
+  it("★発走時刻が済み('09:00')で cond_read=0 の行は候補に出ない(読めなかった行を再候補にして永久に補完待ちにしない)。cond_read が NULL の行は出る", async () => {
+    for (let i = 1; i <= 3; i += 1) await analyses().saveAnalysis(mkRecord(i));
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00', cond_read = 0 WHERE id = 1").run(); // 発走時刻も条件も済み(条件は読めなかった)
+    await local.db.prepare("UPDATE analyses SET start_time = '09:00' WHERE id = 2").run(); // 前提の対照: 条件が未確認
+    await local.db.prepare("UPDATE analyses SET start_time = '?', cond_read = 0 WHERE id = 3").run(); // 発走時刻の印 '?' も済み
+    const page = await verifyStore().listPending(0, 10);
+    expect(page.rows.map((r) => r.id)).toEqual([2]);
+    expect(page.total).toBe(1);
+  });
+});
+
 describe("resolveStartTimes(Issue #389): 同じ get から条件も取り出す", () => {
   it("1 行につき get は 1 回(発走時刻だけのときと同じ)。resolved は従来の形のまま、conditions に同じ id の事実が入る", async () => {
     await analyses().saveAnalysis(record(1));
@@ -421,6 +433,15 @@ describe("commitStartTimes(Issue #389): 発走時刻と条件を 1 文で書く"
     await local.db.prepare("UPDATE analyses SET cond_read = 0 WHERE id = 1").run();
     await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: SNAP_FACTS }]);
     expect(await condRowOf(1)).toEqual({ start_time: "15:45", course_type: null, distance: null, track_condition: null, grade: null, race_name: null, cond_read: 0 });
+  });
+
+  it("★発走時刻の印 '?'(確認できなかった)の行に条件を書いても、'?' は保たれる(NULL でない発走時刻は上書きしない)", async () => {
+    await analyses().saveAnalysis(record(1));
+    await local.db.prepare("UPDATE analyses SET start_time = '?' WHERE id = 1").run(); // 前提: 条件は未確認(cond_read NULL)
+    await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: SNAP_FACTS }]);
+    const row = await condRowOf(1);
+    expect(row.start_time).toBe("?");
+    expect(row).toMatchObject({ course_type: "芝", distance: 1600, cond_read: 1 }); // 条件は書かれる(空振りでない)
   });
 
   it("両方済みの行は何も変えない", async () => {
