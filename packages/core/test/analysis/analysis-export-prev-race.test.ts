@@ -7,8 +7,6 @@
  *  - `buildRaceSnapshot` が受け取るのは、分析パイプラインが自レース・基準日以降の走を除いた後の `RaceData` なので、`results[0]` が前走になる。
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildRaceSnapshot } from "../../src/analysis/analysis-export.js";
 import type { RaceData } from "../../src/pipeline.js";
@@ -17,10 +15,7 @@ import { parseRaceId } from "../../src/scraper/ids.js";
 import type { PrevRaceCondition } from "../../src/scraper/parse-newspaper.js";
 import { scrapeRace } from "../../src/scraper/scrape-race.js";
 import { excludeOwnRaceResults } from "../../src/scorer/snapshot-filter.js";
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 const TABLE: Readonly<Record<string, PrevRaceCondition>> = {
   "202607020506": { weightType: "定量", condition: "(混)[指]", filliesOnly: false },

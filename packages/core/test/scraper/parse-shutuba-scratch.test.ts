@@ -1,10 +1,9 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   parseShutuba,
   ShutubaParseError,
 } from "../../src/scraper/parse-shutuba.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #154: 出馬表に残った取消・除外の馬を `parseShutuba` が読み取ること。
@@ -16,11 +15,6 @@ import {
  *  - 地方(nar.netkeiba.com)の出馬表の印(取消の例を持つ地方フィクスチャが無い)
  *  - 「除外」の文言(実物なし)
  */
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 /** 合成用の最小行。`rowClass` と `cancelCell` で取消・除外の印を差し替える。 */
 function buildRow(opts: {

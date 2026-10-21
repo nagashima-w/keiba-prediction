@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { toResultEntries } from "../../src/ev/result-import.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #269: 枠番の記録(`RaceResultEntry.wakuban`)。
@@ -11,10 +10,6 @@ import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
  * 枠連の買い目の返還(取消・除外で枠の出走馬が尽きる等)は、馬番ではなく枠番で決まる。結果ページのパーサは各馬の枠番を
  * 読んでいるが、`toResultEntries` が落としていたので保存されていなかった。取消・除外の馬の行にも枠番がある。
  */
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
 
 describe("toResultEntries: 枠番(Issue #269)", () => {
   it("実フィクスチャ(中央16頭立て・取消あり): 全馬の枠番を、パース結果のとおりに詰める(取消の6番は枠3)", () => {

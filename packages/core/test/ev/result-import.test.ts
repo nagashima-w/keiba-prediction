@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import { AnalysisStore } from "../support/analysis-store.js";
@@ -11,6 +9,7 @@ import {
 } from "../../src/ev/result-import.js";
 import { parseRaceId } from "../../src/scraper/ids.js";
 import { parseRaceResult, RaceResultParseError } from "../../src/scraper/parse-race-result.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #207(#182-A)AC-A2: 結果の取込フロー(取得 → パース → 保存 → サマリ)の core への移設。
@@ -20,10 +19,6 @@ import { parseRaceResult, RaceResultParseError } from "../../src/scraper/parse-r
  * ここで固定するのは、移設で変わった唯一の契約「`saveResult` の依存は同期でも非同期でもよい(await する)」と、移設後のコードが core 単体で動くこと。
  * 変換(toResultEntries)・素通し(comboPayouts)の網羅は `result-import-flow.test.ts`(旧 app 側のテスト)が担う。
  */
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
 
 const RACE_ID = parseRaceId("202603020211");
 const HTML = loadFixture("result_202603020211.html");

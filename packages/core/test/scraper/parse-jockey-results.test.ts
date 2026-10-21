@@ -1,15 +1,9 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   JockeyResultsParseError,
   parseJockeyResults,
 } from "../../src/scraper/parse-jockey-results.js";
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** 年度別成績の表を最小限の形で組み立てる(ヘッダの列名で列を解決することを確かめるための合成入力)。 */
 function table(headerCells: string, rows: string[]): string {

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import type { RaceIdVenueKind } from "../../src/scraper/ids.js";
@@ -11,6 +9,7 @@ import {
   type RaceFetcher,
 } from "../../src/scraper/scrape-race.js";
 import type { StoredTrainerResults, TrainerResultsStore } from "../../src/scraper/trainer-results-store.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #354: 調教師の年度別成績(`db.netkeiba.com/trainer/result.html?id=…`。表の形は騎手と同じで `parseJockeyResults` が読む)を、
@@ -22,11 +21,6 @@ import type { StoredTrainerResults, TrainerResultsStore } from "../../src/scrape
  *  - 地方のレースは対象外(取得せず、保存先にも触れない。検証したのは中央だけ)。
  *  - fetcher の呼び出しの上限(`jockeyRequestLimit`。既定 40)は騎手と共有する(Free の 50 本に対する保険を増やさない)。
  */
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 class RecordingFetcher implements RaceFetcher {
   readonly calls: Array<{ url: string; options?: CachedFetchTextOptions }> = [];

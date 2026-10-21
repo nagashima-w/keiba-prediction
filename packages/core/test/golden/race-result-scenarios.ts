@@ -11,14 +11,13 @@
  * (cloud 側が JSON から読んだ入力と、完全に同じ値にするため。undefined のキーは消える)。
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { AnalysisStore } from "../support/analysis-store.js";
 import type { RaceComboPayoutsSaveInput, RaceResultDetail, RaceResultEntry } from "../../src/ev/analysis-store-types.js";
 import { toResultEntries } from "../../src/ev/result-import.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
 import type { CourseType } from "../../src/scraper/types.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /** 1回の saveResult の入力。 */
 export interface ContractStep {
@@ -75,10 +74,6 @@ export interface ContractCase {
 
 export interface RaceResultContract {
   readonly cases: ContractCase[];
-}
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
 }
 
 /**

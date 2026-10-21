@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   AnalysisStore,
@@ -16,6 +14,7 @@ import {
   computeVerifyReportByPromptVersion,
   DEFAULT_VERIFY_CONFIG,
 } from "../../src/ev/verify.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /** 分析馬レコードを最小構成で組み立てる(prior=adjustedProb はPhase3まで同値)。 */
 function horse(
@@ -3023,14 +3022,6 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
   });
 
   describe("枠連(bracketQuinella)の回収率集計(Issue #145・#26-F)", () => {
-    /** 実フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
-    function loadFixture(name: string): string {
-      return readFileSync(
-        fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)),
-        "utf-8",
-      );
-    }
-
     /**
      * 実フィクスチャを本物のパーサ(parseRaceResult)に通し、その結果を本物のストア
      * (saveResult)へ保存する。買い目側のキーは本物のキー生成(buildAllocationBetComboKey)で作る

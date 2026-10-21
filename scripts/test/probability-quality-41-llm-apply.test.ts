@@ -16,6 +16,7 @@ import {
 import { driveRunAnalysis, type DriveInput } from "../probability-quality-41-llm/drive.js";
 import { applyRace, type ApplyInput } from "../probability-quality-41-llm/apply.js";
 import { sha256Hex } from "../probability-quality-41-llm/records.js";
+import { loadFixture } from "../../packages/core/test/support/fixtures.js";
 
 /**
  * 段階3の適用(`applyRace`)と、重賞過去結果の記録・再生フェッチャ(`createRecordedGradeFetcher`)を
@@ -26,10 +27,6 @@ import { sha256Hex } from "../probability-quality-41-llm/records.js";
 function loadJson<T>(rel: string): T {
   return JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf-8")) as T;
 }
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
-
 const RAW = loadJson<RaceData>("../../docs/investigations/combo-odds-real-fetch/nar-on.json");
 const RESULT_HTML = loadFixture("nar_result_202654071210.html");
 const RACE_ID = "202654071210";

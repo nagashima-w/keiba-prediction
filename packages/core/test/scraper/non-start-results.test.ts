@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import { parseRaceId } from "../../src/scraper/ids.js";
@@ -10,6 +8,7 @@ import {
 } from "../../src/scraper/parse-horse-results.js";
 import { scrapeRace, type RaceFetcher } from "../../src/scraper/scrape-race.js";
 import type { FinishPosition, HorseRaceResult } from "../../src/scraper/types.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #261 — 出走しなかった行(除外・取消)を戦績から外す。
@@ -22,11 +21,6 @@ import type { FinishPosition, HorseRaceResult } from "../../src/scraper/types.js
  *
  * 観測したのは「除」だけで、「取」は未観測。そのため先頭一致(除・除外・取・取消)で受ける。
  */
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 const NON_START_FIXTURE = loadFixture("horse_results_2024103584.json");
 /** 実走が23行ある実フィクスチャ(除外の行を足す土台)。 */

@@ -5,19 +5,12 @@
  * grade文字列の判定はテーブル駆動で境界値(全角・空文字・undefined等)を固定する。
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { filterJpnOnlyEntries, isJpnGrade } from "../../src/scraper/jpn-grade.js";
 import { parseRaceList } from "../../src/scraper/parse-race-list.js";
 import type { RaceListEntry } from "../../src/scraper/types.js";
-
-/** フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 describe("isJpnGrade(交流重賞Jpn1/2/3判定)", () => {
   const cases: Array<[string | undefined, boolean]> = [

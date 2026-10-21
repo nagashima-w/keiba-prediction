@@ -14,8 +14,6 @@
  *  - `noLlmNoAllocation`: LLM なし・配分なし・開催日あり(Issue #400 R-10b までは「開催日なし〈当日日付で近似する経路〉」の `noLlmNoAllocationNoDate`)
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import {
   collectGradeWinnerTrend,
@@ -37,17 +35,11 @@ import {
   runAnalysis,
   type AnalysisPipelineDeps,
 } from "../../src/analysis/analysis-pipeline.js";
+import { loadFixture } from "../support/fixtures.js";
 
 export const RACE_ID = parseRaceId("202603020211");
 export const KAISAI_DATE = parseKaisaiDate("20260628");
 export const FIXED_NOW = (): Date => new Date("2026-06-28T12:00:00.000Z");
-
-function loadFixture(name: string): string {
-  return readFileSync(
-    fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)),
-    "utf-8",
-  );
-}
 
 /** 戦績フィクスチャを馬ごとに変える(馬ID → フィクスチャ)。割り当ての無い馬は共通のものを返す。 */
 const RESULTS_BY_HORSE: Record<string, string> = {

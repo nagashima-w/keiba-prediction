@@ -15,6 +15,7 @@ import { runAnalysis } from "../../packages/core/src/analysis/analysis-pipeline.
 import { assignCaseIds, CASE_ID_SEED } from "../probability-quality-41-llm/case-ids.js";
 import { buildRaceResultDetail, driveRunAnalysis, type DriveInput } from "../probability-quality-41-llm/drive.js";
 import { FileLlmClient } from "../probability-quality-41-llm/file-llm-client.js";
+import { loadFixture } from "../../packages/core/test/support/fixtures.js";
 
 /**
  * #156(#41-B)段階1・3 の共通部(`driveRunAnalysis`)・ファイル版 LLM クライアント・匿名ケース ID を、
@@ -27,10 +28,6 @@ function loadRaceData(name: string): RaceData {
   const url = new URL(`../../docs/investigations/combo-odds-real-fetch/${name}`, import.meta.url);
   return JSON.parse(readFileSync(fileURLToPath(url), "utf-8")) as RaceData;
 }
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
-
 const CENTRAL = {
   raceId: "202603020211",
   kaisaiDate: "20260628",

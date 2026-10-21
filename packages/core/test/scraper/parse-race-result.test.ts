@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   parseRaceFieldSize,
@@ -8,12 +6,7 @@ import {
   RaceResultParseError,
 } from "../../src/scraper/parse-race-result.js";
 import type { RaceResult } from "../../src/scraper/types.js";
-
-/** フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * 全着順テーブル(#All_Result_Table)の1行を組み立てる。

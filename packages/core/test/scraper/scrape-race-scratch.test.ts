@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import { parseRaceId } from "../../src/scraper/ids.js";
 import { parseShutuba } from "../../src/scraper/parse-shutuba.js";
 import { scrapeRace, type RaceFetcher } from "../../src/scraper/scrape-race.js";
 import { narTrifectaOddsAxisUrl, narTrioOddsAxisUrl } from "../../src/scraper/urls.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #154: 出馬表に残った取消・除外の馬を `scrapeRace` が出走馬から除くこと。
@@ -17,11 +16,6 @@ import { narTrifectaOddsAxisUrl, narTrioOddsAxisUrl } from "../../src/scraper/ur
  * 実物は中央 202606040901(発走後に取得)の1本だけ。発走前の印・地方の印・「除外」の文言は
  * 未観測で、同じ雛形・同じ印と見込んだ合成HTMLで検証している(各テスト名に「合成」と明記する)。
  */
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 class RecordingFetcher implements RaceFetcher {
   readonly calls: Array<{ url: string; options?: CachedFetchTextOptions }> = [];

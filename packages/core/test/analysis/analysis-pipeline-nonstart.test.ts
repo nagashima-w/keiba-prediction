@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import {
   buildPrompt,
   parseHorseResults,
@@ -13,6 +11,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { runAnalysis, type AnalysisPipelineDeps } from "../../src/analysis/analysis-pipeline.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * analysis-pipeline-nonstart.test.ts — Issue #261。
@@ -24,11 +23,6 @@ import { runAnalysis, type AnalysisPipelineDeps } from "../../src/analysis/analy
  * 分析日だけを 2026-10-11 に置く(除外の行は 2026/10/04 なので、分析日が 6/28 のままだと #39 の
  * 日付絞りで消えて空振りになる)。
  */
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 const NON_START_FIXTURE = loadFixture("horse_results_2024103584.json");
 const PLAIN_RUNS_FIXTURE = loadFixture("horse_results_2021105857.json");

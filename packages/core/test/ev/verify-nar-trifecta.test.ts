@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { AnalysisStore, type AnalysisAllocationMetaRecord, type AnalysisHorseRecord } from "../support/analysis-store.js";
 import type { VerifyDataSource } from "../../src/ev/analysis-store-types.js";
@@ -8,6 +6,7 @@ import { toResultEntries } from "../../src/ev/result-import.js";
 import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../src/ev/verify.js";
 import { parseNarComboOdds } from "../../src/scraper/parse-nar-combo-odds.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #283: 地方の三連単の払戻・検証(回収率)が、中央と同じ経路で正しく動くことの通しテスト。
@@ -18,10 +17,6 @@ import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
  * 買い目のキーは着順どおりの 6 桁(`buildAllocationBetComboKey`)。払戻の取り込み(`parseRaceResult` → `toResultEntries`)から
  * 保存・検証(`computeVerifyReport`。`venue: "nar"`)までを、モックではなく実際の関数で通す。
  */
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
 
 const RACE = "202654071210";
 

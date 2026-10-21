@@ -18,15 +18,8 @@
  * `ComboBetType`/`AllocationBetType`のメンバー名を決めるものではない
  * (docs/trifecta-odds-investigation.md §0参照。型の設計は#128のスコープ)。
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-
-/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(既存テストと同じ解決方法)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** 1〜nの馬番を2桁ゼロ埋めした文字列。 */
 function pad2(n: number): string {

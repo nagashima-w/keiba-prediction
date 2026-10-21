@@ -19,16 +19,9 @@
  * これをそのまま使うと着順情報が失われる。本ファイルは`expectedOrderedPairKeys`(順列 P(n,2))を
  * 独立した関数として持ち、`expectedPairKeys`と同じヘルパに引数で分岐させる形にしていない。
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import * as cheerio from "cheerio";
 import { describe, expect, it } from "vitest";
-
-/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(既存テストと同じ解決方法)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** 1〜nの馬番を2桁ゼロ埋めした文字列。 */
 function pad2(n: number): string {

@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SCORER_CONFIG } from "../../src/scorer/config.js";
 import { parseRaceList } from "../../src/scraper/parse-race-list.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * 騎手の複勝率の中立(`baseScore.jockeyNeutralPlaceRate`)の既定値の根拠を再現する(Issue #226)。
@@ -16,11 +15,6 @@ import { parseRaceList } from "../../src/scraper/parse-race-list.js";
  * フィクスチャは**ファイル名を固定**している(glob にしない。レース一覧のフィクスチャが増えて計算結果が動いても、
  * 既定値の根拠が黙って変わらないように)。
  */
-
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
 
 /** Σ min(3,頭数) / Σ 頭数 と、その内訳(検算用)。 */
 function meanPlaceRate(files: readonly string[]): { rate: number; races: number; heads: number } {

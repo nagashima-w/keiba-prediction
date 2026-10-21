@@ -6,8 +6,6 @@
  * (受け入れ条件1・12)。**その後 Issue #34 で、人気(ninki)の数値化のみ `scraper/ninki.ts`
  * の共有実装に統合された(本ファイルのテストケースは無改変)。**
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
@@ -17,12 +15,7 @@ import {
   parseComboOdds,
   type ComboOddsParseResult,
 } from "../../src/scraper/parse-combo-odds.js";
-
-/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(既存テストと同じ解決方法)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** 「available」状態であることを前提として先に固定し、oddsマップを取り出す(空振り防止)。 */
 function expectAvailable(result: ComboOddsParseResult): ReadonlyMap<string, { oddsMin: number | null; oddsMax: number | null; ninki: number | null }> {

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHorseId } from "../../src/scraper/ids.js";
 import {
@@ -7,12 +5,7 @@ import {
   ShutubaParseError,
 } from "../../src/scraper/parse-shutuba.js";
 import type { Shutuba } from "../../src/scraper/types.js";
-
-/** フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * 出馬表の1行(tr.HorseList)を組み立てる。

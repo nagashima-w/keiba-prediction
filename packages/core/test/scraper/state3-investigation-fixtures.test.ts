@@ -14,15 +14,8 @@
  * 事後保存した。本ファイルは、ドキュメントに記録した「17:50」「17:10」がこれらのフィクスチャ
  * から再現できることを固定する。
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-
-/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(既存テストと同じ解決方法)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 describe("中央race_list_sub(fixtures/race_list_sub_20260808.html)の実測値の固定(§11.2)", () => {
   it("前提固定(空振り防止): race_id=202604020511の行が実際に含まれること", () => {

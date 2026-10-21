@@ -1,17 +1,10 @@
 import { deflateSync } from "node:zlib";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   GradeWinnerParseError,
   parseGradeWinnerResponse,
 } from "../../src/scraper/parse-grade-winner.js";
-
-/** フィクスチャ(JSON文字列)を読み込む(実ネットワークは使わない)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /** テスト用: 任意のJS値をAPIと同じ base64(zlib deflate) 形式にエンコードする。 */
 function encodePayload(value: unknown): string {

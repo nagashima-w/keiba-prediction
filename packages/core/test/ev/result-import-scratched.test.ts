@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { toResultEntries } from "../../src/ev/result-import.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * Issue #72: 取消・除外の記録(`RaceResultEntry.scratched`)。
@@ -12,10 +11,6 @@ import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
  * `finishPosition: null` に潰すので、そこだけからは取消・除外と中止・失格を区別できない。その区別を
  * `scratched` として残す。語彙の定義は戦績側の `isNonStartResult`(#261)と同じものを使う。
  */
-
-function loadFixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)), "utf-8");
-}
 
 // 実物: 中山1R(2026-09-27)。16頭中 6番ニシノドリーマーが出走取消。結果ページの着順欄は「取消」(tr.Torikeshi)。
 // 取消馬の行も結果表に残り、パーサは { kind: "非数値", text: "取消" } を返す。

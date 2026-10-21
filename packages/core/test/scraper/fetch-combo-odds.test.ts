@@ -5,8 +5,6 @@
  * `OddsSnapshot`/`scrapeRace`配線は第4段のスコープであり、本ファイルは触れない。
  * 実ネットワークは使わない。フェイクフェッチャ + 実フィクスチャ/最小限の合成HTMLで検証する。
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import { buildComboOddsKey } from "../../src/scraper/combo-odds-key.js";
@@ -33,12 +31,7 @@ import {
   trifectaOddsApiUrl,
   trioOddsApiUrl,
 } from "../../src/scraper/urls.js";
-
-/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(既存テストと同じ解決方法)。 */
-function loadFixture(name: string): string {
-  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
-  return readFileSync(fileURLToPath(url), "utf-8");
-}
+import { loadFixture } from "../support/fixtures.js";
 
 /**
  * 最小限の合成NAR3連複オッズHTML(検証対象の構造〈#odds_view_form・td.Oddsのid規約〉だけを持つ)。
