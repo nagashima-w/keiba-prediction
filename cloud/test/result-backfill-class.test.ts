@@ -280,6 +280,25 @@ describe("段階 3: 段階 1・2 が尽きたら、結果はあるがクラス�
     expect((await core.getStatus()).imported).toBe(0); // 取り込みの累計は段階 1 だけが数える
   });
 
+  it("★段階 3 の回収は、段階 1 の imported の累計を増やさない(段階 1 が 2 レース取り込んだあと、段階 3 が 3 レースを回収しても 2 のまま。Issue #433 変異 X2)", async () => {
+    const w = new World();
+    w.unimported = races("20261009", 2);
+    w.needClass = races("20261008", 3);
+    const { core } = make(w);
+    await core.runNextStep(); // 段階 1 の依頼
+    w.settleImported("20261009");
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep(); // 段階 1 を回収(imported = 2)→ 段階 3 を依頼
+    expect((await core.getStatus()).imported).toBe(2); // 対照: 累計が動く
+    expect(w.day("20261008").requests).toEqual([races("20261008", 3).map((r) => r.raceId)]); // 前提: 段階 3 を依頼した
+    w.settleImported("20261008");
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep(); // 段階 3 を回収(3 レース)
+    const status = await core.getStatus();
+    expect(status.raceClass.filled).toBe(3); // 前提: 段階 3 の回収が実際に起きた
+    expect(status.imported).toBe(2); // 段階 3 の 3 レースは数えない
+  });
+
   it("1 晩の上限は段階 1〜3 で共有する: 段階 1 の 100 レースのあと、段階 3 は残り 50 レースだけ(30・20)", async () => {
     const w = new World();
     w.unimported = races("20261009", 100);
@@ -450,6 +469,22 @@ describe("段階 3 の状態(DO の SQLite の別の表 backfill_class)", () => 
     w.now += BACKFILL_POLL_MS;
     await core.runNextStep();
     expect(w.classListCalls.at(-1)!.exclude).toEqual([ids[0]!.raceId, ids[1]!.raceId]); // 今夜は全部試した
+  });
+
+  it("★段階 2 で諦めた(odds_abandoned)レースは、段階 3 の列挙から除く: D1 の列挙の対象に残っていても、除外 ID に入り、依頼しない(Issue #433 変異 C。件数側の除外は getStatus のテストが見るが、列挙側は別の SQL)", async () => {
+    const w = new World();
+    const abandoned = idOf("20261009", 1);
+    w.needClass = races("20261009", 3); // abandoned は D1 の列挙の対象に残っている
+    const { core, sql } = make(w);
+    // 前の晩に段階 2 が諦めた(last_night は今夜でない=「今夜試した」の除外には入らない)
+    sql.exec("INSERT INTO backfill_race (race_id, nights, defers, last_night, last_class, state) VALUES (?, 3, 0, '20261001', 'no-payout', 'odds_abandoned')", abandoned);
+    // 対照: fill_done は除外に入れない(クラスの補完が要るレース)
+    const filled = idOf("20261009", 2);
+    sql.exec("INSERT INTO backfill_race (race_id, nights, defers, last_night, last_class, state) VALUES (?, 0, 0, '20261001', 'imported', 'fill_done')", filled);
+    await core.runNextStep();
+    expect(w.classListCalls).toHaveLength(1); // 前提: 段階 3 が列挙された
+    expect(w.classListCalls[0]!.exclude).toEqual([abandoned]);
+    expect(w.day("20261009").requests).toEqual([[filled, idOf("20261009", 3)]]); // 諦めたレースは依頼せず、fill_done のレースは依頼する
   });
 
   it("再起動しても続きから: 段階 3 の飛行中の記録(kind)を新しいインスタンスが引き継ぎ、回収したレースを class_done にする", async () => {

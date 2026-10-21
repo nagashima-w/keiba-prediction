@@ -3,7 +3,7 @@
  * 出馬表の `race.raceClass`(`parseShutuba` の `readRaceClass` 指定)。
  *
  * 中央: クラスの span(新馬・未勝利・1〜3勝クラス・オープン)を、NFKC 正規化(全角数字を半角に)と空白除去のうえ**完全一致**で拾う。値は正準ラベル(半角数字)。
- * 地方: クラスは別の span ではなく「サラ系一般 C1」のように年齢条件の span の後半。**空白区切りの最後のトークンを生のまま**持つ(語彙は固定しない。軸の作り方は #389-c)。
+ * 地方: クラスは別の span ではなく「サラ系一般 C1」のように年齢条件の span の後半。**年齢条件の後ろの、空白を挟んでちょうど 1 つのトークンを生のまま**持つ(トークンが 2 つ以上の span は読まない)(語彙は固定しない。軸の作り方は #389-c)。
  * どちらも「読めない・曖昧」は undefined(推測しない)。
  */
 
@@ -91,6 +91,22 @@ describe("readRaceClass(地方。合成の span)", () => {
     ]) {
       expect(readRaceClass(spans, "nar"), JSON.stringify(spans)).toBeUndefined();
     }
+  });
+
+  it("区分のトークンが 2 つ以上の span は読まない(年齢条件の後ろがちょうど 1 トークンの span だけ読む。最後のトークンも先頭のトークンも拾わない。Issue #433〈#426-a のレビュー〉)", () => {
+    // 対照: トークンがちょうど 1 つなら読める。
+    expect(readRaceClass(["サラ系一般 C1"], "nar")).toBe("C1");
+    for (const spans of [
+      ["サラ系一般 C1 九"], // 最後のトークン(九)も先頭のトークン(C1)も拾わない
+      ["サラ系一般 九 C1"],
+      ["サラ系一般  C1  九 "], // 空白が連続していても同じ
+      ["サラ系４歳以上 A2B1 B1"],
+    ]) {
+      expect(readRaceClass(spans, "nar"), JSON.stringify(spans)).toBeUndefined();
+    }
+    // 複数トークンの span は読み飛ばすだけで、曖昧にもしない(別の span に区分が 1 トークンで出ていれば、それを読む)。
+    expect(readRaceClass(["サラ系一般 C1 九", "サラ系一般 C2"], "nar")).toBe("C2");
+    expect(readRaceClass(["サラ系一般 C1 九", "サラ系一般 C1"], "nar")).toBe("C1");
   });
 
   it("長すぎるトークン(20 文字超)は自由文の疑いとして読まない", () => {

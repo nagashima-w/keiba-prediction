@@ -154,6 +154,31 @@ describe("createRaceData: 取得は冪等で、完了したら再描画を要求
     expect(f.data.boardLoading(DATE)).toBe(false);
   });
 
+  it("listRowOf / refreshList は区分(中央/地方)ごとの一覧を別に扱う: 同じ race_id でも区分が違えば別の行を返し、地方の「更新」は中央の一覧を取らない(Issue #433)", async () => {
+    const f = fixture();
+    const NAR_RACES_URL = `/api/races?kaisai_date=${DATE}&venue=nar`;
+    const row = (name: string, venue: string) => ({ race_id: RACE_ID, venue_name: venue, race_number: 11, race_name: name, course_type: "芝", distance: 1800, entry_count: 16, grade: null, start_time: "15:45" });
+    f.replies.set(RACES_URL, () => ok({ ok: true, kaisai_date: DATE, venue: "central", races: [row("中央のレース", "福島")] }));
+    f.replies.set(NAR_RACES_URL, () => ok({ ok: true, kaisai_date: DATE, venue: "nar", races: [row("地方のレース", "高知")] }));
+    f.replies.set(BOARD_URL, () => ok({ ok: true, kaisai_date: DATE, races: [] }));
+    f.data.ensureList(DATE, "central");
+    await Promise.all(f.data.pending());
+    expect(f.data.listRowOf(DATE, "central", RACE_ID)?.raceName).toBe("中央のレース");
+    expect(f.data.listRowOf(DATE, "nar", RACE_ID), "地方の一覧はまだ取っていない(中央の行を返さない)").toBeUndefined();
+    expect(f.data.listRowOf(DATE, "central", "202603020299"), "一覧に無いレースは undefined").toBeUndefined();
+    f.setRoute({ venue: "nar" });
+    f.data.ensureList(DATE, "nar");
+    await Promise.all(f.data.pending());
+    expect(f.data.listRowOf(DATE, "nar", RACE_ID)?.raceName).toBe("地方のレース");
+    expect(f.data.listRowOf(DATE, "central", RACE_ID)?.raceName, "中央の行は地方の一覧に上書きされない").toBe("中央のレース");
+    // 地方の「更新」は地方の一覧だけを取り直す
+    const before = f.calls.length;
+    f.data.refreshList(DATE, "nar");
+    await Promise.all(f.data.pending());
+    expect(f.calls.slice(before).filter((u) => u.startsWith("/api/races"))).toEqual([NAR_RACES_URL]);
+    expect(f.data.listRowOf(DATE, "nar", RACE_ID)?.raceName).toBe("地方のレース");
+  });
+
   it("ensureRace: 状態と過去の分析を 1 本ずつ取り(一覧・板は取らない)、pending は取得中の間だけ待ち対象を返す", async () => {
     const f = fixture();
     f.replies.set(STATUS_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], prior: null }));

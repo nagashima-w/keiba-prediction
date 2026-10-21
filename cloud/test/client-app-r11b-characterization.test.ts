@@ -586,3 +586,53 @@ describe("R-11b 特性: 完了への遷移で取り直す", () => {
     expect(h.text()).not.toContain("順位を取得できませんでした");
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// 一覧の行・「更新」の venue の配線(Issue #433〈R-11b のレビューの記録〉)
+// ---------------------------------------------------------------------------------------------
+describe("R-11b 配線: レース画面の見出しは一覧の行から作り、一覧の「更新」は開いている区分(中央/地方)の一覧を取り直す", () => {
+  const NAR_RACE_ID = "202642062811";
+  const NAR_LIST_HASH = `#date=${DATE}&venue=nar`;
+  const NAR_RACE_HASH = `#date=${DATE}&venue=nar&race=${NAR_RACE_ID}`;
+  const NAR_RACES_URL = `/api/races?kaisai_date=${DATE}&venue=nar`;
+  /** 一覧の行(発走時刻・グレード入り)。prior・レース名だけの経路では作れない見出しになる。 */
+  const listRow = (raceId: string, venueName: string, name: string, grade: string | null, startTime: string) => ({
+    race_id: raceId,
+    venue_name: venueName,
+    race_number: Number(raceId.slice(-2)),
+    race_name: name,
+    course_type: "芝",
+    distance: 1800,
+    entry_count: 16,
+    grade,
+    start_time: startTime,
+  });
+  const racesBody = (venue: "central" | "nar", rows: unknown[]) => ({ ok: true, kaisai_date: DATE, venue, races: rows });
+
+  it("中央: 一覧を開いてからレース画面へ移ると、見出しに一覧の行の発走時刻とグレードが出る(prior・レース名だけでは出ない)", async () => {
+    const h = await started(LIST_HASH, (x) => replyAlways(x, `GET ${RACES_URL}`, () => ok(racesBody("central", [listRow(RACE_ID, "福島", "福島民報杯", "G3", "15:45"), listRow(OTHER_RACE_ID, "福島", "福島12R", null, "16:25")]))));
+    h.go(RACE_HASH);
+    await h.settle();
+    expect(h.count(RACES_URL), "前提: 一覧を取ったのは 1 回だけ(レース画面で取り直していない)").toBe(1);
+    expect(h.text()).toContain("福島11R 福島民報杯(G3) 15:45発走");
+  });
+
+  it("地方: 地方の一覧を開いてからレース画面へ移ると、地方の一覧の行から見出しを作る(中央の一覧の行を引かない)", async () => {
+    const h = await started(NAR_LIST_HASH, (x) => replyAlways(x, `GET ${NAR_RACES_URL}`, () => ok(racesBody("nar", [listRow(NAR_RACE_ID, "高知", "高知テスト賞", null, "20:10")]))));
+    expect(h.count(NAR_RACES_URL), "前提: 地方の一覧を取った").toBe(1);
+    h.go(NAR_RACE_HASH);
+    await h.settle();
+    expect(h.text()).toContain("高知11R 高知テスト賞 20:10発走");
+  });
+
+  it("地方の一覧の「更新」は地方の一覧を取り直し、中央の一覧は取らない", async () => {
+    const h = await started(NAR_LIST_HASH, (x) => replyAlways(x, `GET ${NAR_RACES_URL}`, () => ok(racesBody("nar", [listRow(NAR_RACE_ID, "高知", "高知テスト賞", null, "20:10")]))));
+    expect(h.count(NAR_RACES_URL)).toBe(1);
+    expect(h.gets().filter((u) => u.includes("venue=central")), "前提: 開く前から中央の一覧は取っていない").toEqual([]);
+    click(refreshButton(h));
+    await h.settle();
+    expect(h.count(NAR_RACES_URL), "「更新」は地方の一覧を取り直す").toBe(2);
+    expect(h.count(BOARD_URL), "板も取り直す").toBe(2);
+    expect(h.gets().filter((u) => u.includes("venue=central")), "地方の一覧の「更新」が中央の一覧を取らない").toEqual([]);
+  });
+});
