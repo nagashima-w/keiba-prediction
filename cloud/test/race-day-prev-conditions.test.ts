@@ -285,30 +285,35 @@ describe("w2: 前走条件の警告は画面向けの警告(result.warnings)に�
 });
 
 describe("w3: 読めない応答はキャッシュから消し、通信の失敗では何も消さない", () => {
-  it("対照: 読める応答ならキャッシュに残る", async () => {
-    const h = harness({ kind: "ok", body: GOOD_BODY });
-    await fetchStep(h, "pre_race");
-    expect(newspaperKeys(h)).toHaveLength(1);
-  });
-
-  for (const [name, body] of [
-    ["JSON でない", "<html>壊れた</html>"],
-    ["status が NG", JSON.stringify({ status: "NG", reason: "x", data: [] })],
-  ] as const) {
-    it(`読めない応答(${name}): 取得ステップは ok のまま、そのキャッシュの行が消える。次の取得ステップは(6 時間以内でも)取り直す`, async () => {
-      const h = harness({ kind: "ok", body });
-      await fetchStep(h, "pre_race");
-      expect(h.gate.posts).toHaveLength(1);
-      expect(newspaperKeys(h)).toEqual([]);
-      expect(h.warnings.some((w) => w.includes("前走条件"))).toBe(true);
-
-      h.gate.behavior = { kind: "ok", body: GOOD_BODY };
-      await computeStep(h, "pre_race");
-      h.clock.now += 60_000;
-      await fetchStep(h, "pre_race");
-      expect(h.gate.posts).toHaveLength(2);
+  for (const mode of ["morning", "pre_race"] as const) {
+    it(`対照(${mode}): 読める応答ならキャッシュに残る`, async () => {
+      const h = harness({ kind: "ok", body: GOOD_BODY });
+      await fetchStep(h, mode);
       expect(newspaperKeys(h)).toHaveLength(1);
     });
+  }
+
+  // 朝の取得(runFetch)と発走前の取得(runPreRaceFetch)は、それぞれ別の箇所で壊れた応答のキャッシュを消す(`dropBrokenNewspaperCache`)。両方を固定する(Issue #433)。
+  for (const mode of ["morning", "pre_race"] as const) {
+    for (const [name, body] of [
+      ["JSON でない", "<html>壊れた</html>"],
+      ["status が NG", JSON.stringify({ status: "NG", reason: "x", data: [] })],
+    ] as const) {
+      it(`${mode}: 読めない応答(${name}): 取得ステップは ok のまま、そのキャッシュの行が消える。次の取得ステップは(6 時間以内でも)取り直す`, async () => {
+        const h = harness({ kind: "ok", body });
+        await fetchStep(h, mode);
+        expect(h.gate.posts).toHaveLength(1);
+        expect(newspaperKeys(h)).toEqual([]);
+        expect(h.warnings.some((w) => w.includes("前走条件"))).toBe(true);
+
+        h.gate.behavior = { kind: "ok", body: GOOD_BODY };
+        await computeStep(h, mode);
+        h.clock.now += 60_000;
+        await fetchStep(h, mode);
+        expect(h.gate.posts).toHaveLength(2);
+        expect(newspaperKeys(h)).toHaveLength(1);
+      });
+    }
   }
 
   it("通信の失敗では、期限切れ(6 時間超)の古い行も消さない: 取り直しが失敗しても、計算ステップは前に取れた前走の条件を使う", async () => {
