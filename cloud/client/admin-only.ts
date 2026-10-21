@@ -2,6 +2,11 @@
  * 管理者だけの画面(設定。検証は Issue #263 で閲覧者にも開いた)を、閲覧者が直接(`#settings` などで)開いたときの案内(Issue #238。純関数)。
  * **API は取らない**(サーバも 403 を返すが、閲覧者の画面が 403 を踏まないようにする)。固定文言だけで、入力欄・ボタンは出さない。
  */
+import type { Screen } from "./route";
+
+/** 今の画面(Issue #238)。route から決まる画面(`screenOf`)に、役割で決まる `admin-only` を足したもの。`app.ts` が判定し、`race-data.ts` へ関数で渡す。 */
+export type AppScreen = Screen | "admin-only";
+
 export interface AdminOnlyModel {
   readonly kind: "admin-only";
   /** 一覧(トップ)へ戻るリンク先。 */

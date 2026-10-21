@@ -311,7 +311,7 @@ export async function postJson(fetchLike: FetchLike, url: string, payload: unkno
   return { status: response.status, body };
 }
 
-/** `GET /api/races?kaisai_date=&venue=`。netkeiba に出うるので、呼び出し側(app.ts)がキャッシュする。 */
+/** `GET /api/races?kaisai_date=&venue=`。netkeiba に出うるので、呼び出し側(race-data.ts)がキャッシュする。 */
 export async function fetchRaces(fetchLike: FetchLike, date: string, venue: Venue): Promise<RacesResult> {
   const got = await getJson(fetchLike, `/api/races?kaisai_date=${date}&venue=${venue}`);
   return got === null ? { ok: false, error: { kind: "network" } } : parseRacesResponse(got.status, got.body);

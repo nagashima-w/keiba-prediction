@@ -137,38 +137,60 @@ describe("screenOf(今どの画面か)", () => {
   });
 });
 
-describe("app.ts は、画面の判定を screenOf だけに任せる(Issue #191)", () => {
-  const code = readFileSync(path.join(__dirname, "..", "client", "app.ts"), "utf-8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+describe("app.ts と race-data.ts は、画面の判定を screenOf だけに任せる(Issue #191・#238・#400 R-11b)", () => {
+  // Issue #400 R-11b: 読み込みと追跡(`onCompleted`・`syncLatestAnalysis` ほか)を `race-data.ts` へ切り出した。読む対象を `app.ts` と `race-data.ts` の連結に広げ、旧版の検査項目は減らさない。
+  // `race-data.ts` は `route`・`currentScreen` を依存(関数)で受け取るだけで、`screenOf` を import も呼びもしない(役割の判定〈admin-only〉を素通りしないため)。
+  const stripComments = (src: string): string => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  const read = (file: string): string => stripComments(readFileSync(path.join(__dirname, "..", "client", file), "utf-8"));
+  const appCode = read("app.ts");
+  const dataCode = read("race-data.ts");
+  const code = `${appCode}\n${dataCode}`;
 
-  it("前提: コメントを除いた本文が読めている", () => {
-    expect(code.length).toBeGreaterThan(5000);
+  it("前提: コメントを除いた本文が、2 つのファイルとも読めている", () => {
+    expect(appCode.length).toBeGreaterThan(5000);
+    expect(dataCode.length).toBeGreaterThan(5000);
+    expect(appCode).toContain("function createApp(");
+    expect(dataCode).toContain("function createRaceData(");
   });
 
-  it("route.analysis・route.race を null と直接比べない(分岐は screenOf の switch・比較は route.race の値の取り出しだけ)", () => {
-    expect(code.match(/route\.(analysis|race)\s*[!=]==\s*null/g) ?? []).toEqual([]);
+  it("route.analysis・route.race を null と直接比べない(分岐は screenOf の switch・比較は route.race の値の取り出しだけ。`route().race` の形も含む)", () => {
+    expect(code.match(/route(\(\))?\.(analysis|race)\s*[!=]==\s*null/g) ?? []).toEqual([]);
   });
 
   // Issue #238(契約変更): 旧「5 つの関数が screenOf(route) を使う」は、`screenOf` に役割(閲覧者は設定を admin-only にする。検証は Issue #263 で閲覧者にも開いた)を足した `currentScreen()` を使う、に変わった。
   // 保証していたこと(画面の判定が 1 か所に集まり、画面を判定する 5 つの関数がそれを使う)は保つ。加えて、`screenOf(route)` を直接呼ぶのは `currentScreen` の中の 1 箇所だけであること(役割の判定を素通りしない)を固定する。
-  it("currentScreen() を呼ぶ箇所が、画面を判定する 5 つの関数(render・onCompleted・syncLatestAnalysis・ensureLoaded・onRefresh)にあり、screenOf(route) を直接呼ぶのは currentScreen の中の 1 箇所だけ", () => {
+  // Issue #400 R-11b(契約変更): 5 つの関数のうち `onCompleted`・`syncLatestAnalysis` は `race-data.ts` にある。連結の中で各関数がちょうど 1 回定義されていること(同名の別定義で隠せない)を足し、
+  // `screenOf(route)` の文字列だけでなく `screenOf(` の呼び出しがどんな引数の形でも(例 `screenOf(deps.route())`)連結の中で `currentScreen` の定義の 1 箇所だけであることに強めた。
+  it("currentScreen() を呼ぶ箇所が、画面を判定する 5 つの関数(render・onCompleted・syncLatestAnalysis・ensureLoaded・onRefresh)にあり、screenOf を直接呼ぶのは currentScreen の中の 1 箇所だけ", () => {
     for (const fn of ["render", "onCompleted", "syncLatestAnalysis", "ensureLoaded", "onRefresh"]) {
+      expect((code.match(new RegExp(`function ${fn}\\(`, "g")) ?? []).length, `前提: ${fn} の定義がちょうど 1 つ`).toBe(1);
       const body = new RegExp(`function ${fn}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n  \\}\\n`).exec(code)?.[1];
       expect(body, `前提: ${fn} の本体を取り出せる`).toBeDefined();
       expect(body, `${fn} が currentScreen() を使う`).toContain("currentScreen()");
       expect(body, `${fn} が screenOf(route) を直接使わない(役割の判定を素通りしない)`).not.toContain("screenOf(route)");
+      expect(body, `${fn} が screenOf( をどんな引数でも直接呼ばない`).not.toMatch(/screenOf\s*\(/);
     }
     expect((code.match(/currentScreen\(\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    expect((dataCode.match(/currentScreen\(\)/g) ?? []).length, "race-data.ts では onCompleted・syncLatestAnalysis が使う").toBeGreaterThanOrEqual(2);
     expect((code.match(/screenOf\(route\)/g) ?? []).length).toBe(1);
-    const definition = /function currentScreen\(\)[^{]*\{([\s\S]*?)\n  \}\n/.exec(code)?.[1];
-    expect(definition, "前提: currentScreen の本体を取り出せる").toBeDefined();
+    expect((code.match(/screenOf\s*\(/g) ?? []).length).toBe(1);
+    const definition = /function currentScreen\(\)[^{]*\{([\s\S]*?)\n  \}\n/.exec(appCode)?.[1];
+    expect(definition, "前提: currentScreen の本体を app.ts から取り出せる").toBeDefined();
     expect(definition).toContain("screenOf(route)");
     expect(definition).toContain("admin-only");
   });
 
-  it("対照: 検出は、旧い直接比較を拾える(空振りでない)", () => {
-    expect("if (route.analysis !== null) {".match(/route\.(analysis|race)\s*[!=]==\s*null/g)).toHaveLength(1);
+  it("race-data.ts は screenOf に触れず(import も呼び出しも)、currentScreen を自前で定義せず、依存で受け取る", () => {
+    expect(dataCode).not.toContain("screenOf");
+    expect(dataCode).not.toMatch(/function currentScreen\b/);
+    expect(dataCode).toMatch(/const currentScreen = deps\.currentScreen;/);
+  });
+
+  it("対照: 検出は、旧い直接比較・引数違いの呼び出しを拾える(空振りでない)", () => {
+    expect("if (route.analysis !== null) {".match(/route(\(\))?\.(analysis|race)\s*[!=]==\s*null/g)).toHaveLength(1);
+    expect("if (deps.route().race === null) {".match(/route(\(\))?\.(analysis|race)\s*[!=]==\s*null/g)).toHaveLength(1);
+    expect("const s = screenOf(deps.route());".match(/screenOf\s*\(/g)).toHaveLength(1);
+    expect("const s = screenOf(deps.route());".match(/screenOf\(route\)/g)).toBeNull(); // 旧い文字列の検査だけでは拾えない形
   });
 });
 

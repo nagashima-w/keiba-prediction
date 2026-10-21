@@ -247,6 +247,9 @@ describe("生成物のドリフトと決定性", () => {
     // (追記)Issue #400 R-11a(`createApp` の設定・起動・一括実行を `settings-screen.ts`・`run-control.ts`・`bulk-control.ts`・`keys.ts` へ切り出した。振る舞いは変えない): 224,062 → 224,891(+829。上限は 228,500 のまま。余裕 3,609 バイト)。
     // 内訳(`pnpm run build:client` の出力。各コミットの生成物の `Buffer.byteLength(CLIENT_JS)`): 設定の切り出し 224,062 → 224,408(+346)、起動・一括の切り出し 224,408 → 224,891(+483)。
     // 増えたのは、minify されないプロパティ名(戻り値の `enter`・`onInput`・`model`・`statesOf` ほか、deps のキー)と、`app.ts` が関数で渡す道具(`forceTrack` ほか)の分。
+    // (追記)Issue #400 R-11b(`createApp` から読み込みと追跡を `race-data.ts` へ切り出した。振る舞いは変えない): 224,891 → 225,758(+867。上限は 228,500 のまま。余裕 2,742 バイト)。
+    // 計り方: R-11a の公開時点(050ce5b)の生成物と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った(今の値は `pnpm run build:client` の出力)。ファイル別の内訳は測っていない。
+    // 増えたのは、minify されないプロパティ名(`createRaceData` の戻り値 19 個の名前と、deps の 7 個のキー)と、`app.ts` が `data.` 経由で呼ぶ分。取得・追跡の本体は移しただけで増えていない。
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(228_500);
   });
 });

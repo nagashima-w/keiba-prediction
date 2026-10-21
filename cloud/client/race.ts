@@ -3,9 +3,9 @@
  *
  * 見出しの下に「事前分析」「発走前」の 2 枚のカード(状態・失敗時のエラー文・起動のボタン〈Issue #186〉)。朝が完了していれば prior の順位、発走前が完了していれば**最新の分析の結果を最初からカードの中に出す**
  * (Issue #188。旧「結果を見る」のリンクは廃止。結果の画面〈`#analysis=<id>`〉は過去の分析の一覧のリンク用に残る)。
- * **最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id**(`latestAnalysisIdOf`。取得するかどうか〈`app.ts`〉と表示するかどうかの唯一の判定)。実行中・失敗・未実行のときは出さない(再実行で前の結果を見せない)。
+ * **最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id**(`latestAnalysisIdOf`。取得するかどうか〈`race-data.ts`〉と表示するかどうかの唯一の判定)。実行中・失敗・未実行のときは出さない(再実行で前の結果を見せない)。
  * その下に過去の分析の一覧(結果の画面へのリンク)。
- * **カードの行は「最新の板」(ポーリング・起動のオーバーレイを反映したもの)から導く**(Issue #186。`app.ts` が `status.rows` に渡す。`status?race_id=` は prior と板の初期値)。
+ * **カードの行は「最新の板」(ポーリング・起動のオーバーレイを反映したもの)から導く**(Issue #186。`race-data.ts` の `raceStatusSource` が `status.rows` に渡す。`status?race_id=` は prior と板の初期値)。
  * 状態(`status?race_id=`)と過去の分析(`GET /api/analyses`)の取得は互いに独立(片方の失敗で、もう片方を隠さない)。
  */
 import { formatPercent } from "../../packages/core/src/view/format";
@@ -192,7 +192,7 @@ export function runButtonLabel(mode: TaskMode, status: TaskStatus | undefined, s
 
 /**
  * そのレースの最新の分析 id(板の発走前の行が `done` で `analysisId` があるときだけ。無ければ null)。
- * `app.ts` が「`GET /api/analyses/{id}` を取るかどうか」に、`buildRaceModel` が「カードに結果を出すかどうか」に、**同じこの関数**を使う(二重に持たない)。
+ * `race-data.ts` が「`GET /api/analyses/{id}` を取るかどうか」に、`buildRaceModel` が「カードに結果を出すかどうか」に、**同じこの関数**を使う(二重に持たない)。
  */
 export function latestAnalysisIdOf(rows: readonly BoardRow[], raceId: string): number | null {
   const found = pick(rows, raceId, "pre_race");
