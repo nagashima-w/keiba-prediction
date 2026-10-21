@@ -73,7 +73,10 @@ jobs:
       - name: Node.js をセットアップ
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          # Issue #441: 2026-10-21 の Node.js セキュリティリリース(修正版 24.22.1)に固定する。`24` だと
+          # ランナーのキャッシュにある修正前の版が使われるため。@types/node のメジャーは引き続き 24。
+          # `24` に戻せるのは、ランナーのキャッシュが 24.22.1 以上になったとき。
+          node-version: 24.22.1
           cache: pnpm
 
       - name: 依存をインストール
@@ -109,7 +112,7 @@ jobs:
       - name: Node.js をセットアップ
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
           cache-dependency-path: cloud/pnpm-lock.yaml
 

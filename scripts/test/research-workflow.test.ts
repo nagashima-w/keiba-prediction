@@ -89,12 +89,12 @@ describe("research.yml(確率の質の測定。手動実行だけ)", () => {
     expect(code).not.toContain("upload-artifact");
   });
 
-  it("ジョブは 1 つで、ubuntu-latest・Node 24・タイムアウト付き。pnpm のキャッシュを使う", () => {
+  it("ジョブは 1 つで、ubuntu-latest・Node 24.22.1・タイムアウト付き。pnpm のキャッシュを使う", () => {
     const jobsSection = code.split("\njobs:\n")[1] ?? "";
     expect(jobsSection, "jobs: の節が読める").not.toBe("");
     expect(jobsSection.match(/^ {2}[A-Za-z0-9_-]+:$/gm)).toEqual(["  research:"]);
     expect(code).toMatch(/runs-on: ubuntu-latest/);
-    expect(code).toMatch(/node-version: 24$/m);
+    expect(code).toMatch(/node-version: 24\.22\.1$/m);
     expect(code).toMatch(/timeout-minutes: \d+/);
     expect(code).toMatch(/cache: pnpm/);
   });

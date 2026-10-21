@@ -189,14 +189,14 @@ describe.each([
     expect(withoutComments(job)).not.toMatch(/continue-on-error/);
   });
 
-  it("cloud/ で、frozen-lockfile のインストールを自分のジョブの中で行う。pnpm・Node(24)・キャッシュ(cloud のロックファイル)も自前で用意する(並列なので他方のジョブの成果物を前提にできない)", () => {
+  it("cloud/ で、frozen-lockfile のインストールを自分のジョブの中で行う。pnpm・Node(24.22.1)・キャッシュ(cloud のロックファイル)も自前で用意する(並列なので他方のジョブの成果物を前提にできない)", () => {
     const job = jobBody(jobName);
     const names = [...job.matchAll(/^ {6}- name: (.+)$/gm)].map((m) => m[1]!.trim());
     expect(names.slice(0, 4)).toEqual(["リポジトリを取得", "pnpm をセットアップ", "Node.js をセットアップ", "依存をインストール(cloud)"]);
     // SHA と版数は Dependabot が更新するので固定しない(形と一致の検査は actions-pinned.test.ts)
     expect(stepBody(job, "pnpm をセットアップ")).toMatch(/uses: pnpm\/action-setup@[0-9a-f]{40} # v\d+\.\d+\.\d+(\n|$)/);
     const node = stepBody(job, "Node.js をセットアップ");
-    expect(node).toMatch(/node-version: 24\b/);
+    expect(node).toMatch(/node-version: 24\.22\.1$/m);
     expect(node).toContain("cache: pnpm");
     expect(node).toContain("cache-dependency-path: cloud/pnpm-lock.yaml");
     const install = stepBody(job, "依存をインストール");

@@ -217,12 +217,12 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
     expect(extractRunLine(extractStep(extractJob(yml, "verify"), STEP_NAMES.install))).toBe("pnpm install --frozen-lockfile");
   });
 
-  it("pnpm と Node.js は package.json の packageManager と Node 24 に従う(pnpm はバージョン未指定・Node は 24)", () => {
+  it("pnpm と Node.js は package.json の packageManager と Node 24.22.1 に従う(pnpm はバージョン未指定・Node は Issue #441 で 24.22.1 に固定)", () => {
     // SHA と版数は Dependabot が更新するので固定しない(形と一致の検査は actions-pinned.test.ts)
     const verify = extractJob(yml, "verify");
     expect(extractStep(verify, STEP_NAMES.pnpm)).toMatch(/uses: pnpm\/action-setup@[0-9a-f]{40} # v\d+\.\d+\.\d+\n/);
     expect(extractStep(verify, STEP_NAMES.pnpm)).not.toMatch(/^\s+version:/m);
-    expect(extractStep(verify, STEP_NAMES.node)).toMatch(/node-version: 24\b/);
+    expect(extractStep(verify, STEP_NAMES.node)).toMatch(/node-version: 24\.22\.1$/m);
   });
 
   it("verify の関門のステップは無条件に実行され(if: が無い)、失敗を握りつぶさず(continue-on-error が無い)、ワークフロー全体で秘密を参照しない", () => {
@@ -266,7 +266,7 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
         expect(extractStep(job, name), `${name} は cloud/ で実行する`).toContain("working-directory: cloud");
       }
       expect(extractStep(job, STEP_NAMES.node)).toContain("cache-dependency-path: cloud/pnpm-lock.yaml");
-      expect(extractStep(job, STEP_NAMES.node)).toMatch(/node-version: 24\b/);
+      expect(extractStep(job, STEP_NAMES.node)).toMatch(/node-version: 24\.22\.1$/m);
     });
 
     it("同じ手順が deploy-cloud.yml の check・smoke にもある(コマンドの食い違いを検出する)", () => {
