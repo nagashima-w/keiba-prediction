@@ -121,16 +121,27 @@ export function directionLabel(direction: AdjustmentDirection): string {
 }
 
 /**
- * 補正幅・過信バイアス(0〜1スケールの確率差)を符号付きポイント表示にする(Task#26)。
- * 例: 0.052 → "+5.2pt"、-0.031 → "-3.1pt"。null(件数0の群・予測0件の帯)は "-"。
+ * 差(百分率のポイント)を、小数 1 桁に丸めた後の値で符号を決めて表示する。正の値だけ「+」を付け、負は ASCII の「-」、丸めて 0.0 になる値(-0.04 など)は符号なしの「0.0pt」。
+ * 例: 5.2 → "+5.2pt"、-3.1 → "-3.1pt"、0.04 → "0.0pt"、-0.04 → "0.0pt"、0.05 → "+0.1pt"。
+ * 検証画面の補正幅({@link formatAdjustment})と、cloud の内訳の「差」(`cloud/src/verify-breakdown.ts`)が共有する(Issue #445。旧版は値の符号で付けていたので、-0.04 が「-0.0pt」・0.04 が「+0.0pt」と出ていた)。
+ */
+export function formatSignedPt(pt: number): string {
+  const rounded = pt.toFixed(1);
+  if (Number(rounded) === 0) {
+    return "0.0pt";
+  }
+  return `${pt > 0 ? "+" : ""}${rounded}pt`;
+}
+
+/**
+ * 補正幅・過信バイアス(0〜1スケールの確率差)を符号付きポイント表示にする(Task#26)。符号の規則は {@link formatSignedPt}(丸めた後の値で決める)。
+ * 例: 0.052 → "+5.2pt"、-0.031 → "-3.1pt"、0 → "0.0pt"。null(件数0の群・予測0件の帯)は "-"。
  */
 export function formatAdjustment(value: number | null): string {
   if (value === null) {
     return "-";
   }
-  const pt = value * 100;
-  const sign = pt >= 0 ? "+" : "";
-  return `${sign}${pt.toFixed(1)}pt`;
+  return formatSignedPt(value * 100);
 }
 
 /**

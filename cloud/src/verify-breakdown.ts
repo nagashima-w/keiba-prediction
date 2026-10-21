@@ -18,7 +18,7 @@
  *
  * ## 単複の人気のずれ
  * 「単勝は人気薄なのに複勝は売れている馬」を、モデルが当てられているかを見る内訳。買い目を、構成馬ごとの `確定の単勝人気 − 分析時の複勝順位` で分ける
- * (区切りは {@link WIN_PLACE_GAP_MIN}。置き値)。1 頭でも差が区切り以上なら「単勝は人気薄」、区切り以下の負なら「複勝は人気薄」、両方の向きの馬を含めば「両方」。
+ * (区切りは {@link WIN_PLACE_GAP_MIN}。置き値)。1 頭でも差が {@link WIN_PLACE_GAP_MIN} 以上なら「単勝は人気薄」、差が −{@link WIN_PLACE_GAP_MIN} 以下なら「複勝は人気薄」、両方の向きの馬を含めば「両方」(画面の文言と同じ)。
  *
  * ## 判定は本体と同じ
  * 買い目の的中・外れ・返還・判定不能は、core の `collectProposedBetEvents`(本体の `proposedBet` と同じ判定から出る事象)を使う。ここでは作り直さない。
@@ -52,6 +52,7 @@ import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-code
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key.js";
 import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids.js";
 import { mulberry32 } from "../../packages/core/src/common/random.js";
+import { formatSignedPt } from "../../packages/core/src/view/verify-format.js";
 import { formatRecoveryPercent } from "./recovery-format";
 import { axisLabelsOf, DISTANCE_LABELS, SURFACE_LABELS, TRACK_LABELS, type RaceConditionFacts } from "./verify-race-conditions";
 import type { VerifyBetRow } from "./verify-read";
@@ -443,18 +444,6 @@ export interface BreakdownSection {
 
 const percentRange = (r: RatioInterval): string => `${(r.lower * 100).toFixed(1)}〜${(r.upper * 100).toFixed(1)}%`;
 const ratioRange = (r: RatioInterval): string => `${r.lower.toFixed(2)}〜${r.upper.toFixed(2)}`;
-
-/**
- * 差(pt)を、小数 1 桁に丸めた後の値で符号を決めて表示する。正の値だけ `+` を付け、丸めて 0 になる値(−0.04 など)は `0.0pt`(符号なし)にする。
- * 引数は百分率の差(回収率 0.01 の差 = 1)。Issue #445(#384 の記録 4: `-0.0pt` と出ていた)。
- */
-export function formatSignedPt(pt: number): string {
-  const rounded = pt.toFixed(1);
-  if (Number(rounded) === 0) {
-    return "0.0pt";
-  }
-  return `${pt > 0 ? "+" : ""}${rounded}pt`;
-}
 
 /** 1 行の項目。買い目が無い行は件数だけ。 */
 function statCells(stat: BandStat): BreakdownCell[] {

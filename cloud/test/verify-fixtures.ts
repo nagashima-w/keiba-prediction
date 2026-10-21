@@ -13,7 +13,7 @@ export function calibrationFixture(): CalibrationBinView[] {
     6: { predicted: 120, placed: 24, mean: 0.331 }, // 30〜35%: 実 20.0%、95%区間 13.8〜28.0% の上に平均予測 33.1%(予測が高い)
     8: { predicted: 12, placed: 5, mean: 0.43 }, // 40〜45%: 実 41.7%
     10: { predicted: 10, placed: 7, mean: 0.53 }, // 50〜55%: 実 70%(過小評価)
-    12: { predicted: 8, placed: 5, mean: 0.625 }, // 60〜65%: 実 62.5%(平均予測 62.5% と一致。予測−実績は +0.0pt の「一致」)
+    12: { predicted: 8, placed: 5, mean: 0.625 }, // 60〜65%: 実 62.5%(平均予測 62.5% と一致。予測−実績は 0.0pt の「一致」)
     14: { predicted: 40, placed: 36, mean: 0.72 }, // 70〜75%: 実 90.0%、95%区間 76.9〜96.0% の下に平均予測 72.0%(予測が低い)
     19: { predicted: 1, placed: 1, mean: 0.97 }, // 95〜100%
   };

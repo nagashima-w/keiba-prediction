@@ -289,12 +289,12 @@ function closeOf(a: AnalysisDetail, readOnly: boolean): CloseSection | null {
 
 /**
  * 補正後の3着内率の、統計モデル(prior)からの変化量(Issue #312)。「+2.0pt」「-3.5pt」。丸めて 0.0 になる差は「±0.0pt」(符号を付けない)。非有限の入力は null。
- * 符号と小数1桁は検証画面の補正幅(`formatAdjustment`)に任せ、「+0.0pt」「-0.0pt」だけ「±0.0pt」へ置き換える。
+ * 符号と小数1桁は検証画面の補正幅(`formatAdjustment`)に任せる。`formatAdjustment` は丸めて 0.0 になる差を符号なしの「0.0pt」にする(Issue #445)ので、それだけを「±0.0pt」へ置き換える。
  */
 function probShiftOf(prior: number, adjusted: number): string | null {
   if (!Number.isFinite(prior) || !Number.isFinite(adjusted)) return null;
   const text = formatAdjustment(adjusted - prior);
-  return text === "+0.0pt" || text === "-0.0pt" ? "±0.0pt" : text;
+  return text === "0.0pt" ? "±0.0pt" : text;
 }
 
 /** 強調材料・懸念事項の項目(空文字・空白だけは捨てる。文字列は加工しない)。 */

@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { markRank, PREDICTION_MARKS } from "../../src/common/prediction-marks.js";
 import { PREDICTION_MARKS as PARSE_RESPONSE_MARKS } from "../../src/analyzer/parse-response.js";
@@ -32,5 +35,24 @@ describe("markRank: 印の順位(既知は添字、未知は末尾)", () => {
     for (const m of ["", "○", "x", "なし", "◎〇"]) {
       expect(markRank(m), JSON.stringify(m)).toBe(6);
     }
+  });
+});
+
+describe("PredictionMark の型の定義は 1 か所だけ(Issue #445。analysis-types.ts に文字列リテラルのユニオンで二重に持っていた)", () => {
+  const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : e.name.endsWith(".ts") ? [path.join(dir, e.name)] : []));
+  const files = walk(srcDir);
+
+  it("`type PredictionMark =` の定義(宣言)を持つのは common/prediction-marks.ts だけ。再エクスポート(`export type { PredictionMark }`)は定義でない", () => {
+    expect(files.length, "走査した .ts が十分ある(空振り防止)").toBeGreaterThan(50);
+    const definers = files.filter((f) => /\btype\s+PredictionMark\s*=/.test(readFileSync(f, "utf-8"))).map((f) => path.relative(srcDir, f).split(path.sep).join("/"));
+    expect(definers).toEqual(["common/prediction-marks.ts"]);
+  });
+
+  it("analysis-types.ts は PredictionMark を共通部品から再エクスポートしている(import 元の analysis-record.ts などは変えずに済む)", () => {
+    const text = readFileSync(path.join(srcDir, "analysis", "analysis-types.ts"), "utf-8");
+    expect(text).toMatch(/import type \{ PredictionMark \} from "\.\.\/common\/prediction-marks\.js";/);
+    expect(text).toMatch(/export type \{ PredictionMark \};/);
   });
 });
