@@ -13,6 +13,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 /**
  * Issue #399(R-9e の e1): 計画の「一覧と確定」(`runPlanList`・`afterPlanVenueSettled`・`runPlanFinalize`・`buildPlanRow`)を `RaceDayCore` から切り出す前に、**今の挙動を固定する特性テスト**。
  * 切り出しの前後で、このファイルを書き換えずに緑のままであることが、挙動を変えていないことの根拠になる。
+ * **切り出しの後の名前**(このヘッダと本文の旧名の読み替え): `runPlanList`→`PlanStage.runList`・`runPlanFinalize`→`PlanStage.runFinalize`(`afterPlanVenueSettled`・`buildPlanRow` は名前のまま `PlanStage` のメソッド)。実装は `cloud/src/race-day-plan-stage.ts`。
  *
  * 既存の `race-day-plan.test.ts` が固定している面(行の状態・期限の値・再試行の回数)に加えて、**値だけでは見えない面**を固定する:
  *  - **SQL の文と順序**(計画の表・会場の表・タスクの表・結果の表・meta への書き込みを読める形で、全体は SHA-1 で固定する。**gate への取得・設定の読み取り・警告・`setAlarm` も同じ列に挟む**ので、

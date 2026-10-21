@@ -5,7 +5,7 @@
  * `BabaStage`・`CloseStage`・`ReportHoldStage`・`NotifyStage` と同じ形で、`setAlarm`・`rearm`・`armAlarm` には触れない(状態を必ず変えるので、張り直しは本体の `armAlarm`)。
  *
  * ## 本体との境界
- *  - 本体の `runNextStep` が、タスクが無く({@link RaceDayCore} の `resultsRunnable`: タスク無し・計画の段階が終わっている)、時刻が来ている行があるとき、その行を {@link ResultStage.runStep} に渡す。
+ *  - 本体の `runNextStep` が、タスクが無く(`RaceDayCore` の `resultsRunnable`: タスク無し・計画の段階が終わっている)、時刻が来ている行があるとき、その行を {@link ResultStage.runStep} に渡す。
  *    戻り値のあとの日報の依頼(`maybeRequestReport`)と `armAlarm` は本体。
  *  - 本体に残るもの: 動けるかの判定(`resultsRunnable`。アラームの候補を入れるか〈`rearm`〉と動くか〈`runNextStep`〉の両方が使う)、依頼の受付(`requestResultImport`)と観測(`getResultImportProgress`)、
  *    結果の行を積む処理(`enqueueSameDayResults`・`enqueueResultForAnalyzedRace`。計画の確定・取得ステップの同期区間から呼ぶ)、日報の依頼。
@@ -76,7 +76,7 @@ export class ResultStage {
   }
 
   /**
-   * 結果の 1 レースを取り込む(取得 → パース → **単勝の払戻が出ていれば**保存)。**多くとも 1 レース・D1 への書き込みは 1 レースぶん(最大 6 文の 1 batch。単勝オッズ・人気が無ければ最大 5 文)**。
+   * 結果の 1 レースを取り込む(取得 → パース → **単勝の払戻が出ていれば**保存)。**多くとも 1 レース・D1 への書き込みは 1 レースぶん(最大 6 文の 1 batch。単勝オッズ・人気が無ければ最大 5 文)に、クラスが読めたときだけ batch の外で UPDATE が 1 文増える(`saveRaceClass`。Issue #426。失敗は握る)**。補完モード(`winOddsOnly`)では batch の代わりに `saveWinOdds`・`saveScratched` の UPDATE 各 1 文(NULL の列だけを埋める)と、同じ `saveRaceClass` になる。
    * 取得は gate 経由・キャッシュなし。core の `importRaceResult` を、`parse` を包んで使う(単勝の払戻が 0 件なら `RaceResultNotConfirmedError` を投げる = 審議中の暫定の着順を保存しない)。
    * 試行回数は取得の前に永続化する(クラッシュしても無限に続かない)。失敗の扱い:
    *  - 未確定・払戻なし・構造の異常・取得の失敗・保存の失敗 → 試行を数えて、{@link RESULT_RETRY_DELAY_MS} 後に再試行。{@link MAX_RESULT_ATTEMPTS} 回で諦める

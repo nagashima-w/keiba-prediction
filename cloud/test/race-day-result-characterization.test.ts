@@ -17,6 +17,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 /**
  * Issue #399(R-9d): 結果の取り込みの段階(`runResultStep`・`failResult`・`warnGaveUp`)を `RaceDayCore` から切り出す前に、**今の挙動を固定する特性テスト**。
  * 切り出しの前後で、このファイルを書き換えずに緑のままであることが、挙動を変えていないことの根拠になる。
+ * **切り出しの後の名前**(このヘッダと本文の旧名の読み替え): `runResultStep`→`ResultStage.runStep`(`failResult`・`warnGaveUp` は名前のまま `ResultStage` のメソッド)。実装は `cloud/src/race-day-result-stage.ts`。
  *
  * 既存の `race-day-result.test.ts`・`race-day-result-sameday.test.ts` が固定している面(行の状態・試行の回数・分類・次の時刻)に加えて、**値だけでは見えない面**を固定する:
  *  - **SQL の文と順序**(結果の表・印の表・日の meta に触れた文を読める形で、全体は SHA-1 で固定する。**結果ページの取得・結果ストアの保存・日報の依頼・警告・`setAlarm` も同じ列に挟む**ので、

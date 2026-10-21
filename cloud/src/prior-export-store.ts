@@ -7,7 +7,7 @@
  *    読む行数は束縛した ID の行だけ。D1 が返す `meta.rows_read` を合計して返す。
  *  - 詳細(`fetchDetails`): R2 の `get` だけ(LIST・HEAD は使わない)。同時実行は {@link GET_CONCURRENCY}。取得を試みた回数を返す(Class B に数える)。
  *    `detail_key` が NULL の行は取得しない(none)。R2 に無い・壊れている・別のレースのものも none(失敗ではない)。get の例外だけ failed(再試行する)。
- *    形式 v2(Issue #341)の出馬表の列は、**同じ get で読んだ詳細の `raceSnapshot`** から取り出す(`toSnapshotColumns`)。取得の回数も D1 の文も増えない。
+ *    形式 v2(Issue #341)の出馬表の列と、形式 v3(Issue #421)のレースの条件の列(`weight_type`・`fillies_only`)は、**同じ get で読んだ詳細の `raceSnapshot`** から取り出す(`toSnapshotColumns`)。取得の回数も D1 の文も増えない(D1 の `race_conditions` 表は読まない)。
  *
  * ## 書き
  *  - `r2_ops` の Class B の加算(`countReads`)と、Class A の加算 + R2 の put(`putFile`)。put の前に Class A を数える(`analysis-repository.ts` の流儀: 先に数えて、put の失敗は過少でなく過大に倒す)。

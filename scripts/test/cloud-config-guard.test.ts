@@ -348,7 +348,7 @@ describe("wrangler.toml", () => {
     // 保証していたことは変わらない: 結果のページの取得(runResultStep)に `bypassCache` は無く(下の本体の検査)、2 件は runNarTrifectaStep と closeFetcher の中にだけある(どちらもオッズ。それ以外の URL は cacheOnly)。
     // 【Issue #399(R-9a)で改訂】旧: `bypassCache` が race-day-core.ts に 2 件(runNarTrifectaStep と closeFetcher)。締切の再計算の段階を `race-day-close-stage.ts` に切り出したので、
     // core には runNarTrifectaStep の 1 件だけが残り、closeFetcher の 1 件は段階のファイルに移った(合計は 2 件のまま)。
-    // 保証していたことは変わらない: (1) 結果のページの取得(runResultStep)に `bypassCache` は無い(下の本体の検査) (2) `bypassCache` があるのはオッズの取得 2 箇所
+    // 保証していたことは変わらない: (1) 結果のページの取得(`runResultStep`。R-9d で `ResultStage.runStep` に移った)に `bypassCache` は無い(下の本体の検査) (2) `bypassCache` があるのはオッズの取得 2 箇所
     // (core の runNarTrifectaStep と段階の closeFetcher)だけで、cloud/src の他のファイルには無い (3) 締切の取得口の形(オッズの URL だけ bypassCache・それ以外はキャッシュ専用)は段階のファイルで同じ検査をする。
     expect(count(/bypassCache/g)).toBe(1);
     const closeStage = stripCode(readTextLf("cloud", "src", "race-day-close-stage.ts"));

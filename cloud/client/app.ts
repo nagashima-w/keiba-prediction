@@ -88,7 +88,7 @@ export function createApp(deps: AppDeps): App {
 
   /**
    * 今の画面の判定の**唯一の場所**(Issue #191 の `screenOf` に、Issue #238 の役割を足したもの)。閲覧者が管理者だけの画面(設定。検証は Issue #263 で閲覧者にも開いた)の route に居るときは
-   * `admin-only` を返す。**app.ts の画面ごとの分岐は、すべてこの関数を通す**(`screenOf(route)` を直接使わない)ので、閲覧者は設定の取得も下書きも始めない。
+   * `admin-only` を返す。**画面ごとの分岐は、`app.ts` のものも、切り出した部品〈`race-data.ts`・`settings-screen.ts` など〉に関数で渡す画面の判定も、すべてこの関数を通す**(`screenOf(route)` を直接使わない)ので、閲覧者は設定の取得も下書きも始めない。
    */
   function currentScreen(): AppScreen {
     const screen = screenOf(route);

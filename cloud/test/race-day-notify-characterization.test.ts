@@ -20,6 +20,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 /**
  * Issue #399(R-9c): 通知の段階(`notifyPlan`・`runNotifyStep`・`withAnalysisLink`・`putAnalysisMaterial`)を `RaceDayCore` から切り出す前に、**今の挙動を固定する特性テスト**。
  * 切り出しの前後で、このファイルを書き換えずに緑のままであることが、挙動を変えていないことの根拠になる。
+ * **切り出しの後の名前**(このヘッダと本文の旧名の読み替え): `notifyPlan`→`NotifyStage.plan`・`runNotifyStep`→`NotifyStage.runStep`(`withAnalysisLink`・`putAnalysisMaterial` は名前のまま `NotifyStage` のメソッド)。実装は `cloud/src/race-day-notify-stage.ts`。
  *
  * 既存の `race-day-notify.test.ts` が固定している面(送信の回数・行の状態・embed の主な部分・リンクの有無)に加えて、**値だけでは見えない面**を固定する:
  *  - **送った中身そのもの**(`notifier.send` に渡った payload の全文。embed の JSON・リンクを含む)
@@ -736,7 +737,7 @@ const SCENARIOS: Record<string, ScenarioDef> = {
       return { traces: await traceUntil(h, jst("12:00")), final: finalState(h) };
     },
   },
-  // ---- 23 時の再実行の後の失敗の通知(plan-failure。材料は judgeRescue が積み、送るのはこの段階)----
+  // ---- 23 時の再実行の後の失敗の通知(plan-failure。材料は `RescueStage.judge`〈切り出し前は judgeRescue〉が積み、送るのはこの段階)----
   "23 時の再実行の後も会場の失敗が残る: plan-failure の通知": {
     rows: [central(1, "15:35")],
     run: async (h) => {

@@ -18,18 +18,18 @@ import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "./pre-race-time.js";
  *    LLM を使うときだけ効く(API キーが未登録の間は効かない)。項目の無い旧い行・不正な値は `auto`(読む側は寛容)。
  *  - スコアリングの重み15項目(Issue #218。exe の設定の `biasWeights` 7・`baseScoreWeights` 6。**7 つ目のタイム指数〈`baseScoreWeightTimeIndex`〉は Issue #353、8 つ目の調教師成績〈`baseScoreWeightTrainer`〉は Issue #354 で足した cloud の項目**で、exe にはない)は **exe と共有する項目**。cloud の設定は平坦なキーなので、キー名は接頭辞つき
  *    (`biasWeight` + exe のキーの先頭大文字。例 `biasWeightTrackCondition`・`baseScoreWeightRecentForm`)。対応は {@link SCORING_WEIGHT_FIELDS} の表が唯一の定義元で、
- *    exe のキーとの対応・既定値の一致(exe の `DEFAULT_APP_SETTINGS`・core の `DEFAULT_SCORER_CONFIG`)は `cloud/test/settings.test.ts`・`scripts/test/cloud-settings-defaults.test.ts` が固定する。
- *    検証は exe の `isValidWeight` と同じ(有限な数で 0 以上。**上限は無い**)。読む側と書く側で同じ述語。分析(事前分析・発走前の分析)の ScorerConfig は `scorer-config.ts` が作る。
+ *    exe のキーとの対応(`SCORING_WEIGHT_FIELDS`)と、既定値が固定値・core の `DEFAULT_SCORER_CONFIG` と一致することは、`cloud/test/settings.test.ts`・`scripts/test/cloud-settings-defaults.test.ts` が固定する(exe の `DEFAULT_APP_SETTINGS` との比較は、exe の削除〈#287〉で無くなった)。
+ *    検証は有限な数で 0 以上(**上限は無い**。exe の `isValidWeight` と同じ規則だった。exe の述語は #393 で削除した)。読む側と書く側で同じ述語。分析(事前分析・発走前の分析)の ScorerConfig は `scorer-config.ts` が作る。
  *    項目の無い旧い行(今の本番)は、15項目とも既定値(= 今までと同じ結果)。
  * 値は `GET`/`POST /api/settings`(`handler.ts`)と設定画面(`#settings`)で編集する(`cloud_settings` 表。id = 1 の1行だけ)。直接 D1 に入れてもよい。
  *
  * **範囲の述語は項目ごとに1か所**(`CLOUD_SETTINGS_RULES`)。読む側(`coerceCloudSettings`)は `isReadable`、書く側(`validateCloudSettingsForSave`。`POST` が 400 にする基準)は `isWritable` を使う。
  * **書く側は読む側の部分集合**(書ける値は必ず読める): 読む側は手で D1 に入れた行や過去の行を壊さない広さ、書く側は画面から入れる値の狭さ。違うのは次の2項目だけ。
- *  - `kellyFraction`: 読む側 0〜1、書く側 0.05〜1(exe の画面の `isValidKellyFraction` と同じ。0 は配分を出さない見送りになるので、UI からは入れさせない)
+ *  - `kellyFraction`: 読む側 0〜1、書く側 0.05〜1(exe の画面の `isValidKellyFraction`〈#393 で削除〉と同じ規則だった。0 は配分を出さない見送りになるので、UI からは入れさせない)
  *  - `additionalInstruction`: 読む側は長さの上限なし(D1 に直接入れた長い行を、黙って空に戻さない)、書く側は 2,000 文字(UTF-16 コード単位。HTML の `maxlength` と同じ単位)まで
  *    (#179 で毎回 LLM に送るので上限を付ける。**読む側には上限が無い**ので、#179 のプロンプトの組み立ては、手で入れた長い行に備えて自分でも切り詰めること)
  *
- * 読むときは exe の `coerceSettings` と同じ流儀で、不正な値はその項目だけ既定値に戻す(行が壊れていても分析を止めない)。
+ * 読むときは(exe の `coerceSettings`〈#287 で削除〉と同じ流儀で)、不正な値はその項目だけ既定値に戻す(行が壊れていても分析を止めない)。
  * 行が無い・JSON として読めないときは全項目が既定値。
  */
 
@@ -141,7 +141,7 @@ const PER_RACE_CAP_MAX = 10_000_000;
 export const ADDITIONAL_INSTRUCTION_MAX_LENGTH = 2000;
 export const PRE_RACE_OFFSET_MIN = 10;
 export const PRE_RACE_OFFSET_MAX = 180;
-/** ケリー係数の書く側の下限(exe の `isValidKellyFraction` と同じ。読む側の下限は 0)。 */
+/** ケリー係数の書く側の下限(exe の `isValidKellyFraction`〈#393 で削除〉と同じ規則だった。読む側の下限は 0)。 */
 export const KELLY_FRACTION_WRITE_MIN = 0.05;
 
 /**
@@ -211,7 +211,7 @@ export const CLOUD_SETTINGS_RULES: { readonly [K in keyof CloudSettings]: FieldR
   includeTrifectaInAllocation: rule(D.includeTrifectaInAllocation, isBoolean),
   includeBracketQuinellaInAllocation: rule(D.includeBracketQuinellaInAllocation, isBoolean),
   preRaceOffsetMinutes: rule(D.preRaceOffsetMinutes, numberWhere((n) => Number.isInteger(n) && n >= PRE_RACE_OFFSET_MIN && n <= PRE_RACE_OFFSET_MAX)),
-  // スコアリングの重み15項目(Issue #218・#353・#354): exe の `isValidWeight`(有限な数で 0 以上。上限なし)と同じ。読む側と書く側で同じ述語。
+  // スコアリングの重み15項目(Issue #218・#353・#354): 有限な数で 0 以上。上限なし(exe の `isValidWeight`〈#393 で削除〉と同じ規則だった)。読む側と書く側で同じ述語。
   ...scoringWeightRules(),
 };
 

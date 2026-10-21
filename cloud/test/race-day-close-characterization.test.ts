@@ -20,6 +20,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 /**
  * Issue #399(R-9a): 締切の直前の再計算の段階(`registerClose`・`closeFetcher`・`runCloseStep`・`computeClosePayload`)を `RaceDayCore` から切り出す前に、
  * **今の挙動を固定する特性テスト**。切り出しの前後で、このファイルを書き換えずに緑のままであることが、挙動を変えていないことの根拠になる。
+ * **切り出しの後の名前**(このヘッダと本文の旧名の読み替え): `registerClose`→`CloseStage.register`・`runCloseStep`→`CloseStage.runStep`(`closeFetcher`・`computeClosePayload` は名前のまま `CloseStage` の private メソッド)。実装は `cloud/src/race-day-close-stage.ts`。
  *
  * 既存の `race-day-close*.test.ts` が固定していない面を固定する(既存のテストは `analysis_close` の行・理由・回・組合せの窓を固定している):
  *  - **ログの文言**(`onWarn` に渡る文面。全文一致)

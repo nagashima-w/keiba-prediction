@@ -81,7 +81,7 @@ export function selectBulkTargets(input: SelectInput): BulkSelection {
   return { raceIds, excluded: { running, done, started, timeUnknown } };
 }
 
-/** 場ごとの一括実行の操作の状態(`app.ts` が持つ。キーは場のまとまりのキー)。 */
+/** 場ごとの一括実行の操作の状態(`bulk-control.ts` が持つ。Issue #400 R-11a で `app.ts` から移した。キーは場のまとまりのキー)。 */
 export type BulkUi =
   /** 確認画面。押した時点の対象(raceIds)と除外の件数を覚える(画面の件数と、実行で送る対象を一致させる)。 */
   | { readonly kind: "confirm"; readonly mode: TaskMode; readonly raceIds: readonly string[]; readonly excluded: BulkExclusions }

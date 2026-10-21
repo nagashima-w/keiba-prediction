@@ -566,7 +566,7 @@ export interface OddsSnapshot {
    * `scrapeRace`の`options.includeComboOdds`がtrueのときのみ設定される。
    *
    * **`Record`である理由(`ReadonlyMap`を載せない)**: `RaceData`は`buildRaceSnapshot`
-   * (`packages/core/src/analysis/analysis-export.ts:89`)がホワイトリストで詰め替えるため
+   * (`packages/core/src/analysis/analysis-export.ts`)がホワイトリストで詰め替えるため
    * 現状は直列化事故が起きていないが、`Map`をドメイン型に載せると将来`JSON.stringify`/IPC
    * 経由で静かに`{}`になる種を植える。`win`/`place`が`Record`である既存流儀に揃える。
    */

@@ -100,7 +100,7 @@ export function conditionChangeRunsOf(
  * `promptInput.horses`(【出走馬】プロンプト用。{@link buildPromptInput} の horses の map)と
  * `rows`(`AnalysisResult.rows`。`analysis-record.ts` の `buildAnalysisRows`)の**両方**が
  * この関数を経由することで、`race.odds.win[umaban]?.odds ?? null` という式のリテラルな
- * 重複を増やさない(A-1是正・D-1・boss裁定)。`analysis-export.ts:139`にも同一の式が
+ * 重複を増やさない(A-1是正・D-1・boss裁定)。`analysis-export.ts` の `buildRaceSnapshot` にも同一の式が
  * 独立に存在するが、そちらは別プロセス境界・別責務のため統合しない(boss裁定によりスコープ外)。
  * オッズ未発売(oddsStatus="yoso")でも予想オッズ値が入ることがある(scraper側の仕様。
  * 呼び出し元コメント参照)。

@@ -232,7 +232,8 @@ export function failureMessage(failure: ApiFailure): string {
 /**
  * 失敗(200 以外)の分類のうち、`classify` に「netkeiba の 503 も server-error にする」を足したもの。
  * 書き込み(起動・設定・日報の作成)と検証の取得が使う: これらの 503 は netkeiba の取得に失敗したのではなく、サーバ側のエラーとして扱う。
- * `classify` そのまま(netkeiba の 503 を保つ)なのは、レース一覧と日報・月報の一覧/詳細の取得。
+ * `classify` そのまま(netkeiba の 503 を保つ)なのは、レース一覧・板の取得(`parseRows`。`api.ts`)、過去の分析の一覧・分析の詳細(`fetchPastAnalyses`・`fetchAnalysis`。`api-analysis.ts`)、
+ * 今日の狙い目(`fetchTargets`。`api-targets.ts`)、日報・月報の一覧/詳細の取得(`getOkBody` を使うもの。`api-report.ts`・`api-monthly.ts`)。
  */
 export function classifyWithoutNetkeiba(status: number, body: unknown): ApiFailure {
   const failure = classify(status, body);

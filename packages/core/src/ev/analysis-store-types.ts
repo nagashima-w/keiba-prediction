@@ -71,7 +71,7 @@ export interface AnalysisRecord {
   readonly additionalInstruction?: string | null;
   /**
    * 開催日(YYYYMMDD、Task#34)。呼び出し側(`analysis/analysis-pipeline.ts` の `runAnalysis`)で選択済みの開催日(kaisaiDate)をそのまま渡す想定。
-   * 選択済み開催日が渡らなかった(当日日付で近似した)場合は null を渡す。
+   * 選択済み開催日が渡らなかった場合は null を渡す(`runAnalysis` は開催日が必須で、当日日付で近似する経路は #400 R-10b で撤去した)。
    * 省略時も null(日付不明。既存呼び出し元との後方互換のため任意項目とする)。
    */
   readonly kaisaiDate?: string | null;

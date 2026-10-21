@@ -1765,7 +1765,7 @@ async function handleReportRun(request: Request, env: Env, now: () => Date): Pro
   }
   const record = guarded.body;
   if (Object.keys(record).some((k) => !REPORT_RUN_KEYS.has(k))) {
-    return badRequest("本文のキーは date だけです");
+    return badRequest("本文のキーは date と regenerate だけです");
   }
   const date = record["date"];
   if (typeof date !== "string") {

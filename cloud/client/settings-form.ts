@@ -110,7 +110,7 @@ const ERROR_TEXT: Readonly<Record<FieldKey, (draftValue: DraftValue) => string>>
   includeTrifectaInAllocation: () => "チェックの状態が不正です。",
   includeBracketQuinellaInAllocation: () => "チェックの状態が不正です。",
   preRaceOffsetMinutes: () => `${PRE_RACE_OFFSET_MIN}以上${PRE_RACE_OFFSET_MAX}以下の整数(分)を入力してください(半角)。`,
-  // スコアリングの重み15項目(Issue #218・#353・#354): exe の isValidWeight(有限な数で 0 以上。上限なし)と同じ範囲
+  // スコアリングの重み15項目(Issue #218・#353・#354): 有限な数で 0 以上。上限なし(exe の isValidWeight〈#393 で削除〉と同じ範囲だった)
   ...(Object.fromEntries(WEIGHT_FIELD_ORDER.map((key) => [key, () => "0以上の数値を入力してください(半角)。"])) as Record<(typeof SCORING_WEIGHT_FIELDS)[number]["field"], () => string>),
 };
 

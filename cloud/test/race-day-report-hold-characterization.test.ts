@@ -17,6 +17,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 /**
  * Issue #399(R-9b): 日報の時刻の下限の段階(`reportHoldAt`・`afterReportHold`・`pendingReportHoldAt`・`reportJudgePending`・`markReportHoldJudged`・`recordReportHold`)を
  * `RaceDayCore` から切り出す前に、**今の挙動を固定する特性テスト**。切り出しの前後で、このファイルを書き換えずに緑のままであることが、挙動を変えていないことの根拠になる。
+ * **切り出しの後の名前**(このヘッダと本文の旧名の読み替え): `reportHoldAt`→`ReportHoldStage.holdAt`・`afterReportHold`→`isAfterHold`・`pendingReportHoldAt`→`pendingAlarmAt`・`reportJudgePending`→`judgePending`・`markReportHoldJudged`→`markJudged`・`recordReportHold`→`record`。実装は `cloud/src/race-day-report-hold-stage.ts`(`AlarmInputs.reportJudgePending` と `DayQuietInput.afterReportHold` は入力のフィールド名として今も同じ名前)。
  *
  * 既存の `race-day-report-hold.test.ts` が固定している面(記録の値・回数・skip 条件・依頼の時刻)に加えて、**値だけでは見えない面**を固定する:
  *  - **ログの文言**(`onWarn` に渡る文面。全文一致)
