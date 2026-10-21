@@ -1882,6 +1882,22 @@
               "last3f": null
             }
           ]
+        },
+        {
+          "raceId": "202603020214",
+          "entries": [
+            {
+              "umaban": 1,
+              "finishPosition": null
+            },
+            {
+              "umaban": 2,
+              "finishPosition": null,
+              "passing": [],
+              "last3f": null
+            }
+          ],
+          "courseType": null
         }
       ],
       "expected": {
@@ -2400,6 +2416,22 @@
               }
             }
           }
+        },
+        {
+          "raceId": "202603020213",
+          "entries": [
+            {
+              "umaban": 1,
+              "finishPosition": 1,
+              "placePayout": 100,
+              "winPayout": 200
+            },
+            {
+              "umaban": 2,
+              "finishPosition": 2
+            }
+          ],
+          "courseType": null
         }
       ],
       "expected": {

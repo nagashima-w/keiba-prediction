@@ -235,7 +235,11 @@ function scenarioInputs(): Array<{ name: string; raw?: ContractCase["raw"]; step
     {
       name: "all-finish-null-no-meta-no-combo",
       // 全頭が中止・除外のレース(行はあるが着順が全て NULL)。面・組合せ払戻は渡さない。
-      steps: [{ raceId: "202603020214", entries: [{ umaban: 1, finishPosition: null }, { umaban: 2, finishPosition: null, passing: [], last3f: null }] }],
+      steps: [
+        { raceId: "202603020214", entries: [{ umaban: 1, finishPosition: null }, { umaban: 2, finishPosition: null, passing: [], last3f: null }] },
+        // Issue #433(R-12a): 面を `null` で明示して同じレースを保存し直しても、面の行は作らない(「省略」と「null」はどちらも面を書かない)。結果の行は同じなので、期待値(expected)は変わらない。
+        { raceId: "202603020214", entries: [{ umaban: 1, finishPosition: null }, { umaban: 2, finishPosition: null, passing: [], last3f: null }], courseType: null },
+      ],
       probeIds: ["202603020214", "202603020215"],
     },
     { name: "resave-delete-then-insert-undetermined-keeps", steps: resave, probeIds: ["202603020211", "202603020212", "202603020213"] },
@@ -248,6 +252,8 @@ function scenarioInputs(): Array<{ name: string; raw?: ContractCase["raw"]; step
           courseType: "障",
           comboPayouts: { wide: UNDETERMINED, trio: UNDETERMINED, exacta: UNDETERMINED },
         },
+        // Issue #433(R-12a): 面が書かれたレースを、面 `null` で保存し直しても、面の行は消えも上書きもされない(「障」のまま)。結果の行は同じなので、期待値(expected)は変わらない。
+        { raceId: "202603020213", entries: [{ umaban: 1, finishPosition: 1, placePayout: 100, winPayout: 200 }, { umaban: 2, finishPosition: 2 }], courseType: null },
       ],
       probeIds: ["202603020213", "202603020216"],
     },

@@ -488,6 +488,24 @@ describe("締切の直前の再計算: 行わない・失敗の語彙", () => {
     expect(closeRows(h)[1]).toMatchObject({ state: "done", attempts: 1 });
   });
 
+  it("取得の失敗の警告は、鍵の形(sk-ant-...)を伏せて onWarn に出す(段階は本体の redactSecrets の包みを通した onWarn を受け取る。素の deps.onWarn に配線すると漏れる。Issue #433〈#399 R-9a の記録〉)", async () => {
+    const h = harness();
+    await analyze(h);
+    const SECRET = "sk-ant-api03-ABCDEFghij_klmn-0123456789";
+    const okFetch = h.gate.fetchRaw.bind(h.gate);
+    h.gate.fetchRaw = async (url, ...rest) => {
+      if (/api_get_jra_odds/.test(url)) throw new Error(`取得先が落ちています ${SECRET} (再試行してください)`);
+      return okFetch(url, ...rest);
+    };
+    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "retry" });
+    const failures = h.warnings.filter((w) => w.includes("締切の直前の再計算の取得に失敗しました"));
+    expect(failures).toHaveLength(1); // 前提: 取得の失敗の警告が実際に出ている
+    expect(failures[0]).toContain("取得先が落ちています"); // 前提: 失敗の原因の文面が警告に載っている(原因を丸ごと捨てていない)
+    expect(failures[0]).toContain("sk-ant-***"); // 鍵の形は伏せた形で残る
+    expect(h.warnings.join("\n")).not.toContain("ABCDEFghij");
+    expect(h.warnings.join("\n")).not.toContain(SECRET);
+  });
+
   it("組合せオッズの取得に警告が出たら(券種が欠ける)、見かけの買い目の削除にしないため failed(fetch-failed)", async () => {
     const h = harness();
     await analyze(h);

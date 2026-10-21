@@ -182,3 +182,65 @@ describe("collectProposedBetEvents(買い目ごとの判定の事象)", () => {
     expect(JSON.stringify(computeVerifyReport(source(), DEFAULT_VERIFY_CONFIG))).toBe(before);
   });
 });
+
+/**
+ * 組合せ払戻の取得回数(Issue #433〈#398 R-7 のレビューの記録〉)。`computeProposedBetReport` の `comboPayoutsOf` は、レース×券種ごとに `getComboPayouts` を 1 回だけ引く
+ * (同じレースに買い目が複数あっても、同じレースの分析が複数あっても、無駄な読み出しをしない)。値は引いたものをそのまま返す(別のレース・別の券種の値を返さない)。
+ */
+describe("組合せ払戻のキャッシュ(レース×券種ごとに getComboPayouts を 1 回)", () => {
+  // 既定(latest)は同一レースの最新 1 件しか数えないので、同じレースの 2 つの分析を両方使うために全分析を集計する設定にする。
+  const ALL_ANALYSES = { ...DEFAULT_VERIFY_CONFIG, includeAllAnalyses: true };
+  function countingSource(): { readonly source: VerifyDataSource; readonly calls: string[] } {
+    // 同じレース A に 2 つの分析(買い目が複数。ワイド 3 本・3連複 2 本)、別のレース B に 1 つの分析(ワイド 1 本)。
+    const analyses = [analysis(1, RACE_A), { ...analysis(2, RACE_A), analyzedAt: "2026-06-06T02:00:00.000Z" }, analysis(3, RACE_B)];
+    const results: Record<string, RaceResultEntry[]> = { [RACE_A]: RESULT_A, [RACE_B]: RESULT_B };
+    const payouts: Record<string, RaceComboPayoutsReadResult> = {
+      [`${RACE_A}:wide`]: { state: "imported", payouts: [{ comboKey: "0102", payout: 500 }] },
+      [`${RACE_A}:trio`]: { state: "imported", payouts: [{ comboKey: "010203", payout: 2000 }] },
+      [`${RACE_B}:wide`]: { state: "imported", payouts: [{ comboKey: "0102", payout: 900 }] },
+    };
+    const allocations: Record<number, StoredAllocationSummary> = {
+      1: { route: "mixed", skipReasonCode: null, bets: [{ betType: "wide", comboKey: "0102", stake: 100 }, { betType: "wide", comboKey: "0203", stake: 100 }, { betType: "wide", comboKey: "0103", stake: 100 }, { betType: "trio", comboKey: "010203", stake: 100 }, { betType: "trio", comboKey: "010204", stake: 100 }] },
+      2: { route: "mixed", skipReasonCode: null, bets: [{ betType: "wide", comboKey: "0102", stake: 200 }, { betType: "trio", comboKey: "010203", stake: 200 }] },
+      3: { route: "mixed", skipReasonCode: null, bets: [{ betType: "wide", comboKey: "0102", stake: 100 }] },
+    };
+    const calls: string[] = [];
+    return {
+      calls,
+      source: {
+        listAnalyses: () => analyses,
+        getResult: (raceId) => results[raceId],
+        getComboPayouts: (raceId, betType) => {
+          calls.push(`${raceId}:${betType}`);
+          return payouts[`${raceId}:${betType}`] ?? { state: "not_imported" };
+        },
+        getAllocationForVerify: (id) => allocations[id],
+      },
+    };
+  }
+
+  it("レース A のワイド(分析 2 つ・買い目 4 本)・3連複(買い目 3 本)とレース B のワイドは、それぞれ 1 回だけ引く(合計 3 回)", () => {
+    const { source: src, calls } = countingSource();
+    const report = computeVerifyReport(src, ALL_ANALYSES).proposedBet;
+    // 前提: 買い目が実際に判定されている(キャッシュ以前に、取得が起きている)
+    expect(report.population.allocated).toBe(3);
+    expect(report.wide.betCount).toBe(5); // 的中: A(分析 1)の 1 本・A(分析 2)の 1 本・B の 1 本 / 外れ: A(分析 1)の 2 本(0203・0103)
+    expect(report.trio.betCount).toBe(3);
+    expect([...calls].sort()).toEqual([`${RACE_A}:trio`, `${RACE_A}:wide`, `${RACE_B}:wide`]);
+  });
+
+  it("キャッシュした値は、別のレース・別の券種に使い回されない(各買い目は自分のレース・券種の払戻で判定される)", () => {
+    const { source: src } = countingSource();
+    const events = collectProposedBetEvents(src, ALL_ANALYSES);
+    const pick = (analysisId: number, betType: string, comboKey: string): ProposedBetEvent => {
+      const found = events.filter((e) => e.analysisId === analysisId && e.betType === betType && e.comboKey === comboKey);
+      expect(found).toHaveLength(1);
+      return found[0]!;
+    };
+    expect(pick(1, "wide", "0102")).toMatchObject({ outcome: "hit", payout: 500 });
+    expect(pick(2, "wide", "0102")).toMatchObject({ outcome: "hit", payout: 1000 }); // 賭け金 200 円 × 500 / 100(同じレースの払戻を使い回す)
+    expect(pick(3, "wide", "0102")).toMatchObject({ outcome: "hit", payout: 900 }); // 別のレースの払戻(A のキャッシュを使わない)
+    expect(pick(1, "trio", "010203")).toMatchObject({ outcome: "hit", payout: 2000 });
+    expect(pick(1, "trio", "010204")).toMatchObject({ outcome: "miss", payout: 0 });
+  });
+});
