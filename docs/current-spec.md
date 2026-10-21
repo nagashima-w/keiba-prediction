@@ -1704,10 +1704,10 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 ### スマホ画面の発走前の結果をカードの中に出す(#188〈#165-f〉。v1.19.20)
 **exe のアプリコード・core・サーバ(`cloud/src/*`。`page.ts` の CSS だけ)は無変更**。実機(本番 v1.19.19)で、事前分析の prior の順位はカードの中に出るのに、発走前の結果だけ「結果を見る」から別のページへ移ることをユーザーが気にした。ユーザー判断(2026-10-07): 発走前が完了していれば、レース画面を開いたときに結果を**最初から**カードの中に出す(タップで展開する方式ではない)。
 
-- **最新の分析**: 板の発走前の行が `done` で `analysisId` を持つときのその id(`client/race.ts` の `latestAnalysisIdOf`)。**取るかどうか(`app.ts`)と出すかどうか(`buildRaceModel`)の唯一の判定**。実行中・失敗・未実行では出さない(再実行の間、前の結果を見せない。サーバは再実行で `analysis_id` を NULL に戻す)。
+- **最新の分析**: 板の発走前の行が `done` で `analysisId` を持つときのその id(`client/race.ts` の `latestAnalysisIdOf`)。**取るかどうか(`race-data.ts`)と出すかどうか(`buildRaceModel`)の唯一の判定**。実行中・失敗・未実行では出さない(再実行の間、前の結果を見せない。サーバは再実行で `analysis_id` を NULL に戻す)。
 - **表示**: 発走前のカードの中、起動のボタンの前(朝の prior と同じ並び)。分析時刻・分析モデル・`detail` の注記・馬ごとのカード・配分の提案。**馬ごと・配分の部分は結果画面と共通の `resultSections`**(`contentOf` を export して同じ変換を使う。見出しの階層だけ違う=結果画面は `h2`、カードの中は `h3`)。見出しは `h3` の中のボタン(`class="result-toggle"`・`aria-expanded`・`data-date`・`data-race`・文字 `▾`/`▸ 分析の結果`)。**読み込み中・失敗は開閉に関係なく常に出す**(開閉の見出しは取得できたときだけ)。
 - **開閉**: 既定は開。状態はアプリのメモリに (開催日, race_id) ごとに、利用者が押した値だけを持つ(#187 と同じ。ハッシュ・localStorage には持たない=再読込で開に戻る。「更新」・往復で保たれる)。開閉で取得は起こらない。クリック処理の引数(開催日・レース)は `data-*` にも出し、木の全走査の契約(`client-view.test.ts`)の対象に含める。
-- **取得**(⚠️ サーバは R2 の詳細を読み Class B を +1 し、D1 の書き込みが 1 行): `GET /api/analyses/{id}` を **id ごとに 1 回**。`loadAnalysis` を結果画面と共有する(同じメモリのキャッシュ・同じ 3 つの門〈`analyses`・`analysisErrors`・`analysisInflight`〉)。取るのは `syncLatestAnalysis`(冪等)を呼ぶ 2 箇所だけ: ① `ensureLoaded`(画面を開いたとき・戻ったとき。状態がキャッシュ済みで、他の画面にいる間に完了していた場合を含む)② `applyBoard`(状態の取得の成功・ポーリング・板の取得。完了への遷移もここ)。**`render()` からは取らない**。**ポーリングの周期では取らない**(完了を検知したとき、新しい id を 1 回だけ)。結果画面(`analysis` が付いたハッシュ)にいるときは取らない。
+- **取得**(⚠️ サーバは R2 の詳細を読み Class B を +1 し、D1 の書き込みが 1 行): `GET /api/analyses/{id}` を **id ごとに 1 回**。`loadAnalysis` を結果画面と共有する(同じメモリのキャッシュ・同じ 3 つの門〈`analyses`・`analysisErrors`・`analysisInflight`〉)。取るのは `syncLatestAnalysis`(冪等)を呼ぶ 2 箇所だけ: ① `ensureRace`(`app.ts` の `ensureLoaded` から呼ぶ。画面を開いたとき・戻ったとき。状態がキャッシュ済みで、他の画面にいる間に完了していた場合を含む)② `applyBoard`(状態の取得の成功・ポーリング・板の取得。完了への遷移もここ)。どちらも `client/race-data.ts`。**描画(`app.ts` の `render()`)からは取らない**。**ポーリングの周期では取らない**(完了を検知したとき、新しい id を 1 回だけ)。結果画面(`analysis` が付いたハッシュ)にいるときは取らない。
 - **失敗**: 固定の文言(`failureMessage`。サーバの文面は出さない)+「(「更新」で再取得できます)」を `role="alert"` でカードに出す。自動では再試行しない。**レース画面の「更新」は、失敗した最新の分析だけ**を取り直す(成功した分析は取り直さない)。取得中は `RaceModel.loading` が true で「更新」は押せない(押されても無視)。
 - **「結果を見る」のリンクを廃止**。結果画面(`#analysis=<id>`)は、過去の分析の一覧のリンク用に残す。
 - **【記録】**: 板で `done` なのに `analysis_id` が無い(サーバ側では到達しない)ときは何も出さない/取得した分析の `raceId` が画面のレースと違う場合の検査はしない/ページを再読込するとキャッシュが消え、完了済みのレースを開くたびに id ごとに 1 回ずつ R2 を読む。
@@ -2173,7 +2173,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
 ### スマホ画面の土台と名前(#191〈#165-h〉。v1.19.21)
 変更は `cloud/`(クライアント・`page.ts`・生成物)と、core の調教のキャッシュ鮮度だけ(exe のアプリコードは無変更)。
 - **名前**: web は **Uma Driller**(`<title>`・`<h1>`)。`/check` は「Uma Driller(確認ページ)」。**exe の名前は変えない**(#190)。`<h1>` の中の `<a class="home" href="#">` が、トップ(一覧の画面。既定は今日・中央)へのリンク。
-- **画面の判定**: `route.ts` の `screenOf(route)`(`list`・`race`・`result`)に集約。優先順位は analysis > race > 一覧。`app.ts` の 5 つの関数(render・onCompleted・syncLatestAnalysis・ensureLoaded・onRefresh)が使い、`switch` と `never` で網羅チェックする。`test/client-route.test.ts` が、`app.ts` に `route.analysis`・`route.race` を null と直接比べる分岐が残っていないことを静的に固定する。
+- **画面の判定**: `route.ts` の `screenOf(route)`(`list`・`race`・`result`)に集約。優先順位は analysis > race > 一覧。5 つの関数(`app.ts` の render・ensureLoaded・onRefresh と、`race-data.ts` の onCompleted・syncLatestAnalysis。Issue #400 R-11b で後ろの 2 つを切り出した)が使い、`switch` と `never` で網羅チェックする。`race-data.ts` は今の画面を依存の `currentScreen()`(`app.ts` が役割を反映して渡す)で受け取り、`screenOf` を import も呼びもしない。`test/client-route.test.ts` が、`app.ts` と `race-data.ts` を連結して読み、`route.analysis`・`route.race` を null と直接比べる分岐(`route().race` の形も含む)が残っていないこと、`screenOf(` の呼び出しが `currentScreen` の中の 1 箇所だけであることを静的に固定する。
 - **カードの説明**: `race.ts` の `CARD_DESCRIPTIONS`(`TaskCard.description`。`view.ts` が `p.card-desc` にする。テキストノード)。板の状態によらず、カードがあれば出る。文言は実際の挙動に合わせた(事前分析: 出馬表・オッズ・戦績・騎手の成績・調教を取得〈調教は中央のみ(`scrape-race.ts` の `if (!isNar)`)。組合せオッズは取らない〉・gate への取得は中央で頭数 N・騎手 M 人なら N+3+M 本(16頭・騎手16人で 35 本。騎手の重みが 0 なら N+3 本)・地方で N+2+M 本、× 最小間隔 2 秒からの導出で1〜2分〈実測なし。#226 の前は騎手を取らず1分弱と書いていた〉・戦績・調教・騎手の成績は発走前に使い回す・prior は DO にだけ置き、D1・R2 の分析の履歴には残さない/ 発走前: 出馬表・オッズを取り直す〈オッズはキャッシュ迂回。組合せは設定 ON のときだけ〉・3着内率・EV〈複勝 EV = 3着内率 × 複勝オッズの下限。LLM が効いたときは補正後の3着内率から計算〉を D1・R2 に保存・配分は総資金・1レースの上限を設定しているときだけ〈既定は両方 0 で出ない〉)。**LLM は #194 で使うようになり、#195 で説明を直した**: 「API キーがあれば LLM が3着内率を補正して印と根拠を付け(EV は補正後の値で計算)、キーが無い間は統計のみ」と、**キーの有無のどちらでも嘘にならない書き方**(画面からキーの有無は分からない。116 文字)。cloud のプロンプトの中身(調教・コメント・展開・同日の傾向・重賞の傾向)は約束しない。
 - **調教のキャッシュ鮮度**: `DEFAULT_OIKIRI_TTL_MS` を 6 時間から 24 時間(戦績と同じ)に延ばした(ユーザー判断 2026-10-07。調教は当日の朝に取得できていれば、その後に更新されない)。鮮度は読み取り側で判定するので移行処理は不要。exe にも効くが、取り直しが減るだけで分析結果は変わらない。cloud では、事前分析で取った調教が夕方の発走前でも使い回される(旧 6 時間では、午前の事前分析の調教が、遅い時間のレースの発走前で期限切れになっていた)。
 - **検査**: `cloud/test/page.test.ts`・`client-route.test.ts`・`client-race.test.ts`・`client-view.test.ts`・`client-app-run.test.ts`(カードを見出しの文字で引く)・`packages/core/test/scraper/scrape-race-shutuba-ttl.test.ts`。**実機(スマホ)でのレイアウト・タップは自動検査できない**(デプロイ後にユーザーが確認する)。
@@ -2202,7 +2202,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
 ### スマホ画面の起動と状態の追跡(#186〈#165-d〉。v1.19.19)
 **exe のアプリコード・core・サーバ(`cloud/src/*`。`page.ts` の CSS だけ)は無変更**。実装は 2 段階(段階1: 描画まわり、段階2: 起動と追跡)で、公開は 1 回。
 
-**起動(`POST /api/analyses/run`。`client/api-run.ts`・`app.ts`)**
+**起動(`POST /api/analyses/run`。`client/api-run.ts`・`run-control.ts`。配線は `app.ts`)**
 - **ボタン**(レース画面の各カード。状態が取れているときだけ出す):
   - 朝: 未実行「事前分析を実行」/完了「事前分析をやり直す」/失敗「再試行」
   - 発走前: 未実行「発走前の分析を実行」/完了「再実行(新しい分析として保存されます)」/失敗「再試行」
@@ -2218,7 +2218,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
   - Node の undici(core の依存。8.11.2 のソース `lib/web/fetch/util.js` の `appendRequestOriginHeader` で確認)は、この「mode が cors 以外」の条件を持たない古い仕様の実装で、Node のテストでは Origin の挙動を確かめられない(テストは init の内容と、実際の `handle()` との契約を固定する)。**実ブラウザでの確認は本番での実機確認項目**: スマホで起動して、403 にならないこと。
   - (#186 の Issue 本文・`issue-order.md` の旧記述は「Origin: null になるはずで、付けないと 403 になる」だった。これは誤りで、2026-10-07 の着手前確認で訂正した。)
 
-**追跡(`client/tracker.ts`・`board-state.ts`・`app.ts`)**
+**追跡(`client/tracker.ts`・`board-state.ts`・`race-data.ts`)**
 - **取得**: `GET /api/analyses/status?kaisai_date=`(race_id なし)を、実行中(queued・fetched。またはオーバーレイ)の行がある開催日ごとに取る。持ち主はアプリ全体で、一覧のバッジ・場の見出しの要約・レース画面のカードの行(最新の板から導く。`status?race_id=` は prior と板の初期値)に反映される。`/api/analyses/{id}`・`/api/races`・`status?race_id=` はポーリングで呼ばない(完了時の取り直しを除く)。
 - **間隔**: 3 秒 × 10 回、その後は 5 秒。**タイマーは取得の完了後に張る**(`setInterval` は使わない)。
 - **停止**:

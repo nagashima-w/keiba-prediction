@@ -2,7 +2,7 @@
  * 単体の起動(`POST /api/analyses/run`。Issue #186)の制御。`app.ts` から切り出した(Issue #400 R-11)。DOM・fetch・時計は注入する(Node でテストできる)。
  *
  *  - 起動(`onRun`): 同期の印(`runStates`)を `await` の前に立てて二重押しを防ぐ。202・409 は板にオーバーレイ(待ち等)を重ねて追跡を始める。失敗は固定の文言(`runFailureMessage`)。
- *  - 板のオーバーレイ(`setOverlay`)と追跡の開始(`forceTrack`)は、`app.ts` が持つ板・追跡の道具を関数で受ける(ここは板・追跡の状態を持たない)。
+ *  - 板のオーバーレイ(`setOverlay`)と追跡の開始(`forceTrack`)は、`race-data.ts` が持つ板・追跡の道具(`app.ts` が関数で渡す)を受ける(ここは板・追跡の状態を持たない)。
  *  - **閲覧者(Issue #238)には起動のボタンが無い**。万一呼ばれても POST しない(サーバも 403)。
  */
 import type { FetchLike, TaskMode } from "./api";

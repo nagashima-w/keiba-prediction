@@ -460,7 +460,7 @@ export async function fetchPastAnalyses(fetchLike: FetchLike, date: string, race
 
 /**
  * `GET /api/analyses/{id}`。⚠️ サーバは R2 の詳細を読み、操作回数(Class B)を +1 する(無害な読み取りではない)ので、**利用者が結果の画面を開いたときに 1 回だけ**呼び、
- * 呼び出し側(app.ts)がメモリにキャッシュする。ポーリングに含めない。
+ * 呼び出し側(race-data.ts)がメモリにキャッシュする。ポーリングに含めない。
  */
 export async function fetchAnalysis(fetchLike: FetchLike, id: number): Promise<AnalysisResult> {
   const got = await getJson(fetchLike, `/api/analyses/${id}`);
