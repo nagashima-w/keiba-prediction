@@ -46,6 +46,18 @@
  * 1 晩の上限(150)は、(A)・(B) の合計に対する上限のまま。対象は (B) の分だけ増えるが、1 晩に取得する本数は増えない(多いぶんは、翌晩以降に回る)。
  * 開催日が NULL の分析のレースは、段階 1 と同じ理由で対象外({@link BackfillStatus.winOdds} の `undated` に件数を出す)。
  *
+ * ## 段階 3: レースのクラスの補完(Issue #426-b。#426-a の続き)
+ * 段階 1・2 が尽きたら(段階 2 の列挙も空で、不正なレースの除外もなかったとき)、**結果はあるが、そのレースの分析の行に `race_class` が NULL のものがある**レースを、同じ仕組みで少しずつ埋める
+ * (出馬表・結果ページの `div.RaceData02` のクラス。#426-a の結果ステージが、結果ページを読んだときに `saveRaceClass` で書く)。既存の分析は、スナップショットにクラスが無いので、結果ページを取り直さないとクラスが分からない。
+ * 取得は同じ `dispatchResultImports`(呼び出し箇所は増えない)に **`winOddsOnly: true`**(「NULL の列だけを埋める」補完モード)を渡して依頼する。補完モードの `saveWinOdds`・`saveScratched` は、保存済みの結果に対して
+ * 書き込み 0(WHERE が NULL の列だけに当たる。実 D1 の `test/result-class-backfill-repository.test.ts` が固定)で、その直後の `saveRaceClass` だけが書く。窓・1 晩 {@link BACKFILL_NIGHTLY_LIMIT} レース・
+ * 1 回 {@link BACKFILL_CHUNK_SIZE} レース・gate の都合・失敗の扱いは**段階 1・2 と共有**する(段階 1・2 が先なので、段階 3 は両者の枠を食わない)。
+ * **状態は DO の SQLite の別の表 `backfill_class`**(`class_tried`・`class_abandoned`・`class_done`)。`backfill_race` は 1 レースにつき状態が 1 つなので、段階 3 が段階 2 の `fill_done` を上書きすると、
+ * オッズが NULL のまま D1 に残るレースを段階 2 が毎晩列挙し直す(無限の再取得)。別の表なら、段階 1・2 の状態・除外は一切変わらない。
+ * 取得できたレースは、ページにクラスが無い(ばんえい等)・語彙に無い表記・クラスの保存の失敗で D1 が NULL のままでも `class_done`(**二度と列挙しない**)。そのレースは `raceClass.stillNull` に数えて見せる。
+ * 取得できなかったレースの扱い(永久な分類・系統的な障害・一時的・gate の都合)は段階 1・2 と同じ規則で、`class_abandoned` にする。
+ * 開催日が NULL の分析のレースは対象外({@link BackfillStatus.raceClass} の `undated`)。段階 3 のメソッドを持たない Store(従来の構成)では動かない(状態はすべて 0・空)。
+ *
  * ## 対象外(数だけ見せる)
  * 開催日(`kaisai_date`)が NULL の分析: 日単位の DO の宛先(開催日)が決まらない(中央の race_id から開催日は導出できない)。{@link BackfillStatus.undated} に件数を出す。
  *
@@ -57,7 +69,7 @@ import { jstKaisaiDate } from "./auto-run-plan";
 import { checkRaceDate } from "./race-date";
 import type { ResultImportProgress } from "./race-day-core";
 import { addDaysToKaisaiDate, dispatchResultImports, errorKind, type DispatchStore, type ResultDayStub } from "./result-dispatch";
-import type { BackfillCounts, CountBackfillOptions, ListBackfillOptions, UnimportedRace, WinOddsBackfillCounts } from "./result-repository";
+import type { BackfillCounts, ClassBackfillCounts, ClassDistributionRow, CountBackfillOptions, ListBackfillOptions, UnimportedRace, WinOddsBackfillCounts } from "./result-repository";
 import type { SqlLike } from "./sql-like";
 
 /** 結果の補完の DO(`ResultBackfill`)の固定名(単一インスタンス)。cron の `scheduled` と `GET /api/results/backfill` が引く。 */
@@ -129,6 +141,14 @@ export interface BackfillStore {
   /** 段階 2(Issue #259・#270): 結果はあるが、オッズが 1 頭も入っていない、または scratched が欠ける(着順が NULL で scratched が NULL の行がある)レース。 */
   listWinOddsBackfillRaces(options: ListBackfillOptions): Promise<UnimportedRace[]>;
   countWinOddsBackfill(options: CountBackfillOptions): Promise<WinOddsBackfillCounts>;
+  /**
+   * 段階 3(Issue #426-b): 結果はあるが、分析の行に `race_class` が NULL のものがあるレース。**省略可**: 無い Store(従来の構成・既存のテストの偽物)では段階 3 は動かず、`raceClass` の状態はすべて 0・空。
+   * 本番の `D1ResultStore` は 3 つとも持つ。
+   */
+  listClassBackfillRaces?(options: ListBackfillOptions): Promise<UnimportedRace[]>;
+  countClassBackfill?(options: CountBackfillOptions): Promise<ClassBackfillCounts>;
+  /** 保存済みのクラスの分布(上位 40)。状態の観測用。 */
+  classDistribution?(): Promise<ClassDistributionRow[]>;
 }
 
 export interface BackfillDeps {
@@ -173,6 +193,21 @@ export interface BackfillStatus {
     readonly scratchedMissing: number;
     readonly abandoned: { readonly total: number; readonly byClass: Readonly<Record<string, number>> };
   };
+  /**
+   * 段階 3(Issue #426-b。レースのクラスの補完)。`remaining` = 結果はあるがクラスが NULL の分析の行があるレースのうち、開催日が昨日以前で、完了・除外していないものの数(公開直後の最初の観測で、対象のレース数の総数になる)/
+   * `undated` = 同じ条件で開催日がすべて NULL(補完の対象外)/ `filled` = 取得を終えたレースの累計(`class_done`)/
+   * `stillNull` = 取得を終えた・諦めた(`class_done`・`class_abandoned`・段階 2 の `odds_abandoned`)のに、まだクラスが NULL のレースの数(語彙に無い表記・区分の無いページ・クラスの保存の失敗の目安)/
+   * `abandoned` = 取得できず永久に除外したレース(段階 1・2 の `abandoned` とは別)/ `distribution` = 保存済みのクラスの値ごとのレース数(上位 40。語彙に無い表記の発見・#389-c の材料)。
+   * Store が段階 3 のメソッドを持たない構成では、すべて 0・空。
+   */
+  readonly raceClass: {
+    readonly remaining: number;
+    readonly undated: number;
+    readonly filled: number;
+    readonly stillNull: number;
+    readonly abandoned: { readonly total: number; readonly byClass: Readonly<Record<string, number>> };
+    readonly distribution: readonly ClassDistributionRow[];
+  };
   readonly tonight: { readonly night: string; readonly dispatched: number; readonly limit: number };
   readonly inflight: { readonly day: string; readonly races: number; readonly since: string } | null;
   /** 次にアラームが起きる時刻(ISO。無ければ null)。 */
@@ -180,8 +215,8 @@ export interface BackfillStatus {
   readonly window: { readonly startHour: number; readonly endHour: number };
 }
 
-/** 補完の段階: `results` = 結果の取り込み(段階 1)/ `win-odds` = 確定の単勝オッズ・人気の補完(段階 2。Issue #259)。 */
-type BackfillKind = "results" | "win-odds";
+/** 補完の段階: `results` = 結果の取り込み(段階 1)/ `win-odds` = 確定の単勝オッズ・人気の補完(段階 2。Issue #259)/ `race-class` = レースのクラスの補完(段階 3。Issue #426-b)。 */
+type BackfillKind = "results" | "win-odds" | "race-class";
 
 interface Inflight {
   /** 段階。省略(この変更より前に保存された飛行中の記録)は `results`。 */
@@ -249,6 +284,11 @@ export class ResultBackfillCore {
       `CREATE TABLE IF NOT EXISTS backfill_race (
          race_id TEXT PRIMARY KEY, nights INTEGER NOT NULL, defers INTEGER NOT NULL, last_night TEXT NOT NULL, last_class TEXT NOT NULL, state TEXT NOT NULL)`,
     );
+    // 段階 3(Issue #426-b)の状態。稼働中の DO の表(backfill_race)に触れないよう、同じ形の別の表にする(CREATE TABLE IF NOT EXISTS だけで足りる=DO の SQLite の migration は不要)。
+    deps.sql.exec(
+      `CREATE TABLE IF NOT EXISTS backfill_class (
+         race_id TEXT PRIMARY KEY, nights INTEGER NOT NULL, defers INTEGER NOT NULL, last_night TEXT NOT NULL, last_class TEXT NOT NULL, state TEXT NOT NULL)`,
+    );
   }
 
   // ---- 永続 ----
@@ -292,11 +332,32 @@ export class ResultBackfillCore {
    * **旧い `odds_done`(Issue #270 より前に、オッズだけの補完を終えた印)は含めない**: それらのレースは scratched が NULL のままなので、D1 の条件(scratched の欠け)が選ぶ限り取り直す。
    * 取り込めたら `fill_done` に上書きされ、以後は除外される(1 つの `race_id` に状態は 1 つなので、`odds_done` ↔ 別の状態で行き来しない)。
    */
-  private excludedIds(night: string): string[] {
+  private excludedIds(night: string, kind: BackfillKind = "results"): string[] {
+    if (kind === "race-class") {
+      return this.classExcludedIds(night);
+    }
     const rows = this.deps.sql
       .exec("SELECT race_id FROM backfill_race WHERE state IN ('abandoned', 'odds_abandoned', 'fill_done') OR last_night = ? ORDER BY race_id", night)
       .toArray() as { race_id: string }[];
     return rows.map((r) => r.race_id);
+  }
+
+  /**
+   * 段階 3 の列挙から除外するレース ID(Issue #426-b): 取得を終えた・永久に除外したもの(`class_done`・`class_abandoned`)+ 結果ページが取れず諦めた段階 2 の `odds_abandoned`
+   * (同じページを取り直しても同じ理由で失敗する)+ **その晩に試したもの**(段階 3 の表と、段階 1・2 の表のどちらでも。同じ晩に重ねて取らない)。
+   * 段階 2 の `fill_done` は含めない(それらのレースこそ、クラスの補完が要る)。
+   */
+  private classExcludedIds(night: string): string[] {
+    const own = this.deps.sql.exec("SELECT race_id FROM backfill_class WHERE state IN ('class_abandoned', 'class_done') OR last_night = ?", night).toArray() as { race_id: string }[];
+    const other = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state = 'odds_abandoned' OR last_night = ?", night).toArray() as { race_id: string }[];
+    return [...new Set([...own, ...other].map((r) => r.race_id))].sort();
+  }
+
+  /** 段階 3 の状況の数えで除く、取得を終えた・永久に除外したレース ID(今夜の試行は含めない=今夜試したレースも `remaining` に数える)。 */
+  private classCountExcludedIds(): string[] {
+    const own = this.deps.sql.exec("SELECT race_id FROM backfill_class WHERE state IN ('class_abandoned', 'class_done')").toArray() as { race_id: string }[];
+    const other = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state = 'odds_abandoned'").toArray() as { race_id: string }[];
+    return [...new Set([...own, ...other].map((r) => r.race_id))].sort();
   }
 
   /** 段階 1 の残りの数えで除く、永久に除外したレース ID(段階 2 の状態は含めない)。 */
@@ -313,20 +374,32 @@ export class ResultBackfillCore {
 
   /** 取得できなかったレースを記録する(上の「取得できないレース」の規則)。 */
   private recordFailure(raceId: string, cls: string, night: string, systemic = false, kind: BackfillKind = "results"): void {
-    const prev = (this.deps.sql.exec("SELECT * FROM backfill_race WHERE race_id = ?", raceId).toArray() as RaceRecord[])[0];
+    // 段階 3(race-class)は別の表 backfill_class に書く(段階 1・2 の backfill_race の状態を上書きしない)。表名は定数の 2 つだけ(利用者の入力は入らない)。
+    const table = kind === "race-class" ? "backfill_class" : "backfill_race";
+    const prev = (this.deps.sql.exec(`SELECT * FROM ${table} WHERE race_id = ?`, raceId).toArray() as RaceRecord[])[0];
     const deferral = DEFERRAL_CLASSES.has(cls);
     const nights = (prev?.nights ?? 0) + (deferral ? 0 : 1);
     const defers = (prev?.defers ?? 0) + (deferral ? 1 : 0);
     const abandon = (PERMANENT_CLASSES.has(cls) && !systemic) || nights >= BACKFILL_MAX_NIGHTS || defers >= BACKFILL_MAX_DEFER_NIGHTS;
     this.deps.sql.exec(
-      `INSERT INTO backfill_race (race_id, nights, defers, last_night, last_class, state) VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO ${table} (race_id, nights, defers, last_night, last_class, state) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(race_id) DO UPDATE SET nights = excluded.nights, defers = excluded.defers, last_night = excluded.last_night, last_class = excluded.last_class, state = excluded.state`,
       raceId,
       nights,
       defers,
       night,
       cls,
-      kind === "win-odds" ? (abandon ? "odds_abandoned" : "odds_tried") : abandon ? "abandoned" : "tried",
+      kind === "race-class" ? (abandon ? "class_abandoned" : "class_tried") : kind === "win-odds" ? (abandon ? "odds_abandoned" : "odds_tried") : abandon ? "abandoned" : "tried",
+    );
+  }
+
+  /** 段階 3 で取得を終えたレースを記録する(ページにクラスが無くても・語彙に無い表記でも・保存に失敗しても、二度と列挙しない。D1 が NULL のままなら `raceClass.stillNull` に数える)。 */
+  private recordClassDone(raceId: string, night: string): void {
+    this.deps.sql.exec(
+      `INSERT INTO backfill_class (race_id, nights, defers, last_night, last_class, state) VALUES (?, 0, 0, ?, 'imported', 'class_done')
+       ON CONFLICT(race_id) DO UPDATE SET nights = 0, defers = 0, last_night = excluded.last_night, last_class = 'imported', state = 'class_done'`,
+      raceId,
+      night,
     );
   }
 
@@ -424,6 +497,16 @@ export class ResultBackfillCore {
       kind = "win-odds";
       attempted = await this.listAndDispatch("win-odds", night, to, limit);
     }
+    if (
+      kind === "win-odds" &&
+      this.deps.store.listClassBackfillRaces !== undefined &&
+      !attempted.result.listFailed &&
+      attempted.listed.length === 0 &&
+      attempted.skipped === 0
+    ) {
+      kind = "race-class";
+      attempted = await this.listAndDispatch("race-class", night, to, limit);
+    }
     const { listed, skipped, result } = attempted;
     if (result.listFailed) {
       await this.setAlarm(now + BACKFILL_ERROR_RETRY_MS);
@@ -463,12 +546,17 @@ export class ResultBackfillCore {
     let skipped = 0;
     let result: Awaited<ReturnType<typeof dispatchResultImports>> | null = null;
     for (let attempt = 0; attempt < BACKFILL_MAX_RELIST; attempt += 1) {
-      const exclude = this.excludedIds(night);
+      const exclude = this.excludedIds(night, kind);
       listed = [];
       skipped = 0;
       const store: DispatchStore = {
         listUnimportedRacesByDay: async () => {
-          const found = kind === "win-odds" ? await this.deps.store.listWinOddsBackfillRaces({ to, exclude, limit }) : await this.deps.store.listBackfillRaces({ to, exclude, limit });
+          const found =
+            kind === "race-class"
+              ? await this.deps.store.listClassBackfillRaces!({ to, exclude, limit })
+              : kind === "win-odds"
+                ? await this.deps.store.listWinOddsBackfillRaces({ to, exclude, limit })
+                : await this.deps.store.listBackfillRaces({ to, exclude, limit });
           for (const race of found) {
             if (checkRaceDate(race.raceId, race.kaisaiDate).ok) {
               listed.push(race);
@@ -487,7 +575,8 @@ export class ResultBackfillCore {
         store,
         stubFor: this.deps.stubFor,
         log: this.deps.log,
-        ...(kind === "win-odds" ? { winOddsOnly: true } : {}),
+        // 段階 2・3 は「NULL の列だけを埋める」補完モード(段階 3 は結果ステージが saveRaceClass も呼ぶ)。
+        ...(kind === "win-odds" || kind === "race-class" ? { winOddsOnly: true } : {}),
       });
       if (result.listFailed || listed.length > 0 || skipped === 0) {
         break;
@@ -523,7 +612,9 @@ export class ResultBackfillCore {
       const row = byId.get(raceId);
       if (row?.state === "imported") {
         imported += 1;
-        if (kind === "win-odds") {
+        if (kind === "race-class") {
+          this.recordClassDone(raceId, inflight.night); // 取得を終えた(ページにクラスが無くても・語彙に無くても、二度と列挙しない)
+        } else if (kind === "win-odds") {
           this.recordFillDone(raceId, inflight.night); // 補完を終えた(ページにオッズが無くても・着順なしの馬が残っても、二度と列挙しない)
         } else {
           this.deps.sql.exec("DELETE FROM backfill_race WHERE race_id = ?", raceId);
@@ -563,6 +654,17 @@ export class ResultBackfillCore {
     const to = addDaysToKaisaiDate(night, -1);
     const counts = await this.deps.store.countBackfill({ to, exclude: this.abandonedIds() });
     const oddsCounts = await this.deps.store.countWinOddsBackfill({ to, exclude: this.oddsExcludedIds() });
+    // 段階 3(Issue #426-b)。Store が持たない構成(従来)では、すべて 0・空。
+    const classCounts: ClassBackfillCounts =
+      this.deps.store.countClassBackfill === undefined ? { dated: 0, undated: 0, stillNull: 0 } : await this.deps.store.countClassBackfill({ to, exclude: this.classCountExcludedIds() });
+    const distribution = this.deps.store.classDistribution === undefined ? [] : await this.deps.store.classDistribution();
+    const classByClass: Record<string, number> = {};
+    let classAbandoned = 0;
+    for (const row of this.deps.sql.exec("SELECT last_class AS cls, COUNT(*) AS n FROM backfill_class WHERE state = 'class_abandoned' GROUP BY last_class ORDER BY last_class").toArray() as { cls: string; n: number }[]) {
+      classByClass[row.cls] = row.n;
+      classAbandoned += row.n;
+    }
+    const classFilled = (this.deps.sql.exec("SELECT COUNT(*) AS n FROM backfill_class WHERE state = 'class_done'").toArray() as { n: number }[])[0]?.n ?? 0;
     const inflight = this.loadInflight();
     const dispatched = this.dispatchedTonight(night);
     const byClass: Record<string, number> = {};
@@ -583,7 +685,7 @@ export class ResultBackfillCore {
       state = "disabled";
     } else if (inflight !== null) {
       state = "running";
-    } else if (counts.dated === 0 && oddsCounts.dated === 0) {
+    } else if (counts.dated === 0 && oddsCounts.dated === 0 && classCounts.dated === 0) {
       state = "done";
     } else if (this.metaGet("paused_night") === night) {
       state = "paused";
@@ -600,6 +702,14 @@ export class ResultBackfillCore {
       imported: this.count("imported"),
       abandoned: { total, byClass },
       winOdds: { remaining: oddsCounts.dated, undated: oddsCounts.undated, filled, scratchedMissing: oddsCounts.scratchedMissing, abandoned: { total: oddsAbandoned, byClass: oddsByClass } },
+      raceClass: {
+        remaining: classCounts.dated,
+        undated: classCounts.undated,
+        filled: classFilled,
+        stillNull: classCounts.stillNull,
+        abandoned: { total: classAbandoned, byClass: classByClass },
+        distribution,
+      },
       tonight: { night, dispatched, limit: this.nightlyLimit },
       inflight: inflight === null ? null : { day: inflight.day, races: inflight.raceIds.length, since: new Date(inflight.at).toISOString() },
       nextRunAt: alarm === null ? null : new Date(alarm).toISOString(),

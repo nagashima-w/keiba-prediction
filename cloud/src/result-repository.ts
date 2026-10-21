@@ -298,6 +298,63 @@ export const COUNT_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
            FROM u`;
 
 
+/**
+ * 結果の補完の段階 3(Issue #426-b。レースのクラスの補完)の列挙。判定は段階 2({@link LIST_WIN_ODDS_BACKFILL_SQL})と同じ形で、条件だけが違う:
+ * 分析済みで、結果の行が**あり**、そのレースの分析の行に **`race_class` が NULL のものがある**(同じレースの分析のうち 1 行でも NULL なら対象。`UPDATE analyses SET race_class = ? WHERE race_id = ?` が全行に書く)。
+ * それ以外(開催日が `to` 以下・`GROUP BY race_id` の最小の開催日・**最も新しい日を 1 日だけ**・レースID 昇順・除外するレース ID を JSON 1 つで渡す)は段階 1・2 と同じ。束縛値は `[to, excludeJson, limit]`。
+ *
+ * ## 読み取り行数(索引)
+ * `analyses.kaisai_date` の索引(`idx_analyses_kaisai_date`)の範囲走査で `to` 以前の分析の行を読み、本体の行で `race_class IS NULL` を見る(`race_class` に索引は無い=書き込みの行を増やさないため。0024)。
+ * クラスが NULL の行ごとに、`race_results` の主キー `(race_id, umaban)` の先頭で結果の有無を 1 行だけ引く。したがって読み取りは分析の行数 N に比例する。
+ * 実測(`test/result-class-backfill-repository.test.ts` の「読み取り行数の上界」。N = 600 件・300 レース・全部対象のローカル D1 の `meta.rows_read`): 列挙 2,700 行(4.5N)・件数 1,500 行(2.5N)。
+ * 上界(列挙 5N 以下・件数 3N 以下)をそのテストが固定している。除外の JSON の要素数は別に加わる。
+ * **除外の JSON は束縛値**(SQL 文の長さではなく値の大きさ)。完了したレースの数に比例して増える(レース ID は 12 桁+引用符・区切りで約 16 バイト)ので、
+ * D1 の 1 つの値の大きさの上限(未確認。SQL 文は 100KB と認識)に近づく規模(数千レース)になったら、完了の印を D1 側(`analyses`)に移す設計に替えること。
+ */
+export const LIST_CLASS_BACKFILL_SQL = `WITH u AS (
+             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+             FROM analyses a
+             WHERE a.kaisai_date <= ?
+               AND a.race_class IS NULL
+               AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
+               AND a.race_id NOT IN (SELECT value FROM json_each(?))
+             GROUP BY a.race_id
+           )
+           SELECT raceId, firstDate FROM u
+           WHERE firstDate = (SELECT MAX(firstDate) FROM u)
+           ORDER BY raceId
+           LIMIT ?`;
+
+/**
+ * 段階 3 の残りの数({@link COUNT_BACKFILL_SQL} と同じ形)。対象 = 結果があり、クラスが NULL の分析の行があるレース。
+ * `dated` = 対象で開催日が `to` 以前かつ除外でないレース、`undated` = 対象で開催日がすべて NULL のレース(日単位の DO の宛先が決まらないので補完できない。数だけ見せる)、
+ * `stillNull` = 対象のうち**除外 ID に入っている**レース(取得済み〈`class_done`〉または諦めた〈`class_abandoned`・`odds_abandoned`〉のに、まだクラスが NULL=語彙に無い表記・区分の無いページ・書き込みの失敗の目安)。
+ * 束縛値は `[to, excludeJson, excludeJson]`(`dated` と `stillNull` の分)。
+ */
+export const COUNT_CLASS_BACKFILL_SQL = `WITH u AS (
+             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+             FROM analyses a
+             WHERE a.race_class IS NULL
+               AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
+             GROUP BY a.race_id
+           )
+           SELECT COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS dated,
+                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated,
+                  COALESCE(SUM(CASE WHEN raceId IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS stillNull
+           FROM u`;
+
+/** 保存済みのクラスの分布の上位の件数(状態の応答の大きさの歯止め)。 */
+export const CLASS_DISTRIBUTION_LIMIT = 40;
+
+/**
+ * 保存済みのクラスの分布(Issue #426-b。語彙に無い表記の発見・#389-c の地方の軸の材料)。クラスの値ごとのレース数(同じレースの複数の分析は 1 レース)。NULL は含めない。
+ * レース数の降順・同数は値の昇順(決定的)。上位 {@link CLASS_DISTRIBUTION_LIMIT} 件。値は出馬表・結果ページの固定の語彙(中央)か区分のトークン(地方。20 文字以内)で、利用者の入力は入らない。
+ */
+export const CLASS_DISTRIBUTION_SQL = `SELECT race_class AS value, COUNT(DISTINCT race_id) AS races
+           FROM analyses WHERE race_class IS NOT NULL
+           GROUP BY race_class ORDER BY races DESC, value ASC LIMIT ${CLASS_DISTRIBUTION_LIMIT}`;
+
+
 // ---------------------------------------------------------------------------
 // 保存の文の組み立て
 // ---------------------------------------------------------------------------
@@ -428,6 +485,18 @@ export interface BackfillCounts {
 /** {@link COUNT_WIN_ODDS_BACKFILL_SQL} の結果(段階 2)。`scratchedMissing` は `dated` のうち、scratched が欠けて対象になるレースの数(Issue #270)。 */
 export interface WinOddsBackfillCounts extends BackfillCounts {
   readonly scratchedMissing: number;
+}
+
+/** {@link COUNT_CLASS_BACKFILL_SQL} の結果(段階 3。Issue #426-b)。 */
+export interface ClassBackfillCounts extends BackfillCounts {
+  /** 対象のうち除外 ID に入っているレース(取得済みなのにまだクラスが NULL)。 */
+  readonly stillNull: number;
+}
+
+/** {@link CLASS_DISTRIBUTION_SQL} の 1 行。 */
+export interface ClassDistributionRow {
+  readonly value: string;
+  readonly races: number;
 }
 
 export interface ResultRepository {
@@ -665,6 +734,38 @@ export class D1ResultStore implements ResultRepository {
     const json = JSON.stringify(exclude);
     const row = await this.db.prepare(COUNT_WIN_ODDS_BACKFILL_SQL).bind(to, json, to, json).first<{ dated: number; undated: number; scratchedMissing: number }>();
     return { dated: row?.dated ?? 0, undated: row?.undated ?? 0, scratchedMissing: row?.scratchedMissing ?? 0 };
+  }
+
+  /**
+   * 結果の補完の段階 3(Issue #426-b。上の {@link LIST_CLASS_BACKFILL_SQL})の列挙。
+   * @throws RangeError to が YYYYMMDD の8桁でない・limit が 1〜{@link UNIMPORTED_MAX_LIMIT} の整数でない・exclude が文字列の配列でない(D1 には発行しない)
+   */
+  async listClassBackfillRaces(options: ListBackfillOptions): Promise<UnimportedRace[]> {
+    const { to, exclude, limit } = options;
+    checkBackfillInput(to, exclude);
+    if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
+      throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
+    }
+    const { results } = await this.db.prepare(LIST_CLASS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
+  }
+
+  /**
+   * 結果の補完の段階 3 の残りの数(Issue #426-b。上の {@link COUNT_CLASS_BACKFILL_SQL})。
+   * @throws RangeError to が YYYYMMDD の8桁でない・exclude が文字列の配列でない
+   */
+  async countClassBackfill(options: CountBackfillOptions): Promise<ClassBackfillCounts> {
+    const { to, exclude } = options;
+    checkBackfillInput(to, exclude);
+    const json = JSON.stringify(exclude);
+    const row = await this.db.prepare(COUNT_CLASS_BACKFILL_SQL).bind(to, json, json).first<{ dated: number; undated: number; stillNull: number }>();
+    return { dated: row?.dated ?? 0, undated: row?.undated ?? 0, stillNull: row?.stillNull ?? 0 };
+  }
+
+  /** 保存済みのクラスの分布(Issue #426-b。上の {@link CLASS_DISTRIBUTION_SQL})。 */
+  async classDistribution(): Promise<ClassDistributionRow[]> {
+    const { results } = await this.db.prepare(CLASS_DISTRIBUTION_SQL).all<ClassDistributionRow>();
+    return results.map((r) => ({ value: r.value, races: r.races }));
   }
 
   /**
