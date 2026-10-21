@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 /**
  * Issue #161(#21-C): クラウド版(cloud/)の設定と、公開リポジトリに載せてはいけない値の混入の静的検査。
@@ -10,10 +10,32 @@ import { describe, expect, it } from "vitest";
  * メールアドレス・チーム名の形」だけを見る(実在の値そのものは知り得ない)。
  */
 
+// Issue #445(#426-a の記録 5): cloud/ 配下の全ファイルを走査する検査(#332・#333 の .ts の走査と、メール・チーム名・AUD の混入の検査)は、
+// 並列実行で CPU・ディスクが混むと既定の 5000ms を超えて落ちることがあった(単独では 1 秒未満)。判定は変えずに、
+// (1) 同じファイルの読み込みを 1 回に共有し(検査ごとに全ファイルを読み直していた)、(2) このファイルのテストの時間切れを明示する。
+vi.setConfig({ testTimeout: 30_000 });
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+/** 読んだファイルの内容(LF に正規化済み)。このファイルの中でファイルは書き換えないので、読み込みは 1 回に共有する。 */
+const textCache = new Map<string, string>();
 function readTextLf(...segments: string[]): string {
-  return readFileSync(path.join(ROOT, ...segments), "utf-8").replace(/\r\n/g, "\n");
+  const file = path.join(ROOT, ...segments);
+  let text = textCache.get(file);
+  if (text === undefined) {
+    text = readFileSync(file, "utf-8").replace(/\r\n/g, "\n");
+    textCache.set(file, text);
+  }
+  return text;
 }
+
+/**
+ * 日単位の DO(RaceDay)を構成するソース = cloud/src の `race-day-*.ts` 全部。**ディレクトリから導出する**(Issue #445)。
+ * 手書きの一覧だと、Issue #399 の R-9 で切り出した段階のファイル(`race-day-close-stage.ts` など)が入らず、
+ * 「他の DO を参照しない」検査(否定参照)がそのファイルを素通しする。新しい `race-day-*.ts` は自動で対象になる。
+ */
+const RACE_DAY_FILES = readdirSync(path.join(ROOT, "cloud", "src"))
+  .filter((f) => /^race-day-.+\.ts$/.test(f))
+  .sort();
 
 const toml = readTextLf("cloud", "wrangler.toml");
 const tomlCode = toml
@@ -1075,7 +1097,12 @@ function findMetaUrlViolations(source: string): string[] {
  * 生成物は除く)と、デプロイのワークフロー。固定の一覧にしない(新しいファイル・README も自動で対象になる)。
  * 戻り値は ROOT からの相対パス(/ 区切り)。
  */
+let scanTargetsCache: string[] | null = null;
 function scanTargets(): string[] {
+  scanTargetsCache ??= scanTargetsUncached();
+  return [...scanTargetsCache];
+}
+function scanTargetsUncached(): string[] {
   const ignored = readTextLf("cloud", ".gitignore")
     .split("\n")
     .map((l) => l.trim())
@@ -1199,7 +1226,7 @@ describe("Issue #216・#394・#402: 移行の DO(CloudMigration)は削除済み�
   });
 
   it("cron の scheduled・RaceDay・result-dispatch は、移行の DO を呼ばない(CLOUD_MIGRATION・CloudMigration・migration-* を参照しない)", () => {
-    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts"]) {
+    for (const f of ["scheduled.ts", ...RACE_DAY_FILES, "result-dispatch.ts", "netkeiba-gate-do.ts"]) {
       const code = stripCode(readTextLf("cloud", "src", f));
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は移行を参照しない`).not.toMatch(/CLOUD_MIGRATION|CloudMigration|migration-core|migration-do/);
@@ -1437,7 +1464,7 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
   });
 
   it("cron の scheduled・RaceDay・result-dispatch・他の DO は、検証の DO を参照しない", () => {
-    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts"]) {
+    for (const f of ["scheduled.ts", ...RACE_DAY_FILES, "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts"]) {
       const code = stripCode(readTextLf("cloud", "src", f));
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は検証を参照しない`).not.toMatch(/VERIFY_REPORT|VerifyReport|verify-core|verify-do|verify-store/);
@@ -1487,7 +1514,7 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
     expect(stripCode(readTextLf("cloud", "src", "race-day-do.ts"))).toContain('mode: "auto"');
     expect(stripCode(readTextLf("cloud", "src", "scheduled.ts"))).toContain('mode: "catchup"');
     expect(stripCode(readTextLf("cloud", "src", "handler.ts"))).toContain('mode: regenerate ? "regenerate" : "manual"');
-    for (const f of ["race-day-do.ts", "race-day-core.ts", "scheduled.ts"]) {
+    for (const f of [...RACE_DAY_FILES, "scheduled.ts"]) {
       expect(stripCode(readTextLf("cloud", "src", f)), `${f} は作り直しを依頼しない`).not.toContain("regenerate");
     }
     // 日単位の DO は、依頼の結果の「完了」の判定を isRequestSettled に任せる（too-old を完了として扱う。個別の条件を持たない）
@@ -1626,7 +1653,7 @@ describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkei
   });
 
   it("cron の scheduled・RaceDay・result-dispatch・他の DO は、書き出しの DO を参照しない。route-policy は管理者専用の行を持つ", () => {
-    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "daily-report-do.ts"]) {
+    for (const f of ["scheduled.ts", ...RACE_DAY_FILES, "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "daily-report-do.ts"]) {
       const code = stripCode(readTextLf("cloud", "src", f));
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は書き出しを参照しない`).not.toMatch(/PRIOR_EXPORT|PriorExport|prior-export/);
@@ -1768,7 +1795,7 @@ describe("Issue #279・#280: 月報(MonthlyReportDO)は netkeiba に出ず、LLM
   });
 
   it("他の DO(日報・検証・日単位・結果の補完・移行・書き出し)と日報のソースは、月報を参照しない(干渉しない。アラームは DO ごとに 1 つ)", () => {
-    for (const f of ["daily-report-core.ts", "daily-report-do.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "prior-export-do.ts"]) {
+    for (const f of ["daily-report-core.ts", "daily-report-do.ts", ...RACE_DAY_FILES, "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "prior-export-do.ts"]) {
       const code = stripCode(readTextLf("cloud", "src", f));
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は月報を参照しない`).not.toMatch(/MONTHLY_REPORT|MonthlyReport|monthly-report/);
@@ -1905,5 +1932,31 @@ describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所�
       .filter((l) => !l.trim().startsWith("--"))
       .join("\n");
     expect([...sql.matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1])).toEqual(["baba_fetches", "baba_conditions"]);
+  });
+});
+
+describe("Issue #445: 否定参照の検査(他の DO・機能を参照しない)の対象に、日単位の DO の段階のファイルが入っている", () => {
+  it("RACE_DAY_FILES は cloud/src の race-day-*.ts 全部で、R-9 で切り出した段階(close・result・notify・plan・promote・report-hold・rescue)を含む。手書きの一覧にしない(新しいファイルの漏れを検出する)", () => {
+    const onDisk = readdirSync(path.join(ROOT, "cloud", "src")).filter((f) => f.startsWith("race-day-") && f.endsWith(".ts"));
+    expect(RACE_DAY_FILES).toEqual([...onDisk].sort());
+    for (const f of [
+      "race-day-core.ts",
+      "race-day-do.ts",
+      "race-day-close-stage.ts",
+      "race-day-result-stage.ts",
+      "race-day-notify-stage.ts",
+      "race-day-plan-stage.ts",
+      "race-day-promote-stage.ts",
+      "race-day-report-hold-stage.ts",
+      "race-day-rescue-stage.ts",
+    ]) {
+      expect(RACE_DAY_FILES, `対象に ${f} がある`).toContain(f);
+    }
+  });
+
+  it("対象のファイルは、本当にそれぞれ読めている(中身が空でない。検査が空振りしない)", () => {
+    for (const f of RACE_DAY_FILES) {
+      expect(stripCode(readTextLf("cloud", "src", f)).length, `${f} を読めている`).toBeGreaterThan(500);
+    }
   });
 });

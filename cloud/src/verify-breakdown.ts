@@ -444,6 +444,18 @@ export interface BreakdownSection {
 const percentRange = (r: RatioInterval): string => `${(r.lower * 100).toFixed(1)}〜${(r.upper * 100).toFixed(1)}%`;
 const ratioRange = (r: RatioInterval): string => `${r.lower.toFixed(2)}〜${r.upper.toFixed(2)}`;
 
+/**
+ * 差(pt)を、小数 1 桁に丸めた後の値で符号を決めて表示する。正の値だけ `+` を付け、丸めて 0 になる値(−0.04 など)は `0.0pt`(符号なし)にする。
+ * 引数は百分率の差(回収率 0.01 の差 = 1)。Issue #445(#384 の記録 4: `-0.0pt` と出ていた)。
+ */
+export function formatSignedPt(pt: number): string {
+  const rounded = pt.toFixed(1);
+  if (Number(rounded) === 0) {
+    return "0.0pt";
+  }
+  return `${pt > 0 ? "+" : ""}${rounded}pt`;
+}
+
 /** 1 行の項目。買い目が無い行は件数だけ。 */
 function statCells(stat: BandStat): BreakdownCell[] {
   if (stat.bets === 0) {
@@ -459,7 +471,7 @@ function statCells(stat: BandStat): BreakdownCell[] {
   ];
   const gapPt = stat.recovery !== null && stat.meanEv !== null ? (stat.recovery - stat.meanEv) * 100 : null;
   cells.push(
-    { name: "差(実績−予想)", value: gapPt === null ? "-" : `${gapPt >= 0 ? "+" : ""}${gapPt.toFixed(1)}pt` },
+    { name: "差(実績−予想)", value: gapPt === null ? "-" : formatSignedPt(gapPt) },
     { name: "的中数(実/予想)", value: stat.expectedHits > 0 ? `${stat.hits}/${stat.expectedHits.toFixed(1)}` : "-" },
     {
       name: "的中数の比",
@@ -475,7 +487,7 @@ function statCells(stat: BandStat): BreakdownCell[] {
   return cells;
 }
 
-const COMMON_NOTE = `95%区間は、レース単位の再標本(${BREAKDOWN_BOOTSTRAP_ITERATIONS}回)で求めた目安で、件数が少ないと実際より狭く出ます。区間は行ごとの 95% なので、行が多いと偶然外れる行が出ます。「参考」は ${BREAKDOWN_REFERENCE_MIN_RACES} レース未満の行です。`;
+const COMMON_NOTE = `95%区間は、レース単位の再標本(${BREAKDOWN_BOOTSTRAP_ITERATIONS}回)で求めた目安で、件数が少ないと実際より狭く出ます。区間は行ごとの 95% なので、行が多いと偶然外れる行が出ます。「参考」は ${BREAKDOWN_REFERENCE_MIN_RACES} レース未満の行です。予想した期待値は ev のある買い目、実際の回収率は全買い目が対象なので、母集団が違います。返還は期待値には入りますが、予想した的中数には入りません。`;
 const FINAL_BASIS_WARNING = "結果を振り返る集計で、購入時には分からない値です";
 
 const SECTION_TEXT: Readonly<Record<PopularityGroupKey, { readonly heading: string; readonly description: string; readonly note: string; readonly labelPrefix: string }>> = {
@@ -525,7 +537,7 @@ const GAP_SECTION = {
   heading: "単勝人気と複勝順位のずれ",
   description:
     `買い目を、構成馬ごとの「確定時の単勝人気 − 分析時の複勝オッズ下限の順位」で分けています。差が ${WIN_PLACE_GAP_MIN} 以上の馬を含む買い目は「単勝は人気薄なのに複勝は売れている」、` +
-    `${WIN_PLACE_GAP_MIN} 以下の負の馬を含む買い目は逆向き、両方の向きの馬を含めば「両方」です。モデルが、単複の人気がずれた馬を当てられているかを見ます。${FINAL_BASIS_WARNING}。` +
+    `差が −${WIN_PLACE_GAP_MIN} 以下(複勝は人気薄・単勝は売れている)の馬を含む買い目は逆向き、両方の向きの馬を含めば「両方」です。モデルが、単複の人気がずれた馬を当てられているかを見ます。${FINAL_BASIS_WARNING}。` +
     "券種は混ぜて集計しています(枠連は除く)。",
   note: `区切りの ${WIN_PLACE_GAP_MIN} は、根拠のない置き値です。券種を混ぜているので、回収率より的中数の比のほうが券種の違いに左右されません。${COMMON_NOTE}`,
 };
@@ -749,7 +761,7 @@ function conditionCells(r: Pick<ConditionRow, "races" | "bets" | "hitRaces" | "h
   ];
   if (withDiff) {
     const diff = r.diffFromAll ?? null;
-    cells.push({ name: "全体との差", value: diff === null ? "-" : `${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(1)}pt` });
+    cells.push({ name: "全体との差", value: diff === null ? "-" : formatSignedPt(diff * 100) });
     if (r.races < BREAKDOWN_REFERENCE_MIN_RACES) {
       cells.push({ name: "注意", value: `参考(${BREAKDOWN_REFERENCE_MIN_RACES}レース未満)` });
     }

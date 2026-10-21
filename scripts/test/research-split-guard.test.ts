@@ -117,13 +117,20 @@ describe("型検査は普段の CI に残る(外したテストも pnpm typechec
     const text = readTextLf("tsconfig.scripts.json");
     // コメントを含む JSON(JSONC)なので、// コメントを除いてから読む
     const json = JSON.parse(text.replace(/^\s*\/\/.*$/gm, "")) as { include?: string[]; exclude?: string[] };
-    expect(json.include).toEqual(["scripts"]);
+    // Issue #445: ルート直下の vitest 設定(`vitest*.ts`)も検査する(どの tsconfig の include にも入っていなかった。#392 の記録 1)
+    expect(json.include).toEqual(["scripts", "vitest*.ts"]);
     expect(json.exclude).toBeUndefined();
   });
 
-  it("packages/core の tsconfig は src と test を含み、exclude を持たない", () => {
+  it("Issue #445: `vitest*.ts` の指定が実在のファイルに当たる(ルート・packages/core とも、設定と研究用の一覧と研究用の設定の 3 つ。空振りでない)", () => {
+    const names = (dir: string[]): string[] => readdirSync(path.join(ROOT, ...dir)).filter((f) => /^vitest.*\.ts$/.test(f)).sort();
+    expect(names([])).toEqual(["vitest.config.ts", "vitest.research-tests.ts", "vitest.research.config.ts"]);
+    expect(names(["packages", "core"])).toEqual(["vitest.config.ts", "vitest.research-tests.ts", "vitest.research.config.ts"]);
+  });
+
+  it("packages/core の tsconfig は src と test と vitest 設定(vitest*.ts。Issue #445)を含み、exclude を持たない", () => {
     const json = JSON.parse(readTextLf("packages", "core", "tsconfig.json")) as { include?: string[]; exclude?: string[] };
-    expect(json.include).toEqual(["src", "test"]);
+    expect(json.include).toEqual(["src", "test", "vitest*.ts"]);
     expect(json.exclude).toBeUndefined();
   });
 

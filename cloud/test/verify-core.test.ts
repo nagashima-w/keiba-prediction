@@ -1064,6 +1064,36 @@ describe("Issue #352: 締切直前の再計算との比較(closeComparison)", ()
     expect(viewer.closeComparison).toEqual(admin.closeComparison);
     expect(store.calls).toEqual([]);
   });
+
+  it("★閲覧者の応答は区分(all・central・nar)ごとに別の値を返す: 比較・内訳・報告・venue が、管理者の同じ区分の応答と一致する(Issue #445。`closeByVenue?.[venue]` を `.central` に固定する変異を検出する)", async () => {
+    const { core, store } = setup();
+    const { rows, close } = withVenues();
+    store.state.rows = rows;
+    store.state.close = close;
+    const admins = {} as Record<VerifyVenueFilter, Extract<Awaited<ReturnType<typeof core.getReport>>, { status: "ready" }>>;
+    for (const venue of ["all", "central", "nar"] as const) {
+      const res = await core.getReport(venue);
+      if (res.status !== "ready") throw new Error("ready のはず");
+      admins[venue] = res;
+    }
+    // 前提(空振り防止): 区分ごとに値が違う。比較は基準の行の件数が違い、内訳も区分で違い、どれも null ではない
+    const keyOf = (c: (typeof admins)["all"]["closeComparison"]) => JSON.stringify(c);
+    expect(admins.all.closeComparison).not.toBeNull();
+    expect(new Set([keyOf(admins.all.closeComparison), keyOf(admins.central.closeComparison), keyOf(admins.nar.closeComparison)]).size).toBe(3);
+    expect(admins.all.breakdown).not.toBeNull();
+    expect(new Set([JSON.stringify(admins.all.breakdown), JSON.stringify(admins.central.breakdown), JSON.stringify(admins.nar.breakdown)]).size).toBe(3);
+    expect(new Set([JSON.stringify(admins.all.report), JSON.stringify(admins.central.report), JSON.stringify(admins.nar.report)]).size).toBe(3);
+    store.calls.length = 0;
+    for (const venue of ["all", "central", "nar"] as const) {
+      const viewer = core.getViewerReport(venue);
+      if (viewer.status !== "ready") throw new Error("ready のはず");
+      expect(viewer.venue, venue).toBe(venue);
+      expect(viewer.closeComparison, venue).toEqual(admins[venue].closeComparison);
+      expect(viewer.breakdown, venue).toEqual(admins[venue].breakdown);
+      expect(viewer.report, venue).toEqual(admins[venue].report);
+    }
+    expect(store.calls).toEqual([]);
+  });
 });
 
 
