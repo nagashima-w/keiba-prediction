@@ -11,7 +11,7 @@
  * `test/ev/native-free-modules.test.ts` が機械的に固定している)。DB へ実際に発行する処理(prepare・transaction)は持たない。
  *
  * ★exe の性能を変えないための約束: exe の `AnalysisStore` は、ここの SQL を従来と**同じ文・同じ回数・同じ順序**で発行する
- * (行ごとに prepare し直さない。`test/ev/analysis-store-sql-sequence.test.ts` が発行列を固定している)。
+ * (行ごとに prepare し直さない。発行列を固定していたテスト `analysis-store-sql-sequence.test.ts` は、exe の削除〈#285〉後の整理〈Issue #400 R-12〉で削除した)。
  */
 
 import type { PredictionMark } from "../analyzer/parse-response.js";

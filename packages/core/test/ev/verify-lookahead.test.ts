@@ -1,4 +1,3 @@
-import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import {
   AnalysisStore,
@@ -394,81 +393,6 @@ describe("verify の先読みリーク疑い除外(Issue #152 A)", () => {
       }
       // 前提: OFF では v1 の同一レースの旧分析が superseded になる(ON では 0)。
       expect(groups[0]!.report.supersededAnalysisCount).toBe(1);
-      store.close();
-    });
-  });
-
-  describe("旧スキーマのDB(2列が無い)から開いて集計する", () => {
-    it("JSON スナップショット入りの旧行を開いて集計すると、発走前後が判定できる行は suspect・できない行は unknown に分類され、移行後の listAnalyses は null を返す", () => {
-      const db = new Database(":memory:");
-      db.exec(`
-        CREATE TABLE analyses (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          race_id TEXT NOT NULL,
-          analyzed_at TEXT NOT NULL,
-          ev_estimated INTEGER,
-          prompt_version TEXT,
-          additional_instruction TEXT,
-          kaisai_date TEXT,
-          model TEXT,
-          raw_response TEXT,
-          race_snapshot_json TEXT
-        );
-        CREATE TABLE analysis_horses (
-          analysis_id INTEGER NOT NULL,
-          umaban INTEGER NOT NULL,
-          prior REAL NOT NULL,
-          adjusted_prob REAL NOT NULL,
-          place_odds_min REAL,
-          ev REAL,
-          is_positive INTEGER NOT NULL,
-          contributions_json TEXT,
-          mark TEXT,
-          reason TEXT,
-          PRIMARY KEY (analysis_id, umaban),
-          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
-        );
-      `);
-      const insertAnalysis = db.prepare(
-        `INSERT INTO analyses (race_id, analyzed_at, ev_estimated, prompt_version, kaisai_date, race_snapshot_json)
-         VALUES (?, ?, 0, 'v1', ?, ?)`,
-      );
-      const insertHorse = db.prepare(
-        `INSERT INTO analysis_horses (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason)
-         VALUES (?, 1, 0.5, 0.5, 2.0, 1.0, 1, NULL, NULL, NULL)`,
-      );
-      // 旧行A: 開催日あり・発走後の分析 → suspect(両マーカーが NULL のため)。
-      const a = Number(
-        insertAnalysis.run(centralId(1), "2026-07-05T07:00:00.000Z", "20260705", JSON.stringify(snapshot("15:45"))).lastInsertRowid,
-      );
-      // 旧行B: 中央・開催日なし(Task #34 より前) → unknown。
-      const b = Number(
-        insertAnalysis.run(centralId(2), "2026-07-05T07:00:00.000Z", null, JSON.stringify(snapshot(null))).lastInsertRowid,
-      );
-      insertHorse.run(a);
-      insertHorse.run(b);
-
-      const store = new AnalysisStore({ database: db });
-      store.saveResult(centralId(1), [{ umaban: 1, finishPosition: 1, placePayout: 300 }]);
-      store.saveResult(centralId(2), [{ umaban: 1, finishPosition: 1, placePayout: 300 }]);
-
-      const stored = store.listAnalyses();
-      expect(stored.map((s) => [s.historyCutoffDate, s.promptLookaheadGuarded])).toEqual([
-        [null, null],
-        [null, null],
-      ]);
-
-      const on = computeVerifyReport(store, ON);
-      expect(on.excludedLookaheadSuspectCount).toBe(1);
-      expect(on.excludedLookaheadUnknownCount).toBe(1);
-      expect(on.includedAnalysisCount).toBe(0);
-      expect(counterSum(on)).toBe(2);
-
-      // flag OFF では従来どおり2件とも集計される(既存の数値は変わらない)。
-      const off = computeVerifyReport(store, OFF);
-      expect(off.includedAnalysisCount).toBe(2);
-      expect(off.excludedLookaheadSuspectCount).toBe(0);
-      expect(off.excludedLookaheadUnknownCount).toBe(0);
       store.close();
     });
   });

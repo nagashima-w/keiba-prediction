@@ -4,8 +4,8 @@
  * 使い方: `pnpm tsx scripts/gen-race-result-contract.ts`(リポジトリルートで)。
  * 出力: `packages/core/test/golden/race-result-contract.json`。
  *
- * golden は、exe の `AnalysisStore.saveResult`(codec へ SQL を出した後の実装。出す前と同じ SQL 列であることは
- * `analysis-store-result-sql-sequence.test.ts` が固定)で作る。**exe の保存の挙動を意図して変えたときだけ再生成する**
+ * golden は、exe の `AnalysisStore.saveResult`(codec へ SQL を出した後の実装。出す前と同じ SQL 列であることを固定していたテスト
+ * `analysis-store-result-sql-sequence.test.ts` は、Issue #400 R-12 で削除した。SQL の文面は codec のテストが固定している)で作る。**exe の保存の挙動を意図して変えたときだけ再生成する**
  * (意図しない差分が出たら、それは exe の出力が変わったことを意味する)。入力はリポジトリ内のフィクスチャと固定の合成値で、
  * 実ネットワークには触れない。検証は `packages/core/test/ev/race-result-contract.test.ts`(exe 側)と cloud/test/result-repository.test.ts(D1 側)。
  */
