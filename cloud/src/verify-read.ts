@@ -10,6 +10,7 @@
  *   core の判定は変えない)。`HH:MM` の形の値だけを時刻として渡し、NULL(未確認)・''(詳細に発走時刻が無い)・'?'(詳細が無い・壊れていて確認できなかった)は
  *   スナップショットなし(NULL)として渡す(形で判定するので、将来 '' や '?' 以外の印を足しても、時刻として誤読しない)。
  *   **NULL の行が残っている間は集計してはならない**(`VerifyCore` が補完の完了を待つ。ここでは判定しない)。
+ *   **レースの事実(芝ダ・距離・馬場・グレード・レース名と確認の印 `cond_read`。migration 0023。Issue #389)も同じ行で読み**(読み取り行数は増えない)、`VerifyAnalysisRow` に載せる。読み取り口〈`buildVerifySource`〉には渡さない。`cond_read` が NULL の行が残っている間も、集計してはならない。
  * - 馬: 集計が使う列だけ(寄与度・理由・強調材料・懸念事項は NULL)。
  * - 配分: メタ(route・skip_reason_code)と買い目(券種・キー・賭け金)。**全件の読みの買い目は `odds`・`ev` も読む**(Issue #384。人気帯の内訳が使う。読み取り口〈`getAllocationForVerify`〉には渡さない
  *   ので、exe の `getAllocationForVerify` と同じ)。
@@ -40,7 +41,8 @@ const ANALYSES_HEAD = `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, 
        CASE WHEN start_time GLOB '[0-9]*:[0-9][0-9]'
             THEN json_object('race', json_object('startTime', start_time)) ELSE NULL END AS raceSnapshotJson,
        history_cutoff_date AS historyCutoffDate, prompt_lookahead_guarded AS promptLookaheadGuarded,
-       start_time AS startTime
+       start_time AS startTime,
+       course_type AS courseType, distance, track_condition AS trackCondition, grade, race_name AS raceName, cond_read AS condRead
   FROM analyses`;
 const ALLOCATION_META_HEAD = `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode, include_combo_odds AS includeComboOdds FROM analysis_allocation_meta`;
 /** 買い目の `odds`・`ev`(Issue #384)は、人気帯の内訳が「予想した期待値」(`ev`)と「予想した的中確率」(`ev ÷ odds`)に使う。列を足すだけで読み取り行数は変わらない。1 日ぶんの読み(今日の狙い目)と列を揃える(`targets-repository.test.ts` が行の一致を固定している)。 */
@@ -113,6 +115,17 @@ export function verifyDayResultSql(raceIds: readonly string[]): { readonly resul
 /** 分析の行。`startTime` は D1 の `start_time` の生の値(NULL・''・'?'・'HH:MM')。 */
 export interface VerifyAnalysisRow extends AnalysisRow {
   readonly startTime: string | null;
+  /**
+   * レースの事実(migration 0023。Issue #389)。検証の DO が発走時刻と同じ補完で写す(`race-facts.ts`)。生の値で、NULL = 無い・読めなかった。**集計(core の読み取り口)には渡さない**
+   * (`StoredAnalysis` の契約は exe と共有で変えない)。条件別の見える化(#389-b)が、この行から直接読む。省略可能なのは、この列を持たない行(既存のテストの固定データ)を壊さないため。
+   */
+  readonly courseType?: string | null;
+  readonly distance?: number | null;
+  readonly trackCondition?: string | null;
+  readonly grade?: string | null;
+  readonly raceName?: string | null;
+  /** 条件の確認の印。NULL = 未確認(補完待ち)・1 = 読んだ・0 = 読めなかった。省略(この列を持たない固定データ)は確認済みとして扱う。 */
+  readonly condRead?: number | null;
 }
 export interface VerifyHorseRow extends HorseRow {
   readonly analysisId: number;

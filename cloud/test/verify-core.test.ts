@@ -9,7 +9,7 @@ import {
   type VerifyKv,
   type VerifyStorePort,
 } from "../src/verify-core";
-import type { PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "../src/verify-store";
+import type { ConditionResolution, PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "../src/verify-store";
 import type { VerifyAnalysisRow, VerifyReadRows } from "../src/verify-read";
 import { R2_FENCE_LIMITS, type R2Usage } from "../src/r2-fence";
 import { computeVerifyReport, computeVerifyReportByPromptVersion, DEFAULT_VERIFY_CONFIG, PRODUCTION_VERIFY_CONFIG, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
@@ -78,6 +78,8 @@ function fakeStore() {
   };
   const listPendingArgs: Array<[number, number]> = [];
   const committed: Array<{ resolved: StartTimeResolution[]; gets: number }> = [];
+  /** commitStartTimes の第 3 引数(条件の結果。Issue #389)。committed と同じ並び。 */
+  const committedConditions: Array<readonly ConditionResolution[] | undefined> = [];
   const port: VerifyStorePort = {
     async readWatermark() {
       calls.push("watermark");
@@ -99,9 +101,10 @@ function fakeStore() {
       if (state.resolve !== undefined) return state.resolve(rows);
       return { resolved: rows.map((r) => ({ id: r.id, value: "" })), missing: [], failed: [], gets: rows.length };
     },
-    async commitStartTimes(resolved, gets) {
+    async commitStartTimes(resolved, gets, conditions) {
       calls.push("commit");
       committed.push({ resolved: [...resolved], gets });
+      committedConditions.push(conditions === undefined ? undefined : [...conditions]);
       const ids = new Set(resolved.map((r) => r.id));
       state.pending = state.pending.filter((p) => !ids.has(p.id));
       return resolved.length;
@@ -117,7 +120,7 @@ function fakeStore() {
       return { rows, rowsRead: 123, counts: { ...counts, closeMeta: state.close.meta.length, closeBets: state.close.bets.length }, close: state.close };
     },
   };
-  return { port, state, calls, listPendingArgs, committed };
+  return { port, state, calls, listPendingArgs, committed, committedConditions };
 }
 
 function setup(options: VerifyCoreOptions = {}) {
@@ -1167,5 +1170,98 @@ describe("Issue #384: 人気帯ごとの期待値と回収率(breakdown)", () =>
     const viewer = core.getViewerReport("all");
     if (viewer.status !== "ready") throw new Error("ready のはず");
     expect(Object.keys(viewer.diag)).toEqual(["startTimeGaps"]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Issue #389(#385-B の a): レースの条件(芝ダ・距離・馬場・グレード・レース名)を、発走時刻と同じ補完で埋める
+// ---------------------------------------------------------------------------
+
+const FACTS = { courseType: "芝", distance: 1600, trackCondition: "良", grade: null, raceName: "3歳未勝利" };
+
+describe("Issue #389: 条件の補完(発走時刻と同じ tick・同じ commit)", () => {
+  it("解決した行の条件(store が返した事実)を、同じ commit の第 3 引数に渡す。読めなかった行(facts: null)もそのまま渡す", async () => {
+    const { core, store } = setup();
+    store.state.pending = [pendingRow(1), pendingRow(2)];
+    store.state.resolve = (rows) => ({
+      resolved: rows.map((r) => ({ id: r.id, value: "15:45" })),
+      missing: [],
+      failed: [],
+      gets: rows.length,
+      conditions: [{ id: 1, facts: FACTS }, { id: 2, facts: null }],
+    });
+    await core.runBackfillTick();
+    expect(store.committed).toHaveLength(1);
+    expect(store.committedConditions[0]).toEqual([{ id: 1, facts: FACTS }, { id: 2, facts: null }]);
+  });
+
+  it("★解決した行は必ず条件の結果を持つ: store が条件を返さなかった行も facts: null(読めなかった印)で渡す(cond_read が NULL のまま永久に保留にならない)", async () => {
+    const { core, store } = setup();
+    store.state.pending = [pendingRow(1), pendingRow(2)];
+    store.state.resolve = (rows) => ({ resolved: rows.map((r) => ({ id: r.id, value: "" })), missing: [], failed: [], gets: rows.length, conditions: [{ id: 1, facts: FACTS }] });
+    await core.runBackfillTick();
+    expect(store.committedConditions[0]).toEqual([{ id: 1, facts: FACTS }, { id: 2, facts: null }]);
+  });
+
+  it("★猶予切れで '?' にする行にも、条件は facts: null で渡す。保留の行・失敗の行には渡さない", async () => {
+    const { core, store, clock } = setup();
+    store.state.pending = [pendingRow(1), pendingRow(2)];
+    store.state.resolve = (rows) => ({ resolved: [], missing: rows.map((r) => r.id), failed: [], gets: rows.length, conditions: [] });
+    await core.runBackfillTick();
+    expect(store.committed[0]!.resolved).toEqual([]);
+    expect(store.committedConditions[0]).toEqual([]); // 保留の間は何も書かない
+    clock.now = T0 + 30 * 60_000;
+    await core.runBackfillTick();
+    expect(store.committed[1]!.resolved).toEqual([{ id: 1, value: "?" }, { id: 2, value: "?" }]);
+    expect(store.committedConditions[1]).toEqual([{ id: 1, facts: null }, { id: 2, facts: null }]);
+  });
+
+  it("失敗した行(failed)は条件も渡さない(NULL のまま再試行する)", async () => {
+    const { core, store } = setup();
+    store.state.pending = [pendingRow(1), pendingRow(2)];
+    store.state.resolve = (rows) => ({ resolved: [{ id: rows[0]!.id, value: "" }], missing: [], failed: [rows[1]!.id], gets: rows.length, conditions: [{ id: 1, facts: FACTS }] });
+    await core.runBackfillTick();
+    expect(store.committedConditions[0]).toEqual([{ id: 1, facts: FACTS }]);
+  });
+});
+
+describe("Issue #389: 補完の候補のカーソル(kv のキーを替えた)", () => {
+  it("★旧いキー `cursor` が最大 id まで進んだ状態から始めても、新しいキーでは 0 から数え直す(発走時刻は済みで条件が未確認の既存分を拾う)", async () => {
+    const { core, store, kv } = setup();
+    kv.put("cursor", 2); // 公開前の補完が最大 id まで進めた状態
+    store.state.pending = [pendingRow(1), pendingRow(2)]; // 発走時刻は済み・条件が未確認の既存分(偽物の store は pending をそのまま候補にする)
+    await core.runBackfillTick();
+    expect(store.listPendingArgs[0]).toEqual([0, VERIFY_TICK_QUERY_LIMIT - 4]);
+    expect(store.committed[0]!.resolved.map((r) => r.id)).toEqual([1, 2]);
+    expect(kv.get("cursor")).toBe(2); // 旧いキーは読まず・書かない
+    expect(kv.get("cursor2")).toBe(2); // 新しいキーが進む
+  });
+
+  it("getReport の補完待ちの確認も新しいキーから数える。補完待ちが無いと確認できたら、新しいキーを透かしの最大 id まで進める", async () => {
+    const { core, store, kv } = setup();
+    kv.put("cursor", 99);
+    await core.getReport("all");
+    expect(store.listPendingArgs[0]).toEqual([0, 1]);
+    expect(kv.get("cursor2")).toBe(2);
+    expect(kv.get("cursor")).toBe(99);
+  });
+});
+
+describe("Issue #389: 集計用の読みの時点で条件が未確認(cond_read が NULL)の行が混ざっていたら集計しない", () => {
+  it("condRead が null の行があれば、キャッシュせず preparing(発走時刻が NULL の行と同じ扱い)。件数は、発走時刻 NULL の行と重なっても 1 行を 1 と数える", async () => {
+    const { core, store, kv } = setup();
+    store.state.rows = rowsOf([analysisRow(1, CENTRAL, { condRead: 1 }), analysisRow(2, NAR, { condRead: null }), analysisRow(3, "202606030812", { condRead: null, startTime: null })]);
+    const res = await core.getReport("all");
+    expect(res).toMatchObject({ status: "preparing", remaining: 2 });
+    expect(kv.get("cache")).toBeUndefined();
+    expect(kv.get("runs")).toBeUndefined();
+  });
+
+  it("condRead が 0(読めなかった)・1 の行、condRead を持たない行(既存の偽物)は、確認済みとして集計する", async () => {
+    const { core, store } = setup();
+    store.state.rows = rowsOf([analysisRow(1, CENTRAL, { condRead: 0 }), analysisRow(2, NAR, { kaisaiDate: null, condRead: 1 }), analysisRow(3, "202606030812")]);
+    const res = await core.getReport("all");
+    expect(res.status).toBe("ready");
   });
 });

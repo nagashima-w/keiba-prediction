@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { buildVerifySource, countStartTimeGaps, VERIFY_READ_SQL, verifyDayAllocationSql, verifyDayResultSql, type VerifyAnalysisRow, type VerifyReadRows } from "../src/verify-read";
+import { buildVerifySource, countStartTimeGaps, VERIFY_DAY_ANALYSES_SQL, VERIFY_READ_SQL, verifyDayAllocationSql, verifyDayResultSql, type VerifyAnalysisRow, type VerifyReadRows } from "../src/verify-read";
 
 /**
  * Issue #219: 検証の読み取り(`VERIFY_READ_SQL` と `buildVerifySource`)。実際の D1 のスキーマ(migration 0001〜0009)を Node 組込みの SQLite に流して、
@@ -11,7 +11,7 @@ import { buildVerifySource, countStartTimeGaps, VERIFY_READ_SQL, verifyDayAlloca
  * (cloud は better-sqlite3 を持たない)。
  */
 const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
-const FILES = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0011_win_odds.sql", "0013_result_scratched.sql", "0016_result_wakuban.sql"]; // 0011 は race_results.ninki(Issue #384。VERIFY_READ_SQL.results が読む)、0013 は race_results.scratched(Issue #72)、0016 は race_results.wakuban(Issue #269)。どちらも VERIFY_READ_SQL が読む。0010・0012・0014・0015 はこのテストが読む表に関わらない
+const FILES = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0011_win_odds.sql", "0013_result_scratched.sql", "0016_result_wakuban.sql", "0023_race_facts.sql"]; // 0023 は analyses のレースの事実の 6 列(Issue #389。VERIFY_READ_SQL.analyses が読む)、0011 は race_results.ninki(Issue #384。VERIFY_READ_SQL.results が読む)、0013 は race_results.scratched(Issue #72)、0016 は race_results.wakuban(Issue #269)。どちらも VERIFY_READ_SQL が読む。0010・0012・0014・0015 はこのテストが読む表に関わらない
 
 function openDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
@@ -186,6 +186,28 @@ describe("Issue #384: 結果の確定の単勝人気(ninki)を読みに足す", 
     const rows = db.prepare(verifyDayResultSql(["202606030811"]).results).all();
     expect(rows).toHaveLength(2);
     expect(Object.keys(rows[0]!).sort()).toEqual(["finishPosition", "ninki", "placePayout", "raceId", "scratched", "umaban", "wakuban", "winPayout"]);
+    db.close();
+  });
+});
+
+
+describe("Issue #389: レースの事実(migration 0023)の列を読む", () => {
+  it("全件の読みと 1 日ぶんの読みの両方が、5 つの事実と確認の印を同じ名前で返す。NULL の行は null。読み取り口(StoredAnalysis)には渡さない", () => {
+    const db = openDb();
+    db.prepare("INSERT INTO analyses (race_id, analyzed_at, kaisai_date, start_time, course_type, distance, track_condition, grade, race_name, cond_read) VALUES ('202606030811', '2026-10-06T00:00:00.000Z', '20261006', '15:45', '芝', 1600, '稍', 'G3', '3歳以上1勝クラス', 1)").run();
+    db.prepare("INSERT INTO analyses (race_id, analyzed_at, kaisai_date, start_time) VALUES ('202606030812', '2026-10-06T00:00:00.000Z', '20261006', '16:00')").run();
+    const expectedFirst = { id: 1, courseType: "芝", distance: 1600, trackCondition: "稍", grade: "G3", raceName: "3歳以上1勝クラス", condRead: 1 };
+    const expectedSecond = { id: 2, courseType: null, distance: null, trackCondition: null, grade: null, raceName: null, condRead: null };
+    for (const rows of [db.prepare(VERIFY_READ_SQL.analyses).all(), db.prepare(VERIFY_DAY_ANALYSES_SQL).all("20261006")]) {
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject(expectedFirst);
+      expect(rows[1]).toMatchObject(expectedSecond);
+    }
+    const source = buildVerifySource({ ...readRows(db) });
+    const stored = source.listAnalyses()[0]!;
+    for (const key of ["courseType", "distance", "trackCondition", "grade", "raceName", "condRead"]) {
+      expect(stored, key).not.toHaveProperty(key);
+    }
     db.close();
   });
 });
