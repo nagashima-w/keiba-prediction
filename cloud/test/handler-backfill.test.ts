@@ -17,6 +17,7 @@ const STATUS: BackfillStatus = {
   imported: 100,
   abandoned: { total: 4, byClass: { "no-payout": 3, "fetch-failed": 1 } },
   winOdds: { remaining: 55, undated: 3, filled: 8, scratchedMissing: 12, abandoned: { total: 1, byClass: { "no-payout": 1 } } },
+  raceClass: { remaining: 40, undated: 2, filled: 5, stillNull: 1, abandoned: { total: 1, byClass: { "no-payout": 1 } }, distribution: [{ value: "未勝利", races: 3 }] },
   tonight: { night: "20261010", dispatched: 30, limit: 150 },
   inflight: null,
   nextRunAt: "2026-10-10T17:00:00.000Z",
