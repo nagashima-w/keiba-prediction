@@ -558,6 +558,64 @@ describe("computeVerifyBreakdowns(区分 all・central・nar)", () => {
     expect(out.nar!.stats.gap.find((g) => g.key === "winLonger")!.stat.bets).toBe(1);
   });
 
+  it("★区分 central・nar の内訳は、同じ区分の本体 computeVerifyReport(..., \"central\" | \"nar\").proposedBet と、券種ごとの件数・賭け金・払戻が一致する(Issue #433〈#384 のレビューの記録〉。all = central + nar と all = 本体だけでは、区分の絞りの取り違えを検出できない)", () => {
+    // 中央・地方の 2 レース(twoVenueRows)に、本体が母集団から外す分析を足す。足さないと、内訳が「最新の 1 件」「先読みの除外」を本体とそろえているかが検査できない。
+    //  - 分析 3: 中央の同じレースの古い分析(最新選択で外れる。買い目は賭け金が大きく、混ざれば合計が変わる)
+    //  - 分析 4: 地方の別のレースで、戦績の絞りの印が無い(先読みリークの疑いとして除外される)
+    const two = twoVenueRows();
+    const NAR_RACE_2 = "202644071412";
+    const rows: VerifyReadRows = {
+      ...two,
+      analyses: [...two.analyses, { ...analysisRow(3, RACE), analyzedAt: "2026-07-05T03:00:00.000Z" }, { ...analysisRow(4, NAR_RACE_2), historyCutoffDate: null }],
+      horses: [...two.horses, ...horseRows(3, 10), ...horseRows(4, 10)],
+      allocationMeta: [...two.allocationMeta, { analysisId: 3, route: "place-only", skipReasonCode: null }, { analysisId: 4, route: "place-only", skipReasonCode: null }],
+      bets: [...two.bets, bet(3, "place", "01", 900, 2, 1.2), bet(4, "place", "01", 500, 2, 1.2)],
+      results: [...two.results, ...resultRows(NAR_RACE_2)],
+    };
+    const source = buildVerifySource(rows);
+    const out = computeVerifyBreakdowns(source, rows.bets);
+    // 前提: 足した 2 つの分析は、本体の母集団から外れている(外れていなければ、この検査は足した分析の意味を持たない)
+    const centralReport = computeVerifyReport(source, PRODUCTION_VERIFY_CONFIG, "central");
+    const narReport = computeVerifyReport(source, PRODUCTION_VERIFY_CONFIG, "nar");
+    expect(centralReport.proposedBet.population.allocated).toBe(1); // 分析 1 だけ(分析 3 は最新でない)
+    expect(narReport.proposedBet.population.allocated).toBe(1); // 分析 2 だけ(分析 4 は先読みの疑い)
+    expect(computeVerifyReport(source, { ...PRODUCTION_VERIFY_CONFIG, includeAllAnalyses: true, excludeLookaheadSuspects: false }, "all").proposedBet.population.allocated).toBe(4); // 設定を外せば 4 つとも入る=外す設定が結果を変える
+    type Totals = { bets: number; stake: number; payout: number };
+    const sumGroup = (stats: PopularityStats, key: GroupKey): Totals => {
+      const g = group(stats, key);
+      const all = [...g.bands, g.unknown];
+      return { bets: all.reduce((s, b) => s + b.bets, 0), stake: all.reduce((s, b) => s + b.stake, 0), payout: all.reduce((s, b) => s + b.payout, 0) };
+    };
+    const totalsOf = (report: ReturnType<typeof computeVerifyReport>["proposedBet"], ...types: Array<"place" | "win" | "wide" | "trio" | "quinella" | "exacta" | "trifecta">): Totals => ({
+      bets: types.reduce((s, t) => s + report[t].betCount, 0),
+      stake: types.reduce((s, t) => s + report[t].totalStake, 0),
+      payout: types.reduce((s, t) => s + report[t].totalReturn, 0),
+    });
+    const placeAllTotals = sumGroup(out.all!.stats, "place");
+    const placeTotalsByVenue: Record<"central" | "nar", Totals> = { central: { bets: 0, stake: 0, payout: 0 }, nar: { bets: 0, stake: 0, payout: 0 } };
+    for (const venue of ["central", "nar"] as const) {
+      const report = computeVerifyReport(source, PRODUCTION_VERIFY_CONFIG, venue).proposedBet;
+      const stats = out[venue]!.stats;
+      expect(sumGroup(stats, "place"), `${venue} の複勝`).toEqual(totalsOf(report, "place"));
+      expect(sumGroup(stats, "win"), `${venue} の単勝`).toEqual(totalsOf(report, "win"));
+      expect(sumGroup(stats, "wide"), `${venue} のワイド`).toEqual(totalsOf(report, "wide"));
+      expect(sumGroup(stats, "combo"), `${venue} の組合せ`).toEqual(totalsOf(report, "trio", "quinella", "exacta", "trifecta"));
+      expect(group(stats, "combo").excluded, `${venue} の枠連(対象外)`).toEqual({ bets: report.bracketQuinella.betCount, stake: report.bracketQuinella.totalStake });
+      // 単複の人気のずれの行の合計(人気不明を含む)は、枠連を除く全券種の合計と一致する
+      const gapSum = stats.gap.reduce((s, g) => ({ bets: s.bets + g.stat.bets, stake: s.stake + g.stat.stake, payout: s.payout + g.stat.payout }), { bets: 0, stake: 0, payout: 0 });
+      expect(gapSum, `${venue} のずれの行の合計`).toEqual(totalsOf(report, "place", "win", "wide", "trio", "quinella", "exacta", "trifecta"));
+      placeTotalsByVenue[venue] = sumGroup(stats, "place");
+    }
+    // 空振り防止: 区分ごとに値が違い(central と nar を取り違えても、区分を絞らなくても、等しくならない)、どちらの区分にも買い目がある
+    expect(placeTotalsByVenue.nar.bets).toBeGreaterThan(0);
+    expect(placeTotalsByVenue.central.bets).toBeGreaterThan(placeTotalsByVenue.nar.bets);
+    expect(placeTotalsByVenue.central).not.toEqual(placeTotalsByVenue.nar);
+    expect(placeTotalsByVenue.central).not.toEqual(placeAllTotals);
+    expect(placeTotalsByVenue.nar).not.toEqual(placeAllTotals);
+    expect(computeVerifyReport(source, PRODUCTION_VERIFY_CONFIG, "nar").proposedBet.win.betCount).toBe(0); // 地方には単勝の買い目が無い(中央の単勝を引き込んでいない)
+    expect(computeVerifyReport(source, PRODUCTION_VERIFY_CONFIG, "central").proposedBet.win.betCount).toBeGreaterThan(0);
+  });
+
   it("買い目が 1 つも無い区分は null(節を出さない)", () => {
     const rows = sampleRows();
     const out = computeVerifyBreakdowns(buildVerifySource(rows), rows.bets);

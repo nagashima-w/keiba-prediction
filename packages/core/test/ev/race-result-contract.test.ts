@@ -88,6 +88,20 @@ describe("golden の前提(空振りを防ぐ。入力が退化していない�
     expect(c.expected.race_combo_payout_imports).toEqual([]);
   });
 
+  it("面 null のステップ(Issue #433 R-12a): 「面を null で保存し直す」ステップが、面の行が無いレースでは行を作らず、面の行があるレースでは行を消しも上書きもしない", () => {
+    // 面の行が無いレース: null を明示して再保存しても、面の行は作られない
+    const none = byName("all-finish-null-no-meta-no-combo");
+    expect(none.steps.at(-1)!.courseType).toBeNull(); // 前提: JSON に null が明示されている(省略ではない)
+    expect(none.steps.length).toBeGreaterThanOrEqual(2);
+    expect(none.expected.race_result_meta).toEqual([]);
+    // 面の行があるレース: 先の保存の面「障」が、null の再保存のあとも残る
+    const kept = byName("undetermined-only");
+    expect(kept.steps.at(-1)!.courseType).toBeNull();
+    expect(kept.steps[0]!.courseType).toBe("障");
+    expect(kept.expected.race_result_meta).toEqual([{ race_id: "202603020213", course_type: "障" }]);
+    expect(kept.expectedDetails["202603020213"]!.courseType).toBe("障");
+  });
+
   it("防御的復元のケース: 壊れた通過順と未知の面が入っていて、復元は [] と null になる(正常な馬1は値のまま)", () => {
     const c = byName("defensive-restore");
     expect(c.raw!.race_results.some((r) => r.passing_json === "broken")).toBe(true);

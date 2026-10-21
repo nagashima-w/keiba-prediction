@@ -857,6 +857,38 @@ describe("toSafeRaceSnapshot(防御的復元。旧レコード・破損データ
     expect(safeWith.horsesByUmaban.size).toBe(2); // 前提: 馬を比べている(空のMapで自明に一致していない)
   });
 
+  it("馬ごとの素通しの 9 項目(sex・age・kinryo・jockeyName・trainerName・bodyWeight・popularity・oikiriCritic・oikiriRank)は、値が入った入力をそのまま復元し、馬ごとに取り違えない(Issue #433〈#393 のレビューの記録〉)", () => {
+    // 項目ごと・馬ごとに値が異なる入力(取り違え・定数を返す実装を殺すため)。保存時と同じく JSON を経由する。
+    const stored = {
+      race: {},
+      horses: [
+        { umaban: 1, sex: "牡", age: 4, kinryo: 57, jockeyName: "騎手ア", trainerName: "調教師ア", bodyWeight: 480, popularity: 3, oikiriCritic: "動き良好", oikiriRank: "A" },
+        { umaban: 2, sex: "牝", age: 3, kinryo: 54.5, jockeyName: "騎手イ", trainerName: "調教師イ", bodyWeight: 452, popularity: 11, oikiriCritic: "平凡", oikiriRank: "C" },
+      ],
+    };
+    const safe = toSafeRaceSnapshot(JSON.parse(JSON.stringify(stored)) as unknown);
+    expect(safe.horsesByUmaban.size).toBe(2); // 前提: 2 頭を復元している
+    const pick = (umaban: number) => {
+      const h = safe.horsesByUmaban.get(umaban)!;
+      return { sex: h.sex, age: h.age, kinryo: h.kinryo, jockeyName: h.jockeyName, trainerName: h.trainerName, bodyWeight: h.bodyWeight, popularity: h.popularity, oikiriCritic: h.oikiriCritic, oikiriRank: h.oikiriRank };
+    };
+    expect(Object.keys(pick(1))).toHaveLength(9); // 前提: 9 項目を全て比べている
+    expect(pick(1)).toEqual({ sex: "牡", age: 4, kinryo: 57, jockeyName: "騎手ア", trainerName: "調教師ア", bodyWeight: 480, popularity: 3, oikiriCritic: "動き良好", oikiriRank: "A" });
+    expect(pick(2)).toEqual({ sex: "牝", age: 3, kinryo: 54.5, jockeyName: "騎手イ", trainerName: "調教師イ", bodyWeight: 452, popularity: 11, oikiriCritic: "平凡", oikiriRank: "C" });
+  });
+
+  it("buildRaceSnapshot が書いた値は、toSafeRaceSnapshot で往復して同じ 9 項目になる(書く側と読む側のキー名が揃っている)", () => {
+    const safe = toSafeRaceSnapshot(JSON.parse(JSON.stringify(buildRaceSnapshot(makeRaceData()))) as unknown);
+    const h1 = safe.horsesByUmaban.get(1)!;
+    expect({ sex: h1.sex, age: h1.age, kinryo: h1.kinryo, jockeyName: h1.jockeyName, trainerName: h1.trainerName, bodyWeight: h1.bodyWeight, popularity: h1.popularity, oikiriCritic: h1.oikiriCritic, oikiriRank: h1.oikiriRank }).toEqual({
+      sex: "牡", age: 4, kinryo: 57, jockeyName: "テスト騎手", trainerName: "テスト調教師", bodyWeight: 480, popularity: 1, oikiriCritic: "動き良好", oikiriRank: "A",
+    });
+    const h2 = safe.horsesByUmaban.get(2)!;
+    expect({ sex: h2.sex, age: h2.age, kinryo: h2.kinryo, jockeyName: h2.jockeyName, trainerName: h2.trainerName, bodyWeight: h2.bodyWeight, popularity: h2.popularity, oikiriCritic: h2.oikiriCritic, oikiriRank: h2.oikiriRank }).toEqual({
+      sex: "牝", age: 3, kinryo: 54, jockeyName: "テスト騎手2", trainerName: "テスト調教師2", bodyWeight: null, popularity: 4, oikiriCritic: null, oikiriRank: null,
+    });
+  });
+
   it("馬の配列に、オブジェクトでない要素・umabanが数値でない要素が混ざっていても、それらを飛ばして残りを復元すること", () => {
     const safe = toSafeRaceSnapshot({
       race: {},
