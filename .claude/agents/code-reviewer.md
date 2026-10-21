@@ -30,6 +30,12 @@ model: sonnet
    cloud の `pnpm run typecheck`〈client 用の tsconfig を含む〉と `cloud/test/client-bundle.test.ts`・`import-guard.test.ts` である。
    exe の削除〈#285〉で `pnpm --filter @keiba/app build` は無くなった。実行しても何もせず exit 0 で終わるため、検証に含めない。
    smoke の前に `ps` で他の wrangler・workerd が動いていないことを確かめる)
+   - **確率の質のコードに触れる差分は、ルートの `pnpm test:research` も自分で実行する**: 確率の質の測定のテスト
+     (ルートの `scripts/test/probability-quality-41-*.test.ts` と、`packages/core` の `probability-quality`・`brier-quality-report`・
+     `paired-brier-comparison` の 3 ファイル)は、普段の `pnpm test` から外してある(Issue #395。`ci.yml` の冒頭の注記と
+     `docs/current-spec.md` の CI の節が正)。対象は `packages/core/src/ev/probability-quality*.ts` と
+     `scripts/probability-quality-41*/` に触れる差分(`git diff --stat` にこれらのパスが現れるか)。**`pnpm test` が緑でも、
+     これらのテストは一度も走っていない**。触れていない差分では実行しなくてよい
    - **ローカル緑は CI 緑を意味しない(実行環境の差)**: あなたのローカルは Linux/LF で、CI(`ci.yml`・`deploy-cloud.yml`)も
      `ubuntu-latest` のため OS は同じ(Issue #248 で Windows ランナーを廃止した)。それでも、差分に**リポジトリ内のファイルを
      読むテスト**がある場合は、読み込み直後に改行を LF へ正規化しているか(利用者の Windows での checkout が CRLF になりうる)を
@@ -164,11 +170,12 @@ model: sonnet
      - (Issue #74 で、地方フィクスチャのオッズ個数が 464 / 440 / 474 と3通り出た。文書には「本番パーサは複数セルを券種の契約に沿って**集約する**ため」と書かれたが、per-file に分解すると **10/12 ファイルは完全一致**で、差は発売前の組合せ券2ファイル〈本番パーサは `state:"unavailable"` で0件、スクリプトは `td.Odds` を12件と数える〉だけだった。474 は「別の抽出規則」ですらなく、その場で書いた正規表現が桁区切りカンマ〈`"1,061.8"` → `["1","061.8"]`〉を処理していない**単なるバグ**だった。**このタスクでは、指摘を直すコミット自体が新しい誤りを持ち込むことが3回続いた**)
    - **帰属を含む記述は「誰が」だけでなく「いつ・その成果物は当時存在したか」を機械で確認する**: 「boss が〈コミット済みの〉スクリプトで実測した」のような記述は、**そのスクリプトが当時まだ存在しなければ成立しない**。`git log --follow -- <パス>` で成果物の導入時期を、`git log -S '<主張に含まれる特徴的な文字列>'` で記述の導入・削除コミットを確認し、**時系列が主張と整合するか**を見る。整合しないなら【要修正】(「当時の方法がたまたま同じ規則だった」等、事実に合う言い方へ直させる)
    - **差分が編集した記述の「直後数行」を必ず読む**: 上の「訂正した主張で repo 全体を洗う」は別ファイル・言い換えを対象にしているが、**最も見落とされるのは同じ JSDoc ブロックの2〜5行下**である。今そこを編集した人も、レビューする人も「今見たばかりの箇所」として飛ばす。確認手順: `git diff` の各ハンクについて、**変更行の直後5行を無条件に読み**、変更した主張の古い版・その主張の「理由」が残っていないかを見る。特に「〜のため到達しない」「〜なので問題ない」という**到達不能性の根拠**は、判定基準を変えた差分では機序ごと古くなる(Issue #74 で、`verify.ts` の規則U の JSDoc を1行書き換えた直下に「`ev>1` 判定自体を通らずそもそも `isPositive=true` にならない」という**変更前の機序**が残り、しかもそれは推定EV経路については実行すると偽だった)
-   - **永続化スキーマの変更(列追加・テーブル追加・DDL 変更)は、「新規 DB」ではなく「利用者の既存 DB」で確認する**: `CREATE TABLE IF NOT EXISTS` に列を足すと**新規 DB では必ず緑**になり、テストがすべて `new AnalysisStore()`(=インメモリ新規)で書かれていると、**旧 DB を開いた瞬間に `no such column` で落ちる欠陥が全テスト緑のまま通る**。利用者の `keiba.db` は CI にもリポジトリにも存在しないため、ここは自動では一切守られない。確認手順:
-     - `git diff` に `ALTER TABLE`・`ADD COLUMN`・`CREATE TABLE` が現れたら、**同じファイル内の既存マイグレーションが持っているテストの形を数える**(`packages/core/test/ev/analysis-store.test.ts` では、`mark`・`ev_estimated`・`prompt_version`・`additional_instruction`・`kaisai_date`・エクスポート3列・`passing_json`/`last3f` のすべてが「**旧スキーマで生 SQL によりDBを作り → 既存行を入れ → 新バージョンの Store で開く**」テストを持ち、複数は「2回目の構築でも ALTER が再実行されず既存データを保持する(冪等性)」テストを併せ持つ)。**新しい列だけがそのテストを持たないなら、それは既存の一様な慣行からの逸脱として報告する**
-     - 報告の前に、**自分で旧スキーマの DB を作って開いてみる**(`new Database(tmpfile)` に旧 DDL を流し、既存行を1件入れ、`new AnalysisStore({filename})` で開いて既存行が読めるか・再保存で新列が更新されるか・再オープンで壊れないかを見る)。10行のスクリプトで済み、「動くこと」と「テストがあること」を分けて報告できる
+   - **永続化スキーマの変更(列追加・テーブル追加・DDL 変更)は、「新規 DB に対して緑」ではなく「本番の D1 に今ある状態から適用して壊れないか」で確認する**: 列を足した migration は**空の DB から全部適用すれば必ず緑**になり、テストが新規の DB だけで書かれていると、**適用の順序・旧い Worker との共存・新しい Worker が先に出た場合の被害**が全テスト緑のまま通る。本番の D1 は CI にもリポジトリにも存在しないため、ここは自動では一部しか守られない(守られるのは、下の `cloud-d1-schema.test.ts` の宣言と、`deploy-cloud.yml` の check ジョブが migration をローカルの D1 に適用することまで)。確認手順:
+     - `git diff` に `cloud/migrations/` の新しいファイルが現れたら、**`scripts/test/cloud-d1-schema.test.ts` の既存の先例の形を数える**(`FILES` の一覧と「後から足すときは次の番号」の注記、`D1_EXTRA_COLUMNS` の宣言〈exe の `AnalysisStore` が作る構造にない D1 専用の列は、ここに無ければ不一致として検出される〉、そして 0023〈6列〉・0024〈`race_class`〉のように「`schemaAfter(sqls.slice(0, N))` で**直前までの migration には列が無い**ことを固定し → 適用後の列が `D1_EXTRA_COLUMNS` の宣言と一致し → 索引が増えず → SQL が `ALTER TABLE ... ADD COLUMN` の文だけ〈UPDATE なし〉」を 1 件ずつ固定するテスト)。**新しい migration だけがこの形のテストを持たないなら、既存の一様な慣行からの逸脱として報告する**
+     - 報告の前に、**自分で migration の性質を確かめる**: (a) **追加のみ**か(既存の表・列を `DROP`・`RENAME`・型変更で壊さないか。`ALTER TABLE ... ADD COLUMN` は既存の行を NULL で残す。`UPDATE` で既存行を書き換える文があれば、それが本番の件数で通るかを別に問う)、(b) **旧い Worker と共存する**か(直前のコミットの Worker が発行する SQL〈INSERT の列リスト・SELECT〉が、新しいスキーマに対してそのまま通るか。列を足すだけなら通るが、新しい索引・CHECK・UNIQUE が旧 Worker の INSERT を弾く形になっていないか、既存の列の意味や型を変えていないかを見る)、(c) 直前までの migration を空の DB に適用して既存行を 1 件入れ、新しい migration を適用して**行が残る**こと(`schemaAfter` と同じ手で、10 行のスクリプトで済む)。「動くこと」と「テストがあること」を分けて報告する
+     - **適用の順序と、新しい Worker が先に出た場合の被害を確かめる**: (a) `deploy-cloud.yml` が `wrangler d1 migrations apply DB --remote` を **`wrangler deploy` より前**に置いているか(差分が workflow に触れるなら、`scripts/test/cloud-deploy-workflow.test.ts` がこの順序を固定していることも確認する)、(b) 新しい列を読み書きする Worker のコードがあるなら、**`cloud/src/d1-health.ts` の `D1_HEALTH_SQL` がその列を指しているか**(`/api/health` の `d1.ok=false` が「migration の反映前に新しい Worker が出た」状態に気づく唯一の経路。列を足して health の SQL を直し忘れると、未適用が検出されない)、(c) **新しい Worker が migration より先に動いたら何が落ちるか**を列挙する(新しい列を SELECT する読み出し・INSERT する書き込みのどれが `no such column` で失敗するか。読み出しだけか、保存まで壊れるか)。(c) の被害が「保存が壊れる」なら、順序を担保する仕組み〈上の (a)〉が実在することを実物で確かめる
      - **UPSERT の `DO UPDATE SET` に新列を足したときは、その列を渡さない呼び出し元がいないかを `grep` で全数確認する**(いれば、そちらの再保存が既存値を静かに NULL で上書きする)。production の呼び出し元が1本でも、テストヘルパ経由の再保存で同じことが起きうる
-     - (Issue #100 で `race_results.win_payout` が追加された際、`migrateResultWinPayoutColumn` は既存の逐語コピーで実際に正しく動いた〈boss が旧スキーマ DB で実測〉が、**旧 DB を開くテストも冪等性テストも1本も追加されず、code-reviewer もそれを観点として挙げなかった**。同ファイルには上記のとおり7件の先例があった)
+     - (Issue #100 は exe の SQLite 時代の事例。当時の手順は「旧スキーマの DB を生 SQL で作り、新バージョンの `AnalysisStore` で開く」で、exe の移行機構と旧 DB のテストは Issue #400〈R-12a〉で削除したので、**この手順はもう実行できず、以下の「同ファイルの先例」ももう存在しない**。「既存の慣行から逸脱した新しい変更を、慣行の数え方で見つける」という教訓は D1 の migration にもそのまま当てはまる〈上の 1 つ目の確認手順〉。 当時の経緯: Issue #100 で `race_results.win_payout` が追加された際、`migrateResultWinPayoutColumn` は既存の逐語コピーで実際に正しく動いた〈boss が旧スキーマ DB で実測〉が、**旧 DB を開くテストも冪等性テストも1本も追加されず、code-reviewer もそれを観点として挙げなかった**。同ファイルには、当時の本節が列挙していた7件の先例があった)
 
 ## 出力形式
 指摘は以下の3段階に分類して報告する:

@@ -32,6 +32,8 @@ model: sonnet
 1. `pnpm test`(リポジトリルート)
 2. `pnpm typecheck`(リポジトリルート)
 3. cloud(`cloud/` で。初回は `pnpm install --ignore-workspace --frozen-lockfile`): `pnpm run typecheck`・`npx vitest run`・`pnpm run smoke`
+4. 確率の質のコード(`packages/core/src/ev/probability-quality*.ts`・`scripts/probability-quality-41*/`)に触れる変更では、
+   リポジトリルートの `pnpm test:research` も実行する(**条件付き。触れない変更では不要**)
 
 **3 は必須**。vitest は Node 環境で走るため、**ブラウザ向けのバンドル(`cloud/client`)の破綻はテストだけでは
 検出できない**(過去に `node:zlib` の混入で CI が落ちた)。これを検出するのは、cloud の `pnpm run typecheck`
@@ -40,6 +42,11 @@ model: sonnet
 検証要件に書かない。)
 cloud/client から core を使うときは、バレル(`@keiba/core`)を import せず、`client-bundle.test.ts` の許可リストにある入口を使うこと。
 smoke は固定のポートを使うので、実行の前に `ps` で他の wrangler・workerd が動いていないことを確かめる。
+
+**4 を忘れない**: 確率の質の測定のテスト(ルートの `scripts/test/probability-quality-41-*.test.ts` と、`packages/core` の
+`probability-quality`・`brier-quality-report`・`paired-brier-comparison` の 3 ファイル)は、普段の `pnpm test` から外してある
+(Issue #395。`ci.yml` の冒頭の注記と `docs/current-spec.md` の CI の節が正)。上のパスに触れた変更では、**`pnpm test` が緑でも
+それらのテストは一度も走っていない**。
 
 **1・2 はいずれもリポジトリルートの `-r` 無しコマンド。** ルート直下 `scripts/` 配下のテスト・
 型検査は `pnpm -r test`/`pnpm -r typecheck`(パッケージ横断だが `-r` は workspace 全体を意味し、
