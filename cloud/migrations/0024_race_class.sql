@@ -1,0 +1,19 @@
+-- クラウド版(D1)の migration 0024: レースのクラスの写し(Issue #426〈#389 の案 B〉)。exe の SQLite には無い、D1 専用の列。
+-- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧い行は NULL のまま)。
+-- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言した追加分」(D1_EXTRA_COLUMNS)も同時に直す。
+-- ★デプロイの順序: この列を SELECT する新しい Worker は、migration の適用より前に出してはならない(/api/health の疎通確認と、結果の取り込みの書き込みが落ちる)。
+--   deploy-cloud.yml は migration を wrangler deploy より前に適用する。旧い Worker はこの列を参照しないので、適用後も壊れない(共存)。
+--
+-- 目的: 検証画面の「条件ごとの的中率と回収率」にクラスの節を足す(#389-c)ための、**正確な**クラス。レース名と grade からの推定は、中央の約 25% で決まらない。
+-- 出馬表・結果ページの `div.RaceData02` にクラスの span があるので、そこから読む(`packages/core/src/scraper/race-class.ts`)。
+-- この migration は列と書き込みだけで、画面は変えない。索引は作らない(検証の DO が全件を読む。書き込みの行を増やさない)。
+--
+--   race_class  レースのクラスの値。NULL = 未確認(まだ読んでいない、または読めなかった。両者は区別しない)。
+--               中央: 正準ラベル('新馬'・'未勝利'・'1勝クラス'・'2勝クラス'・'3勝クラス'・'オープン')。「オープン」は重賞・リステッド・OP を区別しない(区別は grade 列と読む側)。
+--               地方: 区分の生のトークン('C1'・'B3'・'A2B1'・'3歳'・'4上' など。年齢限定の表記も混ざる。どう分けるかは読む側〈#389-c〉)。
+--               ばんえい等、`RaceData02` に区分が無いレースは NULL のまま。
+--
+-- 書く経路は 2 つ。**どちらも NULL の列だけを埋める(先着。先に入った値を NULL や別の値で消さない)**:
+--  (1) 検証の DO の補完(`verify-store.ts`): スナップショットの `race.raceClass`(出馬表から読んだ値)を、発走時刻・条件(0023)と同じ 1 文で写す。`cond_read` が NULL の行だけ。
+--  (2) 結果の取り込み(`result-repository.ts` の `saveRaceClass`): 結果ページの `RaceData02` から読んだ値を、そのレースの分析の行すべてに書く。
+ALTER TABLE analyses ADD COLUMN race_class TEXT;

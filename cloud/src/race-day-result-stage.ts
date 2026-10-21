@@ -13,9 +13,10 @@
  * 手順の仕様(試行回数は取得の前に永続化・払戻が出てから保存・失敗の扱い)は {@link ResultStage.runStep} の JSDoc を参照。メソッドの本体は切り出し前から変えていない。
  */
 import { importRaceResult } from "../../packages/core/src/ev/result-import";
-import { parseRaceId } from "../../packages/core/src/scraper/ids";
+import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
 import { HttpError, type HttpClient } from "../../packages/core/src/scraper/http-client";
 import { parseRaceFieldSize, parseRaceResult, RaceResultNotConfirmedError } from "../../packages/core/src/scraper/parse-race-result";
+import { parseRaceClassFromHtml } from "../../packages/core/src/scraper/parse-race-class";
 import { GateRefusedError } from "./gate-fetch";
 import {
   MAX_RESULT_ATTEMPTS,
@@ -90,7 +91,13 @@ export class ResultStage {
     this.results.markAttempt(raceId, attempts, this.now());
     // 当日の行(Issue #209): 計画の確定で積んだ行 = 依頼の日が開催日。全頭の着順がそろった確認と、5 分おき・10 回の再試行が加わる。過去日の行(後日の cron の依頼)は従来どおり。
     const sameDay = row.requested_on === this.metaGet("kaisai_date");
-    const progress: { stage: "fetch" | "parse" | "save"; noPayout: boolean; incomplete: "short" | "unknown-size" | null } = { stage: "fetch", noPayout: false, incomplete: null };
+    // `raceClass`: 結果ページの `RaceData02` から読んだレースのクラス(Issue #426。読めなければ undefined)。パースの終わりに決まり、保存のあとに使う。
+    const progress: { stage: "fetch" | "parse" | "save"; noPayout: boolean; incomplete: "short" | "unknown-size" | null; raceClass: string | undefined } = {
+      stage: "fetch",
+      noPayout: false,
+      incomplete: null,
+      raceClass: undefined,
+    };
     // 確定の単勝オッズ・人気だけを保存する依頼か(Issue #259。印は積むときに付け直す)。
     const winOddsOnly = this.results.isWinOddsOnly(raceId);
     let imported = false;
@@ -116,6 +123,7 @@ export class ResultStage {
               throw new RaceResultNotConfirmedError("全頭の着順がまだそろっていません");
             }
           }
+          progress.raceClass = parseRaceClassFromHtml(html, venueKindOfRaceId(parseRaceId(raceId)));
           return parsed;
         },
         saveResult: async (id, entries, courseType, comboPayouts) => {
@@ -125,9 +133,11 @@ export class ResultStage {
             // 同じ取得(同じ entries)で両方を埋める。どちらも冪等なので、片方が失敗して再試行になっても、埋まった分は書き直されない。
             await this.resultStore!.saveWinOdds(id, entries);
             await this.resultStore!.saveScratched(id, entries);
+            await this.saveRaceClass(id, progress.raceClass);
             return;
           }
           await this.resultStore!.saveResult(id, entries, courseType, comboPayouts);
+          await this.saveRaceClass(id, progress.raceClass);
         },
       });
       imported = outcome.status === "imported";
@@ -173,6 +183,23 @@ export class ResultStage {
       }
     }
     return this.failResult(row, attempts, "fetch-failed", outcomeOf_, sameDay);
+  }
+
+  /**
+   * レースのクラス(Issue #426)を分析の行に書く。**結果の保存(補完モードではオッズ・scratched の保存)が成功したあとにだけ呼ぶ**。
+   * クラスは結果の副産物なので、**ここの失敗は握って警告にし、取り込みは成功させる**: 結果は保存済みで、再試行(`save-failed`)にすると結果ページの取り直しが無駄になり、
+   * 再試行が尽きると『諦めた』と記録されて保存済みの結果と食い違う。クラスは NULL のまま残り、後から補完できる。警告は固定の文言(例外の文面は出さない)。
+   * クラスが読めなかった(undefined)・結果ストアが `saveRaceClass` を持たない構成では、何もしない。
+   */
+  private async saveRaceClass(raceId: string, raceClass: string | undefined): Promise<void> {
+    if (raceClass === undefined || this.resultStore?.saveRaceClass === undefined) {
+      return;
+    }
+    try {
+      await this.resultStore.saveRaceClass(raceId, raceClass);
+    } catch {
+      this.onWarn(`結果の取り込み: レースのクラスの保存に失敗しました(${raceId}。結果は保存済み)`);
+    }
   }
 
   /**

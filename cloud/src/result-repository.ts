@@ -436,6 +436,11 @@ export interface ResultRepository {
   saveWinOdds(raceId: string, results: readonly RaceResultEntry[]): Promise<WinOddsOutcome>;
   /** 取消・除外の記録(`scratched`)だけを、着順が NULL で scratched が NULL の行に限って埋める(Issue #270。#72 の残り)。他の列・組合せ払戻には触れない。 */
   saveScratched(raceId: string, results: readonly RaceResultEntry[]): Promise<ScratchedOutcome>;
+  /**
+   * レースのクラス(結果ページの `RaceData02` から読んだ値。Issue #426)を、そのレースの分析(`analyses`)の行のうち `race_class` が NULL のものに書く。入っている値は上書きしない(先着)。
+   * クラスが無い(null・undefined・空文字)なら D1 に何も発行しない。結果の表(`race_results` ほか)には触れない。
+   */
+  saveRaceClass(raceId: string, raceClass: string | null | undefined): Promise<RaceClassOutcome>;
   getRaceResultDetails(raceIds: readonly string[]): Promise<Map<string, RaceResultDetail>>;
   listUnimportedRaces(options: ListUnimportedOptions): Promise<UnimportedRace[]>;
   listUnimportedRacesByDay(options: ListUnimportedByDayOptions): Promise<UnimportedRace[]>;
@@ -450,6 +455,17 @@ export interface WinOddsOutcome {
 export interface ScratchedOutcome {
   readonly rowsWritten: number;
 }
+
+/** {@link D1ResultStore.saveRaceClass} の結果。`rowsWritten` は D1 が報告した `meta.rows_written`(書くものが無ければ 0)。 */
+export interface RaceClassOutcome {
+  readonly rowsWritten: number;
+}
+
+/**
+ * レースのクラスを書く文(migration 0024。Issue #426)。そのレースの分析の行のうち `race_class` が NULL のものだけ(入っている値は上書きしない=先着。2 回目は 0 行)。
+ * 検証の DO の補完(`verify-store.ts` の `COALESCE`)と対になる: どちらが先に入っても、先に入った値を NULL や別の値で消さない。束縛値は `[クラス, race_id]`。
+ */
+export const SAVE_RACE_CLASS_SQL = "UPDATE analyses SET race_class = ? WHERE race_id = ? AND race_class IS NULL";
 
 export interface D1ResultStoreOptions {
   readonly db: ResultDb;
@@ -517,6 +533,19 @@ export class D1ResultStore implements ResultRepository {
     }
     const [result] = await this.db.batch([statement]);
     return { rowsWritten: result?.meta.rows_written ?? 0 };
+  }
+
+  /**
+   * レースのクラスを、そのレースの分析の行のうち `race_class` が NULL のものに書く(Issue #426。{@link SAVE_RACE_CLASS_SQL} の 1 文)。結果の取り込みが、結果ページを読んだあとに呼ぶ。
+   * 結果の表には**一切触れない**。冪等: 2 回目は何も書かない(`rowsWritten` は 0)。クラスが無い(null・undefined・空文字)なら D1 に何も発行しない。失敗は reject する
+   * (呼び出し側の結果の取り込みが握って警告にする=結果の保存は成功させる)。
+   */
+  async saveRaceClass(raceId: string, raceClass: string | null | undefined): Promise<RaceClassOutcome> {
+    if (typeof raceClass !== "string" || raceClass === "") {
+      return { rowsWritten: 0 };
+    }
+    const result = await this.db.prepare(SAVE_RACE_CLASS_SQL).bind(raceClass, raceId).run();
+    return { rowsWritten: result.meta.rows_written ?? 0 };
   }
 
   /**

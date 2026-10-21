@@ -90,7 +90,7 @@ describe("migration の適用(ローカルの D1)", () => {
   });
 
   it("migration は23本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql"]);
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql"]);
     expect((await rows("PRAGMA table_info(race_results)")).map((r) => r["name"])).toContain("scratched"); // Issue #72(0013)
     expect((await rows("PRAGMA table_info(race_results)")).map((r) => r["name"])).toContain("wakuban"); // Issue #269(0016)
   });
@@ -236,6 +236,16 @@ describe("D1 の疎通確認(/api/health が使う checkD1)を、実エンジン
       expect(await checkD1(db)).toEqual({ ok: false });
     } finally {
       await db.prepare("ALTER TABLE analyses RENAME COLUMN cond_read_renamed TO cond_read").run();
+    }
+    expect(await checkD1(db)).toEqual({ ok: true });
+  });
+
+  it("対照: 0024 の race_class 列が無い状態(migration の未適用相当。Issue #426)では ok:false になる", async () => {
+    await db.prepare("ALTER TABLE analyses RENAME COLUMN race_class TO race_class_renamed").run();
+    try {
+      expect(await checkD1(db)).toEqual({ ok: false });
+    } finally {
+      await db.prepare("ALTER TABLE analyses RENAME COLUMN race_class_renamed TO race_class").run();
     }
     expect(await checkD1(db)).toEqual({ ok: true });
   });
