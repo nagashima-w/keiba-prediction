@@ -757,7 +757,7 @@ export interface RaceBreakdownHorseView {
 /**
  * 配分提案の1買い目分(表示用。core StoredAllocationBetDetail のプレーン写し。Issue #55)。
  * `RaceBreakdownHorseView` と同じ慣行(core側の型をこのファイルに構造的に複製する)に倣う。
- * このファイルが import を持たない規約(ファイル先頭コメント参照)を保つため、型を import せず
+ * このファイルは core の型を import しない規約(ファイル先頭コメント参照。例外は、自身が import を持たない `common/prediction-marks.ts` の型 1 つだけ)を保つため、型を import せず
  * 手動で複製する。構造一致は `packages/core/test/analysis/analysis-types-allocation-pin.test.ts` がコンパイル時に固定する。
  */
 export interface StoredAllocationBetView {

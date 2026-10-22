@@ -949,6 +949,21 @@ describe("期限が来たら pre_race を投入する(planned → promoted)と�
     expect(planRows(h)[0]).toMatchObject({ state: "skipped", skip_reason: "cap" });
     expect(h.sql.exec("SELECT 1 FROM race_day_tasks WHERE mode = 'pre_race'").toArray()).toEqual([]);
   });
+
+  it("昇格のとき、1日の上限の1つ手前(MAX_TASKS_PER_DAY − 1 件)なら昇格する。pre_race を積むと件数がちょうど上限になる(Issue #446)", async () => {
+    const h = harness(listHtml([central(1, "10:00")]), EMPTY_HTML);
+    await planned(h);
+    for (let i = 0; count(h) < MAX_TASKS_PER_DAY - 1; i++) {
+      h.sql.exec("INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at) VALUES (?, 'morning', 'done', 0, 0, 1, 1)", `2026010101${String(i).padStart(2, "0")}`);
+    }
+    expect(count(h)).toBe(MAX_TASKS_PER_DAY - 1); // 前提: 上限の 1 つ手前
+    expect(h.sql.exec("SELECT 1 FROM race_day_tasks WHERE mode = 'pre_race'").toArray()).toEqual([]); // 前提: このレースの pre_race はまだ無い
+    await tick(h); // idle(張り直し)
+    await tick(h); // 期限
+    expect(planRows(h)[0]).toMatchObject({ state: "promoted", skip_reason: null });
+    expect(h.sql.exec("SELECT race_id FROM race_day_tasks WHERE mode = 'pre_race'").toArray()).toHaveLength(1);
+    expect(count(h)).toBe(MAX_TASKS_PER_DAY); // 積んで、ちょうど上限
+  });
 });
 
 describe("getPlanProgress(事前分析のまとめ #205 のための読み取り)", () => {
@@ -1086,6 +1101,7 @@ function recentSink(): RecentSink {
 
 const preRaceRow = (h: Harness): { status: string; queued_at: number; error: string | null; attempts: number }[] =>
   h.sql.exec("SELECT status, queued_at, error, attempts FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as never;
+const count = (h: Harness): number => (h.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks").toArray() as { n: number }[])[0]!.n;
 const nonListUrls = (h: Harness): string[] => h.gate.urls.filter((u) => !u.includes("race_list_sub"));
 const resultOf = (h: Harness, raceId: string) => h.core.getAutoRunResults().results.find((r) => r.raceId === raceId)!.outcome;
 
@@ -1389,6 +1405,24 @@ describe("G-C1(ステップの直前): 自動で積んだ pre_race は、各ス�
     expect(preRaceRow(h)[0]!.queued_at).toBe(jst("09:15")); // 積み直していない
     expect(resultOf(h, R1)).toMatchObject({ kind: "failed", reason: "blocked" }); // 自動として分類される
   });
+
+  it("上と同じ落ち方で、積んだ pre_race が fetched まで進んでいても(実行中)、自動の印が一致すれば promoted にするだけで、積み直さない(Issue #446)", async () => {
+    const h = harness(listHtml([central(1, "10:00")]), EMPTY_HTML);
+    await plannedAt8(h);
+    h.fault = (query) => {
+      if (query.includes("UPDATE race_day_plan SET state = 'promoted'")) throw new Error("SQL の故障");
+    };
+    h.clock.now = jst("09:15");
+    h.alarm.at = h.clock.now;
+    await expect(tick(h)).rejects.toThrow("SQL の故障");
+    h.fault = null;
+    h.sql.exec("UPDATE race_day_tasks SET status = 'fetched' WHERE mode = 'pre_race'");
+    expect(planRows(h)[0]!.state).toBe("planned"); // 前提: 行はまだ planned
+    expect(preRaceRow(h)).toMatchObject([{ status: "fetched", queued_at: jst("09:15") }]); // 前提: 実行中(fetched)の自動の pre_race
+    await wakeAt(h, jst("09:16"));
+    expect(planRows(h)[0]).toMatchObject({ state: "promoted", skip_reason: null }); // skipped(manual) ではない
+    expect(preRaceRow(h)[0]!.queued_at).toBe(jst("09:15")); // 積み直していない(queued にも戻っていない)
+  });
 });
 
 describe("AC-C4: 手動の分析との重複(同じレース・現行の prompt_version・LLM が効いた・期限の 15 分前〜今)なら、自動はスキップする", () => {
@@ -1512,6 +1546,61 @@ describe("AC-C4: 手動の分析との重複(同じレース・現行の prompt_
     expect(planRows(h)[0]).toMatchObject({ state: "skipped", skip_reason: "manual" });
     expect(preRaceRow(h)[0]!.queued_at).toBe(jst("09:15") + 1000); // 手動の予約の時刻のまま(積み直していない)
     expect(resultOf(h, R1)).toEqual({ kind: "skipped", reason: "manual" });
+  });
+
+  it("D1 に聞く窓の終点は「今」(期限ではない)。アラームが期限より遅れて起きたら、終点も遅れる(Issue #446: 期限 9:15 に対し 9:20 に起きる)", async () => {
+    const sink = recentSink();
+    const h = harness(listHtml([central(1, "10:00")]), EMPTY_HTML, { sink });
+    await plannedAt8(h);
+    h.sql.exec("INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at) VALUES (?, 'pre_race', 'failed', 3, 0, ?, ?)", R1, jst("09:05"), jst("09:06"));
+    await wakeAt(h, jst("09:20"));
+    expect(h.clock.now).toBe(jst("09:20")); // 前提: 実際に 9:20 に起きた(期限 9:15 とは違う)
+    expect(sink.finds).toEqual([{ raceId: R1, fromIso: new Date(jst("09:15") - 15 * MIN).toISOString(), toIso: new Date(jst("09:20")).toISOString() }]);
+  });
+
+  it("D1 の読み取りの失敗の警告は、例外の文面にある API キーの形(sk-ant-…)を伏せる(ログに鍵を出さない。Issue #446)", async () => {
+    const SECRET = "sk-ant-api03-ZZZZsecretkey123456";
+    const sink = recentSink();
+    sink.error = new Error(`D1 が落ちた ${SECRET}`);
+    const h = harness(listHtml([central(1, "10:00")]), EMPTY_HTML, { sink });
+    await plannedAt8(h);
+    h.sql.exec("INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at) VALUES (?, 'pre_race', 'failed', 3, 0, ?, ?)", R1, jst("09:05"), jst("09:06"));
+    await wakeAt(h, jst("09:15"));
+    const confirm = h.warnings.filter((w) => /手動の分析の確認/.test(w));
+    expect(confirm).toHaveLength(1); // 前提: 確認の失敗の警告が 1 件出ている
+    expect(confirm[0]).toContain("D1 が落ちた sk-ant-***");
+    expect(h.warnings.join("\n")).not.toContain("ZZZZsecretkey");
+  });
+
+  it("1日の上限ちょうどでも、同じレースの pre_race の行が既にある(done)なら cap でスキップせず、自動で積み直す(上限は新しい行を増やすときだけ。Issue #446)", async () => {
+    const sink = recentSink();
+    const h = harness(listHtml([central(1, "10:00")]), EMPTY_HTML, { sink });
+    await plannedAt8(h);
+    h.sql.exec("INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at, analyzed_at, analysis_id, detail) VALUES (?, 'pre_race', 'done', 1, 1, ?, ?, ?, 3, 'stored')", R1, jst("09:05"), jst("09:06"), jst("09:05"));
+    for (let i = 0; count(h) < MAX_TASKS_PER_DAY; i++) {
+      h.sql.exec("INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at) VALUES (?, 'morning', 'done', 0, 0, 1, 1)", `2026010101${String(i).padStart(2, "0")}`);
+    }
+    expect(count(h)).toBe(MAX_TASKS_PER_DAY); // 前提: 上限ちょうど(この pre_race の行を含む)
+    expect(sink.rows).toEqual([]); // 前提: 手動の分析と重複しない
+    await wakeAt(h, jst("09:15"));
+    expect(planRows(h)[0]).toMatchObject({ state: "promoted", skip_reason: null });
+    expect(preRaceRow(h)).toHaveLength(1);
+    expect(preRaceRow(h)[0]!.queued_at).toBe(jst("09:15")); // 積み直した
+    expect(count(h)).toBe(MAX_TASKS_PER_DAY); // 行は増えていない
+  });
+
+  it("D1 の読み取りの await の間に、計画の行が別の経路で skipped になったら、読み直して何もしない(pre_race を積み直さない。Issue #446)", async () => {
+    const sink = recentSink();
+    const h = harness(listHtml([central(1, "10:00")]), EMPTY_HTML, { sink });
+    await plannedAt8(h);
+    h.sql.exec("INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at) VALUES (?, 'pre_race', 'failed', 3, 0, ?, ?)", R1, jst("09:05"), jst("09:06"));
+    sink.onFind = async () => {
+      h.sql.exec("UPDATE race_day_plan SET state = 'skipped', disposition = 'skip', skip_reason = 'cap' WHERE race_id = ?", R1);
+    };
+    await wakeAt(h, jst("09:15"));
+    expect(sink.calls).toEqual(["findRecentByRace"]); // 前提: 確認の await に入った
+    expect(planRows(h)[0]).toMatchObject({ state: "skipped", skip_reason: "cap" }); // 別の経路の結果のまま
+    expect(preRaceRow(h)).toMatchObject([{ status: "failed", queued_at: jst("09:05") }]); // 積み直していない
   });
 
   it("時刻の判定(発走済み)でスキップになる行は、D1 に出ない", async () => {

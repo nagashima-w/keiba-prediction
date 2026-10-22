@@ -10,7 +10,7 @@ import type {
  * analysis/analysis-types.ts の組合せオッズView型群(core型の手動コピー)が、core型と
  * 構造的に完全一致していることを型レベルで固定する(code-reviewer指摘・提案1採用)。
  *
- * 背景: `analysis/analysis-types.ts` 自体は import を 1 つも持たない既存の流儀(ブラウザ向けの束の閉包に
+ * 背景: `analysis/analysis-types.ts` 自体は core の型を import しない既存の流儀(import するのは、自身が import を持たない `common/prediction-marks.ts` の型 1 つだけ。Issue #445。ブラウザ向けの束の閉包に
  * core のバレルやネイティブ依存を引き込まないため。`cloud/test/client-bundle.test.ts` の許可リスト参照。
  * 旧 exe では main/preload/renderer が参照する IPC 境界を core のnative依存から独立させる理由もあった)を
  * 守っているため、View型は core型の**手動コピー**であり、コンパイラが構造一致を強制する仕組みが

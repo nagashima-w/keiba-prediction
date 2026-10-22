@@ -11,7 +11,7 @@ import type { StoredAllocationView } from "../../src/analysis/analysis-types.js"
  *
  * `analysis-types-combo-odds-pin.test.ts` と同じ手法(`Equal`/`ExpectTrue`)を用いる
  * (再定義になるが、boss指示どおり「同一実装であることを明記」する形で対応した。
- * analysis/analysis-types.ts 自体は import を 1 つも持たない既存の流儀〈ブラウザ向けの束の閉包に
+ * analysis/analysis-types.ts 自体は core の型を import しない既存の流儀〈import するのは、自身が import を持たない `common/prediction-marks.ts` の型 1 つだけ(Issue #445)。ブラウザ向けの束の閉包に
  * core のバレルやネイティブ依存を引き込まないため。`cloud/test/client-bundle.test.ts` の許可リスト参照〉を守るため、
  * 型検査はこのテストファイル側だけで行う)。
  *

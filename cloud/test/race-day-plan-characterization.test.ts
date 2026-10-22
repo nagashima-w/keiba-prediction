@@ -28,7 +28,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
  *  - 「確定済みなのに会場が pending に戻る」: 救済は確定の印を外してから会場を戻すので、確定済みで一覧が動くことは無い
  *  - 「一覧の本体の発走時刻が読めない」(`entries_json` を書き換える): パーサが範囲外の時刻を落とすので、読めない時刻は一覧に出ない
  *
- * ハーネスは `race-day-promote-characterization.test.ts` と同じ形(ゲートは偽・保存先は偽・ストレージは `node:sqlite`)。
+ * ハーネスは、昇格の特性テスト(`race-day-promote-characterization.test.ts`。Issue #446 で削除済み)と同じ形だった(ゲートは偽・保存先は偽・ストレージは `node:sqlite`)。
  * 期待値の作り直し: `CHAR_DUMP=<ファイル> npx vitest run test/race-day-plan-characterization.test.ts`(比べずに、実出力を書き出す。通常の実行では使わない)。
  */
 
