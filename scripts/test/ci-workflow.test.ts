@@ -244,6 +244,12 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
       expect(jobCode).toMatch(/^ {4}if: github\.event_name == 'pull_request'$/m);
     });
 
+    it("Issue #449: timeout-minutes は 30 分以上(実測 9〜13 分の vitest とスモークを 1 ジョブで走らせ、遅い日は 2〜3 倍になりうるので 20 分では足りない)", () => {
+      const m = /^ {4}timeout-minutes: (\d+)$/m.exec(jobCode);
+      expect(m, "cloud-verify に timeout-minutes がある").not.toBeNull();
+      expect(Number(m![1])).toBeGreaterThanOrEqual(30);
+    });
+
     it("ステップの名前と順序が完全一致する", () => {
       expect(extractAllStepNames(job)).toEqual([
         STEP_NAMES.checkout,

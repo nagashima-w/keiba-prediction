@@ -211,6 +211,40 @@ describe.each([
   });
 });
 
+/** ジョブ本文(インデント 4 の `timeout-minutes:`)から分数を取り出す。無ければ null。コメント行は読まない。 */
+function timeoutMinutesOf(job: string): number | null {
+  const m = /^ {4}timeout-minutes: (\d+)$/m.exec(withoutComments(job));
+  return m === null ? null : Number(m[1]);
+}
+
+describe("check・smoke ジョブの制限時間(Issue #449)", () => {
+  // 背景: 2026-10-22 の遅い日に、ランナー全体が遅くなり(ci.yml の verify が普段の 1.5〜2 分から 9 分)、smoke が 12.3 分(普段は約 4〜5 分。成功)、
+  // check が 15 分で取り消され(普段は約 7〜13 分。run 39713630497)、承認印付きの push が本番に出なかった(deploy が skipped)。
+  // 倍率は check にも当たりうる(約 2.4 倍 → 約 29 分)ので、check は 30 分、smoke は 25 分を下限に固定する。
+  // 所要時間は Actions の run の履歴の実測(gh api)に基づく丸めた値。ここで固定するのは『余裕を持った下限』だけで、上限は固定しない。
+  it("検出器の確認(空振りでない): timeoutMinutesOf はインデント 4 の値を読み、コメント行と無い場合を区別する", () => {
+    expect(timeoutMinutesOf("  x:\n    runs-on: y\n    timeout-minutes: 25\n    env:\n")).toBe(25);
+    expect(timeoutMinutesOf("  x:\n    # timeout-minutes: 99\n    runs-on: y\n")).toBeNull();
+    expect(timeoutMinutesOf("  x:\n      timeout-minutes: 99\n")).toBeNull();
+  });
+
+  it("check の timeout-minutes は 30 分以上(通常は約 7〜13 分。遅い日の倍率 約 2.4 倍でも取り消されない)", () => {
+    const minutes = timeoutMinutesOf(jobBody("check"));
+    expect(minutes, "check に timeout-minutes がある").not.toBeNull();
+    expect(minutes!).toBeGreaterThanOrEqual(30);
+  });
+
+  it("smoke の timeout-minutes は 25 分以上(通常は約 4〜5 分。遅い日には 12.3 分かかり、15 分では余裕が約 3 分しかなかった)", () => {
+    const minutes = timeoutMinutesOf(jobBody("smoke"));
+    expect(minutes, "smoke に timeout-minutes がある").not.toBeNull();
+    expect(minutes!).toBeGreaterThanOrEqual(25);
+  });
+
+  it("deploy は timeout-minutes を持ち続ける(通常は約 1 分。check・smoke だけを緩めたことが deploy の検査を外さない)", () => {
+    expect(timeoutMinutesOf(jobBody("deploy"))).not.toBeNull();
+  });
+});
+
 describe("check ジョブのコマンド(順序つきで完全一致)", () => {
   it("install → 型検査 → テスト → デプロイの dry-run → D1 の migration(ローカル)の順に、この5つだけを実行する(smoke は含まない)", () => {
     const check = jobBody("check");

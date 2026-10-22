@@ -608,6 +608,21 @@ describe("AC-B2(補足): gate の拒否は試行を消費しない保留にす�
     expect(rowOf(stale, R_A)).toMatchObject({ attempts: 0, deferrals: 1, next_try_at: NOW + RESULT_BUSY_DELAY_MS });
   });
 
+  it("blocked の解除時刻がちょうど今(境界。未来ではない)なら、解除時刻の 1 秒後ではなく 60 秒後。1ms 先なら解除時刻の 1 秒後(Issue #446)", async () => {
+    const exact = harness();
+    exact.gate.script.push(refused("blocked", NOW));
+    await exact.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A] });
+    await tick(exact);
+    expect(exact.clock.now).toBe(NOW); // 前提: 取り込みのステップは「今 = NOW」で動き、解除時刻はちょうど今
+    expect(rowOf(exact, R_A)).toMatchObject({ attempts: 0, deferrals: 1, last_class: "blocked", next_try_at: NOW + RESULT_BUSY_DELAY_MS });
+
+    const ahead = harness();
+    ahead.gate.script.push(refused("blocked", NOW + 1));
+    await ahead.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_A] });
+    await tick(ahead);
+    expect(rowOf(ahead, R_A)).toMatchObject({ attempts: 0, deferrals: 1, last_class: "blocked", next_try_at: NOW + 1 + 1000 });
+  });
+
   it("保留は 5 回まで。6 回目で諦める(gave_up。分類は直近のもの)。取得を試みた回数は 6 回", async () => {
     const h = harness();
     h.gate.script.push(...Array.from({ length: MAX_RESULT_DEFERRALS + 1 }, () => refused("queue-full")));

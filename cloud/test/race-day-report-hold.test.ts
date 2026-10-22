@@ -491,6 +491,28 @@ describe("AC4: フェイルオープン(下限を記録できないときは今�
     expect(taskStatus(h, kawasaki(10))).toBe("fetched");
   });
 
+  it("下限の meta の書き込みが例外を投げても(一覧は取れている)、取得ステップの外へ漏らさない(戻り値は ok のまま。下限は残らない。例外の本文は出さない。Issue #446)", async () => {
+    const h = harness();
+    await planned(h);
+    const original = h.sql.exec.bind(h.sql);
+    const writes: string[] = [];
+    (h.sql as { exec: typeof h.sql.exec }).exec = (query: string, ...bindings: unknown[]) => {
+      if (query.includes("INSERT INTO race_day_meta") && bindings[0] === REPORT_HOLD_KEY) {
+        writes.push(query);
+        throw new Error("meta の書き込みの故障 SECRET-WRITE");
+      }
+      return original(query, ...bindings);
+    };
+    h.clock.now = jst("19:30");
+    h.gate.analysis = true;
+    await h.core.schedule({ raceId: kawasaki(10), kaisaiDate: DATE, mode: "pre_race" });
+    expect(await tick(h)).toBe(`${kawasaki(10)}:pre_race:fetch:ok`);
+    expect(writes).toHaveLength(1); // 前提: 下限の書き込みに到達して、そこで例外になった
+    expect(holdMeta(h)).toBeNull(); // 下限は残らない
+    expect(h.warnings.join("\n")).not.toContain("SECRET-WRITE");
+    expect(taskStatus(h, kawasaki(10))).toBe("fetched"); // 取得ステップは進んだ(失敗にしていない)
+  });
+
   it.each([
     ["該当の開催が一覧に無い", [nar(ooi(12), "大井", 12, "18:30")]],
     ["その開催の行の発走時刻がすべて読めない", [nar(kawasaki(10), "川崎", 10, null), nar(kawasaki(12), "川崎", 12, null)]],

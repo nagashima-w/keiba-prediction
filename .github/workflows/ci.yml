@@ -99,7 +99,9 @@ jobs:
   cloud-verify:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Issue #449: 20 → 30 分。deploy-cloud.yml の check(vitest)と smoke を 1 ジョブで走らせる。成功した 5 本(2026-10-15)の実測は
+    # 9〜13 分(`gh api repos/<repo>/actions/runs/<id>/jobs` の started_at・completed_at)。遅い日には 2〜3 倍になりうるので 30 分にした。
+    timeout-minutes: 30
     env:
       WRANGLER_SEND_METRICS: "false"
     steps:
