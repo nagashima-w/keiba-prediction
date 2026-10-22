@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
 import type { DiscordNotifier } from "../src/notify-send";
-import { RaceDayCore, type AnalysisSink, type StepOutcome } from "../src/race-day-core";
+import { RaceDayCore, RETRY_DELAY_MS, type AnalysisSink, type StepOutcome } from "../src/race-day-core";
+import { RESCUE_WATCH_MS } from "../src/plan-failure";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
@@ -528,6 +529,68 @@ describe("23 時の再実行の後の失敗の判定と Discord 通知(日単位
     expect(notifyRow(h)).toBeUndefined();
     // 以後に鳴るアラームは、発走前の期限(翌日)以降だけ: 判定のための起床は無い
     expect(h.alarm.at === null || h.alarm.at > T_2300 + 2 * 60 * 60_000).toBe(true);
+  });
+
+  it("Webhook が無効でも、救済のあとに別の起床(判定の段階を通る任意のステップ)が来ても、判定しない・材料も行も積まない(判定の段階が自分で止める。Issue #446)", async () => {
+    const h = harness({ notifier: false });
+    h.gate.failures.central = [blocked(), blocked()];
+    await plan2100(h);
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    expect(venueRows(h).find((r) => r.venue === "central")).toMatchObject({ state: "failed" }); // 前提: 救済しても会場の失敗が残っている(Webhook があれば failed と判定される状態)
+    expect(meta(h, "plan_rescue_at")).not.toBeNull(); // 前提: 救済の要求がある
+    expect(verdict(h)).toBeNull(); // 前提: ここまでは判定の段階を通っていない(最後のステップは計画の段階で戻る)
+    await h.core.runNextStep(); // 判定の段階を通る起床(発走前のタスクなど、別の仕事の起床と同じ入口)
+    await h.core.runNextStep();
+    expect(verdict(h)).toBeNull();
+    expect(notifyRow(h)).toBeUndefined();
+    expect(h.sent).toEqual([]);
+  });
+
+  it("判定のためのアラーム(落ち着いた日): Webhook ありで救済を依頼した直後、アラームは「今」(判定を先送りしない。先まで追わず、時刻そのものを検査する。Issue #446)", async () => {
+    const h = harness({ notifier: true });
+    await plan2100(h);
+    h.sql.exec("UPDATE race_day_tasks SET status = 'done' WHERE mode = 'morning'");
+    h.clock.now = T_2300;
+    h.alarm.at = null;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    expect(verdict(h)).toBeNull(); // 前提: まだ判定していない
+    expect(h.alarm.at).toBe(T_2300);
+  });
+
+  it("判定のためのアラーム(待つ日): 事前分析が再試行待ちのあいだは再試行の時刻、期限(救済の依頼から RESCUE_WATCH_MS)の直前に張り直すと期限の時刻に張る(Issue #446)", async () => {
+    const h = harness({ notifier: true });
+    await plan2100(h);
+    h.sql.exec("UPDATE race_day_tasks SET status = 'done' WHERE mode = 'morning'");
+    const stuck = (h.sql.exec("SELECT race_id FROM race_day_tasks WHERE mode = 'morning' ORDER BY race_id LIMIT 1").toArray() as { race_id: string }[])[0]!.race_id;
+    h.sql.exec("UPDATE race_day_tasks SET status = 'queued', attempts = 1, updated_at = ? WHERE race_id = ? AND mode = 'morning'", T_2300, stuck);
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    expect(verdict(h)).toBeNull(); // 前提: 待っている(判定していない)
+    expect(h.alarm.at).toBe(T_2300 + RETRY_DELAY_MS); // 期限(60 分後)より早い、事前分析の再試行の時刻
+    const deadline = T_2300 + RESCUE_WATCH_MS;
+    expect(deadline).toBeGreaterThan(T_2300 + RETRY_DELAY_MS); // 前提: 期限は再試行より先
+    h.clock.now = deadline - 10_000;
+    await h.core.requestPlan({ kaisaiDate: DATE }); // 張り直し(rescue なしの重複の配信)
+    expect(verdict(h)).toBeNull();
+    expect(h.alarm.at).toBe(deadline);
+  });
+
+  it("アラームの合成: 通知の候補(送信の間隔で先送り)と判定の候補が両方あれば、早いほうに張る(Issue #446)", async () => {
+    const h = harness({ notifier: true });
+    await plan2100(h);
+    h.sql.exec("UPDATE race_day_tasks SET status = 'done' WHERE mode = 'morning'");
+    h.sql.exec("DELETE FROM race_day_notify"); // まとめを未送信に戻す
+    h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('notify_pace_until', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(T_2300 + 30 * 60_000));
+    h.clock.now = T_2300;
+    h.alarm.at = null;
+    const plan = (h.core as unknown as { notifyPlan(): { sendNow: unknown; nextAtMs: number | null } }).notifyPlan();
+    expect(plan.sendNow).toBeNull(); // 前提: 今は送らない
+    expect(plan.nextAtMs).toBe(T_2300 + 30 * 60_000); // 前提: 通知の候補は 30 分後(判定の候補より遅い)
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    expect(verdict(h)).toBeNull(); // 前提: 判定の候補(今)がある = まだ判定していない
+    expect(h.alarm.at).toBe(T_2300); // 早いほう(判定の今)
   });
 
   it("F4 だけが原因の失敗(統合): 事前分析が実行中のまま期限を過ぎ、ほかに失敗が無い → 期限の 1 ミリ秒前は判定せず、期限で failed の通知(未完了の件数だけ)", async () => {

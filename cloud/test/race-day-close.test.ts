@@ -7,6 +7,7 @@ import { parseRaceId } from "../../packages/core/src/scraper/ids";
 import { CLOSE_FINAL_LEAD_MS, CLOSE_FIRST_LEAD_MS, type CloseSavePayload } from "../src/analysis-close";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
+import { CLOSE_FETCH_RETRY_DELAY_MS, CLOSE_SAVE_RETRY_DELAY_MS } from "../src/race-day-close";
 import { RaceDayCore, type AnalysisSink, type RaceDayDeps, type StepOutcome } from "../src/race-day-core";
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { fixtureForUrl } from "./pipeline-fixtures";
@@ -265,6 +266,182 @@ describe("締切の直前の再計算: 入力の登録(分析の保存と同じ�
       [1, 2],
       [2, 2],
     ]);
+  });
+});
+
+describe("締切の直前の再計算: 入力の登録の細部(Issue #446: 削除した特性テストから移した)", () => {
+  it("出馬表の発走時刻が 1 桁の時間(9:50)でも、2 桁に揃えて発走の瞬間(UTC 00:50)を控え、回の行を積む(警告なし)", async () => {
+    const h = harness();
+    const base = h.gate.body;
+    h.gate.body = (url) => {
+      const text = base(url);
+      return text === null || !/shutuba\.html/.test(url) ? text : text.replace(/\d{1,2}:\d{2}発走/g, "9:50発走");
+    };
+    await analyze(h);
+    const startMs = Date.parse("2026-06-28T00:50:00Z");
+    expect(h.sql.exec("SELECT start_ms FROM race_day_close_input WHERE race_id = ?", RACE).toArray()).toEqual([{ start_ms: startMs }]);
+    expect(closeRows(h).map((r) => r.due_ms)).toEqual([startMs - CLOSE_FIRST_LEAD_MS, startMs - CLOSE_FINAL_LEAD_MS]);
+    expect(h.warnings.filter((w) => w.includes("締切の直前の再計算"))).toEqual([]); // 入力を積めなかった警告は出ない
+  });
+
+  it("組合せ ON のとき、分析時の組合せオッズを読んでよい期間の下限は、取得ステップの開始(fetch_started_at)。タスクを積んだ時刻(queued_at)ではない。上限は計算ステップの時刻", async () => {
+    const h = harness();
+    const queuedAt = h.clock.now;
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    h.clock.now = queuedAt + 3_000;
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    h.clock.now = queuedAt + 5_000;
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "compute", result: "ok" });
+    const row = h.sql.exec("SELECT instance, input_json FROM race_day_close_input WHERE race_id = ?", RACE).toArray()[0] as { instance: number; input_json: string };
+    const input = JSON.parse(row.input_json) as { comboFromMs: number; comboToMs: number };
+    expect(row.instance).toBe(queuedAt); // 前提: 積んだ時刻は取得の開始より前
+    expect(input.comboFromMs).toBe(queuedAt + 3_000);
+    expect(input.comboToMs).toBe(queuedAt + 5_000);
+  });
+});
+
+describe("締切の直前の再計算: 取得の再試行・保存の諦めの細部(Issue #446: 削除した特性テストから移した)", () => {
+  const odds404 = (h: Harness): void => {
+    const ok = h.gate.body;
+    h.gate.body = (url) => (/api_get_jra_odds/.test(url) ? null : ok(url));
+  };
+
+  it("取得に失敗して、再試行の時刻がちょうど次の回の時刻になるときは再試行しない(failed)。1 ミリ秒でも手前なら再試行する(retry。アラームはその時刻)", async () => {
+    const a = harness();
+    await analyze(a);
+    odds404(a);
+    expect(await fire(a, DUE2 - CLOSE_FETCH_RETRY_DELAY_MS)).toMatchObject({ round: 1, result: "failed", reason: "fetch-failed" });
+
+    const b = harness();
+    await analyze(b);
+    odds404(b);
+    expect(await fire(b, DUE2 - CLOSE_FETCH_RETRY_DELAY_MS - 1)).toMatchObject({ round: 1, result: "retry", reason: null });
+    expect(b.alarm.at).toBe(DUE2 - 1);
+  });
+
+  it("保存を 3 回失敗して諦めた回の戻り値には、payload の理由が載る(行わない回〈unset〉を保存できなかったとき reason は unset)", async () => {
+    const h = harness();
+    h.settings = { ...ALL_ON, bankroll: 0, perRaceCap: 0 };
+    await analyze(h);
+    h.sink.failSaveClose = 3;
+    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "retry", reason: null });
+    expect(await fire(h, closeRows(h)[0]!.next_try_at!)).toMatchObject({ round: 1, result: "retry", reason: null });
+    expect(await fire(h, closeRows(h)[0]!.next_try_at!)).toMatchObject({ round: 1, result: "failed", reason: "unset" });
+    expect(closeRows(h)[0]).toMatchObject({ state: "abandoned", save_attempts: 3 });
+    expect(h.sink.closes).toEqual([]); // 前提: 保存は 1 件も成功していない
+  });
+});
+
+describe("締切の直前の再計算: 控える入力の中身と、1 ステップの細部(Issue #446: 削除した特性テストから移した)", () => {
+  interface InputHorse {
+    umaban: number;
+    hadWinOdds: boolean;
+    hadPlaceOdds: boolean;
+  }
+  const inputOf = (h: Harness): Record<string, unknown> & { horses: InputHorse[] } => {
+    const row = h.sql.exec("SELECT input_json FROM race_day_close_input WHERE race_id = ?", RACE).toArray()[0] as { input_json: string };
+    return JSON.parse(row.input_json) as Record<string, unknown> & { horses: InputHorse[] };
+  };
+  /** 単勝(`"1"`)か複勝(`"2"`)のオッズから 5 番の馬を消した応答にする(単勝複勝の API 以外は元のまま)。 */
+  const dropOdds = (h: Harness, kind: "1" | "2"): void => {
+    const base = fixtureForUrl;
+    h.gate.body = (url) => {
+      const text = base(url);
+      if (text === null || !/api_get_jra_odds/.test(url) || /type=[3-8]/.test(url)) return text;
+      const json = JSON.parse(text) as { data: { odds: Record<string, Record<string, string[]>> } };
+      delete json.data.odds[kind]!["05"];
+      return JSON.stringify(json);
+    };
+  };
+
+  it("分析時に複勝オッズの無かった馬は、控えに hadPlaceOdds=false で入り、締切でも複勝オッズが無くて構わない(horse-set-mismatch にしない。ほかの馬は true)", async () => {
+    const h = harness();
+    dropOdds(h, "2");
+    await analyze(h);
+    const horses = inputOf(h).horses;
+    expect(horses).toHaveLength(16); // 前提
+    expect(horses.find((x) => x.umaban === 5)!.hadPlaceOdds).toBe(false);
+    expect(horses.filter((x) => x.hadPlaceOdds)).toHaveLength(15);
+    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "ok", reason: null });
+  });
+
+  it("分析時に単勝オッズの無かった馬は、控えに hadWinOdds=false で入り、締切でも単勝オッズが無くて構わない(horse-set-mismatch にしない。ほかの馬は true)", async () => {
+    const h = harness();
+    dropOdds(h, "1");
+    await analyze(h);
+    const horses = inputOf(h).horses;
+    expect(horses).toHaveLength(16); // 前提
+    expect(horses.find((x) => x.umaban === 5)!.hadWinOdds).toBe(false);
+    expect(horses.filter((x) => x.hadWinOdds)).toHaveLength(15);
+    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "ok", reason: null });
+  });
+
+  it("組合せ OFF なら、控えに組合せオッズを読んでよい期間(comboFromMs・comboToMs)は入らない", async () => {
+    const h = harness();
+    h.settings = { ...ALL_ON, includeComboOdds: false };
+    await analyze(h);
+    const input = inputOf(h);
+    expect("comboFromMs" in input).toBe(false);
+    expect("comboToMs" in input).toBe(false);
+    expect(input.allocationSettings).toMatchObject({ includeComboOdds: false });
+  });
+
+  it("控えた馬の数は出馬表と同じでも、馬番の集合が違えば failed(horse-set-mismatch)。再試行しない", async () => {
+    const h = harness();
+    await analyze(h);
+    const input = inputOf(h);
+    expect(input.horses).toHaveLength(16); // 前提
+    // 差し替えた馬は「分析時にオッズが無かった」扱いにして、オッズの欠落(別の理由)で失敗する経路を塞ぐ。馬番の集合の違いだけで failed になることを確かめる。
+    input.horses = input.horses.map((x) => (x.umaban === 16 ? { ...x, umaban: 99, hadWinOdds: false, hadPlaceOdds: false } : x));
+    h.sql.exec("UPDATE race_day_close_input SET input_json = ? WHERE race_id = ?", JSON.stringify(input), RACE);
+    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "failed", reason: "horse-set-mismatch" });
+    expect(closeRows(h)[0]).toMatchObject({ state: "done", attempts: 1 });
+  });
+
+  it("予定の時刻ちょうどに動いた回の遅れ(lateMs)は 0。動いた時刻(firedAtMs)は予定の時刻と同じ", async () => {
+    const h = harness();
+    await analyze(h);
+    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "ok" });
+    expect(h.sink.closes[0]!.payload).toMatchObject({ dueAtMs: DUE1, firedAtMs: DUE1, lateMs: 0 });
+  });
+
+  it("保存の失敗の再試行は、失敗した時刻(動いた時刻。予定の時刻ではない)の CLOSE_SAVE_RETRY_DELAY_MS(20 秒)後。アラームも同じ時刻", async () => {
+    const h = harness();
+    await analyze(h);
+    h.sink.failSaveClose = 1;
+    const firedAt = DUE1 + 7_000; // 予定の時刻より 7 秒遅れて動いた(now と due_ms を区別する)
+    expect(await fire(h, firedAt)).toMatchObject({ round: 1, result: "retry", reason: null });
+    expect(CLOSE_SAVE_RETRY_DELAY_MS).toBe(20_000); // 前提: 定数の値
+    expect(closeRows(h)[0]).toMatchObject({ state: "pending", save_attempts: 1, due_ms: DUE1, next_try_at: firedAt + CLOSE_SAVE_RETRY_DELAY_MS });
+    expect(h.alarm.at).toBe(firedAt + CLOSE_SAVE_RETRY_DELAY_MS);
+  });
+
+  it("分析のあとで保存先が saveClose を持たなくなったら、その回を abandoned にして警告 1 件。failed(reason なし)。次の回は動く", async () => {
+    const h = harness();
+    await analyze(h);
+    delete (h.sink as { saveClose?: unknown }).saveClose;
+    const warningsBefore = h.warnings.length;
+    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "failed", reason: null });
+    expect(closeRows(h)[0]).toMatchObject({ state: "abandoned" });
+    expect(closeRows(h)[1]).toMatchObject({ round: 2, state: "pending" });
+    expect(h.warnings.slice(warningsBefore).filter((w) => w.includes("保存できません"))).toHaveLength(1);
+    expect(h.gate.urls.filter((u) => /api_get_jra_odds/.test(u)).length).toBe(7); // 前提: 分析時の 7 本だけ。保存先が無い回はオッズを取りに行かない
+  });
+});
+
+describe("締切の直前の再計算: 取り直しの範囲(Issue #446: 削除した特性テストから移した)", () => {
+  it("1 ステップは、騎手・調教師の成績のキャッシュも読まない(オッズだけを取り直す。使わない読み取りをしない)", async () => {
+    const h = harness();
+    await analyze(h);
+    const keys: string[] = [];
+    const original = h.sql.exec.bind(h.sql);
+    (h.sql as { exec: typeof h.sql.exec }).exec = (query: string, ...bindings: unknown[]) => {
+      if (/FROM fetch_cache/i.test(query)) keys.push(String(bindings[0]));
+      return original(query, ...bindings);
+    };
+    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "ok" });
+    expect(keys.length).toBeGreaterThan(0); // 前提: キャッシュを読んでいる(出馬表など)
+    expect(keys.filter((k) => /jockey|trainer/.test(k))).toEqual([]);
   });
 });
 
