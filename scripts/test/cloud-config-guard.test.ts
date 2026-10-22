@@ -1,4 +1,6 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -1958,5 +1960,51 @@ describe("Issue #445: 否定参照の検査(他の DO・機能を参照しない
     for (const f of RACE_DAY_FILES) {
       expect(stripCode(readTextLf("cloud", "src", f)).length, `${f} を読めている`).toBeGreaterThan(500);
     }
+  });
+});
+
+/**
+ * Issue #451: ルートの `.gitignore` が、作業用の git worktree の置き場所 `.claude/worktrees/` だけを除外する(`.claude/` のほかのものは除外しない)。
+ *
+ * 判定は実際の `git check-ignore` で行う。リポジトリの外の一時ディレクトリで `git init` し、ルートの `.gitignore` だけをコピーして判定するので、
+ * この検査を走らせている作業ツリー(worktree 自体が `.claude/worktrees/` の下にあることがある)の状態や、利用者の global の ignore 設定には左右されない。
+ * 限界: `.gitignore` の他の行の妥当性は見ない(既存の行を変えていないことは、下の対照〈node_modules/ が除外される・.claude/agents/ が除外されない〉だけで確かめる)。
+ */
+describe("ルートの .gitignore(Issue #451)", () => {
+  /** 一時リポジトリでパスの除外を判定する。0=除外される、1=除外されない。それ以外(128 など)は git の失敗なのでテストを落とす。 */
+  function checkIgnore(files: readonly string[], target: string): 0 | 1 {
+    const dir = mkdtempSync(path.join(tmpdir(), "keiba-gitignore-"));
+    try {
+      const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+      const git = (args: string[]) => spawnSync("git", args, { cwd: dir, env, encoding: "utf-8" });
+      expect(git(["init", "-q"]).status, "git init が成功する").toBe(0);
+      writeFileSync(path.join(dir, ".gitignore"), readTextLf(".gitignore"));
+      // ディレクトリ専用の行(末尾が /)は、実在するディレクトリに対してだけ確実に効くので、実体を作る。
+      for (const f of files) {
+        mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+        writeFileSync(path.join(dir, f), "");
+      }
+      const status = git(["check-ignore", "-q", "--no-index", target]).status;
+      expect(status === 0 || status === 1, `git check-ignore が判定を返す(status=${status})`).toBe(true);
+      return status as 0 | 1;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const FILES = [".claude/worktrees/work-1/package.json", ".claude/agents/code-reviewer.md", ".claude/settings.json", "node_modules/x/index.js"];
+
+  it(".claude/worktrees/ の下(作業用 worktree)は除外される", () => {
+    expect(checkIgnore(FILES, ".claude/worktrees/work-1/package.json")).toBe(0);
+    expect(checkIgnore(FILES, ".claude/worktrees/work-1")).toBe(0);
+  });
+
+  it(".claude/ のほかのもの(agents/・settings.json)は除外されない", () => {
+    expect(checkIgnore(FILES, ".claude/agents/code-reviewer.md")).toBe(1);
+    expect(checkIgnore(FILES, ".claude/settings.json")).toBe(1);
+  });
+
+  it("対照: 既存の行(node_modules/)は除外される(判定の仕組みが生きている)", () => {
+    expect(checkIgnore(FILES, "node_modules/x/index.js")).toBe(0);
   });
 });
