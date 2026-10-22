@@ -861,6 +861,98 @@ describe("G-D2: 順序とアラーム", () => {
   });
 });
 
+describe("通知の内容を作れなかった・送信が失敗した回の結果(Issue #446: 削除した特性テストから移した)", () => {
+  const metaValue = (h: Harness, key: string): string | null => {
+    const rows = h.sql.exec("SELECT value FROM race_day_meta WHERE key = ?", key).toArray() as { value: string }[];
+    return rows[0]?.value ?? null;
+  };
+
+  it("内容を作れない(事前分析のまとめで開催日の読み出しが例外): 送らず、行を failed・分類 build にして、次の送信の時刻を送信の間隔だけ先へ進める。戻り値は failed", async () => {
+    const h = harness([central(1, "15:35")]);
+    await planned(h);
+    let failedAt: number | null = null;
+    h.fault = (query, bindings) => {
+      if (failedAt === null && /^SELECT value FROM race_day_meta WHERE key = \?/.test(query) && bindings[0] === "kaisai_date") {
+        failedAt = h.clock.now;
+        throw new Error("SQL の故障");
+      }
+    };
+    expect(await tick(h)).toBe("summary:notify:send:failed"); // 計画の直後の起床で、事前分析のまとめの送信に入る
+    expect(failedAt).not.toBeNull(); // 前提: 故障を注入できた
+    expect(notifyRows(h).find((r) => r.key === "summary")).toMatchObject({ kind: "summary", state: "failed", error_class: "build", payload_json: null });
+    expect(metaValue(h, "notify_pace_until")).toBe(String(failedAt! + SEND_SPACING_MS));
+    expect(h.notifier.sent).toEqual([]); // 送っていない
+  });
+
+  it("送信が失敗した回の戻り値は failed、成功した回は ok。警告は失敗した 1 通についてだけ(成功のたびに出さない)", async () => {
+    const failing = (): Error => new DiscordNotifyError(`拒否されました ${SECRET_URL}`, { status: 404, responseBody: SECRET_URL });
+    const h = harness([fixtureRace("15:35")]);
+    h.gate.others = "fixture";
+    h.notifier.script = ["ok", failing()]; // 1 通目(事前分析のまとめ)は成功、2 通目(分析)が失敗
+    await planned(h);
+    const labels = await drive(h, jst("16:00"));
+    expect(labels).toContain("summary:notify:send:ok");
+    expect(labels).toContain(`${RACE}:notify:send:failed`);
+    expect(labels).not.toContain(`${RACE}:notify:send:ok`);
+    expect(h.warnings.filter((w) => w.includes("Discord への通知に失敗しました"))).toHaveLength(1);
+  });
+
+  it("材料の embed の構築に失敗して最小の embed に代わるとき、タイトルのラベル(会場名・R・レース名・グレード)は計画の行から取る", async () => {
+    const h = harness([fixtureRace("15:35")]);
+    h.gate.others = "fixture";
+    h.sink.mutate = (record) => {
+      (record.raceSnapshot as { race?: unknown }).race = undefined;
+    };
+    await planned(h);
+    h.sql.exec("UPDATE race_day_plan SET venue_name = '試験場', grade = 'G2'");
+    await drive(h, jst("16:00"));
+    const minimal = h.notifier.sent.map(embedOf).find((e) => e.description?.includes("画面で確認"))!;
+    expect(minimal.title).toBe("試験場 11R 福島記念テスト(G2)");
+  });
+
+  it("failed(blocked)の赤の通知のタイトルは、計画の行の会場名とグレードから作る(race_id から導いた会場名ではない)", async () => {
+    const h = harness([central(1, "15:35", { grade: "G3" })]);
+    await planned(h);
+    h.sql.exec("UPDATE race_day_plan SET venue_name = '試験場'"); // race_id 由来の会場名(中山)と区別する
+    await drive(h, jst("14:49"));
+    await wakeAt(h, jst("14:50")); // 昇格 + 取得 → blocked で failed
+    expect(h.core.getAutoRunResults().results[0]).toMatchObject({ venueName: "試験場", grade: "G3", outcome: { kind: "failed", reason: "blocked" } });
+    await drive(h, jst("16:00"));
+    const red = h.notifier.sent.map(embedOf).filter((e) => e.color === DISCORD_COLORS.fail);
+    expect(red).toHaveLength(1);
+    expect(red[0]!.title).toBe("試験場 1R 中央1R(G3)");
+  });
+
+  it("skipped(manual)の灰色の通知のタイトルも、計画の行の会場名とグレードから作る", async () => {
+    const h = harness([central(1, "15:35", { grade: "G3" })]);
+    await planned(h);
+    h.sql.exec("UPDATE race_day_plan SET venue_name = '試験場'");
+    h.sql.exec(
+      "INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at, analyzed_at, analysis_id, detail) VALUES (?, 'pre_race', 'done', 1, 1, ?, ?, ?, 3, 'stored')",
+      R1,
+      jst("14:40"),
+      jst("14:41"),
+      jst("14:40"),
+    );
+    h.sink.recent = [{ id: 1, analyzedAt: new Date(jst("14:45")).toISOString(), promptVersion: CLIP_VARIANTS.default.promptVersion, model: "m" }];
+    await wakeAt(h, jst("14:50"));
+    expect(planRows(h)[0]).toMatchObject({ state: "skipped", skip_reason: "manual" });
+    await drive(h, jst("16:00"));
+    const gray = h.notifier.sent.map(embedOf).filter((e) => e.description?.includes(MANUAL_SKIP_TEXT));
+    expect(gray).toHaveLength(1);
+    expect(gray[0]!.title).toBe("試験場 1R 中央1R(G3)");
+  });
+
+  it("事前分析のまとめのタイトルは「事前分析 YYYY/MM/DD(曜) 開催分」で、開催日は保存した kaisai_date から作る", async () => {
+    const h = harness([central(1, "15:35")]);
+    await planned(h, false);
+    await drive(h, jst("14:00"));
+    const summaries = h.notifier.sent.map(embedOf).filter((e) => e.title!.startsWith("事前分析"));
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.title).toBe("事前分析 2026/06/28(日) 開催分");
+  });
+});
+
 describe("G-D2: 即時ループ・停止がない(fuzz)", () => {
   /** 小さな乱数(再現のため種を固定)。 */
   function rng(seed: number): () => number {

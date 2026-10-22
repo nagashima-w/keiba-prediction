@@ -570,10 +570,27 @@ describe("計画の段階: 空の日・上限・既存のタスク・offset", ()
     expect(planned).toHaveLength(accepted);
     expect(capped).toHaveLength(25 - accepted);
     expect(capped.every((p) => p.state === "skipped" && p.disposition === "skip")).toBe(true);
+    expect(capped.every((p) => p.due_ms === null)).toBe(true); // 積まない行に期限は無い(Issue #446)
+    expect(planned.every((p) => p.due_ms !== null)).toBe(true);
     // 上限の超過分には morning を積まない(握りつぶさず、行に理由が残る)
     const morning = (h.sql.exec("SELECT race_id FROM race_day_tasks WHERE mode = 'morning' AND status = 'queued'").toArray() as { race_id: string }[]).map((r) => r.race_id);
     expect(morning.sort()).toEqual(planned.map((p) => p.race_id).sort());
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks").toArray() as { n: number }[])[0]!.n).toBeLessThanOrEqual(MAX_TASKS_PER_DAY);
+  });
+
+  it("上限: morning が既にある行は必要数が 1(pre_race の 1 行ぶんだけ)。既存のタスクが MAX_TASKS_PER_DAY − 1 件(その morning を含む)でも planned で、あとの行は cap(Issue #446)", async () => {
+    const h = harness();
+    const ids = planRowsFromFixture();
+    h.sql.exec("INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at) VALUES (?, 'morning', 'done', 1, 1, 5, 5)", ids[0]!);
+    for (let i = 0; count(h) < MAX_TASKS_PER_DAY - 1; i++) {
+      h.sql.exec("INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at) VALUES (?, 'morning', 'done', 0, 0, 1, 1)", `2026010101${String(i).padStart(2, "0")}`);
+    }
+    expect(count(h)).toBe(MAX_TASKS_PER_DAY - 1); // 前提: 上限の 1 つ手前
+    await planThrough(h);
+    const plans = planRows(h);
+    expect(plans.find((p) => p.race_id === ids[0])).toMatchObject({ state: "planned", skip_reason: null }); // 必要数 1: 99 + 0 + 1 = 100 は超えない
+    expect(plans.filter((p) => p.state === "planned")).toHaveLength(1);
+    expect(plans.filter((p) => p.skip_reason === "cap")).toHaveLength(plans.length - 1); // ほかは必要数 2 で超える
   });
 
   it("既に morning の行がある(手動で先に実行した)レースは、状態に関係なく積み直さない(done・failed・queued のまま。計画の行は作る)", async () => {
@@ -734,6 +751,42 @@ describe("計画の段階: planPreRaceDue の結果が行に写る(期限・す�
   });
 });
 
+describe("確定の予約(plan_finalize_next_try_at)は、全会場が終端になった起床の時刻に書く(Issue #446: 削除した特性テストから移した)", () => {
+  it("片方の会場がまだ pending のあいだは書かない。もう片方が ok になった起床で、その時刻を書く", async () => {
+    const h = harness();
+    await h.core.requestPlan({ kaisaiDate: DATE });
+    expect(await tick(h)).toBe("central:plan:list:ok");
+    expect(venueRows(h).map((v) => [v.venue, v.state])).toEqual([["central", "ok"], ["nar", "pending"]]); // 前提: 地方はまだ
+    expect(meta(h, "plan_finalize_next_try_at")).toBeNull();
+    h.clock.now += 5 * MIN; // 次の起床は、1 本目から 5 分後
+    h.alarm.at = h.clock.now;
+    expect(await tick(h)).toBe("nar:plan:list:ok");
+    expect(meta(h, "plan_finalize_next_try_at")).toBe(String(h.clock.now));
+  });
+
+  it("会場が failed で終端になった起床でも同じ(片方が failed・もう片方が ok)。failed が最後でも、その時刻を書く", async () => {
+    const a = harness();
+    a.gate.lists.central.failures = [blocked()];
+    await a.core.requestPlan({ kaisaiDate: DATE });
+    expect(await tick(a)).toBe("central:plan:list:failed");
+    expect(meta(a, "plan_finalize_next_try_at")).toBeNull();
+    a.clock.now += 5 * MIN;
+    a.alarm.at = a.clock.now;
+    expect(await tick(a)).toBe("nar:plan:list:ok");
+    expect(meta(a, "plan_finalize_next_try_at")).toBe(String(a.clock.now));
+
+    const b = harness();
+    b.gate.lists.nar.failures = [blocked()];
+    await b.core.requestPlan({ kaisaiDate: DATE });
+    expect(await tick(b)).toBe("central:plan:list:ok");
+    expect(meta(b, "plan_finalize_next_try_at")).toBeNull();
+    b.clock.now += 5 * MIN;
+    b.alarm.at = b.clock.now;
+    expect(await tick(b)).toBe("nar:plan:list:failed");
+    expect(meta(b, "plan_finalize_next_try_at")).toBe(String(b.clock.now));
+  });
+});
+
 describe("確定(finalize)の冪等性: 原子性に頼らず、途中で落ちても再実行で正しく続く", () => {
   it("確定の途中で落ちた状態(plan_finalized_at が無く、計画の行・morning が一部だけある)から再実行しても、全体が正しい最終形になり、既にある行・タスクの状態は保たれる", async () => {
     const clean = harness();
@@ -759,12 +812,32 @@ describe("確定(finalize)の冪等性: 原子性に頼らず、途中で落ち�
     h.sql.exec("UPDATE race_day_plan_venue SET targeted = NULL");
     h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('plan_finalize_next_try_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(h.clock.now));
     h.alarm.at = h.clock.now;
+    const loadsBefore = h.settingsLoads;
     expect(await tick(h)).toBe("plan:plan:finalize:ok");
+    expect(h.settingsLoads).toBe(loadsBefore); // offset は最初の確定で決めてある(plan_offset が残っている)ので、設定は読み直さない(Issue #446)
     expect(JSON.stringify(planRows(h))).toBe(expectedPlans);
     expect(taskRows(h).map((t) => t.race_id)).toEqual(expectedTasks);
     expect(taskRows(h).find((t) => t.race_id === keep[0])).toMatchObject({ status: "done" }); // 積み直していない
     expect(taskRows(h).filter((t) => t.race_id === keep[0])).toHaveLength(1);
     expect(meta(h, "plan_finalized_at")).not.toBeNull();
+  });
+
+  it("確定の再実行で、計画の行が既にあれば(skipped)作り直さない: morning を積まず、行も変えない(新しく作れば planned になる行でも)", async () => {
+    const h = harness();
+    h.clock.now = jst("08:00");
+    await planThrough(h);
+    const target = planRows(h)[0]!;
+    expect(target.state).toBe("planned"); // 前提: 新しく作れば planned になる行
+    h.sql.exec("UPDATE race_day_plan SET state = 'skipped', disposition = 'skip', skip_reason = 'manual', due_ms = NULL WHERE race_id = ?", target.race_id);
+    h.sql.exec("DELETE FROM race_day_tasks WHERE race_id = ?", target.race_id);
+    h.sql.exec("UPDATE race_day_plan_venue SET entries_json = ? WHERE venue = 'central'", JSON.stringify(parseEntriesFor(CENTRAL_HTML)));
+    h.sql.exec("UPDATE race_day_plan_venue SET entries_json = ? WHERE venue = 'nar'", JSON.stringify(parseEntriesFor(NAR_HTML_SYNTHETIC)));
+    h.sql.exec("DELETE FROM race_day_meta WHERE key IN ('plan_finalized_at', 'plan_finalize_attempts')");
+    h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('plan_finalize_next_try_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(h.clock.now));
+    h.alarm.at = h.clock.now;
+    expect(await tick(h)).toBe("plan:plan:finalize:ok");
+    expect(planRows(h).find((p) => p.race_id === target.race_id)).toMatchObject({ state: "skipped", skip_reason: "manual" });
+    expect(taskRows(h).filter((t) => t.race_id === target.race_id)).toEqual([]);
   });
 
   it("確定を2回続けて実行しても(印を消して再実行)、行・タスクは増えない", async () => {

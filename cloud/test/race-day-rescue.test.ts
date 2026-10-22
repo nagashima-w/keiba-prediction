@@ -417,8 +417,9 @@ describe("23 時の再実行の後の失敗の判定と Discord 通知(日単位
     expect(failureMessages(h)).toEqual([]); // 21 時の時点では送らない(救済の要求が無い)
     h.clock.now = T_2300;
     await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
-    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    const labels = await runDue(h, T_2300 + 2 * 60 * 60_000);
     expect(verdict(h)).toBe("failed");
+    expect(labels).toContain("plan-failure:notify:send:ok"); // 送信のステップの戻り値の raceId は plan-failure(まとめは summary)
     const messages = failureMessages(h);
     expect(messages).toHaveLength(1);
     expect(messages[0]!.title).toBe("事前分析の失敗 2026/09/27(日)");
