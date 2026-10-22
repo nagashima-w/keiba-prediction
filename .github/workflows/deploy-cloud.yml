@@ -72,9 +72,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Issue #449: 制限時間を、check は 15 → 30 分、smoke は 15 → 25 分に上げた(deploy は 15 分のまま)。
+  # 通常の所要時間は check が約 7〜13 分、smoke が約 4〜5 分、deploy が約 1 分。ところが 2026-10-22 の遅い日は、ランナー全体が遅くなり
+  # (ci.yml の verify が普段の 1.5〜2 分から 9 分)、smoke は 12.3 分かかり(成功)、check は 15 分で取り消され、deploy が skipped になった(run 39713630497)。
+  # 遅い日の倍率(smoke で約 2.4 倍)を check に当てると約 29 分になるので、check は 30 分、smoke は 25 分にした。
+  # deploy は普段約 1 分で、6 倍に遅れても 6 分なので 15 分で足りる。下限は cloud-deploy-workflow.test.ts が固定している。
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       WRANGLER_SEND_METRICS: "false"
     steps:
@@ -123,7 +128,7 @@ jobs:
   # Issue #288: check と並列に走る(needs を持たない)。依存のインストールも自前で行う(check の成果物を前提にしない)。
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       WRANGLER_SEND_METRICS: "false"
     steps:
