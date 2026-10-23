@@ -13,7 +13,7 @@
     "monthly:prompt": "tsx print-monthly-prompt.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.133.0",
+    "@anthropic-ai/sdk": "0.135.0",
     "cheerio": "1.2.0",
     "iconv-lite": "0.7.3",
     "jose": "6.2.12"
