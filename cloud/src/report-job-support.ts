@@ -1,7 +1,7 @@
 /**
  * 日報(`DailyReportCore`)と月報(`MonthlyReportCore`)の**ジョブ機構が共有する部品**(Issue #399〈#390 R-8〉)。**葉のモジュール**: `daily-report-core.ts`・`monthly-report-core.ts` を import しない
  * (core が本モジュールを import するので、逆向きに import すると実行時に循環する)。`cloudflare:workers`・SQL・Discord の送信口・グローバルの `fetch` を持たない。
- * 中身は両 core に**同じ文面で重複していたもの**をそのまま移した。挙動は変えていない(`test/report-job-characterization.test.ts` が、移す前の実出力で固定している)。
+ * 中身は両 core に**同じ文面で重複していたもの**をそのまま移した。挙動は変えていない(移す前の実出力で固定した特性テストで確かめた。そのテストは Issue #446 で削除済み。挙動に関わる部分は、本モジュールの単体テスト `test/report-job-support.test.ts` と、両 core のテスト〈`test/daily-report-core.test.ts`・`test/monthly-report-core.test.ts`〉が守る)。
  *
  * ## ここに置いたもの
  *  - 文字列の小物: {@link cut}(サロゲートペアを割らない切り詰め)・{@link errorText}(警告に出すエラー。鍵を伏せて先頭 200 字)・{@link RAW_MAX_CHARS}・{@link RAW_SUMMARY_CHARS}。

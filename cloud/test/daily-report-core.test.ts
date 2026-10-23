@@ -91,6 +91,8 @@ interface Harness {
   readonly prompts: string[];
   /** LLM に送ったリクエストのモデル ID(送った順)。 */
   readonly models: string[];
+  /** LLM に送ったリクエストの max_tokens(送った順)。 */
+  readonly maxTokens: number[];
   readonly readCalls: number[];
   /** 期間の再集計の呼び出し(from, to)。 */
   readonly periodCalls: Array<[string, string]>;
@@ -109,6 +111,7 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
   const sent: DiscordPayload[] = [];
   const prompts: string[] = [];
   const models: string[] = [];
+  const maxTokens: number[] = [];
   const readCalls: number[] = [];
   const periodCalls: Array<[string, string]> = [];
   const raceCount = options.raceCount ?? 20;
@@ -180,6 +183,7 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
   const sender: MessageSender = async (params) => {
     prompts.push(params.messages[0]!.content);
     models.push(params.model);
+    maxTokens.push(params.max_tokens);
     if (state.llmFailures > 0) {
       state.llmFailures -= 1;
       throw Object.assign(new Error("boom"), { status: 529 });
@@ -211,7 +215,7 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
   };
   const core = new DailyReportCore(deps);
   return {
-    core, kv, clock, alarms, warns, saved, replaced, sent, prompts, models, readCalls, periodCalls, state,
+    core, kv, clock, alarms, warns, saved, replaced, sent, prompts, models, maxTokens, readCalls, periodCalls, state,
     step: () => core.runNextStep(),
     async drain(max = 60) {
       const outcomes: StepOutcome[] = [];
@@ -1327,5 +1331,177 @@ describe("Issue #278: 日報の返還(取消・除外の馬への買い目)", ()
     await h.drain();
     expect(h.saved).toHaveLength(1);
     expect(h.saved[0]!.body.stats.refundedBetCount).toBe(1); // 件数は買い目(status)から数え直すので、旧形のダイジェストでも同じ
+  });
+});
+
+describe("Issue #446(H-5): ジョブ機構の確認(削除した特性テストから移した。時間・回数・件数は定数を参照せず、値で固定する)", () => {
+  const ran = (phase: string, result: string) => ({ kind: "ran", kaisaiDate: DATE, phase, result });
+
+  it("段階は list → gather → generate → save → notify の順に、それぞれ result: ok で進む。9 件は 8 件 + 1 件に分け、9 件目も読む。段階が進むと失敗の回数は 0 に戻る", async () => {
+    const h = harness({ raceCount: 9 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    expect(await h.step()).toEqual(ran("list", "ok"));
+    h.state.failRead = 1;
+    expect(await h.step()).toEqual(ran("gather", "retry")); // 1 つ目の 8 件の読み出しが失敗
+    expect(h.core.getStatus(DATE)).toEqual({ phase: "gather", status: "running", attempts: 1 });
+    h.clock.t += 60_000;
+    expect(await h.step()).toEqual(ran("gather", "ok")); // 8 件
+    expect(h.core.getStatus(DATE)).toEqual({ phase: "gather", status: "running", attempts: 0 }); // 成功で 0 に戻る
+    expect(await h.step()).toEqual(ran("gather", "ok")); // 残りの 1 件(9 件目)
+    expect(h.readCalls).toEqual([8, 8, 1]);
+    expect(h.core.getStatus(DATE)).toEqual({ phase: "generate", status: "running", attempts: 0 });
+    h.state.failPeriod = 1;
+    expect(await h.step()).toEqual(ran("generate", "retry"));
+    expect(h.core.getStatus(DATE)).toEqual({ phase: "generate", status: "running", attempts: 1 });
+    h.clock.t += 60_000;
+    expect(await h.step()).toEqual(ran("generate", "ok"));
+    expect(h.core.getStatus(DATE)).toEqual({ phase: "save", status: "running", attempts: 0 });
+    h.state.failSave = 1;
+    expect(await h.step()).toEqual(ran("save", "retry"));
+    h.clock.t += 60_000;
+    expect(await h.step()).toEqual(ran("save", "ok"));
+    expect(h.core.getStatus(DATE)).toEqual({ phase: "notify", status: "running", attempts: 0 });
+    expect(await h.step()).toEqual(ran("notify", "ok"));
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0]!.raceCount).toBe(9); // 9 件目まで読んで数えている
+    expect(h.core.getStatus(DATE)).toBeNull();
+  });
+
+  it("段階の失敗は 60 秒(60,000 ms)後に再試行し、3 回目の失敗で failed(アラームを張らない)", async () => {
+    const h = harness({ raceCount: 2 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    await h.step(); // list
+    h.state.failRead = 99;
+    const t = h.clock.t;
+    expect(await h.step()).toEqual(ran("gather", "retry"));
+    expect(h.alarms[h.alarms.length - 1]).toBe(t + 60_000);
+    h.clock.t = t + 59_999;
+    expect(await h.step()).toEqual({ kind: "idle" }); // 待ちが過ぎるまでは動かない
+    h.clock.t = t + 60_000;
+    expect(await h.step()).toEqual(ran("gather", "retry"));
+    expect(h.alarms[h.alarms.length - 1]).toBe(t + 120_000);
+    h.clock.t = t + 120_000;
+    const alarmsBefore = h.alarms.length;
+    expect(await h.step()).toEqual(ran("gather", "failed"));
+    expect(h.core.getStatus(DATE)).toEqual({ phase: "gather", status: "failed", attempts: 3 });
+    expect(h.alarms).toHaveLength(alarmsBefore); // failed のジョブにはアラームを張らない
+  });
+
+  it("LLM の失敗は 60 秒(60,000 ms)後に再試行する。LLM に送る max_tokens は 12,000", async () => {
+    const h = harness({ raceCount: 2 });
+    h.state.llmFailures = 1;
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    await h.step(); // list
+    await h.step(); // gather
+    const t = h.clock.t;
+    expect(await h.step()).toEqual(ran("generate", "retry")); // LLM が失敗
+    expect(h.alarms[h.alarms.length - 1]).toBe(t + 60_000);
+    h.clock.t = t + 59_999;
+    expect(await h.step()).toEqual({ kind: "idle" });
+    h.clock.t = t + 60_000;
+    expect(await h.step()).toEqual(ran("generate", "ok"));
+    expect(h.maxTokens).toEqual([12_000, 12_000]);
+  });
+
+  it("再起動(新しいインスタンス)で、期限がまだ来ていないジョブだけがあるときの空の起床は、そのジョブの時刻にアラームを張り直す", async () => {
+    const kv = memoryKv();
+    const first = harness({ raceCount: 2, kv });
+    await first.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    await first.step(); // list
+    first.state.failRead = 1;
+    await first.step(); // gather が失敗 → 次の時刻は 60 秒後
+    const t = first.clock.t;
+    const second = harness({ raceCount: 2, kv, start: t });
+    expect(second.alarms).toEqual([]);
+    expect(await second.step()).toEqual({ kind: "idle" });
+    expect(second.alarms).toEqual([t + 60_000]);
+  });
+
+  it("進行中の日の依頼は、作成済みかどうか(D1)を引かずに断る", async () => {
+    const h = harness({ raceCount: 2 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    expect(h.state.hasReportCalls).toBe(1);
+    expect(await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" })).toEqual({ accepted: false, reason: "in-progress" });
+    expect(h.state.hasReportCalls).toBe(1); // 増えない
+  });
+
+  it("保存する日報のレース行: 会場・R・レース名・発走・印(印のある馬だけ)・見送りの注記を、そのまま持つ。本文の format は 1、開催日は依頼の日", async () => {
+    const h = harness({ raceCount: 2 });
+    const first = h.state.inputs.get(101)!;
+    // 1 レース目: 印のない馬(3 番)を足す。2 レース目: 買い目なしの見送り(理由コードつき)にする。
+    h.state.inputs.set(101, { ...first, view: { ...first.view, horses: [...first.view.horses, horse(3)] } });
+    const second = h.state.inputs.get(102)!;
+    h.state.inputs.set(102, { ...second, view: { ...second.view, allocation: { ...second.view.allocation!, bets: [], skipReasonCode: "no-positive-ev" } } });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    await h.drain();
+    const body = h.saved[0]!.body;
+    expect(body.format).toBe(1);
+    expect(body.kaisaiDate).toBe(DATE);
+    const row1 = body.races.find((r) => r.raceId === raceIdOf(1))!;
+    expect(row1).toMatchObject({ venueName: "東京", raceNumber: 1, raceName: "テスト1S", startTime: "15:45", allocationNote: null });
+    expect(row1.marks).toEqual([
+      { mark: "◎", umaban: 1, name: "馬1", finishPosition: 1 },
+      { mark: "〇", umaban: 2, name: "馬2", finishPosition: 2 },
+    ]);
+    const row2 = body.races.find((r) => r.raceId === raceIdOf(2))!;
+    expect(row2).toMatchObject({ venueName: "東京", raceNumber: 2, raceName: "テスト2S", startTime: "15:45", allocationNote: "買い目なし(見送り: no-positive-ev)" });
+  });
+
+  it("記録の model は、文章(構造化も生の文章も)があるときだけ応答のモデル。LLM が使えなかった記録は null", async () => {
+    const parsed = harness({ raceCount: 2 });
+    await parsed.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    await parsed.drain();
+    expect(parsed.saved[0]!.model).toBe("claude-sonnet-5-5");
+
+    const unparsed = harness({ raceCount: 2 });
+    unparsed.state.llmText = "JSON ではない文章です。";
+    await unparsed.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    await unparsed.drain();
+    expect(unparsed.saved[0]!.body.narrative).toBeNull();
+    expect(unparsed.saved[0]!.model).toBe("claude-sonnet-5-5");
+
+    const failed = harness({ raceCount: 2 });
+    failed.state.llmFailures = 99;
+    await failed.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    await failed.drain(); // 1 回目の失敗 → 60 秒待ち
+    failed.clock.t += 60_000;
+    await failed.drain(); // 2 回目の失敗 → 諦めて統計だけの日報
+    expect(failed.saved[0]!.model).toBeNull();
+  });
+
+  it("読めない応答の日報も、Discord には総括(生の文章の先頭)を説明として送る(文章がないときの固定の理由ではなく)", async () => {
+    const h = harness({ raceCount: 2 });
+    h.state.llmText = "JSON ではない文章です。";
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    const outcomes = await h.drain();
+    expect(outcomes.filter((o) => o.kind === "ran").map((o) => (o as { phase: string; result: string }).phase + ":" + (o as { result: string }).result)).toContain("notify:ok");
+    expect(h.sent).toHaveLength(1);
+    const embed = h.sent[0]!.embeds![0] as { description?: string };
+    expect(embed.description).toBe("JSON ではない文章です。");
+  });
+
+  it("Discord に送る payload は embeds だけで、embed は 1 件", async () => {
+    const h = harness({ raceCount: 2 });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    await h.drain();
+    expect(h.sent).toHaveLength(1);
+    expect(Object.keys(h.sent[0]!)).toEqual(["embeds"]);
+    expect(h.sent[0]!.embeds).toHaveLength(1);
+  });
+
+  it("通知の仕組みが無い日報の notify は ok で、警告を出さない。送信が失敗したときは failed(警告 1 件・再送しない)", async () => {
+    const none = harness({ raceCount: 2, notifier: false });
+    await none.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    const noneOutcomes = await none.drain();
+    expect(noneOutcomes).toContainEqual(ran("notify", "ok"));
+    expect(none.warns.filter((w) => w.includes("Discord"))).toEqual([]);
+
+    const failing = harness({ raceCount: 2 });
+    failing.state.notifyFails = true;
+    await failing.core.requestReport({ kaisaiDate: DATE, mode: "manual" });
+    const failingOutcomes = await failing.drain();
+    expect(failingOutcomes).toContainEqual(ran("notify", "failed"));
+    expect(failing.sent).toHaveLength(1);
+    expect(failing.warns.filter((w) => w.startsWith("Discord への日報の通知に失敗しました(20261010。分類: "))).toHaveLength(1);
   });
 });
