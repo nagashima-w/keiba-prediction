@@ -6,7 +6,10 @@
  *
  * 方針:
  *  - PR の宛先は作業ブランチ(main へ直接取り込まない規則。CLAUDE.md「その他」)。すべての更新に `target-branch` を付ける。
- *  - 対象は github-actions と npm(ルート・packages/*・cloud/)。cloud/ は pnpm workspace の外にあり、別の pnpm-lock.yaml を持つ。
+ *  - 対象は github-actions と npm(ルート・cloud/)。cloud/ は pnpm workspace の外にあり、別の pnpm-lock.yaml を持つ。
+ *    packages/*(workspace のメンバー)は directories に並べない。ルート("/")の job が workspace のメンバーの依存まで見て、
+ *    メンバーの package.json とルートの pnpm-lock.yaml を一緒に更新する。メンバーを別のディレクトリとして並べると、
+ *    メンバーの中には lockfile が無いので、ルートの job が失敗した回に package.json だけの PR ができる(Issue #465。docs/current-spec.md「Dependabot」)。
  *  - `@anthropic-ai/sdk`・`iconv-lite`・`cheerio`(core は `^X.Y.Z`、cloud は exact `X.Y.Z`)など、core と cloud が同じ版を揃えている依存は、
  *    1 つの group にして 1 つの PR で同時に上げさせる(片方だけの PR は cloud-config-guard.test.ts が赤にして気づける)。
  *  - 自動の脆弱性修正(セキュリティ更新)の PR はこのファイルでは扱えない(宛先を main 以外にできない見込み。未確認)ので、
@@ -49,6 +52,16 @@ function splitUpdates(code: string): string[] {
 /** `directories:` のブロック形式(`    directories:` に続く `      - "x"`)の値を返す。無ければ空配列。 */
 function directoriesOf(entry: string): string[] {
   const m = /\n {4}directories:\n((?: {6}- .+\n?)+)/.exec(entry);
+  if (m === null) return [];
+  return m[1]!
+    .trim()
+    .split("\n")
+    .map((l) => l.replace(/^\s*-\s*/, "").replace(/^["']|["']$/g, "").trim());
+}
+
+/** pnpm-workspace.yaml の `packages:` の値(`  - packages/*` の形)を返す。無ければ空配列。 */
+function workspacePackagesOf(text: string): string[] {
+  const m = /(?:^|\n)packages:\n((?: {2}- .+\n?)+)/.exec(text);
   if (m === null) return [];
   return m[1]!
     .trim()
@@ -99,6 +112,15 @@ describe("検査する側の自己検証(正の対照。検出器が空振りし
     expect(directoryMatches("/", "/")).toBe(true);
     expect(directoryMatches("/", "/cloud")).toBe(false);
     expect(directoryMatches("/cloud", "/cloud")).toBe(true);
+  });
+});
+
+describe("検査する側の自己検証: pnpm-workspace.yaml の読み取り(Issue #465)", () => {
+  it("workspacePackagesOf は packages: の値だけを返す(他のキーの項目や、packages が無い場合は拾わない)", () => {
+    expect(workspacePackagesOf("packages:\n  - packages/*\n")).toEqual(["packages/*"]);
+    expect(workspacePackagesOf("packages:\n  - packages/*\n  - 'tools/a'\ncatalog:\n  - x\n")).toEqual(["packages/*", "tools/a"]);
+    expect(workspacePackagesOf("packages: []\n")).toEqual([]);
+    expect(workspacePackagesOf("catalog:\n  - x\n")).toEqual([]);
   });
 });
 
@@ -155,28 +177,43 @@ describe("dependabot.yml(Issue #310)", () => {
     const e = entries[1]!;
     const dirs = directoriesOf(e);
 
-    it("directories は ルート・packages/*・cloud の 3 つ(directory の単数指定は使わない)", () => {
-      expect(dirs).toEqual(["/", "/packages/*", "/cloud"]);
+    it("Issue #465: directories は ルートと cloud の 2 つだけ(workspace のメンバー packages/* は並べない。directory の単数指定も使わない)", () => {
+      expect(dirs).toEqual(["/", "/cloud"]);
       expect(e).not.toMatch(/\n {4}directory:/);
     });
 
-    it("リポジトリ内の package.json のあるディレクトリ(ルート・packages/*・cloud)がすべて directories に含まれ、含まれるディレクトリには package.json がある", () => {
+    it("Issue #465: リポジトリ内の package.json のあるディレクトリは、directories に含まれるか、pnpm workspace のメンバー(ルートの job が担当)のどちらかで、workspace のメンバーは directories に含まれない", () => {
+      const workspacePatterns = workspacePackagesOf(readTextLf("pnpm-workspace.yaml"));
+      // 前提(空振り防止): workspace の指定を読めている
+      expect(workspacePatterns, "pnpm-workspace.yaml の packages").toEqual(["packages/*"]);
+      const isMember = (dir: string) => workspacePatterns.some((p) => directoryMatches(`/${p}`, dir));
       const found: string[] = [];
       if (existsSync(path.join(ROOT, "package.json"))) found.push("/");
       for (const d of readdirSync(path.join(ROOT, "packages"), { withFileTypes: true })) {
         if (d.isDirectory() && existsSync(path.join(ROOT, "packages", d.name, "package.json"))) found.push(`/packages/${d.name}`);
       }
       if (existsSync(path.join(ROOT, "cloud", "package.json"))) found.push("/cloud");
-      // 前提(空振り防止): 実際に 3 つ以上見つけている
+      // 前提(空振り防止): ルート・workspace のメンバー(packages/core)・workspace の外の cloud を、実際に見つけている
       expect(found).toEqual(expect.arrayContaining(["/", "/packages/core", "/cloud"]));
+      expect(isMember("/packages/core"), "packages/core は workspace のメンバー").toBe(true);
+      expect(isMember("/cloud"), "cloud は workspace の外(別の lockfile を持つ)").toBe(false);
+      expect(isMember("/"), "ルートは workspace のメンバーの指定には当たらない").toBe(false);
       for (const dir of found) {
-        expect(dirs.some((p) => directoryMatches(p, dir)), `${dir} が directories に含まれる`).toBe(true);
+        expect(
+          dirs.some((p) => directoryMatches(p, dir)) || isMember(dir),
+          `${dir} は directories に含まれるか、workspace のメンバーである`,
+        ).toBe(true);
       }
       for (const p of dirs) {
         expect(
           found.some((dir) => directoryMatches(p, dir)),
           `${p} に対応する package.json がある`,
         ).toBe(true);
+        // メンバーを別のディレクトリとして並べない(メンバーの中に lockfile が無く、package.json だけの PR ができる)
+        expect(
+          found.filter((dir) => directoryMatches(p, dir)).some((dir) => isMember(dir)),
+          `${p} は workspace のメンバーに当たらない`,
+        ).toBe(false);
       }
     });
 

@@ -77,7 +77,7 @@ describe("wrangler.toml", () => {
     expect(tomlCode).not.toMatch(/^\[\[?routes\]?\]/m);
   });
 
-  it("Issue #460: wrangler 4.151 で、未設定のときの upload_source_maps の既定が true に変わった。従来どおり source map をアップロードしないよう、最上位に upload_source_maps = false を置く", () => {
+  it("Issue #460: wrangler 4.150 で、未設定のときの upload_source_maps の既定が true に変わった。従来どおり source map をアップロードしないよう、最上位に upload_source_maps = false を置く", () => {
     // 最上位のキーは最初の [テーブル] より前になければならない(後ろに置くとそのテーブルのキーになる)。前提: 最初のテーブルが見つかり、その手前が空でない
     const firstTable = tomlCode.search(/^\[/m);
     expect(firstTable, "最初の [テーブル] が見つかる(前提)").toBeGreaterThan(0);

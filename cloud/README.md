@@ -135,13 +135,16 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 | `APP_BASE_URL` | 通知のタイトルのリンク(分析画面)の基点となる、このサイトの URL(Issue #230)。**登録は任意**: 未登録・形式不正なら、通知にリンクが付かないだけ(通知自体は送られる。分析も止まらない)。**https のオリジンだけ**有効(例は `https://<あなたのサイトのホスト名>`。パス・クエリ・`#`・ユーザー名とパスワードを含むものは「形式不正」)。登録の手順は、この表の下の「`APP_BASE_URL` の登録」 |
 | `BABA_API_URL` | 馬場の API(外部の API。JRA の競馬場の最新の馬場状態を返す JSON。Issue #294〈#293-A〉)の URL。**登録は任意**: 未登録・https の URL として読めない形なら、取得の仕組み全体が無効(印も書かず、アラームの候補にもしない。分析は従来どおり)。**利用の条件は「JRA の開催日に、利用者全体で 1 日 1 回」**。登録の手順と注意は、この表の下の「`BABA_API_URL` の登録」 |
 
-**次の名前の secret は登録しない**(`ANTHROPIC_API_KEY` 以外の `ANTHROPIC_*` は、どれも登録しない)。`@anthropic-ai/sdk` 0.133.0 は、クライアントの生成時に環境変数(`process.env`)から次の名前を読み、`nodejs_compat` では secret が `process.env` に入りうる。コードで止めているのは宛先(`ANTHROPIC_BASE_URL`。Issue #304)だけで、他の名前はコードで止めていない。登録しない限り無害だが、登録すると次のようになる:
+**次の名前の secret は登録しない**(`ANTHROPIC_API_KEY` 以外の `ANTHROPIC_*` は、どれも登録しない)。`@anthropic-ai/sdk` 0.135.0 は、クライアントの生成時に環境変数(`process.env`)から次の名前を読み、`nodejs_compat` では secret が `process.env` に入りうる。コードで止めているのは宛先(`ANTHROPIC_BASE_URL`。Issue #304)だけで、他の名前はコードで止めていない。登録しない限り無害だが、登録すると次のようになる:
 - `ANTHROPIC_BASE_URL`: **登録しても効かない**。コードが Anthropic の宛先を `https://api.anthropic.com` に固定している(Issue #304。固定しないと、API キーが別のホストへ送られる)。
 - `ANTHROPIC_CUSTOM_HEADERS`: 改行区切りの `名前: 値` が、**すべてのリクエストの任意のヘッダとして付く**(任意ヘッダの注入)。
 - `ANTHROPIC_LOG`: `debug` にすると、リクエストの詳細が Worker のログに出る。認証のヘッダは `***` に伏せられるが、リクエストの本文(分析のプロンプト)は伏せられない。
 - `ANTHROPIC_AUTH_TOKEN`: `Authorization: Bearer <値>` のヘッダが、`x-api-key` に加えて付く(別の資格情報が送られる)。
+- OpenTelemetry の 4 つ(0.134.0 で増えた。Issue #465): `ANTHROPIC_OPEN_TELEMETRY`・`ANTHROPIC_OPEN_TELEMETRY_PROPAGATION`・`ANTHROPIC_OPEN_TELEMETRY_TRACES_CONTENT_MODE`・`ANTHROPIC_OPEN_TELEMETRY_TRACES_MAX_CONTENT_BYTES`。
+  **いまは登録しても効かない**: global の tracer provider が登録されていない(cloud・core のどちらにも無く、workerd にも OTel の実装は無い)ので、SDK は span を作らない。ただし将来 provider を足すと効き始める:
+  最初の 2 つは、既定が有効で、`false` にすると tracing・trace context の送出が止まる。`..._TRACES_CONTENT_MODE=content` にすると、span にリクエスト・応答の本文(分析のプロンプトを含む)が載る(既定は `metadata_only`)。`..._TRACES_MAX_CONTENT_BYTES` は、1 つの span が載せる本文の上限(バイト。既定 750000。10 進の数字だけ有効)。コードは `openTelemetry` のオプションを渡していないので、環境変数が効く。
 
-(根拠: SDK の `client.js` の `readEnv(...)` の呼び出し。SDK を更新したら、`grep -rhoE "readEnv\)?\('[A-Z_]+'\)" cloud/node_modules/@anthropic-ai/sdk --include=*.js` で、読む名前が増えていないか確かめる。`ANTHROPIC_PROFILE` 系の資格情報の名前は、`apiKey` が無いときだけ効くので、キーを渡すときには効かない。)
+(根拠: SDK の `client.js` と `internal/tracing.js`〈`optionFromEnv`〉の `readEnv(...)` の呼び出し。SDK を更新したら、`grep -rhoE "readEnv\)?\('[A-Z_]+'\)" cloud/node_modules/@anthropic-ai/sdk --include=*.js` で、読む名前が増えていないか確かめる。`ANTHROPIC_PROFILE` 系の資格情報の名前は、`apiKey` が無いときだけ効くので、キーを渡すときには効かない。)
 
 未設定の間は、Worker が全リクエストに 403 を返す(これが正しい動作。`ADMIN_USER` を除く 3 つのどれかが欠けている場合)。
 
@@ -398,12 +401,14 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 ## LLM の土台(Issue #193〈#179-a〉。**この Issue は挙動を変えない**。実行本体は #194〈下の「発走前の分析の LLM」〉)
 発走前の分析で LLM(Anthropic の API)を使うための**依存と入口**を足した(#193)。#193 の時点では、本番の入口(`worker.ts`)・`RaceDay` は LLM を呼ばなかった。
 - **`@anthropic-ai/sdk` を cloud の依存に足した理由**: core の `anthropic-client.ts`(メッセージ送信)・`model-selection.ts`(Models API)が値で import する。cloud は workspace の外で `packages/core/node_modules` が CI に無いので、cheerio と同じく cloud/node_modules に入れ、**3か所の alias**(`wrangler.toml`・`tsconfig.json`・`vitest.config.ts`)で向ける。
-  版は core の `package.json` の範囲と同じ版を **exact で固定**する(#193 の時点は 0.70.1。**Issue #324 で 0.133.0 に更新**。`scripts/test/cloud-config-guard.test.ts` が一致と、`pnpm-lock.yaml` への固定を検査)。推移的に増えるのは、#193 の時点では 3 パッケージ(json-schema-to-ts・@babel/runtime・ts-algebra)。0.133.0 では standardwebhooks・@stablelib/base64・fast-sha256 が増えた(`@opentelemetry/api` は 0.134.0 から。0.133.0 には無い)。
+  版は core の `package.json` の範囲と同じ版を **exact で固定**する(#193 の時点は 0.70.1。**Issue #324 で 0.133.0 に更新**、**Issue #460 で 0.135.0 に更新**。`scripts/test/cloud-config-guard.test.ts` が一致と、`pnpm-lock.yaml` への固定を検査)。推移的に増えるのは、#193 の時点では 3 パッケージ(json-schema-to-ts・@babel/runtime・ts-algebra)。0.133.0 では standardwebhooks・@stablelib/base64・fast-sha256 が増えた。`@opentelemetry/api`(OpenTelemetry の API。0.134.0 から SDK の依存に入った。0.133.0 には無い)は、0.135.0 でも入っている(cloud の lockfile では 1.9.1)。**入っていても本番では働かない**: global の tracer provider が登録されていないので span は作られない(cloud・core のどちらにも provider の登録は無く、workerd にも OTel の実装は無い)。provider があっても本文は既定で載らない(`metadata_only`)。根拠は #460 のレビュー。環境変数は上の「`ANTHROPIC_*` は登録しない」の一覧。
 - **`@keiba/core/llm`**(core の `src/llm.ts`): `analyze-race`・`anthropic-client`・`model-selection` の再 export だけの狭い入口。better-sqlite3 を値でも型でも経由しない(`packages/core/test/ev/native-free-modules.test.ts`)。`@keiba/core/pipeline` に足さない理由は、SDK がバンドルに入る経路を「この入口を import したとき」だけにするため(`test/bundle-guard.test.ts` が、pipeline だけの入口に SDK の文字列が無いことを検査)。
 - **`src/llm-sender.ts`**: クラウド版の呼び出しの設定値を1か所に置く(sender の上限時間 180 秒〈**暫定**。実 API で測ってから調整〉・モデル一覧 30 秒・SDK の内部再試行 0 回)。core の `createSdkMessageSender`・`createSdkModelLister` に、省略可の `timeout`・`maxRetries` を足した(exe は渡さない。省略時は SDK の既定のまま)。
   再試行を 0 にする理由: SDK の既定(2 回)と `analyzeRace` の再送(1 回)が重なると、1 レースの HTTP が最大 9 本になる。cloud は `analyzeRace` の再送だけに任せる。
 - **バンドルの実測**(`wrangler deploy --dry-run`): SDK + `analyzeRace` 一式の入口(NetkeibaGate の export を含む probe)で 309.94 KiB・gzip 63.10 KiB(本番の現状は 1952.76 KiB・gzip 512.63 KiB)(`test/bundle-guard.test.ts` が、本番との和が 3 MB に収まることと、単体 512 KiB 以内を検査)。
   - **Issue #324(SDK 0.70.1 → 0.133.0、iconv-lite 0.6.3 → 0.7.3)の前後の本番の dry-run**(`cloud/` で `npx wrangler deploy --dry-run --outdir dist-dry` の `Total Upload`): 更新前 3276.39 KiB・gzip 869.44 KiB → 更新後 3992.01 KiB・gzip 975.54 KiB。`node:` の import は更新前後とも `node:stream` 1・`node:zlib` 3 で増えていない。
+  - **Issue #460(SDK 0.133.0 → 0.135.0、wrangler 4.149.0 → 4.151.1、`upload_source_maps = false` を明示)の後の本番の dry-run**(同じコマンド。Issue #465 で作業ツリーに `cd cloud && pnpm install --ignore-workspace --frozen-lockfile` したうえで測り直した): `Total Upload: 4307.60 KiB / gzip: 1025.23 KiB`(`dist-dry` には `worker.js` と `README.md` だけで、source map は無い)。
+    #324 の後(3992.01 KiB・gzip 975.54 KiB)からの差は +315.59 KiB・gzip +49.69 KiB(2 つの測定値の引き算)。増加の原因を #460 のコメントは SDK 0.135.0 の OpenTelemetry の配線とするが、内訳はここでは測っていない。上限(`test/bundle-guard.test.ts` の圧縮後 3 MB)からは遠い。
 - **Workers での実行**: 偽 fetch を注入した workerd(`wrangler dev --local`)で、Models API の取得 → メッセージ送信が通ること、`timeout` が効くこと、429 で `maxRetries` の既定が 3 本・0 が 1 本であることを確かめた。**実 API には出ていない。**
 
 ## 発走前の分析の LLM(Issue #194〈#179-b〉。b1: 実行・記録と再生・追加指示の切り詰め・理由・ログ / b2: 理由の永続化・health)
@@ -497,7 +502,7 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **失敗したら**: `scheduled` は `requestPlan` が失敗すると、10 秒後・30 秒後に再試行する(`requestPlan` は冪等で、再配信でもアラームが張り直される)。3 回とも失敗したら、ログ(Workers Logs)に分類(`request-plan-failed`)・実行の種類(`kind=first|retry`)・開催日・エラーの種類名だけを残し、固定文言のエラーでその回の cron を失敗にする(ダッシュボードの Cron のイベントで赤く見える)。メッセージ本文・値は出さない。cron が失敗時に再配信されるかは**未確認**。
 - **結果の取り込み・日報の補完が 23 時だけになった影響(Issue #249)**: 基準は cron の JST の今日(翌日ではない)で、窓は今日の前日まで(DO が今日以降の開催日の結果の取り込みを拒否するため)。当日の結果は日単位の DO が当日中に取り込む(7 日の窓は保険)。当日に諦めたレースの取り直しと、日報の取り残しの補完は、翌日の 23 時の実行で拾う(従来は翌朝 9 時。**約 12〜14 時間遅くなる**)。
 - **止め方**(どちらも、先に止めたい理由を決める):
-  1. **`wrangler.toml` を `crons = []`(空配列)にしてデプロイする**。⚠️ **`[triggers]` を消すだけでは止まらない**(wrangler は `crons` が未設定だと schedule を更新せず、登録済みの cron が残る。wrangler 4.147.0 の実装を読んだ結果で、**本番では確かめていない**)。`scripts/test/cloud-config-guard.test.ts` が `["0 12 * * *", "0 14 * * *"]` ちょうどを固定しているので、止めるときはこのテストも直す。
+  1. **`wrangler.toml` を `crons = []`(空配列)にしてデプロイする**。⚠️ **`[triggers]` を消すだけでは止まらない**(wrangler は `crons` が未設定だと schedule を更新せず、登録済みの cron が残る。wrangler 4.147.0 の実装を読んだ結果で、**本番では確かめていない**。4.149.0 と 4.151.1 でも、schedule を PUT する分岐〈`if (crons) { … PUT …/schedules … }`〉が `cli.js` でバイト単位で同一だった〈Issue #465 で静的に照合〉)。`scripts/test/cloud-config-guard.test.ts` が `["0 12 * * *", "0 14 * * *"]` ちょうどを固定しているので、止めるときはこのテストも直す。
   2. ダッシュボードで cron を消す(Worker → Settings → Trigger Events の Cron Triggers。画面の位置は未確認)。⚠️ **次のデプロイで、`wrangler.toml` の内容に戻る**(`wrangler deploy` は toml の `crons` で schedule を上書きする)。止め続けるなら 1. も行う。
   - **課金だけ止める**なら、Worker の secret `ANTHROPIC_API_KEY` を削除する(統計のみで保存する。**netkeiba への取得は続く**)。
 - **デプロイの確認**: CI の「Worker をデプロイ」のログに `Deployed keiba-cloud triggers` と `schedule: 0 12 * * *`・`schedule: 0 14 * * *` が出る(`deploy:dry` は schedule を出さない)。登録に失敗すると `Trigger configuration ... was only partially updated` で赤になる(Worker のコードは既にアップロード済みで、cron だけ無い状態)。API トークンの権限で通るかは**未確認**(初回のデプロイの結果で確かめる)。
