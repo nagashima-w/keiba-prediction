@@ -29,6 +29,7 @@ describe("fetchReportList", () => {
   it.each([
     ["reports が配列でない", { ok: true, reports: {} }],
     ["行の date が 8 桁でない", { ok: true, reports: [{ ...LIST_ROW, date: "2026-10-05" }] }],
+    ["行が null(Issue #446〈H-6〉: 投げずに unexpected)", { ok: true, reports: [null] }],
     ["行の件数が負", { ok: true, reports: [{ ...LIST_ROW, race_count: -1 }] }],
     ["行の金額が文字列", { ok: true, reports: [{ ...LIST_ROW, total_stake: "100" }] }],
     ["1 行だけ壊れている(一部だけを採用しない)", { ok: true, reports: [LIST_ROW, { ...LIST_ROW, summary: 5 }] }],
@@ -96,10 +97,40 @@ describe("postReportRun", () => {
     expect(await postReportRun(reply(202, "x"), "20261005")).toStrictEqual({ kind: "accepted-malformed" });
   });
 
+  // Issue #446(H-6・レビュー指摘): 削除した特性テストから移した。202 で本文が読めない(json() が失敗)でも、投げずに accepted-malformed(サーバは依頼を受け付けている)。
+  it("202 で json() が失敗(本文が読めない)しても、投げずに accepted-malformed", async () => {
+    expect(await postReportRun(badJson, "20261005")).toStrictEqual({ kind: "failed", failure: { kind: "unexpected", httpStatus: 200 } });
+    const failing202: FetchLike = async () => ({
+      status: 202,
+      json: async () => {
+        throw new SyntaxError("not json");
+      },
+    });
+    expect(await postReportRun(failing202, "20261005")).toStrictEqual({ kind: "accepted-malformed" });
+    expect(await postReportRun(async () => ({ status: 202, json: async () => null }), "20261005")).toStrictEqual({ kind: "accepted-malformed" });
+  });
+
   it("409 は error.type で already-exists / in-progress。未知の型は unexpected", async () => {
     expect(await postReportRun(reply(409, { ok: false, error: { type: "already-exists" } }), "20261005")).toStrictEqual({ kind: "already-exists" });
     expect(await postReportRun(reply(409, { ok: false, error: { type: "in-progress" } }), "20261005")).toStrictEqual({ kind: "in-progress" });
     expect(await postReportRun(reply(409, { ok: false, error: { type: "other" } }), "20261005")).toStrictEqual({ kind: "failed", failure: { kind: "unexpected", httpStatus: 409 } });
+  });
+
+  // Issue #446(H-6): 削除した特性テストから移した。本文が読めない 409(プロキシの平文の応答ほか。json() の失敗は本文なし〈undefined〉になる)でも、投げずに unexpected:409。
+  it.each([
+    ["本文なし(json() が失敗)", undefined],
+    ["本文が null", null],
+    ["本文が文字列", "x"],
+    ["本文が error を持たないオブジェクト", {}],
+  ])("409 で %s は、投げずに unexpected:409(already-exists・in-progress にしない)", async (_n, body) => {
+    const failing: FetchLike = async () => ({
+      status: 409,
+      json: async () => {
+        if (body === undefined) throw new SyntaxError("not json");
+        return body;
+      },
+    });
+    expect(await postReportRun(failing, "20261005")).toStrictEqual({ kind: "failed", failure: { kind: "unexpected", httpStatus: 409 } });
   });
 
   it("400・413・415 は bad-request、503 は server-error、403 の Origin 不一致は origin-mismatch、通信の失敗は network", async () => {
@@ -193,6 +224,34 @@ describe("Issue #264: 見込みの的中数・直近 28 日の累計を読む", 
   ])("累計が壊れていれば unexpected: %s", async (_n, rolling) => {
     expect(await fetchWith(detail(withExpected, rolling))).toStrictEqual(unexpected);
   });
+
+  // Issue #446(H-6): 削除した特性テスト(client-api-characterization)から移した。本文(統計・累計)が整っていても、先頭 7 項目が 1 つでも壊れていれば、投げずに unexpected。
+  it("対照: 先頭 7 項目が整っていれば読める(下の「壊れていれば」が空振りでないことの前提)", async () => {
+    const got = await fetchWith(detail(withExpected, ROLLING));
+    expect(got.ok).toBe(true);
+  });
+
+  it.each([
+    ["開催日が 8 桁でない", { date: "2026-10-10" }],
+    ["開催日が数", { date: 20261010 }],
+    ["作成日時が null", { created_at: null }],
+    ["model が数", { model: 5 }],
+    ["件数が負", { race_count: -1 }],
+    ["賭け金が文字列", { total_stake: "1000" }],
+    ["払戻が文字列", { total_return: "1300" }],
+    ["summary が数", { summary: 5 }],
+  ])("先頭 7 項目が壊れていれば、本文が整っていても投げずに unexpected: %s", async (_n, patch) => {
+    expect(await fetchWith({ ...detail(withExpected, ROLLING), ...patch })).toStrictEqual(unexpected);
+  });
+
+  it.each([
+    ["body が無い(undefined)", undefined],
+    ["body が null", null],
+    ["body が配列", []],
+    ["body が文字列", "x"],
+  ])("詳細の %s は、投げずに unexpected", async (_n, body) => {
+    expect(await fetchWith({ ...detail(withExpected, ROLLING), body })).toStrictEqual(unexpected);
+  });
 });
 
 describe("Issue #272: 印の定型の買い方(whatIf)と惜しかったレースを読む", () => {
@@ -275,6 +334,22 @@ describe("Issue #268: 作り直し(regenerate)の API", () => {
     expect(await postReportRun(reply(429, { ok: false, error: { type: "daily-limit" } }), "20261005", true)).toStrictEqual({ kind: "daily-limit" });
     expect(await postReportRun(reply(429, { ok: false, error: { type: "other" } }), "20261005", true)).toStrictEqual({ kind: "failed", failure: { kind: "unexpected", httpStatus: 429 } });
     expect(await postReportRun(reply(429, "x"), "20261005", true)).toStrictEqual({ kind: "failed", failure: { kind: "unexpected", httpStatus: 429 } });
+  });
+
+  // Issue #446(H-6): 削除した特性テストから移した。error の無い・null の 429(上限の判定が error.type を読む前に落ちる形)でも、投げずに unexpected:429。
+  it.each([
+    ["error の無いオブジェクト", { ok: false }],
+    ["error が null", { ok: false, error: null }],
+    ["本文なし(json() が失敗)", undefined],
+  ])("429 で本文が %s でも、投げずに unexpected:429(daily-limit にしない)", async (_n, body) => {
+    const failing: FetchLike = async () => ({
+      status: 429,
+      json: async () => {
+        if (body === undefined) throw new SyntaxError("not json");
+        return body;
+      },
+    });
+    expect(await postReportRun(failing, "20261005", true)).toStrictEqual({ kind: "failed", failure: { kind: "unexpected", httpStatus: 429 } });
   });
 
   it("409 の not-exists(作り直しなのに日報が無い。画面からは出せない)は、既知の型にせず unexpected(固定の文言で出る)", async () => {

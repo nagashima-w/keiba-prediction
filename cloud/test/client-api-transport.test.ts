@@ -3,7 +3,7 @@ import { classify, classifyWithoutNetkeiba, classifyWrite, getJson, isArr, isStr
 
 /**
  * Issue #397(R-6): client の API 層の共通部品(`api.ts`)の単体テスト。
- * 共通化の前後で挙動が変わらないことは `client-api-characterization.test.ts`(各 API 関数の振る舞いの表)が守る。ここは共通部品そのものの契約。
+ * 各 API 関数の振る舞いは `client-api-*.test.ts`(関数ごと)と `client-api-*-contract.test.ts` が守る(共通化の前後を固定していた特性テスト `client-api-characterization.test.ts` は Issue #446〈H-6〉で削除した)。ここは共通部品そのものの契約。
  */
 
 describe("readBody", () => {

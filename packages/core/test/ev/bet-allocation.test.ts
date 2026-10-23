@@ -1262,7 +1262,7 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
 
       expect(plResult.modelApproximate).toBe(false);
       expect(cbResult.modelApproximate).toBe(true);
-      // 実測値(自分で実行して確認。model-characterization.test.tsのF3と同一フィクスチャ)。
+      // 実測値(自分で実行して確認。joint-model-allocation-table.test.tsのF3と同一フィクスチャ)。
       expect(plResult.diagnostics.marginalDeviationMax).toBe(0.27500069958051765);
       expect(cbResult.diagnostics.marginalDeviationMax).toBe(0.19507729125133355);
       // false(PL)の方がtrue(CB)より数値として悪化している(falseは精度が高いという意味ではない)。

@@ -9,7 +9,7 @@ import { deferred } from "./client-fakes";
 
 /**
  * Issue #400 R-11: 場ごとの一括実行の制御(`bulk-control.ts`)の単体テスト。偽の fetch・偽の道具(板のオーバーレイ・追跡の開始・再描画・一覧/板の読み取り)を使う。
- * `createApp` を通した振る舞いは `client-app-bulk.test.ts`・`client-app-r11-characterization.test.ts` が固定している。ここは、`createApp` からは見えない契約
+ * `createApp` を通した振る舞いは `client-app-bulk.test.ts`・`client-app-settings-run-details.test.ts` が固定している。ここは、`createApp` からは見えない契約
  * (閲覧者は何もしない・画面が一覧でなければ何もしない・送信中/0 件/不明なキーでの無視・道具を呼ぶ**順序と引数**・取得中の待ち)を固定する。
  */
 

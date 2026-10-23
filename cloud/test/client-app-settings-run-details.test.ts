@@ -8,10 +8,12 @@ import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { createFakeTimers, deferred } from "./client-fakes";
 
 /**
- * Issue #400 R-11(`createApp` の分割)の前に足した、振る舞いの特性テスト(追加のみ。既存のテストは変えない)。
- * 分割前の `app.ts` に変異(門・世代・強制描画・順序などの削除)を機械的に注入したところ、既存の client 系テストが全緑のまま生き残った変異のうち、
- * **利用者から見える挙動に当たるもの**を固定する。分割後(設定・単体実行・一括実行を外へ出したあと)も同じ振る舞いであることを、`createApp` を通して確かめる。
+ * `createApp` を通した、設定画面(#settings)・単体の起動・一括実行の細部の振る舞い(門・世代・強制描画・順序・権限の配線)。
+ * `app.ts` に変異(門・世代・強制描画・順序などの削除)を機械的に注入したところ、`client-app-settings.test.ts`・`client-app-run.test.ts`・`client-app-bulk.test.ts` ほかの
+ * 既存の client 系テストが全緑のまま生き残った変異のうち、**利用者から見える挙動に当たるもの**を固定する。
+ * 設定・単体実行・一括実行の制御は `settings-screen.ts`・`run-control.ts`・`bulk-control.ts` にあり、ここは `createApp` を通した配線と振る舞いを確かめる。
  * 偽の fetch・偽のタイマー・偽のハッシュ。実リクエストはしない。
+ * (旧名 `client-app-r11-characterization.test.ts`。Issue #400 R-11 の切り出しの前に足した特性テストで、Issue #446 で特性テストの位置づけを外して改名した。assert は変えていない。)
  */
 
 type Resp = { status: number; json: () => Promise<unknown> };
@@ -34,7 +36,7 @@ async function flush(): Promise<void> {
 // ---------------------------------------------------------------------------------------------
 // 設定画面
 // ---------------------------------------------------------------------------------------------
-describe("R-11 特性: 設定画面(#settings)", () => {
+describe("設定画面(#settings)", () => {
   const SERVER: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 500_000, perRaceCap: 50_000, preRaceOffsetMinutes: 90 };
   const LIST_HASH = "#date=20260628&venue=central";
 
@@ -256,7 +258,7 @@ describe("R-11 特性: 設定画面(#settings)", () => {
 // ---------------------------------------------------------------------------------------------
 // 単体実行・一括実行
 // ---------------------------------------------------------------------------------------------
-describe("R-11 特性: 起動(単体・一括)", () => {
+describe("起動(単体・一括)", () => {
   const DATE = "20260628";
   const RACE_ID = "202603020211";
 
@@ -390,7 +392,7 @@ describe("R-11 特性: 起動(単体・一括)", () => {
 // ---------------------------------------------------------------------------------------------
 // 権限(閲覧者/管理者)の配線
 // ---------------------------------------------------------------------------------------------
-describe("R-11 特性: 起動・一括の制御へ、役割から決めた admin を渡している(app.ts の静的な確認)", () => {
+describe("起動・一括の制御へ、役割から決めた admin を渡している(app.ts の静的な確認)", () => {
   // 閲覧者には起動・一括実行のボタンが無いので、`createApp` を通しては「制御へ admin を渡し忘れた/常に true にした」ことを検出できない
   // (閲覧者の画面からはハンドラに届かない)。制御側の「admin が false なら何もしない」は client-run-control.test.ts・client-bulk-control.test.ts が固定するので、
   // ここでは app.ts が `isAdmin(deps.role)` の結果をそのまま渡していることだけを、コメントを除いたソースで確かめる。

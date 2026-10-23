@@ -5,7 +5,7 @@ import { deferred } from "./client-fakes";
 
 /**
  * Issue #400 R-11: 単体の起動の制御(`run-control.ts`)の単体テスト。偽の fetch・偽の道具(板のオーバーレイ・追跡の開始・再描画)の呼び出しを記録する。
- * `createApp` を通した振る舞いは `client-app-run.test.ts`・`client-app-r11-characterization.test.ts` が固定している。ここは、`createApp` からは見えない契約
+ * `createApp` を通した振る舞いは `client-app-run.test.ts`・`client-app-settings-run-details.test.ts` が固定している。ここは、`createApp` からは見えない契約
  * (閲覧者は POST しない・道具を呼ぶ**順序と引数**・送信中の同期の印・取得中の待ち)を固定する。
  */
 

@@ -4,7 +4,7 @@ import { fetchItemList, isYmd, parseHeadOf } from "../client/api-report";
 
 /**
  * Issue #397(R-6 後半): 日報と月報の取得・先頭 7 項目の共通部品の単体テスト。
- * 日報・月報の各 API 関数としての振る舞いは `client-api-characterization.test.ts`(先頭 7 項目の表ほか)と既存の `client-api-report*.test.ts`・`client-api-monthly*.test.ts` が守る。
+ * 日報・月報の各 API 関数としての振る舞いは `client-api-report*.test.ts`・`client-api-monthly*.test.ts`(先頭 7 項目の検査を含む。共通化の前後を固定していた特性テスト `client-api-characterization.test.ts` は Issue #446〈H-6〉で削除した)が守る。
  */
 
 const reply = (status: number, body: unknown): FetchLike => async () => ({ status, json: async () => body });

@@ -38,7 +38,9 @@ describe("fetchMonthlyList", () => {
   it.each([
     ["reports が配列でない", { ok: true, reports: {} }],
     ["行の month が 6 桁でない", { ok: true, reports: [{ ...LIST_ROW, month: "2026-10" }] }],
+    ["行が null(Issue #446〈H-6〉: 投げずに unexpected)", { ok: true, reports: [null] }],
     ["行の month が実在しない月", { ok: true, reports: [{ ...LIST_ROW, month: "202613" }] }],
+    ["行の month が数(文字列でない)", { ok: true, reports: [{ ...LIST_ROW, month: 202610 }] }],
     ["行の件数が負", { ok: true, reports: [{ ...LIST_ROW, race_count: -1 }] }],
     ["行の金額が文字列", { ok: true, reports: [{ ...LIST_ROW, total_stake: "100" }] }],
     ["1 行だけ壊れている(一部だけを採用しない)", { ok: true, reports: [LIST_ROW, { ...LIST_ROW, summary: 5 }] }],
@@ -121,6 +123,7 @@ describe("fetchMonthly", () => {
 
   it.each([
     ["report が壊れている(月が 6 桁でない)", { ok: true, report: { ...DETAIL, month: "2026" } }],
+    ["report の月が数(文字列でない)", { ok: true, report: { ...DETAIL, month: 202610 } }],
     ["report の件数が負", { ok: true, report: { ...DETAIL, race_count: -1 } }],
     ["body が無い", { ok: true, report: { ...DETAIL, body: null } }],
     ["stats が無い", { ok: true, report: { ...DETAIL, body: { ...DETAIL.body, stats: undefined } } }],
@@ -265,6 +268,18 @@ describe("postMonthlyRun(POST /api/monthly-reports/run。Issue #280)", () => {
   it("202 でも本文が想定外(月が違う)なら accepted-malformed(サーバは依頼を受け付けている)", async () => {
     expect(await postMonthlyRun(post(202, { ok: true, accepted: true, month: "202608" }), "202609")).toStrictEqual({ kind: "accepted-malformed" });
     expect(await postMonthlyRun(post(202, "x"), "202609")).toStrictEqual({ kind: "accepted-malformed" });
+  });
+
+  // Issue #446(H-6・レビュー指摘): 削除した特性テストから移した。202 で本文が読めない(json() が失敗)でも、投げずに accepted-malformed(サーバは依頼を受け付けている)。
+  it("202 で json() が失敗(本文が読めない)しても、投げずに accepted-malformed", async () => {
+    const failing202: FetchLike = async () => ({
+      status: 202,
+      json: async () => {
+        throw new SyntaxError("not json");
+      },
+    });
+    expect(await postMonthlyRun(failing202, "202609")).toStrictEqual({ kind: "accepted-malformed" });
+    expect(await postMonthlyRun(post(202, null), "202609")).toStrictEqual({ kind: "accepted-malformed" });
   });
 
   it("409 は already-exists・in-progress、それ以外の 409(not-exists など)は想定外。429 daily-limit は上限", async () => {

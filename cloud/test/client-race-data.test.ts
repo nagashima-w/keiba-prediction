@@ -7,7 +7,7 @@ import { createFakeTimers, deferred } from "./client-fakes";
 
 /**
  * Issue #400 R-11b: 読み込みと追跡(`race-data.ts` の `createRaceData`)の単体テスト。`createApp` を通した振る舞いは
- * `client-app*.test.ts`・`client-app-r11b-characterization.test.ts` が固定する。ここは、切り出した部品そのものの契約
+ * `client-app*.test.ts`・`client-app-load-track-details.test.ts` が固定する。ここは、切り出した部品そのものの契約
  * (取得の冪等・取得中の「更新」の無視・route と画面の判定を依存から受け取ること・待ち対象・再描画の要求)を、偽の fetch・偽のタイマーで確かめる。
  */
 

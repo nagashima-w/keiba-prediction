@@ -7,9 +7,9 @@ import { fitPlackettLuceStrengths } from "../../src/ev/plackett-luce-strength.js
 import type { JointModelHorse } from "../../src/ev/place-joint-model.js";
 
 /**
- * model-characterization — 元は Issue #80(#78-A)の AC-A7 として新設。Issue #81(#78-B)で
+ * 同時分布モデル別の配分結果の表 — 元は Issue #80(#78-A)の AC-A7 として新設。Issue #81(#78-B)で
  * 既定モデルを`PLACKETT_LUCE_MODEL`へ切り替えたため、AC-B2' として**3行構成**へ改める
- * (#81着手前ゲートで確定)。
+ * (#81着手前ゲートで確定)。旧名は `model-characterization.test.ts`(Issue #446 で、特性テストの位置づけを外して改名した。assertは変えていない)。
  *
  * `CONDITIONAL_BERNOULLI_MODEL`と`PLACKETT_LUCE_MODEL`が、**同一の入力(候補馬・オッズ・
  * 配分設定)**に対してどれだけ異なる配分結果を返すかを、テーブル駆動でリテラル固定する。
@@ -121,7 +121,7 @@ function stakesByUmaban(result: { allocations: readonly { umaban: number; stake:
   return out;
 }
 
-describe("AC-B2': CONDITIONAL_BERNOULLI_MODEL・PLACKETT_LUCE_MODEL・既定(model省略)の配分結果の特性化(#81)", () => {
+describe("AC-B2': CONDITIONAL_BERNOULLI_MODEL・PLACKETT_LUCE_MODEL・既定(model省略)の配分結果の表(#81)", () => {
   describe.each(FIXTURES)("$name", (f) => {
     const horses = horsesOf(f);
 

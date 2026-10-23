@@ -6,7 +6,7 @@
  * その関数への写しと、結果なし・未知の券種の扱い:
  *  - 結果そのものが無いレース(`result === undefined`)は、全部判定不能にする
  *  - 未知の券種(core が判定の対象にする 8 券種の外)は判定不能にする(賭け金は返す。静かに捨てない)
- * 同じ入力を `computeVerifyReport` の `proposedBet` に通して突き合わせることは、`test/daily-report-bets.test.ts` と `test/bet-judgment-characterization.test.ts` が固定している。
+ * 同じ入力を `computeVerifyReport` の `proposedBet` に通して突き合わせることは、`test/daily-report-bets.test.ts`・`test/daily-report-bets-refund.test.ts`・`test/daily-report-bets-bracket-refund.test.ts` が固定している(判定の規則そのものは core の `proposed-bet-judgment.test.ts`)。
  */
 
 import {
