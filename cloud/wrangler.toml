@@ -16,6 +16,10 @@ workers_dev = true
 # Version URL / Preview URL は無効にする(Access の掛け忘れ以前に、入口を増やさない)。
 preview_urls = false
 
+# source map はアップロードしない(Issue #460)。wrangler 4.151 で、未設定のときの既定が false から true に変わった
+# (約 11.6MB の map が増え、上限は未確認。ソースの中身が Cloudflare 側に渡る範囲も変わる)。従来どおり明示的に止める。
+upload_source_maps = false
+
 [observability]
 enabled = true
 
