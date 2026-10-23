@@ -454,6 +454,16 @@ describe("parseVerifyResponse(応答を信用しない)", () => {
 
 describe("fetchVerify の失敗の分類", () => {
   const fetchWith = (status: number, body: unknown): FetchLike => async () => ({ status, json: async () => body });
+  // Issue #446(H-6・レビュー指摘): 削除した特性テストの分類表から移した。GET の検証は、書き込みの分類(classifyWrite)と違い 413・415 を bad-request にしない(unexpected のまま)。
+  it("413・415 は bad-request にせず unexpected(ステータス付き)。400 は bad-request のまま(対照)", async () => {
+    for (const status of [413, 415]) {
+      for (const body of [{}, { ok: false, error: { type: "payload-too-large" } }, "x"]) {
+        expect(await fetchVerify(fetchWith(status, body), "all", false), `${status} ${JSON.stringify(body)}`).toEqual({ ok: false, error: { kind: "unexpected", httpStatus: status } });
+      }
+    }
+    expect(await fetchVerify(fetchWith(400, {}), "all", true)).toEqual({ ok: false, error: { kind: "bad-request" } });
+  });
+
   it("403・400・200 で形が違う・例外・json が壊れている", async () => {
     expect(await fetchVerify(fetchWith(403, { ok: false, error: { type: "origin-mismatch" } }), "all", false)).toEqual({ ok: false, error: { kind: "origin-mismatch" } });
     expect(await fetchVerify(fetchWith(403, "x"), "all", false)).toEqual({ ok: false, error: { kind: "forbidden" } });

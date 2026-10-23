@@ -388,7 +388,7 @@ describe("既定切替の数値検出(#81・AC-B10): 非対称・キャップ非
 
     expect(view.result.modelId).toBe("plackett-luce");
     // totalStakeはCB(既定切替前。自分で実行して確認: 149800)と偶然一致する
-    // (model-characterization.test.tsのF3・F6と同じ「totalStakeは判別指標にならない」現象)。
+    // (joint-model-allocation-table.test.tsのF3・F6と同じ「totalStakeは判別指標にならない」現象)。
     // 判別しているのはbetCount(CB=7 vs PL=10)と下記のstakes配列そのもの。
     expect(view.result.totalStake).toBe(149800);
     expect(view.result.betCount).toBe(10);

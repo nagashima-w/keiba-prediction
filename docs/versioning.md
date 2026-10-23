@@ -992,7 +992,7 @@ Issue #81(#78-B)は、既定の同時分布モデルを `CONDITIONAL_BERNOULLI_M
 **「分析結果の数値が変わる」**)のうち後者に該当する。既定モデルが変わることで、
 model 引数を渡さない production の全呼び出し元(`allocateBets`・`allocateGeneralBets`・
 `buildComboCandidates`)が返す配分結果(stake配列・betCount・isSkip・kellyTargetStake等)が
-**新規分析から実際に変わる**(`packages/core/test/ev/model-characterization.test.ts` の
+**新規分析から実際に変わる**(`packages/core/test/ev/model-characterization.test.ts`〈Issue #446 で `joint-model-allocation-table.test.ts` に改名〉の
 F1〜F6がCB/PL両モデルの数値差をリテラルで固定しており、F4は`isSkip`がCB=false/PL=trueと
 反転する)。`modelId`/`modelApproximate` の保存値も `"conditional-bernoulli"`/`true` から
 `"plackett-luce"`/`false` へ変わる(`allocation-record.test.ts`)。

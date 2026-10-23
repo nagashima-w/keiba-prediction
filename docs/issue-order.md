@@ -91,7 +91,7 @@
 - **閉じた Issue**: ~~#441~~・~~#443~~。
 - **新しい Issue と状態**:
   - **#445**(#358 の【記録】の残りの回収): 前半(PR #447)・後半(PR #448)とも公開済み。閉じたら #358 も閉じる。
-  - **#446**(#390 のリファクタリングで作った特性テストの縮小・削除): **#445 の後**。H-1(特性だけが守る変異の洗い出し)は済み(結果は #446 のコメント)。H-2(race-day-result・promote・report-hold の特性テストを、小さな置き換えテストにして削除)はPR #450(main eddf4e1)で取り込み済み。CI は #449 の 18fbbf3 の公開で通った。H-3(race-day-rescue・close)は公開済み(474d396。PR #456 で main 64611e4 に取り込み)。H-4(race-day-notify・plan)は公開済み(f47f0ab。PR は公開後)。H-5(report-job・handler-boilerplate)は実施した(レビュー継続中)。残りは H-6 以降。
+  - **#446**(#390 のリファクタリングで作った特性テストの縮小・削除): **#445 の後**。H-1(特性だけが守る変異の洗い出し)は済み(結果は #446 のコメント)。H-2(race-day-result・promote・report-hold の特性テストを、小さな置き換えテストにして削除)はPR #450(main eddf4e1)で取り込み済み。CI は #449 の 18fbbf3 の公開で通った。H-3(race-day-rescue・close)は公開済み(474d396。PR #456 で main 64611e4 に取り込み)。H-4(race-day-notify・plan)は公開済み(f47f0ab。PR #457 で main 9590c27 に取り込み)。H-5(report-job・handler-boilerplate)は公開済み(52abd11。PR #458 で main 4139854 に取り込み)。H-6(client-api・bet-judgment の特性テストの削除と、r11・r11b・model の改名)も公開済みで、#446 の段階はすべて終わった。
   - **#383**(期待値プラスになり得ないレースでは LLM を呼ばない): **調査済み**。996 件は exe の古い分析とみられる。本番の SQL での確認と、(i)〜(iii) の判断を**ユーザーの回答待ち**。
 - **開発用コンテナの Node**: 使い捨てで、セッションごとに 22.23.4 へ上げ直している(CI は `24.22.1` に固定。コンテナの版は CI と別)。
 
@@ -568,7 +568,7 @@ throw する。**#80 の `route:"invalid"`〈レース全体〉を流用して�
 - **`SkipReasonCode` は6値のまま。** フィット失敗は `skipped`(見送り)ではなく
   **`route:"invalid"` → `unreached`(判定不能)** に分類される。これにより
   `verify.ts` / `VerifyView` / `formatUnjudgedNote` / DB スキーマは **#81 でも無改変でよい**
-- **`model-characterization.test.ts` の CB 行は `allocateBets` を第4引数なしで呼んでいる。**
+- **`model-characterization.test.ts`(Issue #446 で `joint-model-allocation-table.test.ts` に改名)の CB 行は `allocateBets` を第4引数なしで呼んでいる。**
   既定を PL にすると F1〜F6 の CB 行が `modelId` で**全件赤くなる**。
   **#81 の作業は「CB 行の期待値を書き換える」ことではない。** CB 行は明示的に
   `CONDITIONAL_BERNOULLI_MODEL` を渡す形に変え、新たに「引数なし = PL 行」を追加するのが正しい。

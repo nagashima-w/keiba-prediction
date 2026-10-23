@@ -146,6 +146,16 @@ describe("postSettings(POST /api/settings)", () => {
     }
   });
 
+  // Issue #446(H-6): 削除した特性テスト(client-api-characterization)から移した。400 の本文が想定外の形でも、投げずに bad-request(staleScreen は付けない)。
+  it.each([
+    ["error の無いオブジェクト", {}],
+    ["error が null", { ok: false, error: null }],
+    ["本文が null", null],
+    ["本文が文字列", "x"],
+  ])("400 で本文が想定外の形(%s)でも、投げずに bad-request(staleScreen を付けない)", async (_n, body) => {
+    expect(await postSettings(fake(async () => resp(400, body)).fetch, SAVED)).toEqual({ ok: false, error: { kind: "bad-request" } });
+  });
+
   it("fetch が投げたら network", async () => {
     expect(await postSettings(() => Promise.reject(new Error("x")), SAVED)).toEqual({ ok: false, error: { kind: "network" } });
     expect(

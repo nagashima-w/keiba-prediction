@@ -15,7 +15,8 @@ import {
 /**
  * Issue #398(R-7): 配分ベースの買い目 1 件の的中判定の規則(返還・払戻表の取込ゲート・組合せキーの完全一致)の単体テスト。
  * 検証画面の集計(`computeProposedBetReport`)と日報(cloud の `judgeBets`)の両方がこの関数を呼ぶ。両者の出力の一致は
- * `cloud/test/bet-judgment-characterization.test.ts`(旧コードの出力を固定)と `cloud/test/daily-report-bets.test.ts` が固定している。
+ * `cloud/test/daily-report-bets.test.ts`・`daily-report-bets-refund.test.ts`・`daily-report-bets-bracket-refund.test.ts` が固定している
+ * (共通化の前後で出力が変わらないことを守っていた特性テスト `bet-judgment-characterization.test.ts` は、Issue #446〈H-6〉で削除した)。
  */
 
 /** テストで組み立てを書き換えるための可変版。 */
@@ -69,7 +70,28 @@ describe("createRaceBetJudge: 単勝・複勝", () => {
   });
 });
 
+describe("createRaceBetJudge: 馬が 0 頭の結果", () => {
+  // Issue #446(H-6): 削除した特性テスト(bet-judgment-characterization)の「馬が 0 頭の結果」から移した。
+  it("単勝・複勝は払戻が 1 頭にも無いので unjudged。組合せは払戻表で判定する(hit・miss)。返還にはしない", () => {
+    const { lookup } = lookupOf({ wide: imported(["0102", 800]) });
+    const judge = createRaceBetJudge([], lookup);
+    expect(judge("win", "01")).toEqual({ outcome: "unjudged" });
+    expect(judge("place", "01")).toEqual({ outcome: "unjudged" });
+    expect(judge("wide", "0102")).toEqual({ outcome: "hit", unitPayout: 800 });
+    expect(judge("wide", "0103")).toEqual({ outcome: "miss" });
+  });
+});
+
 describe("createRaceBetJudge: 組合せ券種", () => {
+  // Issue #446(H-6・レビュー指摘): 削除した特性テストの「払戻 0 円の的中は hit(払戻 0)で、miss にしない」の組合せ券種側。単勝・複勝は上の describe が確かめる。
+  it("払戻 0 円の行は『ある』扱いで、hit(unitPayout 0)。miss にしない(行が無いキーだけが miss)", () => {
+    for (const [betType, key] of [["wide", "0102"], ["trio", "010203"], ["quinella", "0102"], ["exacta", "0102"], ["trifecta", "010203"], ["bracketQuinella", "0102"]] as const) {
+      const judge = createRaceBetJudge(horses(), lookupOf({ [betType]: imported([key, 0], ["9999", 500]) }).lookup);
+      expect(judge(betType, key)).toEqual({ outcome: "hit", unitPayout: 0 });
+      expect(judge(betType, "0000")).toEqual({ outcome: "miss" });
+    }
+  });
+
   it("キーの文字列の完全一致で hit。一致しなければ miss(馬単の逆順も別の買い目)。重複キーは最初の行", () => {
     const { lookup } = lookupOf({ exacta: imported(["0102", 3200], ["0102", 1]), wide: imported(["0103", 1500]) });
     const judge = createRaceBetJudge(horses(), lookup);
