@@ -21,7 +21,7 @@ import {
 } from "../src/monthly-report-core";
 import { parseLlmCalls } from "../src/llm-calls";
 import { jstMsOf } from "../src/monthly-month";
-import { MONTHLY_PROMPT_VERSION } from "../src/monthly-report-prompt";
+import { buildMonthlyPrompt, MONTHLY_PROMPT_VERSION } from "../src/monthly-report-prompt";
 import { buildMonthStats, type MonthStats } from "../src/monthly-stats";
 import type { PeriodRows } from "../src/period-stats";
 import { DEFAULT_CLOUD_SETTINGS, type AnalysisModelId } from "../src/settings";
@@ -83,6 +83,8 @@ interface Harness {
   readonly sent: DiscordPayload[];
   readonly prompts: string[];
   readonly models: string[];
+  /** LLM に送ったリクエストの max_tokens(送った順)。 */
+  readonly maxTokens: number[];
   readonly statusCalls: string[];
   readonly readCalls: Array<[string, string]>;
   readonly state: {
@@ -92,6 +94,7 @@ interface Harness {
     failStatus: number;
     failSave: number;
     hasReport: boolean;
+    hasReportCalls: number;
     saveResult: "saved" | "exists";
     replaceResult: "replaced" | "kept";
     llmFailures: number;
@@ -120,6 +123,7 @@ function harness(options: { start?: number; kv?: ReturnType<typeof memoryKv>; ll
   const sent: DiscordPayload[] = [];
   const prompts: string[] = [];
   const models: string[] = [];
+  const maxTokens: number[] = [];
   const statusCalls: string[] = [];
   const readCalls: Array<[string, string]> = [];
   const state: Harness["state"] = {
@@ -129,6 +133,7 @@ function harness(options: { start?: number; kv?: ReturnType<typeof memoryKv>; ll
     failStatus: 0,
     failSave: 0,
     hasReport: false,
+    hasReportCalls: 0,
     saveResult: "saved",
     replaceResult: "replaced",
     llmFailures: 0,
@@ -138,6 +143,7 @@ function harness(options: { start?: number; kv?: ReturnType<typeof memoryKv>; ll
   const sender: MessageSender = async (params) => {
     prompts.push(params.messages[0]!.content);
     models.push(params.model);
+    maxTokens.push(params.max_tokens);
     if (state.llmFailures > 0) {
       state.llmFailures -= 1;
       throw Object.assign(new Error("boom"), { status: 529 });
@@ -183,7 +189,10 @@ function harness(options: { start?: number; kv?: ReturnType<typeof memoryKv>; ll
       },
     },
     store: {
-      hasReport: async () => state.hasReport,
+      hasReport: async () => {
+        state.hasReportCalls += 1;
+        return state.hasReport;
+      },
       saveReport: async (record) => {
         if (state.failSave > 0) {
           state.failSave -= 1;
@@ -210,6 +219,7 @@ function harness(options: { start?: number; kv?: ReturnType<typeof memoryKv>; ll
     sent,
     prompts,
     models,
+    maxTokens,
     statusCalls,
     readCalls,
     state,
@@ -878,5 +888,132 @@ describe("作り直し(regenerate。Issue #280): 管理者が押したときだ�
       await regen(h);
       expect(h.kv.get<{ day: string; count: number }>("regen")).toEqual({ day: "20261102", count: 1 });
     });
+  });
+});
+
+describe("Issue #446(H-5): ジョブ機構の確認(削除した特性テストから移した。時間・回数・件数は定数を参照せず、値で固定する)", () => {
+  const ran = (phase: string, result: string) => ({ kind: "ran", month: MONTH, phase, result });
+  const PENDING = { raceCount: 5, noResultRaceCount: 1, hasDailyReport: false } as const;
+
+  it("最終日の結果を待つのは 10 分(600,000 ms)間隔で最大 6 回。7 回目は待たずに作り、lastDayPending を立て、Discord の注記に出す", async () => {
+    const h = harness({ notifier: true });
+    h.state.status = PENDING;
+    await h.core.requestMonthly({ month: MONTH, mode: "auto" });
+    const t0 = h.clock.t;
+    for (let i = 1; i <= 6; i += 1) {
+      h.clock.t = t0 + (i - 1) * 600_000;
+      expect(await h.step()).toEqual(ran("read", "waiting"));
+      expect(h.alarms[h.alarms.length - 1]).toBe(t0 + i * 600_000);
+      h.clock.t = t0 + i * 600_000 - 1;
+      expect(await h.step()).toEqual({ kind: "idle" }); // 間隔の 1 ms 前は動かない
+    }
+    expect(h.readCalls).toEqual([]);
+    h.clock.t = t0 + 6 * 600_000;
+    expect(await h.step()).toEqual(ran("read", "ok")); // 7 回目は待たない
+    expect(h.statusCalls).toHaveLength(7);
+    await h.drain();
+    expect(h.saved[0]!.body.lastDayPending).toBe(true);
+    const fields = (h.sent[0]!.embeds![0] as { fields?: Array<{ name: string; value: string }> }).fields!;
+    expect(fields.map((f) => f.name)).toContain("注記"); // 最終日が未確定の印は Discord にも出る
+  });
+
+  it.each([
+    { name: "最終日の翌日 2:00(待つ窓の中)", now: jstMsOf("20261101", 2), waits: true },
+    { name: "最終日の翌日 2:59:59.999(窓の終わりの 1 ms 前)", now: jstMsOf("20261101", 3) - 1, waits: true },
+    { name: "最終日の翌日 3:00:00.000(窓の外)", now: jstMsOf("20261101", 3), waits: false },
+    { name: "最終日の翌々日 2:00(窓の外。翌日 3:00 を過ぎている)", now: jstMsOf("20261102", 2), waits: false },
+  ])("自動の作成で、最終日の結果が未取込のとき: $name は、待つ=$waits", async ({ now, waits }) => {
+    const h = harness({ start: now });
+    h.state.status = PENDING;
+    await h.core.requestMonthly({ month: MONTH, mode: "auto" });
+    expect(await h.step()).toEqual(ran("read", waits ? "waiting" : "ok"));
+    expect(h.statusCalls).toEqual(waits ? [LAST_DAY] : []);
+  });
+
+  it("段階の失敗は 60 秒(60,000 ms)後に再試行し、3 回目の失敗で failed(アラームを張らない)", async () => {
+    const h = harness();
+    h.state.failRead = 99;
+    await h.core.requestMonthly({ month: MONTH, mode: "auto" });
+    const t = h.clock.t;
+    expect(await h.step()).toEqual(ran("read", "retry"));
+    expect(h.alarms[h.alarms.length - 1]).toBe(t + 60_000); // 段階を終えた直後に、次の時刻へアラームを張る
+    h.clock.t = t + 59_999;
+    expect(await h.step()).toEqual({ kind: "idle" });
+    h.clock.t = t + 60_000;
+    expect(await h.step()).toEqual(ran("read", "retry"));
+    expect(h.alarms[h.alarms.length - 1]).toBe(t + 120_000);
+    h.clock.t = t + 120_000;
+    const alarmsBefore = h.alarms.length;
+    expect(await h.step()).toEqual(ran("read", "failed"));
+    expect(h.core.getStatus(MONTH)).toEqual({ phase: "read", status: "failed", attempts: 3 });
+    expect(h.alarms).toHaveLength(alarmsBefore);
+  });
+
+  it("LLM の失敗は 60 秒(60,000 ms)後に再試行する。LLM に送る max_tokens は 12,000。プロンプトは buildMonthlyPrompt の出力そのもの", async () => {
+    const h = harness({ llm: true });
+    h.state.llmFailures = 1;
+    await h.core.requestMonthly({ month: MONTH, mode: "auto" });
+    await h.step(); // read
+    const t = h.clock.t;
+    expect(await h.step()).toEqual(ran("generate", "retry"));
+    expect(h.alarms[h.alarms.length - 1]).toBe(t + 60_000);
+    h.clock.t = t + 59_999;
+    expect(await h.step()).toEqual({ kind: "idle" });
+    h.clock.t = t + 60_000;
+    expect(await h.step()).toEqual(ran("generate", "ok"));
+    expect(h.maxTokens).toEqual([12_000, 12_000]);
+    const expected = buildMonthlyPrompt({ month: MONTH, stats: h.state.stats, lastDayPending: false });
+    expect(h.prompts).toEqual([expected, expected]);
+  });
+
+  it("Discord に送る payload は embeds だけで、embed は 1 件", async () => {
+    const h = harness({ notifier: true });
+    await h.core.requestMonthly({ month: MONTH, mode: "auto" });
+    await h.drain();
+    expect(h.sent).toHaveLength(1);
+    expect(Object.keys(h.sent[0]!)).toEqual(["embeds"]);
+    expect(h.sent[0]!.embeds).toHaveLength(1);
+  });
+
+  it("保存の失敗の後に成功して通知の段階へ進むと、失敗の回数は 0 に戻る", async () => {
+    const h = harness({ notifier: true });
+    await h.core.requestMonthly({ month: MONTH, mode: "auto" });
+    await h.step(); // read
+    await h.step(); // generate
+    h.state.failSave = 1;
+    expect(await h.step()).toEqual(ran("save", "retry"));
+    expect(h.core.getStatus(MONTH)).toEqual({ phase: "save", status: "running", attempts: 1 });
+    h.clock.t += 60_000;
+    expect(await h.step()).toEqual(ran("save", "ok"));
+    expect(h.core.getStatus(MONTH)).toEqual({ phase: "notify", status: "running", attempts: 0 });
+  });
+
+  it("段階を1つ終えた直後に、次のジョブの時刻へアラームを張る(次の起床を待たずに)", async () => {
+    const h = harness();
+    await h.core.requestMonthly({ month: MONTH, mode: "auto" });
+    expect(h.alarms).toEqual([T_2200]); // 依頼の直後
+    expect(await h.step()).toEqual(ran("read", "ok"));
+    expect(h.alarms).toEqual([T_2200, T_2200]); // 段階を終えた直後(次の段階は今)
+  });
+
+  it("再起動(新しいインスタンス)で、期限がまだ来ていないジョブだけがあるときの空の起床は、そのジョブの時刻にアラームを張り直す", async () => {
+    const kv = memoryKv();
+    const first = harness({ kv });
+    first.state.status = PENDING;
+    await first.core.requestMonthly({ month: MONTH, mode: "auto" });
+    await first.step(); // 待ちに入る(次の時刻は 10 分後)
+    const t = first.clock.t;
+    const second = harness({ kv, start: t });
+    expect(second.alarms).toEqual([]);
+    expect(await second.step()).toEqual({ kind: "idle" });
+    expect(second.alarms).toEqual([t + 600_000]);
+  });
+
+  it("進行中の月の依頼は、作成済みかどうか(D1)を引かずに断る", async () => {
+    const h = harness();
+    await h.core.requestMonthly({ month: MONTH, mode: "auto" });
+    expect(h.state.hasReportCalls).toBe(1);
+    expect(await h.core.requestMonthly({ month: MONTH, mode: "auto" })).toEqual({ accepted: false, reason: "in-progress" });
+    expect(h.state.hasReportCalls).toBe(1); // 増えない
   });
 });
