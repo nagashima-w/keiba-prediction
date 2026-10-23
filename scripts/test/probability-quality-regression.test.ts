@@ -120,7 +120,9 @@ const FIXTURES: readonly FixtureCase[] = [
     label: "地方12頭",
     fixtureFileName: "nar-on.json",
     kaisaiDate: "20260712",
-    expected: { spearmanRho: 0.4308237780280829, sdRatio: 0.9758610447561655, klModel: 0.05161867600144968, klMarket: 0.053251532406149917 },
+    // Issue #421 手順 2 で更新: 地方のレースは統計モデルの斤量の項を使わなくなったため、sdRatio(0.9758610447561655 → 0.9652045401492865)と
+    // klModel(0.05161867600144968 → 0.05050414260015031)が動いた。ρ と klMarket(市場側)は不変で、中央16頭の値は 1 つも動いていない。
+    expected: { spearmanRho: 0.4308237780280829, sdRatio: 0.9652045401492865, klModel: 0.05050414260015031, klMarket: 0.053251532406149917 },
   },
 ];
 

@@ -108,8 +108,9 @@ export interface TodayRaceConditions {
    * "nar"(地方競馬)では COURSE_TRAITS・COURSE_FRAME_BIAS_TABLE・美浦/栗東輸送負荷テーブルが
    * いずれも中央10場前提のため、competeVenueBias(競馬場適性)・computeCourseFrameBiasScore
    * (コース枠順バイアス)・computeTransportBias(輸送・滞在バイアス)の3項目を一律対象外にする
-   * (寄与度ログには「NARのため対象外」等の理由を残す)。それ以外の基礎スコア・バイアス項目は
-   * venueKind に関わらず従来どおり計算する。
+   * (寄与度ログには「NARのため対象外」等の理由を残す)。加えて斤量の項(computeWeightChangeScore)も
+   * NARでは使わない(Issue #421 手順 2。applied=false・補正 0)。騎手の項は中立の値だけが開催区分で変わる。
+   * それ以外の基礎スコア・バイアス項目は venueKind に関わらず従来どおり計算する。
    */
   readonly venueKind?: RaceIdVenueKind;
 }
@@ -458,7 +459,8 @@ export interface BuildPriorRaceInfo {
   /**
    * 今回レースの開催区分(中央/地方)。呼び出し側(`analysis/analysis-pipeline.ts`)は
    * venueKindOfRaceId(raceId) 等で判定した値を必ず明示的に渡すこと(TodayRaceConditions.venueKind
-   * と異なり省略不可)。NARでは競馬場適性・コース枠順バイアス・輸送滞在バイアスを対象外にする
+   * と異なり省略不可)。NARでは競馬場適性・コース枠順バイアス・輸送滞在バイアス・タイム指数・調教師成績
+   * (Issue #353・#354)・斤量(Issue #421)を対象外にする
    * (詳細は TodayRaceConditions.venueKind のコメント参照)。
    */
   readonly venueKind: RaceIdVenueKind;

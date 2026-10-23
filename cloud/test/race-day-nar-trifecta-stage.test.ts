@@ -504,21 +504,28 @@ describe("地方三連単の段階: 失敗・部分被覆・打ち切り(三連�
 });
 
 describe("地方三連単の段階: 前回の残りを使わない・再予約", () => {
-  it("再予約した別の実行で軸 5 が 404 のとき、前回の実行のキャッシュ(軸 5)は使わない(取得ステップの開始より前のオッズは古い)", async () => {
+  // 404 にする軸。Issue #421 手順 2 まで 5 だった。地方の統計モデルから斤量の項を外した結果、この模擬の馬の prior(0.24〜0.26 のほぼ一様)が小さく動き、
+  // 軸 5 を欠いた 2 回目の配分から三連単が 0 点になった(配分の全体は 976 → 16 点。軸 12 を欠くと 968 点・軸 2 を欠くと 973 点が残る。いずれも実測)。
+  // 機序(以前からある丸めの性質で、#421 が原因ではない): この模擬のオッズは裁定級で全買い目が期待値プラスになり、貪欲法が greedySteps を使い切って Σx=1 に達する。
+  // そのとき上限(cap=100,000・betUnit=100)で比例縮小した後の 1 歩の賭け金が 99.99999999999993 円になり、`roundStakes` の floor で 0 円に落ちて、1 歩だけの候補が全部消える。
+  // 軸 5・8・10・11 を 404 にすると崩れ、cap=100,100 では軸 5 も 972 点に戻る。
+  // どの軸でも検査の意図(前回のキャッシュを使わない)は同じなので、崩れない軸 12 にした(1 回目の買い目が最多〈110 件。軸 9・11 と同数〉。改修前の斤量ありでも通る)。
+  const STALE_AXIS = 12;
+  it(`再予約した別の実行で軸 ${STALE_AXIS} が 404 のとき、前回の実行のキャッシュ(軸 ${STALE_AXIS})は使わない(取得ステップの開始より前のオッズは古い)`, async () => {
     const h = harness();
     h.gate.body = narBody(12);
     await scheduleNar(h);
     await stepsUntilDone(h);
-    expect(trifectaBets(h.sink.saved[0]!).some((b) => b.umabans[0] === 5)).toBe(true); // 前提: 1回目は軸 5 の三連単も買い目に入る
+    expect(trifectaBets(h.sink.saved[0]!).some((b) => b.umabans[0] === STALE_AXIS)).toBe(true); // 前提: 1回目は軸 12 の三連単も買い目に入る
 
     h.clock.now += 60 * 60_000;
     const body = narBody(12);
-    h.gate.body = (url) => (isB8(url) && jikuOf(url) === 5 ? null : body(url));
+    h.gate.body = (url) => (isB8(url) && jikuOf(url) === STALE_AXIS ? null : body(url));
     await scheduleNar(h);
     await stepsUntilDone(h);
     expect(h.sink.saved).toHaveLength(2);
     expect(trifectaBets(h.sink.saved[1]!).length).toBeGreaterThan(0);
-    expect(trifectaBets(h.sink.saved[1]!).every((b) => b.umabans[0] !== 5)).toBe(true);
+    expect(trifectaBets(h.sink.saved[1]!).every((b) => b.umabans[0] !== STALE_AXIS)).toBe(true);
   });
 
   it("段階の途中で再予約はできない(実行中の同じレースは受け付けない)。完了後に再予約すると、段階の行は新しい実行のぶんに入れ替わる", async () => {
