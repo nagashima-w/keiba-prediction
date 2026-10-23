@@ -77,6 +77,17 @@ describe("wrangler.toml", () => {
     expect(tomlCode).not.toMatch(/^\[\[?routes\]?\]/m);
   });
 
+  it("Issue #460: wrangler 4.151 で、未設定のときの upload_source_maps の既定が true に変わった。従来どおり source map をアップロードしないよう、最上位に upload_source_maps = false を置く", () => {
+    // 最上位のキーは最初の [テーブル] より前になければならない(後ろに置くとそのテーブルのキーになる)。前提: 最初のテーブルが見つかり、その手前が空でない
+    const firstTable = tomlCode.search(/^\[/m);
+    expect(firstTable, "最初の [テーブル] が見つかる(前提)").toBeGreaterThan(0);
+    const topLevel = tomlCode.slice(0, firstTable);
+    expect(topLevel, "最上位に name がある(前提。最上位を正しく切り出せている)").toMatch(/^name = "keiba-cloud"$/m);
+    expect(topLevel).toMatch(/^upload_source_maps = false$/m);
+    // true や別の指定が混ざっていない(全体で 1 行だけ)
+    expect(tomlCode.match(/^\s*upload_source_maps\s*=/gm) ?? []).toHaveLength(1);
+  });
+
   it("DO は SQLite バックエンド(new_sqlite_classes)だけで、KV バックエンド(new_classes。Paid のみ)を使わない", () => {
     expect(tomlCode).toMatch(/^new_sqlite_classes = \["NetkeibaGate"\]$/m);
     expect(tomlCode).not.toMatch(/new_classes\s*=/);
