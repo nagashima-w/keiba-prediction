@@ -10,3 +10,6 @@ cloud/wrangler.measure-prior-export.generated.toml
 
 # 作業用の git worktree の置き場所。メインのチェックアウトで未追跡のファイルとして出続けるため除外する(Issue #451)
 .claude/worktrees/
+
+# 日本語の推敲スキル yomiyasu が検査の記録を書く場所(Issue #466)
+.yomiyasu/
