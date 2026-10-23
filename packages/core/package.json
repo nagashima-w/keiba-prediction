@@ -38,6 +38,6 @@
     "better-sqlite3": "^13.0.3",
     "cheerio": "^1.2.0",
     "iconv-lite": "^0.7.3",
-    "undici": "^8.11.2"
+    "undici": "^8.12.2"
   }
 }
