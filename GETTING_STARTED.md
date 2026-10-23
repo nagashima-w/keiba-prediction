@@ -31,4 +31,4 @@ exeのコードが最後に残っているコミットは3c1664eです。詳細�
 - ロジック(scraper/scorer/ev)はクラウド上のテストで完結する
 - Electronの画面確認は、GitHub ActionsがビルドしたexeをReleasesから
   ダウンロードして手元で起動 → 感想をClaude Codeに返す、の往復で行う
-  (アーカイブ済みで、exeのコードは削除済み〈3c1664eまで〉。現在の画面確認は、web版〈Uma Driller〉を対象にする)
+  (アーカイブ済みで、exeのコードは削除済み〈3c1664eまで〉。現在の画面確認はweb版〈Uma Driller〉を対象にする)
