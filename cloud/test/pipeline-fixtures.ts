@@ -96,6 +96,7 @@ export const ALL_BETS_SETTINGS = {
   bankroll: 1_000_000,
   perRaceCap: 100_000,
   kellyFraction: 0.5,
+  minHitProb: 0, // Issue #470: 下限なし(core の golden と同じ。配分の出力を変えない)
   includeComboOdds: true,
   includeWideInAllocation: true,
   includeTrioInAllocation: true,

@@ -45,6 +45,7 @@
  * - 孤立サロゲートは元に戻らない(U+FFFD に置き換わる)。
  */
 
+import { serializeMissed } from "./missed-bets";
 import {
   allocationBetParams,
   allocationMetaParams,
@@ -204,6 +205,11 @@ export function withNewIdSql(codecInsertSql: string): string {
 const INSERT_HORSES_SQL = jsonEachInsertSql(INSERT_ANALYSIS_HORSE_SQL);
 const INSERT_BETS_SQL = jsonEachInsertSql(INSERT_ALLOCATION_BET_SQL);
 const INSERT_META_SQL = withNewIdSql(INSERT_ALLOCATION_META_SQL);
+/**
+ * 的中確率の下限と、下限で外した買い目の記録(Issue #470)。core の codec の INSERT(exe と共有)には列を足さず、メタ行の INSERT の直後に **1文の UPDATE** で書く
+ * (`mark_repair_json` と同じ流儀)。束縛値の順は min_hit_prob → below_floor_count → missed_json。
+ */
+const UPDATE_MIN_HIT_PROB_SQL = `UPDATE analysis_allocation_meta SET min_hit_prob = ?, below_floor_count = ?, missed_json = ? WHERE analysis_id = ${NEW_ID}`;
 const UPDATE_DETAIL_KEY_SQL = `UPDATE analyses SET detail_key = ${DETAIL_KEY_SQL} WHERE id = ${NEW_ID}`;
 /**
  * 理由(固定文言。Issue #194)・LLM 呼び出しの記録(Issue #197 段2)・印の補修の記録(Issue #317)。core の codec の INSERT(exe と共有)には列を足さず、
@@ -305,6 +311,11 @@ export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: num
   if (rec.allocation !== undefined) {
     statements.push(db.prepare(INSERT_META_SQL).bind(...allocationMetaParams(0, rec.allocation.meta).slice(1)));
     statements.push(db.prepare(INSERT_BETS_SQL).bind(JSON.stringify(rec.allocation.bets.map((b) => allocationBetParams(0, b).slice(1)))));
+    // Issue #470: 下限を持つ記録(meta.minHitProb が定義されている)だけ、UPDATE を足す。持たない記録(旧い呼び出し・テストの手組み)は文を増やさない。
+    const meta = rec.allocation.meta;
+    if (meta.minHitProb !== undefined) {
+      statements.push(db.prepare(UPDATE_MIN_HIT_PROB_SQL).bind(meta.minHitProb, meta.belowFloorCount ?? null, serializeMissed(meta.missed)));
+    }
   }
   return statements;
 }

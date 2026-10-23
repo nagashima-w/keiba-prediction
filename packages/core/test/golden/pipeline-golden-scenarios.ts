@@ -124,6 +124,8 @@ export const ALL_BETS_SETTINGS = {
   includeExactaInAllocation: true,
   includeTrifectaInAllocation: true,
   includeBracketQuinellaInAllocation: true,
+  // Issue #470: 下限なし(0)で生成し、配分の出力そのものが変わらないことを固定する(メタ行に minHitProb・belowFloorCount・missed の3項目が増えるだけ)。
+  minHitProb: 0,
 } as const;
 
 /** 確定的な LLM スタブ。補正は ±5% 刻みで、予想印も決定的に付ける。 */

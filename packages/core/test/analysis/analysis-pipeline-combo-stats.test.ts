@@ -81,6 +81,7 @@ const SETTINGS = {
   bankroll: 300000,
   perRaceCap: 20000,
   kellyFraction: 0.5,
+  minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
   includeComboOdds: true,
   includeWideInAllocation: true,
   includeTrioInAllocation: true,

@@ -38,7 +38,7 @@ export const CACHE_ONLY_TTL: ScrapeTtlConfig = {
 };
 
 /**
- * 設定のスナップショットのうち、配分に使う 10 項目(`runAnalysis` の `allocationSettings`)。発走前の計算ステップ(分析)と、締切の直前の再計算(Issue #338)が**同じ関数**で作る
+ * 設定のスナップショットのうち、配分に使う 11 項目(`runAnalysis` の `allocationSettings`)。発走前の計算ステップ(分析)と、締切の直前の再計算(Issue #338)が**同じ関数**で作る
  * (食い違うと、再計算の配分が分析時の配分と、設定の差で食い違う)。
  */
 export function allocationSettingsOf(settings: CloudSettings): AnalysisAllocationSettings {
@@ -46,6 +46,7 @@ export function allocationSettingsOf(settings: CloudSettings): AnalysisAllocatio
     bankroll: settings.bankroll,
     perRaceCap: settings.perRaceCap,
     kellyFraction: settings.kellyFraction,
+    minHitProb: settings.minHitProb,
     includeComboOdds: settings.includeComboOdds,
     includeWideInAllocation: settings.includeWideInAllocation,
     includeTrioInAllocation: settings.includeTrioInAllocation,

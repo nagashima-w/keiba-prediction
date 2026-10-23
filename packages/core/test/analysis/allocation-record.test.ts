@@ -66,6 +66,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     bankroll: 300000,
     perRaceCap: 20000,
     kellyFraction: 0.5,
+    minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
     evThreshold: 1.0,
     includeComboOdds: true,
     includeWideInAllocation: true,
@@ -289,6 +290,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       bankroll: 100000,
       perRaceCap: 10000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
       includeComboOdds: true,
       includeWideInAllocation: false,
       includeTrioInAllocation: true,
@@ -301,6 +303,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       bankroll: 100000,
       perRaceCap: 10000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       includeComboOdds: true,
       includeWideInAllocation: false,
       includeTrioInAllocation: true,
@@ -322,6 +325,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       bankroll: 999999,
       perRaceCap: 1,
       kellyFraction: 0.9,
+      minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -334,6 +338,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       bankroll: 999999,
       perRaceCap: 1,
       kellyFraction: 0.9,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -360,6 +365,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       bankroll: 55555,
       perRaceCap: 222,
       kellyFraction: 0.15,
+      minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: false,
@@ -372,6 +378,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       bankroll: 55555,
       perRaceCap: 222,
       kellyFraction: 0.15,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: false,
@@ -392,6 +399,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       bankroll: 31000,
       perRaceCap: 700,
       kellyFraction: 0.25,
+      minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -426,6 +434,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 0,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -440,6 +449,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: null,
       modelApproximate: null,
       oddsStatus: "result",
+      belowFloorCount: null, // Issue #470: 配分の計算に到達していないので「判定していない」(null)
+      missed: null,
     });
     expect(rec.bets).toEqual([]);
   });
@@ -460,6 +471,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -474,6 +486,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: null,
       modelApproximate: null,
       oddsStatus: "yoso",
+      belowFloorCount: null, // Issue #470: 配分の計算に到達していないので「判定していない」(null)
+      missed: null,
     });
     expect(rec.bets).toEqual([]);
   });
@@ -494,6 +508,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: false,
       includeWide: true,
@@ -508,6 +523,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: null,
       modelApproximate: null,
       oddsStatus: "result",
+      belowFloorCount: null, // Issue #470: 配分の計算に到達していないので「判定していない」(null)
+      missed: null,
     });
     expect(rec.bets).toEqual([]);
   });
@@ -535,6 +552,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: false,
       includeWide: true,
@@ -551,6 +569,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: "plackett-luce",
       modelApproximate: false,
       oddsStatus: "result",
+      belowFloorCount: 0, // Issue #470: 下限なし(設定が無い)なら外れた候補は0件
+      missed: null,
     });
     // 前提固定: stake>0の明細が実際に1件以上あること(空振り防止)。
     const result = outcome.view.result;
@@ -607,6 +627,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -621,6 +642,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: "plackett-luce",
       modelApproximate: false,
       oddsStatus: "result",
+      belowFloorCount: 0, // Issue #470: 下限なし(設定が無い)なら外れた候補は0件
+      missed: null,
     });
   });
 
@@ -809,6 +832,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -823,6 +847,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: null,
       modelApproximate: null,
       oddsStatus: "result",
+      belowFloorCount: null, // Issue #470: 配分の計算に到達していないので「判定していない」(null)
+      missed: null,
     });
     expect(rec.bets).toEqual([]);
   });
@@ -873,6 +899,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: false,
@@ -887,6 +914,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: null,
       modelApproximate: null,
       oddsStatus: "result",
+      belowFloorCount: null, // Issue #470: 配分の計算に到達していないので「判定していない」(null)
+      missed: null,
     });
     expect(rec.meta.unavailableReason).toBe(outcome.outcome.unavailableReason);
     expect(rec.meta.fallbackReason).toBe(outcome.outcome.fallbackReason);
@@ -922,6 +951,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -936,6 +966,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: "plackett-luce",
       modelApproximate: false,
       oddsStatus: "middle",
+      belowFloorCount: 0, // Issue #470: 下限なし(設定が無い)なら外れた候補は0件
+      missed: null,
     });
   });
 
@@ -965,6 +997,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -979,6 +1012,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: null,
       modelApproximate: null,
       oddsStatus: "middle",
+      belowFloorCount: null, // Issue #470: 配分の計算に到達していないので「判定していない」(null)
+      missed: null,
     });
     expect(rec.bets).toEqual([]);
   });
@@ -1037,6 +1072,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.42,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: false,
       includeWide: true,
@@ -1052,6 +1088,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: "plackett-luce",
       modelApproximate: false,
       oddsStatus: "middle",
+      belowFloorCount: 0, // Issue #470: 下限なし(設定が無い)なら外れた候補は0件
+      missed: null,
     });
     // 値が固定文字列ではなく`AllocationOutcomeCodes`から写っていることを、写し元との一致でも固定する。
     expect(rec.meta.skipReasonCode).toBe(outcome.outcome.skipReasonCode);
@@ -1081,6 +1119,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       bankroll: 300000,
       perRaceCap: 1,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -1095,6 +1134,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelId: "plackett-luce",
       modelApproximate: false,
       oddsStatus: "result",
+      belowFloorCount: 0, // Issue #470: 下限なし(設定が無い)なら外れた候補は0件
+      missed: null,
     });
     expect(rec.meta.skipReasonCode).toBe(outcome.outcome.skipReasonCode);
     expect(rec.bets).toEqual([]); // skipなので明細0件。
@@ -1119,6 +1160,7 @@ describe("buildInvalidAllocationRecordForException(AC6: buildMixedRaceAllocation
       bankroll: 123456,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: false,
@@ -1133,6 +1175,8 @@ describe("buildInvalidAllocationRecordForException(AC6: buildMixedRaceAllocation
       modelId: null,
       modelApproximate: null,
       oddsStatus: "middle",
+      belowFloorCount: null, // Issue #470: 配分の計算に到達していないので「判定していない」(null)
+      missed: null,
     });
     expect(rec.bets).toEqual([]);
   });
@@ -1169,6 +1213,8 @@ function minimalGeneralResult(allocations: readonly GeneralBetAllocation[]): Gen
     modelApproximate: true,
     diagnostics: { inputCandidateCount: allocations.length, truncatedByCapCount: 0, candidateCount: allocations.length, converged: true },
     winOutcome: { kind: "not-requested" },
+    minHitProb: 0,
+    belowFloor: [],
   };
 }
 

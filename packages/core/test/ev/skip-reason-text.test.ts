@@ -17,11 +17,12 @@ import { placeSkipReasonText } from "../../src/ev/bet-allocation.js";
 import { comboSkipReasonText, type SkipReasonCode } from "../../src/ev/combo-bet-allocation.js";
 
 describe("placeSkipReasonText(複勝の見送り理由文言)", () => {
-  it("6分類すべてに対応する文言を返すこと", () => {
+  it("文言が固定の分類(cap-too-small を除く6分類。Issue #470 で below-min-hit-prob を足して7分類中)に対応する文言を返すこと", () => {
     const cases: Array<[SkipReasonCode, string]> = [
       ["bankroll-unset", "総資金が未設定のため配分を提案していません"],
       ["cap-unset", "1レースの上限が未設定のため配分を提案していません"],
       ["kelly-zero", "ケリー係数が0のため配分しません"],
+      ["below-min-hit-prob", "EVプラスの馬はいますが、的中確率が下限に満たないため見送りです"],
       ["no-candidates", "EVプラスの馬がいないため見送りです"],
       ["no-edge", "妙味が小さく、賭ける価値のある配分が見つかりませんでした"],
     ];
@@ -50,7 +51,7 @@ describe("comboSkipReasonText(ワイド・3連複の見送り理由文言)", () 
     );
   });
 
-  it("no-candidates以外の5分類は複勝側と文言が一致すること(文言定数自体は同一値)", () => {
+  it("no-candidates・below-min-hit-prob以外の5分類は複勝側と文言が一致すること(文言定数自体は同一値)", () => {
     const codes: SkipReasonCode[] = [
       "bankroll-unset",
       "cap-unset",
@@ -61,5 +62,13 @@ describe("comboSkipReasonText(ワイド・3連複の見送り理由文言)", () 
     for (const code of codes) {
       expect(comboSkipReasonText(code, 250)).toBe(placeSkipReasonText(code, 250));
     }
+  });
+});
+
+describe("below-min-hit-prob の文言(Issue #470): 複勝は『馬』、組合せは『買い目』", () => {
+  it("リテラルで固定し、両者が異なること(route の取り違えを検出できる)", () => {
+    expect(placeSkipReasonText("below-min-hit-prob", 100)).toBe("EVプラスの馬はいますが、的中確率が下限に満たないため見送りです");
+    expect(comboSkipReasonText("below-min-hit-prob", 100)).toBe("EVプラスの買い目はありますが、的中確率が下限に満たないため見送りです");
+    expect(comboSkipReasonText("below-min-hit-prob", 100)).not.toBe(placeSkipReasonText("below-min-hit-prob", 100));
   });
 });

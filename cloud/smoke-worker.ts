@@ -279,6 +279,7 @@ async function runSmokeAnalysis(): Promise<{ readonly result: Awaited<ReturnType
       bankroll: 1_000_000,
       perRaceCap: 100_000,
       kellyFraction: 0.5,
+      minHitProb: 0.05, // Issue #470: 本番の既定と同じ
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,

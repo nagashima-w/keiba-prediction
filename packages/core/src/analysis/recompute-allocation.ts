@@ -73,6 +73,11 @@ export interface AllocationForRowsInput {
   readonly comboOdds?: RaceData["meta"]["comboOdds"];
   readonly allocationSettings: AnalysisAllocationSettings;
   readonly evConfig?: EvConfig;
+  /**
+   * 的中確率の下限(Issue #470)で外れた買い目について、外さなかった場合の賭け金を記録するか(既定 false)。分析時の保存だけが true にする。
+   * 締切の直前の再計算は false(下限は適用するが、記録のための2回目の配分は呼ばない)。
+   */
+  readonly recordMissed?: boolean;
 }
 
 /** 手順 (6) の結果。 */
@@ -89,7 +94,7 @@ export interface AllocationForRowsResult {
 export function buildAllocationForRows(input: AllocationForRowsInput): AllocationForRowsResult {
   const { odds } = input;
   const evThreshold = (input.evConfig ?? DEFAULT_EV_CONFIG).threshold;
-  const mixedSettings = toMixedAllocationSettings(input.allocationSettings, evThreshold);
+  const mixedSettings = toMixedAllocationSettings(input.allocationSettings, evThreshold, input.recordMissed === true);
   // MixedCandidateBuildInput は条件付き spread で組む(組合せオッズが無い券種はキー自体を持たせない)。
   const raceForAllocation: MixedCandidateBuildInput = {
     oddsStatus: odds.oddsStatus,

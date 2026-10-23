@@ -333,6 +333,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 0, // unset(見送り)を確実に踏む。
         perRaceCap: 0,
         kellyFraction: 0.5,
+        minHitProb: 0.07, // Issue #470: 既定(0.05)と異なる値にして、定数の直書きを検出できるようにする。
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: false,
@@ -361,6 +362,9 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       bankroll: 0,
       perRaceCap: 0,
       kellyFraction: 0.5,
+      minHitProb: 0.07,
+      belowFloorCount: null, // Issue #470: 配分の計算に未到達(unset)なので、外れた件数は判定していない(null)。
+      missed: null,
       evThreshold: 1.2, // evConfig.threshold由来(allocationSettingsには持たせていない)。
       includeComboOdds: true,
       includeWide: true,
@@ -394,6 +398,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 300000,
         perRaceCap: 20000,
         kellyFraction: 0.5,
+        minHitProb: 0.05,
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
@@ -419,6 +424,9 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,
+      minHitProb: 0.05,
+      belowFloorCount: null,
+      missed: null,
       evThreshold: 1.0, // deps.evConfig未指定 → DEFAULT_EV_CONFIG.threshold(1.0)。
       includeComboOdds: true,
       includeWide: true,
@@ -455,6 +463,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 300000,
         perRaceCap: 20000,
         kellyFraction: 0.5,
+        minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -487,6 +496,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 3000000,
         perRaceCap: 3000000,
         kellyFraction: 0.5,
+        minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
@@ -533,6 +543,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 300000,
         perRaceCap: 20000,
         kellyFraction: 0.5,
+        minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -565,6 +576,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 3000000,
         perRaceCap: 3000000,
         kellyFraction: 0.5,
+        minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
@@ -633,6 +645,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 300000,
         perRaceCap: 20000,
         kellyFraction: 0.5,
+        minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -680,6 +693,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 300000,
         perRaceCap: 20000,
         kellyFraction: 0.5,
+        minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -712,6 +726,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 3000000,
         perRaceCap: 3000000,
         kellyFraction: 0.5,
+        minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
@@ -775,6 +790,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         bankroll: 300000,
         perRaceCap: 20000,
         kellyFraction: 0.5,
+        minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -818,6 +834,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
           bankroll: 3000000,
           perRaceCap: 3000000,
           kellyFraction: 0.5,
+          minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
           includeComboOdds: true,
           includeWideInAllocation: true,
           includeTrioInAllocation: false,
@@ -861,5 +878,40 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
     // 枠連オッズの有無で買い目(券種・キー・金額)が完全に一致し、枠連の行は入らない。
     expect(allocWith.bets).toEqual(allocWithout.bets);
     expect(allocWith.bets.filter((b) => b.betType === "bracketQuinella")).toEqual([]);
+  });
+
+  it("Issue #470: runAnalysis は分析時の保存として recordMissed: true と、設定の下限を配分に渡す(core 単独で配線を守る。落とすと外した買い目が記録されなくなる)", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    buildMixedRaceAllocationWithOutcomeMock.mockImplementation((_race: unknown, settings: Record<string, unknown>) => {
+      seen.push(settings);
+      return undefined; // 実物へ素通しする
+    });
+    const saved: AnalysisRecord[] = [];
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      saveAnalysis: (rec) => {
+        saved.push(rec);
+        return 1;
+      },
+      allocationSettings: {
+        bankroll: 300000,
+        perRaceCap: 20000,
+        kellyFraction: 0.5,
+        minHitProb: 0.07,
+        includeComboOdds: false,
+        includeWideInAllocation: true,
+        includeTrioInAllocation: true,
+        includeQuinellaInAllocation: true,
+        includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: true,
+      },
+    };
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
+    expect(seen).toHaveLength(1); // 前提: 配分の計算が1回呼ばれた
+    expect(saved).toHaveLength(1);
+    expect(seen[0]!["recordMissed"]).toBe(true);
+    expect(seen[0]!["minHitProb"]).toBe(0.07);
+    expect(saved[0]!.allocation!.meta.minHitProb).toBe(0.07);
   });
 });

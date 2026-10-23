@@ -52,12 +52,13 @@ import { BET_ALLOCATION_UNSET_NOTE, formatComboBetLabel, placeBetUnavailableMess
 import { formatEv, formatOdds } from "./format.js";
 import { formatYen } from "./verify-format.js";
 
-/** 見送り理由コード(複勝・組合せで共通の6分類。core `SkipReasonCode` の値をそのまま使う)。 */
+/** 見送り理由コード(複勝・組合せで共通の7分類〈Issue #470で below-min-hit-prob を追加〉。core `SkipReasonCode` の値をそのまま使う)。 */
 const KNOWN_SKIP_REASON_CODES: readonly ComboSkipReasonCode[] = [
   "bankroll-unset",
   "cap-unset",
   "cap-too-small",
   "kelly-zero",
+  "below-min-hit-prob",
   "no-candidates",
   "no-edge",
 ];
@@ -425,14 +426,14 @@ function isKnownSkipReasonCode(code: string): code is ComboSkipReasonCode {
  * (`placeSkipReasonText`/`comboSkipReasonText` の実装参照)ため、`betUnit===null` でも
  * 表示に数値が現れない `0` を安全に渡せる。
  *
- * **観測窓は`no-candidates`1つだけ(boss実測・2026-09-03)。** `placeSkipReasonText`と
- * `comboSkipReasonText`は6分類中5分類(`bankroll-unset`/`cap-unset`/`cap-too-small`/
- * `kelly-zero`/`no-edge`)で完全に同一の文言を返し、両者の違いが観測できるのは`no-candidates`
- * (「馬」/「買い目」)だけである。したがって本関数の`route`分岐(`placeSkipReasonText`と
- * `comboSkipReasonText`のどちらを呼ぶか)を守るテストは、実質的に`no-candidates`のケース
- * 一本にしか依存できない。**将来`no-candidates`のテストを整理・削除すると、この`route`分岐は
+ * **観測窓は`no-candidates`と`below-min-hit-prob`の2つだけ(boss実測・2026-09-03。Issue #470で`below-min-hit-prob`が加わり1→2)。** `placeSkipReasonText`と
+ * `comboSkipReasonText`は7分類中5分類(`bankroll-unset`/`cap-unset`/`cap-too-small`/
+ * `kelly-zero`/`no-edge`)で完全に同一の文言を返し、両者の違いが観測できるのは`no-candidates`と`below-min-hit-prob`
+ * (どちらも「馬」/「買い目」)だけである。したがって本関数の`route`分岐(`placeSkipReasonText`と
+ * `comboSkipReasonText`のどちらを呼ぶか)を守るテストは、実質的に`no-candidates`・`below-min-hit-prob`のケース
+ * に依存する。**将来`no-candidates`・`below-min-hit-prob`のテストを整理・削除すると、この`route`分岐は
  * 無防備になる**(他の5分類では place/combo を入れ替えても出力が変わらないため、テストが
- * 検出できない)。`no-candidates`のテストは削除・弱体化しないこと。
+ * 検出できない)。`no-candidates`・`below-min-hit-prob`のテストは削除・弱体化しないこと。
  */
 function skipNotice(
   route: "place-only" | "mixed",

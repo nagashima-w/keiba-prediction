@@ -251,6 +251,8 @@ describe("生成物のドリフトと決定性", () => {
     // 計り方: R-11a の公開時点(050ce5b)の生成物と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った(今の値は `pnpm run build:client` の出力)。ファイル別の内訳は測っていない。
     // 増えたのは、minify されないプロパティ名(`createRaceData` の戻り値 19 個の名前と、deps の 7 個のキー)と、`app.ts` が `data.` 経由で呼ぶ分。取得・追跡の本体は移しただけで増えていない。
     // (追記)Issue #389(#385-B の b): 内訳の節の数の上限 `parseBreakdown` を 8 から 16 に上げた(桁が 1 つ増えた分だけ): 225,758 → 225,759(+1。`pnpm run build:client` の出力〈「225759 バイト」〉)。節の文言はサーバが組み立てるので、クライアントの束は増えない。上限は 228,500 のまま(余裕 2,741 バイト)。
+    // (追記)Issue #470(的中確率の下限): 設定画面に項目 `minHitProb`(ラベル・補助文・エラー文・並び)を足し、見送り理由の分類に below-min-hit-prob(core の文言 2 本と表示の対応表)を足した: 225,785 → 227,001(+1,216。`pnpm run build:client` の出力〈「227001 バイト」〉。
+    // `Buffer.byteLength(CLIENT_JS)`。計り方: 変更前の生成物と今の生成物を、それぞれ文字列として取り出して測った)。上限は 228,500 のまま(余裕 1,499 バイト)。
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(228_500);
   });
 });
@@ -523,7 +525,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   };
 
   const SETTINGS = {
-    evThreshold: 1, additionalInstruction: "", clipVariant: "default", analysisModel: "auto", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, includeComboOdds: false,
+    evThreshold: 1, additionalInstruction: "", clipVariant: "default", analysisModel: "auto", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, minHitProb: 0.05, includeComboOdds: false,
     includeWideInAllocation: true, includeTrioInAllocation: true, includeQuinellaInAllocation: true, includeExactaInAllocation: true, includeTrifectaInAllocation: true,
     includeBracketQuinellaInAllocation: true, preRaceOffsetMinutes: 45,
     // Issue #218・#353: スコアリングの重み15項目(既定値)
@@ -801,13 +803,13 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
   });
 
-  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、30 個の入力欄(既存の 15 + スコアリングの重み 15。textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 30 項目の POST になる(一覧・板は取らない)", async () => {
+  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、31 個の入力欄(既存の 16〈Issue #470 で的中確率の下限を足した〉+ スコアリングの重み 15。textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 30 項目の POST になる(一覧・板は取らない)", async () => {
     const { root, calls } = run("#settings");
     await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
     const fields = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.has("data-field"));
-    expect(fields.length).toBe(30);
-    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", ...Array(15).fill("input"), "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)。重み15項目は input(Issue #218・#353)
+    expect(fields.length).toBe(31);
+    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", "input", ...Array(15).fill("input"), "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)。重み15項目は input(Issue #218・#353)
     const field = (key: string) => fields.find((n) => n.attrs.get("data-field") === key)!;
     expect(field("bankroll").value).toBe("500000");
     expect(field("clipVariant").value).toBe("default"); // select は option を入れたあとに value が設定される

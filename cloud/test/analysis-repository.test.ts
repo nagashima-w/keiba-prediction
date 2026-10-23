@@ -880,3 +880,76 @@ describe("listAnalyzedRaceIdsByPromptVersion(版別の分析済みレース)", (
     }
   });
 });
+
+describe("的中確率の下限と、下限で外した買い目の記録(Issue #470。meta.minHitProb・belowFloorCount・missed)", () => {
+  const MISSED = [
+    { betType: "trio", comboKey: "010203", hitProb: 0.0125, odds: 260.2, ev: 3.25, wouldStake: 900 },
+    { betType: "exacta", comboKey: "1308", hitProb: 0.03, odds: 83.6, ev: 2.5, wouldStake: 200 },
+  ];
+  function withFloor(i: number, over: { minHitProb?: number; belowFloorCount?: number | null; missed?: typeof MISSED | null }): AnalysisRecord {
+    const base = mkRecord(i, 2, 1);
+    return { ...base, allocation: { ...base.allocation!, meta: { ...base.allocation!.meta, ...over } } };
+  }
+  /** 発行された文と束縛値を記録する偽の DB(文の形だけを見る)。 */
+  function fake(): { db: AnalysisDb; statements: { sql: string; binds: unknown[] }[] } {
+    const statements: { sql: string; binds: unknown[] }[] = [];
+    const db = {
+      prepare(sql: string) {
+        const statement = { sql, binds: [] as unknown[] };
+        statements.push(statement);
+        return {
+          bind(...values: unknown[]) {
+            statement.binds = values;
+            return this;
+          },
+        };
+      },
+    } as unknown as AnalysisDb;
+    return { db, statements };
+  }
+  type FloorRow = { min_hit_prob: number | null; below_floor_count: number | null; missed_json: string | null };
+  async function floorRow(id: number): Promise<FloorRow> {
+    return (await local.db.prepare("SELECT min_hit_prob, below_floor_count, missed_json FROM analysis_allocation_meta WHERE analysis_id = ?").bind(id).first<FloorRow>())!;
+  }
+
+  it("保存の文: 下限を持つ記録は、メタ行の INSERT と買い目の INSERT の後に UPDATE が1文増える(束縛値は 下限・外れた件数・JSON)。下限を持たない記録は文が増えない", () => {
+    const withIt = fake();
+    buildSaveStatements(withIt.db, withFloor(1, { minHitProb: 0.05, belowFloorCount: 2, missed: MISSED }), YM);
+    const update = withIt.statements[withIt.statements.length - 1]!;
+    expect(update.sql).toMatch(/^UPDATE analysis_allocation_meta SET min_hit_prob = \?, below_floor_count = \?, missed_json = \? WHERE analysis_id = \(SELECT max\(id\) FROM analyses\)$/);
+    expect(update.binds).toEqual([0.05, 2, JSON.stringify(MISSED.map((m) => ({ bet_type: m.betType, combo_key: m.comboKey, hit_prob: m.hitProb, odds: m.odds, ev: m.ev, would_stake: m.wouldStake })))]);
+    const without = fake();
+    buildSaveStatements(without.db, mkRecord(1, 2, 1), YM);
+    expect(without.statements.some((st) => /min_hit_prob/.test(st.sql))).toBe(false);
+    expect(withIt.statements.length).toBe(without.statements.length + 1);
+  });
+
+  it("D1 に保存して読み戻す: 下限・外れた件数・外した買い目(JSON)が、同じメタ行に入る。json_each で券種別に集計できる", async () => {
+    const saved = await store().saveAnalysis(withFloor(1, { minHitProb: 0.05, belowFloorCount: 2344, missed: MISSED }));
+    const row = await floorRow(saved.id);
+    expect(row.min_hit_prob).toBe(0.05);
+    expect(row.below_floor_count).toBe(2344);
+    expect(JSON.parse(row.missed_json!)).toHaveLength(2);
+    const agg = await local.db
+      .prepare("SELECT json_extract(j.value, '$.bet_type') AS bt, sum(json_extract(j.value, '$.would_stake')) AS s FROM analysis_allocation_meta m, json_each(m.missed_json) j WHERE m.analysis_id = ? GROUP BY 1 ORDER BY 1")
+      .bind(saved.id)
+      .all<{ bt: string; s: number }>();
+    expect(agg.results).toEqual([{ bt: "exacta", s: 200 }, { bt: "trio", s: 900 }]);
+    // 買い目の表には影響しない(賭け金が付いた行だけ・件数はそのまま)
+    expect(await count("analysis_bets")).toBe(1);
+  });
+
+  it("3通りを区別して保存する: 記録なし(NULL)・外れたが賭け金なし('[]')・あり。件数 0(外れなし)と NULL(未到達)も区別できる", async () => {
+    const none = await floorRow((await store().saveAnalysis(withFloor(1, { minHitProb: 0, belowFloorCount: 0, missed: null }))).id);
+    expect(none).toEqual({ min_hit_prob: 0, below_floor_count: 0, missed_json: null });
+    const empty = await floorRow((await store().saveAnalysis(withFloor(2, { minHitProb: 0.05, belowFloorCount: 7, missed: [] }))).id);
+    expect(empty).toEqual({ min_hit_prob: 0.05, below_floor_count: 7, missed_json: "[]" });
+    const unreached = await floorRow((await store().saveAnalysis(withFloor(3, { minHitProb: 0.05, belowFloorCount: null, missed: null }))).id);
+    expect(unreached).toEqual({ min_hit_prob: 0.05, below_floor_count: null, missed_json: null });
+  });
+
+  it("旧い記録(minHitProb を持たない)は、3列とも NULL のまま(記録なし)", async () => {
+    const old = await floorRow((await store().saveAnalysis(mkRecord(9, 2, 1))).id);
+    expect(old).toEqual({ min_hit_prob: null, below_floor_count: null, missed_json: null });
+  });
+});

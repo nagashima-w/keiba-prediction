@@ -115,7 +115,7 @@ export interface AnalysisPipelineDeps {
    */
   readonly saveAnalysis: (record: AnalysisRecord) => unknown;
   /**
-   * 配分提案(Issue #59)を計算するための設定(10項目。`evThreshold`を含まない——EV閾値は
+   * 配分提案(Issue #59)を計算するための設定(11項目。Issue #470で的中確率の下限 `minHitProb` を足して10→11。`evThreshold`を含まない——EV閾値は
    * `evConfig ?? DEFAULT_EV_CONFIG`から導出し二重ソースを作らない。#59 3節)。
    * `null`は「この呼び出しでは配分計算をしない」という明示的な選択を表す(required-nullable。
    * optionalにしないことで、構築側〈クラウド版は cloud/src/race-day-core.ts。旧 exe では pipeline-deps.ts(#287 で削除。3c1664e まで)〉に選択を強制する。#59着手前ゲート)。
@@ -644,6 +644,8 @@ export async function runAnalysis(
       comboOdds: race.meta.comboOdds,
       allocationSettings: deps.allocationSettings,
       evConfig: deps.evConfig,
+      // Issue #470: 分析時の保存は、下限で外れた買い目の「外さなかった場合の賭け金」も記録する。
+      recordMissed: true,
     });
     allocation = computed.allocation;
     comboStats = computed.comboStats;

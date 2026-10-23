@@ -46,6 +46,7 @@ export const FIELD_ORDER: readonly FieldKey[] = [
   "bankroll",
   "perRaceCap",
   "kellyFraction",
+  "minHitProb",
   "additionalInstruction",
   "clipVariant",
   "analysisModel",
@@ -102,6 +103,7 @@ const ERROR_TEXT: Readonly<Record<FieldKey, (draftValue: DraftValue) => string>>
   bankroll: () => "0以上100,000,000以下の整数を入力してください(半角。0は未設定を表し、配分提案を出しません)。",
   perRaceCap: () => "0以上10,000,000以下の整数を入力してください(半角。0は未設定を表し、配分提案を出しません)。",
   kellyFraction: () => `${KELLY_FRACTION_WRITE_MIN}以上1以下の数値を入力してください(半角)。`,
+  minHitProb: () => "0以上1以下の数値を入力してください(半角。0は下限なし)。",
   includeComboOdds: () => "チェックの状態が不正です。",
   includeWideInAllocation: () => "チェックの状態が不正です。",
   includeTrioInAllocation: () => "チェックの状態が不正です。",
@@ -290,6 +292,7 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
   bankroll: { kind: "text", label: BET_ALLOCATION_LABELS.bankroll, help: `${BET_ALLOCATION_LABELS.bankrollHelp}。0 以上 100,000,000 以下の整数(円)。0 のままだと配分の提案は出ません。`, inputmode: "numeric" },
   perRaceCap: { kind: "text", label: BET_ALLOCATION_LABELS.perRaceCap, help: "1レースで使う金額の上限(円)。0 以上 10,000,000 以下の整数。0 のままだと配分の提案は出ません。", inputmode: "numeric" },
   kellyFraction: { kind: "text", label: BET_ALLOCATION_LABELS.kellyFraction, help: "0.05〜1(既定 0.5)。小さいほど1回あたりの配分額が控えめになり、資産変動が穏やかになります。", inputmode: "decimal" },
+  minHitProb: { kind: "text", label: "この的中確率未満の買い目は買わない(既定 0.05)", help: "0〜1。EVがプラスでも、的中確率がこの値未満の買い目は配分の候補から外します(全券種)。0 にすると外しません。", inputmode: "decimal" },
   additionalInstruction: {
     kind: "textarea",
     label: "プロンプト追加指示(任意)",

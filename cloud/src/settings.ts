@@ -8,6 +8,7 @@ import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "./pre-race-time.js";
  * exe は #287 で削除した。最後に残っているコミットは 3c1664e)。exe を削除した後は **web の既定値を正とする**(ユーザー決定 2026-10-13)。
  * 上のテストは、削除の直前に両者が一致していた値をリテラルで固定していて、既定値を変えるときはそのリテラルも意図して書き換える。
  *  - `bankroll`・`perRaceCap` は既定 0(配分提案を出さない opt-in。exe と同じ)。ユーザーが値を決めたら、D1 の行に入れる。
+ *  - `minHitProb`(的中確率の下限。Issue #470)は既定 0.05。項目の無い旧い行も 0.05 で読む(保存し直さなくても、デプロイ時点から効く)。0〜1 で、0 は下限なし。
  *  - `includeComboOdds`(組合せオッズの取得)は既定 OFF(オプトイン)。OFF なら、組合せの券種は配分に入らない(exe と同じ)。
  *  - 各券種の `include*InAllocation` は既定 ON。
  *  - `preRaceOffsetMinutes`(発走何分前に評価するか。Issue #189)は **cloud 専用の項目**(exe には無い)。既定 45 分は `pre-race-time.ts` の定数と同じ値(定義は1か所)。
@@ -86,6 +87,12 @@ export interface CloudSettings extends Readonly<Record<ScoringWeightField, numbe
   readonly perRaceCap: number;
   /** ケリー係数(0〜1)。 */
   readonly kellyFraction: number;
+  /**
+   * 的中確率の下限(0〜1。Issue #470)。EV プラスでも、的中確率がこの値**未満**の買い目は配分の候補から外す(全券種に一律。ちょうど下限は残る)。
+   * 0 は下限なし。外した買い目は、外さなかった場合の賭け金とともに記録する(`analysis_allocation_meta.missed_json`)。
+   * 既定 0.05(ユーザー決定 2026-10-23。#468 の調査で、確率 0.05 未満の買い目は 86 件のうち的中が 0 件だった)。項目の無い旧い行も 0.05 で読む。
+   */
+  readonly minHitProb: number;
   /** ワイド・3連複・馬連・馬単・三連単〈中央・地方。地方は Issue #283 から〉・枠連のオッズを取得するか。 */
   readonly includeComboOdds: boolean;
   readonly includeWideInAllocation: boolean;
@@ -107,6 +114,7 @@ export const DEFAULT_CLOUD_SETTINGS: CloudSettings = {
   bankroll: 0,
   perRaceCap: 0,
   kellyFraction: 0.5,
+  minHitProb: 0.05,
   includeComboOdds: false,
   includeWideInAllocation: true,
   includeTrioInAllocation: true,
@@ -203,6 +211,8 @@ export const CLOUD_SETTINGS_RULES: { readonly [K in keyof CloudSettings]: FieldR
   bankroll: rule(D.bankroll, numberWhere((n) => Number.isInteger(n) && n >= 0 && n <= BANKROLL_MAX)),
   perRaceCap: rule(D.perRaceCap, numberWhere((n) => Number.isInteger(n) && n >= 0 && n <= PER_RACE_CAP_MAX)),
   kellyFraction: rule(D.kellyFraction, numberWhere((n) => n >= 0 && n <= 1), numberWhere((n) => n >= KELLY_FRACTION_WRITE_MIN && n <= 1)),
+  // Issue #470: 的中確率の下限。読む側と書く側で同じ述語(0〜1。0 は下限なし)。
+  minHitProb: rule(D.minHitProb, numberWhere((n) => n >= 0 && n <= 1)),
   includeComboOdds: rule(D.includeComboOdds, isBoolean),
   includeWideInAllocation: rule(D.includeWideInAllocation, isBoolean),
   includeTrioInAllocation: rule(D.includeTrioInAllocation, isBoolean),

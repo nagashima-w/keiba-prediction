@@ -160,6 +160,9 @@ const BASE: CloudSettings = {
   bankroll: 1_000_000,
   perRaceCap: 100_000,
   kellyFraction: 0.5,
+  // Issue #470: このファイルは地方の三連単の取得の段階と、買い目に三連単が入ること・入らないことを調べる。既定の下限(0.05)は三連単の買い目をほぼ全て外すので、下限なしにする
+  // (下限そのものは min-hit-prob 系のテストと race-day-close.test.ts が調べる)。
+  minHitProb: 0,
   includeComboOdds: true,
   baseScoreWeightJockey: 0,
 };

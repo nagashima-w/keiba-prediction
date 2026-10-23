@@ -134,14 +134,17 @@ import {
   determineSkipReasonCode,
   foldOutcomeIndexSetsBySignature,
   foldToCandidateSubsets,
+  isBelowMinHitProb,
   isUsableOdds,
   resolveBankroll,
   resolveBetUnit,
   resolveEffectivePerRaceCap,
   resolveGreedySteps,
   resolveKellyFraction,
+  resolveMinHitProb,
   roundStakes,
   runGreedyAllocation,
+  type BelowFloorBet,
   type OutcomeIndexSet,
   type SkipReasonCode,
 } from "./allocation-primitives.js";
@@ -158,7 +161,7 @@ export { CONDITIONAL_BERNOULLI_MODEL, DEFAULT_EV_CONFIG };
  * 注意: これは Issue #57 で削除した「未使用の re-export シム」とは別物(削除すれば `analysis/mixed-race-allocation.ts` が
  * コンパイルできない=使用される re-export)。詳細は `bet-allocation.ts` の同種コメント参照。
  */
-export type { SkipReasonCode };
+export type { BelowFloorBet, SkipReasonCode };
 
 // ============================================================================
 // 汎用エンジン(券種非依存)
@@ -519,6 +522,15 @@ export interface AllocationCandidate {
   readonly ev: number;
   /** EVプラス判定。falseの候補は最適化対象から除外される。 */
   readonly isPositive: boolean;
+  /**
+   * 的中確率(Issue #470。0〜1の有限値)。候補ビルダーが計算済みの値をそのまま運ぶ(`ev/odds`への
+   * 丸めの往復をしない)。**的中確率の下限(`GeneralBetAllocationConfig.minHitProb`)の判定に使う。**
+   * 省略時は `ev / odds` で代用する(手組みの候補・既存テスト向け。本番の候補は、複勝〈`buildMixedCandidates`〉も組合せ・単勝のビルダーもすべて運ぶ。
+   * 割り戻しは浮動小数点の誤差で境界がずれる〈0.05 × 20.6 ÷ 20.6 = 0.049999999999999996〉ので、本番では使わない)。複勝は入力の複勝圏内確率
+   * (`adjustedProb`)で、配分の内部が同時分布から導く周辺確率(`GeneralBetAllocation.hitProb`)とは、
+   * モデルの乖離の分だけ異なりうる。
+   */
+  readonly hitProb?: number;
 }
 
 /**
@@ -585,6 +597,13 @@ export interface GeneralBetAllocationConfig {
    * (6360)を上回るため通常は発動しない。
    */
   readonly candidateCap: number;
+  /**
+   * 的中確率の下限(Issue #470。0〜1)。EVプラスでも的中確率(`AllocationCandidate.hitProb`。無ければ `ev/odds`)が
+   * この値**未満**の候補は、最適化の対象から外す(ちょうど下限は残る。候補capの選抜より前)。
+   * 省略・0は下限なし。非有限・負は0、1超は1へ解決する。本番の既定値(0.05)は設定(cloud の `minHitProb`)の側にあり、
+   * coreの既定は下限なし。
+   */
+  readonly minHitProb?: number;
 }
 
 /** 既定の券種一般配分設定。数値既定値は allocation-primitives.ts を参照し二重定義しない。 */
@@ -643,7 +662,7 @@ export interface GeneralBetAllocationDiagnostics {
    * 0でない場合は、候補数が想定を超える異常な状態(データ生成バグ等)を疑うべき。
    */
   readonly truncatedByCapCount: number;
-  /** 実際に最適化に載せた候補数(= min(inputCandidateCount, candidateCap))。 */
+  /** 実際に最適化に載せた候補数(= min(inputCandidateCount − 的中確率の下限で外れた件数〈Issue #470。`GeneralBetAllocationResult.belowFloor`〉, candidateCap))。 */
   readonly candidateCount: number;
   /**
    * 貪欲逐次配分が「収束」(増分の最大値が0以下になり自然停止)したか。
@@ -742,6 +761,14 @@ export interface GeneralBetAllocationResult {
    *  そのような候補が無い呼び出しは常に`{kind:"not-requested"}`
    *  (既存の複勝・ワイド・三連複専用呼び出しへの非破壊性)。 */
   readonly winOutcome: WinOutcome;
+  /** 実際に適用した的中確率の下限(Issue #470。`config.minHitProb` を解決した後の値。0=下限なし)。 */
+  readonly minHitProb: number;
+  /**
+   * 下限(`minHitProb`)で外れた、EVプラスの買い目(Issue #470。最適化の対象になる券種のみ。
+   * 順序付きoutcomeが判定不能で最初から除外された候補は含めない。馬番配列の辞書順)。
+   * 下限なし(0)なら常に空。`allocations` には入らない(賭け金を付ける対象ではないため)。
+   */
+  readonly belowFloor: readonly BelowFloorBet[];
 }
 
 /** 見送り理由(券種一般。決定3: 語は「買い目」に統一)。 */
@@ -749,6 +776,7 @@ const REASON_BANKROLL_UNSET = "総資金が未設定のため配分を提案し�
 const REASON_CAP_UNSET = "1レースの上限が未設定のため配分を提案していません";
 const REASON_KELLY_ZERO = "ケリー係数が0のため配分しません";
 const REASON_NO_CANDIDATES = "EVプラスの買い目がないため見送りです";
+const REASON_BELOW_MIN_HIT_PROB = "EVプラスの買い目はありますが、的中確率が下限に満たないため見送りです";
 const REASON_NO_EDGE = "妙味が小さく、賭ける価値のある配分が見つかりませんでした";
 
 function buildCapTooSmallReason(betUnit: number): string {
@@ -773,6 +801,8 @@ export function comboSkipReasonText(code: SkipReasonCode, betUnit: number): stri
       return buildCapTooSmallReason(betUnit);
     case "kelly-zero":
       return REASON_KELLY_ZERO;
+    case "below-min-hit-prob":
+      return REASON_BELOW_MIN_HIT_PROB;
     case "no-candidates":
       return REASON_NO_CANDIDATES;
     case "no-edge":
@@ -1061,7 +1091,19 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
         `不正な買い目です: evは有限値である必要があります(umabans=${umabans.join(",")}, ev=${ev})`,
       );
     }
+    // hitProb(Issue #470)。下限の判定に使うので、NaN/範囲外を黙って通すと「下限未満」の判定が
+    // 偽になり(NaN < x は常にfalse)、下限を素通りする。
+    if (candidate.hitProb !== undefined && !(Number.isFinite(candidate.hitProb) && candidate.hitProb >= 0 && candidate.hitProb <= 1 + 1e-9)) {
+      throw new Error(
+        `不正な買い目です: hitProbは0以上1以下(浮動小数点の誤差1e-9を許す)の有限値である必要があります(umabans=${umabans.join(",")}, hitProb=${candidate.hitProb})`,
+      );
+    }
   }
+}
+
+/** 候補の的中確率(Issue #470)。`hitProb` があればそれ、無ければ `ev / odds`。 */
+function candidateHitProb(c: AllocationCandidate): number {
+  return c.hitProb ?? c.ev / c.odds;
 }
 
 /**
@@ -1187,7 +1229,15 @@ export function allocateGeneralBets(
   const effectivePerRaceCap = resolveEffectivePerRaceCap(perRaceCapInput, betUnit);
 
   // isPositiveな候補だけを対象にする(bet-allocation.tsのStep1と同じ思想)。
-  const positiveCandidates = candidatesForOptimization.filter((c) => c.isPositive);
+  const evPositiveCandidates = candidatesForOptimization.filter((c) => c.isPositive);
+  // Issue #470: 的中確率が下限未満の候補は、候補cap・最適化の対象から外す(「未満」。ちょうど下限は残る)。
+  // 外した候補は結果の `belowFloor` に残す(記録用。賭け金を付ける対象ではない)。
+  const minHitProb = resolveMinHitProb(config.minHitProb);
+  const positiveCandidates = evPositiveCandidates.filter((c) => !isBelowMinHitProb(candidateHitProb(c), minHitProb));
+  const belowFloor: BelowFloorBet[] = evPositiveCandidates
+    .filter((c) => isBelowMinHitProb(candidateHitProb(c), minHitProb))
+    .sort((a, b) => compareUmabansLex(a.umabans, b.umabans))
+    .map((c) => ({ betType: c.betType, umabans: c.umabans, hitProb: candidateHitProb(c), odds: c.odds, ev: c.ev }));
 
   // 候補cap: EV降順・同値は馬番配列の辞書順で選抜する(決定5)。
   const rankedForCap = [...positiveCandidates].sort(compareCandidatesForCap);
@@ -1364,6 +1414,7 @@ export function allocateGeneralBets(
         kellyTargetStake,
         kellyFraction,
         finalCandidates.length,
+        belowFloor.length,
       )
     : null;
   const skipReason = skipReasonCode === null ? null : comboSkipReasonText(skipReasonCode, betUnit);
@@ -1393,12 +1444,14 @@ export function allocateGeneralBets(
     modelId: model.id,
     modelApproximate: model.approximate,
     diagnostics: {
-      inputCandidateCount: positiveCandidates.length,
+      inputCandidateCount: evPositiveCandidates.length,
       truncatedByCapCount,
       candidateCount: finalCandidates.length,
       converged,
     },
     winOutcome,
+    minHitProb,
+    belowFloor,
   };
 }
 
@@ -1741,7 +1794,7 @@ export function buildComboCandidates(
       notPositiveCount++;
       continue;
     }
-    candidates.push({ betType, umabans: combo, odds: resolution.odds, ev, isPositive: true });
+    candidates.push({ betType, umabans: combo, odds: resolution.odds, ev, isPositive: true, hitProb });
   }
 
   return {
@@ -1866,7 +1919,7 @@ export function buildQuinellaCandidates(
       notPositiveCount++;
       continue;
     }
-    candidates.push({ betType: "quinella", umabans: combo, odds: resolution.odds, ev, isPositive: true });
+    candidates.push({ betType: "quinella", umabans: combo, odds: resolution.odds, ev, isPositive: true, hitProb });
   }
 
   return {
@@ -2008,7 +2061,7 @@ export function buildExactaCandidates(
       notPositiveCount++;
       continue;
     }
-    candidates.push({ betType: "exacta", umabans: pair, odds: resolution.odds, ev, isPositive: true });
+    candidates.push({ betType: "exacta", umabans: pair, odds: resolution.odds, ev, isPositive: true, hitProb });
   }
 
   return {
@@ -2159,7 +2212,7 @@ export function buildTrifectaCandidates(
       notPositiveCount++;
       continue;
     }
-    candidates.push({ betType: "trifecta", umabans: triple, odds: resolution.odds, ev, isPositive: true });
+    candidates.push({ betType: "trifecta", umabans: triple, odds: resolution.odds, ev, isPositive: true, hitProb });
   }
 
   return {
@@ -2327,7 +2380,7 @@ export function buildBracketQuinellaCandidates(
       notPositiveCount++;
       continue;
     }
-    candidates.push({ betType: "bracketQuinella", umabans: pair, odds: resolution.odds, ev, isPositive: true });
+    candidates.push({ betType: "bracketQuinella", umabans: pair, odds: resolution.odds, ev, isPositive: true, hitProb });
   }
 
   return {
@@ -2470,7 +2523,7 @@ export function buildWinCandidates(
       notPositiveCount++;
       continue;
     }
-    candidates.push({ betType: "win", umabans: [h.umaban], odds, ev, isPositive: true });
+    candidates.push({ betType: "win", umabans: [h.umaban], odds, ev, isPositive: true, hitProb: winProb });
   }
 
   return {

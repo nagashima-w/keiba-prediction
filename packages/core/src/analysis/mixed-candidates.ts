@@ -445,6 +445,9 @@ function buildPlaceCandidates(race: MixedCandidateBuildInput): {
       odds: row.placeOddsMin,
       ev: row.ev,
       isPositive: true,
+      // 的中確率(Issue #470)。入力の複勝圏内確率をそのまま運ぶ: 下限の判定を `ev / odds` の割り戻しに任せると、浮動小数点の誤差で
+      // ちょうど下限の値が下限を割り(例: 0.05 × 20.6 ÷ 20.6 = 0.049999999999999996)、複勝のみの経路(`placeProb` で判定)と結論が食い違う。
+      hitProb: row.adjustedProb,
     });
   }
   return {

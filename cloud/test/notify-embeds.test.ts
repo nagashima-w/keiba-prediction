@@ -568,6 +568,7 @@ describe("buildAnalysisNotificationEmbed(Issue #230: 買い目の field)", () =>
       ["複勝が配分の対象外(unavailable)", allocationRecord({ route: "unavailable", unavailableReason: "not-sold" }), "unavailable", "複勝が配分の対象外のため、配分の提案は出ていません"],
       ["配分の計算でエラー(invalid)", allocationRecord({ route: "invalid" }), "invalid", "配分の計算でエラーが起きたため、配分の提案は出ていません"],
       ["見送り: 期待値の見込める買い目なし", allocationRecord({ route: "mixed", skipReasonCode: "no-edge" }), "skip", "見送り(妙味が小さく、賭ける価値のある配分が見つかりませんでした)"],
+      ["見送り: EVプラスの買い目はあるが、的中確率の下限で全部外れた(Issue #470)", allocationRecord({ route: "mixed", skipReasonCode: "below-min-hit-prob" }), "skip", "見送り(EVプラスの買い目は的中確率が下限に満たず、見送りです)"],
       ["見送り: 理由コードが未知", allocationRecord({ route: "mixed", skipReasonCode: "something-new" }), "skip", "見送り(買い目はありません)"],
       ["判定不能: 見送りの印も買い目も無い", allocationRecord({ route: "place-only" }), "indeterminate", "配分の状態を判定できません"],
       ["判定不能: 未知の route", allocationRecord({ route: "future-route" }), "indeterminate", "配分の状態を判定できません"],
@@ -578,12 +579,12 @@ describe("buildAnalysisNotificationEmbed(Issue #230: 買い目の field)", () =>
       expect(betsField(out)).toEqual({ name: "買い目", value: text });
     });
 
-    it("見送りの理由コード(既知の 6 分類)は、それぞれ別の短い固定文になる", () => {
-      const texts = (["bankroll-unset", "cap-unset", "cap-too-small", "kelly-zero", "no-candidates", "no-edge"] as const).map((code) => {
+    it("見送りの理由コード(既知の 7 分類。Issue #470 で below-min-hit-prob を足した)は、それぞれ別の短い固定文になる", () => {
+      const texts = (["bankroll-unset", "cap-unset", "cap-too-small", "kelly-zero", "below-min-hit-prob", "no-candidates", "no-edge"] as const).map((code) => {
         const out = buildAnalysisNotificationEmbed(withAllocation(allocationRecord({ skipReasonCode: code })), effective, label());
         return betsField(out)!.value;
       });
-      expect(new Set(texts).size).toBe(6);
+      expect(new Set(texts).size).toBe(7);
       for (const t of texts) {
         expect(t.startsWith("見送り(") && t.endsWith(")")).toBe(true);
       }

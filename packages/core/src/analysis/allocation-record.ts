@@ -123,7 +123,7 @@ import type {
 } from "./mixed-race-allocation.js";
 
 /**
- * `AnalysisPipelineDeps.allocationSettings` が持つ10項目(`evThreshold` を含まない)。
+ * `AnalysisPipelineDeps.allocationSettings` が持つ11項目(`evThreshold` を含まない。Issue #470 で的中確率の下限 `minHitProb` を足して10→11)。
  * `evThreshold` は `deps.evConfig ?? DEFAULT_EV_CONFIG` から別途導出し、二重ソースを
  * 作らない(analysis-pipeline.ts 側の責務。#59 3節)。
  *
@@ -175,17 +175,21 @@ export interface AnalysisAllocationSettings {
   readonly includeExactaInAllocation: boolean;
   readonly includeTrifectaInAllocation: boolean;
   readonly includeBracketQuinellaInAllocation: boolean;
+  /** 的中確率の下限(設定の `minHitProb`。Issue #470。0〜1、0は下限なし)。 */
+  readonly minHitProb: number;
 }
 
 /**
- * 10項目の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
- * `buildMixedRaceAllocationWithOutcome` が要求する11項目の `MixedAllocationSettings` を作る。
+ * 11項目(Issue #470前は10項目)の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
+ * `buildMixedRaceAllocationWithOutcome` が要求する12項目の `MixedAllocationSettings`(任意の `recordMissed` を除く)を作る。
  */
 export function toMixedAllocationSettings(
   settings: AnalysisAllocationSettings,
   evThreshold: number,
+  recordMissed = false,
 ): MixedAllocationSettings {
-  return { ...settings, evThreshold };
+  // recordMissed は true のときだけキーを持たせる(false/省略は『記録しない』。既存の合成結果の形を変えない)。
+  return { ...settings, evThreshold, ...(recordMissed ? { recordMissed: true } : {}) };
 }
 
 /** `AllocationOutcomeCodes` を、メタ行のコード6列(routeに加え、comboOddsはwide/trioの2列)へ分解する。 */
@@ -225,6 +229,7 @@ function settingsColumnsOf(
   | "includeExacta"
   | "includeTrifecta"
   | "includeBracketQuinella"
+  | "minHitProb"
 > {
   return {
     bankroll: settings.bankroll,
@@ -238,6 +243,20 @@ function settingsColumnsOf(
     includeExacta: settings.includeExactaInAllocation,
     includeTrifecta: settings.includeTrifectaInAllocation,
     includeBracketQuinella: settings.includeBracketQuinellaInAllocation,
+    minHitProb: settings.minHitProb,
+  };
+}
+
+/**
+ * 下限(Issue #470)で外れた買い目の件数と記録を、メタ行の2項目へ写す。配分の計算に到達しなかった経路
+ * (`outcome.belowFloor` が無い)は、どちらも null(判定していない)。
+ */
+function belowFloorColumnsOf(
+  outcome: MixedRaceAllocationOutcome,
+): Pick<AnalysisAllocationMetaRecord, "belowFloorCount" | "missed"> {
+  return {
+    belowFloorCount: outcome.belowFloor?.count ?? null,
+    missed: outcome.belowFloor?.missed ?? null,
   };
 }
 
@@ -298,6 +317,7 @@ export function buildAllocationRecord(
 ): AnalysisAllocationRecord {
   const codesColumns = codesColumnsOf(outcome.outcome);
   const settingsColumns = settingsColumnsOf(settings);
+  const belowFloorColumns = belowFloorColumnsOf(outcome);
   const { view } = outcome;
 
   switch (view.kind) {
@@ -309,6 +329,7 @@ export function buildAllocationRecord(
         meta: {
           ...codesColumns,
           ...settingsColumns,
+          ...belowFloorColumns,
           betUnit: null,
           greedySteps: null,
           candidateCap: null,
@@ -325,6 +346,7 @@ export function buildAllocationRecord(
         meta: {
           ...codesColumns,
           ...settingsColumns,
+          ...belowFloorColumns,
           betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
           greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
           candidateCap: null, // BetAllocationConfigにcandidateCapは存在しない(暴走ガードは組合せ券種のみ)。
@@ -341,6 +363,7 @@ export function buildAllocationRecord(
         meta: {
           ...codesColumns,
           ...settingsColumns,
+          ...belowFloorColumns,
           betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
           greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
           candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -360,6 +383,7 @@ export function buildAllocationRecord(
         meta: {
           ...codesColumns,
           ...settingsColumns,
+          ...belowFloorColumns,
           betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
           greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
           candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -401,6 +425,8 @@ export function buildInvalidAllocationRecordForException(
       comboOddsWide: null,
       comboOddsTrio: null,
       ...settingsColumnsOf(settings),
+      belowFloorCount: null,
+      missed: null,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,

@@ -341,8 +341,17 @@ describe("skip: KNOWN_SKIP_REASON_CODESの残り4値(bankroll-unset/cap-unset/ke
     },
   );
 
-  it("6分類(cap-too-small/no-candidatesを含む)の見送り文言が互いに異なる値であること(取り違え検出)", () => {
+  it("below-min-hit-prob(Issue #470): 複勝のみは『馬』、混在は『買い目』の文言になり、routeの取り違えを検出できること", () => {
+    const placeOnly = buildAllocationProposalView(allocation({ route: "place-only", skipReasonCode: "below-min-hit-prob", betUnit: 100 }));
+    const mixed = buildAllocationProposalView(allocation({ route: "mixed", skipReasonCode: "below-min-hit-prob", betUnit: 100 }));
+    expect(placeOnly.kind).toBe("skip");
+    expect(placeOnly.notices).toEqual(["EVプラスの馬はいますが、的中確率が下限に満たないため見送りです"]);
+    expect(mixed.notices).toEqual(["EVプラスの買い目はありますが、的中確率が下限に満たないため見送りです"]);
+  });
+
+  it("7分類(cap-too-small/no-candidates/below-min-hit-probを含む)の見送り文言が互いに異なる値であること(取り違え検出)", () => {
     const values = [
+      placeSkipReasonText("below-min-hit-prob", 100),
       placeSkipReasonText("bankroll-unset", 100),
       placeSkipReasonText("cap-unset", 100),
       placeSkipReasonText("cap-too-small", 100),
@@ -350,7 +359,7 @@ describe("skip: KNOWN_SKIP_REASON_CODESの残り4値(bankroll-unset/cap-unset/ke
       placeSkipReasonText("no-candidates", 100),
       placeSkipReasonText("no-edge", 100),
     ];
-    expect(new Set(values).size).toBe(6);
+    expect(new Set(values).size).toBe(7);
   });
 });
 

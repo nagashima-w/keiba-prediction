@@ -1273,7 +1273,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       }
     });
 
-    it("skipReasonの6分類すべてが組合せ経路でも成立すること(文言は『買い目』表現)", () => {
+    it("skipReasonのIssue #470前からの6分類すべてが組合せ経路でも成立すること(文言は『買い目』表現。7つ目の below-min-hit-prob は min-hit-prob-general.test.ts)", () => {
       const r1 = allocateGeneralBets(horses, 3, candidates, {
         ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
         bankroll: 0,
@@ -1365,7 +1365,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       },
     );
 
-    it("6分類のskipReasonCodeが互いに異なる値であること(集合サイズで機械的に固定)", () => {
+    it("Issue #470前からの6分類のskipReasonCodeが互いに異なる値であること(集合サイズで機械的に固定。7つ目は min-hit-prob-general.test.ts)", () => {
       const codes = table.map((t) => t.expectedCode);
       expect(new Set(codes).size).toBe(6);
     });
@@ -1646,7 +1646,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       }
     });
 
-    it("見送り6分類それぞれでisSkip/skipReasonの構造(非nullか否か)が一致すること", () => {
+    it("見送りのIssue #470前からの6分類それぞれでisSkip/skipReasonの構造(非nullか否か)が一致すること", () => {
       const horses: AllocationHorse[] = [
         { umaban: 1, placeProb: 0.6, placeOddsMin: 3, ev: 1.8, isPositive: true },
       ];
@@ -1763,7 +1763,10 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
           perRaceCap: 100000,
         };
         const result = allocateGeneralBets(horses, 3, candidates, config);
-        const { winOutcome, ...rest } = result;
+        // minHitProb・belowFloor は #470 で新設されたフィールド(下限なしの呼び出しでは 0 と空。既存フィールドの値には含まれない)。
+        const { winOutcome, minHitProb, belowFloor, ...rest } = result;
+        expect(minHitProb).toBe(0);
+        expect(belowFloor).toEqual([]);
         expect(rest).toEqual({
           allocations: [
             {
@@ -2754,7 +2757,7 @@ describe("buildWinCandidates(単勝候補ビルダー・#90)", () => {
         result = buildWinCandidates(horses, 3, oddsByUmaban);
       }).not.toThrow();
       expect(result!.candidates).toEqual([
-        { betType: "win", umabans: [1], odds: 10, ev: 10, isPositive: true },
+        { betType: "win", umabans: [1], odds: 10, ev: 10, isPositive: true, hitProb: 1 }, // hitProb は #470 で候補が運ぶようになった
       ]);
     });
   });
@@ -3054,7 +3057,10 @@ describe("allocateGeneralBets: 馬連(quinella)候補の統合(Issue #112・#24-
         { umabans: [1, 2, 3], odds: 5, ev: 2, isPositive: true, betType: "trio" },
       ];
       const result = allocateGeneralBets(horses, 3, candidates, realConfig);
-      const { winOutcome, ...rest } = result;
+      // minHitProb・belowFloor は #470 で新設されたフィールド(下限なしの呼び出しでは 0 と空。既存フィールドの値には含まれない)。
+        const { winOutcome, minHitProb, belowFloor, ...rest } = result;
+        expect(minHitProb).toBe(0);
+        expect(belowFloor).toEqual([]);
       expect(rest).toEqual({
         allocations: [
           {

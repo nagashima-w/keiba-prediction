@@ -11,6 +11,7 @@
 
 import {
   allocateGeneralBets,
+  buildAllocationBetComboKey,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
   type BracketJointModelHorse,
   type EvConfig,
@@ -18,6 +19,8 @@ import {
   type GeneralBetAllocationResult,
   type SkipReasonCode,
 } from "../ev/combo-bet-allocation.js";
+import type { BetAllocationResult } from "../ev/bet-allocation.js";
+import type { AnalysisMissedBetRecord } from "../ev/analysis-store-types.js";
 
 import {
   buildMixedCandidates,
@@ -158,6 +161,17 @@ export interface MixedAllocationSettings extends BetAllocationSettings {
    * (D-2フォールバック規則の条件②③)へ実際に接続した。三連単〈#138→#139〉と同じ切り方)。
    */
   readonly includeBracketQuinellaInAllocation: boolean;
+  /**
+   * 的中確率の下限(設定の `minHitProb`(`cloud/src/settings.ts` の `CloudSettings`)。Issue #470。0〜1、0は下限なし)。
+   * EVプラスでも的中確率がこの値**未満**の買い目は、配分の候補から外す(全券種に一律)。必須: 配線の抜けを型検査で捕まえる。
+   */
+  readonly minHitProb: number;
+  /**
+   * 下限で外れた買い目について、外さなかった場合の賭け金を記録するか(Issue #470。既定 false)。true のときだけ、外れた候補が
+   * 1件以上ある場合に限り、下限なしの配分をもう1回計算する(CPU は下限なしの1回分。候補が減るので下限ありの配分は軽い)。
+   * 分析時の保存だけが true にする。締切の直前の再計算は false(記録しない)。
+   */
+  readonly recordMissed?: boolean;
 }
 
 /**
@@ -406,6 +420,96 @@ export interface MixedRaceAllocationOutcome {
    * D1 の列には対応しない(`AllocationOutcomeCodes` とは別。`combo-stats.ts` が券種ごとの点数に縮めて R2 のスナップショットに残す)。
    */
   readonly candidateDiagnostics?: MixedCandidateDiagnostics;
+  /**
+   * 的中確率の下限(Issue #470)で外れた買い目の記録。配分を実際に計算した経路(mixed・place-only)だけに載る
+   * (unset・yoso・unavailable・invalid は省略=判定していない)。`count` は外れたEVプラスの買い目の数、
+   * `missed` は外さなかった場合に賭け金が付いたもの(`recordMissed` が false、または外れた候補が無ければ null。表し方は
+   * `AnalysisAllocationMetaRecord.missed` を参照)。
+   */
+  readonly belowFloor?: BelowFloorOutcome;
+}
+
+/** 下限で外れた買い目の件数と、外さなかった場合の賭け金の記録(Issue #470)。 */
+export interface BelowFloorOutcome {
+  readonly count: number;
+  readonly missed: readonly AnalysisMissedBetRecord[] | null;
+}
+
+/**
+ * 複勝のみの配分で下限(Issue #470)により外れた買い目を、件数と(`settings.recordMissed` のとき)外さなかった場合の賭け金へ直す。
+ * 外れた候補が無い・`recordMissed` でないときは、下限なしの配分を呼ばない(CPUを使わない)。
+ * 下限なしの配分が(契約上ありえないが)computed でなければ、記録は null(記録できなかった。配分本体は壊さない)。
+ */
+function placeBelowFloorOutcome(
+  race: MixedCandidateBuildInput,
+  settings: MixedAllocationSettings,
+  result: BetAllocationResult,
+): BelowFloorOutcome {
+  const count = result.belowFloor.length;
+  if (count === 0 || settings.recordMissed !== true) {
+    return { count, missed: null };
+  }
+  try {
+    const counterfactual = buildRaceAllocation(race, { ...settings, minHitProb: 0 });
+    if (counterfactual.kind !== "computed") {
+      return { count, missed: null };
+    }
+    const stakeByUmaban = new Map(counterfactual.result.allocations.map((a) => [a.umaban, a.stake]));
+    const missed: AnalysisMissedBetRecord[] = [];
+    for (const b of result.belowFloor) {
+      const wouldStake = stakeByUmaban.get(b.umabans[0]!) ?? 0;
+      if (wouldStake > 0) {
+        missed.push({
+          betType: b.betType,
+          comboKey: buildAllocationBetComboKey("place", b.umabans),
+          hitProb: b.hitProb,
+          odds: b.odds,
+          ev: b.ev,
+          wouldStake,
+        });
+      }
+    }
+    return { count, missed };
+  } catch {
+    return { count, missed: null };
+  }
+}
+
+/**
+ * 混在配分で下限(Issue #470)により外れた買い目を、件数と(`settings.recordMissed` のとき)外さなかった場合の賭け金へ直す。
+ * 外れた候補が無い・`recordMissed` でないときは、下限なしの配分を呼ばない。下限なしの配分が失敗しても(契約上ありえないが)
+ * 本体の配分は壊さず、記録だけ null にする。外さなかった場合の賭け金は、下限なしの配分での同じ買い目(券種+キー)の賭け金。
+ */
+function mixedBelowFloorOutcome(
+  horses: readonly BracketJointModelHorse[],
+  topFinishCount: number,
+  candidates: Parameters<typeof allocateGeneralBets>[2],
+  config: GeneralBetAllocationConfig,
+  settings: MixedAllocationSettings,
+  result: GeneralBetAllocationResult,
+): BelowFloorOutcome {
+  const count = result.belowFloor.length;
+  if (count === 0 || settings.recordMissed !== true) {
+    return { count, missed: null };
+  }
+  try {
+    const counterfactual = allocateGeneralBets(horses, topFinishCount, candidates, { ...config, minHitProb: 0 });
+    const stakeByKey = new Map(
+      counterfactual.allocations.map((a) => [`${a.betType}:${buildAllocationBetComboKey(a.betType, a.umabans)}`, a.stake]),
+    );
+    const missed: AnalysisMissedBetRecord[] = [];
+    for (const b of result.belowFloor) {
+      const betType = b.betType as Parameters<typeof buildAllocationBetComboKey>[0];
+      const comboKey = buildAllocationBetComboKey(betType, b.umabans);
+      const wouldStake = stakeByKey.get(`${b.betType}:${comboKey}`) ?? 0;
+      if (wouldStake > 0) {
+        missed.push({ betType: b.betType, comboKey, hitProb: b.hitProb, odds: b.odds, ev: b.ev, wouldStake });
+      }
+    }
+    return { count, missed };
+  } catch {
+    return { count, missed: null };
+  }
 }
 
 /** 判定に到達していない(null)ことを表す共通の空`AllocationOutcomeCodes`片。 */
@@ -450,6 +554,7 @@ function buildPlaceOnlyFallbackOutcome(
         skipReasonCode: view.result.isSkip ? view.result.skipReasonCode : null,
         comboOdds,
       },
+      belowFloor: placeBelowFloorOutcome(race, settings, view.result),
       ...diagnosticsPart,
     };
   }
@@ -554,10 +659,12 @@ function buildMixedRaceAllocationCore(
     // greedySteps・candidateCapは本タスクのスコープ外(AC22・Issue #36)。既定値をそのまま使う。
     greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
     candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+    minHitProb: settings.minHitProb,
   };
 
   try {
     const result = allocateGeneralBets(horses, mixed.topFinishCount, mixed.candidates, config);
+    const belowFloor = mixedBelowFloorOutcome(horses, mixed.topFinishCount, mixed.candidates, config, settings, result);
     return {
       view: { kind: "mixed", result, topFinishCount: mixed.topFinishCount, diagnostics: mixed.diagnostics },
       outcome: {
@@ -567,6 +674,7 @@ function buildMixedRaceAllocationCore(
         skipReasonCode: result.isSkip ? result.skipReasonCode : null,
         comboOdds,
       },
+      belowFloor,
       candidateDiagnostics: mixed.diagnostics,
     };
   } catch (e) {

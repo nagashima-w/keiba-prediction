@@ -32,6 +32,7 @@ const FULL: CloudSettings = {
   bankroll: 500_000,
   perRaceCap: 50_000,
   kellyFraction: 0.25,
+  minHitProb: 0.12,
   includeComboOdds: true,
   includeWideInAllocation: false,
   includeTrioInAllocation: false,
@@ -72,6 +73,7 @@ describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何
       "bankroll",
       "perRaceCap",
       "kellyFraction",
+      "minHitProb",
       "additionalInstruction",
       "clipVariant",
       "analysisModel",
@@ -79,11 +81,11 @@ describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何
     ]);
   });
 
-  it("設定の全項目 = FIELD_ORDER(15項目)+ WEIGHT_FIELD_ORDER(スコアリングの重み15項目。Issue #218・#353)を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
-    expect(FIELD_ORDER.length).toBe(15);
+  it("設定の全項目 = FIELD_ORDER(16項目。Issue #470で的中確率の下限を足した)+ WEIGHT_FIELD_ORDER(スコアリングの重み15項目。Issue #218・#353)を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
+    expect(FIELD_ORDER.length).toBe(16);
     expect(WEIGHT_FIELD_ORDER.length).toBe(15);
     const all = [...FIELD_ORDER, ...WEIGHT_FIELD_ORDER];
-    expect(new Set(all).size).toBe(30);
+    expect(new Set(all).size).toBe(31);
     expect(all.length).toBe(CLOUD_SETTINGS_KEYS.length);
     expect([...all].sort()).toEqual([...CLOUD_SETTINGS_KEYS].sort());
   });
@@ -177,6 +179,15 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     ["kelly 負", "kellyFraction", "-0.1", false],
     ["kelly 空", "kellyFraction", "", false],
     ["kelly 文字", "kellyFraction", "abc", false],
+    // Issue #470: 的中確率の下限は 0〜1(0 は下限なし)。書く側も読む側と同じ範囲
+    ["minHitProb 0(下限なし)", "minHitProb", "0", true],
+    ["minHitProb 0.05", "minHitProb", "0.05", true],
+    ["minHitProb 1", "minHitProb", "1", true],
+    ["minHitProb 1.0001", "minHitProb", "1.0001", false],
+    ["minHitProb 負", "minHitProb", "-0.01", false],
+    ["minHitProb 空", "minHitProb", "", false],
+    ["minHitProb 文字", "minHitProb", "abc", false],
+    ["minHitProb 全角", "minHitProb", "０．０５", false],
     ["発走何分前 10", "preRaceOffsetMinutes", "10", true],
     ["発走何分前 180", "preRaceOffsetMinutes", "180", true],
     ["発走何分前 9", "preRaceOffsetMinutes", "9", false],
@@ -258,6 +269,7 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     expect(run("perRaceCap", "-1")).toContain("10,000,000");
     expect(run("evThreshold", "0")).toContain("0より大きい");
     expect(run("kellyFraction", "0")).toContain("0.05");
+    expect(run("minHitProb", "1.5")).toContain("0以上1以下");
     expect(run("preRaceOffsetMinutes", "5")).toContain("10");
     expect(run("preRaceOffsetMinutes", "5")).toContain("180");
     expect(run("additionalInstruction", "あ".repeat(2003))).toContain("2,000");
@@ -318,7 +330,7 @@ describe("buildSettingsModel", () => {
     expect(kinds["additionalInstruction"]).toBe("textarea");
     expect(kinds["clipVariant"]).toBe("select");
     expect(kinds["analysisModel"]).toBe("select");
-    for (const key of ["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "preRaceOffsetMinutes"]) {
+    for (const key of ["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "minHitProb", "preRaceOffsetMinutes"]) {
       expect(kinds[key], key).toBe("text");
     }
     const byKey = Object.fromEntries(m.fields.map((f) => [f.key, f]));
@@ -327,6 +339,7 @@ describe("buildSettingsModel", () => {
     expect(byKey["preRaceOffsetMinutes"]!.inputmode).toBe("numeric");
     expect(byKey["evThreshold"]!.inputmode).toBe("decimal");
     expect(byKey["kellyFraction"]!.inputmode).toBe("decimal");
+    expect(byKey["minHitProb"]!.inputmode).toBe("decimal");
     expect(byKey["additionalInstruction"]!.maxlength).toBe("2000");
     expect(byKey["bankroll"]!.maxlength).toBeNull();
   });
@@ -458,7 +471,7 @@ describe("buildSettingsModel", () => {
     expect(idle.fields.every((f) => !f.disabled)).toBe(true);
     const saving = buildSettingsModel(READY_INPUT({ save: { kind: "saving" } }));
     expect(saving.saving).toBe(true);
-    expect(saving.fields.length).toBe(15);
+    expect(saving.fields.length).toBe(16);
     expect(saving.fields.every((f) => f.disabled)).toBe(true);
     const saved = buildSettingsModel(READY_INPUT({ save: { kind: "saved" } }));
     expect(saved.saveNotice).toEqual({ tone: "ok", text: "保存しました。次に実行する発走前の分析から使われます。" });
