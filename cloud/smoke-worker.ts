@@ -279,7 +279,10 @@ async function runSmokeAnalysis(): Promise<{ readonly result: Awaited<ReturnType
       bankroll: 1_000_000,
       perRaceCap: 100_000,
       kellyFraction: 0.5,
-      minHitProb: 0.05, // Issue #470: 本番の既定と同じ
+      // Issue #470: 下限なし(0)。比べる相手の core の golden(`pipeline-golden.json` の noLlmAllBets)は下限 0 で生成してあり、ここを本番の既定(0.05)にすると
+      // 三連複・三連単の買い目がほぼ全て外れて、配分(買い目の数・外れた件数・メタの下限)が golden と食い違う。smoke は workerd 上の runAnalysis が golden と同じ結果になる
+      // ことを確かめるので、golden と同じ固定の条件にする(下限そのものの挙動は vitest のテストが固定している)。
+      minHitProb: 0,
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
