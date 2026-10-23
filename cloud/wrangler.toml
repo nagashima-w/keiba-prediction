@@ -16,7 +16,7 @@ workers_dev = true
 # Version URL / Preview URL は無効にする(Access の掛け忘れ以前に、入口を増やさない)。
 preview_urls = false
 
-# source map はアップロードしない(Issue #460)。wrangler 4.151 で、未設定のときの既定が false から true に変わった
+# source map はアップロードしない(Issue #460)。wrangler 4.150 で、未設定のときの既定が false から true に変わった
 # (約 11.6MB の map が増え、上限は未確認。ソースの中身が Cloudflare 側に渡る範囲も変わる)。従来どおり明示的に止める。
 upload_source_maps = false
 
@@ -30,7 +30,7 @@ enabled = true
 #   発走前の分析(Claude API。ANTHROPIC_API_KEY が登録済みのとき)は、翌日の各レースの発走の N 分前に、日単位の DO のアラームが行う。
 # cron は 2 本(UTC 12:00 = JST 21:00 と UTC 14:00 = JST 23:00。ユーザー判断)。scripts/test/cloud-config-guard.test.ts が `["0 12 * * *", "0 14 * * *"]` ちょうどを固定し、
 # 時刻が scheduled の判別の定数(src/auto-run-plan.ts の FIRST_RUN_JST_HOUR=21・RETRY_RUN_JST_HOUR=23)と一致することも検査する(cron を変えるときは両方を直す)。
-# ★止め方: `[triggers]` を**消すだけでは止まらない**(wrangler は crons が未設定だと schedule を更新せず、登録済みの cron が残る。wrangler 4.147.0 の実装を読んだ結果で、本番では未確認。wrangler を 4.149.0 に上げた Issue #305 で、該当箇所〈crons から schedule を組み立てる分岐〉を 4.147.0 と静的に照合し、4.149.0 でも同じだった。これも本番では未確認)。
+# ★止め方: `[triggers]` を**消すだけでは止まらない**(wrangler は crons が未設定だと schedule を更新せず、登録済みの cron が残る。wrangler 4.147.0 の実装を読んだ結果で、本番では未確認。wrangler を 4.149.0 に上げた Issue #305 で、該当箇所〈crons から schedule を組み立てる分岐〉を 4.147.0 と静的に照合し、4.149.0 でも同じだった。これも本番では未確認。4.151.1 でも、schedule を PUT する分岐〈`if (crons)`〉が 4.149.0 と同一だった〈Issue #465 で静的に照合。これも本番では未確認〉)。
 #   `crons = []`(空配列)にしてデプロイする。ダッシュボードで消しても、次のデプロイで、この toml の内容に戻る(wrangler deploy は toml の crons で schedule を上書きする)。
 #   課金だけを止めるなら Worker の secret `ANTHROPIC_API_KEY` を削除する(netkeiba への取得は続く)。手順は cloud/README.md。
 [triggers]

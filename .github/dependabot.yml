@@ -26,6 +26,16 @@
 #   (実ログ: `Scope: all 2 workspace projects`。PR の変更ファイルに cloud/ が 1 つも無い)。対策として cloud/pnpm-workspace.yaml(`packages: []`)を置いた。
 #   これで cloud/ 自身がルートとして扱われ、cloud/pnpm-lock.yaml が更新される。**効いた**(2026-10-16。cloud の PR #331 が cloud/package.json と cloud/pnpm-lock.yaml を更新して来た)。
 #   フォールバックの案 B(SDK・iconv-lite・cheerio を下の npm の更新から ignore する)は不要になった(docs/current-spec.md「Dependabot」)。
+# ★Issue #465: directories に `/packages/*`(pnpm workspace のメンバー)を並べない。ルート("/")の job が workspace のメンバーの依存まで見て
+#   (2026-10-22 の job ログ: ルートの package.json に無い @anthropic-ai/sdk を「/」の job が拾っていた。PR #326 は「/」だけの job で、
+#   ルートの pnpm-lock.yaml と packages/core/package.json を一緒に更新した)、メンバーの package.json とルートの pnpm-lock.yaml を更新する。
+#   メンバーを別のディレクトリとして並べていた間は、PR #453・#454・#455 でルートの lockfile が更新されなかった。ログで見えた連鎖:
+#   (1) 「/」の job が `pnpm update … --lockfile-only --no-save -r --config.minimum-release-age=4320` で失敗した
+#       (`ERR_PNPM_NO_MATURE_MATCHING_VERSION`: lockfile が固定していた vite 8.3.5 が公開から 3 日に満たない。手元でも再現した。日が経てば解ける)。
+#   (2) 「/packages/core」の job は、中に lockfile が無い(ルートにある)ので pnpm を実行せず、package.json だけを書き換えた PR を作った。
+#   効くかどうかは、この変更が main に入って Dependabot が実際に走るまで確かめられない(未確認。docs/current-spec.md「Dependabot」)。
+#   「/」が失敗した週は core の PR が作られない(lockfile の無い PR よりよい)。cloud だけが成功すると core-cloud-shared は cloud だけの PR になり、
+#   cloud-config-guard.test.ts が赤になる。そのときは手で core 側を揃える。保険の手順は docs/current-spec.md。
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -44,7 +54,6 @@ updates:
   - package-ecosystem: npm
     directories:
       - "/"
-      - "/packages/*"
       - "/cloud"
     target-branch: claude/issue-order-processing-wjgpdd
     schedule:
