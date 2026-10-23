@@ -630,6 +630,25 @@ describe("parseNarComboOdds(三連単の発売中の表示。上限値・0.0。I
     expect(wide.get("0103")).toEqual({ oddsMin: 1.5, oddsMax: 2.5, ninki: null });
   });
 
+  it("中央の発売前で観測した仮の値\"9,999.9\"・\"99,999.9\"(Issue #469)も、共有ヘルパ経由で欠損になり、隣接値は数値のまま残ること(地方では未観測の予防的な変換)", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(
+        narTrifectaHtml([
+          [1, 2, 3, "9,999.9"],
+          [1, 2, 4, "9,999.8"],
+          [1, 3, 2, "99,999.9"],
+          [1, 3, 4, "99,999.8"],
+        ]),
+        "trifecta",
+      ),
+    );
+    expect(odds.size).toBe(4); // 前提固定: 4セルともパースされる
+    expect(odds.get("010203")?.oddsMin).toBeNull();
+    expect(odds.get("010204")?.oddsMin).toBeCloseTo(9999.8, 5);
+    expect(odds.get("010302")?.oddsMin).toBeNull();
+    expect(odds.get("010304")?.oddsMin).toBeCloseTo(99999.8, 5);
+  });
+
   it("上限値は\"0.0\"ではないので、全セルが上限値のページを「全セルが0」の発売なし(unavailable)扱いにしないこと(availableのまま全件null)", () => {
     const result = parseNarComboOdds(
       narTrifectaHtml([

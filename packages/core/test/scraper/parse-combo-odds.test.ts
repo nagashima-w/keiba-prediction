@@ -622,3 +622,129 @@ describe("parseComboOdds(枠連 type=3。Issue #143・#26-D)", () => {
     expect(parseComboOdds(make("0101"), "bracketQuinella").state).toBe("available");
   });
 });
+
+/**
+ * 発売前(`status:"middle"`)の仮の値(桁数が券種ごとに違う上限表示)の欠損化(Issue #469)。
+ *
+ * 2026-10-23 に、土曜の東京1R(race_id=202605040801。応答の`status`は`middle`)を中央の
+ * `api_get_jra_odds.html?race_id=202605040801&type=<type>&action=init` で券種ごとに取得した
+ * 5つの実物をフィクスチャにした。票数がまだ少ない組は、券種ごとの表示桁数の上限で表される:
+ * ワイド・枠連は`9,999.9`、馬連・馬単・三連複は`99,999.9`(三連単の`999,999.9`は#130)。
+ * 実オッズとして読むと期待値が桁外れになり配分が偏る(本番の記録で、ワイドの9999.9が5件買われていた)。
+ *
+ * 券種で分岐させない(#130の裁定): 9999.9・99999.9・999999.9のどれも、どの券種でもnullにする。
+ * 副作用として、馬連・馬単・三連複・三連単の**本物のオッズが丁度9999.9や99999.9のとき**も
+ * nullになる(その組を買い目から外すだけの保守的な側。ワイド・枠連の本物は実測で最大1757.2のため
+ * 衝突しない)。
+ *
+ * 件数の再現: `python3 -I -c "import json;o=json.load(open('fixtures/<ファイル>'))['data']['odds']['<type>'];
+ * print(len(o),sum(1 for v in o.values() if v[0]=='<仮の値>'))"`
+ */
+describe("parseComboOdds(発売前の仮の値9,999.9・99,999.9のnull化。Issue #469)", () => {
+  const CASES = [
+    { name: "ワイド", betType: "wide", file: "odds_wide_presale_202605040801_20261023.json", typeKey: "5", cap: "9,999.9", total: 91, capCount: 21 },
+    { name: "枠連", betType: "bracketQuinella", file: "odds_wakuren_presale_202605040801_20261023.json", typeKey: "3", cap: "9,999.9", total: 34, capCount: 5 },
+    { name: "馬連", betType: "quinella", file: "odds_quinella_presale_202605040801_20261023.json", typeKey: "4", cap: "99,999.9", total: 91, capCount: 34 },
+    { name: "馬単", betType: "exacta", file: "odds_exacta_presale_202605040801_20261023.json", typeKey: "6", cap: "99,999.9", total: 182, capCount: 108 },
+    { name: "三連複", betType: "trio", file: "odds_trio_presale_202605040801_20261023.json", typeKey: "7", cap: "99,999.9", total: 364, capCount: 165 },
+  ] as const;
+
+  function loadRaw(file: string, typeKey: string): Record<string, [string, string, string]> {
+    const parsed = JSON.parse(loadFixture(file)) as {
+      status: string;
+      data: { odds: Record<string, Record<string, [string, string, string]>> };
+    };
+    expect(parsed.status).toBe("middle");
+    return parsed.data.odds[typeKey]!;
+  }
+
+  describe.each(CASES)("$name(type=$typeKey)の実物フィクスチャ", (c) => {
+    it("前提固定: 全組数と仮の値の組数が実測と一致すること(生JSONを直接数える)", () => {
+      const raw = loadRaw(c.file, c.typeKey);
+      expect(Object.keys(raw).length).toBe(c.total);
+      expect(Object.values(raw).filter((v) => v[0] === c.cap).length).toBe(c.capCount);
+    });
+
+    it("仮の値の組のoddsMinだけがnullになり、件数が実測と一致すること。残りは生JSONの数値のままで、人気も保たれること", () => {
+      const raw = loadRaw(c.file, c.typeKey);
+      const odds = expectAvailable(parseComboOdds(loadFixture(c.file), c.betType));
+      expect(odds.size).toBe(c.total);
+
+      const nullKeys = [...odds.entries()].filter(([, cell]) => cell.oddsMin === null).map(([k]) => k);
+      expect(nullKeys.length).toBe(c.capCount);
+      // null になった組が、生JSONで仮の値だった組と一致すること(自己参照を避けるため生JSON側から集合を作る)。
+      const rawCapKeys = Object.entries(raw).filter(([, v]) => v[0] === c.cap).map(([k]) => k);
+      expect(rawCapKeys.length).toBe(c.capCount);
+      for (const key of rawCapKeys) {
+        // 馬単は着順付きキーのため、生キーのまま引ける(ソートされない)。それ以外は昇順の生キーがそのままキー。
+        const cell = odds.get(key);
+        expect(cell).toBeDefined();
+        expect(cell!.oddsMin).toBeNull();
+        expect(cell!.ninki).toBe(Number(raw[key]![2]));
+      }
+      const numericRawEntries = Object.entries(raw).filter(([, v]) => v[0] !== c.cap);
+      expect(numericRawEntries.length).toBe(c.total - c.capCount);
+      for (const [key, v] of numericRawEntries) {
+        expect(odds.get(key)!.oddsMin).toBe(Number(v[0].replace(/,/g, "")));
+      }
+    });
+  });
+
+  it("ワイド: 仮の値の組はoddsMaxもnullになり(上限は\"0\")、本物の組のoddsMaxは数値のまま残ること(0倍は存在しないオッズ。地方の`0.0`と同じ扱い)", () => {
+    const raw = loadRaw("odds_wide_presale_202605040801_20261023.json", "5");
+    const capEntries = Object.entries(raw).filter(([, v]) => v[0] === "9,999.9");
+    expect(capEntries.length).toBe(21);
+    // 前提: 仮の値の組の上限は21組とも"0"(これが0になる経路を試験していることの固定)。
+    expect(capEntries.every(([, v]) => v[1] === "0")).toBe(true);
+
+    const odds = expectAvailable(
+      parseComboOdds(loadFixture("odds_wide_presale_202605040801_20261023.json"), "wide"),
+    );
+    for (const [key] of capEntries) {
+      expect(odds.get(key)).toMatchObject({ oddsMin: null, oddsMax: null });
+    }
+    const realEntries = Object.entries(raw).filter(([, v]) => v[0] !== "9,999.9");
+    expect(realEntries.length).toBe(70);
+    for (const [key, v] of realEntries) {
+      expect(odds.get(key)!.oddsMax).toBe(Number(v[1].replace(/,/g, "")));
+      expect(odds.get(key)!.oddsMax).toBeGreaterThan(0);
+    }
+  });
+
+  describe("合成データ: 3つの仮の値はどの券種でもnullになり、隣の値は数値のまま残ること(券種で分岐しない)", () => {
+    function envelope(typeKey: string, cells: Record<string, [string, string, string]>): string {
+      return JSON.stringify({ status: "middle", reason: "", data: { odds: { [typeKey]: cells } } });
+    }
+
+    it.each([
+      ["wide", "5", "0102", "0103"],
+      ["quinella", "4", "0102", "0103"],
+      ["bracketQuinella", "3", "0102", "0103"],
+      ["exacta", "6", "0102", "0201"],
+      ["trio", "7", "010203", "010204"],
+      ["trifecta", "8", "010203", "010204"],
+    ] as const)("%s: 9,999.9・99,999.9・999,999.9はnull、9,999.8・99,999.8・999,999.8は数値", (betType, typeKey, k1, k2) => {
+      const keys = (n: number): string => (n === 0 ? k1 : k2);
+      const caps = ["9,999.9", "99,999.9", "999,999.9"];
+      const neighbors: [string, number][] = [
+        ["9,999.8", 9999.8],
+        ["99,999.8", 99999.8],
+        ["999,999.8", 999999.8],
+      ];
+      // 仮の値は1件ずつ別のレスポンスにして(同じ券種で複数組を持つため、キーを変えずに値だけ差し替える)確認する。
+      for (const cap of caps) {
+        const odds = expectAvailable(
+          parseComboOdds(envelope(typeKey, { [keys(0)]: [cap, "0", "1"], [keys(1)]: ["5.0", "0", "2"] }), betType),
+        );
+        expect(odds.get(keys(0))!.oddsMin).toBeNull();
+        expect(odds.get(keys(1))!.oddsMin).toBe(5.0);
+      }
+      for (const [text, value] of neighbors) {
+        const odds = expectAvailable(
+          parseComboOdds(envelope(typeKey, { [keys(0)]: [text, "0", "1"], [keys(1)]: ["5.0", "0", "2"] }), betType),
+        );
+        expect(odds.get(keys(0))!.oddsMin).toBeCloseTo(value, 5);
+      }
+    });
+  });
+});

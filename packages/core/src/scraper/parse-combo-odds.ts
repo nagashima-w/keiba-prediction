@@ -44,6 +44,7 @@
  * |---|---|---|---|---|
  * | オッズ文字列(下限・単一値。`cellAt(value,0)`) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(560件中251件がカンマ入り)。`parse-combo-odds.test.ts`「桁区切りカンマ」「非数値の値の解釈」describe。`toOddsNumber` は `parse-odds.ts`・`parse-nar-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts` と共有しており、契約は5モジュール・呼び出し箇所13で統一済み(Issue #73で是正。内訳・再現コマンドはモジュール冒頭JSDoc参照) |
  * | オッズ文字列(上限。`cellAt(value,1)`。ワイドのみ使用) | 同上(`toOddsNumber`) | あり | null化(同上)。3連複はこの列を一切読まず常に`oddsMax=null`固定 | 同上。「3連複の2要素目はダミー」describe |
+ * | 発売前の仮の値(下限・上限とも。9,999.9・99,999.9・999,999.9。Issue #469) | `toComboOddsNumber`(`ODDS_CAP_VALUES`) | あり | null化(丁度その値のときだけ。隣の値は数値のまま。券種で分岐しない。ワイドの上限`0`もnull) | `parse-combo-odds.test.ts`「発売前の仮の値9,999.9・99,999.9のnull化」describe・`combo-bet-allocation-presale-cap.test.ts` |
  * | 人気文字列(`cellAt(value,2)`) | `parseComboOdds`(共有ヘルパ `scraper/ninki.ts` の `toNinki`) | あり | null化(非数値・"0"は欠損表現としてnull。上限は課さない) | `parse-combo-odds.test.ts`「非数値の値の解釈」describe。**`toNinki` は `scraper/ninki.ts` の共有実装であり、単勝・複勝(`parse-odds.ts`)/地方(`parse-nar-odds.ts`)とも同一の契約を使う(Issue #34で統一。契約の詳細・根拠は `scraper/ninki.ts` のJSDoc参照)** |
  * | 馬番(オッズキー由来。例"0102"。枠連は枠番) | `decodeRawKey`(`validateComboUmabansFor`経由。券種の要素の種類・順序方針で検証を振り分ける) | あり | throw(2桁ずつ分解し、馬番の券種は1〜18範囲外・キー長不一致・昇順違反〈"0201"等。馬単・三連単は昇順を要求しない〉を検出。**枠連は枠番1〜8の範囲外・降順を検出し、同枠〈"0101"等〉は許す**〈Issue #143〉) | `parse-combo-odds.test.ts`「構造の検証」describe |
  * | 組の要素数(キー長 / 券種との不一致) | `decodeRawKey` | あり | throw(`COMBO_SIZE`との不一致) | 同上 |
@@ -96,32 +97,45 @@ const JSON_ODDS_KEY: Record<ComboBetType, string> = {
 };
 
 /**
- * 上限キャップ値(#130・#25-D。オーケストレーター裁定2026-09-26)。
+ * 上限キャップ値(仮の値)の集合(#130・#25-D。オーケストレーター裁定2026-09-26。
+ * Issue #469で、桁数の違う2値を足した)。
  *
- * 中央presale(`status:"middle"`)応答では、票数がまだ少ない組合せがこの値
- * ("999,999.9")で表示される(三連単presaleフィクスチャの実測: 3360件中2644件=78.7%。
- * `docs/trifecta-odds-investigation.md` §6.2)。実オッズとして読むとEVが桁外れのプラスに
- * なり配分がそこへ偏るため、欠損(null)として扱う。
+ * 中央presale(`status:"middle"`)応答では、票数がまだ少ない組合せが、**券種ごとの表示桁数の上限**で
+ * 表示される。実測:
+ * - 三連単: `999,999.9`(3360件中2644件=78.7%。`docs/trifecta-odds-investigation.md` §6.2)。
+ * - ワイド・枠連: `9,999.9`、馬連・馬単・三連複: `99,999.9`(2026-10-23、東京1R〈race_id=202605040801〉。
+ *   ワイド91組中21、枠連34組中5、馬連91組中34、馬単182組中108、三連複364組中165。
+ *   `docs/wide-trio-odds-investigation.md` §13・`docs/quinella-exacta-odds-investigation.md` §11・
+ *   `docs/wakuren-odds-investigation.md` §13)。
  *
- * **券種で分岐させない**(裁定の言葉どおり): 組合せ券種共通のパーサである本ファイル
- * (`parseComboOdds`)の中でoddsMin・oddsMaxの両方に一律適用する。単勝・複勝
- * (`parse-odds.ts`・`parse-nar-odds.ts`)や過去走(`parse-horse-results.ts`)が使う
- * 共有ヘルパ`toOddsNumber`自体には入れない(これらの経路で上限値が観測された例が無く、
- * 影響範囲を組合せ券種の外へ広げないため)。地方の組合せパーサ(`parse-nar-combo-odds.ts`)は
+ * 実オッズとして読むと期待値が桁外れのプラスになり、配分がそこへ偏る(本番の記録で、ワイドの9999.9が
+ * 5件買われていた〈Issue #469〉)ため、欠損(null)として扱う。
+ *
+ * **券種で分岐させない**(#130の裁定): 3つの値を、どの券種でも一律にnullにする。
+ * **偽陽性がありうる**: 馬連・馬単・三連複・三連単の**本物のオッズが丁度9999.9や99999.9**のとき
+ * (本物が5桁以上になることは実測にある。三連複67054.9・馬単22595.3・三連単102434.5・地方三連単10598.0)も
+ * nullになり、その組は買い目から外れる。外れるだけで誤った買い目は出ないため、保守的な側に倒れる。
+ * ワイド・枠連の本物は実測で最大1757.2のため、これらの値と衝突しない。
+ *
+ * 組合せ券種共通のパーサである本ファイル(`parseComboOdds`)の中でoddsMin・oddsMaxの両方に一律適用する。
+ * 単勝・複勝(`parse-odds.ts`・`parse-nar-odds.ts`)や過去走(`parse-horse-results.ts`)が使う
+ * 共有ヘルパ`toOddsNumber`自体には入れない(これらの経路で仮の値が観測された例が無く、
+ * 影響範囲を組合せ券種の外へ広げないため。`fixtures/odds_middle_202603020611.json`の単勝・複勝は
+ * 実在する値だった)。地方の組合せパーサ(`parse-nar-combo-odds.ts`)は
  * #130時点では観測例が無く対象外としていたが、**Issue #283(#134の【記録】1件目の回収)で
  * 地方三連単を取得するのに合わせ、本関数(`toComboOddsNumber`)をexportして地方側でも使う**
- * (券種で分岐しない)。地方の発売中の厚いプールでの実物は未観測のため、予防的な変換である。
+ * (券種で分岐しない)。地方の仮の値は未観測(地方フィクスチャ26件のどのセルにも無い)のため、予防的な変換である。
  */
-const ODDS_CAP_VALUE = 999999.9;
+const ODDS_CAP_VALUES: ReadonlySet<number> = new Set([9999.9, 99999.9, 999999.9]);
 
 /**
- * `toOddsNumber`の結果から上限キャップ値をnullに変換する(券種非依存。上記
- * `ODDS_CAP_VALUE`のJSDoc参照)。丁度`ODDS_CAP_VALUE`と一致する場合のみnullにし、
- * 隣接する値(例: 999999.8)はそのまま数値として残す。
+ * `toOddsNumber`の結果から上限キャップ値(仮の値)をnullに変換する(券種非依存。上記
+ * `ODDS_CAP_VALUES`のJSDoc参照)。丁度`ODDS_CAP_VALUES`のどれかと一致する場合のみnullにし、
+ * 隣接する値(例: 9999.8・999999.8)はそのまま数値として残す。
  */
 export function toComboOddsNumber(raw: unknown): number | null {
   const value = toOddsNumber(raw);
-  return value === ODDS_CAP_VALUE ? null : value;
+  return value !== null && ODDS_CAP_VALUES.has(value) ? null : value;
 }
 
 /**
@@ -248,7 +262,11 @@ export function parseComboOdds(json: string, betType: ComboBetType): ComboOddsPa
   for (const [rawKey, value] of Object.entries(combo as Record<string, unknown>)) {
     const umabans = decodeRawKey(rawKey, betType);
     const oddsMin = toComboOddsNumber(cellAt(value, 0));
-    const oddsMax = betType === "wide" ? toComboOddsNumber(cellAt(value, 1)) : null;
+    // ワイドの上限。仮の値の組は上限が"0"で来る(Issue #469。実測: 仮の値21組すべて)。0倍は存在しない
+    // オッズなので欠損(null)にする(地方の単一値セルの`0.0`をnullにする#143と同じ扱い)。
+    // oddsMaxは配分に使われない(配分に渡るのはoddsMinのみ)が、{oddsMin:null, oddsMax:0}の矛盾を残さない。
+    const wideMax = betType === "wide" ? toComboOddsNumber(cellAt(value, 1)) : null;
+    const oddsMax = wideMax === 0 ? null : wideMax;
     const ninki = toNinki(cellAt(value, 2));
     entries.push({ umabans, cell: { oddsMin, oddsMax, ninki } });
   }
