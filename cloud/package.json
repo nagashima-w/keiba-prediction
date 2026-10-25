@@ -37,12 +37,17 @@
     "tsx": "ローカルのスモークテスト(smoke.ts)の実行",
     "@types/node": "テスト・スモークテスト(Node で動く)の型検査。メジャーは CI の Node(ワークフローの node-version。現在 24。Issue #333 で 22 から上げた)に合わせる。Node を上げるときに手で同じメジャーに上げる(Dependabot の semver-major は ignore。scripts/test/cloud-config-guard.test.ts が一致を検査)。Issue #332: 24 以上は workers-types と node の URL 型が衝突して `fileURLToPath(new URL(…))` が TS2345 になるため、test/meta-path.ts の pathFromMeta に置き換えた(26.6.5 で typecheck 0 件を実測)",
     "cheerio": "core の出馬表などのパーサ(parseShutuba 等)が使う(Issue #162 段階2。確認用エンドポイントと、後続の分析で使う)。cloud は workspace の外で packages/core/node_modules が CI に無いため、wrangler.toml の alias・tsconfig の paths・vitest の alias でここから解決させる。バージョンは spikes/cloudflare(Issue #290 で削除済み)と packages/core/package.json の範囲に揃えて固定",
-    "iconv-lite": "core の HttpClient が EUC-JP(db.netkeiba.com の馬ページ等)のデコードに使う。cheerio と同じく alias でここから解決させる。バージョン固定。Issue #324 で 0.6.3 → 0.7.3 に上げた(EUC-JP の変換結果が変わらないことは packages/core/test/scraper/iconv-eucjp-regression.test.ts が更新前の値で固定)。cheerio 経由の推移的な iconv-lite 0.6.3 は lock に残るが、Worker のバンドルでは wrangler.toml の alias により 0.7.3 の 1 つになる"
+    "iconv-lite": "core の HttpClient が EUC-JP(db.netkeiba.com の馬ページ等)のデコードに使う。cheerio と同じく alias でここから解決させる。バージョン固定。Issue #324 で 0.6.3 → 0.7.3 に上げた(EUC-JP の変換結果が変わらないことは packages/core/test/scraper/iconv-eucjp-regression.test.ts が更新前の値で固定)。cheerio 経由の推移的な iconv-lite 0.6.3 は lock に残るが、Worker のバンドルでは wrangler.toml の alias により 0.7.3 の 1 つになる",
+    "undici": "Issue #483: 直接の依存ではなく、pnpm.overrides の `miniflare>undici` と `cheerio>undici` の理由。wrangler → miniflare が undici 7.29.1 を固定で引き(wrangler 4.152.0 の miniflare も 7.29.1 のため、wrangler を上げても直らない)、cheerio 1.2.0 も undici(指定は ^7.19.0)を引き、lock では同じ 7.29.1 だった。7.30.1 未満には high 1 件・moderate 2 件の脆弱性がある(GHSA-xjj6-f33q-929c・GHSA-4qv8-2p9j-2685・GHSA-f72v-6w45-q472。`pnpm audit --ignore-workspace`)。2 つの親は別々に undici を引くので、miniflare だけの指定では cheerio 側が 7.29.1 のまま残る(`miniflare>undici` だけにして lock を作り直して確かめた)。どちらかが 7.30.1 以上を引くようになったら、その親の指定を外してよい(外したあとに `pnpm audit --ignore-workspace` で確かめる)。miniflare はローカルの検証とスモークテストの道具で、本番の Worker の束には入らない。undici は wrangler.toml の [alias] で src/undici-stub.ts に置換される。scripts/test/cloud-config-guard.test.ts が指定を固定する"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
       "workerd"
-    ]
+    ],
+    "overrides": {
+      "cheerio>undici": "^7.30.1",
+      "miniflare>undici": "^7.30.1"
+    }
   }
 }

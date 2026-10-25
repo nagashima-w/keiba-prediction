@@ -17,11 +17,17 @@
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
+  "//pnpm": {
+    "overrides": "Issue #483: packages/core が引く cheerio@1.2.0 の undici(指定は ^7.19.0)が 7.30.1 未満だと、high 1 件・moderate 2 件の脆弱性(GHSA-xjj6-f33q-929c・GHSA-4qv8-2p9j-2685・GHSA-f72v-6w45-q472。`pnpm audit`)に当たる。cheerio の指定の範囲内で 7.30.1 以上にそろえる。`cheerio>undici` は cheerio が引く undici だけに効き、packages/core が直接使う undici 8 系(^8.12.2)には当たらない(親を付けない `undici` の指定は 8 系も 7 系に引き戻すので使わない)。cheerio が 7.30.1 以上を引くようになったら、この指定を外してよい(外したあとに `pnpm audit` で確かめる)。cloud 側の同じ件は cloud/package.json の pnpm.overrides。本番の Worker の束には undici は入らない(cloud/wrangler.toml の [alias] で src/undici-stub.ts に置換される)。scripts/test/cloud-config-guard.test.ts が指定を固定する"
+  },
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "cheerio>undici": "^7.30.1"
+    }
   },
   "packageManager": "pnpm@10.33.0"
 }
