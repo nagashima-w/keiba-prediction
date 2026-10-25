@@ -13,7 +13,7 @@
  *   `GET /api/plan`、`GET /api/targets`(今日の狙い目。Issue #336)、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、`GET /api/monthly-reports`・`/api/monthly-reports/{month}`(月報も見せる。Issue #279)、
  *   `GET /api/verify`(検証。Issue #263。閲覧者の要求は集計のやり直しを起こさない〈キャッシュを返すだけ〉、`refresh` は管理者だけ)、
  *   アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244。{@link ICON_PATHS}。表に無いと閲覧者の画面でアイコンが 403 になる)。
- * それ以外(設定・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・統計モデル用の書き出し〈Issue #266〉・各馬の戦績の蓄積の診断〈Issue #256〉・馬場の API の取得の結果の診断〈Issue #360〉・確認ページと確認 API・health)は管理者だけ。
+ * それ以外(設定・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・統計モデル用の書き出し〈Issue #266〉・各馬の戦績の蓄積の診断〈Issue #256〉・馬場の API の取得の結果の診断〈Issue #360〉・JRA に Worker から届くかの確認〈Issue #488〉・確認ページと確認 API・health)は管理者だけ。
  * 閲覧者が表の外の method(HEAD・POST など)を送ったときは、405 ではなく 403 になる(副作用の有無に関わらず管理者専用)。
  */
 import { ICON_PATHS } from "./icons";
@@ -48,7 +48,7 @@ function exact(path: string, viewerMethods: readonly string[]): RouteRule {
 }
 
 /**
- * 表。完全一致のルートが 31(画面・API・管理者専用が 24、アイコンが 7)、パターンのルートが 3(`/api/analyses/{id}`・`/api/reports/{date}`・`/api/monthly-reports/{month}`)。
+ * 表。完全一致のルートが 32(画面・API・管理者専用が 25、アイコンが 7)、パターンのルートが 3(`/api/analyses/{id}`・`/api/reports/{date}`・`/api/monthly-reports/{month}`)。
  * パターンは、同じ階層の固定の path(`/api/analyses/run`・`/api/reports/run`・`/api/monthly-reports/run`)に化けないよう、`run` を除く。
  */
 export const ROUTE_RULES: readonly RouteRule[] = [
@@ -108,6 +108,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/horse-runs", ADMIN_ONLY),
   // 外部の馬場の API の取得の結果の診断(Issue #360)。取得の時刻・結果の分類・捨てた競馬場の理由を読む(D1 の SELECT だけ。外部の API には出ない)。外部の API の利用の記録なので管理者だけ。GET だけ
   exact("/api/baba-fetch", ADMIN_ONLY),
+  // Worker から JRA のページに届くかの確認(Issue #488)。開くたびに JRA へ 2 回出る(取得を起こす)ので管理者だけ。GET だけ
+  exact("/api/jra/check", ADMIN_ONLY),
 ];
 
 /**

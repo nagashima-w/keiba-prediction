@@ -17,6 +17,7 @@ import { remoteKeys } from "./access-jwt";
 import { authenticate, type AccessContextLike } from "./authenticate";
 import { ANALYSIS_DETAIL_PATTERN, MONTHLY_REPORTS_PREFIX, REPORTS_PREFIX, requiredRole } from "./route-policy";
 import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
+import { runJraCheck, type JraFetchLike } from "./jra-check";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { buildAnalysisView } from "./analysis-view";
 import { CLIENT_JS } from "./client-bundle.generated";
@@ -204,6 +205,10 @@ export interface HandlerDeps {
   readonly keys?: (teamName: string) => JWTVerifyGetKey;
   readonly now?: () => Date;
   readonly log?: (line: string) => void;
+  /** `GET /api/jra/check` が JRA に出る fetch(Issue #488)。省略時は Worker のグローバルの `fetch`。テストで差し替える。 */
+  readonly jraFetch?: JraFetchLike;
+  /** `GET /api/jra/check` の 2 本の間の待ち(ミリ秒)。省略時は `setTimeout`。テストで差し替えて実時間を使わない。 */
+  readonly jraWait?: (ms: number) => Promise<void>;
 }
 
 const SECURITY_HEADERS = {
@@ -254,7 +259,7 @@ function originMismatch(): Response {
 }
 
 /**
- * GET の入口の `Sec-Fetch-Site` の検査(Issue #183・#256・#266・#267・#336・#360 ほか。8 ルートが共有する)。別サイトのページから(ログイン中の利用者のブラウザで)呼ばれて、
+ * GET の入口の `Sec-Fetch-Site` の検査(Issue #183・#256・#266・#267・#336・#360・#488 ほか。9 ルートが共有する)。別サイトのページから(ログイン中の利用者のブラウザで)呼ばれて、
  * D1 の全件走査・DO・netkeiba への取得を起こされるのを拒否する。ブラウザは `Sec-Fetch-Site` を付ける(アドレスバー・ブックマークは `none`、同じオリジンの fetch は `same-origin`)。
  * 付かない非ブラウザのクライアントは通す。拒否するなら 403 の応答、通すなら null。**D1・DO・gate に触れる前に呼ぶ**(順序は各ハンドラの JSDoc と cloud-config-guard.test.ts が固定する)。
  * POST の入口の確認({@link originAllowed}。Origin の完全一致を見て、`none` も通さない)とは別物。
@@ -474,6 +479,14 @@ export async function handle(
     return handleBabaFetch(request, env);
   }
 
+  if (pathname === "/api/jra/check") {
+    // 管理者専用(route-policy.ts)。JRA のページに Worker から届くかを、開いたときだけ 2 回取って要約を返す(D1・DO・R2・netkeiba・LLM には触れない)。GET だけ(HEAD で取得を起こさない)。Issue #488。
+    if (method !== "GET") {
+      return methodNotAllowed("GET");
+    }
+    return handleJraCheck(request, deps);
+  }
+
   if (pathname === "/api/results/backfill") {
     // 読み取り専用(補完の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #217。
     if (method !== "GET") {
@@ -637,6 +650,29 @@ async function handleBabaFetch(request: Request, env: Env): Promise<Response> {
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "baba-fetch-error" } }, 503);
   }
+}
+
+/**
+ * `GET /api/jra/check`(Issue #488〈#477-A1〉。管理者専用): Worker のグローバルの fetch で JRA のページに届くかの確認。
+ * 開いたときだけ、クッション値のページの GET と開催情報の POST を 1 回ずつ(間 1.5 秒以上)取り、状態・本文の大きさ・Content-Type・期待した形が見えたか・中身の短い要約を返す
+ * (jra-check.ts の `runJraCheck`)。**本文もヘッダ全体も返さない**。取得の失敗(403・タイムアウトなど)は結果として 200 の応答に載せる(この確認口自体の成功と、取得の成功は別)。
+ * 取得の起点はここだけ(cron・DO からは呼ばない。cloud-config-guard.test.ts が固定する)。順序は: `Sec-Fetch-Site`(別サイトからなら 403)→ クエリの検査(受け付けない。400)→ JRA への取得。
+ * 別サイトのページから(ログイン中の管理者のブラウザで)呼ばれて、JRA への取得を起こされるのを拒否するため、取得より前に検査する。
+ */
+async function handleJraCheck(request: Request, deps: HandlerDeps): Promise<Response> {
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
+  }
+  const url = new URL(request.url);
+  if (hasInvalidQueryKeys(url, NO_PARAMS)) {
+    return badRequest("このパスにクエリは指定できません");
+  }
+  const result = await runJraCheck({
+    ...(deps.jraFetch === undefined ? {} : { fetch: deps.jraFetch }),
+    ...(deps.jraWait === undefined ? {} : { wait: deps.jraWait }),
+  });
+  return json({ ok: true, ...result });
 }
 
 /** 統計モデル用の書き出しの URL(route-policy.ts と同じ値)。 */

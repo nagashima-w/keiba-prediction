@@ -51,7 +51,7 @@ function stripCode(source: string): string {
 }
 
 /**
- * Issue #397(R-4): GET の入口の `Sec-Fetch-Site` の検査は、handler.ts の `crossSiteRejection(request)` に集約した(8 ルートが共有)。
+ * Issue #397(R-4): GET の入口の `Sec-Fetch-Site` の検査は、handler.ts の `crossSiteRejection(request)` に集約した(9 ルートが共有。Issue #488 で GET /api/jra/check が加わり 8 → 9)。
  * 各ハンドラの本体には、この呼び出しと「結果を返す」形が**1 回だけ**あり、**D1・DO・gate に触れる記述より前**にあることを検査する(旧版は本体の `sec-fetch-site` の文字列の位置で検査していた)。
  * 検査の中身(`sec-fetch-site`・`same-origin`・`"none"`・`origin-mismatch`・403)はヘルパー自体の検査(下の「crossSiteRejection」のテスト)が持つ。
  */
@@ -1396,14 +1396,16 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     const enclosing = (index: number): string => functionStarts.filter((f) => f.index <= index).at(-1)!.name;
     const siteReaders = [...code.matchAll(/"sec-fetch-site"/g)].map((m) => enclosing(m.index!));
     expect(siteReaders.sort()).toEqual(["crossSiteRejection", "originAllowed"]);
-    // 呼び出し箇所: 8 つで、関数名の一覧が固定(handleRaces を含む)
+    // 呼び出し箇所: 9 つで、関数名の一覧が固定(handleRaces を含む)
+    // 【Issue #488で改訂】旧: 8 つ(handleJraCheck を含まない)。JRA への到達の確認 GET /api/jra/check が加わり 9 つになった。保証していたことは変わらない
+    // (呼び出し箇所の関数名の一覧が完全に固定で、新しい入口が検査なしに増えると赤になる)。handleJraCheck の順序(取得より前)は下の Issue #488 のテストが持つ。
     const callers = [...code.matchAll(/\bcrossSiteRejection\(request\)/g)].map((m) => enclosing(m.index!));
-    expect(callers.sort()).toEqual(["handleBabaFetch", "handleCheck", "handleHorseRuns", "handlePlan", "handlePriorExport", "handleRaces", "handleTargets", "handleVerify"]);
-    expect(callers).toHaveLength(8);
-    // handleRaces(GET が netkeiba に出る): DO を呼ぶ前に検査する(他の 7 つは各ハンドラの検査が持つ)
+    expect(callers.sort()).toEqual(["handleBabaFetch", "handleCheck", "handleHorseRuns", "handleJraCheck", "handlePlan", "handlePriorExport", "handleRaces", "handleTargets", "handleVerify"]);
+    expect(callers).toHaveLength(9);
+    // handleRaces(GET が netkeiba に出る): DO を呼ぶ前に検査する(他の 8 つは各ハンドラの検査が持つ)
     expectCrossSiteCheckFirst("handleRaces", bodyOf("async function handleRaces("), ["raceDayStub(", ".getRaceList("]);
-    // 対照(検出の確認。空振りでない): 呼び出しを足した本文は 9 つに数える。インラインの検査は「sec-fetch-site を読む関数」に数えられる
-    expect(((code + "\nasync function handleX(request: Request) {\n  crossSiteRejection(request);\n}").match(/\bcrossSiteRejection\(request\)/g) ?? []).length).toBe(9);
+    // 対照(検出の確認。空振りでない): 呼び出しを足した本文は 10 に数える(旧: 9)。インラインの検査は「sec-fetch-site を読む関数」に数えられる
+    expect(((code + "\nasync function handleX(request: Request) {\n  crossSiteRejection(request);\n}").match(/\bcrossSiteRejection\(request\)/g) ?? []).length).toBe(10);
     expect([...(code + '\nfunction handleY(request: Request) {\n  request.headers.get("sec-fetch-site");\n}').matchAll(/"sec-fetch-site"/g)]).toHaveLength(3);
     expect(() => expectCrossSiteCheckFirst("結果を返さない", "async function f(request: Request) {\n  crossSiteRejection(request);\n  env.DB;\n}", ["env.DB"])).toThrow();
   });
@@ -1955,6 +1957,82 @@ describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所�
       .filter((l) => !l.trim().startsWith("--"))
       .join("\n");
     expect([...sql.matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1])).toEqual(["baba_fetches", "baba_conditions"]);
+  });
+});
+
+describe("Issue #488(#477-A1): JRA に Worker から届くかの確認は、管理者が確認口を開いたときだけ。取得の部品は 1 ファイル、起点は handler.ts の 1 箇所で、cron・DO からは呼ばない", () => {
+  const srcDir = path.join(ROOT, "cloud", "src");
+  const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
+  const code = (f: string): string => stripCode(readTextLf("cloud", "src", f));
+  const sites = (pattern: RegExp): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const f of srcFiles) {
+      const n = (code(f).match(pattern) ?? []).length;
+      if (n > 0) out[f] = n;
+    }
+    return out;
+  };
+
+  it("前提: 取得の部品と入口を実際に読めている(以降の検査が空振りでない)", () => {
+    expect(srcFiles.length).toBeGreaterThan(30);
+    expect(code("jra-check.ts").length).toBeGreaterThan(2000);
+    expect(code("handler.ts")).toContain("async function handleJraCheck(");
+  });
+
+  it("JRA の URL(jra.go.jp)を持つ cloud/src のファイルは jra-check.ts だけ。jra-check・runJraCheck・JRA_CHECK を参照するのは jra-check.ts と handler.ts だけ(scheduled・worker・DO・段階は参照しない)", () => {
+    expect(sites(/jra\.go\.jp/g)).toEqual({ "jra-check.ts": 2 }); // 取得先の URL 2 本
+    expect(Object.keys(sites(/jra-check|runJraCheck|JRA_CHECK|JRA_CUSHION|JRA_ACCESS/g)).sort()).toEqual(["handler.ts", "jra-check.ts"]);
+    // 取得の部品を import するのは handler.ts の 1 箇所だけ。runJraCheck の呼び出し(定義は数えない)も handler.ts の 1 箇所だけ
+    expect(sites(/from\s*"\.\/jra-check"/g)).toEqual({ "handler.ts": 1 });
+    expect(sites(/(?<!function\s)\brunJraCheck\(/g)).toEqual({ "handler.ts": 1 });
+  });
+
+  it("グローバルの fetch を呼ぶのは jra-check.ts の 1 箇所(注入できる既定)だけ。handler.ts は fetch( を呼ばない(注入された jraFetch を渡すだけ)", () => {
+    expect((code("jra-check.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
+    expect((code("handler.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(0);
+    expect(code("handler.ts")).not.toMatch(/\.fetch\(/);
+  });
+
+  it("取得は 1 本ずつ 1 回(再試行しない)・リダイレクトを追わない・間をあける: fetchFn の呼び出しは fetchOne の中の 1 箇所、fetchOne の呼び出しは 2 回で、その間に wait(JRA_CHECK_GAP_MS) があり、間隔は 1.5 秒以上", () => {
+    const c = code("jra-check.ts");
+    expect(c).toContain('redirect: "manual"');
+    expect((c.match(/await fetchFn\(/g) ?? []).length).toBe(1);
+    expect((c.match(/(?<!function\s)\bfetchOne\(/g) ?? []).length).toBe(2);
+    const first = c.indexOf("await fetchOne(fetchFn, JRA_CUSHION_URL");
+    const wait = c.indexOf("await wait(JRA_CHECK_GAP_MS)");
+    const second = c.indexOf("fetchOne(", wait);
+    expect(first).toBeGreaterThan(-1);
+    expect(wait).toBeGreaterThan(first);
+    expect(second).toBeGreaterThan(wait);
+    expect(c.slice(second, second + 60)).toContain("JRA_ACCESS_URL");
+    const gap = /export const JRA_CHECK_GAP_MS = ([\d_]+);/.exec(c);
+    expect(gap).not.toBeNull();
+    expect(Number(gap![1]!.replaceAll("_", ""))).toBeGreaterThanOrEqual(1500);
+    // 再試行の仕組みが無い
+    expect(c).not.toMatch(/retry|リトライ|attempt/i);
+  });
+
+  it("入口 GET /api/jra/check の関数(handleJraCheck)は、取得より前に Sec-Fetch-Site とクエリ(受け付けない: NO_PARAMS)を検査する。D1・DO・R2・gate・netkeiba・LLM・Webhook・env に触れない", () => {
+    const handler = code("handler.ts");
+    const start = handler.indexOf("async function handleJraCheck(");
+    expect(start).toBeGreaterThan(-1);
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(400); // 前提: 本体を実際に読めている(空振りでない)
+    expectCrossSiteCheckFirst("handleJraCheck", body, ["hasInvalidQueryKeys(", "runJraCheck("]);
+    expect(body).toContain("hasInvalidQueryKeys(url, NO_PARAMS)");
+    expect(body.indexOf("hasInvalidQueryKeys(")).toBeLessThan(body.indexOf("runJraCheck("));
+    for (const forbidden of ["env", "NETKEIBA_GATE", "RACE_DAY", "RESULT_BACKFILL", "CLOUD_MIGRATION", "VERIFY_REPORT", "PRIOR_EXPORT", "ANALYSIS_DETAIL", ".DB", ".fetchRaw(", ".prepare(", ".batch(", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "fetch("]) {
+      expect(body, `handleJraCheck に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    expect((handler.match(/\bhandleJraCheck\(/g) ?? []).length).toBe(2); // 定義 1 + 呼び出し 1
+    // 対照(検出の確認。空振りでない): 取得の後に検査する本体は「前」の検査を満たさない
+    const bad = "async function handleJraCheck(request: Request, deps: HandlerDeps) {\n  await runJraCheck({});\n  const crossSite = crossSiteRejection(request);\n  if (crossSite !== null) {\n    return crossSite;\n  }\n  hasInvalidQueryKeys(x, NO_PARAMS);\n}";
+    expect(() => expectCrossSiteCheckFirst("bad", bad, ["runJraCheck("])).toThrow();
+  });
+
+  it("ルートの表では管理者専用(閲覧者に開かない)。ルートの文字列は handler.ts と route-policy.ts に 1 つずつ", () => {
+    expect((code("handler.ts").match(/"\/api\/jra\/check"/g) ?? []).length).toBe(1);
+    expect((code("route-policy.ts").match(/exact\("\/api\/jra\/check", ADMIN_ONLY\)/g) ?? []).length).toBe(1);
   });
 });
 
