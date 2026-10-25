@@ -1836,7 +1836,14 @@ describe("Issue #279・#280: 月報(MonthlyReportDO)は netkeiba に出ず、LLM
   });
 });
 
-describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所だけで読み、core・純ロジックは外向きの通信も URL も持たず、D1 の書き込みは 3 文だけ", () => {
+/**
+ * 【Issue #478で改訂】旧(#294): 外部の API の URL を secret の 1 箇所(race-day-do.ts)だけで読み、取得口は baba-fetch.ts の 1 ファイル。
+ * 新: 取得先は JRA のページで、secret は無い。保証していた「取得口を作るのは race-day-do.ts の 1 箇所だけ」「グローバルの fetch を呼ぶのは取得口の 1 箇所(注入できる既定)だけで、
+ * core・段階・純ロジック・保存先には外向きの通信が無い」「リダイレクトを追わない・再試行の仕組みが無い」「馬場のソースに URL のリテラルが無い〈宛先は取得の部品〉」「D1 の書き込みは 3 文だけ」
+ * 「取得の段階を使うのは core だけ」「他の DO・cron は参照しない」は、対象を新しいファイル(jra-http.ts・jra-baba-fetch.ts・jra-baba-parse.ts)に替えて維持する。
+ * 旧 `BABA_API_URL` の検査は「どのソースにも現れない」に反転した(secret を外した後に配線が戻らないことを固定する)。
+ */
+describe("Issue #294・#478: 馬場の取得は JRA のページから、取得口は日単位の DO の 1 箇所だけで作り、core・純ロジックは外向きの通信も URL も持たず、D1 の書き込みは 3 文だけ", () => {
   const srcDir = path.join(ROOT, "cloud", "src");
   const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
   const code = (f: string): string => stripCode(readTextLf("cloud", "src", f));
@@ -1849,46 +1856,69 @@ describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所�
     return out;
   };
   /** 馬場の API に関わるソース(取得の部品・純ロジック・保存先・段階)。 */
-  const babaSources = ["baba-conditions.ts", "baba-fetch.ts", "baba-repository.ts", "race-day-baba.ts"];
+  const babaSources = ["baba-conditions.ts", "jra-baba-parse.ts", "jra-baba-fetch.ts", "baba-repository.ts", "race-day-baba.ts"];
 
   it("前提: 馬場のソースと core を実際に読めている(以降の検査が空振りでない)", () => {
-    for (const f of [...babaSources, "race-day-core.ts", "race-day-do.ts"]) {
+    for (const f of [...babaSources, "jra-http.ts", "race-day-core.ts", "race-day-do.ts"]) {
       expect(code(f).length, `${f} を読めている`).toBeGreaterThan(500);
     }
   });
 
-  it("secret の名前 BABA_API_URL が現れるのは race-day-do.ts だけ(型の宣言 1 + 形式の確認 1 + 取得口の作成 1 + 形式不正の警告の文言 1)。ほかのソースには現れない。wrangler.toml の [vars] にも置かない", () => {
-    expect(sites(/\bBABA_API_URL\b/g)).toEqual({ "race-day-do.ts": 4 });
-    expect((code("race-day-do.ts").match(/\benv\.BABA_API_URL\b/g) ?? []).length).toBe(2);
-    expect(code("race-day-do.ts")).toContain("fetchBaba: createBabaFetcher(env.BABA_API_URL)");
+  it("外部の API の secret BABA_API_URL は、cloud/src のどのファイルにも現れない。wrangler.toml の [vars] にも、deploy-cloud.yml にも置かない。取得口の配線の行は race-day-do.ts の 1 行", () => {
+    expect(sites(/\bBABA_API_URL\b/g)).toEqual({});
+    expect(code("race-day-do.ts")).toContain("fetchBaba: createJraBabaFetcher()");
+    expect((code("race-day-do.ts").match(/\bfetchBaba:/g) ?? []).length).toBe(1);
     expect(tomlCode).not.toMatch(/BABA/);
+    expect(readTextLf(".github", "workflows", "deploy-cloud.yml")).not.toMatch(/BABA/);
   });
 
-  it("取得口を作る createBabaFetcher の呼び出しは race-day-do.ts の 1 箇所だけ", () => {
-    expect(sites(/(?<!function\s)\bcreateBabaFetcher\(/g)).toEqual({ "race-day-do.ts": 1 });
+  it("取得口を作る createJraBabaFetcher の呼び出しは race-day-do.ts の 1 箇所だけ。fetchBaba を使うのは core(段階へ渡す)と DO(配線)だけ", () => {
+    expect(sites(/(?<!function\s)\bcreateJraBabaFetcher\(/g)).toEqual({ "race-day-do.ts": 1 });
+    expect(Object.keys(sites(/\bfetchBaba\b/g)).sort()).toEqual(["race-day-core.ts", "race-day-do.ts"]);
   });
 
-  it("グローバルの fetch を呼ぶのは baba-fetch.ts の 1 箇所(注入できる既定)だけ。core・段階・純ロジック・保存先には外向きの通信が無い", () => {
-    expect((code("baba-fetch.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
-    for (const f of ["baba-conditions.ts", "baba-repository.ts", "race-day-baba.ts", "race-day-core.ts"]) {
+  it("グローバルの fetch を呼ぶのは jra-baba-fetch.ts の 1 箇所(注入できる既定)だけ。jra-http.ts・core・段階・純ロジック・保存先には外向きの通信が無い", () => {
+    expect((code("jra-baba-fetch.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
+    for (const f of ["jra-http.ts", "baba-conditions.ts", "jra-baba-parse.ts", "baba-repository.ts", "race-day-baba.ts", "race-day-core.ts"]) {
       expect((code(f).match(/(^|[^.\w])fetch\(/g) ?? []).length, `${f} にグローバルの fetch が無い`).toBe(0);
       expect(code(f), `${f} に .fetch( が無い`).not.toMatch(/\.fetch\(/);
     }
   });
 
-  it("リダイレクトを追わない(redirect: manual)。再試行の仕組み(retry・リトライのループ)を持たない: 取得口の fetch は 1 回の呼び出しに 1 回", () => {
-    const fetchCode = code("baba-fetch.ts");
-    expect(fetchCode).toContain('redirect: "manual"');
-    expect((fetchCode.match(/await fetchFn\(/g) ?? []).length).toBe(1);
-    expect(fetchCode).not.toMatch(/\b(for|while)\b[^\n]*fetchFn/);
+  it("各 1 回・再試行なし・リダイレクトを追わない・間を 1.5 秒以上あける・タイムアウト 10 秒: fetchFn の呼び出しは jra-http.ts の fetchOne の中の 1 箇所、fetchOne の呼び出しは jra-baba-fetch.ts の page() の中の 1 箇所、page() の呼び出しは 5 箇所で URL はどれも別", () => {
+    const http = code("jra-http.ts");
+    expect(http).toContain('redirect: "manual"');
+    expect((http.match(/await fetchFn\(/g) ?? []).length).toBe(1);
+    expect(http).not.toMatch(/retry|リトライ|attempt/i);
+    expect(http).not.toMatch(/\b(for|while)\b[^\n]*fetchFn/);
+    expect(Number(/export const JRA_GAP_MS = ([\d_]+);/.exec(http)?.[1]?.replaceAll("_", ""))).toBeGreaterThanOrEqual(1500);
+    expect(/export const JRA_TIMEOUT_MS = ([\d_]+);/.exec(http)?.[1]?.replaceAll("_", "")).toBe("10000");
+    const baba = code("jra-baba-fetch.ts");
+    expect(baba).not.toMatch(/retry|リトライ|attempt/i);
+    expect((baba.match(/(?<!function\s)\bfetchOne\(/g) ?? []).length).toBe(1);
+    // 待ちは page() の中で、最初の 1 本を除く各本の前に 1 回。fetchOne より前にある
+    const pageStart = baba.indexOf("const page = async");
+    const waitAt = baba.indexOf("await wait(JRA_GAP_MS)", pageStart);
+    const fetchAt = baba.indexOf("await fetchOne(", pageStart);
+    expect(pageStart).toBeGreaterThan(-1);
+    expect(waitAt).toBeGreaterThan(pageStart);
+    expect(fetchAt).toBeGreaterThan(waitAt);
+    expect((baba.match(/await wait\(/g) ?? []).length).toBe(1);
+    // page() の呼び出し 5 箇所(クッション値・含水率・開催情報・コースの 1 本目・コースの 2 本目以降)。コースの 2 本目以降の繰り返しは、定数 3 本までの有限の for
+    const calls = [...baba.matchAll(/await page\(([^,]+),/g)].map((m) => m[1]!.trim());
+    expect(calls).toEqual(["JRA_CUSHION_URL", "JRA_MOIST_URL", "JRA_ACCESS_URL", "jraCourseUrl(1)", "jraCourseUrl(n)"]);
+    expect(baba).toContain("const MAX_COURSE_PAGES = 3;");
+    expect(baba).toContain("n <= count");
+    expect(baba).toContain("Math.min(firstCourse.tabs.length, MAX_COURSE_PAGES)");
+    expect((baba.match(/\b(for|while)\b/g) ?? []).length).toBe(1);
   });
 
-  it("馬場のソースに URL のリテラル(http(s)://…)が無い。外部の API の宛先は secret にだけある", () => {
+  it("馬場のソースに URL のリテラル(http(s)://…)が無い。JRA の宛先は jra-http.ts にだけある", () => {
     for (const f of babaSources) {
       expect(code(f), `${f} に URL のリテラルが無い`).not.toMatch(/https?:\/\//);
     }
     for (const f of ["race-day-core.ts"]) {
-      expect(code(f), `${f} に馬場の API の URL が無い`).not.toMatch(/baba[^\n]*https?:\/\//i);
+      expect(code(f), `${f} に馬場の URL が無い`).not.toMatch(/baba[^\n]*https?:\/\//i);
     }
   });
 
@@ -1917,13 +1947,13 @@ describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所�
     expect(pick).toBeGreaterThan(baba);
   });
 
-  it("他の DO・cron・日報・月報は、馬場の API の取得を参照しない(アラームは DO ごとに 1 つ。干渉しない)。入口(handler.ts)と ルートの表(route-policy.ts)は診断の入口 /api/baba-fetch だけが例外(次のテスト)", () => {
-    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["race-day-core.ts", "race-day-do.ts", "race-day-plan.ts", "handler.ts", "route-policy.ts"].includes(n))) {
-      expect(code(f), `${f} は馬場の API を参照しない`).not.toMatch(/baba-(conditions|fetch|repository)|race-day-baba|BabaStage|BABA_API_URL/);
+  it("他の DO・cron・日報・月報は、馬場の取得を参照しない(アラームは DO ごとに 1 つ。干渉しない)。入口(handler.ts)と ルートの表(route-policy.ts)は診断の入口 /api/baba-fetch だけが例外(次のテスト)", () => {
+    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["jra-http.ts", "jra-check.ts", "race-day-core.ts", "race-day-do.ts", "race-day-plan.ts", "handler.ts", "route-policy.ts"].includes(n))) {
+      expect(code(f), `${f} は馬場の取得を参照しない`).not.toMatch(/baba-(conditions|fetch|repository)|jra-baba|jra-http|race-day-baba|BabaStage|BABA_API_URL|createJraBabaFetcher/);
     }
   });
 
-  it("Issue #360: 診断の入口 GET /api/baba-fetch の関数(handleBabaFetch)は、D1 に触れる前に Sec-Fetch-Site を見る。baba-repository の読み出し(loadFetches)だけを使い、外部の API・取得口・段階・URL の secret・取得・LLM・Webhook・DO・R2・書き込みに触れない。handler.ts と route-policy.ts が馬場について参照するのはこの入口だけ", () => {
+  it("Issue #360: 診断の入口 GET /api/baba-fetch の関数(handleBabaFetch)は、D1 に触れる前に Sec-Fetch-Site を見る。baba-repository の読み出し(loadFetches)だけを使い、JRA・取得口・段階・取得・LLM・Webhook・DO・R2・書き込みに触れない。handler.ts と route-policy.ts が馬場について参照するのはこの入口だけ", () => {
     const handler = code("handler.ts");
     const start = handler.indexOf("async function handleBabaFetch(");
     expect(start).toBeGreaterThan(-1);
@@ -1939,16 +1969,12 @@ describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所�
     const imports = [...handler.matchAll(/import\s*\{([^}]*)\}\s*from\s*"\.\/baba-repository"/g)].map((m) => m[1]!.replace(/\s+/g, " ").trim());
     expect(imports).toEqual(["D1BabaStore, FETCH_LIST_LIMIT_DEFAULT"]);
     const strip = (text: string): string => text.replaceAll("/api/baba-fetch", "").replaceAll("baba-fetch-error", "").replaceAll("./baba-repository", "");
-    expect(strip(handler), "handler.ts は、診断の入口(ルートの文字列・エラーの種類名・baba-repository の import)のほかに取得の部品を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|race-day-baba|BabaStage|BABA_API_URL|createBabaFetcher/);
-    expect(strip(code("route-policy.ts")), "route-policy.ts は、ルートの文字列のほかに馬場を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|race-day-baba|BabaStage|BABA_API_URL/);
+    expect(strip(handler), "handler.ts は、診断の入口(ルートの文字列・エラーの種類名・baba-repository の import)のほかに取得の部品を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|jra-baba|jra-http|race-day-baba|BabaStage|BABA_API_URL|createJraBabaFetcher/);
+    expect(strip(code("route-policy.ts")), "route-policy.ts は、ルートの文字列のほかに馬場を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|jra-baba|jra-http|race-day-baba|BabaStage|BABA_API_URL/);
     // 対照(検出の確認。空振りでない): 検査より後に D1 に触れる本体は「前」の検査を満たさない
     const bad = 'async function handleBabaFetch(request: Request, env: Env) {\n  await new D1BabaStore({ db: env.DB });\n  const crossSite = crossSiteRejection(request);\n  if (crossSite !== null) {\n    return crossSite;\n  }\n}';
     expect(bad.indexOf(CROSS_SITE_CALL) < bad.indexOf("env.DB")).toBe(false);
     expect(() => expectCrossSiteCheckFirst("bad", bad, ["env.DB"])).toThrow(); // 検出器が悪い例を実際に拒否する(空振りでない)
-  });
-
-  it("deploy-cloud.yml は BABA_API_URL を必須の secret にしない(任意の secret。未登録なら機能が止まるだけ)", () => {
-    expect(readTextLf(".github", "workflows", "deploy-cloud.yml")).not.toMatch(/BABA/);
   });
 
   it("migration 0017 は baba_fetches・baba_conditions の 2 表だけを作る", () => {
@@ -1960,7 +1986,15 @@ describe("Issue #294: 馬場の API の取得は、URL を secret の 1 箇所�
   });
 });
 
-describe("Issue #488(#477-A1): JRA に Worker から届くかの確認は、管理者が確認口を開いたときだけ。取得の部品は 1 ファイル、起点は handler.ts の 1 箇所で、cron・DO からは呼ばない", () => {
+/**
+ * 【Issue #478で改訂】旧(#488): JRA の URL を持つのは jra-check.ts だけ・jra-check 系を参照するのは jra-check.ts と handler.ts だけ・グローバルの fetch を呼ぶのは jra-check.ts の 1 箇所。
+ * #478 で、取得の部品(1 本を取る・Shift_JIS を読む・URL)を `jra-http.ts` に切り出し、馬場の取得(`jra-baba-fetch.ts`)と共有した。保証していたこと
+ * 〈確認口 runJraCheck の起点は handler.ts の 1 箇所だけ・cron と DO からは呼ばない・各 1 回/リダイレクト非追従/1.5 秒以上の間・確認口の入口の検査の順序・管理者専用〉は変えない。
+ * 変わったのは、JRA の URL の置き場(jra-http.ts の 1 ファイルになり、馬場の取得も使う)と、「JRA の取得の起点」が 2 つになったこと:
+ *   (1) handler.ts の確認口(管理者が開いたときだけ。runJraCheck)  (2) 日単位の DO の馬場の段階(開催日の 1 日 1 回。createJraBabaFetcher → BabaStage)。
+ * どちらも、cron(scheduled)・worker.ts・他の DO からは参照しない。参照するファイルの一覧を固定して、起点が増えたら赤になるようにする。
+ */
+describe("Issue #488・#478: JRA のページの取得の起点は、管理者の確認口(handler.ts)と日単位の DO の馬場の段階だけ。取得の部品は jra-http.ts の 1 ファイルで、cron・他の DO からは呼ばない", () => {
   const srcDir = path.join(ROOT, "cloud", "src");
   const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
   const code = (f: string): string => stripCode(readTextLf("cloud", "src", f));
@@ -1976,27 +2010,45 @@ describe("Issue #488(#477-A1): JRA に Worker から届くかの確認は、管�
   it("前提: 取得の部品と入口を実際に読めている(以降の検査が空振りでない)", () => {
     expect(srcFiles.length).toBeGreaterThan(30);
     expect(code("jra-check.ts").length).toBeGreaterThan(2000);
+    expect(code("jra-http.ts").length).toBeGreaterThan(2000);
+    expect(code("jra-baba-fetch.ts").length).toBeGreaterThan(2000);
     expect(code("handler.ts")).toContain("async function handleJraCheck(");
   });
 
-  it("JRA の URL(jra.go.jp)を持つ cloud/src のファイルは jra-check.ts だけ。jra-check・runJraCheck・JRA_CHECK を参照するのは jra-check.ts と handler.ts だけ(scheduled・worker・DO・段階は参照しない)", () => {
-    expect(sites(/jra\.go\.jp/g)).toEqual({ "jra-check.ts": 2 }); // 取得先の URL 2 本
-    expect(Object.keys(sites(/jra-check|runJraCheck|JRA_CHECK|JRA_CUSHION|JRA_ACCESS/g)).sort()).toEqual(["handler.ts", "jra-check.ts"]);
-    // 取得の部品を import するのは handler.ts の 1 箇所だけ。runJraCheck の呼び出し(定義は数えない)も handler.ts の 1 箇所だけ
+  it("JRA の URL(jra.go.jp)を持つ cloud/src のファイルは jra-http.ts だけ(取得先の URL 4 本: クッション値・含水率・開催情報・コースの情報)", () => {
+    expect(sites(/jra\.go\.jp/g)).toEqual({ "jra-http.ts": 4 });
+  });
+
+  it("確認口の部品(jra-check・runJraCheck・JRA_CHECK)を参照するのは jra-check.ts と handler.ts だけ。runJraCheck の呼び出し(定義は数えない)は handler.ts の 1 箇所だけ", () => {
+    expect(Object.keys(sites(/jra-check|runJraCheck|JRA_CHECK/g)).sort()).toEqual(["handler.ts", "jra-check.ts"]);
     expect(sites(/from\s*"\.\/jra-check"/g)).toEqual({ "handler.ts": 1 });
     expect(sites(/(?<!function\s)\brunJraCheck\(/g)).toEqual({ "handler.ts": 1 });
   });
 
-  it("グローバルの fetch を呼ぶのは jra-check.ts の 1 箇所(注入できる既定)だけ。handler.ts は fetch( を呼ばない(注入された jraFetch を渡すだけ)", () => {
+  it("JRA の取得に関わるモジュール(jra-http・jra-check・jra-baba-fetch・jra-baba-parse)を参照するのは、handler.ts・race-day-do.ts と、それら自身だけ。scheduled・worker・他の DO・core・段階は参照しない", () => {
+    expect(Object.keys(sites(/jra-(?:http|check|baba-fetch|baba-parse)/g)).sort()).toEqual(["handler.ts", "jra-baba-fetch.ts", "jra-baba-parse.ts", "jra-check.ts", "race-day-do.ts"]);
+    // jra-http.ts を import するのは取得の 2 つと読み取りの型の 1 つ(順にその 1 回ずつ)
+    expect(sites(/from\s*"\.\/jra-http"/g)).toEqual({ "jra-baba-fetch.ts": 1, "jra-baba-parse.ts": 1, "jra-check.ts": 1 });
+    // jra-baba-fetch は race-day-do.ts だけが import する。jra-baba-parse は jra-baba-fetch だけが import する(保存の段階・core は読み取りに触れない)
+    expect(sites(/from\s*"\.\/jra-baba-fetch"/g)).toEqual({ "race-day-do.ts": 1 });
+    expect(sites(/from\s*"\.\/jra-baba-parse"/g)).toEqual({ "jra-baba-fetch.ts": 1 });
+    // jra-http の関数(fetchOne・jraCourseUrl)を呼ぶのは取得の 2 つだけ
+    expect(Object.keys(sites(/\bfetchOne\(|\bjraCourseUrl\(/g)).sort()).toEqual(["jra-baba-fetch.ts", "jra-check.ts", "jra-http.ts"]);
+  });
+
+  it("グローバルの fetch を呼ぶのは jra-check.ts の 1 箇所と jra-baba-fetch.ts の 1 箇所(どちらも注入できる既定)だけ。jra-http.ts・handler.ts は fetch( を呼ばない(注入された関数を渡すだけ)", () => {
     expect((code("jra-check.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
+    expect((code("jra-baba-fetch.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
+    expect((code("jra-http.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(0);
     expect((code("handler.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(0);
     expect(code("handler.ts")).not.toMatch(/\.fetch\(/);
   });
 
-  it("取得は 1 本ずつ 1 回(再試行しない)・リダイレクトを追わない・間をあける: fetchFn の呼び出しは fetchOne の中の 1 箇所、fetchOne の呼び出しは 2 回で、その間に wait(JRA_CHECK_GAP_MS) があり、間隔は 1.5 秒以上", () => {
+  it("確認口は 1 本ずつ 1 回(再試行しない)・リダイレクトを追わない・間をあける: fetchFn の呼び出しは jra-http.ts の fetchOne の中の 1 箇所、jra-check.ts の fetchOne の呼び出しは 2 回で、その間に wait(JRA_CHECK_GAP_MS) があり、間隔は 1.5 秒以上", () => {
+    const http = code("jra-http.ts");
+    expect(http).toContain('redirect: "manual"');
+    expect((http.match(/await fetchFn\(/g) ?? []).length).toBe(1);
     const c = code("jra-check.ts");
-    expect(c).toContain('redirect: "manual"');
-    expect((c.match(/await fetchFn\(/g) ?? []).length).toBe(1);
     expect((c.match(/(?<!function\s)\bfetchOne\(/g) ?? []).length).toBe(2);
     const first = c.indexOf("await fetchOne(fetchFn, JRA_CUSHION_URL");
     const wait = c.indexOf("await wait(JRA_CHECK_GAP_MS)");
@@ -2005,9 +2057,8 @@ describe("Issue #488(#477-A1): JRA に Worker から届くかの確認は、管�
     expect(wait).toBeGreaterThan(first);
     expect(second).toBeGreaterThan(wait);
     expect(c.slice(second, second + 60)).toContain("JRA_ACCESS_URL");
-    const gap = /export const JRA_CHECK_GAP_MS = ([\d_]+);/.exec(c);
-    expect(gap).not.toBeNull();
-    expect(Number(gap![1]!.replaceAll("_", ""))).toBeGreaterThanOrEqual(1500);
+    expect(c).toContain("export const JRA_CHECK_GAP_MS = JRA_GAP_MS;"); // 値は jra-http.ts の JRA_GAP_MS(1.5 秒以上は上の馬場の検査が固定する)
+    expect(Number(/export const JRA_GAP_MS = ([\d_]+);/.exec(http)?.[1]?.replaceAll("_", ""))).toBeGreaterThanOrEqual(1500);
     // 再試行の仕組みが無い
     expect(c).not.toMatch(/retry|リトライ|attempt/i);
   });

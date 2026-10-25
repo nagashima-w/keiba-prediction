@@ -1,12 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { parseBabaResponse, type BabaDroppedDetail, type BabaVenueRecord } from "../src/baba-conditions";
+import type { BabaDroppedDetail, BabaVenueRecord } from "../src/baba-conditions";
 import { D1BabaStore, FETCH_LIST_LIMIT_DEFAULT } from "../src/baba-repository";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
 import { installFetchTrap } from "./fetch-trap";
+import { SAMPLE_DATE, SAMPLE_NOW, sampleOutcome } from "./baba-sample";
 
 /**
  * Issue #294: 馬場の API の取得の試み(`baba_fetches`)と、競馬場ごとの当日の値(`baba_conditions`)の D1 への保存(`D1BabaStore`。migration 0017)。
@@ -26,12 +24,16 @@ beforeEach(async () => {
   await local.reset();
 });
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const SAMPLE_TEXT = readFileSync(path.join(ROOT, "fixtures", "baba_latest_20261012.json"), "utf-8");
-const NOW = Date.parse("2026-10-12T08:05:52.863Z");
-const DATE = "20261012";
+const DATE = SAMPLE_DATE;
+/** 捨てた競馬場の診断の見本(実物のフィクスチャでは捨てる場が無いので、保存・読み出しの往復の検査用に足す)。 */
+const DROPPED: readonly BabaDroppedDetail[] = [{ venue: "01", reason: "not-today", measured: "9月6日（日曜）8時20分" }];
 
-const parsed = (): { venues: readonly BabaVenueRecord[]; apiFetchedAt: string | null; dropped: number; droppedDetails: readonly BabaDroppedDetail[] } => parseBabaResponse(SAMPLE_TEXT, NOW);
+/** 実物の 3 場(東京・京都・新潟)に、捨てた場 1 件の診断を足した見本。 */
+const parsed = (): { venues: readonly BabaVenueRecord[]; apiFetchedAt: string | null; dropped: number; droppedDetails: readonly BabaDroppedDetail[] } => ({
+  ...sampleOutcome(),
+  dropped: 1,
+  droppedDetails: DROPPED,
+});
 
 async function all(sql: string, ...binds: unknown[]): Promise<Record<string, unknown>[]> {
   return (await local.db.prepare(sql).bind(...binds).all<Record<string, unknown>>()).results;
@@ -78,42 +80,44 @@ describe("claim(試みの先行記録)", () => {
 });
 
 describe("finish(結果の記録)", () => {
-  it("成功: 試みの行に結果を書き、競馬場ごとに 1 行を保存する(見本の東京・京都)", async () => {
+  it("成功: 試みの行に結果を書き、競馬場ごとに 1 行を保存する(見本の東京・京都・新潟)", async () => {
     const store = new D1BabaStore({ db: local.db });
     await store.claim(DATE, 1_000);
     const p = parsed();
-    expect(p.venues).toHaveLength(2); // 前提: 保存する競馬場がある(空振りでない)
+    expect(p.venues).toHaveLength(3); // 前提: 保存する競馬場がある(空振りでない)
     await store.finish(DATE, { finishedAt: 9_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: p.venues, dropped: p.dropped, droppedDetails: p.droppedDetails });
 
     expect(await all("SELECT * FROM baba_fetches")).toEqual([
-      { kaisai_date: DATE, attempted_at: 1_000, finished_at: 9_000, result: "ok", api_fetched_at: "2026-10-12T08:05:52.863Z", venues_saved: 2, venues_dropped: 1, dropped_json: JSON.stringify([{ venue: "01", reason: "not-today", measured: "9月6日（日曜）8時20分" }]) },
+      { kaisai_date: DATE, attempted_at: 1_000, finished_at: 9_000, result: "ok", api_fetched_at: new Date(SAMPLE_NOW).toISOString(), venues_saved: 3, venues_dropped: 1, dropped_json: JSON.stringify(DROPPED) },
     ]);
     const rows = await all("SELECT * FROM baba_conditions ORDER BY venue_code");
     expect(rows.map((r) => [r["kaisai_date"], r["venue_code"], r["venue_name"]])).toEqual([
+      [DATE, "04", "新潟"],
       [DATE, "05", "東京"],
       [DATE, "08", "京都"],
     ]);
-    expect(rows[0]).toMatchObject({
-      measured_at: "2026-10-12T07:00+09:00",
-      cushion: 9.6,
-      turf_condition: "良",
-      turf_goal_condition: "良",
-      turf_corner4_condition: "良",
-      turf_goal_moisture: 13.2,
-      turf_corner4_moisture: 11.8,
-      dirt_condition: "良",
-      dirt_goal_condition: "良",
-      dirt_corner4_condition: "良",
-      dirt_goal_moisture: 1.7,
-      dirt_corner4_moisture: 1.7,
+    expect(rows[1]).toMatchObject({
+      measured_at: "2026-10-25T07:00+09:00",
+      cushion: 9.5,
+      turf_condition: "稍重",
+      turf_goal_condition: "稍重",
+      turf_corner4_condition: "稍重",
+      turf_goal_moisture: 17.5,
+      turf_corner4_moisture: 16.9,
+      dirt_condition: "稍重",
+      dirt_goal_condition: "稍重",
+      dirt_corner4_condition: "稍重",
+      dirt_goal_moisture: 7.4,
+      dirt_corner4_moisture: 7.9,
       rainfall_mm: null,
       used_course: "Aコース（内柵を最内に設置）",
       turf_length: "芝丈(cm) 芝野芝10から12・洋芝10から14 障害野芝10から12",
-      turf_state_text: "1週使用しましたが、傷みは少なく概ね良好な状態です。",
+      turf_state_text: "向正面直線から正面直線にかけての内柵沿いに傷みが見られます。",
       saved_at: 9_000,
     });
-    expect(JSON.parse(rows[0]!["raw_json"] as string)).toMatchObject({ venueCode: "05", cushion: 9.6 });
-    expect(rows[1]).toMatchObject({ cushion: 10.7, dirt_goal_moisture: 2 });
+    expect(JSON.parse(rows[1]!["raw_json"] as string)).toMatchObject({ venueCode: "05", cushion: { value: 9.5 }, sources: { cushion: "ok", moist: "ok", access: "ok", course: "ok" } });
+    expect(rows[2]).toMatchObject({ measured_at: "2026-10-25T06:00+09:00", cushion: 9.2, turf_condition: "稍重", dirt_condition: "重", dirt_goal_moisture: 13.3 });
+    expect(rows[0]).toMatchObject({ cushion: 8.8, turf_condition: "不良", dirt_condition: "不良", rainfall_mm: 2.5 });
   });
 
   it("失敗: 競馬場の行は作らず、分類だけを記録する(venues_saved = 0)", async () => {
@@ -144,15 +148,16 @@ describe("finish(結果の記録)", () => {
     const changed = { ...p.venues[0]!, cushion: 1.1 };
     await store.finish(DATE, { finishedAt: 3_000, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: [changed], dropped: 0, droppedDetails: [] });
     expect(await all("SELECT venue_code, cushion FROM baba_conditions ORDER BY venue_code")).toEqual([
-      { venue_code: "05", cushion: 9.6 },
-      { venue_code: "08", cushion: 10.7 },
+      { venue_code: "04", cushion: 8.8 },
+      { venue_code: "05", cushion: 9.5 },
+      { venue_code: "08", cushion: 9.2 },
     ]);
   });
 });
 
 describe("loadFetches(管理者の診断用の読み出し。Issue #360)", () => {
   async function seed(store: D1BabaStore): Promise<void> {
-    // 10/10: 値あり(見本の東京・京都を保存)、10/17: 全部捨てた(no-today-venues)、10/18: 試みたが結果が無い(クラッシュ相当)。10/11: 旧版の行(dropped_json が NULL)
+    // 10/10: 値あり(見本の東京・京都・新潟を保存)、10/17: 全部捨てた(no-today-venues)、10/18: 試みたが結果が無い(クラッシュ相当)。10/11: 旧版の行(dropped_json が NULL)
     await store.claim("20261010", 100);
     const p = parsed();
     await store.finish("20261010", { finishedAt: 200, result: "ok", apiFetchedAt: p.apiFetchedAt, venues: p.venues, dropped: p.dropped, droppedDetails: p.droppedDetails });
@@ -182,10 +187,11 @@ describe("loadFetches(管理者の診断用の読み出し。Issue #360)", () =>
     expect(rows[2]!.dropped).toBeNull(); // 旧版の行
     expect(rows[2]!.venuesDropped).toBe(3);
     expect(rows[3]!.saved).toEqual([
-      { venueCode: "05", venueName: "東京", measuredAt: "2026-10-12T07:00+09:00" },
-      { venueCode: "08", venueName: "京都", measuredAt: "2026-10-12T07:00+09:00" },
+      { venueCode: "04", venueName: "新潟", measuredAt: "2026-10-25T07:00+09:00" },
+      { venueCode: "05", venueName: "東京", measuredAt: "2026-10-25T07:00+09:00" },
+      { venueCode: "08", venueName: "京都", measuredAt: "2026-10-25T06:00+09:00" },
     ]);
-    expect(rows[3]!.dropped).toEqual([{ venue: "01", reason: "not-today", measured: "9月6日（日曜）8時20分" }]);
+    expect(rows[3]!.dropped).toEqual(DROPPED);
   });
 
   it("開催日を指定すると、その日の 1 行だけ(無ければ空)", async () => {

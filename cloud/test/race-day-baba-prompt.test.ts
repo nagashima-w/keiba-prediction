@@ -4,7 +4,7 @@ import type { AnthropicMessageResponse, AnthropicRequestParams, ModelInfoLite } 
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import type { DayBaba } from "../../packages/core/src/analyzer/day-baba";
 import { BABA_PROMPT_HEADING } from "../../packages/core/src/analyzer/day-baba";
-import { parseBabaResponse } from "../src/baba-conditions";
+import { sampleOutcome } from "./baba-sample";
 import { D1BabaStore } from "../src/baba-repository";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
@@ -15,9 +15,6 @@ import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { fixtureForUrl } from "./pipeline-fixtures";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
 import { openNodeSql, type NodeSql } from "./node-sql";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 /**
  * Issue #295: 当日の馬場の値(D1 の `baba_conditions`)を、発走前の分析の計算ステップで読み、LLM のプロンプトとスナップショットに渡す配線(`RaceDayCore` の `babaReader`)。
@@ -212,12 +209,9 @@ describe("統合(本物の D1BabaStore。ローカルの workerd の D1)", () =>
     await local.reset();
   });
 
-  const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-  const SAMPLE = readFileSync(path.join(ROOT, "fixtures", "baba_latest_20261012.json"), "utf-8");
-
   it("D1 に貯めた 2 日 × 2 場の値から、このレースの日・場(20260628・03)の行だけがプロンプトとスナップショットに入る", async () => {
     const store = new D1BabaStore({ db: local.db });
-    const tokyo = parseBabaResponse(SAMPLE, Date.parse("2026-10-12T08:05:52.863Z")).venues[0]!;
+    const tokyo = sampleOutcome().venues[0]!;
     const cell = (venueCode: string, cushion: number, day: string) => ({ ...tokyo, venueCode, cushion, measuredAt: `2026-06-${day}T07:00+09:00` });
     await store.claim("20260628", 1);
     await store.finish("20260628", { finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [cell("03", 8.1, "28"), cell("05", 8.2, "28")], dropped: 0, droppedDetails: [] });

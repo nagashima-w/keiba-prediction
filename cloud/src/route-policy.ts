@@ -106,7 +106,7 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/export/prior-dataset", ADMIN_ONLY),
   // 各馬の戦績の蓄積の診断(Issue #256 段階A)。D1 の horse_runs の走査(件数・開催区分別・セルの分布)を起こしうるので管理者だけ。読み取り専用・GET だけ
   exact("/api/horse-runs", ADMIN_ONLY),
-  // 外部の馬場の API の取得の結果の診断(Issue #360)。取得の時刻・結果の分類・捨てた競馬場の理由を読む(D1 の SELECT だけ。外部の API には出ない)。外部の API の利用の記録なので管理者だけ。GET だけ
+  // 馬場の取得の結果の診断(Issue #360)。取得の時刻・結果の分類・捨てた競馬場の理由を読む(D1 の SELECT だけ。JRA にも出ない)。JRA への取得の利用の記録なので管理者だけ。GET だけ
   exact("/api/baba-fetch", ADMIN_ONLY),
   // Worker から JRA のページに届くかの確認(Issue #488)。開くたびに JRA へ 2 回出る(取得を起こす)ので管理者だけ。GET だけ
   exact("/api/jra/check", ADMIN_ONLY),

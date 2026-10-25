@@ -15,7 +15,7 @@ import { DurableObject } from "cloudflare:workers";
 import { D1AnalysisStore, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { createAnalysisSink } from "./analysis-sink";
 import { D1BabaStore } from "./baba-repository";
-import { babaUrlStatus, createBabaFetcher } from "./baba-fetch";
+import { createJraBabaFetcher } from "./jra-baba-fetch";
 import { createCloudLlm } from "./llm-sender";
 import { createDiscordNotifier, webhookStatus } from "./notify-send";
 import { resolveAppBaseUrl } from "./notify-link";
@@ -61,12 +61,6 @@ export interface RaceDayEnv {
    * https のオリジンだけ有効。未登録・形式不正ならリンクを付けない(通知は送る)。検証済みの値だけを `RaceDayCore` に渡し、材料(`payload_json`)には入れない(送信の直前に足す)。値はログに出さない。
    */
   APP_BASE_URL?: string;
-  /**
-   * 外部の馬場の API(JRA の競馬場の最新の馬場状態。Issue #294)の URL(Worker の secret。**ユーザーがダッシュボードまたは wrangler で登録する**。URL はリポジトリ・チャットに書かない)。
-   * 未登録・https の URL として使えない形なら、取得の段階全体を無効にする(印も書かず、アラームの候補にもしない。分析は従来どおり)。URL は `createBabaFetcher` のクロージャの中にだけあり、`RaceDayCore` には渡らない。
-   * 利用の条件は「JRA の開催日に、利用者全体で 1 日 1 回」。
-   */
-  BABA_API_URL?: string;
   NETKEIBA_GATE: {
     idFromName(name: string): any;
     get(id: any): Required<GateLike> & { status(): Promise<GateStatus> };
@@ -90,9 +84,6 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
     const gate = env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
     if (webhookStatus(env.DISCORD_WEBHOOK_URL) === "invalid") {
       console.warn("DISCORD_WEBHOOK_URL の形式が Discord の Webhook ではないため、通知は送りません(値は出しません)");
-    }
-    if (babaUrlStatus(env.BABA_API_URL) === "invalid") {
-      console.warn("BABA_API_URL の形式が https の URL ではないため、馬場の API の取得は行いません(値は出しません)");
     }
     const appBase = resolveAppBaseUrl(env.APP_BASE_URL);
     if (appBase.status === "invalid") {
@@ -137,8 +128,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // レースの条件(負担重量の種別・牝馬限定)の記録先(Issue #421 段階 1。D1 の race_conditions〈migration 0022〉)。朝・発走前の取得ステップで、出馬表を読んだ直後に 1 回書く(取得は増やさない)。
       // 失敗は握って警告にする(取得ステップを止めない)ので、migration の適用前に Worker が先に出ても動く。
       raceConditionsStore: new D1RaceConditionsStore({ db: env.DB }),
-      // 馬場の API の取得(Issue #294)。secret が未登録・形式不正なら undefined(取得の段階全体が無効)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(baba_fetches・baba_conditions〈migration 0017〉)。
-      fetchBaba: createBabaFetcher(env.BABA_API_URL),
+      // 馬場の取得(Issue #294。Issue #478 で取得先を JRA のページに替えた)。secret は要らない(JRA のページは素の fetch で届く〈#488〉)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(baba_fetches・baba_conditions〈migration 0017〉)。
+      fetchBaba: createJraBabaFetcher(),
       babaStore: new D1BabaStore({ db: env.DB }),
       // 貯めた当日の馬場の値の読み出し(Issue #295)。発走前の分析が、そのレースの開催日 × 場コードの 1 行を D1 から読む(表が無い間は読み出しが失敗して値なしで続ける)。
       babaReader: new D1BabaStore({ db: env.DB }),
