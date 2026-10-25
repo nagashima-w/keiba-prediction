@@ -42,7 +42,7 @@ const VERIFY_REPORT = {
   },
 };
 /** 閲覧者向けの検証の応答(サーバの `getViewerReport` と同じ形: 診断は発走時刻の欠落だけ・stale は偽)。 */
-const VIEWER_VERIFY_READY = { ok: true, status: "ready", venue: "all", report: VERIFY_REPORT, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } };
+const VIEWER_VERIFY_READY = { ok: true, status: "ready", venue: "all", report: VERIFY_REPORT, promptVersions: versionsFixture(), currentPromptVersions: ["2026-10-09.2", "2026-10-09.2-clip015"], computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } };
 let verifyResponse: Record<string, unknown> = VIEWER_VERIFY_READY;
 
 /** 配分が unset(総資金・1レース上限が未設定。cloud の既定値なので、ほぼ全件がこの状態)の分析。 */

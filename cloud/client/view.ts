@@ -686,14 +686,18 @@ function versionCardNode(card: VersionCard, actions: ViewActions): VNode {
 function versionsNodes(section: VersionsSection, actions: ViewActions): VNode[] {
   const nodes: VNode[] = [h("h2", {}, [section.heading]), h("p", { class: "meta" }, [section.description])];
   if (section.unknownNote !== null) nodes.push(h("p", { class: "meta" }, [section.unknownNote]));
+  if (section.link !== null) nodes.push(h("a", { class: "verify-versions-link", href: section.link.href }, [section.link.label]));
   if (section.empty !== null) nodes.push(h("p", { class: "empty" }, [section.empty]));
   nodes.push(...section.cards.map((card) => versionCardNode(card, actions)));
+  // 30 件未満のいまの版(集計中の枠)と、出さなかった過去の版の数(Issue #481)
+  nodes.push(...section.collecting.map((c) => h("section", { class: "verify-version verify-version-collecting" }, [h("h3", { class: "verify-version-title" }, [c.title]), h("p", { class: "meta" }, [c.text])])));
+  if (section.omitted !== null) nodes.push(h("p", { class: "meta verify-versions-omitted" }, [section.omitted]));
   return nodes;
 }
 
 function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
-    h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
+    h("a", { class: "back", href: model.backHref }, [model.backLabel]),
     // 更新ボタンは管理者だけ(Issue #263。閲覧者の要求は集計のやり直しを起こさない)
     ...(model.canRefresh ? [h("button", { class: "refresh", disabled: model.refreshDisabled }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh })] : []),
   ]);
@@ -702,7 +706,8 @@ function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
     { class: "verify-venues", role: "group", "aria-label": "検証の地域フィルタ" },
     model.venueTabs.map((t) => h("button", { class: "verify-venue", "aria-pressed": t.current ? "true" : "false" }, [t.label], { click: () => actions.onVerifyVenue(t.venue) })),
   );
-  const body: VNode[] = [h("h1", { class: "title" }, ["検証"]), venues];
+  // 過去の版のページ(Issue #481)は区分の切替を持たない(版別は全体の集計)
+  const body: VNode[] = [h("h1", { class: "title" }, [model.title]), ...(model.venueTabs.length === 0 ? [] : [venues])];
   if (model.loading && model.bet === null) {
     body.push(h("p", { class: "empty" }, ["読み込み中…"]));
   }

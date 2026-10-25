@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { buildHash, parseHash, screenOf, SETTINGS_HASH, VERIFY_HASH, type Route } from "../client/route";
+import { buildHash, parseHash, screenOf, SETTINGS_HASH, VERIFY_HASH, VERIFY_VERSIONS_HASH, type Route } from "../client/route";
 
 /**
  * Issue #184(#165-b): スマホ画面の状態(URL のハッシュ)の解析と組み立て。純関数。
@@ -228,6 +228,31 @@ describe("廃止した移行画面のハッシュ(#migration)", () => {
     const route = parseHash("#migration", TODAY);
     expect(route).toEqual(parseHash("#", TODAY));
     expect(screenOf(route)).toBe("list");
+  });
+});
+
+/** Issue #481: `#verify-versions`(完全一致のときだけ。検証画面の中の「過去の版」のページ)。 */
+describe("過去の版のハッシュ(#verify-versions)", () => {
+  it("VERIFY_VERSIONS_HASH は `#verify-versions`。検証画面(verify)の route に versions: true が付く", () => {
+    expect(VERIFY_VERSIONS_HASH).toBe("#verify-versions");
+    expect(parseHash("#verify-versions", TODAY)).toEqual({ date: TODAY, venue: "central", race: null, analysis: null, settings: false, verify: true, versions: true });
+    expect(screenOf(parseHash("#verify-versions", TODAY))).toBe("verify");
+  });
+
+  it("`#verify` には versions が付かない(検証画面の本体)", () => {
+    expect("versions" in parseHash("#verify", TODAY)).toBe(false);
+  });
+
+  it.each([["#verify-versions&date=20261003"], ["#verify-versions=1"], ["#Verify-versions"], ["#verify-versions "], ["#verify-versions/"], ["#verify-version"], ["#verify-versionsx"], ["verify-versions"], ["#date=20261003&verify-versions"]])(
+    "完全一致でない %s は過去の版のページにならない",
+    (hash) => {
+      expect(parseHash(hash, TODAY).versions ?? false).toBe(false);
+      expect(parseHash(hash, TODAY).verify ?? false).toBe(false);
+    },
+  );
+
+  it("buildHash は versions を出さない(入口は VERIFY_VERSIONS_HASH だけ)", () => {
+    expect(buildHash({ date: "20261003", venue: "nar" })).not.toContain("versions");
   });
 });
 

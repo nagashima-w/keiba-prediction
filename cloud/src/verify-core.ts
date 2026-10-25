@@ -40,6 +40,7 @@
 
 import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG, type VerifyReport, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
 import { jstIsoDate, nextJstMidnight } from "../../packages/core/src/common/jst";
+import { CLIP_VARIANTS } from "../../packages/core/src/analyzer/clip-variants";
 import { isReadAllowed, type R2Usage } from "./r2-fence";
 import { buildVerifySource, countStartTimeGaps } from "./verify-read";
 import { computePromptVersionSummaries, type PromptVersionSummary } from "./verify-versions";
@@ -207,6 +208,8 @@ export type VerifyResponse =
       readonly report: VerifyReport;
       /** プロンプト版別の比較(Issue #220)。**区分(venue)に依らず全体**(旧 exe の版別比較と同じ)。画面が使う項目だけを持つ。 */
       readonly promptVersions: readonly PromptVersionSummary[];
+      /** いまの版の一覧(Issue #481)。{@link currentPromptVersions}。画面はこれで版別比較を「いまの版」と「過去の版」に分ける。 */
+      readonly currentPromptVersions: readonly string[];
       /** 締切直前の再計算との比較(Issue #352)。**リクエストの区分のもの**(Issue #379。地方を含む。基準ごとに行が分かれる)。比較できるものが無いときは null。 */
       readonly closeComparison: CloseComparison | null;
       /** 人気帯ごとの期待値と回収率の節(Issue #384)。**リクエストの区分のもの**。サーバが文字列に組み立てて渡す。無い・計算できなかったときは null。 */
@@ -236,6 +239,14 @@ export type VerifyResponse =
       readonly reason: "min-interval" | "daily-limit";
     };
 
+/**
+ * いまの版の一覧(Issue #481)。core の `CLIP_VARIANTS` の各 `promptVersion`(いまは対照と `-clip015` の 2 つ。対照は `PROMPT_VERSION` と同じ値で、clip-variants.test.ts が固定している)。
+ * **応答を組み立てるときに作る**(kv のキャッシュには保存しない=形式の版〈`CACHE_VERSION`〉を上げずに済み、プロンプトの版が変わった直後の最初の応答から新しい一覧になる)。
+ */
+function currentPromptVersions(): readonly string[] {
+  return Object.values(CLIP_VARIANTS).map((v) => v.promptVersion);
+}
+
 /** 閲覧者の応答で、追加指示の全文の代わりに入れる固定の文字列(Issue #263。『追加指示あり』の印。値に意味はなく、画面は『あり』としか表示しない)。 */
 export const VIEWER_REDACTED_INSTRUCTION = "(非公開)";
 
@@ -250,6 +261,8 @@ export type ViewerVerifyResponse =
       readonly report: VerifyReport;
       /** 版別比較。追加指示の全文は {@link VIEWER_REDACTED_INSTRUCTION} に置き換えてある(なしは null のまま)。 */
       readonly promptVersions: readonly PromptVersionSummary[];
+      /** いまの版の一覧(Issue #481)。管理者の応答と同じ(版の文字列だけで、追加指示などの管理者向けの情報は含まない)。 */
+      readonly currentPromptVersions: readonly string[];
       /** 締切直前の再計算との比較(Issue #352)。管理者向けの情報を含まないので、そのまま渡す。 */
       readonly closeComparison: CloseComparison | null;
       /** 人気帯ごとの期待値と回収率の節(Issue #384)。管理者向けの情報を含まないので、そのまま渡す。 */
@@ -358,6 +371,7 @@ export class VerifyCore {
       status: "ready",
       venue,
       report: cache.reports[venue],
+      currentPromptVersions: currentPromptVersions(),
       promptVersions: cache.promptVersions.map((v) => ({ ...v, additionalInstructions: v.additionalInstructions.map((i) => (i === null ? null : VIEWER_REDACTED_INSTRUCTION)) })),
       closeComparison: cache.closeByVenue?.[venue] ?? null,
       breakdown: cache.breakdownByVenue?.[venue]?.sections ?? null,
@@ -380,6 +394,7 @@ export class VerifyCore {
       venue,
       report: cache.reports[venue],
       promptVersions: cache.promptVersions,
+      currentPromptVersions: currentPromptVersions(),
       closeComparison: cache.closeByVenue?.[venue] ?? null,
       breakdown: cache.breakdownByVenue?.[venue]?.sections ?? null,
       computedAt: new Date(cache.computedAt).toISOString(),

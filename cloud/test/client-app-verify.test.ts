@@ -31,7 +31,7 @@ const REPORT = {
   },
 };
 const readyFor = (venue: string): Record<string, unknown> => ({
-  ok: true, status: "ready", venue, report: REPORT, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } },
+  ok: true, status: "ready", venue, report: REPORT, promptVersions: versionsFixture(), currentPromptVersions: ["2026-10-09.2", "2026-10-09.2-clip015"], computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } },
 });
 
 function findAll(node: VNode | string, pred: (n: VNode) => boolean): VNode[] {
@@ -123,6 +123,43 @@ describe("検証画面を開く", () => {
     expect(textOf(h.tree())).toContain("150.0%");
   });
 
+  it("Issue #481: #verify ⇄ #verify-versions の行き来は再取得しない(同じ応答を使う)。いまの版のページのリンクで過去の版のページへ、戻るリンクで検証画面へ。離れると状態を捨てる", async () => {
+    const h = harness("#verify");
+    h.app.start();
+    await h.app.whenIdle();
+    expect(h.calls).toEqual(["GET /api/verify?venue=all"]);
+    expect(byClass(h.tree(), "verify-versions-link")[0]!.attrs?.["href"]).toBe("#verify-versions");
+    h.go("#verify-versions");
+    await h.app.whenIdle();
+    expect(textOf(byClass(h.tree(), "title")[0]!)).toBe("過去の版");
+    expect(textOf(h.tree())).not.toContain("配分ベースの回収率");
+    expect(byClass(h.tree(), "back")[0]!.attrs?.["href"]).toBe("#verify");
+    h.go("#verify");
+    await h.app.whenIdle();
+    expect(textOf(byClass(h.tree(), "title")[0]!)).toBe("検証");
+    expect(textOf(h.tree())).toContain("配分ベースの回収率");
+    expect(h.calls).toEqual(["GET /api/verify?venue=all"]); // 2 回の切替で取得は増えない
+    // 検証画面の外(設定)へ出て戻ると、取り直す(状態を捨てている)
+    h.go("#verify-versions");
+    h.go("#settings");
+    await h.app.whenIdle();
+    h.go("#verify-versions");
+    await h.app.whenIdle();
+    expect(h.calls.filter((c) => c.startsWith("GET /api/verify?"))).toEqual(["GET /api/verify?venue=all", "GET /api/verify?venue=all"]);
+  });
+
+  it("Issue #481: #verify-versions で始めると、GET /api/verify?venue=all を 1 回だけ取り、過去の版のページを出す(区分のボタンは無い)", async () => {
+    const h = harness("#verify-versions");
+    h.app.start();
+    expect(textOf(h.tree())).toContain("読み込み中…");
+    await h.app.whenIdle();
+    expect(h.calls).toEqual(["GET /api/verify?venue=all"]);
+    expect(textOf(byClass(h.tree(), "title")[0]!)).toBe("過去の版");
+    expect(byClass(h.tree(), "verify-venue")).toHaveLength(0);
+    // 見本の版不明は 15 件(30 件未満)なので出さず、その数を言う
+    expect(textOf(byClass(h.tree(), "verify-versions-omitted")[0]!)).toBe("分析が30件未満の版(1版)は出していません。");
+  });
+
   it("区分のボタンで取り直し、更新は refresh=1。画面の区分の表示が替わる", async () => {
     const h = harness("#verify");
     h.app.start();
@@ -139,7 +176,7 @@ describe("検証画面を開く", () => {
     const h = harness("#verify");
     h.app.start();
     await h.app.whenIdle();
-    expect(byClass(h.tree(), "verify-version")).toHaveLength(3);
+    expect(byClass(h.tree(), "verify-version-toggle")).toHaveLength(1); // 見本は 80・25・15 件: カード(開閉ボタンがある)は 30 件以上のいまの版 1 枚。25 件の版は集計中の枠、15 件の版は過去の版のページ(Issue #481)
     expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(20); // 前提(空振り防止): 主表の 20 帯だけ(版別は閉じている)
     byClass(h.tree(), "verify-version-toggle")[0]!.on!.click!();
     // 主表 20 + 開いた版の補正後・補正前の 2 表(20 帯ずつ。Issue #271)

@@ -30,7 +30,7 @@ const REPORT = {
   },
 };
 const ready = (venue: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  ok: true, status: "ready", venue, report: REPORT, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null,
+  ok: true, status: "ready", venue, report: REPORT, promptVersions: versionsFixture().map((v, i) => ({ ...v, includedAnalysisCount: [80, 40, 35][i]! })), currentPromptVersions: ["2026-10-09.2", "2026-10-09.2-clip015"], computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null,
   diag: { startTimeGaps: { lost: 0, affecting: 0 } }, ...over,
 });
 const preparing = (remaining: number, blocked: string | null = null): Record<string, unknown> => ({ ok: true, status: "preparing", remaining, blocked, resumeAt: null });
@@ -315,7 +315,7 @@ describe("版別キャリブレーションの開閉(Issue #220)", () => {
     h.screen.onVersionToggle(KEY, true);
     expect(card(h)?.expanded).toBe(true);
     expect(card(h)?.calibrationRows).toHaveLength(20);
-    expect(card(h, "unknown")?.expanded).toBe(false);
+    expect(card(h, "v:2026-10-09.2-clip015")?.expanded).toBe(false);
     expect(h.changes).toBe(changes + 1);
     h.screen.onVersionToggle(KEY, false);
     expect(card(h)?.expanded).toBe(false);
@@ -328,11 +328,11 @@ describe("版別キャリブレーションの開閉(Issue #220)", () => {
     await open(h);
     h.screen.onVersionToggle(KEY, true);
     h.screen.onVersionToggle(KEY, true);
-    h.screen.onVersionToggle("unknown", true);
-    expect(h.screen.model().versions?.cards.map((c) => c.expanded)).toEqual([true, false, true]);
+    h.screen.onVersionToggle("v:2026-10-09.2-clip015", true);
+    expect(h.screen.model().versions?.cards.map((c) => c.expanded)).toEqual([true, true]);
     h.screen.onVersionToggle(KEY, false);
     h.screen.onVersionToggle(KEY, false);
-    expect(h.screen.model().versions?.cards.map((c) => c.expanded)).toEqual([false, false, true]);
+    expect(h.screen.model().versions?.cards.map((c) => c.expanded)).toEqual([false, true]);
   });
 
   it("区分の切替・更新をまたいで開いたまま(版別は区分に依らないので、取り直しても同じ版を開いておく)", async () => {
@@ -461,5 +461,27 @@ describe("Issue #263: 閲覧者(admin: false)の検証画面の制御", () => {
     admin.responses = [reply(503, { ok: false, error: { type: "verify-error" } })];
     await open(admin);
     expect(admin.screen.model().error).toContain("「更新」");
+  });
+});
+
+describe("Issue #481: 過去の版のページ(model の page 引数)", () => {
+  it("同じ取得結果から、いまの版のページ(既定)と過去の版のページのモデルを作る。ページを替えても取得は増えない。区分の状態は共有する", async () => {
+    const h = harness();
+    h.responses = [reply(200, ready("all", { promptVersions: versionsFixture() }))]; // 見本の件数 80・25・15
+    h.screen.enter();
+    await h.settle();
+    expect(h.urls).toHaveLength(1);
+    const current = h.screen.model();
+    const past = h.screen.model("past");
+    expect(current.title).toBe("検証");
+    expect(past.title).toBe("過去の版");
+    expect(current.versions?.cards.map((c) => c.title)).toEqual(["2026-10-09.2"]); // 見本の件数: 80・25・15
+    expect(current.versions?.collecting.map((c) => c.title)).toEqual(["2026-10-09.2-clip015"]);
+    expect(past.versions?.cards).toEqual([]);
+    expect(past.versions?.omitted).toBe("分析が30件未満の版(1版)は出していません。");
+    expect(h.urls).toHaveLength(1);
+    // 開閉の状態は 2 つのページで共有(画面の中の状態)
+    h.screen.onVersionToggle("v:2026-10-09.2", true);
+    expect(h.screen.model().versions?.cards[0]?.expanded).toBe(true);
   });
 });

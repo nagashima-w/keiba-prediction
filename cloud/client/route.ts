@@ -24,6 +24,11 @@ export interface Route {
   /** 検証画面(`#verify` の**完全一致**のときだけ true。Issue #219)。**省略は false**(`#verify` のときだけ true を付ける。既存の route の組み立て〈テスト・画面の表示用データ〉を変えないための任意項目)。 */
   readonly verify?: boolean;
   /**
+   * 検証画面の中の「過去の版」のページ(Issue #481。`#verify-versions` の**完全一致**のときだけ true。`verify` も true)。画面は検証画面と同じ(取得も状態も共有)で、版別比較の過去の版だけを出す。
+   * **省略は検証画面の本体**(`verify` と同じ流儀)。
+   */
+  readonly versions?: boolean;
+  /**
    * 日報画面(Issue #235)。`#report`(完全一致。`date` は null = 最新)と `#report=YYYYMMDD`(実在の日付の完全一致)のときだけ付く。**省略は日報画面ではない**
    * (`verify` と同じ流儀)。**月報(Issue #279)は同じ画面の中**で、`#report=YYYYMM`(実在の月の完全一致)のとき `month` が付く(`date` は null)。日報のときは `month` のキー自体が無い。
    */
@@ -39,6 +44,9 @@ export const SETTINGS_HASH = "#settings";
 
 /** 検証画面のハッシュ(Issue #219)。一覧のトップの入口のリンク先。 */
 export const VERIFY_HASH = "#verify";
+
+/** 検証画面の中の「過去の版」のページのハッシュ(Issue #481)。検証画面の版別比較の節のリンク先。 */
+export const VERIFY_VERSIONS_HASH = "#verify-versions";
 
 /** 日報画面のハッシュ(Issue #235)。`#report`(日付の一覧と最新の日報)と `#report=YYYYMMDD`(その日の日報)。 */
 export const REPORT_HASH = "#report";
@@ -77,6 +85,10 @@ export function parseHash(hash: string, today: string): Route {
   // 検証画面も `#verify` の完全一致だけ(日付・区分などを持たない画面)。
   if (hash === VERIFY_HASH) {
     return { date: today, venue: "central", race: null, analysis: null, settings: false, verify: true };
+  }
+  // 過去の版のページ(Issue #481)も完全一致だけ。検証画面の中のページなので、画面は verify。
+  if (hash === VERIFY_VERSIONS_HASH) {
+    return { date: today, venue: "central", race: null, analysis: null, settings: false, verify: true, versions: true };
   }
   // 日報画面は `#report` と `#report=YYYYMMDD`(実在の日付)の完全一致だけ(日付以外・区分などを持たない画面)。
   if (hash === REPORT_HASH) {

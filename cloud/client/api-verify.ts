@@ -11,7 +11,7 @@
  * 閲覧者の `ready` は管理者の `ready` と同じ形で読む(診断は発走時刻の欠落だけ・`stale` は偽・追加指示の全文は `"(非公開)"` に置き換わっている。サーバが落とす)。
  */
 import { PREDICTION_MARKS } from "../../packages/core/src/common/prediction-marks";
-import { classifyWithoutNetkeiba, getJson, isNum, isRecord, isStr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { classifyWithoutNetkeiba, getJson, isNum, isRecord, isStr, isStrArr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
 
 export type VerifyVenue = "all" | "central" | "nar";
 
@@ -187,6 +187,8 @@ export type VerifyOutcome =
       readonly report: VerifyReportView;
       /** プロンプト版別の比較(区分に依らず全体。Issue #220)。 */
       readonly promptVersions: readonly PromptVersionView[];
+      /** いまの版の一覧(Issue #481。サーバが core の `CLIP_VARIANTS` から作る。版の文字列をクライアントに直書きしない)。版別比較を「いまの版」と「過去の版」に分ける。 */
+      readonly currentPromptVersions: readonly string[];
       /** 締切直前の再計算との比較(Issue #352。リクエストの区分のもの〈Issue #379〉)。無い・読めないときは null。 */
       readonly closeComparison: CloseComparisonView | null;
       /** 人気帯ごとの期待値と回収率の節(Issue #384。リクエストの区分のもの)。無い・読めないときは null。 */
@@ -423,12 +425,14 @@ export function parseVerifyResponse(body: unknown): VerifyOutcome | null {
   if (!isRecord(diag) || !isRecord(diag["startTimeGaps"]) || !isCount(diag["startTimeGaps"]["lost"]) || !isCount(diag["startTimeGaps"]["affecting"])) return null;
   const report = parseReport(body["report"]);
   const promptVersions = parsePromptVersions(body["promptVersions"]);
-  if (report === null || promptVersions === null) return null;
+  const currentPromptVersions = body["currentPromptVersions"];
+  if (report === null || promptVersions === null || !isStrArr(currentPromptVersions)) return null;
   return {
     kind: "ready",
     venue: venue as VerifyVenue,
     report,
     promptVersions,
+    currentPromptVersions,
     closeComparison: parseCloseComparison(body["closeComparison"]),
     breakdown: parseBreakdown(body["breakdown"]),
     computedAt: body["computedAt"],
