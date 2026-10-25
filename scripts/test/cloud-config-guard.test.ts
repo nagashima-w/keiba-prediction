@@ -2029,3 +2029,92 @@ describe("ルートの .gitignore(Issue #451)", () => {
     expect(checkIgnore(FILES, "node_modules/x/index.js")).toBe(0);
   });
 });
+
+/**
+ * Issue #483: 間接依存の undici 7 系を 7.30.1 以上に保つ指定(pnpm の overrides)の固定。
+ *
+ * 7.30.1 未満には high 1 件・moderate 2 件の脆弱性がある(GHSA-xjj6-f33q-929c・GHSA-4qv8-2p9j-2685・GHSA-f72v-6w45-q472。`pnpm audit`)。
+ * ルートは packages/core → cheerio → undici(cheerio の指定は ^7.19.0)、cloud は wrangler → miniflare → undici(7.29.1 の固定)と cheerio → undici。
+ * 上流が 7.30.1 以上を引くようになったら、指定とこの検査を外してよい。
+ *
+ * 限界: overrides が効いているかは、lockfile の `overrides:` の節と、`packages:` の undici の版(7 系はすべて 7.30.1 以上)で見る。
+ * `pnpm audit` の実行はしない(ネットワークが要る)。lockfile を作り直したか(手で書き換えていないか)は見ない。
+ */
+describe("間接依存の undici 7 系の overrides(Issue #483)", () => {
+  const OVERRIDE_VALUE = "^7.30.1";
+  const MIN = [7, 30, 1] as const;
+
+  type Pkg = { pnpm?: { overrides?: Record<string, string> }; [key: string]: unknown };
+
+  /** lockfile の `packages:` の節に載っている undici の版(`undici@X.Y.Z:` の行。`undici-types@` は含まない)。 */
+  function undiciVersions(lock: string): string[] {
+    return [...lock.matchAll(/^ {2}undici@(\d+\.\d+\.\d+):$/gm)].map((m) => m[1] as string);
+  }
+  function atLeast(version: string, min: readonly number[]): boolean {
+    const v = version.split(".").map(Number);
+    for (let i = 0; i < min.length; i++) {
+      if ((v[i] as number) !== (min[i] as number)) return (v[i] as number) > (min[i] as number);
+    }
+    return true;
+  }
+  /** lockfile の `overrides:` の節(トップレベルの `overrides:` から次のトップレベルの行まで)。 */
+  function lockOverrides(lock: string): string {
+    return /^overrides:\n((?: {2}.*\n)+)/m.exec(lock)?.[1] ?? "";
+  }
+
+  describe("ルート(packages/core → cheerio → undici)", () => {
+    const pkg = JSON.parse(readTextLf("package.json")) as Pkg;
+    const lock = readTextLf("pnpm-lock.yaml");
+
+    it("package.json の pnpm.overrides が cheerio>undici を ^7.30.1 にし、undici 全体(core が直接使う 8 系)には当てない", () => {
+      const overrides = pkg.pnpm?.overrides ?? {};
+      expect(overrides["cheerio>undici"]).toBe(OVERRIDE_VALUE);
+      // 親を付けない `undici` の指定は、core が直接使う 8 系も 7 系に引き戻す。
+      expect(Object.keys(overrides).filter((k) => k === "undici" || k.startsWith("undici@"))).toEqual([]);
+    });
+
+    it("pnpm-lock.yaml の overrides の節に cheerio>undici があり、undici の 7 系はすべて 7.30.1 以上で、core の直接の 8 系は残る", () => {
+      expect(lockOverrides(lock)).toContain(`  cheerio>undici: ${OVERRIDE_VALUE}\n`);
+      const versions = undiciVersions(lock);
+      const v7 = versions.filter((v) => v.startsWith("7."));
+      expect(v7.length, "cheerio が引く 7 系が lock にある(空振りでない)").toBeGreaterThan(0);
+      for (const v of v7) expect(atLeast(v, MIN), `undici@${v} は 7.30.1 以上`).toBe(true);
+      expect(versions.filter((v) => v.startsWith("8.")).length, "core の直接の undici 8 系が lock に残る").toBeGreaterThan(0);
+      const corePkg = JSON.parse(readTextLf("packages", "core", "package.json")) as { dependencies: Record<string, string> };
+      expect(corePkg.dependencies["undici"]).toMatch(/^\^8\./);
+    });
+
+    it("理由が package.json の //pnpm.overrides にある", () => {
+      const reason = (pkg["//pnpm"] as { overrides?: string } | undefined)?.overrides;
+      expect(reason).toBeTruthy();
+      expect(reason).toContain("#483");
+    });
+  });
+
+  describe("cloud(wrangler → miniflare → undici と cheerio → undici)", () => {
+    const pkg = JSON.parse(readTextLf("cloud", "package.json")) as Pkg;
+    const lock = readTextLf("cloud", "pnpm-lock.yaml");
+
+    it("package.json の pnpm.overrides が miniflare>undici と cheerio>undici を ^7.30.1 にする", () => {
+      const overrides = pkg.pnpm?.overrides ?? {};
+      expect(overrides["miniflare>undici"]).toBe(OVERRIDE_VALUE);
+      // cheerio は miniflare とは別に undici を引く。miniflare だけだと cheerio 側が 7.29.1 のまま残る(2026-10-25 に実測)。
+      expect(overrides["cheerio>undici"]).toBe(OVERRIDE_VALUE);
+    });
+
+    it("pnpm-lock.yaml の overrides の節に 2 つの指定があり、undici の版はすべて 7.30.1 以上", () => {
+      const section = lockOverrides(lock);
+      expect(section).toContain(`  miniflare>undici: ${OVERRIDE_VALUE}\n`);
+      expect(section).toContain(`  cheerio>undici: ${OVERRIDE_VALUE}\n`);
+      const versions = undiciVersions(lock);
+      expect(versions.length, "undici が lock にある(空振りでない)").toBeGreaterThan(0);
+      for (const v of versions) expect(atLeast(v, MIN), `undici@${v} は 7.30.1 以上`).toBe(true);
+    });
+
+    it("理由が //deps.undici にある", () => {
+      const reasons = pkg["//deps"] as Record<string, string>;
+      expect(reasons["undici"]).toBeTruthy();
+      expect(reasons["undici"]).toContain("#483");
+    });
+  });
+});
