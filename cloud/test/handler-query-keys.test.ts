@@ -77,6 +77,7 @@ const ROUTES: readonly Route[] = [
   { name: "plan", path: "/api/plan", constant: "KAISAI_DATE_PARAMS", allowed: ["kaisai_date"], message: "クエリは kaisai_date だけを1つ指定できます", site: true },
   { name: "targets", path: "/api/targets", constant: "KAISAI_DATE_PARAMS", allowed: ["kaisai_date"], message: "クエリは kaisai_date だけを1つ指定できます", site: true },
   { name: "netkeiba/check", path: "/api/netkeiba/check", constant: "CHECK_PARAMS", allowed: ["race_id", "type"], message: "クエリは race_id(必須)と type(省略可。shutuba または grade-winner)だけを、それぞれ1つ指定してください", site: true },
+  { name: "jra/check", path: "/api/jra/check", constant: "NO_PARAMS", allowed: [], message: NO_QUERY, site: true },
   { name: "analyses", path: "/api/analyses", constant: "ANALYSES_PARAMS", allowed: ["race_id", "kaisai_date", "limit"], message: "クエリは race_id・kaisai_date・limit だけを、それぞれ1つまで指定できます", site: false },
   { name: "analyses/status", path: "/api/analyses/status", constant: "STATUS_PARAMS", allowed: ["kaisai_date", "race_id"], message: "クエリは kaisai_date(必須)と race_id(任意)だけを、それぞれ1つまで指定できます", site: false },
   { name: "analyses/{id}", path: "/api/analyses/123", constant: "NO_PARAMS", allowed: [], message: NO_QUERY, site: false },
@@ -86,7 +87,7 @@ const ROUTES: readonly Route[] = [
   { name: "monthly-reports/{month}", path: "/api/monthly-reports/202609", constant: "NO_PARAMS", allowed: [], message: NO_QUERY, site: false },
 ];
 
-describe("許可リストの外のキーは 400(全 15 ルート。ほかのルートで許可されているキー・どのルートにも無いキー・重複・大文字違い)", () => {
+describe("許可リストの外のキーは 400(全 16 ルート。ほかのルートで許可されているキー・どのルートにも無いキー・重複・大文字違い)", () => {
   for (const route of ROUTES) {
     const foreign = [...ALL_KEYS.filter((k) => !route.allowed.includes(k)), "zzz"];
 
@@ -114,11 +115,11 @@ describe("許可リストの外のキーは 400(全 15 ルート。ほかのル�
   }
 });
 
-describe("別サイト(Sec-Fetch-Site が same-origin・none 以外)の検査は、クエリの検査より先(別サイト検査をする 8 ルート)", () => {
+describe("別サイト(Sec-Fetch-Site が same-origin・none 以外)の検査は、クエリの検査より先(別サイト検査をする 9 ルート)", () => {
   const checked = ROUTES.filter((r) => r.site);
 
-  it("前提: 別サイトを検査するルートは 8 本", () => {
-    expect(checked.map((r) => r.name)).toEqual(["horse-runs", "baba-fetch", "verify", "prior-export", "races", "plan", "targets", "netkeiba/check"]);
+  it("前提: 別サイトを検査するルートは 9 本(Issue #488 で jra/check が加わり 8 → 9)", () => {
+    expect(checked.map((r) => r.name)).toEqual(["horse-runs", "baba-fetch", "verify", "prior-export", "races", "plan", "targets", "netkeiba/check", "jra/check"]);
   });
 
   for (const route of checked) {

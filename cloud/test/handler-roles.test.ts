@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { handle, type Env } from "../src/handler";
 import { AUD, EMAIL, GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
+import { installFetchTrap } from "./fetch-trap";
 
 /**
  * Issue #238: 閲覧者(viewer)と管理者(admin)の役割が、handle() の入口で効くことの固定。
@@ -9,6 +10,10 @@ import { AUD, EMAIL, GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./help
  *  - 認証に失敗したときは従来どおり 403 `forbidden`(役割は認証に通ってからの話)。
  *  - ルート × 役割の表そのものは route-policy.test.ts(表の手書きの期待値と静的ガード)。ここは handle() を実際に呼んで確かめる。
  */
+
+// Issue #488: 管理者が GET /api/jra/check に届くと JRA への取得が起きる。このファイルの管理者のテストは全ルートに届くので、グローバルの fetch は呼ばれたら落ちるスタブにし(実サイトに出ない)、
+// deps には JRA への取得の偽物(必ず失敗する fetch・待たない wait)を渡す。
+installFetchTrap();
 
 const VIEWER_EMAIL = "friend@example.com";
 const ORIGIN = "https://cloud.invalid";
@@ -51,7 +56,13 @@ function throwingBackends(): Record<string, unknown> {
 async function setup() {
   const key = await makeKey("k1");
   const lines: string[] = [];
-  const deps = { keys: () => localKeys(key), now: () => NOW, log: (line: string) => void lines.push(line) };
+  const deps = {
+    keys: () => localKeys(key),
+    now: () => NOW,
+    log: (line: string) => void lines.push(line),
+    jraFetch: (): Promise<Response> => Promise.reject(new Error("テストでは JRA に出ない")),
+    jraWait: (): Promise<void> => Promise.resolve(),
+  };
   return {
     deps,
     lines,
@@ -102,6 +113,7 @@ const ROUTES: readonly { readonly sample: string; readonly viewer: readonly stri
   { sample: "/api/export/prior-dataset", viewer: [] }, // Issue #266
   { sample: "/api/horse-runs", viewer: [] }, // Issue #256 段階A
   { sample: "/api/baba-fetch", viewer: [] }, // Issue #360
+  { sample: "/api/jra/check", viewer: [] }, // Issue #488: JRA に Worker から届くかの確認(開くたびに JRA へ出る)
 ];
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 
@@ -120,10 +132,10 @@ async function call(env: Env, deps: Parameters<typeof handle>[3], req: Request):
 describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-only。裏側にもリクエスト本文にも触れない", () => {
   const cases = ROUTES.flatMap((r) => METHODS.filter((m) => !r.viewer.includes(m)).map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者が管理者専用に当たる組は 165 通り(32 ルート × 6 method = 192 から、閲覧者に許す 27 を引く)", () => {
-    expect(ROUTES).toHaveLength(32);
+  it("前提: 閲覧者が管理者専用に当たる組は 171 通り(33 ルート × 6 method = 198 から、閲覧者に許す 27 を引く)", () => {
+    expect(ROUTES).toHaveLength(33);
     expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(27);
-    expect(cases).toHaveLength(165);
+    expect(cases).toHaveLength(171);
   });
 
   it.each(cases)("%s %s → 403(本文は admin-only の固定)。バインディングに触れず、本文を読まない", async (method, path) => {

@@ -1,0 +1,73 @@
+{
+  "kaisai_info" : [ {
+    "sort" : "A",
+    "kai" : "4",
+    "day" : "9",
+    "decided" : "8レースまで確定",
+    "cancel_info" : "",
+    "weather" : "曇",
+    "changes" : [ ],
+    "class" : "ajo",
+    "jyoname" : "東京",
+    "kaisai_ymd" : "20261025",
+    "youbi" : "日曜日",
+    "decided_link_para" : "pw01drl00052026040920261025/AA",
+    "decided_link_para_sp" : "sw01drl00052026040920261025/37",
+    "ba_s" : "稍重",
+    "ba_d" : "稍重",
+    "race" : [ ]
+  }, {
+    "sort" : "B",
+    "kai" : "4",
+    "day" : "9",
+    "decided" : "8レースまで確定",
+    "cancel_info" : "",
+    "weather" : "曇",
+    "changes" : [ {
+      "grade_change" : "0",
+      "course_change" : "0",
+      "start_change" : "2",
+      "entry_cancel" : "1",
+      "exclusion" : "0",
+      "jockey_change" : "0",
+      "weight_over" : "0",
+      "blinkers_cancel" : "0"
+    } ],
+    "class" : "bjo",
+    "jyoname" : "京都",
+    "kaisai_ymd" : "20261025",
+    "youbi" : "日曜日",
+    "decided_link_para" : "pw01drl00082026040920261025/88",
+    "decided_link_para_sp" : "sw01drl00082026040920261025/15",
+    "ba_s" : "稍重",
+    "ba_d" : "重",
+    "race" : [ ]
+  }, {
+    "sort" : "C",
+    "kai" : "4",
+    "day" : "4",
+    "decided" : "9レースまで確定",
+    "cancel_info" : "",
+    "weather" : "雨",
+    "changes" : [ {
+      "grade_change" : "0",
+      "course_change" : "0",
+      "start_change" : "2",
+      "entry_cancel" : "0",
+      "exclusion" : "0",
+      "jockey_change" : "0",
+      "weight_over" : "0",
+      "blinkers_cancel" : "0"
+    } ],
+    "class" : "cjo",
+    "jyoname" : "新潟",
+    "kaisai_ymd" : "20261025",
+    "youbi" : "日曜日",
+    "decided_link_para" : "pw01drl00042026040420261025/21",
+    "decided_link_para_sp" : "sw01drl00042026040420261025/AE",
+    "ba_s" : "不良",
+    "ba_d" : "不良",
+    "race" : [ ]
+  } ]
+}
+                                                                                                    
