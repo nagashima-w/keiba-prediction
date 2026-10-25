@@ -32,6 +32,8 @@
  * **Issue #426 で再生成した**(スナップショットの race にレースのクラス `raceClass` を足した。入力の出馬表 `shutuba_202603020211` のクラスは「オープン」)。
  *   差分の検査: 新旧の JSON を構造で比べ、差分が「3 シナリオの `record.raceSnapshot.race` に `raceClass: "オープン"` のキーが加わる」3 件だけ
  *   (キーの追加 3・削除 0・値の変更 0。`promptInput`・`promptText`・確率・配分は 1 件も動かない。`git diff` の行としては、`"filliesOnly": false` の末尾のカンマが加わる 3 行を含む 6 行の追加と 3 行の削除)。
+ * **Issue #421 手順 2 で再生成した**(地方のレースでは統計モデルの斤量の項を使わない。`PROMPT_VERSION` が "2026-10-18.2" → "2026-10-25.1" になった)。入力の出馬表 `shutuba_202603020211` は中央のレースなので、prior・確率・配分は動かない。
+ *   差分の検査: `git diff -U0 packages/core/test/golden | grep '^[-+]'` で、`record.promptVersion` の 1 行の置き換え(削除 1・追加 1)だけであること。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */

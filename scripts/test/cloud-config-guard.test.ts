@@ -1014,6 +1014,16 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     }
   });
 
+  it("Issue #476: ルートの engines.node は、Brotli の脆弱性(CVE-2026-111497)の修正版(22.23.4・24.22.1・26.12.1)以上に限る。cloud と packages/core には engines を置かない", () => {
+    const rootPkg = JSON.parse(readTextLf("package.json")) as { engines?: { node?: string } };
+    expect(rootPkg.engines?.node).toBe("^22.23.4 || ^24.22.1 || >=26.12.1");
+    // engines を足す先を増やしたときに、この検査の対象も見直す(本番は Workers で Node は動かず、engines は束に入らない)
+    for (const segments of [["cloud", "package.json"], ["packages", "core", "package.json"]]) {
+      const pkg = JSON.parse(readTextLf(...segments)) as { engines?: unknown };
+      expect(pkg.engines, `${segments.join("/")} に engines は無い`).toBeUndefined();
+    }
+  });
+
   it("Issue #332: cloud の .ts は `fileURLToPath(new URL(…))` と書かない(グローバルの URL は workers-types のもので、@types/node 24 以上では node:url の URL と型が合わず TS2345)。test/meta-path.ts の pathFromMeta を使う", () => {
     const helper = readTextLf("cloud", "test", "meta-path.ts");
     expect(helper).toMatch(/new URL\(relative, metaUrl\)\.href/); // 文字列で渡す

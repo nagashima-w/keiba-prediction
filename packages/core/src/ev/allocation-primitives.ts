@@ -891,6 +891,7 @@ export type SkipReasonCode =
   | "cap-unset"
   | "cap-too-small"
   | "kelly-zero"
+  | "below-min-hit-prob"
   | "no-candidates"
   | "no-edge";
 
@@ -912,6 +913,7 @@ export const ALL_SKIP_REASON_CODES = [
   "cap-unset",
   "cap-too-small",
   "kelly-zero",
+  "below-min-hit-prob",
   "no-candidates",
   "no-edge",
 ] as const satisfies readonly SkipReasonCode[];
@@ -924,11 +926,16 @@ const _assertAllSkipReasonCodesCovered: MissingSkipReasonCodes extends never
 void _assertAllSkipReasonCodesCovered;
 
 /**
- * 見送り理由を6分類・優先順位順に決定する(コードのみ。文言化は呼び出し側の責務)。
+ * 見送り理由を7分類・優先順位順に決定する(コードのみ。文言化は呼び出し側の責務)。
  * isSkip(totalStake===0)のときにのみ呼び出される想定。
  *
  * 優先順位: ①総資金未設定 → ②1レース上限未設定 → ③1レース上限不足 → ④ケリー係数0
- * → ⑤候補0頭 → ⑥連続最適解ゼロ の順(bet-allocation.ts 設計判断7と同一)。
+ * → ⑤的中確率の下限で候補が全部外れた(Issue #470。EVプラスの候補はあったが下限未満で全て外れた)
+ * → ⑥候補0頭 → ⑦連続最適解ゼロ の順(bet-allocation.ts 設計判断7に⑤を足した形)。
+ * ⑤は⑥より先に判定する: 「EVプラスの候補が無い」と報告すると、実際は候補があったのに
+ * 下限で外れた事実と食い違う(判定結果を事実と違う理由で報告しない)。
+ *
+ * @param belowFloorCount 的中確率の下限で外れたEVプラスの候補数(省略時0=下限の影響なし)。
  */
 export function determineSkipReasonCode(
   bankrollInput: number,
@@ -938,6 +945,7 @@ export function determineSkipReasonCode(
   kellyTargetStake: number,
   kellyFraction: number,
   candidateCount: number,
+  belowFloorCount = 0,
 ): SkipReasonCode {
   if (!Number.isFinite(bankrollInput) || bankrollInput <= 0) {
     return "bankroll-unset";
@@ -951,8 +959,44 @@ export function determineSkipReasonCode(
   if (kellyTargetStake === 0 && kellyFraction === 0) {
     return "kelly-zero";
   }
+  if (candidateCount === 0 && belowFloorCount > 0) {
+    return "below-min-hit-prob";
+  }
   if (candidateCount === 0) {
     return "no-candidates";
   }
   return "no-edge";
+}
+
+/**
+ * 的中確率の下限(Issue #470)の解決。非有限(NaN/Infinity)・負は0(下限なし)、1超は1へ丸める
+ * (他の設定値の防御と同じく、不正な値でサイレントに壊れた結果を返さない)。
+ */
+export function resolveMinHitProb(raw: number | undefined): number {
+  if (raw === undefined || !Number.isFinite(raw) || raw <= 0) {
+    return 0;
+  }
+  return raw > 1 ? 1 : raw;
+}
+
+/** 的中確率が下限未満か(Issue #470)。「未満」なので、ちょうど下限の値は残る。下限0は常にfalse。 */
+export function isBelowMinHitProb(hitProb: number, minHitProb: number): boolean {
+  return hitProb < minHitProb;
+}
+
+/**
+ * 的中確率の下限(Issue #470)で外れた、EVプラスの買い目1件。複勝・組合せで共通の形
+ * (複勝は `betType:"place"`・`umabans:[馬番]`)。外した買い目の記録(`analysis_allocation_meta.missed_json`)の素材になる。
+ */
+export interface BelowFloorBet {
+  /** 券種(core の `AllocationBetType` の値)。 */
+  readonly betType: string;
+  /** 買い目を構成する馬番の組(枠連は枠番)。 */
+  readonly umabans: readonly number[];
+  /** 的中確率(下限と比べた値)。 */
+  readonly hitProb: number;
+  /** 採用したオッズ。 */
+  readonly odds: number;
+  /** 期待値。 */
+  readonly ev: number;
 }

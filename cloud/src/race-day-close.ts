@@ -73,7 +73,7 @@ export interface CloseInput {
   /** 開催日(YYYYMMDD)。 */
   readonly kaisaiDate: string;
   readonly horses: readonly CloseInputHorse[];
-  /** 設定のスナップショットのうち、配分に使う 10 項目(分析時と同じ値)。 */
+  /** 設定のスナップショットのうち、配分に使う 11 項目(分析時と同じ値。Issue #470 で的中確率の下限 `minHitProb` を足して 10 → 11。旧い入力には無く、0 で読む)。 */
   readonly allocationSettings: AnalysisAllocationSettings;
   /** EV の閾値(分析時の設定の `evThreshold`)。 */
   readonly evThreshold: number;
@@ -132,6 +132,14 @@ export function parseCloseInput(text: string): CloseInput | null {
     if (typeof settings[key] !== "boolean") {
       return null;
     }
+  }  // 的中確率の下限(Issue #470)。デプロイをまたいだ旧い入力(下限の無いスナップショット)は 0(下限なし)で読む: その分析は旧い Worker が下限なしで配分したので、
+  // 再計算も揃える(下限の差だけで『買い目の変化』が出ないようにする)。あるのに 0〜1 の数でないものは壊れた入力。
+  let minHitProb = 0;
+  if (settings.minHitProb !== undefined) {
+    if (!isFiniteNumber(settings.minHitProb) || settings.minHitProb < 0 || settings.minHitProb > 1) {
+      return null;
+    }
+    minHitProb = settings.minHitProb;
   }
   const seen = new Set<number>();
   const horses: CloseInputHorse[] = [];
@@ -157,6 +165,7 @@ export function parseCloseInput(text: string): CloseInput | null {
       bankroll: settings.bankroll,
       perRaceCap: settings.perRaceCap,
       kellyFraction: settings.kellyFraction,
+      minHitProb,
       includeComboOdds: settings.includeComboOdds as boolean,
       includeWideInAllocation: settings.includeWideInAllocation as boolean,
       includeTrioInAllocation: settings.includeTrioInAllocation as boolean,

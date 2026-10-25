@@ -308,6 +308,7 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     bankroll: 1_000_000,
     perRaceCap: 100_000,
     kellyFraction: 0.5,
+    minHitProb: 0, // Issue #470: この計測は下限なし(従来の計測と同じ条件)。下限ありの計測は runMinHitProbCost
     evThreshold: 1.0,
     includeComboOdds: true,
     includeWideInAllocation: true,
@@ -712,6 +713,7 @@ async function runBracketQuinellaAllocationComparison(result: AnalysisResult): P
     bankroll: 1_000_000,
     perRaceCap: 100_000,
     kellyFraction: 0.5,
+    minHitProb: 0, // Issue #470: この計測は下限なし(従来の計測と同じ条件)。下限ありの計測は runMinHitProbCost
     evThreshold: 1.0,
     includeComboOdds: true,
     includeWideInAllocation: true,
@@ -797,6 +799,60 @@ async function runBracketQuinellaAllocationComparison(result: AnalysisResult): P
   }
 }
 
+/**
+ * 的中確率の下限(Issue #470)の CPU の計測。中央16頭・実オッズ(複勝・単勝・ワイド・馬連・馬単・三連複・三連単の7券種。枠連なし)・
+ * 総資金100万・1レース上限10万・λ=0.5 で、`buildMixedRaceAllocation`(web が呼ぶ経路の本体)を、下限ごとに繰り返し計測する。
+ *
+ * - 「下限なし」= 下限 0(従来と同じ)。
+ * - 「下限あり」= 下限のみ(外れた買い目の記録なし)。
+ * - 「下限あり+記録」= 分析時の保存と同じ(`recordMissed: true`)。外れた候補があれば、下限なしの配分をもう1回計算する。
+ * 平均 ms は、この機械・この1レース・ウォームアップ1回の後の n 回の平均で、**下位桁に意味は無い**(桁の目安。Workers の本番の CPU とは一致しない)。
+ * 再現: `pnpm tsx scripts/bench-mixed-allocation.ts`。
+ */
+async function runMinHitProbCost(result: AnalysisResult): Promise<void> {
+  const race: MixedCandidateBuildInput = {
+    ...toMixedCandidateInput(result),
+    quinellaCombo: loadQuinellaCombo(),
+    exactaCombo: loadExactaCombo(),
+    trifectaCombo: loadTrifectaCombo(),
+  };
+  const base: MixedAllocationSettings = {
+    bankroll: 1_000_000,
+    perRaceCap: 100_000,
+    kellyFraction: 0.5,
+    minHitProb: 0,
+    evThreshold: 1.0,
+    includeComboOdds: true,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: false,
+  };
+  console.log("");
+  console.log("=== 的中確率の下限(minHitProb。Issue #470)の CPU(中央16頭・実オッズ・枠連なし。buildMixedRaceAllocation) ===");
+  const iterations = 8;
+  const time = (settings: MixedAllocationSettings): { readonly avgMs: number; readonly view: ReturnType<typeof buildMixedRaceAllocation> } => {
+    buildMixedRaceAllocation(race, settings); // ウォームアップ
+    const samples: number[] = [];
+    let view = buildMixedRaceAllocation(race, settings);
+    for (let i = 0; i < iterations; i++) {
+      const t0 = performance.now();
+      view = buildMixedRaceAllocation(race, settings);
+      samples.push(performance.now() - t0);
+    }
+    return { avgMs: samples.reduce((a, b) => a + b, 0) / samples.length, view };
+  };
+  for (const minHitProb of [0, 0.02, 0.05, 0.1]) {
+    for (const recordMissed of minHitProb === 0 ? [false] : [false, true]) {
+      const { avgMs, view } = time({ ...base, minHitProb, recordMissed });
+      const detail = view.kind === "mixed" ? `候補${view.result.diagnostics.candidateCount}件 / 外れた${view.result.belowFloor.length}件 / 総額${view.result.totalStake.toLocaleString()}円 / ${view.result.betCount}点` : view.kind;
+      console.log(`  下限${minHitProb}${recordMissed ? "+記録" : ""}: 平均${avgMs.toFixed(1)}ms(n=${iterations}回) / ${detail}`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const result = await loadAnalysisResult();
   console.log(`raceId=${result.raceId} rows=${result.rows.length}頭 oddsStatus=${result.oddsStatus}`);
@@ -805,6 +861,7 @@ async function main(): Promise<void> {
   await runQuinellaPerformanceComparison(result);
   await runBracketQuinellaPerformanceComparison(result);
   await runBracketQuinellaAllocationComparison(result);
+  await runMinHitProbCost(result);
 }
 
 // このファイルを直接実行したとき(`pnpm tsx scripts/bench-mixed-allocation.ts`)だけ計測一式を

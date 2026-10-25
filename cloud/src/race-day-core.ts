@@ -1438,7 +1438,7 @@ export class RaceDayCore {
       await this.armAlarm();
       return outcome;
     }
-    // 馬場の API の取得(Issue #294)。開催日の朝の 1 回だけ。**タスクより前**: 発走前の分析(LLM)に当日の値を間に合わせる。期限は最初の発走前の分析より前なので、分析を遅らせない。
+    // 馬場の API の取得(Issue #294)。開催日の朝の 1 回だけ。**タスクより前**: 発走前の分析(LLM)に当日の値を間に合わせる。期限(09:30。Issue #475)は最初の発走前の分析より後になりうるが、その分析は取得を待たずに値なしで進む(分析を遅らせない)。
     // 動けるのは、取得口・保存先があり、中央の開催日で、今日が開催日で、期限が来ていて、まだ試みていないときだけ({@link BabaStage.runnable})。失敗しても例外にせず、次の起床でタスクが進む。
     if (this.baba.runnable()) {
       const outcome = await this.baba.run();

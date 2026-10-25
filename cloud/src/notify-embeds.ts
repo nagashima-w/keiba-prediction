@@ -361,12 +361,13 @@ const UNSET_TEXTS = {
   indeterminate: "配分の提案は出ていません(未設定の状態を判定できません)",
 } as const;
 
-/** 見送りの理由(core の `SkipReasonCode` の 6 分類。`Record` なので、分類が増えると型検査が落ちる)。文は core の見送りの文言の短縮。 */
+/** 見送りの理由(core の `SkipReasonCode` の 7 分類。`Record` なので、分類が増えると型検査が落ちる)。文は core の見送りの文言の短縮。 */
 const SKIP_REASON_TEXTS: Readonly<Record<SkipReasonCode, string>> = {
   "bankroll-unset": "総資金が未設定です",
   "cap-unset": "1レースの上限が未設定です",
   "cap-too-small": "1レースの上限が最小賭け金単位を下回ります",
   "kelly-zero": "ケリー係数が0です",
+  "below-min-hit-prob": "EVプラスの買い目は的中確率が下限に満たず、見送りです",
   "no-candidates": "EVプラスの買い目がありません",
   "no-edge": "妙味が小さく、賭ける価値のある配分が見つかりませんでした",
 };

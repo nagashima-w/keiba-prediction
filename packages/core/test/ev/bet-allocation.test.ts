@@ -730,7 +730,7 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
     });
   });
 
-  describe("受け入れ条件9・見送り6分類(優先順位順・テーブル駆動)", () => {
+  describe("受け入れ条件9・見送りのIssue #470前からの6分類(優先順位順・テーブル駆動。7つ目の below-min-hit-prob は min-hit-prob-place.test.ts)", () => {
     it("① bankroll<=0/非有限(未設定)は「総資金が未設定」になること(候補・cap有効でも)", () => {
       for (const bankroll of [0, -100, Number.NaN, Number.POSITIVE_INFINITY]) {
         const horses = [candidate(1, 0.6, 3)];
@@ -909,7 +909,7 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       expect(result.skipReasonCode).toBe(expectedCode);
     });
 
-    it("6分類のskipReasonCodeが互いに異なる値であること(集合サイズで機械的に固定)", () => {
+    it("Issue #470前からの6分類のskipReasonCodeが互いに異なる値であること(集合サイズで機械的に固定。7つ目は min-hit-prob-place.test.ts)", () => {
       const codes = table.map((t) => t.expectedCode);
       expect(new Set(codes).size).toBe(6);
     });

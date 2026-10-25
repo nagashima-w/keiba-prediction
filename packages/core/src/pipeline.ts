@@ -87,6 +87,7 @@ export type {
   RaceResultDetail,
   AnalysisAllocationMetaRecord,
   AnalysisBetRecord,
+  AnalysisMissedBetRecord,
   RaceResultEntry,
   StoredAnalysis,
 } from "./ev/analysis-store-types.js";

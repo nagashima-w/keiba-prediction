@@ -749,7 +749,7 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
     });
   });
 
-  describe("determineSkipReasonCode(見送り理由コードの判定・6分類優先順位。文言は含まない)", () => {
+  describe("determineSkipReasonCode(見送り理由コードの判定・Issue #470前からの6分類の優先順位。文言は含まない。7つ目の below-min-hit-prob は min-hit-prob-general.test.ts)", () => {
     const table: Array<{
       name: string;
       args: readonly [number, number, number, number, number, number, number];
@@ -775,25 +775,26 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
     });
   });
 
-  describe("ALL_SKIP_REASON_CODES(Issue #80 AC-A5: SkipReasonCodeを増やしていないことの機械検査)", () => {
-    it("6値ちょうどであり、値の集合がリテラル配列と一致すること", () => {
-      // 前提固定(空振り防止): 6という数はALL_SKIP_REASON_CODES.length自身からではなく、
+  describe("ALL_SKIP_REASON_CODES(Issue #80 AC-A5: SkipReasonCodeの集合を機械検査。Issue #470で6→7へ意図して変更)", () => {
+    it("7値ちょうどであり、値の集合がリテラル配列と一致すること(Issue #470で below-min-hit-prob を足した)", () => {
+      // 前提固定(空振り防止): 7という数はALL_SKIP_REASON_CODES.length自身からではなく、
       // このリテラル配列(実装からのimportではない、このテストが書く独立した期待値)から来る。
       const expected = [
         "bankroll-unset",
         "cap-unset",
         "cap-too-small",
         "kelly-zero",
+        "below-min-hit-prob",
         "no-candidates",
         "no-edge",
       ];
-      expect(expected).toHaveLength(6);
+      expect(expected).toHaveLength(7);
       // 順序に依存しない比較(定義順が変わっても壊れないよう、両者をソートしてtoEqual)。
       expect([...ALL_SKIP_REASON_CODES].sort()).toEqual([...expected].sort());
     });
 
-    it("重複が無いこと(Setに変換しても6件のまま)", () => {
-      expect(new Set(ALL_SKIP_REASON_CODES).size).toBe(6);
+    it("重複が無いこと(Setに変換しても7件のまま)", () => {
+      expect(new Set(ALL_SKIP_REASON_CODES).size).toBe(7);
     });
   });
 

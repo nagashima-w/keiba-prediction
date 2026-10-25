@@ -10,7 +10,7 @@
     "typecheck": "pnpm -r typecheck && tsc -p tsconfig.scripts.json"
   },
   "engines": {
-    "node": ">=22.19"
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   },
   "devDependencies": {
     "tsx": "^4.23.15",

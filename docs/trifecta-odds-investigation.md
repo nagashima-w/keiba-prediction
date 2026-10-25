@@ -373,6 +373,9 @@ console.log("人気の相異なる値の数:", new Set(keys.map(k => odds[k][2])
 封筒も同じ意味(**発売中**)であり、「新しい応答形状」だったのは`status`の値そのものではなく、
 「発売中だが票数の少ない組合せがキャップ値`"999,999.9"`で表示される」という三連単固有の
 表示仕様の方である(単勝・複勝の`status:"middle"`フィクスチャにはこのキャップ値は現れない)。
+**〔Issue #469(2026-10-23)の注記〕** 「三連単固有」は、この時点の観測範囲での記述である。2026-10-23 の実測で、
+仮の値は三連単に限らず**組合せ券種すべてに現れ、桁数が券種ごとに違う**(ワイド・枠連 `9,999.9`、馬連・馬単・
+三連複 `99,999.9`、三連単 `999,999.9`)と分かった。3 値とも欠損として扱うようにした。詳細は `docs/wide-trio-odds-investigation.md` §13・`docs/quinella-exacta-odds-investigation.md` §11・`docs/wakuren-odds-investigation.md` §13を参照。
 観測日(9/26)に叩いたレースが翌日発走(9/27)だったため「未発売のはず」という先入観が生じ、
 既存記録との突合を怠ったまま「断定できない」と書いたことが誤りの原因だった。
 
@@ -384,6 +387,10 @@ console.log("人気の相異なる値の数:", new Set(keys.map(k => odds[k][2])
 三連単オッズをパースしても、キャップ値を持つ2644件は`oddsMin: null`(EV計算対象外)、
 実数らしい値を持つ716件はそのまま数値として扱われる(`parse-combo-odds.test.ts`
 「parseComboOdds(上限キャップ値'999,999.9'のnull化。Issue #130・#25-D)」describe参照)。
+**〔Issue #469(2026-10-23)の注記〕** 上の「丁度`999999.9`と一致する場合のみ」という変換は、#469 で
+`9999.9`・`99999.9`・`999999.9`の3値に広げた(`toComboOddsNumber`の`ODDS_CAP_VALUES`。券種で分岐しない点は
+同じ)。ワイド・枠連の`9,999.9`、馬連・馬単・三連複の`99,999.9`も同じ仮の値と分かったため。
+偽陽性(本物のオッズが丁度その値のとき外れる)は保守的な側に倒れる。実測と再現は `docs/wide-trio-odds-investigation.md` §13・`docs/quinella-exacta-odds-investigation.md` §11・`docs/wakuren-odds-investigation.md` §13を参照。
 
 ### 6.3 発売条件の状態(AC-A5)まとめ
 
@@ -446,6 +453,9 @@ pnpm tsx scripts/fetch-quinella-exacta-raw.ts \
    実オッズとして読まないことで、`parse-combo-odds.ts`の組合せ券種共通パーサ
    (`toComboOddsNumber`)にnull化処理を実装し解決した(券種で分岐しない実装。地方は同種の
    値が未観測のため対象外)。
+   **〔Issue #469(2026-10-23)の注記〕** その後、仮の値は全券種にあり桁数が券種ごとに違うと分かり
+   (ワイド・枠連 `9,999.9`、馬連・馬単・三連複 `99,999.9`)、3 値とも欠損として扱うようにした。
+   また、地方にも同じ変換を適用済み(#283 以降。`toComboOddsNumber` を共有)。詳細は `docs/wide-trio-odds-investigation.md` §13・`docs/quinella-exacta-odds-investigation.md` §11・`docs/wakuren-odds-investigation.md` §13を参照。
 4. **地方presaleは#13・#103と同型のOR判定フォールバックで確認済み**(§6.1)。追加調査は不要
 5. **【#128】** `"trifecta"`という語は本ドキュメント・フィクスチャファイル名限定の命名であり、
    `AllocationBetType`等のメンバー名は#128で別途決定すること(§0)

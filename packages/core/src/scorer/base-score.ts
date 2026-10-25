@@ -332,6 +332,11 @@ const WEIGHT_CHANGE_NAME = "斤量";
 export interface WeightChangeInput {
   /** 今回の斤量(kg)。 */
   readonly kinryo: number;
+  /**
+   * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
+   * "nar"(地方競馬)では斤量の項を使わない(Issue #421 手順 2。下の computeWeightChangeScore の JSDoc)。
+   */
+  readonly venueKind?: RaceIdVenueKind;
 }
 
 /**
@@ -343,6 +348,14 @@ export interface WeightChangeInput {
  * その馬自身の実績(休み明け実績・ベスト体重。Issue #212)と照らして判断する。scorer でも機械的に
  * 減点すると二重に数えることになり、馬体重の減少が「ベスト体重に戻した」結果でも減点してしまうため。
  * 重みのキー(weights.weightChange)は、保存済みの設定を壊さないため名前を据え置いている(今は斤量だけに効く)。
+ *
+ * **地方(venueKind="nar")では斤量の項を使わない**(Issue #421 手順 2。ユーザー決定・2026-10-23)。寄与度の行は残し、
+ * applied=false・補正 0 にする(重みは設定の値のまま。他の対象外項目と同じ書き方)。根拠は #421 の測り直し:
+ * 本番の書き出し(2026-10-23。形式 3)の地方 151 レースで、斤量の項を外すと prior の Brier の差が
+ * −0.00072 [−0.00124, −0.00023](95%。レース単位のブートストラップ 1,000 回)で、補正の向きも結果と逆に見えた。
+ * ただしこの測定は 13 項目のモデル(タイム指数・調教師の項を入れる前)で行った。現行の 15 項目のモデルでは測っていない。
+ * 中央(792 レース)は −0.00008 [−0.00022, +0.00006] で差がなかったので、中央と開催区分の省略は従来どおり
+ * (値が 1 ビットも変わらない)。地方の判定が前走の斤量の有無より先(地方では前走の斤量があっても無くても同じ理由)。
  */
 export function computeWeightChangeScore(
   features: readonly DerivedRaceFeature[],
@@ -351,6 +364,17 @@ export function computeWeightChangeScore(
 ): BaseScoreContribution {
   const { kinryoScale, kinryoCapKg } = config.baseScore;
   const weight = config.baseScore.weights.weightChange;
+
+  // 地方(NAR)レースは斤量の項を使わない(Issue #421 手順 2)。補正は正の 0 のリテラルで返す(式を通すと -0 になりうる)。
+  if (today.venueKind === "nar") {
+    return {
+      biasName: WEIGHT_CHANGE_NAME,
+      applied: false,
+      reason: "NARのため対象外(地方では斤量の補正を使わない。Issue #421)",
+      weight,
+      correction: 0,
+    };
+  }
 
   // 前走(直近走)の斤量。取得できなければ斤量項は評価しない。
   const prevKinryo = features[0]?.result.kinryo ?? null;
@@ -452,6 +476,7 @@ export interface BaseScoreInput {
   /**
    * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
    * computeCourseFrameBiasScore にそのまま渡す(NARではコースレベル枠順バイアスを対象外にする)。
+   * computeJockeyScore(中立の切り替え)・computeWeightChangeScore(NARでは斤量の項を使わない。Issue #421)にも渡す。
    */
   readonly venueKind?: RaceIdVenueKind;
 }
@@ -488,7 +513,7 @@ export function computeBaseScore(
     computeJockeyScore(jockeyCourseStats, config, today.venueKind),
     computeWeightChangeScore(
       features,
-      { kinryo: today.kinryo },
+      { kinryo: today.kinryo, venueKind: today.venueKind },
       config,
     ),
     computeCourseFrameBiasScore(

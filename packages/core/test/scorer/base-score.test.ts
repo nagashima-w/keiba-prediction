@@ -420,6 +420,133 @@ describe("computeCourseFrameBiasScore(コースレベル枠順バイアス)", ()
   });
 });
 
+/**
+ * 旧実装(Issue #421 より前の computeWeightChangeScore)の式を、そのまま写した参照関数。
+ * 中央・開催区分の省略で値が **1 ビットも変わらない**ことを `toBe`(Object.is)で固定するための凍結コピー。
+ * 実装側を直しても、この関数は書き換えない(書き換えたら中央の不変の保証が意味を失う)。
+ */
+function frozenWeightChangeBeforeIssue421(
+  features: ReturnType<typeof deriveRaceFeatures>,
+  today: { kinryo: number },
+  config: ScorerConfig,
+) {
+  const { kinryoScale, kinryoCapKg } = config.baseScore;
+  const weight = config.baseScore.weights.weightChange;
+  const prevKinryo = features[0]?.result.kinryo ?? null;
+  let kinTerm = 0;
+  let hasKin = false;
+  if (prevKinryo !== null) {
+    const diff = Math.min(kinryoCapKg, Math.max(-kinryoCapKg, today.kinryo - prevKinryo));
+    kinTerm = -diff * kinryoScale;
+    hasKin = true;
+  }
+  return {
+    biasName: "斤量",
+    applied: hasKin,
+    reason: hasKin ? "斤量増減による小補正" : "前走斤量が取得できないため補正なし",
+    weight,
+    correction: kinTerm * weight,
+  };
+}
+
+describe("computeWeightChangeScore の開催区分(Issue #421: 地方では斤量の項を使わない)", () => {
+  const config = cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 1 } });
+  const withPrev = deriveRaceFeatures([makeResult({ date: "2025/01/01", kinryo: 54 })]);
+  const withoutPrev = deriveRaceFeatures([makeResult({ date: "2025/01/01", kinryo: null })]);
+
+  // 今回の斤量(前走 54kg)。増・減・上限超(±3kg)・同じ。
+  const cases: { name: string; kinryo: number; centralCorrection: number }[] = [
+    { name: "斤量増 +2kg", kinryo: 56, centralCorrection: -0.02 },
+    { name: "斤量減 -1kg", kinryo: 53, centralCorrection: 0.01 },
+    { name: "上限超の増 +5kg(上限 3kg)", kinryo: 59, centralCorrection: -0.03 },
+    { name: "上限超の減 -5kg(上限 3kg)", kinryo: 49, centralCorrection: 0.03 },
+    { name: "斤量の増減なし", kinryo: 54, centralCorrection: -0 },
+  ];
+
+  it.each(cases)("地方では斤量の補正が 0 になる: $name", ({ kinryo, centralCorrection }) => {
+    // 比較の前提: 同じ入力を中央で呼ぶと補正は期待どおり(増減なし以外は非ゼロ)。
+    const central = computeWeightChangeScore(withPrev, { kinryo, venueKind: "central" }, config);
+    expect(central.applied).toBe(true);
+    expect(central.correction).toBeCloseTo(centralCorrection, 10);
+    if (kinryo !== 54) {
+      expect(central.correction).not.toBe(0);
+    }
+    const nar = computeWeightChangeScore(withPrev, { kinryo, venueKind: "nar" }, config);
+    expect(nar.applied).toBe(false);
+    expect(Object.is(nar.correction, 0)).toBe(true); // -0 でもない
+    expect(nar.biasName).toBe("斤量");
+    expect(nar.weight).toBe(1); // 重みは設定の値のまま残す
+    expect(nar.reason).toContain("NARのため対象外");
+    expect(nar.reason).toContain("Issue #421");
+  });
+
+  it("地方では重みを変えても補正は 0 のまま、重みは設定の値が寄与度に残る", () => {
+    const heavy = cfg({ kinryoScale: 0.01, kinryoCapKg: 3, weights: { weightChange: 7 } });
+    const central = computeWeightChangeScore(withPrev, { kinryo: 56, venueKind: "central" }, heavy);
+    expect(central.correction).toBeCloseTo(-0.14, 10); // 前提: 中央では重みが効く
+    const nar = computeWeightChangeScore(withPrev, { kinryo: 56, venueKind: "nar" }, heavy);
+    expect(Object.is(nar.correction, 0)).toBe(true);
+    expect(nar.weight).toBe(7);
+  });
+
+  it("地方では前走の斤量が無くても戦績が空でも、理由は地方の対象外が優先される", () => {
+    for (const features of [withoutPrev, []]) {
+      const nar = computeWeightChangeScore(features, { kinryo: 56, venueKind: "nar" }, config);
+      expect(nar.applied).toBe(false);
+      expect(Object.is(nar.correction, 0)).toBe(true);
+      expect(nar.reason).toContain("NARのため対象外");
+    }
+  });
+
+  it("前走の斤量が無いときの既存の挙動は、中央・開催区分の省略で変わらない", () => {
+    for (const venueKind of ["central", undefined] as const) {
+      for (const features of [withoutPrev, []]) {
+        const c = computeWeightChangeScore(
+          features,
+          venueKind === undefined ? { kinryo: 56 } : { kinryo: 56, venueKind },
+          config,
+        );
+        expect(c).toEqual({
+          biasName: "斤量",
+          applied: false,
+          reason: "前走斤量が取得できないため補正なし",
+          weight: 1,
+          correction: 0,
+        });
+        expect(Object.is(c.correction, 0)).toBe(true);
+      }
+    }
+  });
+
+  it("中央・開催区分の省略では、旧実装の凍結コピーと値が完全に一致する(斤量差 -5〜+5kg を 0.5kg 刻み・前走あり/なし/戦績空。toBe で 1 ビットまで)", () => {
+    const featureSets = [withPrev, withoutPrev, [] as ReturnType<typeof deriveRaceFeatures>];
+    const configs = [config, DEFAULT_SCORER_CONFIG, cfg({ kinryoScale: 0.037, kinryoCapKg: 2.5, weights: { weightChange: 0.65 } })];
+    let nonZero = 0;
+    let compared = 0;
+    for (const conf of configs) {
+      for (const features of featureSets) {
+        for (let step = -10; step <= 10; step++) {
+          const kinryo = 54 + step * 0.5;
+          const expected = frozenWeightChangeBeforeIssue421(features, { kinryo }, conf);
+          for (const today of [{ kinryo }, { kinryo, venueKind: "central" as const }]) {
+            const actual = computeWeightChangeScore(features, today, conf);
+            expect(actual.applied).toBe(expected.applied);
+            expect(actual.reason).toBe(expected.reason);
+            expect(actual.weight).toBe(expected.weight);
+            expect(Object.is(actual.correction, expected.correction)).toBe(true);
+            expect(actual.biasName).toBe(expected.biasName);
+            compared++;
+            if (actual.correction !== 0) nonZero++;
+          }
+        }
+      }
+    }
+    // 空振り防止: 比較の件数と、補正が非ゼロの件数を固定する(3 設定 × 3 戦績 × 21 刻み × 2 呼び方 = 378)。
+    expect(compared).toBe(378);
+    expect(nonZero).toBeGreaterThan(50);
+  });
+});
+
 describe("computeBaseScore(基礎スコア統合)", () => {
   it("6項目すべての寄与度ログを返し、合計が各補正の和になること", () => {
     const features = deriveRaceFeatures([
@@ -463,6 +590,41 @@ describe("computeBaseScore(基礎スコア統合)", () => {
     expect(jockeyOf("central").correction).toBeCloseTo(0.1, 10);
     expect(jockeyOf("nar").correction).toBeCloseTo(0.2, 10);
     expect(jockeyOf(undefined).correction).toBeCloseTo(0.1, 10); // 省略は中央
+  });
+
+  it("venueKind: nar のとき斤量の項が対象外になり、補正合計は斤量を除いた和になる(中央・省略では斤量が効く。Issue #421)", () => {
+    const features = deriveRaceFeatures([
+      makeResult({ date: "2025/03/01", courseType: "ダ", distance: 1800, finishPosition: rank(1), last3f: 36, kinryo: 52 }),
+    ]);
+    const today = { courseType: "ダ" as const, distance: 1800, venueName: "中山", frameZone: "内" as const, kinryo: 55 };
+    const kinOf = (venueKind?: "central" | "nar") =>
+      computeBaseScore(features, { ...today, venueKind }, undefined, DEFAULT_SCORER_CONFIG);
+    const nar = kinOf("nar");
+    const central = kinOf("central");
+    const omitted = kinOf(undefined);
+    const narKin = nar.contributions.find((c) => c.biasName === "斤量")!;
+    const centralKin = central.contributions.find((c) => c.biasName === "斤量")!;
+    // 前提: 中央では斤量の項が非ゼロ(前走52→今回55 で増)。
+    expect(centralKin.applied).toBe(true);
+    expect(centralKin.correction).not.toBe(0);
+    expect(omitted.contributions).toEqual(central.contributions);
+    // 地方: 斤量の行は残り(6 項目)、applied=false・補正 0。
+    expect(nar.contributions).toHaveLength(6);
+    expect(narKin.applied).toBe(false);
+    expect(narKin.correction).toBe(0);
+    // 地方と中央の補正合計の差は、中央の斤量の補正と、地方で対象外になるコース枠順バイアスの差だけ(他の項は地方でも同じ)。
+    const frameOf = (r: typeof nar) => r.contributions.find((c) => c.biasName === "コース枠順バイアス")!.correction;
+    expect(central.correctionSum - nar.correctionSum).toBeCloseTo(
+      centralKin.correction + (frameOf(central) - frameOf(nar)),
+      12,
+    );
+    // 騎手の行は参考値の中立(overallRate)が開催区分で違うので、補正(と名前)だけを比べる。
+    const others = (r: typeof nar) =>
+      r.contributions
+        .filter((c) => c.biasName !== "斤量" && c.biasName !== "コース枠順バイアス")
+        .map((c) => ({ biasName: c.biasName, correction: c.correction }));
+    expect(others(nar)).toHaveLength(4);
+    expect(others(nar)).toEqual(others(central));
   });
 
   it("venueKind: nar を computeCourseFrameBiasScore にそのまま渡すこと(NARでは対象外)", () => {

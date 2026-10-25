@@ -42,9 +42,9 @@ describe("設定画面の VNode", () => {
     expect(() => mountAll(renderScreen(buildSettingsModel({ load: { kind: "loading" }, draft: null, errors: {}, save: { kind: "idle" } }), noopActions))).not.toThrow();
   });
 
-  it("入力欄は 30 個(既存の 15 + スコアリングの重み 15。Issue #218・#353)で、すべて data-field に項目名を持つ(FIELD_ORDER の順、そのあとに WEIGHT_FIELD_ORDER の順)", () => {
+  it("入力欄は 31 個(既存の 16〈Issue #470 で的中確率の下限を足した〉+ スコアリングの重み 15。Issue #218・#353)で、すべて data-field に項目名を持つ(FIELD_ORDER の順、そのあとに WEIGHT_FIELD_ORDER の順)", () => {
     const fields = inputs(tree());
-    expect(fields.length).toBe(30);
+    expect(fields.length).toBe(31);
     expect(fields.map((n) => n.attrs?.["data-field"])).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER]);
   });
 
@@ -82,7 +82,7 @@ describe("設定画面の VNode", () => {
   it("Issue #189: 文字を打つ欄(数値の text・textarea)は、change に加えて input でも onSettingsInput を呼ぶ(入力中の値を、保存の直前に取りこぼさない)。checkbox・select は change だけ", () => {
     const calls: [string, string][] = [];
     const actions: ViewActions = { ...noopActions, onSettingsInput: (key, value) => void calls.push([key, value]) };
-    const typed = new Set<string>(["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "additionalInstruction", "preRaceOffsetMinutes", ...WEIGHT_FIELD_ORDER]);
+    const typed = new Set<string>(["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "minHitProb", "additionalInstruction", "preRaceOffsetMinutes", ...WEIGHT_FIELD_ORDER]);
     const fields = inputs(tree({}, actions));
     for (const n of fields) {
       const key = String(n.attrs?.["data-field"]);
@@ -95,7 +95,7 @@ describe("設定画面の VNode", () => {
       }
     }
     expect(calls).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER].filter((k) => typed.has(k)).map((k) => [k, `入力:${k}`]));
-    expect(typed.size).toBe(6 + 15); // 既存の6項目 + 重み15項目(数値の text 欄)
+    expect(typed.size).toBe(7 + 15); // 既存の7項目(Issue #470 で minHitProb を足した)+ 重み15項目(数値の text 欄)
   });
 
   it("保存ボタン(class=settings-save。文言は「保存」)のクリックは onSettingsSave。保存中は disabled・文言「保存中…」。入力欄も disabled", () => {
@@ -212,7 +212,7 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
     expect(labels.some((l) => l.startsWith("馬場状態適性(道悪)"))).toBe(true);
   });
 
-  it("入力欄の位置: 通常の項目 15 個の後ろ・保存ボタンの前。プレビューより前", () => {
+  it("入力欄の位置: 通常の項目 16 個の後ろ・保存ボタンの前。プレビューより前", () => {
     const t = tree({ previewOpen: true });
     const top = t.children as VNode[];
     const idx = (pred: (c: VNode) => boolean): number => top.findIndex((c) => typeof c !== "string" && pred(c));
@@ -376,14 +376,14 @@ describe("Issue #201・#396: プロンプトのプレビュー(VNode。文面は
     expect(refresh(normal)[0]!.attrs?.["disabled"]).toBeFalsy();
   });
 
-  it("プレビューは保存ボタンより後ろ(画面の末尾)にある。入力欄(data-field)は増えない(15 個のまま)", () => {
+  it("プレビューは保存ボタンより後ろ(画面の末尾)にある。入力欄(data-field)は増えない(31 個のまま)", () => {
     const t = tree({ ...OPEN });
     const top = t.children as VNode[];
     const saveIndex = top.findIndex((c) => typeof c !== "string" && (c.attrs?.["class"] === "settings-save"));
     const previewIndex = top.findIndex((c) => typeof c !== "string" && byClass(c, "preview-toggle").length > 0);
     expect(saveIndex).toBeGreaterThan(0);
     expect(previewIndex).toBeGreaterThan(saveIndex);
-    expect(inputs(t).length).toBe(30);
+    expect(inputs(t).length).toBe(31);
   });
 
   it("読み込み中・取得の失敗では、プレビューのボタンも出ない", () => {

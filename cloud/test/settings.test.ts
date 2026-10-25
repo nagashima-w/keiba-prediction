@@ -34,6 +34,7 @@ describe("既定値", () => {
       bankroll: 0,
       perRaceCap: 0,
       kellyFraction: 0.5,
+      minHitProb: 0.05, // Issue #470: 的中確率が 0.05 未満の買い目は買わない(ユーザー決定 2026-10-23)
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -276,6 +277,7 @@ const FULL: CloudSettings = {
   bankroll: 500_000,
   perRaceCap: 50_000,
   kellyFraction: 0.25,
+  minHitProb: 0.12, // Issue #470: 既定(0.05)と別の値
   includeComboOdds: true,
   includeWideInAllocation: false,
   includeTrioInAllocation: false,
@@ -320,6 +322,9 @@ const BOUNDARIES: ReadonlyArray<{ key: keyof CloudSettings; raw: unknown; read: 
   ...[0.05, 0.5, 1].map((raw) => ({ key: "kellyFraction" as const, raw, read: true, write: true })),
   ...[0, 0.01, 0.04999].map((raw) => ({ key: "kellyFraction" as const, raw, read: true, write: false })),
   ...[-0.01, 1.0001, "0.5", Number.NaN].map((raw) => ({ key: "kellyFraction" as const, raw, read: false, write: false })),
+  // Issue #470: 的中確率の下限。読む側も書く側も 0〜1(0 は下限なし、1 は全部外す)。部分集合が真部分集合でない。
+  ...[0, 0.05, 0.2, 1].map((raw) => ({ key: "minHitProb" as const, raw, read: true, write: true })),
+  ...[-0.01, 1.0001, "0.05", null, Number.NaN, Number.POSITIVE_INFINITY].map((raw) => ({ key: "minHitProb" as const, raw, read: false, write: false })),
   ...[10, 11, 45, 179, 180].map((raw) => ({ key: "preRaceOffsetMinutes" as const, raw, read: true, write: true })),
   ...[0, 9, 181, 10.5, "45", Number.NaN].map((raw) => ({ key: "preRaceOffsetMinutes" as const, raw, read: false, write: false })),
   ...["default", "wide15"].map((raw) => ({ key: "clipVariant" as const, raw, read: true, write: true })),
@@ -489,7 +494,7 @@ describe("saveSettings(D1 の1行に UPSERT)", () => {
     expect(record[0]!.args.length).toBe(2);
     expect(record[0]!.args[1]).toBe("2026-10-07T01:02:03.000Z");
     expect(JSON.parse(record[0]!.args[0] as string)).toEqual(FULL);
-    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(30); // 既存の15項目 + 重み15項目
+    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(31); // 既存の16項目(Issue #470で的中確率の下限を足した)+ 重み15項目
     expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(Object.keys(DEFAULT_CLOUD_SETTINGS).length);
   });
 
@@ -501,5 +506,34 @@ describe("saveSettings(D1 の1行に UPSERT)", () => {
 
   it("D1 の書き込みが失敗したら投げる", async () => {
     await expect(saveSettings(writeDb([], true), FULL, "2026-10-07T00:00:00.000Z")).rejects.toThrow("D1 失敗");
+  });
+});
+
+
+describe("minHitProb(的中確率の下限。Issue #470)", () => {
+  it("項目が無い旧い行は、既定値 0.05 で読む(デプロイ時点で下限が効く)", () => {
+    expect(coerceCloudSettings({ bankroll: 1_000_000, perRaceCap: 100_000 }).minHitProb).toBe(0.05);
+    expect(coerceCloudSettings({}).minHitProb).toBe(0.05);
+    expect(coerceCloudSettings(null).minHitProb).toBe(0.05);
+  });
+
+  it("0(下限なし)・0.2・1 は採用し、範囲外・型違いはその項目だけ 0.05 に戻す", () => {
+    expect(coerceCloudSettings({ minHitProb: 0 }).minHitProb).toBe(0);
+    expect(coerceCloudSettings({ minHitProb: 0.2 }).minHitProb).toBe(0.2);
+    expect(coerceCloudSettings({ minHitProb: 1 }).minHitProb).toBe(1);
+    for (const bad of [-0.01, 1.01, "0.1", null, Number.NaN]) {
+      const s = coerceCloudSettings({ minHitProb: bad, bankroll: 500 });
+      expect(s.minHitProb).toBe(0.05);
+      expect(s.bankroll).toBe(500); // 他の項目は巻き込まない
+    }
+  });
+
+  it("保存の検証: 項目が欠けた本文は不正(keys-mismatch の対象)で、0・1 は通り、範囲外は minHitProb だけを名指しする", () => {
+    const { minHitProb: _omit, ...withoutKey } = FULL;
+    expect(validateCloudSettingsForSave(withoutKey)).toEqual({ ok: false, fields: ["minHitProb"] });
+    expect(validateCloudSettingsForSave({ ...FULL, minHitProb: 0 }).ok).toBe(true);
+    expect(validateCloudSettingsForSave({ ...FULL, minHitProb: 1 }).ok).toBe(true);
+    expect(validateCloudSettingsForSave({ ...FULL, minHitProb: 1.01 })).toEqual({ ok: false, fields: ["minHitProb"] });
+    expect(validateCloudSettingsForSave({ ...FULL, minHitProb: -0.01 })).toEqual({ ok: false, fields: ["minHitProb"] });
   });
 });

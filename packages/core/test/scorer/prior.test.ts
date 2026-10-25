@@ -453,3 +453,62 @@ describe("computePrior 実フィクスチャ(ウィンターガーデン23走)",
     expect(cf?.applied).toBe(true);
   });
 });
+
+describe("地方では斤量の項が prior に効かない(Issue #421。computeFieldPriors・buildPriorInput 経由)", () => {
+  // 10 頭が同じ戦績(前走 54kg)で、今回の斤量だけが違う(上限 3kg の内側で、すべて異なる値)。他の条件はすべて同じ。
+  // 頭数が少ないと中立確率が 1(3 頭以下)になり、全頭がクランプされて差が見えないので、10 頭にする。
+  const raceResults = [
+    makeResult({ date: "2025/06/01", finishPosition: rank(3), kinryo: 54 }),
+    makeResult({ date: "2025/05/01", finishPosition: rank(1), kinryo: 54 }),
+  ];
+  const features = deriveRaceFeatures(raceResults);
+  const kinryos = [52, 53, 53.5, 54, 54.5, 55, 55.5, 56, 56.5, 57];
+  const fieldOf = (venueKind: "central" | "nar") =>
+    computeFieldPriors(
+      kinryos.map((kinryo) => ({
+        features,
+        today: { ...NEUTRAL_TODAY, kinryo, venueKind },
+        fieldSize: kinryos.length,
+      })),
+    );
+
+  it("中央では今回の斤量の違いが prior に出る(比較の前提)", () => {
+    const central = fieldOf("central");
+    const kin = central.map((p) => p.contributions.find((c) => c.biasName === "斤量")!.correction);
+    expect(kin[0]).toBeGreaterThan(0); // 52kg: 前走より軽い
+    expect(kin[3]).toBe(0 * kin[3]!); // 54kg: 同じ(0 または -0)
+    expect(kin[9]).toBeLessThan(0); // 57kg: 前走より重い
+    expect(new Set(central.map((p) => p.prior)).size).toBe(10);
+  });
+
+  it("地方では今回の斤量が違っても prior・rawPrior・補正合計が全頭で一致し、斤量の行は applied=false・補正 0 で残る", () => {
+    const nar = fieldOf("nar");
+    expect(nar).toHaveLength(10);
+    expect(new Set(nar.map((p) => p.prior)).size).toBe(1);
+    expect(new Set(nar.map((p) => p.rawPrior)).size).toBe(1);
+    expect(new Set(nar.map((p) => p.correctionSum)).size).toBe(1);
+    for (const p of nar) {
+      const kin = p.contributions.filter((c) => c.biasName === "斤量");
+      expect(kin).toHaveLength(1);
+      expect(kin[0]!.applied).toBe(false);
+      expect(Object.is(kin[0]!.correction, 0)).toBe(true);
+      expect(kin[0]!.reason).toContain("NARのため対象外");
+    }
+  });
+
+  it("buildPriorInput(race.venueKind: nar)→ computePrior で斤量の項が対象外になる(production の組み立ての経路)", () => {
+    const horse: ShutubaHorse = {
+      wakuban: 4, umaban: 7, name: "地方斤量馬", horseId: "2020100003" as ShutubaHorse["horseId"],
+      sex: "牡", age: 4, kinryo: 58, jockeyName: "騎手", jockeyId: null,
+      stableLocation: "高知", trainerName: "調教師", trainerId: null, bodyWeight: null,
+    };
+    const race = { courseType: "ダ" as const, distance: 1400, venueName: "高知", isWet: false, date: "2025/07/06" };
+    const priorOf = (venueKind: "central" | "nar") =>
+      computePrior(buildPriorInput({ horse, raceResults, race: { ...race, venueKind }, fieldSize: 12 }));
+    const central = priorOf("central").contributions.find((c) => c.biasName === "斤量")!;
+    const nar = priorOf("nar").contributions.find((c) => c.biasName === "斤量")!;
+    expect(central.correction).toBeLessThan(0); // 前提: 前走 54 → 今回 58 は中央では減点
+    expect(nar.applied).toBe(false);
+    expect(Object.is(nar.correction, 0)).toBe(true);
+  });
+});

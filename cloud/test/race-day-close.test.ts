@@ -468,7 +468,15 @@ describe("締切の直前の再計算: 取り直しと再計算(中央)", () => 
     // 同じオッズ・同じ確率なので、分析時の配分(メタ・買い目)と完全に一致する(配分が多点であることを先に固定する)
     const base = h.sink.saved[0]!.allocation!;
     expect(base.bets.length).toBeGreaterThan(5);
-    expect(JSON.stringify(payload.allocation)).toBe(JSON.stringify(base));
+    // Issue #470: 分析時の保存だけが、下限で外れた買い目の『外さなかった場合の賭け金』(meta.missed)を記録する。締切直前の再計算は下限は適用するが記録はしない(null)。
+    // それ以外(買い目・メタの他の項目〈外れた件数を含む〉)は、同じオッズなら分析時と一致する。
+    // 設定の下限が、分析(取得 → 計算 → 保存)の配分まで届いている(配線の抜けを検出する。既定 0.05 と別の値での確認は allocation-settings-of.test.ts)。
+    expect(base.meta.minHitProb).toBe(ALL_ON.minHitProb);
+    expect(base.meta.belowFloorCount, "前提: 実際に外れた買い目がある").toBeGreaterThan(0);
+    expect(base.meta.missed, "前提: 分析時は外した買い目を記録している").not.toBeNull();
+    expect(base.meta.missed!.length).toBeGreaterThan(0);
+    expect(payload.allocation!.meta.missed).toBeNull();
+    expect(JSON.stringify({ ...payload.allocation!, meta: { ...payload.allocation!.meta, missed: base.meta.missed } })).toBe(JSON.stringify(base));
     expect(closeRows(h).map((r) => [r.round, r.state])).toEqual([
       [1, "done"],
       [2, "pending"],
@@ -530,7 +538,7 @@ describe("締切の直前の再計算: 取り直しと再計算(中央)", () => 
         horses: race.horses.map((x) => ({ umaban: x.shutuba.umaban, wakuban: x.shutuba.wakuban, horseName: x.shutuba.name, prior: saved.horses.find((s) => s.umaban === x.shutuba.umaban)!.prior, adjustedProb: saved.horses.find((s) => s.umaban === x.shutuba.umaban)!.adjustedProb })),
         odds: race.odds,
         comboOdds: race.meta.comboOdds,
-        allocationSettings: { bankroll: ALL_ON.bankroll, perRaceCap: ALL_ON.perRaceCap, kellyFraction: ALL_ON.kellyFraction, includeComboOdds: true, includeWideInAllocation: ALL_ON.includeWideInAllocation, includeTrioInAllocation: ALL_ON.includeTrioInAllocation, includeQuinellaInAllocation: ALL_ON.includeQuinellaInAllocation, includeExactaInAllocation: ALL_ON.includeExactaInAllocation, includeTrifectaInAllocation: ALL_ON.includeTrifectaInAllocation, includeBracketQuinellaInAllocation: ALL_ON.includeBracketQuinellaInAllocation },
+        allocationSettings: { bankroll: ALL_ON.bankroll, perRaceCap: ALL_ON.perRaceCap, kellyFraction: ALL_ON.kellyFraction, minHitProb: ALL_ON.minHitProb, includeComboOdds: true, includeWideInAllocation: ALL_ON.includeWideInAllocation, includeTrioInAllocation: ALL_ON.includeTrioInAllocation, includeQuinellaInAllocation: ALL_ON.includeQuinellaInAllocation, includeExactaInAllocation: ALL_ON.includeExactaInAllocation, includeTrifectaInAllocation: ALL_ON.includeTrifectaInAllocation, includeBracketQuinellaInAllocation: ALL_ON.includeBracketQuinellaInAllocation },
         evConfig: { threshold: ALL_ON.evThreshold },
       }).allocation;
     };

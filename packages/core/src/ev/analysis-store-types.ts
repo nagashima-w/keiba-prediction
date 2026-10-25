@@ -202,6 +202,44 @@ export interface AnalysisAllocationMetaRecord {
   readonly modelApproximate: boolean | null;
   /** オッズ発売状態(発売前/中間/確定)。`scraper/types.ts` の `OddsStatus` の値をそのまま受け取る。 */
   readonly oddsStatus: string;
+  /**
+   * 使った的中確率の下限(Issue #470。0=下限なし)。D1 の `analysis_allocation_meta.min_hit_prob`(NULL=記録なし=旧い行)。
+   * **共有の INSERT(`INSERT_ALLOCATION_META_SQL`)には含めない**(exe のスキーマに無い D1 専用の列。cloud の保存が別の UPDATE で書く。
+   * `mark_repair_json` と同じ流儀)。省略可: 旧い呼び出し・テストの手組みの記録は省略する。
+   */
+  readonly minHitProb?: number;
+  /**
+   * 的中確率の下限で外れた EV プラスの買い目の件数(Issue #470)。D1 の `below_floor_count`。
+   * 配分の計算に到達しなかった経路(unset・yoso・unavailable・invalid)は null(判定していない)。0=外れた候補なし。
+   */
+  readonly belowFloorCount?: number | null;
+  /**
+   * 外した買い目の記録(Issue #470)。D1 の `missed_json`(JSON の配列。`json_each` で集計できる)に書く。表し方:
+   *   - null: 記録していない(下限なし・外れた候補なし・分析時の保存でなく2回目の配分を呼ばなかった・配分未到達)。
+   *   - `[]`: 外れた候補はあったが、外さなかった場合でも賭け金が付いたものは無かった。
+   *   - 1件以上: 外さなかった場合に賭け金が付いた候補(`would_stake > 0` のものだけ)。
+   * 件数は `belowFloorCount` と併せて読む(件数 > 0 かつ null なら、外れたが2回目を呼んでいない)。
+   */
+  readonly missed?: readonly AnalysisMissedBetRecord[] | null;
+}
+
+/**
+ * 的中確率の下限で外れた買い目のうち、外さなかった場合に賭け金が付いたもの1件(Issue #470)。
+ * `missed_json` の配列の要素になる。JSON のキーは bet_type・combo_key・hit_prob・odds・ev・would_stake(snake_case。cloud の保存が写す)。
+ */
+export interface AnalysisMissedBetRecord {
+  /** 券種(core の `AllocationBetType` の値)。 */
+  readonly betType: string;
+  /** `buildAllocationBetComboKey` のキー(`analysis_bets.combo_key` と同じ形)。 */
+  readonly comboKey: string;
+  /** 的中確率(下限と比べた値)。 */
+  readonly hitProb: number;
+  /** 採用したオッズ。 */
+  readonly odds: number;
+  /** 期待値。 */
+  readonly ev: number;
+  /** 外さなかった場合の賭け金(円。下限なしの配分での、この買い目の賭け金。1以上)。 */
+  readonly wouldStake: number;
 }
 
 /**

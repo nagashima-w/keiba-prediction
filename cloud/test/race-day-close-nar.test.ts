@@ -130,6 +130,9 @@ const SETTINGS_ON: CloudSettings = {
   bankroll: 1_000_000,
   perRaceCap: 100_000,
   kellyFraction: 0.5,
+  // Issue #470: このファイルは地方の部分的な取り直し(取得の本数・組合せの買い目の再現)を調べる。既定の下限(0.05)は三連複・三連単の買い目をほぼ全て外してしまい、
+  // 『分析時の配分に組合せの買い目が入る』前提が成り立たなくなるので、下限なしにする(下限そのものは race-day-close.test.ts と min-hit-prob 系のテストが調べる)。
+  minHitProb: 0,
   includeComboOdds: true,
   baseScoreWeightJockey: 0, // 騎手の成績を取らない(取得の本数を固定する。race-day-close.test.ts と同じ理由)
   baseScoreWeightTrainer: 0,
@@ -386,5 +389,43 @@ describe("入力の期間(comboFromMs・comboToMs)の検査(parseCloseInput)", (
     const half = parse({ comboFromMs: 100 });
     expect(half).not.toBeNull();
     expect(half!.comboFromMs).toBeUndefined();
+  });
+});
+
+describe("入力の的中確率の下限(allocationSettings.minHitProb。Issue #470)の検査(parseCloseInput)", () => {
+  const base = {
+    v: 1,
+    kaisaiDate: DATE,
+    horses: [{ umaban: 1, wakuban: 1, horseName: "テスト", prior: 0.3, adjustedProb: 0.3, hadWinOdds: true, hadPlaceOdds: true }],
+    evThreshold: 1.1,
+    baseRoute: "mixed",
+  };
+  const settings = {
+    bankroll: 1000,
+    perRaceCap: 1000,
+    kellyFraction: 0.5,
+    includeComboOdds: true,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
+  };
+  const parse = (extra: Record<string, unknown>) => parseCloseInput(JSON.stringify({ ...base, allocationSettings: { ...settings, ...extra } }));
+
+  it("あれば、そのまま読む(0.12 も 0 も)", () => {
+    expect(parse({ minHitProb: 0.12 })!.allocationSettings.minHitProb).toBe(0.12);
+    expect(parse({ minHitProb: 0 })!.allocationSettings.minHitProb).toBe(0);
+  });
+  it("旧い入力(デプロイをまたいだ、下限の無い分析時のスナップショット)は 0(下限なし)で読む。分析時に旧い Worker が下限なしで配分したのと揃える", () => {
+    const input = parse({});
+    expect(input).not.toBeNull();
+    expect(input!.allocationSettings.minHitProb).toBe(0);
+  });
+  it("数でない・範囲外の値は壊れた入力として弾く(null)", () => {
+    for (const bad of ["0.05", null, Number.NaN, -0.01, 1.01]) {
+      expect(parse({ minHitProb: bad }), String(bad)).toBeNull();
+    }
   });
 });

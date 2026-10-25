@@ -1,6 +1,6 @@
 /**
  * bet-allocation — 複勝の馬券配分最適化(馬券配分「機能C」の中核。C-1で純ロジックを実装、
- * C-2で「総資金」「1レース上限」の2軸化・最低額ロジック・見送り6分類へ契約を改訂)。
+ * C-2で「総資金」「1レース上限」の2軸化・最低額ロジック・見送り6分類へ契約を改訂。Issue #470で的中確率の下限による7つ目の分類を追加)。
  *
  * 背景(ユーザー要望): 馬券に充てている資金の総額(総資金)と、1レースで使ってよい金額の上限
  * (1レース上限)を設定しておき、その中で的中率と配当の妙味から最適と思われる配分をケリー基準で
@@ -26,7 +26,7 @@
  *         比例縮小(s = min(1, perRaceCap/kellyTargetStake))してから betUnit 単位へ切り捨てる
  *   Step5.5 切り捨ての結果、全馬が0円になった場合は最低額(betUnit1単位)を
  *           continuousFraction最大の1頭にだけ与える(最低額ロジック。下記参照)
- *   Step6 見送り判定(6分類)・notDiversified判定・advisory(適正額超過警告)生成
+ *   Step6 見送り判定(7分類)・notDiversified判定・advisory(適正額超過警告)生成
  *
  * 設計判断(なぜこう作ったか):
  *
@@ -105,9 +105,11 @@
  *        総資金が不足していても計算コストはゼロに等しい。見送り時にも埋めておくことで、
  *        「総資金があればこう配分したはず」という参考情報を示せる。
  *
- * 7. 見送り理由(skipReason)6分類の優先順位(重要な設計判断):
+ * 7. 見送り理由(skipReason)7分類の優先順位(重要な設計判断。Issue #470で⑤を足して6→7):
  *    優先順位は ①総資金未設定 → ②1レース上限未設定 → ③1レース上限不足 → ④ケリー係数0
- *    → ⑤候補0頭 → ⑥連続最適解ゼロ の順。
+ *    → ⑤EVプラスの馬はいるが的中確率の下限で全部外れた(below-min-hit-prob) → ⑥候補0頭 → ⑦連続最適解ゼロ の順。
+ *    (以下の説明の番号①〜④と「候補0頭」「丸めでゼロ」は、⑤追加前の番号のまま読む。⑤は⑥より先に判定する:
+ *    下限で外れただけなのに『EVプラスの馬がいない』と報告すると事実と食い違うため。)
  *    ①②は仕様上の既定値(未設定・opt-in)であり、③(上限はあるがbetUnit未満)とは明確に意味が
  *    異なるため分離した。未設定は「妙味なし」ではなく「まだ判定していない」状態であり、これを
  *    ⑤(EVプラスの馬がいないため見送り)と同じ文言で報告すると、ユーザーは「このレースには妙味が
@@ -164,14 +166,17 @@ import {
   DEFAULT_KELLY_FRACTION,
   determineSkipReasonCode,
   foldToCandidateSubsets,
+  isBelowMinHitProb,
   isUsableOdds,
   resolveBankroll,
   resolveBetUnit,
   resolveEffectivePerRaceCap,
   resolveGreedySteps,
   resolveKellyFraction,
+  resolveMinHitProb,
   roundStakes,
   runGreedyAllocation,
+  type BelowFloorBet,
   type SkipReasonCode,
 } from "./allocation-primitives.js";
 
@@ -197,7 +202,7 @@ export { CONDITIONAL_BERNOULLI_MODEL };
  * この re-export を import しているのは `packages/core/test/ev/bet-allocation.test.ts` で、消すと型検査が壊れる。
  * 公開しているサブパスの契約としても残している)。
  */
-export type { SkipReasonCode };
+export type { BelowFloorBet, SkipReasonCode };
 
 // 機能D-2a(Issue #14): 防御関数群・畳み込み・貪欲最適化・betUnit丸め・最低額ロジック・
 // 見送り理由判定ロジックは allocation-primitives.ts へ抽出し、組合せ券種(combo-bet-allocation.ts)
@@ -237,6 +242,12 @@ export interface BetAllocationConfig {
   readonly betUnit: number;
   /** 貪欲逐次配分の分割数。既定1000(1ステップ=連続最適比率の0.1%)。 */
   readonly greedySteps: number;
+  /**
+   * 的中確率の下限(Issue #470。0〜1)。EVプラスでも的中確率(複勝圏内確率 placeProb)がこの値**未満**の馬は
+   * 候補から外す(ちょうど下限は残る)。省略・0は下限なし(従来どおり)。非有限・負は0、1超は1へ解決する。
+   * 本番の既定値(0.05)は設定(cloud の `minHitProb`)の側にあり、coreの既定は下限なし。
+   */
+  readonly minHitProb?: number;
 }
 
 /** 既定の馬券配分設定。 */
@@ -390,6 +401,13 @@ export interface BetAllocationResult {
   readonly modelApproximate: boolean;
   /** 診断値。 */
   readonly diagnostics: BetAllocationDiagnostics;
+  /** 実際に適用した的中確率の下限(Issue #470。`config.minHitProb` を解決した後の値。0=下限なし)。 */
+  readonly minHitProb: number;
+  /**
+   * 下限(`minHitProb`)で外れたEVプラスの馬(Issue #470。馬番昇順)。下限なし(0)なら常に空。
+   * オッズが使えない馬(未確定・不正値)は「EVプラス」と言えないので含めない。
+   */
+  readonly belowFloor: readonly BelowFloorBet[];
 }
 
 /** 見送り理由(優先順位順)。理由の選定ロジックはコメント「7. 見送り理由...」を参照。 */
@@ -397,11 +415,14 @@ const REASON_BANKROLL_UNSET = "総資金が未設定のため配分を提案し�
 const REASON_CAP_UNSET = "1レースの上限が未設定のため配分を提案していません";
 const REASON_KELLY_ZERO = "ケリー係数が0のため配分しません";
 const REASON_NO_CANDIDATES = "EVプラスの馬がいないため見送りです";
+const REASON_BELOW_MIN_HIT_PROB = "EVプラスの馬はいますが、的中確率が下限に満たないため見送りです";
 const REASON_NO_EDGE = "妙味が小さく、賭ける価値のある配分が見つかりませんでした";
 
 /** 候補外の理由。 */
 const EXCLUDED_NOT_POSITIVE = "EVがプラスではないため対象外";
 const EXCLUDED_NO_ODDS = "複勝オッズ下限が未確定のため対象外";
+/** EVプラスだが的中確率が下限(`minHitProb`。Issue #470)未満のため対象外。 */
+const EXCLUDED_BELOW_MIN_HIT_PROB = "的中確率が下限未満のため対象外";
 /**
  * オッズが不正な値(非有限または1.0未満。#74でisUsableOddsの基準を`>0`から引き上げ)の
  * ため対象外(Issue #31)。
@@ -467,9 +488,14 @@ export function allocateBets(
   // `h.ev`/`.ev` を grep し、上記(a)(b)以外の出現が無いことを確認した)。`ev` は結果を
   // 読む利用者への参考情報としてそのまま素通しする(サニタイズしない。他の入力echoフィールド
   // 〈placeProb等〉と同じ扱い)。
-  const candidateHorses = sortedHorses.filter(
+  const minHitProb = resolveMinHitProb(config.minHitProb);
+  const evPositiveHorses = sortedHorses.filter(
     (h) => h.isPositive && h.placeOddsMin !== null && isUsableOdds(h.placeOddsMin),
   );
+  // Issue #470: 的中確率(placeProb)が下限未満の馬は候補から外す(「未満」。ちょうど下限は残る)。
+  const candidateHorses = evPositiveHorses.filter((h) => !isBelowMinHitProb(h.placeProb, minHitProb));
+  const belowFloorHorses = evPositiveHorses.filter((h) => isBelowMinHitProb(h.placeProb, minHitProb));
+  const belowFloorUmabanSet = new Set(belowFloorHorses.map((h) => h.umaban));
   const candidateUmabanSet = new Set(candidateHorses.map((h) => h.umaban));
 
   // Step2: 出走全頭で同時分布を構築する(候補馬だけでなくレース全頭を渡す)。
@@ -587,13 +613,17 @@ export function allocateBets(
       //    「使えない」状態であり、これも「判定不能」の一種として isPositive の値に関わらず
       //    優先する(isPositive===falseの不正値を「EVがプラスではない」と誤ラベルしない。
       //    #31が問題視した「判定不能を判定結果として報告する」欠陥の再生産防止)。
-      // 3. 上記いずれでもない(数値としては有効・isPositive===false) → 従来どおり判定結果マイナス。
+      // 3. EVプラスだが的中確率が下限未満(Issue #470)。EVプラスの判定結果は出ているので、
+      //    「EVがプラスではない」とは別の理由にする。
+      // 4. 上記いずれでもない(数値としては有効・isPositive===false) → 従来どおり判定結果マイナス。
       excludedReason:
         horse.placeOddsMin === null
           ? EXCLUDED_NO_ODDS
           : !isUsableOdds(horse.placeOddsMin)
             ? EXCLUDED_ODDS_MALFORMED
-            : EXCLUDED_NOT_POSITIVE,
+            : belowFloorUmabanSet.has(horse.umaban)
+              ? EXCLUDED_BELOW_MIN_HIT_PROB
+              : EXCLUDED_NOT_POSITIVE,
     });
   }
 
@@ -605,7 +635,7 @@ export function allocateBets(
   const exceedsKellyTarget = totalStake > kellyTargetStake;
   const advisory = buildAdvisory(exceedsKellyTarget, kellyTargetStake, betUnit);
 
-  // Step6: 見送り理由(6分類・優先順位順)。判定ロジックはallocation-primitives.tsのコードを
+  // Step6: 見送り理由(7分類・優先順位順)。判定ロジックはallocation-primitives.tsのコードを
   // 共有し、文言化(コード→日本語)だけを本ファイルの責務として残す(決定3: 文言定数は
   // 組合せ券種と分離する)。isSkipのときのみ算出する。
   // Issue #58: コードをskipReasonの計算より前に独立した変数として持つ(一方向依存を型と
@@ -620,6 +650,7 @@ export function allocateBets(
         kellyTargetStake,
         kellyFraction,
         candidateHorses.length,
+        belowFloorHorses.length,
       )
     : null;
   const skipReason = skipReasonCode === null ? null : placeSkipReasonText(skipReasonCode, betUnit);
@@ -650,6 +681,14 @@ export function allocateBets(
     notDiversified,
     modelId: model.id,
     modelApproximate: model.approximate,
+    minHitProb,
+    belowFloor: belowFloorHorses.map((h) => ({
+      betType: "place",
+      umabans: [h.umaban],
+      hitProb: h.placeProb,
+      odds: h.placeOddsMin!,
+      ev: h.ev ?? h.placeProb * h.placeOddsMin!,
+    })),
     diagnostics: {
       placeProbSum,
       placeProbSumTarget,
@@ -729,7 +768,7 @@ function computeMarginalDeviationMax(
  * Step6: 見送り理由コード(allocation-primitives.ts の determineSkipReasonCode。判定ロジックは
  * 組合せ券種と共有)を、複勝固有の日本語文言へ変換する。優先順位・判定条件そのものは
  * allocation-primitives.ts 側に一元化されているため、本関数は文言のマッピングのみを行う
- * (決定3: 見送り理由・advisoryの文言定数は券種ごとに分離する。既存の①〜⑥の文言・優先順位は
+ * (決定3: 見送り理由・advisoryの文言定数は券種ごとに分離する。既存の①〜⑥〈Issue #470前の6分類〉の文言・優先順位は
  * 完全に維持している)。
  *
  * **Issue #55でexportした**: 過去分析の再表示(検証タブ「レース一覧」)が、保存済みの
@@ -747,6 +786,8 @@ export function placeSkipReasonText(code: SkipReasonCode, betUnit: number): stri
       return buildCapTooSmallReason(betUnit);
     case "kelly-zero":
       return REASON_KELLY_ZERO;
+    case "below-min-hit-prob":
+      return REASON_BELOW_MIN_HIT_PROB;
     case "no-candidates":
       return REASON_NO_CANDIDATES;
     case "no-edge":
