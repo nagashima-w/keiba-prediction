@@ -256,7 +256,7 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       case "verify": {
-        deps.render(renderScreen(verify.model(), actions), force);
+        deps.render(renderScreen(verify.model(route.versions === true ? "past" : "current"), actions), force);
         return;
       }
       case "report": {

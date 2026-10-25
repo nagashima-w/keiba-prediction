@@ -87,7 +87,7 @@ async function connect(): Promise<Connected> {
   const token = await signToken(key);
   const state: Connected = {
     fetch: undefined as never,
-    response: { status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), closeComparison: null, breakdown: null, computedAt: "2026-10-10T03:00:00.000Z", stale: true, staleReason: "min-interval", nextRecomputeAt: "2026-10-10T03:05:00.000Z", diag: { rowsRead: 5, counts: {}, readMs: 1, computeMs: 1, promptVersionsMs: 1, startTimeGaps: { lost: 3, affecting: 2 } } },
+    response: { status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), currentPromptVersions: ["v2", "v2-clip015"], closeComparison: null, breakdown: null, computedAt: "2026-10-10T03:00:00.000Z", stale: true, staleReason: "min-interval", nextRecomputeAt: "2026-10-10T03:05:00.000Z", diag: { rowsRead: 5, counts: {}, readMs: 1, computeMs: 1, promptVersionsMs: 1, startTimeGaps: { lost: 3, affecting: 2 } } },
     fails: false,
     calls: [],
   };
@@ -187,6 +187,15 @@ describe("GET /api/verify の契約", () => {
     expect(r.trend.markStats).toHaveLength(7);
     // クライアントの印の一覧は core の PREDICTION_MARKS と同じ
     expect([...MARKS]).toEqual([...PREDICTION_MARKS]);
+  });
+
+  it("Issue #481: いまの版の一覧(currentPromptVersions)を、サーバの応答のまま読む(並びも保つ)", async () => {
+    const s = await connect();
+    const result = await fetchVerify(s.fetch, "all", false);
+    if (!result.ok || result.outcome.kind !== "ready") throw new Error("ready のはず");
+    const server = (s.response as Extract<VerifyResponse, { status: "ready" }>).currentPromptVersions;
+    expect(server).toEqual(["v2", "v2-clip015"]); // 前提(空振り防止): 2 つで、集計の版 v1 とは別の並び
+    expect(result.outcome.currentPromptVersions).toEqual(server);
   });
 
   it("プロンプト版別の比較(Issue #220): サーバの射影をそのまま読める。版の並び・追加指示・帯・過信バイアスの添字", async () => {
@@ -300,6 +309,7 @@ describe("Issue #263: 閲覧者の応答の契約(本物の VerifyCore.getViewer
     expect(result.outcome).toMatchObject({ venue: "central", computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 } });
     expect(result.outcome.report.includedAnalysisCount).toBe(2); // 前提(空振り防止): 集計に入っている
     expect(result.outcome.promptVersions.map((v) => v.additionalInstructions)).toEqual([[null], ["(非公開)"]]);
+    expect(result.outcome.currentPromptVersions.length).toBeGreaterThan(0); // Issue #481: 閲覧者の応答にも、いまの版の一覧が付いて読める
     expect(JSON.stringify(result.outcome)).not.toContain("SECRET");
     expect(JSON.stringify(result.outcome)).not.toContain("rowsRead");
   });
@@ -313,7 +323,7 @@ describe("Issue #263: 閲覧者の応答の契約(本物の VerifyCore.getViewer
 });
 
 describe("parseVerifyResponse(応答を信用しない)", () => {
-  const ready = (): Record<string, unknown> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as object) });
+  const ready = (): Record<string, unknown> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), currentPromptVersions: ["v2", "v2-clip015"], computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as object) });
 
   it("前提: 本物の集計から作った ready は読める", () => {
     expect(parseVerifyResponse(ready())?.kind).toBe("ready");
@@ -382,6 +392,10 @@ describe("parseVerifyResponse(応答を信用しない)", () => {
     ["版の帯の平均予測値が文字列", (b) => { b["promptVersions"][0].calibration[3].meanPredictedProb = "x"; }],
     ["過信バイアスが配列でない", (b) => { b["report"].trend.calibrationBias = null; }],
     ["過信バイアスが文字列", (b) => { b["report"].trend.calibrationBias[0].overconfidenceGap = "x"; }],
+    ["いまの版の一覧が無い(Issue #481)", (b) => { delete b["currentPromptVersions"]; }],
+    ["いまの版の一覧が配列でない", (b) => { b["currentPromptVersions"] = "v2"; }],
+    ["いまの版の一覧に文字列でないものが混ざる", (b) => { b["currentPromptVersions"] = ["v2", 1]; }],
+    ["いまの版の一覧に null(版不明)が混ざる", (b) => { b["currentPromptVersions"] = ["v2", null]; }],
     ["promptVersions が無い", (b) => { delete b["promptVersions"]; }],
     ["promptVersions が配列でない", (b) => { b["promptVersions"] = {}; }],
     ["版が数値", (b) => { b["promptVersions"][0].promptVersion = 1; }],
@@ -492,7 +506,7 @@ describe("fetchVerify の失敗の分類", () => {
 });
 
 describe("Issue #352: closeComparison(締切直前の再計算との比較)の読み取り", () => {
-  const ready = (): Record<string, any> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as Record<string, unknown>) });
+  const ready = (): Record<string, any> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), currentPromptVersions: ["v2"], computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as Record<string, unknown>) });
   // Issue #379: 説明文(description)・基準ごとの見出しの語(basisLabel。null か文字列)をサーバが渡す。同じ回に、基準の違う行が並びうる(3 行目)。
   const valid = () => ({
     description: "説明文(サーバが組み立てる)",
@@ -555,7 +569,7 @@ describe("Issue #352: closeComparison(締切直前の再計算との比較)の�
 });
 
 describe("Issue #384: breakdown(人気帯ごとの期待値と回収率の節)の読み取り", () => {
-  const ready = (): Record<string, any> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as Record<string, unknown>) });
+  const ready = (): Record<string, any> => ({ ok: true, ...(JSON.parse(JSON.stringify({ status: "ready", venue: "all", report: realReport(), promptVersions: realVersions(), currentPromptVersions: ["v2"], computedAt: "x", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } } })) as Record<string, unknown>) });
   const valid = () => [
     {
       heading: "人気帯ごとの期待値と回収率(複勝)",

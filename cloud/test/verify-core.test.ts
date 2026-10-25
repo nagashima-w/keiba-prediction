@@ -17,6 +17,7 @@ import { summarizePromptVersions } from "../src/verify-versions";
 import { buildVerifySource } from "../src/verify-read";
 import { computeCloseComparison, type VerifyCloseRows } from "../src/verify-close";
 import { computeVerifyBreakdowns } from "../src/verify-breakdown";
+import { CLIP_VARIANTS } from "../../packages/core/src/analyzer/clip-variants";
 
 /**
  * Issue #219: 検証の DO の純ロジック(`VerifyCore`)。D1・R2・時計・アラームは偽物で、キャッシュ・費用の柵・単一飛行・発走時刻の補完の進め方を確かめる。
@@ -740,6 +741,62 @@ describe("runBackfillTick(アラーム: 発走時刻の補完を少しずつ)", 
   });
 });
 
+describe("Issue #481: いまの版の一覧(currentPromptVersions)を応答に足す", () => {
+  const expected = Object.values(CLIP_VARIANTS).map((v) => v.promptVersion);
+
+  it("管理者の ready は、core の CLIP_VARIANTS の各 promptVersion(対照・-clip015 の 2 つ)を持つ。区分によらず同じ。版の文字列はサーバが core から導く", async () => {
+    const { core, store } = setup();
+    store.state.rows = rowsOf([analysisRow(1, CENTRAL, { promptVersion: "v1" })]);
+    expect(expected).toHaveLength(2); // 前提: いまの版は 2 つ(対照とクリップ幅の別版)
+    expect(new Set(expected).size).toBe(2); // 前提: 2 つは別の文字列
+    for (const venue of ["all", "central", "nar"] as const) {
+      const res = await core.getReport(venue);
+      if (res.status !== "ready") throw new Error("ready のはず");
+      expect(res.currentPromptVersions, venue).toEqual(expected);
+    }
+  });
+
+  it("集計に載っていない版でも一覧に入る(集計に現れる版 v1 とは無関係=キャッシュの版別から導いていない)", async () => {
+    const { core, store } = setup();
+    store.state.rows = rowsOf([analysisRow(1, CENTRAL, { promptVersion: "v1" })]);
+    const res = await core.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(res.promptVersions.map((v) => v.promptVersion)).toEqual(["v1"]);
+    expect(res.currentPromptVersions).not.toContain("v1");
+  });
+
+  it("kv のキャッシュの形と版は変えない(currentPromptVersions を保存しない。CACHE_VERSION は 6 のまま)", async () => {
+    const { core, store, kv } = setup();
+    store.state.rows = rowsOf([analysisRow(1, CENTRAL, { promptVersion: "v1" })]);
+    await core.getReport("all");
+    const cache = kv.get<Record<string, unknown>>("cache")!;
+    expect(cache["v"]).toBe(6);
+    expect("currentPromptVersions" in cache).toBe(false);
+  });
+
+  it("旧い形式でも新しいデプロイの最初の応答で付く(キャッシュに無い=保存していないため。キャッシュ命中の経路でも付く)", async () => {
+    const { core, store } = setup();
+    store.state.rows = rowsOf([analysisRow(1, CENTRAL, { promptVersion: "v1" })]);
+    await core.getReport("all");
+    store.calls.length = 0;
+    const hit = await core.getReport("central");
+    if (hit.status !== "ready") throw new Error("ready のはず");
+    expect(store.calls.filter((c) => c === "readAll")).toEqual([]); // 前提: キャッシュ命中(再計算していない)
+    expect(hit.currentPromptVersions).toEqual(expected);
+  });
+
+  it("閲覧者の応答にも付く(管理者と同じ一覧。集計のやり直しは起こさない)", async () => {
+    const { core, store } = setup();
+    store.state.rows = rowsOf([analysisRow(1, CENTRAL, { promptVersion: "v1" })]);
+    await core.getReport("all");
+    store.calls.length = 0;
+    const res = core.getViewerReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    expect(res.currentPromptVersions).toEqual(expected);
+    expect(store.calls).toEqual([]);
+  });
+});
+
 describe("Issue #263: getViewerReport(閲覧者の要求。集計のやり直しを起こさず、D1・R2・アラームに触れない)", () => {
   /** 管理者の要求で集計を 1 回作り、store の呼び出し記録を空にした状態。 */
   async function withCache(options: VerifyCoreOptions = {}, rows: VerifyReadRows = DEFAULT_ROWS) {
@@ -849,7 +906,7 @@ describe("Issue #263: getViewerReport(閲覧者の要求。集計のやり直し
     const { core } = await withCache();
     const res = core.getViewerReport("all");
     if (res.status !== "ready") throw new Error("ready のはず");
-    expect(Object.keys(res).sort()).toEqual(["breakdown", "closeComparison", "computedAt", "diag", "nextRecomputeAt", "promptVersions", "report", "stale", "staleReason", "status", "venue"]);
+    expect(Object.keys(res).sort()).toEqual(["breakdown", "closeComparison", "computedAt", "currentPromptVersions", "diag", "nextRecomputeAt", "promptVersions", "report", "stale", "staleReason", "status", "venue"]);
     expect(res.stale).toBe(false);
     expect(res.staleReason).toBeNull();
     expect(res.nextRecomputeAt).toBeNull();

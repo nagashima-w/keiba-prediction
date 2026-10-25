@@ -249,6 +249,7 @@ ${paletteCss()}
   .verify-version { margin: 12px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
   .verify-version h3 { margin: 0 0 4px; overflow-wrap: anywhere; }
   .verify-version .meta { overflow-wrap: anywhere; }
+  .verify-versions-link { display: block; margin: 8px 0; padding: 10px 0; }
   .verify-version-toggle { display: block; width: 100%; min-height: 44px; margin: 8px 0 0; padding: 8px 12px; text-align: left; font-weight: bold; }
   .verify-version-calibration-heading { margin: 12px 0 4px; font-size: 0.9rem; font-weight: bold; overflow-wrap: anywhere; }
   .verify-version-table-label { margin: 12px 0 4px; font-weight: bold; }

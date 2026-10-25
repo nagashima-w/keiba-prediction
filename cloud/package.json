@@ -16,16 +16,16 @@
     "@anthropic-ai/sdk": "0.135.0",
     "cheerio": "1.2.0",
     "iconv-lite": "0.7.3",
-    "jose": "6.2.12"
+    "jose": "6.2.13"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261019.1",
+    "@cloudflare/workers-types": "5.20261022.1",
     "@types/node": "^24.0.0",
     "esbuild": "0.28.2",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
-    "wrangler": "4.151.1"
+    "wrangler": "4.151.3"
   },
   "//deps": {
     "@anthropic-ai/sdk": "発走前の分析の LLM 呼び出し(Issue #179〈#164-d〉。土台は #193)。core の anthropic-client.ts・model-selection.ts が値で import する(Models API と messages.create)。cloud は workspace の外で packages/core/node_modules が CI に無いため、wrangler.toml の alias・tsconfig の paths・vitest の alias でここから解決させる(cheerio と同じ)。版は core の package.json の範囲(^0.135.0)と同じ 0.135.0 で exact 固定(scripts/test/cloud-config-guard.test.ts が一致を検査)。Issue #324 で 0.70.1 → 0.133.0 に上げた(そのとき 0.135.0 は公開から 1 日で、OpenTelemetry の自動計装〈0.134.0〉を持ち込むため見送った)。Issue #460 で 0.133.0 → 0.135.0 に上げた。OpenTelemetry の自動計装は、レビューで確かめた結果、このプロジェクトでは働かない: SDK は global の tracer provider が登録されていなければ span を作らず、cloud・core のどちらにも tracer provider の登録は無く、workerd にも OTel の実装は無い。provider がある場合でも既定は metadata_only で、プロンプトの本文は載らない。Workers でバンドル・実行できることは、偽 fetch での workerd 実行とバンドルのガード(test/bundle-guard.test.ts)で確認した",

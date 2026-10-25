@@ -13,7 +13,7 @@
  */
 import { fetchVerify, verifyFetchFailureMessage, type VerifyOutcome, type VerifyVenue } from "./api-verify";
 import type { FetchLike } from "./api";
-import { buildVerifyModel, type CalibrationTarget, type VerifyLoadState, type VerifyModel } from "./verify-model";
+import { buildVerifyModel, type CalibrationTarget, type VerifyLoadState, type VerifyModel, type VerifyPage } from "./verify-model";
 
 /** 準備中(集計がまだ無い)の更新間隔。 */
 export const VERIFY_PREPARING_POLL_MS = 3_000;
@@ -51,7 +51,8 @@ export interface VerifyScreen {
   /** 対応表の対象の切替(補正後〈AI〉/補正前〈統計〉。Issue #254)。同じ対象・画面に居ないときは何もしない。取得は増えない。 */
   onCalibrationTarget(target: CalibrationTarget): void;
   onVisibilityChange(): void;
-  model(): VerifyModel;
+  /** 画面のモデル。`page`: 過去の版のページ(Issue #481)なら "past"(既定は検証画面の本体)。取得も状態も 2 つのページで共有する。 */
+  model(page?: VerifyPage): VerifyModel;
   /** 取得中のもの(テスト用の待ち)。 */
   pending(): Promise<unknown>[];
 }
@@ -209,7 +210,7 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
     onVersionToggle,
     onCalibrationTarget,
     onVisibilityChange,
-    model: () => buildVerifyModel({ load: load ?? { kind: "loading" }, venue, busy, pollStopped, expandedVersions: [...expandedVersions], calibrationTarget, admin: deps.admin }),
+    model: (page = "current") => buildVerifyModel({ load: load ?? { kind: "loading" }, page, venue, busy, pollStopped, expandedVersions: [...expandedVersions], calibrationTarget, admin: deps.admin }),
     pending: () => [...inflight],
   };
 }

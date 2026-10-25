@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { ProposedSummaryView, VerifyOutcome, VerifyReportView } from "../client/api-verify";
+import type { ProposedSummaryView, PromptVersionView, VerifyOutcome, VerifyReportView } from "../client/api-verify";
 import { exclusionRows, formatRate, formatUnknownBetTypeNotice, formatYen, venueFilterLabel } from "../../packages/core/src/view/verify-format";
 import { PROPOSED_BET_LABELS } from "../client/verify-format";
-import { buildVerifyModel, type VerifyModelInput } from "../client/verify-model";
+import { buildVerifyModel, VERSION_CARD_MIN_COUNT, type VerifyModelInput } from "../client/verify-model";
 import { breakdownFixture, calibrationFixture, closeFixture, priorCalibrationFixture, LONG_INSTRUCTION, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /** Issue #219: 検証画面の表示用データ。数値の整形は core の `view/verify-format.ts` を直接使う(Issue #397 R-3 で、client の複製と、一致を固定していた scripts/test/cloud-verify-format.test.ts をなくした。境界値は core の verify-format.test.ts が持つ)。 */
@@ -40,11 +40,16 @@ function report(over: Partial<VerifyReportView> = {}): VerifyReportView {
   };
 }
 
+/** 見本の版の集計件数を 30 件以上に揃える(版別のカードは 30 件未満を出さない〈Issue #481〉。件数の違い〈80・40・35〉は取り違えの検出用)。 */
+const countsOf = (counts: readonly number[]): PromptVersionView[] => versionsFixture().map((v, i) => ({ ...v, includedAnalysisCount: counts[i]! }));
+/** いまの版(見本の 1 つ目と 2 つ目。3 つ目の版不明は過去の版)。 */
+const CURRENT = ["2026-10-09.2", "2026-10-09.2-clip015"];
+
 const ready = (over: Partial<Extract<VerifyOutcome, { kind: "ready" }>> = {}, r: VerifyReportView = report()): VerifyOutcome => ({
-  kind: "ready", venue: "all", report: r, promptVersions: versionsFixture(), closeComparison: null, breakdown: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 }, ...over,
+  kind: "ready", venue: "all", report: r, promptVersions: countsOf([80, 40, 35]), currentPromptVersions: CURRENT, closeComparison: null, breakdown: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 0, affecting: 0 }, ...over,
 });
 
-const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: ready() }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, ...over });
+const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: ready() }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, page: "current", ...over });
 
 describe("整形(core の view/verify-format の関数を直接使う。書式は exe の検証画面から引き継いだもの)", () => {
   it("率は小数第 1 位のパーセント(null は -)、金額は 3 桁区切りの円", () => {
@@ -278,24 +283,33 @@ describe("buildVerifyModel: 補正方向×結果・キャリブレーション�
   });
 });
 
-describe("buildVerifyModel: プロンプト版別の比較(Issue #220)", () => {
+type ReadyOutcome = Extract<VerifyOutcome, { kind: "ready" }>;
+/** 版別だけ差し替えた入力(いまの版の一覧は既定のまま)。 */
+const inputWith = (versions: readonly PromptVersionView[], over: Partial<VerifyModelInput> = {}, current: readonly string[] = CURRENT): VerifyModelInput =>
+  input({ load: { kind: "ready", outcome: { ...(ready() as ReadyOutcome), promptVersions: versions, currentPromptVersions: current } }, ...over });
+
+describe("buildVerifyModel: プロンプト版別の比較(Issue #220。Issue #481 以降は、いまの版のページと過去の版のページ)", () => {
   const model = buildVerifyModel(input());
+  const past = buildVerifyModel(input({ page: "past" }));
   const SUMMARY_30 = `${LONG_INSTRUCTION.slice(0, 30)}…`;
 
-  it("見出し・説明(全体の集計で区分の切替に連動しないこと)・版不明の注記。版の並びはサーバのまま", () => {
+  it("見出し・説明(全体の集計で区分の切替に連動しないこと)。いまの版のページは、いまの版だけを版の並び(サーバのまま)で出す", () => {
     expect(model.versions?.heading).toBe("プロンプト版別比較");
     expect(model.versions?.description).toContain("全体の集計");
     expect(model.versions?.description).toContain("区分の切替には連動しません");
-    expect(model.versions?.cards.map((c) => c.title)).toEqual(["2026-10-09.2", "2026-10-09.2-clip015", "版不明"]);
-    // 版不明の行があるときだけ、その内訳(旧データと LLM 未使用の両方を含む)の注記を出す
-    expect(model.versions?.unknownNote).toContain("版記録導入前の旧データ");
-    expect(model.versions?.unknownNote).toContain("APIキー未設定");
-    const known = buildVerifyModel(input({ load: { kind: "ready", outcome: { ...(ready() as Extract<VerifyOutcome, { kind: "ready" }>), promptVersions: versionsFixture().slice(0, 2) } } }));
+    expect(model.versions?.cards.map((c) => c.title)).toEqual(["2026-10-09.2", "2026-10-09.2-clip015"]);
+    // 版不明の注記は、版不明のカードを出す過去の版のページだけ(旧データと LLM 未使用の両方を含む)
+    expect(model.versions?.unknownNote).toBeNull();
+    expect(past.versions?.cards.map((c) => c.title)).toEqual(["版不明"]);
+    expect(past.versions?.unknownNote).toContain("版記録導入前の旧データ");
+    expect(past.versions?.unknownNote).toContain("APIキー未設定");
+    const known = buildVerifyModel(inputWith(countsOf([80, 40, 35]).slice(0, 2), { page: "past" }));
     expect(known.versions?.unknownNote).toBeNull();
   });
 
   it("版ごとのカード: 追加指示の要約(30 文字で切る・null は『なし』・複数は ' / ')、集計件数、4 タイル(賭け数・投資額・回収額・回収率)", () => {
-    const [first, second, third] = model.versions?.cards ?? [];
+    const [first, second] = model.versions?.cards ?? [];
+    const [third] = past.versions?.cards ?? [];
     expect(first?.instructions).toBe(`追加指示: ${SUMMARY_30} / なし`);
     expect(first?.included).toBe("集計件数 80件");
     expect(first?.tiles).toEqual([
@@ -305,16 +319,17 @@ describe("buildVerifyModel: プロンプト版別の比較(Issue #220)", () => {
       { label: "回収率", value: "96.0%", strong: true },
     ]);
     expect(second?.instructions).toBe("追加指示: なし");
+    expect(second?.included).toBe("集計件数 40件");
     expect(second?.tiles.map((t) => t.value)).toEqual(["10点", "1,000円", "1,250円", "125.0%"]);
     // 賭けが 0 点の版: 回収率は -
     expect(third?.tiles.map((t) => t.value)).toEqual(["0点", "0円", "0円", "-"]);
-    expect(third?.included).toBe("集計件数 15件");
+    expect(third?.included).toBe("集計件数 35件");
   });
 
   it("既定は全部たたんでいる(キャリブレーションの行・全文を持たない)。開いた版だけが、見出し・追加指示の全文・20 帯を持つ", () => {
     expect(model.versions?.cards.every((c) => !c.expanded && c.calibrationRows.length === 0 && c.fullInstructions === null)).toBe(true);
-    expect(model.versions?.cards.map((c) => c.toggleLabel)).toEqual(Array(3).fill("キャリブレーションを表示"));
-    const keys = model.versions?.cards.map((c) => c.key) ?? [];
+    expect(model.versions?.cards.map((c) => c.toggleLabel)).toEqual(Array(2).fill("キャリブレーションを表示"));
+    const keys = [...(model.versions?.cards ?? []), ...(past.versions?.cards ?? [])].map((c) => c.key);
     expect(new Set(keys).size).toBe(3);
     const opened = buildVerifyModel(input({ expandedVersions: [keys[0]!] }));
     const [a, b] = opened.versions?.cards ?? [];
@@ -330,6 +345,8 @@ describe("buildVerifyModel: プロンプト版別の比較(Issue #220)", () => {
     // 開いていない版は閉じたまま
     expect(b?.expanded).toBe(false);
     expect(b?.calibrationRows).toEqual([]);
+    // 過去の版のページでも、開閉のキーは同じ(版不明のキーで開く)
+    expect(buildVerifyModel(input({ page: "past", expandedVersions: [keys[2]!] })).versions?.cards[0]?.expanded).toBe(true);
   });
 
   it("開いた版でも帯の件数がすべて 0 なら 20 行は出す(件数 0・率 -)。帯が 0 本なら『データがありません。』", () => {
@@ -337,8 +354,8 @@ describe("buildVerifyModel: プロンプト版別の比較(Issue #220)", () => {
     const second = buildVerifyModel(input({ expandedVersions: [keys[1]!] })).versions?.cards[1];
     expect(second?.calibrationRows).toHaveLength(20);
     expect(second?.calibrationRows.every((r) => r.cells[0]?.value === "0件" && r.cells[3]?.value === "-")).toBe(true);
-    const noBins = { ...(ready() as Extract<VerifyOutcome, { kind: "ready" }>), promptVersions: [{ ...versionsFixture()[0]!, calibration: [], overconfidenceGaps: [] }] };
-    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: noBins }, expandedVersions: [keys[0]!] }));
+    const noBins = [{ ...countsOf([80, 40, 35])[0]!, calibration: [], overconfidenceGaps: [] }];
+    const m = buildVerifyModel(inputWith(noBins, { expandedVersions: [keys[0]!] }));
     expect(m.versions?.cards[0]?.calibrationEmpty).toBe("データがありません。");
     expect(m.versions?.cards[0]?.calibrationRows).toEqual([]);
   });
@@ -348,21 +365,136 @@ describe("buildVerifyModel: プロンプト版別の比較(Issue #220)", () => {
     expect(buildVerifyModel(input({ expandedVersions: [keys[1]!] })).versions?.cards[1]?.fullInstructions).toBe("追加指示(全文): なし");
   });
 
-  it("版別が 0 件なら『集計対象がありません。』。集計が出せないとき・取得中は節ごと出さない", () => {
-    const none = { ...(ready() as Extract<VerifyOutcome, { kind: "ready" }>), promptVersions: [] };
-    const m = buildVerifyModel(input({ load: { kind: "ready", outcome: none } }));
-    expect(m.versions?.empty).toBe("集計対象がありません。");
-    expect(m.versions?.cards).toEqual([]);
+  it("版別が 0 件(分析が無い)なら、いまの版は『集計中(0件)』の枠。いまの版の一覧も空なら『集計対象がありません。』。過去の版のページは『集計対象がありません。』。集計が出せないとき・取得中は節ごと出さない", () => {
+    const none = buildVerifyModel(inputWith([]));
+    expect(none.versions?.cards).toEqual([]);
+    expect(none.versions?.collecting.map((c) => c.text)).toEqual(["集計中(0件。30件で表示)", "集計中(0件。30件で表示)"]);
+    expect(none.versions?.empty).toBeNull();
+    const nothing = buildVerifyModel(inputWith([], {}, []));
+    expect(nothing.versions?.empty).toBe("集計対象がありません。");
+    expect(buildVerifyModel(inputWith([], { page: "past" })).versions?.empty).toBe("集計対象がありません。");
     expect(model.versions?.empty).toBeNull();
     for (const load of [{ kind: "loading" }, { kind: "error", message: "x" }, { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" } }] as const) {
       expect(buildVerifyModel(input({ load })).versions).toBeNull();
+      expect(buildVerifyModel(input({ load, page: "past" })).versions).toBeNull();
     }
   });
 
   it("区分を替えても版別は同じ(全体のまま)", () => {
     const nar = buildVerifyModel(input({ venue: "nar" }));
-    expect(model.versions?.cards).toHaveLength(3); // 前提(空振り防止): 版別がある
+    expect(model.versions?.cards).toHaveLength(2); // 前提(空振り防止): 版別がある
     expect(nar.versions).toEqual(model.versions);
+    expect(buildVerifyModel(input({ venue: "nar", page: "past" })).versions).toEqual(past.versions);
+  });
+});
+
+describe("Issue #481: 版別比較は、いまの版だけを検証画面に残し、過去の版は別のページへ。分析 30 件未満の版は出さない", () => {
+  /** 版の見本(版 `v`・集計件数 `n`)。中身は見本の 1 つ目を使い、版と件数だけ替える。 */
+  const ver = (promptVersion: string | null, n: number): PromptVersionView => ({ ...versionsFixture()[0]!, promptVersion, includedAnalysisCount: n });
+  const titles = (m: ReturnType<typeof buildVerifyModel>): string[] => m.versions?.cards.map((c) => c.title) ?? [];
+
+  it("境目の定数は 30(『参考』の境目 CLOSE_REFERENCE_MIN_COUNT とは別の定数)", () => {
+    expect(VERSION_CARD_MIN_COUNT).toBe(30);
+  });
+
+  it.each([
+    [0, false],
+    [29, false],
+    [30, true],
+    [31, true],
+  ])("いまの版: 集計件数 %i 件 → カードを出す=%s。出さないときは『集計中(N件。30件で表示)』の枠にする(出す版は枠にしない)", (n, shown) => {
+    const m = buildVerifyModel(inputWith([ver("cur", n), ver("cur-2", 100)], {}, ["cur", "cur-2"]));
+    expect(titles(m)).toEqual(shown ? ["cur", "cur-2"] : ["cur-2"]);
+    expect(m.versions?.collecting).toEqual(shown ? [] : [{ title: "cur", text: `集計中(${n}件。30件で表示)` }]);
+    // 前提(空振り防止): 100 件の版は必ず出ている=分け方が全件落としではない
+    expect(titles(m)).toContain("cur-2");
+    // 出さなかったいまの版は『出していない版』の数に入れない(枠として出している)
+    expect(m.versions?.omitted).toBeNull();
+  });
+
+  it.each([
+    [0, 0],
+    [1, 0],
+    [29, 0],
+    [30, 1],
+    [31, 1],
+  ])("過去の版のページ: 集計件数 %i 件の過去の版 → カードを出す=%i 枚", (n, shown) => {
+    const m = buildVerifyModel(inputWith([ver("cur", 100), ver("old", n)], { page: "past" }, ["cur"]));
+    expect(titles(m)).toEqual(shown === 1 ? ["old"] : []);
+    expect(m.versions?.omitted).toBe(shown === 1 ? null : "分析が30件未満の版(1版)は出していません。");
+  });
+
+  it("過去の版のページ: 30 件未満の版の数を 1 行で言う(複数版・版不明も数える)。0 版なら行を出さない。いまの版は数えない", () => {
+    const versions = [ver("cur", 5), ver("old-a", 5), ver("old-b", 29), ver("old-c", 30), ver(null, 12), ver("old-d", 31)];
+    const m = buildVerifyModel(inputWith(versions, { page: "past" }, ["cur"]));
+    expect(titles(m)).toEqual(["old-c", "old-d"]);
+    expect(m.versions?.omitted).toBe("分析が30件未満の版(3版)は出していません。");
+    const none = buildVerifyModel(inputWith([ver("cur", 5), ver("old-c", 30)], { page: "past" }, ["cur"]));
+    expect(none.versions?.omitted).toBeNull();
+    expect(none.versions?.cards).toHaveLength(1); // 前提(空振り防止): 行を出さないのは『全部出せている』から
+  });
+
+  it("いまの版のページには過去の版を出さない(どれだけ件数が多くても)。いまの版でない版は、過去の版のページだけに出る(2 つのページの版は重ならず、足すと全部)", () => {
+    const versions = [ver("cur", 100), ver("old-a", 200), ver(null, 300), ver("cur-2", 40)];
+    const current = buildVerifyModel(inputWith(versions, {}, ["cur", "cur-2"]));
+    const pastPage = buildVerifyModel(inputWith(versions, { page: "past" }, ["cur", "cur-2"]));
+    expect(titles(current)).toEqual(["cur", "cur-2"]);
+    expect(titles(pastPage)).toEqual(["old-a", "版不明"]);
+    expect(current.versions?.omitted).toBeNull();
+    expect(new Set([...titles(current), ...titles(pastPage)]).size).toBe(4);
+  });
+
+  it("いまの版が集計にまだ現れない(行が無い)ときも、枠を出す(いまの版の一覧の順)。いまの版の一覧が空なら枠は無い", () => {
+    const m = buildVerifyModel(inputWith([ver("old", 100)], {}, ["cur-a", "cur-b"]));
+    expect(m.versions?.cards).toEqual([]);
+    expect(m.versions?.collecting).toEqual([
+      { title: "cur-a", text: "集計中(0件。30件で表示)" },
+      { title: "cur-b", text: "集計中(0件。30件で表示)" },
+    ]);
+    expect(buildVerifyModel(inputWith([ver("old", 100)], {}, [])).versions?.collecting).toEqual([]);
+  });
+
+  it("リンク: いまの版のページに『過去の版』のページ(#verify-versions)への案内。過去の版のページは検証画面(#verify)へ戻るリンクと、区分タブ・全体の節なし", () => {
+    expect(buildVerifyModel(input()).versions?.link).toEqual({ label: "過去の版は別のページで見る", href: "#verify-versions" });
+    expect(buildVerifyModel(input()).backHref).toBe("#");
+    const p = buildVerifyModel(input({ page: "past" }));
+    expect(p.versions?.link).toBeNull();
+    expect(p.backHref).toBe("#verify");
+    expect(p.backLabel).toBe("検証へ戻る");
+    expect(p.title).toBe("過去の版");
+    expect(p.versions?.heading).toBe("過去の版");
+    expect(p.venueTabs).toEqual([]);
+    expect([p.bet, p.proposed, p.close, p.direction, p.calibration, p.marks]).toEqual([null, null, null, null, null, null]);
+    expect(p.breakdown).toEqual([]);
+    // 対照(空振り防止): いまの版のページは、これらを持つ
+    const c = buildVerifyModel(input());
+    expect(c.title).toBe("検証");
+    expect(c.backLabel).toBe("一覧へ戻る");
+    expect(c.venueTabs).toHaveLength(3);
+    expect(c.bet).not.toBeNull();
+    expect(c.calibration).not.toBeNull();
+  });
+
+  it("版別以外の節は、版別の分け方に影響されない(全体の回収率・キャリブレーションなどには全部の版が入ったまま=サーバの集計をそのまま出す)", () => {
+    const full = buildVerifyModel(input());
+    const noVersions = buildVerifyModel(inputWith([], {}, []));
+    for (const key of ["bet", "proposed", "close", "breakdown", "direction", "calibration", "marks", "notices", "computedAt"] as const) {
+      expect(noVersions[key], key).toEqual(full[key]);
+    }
+    expect(full.bet?.tiles.length).toBeGreaterThan(0); // 前提(空振り防止): 比べる節が空でない
+  });
+
+  it("閲覧者(admin: false): どちらのページでも追加指示の全文を出さない(『あり/なし』だけ)", () => {
+    const keys = [...(buildVerifyModel(input()).versions?.cards ?? []), ...(buildVerifyModel(input({ page: "past" })).versions?.cards ?? [])].map((c) => c.key);
+    expect(keys).toHaveLength(3); // 前提(空振り防止): 2 つのページで 3 枚
+    for (const page of ["current", "past"] as const) {
+      const m = buildVerifyModel(input({ admin: false, page, expandedVersions: keys }));
+      expect(m.versions?.cards.length, page).toBeGreaterThan(0);
+      expect(m.versions?.cards.every((c) => c.expanded && c.fullInstructions === null), page).toBe(true);
+      expect(JSON.stringify(m), page).not.toContain("逃げ馬");
+    }
+    // 対照: 管理者には全文が出る
+    expect(buildVerifyModel(input({ expandedVersions: keys })).versions?.cards[0]?.fullInstructions).toContain("逃げ馬を重視");
   });
 });
 
@@ -676,9 +808,9 @@ describe("Issue #263: 閲覧者(admin: false)の検証画面のモデル", () =>
 
   it("追加指示の全文を出さない: 要約は『あり/なし』だけ(複数あれば種類数)。版別のキャリブレーションを開いても全文の行は出ない。管理者には全文が出る(対照)", () => {
     const keys = buildVerifyModel(viewer()).versions?.cards.map((c) => c.key) ?? [];
-    expect(keys).toHaveLength(3); // 前提(空振り防止): 版が 3 つ
+    expect(keys).toHaveLength(2); // 前提(空振り防止): いまの版が 2 つ
     const closed = buildVerifyModel(viewer());
-    expect(closed.versions?.cards.map((c) => c.instructions)).toEqual(["追加指示: あり / なし", "追加指示: なし", "追加指示: なし"]);
+    expect(closed.versions?.cards.map((c) => c.instructions)).toEqual(["追加指示: あり / なし", "追加指示: なし"]);
     const opened = buildVerifyModel(viewer({ expandedVersions: keys }));
     expect(opened.versions?.cards.every((c) => c.expanded && c.fullInstructions === null)).toBe(true);
     expect(opened.versions?.cards[0]?.calibrationHeading).toBe("2026-10-09.2 (追加指示: あり / なし)");
@@ -688,7 +820,7 @@ describe("Issue #263: 閲覧者(admin: false)の検証画面のモデル", () =>
     const admin = buildVerifyModel(input({ expandedVersions: keys }));
     expect(admin.versions?.cards[0]?.fullInstructions).toContain("逃げ馬を重視");
     // 追加指示が複数の種類ならその数
-    const two = { ...(ready() as Extract<VerifyOutcome, { kind: "ready" }>), promptVersions: [{ ...versionsFixture()[0]!, additionalInstructions: ["a", "b", null] }] };
+    const two = { ...(ready() as Extract<VerifyOutcome, { kind: "ready" }>), promptVersions: [{ ...countsOf([80, 40, 35])[0]!, additionalInstructions: ["a", "b", null] }] };
     expect(buildVerifyModel(viewer({ load: { kind: "ready", outcome: two } })).versions?.cards[0]?.instructions).toBe("追加指示: あり(2種類) / なし");
   });
 
@@ -701,9 +833,7 @@ describe("Issue #263: 閲覧者(admin: false)の検証画面のモデル", () =>
 
 describe("Issue #271: 版別カードに、補正前(統計モデル)の対応表と Brier を出す", () => {
   const cellsOf = (row: { cells: readonly { name: string; value: string }[] } | undefined) => Object.fromEntries((row?.cells ?? []).map((c) => [c.name, c.value]));
-  const withVersions = (versions: ReturnType<typeof versionsFixture>, over: Partial<VerifyModelInput> = {}): VerifyModelInput =>
-    input({ load: { kind: "ready", outcome: { ...(ready() as Extract<VerifyOutcome, { kind: "ready" }>), promptVersions: versions } }, ...over });
-  const MIN_RACES = 30;
+  const withVersions = (versions: readonly PromptVersionView[], over: Partial<VerifyModelInput> = {}): VerifyModelInput => inputWith(versions, over);
 
   it("閉じたカードにも Brier の 1 行を出す(補正前・補正後・頭数・レース数。レース数は集計件数)", () => {
     const [first] = buildVerifyModel(input()).versions?.cards ?? [];
@@ -711,25 +841,30 @@ describe("Issue #271: 版別カードに、補正前(統計モデル)の対応�
     expect(first?.quality).toBe("Brier 補正前 0.1661 / 補正後 0.1655(395頭・80レース)");
   });
 
-  it("レース数が 30 未満の版は値を隠し『レース数不足』と出す(値を持っていても出さない)", () => {
-    const cards = buildVerifyModel(input()).versions?.cards ?? [];
-    const insufficient = `Brier: レース数不足(${MIN_RACES}レース未満)`;
-    expect(cards[1]?.quality).toBe(insufficient);
-    expect(cards[2]?.quality).toBe(insufficient);
-    // 前提(空振り防止): 版 3 は値を持っている=隠していることを検出できる
-    expect(versionsFixture()[2]!.quality.priorBrier).toBe(0.1802);
-    expect(cards[2]?.quality).not.toContain("0.18");
+  it("レース数が 30 未満の版は、カード自体を出さない(Issue #481。Brier の値を持っていても、どのページにも出ない。旧版は値だけを隠して『レース数不足』と出していた)", () => {
+    // 見本の版 3(版不明)は Brier の値(0.1802)を持つ。件数 25・15 に下げると、いまの版のページにも過去の版のページにも出ない
+    const lowCounts = versionsFixture(); // 80・25・15
+    expect(lowCounts[2]!.quality.priorBrier).toBe(0.1802); // 前提(空振り防止): 値を持っている=出していれば検出できる
+    for (const page of ["current", "past"] as const) {
+      const m = buildVerifyModel(withVersions(lowCounts, { page }));
+      const text = JSON.stringify(m);
+      expect(text, page).not.toContain("0.1802");
+      expect(text, page).not.toContain("レース数不足");
+    }
+    expect(buildVerifyModel(withVersions(lowCounts, { page: "past" })).versions?.cards).toEqual([]); // 前提: 過去の版のページは空=版不明を出していない
+    expect(buildVerifyModel(withVersions(lowCounts)).versions?.cards.map((c) => c.title)).toEqual(["2026-10-09.2"]);
   });
 
   it.each([
     [29, false],
     [30, true],
     [31, true],
-  ])("境界: レース数 %i は Brier を出す=%s", (races, shown) => {
+  ])("境界: レース数 %i はカードと Brier を出す=%s", (races, shown) => {
     const v = { ...versionsFixture()[0]!, includedAnalysisCount: races };
     const card = buildVerifyModel(withVersions([v])).versions?.cards[0];
-    expect(card?.quality.startsWith("Brier 補正前 0.1661")).toBe(shown);
-    expect(card?.quality.includes("レース数不足")).toBe(!shown);
+    expect(card === undefined).toBe(!shown);
+    expect(card?.quality.startsWith("Brier 補正前 0.1661") ?? false).toBe(shown);
+    expect(card?.quality ?? "").not.toContain("レース数不足");
   });
 
   it("Brier は小数第 4 位に丸める。求められなかった方は - と出す(もう一方は出す)", () => {

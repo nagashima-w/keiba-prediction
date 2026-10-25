@@ -40,8 +40,10 @@ const REPORT: VerifyReportView = {
     unknownBetType: { count: 1, totalStake: 100, betTypes: ["x"] },
   },
 };
-const READY: VerifyOutcome = { kind: "ready", venue: "all", report: REPORT, promptVersions: versionsFixture(), closeComparison: null, breakdown: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 5, affecting: 2 } };
-const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: READY }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, ...over });
+/** 見本の版の集計件数を 30 以上に揃える(Issue #481: 30 件未満の版別カードは出さない)。1・2 つ目がいまの版、3 つ目(版不明)が過去の版。 */
+const VERSIONS = versionsFixture().map((v, i) => ({ ...v, includedAnalysisCount: [80, 40, 35][i]! }));
+const READY: VerifyOutcome = { kind: "ready", venue: "all", report: REPORT, promptVersions: VERSIONS, currentPromptVersions: ["2026-10-09.2", "2026-10-09.2-clip015"], closeComparison: null, breakdown: null, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, startTimeGaps: { lost: 5, affecting: 2 } };
+const input = (over: Partial<VerifyModelInput> = {}): VerifyModelInput => ({ load: { kind: "ready", outcome: READY }, venue: "all", busy: false, pollStopped: false, expandedVersions: [], calibrationTarget: "adjusted", admin: true, page: "current", ...over });
 const tree = (over: Partial<VerifyModelInput> = {}, actions: ViewActions = noopActions): VNode => renderScreen(buildVerifyModel(input(over)), actions);
 
 describe("検証画面の VNode", () => {
@@ -63,7 +65,7 @@ describe("検証画面の VNode", () => {
   it("スマホ幅で横に伸びない: table・横スクロールを使わず、数値はタイル、内訳は ul の行で組む", () => {
     const t = tree();
     expect(findAll(t, (n) => n.tag === "table")).toEqual([]);
-    expect(byClass(t, "verify-tiles")).toHaveLength(5); // 累積回収率・配分ベース・版別の 3 カード
+    expect(byClass(t, "verify-tiles")).toHaveLength(4); // 累積回収率・配分ベース・版別の 2 カード(いまの版)
     for (const tiles of byClass(t, "verify-tiles")) {
       expect(byClass(tiles, "verify-tile")).toHaveLength(4);
     }
@@ -139,11 +141,11 @@ describe("検証画面の VNode", () => {
   it("プロンプト版別比較(Issue #220): 版ごとのカード(見出し・追加指示・集計件数・4 タイル・開閉ボタン)。既定はたたんでいて、キャリブレーションの行を持たない", () => {
     const t = tree();
     const cards = byClass(t, "verify-version");
-    expect(cards).toHaveLength(3);
+    expect(cards).toHaveLength(2);
     expect(textOf(t)).toContain("プロンプト版別比較");
     expect(textOf(t)).toContain("全体の集計です");
-    expect(textOf(t)).toContain("「版不明」は版記録導入前の旧データ");
-    expect(cards.map((c) => textOf(byClass(c, "verify-version-title")[0]!))).toEqual(["2026-10-09.2", "2026-10-09.2-clip015", "版不明"]);
+    expect(textOf(t)).not.toContain("「版不明」は版記録導入前の旧データ"); // 版不明は過去の版のページ
+    expect(cards.map((c) => textOf(byClass(c, "verify-version-title")[0]!))).toEqual(["2026-10-09.2", "2026-10-09.2-clip015"]);
     expect(textOf(byClass(cards[0]!, "verify-version-instructions")[0]!)).toBe(`追加指示: ${LONG_INSTRUCTION.slice(0, 30)}… / なし`);
     for (const c of cards) {
       expect(byClass(c, "verify-tile")).toHaveLength(4);
@@ -177,12 +179,11 @@ describe("検証画面の VNode", () => {
     expect(() => mountAll(t)).not.toThrow();
   });
 
-  it("Issue #271: 閉じた版にも Brier の 1 行を出し(レース数不足の版は不足の文言)、開いた版は補正後・補正前の 2 つの表(それぞれ 20 帯)を見出し付きで続けて出す", () => {
+  it("Issue #271: 閉じた版にも Brier の 1 行を出し(値が求まらない方は -)、開いた版は補正後・補正前の 2 つの表(それぞれ 20 帯)を見出し付きで続けて出す", () => {
     const closed = byClass(tree(), "verify-version");
     expect(closed.map((c) => textOf(byClass(c, "verify-version-quality")[0]!))).toEqual([
       "Brier 補正前 0.1661 / 補正後 0.1655(395頭・80レース)",
-      "Brier: レース数不足(30レース未満)",
-      "Brier: レース数不足(30レース未満)",
+      "Brier 補正前 - / 補正後 -(0頭・40レース)",
     ]);
     expect(closed.every((c) => byClass(c, "verify-version-table-label").length === 0)).toBe(true);
     const [first, second] = byClass(tree({ expandedVersions: ["v:2026-10-09.2"] }), "verify-version");
@@ -207,16 +208,16 @@ describe("検証画面の VNode", () => {
     const actions: ViewActions = { ...noopActions, onVerifyVersionToggle: (key, open) => calls.push([key, open]) };
     const closed = byClass(tree({}, actions), "verify-version-toggle");
     closed[0]!.on?.click?.();
-    closed[2]!.on?.click?.();
+    closed[1]!.on?.click?.();
     const opened = byClass(tree({ expandedVersions: ["v:2026-10-09.2"] }, actions), "verify-version-toggle");
     opened[0]!.on?.click?.();
-    expect(calls).toEqual([["v:2026-10-09.2", true], ["unknown", true], ["v:2026-10-09.2", false]]);
+    expect(calls).toEqual([["v:2026-10-09.2", true], ["v:2026-10-09.2-clip015", true], ["v:2026-10-09.2", false]]);
     // data 属性は描画の差分検出(関数は比較されない)に使う: 版のキーを持つ
-    expect(closed.map((n) => n.attrs?.["data-version-key"])).toEqual(["v:2026-10-09.2", "v:2026-10-09.2-clip015", "unknown"]);
+    expect(closed.map((n) => n.attrs?.["data-version-key"])).toEqual(["v:2026-10-09.2", "v:2026-10-09.2-clip015"]);
   });
 
   it("版別が 0 件なら『集計対象がありません。』", () => {
-    const t = tree({ load: { kind: "ready", outcome: { ...READY, promptVersions: [] } } });
+    const t = tree({ load: { kind: "ready", outcome: { ...READY, promptVersions: [], currentPromptVersions: [] } } });
     expect(byClass(t, "verify-version")).toHaveLength(0);
     expect(textOf(t)).toContain("プロンプト版別比較");
     expect(textOf(byClass(t, "empty").find((n) => textOf(n) === "集計対象がありません。")!)).toBe("集計対象がありません。");
@@ -283,8 +284,8 @@ describe("検証画面の VNode", () => {
   it("集計対象が 0 件なら、タイルの代わりに『集計対象がありません。』", () => {
     const t = tree({ load: { kind: "ready", outcome: { ...READY, report: { ...REPORT, includedAnalysisCount: 0 } } } });
     expect(textOf(t)).toContain("集計対象がありません。");
-    expect(byClass(t, "verify-tiles")).toHaveLength(3); // 累積・配分のタイルは出ない。残るのは版別の 3 カード(版別は別の集計)
-    expect(byClass(t, "verify-version")).toHaveLength(3);
+    expect(byClass(t, "verify-tiles")).toHaveLength(2); // 累積・配分のタイルは出ない。残るのは版別の 2 カード(版別は別の集計)
+    expect(byClass(t, "verify-version")).toHaveLength(2);
   });
 
   it("区分の切替(3 つ)は押すとアクションが呼ばれ、いまの区分は aria-pressed。更新ボタンは通信中は無効", () => {
@@ -307,6 +308,76 @@ describe("検証画面の VNode", () => {
     expect(byClass(tree(), "back")[0]?.attrs?.["href"]).toBe("#");
     const err = tree({ load: { kind: "error", message: "取得できません" } });
     expect(findAll(err, (n) => n.attrs?.["role"] === "alert").map(textOf)).toEqual(["取得できません"]);
+  });
+});
+
+describe("Issue #481: 版別比較の VNode(いまの版のページと過去の版のページ)", () => {
+  const cur = ["2026-10-09.2", "2026-10-09.2-clip015"];
+  const withVersions = (counts: readonly number[], over: Partial<VerifyModelInput> = {}): Partial<VerifyModelInput> => ({
+    load: { kind: "ready", outcome: { ...READY, promptVersions: VERSIONS.map((v, i) => ({ ...v, includedAnalysisCount: counts[i]! })), currentPromptVersions: cur } },
+    ...over,
+  });
+
+  it("いまの版のページ: 過去の版のページ(#verify-versions)へのリンクが、版別比較の節にある", () => {
+    const links = byClass(tree(), "verify-versions-link");
+    expect(links).toHaveLength(1);
+    expect(links[0]!.tag).toBe("a");
+    expect(links[0]!.attrs?.["href"]).toBe("#verify-versions");
+    expect(textOf(links[0]!)).toBe("過去の版は別のページで見る");
+    // 版別比較の節の中(見出しより後ろ、補正方向の節より前)
+    const text = textOf(tree());
+    expect(text.indexOf("プロンプト版別比較")).toBeLessThan(text.indexOf("過去の版は別のページで見る"));
+    expect(text.indexOf("過去の版は別のページで見る")).toBeLessThan(text.indexOf("補正方向×結果"));
+  });
+
+  it("いまの版が 30 件未満なら、カードの代わりに『集計中(N件。30件で表示)』の枠(版の名前つき)を出す", () => {
+    const t = tree(withVersions([80, 25, 35]));
+    expect(byClass(t, "verify-version").map((c) => textOf(byClass(c, "verify-version-title")[0]!))).toEqual(["2026-10-09.2", "2026-10-09.2-clip015"]);
+    const collecting = byClass(t, "verify-version-collecting");
+    expect(collecting).toHaveLength(1);
+    expect(textOf(collecting[0]!)).toContain("2026-10-09.2-clip015");
+    expect(textOf(collecting[0]!)).toContain("集計中(25件。30件で表示)");
+    expect(byClass(collecting[0]!, "verify-version-toggle")).toHaveLength(0); // 枠にはキャリブレーションの開閉ボタンなどが無い
+    expect(byClass(collecting[0]!, "verify-tile")).toHaveLength(0);
+    expect(() => mountAll(t)).not.toThrow();
+  });
+
+  it("過去の版のページ: 見出し『過去の版』・検証へ戻るリンク(#verify)・過去の版のカード。区分の切替・全体の節・更新(管理者)は残るもの/消えるものを区別する", () => {
+    const t = tree({ page: "past" });
+    expect(textOf(byClass(t, "title")[0]!)).toBe("過去の版");
+    const back = byClass(t, "back");
+    expect(back).toHaveLength(1);
+    expect(back[0]!.attrs?.["href"]).toBe("#verify");
+    expect(textOf(back[0]!)).toBe("検証へ戻る");
+    expect(byClass(t, "verify-version").map((c) => textOf(byClass(c, "verify-version-title")[0]!))).toEqual(["版不明"]);
+    expect(textOf(t)).toContain("「版不明」は版記録導入前の旧データ");
+    expect(byClass(t, "verify-venue")).toHaveLength(0);
+    expect(byClass(t, "verify-versions-link")).toHaveLength(0);
+    expect(byClass(t, "verify-tiles")).toHaveLength(1); // 版不明のカードのタイルだけ(全体の累積・配分のタイルは出ない)
+    expect(textOf(t)).not.toContain("配分ベースの回収率"); // 全体の節は出さない(説明文の『累積回収率』という語は版別の節にも出るので、見出しで確かめる)
+    expect(textOf(t)).not.toContain("補正方向×結果");
+    expect(byClass(t, "refresh")).toHaveLength(1); // 管理者の更新は残る
+    expect(() => mountAll(t)).not.toThrow();
+    // 対照(空振り防止): いまの版のページは一覧へ戻る
+    expect(byClass(tree(), "back")[0]!.attrs?.["href"]).toBe("#");
+  });
+
+  it("過去の版のページ: 30 件未満の過去の版は出さず、出していない版の数を 1 行で言う。0 版なら行は出ない", () => {
+    const hidden = tree(withVersions([80, 40, 12], { page: "past" }));
+    expect(byClass(hidden, "verify-version")).toHaveLength(0);
+    const line = byClass(hidden, "verify-versions-omitted");
+    expect(line).toHaveLength(1);
+    expect(textOf(line[0]!)).toBe("分析が30件未満の版(1版)は出していません。");
+    const shown = tree({ page: "past" });
+    expect(byClass(shown, "verify-version")).toHaveLength(1); // 前提(空振り防止): 出せる版があるとき
+    expect(byClass(shown, "verify-versions-omitted")).toHaveLength(0);
+  });
+
+  it("過去の版のページでも、キャリブレーションの開閉ボタンはアクションを呼ぶ(版不明のキー)", () => {
+    const calls: Array<[string, boolean]> = [];
+    const t = tree({ page: "past" }, { ...noopActions, onVerifyVersionToggle: (key, open) => calls.push([key, open]) });
+    byClass(t, "verify-version-toggle")[0]!.on?.click?.();
+    expect(calls).toEqual([["unknown", true]]);
   });
 });
 

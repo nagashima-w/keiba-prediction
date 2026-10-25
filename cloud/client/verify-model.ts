@@ -28,6 +28,7 @@ import {
   venueFilterLabel,
 } from "../../packages/core/src/view/verify-format";
 import { PROPOSED_BET_LABELS } from "./verify-format";
+import { VERIFY_HASH, VERIFY_VERSIONS_HASH } from "./route";
 
 /** 取得の状態。 */
 export type VerifyLoadState =
@@ -38,8 +39,13 @@ export type VerifyLoadState =
 /** 対応表(キャリブレーション)の対象。`adjusted`: 補正後〈AI〉の確率で分けた表。`prior`: 補正前〈統計モデル〉の確率で分けた表(Issue #254)。 */
 export type CalibrationTarget = "adjusted" | "prior";
 
+/** 検証画面のページ(Issue #481)。`current`: 検証画面の本体(版別比較はいまの版だけ)。`past`: 過去の版のページ(`#verify-versions`。版別比較の過去の版だけ)。 */
+export type VerifyPage = "current" | "past";
+
 export interface VerifyModelInput {
   readonly load: VerifyLoadState;
+  /** どちらのページか(Issue #481)。取得・状態は 2 つのページで共有する。 */
+  readonly page: VerifyPage;
   readonly venue: VerifyVenue;
   /** 通信中(取得・更新)。 */
   readonly busy: boolean;
@@ -171,6 +177,12 @@ export interface VersionCard {
   readonly priorCalibrationRows: readonly StatRow[];
 }
 
+/** いまの版が 30 件未満で、カードの代わりに出す枠(Issue #481)。 */
+export interface CollectingVersion {
+  readonly title: string;
+  readonly text: string;
+}
+
 export interface VersionsSection {
   readonly heading: string;
   readonly description: string;
@@ -179,6 +191,12 @@ export interface VersionsSection {
   /** 版別が 0 件のときの文。 */
   readonly empty: string | null;
   readonly cards: readonly VersionCard[];
+  /** いまの版のページ: 集計件数が足りない(30 件未満の)いまの版の枠(Issue #481)。 */
+  readonly collecting: readonly CollectingVersion[];
+  /** 過去の版のページ: 30 件未満で出さなかった版の数の 1 行(0 版なら null。Issue #481)。 */
+  readonly omitted: string | null;
+  /** いまの版のページ: 過去の版のページへのリンク(Issue #481)。過去の版のページは null。 */
+  readonly link: { readonly label: string; readonly href: string } | null;
 }
 
 /**
@@ -204,7 +222,11 @@ export interface VerifyNotice {
 
 export interface VerifyModel {
   readonly kind: "verify";
-  readonly backHref: "#";
+  /** 画面の見出し(Issue #481: 過去の版のページは「過去の版」)。 */
+  readonly title: string;
+  /** 戻るリンク(Issue #481: 過去の版のページは検証画面へ。それ以外は一覧へ)。 */
+  readonly backHref: string;
+  readonly backLabel: string;
   readonly venueTabs: readonly { readonly venue: VerifyVenue; readonly label: string; readonly current: boolean }[];
   readonly loading: boolean;
   /** 「更新」ボタンを出すか(管理者だけ。Issue #263)。 */
@@ -415,14 +437,35 @@ function versionCard(v: PromptVersionView, expandedKeys: ReadonlySet<string>, ad
   };
 }
 
-function versionsSection(versions: readonly PromptVersionView[], expandedVersions: readonly string[], admin: boolean): VersionsSection {
+/** 版別のカードを出す、集計できた分析の最小件数(未満なら出さない。Issue #481)。`CLOSE_REFERENCE_MIN_COUNT`・`MIN_RACES_FOR_BRIER` と同じ 30 だが別の定数で、連動しない。 */
+export const VERSION_CARD_MIN_COUNT = 30;
+
+/**
+ * 版別比較の節(Issue #481)。サーバが渡すいまの版の一覧(`current`)で、版を「いまの版」(検証画面の本体)と「過去の版」(過去の版のページ)に分ける。
+ * どちらも集計件数が {@link VERSION_CARD_MIN_COUNT} 未満の版はカードにしない: いまの版は『集計中』の枠にし、過去の版は数だけを 1 行で言う。
+ */
+function versionsSection(versions: readonly PromptVersionView[], current: readonly string[], page: VerifyPage, expandedVersions: readonly string[], admin: boolean): VersionsSection {
   const expandedKeys = new Set(expandedVersions);
+  const isCurrent = (v: PromptVersionView): boolean => v.promptVersion !== null && current.includes(v.promptVersion);
+  const past = page === "past";
+  const shown = versions.filter((v) => isCurrent(v) !== past);
+  const cards = shown.filter((v) => v.includedAnalysisCount >= VERSION_CARD_MIN_COUNT);
+  const omittedCount = shown.length - cards.length;
+  const collecting = past
+    ? []
+    : current.filter((c) => !cards.some((v) => v.promptVersion === c)).map((c) => ({
+        title: promptVersionLabel(c),
+        text: `集計中(${versions.find((v) => v.promptVersion === c)?.includedAnalysisCount ?? 0}件。${VERSION_CARD_MIN_COUNT}件で表示)`,
+      }));
   return {
-    heading: "プロンプト版別比較",
+    heading: past ? "過去の版" : "プロンプト版別比較",
     description: "プロンプトの版ごとの累積回収率・キャリブレーション・Brier。版別は全体の集計です(上の区分の切替には連動しません)。同じ版でも追加指示が違えば別条件です。Brier は予測と結果のずれの平均で、小さいほど良い。版ごとにレースが違うので、差は目安です。",
-    unknownNote: versions.some((v) => v.promptVersion === null) ? UNKNOWN_VERSION_NOTE : null,
-    empty: versions.length === 0 ? "集計対象がありません。" : null,
-    cards: versions.map((v) => versionCard(v, expandedKeys, admin)),
+    unknownNote: cards.some((v) => v.promptVersion === null) ? UNKNOWN_VERSION_NOTE : null,
+    empty: cards.length === 0 && collecting.length === 0 && omittedCount === 0 ? "集計対象がありません。" : null,
+    cards: cards.map((v) => versionCard(v, expandedKeys, admin)),
+    collecting,
+    omitted: past && omittedCount > 0 ? `分析が${VERSION_CARD_MIN_COUNT}件未満の版(${omittedCount}版)は出していません。` : null,
+    link: past ? null : { label: "過去の版は別のページで見る", href: VERIFY_VERSIONS_HASH },
   };
 }
 
@@ -578,10 +621,13 @@ export function buildVerifyModel(input: VerifyModelInput): VerifyModel {
     const gap = gapNotice(ready.startTimeGaps);
     if (gap !== null) notices.push(gap);
   }
+  const past = input.page === "past";
   return {
     kind: "verify",
-    backHref: "#",
-    venueTabs: (["all", "central", "nar"] as const).map((venue) => ({ venue, label: venueFilterLabel(venue), current: venue === input.venue })),
+    title: past ? "過去の版" : "検証",
+    backHref: past ? VERIFY_HASH : "#",
+    backLabel: past ? "検証へ戻る" : "一覧へ戻る",
+    venueTabs: past ? [] : (["all", "central", "nar"] as const).map((venue) => ({ venue, label: venueFilterLabel(venue), current: venue === input.venue })),
     loading: load.kind === "loading" || input.busy,
     canRefresh: input.admin,
     refreshDisabled: load.kind === "loading" || input.busy,
@@ -590,13 +636,14 @@ export function buildVerifyModel(input: VerifyModelInput): VerifyModel {
     unavailable: outcome !== null && outcome.kind !== "ready" ? unavailableNotice(outcome) : null,
     computedAt: ready === null ? null : jst(ready.computedAt),
     notices,
-    bet: ready === null ? null : betSection(ready.report),
-    proposed: ready === null ? null : proposedSection(ready.report),
-    versions: ready === null ? null : versionsSection(ready.promptVersions, input.expandedVersions, input.admin),
-    close: ready === null || ready.closeComparison === null ? null : closeSection(ready.closeComparison),
-    breakdown: ready === null ? [] : breakdownSections(ready.breakdown),
-    direction: ready === null ? null : directionSection(ready.report),
-    calibration: ready === null ? null : calibrationSection(ready.report, input.calibrationTarget),
-    marks: ready === null ? null : marksSection(ready.report),
+    // 過去の版のページ(Issue #481)は版別だけ。全体の節は検証画面の本体に残す(中身は変えない)。
+    bet: ready === null || past ? null : betSection(ready.report),
+    proposed: ready === null || past ? null : proposedSection(ready.report),
+    versions: ready === null ? null : versionsSection(ready.promptVersions, ready.currentPromptVersions, input.page, input.expandedVersions, input.admin),
+    close: ready === null || past || ready.closeComparison === null ? null : closeSection(ready.closeComparison),
+    breakdown: ready === null || past ? [] : breakdownSections(ready.breakdown),
+    direction: ready === null || past ? null : directionSection(ready.report),
+    calibration: ready === null || past ? null : calibrationSection(ready.report, input.calibrationTarget),
+    marks: ready === null || past ? null : marksSection(ready.report),
   };
 }
