@@ -224,7 +224,7 @@ export interface AlarmInputs {
    */
   readonly resultAtMs?: number | null;
   /**
-   * 馬場の API の取得(Issue #294)の期限({@link BabaStage.dueAtMs})。**前夜のうちから**翌朝の期限で入る(過去は now)。取得の印があれば null(取得の後に候補が残って、即時のアラームが続かない)。
+   * 馬場の取得(Issue #294)の期限({@link BabaStage.dueAtMs})。**前夜のうちから**翌朝の期限で入る(過去は now)。取得の印があれば null(取得の後に候補が残って、即時のアラームが続かない)。
    * 省略・null は候補なし(取得口が無い構成・中央の開催日でない日・既存の呼び出し)。
    */
   readonly babaAtMs?: number | null;
@@ -411,11 +411,11 @@ export interface RaceDayDeps {
    */
   readonly requestReport?: (kaisaiDate: string) => Promise<void>;
   /**
-   * 馬場の API の取得口(Issue #294〈#293-A〉。DO のラッパが、Worker の secret `BABA_API_URL` から作る)。**URL そのものは持たない**(本文を返す関数だけ。URL が状態・ログに入る経路を作らない)。
-   * **未登録・形式不正なら渡さない**: 取得の段階全体が無効(印も書かず、アラームの候補にもしない)。`babaStore` と両方があるときだけ動く。
+   * 馬場の取得口(Issue #294〈#293-A〉。Issue #478 で取得先を JRA のページに替えた。DO のラッパが `createJraBabaFetcher` で作る)。**URL そのものは持たない**(読み取り済みの結果を返す関数だけ。URL が状態・ログに入る経路を作らない)。
+   * 渡さなければ取得の段階全体が無効(印も書かず、アラームの候補にもしない。テスト用。本番は常に渡す)。`babaStore` と両方があるときだけ動く。
    */
   readonly fetchBaba?: BabaFetcher;
-  /** 馬場の API の取得の試み・結果の保存先(本番は D1 の `baba_fetches`・`baba_conditions`〈migration 0017〉)。 */
+  /** 馬場の取得の試み・結果の保存先(本番は D1 の `baba_fetches`・`baba_conditions`〈migration 0017〉)。 */
   readonly babaStore?: BabaStore;
   /**
    * 貯めた当日の馬場の値の読み出し口(Issue #295。本番は `D1BabaStore.load`)。**発走前の計算ステップだけ**が、そのレースの開催日 × 場コードの値を読み、LLM のプロンプトとスナップショットに渡す
@@ -471,7 +471,7 @@ export type StepOutcome =
   | ResultStepOutcome
   /** 締切の直前の再計算の 1 ステップ(Issue #338。`mode: "close"`。形と各値の意味は {@link CloseStepOutcome})。 */
   | CloseStepOutcome
-  /** 馬場の API の取得(Issue #294。`mode: "baba"`)。`raceId` は開催日。`ok` は当日の競馬場の値を D1 に保存した、`retry` は試みの記録(D1)の失敗で再試行待ち、`failed` はこの日は取得しない(再試行しない)。 */
+  /** 馬場の取得(Issue #294。`mode: "baba"`)。`raceId` は開催日。`ok` は当日の競馬場の値を D1 に保存した、`retry` は試みの記録(D1)の失敗で再試行待ち、`failed` はこの日は取得しない(再試行しない)。 */
   | BabaStepOutcome;
 
 /** 通知の1件の状態(状態から読める。失敗の分類だけで、URL・メッセージ・本文は持たない。`getNotifications`)。 */
@@ -808,7 +808,7 @@ export class RaceDayCore {
     this.results = new ResultImportStore(this.sql);
     this.resultStore = deps.resultStore;
     this.requestReport = deps.requestReport;
-    // 馬場の API の取得(Issue #294)。メタは既存の race_day_meta(新しい表は無い)。取得口・保存先が無ければ段階全体が無効。
+    // 馬場の取得(Issue #294)。メタは既存の race_day_meta(新しい表は無い)。取得口・保存先が無ければ段階全体が無効。
     this.babaReader = deps.babaReader;
     this.baba = new BabaStage({
       sql: this.sql,
@@ -1438,7 +1438,7 @@ export class RaceDayCore {
       await this.armAlarm();
       return outcome;
     }
-    // 馬場の API の取得(Issue #294)。開催日の朝の 1 回だけ。**タスクより前**: 発走前の分析(LLM)に当日の値を間に合わせる。期限(09:30。Issue #475)は最初の発走前の分析より後になりうるが、その分析は取得を待たずに値なしで進む(分析を遅らせない)。
+    // 馬場の取得(Issue #294)。開催日の朝の 1 回だけ。**タスクより前**: 発走前の分析(LLM)に当日の値を間に合わせる。期限(09:30。Issue #475)は最初の発走前の分析より後になりうるが、その分析は取得を待たずに値なしで進む(分析を遅らせない)。
     // 動けるのは、取得口・保存先があり、中央の開催日で、今日が開催日で、期限が来ていて、まだ試みていないときだけ({@link BabaStage.runnable})。失敗しても例外にせず、次の起床でタスクが進む。
     if (this.baba.runnable()) {
       const outcome = await this.baba.run();

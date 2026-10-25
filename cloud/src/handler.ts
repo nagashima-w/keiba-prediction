@@ -472,7 +472,7 @@ export async function handle(
   }
 
   if (pathname === "/api/baba-fetch") {
-    // 管理者専用(route-policy.ts)。D1 の baba_fetches・baba_conditions を読むだけ(外部の API にも netkeiba にも LLM にも出ない)。GET だけ。Issue #360。
+    // 管理者専用(route-policy.ts)。D1 の baba_fetches・baba_conditions を読むだけ(JRA にも netkeiba にも LLM にも出ない)。GET だけ。Issue #360。
     if (method !== "GET") {
       return methodNotAllowed("GET");
     }
@@ -603,7 +603,7 @@ async function handleHorseRuns(request: Request, env: Env, now: () => Date): Pro
 }
 
 /**
- * `GET /api/baba-fetch[?kaisai_date=YYYYMMDD]`(Issue #360。管理者専用): 外部の馬場の API の取得の結果(D1 の `baba_fetches`・`baba_conditions`)。
+ * `GET /api/baba-fetch[?kaisai_date=YYYYMMDD]`(Issue #360。管理者専用): 馬場の取得の結果(D1 の `baba_fetches`・`baba_conditions`)。
  * 開催日ごとに、結果の分類・取得の時刻・保存した競馬場の数と中身・捨てた競馬場の理由と計測日時の文字列(`dropped`。旧版の記録は null)を返す。
  * 「当日の値がまだ載っていなかった」のか「計測日時が読めなかった」のかを、D1 のコンソールを開かずに確かめるための入口。
  * `kaisai_date` を省くと直近 {@link FETCH_LIST_LIMIT_DEFAULT} 日ぶん(新しい順)、指定するとその日だけ。

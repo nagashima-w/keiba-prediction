@@ -1,9 +1,6 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BabaFetchError, type BabaResultClass, type BabaVenueRecord } from "../src/baba-conditions";
+import { BabaFetchError, type BabaFetchOutcome, type BabaResultClass, type BabaVenueRecord } from "../src/baba-conditions";
 import {
   BABA_FETCH_JST,
   BABA_META_ATTEMPTED,
@@ -18,20 +15,22 @@ import {
 } from "../src/race-day-baba";
 import { openNodeSql, type NodeSql } from "./node-sql";
 import { installFetchTrap } from "./fetch-trap";
+import { SAMPLE_DATE, sampleOutcome } from "./baba-sample";
 
 /**
- * Issue #294: 馬場の API の取得ステップ(`BabaStage`)の単体。いつ動けるか(期限と条件)・「試みた」を先に永続化して 1 日 1 回に収めること・失敗の扱い。
- * 保存先(D1)・取得口(API)は偽。**実際の API には一切アクセスしない**。ストレージは `node:sqlite`(本物の SQLite)。
+ * Issue #294: 馬場の取得ステップ(`BabaStage`)の単体。いつ動けるか(期限と条件)・「試みた」を先に永続化して 1 日 1 回に収めること・失敗の扱い。
+ * Issue #478 で取得先を JRA のページに替えた(取得口は読み取り済みの結果 `BabaFetchOutcome` を返す)。
+ * 保存先(D1)・取得口は偽。**実際の JRA には一切アクセスしない**。ストレージは `node:sqlite`(本物の SQLite)。
  * 使う URL・ホストは登場しない(取得口は関数で、URL はその外にある)。
  */
 
 installFetchTrap();
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const SAMPLE_TEXT = readFileSync(path.join(ROOT, "fixtures", "baba_latest_20261012.json"), "utf-8");
-const DATE = "20261012";
+const DATE = SAMPLE_DATE;
 const jst = (s: string): number => Date.parse(`${s}+09:00`);
-const AT_0930 = jst("2026-10-12T09:30:00");
+const AT_0930 = jst("2026-10-25T09:30:00");
+/** 取得口が失敗の分類だけを返した結果(保存する場は無い)。 */
+const failureOutcome = (result: BabaResultClass, dropped = 0): BabaFetchOutcome => ({ result, venues: [], dropped, droppedDetails: [], apiFetchedAt: null });
 
 const opened: NodeSql[] = [];
 afterEach(() => {
@@ -83,7 +82,7 @@ interface Harness {
   readonly warns: string[];
   readonly fetchCalls: { n: number };
   /** 取得口の挙動(省略時は見本を返す)。 */
-  behavior: { respond: () => Promise<string> | string };
+  behavior: { respond: () => Promise<BabaFetchOutcome> | BabaFetchOutcome };
   /** 取得口が呼ばれた瞬間の、永続化の状態(「試みた」が先か)。 */
   readonly atFetch: { claimRowExists: boolean; metaAttempted: string | null }[];
 }
@@ -102,7 +101,7 @@ function harness(options: { facts?: Partial<BabaFacts>; sql?: NodeSql; store?: F
   const warns: string[] = [];
   const fetchCalls = { n: 0 };
   const atFetch: Harness["atFetch"] = [];
-  const h = { behavior: { respond: (): Promise<string> | string => SAMPLE_TEXT } } as Pick<Harness, "behavior">;
+  const h = { behavior: { respond: (): Promise<BabaFetchOutcome> | BabaFetchOutcome => sampleOutcome() } } as Pick<Harness, "behavior">;
   const fetcher: BabaFetcher = async () => {
     fetchCalls.n += 1;
     atFetch.push({
@@ -135,7 +134,7 @@ describe("期限(dueAtMs): 開催日の 09:30 JST で固定(最初の発走前�
   // 取得は 09:30 に固定する。外部の API は 08:00 の時点でも 09:00 の時点でも当日 7:00 の計測値をまだ載せていなかった(Issue #360・#475)ので、値が載る前に取りに行かないことを、最初の数レースの分析に間に合うことより優先する。
   // 最初の発走前の分析の期限(計画の行)が 09:30 より前でも 09:30 より後でも、取得は 09:30(`BabaFacts` に最初の期限は渡さない)。
   it("開催日が確定していれば、どの時刻から数えても期限は 09:30(前夜の計画の段階から候補になる)", () => {
-    for (const now of [jst("2026-10-11T21:30:00"), jst("2026-10-12T06:00:00"), jst("2026-10-12T09:00:00"), jst("2026-10-12T09:29:59")]) {
+    for (const now of [jst("2026-10-24T21:30:00"), jst("2026-10-25T06:00:00"), jst("2026-10-25T09:00:00"), jst("2026-10-25T09:29:59")]) {
       const h = harness({ now });
       expect(h.stage.dueAtMs()).toBe(AT_0930);
     }
@@ -149,9 +148,9 @@ describe("期限(dueAtMs): 開催日の 09:30 JST で固定(最初の発走前�
     { name: "計画が確定していない", options: { facts: { planFinalized: false } } },
     { name: "中央の一覧が無い(地方だけの日・一覧の取得に失敗した日)", options: { facts: { centralListed: false } } },
     { name: "開催日が未確定", options: { facts: { kaisaiDate: null } } },
-    { name: "取得口が無い(secret 未登録)", options: { noFetcher: true } },
+    { name: "取得口が無い(本番は常に渡す。無ければ機能全体が止まる)", options: { noFetcher: true } },
     { name: "保存先が無い", options: { noStore: true } },
-    { name: "開催日が過去(今日 JST が開催日より後)", options: { now: jst("2026-10-13T00:00:00") } },
+    { name: "開催日が過去(今日 JST が開催日より後)", options: { now: jst("2026-10-26T00:00:00") } },
   ];
   for (const c of none) {
     it(`${c.name} → null(アラームの候補にならない)`, () => {
@@ -174,7 +173,7 @@ describe("期限(dueAtMs): 開催日の 09:30 JST で固定(最初の発走前�
     expect(h.stage.dueAtMs()).toBe(AT_0930 + 60_000);
   });
 
-  it("secret 未登録のとき、何度確かめても印を書かない(後から登録した同じ日に取得できる)", async () => {
+  it("取得口が無いとき、何度確かめても印を書かない(取得口が付いた同じ日に取得できる)", async () => {
     const h = harness({ noFetcher: true });
     expect(h.stage.runnable()).toBe(false);
     expect(meta(h, BABA_META_ATTEMPTED)).toBeNull();
@@ -183,7 +182,7 @@ describe("期限(dueAtMs): 開催日の 09:30 JST で固定(最初の発走前�
 
 describe("動ける時刻(runnable)", () => {
   it("09:30 の 1ms 前は動けず、09:30 ちょうどから動ける。09:00 ちょうどはまだ動けない(Issue #475)", () => {
-    const early = harness({ now: jst("2026-10-12T09:00:00") });
+    const early = harness({ now: jst("2026-10-25T09:00:00") });
     expect(early.stage.runnable()).toBe(false);
     const h = harness({ now: AT_0930 - 1 });
     expect(h.stage.runnable()).toBe(false);
@@ -192,13 +191,13 @@ describe("動ける時刻(runnable)", () => {
   });
 
   it("前夜(21:00 の計画の直後)は、期限が翌朝でも動けない", () => {
-    const h = harness({ now: jst("2026-10-11T21:30:00") });
+    const h = harness({ now: jst("2026-10-24T21:30:00") });
     expect(h.stage.dueAtMs()).toBe(AT_0930); // 前提: 候補(アラーム)にはなる
     expect(h.stage.runnable()).toBe(false);
   });
 
   it("開催日の当日の夕方でも、まだ試みていなければ動ける(同日の遅い計画・取り残し)", () => {
-    const h = harness({ now: jst("2026-10-12T17:05:00") });
+    const h = harness({ now: jst("2026-10-25T17:05:00") });
     expect(h.stage.runnable()).toBe(true);
   });
 });
@@ -214,9 +213,10 @@ describe("run: 試みを先に永続化して、1 回だけ取得する", () => 
     expect(h.store.finishes).toHaveLength(1);
     const finish = h.store.finishes[0]!.finish;
     expect(finish.result).toBe("ok");
-    expect(finish.venues.map((v: BabaVenueRecord) => v.venueCode)).toEqual(["05", "08"]); // 札幌(9/6)は捨てる
-    expect(finish.dropped).toBe(1);
-    expect(finish.droppedDetails).toEqual([{ venue: "01", reason: "not-today", measured: "9月6日（日曜）8時20分" }]);
+    expect(finish.venues.map((v: BabaVenueRecord) => v.venueCode)).toEqual(["05", "08", "04"]); // 東京・京都・新潟(取得口が返した順のまま保存先に渡す)
+    expect(finish.apiFetchedAt).toBe(sampleOutcome().apiFetchedAt);
+    expect(finish.dropped).toBe(0);
+    expect(finish.droppedDetails).toEqual([]);
     expect(finish.finishedAt).toBe(AT_0930);
     expect(meta(h, BABA_META_ATTEMPTED)).toBe(String(AT_0930));
     expect(meta(h, BABA_META_RESULT)).toBe("ok");
@@ -229,14 +229,13 @@ describe("run: 試みを先に永続化して、1 回だけ取得する", () => 
   // 結果が何であっても、2 回目は送らない(M2・M3)。
   const outcomes: { name: string; result: BabaResultClass; setup: (h: Harness) => void; stepResult: "ok" | "failed" }[] = [
     { name: "成功", result: "ok", setup: () => undefined, stepResult: "ok" },
-    { name: "HTTP 500", result: "http-500", setup: (h) => (h.behavior.respond = () => Promise.reject(new BabaFetchError("http-500"))), stepResult: "failed" },
-    { name: "タイムアウト", result: "timeout", setup: (h) => (h.behavior.respond = () => Promise.reject(new BabaFetchError("timeout"))), stepResult: "failed" },
-    { name: "通信の失敗", result: "network", setup: (h) => (h.behavior.respond = () => Promise.reject(new BabaFetchError("network"))), stepResult: "failed" },
-    { name: "リダイレクト", result: "redirect", setup: (h) => (h.behavior.respond = () => Promise.reject(new BabaFetchError("redirect"))), stepResult: "failed" },
-    { name: "JSON でない本文", result: "not-json", setup: (h) => (h.behavior.respond = () => "<html>Bad Gateway</html>"), stepResult: "failed" },
-    { name: "形の不一致", result: "shape-mismatch", setup: (h) => (h.behavior.respond = () => '{"venues":[]}'), stepResult: "failed" },
-    { name: "古いキャッシュ(stale)", result: "stale", setup: (h) => (h.behavior.respond = () => JSON.stringify({ ...JSON.parse(SAMPLE_TEXT), fetchedAt: "2026-10-11T08:00:00.000Z" })), stepResult: "failed" },
-    { name: "当日の競馬場が無い", result: "no-today-venues", setup: (h) => (h.behavior.respond = () => JSON.stringify({ ...JSON.parse(SAMPLE_TEXT), venues: [JSON.parse(SAMPLE_TEXT).venues[2]] })), stepResult: "failed" },
+    { name: "HTTP 500(取得口が投げた失敗)", result: "http-500", setup: (h) => (h.behavior.respond = () => Promise.reject(new BabaFetchError("http-500"))), stepResult: "failed" },
+    { name: "タイムアウト(取得口が投げた失敗)", result: "timeout", setup: (h) => (h.behavior.respond = () => Promise.reject(new BabaFetchError("timeout"))), stepResult: "failed" },
+    { name: "通信の失敗(取得口が投げた失敗)", result: "network", setup: (h) => (h.behavior.respond = () => Promise.reject(new BabaFetchError("network"))), stepResult: "failed" },
+    { name: "リダイレクト(取得口が投げた失敗)", result: "redirect", setup: (h) => (h.behavior.respond = () => Promise.reject(new BabaFetchError("redirect"))), stepResult: "failed" },
+    { name: "HTTP 503(取得口が結果として返した失敗)", result: "http-503", setup: (h) => (h.behavior.respond = () => failureOutcome("http-503")), stepResult: "failed" },
+    { name: "形の不一致(取得口が結果として返した失敗)", result: "shape-mismatch", setup: (h) => (h.behavior.respond = () => failureOutcome("shape-mismatch")), stepResult: "failed" },
+    { name: "当日の競馬場が無い", result: "no-today-venues", setup: (h) => (h.behavior.respond = () => failureOutcome("no-today-venues", 3)), stepResult: "failed" },
     { name: "想定外の例外(BabaFetchError でない)", result: "other", setup: (h) => (h.behavior.respond = () => Promise.reject(new TypeError("想定外 https://secret.test.invalid/x"))), stepResult: "failed" },
     { name: "D1 への結果の保存の失敗", result: "ok", setup: (h) => (h.store.finishFails = true), stepResult: "failed" },
   ];
@@ -304,7 +303,7 @@ describe("run: 試みを先に永続化して、1 回だけ取得する", () => 
 
   it("クラッシュの模擬: 取得口が戻らないまま stage を捨てても、新しい stage は取得しない(印は取得の前に書かれている)", async () => {
     const h = harness();
-    h.behavior.respond = () => new Promise<string>(() => undefined); // 応答が返らない
+    h.behavior.respond = () => new Promise<BabaFetchOutcome>(() => undefined); // 応答が返らない
     void h.stage.run();
     for (let i = 0; i < 50; i++) await Promise.resolve();
     expect(h.fetchCalls.n).toBe(1);
@@ -379,28 +378,37 @@ describe("失敗しても分析を止めず、秘匿を守る", () => {
 
   it("応答の本文(競馬場の文章)を警告に出さない", async () => {
     const h = harness();
-    h.behavior.respond = () => JSON.stringify({ fetchedAt: "2026-10-12T08:00:00Z", venues: [{ venueCode: "05", venueName: "本文に含まれる語-CANARY", measuredAt: "壊れた" }] });
+    h.behavior.respond = () => ({ ...failureOutcome("no-today-venues", 1), droppedDetails: [{ venue: "05", reason: "unparsed", measured: "本文に含まれる語-CANARY" }] });
     await h.stage.run();
     expect(h.warns.length).toBeGreaterThan(0);
     expect(h.warns.join("\n")).not.toContain("CANARY");
   });
 
-  it("保存先に渡す記録に、応答の本文の断片を入れない(成功: API の fetchedAt と競馬場の値だけ。失敗: apiFetchedAt は null)", async () => {
+  it("保存先に渡す記録に、取得口の結果の余計な項目(本文の断片)を入れない(成功: 結果・取得時刻・競馬場・件数だけ。失敗: apiFetchedAt は null)", async () => {
     const ok = harness();
-    ok.behavior.respond = () => JSON.stringify({ ...(JSON.parse(SAMPLE_TEXT) as object), text: "本文の断片-CANARY" });
+    ok.behavior.respond = () => ({ ...sampleOutcome(), text: "本文の断片-CANARY" }) as BabaFetchOutcome;
     await ok.stage.run();
     expect(ok.store.finishes).toHaveLength(1);
     expect(ok.store.finishes[0]!.finish.result).toBe("ok");
-    expect(ok.store.finishes[0]!.finish.apiFetchedAt).toBe((JSON.parse(SAMPLE_TEXT) as { fetchedAt: string }).fetchedAt);
+    expect(ok.store.finishes[0]!.finish.apiFetchedAt).toBe(sampleOutcome().apiFetchedAt);
     expect(JSON.stringify(ok.store.finishes)).not.toContain("CANARY");
 
     const ng = harness();
-    ng.behavior.respond = () => "<html>Bad Gateway 本文の断片-CANARY</html>";
+    ng.behavior.respond = () => ({ ...failureOutcome("shape-mismatch"), text: "本文の断片-CANARY" }) as BabaFetchOutcome;
     await ng.stage.run();
     expect(ng.store.finishes).toHaveLength(1);
-    expect(ng.store.finishes[0]!.finish.result).toBe("not-json");
+    expect(ng.store.finishes[0]!.finish.result).toBe("shape-mismatch");
     expect(ng.store.finishes[0]!.finish.apiFetchedAt).toBeNull();
     expect(JSON.stringify([ng.store.finishes, ng.warns])).not.toContain("CANARY");
+  });
+
+  it("捨てた競馬場の件数と診断は、取得口の結果のまま保存先に渡す(件数 1・診断 1 件)", async () => {
+    const h = harness();
+    const detail = { venue: "01", reason: "not-today", measured: "9月6日（日曜）8時20分" } as const;
+    h.behavior.respond = () => ({ ...sampleOutcome(), dropped: 1, droppedDetails: [detail] });
+    await h.stage.run();
+    expect(h.store.finishes[0]!.finish.dropped).toBe(1);
+    expect(h.store.finishes[0]!.finish.droppedDetails).toEqual([detail]);
   });
 
   it("成功のとき警告は無く、一部の競馬場を捨てただけの応答も警告にしない(件数は D1 の記録に残る)", async () => {

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BabaFetchError } from "../src/baba-conditions";
+import { BabaFetchError, type BabaFetchOutcome } from "../src/baba-conditions";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
 import { BABA_META_ATTEMPTED, type BabaFetcher, type BabaFinish, type BabaStore } from "../src/race-day-baba";
@@ -11,11 +11,12 @@ import { RaceDayCore, type AnalysisSink, type StepOutcome } from "../src/race-da
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { openNodeSql, type NodeSql } from "./node-sql";
 import { installFetchTrap } from "./fetch-trap";
+import { sampleOutcome } from "./baba-sample";
 
 /**
- * Issue #294: 日単位の DO(`RaceDayCore`)の中の、馬場の API の取得(開催日の朝に 1 回だけ)。
+ * Issue #294: 日単位の DO(`RaceDayCore`)の中の、馬場の取得(開催日の朝に 1 回だけ。Issue #478 で取得先を JRA のページに替えた)。
  * 前夜 21:00 の計画(中央の一覧あり)→ 翌朝 09:30 にアラームで 1 回取得(Issue #475 で 09:00 から変更) → 保存。「1 日 1 回」を、再起動・並行・再計画(救済)でも守る。
- * ゲート・保存先・取得口は偽(実 netkeiba にも実 API にも触れない)。ストレージは `node:sqlite`。
+ * ゲート・保存先・取得口は偽(実 netkeiba にも JRA にも触れない)。ストレージは `node:sqlite`。
  */
 
 installFetchTrap();
@@ -27,7 +28,6 @@ const jst = (s: string): number => Date.parse(`${s}+09:00`);
 const T_2100 = jst("2026-10-11T21:00:00");
 const AT_0900 = jst("2026-10-12T09:00:00");
 const AT_0930 = jst("2026-10-12T09:30:00");
-const SAMPLE_TEXT = fixture("baba_latest_20261012.json");
 const CENTRAL_HTML = fixture("race_list_sub_20260927.html");
 const NAR_HTML = fixture("synthetic_nar_race_list_sub_20260927_jpn3.html");
 
@@ -98,13 +98,13 @@ function fakeStore(): FakeStore {
 
 interface Api {
   calls: number;
-  respond: () => Promise<string> | string;
+  respond: () => Promise<BabaFetchOutcome> | BabaFetchOutcome;
   readonly fetcher: BabaFetcher;
 }
 function fakeApi(): Api {
   const api: Api = {
     calls: 0,
-    respond: () => SAMPLE_TEXT,
+    respond: () => sampleOutcome(),
     fetcher: async () => {
       api.calls += 1;
       return api.respond();
@@ -217,7 +217,7 @@ describe("開催日の朝に 1 回だけ取得する", () => {
     expect(await tick(h)).toBe(`${DATE}:baba:fetch:ok`); // 順序: 通知 → 馬場 → タスク。馬場が先
     expect(h.api.calls).toBe(1);
     expect(h.store.finishes).toHaveLength(1);
-    expect(h.store.finishes[0]!.finish.venues.map((v) => v.venueCode)).toEqual(["05", "08"]);
+    expect(h.store.finishes[0]!.finish.venues.map((v) => v.venueCode)).toEqual(["05", "08", "04"]);
     // 取得は保存まで済んでいて、最初のレースの分析はその後に動く(値を受け取れる境界)
     expect(h.alarm.at).toBe(AT_0930); // 期限 09:30 の分析がまだ残っている(即時)
     const second = await tick(h);

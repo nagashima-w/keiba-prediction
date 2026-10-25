@@ -1,10 +1,10 @@
 /**
- * 馬場の API の取得の試み(`baba_fetches`)と、競馬場ごとの当日の値(`baba_conditions`)の D1 への保存(Issue #294〈#293-A〉。migration 0017)。
+ * 馬場の取得の試み(`baba_fetches`)と、競馬場ごとの当日の値(`baba_conditions`)の D1 への保存(Issue #294〈#293-A〉。migration 0017)。
  *
  * ## 1 日 1 回の保証の実体: {@link D1BabaStore.claim}
- * 利用の条件は「JRA の開催日に、利用者全体で 1 日 1 回」。**API に出る前に**、開催日を主キーとする行を `INSERT ... ON CONFLICT DO NOTHING` で書く。
+ * 利用の条件は「JRA の開催日に、利用者全体で 1 日 1 回」。**JRA に出る前に**、開催日を主キーとする行を `INSERT ... ON CONFLICT DO NOTHING` で書く。
  * `meta.changes` が 1 のとき(= この呼び出しが行を作った)だけ `claimed` を返し、0 なら `exists`(既に誰かが試みた)。DO の再起動・アラームの重複・DO のストレージの消失でも、2 回目は通らない。
- * 結果({@link D1BabaStore.finish})は、試みの行の更新と競馬場の行の INSERT を `batch` 1 回(原子的)で書く。**結果の保存に失敗しても、再試行はしない**(API は既に使った)。
+ * 結果({@link D1BabaStore.finish})は、試みの行の更新と競馬場の行の INSERT を `batch` 1 回(原子的)で書く。**結果の保存に失敗しても、再試行はしない**(JRA への取得は既に使った)。
  *
  * ## 読み出し: {@link D1BabaStore.load}(Issue #295)
  * 発走前の分析が、そのレースの開催日 × 場コードの 1 行(主キー)を読む。**SELECT 1 文**。列(クッション値・芝とダートの状態と含水率・使用コース・芝の状態の文章)だけを読み(芝丈・降水量・元の JSON は読まない)、
@@ -133,7 +133,7 @@ export class D1BabaStore implements BabaStore, BabaReader {
     this.db = options.db;
   }
 
-  /** 試みを先に記録する。行を作れたら `claimed`(API に出てよい)、既にあれば `exists`(出ない)。失敗は投げる(まだ API に出ていないので、呼び出し側が再試行してよい)。 */
+  /** 試みを先に記録する。行を作れたら `claimed`(JRA に出てよい)、既にあれば `exists`(出ない)。失敗は投げる(まだ JRA に出ていないので、呼び出し側が再試行してよい)。 */
   async claim(kaisaiDate: string, attemptedAt: number): Promise<"claimed" | "exists"> {
     const result = await this.db.prepare(CLAIM_SQL).bind(kaisaiDate, attemptedAt).run();
     return (result.meta.changes ?? 0) > 0 ? "claimed" : "exists";
