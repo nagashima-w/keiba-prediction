@@ -74,7 +74,7 @@ const files = readdirSync(WORKFLOWS_DIR)
   .sort();
 
 /** ワークフローごとの uses 行の数(`grep -c "^\s*uses:" .github/workflows/<file>` で再現できる)。 */
-const EXPECTED_COUNTS: Readonly<Record<string, number>> = { "ci.yml": 6, "deploy-cloud.yml": 9, "research.yml": 3 };
+const EXPECTED_COUNTS: Readonly<Record<string, number>> = { "audit.yml": 6, "ci.yml": 6, "deploy-cloud.yml": 9, "research.yml": 3 };
 
 /**
  * 規則(a)〜(c)の違反を、人が読める文の配列で返す。違反が無ければ空配列。
@@ -187,28 +187,28 @@ describe("Issue #305・#310: すべてのワークフローの uses: が、SHA �
   const ymls: Record<string, string> = {};
   for (const f of files) ymls[f] = readTextLf(path.join(WORKFLOWS_DIR, f));
 
-  it("前提: 検査対象のワークフローは ci.yml・deploy-cloud.yml・research.yml の 3 つで、uses 行の数は期待どおり(空振りでない。合計 18 行)", () => {
-    expect(files).toEqual(["ci.yml", "deploy-cloud.yml", "research.yml"]);
+  it("前提: 検査対象のワークフローは audit.yml・ci.yml・deploy-cloud.yml・research.yml の 4 つで、uses 行の数は期待どおり(空振りでない。合計 24 行)", () => {
+    expect(files).toEqual(["audit.yml", "ci.yml", "deploy-cloud.yml", "research.yml"]);
     const counts: Record<string, number> = {};
     for (const f of files) {
       counts[f] = extractUses(ymls[f]!).length;
     }
     expect(counts).toEqual(EXPECTED_COUNTS);
-    expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(18);
+    expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(24);
   });
 
   it("規則 (a)〜(d) の違反が 1 件も無い(全ワークフローの全 uses 行)", () => {
     expect(findViolations(ymls)).toEqual([]);
   });
 
-  it("3 つのワークフローを通して、action ごとの使用箇所は checkout 6・setup-node 6・pnpm/action-setup 6(合計 18。許可リストの 3 つすべてが使われている)", () => {
+  it("4 つのワークフローを通して、action ごとの使用箇所は checkout 8・setup-node 8・pnpm/action-setup 8(合計 24。許可リストの 3 つすべてが使われている)", () => {
     const counts: Record<string, number> = {};
     for (const f of files) {
       for (const u of extractUses(ymls[f]!)) {
         counts[u.action] = (counts[u.action] ?? 0) + 1;
       }
     }
-    expect(counts).toEqual({ "actions/checkout": 6, "actions/setup-node": 6, "pnpm/action-setup": 6 });
+    expect(counts).toEqual({ "actions/checkout": 8, "actions/setup-node": 8, "pnpm/action-setup": 8 });
     expect(Object.keys(counts).sort()).toEqual([...ALLOWED_ACTIONS].sort());
   });
 });
