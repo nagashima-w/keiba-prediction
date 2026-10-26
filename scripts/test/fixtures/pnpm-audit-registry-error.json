@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "ECONNREFUSED",
+    "message": "request to http://127.0.0.1:9/-/npm/v1/security/audits failed, reason: connect ECONNREFUSED 127.0.0.1:9"
+  }
+}

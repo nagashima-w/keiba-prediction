@@ -10,6 +10,12 @@
 # ★この設定ファイルは、GitHub が既定ブランチ(main)のものを読む。作業ブランチにあるだけでは Dependabot は動かない
 #   (main への取り込みはユーザーの指示で PR のマージとして行う)。
 #
+# ★Issue #498: バージョン更新を週 1 回から毎日(`daily`)にした。時刻は日本時間 02:41(`time`・`timezone`)で、毎日の監査(.github/workflows/audit.yml。03:17 JST)と、
+#   Claude の毎朝の確認(04:23 JST)より前に、更新の PR が出そろうようにする。毎日にしても、脆弱性への対応そのものは速くならない(lockfile の `minimum-release-age`〈公開から 3 日〉の効果も残る)。
+#   脆弱性に早く気づくのは、audit.yml(毎日の `pnpm audit`)と Dependabot alerts の役目である。
+#   **`time`・`timezone` が効くか(指定の時刻に PR が来るか)は、この変更が main に入って Dependabot が実際に走るまで未確認**(このリポジトリで使うのは初めて)。
+#   時刻の指定は「その時刻に始める」意味で、PR が出るのは少し遅れうる。
+#
 # ★自動の脆弱性修正(セキュリティ更新)の PR は、このファイルでは扱わない。宛先を main 以外にできない見込みなので(未確認)、
 #   リポジトリの「Dependabot alerts」で通知を受け、作業ブランチで対応する(docs/current-spec.md「Dependabot」)。
 #
@@ -42,7 +48,9 @@ updates:
     directory: "/"
     target-branch: claude/issue-order-processing-wjgpdd
     schedule:
-      interval: weekly
+      interval: daily
+      time: "02:41"
+      timezone: "Asia/Tokyo"
     # Actions の更新は 1 つの PR にまとめる(SHA と行末の版数コメントが同時に書き換わる。scripts/test/actions-pinned.test.ts が規則を検査する)。
     groups:
       github-actions:
@@ -57,7 +65,9 @@ updates:
       - "/cloud"
     target-branch: claude/issue-order-processing-wjgpdd
     schedule:
-      interval: weekly
+      interval: daily
+      time: "02:41"
+      timezone: "Asia/Tokyo"
     # group は先頭から最初に一致したものに入る。先頭は、core と cloud で版を揃えている依存(両方のディレクトリの更新を 1 つの PR にする)。
     groups:
       core-cloud-shared:
