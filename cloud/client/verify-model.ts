@@ -402,14 +402,13 @@ export function viewerInstructionsSummary(instructions: readonly (string | null)
   return parts.join(" / ");
 }
 
-/** Brier を出す最小のレース数。これ未満は、馬が少ないうえ同じレースの馬が互いに独立でなく、値が偶然で大きく動くので出さない(Issue #271)。 */
-const MIN_RACES_FOR_BRIER = 30;
-
 const formatBrier = (value: number | null): string => (value === null ? "-" : value.toFixed(4));
 
-/** Brier の 1 行。レース数は版の集計件数(同じ版の中では 1 レース 1 分析)。 */
+/**
+ * Brier の 1 行。レース数は版の集計件数(同じ版の中では 1 レース 1 分析)。
+ * 少ないレース数で値が偶然に大きく動く問題(Issue #271)は、Issue #481 から**カードを出す条件**({@link VERSION_CARD_MIN_COUNT}=30 件以上)が受け持つ=ここへ来る版は常に 30 件以上。
+ */
 function qualityText(v: PromptVersionView): string {
-  if (v.includedAnalysisCount < MIN_RACES_FOR_BRIER) return `Brier: レース数不足(${MIN_RACES_FOR_BRIER}レース未満)`;
   return `Brier 補正前 ${formatBrier(v.quality.priorBrier)} / 補正後 ${formatBrier(v.quality.adjustedBrier)}(${v.quality.evaluatedCount}頭・${v.includedAnalysisCount}レース)`;
 }
 
@@ -437,7 +436,7 @@ function versionCard(v: PromptVersionView, expandedKeys: ReadonlySet<string>, ad
   };
 }
 
-/** 版別のカードを出す、集計できた分析の最小件数(未満なら出さない。Issue #481)。`CLOSE_REFERENCE_MIN_COUNT`・`MIN_RACES_FOR_BRIER` と同じ 30 だが別の定数で、連動しない。 */
+/** 版別のカードを出す、集計できた分析の最小件数(未満なら出さない。Issue #481)。`CLOSE_REFERENCE_MIN_COUNT` と同じ 30 だが別の定数で、連動しない。 */
 export const VERSION_CARD_MIN_COUNT = 30;
 
 /**
@@ -458,10 +457,10 @@ function versionsSection(versions: readonly PromptVersionView[], current: readon
         text: `集計中(${versions.find((v) => v.promptVersion === c)?.includedAnalysisCount ?? 0}件。${VERSION_CARD_MIN_COUNT}件で表示)`,
       }));
   return {
-    heading: past ? "過去の版" : "プロンプト版別比較",
-    description: "プロンプトの版ごとの累積回収率・キャリブレーション・Brier。版別は全体の集計です(上の区分の切替には連動しません)。同じ版でも追加指示が違えば別条件です。Brier は予測と結果のずれの平均で、小さいほど良い。版ごとにレースが違うので、差は目安です。",
+    heading: "プロンプト版別比較", // ページの見出し(h1)と重ねない: 過去の版のページの h1 は「過去の版」
+    description: "プロンプトの版ごとの累積回収率・キャリブレーション・Brier。版別は、中央・地方の区分によらず全体の集計です。同じ版でも追加指示が違えば別条件です。Brier は予測と結果のずれの平均で、小さいほど良い。版ごとにレースが違うので、差は目安です。",
     unknownNote: cards.some((v) => v.promptVersion === null) ? UNKNOWN_VERSION_NOTE : null,
-    empty: cards.length === 0 && collecting.length === 0 && omittedCount === 0 ? "集計対象がありません。" : null,
+    empty: cards.length === 0 && collecting.length === 0 && omittedCount === 0 ? (past ? "過去の版はありません。" : "集計対象がありません。") : null,
     cards: cards.map((v) => versionCard(v, expandedKeys, admin)),
     collecting,
     omitted: past && omittedCount > 0 ? `分析が${VERSION_CARD_MIN_COUNT}件未満の版(${omittedCount}版)は出していません。` : null,

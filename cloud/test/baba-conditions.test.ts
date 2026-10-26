@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BABA_DROPPED_DETAIL_LIMIT, BABA_MEASURED_TEXT_LIMIT, BABA_RAW_JSON_LIMIT, BabaFetchError, isVenueComplete } from "../src/baba-conditions";
+import { BABA_DROPPED_DETAIL_LIMIT, BABA_MEASURED_TEXT_LIMIT, BabaFetchError, isVenueComplete } from "../src/baba-conditions";
 
 /**
  * Issue #294・#478: 馬場の取得の失敗の分類(`BabaFetchError`)と、保存する値の上限の定数。
@@ -18,8 +18,7 @@ describe("BabaFetchError", () => {
 });
 
 describe("上限の定数(保存先・診断の読み出しが共有する)", () => {
-  it("rawJson は 4096 字・捨てた詳細は 20 件・計測日時の文字列は 40 字", () => {
-    expect(BABA_RAW_JSON_LIMIT).toBe(4096);
+  it("捨てた詳細は 20 件・計測日時の文字列は 40 字(rawJson の上限は Issue #490-3 で消した。長さの上界は jra-baba-parse.test.ts)", () => {
     expect(BABA_DROPPED_DETAIL_LIMIT).toBe(20);
     expect(BABA_MEASURED_TEXT_LIMIT).toBe(40);
   });
