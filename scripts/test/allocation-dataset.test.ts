@@ -1,5 +1,6 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_KELLY_FRACTION, resolveBankroll, resolveEffectivePerRaceCap, resolveMinHitProb, resolveKellyFraction } from "../../packages/core/src/ev/allocation-primitives.js";
 import { collectProposedBetEvents, computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
 import { buildVerifySource, type VerifyReadRows } from "../../cloud/src/verify-read.js";
 import {
@@ -518,11 +519,39 @@ describe("replayRace の設定の上書き(Issue #494。#468 の試算で、本�
     expect(zeroed.bets.some((b) => b.startsWith("place:05"))).toBe(true);
   });
 
-  it("非有限の数・範囲外の確率は、黙って通さず例外にする", () => {
+  it("非有限の数・範囲外の確率は、黙って通さず例外にする(adjustProb の負の値も)", () => {
     expect(() => replayRace(base, { bankroll: Number.NaN })).toThrow(/bankroll/);
     expect(() => replayRace(base, { evThreshold: Number.POSITIVE_INFINITY })).toThrow(/evThreshold/);
     expect(() => replayRace(base, { adjustProb: () => Number.NaN })).toThrow(/adjustProb/);
     expect(() => replayRace(base, { adjustProb: () => 1.5 })).toThrow(/adjustProb/);
+    expect(() => replayRace(base, { adjustProb: () => -0.1 })).toThrow(/adjustProb/);
+    // 境界(0 と 1)は通る
+    expect(() => replayRace(base, { adjustProb: (h) => (h.umaban === 1 ? 0 : 1) })).not.toThrow();
+  });
+
+  it("本番の関数が黙って別の値に置き換える範囲の上書きは、例外にする(指定した値で計算したように見せない)。境界の値は通る", () => {
+    // 前提: 本番の関数は、これらを黙って置き換える(置き換えが無くなったらこのテストが知らせる)
+    expect(resolveKellyFraction(1.5)).toBe(DEFAULT_KELLY_FRACTION);
+    expect(resolveKellyFraction(-0.1)).toBe(DEFAULT_KELLY_FRACTION);
+    expect(resolveMinHitProb(1.2)).toBe(1);
+    expect(resolveMinHitProb(-0.1)).toBe(0);
+    expect(resolveBankroll(-1)).toBe(0);
+    expect(resolveEffectivePerRaceCap(-100, 100)).toBe(0);
+    const bad: Array<[string, ReplayOverrides]> = [
+      ["kellyFraction が 1 超", { kellyFraction: 1.5 }],
+      ["kellyFraction が負", { kellyFraction: -0.1 }],
+      ["minHitProb が 1 超", { minHitProb: 1.2 }],
+      ["minHitProb が負", { minHitProb: -0.1 }],
+      ["bankroll が負", { bankroll: -1 }],
+      ["perRaceCap が負", { perRaceCap: -100 }],
+    ];
+    for (const [name, overrides] of bad) {
+      expect(() => replayRace(base, overrides), name).toThrow(new RegExp(Object.keys(overrides)[0]!));
+    }
+    // 境界: 0・1・総資金 0(未設定の経路)・負の EV 閾値(本番の関数もそのまま使う)は例外にしない
+    for (const overrides of [{ kellyFraction: 0 }, { kellyFraction: 1 }, { minHitProb: 0 }, { minHitProb: 1 }, { bankroll: 0 }, { perRaceCap: 0 }, { evThreshold: -0.5 }] as ReplayOverrides[]) {
+      expect(() => replayRace(base, overrides), JSON.stringify(overrides)).not.toThrow();
+    }
   });
 });
 
@@ -543,6 +572,13 @@ describe("parseOverrides(CLI の --override key=value)", () => {
     expect(() => parseOverrides(["includeComboOdds=maybe"])).toThrow(/includeComboOdds/);
     expect(() => parseOverrides(["include.place=on"])).toThrow(/place/);
     expect(() => parseOverrides(["include.wide=2"])).toThrow(/include\.wide/);
+  });
+
+  it("範囲外の値(kellyFraction・minHitProb が 0〜1 の外、bankroll・perRaceCap が負)は、replayRace に渡す前に例外(CLI は終了コード 1)", () => {
+    for (const pair of ["kellyFraction=1.5", "kellyFraction=-0.1", "minHitProb=2", "minHitProb=-0.5", "bankroll=-1", "perRaceCap=-100"]) {
+      expect(() => parseOverrides([pair]), pair).toThrow(new RegExp(pair.split("=")[0]!));
+    }
+    expect(() => parseOverrides(["kellyFraction=0", "minHitProb=1", "bankroll=0", "evThreshold=-0.5"])).not.toThrow();
   });
 });
 
@@ -606,6 +642,29 @@ describe("classifyReplay(一致しない理由の分類。Issue #494)", () => {
     // min_hit_prob が NULL: 保存の提案は下限 0.25 で計算した(下限なしと違う)。NULL は 0 と解釈する
     const floorNull = consistentRow({ includeComboOdds: 0, minHitProb: 0.25 }, {}, { meta: { minHitProb: null } });
     expect(classifyReplay(floorNull)).toMatchObject({ reason: "legacy-settings", nullSettings: ["min_hit_prob"] });
+  });
+
+  it("NULL を解釈する 8 列(include_combo_odds・6 券種の include_*・min_hit_prob)は、どれが NULL でも legacy-settings(列の取りこぼしが無い)", () => {
+    // 列ごとに、NULL を解釈すると提案が変わる行を作る(保存の提案は、その列が ON・下限ありで計算したもの)
+    const cases: Array<[string, Settings, Partial<AllocationMetaInput>]> = [
+      ["include_combo_odds", { includeWide: 1, includeComboOdds: 1 }, { includeComboOdds: null }],
+      ["include_wide", { includeWide: 1 }, { includeWide: null }],
+      ["include_trio", { includeTrio: 1 }, { includeTrio: null }],
+      ["include_quinella", { includeQuinella: 1 }, { includeQuinella: null }],
+      ["include_exacta", { includeExacta: 1 }, { includeExacta: null }],
+      ["include_trifecta", { includeTrifecta: 1 }, { includeTrifecta: null }],
+      ["include_bracket_quinella", { includeBracketQuinella: 1 }, { includeBracketQuinella: null }],
+      ["min_hit_prob", { includeComboOdds: 0, minHitProb: 0.25 }, { minHitProb: null }],
+    ];
+    expect(cases).toHaveLength(8);
+    for (const [column, settings, meta] of cases) {
+      const row = consistentRow(settings, {}, { meta });
+      expect(row.allocation!.bets.length, `${column}: 前提(保存の提案が空でない)`).toBeGreaterThan(0);
+      expect(row.allocation!.settings[column as keyof NonNullable<AllocationRaceRow["allocation"]>["settings"]], `${column}: 前提(保存の設定が NULL)`).toBeNull();
+      const outcome = replayRace(row) as Extract<ReplayOutcome, { kind: "replayed" }>;
+      expect(compareReplay(row, outcome).same, `${column}: 前提(NULL の解釈で提案が変わる)`).toBe(false);
+      expect(classifyReplay(row), column).toMatchObject({ reason: "legacy-settings", nullSettings: [column] });
+    }
   });
 
   it("設定に NULL があっても、解釈どおりで一致する行は match(NULL があるだけでは legacy-settings にしない)。NULL の列は返す", () => {
@@ -672,15 +731,15 @@ describe("summarizeReplay(区分別の理由の集計。Issue #494)", () => {
   it("全体・中央・地方の理由別の件数、計算し直せた行数、一致率が、数えたとおりになる", () => {
     const report = summarizeReplay(rows);
     expect(report.total).toEqual({
-      rows: 10, replayed: 8, matchRate: 4 / 8,
+      rows: 10, replayed: 8, matchRate: 4 / 8, invalidThrown: 0,
       reasons: { match: 4, "no-allocation-record": 1, "no-odds": 1, invalid: 0, "code-drift": 2, "legacy-settings": 1, mismatch: 1 },
     });
     expect(report.byVenueKind.central).toEqual({
-      rows: 5, replayed: 4, matchRate: 3 / 4,
+      rows: 5, replayed: 4, matchRate: 3 / 4, invalidThrown: 0,
       reasons: { match: 3, "no-allocation-record": 1, "no-odds": 0, invalid: 0, "code-drift": 1, "legacy-settings": 0, mismatch: 0 },
     });
     expect(report.byVenueKind.nar).toEqual({
-      rows: 5, replayed: 4, matchRate: 1 / 4,
+      rows: 5, replayed: 4, matchRate: 1 / 4, invalidThrown: 0,
       reasons: { match: 1, "no-allocation-record": 0, "no-odds": 1, invalid: 0, "code-drift": 1, "legacy-settings": 1, mismatch: 1 },
     });
   });
@@ -705,6 +764,26 @@ describe("summarizeReplay(区分別の理由の集計。Issue #494)", () => {
   it("計算し直せない行だけ・空の入力でも、一致率は null(0 除算にしない)", () => {
     expect(summarizeReplay([]).total).toMatchObject({ rows: 0, replayed: 0, matchRate: null });
     expect(summarizeReplay([rowWith({ meta: null, bets: [] })]).total).toMatchObject({ rows: 1, replayed: 0, matchRate: null });
+  });
+
+  it("計算し直しが例外を投げた行は invalid に数え、その件数を別に持つ(全体・区分別。route=invalid の記録との食い違いは数えない)", () => {
+    const throwFor = new Set([rows[0]!, rows[4]!, rows[5]!]); // 中央 1 行・地方 2 行
+    const report = summarizeReplay(rows, (row) => {
+      if (throwFor.has(row)) throw new Error("計算不能");
+      return replayRace(row);
+    });
+    expect(report.total.invalidThrown).toBe(3);
+    expect(report.byVenueKind.central.invalidThrown).toBe(1);
+    expect(report.byVenueKind.nar.invalidThrown).toBe(2);
+    expect(report.total.reasons.invalid).toBe(3);
+    // 例外でなく route=invalid になった行(枠番が無い)は、invalid だが例外には数えない
+    const stored = consistentRow({ includeBracketQuinella: 1 });
+    const noWaku = { ...stored, horses: stored.horses.map((h) => ({ ...h, wakuban: null })), result: { ...stored.result, horses: stored.result.horses.map((h) => ({ ...h, wakuban: null })) } };
+    const invalidOnly = summarizeReplay([noWaku]);
+    expect(invalidOnly.total.reasons.invalid).toBe(1);
+    expect(invalidOnly.total.invalidThrown).toBe(0);
+    expect(classifyReplay(noWaku).threw).toBe(false);
+    expect(classifyReplay(rows[0]!, () => { throw new Error("x"); }).threw).toBe(true);
   });
 
   it("replayableRows は、配分の記録があってオッズを再構成できる行だけ", () => {
@@ -866,7 +945,14 @@ describe("回収額の集計(Issue #494。検証画面と同じ判定・同じ�
 describe("runCli(--replay。Issue #494)", () => {
   // 一致 2(中央)・金額の食い違い 1(地方)・オッズなし 1(地方)。
   // ワイドは取込済みで、0102 だけが的中(払戻 300)。買い目は判定でき、回収額が 0 でない。
-  const settled = { payouts: [{ betType: "wide", comboKey: "0102", payout: 300 }], imports: ["wide"] };
+  // 結果: 4 番が 1 着・5 番が 2 着・1 番が 3 着。複勝の払戻は 4 番 450・5 番 650・1 番 110(100 円あたり)。
+  const settled = {
+    payouts: [{ betType: "wide", comboKey: "0102", payout: 300 }],
+    imports: ["wide"],
+    results: P.map((_, i) => ({
+      umaban: i + 1, finishPosition: [3, 4, 5, 1, 2, 6, 7, 8][i]!, placePayout: i === 3 ? 450 : i === 4 ? 650 : i === 0 ? 110 : null, winPayout: i === 3 ? 1000 : null, scratched: 0, wakuban: i + 1, winOdds: null, ninki: null,
+    })),
+  };
   const matchA = consistentRow({ includeWide: 1 }, {}, { ...settled, analysis: { ...CHOSEN, id: 1, raceId: "202606030811" } });
   const matchB = consistentRow({ includeWide: 1 }, {}, { ...settled, analysis: { ...CHOSEN, id: 2, raceId: "202606030812" } });
   const wideBets = matchA.allocation!.bets;
@@ -930,5 +1016,36 @@ describe("runCli(--replay。Issue #494)", () => {
     expect(r.output).not.toMatch(/## 計算し直しの一致率/);
     const replayedLine = (text: string): string => text.split("\n").find((l) => l.startsWith("計算し直した提案("))!;
     expect(replayedLine(r.output)).not.toBe(replayedLine(plain));
+  });
+  it("--override が回収額の数字に効いている: 計算し直した提案の点数・賭け金・払戻を、手で数えた値で固定する(上書きを渡さないと赤)", () => {
+    // 計算し直せる 3 行(中央 2・地方 1)は、同じ入力。1 行あたりの買い目の賭け金は、計算し直した提案(実測)で、払戻は結果から手で足した。
+    // 上書きなし: ワイド 8 点(9600・5900・500・300・2700・200・100・100 = 19400)。的中は 0102(払戻 300)だけ → 9600 × 3 = 28800 → 3 行で 点数 24・賭け金 58200・払戻 86400。
+    const plain = runCli(["x.gz", "--replay"], load).output.split("\n");
+    expect(plain).toContain("計算し直した提案(計算し直せた 3 行): 点数 24・賭け金 58200・払戻 86400・回収率 148.5%・判定不能 0・返還 0");
+    // ワイドを OFF: 複勝 5 点(04=2600・05=3200・06=1200・07=600・08=400 = 8000)。4 番(450)と 5 番(650)が的中 → 26 × 450 + 32 × 650 = 32500 → 3 行で 点数 15・賭け金 24000・払戻 97500。
+    const wideOff = runCli(["x.gz", "--replay", "--override", "include.wide=off"], load).output.split("\n");
+    expect(wideOff).toContain("計算し直した提案(計算し直せた 3 行・設定の上書きあり): 点数 15・賭け金 24000・払戻 97500・回収率 406.3%・判定不能 0・返還 0");
+    // ケリー係数 0.1: ワイド 6 点(4800・2900・200・100・1300・100 = 9400)。的中は 0102 だけ → 4800 × 3 = 14400 → 3 行で 点数 18・賭け金 28200・払戻 43200。
+    const kelly = runCli(["x.gz", "--replay", "--override", "kellyFraction=0.1"], load).output.split("\n");
+    expect(kelly).toContain("計算し直した提案(計算し直せた 3 行・設定の上書きあり): 点数 18・賭け金 28200・払戻 43200・回収率 153.2%・判定不能 0・返還 0");
+    // 分析時の提案の行は、上書きに左右されない
+    // (地方の 1 行は、先頭の買い目の賭け金を 100 円増やしてある〈9600 → 9700〉ので、賭け金 19400 + 19400 + 19500 = 58300、払戻 28800 + 28800 + 29100 = 86700)
+    const stored = "分析時の提案(計算し直せた 3 行): 点数 24・賭け金 58300・払戻 86700・回収率 148.7%・判定不能 0・返還 0";
+    expect(plain).toContain(stored);
+    expect(wideOff).toContain(stored);
+    expect(kelly).toContain(stored);
+  });
+
+  it("範囲外の --override(kellyFraction が 1 超など)は、計算せず終了コード 1 で理由を出す", () => {
+    for (const pair of ["kellyFraction=1.5", "minHitProb=-0.1", "bankroll=-5"]) {
+      const r = runCli(["x.gz", "--replay", "--override", pair], load);
+      expect(r.exitCode, pair).toBe(1);
+      expect(r.output, pair).toMatch(new RegExp(pair.split("=")[0]!));
+    }
+  });
+
+  it("invalid のうち計算し直しが例外を投げた行の件数を、表の下に出す(上書きなしの --replay のとき)", () => {
+    const lines = runCli(["x.gz", "--replay"], load).output.split("\n");
+    expect(lines).toContain("invalid のうち計算し直しが例外を投げた行(route=invalid の記録との食い違いではない): 全体 0・中央 0・地方 0");
   });
 });

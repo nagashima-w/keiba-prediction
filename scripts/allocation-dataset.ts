@@ -279,11 +279,21 @@ export interface ReplayOverrides {
 
 const NUMBER_OVERRIDES = ["bankroll", "perRaceCap", "kellyFraction", "evThreshold", "minHitProb"] as const;
 
-function checkedOverrides(overrides: ReplayOverrides): void {
+/**
+ * 上書きの値を検査する(範囲外は例外)。**本番の配分の関数は、範囲外の値を黙って別の値に置き換える**(`resolveKellyFraction` は [0,1] の外を既定の 0.5 に、`resolveMinHitProb` は [0,1] に丸める、
+ * `resolveBankroll`・`resolveEffectivePerRaceCap` は負の値を 0〈未設定〉にする)。試算の道具としては、指定した値で計算したように見えて別の値で計算するのが最も危ないので、範囲外は例外にする。
+ * - `bankroll`・`perRaceCap`: 有限で 0 以上(0 は「未設定」で、そのとおりに計算される。`perRaceCap` は本番の関数が 100 円の倍数に切り捨てる)。
+ * - `kellyFraction`・`minHitProb`: 有限で 0〜1。
+ * - `evThreshold`: 有限(負の閾値は本番の関数もそのまま使う)。
+ */
+export function validateOverrides(overrides: ReplayOverrides): void {
   for (const key of NUMBER_OVERRIDES) {
     const value = overrides[key];
-    if (value !== undefined && !Number.isFinite(value)) {
-      throw new Error(`上書き ${key} が有限の数ではありません(${String(value)})`);
+    if (value === undefined) continue;
+    if (!Number.isFinite(value)) throw new Error(`上書き ${key} が有限の数ではありません(${String(value)})`);
+    if ((key === "bankroll" || key === "perRaceCap") && value < 0) throw new Error(`上書き ${key} は 0 以上です(${value}。本番の関数は負の値を 0〈未設定〉に置き換えます)`);
+    if ((key === "kellyFraction" || key === "minHitProb") && (value < 0 || value > 1)) {
+      throw new Error(`上書き ${key} は 0〜1 です(${value}。本番の関数は範囲外の値を ${key === "kellyFraction" ? "既定の 0.5" : "0〜1 の端"} に置き換えます)`);
     }
   }
 }
@@ -297,7 +307,7 @@ export function replayRace(row: AllocationRaceRow, overrides: ReplayOverrides = 
   const allocation = row.allocation;
   if (allocation === null) return { kind: "no-allocation-record" };
   if (!row.has_odds) return { kind: "no-odds" };
-  checkedOverrides(overrides);
+  validateOverrides(overrides);
   const s = allocation.settings;
   const include = overrides.include ?? {};
   const wakubanOfResult = new Map(row.result.horses.map((h) => [h.umaban, h.wakuban] as const));
@@ -425,6 +435,8 @@ export interface ReplayClassification {
   readonly driftedConstants: string[];
   /** `code-drift` の行が、設定に NULL も持っているか(両方に当てはまる行。優先順で code-drift にした)。 */
   readonly alsoLegacySettings: boolean;
+  /** 計算し直しが例外を投げたか(`reason` は invalid になる。route=invalid の記録と区別するため別に持つ)。 */
+  readonly threw: boolean;
 }
 
 /**
@@ -432,12 +444,15 @@ export interface ReplayClassification {
  */
 export function classifyReplay(row: AllocationRaceRow, replay: (row: AllocationRaceRow) => ReplayOutcome = (r) => replayRace(r)): ReplayClassification {
   const nullSettings = row.allocation === null ? [] : NULLABLE_SETTING_COLUMNS.filter((k) => row.allocation!.settings[k] === null);
-  const done = (reason: ReplayReason, drifted: string[] = []): ReplayClassification => ({ reason, nullSettings: [...nullSettings], driftedConstants: drifted, alsoLegacySettings: reason === "code-drift" && nullSettings.length > 0 });
+  const done = (reason: ReplayReason, drifted: string[] = [], threw = false): ReplayClassification => ({
+    reason, nullSettings: [...nullSettings], driftedConstants: drifted, alsoLegacySettings: reason === "code-drift" && nullSettings.length > 0, threw,
+  });
   let outcome: ReplayOutcome;
   try {
     outcome = replay(row);
   } catch {
-    return done("invalid");
+    // 例外は invalid に数えるが、集計で別に数える(本番の関数は例外を route=invalid の記録に変えて返すので、ここまで例外が届くのは入力の行の異常か、この道具の不具合)。
+    return done("invalid", [], true);
   }
   if (outcome.kind === "no-allocation-record") return done("no-allocation-record");
   if (outcome.kind === "no-odds") return done("no-odds");
@@ -461,6 +476,8 @@ export interface ReplayTally {
   /** 一致した行 ÷ 計算し直せた行(計算し直せた行が 0 なら null)。 */
   readonly matchRate: number | null;
   readonly reasons: Record<ReplayReason, number>;
+  /** `invalid` のうち、計算し直しが例外を投げた行(route=invalid の記録との食い違いではない行)。 */
+  readonly invalidThrown: number;
 }
 
 export interface ReplayReport {
@@ -476,28 +493,30 @@ function emptyReasons(): Record<ReplayReason, number> {
   return Object.fromEntries(REPLAY_REASONS.map((r) => [r, 0])) as Record<ReplayReason, number>;
 }
 
-function tallyOf(reasons: Record<ReplayReason, number>): ReplayTally {
+function tallyOf(reasons: Record<ReplayReason, number>, invalidThrown: number): ReplayTally {
   const rows = REPLAY_REASONS.reduce((n, r) => n + reasons[r], 0);
   const replayed = rows - reasons["no-allocation-record"] - reasons["no-odds"];
-  return { rows, replayed, matchRate: replayed === 0 ? null : reasons.match / replayed, reasons };
+  return { rows, replayed, matchRate: replayed === 0 ? null : reasons.match / replayed, reasons, invalidThrown };
 }
 
-/** 全行を計算し直して(設定の上書きなし)、理由別・区分別に数える。 */
-export function summarizeReplay(rows: readonly AllocationRaceRow[]): ReplayReport {
+/** 全行を計算し直して(設定の上書きなし)、理由別・区分別に数える。`replay` は計算し直しの関数(テストで例外を投げさせるために差し替えられる)。 */
+export function summarizeReplay(rows: readonly AllocationRaceRow[], replay?: (row: AllocationRaceRow) => ReplayOutcome): ReplayReport {
   const all = emptyReasons();
   const byKind = { central: emptyReasons(), nar: emptyReasons() };
+  const thrown = { central: 0, nar: 0 };
   const nullSettingColumns: Record<string, number> = {};
   let codeDriftAlsoLegacy = 0;
   for (const row of rows) {
-    const c = classifyReplay(row);
+    const c = classifyReplay(row, replay);
     all[c.reason] += 1;
+    if (c.threw) thrown[row.venue_kind] += 1;
     byKind[row.venue_kind][c.reason] += 1;
     if (c.reason !== "match" && c.reason !== "no-allocation-record" && c.reason !== "no-odds") {
       for (const column of c.nullSettings) nullSettingColumns[column] = (nullSettingColumns[column] ?? 0) + 1;
     }
     if (c.alsoLegacySettings) codeDriftAlsoLegacy += 1;
   }
-  return { total: tallyOf(all), byVenueKind: { central: tallyOf(byKind.central), nar: tallyOf(byKind.nar) }, nullSettingColumns, codeDriftAlsoLegacy };
+  return { total: tallyOf(all, thrown.central + thrown.nar), byVenueKind: { central: tallyOf(byKind.central, thrown.central), nar: tallyOf(byKind.nar, thrown.nar) }, nullSettingColumns, codeDriftAlsoLegacy };
 }
 
 // ---------------------------------------------------------------------------
@@ -679,6 +698,7 @@ export function parseOverrides(pairs: readonly string[]): ReplayOverrides {
     }
   }
   if (Object.keys(include).length > 0) out.include = include;
+  validateOverrides(out);
   return out;
 }
 
@@ -761,7 +781,11 @@ export function runCli(argv: readonly string[], load: (file: string) => Allocati
     const report = summarizeReplay(rows);
     lines.push("", "## 計算し直しの一致率(設定の上書きなし)", formatTally("全体", report.total), formatTally("中央", report.byVenueKind.central), formatTally("地方", report.byVenueKind.nar));
     const columns = Object.entries(report.nullSettingColumns).map(([k, n]) => `${k} ${n}`).join(", ");
-    lines.push(`一致しない行のうち設定が NULL の列: ${columns === "" ? "なし" : columns}`, `code-drift のうち設定にも NULL がある行: ${report.codeDriftAlsoLegacy}`);
+    lines.push(
+      `一致しない行のうち設定が NULL の列: ${columns === "" ? "なし" : columns}`,
+      `code-drift のうち設定にも NULL がある行: ${report.codeDriftAlsoLegacy}`,
+      `invalid のうち計算し直しが例外を投げた行(route=invalid の記録との食い違いではない): 全体 ${report.total.invalidThrown}・中央 ${report.byVenueKind.central.invalidThrown}・地方 ${report.byVenueKind.nar.invalidThrown}`,
+    );
   }
   lines.push("", "## 回収額(円。検証画面と同じ判定。判定不能は賭け金・払戻に入れない)");
   lines.push(...formatPayoutReport(`分析時の提案(全 ${rows.length} 行)`, payoutReport(rows, storedBets)));
