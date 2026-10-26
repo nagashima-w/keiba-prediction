@@ -505,6 +505,30 @@ describe("塊とメタ行(gzip のメンバーの連結)", () => {
     expect((head._meta["notes"] as string[]).length).toBeGreaterThan(0);
   });
 
+  it("メタ行の注記は、has_odds が false になる 4 つの原因を書いている。4 つの原因のどれでも has_odds が false になる(注記と挙動が食い違わない)", () => {
+    const head = JSON.parse(new TextDecoder().decode(gunzipSync(buildAllocationHead({ generatedAt: "2026-10-26T03:00:00.000Z", rows: 0, races: 0, missingOdds: 0, noAllocation: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, uncheckedRaces: 0, superseded: 0, estimated: 0 } })))) as {
+      _meta: { notes: string[] };
+    };
+    const notes = head._meta.notes.filter((n) => n.startsWith("has_odds が false"));
+    expect(notes).toHaveLength(1);
+    const note = notes[0]!;
+    // 原因: (1) detail_key が NULL (2) R2 に詳細が無い・壊れている (3) 詳細の race_id が別のレース (4) スナップショットが無い・壊れている・馬を 1 頭も読めない
+    for (const phrase of ["detail_key", "R2 に詳細が無い", "別のレース", "raceSnapshot", "1 頭も"]) {
+      expect(note, phrase).toContain(phrase);
+    }
+    // 取得そのものの失敗は has_odds が false にならず、作成を再試行する(store の failed → core の recordFailure)
+    expect(note).toContain("再試行");
+    // 挙動: (1)〜(3) は store が none を返し、行の入力では snapshot が null。(4) は present が false
+    const noHorses = toAllocationSnapshot({ race: { courseType: "芝" }, horses: [], wideCombo: { "0102": 8 } });
+    const noRecord = toAllocationSnapshot("壊れた値");
+    for (const [name, snapshot] of [["詳細なし(1〜3)", null], ["馬が 1 頭も読めない", noHorses], ["スナップショットが壊れている", noRecord]] as const) {
+      expect(buildAllocationRaceRow(rowInput({ snapshot })).has_odds, name).toBe(false);
+    }
+    expect(noHorses.present).toBe(false); // 前提: 組合せのオッズが読めても、馬が無ければ present は false
+    expect(Object.keys(noHorses.combos)).toEqual(["wide"]);
+    expect(buildAllocationRaceRow(rowInput({ snapshot: toAllocationSnapshot({ race: {}, horses: [{ umaban: 1, winOdds: 3 }] }) })).has_odds).toBe(true); // 対照: 馬が 1 頭読めれば true
+  });
+
   it("連結した gzip は 1 回の gunzip で全体を読める(メタ行 → 塊)", () => {
     const head = buildAllocationHead({ generatedAt: "2026-10-26T03:00:00.000Z", rows: 1, races: 1, missingOdds: 0, noAllocation: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, uncheckedRaces: 0, superseded: 0, estimated: 0 } });
     const chunk = encodeAllocationChunk([buildAllocationRaceRow(rowInput())]);
