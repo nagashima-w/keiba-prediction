@@ -95,15 +95,15 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
-  it("Issue #177・#216・#217・#219・#235・#266・#279・#402: 日単位の DO(RACE_DAY・RaceDay)は migration v2、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6、統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)は migration v7、月報の DO(MONTHLY_REPORT・MonthlyReportDO)は migration v8 で追加するだけ。v1(NetkeibaGate)は無変更。移行の DO(CloudMigration)は v3 で作られ、v9 の deleted_classes で削除される(Issue #402。binding は #394 で廃止済み)。それ以外のクラスの削除・new_classes・renamed・transferred は使わない", () => {
+  it("Issue #177・#216・#217・#219・#235・#266・#279・#402: 日単位の DO(RACE_DAY・RaceDay)は migration v2、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6、統計モデル用の書き出しの DO(PRIOR_EXPORT・PriorExportDO)は migration v7、月報の DO(MONTHLY_REPORT・MonthlyReportDO)は migration v8、配分の再計算用の書き出しの DO(ALLOCATION_EXPORT・AllocationExportDO。Issue #463)は migration v10 で追加するだけ。v1(NetkeibaGate)は無変更。移行の DO(CloudMigration)は v3 で作られ、v9 の deleted_classes で削除される(Issue #402。binding は #394 で廃止済み)。それ以外のクラスの削除・new_classes・renamed・transferred は使わない", () => {
     // migration のブロック(コメント除去済みの tomlCode から、[[migrations]] ごとに本体を取る)
     const blocks = [...tomlCode.matchAll(/^\[\[migrations\]\]\n((?:(?!\[)[^\n]*\n?)*)/gm)].map((m) => m[1]!);
     const field = (body: string, key: string): string | null => new RegExp(`^${key} = \\[([^\\]]*)\\]$`, "m").exec(body)?.[1] ?? null;
     const tagOf = (body: string): string | null => /^tag = "(v\d+)"$/m.exec(body)?.[1] ?? null;
-    // 前提: migration を実際に読めている(空振りでない)。v1〜v9 の 9 ブロック
-    expect(blocks.length, "migration ブロックの数(v1〜v9)").toBe(9);
-    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"]);
-    // 追加(new_sqlite_classes)は v1〜v8 の各 1 クラス。v3 の CloudMigration は残す(v9 の deleted_classes が指す先行の migration。wrangler が同じ toml 内で存在を検査する)
+    // 前提: migration を実際に読めている(空振りでない)。v1〜v10 の 10 ブロック
+    expect(blocks.length, "migration ブロックの数(v1〜v10)").toBe(10);
+    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10"]);
+    // 追加(new_sqlite_classes)は v1〜v8・v10 の各 1 クラス。v3 の CloudMigration は残す(v9 の deleted_classes が指す先行の migration。wrangler が同じ toml 内で存在を検査する)
     expect(blocks.map((b) => field(b, "new_sqlite_classes"))).toEqual([
       '"NetkeibaGate"',
       '"RaceDay"',
@@ -114,9 +114,10 @@ describe("wrangler.toml", () => {
       '"PriorExportDO"',
       '"MonthlyReportDO"',
       null,
+      '"AllocationExportDO"',
     ]);
     // 削除(deleted_classes)は v9 の 1 回だけで、中身は CloudMigration ちょうど 1 クラス。他のクラスの削除は禁じる
-    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"']);
+    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"', null]);
     expect((tomlCode.match(/deleted_classes/g) ?? []).length, "deleted_classes は toml 全体で 1 回").toBe(1);
     // v9 は削除だけ(同じブロックに追加・改名・移管を混ぜない)
     expect(blocks[8]!.trim().split("\n")).toEqual(['tag = "v9"', 'deleted_classes = ["CloudMigration"]']);
@@ -137,9 +138,13 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "PriorExportDO"$/m);
     expect(tomlCode).toMatch(/^name = "MONTHLY_REPORT"$/m);
     expect(tomlCode).toMatch(/^class_name = "MonthlyReportDO"$/m);
+    expect(tomlCode).toMatch(/^name = "ALLOCATION_EXPORT"$/m);
+    expect(tomlCode).toMatch(/^class_name = "AllocationExportDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|transferred_classes|new_classes)\s*=/m);
-    // DO のバインディングはちょうど7つ(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT。Issue #394 で CLOUD_MIGRATION を外した)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(7);
+    // DO のバインディングはちょうど8つ(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT・ALLOCATION_EXPORT。Issue #394 で CLOUD_MIGRATION を外し、Issue #463 で ALLOCATION_EXPORT を足した)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(8);
+    // v10 は追加だけ(同じブロックに削除・改名・移管を混ぜない)
+    expect(blocks[9]!.trim().split("\n")).toEqual(['tag = "v10"', 'new_sqlite_classes = ["AllocationExportDO"]']);
   });
 
   it("Issue #206・#249: cron はちょうど2本で `0 12 * * *`(UTC 12:00 = JST 21:00)と `0 14 * * *`(UTC 14:00 = JST 23:00)。朝 9 時の定時実行は無い。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -1396,16 +1401,18 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     const enclosing = (index: number): string => functionStarts.filter((f) => f.index <= index).at(-1)!.name;
     const siteReaders = [...code.matchAll(/"sec-fetch-site"/g)].map((m) => enclosing(m.index!));
     expect(siteReaders.sort()).toEqual(["crossSiteRejection", "originAllowed"]);
-    // 呼び出し箇所: 9 つで、関数名の一覧が固定(handleRaces を含む)
+    // 呼び出し箇所: 10 つで、関数名の一覧が固定(handleRaces を含む)
+    // 【Issue #463で改訂】旧: 9 つ(handleAllocationExport を含まない)。配分の再計算用の書き出し GET /api/export/allocation-dataset が加わり 10 になった。保証していたことは変わらない
+    // (一覧が完全に固定で、検査なしの入口が増えると赤になる)。D1 に触れる前の順序は、下の Issue #463 のテストが持つ。
     // 【Issue #488で改訂】旧: 8 つ(handleJraCheck を含まない)。JRA への到達の確認 GET /api/jra/check が加わり 9 つになった。保証していたことは変わらない
     // (呼び出し箇所の関数名の一覧が完全に固定で、新しい入口が検査なしに増えると赤になる)。handleJraCheck の順序(取得より前)は下の Issue #488 のテストが持つ。
     const callers = [...code.matchAll(/\bcrossSiteRejection\(request\)/g)].map((m) => enclosing(m.index!));
-    expect(callers.sort()).toEqual(["handleBabaFetch", "handleCheck", "handleHorseRuns", "handleJraCheck", "handlePlan", "handlePriorExport", "handleRaces", "handleTargets", "handleVerify"]);
-    expect(callers).toHaveLength(9);
-    // handleRaces(GET が netkeiba に出る): DO を呼ぶ前に検査する(他の 8 つは各ハンドラの検査が持つ)
+    expect(callers.sort()).toEqual(["handleAllocationExport", "handleBabaFetch", "handleCheck", "handleHorseRuns", "handleJraCheck", "handlePlan", "handlePriorExport", "handleRaces", "handleTargets", "handleVerify"]);
+    expect(callers).toHaveLength(10);
+    // handleRaces(GET が netkeiba に出る): DO を呼ぶ前に検査する(他の 9 つは各ハンドラの検査が持つ)
     expectCrossSiteCheckFirst("handleRaces", bodyOf("async function handleRaces("), ["raceDayStub(", ".getRaceList("]);
-    // 対照(検出の確認。空振りでない): 呼び出しを足した本文は 10 に数える(旧: 9)。インラインの検査は「sec-fetch-site を読む関数」に数えられる
-    expect(((code + "\nasync function handleX(request: Request) {\n  crossSiteRejection(request);\n}").match(/\bcrossSiteRejection\(request\)/g) ?? []).length).toBe(10);
+    // 対照(検出の確認。空振りでない): 呼び出しを足した本文は 11 に数える(旧: 10)。インラインの検査は「sec-fetch-site を読む関数」に数えられる
+    expect(((code + "\nasync function handleX(request: Request) {\n  crossSiteRejection(request);\n}").match(/\bcrossSiteRejection\(request\)/g) ?? []).length).toBe(11);
     expect([...(code + '\nfunction handleY(request: Request) {\n  request.headers.get("sec-fetch-site");\n}').matchAll(/"sec-fetch-site"/g)]).toHaveLength(3);
     expect(() => expectCrossSiteCheckFirst("結果を返さない", "async function f(request: Request) {\n  crossSiteRejection(request);\n  env.DB;\n}", ["env.DB"])).toThrow();
   });
@@ -1684,6 +1691,81 @@ describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkei
       expect(code, `${f} は書き出しを参照しない`).not.toMatch(/PRIOR_EXPORT|PriorExport|prior-export/);
     }
     expect(stripCode(readTextLf("cloud", "src", "route-policy.ts"))).toContain('exact("/api/export/prior-dataset", ADMIN_ONLY)');
+  });
+});
+
+describe("Issue #463: 配分の再計算用の書き出し(AllocationExportDO)は netkeiba にも LLM にも出ず、他の DO・cron と干渉せず、R2 への書き込みは 1 箇所、Worker は D1 に触れない", () => {
+  const exportSources = ["allocation-export-core.ts", "allocation-export-do.ts", "allocation-export-store.ts", "allocation-export-format.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
+
+  it("書き出しのソース(4 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・他の DO が無い", () => {
+    expect(exportSources).toHaveLength(4);
+    for (const [name, code] of exportSources) {
+      expect(code.length, `${name} を読めている`).toBeGreaterThan(500);
+      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "VERIFY_REPORT", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+  });
+
+  it("D1・R2 の読み書きは allocation-export-store.ts だけ。R2 の put は putFileStream の 1 箇所、get は詳細の読みの 1 箇所(list・head・delete は使わない)。D1 の書き込みは r2_ops の 2 文(Class B の加算・Class A の加算。SQL は prior-export-store.ts の定数を使う)だけ", () => {
+    const store = exportSources.find(([n]) => n === "allocation-export-store.ts")![1];
+    expect((store.match(/this\.bucket\.put\(/g) ?? []).length).toBe(1);
+    expect((store.match(/this\.bucket\.get\(/g) ?? []).length).toBe(1);
+    for (const forbidden of [".list(", ".head(", ".delete(", "DELETE FROM", "UPDATE ", "INSERT INTO", "REPLACE INTO", "DROP ", "ALTER "]) {
+      expect(store, `allocation-export-store.ts に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 書き込みの SQL は、統計モデル用の書き出しのストアと共有する 2 本(COUNT_READS_SQL・COUNT_WRITE_SQL)だけ
+    expect((store.match(/COUNT_READS_SQL|COUNT_WRITE_SQL/g) ?? []).length).toBe(4); // import 1 行に 2 つ + 使う 2 か所
+    expect((store.match(/\.run\(\)/g) ?? []).length).toBe(2);
+    // 型 AllocationExportBucket は get と put だけを許す
+    expect(store).toMatch(/type AllocationExportBucket = Pick<R2Bucket, "get" \| "put">/);
+    // 読みの SQL は自由文・大きな列に触れない
+    for (const forbidden of ["race_snapshot_json", "raw_response", "contributions_json", "additional_instruction", "highlights_json", "concerns_json"]) {
+      expect(store, `allocation-export-store.ts が ${forbidden} を読まない`).not.toContain(forbidden);
+    }
+    // ほかの書き出しのソースは D1・R2 に直接触れない(core は注入された窓口だけを使う)
+    for (const [name, code] of exportSources.filter(([n]) => n === "allocation-export-core.ts" || n === "allocation-export-format.ts")) {
+      for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", ".prepare(", ".batch(", ".put(\"exports"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it("GET /api/export/allocation-dataset の関数(handleAllocationExport)は、別サイトの検査が先で、DO の request を呼び、R2 は完成したファイルの get 1 回だけ。D1・取得・LLM・Webhook・R2 の書き込みに触れない。Refresh ヘッダの遷移先は定数のパスだけ(?refresh=1 を含めない)", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = handler.indexOf("async function handleAllocationExport(");
+    expect(start).toBeGreaterThan(-1);
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(1500); // 前提: 本体を実際に読めている
+    expect(body).toContain(".request(mode)");
+    expectCrossSiteCheckFirst("handleAllocationExport", body, ["env.ALLOCATION_EXPORT", "env.ANALYSIS_DETAIL", ".request(mode)"]);
+    expect((body.match(/env\.ANALYSIS_DETAIL\.get\(ALLOCATION_EXPORT_KEY\)/g) ?? []).length).toBe(1);
+    expect((body.match(/env\.ANALYSIS_DETAIL/g) ?? []).length).toBe(1);
+    expect(body).toContain("url=${ALLOCATION_EXPORT_PATH}");
+    expect(body).not.toContain("refresh=1}");
+    for (const forbidden of ["env.DB", "NETKEIBA_GATE", "RACE_DAY", "RESULT_BACKFILL", "CLOUD_MIGRATION", "VERIFY_REPORT", "PRIOR_EXPORT", ".kick(", ".start(", ".fetchRaw(", ".prepare(", ".put(", ".list(", ".delete(", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "fetch("]) {
+      expect(body, `handleAllocationExport に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 書き出しの DO の binding・クラスに触れるファイルは、概念で走査して固定(cloud/src の全ファイル)
+    const srcDir = path.join(ROOT, "cloud", "src");
+    const sites: Record<string, number> = {};
+    for (const f of readdirSync(srcDir).filter((x) => x.endsWith(".ts") && x !== "client-bundle.generated.ts")) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(/\bALLOCATION_EXPORT\b|\bAllocationExportDO\b/g) ?? []).length;
+      if (n > 0) sites[f] = n;
+    }
+    // handler.ts(Env の型・env.ALLOCATION_EXPORT)・worker.ts(export)・allocation-export-do.ts(クラス定義)だけ
+    expect(Object.keys(sites).sort()).toEqual(["allocation-export-do.ts", "handler.ts", "worker.ts"]);
+    expect((handler.match(/\benv\.ALLOCATION_EXPORT\b/g) ?? []).length).toBe(1);
+  });
+
+  it("cron の scheduled・RaceDay・result-dispatch・他の DO は、この書き出しを参照しない。route-policy は管理者専用の行を持つ。統計モデル用の書き出しとは、DO のクラスもファイルも共有しない", () => {
+    for (const f of ["scheduled.ts", ...RACE_DAY_FILES, "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts", "verify-do.ts", "verify-core.ts", "verify-store.ts", "daily-report-do.ts", "prior-export-do.ts", "prior-export-core.ts"]) {
+      const code = stripCode(readTextLf("cloud", "src", f));
+      expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
+      expect(code, `${f} はこの書き出しを参照しない`).not.toMatch(/ALLOCATION_EXPORT|AllocationExport|allocation-export/);
+    }
+    expect(stripCode(readTextLf("cloud", "src", "route-policy.ts"))).toContain('exact("/api/export/allocation-dataset", ADMIN_ONLY)');
   });
 });
 

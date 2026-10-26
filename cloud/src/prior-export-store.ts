@@ -24,9 +24,9 @@ export type PriorExportDb = Pick<D1Database, "prepare" | "batch">;
 export type PriorExportBucket = Pick<R2Bucket, "get" | "put">;
 
 /** R2 の get の同時実行数。 */
-const GET_CONCURRENCY = 6;
+export const GET_CONCURRENCY = 6;
 
-const CANDIDATES_SQL = `SELECT a.id AS id, a.race_id AS raceId, a.analyzed_at AS analyzedAt, a.kaisai_date AS kaisaiDate, a.prompt_version AS promptVersion,
+export const CANDIDATES_SQL = `SELECT a.id AS id, a.race_id AS raceId, a.analyzed_at AS analyzedAt, a.kaisai_date AS kaisaiDate, a.prompt_version AS promptVersion,
        a.detail_key AS detailKey, a.ev_estimated AS evEstimated, a.prompt_lookahead_guarded AS promptLookaheadGuarded,
        a.history_cutoff_date AS historyCutoffDate, a.start_time AS startTime
   FROM analyses a
@@ -39,9 +39,9 @@ const RESULTS_SQL = `SELECT race_id AS raceId, umaban, finish_position AS finish
   FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban`;
 const META_SQL = `SELECT race_id AS raceId, course_type AS courseType FROM race_result_meta WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id`;
 
-const SELECT_R2_USAGE_SQL = "SELECT class_a AS classA, class_b AS classB FROM r2_ops WHERE ym = ?";
-const COUNT_READS_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + ?";
-const COUNT_WRITE_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1";
+export const SELECT_R2_USAGE_SQL = "SELECT class_a AS classA, class_b AS classB FROM r2_ops WHERE ym = ?";
+export const COUNT_READS_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + ?";
+export const COUNT_WRITE_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1";
 
 export interface D1PriorExportStoreOptions {
   readonly db: PriorExportDb;

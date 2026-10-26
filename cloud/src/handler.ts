@@ -41,6 +41,8 @@ import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-cor
 import type { GetReportOptions, VerifyResponse, ViewerVerifyResponse } from "./verify-core";
 import type { ExportMode, ExportResponse } from "./prior-export-core";
 import { exportFilename, PRIOR_EXPORT_KEY } from "./prior-export-format";
+import type { AllocationExportResponse } from "./allocation-export-core";
+import { allocationExportFilename, ALLOCATION_EXPORT_KEY } from "./allocation-export-format";
 import { toRaceListRows } from "./race-list";
 import { D1TargetsStore } from "./targets-repository";
 import { D1BabaStore, FETCH_LIST_LIMIT_DEFAULT } from "./baba-repository";
@@ -146,6 +148,21 @@ export interface PriorExportNamespaceLike {
 /** 統計モデル用の書き出しの DO の固定名(単一インスタンス)。 */
 const PRIOR_EXPORT_NAME = "main";
 
+/** 配分の再計算用の書き出しの DO(AllocationExportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #463。 */
+export interface AllocationExportStubLike {
+  /** 要求(`download`・`refresh`・`status`)。作成中は古いファイルを返さず building を返す。 */
+  request(mode: ExportMode): Promise<AllocationExportResponse>;
+}
+
+/** 配分の再計算用の書き出しの DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link ALLOCATION_EXPORT_NAME})。 */
+export interface AllocationExportNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): AllocationExportStubLike;
+}
+
+/** 配分の再計算用の書き出しの DO の固定名(単一インスタンス)。 */
+const ALLOCATION_EXPORT_NAME = "main";
+
 /** 日報の DO(DailyReportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #235。 */
 export interface DailyReportStubLike {
   /** 日報の作成の依頼(冪等。進行中・作成済みは断る)。`mode: "regenerate"`(Issue #268)は逆に、日報が無い日を断り、1 日の回数の上限がある。 */
@@ -185,6 +202,8 @@ export interface Env extends AccessEnv {
   VERIFY_REPORT?: VerifyNamespaceLike;
   /** 統計モデル用の書き出しの DO(PriorExportDO。wrangler.toml の binding)。Issue #266。本番では常にある。無い構成では `GET /api/export/prior-dataset` が 503 になる。 */
   PRIOR_EXPORT?: PriorExportNamespaceLike;
+  /** 配分の再計算用の書き出しの DO(AllocationExportDO。wrangler.toml の binding)。Issue #463。本番では常にある。無い構成では `GET /api/export/allocation-dataset` が 503 になる。 */
+  ALLOCATION_EXPORT?: AllocationExportNamespaceLike;
   /** 日報の DO(DailyReportDO。wrangler.toml の binding)。Issue #235。本番では常にある。無い構成では `POST /api/reports/run` が 503 になり、cron は日報の取り残しの補完をしない(一覧・本文の GET は D1 を読むだけなので動く)。 */
   DAILY_REPORT?: DailyReportNamespaceLike;
   /** 月報の DO(MonthlyReportDO。wrangler.toml の binding)。Issue #265・#279。本番では常にある。無い構成では cron は月報を依頼しない(一覧・本文の GET は D1 を読むだけなので動く)。 */
@@ -461,6 +480,14 @@ export async function handle(
       return methodNotAllowed("GET");
     }
     return handlePriorExport(request, env);
+  }
+
+  if (pathname === "/api/export/allocation-dataset") {
+    // 管理者専用(route-policy.ts)。DO の状態を読むか作成を始め、完成していれば R2 のファイルを返すだけ(Worker は D1 に触れない)。GET だけ(HEAD で DO を開かない)。Issue #463。
+    if (method !== "GET") {
+      return methodNotAllowed("GET");
+    }
+    return handleAllocationExport(request, env);
   }
 
   if (pathname === "/api/horse-runs") {
@@ -815,6 +842,90 @@ async function handlePriorExport(request: Request, env: Env): Promise<Response> 
       return json({ ok: true, ...response });
   }
 }
+
+/** 配分の再計算用の書き出しの URL(route-policy.ts と同じ値)。 */
+const ALLOCATION_EXPORT_PATH = "/api/export/allocation-dataset";
+
+const ALLOCATION_EXPORT_PARAMS = new Set(["refresh", "status"]);
+
+/**
+ * `GET /api/export/allocation-dataset[?refresh=1|?status=1]`(Issue #463。管理者専用): 過去のレースの配分を計算し直すための入力(分析時点のオッズ・実効設定・提案した買い目・確定払戻)を
+ * 1 レース 1 行で書き出したファイル(NDJSON を gzip)を返す。`handlePriorExport` と同じ作りの別の入口(別の DO・別のファイル)。
+ * 作成は DO(`AllocationExportDO`)がアラームで少しずつ行い、Worker はその状態を読むか作成を頼むだけ。
+ *  - 通常の GET: 完成したファイルがあれば本体をそのまま返す(200・attachment)。無ければ作成を始めて 202。**作成中は古いファイルを返さず 202**。
+ *  - `?refresh=1`: 作り直しを始める(作成中なら二重に始めず 202。1 日 3 回まで〈超えると 429〉)。ファイルは返さない。
+ *  - `?status=1`: 状態の JSON だけ(副作用なし)。
+ * 202 の `Refresh` ヘッダは、`?refresh=1` を含まない URL へ 5 秒後に遷移させる(完成するとダウンロードになる)。
+ * 別サイトからの要求は 403(`Sec-Fetch-Site`。アドレスバーからは `none`)。入力の検証が先(400。DO は呼ばない)。失敗は固定の種類名だけ(例外の文面は返さない)。
+ */
+async function handleAllocationExport(request: Request, env: Env): Promise<Response> {
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
+  }
+  const url = new URL(request.url);
+  if (hasInvalidQueryKeys(url, ALLOCATION_EXPORT_PARAMS)) {
+    return badRequest("クエリは refresh(1 または 0)と status(1 または 0)だけを、それぞれ1つまで指定できます");
+  }
+  const refreshValue = url.searchParams.get("refresh");
+  const statusValue = url.searchParams.get("status");
+  if ((refreshValue !== null && refreshValue !== "0" && refreshValue !== "1") || (statusValue !== null && statusValue !== "0" && statusValue !== "1")) {
+    return badRequest("refresh・status は 1 または 0 で指定してください");
+  }
+  if (refreshValue === "1" && statusValue === "1") {
+    return badRequest("refresh と status は同時に指定できません");
+  }
+  const mode: ExportMode = statusValue === "1" ? "status" : refreshValue === "1" ? "refresh" : "download";
+  let response: AllocationExportResponse;
+  try {
+    const namespace = env.ALLOCATION_EXPORT;
+    if (namespace === undefined) {
+      throw new Error("ALLOCATION_EXPORT binding がありません");
+    }
+    response = await namespace.get(namespace.idFromName(ALLOCATION_EXPORT_NAME)).request(mode);
+  } catch {
+    return json({ ok: false, error: { type: "export-error" } }, 503);
+  }
+  if (mode === "status") {
+    return json({ ok: true, ...response });
+  }
+  switch (response.status) {
+    case "ready": {
+      if (mode !== "download") {
+        return json({ ok: true, ...response });
+      }
+      const object = await env.ANALYSIS_DETAIL.get(ALLOCATION_EXPORT_KEY).catch(() => null);
+      if (object === null) {
+        return json({ ok: false, error: { type: "export-missing" } }, 503);
+      }
+      return new Response(object.body, {
+        status: 200,
+        headers: {
+          ...SECURITY_HEADERS,
+          "content-type": "application/gzip",
+          "content-disposition": `attachment; filename="${allocationExportFilename(response.file.generatedAt)}"`,
+          "content-length": String(object.size),
+        },
+      });
+    }
+    case "building":
+      return new Response(JSON.stringify({ ok: true, ...response }), {
+        status: 202,
+        headers: { ...SECURITY_HEADERS, "content-type": "application/json; charset=utf-8", refresh: `${ALLOCATION_EXPORT_REFRESH_SECONDS}; url=${ALLOCATION_EXPORT_PATH}` },
+      });
+    case "throttled":
+      return json({ ok: false, error: { type: "export-throttled" }, nextAt: response.nextAt, file: response.file }, 429);
+    case "blocked":
+      return json({ ok: false, error: { type: "export-blocked", reason: response.reason }, file: response.file }, 503);
+    case "failed":
+      return json({ ok: false, error: { type: "export-failed", reason: response.reason }, file: response.file }, 503);
+    case "empty":
+      return json({ ok: true, ...response });
+  }
+}
+
+/** 作成中の応答の Refresh ヘッダ(秒)。遷移先は**クエリなし**の URL。 */
+const ALLOCATION_EXPORT_REFRESH_SECONDS = 5;
 
 const ANALYSES_PARAMS = new Set(["race_id", "kaisai_date", "limit"]);
 

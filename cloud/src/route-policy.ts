@@ -104,6 +104,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/monthly-reports/run", ADMIN_ONLY), // 月報の手動作成と作り直し(Issue #280。LLM を呼ぶ)
   // 統計モデルの見直し用の書き出し(Issue #266)。分析・結果の全件に近い内容(prior・補正・着順・オッズ)が出るので管理者だけ。作成は DO が R2 の詳細を大量に読む
   exact("/api/export/prior-dataset", ADMIN_ONLY),
+  // 配分の再計算用の書き出し(Issue #463)。分析時点のオッズ・実効設定・提案した買い目・確定払戻が 1 レース 1 行で出るので管理者だけ。作成は DO が R2 の詳細を大量に読む
+  exact("/api/export/allocation-dataset", ADMIN_ONLY),
   // 各馬の戦績の蓄積の診断(Issue #256 段階A)。D1 の horse_runs の走査(件数・開催区分別・セルの分布)を起こしうるので管理者だけ。読み取り専用・GET だけ
   exact("/api/horse-runs", ADMIN_ONLY),
   // 馬場の取得の結果の診断(Issue #360)。取得の時刻・結果の分類・捨てた競馬場の理由を読む(D1 の SELECT だけ。JRA にも出ない)。JRA への取得の利用の記録なので管理者だけ。GET だけ

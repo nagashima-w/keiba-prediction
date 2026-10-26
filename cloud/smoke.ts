@@ -183,7 +183,7 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const monthly = await req(port, "GET", "/api/monthly-reports");
   check(`${label}: GET /api/monthly-reports は 200(月報は閲覧できる。Issue #279)・POST は 403(admin-only)`, monthly.status === 200 && parseJson(monthly.text)["ok"] === true && (await req(port, "POST", "/api/monthly-reports")).status === 403, `${monthly.status} ${monthly.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/settings/prompt-preview"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/export/allocation-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/settings/prompt-preview"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
@@ -211,6 +211,7 @@ async function expectAdmin(port: number, label: string, email: string): Promise<
   const verifyAdmin = await req(port, "GET", "/api/verify?venue=all");
   check(`${label}: GET /api/verify は ready(管理者は集計する。閲覧者の not-computed との対照)`, verifyAdmin.status === 200 && parseJson(verifyAdmin.text)["status"] === "ready", `${verifyAdmin.status} ${verifyAdmin.text.slice(0, 160)}`);
   check(`${label}: GET /api/export/prior-dataset?x=1(Issue #266)は 400(役割の関門を通って、入力の検証に届く。DO は開かない)`, (await req(port, "GET", "/api/export/prior-dataset?x=1")).status === 400);
+  check(`${label}: GET /api/export/allocation-dataset?x=1(Issue #463)は 400(役割の関門を通って、入力の検証に届く。DO は開かない)`, (await req(port, "GET", "/api/export/allocation-dataset?x=1")).status === 400);
   // Issue #256 段階A: 各馬の戦績の蓄積の診断。管理者は 200(本物の D1。migration 0014 の表が空なので、行数 0・保存の集計 0)。入力の検証は 400。
   const horseRuns = await req(port, "GET", "/api/horse-runs");
   const horseRunsBody = parseJson(horseRuns.text);
@@ -397,6 +398,28 @@ async function main(): Promise<void> {
       const exportAgainDuring = await req(port, "GET", "/api/export/prior-dataset");
       check(`${label}: ?refresh=1 は作り直しを始めて 202。作成中の通常の GET は古いファイルを返さず 202(進捗)`, exportAgain.status === 202 && exportAgainDuring.status === 202 && parseJson(exportAgainDuring.text)["status"] === "building", `${exportAgain.status} ${exportAgainDuring.status} ${exportAgainDuring.text.slice(0, 120)}`);
       check(`${label}: GET /api/export/prior-dataset の POST は 405`, (await req(port, "POST", "/api/export/prior-dataset")).status === 405);
+
+      // Issue #463: 配分の再計算用の書き出し(本物の DO `AllocationExportDO`)。流れは統計モデル用の書き出しと同じ。仕上げは本物の `FixedLengthStream` で塊を 1 つずつ R2 に流す
+      // (Node のテストには無い組み込みなので、ここが本物の workerd で通る唯一の確認)。
+      const allocFirst = await req(port, "GET", "/api/export/allocation-dataset");
+      check(`${label}: GET /api/export/allocation-dataset は(ファイルが無いので)作成を始めて 202。Refresh ヘッダは ?refresh=1 を含まない URL へ`, allocFirst.status === 202 && parseJson(allocFirst.text)["status"] === "building" && allocFirst.headers.get("refresh") === "5; url=/api/export/allocation-dataset", `${allocFirst.status} ${allocFirst.text.slice(0, 200)} ${allocFirst.headers.get("refresh")}`);
+      let allocStatus: Record<string, unknown> = {};
+      let allocPolls = 0;
+      for (; allocPolls < 120; allocPolls += 1) {
+        allocStatus = parseJson((await req(port, "GET", "/api/export/allocation-dataset?status=1")).text);
+        if (allocStatus["status"] !== "building") break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      const allocFile = allocStatus["file"] as { rows: number; races: number; bytes: number; diag: { rowsRead: number; gets: number } } | null | undefined;
+      check(`${label}: 配分の書き出しが ready になる(本物の DO・D1・R2。仕上げは FixedLengthStream)。D1 の読み取り行数と R2 の取得回数が診断に出る`, allocStatus["status"] === "ready" && typeof allocFile?.diag.rowsRead === "number" && allocFile.diag.rowsRead > 0 && typeof allocFile.diag.gets === "number", `${allocPolls} ${JSON.stringify(allocStatus).slice(0, 400)}`);
+      const allocDownload = await req(port, "GET", "/api/export/allocation-dataset");
+      const allocLines = allocDownload.status === 200 ? new TextDecoder().decode(gunzipSync(allocDownload.bytes)).split("\n").filter((l) => l !== "") : [];
+      const allocMeta = (parseJson(allocLines[0] ?? "")["_meta"] ?? {}) as { format?: number; rows?: number };
+      check(`${label}: ready のあとの通常の GET は 200 で gzip の NDJSON を返す(attachment・no-store)。先頭がメタ行(format 1)で、行数がメタ行・状態と一致し、**行が 1 行以上ある**。ファイルのバイト数が状態の bytes と一致する(FixedLengthStream に宣言した長さと流した長さが同じ)`, allocDownload.status === 200 && allocDownload.headers.get("content-type") === "application/gzip" && (allocDownload.headers.get("content-disposition") ?? "").startsWith('attachment; filename="allocation-dataset-') && allocDownload.headers.get("cache-control") === "no-store" && allocMeta.format === 1 && allocLines.length > 1 && (allocMeta.rows ?? 0) > 0 && allocMeta.rows === allocLines.length - 1 && allocMeta.rows === allocFile?.rows && allocDownload.bytes.length === allocFile?.bytes, `${allocDownload.status} ${allocLines.length} ${JSON.stringify(allocMeta)} ${allocDownload.bytes.length} ${allocFile?.bytes}`);
+      const allocAgain = await req(port, "GET", "/api/export/allocation-dataset?refresh=1");
+      const allocAgainDuring = await req(port, "GET", "/api/export/allocation-dataset");
+      check(`${label}: ?refresh=1 は作り直しを始めて 202。作成中の通常の GET は古いファイルを返さず 202(進捗)`, allocAgain.status === 202 && allocAgainDuring.status === 202 && parseJson(allocAgainDuring.text)["status"] === "building", `${allocAgain.status} ${allocAgainDuring.status} ${allocAgainDuring.text.slice(0, 120)}`);
+      check(`${label}: GET /api/export/allocation-dataset の POST は 405`, (await req(port, "POST", "/api/export/allocation-dataset")).status === 405);
 
       check(`${label}: シードの応答にメール・AUD・チーム名が含まれない`, !seeded.text.includes(EMAIL));
     });
