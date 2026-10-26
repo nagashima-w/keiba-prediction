@@ -232,7 +232,7 @@ describe("要求と状態", () => {
     // メタ行 + 塊 3 つ = 4 つのメンバーを、まとめて持たずに 1 つずつ渡した(ここでは偽のストアが列挙するだけ。生成器が遅延評価であることは別のテストで見る)
     expect(put.info).toMatchObject({ rows: 5, races: 5 });
     const { meta, rows } = readFile(put.bytes);
-    expect(meta).toMatchObject({ format: 1, rows: 5, races: 5, missingOdds: 0, noAllocation: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0, estimated: 0 } });
+    expect(meta).toMatchObject({ format: 1, rows: 5, races: 5, missingOdds: 0, noAllocation: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, uncheckedRaces: 0, superseded: 0, estimated: 0 } });
     expect(rows.map((r) => r.race_id)).toEqual(Array.from({ length: 5 }, (_, i) => raceIdOf(i + 1)));
     expect(rows[0]).toMatchObject({ analysis_id: 100, field_size: 3, has_odds: true, course_type: "芝", leak_class: "guarded" });
     expect(rows[0]!.horses.map((h) => [h.umaban, h.win_odds, h.wakuban])).toEqual([[1, 3.5, 1], [2, 4.5, 2], [3, 5.5, 3]]);
@@ -306,10 +306,10 @@ describe("要求と状態", () => {
     await core.request("download");
     await w.drain(core);
     const res = await core.request("status");
-    expect(res).toMatchObject({ status: "ready", file: { rows: 0, races: 0, excluded: { unchecked: 1, suspect: 1, unknown: 0, superseded: 0, estimated: 1 } } });
+    expect(res).toMatchObject({ status: "ready", file: { rows: 0, races: 0, excluded: { unchecked: 1, uncheckedRaces: 1, suspect: 1, unknown: 0, superseded: 0, estimated: 1 } } });
     const { meta, rows } = readFile(w.store.puts[0]!.bytes);
     expect(rows).toEqual([]);
-    expect(meta).toMatchObject({ excluded: { unchecked: 1, suspect: 1, estimated: 1 } });
+    expect(meta).toMatchObject({ excluded: { unchecked: 1, uncheckedRaces: 1, suspect: 1, estimated: 1 } });
   });
 
   it("詳細(R2)が無いレースも行は出し(has_odds は false)、missingOdds に数える。配分のメタが無い分析は allocation が null で、noAllocation に数える", async () => {
@@ -482,6 +482,30 @@ describe("失敗", () => {
     expect(w.kv.get("runs")).toEqual({ day: "2026-10-10", count: 2 });
     await w.drain(core);
     expect((await core.request("status")).status).toBe("ready");
+  });
+
+  it("失敗で止まったら、計画と処理済みの塊を kv に残さない(R2 の柵・連続の失敗のどちらの止まり方でも)。止まる前には確かに残っている", async () => {
+    const leftovers = (w: World): string[] => [...w.kv.map.keys()].filter((k) => k.startsWith("plan:") || k.startsWith("chunk:")).sort();
+    // (a) 処理の途中で R2 の読み出しの柵に達して止まる
+    const a = world(5);
+    const coreA = a.core({ batchSize: 2 });
+    await coreA.request("download");
+    await a.drain(coreA, 2); // 計画 + 処理 1 batch
+    expect(leftovers(a)).toEqual(["chunk:0", "plan:0", "plan:1", "plan:2"]); // 前提: 止まる前には残っている
+    a.store.usage = { classA: 0, classB: R2_FENCE_LIMITS.classB };
+    await a.drain(coreA, 1);
+    expect(await coreA.request("status")).toMatchObject({ status: "failed", reason: "r2-fence" });
+    expect(leftovers(a)).toEqual([]);
+    // (b) 取得の失敗が続いて、上限の回数で止まる
+    const b = world(5);
+    const coreB = b.core({ batchSize: 2 });
+    await coreB.request("download");
+    await b.drain(coreB, 2);
+    expect(leftovers(b)).toEqual(["chunk:0", "plan:0", "plan:1", "plan:2"]);
+    b.store.failFetch = ALLOCATION_EXPORT_MAX_ATTEMPTS;
+    await b.drain(coreB);
+    expect(await coreB.request("status")).toMatchObject({ status: "failed", reason: "tick-failed" });
+    expect(leftovers(b)).toEqual([]);
   });
 
   it("仕上げの塊が失われていたら(kv に無い)put は失敗として扱い、failed へ進む前に再試行する。完成したファイルは作られない", async () => {

@@ -13,17 +13,20 @@
  * ## 母集団(`selectAllocationExportAnalyses`)
  * **検証画面の母集団に合わせる**(`computeVerifyReport` の `selectIncludedAnalyses`。`PRODUCTION_VERIFY_CONFIG`)。順序も同じ:
  *  1. 先読みの分類。遮断済み(`isLookaheadGuarded`。`history_cutoff_date` あり、**かつ**〈LLM 未使用または LLM のプロンプトも遮断〉)は clean。
- *     それ以外は発走の前後で clean / suspect / unknown(`classifyLookaheadSuspicion`)。`start_time` が NULL(発走時刻の補完待ち)の行は判定できないので `unchecked`。
- *  2. **clean の中で**レースごとに最新 1 件(`analyzed_at` の降順、同じなら id が大きい方)。それ以外の clean は `superseded`。
- *  3. 最新が推定 EV(`ev_estimated`)なら、そのレースは**丸ごと除外**(`estimated`。古い分析に代わらない)。
- * 結果の無いレースは候補の段階で除かれる(SQL)。除外の内訳の和 + 採用 = 候補の総数。
+ *     それ以外は発走の前後で clean / suspect / unknown(`classifyLookaheadSuspicion`)。`start_time` が NULL(発走時刻の補完待ち)の行は判定できないので `unchecked`(分析の件数)。
+ *  2. **clean と補完待ちを合わせた中で**レースごとに最新 1 件(`analyzed_at` の降順、同じなら id が大きい方)。それ以外の clean は `superseded`。
+ *     **最新が補完待ちのレースは、古い clean に代えず、レースごと書き出さない**(`uncheckedRaces`。検証画面は補完が済むまで集計を待ち、済んだ後にその分析が clean なら新しい方を選ぶ。
+ *     古い clean に代えると、補完の前後で書き出す分析が変わる)。補完が済んだあと(`start_time` が入ったあと)の結果は、検証画面と一致する(テストが表で固定している)。
+ *  3. 最新の clean が推定 EV(`ev_estimated`)なら、そのレースは**丸ごと除外**(`estimated`。古い分析に代わらない)。
+ * 結果の無いレースは候補の段階で除かれる(SQL)。除外の内訳(`uncheckedRaces` を除く。分析の件数)の和 + 採用 = 候補の総数。
  * prior-dataset の母集団との違い: 遮断済みの定義(prior-dataset は `history_cutoff_date` ありだけ)と、推定 EV(prior-dataset は行を残す)。
  * このため同じレースでも、選ばれる分析が違うことがある。
  *
  * ## 行の中身(`ALLOCATION_ROW_KEYS`。許可リスト。テストが完全一致を固定する)
  * 追加指示・LLM の生応答・`reason` などの自由文・馬名・騎手名・調教師名・寄与度・レース名は含めない。
  *  - 馬ごと: 馬番・枠番・prior・補正後の確率・分析時点の単勝と複勝のオッズ(R2 の `raceSnapshot` から)・保存済みの複勝下限と EV(再計算の照合用)
- *  - `combos`: 券種ごとの組合せオッズ(スナップショットのまま。キーは券種別の順序方針で正規化済み。馬単・三連単は順序つき。**キーが無い = 取得していない**、`{}` = 取得したが空)
+ *  - `combos`: 券種ごとの組合せオッズ(スナップショットのまま。キーは券種別の順序方針で正規化済み。馬単・三連単は順序つき。**キーが無い = 取得していない**、`{}` = 取得したが空)。
+ *    `{}` や欠けた券種の**原因**(発売なし・取得失敗など)は、`combo_states`(取得の状態)を見る
  *  - `allocation`: 分析時の実効設定・配分のコード・提案した買い目・下限で外した買い目。**D1 の NULL は NULL のまま**(旧い行の解釈は読み手の責務)。メタ行が無ければ null
  *  - `result`: 馬ごとの着順・取消・払戻、組合せの払戻、払戻の取込印(検証画面の判定〈`createRaceBetJudge`〉と同じ入力)
  */
@@ -76,8 +79,13 @@ export interface AllocationExcludedCounts {
   readonly suspect: number;
   /** 遮断済みでなく、発走の前後を判定できない。 */
   readonly unknown: number;
-  /** 遮断済みでなく、`start_time` が NULL(発走時刻の補完待ち)。 */
+  /** 遮断済みでなく、`start_time` が NULL(発走時刻の補完待ち)の**分析**の数。 */
   readonly unchecked: number;
+  /**
+   * 補完待ちのためにレースごと書き出さなかった**レース**の数。clean と補完待ちを合わせた中で最新の分析が補完待ちのレース
+   * (検証画面は補完が済むまで集計を待ち、済んだ後は、その分析が clean なら新しい方を選ぶ。古い clean に代えると、補完前後で書き出す分析が変わる)。
+   */
+  readonly uncheckedRaces: number;
   /** clean だが、同じレースのより新しい clean な分析がある。 */
   readonly superseded: number;
   /** 最新の clean が推定 EV だったレース(検証画面と同じく、丸ごと除外。古い分析には代わらない)。 */
@@ -92,48 +100,66 @@ export function selectAllocationExportAnalyses(candidates: readonly CandidateRow
   readonly chosen: ChosenAllocationAnalysis[];
   readonly excluded: AllocationExcludedCounts;
 } {
+  interface Entry {
+    readonly c: CandidateRow;
+    readonly guarded: boolean;
+    /** 補完待ち(`start_time` が NULL)。clean か suspect かまだ決まらない。 */
+    readonly pending: boolean;
+  }
   let suspect = 0;
   let unknown = 0;
   let unchecked = 0;
-  const clean: Array<{ readonly c: CandidateRow; readonly guarded: boolean }> = [];
+  let cleanCount = 0;
+  // 最新の選択の対象は、clean と補完待ちを合わせたもの(補完待ちが済んだあとに clean なら最新になりうるため)。
+  const latest = new Map<string, Entry>();
   for (const c of candidates) {
     const promptLookaheadGuarded = c.promptLookaheadGuarded === null ? null : c.promptLookaheadGuarded === 1;
     const guarded = isLookaheadGuarded({ historyCutoffDate: c.historyCutoffDate, promptVersion: c.promptVersion, promptLookaheadGuarded });
+    let pending = false;
     if (!guarded) {
       if (c.startTime === null) {
         unchecked += 1;
-        continue;
-      }
-      const verdict = classifyLookaheadSuspicion({
-        raceId: c.raceId,
-        analyzedAt: c.analyzedAt,
-        kaisaiDate: c.kaisaiDate,
-        promptVersion: c.promptVersion,
-        historyCutoffDate: c.historyCutoffDate,
-        promptLookaheadGuarded,
-        raceSnapshot: START_TIME_LIKE.test(c.startTime) ? { race: { startTime: c.startTime } } : null,
-      });
-      if (verdict === "suspect") {
-        suspect += 1;
-        continue;
-      }
-      if (verdict === "unknown") {
-        unknown += 1;
-        continue;
+        pending = true;
+      } else {
+        const verdict = classifyLookaheadSuspicion({
+          raceId: c.raceId,
+          analyzedAt: c.analyzedAt,
+          kaisaiDate: c.kaisaiDate,
+          promptVersion: c.promptVersion,
+          historyCutoffDate: c.historyCutoffDate,
+          promptLookaheadGuarded,
+          raceSnapshot: START_TIME_LIKE.test(c.startTime) ? { race: { startTime: c.startTime } } : null,
+        });
+        if (verdict === "suspect") {
+          suspect += 1;
+          continue;
+        }
+        if (verdict === "unknown") {
+          unknown += 1;
+          continue;
+        }
       }
     }
-    clean.push({ c, guarded });
-  }
-  const latest = new Map<string, { readonly c: CandidateRow; readonly guarded: boolean }>();
-  for (const entry of clean) {
-    const current = latest.get(entry.c.raceId);
-    if (current === undefined || entry.c.analyzedAt > current.c.analyzedAt || (entry.c.analyzedAt === current.c.analyzedAt && entry.c.id > current.c.id)) {
-      latest.set(entry.c.raceId, entry);
+    if (!pending) {
+      cleanCount += 1;
+    }
+    const entry: Entry = { c, guarded, pending };
+    const current = latest.get(c.raceId);
+    if (current === undefined || c.analyzedAt > current.c.analyzedAt || (c.analyzedAt === current.c.analyzedAt && c.id > current.c.id)) {
+      latest.set(c.raceId, entry);
     }
   }
   let estimated = 0;
+  let uncheckedRaces = 0;
+  let cleanLatest = 0;
   const chosen: ChosenAllocationAnalysis[] = [];
-  for (const { c, guarded } of latest.values()) {
+  for (const { c, guarded, pending } of latest.values()) {
+    if (pending) {
+      // 最新が補完待ち: 古い clean に代えず、レースごと書き出さない(古い clean は、より新しい分析があるので superseded に数える)。
+      uncheckedRaces += 1;
+      continue;
+    }
+    cleanLatest += 1;
     if (c.evEstimated === 1) {
       estimated += 1;
       continue;
@@ -150,7 +176,7 @@ export function selectAllocationExportAnalyses(candidates: readonly CandidateRow
     });
   }
   chosen.sort((x, y) => (x.raceId < y.raceId ? -1 : x.raceId > y.raceId ? 1 : 0));
-  return { chosen, excluded: { suspect, unknown, unchecked, superseded: clean.length - latest.size, estimated } };
+  return { chosen, excluded: { suspect, unknown, unchecked, uncheckedRaces, superseded: cleanCount - cleanLatest, estimated } };
 }
 
 // ---------------------------------------------------------------------------
@@ -434,7 +460,10 @@ export interface AllocationRaceRow {
   /** 分析時点のオッズを再構成できるか(R2 の詳細が無い・壊れている・馬が読めないときは false。そのとき馬のオッズ・組合せは空)。 */
   readonly has_odds: boolean;
   readonly horses: AllocationRowHorse[];
-  /** 券種 → 組合せオッズ。キーが無い券種は取得していない。 */
+  /**
+   * 券種 → 組合せオッズ。キーが無い券種は取得していない、`{}` は取得したが空。**`{}` や欠けた券種の原因(取得したが空・取得失敗・発売なしなど)は `combo_states` を見る**
+   * (`combos` の形だけでは区別できない)。
+   */
   readonly combos: Record<string, AllocationComboOdds>;
   readonly combo_states: Record<string, string>;
   readonly allocation: AllocationRowAllocation | null;
@@ -642,7 +671,7 @@ export interface AllocationExportMetaInput {
 
 /** メタ行の注記。読み手が誤解しやすい点(この形式で分からないこと)を書く。 */
 const NOTES: readonly string[] = [
-  "1 行 1 レース。母集団は検証画面と同じ規則(先読みの疑い・発走の前後を判定できない・補完待ちを除き、clean の中でレースごとに最新 1 件。最新が推定 EV のレースは丸ごと除外)。excluded の和 + races = 結果のあるレースの分析の総数。",
+  "1 行 1 レース。母集団は検証画面と同じ規則(先読みの疑い・発走の前後を判定できない分析を除き、clean と発走時刻の補完待ちを合わせた中でレースごとに最新 1 件。最新が補完待ちのレースは、古い clean に代えず書き出さない〈uncheckedRaces〉。最新の clean が推定 EV のレースは丸ごと除外)。excluded の uncheckedRaces を除く項目(分析の件数)の和 + races = 結果のあるレースの分析の総数。",
   "has_odds が false のレースは、R2 の詳細が無い・壊れている・別のレースのものだった(馬のオッズ・組合せは空。配分を計算し直せない)。",
   "allocation の settings・codes は analysis_allocation_meta の値で、D1 の NULL は NULL のまま(旧い行〈include_quinella などは #118 より前、min_hit_prob は #470 より前〉の解釈は読み手の責務)。allocation が null の分析は配分の記録が無い。",
   "bet_unit・greedy_steps・candidate_cap・model_id は分析時の実効値。コードの既定値が変わった後の分析は、計算し直しても一致しないことがある。",

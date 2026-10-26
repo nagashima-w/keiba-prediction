@@ -21,7 +21,7 @@ import { compareReplay, judgeRaceBets, parseAllocationDataset, replayRace, summa
  * 実データに近い往復(runAnalysis → D1 → 書き出し → ローダ → 計算し直し)は `cloud/test/allocation-export-roundtrip.test.ts`。ここは合成した行だけで、ネットワークにも D1 にも触れない。
  */
 
-const EXCLUDED: AllocationExcludedCounts = { suspect: 0, unknown: 0, unchecked: 0, superseded: 0, estimated: 0 };
+const EXCLUDED: AllocationExcludedCounts = { suspect: 0, unknown: 0, unchecked: 0, uncheckedRaces: 0, superseded: 0, estimated: 0 };
 const RACE_ID = "202606030811";
 
 const CHOSEN: ChosenAllocationAnalysis = {
@@ -258,5 +258,117 @@ describe("judgeRaceBets(払戻の判定。検証画面と同じ規則〈createRa
     const unjudged = (r: AllocationRaceRow): number => judgeRaceBets(r, r.allocation!.bets).filter((j) => j.judgment.outcome === "unjudged").length;
     expect(unjudged(row)).toBe(2);
     expect(unjudged(noImports)).toBeGreaterThan(unjudged(row));
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("replayRace が D1 の NULL を読む規則(書き出しは NULL のまま。読み手が解釈する): min_hit_prob の NULL は 0、include_* の NULL は OFF、枠番は結果の枠番で補う", () => {
+  // 8 頭・全 6 券種の組合せオッズつきの合成の1レース。確率は大穴(0.03・0.02)まで含め、EV が 1 を超える馬が複数いるので、
+  // 下限・券種の ON/OFF・枠番が配分を実際に変える(下の前提のテストで固定している)。
+  const P = [0.9, 0.8, 0.7, 0.25, 0.2, 0.1, 0.03, 0.02];
+  const PLACE = [1.1, 1.15, 1.2, 4.5, 6.5, 12, 50, 80];
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  const combos = (() => {
+    const out: Record<string, Record<string, number>> = { wide: {}, trio: {}, quinella: {}, exacta: {}, trifecta: {}, bracketQuinella: {} };
+    for (let a = 1; a <= 8; a += 1) {
+      for (let b = 1; b <= 8; b += 1) {
+        if (a < b) out["wide"]![pad(a) + pad(b)] = 30;
+        if (a < b) out["quinella"]![pad(a) + pad(b)] = 30;
+        if (a !== b) out["exacta"]![pad(a) + pad(b)] = 60;
+        if (a <= b) out["bracketQuinella"]![pad(a) + pad(b)] = 40;
+        for (let c = 1; c <= 8; c += 1) {
+          if (a < b && b < c) out["trio"]![pad(a) + pad(b) + pad(c)] = 100;
+          if (a !== b && b !== c && a !== c) out["trifecta"]![pad(a) + pad(b) + pad(c)] = 400;
+        }
+      }
+    }
+    return out;
+  })();
+
+  type Settings = Partial<AllocationMetaInput>;
+  /** `snapshotWakuban`: 分析時のスナップショットの枠番(false なら NULL)。`resultWakuban`: 結果の枠番(false なら NULL)。 */
+  function raceRow(settings: Settings, wakuban: { snapshot?: boolean; result?: boolean } = {}): AllocationRaceRow {
+    const meta: AllocationMetaInput = {
+      ...META, comboOddsWide: "present", comboOddsTrio: null, bankroll: 100_000, perRaceCap: 20_000, kellyFraction: 0.5, evThreshold: 1, includeComboOdds: 1,
+      includeWide: 0, includeTrio: 0, includeQuinella: 0, includeExacta: 0, includeTrifecta: 0, includeBracketQuinella: 0, minHitProb: 0, ...settings,
+    };
+    return buildAllocationRaceRow({
+      analysis: CHOSEN,
+      horses: P.map((p, i) => ({ umaban: i + 1, prior: p, adjustedProb: p, placeOddsMin: PLACE[i]!, ev: null })),
+      snapshot: {
+        present: true,
+        race: { course_type: "芝", distance: 1600, grade: null },
+        horses: new Map(P.map((_, i) => [i + 1, { wakuban: wakuban.snapshot === false ? null : i + 1, win_odds: 10, ninki: i + 1, place_min: PLACE[i]!, place_max: PLACE[i]! + 1 }] as const)),
+        combos,
+        comboStates: {},
+      },
+      meta,
+      bets: [],
+      results: P.map((_, i) => ({ umaban: i + 1, finishPosition: i + 1, placePayout: null, winPayout: null, scratched: 0, wakuban: wakuban.result === false ? null : i + 1, winOdds: null, ninki: null })),
+      payouts: [],
+      imports: [],
+    });
+  }
+
+  /** 計算し直した提案(route と買い目の券種・キー・金額)。 */
+  function replayed(row: AllocationRaceRow): { route: string; bets: string[] } {
+    const outcome = replayRace(row);
+    expect(outcome.kind).toBe("replayed");
+    const allocation = (outcome as Extract<ReplayOutcome, { kind: "replayed" }>).result.allocation;
+    return { route: allocation.meta.route, bets: allocation.bets.map((b) => `${b.betType}:${b.comboKey}=${b.stake}`) };
+  }
+
+  const INCLUDE_COLUMNS = ["includeWide", "includeTrio", "includeQuinella", "includeExacta", "includeTrifecta", "includeBracketQuinella"] as const;
+  const KIND_OF: Record<(typeof INCLUDE_COLUMNS)[number], string> = {
+    includeWide: "wide", includeTrio: "trio", includeQuinella: "quinella", includeExacta: "exacta", includeTrifecta: "trifecta", includeBracketQuinella: "bracketQuinella",
+  };
+
+  it("前提(空振り防止): 下限 0 / 0.05 / 0.25 で提案が互いに違い、券種を ON にすると、その券種の買い目が出て提案が変わり、枠連が配分に入る設定の route は mixed", () => {
+    const floors = [0, 0.05, 0.25].map((minHitProb) => replayed(raceRow({ includeComboOdds: 0, minHitProb })).bets.join(","));
+    expect(new Set(floors).size).toBe(3);
+    expect(floors.every((f) => f.length > 0)).toBe(true);
+    for (const column of INCLUDE_COLUMNS) {
+      const off = replayed(raceRow({ [column]: 0 }));
+      const on = replayed(raceRow({ [column]: 1 }));
+      expect(on.route, column).toBe("mixed");
+      expect(on.bets.some((b) => b.startsWith(`${KIND_OF[column]}:`)), column).toBe(true);
+      expect(off.bets.some((b) => b.startsWith(`${KIND_OF[column]}:`)), column).toBe(false);
+      expect(on.bets.join(","), column).not.toBe(off.bets.join(","));
+    }
+    expect(replayed(raceRow({ includeWide: 1, includeComboOdds: 0 })).route).toBe("place-only"); // 組合せオッズを取得しない設定では、組合せ券種が ON でも複勝だけの経路
+  });
+
+  it("min_hit_prob が NULL(Issue #470 より前の行)は、下限なし(0)として計算し直す。0.05 とも 0.25 とも違う", () => {
+    for (const include of [{ includeComboOdds: 0 }, { includeWide: 1 }] as const) {
+      const asNull = replayed(raceRow({ ...include, minHitProb: null }));
+      expect(asNull).toEqual(replayed(raceRow({ ...include, minHitProb: 0 })));
+      expect(asNull.bets.join(",")).not.toBe(replayed(raceRow({ ...include, minHitProb: 0.05 })).bets.join(","));
+      expect(asNull.bets.join(",")).not.toBe(replayed(raceRow({ ...include, minHitProb: 0.25 })).bets.join(","));
+    }
+  });
+
+  it("include_* の NULL(旧い行)は OFF として計算し直す(6 券種それぞれ。ON とは違う)。include_combo_odds の NULL も OFF(組合せ券種が ON でも複勝だけの経路)", () => {
+    for (const column of INCLUDE_COLUMNS) {
+      expect(replayed(raceRow({ [column]: null })), column).toEqual(replayed(raceRow({ [column]: 0 })));
+      expect(replayed(raceRow({ [column]: null })).bets.join(","), column).not.toBe(replayed(raceRow({ [column]: 1 })).bets.join(","));
+    }
+    const comboNull = replayed(raceRow({ includeWide: 1, includeComboOdds: null }));
+    expect(comboNull).toEqual(replayed(raceRow({ includeWide: 1, includeComboOdds: 0 })));
+    expect(comboNull.route).toBe("place-only");
+    expect(comboNull.bets.join(",")).not.toBe(replayed(raceRow({ includeWide: 1, includeComboOdds: 1 })).bets.join(","));
+  });
+
+  it("分析時のスナップショットに枠番が無い馬は、結果の枠番で補って計算し直す(枠連の買い目が出て、枠番が入っているときと同じ提案)。どちらにも無ければ、枠連が配分に入る設定のときだけ route が invalid", () => {
+    const withBoth = replayed(raceRow({ includeBracketQuinella: 1 }));
+    expect(withBoth.route).toBe("mixed");
+    expect(withBoth.bets.some((b) => b.startsWith("bracketQuinella:"))).toBe(true);
+    const filled = replayed(raceRow({ includeBracketQuinella: 1 }, { snapshot: false }));
+    expect(filled).toEqual(withBoth);
+    const neither = replayed(raceRow({ includeBracketQuinella: 1 }, { snapshot: false, result: false }));
+    expect(neither.route).toBe("invalid");
+    expect(neither.bets).toEqual([]);
+    // 枠連が配分に入らない設定では、枠番は結果に影響しない
+    expect(replayed(raceRow({ includeWide: 1 }, { snapshot: false, result: false }))).toEqual(replayed(raceRow({ includeWide: 1 })));
   });
 });

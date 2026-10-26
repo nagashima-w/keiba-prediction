@@ -133,23 +133,31 @@ describe("selectAllocationExportAnalyses: 検証画面(computeVerifyReport。PRO
     },
   ];
 
+  /** 補完が済んだ状態(発走時刻が全分析に入っている)の分析の列を、書き出しの選別と検証画面の集計の両方に通して、同じになることを確かめる。 */
+  function expectSameAsVerify(specs: readonly Spec[]): ReturnType<typeof selectAllocationExportAnalyses> {
+    const source = verifySource(specs);
+    const report = computeVerifyReport(source, PRODUCTION_VERIFY_CONFIG);
+    const events = collectProposedBetEvents(source, PRODUCTION_VERIFY_CONFIG);
+    const selected = selectAllocationExportAnalyses(specs.map(candidate));
+    const { chosen, excluded } = selected;
+    // 採用された分析の集合が検証画面と同じ(各分析に買い目が 1 件あるので、採用された分析だけが事象を出す)
+    expect(chosen.map((c) => c.id).sort((a, b) => a - b)).toEqual([...new Set(events.map((e) => e.analysisId))].sort((a, b) => a - b));
+    // 除外の内訳が検証画面のカウンタと同じ
+    expect(chosen.length).toBe(report.includedAnalysisCount);
+    expect(excluded.suspect).toBe(report.excludedLookaheadSuspectCount);
+    expect(excluded.unknown).toBe(report.excludedLookaheadUnknownCount);
+    expect(excluded.superseded).toBe(report.supersededAnalysisCount);
+    expect(excluded.estimated).toBe(report.excludedEstimatedCount);
+    expect(excluded.unchecked).toBe(0);
+    expect(excluded.uncheckedRaces).toBe(0);
+    // 内訳の和 + 採用 = 候補の総数
+    expect(chosen.length + excluded.suspect + excluded.unknown + excluded.unchecked + excluded.superseded + excluded.estimated).toBe(specs.length);
+    return selected;
+  }
+
   for (const { name, specs } of CASES) {
     it(`${name}`, () => {
-      const source = verifySource(specs);
-      const report = computeVerifyReport(source, PRODUCTION_VERIFY_CONFIG);
-      const events = collectProposedBetEvents(source, PRODUCTION_VERIFY_CONFIG);
-      const { chosen, excluded } = selectAllocationExportAnalyses(specs.map(candidate));
-      // 採用された分析の集合が検証画面と同じ(各分析に買い目が 1 件あるので、採用された分析だけが事象を出す)
-      expect(chosen.map((c) => c.id).sort((a, b) => a - b)).toEqual([...new Set(events.map((e) => e.analysisId))].sort((a, b) => a - b));
-      // 除外の内訳が検証画面のカウンタと同じ
-      expect(chosen.length).toBe(report.includedAnalysisCount);
-      expect(excluded.suspect).toBe(report.excludedLookaheadSuspectCount);
-      expect(excluded.unknown).toBe(report.excludedLookaheadUnknownCount);
-      expect(excluded.superseded).toBe(report.supersededAnalysisCount);
-      expect(excluded.estimated).toBe(report.excludedEstimatedCount);
-      expect(excluded.unchecked).toBe(0);
-      // 内訳の和 + 採用 = 候補の総数
-      expect(chosen.length + excluded.suspect + excluded.unknown + excluded.unchecked + excluded.superseded + excluded.estimated).toBe(specs.length);
+      expectSameAsVerify(specs);
     });
   }
 
@@ -168,14 +176,62 @@ describe("selectAllocationExportAnalyses: 検証画面(computeVerifyReport。PRO
     }
   });
 
-  it("遮断済みでなく start_time が NULL(補完待ち)の行は unchecked に数え、最新の選択にも加えない(遮断済みなら時刻に関係なく採用)", () => {
-    const { chosen, excluded } = selectAllocationExportAnalyses([
-      candidate({ id: 1, raceId: RACE_A, analyzedAt: BEFORE_START }),
-      candidate({ id: 2, raceId: RACE_A, analyzedAt: AFTER_START, startTime: null }),
-      candidate({ id: 3, raceId: RACE_B, analyzedAt: AFTER_START, startTime: null, historyCutoffDate: "20260704", promptVersion: null }),
-    ]);
-    expect(chosen.map((c) => [c.id, c.leakClass])).toEqual([[1, "pre_race"], [3, "guarded"]]);
-    expect(excluded).toEqual({ suspect: 0, unknown: 0, unchecked: 1, superseded: 0, estimated: 0 });
+  describe("start_time が NULL(発走時刻の補完待ち)の分析: 検証画面は補完が済むまで集計を待つので、補完が済んだあとの結果に合わせる", () => {
+    // 同じ分析の列を「補完前(最新だけ start_time が NULL)」と「補完後(start_time が入った)」の2つの状態で並べる。補完前の書き出しは、補完後の検証画面の結果を先取りしない:
+    // 最新が unchecked のレースは、古い clean に代えず、レースごと書き出さない。補完後は検証画面と一致する。
+    const OLDER_CLEAN: Spec = { id: 1, raceId: RACE_A, analyzedAt: "2026-07-04T00:00:00.000Z" };
+    const TABLE: ReadonlyArray<{ readonly name: string; readonly before: Spec[]; readonly afterClean: Spec[]; readonly afterSuspect: Spec[] }> = [
+      {
+        name: "最新が unchecked・1 つ古いのが clean",
+        before: [OLDER_CLEAN, { id: 2, raceId: RACE_A, analyzedAt: BEFORE_START, startTime: null }],
+        afterClean: [OLDER_CLEAN, { id: 2, raceId: RACE_A, analyzedAt: BEFORE_START }], // 補完後に clean(発走前)→ 新しい方(2)が採用される
+        afterSuspect: [OLDER_CLEAN, { id: 2, raceId: RACE_A, analyzedAt: AFTER_START }], // 補完後に suspect(発走後)→ 古い clean(1)が採用される
+      },
+    ];
+
+    for (const { name, before, afterClean, afterSuspect } of TABLE) {
+      it(`${name}: 補完前はレースごと書き出さない(古い clean に代えない)。除外した分析は unchecked に、レース数は uncheckedRaces に数える`, () => {
+        const { chosen, excluded } = selectAllocationExportAnalyses(before.map(candidate));
+        expect(chosen).toEqual([]);
+        // 古い clean(1)は、より新しい分析(2)があるので superseded に数える。和 + 採用 = 候補の総数
+        expect(excluded).toEqual({ suspect: 0, unknown: 0, unchecked: 1, uncheckedRaces: 1, superseded: 1, estimated: 0 });
+        expect(chosen.length + excluded.suspect + excluded.unknown + excluded.unchecked + excluded.superseded + excluded.estimated).toBe(before.length);
+      });
+
+      it(`${name}: 補完後は検証画面と一致する(clean なら新しい方、suspect なら古い clean)`, () => {
+        expect(expectSameAsVerify(afterClean).chosen.map((c) => c.id)).toEqual([2]);
+        expect(expectSameAsVerify(afterSuspect).chosen.map((c) => c.id)).toEqual([1]);
+      });
+    }
+
+    it("最新が clean で、古いのが unchecked なら、最新を採用する(古い unchecked は unchecked に数えるが、レースは落とさない)", () => {
+      const { chosen, excluded } = selectAllocationExportAnalyses([
+        candidate({ id: 1, raceId: RACE_A, analyzedAt: "2026-07-04T00:00:00.000Z", startTime: null }),
+        candidate({ id: 2, raceId: RACE_A, analyzedAt: BEFORE_START }),
+      ]);
+      expect(chosen.map((c) => c.id)).toEqual([2]);
+      expect(excluded).toEqual({ suspect: 0, unknown: 0, unchecked: 1, uncheckedRaces: 0, superseded: 0, estimated: 0 });
+    });
+
+    it("analyzed_at が同じなら id の大きい方が最新(unchecked の方が大きければレースごと書き出さない)。ほかのレースには影響しない。遮断済みなら時刻に関係なく採用(unchecked にならない)", () => {
+      const { chosen, excluded } = selectAllocationExportAnalyses([
+        candidate({ id: 1, raceId: RACE_A, analyzedAt: BEFORE_START }),
+        candidate({ id: 2, raceId: RACE_A, analyzedAt: BEFORE_START, startTime: null }),
+        candidate({ id: 3, raceId: RACE_B, analyzedAt: AFTER_START, startTime: null, historyCutoffDate: "20260704", promptVersion: null }),
+        candidate({ id: 4, raceId: RACE_C, analyzedAt: BEFORE_START }),
+      ]);
+      expect(chosen.map((c) => [c.id, c.leakClass])).toEqual([[3, "guarded"], [4, "pre_race"]]);
+      expect(excluded).toEqual({ suspect: 0, unknown: 0, unchecked: 1, uncheckedRaces: 1, superseded: 1, estimated: 0 });
+    });
+
+    it("最新が unchecked のレースの古い分析が推定 EV の clean でも、そのレースは書き出さない(estimated には数えず superseded)", () => {
+      const { chosen, excluded } = selectAllocationExportAnalyses([
+        candidate({ id: 1, raceId: RACE_A, analyzedAt: "2026-07-04T00:00:00.000Z", evEstimated: 1 }),
+        candidate({ id: 2, raceId: RACE_A, analyzedAt: BEFORE_START, startTime: null }),
+      ]);
+      expect(chosen).toEqual([]);
+      expect(excluded).toEqual({ suspect: 0, unknown: 0, unchecked: 1, uncheckedRaces: 1, superseded: 1, estimated: 0 });
+    });
   });
 
   it("結果は レースID の昇順。採用した分析の列を引き継ぐ(promptLookaheadGuarded は boolean | null)", () => {
@@ -440,7 +496,7 @@ describe("塊とメタ行(gzip のメンバーの連結)", () => {
   });
 
   it("メタ行: 形式・件数・除外の内訳・列・注記。行の列は ALLOCATION_ROW_KEYS", () => {
-    const excluded = { suspect: 1, unknown: 2, unchecked: 3, superseded: 4, estimated: 5 };
+    const excluded = { suspect: 1, unknown: 2, unchecked: 3, uncheckedRaces: 6, superseded: 4, estimated: 5 };
     const head = JSON.parse(new TextDecoder().decode(gunzipSync(buildAllocationHead({ generatedAt: "2026-10-26T03:00:00.000Z", rows: 9, races: 9, missingOdds: 2, noAllocation: 1, excluded })))) as {
       _meta: Record<string, unknown>;
     };
@@ -450,7 +506,7 @@ describe("塊とメタ行(gzip のメンバーの連結)", () => {
   });
 
   it("連結した gzip は 1 回の gunzip で全体を読める(メタ行 → 塊)", () => {
-    const head = buildAllocationHead({ generatedAt: "2026-10-26T03:00:00.000Z", rows: 1, races: 1, missingOdds: 0, noAllocation: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0, estimated: 0 } });
+    const head = buildAllocationHead({ generatedAt: "2026-10-26T03:00:00.000Z", rows: 1, races: 1, missingOdds: 0, noAllocation: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, uncheckedRaces: 0, superseded: 0, estimated: 0 } });
     const chunk = encodeAllocationChunk([buildAllocationRaceRow(rowInput())]);
     const all = Buffer.concat([head, chunk]);
     const lines = gunzipSync(all).toString("utf8").trimEnd().split("\n");

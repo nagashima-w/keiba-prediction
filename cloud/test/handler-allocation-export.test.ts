@@ -14,7 +14,7 @@ const PATH = "/api/export/allocation-dataset";
 const VIEWER_EMAIL = "friend@example.com";
 
 const FILE: ExportFileInfo = {
-  generatedAt: "2026-10-10T12:34:56.000Z", rows: 3, races: 3, missingOdds: 0, noAllocation: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0, estimated: 0 }, bytes: 5, diag: { rowsRead: 9, gets: 1 },
+  generatedAt: "2026-10-10T12:34:56.000Z", rows: 3, races: 3, missingOdds: 0, noAllocation: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, uncheckedRaces: 0, superseded: 0, estimated: 0 }, bytes: 5, diag: { rowsRead: 9, gets: 1 },
 };
 const READY: ExportResponse = { status: "ready", file: FILE };
 const BUILDING: ExportResponse = { status: "building", phase: "building", racesDone: 30, races: 120, startedAt: "2026-10-10T12:00:00.000Z", file: null };

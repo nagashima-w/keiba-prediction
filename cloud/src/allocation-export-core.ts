@@ -372,7 +372,7 @@ export class AllocationExportCore {
       return;
     }
     const generatedAt = new Date(now()).toISOString();
-    const excluded = job.excluded ?? { suspect: 0, unknown: 0, unchecked: 0, superseded: 0, estimated: 0 };
+    const excluded = job.excluded ?? { suspect: 0, unknown: 0, unchecked: 0, uncheckedRaces: 0, superseded: 0, estimated: 0 };
     const head = buildAllocationHead({ generatedAt, rows: job.rows, races: job.races, missingOdds: job.missingOdds, noAllocation: job.noAllocation, excluded });
     const totalBytes = job.chunkBytes.reduce((n, b) => n + b, head.length);
     // 塊は 1 つずつ kv から読んで流す(全体を連結しない)。失われている・長さが記録と違う塊は例外(流している途中の例外は put の失敗)。
