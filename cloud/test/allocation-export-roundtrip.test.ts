@@ -9,7 +9,7 @@ import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-t
 import type { RaceData } from "../../packages/core/src/scraper/scrape-race";
 import { compareReplay, parseAllocationDataset, replayRace, type ReplayOutcome } from "../../scripts/allocation-dataset";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
-import { ALL_BETS_SETTINGS, KAISAI_DATE, RACE_ID, scrapeFixtureRace } from "./pipeline-fixtures";
+import { ALL_BETS_SETTINGS, KAISAI_DATE, NAR_KAISAI_DATE, NAR_RACE_ID, RACE_ID, scrapeFixtureRace, scrapeNarFixtureRace } from "./pipeline-fixtures";
 
 /**
  * Issue #463 の中心の検査(往復): 本番の分析(`runAnalysis`)が保存した提案を、**書き出したファイルの 1 行だけから**、本番の配分の関数で計算し直すと一致すること。
@@ -59,12 +59,24 @@ function fixedLength(length: number) {
   });
 }
 
+/** 分析の対象(省略時は中央の 16 頭のフィクスチャ)。 */
+interface AnalysisTarget {
+  readonly raceId: typeof RACE_ID;
+  readonly kaisaiDate: typeof KAISAI_DATE;
+  readonly scrape: () => Promise<RaceData>;
+  /** 結果の枠番(省略時は馬番の半分の切り上げ)。 */
+  readonly wakubanOf?: (race: RaceData, umaban: number) => number;
+}
+
+const CENTRAL_TARGET: AnalysisTarget = { raceId: RACE_ID, kaisaiDate: KAISAI_DATE, scrape: async () => (await scrapeFixtureRace()).race };
+
 /** 分析を 1 件実行して本物の D1・R2 に保存し、結果と払戻も入れる。保存した分析の id と、保存したレコードを返す。 */
 async function analyzeAndSave(
   settings: Record<string, unknown>,
   tweak: (race: RaceData) => RaceData = (r) => r,
+  target: AnalysisTarget = CENTRAL_TARGET,
 ): Promise<{ id: number; record: AnalysisRecord }> {
-  const { race } = await scrapeFixtureRace();
+  const race = await target.scrape();
   const store = new D1AnalysisStore({ db: local.db, bucket: local.r2, now: () => NOW });
   let saved: { id: number; record: AnalysisRecord } | undefined;
   const deps: CloudAnalysisDeps = {
@@ -79,11 +91,14 @@ async function analyzeAndSave(
     llmSkipReason: "テスト: LLM なし",
     now: () => new Date("2026-06-28T00:00:00.000Z"),
   };
-  await runCloudAnalysis(RACE_ID, KAISAI_DATE, deps);
+  await runCloudAnalysis(target.raceId, target.kaisaiDate, deps);
   const horses = race.horses.map((h) => h.shutuba.umaban).sort((a, b) => a - b);
   await new D1ResultStore({ db: local.db }).saveResult(
-    RACE_ID,
-    horses.map((umaban, i) => ({ umaban, finishPosition: i + 1, placePayout: i < 3 ? 150 + i * 10 : null, winPayout: i === 0 ? 420 : null, winOdds: 4.2 + i, ninki: i + 1, scratched: false, wakuban: Math.ceil(umaban / 2) })),
+    target.raceId,
+    horses.map((umaban, i) => ({
+      umaban, finishPosition: i + 1, placePayout: i < 3 ? 150 + i * 10 : null, winPayout: i === 0 ? 420 : null, winOdds: 4.2 + i, ninki: i + 1, scratched: false,
+      wakuban: target.wakubanOf === undefined ? Math.ceil(umaban / 2) : target.wakubanOf(race, umaban),
+    })),
     "芝",
   );
   return { id: saved!.id, record: saved!.record };
@@ -184,6 +199,52 @@ describe("往復: 書き出した 1 行から計算し直すと、分析時に�
     // 券種の ON/OFF(三連単を OFF にすると、三連単の買い目が消える)
     expect(row.allocation!.bets.some((b) => b.bet_type === "trifecta")).toBe(true);
     expect(differs(withSettings({ include_trifecta: false }))).toBe(true);
+  });
+
+  it("地方(実フィクスチャ 202654071210。12 頭・軸馬別の取得が一部だけ): venue_kind が nar で、全券種 ON の提案が計算し直しと完全に一致する。開催日が NULL の旧い行は地方のレース ID から補う", async () => {
+    const narTarget: AnalysisTarget = {
+      raceId: NAR_RACE_ID, kaisaiDate: NAR_KAISAI_DATE, scrape: scrapeNarFixtureRace, wakubanOf: (race, umaban) => race.horses.find((h) => h.shutuba.umaban === umaban)!.shutuba.wakuban,
+    };
+    const { id, record } = await analyzeAndSave(ALL_BETS_SETTINGS, (r) => r, narTarget);
+    // 前提(空振り防止): 保存された提案が、多点で、券種が 2 つ以上、組合せの券種を含む。経路は mixed
+    const bets = record.allocation!.bets;
+    expect(record.allocation!.meta.route).toBe("mixed");
+    expect(bets.length).toBeGreaterThan(5);
+    const types = new Set(bets.map((b) => b.betType));
+    expect(types.size).toBeGreaterThanOrEqual(2);
+    expect([...types].some((t) => t !== "place" && t !== "win")).toBe(true);
+
+    const { rows } = await exportAndLoad();
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row).toMatchObject({ analysis_id: id, race_id: NAR_RACE_ID, venue_kind: "nar", field_size: 12, has_odds: true, kaisai_date: NAR_KAISAI_DATE });
+    // 組合せオッズ: 6 券種とも入っている。軸馬別の取得(3 連複・三連単)は、フィクスチャのある軸だけ(部分取得)で、ほかは全組合せより少ない
+    expect(Object.keys(row.combos).sort()).toEqual([...ALLOCATION_COMBO_KINDS].sort());
+    expect(Object.keys(row.combos["trio"]!).length).toBeLessThan((12 * 11 * 10) / 6);
+    expect(Object.keys(row.combos["trifecta"]!).length).toBeLessThan(12 * 11 * 10);
+    expect(Object.keys(row.combos["trio"]!).length).toBeGreaterThan(0);
+    expect(Object.keys(row.combos["trifecta"]!).length).toBeGreaterThan(0);
+    // 枠連は地方でも枠番が入っていて、結果の枠番もそろっている
+    expect(row.horses.every((h) => h.wakuban !== null)).toBe(true);
+    expect(row.result.horses.every((h) => h.wakuban !== null)).toBe(true);
+    const outcome = replayed(row);
+    const cmp = compareReplay(row, outcome);
+    expect(cmp.differences).toEqual([]);
+    expect(cmp.same).toBe(true);
+    expect(outcome.result.allocation.bets.map((b) => b.stake)).toEqual(bets.map((b) => b.stake));
+
+    // 入力が効いている: 提案に入った組合せの券種は、そのオッズを 3 倍にして計算し直すと提案が食い違う(一致が空振りでない)
+    const usedKinds = ALLOCATION_COMBO_KINDS.filter((k) => types.has(k));
+    expect(usedKinds.length).toBeGreaterThan(0);
+    for (const kind of usedKinds) {
+      const odds = row.combos[kind]!;
+      const changed: AllocationRaceRow = { ...row, combos: { ...row.combos, [kind]: Object.fromEntries(Object.entries(odds).map(([k, v]) => [k, v === null ? null : v * 3])) } };
+      expect(compareReplay(row, replayed(changed)).same, `${kind} を 3 倍にすると提案が変わる`).toBe(false);
+    }
+
+    // 開催日が NULL の旧い行は、地方のレース ID(月日)から補う
+    await local.db.prepare("UPDATE analyses SET kaisai_date = NULL WHERE id = ?").bind(id).run();
+    expect((await exportAndLoad()).rows[0]!.kaisai_date).toBe(NAR_KAISAI_DATE);
   });
 
   it("複勝のみの経路(組合せ券種がすべて OFF): 一致する", async () => {

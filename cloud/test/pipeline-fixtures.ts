@@ -89,6 +89,35 @@ export async function scrapeFixtureRace(): Promise<{ race: RaceData; urls: strin
   return { race, urls };
 }
 
+/** 地方の実フィクスチャ(12 頭の 202654071210。開催日は 2026-07-12)。Issue #494 の往復の検査用。 */
+export const NAR_RACE_ID = parseRaceId("202654071210");
+export const NAR_KAISAI_DATE = parseKaisaiDate("20260712");
+
+/**
+ * 地方の実フィクスチャから組み立てる(全券種の組合せオッズ入り)。軸馬別の取得(3 連複・三連単)は、フィクスチャのある軸〈3 連複は 1・2、三連単は 1・2・5〉だけが取れ、
+ * ほかの軸は取得失敗になる(未取得の軸があるまま配分する、地方の実際の部分取得に近い形)。
+ */
+export async function scrapeNarFixtureRace(): Promise<RaceData> {
+  const id = "202654071210";
+  return scrapeRace(
+    NAR_RACE_ID,
+    {
+      fetcher: {
+        fetchText: async (url) => {
+          if (url.includes("shutuba.html")) return loadFixture(`nar_shutuba_${id}.html`);
+          if (url.includes("ajax_horse_results")) return loadFixture("horse_results_2021105857.json");
+          const type = /type=(b\d)/.exec(url)?.[1];
+          const jiku = /jiku=(\d+)/.exec(url)?.[1];
+          if (type !== undefined) return loadFixture(jiku === undefined ? `nar_odds_${type}_${id}.html` : `nar_odds_${type}_jiku${jiku}_${id}.html`); // 無い軸のフィクスチャは読めず、取得失敗になる
+          throw new Error(`未知のURL: ${url}`);
+        },
+      },
+      now: FIXED_NOW,
+    },
+    { includeComboOdds: true },
+  );
+}
+
 /** 重賞の過去10年傾向の応答(実フィクスチャ)。 */
 export const GRADE_WINNER_RESPONSE = (): string => loadFixture("grade_winner_202603020211.json");
 

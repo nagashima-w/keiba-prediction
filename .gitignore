@@ -7,6 +7,7 @@ release/
 .env
 cloud/wrangler.measure-verify.generated.toml
 cloud/wrangler.measure-prior-export.generated.toml
+cloud/wrangler.measure-allocation-export.generated.toml
 
 # 作業用の git worktree の置き場所。メインのチェックアウトで未追跡のファイルとして出続けるため除外する(Issue #451)
 .claude/worktrees/

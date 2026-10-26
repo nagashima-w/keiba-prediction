@@ -519,4 +519,26 @@ describe("失敗", () => {
     expect(w.store.puts).toEqual([]);
     expect(w.kv.get("job")).toMatchObject({ state: "running", phase: "finalizing", attempts: 1 });
   });
+
+  it("仕上げの塊の長さが、処理のときに記録した長さと違っていたら(kv の値が差し替わった・欠けた)put は失敗として扱い、完成したファイルは作られない。長さが同じなら通る", async () => {
+    // 本番では FixedLengthStream も長さの違いで止める(守りは 2 重)。ここは core 自身の検査を、偽のストア(長さを検査しない)で固定する。
+    const w = world(3);
+    const core = w.core({ batchSize: 2 });
+    await core.request("download");
+    await w.drain(core, 1 + 2); // 計画 + 処理 2(仕上げの前)
+    const chunk = w.kv.get<Uint8Array>("chunk:1")!;
+    expect(chunk.length).toBeGreaterThan(1);
+    // 長さが違う値に差し替える(1 バイト長い・1 バイト短い)。どちらも例外
+    for (const replaced of [new Uint8Array([...chunk, 0]), chunk.slice(0, chunk.length - 1)]) {
+      expect(replaced.length).not.toBe(chunk.length);
+      w.kv.put("chunk:1", replaced);
+      await w.drain(core, 1);
+      expect(w.store.puts).toEqual([]);
+      expect(w.kv.get("job")).toMatchObject({ state: "running", phase: "finalizing" });
+    }
+    // 長さが同じ(中身だけ別)なら、この検査では止まらない(長さの検査であって、中身の検査ではない)
+    w.kv.put("chunk:1", new Uint8Array(chunk.length));
+    await w.drain(core, 1);
+    expect(w.store.puts).toHaveLength(1);
+  });
 });
