@@ -266,6 +266,19 @@ describe("finish: 既に入っている行の補完(Issue #480。欠けを埋め
     expect(await all("SELECT venues_saved FROM baba_fetch_attempts WHERE slot = 1")).toEqual([{ venues_saved: 1 }]);
   });
 
+  it("含水率を補うときは、計測日時を変えない: 前の読みはクッション値あり・含水率なし(計測 7:00)、後の読みは計測時刻が違う(9:30)で含水率を補っても measured_at は 7:00 のまま", async () => {
+    const store = new D1BabaStore({ db: local.db });
+    await seed(store, cushionOnly());
+    expect((await row())["measured_at"]).toBe("2026-10-25T07:00+09:00"); // 前提
+    const later: BabaVenueRecord = { ...full(), measuredAt: "2026-10-25T09:30+09:00" };
+    expect(later.measuredAt).not.toBe(cushionOnly().measuredAt); // 前提: 後の読みの計測日時は違う
+    await store.claim(DATE, 1, 3_000);
+    await store.finish(DATE, fin({ slot: 1, finishedAt: 4_000, venues: [later] }));
+    const after = await row();
+    expect(after["turf_goal_moisture"]).toBe(17.5); // 前提: 含水率は補われた(更新は起きた)
+    expect(after["measured_at"]).toBe("2026-10-25T07:00+09:00");
+  });
+
   it("完全な行は触らない(後の回の値が違っても、saved_at も変えない)。枠の venues_saved は 0", async () => {
     const store = new D1BabaStore({ db: local.db });
     await seed(store, full());

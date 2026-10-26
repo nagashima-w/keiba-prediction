@@ -84,6 +84,7 @@ const anyPresent = (prefix: string): string => MOISTURE_COLUMNS.map((c) => `${pr
 /**
  * 競馬場の行の保存(補完の upsert)。新しい行は INSERT。既にある行は、欠けを埋めるときだけ更新する(冒頭の「既に入っている行の補完」):
  * 既存のクッション値が NULL で新しい読みにある、または、既存の含水率が 4 つとも NULL で新しい読みに 1 つでもある。
+ * `raw_json` は更新した読みのもので、行の列(古い読みと新しい読みの混在)とは一致しない。読み手は無い(診断用)。
  */
 const CONDITION_SQL =
   "INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, " +

@@ -450,6 +450,23 @@ describe("取り直し: そろうまで次の枠で取り直す(Issue #480)", ()
     expect(h.stage.runnable()).toBe(false); // 10:07 のうちはもう動かない
   });
 
+  it("枠の番号は切り捨て: 枠の半分を過ぎた 10:10 に起きても枠 4(10:00)を取る(四捨五入なら枠 5)。次の枠 5 は 10:15 に取れる", async () => {
+    const h = harness();
+    h.behavior.respond = () => failureOutcome("no-today-venues", 3);
+    await h.stage.run(); // 枠 0
+    h.clock.now = at("10:10:00");
+    expect((at("10:10:00") - AT_0900) / (15 * MIN)).toBeGreaterThan(4.5); // 前提: 小数部が 0.5 を超える(round なら 5 になる時刻)
+    await h.stage.run();
+    expect(h.store.claims.map((c) => c.slot)).toEqual([0, 4]);
+    expect(h.stage.dueAtMs()).toBe(at("10:15:00"));
+    h.clock.now = at("10:14:59");
+    expect(h.stage.runnable()).toBe(false);
+    h.clock.now = at("10:15:00");
+    expect(h.stage.runnable()).toBe(true);
+    await h.stage.run();
+    expect(h.store.claims.map((c) => c.slot)).toEqual([0, 4, 5]); // 枠 5 を飛ばさずに取れた
+  });
+
   it("計画の確定が遅い日: まだ試みていない 11:47 に動ける → 枠 11(11:45)。最後の枠の窓(12:00〜12:15)は枠 12", async () => {
     const late = harness({ now: at("11:47:00") });
     await late.stage.run();
@@ -503,6 +520,28 @@ describe("取り直し: そろうまで次の枠で取り直す(Issue #480)", ()
       expect(h.store.finishes[0]!.finish.venues).toHaveLength(3); // 3 場とも保存に渡す(片方だけの行も先に保存する)
       expect(h.store.finishes[0]!.finish.complete).toBe(false);
       expect(meta(h, BABA_META_COMPLETE)).toBe(JSON.stringify(["05", "04"]));
+      h.clock.now = slotAt(1);
+      h.behavior.respond = () => sampleOutcome();
+      await h.stage.run();
+      expect(h.store.finishes[1]!.finish.complete).toBe(true);
+      expect(meta(h, BABA_META_DONE)).toBe("1");
+    });
+
+    it("クッション値はあるが含水率が 4 つとも null の場は「そろった」に数えない(含水率の側も見ている)。DONE は立たず、次の枠で含水率が来ればそろう", async () => {
+      const h = harness();
+      const moistureLess = (): BabaFetchOutcome => {
+        const base = sampleOutcome();
+        const nulls = { goalMoisture: null, corner4Moisture: null };
+        return { ...base, venues: base.venues.map((v) => ({ ...v, turf: { ...v.turf, ...nulls }, dirt: { ...v.dirt, ...nulls } })) };
+      };
+      h.behavior.respond = moistureLess;
+      await h.stage.run();
+      expect(h.store.finishes[0]!.finish.venues).toHaveLength(3); // 前提: 3 場とも保存に渡す(空振りでない)
+      expect(h.store.finishes[0]!.finish.venues.every((v) => v.cushion !== null)).toBe(true); // 前提: クッション値はある
+      expect(h.store.finishes[0]!.finish.complete).toBe(false);
+      expect(meta(h, BABA_META_COMPLETE)).toBe("[]");
+      expect(meta(h, BABA_META_DONE)).toBeNull();
+      expect(h.stage.dueAtMs()).toBe(slotAt(1));
       h.clock.now = slotAt(1);
       h.behavior.respond = () => sampleOutcome();
       await h.stage.run();
