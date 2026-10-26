@@ -991,7 +991,7 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     expect(typesMajor, "cloud/package.json の @types/node の範囲からメジャーが読める").toBeDefined();
     const nodeMajors = new Set<string>();
     let count = 0;
-    for (const wf of ["ci.yml", "deploy-cloud.yml", "research.yml"]) {
+    for (const wf of ["audit.yml", "ci.yml", "deploy-cloud.yml", "research.yml"]) {
       for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\d+)(?:\.\d+\.\d+)?\s*$/gm)) {
         nodeMajors.add(m[1]!);
         count++;
@@ -1005,10 +1005,10 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
   it("Issue #441: ワークフローの node-version は、2026-10-21 のセキュリティリリースの修正版(24.22.1)以上に固定されている(`24` だけだとランナーのツールキャッシュにある修正前の版が使われる)", () => {
     const MIN = [24, 22, 1] as const;
     const versions: string[] = [];
-    for (const wf of ["ci.yml", "deploy-cloud.yml", "research.yml"]) {
+    for (const wf of ["audit.yml", "ci.yml", "deploy-cloud.yml", "research.yml"]) {
       for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\S+)\s*$/gm)) versions.push(m[1]!);
     }
-    expect(versions.length, "node-version の指定を実際に読めている(空振り防止。ci 2 + deploy-cloud 3 + research 1)").toBe(6);
+    expect(versions.length, "node-version の指定を実際に読めている(空振り防止。audit 2 + ci 2 + deploy-cloud 3 + research 1)").toBe(8);
     for (const v of versions) {
       const parts = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
       expect(parts, `node-version: ${v} は major.minor.patch の正確な版(メジャーだけだとキャッシュの修正前の版になる)`).not.toBeNull();

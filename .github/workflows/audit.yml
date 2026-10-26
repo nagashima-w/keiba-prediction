@@ -1,0 +1,98 @@
+# 毎日の依存の脆弱性の監査(Issue #498)。
+#
+# ★何のためか: 脆弱性が公表されてから対応を始めるまでの時間を短くする。Dependabot alerts はユーザーにしか見えず、Claude からは見えない。
+#   このワークフローが毎日(日本時間 03:17)、ルートと cloud/(別の pnpm-lock.yaml。cloud/pnpm-workspace.yaml があり、cloud/ がそれ自身のルート)の両方に `pnpm audit` をかける。
+#   Claude の定期のタスクが毎朝(日本時間 04:23)このワークフローの直近の run を読み、赤なら CLAUDE.md の優先順位(セキュリティと Dependabot を先に)に従って対応する。
+#   Dependabot の更新(.github/dependabot.yml)も毎日(`daily`)にした(日本時間 02:41)。ただし Dependabot の `daily` は平日(月〜金)だけ動く。土日も毎日走るのは、このワークフローのほう。
+#
+# ★ジョブは 2 つに分ける(監査(ルート)・監査(cloud))。片方が赤でももう片方の結果が出る。どちらの lockfile かが、ジョブ名で分かる。
+#
+# ★依存をインストールしない: `pnpm audit` は lockfile(pnpm-lock.yaml)だけを見る(node_modules 無しで動くことを確かめた)。インストールしないので、
+#   依存のインストールスクリプトが走らず、監査のジョブの攻撃面が小さい。pnpm は packageManager(pnpm@10.33.0)に従い、Node は ci.yml と同じ版に固定する。
+#
+# ★結果の読み方(scripts/ci/audit-report.ts): `pnpm audit` は、脆弱性があるときも、レジストリに届かないときも exit 1 で終わる。区別するため、
+#   `--json` の出力を audit-report.ts が分類して、ログの 1 行目に印を出す(Actions のステップサマリにも同じ内容を書く)。
+#     AUDIT-OK <root|cloud>: 0 vulnerabilities            ... 脆弱性なし(終了コード 0)
+#     AUDIT-FAIL <root|cloud>: critical=.. high=.. ...     ... low 以上が 1 件でもある。続けて advisory ごとに 1 行(終了コード 1)
+#     AUDIT-UNAVAILABLE <root|cloud>: <理由>               ... 監査できなかった。レジストリに届かない等。失敗にする(監査していない日を安全と読ませない。終了コード 2)
+#   UNAVAILABLE は一時的な障害でも赤になる。workflow_dispatch で再実行すれば足りる。
+#   閾値は low 以上(1 件でも失敗)。開発の依存も対象にする(--prod で絞らない。ビルド・CI の供給網でもあるため)。
+#
+# ★schedule は既定ブランチ(main)のこのファイルで動く。作業ブランチにあるだけでは毎日の実行は始まらない(workflow_dispatch の手動実行も、既定ブランチにあるファイルが対象)。
+#   main への取り込み後に、workflow_dispatch で 1 回走らせて AUDIT-OK を確かめる。**取り込むまで、このワークフローが Actions 上で緑になるかは未確認**。
+#   GitHub の schedule は、混んでいると数分〜数十分遅れることがある(遅れても 04:23 の確認までは通常は間に合うが、保証はない)。
+#   公開リポジトリでは、60 日間活動が無いと schedule が止まる。
+#
+# ★公開しない・秘密を持たない: リリースへの書き込み・秘密の参照は持たない(scripts/test/audit-workflow.test.ts と ci-workflow.test.ts が固定)。
+#   push・pull_request では走らせない(毎日、main の lockfile を見る。Dependabot alerts が見るのと同じもの)。
+#
+# ★uses: はコミット SHA でピン留めしている(Issue #305)。SHA と行末の版数コメントの規則は actions-pinned.test.ts が検査し、更新は Dependabot の PR が行う
+#   (ci.yml のヘッダ参照)。
+name: 依存の脆弱性の監査
+
+on:
+  schedule:
+    # 日本時間 03:17(UTC 18:17)。分は 0 以外にずらす(毎時 0 分は混む)。
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+# リポジトリへは何も書き戻さない。
+permissions:
+  contents: read
+
+# 手動実行とスケジュールが重なっても 1 本にする(公開しないので、古い run は取り消してよい)。
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit-root:
+    name: 監査(ルート)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # pnpm はバージョン未指定にして package.json の packageManager フィールドに従わせる(ci.yml と同じ)。
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # ci.yml・deploy-cloud.yml と同じ版(Issue #441)。依存をインストールしないので、cache は使わない。
+          node-version: 24.22.1
+
+      # `set +e` で pnpm audit の終了コードを受け(脆弱性ありでも届かなくても exit 1)、audit-report.ts に分類させる。ステップの結果は、スクリプトの終了コード。
+      - name: 依存の脆弱性を監査
+        run: |
+          set +e
+          pnpm audit --json > "$RUNNER_TEMP/audit.json" 2> "$RUNNER_TEMP/audit.err"
+          code=$?
+          node scripts/ci/audit-report.ts root "$RUNNER_TEMP/audit.json" "$code" "$RUNNER_TEMP/audit.err"
+
+  audit-cloud:
+    name: 監査(cloud)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+
+      # cloud/ は別の lockfile(cloud/pnpm-lock.yaml)。cloud/ をルートとして監査する。
+      - name: 依存の脆弱性を監査
+        working-directory: cloud
+        run: |
+          set +e
+          pnpm audit --json > "$RUNNER_TEMP/audit.json" 2> "$RUNNER_TEMP/audit.err"
+          code=$?
+          node ../scripts/ci/audit-report.ts cloud "$RUNNER_TEMP/audit.json" "$code" "$RUNNER_TEMP/audit.err"

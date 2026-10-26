@@ -12,6 +12,7 @@
  *    メンバーの中には lockfile が無いので、ルートの job が失敗した回に package.json だけの PR ができる(Issue #465。docs/current-spec.md「Dependabot」)。
  *  - `@anthropic-ai/sdk`・`iconv-lite`・`cheerio`(core は `^X.Y.Z`、cloud は exact `X.Y.Z`)など、core と cloud が同じ版を揃えている依存は、
  *    1 つの group にして 1 つの PR で同時に上げさせる(片方だけの PR は cloud-config-guard.test.ts が赤にして気づける)。
+ *  - Issue #498: 更新は平日の毎日(`interval: daily`。GitHub の仕様で月〜金だけ動く。土日は動かない)・日本時間 02:41(`time`・`timezone`)。毎日の監査(.github/workflows/audit.yml。03:17 JST)と、Claude の毎朝の確認(04:23 JST)より前に動く。
  *  - 自動の脆弱性修正(セキュリティ更新)の PR はこのファイルでは扱えない(宛先を main 以外にできない見込み。未確認)ので、
  *    リポジトリの「Dependabot alerts」で通知を受け、作業ブランチで対応する(docs/current-spec.md)。
  *
@@ -150,11 +151,30 @@ describe("dependabot.yml(Issue #310)", () => {
     expect(code).not.toMatch(/target-branch: ["']?main\b/);
   });
 
-  it("すべての項目が週 1 回(schedule.interval: weekly)", () => {
+  it("Issue #498: すべての項目が平日の毎日(schedule.interval: daily。月〜金だけ動く)・日本時間 02:41(time・timezone)。weekly が残っていない", () => {
     expect(entries).toHaveLength(2);
     for (const e of entries) {
-      expect(e).toMatch(/\n {4}schedule:\n {6}interval: weekly\n/);
+      expect(e).toMatch(/\n {4}schedule:\n {6}interval: daily\n {6}time: "02:41"\n {6}timezone: "Asia\/Tokyo"\n/);
     }
+    expect(code).not.toContain("weekly");
+    // schedule の行は項目ごとに 1 つ(項目の数と一致する)
+    expect(code.match(/^ {6}interval: /gm)).toHaveLength(2);
+    expect(code.match(/^ {6}time: /gm)).toHaveLength(2);
+    expect(code.match(/^ {6}timezone: /gm)).toHaveLength(2);
+  });
+
+  it("Issue #498: Dependabot の時刻(02:41 JST)は、毎日の監査(audit.yml の cron。03:17 JST)より前。Claude の確認(04:23 JST)より前に、監査と更新の PR が出そろう", () => {
+    const m = /time: "(\d{2}):(\d{2})"/.exec(code);
+    expect(m, "time が読める").not.toBeNull();
+    const dependabotMinutes = Number(m![1]) * 60 + Number(m![2]);
+    const audit = readTextLf(".github", "workflows", "audit.yml");
+    const cron = /- cron: "(\d+) (\d+) \* \* \*"/.exec(audit);
+    expect(cron, "audit.yml の cron が読める").not.toBeNull();
+    const auditMinutesJst = (((Number(cron![2]) + 9) % 24) * 60) + Number(cron![1]);
+    expect(dependabotMinutes).toBeLessThan(auditMinutesJst);
+    expect(auditMinutesJst).toBeLessThan(4 * 60 + 23);
+    // 02 時台
+    expect(Math.floor(dependabotMinutes / 60)).toBe(2);
   });
 
   it("コミットメッセージの接頭辞は付ける(日本語可)が、承認印 [PUBLISH-APPROVED] と『レビュー継続中』は含まない(Dependabot のマージだけで本番へ出ない・出る条件に触れない)", () => {
