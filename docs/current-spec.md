@@ -45,7 +45,7 @@
     間)**(それまでは買い目が構造的に0件だったため、#112「馬連 ¥0 0点」の事故と同型を
     避けるためあえて表示しない設計だった)。
     取得(オッズ・配分提案)と検証(回収率集計)は別軸であることに注意(5節の配分提案は
-    既に単勝・ワイド・馬連・馬単・三連複対応済みだが、これは組合せ**オッズ**の話で本項の
+    既に単勝・ワイド・馬連・馬単・三連複・三連単・枠連対応済みだが、これは組合せ**オッズ**の話で本項の
     組合せ**払戻**とは別物。組合せオッズの永続化自体も別Issue #53)
   - **単勝オッズ**: Issue #90以降は2つの用途を持つ。(a) 発売前レースで複勝下限を概算する用途
     (`estimatePlaceOddsMinFromWin`。従来どおり)、(b) 5節の配分提案における単勝の候補自体の
@@ -915,7 +915,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 
 ### 的中確率の下限(`minHitProb`。Issue #470〈#468-A〉。ユーザー決定 2026-10-23)
 
-- **何をするか**: EV がプラスでも、**的中確率が下限未満の買い目は、配分の候補から外す**(全券種に一律。ちょうど下限は残る。0 は下限なし)。設定の `minHitProb`(cloud の設定。0〜1。**既定 0.05**。項目の無い旧い行も 0.05 で読むので、保存し直さなくてもデプロイ時点から効く)。
+- **何をするか**: EV がプラスでも、**的中確率が下限未満の買い目は、配分の候補から外す**(全券種に一律。ちょうど下限は残る。0 は下限なし)。設定の `minHitProb`(cloud の設定。0〜1。**既定 0.05**。項目の無い旧い行も 0.05 で読むので、保存し直さなくてもデプロイ時点から適用される)。
   背景(#468 の調査): モデルの確率が 0.2 未満の買い目では、実際の的中はオッズからの予想とほぼ同じで、モデルの予想の半分ほどだった。確率 0.05 未満の買い目は 86 件のうち的中が 0 件だった(標本内の試算)。
 - **的中確率の出どころ**: 複勝は入力の複勝圏内確率(`adjustedProb`)。単勝・ワイド・馬連・馬単・三連複・三連単・枠連は、候補ビルダー(`build*Candidates`)が着順の分布(Plackett-Luce)から求めた値を、候補が `hitProb` として運ぶ(`AllocationCandidate.hitProb`。省略時は `ev / odds`)。
 - **当てる場所**: 混在配分は `allocateGeneralBets` の EV プラス候補の絞り込み(候補 cap の選抜より前)、複勝のみの配分は `allocateBets` の候補馬の選定。core の `minHitProb` の既定は 0(下限なし)で、本番の 0.05 は設定の側にある。
@@ -1195,7 +1195,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
      LLM プロンプト側(当日傾向・同レース過去傾向)の遮断は #153(同節)。
      #40 の時点の計測値(中央 ρ=0.2104 等)はリークありの値で、#39 以降の `runAnalysis` の出力は
      遮断後の値(中央 ρ=-0.0059 等)になる。
-- **`scorer/snapshot-filter.ts`**: `filterRaceDataBefore(raceData, cutoffDate)` — 各馬の
+- **`scorer/snapshot-filter.ts`**: `filterRaceDataBefore(raceData, cutoffDate)`: 各馬の
   `results` を `date < cutoffDate` で絞る純関数(`cutoffDate`/`HorseRaceResult.date` はいずれも
   `YYYY/MM/DD`。非ゼロ埋め表記も含め `daysBetweenDates` で比較し、辞書順比較はしない)。
   基準日と同日(=当該レース自身の可能性)は除外。日付欠損・不正形式は安全側(除外)に倒す。
@@ -1377,7 +1377,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
   - `getAnalysisDetail(id)` → `{ analysis, detail: "present" | "missing" | "none" }`(存在しない id は undefined)
   - `getStoredAllocation(id)`(配分なしは undefined)・`listAnalyzedRaceIdsByPromptVersion(version)`(`idx_analyses_prompt_version_race` のカバリング索引を使う)・`getR2Usage()`(#173)
 - **保存**: ① 詳細を JSON → gzip(`node:zlib` の **level 1**)にする(D1 に書く前)② D1 に **1 回の batch** で書く(**#173 でカウンタの文が加わり、配分ありで 6 文・なしで 4 文**〈#175 の時点では 5・3〉。馬・買い目の数によらず一定。bind 変数は 1 文あたり 23 個が最大で、100 個以下)
-  — analyses の INSERT(core の codec の文と束縛値。大きな列は NULL)・`detail_key` の UPDATE・馬(`json_each`)・配分メタ・買い目(`json_each`)。子の行は `(SELECT max(id) FROM analyses)` で採番された id に紐づける。
+  内訳は、analyses の INSERT(core の codec の文と束縛値。大きな列は NULL)・`detail_key` の UPDATE・馬(`json_each`)・配分メタ・買い目(`json_each`)。子の行は `(SELECT max(id) FROM analyses)` で採番された id に紐づける。
   ③ R2 に `analyses/{id}.json.gz` を put(**D1 が先、R2 が後**。LIST・HEAD は使わない)。失敗したら最大 2 回まで同じキーに再試行し、それでも失敗したら `detail_key` を NULL に戻して **throw せず** `detail: "failed"` を返す(要約は残る)。
 - **読み出し**: `detail_key` が NULL なら `none`(R2 に触れない)。R2 に無い・壊れている・別のレースの詳細(raceId の不一致)・get の失敗は `missing`(クラッシュしない)。
   **`missing`・`none` のとき、大きな列(`rawResponse`・`raceSnapshot`・馬の `contributions`)は null で、「LLM 未使用」とは区別できない**ので、`detail` の状態で区別する。
@@ -1725,7 +1725,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **ビルド**: `cloud/client/`(TS)→ `cloud/build-client.ts`(esbuild `0.28.2`。IIFE・browser・es2020・**minify**〈外すと出力にパスコメントが入り cwd・OS で変わる〉)→ `cloud/src/client-bundle.generated.ts`(**コミットする生成物**。typecheck・test・deploy:dry・smoke・CI が同じものを使う。ドリフトは `test/client-bundle.test.ts`)。クライアントの型検査は `tsconfig.client.json`(DOM の型)。クライアントは `client/` の中を import する(#185 で、exe の renderer の純関数だけを許可リストで足した。下の「スマホ画面(#185)」)。
 - **画面(一覧)**: 開催日(`<input type="date">`。既定は今日〈JST〉)・中央/地方・場ごとのレース(R・レース名・コース距離頭数・グレード。発走予定時刻があれば、コース距離頭数の行の先頭に「15:40 発走・」〈#236。無い行は出さない。**発走後に取得した中央の一覧では、始まったレースの時刻が空になる。そのため同じ場の中で、時刻のある行と無い行が混在しうる**〉)・事前分析と発走前の状態バッジ(板の `(race_id, mode)` ごと。未実行・待ち・取得済み・完了・失敗)・「更新」。URL のハッシュに `#date=YYYYMMDD&venue=central|nar[&race=<12桁>][&analysis=<id>]` を持ち(値は検証し、不正な項目は既定に落とす。`race` は有効な `date` があるときだけ)、戻る・進む・再読み込みが使える。`race`・`analysis` は #185 でレース画面・結果画面になった(#184 の時点では「準備中」の表示)。
 - **取得の回数**: 一覧(`GET /api/races`。netkeiba に出うる)は (開催日, 区分) ごとに 1 回、板(`GET /api/analyses/status`。`race_id` なし。DO の読み取りだけ)は開催日ごとに 1 回で、画面の往復・区分の切り替えで取り直さない。失敗は自動で再試行せず、「更新」だけが取り直す(取得中は押せず、同時に同じものを 2 本取らない)。`/api/analyses/{id}`・`POST` は一覧の画面からは呼ばない(#185 のレース画面・結果画面の取得は下の節)。
-- **失敗の表示**: サーバの文面は出さず、種類ごとの固定の文言(403・通信失敗〈Access の期限切れの可能性〉・400・netkeiba の `blocked`/`busy`/`failed`・サーバのエラー・想定外の応答)。応答の形が想定と違えば、一部の行だけを断りなく表示せず「想定外の応答」にする。
+- **失敗の表示**: サーバの文面は出さず、種類ごとの固定の文言(403・通信失敗〈Access の期限切れの可能性〉・400・netkeiba の `blocked`/`busy`/`failed`・サーバのエラー・想定外の応答)。応答の形が想定と違えば、一部の行だけを表示して済ませず、「想定外の応答」にする。
 - **#185 用に決めたこと(記録)**: 印・AI補正後・分析モデルは、`mark`・`model` が non-null のときだけ出す(当時の cloud の発走前の分析は LLM なしなので、印は常に空・「AI補正後」は 3着内率と同値・モデルは null。**LLM を使うようになった #195 で、補正後・根拠は「モデル ID があるとき」だけ出し、印の凡例・`llmNote` の注記を足した**。下の「結果画面」)/ 配分の表示は exe の `buildAllocationProposalView` を流用し、そのために `GET /api/analyses/{id}` の配分に `fallbackReason`・`betUnit` を足す/ 発走前の完了後は「結果を見る」ボタンで利用者が開く(詳細の読み出しは D1 の書き込み1行を伴うため、自動で呼ばない)/ レース画面の表示時に `GET /api/analyses?race_id=&kaisai_date=` を1回だけ呼び、過去の分析へのリンクにする/ pre_race の再実行は新しい分析として保存される旨をボタンの文言に出す/ **配分は、資金・1レース上限を D1 の `cloud_settings` に入れるまで、ほぼ全件が「未設定」(`unset`)の注記になる**(既定値は 0。**両方が未設定のとき**、結果画面は exe の「設定画面で…入力してください」の代わりに cloud 専用の文言を出す。片方だけ未設定・判定不能は exe の注記のまま。編集画面は範囲外)。
 - **検査**: `test/client-route.test.ts`・`client-date.test.ts`・`client-api.test.ts`・`client-api-contract.test.ts`(実際の `handle()` の応答をクライアントのパーサに通す)・`client-list.test.ts`・`client-app.test.ts`・`client-dom.test.ts`(偽の document。XSS・要素/属性の許可リスト)・`client-bundle.test.ts`(ドリフト・決定性・静的ガード・生成物の実行スモーク)、`handler.test.ts`、smoke。**実機(スマホ)でのレイアウト・タップは自動検査できない**(デプロイ後にユーザーが確認する)。
 
@@ -1841,7 +1841,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **当日傾向を発走前の分析に入れる(AC-C4)**: 発走前の計算ステップの `getRaceResultDetails` を `D1ResultStore.getRaceResultDetails` につないだ(前のレース 01〜自番号−1 を 1 回の batch で読む。gate は 0 回。LLM を使わない経路では呼ばない)。
   先読みのリーク(自レース・後続の結果)は、`runAnalysis` が渡す ID が前のレース番号だけなので入らない(#153)。D1 の読み出しの失敗は、当日傾向なしで続け、`onSameDayTrendError` で警告(redactSecrets を通した先頭 200 文字)。結果ストアが無い構成は当日傾向なし。
   exe と同じ入力になることは、統合テスト(`race-day-sameday-trend.test.ts`)で固定: 本物の `D1ResultStore`(ローカルの D1)に結果を保存し、LLM のスタブで取り出したプロンプトが、golden と同じ式(`sameDayDetailOf`)の経路で作ったプロンプトと文字列で一致する(自レース・後続の結果が D1 にあっても混ざらない)。
-- **効く範囲**: 同じ場・同じ面で、取り込み済みの前のレースが 2 つ以上あるとき(目安は R5 以降)。**地方は結果ページに通過順の列が無い**(実測: 地方の結果フィクスチャ 6 件はすべて空。中央は 0 件が空)ため脚質傾向が「データ不足」になり、`collectSameDayTrend` が傾向ごと null にする。実質、中央だけ。
+- **反映される範囲**: 同じ場・同じ面で、取り込み済みの前のレースが 2 つ以上あるとき(目安は R5 以降)。**地方は結果ページに通過順の列が無い**(実測: 地方の結果フィクスチャ 6 件はすべて空。中央は 0 件が空)ため脚質傾向が「データ不足」になり、`collectSameDayTrend` が傾向ごと null にする。実質、中央だけ。
   設定の「発走の何分前に評価するか」が大きいほど、前のレースの結果が間に合わず入らない(推定。実測はしていない: 既定 45 分で実質 N-3 以前、180 分では朝の確定直後に走るのでほぼ入らない、10 分では N-1 も入りうる)。
 - **観測(AC-C6)**: `GET /api/plan` の `result_import` に当日の行も出る(形は #208 のまま。`requested_on` が開催日、`last_class` に `incomplete` が出うる)。
 - **前後の区別**: `prompt_version` が同じでも入力は変わっている。版別の検証ではこの版の公開日(cloud の deploy の日)で分ける。公開日にすでに計画が確定していた開催日には、結果の行が積まれないので入らない。
@@ -2107,7 +2107,7 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - **クライアントのバンドル**: 157,309 → **160,159 バイト**(+2,850。`pnpm run build:client` が出力する。移行画面の 1 行の API・文言・節だけ。サーバ側のコードはクライアントに入らない)。#394 で、この 1 行も移行画面ごとクライアントから消えた。
 - **止める設定**: Worker の var `RESULT_BACKFILL_NIGHTLY_LIMIT=0`(完全一致の `"0"` だけ。`isBackfillDisabled`)。`kick` もアラームも何もしない・`state` は `disabled`。**`cloud/smoke.ts` のすべての構成がこれで動く**(CI の smoke が補完の窓に当たっても netkeiba に出ない)。
 - **(廃止した画面の)文言**: `paused` は原因を断定しない(「今夜は一時停止中です。明晩に再開します」)。止まる経路は、gate の都合(ブレーカー・混雑)と、日単位の DO への依頼の失敗の両方なため。
-- **ガード**: `scripts/test/cloud-config-guard.test.ts` — (#217 の時点で)DO の binding は 4 つ・migration は v1〜v4。#394 の後は binding 7 つ・migration v1〜v8。#402 の後は migration v1〜v9(v9 は `deleted_classes = ["CloudMigration"]` だけ。他のクラスの削除は禁じる)。補完のコードは gate の `fetchRaw`・`postRaw`・LLM・通知・R2 を持たない。`.kick()` は `scheduled.ts` と補完の DO の中だけ。`dispatchResultImports(` の呼び出しは `handler.ts`・`result-backfill-core.ts`・`scheduled.ts` の 1 つずつ。
+- **ガード**: `scripts/test/cloud-config-guard.test.ts`: (#217 の時点で)DO の binding は 4 つ・migration は v1〜v4。#394 の後は binding 7 つ・migration v1〜v8。#402 の後は migration v1〜v9(v9 は `deleted_classes = ["CloudMigration"]` だけ。他のクラスの削除は禁じる)。補完のコードは gate の `fetchRaw`・`postRaw`・LLM・通知・R2 を持たない。`.kick()` は `scheduled.ts` と補完の DO の中だけ。`dispatchResultImports(` の呼び出しは `handler.ts`・`result-backfill-core.ts`・`scheduled.ts` の 1 つずつ。
 - **変わらないもの**: exe・`packages/core` のコード・D1 のスキーマ(migration 0009 は無い)・既存の DO(`NetkeibaGate`・`RaceDay`・`CloudMigration`)・`prompt_version`。
 
 ### クラウド版の確定単勝オッズ・人気の保存と補完(#259 の前半。版数は 1.44.0 で凍結のため上げない)
