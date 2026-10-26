@@ -94,7 +94,7 @@ export const NAR_RACE_ID = parseRaceId("202654071210");
 export const NAR_KAISAI_DATE = parseKaisaiDate("20260712");
 
 /**
- * 地方の実フィクスチャから組み立てる(全券種の組合せオッズ入り)。軸馬別の取得(3 連複・三連単)は、フィクスチャのある軸〈3 連複は 1・2、三連単は 1・2・5〉だけが取れ、
+ * 地方の実フィクスチャから組み立てる(全券種の組合せオッズ入り)。軸馬別の取得(3 連複・三連単)は、フィクスチャのある軸〈3 連複は 1・2、三連単は 2・5〉だけが取れ、
  * ほかの軸は取得失敗になる(未取得の軸があるまま配分する、地方の実際の部分取得に近い形)。
  */
 export async function scrapeNarFixtureRace(): Promise<RaceData> {
