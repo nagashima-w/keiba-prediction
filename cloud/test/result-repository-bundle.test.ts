@@ -62,7 +62,10 @@ describe("結果ストアのバンドル(Issue #207)", () => {
         .replace(/\[\[migrations\]\]\ntag = "v7"\nnew_sqlite_classes = \["PriorExportDO"\]\n/, "")
         // Issue #279: 月報の DO(MONTHLY_REPORT・MonthlyReportDO)と migration v8 も同じく除く。
         .replace(/\[\[durable_objects\.bindings\]\]\nname = "MONTHLY_REPORT"\nclass_name = "MonthlyReportDO"\n/, "")
-        .replace(/\[\[migrations\]\]\ntag = "v8"\nnew_sqlite_classes = \["MonthlyReportDO"\]\n/, "");
+        .replace(/\[\[migrations\]\]\ntag = "v8"\nnew_sqlite_classes = \["MonthlyReportDO"\]\n/, "")
+        // Issue #463: 配分の再計算用の書き出しの DO(ALLOCATION_EXPORT・AllocationExportDO)と migration v10 も同じく除く。
+        .replace(/\[\[durable_objects\.bindings\]\]\nname = "ALLOCATION_EXPORT"\nclass_name = "AllocationExportDO"\n/, "")
+        .replace(/\[\[migrations\]\]\ntag = "v10"\nnew_sqlite_classes = \["AllocationExportDO"\]\n/, "");
       expect(withoutRaceDay, "RACE_DAY の binding と migration v2 を除けている").not.toBe(base);
       const config = withoutRaceDay.replace('main = "src/worker.ts"', 'main = "result-store-probe.generated.ts"');
       expect(config).not.toBe(withoutRaceDay);

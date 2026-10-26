@@ -322,6 +322,7 @@ export { VerifyReportDO } from "./src/verify-do";
 export { DailyReportDO } from "./src/daily-report-do";
 // Issue #266: 統計モデル用の書き出しの DO(同上)。
 export { PriorExportDO } from "./src/prior-export-do";
+export { AllocationExportDO } from "./src/allocation-export-do";
 // Issue #279: 月報の DO(同上)。
 export { MonthlyReportDO } from "./src/monthly-report-do";
 

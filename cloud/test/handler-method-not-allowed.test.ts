@@ -21,6 +21,7 @@ const SITES: readonly { readonly site: string; readonly method: string; readonly
   { site: "月報の一覧", method: "HEAD", path: "/api/monthly-reports", allow: "GET" },
   { site: "検証", method: "HEAD", path: "/api/verify", allow: "GET" },
   { site: "統計モデル用の書き出し", method: "HEAD", path: "/api/export/prior-dataset", allow: "GET" },
+  { site: "配分の再計算用の書き出し", method: "HEAD", path: "/api/export/allocation-dataset", allow: "GET" },
   { site: "戦績の診断", method: "HEAD", path: "/api/horse-runs", allow: "GET" },
   { site: "馬場の取得の診断", method: "HEAD", path: "/api/baba-fetch", allow: "GET" },
   { site: "結果の補完", method: "HEAD", path: "/api/results/backfill", allow: "GET" },
@@ -33,10 +34,10 @@ const SITES: readonly { readonly site: string; readonly method: string; readonly
   { site: "分析の詳細", method: "HEAD", path: "/api/analyses/1", allow: "GET" },
 ];
 
-describe("handler.ts の 405: 19 か所すべてが、ステータス・本文・ヘッダを変えずに返す(Issue #445)", () => {
-  it("前提: 表は 19 件で、パスとメソッドの組が重複しない(1 か所ずつ踏んでいる)", () => {
-    expect(SITES).toHaveLength(19);
-    expect(new Set(SITES.map((s) => `${s.method} ${s.path}`)).size).toBe(19);
+describe("handler.ts の 405: 20 か所すべて(Issue #463 で配分の再計算用の書き出しが加わり 19 → 20)が、ステータス・本文・ヘッダを変えずに返す(Issue #445)", () => {
+  it("前提: 表は 20 件で、パスとメソッドの組が重複しない(1 か所ずつ踏んでいる)", () => {
+    expect(SITES).toHaveLength(20);
+    expect(new Set(SITES.map((s) => `${s.method} ${s.path}`)).size).toBe(20);
   });
 
   it.each(SITES)("$site($method $path): 405・本文 method not allowed・ヘッダ 5 つ(allow: $allow)", async ({ method, path, allow }) => {

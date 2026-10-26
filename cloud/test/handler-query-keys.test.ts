@@ -34,6 +34,7 @@ function env(): Env {
     RESULT_BACKFILL: { idFromName: boom, get: boom },
     VERIFY_REPORT: { idFromName: boom, get: boom },
     PRIOR_EXPORT: { idFromName: boom, get: boom },
+    ALLOCATION_EXPORT: { idFromName: boom, get: boom },
     DAILY_REPORT: { idFromName: boom, get: boom },
     MONTHLY_REPORT: { idFromName: boom, get: boom },
     DB: { prepare: boom, batch: boom },
@@ -73,6 +74,7 @@ const ROUTES: readonly Route[] = [
   { name: "baba-fetch", path: "/api/baba-fetch", constant: "KAISAI_DATE_PARAMS", allowed: ["kaisai_date"], message: "クエリは kaisai_date だけを1つ指定できます", site: true },
   { name: "verify", path: "/api/verify", constant: "VERIFY_PARAMS", allowed: ["venue", "refresh"], message: "クエリは venue(all・central・nar)と refresh(1 または 0)だけを、それぞれ1つまで指定できます", site: true },
   { name: "prior-export", path: "/api/export/prior-dataset", constant: "PRIOR_EXPORT_PARAMS", allowed: ["refresh", "status"], message: "クエリは refresh(1 または 0)と status(1 または 0)だけを、それぞれ1つまで指定できます", site: true },
+  { name: "allocation-export", path: "/api/export/allocation-dataset", constant: "ALLOCATION_EXPORT_PARAMS", allowed: ["refresh", "status"], message: "クエリは refresh(1 または 0)と status(1 または 0)だけを、それぞれ1つまで指定できます", site: true }, // Issue #463
   { name: "races", path: "/api/races", constant: "RACES_PARAMS", allowed: ["kaisai_date", "venue"], message: "クエリは kaisai_date(必須)と venue(必須)だけを、それぞれ1つまで指定できます", site: true },
   { name: "plan", path: "/api/plan", constant: "KAISAI_DATE_PARAMS", allowed: ["kaisai_date"], message: "クエリは kaisai_date だけを1つ指定できます", site: true },
   { name: "targets", path: "/api/targets", constant: "KAISAI_DATE_PARAMS", allowed: ["kaisai_date"], message: "クエリは kaisai_date だけを1つ指定できます", site: true },
@@ -87,7 +89,7 @@ const ROUTES: readonly Route[] = [
   { name: "monthly-reports/{month}", path: "/api/monthly-reports/202609", constant: "NO_PARAMS", allowed: [], message: NO_QUERY, site: false },
 ];
 
-describe("許可リストの外のキーは 400(全 16 ルート。ほかのルートで許可されているキー・どのルートにも無いキー・重複・大文字違い)", () => {
+describe("許可リストの外のキーは 400(全 17 ルート。ほかのルートで許可されているキー・どのルートにも無いキー・重複・大文字違い)", () => {
   for (const route of ROUTES) {
     const foreign = [...ALL_KEYS.filter((k) => !route.allowed.includes(k)), "zzz"];
 
@@ -115,11 +117,11 @@ describe("許可リストの外のキーは 400(全 16 ルート。ほかのル�
   }
 });
 
-describe("別サイト(Sec-Fetch-Site が same-origin・none 以外)の検査は、クエリの検査より先(別サイト検査をする 9 ルート)", () => {
+describe("別サイト(Sec-Fetch-Site が same-origin・none 以外)の検査は、クエリの検査より先(別サイト検査をする 10 ルート)", () => {
   const checked = ROUTES.filter((r) => r.site);
 
-  it("前提: 別サイトを検査するルートは 9 本(Issue #488 で jra/check が加わり 8 → 9)", () => {
-    expect(checked.map((r) => r.name)).toEqual(["horse-runs", "baba-fetch", "verify", "prior-export", "races", "plan", "targets", "netkeiba/check", "jra/check"]);
+  it("前提: 別サイトを検査するルートは 10 本(Issue #488 で jra/check が加わり 8 → 9、Issue #463 で allocation-export が加わり 9 → 10)", () => {
+    expect(checked.map((r) => r.name)).toEqual(["horse-runs", "baba-fetch", "verify", "prior-export", "allocation-export", "races", "plan", "targets", "netkeiba/check", "jra/check"]);
   });
 
   for (const route of checked) {

@@ -11,6 +11,7 @@ export { ResultBackfill } from "./result-backfill-do";
 export { VerifyReportDO } from "./verify-do";
 export { DailyReportDO } from "./daily-report-do";
 export { PriorExportDO } from "./prior-export-do";
+export { AllocationExportDO } from "./allocation-export-do";
 export { MonthlyReportDO } from "./monthly-report-do";
 
 export default {
