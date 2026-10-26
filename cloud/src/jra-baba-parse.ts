@@ -141,13 +141,16 @@ export interface CushionVenueData {
   readonly units: readonly CushionUnit[];
 }
 
-/** クッション値のページを読む。場の見出しが 1 つも無ければ null(形が想定と違う)。値が数でない計測は、その値だけ null。 */
+/**
+ * クッション値のページを読む。場の見出しが 1 つも無い、または全場で計測が 1 件も読めなければ null(形が想定と違う。Issue #490-1: `time` の class が変わると、
+ * 全場の計測が読めずに「今日ではない」と取り違えるため)。値が数でない計測は、その値だけ null。
+ */
 export function parseCushionHtml(html: string): CushionVenueData[] | null {
   const sections = sectionsOf(html);
   if (sections.length === 0) {
     return null;
   }
-  return sections.map((s) => ({
+  const venues = sections.map((s) => ({
     name: s.name,
     units: unitsOf(s.body).flatMap((u): CushionUnit[] => {
       const time = timeOf(u);
@@ -158,6 +161,7 @@ export function parseCushionHtml(html: string): CushionVenueData[] | null {
       return [{ time, cushion: value === null ? null : numberOf(value[1] ?? "") }];
     }),
   }));
+  return venues.some((v) => v.units.length > 0) ? venues : null;
 }
 
 // ---------------------------------------------------------------- 含水率
@@ -200,13 +204,16 @@ function faceOf(unit: string, cls: "turf" | "dirt"): MoistFace {
   return { goal: goal.value, goalCondition: goal.condition, corner4: corner4.value, corner4Condition: corner4.condition };
 }
 
-/** 含水率のページを読む。場の見出しが 1 つも無ければ null。 */
+/**
+ * 含水率のページを読む。場の見出しが 1 つも無い、全場で計測が 1 件も読めない、または計測はあるのに全場・全計測で 4 つの値(芝・ダートのゴール前/4 角)が 1 つも読めなければ
+ * null(形が想定と違う。Issue #490-1: `span.mg` などの class が変わると、含水率が全部 null のまま「読めた」ことになるため)。
+ */
 export function parseMoistHtml(html: string): MoistVenueData[] | null {
   const sections = sectionsOf(html);
   if (sections.length === 0) {
     return null;
   }
-  return sections.map((s) => ({
+  const venues = sections.map((s) => ({
     name: s.name,
     units: unitsOf(s.body).flatMap((u): MoistUnit[] => {
       const time = timeOf(u);
@@ -217,6 +224,9 @@ export function parseMoistHtml(html: string): MoistVenueData[] | null {
       return [{ time, turf: faceOf(u, "turf"), dirt: faceOf(u, "dirt"), rainfallMm: rain === null ? null : Number(rain[1]) }];
     }),
   }));
+  const units = venues.flatMap((v) => v.units);
+  const anyValue = units.some((u) => [u.turf.goal, u.turf.corner4, u.dirt.goal, u.dirt.corner4].some((x) => x !== null));
+  return anyValue ? venues : null;
 }
 
 // ---------------------------------------------------------------- 開催情報(POST の JSON)
@@ -384,6 +394,8 @@ export interface AssembleResult {
   readonly dropped: number;
   /** 捨てた場の理由と計測の時刻の文字列(場の並び順。{@link BABA_DROPPED_DETAIL_LIMIT} 件まで)。 */
   readonly droppedDetails: readonly BabaDroppedDetail[];
+  /** クッション値・含水率のページに載っていた場の場コード(クッション値の並び → 含水率にだけある場。重複なし。場名が JRA の 10 場に無いものは入らない)。 */
+  readonly listedVenueCodes: readonly string[];
 }
 
 interface Pick<T> {
@@ -443,6 +455,7 @@ export function assembleBabaVenues(input: AssembleInput): AssembleResult {
   const names = [...new Set([...(input.cushion ?? []).map((v) => v.name), ...(input.moist ?? []).map((v) => v.name)])];
 
   const venues: BabaVenueRecord[] = [];
+  const listedVenueCodes = names.flatMap((n) => CODE_BY_VENUE_NAME.get(n) ?? []);
   const droppedDetails: BabaDroppedDetail[] = [];
   let dropped = 0;
   const drop = (detail: BabaDroppedDetail): void => {
@@ -497,5 +510,5 @@ export function assembleBabaVenues(input: AssembleInput): AssembleResult {
       rawJson: raw.length <= BABA_RAW_JSON_LIMIT ? raw : null,
     });
   }
-  return { venues, dropped, droppedDetails };
+  return { venues, dropped, droppedDetails, listedVenueCodes };
 }

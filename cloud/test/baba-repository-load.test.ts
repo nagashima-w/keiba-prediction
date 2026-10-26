@@ -32,10 +32,10 @@ async function seedGrid(store: D1BabaStore): Promise<void> {
   const tokyo = parsed().venues[0]!; // 05
   const kyoto = parsed().venues[1]!; // 08
   const cell = (v: typeof tokyo, cushion: number, course: string, day: string) => ({ ...v, cushion, usedCourse: course, measuredAt: `2026-10-${day}T07:00+09:00` });
-  await store.claim("20261025", 1);
-  await store.finish("20261025", { finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [cell(tokyo, 9.1, "25日の東京", "25"), cell(kyoto, 9.2, "25日の京都", "25")], dropped: 0, droppedDetails: [] });
-  await store.claim("20261024", 3);
-  await store.finish("20261024", { finishedAt: 4, result: "ok", apiFetchedAt: null, venues: [cell(tokyo, 9.3, "24日の東京", "24"), cell(kyoto, 9.4, "24日の京都", "24")], dropped: 0, droppedDetails: [] });
+  await store.claim("20261025", 0, 1);
+  await store.finish("20261025", { slot: 0, complete: false, finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [cell(tokyo, 9.1, "25日の東京", "25"), cell(kyoto, 9.2, "25日の京都", "25")], dropped: 0, droppedDetails: [] });
+  await store.claim("20261024", 0, 3);
+  await store.finish("20261024", { slot: 0, complete: false, finishedAt: 4, result: "ok", apiFetchedAt: null, venues: [cell(tokyo, 9.3, "24日の東京", "24"), cell(kyoto, 9.4, "24日の京都", "24")], dropped: 0, droppedDetails: [] });
 }
 
 describe("load(開催日 × 場コードで 1 行を読み、DayBaba にする)", () => {
@@ -55,7 +55,7 @@ describe("load(開催日 × 場コードで 1 行を読み、DayBaba にする)"
 
   it("列を DayBaba の形に写す: 芝・ダート × 全体・ゴール前・4角の状態と、ゴール前・4角の含水率を、列ごとに違う値で入れて、それぞれ正しい位置に出る。芝丈・降水量・元の JSON は載せない", async () => {
     const store = new D1BabaStore({ db: local.db });
-    await store.claim(DATE, 1);
+    await store.claim(DATE, 0, 1);
     const tokyo = parsed().venues[0]!;
     expect(tokyo.venueCode).toBe("05"); // 前提: 見本から東京を読めている
     // 状態は同じ面の 3 か所で互いに違う語、芝とダートの同じ位置でも違う語。含水率は 4 つとも違う値(入れ替わりが値で分かる)
@@ -67,7 +67,7 @@ describe("load(開催日 × 場コードで 1 行を読み、DayBaba にする)"
     expect(new Set([turf.condition, turf.goalCondition, turf.corner4Condition]).size, "前提: 芝の状態 3 か所が違う").toBe(3);
     expect(new Set([dirt.condition, dirt.goalCondition, dirt.corner4Condition]).size, "前提: ダートの状態 3 か所が違う").toBe(3);
     expect(new Set([turf.goalMoisture, turf.corner4Moisture, dirt.goalMoisture, dirt.corner4Moisture]).size, "前提: 含水率 4 つが違う").toBe(4);
-    await store.finish(DATE, { finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [{ ...tokyo, turf, dirt }], dropped: 0, droppedDetails: [] });
+    await store.finish(DATE, { slot: 0, complete: false, finishedAt: 2, result: "ok", apiFetchedAt: null, venues: [{ ...tokyo, turf, dirt }], dropped: 0, droppedDetails: [] });
 
     // 書き込み側の列の対応(列名で固定)
     const row = (await local.db.prepare("SELECT * FROM baba_conditions WHERE kaisai_date = ? AND venue_code = ?").bind(DATE, "05").first<Record<string, unknown>>())!;

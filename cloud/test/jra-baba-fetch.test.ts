@@ -4,7 +4,7 @@ import { JRA_GAP_MS, JRA_MAX_BODY_BYTES, JRA_TIMEOUT_MS, type JraFetchLike } fro
 import { createJraBabaFetcher } from "../src/jra-baba-fetch";
 
 import { installFetchTrap } from "./fetch-trap";
-import { FIXTURE_NAMES, NOW_MONDAY, NOW_SUNDAY, accessJson, coursePage, cushionHtml, fixtureBytes, moistHtml, sjis } from "./jra-baba-samples";
+import { FIXTURE_NAMES, NOW_MONDAY, NOW_SUNDAY, accessJson, coursePage, cushionHtml, fixtureBytes, fixtureText, moistHtml, sjis } from "./jra-baba-samples";
 
 /**
  * Issue #478(#477-B): JRA のページから馬場の値を取る流れ(createJraBabaFetcher)。
@@ -103,7 +103,6 @@ describe("正常: 実物の 3 場", () => {
       ["04", "新潟", 8.8],
     ]);
     expect(outcome.dropped).toBe(0);
-    expect(outcome.apiFetchedAt).toBe(new Date(NOW_SUNDAY).toISOString());
   });
 
   it("各 URL は 1 回ずつ(再試行しない)。開催情報だけが POST で、本文は CNAME=pw01iwtS3/CD。リダイレクトは追わない設定・タイムアウトの信号つき・UA などのヘッダは足さない", async () => {
@@ -415,5 +414,93 @@ describe("HTTP の状態の分類(旧 baba-fetch の表を引き継ぐ。クッ�
     const empty = harness({ cushion: () => new Response(null, { status: 204 }) });
     const outcome2 = await createJraBabaFetcher({ fetch: empty.fetch, wait: empty.wait })(NOW_SUNDAY);
     expect(JSON.parse(outcome2.venues[0]!.rawJson!).sources.cushion).toBe("shape-mismatch");
+  });
+});
+
+describe("Issue #480(取り直し)で足した出力: 載っている場・クッション値を取り終えた時刻", () => {
+  it("apiFetchedAt はクッション値のページを取り終えた時刻(取得口を呼んだ時刻 nowMs ではない)。含水率以降を待っている間に進んだ時計の値にならない", async () => {
+    const h = harness();
+    const clock = [NOW_SUNDAY + 3_000, NOW_SUNDAY + 9_000, NOW_SUNDAY + 20_000];
+    let n = 0;
+    const outcome = await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait, now: () => clock[Math.min(n++, clock.length - 1)]! })(NOW_SUNDAY);
+    expect(outcome.apiFetchedAt).toBe(new Date(NOW_SUNDAY + 3_000).toISOString()); // 最初の now() = クッション値の本を取り終えた直後
+    expect(outcome.apiFetchedAt).not.toBe(new Date(NOW_SUNDAY).toISOString()); // 差が 0 でない(取得口を呼んだ時刻とは違う)
+    expect(n).toBe(1); // 時計を引くのは 1 回だけ
+  });
+
+  it("クッション値のページを取れなければ apiFetchedAt は null(時計も引かない)", async () => {
+    const h = harness({ cushion: () => new Response("x", { status: 503 }) });
+    let n = 0;
+    const outcome = await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait, now: () => (n++, NOW_SUNDAY) })(NOW_SUNDAY);
+    expect(outcome.apiFetchedAt).toBeNull();
+    expect(n).toBe(0);
+  });
+
+  it("listedVenueCodes: クッション値・含水率のページに載っている場の場コード(載った順、重複なし)。当日の値が無い場(月曜)も載っている", async () => {
+    const sunday = await createJraBabaFetcher({ fetch: harness().fetch, wait: harness().wait })(NOW_SUNDAY);
+    expect(sunday.listedVenueCodes).toEqual(["05", "08", "04"]);
+    const monday = await createJraBabaFetcher({ fetch: harness().fetch, wait: harness().wait })(NOW_MONDAY);
+    expect(monday.venues).toEqual([]); // 前提: 1 場も保存しない回でも
+    expect(monday.listedVenueCodes).toEqual(["05", "08", "04"]); // 載っている場は分かる
+  });
+
+  it("listedVenueCodes: 含水率のページにだけある場も入る。JRA の 10 場にない場名は入らない。ページを読めなければ空", async () => {
+    const cushion = cushionHtml([{ name: "東京", units: [["10月25日（日曜）7時00分", "9.5"]] }]);
+    const moist = moistHtml([
+      { name: "京都", units: [{ time: "10月25日（日曜）5時30分", turf: ["10.0", "hard", "11.0", "hard"], dirt: ["3.0", "hard", "4.0", "hard"] }] },
+      { name: "謎の場", units: [{ time: "10月25日（日曜）5時30分", turf: ["10.0", "hard", "11.0", "hard"], dirt: ["3.0", "hard", "4.0", "hard"] }] },
+    ]);
+    const h = harness({ cushion: () => html(sjis(cushion)), moist: () => html(sjis(moist)) });
+    const outcome = await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait })(NOW_SUNDAY);
+    expect(outcome.listedVenueCodes).toEqual(["05", "08"]);
+    const broken = harness({ cushion: () => new Response("x", { status: 503 }), moist: () => new Response("x", { status: 503 }) });
+    expect((await createJraBabaFetcher({ fetch: broken.fetch, wait: broken.wait })(NOW_SUNDAY)).listedVenueCodes).toEqual([]);
+  });
+});
+
+describe("Issue #490-1: ページの構造が変わったら、判定の結果ではなく shape-mismatch として残す", () => {
+  const renamed = (name: string, from: string, to: string): Uint8Array => sjis(fixtureText(name).replaceAll(from, to));
+
+  it("前提(対照): 実物のクッション値で、time の class を変えなければ読める", () => {
+    expect(fixtureText(FIXTURE_NAMES.cushion)).toContain('class="time"');
+    expect(fixtureText(FIXTURE_NAMES.moist)).toContain('class="mg"');
+  });
+
+  it("クッション値の time の class が変わった(含水率は読める): クッション値は shape-mismatch。含水率で保存し、rawJson の sources に残る。no-today-venues にはならない", async () => {
+    const h = harness({ cushion: () => html(renamed(FIXTURE_NAMES.cushion, 'class="time"', 'class="tm"')) });
+    const outcome = await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait })(NOW_SUNDAY);
+    expect(outcome.result).toBe("ok");
+    expect(outcome.venues).toHaveLength(3);
+    expect(outcome.venues.every((v) => v.cushion === null)).toBe(true);
+    expect(JSON.parse(outcome.venues[0]!.rawJson!).sources.cushion).toBe("shape-mismatch");
+    expect(outcome.apiFetchedAt).toBeNull(); // クッション値のページを読めていない
+  });
+
+  it("クッション値の time の class が変わり、含水率は当日の値が無い(月曜): 結果は shape-mismatch(no-today-venues ではない)。開催情報・コースには出ない", async () => {
+    const h = harness({ cushion: () => html(renamed(FIXTURE_NAMES.cushion, 'class="time"', 'class="tm"')) });
+    const outcome = await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait })(NOW_MONDAY);
+    expect(outcome.venues).toEqual([]);
+    expect(outcome.result).toBe("shape-mismatch");
+    expect(h.events.filter((e) => !e.startsWith("wait"))).toEqual(GET_ORDER.slice(0, 2));
+  });
+
+  it("含水率の span.mg・span.m4c の class が変わった(値が全部読めない): 含水率は shape-mismatch。クッション値で保存し、rawJson の sources に残る", async () => {
+    const changed = fixtureText(FIXTURE_NAMES.moist).replaceAll('class="mg"', 'class="mgx"').replaceAll('class="m4c"', 'class="m4cx"');
+    const h = harness({ moist: () => html(sjis(changed)) });
+    const outcome = await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait })(NOW_SUNDAY);
+    expect(outcome.result).toBe("ok");
+    expect(outcome.venues).toHaveLength(3);
+    expect(outcome.venues.every((v) => v.cushion !== null)).toBe(true);
+    expect(outcome.venues.every((v) => v.turf.goalMoisture === null && v.dirt.goalMoisture === null)).toBe(true);
+    expect(JSON.parse(outcome.venues[0]!.rawJson!).sources.moist).toBe("shape-mismatch");
+  });
+
+  it("対照: 含水率の一部の面だけ値が無くても(ほかに値がある)、shape-mismatch にしない", async () => {
+    const moist = moistHtml([
+      { name: "東京", units: [{ time: "10月25日（日曜）5時30分", turf: ["", "hard", "11.0", "hard"], dirt: ["", "", "", ""] }] },
+    ]);
+    const h = harness({ moist: () => html(sjis(moist)) });
+    const outcome = await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait })(NOW_SUNDAY);
+    expect(JSON.parse(outcome.venues.find((v) => v.venueName === "東京")!.rawJson!).sources.moist).toBe("ok");
   });
 });

@@ -32,5 +32,5 @@ export function sampleOutcome(): BabaFetchOutcome {
     courses,
     sources: { cushion: "ok", moist: "ok", access: "ok", course: "ok" },
   });
-  return { result: "ok", venues: assembled.venues, dropped: assembled.dropped, droppedDetails: assembled.droppedDetails, apiFetchedAt: new Date(SAMPLE_NOW).toISOString() };
+  return { result: "ok", venues: assembled.venues, dropped: assembled.dropped, droppedDetails: assembled.droppedDetails, apiFetchedAt: new Date(SAMPLE_NOW).toISOString(), listedVenueCodes: assembled.listedVenueCodes };
 }

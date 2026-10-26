@@ -472,7 +472,7 @@ export async function handle(
   }
 
   if (pathname === "/api/baba-fetch") {
-    // 管理者専用(route-policy.ts)。D1 の baba_fetches・baba_conditions を読むだけ(JRA にも netkeiba にも LLM にも出ない)。GET だけ。Issue #360。
+    // 管理者専用(route-policy.ts)。D1 の baba_fetches・baba_fetch_attempts・baba_conditions を読むだけ(JRA にも netkeiba にも LLM にも出ない)。GET だけ。Issue #360。
     if (method !== "GET") {
       return methodNotAllowed("GET");
     }
@@ -603,12 +603,13 @@ async function handleHorseRuns(request: Request, env: Env, now: () => Date): Pro
 }
 
 /**
- * `GET /api/baba-fetch[?kaisai_date=YYYYMMDD]`(Issue #360。管理者専用): 馬場の取得の結果(D1 の `baba_fetches`・`baba_conditions`)。
+ * `GET /api/baba-fetch[?kaisai_date=YYYYMMDD]`(Issue #360。管理者専用): 馬場の取得の結果(D1 の `baba_fetches`・`baba_fetch_attempts`・`baba_conditions`)。
  * 開催日ごとに、結果の分類・取得の時刻・保存した競馬場の数と中身・捨てた競馬場の理由と計測日時の文字列(`dropped`。旧版の記録は null)を返す。
+ * Issue #480 から、当日の値がそろうまで 15 分おきに取り直す(09:00 から 12:00 まで)ので、枠ごとの試み(`attempts`: 枠の番号・時刻・結果・その回で保存した数・そろったか)も日ごとに付ける。
  * 「当日の値がまだ載っていなかった」のか「計測日時が読めなかった」のかを、D1 のコンソールを開かずに確かめるための入口。
  * `kaisai_date` を省くと直近 {@link FETCH_LIST_LIMIT_DEFAULT} 日ぶん(新しい順)、指定するとその日だけ。
- * **外部の API の URL・応答の本文・元の JSON は、保存もしておらず、応答にも出ない**(応答は明示の許可リストで作る)。
- * 閲覧者には開かない(route-policy.ts の表に管理者専用として載せる): 外部の API の利用の記録(利用の条件は 1 日 1 回)は運用の情報で、`/api/health` などと同じ扱い。
+ * **JRA の URL・応答の本文・元の JSON は、保存もしておらず、応答にも出ない**(応答は明示の許可リストで作る)。
+ * 閲覧者には開かない(route-policy.ts の表に管理者専用として載せる): JRA への取得の記録(利用の条件は 1 枠 1 回)は運用の情報で、`/api/health` などと同じ扱い。
  * 読み取り専用。順序は: `Sec-Fetch-Site`(別サイトからなら 403)→ 入力の検証(400。ここまでで D1 に触れない)→ D1(失敗は 503 の固定の種類名だけ)。
  */
 async function handleBabaFetch(request: Request, env: Env): Promise<Response> {
@@ -644,6 +645,18 @@ async function handleBabaFetch(request: Request, env: Env): Promise<Response> {
         venues_dropped: f.venuesDropped,
         dropped: f.dropped === null ? null : f.dropped.map((d) => ({ venue: d.venue, reason: d.reason, measured: d.measured })),
         saved: f.saved.map((v) => ({ venue_code: v.venueCode, venue_name: v.venueName, measured_at: v.measuredAt })),
+        // 枠ごとの試み(Issue #480。09:00 から 15 分おきに 12:00 まで、当日の値がそろうまで取り直す)。旧版の日・枠の記録が無い日は空。
+        attempts: f.attempts.map((a) => ({
+          slot: a.slot,
+          attempted_at: a.attemptedAt,
+          finished_at: a.finishedAt,
+          result: a.result,
+          api_fetched_at: a.apiFetchedAt,
+          venues_saved: a.venuesSaved,
+          venues_dropped: a.venuesDropped,
+          dropped: a.dropped === null ? null : a.dropped.map((d) => ({ venue: d.venue, reason: d.reason, measured: d.measured })),
+          complete: a.complete,
+        })),
       })),
     });
   } catch {

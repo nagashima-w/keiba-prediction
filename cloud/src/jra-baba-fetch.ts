@@ -1,7 +1,7 @@
 /**
  * JRA のページから馬場の値を取りに行く流れ(Issue #478〈#477-B〉。旧 `baba-fetch.ts` の外部の API の取得口に代わる)。日単位の DO の馬場の段階〈`race-day-baba.ts`〉だけが使う。
  *
- * ## 取る順(開催日に 1 日 1 回の試みの中で、1 本ずつ順に。間は {@link JRA_GAP_MS}〈1.5 秒〉以上)
+ * ## 取る順(開催日の 1 回の試み〈1 枠〉の中で、1 本ずつ順に。間は {@link JRA_GAP_MS}〈1.5 秒〉以上)
  *  1. クッション値 `GET _data_cushion.html`
  *  2. 含水率 `GET _data_moist.html`
  *  3. 開催情報(公式の馬場状態・天候)`POST accessJ.html`(本文 `CNAME=pw01iwtS3/CD`)
@@ -11,7 +11,11 @@
  * ## 守ること(`jra-http.ts` の部品が実現する。#488 の確認口と同じ)
  * 各 1 回・再試行なし・リダイレクトは追わない・タイムアウト 10 秒(本文の読み出しも含む。1 本ごと)・本文は 256KB まで・UA などのヘッダは付けない。
  * netkeiba 用の gate は通さない(許可リストは netkeiba のホストだけ)。間隔はここで守る。
- * 1 日 1 回の制御・09:30 の期限・取り直し(#480)は `race-day-baba.ts` の側にある。ここは「呼ばれたら 1 回取る」だけ。
+ * 1 枠 1 回の制御・枠の時刻(09:00 から 15 分おきに 12:00 まで)・当日の値がそろうまでの取り直し(#480)は `race-day-baba.ts` の側にある。ここは「呼ばれたら 1 回取る」だけ。
+ * 結果には、ページに載っている場の場コード(`listedVenueCodes`。計画から場が取れないときの「全部の場」の分母)と、クッション値のページを取り終えた時刻(`apiFetchedAt`)を含める。
+ *
+ * ## ページの構造が変わったとき(Issue #490-1)
+ * クッション値は全場で計測が 1 件も読めなければ、含水率は計測があるのに値が 1 つも読めなければ、`shape-mismatch` として残す(「当日の計測が無い」と取り違えない)。
  *
  * ## 一部の失敗は、取れたものだけで保存する
  * 失敗した本は、その本由来の項目が null になる(クッション値が失敗なら クッション値 = null、開催情報が失敗なら 芝・ダートの全体の状態 = null、
@@ -56,6 +60,8 @@ export interface CreateJraBabaFetcherDeps {
   readonly wait?: (ms: number) => Promise<void>;
   /** 1 本ごとのタイムアウト(ミリ秒)。省略時は {@link JRA_TIMEOUT_MS}。 */
   readonly timeoutMs?: number;
+  /** 現在時刻(エポックミリ秒)。`apiFetchedAt`(クッション値のページを取り終えた時刻)に使う。省略時は `Date.now`。テストで固定する。 */
+  readonly now?: () => number;
 }
 
 /** 既定の待ち(`setTimeout`)。 */
@@ -72,6 +78,7 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
   const fetchFn: JraFetchLike = deps.fetch ?? ((target, init) => fetch(target, init));
   const wait = deps.wait ?? defaultWait;
   const timeoutMs = deps.timeoutMs ?? JRA_TIMEOUT_MS;
+  const clock = deps.now ?? Date.now;
 
   return async (nowMs: number): Promise<BabaFetchOutcome> => {
     let first = true;
@@ -99,18 +106,19 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
     const cushionPage = await page(JRA_CUSHION_URL, { method: "GET" });
     const cushion = cushionPage.status === "ok" ? parseCushionHtml(cushionPage.text) : null;
     const cushionStatus: BabaSourceStatus = cushionPage.status === "ok" && cushion === null ? "shape-mismatch" : cushionPage.status;
+    // クッション値のページを取り終えた時刻(以降の本を待つあいだに進んだ時計ではない)。読めなかった(shape-mismatch)ときは null。
+    const apiFetchedAt = cushionStatus === "ok" ? new Date(clock()).toISOString() : null;
 
     const moistPage = await page(JRA_MOIST_URL, { method: "GET" });
     const moist = moistPage.status === "ok" ? parseMoistHtml(moistPage.text) : null;
     const moistStatus: BabaSourceStatus = moistPage.status === "ok" && moist === null ? "shape-mismatch" : moistPage.status;
 
     let sources: BabaSources = { cushion: cushionStatus, moist: moistStatus, access: "skipped", course: "skipped" };
-    const apiFetchedAt = cushionStatus === "ok" ? new Date(nowMs).toISOString() : null;
 
     // 当日の値のある場が無ければ、開催情報とコースには出ない(保存する場が無い)。
     const measured = assembleBabaVenues({ nowMs, cushion, moist, access: null, courses: [], sources });
     if (measured.venues.length === 0) {
-      return { result: failureClass(cushionStatus, moistStatus), venues: [], dropped: measured.dropped, droppedDetails: measured.droppedDetails, apiFetchedAt };
+      return { result: failureClass(cushionStatus, moistStatus), venues: [], dropped: measured.dropped, droppedDetails: measured.droppedDetails, apiFetchedAt, listedVenueCodes: measured.listedVenueCodes };
     }
 
     // 開催情報(公式の馬場状態)。
@@ -156,6 +164,7 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
       dropped: assembled.dropped,
       droppedDetails: assembled.droppedDetails,
       apiFetchedAt,
+      listedVenueCodes: assembled.listedVenueCodes,
     };
   };
 }
