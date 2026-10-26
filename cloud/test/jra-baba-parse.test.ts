@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { BABA_RAW_JSON_LIMIT } from "../src/baba-conditions";
 import {
   assembleBabaVenues,
   parseAccessJson,
@@ -251,10 +250,9 @@ describe("組み立て(assembleBabaVenues): 実物の 3 場", () => {
     expect(niigata.turfLength).toBe("芝丈(cm) 芝野芝10から12");
   });
 
-  it("rawJson は JRA から読み取った値の要約(HTML ではない)。場・計測の時刻・クッション値・含水率・各取得の結果の語を持ち、4096 字以内", () => {
+  it("rawJson は JRA から読み取った値の要約(HTML ではない)。場・計測の時刻・クッション値・含水率・各取得の結果の語を持つ(長さの上界は下の「Issue #490-3」の最悪入力のテスト)", () => {
     const tokyo = assembleBabaVenues({ nowMs: NOW_SUNDAY, ...realInputs(), sources: OK_SOURCES }).venues[0]!;
     expect(tokyo.rawJson).not.toBeNull();
-    expect(tokyo.rawJson!.length).toBeLessThanOrEqual(BABA_RAW_JSON_LIMIT);
     expect(tokyo.rawJson).not.toContain("<div");
     expect(JSON.parse(tokyo.rawJson!)).toMatchObject({
       venueCode: "05",
@@ -434,6 +432,14 @@ describe("計測の時刻の読み(年の補い・曜日の検算)", () => {
     { name: "分が範囲外(60 分)", now: "2026-10-12T08:00:00", time: "10月12日（月曜）7時60分", reason: "unparsed" },
     { name: "形が違う(曜日が無い)", now: "2026-10-12T08:00:00", time: "10月12日 7時00分", reason: "unparsed" },
     { name: "書式の変更(ISO 形式)", now: "2026-10-12T08:00:00", time: "2026-10-12T07:00:00+09:00", reason: "unparsed" },
+    // Issue #490-3: 年の補いの窓 YEAR_WINDOW_DAYS(182 日)の境界。10/12 の取得で、2027-04-12(月)は +182 日、2026-04-12(日)は -183 日、2026-04-13(月)は -182 日(いずれも実在の曜日)。
+    // 182 を 181 にすると 1 行目が、183 にすると 2 行目が「読めない」側に倒れる(窓の外の候補が先に拾われ、曜日が合わない)。
+    { name: "窓の境界の内側(+182 日の翌年 4/12 月曜)→ 読めて今日でない", now: "2026-10-12T08:00:00", time: "4月12日（月曜）7時00分", reason: "not-today" },
+    { name: "窓の境界の外側(-183 日の同年 4/12 日曜)は採らない。窓の内の翌年 4/12 は月曜なので曜日が合わない", now: "2026-10-12T08:00:00", time: "4月12日（日曜）7時00分", reason: "unparsed" },
+    { name: "窓の境界の内側(-182 日の同年 4/13 月曜)→ 読めて今日でない", now: "2026-10-12T08:00:00", time: "4月13日（月曜）7時00分", reason: "not-today" },
+    // 書式は全体が一致したときだけ読む(先頭の `^`・末尾の `$` を外すと、前後に余計な文字のある文字列が読めてしまう)
+    { name: "先頭に余計な文字がある", now: "2026-10-12T08:00:00", time: "x10月12日（月曜）7時00分", reason: "unparsed" },
+    { name: "末尾に余計な文字がある", now: "2026-10-12T08:00:00", time: "10月12日（月曜）7時00分x", reason: "unparsed" },
   ];
   for (const c of dropped) {
     it(`${c.name} → ${c.reason}。計測日時の文字列をそのまま診断に残し、保存しない`, () => {
@@ -448,6 +454,7 @@ describe("計測の時刻の読み(年の補い・曜日の検算)", () => {
     expect(new Set(dropped.map((c) => c.reason))).toEqual(new Set(["not-today", "unparsed"]));
     expect(dropped.filter((c) => c.reason === "not-today").length).toBeGreaterThanOrEqual(3);
     expect(dropped.filter((c) => c.reason === "unparsed").length).toBeGreaterThanOrEqual(8);
+    expect(dropped.filter((c) => c.time.startsWith("4月1")).map((c) => c.reason)).toEqual(["not-today", "unparsed", "not-today"]); // 窓の境界の 3 行が両方の結果を含む(退化していない)
     expect(saved.length).toBeGreaterThanOrEqual(4);
   });
 
@@ -529,5 +536,55 @@ describe("Issue #480: 載っている場の場コード(listedVenueCodes)", () =
     const r = assembleBabaVenues({ nowMs: NOW_SUNDAY, cushion, moist, access: null, courses: [], sources: { cushion: "ok", moist: "ok", access: "skipped", course: "skipped" } });
     expect(r.venues).toEqual([]); // 前提: 前日の値だけ(当日の値は無い)
     expect(r.listedVenueCodes).toEqual(["05", "08"]);
+  });
+});
+
+/**
+ * Issue #490-3(#478 の【記録】のテストの穴): 切り詰めの長さの値と、「もう通らない経路」を消したことの裏付け。
+ */
+describe("Issue #490-3: 芝丈の長さの上限・保存する値の上界・固定の表の鍵", () => {
+  const sunday = "10月25日（日曜）7時00分";
+  const tokyo = (): CushionVenueData[] => must(parseCushionHtml(cushionHtml([{ name: "東京", units: [[sunday, "9.5"]] }])));
+  const courseOf = (turfLength: string): CoursePage => ({ venueName: "東京", tabs: ["東京"], usedCourse: null, turfLength, turfConditionText: null });
+  const run = (cushion: CushionVenueData[], extra: Partial<Parameters<typeof assembleBabaVenues>[0]> = {}) =>
+    assembleBabaVenues({ nowMs: NOW_SUNDAY, cushion, moist: null, access: null, courses: [], sources: OK_SOURCES, ...extra });
+
+  it("芝丈は制御文字を除いて 200 字に切る。ちょうど 200 字は切らない(201 字で 200 字・200 字で 200 字・199 字で 199 字)", () => {
+    expect(run(tokyo(), { courses: [courseOf(`あ${"\u0007"}${"い".repeat(300)}`)] }).venues[0]!.turfLength).toBe(`あ${"い".repeat(199)}`);
+    expect(run(tokyo(), { courses: [courseOf("い".repeat(201))] }).venues[0]!.turfLength).toBe("い".repeat(200));
+    expect(run(tokyo(), { courses: [courseOf("い".repeat(200))] }).venues[0]!.turfLength).toBe("い".repeat(200));
+    expect(run(tokyo(), { courses: [courseOf("い".repeat(199))] }).venues[0]!.turfLength).toBe("い".repeat(199));
+  });
+
+  /** 最悪入力: 全項目が最長(月日・時分が 2 桁・17 桁の小数・取得の結果の語の最長)。 */
+  const WORST_TIME = "12月28日（月曜）23時59分";
+  const WORST_FACE = { goal: 17.123456789012345, goalCondition: "稍重", corner4: 17.123456789012345, corner4Condition: "稍重" };
+  const WORST_SOURCES: BabaSources = { cushion: "shape-mismatch", moist: "shape-mismatch", access: "shape-mismatch", course: "shape-mismatch" };
+
+  it("rawJson の長さの上界: 全項目が最長の最悪入力でも 600 字未満(旧上限 4096 字の分岐は、この上界のため通らないので消した。項目を足して超えたら、上限の要否を考え直す)", () => {
+    const venueNames = ["札幌", "函館", "福島", "新潟", "東京", "中山", "中京", "京都", "阪神", "小倉"];
+    const lengths = venueNames.map((name) => {
+      const cushion = [{ name, units: [{ time: WORST_TIME, cushion: 19.123456789012345 }] }];
+      const moist = [{ name, units: [{ time: WORST_TIME, turf: WORST_FACE, dirt: WORST_FACE, rainfallMm: 123.45678901234567 }] }];
+      const r = assembleBabaVenues({ nowMs: Date.parse("2026-12-28T08:00:00+09:00"), cushion, moist, access: null, courses: [], sources: WORST_SOURCES });
+      expect(r.venues, name).toHaveLength(1); // 前提: 最悪入力が保存される=落とされて空振りしていない
+      return r.venues[0]!.rawJson!.length;
+    });
+    expect(Math.max(...lengths)).toBeGreaterThan(300); // 前提: 長い入力になっている(上界の assert が自明に成立しない)
+    expect(Math.max(...lengths)).toBeLessThan(600); // 実測の最大は 450 字(10 場とも同じ。場名はどれも 2 字)。上界 600 は、4096 字(旧上限)よりずっと小さく、項目を数個足しても超えない値
+  });
+
+  it("保存する場の場コード・場名は固定の表(JRA の 10 場)の値だけ。外部の文字列(制御文字つきの場名)は保存に届かず、診断の場コードも 2 桁の数字だけ", () => {
+    const time = (name: string): CushionVenueData => ({ name, units: [{ time: sunday, cushion: 9.5 }] });
+    const names = ["札幌", "函館", "福島", "新潟", "東京", "中山", "中京", "京都", "阪神", "小倉"];
+    const r = run([...names.map(time), time("東京\u0007"), time("あ".repeat(50))]);
+    expect(r.venues.map((v) => v.venueName)).toEqual(names);
+    expect(r.venues.every((v) => /^\d{2}$/.test(v.venueCode) && v.venueName.length === 2)).toBe(true);
+    expect(r.droppedDetails).toEqual([
+      { venue: null, reason: "invalid", measured: sunday },
+      { venue: null, reason: "invalid", measured: sunday },
+    ]);
+    // 当日でない場の診断の場コードも表の値(2 桁)
+    expect(run([time("東京")], { nowMs: NOW_MONDAY }).droppedDetails.map((d) => d.venue)).toEqual(["05"]);
   });
 });

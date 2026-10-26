@@ -293,10 +293,11 @@ describe("buildVerifyModel: プロンプト版別の比較(Issue #220。Issue #4
   const past = buildVerifyModel(input({ page: "past" }));
   const SUMMARY_30 = `${LONG_INSTRUCTION.slice(0, 30)}…`;
 
-  it("見出し・説明(全体の集計で区分の切替に連動しないこと)。いまの版のページは、いまの版だけを版の並び(サーバのまま)で出す", () => {
+  it("見出し・説明(中央・地方の区分によらず全体の集計であること。区分の切替があるのは、いまの版のページだけなので「切替」とは言わない)。いまの版のページは、いまの版だけを版の並び(サーバのまま)で出す", () => {
     expect(model.versions?.heading).toBe("プロンプト版別比較");
-    expect(model.versions?.description).toContain("全体の集計");
-    expect(model.versions?.description).toContain("区分の切替には連動しません");
+    expect(model.versions?.description).toContain("中央・地方の区分によらず全体の集計");
+    expect(model.versions?.description).not.toContain("上の区分の切替");
+    expect(past.versions?.description).toBe(model.versions?.description); // 説明は両ページで同じ(分岐を持たない)
     expect(model.versions?.cards.map((c) => c.title)).toEqual(["2026-10-09.2", "2026-10-09.2-clip015"]);
     // 版不明の注記は、版不明のカードを出す過去の版のページだけ(旧データと LLM 未使用の両方を含む)
     expect(model.versions?.unknownNote).toBeNull();
@@ -365,14 +366,14 @@ describe("buildVerifyModel: プロンプト版別の比較(Issue #220。Issue #4
     expect(buildVerifyModel(input({ expandedVersions: [keys[1]!] })).versions?.cards[1]?.fullInstructions).toBe("追加指示(全文): なし");
   });
 
-  it("版別が 0 件(分析が無い)なら、いまの版は『集計中(0件)』の枠。いまの版の一覧も空なら『集計対象がありません。』。過去の版のページは『集計対象がありません。』。集計が出せないとき・取得中は節ごと出さない", () => {
+  it("版別が 0 件(分析が無い)なら、いまの版は『集計中(0件)』の枠。いまの版の一覧も空なら『集計対象がありません。』。過去の版のページは(過去の版が 1 つも無いので)『過去の版はありません。』。集計が出せないとき・取得中は節ごと出さない", () => {
     const none = buildVerifyModel(inputWith([]));
     expect(none.versions?.cards).toEqual([]);
     expect(none.versions?.collecting.map((c) => c.text)).toEqual(["集計中(0件。30件で表示)", "集計中(0件。30件で表示)"]);
     expect(none.versions?.empty).toBeNull();
     const nothing = buildVerifyModel(inputWith([], {}, []));
     expect(nothing.versions?.empty).toBe("集計対象がありません。");
-    expect(buildVerifyModel(inputWith([], { page: "past" })).versions?.empty).toBe("集計対象がありません。");
+    expect(buildVerifyModel(inputWith([], { page: "past" })).versions?.empty).toBe("過去の版はありません。");
     expect(model.versions?.empty).toBeNull();
     for (const load of [{ kind: "loading" }, { kind: "error", message: "x" }, { kind: "ready", outcome: { kind: "throttled", nextAt: "2026-10-10T15:00:00.000Z", reason: "daily-limit" } }] as const) {
       expect(buildVerifyModel(input({ load })).versions).toBeNull();
@@ -462,7 +463,8 @@ describe("Issue #481: 版別比較は、いまの版だけを検証画面に残�
     expect(p.backHref).toBe("#verify");
     expect(p.backLabel).toBe("検証へ戻る");
     expect(p.title).toBe("過去の版");
-    expect(p.versions?.heading).toBe("過去の版");
+    expect(p.versions?.heading).toBe("プロンプト版別比較"); // 節の見出しは両ページ同じ。ページの見出し(title)と重ねない
+    expect(p.versions?.heading).not.toBe(p.title);
     expect(p.venueTabs).toEqual([]);
     expect([p.bet, p.proposed, p.close, p.direction, p.calibration, p.marks]).toEqual([null, null, null, null, null, null]);
     expect(p.breakdown).toEqual([]);

@@ -34,9 +34,6 @@ export class BabaFetchError extends Error {
   }
 }
 
-/** 元の要約の JSON(競馬場 1 件ぶん)を `rawJson` に残す上限(文字数)。超えるときは null(JSON の途中で切らない)。 */
-export const BABA_RAW_JSON_LIMIT = 4096;
-
 /** 1 面(芝・ダート)の状態と含水率。 */
 export interface BabaSurface {
   readonly condition: string | null;
@@ -61,7 +58,7 @@ export interface BabaVenueRecord {
   readonly turfLength: string | null;
   /** 芝の状態の文章(良・稍重などの状態ではない)。 */
   readonly turfConditionText: string | null;
-  /** JRA から読み取った値の要約の JSON(競馬場 1 件ぶん)。{@link BABA_RAW_JSON_LIMIT} を超えるときは null。HTML は入れない。 */
+  /** JRA から読み取った値の要約の JSON(競馬場 1 件ぶん)。HTML は入れない。読み取りの側は常に入れる(長さは最悪入力でも数百字。上界は `jra-baba-parse.test.ts` が固定する。Issue #490-3 で、旧上限 4096 字の分岐を消した)。型は null を許す。 */
   readonly rawJson: string | null;
 }
 

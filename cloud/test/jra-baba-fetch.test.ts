@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { JRA_GAP_MS, JRA_MAX_BODY_BYTES, JRA_TIMEOUT_MS, type JraFetchLike } from "../src/jra-http";
 import { createJraBabaFetcher } from "../src/jra-baba-fetch";
@@ -120,6 +120,23 @@ describe("正常: 実物の 3 場", () => {
     expect(post[0]!.init.body).toBe("CNAME=pw01iwtS3/CD");
     expect(h.calls.filter((c) => (c.init.method ?? "GET") === "GET")).toHaveLength(5);
     expect(fetch).not.toHaveBeenCalled(); // グローバルの fetch(落ちるスタブ)は呼ばれていない
+  });
+
+  it("タイムアウトは、省略すれば JRA_TIMEOUT_MS(10 秒)を 6 本すべてに渡し、timeoutMs を渡せばその値を 6 本すべてに渡す(Issue #490-3)", async () => {
+    const spy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      const byDefault = harness();
+      await createJraBabaFetcher({ fetch: byDefault.fetch, wait: byDefault.wait })(NOW_SUNDAY);
+      expect(byDefault.calls).toHaveLength(6); // 前提: 6 本取っている
+      expect(spy.mock.calls).toEqual(Array.from({ length: 6 }, () => [10_000]));
+      spy.mockClear();
+      const custom = harness();
+      await createJraBabaFetcher({ fetch: custom.fetch, wait: custom.wait, timeoutMs: 25 })(NOW_SUNDAY);
+      expect(custom.calls).toHaveLength(6);
+      expect(spy.mock.calls).toEqual(Array.from({ length: 6 }, () => [25]));
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("定数: 間は 1.5 秒以上・各本のタイムアウトは 10 秒・本文の上限は 256KB(index は約 75KB で収まる)", () => {

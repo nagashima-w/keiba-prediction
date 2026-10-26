@@ -17,7 +17,7 @@
  * `measuredAt` はクッション値の時刻(あれば)、無ければ含水率の時刻。
  *
  * ## 秘匿・上限
- * 外部の文章は制御文字を除き、長さを切る(LLM に入るため)。`rawJson` は読み取った値の要約の JSON(HTML・本文は入れない)で、各ページの取得の結果は固定の語({@link BabaSourceStatus})だけを入れる。
+ * 外部の文章(使用コース・芝丈・芝の状態の文章・診断に残す計測の時刻の文字列)は制御文字を除き、長さを切る(LLM に入るため)。場コード・場名は固定の表の値だけなので切らない。`rawJson` は読み取った値の要約の JSON(HTML・本文は入れない)で、各ページの取得の結果は固定の語({@link BabaSourceStatus})だけを入れる。
  */
 import { JST_OFFSET_MS } from "../../packages/core/src/common/jst";
 import { isRecord } from "../../packages/core/src/common/guards";
@@ -25,7 +25,6 @@ import { VENUE_BY_TRACK_CODE } from "../../packages/core/src/analysis/venue-code
 import {
   BABA_DROPPED_DETAIL_LIMIT,
   BABA_MEASURED_TEXT_LIMIT,
-  BABA_RAW_JSON_LIMIT,
   type BabaDropReason,
   type BabaDroppedDetail,
   type BabaSurface,
@@ -53,8 +52,6 @@ const RAINFALL_RANGE = [0, 500] as const;
 const MAX_COURSE = 200;
 const MAX_TURF_LENGTH = 200;
 const MAX_TURF_TEXT = 500;
-const MAX_VENUE_NAME = 20;
-const MAX_VENUE_TEXT = 4;
 
 /** 状態語の許可リスト(core の `BABA_CONDITION_WORDS` と同じ)。 */
 const CONDITION_WORDS: ReadonlySet<string> = new Set(["良", "稍重", "重", "不良"]);
@@ -437,7 +434,7 @@ function surfaceOf(condition: string | null, face: MoistFace): BabaSurface {
 
 function dropDetail(venueCode: string | null, reason: BabaDropReason, measured: string | null): BabaDroppedDetail {
   return {
-    venue: venueCode === null ? null : sanitize(venueCode, MAX_VENUE_TEXT),
+    venue: venueCode, // 固定の表(`VENUE_BY_TRACK_CODE`)の 2 桁の鍵か null。外部の文章ではないので sanitize しない
     reason,
     measured: measured === null ? null : sanitize(measured, BABA_MEASURED_TEXT_LIMIT),
   };
@@ -498,7 +495,7 @@ export function assembleBabaVenues(input: AssembleInput): AssembleResult {
     });
     venues.push({
       venueCode: code,
-      venueName: sanitize(name, MAX_VENUE_NAME),
+      venueName: name, // `CODE_BY_VENUE_NAME` の鍵に一致した(= JRA の 10 場の固定の名前の)ものだけがここへ来る(`code === null` は上で捨てている)
       measuredAt,
       cushion,
       turf,
@@ -507,7 +504,7 @@ export function assembleBabaVenues(input: AssembleInput): AssembleResult {
       usedCourse: course?.usedCourse == null ? null : sanitize(course.usedCourse, MAX_COURSE),
       turfLength: course?.turfLength == null ? null : sanitize(course.turfLength, MAX_TURF_LENGTH),
       turfConditionText: course?.turfConditionText == null ? null : sanitize(course.turfConditionText, MAX_TURF_TEXT),
-      rawJson: raw.length <= BABA_RAW_JSON_LIMIT ? raw : null,
+      rawJson: raw,
     });
   }
   return { venues, dropped, droppedDetails, listedVenueCodes };
