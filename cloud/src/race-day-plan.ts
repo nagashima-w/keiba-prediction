@@ -355,6 +355,15 @@ export class PlanStore {
     return rows[0]?.state === "ok" && (rows[0].listed ?? 0) > 0;
   }
 
+  /**
+   * 計画の中央の行にある場コード(JRA の 01〜10。重複なし・コード順)。その日の全部の場 = 馬場の取得の「そろった」判定の分母(Issue #480)。
+   * 中央の行は一覧の全件(重賞だけに絞らない)なので、開催のある場はすべて入る。race_id(年 4 桁 + 場コード 2 桁 + …)から取り、01〜10 でないものは入れない。
+   */
+  centralVenueCodes(): string[] {
+    const rows = this.sql.exec("SELECT DISTINCT substr(race_id, 5, 2) AS code FROM race_day_plan WHERE venue = 'central'").toArray() as { code: string }[];
+    return rows.map((r) => r.code).filter((code) => /^(0[1-9]|10)$/.test(code)).sort();
+  }
+
   plannedCount(): number {
     return (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_plan WHERE state = 'planned'").toArray() as { n: number }[])[0]?.n ?? 0;
   }

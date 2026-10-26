@@ -97,8 +97,22 @@ export interface BabaFetchOutcome {
   readonly dropped: number;
   /** 捨てた競馬場の理由と計測日時の文字列(場の並び順。{@link BABA_DROPPED_DETAIL_LIMIT} 件まで)。 */
   readonly droppedDetails: readonly BabaDroppedDetail[];
-  /** クッション値のページを取得できた時刻(ISO 8601)。取れていなければ null。`baba_fetches.api_fetched_at` に入る。 */
+  /** クッション値のページを取得できた時刻(ISO 8601。そのページを取り終えた時刻)。取れていなければ null。`baba_fetch_attempts.api_fetched_at` に入る。 */
   readonly apiFetchedAt: string | null;
+  /**
+   * クッション値・含水率のページに載っていた場の場コード(載った順、重複なし。JRA の 10 場に当たらない場名は入らない)。当日の値の有無は問わない。
+   * 計画から場コードが取れないときだけ、「その日の全部の場」の分母に使う(Issue #480)。ページを読めなければ空。
+   */
+  readonly listedVenueCodes: readonly string[];
+}
+
+/**
+ * 場の行が「そろっている」か(Issue #480): クッション値と含水率(芝・ダートのゴール前/4 角のどれか)の**どちらにも**当日の値がある。
+ * 片方だけの行は先に保存するが、「そろった」には数えず、後の回で欠けを埋める(`baba-repository.ts` の補完の upsert。SQL の条件は同じ定義)。
+ */
+export function isVenueComplete(v: Pick<BabaVenueRecord, "cushion" | "turf" | "dirt">): boolean {
+  const hasMoisture = [v.turf.goalMoisture, v.turf.corner4Moisture, v.dirt.goalMoisture, v.dirt.corner4Moisture].some((m) => m !== null);
+  return v.cushion !== null && hasMoisture;
 }
 
 /** `RaceDayCore` に渡す取得口: JRA のページを取って読み、結果を返す。失敗は結果の分類に落とす(投げない)。URL は取得口の中だけにある。 */

@@ -489,6 +489,45 @@ describe("捨てた場の診断(件数・上限・秘匿)", () => {
 
   it("全体として当日の場が 1 つも無く、ページ自体が無い(null)ときは、捨てた場も詳細も無い(空)", () => {
     const r = assembleBabaVenues({ nowMs: NOW_SUNDAY, cushion: null, moist: null, access: null, courses: [], sources: OK_SOURCES });
-    expect(r).toEqual({ venues: [], dropped: 0, droppedDetails: [] });
+    expect(r).toEqual({ venues: [], dropped: 0, droppedDetails: [], listedVenueCodes: [] }); // Issue #480: ページが無ければ載っている場も無い
+  });
+});
+
+describe("Issue #490-1: ページの構造が変わったとき(読めた計測が 1 件も無い)は null", () => {
+  it("クッション値: 見出しはあるが、全場で計測(time)が 1 件も読めなければ null。1 場でも読めれば null でない", () => {
+    const broken = CUSHION.replaceAll('class="time"', 'class="tm"');
+    expect(broken).toContain('title="東京"'); // 前提: 見出しは残っている(見出しが無い場合とは別の経路)
+    expect(parseCushionHtml(broken)).toBeNull();
+    const oneVenue = cushionHtml([{ name: "東京", units: [["10月25日（日曜）7時00分", "9.5"]] }, { name: "京都", units: [] }]);
+    expect(must(parseCushionHtml(oneVenue)).map((v) => v.units.length)).toEqual([1, 0]);
+  });
+
+  it("含水率: 計測はあるが全場・全計測で 4 つの値が 1 つも読めなければ null。1 つでも読めれば null でない", () => {
+    const broken = MOIST.replaceAll('class="mg"', 'class="mgx"').replaceAll('class="m4c"', 'class="m4cx"');
+    expect(broken).toContain('class="time"'); // 前提: 計測の時刻は読める(値だけが読めない)
+    expect(parseMoistHtml(broken)).toBeNull();
+    const oneValue = moistHtml([{ name: "東京", units: [{ time: "10月25日（日曜）5時30分", turf: ["", "", "11.0", "hard"], dirt: ["", "", "", ""] }] }]);
+    expect(must(parseMoistHtml(oneValue))[0]!.units[0]!.turf.corner4).toBe(11);
+  });
+
+  it("含水率: 全場で計測が 1 件も読めなければ null(time の class が変わった)", () => {
+    expect(parseMoistHtml(MOIST.replaceAll('class="time"', 'class="tm"'))).toBeNull();
+  });
+});
+
+describe("Issue #480: 載っている場の場コード(listedVenueCodes)", () => {
+  it("当日の値の有無によらず、クッション値の並び → 含水率にだけある場。重複なし。JRA の 10 場にない場名は入らない", () => {
+    const cushion = must(parseCushionHtml(cushionHtml([{ name: "東京", units: [["10月24日（土曜）7時00分", "9.5"]] }, { name: "謎の場", units: [["10月24日（土曜）7時00分", "9.0"]] }])));
+    const moist = must(
+      parseMoistHtml(
+        moistHtml([
+          { name: "京都", units: [{ time: "10月24日（土曜）5時30分", turf: ["10.0", "hard", "11.0", "hard"], dirt: ["3.0", "hard", "4.0", "hard"] }] },
+          { name: "東京", units: [{ time: "10月24日（土曜）5時30分", turf: ["10.0", "hard", "11.0", "hard"], dirt: ["3.0", "hard", "4.0", "hard"] }] },
+        ]),
+      ),
+    );
+    const r = assembleBabaVenues({ nowMs: NOW_SUNDAY, cushion, moist, access: null, courses: [], sources: { cushion: "ok", moist: "ok", access: "skipped", course: "skipped" } });
+    expect(r.venues).toEqual([]); // 前提: 前日の値だけ(当日の値は無い)
+    expect(r.listedVenueCodes).toEqual(["05", "08"]);
   });
 });

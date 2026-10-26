@@ -26,6 +26,20 @@ const FETCH_ROW = {
   raw_json: "RAW-SECRET",
   url: "https://secret.test.invalid/baba",
 };
+const ATTEMPT_ROW = {
+  kaisai_date: "20261017",
+  slot: 1,
+  attempted_at: 900_000,
+  finished_at: 905_000,
+  result: "ok",
+  api_fetched_at: "2026-10-17T00:15:00.000Z",
+  venues_saved: 2,
+  venues_dropped: 1,
+  dropped_json: JSON.stringify([{ venue: "05", reason: "not-today", measured: "10月17日（土曜）7時00分" }]),
+  complete: 1,
+  // 想定外の列(応答に出してはならない)
+  raw_json: "RAW-SECRET",
+};
 const SAVED_ROW = { kaisai_date: "20261017", venue_code: "05", venue_name: "東京", measured_at: "2026-10-17T07:00+09:00", raw_json: "RAW-SECRET" };
 
 interface Harness {
@@ -34,6 +48,7 @@ interface Harness {
   fails: boolean;
   fetchRows: Record<string, unknown>[];
   savedRows: Record<string, unknown>[];
+  attemptRows: Record<string, unknown>[];
   env(): Env;
 }
 
@@ -44,6 +59,7 @@ function harness(): Harness {
     fails: false,
     fetchRows: [FETCH_ROW],
     savedRows: [SAVED_ROW],
+    attemptRows: [ATTEMPT_ROW],
     env: () => ({
       ...GOOD_ENV,
       NETKEIBA_GATE: { idFromName: NOT_CALLED, get: NOT_CALLED },
@@ -59,7 +75,7 @@ function harness(): Harness {
             },
             all: async () => {
               if (h.fails) throw new Error("D1 の詳細 SECRET-D1");
-              return { results: sql.includes("FROM baba_conditions") ? h.savedRows : h.fetchRows };
+              return { results: sql.includes("FROM baba_fetch_attempts") ? h.attemptRows : sql.includes("FROM baba_conditions") ? h.savedRows : h.fetchRows };
             },
           };
           return statement;
@@ -104,6 +120,19 @@ describe("GET /api/baba-fetch: 診断", () => {
           venues_dropped: 3,
           dropped: [{ venue: "05", reason: "not-today", measured: "10月17日（土曜）7時00分" }],
           saved: [{ venue_code: "05", venue_name: "東京", measured_at: "2026-10-17T07:00+09:00" }],
+          attempts: [
+            {
+              slot: 1,
+              attempted_at: 900_000,
+              finished_at: 905_000,
+              result: "ok",
+              api_fetched_at: "2026-10-17T00:15:00.000Z",
+              venues_saved: 2,
+              venues_dropped: 1,
+              dropped: [{ venue: "05", reason: "not-today", measured: "10月17日（土曜）7時00分" }],
+              complete: true,
+            },
+          ],
         },
       ],
     });
@@ -120,10 +149,23 @@ describe("GET /api/baba-fetch: 診断", () => {
     const h = harness();
     h.fetchRows = [{ kaisai_date: "20261018", attempted_at: 5, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null, dropped_json: null }];
     h.savedRows = [];
+    h.attemptRows = [];
     const body = (await (await handle(get(token), h.env(), {}, deps)).json()) as { fetches: Record<string, unknown>[] };
     expect(body.fetches).toEqual([
-      { kaisai_date: "20261018", attempted_at: 5, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null, dropped: null, saved: [] },
+      { kaisai_date: "20261018", attempted_at: 5, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null, dropped: null, saved: [], attempts: [] },
     ]);
+  });
+
+  it("枠ごとの記録(attempts)は、結果を記録できなかった枠〈完了の印 complete が NULL〉も返す(complete は null)。想定外の列は出さない", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    h.attemptRows = [{ kaisai_date: "20261017", slot: 3, attempted_at: 7, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null, dropped_json: null, complete: null, raw_json: "RAW-SECRET" }];
+    const text = await (await handle(get(token), h.env(), {}, deps)).text();
+    const body = JSON.parse(text) as { fetches: { attempts: unknown[] }[] };
+    expect(body.fetches[0]!.attempts).toEqual([
+      { slot: 3, attempted_at: 7, finished_at: null, result: null, api_fetched_at: null, venues_saved: null, venues_dropped: null, dropped: null, complete: null },
+    ]);
+    expect(text).not.toContain("RAW-SECRET");
   });
 
   it("kaisai_date を指定すると、その日だけを引く(開催日を束縛する)", async () => {

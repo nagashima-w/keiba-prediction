@@ -1839,11 +1839,11 @@ describe("Issue #279・#280: 月報(MonthlyReportDO)は netkeiba に出ず、LLM
 /**
  * 【Issue #478で改訂】旧(#294): 外部の API の URL を secret の 1 箇所(race-day-do.ts)だけで読み、取得口は baba-fetch.ts の 1 ファイル。
  * 新: 取得先は JRA のページで、secret は無い。保証していた「取得口を作るのは race-day-do.ts の 1 箇所だけ」「グローバルの fetch を呼ぶのは取得口の 1 箇所(注入できる既定)だけで、
- * core・段階・純ロジック・保存先には外向きの通信が無い」「リダイレクトを追わない・再試行の仕組みが無い」「馬場のソースに URL のリテラルが無い〈宛先は取得の部品〉」「D1 の書き込みは 3 文だけ」
+ * core・段階・純ロジック・保存先には外向きの通信が無い」「リダイレクトを追わない・再試行の仕組みが無い」「馬場のソースに URL のリテラルが無い〈宛先は取得の部品〉」「D1 の書き込みは 3 文だけ」〈Issue #480 で 5 文に〉
  * 「取得の段階を使うのは core だけ」「他の DO・cron は参照しない」は、対象を新しいファイル(jra-http.ts・jra-baba-fetch.ts・jra-baba-parse.ts)に替えて維持する。
  * 旧 `BABA_API_URL` の検査は「どのソースにも現れない」に反転した(secret を外した後に配線が戻らないことを固定する)。
  */
-describe("Issue #294・#478: 馬場の取得は JRA のページから、取得口は日単位の DO の 1 箇所だけで作り、core・純ロジックは外向きの通信も URL も持たず、D1 の書き込みは 3 文だけ", () => {
+describe("Issue #294・#478: 馬場の取得は JRA のページから、取得口は日単位の DO の 1 箇所だけで作り、core・純ロジックは外向きの通信も URL も持たず、D1 の書き込みは 5 文だけ(#480 で 3 文から)", () => {
   const srcDir = path.join(ROOT, "cloud", "src");
   const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
   const code = (f: string): string => stripCode(readTextLf("cloud", "src", f));
@@ -1922,15 +1922,21 @@ describe("Issue #294・#478: 馬場の取得は JRA のページから、取得�
     }
   });
 
-  it("D1 の書き込みは baba-repository.ts の 3 文だけ(claim の INSERT・結果の UPDATE・競馬場の INSERT)。DELETE は無い", () => {
+  it("D1 の書き込みは baba-repository.ts の 5 文だけ(Issue #480 で 3 文から増えた: 枠の claim の INSERT・日の要約の claim の INSERT・枠の結果の UPDATE・日の要約の結果の UPDATE・競馬場の INSERT〈欠けを埋める upsert〉)。DELETE は無い", () => {
     const repo = code("baba-repository.ts");
+    expect((repo.match(/INSERT INTO baba_fetch_attempts/g) ?? []).length).toBe(1);
+    expect((repo.match(/UPDATE baba_fetch_attempts/g) ?? []).length).toBe(1);
     expect((repo.match(/INSERT INTO baba_fetches/g) ?? []).length).toBe(1);
     expect((repo.match(/UPDATE baba_fetches/g) ?? []).length).toBe(1);
     expect((repo.match(/INSERT INTO baba_conditions/g) ?? []).length).toBe(1);
     expect(repo).not.toMatch(/\bDELETE\b|\bREPLACE\b/);
     expect(repo).toContain("ON CONFLICT (kaisai_date) DO NOTHING");
+    expect(repo).toContain("ON CONFLICT (kaisai_date, slot) DO NOTHING"); // 1 枠 1 回の保証
+    // 競馬場の行は、欠けを埋めるときだけ更新する(WHERE つきの DO UPDATE。無条件の DO UPDATE で完全な行を潰さない)
+    expect((repo.match(/ON CONFLICT \(kaisai_date, venue_code\) DO UPDATE SET/g) ?? []).length).toBe(1);
+    expect(repo).not.toContain("ON CONFLICT (kaisai_date, venue_code) DO NOTHING");
     // 表を書くのはこのファイルだけ
-    expect(sites(/\b(INSERT INTO|UPDATE|DELETE FROM)\s+baba_(fetches|conditions)\b/g)).toEqual({ "baba-repository.ts": 3 });
+    expect(sites(/\b(INSERT INTO|UPDATE|DELETE FROM)\s+baba_(fetch_attempts|fetches|conditions)\b/g)).toEqual({ "baba-repository.ts": 5 });
   });
 
   it("取得の段階(BabaStage)を使うのは race-day-core.ts だけ。runNextStep では通知の後・タスクの前に 1 箇所、アラームの合成で 1 箇所(期限の候補)", () => {

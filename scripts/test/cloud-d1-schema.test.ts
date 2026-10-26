@@ -312,6 +312,23 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     indexes: [{ origin: "pk", unique: 1, columns: ["kaisai_date"], name: null }],
   },
+  // 0026 の中身(Issue #480)。馬場の取得の枠ごとの試み(主キーは (kaisai_date, slot) = 1 枠 1 回の保証。WITHOUT ROWID。副索引なし)。baba_fetches は日の要約として残る。
+  baba_fetch_attempts: {
+    columns: [
+      { name: "api_fetched_at", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "attempted_at", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "complete", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "dropped_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "finished_at", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "kaisai_date", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "result", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "slot", type: "INTEGER", notnull: 1, dflt_value: null, pk: 2 },
+      { name: "venues_dropped", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "venues_saved", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["kaisai_date", "slot"], name: null }],
+  },
   baba_conditions: {
     columns: [
       { name: "cushion", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
@@ -429,8 +446,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql の25本だけで、番号は 0001 から連続している(後から足すときは 0026 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql の26本だけで、番号は 0001 から連続している(後から足すときは 0027 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -521,8 +538,8 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
   });
 
   it("Issue #445: WITHOUT ROWID の表の集合が、宣言と一致する(主キーが行の実体になる表。外すと書き込みの行が増える。構造の比較〈列・索引〉には現れないので別に固定する)", () => {
-    // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
-    const declared = ["baba_conditions", "baba_fetches", "horse_run_saves", "horse_runs", "race_conditions"];
+    // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)・0026(baba_fetch_attempts)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
+    const declared = ["baba_conditions", "baba_fetch_attempts", "baba_fetches", "horse_run_saves", "horse_runs", "race_conditions"];
     const wrTables = (sqlList: readonly string[]): string[] => {
       const db = openEmptyDb();
       try {
@@ -585,7 +602,7 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     const names = ["min_hit_prob", "below_floor_count", "missed_json"];
     const before = schemaAfter(sqls.slice(0, 24));
     for (const n of names) expect(before["analysis_allocation_meta"]!.columns.map((c) => c.name), n).not.toContain(n);
-    const after = schemaAfter(sqls);
+    const after = schemaAfter(sqls.slice(0, 25)); // 0025 までを適用した状態(0026 以降の表は含めない)
     for (const n of names) {
       expect(after["analysis_allocation_meta"]!.columns.find((c) => c.name === n), n).toEqual(D1_EXTRA_COLUMNS["analysis_allocation_meta"]!.find((c) => c.name === n));
       expect(exe["analysis_allocation_meta"]!.columns.map((c) => c.name), n).not.toContain(n);
@@ -601,6 +618,21 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
         "ALTER TABLE analysis_allocation_meta ADD COLUMN missed_json TEXT;",
       ].join("\n"),
     );
+  });
+
+  it("Issue #480: baba_fetch_attempts は 0026 だけが足す新しい表(主キー (kaisai_date, slot)・WITHOUT ROWID・副索引なし)。0001〜0025 までには無く、exe には無い D1 専用(D1_EXTRA_TABLES に宣言している)。既存の表は変えない(CREATE TABLE の1文だけ)", () => {
+    const before = schemaAfter(sqls.slice(0, 25));
+    expect(Object.keys(before)).not.toContain("baba_fetch_attempts");
+    const after = schemaAfter(sqls);
+    expect(after["baba_fetch_attempts"]).toEqual(D1_EXTRA_TABLES["baba_fetch_attempts"]);
+    expect(Object.keys(exe)).not.toContain("baba_fetch_attempts");
+    for (const [table, schema] of Object.entries(before)) {
+      expect(after[table], table).toEqual(schema); // 既存の表は列も索引も変わらない
+    }
+    expect(Object.keys(after).sort()).toEqual([...Object.keys(before), "baba_fetch_attempts"].sort());
+    const code = sqls[25]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    expect(code.match(/\bCREATE TABLE\b/g) ?? []).toHaveLength(1);
+    expect(code).not.toMatch(/\b(ALTER|DROP|DELETE|UPDATE|INSERT)\b/);
   });
 
   it("Issue #259: win_odds(REAL)・ninki(INTEGER)は 0011 だけが足す。0001〜0010 までには無い。追加のみ(ALTER TABLE ... ADD COLUMN の2文だけ・UPDATE なし)。exe の race_results には無く(D1 専用)、移行の形式の列にも入れない", () => {
