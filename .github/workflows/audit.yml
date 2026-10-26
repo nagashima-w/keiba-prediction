@@ -3,7 +3,7 @@
 # ★何のためか: 脆弱性が公表されてから対応を始めるまでの時間を短くする。Dependabot alerts はユーザーにしか見えず、Claude からは見えない。
 #   このワークフローが毎日(日本時間 03:17)、ルートと cloud/(別の pnpm-lock.yaml。cloud/pnpm-workspace.yaml があり、cloud/ がそれ自身のルート)の両方に `pnpm audit` をかける。
 #   Claude の定期のタスクが毎朝(日本時間 04:23)このワークフローの直近の run を読み、赤なら CLAUDE.md の優先順位(セキュリティと Dependabot を先に)に従って対応する。
-#   Dependabot の更新(.github/dependabot.yml)も毎日にした(日本時間 02:41)。
+#   Dependabot の更新(.github/dependabot.yml)も毎日(`daily`)にした(日本時間 02:41)。ただし Dependabot の `daily` は平日(月〜金)だけ動く。土日も毎日走るのは、このワークフローのほう。
 #
 # ★ジョブは 2 つに分ける(監査(ルート)・監査(cloud))。片方が赤でももう片方の結果が出る。どちらの lockfile かが、ジョブ名で分かる。
 #

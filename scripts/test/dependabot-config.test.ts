@@ -12,7 +12,7 @@
  *    メンバーの中には lockfile が無いので、ルートの job が失敗した回に package.json だけの PR ができる(Issue #465。docs/current-spec.md「Dependabot」)。
  *  - `@anthropic-ai/sdk`・`iconv-lite`・`cheerio`(core は `^X.Y.Z`、cloud は exact `X.Y.Z`)など、core と cloud が同じ版を揃えている依存は、
  *    1 つの group にして 1 つの PR で同時に上げさせる(片方だけの PR は cloud-config-guard.test.ts が赤にして気づける)。
- *  - Issue #498: 更新は毎日(`interval: daily`)・日本時間 02:41(`time`・`timezone`)。毎日の監査(.github/workflows/audit.yml。03:17 JST)と、Claude の毎朝の確認(04:23 JST)より前に動く。
+ *  - Issue #498: 更新は平日の毎日(`interval: daily`。GitHub の仕様で月〜金だけ動く。土日は動かない)・日本時間 02:41(`time`・`timezone`)。毎日の監査(.github/workflows/audit.yml。03:17 JST)と、Claude の毎朝の確認(04:23 JST)より前に動く。
  *  - 自動の脆弱性修正(セキュリティ更新)の PR はこのファイルでは扱えない(宛先を main 以外にできない見込み。未確認)ので、
  *    リポジトリの「Dependabot alerts」で通知を受け、作業ブランチで対応する(docs/current-spec.md)。
  *
@@ -151,7 +151,7 @@ describe("dependabot.yml(Issue #310)", () => {
     expect(code).not.toMatch(/target-branch: ["']?main\b/);
   });
 
-  it("Issue #498: すべての項目が毎日(schedule.interval: daily)・日本時間 02:41(time・timezone)。weekly が残っていない", () => {
+  it("Issue #498: すべての項目が平日の毎日(schedule.interval: daily。月〜金だけ動く)・日本時間 02:41(time・timezone)。weekly が残っていない", () => {
     expect(entries).toHaveLength(2);
     for (const e of entries) {
       expect(e).toMatch(/\n {4}schedule:\n {6}interval: daily\n {6}time: "02:41"\n {6}timezone: "Asia\/Tokyo"\n/);

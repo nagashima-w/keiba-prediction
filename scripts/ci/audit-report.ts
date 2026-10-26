@@ -7,6 +7,7 @@
  *
  * ★判定(安全側に倒す。監査していない日を「安全」と読ませない):
  *   - low 以上(low・moderate・high・critical)の件数の合計が 1 以上 → FAIL(exit 0 でも FAIL。終了コードを信用しない)
+ *   - 件数(`metadata.vulnerabilities`)が全部 0 でも、info 以外の advisory が `advisories` に 1 件でもあれば FAIL(件数と advisories の食い違い。安全側)
  *   - 出力が空・JSON でない・`metadata.vulnerabilities` の 5 つの件数が数でない・error を含み件数が 0 → UNAVAILABLE
  *   - 件数が 0 なのに exit が 0 でない → UNAVAILABLE(監査の結果を信用できない)
  *   - 件数が 0 で exit 0 → OK。info は件数の表示に出すが、失敗の条件には数えない(閾値は「low 以上」)。
@@ -69,8 +70,16 @@ function readCounts(parsed: Record<string, unknown>): Record<Severity, number> |
   return out;
 }
 
-/** advisory を、重大度の高い順・同じ重大度では GHSA の昇順に、1 行ずつにする。 */
-function advisoryLines(parsed: Record<string, unknown>): string[] {
+interface AdvisoryRow {
+  readonly severity: string;
+  readonly module: string;
+  readonly vulnerable: string;
+  readonly patched: string;
+  readonly ghsa: string;
+}
+
+/** advisories を、重大度の高い順・同じ重大度では GHSA の昇順に並べた行にする。 */
+function advisoryRows(parsed: Record<string, unknown>): AdvisoryRow[] {
   const adv = parsed.advisories;
   if (!isRecord(adv)) return [];
   const rows = Object.values(adv)
@@ -87,7 +96,11 @@ function advisoryLines(parsed: Record<string, unknown>): string[] {
     return i < 0 ? SEVERITIES.length : i;
   };
   rows.sort((x, y) => rank(x.severity) - rank(y.severity) || (x.ghsa < y.ghsa ? -1 : x.ghsa > y.ghsa ? 1 : 0));
-  return rows.map((r) => `  ${r.severity} ${r.module} ${r.vulnerable} -> ${r.patched} ${r.ghsa}`);
+  return rows;
+}
+
+function advisoryLine(r: AdvisoryRow): string {
+  return `  ${r.severity} ${r.module} ${r.vulnerable} -> ${r.patched} ${r.ghsa}`;
 }
 
 /**
@@ -114,9 +127,13 @@ export function classifyAudit(label: string, stdout: string, auditExitCode: numb
     return unavailable(label, errorText(parsed) ?? "metadata.vulnerabilities が無い(または件数が数でない)", auditExitCode);
   }
   const total = FAILING.reduce((sum, s) => sum + counts[s], 0);
-  if (total > 0) {
-    const head = `AUDIT-FAIL ${label}: critical=${counts.critical} high=${counts.high} moderate=${counts.moderate} low=${counts.low} info=${counts.info} (total ${total})`;
-    return { verdict: "fail", exitCode: 1, lines: [head, ...advisoryLines(parsed)] };
+  const rows = advisoryRows(parsed);
+  // info を除く advisory(重大度が読めないものも含む)。件数(metadata)が 0 でも、これが 1 件でもあれば、件数と advisories が食い違っている。安全側に FAIL にする。
+  const failingRows = rows.filter((r) => r.severity !== "info");
+  if (total > 0 || failingRows.length > 0) {
+    const mismatch = total === 0 ? `。ただし metadata の件数が 0 なのに advisories が ${failingRows.length} 件ある(食い違い)` : "";
+    const head = `AUDIT-FAIL ${label}: critical=${counts.critical} high=${counts.high} moderate=${counts.moderate} low=${counts.low} info=${counts.info} (total ${total}${mismatch})`;
+    return { verdict: "fail", exitCode: 1, lines: [head, ...rows.map(advisoryLine)] };
   }
   const err = errorText(parsed);
   if (err !== null) return unavailable(label, err, auditExitCode);

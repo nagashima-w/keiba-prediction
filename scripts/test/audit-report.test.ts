@@ -132,6 +132,63 @@ describe("classifyAudit: 閾値(low 以上で失敗。表駆動)", () => {
   });
 });
 
+describe("classifyAudit: 件数(metadata)が全部 0 でも advisories が空でなければ FAIL(件数と advisories の食い違い。安全側)", () => {
+  /** 件数は全部 0 で、advisories にだけ指定の advisory を持つ出力(食い違い)。 */
+  function mismatched(advisories: Record<string, Record<string, unknown>>): string {
+    return JSON.stringify({
+      actions: [],
+      advisories,
+      muted: [],
+      metadata: { vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 0 } },
+    });
+  }
+  const high = { "1": { severity: "high", module_name: "lodash", vulnerable_versions: "<4.17.21", patched_versions: ">=4.17.21", github_advisory_id: "GHSA-35jh-r3h4-6jhm" } };
+
+  it("前提(空振り防止): 入力は件数が全部 0 で、advisories が 1 件ある", () => {
+    const j = JSON.parse(mismatched(high)) as { advisories: Record<string, unknown>; metadata: { vulnerabilities: Record<string, number> } };
+    expect(Object.values(j.metadata.vulnerabilities)).toEqual([0, 0, 0, 0, 0]);
+    expect(Object.keys(j.advisories)).toHaveLength(1);
+  });
+
+  it.each([0, 1])("件数 0・high の advisory が 1 件(exit %i)は FAIL。1 行目に食い違いを明記し、advisory の行が続く(終了コード 1)", (exit) => {
+    const r = classifyAudit("t", mismatched(high), exit);
+    expect(r.verdict).toBe("fail");
+    expect(r.exitCode).toBe(1);
+    expect(r.lines[0]).toBe("AUDIT-FAIL t: critical=0 high=0 moderate=0 low=0 info=0 (total 0。ただし metadata の件数が 0 なのに advisories が 1 件ある(食い違い))");
+    expect(r.lines).toEqual([r.lines[0], "  high lodash <4.17.21 -> >=4.17.21 GHSA-35jh-r3h4-6jhm"]);
+  });
+
+  it("重大度が読めない(severity が無い)advisory も、失敗側として数える", () => {
+    const r = classifyAudit("t", mismatched({ "2": { module_name: "x" } }), 0);
+    expect(r.verdict).toBe("fail");
+    expect(r.lines[0]).toContain("advisories が 1 件ある");
+    expect(r.lines[1]).toBe("  ? x ? -> ? ?");
+  });
+
+  it("info だけの advisory は、閾値(low 以上)の対象外なので OK のまま(exit 0)。info を含めて数えた件数 2 件でも FAIL にしない", () => {
+    const info = { "3": { severity: "info", module_name: "a", vulnerable_versions: "*", patched_versions: "-", github_advisory_id: "GHSA-aaaa-aaaa-aaaa" }, "4": { severity: "info", module_name: "b", vulnerable_versions: "*", patched_versions: "-", github_advisory_id: "GHSA-bbbb-bbbb-bbbb" } };
+    expect(Object.keys(info)).toHaveLength(2);
+    const r = classifyAudit("t", mismatched(info), 0);
+    expect(r.verdict).toBe("ok");
+    expect(r.lines).toEqual(["AUDIT-OK t: 0 vulnerabilities"]);
+  });
+
+  it("info の advisory と high の advisory が混在し、件数が全部 0 なら FAIL。advisory の行は 2 件(重大度の高い順)", () => {
+    const mixed = { ...high, "3": { severity: "info", module_name: "a", vulnerable_versions: "*", patched_versions: "-", github_advisory_id: "GHSA-aaaa-aaaa-aaaa" } };
+    const r = classifyAudit("t", mismatched(mixed), 0);
+    expect(r.verdict).toBe("fail");
+    expect(r.lines[0]).toContain("advisories が 1 件ある");
+    expect(r.lines).toHaveLength(3);
+    expect(r.lines[1]).toContain("high lodash");
+    expect(r.lines[2]).toContain("info a");
+  });
+
+  it("advisories が空のオブジェクトや無い出力は、これまでどおり件数で判定する(0 件・exit 0 は OK)", () => {
+    expect(classifyAudit("t", mismatched({}), 0).verdict).toBe("ok");
+    expect(classifyAudit("t", JSON.stringify({ metadata: { vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 0 } } }), 0).verdict).toBe("ok");
+  });
+});
+
 describe("classifyAudit: 監査の結果として読めない出力は UNAVAILABLE(OK にしない)", () => {
   const cases: { name: string; stdout: string; exit: number; reasonIncludes: string }[] = [
     { name: "空の出力(exit 1)", stdout: "", exit: 1, reasonIncludes: "出力が空" },

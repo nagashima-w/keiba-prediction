@@ -10,8 +10,9 @@
 # ★この設定ファイルは、GitHub が既定ブランチ(main)のものを読む。作業ブランチにあるだけでは Dependabot は動かない
 #   (main への取り込みはユーザーの指示で PR のマージとして行う)。
 #
-# ★Issue #498: バージョン更新を週 1 回から毎日(`daily`)にした。時刻は日本時間 02:41(`time`・`timezone`)で、毎日の監査(.github/workflows/audit.yml。03:17 JST)と、
-#   Claude の毎朝の確認(04:23 JST)より前に、更新の PR が出そろうようにする。毎日にしても、脆弱性への対応そのものは速くならない(lockfile の `minimum-release-age`〈公開から 3 日〉の効果も残る)。
+# ★Issue #498: バージョン更新を週 1 回から毎日(`daily`)にした。**GitHub の仕様では `daily` は平日(月〜金)だけ動く**(公式の options reference の記述: "Use `daily` to run on every weekday, Monday to Friday."。2026-10-27 に確認)。
+#   土日は更新の PR が来ない(土日も毎日走るのは audit.yml の監査のほう)。時刻は日本時間 02:41(`time`・`timezone`)で、毎日の監査(.github/workflows/audit.yml。03:17 JST)と、
+#   Claude の毎朝の確認(04:23 JST)より前に、更新の PR が出そろうようにする。平日の毎日にしても、脆弱性への対応そのものは速くならない(lockfile の `minimum-release-age`〈公開から 3 日〉の効果も残る)。
 #   脆弱性に早く気づくのは、audit.yml(毎日の `pnpm audit`)と Dependabot alerts の役目である。
 #   **`time`・`timezone` が効くか(指定の時刻に PR が来るか)は、この変更が main に入って Dependabot が実際に走るまで未確認**(このリポジトリで使うのは初めて)。
 #   時刻の指定は「その時刻に始める」意味で、PR が出るのは少し遅れうる。
