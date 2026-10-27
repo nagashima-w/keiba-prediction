@@ -227,6 +227,11 @@ describe("GET /api/monthly-reports/{YYYYMM}: 補正の当たり具合の節(Issu
     expect(report.fit[0]!.note).toContain("多すぎて");
   });
 
+  it("知らない理由の印(unavailable が未知の語)は、節なし(画面を壊さない。note が undefined の節を返さない)。Issue #511", async () => {
+    const report = (await fitOf(rowWith({ adjustmentFit: { unavailable: "未知の理由" } }))) as { fit: unknown };
+    expect(report.fit).toStrictEqual([]);
+  });
+
   it("項目の無い昔の月報・stats が無い・壊れた stats・壊れた adjustmentFit は、節なし(落ちない)", async () => {
     for (const stats of [undefined, null, 5, {}, { adjustmentFit: null }, { adjustmentFit: 5 }, { adjustmentFit: { all: 1 } }, { adjustmentFit: { all: { raceCount: 3 } } }]) {
       expect(((await fitOf(rowWith(stats))) as { fit: unknown }).fit, JSON.stringify(stats)).toStrictEqual([]);

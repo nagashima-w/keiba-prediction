@@ -46,7 +46,15 @@ function bucketValue(b: FitBucket<string>): string {
   return b.count < FIT_FEW_COUNT ? `${text} ${FIT_FEW_MARK}` : text;
 }
 
-const signed = (n: number): string => `${n < 0 ? "−" : "+"}${Math.abs(n).toFixed(4)}`;
+/**
+ * 4 桁に丸めた 2 つの値の差(画面に出る 2 つの数の引き算と、出る差が一致する)。表示と同じ `toFixed(4)` で丸めたあと、1/10000 単位の整数で引いて、浮動小数の引き算の誤差を避ける。
+ * 差が 0 のときの符号は「+」(「−0.0000」と出さない)。負号は他の差と同じ「−」(U+2212)。
+ */
+function signedRoundedDiff(prior: number, adjusted: number): string {
+  const units = (n: number): number => Math.round(Number(n.toFixed(4)) * 10_000); // 表示と同じ丸め(toFixed(4))を先にかける
+  const diff = units(adjusted) - units(prior);
+  return `${diff < 0 ? "−" : "+"}${(Math.abs(diff) / 10_000).toFixed(4)}`;
+}
 
 /**
  * 最適な倍率 k の文面。**表示する 2 桁に丸めた値で区分する**(表示が 0.00・1.00 になる値で、文面と数字が食い違わないため)。
@@ -68,7 +76,7 @@ function kText(k: number | null): string {
 function summaryRows(g: FitGroup): FitSection["rows"] {
   const { prior, adjusted } = g.brier;
   const brierText =
-    prior === null || adjusted === null ? "なし" : `統計モデル ${prior.toFixed(4)}・補正後 ${adjusted.toFixed(4)}(差 ${signed(adjusted - prior)}。負なら補正で良くなった)`;
+    prior === null || adjusted === null ? "なし" : `統計モデル ${prior.toFixed(4)}・補正後 ${adjusted.toFixed(4)}(差 ${signedRoundedDiff(prior, adjusted)}。負なら補正で良くなった)`;
   return [
     { label: "3 着内の Brier", value: brierText },
     { label: "最適な倍率 k", value: kText(g.optimalK) },

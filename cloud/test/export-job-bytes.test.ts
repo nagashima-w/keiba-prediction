@@ -112,3 +112,31 @@ describe("配分用: 仕上げのバイト列は起点のコードで測った�
     });
   }
 });
+
+describe("配分用: メタ行の missingOdds と noAllocation は取り違えない(Issue #507。2 つが違う値のシナリオ)", () => {
+  // 上の固定値のシナリオは、詳細なし 1 件・配分のメタなし 1 件で、2 つの数が同じ 1 になる。取り違えても気づけないので、別のテストで 2 つを違う数にする。
+  // 固定値(sha256)は起点のコードで測ったものなので、上のシナリオ・フィクスチャは変えない。
+  it("詳細なし 2 件(101・103)・配分のメタなし 1 件(102): メタ行・kv の file とも missingOdds=2・noAllocation=1", async () => {
+    const kv = new FakeKv();
+    const store = new AllocationFakeStore();
+    store.candidates = Array.from({ length: 5 }, (_, i) => cand(100 + i, raceIdOf(i + 1)));
+    store.noDetail = new Set([101, 103]);
+    store.noMeta = new Set([102]);
+    const d = driver();
+    const core = new AllocationExportCore({ kv, store, ...d.deps }, { batchSize: 2 });
+    await core.request("download");
+    await d.drain(core);
+    expect(store.puts).toHaveLength(1);
+    const lines = new TextDecoder().decode(gunzipSync(store.puts[0]!.bytes)).split("\n").filter((l) => l !== "");
+    const meta = (JSON.parse(lines[0]!) as { _meta: { missingOdds: number; noAllocation: number } })._meta;
+    const file = kv.get<{ missingOdds: number; noAllocation: number }>("file")!;
+    expect(meta.missingOdds).not.toBe(meta.noAllocation); // 前提: 2 つが違う値(同じだと取り違えを検出できない)
+    expect({ missingOdds: meta.missingOdds, noAllocation: meta.noAllocation }).toEqual({ missingOdds: 2, noAllocation: 1 });
+    expect({ missingOdds: file.missingOdds, noAllocation: file.noAllocation }).toEqual({ missingOdds: 2, noAllocation: 1 });
+    // 行そのものから数えた値とも一致する(has_odds が false の行、allocation が null の行)
+    const rows = lines.slice(1).map((l) => JSON.parse(l) as { has_odds: boolean; allocation: unknown });
+    expect(rows).toHaveLength(5);
+    expect(rows.filter((r) => !r.has_odds)).toHaveLength(2);
+    expect(rows.filter((r) => r.allocation === null)).toHaveLength(1);
+  });
+});
