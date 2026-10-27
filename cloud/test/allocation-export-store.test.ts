@@ -6,6 +6,7 @@ import { ALLOCATION_EXPORT_BATCH_SIZE, ALLOCATION_EXPORT_TICK_OVERHEAD_QUERIES, 
 import { D1ResultStore } from "../src/result-repository";
 import type { AnalysisAllocationMetaRecord, AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { openLocalBindings, spyBucket, spyDb, type LocalBindings } from "./local-bindings";
+import { fixedLength, streamBucket } from "./stream-put-support";
 
 /**
  * Issue #463: 配分の再計算用の書き出しの D1・R2 の読み書き(`D1AllocationExportStore`)を、ローカル(workerd)の D1・R2 で確かめる。
@@ -71,39 +72,9 @@ function mkRecord(i: number, over: Partial<AnalysisRecord> = {}): AnalysisRecord
 }
 
 const analyses = () => new D1AnalysisStore({ db: local.db, bucket: local.r2, now: () => NOW });
-/** FixedLengthStream の代わり: 流れたバイト数が宣言した長さと違えば、読み手(put)が失敗する。 */
-function fixedLength(length: number) {
-  let seen = 0;
-  return new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      seen += chunk.length;
-      if (seen > length) throw new Error("宣言より多い");
-      controller.enqueue(chunk);
-    },
-    flush() {
-      if (seen !== length) throw new Error("宣言と違う");
-    },
-  });
-}
 const store = (bucket: AllocationExportBucket = local.r2 as unknown as AllocationExportBucket, db = local.db) =>
   new D1AllocationExportStore({ db, bucket, now: () => NOW, fixedLengthStream: fixedLength });
 const results = () => new D1ResultStore({ db: local.db });
-
-/** R2 の put を、流れてきたストリームを読み切って実物のバケットに渡す偽物にする(Node の ReadableStream をローカルの R2 のプロキシに直接渡せないため)。 */
-function streamBucket(real: R2Bucket): { bucket: AllocationExportBucket; bodies: Uint8Array[]; keys: string[] } {
-  const bodies: Uint8Array[] = [];
-  const keys: string[] = [];
-  const bucket = {
-    get: (key: string) => real.get(key),
-    async put(key: string, value: ReadableStream | Uint8Array, options?: R2PutOptions) {
-      const bytes = value instanceof Uint8Array ? value : new Uint8Array(await new Response(value as ReadableStream).arrayBuffer());
-      keys.push(key);
-      bodies.push(bytes);
-      return real.put(key, bytes, options);
-    },
-  } as unknown as AllocationExportBucket;
-  return { bucket, bodies, keys };
-}
 
 async function seedPayouts(raceId: string): Promise<void> {
   await local.db.prepare("INSERT INTO race_combo_payouts (race_id, bet_type, combo_key, payout) VALUES (?, 'exacta', '0102', 1230), (?, 'exacta', '0201', 1540), (?, 'wide', '0102', 220)").bind(raceId, raceId, raceId).run();

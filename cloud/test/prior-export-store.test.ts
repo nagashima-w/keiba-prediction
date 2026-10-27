@@ -6,6 +6,7 @@ import { PRIOR_EXPORT_BATCH_SIZE, PRIOR_EXPORT_TICK_OVERHEAD_QUERIES, type Detai
 import { D1ResultStore } from "../src/result-repository";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { openLocalBindings, spyBucket, spyDb, type LocalBindings } from "./local-bindings";
+import { fixedLength, streamBucket } from "./stream-put-support";
 
 /**
  * Issue #266: 書き出しの D1・R2 の読み書き(`D1PriorExportStore`)を、ローカル(workerd)の D1・R2 で確かめる。
@@ -45,7 +46,7 @@ function mkRecord(i: number, over: Partial<AnalysisRecord> = {}): AnalysisRecord
 }
 
 const analyses = () => new D1AnalysisStore({ db: local.db, bucket: local.r2, now: () => NOW });
-const store = (bucket: PriorExportBucket = local.r2, db = local.db) => new D1PriorExportStore({ db, bucket, now: () => NOW });
+const store = (bucket: PriorExportBucket = local.r2, db = local.db) => new D1PriorExportStore({ db, bucket, now: () => NOW, fixedLengthStream: fixedLength });
 const results = () => new D1ResultStore({ db: local.db });
 
 describe("readCandidates", () => {
@@ -190,18 +191,37 @@ describe("Class A・B の計数と put", () => {
     expect(await s.readUsage()).toEqual({ classA: 0, classB: 35 });
   });
 
-  it("putFile は class_a を 1 数えてから、固定キーに put する(メタデータつき)。上書きは 1 つのオブジェクトのまま", async () => {
-    const s = store();
-    await s.putFile("exports/prior-dataset.ndjson.gz", new Uint8Array([1, 2, 3]), { generatedAt: "2026-10-10T12:00:00.000Z", rows: 3, races: 1 });
-    await s.putFile("exports/prior-dataset.ndjson.gz", new Uint8Array([4, 5]), { generatedAt: "2026-10-10T13:00:00.000Z", rows: 2, races: 1 });
+  const INFO = { generatedAt: "2026-10-10T12:00:00.000Z", rows: 3, races: 1 };
+
+  it("putFileStream は class_a を 1 数えてから、塊を 1 つずつ流して固定キーに put する(メタデータつき)。上書きは 1 つのオブジェクトのまま", async () => {
+    const sb = streamBucket(local.r2);
+    const s = store(sb.bucket);
+    const read: number[] = [];
+    await s.putFileStream("exports/prior-dataset.ndjson.gz", function* () { for (const p of [[1, 2], [3], [4, 5, 6]]) { read.push(p.length); yield new Uint8Array(p); } }, 6, INFO);
+    await s.putFileStream("exports/prior-dataset.ndjson.gz", () => [new Uint8Array([4, 5])], 2, { generatedAt: "2026-10-10T13:00:00.000Z", rows: 2, races: 1 });
+    expect(read).toEqual([2, 1, 3]);
     expect(await s.readUsage()).toEqual({ classA: 2, classB: 0 });
+    expect(sb.keys).toEqual(["exports/prior-dataset.ndjson.gz", "exports/prior-dataset.ndjson.gz"]);
+    expect([...sb.bodies[0]!]).toEqual([1, 2, 3, 4, 5, 6]);
     const obj = await local.r2.get("exports/prior-dataset.ndjson.gz");
     expect([...new Uint8Array(await obj!.arrayBuffer())]).toEqual([4, 5]);
     expect(obj!.customMetadata).toMatchObject({ generatedAt: "2026-10-10T13:00:00.000Z", rows: "2", races: "1" });
   });
 
-  it("put が失敗すると例外を投げる(呼び出し側が再試行する)", async () => {
+  it("Class A は put の前に数える: 流している途中の例外・総バイト数の食い違い・put の失敗でも数え、例外を投げる。固定キーの古いファイルは変わらない", async () => {
+    const sb = streamBucket(local.r2);
+    const s = store(sb.bucket);
+    await s.putFileStream("k", () => [new Uint8Array([7])], 1, INFO); // 古いファイル
+    const before = (await s.readUsage()).classA;
+    await expect(s.putFileStream("k", function* () { yield new Uint8Array([1, 1]); throw new Error("塊が失われています"); }, 4, INFO)).rejects.toThrow();
+    await expect(s.putFileStream("k", () => [new Uint8Array([1, 1])], 5, INFO)).rejects.toThrow(); // 宣言より短い
+    await expect(s.putFileStream("k", () => [new Uint8Array([1, 1, 1])], 2, INFO)).rejects.toThrow(); // 宣言より長い
+    // 宣言した長さをちょうど流したあとに例外になっても、put は失敗として終わり、古いファイルを上書きしない
+    await expect(s.putFileStream("k", function* () { yield new Uint8Array([2, 2]); throw new Error("最後の塊の後で例外"); }, 2, INFO)).rejects.toThrow("最後の塊の後で例外");
     const spy = spyBucket(local.r2, { failPut: () => true });
-    await expect(store(spy.bucket as unknown as PriorExportBucket).putFile("k", new Uint8Array([1]), { generatedAt: "x", rows: 0, races: 0 })).rejects.toThrow();
+    await expect(store(spy.bucket as unknown as PriorExportBucket).putFileStream("k", () => [new Uint8Array([1])], 1, INFO)).rejects.toThrow();
+    expect((await s.readUsage()).classA).toBe(before + 5);
+    const obj = await local.r2.get("k");
+    expect([...new Uint8Array(await obj!.arrayBuffer())]).toEqual([7]);
   });
 });
