@@ -13,7 +13,7 @@
  *
  * この module は、クライアント(ブラウザの束)から import しない(プロンプトの文面が束に入って肥大するため)。
  */
-import { adjustmentFitHasData, adjustmentFitPromptLines } from "./adjustment-fit-format";
+import { adjustmentFitHasData, adjustmentFitPromptLines, FIT_FEW_MARK } from "./adjustment-fit-format";
 import { dateLabel, periodBlock, whatIfRows, WHATIF_HEADING, yen } from "./daily-report-prompt";
 import { formatMonthLabel } from "./monthly-month";
 import type { MonthDayRow, MonthStats, MonthVersionRow } from "./monthly-stats";
@@ -94,7 +94,7 @@ export function buildMonthlyPrompt(input: MonthlyPromptInput): string {
       ? [
           "- 「補正の当たり具合」の節は、LLM が統計モデルの 3 着内率を補正した結果が、実際の 3 着内率に近づいたかを見る確定値です。計算し直さず、そのまま引用してください。成績の節とは母集団が違います(先読みの疑いと LLM 不使用の分析を除いています)。",
           "- 補正が良かったか悪かったかは、統計モデルの率・補正後の率・実際の率を並べ、実際の率との差(ポイント)を数字で示して書いてください。数字を伴わない評価は書かないでください。",
-          "- 頭数が少ない区分(「※30 頭未満」と付いた区分)は断定しないでください。最適な倍率 k も 1 か月分の標本では動きやすい値です。1 より大きければ補正の幅が小さすぎた、1 より小さければ大きすぎたことを示しますが、頭数が少ないときは断定しないでください。",
+          `- 頭数が少ない区分(「${FIT_FEW_MARK}」と付いた区分)は断定しないでください。最適な倍率 k も 1 か月分の標本では動きやすい値です。1 より大きければ補正の幅が小さすぎた、1 より小さければ大きすぎたことを示します。0 より小さければ、補正の向きが実際と逆だったことを示します。いずれも頭数が少ないときは断定しないでください。`,
           "- 人気の帯別の差は、主に統計モデルの偏りを表します。LLM の補正の良し悪しとは分けて書いてください。版ごとの表の違いを、版の優劣の結論にしないでください。",
           "- この節の数字についても、プロンプトや重みを変えるよう命令する書き方はしないでください。気づきとして、見ておく数字を書いてください。",
         ]

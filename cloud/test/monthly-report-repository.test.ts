@@ -357,6 +357,18 @@ describe("D1MonthlySource.readMonthStats: 補正の当たり具合(Issue #509)",
     expect(fit.hiddenVersionCount).toBe(1);
   });
 
+  it("月の範囲の端: 月初(1 日)と末日(31 日)の標本は入り、前月末日(30 日)と翌月 1 日の標本は入らない(境目の比較が閉じている)", async () => {
+    await seedFitRace({ raceNo: 1, kaisaiDate: "20261001" }); // 月初(含む)
+    await seedFitRace({ raceNo: 2, kaisaiDate: "20261031" }); // 月末(含む)
+    await seedFitRace({ raceNo: 3, kaisaiDate: "20260930" }); // 前月末(含まない)
+    await seedFitRace({ raceNo: 4, kaisaiDate: "20261101" }); // 翌月初(含まない)
+    const read = await readAdjustmentFitRows(local.db, "20261001", "20261031");
+    expect(read.selection.chosen.map((c) => c.raceId)).toEqual([fitRaceId(1), fitRaceId(2)]);
+    const fit = await fitOf("20261001", "20261031");
+    expect(fit.all.raceCount).toBe(2);
+    expect(fit.all.horseCount).toBe(6);
+  });
+
   it("値: 向き別・人気別・Brier・k が、入れた標本の手計算と一致する(取消の馬・着順なしの馬は評価しない)", async () => {
     await seedFitRace({
       raceNo: 1,

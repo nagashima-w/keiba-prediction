@@ -151,6 +151,40 @@ describe("fetchMonthly", () => {
   });
 });
 
+describe("fetchMonthly: 補正の当たり具合(Issue #509。サーバが文面を作った節をそのまま読む)", () => {
+  const SECTION = { heading: "補正の向き別(月全体)", note: null, rows: [{ label: "大きく上げた(+5pt 超)", value: "412 頭・統計モデル 27.8%・補正後 34.7%・実際 45.4%(187/412)" }, { label: "ほぼそのまま(±1pt)", value: "0 頭" }] };
+  const NOTE_ONLY = { heading: "補正の当たり具合", note: "補正の当たり具合は、計算できなかったため、載せていません。", rows: [] };
+  const withFit = (fit: unknown) => ({ ok: true, report: { ...DETAIL, fit } });
+
+  it("fit の節(見出し・注・行)を、そのまま読む。注があって行が無い節(読み出せなかった月報)も読める", async () => {
+    const got = await fetchMonthly(reply(200, withFit([{ ...SECTION, note: "母集団の説明" }, NOTE_ONLY])), "202610");
+    if (!got.ok || got.report === null) throw new Error("読めている想定");
+    expect(got.report.fit).toStrictEqual([{ ...SECTION, note: "母集団の説明" }, NOTE_ONLY]);
+  });
+
+  it("fit が無い・null の応答(昔のサーバ・昔の月報)は、節なし(空の配列)として読める", async () => {
+    for (const body of [{ ok: true, report: DETAIL }, withFit(null), withFit([])]) {
+      const got = await fetchMonthly(reply(200, body), "202610");
+      if (!got.ok || got.report === null) throw new Error("読めている想定");
+      expect(got.report.fit).toStrictEqual([]);
+    }
+  });
+
+  it.each([
+    ["fit が配列でない", withFit({})],
+    ["節が null", withFit([null])],
+    ["見出しが文字列でない", withFit([{ ...SECTION, heading: 5 }])],
+    ["注が文字列でも null でもない", withFit([{ ...SECTION, note: 5 }])],
+    ["注のキーが無い", withFit([{ heading: "x", rows: [] }])],
+    ["行が配列でない", withFit([{ ...SECTION, rows: {} }])],
+    ["行のラベルが文字列でない", withFit([{ ...SECTION, rows: [{ label: 1, value: "x" }] }])],
+    ["行の値が無い", withFit([{ ...SECTION, rows: [{ label: "x" }] }])],
+    ["1 節だけ壊れている(一部だけを採用しない)", withFit([SECTION, { ...SECTION, rows: [null] }])],
+  ])("想定外の形は unexpected: %s", async (_name, body) => {
+    expect(await fetchMonthly(reply(200, body), "202610")).toStrictEqual({ ok: false, error: { kind: "unexpected", httpStatus: 200 } });
+  });
+});
+
 describe("monthlyFetchFailureMessage(固定の文言。サーバの文面・例外の文面を含めない)", () => {
   it.each([
     { kind: "forbidden" as const },

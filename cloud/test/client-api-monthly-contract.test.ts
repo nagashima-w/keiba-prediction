@@ -7,7 +7,9 @@ import { jstMsOf } from "../src/monthly-month";
 import type { MessageSender } from "@keiba/core/llm";
 import { MonthlyReportCore, MONTHLY_NOTE_NO_KEY, type MonthlyMode, type MonthlyReportRecord, type MonthlyStatus } from "../src/monthly-report-core";
 import { MONTHLY_PROMPT_VERSION } from "../src/monthly-report-prompt";
-import { buildMonthStats } from "../src/monthly-stats";
+import { buildAdjustmentFit, selectFitAnalyses, type FitCandidate } from "../src/adjustment-fit";
+import { adjustmentFitSections } from "../src/adjustment-fit-format";
+import { buildMonthStats, type MonthStats } from "../src/monthly-stats";
 import type { PeriodRows } from "../src/period-stats";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
@@ -53,7 +55,7 @@ function rows(): PeriodRows {
 /**
  * 本物のコアに、偽の窓口(D1)を渡して月報を作らせ、保存された記録を取り出す。`llmText` を渡すと、その応答を返す偽の LLM を使う(Issue #280。省略は LLM なし = キー未登録の月報)。
  */
-async function buildSavedRecord(lastDayPending: boolean, llmText?: string): Promise<MonthlyReportRecord> {
+async function buildSavedRecord(lastDayPending: boolean, llmText?: string, withFit = false): Promise<MonthlyReportRecord> {
   const sender: MessageSender = async () => ({ content: [{ type: "text", text: llmText ?? "" }], stop_reason: "end_turn", model: "claude-sonnet-5-5", usage: { input_tokens: 10, output_tokens: 10 } });
   const kv = new Map<string, unknown>();
   const saved: MonthlyReportRecord[] = [];
@@ -69,7 +71,7 @@ async function buildSavedRecord(lastDayPending: boolean, llmText?: string): Prom
     onWarn: () => {},
     source: {
       lastDayStatus: async () => ({ raceCount: 3, noResultRaceCount: lastDayPending ? 1 : 0, hasDailyReport: !lastDayPending }),
-      readMonthStats: async (from, to) => buildMonthStats(rows(), { fromDate: from, toDate: to }),
+      readMonthStats: async (from, to): Promise<MonthStats> => ({ ...buildMonthStats(rows(), { fromDate: from, toDate: to }), ...(withFit ? { adjustmentFit: realFit() } : {}) }),
     },
     loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
     ...(llmText === undefined ? {} : { llm: { sender } }),
@@ -113,6 +115,24 @@ async function realJob(scenario: "regen-running" | "regen-kept" | "create-runnin
     }
   }
   return core.getStatus("202610")!;
+}
+
+/** 本物の計算(`buildAdjustmentFit`)が作る補正の当たり具合(2 レース・各 3 頭)。 */
+function realFit() {
+  const candidate = (id: number, raceId: string): FitCandidate => ({
+    id, raceId, analyzedAt: "2026-10-03T00:00:00.000Z", kaisaiDate: "20261003", promptVersion: "v1", detailKey: null, evEstimated: 0, promptLookaheadGuarded: 1, historyCutoffDate: "20261002", startTime: "15:45", model: "claude-x",
+  });
+  const horses = [1, 2].flatMap((id) => [
+    { analysisId: id, umaban: 1, prior: 0.4, adjustedProb: 0.5 },
+    { analysisId: id, umaban: 2, prior: 0.3, adjustedProb: 0.3 },
+    { analysisId: id, umaban: 3, prior: 0.2, adjustedProb: 0.1 },
+  ]);
+  const results = ["R1", "R2"].flatMap((raceId) => [
+    { raceId, umaban: 1, finishPosition: 1, ninki: 1 },
+    { raceId, umaban: 2, finishPosition: 5, ninki: 2 },
+    { raceId, umaban: 3, finishPosition: 3, ninki: 8 },
+  ]);
+  return buildAdjustmentFit(selectFitAnalyses([candidate(1, "R1"), candidate(2, "R2")]), horses, results);
 }
 
 async function connect(record: MonthlyReportRecord, options: { status?: MonthlyStatus | null; admin?: boolean } = {}): Promise<FetchLike> {
@@ -168,6 +188,31 @@ describe("契約: 本物の月報(MonthlyReportCore の出力)を、クライア
     expect(s.days.reduce((n, d) => n + d.totalReturn, 0)).toBe(s.totalReturn);
     expect(s.byVersion.reduce((n, v) => n + v.raceCount, 0)).toBe(s.raceCount);
     expect(s.totalStake).toBe(record.totalStake);
+  });
+
+  it("補正の当たり具合(Issue #509): 本物のコアが残した数字から、サーバが作った節を、クライアントがそのまま読み、画面のモデルまで通る。数字は本文にも残る", async () => {
+    const record = await buildSavedRecord(false, undefined, true);
+    const fit = realFit();
+    expect(fit.all.horseCount).toBe(6); // 前提: 標本が実際に数えられている(空の節ではない)
+    expect(record.body.stats.adjustmentFit).toEqual(fit);
+    const got = await fetchMonthly(await connect(record), "202610");
+    if (!got.ok || got.report === null) throw new Error("読めている想定");
+    const expected = adjustmentFitSections(fit);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(got.report.fit).toStrictEqual(expected);
+    const model = buildMonthlyModel({ today: "20261101", shownMonth: "202610", list: { kind: "ready", items: [] }, detail: { kind: "ready", report: got.report } });
+    expect(model.body!.fit).toStrictEqual(expected);
+    // 向き別の行の値が、入れた標本のとおり(大きく上げた 2 頭・そのまま 2 頭・大きく下げた 2 頭)
+    const direction = model.body!.fit.find((s) => s.heading === "補正の向き別(月全体)")!;
+    expect(direction.rows.map((r) => r.value.split("・")[0])).toEqual(["2 頭", "0 頭", "2 頭", "0 頭", "2 頭"]);
+  });
+
+  it("補正の当たり具合(Issue #509): 項目の無い月報(昔の月報)は fit が空の配列で、画面のモデルも空", async () => {
+    const record = await buildSavedRecord(false);
+    expect(record.body.stats.adjustmentFit).toBeUndefined();
+    const got = await fetchMonthly(await connect(record), "202610");
+    if (!got.ok || got.report === null) throw new Error("読めている想定");
+    expect(got.report.fit).toStrictEqual([]);
   });
 
   it("最終日の結果・日報を待ちきれずに作った月報(lastDayPending: true)も読め、画面のモデルに未確定の注記が出る", async () => {

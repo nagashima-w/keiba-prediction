@@ -37,26 +37,41 @@ const POPULARITY_LABELS: Readonly<Record<PopularityKey, string>> = {
 };
 
 /** 数が少ない区分に付ける印(断定しないための目印。プロンプトの規則が参照する)。 */
-const FEW_MARK = `※${FIT_FEW_COUNT} 頭未満`;
+export const FIT_FEW_MARK = `※${FIT_FEW_COUNT} 頭未満`;
 
 function bucketValue(b: FitBucket<string>): string {
   if (b.count === 0) return "0 頭";
   const actual = formatRate(b.placedCount / b.count);
   const text = `${b.count} 頭・統計モデル ${formatRate(b.meanPrior)}・補正後 ${formatRate(b.meanAdjusted)}・実際 ${actual}(${b.placedCount}/${b.count})`;
-  return b.count < FIT_FEW_COUNT ? `${text} ${FEW_MARK}` : text;
+  return b.count < FIT_FEW_COUNT ? `${text} ${FIT_FEW_MARK}` : text;
 }
 
 const signed = (n: number): string => `${n < 0 ? "−" : "+"}${Math.abs(n).toFixed(4)}`;
+
+/**
+ * 最適な倍率 k の文面。**表示する 2 桁に丸めた値で区分する**(表示が 0.00・1.00 になる値で、文面と数字が食い違わないため)。
+ * k < 0: 補正の向きが実際と逆(補正しない方が当たった)。0: 補正を足しても良くならなかった。0〜1: 補正の幅が大きすぎた。1: ちょうどよかった。1 超: 小さすぎた。
+ * 負号は他の差と同じ「−」(U+2212)。
+ */
+function kText(k: number | null): string {
+  if (k === null) return "なし(補正が 1 頭も無い、または評価した馬が無い)";
+  const r = Number(k.toFixed(2));
+  if (r === 0) return "0.00(補正を足しても当たりは良くならなかった)";
+  if (r < 0) return `−${Math.abs(r).toFixed(2)}(負の値: 補正の向きが実際と逆だった。補正しない方が当たった)`;
+  const shown = r.toFixed(2);
+  const lead = `${shown}(補正の幅を ${shown} 倍にしたとき最も当たった。`;
+  if (r < 1) return `${lead}1 より小さいので補正の幅が大きすぎた)`;
+  if (r === 1) return `${lead}今の補正の幅がちょうどよかった)`;
+  return `${lead}1 より大きいので補正の幅が小さすぎた)`;
+}
 
 function summaryRows(g: FitGroup): FitSection["rows"] {
   const { prior, adjusted } = g.brier;
   const brierText =
     prior === null || adjusted === null ? "なし" : `統計モデル ${prior.toFixed(4)}・補正後 ${adjusted.toFixed(4)}(差 ${signed(adjusted - prior)}。負なら補正で良くなった)`;
-  const k = g.optimalK;
-  const kText = k === null ? "なし(補正が 1 頭も無い、または評価した馬が無い)" : `${k.toFixed(2)}(補正の幅を ${k.toFixed(2)} 倍にしたとき最も当たった。1 より大きいと補正の幅が小さすぎた)`;
   return [
     { label: "3 着内の Brier", value: brierText },
-    { label: "最適な倍率 k", value: kText },
+    { label: "最適な倍率 k", value: kText(g.optimalK) },
   ];
 }
 
@@ -75,7 +90,7 @@ function populationNote(fit: AdjustmentFit): string {
   return (
     "LLM が統計モデルの 3 着内率を補正した結果が、実際の 3 着内率に近づいたかを見る表です。補正の向きは「補正後 − 統計モデル」の 3 着内率の差で分けています。" +
     "対象は、先読みの疑いがなく、LLM の補正が効いた分析で、結果のあるレースの馬(着順なし・取消・除外を除く)です。人気の帯別は、確定の人気が無い馬を除きます。" +
-    `除いたもの: 先読みの疑い ${e.suspect} 分析・判定不能 ${e.unknown} 分析・発走時刻の確認待ち ${e.uncheckedRaces} レース・推定オッズ ${e.estimated} レース・LLM 不使用 ${e.notLlm} レース。` +
+    `除いたもの: 先読みの疑い ${e.suspect} 分析・判定不能 ${e.unknown} 分析・発走時刻の確認待ち ${e.uncheckedRaces} レース・推定オッズ ${e.estimated} レース・LLM 不使用など ${e.notLlm} レース。` +
     hidden
   );
 }
@@ -105,4 +120,26 @@ export function adjustmentFitSections(fit: AdjustmentFit | AdjustmentFitUnavaila
 export function adjustmentFitPromptLines(fit: AdjustmentFit | AdjustmentFitUnavailable | undefined): string[] {
   if (!adjustmentFitHasData(fit)) return [];
   return adjustmentFitSections(fit).flatMap((s) => [`### ${s.heading}`, ...(s.note === null ? [] : [s.note]), ...s.rows.map((r) => `- ${r.label}: ${r.value}`), ""]);
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * 保存した月報の本文(`body_json` を読んだだけの、検証していない値)から、画面向けの節を作る(ハンドラが読み出し時に呼ぶ)。
+ * **本文が壊れていても投げない**: 項目の無い昔の月報・`stats` や `adjustmentFit` が想定の形でない本文・知らない理由の印は、節なし(空の配列)にする。
+ * 節の形(見出しは文字列・注は文字列か null・行は文字列の対)を確かめてから返す(クライアントは一部だけを採用しないので、1 つでも崩れると画面全体が読めなくなる)。
+ */
+export function fitSectionsOfBody(body: unknown): FitSection[] {
+  if (!isRecord(body) || !isRecord(body["stats"])) return [];
+  const fit = body["stats"]["adjustmentFit"];
+  if (!isRecord(fit)) return [];
+  try {
+    const sections = adjustmentFitSections(fit as unknown as AdjustmentFit | AdjustmentFitUnavailable);
+    const wellFormed = sections.every(
+      (s) => typeof s.heading === "string" && (s.note === null || typeof s.note === "string") && s.rows.every((r) => typeof r.label === "string" && typeof r.value === "string"),
+    );
+    return wellFormed ? sections : [];
+  } catch {
+    return [];
+  }
 }

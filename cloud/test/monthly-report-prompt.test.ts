@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { MONTHLY_NARRATIVE_LIMITS, MONTHLY_PROMPT_VERSION, buildMonthlyPrompt, parseMonthlyNarrative } from "../src/monthly-report-prompt";
 import { dateLabel, yen } from "../src/daily-report-prompt";
 import { formatRecoveryPercent } from "../src/recovery-format";
-import type { AdjustmentFit, FitBucket, FitGroup } from "../src/adjustment-fit";
+import { FIT_FEW_COUNT, type AdjustmentFit, type FitBucket, type FitGroup } from "../src/adjustment-fit";
+import { FIT_FEW_MARK } from "../src/adjustment-fit-format";
 import { buildMonthStats } from "../src/monthly-stats";
 import { SMALL_MONTH_SPEC, syntheticMonthRows, syntheticMonthStats } from "./monthly-fixtures";
 
@@ -198,6 +199,17 @@ describe("補正の当たり具合の節と規則(Issue #509)", () => {
     expect(p).toContain("統計モデルの偏りを表します");
     // 節は版ごとの成績の節より前、出力形式の説明より後(確定値の並びの中)
     expect(p.indexOf("## 補正の当たり具合(確定値)")).toBeGreaterThan(p.indexOf("## 出力形式"));
+  });
+
+  it("規則の『頭数が少ない区分』の印と閾値は、表の行に付く印と同じ定数から作る(ずれない)。k の規則は 0 より小さい場合(逆向き)を含む", () => {
+    const few: AdjustmentFit = { ...fit, all: { ...group, byDirection: [b("bigUp", FIT_FEW_COUNT - 1, 3, 0.3, 0.3), ...group.byDirection.slice(1)] } };
+    const p = prompt({ stats: { ...STATS, adjustmentFit: few } });
+    expect(FIT_FEW_MARK).toContain(String(FIT_FEW_COUNT));
+    expect(p).toContain(`「${FIT_FEW_MARK}」と付いた区分`);
+    expect(p).toContain(`${FIT_FEW_MARK}`); // 表の行にも同じ印が付いている
+    expect(p.match(new RegExp(FIT_FEW_MARK, "g"))!.length).toBeGreaterThanOrEqual(2);
+    expect(p).toContain("0 より小さければ、補正の向きが実際と逆だったことを示します");
+    expect(p).toContain("1 より小さければ大きすぎた");
   });
 
   it("標本が無い・読み出せなかった・昔の月報(項目なし)・対象のレースが無いときは、節も規則も入れない(補正の当たり具合の語が一つも出ない)", () => {

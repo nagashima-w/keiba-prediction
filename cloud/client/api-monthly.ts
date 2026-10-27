@@ -87,6 +87,15 @@ export interface MonthlyDetail {
   readonly note: string | null;
   /** 月報を書いたプロンプトの版。持たない本文は null。 */
   readonly promptVersion: string | null;
+  /** 補正の当たり具合の節(Issue #509。サーバが文面まで作ったもの。昔の月報・昔のサーバは空)。省略は空と同じ。 */
+  readonly fit?: readonly MonthlyFitSection[];
+}
+
+/** サーバが作った節(見出し・注・行)。クライアントは文字列のまま出す。 */
+export interface MonthlyFitSection {
+  readonly heading: string;
+  readonly note: string | null;
+  readonly rows: readonly { readonly label: string; readonly value: string }[];
 }
 
 export type MonthlyListResult = { readonly ok: true; readonly reports: readonly MonthlyListItem[] } | { readonly ok: false; readonly error: ApiFailure };
@@ -164,6 +173,23 @@ function strOrAbsent(v: unknown): string | null | undefined {
   return v === undefined || v === null ? null : isStr(v) ? v : undefined;
 }
 
+/** 節を読む。無い(undefined)・null は空。形が壊れていれば undefined(一部だけを採用しない)。 */
+function parseFit(value: unknown): MonthlyFitSection[] | undefined {
+  if (value === undefined || value === null) return [];
+  if (!isArr(value)) return undefined;
+  const out: MonthlyFitSection[] = [];
+  for (const s of value) {
+    if (!isRecord(s) || !isStr(s["heading"]) || !strOrNull(s["note"]) || !isArr(s["rows"])) return undefined;
+    const rows: { label: string; value: string }[] = [];
+    for (const r of s["rows"]) {
+      if (!isRecord(r) || !isStr(r["label"]) || !isStr(r["value"])) return undefined;
+      rows.push({ label: r["label"], value: r["value"] });
+    }
+    out.push({ heading: s["heading"], note: s["note"], rows });
+  }
+  return out;
+}
+
 function parseDetail(value: unknown): MonthlyDetail | null {
   if (!isRecord(value)) return null;
   const head = parseHeadOf(value, "month", isMonth);
@@ -175,8 +201,9 @@ function parseDetail(value: unknown): MonthlyDetail | null {
   const narrativeRaw = strOrAbsent(body["narrativeRaw"]);
   const note = strOrAbsent(body["note"]);
   const promptVersion = strOrAbsent(body["promptVersion"]);
-  if (stats === null || typeof body["lastDayPending"] !== "boolean" || narrative === undefined || narrativeRaw === undefined || note === undefined || promptVersion === undefined) return null;
-  return { month, ...rest, stats, lastDayPending: body["lastDayPending"], narrative, narrativeRaw, note, promptVersion };
+  const fit = parseFit(value["fit"]);
+  if (fit === undefined || stats === null || typeof body["lastDayPending"] !== "boolean" || narrative === undefined || narrativeRaw === undefined || note === undefined || promptVersion === undefined) return null;
+  return { month, ...rest, stats, lastDayPending: body["lastDayPending"], narrative, narrativeRaw, note, promptVersion, fit };
 }
 
 const MONTHLY_PHASES = ["read", "generate", "save", "notify"] as const;

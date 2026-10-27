@@ -71,7 +71,7 @@ describe("adjustmentFitSections", () => {
     expect(note).toContain("判定不能 1");
     expect(note).toContain("発走時刻の確認待ち 3");
     expect(note).toContain("推定オッズ 4");
-    expect(note).toContain("LLM 不使用 5");
+    expect(note).toContain("LLM 不使用など 5 レース"); // 数の定義は『LLM が効いていない最新の分析』(model があっても prompt_version が無い古い分析を含む)なので、「不使用」と言い切らない
     expect(note).toContain("30 レース未満の版(2 版)");
     expect(adjustmentFitSections(fit({ hiddenVersionCount: 0 }))[0]!.note).not.toContain("30 レース未満の版");
   });
@@ -113,6 +113,45 @@ describe("adjustmentFitSections", () => {
   it("項目の無い昔の月報(undefined)は節なし", () => {
     expect(adjustmentFitSections(undefined)).toEqual([]);
     expect(adjustmentFitHasData(undefined)).toBe(false);
+  });
+});
+
+describe("最適な倍率 k の文面(境目: 負・0・0〜1・1・1 超。Issue #509 のレビューで追加)", () => {
+  const kValue = (k: number | null): string => adjustmentFitSections(fit({ all: group({ optimalK: k }) }))[0]!.rows[1]!.value;
+
+  it("負の k は『補正の向きが実際と逆だった(補正しない方が当たった)』と書き、『倍にしたとき最も当たった』とは書かない", () => {
+    const v = kValue(-1);
+    expect(v).toContain("−1.00");
+    expect(v).toContain("補正の向きが実際と逆だった");
+    expect(v).toContain("補正しない方が当たった");
+    expect(v).not.toContain("倍にしたとき最も当たった");
+    expect(v).not.toContain("-1.00"); // 負号は他の差と同じ『−』(U+2212)
+  });
+
+  it("0〜1 は『補正の幅が大きすぎた』、1 ちょうどは『ちょうどよかった』、1 より大きいと『小さすぎた』", () => {
+    expect(kValue(0.5)).toContain("0.50 倍にしたとき最も当たった");
+    expect(kValue(0.5)).toContain("大きすぎた");
+    expect(kValue(1)).toContain("ちょうどよかった");
+    expect(kValue(1.4523)).toContain("1.45 倍にしたとき最も当たった");
+    expect(kValue(1.4523)).toContain("小さすぎた");
+    for (const k of [0.5, 1.4523]) expect(kValue(k)).not.toContain("逆");
+  });
+
+  it("0 ちょうどは『補正を足しても当たりは良くならなかった』(逆とも大きすぎとも書かない)。表示が 0.00 になる極小の負の値(−0.004)も 0 と同じ文面で、『−0.00』とは出さない", () => {
+    for (const k of [0, -0.004, 0.004]) {
+      const v = kValue(k);
+      expect(v, String(k)).toContain("0.00");
+      expect(v, String(k)).toContain("当たりは良くならなかった");
+      expect(v, String(k)).not.toContain("−0.00");
+      expect(v, String(k)).not.toContain("逆");
+      expect(v, String(k)).not.toContain("大きすぎた");
+    }
+  });
+
+  it("境目: −0.01 は逆(表示は −0.01)、0.996 は表示が 1.00 に丸まるので『ちょうどよかった』", () => {
+    expect(kValue(-0.01)).toContain("逆だった");
+    expect(kValue(0.996)).toContain("ちょうどよかった");
+    expect(kValue(0.994)).toContain("大きすぎた");
   });
 });
 

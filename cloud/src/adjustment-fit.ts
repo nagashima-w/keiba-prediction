@@ -108,7 +108,7 @@ export interface FitExcluded {
   readonly uncheckedRaces: number;
   /** 最新の clean な分析が推定 EV のため、レースごと除いた数。 */
   readonly estimated: number;
-  /** 最新の分析が LLM を使っていない(使えなかった)ため、レースごと除いた数。 */
+  /** 最新の分析が、LLM が効いたものでない(キー無し・フォールバックで `model` が無い、または `prompt_version` が無い古い分析)ため、レースごと除いた数。画面・プロンプトでは『LLM 不使用など』と書く。 */
   readonly notLlm: number;
 }
 

@@ -914,6 +914,7 @@ function monthlyBodyNodes(b: MonthlyBodyView): VNode[] {
   if (b.markRows.length > 0) nodes.push(h("h3", {}, [b.markHeading]), rowsNode(b.markRows));
   if (b.whatIf !== null) nodes.push(h("h3", {}, [b.whatIf.heading]), h("p", { class: "meta" }, [b.whatIf.note]), rowsNode(b.whatIf.rows));
   if (b.versions !== null) nodes.push(h("h3", {}, [b.versions.heading]), longRowsNode(b.versions.rows), h("p", { class: "meta report-version-note" }, [b.versions.note]));
+  for (const s of b.fit) nodes.push(h("h3", {}, [s.heading]), ...(s.note === null ? [] : [h("p", { class: "meta" }, [s.note])]), ...(s.rows.length === 0 ? [] : [longRowsNode(s.rows)]));
   return nodes;
 }
 
