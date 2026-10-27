@@ -33,6 +33,7 @@ import { jstKaisaiDate } from "./auto-run-plan";
 import { addDaysToKaisaiDate, dispatchResultImports, MANUAL_RESULT_MAX_DAYS } from "./result-dispatch";
 import { D1ResultStore } from "./result-repository";
 import { D1ReportStore } from "./daily-report-repository";
+import { fitSectionsOfBody } from "./adjustment-fit-format";
 import { D1MonthlyStore } from "./monthly-report-repository";
 import { MONTHLY_REPORT_NAME, type MonthlyMode, type MonthlyStatus, type RequestMonthlyResult } from "./monthly-report-core";
 import { isValidMonth, monthRange } from "./monthly-month";
@@ -1817,6 +1818,7 @@ async function handleMonthlyList(url: URL, env: Env): Promise<Response> {
 /**
  * `GET /api/monthly-reports/{YYYYMM}`(Issue #279・#280): 1 か月の月報(本文つき)。無い月は `report: null`(200)。月の形が 6 桁の実在の月でなければ 404(D1 を引かない)。
  * クエリは受け付けない(400)。D1 の失敗は 503。閲覧者にも月報は返す。
+ * **`report.fit`(Issue #509)**: 補正の当たり具合の節(見出し・注・行の文字列)。保存した数字から読み出し時に作る(`fitSectionsOfBody`。昔の月報・壊れた本文は空の配列)。
  *
  * **進行状況(`job`・`job_status`。Issue #280。日報の #268 と同じ形)**: **管理者だけ**月報の DO の `getStatus` を読む(作り直し・手動の作成の進行・失敗を画面が見るため。`regenerate: true` のジョブだけが
  * 「作り直し」を意味する)。**閲覧者は DO に一切触れない**(`job: null`・`job_status: "ok"`)。役割は認証の結果(`auth.role`)だけで決める(クエリでは名乗れない)。
@@ -1856,6 +1858,8 @@ async function handleMonthlyDetail(url: URL, monthText: string, env: Env, role: 
             total_return: report.totalReturn,
             summary: report.summary,
             body: report.body,
+            // 補正の当たり具合(Issue #509)。保存した数字から、読み出し時に画面向けの節(見出し・注・行)を作る(クライアントの束を小さく保つため、文面はサーバが作る)。
+            fit: fitSectionsOfBody(report.body),
           },
     job,
     job_status: jobStatus,

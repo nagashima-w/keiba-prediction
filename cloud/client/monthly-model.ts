@@ -5,7 +5,7 @@
  * LLM の文章(総括・良かった点・改善点・来月に向けて。Issue #280)は、サーバが書いた文をそのまま出す(`textContent` に載せるだけ。HTML として解釈しない)。それ以外の文言(注記・案内・確認)はすべてクライアントの固定の文言。
  * 管理者だけの「この月の月報を作る」(終わった月で月報が無い月)と「月報を作り直す」(終わった月で月報がある月。確認つき)の出し分け・進行の案内も、ここで決める(日報の #235・#268 と同じ作り)。
  */
-import type { MonthlyDayRow, MonthlyDetail, MonthlyJob, MonthlyListItem, MonthlyVersionRow } from "./api-monthly";
+import type { MonthlyDayRow, MonthlyDetail, MonthlyFitSection, MonthlyJob, MonthlyListItem, MonthlyVersionRow } from "./api-monthly";
 import { formatJstDateTime } from "./date";
 import { dateLabel, JOB_UNAVAILABLE_NOTICE, MARK_HEADING, markRowsOf, refundText, statTiles, templateRows, typeRowsOf, WHATIF_HEADING, WHATIF_NOTE, ymd, type ReportModel, type ReportRegenState, type ReportRunState, type RowView, type TileView, type Tone } from "./report-model";
 import { buildMonthlyHash, buildReportHash, REPORT_HASH } from "./route";
@@ -81,6 +81,8 @@ export interface MonthlyBodyView {
   readonly whatIf: { readonly heading: string; readonly note: string; readonly rows: readonly RowView[] } | null;
   /** プロンプトの版ごと。版が 2 つ以上のときだけ(1 つの月は null)。 */
   readonly versions: { readonly heading: string; readonly rows: readonly RowView[]; readonly note: string } | null;
+  /** 補正の当たり具合の節(Issue #509)。サーバが見出し・注・行の文面まで作ったものを、そのまま渡す。無い月報は空。 */
+  readonly fit: readonly MonthlyFitSection[];
 }
 
 export interface MonthlyModel {
@@ -176,6 +178,7 @@ function bodyOf(report: MonthlyDetail): MonthlyBodyView {
     markHeading: MARK_HEADING,
     markRows: markRowsOf(s.byMark),
     whatIf,
+    fit: report.fit ?? [],
     versions: s.byVersion.length >= 2 ? { heading: "プロンプトの版ごと", rows: s.byVersion.map(versionRowOf), note: MONTHLY_VERSION_NOTE } : null,
   };
 }

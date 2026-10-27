@@ -237,3 +237,32 @@ describe("日報画面に足した『日 / 月』のタブ", () => {
     ]);
   });
 });
+
+describe("補正の当たり具合の節(Issue #509)", () => {
+  const SECTIONS = [
+    { heading: "補正の当たり具合(月全体・80 レース・1000 頭)", note: "母集団の説明の文", rows: [{ label: "3 着内の Brier", value: "統計モデル 0.1234・補正後 0.1210" }, { label: "最適な倍率 k", value: "1.45" }] },
+    { heading: "補正の向き別(月全体)", note: null, rows: [{ label: "大きく上げた(+5pt 超)", value: "412 頭・統計モデル 27.8%" }] },
+  ];
+  const withFit = (fit: MonthlyDetail["fit"]) => tree({ detail: { kind: "ready", report: detail({ fit }) } });
+
+  it("版ごとの節のあとに、サーバが作った節を見出し・注・行の順に出す。行は日報の長い行と同じ作り(ラベルと値)", () => {
+    const t = withFit(SECTIONS);
+    expect(headings(t).slice(-2)).toEqual(["補正の当たり具合(月全体・80 レース・1000 頭)", "補正の向き別(月全体)"]);
+    expect(headings(t).indexOf("プロンプトの版ごと")).toBeLessThan(headings(t).indexOf("補正の当たり具合(月全体・80 レース・1000 頭)"));
+    expect(byClass(t, "report-days").slice(-2).map((ul) => kids(ul).map(textOf))).toEqual([["3 着内の Brier 統計モデル 0.1234・補正後 0.1210", "最適な倍率 k 1.45"], ["大きく上げた(+5pt 超) 412 頭・統計モデル 27.8%"]]);
+    expect(findAll(t, (n) => n.tag === "p" && textOf(n) === "母集団の説明の文")).toHaveLength(1);
+  });
+
+  it("注があって行が無い節(読み出せなかった月報)は、見出しと注だけ(空の一覧を出さない)", () => {
+    const only = [{ heading: "補正の当たり具合", note: "載せていません。", rows: [] }];
+    const t = withFit(only);
+    expect(headings(t).slice(-1)).toEqual(["補正の当たり具合"]);
+    expect(byClass(t, "report-days")).toHaveLength(byClass(withFit([]), "report-days").length); // 一覧の数は、節が無いときと同じ
+    expect(textOf(t)).toContain("載せていません。");
+  });
+
+  it("節が無い月報(昔の月報)は、補正の当たり具合の見出しを出さない", () => {
+    expect(headings(withFit([])).some((h) => h.includes("補正の当たり具合"))).toBe(false);
+    expect(headings(tree()).some((h) => h.includes("補正の当たり具合"))).toBe(false);
+  });
+});

@@ -239,3 +239,20 @@ describe("buildMonthlyModel: 月報の本文", () => {
     expect(buildMonthlyModel(input({ detail: { kind: "error", message: "x" } })).body).toBeNull();
   });
 });
+
+describe("補正の当たり具合(Issue #509): サーバが作った節を、そのまま渡す", () => {
+  const SECTIONS = [
+    { heading: "補正の当たり具合(月全体・80 レース・1000 頭)", note: "母集団の説明", rows: [{ label: "3 着内の Brier", value: "統計モデル 0.1234・補正後 0.1210" }] },
+    { heading: "補正の向き別(月全体)", note: null, rows: [{ label: "ほぼそのまま(±1pt)", value: "300 頭" }] },
+  ];
+  const body = (fit?: MonthlyDetail["fit"]) => buildMonthlyModel({ today: TODAY, shownMonth: "202610", list: list("202610"), detail: ready(detail(fit === undefined ? {} : { fit })) }).body!;
+
+  it("節の見出し・注・行を、順番もそのまま本文のモデルに渡す", () => {
+    expect(body(SECTIONS).fit).toStrictEqual(SECTIONS);
+  });
+
+  it("節が無い(項目なしの昔の月報・空の配列)ときは、空の配列", () => {
+    expect(body().fit).toStrictEqual([]);
+    expect(body([]).fit).toStrictEqual([]);
+  });
+});
