@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { isFitUnavailable, type AdjustmentFit } from "../src/adjustment-fit";
+import { FIT_CANDIDATES_SQL, FIT_HORSES_SQL, FIT_RESULTS_SQL, FitTooManyError, readAdjustmentFitRows } from "../src/adjustment-fit-read";
 import { D1AnalysisStore } from "../src/analysis-repository";
 import { READ_PERIOD_SQL } from "../src/daily-report-repository";
 import type { MonthlyReportRecord } from "../src/monthly-report-core";
@@ -6,7 +8,9 @@ import { D1MonthlySource, D1MonthlyStore, INSERT_MONTHLY_SQL, LAST_DAY_STATUS_SQ
 import { MONTHLY_PROMPT_VERSION } from "../src/monthly-report-prompt";
 import { buildMonthStats } from "../src/monthly-stats";
 import { D1ResultStore } from "../src/result-repository";
-import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
+import type { AnalysisRecord, RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
+import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
+import { buildVerifySource, VERIFY_READ_SQL, type VerifyReadRows } from "../src/verify-read";
 import { contractCases } from "./fixtures-contract";
 import { openLocalBindings, spyDb, type LocalBindings } from "./local-bindings";
 
@@ -14,6 +18,8 @@ import { openLocalBindings, spyDb, type LocalBindings } from "./local-bindings";
  * Issue #279(#265-A): 月報の D1 への保存・読み出し(`D1MonthlyStore`)と、月の統計・最終日の状態の読み出し(`D1MonthlySource`)を、ローカル(workerd)の D1 で確かめる。
  * migration 0015 は `wrangler d1 migrations apply --local`(CI と同じ実コマンド)で適用される。
  */
+
+type AnalysisDbLike = ConstructorParameters<typeof D1MonthlySource>[0]["db"];
 
 let local: LocalBindings;
 beforeAll(async () => {
@@ -202,6 +208,63 @@ function analysisRecord(n: number, kaisaiDate: string | null, analyzedAt: string
 const raceIdOf = (n: number): string => `2026050308${String(n).padStart(2, "0")}`;
 const horsesOf = (rows: Array<[number, number, number | null, number | null]>) => rows.map(([umaban, finishPosition, winPayout, placePayout]) => ({ umaban, finishPosition, winPayout, placePayout }));
 
+
+// ---- 補正の当たり具合(Issue #509)の標本 ----
+
+interface FitHorseSeed {
+  readonly umaban: number;
+  readonly prior: number;
+  readonly adjusted: number;
+  readonly finish: number | null;
+  readonly ninki?: number | null;
+  readonly scratched?: boolean;
+}
+const DEFAULT_FIT_HORSES: readonly FitHorseSeed[] = [
+  { umaban: 1, prior: 0.4, adjusted: 0.5, finish: 1, ninki: 1 }, // d +0.10(大きく上げた)・3 着内
+  { umaban: 2, prior: 0.3, adjusted: 0.3, finish: 5, ninki: 2 }, // d 0(そのまま)・3 着外
+  { umaban: 3, prior: 0.2, adjusted: 0.1, finish: 3, ninki: 8 }, // d −0.10(大きく下げた)・3 着内
+];
+interface FitRaceSeed {
+  /** レース番号(レース ID の末尾 2 桁)。 */
+  readonly raceNo: number;
+  readonly kaisaiDate?: string;
+  readonly analyzedAt?: string;
+  readonly promptVersion?: string | null;
+  /** 既定は LLM が効いた分析(model あり)。null で LLM 不使用。 */
+  readonly model?: string | null;
+  /** 既定は遮断済み(clean)。false で遮断の記録なし(発走時刻の写しが要る)。 */
+  readonly guarded?: boolean;
+  readonly evEstimated?: boolean;
+  readonly withResult?: boolean;
+  readonly horses?: readonly FitHorseSeed[];
+}
+const fitRaceId = (raceNo: number): string => `2026101008${String(raceNo).padStart(2, "0")}`;
+
+/** 分析 1 件(と、あれば結果)を D1 に入れ、分析の id を返す。 */
+async function seedFitRace(seed: FitRaceSeed): Promise<number> {
+  const horses = seed.horses ?? DEFAULT_FIT_HORSES;
+  const guarded = seed.guarded ?? true;
+  const raceId = fitRaceId(seed.raceNo);
+  const record = {
+    raceId,
+    analyzedAt: seed.analyzedAt ?? "2026-10-10T00:00:00.000Z",
+    kaisaiDate: seed.kaisaiDate ?? "20261010",
+    promptVersion: seed.promptVersion === undefined ? "v1" : seed.promptVersion,
+    model: seed.model === undefined ? "claude-sonnet-5-5" : seed.model,
+    rawResponse: null,
+    evEstimated: seed.evEstimated ?? false,
+    historyCutoffDate: guarded ? "20261009" : null,
+    promptLookaheadGuarded: guarded ? true : null,
+    horses: horses.map((h) => ({ umaban: h.umaban, prior: h.prior, adjustedProb: h.adjusted, placeOddsMin: 1.5, ev: 1.1, isPositive: false, contributions: { umaban: h.umaban }, mark: null, reason: null })),
+  } as unknown as AnalysisRecord;
+  const { id } = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(record);
+  if (seed.withResult !== false) {
+    const entries: RaceResultEntry[] = horses.map((h) => ({ umaban: h.umaban, finishPosition: h.finish, placePayout: null, winPayout: null, ninki: h.ninki ?? null, ...(h.scratched === true ? { scratched: true } : {}) }));
+    await new D1ResultStore({ db: local.db }).saveResult(raceId, entries, "芝", {});
+  }
+  return id;
+}
+
 describe("D1MonthlySource.readMonthStats", () => {
   const analyses = () => new D1AnalysisStore({ db: local.db, bucket: local.r2 });
   const source = () => new D1MonthlySource({ db: local.db });
@@ -241,16 +304,206 @@ describe("D1MonthlySource.readMonthStats", () => {
     expect(s.unjudgedStake).toBe(100);
   });
 
-  it("D1 への発行は 1 回の batch だけ(サブリクエスト 1)。SQL は期間の再集計と同じ 6 文", async () => {
+  it("D1 への発行: 成績の再集計は 1 回の batch(6 文。期間の再集計と同じ SQL)。補正の当たり具合の候補が無いときは、それだけ(サブリクエスト 2: batch 1 + 候補 1 文)", async () => {
     const { db, prepared, batches } = spyDb(local.db);
     await new D1MonthlySource({ db }).readMonthStats("20261001", "20261031");
     expect(batches).toEqual([6]);
-    expect(prepared).toHaveLength(6);
-    expect(new Set(prepared)).toEqual(new Set(Object.values(READ_PERIOD_SQL)));
+    expect(prepared).toHaveLength(7);
+    expect(new Set(prepared.slice(0, 6))).toEqual(new Set(Object.values(READ_PERIOD_SQL)));
+    expect(prepared[6]).toBe(FIT_CANDIDATES_SQL);
+  });
+
+  it("D1 への発行: 補正の当たり具合の標本があるときは、成績の batch 6 文 + 候補 1 文 + 馬と結果の batch 2 文(サブリクエスト 3)。どれも読み取り専用", async () => {
+    await seedFitRace({ raceNo: 1 });
+    const { db, prepared, batches } = spyDb(local.db);
+    await new D1MonthlySource({ db }).readMonthStats("20261001", "20261031");
+    expect(batches).toEqual([6, 2]);
+    expect(prepared).toHaveLength(9);
+    expect(prepared.slice(6)).toEqual([FIT_CANDIDATES_SQL, FIT_HORSES_SQL, FIT_RESULTS_SQL]);
+    for (const sql of [FIT_CANDIDATES_SQL, FIT_HORSES_SQL, FIT_RESULTS_SQL]) {
+      expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER)\b/i);
+    }
   });
 
   it("期間の SQL は分析のプロンプト版(prompt_version)を読む(月報の版別の行の材料)", () => {
     expect(READ_PERIOD_SQL.races).toContain("prompt_version");
+  });
+});
+
+describe("D1MonthlySource.readMonthStats: 補正の当たり具合(Issue #509)", () => {
+  const source = (options: { readonly db?: AnalysisDbLike; readonly onWarn?: (m: string) => void; readonly fitCandidateLimit?: number } = {}) =>
+    new D1MonthlySource({ db: options.db ?? local.db, ...(options.onWarn === undefined ? {} : { onWarn: options.onWarn }), ...(options.fitCandidateLimit === undefined ? {} : { fitCandidateLimit: options.fitCandidateLimit }) });
+  const fitOf = async (...args: Parameters<D1MonthlySource["readMonthStats"]>): Promise<AdjustmentFit> => {
+    const fit = (await source().readMonthStats(...args)).adjustmentFit;
+    if (fit === undefined || isFitUnavailable(fit)) throw new Error("補正の当たり具合が読めていません");
+    return fit;
+  };
+
+  it("母集団: 月の範囲・結果あり・LLM が効いた・clean・最新の 1 件だけ。除いたレースは内訳に数える", async () => {
+    await seedFitRace({ raceNo: 1 }); // 採用(3 頭)
+    await seedFitRace({ raceNo: 2, analyzedAt: "2026-10-09T00:00:00.000Z", promptVersion: "v-old" }); // R2 の古い分析
+    await seedFitRace({ raceNo: 2, promptVersion: "v1" }); // R2 の最新(採用。版は v1)
+    await seedFitRace({ raceNo: 3, withResult: false }); // 結果なし(候補の段階で除く)
+    await seedFitRace({ raceNo: 4, model: null, promptVersion: null }); // LLM 不使用
+    await seedFitRace({ raceNo: 5, guarded: false }); // 遮断なしで発走時刻が NULL(補完待ち)
+    await seedFitRace({ raceNo: 6, evEstimated: true }); // 推定 EV
+    await seedFitRace({ raceNo: 7, kaisaiDate: "20260930" }); // 前月
+    await seedFitRace({ raceNo: 8, kaisaiDate: "20261101" }); // 翌月
+    const fit = await fitOf("20261001", "20261031");
+    expect(fit.all.raceCount).toBe(2);
+    expect(fit.all.horseCount).toBe(6);
+    expect(fit.excluded).toEqual({ suspect: 0, unknown: 0, uncheckedRaces: 1, estimated: 1, notLlm: 1 });
+    expect(fit.byVersion).toEqual([]); // 2 レースしかない版は出さない
+    expect(fit.hiddenVersionCount).toBe(1);
+  });
+
+  it("値: 向き別・人気別・Brier・k が、入れた標本の手計算と一致する(取消の馬・着順なしの馬は評価しない)", async () => {
+    await seedFitRace({
+      raceNo: 1,
+      horses: [...DEFAULT_FIT_HORSES, { umaban: 4, prior: 0.1, adjusted: 0.2, finish: 2, ninki: 3, scratched: true }, { umaban: 5, prior: 0.1, adjusted: 0.2, finish: null, ninki: 4 }],
+    });
+    const fit = await fitOf("20261001", "20261031");
+    expect(fit.all.horseCount).toBe(3);
+    const dir = Object.fromEntries(fit.all.byDirection.map((b) => [b.key, b.count]));
+    expect(dir).toEqual({ bigUp: 1, up: 0, same: 1, down: 0, bigDown: 1 });
+    expect(fit.all.byPopularity.map((b) => [b.key, b.count])).toEqual([["1", 1], ["2-3", 1], ["4-6", 0], ["7+", 1]]);
+    // d = +0.1, 0, −0.1。y = 1, 0, 1。Σd² = 0.02。Σd(y−prior) = 0.1×0.6 + 0 + (−0.1)×0.8 = −0.02。k = −1
+    expect(fit.all.optimalK).toBeCloseTo(-1, 9);
+    // prior の Brier = (0.6² + 0.3² + 0.8²)/3、補正後 = (0.5² + 0.3² + 0.9²)/3
+    expect(fit.all.brier.prior).toBeCloseTo((0.36 + 0.09 + 0.64) / 3, 9);
+    expect(fit.all.brier.adjusted).toBeCloseTo((0.25 + 0.09 + 0.81) / 3, 9);
+  });
+
+  it("検証画面(computeVerifyReport。D1 から VERIFY_READ_SQL で読んだ行)と、採用件数・評価した馬の数・Brier が一致する(LLM 不使用の分析を含まない月)", async () => {
+    await seedFitRace({ raceNo: 1 });
+    await seedFitRace({ raceNo: 2, analyzedAt: "2026-10-09T00:00:00.000Z", horses: [{ umaban: 1, prior: 0.9, adjusted: 0.1, finish: 9, ninki: 1 }] }); // 古い分析(最新に取って代わられる)
+    await seedFitRace({ raceNo: 2, horses: [{ umaban: 1, prior: 0.3, adjusted: 0.35, finish: 2, ninki: 2 }, { umaban: 2, prior: 0.2, adjusted: 0.15, finish: 7, ninki: 6 }] });
+    const suspect = await seedFitRace({ raceNo: 3, guarded: false, analyzedAt: "2026-10-10T08:00:00.000Z" }); // 発走後に分析(先読みの疑い)
+    await local.db.prepare("UPDATE analyses SET start_time = '15:45' WHERE id = ?").bind(suspect).run();
+    const clean = await seedFitRace({ raceNo: 4, guarded: false, analyzedAt: "2026-10-10T00:00:00.000Z" }); // 遮断なしで発走前(clean)
+    await local.db.prepare("UPDATE analyses SET start_time = '15:45' WHERE id = ?").bind(clean).run();
+    await seedFitRace({ raceNo: 5, evEstimated: true }); // 推定 EV
+    await seedFitRace({ raceNo: 6, withResult: false }); // 結果なし
+    await seedFitRace({ raceNo: 7, promptVersion: "v2", horses: [{ umaban: 1, prior: 0.25, adjusted: 0.3, finish: 1, ninki: 3 }] });
+
+    const read = async <T>(sql: string): Promise<T[]> => (await local.db.prepare(sql).all<T>()).results;
+    const rows: VerifyReadRows = {
+      analyses: await read(VERIFY_READ_SQL.analyses),
+      horses: await read(VERIFY_READ_SQL.horses),
+      allocationMeta: await read(VERIFY_READ_SQL.allocationMeta),
+      bets: await read(VERIFY_READ_SQL.bets),
+      results: await read(VERIFY_READ_SQL.results),
+      comboPayouts: await read(VERIFY_READ_SQL.comboPayouts),
+      comboImports: await read(VERIFY_READ_SQL.comboImports),
+    };
+    const report = computeVerifyReport(buildVerifySource(rows), PRODUCTION_VERIFY_CONFIG);
+    const fit = await fitOf("20261001", "20261031");
+
+    expect(report.includedAnalysisCount).toBe(4); // 前提: R1・R2(最新)・R4・R7 の 4 件(R3 は先読みの疑い・R5 は推定 EV・R6 は結果なしで除かれる)。空振りでないことの固定
+    expect(report.excludedLookaheadSuspectCount).toBe(1); // 前提: 先読みの疑いが実際に除かれている
+    expect(report.excludedEstimatedCount).toBe(1);
+    expect(fit.all.raceCount).toBe(report.includedAnalysisCount);
+    expect(fit.all.horseCount).toBe(report.quality.evaluatedCount);
+    expect(fit.all.brier.prior).toBeCloseTo(report.quality.priorBrier!, 12);
+    expect(fit.all.brier.adjusted).toBeCloseTo(report.quality.adjustedBrier!, 12);
+    expect(fit.excluded.suspect).toBe(report.excludedLookaheadSuspectCount);
+    expect(fit.excluded.estimated).toBe(report.excludedEstimatedCount);
+  });
+
+  it("読み出しの実行計画: 候補は開催日の索引、馬と結果は主キーの索引を引く(全件走査にならない)", async () => {
+    const plan = async (sql: string, ...binds: unknown[]): Promise<string> => {
+      const { results } = await local.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(...binds).all<{ detail: string }>();
+      return results.map((r) => r.detail).join("\n");
+    };
+    const candidates = await plan(FIT_CANDIDATES_SQL, "20261001", "20261031", 10);
+    expect(candidates).toMatch(/idx_analyses_kaisai_date/);
+    const horses = await plan(FIT_HORSES_SQL, "[1,2]");
+    expect(horses).not.toMatch(/SCAN analysis_horses/);
+    const results = await plan(FIT_RESULTS_SQL, '["R1"]');
+    expect(results).not.toMatch(/SCAN race_results/);
+  });
+
+  it("D1 の読み取り行数(meta.rows_read)を返す: 標本の行数以上で、範囲外の月の分析・結果を増やしても、ほとんど増えない(全件走査でない)", async () => {
+    for (let i = 1; i <= 10; i += 1) await seedFitRace({ raceNo: i });
+    const before = await readAdjustmentFitRows(local.db, "20261001", "20261031");
+    expect(before.horses).toHaveLength(30);
+    expect(before.results).toHaveLength(30);
+    expect(before.rowsRead).toBeGreaterThanOrEqual(10 + 30 + 30); // 候補 10 + 馬 30 + 結果 30 が最低ライン
+    for (let i = 21; i <= 30; i += 1) await seedFitRace({ raceNo: i, kaisaiDate: "20260901" }); // 9 月の分析と結果(10 月の範囲外)
+    const after = await readAdjustmentFitRows(local.db, "20261001", "20261031");
+    expect(after.horses).toHaveLength(30); // 前提: 範囲外の標本は読んでいない
+    // 範囲外に足した行は 70(分析 10 + 馬 30 + 結果 30)。読み取りは索引の境目の数行しか増えない(全件走査なら 70 以上増える)
+    expect(after.rowsRead - before.rowsRead).toBeLessThan(10);
+  });
+
+  describe("失敗の扱い(新しい節の失敗で、月報そのものを failed にしない)", () => {
+    /** 候補の文の `all()` を、最初の `failures` 回だけ例外にする db。 */
+    function flakyDb(failures: number): { db: AnalysisDbLike; attempts: () => number } {
+      let attempts = 0;
+      const db = {
+        prepare(sql: string) {
+          const statement = local.db.prepare(sql);
+          if (sql !== FIT_CANDIDATES_SQL) return statement;
+          return {
+            bind: (...args: unknown[]) => ({
+              all: async () => {
+                attempts += 1;
+                if (attempts <= failures) throw new Error("内部の詳細: secret-token-xyz");
+                return statement.bind(...args).all();
+              },
+            }),
+          };
+        },
+        batch: (statements: D1PreparedStatement[]) => local.db.batch(statements),
+      } as unknown as AnalysisDbLike;
+      return { db, attempts: () => attempts };
+    }
+
+    it("一時的な失敗は 1 度取り直す: 1 回目が失敗しても 2 回目で読めれば、節は付く", async () => {
+      await seedFitRace({ raceNo: 1 });
+      const flaky = flakyDb(1);
+      const stats = await source({ db: flaky.db }).readMonthStats("20261001", "20261031");
+      expect(flaky.attempts()).toBe(2);
+      expect(stats.adjustmentFit).toBeDefined();
+      expect(isFitUnavailable(stats.adjustmentFit!)).toBe(false);
+    });
+
+    it("2 回続けて失敗したら、月報は作り続け、節は『読めなかった』の印(read-failed)にする。警告に例外の本文を含めない", async () => {
+      await seedFitRace({ raceNo: 1 });
+      const flaky = flakyDb(2);
+      const warns: string[] = [];
+      const stats = await source({ db: flaky.db, onWarn: (m) => warns.push(m) }).readMonthStats("20261001", "20261031");
+      expect(flaky.attempts()).toBe(2);
+      expect(stats.adjustmentFit).toEqual({ unavailable: "read-failed" });
+      expect(stats.raceCount).toBe(1); // 成績の統計は今までどおり読めている
+      expect(warns).toHaveLength(1);
+      expect(warns[0]).not.toContain("secret-token-xyz");
+    });
+
+    it("候補が上限を超えたら、取り直さずに印(too-many)にする。一部だけの集計は返さない", async () => {
+      for (let i = 1; i <= 3; i += 1) await seedFitRace({ raceNo: i });
+      const warns: string[] = [];
+      const stats = await source({ onWarn: (m) => warns.push(m), fitCandidateLimit: 2 }).readMonthStats("20261001", "20261031");
+      expect(stats.adjustmentFit).toEqual({ unavailable: "too-many" });
+      expect(warns).toHaveLength(1);
+      await expect(readAdjustmentFitRows(local.db, "20261001", "20261031", 2)).rejects.toBeInstanceOf(FitTooManyError);
+      // 上限ちょうどは通る(境目)
+      const exact = await readAdjustmentFitRows(local.db, "20261001", "20261031", 3);
+      expect(exact.selection.chosen).toHaveLength(3);
+    });
+
+    it("計算の失敗(compute-failed)でも月報は作り続ける。成績の読み出しの失敗は今までどおり例外(段階の再試行に任せる)", async () => {
+      await seedFitRace({ raceNo: 1 });
+      const throwing = new D1MonthlySource({
+        db: local.db,
+        computeFit: () => {
+          throw new Error("計算の失敗");
+        },
+      });
+      expect((await throwing.readMonthStats("20261001", "20261031")).adjustmentFit).toEqual({ unavailable: "compute-failed" });
+      const failingMain = { prepare: () => { throw new Error("D1 が落ちた"); }, batch: () => { throw new Error("D1 が落ちた"); } } as unknown as AnalysisDbLike;
+      await expect(new D1MonthlySource({ db: failingMain }).readMonthStats("20261001", "20261031")).rejects.toThrow("D1 が落ちた");
+    });
   });
 });
 

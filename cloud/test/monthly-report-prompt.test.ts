@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MONTHLY_NARRATIVE_LIMITS, MONTHLY_PROMPT_VERSION, buildMonthlyPrompt, parseMonthlyNarrative } from "../src/monthly-report-prompt";
 import { dateLabel, yen } from "../src/daily-report-prompt";
 import { formatRecoveryPercent } from "../src/recovery-format";
+import type { AdjustmentFit, FitBucket, FitGroup } from "../src/adjustment-fit";
 import { buildMonthStats } from "../src/monthly-stats";
 import { SMALL_MONTH_SPEC, syntheticMonthRows, syntheticMonthStats } from "./monthly-fixtures";
 
@@ -163,6 +164,51 @@ describe("最終日が未反映のときの規則(lastDayPending)", () => {
     const p = prompt({ lastDayPending: true });
     expect(p).toContain("最終日の分は一部または全部が反映されていない可能性があります");
     expect(p).not.toContain("最終日の分は一部が反映されていない可能性があります");
+  });
+});
+
+describe("補正の当たり具合の節と規則(Issue #509)", () => {
+  const b = <K extends string>(key: K, count: number, placedCount: number, meanPrior: number | null, meanAdjusted: number | null): FitBucket<K> => ({ key, count, placedCount, meanPrior, meanAdjusted });
+  const group: FitGroup = {
+    raceCount: 80,
+    horseCount: 1000,
+    byDirection: [b("bigUp", 412, 187, 0.278, 0.347), b("up", 100, 40, 0.25, 0.27), b("same", 300, 90, 0.3, 0.3), b("down", 150, 40, 0.3, 0.28), b("bigDown", 29, 8, 0.4, 0.33)],
+    byPopularity: [b("1", 80, 50, 0.499, 0.508), b("2-3", 160, 70, 0.383, 0.388), b("4-6", 240, 60, 0.264, 0.258), b("7+", 0, 0, null, null)],
+    brier: { prior: 0.1234, adjusted: 0.121 },
+    optimalK: 1.4523,
+  };
+  const fit: AdjustmentFit = { all: group, byVersion: [{ promptVersion: "v-a", ...group }], hiddenVersionCount: 1, excluded: { suspect: 0, unknown: 0, uncheckedRaces: 0, estimated: 0, notLlm: 0 } };
+  const FIT_MARKERS = ["補正の当たり具合", "補正の向き別", "人気の帯別"];
+
+  it("プロンプトの版が上がっている(文面を変えたので)", () => {
+    expect(MONTHLY_PROMPT_VERSION).not.toBe("monthly-2026-10-13.1");
+    expect(MONTHLY_PROMPT_VERSION).toBe("monthly-2026-10-27.1");
+  });
+
+  it("標本があるとき: 確定値の節(月全体と版ごとの表。画面と同じ行)と、規則(実際の率との差を数字で・30 頭未満は断定しない・命令しない)を入れる", () => {
+    const p = prompt({ stats: { ...STATS, adjustmentFit: fit } });
+    expect(p).toContain("## 補正の当たり具合(確定値)");
+    expect(p).toContain("### 補正の向き別(月全体)");
+    expect(p).toContain("### 補正の向き別(版 v-a)");
+    expect(p).toContain("- 大きく上げた(+5pt 超): 412 頭・統計モデル 27.8%・補正後 34.7%・実際 45.4%(187/412)");
+    expect(p).toContain("実際の率との差");
+    expect(p).toContain("30 頭未満");
+    expect(p).toContain("断定しないでください");
+    expect(p).toContain("この節の数字についても、プロンプトや重みを変えるよう命令する書き方はしないでください");
+    expect(p).toContain("統計モデルの偏りを表します");
+    // 節は版ごとの成績の節より前、出力形式の説明より後(確定値の並びの中)
+    expect(p.indexOf("## 補正の当たり具合(確定値)")).toBeGreaterThan(p.indexOf("## 出力形式"));
+  });
+
+  it("標本が無い・読み出せなかった・昔の月報(項目なし)・対象のレースが無いときは、節も規則も入れない(補正の当たり具合の語が一つも出ない)", () => {
+    const none = prompt();
+    const empty: AdjustmentFit = { ...fit, all: { ...group, raceCount: 0, horseCount: 0 }, byVersion: [] };
+    for (const adjustmentFit of [{ unavailable: "read-failed" as const }, { unavailable: "too-many" as const }, { unavailable: "compute-failed" as const }, empty]) {
+      const p = prompt({ stats: { ...STATS, adjustmentFit } });
+      for (const marker of FIT_MARKERS) expect(p, marker).not.toContain(marker);
+      expect(p).toBe(none);
+    }
+    for (const marker of FIT_MARKERS) expect(none, marker).not.toContain(marker);
   });
 });
 

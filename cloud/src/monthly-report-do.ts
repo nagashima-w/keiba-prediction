@@ -47,7 +47,7 @@ export class MonthlyReportDO extends DurableObject<MonthlyReportEnv> {
       now: () => Date.now(),
       setAlarm: (at) => ctx.storage.setAlarm(at),
       onWarn: (message) => console.warn(message),
-      source: new D1MonthlySource({ db: env.DB }),
+      source: new D1MonthlySource({ db: env.DB, onWarn: (message) => console.warn(message) }),
       store: new D1MonthlyStore({ db: env.DB }),
       loadSettings: async () => (await loadSettings(env.DB)).settings,
       ...(llm === undefined ? {} : { llm }),

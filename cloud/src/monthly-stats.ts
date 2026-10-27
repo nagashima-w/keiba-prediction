@@ -5,9 +5,14 @@
  * 月全体は {@link buildPeriodStats} をそのまま通す(日報の 28 日累計の「直前 27 日」と同じ集計)。日ごと・版ごとの行は**同じ行を分割して**同じ関数に通すので、
  * 足し合わせると月全体になる(テストが固定)。日報の合計と月の数字は、日報が確定したあとに入った結果や補完〈#270〉で一致しないことがある(日報は 1 日 1 回で確定して上書きしないため。月は読んだ時点の D1 から数え直す)。
  *
- * ## 追加の D1 読み取りは無い
+ * ## 日ごと・版ごとの行に、追加の D1 読み取りは無い
  * 日ごと・版ごとの行はメモリ上の分割だけ(同じ 6 文の 1 回の batch で足りる)。版は `analyses.prompt_version`(既存の列)を期間の SQL の `latest` に 1 列足して読む。
+ *
+ * ## 補正の当たり具合は別の読み出し(Issue #509)
+ * {@link MonthStats.adjustmentFit} は、この関数の入力とは別の行(先読みを除いた LLM の分析の馬ごとの値)から作る。`buildMonthStats` は付けず、
+ * 月報の読み出し(`D1MonthlySource.readMonthStats`)が追加の D1 読み取り(候補 1 文 + 馬と結果の batch 2 文。`adjustment-fit-read.ts`)で作って足す。
  */
+import type { AdjustmentFit, AdjustmentFitUnavailable } from "./adjustment-fit";
 import { buildPeriodStats, type PeriodRows, type PeriodStats } from "./period-stats";
 
 /** 開催日 1 日分の行(月の日別の表)。 */
@@ -46,6 +51,11 @@ export interface MonthVersionRow {
 export interface MonthStats extends PeriodStats {
   readonly days: readonly MonthDayRow[];
   readonly byVersion: readonly MonthVersionRow[];
+  /**
+   * 補正の当たり具合(Issue #509)。省略 = この項目を持たない昔の月報。`{ unavailable }` = 読めなかった・計算できなかった月報(理由は固定の語。昔の月報と区別する)。
+   * 成績の集計(上の項目)とは母集団が違う: 先読みの疑いがある分析と LLM 不使用の分析を除く(`adjustment-fit.ts`)。
+   */
+  readonly adjustmentFit?: AdjustmentFit | AdjustmentFitUnavailable;
 }
 
 function groupBy<T, K>(items: readonly T[], key: (item: T) => K): Map<K, T[]> {

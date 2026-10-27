@@ -4,6 +4,7 @@
  * 方針(日報の `daily-report-prompt.ts` と同じ。日報の規則をそのまま引き継ぐ):
  *  - 数字は決定的に計算済み(`monthly-stats.ts`)。プロンプトには確定値として渡し、LLM には計算させない。
  *  - **渡すのは月の確定値の節だけ**(ユーザーの決定・2026-10-13): 月全体の成績・開催日ごとの表・券種別・印別・「もしも」・版ごとの表。
+ *    Issue #509 で、**補正の当たり具合**の節(LLM の補正が実際の 3 着内率に近づいたか。向き別・人気の帯別・Brier・最適な倍率 k。月全体と版ごと)を足した。標本が無い・読み出せなかった・昔の月報のときは、節も規則も入れない。
  *    各レースのブロックと日報の総括(LLM の文章)は渡さない(要約の要約で誤りが伝わるため)。
  *  - LLM が書くのは「総括・良かった点・改善点・来月に向けて」だけ。気づきとして書かせ、**プロンプトや重みを変えるよう命令する書き方はさせない**
  *    (月報は記録と振り返りの材料。`docs/prompt-improvement-plan.md`)。
@@ -12,6 +13,7 @@
  *
  * この module は、クライアント(ブラウザの束)から import しない(プロンプトの文面が束に入って肥大するため)。
  */
+import { adjustmentFitHasData, adjustmentFitPromptLines } from "./adjustment-fit-format";
 import { dateLabel, periodBlock, whatIfRows, WHATIF_HEADING, yen } from "./daily-report-prompt";
 import { formatMonthLabel } from "./monthly-month";
 import type { MonthDayRow, MonthStats, MonthVersionRow } from "./monthly-stats";
@@ -21,7 +23,7 @@ import { formatRecoveryPercent } from "./recovery-format";
  * 月報のプロンプトの版。月報の本文(`MonthlyReportBody.promptVersion`)に残し、どの文面が書いた月報かを後から区別する(日報の `REPORT_PROMPT_VERSION` とは別)。
  * **プロンプトの文面〈規則・出力形式・成績の節の書き方〉を変えたら更新する。**
  */
-export const MONTHLY_PROMPT_VERSION = "monthly-2026-10-13.1";
+export const MONTHLY_PROMPT_VERSION = "monthly-2026-10-27.1";
 
 /** 応答の最大トークン数(thinking を含む)。日報と同じ値(月報の JSON は日報より短い)。非ストリーミングの上限(21333)未満。 */
 export const MONTHLY_MAX_TOKENS = 12000;
@@ -64,6 +66,8 @@ export function buildMonthlyPrompt(input: MonthlyPromptInput): string {
   const label = formatMonthLabel(input.month);
   const hasRefund = stats.refundedBetCount > 0;
   const hasVersions = stats.byVersion.length >= 2;
+  const fit = stats.adjustmentFit;
+  const hasFit = adjustmentFitHasData(fit);
   const whatIf = stats.whatIf;
   const sections: string[] = [
     `あなたは競馬の期待値分析ツールの「月報」を書く振り返り担当です。以下は ${label}の 1 か月に、このツールが発走前に分析した全レースの成績を集計した「確定値」です。`,
@@ -85,6 +89,15 @@ export function buildMonthlyPrompt(input: MonthlyPromptInput): string {
       : []),
     ...(hasRefund
       ? ["- 「返還」は、取消・除外になった馬を含む買い目で、賭け金がそのまま戻ったものです。的中でもはずれでもないので、「はずれ」と書かないでください。賭け金と払戻の両方に含まれ(回収率の計算に入っています)、的中数・見込みの的中数には含めません。予想の巧拙の根拠にしないでください。"]
+      : []),
+    ...(hasFit
+      ? [
+          "- 「補正の当たり具合」の節は、LLM が統計モデルの 3 着内率を補正した結果が、実際の 3 着内率に近づいたかを見る確定値です。計算し直さず、そのまま引用してください。成績の節とは母集団が違います(先読みの疑いと LLM 不使用の分析を除いています)。",
+          "- 補正が良かったか悪かったかは、統計モデルの率・補正後の率・実際の率を並べ、実際の率との差(ポイント)を数字で示して書いてください。数字を伴わない評価は書かないでください。",
+          "- 頭数が少ない区分(「※30 頭未満」と付いた区分)は断定しないでください。最適な倍率 k も 1 か月分の標本では動きやすい値です。1 より大きければ補正の幅が小さすぎた、1 より小さければ大きすぎたことを示しますが、頭数が少ないときは断定しないでください。",
+          "- 人気の帯別の差は、主に統計モデルの偏りを表します。LLM の補正の良し悪しとは分けて書いてください。版ごとの表の違いを、版の優劣の結論にしないでください。",
+          "- この節の数字についても、プロンプトや重みを変えるよう命令する書き方はしないでください。気づきとして、見ておく数字を書いてください。",
+        ]
       : []),
     ...(input.lastDayPending
       ? ["- 最終日の結果または日報がそろう前に作ったため、最終日の分は一部または全部が反映されていない可能性があります。最終日の成績を断定しないでください。"]
@@ -117,6 +130,7 @@ export function buildMonthlyPrompt(input: MonthlyPromptInput): string {
           "",
         ]),
     ...(hasVersions ? ["## プロンプトの版ごとの成績(確定値)", ...stats.byVersion.map(versionRow), ""] : []),
+    ...(hasFit ? ["## 補正の当たり具合(確定値)", ...adjustmentFitPromptLines(fit)] : []),
   ];
   return sections.join("\n").trimEnd() + "\n";
 }

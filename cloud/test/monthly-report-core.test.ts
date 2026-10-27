@@ -499,6 +499,38 @@ const LABELS = (o: MonthlyStepOutcome[]): string[] => o.map((x) => (x.kind === "
 /** 終わった月(最終日の翌々日の昼)。手動・作り直しの依頼の時刻。 */
 const T_NEXT = jstMsOf("20261102", 12);
 
+describe("補正の当たり具合(Issue #509): 月の統計の項目として、プロンプトと保存する本文に流れる", () => {
+  const fitGroup = {
+    raceCount: 3,
+    horseCount: 9,
+    byDirection: (["bigUp", "up", "same", "down", "bigDown"] as const).map((key, i) => ({ key, count: i + 1, placedCount: i, meanPrior: 0.3, meanAdjusted: 0.31 })),
+    byPopularity: (["1", "2-3", "4-6", "7+"] as const).map((key) => ({ key, count: 2, placedCount: 1, meanPrior: 0.3, meanAdjusted: 0.3 })),
+    brier: { prior: 0.2, adjusted: 0.19 },
+    optimalK: 1.5,
+  };
+
+  it("標本があれば、プロンプトに節が入り、保存する本文の stats.adjustmentFit に数字が残る", async () => {
+    const h = harness({ llm: true });
+    const adjustmentFit = { all: fitGroup, byVersion: [], hiddenVersionCount: 0, excluded: { suspect: 0, unknown: 0, uncheckedRaces: 0, estimated: 0, notLlm: 0 } };
+    h.state.stats = { ...h.state.stats, adjustmentFit };
+    await h.core.requestMonthly({ month: MONTH, mode: "auto" });
+    await h.drain();
+    expect(h.prompts[0]).toContain("## 補正の当たり具合(確定値)");
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0]!.body.stats.adjustmentFit).toEqual(adjustmentFit);
+  });
+
+  it("読み出せなかった月(unavailable)でも月報は普通に作られ、本文に理由の印が残り、プロンプトには節も規則も入らない", async () => {
+    const h = harness({ llm: true });
+    h.state.stats = { ...h.state.stats, adjustmentFit: { unavailable: "read-failed" } };
+    const outcomes = await h.core.requestMonthly({ month: MONTH, mode: "auto" }).then(() => h.drain());
+    expect(LABELS(outcomes)).not.toContain("read:failed");
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0]!.body.stats.adjustmentFit).toEqual({ unavailable: "read-failed" });
+    expect(h.prompts[0]).not.toContain("補正の当たり具合");
+  });
+});
+
 describe("文章(generate): LLM の呼び出し(Issue #280)", () => {
   it("文章を作り、総括を summary に、構造を body.narrative に残す。モデル・LLM の記録・プロンプトの版も残す。プロンプトは月の確定値の節だけ(各レースのブロックを含まない)", async () => {
     const h = harness({ llm: true });
