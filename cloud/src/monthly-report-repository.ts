@@ -5,10 +5,15 @@
  *  - {@link D1MonthlySource}: 月の統計の再集計と、最終日 1 日分の状態の読み出し。
  *    - 月の統計は、日報の 28 日累計の「直前 27 日」と同じ 6 文の 1 回の batch(サブリクエスト 1。`readPeriodRowsFrom`)で行を読み、`buildMonthStats` で日ごと・版ごとの行つきの統計にする。
  *      読み取り行数は日報の期間の再集計と同じ(1 レースあたり約 100 行。月に 300〜1000 レースなら約 3 万〜10 万行。上限 `PERIOD_ANALYSES_LIMIT`〈3000〉レースを超えれば例外)。
+ *    - **補正の当たり具合**(Issue #509。`adjustmentFit`)は、そのあとに別に読む(`adjustment-fit-read.ts`。候補 1 文 + 馬と結果の batch 2 文 = サブリクエスト 2。合わせて read 段階は 3)。
+ *      **この節の失敗で月報そのものを failed にしない**: 一時的な失敗は 1 度だけ取り直し、続けて失敗したら本文に `{ unavailable: "read-failed" }` の印を残す(上限超過は `too-many`、計算の失敗は `compute-failed`。
+ *      例外の本文は警告にも本文にも入れない)。成績の統計の読み出しの失敗は今までどおり例外(段階の再試行に任せる)。
  *    - 最終日の状態は軽い 1 問い合わせ({@link LAST_DAY_STATUS_SQL})。待ちのたびに大きな再集計を読み直さないために分けている。
  */
 import type { LastDayStatus, MonthlyReportBody, MonthlyReportRecord, MonthlySource, MonthlyStore } from "./monthly-report-core";
 import { readPeriodRowsFrom, type ReportDb } from "./daily-report-repository";
+import { buildAdjustmentFit, type AdjustmentFit, type AdjustmentFitUnavailable } from "./adjustment-fit";
+import { FIT_CANDIDATES_LIMIT, FitTooManyError, readAdjustmentFitRows, type FitRows } from "./adjustment-fit-read";
 import { buildMonthStats, type MonthStats } from "./monthly-stats";
 
 /** 一覧に出す件数の上限と既定(月報は 1 年 12 件。数年分を余裕で返せる)。 */
@@ -131,11 +136,30 @@ export class D1MonthlyStore implements MonthlyStore {
   }
 }
 
+export interface D1MonthlySourceOptions {
+  readonly db: ReportDb;
+  /** 警告の出し先(固定の文言だけを渡す。例外の本文は渡さない)。無ければ出さない。 */
+  readonly onWarn?: (message: string) => void;
+  /** 補正の当たり具合の候補の分析の上限(テスト用。既定は {@link FIT_CANDIDATES_LIMIT})。 */
+  readonly fitCandidateLimit?: number;
+  /** 補正の当たり具合の計算(テスト用。既定は {@link buildAdjustmentFit})。 */
+  readonly computeFit?: (rows: FitRows) => AdjustmentFit;
+}
+
+/** 補正の当たり具合の読み出しを、一時的な失敗のために取り直す回数の上限(初回を含む)。 */
+const FIT_READ_ATTEMPTS = 2;
+
 export class D1MonthlySource implements MonthlySource {
   private readonly db: ReportDb;
+  private readonly onWarn: (message: string) => void;
+  private readonly fitCandidateLimit: number;
+  private readonly computeFit: (rows: FitRows) => AdjustmentFit;
 
-  constructor(options: { readonly db: ReportDb }) {
+  constructor(options: D1MonthlySourceOptions) {
     this.db = options.db;
+    this.onWarn = options.onWarn ?? (() => undefined);
+    this.fitCandidateLimit = options.fitCandidateLimit ?? FIT_CANDIDATES_LIMIT;
+    this.computeFit = options.computeFit ?? ((rows) => buildAdjustmentFit(rows.selection, rows.horses, rows.results));
   }
 
   async lastDayStatus(date: string): Promise<LastDayStatus> {
@@ -145,6 +169,32 @@ export class D1MonthlySource implements MonthlySource {
 
   async readMonthStats(fromDate: string, toDate: string): Promise<MonthStats> {
     const { rows } = await readPeriodRowsFrom(this.db, fromDate, toDate);
-    return buildMonthStats(rows, { fromDate, toDate });
+    const stats = buildMonthStats(rows, { fromDate, toDate });
+    return { ...stats, adjustmentFit: await this.readFit(fromDate, toDate) };
+  }
+
+  /** 補正の当たり具合。失敗しても例外にせず、理由の印を返す(月報の本体を、新しい任意の節で壊さない)。 */
+  private async readFit(fromDate: string, toDate: string): Promise<AdjustmentFit | AdjustmentFitUnavailable> {
+    let rows: FitRows | undefined;
+    for (let attempt = 1; rows === undefined; attempt += 1) {
+      try {
+        rows = await readAdjustmentFitRows(this.db, fromDate, toDate, this.fitCandidateLimit);
+      } catch (error) {
+        if (error instanceof FitTooManyError) {
+          this.onWarn("月報: 補正の当たり具合の候補の分析が上限を超えたため、この節は載せません");
+          return { unavailable: "too-many" };
+        }
+        if (attempt >= FIT_READ_ATTEMPTS) {
+          this.onWarn("月報: 補正の当たり具合を D1 から読めなかったため、この節は載せません");
+          return { unavailable: "read-failed" };
+        }
+      }
+    }
+    try {
+      return this.computeFit(rows);
+    } catch {
+      this.onWarn("月報: 補正の当たり具合を計算できなかったため、この節は載せません");
+      return { unavailable: "compute-failed" };
+    }
   }
 }

@@ -141,7 +141,7 @@ describe("GET /api/monthly-reports/{YYYYMM}: 1 か月の月報", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toStrictEqual({
       ok: true,
-      report: { month: "202609", created_at: "2026-09-30T13:00:00.000Z", model: null, race_count: 120, total_stake: 40000, total_return: 34000, summary: null, body: { format: 1, month: "202609", lastDayPending: false } },
+      report: { month: "202609", created_at: "2026-09-30T13:00:00.000Z", model: null, race_count: 120, total_stake: 40000, total_return: 34000, summary: null, body: { format: 1, month: "202609", lastDayPending: false }, fit: [] },
       job: null, // 閲覧者は DO に触れない(Issue #280。進行状況は管理者だけ)
       job_status: "ok",
     });
@@ -190,5 +190,46 @@ describe("役割: 閲覧者は読み取り(GET)だけ", () => {
     expect((await handle(get("/api/monthly-reports", token, "HEAD"), h.env(), {}, deps)).status).toBe(403);
     expect((await handle(get("/api/monthly-reports/run", token), h.env(), {}, deps)).status).toBe(403);
     expect((await handle(get("/api/monthly-reports", token), h.env(), {}, deps)).status).toBe(200);
+  });
+});
+
+describe("GET /api/monthly-reports/{YYYYMM}: 補正の当たり具合の節(Issue #509。文面は読み出し時にサーバが作る)", () => {
+  const fitGroup = {
+    raceCount: 80,
+    horseCount: 1000,
+    byDirection: (["bigUp", "up", "same", "down", "bigDown"] as const).map((key, i) => ({ key, count: 100 + i, placedCount: 40, meanPrior: 0.3, meanAdjusted: 0.31 })),
+    byPopularity: (["1", "2-3", "4-6", "7+"] as const).map((key) => ({ key, count: 200, placedCount: 80, meanPrior: 0.3, meanAdjusted: 0.3 })),
+    brier: { prior: 0.1234, adjusted: 0.121 },
+    optimalK: 1.4523,
+  };
+  const fit = { all: fitGroup, byVersion: [], hiddenVersionCount: 0, excluded: { suspect: 0, unknown: 0, uncheckedRaces: 0, estimated: 0, notLlm: 0 } };
+  const rowWith = (stats: unknown): StoredRow => ({ ...ROW_A, bodyJson: JSON.stringify({ format: 1, month: "202609", lastDayPending: false, stats }) });
+  const fitOf = async (row: StoredRow): Promise<unknown> => {
+    const { deps, token } = await setup("friend@example.com");
+    const h = harness();
+    h.rows = [row];
+    const res = await handle(get("/api/monthly-reports/202609", token), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { report: { fit: unknown; body: { stats?: unknown } } }).report;
+  };
+
+  it("保存した数字(stats.adjustmentFit)から節を作って fit に入れる。本文(body)の数字はそのまま残す", async () => {
+    const report = (await fitOf(rowWith({ adjustmentFit: fit }))) as { fit: Array<{ heading: string; rows: unknown[] }>; body: { stats: { adjustmentFit: unknown } } };
+    expect(report.fit.map((s) => s.heading)).toEqual(["補正の当たり具合(月全体・80 レース・1000 頭)", "補正の向き別(月全体)", "人気の帯別(月全体)"]);
+    expect(report.fit[1]!.rows).toHaveLength(5);
+    expect(report.body.stats.adjustmentFit).toEqual(fit);
+  });
+
+  it("読み出せなかった月報(unavailable)は、理由の固定文言の 1 節だけ", async () => {
+    const report = (await fitOf(rowWith({ adjustmentFit: { unavailable: "too-many" } }))) as { fit: Array<{ heading: string; note: string; rows: unknown[] }> };
+    expect(report.fit).toHaveLength(1);
+    expect(report.fit[0]!.rows).toEqual([]);
+    expect(report.fit[0]!.note).toContain("多すぎて");
+  });
+
+  it("項目の無い昔の月報・stats が無い・壊れた stats・壊れた adjustmentFit は、節なし(落ちない)", async () => {
+    for (const stats of [undefined, null, 5, {}, { adjustmentFit: null }, { adjustmentFit: 5 }, { adjustmentFit: { all: 1 } }, { adjustmentFit: { all: { raceCount: 3 } } }]) {
+      expect(((await fitOf(rowWith(stats))) as { fit: unknown }).fit, JSON.stringify(stats)).toStrictEqual([]);
+    }
   });
 });
