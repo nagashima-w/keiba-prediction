@@ -11,7 +11,7 @@ import { DurableObject } from "cloudflare:workers";
 import { parseLimitOverride } from "./limit-override";
 import { AllocationExportCore, ALLOCATION_EXPORT_DAILY_LIMIT, type AllocationExportResponse } from "./allocation-export-core";
 import { D1AllocationExportStore, type AllocationExportBucket, type AllocationExportDb } from "./allocation-export-store";
-import type { ExportMode } from "./prior-export-core";
+import type { ExportMode } from "./export-job-core";
 
 export interface AllocationExportEnv {
   DB: AllocationExportDb;

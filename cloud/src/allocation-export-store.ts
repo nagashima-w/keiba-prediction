@@ -14,7 +14,7 @@
  *  - `r2_ops` の Class B の加算(`countReads`)と、Class A の加算 + R2 への流し込み(`putFileStream`)。put の前に Class A を数える(`analysis-repository.ts` の流儀:
  *    先に数えて、put の失敗は過少でなく過大に倒す)。
  *  - `putFileStream` は、塊を 1 つずつ `FixedLengthStream` に書いて R2 の `put` に渡す(固定キーを原子的に上書き)。全体を 1 つのバッファに連結しない。
- *    流している途中の例外・宣言した総バイト数との食い違いは put の失敗になり、固定キーの古いファイルは変わらない。
+ *    流し込みの本体は両方の書き出しで共有する `export-r2-stream.ts`(Issue #495)。流している途中の例外・宣言した総バイト数との食い違いは put の失敗になり、固定キーの古いファイルは変わらない。
  */
 
 import { decodeDetail } from "./analysis-detail";
@@ -23,14 +23,12 @@ import { toAllocationSnapshot } from "./allocation-export-format";
 import type { AllocationDetailOutcome, AllocationExportStorePort, AllocationRaceDataBatch } from "./allocation-export-core";
 import { CANDIDATES_SQL, COUNT_READS_SQL, COUNT_WRITE_SQL, GET_CONCURRENCY, SELECT_R2_USAGE_SQL, type PriorExportDb } from "./prior-export-store";
 import type { CandidateRow } from "./prior-export-format";
-import type { DetailRequest } from "./prior-export-core";
+import type { DetailRequest } from "./export-job-core";
+import { defaultFixedLengthStream, putStreamToR2, type FixedLengthStreamFactory } from "./export-r2-stream";
 
 export type AllocationExportDb = PriorExportDb;
 /** R2 のうち使う部分: 詳細の読み出し(get)と、完成したファイルの書き込み(put)だけ。 */
 export type AllocationExportBucket = Pick<R2Bucket, "get" | "put">;
-
-/** 定長のストリーム(workerd の組み込み `FixedLengthStream` と同じ形。R2 の put にストリームを渡すには長さが要る)。 */
-export type FixedLengthStreamFactory = (length: number) => { readonly readable: ReadableStream<Uint8Array>; readonly writable: WritableStream<Uint8Array> };
 
 const HORSES_SQL = `SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob AS adjustedProb, place_odds_min AS placeOddsMin, ev
   FROM analysis_horses WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analysis_id, umaban`;
@@ -67,7 +65,7 @@ export class D1AllocationExportStore implements AllocationExportStorePort {
     this.db = options.db;
     this.bucket = options.bucket;
     this.now = options.now ?? (() => new Date());
-    this.fixedLengthStream = options.fixedLengthStream ?? ((length) => new FixedLengthStream(length));
+    this.fixedLengthStream = options.fixedLengthStream ?? defaultFixedLengthStream;
   }
 
   async readUsage(): Promise<R2Usage> {
@@ -145,39 +143,6 @@ export class D1AllocationExportStore implements AllocationExportStorePort {
     info: { readonly generatedAt: string; readonly rows: number; readonly races: number },
   ): Promise<void> {
     await this.db.prepare(COUNT_WRITE_SQL).bind(monthKey(this.now())).run();
-    const { readable, writable } = this.fixedLengthStream(totalBytes);
-    // put の結果。この Promise 自身は reject しない(失敗は putError に記録する)ので、流し込みの途中で put が先に失敗しても未処理の reject にならない。
-    let putFailed = false;
-    let putError: unknown;
-    const putCall = this.bucket.put(key, readable, {
-      httpMetadata: { contentType: "application/gzip" },
-      customMetadata: { generatedAt: info.generatedAt, rows: String(info.rows), races: String(info.races) },
-    });
-    const putDone = putCall.then(
-      () => undefined,
-      (error: unknown) => {
-        putFailed = true;
-        putError = error;
-      },
-    );
-    // put が先に失敗したら、読み手のいないストリームへの書き込みで待ち続けないよう、書き込みの待ちを打ち切る。
-    const putAborted = putDone.then(() => (putFailed ? Promise.reject(putError) : new Promise<never>(() => undefined)));
-    putAborted.catch(() => undefined);
-    const writer = writable.getWriter();
-    try {
-      for (const part of parts()) {
-        await Promise.race([writer.write(part), putAborted]);
-      }
-      await Promise.race([writer.close(), putAborted]);
-    } catch (error) {
-      // abort の完了は待たない(読み手のいないストリームでは、進行中の書き込みが詰まったまま abort が終わらないことがある)。abort は読み手に伝わり、put は失敗で終わる。
-      void writer.abort(error).catch(() => undefined);
-      await putDone;
-      throw error;
-    }
-    await putDone;
-    if (putFailed) {
-      throw putError;
-    }
+    await putStreamToR2(this.bucket, this.fixedLengthStream, key, parts, totalBytes, info);
   }
 }
