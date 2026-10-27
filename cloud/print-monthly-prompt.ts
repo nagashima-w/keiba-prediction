@@ -7,6 +7,7 @@
  * 使い方(cloud/ で):
  *  - `pnpm run monthly:prompt` … シナリオ M1 のプロンプトを標準出力に出す
  *  - `pnpm run monthly:prompt -- --scenario M2` … 指定したシナリオ(M1 黒字の月・M2 赤字の月・M3 標本の少ない月。`monthly-prompt-scenarios.ts`)だけ
+ *  - `--with-fit` … 「補正の当たり具合」の節(固定のサンプル。偽の数字)を足す。補正の節を足した後のプロンプトの長さを測るため(Issue #511)。`--out` のファイルは、プロンプトだけがサンプルつきになる(確定値の一覧・embed は変わらない)
  *  - `pnpm run monthly:prompt -- --scenario all --out <ディレクトリ>` … 全シナリオの `<S>-prompt.txt`(LLM に送る user メッセージの全文)・`<S>-facts.json`(確定値の一覧。
  *    出力の突き合わせ用)・`<S>-embed.json`(文章が無い場合の Discord の embed)をそのディレクトリに書く
  *
@@ -19,7 +20,7 @@ import { pathToFileURL } from "node:url";
 import { excludingTopRecoveryRate } from "./src/daily-report-digest";
 import { buildMonthlyEmbed } from "./src/monthly-report-embed";
 import { buildMonthlyPrompt, MONTHLY_MAX_TOKENS, MONTHLY_PROMPT_VERSION } from "./src/monthly-report-prompt";
-import { buildMonthlyScenario, MONTHLY_SCENARIO_IDS, type MonthlyScenario, type MonthlyScenarioId } from "./monthly-prompt-scenarios";
+import { buildMonthlyScenario, MONTHLY_SCENARIO_IDS, sampleAdjustmentFit, type MonthlyScenario, type MonthlyScenarioId } from "./monthly-prompt-scenarios";
 
 /** シナリオの確定値の一覧(出力の突き合わせ用)。 */
 export function scenarioFacts(scenario: MonthlyScenario): Record<string, unknown> {
@@ -55,13 +56,16 @@ export function scenarioFacts(scenario: MonthlyScenario): Record<string, unknown
   };
 }
 
-export function scenarioPrompt(scenario: MonthlyScenario): string {
-  return buildMonthlyPrompt({ month: scenario.month, stats: scenario.stats, lastDayPending: scenario.lastDayPending });
+/** `withFit` を付けると、固定のサンプル(`sampleAdjustmentFit`。偽の数字)の「補正の当たり具合」の節を足す。付けなければ、シナリオの `stats` のまま(補正の節なし)。 */
+export function scenarioPrompt(scenario: MonthlyScenario, options: { readonly withFit?: boolean } = {}): string {
+  const stats = options.withFit === true ? { ...scenario.stats, adjustmentFit: sampleAdjustmentFit() } : scenario.stats;
+  return buildMonthlyPrompt({ month: scenario.month, stats, lastDayPending: scenario.lastDayPending });
 }
 
-function parseArgs(argv: readonly string[]): { scenario: MonthlyScenarioId | "all"; out: string | null } {
+function parseArgs(argv: readonly string[]): { scenario: MonthlyScenarioId | "all"; out: string | null; withFit: boolean } {
   let scenario: MonthlyScenarioId | "all" = "M1";
   let out: string | null = null;
+  let withFit = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]!;
     if (arg === "--") continue;
@@ -72,24 +76,26 @@ function parseArgs(argv: readonly string[]): { scenario: MonthlyScenarioId | "al
       } else {
         throw new Error(`--scenario は ${MONTHLY_SCENARIO_IDS.join("・")}・all のどれかです`);
       }
+    } else if (arg === "--with-fit") {
+      withFit = true;
     } else if (arg === "--out") {
       out = argv[(i += 1)] ?? null;
     } else {
       throw new Error(`未知の引数: ${arg}`);
     }
   }
-  return { scenario, out };
+  return { scenario, out, withFit };
 }
 
 function main(): void {
-  const { scenario, out } = parseArgs(process.argv.slice(2));
+  const { scenario, out, withFit } = parseArgs(process.argv.slice(2));
   const ids: readonly MonthlyScenarioId[] = scenario === "all" ? MONTHLY_SCENARIO_IDS : [scenario];
   if (out !== null) {
     const dir = path.resolve(out);
     mkdirSync(dir, { recursive: true });
     for (const id of ids) {
       const sc = buildMonthlyScenario(id);
-      const prompt = scenarioPrompt(sc);
+      const prompt = scenarioPrompt(sc, { withFit });
       writeFileSync(path.join(dir, `${id}-prompt.txt`), prompt, "utf8");
       writeFileSync(path.join(dir, `${id}-facts.json`), JSON.stringify(scenarioFacts(sc), null, 2) + "\n", "utf8");
       const embed = buildMonthlyEmbed({ month: sc.month, stats: sc.stats, narrative: null, note: "(文章なしの例)", link: "https://example.com/#report=202610", lastDayPending: sc.lastDayPending });
@@ -100,7 +106,7 @@ function main(): void {
   }
   for (const id of ids) {
     const sc = buildMonthlyScenario(id);
-    const prompt = scenarioPrompt(sc);
+    const prompt = scenarioPrompt(sc, { withFit });
     console.log(`==== 送信パラメータ(本番と同じ値。モデルは設定の analysisModel に従う) ====`);
     console.log(JSON.stringify({ model: "(設定の analysisModel〈auto は最新 Sonnet〉。固定モデルは claude-sonnet-5-5)", max_tokens: MONTHLY_MAX_TOKENS, output_config: { effort: "low" }, system: "(なし)", messages: "[{role: user, content: <下の全文>}]" }, null, 2));
     console.log(`\n==== user メッセージ(全文。${prompt.length} 文字・${sc.id} ${sc.title}) ====`);
