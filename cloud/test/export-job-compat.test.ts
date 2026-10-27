@@ -147,6 +147,79 @@ describe("統計モデル用: 古いコードが書いた作成中の job(chunkB
   });
 });
 
+describe("統計モデル用: chunkBytes の長さが済んだ塊の数(done・batches)と合わない job は、kv の塊から数え直す(Issue #507)", () => {
+  /** 仕上げの手前(finalizing。3 つの塊が済んでいる)まで回した世界と、その job。 */
+  async function finalizingWorld() {
+    const w = priorWorld(5);
+    await w.core().request("download");
+    await w.d.drain(w.core(), 1 + 3);
+    const job = w.kv.get<{ phase: string; chunkBytes: number[] }>("job")!;
+    expect(job).toMatchObject({ phase: "finalizing" });
+    expect(job.chunkBytes).toHaveLength(3); // 前提: 正しい記録は塊の数(3)と同じ長さ
+    return { w, job };
+  }
+
+  async function finishWith(w: ReturnType<typeof priorWorld>, kv: FakeKv) {
+    const store2 = new PriorFakeStore();
+    store2.candidates = w.store.candidates;
+    const d = driver();
+    const core = new PriorExportCore({ kv, store: store2, ...d.deps }, { batchSize: 2 });
+    await core.request("download");
+    await d.drain(core);
+    return { store2, kv };
+  }
+
+  const baseBytes = async (): Promise<Uint8Array> => {
+    const base = priorWorld(5);
+    await base.core().request("download");
+    await base.d.drain(base.core());
+    return base.store.puts[0]!.bytes;
+  };
+
+  for (const [name, mutate] of [
+    ["1 つ足りない(2 つ)", (c: number[]) => c.slice(0, 2)],
+    ["1 つ多い(4 つ。末尾に偽の値)", (c: number[]) => [...c, 999_999]],
+    ["空の配列", () => [] as number[]],
+  ] as const) {
+    it(`仕上げの段: ${name}。記録を使わず塊から数え直し、止めずに回したものと同じ中身のファイルを作る`, async () => {
+      const { w, job } = await finalizingWorld();
+      const wrong = mutate(job.chunkBytes);
+      expect(wrong.length).not.toBe(3); // 前提: 長さが合っていない
+      const kv = copyKv(w.kv);
+      kv.put("job", { ...job, chunkBytes: wrong });
+      const { store2 } = await finishWith(w, kv);
+      expect(store2.puts).toHaveLength(1); // 長さの検査が無いと、塊の長さの不一致(または総バイト数の食い違い)で失敗し、ファイルができない
+      const put = store2.puts[0]!;
+      expect(put.totalBytes).toBe(put.bytes.length);
+      expect(kv.get<{ bytes: number }>("file")!.bytes).toBe(put.bytes.length);
+      const rows = bodyLines(put.bytes);
+      expect(rows).toHaveLength(15);
+      expect(rows).toEqual(bodyLines(await baseBytes())); // メタ行を除いた中身が、止めずに回したものと同じ
+    });
+  }
+
+  it("処理の段(done=1): 長さが合わない記録(2 つ)でも、次の塊のあとの chunkBytes は kv の塊の長さの並びになる(添字がずれない)", async () => {
+    const w = priorWorld(5);
+    await w.core().request("download");
+    await w.d.drain(w.core(), 2); // 計画 + 処理 1 batch(done=1)
+    const job = w.kv.get<{ phase: string; done: number; chunkBytes: number[] }>("job")!;
+    expect(job).toMatchObject({ phase: "building", done: 1 });
+    const chunk0 = w.kv.get<Uint8Array>("chunk:0")!;
+    const kv = copyKv(w.kv);
+    kv.put("job", { ...job, chunkBytes: [chunk0.length, 999_999] }); // done(1)と合わない長さ 2
+    const store2 = new PriorFakeStore();
+    store2.candidates = w.store.candidates;
+    const d = driver();
+    const core = new PriorExportCore({ kv, store: store2, ...d.deps }, { batchSize: 2 });
+    await core.request("download");
+    await d.drain(core, 1); // 処理 1 batch(done=2)
+    const after = kv.get<{ done: number; chunkBytes: number[] }>("job")!;
+    expect(after.done).toBe(2);
+    const chunk1 = kv.get<Uint8Array>("chunk:1")!;
+    expect(after.chunkBytes).toEqual([chunk0.length, chunk1.length]);
+  });
+});
+
 describe("配分用: 古いコードが書いた作成中の job(chunkBytes あり)を、新しいコードで仕上げまで進める", () => {
   it("処理の途中(done=1)で残っていた job を、新しいインスタンスが続きから仕上げる。job のキーは古い形のまま", async () => {
     const mk = () => {

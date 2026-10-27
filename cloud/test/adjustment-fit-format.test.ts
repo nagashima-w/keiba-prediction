@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DIRECTION_KEYS, POPULARITY_KEYS, type AdjustmentFit, type FitBucket, type FitGroup, type FitVersion } from "../src/adjustment-fit";
-import { adjustmentFitHasData, adjustmentFitPromptLines, adjustmentFitSections, FIT_UNAVAILABLE_NOTES } from "../src/adjustment-fit-format";
+import { adjustmentFitHasData, adjustmentFitPromptLines, adjustmentFitSections, fitSectionsOfBody, FIT_UNAVAILABLE_NOTES } from "../src/adjustment-fit-format";
 
 /**
  * Issue #509: 「補正の当たり具合」の文面(画面とプロンプトが同じ関数を通す)。数字の表し方・数の少ない区分の印・版別の見出し・読み出せなかった月報の扱いを固定する。
@@ -62,6 +62,18 @@ describe("adjustmentFitSections", () => {
     expect(rows[1]!.value).toContain("1.45");
     const none = adjustmentFitSections(fit({ all: group({ optimalK: null }) }));
     expect(rowsOf(none, "補正の当たり具合(月全体・80 レース・1000 頭)")[1]!.value).toContain("なし");
+  });
+
+  it("Brier の差は、表示する 4 桁に丸めた 2 つの値の差にそろえる(画面の引き算と差が食い違わない。Issue #511)", () => {
+    const summary = (prior: number, adjusted: number): string => rowsOf(adjustmentFitSections(fit({ all: group({ brier: { prior, adjusted } }) })), "補正の当たり具合(月全体・80 レース・1000 頭)")[0]!.value;
+    // 生の差は +0.00002 で「+0.0000」と出ていたが、表示された 0.1234 と 0.1235 の差は +0.0001
+    expect(summary(0.12344, 0.12346)).toBe("統計モデル 0.1234・補正後 0.1235(差 +0.0001。負なら補正で良くなった)");
+    // 生の差は −0.00018 で「−0.0002」と出ていたが、表示された 0.1234 と 0.1233 の差は −0.0001
+    expect(summary(0.12344, 0.12326)).toBe("統計モデル 0.1234・補正後 0.1233(差 −0.0001。負なら補正で良くなった)");
+    // 丸めた値が同じなら差は 0(符号は + )
+    expect(summary(0.12341, 0.12344)).toBe("統計モデル 0.1234・補正後 0.1234(差 +0.0000。負なら補正で良くなった)");
+    // 丸めた値が同じで、生の差が負のとき: −0.0000 と出さない
+    expect(summary(0.12344, 0.12341)).toBe("統計モデル 0.1234・補正後 0.1234(差 +0.0000。負なら補正で良くなった)");
   });
 
   it("母集団の説明(除いた件数の内訳)と、版別に出さなかった版の数を、月全体の節の注に書く", () => {
@@ -165,5 +177,17 @@ describe("adjustmentFitPromptLines: プロンプトに入れる行", () => {
   it("データが無い・読み出せなかった・昔の月報のときは、行を出さない(プロンプトにその節を入れない)", () => {
     expect(adjustmentFitPromptLines(undefined)).toEqual([]);
     expect(adjustmentFitPromptLines({ unavailable: "too-many" })).toEqual([]);
+  });
+});
+
+describe("fitSectionsOfBody(保存した本文から節を作る。壊れた本文でも投げない。Issue #511)", () => {
+  it("知らない理由の印は節なし(wellFormed の検査が、note が undefined の節を落とす)", () => {
+    expect(fitSectionsOfBody({ stats: { adjustmentFit: { unavailable: "未知の理由" } } })).toStrictEqual([]);
+  });
+
+  it("前提: 知っている理由の印は、固定文言の 1 節を返す(上のテストが空振りでないことの対照)", () => {
+    const s = fitSectionsOfBody({ stats: { adjustmentFit: { unavailable: "too-many" } } });
+    expect(s).toHaveLength(1);
+    expect(s[0]!.note).toBe(FIT_UNAVAILABLE_NOTES["too-many"]);
   });
 });

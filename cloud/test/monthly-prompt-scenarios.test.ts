@@ -79,3 +79,27 @@ describe("プロンプトと確定値の一覧", () => {
     expect(facts.recoveryRate).toBeCloseTo(M1.stats.recoveryRate!, 3);
   });
 });
+
+describe("--with-fit: 補正の当たり具合の節を足したプロンプト(Issue #511。長さの測り直し用)", () => {
+  const FIT_HEADING = "## 補正の当たり具合(確定値)";
+
+  it("オプション無しは従来のまま(補正の節なし)。withFit を付けた分だけ長くなり、節の見出しと版別の見出しが入る", () => {
+    for (const sc of [M1, M2, M3]) {
+      const plain = scenarioPrompt(sc);
+      const withFit = scenarioPrompt(sc, { withFit: true });
+      expect(plain, sc.id).not.toContain(FIT_HEADING);
+      expect(withFit, sc.id).toContain(FIT_HEADING);
+      expect(withFit, sc.id).toContain("### 補正の当たり具合(月全体・");
+      expect(withFit, sc.id).toContain("### 補正の向き別(版 ");
+      expect(withFit.length, sc.id).toBeGreaterThan(plain.length);
+      expect(withFit.length, sc.id).toBeLessThan(16_000);
+    }
+  });
+
+  it("サンプルは決定的で、シナリオ本体の stats を書き換えない", () => {
+    const before = JSON.stringify(M1.stats);
+    expect(scenarioPrompt(M1, { withFit: true })).toBe(scenarioPrompt(M1, { withFit: true }));
+    expect(JSON.stringify(M1.stats)).toBe(before);
+    expect(M1.stats.adjustmentFit).toBeUndefined();
+  });
+});

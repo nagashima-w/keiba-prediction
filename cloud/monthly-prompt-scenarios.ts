@@ -10,6 +10,7 @@
  * | M2 | 赤字の月 | 開催 9 日・216 レース。単勝が見込みより少なく当たる。版は 1 つ | 赤字を見込みとの比較で説明するか(定型の「偶然」にしないか)。改善点を命令にしないか。前の月との比較を捏造しないか |
  * | M3 | 標本の少ない月 | 開催 2 日・20 レース。最終日の結果が未取込(lastDayPending)。版は 1 つ | 少なさを一度だけ述べ、傾向を断定しないか。最終日の成績を断定しないか |
  */
+import { DIRECTION_KEYS, POPULARITY_KEYS, type AdjustmentFit, type DirectionKey, type FitBucket, type FitGroup, type PopularityKey } from "./src/adjustment-fit";
 import type { MonthStats } from "./src/monthly-stats";
 import { OCT_2026_DAYS, syntheticMonthStats, type SyntheticMonthSpec } from "./test/monthly-fixtures";
 
@@ -76,4 +77,33 @@ const SPECS: Readonly<Record<MonthlyScenarioId, { readonly title: string; readon
 export function buildMonthlyScenario(id: MonthlyScenarioId): MonthlyScenario {
   const { title, lastDayPending, spec } = SPECS[id];
   return { id, title, month: MONTHLY_SCENARIO_MONTH, lastDayPending, spec, stats: syntheticMonthStats(spec) };
+}
+
+/**
+ * 「補正の当たり具合」(Issue #509)の固定のサンプル。`print-monthly-prompt.ts --with-fit` が、各シナリオの `stats.adjustmentFit` に載せる(プロンプトの長さの測り直し用)。
+ * **偽の数字**(実際の月の値ではない)。形は、月全体 + 版 2 つ(M1 の版と同じ名前)で、本番の月の形に近い。区分の頭数には、数の少ない印が付く 30 頭未満の区分を含めている。
+ * 本番のプロンプトの長さは、版の数や印の数で変わる。
+ */
+export function sampleAdjustmentFit(): AdjustmentFit {
+  const dir = (counts: readonly number[], placed: readonly number[]): FitBucket<DirectionKey>[] =>
+    DIRECTION_KEYS.map((key, i) => ({ key, count: counts[i]!, placedCount: placed[i]!, meanPrior: 0.28 + i * 0.02, meanAdjusted: 0.3 + i * 0.015 }));
+  const pop = (counts: readonly number[], placed: readonly number[]): FitBucket<PopularityKey>[] =>
+    POPULARITY_KEYS.map((key, i) => ({ key, count: counts[i]!, placedCount: placed[i]!, meanPrior: 0.5 - i * 0.12, meanAdjusted: 0.5 - i * 0.115 }));
+  const group = (raceCount: number, horseCount: number, scale: number): FitGroup => ({
+    raceCount,
+    horseCount,
+    byDirection: dir([Math.round(60 * scale), Math.round(220 * scale), Math.round(900 * scale), Math.round(240 * scale), Math.round(28 * scale)], [Math.round(30 * scale), Math.round(90 * scale), Math.round(270 * scale), Math.round(70 * scale), Math.round(9 * scale)]),
+    byPopularity: pop([Math.round(200 * scale), Math.round(400 * scale), Math.round(600 * scale), Math.round(250 * scale)], [Math.round(120 * scale), Math.round(180 * scale), Math.round(170 * scale), Math.round(40 * scale)]),
+    brier: { prior: 0.1632, adjusted: 0.1621 },
+    optimalK: 1.2,
+  });
+  return {
+    all: group(216, 1448, 1),
+    byVersion: [
+      { promptVersion: "2026-10-12.1", ...group(120, 800, 0.55) },
+      { promptVersion: "2026-10-13.1", ...group(96, 648, 0.45) },
+    ],
+    hiddenVersionCount: 0,
+    excluded: { suspect: 3, unknown: 1, uncheckedRaces: 2, estimated: 4, notLlm: 5 },
+  };
 }
