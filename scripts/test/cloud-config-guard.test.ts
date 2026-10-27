@@ -1625,12 +1625,42 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
   });
 });
 
+/** Issue #495: 2 つの書き出し(統計モデル用・配分用)が共有する部品。状態機械と、R2 への流し込み。 */
+const EXPORT_SHARED_FILES = ["export-job-core.ts", "export-r2-stream.ts"] as const;
+
+/**
+ * Issue #495: R2 の put を呼ぶのは共有の流し込み(export-r2-stream.ts)の 1 箇所だけ。書き出しのストアは `this.bucket.put(` を持たず、`putStreamToR2(` を 1 回呼ぶ。
+ * 流し込みの側は、put 以外の R2 の操作(get・list・head・delete)と D1 に触れない。状態機械(export-job-core.ts)は put を持たない(窓口の putFileStream に任せる)。
+ */
+function expectR2PutOnlyInSharedStream(store: string, shared: ReadonlyArray<readonly [string, string]>): void {
+  const stream = shared.find(([n]) => n === "export-r2-stream.ts")![1];
+  const job = shared.find(([n]) => n === "export-job-core.ts")![1];
+  expect(stream.length, "export-r2-stream.ts を読めている").toBeGreaterThan(500);
+  expect(job.length, "export-job-core.ts を読めている").toBeGreaterThan(500);
+  expect((stream.match(/\bbucket\.put\(/g) ?? []).length, "流し込みの put は 1 箇所").toBe(1);
+  expect((store.match(/\bbucket\.put\(/g) ?? []).length, "ストアは put を直接呼ばない").toBe(0);
+  expect((store.match(/putStreamToR2\(/g) ?? []).length, "ストアは流し込みを 1 回呼ぶ").toBe(1);
+  for (const forbidden of ["bucket.get(", ".list(", ".head(", ".delete(", ".prepare(", ".batch(", "env.DB", "ANALYSIS_DETAIL"]) {
+    expect(stream, `export-r2-stream.ts に ${forbidden} が無い`).not.toContain(forbidden);
+  }
+  for (const forbidden of ["bucket.put(", "bucket.get(", ".prepare(", ".batch("]) {
+    expect(job, `export-job-core.ts に ${forbidden} が無い`).not.toContain(forbidden);
+  }
+  // 共有の部品は、どちらの書き出しの名前も知らない(種別ごとの差は spec と窓口で差し込む)
+  for (const [name, code] of shared) {
+    expect(code, `${name} は書き出しの種別の名前を持たない`).not.toMatch(/PRIOR_EXPORT|PriorExport|ALLOCATION_EXPORT|AllocationExport|allocation-export/);
+  }
+}
+
 describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkeiba にも LLM にも出ず、他の DO・cron と干渉せず、R2 への書き込みは 1 箇所、Worker は D1 に触れない", () => {
   const exportSources = ["prior-export-core.ts", "prior-export-do.ts", "prior-export-store.ts", "prior-export-format.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
+  /** Issue #495: 2 つの書き出しが共有する状態機械(export-job-core.ts)と R2 への流し込み(export-r2-stream.ts)。同じ検査を受ける。 */
+  const sharedSources = EXPORT_SHARED_FILES.map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
 
-  it("書き出しのソース(4 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・他の DO が無い", () => {
+  it("書き出しのソース(4 ファイル)と共有の部品(2 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・他の DO が無い", () => {
     expect(exportSources).toHaveLength(4);
-    for (const [name, code] of exportSources) {
+    expect(sharedSources).toHaveLength(2);
+    for (const [name, code] of [...exportSources, ...sharedSources]) {
       expect(code.length, `${name} を読めている`).toBeGreaterThan(500);
       for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "VERIFY_REPORT", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket"]) {
         expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
@@ -1639,9 +1669,9 @@ describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkei
     }
   });
 
-  it("D1・R2 の読み書きは prior-export-store.ts だけ。R2 の put は putFile の 1 箇所、get は詳細の読みの 1 箇所(list・head・delete は使わない)。D1 の書き込みは r2_ops の 2 文(Class B の加算・Class A の加算)だけ", () => {
+  it("D1・R2 の読み書きは prior-export-store.ts だけ。R2 の put は共有の流し込み(export-r2-stream.ts)の 1 箇所で、このストアの putFileStream が 1 回呼ぶ。get は詳細の読みの 1 箇所(list・head・delete は使わない)。D1 の書き込みは r2_ops の 2 文(Class B の加算・Class A の加算)だけ", () => {
     const store = exportSources.find(([n]) => n === "prior-export-store.ts")![1];
-    expect((store.match(/this\.bucket\.put\(/g) ?? []).length).toBe(1);
+    expectR2PutOnlyInSharedStream(store, sharedSources);
     expect((store.match(/this\.bucket\.get\(/g) ?? []).length).toBe(1);
     for (const forbidden of [".list(", ".head(", ".delete(", "DELETE FROM", "UPDATE analyses", "UPDATE analysis_", "UPDATE race_", "UPDATE daily_", "UPDATE cloud_", "INSERT INTO analyses", "INSERT INTO race_", "INSERT INTO daily_", "INSERT INTO cloud_"]) {
       expect(store, `prior-export-store.ts に ${forbidden} が無い`).not.toContain(forbidden);
@@ -1649,8 +1679,8 @@ describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkei
     expect((store.match(/INSERT INTO r2_ops/g) ?? []).length).toBe(2);
     // 型 PriorExportBucket は get と put だけを許す
     expect(store).toMatch(/type PriorExportBucket = Pick<R2Bucket, "get" \| "put">/);
-    // ほかの書き出しのソースは D1・R2 に直接触れない(core は注入された窓口だけを使う)
-    for (const [name, code] of exportSources.filter(([n]) => n === "prior-export-core.ts" || n === "prior-export-format.ts")) {
+    // ほかの書き出しのソースは D1・R2 に直接触れない(core は注入された窓口だけを使う)。共有の状態機械(export-job-core.ts)も同じ
+    for (const [name, code] of [...exportSources.filter(([n]) => n === "prior-export-core.ts" || n === "prior-export-format.ts"), ...sharedSources.filter(([n]) => n === "export-job-core.ts")]) {
       for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", ".prepare(", ".batch(", ".put(\"exports"]) {
         expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
       }
@@ -1696,10 +1726,13 @@ describe("Issue #266: 統計モデル用の書き出し(PriorExportDO)は netkei
 
 describe("Issue #463: 配分の再計算用の書き出し(AllocationExportDO)は netkeiba にも LLM にも出ず、他の DO・cron と干渉せず、R2 への書き込みは 1 箇所、Worker は D1 に触れない", () => {
   const exportSources = ["allocation-export-core.ts", "allocation-export-do.ts", "allocation-export-store.ts", "allocation-export-format.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
+  /** Issue #495: 2 つの書き出しが共有する状態機械(export-job-core.ts)と R2 への流し込み(export-r2-stream.ts)。同じ検査を受ける。 */
+  const sharedSources = EXPORT_SHARED_FILES.map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
 
-  it("書き出しのソース(4 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・他の DO が無い", () => {
+  it("書き出しのソース(4 ファイル)と共有の部品(2 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・他の DO が無い", () => {
     expect(exportSources).toHaveLength(4);
-    for (const [name, code] of exportSources) {
+    expect(sharedSources).toHaveLength(2);
+    for (const [name, code] of [...exportSources, ...sharedSources]) {
       expect(code.length, `${name} を読めている`).toBeGreaterThan(500);
       for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "VERIFY_REPORT", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket"]) {
         expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
@@ -1708,9 +1741,9 @@ describe("Issue #463: 配分の再計算用の書き出し(AllocationExportDO)�
     }
   });
 
-  it("D1・R2 の読み書きは allocation-export-store.ts だけ。R2 の put は putFileStream の 1 箇所、get は詳細の読みの 1 箇所(list・head・delete は使わない)。D1 の書き込みは r2_ops の 2 文(Class B の加算・Class A の加算。SQL は prior-export-store.ts の定数を使う)だけ", () => {
+  it("D1・R2 の読み書きは allocation-export-store.ts だけ。R2 の put は共有の流し込み(export-r2-stream.ts)の 1 箇所で、このストアの putFileStream が 1 回呼ぶ。get は詳細の読みの 1 箇所(list・head・delete は使わない)。D1 の書き込みは r2_ops の 2 文(Class B の加算・Class A の加算。SQL は prior-export-store.ts の定数を使う)だけ", () => {
     const store = exportSources.find(([n]) => n === "allocation-export-store.ts")![1];
-    expect((store.match(/this\.bucket\.put\(/g) ?? []).length).toBe(1);
+    expectR2PutOnlyInSharedStream(store, sharedSources);
     expect((store.match(/this\.bucket\.get\(/g) ?? []).length).toBe(1);
     for (const forbidden of [".list(", ".head(", ".delete(", "DELETE FROM", "UPDATE ", "INSERT INTO", "REPLACE INTO", "DROP ", "ALTER "]) {
       expect(store, `allocation-export-store.ts に ${forbidden} が無い`).not.toContain(forbidden);
@@ -1724,8 +1757,8 @@ describe("Issue #463: 配分の再計算用の書き出し(AllocationExportDO)�
     for (const forbidden of ["race_snapshot_json", "raw_response", "contributions_json", "additional_instruction", "highlights_json", "concerns_json"]) {
       expect(store, `allocation-export-store.ts が ${forbidden} を読まない`).not.toContain(forbidden);
     }
-    // ほかの書き出しのソースは D1・R2 に直接触れない(core は注入された窓口だけを使う)
-    for (const [name, code] of exportSources.filter(([n]) => n === "allocation-export-core.ts" || n === "allocation-export-format.ts")) {
+    // ほかの書き出しのソースは D1・R2 に直接触れない(core は注入された窓口だけを使う)。共有の状態機械(export-job-core.ts)も同じ
+    for (const [name, code] of [...exportSources.filter(([n]) => n === "allocation-export-core.ts" || n === "allocation-export-format.ts"), ...sharedSources.filter(([n]) => n === "export-job-core.ts")]) {
       for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", ".prepare(", ".batch(", ".put(\"exports"]) {
         expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
       }

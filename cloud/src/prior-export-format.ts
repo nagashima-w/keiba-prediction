@@ -433,13 +433,21 @@ const NOTES: readonly string[] = [
   "oikiri_rank・oikiri_critic: 調教は中央だけ取るので、地方は常に null。oikiri_critic は netkeiba の短評で、16 文字を超えるものは自由文の疑いで null にしている。実フィクスチャの 16 頭では 4 文字前後の定型句だったが、語彙が閉じていることは確認していない。",
 ];
 
-/** ファイルを組み立てる: メタ行のメンバー + チャンクの連結。 */
-export function assembleFile(meta: PriorExportMetaInput, chunks: readonly Uint8Array[]): Uint8Array {
-  const head = gzipSync(
+/** メタ行のメンバー(ファイルの先頭)。 */
+export function buildPriorHead(meta: PriorExportMetaInput): Uint8Array {
+  return gzipSync(
     new TextEncoder().encode(`${JSON.stringify({ _meta: { format: PRIOR_EXPORT_FORMAT, ...meta, columns: [...PRIOR_ROW_KEYS], notes: [...NOTES] } })}\n`),
     { level: 1 },
   );
-  const parts = [head, ...chunks];
+}
+
+/**
+ * ファイルを全部つなげて組み立てる: メタ行のメンバー + チャンクの連結。
+ * 本番の仕上げは、塊を 1 つずつ流す(Issue #495。`export-job-core.ts`)ので、これは呼ばない。
+ * 流す方式のバイト列が、全部つなげた従来の組み立てと完全に一致することの正解(テスト)と、ローダのテストの入力に使う。
+ */
+export function assembleFile(meta: PriorExportMetaInput, chunks: readonly Uint8Array[]): Uint8Array {
+  const parts = [buildPriorHead(meta), ...chunks];
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let offset = 0;
   for (const p of parts) {

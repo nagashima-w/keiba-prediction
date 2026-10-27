@@ -12,6 +12,7 @@ import {
   type PriorExportStorePort,
   type RaceDataBatch,
 } from "../src/prior-export-core";
+import { recordPut, type PutRecord } from "./export-fixtures";
 import { PRIOR_EXPORT_KEY, toSnapshotColumns, type CandidateRow, type PriorDatasetRow } from "../src/prior-export-format";
 
 /**
@@ -41,7 +42,9 @@ class FakeStore implements PriorExportStorePort {
   failCandidates = 0;
   readonly calls: string[] = [];
   readonly fetchSizes: number[] = [];
-  readonly puts: Array<{ key: string; bytes: Uint8Array; info: { generatedAt: string; rows: number; races: number } }> = [];
+  readonly puts: PutRecord[] = [];
+  /** 仕上げの put(流す方式)。流された塊をそのまま取り出して、つなげたバイト列を記録する。 */
+  readonly putFileStream = recordPut(this.puts);
   readCounted = 0;
   horsesPerRace = 3;
 
@@ -96,10 +99,6 @@ class FakeStore implements PriorExportStorePort {
   async countReads(gets: number) {
     this.calls.push("count");
     this.readCounted += gets;
-  }
-  async putFile(key: string, bytes: Uint8Array, info: { generatedAt: string; rows: number; races: number }) {
-    this.calls.push("put");
-    this.puts.push({ key, bytes, info });
   }
 }
 

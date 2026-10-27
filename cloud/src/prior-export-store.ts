@@ -10,14 +10,17 @@
  *    形式 v2(Issue #341)の出馬表の列と、形式 v3(Issue #421)のレースの条件の列(`weight_type`・`fillies_only`)は、**同じ get で読んだ詳細の `raceSnapshot`** から取り出す(`toSnapshotColumns`)。取得の回数も D1 の文も増えない(D1 の `race_conditions` 表は読まない)。
  *
  * ## 書き
- *  - `r2_ops` の Class B の加算(`countReads`)と、Class A の加算 + R2 の put(`putFile`)。put の前に Class A を数える(`analysis-repository.ts` の流儀: 先に数えて、put の失敗は過少でなく過大に倒す)。
- *  - R2 に書くのはこのクラスの `putFile` の 1 箇所だけ(固定キーを原子的に上書き)。
+ *  - `r2_ops` の Class B の加算(`countReads`)と、Class A の加算 + R2 への流し込み(`putFileStream`)。put の前に Class A を数える(`analysis-repository.ts` の流儀: 先に数えて、put の失敗は過少でなく過大に倒す)。
+ *  - `putFileStream` は、塊を 1 つずつ `FixedLengthStream` に書いて R2 の `put` に渡す(固定キーを原子的に上書き。Issue #495 で、全体を連結してから `put` する方式をやめた)。
+ *    流し込みの本体は両方の書き出しで共有する `export-r2-stream.ts` で、R2 の `put` を呼ぶのはそこの 1 箇所だけ。
  */
 
 import { decodeDetail } from "./analysis-detail";
 import { monthKey, type R2Usage } from "./r2-fence";
 import { toSnapshotColumns, type CandidateRow } from "./prior-export-format";
-import type { DetailOutcome, DetailRequest, PriorExportStorePort, RaceDataBatch } from "./prior-export-core";
+import type { DetailOutcome, PriorExportStorePort, RaceDataBatch } from "./prior-export-core";
+import type { DetailRequest } from "./export-job-core";
+import { defaultFixedLengthStream, putStreamToR2, type FixedLengthStreamFactory } from "./export-r2-stream";
 
 export type PriorExportDb = Pick<D1Database, "prepare" | "batch">;
 /** R2 のうち使う部分: 詳細の読み出し(get)と、完成したファイルの書き込み(put)だけ。 */
@@ -48,17 +51,21 @@ export interface D1PriorExportStoreOptions {
   readonly bucket: PriorExportBucket;
   /** 時計(R2 の月の区切りに使う)。既定は現在時刻。テストで注入する。 */
   readonly now?: () => Date;
+  /** 定長のストリームの作り方。既定は workerd の `FixedLengthStream`。Node のテストは、長さを検査する偽物を注入する。 */
+  readonly fixedLengthStream?: FixedLengthStreamFactory;
 }
 
 export class D1PriorExportStore implements PriorExportStorePort {
   private readonly db: PriorExportDb;
   private readonly bucket: PriorExportBucket;
   private readonly now: () => Date;
+  private readonly fixedLengthStream: FixedLengthStreamFactory;
 
   constructor(options: D1PriorExportStoreOptions) {
     this.db = options.db;
     this.bucket = options.bucket;
     this.now = options.now ?? (() => new Date());
+    this.fixedLengthStream = options.fixedLengthStream ?? defaultFixedLengthStream;
   }
 
   async readUsage(): Promise<R2Usage> {
@@ -125,11 +132,13 @@ export class D1PriorExportStore implements PriorExportStorePort {
     await this.db.prepare(COUNT_READS_SQL).bind(monthKey(this.now()), gets, gets).run();
   }
 
-  async putFile(key: string, bytes: Uint8Array, info: { readonly generatedAt: string; readonly rows: number; readonly races: number }): Promise<void> {
+  async putFileStream(
+    key: string,
+    parts: () => Iterable<Uint8Array>,
+    totalBytes: number,
+    info: { readonly generatedAt: string; readonly rows: number; readonly races: number },
+  ): Promise<void> {
     await this.db.prepare(COUNT_WRITE_SQL).bind(monthKey(this.now())).run();
-    await this.bucket.put(key, bytes, {
-      httpMetadata: { contentType: "application/gzip" },
-      customMetadata: { generatedAt: info.generatedAt, rows: String(info.rows), races: String(info.races) },
-    });
+    await putStreamToR2(this.bucket, this.fixedLengthStream, key, parts, totalBytes, info);
   }
 }
