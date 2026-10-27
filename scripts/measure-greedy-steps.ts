@@ -30,11 +30,16 @@
  * ## 3つの条件(主表は C)
  * - C: 全8券種・的中確率の下限 = 本番の既定(0.05)。**本番の挙動。主表。**
  * - B: 全8券種・下限なし(0)。「下限が無かったらどうなるか」の参考。
- * - A: 単勝・複勝・ワイド・三連複のみ・下限なし。8/13 の表と券種を揃えた比較用。
+ * - A: 単勝・複勝・ワイド・三連複のみ・下限なし。8/13 の表(複勝・ワイド・三連複の3券種)に近い券種にした比較用。
  *
  * ## 8/13 の表との比較の注意
- * prior が変わっている(#339 の重み・#353 のタイム指数)ため、条件 A でも8/13の数値とは一致しない。差は prior の変化によるもので、
- * 本スクリプトの組み立ての違いではない(8/13 の表は旧 prior でしか再現できない)。
+ * 条件 A は8/13の表と揃っていない。(1) 券種: 8/13 は複勝・ワイド・三連複の3券種、条件 A は単勝を加えた4券種。(2) 同時分布のモデル:
+ * 8/13 当時は CB、いまは PL。(3) prior: #339 の重み・#353 のタイム指数で変わっている。したがって数値は一致せず、差の大半は prior の
+ * 変化と見られるが、上の3つを切り分けてはいない(8/13 の表は当時の prior・モデルでしか再現できない)。
+ *
+ * ## 「0.0%」の読み方
+ * 構成比が 0.0% の券種は、「EV プラスの候補が無い」場合と「候補はあるが的中確率の下限(条件 C)で外れた」場合がある。両者を区別できるよう、
+ * 出力はシナリオ×条件ごとに「EV プラスの候補」と「下限を通過した候補」の券種別の件数を分けて出す。
  */
 
 import { readFileSync } from "node:fs";
@@ -108,6 +113,40 @@ export function summarizeAllocations(
     BET_TYPE_COLUMNS.map((c) => [c.betType, result.totalStake > 0 ? stakeByType[c.betType] / result.totalStake : 0]),
   ) as Record<AllocationBetType, number>;
   return { totalStake: result.totalStake, betCount: result.betCount, stakeByType, shareByType };
+}
+
+/** 券種(`AllocationBetType`)の文字列の列を、券種別の件数にする。列に無い券種が混ざれば例外(数えられない件数を黙って落とさない)。 */
+export function countByBetType(betTypes: readonly string[]): Record<AllocationBetType, number> {
+  const counts = Object.fromEntries(BET_TYPE_COLUMNS.map((c) => [c.betType, 0])) as Record<AllocationBetType, number>;
+  for (const betType of betTypes) {
+    if (!(betType in counts)) {
+      throw new Error(`countByBetType: 列に無い券種 ${betType} が含まれています`);
+    }
+    counts[betType as AllocationBetType] += 1;
+  }
+  return counts;
+}
+
+/** 券種別の件数の引き算(a − b)。ある券種で b が a を上回れば例外(「通過 = EVプラス − 下限で外れ」が負にならない前提の検査)。 */
+export function subtractCounts(
+  a: Readonly<Record<AllocationBetType, number>>,
+  b: Readonly<Record<AllocationBetType, number>>,
+): Record<AllocationBetType, number> {
+  const out = {} as Record<AllocationBetType, number>;
+  for (const { betType } of BET_TYPE_COLUMNS) {
+    if (b[betType] > a[betType]) {
+      throw new Error(`subtractCounts: ${betType} で引く数 ${b[betType]} が引かれる数 ${a[betType]} を上回ります`);
+    }
+    out[betType] = a[betType] - b[betType];
+  }
+  return out;
+}
+
+/** 券種別の件数を「単勝5 / 複勝5 / …(計N)」の行にする。0件の券種は省略する(全部0なら「なし(計0)」)。 */
+export function formatCountsLine(counts: Readonly<Record<AllocationBetType, number>>): string {
+  const total = BET_TYPE_COLUMNS.reduce((s, c) => s + counts[c.betType], 0);
+  const parts = BET_TYPE_COLUMNS.filter((c) => counts[c.betType] > 0).map((c) => `${c.label}${counts[c.betType]}`);
+  return parts.length === 0 ? `なし(計${total})` : `${parts.join(" / ")}(計${total})`;
 }
 
 /** 構成比(0〜1)を小数1桁の百分率にする。 */
@@ -238,6 +277,10 @@ export async function loadMeasurementRace(): Promise<{ readonly analysis: Analys
   deepStrictEqual(sortedEntries(analysis.wideCombo), sortedEntries(combos.wide));
   deepStrictEqual(sortedEntries(analysis.trioCombo), sortedEntries(combos.trio));
 
+  // 確定後のオッズ(出力の先頭に「確定後オッズ」と書く前提。発売前〈yoso〉や発売中のオッズでは測っていない)。
+  if (analysis.oddsStatus !== "result") {
+    throw new Error(`oddsStatus が result ではありません(${analysis.oddsStatus})。出力の先頭の「確定後オッズ」の記述が成り立ちません`);
+  }
   const race: MixedCandidateBuildInput = {
     oddsStatus: analysis.oddsStatus,
     rows: analysis.rows,
@@ -272,7 +315,7 @@ export const CONDITIONS: readonly {
   { id: "B", title: "条件B(参考): 全8券種・的中確率の下限なし(0)", overrides: { minHitProb: 0 } },
   {
     id: "A",
-    title: "条件A(8/13との比較用): 単勝・複勝・ワイド・三連複のみ・下限なし(0)",
+    title: "条件A(8/13に近い券種): 単勝・複勝・ワイド・三連複のみ・下限なし(0)。8/13とは単勝の有無と同時分布のモデル(CB→PL)が違う",
     overrides: {
       minHitProb: 0,
       includeQuinellaInAllocation: false,
@@ -353,6 +396,7 @@ export async function runMeasurement(greedyStepsValues: readonly number[] = GREE
   out.push(`# greedySteps の感度(Issue #36 の測り直し)`);
   out.push("");
   out.push("## 計測条件");
+  out.push(`- **確定後オッズ(oddsStatus=${analysis.oddsStatus})・LLM の補正なし(prior のまま)・1 レース**(中央${analysis.rows.length}頭の 1 レースだけの測定。レース間のばらつきは測っていない)`);
   out.push(`- レース: 中央${analysis.rows.length}頭 raceId=${analysis.raceId}(実レース日 ${KAISAI_DATE})。oddsStatus=${analysis.oddsStatus}`);
   out.push(`- 入力: docs/investigations/combo-odds-real-fetch/central-on.json(実戦績・単複ワイド三連複のオッズ)+ fixtures/odds_{quinella,exacta,trifecta,wakuren}_202603020211.json`);
   out.push(`- prior: runAnalysis(analyze: null)の実 prior。scorerConfig = buildCloudScorerConfig(DEFAULT_CLOUD_SETTINGS)(core の既定と同一であることを検査済み)`);
@@ -367,7 +411,10 @@ export async function runMeasurement(greedyStepsValues: readonly number[] = GREE
   );
   out.push(`- betUnit=${DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit} / candidateCap=${DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap} / 既定の greedySteps=${defaultSteps}`);
   out.push(`- 構成比は券種ごとの金額 ÷ 総額。「下限で外れ」は、的中確率の下限で候補から外れた EV プラスの買い目の数`);
-  out.push(`- **8/13の表との比較の注意**: prior が変わっている(#339 の重み・#353 のタイム指数)ので、条件Aでも8/13の数値とは一致しない。差は prior の変化による`);
+  out.push(
+    `- **8/13の表との比較の注意**: 条件Aは8/13の表と揃っていない。券種(8/13は複勝・ワイド・三連複の3券種、条件Aは単勝を足した4券種)・同時分布のモデル(8/13当時はCB、いまはPL)・prior(#339 の重み・#353 のタイム指数)が違う。差の大半は prior の変化と見られるが、切り分けてはいない`,
+  );
+  out.push(`- 構成比が 0.0% の券種は、「EVプラスの候補が無い」場合と「候補はあるが的中確率の下限で外れた」場合がある。シナリオ・条件ごとに、EVプラスの候補と下限を通過した候補の券種別の件数を分けて出す`);
   out.push("");
 
   let checked = 0;
@@ -376,12 +423,21 @@ export async function runMeasurement(greedyStepsValues: readonly number[] = GREE
     for (const condition of CONDITIONS) {
       const settings = settingsFor(scenario, condition.overrides);
       const mixed = buildMixedCandidates(race, { betTypes: betTypesOfSettings(settings), evConfig: { threshold: settings.evThreshold } });
-      const counts = betTypesOfSettings(settings)
-        .map((bt) => `${BET_TYPE_COLUMNS.find((c) => c.betType === bt)!.label}${mixed.candidates.filter((c) => c.betType === bt).length}`)
-        .join(" / ");
+      const evCounts = countByBetType(mixed.candidates.map((c) => c.betType));
       const rows: SensitivityRow[] = [];
+      let passedCounts: Record<AllocationBetType, number> | null = null;
       for (const greedySteps of greedyStepsValues) {
         const result = allocateWith(race, analysis, settings, greedySteps);
+        // 下限を通過した候補 = EVプラスの候補 − 下限で外れた候補(券種別)。最適化に載せた候補数(diagnostics)と合うことを検査する。
+        const passed = subtractCounts(evCounts, countByBetType(result.belowFloor.map((b) => b.betType)));
+        const passedTotal = BET_TYPE_COLUMNS.reduce((sum, c) => sum + passed[c.betType], 0);
+        if (result.diagnostics.truncatedByCapCount !== 0 || passedTotal !== result.diagnostics.candidateCount) {
+          throw new Error(`${scenario.label} / 条件${condition.id} / greedySteps=${greedySteps}: 通過した候補の数 ${passedTotal} が最適化に載せた候補数 ${result.diagnostics.candidateCount} と合いません`);
+        }
+        if (passedCounts !== null && formatCountsLine(passedCounts) !== formatCountsLine(passed)) {
+          throw new Error(`${scenario.label} / 条件${condition.id}: 下限を通過した候補が greedySteps で変わりました(下限は最適化の前に適用されるはず)`);
+        }
+        passedCounts = passed;
         rows.push({ greedySteps, summary: summarizeAllocations(result), belowFloorCount: result.belowFloor.length });
         if (greedySteps === defaultSteps) {
           assertMatchesProduction(race, settings, result, `${scenario.label} / 条件${condition.id}`);
@@ -389,7 +445,8 @@ export async function runMeasurement(greedyStepsValues: readonly number[] = GREE
         }
       }
       out.push(`### ${scenario.label} — ${condition.title}`);
-      out.push(`候補(EVプラス): ${counts}`);
+      out.push(`EVプラスの候補: ${formatCountsLine(evCounts)}`);
+      out.push(`下限を通過した候補: ${formatCountsLine(passedCounts!)}`);
       out.push("");
       out.push(...formatSensitivityTable("", rows).slice(1));
       out.push("");

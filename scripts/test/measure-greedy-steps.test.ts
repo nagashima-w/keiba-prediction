@@ -3,7 +3,10 @@ import {
   BET_TYPE_COLUMNS,
   allocationsEqual,
   betTypesOfSettings,
+  countByBetType,
+  formatCountsLine,
   formatShare,
+  subtractCounts,
   formatSensitivityTable,
   summarizeAllocations,
   type SensitivityRow,
@@ -100,7 +103,7 @@ describe("betTypesOfSettings(設定 → 券種の並び。mixed-race-allocation 
     expect(betTypesOfSettings(all)).toEqual(["place", "win", "wide", "trio", "quinella", "exacta", "trifecta", "bracketQuinella"]);
   });
 
-  it("馬連・馬単・三連単・枠連をOFF: 単勝・複勝・ワイド・三連複の4券種(8/13と同じ券種)", () => {
+  it("馬連・馬単・三連単・枠連をOFF: 単勝・複勝・ワイド・三連複の4券種(8/13の3券種〈複勝・ワイド・三連複〉に単勝を足した形)", () => {
     expect(
       betTypesOfSettings({
         ...all,
@@ -212,5 +215,61 @@ describe("formatSensitivityTable(感度表の組み立て)", () => {
     const counts = table.slice(1).filter((l) => l.includes("|")).map((l) => l.split("|").length);
     expect(counts.length).toBeGreaterThan(2);
     expect(new Set(counts).size).toBe(1);
+  });
+});
+
+describe("BET_TYPE_COLUMNS(券種とラベルの対応・列の順)", () => {
+  it("リテラルの期待値と一致する(ワイドと三連複のラベルの取り違えなどを検出する)", () => {
+    expect(BET_TYPE_COLUMNS).toEqual([
+      { betType: "win", label: "単勝" },
+      { betType: "place", label: "複勝" },
+      { betType: "wide", label: "ワイド" },
+      { betType: "quinella", label: "馬連" },
+      { betType: "exacta", label: "馬単" },
+      { betType: "trio", label: "三連複" },
+      { betType: "trifecta", label: "三連単" },
+      { betType: "bracketQuinella", label: "枠連" },
+    ]);
+  });
+});
+
+describe("countByBetType(券種別の件数)", () => {
+  it("券種ごとに数える。全8券種のキーがあり、無い券種は0", () => {
+    const counts = countByBetType(["wide", "wide", "trio", "win"]);
+    expect(Object.keys(counts)).toHaveLength(BET_TYPE_COLUMNS.length);
+    expect(counts.wide).toBe(2);
+    expect(counts.trio).toBe(1);
+    expect(counts.win).toBe(1);
+    expect(counts.trifecta).toBe(0);
+  });
+
+  it("空なら全部0", () => {
+    const counts = countByBetType([]);
+    expect(Object.keys(counts)).toHaveLength(BET_TYPE_COLUMNS.length);
+    expect(Object.values(counts).every((n) => n === 0)).toBe(true);
+  });
+
+  it("未知の券種が混ざったら例外(数えられない件数を黙って落とさない)", () => {
+    expect(() => countByBetType(["wide", "unknownType"])).toThrow(/unknownType/);
+  });
+
+  it("引き算(EVプラス − 下限で外れ)= 通過。外れの方が多い券種があれば例外", () => {
+    const ev = countByBetType(["wide", "wide", "wide", "trio", "trio"]);
+    const floor = countByBetType(["wide", "trio", "trio"]);
+    const passed = subtractCounts(ev, floor);
+    expect(passed.wide).toBe(2);
+    expect(passed.trio).toBe(0);
+    expect(() => subtractCounts(floor, ev)).toThrow(/wide/);
+  });
+});
+
+describe("formatCountsLine(件数の行)", () => {
+  it("件数のある券種を列の順に出し、0件の券種は省略し、末尾に計を付ける", () => {
+    const counts = countByBetType(["wide", "wide", "wide", "quinella", "win", "win", "win", "win", "win", "place", "place", "place", "place", "place", "bracketQuinella"]);
+    expect(formatCountsLine(counts)).toBe("単勝5 / 複勝5 / ワイド3 / 馬連1 / 枠連1(計15)");
+  });
+
+  it("全部0なら「なし(計0)」", () => {
+    expect(formatCountsLine(countByBetType([]))).toBe("なし(計0)");
   });
 });
