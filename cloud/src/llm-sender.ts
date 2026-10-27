@@ -39,7 +39,7 @@ export interface CloudLlm {
 }
 
 /**
- * メッセージ送信の関数を作る。キーは**前後の空白(改行を含む)を除いて**渡す: ダッシュボードにキーを貼ると末尾に改行が付くことがあり、そのまま x-api-key ヘッダに入れると、
+ * メッセージ送信の関数を作る。キーは**前後の空白(改行を含む)を除いて**渡す: ダッシュボードにキーを貼ると末尾に改行が付くことがあり、そのまま認証のヘッダ(SDK 1.0.0 から Authorization: Bearer。0.135.0 までは x-api-key)に入れると、
  * 毎回「LLM 呼び出しに失敗」になる(原因が利用者から見えない)。
  */
 export function createCloudLlmSender(apiKey: string, options: CloudLlmOptions = {}): MessageSender {

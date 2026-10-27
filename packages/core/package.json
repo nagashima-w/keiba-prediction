@@ -34,7 +34,7 @@
   "//undici": "Issue #305: 範囲を ^7.19.0 → ^7.29.1 に上げた(7.29.1 未満に high を含む脆弱性が複数ある。`pnpm audit`)。その後 Dependabot(#322)で ^8.11.2 に上がった(Electron を削除して、^7 に留める理由が無くなった。engines は Node22+)。cloud の Worker には入らない(cloud/wrangler.toml の [alias] で src/undici-stub.ts に置換される)。",
   "//vitest": "Issue #305: 範囲を ^4.1.9 → ^4.1.11 に上げた(4.1.11 未満の vitest・@vitest/mocker に Path Traversal の脆弱性。テスト時のみ)。その後 Dependabot(#326)で ^5.0.4 に上がった(ルートも同じ範囲)。",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0",
+    "@anthropic-ai/sdk": "^1.2.0",
     "better-sqlite3": "^13.0.3",
     "cheerio": "^1.2.0",
     "iconv-lite": "^0.7.3",

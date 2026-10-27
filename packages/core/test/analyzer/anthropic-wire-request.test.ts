@@ -1,9 +1,10 @@
 /**
  * Issue #324: SDK(`@anthropic-ai/sdk`)が実際に送るリクエストと、エラー・応答の扱いの固定(偽 fetch。実 API には出ない)。
  *
- * 目的: SDK を上げたとき(0.70.1 → 0.133.0)に、API へ送るもの(URL・メソッド・本文・主要ヘッダ)と、
+ * 目的: SDK を上げたとき(0.70.1 → 0.133.0 → 1.2.0)に、API へ送るもの(URL・メソッド・本文・主要ヘッダ)と、
  * 呼び出し側が頼っている性質(エラーの `.status`・再試行しないこと・タイムアウトの扱い・応答のテキスト抽出)が変わっていないことを、
- * 実 API を使わずに確かめる。更新の前後で同じテストが通る(版数を値に含めない)。
+ * 実 API を使わずに確かめる。0.70.1 → 0.133.0 では、更新の前後で同じテストが通った。1.0.0 では API の版(`anthropic-version`)が 2023-06-01 → 2026-10-21 に、
+ * API キーを送るヘッダが `x-api-key` → `Authorization: Bearer` に変わった(SDK のソースの差分と、偽 fetch での実測で確認)ので、その 2 点だけ期待値を書き換えた。
  *
  * 固定しないもの: SDK 内部のヘッダ(`x-stainless-*` の版・ランタイム情報、`user-agent` の版数)。
  * `user-agent` は「Anthropic/JS <版>」の形だけを見る。
@@ -78,16 +79,17 @@ describe("messages の送信リクエスト(createSdkMessageSender)", () => {
         messages: [{ role: "user", content: "プロンプト" }],
       }),
     );
-    expect(c.headers["x-api-key"]).toBe(KEY);
-    expect(c.headers["anthropic-version"]).toBe("2023-06-01");
+    // SDK 1.0.0(API の版 2026-10-21)から、API キーは `Authorization: Bearer` で送られ、`x-api-key` は付かない(0.135.0 までは逆)
+    expect(c.headers["authorization"]).toBe(`Bearer ${KEY}`);
+    expect(c.headers["x-api-key"]).toBeUndefined();
+    expect(c.headers["anthropic-version"]).toBe("2026-10-21");
     expect(c.headers["content-type"]).toBe("application/json");
     expect(c.headers["accept"]).toBe("application/json");
     expect(c.headers["user-agent"]).toMatch(/^Anthropic\/JS \d+\.\d+\.\d+$/);
     // 再試行しない設定(cloud と同じ)が実際に効いている / 上限時間(秒)が SDK に渡っている
     expect(c.headers["x-stainless-retry-count"]).toBe("0");
     expect(c.headers["x-stainless-timeout"]).toBe("180");
-    // 余計な認証・ベータのヘッダは付かない
-    expect(c.headers["authorization"]).toBeUndefined();
+    // 余計なベータのヘッダは付かない(認証のヘッダは上で `authorization` の 1 系統だけを固定した)
     expect(c.headers["anthropic-beta"]).toBeUndefined();
   });
 
@@ -125,8 +127,9 @@ describe("Models API の送信リクエスト(createSdkModelLister)", () => {
     expect(c.url).toBe("https://api.anthropic.com/v1/models?limit=1000");
     expect(c.method).toBe("GET");
     expect(c.body).toBeUndefined();
-    expect(c.headers["x-api-key"]).toBe(KEY);
-    expect(c.headers["anthropic-version"]).toBe("2023-06-01");
+    expect(c.headers["authorization"]).toBe(`Bearer ${KEY}`);
+    expect(c.headers["x-api-key"]).toBeUndefined();
+    expect(c.headers["anthropic-version"]).toBe("2026-10-21");
     expect(c.headers["x-stainless-retry-count"]).toBe("0");
     expect(models).toEqual([{ id: "claude-sonnet-5-5", created_at: "2026-01-01T00:00:00Z" }]);
   });
