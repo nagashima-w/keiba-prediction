@@ -148,7 +148,7 @@ describe("createCloudLlm(API キーから LLM の依存を作る。キーが無�
 });
 
 /**
- * Issue #194(メタレビュー R5): API キーの前後の空白(改行を含む)。ダッシュボードにキーを貼ると末尾に改行が付くことがあり、そのまま x-api-key ヘッダに入れると、
+ * Issue #194(メタレビュー R5): API キーの前後の空白(改行を含む)。ダッシュボードにキーを貼ると末尾に改行が付くことがあり、そのまま認証のヘッダ(SDK 0.135.0 までは x-api-key、1.0.0 からは Authorization: Bearer)に入れると、
  * 毎回「LLM 呼び出しに失敗」になる(原因が利用者から見えない)ことを懸念して、trim して渡す。SDK に送るヘッダが空白なしであることを、偽の fetch で固定する。実 API には出ない。
  * **実測(2026-10-07。Node と workerd〈wrangler dev --local〉)**: SDK のヘッダは `Headers` を通るので、末尾の改行・前後の空白は、trim しなくても正規化されて**送られるヘッダは同じ**になる
  * (懸念した「毎回失敗」は再現しなかった)。したがって、このテストはヘッダだけでは trim の有無を区別できない。SDK に**渡すキーそのもの**が trim 済みであることは、
@@ -157,11 +157,12 @@ describe("createCloudLlm(API キーから LLM の依存を作る。キーが無�
 describe("API キーの前後の空白は取り除いて送る(Issue #194 R5)", () => {
   const BARE = "sk-ant-fake-test-key-not-real";
 
-  /** x-api-key ヘッダを記録し、送信・一覧のどちらにも成功を返す fetch。 */
+  /** 認証のヘッダ(SDK 1.0.0 から `Authorization: Bearer <キー>`。0.135.0 までは `x-api-key`)のキー部分を記録し、送信・一覧のどちらにも成功を返す fetch。 */
   function recordingFetch() {
     const keys: (string | null)[] = [];
     const fetchImpl = vi.fn(async (url: unknown, init?: { headers?: HeadersInit }) => {
-      keys.push(new Headers(init?.headers).get("x-api-key"));
+      const auth = new Headers(init?.headers).get("authorization");
+      keys.push(auth === null ? null : auth.replace(/^Bearer /, ""));
       const body = String(url).includes("/v1/models")
         ? { data: [], has_more: false, first_id: null, last_id: null }
         : { id: "msg_test", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [{ type: "text", text: "x" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } };
