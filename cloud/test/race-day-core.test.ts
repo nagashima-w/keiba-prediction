@@ -547,11 +547,13 @@ describe("朝の prior は DO にだけ置く(AC-b4)と、キャッシュの掃�
     // Issue #194: `race_day_llm_responses`(発走前の LLM の応答の記録)が増えた。分析の保存先(analyses 系)の表は、引き続き無い。朝のタスクは、これにも書かない。Issue #283: `race_day_nar_trifecta`(地方三連単の段階の進み具合)が増えた。これも新しい表で、朝のタスクは書かない。
     // Issue #203: `race_day_plan_venue`・`race_day_plan`(事前分析の計画の表)が増えた。これも分析の保存先ではない(手動の朝のタスクは、どちらにも書かない: 下で件数 0 を固定する)。
     // Issue #204: `race_day_auto_pre_race`(自動で積んだ pre_race の印)が増えた。同じく分析の保存先ではなく、手動の朝のタスクは書かない(下で件数 0 を固定する)。
-    expect(tables).toEqual(["fetch_cache", "race_day_meta", "race_day_tasks", "race_day_morning_prior", "race_day_llm_responses", "race_day_nar_trifecta", "race_day_plan_venue", "race_day_plan", "race_day_auto_pre_race", "race_day_close", "race_day_close_input", "race_day_notify", "race_day_result", "race_day_win_odds_only"].sort());
+    expect(tables).toEqual(["fetch_cache", "race_day_meta", "race_day_tasks", "race_day_morning_prior", "race_day_llm_responses", "race_day_nar_trifecta", "race_day_plan_venue", "race_day_plan", "race_day_auto_pre_race", "race_day_close", "race_day_close_input", "race_day_notify", "race_day_header_unread", "race_day_result", "race_day_win_odds_only"].sort());
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_plan").toArray() as { n: number }[])[0]!.n).toBe(0);
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_plan_venue").toArray() as { n: number }[])[0]!.n).toBe(0);
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_auto_pre_race").toArray() as { n: number }[])[0]!.n).toBe(0);
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_nar_trifecta").toArray() as { n: number }[])[0]!.n).toBe(0); // Issue #283
+    // Issue #522: `race_day_header_unread`(出馬表の見出しを読めなかった中央のレースの記録)が増えた。通知の表と同じく `NotifyStore` が作る新しい表で、分析の保存先ではない。手動の朝のタスクは書かない(件数 0)。
+    expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_header_unread").toArray() as { n: number }[])[0]!.n).toBe(0);
     // Issue #259: `race_day_win_odds_only`(確定の単勝オッズ・人気だけを保存する依頼の印)が増えた。これも分析の保存先ではなく、手動の朝のタスクは書かない(件数 0)。
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_win_odds_only").toArray() as { n: number }[])[0]!.n).toBe(0);
     // Issue #208: `race_day_result`(結果の取り込みの表)が増えた。これも分析の保存先ではなく、手動の朝のタスクは書かない(件数 0)。

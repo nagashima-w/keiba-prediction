@@ -244,6 +244,7 @@ describe("planNotifications: 失敗の通知(plan-failure)の候補(多くとも
       progress: over.progress ?? progress({ rows: [] }),
       rows: new Map(rows),
       paceUntilMs: 0,
+      headerUnread: null,
     });
 
   it("材料(ready)があれば、その場で送る候補になる", () => {
@@ -273,6 +274,7 @@ describe("planNotifications: 失敗の通知(plan-failure)の候補(多くとも
       progress: progress({ rows: [] }),
       rows: new Map([["plan-failure", { kind: "plan-failure", state: "ready" } as NotifyRowState]]),
       paceUntilMs: 5000,
+      headerUnread: null,
     });
     expect(plan).toEqual({ sendNow: null, nextAtMs: 5000 });
   });

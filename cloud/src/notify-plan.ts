@@ -15,6 +15,7 @@
  *  - `completed` → 材料の行(`ready`。計算ステップが保存と同じ同期区間で書く)があるときだけ。材料が無い completed(webhook を後から登録した等)は送らない。
  *  - `failed` → 赤い通知 / 昇格の時点の `skipped`(started・cap・no-start-time)→ 赤 / 昇格の時点の `skipped(manual)` → 灰色。
  *  - 計画の時点の `skipped`・`superseded`・`waiting`・`running` → レースごとの通知は送らない(計画の時点のスキップは事前分析のまとめにだけ載る)。
+ *  - 見出しを読めなかったレースの通知(Issue #522)→ 最初の記録から {@link HEADER_UNREAD_DELAY_MS} 後に、1日に1回。レースごとの通知・23 時の失敗の通知の後、まとめの前。
  *  - 事前分析のまとめ → {@link summaryEligibility}。1日に1回。レースごとの通知が先。
  */
 import { skipStage } from "./auto-run-result";
@@ -22,9 +23,10 @@ import type { AutoRunResults, PlanProgress } from "./race-day-core";
 
 /**
  * 通知の種類。`analysis` = 分析の embed(緑・灰)/ `failed` = 赤 / `skipped-manual` = 灰色 / `summary` = 事前分析のまとめ(旧「朝のまとめ」)/
- * `plan-failure` = 23 時の再実行の後も翌日の事前分析に失敗が残っているときの通知(Issue #249。1 日に高々 1 通。材料は判定の時点で積む)。
+ * `plan-failure` = 23 時の再実行の後も翌日の事前分析に失敗が残っているときの通知(Issue #249。1 日に高々 1 通。材料は判定の時点で積む)/
+ * `header-unread` = 出馬表の見出しから馬場状態か芝の柵を読めなかった中央のレースがあったときの通知(Issue #522。1 日に高々 1 通。送る時点の表から作る)。
  */
-export type NotifyKind = "analysis" | "failed" | "skipped-manual" | "summary" | "plan-failure";
+export type NotifyKind = "analysis" | "failed" | "skipped-manual" | "summary" | "plan-failure" | "header-unread";
 /** 通知の状態。`ready` = 材料だけ積んである(送る前)/ `sending` = 送信中(送る前に書く)/ `sent` / `failed`。 */
 export type NotifyState = "ready" | "sending" | "sent" | "failed";
 
@@ -37,12 +39,15 @@ export interface NotifyRowState {
 export type NotifyItem =
   | { readonly key: `race:${string}`; readonly kind: "analysis" | "failed" | "skipped-manual"; readonly raceId: string }
   | { readonly key: "summary"; readonly kind: "summary" }
-  | { readonly key: "plan-failure"; readonly kind: "plan-failure" };
+  | { readonly key: "plan-failure"; readonly kind: "plan-failure" }
+  | { readonly key: "header-unread"; readonly kind: "header-unread" };
 
 /** 送信の間隔(ミリ秒)。連続する通知を 1 秒空ける(Discord の Webhook のレート制限に当たりにくくし、その間にタスクの step が走る余地を残す)。 */
 export const SEND_SPACING_MS = 1000;
 /** 送信に失敗したあとのクールダウン(ミリ秒)。Discord が止まっているとき、残りの通知を毎回 5 秒待たせてタスクを押しのけない。失敗した通知は再送しない。 */
 export const FAILURE_COOLDOWN_MS = 60_000;
+/** 見出しを読めなかったレースの通知を送るまでの待ち時間(最初の記録から。Issue #522): 同じ時間帯に並ぶ複数の場のレースを、1 通の件数にまとめるため。 */
+export const HEADER_UNREAD_DELAY_MS = 10 * 60_000;
 /** 事前分析のまとめの保険の時刻: 確定からこの時間が過ぎたら、未完了があっても送る(確定 + 60 分。すぐ実行の行は期限が確定と同時なので、「最初の期限」にはできない)。 */
 export const SUMMARY_INSURANCE_MS = 60 * 60_000;
 
@@ -92,6 +97,8 @@ export interface PlanNotificationsInput {
   readonly rows: ReadonlyMap<string, NotifyRowState>;
   /** これ以前には送らない時刻(送信の間隔・失敗のクールダウン。無ければ 0)。 */
   readonly paceUntilMs: number;
+  /** 見出しを読めなかったレースの最初の記録の時刻(Issue #522)。記録が無ければ null。 */
+  readonly headerUnread: { readonly firstAtMs: number } | null;
 }
 
 export interface NotificationPlan {
@@ -132,6 +139,16 @@ export function planNotifications(input: PlanNotificationsInput): NotificationPl
   if (planFailureRow !== undefined && planFailureRow.kind === "plan-failure" && planFailureRow.state === "ready") {
     eligible.push({ key: "plan-failure", kind: "plan-failure" });
   }
+  // 見出しを読めなかったレースの通知(Issue #522)。記録があり、行が無い(1 日 1 回)あいだ、最初の記録 + 待ち時間から送る。待ち時間のあいだは、その時刻が次のアラームの候補。
+  let headerDueMs: number | null = null;
+  if (rows.get("header-unread") === undefined && input.headerUnread !== null) {
+    const due = input.headerUnread.firstAtMs + HEADER_UNREAD_DELAY_MS;
+    if (nowMs >= due) {
+      eligible.push({ key: "header-unread", kind: "header-unread" });
+    } else {
+      headerDueMs = due;
+    }
+  }
   const summaryRow = rows.get("summary");
   let summaryDueMs: number | null = null;
   if (summaryRow === undefined) {
@@ -146,6 +163,7 @@ export function planNotifications(input: PlanNotificationsInput): NotificationPl
     // 送れる項目がある: ペースの時刻になれば送る。
     return { sendNow: nowMs >= paceUntilMs ? eligible[0]! : null, nextAtMs: paceUntilMs };
   }
-  // 送れる項目が無い: まとめの保険の時刻(未来)だけが候補。ペースの時刻より前には送らない。
-  return { sendNow: null, nextAtMs: summaryDueMs === null ? null : Math.max(summaryDueMs, paceUntilMs) };
+  // 送れる項目が無い: まとめの保険の時刻・見出しの通知の期限(どちらも未来)だけが候補。早いほう。ペースの時刻より前には送らない。
+  const dueMs = summaryDueMs === null ? headerDueMs : headerDueMs === null ? summaryDueMs : Math.min(summaryDueMs, headerDueMs);
+  return { sendNow: null, nextAtMs: dueMs === null ? null : Math.max(dueMs, paceUntilMs) };
 }

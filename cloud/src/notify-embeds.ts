@@ -5,6 +5,7 @@
  *    (馬名・コース・距離は `record.raceSnapshot` にある。D1 の要約には馬名もコースも無い。R2 に頼ると、R2 が使えないときに通知が劣化する)。LLM が効かなかったときは、固定の理由文を末尾に足す。
  *  - 失敗(赤)・手動スキップ(灰色): 理由ごとの**固定文だけ**を載せる(タスクのエラー文の生の値は載せない)。
  *  - 事前分析のまとめ: 中央は場ごとの field、地方は「地方 交流重賞」の field。**上限(AC-D4)は {@link fitEmbed} が最後に保証する**。
+ *  - 出馬表の見出しを読めなかったレースの通知(Issue #522): 件数と例を 1 つ({@link buildHeaderUnreadEmbed})。
  *
  * `fields` は core の `DiscordEmbed` に無い(title・description・color だけ)ので、ここで {@link CloudEmbed} として拡張する(core には触らない)。
  * `sendDiscordNotification` は `JSON.stringify` するだけなので、そのまま通る。
@@ -28,6 +29,7 @@ import { isRecord } from "../../packages/core/src/common/guards";
 import { markRank, PREDICTION_MARKS } from "../../packages/core/src/common/prediction-marks";
 import { nameWithGrade } from "../client/grade";
 import { kaisaiDateWeekday } from "./auto-run-plan";
+import type { HeaderItem, HeaderUnreadSummary } from "./header-unread";
 import { DISCORD_COLORS } from "./palette";
 import { buildPlaceOddsLine } from "./place-odds-format";
 import { estimatePlaceOddsForRace } from "./place-odds-view";
@@ -766,4 +768,49 @@ export function buildPlanFailureEmbed(input: PlanFailureInput): CloudEmbed {
 export function buildPlanFailureMinimalEmbed(kaisaiDate: string): CloudEmbed {
   const label = slashDateWithWeekday(kaisaiDate);
   return fitEmbed({ title: `事前分析の失敗 ${label}`, description: `【失敗】23 時の再実行後も、事前分析が完了していません(対象: ${label}開催分)。画面で確認してください。`, color: COLOR_RED });
+}
+
+// ---- 出馬表の見出しを読めなかったレースの通知(Issue #522)----
+
+const HEADER_UNREAD_TITLE = "出馬表の見出しを読めませんでした";
+
+export interface HeaderUnreadInput {
+  /** 開催日(YYYYMMDD)。 */
+  readonly kaisaiDate: string;
+  /** 件数(`summarizeHeaderUnread`)。 */
+  readonly summary: HeaderUnreadSummary;
+  /** 例: 最初に見つかったレース。 */
+  readonly example: { readonly label: RaceLabel; readonly items: readonly HeaderItem[] };
+}
+
+/**
+ * 出馬表の見出しから馬場状態か芝の柵を読めなかった中央のレースがあったときの通知(日単位の DO が、送る時点の表から作る)。**色(橙)に頼らず、文字(【要確認】・件数)で伝える。**
+ * 形の変化(Issue #521)と未発表は見分けられないので、両方の可能性を書く。影響の説明は、実際に読めなかった項目(件数が 1 以上)の分だけを出す(事実に合わせる)。
+ * 例は 1 つ(最初に見つかったレース。会場名・レース名は netkeiba 由来なので `raceTitle` が無害化する)。長さの保証は {@link fitEmbed}。
+ */
+export function buildHeaderUnreadEmbed(input: HeaderUnreadInput): CloudEmbed {
+  const { summary, example } = input;
+  const lines = [
+    `【要確認】本日の中央のレース ${summary.races} 件で、出馬表の見出しから馬場状態か芝の柵を読めませんでした。`,
+    "netkeiba の表示の形が変わった可能性があります。馬場や柵の発表前など、未発表のときも同じように読めません。",
+    `読めなかった項目: 馬場状態 ${summary.track} 件 / 柵(芝) ${summary.fence} 件 / 天候も読めなかったレース ${summary.weather} 件`,
+  ];
+  if (summary.track > 0) {
+    lines.push("馬場状態を読めないと、道悪の補正がかからず、プロンプトの馬場の行が「不明」になります。");
+  }
+  if (summary.fence > 0) {
+    lines.push("柵を読めないと、芝の柵の日数を数えられません。");
+  }
+  lines.push("この通知は 1 日に 1 回です。");
+  const fields: EmbedField[] = [{ name: "例(最初に見つかったレース)", value: `${raceTitle(example.label)}: ${example.items.join("・")}` }];
+  return fitEmbed({ title: `${HEADER_UNREAD_TITLE} ${slashDateWithWeekday(input.kaisaiDate)}`, description: lines.join("\n"), color: COLOR_ORANGE, fields });
+}
+
+/** {@link buildHeaderUnreadEmbed} を組み立てられなかったときの最小の通知(固定文と日付だけ)。 */
+export function buildHeaderUnreadMinimalEmbed(kaisaiDate: string): CloudEmbed {
+  return fitEmbed({
+    title: `${HEADER_UNREAD_TITLE} ${slashDateWithWeekday(kaisaiDate)}`,
+    description: "【要確認】出馬表の見出しから馬場状態か芝の柵を読めなかった中央のレースがあります。画面で確認してください。",
+    color: COLOR_ORANGE,
+  });
 }
