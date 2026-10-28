@@ -156,6 +156,54 @@ describe("recomputeAllocationFromProbs の同時分布モデルの口(Issue #524
     expect(mixed.allocation.bets).toEqual(plain.allocation.bets);
   });
 
+  it("複勝だけへ落ちる3つの理由(combo-odds-not-requested・combo-bet-types-off・no-combo-candidates)のすべてで、渡したモデルが配分に届く(メタの modelId がスパイの id になる)", async () => {
+    const { race, horses } = await baseline();
+    const noCombos: RaceData["odds"] = {
+      ...race.odds,
+      wideCombo: undefined,
+      trioCombo: undefined,
+      quinellaCombo: undefined,
+      exactaCombo: undefined,
+      trifectaCombo: undefined,
+      bracketQuinellaCombo: undefined,
+    };
+    const allOff = {
+      ...ALL_BETS_SETTINGS,
+      includeWideInAllocation: false,
+      includeTrioInAllocation: false,
+      includeQuinellaInAllocation: false,
+      includeExactaInAllocation: false,
+      includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: false,
+    };
+    const cases = [
+      // ① 組合せオッズを取得しない設定
+      { reason: "combo-odds-not-requested", odds: race.odds, settings: PLACE_ONLY_SETTINGS },
+      // ② 組合せの券種がすべて配分の対象外
+      { reason: "combo-bet-types-off", odds: race.odds, settings: allOff },
+      // ③ 組合せの券種は ON だが、組合せの候補が 0 件(組合せのオッズが無い)
+      { reason: "no-combo-candidates", odds: noCombos, settings: ALL_BETS_SETTINGS },
+    ] as const;
+    expect(cases).toHaveLength(3);
+    for (const c of cases) {
+      const spy = spyModel();
+      const result = recomputeAllocationFromProbs({
+        raceId: RACE_ID,
+        horses,
+        odds: c.odds,
+        comboOdds: race.meta.comboOdds,
+        allocationSettings: c.settings,
+        model: spy.model,
+      });
+      // 前提: その理由で複勝だけへ落ちていて、複勝の買い目がある(空の配分どうしの一致ではない)
+      expect(result.allocation.meta.route, c.reason).toBe("place-only");
+      expect(result.allocation.meta.fallbackReason, c.reason).toBe(c.reason);
+      expect(result.allocation.bets.length, c.reason).toBeGreaterThan(0);
+      expect(result.allocation.meta.modelId, c.reason).toBe("spy-pl");
+      expect(spy.calls(), c.reason).toBeGreaterThan(0);
+    }
+  });
+
   it("券種ごとの候補ビルダー: モデルを使う7券種のすべてで、buildMixedCandidates に渡したモデルが呼ばれる(複勝はモデルを使わない)", async () => {
     const { race, horses } = await baseline();
     // 候補の構築に要る最小の行(確率・オッズ・EV)は、recompute が組み立てる行を使う

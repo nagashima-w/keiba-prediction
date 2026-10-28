@@ -23,6 +23,7 @@
  * 3 着内率から単勝・組合せ・複勝の確率を出すモデル(`PlaceJointModel`)を差し替えて計算し直す。`REPLAY_MODELS` の 2 つ(`plackett-luce`〈本番の既定〉・`conditional-bernoulli`)を `--override model=<id>` で選べる。
  * **条件付きベルヌーイは順序がないので、組合せの経路〈単勝の候補を常に作る〉では例外になり route=invalid になる。比べられるのは複勝だけの経路〈`includeComboOdds=false`〉。**
  * モデルを上書きして invalid になった行は、`replayedBets` が null を返す(計算し直せなかった行)。CLI は回収額の集計から外し、その行数(全体・中央・地方)を必ず出す。
+ * 分析時から invalid だった行(例: 枠連を含めて枠番が無い)も、モデルを上書きしたときはこの行数に入る(原因がモデル以外のこともある)。
  * 買い目の見積もりの当たり具合を比べるときは、この行数が 0 でないモデルの結果を「買い目なし」と読まないこと。
  *
  * ## 一致しない理由の分類(`classifyReplay`)
@@ -655,6 +656,7 @@ export function storedBets(row: AllocationRaceRow): readonly AllocationRowBet[] 
 /**
  * 計算し直した提案の買い目。計算し直せない行(配分の記録なし・オッズなし)は null。
  * **モデルを上書きしたとき(Issue #524)だけ、route=invalid になった行も null**(そのモデルでは計算し直せなかった行。例: 順序のないモデルは組合せの経路で例外になる)。
+ * 分析時から invalid だった行(例: 枠連を含めて枠番が無い)も、モデルを上書きしたときはこの null に入る(原因がモデル以外のこともある)。
  * 回収額に「買い目なし」として混ぜると、計算に失敗した行が「買わなかった」ように見えるため。上書きなし・ほかの上書きだけのときの invalid は、これまでどおり買い目なし(空配列)。
  */
 export function replayedBets(row: AllocationRaceRow, overrides: ReplayOverrides = {}): AllocationRowBet[] | null {
@@ -820,6 +822,7 @@ export function runCli(argv: readonly string[], load: (file: string) => Allocati
     );
   }
   // モデルを上書きしたとき(Issue #524)は、そのモデルで route=invalid になった行を、計算し直せなかった行として回収額の集計から外す(行数は必ず出す)。
+  // 分析時から invalid だった行(例: 枠連を含めて枠番が無い)も、モデルを上書きしたときはこの数に入る(原因がモデル以外のこともある)。
   // 計算は行ごとに 1 回で済ませる(配分の計算は重いので、判定と買い目の取得で二重にしない)。
   let counted = target;
   let betsOf: (row: AllocationRaceRow) => readonly AllocationRowBet[] = (r) => replayedBets(r, overrides) ?? [];
