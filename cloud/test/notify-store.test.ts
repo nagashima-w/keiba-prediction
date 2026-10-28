@@ -82,3 +82,30 @@ describe("NotifyStore(通知の表)", () => {
     ]);
   });
 });
+
+describe("NotifyStore(見出しを読めなかったレースの表。Issue #522)", () => {
+  it("記録は race_id ごとに 1 行。同じレースを再び記録しても行は増えず、最初の値と時刻を保つ(計算の再試行で二重にならない)", () => {
+    const { store: s } = store();
+    s.recordHeaderUnread("r1", ["馬場状態", "天候"], 100);
+    s.recordHeaderUnread("r1", ["柵"], 900);
+    expect(s.headerUnreadRows()).toEqual([{ race_id: "r1", missing: "馬場状態,天候", recorded_at: 100 }]);
+  });
+
+  it("読み出しは記録の古い順(同時刻は race_id 順)。最初の記録の時刻を返す。無ければ null", () => {
+    const { store: s } = store();
+    expect(s.headerUnreadFirstAt()).toBeNull();
+    expect(s.headerUnreadRows()).toEqual([]);
+    s.recordHeaderUnread("r2", ["馬場状態"], 200);
+    s.recordHeaderUnread("r3", ["柵"], 150);
+    s.recordHeaderUnread("r1", ["馬場状態"], 200);
+    expect(s.headerUnreadRows().map((r) => r.race_id)).toEqual(["r3", "r1", "r2"]);
+    expect(s.headerUnreadFirstAt()).toBe(150);
+  });
+
+  it("表は通知の表(race_day_notify)とは別。記録しても通知の行は増えない", () => {
+    const { store: s } = store();
+    s.recordHeaderUnread("r1", ["馬場状態"], 1);
+    expect(s.rows()).toEqual([]);
+  });
+});
+

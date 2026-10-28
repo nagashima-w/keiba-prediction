@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AutoRunOutcome } from "../src/auto-run-result";
 import {
   FAILURE_COOLDOWN_MS,
+  HEADER_UNREAD_DELAY_MS,
   notifyKindFor,
   planNotifications,
   SEND_SPACING_MS,
@@ -64,6 +65,7 @@ const input = (over: Partial<PlanNotificationsInput> = {}): PlanNotificationsInp
   progress: progress({ rows: [] }),
   rows: new Map(),
   paceUntilMs: 0,
+  headerUnread: null,
   ...over,
 });
 const withResults = (...results: Result[]): AutoRunResults => ({ stage: "done", finalizedAt: FIN, results });
@@ -264,3 +266,103 @@ describe("planNotifications(いま送るもの・次に起きる時刻)", () => 
     expect(sent).toBeLessThan(checked); // 空振り防止: 送らない側もある
   });
 });
+
+describe("見出しを読めなかったレースの通知(Issue #522)。最初に見つかってから HEADER_UNREAD_DELAY_MS 待って、1 日 1 回", () => {
+  const HOUR = 60 * MIN;
+  const row = (key: string, kind: NotifyRowState["kind"], state: NotifyRowState["state"]): [string, NotifyRowState] => [key, { kind, state }];
+  const FIRST = NOW - 5 * MIN;
+  const headerKey = { key: "header-unread", kind: "header-unread" } as const;
+
+  it("待ち時間は 10 分", () => {
+    expect(HEADER_UNREAD_DELAY_MS).toBe(10 * MIN);
+  });
+
+  it("記録が無ければ送らず、アラームの候補も出さない", () => {
+    expect(planNotifications(input({ headerUnread: null }))).toEqual({ sendNow: null, nextAtMs: null });
+  });
+
+  it("待ち時間のあいだは送らず、nextAtMs は最初の記録 + 待ち時間。1ms 前は送らず、ちょうどの時刻から送る", () => {
+    const due = FIRST + HEADER_UNREAD_DELAY_MS;
+    expect(due).toBeGreaterThan(NOW); // 前提: 期限は未来
+    const waiting = planNotifications(input({ headerUnread: { firstAtMs: FIRST } }));
+    expect(waiting).toEqual({ sendNow: null, nextAtMs: due });
+    expect(planNotifications(input({ nowMs: due - 1, headerUnread: { firstAtMs: FIRST } })).sendNow).toBeNull();
+    expect(planNotifications(input({ nowMs: due, headerUnread: { firstAtMs: FIRST }, paceUntilMs: due })).sendNow).toEqual(headerKey);
+  });
+
+  it("期限が過ぎれば送る。nextAtMs はペースの時刻(送れる項目がある形)", () => {
+    const plan = planNotifications(input({ nowMs: FIRST + HEADER_UNREAD_DELAY_MS + 1, headerUnread: { firstAtMs: FIRST }, paceUntilMs: 5 }));
+    expect(plan.sendNow).toEqual(headerKey);
+    expect(plan.nextAtMs).toBe(5);
+  });
+
+  it("期限が過ぎていても、ペースの時刻が未来なら送らず、その時刻を待つ。待ち時間のあいだも、ペースの時刻が期限より後ならそちらを待つ", () => {
+    const due = FIRST + HEADER_UNREAD_DELAY_MS;
+    const late = planNotifications(input({ nowMs: due + 10, headerUnread: { firstAtMs: FIRST }, paceUntilMs: due + 5000 }));
+    expect(late).toEqual({ sendNow: null, nextAtMs: due + 5000 });
+    const early = planNotifications(input({ headerUnread: { firstAtMs: FIRST }, paceUntilMs: due + 777 }));
+    expect(early).toEqual({ sendNow: null, nextAtMs: due + 777 });
+  });
+
+  it("1 日 1 回: header-unread の行があれば(sending・sent・failed のどれでも)、記録が増えても送らず、候補も出さない", () => {
+    for (const state of ["sending", "sent", "failed"] as const) {
+      const plan = planNotifications(input({ nowMs: NOW + HOUR, headerUnread: { firstAtMs: FIRST }, rows: new Map([row("header-unread", "header-unread", state)]) }));
+      expect(plan, state).toEqual({ sendNow: null, nextAtMs: null });
+    }
+  });
+
+  it("webhook が無効なら、記録があっても何も出さない(I2)", () => {
+    expect(planNotifications(input({ enabled: false, nowMs: NOW + HOUR, headerUnread: { firstAtMs: FIRST } }))).toEqual({ sendNow: null, nextAtMs: null });
+  });
+
+  it("順序: レースごとの通知 → 23 時の失敗の通知 → 見出しの通知 → 事前分析のまとめ。1 回に 1 件だけ", () => {
+    const failed = result("a", { kind: "failed", reason: "started", message: null });
+    const base = { nowMs: NOW + HOUR, headerUnread: { firstAtMs: FIRST }, progress: progress({ morningAllTerminal: true }) };
+    const pf = row("plan-failure", "plan-failure", "ready");
+    expect(planNotifications(input({ ...base, auto: withResults(failed), rows: new Map([pf]) })).sendNow).toEqual({ key: "race:a", kind: "failed", raceId: "a" });
+    expect(planNotifications(input({ ...base, rows: new Map([pf]) })).sendNow).toEqual({ key: "plan-failure", kind: "plan-failure" });
+    expect(planNotifications(input({ ...base })).sendNow).toEqual(headerKey);
+    expect(planNotifications(input({ ...base, rows: new Map([row("header-unread", "header-unread", "sent")]) })).sendNow).toEqual({ key: "summary", kind: "summary" });
+  });
+
+  it("まとめの保険の時刻と見出しの期限が両方未来なら、早いほうが nextAtMs", () => {
+    const summaryDue = FIN + SUMMARY_INSURANCE_MS;
+    const headerEarly = summaryDue - 3 * MIN - HEADER_UNREAD_DELAY_MS;
+    const early = planNotifications(input({ headerUnread: { firstAtMs: headerEarly }, progress: progress({ morningAllTerminal: false }) }));
+    expect(early.nextAtMs).toBe(summaryDue - 3 * MIN);
+    const headerLate = summaryDue + 3 * MIN - HEADER_UNREAD_DELAY_MS;
+    const late = planNotifications(input({ headerUnread: { firstAtMs: headerLate }, progress: progress({ morningAllTerminal: false }) }));
+    expect(late.nextAtMs).toBe(summaryDue);
+    expect(summaryDue - 3 * MIN).toBeGreaterThan(NOW); // 前提: 早いほうも未来(候補が 2 つとも未来)
+  });
+
+  it("不変条件 I1(網羅・見出しの通知を含む): nextAtMs ≤ now なら必ず sendNow がある。sendNow があれば nextAtMs ≤ now", () => {
+    let checked = 0;
+    let sentHeader = 0;
+    for (const paceUntilMs of [0, NOW - 1, NOW, NOW + 1, NOW + MIN]) {
+      for (const nowOffset of [-2 * MIN, 0, 3 * MIN, 6 * MIN, 40 * MIN]) {
+        for (const firstOffset of [null, -20 * MIN, -10 * MIN, -4 * MIN, 0]) {
+          for (const headerState of [null, "ready", "sending", "sent", "failed"] as const) {
+            for (const morningAllTerminal of [false, true]) {
+              const rows = new Map<string, NotifyRowState>();
+              if (headerState !== null) rows.set("header-unread", { kind: "header-unread", state: headerState });
+              const nowMs = NOW + nowOffset;
+              const plan = planNotifications(input({ nowMs, paceUntilMs, rows, headerUnread: firstOffset === null ? null : { firstAtMs: NOW + firstOffset }, progress: progress({ morningAllTerminal }) }));
+              checked += 1;
+              const label = JSON.stringify({ paceUntilMs, nowOffset, firstOffset, headerState, morningAllTerminal });
+              if (plan.nextAtMs !== null && plan.nextAtMs <= nowMs) expect(plan.sendNow, label).not.toBeNull();
+              if (plan.sendNow !== null) {
+                expect(plan.nextAtMs, label).not.toBeNull();
+                expect(plan.nextAtMs!, label).toBeLessThanOrEqual(nowMs);
+                if (plan.sendNow.kind === "header-unread") sentHeader += 1;
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBe(5 * 5 * 5 * 5 * 2); // 前提: 組み合わせの数
+    expect(sentHeader).toBeGreaterThan(10); // 空振り防止: 見出しの通知を送る組み合わせが多数ある
+  });
+});
+
