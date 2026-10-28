@@ -80,6 +80,17 @@ export const SHUTUBA_SELECTORS = {
   gradeText: ".RaceName .Icon_Grade_None_Text",
   /** 発走時刻・距離・コース・天候・馬場を含む行。 */
   raceData01: ".RaceData01",
+  /**
+   * 天候のアイコン(`.RaceData01` の中。見出しの新しい形。Issue #521)。天候は `aria-label` の値(例: 晴・曇・雨)で読む。
+   * アイコンのクラスは 2 系統ある(`Icon_Weather Weather02`・`Icon_Weather02 Icon_W01`。2026-10-28 の実測)ので、
+   * 両方に当たる部分一致にする。旧い形のアイコンは `aria-label` を持たないので、このセレクタに当たらない。
+   */
+  weatherIcon: '[class*="Icon_Weather"][aria-label]',
+  /**
+   * 馬場状態の span(`.RaceData01` の中。見出しの新しい形。Issue #521)。芝・障害は `Item03`、ダートは `Item04`。
+   * 風の `Item05` は含めない。
+   */
+  trackConditionItem: "span.Item03, span.Item04",
   /** 会場・条件・頭数などを含む行。 */
   raceData02: ".RaceData02",
   /** 出走馬の行。 */
@@ -456,6 +467,15 @@ export const PATTERNS = {
    */
   turfFenceParen: /芝\s*\d+\s*m\s*\(([^)]*)\)/,
   /**
+   * 芝コース区分(柵)の断片を取り出す、見出しの新しい形の版(Issue #521)。
+   * 新しい形は括弧が無く、`芝1400m 左 A / …`・`芝1800m 右 外 A / …`・`芝1000m 直線 A / …` の並びで、
+   * 柵の断片は距離の直後から次の `/`(天候アイコン〈`aria-label`〉や風の `Item05` の手前)までになる。
+   * 括弧を持つ旧い形はこのパターンの対象外(括弧版を先に試し、当たらないときだけこちらを使う)。
+   * 断片から柵の文字を取るのは、旧い形と同じ {@link PATTERNS.fenceLetterToken}。
+   * 実測した断片(2026-10-28 に取得した中央の結果ページの見出しの変種。`parse-shutuba-header-new-form.test.ts` の表と、追加した 4 件のフィクスチャ)は `左 A`・`右 A`・`右 外 A`・`左 外 A`・`直線 A`。
+   */
+  turfFenceBare: /芝\s*\d+\s*m\s*([^()/]*)/,
+  /**
    * 芝コース区分(柵)の括弧内容から柵letter(A〜Z単体)を取り出す(タスク#26-P1)。
    * 括弧内容は `右`/`左`/`直`(回り方向)・`内`/`外`(内外)・柵letterの組み合わせで、
    * 区切りは実体 `&nbsp;`(U+00A0。\s に含まれる)。内・外・回り方向はいずれも漢字のため
@@ -470,6 +490,17 @@ export const PATTERNS = {
    *   別の単語を誤って拾うことはない)。
    */
   fenceLetterToken: /(?:^|\s)([A-Z])(?:\s|$)/,
+  /**
+   * 見出しの新しい形で、天候の `aria-label` の値が受け入れる形(Issue #521)。空白・`<>/` を含まない 1 トークン。
+   * 旧い形の {@link PATTERNS.weather} と同じ制約(天候はプロンプトに入る外部の文字列なので、自由文を通さない)。
+   */
+  weatherToken: /^[^\s<>/]+$/,
+  /**
+   * 見出しの新しい形で、馬場状態の span の値が受け入れる語(Issue #521)。実測(2026-10-28)は 良・稍・重・不 の 1 文字だけ。
+   * 稍重・不良のフル表記も受ける。許可リストにするのは、ダートの Item04 に別の値が入る場合
+   * (地方ばんえいの `水分量:2.5`・未発表の `−`)を馬場状態と取らないため。旧い形の {@link PATTERNS.trackCondition} は変えない。
+   */
+  trackConditionWord: /^(?:良|稍重?|重|不良?)$/,
   /** 全戦績の距離表記(例: 芝1800 / ダ1700 / 障3000。m 表記なし)。 */
   courseAndDistanceCompact: /(芝|ダ|障)\s*(\d+)/,
   /** 開催表記を回次・会場・日目に分解する(例: 2福島2 → 2, 福島, 2)。 */
