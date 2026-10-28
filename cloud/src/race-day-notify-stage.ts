@@ -13,10 +13,15 @@
  * 手順の仕様(**多くとも 1 回**・送る前に `sending` の行を書く・落ちたものは再送しない)は、各メソッドの JSDoc と `race-day-core.ts` 冒頭の「通知」の項を参照。メソッドの本体は切り出し前から変えていない。
  */
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
+import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
+import type { ShutubaRaceInfo } from "../../packages/core/src/scraper/types";
+import { findUnreadHeaderItems, summarizeHeaderUnread } from "./header-unread";
 import { buildAnalysisLink } from "./notify-link";
 import {
   buildAnalysisNotificationEmbed,
   buildFailureEmbed,
+  buildHeaderUnreadEmbed,
+  buildHeaderUnreadMinimalEmbed,
   buildManualSkipEmbed,
   buildMinimalAnalysisEmbed,
   buildSummaryEmbed,
@@ -32,7 +37,7 @@ import type { PlanRowRecord } from "./race-day-plan";
 import { errorMessage } from "./race-day-support";
 import type { AutoRunResults, PlanProgress, TaskMode } from "./race-day-core";
 
-/** 1 ステップの結果(`StepOutcome` の 1 種)。`raceId` は、レースごとの通知ではそのレース、事前分析のまとめでは `summary`、23 時の失敗の通知では `plan-failure`。`failed` は送信の失敗か送る内容を作れなかったこと(再送しない)。 */
+/** 1 ステップの結果(`StepOutcome` の 1 種)。`raceId` は、レースごとの通知ではそのレース、事前分析のまとめでは `summary`、23 時の失敗の通知では `plan-failure`、見出しの通知では `header-unread`。`failed` は送信の失敗か送る内容を作れなかったこと(再送しない)。 */
 export interface NotifyStepOutcome {
   readonly kind: "ran";
   readonly raceId: string;
@@ -106,6 +111,7 @@ export class NotifyStage {
       progress: this.getPlanProgress(),
       rows: this.store.stateMap(),
       paceUntilMs: this.store.paceUntil(),
+      headerUnread: this.headerUnreadFirstAt(),
     });
   }
 
@@ -115,7 +121,7 @@ export class NotifyStage {
    * **URL・例外のメッセージ・応答の本文は、状態にもログにも出さない**(`classifyNotifyError` の分類だけ)。
    */
   async runStep(item: NotifyItem): Promise<NotifyStepOutcome> {
-    const raceId = item.kind === "summary" ? "summary" : item.kind === "plan-failure" ? "plan-failure" : item.raceId;
+    const raceId = item.kind === "summary" || item.kind === "plan-failure" || item.kind === "header-unread" ? item.kind : item.raceId;
     const outcomeOf_ = (result: "ok" | "failed"): NotifyStepOutcome => ({ kind: "ran", raceId, mode: "notify", step: "send", result });
     let payloadJson: string;
     let analysisId: number | null = null;
@@ -128,6 +134,8 @@ export class NotifyStage {
         }
         payloadJson = row.payload_json;
         analysisId = row.analysis_id;
+      } else if (item.kind === "header-unread") {
+        payloadJson = JSON.stringify(this.buildHeaderUnread());
       } else if (item.kind === "summary") {
         const kaisaiDate = this.metaGet("kaisai_date");
         if (kaisaiDate === null) {
