@@ -22,6 +22,8 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 
 const DATE = "20260628";
 const RACE = "202603020211";
+/** 中山(06)の 2026 年 4 回 8 日目の 11R。回(4)・日次(8)・柵(C)がすべて違う値で、写像の取り違え(回と日次の入れ替え・柵の固定)を値で検出する。出馬表はフィクスチャ(柵 A)の柵だけを C に替えて使う。 */
+const RACE_NAKAYAMA = "202606040811";
 const SECRET = "sk-ant-SECRET-D1-BODY";
 const FIXED_MODEL = "claude-sonnet-5-5";
 const SETTINGS: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 1_000_000, perRaceCap: 100_000, kellyFraction: 0.5, includeComboOdds: false };
@@ -44,13 +46,19 @@ const bytes = (text: string): ArrayBuffer => {
 interface FakeGate extends GateLike {
   readonly urls: string[];
 }
-function fakeGate(): FakeGate {
+/** `fence` を渡すと、出馬表のフィクスチャの柵(「右 A」の A)をその文字に替える(レースの回・日次・柵が一致しない値で写像を確かめるため)。 */
+function fakeGate(fence?: string): FakeGate {
   const gate: FakeGate = {
     urls: [],
     async fetchRaw(url): Promise<GateResult> {
       gate.urls.push(url);
       await Promise.resolve();
-      return { kind: "response", status: 200, contentType: "text/html; charset=UTF-8", body: bytes(fixtureForUrl(url)), queuedMs: 0, elapsedMs: 1 };
+      let body = fixtureForUrl(url);
+      if (fence !== undefined && url.includes("shutuba.html")) {
+        expect(body).toContain("(右&nbsp;A)"); // 前提: 置き換える箇所がフィクスチャにある
+        body = body.replace("(右&nbsp;A)", `(右&nbsp;${fence})`);
+      }
+      return { kind: "response", status: 200, contentType: "text/html; charset=UTF-8", body: bytes(body), queuedMs: 0, elapsedMs: 1 };
     },
   };
   return gate;
@@ -129,11 +137,11 @@ afterEach(() => {
   for (const sql of opened.splice(0)) sql.close();
 });
 
-function harness(options: { store?: KaisaiDaysStore; llm?: boolean }): Harness {
+function harness(options: { store?: KaisaiDaysStore; llm?: boolean; fence?: string }): Harness {
   const sql = openNodeSql();
   opened.push(sql);
   const clock = { now: Date.parse("2026-06-28T00:00:00Z") };
-  const gate = fakeGate();
+  const gate = fakeGate(options.fence);
   const sink = fakeSink();
   const llm = options.llm === false ? undefined : fakeLlm();
   const warnings: string[] = [];
@@ -151,8 +159,8 @@ function harness(options: { store?: KaisaiDaysStore; llm?: boolean }): Harness {
   return { core, gate, sink, llm, warnings };
 }
 
-async function runPreRace(h: Harness): Promise<{ readonly outcome: string; readonly gateBeforeCompute: number; readonly gateAfterCompute: number }> {
-  await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+async function runPreRace(h: Harness, raceId: string = RACE): Promise<{ readonly outcome: string; readonly gateBeforeCompute: number; readonly gateAfterCompute: number }> {
+  await h.core.schedule({ raceId, kaisaiDate: DATE, mode: "pre_race" });
   await h.core.runNextStep(); // fetch
   const gateBeforeCompute = h.gate.urls.length;
   const out = await h.core.runNextStep(); // compute
@@ -160,12 +168,19 @@ async function runPreRace(h: Harness): Promise<{ readonly outcome: string; reado
 }
 
 describe("発走前の計算ステップ: 開催日の記録の書き込み(偽の保存先)", () => {
-  it("そのレースの (場コード, 年, 回, 日次)・開催日・柵(芝で読めた A)を 1 回だけ書く。gate は 0 回のまま", async () => {
+  it("そのレースの (場コード, 年, 回, 日次)・開催日・柵(芝で読めた C)を 1 回だけ書く。回(4)と日次(8)と柵(C)は互いに違う値。gate は 0 回のまま", async () => {
     const store = fakeStore();
-    const h = harness({ store });
-    const r = await runPreRace(h);
+    const h = harness({ store, fence: "C" });
+    const r = await runPreRace(h, RACE_NAKAYAMA);
     expect(r.outcome).toBe("pre_race:compute:ok");
     expect(r.gateAfterCompute).toBe(r.gateBeforeCompute);
+    expect(store.recorded).toEqual([{ trackCode: "06", year: 2026, kai: 4, nichi: 8, kaisaiDate: DATE, fence: "C" }]);
+  });
+
+  it("フィクスチャそのままの柵(A)では、柵 A が書かれる(柵を固定値にしていない対照)。場コード 03・2回2日目", async () => {
+    const store = fakeStore();
+    const h = harness({ store });
+    expect((await runPreRace(h)).outcome).toBe("pre_race:compute:ok");
     expect(store.recorded).toEqual([{ trackCode: "03", year: 2026, kai: 2, nichi: 2, kaisaiDate: DATE, fence: "A" }]);
   });
 
