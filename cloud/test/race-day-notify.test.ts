@@ -7,7 +7,7 @@ import { failureText, MANUAL_SKIP_TEXT } from "../src/notify-embeds";
 import type { CloudEmbed } from "../src/notify-embeds";
 import { DISCORD_COLORS } from "../src/palette";
 import type { DiscordNotifier } from "../src/notify-send";
-import { FAILURE_COOLDOWN_MS, SEND_SPACING_MS, SUMMARY_INSURANCE_MS } from "../src/notify-plan";
+import { FAILURE_COOLDOWN_MS, HEADER_UNREAD_DELAY_MS, SEND_SPACING_MS, SUMMARY_INSURANCE_MS } from "../src/notify-plan";
 import type { RecentAnalysis } from "../src/analysis-save-extra";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
@@ -1015,3 +1015,153 @@ describe("G-D2: 即時ループ・停止がない(fuzz)", () => {
     expect(sendsTotal).toBeGreaterThan(60); // 空振り防止: 送信の経路を多数通った
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe("Issue #522: 出馬表の見出しから馬場状態・芝の柵を読めなかったレースがあれば、Discord に 1 日 1 回(最初に見つかってから待って、件数と例を 1 つ)", () => {
+  const TITLE = "出馬表の見出しを読めませんでした";
+  const headerNotices = (h: Harness): CloudEmbed[] => h.notifier.sent.map(embedOf).filter((e) => e.title!.startsWith(TITLE));
+  const headerRows = (h: Harness): { race_id: string; missing: string; recorded_at: number }[] =>
+    h.sql.exec("SELECT race_id, missing, recorded_at FROM race_day_header_unread ORDER BY recorded_at, race_id").toArray() as never;
+
+  /** 出馬表のページ(shutuba.html)の本文だけを書き換える(置き換え対象が無ければ、フィクスチャが変わったということなので投げる)。 */
+  function editShutuba(h: Harness, edits: readonly (readonly [from: string, to: string])[]): void {
+    const original = h.gate.fetchRaw.bind(h.gate);
+    h.gate.fetchRaw = async (url) => {
+      const res = await original(url);
+      if (!url.includes("shutuba.html") || res.kind !== "response") return res;
+      let html = new TextDecoder().decode(res.body);
+      for (const [from, to] of edits) {
+        if (!html.includes(from)) throw new Error(`フィクスチャに ${from} がありません`);
+        html = html.replace(from, to);
+      }
+      return ok(html);
+    };
+  }
+  const NO_TRACK = ["馬場:良", ""] as const; // 見出しの文字が無くなる(「馬場:−」は旧い形のパーサが値「−」として読むため、読めなかったことにならない)
+  const NO_FENCE = ["(右&nbsp;A)", "(右)"] as const;
+  const NO_WEATHER = ["天候:晴", ""] as const;
+
+  async function day(rows: readonly ListRow[], edits: readonly (readonly [string, string])[], options: Parameters<typeof harness>[1] = {}): Promise<Harness> {
+    const h = harness(rows, options);
+    h.gate.others = "fixture";
+    editShutuba(h, edits);
+    await planned(h);
+    await drive(h, jst("16:00"));
+    return h;
+  }
+
+  it("2 レースで馬場状態を読めない: 通知は 1 通だけ。件数は 2 件で、例は最初に見つかったレース。最初の記録から待ち時間(10 分)が過ぎてから送る", async () => {
+    const h = await day([central(1, "15:35"), central(2, "15:40")], [NO_TRACK]);
+    expect(h.sink.saved).toHaveLength(2); // 前提: 2 レースとも分析は完了した
+    const rows = headerRows(h);
+    expect(rows.map((r) => [r.race_id, r.missing])).toEqual([[R1, "馬場状態"], [R2, "馬場状態"]]);
+    expect(rows[0]!.recorded_at).toBeLessThan(rows[1]!.recorded_at); // 前提: 記録の時刻が違う(「最初」が決まる)
+    const notices = headerNotices(h);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.description).toContain("本日の中央のレース 2 件で");
+    expect(notices[0]!.description).toContain("読めなかった項目: 馬場状態 2 件 / 柵(芝) 0 件 / 天候も読めなかったレース 0 件");
+    expect(notices[0]!.fields).toEqual([{ name: "例(最初に見つかったレース)", value: "中山 1R 中央1R: 馬場状態" }]);
+    expect(notices[0]!.color).toBe(DISCORD_COLORS.warn);
+    const index = h.notifier.sent.map(embedOf).findIndex((e) => e.title!.startsWith(TITLE));
+    const sentAt = h.notifier.at[index]!;
+    expect(sentAt - rows[0]!.recorded_at).toBeGreaterThanOrEqual(HEADER_UNREAD_DELAY_MS);
+    expect(sentAt - rows[0]!.recorded_at).toBeLessThan(HEADER_UNREAD_DELAY_MS + 5 * MIN);
+    expect(notifyRows(h).filter((r) => r.kind === "header-unread").map((r) => [r.key, r.state])).toEqual([["header-unread", "sent"]]);
+  });
+
+  it("多くとも 1 回: 送ったあとにアラームが何度鳴っても、別のレースが見つかっても、通知は増えない", async () => {
+    const h = await day([central(1, "15:35")], [NO_TRACK]);
+    expect(headerNotices(h)).toHaveLength(1);
+    h.sql.exec("INSERT INTO race_day_header_unread (race_id, missing, recorded_at) VALUES ('x', '馬場状態', ?)", h.clock.now);
+    for (let i = 0; i < 5; i += 1) {
+      h.clock.now += 30 * MIN;
+      h.alarm.at = h.clock.now;
+      await tick(h);
+    }
+    expect(headerNotices(h)).toHaveLength(1);
+  });
+
+  it("芝の柵だけ読めない(馬場状態は読めた): 通知する。柵 1 件・馬場状態 0 件で、柵の影響の説明だけが出る", async () => {
+    const h = await day([fixtureRace("15:35")], [NO_FENCE]);
+    expect(headerRows(h).map((r) => [r.race_id, r.missing])).toEqual([[RACE, "柵"]]);
+    const notice = headerNotices(h)[0]!;
+    expect(notice.description).toContain("読めなかった項目: 馬場状態 0 件 / 柵(芝) 1 件 / 天候も読めなかったレース 0 件");
+    expect(notice.description).toContain("柵の日数");
+    expect(notice.description).not.toContain("道悪の補正がかからず");
+  });
+
+  it("馬場状態が読めず、天候も読めない: 通知する。天候は『天候も読めなかったレース 1 件』と添えるだけ", async () => {
+    const h = await day([fixtureRace("15:35")], [NO_TRACK, NO_WEATHER]);
+    expect(headerRows(h).map((r) => r.missing)).toEqual(["馬場状態,天候"]);
+    const notice = headerNotices(h)[0]!;
+    expect(notice.description).toContain("馬場状態 1 件 / 柵(芝) 0 件 / 天候も読めなかったレース 1 件");
+    expect(notice.fields![0]!.value).toBe("福島 11R 福島記念テスト: 馬場状態・天候");
+  });
+
+  it("天候だけ読めない(馬場状態・柵は読めた)は、きっかけにしない: 記録も通知も無い(未発表による偽の警告を減らす)", async () => {
+    const h = await day([fixtureRace("15:35")], [NO_WEATHER]);
+    expect(h.sink.saved).toHaveLength(1); // 前提: 分析は完了した
+    expect(headerRows(h)).toEqual([]);
+    expect(headerNotices(h)).toEqual([]);
+    expect(notifyRows(h).filter((r) => r.kind === "header-unread")).toEqual([]);
+  });
+
+  it("すべて読めるレースだけの日: 記録も通知も無い", async () => {
+    const h = await day([fixtureRace("15:35")], []);
+    expect(h.sink.saved).toHaveLength(1);
+    expect(headerRows(h)).toEqual([]);
+    expect(headerNotices(h)).toEqual([]);
+  });
+
+  it("手動の pre_race(自動の印が無い)は記録しない(前夜に手動で動かすと、馬場の未発表で偽の警告になるため)", async () => {
+    const h = harness([]);
+    h.gate.others = "fixture";
+    editShutuba(h, [NO_TRACK]);
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await drive(h, jst("23:00"), 20);
+    expect(h.sink.saved).toHaveLength(1); // 前提: 分析は走った
+    expect(headerRows(h)).toEqual([]);
+    expect(headerNotices(h)).toEqual([]);
+  });
+
+  it("webhook が無効(notifier なし)なら、何も記録しない(表への書き込みも無い)。分析は完了する", async () => {
+    const h = await day([fixtureRace("15:35")], [NO_TRACK], { notifier: false });
+    expect(h.sink.saved).toHaveLength(1);
+    expect(headerRows(h)).toEqual([]);
+    expect(h.sql.statements.filter((q) => q.includes("INSERT") && q.includes("race_day_header_unread"))).toEqual([]);
+  });
+
+  it("送信が失敗しても分析は done のまま。行は failed(分類つき)で、再送しない", async () => {
+    const h = harness([fixtureRace("15:35")]);
+    h.gate.others = "fixture";
+    editShutuba(h, [NO_TRACK]);
+    h.notifier.script = Array.from({ length: 12 }, () => new DiscordNotifyError("x", { status: 500 }));
+    await planned(h);
+    await drive(h, jst("16:00"));
+    const task = h.sql.exec("SELECT status FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as { status: string }[];
+    expect(task[0]!.status).toBe("done");
+    expect(notifyRows(h).filter((r) => r.kind === "header-unread").map((r) => [r.state, r.error_class])).toEqual([["failed", "http-500"]]);
+    const attempts = h.notifier.at.length;
+    await drive(h, jst("20:00"));
+    expect(h.notifier.at.length).toBe(attempts); // 再送しない
+  });
+
+  it("記録の書き込みが失敗しても分析は完了する。固定の警告だけを残す(例外の文面は出さない)", async () => {
+    const h = harness([fixtureRace("15:35")]);
+    h.gate.others = "fixture";
+    editShutuba(h, [NO_TRACK]);
+    h.fault = (query) => {
+      if (query.includes("INSERT") && query.includes("race_day_header_unread")) throw new Error("SECRET-DB-DETAIL");
+    };
+    await planned(h);
+    await drive(h, jst("16:00"));
+    expect(h.sink.saved).toHaveLength(1);
+    const task = h.sql.exec("SELECT status FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as { status: string }[];
+    expect(task[0]!.status).toBe("done");
+    expect(h.warnings.some((w) => w.includes("見出し") && w.includes(RACE))).toBe(true);
+    expect(h.warnings.join("\n")).not.toContain("SECRET-DB-DETAIL");
+    expect(headerNotices(h)).toEqual([]);
+  });
+});
+
