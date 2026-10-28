@@ -1,5 +1,7 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
+import { CONDITIONAL_BERNOULLI_MODEL } from "../../packages/core/src/ev/place-joint-model.js";
+import { PLACKETT_LUCE_MODEL } from "../../packages/core/src/ev/plackett-luce-model.js";
 import { DEFAULT_KELLY_FRACTION, resolveBankroll, resolveEffectivePerRaceCap, resolveMinHitProb, resolveKellyFraction } from "../../packages/core/src/ev/allocation-primitives.js";
 import { collectProposedBetEvents, computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
 import { buildVerifySource, type VerifyReadRows } from "../../cloud/src/verify-read.js";
@@ -13,6 +15,7 @@ import {
   type AllocationMetaInput,
   type AllocationRaceRow,
   type AllocationResultInput,
+  type AllocationRowBet,
   type ChosenAllocationAnalysis,
 } from "../../cloud/src/allocation-export-format.js";
 import {
@@ -25,6 +28,8 @@ import {
   payoutReport,
   replayableRows,
   replayedBets,
+  describeOverrides,
+  REPLAY_MODELS,
   replayRace,
   runCli,
   storedBets,
@@ -555,6 +560,67 @@ describe("replayRace の設定の上書き(Issue #494。#468 の試算で、本�
   });
 });
 
+describe("replayRace の同時分布のモデルの上書き(Issue #524。3 着内率から単勝・組合せの確率を出すモデルを差し替えて、買い目の見積もりの当たり具合を試算する)", () => {
+  const mixedRow = raceRow(ALL_ON);
+  // EV 閾値 0.9: 条件付きベルヌーイでも買い目が残る(閾値 1 では「妙味なし」の見送りになり、比べられない)
+  const placeOnlyRow = raceRow({ includeComboOdds: 0, evThreshold: 0.9 });
+
+  it("前提(空振り防止): 全券種 ON は混在の経路で多点、組合せオッズ取得 OFF は複勝だけの経路で多点", () => {
+    expect(replayed(mixedRow).route).toBe("mixed");
+    expect(replayed(mixedRow).bets.length).toBeGreaterThanOrEqual(5);
+    expect(replayed(placeOnlyRow).route).toBe("place-only");
+    expect(replayed(placeOnlyRow).bets.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("登録表は、本番の既定(plackett-luce)と条件付きベルヌーイ(conditional-bernoulli)の 2 つ", () => {
+    expect(Object.keys(REPLAY_MODELS)).toEqual(["plackett-luce", "conditional-bernoulli"]);
+    expect(REPLAY_MODELS["plackett-luce"]).toBe(PLACKETT_LUCE_MODEL);
+    expect(REPLAY_MODELS["conditional-bernoulli"]).toBe(CONDITIONAL_BERNOULLI_MODEL);
+  });
+
+  it("PLACKETT_LUCE_MODEL の指定は、上書きなしと同じ提案(混在・複勝だけの 2 経路)", () => {
+    for (const row of [mixedRow, placeOnlyRow]) {
+      expect(replayed(row, { model: PLACKETT_LUCE_MODEL })).toEqual(replayed(row));
+    }
+  });
+
+  it("複勝だけの経路: 条件付きベルヌーイに替えると、メタの modelId が変わり、買い目の賭け金が変わる(差が 0 でない)", () => {
+    const pl = replayed(placeOnlyRow);
+    const cb = replayed(placeOnlyRow, { model: CONDITIONAL_BERNOULLI_MODEL });
+    expect(cb.route).toBe("place-only");
+    const modelIdOf = (row: AllocationRaceRow, model?: ReplayOverrides["model"]): string | null => {
+      const outcome = replayRace(row, model === undefined ? {} : { model }) as Extract<ReplayOutcome, { kind: "replayed" }>;
+      return outcome.result.allocation.meta.modelId;
+    };
+    expect(modelIdOf(placeOnlyRow)).toBe("plackett-luce");
+    expect(modelIdOf(placeOnlyRow, CONDITIONAL_BERNOULLI_MODEL)).toBe("conditional-bernoulli");
+    expect(cb.bets.length).toBeGreaterThan(0);
+    expect(cb.bets).not.toEqual(pl.bets);
+  });
+
+  it("混在の経路: 条件付きベルヌーイ(順序なし)は route=invalid・買い目なしになる(本番の「順序のないモデルは例外」を保つ)", () => {
+    const cb = replayed(mixedRow, { model: CONDITIONAL_BERNOULLI_MODEL });
+    expect(cb.route).toBe("invalid");
+    expect(cb.bets).toEqual([]);
+  });
+
+  it("replayedBets: モデルを上書きして route=invalid になった行は null(計算し直せなかった行。回収額の集計に入れない)。上書きなし・モデルの上書きなしの invalid は、これまでどおり買い目なし(空配列)", () => {
+    expect(replayedBets(mixedRow, { model: CONDITIONAL_BERNOULLI_MODEL })).toBeNull();
+    // 前提: 同じ行は、モデルを上書きしなければ多点の買い目を返す(null になる原因がモデルの上書きだけ)
+    expect(replayedBets(mixedRow)!.length).toBeGreaterThanOrEqual(5);
+    expect(replayedBets(mixedRow, { model: PLACKETT_LUCE_MODEL })!.length).toBeGreaterThanOrEqual(5);
+    // 複勝だけの経路は、条件付きベルヌーイでも計算し直せる
+    expect(replayedBets(placeOnlyRow, { model: CONDITIONAL_BERNOULLI_MODEL })!.length).toBeGreaterThan(0);
+    // モデルの上書きなしで invalid になる行(枠連が ON で枠番が無い)は、これまでどおり空配列
+    const noWaku = raceRow({ includeBracketQuinella: 1 }, { snapshot: false, result: false });
+    expect(replayRace(noWaku)).toMatchObject({ kind: "replayed" });
+    expect((replayRace(noWaku) as Extract<ReplayOutcome, { kind: "replayed" }>).result.allocation.meta.route).toBe("invalid");
+    expect(replayedBets(noWaku)).toEqual([]);
+    // 他の設定の上書きだけで invalid になる場合も、これまでどおり(null にしない)
+    expect(replayedBets(noWaku, { evThreshold: 1.1 })).toEqual([]);
+  });
+});
+
 describe("parseOverrides(CLI の --override key=value)", () => {
   it("数・真偽・券種を解釈する。同じキーが複数あれば後が勝つ", () => {
     expect(parseOverrides(["evThreshold=1.2", "kellyFraction=0.1", "includeComboOdds=false", "include.wide=on", "include.trifecta=off", "minHitProb=0.1", "bankroll=50000", "perRaceCap=3000"])).toEqual({
@@ -562,6 +628,15 @@ describe("parseOverrides(CLI の --override key=value)", () => {
     });
     expect(parseOverrides(["evThreshold=1.2", "evThreshold=1.5"])).toEqual({ evThreshold: 1.5 });
     expect(parseOverrides([])).toEqual({});
+  });
+
+  it("model=<id> は登録表のモデルに解釈する(plackett-luce・conditional-bernoulli)。知らない id は、選べる id を添えた例外。describeOverrides に model=<id> が出る", () => {
+    expect(parseOverrides(["model=conditional-bernoulli"]).model).toBe(CONDITIONAL_BERNOULLI_MODEL);
+    expect(parseOverrides(["model=plackett-luce"]).model).toBe(PLACKETT_LUCE_MODEL);
+    expect(parseOverrides(["model=plackett-luce", "model=conditional-bernoulli"]).model).toBe(CONDITIONAL_BERNOULLI_MODEL); // 後が勝つ
+    expect(() => parseOverrides(["model=henery"])).toThrow(/model.*henery.*plackett-luce.*conditional-bernoulli/);
+    expect(() => parseOverrides(["model="])).toThrow(/model/);
+    expect(describeOverrides(parseOverrides(["model=conditional-bernoulli", "minHitProb=0.1"]))).toBe("minHitProb=0.1, model=conditional-bernoulli");
   });
 
   it("知らないキー・値のない指定・数でない値・真偽でない値・知らない券種は、理由つきの例外", () => {
@@ -1047,5 +1122,54 @@ describe("runCli(--replay。Issue #494)", () => {
   it("invalid のうち計算し直しが例外を投げた行の件数を、表の下に出す(上書きなしの --replay のとき)", () => {
     const lines = runCli(["x.gz", "--replay"], load).output.split("\n");
     expect(lines).toContain("invalid のうち計算し直しが例外を投げた行(route=invalid の記録との食い違いではない): 全体 0・中央 0・地方 0");
+  });
+
+  describe("--override model=<id>(Issue #524)", () => {
+    // 混在の経路(ワイド ON)の 3 行(中央 2・地方 1)と、複勝だけの経路の中央 1 行。条件付きベルヌーイでは、混在の 3 行が route=invalid になる。
+    const placeOnly = consistentRow({ includeComboOdds: 0, evThreshold: 0.9 }, {}, { ...settled, analysis: { ...CHOSEN, id: 3, raceId: "202606030813" } });
+    const withPlaceOnly = parseAllocationDataset(fileOf([matchA, matchB, narMismatch, narNoOdds, placeOnly]));
+    const loadWith = (): typeof withPlaceOnly => withPlaceOnly;
+    const cbLines = (): string[] => runCli(["x.gz", "--replay", "--override", "model=conditional-bernoulli"], loadWith).output.split("\n");
+
+    it("上書きの内容に model=<id> を出し、一致率は出さない。invalid になった行数(全体・中央・地方)を必ず出す", () => {
+      const r = runCli(["x.gz", "--replay", "--override", "model=conditional-bernoulli"], loadWith);
+      expect(r.exitCode).toBe(0);
+      const lines = r.output.split("\n");
+      expect(lines).toContain("## 設定の上書き: model=conditional-bernoulli(一致率は出さない)");
+      expect(r.output).not.toMatch(/## 計算し直しの一致率/);
+      expect(lines).toContain("モデルの上書きで route=invalid になり計算し直せなかった行(回収額の集計に入れない): 全体 3・中央 2・地方 1");
+    });
+
+    it("invalid になった行は回収額の集計に入れない: 分析時の提案・計算し直した提案とも、残った行(複勝だけの 1 行)だけを数え、行数の表示もそれに合わせる", () => {
+      const lines = cbLines();
+      const kept = [placeOnly];
+      expect(replayableRows(withPlaceOnly.rows)).toHaveLength(4); // 前提: 計算し直せる行は 4 行(オッズなし 1 行は対象外)
+      const fmt = (label: string, row: AllocationRaceRow[], betsOf: (r: AllocationRaceRow) => readonly AllocationRowBet[]): string => {
+        const o = payoutReport(row, betsOf).overall;
+        const rate = o.recoveryRate === null ? "なし" : `${(o.recoveryRate * 100).toFixed(1)}%`;
+        return `${label}: 点数 ${o.betCount}・賭け金 ${o.totalStake}・払戻 ${o.totalReturn}・回収率 ${rate}・判定不能 ${o.unjudgedCount}・返還 ${o.refundedCount}`;
+      };
+      const cbBets = replayedBets(placeOnly, { model: REPLAY_MODELS["conditional-bernoulli"] })!;
+      expect(cbBets.length).toBeGreaterThan(0); // 前提: 残った行に買い目がある
+      expect(lines).toContain(fmt("分析時の提案(計算し直せた 1 行)", kept, storedBets));
+      expect(lines).toContain(fmt("計算し直した提案(計算し直せた 1 行・設定の上書きあり)", kept, () => cbBets));
+      // 混ぜていたら変わる数: invalid の 3 行を足した分析時の提案は、残った 1 行だけの提案と点数が違う
+      const all = payoutReport(replayableRows(withPlaceOnly.rows), storedBets).overall.betCount;
+      expect(all).toBeGreaterThan(payoutReport(kept, storedBets).overall.betCount);
+    });
+
+    it("plackett-luce の指定は、invalid の行が 0 で、行数は計算し直せた 4 行すべて", () => {
+      const lines = runCli(["x.gz", "--replay", "--override", "model=plackett-luce"], loadWith).output.split("\n");
+      expect(lines).toContain("モデルの上書きで route=invalid になり計算し直せなかった行(回収額の集計に入れない): 全体 0・中央 0・地方 0");
+      expect(lines.some((l) => l.startsWith("計算し直した提案(計算し直せた 4 行・設定の上書きあり)"))).toBe(true);
+    });
+
+    it("model を上書きしないとき(ほかの上書きだけ・上書きなし)は、invalid の行数の行を出さず、これまでの行数の表示のまま", () => {
+      for (const argv of [["x.gz", "--replay"], ["x.gz", "--replay", "--override", "minHitProb=0.5"]]) {
+        const out = runCli(argv, loadWith).output;
+        expect(out, argv.join(" ")).not.toMatch(/モデルの上書きで route=invalid/);
+        expect(out, argv.join(" ")).toMatch(/計算し直した提案\(計算し直せた 4 行/);
+      }
+    });
   });
 });
