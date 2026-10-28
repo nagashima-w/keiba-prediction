@@ -685,7 +685,37 @@ describe("Issue #384: breakdown(人気帯ごとの期待値と回収率の節)�
       comboPayouts: [], comboImports: [],
     };
     const sections = computeVerifyBreakdowns(buildVerifySource(rows), rows.bets, buildConditionFactsIndex(rows.analyses)).all!.sections;
-    expect(sections).toHaveLength(11); // 前提: 11 節(旧い上限 8 を超える。上限 16 までは #389-c でクラスを足す余地)
+    expect(sections).toHaveLength(11); // 前提: 11 節(旧い上限 8 を超える。クラスの節は race_class を持つ下の試験で見る)
+    const body = ready();
+    body["breakdown"] = JSON.parse(JSON.stringify(sections));
+    const outcome = parseVerifyResponse(body);
+    expect(outcome?.kind === "ready" ? outcome.breakdown : null).toEqual(JSON.parse(JSON.stringify(sections)));
+  });
+
+  it("★契約(Issue #389-c): クラスの節を足した全体の区分の 12 節(人気帯 5 + 条件別 7)を、サーバの出力のままクライアントが読める(上限 16 節・長さ・行数に収まる)", () => {
+    const specs: Array<[string, boolean, string | null, string]> = [
+      ["202605010501", true, "1勝クラス", "芝"],
+      ["202605010502", false, "未勝利", "ダ"],
+      ["202605010503", false, "オープン", "芝"],
+      ["202605010504", false, null, "ダ"],
+      ["202644010501", true, "C3", "ダ"],
+    ];
+    const analyses: VerifyAnalysisRow[] = specs.map(([raceId, , raceClass, courseType], i) => ({
+      id: i + 1, raceId, analyzedAt: "2026-07-05T05:00:00.000Z", evEstimated: 0, promptVersion: "v1", additionalInstruction: null, kaisaiDate: "20260705",
+      model: null, rawResponse: null, raceSnapshotJson: null, historyCutoffDate: "20260705", promptLookaheadGuarded: 1, startTime: "15:45",
+      courseType, distance: 1600, trackCondition: "良", grade: null, raceName: null, condRead: 1, raceClass,
+    }));
+    const rows: VerifyReadRows = {
+      analyses,
+      horses: analyses.map((a) => ({ analysisId: a.id, umaban: 1, prior: 0.5, adjusted_prob: 0.5, place_odds_min: 2, ev: 1.2, is_positive: 1, contributions_json: null, mark: "◎", reason: null, highlights_json: null, concerns_json: null })),
+      allocationMeta: analyses.map((a) => ({ analysisId: a.id, route: "place-only", skipReasonCode: null })),
+      bets: analyses.map((a) => ({ analysisId: a.id, betType: "place", comboKey: "01", stake: 100, odds: 2, ev: 1.2 })),
+      results: specs.map(([raceId, hit]) => ({ raceId, umaban: 1, finishPosition: hit ? 1 : 5, placePayout: hit ? 150 : null, winPayout: null })),
+      comboPayouts: [], comboImports: [],
+    };
+    const sections = computeVerifyBreakdowns(buildVerifySource(rows), rows.bets, buildConditionFactsIndex(rows.analyses)).all!.sections;
+    expect(sections).toHaveLength(12); // 前提
+    expect(sections[sections.length - 1]!.heading).toBe("条件ごとの的中率と回収率(クラス)");
     const body = ready();
     body["breakdown"] = JSON.parse(JSON.stringify(sections));
     const outcome = parseVerifyResponse(body);

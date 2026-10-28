@@ -390,7 +390,7 @@ function parseBreakdownSection(v: unknown): BreakdownSectionView | null {
 
 /**
  * 人気帯ごとの期待値と回収率(Issue #384)。**無い(旧い集計・旧い Worker)・null・壊れている値は、いずれも null(内訳なし)**: 補助の節なので、この節の不整合で応答全体を捨てない。
- * 節は 1〜16 個(人気帯 5 + 条件別 6 = 11 が最大。Issue #389 で 8 から上げた。#389-c でクラスの節を足す余地を残して 16)。文字列の長さの上限は、サーバが組み立てる文の長さに余裕を持たせたもの(契約テストが、本物のサーバの出力が収まることを固定している)。
+ * 節は 1〜16 個(人気帯 5 + 条件別 7 = 12 が最大〈条件別は開催区分・競馬場・頭数・距離帯・馬場・芝ダ・クラス〉。Issue #389 で 8 から上げ、#389-c でクラスの節を足して 12 になった。残りは余裕)。文字列の長さの上限は、サーバが組み立てる文の長さに余裕を持たせたもの(契約テストが、本物のサーバの出力が収まることを固定している)。
  */
 function parseBreakdown(v: unknown): BreakdownSectionView[] | null {
   if (!Array.isArray(v) || v.length === 0 || v.length > 16) return null;

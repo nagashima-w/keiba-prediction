@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  axisLabelsOf,
   buildConditionFactsIndex,
+  CLASS_LABELS,
+  classLabelOf,
   DISTANCE_LABELS,
   distanceLabelOf,
   SURFACE_LABELS,
@@ -12,11 +15,11 @@ import {
 import type { VerifyAnalysisRow } from "../src/verify-read";
 
 /**
- * Issue #389(#385-B の b): 条件別の見える化の 3 軸(距離帯・馬場・芝ダ)の分類。クラスは含めない(#426 のあとに #389-c で足す)。分析の行の生の値(`race-facts.ts` が写したもの)から、行の見出しを決める純関数。
+ * Issue #389(#385-B の b・c): 条件別の見える化の 4 軸(距離帯・馬場・芝ダ・クラス)の分類。分析の行の生の値(`race-facts.ts` が写したもの。クラスは #426 が保存した `race_class`)から、行の見出しを決める純関数。
  * 区切り・推定の規則は置き値(根拠のない境界)で、ここが規則の仕様になる。
  */
 
-const NONE: RaceConditionFacts = { courseType: null, distance: null, trackCondition: null };
+const NONE: RaceConditionFacts = { courseType: null, distance: null, trackCondition: null, raceClass: null };
 const facts = (over: Partial<RaceConditionFacts>): RaceConditionFacts => ({ ...NONE, ...over });
 
 // ---------------------------------------------------------------------------
@@ -124,25 +127,91 @@ function row(id: number, over: Partial<VerifyAnalysisRow> = {}): VerifyAnalysisR
 
 describe("buildConditionFactsIndex(分析の行 → 条件の索引)", () => {
   it("読めた行(cond_read=1)の生の値を分析 id で引ける", () => {
-    const index = buildConditionFactsIndex([row(1, { courseType: "芝", distance: 1600, trackCondition: "稍", grade: "G3", raceName: "毎日王冠", condRead: 1 })]);
-    expect(index.get(1)).toEqual({ courseType: "芝", distance: 1600, trackCondition: "稍" }); // grade・raceName は(クラスを出さない間は)索引に持たない
+    const index = buildConditionFactsIndex([row(1, { courseType: "芝", distance: 1600, trackCondition: "稍", grade: "G3", raceName: "毎日王冠", raceClass: "オープン", condRead: 1 })]);
+    expect(index.get(1)).toEqual({ courseType: "芝", distance: 1600, trackCondition: "稍", raceClass: "オープン" }); // grade・raceName は索引に持たない(クラスは正確な race_class だけを使う)
   });
 
-  it("★読めなかった行(cond_read=0)は、列に値があっても条件なし(null)。確認前(NULL)も条件なし", () => {
+  it("★読めなかった行(cond_read=0)は、列に値があっても芝ダ・距離・馬場は null。確認前(NULL)も同じ", () => {
     const index = buildConditionFactsIndex([
-      row(1, { courseType: "芝", distance: 1600, condRead: 0 }),
-      row(2, { courseType: "芝", distance: 1600, condRead: null }),
+      row(1, { courseType: "芝", distance: 1600, trackCondition: "良", condRead: 0 }),
+      row(2, { courseType: "芝", distance: 1600, trackCondition: "良", condRead: null }),
     ]);
-    expect(index.get(1)).toBeNull();
-    expect(index.get(2)).toBeNull();
+    expect(index.get(1)).toEqual(NONE);
+    expect(index.get(2)).toEqual(NONE);
     expect(index.has(1)).toBe(true);
   });
 
-  it("条件の列を持たない行(既存の固定データ。cond_read も無い)は、全項目 null の事実(= 全軸が不明になる)", () => {
+  it("★クラスは cond_read と独立: 読めなかった行(0)・確認前(NULL)でも race_class は残る(結果の取り込みと補完は、スナップショットが読めなくてもクラスを書く)", () => {
+    const index = buildConditionFactsIndex([
+      row(1, { courseType: "芝", distance: 1600, raceClass: "2勝クラス", condRead: 0 }),
+      row(2, { raceClass: "未勝利", condRead: null }),
+      row(3, { raceClass: "新馬", condRead: 1 }),
+    ]);
+    expect(index.get(1)).toEqual({ ...NONE, raceClass: "2勝クラス" }); // 芝・1600 は捨て、クラスは残す
+    expect(index.get(2)).toEqual({ ...NONE, raceClass: "未勝利" });
+    expect(index.get(3)).toEqual({ ...NONE, raceClass: "新馬" });
+  });
+
+  it("条件の列を持たない行(既存の固定データ。cond_read も race_class も無い)は、全項目 null の事実(= 全軸が不明になる)", () => {
     expect(buildConditionFactsIndex([row(1)]).get(1)).toEqual(NONE);
   });
 
   it("cond_read=1 でも列が NULL の項目は null のまま(スナップショットに無かった)", () => {
     expect(buildConditionFactsIndex([row(1, { courseType: "ダ", distance: null, trackCondition: null, condRead: 1 })]).get(1)).toEqual({ ...NONE, courseType: "ダ" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// クラス(Issue #389-c)
+// ---------------------------------------------------------------------------
+
+describe("classLabelOf(クラス: 新馬 / 未勝利 / 1勝クラス / 2勝クラス / 3勝クラス / オープン / 地方(対象外) / 不明)", () => {
+  it("見出しの並び: 中央の 6 つの正準ラベルの順、地方(対象外)、不明が最後", () => {
+    expect([...CLASS_LABELS]).toEqual(["新馬", "未勝利", "1勝クラス", "2勝クラス", "3勝クラス", "オープン", "地方(対象外)", "不明"]);
+  });
+
+  const central: ReadonlyArray<readonly [string, string | null, (typeof CLASS_LABELS)[number]]> = [
+    ["新馬", "新馬", "新馬"],
+    ["未勝利", "未勝利", "未勝利"],
+    ["1勝クラス", "1勝クラス", "1勝クラス"],
+    ["2勝クラス", "2勝クラス", "2勝クラス"],
+    ["3勝クラス", "3勝クラス", "3勝クラス"],
+    ["オープン", "オープン", "オープン"],
+    ["全角数字・前後の空白は正規化して照合する", " １勝クラス ", "1勝クラス"],
+    ["全角数字(3勝)", "３勝クラス", "3勝クラス"],
+    ["NULL(未確認・読めなかった)は不明", null, "不明"],
+    ["空文字は不明", "", "不明"],
+    ["語彙に無い表記(部分一致しない: 1勝)は不明", "1勝", "不明"],
+    ["語彙に無い表記(オープン特別)は不明", "オープン特別", "不明"],
+    ["旧表記(500万下)は不明", "500万下", "不明"],
+    ["地方の区分のトークン(C2)が中央のレースに入っていても不明(推測で中央の行に入れない)", "C2", "不明"],
+  ];
+  it.each(central)("中央: %s", (_name, raw, label) => {
+    expect(classLabelOf(facts({ raceClass: raw }), "central")).toBe(label);
+  });
+
+  it("★行ごとに別の見出しになる(取り違えない): 6 つの正準ラベルは互いに別の行", () => {
+    const labels = ["新馬", "未勝利", "1勝クラス", "2勝クラス", "3勝クラス", "オープン"].map((v) => classLabelOf(facts({ raceClass: v }), "central"));
+    expect(new Set(labels).size).toBe(6);
+  });
+
+  it("地方のレースは、race_class の値(C1・B2B3・3歳・NULL)に依らず『地方(対象外)』の 1 行。中央のラベルが入っていても地方の行", () => {
+    for (const raw of ["C1", "B2B3", "3歳", "C2七", null, "オープン"]) {
+      expect(classLabelOf(facts({ raceClass: raw }), "nar"), String(raw)).toBe("地方(対象外)");
+    }
+    expect(classLabelOf(null, "nar")).toBe("地方(対象外)");
+  });
+
+  it("開催区分が判定できない race_id(kind が null)は、race_class があっても不明。条件の行が無い(null)中央は不明", () => {
+    expect(classLabelOf(facts({ raceClass: "未勝利" }), null)).toBe("不明");
+    expect(classLabelOf(null, "central")).toBe("不明");
+    expect(classLabelOf(null, null)).toBe("不明");
+  });
+
+  it("axisLabelsOf: 4 軸の見出しをまとめて返す(クラスは開催区分を受け取る)", () => {
+    const f = facts({ courseType: "芝", distance: 1600, trackCondition: "良", raceClass: "1勝クラス" });
+    expect(axisLabelsOf(f, "central")).toEqual({ distance: "1401〜1800m", track: "良", surface: "芝", class: "1勝クラス" });
+    expect(axisLabelsOf(f, "nar")).toEqual({ distance: "1401〜1800m", track: "良", surface: "芝", class: "地方(対象外)" });
+    expect(axisLabelsOf(null, "central")).toEqual({ distance: "不明", track: "未発表・不明", surface: "不明", class: "不明" });
   });
 });

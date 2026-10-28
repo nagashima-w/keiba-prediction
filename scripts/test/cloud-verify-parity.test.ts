@@ -13,7 +13,7 @@ import { computePromptVersionSummaries } from "../../cloud/src/verify-versions.j
  *
  * **ここ(ルートの scripts/test/)に置く理由**: exe 側の `AnalysisStore` は better-sqlite3 を使う。cloud の CI は cloud だけを install する(better-sqlite3 が無い)ので、cloud/test からは
  * import できない(#218 と同じ)。cloud の SQL 定数(`VERIFY_READ_SQL`)を、exe と同じスキーマの SQLite にそのまま流して行を取り、D1 の行の代わりにする。
- * D1 の列のうち exe に無いのは `start_time` と 0023 の条件の 6 列(course_type・distance・track_condition・grade・race_name・cond_read。Issue #389。全行 NULL のまま)と `scratched`(Issue #72。全行 NULL のまま)と `wakuban`(Issue #269。同じく全行 NULL のまま)と `ninki`(Issue #384。同じく全行 NULL のまま)で、これらは `ALTER TABLE` で足し、検証の DO の補完と同じ関数(`extractStartTime`)で埋める。
+ * D1 の列のうち exe に無いのは `start_time` と 0023 の条件の 6 列(course_type・distance・track_condition・grade・race_name・cond_read。Issue #389。全行 NULL のまま)と 0024 の `race_class`(Issue #426・#389-c。同じく全行 NULL のまま)と `scratched`(Issue #72。全行 NULL のまま)と `wakuban`(Issue #269。同じく全行 NULL のまま)と `ninki`(Issue #384。同じく全行 NULL のまま)で、これらは `ALTER TABLE` で足し、検証の DO の補完と同じ関数(`extractStartTime`)で埋める。
  *
  * 入力は乱数(固定の種)で作った 160 レース前後の分析・結果。**一致の検査が空振りでない**ことを、集計の各カウンタ・券種別の点数が 0 でないことで先に固定する。
  */
@@ -162,8 +162,8 @@ function build(seed: number): Dataset {
   db.exec("ALTER TABLE race_results ADD COLUMN ninki INTEGER");
   // 発走時刻の写し(0009)。検証の DO の補完と同じ手順: 保存済みのスナップショットから extractStartTime → なければ ''。
   db.exec("ALTER TABLE analyses ADD COLUMN start_time TEXT");
-  // レースの事実(0023。Issue #389)。exe の AnalysisStore は保存しないので、D1 の列は全行 NULL(未確認)のまま。検証の全件の読みの SQL(ANALYSES_HEAD)がこれらの列を選ぶので、列だけ足す(集計の結果には影響しない)。
-  for (const column of ["course_type TEXT", "distance INTEGER", "track_condition TEXT", "grade TEXT", "race_name TEXT", "cond_read INTEGER"]) {
+  // レースの事実(0023。Issue #389)とクラス(0024。Issue #426・#389-c)。exe の AnalysisStore は保存しないので、D1 の列は全行 NULL(未確認)のまま。検証の全件の読みの SQL(ANALYSES_HEAD)がこれらの列を選ぶので、列だけ足す(集計の結果には影響しない)。
+  for (const column of ["course_type TEXT", "distance INTEGER", "track_condition TEXT", "grade TEXT", "race_name TEXT", "cond_read INTEGER", "race_class TEXT"]) {
     db.exec(`ALTER TABLE analyses ADD COLUMN ${column}`);
   }
   const snapshots = db.prepare("SELECT id, race_snapshot_json AS json FROM analyses").all() as Array<{ id: number; json: string | null }>;
