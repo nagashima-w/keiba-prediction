@@ -15,6 +15,7 @@ import { DurableObject } from "cloudflare:workers";
 import { D1AnalysisStore, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { createAnalysisSink } from "./analysis-sink";
 import { D1BabaStore } from "./baba-repository";
+import { D1KaisaiDaysStore } from "./kaisai-days-repository";
 import { createJraBabaFetcher } from "./jra-baba-fetch";
 import { createCloudLlm } from "./llm-sender";
 import { createDiscordNotifier, webhookStatus } from "./notify-send";
@@ -133,6 +134,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       babaStore: new D1BabaStore({ db: env.DB }),
       // 貯めた当日の馬場の値の読み出し(Issue #295)。発走前の分析が、そのレースの開催日 × 場コードの 1 行を D1 から読む(表が無い間は読み出しが失敗して値なしで続ける)。
       babaReader: new D1BabaStore({ db: env.DB }),
+      // 開催日ごとの記録(Issue #519。D1 の kaisai_days〈migration 0027〉)。発走前の計算が、中央のレースごとに書き、芝の開催進行の通算・柵の日数を数える過去の行を読む。
+      // 書き込み・読み出しの失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
+      kaisaiDaysStore: new D1KaisaiDaysStore({ db: env.DB }),
       // 日報の作成の依頼(Issue #235)。DAILY_REPORT が無い構成では渡さない(依頼しない)。
       ...(requestReport === undefined ? {} : { requestReport }),
       loadSettings: async () => {

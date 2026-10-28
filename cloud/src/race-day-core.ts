@@ -97,7 +97,7 @@ import { fetchGradeWinnerEntries, gradeWinnerCacheKey } from "../../packages/cor
 import { newspaperCacheKey } from "../../packages/core/src/scraper/fetch-newspaper";
 import { GradeWinnerParseError } from "../../packages/core/src/scraper/parse-grade-winner";
 import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher } from "../../packages/core/src/scraper/scrape-race";
-import { parseKaisaiDate, parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
+import { centralVenueInfoFromRaceId, parseKaisaiDate, parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
 import { deriveNarTrifectaAxisUmabans } from "../../packages/core/src/scraper/nar-trifecta-axis";
 import type { JockeyResultsStore } from "../../packages/core/src/scraper/jockey-results-store";
 import type { TrainerResultsStore } from "../../packages/core/src/scraper/trainer-results-store";
@@ -139,6 +139,7 @@ import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelecto
 import { SqlLlmResponseStore } from "./llm-response-store";
 import type { CloudLlm } from "./llm-sender";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
+import type { KaisaiDaysStore } from "./kaisai-days-repository";
 import type { CloseSavePayload } from "./analysis-close";
 import { CloseStore } from "./race-day-close";
 import { CloseStage, type CloseStepOutcome } from "./race-day-close-stage";
@@ -422,6 +423,14 @@ export interface RaceDayDeps {
    * (中央のレースで、LLM を使うときだけ。netkeiba には出ない)。無い構成は読まない(従来どおり)。読み出しの失敗は握って値なしで続け、警告は固定の語だけ(例外の文面は出さない)。
    */
   readonly babaReader?: BabaReader;
+  /**
+   * 開催日ごとの記録(D1 の `kaisai_days`。migration 0027。Issue #519)。**発走前の計算ステップだけ**が使う:
+   *  - 書き込み: 中央のレースを分析するたびに、そのレースの (場コード, 年, 回, 日次)・開催日・柵(芝で読めたときだけ)を 1 回書く(LLM を使うかどうかに関係なく。地方は書かない)。
+   *    同じ日・同じ場の行は 1 つで、柵は先着(既存の値は上書きしない)。失敗は握って警告にし(固定の語だけ)、分析は止めない。
+   *  - 読み出し: LLM を使う中央の芝のレースで、同じ場の過去の行を読み、芝の開催進行の通算の日数・柵の日数を数える(`getKaisaiDays`)。失敗は握って値なしで続ける。
+   * 無い構成は何もしない(従来どおり)。
+   */
+  readonly kaisaiDaysStore?: KaisaiDaysStore;
 }
 
 export interface ScheduleInput {
@@ -749,6 +758,7 @@ export class RaceDayCore {
   private readonly results: ResultImportStore;
   private readonly baba: BabaStage;
   private readonly babaReader: BabaReader | undefined;
+  private readonly kaisaiDaysStore: KaisaiDaysStore | undefined;
   /** 結果の保存先。無ければ結果の仕組み全体が無効。 */
   private readonly resultStore: ResultStoreDeps | undefined;
   /** 日報の作成の依頼(Issue #235)。無ければ依頼しない。 */
@@ -810,6 +820,7 @@ export class RaceDayCore {
     this.requestReport = deps.requestReport;
     // 馬場の取得(Issue #294)。メタは既存の race_day_meta(新しい表は無い)。取得口・保存先が無ければ段階全体が無効。
     this.babaReader = deps.babaReader;
+    this.kaisaiDaysStore = deps.kaisaiDaysStore;
     this.baba = new BabaStage({
       sql: this.sql,
       now: this.now,
@@ -1768,6 +1779,32 @@ export class RaceDayCore {
   }
 
   /**
+   * そのレースの開催日の記録(場コード・年・回・日次・開催日・柵)を `kaisai_days` へ書く(Issue #519。発走前の計算ステップで、取得したレースデータを受けた直後に呼ぶ)。**投げない**:
+   * 失敗は警告(固定の語だけ。例外の文面・D1 の内部のメッセージは出さない)にして戻る(分析は止めない)。記録先が無い構成・地方は何もしない。
+   * 柵は芝で読めたときだけ書く(読めない・芝以外は NULL。ダート・障害のレースの柵は、同じ日の芝のレースが埋める)。同じ日・同じ場のレースが何度呼んでも、行は 1 つ(柵は先着)。
+   */
+  private async recordKaisaiDay(raceId: string, kaisaiDate: string, race: RaceData): Promise<void> {
+    if (this.kaisaiDaysStore === undefined) {
+      return;
+    }
+    const venue = centralVenueInfoFromRaceId(raceId);
+    if (venue === null) {
+      return;
+    }
+    const kai = Number(venue.round);
+    const nichi = Number(venue.day);
+    if (!Number.isInteger(kai) || kai < 1 || !Number.isInteger(nichi) || nichi < 1) {
+      return;
+    }
+    const fence = race.race.courseType === "芝" ? (race.race.fence ?? null) : null;
+    try {
+      await this.kaisaiDaysStore.record({ trackCode: venue.trackCode, year: Number(raceId.slice(0, 4)), kai, nichi, kaisaiDate, fence });
+    } catch {
+      this.onWarn(`発走前の分析(${raceId}): 開催日の記録を書けなかったため、続けます`);
+    }
+  }
+
+  /**
    * 取得ステップの `scrapeRace` が残した警告のうち、騎手・調教師のものを onWarn に出す(Issue #380)。応答・保存は変えない。
    * 出すのは `scrapeRace` の文面そのまま(取得に失敗した人は 1 人 1 行〈URL を含む。取得ステップの他の警告と同じ〉、取得の上限で取らなかった人は人数をまとめた 1 行、保存先の読み書きの失敗)。
    * ほかの種別(調教・組合せオッズ・出走取消)は出さない(増えすぎる)。戦績が欠けて取得ステップが再試行になる回では呼ばない(同じ警告が試行の回数だけ重なるため)。
@@ -2163,6 +2200,8 @@ export class RaceDayCore {
           scrape: async (id) => {
             const race = await this.scrapeFromCache(id, { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), includePrevConditions: true }, `発走前の分析(${id})`, oddsSince);
             scrapeWarnings = race.meta.warnings;
+            // 開催日の記録(Issue #519)。LLM を使うかどうかに関係なく、中央のレースを分析するたびに書く(失敗は握って警告にし、分析は止めない)。
+            await this.recordKaisaiDay(task.race_id, kaisaiDate, race);
             return race;
           },
           analyze: cloudAnalyze === null ? null : cloudAnalyze.analyze,
@@ -2210,6 +2249,14 @@ export class RaceDayCore {
             : {
                 getBabaConditions: (venueCode: string, date: string) => this.babaReader!.load(date, venueCode),
                 onBabaError: (info: { readonly raceId: string }) => this.onWarn(`発走前の分析(${info.raceId}): 当日の馬場の値を読み出せなかったため、馬場の値なしで続けます`),
+              }),
+          // 芝の開催進行の通算の日数・柵の日数(Issue #519): LLM を使う中央の芝のレースだけ、同じ場の過去の行を D1 から読む(netkeiba には出ない)。
+          // 失敗は runAnalysis が握って値なしで続け、`onKaisaiDaysError` に渡す。警告は固定の語だけ(例外の文面・D1 の内部のメッセージは出さない)。
+          ...(this.kaisaiDaysStore === undefined
+            ? {}
+            : {
+                getKaisaiDays: (trackCode: string, date: string) => this.kaisaiDaysStore!.load(trackCode, date),
+                onKaisaiDaysError: (info: { readonly raceId: string }) => this.onWarn(`発走前の分析(${info.raceId}): 過去の開催日の記録を読み出せなかったため、芝の開催進行の通算・柵の日数なしで続けます`),
               }),
           llmSkipReason: LLM_NOTE_NO_KEY,
         });

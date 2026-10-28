@@ -53,6 +53,7 @@
  * Issue #353 で "2026-10-16.1" → "2026-10-18.1" に更新(タイム指数を統計モデルに入れた。プロンプトの文面は不変で 3着内率の値が変わる。build-prompt.ts)したため、同じく追随した。
  * Issue #354 で "2026-10-18.1" → "2026-10-18.2" に更新(調教師の前2年の3着内率を統計モデルに入れた。プロンプトの文面は不変で 3着内率の値が変わる。build-prompt.ts)したため、同じく追随した。
  * Issue #421 で "2026-10-18.2" → "2026-10-25.1" に更新(地方のレースでは統計モデルの斤量の項を使わない。プロンプトの文面は不変で、地方の 3着内率の値が変わる。build-prompt.ts)したため、同じく追随した。
+ * Issue #519 で "2026-10-25.1" → "2026-10-29.1" に更新(芝の開催進行の行に、連続開催の通算の日数と、いまの柵の日数を足した。build-prompt.ts)したため、同じく追随した。
  *
  * 新版(wide15)は幅0.15(絶対値)・PROMPT_VERSION="{対照のPROMPT_VERSION}-clip015"(版文字列に幅を
  * 内包し、対照と必ず異なる値にする。DB列は追加しない: analyses.prompt_version は既存の文字列カラムの
@@ -88,14 +89,14 @@ export const CLIP_VARIANTS: Readonly<Record<ClipVariantId, ClipVariant>> = {
   default: {
     id: "default",
     maxAdjust: 0.1,
-    // build-prompt.ts の PROMPT_VERSION と同一の値を手動同期する(Issue #261・#260・#262、#226、#258、#315、#353、#354、#421 で追随)。
-    promptVersion: "2026-10-25.1",
+    // build-prompt.ts の PROMPT_VERSION と同一の値を手動同期する(Issue #261・#260・#262、#226、#258、#315、#353、#354、#421、#519 で追随)。
+    promptVersion: "2026-10-29.1",
   },
   wide15: {
     id: "wide15",
     maxAdjust: 0.15,
-    // 対照(default)のPROMPT_VERSIONに"-clip015"を付けた値。対照更新時は必ず追随する(Issue #261・#260・#262、#226、#258、#315、#353、#354、#421 で追随)。
-    promptVersion: "2026-10-25.1-clip015",
+    // 対照(default)のPROMPT_VERSIONに"-clip015"を付けた値。対照更新時は必ず追随する(Issue #261・#260・#262、#226、#258、#315、#353、#354、#421、#519 で追随)。
+    promptVersion: "2026-10-29.1-clip015",
   },
 };
 
