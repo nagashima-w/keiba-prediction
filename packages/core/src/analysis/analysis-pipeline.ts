@@ -62,6 +62,7 @@ import {
   type GradeWinnerTrendSummary,
   type HorsePrior,
   type KaisaiDate,
+  type KaisaiDayRow,
   type PriorInput,
   type RaceData,
   type RaceId,
@@ -88,6 +89,7 @@ import {
   buildPromptInput,
   loadDayBaba,
   loadGradeWinnerTrend,
+  loadKaisaiDays,
   loadSameDayTrend,
 } from "./analysis-llm-materials.js";
 import {
@@ -246,6 +248,17 @@ export interface AnalysisPipelineDeps {
   readonly getBabaConditions?: (venueCode: string, kaisaiDate: string) => DayBaba | null | Promise<DayBaba | null>;
   /** `getBabaConditions` が失敗したときの警告用フック(Issue #295)。失敗しても分析は止めず、値なしで続ける。省略時は黙って値なしにする。 */
   readonly onBabaError?: (info: { readonly raceId: RaceId; readonly message: string }) => void;
+  /**
+   * 芝の開催進行の「連続開催の通算の日数」と「いまの柵の日数」を数える材料の読み出し(Issue #519。クラウド版は D1 の `kaisai_days`)。
+   * 引数は JRA の場コード(2桁。レースIDの5〜6桁目)と開催日(YYYYMMDD)。**開催日より前の**、その場の行を返す(今日の行は読まない。今日の回・日次はレース ID、今日の柵は出馬表から取る)。
+   * 返す範囲は呼び出し側が決める。連続の判定は「前の回の全日がそろっている」ことを確かめるので、クラウド版は開催年とその前の年の行を全部返す
+   * (日数の窓で切ると、夏の休みのように間隔の長い回で、前の回の初日が窓の外に出て判定できなくなる)。
+   * **呼ぶのは、LLM を使う中央の芝のレースで、開催日が渡っているときだけ**(地方・ダート・障害・LLM スキップでは呼ばない)。
+   * 省略時は何もしない(機能オフ。プロンプトは従来とバイト不変)。失敗(throw・reject)は握って値なしで続け、`onKaisaiDaysError` に渡す。
+   */
+  readonly getKaisaiDays?: (trackCode: string, kaisaiDate: string) => readonly KaisaiDayRow[] | Promise<readonly KaisaiDayRow[]>;
+  /** `getKaisaiDays` が失敗したときの警告用フック(Issue #519)。失敗しても分析は止めず、値なしで続ける。省略時は黙って値なしにする。 */
+  readonly onKaisaiDaysError?: (info: { readonly raceId: RaceId; readonly message: string }) => void;
   /**
    * fallback:true(LLMがフェイルセーフでpriorに復帰)発生時に呼ばれる任意の診断ログ用フック
    * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(印の補修〈Issue #317〉を含む)では
@@ -447,6 +460,7 @@ async function runLlmStage(
   const sameDayTrend = await loadSameDayTrend(raceId, race.race.courseType, deps);
   const gradeWinnerTrend = await loadGradeWinnerTrend(raceId, race.race, ctx.analysisDate, deps);
   const baba = await loadDayBaba(raceId, race.race.courseType, ctx.kaisaiDate, deps);
+  const kaisaiDays = await loadKaisaiDays(raceId, race.race.courseType, ctx.kaisaiDate, deps);
 
   const promptInput = buildPromptInput({
     race,
@@ -458,6 +472,8 @@ async function runLlmStage(
     sameDayTrend,
     gradeWinnerTrend,
     baba,
+    kaisaiDate: ctx.kaisaiDate,
+    kaisaiDays,
     trimmedInstruction: ctx.trimmedInstruction,
     clipVariantId: ctx.clipVariantId,
   });
