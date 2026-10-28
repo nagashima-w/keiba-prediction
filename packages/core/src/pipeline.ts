@@ -82,6 +82,11 @@ export {
 } from "./analyzer/turf-wear.js";
 
 export type {
+  KaisaiDayRow,
+  TurfWearHistory,
+} from "./analyzer/turf-wear.js";
+
+export type {
   AnalysisAllocationRecord,
   AnalysisRecord,
   RaceResultDetail,

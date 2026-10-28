@@ -8,7 +8,8 @@
  * - {@link loadSameDayTrend}: 当日の同一場・同一面傾向(タスク#27-C。Issue #153・#176・#177)
  * - {@link loadGradeWinnerTrend}: 同レース(重賞)の過去10年結果傾向(タスク機能B。Issue #153)
  * - {@link loadDayBaba}: 当日の馬場の値(Issue #295)
- * - {@link buildPromptInput}: 上の 3 つと prior から `BuildPromptInput` を作る純関数
+ * - {@link loadKaisaiDays}: 芝の開催進行の通算・柵の日数を数える過去の開催日の行(Issue #519)
+ * - {@link buildPromptInput}: 上の材料と prior から `BuildPromptInput` を作る純関数
  * - {@link conditionChangeRunsOf}・{@link winOddsOf}: 結果行の組み立て(`analysis-record.ts`)も使う共有のヘルパ
  *
  * deps は `AnalysisPipelineDeps` の必要な項目だけを `Pick` で受ける(`analysis-pipeline.ts` を値で import すると循環するため、型だけ import する)。
@@ -35,6 +36,7 @@ import {
   type HorseRaceResult,
   type JockeyChangePrevRunInput,
   type KaisaiDate,
+  type KaisaiDayRow,
   type RaceData,
   type RaceId,
   type RaceResultDetail,
@@ -240,6 +242,49 @@ export async function loadDayBaba(
   return baba;
 }
 
+/**
+ * 芝の開催進行の通算の日数・柵の日数を数える材料(Issue #519): LLM を使う中央の**芝**のレースだけ、開催日より前のその場の行を読む。失敗は握って値なし(null)で続ける。
+ * 読まない(機能オフ・地方・芝以外)は null。読んだ行は形を確かめて、壊れた行は捨てる(D1 に直接入れた値でも、計算が壊れた入力で動かない)。
+ */
+export async function loadKaisaiDays(
+  raceId: RaceId,
+  courseType: RaceData["race"]["courseType"],
+  kaisaiDate: KaisaiDate,
+  deps: Pick<AnalysisPipelineDeps, "getKaisaiDays" | "onKaisaiDaysError">,
+): Promise<readonly KaisaiDayRow[] | null> {
+  const centralVenue = centralVenueInfoFromRaceId(raceId);
+  if (!deps.getKaisaiDays || centralVenue === null || courseType !== "芝") {
+    return null;
+  }
+  try {
+    const rows: unknown = await deps.getKaisaiDays(centralVenue.trackCode, kaisaiDate);
+    return Array.isArray(rows) ? rows.filter(isKaisaiDayRow) : null;
+  } catch (error) {
+    deps.onKaisaiDaysError?.({
+      raceId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/** 過去の開催日の行として使える形か(場コードは文字列、年・回・日次は 1 以上の整数、開催日は文字列、柵は文字列か null)。 */
+function isKaisaiDayRow(value: unknown): value is KaisaiDayRow {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const row = value as Record<string, unknown>;
+  const positiveInteger = (v: unknown): boolean => typeof v === "number" && Number.isInteger(v) && v >= 1;
+  return (
+    typeof row["trackCode"] === "string" &&
+    positiveInteger(row["year"]) &&
+    positiveInteger(row["kai"]) &&
+    positiveInteger(row["nichi"]) &&
+    typeof row["kaisaiDate"] === "string" &&
+    (row["fence"] === null || typeof row["fence"] === "string")
+  );
+}
+
 /** {@link buildPromptInput} の入力。 */
 export interface BuildPromptInputArgs {
   /** 先読み遮断済みのレースデータ。 */
@@ -254,6 +299,10 @@ export interface BuildPromptInputArgs {
   readonly sameDayTrend: SameDayTrend;
   readonly gradeWinnerTrend: GradeWinnerTrendSummary | null;
   readonly baba: DayBaba | null;
+  /** 開催日(Issue #519。芝の開催進行の通算・柵の日数を数える基準日)。省略時は数えない。 */
+  readonly kaisaiDate?: KaisaiDate;
+  /** 芝の開催進行を数える過去の開催日の行(Issue #519。{@link loadKaisaiDays} の戻り値)。省略・null は数えない(従来と同じ文)。 */
+  readonly kaisaiDays?: readonly KaisaiDayRow[] | null;
   /** トリム済みの追加指示(空文字は注入なし)。 */
   readonly trimmedInstruction: string;
   readonly clipVariantId: ClipVariantId;
@@ -271,6 +320,8 @@ export function buildPromptInput(args: BuildPromptInputArgs): BuildPromptInput {
     sameDayTrend,
     gradeWinnerTrend,
     baba,
+    kaisaiDate,
+    kaisaiDays,
     trimmedInstruction,
     clipVariantId,
   } = args;
@@ -286,7 +337,13 @@ export function buildPromptInput(args: BuildPromptInputArgs): BuildPromptInput {
       venueKind,
       // 芝の傷み目安(タスク#26-P3): 中央芝のときだけ開催回・日次・柵の事実を1行渡す
       // (turf-wear.ts の assessTurfWear。地方・ダート・障害は null になり行自体が出ない)。
-      turfWearHint: assessTurfWear(raceId, race.race.courseType, race.race.fence),
+      // 連続開催の通算の日数・いまの柵の日数(Issue #519)は、開催日と過去の行がそろったときだけ足す。
+      turfWearHint: assessTurfWear(
+        raceId,
+        race.race.courseType,
+        race.race.fence,
+        kaisaiDate === undefined ? null : { kaisaiDate, rows: kaisaiDays ?? null },
+      ),
       // 当日の同一場・同一面傾向(タスク#27-C。same-day-trend.ts の collectSameDayTrend)。
       sameDayTrend,
       // 同レース(重賞)の過去10年結果傾向(タスク機能B。grade-winner-trend.ts の

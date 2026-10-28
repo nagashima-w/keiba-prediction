@@ -23,6 +23,10 @@ describe("assessTurfWear(芝の傷み目安・純関数)", () => {
         開催日次: 8,
         開催回次: 2,
         柵: "A",
+        通算日次: null,
+        連続開始年: null,
+        連続開始回: null,
+        柵日数: null,
         note: `中央2回8日目(柵A)。${NEUTRAL_SUFFIX}`,
       });
     });
@@ -33,6 +37,10 @@ describe("assessTurfWear(芝の傷み目安・純関数)", () => {
         開催日次: 8,
         開催回次: 2,
         柵: null,
+        通算日次: null,
+        連続開始年: null,
+        連続開始回: null,
+        柵日数: null,
         note: `中央2回8日目。${NEUTRAL_SUFFIX}`,
       });
       expect(result?.note).not.toContain("柵情報");
@@ -61,6 +69,10 @@ describe("assessTurfWear(芝の傷み目安・純関数)", () => {
         開催日次: 8,
         開催回次: null,
         柵: "B",
+        通算日次: null,
+        連続開始年: null,
+        連続開始回: null,
+        柵日数: null,
         note: `中央8日目(柵B)。${NEUTRAL_SUFFIX}`,
       });
     });

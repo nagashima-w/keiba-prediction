@@ -34,6 +34,9 @@
  *   (キーの追加 3・削除 0・値の変更 0。`promptInput`・`promptText`・確率・配分は 1 件も動かない。`git diff` の行としては、`"filliesOnly": false` の末尾のカンマが加わる 3 行を含む 6 行の追加と 3 行の削除)。
  * **Issue #421 手順 2 で再生成した**(地方のレースでは統計モデルの斤量の項を使わない。`PROMPT_VERSION` が "2026-10-18.2" → "2026-10-25.1" になった)。入力の出馬表 `shutuba_202603020211` は中央のレースなので、prior・確率・配分は動かない。
  *   差分の検査: `git diff -U0 packages/core/test/golden | grep '^[-+]'` で、`record.promptVersion` の 1 行の置き換え(削除 1・追加 1)だけであること。
+ * **Issue #519 で再生成した**(芝の開催進行に連続開催の通算と柵の日数を足した。`PROMPT_VERSION` が "2026-10-25.1" → "2026-10-29.1" になり、`TurfWearHint` に 4 つのキー〈通算日次・連続開始年・連続開始回・柵日数〉が加わった)。
+ *   フィクスチャは過去の開催日の行を渡さないので、4 つのキーはすべて null で、`promptText`(「芝コースの開催進行」の行を含む)・確率・配分は動かない。
+ *   差分の検査: `git diff -U0 packages/core/test/golden | grep '^[-+]'` で、`record.promptVersion` の置き換え(削除 1・追加 1)と、LLM のシナリオの `promptInput.race.turfWearHint` への 4 つの null のキーの追加(追加 4・削除 0)だけであること。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */

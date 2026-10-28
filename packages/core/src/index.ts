@@ -398,7 +398,7 @@ export {
   type SameDayTrendSampleSize,
   type SameDayTrendSummary,
 } from "./analyzer/same-day-trend.js";
-export { assessTurfWear, type TurfWearHint } from "./analyzer/turf-wear.js";
+export { assessTurfWear, CONTINUITY_MAX_GAP_DAYS, type KaisaiDayRow, type TurfWearHint, type TurfWearHistory } from "./analyzer/turf-wear.js";
 export {
   collectGradeWinnerTrend,
   excludeLookaheadEntries,

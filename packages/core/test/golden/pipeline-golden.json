@@ -20149,7 +20149,7 @@
       "raceId": "202603020211",
       "analyzedAt": "2026-06-28T12:00:00.000Z",
       "evEstimated": false,
-      "promptVersion": "2026-10-25.1",
+      "promptVersion": "2026-10-29.1",
       "additionalInstruction": null,
       "kaisaiDate": "20260628",
       "historyCutoffDate": "20260628",
@@ -30407,6 +30407,10 @@
           "開催日次": 2,
           "開催回次": 2,
           "柵": "A",
+          "通算日次": null,
+          "連続開始年": null,
+          "連続開始回": null,
+          "柵日数": null,
           "note": "中央2回2日目(柵A)。開催が進むほど芝の状態(特に内側)は変化しうるが、内外・前後の有利は断定しない材料として扱うこと。"
         },
         "sameDayTrend": {
