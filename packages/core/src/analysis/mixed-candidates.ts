@@ -107,6 +107,7 @@ import {
   type EvConfig,
   type JointModelHorse,
 } from "../ev/combo-bet-allocation.js";
+import type { PlaceJointModel } from "../ev/place-joint-model.js";
 
 import type {
   AnalysisRow,
@@ -222,6 +223,12 @@ export interface MixedCandidateBuildOptions {
    * 呼び出し元がここへ同じ閾値の`evConfig`を渡すことで全券種の判定基準を統一できる(D-4)。
    */
   readonly evConfig?: EvConfig;
+  /**
+   * 同時分布のモデル(Issue #524。省略時は各候補ビルダーの既定の `PLACKETT_LUCE_MODEL`)。ワイド・3連複・単勝・馬連・馬単・三連単・枠連の
+   * 候補ビルダー(6本)に渡る。複勝の候補は行の `ev`/`isPositive` で決まるのでモデルを使わない。順序のないモデル
+   * (`CONDITIONAL_BERNOULLI_MODEL`)を渡すと、単勝の候補ビルダーが例外を投げる(単勝は `betTypes` に含めたときだけ)。
+   */
+  readonly model?: PlaceJointModel;
 }
 
 /**
@@ -479,6 +486,7 @@ function buildWinCandidatesForBetType(
   race: MixedCandidateBuildInput,
   horses: readonly JointModelHorse[],
   evConfig: EvConfig,
+  model: PlaceJointModel | undefined,
 ): { candidates: readonly AllocationCandidate[]; diagnostics: WinCandidateDiagnosticsView } {
   if (!requested) {
     return { candidates: [], diagnostics: { kind: "not-requested" } };
@@ -489,7 +497,7 @@ function buildWinCandidatesForBetType(
     return { candidates: [], diagnostics: { kind: "unavailable", reason: "yoso" } };
   }
   const oddsByUmaban = new Map<number, number | null>(race.rows.map((r) => [r.umaban, r.winOdds]));
-  const result = buildWinCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByUmaban, evConfig);
+  const result = buildWinCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByUmaban, evConfig, model);
   return {
     candidates: result.candidates,
     diagnostics: {
@@ -507,6 +515,7 @@ function buildComboCandidatesForBetType(
   race: MixedCandidateBuildInput,
   horses: readonly JointModelHorse[],
   evConfig: EvConfig,
+  model: PlaceJointModel | undefined,
 ): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
   if (!requested) {
     return { candidates: [], diagnostics: { kind: "not-requested" } };
@@ -521,7 +530,7 @@ function buildComboCandidatesForBetType(
   const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
   // D-4: evConfigを渡し、複勝(row.isPositive)と同じ閾値・同じ厳密不等号で判定させる。
   // Issue #76: 第3引数はcomboSize(数値)ではなくbetType自体を渡す(umabanCountOfへ内部で委譲)。
-  const result = buildComboCandidates(horses, COMBO_TOP_FINISH_COUNT, betType, oddsByKey, evConfig);
+  const result = buildComboCandidates(horses, COMBO_TOP_FINISH_COUNT, betType, oddsByKey, evConfig, model);
   return {
     candidates: result.candidates,
     diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
@@ -542,6 +551,7 @@ function buildQuinellaCandidatesForBetType(
   race: MixedCandidateBuildInput,
   horses: readonly JointModelHorse[],
   evConfig: EvConfig,
+  model: PlaceJointModel | undefined,
 ): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
   if (!requested) {
     return { candidates: [], diagnostics: { kind: "not-requested" } };
@@ -555,7 +565,7 @@ function buildQuinellaCandidatesForBetType(
   const comboOddsState = race.comboOdds?.quinella?.state ?? "unknown";
   const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
   // D-4: evConfigを渡し、複勝・ワイド・3連複と同じ閾値・同じ厳密不等号で判定させる。
-  const result = buildQuinellaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  const result = buildQuinellaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig, model);
   return {
     candidates: result.candidates,
     diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
@@ -578,6 +588,7 @@ function buildExactaCandidatesForBetType(
   race: MixedCandidateBuildInput,
   horses: readonly JointModelHorse[],
   evConfig: EvConfig,
+  model: PlaceJointModel | undefined,
 ): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
   if (!requested) {
     return { candidates: [], diagnostics: { kind: "not-requested" } };
@@ -591,7 +602,7 @@ function buildExactaCandidatesForBetType(
   const comboOddsState = race.comboOdds?.exacta?.state ?? "unknown";
   const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
   // D-4: evConfigを渡し、複勝・ワイド・3連複・馬連と同じ閾値・同じ厳密不等号で判定させる。
-  const result = buildExactaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  const result = buildExactaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig, model);
   return {
     candidates: result.candidates,
     diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
@@ -614,6 +625,7 @@ function buildTrifectaCandidatesForBetType(
   race: MixedCandidateBuildInput,
   horses: readonly JointModelHorse[],
   evConfig: EvConfig,
+  model: PlaceJointModel | undefined,
 ): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
   if (!requested) {
     return { candidates: [], diagnostics: { kind: "not-requested" } };
@@ -627,7 +639,7 @@ function buildTrifectaCandidatesForBetType(
   const comboOddsState = race.comboOdds?.trifecta?.state ?? "unknown";
   const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
   // D-4: evConfigを渡し、複勝・ワイド・3連複・馬連・馬単と同じ閾値・同じ厳密不等号で判定させる。
-  const result = buildTrifectaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  const result = buildTrifectaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig, model);
   return {
     candidates: result.candidates,
     diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
@@ -657,6 +669,7 @@ function buildBracketQuinellaCandidatesForBetType(
   race: MixedCandidateBuildInput,
   horses: readonly BracketJointModelHorse[],
   evConfig: EvConfig,
+  model: PlaceJointModel | undefined,
 ): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
   if (!requested) {
     return { candidates: [], diagnostics: { kind: "not-requested" } };
@@ -670,7 +683,7 @@ function buildBracketQuinellaCandidatesForBetType(
   const comboOddsState = race.comboOdds?.bracketQuinella?.state ?? "unknown";
   const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
   // D-4: evConfigを渡し、他の券種と同じ閾値・同じ厳密不等号で判定させる。
-  const result = buildBracketQuinellaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  const result = buildBracketQuinellaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig, model);
   return {
     candidates: result.candidates,
     diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
@@ -691,6 +704,7 @@ export function buildMixedCandidates(
 ): MixedCandidateBuildResult {
   const betTypes = options.betTypes ?? ALL_MIXED_CANDIDATE_BET_TYPES;
   const evConfig = options.evConfig ?? DEFAULT_EV_CONFIG;
+  const model = options.model;
   // 枠連(Issue #148)の的中判定が読む枠番を載せる。枠連候補が無い券種のビルダーは`wakuban`を
   // 一切見ない(coreの契約。既存券種の結果は不変)。`AnalysisRow.wakuban`は必須フィールドなので
   // Web Workerへの直列化(structured clone)でも落ちない。
@@ -703,17 +717,18 @@ export function buildMixedCandidates(
   const place = betTypes.includes("place")
     ? buildPlaceCandidates(race)
     : { candidates: [] as AllocationCandidate[], diagnostics: { kind: "not-requested" } as PlaceCandidateDiagnostics };
-  const win = buildWinCandidatesForBetType(betTypes.includes("win"), race, horses, evConfig);
-  const wide = buildComboCandidatesForBetType("wide", betTypes.includes("wide"), race, horses, evConfig);
-  const trio = buildComboCandidatesForBetType("trio", betTypes.includes("trio"), race, horses, evConfig);
-  const quinella = buildQuinellaCandidatesForBetType(betTypes.includes("quinella"), race, horses, evConfig);
-  const exacta = buildExactaCandidatesForBetType(betTypes.includes("exacta"), race, horses, evConfig);
-  const trifecta = buildTrifectaCandidatesForBetType(betTypes.includes("trifecta"), race, horses, evConfig);
+  const win = buildWinCandidatesForBetType(betTypes.includes("win"), race, horses, evConfig, model);
+  const wide = buildComboCandidatesForBetType("wide", betTypes.includes("wide"), race, horses, evConfig, model);
+  const trio = buildComboCandidatesForBetType("trio", betTypes.includes("trio"), race, horses, evConfig, model);
+  const quinella = buildQuinellaCandidatesForBetType(betTypes.includes("quinella"), race, horses, evConfig, model);
+  const exacta = buildExactaCandidatesForBetType(betTypes.includes("exacta"), race, horses, evConfig, model);
+  const trifecta = buildTrifectaCandidatesForBetType(betTypes.includes("trifecta"), race, horses, evConfig, model);
   const bracketQuinella = buildBracketQuinellaCandidatesForBetType(
     betTypes.includes("bracketQuinella"),
     race,
     horses,
     evConfig,
+    model,
   );
 
   return {

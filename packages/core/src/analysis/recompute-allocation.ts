@@ -24,6 +24,7 @@ import {
   type RaceData,
 } from "../pipeline.js";
 import type { HorseEv } from "../ev/expected-value.js";
+import type { PlaceJointModel } from "../ev/place-joint-model.js";
 import type { AnalysisRow } from "./analysis-types.js";
 import type { MixedCandidateBuildInput } from "./mixed-candidates.js";
 import { buildMixedRaceAllocationWithOutcome } from "./mixed-race-allocation.js";
@@ -78,6 +79,11 @@ export interface AllocationForRowsInput {
    * 締切の直前の再計算は false(下限は適用するが、記録のための2回目の配分は呼ばない)。
    */
   readonly recordMissed?: boolean;
+  /**
+   * 同時分布のモデル(Issue #524)。省略すると配分の関数の既定(`PLACKETT_LUCE_MODEL`)で、本番の呼び出しはどちらも渡さない。
+   * 計算し直しの試算(`scripts/allocation-dataset.ts`)で、別のモデルでの配分を見るための口。
+   */
+  readonly model?: PlaceJointModel;
 }
 
 /** 手順 (6) の結果。 */
@@ -109,7 +115,7 @@ export function buildAllocationForRows(input: AllocationForRowsInput): Allocatio
     ...(input.comboOdds !== undefined ? { comboOdds: input.comboOdds } : {}),
   };
   try {
-    const outcome = buildMixedRaceAllocationWithOutcome(raceForAllocation, mixedSettings);
+    const outcome = buildMixedRaceAllocationWithOutcome(raceForAllocation, mixedSettings, input.model);
     return {
       allocation: buildAllocationRecord(outcome, mixedSettings, odds.oddsStatus),
       comboStats: buildComboStats(outcome),
@@ -141,6 +147,8 @@ export interface RecomputeAllocationInput {
   readonly allocationSettings: AnalysisAllocationSettings;
   readonly evConfig?: EvConfig;
   readonly estimatedPlaceConfig?: EstimatedPlaceConfig;
+  /** 同時分布のモデル(Issue #524)。省略 = 本番と同じ(`PLACKETT_LUCE_MODEL`)。EV の計算(手順 4)は市場のオッズだけで決まるので、モデルに依存しない。 */
+  readonly model?: PlaceJointModel;
 }
 
 export interface RecomputeAllocationResult {
@@ -192,6 +200,7 @@ export function recomputeAllocationFromProbs(input: RecomputeAllocationInput): R
     comboOdds: input.comboOdds,
     allocationSettings: input.allocationSettings,
     evConfig: input.evConfig,
+    model: input.model,
   });
   return { oddsStatus: input.odds.oddsStatus, evEstimated, rows, allocation, comboStats };
 }
