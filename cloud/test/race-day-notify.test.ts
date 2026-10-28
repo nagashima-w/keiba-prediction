@@ -1038,7 +1038,7 @@ describe("Issue #522: 出馬表の見出しから馬場状態・芝の柵を読�
       return ok(html);
     };
   }
-  const NO_TRACK = ["馬場:良", "馬場:−"] as const;
+  const NO_TRACK = ["馬場:良", ""] as const; // 見出しの文字が無くなる(「馬場:−」は旧い形のパーサが値「−」として読むため、読めなかったことにならない)
   const NO_FENCE = ["(右&nbsp;A)", "(右)"] as const;
   const NO_WEATHER = ["天候:晴", ""] as const;
 
