@@ -62,11 +62,38 @@ function parseFence(courseType: CourseType, data01: string): string | null | und
   if (courseType !== "芝") {
     return undefined;
   }
-  const parenContent = PATTERNS.turfFenceParen.exec(data01)?.[1];
-  if (parenContent === undefined) {
+  // 旧い形は括弧つき(`芝1200m (右 外 C)`)、新しい形(Issue #521)は括弧なし(`芝1400m 左 A / …`)。括弧版を先に試す。
+  const fragment = (PATTERNS.turfFenceParen.exec(data01) ?? PATTERNS.turfFenceBare.exec(data01))?.[1];
+  if (fragment === undefined) {
     return null;
   }
-  return PATTERNS.fenceLetterToken.exec(parenContent)?.[1] ?? null;
+  return PATTERNS.fenceLetterToken.exec(fragment)?.[1] ?? null;
+}
+
+/**
+ * 天候を読む。旧い形の文字(`天候:曇`)を先に試し、無ければ新しい形(Issue #521)の天候アイコンの `aria-label` を読む。
+ * `aria-label` は前後の空白を除き、空白・`<>/` を含まない 1 トークンのときだけ採る。読めなければ undefined。
+ */
+function parseWeather($: CheerioAPI, data01: string): string | undefined {
+  const fromText = PATTERNS.weather.exec(data01)?.[1];
+  if (fromText !== undefined) {
+    return fromText;
+  }
+  const label = $(SEL.raceData01).first().find(SEL.weatherIcon).first().attr("aria-label")?.trim();
+  return label !== undefined && PATTERNS.weatherToken.test(label) ? label : undefined;
+}
+
+/**
+ * 馬場状態を読む。旧い形の文字(`馬場:良`)を先に試し、無ければ新しい形(Issue #521)の `span.Item03`/`Item04` の値を読む。
+ * 新しい形の値は前後の空白を除き、許可リスト(良・稍・重・不・稍重・不良)に当たるときだけ採る。読めなければ undefined。
+ */
+function parseTrackCondition($: CheerioAPI, data01: string): string | undefined {
+  const fromText = PATTERNS.trackCondition.exec(data01)?.[1];
+  if (fromText !== undefined) {
+    return fromText;
+  }
+  const word = $(SEL.raceData01).first().find(SEL.trackConditionItem).first().text().trim();
+  return PATTERNS.trackConditionWord.test(word) ? word : undefined;
 }
 
 /**
@@ -115,8 +142,8 @@ function parseRaceInfo($: CheerioAPI, readConditions: boolean, raceClassKind: Ra
   const distance = Number(cdMatch[2]!);
 
   const startTime = PATTERNS.startTime.exec(data01)?.[1];
-  const weather = PATTERNS.weather.exec(data01)?.[1];
-  const trackCondition = PATTERNS.trackCondition.exec(data01)?.[1];
+  const weather = parseWeather($, data01);
+  const trackCondition = parseTrackCondition($, data01);
   const fence = parseFence(courseType, data01);
   // 重賞グレードバッジの有無(タスク機能B 要修正2)。RaceName配下のIcon_GradeType要素の
   // 有無のみで判定し、この判定では番号(グレード)は解釈しない(中央h1/地方divのタグ違いはセレクタ側で吸収)。
