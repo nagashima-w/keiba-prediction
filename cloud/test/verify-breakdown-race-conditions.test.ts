@@ -14,7 +14,7 @@ import { buildConditionFactsIndex } from "../src/verify-race-conditions";
 import { buildVerifySource, type VerifyAnalysisRow, type VerifyBetRow, type VerifyReadRows, type VerifyResultRow } from "../src/verify-read";
 
 /**
- * Issue #389(#385-B の b): 条件別の見える化に、距離帯・馬場・芝ダの 3 軸を足す(クラスは #426 のあとに #389-c で足すので、ここでは出さない)。
+ * Issue #389(#385-B の b): 条件別の見える化に、距離帯・馬場・芝ダの 3 軸を足す。クラス(#389-c)の試験はこのファイルの後半(`race_class` を持つ見本 CLASSED)。
  * 条件は分析の行(`analyses` の条件の列。`race-facts.ts` が写したもの)から引く。単位はレース、買い目の判定は core の `collectProposedBetEvents`。
  */
 
@@ -22,7 +22,7 @@ import { buildVerifySource, type VerifyAnalysisRow, type VerifyBetRow, type Veri
 // 見本: 分析を 1 つずつ作る(複勝 01 を 100 円。的中なら 1 着で払戻 150)
 // ---------------------------------------------------------------------------
 
-type Conditions = Pick<VerifyAnalysisRow, "courseType" | "distance" | "trackCondition" | "grade" | "raceName" | "condRead">;
+type Conditions = Pick<VerifyAnalysisRow, "courseType" | "distance" | "trackCondition" | "grade" | "raceName" | "condRead" | "raceClass">;
 
 interface AnalysisSpec {
   readonly raceId: string;
@@ -79,7 +79,7 @@ const OOI = "44";
  * 中央 7 レース + 地方 4 レース(計 11)。条件は軸ごとに 2 行以上に分かれ、不明の行も非空になるように作る。
  *  中央: c1 芝1600 良(的中)/ c2 芝1200 稍 / c3 ダ1800 重 / c4 ダ2400 不良(的中)/ c5 障3000 良 / c6 条件を読めなかった(cond_read=0)/ c7 芝2000 「−」
  *  地方: n1 ダ1400 良(的中)/ n2 ダ1870 稍重 / n3 ダ1200 馬場なし / n4 ダ1300 良
- * グレード・レース名の列にも値を入れるが、集計は使わない(クラスを出さない間は索引にも持たない)。
+ * グレード・レース名の列にも値を入れるが、集計は使わない(クラスは正確な `race_class` だけを使い、推定しない)。この見本は `race_class` を持たない(補完前の状態。クラスの節は出ない)。
  */
 const SAMPLE: readonly AnalysisSpec[] = [
   { raceId: raceId(TOKYO, 1), hit: true, conditions: cond("芝", 1600, "良", null, "3歳以上1勝クラス") },
@@ -101,7 +101,7 @@ function statsOf(rows: VerifyReadRows): { stats: ConditionStats; source: ReturnT
   return { source, stats: buildConditionStats(source, events, createPopularityLookups(source), buildConditionFactsIndex(rows.analyses)) };
 }
 
-const AXES: readonly ConditionKey[] = ["distance", "track", "surface"];
+const AXES: readonly ConditionKey[] = ["distance", "track", "surface"]; // クラスは後半の別の describe で見る(分類できない中央の行が『不明』でなく『地方(対象外)』を持つため)
 const dimension = (stats: ConditionStats, key: ConditionKey): readonly ConditionRow[] => stats.dimensions.find((d) => d.key === key)!.rows;
 const byLabel = (rows: readonly ConditionRow[]): Record<string, { races: number; hitRaces: number }> =>
   Object.fromEntries(rows.map((r) => [r.label, { races: r.races, hitRaces: r.hitRaces }]));
@@ -287,10 +287,11 @@ describe("computeVerifyBreakdowns: 3 つの節が条件別の節の最後に付�
     expect(legacy.central!.sections).toHaveLength(7);
   });
 
-  it("クラスの節は出さない(#426 のあとに #389-c で足す)。新しい節は距離帯・馬場・芝ダの 3 つだけ", () => {
+  it("★c0 race_class を持たない見本(補完前)では、クラスの節は出ない(レース名・グレードの列に値があっても推定しない)。新しい節は距離帯・馬場・芝ダの 3 つだけ", () => {
+    expect(SAMPLE.filter((s) => s.conditions.raceName !== null).length).toBeGreaterThan(5); // 前提: レース名の列には値がある(推定の材料はある)
     for (const v of ["all", "central", "nar"] as const) {
       const headings = out[v]!.sections.map((x) => x.heading);
-      expect(headings.filter((h) => h.includes("クラス"))).toEqual([]);
+      expect(headings.filter((h) => h.includes("(クラス)"))).toEqual([]);
       expect(headings.filter((h) => NEW_HEADINGS.includes(h))).toEqual(NEW_HEADINGS);
     }
   });
@@ -330,5 +331,173 @@ describe("renderConditionSections: 新しい軸の節", () => {
     expect(renderConditionSections(stats, "all").map((s) => s.heading)).toContain(NEW_HEADINGS[2]);
     expect(renderConditionSections(stats, "central").map((s) => s.heading)).toContain(NEW_HEADINGS[2]);
     expect(renderConditionSections(stats, "central").map((s) => s.heading)).not.toContain("条件ごとの的中率と回収率(開催区分)");
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// クラス(Issue #389-c)
+// ---------------------------------------------------------------------------
+
+const CLASS_HEADING = "条件ごとの的中率と回収率(クラス)";
+const CLASS_ORDER = ["新馬", "未勝利", "1勝クラス", "2勝クラス", "3勝クラス", "オープン", "地方(対象外)", "不明"];
+
+/** SAMPLE の各レースに race_class を足した見本(レース名の列は SAMPLE のまま = 推定の材料はあるが使わない)。 */
+const CLASS_BY_RACE: Readonly<Record<string, string | null>> = {
+  [raceId(TOKYO, 1)]: "1勝クラス", // 的中
+  [raceId(TOKYO, 2)]: "未勝利",
+  [raceId(TOKYO, 3)]: "新馬",
+  [raceId(TOKYO, 4)]: "オープン", // 的中
+  [raceId(TOKYO, 5)]: "未勝利", // 障害
+  [raceId(TOKYO, 6)]: "2勝クラス", // cond_read=0(条件を読めなかった)のレースでもクラスは使う
+  [raceId(TOKYO, 7)]: null, // 不明
+  [raceId(OOI, 1)]: "C3", // 的中
+  [raceId(OOI, 2)]: "B1",
+  [raceId(OOI, 3)]: null,
+  [raceId(OOI, 4)]: "3歳",
+};
+const CLASSED: readonly AnalysisSpec[] = SAMPLE.map((s) => ({ ...s, conditions: { ...s.conditions, raceClass: CLASS_BY_RACE[s.raceId] ?? null } }));
+
+describe("buildConditionStats: クラス(#389-c)", () => {
+  it("見本が退化していない: 中央 7 レースのうち 6 つに別々のクラス、地方 4 レースは全部違う区分(C3・B1・NULL・3歳)", () => {
+    expect(CLASSED.filter((s) => s.raceId.startsWith("202605")).map((s) => s.conditions.raceClass).filter((c) => c !== null && c !== undefined)).toHaveLength(6);
+    expect(CLASSED.filter((s) => s.raceId.startsWith("202644")).map((s) => s.conditions.raceClass)).toEqual(["C3", "B1", null, "3歳"]);
+  });
+
+  it("行の振り分け: 並びは固定の順(3勝クラスのように無い行は出ない)。cond_read=0 のレース(2勝クラス)も race_class で数える。地方 4 レースは『地方(対象外)』に 1 行でまとまる", () => {
+    const rows = dimension(statsOf(rowsOf(CLASSED)).stats, "class");
+    expect(labelsOf(rows)).toEqual(["新馬", "未勝利", "1勝クラス", "2勝クラス", "オープン", "地方(対象外)", "不明"]);
+    expect(byLabel(rows)).toEqual({
+      "新馬": { races: 1, hitRaces: 0 }, // c3
+      "未勝利": { races: 2, hitRaces: 0 }, // c2・c5(障害)
+      "1勝クラス": { races: 1, hitRaces: 1 }, // c1
+      "2勝クラス": { races: 1, hitRaces: 0 }, // c6(cond_read=0)
+      "オープン": { races: 1, hitRaces: 1 }, // c4
+      "地方(対象外)": { races: 4, hitRaces: 1 }, // n1〜n4(n1 が的中)
+      "不明": { races: 1, hitRaces: 0 }, // c7(NULL)
+    });
+  });
+
+  it("★保存則: クラスの行のレース数・点数・賭け金・払戻・的中レースの和が全体と一致する(2 行以上で、不明の行が非空)", () => {
+    const { stats } = statsOf(rowsOf(CLASSED));
+    const rows = dimension(stats, "class");
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(rows.some((r) => r.label === "不明" && r.races > 0)).toBe(true);
+    const sum = (pick: (r: ConditionRow) => number): number => rows.reduce((s, r) => s + pick(r), 0);
+    expect(sum((r) => r.races)).toBe(stats.overall.races);
+    expect(sum((r) => r.bets)).toBe(stats.overall.bets);
+    expect(sum((r) => r.stake)).toBe(stats.overall.stake);
+    expect(sum((r) => r.payout)).toBe(stats.overall.payout);
+    expect(sum((r) => r.hitRaces)).toBe(stats.overall.hitRaces);
+  });
+
+  it("行の値: 『未勝利』は 2 レース・的中 0・賭け金 200・払戻 0・回収率 0 で、全体との差は負、区間が付く", () => {
+    const row = dimension(statsOf(rowsOf(CLASSED)).stats, "class").find((r) => r.label === "未勝利")!;
+    expect(row).toMatchObject({ races: 2, bets: 2, hitRaces: 0, hitRate: 0, stake: 200, payout: 0, recovery: 0 });
+    expect(row.diffFromAll).toBeCloseTo(0 - 450 / 1100, 12);
+    expect(row.hitInterval).not.toBeNull();
+    expect(row.recoveryInterval).not.toBeNull();
+  });
+
+  it("★c1 語彙に無い値・地方の区分が中央のレースに入っていても『不明』(中央の行に推測で入れない)", () => {
+    const rows = rowsOf([
+      { raceId: raceId(TOKYO, 1), hit: true, conditions: cond("芝", 1600, "良", null, null) },
+      { raceId: raceId(TOKYO, 2), hit: false, conditions: { ...cond("芝", 1600, "良", null, null), raceClass: "C2" } },
+      { raceId: raceId(TOKYO, 3), hit: false, conditions: { ...cond("芝", 1600, "良", null, null), raceClass: "オープン特別" } },
+      { raceId: raceId(TOKYO, 4), hit: false, conditions: { ...cond("芝", 1600, "良", null, null), raceClass: "未勝利" } },
+    ]);
+    expect(byLabel(dimension(statsOf(rows).stats, "class"))).toEqual({ "未勝利": { races: 1, hitRaces: 0 }, "不明": { races: 3, hitRaces: 1 } });
+  });
+
+  it("★c2 複数の分析のあるレースは、集計に採用された最新の分析の行のクラスを使う", () => {
+    const id = raceId(TOKYO, 1);
+    const rows = rowsOf([
+      { raceId: id, hit: true, analyzedAt: "2026-07-05T03:00:00.000Z", conditions: { ...cond("芝", 1600, "良", null, null), raceClass: "未勝利" } },
+      { raceId: id, hit: true, analyzedAt: "2026-07-05T04:00:00.000Z", conditions: { ...cond("芝", 1600, "良", null, null), raceClass: "1勝クラス" } },
+    ]);
+    const { stats, source } = statsOf(rows);
+    expect(collectProposedBetEvents(source, PRODUCTION_VERIFY_CONFIG).map((e) => e.analysisId)).toEqual([2]); // 前提: 最新(id 2)だけが採用される
+    expect(byLabel(dimension(stats, "class"))).toEqual({ "1勝クラス": { races: 1, hitRaces: 1 } });
+  });
+
+  it("条件の索引を渡さない呼び出し(従来の呼び方)は、中央が不明・地方が『地方(対象外)』に入る(クラスの節は出ない)", () => {
+    const rows = rowsOf(CLASSED);
+    const source = buildVerifySource(rows);
+    const stats = buildConditionStats(source, collectProposedBetEvents(source, PRODUCTION_VERIFY_CONFIG));
+    expect(byLabel(dimension(stats, "class"))).toEqual({ "地方(対象外)": { races: 4, hitRaces: 1 }, "不明": { races: 7, hitRaces: 2 } });
+  });
+});
+
+describe("computeVerifyBreakdowns: クラスの節", () => {
+  const rows = rowsOf(CLASSED);
+  const out = computeVerifyBreakdowns(buildVerifySource(rows), rows.bets, buildConditionFactsIndex(rows.analyses));
+
+  it("★c3 節の数: 全体 12(人気帯 5 + 条件別 7)、中央のみ 11、地方のみ 10(クラスの節なし = 分類できるレースが無い)", () => {
+    expect(out.all!.sections).toHaveLength(12);
+    expect(out.central!.sections).toHaveLength(11);
+    expect(out.nar!.sections).toHaveLength(10);
+  });
+
+  it("並び: 芝ダの節のすぐ後ろ(最後)に付く", () => {
+    expect(out.all!.sections.slice(5).map((s) => s.heading)).toEqual([
+      "条件ごとの的中率と回収率(開催区分)",
+      "条件ごとの的中率と回収率(競馬場)",
+      "条件ごとの的中率と回収率(頭数)",
+      ...NEW_HEADINGS,
+      CLASS_HEADING,
+    ]);
+    expect(out.nar!.sections.map((s) => s.heading)).not.toContain(CLASS_HEADING);
+  });
+
+  it("★c4 全体のタブは『地方(対象外)』の行を含む。中央のみのタブには地方の行が出ない(中央のレース数 7 = 行の和)", () => {
+    const labels = (v: "all" | "central"): string[] => sectionOf(out[v]!.sections, CLASS_HEADING).rows.map((r) => r.label);
+    expect(labels("all")).toEqual(["全体", "新馬", "未勝利", "1勝クラス", "2勝クラス", "オープン", "地方(対象外)", "不明"]);
+    expect(labels("central")).toEqual(["全体", "新馬", "未勝利", "1勝クラス", "2勝クラス", "オープン", "不明"]);
+    const cells = (v: "all" | "central"): string[] => sectionOf(out[v]!.sections, CLASS_HEADING).rows.map((r) => r.cells[0]!.value);
+    expect(cells("all")).toEqual(["11R(11点)", "1R(1点)", "2R(2点)", "1R(1点)", "1R(1点)", "1R(1点)", "4R(4点)", "1R(1点)"]);
+    expect(cells("central")).toEqual(["7R(7点)", "1R(1点)", "2R(2点)", "1R(1点)", "1R(1点)", "1R(1点)", "1R(1点)"]);
+  });
+
+  it("各節の見出し順は CLASS_ORDER の部分列(行は固定の順で、不明が最後)", () => {
+    const labels = sectionOf(out.all!.sections, CLASS_HEADING).rows.slice(1).map((r) => r.label);
+    const positions = labels.map((l) => CLASS_ORDER.indexOf(l));
+    expect(positions.every((p) => p >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(labels[labels.length - 1]).toBe("不明");
+  });
+
+  it("★c5 『不明』と『地方(対象外)』しか無い入力(全レースの race_class が NULL)は、節ごと出さない", () => {
+    const unread = rowsOf(CLASSED.map((s) => ({ ...s, conditions: { ...s.conditions, raceClass: null } })));
+    const result = computeVerifyBreakdowns(buildVerifySource(unread), unread.bets, buildConditionFactsIndex(unread.analyses));
+    expect(Object.values(result).every((v) => v !== null)).toBe(true); // 前提
+    for (const v of ["all", "central", "nar"] as const) {
+      expect(result[v]!.sections.map((x) => x.heading), v).not.toContain(CLASS_HEADING);
+    }
+    expect(result.all!.sections).toHaveLength(11);
+  });
+
+  it("★c6 不明が 0 件なら『不明』の行を出さない(中央のレースがすべて分類できた)", () => {
+    const known = rowsOf(CLASSED.filter((s) => s.raceId.startsWith("202605") && s.conditions.raceClass !== null && s.conditions.raceClass !== undefined));
+    expect(known.analyses.length).toBeGreaterThan(3); // 前提
+    const result = computeVerifyBreakdowns(buildVerifySource(known), known.bets, buildConditionFactsIndex(known.analyses)).central!;
+    expect(sectionOf(result.sections, CLASS_HEADING).rows.map((r) => r.label)).not.toContain("不明");
+  });
+
+  it("★c7 注記: 説明に『地方』の扱い、注記に『オープン』の内訳を含むこと・『不明』が補完中を含むことを書く。文言は短い(説明 100 字以内・注記 120 字以内)", () => {
+    const section = sectionOf(out.all!.sections, CLASS_HEADING);
+    expect(section.description).toContain("地方(対象外)");
+    expect(section.note).toContain("オープン");
+    expect(section.note).toContain("重賞");
+    expect(section.note).toContain("補完中");
+    expect(section.description.length).toBeLessThanOrEqual(100);
+    expect(section.note.length).toBeLessThanOrEqual(120);
+    const existing = sectionOf(out.all!.sections, "条件ごとの的中率と回収率(競馬場)");
+    expect(section.description).not.toBe(existing.description);
+    expect(section.note).not.toBe(existing.note);
+  });
+
+  it("同じ入力なら同じ結果(固定シード)", () => {
+    const again = computeVerifyBreakdowns(buildVerifySource(rows), rows.bets, buildConditionFactsIndex(rows.analyses));
+    expect(JSON.stringify(again)).toBe(JSON.stringify(out));
   });
 });

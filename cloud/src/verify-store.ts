@@ -13,7 +13,7 @@
  * **R2 の Class B(読み出し)は、取得を試みた回数を 1 回の batch でまとめて数える**(保留・失敗の取得も R2 への要求)。柵の判定(`isReadAllowed`)は呼び出し側(`VerifyCore`)が `readUsage` で行う。
  *
  * ## レースの事実の写し(`analyses.course_type`・`distance`・`track_condition`・`grade`・`race_name`・`cond_read`。migration 0023。Issue #389。`race_class` は migration 0024・Issue #426)
- * 条件別の見える化(距離帯・馬場・芝ダ。クラスは #389-c)が使うスナップショットの項目を、**発走時刻と同じ get で**取り出して D1 に写す(追加の R2 読みは 0)。取り出しは `race-facts.ts`。
+ * 条件別の見える化(距離帯・馬場・芝ダ。クラスは `race_class`〈#426〉を #389-c が読む)が使うスナップショットの項目を、**発走時刻と同じ get で**取り出して D1 に写す(追加の R2 読みは 0)。取り出しは `race-facts.ts`。
  *  - 印 `cond_read`: NULL = 未確認 / 1 = 読んだ(列が NULL なら、スナップショットに無かった)/ 0 = 読めなかった(詳細が無い・壊れている・別のレースのもの・猶予切れ)。**発走時刻とは別の印**(発走時刻が済みの既存分にも補完が要る)。
  *  - 候補(`listPending`)は「発走時刻が NULL **または** `cond_read` が NULL」の行。1 回の get で両方を決め、**1 つの UPDATE** で書く(確認済みの値は、列ごとに上書きしない)。
  *  - 詳細が無い行(`detail_key` が NULL)・壊れた詳細・別のレースの詳細は、発走時刻 '?' と同じく条件も「読めなかった」(`facts: null`)。R2 に現れない行(`missing`)・get の例外(`failed`)は条件も出さない(NULL のまま)。
