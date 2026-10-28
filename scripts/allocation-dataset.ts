@@ -19,6 +19,13 @@
  * **確率ごとに閾値やケリー係数を変える・低確率の買い目に回す額に上限を付ける・100 円の救済をやめる、は本番の関数の変更が要るので、ここでは試せない。**
  * 上書きをすると分析時の提案とは一致しなくて当然なので、一致率の集計(`summarizeReplay`)は上書きなしだけに使う。
  *
+ * ## 同時分布のモデルの上書き(`ReplayOverrides.model`。Issue #524)
+ * 3 着内率から単勝・組合せ・複勝の確率を出すモデル(`PlaceJointModel`)を差し替えて計算し直す。`REPLAY_MODELS` の 2 つ(`plackett-luce`〈本番の既定〉・`conditional-bernoulli`)を `--override model=<id>` で選べる。
+ * **条件付きベルヌーイは順序がないので、組合せの経路〈単勝の候補を常に作る〉では例外になり route=invalid になる。比べられるのは複勝だけの経路〈`includeComboOdds=false`〉。**
+ * モデルを上書きして invalid になった行は、`replayedBets` が null を返す(計算し直せなかった行)。CLI は回収額の集計から外し、その行数(全体・中央・地方)を必ず出す。
+ * 分析時から invalid だった行(例: 枠連を含めて枠番が無い)も、モデルを上書きしたときはこの行数に入る(原因がモデル以外のこともある)。
+ * 買い目の見積もりの当たり具合を比べるときは、この行数が 0 でないモデルの結果を「買い目なし」と読まないこと。
+ *
  * ## 一致しない理由の分類(`classifyReplay`)
  * 上から順に、先に当てはまったものを理由にする(1 行に理由は 1 つ): `no-allocation-record`(配分の記録なし)→ `no-odds`(分析時のオッズを再構成できない)→ 一致なら `match` →
  * `invalid`(計算し直しが例外・route=invalid、または分析時が route=invalid で一致しない)→ `code-drift`(保存した実効値 5 つ〈bet_unit・greedy_steps・candidate_cap・model_id・model_approximate〉が今のコードの値と違う)→
@@ -27,7 +34,7 @@
  * 使い方(リポジトリのルートで):
  * - `pnpm tsx scripts/allocation-dataset.ts <ファイル>`: 要約(レース数・区分別・オッズなし・配分の記録なし)と、計算し直した買い目が分析時の提案と一致した件数。
  * - `pnpm tsx scripts/allocation-dataset.ts <ファイル> --replay [--override key=value ...]`: 理由別・区分別の一致率と、回収額(分析時の提案・計算し直した提案)。
- *   `--override` のキーは `bankroll`・`perRaceCap`・`kellyFraction`・`evThreshold`・`minHitProb`・`includeComboOdds`・`include.wide`(`trio`・`quinella`・`exacta`・`trifecta`・`bracketQuinella` も)。真偽は true/false/on/off。
+ *   `--override` のキーは `bankroll`・`perRaceCap`・`kellyFraction`・`evThreshold`・`minHitProb`・`includeComboOdds`・`include.wide`(`trio`・`quinella`・`exacta`・`trifecta`・`bracketQuinella` も)。真偽は true/false/on/off。`model=plackett-luce|conditional-bernoulli`(Issue #524)。
  *
  * スクリプトからは、`loadAllocationDataset`・`replayRace`・`replayedBets`・`judgeRaceBets`・`summarizePayouts`・`payoutReport` を直接呼べる(CLI の `runCli` は表示だけ)。
  */
@@ -37,6 +44,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { recomputeAllocationFromProbs, type RecomputeAllocationResult } from "../packages/core/src/analysis/recompute-allocation.js";
+import { CONDITIONAL_BERNOULLI_MODEL, type PlaceJointModel } from "../packages/core/src/ev/place-joint-model.js";
+import { PLACKETT_LUCE_MODEL } from "../packages/core/src/ev/plackett-luce-model.js";
 import type { RaceData } from "../packages/core/src/scraper/scrape-race.js";
 import { createRaceBetJudge, judgmentPayout, PROPOSED_BET_TYPES, type BetJudgment, type JudgedHorse } from "../packages/core/src/ev/proposed-bet-judgment.js";
 import type { ComboBetType } from "../packages/core/src/scraper/combo-odds-key.js";
@@ -275,7 +284,19 @@ export interface ReplayOverrides {
   readonly include?: Partial<Record<ReplayIncludeKind, boolean>>;
   /** 馬ごとの補正後の確率(3 着内率)の差し替え。0〜1 の有限値を返す。事前確率(prior)は変えない。 */
   readonly adjustProb?: (horse: RowHorse, row: AllocationRaceRow) => number;
+  /**
+   * 3 着内率から単勝・組合せ・複勝の同時の確率を出すモデルの差し替え(Issue #524)。省略 = 本番と同じ(`PLACKETT_LUCE_MODEL`)。
+   * **順序のないモデル(条件付きベルヌーイ)は、組合せの経路〈単勝の候補を常に作る〉で例外になり、route=invalid になる**(本番の「順序のないモデルは例外」を保つ)。
+   * その行は `replayedBets` が null を返し(計算し直せなかった行)、回収額の集計に入れない。条件付きベルヌーイで比べられるのは複勝だけの経路〈`includeComboOdds=false`〉。
+   */
+  readonly model?: PlaceJointModel;
 }
+
+/** `--override model=<id>` で選べるモデル(id は `PlaceJointModel.id`)。新しいモデルを試すときはここに足す。 */
+export const REPLAY_MODELS: Readonly<Record<string, PlaceJointModel>> = {
+  [PLACKETT_LUCE_MODEL.id]: PLACKETT_LUCE_MODEL,
+  [CONDITIONAL_BERNOULLI_MODEL.id]: CONDITIONAL_BERNOULLI_MODEL,
+};
 
 const NUMBER_OVERRIDES = ["bankroll", "perRaceCap", "kellyFraction", "evThreshold", "minHitProb"] as const;
 
@@ -337,6 +358,7 @@ export function replayRace(row: AllocationRaceRow, overrides: ReplayOverrides = 
       minHitProb: overrides.minHitProb ?? s.min_hit_prob ?? 0,
     },
     evConfig: { threshold: overrides.evThreshold ?? s.ev_threshold },
+    ...(overrides.model === undefined ? {} : { model: overrides.model }),
   });
   return { kind: "replayed", result };
 }
@@ -631,10 +653,16 @@ export function storedBets(row: AllocationRaceRow): readonly AllocationRowBet[] 
   return row.allocation?.bets ?? [];
 }
 
-/** 計算し直した提案の買い目。計算し直せない行(配分の記録なし・オッズなし)は null。 */
+/**
+ * 計算し直した提案の買い目。計算し直せない行(配分の記録なし・オッズなし)は null。
+ * **モデルを上書きしたとき(Issue #524)だけ、route=invalid になった行も null**(そのモデルでは計算し直せなかった行。例: 順序のないモデルは組合せの経路で例外になる)。
+ * 分析時から invalid だった行(例: 枠連を含めて枠番が無い)も、モデルを上書きしたときはこの null に入る(原因がモデル以外のこともある)。
+ * 回収額に「買い目なし」として混ぜると、計算に失敗した行が「買わなかった」ように見えるため。上書きなし・ほかの上書きだけのときの invalid は、これまでどおり買い目なし(空配列)。
+ */
 export function replayedBets(row: AllocationRaceRow, overrides: ReplayOverrides = {}): AllocationRowBet[] | null {
   const outcome = replayRace(row, overrides);
   if (outcome.kind !== "replayed") return null;
+  if (overrides.model !== undefined && outcome.result.allocation.meta.route === "invalid") return null;
   return outcome.result.allocation.bets.map((b) => ({ bet_type: b.betType, combo_key: b.comboKey, stake: b.stake, odds: b.odds, ev: b.ev }));
 }
 
@@ -687,6 +715,11 @@ export function parseOverrides(pairs: readonly string[]): ReplayOverrides {
       out[key as (typeof NUMBER_OVERRIDES)[number]] = parseNumber(key, value);
     } else if (key === "includeComboOdds") {
       out.includeComboOdds = parseBoolean(key, value);
+    } else if (key === "model") {
+      if (!Object.hasOwn(REPLAY_MODELS, value)) {
+        throw new Error(`--override model: 知らないモデルです(${JSON.stringify(value)}。${Object.keys(REPLAY_MODELS).join("・")} のどれか)`);
+      }
+      out.model = REPLAY_MODELS[value]!;
     } else if (key.startsWith("include.")) {
       const kind = key.slice("include.".length);
       if (!(REPLAY_INCLUDE_KINDS as readonly string[]).includes(kind)) {
@@ -694,7 +727,7 @@ export function parseOverrides(pairs: readonly string[]): ReplayOverrides {
       }
       include[kind as ReplayIncludeKind] = parseBoolean(key, value);
     } else {
-      throw new Error(`--override のキーが知らないものです(${key}。${[...NUMBER_OVERRIDES, "includeComboOdds", "include.<券種>"].join("・")})`);
+      throw new Error(`--override のキーが知らないものです(${key}。${[...NUMBER_OVERRIDES, "includeComboOdds", "include.<券種>", "model"].join("・")})`);
     }
   }
   if (Object.keys(include).length > 0) out.include = include;
@@ -708,6 +741,7 @@ export function describeOverrides(overrides: ReplayOverrides): string {
   for (const key of NUMBER_OVERRIDES) if (overrides[key] !== undefined) parts.push(`${key}=${overrides[key]}`);
   if (overrides.includeComboOdds !== undefined) parts.push(`includeComboOdds=${overrides.includeComboOdds}`);
   for (const kind of REPLAY_INCLUDE_KINDS) if (overrides.include?.[kind] !== undefined) parts.push(`include.${kind}=${overrides.include[kind]}`);
+  if (overrides.model !== undefined) parts.push(`model=${overrides.model.id}`);
   if (overrides.adjustProb !== undefined) parts.push("adjustProb");
   return parts.join(", ");
 }
@@ -787,10 +821,23 @@ export function runCli(argv: readonly string[], load: (file: string) => Allocati
       `invalid のうち計算し直しが例外を投げた行(route=invalid の記録との食い違いではない): 全体 ${report.total.invalidThrown}・中央 ${report.byVenueKind.central.invalidThrown}・地方 ${report.byVenueKind.nar.invalidThrown}`,
     );
   }
+  // モデルを上書きしたとき(Issue #524)は、そのモデルで route=invalid になった行を、計算し直せなかった行として回収額の集計から外す(行数は必ず出す)。
+  // 分析時から invalid だった行(例: 枠連を含めて枠番が無い)も、モデルを上書きしたときはこの数に入る(原因がモデル以外のこともある)。
+  // 計算は行ごとに 1 回で済ませる(配分の計算は重いので、判定と買い目の取得で二重にしない)。
+  let counted = target;
+  let betsOf: (row: AllocationRaceRow) => readonly AllocationRowBet[] = (r) => replayedBets(r, overrides) ?? [];
+  if (overrides.model !== undefined) {
+    const bets = new Map(target.map((r) => [r, replayedBets(r, overrides)] as const));
+    counted = target.filter((r) => bets.get(r) !== null);
+    betsOf = (r) => bets.get(r) ?? [];
+    const dropped = target.filter((r) => bets.get(r) === null);
+    const venue = (kind: AllocationRaceRow["venue_kind"]): number => dropped.filter((r) => r.venue_kind === kind).length;
+    lines.push(`モデルの上書きで route=invalid になり計算し直せなかった行(回収額の集計に入れない): 全体 ${dropped.length}・中央 ${venue("central")}・地方 ${venue("nar")}`);
+  }
   lines.push("", "## 回収額(円。検証画面と同じ判定。判定不能は賭け金・払戻に入れない)");
   lines.push(...formatPayoutReport(`分析時の提案(全 ${rows.length} 行)`, payoutReport(rows, storedBets)));
-  lines.push(...formatPayoutReport(`分析時の提案(計算し直せた ${target.length} 行)`, payoutReport(target, storedBets)));
-  lines.push(...formatPayoutReport(`計算し直した提案(計算し直せた ${target.length} 行${overridden ? "・設定の上書きあり" : ""})`, payoutReport(target, (r) => replayedBets(r, overrides) ?? [])));
+  lines.push(...formatPayoutReport(`分析時の提案(計算し直せた ${counted.length} 行)`, payoutReport(counted, storedBets)));
+  lines.push(...formatPayoutReport(`計算し直した提案(計算し直せた ${counted.length} 行${overridden ? "・設定の上書きあり" : ""})`, payoutReport(counted, betsOf)));
   return { output: lines.join("\n"), exitCode: 0 };
 }
 

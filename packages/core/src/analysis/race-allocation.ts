@@ -19,6 +19,7 @@ import {
   type AllocationHorse,
   type BetAllocationResult,
 } from "../ev/bet-allocation.js";
+import type { PlaceJointModel } from "../ev/place-joint-model.js";
 
 import type { AnalysisRow, OddsStatus } from "./analysis-types.js";
 
@@ -113,10 +114,14 @@ export interface RaceAllocationInput {
  * placeOddsMin/ev/isPositive/umabanはそのまま。core側の見送り判定(候補0頭・妙味なし等)は
  * "computed" の中で BetAllocationResult.isSkip/skipReason として表現される
  * (buildRaceAllocation自体はここまでの4分類だけを判定し、以降はcoreに委ねる)。
+ *
+ * `model`(Issue #524)は同時分布のモデル。省略すると `allocateBets` の既定(`PLACKETT_LUCE_MODEL`)になる(本番の呼び出しは渡さない)。
+ * 計算し直しの試算で、別のモデルでの配分を見るための口。
  */
 export function buildRaceAllocation(
   race: RaceAllocationInput,
   settings: BetAllocationSettings,
+  model?: PlaceJointModel,
 ): RaceAllocationView {
   if (isBetAllocationUnset(settings)) {
     return { kind: "unset" };
@@ -142,6 +147,6 @@ export function buildRaceAllocation(
     betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
     greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
     minHitProb: settings.minHitProb ?? 0,
-  });
+  }, model);
   return { kind: "computed", result };
 }

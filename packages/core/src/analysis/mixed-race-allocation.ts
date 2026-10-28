@@ -20,6 +20,7 @@ import {
   type SkipReasonCode,
 } from "../ev/combo-bet-allocation.js";
 import type { BetAllocationResult } from "../ev/bet-allocation.js";
+import type { PlaceJointModel } from "../ev/place-joint-model.js";
 import type { AnalysisMissedBetRecord } from "../ev/analysis-store-types.js";
 
 import {
@@ -444,13 +445,14 @@ function placeBelowFloorOutcome(
   race: MixedCandidateBuildInput,
   settings: MixedAllocationSettings,
   result: BetAllocationResult,
+  model: PlaceJointModel | undefined,
 ): BelowFloorOutcome {
   const count = result.belowFloor.length;
   if (count === 0 || settings.recordMissed !== true) {
     return { count, missed: null };
   }
   try {
-    const counterfactual = buildRaceAllocation(race, { ...settings, minHitProb: 0 });
+    const counterfactual = buildRaceAllocation(race, { ...settings, minHitProb: 0 }, model);
     if (counterfactual.kind !== "computed") {
       return { count, missed: null };
     }
@@ -487,13 +489,14 @@ function mixedBelowFloorOutcome(
   config: GeneralBetAllocationConfig,
   settings: MixedAllocationSettings,
   result: GeneralBetAllocationResult,
+  model: PlaceJointModel | undefined,
 ): BelowFloorOutcome {
   const count = result.belowFloor.length;
   if (count === 0 || settings.recordMissed !== true) {
     return { count, missed: null };
   }
   try {
-    const counterfactual = allocateGeneralBets(horses, topFinishCount, candidates, { ...config, minHitProb: 0 });
+    const counterfactual = allocateGeneralBets(horses, topFinishCount, candidates, { ...config, minHitProb: 0 }, model);
     const stakeByKey = new Map(
       counterfactual.allocations.map((a) => [`${a.betType}:${buildAllocationBetComboKey(a.betType, a.umabans)}`, a.stake]),
     );
@@ -533,8 +536,9 @@ function buildPlaceOnlyFallbackOutcome(
   fallbackReason: PlaceOnlyFallbackReason,
   comboOdds: AllocationOutcomeCodes["comboOdds"],
   candidateDiagnostics?: MixedCandidateDiagnostics,
+  model?: PlaceJointModel,
 ): MixedRaceAllocationOutcome {
-  const view = buildRaceAllocation(race, settings);
+  const view = buildRaceAllocation(race, settings, model);
   // 候補の診断(Issue #296)。候補ビルドを走らせた経路(条件③)だけが渡す。無いときはキー自体を持たせない。
   const diagnosticsPart = candidateDiagnostics === undefined ? {} : { candidateDiagnostics };
   if (view.kind === "unavailable") {
@@ -554,7 +558,7 @@ function buildPlaceOnlyFallbackOutcome(
         skipReasonCode: view.result.isSkip ? view.result.skipReasonCode : null,
         comboOdds,
       },
-      belowFloor: placeBelowFloorOutcome(race, settings, view.result),
+      belowFloor: placeBelowFloorOutcome(race, settings, view.result, model),
       ...diagnosticsPart,
     };
   }
@@ -592,10 +596,13 @@ function buildPlaceOnlyFallbackOutcome(
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
  * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の7項目)
+ * @param model 同時分布のモデル(Issue #524。省略 = 各配分の関数の既定の `PLACKETT_LUCE_MODEL`。本番の呼び出しは渡さない)。
+ *   複勝だけの経路・候補の構築・混在の配分・下限で外れた買い目の反事実の配分のすべてに渡る(本体と反事実でモデルが食い違わないように)
  */
 function buildMixedRaceAllocationCore(
   race: MixedCandidateBuildInput,
   settings: MixedAllocationSettings,
+  model: PlaceJointModel | undefined,
 ): MixedRaceAllocationOutcome {
   // 1. unset(レース全体のゲート。既存どおり)。
   if (isBetAllocationUnset(settings)) {
@@ -609,15 +616,15 @@ function buildMixedRaceAllocationCore(
 
   // 4. D-2条件①②(候補構築前に判定できる部分。既存の短絡順序=①→②を保つ)。
   if (isComboOddsNotRequested(settings)) {
-    return buildPlaceOnlyFallbackOutcome(race, settings, "combo-odds-not-requested", null);
+    return buildPlaceOnlyFallbackOutcome(race, settings, "combo-odds-not-requested", null, undefined, model);
   }
   if (isComboBetTypesOff(settings)) {
-    return buildPlaceOnlyFallbackOutcome(race, settings, "combo-bet-types-off", null);
+    return buildPlaceOnlyFallbackOutcome(race, settings, "combo-bet-types-off", null, undefined, model);
   }
 
   const betTypes = resolveMixedBetTypes(settings);
   const evConfig: EvConfig = { threshold: settings.evThreshold };
-  const mixed = buildMixedCandidates(race, { betTypes, evConfig });
+  const mixed = buildMixedCandidates(race, { betTypes, evConfig, ...(model === undefined ? {} : { model }) });
   const comboOdds = {
     wide: comboOddsAvailabilityFromDiagnostics(mixed.diagnostics.wide),
     trio: comboOddsAvailabilityFromDiagnostics(mixed.diagnostics.trio),
@@ -637,7 +644,7 @@ function buildMixedRaceAllocationCore(
       c.betType === "bracketQuinella",
   ).length;
   if (comboCandidateCount === 0) {
-    return buildPlaceOnlyFallbackOutcome(race, settings, "no-combo-candidates", comboOdds, mixed.diagnostics);
+    return buildPlaceOnlyFallbackOutcome(race, settings, "no-combo-candidates", comboOdds, mixed.diagnostics, model);
   }
 
   // 5. 混在配分を実際に計算する。
@@ -663,8 +670,8 @@ function buildMixedRaceAllocationCore(
   };
 
   try {
-    const result = allocateGeneralBets(horses, mixed.topFinishCount, mixed.candidates, config);
-    const belowFloor = mixedBelowFloorOutcome(horses, mixed.topFinishCount, mixed.candidates, config, settings, result);
+    const result = allocateGeneralBets(horses, mixed.topFinishCount, mixed.candidates, config, model);
+    const belowFloor = mixedBelowFloorOutcome(horses, mixed.topFinishCount, mixed.candidates, config, settings, result, model);
     return {
       view: { kind: "mixed", result, topFinishCount: mixed.topFinishCount, diagnostics: mixed.diagnostics },
       outcome: {
@@ -721,13 +728,16 @@ function buildMixedRaceAllocationCore(
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
  * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の7項目)
+ * @param model 同時分布のモデル(Issue #524。`buildMixedRaceAllocationCore` の同名の引数を参照)。
+ *   順序のないモデル(`CONDITIONAL_BERNOULLI_MODEL`)を渡すと、組合せの経路では単勝の候補の構築で例外になり、外側 catch で `route=invalid` になる
  */
 export function buildMixedRaceAllocationWithOutcome(
   race: MixedCandidateBuildInput,
   settings: MixedAllocationSettings,
+  model?: PlaceJointModel,
 ): MixedRaceAllocationOutcome {
   try {
-    return buildMixedRaceAllocationCore(race, settings);
+    return buildMixedRaceAllocationCore(race, settings, model);
   } catch (e) {
     // Issue #80: buildMixedRaceAllocationCore内の内側catchでは覆えない2箇所
     // (buildMixedCandidates自体の例外・D-2フォールバックのallocateBetsの例外)を吸収する。
