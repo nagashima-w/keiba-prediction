@@ -124,6 +124,15 @@ describe("parseShutuba(新しい形の見出し・柵の境界)", () => {
     expect(race.fence).toBeNull();
   });
 
+  it("柵の断片は「/」で止まること(「/」の後ろにある独立した大文字 1 文字を柵と取らない)", () => {
+    // 新しい形の柵は距離の直後から次の「/」までの断片。「/」の後ろの G を含めると、柵が G と誤って読まれる。
+    const { race } = parseShutuba(
+      buildPage('13:10発走 / <span> 芝1600m</span> 左 / G / <span class="Item03"> 良</span>'),
+    );
+    expect(race.courseType).toBe("芝");
+    expect(race.fence).toBeNull();
+  });
+
   it("旧い形(括弧つき)が新しい形の読み方より優先されること(括弧の中の C を取り、後ろの A は取らない)", () => {
     const { race } = parseShutuba(buildPage("15:45発走 / 芝1200m (右 外&nbsp;C) A / 天候:晴 / 馬場:良"));
     expect(race.fence).toBe("C");
