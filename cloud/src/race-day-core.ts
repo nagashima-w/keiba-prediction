@@ -485,7 +485,7 @@ export type StepOutcome =
 
 /** 通知の1件の状態(状態から読める。失敗の分類だけで、URL・メッセージ・本文は持たない。`getNotifications`)。 */
 export interface NotificationRecord {
-  /** `race:<raceId>` か `summary`。 */
+  /** `race:<raceId>`・`summary`・`plan-failure`・`header-unread`。 */
   readonly key: string;
   readonly kind: NotifyKind;
   readonly state: NotifyState;
@@ -2202,6 +2202,8 @@ export class RaceDayCore {
             scrapeWarnings = race.meta.warnings;
             // 開催日の記録(Issue #519)。LLM を使うかどうかに関係なく、中央のレースを分析するたびに書く(失敗は握って警告にし、分析は止めない)。
             await this.recordKaisaiDay(task.race_id, kaisaiDate, race);
+            // 出馬表の見出しから馬場状態か芝の柵を読めなかったレースの記録(Issue #522。Discord に 1 日 1 回知らせる材料。失敗は握る)。
+            this.notifyStage.recordHeaderRead(task, race.race);
             return race;
           },
           analyze: cloudAnalyze === null ? null : cloudAnalyze.analyze,

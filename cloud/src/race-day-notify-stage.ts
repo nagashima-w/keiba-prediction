@@ -14,8 +14,7 @@
  */
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
-import type { ShutubaRaceInfo } from "../../packages/core/src/scraper/types";
-import { findUnreadHeaderItems, summarizeHeaderUnread } from "./header-unread";
+import { findUnreadHeaderItems, parseHeaderItems, summarizeHeaderUnread, type HeaderRead } from "./header-unread";
 import { buildAnalysisLink } from "./notify-link";
 import {
   buildAnalysisNotificationEmbed,
@@ -177,6 +176,61 @@ export class NotifyStage {
       this.onWarn(`Discord への通知に失敗しました(${item.key}。分類: ${errorClass}。再送しません)`);
     }
     return outcomeOf_(errorClass === null ? "ok" : "failed");
+  }
+
+  /**
+   * 出馬表の見出しを読めなかったレースの通知の embed(Issue #522)。**送る時点の表から作る**(件数は、最初の記録から待ち時間のあいだに増えた分を含む。例は最初に見つかったレース)。
+   * 開催日が未確定・記録が無いときは投げる(呼び出し側 `runStep` が、送らず failed〈分類 build〉にする)。embed の組み立ての失敗は握り、最小の通知(画面で確認)に代える。
+   */
+  private buildHeaderUnread(): CloudEmbed {
+    const kaisaiDate = this.metaGet("kaisai_date");
+    if (kaisaiDate === null) {
+      throw new Error("開催日が未確定です");
+    }
+    const rows = this.store.headerUnreadRows();
+    const first = rows[0];
+    if (first === undefined) {
+      throw new Error("見出しの記録がありません");
+    }
+    try {
+      const plan = this.planRow(first.race_id);
+      const label: RaceLabel = { raceId: first.race_id, venueName: plan?.venue_name ?? null, raceNumber: plan?.race_number ?? null, raceName: plan?.race_name ?? null, startTime: plan?.start_time ?? null, grade: plan?.grade ?? null };
+      return buildHeaderUnreadEmbed({ kaisaiDate, summary: summarizeHeaderUnread(rows), example: { label, items: parseHeaderItems(first.missing) } });
+    } catch (error) {
+      this.onWarn(`見出しを読めなかったレースの通知の材料を組み立てられませんでした(最小の通知に代えます): ${errorMessage(error)}`);
+      return buildHeaderUnreadMinimalEmbed(kaisaiDate);
+    }
+  }
+
+  /** 見出しの記録の最初の時刻(計画の入力)。記録が無ければ null。 */
+  private headerUnreadFirstAt(): { readonly firstAtMs: number } | null {
+    const firstAtMs = this.store.headerUnreadFirstAt();
+    return firstAtMs === null ? null : { firstAtMs };
+  }
+
+  /**
+   * 発走前の計算ステップで、出馬表の見出しから馬場状態か芝の柵を読めなかったレースを記録する(Issue #522。同期。`scrape` コールバックの中で、`recordKaisaiDay` の直後に呼ぶ)。
+   * 記録するのは、通知が有効(`notifier` あり)・自動の pre_race(手動を前夜に動かすと、馬場の未発表で偽の警告になる)・中央のレースだけ。事前分析(morning)と地方は呼ばれない・数えない。
+   * **投げない**: 失敗は固定の警告だけにして戻る(例外の文面は出さない。分析は止めない)。計算の再試行で何度呼ばれても、レースごとに 1 行(最初の値と時刻を保つ)。
+   * 見つかったレースごとに、ログ(`onWarn`)にも 1 行出す。
+   */
+  recordHeaderRead(task: NotifyMaterialTask, header: HeaderRead): void {
+    if (this.notifier === undefined || !this.isAutoTask(task)) {
+      return;
+    }
+    try {
+      if (venueKindOfRaceId(parseRaceId(task.race_id)) !== "central") {
+        return;
+      }
+      const items = findUnreadHeaderItems(header);
+      if (items.length === 0) {
+        return;
+      }
+      this.onWarn(`発走前の分析(${task.race_id}): 出馬表の見出しから読めない項目があります(${items.join("・")})`);
+      this.store.recordHeaderUnread(task.race_id, items, this.now());
+    } catch {
+      this.onWarn(`発走前の分析(${task.race_id}): 出馬表の見出しの記録を書けなかったため、続けます`);
+    }
   }
 
   /**
