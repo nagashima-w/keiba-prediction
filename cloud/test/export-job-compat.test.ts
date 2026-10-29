@@ -258,13 +258,13 @@ describe("配分用: 古いコードが書いた作成中の job(chunkBytes あ�
 });
 
 describe("kv のキーと値の形: 新しいコードが書くものは、古いコードの形に足すだけ", () => {
-  it("統計モデル用: 回している間の kv のキーは job・file・runs・plan:i・chunk:i だけ。job は古いキーに chunkBytes を足したもの。完成後に残るのは file と runs だけ", async () => {
+  it("統計モデル用: 回している間の kv のキーは job・file・runs・plan:i・chunk:i と、引き当て用の表の lookups(Issue #526 段階 1b。新しいキー 1 つ)だけ。job は古いキーに chunkBytes を足したもの(lookups は job に混ぜない)。完成後に残るのは file と runs だけ(lookups も消える)", async () => {
     const w = priorWorld(5);
     const core = w.core();
     await core.request("download");
     await w.d.drain(core, 1 + 3);
     const keys = [...w.kv.map.keys()].sort();
-    expect(keys).toEqual(["chunk:0", "chunk:1", "chunk:2", "job", "plan:0", "plan:1", "plan:2", "runs"]);
+    expect(keys).toEqual(["chunk:0", "chunk:1", "chunk:2", "job", "lookups", "plan:0", "plan:1", "plan:2", "runs"]);
     expect(Object.keys(w.kv.get<object>("job")!).sort()).toEqual([...OLD_PRIOR_JOB_KEYS, "chunkBytes"].sort());
     await w.d.drain(core);
     expect([...w.kv.map.keys()].sort()).toEqual(["file", "runs"]);

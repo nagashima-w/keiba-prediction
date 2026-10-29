@@ -1,6 +1,6 @@
 import { toSnapshotColumns, type CandidateRow } from "../src/prior-export-format";
 import { toAllocationSnapshot } from "../src/allocation-export-format";
-import type { DetailOutcome, RaceDataBatch } from "../src/prior-export-core";
+import type { DetailOutcome, PriorLookups, RaceDataBatch } from "../src/prior-export-core";
 import type { AllocationDetailOutcome, AllocationRaceDataBatch } from "../src/allocation-export-core";
 
 /**
@@ -68,12 +68,17 @@ export class PriorFakeStore {
   horsesPerRace = 3;
   readonly puts: PutRecord[] = [];
   readonly putFileStream = recordPut(this.puts);
+  /** 騎手名 → 騎手 ID の対応(Issue #526 段階 1b)。既定は空(埋めない)。 */
+  lookups: PriorLookups = { jockeyIds: [] };
 
   async readUsage() {
     return this.usage;
   }
   async readCandidates() {
     return { rows: this.candidates, rowsRead: this.candidates.length * 2 };
+  }
+  async readLookups() {
+    return { lookups: this.lookups, rowsRead: 0 };
   }
   async readRaceData(analysisIds: readonly number[], raceIds: readonly string[]): Promise<RaceDataBatch> {
     const horses = analysisIds.flatMap((analysisId) =>
