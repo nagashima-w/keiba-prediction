@@ -177,6 +177,10 @@ export interface AnalysisAllocationSettings {
   readonly includeBracketQuinellaInAllocation: boolean;
   /** 的中確率の下限(設定の `minHitProb`。Issue #470。0〜1、0は下限なし)。 */
   readonly minHitProb: number;
+  /** 単勝の点数の上限(設定の `maxWinBetsPerRace`。Issue #533。整数、0は上限なし)。 */
+  readonly maxWinBets: number;
+  /** 複勝の点数の上限(設定の `maxPlaceBetsPerRace`。Issue #533。整数、0は上限なし)。 */
+  readonly maxPlaceBets: number;
 }
 
 /**
@@ -230,6 +234,8 @@ function settingsColumnsOf(
   | "includeTrifecta"
   | "includeBracketQuinella"
   | "minHitProb"
+  | "maxWinBets"
+  | "maxPlaceBets"
 > {
   return {
     bankroll: settings.bankroll,
@@ -244,6 +250,8 @@ function settingsColumnsOf(
     includeTrifecta: settings.includeTrifectaInAllocation,
     includeBracketQuinella: settings.includeBracketQuinellaInAllocation,
     minHitProb: settings.minHitProb,
+    maxWinBets: settings.maxWinBets,
+    maxPlaceBets: settings.maxPlaceBets,
   };
 }
 

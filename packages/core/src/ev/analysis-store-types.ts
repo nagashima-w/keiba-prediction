@@ -209,6 +209,13 @@ export interface AnalysisAllocationMetaRecord {
    */
   readonly minHitProb?: number;
   /**
+   * 使った単勝の点数の上限(Issue #533。0=上限なし)。D1 の `analysis_allocation_meta.max_win_bets`(NULL=記録なし=旧い行=上限なし)。
+   * `minHitProb` と同じく共有の INSERT には含めない(D1 専用の列。cloud の保存が別の UPDATE で書く)。省略可: 旧い呼び出し・テストの手組みの記録は省略する。
+   */
+  readonly maxWinBets?: number;
+  /** 使った複勝の点数の上限(Issue #533。0=上限なし)。D1 の `max_place_bets`。扱いは `maxWinBets` と同じ。 */
+  readonly maxPlaceBets?: number;
+  /**
    * 的中確率の下限で外れた EV プラスの買い目の件数(Issue #470)。D1 の `below_floor_count`。
    * 配分の計算に到達しなかった経路(unset・yoso・unavailable・invalid)は null(判定していない)。0=外れた候補なし。
    */

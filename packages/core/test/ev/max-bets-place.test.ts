@@ -52,11 +52,12 @@ describe("allocateBets: 複勝の点数の上限 maxBets(Issue #533)", () => {
       expect(betCountOf(limited)).toBeLessThanOrEqual(max);
       expect(positiveFractionCountOf(limited)).toBe(max);
       expect(betCountOf(limited)).toBeGreaterThanOrEqual(1);
-      // 後から削るのではなく選び直す: 残った買い目の連続配分は、上限なしのときの同じ買い目より大きい(予算を回している)。
+      // 後から削るのではなく選び直す: 残った買い目の連続配分は、上限なしのときの同じ買い目以上で、2点以上残すときは厳密に大きい(予算を回している)。
       const kept = limited.allocations.filter((a) => a.continuousFraction > 0);
       const sumLimited = kept.reduce((acc, a) => acc + a.continuousFraction, 0);
       const sumFreeOfKept = kept.reduce((acc, a) => acc + free.allocations.find((f) => f.umaban === a.umaban)!.continuousFraction, 0);
-      expect(sumLimited).toBeGreaterThan(sumFreeOfKept);
+      expect(sumLimited).toBeGreaterThanOrEqual(sumFreeOfKept);
+      if (max >= 2) expect(sumLimited).toBeGreaterThan(sumFreeOfKept);
       // 上限を超えた分は外れている(上限なしでは買い目が増えていた)
       expect(betCountOf(free)).toBeGreaterThan(betCountOf(limited));
     });
@@ -84,9 +85,11 @@ describe("allocateBets: 複勝の点数の上限 maxBets(Issue #533)", () => {
   });
 
   it("丸めで新しい買い目は生まれない: 1レース上限が小さく最低額ロジックが働く場合も、買い目は上限以内", () => {
-    const tiny = allocateBets(HORSES, 3, config({ bankroll: 3_000, perRaceCap: 300, maxBets: 2 }));
-    expect(betCountOf(tiny)).toBeLessThanOrEqual(2);
-    expect(betCountOf(tiny)).toBeGreaterThanOrEqual(1);
+    const tiny = allocateBets(HORSES, 3, config({ bankroll: 400, perRaceCap: 300, maxBets: 2 }));
+    // 前提: 丸めで全部が0円になり、最低額ロジックが1点だけに1単位を与える状況である
+    expect(tiny.minimumStakeApplied).toBe(true);
+    expect(betCountOf(tiny)).toBe(1);
+    expect(positiveFractionCountOf(tiny)).toBe(2);
   });
 
   it("候補外の馬は0円のまま全頭が含まれる(出力の形は変わらない)", () => {
