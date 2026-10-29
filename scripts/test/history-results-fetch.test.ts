@@ -509,6 +509,8 @@ describe("fetch: 取得の失敗が続いたら打ち切る(アクセス制限�
     expect(stats.requests).toBe(1 + 20);
     expect(down.calls).toHaveLength(21);
     expect(lines.join("\n")).toMatch(/連続 20 件.*打ち切/);
+    // Issue #535-E: 恒久的に失敗するページが続いて先へ進めないときの出口(連続失敗の上限を上げる)を、ログで案内する
+    expect(lines.join("\n")).toContain("連続失敗の上限(--max-consecutive-failures)を上げると、先へ進めることがあります");
     expect(lines.join("\n")).toContain("HTTPエラー(503)");
     // 復旧後の再実行は、カレンダーを使い回して続きから(取れた一覧はまだ無いので 1 日目から)
     const up = fakeSite({

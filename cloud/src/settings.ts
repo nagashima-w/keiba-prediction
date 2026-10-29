@@ -97,7 +97,7 @@ export interface CloudSettings extends Readonly<Record<ScoringWeightField, numbe
   readonly minHitProb: number;
   /**
    * 単勝の点数の上限(1レースあたり。整数 0〜18。Issue #533)。賭け金の付く単勝の買い目がこの点数を超えないようにする(買い目を後から削るのではなく、上限の中で残す点と予算の回し方を選び直す)。
-   * 0 は上限なし。既定 2(ユーザー決定 2026-10-29。単勝を3点以上買ったレースは賭け金 9,400 円に対し払戻 1,140 円だった)。項目の無い旧い行も 2 で読む。
+   * 0 は上限なし。既定 2(ユーザー決定 2026-10-29。背景と測定は Issue #533)。項目の無い旧い行も 2 で読む。
    * 単勝を扱うのは組合せオッズを取得する設定(`includeComboOdds`)の経路だけで、そうでない経路には単勝がないので効かない。
    */
   readonly maxWinBetsPerRace: number;
