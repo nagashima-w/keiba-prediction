@@ -13,12 +13,13 @@ import {
   PRIOR_ROW_KEYS_V2_ADDED,
   PRIOR_ROW_KEYS_V3_ADDED,
   PRIOR_ROW_KEYS_V4_ADDED,
+  PRIOR_ROW_KEYS_V5_ADDED,
   toContributions,
   toSnapshotColumns,
   type ChosenAnalysis,
   type PriorDatasetRow,
 } from "../../cloud/src/prior-export-format.js";
-import { groupByRace, guardedOnly, loadPriorDataset, parsePriorDataset, summarize, v2ColumnCoverage, v3ColumnCoverage, v4ColumnCoverage } from "../prior-dataset.js";
+import { groupByRace, guardedOnly, jockeyIdSourceCounts, loadPriorDataset, parsePriorDataset, summarize, v2ColumnCoverage, v3ColumnCoverage, v4ColumnCoverage, v5ColumnCoverage } from "../prior-dataset.js";
 
 /**
  * Issue #266: 書き出したファイル(NDJSON を gzip。メタ行 + 行)を、開発側で読み込んで型つきの行にするローダ。
@@ -35,14 +36,17 @@ const chosen = (id: number, raceId: string, leak: ChosenAnalysis["leakClass"] = 
   evEstimated: false, promptLookaheadGuarded: leak === "guarded" ? true : null, leakClass: leak,
 });
 
+/** 騎手名 → 騎手 ID の対応が無い(v5 の埋め直しをしない)。 */
+const NO_LOOKUP: ReadonlyMap<string, string> = new Map();
+
 const contributions = new Map([[1, toContributions([{ biasName: "近走着順", applied: true, weight: 0.2, correction: 0.05, sampleCount: 5, targetRate: 0.6, overallRate: 0.33 }])]]);
 const horses = [{ umaban: 1, prior: 0.3, adjustedProb: 0.32, placeOddsMin: 2.1 }, { umaban: 2, prior: 0.2, adjustedProb: 0.19, placeOddsMin: null }];
 const results = [{ umaban: 1, finishPosition: 2, winOdds: 4.5, ninki: 2 }, { umaban: 2, finishPosition: null, winOdds: null, ninki: null }];
 
 function sampleRows(): PriorDatasetRow[] {
   return [
-    ...buildRaceRows(chosen(1, "202606030801"), horses, results, "芝", contributions, null),
-    ...buildRaceRows(chosen(2, "202606030802", "pre_race"), horses, results, null, new Map(), null),
+    ...buildRaceRows(chosen(1, "202606030801"), horses, results, "芝", contributions, null, NO_LOOKUP),
+    ...buildRaceRows(chosen(2, "202606030802", "pre_race"), horses, results, null, new Map(), null, NO_LOOKUP),
   ];
 }
 
@@ -150,12 +154,17 @@ const SNAPSHOT = {
 /** v2 の列が入った行(レース 1 はスナップショットあり、レース 2 はなし)。 */
 function v2Rows(): PriorDatasetRow[] {
   return [
-    ...buildRaceRows(chosen(1, "202606030801"), horses, results, "芝", contributions, toSnapshotColumns(SNAPSHOT)),
-    ...buildRaceRows(chosen(2, "202606030802"), horses, results, "芝", new Map(), null),
+    ...buildRaceRows(chosen(1, "202606030801"), horses, results, "芝", contributions, toSnapshotColumns(SNAPSHOT), NO_LOOKUP),
+    ...buildRaceRows(chosen(2, "202606030802"), horses, results, "芝", new Map(), null, NO_LOOKUP),
   ];
 }
 
 const gz = (meta: object, rows: readonly object[]): Uint8Array => gzipSync(Buffer.from(`${[{ _meta: meta }, ...rows].map((x) => JSON.stringify(x)).join("\n")}\n`));
+
+/** v4 の行: v1 の 19 列 + v2 の 11 列 + v3 の 2 列 + v4 の 2 列(v5 の列を持たない)。 */
+function toV4(row: PriorDatasetRow): Record<string, unknown> {
+  return Object.fromEntries([...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED, ...PRIOR_ROW_KEYS_V4_ADDED].map((k) => [k, (row as unknown as Record<string, unknown>)[k]]));
+}
 
 /** v3 の行: v1 の 19 列 + v2 の 11 列 + v3 の 2 列(v4 の列を持たない)。 */
 function toV3(row: PriorDatasetRow): Record<string, unknown> {
@@ -178,13 +187,14 @@ describe("parsePriorDataset: 形式 v2(v3・v4 の列を持たない 30 列の�
     expect(rows).toHaveLength(4); // 前提: 2 レース × 2 頭
     const loaded = parsePriorDataset(gz({ format: 2, generatedAt: "x", rows: rows.length, races: 2, missingDetail: 0 }, rows.map(toV2)));
     expect(loaded.meta.format).toBe(2);
-    expect(loaded.rows).toEqual(JSON.parse(JSON.stringify(rows.map((r) => ({ ...toV2(r), weight_type: null, fillies_only: null, jockey_name: null, jockey_id: null })))));
+    expect(loaded.rows).toEqual(JSON.parse(JSON.stringify(rows.map((r) => ({ ...toV2(r), weight_type: null, fillies_only: null, jockey_name: null, jockey_id: null, jockey_id_source: null })))));
     expect(loaded.rows[0]).toMatchObject({ race_name: "テストS", grade: "G3", distance: 1600, track_condition: "良", wakuban: 1, sex: "牡", age: 3, body_weight: 480, kinryo: 56, oikiri_rank: "A", oikiri_critic: "動き良化" });
     expect(loaded.rows[1]).toMatchObject({ sex: "牝", body_weight: null, oikiri_critic: null });
     for (const r of loaded.rows.slice(2)) expect(PRIOR_ROW_KEYS_V2_ADDED.map((k) => r[k])).toEqual(Array(11).fill(null));
     for (const r of loaded.rows) {
       expect(PRIOR_ROW_KEYS_V3_ADDED.map((k) => r[k])).toEqual([null, null]);
       expect(PRIOR_ROW_KEYS_V4_ADDED.map((k) => r[k])).toEqual([null, null]);
+      expect(PRIOR_ROW_KEYS_V5_ADDED.map((k) => r[k])).toEqual([null]);
       expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
     }
     expect(rows[0]!.jockey_name).toBe("騎手ア"); // 前提: 書き出した側の v4 の列は値を持っている(読み側が補った null との差が出る)
@@ -223,6 +233,7 @@ describe("parsePriorDataset: 形式 v1 も読める(v2 の列は null に補う)
       expect(PRIOR_ROW_KEYS_V2_ADDED.map((k) => r[k])).toEqual(Array(11).fill(null));
       expect(PRIOR_ROW_KEYS_V3_ADDED.map((k) => r[k])).toEqual([null, null]);
       expect(PRIOR_ROW_KEYS_V4_ADDED.map((k) => r[k])).toEqual([null, null]);
+      expect(PRIOR_ROW_KEYS_V5_ADDED.map((k) => r[k])).toEqual([null]);
       expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
     }
     expect(loaded.rows[0]!.contributions).not.toBeNull(); // 前提: v1 の列が実際に値を持っている(null 同士の一致ではない)
@@ -239,8 +250,8 @@ describe("parsePriorDataset: 形式 v1 も読める(v2 の列は null に補う)
     expect(() => parsePriorDataset(gz({ format: 1, rows: 1 }, [row]))).toThrow(/2 行目/);
   });
 
-  it("v1〜v4 以外の版(0・5)は読めない版の例外", () => {
-    for (const format of [0, 5]) {
+  it("v1〜v5 以外の版(0・6)は読めない版の例外", () => {
+    for (const format of [0, 6]) {
       expect(() => parsePriorDataset(gz({ format, rows: 0 }, []))).toThrow(/版/);
     }
   });
@@ -260,8 +271,9 @@ describe("parsePriorDataset: 形式 v3(v4 の列を持たない 32 列のファ�
     const rows = v2Rows();
     const loaded = parsePriorDataset(gz({ format: 3, generatedAt: "x", rows: rows.length, races: 2, missingDetail: 0 }, rows.map(toV3)));
     expect(loaded.meta.format).toBe(3);
-    expect(loaded.rows).toEqual(JSON.parse(JSON.stringify(rows.map((r) => ({ ...toV3(r), jockey_name: null, jockey_id: null })))));
+    expect(loaded.rows).toEqual(JSON.parse(JSON.stringify(rows.map((r) => ({ ...toV3(r), jockey_name: null, jockey_id: null, jockey_id_source: null })))));
     for (const r of loaded.rows) expect(PRIOR_ROW_KEYS_V4_ADDED.map((k) => r[k])).toEqual([null, null]);
+    for (const r of loaded.rows) expect(r.jockey_id_source).toBeNull(); // v5 の列も null(jockey_id が null なので不変条件を保つ)
     for (const r of loaded.rows.slice(0, 2)) expect(r).toMatchObject({ weight_type: "馬齢", fillies_only: true });
     for (const r of loaded.rows.slice(2)) expect(PRIOR_ROW_KEYS_V3_ADDED.map((k) => r[k])).toEqual([null, null]);
     expect(Object.keys(loaded.rows[0]!)).toEqual([...PRIOR_ROW_KEYS]);
@@ -316,16 +328,17 @@ describe("v3ColumnCoverage: v3 の列の非 null の件数", () => {
 // Issue #526(段階 1): 形式 v4(今回の騎手名・騎手 ID の 2 列)。ローダは v1〜v4 のすべてを読む。
 // ---------------------------------------------------------------------------
 
-describe("parsePriorDataset: 形式 v4", () => {
-  it("v4 のファイルを往復で読む。meta.format は 4。jockey_name・jockey_id が値のまま戻り、騎手 ID が無い馬は jockey_id だけ null、スナップショットの無いレースは両列 null", () => {
+describe("parsePriorDataset: 形式 v4(v5 の列を持たない 34 列のファイルも読める)", () => {
+  it("v4 のファイルを往復で読む。meta.format は 4 のまま。v4 の 2 列が値のまま戻り、v5 の jockey_id_source は jockey_id から導く(ID があれば snapshot〈v4 はスナップショットの ID だけ〉、無ければ null)", () => {
     const rows = v2Rows();
-    const loaded = parsePriorDataset(assembleFile({ ...META, rows: rows.length }, [encodeChunk(rows)]));
+    const loaded = parsePriorDataset(gz({ format: 4, generatedAt: "x", rows: rows.length, races: 2, missingDetail: 0 }, rows.map(toV4)));
     expect(loaded.meta.format).toBe(4);
-    expect(loaded.meta.columns).toHaveLength(34);
-    expect(loaded.rows).toEqual(JSON.parse(JSON.stringify(rows)));
-    expect(loaded.rows.map((r) => [r.jockey_name, r.jockey_id])).toEqual([["騎手ア", "01001"], ["騎手イ", null], [null, null], [null, null]]);
-    expect(Object.keys(loaded.rows[0]!)).toEqual([...PRIOR_ROW_KEYS]);
-    expect(Object.keys(loaded.rows[0]!).slice(-2)).toEqual([...PRIOR_ROW_KEYS_V4_ADDED]);
+    expect(loaded.rows.map((r) => [r.jockey_name, r.jockey_id, r.jockey_id_source])).toEqual([["騎手ア", "01001", "snapshot"], ["騎手イ", null, null], [null, null, null], [null, null, null]]);
+    expect(loaded.rows).toEqual(JSON.parse(JSON.stringify(rows.map((r) => ({ ...toV4(r), jockey_id_source: r.jockey_id === null ? null : "snapshot" })))));
+    for (const r of loaded.rows) {
+      expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
+      expect(r.jockey_id === null).toBe(r.jockey_id_source === null); // 不変条件
+    }
   });
 
   it.each([
@@ -334,8 +347,9 @@ describe("parsePriorDataset: 形式 v4", () => {
     ["jockey_id が数(\"01001\" が 1001 になった)", (r: Record<string, unknown>) => { r["jockey_id"] = 1001; }, /型が違います.*jockey_id/],
     ["jockey_name が真偽値", (r: Record<string, unknown>) => { r["jockey_name"] = true; }, /型が違います.*jockey_name/],
     ["調教師名の列が混ざった(知らない列)", (r: Record<string, unknown>) => { r["trainer_name"] = "x"; }, /知らない列.*trainer_name/],
+    ["v5 の列が混ざった(知らない列)", (r: Record<string, unknown>) => { r["jockey_id_source"] = "snapshot"; }, /知らない列.*jockey_id_source/],
   ])("v4 の行が壊れている(%s)と、行番号と列名つきの例外", (_name, mutate, pattern) => {
-    const row = JSON.parse(JSON.stringify(v2Rows()[0])) as Record<string, unknown>;
+    const row = JSON.parse(JSON.stringify(toV4(v2Rows()[0]!))) as Record<string, unknown>;
     expect(row["jockey_id"]).toBe("01001"); // 前提: 壊す前の v4 の行は値を持っている
     mutate(row);
     expect(() => parsePriorDataset(gz({ format: 4, rows: 1 }, [row]))).toThrow(pattern);
@@ -344,12 +358,88 @@ describe("parsePriorDataset: 形式 v4", () => {
 
   it("v4 と名乗るファイルに v3 の行(v4 の列がない)が混ざったら、黙って v3 として読まず例外(デプロイ中のジョブの混在)", () => {
     const rows = v2Rows();
-    expect(() => parsePriorDataset(gz({ format: 4, rows: 2 }, [rows[0]!, toV3(rows[1]!)]))).toThrow(/3 行目: 列が足りません.*jockey_name/);
+    expect(() => parsePriorDataset(gz({ format: 4, rows: 2 }, [toV4(rows[0]!), toV3(rows[1]!)]))).toThrow(/3 行目: 列が足りません.*jockey_name/);
   });
 
   it("v3 と名乗るファイルに v4 の行(v4 の列がある)が混ざったら、知らない列として例外", () => {
     const rows = v2Rows();
-    expect(() => parsePriorDataset(gz({ format: 3, rows: 2 }, [toV3(rows[0]!), rows[1]!]))).toThrow(/3 行目: 知らない列.*jockey_name/);
+    expect(() => parsePriorDataset(gz({ format: 3, rows: 2 }, [toV3(rows[0]!), toV4(rows[1]!)]))).toThrow(/3 行目: 知らない列.*jockey_name/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #526(段階 1b): 形式 v5(jockey_id_source の 1 列。名前から埋めた ID の見分け)。ローダは v1〜v5 のすべてを読む。
+// ---------------------------------------------------------------------------
+
+/** 5 頭の v5 の行: 1 = スナップショットの ID(snapshot)、2 = 名前から埋めた ID(name)、3 = 表に無い名前(null)、4・5 = スナップショットなし。 */
+function v5Rows(): PriorDatasetRow[] {
+  return [
+    ...buildRaceRows(chosen(1, "202606030801"), horses, results, "芝", contributions, toSnapshotColumns(SNAPSHOT), new Map([["騎手イ", "01002"]])),
+    ...buildRaceRows(chosen(2, "202606030802"), horses, results, "芝", new Map(), null, new Map([["騎手イ", "01002"]])),
+  ];
+}
+
+describe("parsePriorDataset: 形式 v5", () => {
+  it("v5 のファイルを往復で読む。meta.format は 5。snapshot・name・null の 3 通りが値のまま戻り、列の順は PRIOR_ROW_KEYS(jockey_id_source は末尾)", () => {
+    const rows = v5Rows();
+    const loaded = parsePriorDataset(assembleFile({ ...META, rows: rows.length }, [encodeChunk(rows)]));
+    expect(loaded.meta.format).toBe(5);
+    expect(loaded.meta.columns).toHaveLength(35);
+    expect(loaded.rows).toEqual(JSON.parse(JSON.stringify(rows)));
+    expect(loaded.rows.map((r) => [r.jockey_name, r.jockey_id, r.jockey_id_source])).toEqual([
+      ["騎手ア", "01001", "snapshot"],
+      ["騎手イ", "01002", "name"],
+      [null, null, null],
+      [null, null, null],
+    ]);
+    expect(Object.keys(loaded.rows[0]!).at(-1)).toBe("jockey_id_source");
+    expect(Object.keys(loaded.rows[0]!).slice(-3)).toEqual(["jockey_name", "jockey_id", "jockey_id_source"]);
+  });
+
+  it.each([
+    ["列が足りない(jockey_id_source がない)", (r: Record<string, unknown>) => { delete r["jockey_id_source"]; }, /列が足りません.*jockey_id_source/],
+    ["jockey_id_source が未知の値", (r: Record<string, unknown>) => { r["jockey_id_source"] = "guess"; }, /型が違います.*jockey_id_source/],
+    ["jockey_id_source が数", (r: Record<string, unknown>) => { r["jockey_id_source"] = 1; }, /型が違います.*jockey_id_source/],
+    ["jockey_id が null なのに jockey_id_source が snapshot(不変条件の違反)", (r: Record<string, unknown>) => { r["jockey_id"] = null; }, /型が違います.*jockey_id_source/],
+    ["jockey_id があるのに jockey_id_source が null(不変条件の違反)", (r: Record<string, unknown>) => { r["jockey_id_source"] = null; }, /型が違います.*jockey_id_source/],
+    ["知らない列が混ざった", (r: Record<string, unknown>) => { r["jockey_note"] = "x"; }, /知らない列.*jockey_note/],
+  ])("v5 の行が壊れている(%s)と、行番号と列名つきの例外", (_name, mutate, pattern) => {
+    const row = JSON.parse(JSON.stringify(v5Rows()[0])) as Record<string, unknown>;
+    expect([row["jockey_id"], row["jockey_id_source"]]).toEqual(["01001", "snapshot"]); // 前提: 壊す前の v5 の行は値を持っている
+    mutate(row);
+    expect(() => parsePriorDataset(gz({ format: 5, rows: 1 }, [row]))).toThrow(pattern);
+    expect(() => parsePriorDataset(gz({ format: 5, rows: 1 }, [row]))).toThrow(/2 行目/);
+  });
+
+  it("v5 と名乗るファイルに v4 の行(v5 の列がない)が混ざったら、黙って v4 として読まず例外", () => {
+    const rows = v5Rows();
+    expect(() => parsePriorDataset(gz({ format: 5, rows: 2 }, [rows[0]!, toV4(rows[1]!)]))).toThrow(/3 行目: 列が足りません.*jockey_id_source/);
+  });
+
+  it("v4 と名乗るファイルに v5 の行(v5 の列がある)が混ざったら、知らない列として例外", () => {
+    const rows = v5Rows();
+    expect(() => parsePriorDataset(gz({ format: 4, rows: 2 }, [toV4(rows[0]!), rows[1]!]))).toThrow(/3 行目: 知らない列.*jockey_id_source/);
+  });
+});
+
+describe("v5ColumnCoverage・jockeyIdSourceCounts: 騎手 ID の出どころの件数", () => {
+  it("v5 のファイルでは、jockey_id_source の非 null の件数(2)と、出どころ別の件数(snapshot 1・name 1・ID なし 2)が合う。合計は行数", () => {
+    const loaded = parsePriorDataset(assembleFile({ ...META, rows: 4 }, [encodeChunk(v5Rows())]));
+    expect(v5ColumnCoverage(loaded.rows)).toEqual({ jockey_id_source: 2 });
+    const counts = jockeyIdSourceCounts(loaded.rows);
+    expect(counts).toEqual({ snapshot: 1, name: 1, none: 2 });
+    expect(counts.snapshot + counts.name + counts.none).toBe(loaded.rows.length);
+  });
+
+  it("v4 のファイルを読むと、ID のある行は snapshot に導かれ、name は 0。v1〜v3 のファイルを読むと全部 none", () => {
+    const rows = v2Rows();
+    const v4 = parsePriorDataset(gz({ format: 4, rows: rows.length }, rows.map(toV4)));
+    expect(jockeyIdSourceCounts(v4.rows)).toEqual({ snapshot: 1, name: 0, none: 3 });
+    for (const [format, toOld] of [[1, toV1], [2, toV2], [3, toV3]] as const) {
+      const loaded = parsePriorDataset(gz({ format, rows: rows.length }, rows.map(toOld)));
+      expect(jockeyIdSourceCounts(loaded.rows)).toEqual({ snapshot: 0, name: 0, none: rows.length });
+      expect(v5ColumnCoverage(loaded.rows)).toEqual({ jockey_id_source: 0 });
+    }
   });
 });
 
@@ -357,6 +447,9 @@ describe("v4ColumnCoverage: v4 の列の非 null の件数", () => {
   it("v4 のファイルでは、騎手名はスナップショットのある 2 頭、騎手 ID は ID を持つ 1 頭だけが数えられる", () => {
     const loaded = parsePriorDataset(assembleFile({ ...META, rows: 4 }, [encodeChunk(v2Rows())]));
     expect(v4ColumnCoverage(loaded.rows)).toEqual({ jockey_name: 2, jockey_id: 1 });
+    // v5 のファイルでは、名前から埋めた ID も jockey_id の件数に入る(出どころ別の件数は jockeyIdSourceCounts)
+    const filled = parsePriorDataset(assembleFile({ ...META, rows: 4 }, [encodeChunk(v5Rows())]));
+    expect(v4ColumnCoverage(filled.rows)).toEqual({ jockey_name: 2, jockey_id: 2 });
   });
 
   it("v1〜v3 のファイルを読むと全列 0。キーの順は PRIOR_ROW_KEYS_V4_ADDED", () => {

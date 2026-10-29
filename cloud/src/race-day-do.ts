@@ -15,6 +15,7 @@ import { DurableObject } from "cloudflare:workers";
 import { D1AnalysisStore, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { createAnalysisSink } from "./analysis-sink";
 import { D1BabaStore } from "./baba-repository";
+import { D1JockeyNamesStore } from "./jockey-names-repository";
 import { D1KaisaiDaysStore } from "./kaisai-days-repository";
 import { createJraBabaFetcher } from "./jra-baba-fetch";
 import { createCloudLlm } from "./llm-sender";
@@ -137,6 +138,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 開催日ごとの記録(Issue #519。D1 の kaisai_days〈migration 0027〉)。発走前の計算が、中央のレースごとに書き、芝の開催進行の通算・柵の日数を数える過去の行を読む。
       // 書き込み・読み出しの失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
       kaisaiDaysStore: new D1KaisaiDaysStore({ db: env.DB }),
+      // 出馬表の騎手名と騎手 ID の組(Issue #526 段階 1b。D1 の jockey_names〈migration 0028〉)。発走前の計算が、レースごとに全馬の組を書く(統計モデル用の書き出しが騎手 ID を名前から埋める材料)。
+      // 書き込みの失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
+      jockeyNamesStore: new D1JockeyNamesStore({ db: env.DB }),
       // 日報の作成の依頼(Issue #235)。DAILY_REPORT が無い構成では渡さない(依頼しない)。
       ...(requestReport === undefined ? {} : { requestReport }),
       loadSettings: async () => {

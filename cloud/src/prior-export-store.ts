@@ -3,6 +3,7 @@
  *
  * ## 読み
  *  - 候補(`readCandidates`): `analyses` のうち**結果のあるレース**の分析を、選別に必要な列だけ(大きな列・追加指示は読まない)。1 文。
+ *  - 対応(`readLookups`。Issue #526 段階 1b): `jockey_names`(出馬表の騎手名と騎手 ID の組)の全件を 1 文で読み、ID がちょうど 1 つの名前だけ返す。**計画の tick で 1 回**(`export-job-core.ts`)。
  *  - 馬・結果・面(`readRaceData`): 1 回の batch(3 文)。いずれも `IN (SELECT value FROM json_each(?))` で、主キーの索引を引く(EXPLAIN で全件走査にならないことを確認済み)ので、
  *    読む行数は束縛した ID の行だけ。D1 が返す `meta.rows_read` を合計して返す。
  *  - 詳細(`fetchDetails`): R2 の `get` だけ(LIST・HEAD は使わない)。同時実行は {@link GET_CONCURRENCY}。取得を試みた回数を返す(Class B に数える)。
@@ -18,7 +19,7 @@
 import { decodeDetail } from "./analysis-detail";
 import { monthKey, type R2Usage } from "./r2-fence";
 import { toSnapshotColumns, type CandidateRow } from "./prior-export-format";
-import type { DetailOutcome, PriorExportStorePort, RaceDataBatch } from "./prior-export-core";
+import type { DetailOutcome, PriorExportStorePort, PriorLookups, RaceDataBatch } from "./prior-export-core";
 import type { DetailRequest } from "./export-job-core";
 import { defaultFixedLengthStream, putStreamToR2, type FixedLengthStreamFactory } from "./export-r2-stream";
 
@@ -41,6 +42,12 @@ const HORSES_SQL = `SELECT analysis_id AS analysisId, umaban, prior, adjusted_pr
 const RESULTS_SQL = `SELECT race_id AS raceId, umaban, finish_position AS finishPosition, win_odds AS winOdds, ninki
   FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban`;
 const META_SQL = `SELECT race_id AS raceId, course_type AS courseType FROM race_result_meta WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id`;
+
+/**
+ * 騎手名 → 騎手 ID の対応(Issue #526 段階 1b。`jockey_names` 表〈migration 0028〉)。**ID がちょうど 1 つの名前だけ**を返す(2 つ以上ある名前は返さない)。表の全件走査 1 回
+ * (表は中央と地方で数百〜千数百行の見込み。未測定)。計画の tick で 1 回だけ読み、kv に置いて全 batch で使う(`export-job-core.ts` の `readLookups`)。
+ */
+export const LOOKUPS_SQL = "SELECT jockey_name AS name, MIN(jockey_id) AS id FROM jockey_names GROUP BY jockey_name HAVING COUNT(*) = 1 ORDER BY jockey_name";
 
 export const SELECT_R2_USAGE_SQL = "SELECT class_a AS classA, class_b AS classB FROM r2_ops WHERE ym = ?";
 export const COUNT_READS_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + ?";
@@ -76,6 +83,11 @@ export class D1PriorExportStore implements PriorExportStorePort {
   async readCandidates(): Promise<{ readonly rows: CandidateRow[]; readonly rowsRead: number }> {
     const res = await this.db.prepare(CANDIDATES_SQL).all<CandidateRow>();
     return { rows: res.results, rowsRead: res.meta.rows_read ?? 0 };
+  }
+
+  async readLookups(): Promise<{ readonly lookups: PriorLookups; readonly rowsRead: number }> {
+    const res = await this.db.prepare(LOOKUPS_SQL).all<{ name: string; id: string }>();
+    return { lookups: { jockeyIds: res.results.map((r) => [r.name, r.id] as const) }, rowsRead: res.meta.rows_read ?? 0 };
   }
 
   async readRaceData(analysisIds: readonly number[], raceIds: readonly string[]): Promise<RaceDataBatch> {

@@ -9,6 +9,8 @@
  *  - ファイルの情報に足す数(`counterKeys`。統計モデル用は `missingDetail`、配分用は `missingOdds`・`noAllocation`)
  *  - R2 の固定キー・1 tick の件数の既定・警告の文
  * 1 tick で D1 から何を読むか(`readRaceData`)と、詳細(R2)の取り方(`fetchDetails`)は、種別ごとの窓口(`ExportStorePort`)が決める。
+ * 全 batch が共有する引き当て用の表(Issue #526 段階 1b。統計モデル用の騎手名 → 騎手 ID の対応)が要る種別だけが、窓口に省略可能な `readLookups` を実装する。
+ * 計画の tick で 1 回だけ読み、kv の `lookups` に置いて `buildChunk` の第 4 引数に渡す(読まない種別〈配分用〉は何も読まず・置かず、第 4 引数は undefined)。
  *
  * ## なぜ多段のジョブか
  * 項目ごとの補正・分析時点のオッズは D1 に無く、R2 の詳細オブジェクトにしかない。1,300 件超を 1 回の呼び出しでは読めない
@@ -16,7 +18,7 @@
  *
  * ## 流れ
  *  1. 要求(`request`): `download`(通常の GET)・`refresh`(`?refresh=1`)・`status`(`?status=1`。副作用なし)。ジョブを始める条件は下の「柵」。
- *  2. tick(`runTick`。アラーム): 計画(適格な分析を選んで batch に分ける)→ 処理(1 tick に batch の件数。D1 で読み、R2 から詳細を取り、行を整形して
+ *  2. tick(`runTick`。アラーム): 計画(適格な分析を選んで batch に分ける。`readLookups` があれば、ここで 1 回読む)→ 処理(1 tick に batch の件数。D1 で読み、R2 から詳細を取り、行を整形して
  *     **その tick ぶんだけ gzip** し kv に置く)→ 仕上げ(メタ行 + 各 tick のメンバーを**1 つずつ流して** R2 に put。固定キーを原子的に上書き)。
  *     gzip のメンバーの連結は 1 回の gunzip で読める。全体を 1 つのバッファに連結しない(DO のメモリ 128MB のため)。
  *     総バイト数は、各塊を kv に置いたときの長さの和で、流す前に窓口へ渡す(`FixedLengthStream` に先に渡すため)。
@@ -81,11 +83,20 @@ export interface OutcomeBase {
   readonly kind: "ok" | "none" | "failed";
 }
 
-/** D1・R2 の窓口(各書き出しのストアがこれを満たす。テストでは偽物)。 */
-export interface ExportStorePort<Batch extends { readonly rowsRead: number }, Outcome extends OutcomeBase> {
+/**
+ * D1・R2 の窓口(各書き出しのストアがこれを満たす。テストでは偽物)。
+ * `Lookups` は、全 batch が共有する「引き当て用の表」の型(既定は無し。統計モデル用の書き出しだけが使う。Issue #526 段階 1b)。
+ */
+export interface ExportStorePort<Batch extends { readonly rowsRead: number }, Outcome extends OutcomeBase, Lookups = undefined> {
   readUsage(): Promise<R2Usage>;
   /** 結果のあるレースの分析をすべて読む(選別は種別ごとの `select`)。 */
   readCandidates(): Promise<{ readonly rows: CandidateRow[]; readonly rowsRead: number }>;
+  /**
+   * 全 batch が共有する引き当て用の表を読む(**省略可**。実装しない種別は、表を読まず、kv にも置かない)。**計画の tick で 1 回だけ**呼ぶ(候補の読み出しの直後)。
+   * 結果は kv の `lookups` に置き、以降の batch の `buildChunk` が使う(ファイルの全体で同じ表を使い、読む行数も batch の数に比例しない)。
+   * 失敗は投げる(tick の失敗として再試行し、上限で止まる)。`rowsRead` は D1 が報告した読み取り行数で、`diag.rowsRead` に足す。
+   */
+  readLookups?(): Promise<{ readonly lookups: Lookups; readonly rowsRead: number }>;
   readRaceData(analysisIds: readonly number[], raceIds: readonly string[]): Promise<Batch>;
   /** 詳細(R2)を取る。取得を試みた回数 `gets` を返す。 */
   fetchDetails(items: readonly DetailRequest[]): Promise<{ readonly outcomes: Outcome[]; readonly gets: number }>;
@@ -148,7 +159,7 @@ export type ExportJobResponse<File> =
   | { readonly status: "blocked"; readonly reason: "r2-fence"; readonly file: File | null };
 
 /** 書き出しの種別ごとの差(差し込む口)。 */
-export interface ExportKindSpec<Chosen extends ChosenBase, Excluded, Counter extends string, Batch, Outcome> {
+export interface ExportKindSpec<Chosen extends ChosenBase, Excluded, Counter extends string, Batch, Outcome, Lookups = undefined> {
   /** R2 の固定キー。 */
   readonly key: string;
   /** 例外を握ったとき `onWarn` に渡す文(例外の本文は入れない)。 */
@@ -162,7 +173,7 @@ export interface ExportKindSpec<Chosen extends ChosenBase, Excluded, Counter ext
   /** 母集団を選ぶ。 */
   select(rows: readonly CandidateRow[]): { readonly chosen: Chosen[]; readonly excluded: Excluded };
   /** 1 batch の行を組み立て、gzip の 1 メンバー(塊)にする。`rows` は行の数、`counts` は `counterKeys` ごとの数。 */
-  buildChunk(items: readonly Chosen[], data: Batch, outcomes: readonly Outcome[]): { readonly chunk: Uint8Array; readonly rows: number; readonly counts: Record<Counter, number> };
+  buildChunk(items: readonly Chosen[], data: Batch, outcomes: readonly Outcome[], lookups: Lookups | undefined): { readonly chunk: Uint8Array; readonly rows: number; readonly counts: Record<Counter, number> };
   /** メタ行のメンバー(ファイルの先頭)。 */
   buildHead(meta: { readonly generatedAt: string; readonly rows: number; readonly races: number; readonly counts: Record<Counter, number>; readonly excluded: Excluded }): Uint8Array;
 }
@@ -195,6 +206,8 @@ interface Runs {
 
 const planKey = (i: number): string => `plan:${i}`;
 const chunkKey = (i: number): string => `chunk:${i}`;
+/** 引き当て用の表(`readLookups` の結果)を置く kv のキー。 */
+const LOOKUPS_KEY = "lookups";
 
 export class ExportJobCore<
   Chosen extends ChosenBase,
@@ -202,14 +215,15 @@ export class ExportJobCore<
   Counter extends string,
   Batch extends { readonly rowsRead: number },
   Outcome extends OutcomeBase,
+  Lookups = undefined,
 > {
   private readonly dailyLimit: number;
   private readonly batchSize: number;
   private readonly maxAttempts: number;
 
   constructor(
-    private readonly spec: ExportKindSpec<Chosen, Excluded, Counter, Batch, Outcome>,
-    private readonly deps: ExportDeps<ExportStorePort<Batch, Outcome>>,
+    private readonly spec: ExportKindSpec<Chosen, Excluded, Counter, Batch, Outcome, Lookups>,
+    private readonly deps: ExportDeps<ExportStorePort<Batch, Outcome, Lookups>>,
     options: ExportOptions = {},
   ) {
     this.dailyLimit = options.dailyLimit ?? EXPORT_DAILY_LIMIT;
@@ -326,10 +340,18 @@ export class ExportJobCore<
     const { rows, rowsRead } = await store.readCandidates();
     const { chosen, excluded } = this.spec.select(rows);
     const batches = Math.ceil(chosen.length / this.batchSize);
+    // 引き当て用の表は、候補の選別のあと・計画を書く前に 1 回だけ読む(失敗はここで投げる。計画の途中の状態を残さない)。0 batch のときは使わないので読まない。
+    const lookups = batches === 0 || store.readLookups === undefined ? null : await store.readLookups();
     for (let i = 0; i < batches; i += 1) {
       kv.put(planKey(i), chosen.slice(i * this.batchSize, (i + 1) * this.batchSize));
     }
-    this.save({ ...job, phase: batches === 0 ? "finalizing" : "building", batches, done: 0, races: chosen.length, excluded, rowsRead: job.rowsRead + rowsRead, attempts: 0 });
+    if (lookups !== null) {
+      kv.put(LOOKUPS_KEY, lookups.lookups);
+    }
+    this.save({
+      ...job, phase: batches === 0 ? "finalizing" : "building", batches, done: 0, races: chosen.length, excluded,
+      rowsRead: job.rowsRead + rowsRead + (lookups?.rowsRead ?? 0), attempts: 0,
+    });
     await setAlarm(now() + EXPORT_TICK_DELAY_MS);
   }
 
@@ -357,7 +379,8 @@ export class ExportJobCore<
       return;
     }
 
-    const built = this.spec.buildChunk(items, data, details.outcomes);
+    // 対応が無い(読む前のコードが始めたジョブ・読まない種別)は undefined のまま渡す。
+    const built = this.spec.buildChunk(items, data, details.outcomes, kv.get<Lookups>(LOOKUPS_KEY));
     kv.put(chunkKey(job.done), built.chunk);
     const done = job.done + 1;
     const next: Job<Counter, Excluded> = {
@@ -452,8 +475,9 @@ export class ExportJobCore<
     await this.deps.setAlarm(this.deps.now() + EXPORT_BACKOFF_MS[Math.min(attempts - 1, EXPORT_BACKOFF_MS.length - 1)]!);
   }
 
-  /** 計画と処理済みの塊を消す。 */
+  /** 計画と処理済みの塊と、引き当て用の表を消す。 */
   private cleanup(job: Job<Counter, Excluded>): void {
+    this.deps.kv.delete(LOOKUPS_KEY);
     for (let i = 0; i < job.batches; i += 1) {
       this.deps.kv.delete(planKey(i));
       this.deps.kv.delete(chunkKey(i));

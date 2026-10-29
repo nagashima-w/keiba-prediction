@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { encodeDetail } from "../src/analysis-detail";
 import { D1AnalysisStore } from "../src/analysis-repository";
-import { D1PriorExportStore, type PriorExportBucket } from "../src/prior-export-store";
+import { D1PriorExportStore, LOOKUPS_SQL, type PriorExportBucket } from "../src/prior-export-store";
 import { PRIOR_EXPORT_BATCH_SIZE, PRIOR_EXPORT_TICK_OVERHEAD_QUERIES, type DetailOutcome } from "../src/prior-export-core";
 import { D1ResultStore } from "../src/result-repository";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
@@ -111,6 +111,53 @@ describe("Issue #341: 形式 v2 は D1 の読み取りを増やさない", () =>
       expect(sql, "SQL が race_snapshot_json を読まない").not.toContain("race_snapshot_json");
       expect(sql, "SQL が wakuban を読まない").not.toContain("wakuban");
     }
+  });
+});
+
+describe("readLookups(Issue #526 段階 1b: 騎手名 → 騎手 ID の対応)", () => {
+  const put = async (name: string, id: string, firstSeen = "20261031"): Promise<void> => {
+    await local.db.prepare("INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) VALUES (?, ?, ?)").bind(name, id, firstSeen).run();
+  };
+  const sorted = (pairs: ReadonlyArray<readonly [string, string]>): Array<readonly [string, string]> => [...pairs].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+
+  it("ID がちょうど 1 つの名前だけを返す。同じ名前に ID が 2 つある名前(松山)は返さない。同じ ID に名前が 2 つある場合(戸崎圭・戸崎圭太)は、名前ごとに 1 つずつ返す", async () => {
+    await put("戸崎圭", "05386");
+    await put("戸崎圭太", "05386");
+    await put("横山武", "01170");
+    await put("松山", "01126");
+    await put("松山", "99999");
+    await put("三浦", "01122");
+    const out = await store().readLookups();
+    expect(sorted(out.lookups.jockeyIds)).toEqual(sorted([["三浦", "01122"], ["戸崎圭", "05386"], ["戸崎圭太", "05386"], ["横山武", "01170"]]));
+    expect(out.lookups.jockeyIds.map((p) => p[0])).not.toContain("松山");
+  });
+
+  it("名前が曖昧かどうかは first_seen や書いた順に依らない(あとから ID が増えた名前は、以降ずっと返さない)。ID は先頭の 0 を含む文字列のまま", async () => {
+    await put("田口", "01208", "20261024");
+    expect((await store().readLookups()).lookups.jockeyIds).toEqual([["田口", "01208"]]);
+    await put("田口", "01999", "20261107");
+    expect((await store().readLookups()).lookups.jockeyIds).toEqual([]);
+  });
+
+  it("表が空なら空の配列(rowsRead は 1 以下。D1 は空の表を読む文を 1 行と数える)。D1 には SELECT 1 文だけ(batch なし・書き込みなし)", async () => {
+    const spy = spyDb(local.db);
+    const out = await store(local.r2, spy.db as never).readLookups();
+    expect(out.lookups.jockeyIds).toEqual([]);
+    expect(out.rowsRead).toBeLessThanOrEqual(1); // ローカルの D1 の実測は 1(空の表でも 1 行と数える)
+    expect(spy.prepared).toEqual([LOOKUPS_SQL]);
+    expect(spy.batches).toEqual([]);
+    expect(LOOKUPS_SQL.trim().toUpperCase().startsWith("SELECT")).toBe(true);
+  });
+
+  it("読んだ行数(rowsRead)は表の行数(曖昧な名前の行も数える。全件走査 1 回)。表の行数に比例して増える", async () => {
+    await put("A", "1");
+    await put("B", "2");
+    await put("B", "3");
+    const three = (await store().readLookups()).rowsRead;
+    expect(three).toBe(3);
+    await put("C", "4");
+    await put("D", "5");
+    expect((await store().readLookups()).rowsRead).toBe(5);
   });
 });
 
