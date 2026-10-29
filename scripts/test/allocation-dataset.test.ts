@@ -1270,3 +1270,62 @@ describe("replayRace: 単勝・複勝の点数の上限(Issue #533)", () => {
     }
   });
 });
+
+// Issue #535-D: 点数の上限の 2 列(max_win_bets・max_place_bets)を足す前(Issue #533 の 10/29 より前)の書き出しを読む。
+// 形式の版(ALLOCATION_EXPORT_FORMAT)は 1 のままなので、この 2 列が無ければ null とみなす(ほかの列の欠落は従来どおり拒む)。
+
+describe("parseAllocationDataset: 点数の上限の列が無い古い書き出し(Issue #535-D)", () => {
+  const oldFile = (change: (row: Record<string, any>) => void = () => {}): Uint8Array => {
+    const row = JSON.parse(JSON.stringify(raceRow({ includeComboOdds: 0, maxWinBets: 0, maxPlaceBets: 0 }))) as Record<string, any>;
+    change(row);
+    return gz(`${JSON.stringify({ _meta: { format: ALLOCATION_EXPORT_FORMAT, rows: 1 } })}\n${JSON.stringify(row)}\n`);
+  };
+  const dropLimits = (r: Record<string, any>): void => {
+    delete r["allocation"]["settings"]["max_win_bets"];
+    delete r["allocation"]["settings"]["max_place_bets"];
+  };
+
+  it("前提: 2 列が無いファイルは、2 列の無いキー集合になっている(空振り防止)", () => {
+    const row = JSON.parse(new TextDecoder().decode(gunzipSync(oldFile(dropLimits))).split("\n")[1]!) as Record<string, any>;
+    expect(Object.keys(row["allocation"]["settings"])).not.toContain("max_win_bets");
+    expect(Object.keys(row["allocation"]["settings"])).not.toContain("max_place_bets");
+  });
+
+  it("2 列が無い行は読め、2 列は null になる(ほかの設定の値はそのまま)", () => {
+    const loaded = parseAllocationDataset(oldFile(dropLimits));
+    expect(loaded.rows).toHaveLength(1);
+    const settings = loaded.rows[0]!.allocation!.settings;
+    expect(settings.max_win_bets).toBeNull();
+    expect(settings.max_place_bets).toBeNull();
+    expect(settings.bankroll).toBe(100_000);
+    expect(settings.per_race_cap).toBe(20_000);
+  });
+
+  it("片方だけ無い行も読め、無い側だけが null になる。ある側の値は変えない", () => {
+    const onlyWin = parseAllocationDataset(oldFile((r) => { r["allocation"]["settings"]["max_place_bets"] = 3; delete r["allocation"]["settings"]["max_win_bets"]; })).rows[0]!.allocation!.settings;
+    expect([onlyWin.max_win_bets, onlyWin.max_place_bets]).toEqual([null, 3]);
+    const onlyPlace = parseAllocationDataset(oldFile((r) => { r["allocation"]["settings"]["max_win_bets"] = 2; delete r["allocation"]["settings"]["max_place_bets"]; })).rows[0]!.allocation!.settings;
+    expect([onlyPlace.max_win_bets, onlyPlace.max_place_bets]).toEqual([2, null]);
+  });
+
+  it("読んだ古い行は、2 列が NULL の行と同じに計算し直され(上限なし=0。上限 2 とは違う)、NULL の列として数えられる", () => {
+    const old = parseAllocationDataset(oldFile(dropLimits)).rows[0]!;
+    const asNull = raceRow({ includeComboOdds: 0, maxWinBets: null, maxPlaceBets: null });
+    const free = replayed(raceRow({ includeComboOdds: 0, maxWinBets: 0, maxPlaceBets: 0 }));
+    expect(replayed(old)).toEqual(replayed(asNull));
+    expect(replayed(old)).toEqual(free);
+    expect(replayed(old).bets.join(",")).not.toBe(replayed(raceRow({ includeComboOdds: 0, maxWinBets: 2, maxPlaceBets: 2 })).bets.join(","));
+    expect(classifyReplay(old).nullSettings).toEqual(["max_win_bets", "max_place_bets"]);
+  });
+
+  it("2 列以外の設定の列が無い行は、従来どおり『列が足りません』で拒む(2 列も無くても)", () => {
+    expect(() => parseAllocationDataset(oldFile((r) => { dropLimits(r); delete r["allocation"]["settings"]["bankroll"]; }))).toThrow(/allocation\.settings の列が足りません\(bankroll\)/);
+    expect(() => parseAllocationDataset(oldFile((r) => { dropLimits(r); delete r["allocation"]["settings"]["min_hit_prob"]; }))).toThrow(/allocation\.settings の列が足りません\(min_hit_prob\)/);
+  });
+
+  it("2 列が有っても型が違えば従来どおり拒む。知らない列があれば従来どおり拒む。allocation が null の行も読める", () => {
+    expect(() => parseAllocationDataset(oldFile((r) => { r["allocation"]["settings"]["max_win_bets"] = "2"; }))).toThrow(/allocation\.settings の数の列の型が違います/);
+    expect(() => parseAllocationDataset(oldFile((r) => { dropLimits(r); r["allocation"]["settings"]["extra"] = 1; }))).toThrow(/allocation\.settings に知らない列があります\(extra\)/);
+    expect(parseAllocationDataset(oldFile((r) => { r["allocation"] = null; })).rows[0]!.allocation).toBeNull();
+  });
+});

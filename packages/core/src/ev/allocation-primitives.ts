@@ -506,7 +506,7 @@ export function runGreedyAllocation(
   const groupMembers: (readonly number[])[] = [];
   const groupPositive: number[] = [];
   // 重複の検査は、上限なしの群(`max` が 1 未満)も含む全ての群・全ての member について行う(Issue #535-B)。
-  // `groupOf` は有効な群にしか書かないので、重複の検査には別の `seen` を使う(`limits` が空のときは確保しない)。
+  // `groupOf` は有効な群にしか書かないので、重複の検査には別の `seen` を使う(`limits` が空のときは長さ 0 で、検査の対象も無い)。
   // 同じ群の中で同じ候補が 2 回入っている場合も重複として例外にする。
   const seen = new Uint8Array(limits !== undefined && limits.length > 0 ? n : 0);
   for (const limit of limits ?? []) {

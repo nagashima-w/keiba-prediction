@@ -415,7 +415,8 @@ export async function runFetch(opts: FetchOptions): Promise<FetchStats> {
       stats.aborted = true;
       opts.log(
         `連続 ${maxConsecutiveFailures} 件の取得失敗のため打ち切ります(アクセス制限の可能性があります)。直近の失敗: ${lastFailureReason}。` +
-          `時間を置いて再実行すると、取れたものは使い回して続きから取ります。`,
+          `時間を置いて再実行すると、取れたものは使い回して続きから取ります。` +
+          `恒久的に失敗するページが続いていて先へ進めないときは、連続失敗の上限(--max-consecutive-failures)を上げると、先へ進めることがあります。`,
       );
     } else {
       throw e;
