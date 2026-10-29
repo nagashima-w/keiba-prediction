@@ -13,6 +13,8 @@
  *   実物では取消・除外・中止の行も頭数に含まれる。
  * - カレンダーは、今月(today の月)以降なら raw があっても毎回取り直す(開催日が増えるため)。過去の月は使い回す。
  * - 中央の一覧に race_id が 0 件のものは異常として保存しない(中央のカレンダーには開催日しか載らない)。地方の 0 件は保存する(開催のない日)。
+ * - HTTP 400・403・429 は、アクセスを制限された可能性が高いので、1 件目でもその場で打ち切る(`aborted` と `restricted`)。
+ * - `newestFirst` なら、月も月の中の開催日も新しい順にたどる(カレンダー → 一覧 → 結果の順は同じ)。
  * - 取得の失敗(HTTP エラー・保存前の検査の不合格)が連続 `maxConsecutiveFailures` 件(既定 20)になったら打ち切る(`aborted`)。
  *   アクセスを制限されたときに叩き続けないため。成功が 1 件あれば数え直す。raw は残るので、再実行で続きから取る。
  * - errors.ndjson は追記のログで、再実行のたびに同じ失敗が重ねて載ることがある(`list-unparsed` は取得済みの一覧を読み直すたびに載る)。
@@ -48,6 +50,17 @@ export interface FetchOptions {
   readonly log: (message: string) => void;
   /** 取得の失敗が連続したら打ち切る件数。既定 20。 */
   readonly maxConsecutiveFailures?: number;
+  /** true なら、月も月の中の開催日も新しい順にたどる。 */
+  readonly newestFirst?: boolean;
+}
+
+/** アクセスの制限を疑う HTTP ステータス。 */
+const RESTRICTED_STATUSES: ReadonlySet<number> = new Set([400, 403, 429]);
+
+/** 例外が持つ HTTP ステータス(HttpClient の HttpError の `status`)。無ければ undefined。 */
+function httpStatusOf(e: unknown): number | undefined {
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : undefined;
 }
 
 /** 連続失敗の上限の既定値。 */
@@ -64,6 +77,8 @@ export interface FetchStats {
   limitReached: boolean;
   /** 連続失敗の上限に達して打ち切ったか(CLI は 0 以外の終了コードで終わる)。 */
   aborted: boolean;
+  /** HTTP 400・403・429 でアクセスを制限された可能性があるとして打ち切ったか(aborted も true になる)。 */
+  restricted: boolean;
   /** 地方の一覧で見えたグレード表記ごとの件数(表記なしは `(なし)`)。 */
   gradeCounts: Record<string, number>;
 }
@@ -73,6 +88,9 @@ class LimitSignal extends Error {}
 
 /** 連続失敗の上限に達して打ち切るための内部の合図。 */
 class FailureSignal extends Error {}
+
+/** アクセスの制限を疑う HTTP エラーで、その場で打ち切るための内部の合図。 */
+class RestrictedSignal extends Error {}
 
 const zeroByStage = (): Record<Stage, number> => ({ calendar: 0, list: 0, result: 0 });
 
@@ -204,6 +222,7 @@ export async function runFetch(opts: FetchOptions): Promise<FetchStats> {
     emptyLists: 0,
     limitReached: false,
     aborted: false,
+    restricted: false,
     gradeCounts: {},
   };
   const maxConsecutiveFailures = opts.maxConsecutiveFailures ?? DEFAULT_MAX_CONSECUTIVE_FAILURES;
@@ -221,8 +240,12 @@ export async function runFetch(opts: FetchOptions): Promise<FetchStats> {
   };
 
   /** 取得の失敗を記録し、連続失敗の上限に達したら打ち切りの合図を投げる。保存はしない(null を返す)。 */
-  function failed(kind: Kind, stage: Stage, id: string, url: string, reason: string): null {
+  function failed(kind: Kind, stage: Stage, id: string, url: string, reason: string, status?: number): null {
     recordError(kind, stage, id, url, reason);
+    if (status !== undefined && RESTRICTED_STATUSES.has(status)) {
+      lastFailureReason = `[${kind} ${stage} ${id}] HTTP ${status}: ${reason}`;
+      throw new RestrictedSignal();
+    }
     consecutiveFailures += 1;
     if (consecutiveFailures >= maxConsecutiveFailures) {
       lastFailureReason = `[${kind} ${stage} ${id}] ${reason}`;
@@ -258,7 +281,7 @@ export async function runFetch(opts: FetchOptions): Promise<FetchStats> {
     try {
       text = await opts.fetchText(url);
     } catch (e) {
-      return failed(kind, stage, id, url, errMessage(e));
+      return failed(kind, stage, id, url, errMessage(e), httpStatusOf(e));
     }
     const problem = validate(kind, stage, text);
     if (problem !== null) {
@@ -277,7 +300,8 @@ export async function runFetch(opts: FetchOptions): Promise<FetchStats> {
 
   try {
     for (const kind of opts.kinds) {
-      for (const month of monthsBetween(opts.from, opts.to)) {
+      const months = monthsBetween(opts.from, opts.to);
+      for (const month of opts.newestFirst === true ? months.reverse() : months) {
         const calUrl = calendarUrl(kind, month);
         // 今月以降は開催日が増えるので、raw があっても取り直す(取り直しに失敗したら古い raw は残し、この月は飛ばす)
         const calHtml = await acquire(kind, "calendar", month, calUrl, true, month >= todayMonth);
@@ -294,6 +318,9 @@ export async function runFetch(opts: FetchOptions): Promise<FetchStats> {
               .filter((d): d is string => d !== undefined && d.startsWith(prefix)),
           ),
         ].sort();
+        if (opts.newestFirst === true) {
+          dates.reverse();
+        }
         opts.log(`[${kind} ${month}] 開催日 ${dates.length} 日`);
         const monthGradeCounts: Record<string, number> = {};
 
@@ -377,6 +404,13 @@ export async function runFetch(opts: FetchOptions): Promise<FetchStats> {
     if (e instanceof LimitSignal) {
       stats.limitReached = true;
       opts.log(`--limit ${opts.limit} 件のリクエストに達したので止めます。再実行すると続きから取ります。`);
+    } else if (e instanceof RestrictedSignal) {
+      stats.aborted = true;
+      stats.restricted = true;
+      opts.log(
+        `アクセスを制限された可能性があります(HTTP 400・403・429)。その場で打ち切ります。直近の失敗: ${lastFailureReason}。` +
+          `間隔を広げ(--interval-ms)、時間を置いて再実行すると、取れたものは使い回して続きから取ります。`,
+      );
     } else if (e instanceof FailureSignal) {
       stats.aborted = true;
       opts.log(
@@ -399,13 +433,21 @@ export async function runFetch(opts: FetchOptions): Promise<FetchStats> {
 const MONTH = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
 export type ParsedFetchArgs =
-  | { readonly ok: true; readonly value: { from: string; to: string; outDir: string; kinds: Kind[]; limit?: number; maxConsecutiveFailures?: number } }
+  | { readonly ok: true; readonly value: { from: string; to: string; outDir: string; kinds: Kind[]; limit?: number; maxConsecutiveFailures?: number; intervalMs: number; newestFirst: boolean } }
   | { readonly ok: false; readonly message: string };
 
 export const FETCH_USAGE =
-  "使い方: pnpm tsx scripts/history-results/fetch.ts --from 2021-11 --to 2026-10 --out <ディレクトリ> [--central] [--nar-jpn] [--limit N] [--max-consecutive-failures N]\n" +
+  "使い方: pnpm tsx scripts/history-results/fetch.ts --from 2021-11 --to 2026-10 --out <ディレクトリ> [--central] [--nar-jpn] [--limit N] [--max-consecutive-failures N] [--interval-ms N] [--newest-first]\n" +
   "  --central と --nar-jpn はどちらも付けなければ両方。--limit は新しく出すリクエストの数の上限(再実行で続きから)。\n" +
+  "  --interval-ms は最低間隔(既定 10000、1500 未満は不可)。--newest-first は新しい月・開催日から取る。\n" +
+  "  HTTP 400・403・429 は、アクセスの制限を疑ってその場で打ち切る(終了コード 1)。\n" +
   "  取得の失敗が連続 20 件(--max-consecutive-failures で変更)になったら打ち切り、終了コード 1 で終わる。";
+
+/** リクエストの最低間隔の既定(ミリ秒)。1500 では 273 リクエストで HTTP 400 になったため、10 秒に広げた。 */
+export const DEFAULT_INTERVAL_MS = 10000;
+
+/** 最低間隔の下限(HttpClient の既定と同じ。これを割る指定は拒否する)。 */
+export const MIN_INTERVAL_MS = 1500;
 
 export function parseFetchArgs(argv: readonly string[]): ParsedFetchArgs {
   let from: string | undefined;
@@ -413,6 +455,8 @@ export function parseFetchArgs(argv: readonly string[]): ParsedFetchArgs {
   let outDir: string | undefined;
   let limit: number | undefined;
   let maxConsecutiveFailures: number | undefined;
+  let intervalMs = DEFAULT_INTERVAL_MS;
+  let newestFirst = false;
   let central = false;
   let nar = false;
   for (let i = 0; i < argv.length; i++) {
@@ -433,7 +477,14 @@ export function parseFetchArgs(argv: readonly string[]): ParsedFetchArgs {
         return { ok: false, message: `--max-consecutive-failures は正の整数で指定してください(値: ${v ?? "なし"})` };
       }
       maxConsecutiveFailures = Number(v);
-    } else if (a === "--central") central = true;
+    } else if (a === "--interval-ms") {
+      const v = next();
+      if (v === undefined || !/^[1-9][0-9]*$/.test(v) || Number(v) < MIN_INTERVAL_MS) {
+        return { ok: false, message: `--interval-ms は ${MIN_INTERVAL_MS} 以上の整数で指定してください(値: ${v ?? "なし"})` };
+      }
+      intervalMs = Number(v);
+    } else if (a === "--newest-first") newestFirst = true;
+    else if (a === "--central") central = true;
     else if (a === "--nar-jpn") nar = true;
     else return { ok: false, message: `知らない引数です: ${a}` };
   }
@@ -442,5 +493,5 @@ export function parseFetchArgs(argv: readonly string[]): ParsedFetchArgs {
   if (from > to) return { ok: false, message: `--from ${from} が --to ${to} より後です` };
   if (outDir === undefined || outDir === "") return { ok: false, message: "--out は必須です" };
   const kinds: Kind[] = !central && !nar ? ["central", "nar"] : [...(central ? (["central"] as const) : []), ...(nar ? (["nar"] as const) : [])];
-  return { ok: true, value: { from, to, outDir, kinds, ...(limit !== undefined ? { limit } : {}), ...(maxConsecutiveFailures !== undefined ? { maxConsecutiveFailures } : {}) } };
+  return { ok: true, value: { from, to, outDir, kinds, ...(limit !== undefined ? { limit } : {}), ...(maxConsecutiveFailures !== undefined ? { maxConsecutiveFailures } : {}), intervalMs, newestFirst } };
 }

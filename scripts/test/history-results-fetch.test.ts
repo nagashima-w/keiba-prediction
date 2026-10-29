@@ -444,7 +444,7 @@ describe("fetch: アクセスを制限されたらその場で打ち切る(HTTP 
       expect(stats.errors).toBe(1);
       expect(errorsOf(out)[0]).toMatchObject({ stage: "calendar", id: "2021-11" });
       expect(String(errorsOf(out)[0]!.reason)).toContain(`HTTPエラー(${status})`);
-      expect(lines.join("\n")).toMatch(/アクセスを制限された可能性.*HTTP ${status}/);
+      expect(lines.join("\n")).toMatch(new RegExp(`アクセスを制限された可能性.*直近の失敗: .*HTTP ${status}`));
     });
   }
 
