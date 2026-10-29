@@ -168,6 +168,7 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       age: 4,
       kinryo: 57,
       jockeyName: "テスト騎手",
+      jockeyId: "00001", // Issue #526: 出馬表の騎手 ID の写し
       trainerName: "テスト調教師",
       bodyWeight: 480,
       winOdds: 2.5,
@@ -198,6 +199,8 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
     expect(snapshot.race.fence).toBeNull();
     const h2 = snapshot.horses.find((h) => h.umaban === 2)!;
     expect(h2.bodyWeight).toBeNull();
+    expect("jockeyId" in h2).toBe(true); // Issue #526: 騎手 ID が無い(jockeyId=null)馬も、キーは残して null
+    expect(h2.jockeyId).toBeNull();
     expect(h2.oikiriCritic).toBeNull();
     expect(h2.oikiriRank).toBeNull();
   });
@@ -715,6 +718,7 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
         age: 24,
         kinryo: 57,
         jockeyName: "ジョッキー甲",
+        jockeyId: "00001", // Issue #526
         trainerName: "調教師甲",
         bodyWeight: 480,
         winOdds: 2.5,
@@ -735,6 +739,7 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
         age: 13,
         kinryo: 54,
         jockeyName: "ジョッキー乙",
+        jockeyId: "00003", // Issue #526: 馬ごとに別の値(取り違えの検知)
         trainerName: "調教師乙",
         bodyWeight: 420,
         winOdds: 8.0,

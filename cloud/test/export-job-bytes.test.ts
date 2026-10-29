@@ -16,6 +16,8 @@ import { AllocationFakeStore, FakeKv, PriorFakeStore, cand, driver, raceIdOf } f
  *  (2) 固定した正解: **実装前の起点(3762f72)のコードで測った**、伸長後の NDJSON 全体の sha256(base64。64 桁の 16 進は、`cloud-config-guard.test.ts` が Access の AUD の混入として拒むため)。時刻(clock)・入力はすべて決定的。
  *      gzip の圧縮後のバイト列は zlib の版で変わりうるので、固定値は伸長後でとる。測定の手順は `cloud/test/export-fixtures.ts` の入力を
  *      起点のコードで走らせて、伸長した全体の sha256 を取る(統計モデル用は `putFile`、配分用は `putFileStream` で受ける)。
+ *      **統計モデル用の固定値は、書き出しの形式を上げたとき〈Issue #526 の format 4〉に、列とメタ行の notes が変わるので測り直した**
+ *      (測り直した値は、ファイルの組み立てを変える前後の一致を見る回帰の固定であって、列の中身の正解ではない。検算: 行ごとの増分は 1 行 44 バイト〈`,"jockey_name":"騎手1","jockey_id":"01001"`〉、詳細なしの行は 36 バイト〈両列 null〉、メタ行の増分は 944 バイトで、4 つの場面とも和が合う)。
  */
 
 const sha256 = (gz: Uint8Array): string => createHash("sha256").update(gunzipSync(gz)).digest("base64");
@@ -35,10 +37,10 @@ interface Scenario {
 }
 
 const PRIOR: Scenario[] = [
-  { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "hRu2no8/ItqVMsy5QjZgoxEYtzRDWtXfHK+y+jf5nrk=", plainBytes: 14925 },
-  { name: "5 レース・batch 2・詳細なし(101)", races: 5, batchSize: 2, noDetail: [101], sha256: "hNxZ+ENzSFbaqzf1fE3pNQ/kz6xaKNWCZSE3wjYWsfg=", plainBytes: 14529 },
-  { name: "候補 0 件(除外だけ。メタ行だけのファイル)", races: 0, batchSize: 2, candidates: excluded, sha256: "BVt5COSz8b5VPqt0E1c6d3MfeeHvwk75VVOg8icxdjo=", plainBytes: 3694 },
-  { name: "7 レース・batch 3・5 頭", races: 7, batchSize: 3, horses: 5, sha256: "+u+SK8VNTaVj9NuBFWGRqqBHCWE3PU4NrQ9VTMazijs=", plainBytes: 30043 },
+  { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "6iKKBn7+zosYjlHWzcORguzmUgo6z3X/A8yCbGPIP6k=", plainBytes: 16529 },
+  { name: "5 レース・batch 2・詳細なし(101)", races: 5, batchSize: 2, noDetail: [101], sha256: "7hKLfvF2TF0fPX+RlSLF6tTvklyIFbwyDdqWsWQbaOw=", plainBytes: 16109 },
+  { name: "候補 0 件(除外だけ。メタ行だけのファイル)", races: 0, batchSize: 2, candidates: excluded, sha256: "JhsPRfwZB9/oU3tFEnLC5oItLBp8FeWnYI7zFavRpeU=", plainBytes: 4638 },
+  { name: "7 レース・batch 3・5 頭", races: 7, batchSize: 3, horses: 5, sha256: "mhmLBADiS267XfudL1jViBT19FHMLK1m13ORYTsWopI=", plainBytes: 32527 },
 ];
 const ALLOCATION: Scenario[] = [
   { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "XH6vlBeA9Fop6Emy94GG77/GGCqvhK6Sg6GBbrSkqCA=", plainBytes: 12884 },

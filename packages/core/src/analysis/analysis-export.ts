@@ -64,6 +64,13 @@ export interface RaceSnapshotHorse {
   readonly age: number | null;
   readonly kinryo: number | null;
   readonly jockeyName: string | null;
+  /**
+   * 今回の騎手の ID(Issue #526 段階 1。出馬表の `jockeyId` の写し。netkeiba の騎手 ID)。統計モデルの見直し用の書き出しに載せるためだけに保存する
+   * (プロンプト・統計モデル・画面・配分には使わない。`toSafeRaceSnapshot` は読み出さない)。
+   * **任意項目**: 出馬表を読めた分析(このキーを保存し始めた 2026-10-29 以降)では全馬がキーを持ち、騎手のリンクが無い馬(騎手未定など)は null。
+   * このキーを保存する前に作った過去のスナップショットはキー自体が無い(null と区別できる)。
+   */
+  readonly jockeyId?: string | null;
   readonly trainerName: string | null;
   readonly bodyWeight: number | null;
   readonly winOdds: number | null;
@@ -230,6 +237,7 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         age: h.shutuba.age,
         kinryo: h.shutuba.kinryo,
         jockeyName: h.shutuba.jockeyName,
+        jockeyId: h.shutuba.jockeyId ?? null,
         trainerName: h.shutuba.trainerName,
         bodyWeight: h.shutuba.bodyWeight?.weight ?? null,
         winOdds: race.odds.win[umaban]?.odds ?? null,
