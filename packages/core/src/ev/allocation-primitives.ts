@@ -263,7 +263,7 @@ export function buildOutcomeIndexSets<T>(
  * 貪欲逐次配分の「群ごとの点数の上限」(Issue #533)。`members` は候補インデックス(candidates配列内の位置)で、
  * 群の中で連続最適比率が正の候補が `max` 点に達したら、まだ 0 の同じ群の候補はそれ以降のステップで選ばない。
  *
- * 契約: 候補は高々1つの群にしか入れない(重複は例外)。`members` は 0 以上 n 未満の整数(範囲外・非整数は例外)。
+ * 契約: 候補は高々1つの群にしか入れない(重複は例外。上限なしの群〈`max` が 1 未満〉も、同じ群の中の重複も数える)。`members` は 0 以上 n 未満の整数(範囲外・非整数は例外)。
  * `max` が 1 未満(0・負・NaN)の群は上限なし(無視する)。非整数は切り捨てる。呼び出し側(設定の解決)が
  * 値の意味づけ(0=上限なし)を済ませてから渡す。
  */
@@ -505,17 +505,22 @@ export function runGreedyAllocation(
   const groupMax: number[] = [];
   const groupMembers: (readonly number[])[] = [];
   const groupPositive: number[] = [];
+  // 重複の検査は、上限なしの群(`max` が 1 未満)も含む全ての群・全ての member について行う(Issue #535-B)。
+  // `groupOf` は有効な群にしか書かないので、重複の検査には別の `seen` を使う(`limits` が空のときは確保しない)。
+  // 同じ群の中で同じ候補が 2 回入っている場合も重複として例外にする。
+  const seen = new Uint8Array(limits !== undefined && limits.length > 0 ? n : 0);
   for (const limit of limits ?? []) {
     for (const m of limit.members) {
       if (!Number.isInteger(m) || m < 0 || m >= n) {
         throw new Error(`runGreedyAllocation: 上限の群の候補番号が範囲外または非整数です(${String(m)}。候補数 ${n})`);
       }
-      if (groupOf[m] !== -1) {
-        throw new Error(`runGreedyAllocation: 候補 ${m} が複数の上限の群に入っています`);
+      if (seen[m] === 1) {
+        throw new Error(`runGreedyAllocation: 候補 ${m} が複数の上限の群に入っています(同じ群の中の重複を含む)`);
       }
+      seen[m] = 1;
     }
     if (!(limit.max >= 1)) {
-      continue; // 上限なしの群(0・負・NaN)。メンバーの重複検査は上で済ませた。
+      continue; // 上限なしの群(0・負・NaN)。メンバーの範囲・重複の検査は上で済ませた。
     }
     const g = groupMax.length;
     for (const m of limit.members) {

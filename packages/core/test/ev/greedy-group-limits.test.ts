@@ -272,6 +272,45 @@ describe("runGreedyAllocation の群ごとの点数の上限(Issue #533)", () =>
         ]),
       ).toThrow();
     });
+    // Issue #535-B: 重複の検査は、上限なしの群(max が 1 未満)も含めて行う。本番(combo-bet-allocation.ts・bet-allocation.ts)は
+    // 券種ごとに 1 群を、昇順の候補番号で重複なく作るので、これらの入力は本番からは届かない(組み立て方の誤りを捕まえる検査)。
+    it("上限なしの群(max=0)に入った候補が、有効な群にも入っている(群の順序によらない)", () => {
+      expect(() =>
+        runGreedyAllocation(3, [2, 2, 2], sets, 10, [
+          { members: [0, 1], max: 0 },
+          { members: [1, 2], max: 1 },
+        ]),
+      ).toThrow(/候補 1 が複数の上限の群/);
+      expect(() =>
+        runGreedyAllocation(3, [2, 2, 2], sets, 10, [
+          { members: [0, 1], max: 1 },
+          { members: [1, 2], max: 0 },
+        ]),
+      ).toThrow(/候補 1 が複数の上限の群/);
+    });
+    it("上限なしの群どうしで同じ候補が重複している", () => {
+      expect(() =>
+        runGreedyAllocation(3, [2, 2, 2], sets, 10, [
+          { members: [0, 1], max: 0 },
+          { members: [1, 2], max: Number.NaN },
+        ]),
+      ).toThrow(/候補 1 が複数の上限の群/);
+    });
+    it("同じ群の中で同じ候補が 2 回入っている(有効な群・上限なしの群のどちらも)", () => {
+      expect(() => runGreedyAllocation(3, [2, 2, 2], sets, 10, [{ members: [1, 1], max: 1 }])).toThrow(/候補 1 が複数の上限の群/);
+      expect(() => runGreedyAllocation(3, [2, 2, 2], sets, 10, [{ members: [1, 1], max: 0 }])).toThrow(/候補 1 が複数の上限の群/);
+    });
+    it("重複のない上限なしの群が付いても、上限を渡さない呼び出しとビット単位で一致する", () => {
+      const odds = [3, 2.5, 4];
+      const multi: OutcomeIndexSet[] = [
+        { indices: [0], probability: 0.4 },
+        { indices: [1, 2], probability: 0.3 },
+        { indices: [], probability: 0.3 },
+      ];
+      const base = runGreedyAllocation(3, odds, multi, 200);
+      expect(base.fractions.filter((x) => x > 0).length).toBeGreaterThanOrEqual(1);
+      expect(runGreedyAllocation(3, odds, multi, 200, [{ members: [0, 1], max: 0 }, { members: [2], max: -1 }])).toEqual(base);
+    });
     it("候補番号が範囲外・非整数", () => {
       expect(() => runGreedyAllocation(3, [2, 2, 2], sets, 10, [{ members: [3], max: 1 }])).toThrow();
       expect(() => runGreedyAllocation(3, [2, 2, 2], sets, 10, [{ members: [-1], max: 1 }])).toThrow();
