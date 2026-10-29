@@ -1185,6 +1185,21 @@ describe("Issue #384: 人気帯ごとの期待値と回収率(breakdown)", () =>
     expect(plain.breakdown).toHaveLength(7);
   });
 
+  it("★配線(Issue #389-c): 分析の行の race_class が、再計算の内訳のクラスの節に届く。cond_read=0(条件を読めなかった)の行でも使う。race_class が無い行はクラスの節を出さない", async () => {
+    const a = setup();
+    const rows = withBets();
+    a.store.state.rows = { ...rows, analyses: rows.analyses.map((x) => ({ ...x, courseType: null, distance: null, trackCondition: null, grade: null, raceName: null, condRead: 0, raceClass: "2勝クラス" })) };
+    const res = await a.core.getReport("central");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    const section = res.breakdown!.find((s) => s.heading === "条件ごとの的中率と回収率(クラス)");
+    expect(section?.rows.map((r) => r.label)).toEqual(["全体", "2勝クラス"]);
+    const b = setup();
+    b.store.state.rows = { ...rows, analyses: rows.analyses.map((x) => ({ ...x, condRead: 1, raceClass: null })) };
+    const plain = await b.core.getReport("central");
+    if (plain.status !== "ready") throw new Error("ready のはず");
+    expect(plain.breakdown!.map((s) => s.heading)).not.toContain("条件ごとの的中率と回収率(クラス)");
+  });
+
   it("再計算で内訳を作り、kv のキャッシュにも応答にも載せる。値は純関数 computeVerifyBreakdowns の節と同じ。区分ごとに別の値(地方のレースが無ければ nar は null)", async () => {
     const { core, store, kv } = setup();
     const rows = withBets();

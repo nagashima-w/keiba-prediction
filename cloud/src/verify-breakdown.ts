@@ -54,7 +54,7 @@ import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/
 import { mulberry32 } from "../../packages/core/src/common/random.js";
 import { formatSignedPt } from "../../packages/core/src/view/verify-format.js";
 import { formatRecoveryPercent } from "./recovery-format";
-import { axisLabelsOf, DISTANCE_LABELS, SURFACE_LABELS, TRACK_LABELS, type RaceConditionFacts } from "./verify-race-conditions";
+import { axisLabelsOf, CLASS_LABELS, DISTANCE_LABELS, SURFACE_LABELS, TRACK_LABELS, type RaceConditionFacts } from "./verify-race-conditions";
 import type { VerifyBetRow } from "./verify-read";
 
 /** ブートストラップの反復回数(ユーザー指定)。 */
@@ -618,9 +618,9 @@ export interface ConditionRow {
   readonly diffFromAll: number | null;
 }
 
-/** 分析の行の条件(Issue #389)で分ける 3 つの軸。クラスは含めない(正確な値を保存する #426 のあとに #389-c で足す)。 */
-type AxisKey = "distance" | "track" | "surface";
-const AXIS_KEYS: readonly AxisKey[] = ["distance", "track", "surface"];
+/** 分析の行の条件(Issue #389)で分ける 4 つの軸。クラスは #426 が保存した正確な値だけを使う(推定しない。#389-c)。 */
+type AxisKey = "distance" | "track" | "surface" | "class";
+const AXIS_KEYS: readonly AxisKey[] = ["distance", "track", "surface", "class"];
 
 export type ConditionKey = "kind" | "venue" | "field" | AxisKey;
 
@@ -671,7 +671,7 @@ export function buildConditionStats(
   source: VerifyDataSource,
   events: readonly ProposedBetEvent[],
   lookups: PopularityLookups = createPopularityLookups(source),
-  facts: ReadonlyMap<number, RaceConditionFacts | null> = new Map(),
+  facts: ReadonlyMap<number, RaceConditionFacts> = new Map(),
 ): ConditionStats {
   const ledger = buildRaceLedger(events);
   const overall = summarizeRaces("全体", ledger, null);
@@ -680,7 +680,7 @@ export function buildConditionStats(
   const kind: Record<"central" | "nar", RaceLedgerRow[]> = { central: [], nar: [] };
   const field: RaceBucket[] = FIELD_BAND_LABELS.map(() => ({ races: [] }));
   const fieldUnknown: RaceLedgerRow[] = [];
-  const axisRaces: Record<AxisKey, Map<string, RaceLedgerRow[]>> = { distance: new Map(), track: new Map(), surface: new Map() };
+  const axisRaces: Record<AxisKey, Map<string, RaceLedgerRow[]>> = { distance: new Map(), track: new Map(), surface: new Map(), class: new Map() };
   for (const race of ledger) {
     const code = race.raceId.slice(4, 6);
     byVenue.set(code, [...(byVenue.get(code) ?? []), race]);
@@ -688,7 +688,7 @@ export function buildConditionStats(
     if (k !== null) {
       kind[k].push(race);
     }
-    const labels = axisLabelsOf(facts.get(race.analysisId) ?? null);
+    const labels = axisLabelsOf(facts.get(race.analysisId) ?? null, k);
     for (const axis of AXIS_KEYS) {
       axisRaces[axis].set(labels[axis], [...(axisRaces[axis].get(labels[axis]) ?? []), race]);
     }
@@ -737,6 +737,7 @@ export function buildConditionStats(
       { key: "distance", rows: axisRows("distance", DISTANCE_LABELS) },
       { key: "track", rows: axisRows("track", TRACK_LABELS) },
       { key: "surface", rows: axisRows("surface", SURFACE_LABELS) },
+      { key: "class", rows: axisRows("class", CLASS_LABELS) },
     ],
   };
 }
@@ -773,10 +774,11 @@ const CONDITION_HEADINGS: Readonly<Record<ConditionKey, string>> = {
   distance: "条件ごとの的中率と回収率(距離帯)",
   track: "条件ごとの的中率と回収率(馬場)",
   surface: "条件ごとの的中率と回収率(芝ダ)",
+  class: "条件ごとの的中率と回収率(クラス)",
 };
 
 /**
- * 距離帯・馬場・芝ダの節の文言(Issue #389)。上の既存 3 節の長い説明・注記を繰り返さず、軸ごとの定義と固有の注意だけを書く
+ * 距離帯・馬場・芝ダ・クラスの節の文言(Issue #389)。上の既存 3 節の長い説明・注記を繰り返さず、軸ごとの定義と固有の注意だけを書く
  * (区間・『参考』の見方は『上の節と同じ』)。画面の重さを抑えるため短く保つ(試験が上限を固定している)。
  */
 const AXIS_SECTION_TEXT: Readonly<Record<AxisKey, { readonly description: string; readonly note: string }>> = {
@@ -792,19 +794,23 @@ const AXIS_SECTION_TEXT: Readonly<Record<AxisKey, { readonly description: string
     description: "芝・ダート・障害で分けます。読めなかったレースは『不明』です。",
     note: "区間と『参考』の見方は上の節と同じです。",
   },
+  class: {
+    description: "出馬表・結果ページのクラスで分けます。地方は表記がばらばらなので『地方(対象外)』の 1 行にまとめました。",
+    note: "『オープン』は重賞・リステッドを含みます。『不明』はクラスを読めていないレース(補完中を含む)です。区間と『参考』は上の節と同じです。",
+  },
 };
 
 /** 軸ごとの『不明』の行の見出し(分類できたレースがあるかの判定に使う)。 */
-const AXIS_UNKNOWN_LABEL: Readonly<Record<AxisKey, string>> = { distance: "不明", track: "未発表・不明", surface: "不明" };
+const AXIS_UNKNOWN_LABEL: Readonly<Record<AxisKey, readonly string[]>> = { distance: ["不明"], track: ["未発表・不明"], surface: ["不明"], class: ["不明", "地方(対象外)"] };
 
 const isAxisKey = (key: ConditionKey): key is AxisKey => (AXIS_KEYS as readonly string[]).includes(key);
 
-/** 軸の行に、『不明』以外の行(分類できたレース)があるか。 */
-const hasClassifiedRow = (axis: AxisKey, rows: readonly ConditionRow[]): boolean => rows.some((r) => r.label !== AXIS_UNKNOWN_LABEL[axis]);
+/** 軸の行に、『不明』以外の行(分類できたレース)があるか。クラスは『地方(対象外)』も分類できたことに数えない(中央のレースが 1 つも分類できないときは節を出さない)。 */
+const hasClassifiedRow = (axis: AxisKey, rows: readonly ConditionRow[]): boolean => rows.some((r) => !AXIS_UNKNOWN_LABEL[axis].includes(r.label));
 
 /**
  * 条件別の集計を、画面に渡す節に組み立てる。開催区分の節は全体の区分でだけ出す(中央のみ・地方のみでは行が 1 つになる)。条件の行が無い節は出さない。
- * 距離帯・馬場・芝ダは、『不明』以外の行(分類できたレース)が 1 つも無い節も出さない(Issue #389)。
+ * 距離帯・馬場・芝ダ・クラスは、『不明』以外の行(分類できたレース)が 1 つも無い節も出さない(Issue #389。クラスは『地方(対象外)』も数えない=中央のレースが 1 つも分類できなければ出さない。地方のみの区分では出ない)。
  */
 export function renderConditionSections(stats: ConditionStats, venue: VerifyVenueFilter): BreakdownSection[] {
   const overallRow: BreakdownRow = { label: "全体", cells: conditionCells(stats.overall, false) };
@@ -841,12 +847,12 @@ function venueKindOf(raceId: string): "central" | "nar" | null {
 /**
  * 人気帯の内訳を、区分(all・central・nar)ごとに作る。買い目の判定は core の `collectProposedBetEvents`(本体の `proposedBet` と同じ判定)を 1 回だけ回し、
  * 区分は race_id で分ける(最新選択・先読みの除外はレース単位なので、区分で絞った本体の集計と一致する)。判定できた買い目が 1 つも無い区分は null。
- * `betRows` は全件の読みの買い目の行(odds・ev を持つ)。`facts` は分析 id → 条件の索引(`buildConditionFactsIndex`。省略は全レースが各軸の『不明』= 新しい 3 つの節は出ない)。
+ * `betRows` は全件の読みの買い目の行(odds・ev を持つ)。`facts` は分析 id → 条件の索引(`buildConditionFactsIndex`。省略は全レースが各軸の『不明』〈クラスは地方が『地方(対象外)』〉= 距離帯・馬場・芝ダ・クラスの節は出ない)。
  */
 export function computeVerifyBreakdowns(
   source: VerifyDataSource,
   betRows: readonly VerifyBetRow[],
-  facts: ReadonlyMap<number, RaceConditionFacts | null> = new Map(),
+  facts: ReadonlyMap<number, RaceConditionFacts> = new Map(),
 ): Record<VerifyVenueFilter, VerifyBreakdownResult | null> {
   const events = collectProposedBetEvents(source, PRODUCTION_VERIFY_CONFIG);
   const extras = buildBetExtras(betRows);
