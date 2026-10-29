@@ -133,6 +133,9 @@ const SETTINGS_ON: CloudSettings = {
   // Issue #470: このファイルは地方の部分的な取り直し(取得の本数・組合せの買い目の再現)を調べる。既定の下限(0.05)は三連複・三連単の買い目をほぼ全て外してしまい、
   // 『分析時の配分に組合せの買い目が入る』前提が成り立たなくなるので、下限なしにする(下限そのものは race-day-close.test.ts と min-hit-prob 系のテストが調べる)。
   minHitProb: 0,
+  // Issue #533: 単勝・複勝の点数の上限もなしにする(既定の2点だと、複勝だけの経路の『分析時の配分が多点』の前提が成り立たない。上限そのものは race-day-pre-race.test.ts と core のテストが調べる)。
+  maxWinBetsPerRace: 0,
+  maxPlaceBetsPerRace: 0,
   includeComboOdds: true,
   baseScoreWeightJockey: 0, // 騎手の成績を取らない(取得の本数を固定する。race-day-close.test.ts と同じ理由)
   baseScoreWeightTrainer: 0,
@@ -426,6 +429,60 @@ describe("入力の的中確率の下限(allocationSettings.minHitProb。Issue #
   it("数でない・範囲外の値は壊れた入力として弾く(null)", () => {
     for (const bad of ["0.05", null, Number.NaN, -0.01, 1.01]) {
       expect(parse({ minHitProb: bad }), String(bad)).toBeNull();
+    }
+  });
+});
+
+describe("入力の点数の上限(allocationSettings.maxWinBets・maxPlaceBets。Issue #533)の検査(parseCloseInput)", () => {
+  const base = {
+    v: 1,
+    kaisaiDate: DATE,
+    horses: [{ umaban: 1, wakuban: 1, horseName: "テスト", prior: 0.3, adjustedProb: 0.3, hadWinOdds: true, hadPlaceOdds: true }],
+    evThreshold: 1.1,
+    baseRoute: "mixed",
+  };
+  const settings = {
+    bankroll: 1000,
+    perRaceCap: 1000,
+    kellyFraction: 0.5,
+    includeComboOdds: true,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
+  };
+  const parse = (extra: Record<string, unknown>) => parseCloseInput(JSON.stringify({ ...base, allocationSettings: { ...settings, ...extra } }));
+
+  it("あれば、単勝と複勝を別々にそのまま読む(0 も)", () => {
+    const input = parse({ maxWinBets: 3, maxPlaceBets: 5 })!;
+    expect(input.allocationSettings.maxWinBets).toBe(3);
+    expect(input.allocationSettings.maxPlaceBets).toBe(5);
+    const zero = parse({ maxWinBets: 0, maxPlaceBets: 0 })!;
+    expect(zero.allocationSettings.maxWinBets).toBe(0);
+    expect(zero.allocationSettings.maxPlaceBets).toBe(0);
+  });
+  it(
+    "項目の無い入力は 0(上限なし)で読む。設定の表〈cloud_settings〉の旧い行は 2 で読む(settings.ts)のとは意図して違う: " +
+      "ここは分析時のスナップショットで、項目が無いのは上限を知らない旧い Worker が上限なしで配分した分析だから、再計算も上限なしに揃える(上限の差だけで『買い目の変化』が出ないようにする)",
+    () => {
+      const input = parse({});
+      expect(input).not.toBeNull();
+      expect(input!.allocationSettings.maxWinBets).toBe(0);
+      expect(input!.allocationSettings.maxPlaceBets).toBe(0);
+      // 片方だけ無い入力も、無い方だけ 0
+      const half = parse({ maxPlaceBets: 2 })!;
+      expect(half.allocationSettings.maxWinBets).toBe(0);
+      expect(half.allocationSettings.maxPlaceBets).toBe(2);
+    },
+  );
+  it("整数でない・範囲外・数でない値は壊れた入力として弾く(null)", () => {
+    for (const key of ["maxWinBets", "maxPlaceBets"]) {
+      for (const bad of ["2", null, Number.NaN, -1, 19, 1.5]) {
+        expect(parse({ [key]: bad }), `${key}=${String(bad)}`).toBeNull();
+      }
+      expect(parse({ [key]: 18 }), `${key}=18`).not.toBeNull();
     }
   });
 });

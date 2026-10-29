@@ -36,6 +36,7 @@ import {
   summarize,
   summarizePayouts,
   summarizeReplay,
+  validateOverrides,
   type ReplayOutcome,
   type PayoutSummary,
   type ReplayOverrides,
@@ -57,7 +58,7 @@ const META: AllocationMetaInput = {
   route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOddsWide: "present", comboOddsTrio: "present",
   bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: 1, includeWide: 1, includeTrio: 1,
   includeQuinella: 1, includeExacta: 1, includeTrifecta: 1, includeBracketQuinella: 1, betUnit: 100, greedySteps: 1000, candidateCap: 2000,
-  modelId: "plackett-luce", modelApproximate: 0, oddsStatus: "result", minHitProb: 0, belowFloorCount: null, missedJson: null,
+  modelId: "plackett-luce", modelApproximate: 0, oddsStatus: "result", minHitProb: 0, maxWinBets: 0, maxPlaceBets: 0, belowFloorCount: null, missedJson: null,
 };
 
 const HORSES = Array.from({ length: 6 }, (_, k) => ({ umaban: k + 1, prior: 0.3, adjustedProb: 0.3, placeOddsMin: 2, ev: 1.1 }));
@@ -133,6 +134,8 @@ describe("parseAllocationDataset(読み込みの検証。黙って捨てない)"
       ["allocation の列", (r) => { r["allocation"]["extra"] = 1; }, /allocation に知らない列があります\(extra\)/],
       ["settings の列", (r) => { delete r["allocation"]["settings"]["bankroll"]; }, /allocation\.settings の列が足りません\(bankroll\)/],
       ["settings の型", (r) => { r["allocation"]["settings"]["kelly_fraction"] = null; }, /allocation\.settings の数の列の型が違います/],
+      ["settings の点数の上限の型(単勝。Issue #533)", (r) => { r["allocation"]["settings"]["max_win_bets"] = "2"; }, /allocation\.settings の数の列の型が違います/],
+      ["settings の点数の上限の型(複勝。Issue #533)", (r) => { r["allocation"]["settings"]["max_place_bets"] = true; }, /allocation\.settings の数の列の型が違います/],
       ["codes の列", (r) => { r["allocation"]["codes"]["extra"] = 1; }, /allocation\.codes に知らない列があります\(extra\)/],
       ["買い目の型", (r) => { r["allocation"]["bets"][0]["stake"] = "300"; }, /allocation\.bets\[0\] の型が違います/],
       ["買い目の列", (r) => { r["allocation"]["bets"][0]["extra"] = 1; }, /allocation\.bets\[0\] に知らない列があります\(extra\)/],
@@ -294,6 +297,11 @@ describe("judgeRaceBets(払戻の判定。検証画面と同じ規則〈createRa
 const P = [0.9, 0.8, 0.7, 0.25, 0.2, 0.1, 0.03, 0.02];
 const PLACE = [1.1, 1.15, 1.2, 4.5, 6.5, 12, 50, 80];
 const pad = (n: number): string => String(n).padStart(2, "0");
+/**
+ * 単勝・複勝が両方とも複数点買われる混在の経路にするための組合せオッズ(Issue #533)。既定の合成(全券種が高オッズ)は、ワイドなどの組合せが予算を吸って単勝・複勝が買われない。
+ * ワイド 1-2 だけを低めのオッズ(3 倍)にして、組合せの候補は 1 件だけ(買い目に入る)にする。上限なしの結果は『単勝 3 点・複勝 5 点・ワイド 1 点』(下の前提のテストが固定する)。
+ */
+const MIXED_COMBOS: Record<string, Record<string, number>> = { wide: { "0102": 3 } };
 const combos = (() => {
   const out: Record<string, Record<string, number>> = { wide: {}, trio: {}, quinella: {}, exacta: {}, trifecta: {}, bracketQuinella: {} };
   for (let a = 1; a <= 8; a += 1) {
@@ -318,6 +326,8 @@ interface RowOverride {
   readonly bets?: AllocationBetInput[];
   readonly horseValues?: ReadonlyMap<number, { readonly placeOddsMin: number | null; readonly ev: number | null }>;
   readonly analysis?: ChosenAllocationAnalysis;
+  /** 組合せオッズの差し替え(券種 → キー → オッズ。Issue #533 のテスト用。既定は全券種とも高オッズの合成)。 */
+  readonly combos?: Record<string, Record<string, number>>;
   /** 結果・払戻・取込印の差し替え(回収額のテスト用)。 */
   readonly results?: AllocationResultInput[];
   readonly payouts?: Array<{ betType: string; comboKey: string; payout: number }>;
@@ -328,7 +338,7 @@ interface RowOverride {
 function raceRow(settings: Settings, wakuban: { snapshot?: boolean; result?: boolean } = {}, stored: RowOverride = {}): AllocationRaceRow {
   const meta: AllocationMetaInput = {
     ...META, comboOddsWide: "present", comboOddsTrio: null, bankroll: 100_000, perRaceCap: 20_000, kellyFraction: 0.5, evThreshold: 1, includeComboOdds: 1,
-    includeWide: 0, includeTrio: 0, includeQuinella: 0, includeExacta: 0, includeTrifecta: 0, includeBracketQuinella: 0, minHitProb: 0, ...settings, ...stored.meta,
+    includeWide: 0, includeTrio: 0, includeQuinella: 0, includeExacta: 0, includeTrifecta: 0, includeBracketQuinella: 0, minHitProb: 0, maxWinBets: 0, maxPlaceBets: 0, ...settings, ...stored.meta,
   };
   return buildAllocationRaceRow({
     analysis: stored.analysis ?? CHOSEN,
@@ -337,7 +347,7 @@ function raceRow(settings: Settings, wakuban: { snapshot?: boolean; result?: boo
       present: true,
       race: { course_type: "芝", distance: 1600, grade: null },
       horses: new Map(P.map((_, i) => [i + 1, { wakuban: wakuban.snapshot === false ? null : i + 1, win_odds: 10, ninki: i + 1, place_min: PLACE[i]!, place_max: PLACE[i]! + 1 }] as const)),
-      combos,
+      combos: stored.combos ?? combos,
       comboStates: {},
     },
     meta,
@@ -424,7 +434,7 @@ const betString = (r: { bets: string[] }): string => r.bets.join(",");
  * `stored` で保存側だけ変える(設定の NULL・配分のコードの食い違い・買い目の改変)。
  */
 function consistentRow(settings: Settings, wakuban: { snapshot?: boolean; result?: boolean } = {}, stored: RowOverride = {}): AllocationRaceRow {
-  const outcome = replayRace(raceRow(settings, wakuban, stored.analysis === undefined ? {} : { analysis: stored.analysis }));
+  const outcome = replayRace(raceRow(settings, wakuban, { ...(stored.analysis === undefined ? {} : { analysis: stored.analysis }), ...(stored.combos === undefined ? {} : { combos: stored.combos }) }));
   if (outcome.kind !== "replayed") throw new Error("前提: 計算し直せる行でなければならない");
   const { allocation, rows } = outcome.result;
   const m = allocation.meta;
@@ -719,9 +729,9 @@ describe("classifyReplay(一致しない理由の分類。Issue #494)", () => {
     expect(classifyReplay(floorNull)).toMatchObject({ reason: "legacy-settings", nullSettings: ["min_hit_prob"] });
   });
 
-  it("NULL を解釈する 8 列(include_combo_odds・6 券種の include_*・min_hit_prob)は、どれが NULL でも legacy-settings(列の取りこぼしが無い)", () => {
+  it("NULL を解釈する 10 列(include_combo_odds・6 券種の include_*・min_hit_prob・max_win_bets・max_place_bets)は、どれが NULL でも legacy-settings(列の取りこぼしが無い)", () => {
     // 列ごとに、NULL を解釈すると提案が変わる行を作る(保存の提案は、その列が ON・下限ありで計算したもの)
-    const cases: Array<[string, Settings, Partial<AllocationMetaInput>]> = [
+    const cases: Array<[string, Settings, Partial<AllocationMetaInput>, Record<string, Record<string, number>>?]> = [
       ["include_combo_odds", { includeWide: 1, includeComboOdds: 1 }, { includeComboOdds: null }],
       ["include_wide", { includeWide: 1 }, { includeWide: null }],
       ["include_trio", { includeTrio: 1 }, { includeTrio: null }],
@@ -730,10 +740,13 @@ describe("classifyReplay(一致しない理由の分類。Issue #494)", () => {
       ["include_trifecta", { includeTrifecta: 1 }, { includeTrifecta: null }],
       ["include_bracket_quinella", { includeBracketQuinella: 1 }, { includeBracketQuinella: null }],
       ["min_hit_prob", { includeComboOdds: 0, minHitProb: 0.25 }, { minHitProb: null }],
+      // Issue #533: 点数の上限(0=上限なし。NULL は上限なしと解釈する)。保存の提案は複勝を1点に絞って計算した
+      ["max_win_bets", { includeComboOdds: 1, includeWide: 1, maxWinBets: 1 }, { maxWinBets: null }, MIXED_COMBOS],
+      ["max_place_bets", { includeComboOdds: 0, maxPlaceBets: 1 }, { maxPlaceBets: null }],
     ];
-    expect(cases).toHaveLength(8);
-    for (const [column, settings, meta] of cases) {
-      const row = consistentRow(settings, {}, { meta });
+    expect(cases).toHaveLength(10);
+    for (const [column, settings, meta, comboOdds] of cases) {
+      const row = consistentRow(settings, {}, { meta, ...(comboOdds === undefined ? {} : { combos: comboOdds }) });
       expect(row.allocation!.bets.length, `${column}: 前提(保存の提案が空でない)`).toBeGreaterThan(0);
       expect(row.allocation!.settings[column as keyof NonNullable<AllocationRaceRow["allocation"]>["settings"]], `${column}: 前提(保存の設定が NULL)`).toBeNull();
       const outcome = replayRace(row) as Extract<ReplayOutcome, { kind: "replayed" }>;
@@ -1171,5 +1184,89 @@ describe("runCli(--replay。Issue #494)", () => {
         expect(out, argv.join(" ")).toMatch(/計算し直した提案\(計算し直せた 4 行/);
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #533: 単勝・複勝の点数の上限(max_win_bets・max_place_bets)
+
+describe("replayRace: 単勝・複勝の点数の上限(Issue #533)", () => {
+  const count = (r: ReturnType<typeof replayed>, betType: string): number => r.bets.filter((b) => b.startsWith(`${betType}:`)).length;
+  /** 混在の経路の行。組合せは MIXED_COMBOS(ワイド 1 点だけ)で、単勝・複勝も買われる。 */
+  const mixedRow = (settings: Settings): AllocationRaceRow => raceRow({ includeComboOdds: 1, includeWide: 1, ...settings }, {}, { combos: MIXED_COMBOS });
+  const mixed = mixedRow({ maxWinBets: 0, maxPlaceBets: 0 });
+  const placeOnly = raceRow({ includeComboOdds: 0, maxWinBets: 0, maxPlaceBets: 0 });
+
+  it("前提(空振り防止): 上限なしでは、混在の経路で単勝・複勝とも2点より多く、複勝だけの経路で複勝が2点より多い", () => {
+    const free = replayed(mixed);
+    expect(free.route).toBe("mixed");
+    expect(count(free, "win")).toBeGreaterThan(2);
+    expect(count(free, "place")).toBeGreaterThan(2);
+    expect(count(free, "wide")).toBeGreaterThanOrEqual(1);
+    const freePlace = replayed(placeOnly);
+    expect(freePlace.route).toBe("place-only");
+    expect(count(freePlace, "place")).toBeGreaterThan(2);
+  });
+
+  it("保存した上限で計算し直す: 混在の経路で単勝2点・複勝1点を超えない。単勝と複勝は別々に数える", () => {
+    const limited = replayed(mixedRow({ maxWinBets: 2, maxPlaceBets: 1 }));
+    expect(limited.route).toBe("mixed");
+    expect(count(limited, "win")).toBeLessThanOrEqual(2);
+    expect(count(limited, "win")).toBeGreaterThanOrEqual(1);
+    expect(count(limited, "place")).toBe(1);
+    expect(count(limited, "wide")).toBeGreaterThanOrEqual(1); // 組合せの券種は上限の対象外
+    expect(limited.bets.join(",")).not.toBe(replayed(mixed).bets.join(","));
+  });
+
+  it("保存した上限で計算し直す: 複勝だけの経路で複勝2点を超えない。単勝の上限はこの経路に効かない", () => {
+    const limited = replayed(raceRow({ includeComboOdds: 0, maxWinBets: 1, maxPlaceBets: 2 }));
+    expect(limited.route).toBe("place-only");
+    expect(count(limited, "place")).toBe(2);
+    expect(replayed(raceRow({ includeComboOdds: 0, maxWinBets: 1, maxPlaceBets: 0 }))).toEqual(replayed(placeOnly));
+  });
+
+  it("max_win_bets・max_place_bets が NULL(Issue #533 より前の行)は、上限なし(0)として計算し直す。上限2とは違う", () => {
+    for (const make of [mixedRow, (settings: Settings) => raceRow({ includeComboOdds: 0, ...settings })]) {
+      const asNull = replayed(make({ maxWinBets: null, maxPlaceBets: null }));
+      expect(asNull).toEqual(replayed(make({ maxWinBets: 0, maxPlaceBets: 0 })));
+      expect(asNull.bets.join(",")).not.toBe(replayed(make({ maxWinBets: 2, maxPlaceBets: 2 })).bets.join(","));
+    }
+  });
+
+  it("上書き(maxWinBetsPerRace・maxPlaceBetsPerRace)は、NULL の解釈より後に当たる。保存の値が 0 の行にも、NULL の行にも効き、保存の上限を 0 に上書きすると外せる", () => {
+    const stored2 = mixedRow({ maxWinBets: 2, maxPlaceBets: 2 });
+    const free = replayed(mixed);
+    expect(replayed(stored2, { maxWinBetsPerRace: 0, maxPlaceBetsPerRace: 0 })).toEqual(free);
+    const forced = replayed(mixed, { maxWinBetsPerRace: 2, maxPlaceBetsPerRace: 2 });
+    expect(forced).toEqual(replayed(stored2));
+    expect(count(forced, "win")).toBeLessThanOrEqual(2);
+    expect(count(forced, "place")).toBeLessThanOrEqual(2);
+    const nullRow = mixedRow({ maxWinBets: null, maxPlaceBets: null });
+    expect(replayed(nullRow, { maxWinBetsPerRace: 2, maxPlaceBetsPerRace: 2 })).toEqual(forced);
+    // 単勝だけ・複勝だけの上書きは、別々に効く
+    const winOnly = replayed(mixed, { maxWinBetsPerRace: 1 });
+    expect(count(winOnly, "win")).toBe(1);
+    expect(count(winOnly, "place")).toBe(count(free, "place"));
+    const placeOnlyOverride = replayed(mixed, { maxPlaceBetsPerRace: 1 });
+    expect(count(placeOnlyOverride, "place")).toBe(1);
+    expect(count(placeOnlyOverride, "win")).toBe(count(free, "win"));
+  });
+
+  it("上書きの検査: 整数でない・0〜18 の外・有限でない値は例外(本番の関数は範囲外を黙って別の値に置き換えるので、試算の道具では例外にする)。0 と 18 は通る", () => {
+    for (const key of ["maxWinBetsPerRace", "maxPlaceBetsPerRace"] as const) {
+      for (const bad of [-1, 19, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(() => validateOverrides({ [key]: bad }), `${key}=${String(bad)}`).toThrow();
+      }
+      expect(() => validateOverrides({ [key]: 0 })).not.toThrow();
+      expect(() => validateOverrides({ [key]: 18 })).not.toThrow();
+    }
+  });
+
+  it("CLI の --override: maxWinBetsPerRace=2 maxPlaceBetsPerRace=1 を読み、説明の文字列にも出る。範囲外は例外", () => {
+    expect(parseOverrides(["maxWinBetsPerRace=2", "maxPlaceBetsPerRace=1"])).toEqual({ maxWinBetsPerRace: 2, maxPlaceBetsPerRace: 1 });
+    expect(describeOverrides(parseOverrides(["maxWinBetsPerRace=2", "maxPlaceBetsPerRace=1"]))).toBe("maxWinBetsPerRace=2, maxPlaceBetsPerRace=1");
+    for (const pair of ["maxWinBetsPerRace=19", "maxPlaceBetsPerRace=-1", "maxPlaceBetsPerRace=1.5"]) {
+      expect(() => parseOverrides([pair]), pair).toThrow();
+    }
   });
 });

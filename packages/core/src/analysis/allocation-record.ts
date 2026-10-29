@@ -123,7 +123,7 @@ import type {
 } from "./mixed-race-allocation.js";
 
 /**
- * `AnalysisPipelineDeps.allocationSettings` が持つ11項目(`evThreshold` を含まない。Issue #470 で的中確率の下限 `minHitProb` を足して10→11)。
+ * `AnalysisPipelineDeps.allocationSettings` が持つ13項目(`evThreshold` を含まない。Issue #470 で的中確率の下限 `minHitProb` を足して10→11、Issue #533 で単勝・複勝の点数の上限 `maxWinBets`・`maxPlaceBets` を足して11→13)。
  * `evThreshold` は `deps.evConfig ?? DEFAULT_EV_CONFIG` から別途導出し、二重ソースを
  * 作らない(analysis-pipeline.ts 側の責務。#59 3節)。
  *
@@ -177,11 +177,15 @@ export interface AnalysisAllocationSettings {
   readonly includeBracketQuinellaInAllocation: boolean;
   /** 的中確率の下限(設定の `minHitProb`。Issue #470。0〜1、0は下限なし)。 */
   readonly minHitProb: number;
+  /** 単勝の点数の上限(設定の `maxWinBetsPerRace`。Issue #533。整数、0は上限なし)。 */
+  readonly maxWinBets: number;
+  /** 複勝の点数の上限(設定の `maxPlaceBetsPerRace`。Issue #533。整数、0は上限なし)。 */
+  readonly maxPlaceBets: number;
 }
 
 /**
- * 11項目(Issue #470前は10項目)の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
- * `buildMixedRaceAllocationWithOutcome` が要求する12項目の `MixedAllocationSettings`(任意の `recordMissed` を除く)を作る。
+ * 13項目(Issue #533前は11項目)の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
+ * `buildMixedRaceAllocationWithOutcome` が要求する14項目の `MixedAllocationSettings`(任意の `recordMissed` を除く)を作る。
  */
 export function toMixedAllocationSettings(
   settings: AnalysisAllocationSettings,
@@ -210,7 +214,7 @@ function codesColumnsOf(
 }
 
 /**
- * `MixedAllocationSettings`(#26-E3aで11項目になった)の全11項目を、メタ行の設定エコー11列へ写す
+ * `MixedAllocationSettings` の設定(#26-E3aで11項目になり、Issue #470で下限、Issue #533で単勝・複勝の点数の上限が加わって14項目)の全14項目を、メタ行の設定エコー14列へ写す
  * (Issue #118でincludeQuinella・Issue #126でincludeExacta・Issue #140でincludeTrifecta・
  * Issue #151でincludeBracketQuinellaを追加した)。
  */
@@ -230,6 +234,8 @@ function settingsColumnsOf(
   | "includeTrifecta"
   | "includeBracketQuinella"
   | "minHitProb"
+  | "maxWinBets"
+  | "maxPlaceBets"
 > {
   return {
     bankroll: settings.bankroll,
@@ -244,6 +250,8 @@ function settingsColumnsOf(
     includeTrifecta: settings.includeTrifectaInAllocation,
     includeBracketQuinella: settings.includeBracketQuinellaInAllocation,
     minHitProb: settings.minHitProb,
+    maxWinBets: settings.maxWinBets,
+    maxPlaceBets: settings.maxPlaceBets,
   };
 }
 

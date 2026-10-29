@@ -54,10 +54,10 @@ const EXPECTED_WEIGHT_DEFAULTS = {
  * cloud 専用の項目(Issue #189 ほか)。exe の設定は PC 上で手動の分析を行うので、「発走何分前に自動評価するか」などを持たなかった。
  * 新しい cloud 専用の項目を足すときは、ここに明示する(足し忘れると、下の「項目集合」の検査が落ちる)。
  */
-const CLOUD_ONLY_KEYS = ["analysisModel", "preRaceOffsetMinutes", "minHitProb"] as const;
+const CLOUD_ONLY_KEYS = ["analysisModel", "preRaceOffsetMinutes", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace"] as const;
 
-/** cloud 専用の項目のうち、既定値を固定値で押さえるもの(Issue #470: 的中確率の下限。ユーザー決定 2026-10-23)。 */
-const EXPECTED_CLOUD_ONLY_DEFAULTS = { minHitProb: 0.05 } as const;
+/** cloud 専用の項目のうち、既定値を固定値で押さえるもの(Issue #470: 的中確率の下限。ユーザー決定 2026-10-23。Issue #533: 単勝・複勝の点数の上限。ユーザー決定 2026-10-29)。 */
+const EXPECTED_CLOUD_ONLY_DEFAULTS = { minHitProb: 0.05, maxWinBetsPerRace: 2, maxPlaceBetsPerRace: 2 } as const;
 
 /** スコアリングの重み15項目(Issue #218。タイム指数は Issue #353、調教師成績は Issue #354)。cloud では平坦な接頭辞つきのキー。対応表は cloud/src/settings.ts の SCORING_WEIGHT_FIELDS。 */
 const WEIGHT_FIELDS: readonly string[] = SCORING_WEIGHT_FIELDS.map((f) => f.field);
@@ -78,7 +78,7 @@ describe("クラウド版の設定の既定値(固定値との比較)", () => {
     }
   });
 
-  it("Issue #470: cloud 専用の minHitProb(的中確率の下限)の既定値は 0.05 の固定値", () => {
+  it("Issue #470・#533: cloud 専用の minHitProb(的中確率の下限)は 0.05、maxWinBetsPerRace・maxPlaceBetsPerRace(単勝・複勝の点数の上限)は 2 の固定値", () => {
     for (const [key, expected] of Object.entries(EXPECTED_CLOUD_ONLY_DEFAULTS)) {
       expect((DEFAULT_CLOUD_SETTINGS as unknown as Record<string, unknown>)[key], key).toBe(expected);
     }

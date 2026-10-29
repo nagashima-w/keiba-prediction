@@ -472,6 +472,9 @@ describe("締切の直前の再計算: 取り直しと再計算(中央)", () => 
     // それ以外(買い目・メタの他の項目〈外れた件数を含む〉)は、同じオッズなら分析時と一致する。
     // 設定の下限が、分析(取得 → 計算 → 保存)の配分まで届いている(配線の抜けを検出する。既定 0.05 と別の値での確認は allocation-settings-of.test.ts)。
     expect(base.meta.minHitProb).toBe(ALL_ON.minHitProb);
+    // Issue #533: 単勝・複勝の点数の上限も、設定から分析の配分の記録まで届いている(再計算も同じ値で計算する。下の expectedFor が同じ値を渡す)
+    expect(base.meta.maxWinBets).toBe(ALL_ON.maxWinBetsPerRace);
+    expect(base.meta.maxPlaceBets).toBe(ALL_ON.maxPlaceBetsPerRace);
     expect(base.meta.belowFloorCount, "前提: 実際に外れた買い目がある").toBeGreaterThan(0);
     expect(base.meta.missed, "前提: 分析時は外した買い目を記録している").not.toBeNull();
     expect(base.meta.missed!.length).toBeGreaterThan(0);
@@ -538,7 +541,7 @@ describe("締切の直前の再計算: 取り直しと再計算(中央)", () => 
         horses: race.horses.map((x) => ({ umaban: x.shutuba.umaban, wakuban: x.shutuba.wakuban, horseName: x.shutuba.name, prior: saved.horses.find((s) => s.umaban === x.shutuba.umaban)!.prior, adjustedProb: saved.horses.find((s) => s.umaban === x.shutuba.umaban)!.adjustedProb })),
         odds: race.odds,
         comboOdds: race.meta.comboOdds,
-        allocationSettings: { bankroll: ALL_ON.bankroll, perRaceCap: ALL_ON.perRaceCap, kellyFraction: ALL_ON.kellyFraction, minHitProb: ALL_ON.minHitProb, includeComboOdds: true, includeWideInAllocation: ALL_ON.includeWideInAllocation, includeTrioInAllocation: ALL_ON.includeTrioInAllocation, includeQuinellaInAllocation: ALL_ON.includeQuinellaInAllocation, includeExactaInAllocation: ALL_ON.includeExactaInAllocation, includeTrifectaInAllocation: ALL_ON.includeTrifectaInAllocation, includeBracketQuinellaInAllocation: ALL_ON.includeBracketQuinellaInAllocation },
+        allocationSettings: { bankroll: ALL_ON.bankroll, perRaceCap: ALL_ON.perRaceCap, kellyFraction: ALL_ON.kellyFraction, minHitProb: ALL_ON.minHitProb, maxWinBets: ALL_ON.maxWinBetsPerRace, maxPlaceBets: ALL_ON.maxPlaceBetsPerRace, includeComboOdds: true, includeWideInAllocation: ALL_ON.includeWideInAllocation, includeTrioInAllocation: ALL_ON.includeTrioInAllocation, includeQuinellaInAllocation: ALL_ON.includeQuinellaInAllocation, includeExactaInAllocation: ALL_ON.includeExactaInAllocation, includeTrifectaInAllocation: ALL_ON.includeTrifectaInAllocation, includeBracketQuinellaInAllocation: ALL_ON.includeBracketQuinellaInAllocation },
         evConfig: { threshold: ALL_ON.evThreshold },
       }).allocation;
     };

@@ -141,10 +141,12 @@ import {
   resolveEffectivePerRaceCap,
   resolveGreedySteps,
   resolveKellyFraction,
+  resolveMaxBets,
   resolveMinHitProb,
   roundStakes,
   runGreedyAllocation,
   type BelowFloorBet,
+  type GreedyGroupLimit,
   type OutcomeIndexSet,
   type SkipReasonCode,
 } from "./allocation-primitives.js";
@@ -604,6 +606,15 @@ export interface GeneralBetAllocationConfig {
    * coreの既定は下限なし。
    */
   readonly minHitProb?: number;
+  /**
+   * 券種ごとの点数の上限(Issue #533。1レースあたり)。キーは券種(`AllocationBetType`)、値はその券種で賭け金の付く買い目の上限点数。
+   * 券種ごとに別々に数える(単勝と複勝を合わせた上限ではない)。後から削るのではなく、貪欲配分の中で「上限の中でどの点を残し、
+   * 予算をどう回すか」を選ぶ(その券種で割合が正の候補が上限に達したら、まだ 0 の同じ券種の候補は選ばない)。
+   * 書かない券種・値が 0・非有限・1未満は上限なし(従来どおり。省略・空もビット単位で同じ出力)。非整数は切り捨てる。
+   * 本番が使うのは単勝(`win`)と複勝(`place`)だけで、既定値(2)は設定(cloud の `maxWinBetsPerRace`・`maxPlaceBetsPerRace`)の側にある。
+   * 組合せ券種の上限は今は使わない(エンジンは書けば効く)。
+   */
+  readonly maxBetsByType?: Readonly<Partial<Record<AllocationBetType, number>>>;
 }
 
 /** 既定の券種一般配分設定。数値既定値は allocation-primitives.ts を参照し二重定義しない。 */
@@ -1346,11 +1357,24 @@ export function allocateGeneralBets(
   // convergedは組合せ経路では診断値に載せる(複勝経路は受け取って捨てるのと対照的。
   // 「無制限側のΣx*=1.000はgreedyStepsを使い切っただけで収束ではない」という誤読を
   // 防ぐため、判定結果を利用者に見える形で残す)。
+  // Issue #533: 券種ごとの点数の上限。最適化に載せた候補(finalCandidates)のうち、上限を付けた券種の候補を群にする。
+  // 上限なしの券種は群にしない(上限をまったく付けない呼び出しは、群を渡さず従来と同じ呼び出しになる)。
+  const limits: GreedyGroupLimit[] = [];
+  for (const [betType, rawMax] of Object.entries(config.maxBetsByType ?? {})) {
+    const max = resolveMaxBets(rawMax);
+    if (max === 0) continue;
+    const members: number[] = [];
+    finalCandidates.forEach((c, i) => {
+      if (c.betType === betType) members.push(i);
+    });
+    if (members.length > 0) limits.push({ members, max });
+  }
   const { fractions: continuousFractions, converged } = runGreedyAllocation(
     finalCandidates.length,
     odds,
     outcomeIndexSets,
     greedySteps,
+    limits.length > 0 ? limits : undefined,
   );
   const sumContinuousFractions = continuousFractions.reduce((acc, x) => acc + x, 0);
 

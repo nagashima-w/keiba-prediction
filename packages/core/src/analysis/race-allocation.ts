@@ -33,6 +33,12 @@ export interface BetAllocationSettings {
    * `MixedAllocationSettings` では必須にして、配線の抜けを型検査で捕まえる(ここは省略可にして既存の呼び出しを壊さない)。
    */
   readonly minHitProb?: number;
+  /**
+   * 複勝の点数の上限(Issue #533。1レースあたり。整数)。省略・0は上限なし。設定の `maxPlaceBetsPerRace`(`cloud/src/settings.ts`)。
+   * `MixedAllocationSettings` では必須にして、配線の抜けを型検査で捕まえる(ここは省略可にして既存の呼び出しを壊さない)。
+   * 単勝の上限(`maxWinBets`)は、単勝を扱わないこの経路には無い。
+   */
+  readonly maxPlaceBets?: number;
 }
 
 /**
@@ -147,6 +153,7 @@ export function buildRaceAllocation(
     betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
     greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
     minHitProb: settings.minHitProb ?? 0,
+    maxBets: settings.maxPlaceBets ?? 0,
   }, model);
   return { kind: "computed", result };
 }

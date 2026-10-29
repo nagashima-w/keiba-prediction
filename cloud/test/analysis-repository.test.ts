@@ -953,3 +953,68 @@ describe("的中確率の下限と、下限で外した買い目の記録(Issue 
     expect(old).toEqual({ min_hit_prob: null, below_floor_count: null, missed_json: null });
   });
 });
+
+describe("単勝・複勝の点数の上限の記録(Issue #533。meta.maxWinBets・maxPlaceBets)", () => {
+  function withMax(i: number, over: { maxWinBets?: number; maxPlaceBets?: number; minHitProb?: number; belowFloorCount?: number | null; missed?: null }): AnalysisRecord {
+    const base = mkRecord(i, 2, 1);
+    return { ...base, allocation: { ...base.allocation!, meta: { ...base.allocation!.meta, ...over } } };
+  }
+  function fake(): { db: AnalysisDb; statements: { sql: string; binds: unknown[] }[] } {
+    const statements: { sql: string; binds: unknown[] }[] = [];
+    const db = {
+      prepare(sql: string) {
+        const statement = { sql, binds: [] as unknown[] };
+        statements.push(statement);
+        return {
+          bind(...values: unknown[]) {
+            statement.binds = values;
+            return this;
+          },
+        };
+      },
+    } as unknown as AnalysisDb;
+    return { db, statements };
+  }
+  type MaxRow = { max_win_bets: number | null; max_place_bets: number | null };
+  async function maxRow(id: number): Promise<MaxRow> {
+    return (await local.db.prepare("SELECT max_win_bets, max_place_bets FROM analysis_allocation_meta WHERE analysis_id = ?").bind(id).first<MaxRow>())!;
+  }
+
+  it("保存の文: 下限と上限の両方を持つ記録は、同じ UPDATE 1文に5列を書く(束縛値は 下限・外れた件数・JSON・単勝の上限・複勝の上限)", () => {
+    const f = fake();
+    buildSaveStatements(f.db, withMax(1, { minHitProb: 0.05, belowFloorCount: 2, missed: null, maxWinBets: 2, maxPlaceBets: 3 }), YM);
+    const update = f.statements[f.statements.length - 1]!;
+    expect(update.sql).toBe(
+      "UPDATE analysis_allocation_meta SET min_hit_prob = ?, below_floor_count = ?, missed_json = ?, max_win_bets = ?, max_place_bets = ? WHERE analysis_id = (SELECT max(id) FROM analyses)",
+    );
+    expect(update.binds).toEqual([0.05, 2, null, 2, 3]);
+    expect(f.statements.filter((st) => /^UPDATE analysis_allocation_meta/.test(st.sql))).toHaveLength(1); // 文は増やさない(1文に束ねる)
+  });
+
+  it("保存の文: 上限だけを持つ記録は max の2列だけを書く。上限を持たない記録は max_ の列に触れない(旧い呼び出し・テストの手組みの記録の文を変えない)", () => {
+    const only = fake();
+    buildSaveStatements(only.db, withMax(1, { maxWinBets: 0, maxPlaceBets: 0 }), YM);
+    expect(only.statements[only.statements.length - 1]!.sql).toBe("UPDATE analysis_allocation_meta SET max_win_bets = ?, max_place_bets = ? WHERE analysis_id = (SELECT max(id) FROM analyses)");
+    expect(only.statements[only.statements.length - 1]!.binds).toEqual([0, 0]);
+    const without = fake();
+    buildSaveStatements(without.db, mkRecord(1, 2, 1), YM);
+    expect(without.statements.some((st) => /max_win_bets|max_place_bets/.test(st.sql))).toBe(false);
+  });
+
+  it("D1 に保存して読み戻す: 単勝と複勝の上限が別々に入る。0(上限なし)は NULL ではなく 0 のまま", async () => {
+    const a = await maxRow((await store().saveAnalysis(withMax(1, { maxWinBets: 2, maxPlaceBets: 5 }))).id);
+    expect(a).toEqual({ max_win_bets: 2, max_place_bets: 5 });
+    const zero = await maxRow((await store().saveAnalysis(withMax(2, { maxWinBets: 0, maxPlaceBets: 0 }))).id);
+    expect(zero).toEqual({ max_win_bets: 0, max_place_bets: 0 });
+  });
+
+  it("下限と上限を一緒に保存しても、下限の3列の値は変わらない(1文に束ねても列の対応がずれない)", async () => {
+    const saved = await store().saveAnalysis(withMax(1, { minHitProb: 0.05, belowFloorCount: 7, missed: null, maxWinBets: 1, maxPlaceBets: 2 }));
+    const row = (await local.db.prepare("SELECT min_hit_prob, below_floor_count, missed_json, max_win_bets, max_place_bets FROM analysis_allocation_meta WHERE analysis_id = ?").bind(saved.id).first())!;
+    expect(row).toEqual({ min_hit_prob: 0.05, below_floor_count: 7, missed_json: null, max_win_bets: 1, max_place_bets: 2 });
+  });
+
+  it("旧い記録(maxWinBets・maxPlaceBets を持たない)は、2列とも NULL のまま(記録なし=上限なしの意味)", async () => {
+    expect(await maxRow((await store().saveAnalysis(mkRecord(9, 2, 1))).id)).toEqual({ max_win_bets: null, max_place_bets: null });
+  });
+});

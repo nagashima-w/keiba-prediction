@@ -38,7 +38,7 @@ const META_SQL = `SELECT analysis_id AS analysisId, route, unavailable_reason AS
        combo_odds_wide AS comboOddsWide, combo_odds_trio AS comboOddsTrio, bankroll, per_race_cap AS perRaceCap, kelly_fraction AS kellyFraction, ev_threshold AS evThreshold,
        include_combo_odds AS includeComboOdds, include_wide AS includeWide, include_trio AS includeTrio, include_quinella AS includeQuinella, include_exacta AS includeExacta,
        include_trifecta AS includeTrifecta, include_bracket_quinella AS includeBracketQuinella, bet_unit AS betUnit, greedy_steps AS greedySteps, candidate_cap AS candidateCap,
-       model_id AS modelId, model_approximate AS modelApproximate, odds_status AS oddsStatus, min_hit_prob AS minHitProb, below_floor_count AS belowFloorCount, missed_json AS missedJson
+       model_id AS modelId, model_approximate AS modelApproximate, odds_status AS oddsStatus, min_hit_prob AS minHitProb, max_win_bets AS maxWinBets, max_place_bets AS maxPlaceBets, below_floor_count AS belowFloorCount, missed_json AS missedJson
   FROM analysis_allocation_meta WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analysis_id`;
 const BETS_SQL = `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev
   FROM analysis_bets WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analysis_id, bet_type, combo_key`;

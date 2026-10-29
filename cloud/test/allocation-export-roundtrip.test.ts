@@ -276,6 +276,26 @@ describe("往復: 書き出した 1 行から計算し直すと、分析時に�
     expect(compareReplay(row, replayed(noFloor)).same).toBe(false);
   });
 
+  it("単勝・複勝の点数の上限がある設定(Issue #533): 上限が配分の記録と書き出しの設定に入り、上限どおりの提案が計算し直しで一致する。上限を外して計算し直すと提案が変わる(上限が入力として効いている)", async () => {
+    const { record } = await analyzeAndSave({ ...ALL_BETS_SETTINGS, maxWinBets: 2, maxPlaceBets: 1 });
+    const count = (t: string) => record.allocation!.bets.filter((b) => b.betType === t).length;
+    expect(count("win")).toBeLessThanOrEqual(2);
+    expect(count("place")).toBeLessThanOrEqual(1);
+    expect(count("win") + count("place")).toBeGreaterThanOrEqual(1);
+    expect(record.allocation!.meta.maxWinBets).toBe(2);
+    expect(record.allocation!.meta.maxPlaceBets).toBe(1);
+    const row = (await exportAndLoad()).rows[0]!;
+    expect(row.allocation!.settings.max_win_bets).toBe(2);
+    expect(row.allocation!.settings.max_place_bets).toBe(1);
+    expect(compareReplay(row, replayed(row)).differences).toEqual([]);
+    // 上限を外して(0=上限なし)計算し直すと、提案が変わる
+    const noCap: AllocationRaceRow = { ...row, allocation: { ...row.allocation!, settings: { ...row.allocation!.settings, max_win_bets: 0, max_place_bets: 0 } } };
+    expect(compareReplay(row, replayed(noCap)).same).toBe(false);
+    // 上限の列が NULL(Issue #533 より前の行)は、上限なしとして計算し直す(0 を明示した行と同じ提案)
+    const nullCap: AllocationRaceRow = { ...row, allocation: { ...row.allocation!, settings: { ...row.allocation!.settings, max_win_bets: null, max_place_bets: null } } };
+    expect(replayed(nullCap)).toEqual(replayed(noCap));
+  });
+
   it("発売前(yoso。推定 EV): 単勝からの推定で EV を作り、配分は出ない経路(コードも一致)", async () => {
     const { record, id } = await analyzeAndSave(ALL_BETS_SETTINGS, (race) => ({ ...race, odds: { ...race.odds, oddsStatus: "yoso", place: {} } }));
     expect(record.allocation!.meta.route).toBe("yoso");

@@ -173,6 +173,7 @@ import {
   resolveEffectivePerRaceCap,
   resolveGreedySteps,
   resolveKellyFraction,
+  resolveMaxBets,
   resolveMinHitProb,
   roundStakes,
   runGreedyAllocation,
@@ -248,6 +249,13 @@ export interface BetAllocationConfig {
    * 本番の既定値(0.05)は設定(cloud の `minHitProb`)の側にあり、coreの既定は下限なし。
    */
   readonly minHitProb?: number;
+  /**
+   * 複勝の点数の上限(Issue #533。1レースあたり)。賭け金の付く買い目がこの点数を超えないようにする。後から削るのではなく、
+   * 貪欲配分の中で「上限の中でどの点を残し、予算をどう回すか」を選ぶ(割合が正の候補が上限に達したら、まだ 0 の候補は選ばない)。
+   * 省略・0・非有限・1未満は上限なし(従来どおり。ビット単位で同じ出力)。非整数は切り捨てる。
+   * 本番の既定値(2)は設定(cloud の `maxPlaceBetsPerRace`)の側にあり、coreの既定は上限なし。
+   */
+  readonly maxBets?: number;
 }
 
 /** 既定の馬券配分設定。 */
@@ -527,11 +535,14 @@ export function allocateBets(
   // runGreedyAllocationは{fractions, converged}を返す(機能D-2a・boss指摘2026-08-05)。
   // convergedは複勝経路では受け取って捨てる(BetAllocationResultに新規フィールドを
   // 追加しない。公開契約を一切変えない方針は組合せ経路一般化の後も維持する)。
+  // Issue #533: 複勝の点数の上限。候補はすべて複勝なので、全候補が1つの群になる(上限なしなら群を渡さない)。
+  const maxBets = resolveMaxBets(config.maxBets);
   const { fractions: continuousFractions } = runGreedyAllocation(
     candidateHorses.length,
     odds,
     outcomeIndexSets,
     greedySteps,
+    maxBets > 0 ? [{ members: candidateHorses.map((_, i) => i), max: maxBets }] : undefined,
   );
   const sumContinuousFractions = continuousFractions.reduce((acc, x) => acc + x, 0);
 

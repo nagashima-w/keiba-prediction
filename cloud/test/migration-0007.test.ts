@@ -14,7 +14,7 @@ import { D1_HEALTH_SQL } from "../src/d1-health";
 
 const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 const read = (name: string): string => readFileSync(path.join(MIGRATIONS, name), "utf-8");
-const ALL = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0013_result_scratched.sql", "0016_result_wakuban.sql", "0018_mark_repair.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql"]; // 0010〜0012・0014・0015・0017 は検査の文が読む列に関わらない(0013 は race_results.scratched。Issue #72。0016 は race_results.wakuban。Issue #269。0018 は analyses.mark_repair_json。Issue #317)
+const ALL = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0013_result_scratched.sql", "0016_result_wakuban.sql", "0018_mark_repair.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0029_max_bets.sql"]; // 0010〜0012・0014・0015・0017・0019〜0022・0026〜0028 は検査の文が読む列に関わらない(0013 は race_results.scratched。Issue #72。0016 は race_results.wakuban。Issue #269。0018 は analyses.mark_repair_json。Issue #317。0029 は analysis_allocation_meta.max_win_bets・max_place_bets。Issue #533)
 
 describe("migration 0007: 行のある DB への適用", () => {
   it("0001〜0006 のあとに分析の行(馬の子つき・理由つき)を入れ、0007 を適用すると、行は残り、llm_calls_json は NULL。以後は JSON 文字列を書ける", () => {
@@ -56,7 +56,7 @@ describe("D1_HEALTH_SQL(/api/health の D1 の検査): 必要な列が1つでも
     return db;
   }
 
-  it("全 migration(0001〜0009 と 0013・0016・0018・0023・0024・0025)を適用した空の D1(行が1つも無い)で成功する(行が無くても、列の有無は文の準備で検査される)", () => {
+  it("全 migration(0001〜0009 と 0013・0016・0018・0023・0024・0025・0029)を適用した空の D1(行が1つも無い)で成功する(行が無くても、列の有無は文の準備で検査される)", () => {
     const db = dbWith(ALL);
     expect(() => db.prepare(D1_HEALTH_SQL).get()).not.toThrow();
     db.close();
@@ -90,6 +90,8 @@ describe("D1_HEALTH_SQL(/api/health の D1 の検査): 必要な列が1つでも
     ["0024(analyses.race_class)", ALL.filter((f) => !f.startsWith("0024")), /race_class/],
     // Issue #470: 分析の保存(メタ行への UPDATE)が書く analysis_allocation_meta.min_hit_prob ほか2列。未適用のまま新しい Worker が出ると、分析の保存の batch が丸ごと落ちる。
     ["0025(analysis_allocation_meta.min_hit_prob)", ALL.filter((f) => !f.startsWith("0025")), /min_hit_prob/],
+    // Issue #533: 分析の保存(メタ行への UPDATE)が書く analysis_allocation_meta.max_win_bets・max_place_bets。未適用のまま新しい Worker が出ると、分析の保存の batch が丸ごと落ちる。
+    ["0029(analysis_allocation_meta.max_win_bets)", ALL.filter((f) => !f.startsWith("0029")), /max_win_bets|max_place_bets/],
   ];
   it.each(missing)("%s が未適用の D1 では失敗する(migration の反映漏れを、/api/health が d1.ok=false にできる)", (_name, files, column) => {
     const db = dbWith(files);

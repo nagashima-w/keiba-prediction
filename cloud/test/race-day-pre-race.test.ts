@@ -111,6 +111,9 @@ const ALL_ON: CloudSettings = {
   // Issue #470: このファイルは取得の本数・キャッシュの使い回し・券種スイッチ(組合せの買い目が入ること)を調べる。既定の下限(0.05)は三連複・三連単の買い目をほぼ全て外し、
   // 『買い目に三連単が入る/入らない』の対照が成り立たなくなるので、下限なしにする(下限そのものは min-hit-prob 系のテストと race-day-close.test.ts が調べる)。
   minHitProb: 0,
+  // Issue #533: 単勝・複勝の点数の上限も、このファイルでは上限なしにする(既定の2点だと、買い目の券種・本数を調べる対照が崩れる)。上限そのものは下の専用のテストが調べる。
+  maxWinBetsPerRace: 0,
+  maxPlaceBetsPerRace: 0,
   includeComboOdds: true,
   // このファイルの取得の本数(19・25・8・2 本など)は、騎手の成績を取らない取得で固定している。Issue #226 で、既定の重み(騎手 0.15)のときは騎手の
   // 年度別成績も取る(16頭・騎手16人で+16本)ようになったので、ここでは騎手の重みを 0(= 取らない)にして従来の検査の意味を保つ
@@ -422,6 +425,65 @@ describe("発走前の分析: 計算・保存ステップ(AC-c5・c1・c6)", () 
     await off.core.runNextStep();
     await off.core.runNextStep();
     expect(off.sink.saved[0]!.allocation!.bets.some((b) => b.betType === "trifecta")).toBe(false);
+  });
+
+  it("Issue #533: 単勝・複勝の点数の上限(設定)が、取得 → 計算 → 保存した配分の買い目とメタ行まで届く。券種ごとに別々に数え、組合せの券種は影響を受けない", async () => {
+    const run = async (patch: Partial<CloudSettings>) => {
+      const h = harness();
+      h.settings = { ...ALL_ON, ...patch };
+      await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+      await h.core.runNextStep();
+      await h.core.runNextStep();
+      return h.sink.saved[0]!.allocation!;
+    };
+    const count = (a: Awaited<ReturnType<typeof run>>, t: string) => a.bets.filter((b) => b.betType === t).length;
+    const free = await run({});
+    // 前提(空振り防止): 上限なしでは、単勝は2点より多く、複勝は1点より多く買い、組合せの券種も買っている(このフィクスチャの上限なしの買い目は 単勝 6 点・複勝 2 点)
+    expect(count(free, "win")).toBeGreaterThan(2);
+    expect(count(free, "place")).toBeGreaterThan(1);
+    expect(free.bets.some((b) => b.betType !== "win" && b.betType !== "place")).toBe(true);
+    expect(free.meta.maxWinBets).toBe(0);
+    expect(free.meta.maxPlaceBets).toBe(0);
+
+    const both = await run({ maxWinBetsPerRace: 2, maxPlaceBetsPerRace: 1 });
+    expect(count(both, "win")).toBeLessThanOrEqual(2);
+    expect(count(both, "place")).toBeLessThanOrEqual(1);
+    expect(count(both, "win")).toBeGreaterThanOrEqual(1);
+    expect(count(both, "place")).toBe(1);
+    expect(both.bets.some((b) => b.betType !== "win" && b.betType !== "place")).toBe(true);
+    expect(both.meta.maxWinBets).toBe(2);
+    expect(both.meta.maxPlaceBets).toBe(1);
+
+    // 単勝と複勝は別々に数える: 単勝だけ 1 にしても複勝は上限なしのまま(2 点以上買う)、複勝だけ 1 にしても単勝は上限なしのまま(2 点より多く買う)
+    const winOnly = await run({ maxWinBetsPerRace: 1, maxPlaceBetsPerRace: 0 });
+    expect(count(winOnly, "win")).toBe(1);
+    expect(count(winOnly, "place")).toBeGreaterThan(1);
+    expect(winOnly.meta.maxWinBets).toBe(1);
+    expect(winOnly.meta.maxPlaceBets).toBe(0);
+    const placeOnly = await run({ maxWinBetsPerRace: 0, maxPlaceBetsPerRace: 1 });
+    expect(count(placeOnly, "place")).toBe(1);
+    expect(count(placeOnly, "win")).toBeGreaterThan(2);
+  });
+
+  it("Issue #533: 組合せオッズを取得しない設定(複勝だけの経路)でも、複勝の点数の上限が効き、メタ行に残る。単勝の上限はこの経路に影響しない", async () => {
+    const run = async (patch: Partial<CloudSettings>) => {
+      const h = harness();
+      h.settings = { ...ALL_ON, includeComboOdds: false, ...patch };
+      await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+      await h.core.runNextStep();
+      await h.core.runNextStep();
+      return h.sink.saved[0]!.allocation!;
+    };
+    const free = await run({});
+    expect(free.meta.route).toBe("place-only");
+    expect(free.bets.length).toBeGreaterThan(2); // 前提: 上限なしなら複勝を3点以上買う
+    const limited = await run({ maxPlaceBetsPerRace: 2, maxWinBetsPerRace: 1 });
+    expect(limited.meta.route).toBe("place-only");
+    expect(limited.bets.length).toBeLessThanOrEqual(2);
+    expect(limited.bets.length).toBeGreaterThanOrEqual(1);
+    expect(limited.bets.every((b) => b.betType === "place")).toBe(true);
+    expect(limited.meta.maxPlaceBets).toBe(2);
+    expect(limited.meta.maxWinBets).toBe(1);
   });
 
   it("EV の閾値(設定)が効く: 閾値が極端に低いと EV プラスの馬がいて、極端に高いといない", async () => {

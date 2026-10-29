@@ -17,6 +17,7 @@ import type { AnalysisAllocationSettings } from "../../packages/core/src/analysi
 import { isFiniteNumber, isRecord } from "../../packages/core/src/common/guards";
 import { assertClosePayload, CLOSE_ROUNDS, type CloseSavePayload } from "./analysis-close";
 import type { SqlLike } from "./sql-like";
+import { MAX_BETS_PER_RACE_MAX } from "./settings";
 
 /** 取得の試行回数の上限(初回 + 再試行 1 回)。 */
 export const CLOSE_FETCH_MAX_ATTEMPTS = 2;
@@ -73,7 +74,7 @@ export interface CloseInput {
   /** 開催日(YYYYMMDD)。 */
   readonly kaisaiDate: string;
   readonly horses: readonly CloseInputHorse[];
-  /** 設定のスナップショットのうち、配分に使う 11 項目(分析時と同じ値。Issue #470 で的中確率の下限 `minHitProb` を足して 10 → 11。旧い入力には無く、0 で読む)。 */
+  /** 設定のスナップショットのうち、配分に使う 13 項目(分析時と同じ値。Issue #470 で的中確率の下限 `minHitProb`、Issue #533 で単勝・複勝の点数の上限 `maxWinBets`・`maxPlaceBets` を足して 10 → 13。旧い入力には無く、いずれも 0 で読む)。 */
   readonly allocationSettings: AnalysisAllocationSettings;
   /** EV の閾値(分析時の設定の `evThreshold`)。 */
   readonly evThreshold: number;
@@ -141,6 +142,18 @@ export function parseCloseInput(text: string): CloseInput | null {
     }
     minHitProb = settings.minHitProb;
   }
+  // 単勝・複勝の点数の上限(Issue #533)。**項目の無い旧い入力は 0(上限なし)で読む**。設定の表(`cloud_settings`)の旧い行を 2 で読む(settings.ts)のとは意図して違う:
+  // ここは分析時のスナップショットで、項目が無いのは上限を知らない旧い Worker が上限なしで配分した分析だから、再計算も上限なしに揃える
+  // (上限の差だけで『買い目の変化』が出ないようにする。下限 `minHitProb` と同じ理由)。あるのに整数 0〜18 でないものは壊れた入力。
+  const readMaxBets = (raw: unknown): number | null => {
+    if (raw === undefined) return 0;
+    return isFiniteNumber(raw) && Number.isInteger(raw) && raw >= 0 && raw <= MAX_BETS_PER_RACE_MAX ? raw : null;
+  };
+  const maxWinBets = readMaxBets(settings.maxWinBets);
+  const maxPlaceBets = readMaxBets(settings.maxPlaceBets);
+  if (maxWinBets === null || maxPlaceBets === null) {
+    return null;
+  }
   const seen = new Set<number>();
   const horses: CloseInputHorse[] = [];
   for (const h of raw.horses as unknown[]) {
@@ -166,6 +179,8 @@ export function parseCloseInput(text: string): CloseInput | null {
       perRaceCap: settings.perRaceCap,
       kellyFraction: settings.kellyFraction,
       minHitProb,
+      maxWinBets,
+      maxPlaceBets,
       includeComboOdds: settings.includeComboOdds as boolean,
       includeWideInAllocation: settings.includeWideInAllocation as boolean,
       includeTrioInAllocation: settings.includeTrioInAllocation as boolean,

@@ -148,7 +148,7 @@ export class AllocationFakeStore {
         analysisId, route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOddsWide: "present", comboOddsTrio: "present",
         bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: 1, includeWide: 1, includeTrio: 1, includeQuinella: 1,
         includeExacta: 1, includeTrifecta: 1, includeBracketQuinella: 1, betUnit: 100, greedySteps: 1000, candidateCap: 2000, modelId: "plackett-luce",
-        modelApproximate: 0, oddsStatus: "result", minHitProb: 0, belowFloorCount: null, missedJson: null,
+        modelApproximate: 0, oddsStatus: "result", minHitProb: 0, belowFloorCount: null, missedJson: null, maxWinBets: 0, maxPlaceBets: 0,
       }));
     const bets = metas.map((m) => ({ analysisId: m.analysisId, betType: "place", comboKey: "01", stake: 100 + m.analysisId, odds: 2, ev: 1.1 }));
     const payouts = raceIds.map((raceId) => ({ raceId, betType: "wide", comboKey: "0102", payout: 400 + Number(raceId.slice(8, 10)) }));
