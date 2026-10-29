@@ -259,6 +259,31 @@ export function buildOutcomeIndexSets<T>(
   });
 }
 
+/**
+ * 貪欲逐次配分の「群ごとの点数の上限」(Issue #533)。`members` は候補インデックス(candidates配列内の位置)で、
+ * 群の中で連続最適比率が正の候補が `max` 点に達したら、まだ 0 の同じ群の候補はそれ以降のステップで選ばない。
+ *
+ * 契約: 候補は高々1つの群にしか入れない(重複は例外)。`members` は 0 以上 n 未満の整数(範囲外・非整数は例外)。
+ * `max` が 1 未満(0・負・NaN)の群は上限なし(無視する)。非整数は切り捨てる。呼び出し側(設定の解決)が
+ * 値の意味づけ(0=上限なし)を済ませてから渡す。
+ */
+export interface GreedyGroupLimit {
+  readonly members: readonly number[];
+  readonly max: number;
+}
+
+/**
+ * 設定の「1レースあたりの点数の上限」(単勝・複勝。Issue #533)を解決する。非有限・1未満(0・負)は 0 =
+ * 上限なし、非整数は切り捨てる。省略(undefined)も上限なし。本番の既定値(2)は設定(cloud の
+ * `maxWinBetsPerRace`・`maxPlaceBetsPerRace`)の側にあり、core の既定は上限なし(`minHitProb` と同じ分担)。
+ */
+export function resolveMaxBets(raw: number | undefined): number {
+  if (raw === undefined || !Number.isFinite(raw) || raw < 1) {
+    return 0;
+  }
+  return Math.floor(raw);
+}
+
 /** runGreedyAllocation の結果。収束(局所最適に到達)したのか、貪欲分割数(greedySteps)を
  *  使い切って打ち切られただけなのかを明示的に区別する(boss指摘・2026-08-05: 「無制限側の
  *  Σx*=1.000は収束ではなくgreedyStepsを使い切ったという意味であり、品質の基準線にならない」)。 */
@@ -450,10 +475,42 @@ export function runGreedyAllocation(
   odds: readonly number[],
   outcomeIndexSets: readonly OutcomeIndexSet[],
   greedySteps: number,
+  limits?: readonly GreedyGroupLimit[],
 ): GreedyAllocationResult {
   if (n === 0) {
     return { fractions: [], converged: true };
   }
+
+  // ── 群ごとの点数の上限(Issue #533)。`blocked[i]===1` の候補は、そのステップ以降ずっと選ばない
+  // (群の中で割合が正の候補が上限に達し、かつ自分はまだ 0)。上限なし(未指定・空・全群が無効)のときは
+  // `hasLimits` が false のままで、下のステップループは上限を知らない呼び出しと同じ演算だけを行う
+  // (ビット単位で同一)。`blocked` を触るのは `hasLimits` が true のときだけ。
+  const groupOf = new Int32Array(n).fill(-1);
+  const groupMax: number[] = [];
+  const groupMembers: (readonly number[])[] = [];
+  const groupPositive: number[] = [];
+  for (const limit of limits ?? []) {
+    for (const m of limit.members) {
+      if (!Number.isInteger(m) || m < 0 || m >= n) {
+        throw new Error(`runGreedyAllocation: 上限の群の候補番号が範囲外または非整数です(${String(m)}。候補数 ${n})`);
+      }
+      if (groupOf[m] !== -1) {
+        throw new Error(`runGreedyAllocation: 候補 ${m} が複数の上限の群に入っています`);
+      }
+    }
+    if (!(limit.max >= 1)) {
+      continue; // 上限なしの群(0・負・NaN)。メンバーの重複検査は上で済ませた。
+    }
+    const g = groupMax.length;
+    for (const m of limit.members) {
+      groupOf[m] = g;
+    }
+    groupMax.push(Math.floor(limit.max));
+    groupMembers.push(limit.members);
+    groupPositive.push(0);
+  }
+  const hasLimits = groupMax.length > 0;
+  const blocked = new Uint8Array(n);
 
   const outcomeCount = outcomeIndexSets.length;
 
@@ -590,6 +647,9 @@ export function runGreedyAllocation(
     // 変えていない。
     let worstFresh = Infinity;
     for (let i = 0; i < n; i++) {
+      if (hasLimits && blocked[i] === 1) {
+        continue; // 選ばれない候補は評価しない。安全性の判定(worstFresh)にも使わない(その候補の接触先の資産で、高速パスの可否を決めない)。
+      }
       const cStart = contactOffsets[i]!;
       const cEnd = contactOffsets[i + 1]!;
       const freshTerm = (x[i]! + delta) * odds[i]!;
@@ -627,6 +687,9 @@ export function runGreedyAllocation(
         commonLogSum += outcomeProbabilities[j]! * logW;
       }
       for (let i = 0; i < n; i++) {
+        if (hasLimits && blocked[i] === 1) {
+          continue;
+        }
         let trialLogSum = commonLogSum;
         const cStart = contactOffsets[i]!;
         const cEnd = contactOffsets[i + 1]!;
@@ -646,6 +709,9 @@ export function runGreedyAllocation(
       // 稀なステップでのみ発生する。既存実装と完全に同じ式・同じ走査順のため、この分岐が
       // 選ばれるステップの結果は旧実装とビット一致する。
       for (let i = 0; i < n; i++) {
+        if (hasLimits && blocked[i] === 1) {
+          continue;
+        }
         const trialX = x.slice();
         trialX[i] = trialX[i]! + delta;
         const trialF = computeF(trialSumX, trialX);
@@ -666,9 +732,24 @@ export function runGreedyAllocation(
     }
     // 状態(x・sumX・currentF)の更新は常に旧実装と同じcomputeFによるフレッシュな再計算で行う
     // (高速パスの中間値はbestIdxの選択にのみ使い、状態更新には使わない)。
+    const becamePositive = x[bestIdx] === 0;
     x[bestIdx] = x[bestIdx]! + delta;
     sumX = trialSumX;
     currentF = computeF(sumX, x)!;
+    if (hasLimits && becamePositive) {
+      const g = groupOf[bestIdx]!;
+      if (g >= 0) {
+        groupPositive[g] = groupPositive[g]! + 1;
+        if (groupPositive[g]! >= groupMax[g]!) {
+          // 群が上限に達した。まだ 0 の同じ群の候補は、これ以降選ばない(正の候補は引き続き増やせる)。
+          for (const m of groupMembers[g]!) {
+            if (x[m] === 0) {
+              blocked[m] = 1;
+            }
+          }
+        }
+      }
+    }
   }
 
   return { fractions: x, converged };

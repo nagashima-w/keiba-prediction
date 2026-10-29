@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { afterAll, describe, expect, it } from "vitest";
+import { HttpError } from "../../packages/core/src/scraper/http-client.js";
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids.js";
 import { narRaceListSubUrl, raceListSubUrl, raceResultUrl } from "../../packages/core/src/scraper/urls.js";
 import { parseFetchArgs, runFetch, type FetchOptions } from "../history-results/fetch-lib.js";
@@ -383,6 +384,114 @@ describe("fetch: 今日以降の開催日・今月以降のカレンダー", () 
   });
 });
 
+describe("fetch: 新しい順にたどる(--newest-first)", () => {
+  it("月は新しい順、月の中の開催日も新しい順。カレンダー → 一覧 → 結果の順は同じ", async () => {
+    const out = tmp();
+    const cal12 = "https://race.netkeiba.com/top/calendar.html?year=2021&month=12";
+    const site = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211106", "20211107"]),
+      [cal12]: mkCalendar(["20211204", "20211205"]),
+      [listUrl("20211106")]: mkList([{ id: "202105050101" }]),
+      [listUrl("20211107")]: mkList([{ id: "202105050201" }]),
+      [listUrl("20211204")]: mkList([{ id: "202105050301" }]),
+      [listUrl("20211205")]: mkList([{ id: "202105050401" }]),
+      [resultUrl("202105050101")]: RESULT_OK,
+      [resultUrl("202105050201")]: RESULT_OK,
+      [resultUrl("202105050301")]: RESULT_OK,
+      [resultUrl("202105050401")]: RESULT_OK,
+    });
+    await runFetch(baseOpts(out, site.fetchText, { to: "2021-12", newestFirst: true }));
+    expect(site.calls).toEqual([
+      cal12,
+      listUrl("20211205"),
+      resultUrl("202105050401"),
+      listUrl("20211204"),
+      resultUrl("202105050301"),
+      CAL_CENTRAL,
+      listUrl("20211107"),
+      resultUrl("202105050201"),
+      listUrl("20211106"),
+      resultUrl("202105050101"),
+    ]);
+  });
+
+  it("指定しなければ古い順のまま", async () => {
+    const out = tmp();
+    const site = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211106", "20211107"]),
+      [listUrl("20211106")]: mkList([{ id: "202105050101" }]),
+      [listUrl("20211107")]: mkList([{ id: "202105050201" }]),
+      [resultUrl("202105050101")]: RESULT_OK,
+      [resultUrl("202105050201")]: RESULT_OK,
+    });
+    await runFetch(baseOpts(out, site.fetchText));
+    expect(site.calls.filter((u) => u.includes("race_list_sub"))).toEqual([listUrl("20211106"), listUrl("20211107")]);
+  });
+});
+
+describe("fetch: アクセスを制限されたらその場で打ち切る(HTTP 400・403・429)", () => {
+  const httpErr = (status: number, url: string) => new HttpError(`HTTPエラー(${status})が発生しました: ${url}`, { url, status });
+
+  for (const status of [400, 403, 429]) {
+    it(`HTTP ${status} は 1 件目でも打ち切り、errors に残し、終了コード用の aborted と restricted を立てる`, async () => {
+      const out = tmp();
+      const lines: string[] = [];
+      const site = fakeSite({ [CAL_CENTRAL]: httpErr(status, CAL_CENTRAL) });
+      const stats = await runFetch(baseOpts(out, site.fetchText, { log: (m) => lines.push(m) }));
+      expect(stats.aborted).toBe(true);
+      expect(stats.restricted).toBe(true);
+      expect(stats.requests).toBe(1);
+      expect(stats.errors).toBe(1);
+      expect(errorsOf(out)[0]).toMatchObject({ stage: "calendar", id: "2021-11" });
+      expect(String(errorsOf(out)[0]!.reason)).toContain(`HTTPエラー(${status})`);
+      expect(lines.join("\n")).toMatch(/アクセスを制限された可能性.*HTTP ${status}/);
+    });
+  }
+
+  it("結果ページの途中で 400 が返ったら、そこで止まり、あとの結果は取りに行かない(取れた分は残る)", async () => {
+    const out = tmp();
+    const ids = ["202105050101", "202105050102", "202105050103"];
+    const site = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211107"]),
+      [listUrl("20211107")]: mkList(ids.map((id) => ({ id }))),
+      [resultUrl(ids[0]!)]: RESULT_OK,
+      [resultUrl(ids[1]!)]: httpErr(400, resultUrl(ids[1]!)),
+      [resultUrl(ids[2]!)]: RESULT_OK,
+    });
+    const stats = await runFetch(baseOpts(out, site.fetchText));
+    expect(stats.restricted).toBe(true);
+    expect(site.calls.filter((u) => u.includes("result.html"))).toEqual([resultUrl(ids[0]!), resultUrl(ids[1]!)]);
+    expect(existsSync(rawFilePath(out, "central", "result", ids[0]!))).toBe(true);
+    expect(existsSync(rawFilePath(out, "central", "result", ids[2]!))).toBe(false);
+    // 再実行(制限が解けた)で続きから
+    const site2 = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211107"]),
+      [resultUrl(ids[1]!)]: RESULT_OK,
+      [resultUrl(ids[2]!)]: RESULT_OK,
+    });
+    const stats2 = await runFetch(baseOpts(out, site2.fetchText));
+    expect(stats2.aborted).toBe(false);
+    expect(site2.calls).toEqual([resultUrl(ids[1]!), resultUrl(ids[2]!)]);
+  });
+
+  it("404 や 5xx は制限とみなさず、従来どおり連続失敗の数え方(上限まで続ける)", async () => {
+    const out = tmp();
+    const ids = ["202105050101", "202105050102", "202105050103"];
+    const site = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211107"]),
+      [listUrl("20211107")]: mkList(ids.map((id) => ({ id }))),
+      [resultUrl(ids[0]!)]: httpErr(404, resultUrl(ids[0]!)),
+      [resultUrl(ids[1]!)]: httpErr(503, resultUrl(ids[1]!)),
+      [resultUrl(ids[2]!)]: RESULT_OK,
+    });
+    const stats = await runFetch(baseOpts(out, site.fetchText));
+    expect(stats.aborted).toBe(false);
+    expect(stats.restricted).toBe(false);
+    expect(stats.errors).toBe(2);
+    expect(stats.saved.result).toBe(1);
+  });
+});
+
 describe("fetch: 取得の失敗が続いたら打ち切る(アクセス制限のときに叩き続けない)", () => {
   const dates30 = Array.from({ length: 30 }, (_, i) => `202111${String(i + 1).padStart(2, "0")}`);
 
@@ -628,7 +737,7 @@ describe("parseFetchArgs", () => {
   it("--from/--to/--out/--limit と種別の指定", () => {
     expect(parseFetchArgs(["--from", "2021-11", "--to", "2026-10", "--out", "/x", "--limit", "5"])).toEqual({
       ok: true,
-      value: { from: "2021-11", to: "2026-10", outDir: "/x", kinds: ["central", "nar"], limit: 5 },
+      value: { from: "2021-11", to: "2026-10", outDir: "/x", kinds: ["central", "nar"], limit: 5, intervalMs: 10000, newestFirst: false },
     });
     expect(parseFetchArgs(["--from", "2021-11", "--to", "2021-11", "--out", "/x", "--central"])).toMatchObject({
       ok: true,
@@ -642,6 +751,23 @@ describe("parseFetchArgs", () => {
       ok: true,
       value: { kinds: ["central", "nar"] },
     });
+  });
+
+  it("--interval-ms で最低間隔を指定できる(既定 10000、1500 未満・整数でない値は拒否)", () => {
+    const base = ["--from", "2021-11", "--to", "2021-11", "--out", "/x"];
+    expect(parseFetchArgs(base)).toMatchObject({ ok: true, value: { intervalMs: 10000 } });
+    expect(parseFetchArgs([...base, "--interval-ms", "1500"])).toMatchObject({ ok: true, value: { intervalMs: 1500 } });
+    expect(parseFetchArgs([...base, "--interval-ms", "3000"])).toMatchObject({ ok: true, value: { intervalMs: 3000 } });
+    for (const bad of ["1499", "0", "abc", "1500.5", ""]) {
+      expect(parseFetchArgs([...base, "--interval-ms", bad]).ok, bad).toBe(false);
+    }
+    expect(parseFetchArgs([...base, "--interval-ms"]).ok).toBe(false);
+  });
+
+  it("--newest-first を指定できる", () => {
+    const base = ["--from", "2021-11", "--to", "2021-11", "--out", "/x"];
+    expect(parseFetchArgs([...base, "--newest-first"])).toMatchObject({ ok: true, value: { newestFirst: true } });
+    expect(parseFetchArgs(base)).toMatchObject({ ok: true, value: { newestFirst: false } });
   });
 
   it("--max-consecutive-failures で連続失敗の上限を変えられる", () => {
