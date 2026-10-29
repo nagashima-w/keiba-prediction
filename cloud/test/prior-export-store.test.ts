@@ -142,7 +142,7 @@ describe("fetchDetails", () => {
     const snapshot = {
       race: { raceName: "テストS", grade: "G2", distance: 2000, trackCondition: "稍重", courseType: "芝" },
       horses: [
-        { umaban: 1, wakuban: 1, name: "SECRET-HORSE", sex: "牝", age: 4, kinryo: 54, jockeyName: "SECRET-JOCKEY", trainerName: "SECRET-TRAINER", bodyWeight: 456, winOdds: 99.9, oikiriCritic: "気配上々", oikiriRank: "B" },
+        { umaban: 1, wakuban: 1, name: "SECRET-HORSE", sex: "牝", age: 4, kinryo: 54, jockeyName: "騎手ウ", jockeyId: "01234", trainerName: "SECRET-TRAINER", bodyWeight: 456, winOdds: 99.9, oikiriCritic: "気配上々", oikiriRank: "B" },
         { umaban: 2, wakuban: 2, sex: "牡", age: 3, kinryo: 56, bodyWeight: null, oikiriCritic: null, oikiriRank: null },
       ],
     };
@@ -162,6 +162,9 @@ describe("fetchDetails", () => {
     expect(a.race).toEqual({ race_name: "テストS", grade: "G2", distance: 2000, track_condition: "稍重" });
     expect(a.horses.get(1)).toEqual({ wakuban: 1, sex: "牝", age: 4, body_weight: 456, kinryo: 54, oikiri_rank: "B", oikiri_critic: "気配上々" });
     expect(a.horses.get(2)).toMatchObject({ wakuban: 2, sex: "牡", body_weight: null, oikiri_rank: null });
+    // Issue #526(形式 v4): 今回の騎手は R2 の詳細のスナップショットから馬番ごとに取れる(騎手の無い馬は両列 null。追加の R2 操作はない)
+    expect(a.jockeys.get(1)).toEqual({ jockey_name: "騎手ウ", jockey_id: "01234" });
+    expect(a.jockeys.get(2)).toEqual({ jockey_name: null, jockey_id: null });
     // スナップショットが null の詳細は ok のまま、列がすべて null(詳細なし〈none〉とは別)
     expect(b.race).toEqual({ race_name: null, grade: null, distance: null, track_condition: null });
     expect(b.horses.size).toBe(0);

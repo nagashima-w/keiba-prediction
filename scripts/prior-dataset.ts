@@ -7,10 +7,10 @@
  *
  * **黙って捨てない**: 読めない版・メタ行の無いファイル・件数の食い違い(途中で切れた/混ざった)・壊れた行(JSON でない・列の過不足・型の違い)は、行番号つきの例外にする。
  *
- * **形式 v1・v2・v3 をすべて読む**(Issue #341・#421)。v1(19 列)の行は、v2 で足した 11 列(出馬表の列)と v3 で足した 2 列(レースの条件)を null に補い、v2(30 列)の行は v3 の 2 列を null に補って、
- * v3 の型の行にする。`meta.format` は元の版のまま。
- * 列の過不足は版ごとに検査する(古い版に新しい版の列があれば「知らない列」、新しい版に足りなければ「列が足りません」。**v2 と名乗るファイルに v1 の行が混ざっても、v3 と名乗るファイルに v2 の行が混ざっても、黙って古い版として読まず例外**)。
- * 古い版を読んだときの「全部 null」を欠損と取り違えないよう、{@link v2ColumnCoverage}・{@link v3ColumnCoverage} で v2・v3 の列の非 null の件数を見られる(CLI の要約にも出す)。
+ * **形式 v1〜v4 をすべて読む**(Issue #341・#421・#526)。v1(19 列)の行は、v2 で足した 11 列(出馬表の列)・v3 で足した 2 列(レースの条件)・v4 で足した 2 列(今回の騎手の名前と ID)を null に補い、
+ * v2(30 列)の行は v3・v4 の 4 列を、v3(32 列)の行は v4 の 2 列を null に補って、v4 の型の行にする。`meta.format` は元の版のまま。
+ * 列の過不足は版ごとに検査する(古い版に新しい版の列があれば「知らない列」、新しい版に足りなければ「列が足りません」。**v2 と名乗るファイルに v1 の行が混ざっても、v4 と名乗るファイルに v3 の行が混ざっても、黙って古い版として読まず例外**)。
+ * 古い版を読んだときの「全部 null」を欠損と取り違えないよう、{@link v2ColumnCoverage}・{@link v3ColumnCoverage}・{@link v4ColumnCoverage} で v2〜v4 の列の非 null の件数を見られる(CLI の要約にも出す)。
  *
  * 使い方(リポジトリのルートで): `pnpm tsx scripts/prior-dataset.ts <ファイル>` で要約(行数・レース数・区分別・欠落の件数)を出す。
  */
@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { PRIOR_ROW_KEYS, PRIOR_ROW_KEYS_V1, PRIOR_ROW_KEYS_V2_ADDED, PRIOR_ROW_KEYS_V3_ADDED, type PriorDatasetRow } from "../cloud/src/prior-export-format.js";
+import { PRIOR_ROW_KEYS, PRIOR_ROW_KEYS_V1, PRIOR_ROW_KEYS_V2_ADDED, PRIOR_ROW_KEYS_V3_ADDED, PRIOR_ROW_KEYS_V4_ADDED, type PriorDatasetRow } from "../cloud/src/prior-export-format.js";
 
 export type { PriorDatasetRow } from "../cloud/src/prior-export-format.js";
 
@@ -46,7 +46,7 @@ const isNumOrNull = (v: unknown): boolean => v === null || isNum(v);
 const isStrOrNull = (v: unknown): boolean => v === null || typeof v === "string";
 
 /** 読める形式の版。 */
-const READABLE_FORMATS = [1, 2, 3] as const;
+const READABLE_FORMATS = [1, 2, 3, 4] as const;
 
 type Format = (typeof READABLE_FORMATS)[number];
 
@@ -76,11 +76,20 @@ function v3Checks(row: Record<string, unknown>): Array<[string, boolean]> {
   ];
 }
 
-/** 版ごとの列(1 は v1 の 19 列、2 は v2 の 30 列、3 は v3 の 32 列)。 */
+/** v4 で足した列の型の検査(v4 の行だけ)。jockey_name・jockey_id はいずれも文字列(null あり。ID は "01001" のような先頭 0 を含む文字列で、数に直さない)。 */
+function v4Checks(row: Record<string, unknown>): Array<[string, boolean]> {
+  return [
+    ["jockey_name", isStrOrNull(row["jockey_name"])],
+    ["jockey_id", isStrOrNull(row["jockey_id"])],
+  ];
+}
+
+/** 版ごとの列(1 は v1 の 19 列、2 は v2 の 30 列、3 は v3 の 32 列、4 は v4 の 34 列)。 */
 const KEYS_BY_FORMAT: Readonly<Record<Format, readonly string[]>> = {
   1: PRIOR_ROW_KEYS_V1,
   2: [...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED],
-  3: PRIOR_ROW_KEYS,
+  3: [...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED],
+  4: PRIOR_ROW_KEYS,
 };
 
 /** 行 1 つの列・型を検査する(`format` はメタ行の版。{@link KEYS_BY_FORMAT})。問題があれば理由の文字列、なければ null。 */
@@ -125,7 +134,8 @@ function rowProblem(row: unknown, format: Format): string | null {
     ],
   ];
   if (format >= 2) checks.push(...v2Checks(row));
-  if (format === 3) checks.push(...v3Checks(row));
+  if (format >= 3) checks.push(...v3Checks(row));
+  if (format === 4) checks.push(...v4Checks(row));
   const bad = checks.filter(([, ok]) => !ok).map(([k]) => k);
   return bad.length > 0 ? `型が違います(${bad.join("・")})` : null;
 }
@@ -134,6 +144,8 @@ function rowProblem(row: unknown, format: Format): string | null {
 const V2_NULLS: Readonly<Record<string, null>> = Object.fromEntries(PRIOR_ROW_KEYS_V2_ADDED.map((k) => [k, null]));
 /** v3 で足した列をすべて null にしたもの(v1・v2 の行に補う)。 */
 const V3_NULLS: Readonly<Record<string, null>> = Object.fromEntries(PRIOR_ROW_KEYS_V3_ADDED.map((k) => [k, null]));
+/** v4 で足した列をすべて null にしたもの(v1〜v3 の行に補う)。 */
+const V4_NULLS: Readonly<Record<string, null>> = Object.fromEntries(PRIOR_ROW_KEYS_V4_ADDED.map((k) => [k, null]));
 
 /** gzip(複数メンバー可)のバイト列から読む。 */
 export function parsePriorDataset(bytes: Uint8Array): PriorDataset {
@@ -165,9 +177,9 @@ export function parsePriorDataset(bytes: Uint8Array): PriorDataset {
     if (problem !== null) {
       throw new Error(`${i + 1} 行目: ${problem}`);
     }
-    // 古い版の行は、足りない版の列を null に補って v3 の型にする(元の列の値は変えない。列の順序は PRIOR_ROW_KEYS)。
-    const padding = format === 1 ? { ...V2_NULLS, ...V3_NULLS } : format === 2 ? V3_NULLS : {};
-    rows.push((format === 3 ? parsed : { ...(parsed as Record<string, unknown>), ...padding }) as PriorDatasetRow);
+    // 古い版の行は、足りない版の列を null に補って v4 の型にする(元の列の値は変えない。列の順序は PRIOR_ROW_KEYS)。
+    const padding = format === 1 ? { ...V2_NULLS, ...V3_NULLS, ...V4_NULLS } : format === 2 ? { ...V3_NULLS, ...V4_NULLS } : format === 3 ? V4_NULLS : {};
+    rows.push((format === 4 ? parsed : { ...(parsed as Record<string, unknown>), ...padding }) as PriorDatasetRow);
   }
   if (rows.length !== meta.rows) {
     throw new Error(`件数が合いません(メタ行は ${String(meta.rows)} 行、実際は ${rows.length} 行。途中で切れたか、別のファイルが混ざった可能性があります)`);
@@ -233,6 +245,14 @@ export function v3ColumnCoverage(rows: readonly PriorDatasetRow[]): Record<(type
   return Object.fromEntries(PRIOR_ROW_KEYS_V3_ADDED.map((k) => [k, rows.filter((r) => r[k] !== null).length])) as Record<(typeof PRIOR_ROW_KEYS_V3_ADDED)[number], number>;
 }
 
+/**
+ * v4 で足した 2 列ごとの、非 null の行数(キーの順は `PRIOR_ROW_KEYS_V4_ADDED`)。v1〜v3 のファイルを読むと全列 0。
+ * `jockey_id` は 2026-10-29 より前の分析・騎手のリンクが無い馬で null、`jockey_name` は騎手未定・詳細が無いレースで null なので、実際に使える件数の目安になる。
+ */
+export function v4ColumnCoverage(rows: readonly PriorDatasetRow[]): Record<(typeof PRIOR_ROW_KEYS_V4_ADDED)[number], number> {
+  return Object.fromEntries(PRIOR_ROW_KEYS_V4_ADDED.map((k) => [k, rows.filter((r) => r[k] !== null).length])) as Record<(typeof PRIOR_ROW_KEYS_V4_ADDED)[number], number>;
+}
+
 if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const file = process.argv[2];
   if (file === undefined) {
@@ -245,5 +265,6 @@ if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLTo
     console.log(`除外: ${JSON.stringify(meta.excluded)}・詳細なしのレース ${meta.missingDetail}`);
     console.log(`v2 の列の非 null の件数${meta.format === 1 ? "(形式 1 のファイルなので全列 0)" : ""}: ${JSON.stringify(v2ColumnCoverage(rows))}`);
     console.log(`v3 の列の非 null の件数${meta.format < 3 ? `(形式 ${meta.format} のファイルなので全列 0)` : ""}: ${JSON.stringify(v3ColumnCoverage(rows))}`);
+    console.log(`v4 の列の非 null の件数${meta.format < 4 ? `(形式 ${meta.format} のファイルなので全列 0)` : ""}: ${JSON.stringify(v4ColumnCoverage(rows))}`);
   }
 }

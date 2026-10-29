@@ -37,6 +37,9 @@
  * **Issue #519 で再生成した**(芝の開催進行に連続開催の通算と柵の日数を足した。`PROMPT_VERSION` が "2026-10-25.1" → "2026-10-29.1" になり、`TurfWearHint` に 4 つのキー〈通算日次・連続開始年・連続開始回・柵日数〉が加わった)。
  *   フィクスチャは過去の開催日の行を渡さないので、4 つのキーはすべて null で、`promptText`(「芝コースの開催進行」の行を含む)・確率・配分は動かない。
  *   差分の検査: `git diff -U0 packages/core/test/golden | grep '^[-+]'` で、`record.promptVersion` の置き換え(削除 1・追加 1)と、LLM のシナリオの `promptInput.race.turfWearHint` への 4 つの null のキーの追加(追加 4・削除 0)だけであること。
+ * **Issue #526 段階 1 で再生成した**(スナップショットの各馬に今回の騎手の ID `jockeyId` を足した。書き出し用で、プロンプト・統計モデル・配分には使わない。`PROMPT_VERSION` は上げない)。
+ *   差分の検査: 新旧の JSON を構造で比べ、差分が「3 シナリオの `record.raceSnapshot.horses` の各馬(16 頭)に `jockeyId`(5 桁の文字列。フィクスチャの 16 頭すべて非 null)が加わる」48 件だけ
+ *   (キーの追加 48・削除 0・値の変更 0。`promptInput`・`promptText`・確率・配分は 1 件も動かない)。`git diff -U0 packages/core/test/golden | grep '^[-+]' | grep -c '"jockeyId"'` が 48 で、削除行は 0。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */
