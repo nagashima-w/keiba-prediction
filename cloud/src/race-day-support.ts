@@ -38,7 +38,7 @@ export const CACHE_ONLY_TTL: ScrapeTtlConfig = {
 };
 
 /**
- * 設定のスナップショットのうち、配分に使う 11 項目(`runAnalysis` の `allocationSettings`)。発走前の計算ステップ(分析)と、締切の直前の再計算(Issue #338)が**同じ関数**で作る
+ * 設定のスナップショットのうち、配分に使う 13 項目(Issue #533 で単勝・複勝の点数の上限を足して 11 → 13)(`runAnalysis` の `allocationSettings`)。発走前の計算ステップ(分析)と、締切の直前の再計算(Issue #338)が**同じ関数**で作る
  * (食い違うと、再計算の配分が分析時の配分と、設定の差で食い違う)。
  */
 export function allocationSettingsOf(settings: CloudSettings): AnalysisAllocationSettings {
@@ -47,6 +47,8 @@ export function allocationSettingsOf(settings: CloudSettings): AnalysisAllocatio
     perRaceCap: settings.perRaceCap,
     kellyFraction: settings.kellyFraction,
     minHitProb: settings.minHitProb,
+    maxWinBets: settings.maxWinBetsPerRace,
+    maxPlaceBets: settings.maxPlaceBetsPerRace,
     includeComboOdds: settings.includeComboOdds,
     includeWideInAllocation: settings.includeWideInAllocation,
     includeTrioInAllocation: settings.includeTrioInAllocation,

@@ -206,10 +206,13 @@ const INSERT_HORSES_SQL = jsonEachInsertSql(INSERT_ANALYSIS_HORSE_SQL);
 const INSERT_BETS_SQL = jsonEachInsertSql(INSERT_ALLOCATION_BET_SQL);
 const INSERT_META_SQL = withNewIdSql(INSERT_ALLOCATION_META_SQL);
 /**
- * 的中確率の下限と、下限で外した買い目の記録(Issue #470)。core の codec の INSERT(exe と共有)には列を足さず、メタ行の INSERT の直後に **1文の UPDATE** で書く
- * (`mark_repair_json` と同じ流儀)。束縛値の順は min_hit_prob → below_floor_count → missed_json。
+ * 的中確率の下限と、下限で外した買い目の記録(Issue #470)・単勝と複勝の点数の上限の記録(Issue #533)。core の codec の INSERT(exe と共有)には列を足さず、メタ行の INSERT の直後に
+ * **1文の UPDATE** で書く(`mark_repair_json` と同じ流儀)。どちらの記録を持つかで SET の列が変わる(`updateMetaExtrasSql`): 下限の記録があれば min_hit_prob → below_floor_count → missed_json
+ * (束縛値もこの順)、上限の記録があればその後ろに max_win_bets → max_place_bets。文は増やさない(1文に束ねる)。
  */
-const UPDATE_MIN_HIT_PROB_SQL = `UPDATE analysis_allocation_meta SET min_hit_prob = ?, below_floor_count = ?, missed_json = ? WHERE analysis_id = ${NEW_ID}`;
+function updateMetaExtrasSql(columns: readonly string[]): string {
+  return `UPDATE analysis_allocation_meta SET ${columns.map((c) => `${c} = ?`).join(", ")} WHERE analysis_id = ${NEW_ID}`;
+}
 const UPDATE_DETAIL_KEY_SQL = `UPDATE analyses SET detail_key = ${DETAIL_KEY_SQL} WHERE id = ${NEW_ID}`;
 /**
  * 理由(固定文言。Issue #194)・LLM 呼び出しの記録(Issue #197 段2)・印の補修の記録(Issue #317)。core の codec の INSERT(exe と共有)には列を足さず、
@@ -311,10 +314,21 @@ export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: num
   if (rec.allocation !== undefined) {
     statements.push(db.prepare(INSERT_META_SQL).bind(...allocationMetaParams(0, rec.allocation.meta).slice(1)));
     statements.push(db.prepare(INSERT_BETS_SQL).bind(JSON.stringify(rec.allocation.bets.map((b) => allocationBetParams(0, b).slice(1)))));
-    // Issue #470: 下限を持つ記録(meta.minHitProb が定義されている)だけ、UPDATE を足す。持たない記録(旧い呼び出し・テストの手組み)は文を増やさない。
+    // Issue #470・#533: 下限を持つ記録(meta.minHitProb が定義されている)と、上限を持つ記録(meta.maxWinBets・maxPlaceBets が定義されている)だけ、UPDATE を足す(1文に束ねる)。
+    // どちらも持たない記録(旧い呼び出し・テストの手組み)は文を増やさない。上限は単勝・複勝の両方が定義されているときだけ書く(片方だけの記録は上限を持たない扱い)。
     const meta = rec.allocation.meta;
+    const metaColumns: string[] = [];
+    const metaBinds: unknown[] = [];
     if (meta.minHitProb !== undefined) {
-      statements.push(db.prepare(UPDATE_MIN_HIT_PROB_SQL).bind(meta.minHitProb, meta.belowFloorCount ?? null, serializeMissed(meta.missed)));
+      metaColumns.push("min_hit_prob", "below_floor_count", "missed_json");
+      metaBinds.push(meta.minHitProb, meta.belowFloorCount ?? null, serializeMissed(meta.missed));
+    }
+    if (meta.maxWinBets !== undefined && meta.maxPlaceBets !== undefined) {
+      metaColumns.push("max_win_bets", "max_place_bets");
+      metaBinds.push(meta.maxWinBets, meta.maxPlaceBets);
+    }
+    if (metaColumns.length > 0) {
+      statements.push(db.prepare(updateMetaExtrasSql(metaColumns)).bind(...metaBinds));
     }
   }
   return statements;

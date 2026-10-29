@@ -92,6 +92,8 @@ const PLACE_ONLY_SETTINGS = {
   perRaceCap: 20000,
   kellyFraction: 0.5,
   minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+  maxWinBets: 0,
+  maxPlaceBets: 0,
   includeComboOdds: false,
   includeWideInAllocation: false,
   includeTrioInAllocation: false,

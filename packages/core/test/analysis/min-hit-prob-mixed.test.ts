@@ -83,6 +83,8 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeTrifectaInAllocation: true,
     includeBracketQuinellaInAllocation: true,
     minHitProb: 0,
+    maxWinBets: 0,
+    maxPlaceBets: 0,
     ...overrides,
   };
 }
@@ -224,6 +226,8 @@ describe("配分の記録(buildAllocationRecord)への下限の配線(Issue #470
       perRaceCap: 1,
       kellyFraction: 0.5,
       minHitProb: 0.07,
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -243,6 +247,8 @@ describe("配分の記録(buildAllocationRecord)への下限の配線(Issue #470
       perRaceCap: 100_000,
       kellyFraction: 0.5,
       minHitProb: 0.05,
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,

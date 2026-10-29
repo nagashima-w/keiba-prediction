@@ -334,6 +334,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 0,
         kellyFraction: 0.5,
         minHitProb: 0.07, // Issue #470: 既定(0.05)と異なる値にして、定数の直書きを検出できるようにする。
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: false,
@@ -363,6 +365,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       perRaceCap: 0,
       kellyFraction: 0.5,
       minHitProb: 0.07,
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       belowFloorCount: null, // Issue #470: 配分の計算に未到達(unset)なので、外れた件数は判定していない(null)。
       missed: null,
       evThreshold: 1.2, // evConfig.threshold由来(allocationSettingsには持たせていない)。
@@ -399,6 +403,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 20000,
         kellyFraction: 0.5,
         minHitProb: 0.05,
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
@@ -425,6 +431,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0.05,
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       belowFloorCount: null,
       missed: null,
       evThreshold: 1.0, // deps.evConfig未指定 → DEFAULT_EV_CONFIG.threshold(1.0)。
@@ -464,6 +472,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 20000,
         kellyFraction: 0.5,
         minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -497,6 +507,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 3000000,
         kellyFraction: 0.5,
         minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
@@ -544,6 +556,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 20000,
         kellyFraction: 0.5,
         minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -577,6 +591,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 3000000,
         kellyFraction: 0.5,
         minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
@@ -646,6 +662,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 20000,
         kellyFraction: 0.5,
         minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -694,6 +712,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 20000,
         kellyFraction: 0.5,
         minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -727,6 +747,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 3000000,
         kellyFraction: 0.5,
         minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
@@ -791,6 +813,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 20000,
         kellyFraction: 0.5,
         minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: true,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
@@ -835,6 +859,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
           perRaceCap: 3000000,
           kellyFraction: 0.5,
           minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+          maxWinBets: 0,
+          maxPlaceBets: 0,
           includeComboOdds: true,
           includeWideInAllocation: true,
           includeTrioInAllocation: false,
@@ -898,6 +924,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         perRaceCap: 20000,
         kellyFraction: 0.5,
         minHitProb: 0.07,
+        maxWinBets: 0,
+        maxPlaceBets: 0,
         includeComboOdds: false,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,

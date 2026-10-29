@@ -22,6 +22,9 @@ import { AllocationFakeStore, FakeKv, PriorFakeStore, cand, driver, raceIdOf } f
  *      メタ行の増分は 1,466 バイト〈format 4 のコードのメタ行 4,638 → 6,104。`git show HEAD:cloud/src/prior-export-format.ts` の旧版と現行版の `buildPriorHead` を同じ引数で伸長した長さの差〉。
  *      場面ごとの伸長後の長さ: 5 レース 16,529 → 18,445(= 16,529 + 15 行 × 30 + 1,466)、詳細なし 16,109 → 18,007(= 16,109 + 12 行 × 30 + 3 行 × 24 + 1,466)、候補 0 件 4,638 → 6,104(= 4,638 + 1,466)、
  *      7 レース・5 頭 32,527 → 35,043(= 32,527 + 35 行 × 30 + 1,466)で、4 つの場面とも和が合う。この場面は対応が空(`PriorFakeStore.lookups`)なので、名前から埋めた行は無い。**配分用の 3 場面の固定値は、format 5 でも一切変えていない**(共有の組み立てに引き当て用の表のフックを足しても、配分用のバイト列は不変)。
+ *      **配分用の固定値は、Issue #533 で設定の列〈`max_win_bets`・`max_place_bets`〉とメタ行の注記が増えたときに測り直した**(同じ意味の回帰の固定)。検算: 行ごとの増分は、配分のメタのある行が 36 バイト
+ *      〈`,"max_win_bets":0,"max_place_bets":0`〉、メタ行の増分は 174 バイト〈注記 1 つの 287 → 461。`git show HEAD:cloud/src/allocation-export-format.ts` の旧版と現行版の注記を UTF-8 で数えた〉。
+ *      場面ごとの伸長後の長さ: 5 レース 12,884 → 13,238(= 12,884 + 5 行 × 36 + 174)、詳細なし・配分のメタなし 12,206 → 12,524(= 12,206 + 4 行 × 36 + 174。メタのない 1 行は設定を持たない)、候補 0 件 3,124 → 3,298(= 3,124 + 174)。
  */
 
 const sha256 = (gz: Uint8Array): string => createHash("sha256").update(gunzipSync(gz)).digest("base64");
@@ -47,9 +50,9 @@ const PRIOR: Scenario[] = [
   { name: "7 レース・batch 3・5 頭", races: 7, batchSize: 3, horses: 5, sha256: "ePfBUobf9Oz0hOdMLExKAZQfTSHDVdFia96V1/JXRN4=", plainBytes: 35043 },
 ];
 const ALLOCATION: Scenario[] = [
-  { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "XH6vlBeA9Fop6Emy94GG77/GGCqvhK6Sg6GBbrSkqCA=", plainBytes: 12884 },
-  { name: "5 レース・batch 2・詳細なし(101)・配分のメタなし(102)", races: 5, batchSize: 2, noDetail: [101], noMeta: [102], sha256: "rq1XRu5eE16NaoeXs3O8XmfsBK3HDNcSubRzz/6NYE0=", plainBytes: 12206 },
-  { name: "候補 0 件(除外だけ。メタ行だけのファイル)", races: 0, batchSize: 2, candidates: excluded, sha256: "Qu4FPz2sqffC9QwzQJFuqGuEHfCrDfJJf7WyoNy4CX8=", plainBytes: 3124 },
+  { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "jK9gg3shwuHhxzlM5//LIGCTPzE5s6KCQyhEcr9ciaU=", plainBytes: 13238 },
+  { name: "5 レース・batch 2・詳細なし(101)・配分のメタなし(102)", races: 5, batchSize: 2, noDetail: [101], noMeta: [102], sha256: "dp75SO9NsKgJpUSGHeMVUol+gyR9Y4trjIi/tDYqIQc=", plainBytes: 12524 },
+  { name: "候補 0 件(除外だけ。メタ行だけのファイル)", races: 0, batchSize: 2, candidates: excluded, sha256: "Cb8nmBXQbsviPhRnre7qTrSNaWV5cJ8Q/8sJ+bHkTio=", plainBytes: 3298 },
 ];
 
 function candidatesOf(s: Scenario) {

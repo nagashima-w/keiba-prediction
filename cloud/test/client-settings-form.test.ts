@@ -33,6 +33,8 @@ const FULL: CloudSettings = {
   perRaceCap: 50_000,
   kellyFraction: 0.25,
   minHitProb: 0.12,
+  maxWinBetsPerRace: 3,
+  maxPlaceBetsPerRace: 4,
   includeComboOdds: true,
   includeWideInAllocation: false,
   includeTrioInAllocation: false,
@@ -74,6 +76,8 @@ describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何
       "perRaceCap",
       "kellyFraction",
       "minHitProb",
+      "maxWinBetsPerRace",
+      "maxPlaceBetsPerRace",
       "additionalInstruction",
       "clipVariant",
       "analysisModel",
@@ -81,11 +85,11 @@ describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何
     ]);
   });
 
-  it("設定の全項目 = FIELD_ORDER(16項目。Issue #470で的中確率の下限を足した)+ WEIGHT_FIELD_ORDER(スコアリングの重み15項目。Issue #218・#353)を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
-    expect(FIELD_ORDER.length).toBe(16);
+  it("設定の全項目 = FIELD_ORDER(18項目。Issue #470で的中確率の下限、Issue #533で単勝・複勝の点数の上限を足した)+ WEIGHT_FIELD_ORDER(スコアリングの重み15項目。Issue #218・#353)を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
+    expect(FIELD_ORDER.length).toBe(18);
     expect(WEIGHT_FIELD_ORDER.length).toBe(15);
     const all = [...FIELD_ORDER, ...WEIGHT_FIELD_ORDER];
-    expect(new Set(all).size).toBe(31);
+    expect(new Set(all).size).toBe(33);
     expect(all.length).toBe(CLOUD_SETTINGS_KEYS.length);
     expect([...all].sort()).toEqual([...CLOUD_SETTINGS_KEYS].sort());
   });
@@ -188,6 +192,23 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     ["minHitProb 空", "minHitProb", "", false],
     ["minHitProb 文字", "minHitProb", "abc", false],
     ["minHitProb 全角", "minHitProb", "０．０５", false],
+    // Issue #533: 単勝・複勝の点数の上限は整数 0〜18(0 は上限なし)。書く側も読む側と同じ範囲
+    ["単勝の上限 0(上限なし)", "maxWinBetsPerRace", "0", true],
+    ["単勝の上限 2", "maxWinBetsPerRace", "2", true],
+    ["単勝の上限 18", "maxWinBetsPerRace", "18", true],
+    ["単勝の上限 19", "maxWinBetsPerRace", "19", false],
+    ["単勝の上限 負", "maxWinBetsPerRace", "-1", false],
+    ["単勝の上限 小数", "maxWinBetsPerRace", "1.5", false],
+    ["単勝の上限 空", "maxWinBetsPerRace", "", false],
+    ["単勝の上限 文字", "maxWinBetsPerRace", "abc", false],
+    ["単勝の上限 全角", "maxWinBetsPerRace", "２", false],
+    ["複勝の上限 0(上限なし)", "maxPlaceBetsPerRace", "0", true],
+    ["複勝の上限 2", "maxPlaceBetsPerRace", "2", true],
+    ["複勝の上限 18", "maxPlaceBetsPerRace", "18", true],
+    ["複勝の上限 19", "maxPlaceBetsPerRace", "19", false],
+    ["複勝の上限 負", "maxPlaceBetsPerRace", "-1", false],
+    ["複勝の上限 小数", "maxPlaceBetsPerRace", "1.5", false],
+    ["複勝の上限 空", "maxPlaceBetsPerRace", "", false],
     ["発走何分前 10", "preRaceOffsetMinutes", "10", true],
     ["発走何分前 180", "preRaceOffsetMinutes", "180", true],
     ["発走何分前 9", "preRaceOffsetMinutes", "9", false],
@@ -270,6 +291,10 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     expect(run("evThreshold", "0")).toContain("0より大きい");
     expect(run("kellyFraction", "0")).toContain("0.05");
     expect(run("minHitProb", "1.5")).toContain("0以上1以下");
+    expect(run("maxWinBetsPerRace", "19")).toContain("0以上18以下の整数");
+    expect(run("maxWinBetsPerRace", "19")).toContain("0は上限なし");
+    expect(run("maxPlaceBetsPerRace", "-1")).toContain("0以上18以下の整数");
+    expect(run("maxPlaceBetsPerRace", "-1")).toContain("0は上限なし");
     expect(run("preRaceOffsetMinutes", "5")).toContain("10");
     expect(run("preRaceOffsetMinutes", "5")).toContain("180");
     expect(run("additionalInstruction", "あ".repeat(2003))).toContain("2,000");
@@ -330,7 +355,7 @@ describe("buildSettingsModel", () => {
     expect(kinds["additionalInstruction"]).toBe("textarea");
     expect(kinds["clipVariant"]).toBe("select");
     expect(kinds["analysisModel"]).toBe("select");
-    for (const key of ["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "minHitProb", "preRaceOffsetMinutes"]) {
+    for (const key of ["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace", "preRaceOffsetMinutes"]) {
       expect(kinds[key], key).toBe("text");
     }
     const byKey = Object.fromEntries(m.fields.map((f) => [f.key, f]));
@@ -340,6 +365,8 @@ describe("buildSettingsModel", () => {
     expect(byKey["evThreshold"]!.inputmode).toBe("decimal");
     expect(byKey["kellyFraction"]!.inputmode).toBe("decimal");
     expect(byKey["minHitProb"]!.inputmode).toBe("decimal");
+    expect(byKey["maxWinBetsPerRace"]!.inputmode).toBe("numeric");
+    expect(byKey["maxPlaceBetsPerRace"]!.inputmode).toBe("numeric");
     expect(byKey["additionalInstruction"]!.maxlength).toBe("2000");
     expect(byKey["bankroll"]!.maxlength).toBeNull();
   });
@@ -471,7 +498,7 @@ describe("buildSettingsModel", () => {
     expect(idle.fields.every((f) => !f.disabled)).toBe(true);
     const saving = buildSettingsModel(READY_INPUT({ save: { kind: "saving" } }));
     expect(saving.saving).toBe(true);
-    expect(saving.fields.length).toBe(16);
+    expect(saving.fields.length).toBe(18);
     expect(saving.fields.every((f) => f.disabled)).toBe(true);
     const saved = buildSettingsModel(READY_INPUT({ save: { kind: "saved" } }));
     expect(saved.saveNotice).toEqual({ tone: "ok", text: "保存しました。次に実行する発走前の分析から使われます。" });

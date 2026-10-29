@@ -334,6 +334,10 @@ function settingsFor(scenario: { bankroll: number; perRaceCap: number }, overrid
     perRaceCap: scenario.perRaceCap,
     kellyFraction: d.kellyFraction,
     minHitProb: d.minHitProb,
+    // Issue #533: 点数の上限は『なし(0)』に固定する。この計測は貪欲の分割数(greedySteps)の影響を、上限のかかる前の配分で測るためのもので、
+    // 本番の既定(単勝・複勝とも2点)を入れると測る対象が変わり、これまでの測定結果と比べられなくなる。
+    maxWinBets: 0,
+    maxPlaceBets: 0,
     evThreshold: d.evThreshold,
     // 既定は false(オッズを取得せず複勝のみの経路)。組合せ券種を測るので true にする(本スクリプトの2つの上書きの1つ)。
     includeComboOdds: true,
@@ -367,6 +371,7 @@ function allocateWith(
     greedySteps,
     candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
     minHitProb: settings.minHitProb,
+    maxBetsByType: { win: settings.maxWinBets, place: settings.maxPlaceBets },
   });
 }
 

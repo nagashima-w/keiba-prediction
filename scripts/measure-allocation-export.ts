@@ -89,10 +89,10 @@ const SNAPSHOT_FIELD: Record<ComboBetType, string> = {
   wide: "wideCombo", trio: "trioCombo", quinella: "quinellaCombo", exacta: "exactaCombo", trifecta: "trifectaCombo", bracketQuinella: "bracketQuinellaCombo",
 };
 
-/** 合成のレースで使う設定(本番の既定に近い値。全券種を配分に含め、的中確率の下限は #470 の 0.05)。 */
+/** 合成のレースで使う設定(本番の既定に近い値。全券種を配分に含め、的中確率の下限は #470 の 0.05、単勝・複勝の点数の上限は #533 の 2)。 */
 export const SYNTHETIC_SETTINGS = {
   bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, includeComboOdds: true, includeWideInAllocation: true, includeTrioInAllocation: true, includeQuinellaInAllocation: true,
-  includeExactaInAllocation: true, includeTrifectaInAllocation: true, includeBracketQuinellaInAllocation: true, minHitProb: 0.05,
+  includeExactaInAllocation: true, includeTrifectaInAllocation: true, includeBracketQuinellaInAllocation: true, minHitProb: 0.05, maxWinBets: 2, maxPlaceBets: 2,
 } as const;
 
 /** n 頭の枠番(1〜8)。n が 8 以下なら馬番と同じ。9 頭以上は、後ろの枠から順に 1 頭ずつ多くなる(中央・地方の枠の割り当ての規則)。 */
@@ -343,8 +343,12 @@ async function main(): Promise<void> {
       for (const h of rec.horses) statements.push(db.prepare(INSERT_ANALYSIS_HORSE_SQL).bind(...horseParams(id, { ...h, contributions: null })));
       const meta = race.allocation.meta;
       statements.push(db.prepare(INSERT_ALLOCATION_META_SQL).bind(...allocationMetaParams(id, meta)));
-      // 的中確率の下限(Issue #470)の 3 列。本番の保存(`cloud/src/analysis-repository.ts` の UPDATE_MIN_HIT_PROB_SQL)と同じ列・同じ値。
-      statements.push(db.prepare("UPDATE analysis_allocation_meta SET min_hit_prob = ?, below_floor_count = ?, missed_json = ? WHERE analysis_id = ?").bind(meta.minHitProb, meta.belowFloorCount ?? null, missedJson(meta.missed), id));
+      // 的中確率の下限(Issue #470)の 3 列と、単勝・複勝の点数の上限(Issue #533)の 2 列。本番の保存(`cloud/src/analysis-repository.ts` の `updateMetaExtrasSql`)と同じ列・同じ値。
+      statements.push(
+        db
+          .prepare("UPDATE analysis_allocation_meta SET min_hit_prob = ?, below_floor_count = ?, missed_json = ?, max_win_bets = ?, max_place_bets = ? WHERE analysis_id = ?")
+          .bind(meta.minHitProb, meta.belowFloorCount ?? null, missedJson(meta.missed), meta.maxWinBets ?? null, meta.maxPlaceBets ?? null, id),
+      );
       for (const b of race.allocation.bets) statements.push(db.prepare(INSERT_ALLOCATION_BET_SQL).bind(...allocationBetParams(id, b)));
       await db.batch(statements);
       await proxy.env.ANALYSIS_DETAIL.put(`analyses/${id}.json.gz`, encodeDetail(rec));

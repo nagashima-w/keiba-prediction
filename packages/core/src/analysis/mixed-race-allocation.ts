@@ -168,6 +168,17 @@ export interface MixedAllocationSettings extends BetAllocationSettings {
    */
   readonly minHitProb: number;
   /**
+   * 単勝の点数の上限(設定の `maxWinBetsPerRace`(`cloud/src/settings.ts` の `CloudSettings`)。Issue #533。1レースあたり。整数、0は上限なし)。
+   * 賭け金の付く単勝の買い目がこの点数を超えないようにする(後から削るのではなく、貪欲配分の中で選び直す)。
+   * 単勝を扱うのは組合せを混ぜる経路だけで、複勝だけの経路〈D-2フォールバック〉には単勝がないので効かない。必須: 配線の抜けを型検査で捕まえる。
+   */
+  readonly maxWinBets: number;
+  /**
+   * 複勝の点数の上限(設定の `maxPlaceBetsPerRace`(`cloud/src/settings.ts` の `CloudSettings`)。Issue #533。1レースあたり。整数、0は上限なし)。
+   * 組合せを混ぜる経路と複勝だけの経路の両方に効く。必須: 配線の抜けを型検査で捕まえる(`BetAllocationSettings.maxPlaceBets` は省略可)。
+   */
+  readonly maxPlaceBets: number;
+  /**
    * 下限で外れた買い目について、外さなかった場合の賭け金を記録するか(Issue #470。既定 false)。true のときだけ、外れた候補が
    * 1件以上ある場合に限り、下限なしの配分をもう1回計算する(CPU は下限なしの1回分。候補が減るので下限ありの配分は軽い)。
    * 分析時の保存だけが true にする。締切の直前の再計算は false(記録しない)。
@@ -667,6 +678,8 @@ function buildMixedRaceAllocationCore(
     greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
     candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
     minHitProb: settings.minHitProb,
+    // Issue #533: 単勝・複勝の点数の上限(券種ごとに別々に数える。組合せ券種は上限なし)。
+    maxBetsByType: { win: settings.maxWinBets, place: settings.maxPlaceBets },
   };
 
   try {

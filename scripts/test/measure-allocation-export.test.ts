@@ -27,7 +27,7 @@ function rowOf(race: SyntheticRace, id: number): AllocationRaceRow {
     bankroll: m.bankroll, perRaceCap: m.perRaceCap, kellyFraction: m.kellyFraction, evThreshold: m.evThreshold, includeComboOdds: flag(m.includeComboOdds), includeWide: flag(m.includeWide),
     includeTrio: flag(m.includeTrio), includeQuinella: flag(m.includeQuinella), includeExacta: flag(m.includeExacta), includeTrifecta: flag(m.includeTrifecta),
     includeBracketQuinella: flag(m.includeBracketQuinella), betUnit: m.betUnit, greedySteps: m.greedySteps, candidateCap: m.candidateCap, modelId: m.modelId, modelApproximate: flag(m.modelApproximate),
-    oddsStatus: m.oddsStatus, minHitProb: m.minHitProb ?? null, belowFloorCount: m.belowFloorCount ?? null,
+    oddsStatus: m.oddsStatus, minHitProb: m.minHitProb ?? null, maxWinBets: m.maxWinBets ?? null, maxPlaceBets: m.maxPlaceBets ?? null, belowFloorCount: m.belowFloorCount ?? null,
     missedJson: m.missed === undefined || m.missed === null ? null : JSON.stringify(m.missed.map((x) => ({ bet_type: x.betType, combo_key: x.comboKey, hit_prob: x.hitProb, odds: x.odds, ev: x.ev, would_stake: x.wouldStake }))),
   };
   return buildAllocationRaceRow({

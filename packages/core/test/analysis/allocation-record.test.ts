@@ -67,6 +67,8 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     perRaceCap: 20000,
     kellyFraction: 0.5,
     minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+    maxWinBets: 0,
+    maxPlaceBets: 0,
     evThreshold: 1.0,
     includeComboOdds: true,
     includeWideInAllocation: true,
@@ -291,6 +293,8 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       perRaceCap: 10000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: true,
       includeWideInAllocation: false,
       includeTrioInAllocation: true,
@@ -304,6 +308,8 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       perRaceCap: 10000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: true,
       includeWideInAllocation: false,
       includeTrioInAllocation: true,
@@ -326,6 +332,8 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       perRaceCap: 1,
       kellyFraction: 0.9,
       minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -339,6 +347,8 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       perRaceCap: 1,
       kellyFraction: 0.9,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -366,6 +376,8 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       perRaceCap: 222,
       kellyFraction: 0.15,
       minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: false,
@@ -379,6 +391,8 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       perRaceCap: 222,
       kellyFraction: 0.15,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: false,
@@ -400,6 +414,8 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       perRaceCap: 700,
       kellyFraction: 0.25,
       minHitProb: 0, // Issue #470: 既存のテストは下限なしで固定する
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -435,6 +451,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -472,6 +490,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -509,6 +529,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: false,
       includeWide: true,
@@ -553,6 +575,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: false,
       includeWide: true,
@@ -628,6 +652,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -833,6 +859,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -900,6 +928,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: false,
@@ -952,6 +982,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -998,6 +1030,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -1073,6 +1107,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 20000,
       kellyFraction: 0.42,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: false,
       includeWide: true,
@@ -1120,6 +1156,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       perRaceCap: 1,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: true,
@@ -1161,6 +1199,8 @@ describe("buildInvalidAllocationRecordForException(AC6: buildMixedRaceAllocation
       perRaceCap: 20000,
       kellyFraction: 0.5,
       minHitProb: 0, // Issue #470: 設定のエコー(このテストの設定は下限なし)
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       evThreshold: 1.0,
       includeComboOdds: true,
       includeWide: false,

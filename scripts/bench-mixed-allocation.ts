@@ -309,6 +309,8 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     perRaceCap: 100_000,
     kellyFraction: 0.5,
     minHitProb: 0, // Issue #470: この計測は下限なし(従来の計測と同じ条件)。下限ありの計測は runMinHitProbCost
+    maxWinBets: 0, // Issue #533: 点数の上限もなし(従来の計測と同じ条件)
+    maxPlaceBets: 0,
     evThreshold: 1.0,
     includeComboOdds: true,
     includeWideInAllocation: true,
@@ -714,6 +716,8 @@ async function runBracketQuinellaAllocationComparison(result: AnalysisResult): P
     perRaceCap: 100_000,
     kellyFraction: 0.5,
     minHitProb: 0, // Issue #470: この計測は下限なし(従来の計測と同じ条件)。下限ありの計測は runMinHitProbCost
+    maxWinBets: 0, // Issue #533: 点数の上限もなし(従来の計測と同じ条件)
+    maxPlaceBets: 0,
     evThreshold: 1.0,
     includeComboOdds: true,
     includeWideInAllocation: true,
@@ -821,6 +825,8 @@ async function runMinHitProbCost(result: AnalysisResult): Promise<void> {
     perRaceCap: 100_000,
     kellyFraction: 0.5,
     minHitProb: 0,
+    maxWinBets: 0, // Issue #533: 点数の上限もなし(従来の計測と同じ条件)
+    maxPlaceBets: 0,
     evThreshold: 1.0,
     includeComboOdds: true,
     includeWideInAllocation: true,

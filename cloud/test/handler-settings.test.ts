@@ -22,6 +22,8 @@ const FULL: CloudSettings = {
   perRaceCap: 50_000,
   kellyFraction: 0.25,
   minHitProb: 0.12,
+  maxWinBetsPerRace: 3,
+  maxPlaceBetsPerRace: 4,
   includeComboOdds: true,
   includeWideInAllocation: false,
   includeTrioInAllocation: false,
@@ -129,12 +131,12 @@ describe("GET /api/settings", () => {
     expect(f.sqls).toEqual([SELECT_SETTINGS_SQL]);
   });
 
-  it("行があれば、その設定(source: d1)。camelCase の全 31 項目(既存の 16〈Issue #470 で的中確率の下限を足した〉+ スコアリングの重み 15)", async () => {
+  it("行があれば、その設定(source: d1)。camelCase の全 33 項目(既存の 18〈Issue #470 で的中確率の下限、Issue #533 で単勝・複勝の点数の上限を足した〉+ スコアリングの重み 15)", async () => {
     const { deps, token } = await setup();
     const f = fakeDb(JSON.stringify(FULL));
     const body = (await (await handle(get(token), envOf(f), {}, deps)).json()) as { ok: boolean; settings: CloudSettings; source: string };
     expect(body).toEqual({ ok: true, settings: FULL, source: "d1" });
-    expect(Object.keys(body.settings).length).toBe(31);
+    expect(Object.keys(body.settings).length).toBe(33);
   });
 
   it("手で入れた不正な値の行は、その項目だけ既定値(読む側)。kelly の 0 は読む側では有効で、そのまま返る", async () => {

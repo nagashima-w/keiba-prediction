@@ -283,6 +283,9 @@ async function runSmokeAnalysis(): Promise<{ readonly result: Awaited<ReturnType
       // 三連複・三連単の買い目がほぼ全て外れて、配分(買い目の数・外れた件数・メタの下限)が golden と食い違う。smoke は workerd 上の runAnalysis が golden と同じ結果になる
       // ことを確かめるので、golden と同じ固定の条件にする(下限そのものの挙動は vitest のテストが固定している)。
       minHitProb: 0,
+      // Issue #533: 単勝・複勝の点数の上限もなし(0)。下限と同じ理由(core の golden が上限なしで生成してある)。
+      maxWinBets: 0,
+      maxPlaceBets: 0,
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,

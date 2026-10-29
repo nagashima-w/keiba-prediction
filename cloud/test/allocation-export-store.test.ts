@@ -33,7 +33,7 @@ const META: AnalysisAllocationMetaRecord = {
   route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOddsWide: "present", comboOddsTrio: "empty",
   bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.05, includeComboOdds: true, includeWide: true, includeTrio: false,
   includeQuinella: true, includeExacta: false, includeTrifecta: true, includeBracketQuinella: false, betUnit: 100, greedySteps: 1000, candidateCap: 2000,
-  modelId: "plackett-luce", modelApproximate: false, oddsStatus: "result", minHitProb: 0.02, belowFloorCount: 4,
+  modelId: "plackett-luce", modelApproximate: false, oddsStatus: "result", minHitProb: 0.02, belowFloorCount: 4, maxWinBets: 2, maxPlaceBets: 3,
   missed: [{ betType: "trifecta", comboKey: "010203", hitProb: 0.001, odds: 900, ev: 1.2, wouldStake: 100 }],
 };
 
@@ -132,7 +132,7 @@ describe("readRaceData", () => {
       analysisId: 1, route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOddsWide: "present", comboOddsTrio: "empty",
       bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.05, includeComboOdds: 1, includeWide: 1, includeTrio: 0, includeQuinella: 1,
       includeExacta: 0, includeTrifecta: 1, includeBracketQuinella: 0, betUnit: 100, greedySteps: 1000, candidateCap: 2000, modelId: "plackett-luce",
-      modelApproximate: 0, oddsStatus: "result", minHitProb: 0.02, belowFloorCount: 4,
+      modelApproximate: 0, oddsStatus: "result", minHitProb: 0.02, belowFloorCount: 4, maxWinBets: 2, maxPlaceBets: 3,
       missedJson: JSON.stringify([{ bet_type: "trifecta", combo_key: "010203", hit_prob: 0.001, odds: 900, ev: 1.2, would_stake: 100 }]),
     });
     // 買い目(主キーの順)・組合せ払戻・取込印
@@ -152,11 +152,11 @@ describe("readRaceData", () => {
   it("配分を保存していない分析は、メタも買い目も返さない(馬は返る)。NULL の設定(旧い行)は NULL のまま読める", async () => {
     await analyses().saveAnalysis(mkRecord(1, { allocation: undefined }));
     await analyses().saveAnalysis(mkRecord(2));
-    await local.db.prepare("UPDATE analysis_allocation_meta SET include_quinella = NULL, include_trifecta = NULL, min_hit_prob = NULL, below_floor_count = NULL, missed_json = NULL WHERE analysis_id = 2").run();
+    await local.db.prepare("UPDATE analysis_allocation_meta SET include_quinella = NULL, include_trifecta = NULL, min_hit_prob = NULL, below_floor_count = NULL, missed_json = NULL, max_win_bets = NULL, max_place_bets = NULL WHERE analysis_id = 2").run();
     for (const i of [1, 2]) await results().saveResult(mkRecord(i).raceId, [{ umaban: 1, finishPosition: 1 }]);
     const out = await store().readRaceData([1, 2], [mkRecord(1).raceId, mkRecord(2).raceId]);
     expect(out.metas.map((m) => m.analysisId)).toEqual([2]);
-    expect(out.metas[0]).toMatchObject({ includeQuinella: null, includeTrifecta: null, minHitProb: null, belowFloorCount: null, missedJson: null });
+    expect(out.metas[0]).toMatchObject({ includeQuinella: null, includeTrifecta: null, minHitProb: null, belowFloorCount: null, missedJson: null, maxWinBets: null, maxPlaceBets: null });
     expect(out.bets.map((b) => b.analysisId)).toEqual([2, 2]);
     expect(out.horses.filter((h) => h.analysisId === 1)).toHaveLength(2);
   });
