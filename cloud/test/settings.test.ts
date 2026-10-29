@@ -35,6 +35,8 @@ describe("既定値", () => {
       perRaceCap: 0,
       kellyFraction: 0.5,
       minHitProb: 0.05, // Issue #470: 的中確率が 0.05 未満の買い目は買わない(ユーザー決定 2026-10-23)
+      maxWinBetsPerRace: 2, // Issue #533: 単勝は1レース2点まで(ユーザー決定 2026-10-29)
+      maxPlaceBetsPerRace: 2, // Issue #533: 複勝は1レース2点まで(同上)
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -278,6 +280,8 @@ const FULL: CloudSettings = {
   perRaceCap: 50_000,
   kellyFraction: 0.25,
   minHitProb: 0.12, // Issue #470: 既定(0.05)と別の値
+  maxWinBetsPerRace: 3, // Issue #533: 既定(2)と別の値。複勝とも別の値(取り違えを検出する)
+  maxPlaceBetsPerRace: 4,
   includeComboOdds: true,
   includeWideInAllocation: false,
   includeTrioInAllocation: false,
@@ -325,6 +329,9 @@ const BOUNDARIES: ReadonlyArray<{ key: keyof CloudSettings; raw: unknown; read: 
   // Issue #470: 的中確率の下限。読む側も書く側も 0〜1(0 は下限なし、1 は全部外す)。部分集合が真部分集合でない。
   ...[0, 0.05, 0.2, 1].map((raw) => ({ key: "minHitProb" as const, raw, read: true, write: true })),
   ...[-0.01, 1.0001, "0.05", null, Number.NaN, Number.POSITIVE_INFINITY].map((raw) => ({ key: "minHitProb" as const, raw, read: false, write: false })),
+  // Issue #533: 単勝・複勝の点数の上限。整数 0〜18(0 は上限なし。18 は中央競馬の最大頭数)。読む側も書く側も同じ。
+  ...[0, 1, 2, 17, 18].flatMap((raw) => (["maxWinBetsPerRace", "maxPlaceBetsPerRace"] as const).map((key) => ({ key, raw, read: true, write: true }))),
+  ...[-1, 19, 1.5, 0.5, "2", null, Number.NaN, Number.POSITIVE_INFINITY].flatMap((raw) => (["maxWinBetsPerRace", "maxPlaceBetsPerRace"] as const).map((key) => ({ key, raw, read: false, write: false }))),
   ...[10, 11, 45, 179, 180].map((raw) => ({ key: "preRaceOffsetMinutes" as const, raw, read: true, write: true })),
   ...[0, 9, 181, 10.5, "45", Number.NaN].map((raw) => ({ key: "preRaceOffsetMinutes" as const, raw, read: false, write: false })),
   ...["default", "wide15"].map((raw) => ({ key: "clipVariant" as const, raw, read: true, write: true })),
@@ -494,7 +501,7 @@ describe("saveSettings(D1 の1行に UPSERT)", () => {
     expect(record[0]!.args.length).toBe(2);
     expect(record[0]!.args[1]).toBe("2026-10-07T01:02:03.000Z");
     expect(JSON.parse(record[0]!.args[0] as string)).toEqual(FULL);
-    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(31); // 既存の16項目(Issue #470で的中確率の下限を足した)+ 重み15項目
+    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(33); // 既存の18項目(Issue #470で的中確率の下限、Issue #533で単勝・複勝の点数の上限を足した)+ 重み15項目
     expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(Object.keys(DEFAULT_CLOUD_SETTINGS).length);
   });
 
@@ -535,5 +542,45 @@ describe("minHitProb(的中確率の下限。Issue #470)", () => {
     expect(validateCloudSettingsForSave({ ...FULL, minHitProb: 1 }).ok).toBe(true);
     expect(validateCloudSettingsForSave({ ...FULL, minHitProb: 1.01 })).toEqual({ ok: false, fields: ["minHitProb"] });
     expect(validateCloudSettingsForSave({ ...FULL, minHitProb: -0.01 })).toEqual({ ok: false, fields: ["minHitProb"] });
+  });
+});
+
+describe("maxWinBetsPerRace・maxPlaceBetsPerRace(単勝・複勝の点数の上限。Issue #533)", () => {
+  const KEYS = ["maxWinBetsPerRace", "maxPlaceBetsPerRace"] as const;
+
+  it("項目が無い旧い行は、どちらも既定値 2 で読む(保存し直さなくても、デプロイ時点から上限が効く)", () => {
+    for (const raw of [{ bankroll: 1_000_000, perRaceCap: 100_000 }, {}, null]) {
+      const s = coerceCloudSettings(raw);
+      expect(s.maxWinBetsPerRace).toBe(2);
+      expect(s.maxPlaceBetsPerRace).toBe(2);
+    }
+  });
+
+  it("0(上限なし)・1・18 は採用し、範囲外・非整数・型違いはその項目だけ 2 に戻す。単勝と複勝は別々に読む", () => {
+    expect(coerceCloudSettings({ maxWinBetsPerRace: 0, maxPlaceBetsPerRace: 18 })).toMatchObject({ maxWinBetsPerRace: 0, maxPlaceBetsPerRace: 18 });
+    expect(coerceCloudSettings({ maxWinBetsPerRace: 1, maxPlaceBetsPerRace: 3 })).toMatchObject({ maxWinBetsPerRace: 1, maxPlaceBetsPerRace: 3 });
+    for (const key of KEYS) {
+      for (const bad of [-1, 19, 1.5, "2", null, Number.NaN]) {
+        const s = coerceCloudSettings({ [key]: bad, bankroll: 500 });
+        expect(s[key]).toBe(2);
+        expect(s.bankroll).toBe(500); // 他の項目は巻き込まない
+      }
+    }
+    // 片方だけ不正でも、もう片方は読む
+    const mixed = coerceCloudSettings({ maxWinBetsPerRace: 99, maxPlaceBetsPerRace: 5 });
+    expect(mixed.maxWinBetsPerRace).toBe(2);
+    expect(mixed.maxPlaceBetsPerRace).toBe(5);
+  });
+
+  it("保存の検証: 項目が欠けた本文は不正で、その項目だけを名指しする。0・18 は通り、19・小数は名指しされる", () => {
+    for (const key of KEYS) {
+      const { [key]: _omit, ...withoutKey } = FULL;
+      expect(validateCloudSettingsForSave(withoutKey)).toEqual({ ok: false, fields: [key] });
+      expect(validateCloudSettingsForSave({ ...FULL, [key]: 0 }).ok).toBe(true);
+      expect(validateCloudSettingsForSave({ ...FULL, [key]: 18 }).ok).toBe(true);
+      expect(validateCloudSettingsForSave({ ...FULL, [key]: 19 })).toEqual({ ok: false, fields: [key] });
+      expect(validateCloudSettingsForSave({ ...FULL, [key]: 1.5 })).toEqual({ ok: false, fields: [key] });
+      expect(validateCloudSettingsForSave({ ...FULL, [key]: -1 })).toEqual({ ok: false, fields: [key] });
+    }
   });
 });

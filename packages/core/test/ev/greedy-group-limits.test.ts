@@ -237,6 +237,29 @@ describe("runGreedyAllocation の群ごとの点数の上限(Issue #533)", () =>
       expect(actual).toEqual(free);
       expect(actual.fractions).toEqual(bruteForceWithLimits(3, odds, sets, 1000, limits));
     });
+
+    it("EPS ガードのフォールバックを通るステップで、ブロックされた候補は選ばれない(群の上限を守り、旧来のブルートフォースと一致する)", () => {
+      // 上と同じ構成に、候補2と同じ形の候補3(同じ outcome・同じ極端なオッズ)を足す。群 {0, 2}(上限1)では、候補0が先に正になり、候補2は
+      // ブロックされる。最後のステップ(sumX が 1 に届く。EPS ガードのフォールバック)では、候補2と候補3の増分が同じなので、ブロックを無視すると
+      // 添字の小さい候補2(ブロック済み)が選ばれて上限を破る。ブロックを守れば候補3が選ばれる。
+      const sets: OutcomeIndexSet[] = [
+        { indices: [0], probability: 0.49995 },
+        { indices: [1], probability: 0.49995 },
+        { indices: [2, 3], probability: 0.0001 },
+      ];
+      const odds = [10, 10, 10000, 10000];
+      const limits: GreedyGroupLimit[] = [{ members: [0, 2], max: 1 }];
+      const free = runGreedyAllocation(4, odds, sets, 1000);
+      // 前提: 上限なしでは、最後のステップで候補2(添字の小さい方)が選ばれる(= ブロックを無視した場合の選択)。群の2点とも正になる
+      expect(free.fractions[2]!).toBeGreaterThan(0);
+      expect(free.fractions[3]!).toBe(0);
+      expect(positiveCount(free.fractions, [0, 2])).toBe(2);
+      const actual = runGreedyAllocation(4, odds, sets, 1000, limits);
+      expect(actual.fractions[2]!).toBe(0);
+      expect(actual.fractions[3]!).toBeGreaterThan(0);
+      expect(positiveCount(actual.fractions, [0, 2])).toBe(1);
+      expect(actual.fractions).toEqual(bruteForceWithLimits(4, odds, sets, 1000, limits));
+    });
   });
 
   describe("契約違反は例外にする", () => {

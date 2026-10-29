@@ -9,6 +9,8 @@ import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "./pre-race-time.js";
  * 上のテストは、削除の直前に両者が一致していた値をリテラルで固定していて、既定値を変えるときはそのリテラルも意図して書き換える。
  *  - `bankroll`・`perRaceCap` は既定 0(配分提案を出さない opt-in。exe と同じ)。ユーザーが値を決めたら、D1 の行に入れる。
  *  - `minHitProb`(的中確率の下限。Issue #470)は既定 0.05。項目の無い旧い行も 0.05 で読む(保存し直さなくても、デプロイ時点から効く)。0〜1 で、0 は下限なし。
+ *  - `maxWinBetsPerRace`・`maxPlaceBetsPerRace`(1 レースあたりの単勝・複勝の点数の上限。Issue #533)は既定 2。項目の無い旧い行も 2 で読む(保存し直さなくても、デプロイ時点から効く)。整数 0〜18 で、0 は上限なし。
+ *    **分析時のスナップショット〈締切直前の再計算の入力 `input_json`〉の旧い入力は 0 で読む**(`race-day-close.ts`)。設定の表の旧い行〈2〉とは意図して違う: スナップショットは『上限を知らない旧い Worker が上限なしで配分した分析』なので、再計算も上限なしに揃える。
  *  - `includeComboOdds`(組合せオッズの取得)は既定 OFF(オプトイン)。OFF なら、組合せの券種は配分に入らない(exe と同じ)。
  *  - 各券種の `include*InAllocation` は既定 ON。
  *  - `preRaceOffsetMinutes`(発走何分前に評価するか。Issue #189)は **cloud 専用の項目**(exe には無い)。既定 45 分は `pre-race-time.ts` の定数と同じ値(定義は1か所)。
@@ -93,6 +95,14 @@ export interface CloudSettings extends Readonly<Record<ScoringWeightField, numbe
    * 既定 0.05(ユーザー決定 2026-10-23。#468 の調査で、確率 0.05 未満の買い目は 86 件のうち的中が 0 件だった)。項目の無い旧い行も 0.05 で読む。
    */
   readonly minHitProb: number;
+  /**
+   * 単勝の点数の上限(1レースあたり。整数 0〜18。Issue #533)。賭け金の付く単勝の買い目がこの点数を超えないようにする(買い目を後から削るのではなく、上限の中で残す点と予算の回し方を選び直す)。
+   * 0 は上限なし。既定 2(ユーザー決定 2026-10-29。単勝を3点以上買ったレースは賭け金 9,400 円に対し払戻 1,140 円だった)。項目の無い旧い行も 2 で読む。
+   * 単勝を扱うのは組合せオッズを取得する設定(`includeComboOdds`)の経路だけで、そうでない経路には単勝がないので効かない。
+   */
+  readonly maxWinBetsPerRace: number;
+  /** 複勝の点数の上限(1レースあたり。整数 0〜18。Issue #533)。意味・既定・旧い行の扱いは `maxWinBetsPerRace` と同じ。複勝は組合せを混ぜる経路と複勝だけの経路の両方に効く。単勝とは別々に数える。 */
+  readonly maxPlaceBetsPerRace: number;
   /** ワイド・3連複・馬連・馬単・三連単〈中央・地方。地方は Issue #283 から〉・枠連のオッズを取得するか。 */
   readonly includeComboOdds: boolean;
   readonly includeWideInAllocation: boolean;
@@ -115,6 +125,8 @@ export const DEFAULT_CLOUD_SETTINGS: CloudSettings = {
   perRaceCap: 0,
   kellyFraction: 0.5,
   minHitProb: 0.05,
+  maxWinBetsPerRace: 2,
+  maxPlaceBetsPerRace: 2,
   includeComboOdds: false,
   includeWideInAllocation: true,
   includeTrioInAllocation: true,
@@ -143,6 +155,8 @@ export const DEFAULT_CLOUD_SETTINGS: CloudSettings = {
   baseScoreWeightTrainer: 0.77,
 };
 
+/** 単勝・複勝の点数の上限の最大(18 は中央競馬の最大頭数。複勝・単勝は1頭につき1点なので、これ以上の上限は意味がない)。 */
+export const MAX_BETS_PER_RACE_MAX = 18;
 const BANKROLL_MAX = 100_000_000;
 const PER_RACE_CAP_MAX = 10_000_000;
 /** 追加指示の上限(書く側のみ。UTF-16 コード単位 = `String#length`。HTML の `maxlength` と同じ)。 */
@@ -213,6 +227,9 @@ export const CLOUD_SETTINGS_RULES: { readonly [K in keyof CloudSettings]: FieldR
   kellyFraction: rule(D.kellyFraction, numberWhere((n) => n >= 0 && n <= 1), numberWhere((n) => n >= KELLY_FRACTION_WRITE_MIN && n <= 1)),
   // Issue #470: 的中確率の下限。読む側と書く側で同じ述語(0〜1。0 は下限なし)。
   minHitProb: rule(D.minHitProb, numberWhere((n) => n >= 0 && n <= 1)),
+  // Issue #533: 単勝・複勝の点数の上限。整数 0〜18(0 は上限なし)。読む側と書く側で同じ述語。
+  maxWinBetsPerRace: rule(D.maxWinBetsPerRace, numberWhere((n) => Number.isInteger(n) && n >= 0 && n <= MAX_BETS_PER_RACE_MAX)),
+  maxPlaceBetsPerRace: rule(D.maxPlaceBetsPerRace, numberWhere((n) => Number.isInteger(n) && n >= 0 && n <= MAX_BETS_PER_RACE_MAX)),
   includeComboOdds: rule(D.includeComboOdds, isBoolean),
   includeWideInAllocation: rule(D.includeWideInAllocation, isBoolean),
   includeTrioInAllocation: rule(D.includeTrioInAllocation, isBoolean),

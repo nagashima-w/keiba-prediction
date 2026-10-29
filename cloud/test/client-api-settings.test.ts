@@ -35,12 +35,12 @@ describe("fetchSettings(GET /api/settings)", () => {
     expect(f.calls[0]!.init.body).toBeUndefined();
   });
 
-  it("成功: 全 31 項目(既存の 16 + スコアリングの重み 15。Issue #470 で的中確率の下限を足した)と source を、そのまま返す", async () => {
+  it("成功: 全 33 項目(既存の 18 + スコアリングの重み 15。Issue #470 で的中確率の下限を足した)と source を、そのまま返す", async () => {
     for (const source of ["default", "d1", "invalid"] as const) {
       const f = fake(async () => resp(200, { ok: true, settings: SAVED, source }));
       expect(await fetchSettings(f.fetch)).toEqual({ ok: true, settings: SAVED, source });
     }
-    expect(CLOUD_SETTINGS_KEYS.length).toBe(31);
+    expect(CLOUD_SETTINGS_KEYS.length).toBe(33);
   });
 
   it.each([
@@ -85,7 +85,7 @@ describe("fetchSettings(GET /api/settings)", () => {
 });
 
 describe("postSettings(POST /api/settings)", () => {
-  it("リクエスト: POST /api/settings に、31 項目すべての JSON を送る(content-type: application/json・同じオリジンの資格情報・referrerPolicy: same-origin。mode は指定しない)", async () => {
+  it("リクエスト: POST /api/settings に、33 項目すべての JSON を送る(content-type: application/json・同じオリジンの資格情報・referrerPolicy: same-origin。mode は指定しない)", async () => {
     const f = fake(async () => resp(200, { ok: true, settings: SAVED }));
     await postSettings(f.fetch, SAVED);
     expect(f.calls).toHaveLength(1);

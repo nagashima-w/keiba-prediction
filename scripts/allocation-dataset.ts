@@ -9,13 +9,13 @@
  *
  * ## 計算し直し(`replayRace`)
  * 行の分析時点のオッズ・確率・実効設定を、本番と同じ関数(`recomputeAllocationFromProbs`。分析時の配分も締切直前の再計算も呼ぶ関数)に渡す。D1 の NULL は
- * ここで解釈する(書き出しは NULL のまま): 券種の `include_*` が NULL は OFF、`min_hit_prob` が NULL は 0(下限なし)。それで分析時の提案と食い違ったときの理由の分類は、下の「一致しない理由の分類」。
+ * ここで解釈する(書き出しは NULL のまま): 券種の `include_*` が NULL は OFF、`min_hit_prob` が NULL は 0(下限なし)、`max_win_bets`・`max_place_bets`(Issue #533。1 レースあたりの単勝・複勝の点数の上限)が NULL は 0(上限なし。旧い Worker は上限なしで配分した)。それで分析時の提案と食い違ったときの理由の分類は、下の「一致しない理由の分類」。
  * 組合せの取得診断(`comboOdds`)は渡さない(買い目の金額には効かず、配分のコードの診断にだけ使われる。往復のテストで、渡さなくても買い目が一致することを確かめている)。
  * 下限で外した買い目(`missed`)は、`recomputeAllocationFromProbs` が記録のための 2 回目の配分を呼ばないので、ここでは比べない。
  *
  * ## 設定の上書き(`ReplayOverrides`。Issue #494)
  * `replayRace(row, overrides)` は、NULL の解釈のあとに設定を上書きして計算し直す(#468 の試算用)。本番の配分の関数は変えず、**設定で表せる候補だけ**が試せる:
- * 総資金・1 レースの上限・ケリー係数・EV 閾値・的中確率の下限・組合せオッズの取得・6 券種の ON/OFF。確率を変える候補は `adjustProb`(馬ごとの補正後の確率を差し替える。寄せ方の式は作らない)。
+ * 総資金・1 レースの上限・ケリー係数・EV 閾値・的中確率の下限・単勝と複勝の点数の上限・組合せオッズの取得・6 券種の ON/OFF。確率を変える候補は `adjustProb`(馬ごとの補正後の確率を差し替える。寄せ方の式は作らない)。
  * **確率ごとに閾値やケリー係数を変える・低確率の買い目に回す額に上限を付ける・100 円の救済をやめる、は本番の関数の変更が要るので、ここでは試せない。**
  * 上書きをすると分析時の提案とは一致しなくて当然なので、一致率の集計(`summarizeReplay`)は上書きなしだけに使う。
  *
@@ -34,7 +34,7 @@
  * 使い方(リポジトリのルートで):
  * - `pnpm tsx scripts/allocation-dataset.ts <ファイル>`: 要約(レース数・区分別・オッズなし・配分の記録なし)と、計算し直した買い目が分析時の提案と一致した件数。
  * - `pnpm tsx scripts/allocation-dataset.ts <ファイル> --replay [--override key=value ...]`: 理由別・区分別の一致率と、回収額(分析時の提案・計算し直した提案)。
- *   `--override` のキーは `bankroll`・`perRaceCap`・`kellyFraction`・`evThreshold`・`minHitProb`・`includeComboOdds`・`include.wide`(`trio`・`quinella`・`exacta`・`trifecta`・`bracketQuinella` も)。真偽は true/false/on/off。`model=plackett-luce|conditional-bernoulli`(Issue #524)。
+ *   `--override` のキーは `bankroll`・`perRaceCap`・`kellyFraction`・`evThreshold`・`minHitProb`・`maxWinBetsPerRace`・`maxPlaceBetsPerRace`(整数 0〜18。0 は上限なし。Issue #533)・`includeComboOdds`・`include.wide`(`trio`・`quinella`・`exacta`・`trifecta`・`bracketQuinella` も)。真偽は true/false/on/off。`model=plackett-luce|conditional-bernoulli`(Issue #524)。
  *
  * スクリプトからは、`loadAllocationDataset`・`replayRace`・`replayedBets`・`judgeRaceBets`・`summarizePayouts`・`payoutReport` を直接呼べる(CLI の `runCli` は表示だけ)。
  */
@@ -148,7 +148,7 @@ function rowProblem(row: unknown): string | null {
       if (p !== null) return p;
     }
     const s = alloc["settings"] as Record<string, unknown>;
-    if (![s["bankroll"], s["per_race_cap"], s["kelly_fraction"], s["ev_threshold"]].every(isNum) || !isNumOrNull(s["min_hit_prob"])) return "allocation.settings の数の列の型が違います";
+    if (![s["bankroll"], s["per_race_cap"], s["kelly_fraction"], s["ev_threshold"]].every(isNum) || !isNumOrNull(s["min_hit_prob"]) || !isNumOrNull(s["max_win_bets"]) || !isNumOrNull(s["max_place_bets"])) return "allocation.settings の数の列の型が違います";
     if (!Array.isArray(alloc["bets"])) return "allocation.bets が配列ではありません";
     for (const [i, b] of (alloc["bets"] as unknown[]).entries()) {
       const p = keyProblem(`allocation.bets[${i}]`, b, ALLOCATION_BET_KEYS);
@@ -278,6 +278,10 @@ export interface ReplayOverrides {
   readonly evThreshold?: number;
   /** 的中確率の下限(0〜1。0 は下限なし)。 */
   readonly minHitProb?: number;
+  /** 単勝の点数の上限(1 レースあたり。整数 0〜18。0 は上限なし。Issue #533)。複勝だけの経路には単勝がないので効かない。 */
+  readonly maxWinBetsPerRace?: number;
+  /** 複勝の点数の上限(1 レースあたり。整数 0〜18。0 は上限なし。Issue #533)。単勝とは別々に数える。 */
+  readonly maxPlaceBetsPerRace?: number;
   /** 組合せオッズを取得する設定。false なら複勝だけの経路(組合せ券種が ON でも)。 */
   readonly includeComboOdds?: boolean;
   /** 券種ごとの「配分に含める」。 */
@@ -298,13 +302,17 @@ export const REPLAY_MODELS: Readonly<Record<string, PlaceJointModel>> = {
   [CONDITIONAL_BERNOULLI_MODEL.id]: CONDITIONAL_BERNOULLI_MODEL,
 };
 
-const NUMBER_OVERRIDES = ["bankroll", "perRaceCap", "kellyFraction", "evThreshold", "minHitProb"] as const;
+const NUMBER_OVERRIDES = ["bankroll", "perRaceCap", "kellyFraction", "evThreshold", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace"] as const;
+
+/** 点数の上限の上書きの最大(`cloud/src/settings.ts` の `MAX_BETS_PER_RACE_MAX` と同じ。中央競馬の最大頭数)。 */
+const MAX_BETS_OVERRIDE = 18;
 
 /**
  * 上書きの値を検査する(範囲外は例外)。**本番の配分の関数は、範囲外の値を黙って別の値に置き換える**(`resolveKellyFraction` は [0,1] の外を既定の 0.5 に、`resolveMinHitProb` は [0,1] に丸める、
  * `resolveBankroll`・`resolveEffectivePerRaceCap` は負の値を 0〈未設定〉にする)。試算の道具としては、指定した値で計算したように見えて別の値で計算するのが最も危ないので、範囲外は例外にする。
  * - `bankroll`・`perRaceCap`: 有限で 0 以上(0 は「未設定」で、そのとおりに計算される。`perRaceCap` は本番の関数が 100 円の倍数に切り捨てる)。
  * - `kellyFraction`・`minHitProb`: 有限で 0〜1。
+ * - `maxWinBetsPerRace`・`maxPlaceBetsPerRace`: 整数で 0〜18(0 は上限なし。本番の関数は非整数を切り捨て、1 未満を上限なしにするので、1.5 などは指定した値と違う上限で計算してしまう)。
  * - `evThreshold`: 有限(負の閾値は本番の関数もそのまま使う)。
  */
 export function validateOverrides(overrides: ReplayOverrides): void {
@@ -313,6 +321,9 @@ export function validateOverrides(overrides: ReplayOverrides): void {
     if (value === undefined) continue;
     if (!Number.isFinite(value)) throw new Error(`上書き ${key} が有限の数ではありません(${String(value)})`);
     if ((key === "bankroll" || key === "perRaceCap") && value < 0) throw new Error(`上書き ${key} は 0 以上です(${value}。本番の関数は負の値を 0〈未設定〉に置き換えます)`);
+    if ((key === "maxWinBetsPerRace" || key === "maxPlaceBetsPerRace") && (!Number.isInteger(value) || value < 0 || value > MAX_BETS_OVERRIDE)) {
+      throw new Error(`上書き ${key} は 0〜${MAX_BETS_OVERRIDE} の整数です(${value}。0 は上限なし。本番の関数は非整数を切り捨てます)`);
+    }
     if ((key === "kellyFraction" || key === "minHitProb") && (value < 0 || value > 1)) {
       throw new Error(`上書き ${key} は 0〜1 です(${value}。本番の関数は範囲外の値を ${key === "kellyFraction" ? "既定の 0.5" : "0〜1 の端"} に置き換えます)`);
     }
@@ -356,6 +367,8 @@ export function replayRace(row: AllocationRaceRow, overrides: ReplayOverrides = 
       includeTrifectaInAllocation: include.trifecta ?? s.include_trifecta ?? false,
       includeBracketQuinellaInAllocation: include.bracketQuinella ?? s.include_bracket_quinella ?? false,
       minHitProb: overrides.minHitProb ?? s.min_hit_prob ?? 0,
+      maxWinBets: overrides.maxWinBetsPerRace ?? s.max_win_bets ?? 0,
+      maxPlaceBets: overrides.maxPlaceBetsPerRace ?? s.max_place_bets ?? 0,
     },
     evConfig: { threshold: overrides.evThreshold ?? s.ev_threshold },
     ...(overrides.model === undefined ? {} : { model: overrides.model }),
@@ -446,8 +459,8 @@ export function driftedConstants(row: AllocationRaceRow, outcome: Extract<Replay
 export const REPLAY_REASONS = ["match", "no-allocation-record", "no-odds", "invalid", "code-drift", "legacy-settings", "mismatch"] as const;
 export type ReplayReason = (typeof REPLAY_REASONS)[number];
 
-/** 設定の列のうち、D1 の NULL を読み手が解釈するもの(`replayRace` が OFF・下限なしと解釈する列)。 */
-const NULLABLE_SETTING_COLUMNS = ["include_combo_odds", "include_wide", "include_trio", "include_quinella", "include_exacta", "include_trifecta", "include_bracket_quinella", "min_hit_prob"] as const;
+/** 設定の列のうち、D1 の NULL を読み手が解釈するもの(`replayRace` が OFF・下限なし・上限なしと解釈する列)。 */
+const NULLABLE_SETTING_COLUMNS = ["include_combo_odds", "include_wide", "include_trio", "include_quinella", "include_exacta", "include_trifecta", "include_bracket_quinella", "min_hit_prob", "max_win_bets", "max_place_bets"] as const;
 
 export interface ReplayClassification {
   readonly reason: ReplayReason;

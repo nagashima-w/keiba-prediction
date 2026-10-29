@@ -4,7 +4,7 @@
  * **下書きは文字列(数値欄は入力した文字のまま)・真偽は真偽値**で持つ。検証は保存の押下時に1回だけ(`validateDraft`。入力のたびには行わない=`change` で描画しない設計)。
  * 検証の範囲は、サーバが 400 にする**書く側の述語**(`cloud/src/settings.ts` の `CLOUD_SETTINGS_RULES[key].isWritable`)をそのまま使う(範囲の定義は1か所)。
  * 並びとラベルは exe の最後の設定画面(`packages/app/src/renderer/SettingsView.tsx`。#287 で削除。3c1664e まで)に合わせた(ラベルは exe と共有していた定数 `packages/core/src/analysis/app-settings.ts` を流用)。**補助文は cloud の実際の挙動に合わせて書き直した**:
- *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
+ *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・単勝と複勝の点数の上限(Issue #533)・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
  *  - LLM を使うときだけ効く: 追加指示・クリップ幅(発走前の分析の LLM〈Issue #194〉で使う。Worker の API キーが未登録の間は LLM を使わないので効かない。補助文はキーの有無のどちらでも嘘にならない書き方)
  *  - LLM を使うときだけ効く(分析モデル。Issue #158): 選んだ系統の最新のモデルで、保存後に次に始まる発走前の分析から使う
  *  - 事前分析と発走前の分析の両方で効く: スコアリングの重み15項目(Issue #218・#353・#354。`WEIGHT_FIELD_ORDER`。`fields` ではなく専用の節〈`weights`〉に出す)。取得ステップで固定した設定のスナップショットで計算する
@@ -18,6 +18,7 @@ import {
   CLOUD_SETTINGS_RULES,
   DEFAULT_CLOUD_SETTINGS,
   KELLY_FRACTION_WRITE_MIN,
+  MAX_BETS_PER_RACE_MAX,
   PRE_RACE_OFFSET_MAX,
   PRE_RACE_OFFSET_MIN,
   SCORING_WEIGHT_FIELDS,
@@ -47,6 +48,8 @@ export const FIELD_ORDER: readonly FieldKey[] = [
   "perRaceCap",
   "kellyFraction",
   "minHitProb",
+  "maxWinBetsPerRace",
+  "maxPlaceBetsPerRace",
   "additionalInstruction",
   "clipVariant",
   "analysisModel",
@@ -95,6 +98,11 @@ function parseNumberInput(text: string): number | null {
 /** 1,000,000 のような桁区切り。 */
 const withCommas = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
+/** 単勝・複勝の点数の上限(Issue #533)の入力の誤り。2 項目で同じ文言(バンドルの大きさを抑えるため 1 つにまとめた)。 */
+function maxBetsError(): string {
+  return `0以上${MAX_BETS_PER_RACE_MAX}以下の整数を入力してください(半角。0は上限なし)。`;
+}
+
 const ERROR_TEXT: Readonly<Record<FieldKey, (draftValue: DraftValue) => string>> = {
   evThreshold: () => "0より大きい数値を入力してください(半角)。",
   additionalInstruction: (v) => `${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)}文字以内で入力してください(現在 ${typeof v === "string" ? v.length : 0} 文字)。`,
@@ -104,6 +112,8 @@ const ERROR_TEXT: Readonly<Record<FieldKey, (draftValue: DraftValue) => string>>
   perRaceCap: () => "0以上10,000,000以下の整数を入力してください(半角。0は未設定を表し、配分提案を出しません)。",
   kellyFraction: () => `${KELLY_FRACTION_WRITE_MIN}以上1以下の数値を入力してください(半角)。`,
   minHitProb: () => "0以上1以下の数値を入力してください(半角。0は下限なし)。",
+  maxWinBetsPerRace: maxBetsError,
+  maxPlaceBetsPerRace: maxBetsError,
   includeComboOdds: () => "チェックの状態が不正です。",
   includeWideInAllocation: () => "チェックの状態が不正です。",
   includeTrioInAllocation: () => "チェックの状態が不正です。",
@@ -293,6 +303,18 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
   perRaceCap: { kind: "text", label: BET_ALLOCATION_LABELS.perRaceCap, help: "1レースで使う金額の上限(円)。0 以上 10,000,000 以下の整数。0 のままだと配分の提案は出ません。", inputmode: "numeric" },
   kellyFraction: { kind: "text", label: BET_ALLOCATION_LABELS.kellyFraction, help: "0.05〜1(既定 0.5)。小さいほど1回あたりの配分額が控えめになり、資産変動が穏やかになります。", inputmode: "decimal" },
   minHitProb: { kind: "text", label: "この的中確率未満の買い目は買わない(既定 0.05)", help: "0〜1。EVがプラスでも、的中確率がこの値未満の買い目は配分の候補から外します(全券種)。0 にすると外しません。", inputmode: "decimal" },
+  maxWinBetsPerRace: {
+    kind: "text",
+    label: "単勝は1レースに何点まで買うか(既定 2)",
+    help: `0〜${MAX_BETS_PER_RACE_MAX} の整数。1レースで買う単勝の点数の上限です。0 にすると上限なしです。単勝は、組合せオッズを取得する設定のときだけ配分に入ります。`,
+    inputmode: "numeric",
+  },
+  maxPlaceBetsPerRace: {
+    kind: "text",
+    label: "複勝は1レースに何点まで買うか(既定 2)",
+    help: `0〜${MAX_BETS_PER_RACE_MAX} の整数。1レースで買う複勝の点数の上限です(単勝とは別に数えます)。0 にすると上限なしです。`,
+    inputmode: "numeric",
+  },
   additionalInstruction: {
     kind: "textarea",
     label: "プロンプト追加指示(任意)",

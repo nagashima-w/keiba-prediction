@@ -90,14 +90,18 @@ describe("migration の適用(ローカルの D1)", () => {
     for (const c of ["min_hit_prob", "below_floor_count", "missed_json"]) {
       expect((await rows("PRAGMA table_info(analysis_allocation_meta)")).map((r) => r["name"]), c).toContain(c);
     }
+    // Issue #533(0029。cloud 専用): 使った単勝・複勝の点数の上限(メタ行の2列)
+    for (const c of ["max_win_bets", "max_place_bets"]) {
+      expect((await rows("PRAGMA table_info(analysis_allocation_meta)")).map((r) => r["name"]), c).toContain(c);
+    }
     // Issue #197(0006): 馬ごとの強調材料・懸念事項。exe の analysis_horses と同じ列(並びも reason の後ろ)。
     expect((await rows("PRAGMA table_info(analysis_horses)")).map((r) => r["name"]).slice(-3)).toEqual(["reason", "highlights_json", "concerns_json"]);
     const indexes = (await rows("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx\\_%' ESCAPE '\\' ORDER BY name")).map((r) => r["name"]);
     expect(indexes).toEqual(["idx_analyses_analyzed_at", "idx_analyses_exe_id", "idx_analyses_kaisai_analyzed", "idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race", "idx_analyses_race_analyzed"]);
   });
 
-  it("migration は28本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql"]);
+  it("migration は29本とも適用済みとして記録されている(d1_migrations)", async () => {
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql"]);
     expect((await rows("PRAGMA table_info(race_results)")).map((r) => r["name"])).toContain("scratched"); // Issue #72(0013)
     expect((await rows("PRAGMA table_info(race_results)")).map((r) => r["name"])).toContain("wakuban"); // Issue #269(0016)
   });
@@ -265,6 +269,18 @@ describe("D1 の疎通確認(/api/health が使う checkD1)を、実エンジン
       await db.prepare("ALTER TABLE analysis_allocation_meta RENAME COLUMN min_hit_prob_renamed TO min_hit_prob").run();
     }
     expect(await checkD1(db)).toEqual({ ok: true });
+  });
+
+  it("対照: 0029 の max_win_bets・max_place_bets 列が無い状態(migration の未適用相当。Issue #533)では、どちらの列でも ok:false になる(分析の保存の UPDATE が落ちる状態を、疎通確認で気づく)", async () => {
+    for (const column of ["max_win_bets", "max_place_bets"]) {
+      await db.prepare(`ALTER TABLE analysis_allocation_meta RENAME COLUMN ${column} TO ${column}_renamed`).run();
+      try {
+        expect(await checkD1(db), column).toEqual({ ok: false });
+      } finally {
+        await db.prepare(`ALTER TABLE analysis_allocation_meta RENAME COLUMN ${column}_renamed TO ${column}`).run();
+      }
+      expect(await checkD1(db), column).toEqual({ ok: true });
+    }
   });
 
   it("対照: analyses 表が無い状態でも例外を投げず ok:false(表の名前を変えて戻す)", async () => {

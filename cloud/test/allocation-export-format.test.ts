@@ -334,7 +334,7 @@ const META: AllocationMetaInput = {
   route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOddsWide: "present", comboOddsTrio: "present",
   bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.05, includeComboOdds: 1, includeWide: 1, includeTrio: 0,
   includeQuinella: null, includeExacta: 0, includeTrifecta: 1, includeBracketQuinella: null, betUnit: 100, greedySteps: 1000, candidateCap: 2000,
-  modelId: "plackett-luce", modelApproximate: 0, oddsStatus: "result", minHitProb: null, belowFloorCount: 3,
+  modelId: "plackett-luce", modelApproximate: 0, oddsStatus: "result", minHitProb: null, belowFloorCount: 3, maxWinBets: 2, maxPlaceBets: null,
   missedJson: JSON.stringify([{ bet_type: "trifecta", combo_key: "010203", hit_prob: 0.001, odds: 900, ev: 1.2, would_stake: 100, reason: "SECRET-MISSED", extra: { a: 1 } }, "x", { bet_type: { a: 1 } }]),
 };
 
@@ -396,7 +396,7 @@ describe("buildAllocationRaceRow(1 行 1 レース。列は許可リストと完
   it("設定と配分のコードは meta の値のまま。D1 の NULL は NULL のまま(0/1 は boolean)で、旧い行の列を OFF や 0 に補わない", () => {
     expect(row.allocation!.settings).toEqual({
       bankroll: 10000, per_race_cap: 3000, kelly_fraction: 0.25, ev_threshold: 1.05, include_combo_odds: true, include_wide: true, include_trio: false,
-      include_quinella: null, include_exacta: false, include_trifecta: true, include_bracket_quinella: null, min_hit_prob: null,
+      include_quinella: null, include_exacta: false, include_trifecta: true, include_bracket_quinella: null, min_hit_prob: null, max_win_bets: 2, max_place_bets: null,
     });
     expect(row.allocation!.codes).toEqual({
       route: "mixed", unavailable_reason: null, fallback_reason: null, skip_reason_code: null, combo_odds_wide: "present", combo_odds_trio: "present",
