@@ -409,10 +409,21 @@ async function smokeSeedAnalyses(env: SmokeEnv): Promise<Response> {
     ["202603030101", "2026-03-02T04:00:00.000Z"],
     ["202603020211", "2026-03-02T02:00:00.000Z"],
   ];
+  // Issue #526 段階 1b: 202603020212 の分析だけ、出馬表の騎手 ID を落とす(2026-10-29 より前の旧スナップショットの想定)。書き出しが騎手名から ID を埋める経路を、
+  // 本物の DO・D1・kv で通すための材料。ほかの分析(202603020211・202603030101)はスナップショットに ID がある。
+  const withoutJockeyIds = (snapshot: unknown): unknown => {
+    const s = snapshot as { horses?: Array<Record<string, unknown>> };
+    return { ...s, horses: (s.horses ?? []).map(({ jockeyId: _dropped, ...rest }) => rest) };
+  };
   const results: Array<{ id: number; detail: string }> = [];
   for (const [raceId, analyzedAt] of specs) {
-    const outcome = await store.saveAnalysis({ ...base, raceId, analyzedAt, kaisaiDate: "20260302" });
+    const raceSnapshot = raceId === "202603020212" ? withoutJockeyIds(base.raceSnapshot) : base.raceSnapshot;
+    const outcome = await store.saveAnalysis({ ...base, raceId, analyzedAt, kaisaiDate: "20260302", raceSnapshot });
     results.push({ id: outcome.id, detail: outcome.detail });
+  }
+  // 出馬表の騎手名と騎手 ID の組(jockey_names)。戸崎圭・田辺は ID が 1 つ(埋まる)、横山武は ID が 2 つ(曖昧なので埋めない)、松山などは表に無い(埋まらない)。
+  for (const [name, id] of [["戸崎圭", "05386"], ["田辺", "01075"], ["横山武", "01170"], ["横山武", "99999"]] as const) {
+    await env.DB.prepare("INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) VALUES (?, ?, '20260302') ON CONFLICT DO NOTHING").bind(name, id).run();
   }
   for (const raceId of ["202603020211", "202603020212"]) {
     await env.DB.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, place_payout) VALUES (?, 1, 1, 400, 150)").bind(raceId).run();

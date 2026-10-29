@@ -7,12 +7,13 @@
  * メタ行・ファイルの情報に足す数(`missingDetail`)・定数。
  *
  * ## 流れ(この書き出しの tick)
- * 計画(適格な分析を選んで batch に分ける)→ 処理(1 tick に {@link PRIOR_EXPORT_BATCH_SIZE} 件。D1 で馬・結果・面を読み、R2 から詳細を取り、
+ * 計画(適格な分析を選んで batch に分ける。**形式 v5 から、同じ tick で騎手名 → 騎手 ID の対応〈`jockey_names` 表で ID がちょうど 1 つの名前〉も 1 回読み**、kv の `lookups` に置いて全 batch で使う。
+ * スナップショットに騎手 ID が無い行を、これで埋める。Issue #526 段階 1b)→ 処理(1 tick に {@link PRIOR_EXPORT_BATCH_SIZE} 件。D1 で馬・結果・面を読み、R2 から詳細を取り、
  * 行を整形して **その tick ぶんだけ gzip** し kv に置く)→ 仕上げ(メタ行 + 各 tick のメンバーを**1 つずつ流して** R2 に put。固定キーを原子的に上書き)。
  * gzip のメンバーの連結は 1 回の gunzip で読めるので、全体を 1 文字列にも 1 つのバッファにもしない(DO のメモリ 128MB のため)。
  *
  * ## 柵の根拠(1 日 {@link PRIOR_EXPORT_DAILY_LIMIT} 回)
- * 1 回の D1 の読み取りは 53,324 行(ローカルの実測。合成データ 分析 2,225・結果 1,301 レース・1 レース 14 頭。
+ * 1 回の D1 の読み取りは 53,324 行(ローカルの実測。形式 v5 の対応の読み出しで、`jockey_names` 表の行数ぶんだけ増える〈1 回の作成につき 1 回。本番の行数は未測定〉。合成データ 分析 2,225・結果 1,301 レース・1 レース 14 頭。
  * 再現: `pnpm tsx scripts/measure-prior-export.ts`。`docs/current-spec.md` の「統計モデルの見直し用の書き出し」)で、3 回で 159,972 行。Free の 500 万行/日の約 3.2%。本番の実数は未確認
  * (最初の作成の `?status=1` の `file.diag.rowsRead` で確かめ、必要なら上限を下げる)。
  *
@@ -87,8 +88,17 @@ export interface RaceDataBatch {
   readonly rowsRead: number;
 }
 
-/** D1・R2 の窓口(`D1PriorExportStore` がこれを満たす。テストでは偽物)。 */
-export type PriorExportStorePort = ExportStorePort<RaceDataBatch, DetailOutcome>;
+/**
+ * 全 batch が共有する引き当て用の表(Issue #526 段階 1b)。騎手名 → 騎手 ID の対応で、**D1 の `jockey_names` で ID がちょうど 1 つの名前だけ**(2 つ以上ある名前は入れない)。
+ * kv に置くので、`Map` ではなく組の配列(`[騎手名, 騎手 ID][]`)。名前をオブジェクトのキーにしない(`constructor` などの名前で継承されたプロパティを拾わないため)。
+ */
+export interface PriorLookups {
+  readonly jockeyIds: ReadonlyArray<readonly [string, string]>;
+}
+
+/** D1・R2 の窓口(`D1PriorExportStore` がこれを満たす。テストでは偽物)。統計モデル用は、引き当て用の表の読み出し(`readLookups`)を**必ず**持つ(配線漏れをコンパイルで検出する)。 */
+export type PriorExportStorePort = ExportStorePort<RaceDataBatch, DetailOutcome, PriorLookups> &
+  Required<Pick<ExportStorePort<RaceDataBatch, DetailOutcome, PriorLookups>, "readLookups">>;
 
 export type PriorExportDeps = ExportDeps<PriorExportStorePort>;
 
@@ -99,14 +109,16 @@ export type ExportFileInfo = ExportJobFileInfo<"missingDetail", ExcludedCounts>;
 
 export type ExportResponse = ExportJobResponse<ExportFileInfo>;
 
-const PRIOR_SPEC: ExportKindSpec<ChosenAnalysis, ExcludedCounts, "missingDetail", RaceDataBatch, DetailOutcome> = {
+const PRIOR_SPEC: ExportKindSpec<ChosenAnalysis, ExcludedCounts, "missingDetail", RaceDataBatch, DetailOutcome, PriorLookups> = {
   key: PRIOR_EXPORT_KEY,
   warnMessage: "統計モデル用の書き出しで例外が起きました(再試行します)",
   counterKeys: ["missingDetail"],
   defaultBatchSize: PRIOR_EXPORT_BATCH_SIZE,
   emptyExcluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 },
   select: selectPriorExportAnalyses,
-  buildChunk(items, data, outcomes) {
+  buildChunk(items, data, outcomes, lookups) {
+    // 対応が無いジョブ(読む前のコードが始めたジョブ)は、空の対応で続ける(埋めない。スナップショットの ID はそのまま)。
+    const jockeyIdByName = new Map(lookups?.jockeyIds ?? []);
     const horsesByAnalysis = groupBy(data.horses, (h) => h.analysisId);
     const resultsByRace = groupBy(data.results, (r) => r.raceId);
     const courseTypes = new Map(data.courseTypes.map((c) => [c.raceId, c.courseType] as const));
@@ -123,7 +135,7 @@ const PRIOR_SPEC: ExportKindSpec<ChosenAnalysis, ExcludedCounts, "missingDetail"
       }
       return buildRaceRows(
         analysis, horsesByAnalysis.get(analysis.id) ?? [], resultsByRace.get(analysis.raceId) ?? [], courseTypes.get(analysis.raceId) ?? null, contributions,
-        outcome.kind === "ok" ? outcome.snapshot : null,
+        outcome.kind === "ok" ? outcome.snapshot : null, jockeyIdByName,
       );
     });
     return { chunk: encodeChunk(rows), rows: rows.length, counts: { missingDetail: missing } };
@@ -132,7 +144,7 @@ const PRIOR_SPEC: ExportKindSpec<ChosenAnalysis, ExcludedCounts, "missingDetail"
   buildHead: (m) => buildPriorHead({ generatedAt: m.generatedAt, rows: m.rows, races: m.races, missingDetail: m.counts.missingDetail, excluded: m.excluded }),
 };
 
-export class PriorExportCore extends ExportJobCore<ChosenAnalysis, ExcludedCounts, "missingDetail", RaceDataBatch, DetailOutcome> {
+export class PriorExportCore extends ExportJobCore<ChosenAnalysis, ExcludedCounts, "missingDetail", RaceDataBatch, DetailOutcome, PriorLookups> {
   constructor(deps: PriorExportDeps, options: PriorExportOptions = {}) {
     super(PRIOR_SPEC, deps, options);
   }

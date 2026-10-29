@@ -10,9 +10,11 @@ import {
   PRIOR_EXPORT_TICK_QUERY_LIMIT,
   type DetailOutcome,
   type PriorExportStorePort,
+  type PriorLookups,
   type RaceDataBatch,
 } from "../src/prior-export-core";
-import { recordPut, type PutRecord } from "./export-fixtures";
+import { AllocationExportCore } from "../src/allocation-export-core";
+import { AllocationFakeStore, driver as fixtureDriver, recordPut, type PutRecord } from "./export-fixtures";
 import { PRIOR_EXPORT_KEY, toSnapshotColumns, type CandidateRow, type PriorDatasetRow } from "../src/prior-export-format";
 
 /**
@@ -47,6 +49,13 @@ class FakeStore implements PriorExportStorePort {
   readonly putFileStream = recordPut(this.puts);
   readCounted = 0;
   horsesPerRace = 3;
+  /** 騎手名 → 騎手 ID の対応(jockey_names 表で ID がちょうど 1 つの名前。Issue #526 段階 1b)。 */
+  lookups: PriorLookups = { jockeyIds: [] };
+  lookupsRowsRead = 7;
+  /** 次の readLookups を失敗させる回数。 */
+  failLookups = 0;
+  /** スナップショットから jockeyId を落とす馬番(2026-10-29 より前の旧スナップショットの想定)。 */
+  idlessUmaban = new Set<number>();
 
   async readUsage() {
     this.calls.push("usage");
@@ -59,6 +68,14 @@ class FakeStore implements PriorExportStorePort {
       throw new Error("D1 SECRET-CAND");
     }
     return { rows: this.candidates, rowsRead: this.candidates.length * 2 };
+  }
+  async readLookups() {
+    this.calls.push("lookups");
+    if (this.failLookups > 0) {
+      this.failLookups -= 1;
+      throw new Error("D1 SECRET-LOOKUPS");
+    }
+    return { lookups: this.lookups, rowsRead: this.lookupsRowsRead };
   }
   async readRaceData(analysisIds: number[], raceIds: string[]): Promise<RaceDataBatch> {
     this.calls.push("raceData");
@@ -92,7 +109,7 @@ class FakeStore implements PriorExportStorePort {
       race: { raceName: `レース${id}`, grade: "G3", distance: 1600, trackCondition: "良", courseType: "芝", weightType: "別定", filliesOnly: true },
       horses: Array.from({ length: this.horsesPerRace }, (_, k) => ({
         umaban: k + 1, wakuban: k + 1, sex: "牡", age: 3 + k, kinryo: 55, bodyWeight: 480 + k, oikiriRank: "A", oikiriCritic: "動き良化",
-        name: "SECRET-NAME", jockeyName: `騎手${k + 1}`, jockeyId: `0100${k + 1}`, trainerName: "SECRET-TRAINER", winOdds: 99.9, popularity: 13, placeOddsMin: 77.7, placeOddsMax: 88.8,
+        name: "SECRET-NAME", jockeyName: `騎手${k + 1}`, ...(this.idlessUmaban.has(k + 1) ? {} : { jockeyId: `0100${k + 1}` }), trainerName: "SECRET-TRAINER", winOdds: 99.9, popularity: 13, placeOddsMin: 77.7, placeOddsMax: 88.8,
       })),
     };
   }
@@ -189,7 +206,7 @@ describe("要求と状態", () => {
     expect(w.store.puts).toHaveLength(1);
     expect(w.store.puts[0]!.key).toBe(PRIOR_EXPORT_KEY);
     const { meta, rows } = readFile(w.store.puts[0]!.bytes);
-    expect(meta).toMatchObject({ format: 4, rows: 15, races: 5, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } });
+    expect(meta).toMatchObject({ format: 5, rows: 15, races: 5, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } });
     expect(rows).toHaveLength(15);
     expect(rows.map((r) => r.race_id)).toEqual(Array.from({ length: 15 }, (_, i) => raceIdOf(Math.floor(i / 3) + 1)));
     expect(rows.slice(0, 3).map((r) => r.umaban)).toEqual([1, 2, 3]);
@@ -208,7 +225,7 @@ describe("要求と状態", () => {
       expect(text, `ファイルに ${secret} が無い`).not.toContain(secret);
     }
     // v4 の列(Issue #526): 今回の騎手は R2 の詳細のスナップショットから馬番ごとに入る(騎手名はファイルに出る。馬名・調教師名は出ない)。
-    expect(rows.map((r) => [r.jockey_name, r.jockey_id])).toEqual(Array.from({ length: 15 }, (_, i) => [`騎手${(i % 3) + 1}`, `0100${(i % 3) + 1}`]));
+    expect(rows.map((r) => [r.jockey_name, r.jockey_id, r.jockey_id_source])).toEqual(Array.from({ length: 15 }, (_, i) => [`騎手${(i % 3) + 1}`, `0100${(i % 3) + 1}`, "snapshot"]));
     expect(text).toContain("騎手1");
     // 仕上げのあとは中間データを残さない
     expect([...w.kv.map.keys()].filter((k) => k.startsWith("plan:") || k.startsWith("chunk:"))).toEqual([]);
@@ -254,7 +271,7 @@ describe("要求と状態", () => {
     expect(noDetailRows).toHaveLength(3);
     for (const r of noDetailRows) expect(keys.map((k) => r[k])).toEqual(Array(11).fill(null));
     for (const r of noDetailRows) expect([r.weight_type, r.fillies_only]).toEqual([null, null]); // v3 の 2 列も null(Issue #421)
-    for (const r of noDetailRows) expect([r.jockey_name, r.jockey_id]).toEqual([null, null]); // v4 の 2 列も null(Issue #526)
+    for (const r of noDetailRows) expect([r.jockey_name, r.jockey_id, r.jockey_id_source]).toEqual([null, null, null]); // v4 の 2 列・v5 の 1 列も null(Issue #526)
     for (const r of rows.filter((x) => x.race_id !== raceIdOf(2))) expect([r.jockey_name === null, r.jockey_id === null]).toEqual([false, false]);
     for (const r of rows.filter((x) => x.race_id !== raceIdOf(2))) expect([r.weight_type, r.fillies_only]).toEqual(["別定", true]);
     for (const r of rows.filter((x) => x.race_id !== raceIdOf(2))) expect(keys.every((k) => r[k] !== null)).toBe(true);
@@ -418,6 +435,148 @@ describe("失敗", () => {
     expect((await core.request("refresh")).status).toBe("building");
     expect(w.kv.get("runs")).toEqual({ day: "2026-10-10", count: 2 });
     await w.drain(core);
+    expect((await core.request("status")).status).toBe("ready");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #526 段階 1b: 騎手 ID を名前から埋める。騎手名 → 騎手 ID の対応(jockey_names 表)は、計画の tick で 1 回だけ読み、kv に置いて、全 batch で使う。
+// ---------------------------------------------------------------------------
+
+describe("Issue #526 段階 1b: 騎手名 → 騎手 ID の対応の読み出しと埋め込み", () => {
+  const rowsOfFile = (w: World): PriorDatasetRow[] => readFile(w.store.puts[0]!.bytes).rows;
+  const idCols = (rows: readonly PriorDatasetRow[]): unknown[] => rows.map((r) => [r.jockey_name, r.jockey_id, r.jockey_id_source]);
+
+  it("対応は計画の tick で 1 回だけ読む(batch が 3 つあっても)。候補の読み出しのあと、最初の batch の前", async () => {
+    const w = world(5);
+    const core = w.core({ batchSize: 2 });
+    await core.request("download");
+    await w.drain(core);
+    expect(w.store.calls.filter((c) => c === "lookups")).toHaveLength(1);
+    expect(w.store.calls.filter((c) => c === "raceData")).toHaveLength(3); // 前提: batch は 3 つ
+    expect(w.store.calls.indexOf("candidates")).toBeLessThan(w.store.calls.indexOf("lookups"));
+    expect(w.store.calls.indexOf("lookups")).toBeLessThan(w.store.calls.indexOf("raceData"));
+  });
+
+  it("スナップショットに騎手 ID が無い馬(2・3 番)は、表にある名前なら埋め(name)、表に無ければ null。ある馬(1 番)は表に別の ID があってもスナップショットが優先(snapshot)。全 batch の全レースで同じ", async () => {
+    const w = world(5);
+    w.store.idlessUmaban = new Set([2, 3]);
+    w.store.lookups = { jockeyIds: [["騎手1", "99991"], ["騎手2", "01102"]] }; // 騎手3 は表に無い
+    const core = w.core({ batchSize: 2 });
+    await core.request("download");
+    await w.drain(core);
+    const rows = rowsOfFile(w);
+    expect(rows).toHaveLength(15);
+    expect(idCols(rows)).toEqual(
+      Array.from({ length: 5 }, () => [
+        ["騎手1", "01001", "snapshot"],
+        ["騎手2", "01102", "name"],
+        ["騎手3", null, null],
+      ]).flat(),
+    );
+    // 不変条件: jockey_id が null なのは jockey_id_source が null のときだけ
+    for (const r of rows) expect(r.jockey_id === null).toBe(r.jockey_id_source === null);
+  });
+
+  it("対応が空なら埋めない: ID の無い馬は null のまま、ある馬は snapshot", async () => {
+    const w = world(2);
+    w.store.idlessUmaban = new Set([2]);
+    const core = w.core();
+    await core.request("download");
+    await w.drain(core);
+    expect(idCols(rowsOfFile(w).slice(0, 3))).toEqual([["騎手1", "01001", "snapshot"], ["騎手2", null, null], ["騎手3", "01003", "snapshot"]]);
+  });
+
+  it("対応は kv に 1 つだけ置かれ(計画のあと)、完成したら消える。失敗で止まったときも消える", async () => {
+    const w = world(5);
+    w.store.lookups = { jockeyIds: [["騎手2", "01102"]] };
+    const core = w.core({ batchSize: 2 });
+    await core.request("download");
+    await w.drain(core, 1); // 計画の tick だけ
+    expect(w.kv.get("lookups")).toEqual({ jockeyIds: [["騎手2", "01102"]] });
+    await w.drain(core);
+    expect(w.kv.get("lookups")).toBeUndefined();
+    expect([...w.kv.map.keys()].filter((k) => k !== "runs" && k !== "file")).toEqual([]);
+
+    const f = world(3);
+    f.store.lookups = { jockeyIds: [["騎手2", "01102"]] };
+    f.store.failFetch = 99;
+    const failing = f.core();
+    await failing.request("download");
+    await f.drain(failing);
+    expect(await failing.request("status")).toMatchObject({ status: "failed", reason: "tick-failed" });
+    expect(f.kv.get("lookups")).toBeUndefined();
+  });
+
+  it("対応の読み出しの行数は diag.rowsRead に足される(読んだ行数ぶんだけ。ほかの行数は変わらない)", async () => {
+    const run = async (rowsRead: number): Promise<number> => {
+      const w = world(5);
+      w.store.lookupsRowsRead = rowsRead;
+      const core = w.core({ batchSize: 2 });
+      await core.request("download");
+      await w.drain(core);
+      return (w.kv.get("file") as { diag: { rowsRead: number } }).diag.rowsRead;
+    };
+    const base = await run(0);
+    expect(base).toBeGreaterThan(0); // 前提: ほかの読み出しの行数は数えられている
+    expect(await run(1234)).toBe(base + 1234);
+  });
+
+  it("対応の読み出しが失敗した tick は、退避のあとに再試行し、成功すれば完成する。警告に例外の文面を出さない", async () => {
+    const w = world(3);
+    w.store.failLookups = 1;
+    w.store.idlessUmaban = new Set([2]);
+    w.store.lookups = { jockeyIds: [["騎手2", "01102"]] };
+    const warnings: string[] = [];
+    const core = new PriorExportCore(
+      { kv: w.kv, now: () => w.clock.now, setAlarm: (at) => { w.alarms.push(at); }, getAlarm: async () => (w.alarms.length === 0 ? null : w.alarms[w.alarms.length - 1]!), store: w.store, onWarn: (m) => warnings.push(m) },
+    );
+    await core.request("download");
+    await w.drain(core);
+    expect((await core.request("status")).status).toBe("ready");
+    expect(w.store.calls.filter((c) => c === "lookups")).toHaveLength(2); // 失敗 1 回 + 成功 1 回
+    expect(idCols(rowsOfFile(w).slice(0, 3))).toEqual([["騎手1", "01001", "snapshot"], ["騎手2", "01102", "name"], ["騎手3", "01003", "snapshot"]]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings.join("\n")).not.toContain("SECRET");
+  });
+
+  it("対応の読み出しが失敗し続けると failed(tick-failed)。ファイルは出さない(埋めないまま黙って完成させない)", async () => {
+    const w = world(3);
+    w.store.failLookups = PRIOR_EXPORT_MAX_ATTEMPTS;
+    const core = w.core();
+    await core.request("download");
+    await w.drain(core);
+    expect(await core.request("status")).toMatchObject({ status: "failed", reason: "tick-failed" });
+    expect(w.store.puts).toEqual([]);
+  });
+
+  it("対応が kv に無いジョブ(対応を読む前のコードが始めたジョブ)の続きでも、例外にせず、埋めないまま完成する(スナップショットの ID は snapshot)", async () => {
+    const w = world(5);
+    w.store.idlessUmaban = new Set([2]);
+    w.store.lookups = { jockeyIds: [["騎手2", "01102"]] };
+    const core = w.core({ batchSize: 2 });
+    await core.request("download");
+    await w.drain(core, 1); // 計画
+    expect(w.kv.get("lookups")).toBeDefined(); // 前提: 対応は置かれている
+    w.kv.delete("lookups"); // 古いコードが始めたジョブの想定
+    await w.drain(core);
+    expect((await core.request("status")).status).toBe("ready");
+    expect(idCols(rowsOfFile(w).slice(0, 3))).toEqual([["騎手1", "01001", "snapshot"], ["騎手2", null, null], ["騎手3", "01003", "snapshot"]]);
+  });
+
+  it("配分用の書き出しは対応を読まない・kv に置かない(readLookups の無い窓口のまま動く)", async () => {
+    const kv = new Map<string, unknown>();
+    const fakeKv = { get: <T>(k: string) => kv.get(k) as T | undefined, put: (k: string, v: unknown) => void kv.set(k, structuredClone(v)), delete: (k: string) => kv.delete(k) };
+    const store = new AllocationFakeStore();
+    store.candidates = [cand(100, raceIdOf(1))];
+    const d = fixtureDriver();
+    const core = new AllocationExportCore({ kv: fakeKv, store, ...d.deps });
+    await core.request("download");
+    await d.drain(core, 1);
+    expect(kv.get("job")).toMatchObject({ phase: "building" }); // 前提: 計画の tick は済んでいる
+    expect([...kv.keys()]).not.toContain("lookups");
+    expect("readLookups" in store).toBe(false);
+    await d.drain(core);
     expect((await core.request("status")).status).toBe("ready");
   });
 });
