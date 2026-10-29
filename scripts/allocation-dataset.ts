@@ -105,6 +105,23 @@ function keyProblem(label: string, value: unknown, expected: readonly string[]):
   return null;
 }
 
+/** 点数の上限の列(Issue #533 で足した。形式の版は 1 のまま)。これが無い古い書き出しは null とみなす(Issue #535-D)。 */
+const LEGACY_LIMIT_COLUMNS = ["max_win_bets", "max_place_bets"] as const;
+
+/**
+ * 点数の上限の 2 列(`max_win_bets`・`max_place_bets`)が無い古い書き出し(Issue #533 より前)を読めるようにする。`allocation.settings` がオブジェクトで、この 2 列が
+ * キーとして無いときだけ、無い列を null で補う(NULL は『上限なし』と解釈する既存の規則に乗る)。ほかの列の欠落・型の違いは補わず、そのあとの検査で拒まれる。
+ * 検査の前に呼ぶ。`parsed` は書き換える。
+ */
+function fillLegacyLimitColumns(parsed: unknown): void {
+  if (!isObject(parsed) || !isObject(parsed["allocation"])) return;
+  const settings = parsed["allocation"]["settings"];
+  if (!isObject(settings)) return;
+  for (const k of LEGACY_LIMIT_COLUMNS) {
+    if (!(k in settings)) settings[k] = null;
+  }
+}
+
 /** 行 1 つの列・型を検査する。問題があれば理由の文字列、なければ null。 */
 function rowProblem(row: unknown): string | null {
   const top = keyProblem("行", row, ALLOCATION_ROW_KEYS);
@@ -204,6 +221,7 @@ export function parseAllocationDataset(bytes: Uint8Array): AllocationDataset {
     } catch {
       throw new Error(`${i + 1} 行目が JSON ではありません`);
     }
+    fillLegacyLimitColumns(parsed);
     const problem = rowProblem(parsed);
     if (problem !== null) {
       throw new Error(`${i + 1} 行目: ${problem}`);

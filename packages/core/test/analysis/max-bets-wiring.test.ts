@@ -158,6 +158,32 @@ describe("複勝だけの経路(D-2フォールバック): 複勝の点数の上
     expect(o.view.result.betCount).toBe(2);
   });
 
+  it("下限で外した複勝の記録(recordMissed)でも、反事実の配分に複勝の上限が効く(Issue #535-A。上限を外す変異を殺す)", () => {
+    const floor = 0.3;
+    const withFloor = noCombo({ minHitProb: floor, maxPlaceBets: 2, recordMissed: true });
+    const o = buildMixedRaceAllocationWithOutcome(placeOnlyRace, withFloor);
+    // 前提(空振り防止): 複勝だけの経路で、下限 0.3 未満の複勝(6〜9番)が外れ、記録が付く
+    expect(o.outcome.route).toBe("place-only");
+    expect(o.belowFloor?.count).toBe(4);
+    const missed = o.belowFloor?.missed;
+    expect(missed).not.toBeNull();
+    // 上限ありの反事実(minHitProb=0・maxPlaceBets=2)と上限なしの反事実は、外れた馬の賭け金が違う(差が0でない)
+    const stakes = (maxPlaceBets: number): Map<number, number> => {
+      const cf = buildMixedRaceAllocationWithOutcome(placeOnlyRace, noCombo({ minHitProb: 0, maxPlaceBets }));
+      if (cf.view.kind !== "computed") throw new Error("computedでない");
+      return new Map(cf.view.result.allocations.map((a) => [a.umaban, a.stake]));
+    };
+    const limitedStakes = stakes(2);
+    const freeStakes = stakes(0);
+    const below = [6, 7, 8, 9];
+    const pick = (m: Map<number, number>): number[][] => below.map((u) => [u, m.get(u) ?? 0]).filter(([, st]) => st! > 0) as number[][];
+    expect(pick(freeStakes)).not.toEqual(pick(limitedStakes));
+    expect(pick(freeStakes).length).toBeGreaterThan(2);
+    // 記録は上限ありの反事実に一致する: 2点だけ(上限なしなら4点になる)
+    expect(missed!.map((m) => [Number(m.comboKey), m.wouldStake])).toEqual(pick(limitedStakes));
+    expect(missed!.map((m) => [m.comboKey, m.wouldStake])).toEqual([["08", 24000], ["09", 17500]]);
+  });
+
   it("buildRaceAllocation: maxPlaceBets を省略した呼び出しは、0を明示した呼び出しと一致する(既存の呼び出しを壊さない)", () => {
     const base = { bankroll: 1_000_000, perRaceCap: 100_000, kellyFraction: 0.5 };
     const omitted = buildRaceAllocation({ oddsStatus: "result", rows: ROWS }, base);
