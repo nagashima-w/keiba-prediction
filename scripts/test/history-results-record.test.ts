@@ -66,6 +66,80 @@ describe("buildRaceRecord: 中央 2021 年", () => {
   });
 });
 
+describe("buildRaceRecord: 1 着馬の行全体を固定する(実物の HTML と突き合わせた値)", () => {
+  it("中央 2021 年 天皇賞(秋) 1 着エフフォーリア", () => {
+    const rec = mustOk(CENTRAL_2021, "202105040811", "central");
+    expect(rec.horses[0]).toEqual({
+      umaban: 5,
+      wakuban: 3,
+      finish: 1,
+      finishStatus: null,
+      finishDemoted: false,
+      finishRaw: "1",
+      horseId: "2018105027",
+      horseName: "エフフォーリア",
+      sexAgeRaw: "牡3",
+      sex: "牡",
+      age: 3,
+      burden: 56,
+      jockeyId: "01170",
+      jockeyName: "横山武",
+      jockeyMark: null,
+      timeRaw: "1:57.9",
+      timeSec: 117.9,
+      marginRaw: "",
+      ninki: 3,
+      winOdds: 3.4,
+      last3f: 33.2,
+      passing: [6, 6, 6],
+      trainerId: "01097",
+      trainerName: "鹿戸",
+      trainerArea: "美浦",
+      bodyWeight: 514,
+      bodyWeightRaw: "514(+4)",
+      bodyWeightDiff: 4,
+      bodyWeightDiffRaw: "+4",
+      cellsAligned: true,
+    });
+  });
+
+  it("地方 2021 年 JBC クラシック(Jpn1) 1 着ミューチャリー", () => {
+    const rec = mustOk(NAR_2021, "202146110310", "nar");
+    expect(rec.horses[0]).toEqual({
+      umaban: 7,
+      wakuban: 6,
+      finish: 1,
+      finishStatus: null,
+      finishDemoted: false,
+      finishRaw: "1",
+      horseId: "2016100981",
+      horseName: "ミューチャリー",
+      sexAgeRaw: "牡5",
+      sex: "牡",
+      age: 5,
+      burden: 57,
+      jockeyId: "05299",
+      jockeyName: "吉原寛人",
+      jockeyMark: null,
+      timeRaw: "2:13.1",
+      timeSec: 133.1,
+      marginRaw: "",
+      ninki: 6,
+      winOdds: 13.9,
+      last3f: 36,
+      passing: [],
+      trainerId: "05575",
+      trainerName: "矢野義幸",
+      trainerArea: "船橋",
+      bodyWeight: 460,
+      bodyWeightRaw: "460(-1)",
+      bodyWeightDiff: -1,
+      bodyWeightDiffRaw: "-1",
+      cellsAligned: true,
+    });
+  });
+});
+
 describe("buildRaceRecord: 地方 Jpn1", () => {
   it("通過順の列が無いので passing は空配列、後3F・オッズは読める", () => {
     const rec = mustOk(NAR_2021, "202146110310", "nar");

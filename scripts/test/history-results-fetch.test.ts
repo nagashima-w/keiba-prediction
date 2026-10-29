@@ -36,7 +36,7 @@ function mkCalendar(dates: string[]): string {
   return `<html><div class="Race_Calendar_Main"><table class="Calendar_Table"><tbody><tr>${cells}</tr></tbody></table></div></html>`;
 }
 
-const RESULT_OK = `<html><table id="All_Result_Table"><thead><tr><th>着順</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table></html>`;
+const RESULT_OK = `<html><div class="RaceData02"><span>1頭</span></div><table id="All_Result_Table"><thead><tr><th>着順</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table></html>`;
 
 /** 実物に倣った一覧の 1 件(距離を持たない項目は parseRaceList が捨てる)。 */
 function mkList(items: { id: string; distance?: boolean; grade?: string }[]): string {
@@ -225,23 +225,226 @@ describe("fetch: 失敗は保存せず errors.ndjson に残し、再実行でも
     expect(errorsOf(out)[0]).toMatchObject({ stage: "calendar", id: "2021-11" });
   });
 
-  it("一覧のコンテナが無いページは保存せず errors、コンテナがありレースが 0 件のページは保存して errors にしない", async () => {
+  it("一覧のコンテナが無いページは保存せず errors に残す", async () => {
     const out = tmp();
     const site = fakeSite({
-      [CAL_CENTRAL]: mkCalendar(["20211106", "20211107"]),
+      [CAL_CENTRAL]: mkCalendar(["20211106"]),
       [listUrl("20211106")]: "<html>なにもない</html>",
+    });
+    await runFetch(baseOpts(out, site.fetchText));
+    expect(existsSync(rawFilePath(out, "central", "list", "20211106"))).toBe(false);
+    expect(errorsOf(out)).toHaveLength(1);
+    expect(errorsOf(out)[0]).toMatchObject({ stage: "list", id: "20211106" });
+  });
+
+  it("中央の一覧に race_id が 0 件のとき(カレンダーには開催日しか載らないので異常)は保存せず errors に残し、再実行で取り直す", async () => {
+    const out = tmp();
+    const site = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211107"]),
       [listUrl("20211107")]: `<div class="RaceList_Body"></div>`,
     });
     const stats = await runFetch(baseOpts(out, site.fetchText));
-    expect(existsSync(rawFilePath(out, "central", "list", "20211106"))).toBe(false);
+    expect(existsSync(rawFilePath(out, "central", "list", "20211107"))).toBe(false);
+    expect(stats.errors).toBe(1);
+    expect(errorsOf(out)[0]).toMatchObject({ kind: "central", stage: "list", id: "20211107" });
+    expect(String(errorsOf(out)[0]!.reason)).toContain("0 件");
+    // 再実行で取り直す(カレンダーは過去の月なので使い回し、一覧だけもう一度取る)
+    const site2 = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211107"]),
+      [listUrl("20211107")]: mkList([{ id: "202105050201" }]),
+      [resultUrl("202105050201")]: RESULT_OK,
+    });
+    await runFetch(baseOpts(out, site2.fetchText));
+    expect(site2.calls).toEqual([listUrl("20211107"), resultUrl("202105050201")]);
     expect(existsSync(rawFilePath(out, "central", "list", "20211107"))).toBe(true);
-    expect(errorsOf(out)).toHaveLength(1);
-    expect(errorsOf(out)[0]).toMatchObject({ stage: "list", id: "20211106" });
+  });
+
+  it("中央の保存済みの一覧が 0 件だった場合も(古い実行の名残)、結果は取らず errors に残す", async () => {
+    const out = tmp();
+    mkdirSync(path.join(out, "raw", "list"), { recursive: true });
+    writeFileSync(rawFilePath(out, "central", "list", "20211107"), gzipSync(`<div class="RaceList_Body"></div>`));
+    const site = fakeSite({ [CAL_CENTRAL]: mkCalendar(["20211107"]) });
+    const stats = await runFetch(baseOpts(out, site.fetchText));
+    expect(site.calls).toEqual([CAL_CENTRAL]);
+    expect(stats.errors).toBe(1);
+    expect(errorsOf(out)[0]).toMatchObject({ stage: "list", id: "20211107" });
+  });
+
+  it("地方の一覧が 0 件のページは保存して errors にしない(件数を数え、日付をログに出す)", async () => {
+    const out = tmp();
+    const lines: string[] = [];
+    const site = fakeSite({
+      [CAL_NAR]: mkCalendar(["20211104"]),
+      [listUrl("20211104", true)]: `<div class="RaceList_Body"></div>`,
+    });
+    const stats = await runFetch(baseOpts(out, site.fetchText, { kinds: ["nar"], log: (m) => lines.push(m) }));
+    expect(existsSync(rawFilePath(out, "nar", "list", "20211104"))).toBe(true);
+    expect(stats.errors).toBe(0);
     expect(stats.emptyLists).toBe(1);
+    expect(lines.some((l) => l.includes("[nar 20211104]") && l.includes("レース 0 件"))).toBe(true);
   });
 });
 
-describe("fetch: 中央以外の race_id は取らない・未来日は取らない", () => {
+describe("fetch: 結果は頭数と行数が合うものだけ保存する(途中の結果を確定として保存しない)", () => {
+  const oneRace = (resultBody: string) =>
+    fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211107"]),
+      [listUrl("20211107")]: mkList([{ id: "202105050201" }]),
+      [resultUrl("202105050201")]: resultBody,
+    });
+
+  it("実物の途中のページ(15 頭中 3 行)は保存せず errors に残す", async () => {
+    const out = tmp();
+    const partial = fx("nar_result_partial_202644100810.html");
+    const stats = await runFetch(baseOpts(out, oneRace(partial).fetchText));
+    expect(existsSync(rawFilePath(out, "central", "result", "202105050201"))).toBe(false);
+    expect(stats.errors).toBe(1);
+    expect(errorsOf(out)[0]).toMatchObject({ stage: "result", id: "202105050201" });
+    expect(String(errorsOf(out)[0]!.reason)).toMatch(/頭数 15.*行 3|行数 3.*頭数 15/);
+  });
+
+  it("頭数が読めないページは保存しない", async () => {
+    const out = tmp();
+    const stats = await runFetch(baseOpts(out, oneRace(RESULT_OK.replace("<span>1頭</span>", "")).fetchText));
+    expect(existsSync(rawFilePath(out, "central", "result", "202105050201"))).toBe(false);
+    expect(stats.errors).toBe(1);
+    expect(String(errorsOf(out)[0]!.reason)).toContain("頭数が読めません");
+  });
+
+  it("実物の発売前のページ(表に行なし)は保存しない", async () => {
+    const out = tmp();
+    const stats = await runFetch(baseOpts(out, oneRace(fx("nar_result_presale_202642071612.html")).fetchText));
+    expect(existsSync(rawFilePath(out, "central", "result", "202105050201"))).toBe(false);
+    expect(stats.errors).toBe(1);
+  });
+
+  it("実物の全頭そろったページ(15 頭 15 行)・取消や除外を含むページ(行に数えられる)は保存する", async () => {
+    for (const name of ["nar_result_202644100810.html", "result_202606040901.html", "result_202605040205.html"]) {
+      const out = tmp();
+      const stats = await runFetch(baseOpts(out, oneRace(fx(name)).fetchText));
+      expect(stats.errors, name).toBe(0);
+      expect(existsSync(rawFilePath(out, "central", "result", "202105050201")), name).toBe(true);
+    }
+  });
+});
+
+describe("fetch: 今日以降の開催日・今月以降のカレンダー", () => {
+  it("今日の開催日は取らない(途中のページを確定として保存しない)。件数だけ数える", async () => {
+    const out = tmp();
+    const site = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211106", "20211107", "20211113"]),
+      [listUrl("20211106")]: mkList([{ id: "202105050101" }]),
+      [resultUrl("202105050101")]: RESULT_OK,
+    });
+    const stats = await runFetch(baseOpts(out, site.fetchText, { today: "20211107" }));
+    expect(site.calls).toEqual([CAL_CENTRAL, listUrl("20211106"), resultUrl("202105050101")]);
+    expect(stats.skippedFuture).toBe(2);
+    expect(errorsOf(out)).toEqual([]);
+  });
+
+  it("今月(today の月)以降のカレンダーは、raw があっても毎回取り直して上書きする", async () => {
+    const out = tmp();
+    mkdirSync(path.join(out, "raw", "calendar"), { recursive: true });
+    writeFileSync(rawFilePath(out, "central", "calendar", "2021-11"), gzipSync(mkCalendar(["20211101"])));
+    const fresh = mkCalendar(["20211102"]);
+    const site = fakeSite({
+      [CAL_CENTRAL]: fresh,
+      [listUrl("20211102")]: mkList([{ id: "202105050101" }]),
+      [resultUrl("202105050101")]: RESULT_OK,
+    });
+    const stats = await runFetch(baseOpts(out, site.fetchText, { today: "20211110" }));
+    expect(site.calls).toEqual([CAL_CENTRAL, listUrl("20211102"), resultUrl("202105050101")]);
+    expect(readGz(rawFilePath(out, "central", "calendar", "2021-11"))).toBe(fresh);
+    expect(stats.skippedExisting.calendar).toBe(0);
+  });
+
+  it("取り直しに失敗した今月のカレンダーは、古い raw を消さず errors に残して、その月は飛ばす", async () => {
+    const out = tmp();
+    mkdirSync(path.join(out, "raw", "calendar"), { recursive: true });
+    const old = mkCalendar(["20211101"]);
+    writeFileSync(rawFilePath(out, "central", "calendar", "2021-11"), gzipSync(old));
+    const site = fakeSite({ [CAL_CENTRAL]: new Error("HTTPエラー(503): x") });
+    const stats = await runFetch(baseOpts(out, site.fetchText, { today: "20211110" }));
+    expect(readGz(rawFilePath(out, "central", "calendar", "2021-11"))).toBe(old);
+    expect(site.calls).toEqual([CAL_CENTRAL]);
+    expect(stats.errors).toBe(1);
+  });
+
+  it("過去の月のカレンダーは従来どおり使い回す(月が today の月より前)", async () => {
+    const out = tmp();
+    mkdirSync(path.join(out, "raw", "calendar"), { recursive: true });
+    writeFileSync(rawFilePath(out, "central", "calendar", "2021-11"), gzipSync(mkCalendar(["20211101"])));
+    const site = fakeSite({
+      [listUrl("20211101")]: mkList([{ id: "202105050101" }]),
+      [resultUrl("202105050101")]: RESULT_OK,
+    });
+    await runFetch(baseOpts(out, site.fetchText, { today: "20211201" }));
+    expect(site.calls).toEqual([listUrl("20211101"), resultUrl("202105050101")]);
+  });
+});
+
+describe("fetch: 取得の失敗が続いたら打ち切る(アクセス制限のときに叩き続けない)", () => {
+  const dates30 = Array.from({ length: 30 }, (_, i) => `202111${String(i + 1).padStart(2, "0")}`);
+
+  it("連続 20 件の失敗で打ち切り、理由をログに出す。再実行で続きから取る", async () => {
+    const out = tmp();
+    const lines: string[] = [];
+    // カレンダーは取れるが、一覧がすべて 503
+    const down = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(dates30),
+      ...Object.fromEntries(dates30.map((d) => [listUrl(d), new Error(`HTTPエラー(503): ${listUrl(d)}`)])),
+    });
+    const stats = await runFetch(baseOpts(out, down.fetchText, { log: (m) => lines.push(m) }));
+    expect(stats.aborted).toBe(true);
+    expect(stats.errors).toBe(20);
+    expect(stats.requests).toBe(1 + 20);
+    expect(down.calls).toHaveLength(21);
+    expect(lines.join("\n")).toMatch(/連続 20 件.*打ち切/);
+    expect(lines.join("\n")).toContain("HTTPエラー(503)");
+    // 復旧後の再実行は、カレンダーを使い回して続きから(取れた一覧はまだ無いので 1 日目から)
+    const up = fakeSite({
+      ...Object.fromEntries(dates30.map((d) => [listUrl(d), mkList([{ id: "202105050101" }])])),
+      [resultUrl("202105050101")]: RESULT_OK,
+    });
+    const stats2 = await runFetch(baseOpts(out, up.fetchText));
+    expect(stats2.aborted).toBe(false);
+    expect(up.calls[0]).toBe(listUrl("20211101"));
+    expect(stats2.saved.list).toBe(30);
+  });
+
+  it("成功が 1 件あれば数え直す(失敗 2・成功 1・失敗 2 は、上限 3 では止まらない)", async () => {
+    const out = tmp();
+    const ids = ["202105050101", "202105050102", "202105050103", "202105050104", "202105050105"];
+    const site = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211107"]),
+      [listUrl("20211107")]: mkList(ids.map((id) => ({ id }))),
+      [resultUrl(ids[0]!)]: new Error("HTTPエラー(500): x"),
+      [resultUrl(ids[1]!)]: new Error("HTTPエラー(500): x"),
+      [resultUrl(ids[2]!)]: RESULT_OK,
+      [resultUrl(ids[3]!)]: new Error("HTTPエラー(500): x"),
+      [resultUrl(ids[4]!)]: new Error("HTTPエラー(500): x"),
+    });
+    const stats = await runFetch(baseOpts(out, site.fetchText, { maxConsecutiveFailures: 3 }));
+    expect(stats.aborted).toBe(false);
+    expect(stats.errors).toBe(4);
+    expect(stats.saved.result).toBe(1);
+  });
+
+  it("保存前の検査の不合格(0 バイト)も失敗として数える。上限に達したら残りは取らない", async () => {
+    const out = tmp();
+    const ids = ["202105050101", "202105050102", "202105050103", "202105050104"];
+    const site = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(["20211107"]),
+      [listUrl("20211107")]: mkList(ids.map((id) => ({ id }))),
+      ...Object.fromEntries(ids.map((id) => [resultUrl(id), ""])),
+    });
+    const stats = await runFetch(baseOpts(out, site.fetchText, { maxConsecutiveFailures: 3 }));
+    expect(stats.aborted).toBe(true);
+    expect(site.calls.filter((u) => u.includes("result.html"))).toHaveLength(3);
+  });
+});
+
+describe("fetch: 中央以外の race_id は取らない", () => {
   it("中央の一覧にあっても、場コードが 01〜10 でない race_id は結果を取りに行かない", async () => {
     const out = tmp();
     const ids = ["202105050201", "202144100810", "202165071311", "202130110301"];
@@ -254,26 +457,15 @@ describe("fetch: 中央以外の race_id は取らない・未来日は取らな
     expect(site.calls.filter((u) => u.includes("result.html"))).toEqual([resultUrl("202105050201")]);
   });
 
-  it("今日より後の開催日は一覧も取らず、errors にもしない(件数だけ数える)", async () => {
-    const out = tmp();
-    const site = fakeSite({
-      [CAL_CENTRAL]: mkCalendar(["20211106", "20211107"]),
-      [listUrl("20211106")]: mkList([]),
-    });
-    const stats = await runFetch(baseOpts(out, site.fetchText, { today: "20211106" }));
-    expect(site.calls).toEqual([CAL_CENTRAL, listUrl("20211106")]);
-    expect(stats.skippedFuture).toBe(1);
-    expect(errorsOf(out)).toEqual([]);
-  });
-
   it("カレンダーにある月外の日付は無視する", async () => {
     const out = tmp();
     const site = fakeSite({
       [CAL_CENTRAL]: mkCalendar(["20211031", "20211107"]),
-      [listUrl("20211107")]: mkList([]),
+      [listUrl("20211107")]: mkList([{ id: "202105050201" }]),
+      [resultUrl("202105050201")]: RESULT_OK,
     });
     await runFetch(baseOpts(out, site.fetchText));
-    expect(site.calls).toEqual([CAL_CENTRAL, listUrl("20211107")]);
+    expect(site.calls).toEqual([CAL_CENTRAL, listUrl("20211107"), resultUrl("202105050201")]);
   });
 
   it("一覧の解析から漏れる項目(距離なし)も、中央では結果を取りに行く(和集合)", async () => {
@@ -327,6 +519,17 @@ describe("fetch: 地方は交流重賞(Jpn)だけ", () => {
       "202146110310.html.gz",
     ]);
     expect(stats.errors).toBe(0);
+  });
+
+  it("地方の一覧で見えたグレード表記の種類と件数を、月の終わりと終了時にログへ出す(Jpn の表記ゆれに気づけるように)", async () => {
+    const out = tmp();
+    const lines: string[] = [];
+    const stats = await runFetch(narOpts(out, narSite().fetchText, { log: (m) => lines.push(m) }));
+    // 実物の一覧 40 件の内訳(cheerio で別に数えた値): グレード表記なし 35・Jpn1 3・Jpn3 1・OP 1
+    expect(stats.gradeCounts).toEqual({ "(なし)": 35, Jpn1: 3, Jpn3: 1, OP: 1 });
+    const monthLine = lines.find((l) => l.startsWith("[nar 2021-11] グレード表記"));
+    expect(monthLine).toBe("[nar 2021-11] グレード表記の件数: (なし) 35・Jpn1 3・Jpn3 1・OP 1");
+    expect(lines[lines.length - 1]).toContain("地方のグレード表記: (なし) 35・Jpn1 3・Jpn3 1・OP 1");
   });
 
   it("raw の置き場所は中央と分かれる(raw/nar/…)", async () => {
@@ -404,7 +607,7 @@ describe("fetch: 進捗の出力", () => {
     // 25 件目のリクエスト(カレンダーと一覧の 2 件のあとの 23 件目の結果)で途中経過が出る(この日の残り)。最後の行にはエラー数が出る。
     expect(joined).toMatch(/結果 23\/36\(この日の残り 13\)/);
     expect(joined).toContain("結果 36 件: 取得済み 0・今回保存 35・失敗 1");
-    expect(lines[lines.length - 1]).toMatch(/未来日 0.*エラー 1$/);
+    expect(lines[lines.length - 1]).toMatch(/今日以降の開催日 0.*エラー 1$/);
   });
 });
 
@@ -441,6 +644,13 @@ describe("parseFetchArgs", () => {
     });
   });
 
+  it("--max-consecutive-failures で連続失敗の上限を変えられる", () => {
+    expect(parseFetchArgs(["--from", "2021-11", "--to", "2021-11", "--out", "/x", "--max-consecutive-failures", "50"])).toMatchObject({
+      ok: true,
+      value: { maxConsecutiveFailures: 50 },
+    });
+  });
+
   it("--out が無い・月の形が違う・from が to より後・limit が正の整数でない は拒否する", () => {
     const bad = (a: string[]) => expect(parseFetchArgs(a).ok).toBe(false);
     bad(["--from", "2021-11", "--to", "2021-11"]);
@@ -450,5 +660,6 @@ describe("parseFetchArgs", () => {
     bad(["--from", "2021-11", "--to", "2021-11", "--out", "/x", "--limit", "0"]);
     bad(["--from", "2021-11", "--to", "2021-11", "--out", "/x", "--limit", "abc"]);
     bad(["--from", "2021-11", "--to", "2021-11", "--out", "/x", "--unknown"]);
+    bad(["--from", "2021-11", "--to", "2021-11", "--out", "/x", "--max-consecutive-failures", "0"]);
   });
 });

@@ -2,11 +2,12 @@
  * 過去の結果の取得(Issue #532 段階 1)。開発用のスクリプトで、本番の Worker・D1 には載せない。
  *
  * 使い方(リポジトリのルートで):
- *   pnpm tsx scripts/history-results/fetch.ts --from 2021-11 --to 2026-10 --out <ディレクトリ> [--central] [--nar-jpn] [--limit N]
+ *   pnpm tsx scripts/history-results/fetch.ts --from 2021-11 --to 2026-10 --out <ディレクトリ> [--central] [--nar-jpn] [--limit N] [--max-consecutive-failures N]
  * 中央の全レース(`--central`)と、地方は交流重賞 Jpn1〜3 だけ(`--nar-jpn`)の結果ページを、gzip で `<ディレクトリ>/raw/…` に保存する
  * (どちらも付けなければ両方)。途中で止めても、再実行で続きから取る(取得済みのファイルは取らない)。取れなかったものは
  * `<ディレクトリ>/errors.ndjson` に残り、再実行でもう一度試す。取った生のデータはリポジトリに入れない(出力先はリポジトリの外に指定する)。
  *
+ * 取得の失敗(HTTP エラー・保存前の検査の不合格)が連続 20 件になったら、アクセス制限を疑って打ち切り、終了コード 1 で終わる(再実行で続きから)。
  * netkeiba への実リクエストを出す。HttpClient の最低間隔(1500ms)を守り、1 プロセスで直列に取る。
  * 依存: ルートの devDependencies の cheerio(開発用の結果パーサが使う。本番には入らない)。
  * 解析は parse.ts(ネットワークには出ない)。
@@ -31,6 +32,10 @@ const stats = await runFetch({
   fetchText: (url) => client.fetchText(url, { encoding: "utf-8" }),
   log: (m) => console.log(m),
 });
+if (stats.aborted) {
+  console.error("連続失敗のため打ち切りました(終了コード 1)。");
+  process.exitCode = 1;
+}
 if (stats.errors > 0) {
   console.log(`エラーが ${stats.errors} 件あります。${parsed.value.outDir}/errors.ndjson を見て、もう一度実行すると取れなかったものを試します。`);
 }
