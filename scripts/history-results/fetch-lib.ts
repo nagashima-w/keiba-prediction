@@ -55,10 +55,10 @@ export interface FetchOptions {
 }
 
 /** アクセスの制限を疑う HTTP ステータス。 */
-const RESTRICTED_STATUSES: ReadonlySet<number> = new Set([400, 403, 429]);
+export const RESTRICTED_STATUSES: ReadonlySet<number> = new Set([400, 403, 429]);
 
 /** 例外が持つ HTTP ステータス(HttpClient の HttpError の `status`)。無ければ undefined。 */
-function httpStatusOf(e: unknown): number | undefined {
+export function httpStatusOf(e: unknown): number | undefined {
   const status = (e as { status?: unknown } | null)?.status;
   return typeof status === "number" ? status : undefined;
 }
@@ -109,7 +109,7 @@ function errMessage(e: unknown): string {
 }
 
 /** 一時ファイルに書いて rename する。 */
-function atomicWrite(file: string, data: Buffer): void {
+export function atomicWrite(file: string, data: Buffer): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
