@@ -12,6 +12,7 @@ import {
   PRIOR_ROW_KEYS_V3_ADDED,
   PRIOR_ROW_KEYS_V4_ADDED,
   PRIOR_ROW_KEYS_V5_ADDED,
+  PRIOR_ROW_KEYS_V6_ADDED,
   selectPriorExportAnalyses,
   toContributions,
   toSnapshotColumns,
@@ -28,6 +29,8 @@ import {
 const BEFORE_START = "2026-10-10T00:00:00.000Z"; // JST 09:00。発走(10:05)より前
 /** 騎手名 → 騎手 ID の対応が無い(表が空)。v5 の埋め直しをしない呼び出し。 */
 const NO_LOOKUP: ReadonlyMap<string, string> = new Map();
+/** 調教師名 → 調教師 ID の対応が無い(表が空)。v6 の埋め直しをしない呼び出し。 */
+const NO_TRAINER_LOOKUP: ReadonlyMap<string, string> = new Map();
 const AFTER_START = "2026-10-10T03:00:00.000Z"; // JST 12:00。発走(10:05)より後
 
 function cand(id: number, over: Partial<CandidateRow> = {}): CandidateRow {
@@ -178,7 +181,7 @@ describe("buildRaceRows: 1 行 1 頭", () => {
   const contributions = new Map([[1, toContributions([{ biasName: "a", applied: true, weight: 0.1, correction: 0.01 }])]]);
 
   it("馬番の昇順で、分析の馬ごとに 1 行。頭数・面・結果・寄与度を結ぶ。結果の無い馬(umaban 3)は着順・オッズ・人気が null", () => {
-    const rows = buildRaceRows(CHOSEN, horses, results, "ダ", contributions, null, NO_LOOKUP);
+    const rows = buildRaceRows(CHOSEN, horses, results, "ダ", contributions, null, NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(rows.map((r) => r.umaban)).toEqual([1, 2, 3]);
     expect(rows.every((r) => r.field_size === 3)).toBe(true);
     expect(rows[0]).toMatchObject({
@@ -192,7 +195,7 @@ describe("buildRaceRows: 1 行 1 頭", () => {
   });
 
   it("キーは許可リスト(PRIOR_ROW_KEYS)と完全に一致する。追加指示・生応答・自由文・馬名などの秘密や個人的な内容は列にない", () => {
-    const [row] = buildRaceRows(CHOSEN, horses, results, null, contributions, null, NO_LOOKUP);
+    const [row] = buildRaceRows(CHOSEN, horses, results, null, contributions, null, NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(Object.keys(row!)).toEqual([...PRIOR_ROW_KEYS]);
     for (const forbidden of ["additional_instruction", "raw_response", "reason", "highlights", "concerns", "mark", "horse_name", "model", "bets"]) {
       expect(PRIOR_ROW_KEYS as readonly string[]).not.toContain(forbidden);
@@ -201,19 +204,19 @@ describe("buildRaceRows: 1 行 1 頭", () => {
 
   it("地方のレース ID は venue_kind が nar。kaisai_date が NULL なら地方のレース ID から補う", () => {
     const nar: ChosenAnalysis = { ...CHOSEN, raceId: "202544101501", kaisaiDate: null };
-    const [row] = buildRaceRows(nar, horses, results, null, contributions, null, NO_LOOKUP);
+    const [row] = buildRaceRows(nar, horses, results, null, contributions, null, NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(row!.venue_kind).toBe("nar");
     expect(row!.kaisai_date).toBe("20251015");
   });
 
   it("中央で kaisai_date が NULL なら null のまま(推測しない)", () => {
-    const [row] = buildRaceRows({ ...CHOSEN, kaisaiDate: null }, horses, results, null, contributions, null, NO_LOOKUP);
+    const [row] = buildRaceRows({ ...CHOSEN, kaisaiDate: null }, horses, results, null, contributions, null, NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(row!.kaisai_date).toBeNull();
   });
 });
 
 describe("NDJSON(gzip の複数メンバー)とファイル名", () => {
-  const row = (umaban: number): PriorDatasetRow => buildRaceRows(CHOSEN, [{ umaban, prior: 0.1, adjustedProb: 0.1, placeOddsMin: 1.5 }], [], null, new Map(), null, NO_LOOKUP)[0]!;
+  const row = (umaban: number): PriorDatasetRow => buildRaceRows(CHOSEN, [{ umaban, prior: 0.1, adjustedProb: 0.1, placeOddsMin: 1.5 }], [], null, new Map(), null, NO_LOOKUP, NO_TRAINER_LOOKUP)[0]!;
 
   it("encodeChunk は行ごとに 1 行の JSON(末尾改行つき)を gzip の 1 メンバーにし、メンバーの連結は 1 回の gunzip で全部読める", () => {
     const a = encodeChunk([row(1), row(2)]);
@@ -254,11 +257,11 @@ const SNAPSHOT = {
   race: { raceName: "テストステークス", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", startTime: "10:05", fence: null, oddsStatus: "x", officialDatetime: null, grade: "G3", weightType: "ハンデ", filliesOnly: false },
   horses: [
     {
-      umaban: 1, wakuban: 1, name: "SECRET-HORSE", sex: "牡", age: 3, kinryo: 56, jockeyName: "騎手ア", jockeyId: "01001", trainerName: "SECRET-TRAINER", bodyWeight: 480,
+      umaban: 1, wakuban: 1, name: "SECRET-HORSE", sex: "牡", age: 3, kinryo: 56, jockeyName: "騎手ア", jockeyId: "01001", trainerName: "調教師ア", trainerId: "02001", horseId: "2021100001", bodyWeight: 480,
       winOdds: 99.9, popularity: 13, placeOddsMin: 77.7, placeOddsMax: 88.8, oikiriCritic: "動き良化", oikiriRank: "A",
     },
     {
-      umaban: 2, wakuban: 2, name: "SECRET-HORSE-2", sex: "牝", age: 4, kinryo: 54.5, jockeyName: "騎手イ", jockeyId: "01002", trainerName: "SECRET-TRAINER-2", bodyWeight: null,
+      umaban: 2, wakuban: 2, name: "SECRET-HORSE-2", sex: "牝", age: 4, kinryo: 54.5, jockeyName: "騎手イ", jockeyId: "01002", trainerName: "調教師イ", trainerId: "02002", horseId: "2021100002", bodyWeight: null,
       winOdds: 5, popularity: 2, placeOddsMin: 1.5, placeOddsMax: 2, oikiriCritic: null, oikiriRank: null,
     },
   ],
@@ -271,8 +274,8 @@ const NULL_RACE = { race_name: null, grade: null, distance: null, track_conditio
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 describe("v2 の列(許可リスト)", () => {
-  it("形式の版は 5(Issue #526)。v1 の 19 列は先頭にそのまま残り、v2 で足した 11 列・v3 で足した 2 列・v4 で足した 2 列・v5 で足した 1 列がこの順で続く(順序も固定)", () => {
-    expect(PRIOR_EXPORT_FORMAT).toBe(5);
+  it("形式の版は 6(Issue #540)。v1 の 19 列は先頭にそのまま残り、v2 で足した 11 列・v3 で足した 2 列・v4 で足した 2 列・v5 で足した 1 列・v6 で足した 4 列がこの順で続く(順序も固定)", () => {
+    expect(PRIOR_EXPORT_FORMAT).toBe(6);
     expect(PRIOR_ROW_KEYS_V1).toHaveLength(19);
     expect([...PRIOR_ROW_KEYS_V1]).toEqual([
       "analysis_id", "race_id", "kaisai_date", "venue_kind", "course_type", "field_size", "umaban", "prior", "adjusted_prob", "place_odds_min", "contributions",
@@ -284,19 +287,33 @@ describe("v2 の列(許可リスト)", () => {
     expect([...PRIOR_ROW_KEYS_V3_ADDED]).toEqual(["weight_type", "fillies_only"]);
     expect([...PRIOR_ROW_KEYS_V4_ADDED]).toEqual(["jockey_name", "jockey_id"]);
     expect([...PRIOR_ROW_KEYS_V5_ADDED]).toEqual(["jockey_id_source"]);
-    expect([...PRIOR_ROW_KEYS]).toEqual([...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED, ...PRIOR_ROW_KEYS_V4_ADDED, ...PRIOR_ROW_KEYS_V5_ADDED]);
-    expect(PRIOR_ROW_KEYS).toHaveLength(35);
-    expect(PRIOR_ROW_KEYS.slice(-3)).toEqual(["jockey_name", "jockey_id", "jockey_id_source"]); // 末尾の 3 列が騎手
+    expect([...PRIOR_ROW_KEYS_V6_ADDED]).toEqual(["trainer_name", "trainer_id", "trainer_id_source", "horse_id"]);
+    expect([...PRIOR_ROW_KEYS]).toEqual([...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED, ...PRIOR_ROW_KEYS_V4_ADDED, ...PRIOR_ROW_KEYS_V5_ADDED, ...PRIOR_ROW_KEYS_V6_ADDED]);
+    expect(PRIOR_ROW_KEYS).toHaveLength(39);
+    expect(PRIOR_ROW_KEYS.slice(-7)).toEqual(["jockey_name", "jockey_id", "jockey_id_source", "trainer_name", "trainer_id", "trainer_id_source", "horse_id"]); // 末尾の 7 列が騎手と調教師・馬の ID
   });
 
-  it("馬名・調教師名と、スナップショットの市場の値(単勝オッズ・人気・複勝オッズ)は列にない(騎手名・騎手 ID・ID の出どころは format 4・5 から入る)。既存の win_odds・ninki(確定値)と place_odds_min だけが市場に近い列", () => {
+  it("format 5 までの 35 列は、名前も順序も変わっていない(v6 の 4 列は末尾に足しただけ。リテラルで固定する。新旧の対応表の左側)", () => {
+    expect(PRIOR_ROW_KEYS.slice(0, 35)).toEqual([
+      "analysis_id", "race_id", "kaisai_date", "venue_kind", "course_type", "field_size", "umaban", "prior", "adjusted_prob", "place_odds_min", "contributions",
+      "finish_position", "win_odds", "ninki", "prompt_version", "analyzed_at", "ev_estimated", "prompt_lookahead_guarded", "leak_class",
+      "race_name", "grade", "distance", "track_condition", "wakuban", "sex", "age", "body_weight", "kinryo", "oikiri_rank", "oikiri_critic",
+      "weight_type", "fillies_only", "jockey_name", "jockey_id", "jockey_id_source",
+    ]);
+  });
+
+  it("馬名と、スナップショットの市場の値(単勝オッズ・人気・複勝オッズ)は列にない(騎手名・騎手 ID・ID の出どころは format 4・5、調教師名・調教師 ID・その出どころ・馬の ID は format 6 から入る)。既存の win_odds・ninki(確定値)と place_odds_min だけが市場に近い列", () => {
     for (const forbidden of [
-      "name", "horse_name", "trainer_name", "jockey", "trainer", "horse_id", "trainer_id", "jockey_code", "trainer_code",
+      "name", "horse_name", "jockey", "trainer", "jockey_code", "trainer_code",
       "popularity", "place_odds_max", "snapshot_win_odds", "snapshot_popularity", "snapshot_place_odds_min", "winOdds", "placeOddsMax",
     ]) {
       expect(PRIOR_ROW_KEYS as readonly string[], `${forbidden} は列にない`).not.toContain(forbidden);
     }
     expect(PRIOR_ROW_KEYS.filter((k) => /odds|ninki|popul/.test(k))).toEqual(["place_odds_min", "win_odds", "ninki"]);
+    // 調教師名・調教師 ID・馬の ID は format 6 から列にある(ユーザーの決定・2026-10-30)。馬名は引き続き無い。
+    for (const shown of ["trainer_name", "trainer_id", "horse_id"]) {
+      expect(PRIOR_ROW_KEYS as readonly string[], `${shown} は列にある`).toContain(shown);
+    }
   });
 });
 
@@ -408,7 +425,7 @@ describe("buildRaceRows: v2 の列", () => {
   const results = [{ umaban: 1, finishPosition: 1, winOdds: 2.5, ninki: 1 }];
 
   it("スナップショットの列を、レースの列は全頭に・馬の列は馬番で結ぶ。スナップショットに無い馬(umaban 3)は馬の列だけ null でレースの列は入る", () => {
-    const rows = buildRaceRows(CHOSEN, horses, results, "芝", new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP);
+    const rows = buildRaceRows(CHOSEN, horses, results, "芝", new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(rows).toHaveLength(3);
     expect(rows.every((r) => r.race_name === "テストステークス" && r.grade === "G3" && r.distance === 1600 && r.track_condition === "良")).toBe(true);
     expect(rows[0]).toMatchObject(HORSE1);
@@ -417,7 +434,7 @@ describe("buildRaceRows: v2 の列", () => {
   });
 
   it("スナップショットが無い(null)ときは、v2 の 11 列がすべて null。v1 の列は変わらない", () => {
-    const rows = buildRaceRows(CHOSEN, horses, results, "芝", new Map(), null, NO_LOOKUP);
+    const rows = buildRaceRows(CHOSEN, horses, results, "芝", new Map(), null, NO_LOOKUP, NO_TRAINER_LOOKUP);
     for (const r of rows) {
       expect(PRIOR_ROW_KEYS_V2_ADDED.map((k) => r[k])).toEqual(Array(11).fill(null));
     }
@@ -425,13 +442,13 @@ describe("buildRaceRows: v2 の列", () => {
   });
 
   it("キーの順序は PRIOR_ROW_KEYS(v1 の 19 列が先頭)と完全に一致する", () => {
-    const [row] = buildRaceRows(CHOSEN, horses, results, null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP);
+    const [row] = buildRaceRows(CHOSEN, horses, results, null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(Object.keys(row!)).toEqual([...PRIOR_ROW_KEYS]);
     expect(Object.keys(row!).slice(0, 19)).toEqual([...PRIOR_ROW_KEYS_V1]);
   });
 
-  it("市場の値は、スナップショットのもの(単勝 99.9・人気 13・複勝 77.7/88.8)ではなく、既存の確定値・分析の値のまま。人名・馬名は行のどこにも出ない", () => {
-    const rows = buildRaceRows(CHOSEN, horses, results, null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP);
+  it("市場の値は、スナップショットのもの(単勝 99.9・人気 13・複勝 77.7/88.8)ではなく、既存の確定値・分析の値のまま。馬名は行のどこにも出ない", () => {
+    const rows = buildRaceRows(CHOSEN, horses, results, null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(rows[0]).toMatchObject({ win_odds: 2.5, ninki: 1, place_odds_min: 3.1 });
     const text = JSON.stringify(rows);
     for (const secret of ["SECRET", "99.9", "77.7", "88.8"]) {
@@ -439,16 +456,16 @@ describe("buildRaceRows: v2 の列", () => {
     }
   });
 
-  it("assembleFile のメタ行は format 5 で、列は 35 列。notes に v2 の列の出どころ・null の意味(grade の曖昧さ・地方の調教・critic の未確認)と、v3・v4・v5 の列の意味を書く", () => {
-    const rows = buildRaceRows(CHOSEN, horses, results, null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP);
+  it("assembleFile のメタ行は format 6 で、列は 39 列。notes に v2 の列の出どころ・null の意味(grade の曖昧さ・地方の調教・critic の未確認)と、v3・v4・v5・v6 の列の意味を書く", () => {
+    const rows = buildRaceRows(CHOSEN, horses, results, null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP, NO_TRAINER_LOOKUP);
     const file = assembleFile({ generatedAt: "2026-10-10T12:00:00.000Z", rows: rows.length, races: 1, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } }, [encodeChunk(rows)]);
     const lines = new TextDecoder().decode(gunzipSync(file)).split("\n").filter((l) => l !== "");
     const head = JSON.parse(lines[0]!) as { _meta: { format: number; columns: string[]; notes: string[] } };
-    expect(head._meta.format).toBe(5);
-    expect(head._meta.columns).toHaveLength(35);
-    expect(head._meta.columns.slice(-3)).toEqual(["jockey_name", "jockey_id", "jockey_id_source"]);
+    expect(head._meta.format).toBe(6);
+    expect(head._meta.columns).toHaveLength(39);
+    expect(head._meta.columns.slice(-7)).toEqual(["jockey_name", "jockey_id", "jockey_id_source", "trainer_name", "trainer_id", "trainer_id_source", "horse_id"]);
     const notes = head._meta.notes.join("\n");
-    for (const phrase of ["v2", "raceSnapshot", "grade", "地方", "oikiri_critic", "16 文字", "確認していない", "馬名・調教師名", "format 3", "weight_type", "fillies_only", "区別できない", "前走"]) {
+    for (const phrase of ["v2", "raceSnapshot", "grade", "地方", "oikiri_critic", "16 文字", "確認していない", "馬名と、スナップショットの市場の値", "format 3", "weight_type", "fillies_only", "区別できない", "前走"]) {
       expect(notes, `notes に「${phrase}」`).toContain(phrase);
     }
     // format 4(Issue #526): 方針の変更を書く。「騎手名は含めない」という旧い方針の文は残さない。
@@ -456,8 +473,13 @@ describe("buildRaceRows: v2 の列", () => {
       expect(notes, `notes に「${phrase}」`).toContain(phrase);
     }
     expect(notes).not.toContain("馬名・騎手名・調教師名");
+    expect(notes).not.toContain("馬名・調教師名は引き続き含めない"); // format 6 で調教師名を含めるようにしたので、旧い方針の文は残さない
     // format 5(Issue #526 段階 1b): 名前から埋めた ID の意味と、誤りうる条件・表を貯め始めた日・使うかを分析側が選ぶこと。
     for (const phrase of ["format 5", "jockey_id_source", "snapshot", "name", "ちょうど 1 つ", "同じ名前の別人", "引退", "2026-10-29", "絞れる"]) {
+      expect(notes, `notes に「${phrase}」`).toContain(phrase);
+    }
+    // format 6(Issue #540): 方針の変更(調教師名だけ。馬名は含めない)・列の意味・貯め始めた日・誤りうる条件・馬の ID は名前から埋めないこと。
+    for (const phrase of ["format 6", "trainer_name", "trainer_id", "trainer_id_source", "horse_id", "#540", "2026-10-30", "騎手と調教師の相性", "馬名は引き続き含めない", "名前から埋めない", "同じ名前の別人", "絞れる"]) {
       expect(notes, `notes に「${phrase}」`).toContain(phrase);
     }
   });
@@ -519,19 +541,19 @@ describe("v3 の列: buildRaceRows が全頭に同じ値を載せる", () => {
     { umaban: 3, prior: 0.1, adjustedProb: 0.1, placeOddsMin: 9 },
   ];
 
-  it("レースの条件は全頭に入る(スナップショットに無い馬にも)。キーの順序は PRIOR_ROW_KEYS で、v3 の 2 列は 31・32 番目(v4 の 2 列が末尾)", () => {
-    const rows = buildRaceRows(CHOSEN_V3, horsesV3, [], null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP);
+  it("レースの条件は全頭に入る(スナップショットに無い馬にも)。キーの順序は PRIOR_ROW_KEYS で、v3 の 2 列は 31・32 番目(v4 以降の列が後ろに続く)", () => {
+    const rows = buildRaceRows(CHOSEN_V3, horsesV3, [], null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(rows).toHaveLength(2);
     for (const r of rows) {
       expect(r.weight_type).toBe("ハンデ");
       expect(r.fillies_only).toBe(false);
       expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
-      expect(Object.keys(r).slice(30, 32)).toEqual([...PRIOR_ROW_KEYS_V3_ADDED]); // v4 で足した 2 列が末尾に来たので、v3 の 2 列は 31・32 番目
+      expect(Object.keys(r).slice(30, 32)).toEqual([...PRIOR_ROW_KEYS_V3_ADDED]); // v4 以降の列が後ろに来たので、v3 の 2 列は 31・32 番目
     }
   });
 
   it("スナップショットが無い(null)ときは v3 の 2 列も null。ほかの列は変わらない", () => {
-    const rows = buildRaceRows(CHOSEN_V3, horsesV3, [], null, new Map(), null, NO_LOOKUP);
+    const rows = buildRaceRows(CHOSEN_V3, horsesV3, [], null, new Map(), null, NO_LOOKUP, NO_TRAINER_LOOKUP);
     for (const r of rows) {
       expect(PRIOR_ROW_KEYS_V3_ADDED.map((k) => r[k])).toEqual([null, null]);
       expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
@@ -601,7 +623,7 @@ describe("v4 の列: toSnapshotColumns がスナップショットの horses[] �
     expect(toSnapshotColumns(raw).jockeys.size).toBe(0);
   });
 
-  it("調教師名・馬名は、騎手の列にも、結果のどこにも出ない", () => {
+  it("調教師名・馬名は、騎手の列(jockeys)に混ざらない", () => {
     const out = toSnapshotColumns(SNAPSHOT);
     const text = JSON.stringify([...out.jockeys.values()]);
     expect(text).toContain("騎手ア"); // 前提: 騎手は出る
@@ -619,7 +641,7 @@ describe("v4 の列: buildRaceRows が馬番ごとに載せる", () => {
   ];
 
   it("全頭に載る。スナップショットに無い馬(umaban 3)は両列 null。馬ごとに別の値", () => {
-    const rows = buildRaceRows(CHOSEN, horsesV4, [], null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP);
+    const rows = buildRaceRows(CHOSEN, horsesV4, [], null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(rows).toHaveLength(3);
     expect(rows.map((r) => [r.jockey_name, r.jockey_id])).toEqual([
       ["騎手ア", "01001"],
@@ -628,12 +650,12 @@ describe("v4 の列: buildRaceRows が馬番ごとに載せる", () => {
     ]);
     for (const r of rows) {
       expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
-      expect(Object.keys(r).slice(-3, -1)).toEqual([...PRIOR_ROW_KEYS_V4_ADDED]); // v4 の 2 列は末尾から 3〜2 番目(末尾は v5 の 1 列)
+      expect(Object.keys(r).slice(32, 34)).toEqual([...PRIOR_ROW_KEYS_V4_ADDED]); // v4 の 2 列は 33・34 番目(v5 の 1 列・v6 の 4 列が後ろに続く)
     }
   });
 
   it("スナップショットが無い(null)ときは両列 null。ほかの列は変わらない", () => {
-    const rows = buildRaceRows(CHOSEN, horsesV4, [], null, new Map(), null, NO_LOOKUP);
+    const rows = buildRaceRows(CHOSEN, horsesV4, [], null, new Map(), null, NO_LOOKUP, NO_TRAINER_LOOKUP);
     for (const r of rows) {
       expect(PRIOR_ROW_KEYS_V4_ADDED.map((k) => r[k])).toEqual([null, null]);
       expect(r.jockey_id_source).toBeNull();
@@ -641,8 +663,8 @@ describe("v4 の列: buildRaceRows が馬番ごとに載せる", () => {
     }
   });
 
-  it("行の JSON に騎手名・騎手 ID は出るが、調教師名・馬名・スナップショットの市場の値は出ない", () => {
-    const text = JSON.stringify(buildRaceRows(CHOSEN, horsesV4, [], null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP));
+  it("行の JSON に騎手名・騎手 ID は出るが、馬名・スナップショットの市場の値は出ない", () => {
+    const text = JSON.stringify(buildRaceRows(CHOSEN, horsesV4, [], null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP, NO_TRAINER_LOOKUP));
     for (const shown of ["騎手ア", "01001", "騎手イ", "01002"]) {
       expect(text, `行に ${shown} がある`).toContain(shown);
     }
@@ -674,7 +696,7 @@ describe("v5 の列: buildRaceRows が jockey_id を名前から埋め、出ど�
   const idCols = (rows: readonly PriorDatasetRow[]): unknown[] => rows.map((r) => [r.jockey_name, r.jockey_id, r.jockey_id_source]);
 
   it("スナップショットに ID があればそれを使い(snapshot)、無くて表に名前があれば表の ID で埋め(name)、どちらでもなければ null。馬ごとに別の結果", () => {
-    const rows = buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), snapshot(), lookup);
+    const rows = buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), snapshot(), lookup, NO_TRAINER_LOOKUP);
     expect(rows).toHaveLength(5);
     expect(idCols(rows)).toEqual([
       ["戸崎圭", "05386", "snapshot"], // 表の 99999 ではなく、スナップショットの ID
@@ -686,7 +708,7 @@ describe("v5 の列: buildRaceRows が jockey_id を名前から埋め、出ど�
   });
 
   it("不変条件: jockey_id が null なのは jockey_id_source が null のときだけ(全行で。出どころが付くのは ID があるときだけ)", () => {
-    const rows = buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), snapshot(), lookup);
+    const rows = buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), snapshot(), lookup, NO_TRAINER_LOOKUP);
     expect(rows.filter((r) => r.jockey_id !== null)).toHaveLength(2); // 前提: ID のある行と無い行の両方がある
     expect(rows.filter((r) => r.jockey_id === null)).toHaveLength(3);
     for (const r of rows) {
@@ -696,7 +718,7 @@ describe("v5 の列: buildRaceRows が jockey_id を名前から埋め、出ど�
   });
 
   it("対応が空(表が空・読み出し口が無い)なら、スナップショットの ID だけ(snapshot)。埋めない", () => {
-    const rows = buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), snapshot(), NO_LOOKUP);
+    const rows = buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), snapshot(), NO_LOOKUP, NO_TRAINER_LOOKUP);
     expect(idCols(rows)).toEqual([
       ["戸崎圭", "05386", "snapshot"],
       ["横山武", null, null],
@@ -707,7 +729,7 @@ describe("v5 の列: buildRaceRows が jockey_id を名前から埋め、出ど�
   });
 
   it("スナップショットが無い(null)ときは、名前が無いので表があっても全行 null", () => {
-    const rows = buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), null, lookup);
+    const rows = buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), null, lookup, NO_TRAINER_LOOKUP);
     expect(rows).toHaveLength(5);
     expect(idCols(rows)).toEqual(Array.from({ length: 5 }, () => [null, null, null]));
   });
@@ -721,7 +743,7 @@ describe("v5 の列: buildRaceRows が jockey_id を名前から埋め、出ど�
         { umaban: 3, jockeyName: "Mデムーロ", jockeyId: null },
       ],
     });
-    const rows = buildRaceRows(CHOSEN, horsesV5.slice(0, 3), [], null, new Map(), snap, new Map([["横山武", "01170"], ["Mデムーロ", "05212"]]));
+    const rows = buildRaceRows(CHOSEN, horsesV5.slice(0, 3), [], null, new Map(), snap, new Map([["横山武", "01170"], ["Mデムーロ", "05212"]]), NO_TRAINER_LOOKUP);
     expect(idCols(rows)).toEqual([
       ["横山武 ", null, null],
       ["Ｍデムーロ", null, null],
@@ -732,7 +754,7 @@ describe("v5 の列: buildRaceRows が jockey_id を名前から埋め、出ど�
   it("名前が Object のプロパティ名(constructor・__proto__・toString)でも、表に無ければ null(継承されたプロパティを ID と取り違えない)", () => {
     const names = ["constructor", "__proto__", "toString", "hasOwnProperty"];
     const snap = toSnapshotColumns({ race: {}, horses: names.map((jockeyName, i) => ({ umaban: i + 1, jockeyName, jockeyId: null })) });
-    const rows = buildRaceRows(CHOSEN, horsesV5.slice(0, 4), [], null, new Map(), snap, new Map([["横山武", "01170"]]));
+    const rows = buildRaceRows(CHOSEN, horsesV5.slice(0, 4), [], null, new Map(), snap, new Map([["横山武", "01170"]]), NO_TRAINER_LOOKUP);
     expect(rows).toHaveLength(4);
     for (const r of rows) {
       expect([r.jockey_id, r.jockey_id_source]).toEqual([null, null]);
@@ -742,14 +764,229 @@ describe("v5 の列: buildRaceRows が jockey_id を名前から埋め、出ど�
   it("jockey_id の型が違う(数)スナップショットは、ID なしとして扱い、名前から埋める(型の違う値を ID として採らない)", () => {
     const snap = toSnapshotColumns({ race: {}, horses: [{ umaban: 1, jockeyName: "横山武", jockeyId: 1170 }] });
     expect(snap.jockeys.get(1)!.jockey_id).toBeNull(); // 前提: 数は採られない
-    const [row] = buildRaceRows(CHOSEN, horsesV5.slice(0, 1), [], null, new Map(), snap, lookup);
+    const [row] = buildRaceRows(CHOSEN, horsesV5.slice(0, 1), [], null, new Map(), snap, lookup, NO_TRAINER_LOOKUP);
     expect([row!.jockey_id, row!.jockey_id_source]).toEqual(["01170", "name"]);
   });
 
-  it("行のキーの順は PRIOR_ROW_KEYS のまま(jockey_id_source は末尾)", () => {
-    for (const r of buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), snapshot(), lookup)) {
+  it("行のキーの順は PRIOR_ROW_KEYS のまま(jockey_id_source は 35 番目。v6 の 4 列が後ろに続く)", () => {
+    for (const r of buildRaceRows(CHOSEN, horsesV5, [], null, new Map(), snapshot(), lookup, NO_TRAINER_LOOKUP)) {
       expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
-      expect(Object.keys(r).at(-1)).toBe("jockey_id_source");
+      expect(Object.keys(r).slice(34, 35)).toEqual([...PRIOR_ROW_KEYS_V5_ADDED]); // jockey_id_source は 35 番目(v6 の 4 列が後ろに続く)
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #540: 形式 v6。調教師名・調教師 ID・調教師 ID の出どころ・馬の ID の 4 列。
+// 調教師 ID は、スナップショットに無い行を、調教師名 → 調教師 ID の対応(trainer_names 表で ID がちょうど 1 つの名前)で埋める(騎手と同じ規則)。馬の ID は名前から埋めない。
+// ---------------------------------------------------------------------------
+
+describe("toSnapshotColumns: v6 の列(調教師名・調教師 ID・馬の ID)", () => {
+  it("馬番ごとに、調教師名・調教師 ID と、馬の ID を取り出す。馬ごとに別の値(取り違えの検知)。馬名は結果に含まれない", () => {
+    const out = toSnapshotColumns(SNAPSHOT);
+    expect([...out.trainers.keys()]).toEqual([1, 2]);
+    expect(out.trainers.get(1)).toEqual({ trainer_name: "調教師ア", trainer_id: "02001" });
+    expect(out.trainers.get(2)).toEqual({ trainer_name: "調教師イ", trainer_id: "02002" });
+    expect([...out.horseIds.entries()]).toEqual([[1, "2021100001"], [2, "2021100002"]]);
+    const text = JSON.stringify([...out.trainers.values(), ...out.horseIds.values()]);
+    expect(text).toContain("調教師ア"); // 前提: 調教師名は出る
+    expect(text).not.toContain("SECRET"); // 馬名は出ない
+  });
+
+  it("このキーを保存する前の旧スナップショット(trainerId・horseId のキーが無い)は、調教師名は入り、2 つの ID は null", () => {
+    const old = clone(SNAPSHOT);
+    for (const h of old.horses as Array<Record<string, unknown>>) {
+      delete h["trainerId"];
+      delete h["horseId"];
+    }
+    const out = toSnapshotColumns(old);
+    expect(out.trainers.get(1)).toEqual({ trainer_name: "調教師ア", trainer_id: null });
+    expect(out.horseIds.get(1)).toBeNull();
+    expect(out.horseIds.size).toBe(2); // 馬ごとに null が入っている(馬が消えない)
+  });
+
+  it.each([
+    ["調教師名が空文字", "trainerName", "", "trainer_name"],
+    ["調教師名が数", "trainerName", 7, "trainer_name"],
+    ["調教師 ID が数(\"02001\" が 2001 になっていても採らない)", "trainerId", 2001, "trainer_id"],
+    ["調教師 ID が空文字", "trainerId", "", "trainer_id"],
+  ] as const)("%s のときは、その列だけ null(ほかの列は変わらない)", (_name, key, value, column) => {
+    const bad = clone(SNAPSHOT);
+    (bad.horses[0] as Record<string, unknown>)[key] = value;
+    const got = toSnapshotColumns(bad).trainers.get(1)!;
+    expect(got[column]).toBeNull();
+    const other = column === "trainer_name" ? "trainer_id" : "trainer_name";
+    expect(got[other]).not.toBeNull(); // 前提: もう一方の列は取れている
+    expect(toSnapshotColumns(bad).horseIds.get(1)).toBe("2021100001");
+  });
+
+  it("馬の ID が数・空文字なら、その馬の horse_id だけ null", () => {
+    for (const bad of [2021100001, ""]) {
+      const snap = clone(SNAPSHOT);
+      (snap.horses[0] as Record<string, unknown>)["horseId"] = bad;
+      const out = toSnapshotColumns(snap);
+      expect(out.horseIds.get(1)).toBeNull();
+      expect(out.horseIds.get(2)).toBe("2021100002"); // 隣の馬は取れる
+    }
+  });
+
+  it.each([
+    ["null", null],
+    ["文字列", "x"],
+    ["空のオブジェクト", {}],
+    ["horses が配列でない型", { race: "x", horses: {} }],
+  ])("スナップショットが壊れている(%s)ときは、調教師の列・馬の ID は 0 頭(例外を投げない)", (_name, raw) => {
+    const out = toSnapshotColumns(raw);
+    expect(out.trainers.size).toBe(0);
+    expect(out.horseIds.size).toBe(0);
+  });
+});
+
+describe("v6 の列: buildRaceRows が調教師 ID を名前から埋め、出どころを trainer_id_source に残す。馬の ID は名前から埋めない", () => {
+  const horsesV6 = [1, 2, 3, 4, 5].map((umaban) => ({ umaban, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 2 }));
+  /** 5 頭: 1 = ID あり、2 = ID なし(名前は表にある)、3 = ID なし(名前は表に無い)、4 = 調教師名なし・ID なし、5 = スナップショットに載っていない。 */
+  const snapshot = (): ReturnType<typeof toSnapshotColumns> =>
+    toSnapshotColumns({
+      race: { raceName: "x" },
+      horses: [
+        { umaban: 1, trainerName: "藤野", trainerId: "01200", horseId: "2024104976" },
+        { umaban: 2, trainerName: "和田雄", trainerId: null, horseId: "2021105857" },
+        { umaban: 3, trainerName: "表にない調教師", trainerId: null },
+        { umaban: 4, trainerName: "", trainerId: null },
+      ],
+    });
+  const lookup = new Map([["和田雄", "01143"], ["藤野", "99999"]]); // 藤野 は表の ID がスナップショットと食い違う(スナップショットが優先されることを値で見る)
+  const trainerCols = (rows: readonly PriorDatasetRow[]): unknown[] => rows.map((r) => [r.trainer_name, r.trainer_id, r.trainer_id_source]);
+
+  it("スナップショットに ID があればそれを使い(snapshot)、無くて表に名前があれば表の ID で埋め(name)、どちらでもなければ null。馬ごとに別の結果", () => {
+    const rows = buildRaceRows(CHOSEN, horsesV6, [], null, new Map(), snapshot(), NO_LOOKUP, lookup);
+    expect(rows).toHaveLength(5);
+    expect(trainerCols(rows)).toEqual([
+      ["藤野", "01200", "snapshot"], // 表の 99999 ではなく、スナップショットの ID
+      ["和田雄", "01143", "name"],
+      ["表にない調教師", null, null],
+      [null, null, null],
+      [null, null, null],
+    ]);
+  });
+
+  it("不変条件: trainer_id が null なのは trainer_id_source が null のときだけ(全行で)", () => {
+    const rows = buildRaceRows(CHOSEN, horsesV6, [], null, new Map(), snapshot(), NO_LOOKUP, lookup);
+    expect(rows.filter((r) => r.trainer_id !== null)).toHaveLength(2); // 前提: ID のある行と無い行の両方がある
+    expect(rows.filter((r) => r.trainer_id === null)).toHaveLength(3);
+    for (const r of rows) {
+      expect(r.trainer_id === null).toBe(r.trainer_id_source === null);
+      expect([null, "snapshot", "name"]).toContain(r.trainer_id_source);
+    }
+  });
+
+  it("対応が空なら、スナップショットの ID だけ(snapshot)。埋めない", () => {
+    const rows = buildRaceRows(CHOSEN, horsesV6, [], null, new Map(), snapshot(), NO_LOOKUP, NO_TRAINER_LOOKUP);
+    expect(trainerCols(rows)).toEqual([
+      ["藤野", "01200", "snapshot"],
+      ["和田雄", null, null],
+      ["表にない調教師", null, null],
+      [null, null, null],
+      [null, null, null],
+    ]);
+  });
+
+  it("スナップショットが無い(null)ときは、名前が無いので表があっても全行 null(4 列とも)", () => {
+    const rows = buildRaceRows(CHOSEN, horsesV6, [], null, new Map(), null, NO_LOOKUP, lookup);
+    expect(rows).toHaveLength(5);
+    for (const r of rows) {
+      expect(PRIOR_ROW_KEYS_V6_ADDED.map((k) => r[k])).toEqual([null, null, null, null]);
+    }
+  });
+
+  it("騎手の対応表と調教師の対応表は混ざらない: 調教師名が騎手の表にあっても埋めない。騎手名が調教師の表にあっても埋めない", () => {
+    const snap = toSnapshotColumns({
+      race: {},
+      horses: [{ umaban: 1, jockeyName: "横山武", jockeyId: null, trainerName: "和田雄", trainerId: null }],
+    });
+    // 調教師名 和田雄 は騎手の表にだけある。騎手名 横山武 は調教師の表にだけある。
+    const [row] = buildRaceRows(CHOSEN, horsesV6.slice(0, 1), [], null, new Map(), snap, new Map([["和田雄", "00001"]]), new Map([["横山武", "00002"]]));
+    expect([row!.jockey_id, row!.jockey_id_source, row!.trainer_id, row!.trainer_id_source]).toEqual([null, null, null, null]);
+    // 対照: 正しい表なら、両方埋まる(騎手の ID と調教師の ID は別の値)。
+    const [ok] = buildRaceRows(CHOSEN, horsesV6.slice(0, 1), [], null, new Map(), snap, new Map([["横山武", "01170"]]), new Map([["和田雄", "01143"]]));
+    expect([ok!.jockey_id, ok!.jockey_id_source, ok!.trainer_id, ok!.trainer_id_source]).toEqual(["01170", "name", "01143", "name"]);
+  });
+
+  it("突き合わせは厳密な文字列一致: 前後の空白・全角と半角の違いは別の名前(直して合わせない)", () => {
+    const snap = toSnapshotColumns({
+      race: {},
+      horses: [
+        { umaban: 1, trainerName: "和田雄 ", trainerId: null },
+        { umaban: 2, trainerName: "Ｍ藤野", trainerId: null },
+        { umaban: 3, trainerName: "M藤野", trainerId: null },
+      ],
+    });
+    const rows = buildRaceRows(CHOSEN, horsesV6.slice(0, 3), [], null, new Map(), snap, NO_LOOKUP, new Map([["和田雄", "01143"], ["M藤野", "01200"]]));
+    expect(trainerCols(rows)).toEqual([
+      ["和田雄 ", null, null],
+      ["Ｍ藤野", null, null],
+      ["M藤野", "01200", "name"],
+    ]);
+  });
+
+  it("名前が Object のプロパティ名(constructor・__proto__・toString)でも、表に無ければ null(継承されたプロパティを ID と取り違えない)", () => {
+    const names = ["constructor", "__proto__", "toString", "hasOwnProperty"];
+    const snap = toSnapshotColumns({ race: {}, horses: names.map((trainerName, i) => ({ umaban: i + 1, trainerName, trainerId: null })) });
+    const rows = buildRaceRows(CHOSEN, horsesV6.slice(0, 4), [], null, new Map(), snap, NO_LOOKUP, new Map([["和田雄", "01143"]]));
+    expect(rows).toHaveLength(4);
+    for (const r of rows) {
+      expect([r.trainer_id, r.trainer_id_source]).toEqual([null, null]);
+    }
+  });
+
+  it("trainer_id の型が違う(数)スナップショットは、ID なしとして扱い、名前から埋める", () => {
+    const snap = toSnapshotColumns({ race: {}, horses: [{ umaban: 1, trainerName: "和田雄", trainerId: 1143 }] });
+    expect(snap.trainers.get(1)!.trainer_id).toBeNull(); // 前提: 数は採られない
+    const [row] = buildRaceRows(CHOSEN, horsesV6.slice(0, 1), [], null, new Map(), snap, NO_LOOKUP, lookup);
+    expect([row!.trainer_id, row!.trainer_id_source]).toEqual(["01143", "name"]);
+  });
+
+  it("horse_id は、スナップショットにある馬だけ。キーの無い旧スナップショット・載っていない馬・スナップショットなしは null(名前からも表からも埋めない)", () => {
+    const rows = buildRaceRows(CHOSEN, horsesV6, [], null, new Map(), snapshot(), NO_LOOKUP, lookup);
+    expect(rows.map((r) => r.horse_id)).toEqual(["2024104976", "2021105857", null, null, null]); // 3 頭目はキーなし、4 頭目はキーなし、5 頭目は載っていない
+    const none = buildRaceRows(CHOSEN, horsesV6, [], null, new Map(), null, NO_LOOKUP, lookup);
+    expect(none.map((r) => r.horse_id)).toEqual([null, null, null, null, null]);
+    // 調教師名が表にあり、調教師 ID は名前から埋まるが、馬の ID はスナップショットに無いので null のまま(表の ID を馬の ID に流用しない)。
+    const oldSnap = toSnapshotColumns({ race: {}, horses: [{ umaban: 1, trainerName: "和田雄", trainerId: null }] });
+    const [filled] = buildRaceRows(CHOSEN, horsesV6.slice(0, 1), [], null, new Map(), oldSnap, NO_LOOKUP, lookup);
+    expect([filled!.trainer_id, filled!.trainer_id_source, filled!.horse_id]).toEqual(["01143", "name", null]);
+  });
+
+  it("行のキーの順は PRIOR_ROW_KEYS のまま。v6 の 4 列は末尾(trainer_name・trainer_id・trainer_id_source・horse_id)", () => {
+    for (const r of buildRaceRows(CHOSEN, horsesV6, [], null, new Map(), snapshot(), NO_LOOKUP, lookup)) {
+      expect(Object.keys(r)).toEqual([...PRIOR_ROW_KEYS]);
+      expect(Object.keys(r).slice(35)).toEqual([...PRIOR_ROW_KEYS_V6_ADDED]);
+    }
+  });
+
+  it("format 5 までの 35 列の値は、v6 の列を足しても変わらない: 同じ入力で、35 列ぶんは調教師の表・スナップショットの調教師・馬の ID の有無に依らず同じ", () => {
+    const withIds = snapshot();
+    const withoutIds = toSnapshotColumns({
+      race: { raceName: "x" },
+      horses: [
+        { umaban: 1, trainerName: "", trainerId: null },
+        { umaban: 2, trainerName: "", trainerId: null },
+      ],
+    });
+    const a = buildRaceRows(CHOSEN, horsesV6.slice(0, 2), [], "芝", new Map(), withIds, NO_LOOKUP, lookup);
+    const b = buildRaceRows(CHOSEN, horsesV6.slice(0, 2), [], "芝", new Map(), withoutIds, NO_LOOKUP, NO_TRAINER_LOOKUP);
+    expect(a).toHaveLength(2);
+    expect(a.map((r) => PRIOR_ROW_KEYS.slice(0, 35).map((k) => r[k]))).toEqual(b.map((r) => PRIOR_ROW_KEYS.slice(0, 35).map((k) => r[k])));
+    expect(a[0]!.trainer_id).not.toBe(b[0]!.trainer_id); // 前提: v6 の列は実際に違う(比較が空振りでない)
+  });
+
+  it("行の JSON に調教師名・調教師 ID・馬の ID は出るが、馬名・スナップショットの市場の値は出ない", () => {
+    const text = JSON.stringify(buildRaceRows(CHOSEN, horsesV6.slice(0, 2), [], null, new Map(), toSnapshotColumns(SNAPSHOT), NO_LOOKUP, NO_TRAINER_LOOKUP));
+    for (const shown of ["調教師ア", "02001", "調教師イ", "02002", "2021100001", "2021100002"]) {
+      expect(text, `行に ${shown} がある`).toContain(shown);
+    }
+    for (const secret of ["SECRET", "99.9", "77.7", "88.8"]) {
+      expect(text, `行に ${secret} が無い`).not.toContain(secret);
     }
   });
 });

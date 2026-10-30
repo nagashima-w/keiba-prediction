@@ -25,6 +25,12 @@ import { AllocationFakeStore, FakeKv, PriorFakeStore, cand, driver, raceIdOf } f
  *      **配分用の固定値は、Issue #533 で設定の列〈`max_win_bets`・`max_place_bets`〉とメタ行の注記が増えたときに測り直した**(同じ意味の回帰の固定)。検算: 行ごとの増分は、配分のメタのある行が 36 バイト
  *      〈`,"max_win_bets":0,"max_place_bets":0`〉、メタ行の増分は 174 バイト〈注記 1 つの 287 → 461。`git show HEAD:cloud/src/allocation-export-format.ts` の旧版と現行版の注記を UTF-8 で数えた〉。
  *      場面ごとの伸長後の長さ: 5 レース 12,884 → 13,238(= 12,884 + 5 行 × 36 + 174)、詳細なし・配分のメタなし 12,206 → 12,524(= 12,206 + 4 行 × 36 + 174。メタのない 1 行は設定を持たない)、候補 0 件 3,124 → 3,298(= 3,124 + 174)。
+ *      **format 6〈Issue #540〉でもう一度測り直した**(調教師名・調教師 ID・その出どころ・馬の ID の 4 列と注記が増えた。フィクスチャの調教師名は `調教師N`〈SECRET-TRAINER をやめた〉)。検算: 行ごとの増分は、詳細のある行が 104 バイト
+ *      〈`,"trainer_name":"調教師1","trainer_id":"02001","trainer_id_source":"snapshot","horse_id":"2021100001"` を `Buffer.byteLength` で数えた値〉、詳細なしの行が 79 バイト〈4 列とも null〉、
+ *      メタ行の増分は 2,627 バイト〈format 5 のコード〈`git show HEAD:cloud/src/prior-export-format.ts`〉と現行の `assembleFile` を、行なし・同じ引数で伸長した長さの差: 6,104 → 8,731〉。
+ *      場面ごとの伸長後の長さ: 5 レース 18,445 → 22,632(= 18,445 + 15 行 × 104 + 2,627)、詳細なし 18,007 → 22,119(= 18,007 + 12 行 × 104 + 3 行 × 79 + 2,627)、候補 0 件 6,104 → 8,731(= 6,104 + 2,627)、
+ *      7 レース・5 頭 35,043 → 41,310(= 35,043 + 35 行 × 104 + 2,627)で、4 つの場面とも和が合う。この場面は対応が空(`PriorFakeStore.lookups`)なので、名前から埋めた行は無い。
+ *      **配分用の 3 場面の固定値は、format 6 でも一切変えていない**(調教師の対応を足しても、配分用のバイト列は不変)。
  */
 
 const sha256 = (gz: Uint8Array): string => createHash("sha256").update(gunzipSync(gz)).digest("base64");
@@ -44,10 +50,10 @@ interface Scenario {
 }
 
 const PRIOR: Scenario[] = [
-  { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "BR1WHG//lqZIZDABJSC0kGUDRLZ9GaUY0jVfKzjGm3c=", plainBytes: 18445 },
-  { name: "5 レース・batch 2・詳細なし(101)", races: 5, batchSize: 2, noDetail: [101], sha256: "PrLoHv79TWZm0RSsIA7ewJlwvWhov/PmeZZ7P5DzdG4=", plainBytes: 18007 },
-  { name: "候補 0 件(除外だけ。メタ行だけのファイル)", races: 0, batchSize: 2, candidates: excluded, sha256: "2MB7Zjc0Jw4HMhF4g0K91OA7e+tw2M88IPo6CEUFlQY=", plainBytes: 6104 },
-  { name: "7 レース・batch 3・5 頭", races: 7, batchSize: 3, horses: 5, sha256: "ePfBUobf9Oz0hOdMLExKAZQfTSHDVdFia96V1/JXRN4=", plainBytes: 35043 },
+  { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "dlycd4qRq11PQKIZJRR4QgMHxH9Kh0ihe0l25teHgm4=", plainBytes: 22632 },
+  { name: "5 レース・batch 2・詳細なし(101)", races: 5, batchSize: 2, noDetail: [101], sha256: "a70bxU3DTcxTI0FrdAu09JAP42H/fubCDDBIbQOBFck=", plainBytes: 22119 },
+  { name: "候補 0 件(除外だけ。メタ行だけのファイル)", races: 0, batchSize: 2, candidates: excluded, sha256: "cDuhF/4uYbM/fo6Nyh1P/6ZzziLCxgRG+sbnJF9nh+A=", plainBytes: 8731 },
+  { name: "7 レース・batch 3・5 頭", races: 7, batchSize: 3, horses: 5, sha256: "FDaJqAv2bI9S74iuq/rRUcsItoSUTrrFr3PGYCAZqR8=", plainBytes: 41310 },
 ];
 const ALLOCATION: Scenario[] = [
   { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "jK9gg3shwuHhxzlM5//LIGCTPzE5s6KCQyhEcr9ciaU=", plainBytes: 13238 },

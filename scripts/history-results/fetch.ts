@@ -17,7 +17,7 @@
  */
 
 import { HttpClient } from "../../packages/core/src/scraper/http-client.js";
-import { FETCH_USAGE, parseFetchArgs, runFetch } from "./fetch-lib.js";
+import { abortMessage, FETCH_USAGE, parseFetchArgs, runFetch } from "./fetch-lib.js";
 
 const parsed = parseFetchArgs(process.argv.slice(2));
 if (!parsed.ok) {
@@ -36,8 +36,9 @@ const stats = await runFetch({
   fetchText: (url) => client.fetchText(url, { encoding: "utf-8" }),
   log: (m) => console.log(m),
 });
-if (stats.aborted) {
-  console.error("連続失敗のため打ち切りました(終了コード 1)。");
+const abortText = abortMessage(stats);
+if (abortText !== null) {
+  console.error(abortText);
   process.exitCode = 1;
 }
 if (stats.errors > 0) {

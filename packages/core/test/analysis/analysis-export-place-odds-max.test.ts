@@ -51,10 +51,10 @@ describe("buildRaceSnapshot(複勝オッズの上限。Issue #253)", () => {
     expect(byUmaban.get(1)!.placeOddsMin).not.toBe(byUmaban.get(1)!.placeOddsMax);
   });
 
-  it("馬のキー一覧(placeOddsMax は Issue #253、earlyPos は Issue #311、latePos は Issue #363、legStyle は Issue #314、jockeyId は Issue #526 で増えた。他のキーは従来のまま)", () => {
+  it("馬のキー一覧(placeOddsMax は Issue #253、earlyPos は Issue #311、latePos は Issue #363、legStyle は Issue #314、jockeyId は Issue #526、trainerId・horseId は Issue #540 で増えた。他のキーは従来のまま)", () => {
     const keys = Object.keys(buildRaceSnapshot(raceData()).horses[0]!).sort();
     expect(keys).toEqual(
-      ["age", "bodyWeight", "earlyPos", "jockeyId", "jockeyName", "kinryo", "latePos", "legStyle", "name", "oikiriCritic", "oikiriRank", "placeOddsMax", "placeOddsMin", "popularity", "sex", "trainerName", "umaban", "wakuban", "winOdds"],
+      ["age", "bodyWeight", "earlyPos", "horseId", "jockeyId", "jockeyName", "kinryo", "latePos", "legStyle", "name", "oikiriCritic", "oikiriRank", "placeOddsMax", "placeOddsMin", "popularity", "sex", "trainerId", "trainerName", "umaban", "wakuban", "winOdds"],
     );
   });
 });

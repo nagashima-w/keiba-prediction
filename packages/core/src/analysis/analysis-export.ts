@@ -72,6 +72,18 @@ export interface RaceSnapshotHorse {
    */
   readonly jockeyId?: string | null;
   readonly trainerName: string | null;
+  /**
+   * 調教師の ID(Issue #540。出馬表の `trainerId` の写し。netkeiba の調教師 ID)。統計モデルの見直し用の書き出しに載せるためだけに保存する
+   * (プロンプト・統計モデル・画面・配分には使わない。`toSafeRaceSnapshot` は読み出さない)。
+   * **任意項目**: 出馬表を読めた分析(このキーを保存し始めた 2026-10-30 以降)では全馬がキーを持ち、調教師のリンクが無い馬は null。
+   * このキーを保存する前に作った過去のスナップショットはキー自体が無い(null と区別できる)。
+   */
+  readonly trainerId?: string | null;
+  /**
+   * 馬の ID(Issue #540。出馬表の `horseId` の写し。netkeiba の 10 桁の馬 ID)。用途と任意項目の扱いは `trainerId` と同じ。出馬表を読めた分析では全馬が文字列で持つ。
+   * 型に null を含めるのは、出馬表の形が欠けた入力でもキーを残すため(実データでは null にならない)。
+   */
+  readonly horseId?: string | null;
   readonly bodyWeight: number | null;
   readonly winOdds: number | null;
   readonly popularity: number | null;
@@ -239,6 +251,8 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         jockeyName: h.shutuba.jockeyName,
         jockeyId: h.shutuba.jockeyId ?? null,
         trainerName: h.shutuba.trainerName,
+        trainerId: h.shutuba.trainerId ?? null,
+        horseId: h.shutuba.horseId ?? null,
         bodyWeight: h.shutuba.bodyWeight?.weight ?? null,
         winOdds: race.odds.win[umaban]?.odds ?? null,
         popularity: race.odds.win[umaban]?.ninki ?? null,

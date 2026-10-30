@@ -141,6 +141,7 @@ import type { CloudLlm } from "./llm-sender";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
 import type { KaisaiDaysStore } from "./kaisai-days-repository";
 import { collectJockeyPairs, type JockeyNamesStore } from "./jockey-names-repository";
+import { collectTrainerPairs, type TrainerNamesStore } from "./trainer-names-repository";
 import type { CloseSavePayload } from "./analysis-close";
 import { CloseStore } from "./race-day-close";
 import { CloseStage, type CloseStepOutcome } from "./race-day-close-stage";
@@ -439,6 +440,13 @@ export interface RaceDayDeps {
    * 失敗は握って警告にし(固定の語だけ)、分析は止めない。無い構成は何もしない(従来どおり)。
    */
   readonly jockeyNamesStore?: JockeyNamesStore;
+  /**
+   * 出馬表の調教師名と調教師 ID の組(D1 の `trainer_names`。migration 0030。Issue #540)。`jockeyNamesStore` の調教師版で、書く場面・条件・失敗の扱いは同じ:
+   * **発走前の計算ステップだけ**が、レースを分析するたびに、そのレースの出馬表の全馬の (調教師名, 調教師 ID) を 1 回書く(中央・地方とも。名前も ID も空でない馬だけ)。
+   * 統計モデル用の書き出しが、`trainer_id` の無い過去の行を名前から埋める材料になる。分析・LLM・画面・配分には使わない。失敗は握って警告にし(固定の語だけ)、分析は止めない。
+   * 騎手の記録とは独立(どちらかが失敗しても、もう一方は書く)。無い構成は何もしない(従来どおり)。
+   */
+  readonly trainerNamesStore?: TrainerNamesStore;
 }
 
 export interface ScheduleInput {
@@ -768,6 +776,7 @@ export class RaceDayCore {
   private readonly babaReader: BabaReader | undefined;
   private readonly kaisaiDaysStore: KaisaiDaysStore | undefined;
   private readonly jockeyNamesStore: JockeyNamesStore | undefined;
+  private readonly trainerNamesStore: TrainerNamesStore | undefined;
   /** 結果の保存先。無ければ結果の仕組み全体が無効。 */
   private readonly resultStore: ResultStoreDeps | undefined;
   /** 日報の作成の依頼(Issue #235)。無ければ依頼しない。 */
@@ -831,6 +840,7 @@ export class RaceDayCore {
     this.babaReader = deps.babaReader;
     this.kaisaiDaysStore = deps.kaisaiDaysStore;
     this.jockeyNamesStore = deps.jockeyNamesStore;
+    this.trainerNamesStore = deps.trainerNamesStore;
     this.baba = new BabaStage({
       sql: this.sql,
       now: this.now,
@@ -1835,6 +1845,26 @@ export class RaceDayCore {
   }
 
   /**
+   * そのレースの出馬表の全馬の (調教師名, 調教師 ID) を `trainer_names` へ書く(Issue #540)。{@link RaceDayCore.recordJockeyNames} の調教師版で、呼ぶ場面も同じ。**投げない**:
+   * 失敗は警告(固定の語だけ。例外の文面・D1 の内部のメッセージは出さない)にして戻る(分析は止めない)。記録先が無い構成・書く組が無いレースは何もしない。
+   * 騎手の記録とは別の try/catch で、どちらかの失敗がもう一方を飛ばさない。
+   */
+  private async recordTrainerNames(raceId: string, kaisaiDate: string, race: RaceData): Promise<void> {
+    if (this.trainerNamesStore === undefined) {
+      return;
+    }
+    const pairs = collectTrainerPairs(race.horses.map((h) => h.shutuba));
+    if (pairs.length === 0) {
+      return;
+    }
+    try {
+      await this.trainerNamesStore.record(pairs, kaisaiDate);
+    } catch {
+      this.onWarn(`発走前の分析(${raceId}): 調教師名と調教師 ID の記録を書けなかったため、続けます`);
+    }
+  }
+
+  /**
    * 取得ステップの `scrapeRace` が残した警告のうち、騎手・調教師のものを onWarn に出す(Issue #380)。応答・保存は変えない。
    * 出すのは `scrapeRace` の文面そのまま(取得に失敗した人は 1 人 1 行〈URL を含む。取得ステップの他の警告と同じ〉、取得の上限で取らなかった人は人数をまとめた 1 行、保存先の読み書きの失敗)。
    * ほかの種別(調教・組合せオッズ・出走取消)は出さない(増えすぎる)。戦績が欠けて取得ステップが再試行になる回では呼ばない(同じ警告が試行の回数だけ重なるため)。
@@ -2234,6 +2264,8 @@ export class RaceDayCore {
             await this.recordKaisaiDay(task.race_id, kaisaiDate, race);
             // 出馬表の騎手名と騎手 ID の組(Issue #526 段階 1b。統計モデル用の書き出しが、騎手 ID の無い過去の行を名前から埋める材料。失敗は握る)。
             await this.recordJockeyNames(task.race_id, kaisaiDate, race);
+            // 出馬表の調教師名と調教師 ID の組(Issue #540。騎手の記録と同じ目的・同じ扱い。別の try/catch で、騎手の記録の成否に左右されない)。
+            await this.recordTrainerNames(task.race_id, kaisaiDate, race);
             // 出馬表の見出しから馬場状態か芝の柵を読めなかったレースの記録(Issue #522。Discord に 1 日 1 回知らせる材料。失敗は握る)。
             this.notifyStage.recordHeaderRead(task, race.race);
             return race;

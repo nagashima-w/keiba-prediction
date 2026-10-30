@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { HttpError } from "../../packages/core/src/scraper/http-client.js";
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids.js";
 import { narRaceListSubUrl, raceListSubUrl, raceResultUrl } from "../../packages/core/src/scraper/urls.js";
-import { parseFetchArgs, runFetch, type FetchOptions } from "../history-results/fetch-lib.js";
+import { abortMessage, parseFetchArgs, runFetch, type FetchOptions } from "../history-results/fetch-lib.js";
 import { rawFilePath } from "../history-results/layout.js";
 
 /**
@@ -789,5 +789,42 @@ describe("parseFetchArgs", () => {
     bad(["--from", "2021-11", "--to", "2021-11", "--out", "/x", "--limit", "abc"]);
     bad(["--from", "2021-11", "--to", "2021-11", "--out", "/x", "--unknown"]);
     bad(["--from", "2021-11", "--to", "2021-11", "--out", "/x", "--max-consecutive-failures", "0"]);
+  });
+});
+
+describe("abortMessage: 打ち切りの表示を stats から決める(Issue #535)", () => {
+  const base = { aborted: false, restricted: false } as const;
+
+  it("打ち切っていなければ null(何も出さない)", () => {
+    expect(abortMessage({ ...base })).toBeNull();
+  });
+
+  it("連続失敗で打ち切ったときは、従来の連続失敗の文", () => {
+    expect(abortMessage({ aborted: true, restricted: false })).toBe("連続失敗のため打ち切りました(終了コード 1)。");
+  });
+
+  it("HTTP 400・403・429 でその場で打ち切ったときは、連続失敗とは言わず、アクセス制限の文", () => {
+    const msg = abortMessage({ aborted: true, restricted: true });
+    expect(msg).toBe("アクセスを制限された可能性(HTTP 400・403・429)があるため打ち切りました(終了コード 1)。");
+    expect(msg).not.toContain("連続失敗");
+  });
+
+  it("実際の runFetch の結果から決める: 403 は制限の文、連続失敗は連続失敗の文", async () => {
+    const forbidden = fakeSite({
+      [CAL_CENTRAL]: new HttpError("HTTPエラー(403)", { url: CAL_CENTRAL, status: 403 }),
+    });
+    const s403 = await runFetch(baseOpts(tmp(), forbidden.fetchText));
+    expect(s403.restricted).toBe(true);
+    expect(abortMessage(s403)).toContain("アクセスを制限された可能性");
+
+    const dates = Array.from({ length: 5 }, (_, i) => `202111${String(i + 1).padStart(2, "0")}`);
+    const down = fakeSite({
+      [CAL_CENTRAL]: mkCalendar(dates),
+      ...Object.fromEntries(dates.map((d) => [listUrl(d), new Error(`HTTPエラー(503): ${listUrl(d)}`)])),
+    });
+    const s503 = await runFetch(baseOpts(tmp(), down.fetchText, { maxConsecutiveFailures: 2 }));
+    expect(s503.aborted).toBe(true);
+    expect(s503.restricted).toBe(false);
+    expect(abortMessage(s503)).toBe("連続失敗のため打ち切りました(終了コード 1)。");
   });
 });

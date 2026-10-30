@@ -50,12 +50,14 @@ class FakeStore implements PriorExportStorePort {
   readCounted = 0;
   horsesPerRace = 3;
   /** 騎手名 → 騎手 ID の対応(jockey_names 表で ID がちょうど 1 つの名前。Issue #526 段階 1b)。 */
-  lookups: PriorLookups = { jockeyIds: [] };
+  lookups: PriorLookups = { jockeyIds: [], trainerIds: [] };
   lookupsRowsRead = 7;
   /** 次の readLookups を失敗させる回数。 */
   failLookups = 0;
   /** スナップショットから jockeyId を落とす馬番(2026-10-29 より前の旧スナップショットの想定)。 */
   idlessUmaban = new Set<number>();
+  /** スナップショットから trainerId・horseId を落とす馬番(2026-10-30 より前の旧スナップショットの想定。Issue #540)。 */
+  trainerIdlessUmaban = new Set<number>();
 
   async readUsage() {
     this.calls.push("usage");
@@ -109,7 +111,7 @@ class FakeStore implements PriorExportStorePort {
       race: { raceName: `レース${id}`, grade: "G3", distance: 1600, trackCondition: "良", courseType: "芝", weightType: "別定", filliesOnly: true },
       horses: Array.from({ length: this.horsesPerRace }, (_, k) => ({
         umaban: k + 1, wakuban: k + 1, sex: "牡", age: 3 + k, kinryo: 55, bodyWeight: 480 + k, oikiriRank: "A", oikiriCritic: "動き良化",
-        name: "SECRET-NAME", jockeyName: `騎手${k + 1}`, ...(this.idlessUmaban.has(k + 1) ? {} : { jockeyId: `0100${k + 1}` }), trainerName: "SECRET-TRAINER", winOdds: 99.9, popularity: 13, placeOddsMin: 77.7, placeOddsMax: 88.8,
+        name: "SECRET-NAME", jockeyName: `騎手${k + 1}`, ...(this.idlessUmaban.has(k + 1) ? {} : { jockeyId: `0100${k + 1}` }), trainerName: `調教師${k + 1}`, ...(this.trainerIdlessUmaban.has(k + 1) ? {} : { trainerId: `0200${k + 1}`, horseId: `202110000${k + 1}` }), winOdds: 99.9, popularity: 13, placeOddsMin: 77.7, placeOddsMax: 88.8,
       })),
     };
   }
@@ -206,7 +208,7 @@ describe("要求と状態", () => {
     expect(w.store.puts).toHaveLength(1);
     expect(w.store.puts[0]!.key).toBe(PRIOR_EXPORT_KEY);
     const { meta, rows } = readFile(w.store.puts[0]!.bytes);
-    expect(meta).toMatchObject({ format: 5, rows: 15, races: 5, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } });
+    expect(meta).toMatchObject({ format: 6, rows: 15, races: 5, missingDetail: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, superseded: 0 } });
     expect(rows).toHaveLength(15);
     expect(rows.map((r) => r.race_id)).toEqual(Array.from({ length: 15 }, (_, i) => raceIdOf(Math.floor(i / 3) + 1)));
     expect(rows.slice(0, 3).map((r) => r.umaban)).toEqual([1, 2, 3]);
@@ -221,12 +223,17 @@ describe("要求と状態", () => {
     // v3 の列(Issue #421): レースの条件は R2 の詳細のスナップショットから全頭に入る。
     expect(rows.map((r) => [r.weight_type, r.fillies_only])).toEqual(Array(15).fill(["別定", true]));
     const text = new TextDecoder().decode(gunzipSync(w.store.puts[0]!.bytes));
-    for (const secret of ["SECRET-NAME", "SECRET-TRAINER", "99.9", "77.7", "88.8"]) {
+    for (const secret of ["SECRET-NAME", "99.9", "77.7", "88.8"]) {
       expect(text, `ファイルに ${secret} が無い`).not.toContain(secret);
     }
     // v4 の列(Issue #526): 今回の騎手は R2 の詳細のスナップショットから馬番ごとに入る(騎手名はファイルに出る。馬名・調教師名は出ない)。
     expect(rows.map((r) => [r.jockey_name, r.jockey_id, r.jockey_id_source])).toEqual(Array.from({ length: 15 }, (_, i) => [`騎手${(i % 3) + 1}`, `0100${(i % 3) + 1}`, "snapshot"]));
     expect(text).toContain("騎手1");
+    // v6 の列(Issue #540): 調教師名・調教師 ID・馬の ID も同じ詳細から馬番ごとに入る(調教師名はファイルに出る。馬名は出ない)。
+    expect(rows.map((r) => [r.trainer_name, r.trainer_id, r.trainer_id_source, r.horse_id])).toEqual(
+      Array.from({ length: 15 }, (_, i) => [`調教師${(i % 3) + 1}`, `0200${(i % 3) + 1}`, "snapshot", `202110000${(i % 3) + 1}`]),
+    );
+    expect(text).toContain("調教師1");
     // 仕上げのあとは中間データを残さない
     expect([...w.kv.map.keys()].filter((k) => k.startsWith("plan:") || k.startsWith("chunk:"))).toEqual([]);
     expect(w.kv.get("job")).toBeUndefined();
@@ -461,7 +468,7 @@ describe("Issue #526 段階 1b: 騎手名 → 騎手 ID の対応の読み出し
   it("スナップショットに騎手 ID が無い馬(2・3 番)は、表にある名前なら埋め(name)、表に無ければ null。ある馬(1 番)は表に別の ID があってもスナップショットが優先(snapshot)。全 batch の全レースで同じ", async () => {
     const w = world(5);
     w.store.idlessUmaban = new Set([2, 3]);
-    w.store.lookups = { jockeyIds: [["騎手1", "99991"], ["騎手2", "01102"]] }; // 騎手3 は表に無い
+    w.store.lookups = { jockeyIds: [["騎手1", "99991"], ["騎手2", "01102"]], trainerIds: [] }; // 騎手3 は表に無い
     const core = w.core({ batchSize: 2 });
     await core.request("download");
     await w.drain(core);
@@ -489,17 +496,17 @@ describe("Issue #526 段階 1b: 騎手名 → 騎手 ID の対応の読み出し
 
   it("対応は kv に 1 つだけ置かれ(計画のあと)、完成したら消える。失敗で止まったときも消える", async () => {
     const w = world(5);
-    w.store.lookups = { jockeyIds: [["騎手2", "01102"]] };
+    w.store.lookups = { jockeyIds: [["騎手2", "01102"]], trainerIds: [] };
     const core = w.core({ batchSize: 2 });
     await core.request("download");
     await w.drain(core, 1); // 計画の tick だけ
-    expect(w.kv.get("lookups")).toEqual({ jockeyIds: [["騎手2", "01102"]] });
+    expect(w.kv.get("lookups")).toEqual({ jockeyIds: [["騎手2", "01102"]], trainerIds: [] });
     await w.drain(core);
     expect(w.kv.get("lookups")).toBeUndefined();
     expect([...w.kv.map.keys()].filter((k) => k !== "runs" && k !== "file")).toEqual([]);
 
     const f = world(3);
-    f.store.lookups = { jockeyIds: [["騎手2", "01102"]] };
+    f.store.lookups = { jockeyIds: [["騎手2", "01102"]], trainerIds: [] };
     f.store.failFetch = 99;
     const failing = f.core();
     await failing.request("download");
@@ -526,7 +533,7 @@ describe("Issue #526 段階 1b: 騎手名 → 騎手 ID の対応の読み出し
     const w = world(3);
     w.store.failLookups = 1;
     w.store.idlessUmaban = new Set([2]);
-    w.store.lookups = { jockeyIds: [["騎手2", "01102"]] };
+    w.store.lookups = { jockeyIds: [["騎手2", "01102"]], trainerIds: [] };
     const warnings: string[] = [];
     const core = new PriorExportCore(
       { kv: w.kv, now: () => w.clock.now, setAlarm: (at) => { w.alarms.push(at); }, getAlarm: async () => (w.alarms.length === 0 ? null : w.alarms[w.alarms.length - 1]!), store: w.store, onWarn: (m) => warnings.push(m) },
@@ -553,7 +560,7 @@ describe("Issue #526 段階 1b: 騎手名 → 騎手 ID の対応の読み出し
   it("対応が kv に無いジョブ(対応を読む前のコードが始めたジョブ)の続きでも、例外にせず、埋めないまま完成する(スナップショットの ID は snapshot)", async () => {
     const w = world(5);
     w.store.idlessUmaban = new Set([2]);
-    w.store.lookups = { jockeyIds: [["騎手2", "01102"]] };
+    w.store.lookups = { jockeyIds: [["騎手2", "01102"]], trainerIds: [] };
     const core = w.core({ batchSize: 2 });
     await core.request("download");
     await w.drain(core, 1); // 計画
@@ -578,5 +585,77 @@ describe("Issue #526 段階 1b: 騎手名 → 騎手 ID の対応の読み出し
     expect("readLookups" in store).toBe(false);
     await d.drain(core);
     expect((await core.request("status")).status).toBe("ready");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #540: 調教師 ID を名前から埋める。調教師名 → 調教師 ID の対応(trainer_names 表)も、計画の tick で騎手の対応と一緒に 1 回だけ読み、kv に置いて全 batch で使う。
+// ---------------------------------------------------------------------------
+
+describe("Issue #540: 調教師名 → 調教師 ID の対応の読み出しと埋め込み", () => {
+  const rowsOfFile = (w: World): PriorDatasetRow[] => readFile(w.store.puts[0]!.bytes).rows;
+  const trainerCols = (rows: readonly PriorDatasetRow[]): unknown[] => rows.map((r) => [r.trainer_name, r.trainer_id, r.trainer_id_source, r.horse_id]);
+
+  it("調教師の ID が無い馬(2・3 番)は、表にある名前なら埋め(name)、表に無ければ null。ある馬(1 番)は表に別の ID があってもスナップショットが優先(snapshot)。全 batch の全レースで同じ。馬の ID は埋めない", async () => {
+    const w = world(5);
+    w.store.trainerIdlessUmaban = new Set([2, 3]);
+    w.store.lookups = { jockeyIds: [], trainerIds: [["調教師1", "99991"], ["調教師2", "01102"]] }; // 調教師3 は表に無い
+    const core = w.core({ batchSize: 2 });
+    await core.request("download");
+    await w.drain(core);
+    const rows = rowsOfFile(w);
+    expect(rows).toHaveLength(15);
+    expect(trainerCols(rows)).toEqual(
+      Array.from({ length: 5 }, () => [
+        ["調教師1", "02001", "snapshot", "2021100001"],
+        ["調教師2", "01102", "name", null], // 名前から調教師 ID は埋めるが、馬の ID は埋めない(キーが無い旧スナップショット)
+        ["調教師3", null, null, null],
+      ]).flat(),
+    );
+    for (const r of rows) expect(r.trainer_id === null).toBe(r.trainer_id_source === null);
+  });
+
+  it("騎手の対応と調教師の対応は別々に使われる: 調教師の表だけを埋めても騎手の列は変わらず、騎手の表だけを埋めても調教師の列は変わらない", async () => {
+    const w = world(2);
+    w.store.idlessUmaban = new Set([2]);
+    w.store.trainerIdlessUmaban = new Set([2]);
+    w.store.lookups = { jockeyIds: [["騎手2", "01102"]], trainerIds: [] };
+    const core = w.core();
+    await core.request("download");
+    await w.drain(core);
+    const rows = rowsOfFile(w).slice(0, 3);
+    expect(rows.map((r) => [r.jockey_id, r.jockey_id_source, r.trainer_id, r.trainer_id_source])).toEqual([
+      ["01001", "snapshot", "02001", "snapshot"],
+      ["01102", "name", null, null], // 騎手だけ埋まる
+      ["01003", "snapshot", "02003", "snapshot"],
+    ]);
+  });
+
+  it("対応は 2 つとも kv の lookups に 1 つにまとめて置かれ(計画のあと)、完成したら消える", async () => {
+    const w = world(5);
+    w.store.lookups = { jockeyIds: [["騎手2", "01102"]], trainerIds: [["調教師2", "02102"]] };
+    const core = w.core({ batchSize: 2 });
+    await core.request("download");
+    await w.drain(core, 1);
+    expect(w.kv.get("lookups")).toEqual({ jockeyIds: [["騎手2", "01102"]], trainerIds: [["調教師2", "02102"]] });
+    await w.drain(core);
+    expect(w.kv.get("lookups")).toBeUndefined();
+    expect(w.store.calls.filter((c) => c === "lookups")).toHaveLength(1); // 2 つの対応を 1 回の readLookups で読む
+  });
+
+  it("調教師の対応が kv に無い lookups(format 5 のコードが置いた { jockeyIds } だけの形)の続きでも、例外にせず、騎手は埋め、調教師は埋めずに完成する(スナップショットの ID は snapshot)", async () => {
+    const w = world(5);
+    w.store.idlessUmaban = new Set([2]);
+    w.store.trainerIdlessUmaban = new Set([2]);
+    w.store.lookups = { jockeyIds: [["騎手2", "01102"]], trainerIds: [["調教師2", "02102"]] };
+    const core = w.core({ batchSize: 2 });
+    await core.request("download");
+    await w.drain(core, 1); // 計画
+    w.kv.put("lookups", { jockeyIds: [["騎手2", "01102"]] }); // 古いコードが始めたジョブの想定(trainerIds のキーが無い)
+    await w.drain(core);
+    expect((await core.request("status")).status).toBe("ready");
+    const rows = rowsOfFile(w).slice(0, 3);
+    expect(rows.map((r) => [r.jockey_id, r.jockey_id_source])).toEqual([["01001", "snapshot"], ["01102", "name"], ["01003", "snapshot"]]);
+    expect(rows.map((r) => [r.trainer_id, r.trainer_id_source])).toEqual([["02001", "snapshot"], [null, null], ["02003", "snapshot"]]);
   });
 });

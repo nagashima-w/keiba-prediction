@@ -8,12 +8,12 @@
  *
  * ## 流れ(この書き出しの tick)
  * 計画(適格な分析を選んで batch に分ける。**形式 v5 から、同じ tick で騎手名 → 騎手 ID の対応〈`jockey_names` 表で ID がちょうど 1 つの名前〉も 1 回読み**、kv の `lookups` に置いて全 batch で使う。
- * スナップショットに騎手 ID が無い行を、これで埋める。Issue #526 段階 1b)→ 処理(1 tick に {@link PRIOR_EXPORT_BATCH_SIZE} 件。D1 で馬・結果・面を読み、R2 から詳細を取り、
+ * スナップショットに騎手 ID が無い行を、これで埋める。Issue #526 段階 1b。**形式 v6 から、調教師名 → 調教師 ID の対応〈`trainer_names` 表〉も同じ読み出しで読む**。Issue #540)→ 処理(1 tick に {@link PRIOR_EXPORT_BATCH_SIZE} 件。D1 で馬・結果・面を読み、R2 から詳細を取り、
  * 行を整形して **その tick ぶんだけ gzip** し kv に置く)→ 仕上げ(メタ行 + 各 tick のメンバーを**1 つずつ流して** R2 に put。固定キーを原子的に上書き)。
  * gzip のメンバーの連結は 1 回の gunzip で読めるので、全体を 1 文字列にも 1 つのバッファにもしない(DO のメモリ 128MB のため)。
  *
  * ## 柵の根拠(1 日 {@link PRIOR_EXPORT_DAILY_LIMIT} 回)
- * 1 回の D1 の読み取りは 53,324 行(ローカルの実測。形式 v5 の対応の読み出しで、`jockey_names` 表の行数ぶんだけ増える〈1 回の作成につき 1 回。本番の行数は未測定〉。合成データ 分析 2,225・結果 1,301 レース・1 レース 14 頭。
+ * 1 回の D1 の読み取りは 53,324 行(ローカルの実測。形式 v5・v6 の対応の読み出しで、`jockey_names` 表と `trainer_names` 表の行数ぶんだけ増える〈1 回の作成につき 1 回ずつ。本番の行数は未測定〉。合成データ 分析 2,225・結果 1,301 レース・1 レース 14 頭。
  * 再現: `pnpm tsx scripts/measure-prior-export.ts`。`docs/current-spec.md` の「統計モデルの見直し用の書き出し」)で、3 回で 159,972 行。Free の 500 万行/日の約 3.2%。本番の実数は未確認
  * (最初の作成の `?status=1` の `file.diag.rowsRead` で確かめ、必要なら上限を下げる)。
  *
@@ -89,11 +89,15 @@ export interface RaceDataBatch {
 }
 
 /**
- * 全 batch が共有する引き当て用の表(Issue #526 段階 1b)。騎手名 → 騎手 ID の対応で、**D1 の `jockey_names` で ID がちょうど 1 つの名前だけ**(2 つ以上ある名前は入れない)。
- * kv に置くので、`Map` ではなく組の配列(`[騎手名, 騎手 ID][]`)。名前をオブジェクトのキーにしない(`constructor` などの名前で継承されたプロパティを拾わないため)。
+ * 全 batch が共有する引き当て用の表(Issue #526 段階 1b・Issue #540)。名前 → ID の対応が 2 つある:
+ *  - `jockeyIds`: 騎手名 → 騎手 ID。**D1 の `jockey_names` で ID がちょうど 1 つの名前だけ**(2 つ以上ある名前は入れない)。
+ *  - `trainerIds`: 調教師名 → 調教師 ID。**D1 の `trainer_names` で ID がちょうど 1 つの名前だけ**(同じ規則)。
+ * kv に置くので、`Map` ではなく組の配列(`[名前, ID][]`)。名前をオブジェクトのキーにしない(`constructor` などの名前で継承されたプロパティを拾わないため)。
+ * **kv に残っている古い形には `trainerIds` が無い**(format 5 のコードが置いた `{ jockeyIds }`。公開をまたいで続くジョブ)ので、読む側は `trainerIds` が無くても落ちない({@link PRIOR_SPEC} の `buildChunk`)。
  */
 export interface PriorLookups {
   readonly jockeyIds: ReadonlyArray<readonly [string, string]>;
+  readonly trainerIds: ReadonlyArray<readonly [string, string]>;
 }
 
 /** D1・R2 の窓口(`D1PriorExportStore` がこれを満たす。テストでは偽物)。統計モデル用は、引き当て用の表の読み出し(`readLookups`)を**必ず**持つ(配線漏れをコンパイルで検出する)。 */
@@ -118,7 +122,9 @@ const PRIOR_SPEC: ExportKindSpec<ChosenAnalysis, ExcludedCounts, "missingDetail"
   select: selectPriorExportAnalyses,
   buildChunk(items, data, outcomes, lookups) {
     // 対応が無いジョブ(読む前のコードが始めたジョブ)は、空の対応で続ける(埋めない。スナップショットの ID はそのまま)。
+    // 調教師の対応は、format 5 のコードが置いた古い形の lookups(`trainerIds` のキーが無い)でも落ちないよう、型に頼らず存在を確かめる(Issue #540)。
     const jockeyIdByName = new Map(lookups?.jockeyIds ?? []);
+    const trainerIdByName = new Map((lookups as Partial<PriorLookups> | undefined)?.trainerIds ?? []);
     const horsesByAnalysis = groupBy(data.horses, (h) => h.analysisId);
     const resultsByRace = groupBy(data.results, (r) => r.raceId);
     const courseTypes = new Map(data.courseTypes.map((c) => [c.raceId, c.courseType] as const));
@@ -135,7 +141,7 @@ const PRIOR_SPEC: ExportKindSpec<ChosenAnalysis, ExcludedCounts, "missingDetail"
       }
       return buildRaceRows(
         analysis, horsesByAnalysis.get(analysis.id) ?? [], resultsByRace.get(analysis.raceId) ?? [], courseTypes.get(analysis.raceId) ?? null, contributions,
-        outcome.kind === "ok" ? outcome.snapshot : null, jockeyIdByName,
+        outcome.kind === "ok" ? outcome.snapshot : null, jockeyIdByName, trainerIdByName,
       );
     });
     return { chunk: encodeChunk(rows), rows: rows.length, counts: { missingDetail: missing } };
