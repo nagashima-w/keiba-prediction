@@ -7,11 +7,13 @@
  *
  * **黙って捨てない**: 読めない版・メタ行の無いファイル・件数の食い違い(途中で切れた/混ざった)・壊れた行(JSON でない・列の過不足・型の違い)は、行番号つきの例外にする。
  *
- * **形式 v1〜v5 をすべて読む**(Issue #341・#421・#526)。v1(19 列)の行は、v2 で足した 11 列(出馬表の列)・v3 で足した 2 列(レースの条件)・v4 で足した 2 列(今回の騎手の名前と ID)・v5 で足した 1 列(騎手 ID の出どころ)を null に補い、
- * v2(30 列)の行は v3〜v5 の 5 列を、v3(32 列)の行は v4・v5 の 3 列を null に補って、v5 の型の行にする。**v4(34 列)の行の `jockey_id_source` だけは null でなく導く**: v4 の `jockey_id` はスナップショットの ID だけなので、
+ * **形式 v1〜v6 をすべて読む**(Issue #341・#421・#526・#540)。v1(19 列)の行は、v2 で足した 11 列(出馬表の列)・v3 で足した 2 列(レースの条件)・v4 で足した 2 列(今回の騎手の名前と ID)・v5 で足した 1 列(騎手 ID の出どころ)を null に補い、
+ * v2(30 列)の行は v3〜v5 の 5 列を、v3(32 列)の行は v4・v5 の 3 列を null に補って、v6 の型の行にする(v6 の 4 列も null。下記)。**v4(34 列)の行の `jockey_id_source` だけは null でなく導く**: v4 の `jockey_id` はスナップショットの ID だけなので、
  * ID があれば `"snapshot"`、無ければ null(v5 の不変条件「`jockey_id` が null のときだけ `jockey_id_source` が null」を、どの版を読んでも保つ)。`meta.format` は元の版のまま。
  * 列の過不足は版ごとに検査する(古い版に新しい版の列があれば「知らない列」、新しい版に足りなければ「列が足りません」。**v2 と名乗るファイルに v1 の行が混ざっても、v5 と名乗るファイルに v4 の行が混ざっても、黙って古い版として読まず例外**)。
  * 古い版を読んだときの「全部 null」を欠損と取り違えないよう、{@link v2ColumnCoverage}・{@link v3ColumnCoverage}・{@link v4ColumnCoverage}・{@link v5ColumnCoverage} で v2〜v5 の列の非 null の件数を見られる(CLI の要約にも出す)。
+ * **v6(Issue #540)で足した 4 列**(調教師名・調教師 ID・調教師 ID の出どころ・馬の ID)は、v1〜v5 の行には元から無いので、**すべて null に補う**(騎手の v4 のように導かない。v5 以前の行に調教師の情報は無い)。
+ * 非 null の件数は {@link v6ColumnCoverage}、調教師 ID の出どころ別の件数は {@link trainerIdSourceCounts}。
  * 騎手 ID の出どころ別の件数(スナップショット・名前から埋めた・ID なし)は {@link jockeyIdSourceCounts}。名前から埋めた ID は同名の別人を取り違えうるので、使うかどうかは `jockey_id_source` で絞って選ぶ。
  *
  * 使い方(リポジトリのルートで): `pnpm tsx scripts/prior-dataset.ts <ファイル>` で要約(行数・レース数・区分別・欠落の件数)を出す。
@@ -21,7 +23,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { PRIOR_ROW_KEYS, PRIOR_ROW_KEYS_V1, PRIOR_ROW_KEYS_V2_ADDED, PRIOR_ROW_KEYS_V3_ADDED, PRIOR_ROW_KEYS_V4_ADDED, PRIOR_ROW_KEYS_V5_ADDED, type PriorDatasetRow } from "../cloud/src/prior-export-format.js";
+import { PRIOR_ROW_KEYS, PRIOR_ROW_KEYS_V1, PRIOR_ROW_KEYS_V2_ADDED, PRIOR_ROW_KEYS_V3_ADDED, PRIOR_ROW_KEYS_V4_ADDED, PRIOR_ROW_KEYS_V5_ADDED, PRIOR_ROW_KEYS_V6_ADDED, type PriorDatasetRow } from "../cloud/src/prior-export-format.js";
 
 export type { PriorDatasetRow } from "../cloud/src/prior-export-format.js";
 
@@ -48,7 +50,7 @@ const isNumOrNull = (v: unknown): boolean => v === null || isNum(v);
 const isStrOrNull = (v: unknown): boolean => v === null || typeof v === "string";
 
 /** 読める形式の版。 */
-const READABLE_FORMATS = [1, 2, 3, 4, 5] as const;
+const READABLE_FORMATS = [1, 2, 3, 4, 5, 6] as const;
 
 type Format = (typeof READABLE_FORMATS)[number];
 
@@ -95,13 +97,29 @@ function v5Checks(row: Record<string, unknown>): Array<[string, boolean]> {
   return [["jockey_id_source", source === null || source === "snapshot" || source === "name"], ["jockey_id_source(jockey_id が null のときだけ null)", (row["jockey_id"] === null) === (source === null)]];
 }
 
-/** 版ごとの列(1 は v1 の 19 列、2 は v2 の 30 列、3 は v3 の 32 列、4 は v4 の 34 列、5 は v5 の 35 列)。 */
+/**
+ * v6 で足した列の型の検査(v6 の行だけ)。trainer_name・trainer_id・horse_id は文字列か null(ID を数に直さない)。trainer_id_source は `"snapshot"`・`"name"`・null のどれか。
+ * 加えて不変条件(騎手の v5 と同じ): `trainer_id` が null のときだけ `trainer_id_source` が null。
+ */
+function v6Checks(row: Record<string, unknown>): Array<[string, boolean]> {
+  const source = row["trainer_id_source"];
+  return [
+    ["trainer_name", isStrOrNull(row["trainer_name"])],
+    ["trainer_id", isStrOrNull(row["trainer_id"])],
+    ["trainer_id_source", source === null || source === "snapshot" || source === "name"],
+    ["trainer_id_source(trainer_id が null のときだけ null)", (row["trainer_id"] === null) === (source === null)],
+    ["horse_id", isStrOrNull(row["horse_id"])],
+  ];
+}
+
+/** 版ごとの列(1 は v1 の 19 列、2 は v2 の 30 列、3 は v3 の 32 列、4 は v4 の 34 列、5 は v5 の 35 列、6 は v6 の 39 列)。 */
 const KEYS_BY_FORMAT: Readonly<Record<Format, readonly string[]>> = {
   1: PRIOR_ROW_KEYS_V1,
   2: [...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED],
   3: [...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED],
   4: [...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED, ...PRIOR_ROW_KEYS_V4_ADDED],
-  5: PRIOR_ROW_KEYS,
+  5: [...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED, ...PRIOR_ROW_KEYS_V4_ADDED, ...PRIOR_ROW_KEYS_V5_ADDED],
+  6: PRIOR_ROW_KEYS,
 };
 
 /** 行 1 つの列・型を検査する(`format` はメタ行の版。{@link KEYS_BY_FORMAT})。問題があれば理由の文字列、なければ null。 */
@@ -148,7 +166,8 @@ function rowProblem(row: unknown, format: Format): string | null {
   if (format >= 2) checks.push(...v2Checks(row));
   if (format >= 3) checks.push(...v3Checks(row));
   if (format >= 4) checks.push(...v4Checks(row));
-  if (format === 5) checks.push(...v5Checks(row));
+  if (format >= 5) checks.push(...v5Checks(row));
+  if (format === 6) checks.push(...v6Checks(row));
   const bad = checks.filter(([, ok]) => !ok).map(([k]) => k);
   return bad.length > 0 ? `型が違います(${bad.join("・")})` : null;
 }
@@ -162,6 +181,9 @@ const V4_NULLS: Readonly<Record<string, null>> = Object.fromEntries(PRIOR_ROW_KE
 
 /** v5 で足した列をすべて null にしたもの(v1〜v3 の行に補う。v4 の行は `jockey_id` から導く)。 */
 const V5_NULLS: Readonly<Record<string, null>> = Object.fromEntries(PRIOR_ROW_KEYS_V5_ADDED.map((k) => [k, null]));
+
+/** v6 で足した列をすべて null にしたもの(v1〜v5 の行に補う。v5 以前の行に調教師の情報は無いので、導かない)。 */
+const V6_NULLS: Readonly<Record<string, null>> = Object.fromEntries(PRIOR_ROW_KEYS_V6_ADDED.map((k) => [k, null]));
 
 /** gzip(複数メンバー可)のバイト列から読む。 */
 export function parsePriorDataset(bytes: Uint8Array): PriorDataset {
@@ -193,16 +215,17 @@ export function parsePriorDataset(bytes: Uint8Array): PriorDataset {
     if (problem !== null) {
       throw new Error(`${i + 1} 行目: ${problem}`);
     }
-    // 古い版の行は、足りない版の列を null に補って v5 の型にする(元の列の値は変えない。列の順序は PRIOR_ROW_KEYS)。
+    // 古い版の行は、足りない版の列を null に補って v6 の型にする(元の列の値は変えない。列の順序は PRIOR_ROW_KEYS)。
     // v4 の行の jockey_id_source は null でなく導く(v4 の jockey_id はスナップショットの ID だけなので、ID があれば snapshot)。
     const old = parsed as Record<string, unknown>;
     const padding =
-      format === 1 ? { ...V2_NULLS, ...V3_NULLS, ...V4_NULLS, ...V5_NULLS }
-      : format === 2 ? { ...V3_NULLS, ...V4_NULLS, ...V5_NULLS }
-      : format === 3 ? { ...V4_NULLS, ...V5_NULLS }
-      : format === 4 ? { jockey_id_source: old["jockey_id"] === null ? null : "snapshot" }
+      format === 1 ? { ...V2_NULLS, ...V3_NULLS, ...V4_NULLS, ...V5_NULLS, ...V6_NULLS }
+      : format === 2 ? { ...V3_NULLS, ...V4_NULLS, ...V5_NULLS, ...V6_NULLS }
+      : format === 3 ? { ...V4_NULLS, ...V5_NULLS, ...V6_NULLS }
+      : format === 4 ? { jockey_id_source: old["jockey_id"] === null ? null : "snapshot", ...V6_NULLS }
+      : format === 5 ? V6_NULLS
       : {};
-    rows.push((format === 5 ? parsed : { ...old, ...padding }) as PriorDatasetRow);
+    rows.push((format === 6 ? parsed : { ...old, ...padding }) as PriorDatasetRow);
   }
   if (rows.length !== meta.rows) {
     throw new Error(`件数が合いません(メタ行は ${String(meta.rows)} 行、実際は ${rows.length} 行。途中で切れたか、別のファイルが混ざった可能性があります)`);
@@ -296,6 +319,26 @@ export function jockeyIdSourceCounts(rows: readonly PriorDatasetRow[]): { readon
   };
 }
 
+/**
+ * v6 で足した 4 列ごとの、非 null の行数(キーの順は `PRIOR_ROW_KEYS_V6_ADDED`)。v1〜v5 のファイルを読むと全列 0(v5 以前の行に調教師・馬の ID は無く、導かない)。
+ * `trainer_id` は 2026-10-30 より前の分析で、名前が表に載るまで null になる。`horse_id` は 2026-10-30 より前の分析で null(名前から埋めない)ので、実際に使える件数の目安になる。
+ */
+export function v6ColumnCoverage(rows: readonly PriorDatasetRow[]): Record<(typeof PRIOR_ROW_KEYS_V6_ADDED)[number], number> {
+  return Object.fromEntries(PRIOR_ROW_KEYS_V6_ADDED.map((k) => [k, rows.filter((r) => r[k] !== null).length])) as Record<(typeof PRIOR_ROW_KEYS_V6_ADDED)[number], number>;
+}
+
+/**
+ * 調教師 ID の出どころ別の行数: `snapshot`(その分析の出馬表の ID)・`name`(調教師名から埋めた ID。同名の別人を取り違えうる)・`none`(ID なし)。3 つの和は行数。
+ * 名前から埋めた行を使うかどうかを決める目安になる(`name` を除くなら `trainer_id_source === "snapshot"` で絞る)。{@link jockeyIdSourceCounts} の調教師版。
+ */
+export function trainerIdSourceCounts(rows: readonly PriorDatasetRow[]): { readonly snapshot: number; readonly name: number; readonly none: number } {
+  return {
+    snapshot: rows.filter((r) => r.trainer_id_source === "snapshot").length,
+    name: rows.filter((r) => r.trainer_id_source === "name").length,
+    none: rows.filter((r) => r.trainer_id_source === null).length,
+  };
+}
+
 if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const file = process.argv[2];
   if (file === undefined) {
@@ -311,5 +354,7 @@ if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLTo
     console.log(`v4 の列の非 null の件数${meta.format < 4 ? `(形式 ${meta.format} のファイルなので全列 0)` : ""}: ${JSON.stringify(v4ColumnCoverage(rows))}`);
     console.log(`v5 の列の非 null の件数${meta.format < 5 ? `(形式 ${meta.format} のファイルなので、v4 は導いた値・v1〜v3 は 0)` : ""}: ${JSON.stringify(v5ColumnCoverage(rows))}`);
     console.log(`騎手 ID の出どころ別の件数(snapshot = 出馬表の ID・name = 名前から埋めた ID・none = ID なし): ${JSON.stringify(jockeyIdSourceCounts(rows))}`);
+    console.log(`v6 の列の非 null の件数${meta.format < 6 ? `(形式 ${meta.format} のファイルなので全列 0)` : ""}: ${JSON.stringify(v6ColumnCoverage(rows))}`);
+    console.log(`調教師 ID の出どころ別の件数(snapshot = 出馬表の ID・name = 名前から埋めた ID・none = ID なし): ${JSON.stringify(trainerIdSourceCounts(rows))}`);
   }
 }

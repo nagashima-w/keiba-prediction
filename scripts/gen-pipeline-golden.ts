@@ -40,6 +40,9 @@
  * **Issue #526 段階 1 で再生成した**(スナップショットの各馬に今回の騎手の ID `jockeyId` を足した。書き出し用で、プロンプト・統計モデル・配分には使わない。`PROMPT_VERSION` は上げない)。
  *   差分の検査: 新旧の JSON を構造で比べ、差分が「3 シナリオの `record.raceSnapshot.horses` の各馬(16 頭)に `jockeyId`(5 桁の文字列。フィクスチャの 16 頭すべて非 null)が加わる」48 件だけ
  *   (キーの追加 48・削除 0・値の変更 0。`promptInput`・`promptText`・確率・配分は 1 件も動かない)。`git diff -U0 packages/core/test/golden | grep '^[-+]' | grep -c '"jockeyId"'` が 48 で、削除行は 0。
+ * **Issue #540 で再生成した**(スナップショットの各馬に調教師の ID `trainerId` と馬の ID `horseId` を足した。書き出し用で、プロンプト・統計モデル・配分には使わない。`PROMPT_VERSION` は上げない)。
+ *   差分の検査: 新旧の JSON を構造で比べ、差分が「3 シナリオの `record.raceSnapshot.horses` の各馬(16 頭)に `trainerId`(5 桁の文字列)と `horseId`(10 桁の文字列)が加わる」96 件だけ
+ *   (キーの追加 96〈`trainerId` 48・`horseId` 48〉・削除 0・値の変更 0。`promptInput`・`promptText`・確率・配分は 1 件も動かない)。`git diff -U0 packages/core/test/golden | grep '^-' | grep -vc '^---'` が 0(削除行なし)。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/core/test/analysis/analysis-pipeline-golden.test.ts`。
  */

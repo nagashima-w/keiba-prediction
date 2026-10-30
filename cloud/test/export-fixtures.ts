@@ -68,8 +68,8 @@ export class PriorFakeStore {
   horsesPerRace = 3;
   readonly puts: PutRecord[] = [];
   readonly putFileStream = recordPut(this.puts);
-  /** 騎手名 → 騎手 ID の対応(Issue #526 段階 1b)。既定は空(埋めない)。 */
-  lookups: PriorLookups = { jockeyIds: [] };
+  /** 騎手名 → 騎手 ID と、調教師名 → 調教師 ID の対応(Issue #526 段階 1b・Issue #540)。既定は空(埋めない)。 */
+  lookups: PriorLookups = { jockeyIds: [], trainerIds: [] };
 
   async readUsage() {
     return this.usage;
@@ -110,7 +110,7 @@ export class PriorFakeStore {
       race: { raceName: `レース${id}`, grade: "G3", distance: 1600, trackCondition: "良", courseType: "芝", weightType: "別定", filliesOnly: true },
       horses: Array.from({ length: this.horsesPerRace }, (_, k) => ({
         umaban: k + 1, wakuban: k + 1, sex: "牡", age: 3 + k, kinryo: 55, bodyWeight: 480 + k, oikiriRank: "A", oikiriCritic: "動き良化",
-        name: "SECRET-NAME", jockeyName: `騎手${k + 1}`, jockeyId: `0100${k + 1}`, trainerName: "SECRET-TRAINER", winOdds: 99.9, popularity: 13, placeOddsMin: 77.7, placeOddsMax: 88.8,
+        name: "SECRET-NAME", jockeyName: `騎手${k + 1}`, jockeyId: `0100${k + 1}`, trainerName: `調教師${k + 1}`, trainerId: `0200${k + 1}`, horseId: `202110000${k + 1}`, winOdds: 99.9, popularity: 13, placeOddsMin: 77.7, placeOddsMax: 88.8,
       })),
     };
   }

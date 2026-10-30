@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { encodeDetail } from "../src/analysis-detail";
 import { D1AnalysisStore } from "../src/analysis-repository";
-import { D1PriorExportStore, LOOKUPS_SQL, type PriorExportBucket } from "../src/prior-export-store";
+import { D1PriorExportStore, LOOKUPS_SQL, TRAINER_LOOKUPS_SQL, type PriorExportBucket } from "../src/prior-export-store";
 import { PRIOR_EXPORT_BATCH_SIZE, PRIOR_EXPORT_TICK_OVERHEAD_QUERIES, type DetailOutcome } from "../src/prior-export-core";
 import { D1ResultStore } from "../src/result-repository";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
@@ -114,6 +114,11 @@ describe("Issue #341: 形式 v2 は D1 の読み取りを増やさない", () =>
   });
 });
 
+/** 調教師の表に 1 行書く(Issue #540)。 */
+const putTrainer = async (name: string, id: string, firstSeen = "20261031"): Promise<void> => {
+  await local.db.prepare("INSERT INTO trainer_names (trainer_name, trainer_id, first_seen) VALUES (?, ?, ?)").bind(name, id, firstSeen).run();
+};
+
 describe("readLookups(Issue #526 段階 1b: 騎手名 → 騎手 ID の対応)", () => {
   const put = async (name: string, id: string, firstSeen = "20261031"): Promise<void> => {
     await local.db.prepare("INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) VALUES (?, ?, ?)").bind(name, id, firstSeen).run();
@@ -139,25 +144,70 @@ describe("readLookups(Issue #526 段階 1b: 騎手名 → 騎手 ID の対応)",
     expect((await store().readLookups()).lookups.jockeyIds).toEqual([]);
   });
 
-  it("表が空なら空の配列(rowsRead は 1 以下。D1 は空の表を読む文を 1 行と数える)。D1 には SELECT 1 文だけ(batch なし・書き込みなし)", async () => {
+  it("表が空なら両方とも空の配列(rowsRead は 2 以下。D1 は空の表を読む文を 1 行と数える)。D1 には SELECT 2 文だけ(騎手の表・調教師の表の順。batch なし・書き込みなし)。騎手の SQL は変わっていない", async () => {
     const spy = spyDb(local.db);
     const out = await store(local.r2, spy.db as never).readLookups();
     expect(out.lookups.jockeyIds).toEqual([]);
-    expect(out.rowsRead).toBeLessThanOrEqual(1); // ローカルの D1 の実測は 1(空の表でも 1 行と数える)
-    expect(spy.prepared).toEqual([LOOKUPS_SQL]);
+    expect(out.lookups.trainerIds).toEqual([]);
+    expect(out.rowsRead).toBeLessThanOrEqual(2); // ローカルの D1 の実測は 1 文につき 1(空の表でも 1 行と数える)
+    expect(spy.prepared).toEqual([LOOKUPS_SQL, TRAINER_LOOKUPS_SQL]);
     expect(spy.batches).toEqual([]);
     expect(LOOKUPS_SQL.trim().toUpperCase().startsWith("SELECT")).toBe(true);
+    expect(TRAINER_LOOKUPS_SQL.trim().toUpperCase().startsWith("SELECT")).toBe(true);
+    // 騎手の SQL は #526 段階 1b のまま(文字列で固定)。調教師の SQL は同じ形で、表と列だけが調教師のもの。
+    expect(LOOKUPS_SQL).toBe("SELECT jockey_name AS name, MIN(jockey_id) AS id FROM jockey_names GROUP BY jockey_name HAVING COUNT(*) = 1 ORDER BY jockey_name");
+    expect(TRAINER_LOOKUPS_SQL).toBe("SELECT trainer_name AS name, MIN(trainer_id) AS id FROM trainer_names GROUP BY trainer_name HAVING COUNT(*) = 1 ORDER BY trainer_name");
   });
 
-  it("読んだ行数(rowsRead)は表の行数(曖昧な名前の行も数える。全件走査 1 回)。表の行数に比例して増える", async () => {
+  it("読んだ行数(rowsRead)は 2 つの表の行数の和(曖昧な名前の行も数える。全件走査 1 回ずつ)。どちらの表の行数にも比例して増える", async () => {
     await put("A", "1");
     await put("B", "2");
     await put("B", "3");
-    const three = (await store().readLookups()).rowsRead;
-    expect(three).toBe(3);
+    await putTrainer("ア", "1");
+    await putTrainer("イ", "2");
+    const five = (await store().readLookups()).rowsRead;
+    expect(five).toBe(5); // 騎手 3 行 + 調教師 2 行
     await put("C", "4");
     await put("D", "5");
-    expect((await store().readLookups()).rowsRead).toBe(5);
+    expect((await store().readLookups()).rowsRead).toBe(7);
+    await putTrainer("ウ", "3");
+    expect((await store().readLookups()).rowsRead).toBe(8);
+  });
+});
+
+describe("readLookups(Issue #540: 調教師名 → 調教師 ID の対応)", () => {
+  const put = async (name: string, id: string): Promise<void> => {
+    await local.db.prepare("INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) VALUES (?, ?, '20261031')").bind(name, id).run();
+  };
+  const sorted = (pairs: ReadonlyArray<readonly [string, string]>): Array<readonly [string, string]> => [...pairs].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+
+  it("ID がちょうど 1 つの名前だけを返す。同じ名前に ID が 2 つある名前(鈴木)は返さない。同じ ID に名前が 2 つある場合(伊藤圭・伊藤圭三)は、名前ごとに 1 つずつ返す", async () => {
+    await putTrainer("伊藤圭", "01023");
+    await putTrainer("伊藤圭三", "01023");
+    await putTrainer("藤野", "01200");
+    await putTrainer("鈴木", "01001");
+    await putTrainer("鈴木", "99999");
+    await putTrainer("西山裕貴", "a030b");
+    const out = await store().readLookups();
+    expect(sorted(out.lookups.trainerIds)).toEqual(sorted([["伊藤圭", "01023"], ["伊藤圭三", "01023"], ["藤野", "01200"], ["西山裕貴", "a030b"]]));
+    expect(out.lookups.trainerIds.map((p) => p[0])).not.toContain("鈴木");
+  });
+
+  it("名前が曖昧かどうかは first_seen や書いた順に依らない(あとから ID が増えた名前は、以降ずっと返さない)。ID は先頭の 0 を含む文字列のまま", async () => {
+    await putTrainer("田口", "01208", "20261024");
+    expect((await store().readLookups()).lookups.trainerIds).toEqual([["田口", "01208"]]);
+    await putTrainer("田口", "01999", "20261107");
+    expect((await store().readLookups()).lookups.trainerIds).toEqual([]);
+  });
+
+  it("騎手の表と調教師の表は混ざらない: 騎手の表の行は trainerIds に出ず、調教師の表の行は jockeyIds に出ない(同じ名前でも別々に判定する)", async () => {
+    await put("横山武", "01170"); // 騎手の表
+    await putTrainer("和田雄", "01143"); // 調教師の表
+    await put("共通名", "00001"); // 同じ名前が両方の表にある(ID は別)
+    await putTrainer("共通名", "00002");
+    const out = (await store().readLookups()).lookups;
+    expect(sorted(out.jockeyIds)).toEqual(sorted([["横山武", "01170"], ["共通名", "00001"]]));
+    expect(sorted(out.trainerIds)).toEqual(sorted([["和田雄", "01143"], ["共通名", "00002"]]));
   });
 });
 
@@ -189,7 +239,7 @@ describe("fetchDetails", () => {
     const snapshot = {
       race: { raceName: "テストS", grade: "G2", distance: 2000, trackCondition: "稍重", courseType: "芝" },
       horses: [
-        { umaban: 1, wakuban: 1, name: "SECRET-HORSE", sex: "牝", age: 4, kinryo: 54, jockeyName: "騎手ウ", jockeyId: "01234", trainerName: "SECRET-TRAINER", bodyWeight: 456, winOdds: 99.9, oikiriCritic: "気配上々", oikiriRank: "B" },
+        { umaban: 1, wakuban: 1, name: "SECRET-HORSE", sex: "牝", age: 4, kinryo: 54, jockeyName: "騎手ウ", jockeyId: "01234", trainerName: "調教師ウ", trainerId: "02345", horseId: "2021100345", bodyWeight: 456, winOdds: 99.9, oikiriCritic: "気配上々", oikiriRank: "B" },
         { umaban: 2, wakuban: 2, sex: "牡", age: 3, kinryo: 56, bodyWeight: null, oikiriCritic: null, oikiriRank: null },
       ],
     };
@@ -212,6 +262,11 @@ describe("fetchDetails", () => {
     // Issue #526(形式 v4): 今回の騎手は R2 の詳細のスナップショットから馬番ごとに取れる(騎手の無い馬は両列 null。追加の R2 操作はない)
     expect(a.jockeys.get(1)).toEqual({ jockey_name: "騎手ウ", jockey_id: "01234" });
     expect(a.jockeys.get(2)).toEqual({ jockey_name: null, jockey_id: null });
+    // Issue #540(形式 v6): 調教師と馬の ID も同じ詳細から馬番ごとに取れる(キーの無い馬は null。追加の R2 操作はない)
+    expect(a.trainers.get(1)).toEqual({ trainer_name: "調教師ウ", trainer_id: "02345" });
+    expect(a.trainers.get(2)).toEqual({ trainer_name: null, trainer_id: null });
+    expect(a.horseIds.get(1)).toBe("2021100345");
+    expect(a.horseIds.get(2)).toBeNull();
     // スナップショットが null の詳細は ok のまま、列がすべて null(詳細なし〈none〉とは別)
     expect(b.race).toEqual({ race_name: null, grade: null, distance: null, track_condition: null });
     expect(b.horses.size).toBe(0);

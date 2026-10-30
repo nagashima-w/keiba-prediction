@@ -170,6 +170,8 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       jockeyName: "テスト騎手",
       jockeyId: "00001", // Issue #526: 出馬表の騎手 ID の写し
       trainerName: "テスト調教師",
+      trainerId: "00002", // Issue #540: 出馬表の調教師 ID の写し
+      horseId: "2020100001", // Issue #540: 出馬表の馬の ID の写し
       bodyWeight: 480,
       winOdds: 2.5,
       popularity: 1,
@@ -201,6 +203,9 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
     expect(h2.bodyWeight).toBeNull();
     expect("jockeyId" in h2).toBe(true); // Issue #526: 騎手 ID が無い(jockeyId=null)馬も、キーは残して null
     expect(h2.jockeyId).toBeNull();
+    expect("trainerId" in h2).toBe(true); // Issue #540: 調教師 ID が無い(trainerId=null)馬も、キーは残して null
+    expect(h2.trainerId).toBeNull();
+    expect(h2.horseId).toBe("2020100002"); // Issue #540: 馬の ID は調教師 ID が無くても入る
     expect(h2.oikiriCritic).toBeNull();
     expect(h2.oikiriRank).toBeNull();
   });
@@ -720,6 +725,8 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
         jockeyName: "ジョッキー甲",
         jockeyId: "00001", // Issue #526
         trainerName: "調教師甲",
+        trainerId: "00002", // Issue #540
+        horseId: "2020100001", // Issue #540
         bodyWeight: 480,
         winOdds: 2.5,
         popularity: 9,
@@ -741,6 +748,8 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
         jockeyName: "ジョッキー乙",
         jockeyId: "00003", // Issue #526: 馬ごとに別の値(取り違えの検知)
         trainerName: "調教師乙",
+        trainerId: "00004", // Issue #540: 馬ごとに別の値(取り違えの検知)
+        horseId: "2020100002", // Issue #540: 同上
         bodyWeight: 420,
         winOdds: 8.0,
         popularity: 6,
