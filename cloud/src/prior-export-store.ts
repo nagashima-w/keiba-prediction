@@ -3,7 +3,8 @@
  *
  * ## 読み
  *  - 候補(`readCandidates`): `analyses` のうち**結果のあるレース**の分析を、選別に必要な列だけ(大きな列・追加指示は読まない)。1 文。
- *  - 対応(`readLookups`。Issue #526 段階 1b): `jockey_names`(出馬表の騎手名と騎手 ID の組)の全件を 1 文で読み、ID がちょうど 1 つの名前だけ返す。**計画の tick で 1 回**(`export-job-core.ts`)。
+ *  - 対応(`readLookups`。Issue #526 段階 1b・Issue #540): `jockey_names`(出馬表の騎手名と騎手 ID の組)と `trainer_names`(調教師名と調教師 ID の組)の全件を 1 文ずつ(計 2 文)読み、
+ *    ID がちょうど 1 つの名前だけ返す。**計画の tick で 1 回**(`export-job-core.ts`)。
  *  - 馬・結果・面(`readRaceData`): 1 回の batch(3 文)。いずれも `IN (SELECT value FROM json_each(?))` で、主キーの索引を引く(EXPLAIN で全件走査にならないことを確認済み)ので、
  *    読む行数は束縛した ID の行だけ。D1 が返す `meta.rows_read` を合計して返す。
  *  - 詳細(`fetchDetails`): R2 の `get` だけ(LIST・HEAD は使わない)。同時実行は {@link GET_CONCURRENCY}。取得を試みた回数を返す(Class B に数える)。
@@ -49,6 +50,11 @@ const META_SQL = `SELECT race_id AS raceId, course_type AS courseType FROM race_
  */
 export const LOOKUPS_SQL = "SELECT jockey_name AS name, MIN(jockey_id) AS id FROM jockey_names GROUP BY jockey_name HAVING COUNT(*) = 1 ORDER BY jockey_name";
 
+/**
+ * 調教師名 → 調教師 ID の対応(Issue #540。`trainer_names` 表〈migration 0030〉)。{@link LOOKUPS_SQL} の調教師版で、形も読み方も同じ(**ID がちょうど 1 つの名前だけ**を返す全件走査 1 回)。
+ */
+export const TRAINER_LOOKUPS_SQL = "SELECT trainer_name AS name, MIN(trainer_id) AS id FROM trainer_names GROUP BY trainer_name HAVING COUNT(*) = 1 ORDER BY trainer_name";
+
 export const SELECT_R2_USAGE_SQL = "SELECT class_a AS classA, class_b AS classB FROM r2_ops WHERE ym = ?";
 export const COUNT_READS_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + ?";
 export const COUNT_WRITE_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1";
@@ -86,8 +92,16 @@ export class D1PriorExportStore implements PriorExportStorePort {
   }
 
   async readLookups(): Promise<{ readonly lookups: PriorLookups; readonly rowsRead: number }> {
-    const res = await this.db.prepare(LOOKUPS_SQL).all<{ name: string; id: string }>();
-    return { lookups: { jockeyIds: res.results.map((r) => [r.name, r.id] as const) }, rowsRead: res.meta.rows_read ?? 0 };
+    // 騎手の表 → 調教師の表の順に 1 文ずつ(batch にしない。どちらかが失敗すれば、全体を失敗にして投げる)。読んだ行数は 2 文の和。
+    const jockeys = await this.db.prepare(LOOKUPS_SQL).all<{ name: string; id: string }>();
+    const trainers = await this.db.prepare(TRAINER_LOOKUPS_SQL).all<{ name: string; id: string }>();
+    return {
+      lookups: {
+        jockeyIds: jockeys.results.map((r) => [r.name, r.id] as const),
+        trainerIds: trainers.results.map((r) => [r.name, r.id] as const),
+      },
+      rowsRead: (jockeys.meta.rows_read ?? 0) + (trainers.meta.rows_read ?? 0),
+    };
   }
 
   async readRaceData(analysisIds: readonly number[], raceIds: readonly string[]): Promise<RaceDataBatch> {

@@ -412,21 +412,25 @@ async function smokeSeedAnalyses(env: SmokeEnv): Promise<Response> {
     ["202603030101", "2026-03-02T04:00:00.000Z"],
     ["202603020211", "2026-03-02T02:00:00.000Z"],
   ];
-  // Issue #526 段階 1b: 202603020212 の分析だけ、出馬表の騎手 ID を落とす(2026-10-29 より前の旧スナップショットの想定)。書き出しが騎手名から ID を埋める経路を、
-  // 本物の DO・D1・kv で通すための材料。ほかの分析(202603020211・202603030101)はスナップショットに ID がある。
-  const withoutJockeyIds = (snapshot: unknown): unknown => {
+  // Issue #526 段階 1b・Issue #540: 202603020212 の分析だけ、出馬表の騎手 ID・調教師 ID・馬の ID を落とす(2026-10-29・10-30 より前の旧スナップショットの想定)。書き出しが騎手名・調教師名から ID を
+  // 埋める経路を、本物の DO・D1・kv で通すための材料。ほかの分析(202603020211・202603030101)はスナップショットに ID がある(馬の ID は名前から埋めないので、落とした分析では null のまま)。
+  const withoutIds = (snapshot: unknown): unknown => {
     const s = snapshot as { horses?: Array<Record<string, unknown>> };
-    return { ...s, horses: (s.horses ?? []).map(({ jockeyId: _dropped, ...rest }) => rest) };
+    return { ...s, horses: (s.horses ?? []).map(({ jockeyId: _jockey, trainerId: _trainer, horseId: _horse, ...rest }) => rest) };
   };
   const results: Array<{ id: number; detail: string }> = [];
   for (const [raceId, analyzedAt] of specs) {
-    const raceSnapshot = raceId === "202603020212" ? withoutJockeyIds(base.raceSnapshot) : base.raceSnapshot;
+    const raceSnapshot = raceId === "202603020212" ? withoutIds(base.raceSnapshot) : base.raceSnapshot;
     const outcome = await store.saveAnalysis({ ...base, raceId, analyzedAt, kaisaiDate: "20260302", raceSnapshot });
     results.push({ id: outcome.id, detail: outcome.detail });
   }
   // 出馬表の騎手名と騎手 ID の組(jockey_names)。戸崎圭・田辺は ID が 1 つ(埋まる)、横山武は ID が 2 つ(曖昧なので埋めない)、松山などは表に無い(埋まらない)。
   for (const [name, id] of [["戸崎圭", "05386"], ["田辺", "01075"], ["横山武", "01170"], ["横山武", "99999"]] as const) {
     await env.DB.prepare("INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) VALUES (?, ?, '20260302') ON CONFLICT DO NOTHING").bind(name, id).run();
+  }
+  // 出馬表の調教師名と調教師 ID の組(trainer_names。Issue #540)。木村・堀は ID が 1 つ(埋まる)、池江は ID が 2 つ(曖昧なので埋めない)、宮田などは表に無い(埋まらない)。
+  for (const [name, id] of [["木村", "01126"], ["堀", "01070"], ["池江", "01071"], ["池江", "99999"]] as const) {
+    await env.DB.prepare("INSERT INTO trainer_names (trainer_name, trainer_id, first_seen) VALUES (?, ?, '20260302') ON CONFLICT DO NOTHING").bind(name, id).run();
   }
   for (const raceId of ["202603020211", "202603020212"]) {
     await env.DB.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, place_payout) VALUES (?, 1, 1, 400, 150)").bind(raceId).run();

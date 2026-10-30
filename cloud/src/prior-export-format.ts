@@ -15,7 +15,8 @@
  *  - `leak_class`: `guarded` = `history_cutoff_date` あり(ブリーフの A の母集団)、`pre_race` = 遮断なしだが発走前の分析。
  *
  * ## 行の列(`PRIOR_ROW_KEYS`。許可リスト。テストが完全一致を固定する)
- * 追加指示・LLM の生応答・`reason` などの自由文・馬名・調教師名・設定・買い目は列にない。騎手名は format 4 から入れる(ユーザーの決定・2026-10-29、Issue #526。騎手と馬の相性・乗り替わりの検証のため)。
+ * 追加指示・LLM の生応答・`reason` などの自由文・馬名・設定・買い目は列にない。騎手名は format 4 から、調教師名は format 6 から入れる(ユーザーの決定。騎手名は 2026-10-29〈Issue #526〉、調教師名は 2026-10-30〈Issue #540〉。
+ * 騎手と馬の相性・乗り替わり・騎手と調教師の相性の検証のため)。
  *
  * ## 形式の版
  *  - v1(Issue #266): 19 列(`PRIOR_ROW_KEYS_V1`)。
@@ -35,6 +36,12 @@
  *    `jockey_id_source` は ID の出どころで、`"snapshot"`(その分析の出馬表の ID)・`"name"`(名前から埋めた ID)・null(ID が null のとき。不変条件: `jockey_id` と同時に null)。
  *    名前から埋めた ID は、同じ名前の別人・引退した騎手とあとから同じ略称になった新人を取り違えうる(表に載らない人は検出できない)。使うかどうかは分析側が `jockey_id_source` で絞って選ぶ。
  *    表は書き出しの 1 回につき 1 回だけ読む(`ExportJobCore` の `readLookups`)ので、ファイルの全体で同じ対応を使う。
+ *  - v6(Issue #540): v5 の 35 列の**後ろに** 4 列(`PRIOR_ROW_KEYS_V6_ADDED`: `trainer_name`・`trainer_id`・`trainer_id_source`・`horse_id`)を足した。既存の 35 列の名前・順序・値は変えていない。
+ *    出どころは同じく R2 の詳細の `raceSnapshot.horses[]`(`trainerName`・`trainerId`・`horseId`)で、追加の取得はない。調教師の 3 列は、騎手の v4・v5 の 3 列と同じ規則:
+ *    スナップショットの ID があればそれ(`"snapshot"`)、無ければ D1 の `trainer_names`(出馬表の調教師名と調教師 ID の組。発走前の計算が分析のたびに貯める。貯め始めたのは 2026-10-30)で、
+ *    **その名前に対応する ID がちょうど 1 つのときだけ**その ID を入れる(`"name"`)。不変条件: `trainer_id` と `trainer_id_source` は同時に null。
+ *    `horse_id` はスナップショットにあるときだけで、**名前から埋めない**(`horseId` を保存し始めたのは 2026-10-30 なので、それより前の分析は null)。
+ *    これで「馬名・調教師名は含めない」としていた方針を、調教師名に限って変えた(馬名は引き続き含めない)。
  */
 
 import { classifyLookaheadSuspicion } from "../../packages/core/src/ev/lookahead-suspicion.js";
@@ -44,8 +51,8 @@ import { finiteOrNull, isRecord } from "../../packages/core/src/common/guards.js
 import { JST_OFFSET_MS } from "../../packages/core/src/common/jst.js";
 import { gzipSync } from "node:zlib";
 
-/** ファイルの形式の版。列を足す・意味を変えるときに上げる(ローダは読めない版を例外にする)。2 = Issue #341 で出馬表の列を足した。3 = Issue #421 でレースの条件の列を足した。4 = Issue #526 で騎手名・騎手 ID の列を足した。5 = Issue #526 段階 1b で jockey_id_source を足し、jockey_id を騎手名から埋めるようにした。 */
-export const PRIOR_EXPORT_FORMAT = 5;
+/** ファイルの形式の版。列を足す・意味を変えるときに上げる(ローダは読めない版を例外にする)。2 = Issue #341 で出馬表の列を足した。3 = Issue #421 でレースの条件の列を足した。4 = Issue #526 で騎手名・騎手 ID の列を足した。5 = Issue #526 段階 1b で jockey_id_source を足し、jockey_id を騎手名から埋めるようにした。6 = Issue #540 で調教師名・調教師 ID・その出どころ・馬の ID の列を足した。 */
+export const PRIOR_EXPORT_FORMAT = 6;
 
 /** R2 のキー。固定(完成のたびに原子的に上書きする)。 */
 export const PRIOR_EXPORT_KEY = "exports/prior-dataset.ndjson.gz";
@@ -236,8 +243,13 @@ export const PRIOR_ROW_KEYS_V4_ADDED = ["jockey_name", "jockey_id"] as const;
 /** 形式 v5 で足した列(1 列。v4 の列の後ろ)。騎手 ID の出どころ(Issue #526 段階 1b)。 */
 export const PRIOR_ROW_KEYS_V5_ADDED = ["jockey_id_source"] as const;
 
-/** 書き出す行の列(この順で JSON にする)。許可リスト。v1 の 19 列 + v2 で足した 11 列 + v3 で足した 2 列 + v4 で足した 2 列 + v5 で足した 1 列。 */
-export const PRIOR_ROW_KEYS = [...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED, ...PRIOR_ROW_KEYS_V4_ADDED, ...PRIOR_ROW_KEYS_V5_ADDED] as const;
+/** 形式 v6 で足した列(4 列。v5 の列の後ろに、この順で並ぶ)。今回の調教師の名前・ID・ID の出どころと、馬の ID(Issue #540)。 */
+export const PRIOR_ROW_KEYS_V6_ADDED = ["trainer_name", "trainer_id", "trainer_id_source", "horse_id"] as const;
+
+/** 書き出す行の列(この順で JSON にする)。許可リスト。v1 の 19 列 + v2 で足した 11 列 + v3 で足した 2 列 + v4 で足した 2 列 + v5 で足した 1 列 + v6 で足した 4 列。 */
+export const PRIOR_ROW_KEYS = [
+  ...PRIOR_ROW_KEYS_V1, ...PRIOR_ROW_KEYS_V2_ADDED, ...PRIOR_ROW_KEYS_V3_ADDED, ...PRIOR_ROW_KEYS_V4_ADDED, ...PRIOR_ROW_KEYS_V5_ADDED, ...PRIOR_ROW_KEYS_V6_ADDED,
+] as const;
 
 /** レースごとの出馬表の列(スナップショットの `race`。全頭に同じ値が入る)。 */
 export interface PriorRaceColumns {
@@ -288,12 +300,38 @@ export interface PriorJockeyIdSourceColumn {
   readonly jockey_id_source: JockeyIdSource | null;
 }
 
-/** スナップショットから取り出した列: レースの列(v2)と、馬番 → 馬の列(v2)と、レースの条件の列(v3)と、馬番 → 騎手の列(v4。`horses` と同じ馬番の集合)。 */
+/** 今回の調教師の列(v6。スナップショットの `horses[]`)。 */
+export interface PriorTrainerColumns {
+  /** 今回の調教師名(分析時点の出馬表の値。中央は略した名前、地方はフルネーム)。調教師のリンクが無い・型が違う値は null。 */
+  readonly trainer_name: string | null;
+  /** 今回の調教師の ID(netkeiba の調教師 ID)。2026-10-30 より前の旧スナップショット・調教師のリンクが無い馬・型が違う値は null(区別できない)。v6 からは、名前から埋める({@link resolveTrainerColumns})。 */
+  readonly trainer_id: string | null;
+}
+
+/** 調教師 ID の出どころ(v6)。`snapshot` = その分析の出馬表の ID、`name` = 調教師名から埋めた ID。 */
+export type TrainerIdSource = "snapshot" | "name";
+
+/** 調教師 ID の出どころの列(v6)。`trainer_id` が null のときだけ null。 */
+export interface PriorTrainerIdSourceColumn {
+  readonly trainer_id_source: TrainerIdSource | null;
+}
+
+/** 馬の ID の列(v6。スナップショットの `horses[].horseId`)。名前から埋めない。キーを保存する前の旧スナップショット・型が違う値は null。 */
+export interface PriorHorseIdColumn {
+  readonly horse_id: string | null;
+}
+
+/**
+ * スナップショットから取り出した列: レースの列(v2)と、馬番 → 馬の列(v2)と、レースの条件の列(v3)と、馬番 → 騎手の列(v4。`horses` と同じ馬番の集合)と、
+ * 馬番 → 調教師の列(v6。同じ馬番の集合)と、馬番 → 馬の ID(v6。同じ馬番の集合)。
+ */
 export interface PriorSnapshotColumns {
   readonly race: PriorRaceColumns;
   readonly horses: ReadonlyMap<number, PriorHorseColumns>;
   readonly conditions: PriorConditionColumns;
   readonly jockeys: ReadonlyMap<number, PriorJockeyColumns>;
+  readonly trainers: ReadonlyMap<number, PriorTrainerColumns>;
+  readonly horseIds: ReadonlyMap<number, string | null>;
 }
 
 /** `oikiri_critic` の最大文字数(コードポイント)。超える値は自由文の疑いで null にする(実フィクスチャの 16 頭では 4 文字前後の定型句だった。語彙が閉じていることは確認していない)。 */
@@ -302,20 +340,21 @@ export const CRITIC_MAX_LENGTH = 16;
 const NULL_RACE_COLUMNS: PriorRaceColumns = { race_name: null, grade: null, distance: null, track_condition: null };
 const NULL_CONDITION_COLUMNS: PriorConditionColumns = { weight_type: null, fillies_only: null };
 const NULL_JOCKEY_COLUMNS: PriorJockeyColumns = { jockey_name: null, jockey_id: null };
+const NULL_TRAINER_COLUMNS: PriorTrainerColumns = { trainer_name: null, trainer_id: null };
 const NULL_HORSE_COLUMNS: PriorHorseColumns = { wakuban: null, sex: null, age: null, body_weight: null, kinryo: null, oikiri_rank: null, oikiri_critic: null };
 
 const nonEmptyStringOrNull = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 const integerOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
 
 /**
- * R2 の詳細の `raceSnapshot`(core の `buildRaceSnapshot` の形。型は未検証の unknown)から、v2・v3・v4 の列を取り出す。純関数。
+ * R2 の詳細の `raceSnapshot`(core の `buildRaceSnapshot` の形。型は未検証の unknown)から、v2・v3・v4・v6 の列を取り出す。純関数。
  * **想定外の形・型は例外にせず、その列だけ null**(`toContributions` と同じ「推測で直さない」)。スナップショット全体が無い・壊れているときは全列 null・馬は 0 頭。
- * 取り出すのは {@link PRIOR_ROW_KEYS_V2_ADDED}・{@link PRIOR_ROW_KEYS_V3_ADDED}・{@link PRIOR_ROW_KEYS_V4_ADDED} の列だけ。馬名・調教師名・単勝オッズ・人気・複勝オッズ(分析時点の市場の値)は読まない。
+ * 取り出すのは {@link PRIOR_ROW_KEYS_V2_ADDED}・{@link PRIOR_ROW_KEYS_V3_ADDED}・{@link PRIOR_ROW_KEYS_V4_ADDED}・{@link PRIOR_ROW_KEYS_V6_ADDED} の列の元の値(調教師名・調教師 ID・馬の ID)だけ。馬名・単勝オッズ・人気・複勝オッズ(分析時点の市場の値)は読まない。
  * 馬番が整数でない要素は飛ばし、馬番が重複したら最初の 1 頭を使う。
  */
 export function toSnapshotColumns(raw: unknown): PriorSnapshotColumns {
   if (!isRecord(raw)) {
-    return { race: NULL_RACE_COLUMNS, horses: new Map(), conditions: NULL_CONDITION_COLUMNS, jockeys: new Map() };
+    return { race: NULL_RACE_COLUMNS, horses: new Map(), conditions: NULL_CONDITION_COLUMNS, jockeys: new Map(), trainers: new Map(), horseIds: new Map() };
   }
   const race = isRecord(raw["race"])
     ? {
@@ -333,6 +372,8 @@ export function toSnapshotColumns(raw: unknown): PriorSnapshotColumns {
     : NULL_CONDITION_COLUMNS;
   const horses = new Map<number, PriorHorseColumns>();
   const jockeys = new Map<number, PriorJockeyColumns>();
+  const trainers = new Map<number, PriorTrainerColumns>();
+  const horseIds = new Map<number, string | null>();
   if (Array.isArray(raw["horses"])) {
     for (const h of raw["horses"] as unknown[]) {
       if (!isRecord(h)) {
@@ -353,12 +394,15 @@ export function toSnapshotColumns(raw: unknown): PriorSnapshotColumns {
         oikiri_critic: critic !== null && Array.from(critic).length <= CRITIC_MAX_LENGTH ? critic : null,
       });
       jockeys.set(umaban, { jockey_name: nonEmptyStringOrNull(h["jockeyName"]), jockey_id: nonEmptyStringOrNull(h["jockeyId"]) });
+      trainers.set(umaban, { trainer_name: nonEmptyStringOrNull(h["trainerName"]), trainer_id: nonEmptyStringOrNull(h["trainerId"]) });
+      horseIds.set(umaban, nonEmptyStringOrNull(h["horseId"]));
     }
   }
-  return { race, horses, conditions, jockeys };
+  return { race, horses, conditions, jockeys, trainers, horseIds };
 }
 
-export interface PriorDatasetRow extends PriorRaceColumns, PriorHorseColumns, PriorConditionColumns, PriorJockeyColumns, PriorJockeyIdSourceColumn {
+export interface PriorDatasetRow
+  extends PriorRaceColumns, PriorHorseColumns, PriorConditionColumns, PriorJockeyColumns, PriorJockeyIdSourceColumn, PriorTrainerColumns, PriorTrainerIdSourceColumn, PriorHorseIdColumn {
   readonly analysis_id: number;
   readonly race_id: string;
   readonly kaisai_date: string | null;
@@ -409,9 +453,23 @@ function resolveJockeyColumns(jockey: PriorJockeyColumns, jockeyIdByName: Readon
 }
 
 /**
+ * 調教師の列に、v6 の出どころを足す。純関数で、{@link resolveJockeyColumns} の調教師版(同じ規則)。スナップショットの ID があればそれ(`snapshot`)、無くて名前があり対応表に載っていれば表の ID(`name`)、
+ * それ以外は ID も出どころも null。突き合わせは厳密な文字列一致(空白・全角半角を直さない)。`Map` なので、名前が `constructor` などでも継承されたプロパティを拾わない。
+ * 対応表には「ID がちょうど 1 つの名前」だけが入っている前提(読む側 `readLookups` の責務)。騎手の対応表とは別の表で、混ぜない。
+ */
+function resolveTrainerColumns(trainer: PriorTrainerColumns, trainerIdByName: ReadonlyMap<string, string>): PriorTrainerColumns & PriorTrainerIdSourceColumn {
+  if (trainer.trainer_id !== null) {
+    return { ...trainer, trainer_id_source: "snapshot" };
+  }
+  const filled = trainer.trainer_name === null ? undefined : trainerIdByName.get(trainer.trainer_name);
+  return filled === undefined ? { ...trainer, trainer_id_source: null } : { ...trainer, trainer_id: filled, trainer_id_source: "name" };
+}
+
+/**
  * 分析 1 件ぶんの行(馬番の昇順)。結果の無い馬は着順・オッズ・人気が null。寄与度は馬番 → 書き出す形(無い・読めない馬は null)。
- * `snapshot`(v2・v3・v4 の列。{@link toSnapshotColumns})は、詳細(R2)が無いレースでは null(15 列とも null)。スナップショットに無い馬は、馬の列と騎手の列だけ null でレースの列は入る。
+ * `snapshot`(v2・v3・v4・v6 の列。{@link toSnapshotColumns})は、詳細(R2)が無いレースでは null(v6 まですべて null)。スナップショットに無い馬は、馬の列・騎手の列・調教師の列・馬の ID だけ null でレースの列は入る。
  * `jockeyIdByName`(v5)は、騎手名 → 騎手 ID の対応(ID がちょうど 1 つの名前だけ)。スナップショットに ID が無い行を、これで埋める({@link resolveJockeyColumns})。
+ * `trainerIdByName`(v6)は、調教師名 → 調教師 ID の対応(ID がちょうど 1 つの名前だけ)。`jockeyIdByName` と同じ規則で、スナップショットに ID が無い行を埋める({@link resolveTrainerColumns})。
  * 引数を省略可にしないのは、呼び出し側の配線漏れをコンパイルで検出するため。
  */
 export function buildRaceRows(
@@ -422,6 +480,7 @@ export function buildRaceRows(
   contributions: ReadonlyMap<number, PriorContribution[] | null>,
   snapshot: PriorSnapshotColumns | null,
   jockeyIdByName: ReadonlyMap<string, string>,
+  trainerIdByName: ReadonlyMap<string, string>,
 ): PriorDatasetRow[] {
   const resultByUmaban = new Map(results.map((r) => [r.umaban, r] as const));
   const venueKind = venueKindOfRaceId(analysis.raceId as RaceId);
@@ -454,6 +513,8 @@ export function buildRaceRows(
         ...(snapshot?.horses.get(h.umaban) ?? NULL_HORSE_COLUMNS),
         ...(snapshot?.conditions ?? NULL_CONDITION_COLUMNS),
         ...resolveJockeyColumns(snapshot?.jockeys.get(h.umaban) ?? NULL_JOCKEY_COLUMNS, jockeyIdByName),
+        ...resolveTrainerColumns(snapshot?.trainers.get(h.umaban) ?? NULL_TRAINER_COLUMNS, trainerIdByName),
+        horse_id: snapshot?.horseIds.get(h.umaban) ?? null,
       };
     });
 }
@@ -479,11 +540,12 @@ const NOTES: readonly string[] = [
   "field_size は分析に載っている馬の数。出馬表の取消・除外は分析前に除かれるが、分析後の取消は入りうる(着順は null)。着順が null の馬は中止・取消・除外のいずれか(区別できない)。",
   "win_odds・ninki は結果ページの確定値。取り込み前の旧い行・欄が空の馬は null(Issue #259)。",
   "contributions は寄与度ログ(自由文の reason は除く)。詳細(R2)が無い・読めないレースは null。",
-  "format 2(v2。Issue #341): v1 の列の後ろに race_name・grade・distance・track_condition・wakuban・sex・age・body_weight・kinryo・oikiri_rank・oikiri_critic の 11 列を足した。出どころは R2 の詳細の raceSnapshot(分析時点の出馬表。追加の取得はしていない)。詳細が無い・スナップショットが壊れているレースは 11 列とも null。型が違う値はその列だけ null。馬名・調教師名と、スナップショットの市場の値(単勝オッズ・人気・複勝オッズ)は含めない(騎手名は format 4 から含める。下記)。",
+  "format 2(v2。Issue #341): v1 の列の後ろに race_name・grade・distance・track_condition・wakuban・sex・age・body_weight・kinryo・oikiri_rank・oikiri_critic の 11 列を足した。出どころは R2 の詳細の raceSnapshot(分析時点の出馬表。追加の取得はしていない)。詳細が無い・スナップショットが壊れているレースは 11 列とも null。型が違う値はその列だけ null。馬名と、スナップショットの市場の値(単勝オッズ・人気・複勝オッズ)は含めない(騎手名は format 4 から、調教師名は format 6 から含める。下記)。調教師名はこの format 2 の時点では含めていなかった。",
   "grade は、グレードなしのレースと、グレードを保存する前(Issue #250 より前)の旧いスナップショットのどちらも null で、区別できない。track_condition は分析時点の値(確定ではない)。body_weight は馬体重の発表前(前日の分析など)は null で、増減は保存していない。",
   "format 3(v3。Issue #421): v2 の列の後ろに weight_type・fillies_only の 2 列を足した。出どころは R2 の詳細の raceSnapshot.race(出馬表の RaceData02 から読んだ、負担重量の種別〈ハンデ・別定・定量・馬齢〉と牝馬限定。追加の取得はしていない)。中央のレースだけで、地方・読めなかったレース・この項目を保存する前の旧スナップショットは両列とも null(区別できない)。weight_type は、出馬表に種別が見つからない・曖昧なときも null。fillies_only の false は「牝馬限定でない」で、null(不明)とは別。前走の条件の列は無い。",
-  "format 4(v4。Issue #526): v3 の列の後ろに jockey_name・jockey_id の 2 列を足した。今回の騎手の名前と ID で、出どころは R2 の詳細の raceSnapshot.horses[](追加の取得はしていない)。騎手と馬の相性・乗り替わりの検証のために含める(ユーザーの決定・2026-10-29)。馬名・調教師名は引き続き含めない。分析時点の出馬表の騎手で、実際に乗った騎手とは限らない(発走前の乗り替わりは反映されない)。format 4 の時点では、jockey_id は 2026-10-29 以降の分析だけで、それより前の分析、騎手のリンクが無い馬(騎手未定など)、詳細(R2)が無いレース、スナップショットに載っていない馬は null(区別できない)だった。jockey_name は、騎手未定・詳細が無いレース・スナップショットに載っていない馬が null。format 5 からは、下の注記のとおり名前から埋める。",
+  "format 4(v4。Issue #526): v3 の列の後ろに jockey_name・jockey_id の 2 列を足した。今回の騎手の名前と ID で、出どころは R2 の詳細の raceSnapshot.horses[](追加の取得はしていない)。騎手と馬の相性・乗り替わりの検証のために含める(ユーザーの決定・2026-10-29)。馬名は引き続き含めない(調教師名は format 6 から含める)。分析時点の出馬表の騎手で、実際に乗った騎手とは限らない(発走前の乗り替わりは反映されない)。format 4 の時点では、jockey_id は 2026-10-29 以降の分析だけで、それより前の分析、騎手のリンクが無い馬(騎手未定など)、詳細(R2)が無いレース、スナップショットに載っていない馬は null(区別できない)だった。jockey_name は、騎手未定・詳細が無いレース・スナップショットに載っていない馬が null。format 5 からは、下の注記のとおり名前から埋める。",
   "format 5(v5。Issue #526 段階 1b): v4 の列の後ろに jockey_id_source の 1 列を足し、jockey_id の意味を広げた。スナップショット(その分析の出馬表)に ID がある行は、その ID で jockey_id_source = snapshot。ID が無く jockey_name がある行は、出馬表の騎手名と騎手 ID の組の表(発走前の分析のたびに貯めた。貯め始めたのは 2026-10-29 から)で、その名前に対応する ID がちょうど 1 つのときだけ、その ID を入れて jockey_id_source = name。同じ名前に ID が 2 つ以上ある名前、表に無い名前、名前が無い行、詳細(R2)が無いレースは jockey_id も jockey_id_source も null(jockey_id が null なのは jockey_id_source が null のときだけ)。名前から埋めた ID は、同じ名前の別人を取り違えうる(中央の出馬表の騎手名は略した名前で、引退した騎手とあとから同じ略称になった新人が現れても、表に載っていない人は検出できない。確かめられるのは「表にある名前に ID が 2 つ以上ない」ことまで)。表は書き出しの 1 回につき 1 回読むので、1 つのファイルの中では同じ対応を使う。使うかどうかは分析側が選ぶ(jockey_id_source = snapshot だけに絞れる)。",
+  "format 6(v6。Issue #540): v5 の列の後ろに trainer_name・trainer_id・trainer_id_source・horse_id の 4 列を足した(format 5 までの 35 列の名前・順序・値は変えていない)。今回の調教師の名前と ID、調教師 ID の出どころ、馬の ID で、出どころは R2 の詳細の raceSnapshot.horses[](追加の取得はしていない)。騎手と調教師の相性、騎手と馬の相性を、ほかのデータ(過去の結果・戦績)と結び付けて検証するために含める(ユーザーの決定・2026-10-30)。調教師名は含めるようにしたが、馬名は引き続き含めない。trainer_name は分析時点の出馬表の値で、中央は略した名前(例: 藤野)、地方はフルネーム。調教師のリンクが無い馬・詳細(R2)が無いレース・スナップショットに載っていない馬は null。trainer_id は、スナップショット(その分析の出馬表)に ID がある行はその ID で trainer_id_source = snapshot。ID が無く trainer_name がある行は、出馬表の調教師名と調教師 ID の組の表(発走前の分析のたびに貯めた。貯め始めたのは 2026-10-30 から)で、その名前に対応する ID がちょうど 1 つのときだけ、その ID を入れて trainer_id_source = name。同じ名前に ID が 2 つ以上ある名前、表に無い名前、名前が無い行、詳細(R2)が無いレースは trainer_id も trainer_id_source も null(trainer_id が null なのは trainer_id_source が null のときだけ)。スナップショットに調教師 ID を保存し始めたのも 2026-10-30 からなので、それより前の分析は、表に名前が載るまで trainer_id が null になる。名前から埋めた ID は、同じ名前の別人を取り違えうる(中央の出馬表の調教師名は略した名前で、引退した調教師とあとから同じ略称になった人が現れても、表に載っていない人は検出できない。確かめられるのは「表にある名前に ID が 2 つ以上ない」ことまで)。使うかどうかは分析側が選ぶ(trainer_id_source = snapshot だけに絞れる)。horse_id はスナップショットにあるときだけで、2026-10-30 より前の分析は null。名前から埋めない。表は書き出しの 1 回につき 1 回読むので、1 つのファイルの中では同じ対応を使う。",
   "oikiri_rank・oikiri_critic: 調教は中央だけ取るので、地方は常に null。oikiri_critic は netkeiba の短評で、16 文字を超えるものは自由文の疑いで null にしている。実フィクスチャの 16 頭では 4 文字前後の定型句だったが、語彙が閉じていることは確認していない。",
 ];
 

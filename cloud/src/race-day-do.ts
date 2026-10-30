@@ -17,6 +17,7 @@ import { createAnalysisSink } from "./analysis-sink";
 import { D1BabaStore } from "./baba-repository";
 import { D1JockeyNamesStore } from "./jockey-names-repository";
 import { D1KaisaiDaysStore } from "./kaisai-days-repository";
+import { D1TrainerNamesStore } from "./trainer-names-repository";
 import { createJraBabaFetcher } from "./jra-baba-fetch";
 import { createCloudLlm } from "./llm-sender";
 import { createDiscordNotifier, webhookStatus } from "./notify-send";
@@ -141,6 +142,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 出馬表の騎手名と騎手 ID の組(Issue #526 段階 1b。D1 の jockey_names〈migration 0028〉)。発走前の計算が、レースごとに全馬の組を書く(統計モデル用の書き出しが騎手 ID を名前から埋める材料)。
       // 書き込みの失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
       jockeyNamesStore: new D1JockeyNamesStore({ db: env.DB }),
+      // 出馬表の調教師名と調教師 ID の組(Issue #540。D1 の trainer_names〈migration 0030〉)。騎手の組と同じ場面で書く(統計モデル用の書き出しが調教師 ID を名前から埋める材料)。
+      // 書き込みの失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
+      trainerNamesStore: new D1TrainerNamesStore({ db: env.DB }),
       // 日報の作成の依頼(Issue #235)。DAILY_REPORT が無い構成では渡さない(依頼しない)。
       ...(requestReport === undefined ? {} : { requestReport }),
       loadSettings: async () => {
