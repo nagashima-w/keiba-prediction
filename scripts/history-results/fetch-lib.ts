@@ -83,6 +83,16 @@ export interface FetchStats {
   gradeCounts: Record<string, number>;
 }
 
+/**
+ * 打ち切ったときに CLI が出す文を `stats` から決める(Issue #535)。打ち切っていなければ null。
+ * HTTP 400・403・429 でその場で打ち切った(`restricted`)ときは連続失敗ではないので、連続失敗とは書かない。終了コードはどちらも 1。
+ */
+export function abortMessage(stats: Pick<FetchStats, "aborted" | "restricted">): string | null {
+  if (!stats.aborted) return null;
+  if (stats.restricted) return "アクセスを制限された可能性(HTTP 400・403・429)があるため打ち切りました(終了コード 1)。";
+  return "連続失敗のため打ち切りました(終了コード 1)。";
+}
+
 /** limit に達して取得を打ち切るための内部の合図。 */
 class LimitSignal extends Error {}
 
