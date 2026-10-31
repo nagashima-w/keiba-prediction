@@ -224,7 +224,7 @@ describe("実例なし(合成): 着差・勝ち馬名・頭数", () => {
     expect(run2.margin).toBe(0.2);
   });
 
-  it("1 着: 着差は 2 着との時計差で負、勝ち馬名は 2 着馬の名前を括弧で包む(API の国内 1 着 17 行の形)", () => {
+  it("1 着: 着差は 2 着との時計差で負、勝ち馬名は 2 着馬の名前を括弧で包む(API の国内 1 着 20 行の形)", () => {
     const run1 = runOf(withHorses(field), "H1");
     expect(run1.margin).toBe(-0.2);
     expect(run1.winnerName).toBe("(馬2)");
@@ -362,8 +362,51 @@ describe("実例なし(合成): 項目ごとの変換", () => {
     [null, "ラジオNIKKEI賞"],
   ];
   it.each(gradeTable)("格 %s → レース名 %s(G1〜G3 と Jpn1〜3 だけローマ数字の括弧を付ける。JG・L・OP は付けない)", (grade, expected) => {
-    const rec = withHorses(BASE.horses, { name: "ラジオNIKKEI賞", grade });
+    // クラスは「オープン」にそろえる(BASE の 1勝クラスだと、格が無い行にクラスの括弧が付き、格の表と混ざる)
+    const rec = withHorses(BASE.horses, { name: "ラジオNIKKEI賞", grade, raceClass: "オープン" });
     expect(runOf(rec, BASE.horses[0]!.horseId!).raceName).toBe(expected);
+  });
+
+  describe("中央の名前つき条件戦: クラスの括弧(API は `メルボルンT(1勝クラス)` `納屋橋特別(2勝クラス)` のように付ける)", () => {
+    it("前提(API の実例): 中央の名前つき 1 勝・2 勝クラスは括弧つき。クラス名そのものの名前・新馬・未勝利・グレードは別の形", () => {
+      const apiRows = ["horse_results_newspaper_2023100448.json", "horse_results_2023103386.json"].flatMap((f) => parseHorseResults(read(f)));
+      const names = new Set(apiRows.filter((r) => r.venueKind === "中央").map((r) => r.raceName));
+      for (const n of ["メルボルンT(1勝クラス)", "納屋橋特別(2勝クラス)", "3歳1勝クラス", "2歳新馬", "3歳未勝利", "秋華賞(GI)"]) {
+        expect(names.has(n)).toBe(true);
+      }
+    });
+
+    // [ラベル, 実例の有無, ファイル, race_id, 期待するレース名]。ページ側の名前は record.name、クラスは record.raceClass
+    const pageTable: ReadonlyArray<readonly [string, string, string, string, string, string]> = [
+      ["2 勝クラスの名前つき(API の納屋橋特別と同種)", "実ページ", "result_202606040810.html", "202606040810", "2勝クラス", "勝浦特別(2勝クラス)"],
+      ["3 勝クラスの名前つき(実例なし)", "実ページ側だけ", "result_202603020210.html", "202603020210", "3勝クラス", "鶴ケ城S(3勝クラス)"],
+      ["名前がクラス名そのもの(3歳以上1勝クラス。API 実例と一致済み)", "実ページ", "result_202602010607.html", "202602010607", "1勝クラス", "3歳以上1勝クラス"],
+      ["新馬(2歳新馬)", "実ページ", "result_202602010605.html", "202602010605", "新馬", "2歳新馬"],
+      ["未勝利(2歳未勝利)", "実ページ", "result_202603020203.html", "202603020203", "未勝利", "2歳未勝利"],
+    ];
+    it.each(pageTable)("%s [%s]", (_label, _kind, file, raceId, cls, expected) => {
+      const rec = record(file, raceId, "central");
+      expect(rec.raceClass).toBe(cls); // 前提: ページから読んだクラス
+      expect(rec.grade).toBeNull();
+      expect(runOf(rec, rec.horses.find((h) => h.horseId !== null)!.horseId!).raceName).toBe(expected);
+    });
+
+    const synthTable: ReadonlyArray<readonly [string, string, string | null, string | null, string]> = [
+      ["1 勝クラスの名前つき(API の メルボルンT(1勝クラス) と同じ形。ページ側は合成)", "メルボルンT", "1勝クラス", null, "メルボルンT(1勝クラス)"],
+      ["オープン(グレードなし)は付けない(実例なし)", "テストS", "オープン", null, "テストS"],
+      ["リステッド(L)は付けない(実例なし)", "テストS", "オープン", "L", "テストS"],
+      ["グレードが付くレースは、クラスの括弧でなくグレードの括弧(秋華賞(GI) と同じ形)", "秋華賞", "オープン", "G1", "秋華賞(GI)"],
+      ["クラスが読めない(null)なら付けない", "テストS", null, null, "テストS"],
+    ];
+    it.each(synthTable)("実例なし(合成): %s", (_label, name, raceClass, grade, expected) => {
+      const rec = withHorses(BASE.horses, { name, raceClass, grade });
+      expect(runOf(rec, BASE.horses[0]!.horseId!).raceName).toBe(expected);
+    });
+
+    it("地方はクラスの括弧を足さない(地方の名前はクラスの書き方が違い、別の問題。C1 など)", () => {
+      const rec = withHorses(BASE.horses, { kind: "nar", name: "テスト特別", raceClass: "1勝クラス", grade: null });
+      expect(runOf(rec, BASE.horses[0]!.horseId!).raceName).toBe("テスト特別");
+    });
   });
 
   it("レース名が null なら、格があっても null(括弧だけの名前を作らない)", () => {
