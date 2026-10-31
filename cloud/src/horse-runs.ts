@@ -9,6 +9,11 @@
  *    直後のレースで通過順・ペース・上がりが遅れて入る等)と、**値が変わった**(降着・繰り上がり・騎手名の改名等)を分けて数える。
  *    違ったスロットの番号と種別は、1回の保存で最大 {@link MISMATCH_SAMPLE_LIMIT} 件まで標本として残す。
  *  - **再パース**: 保存済みの版数が古い → 内容が同じでも上書きして版を上げる(不一致には数えない)。保存済みの版数が新しい(旧い Worker が動いているとき)は触らない。
+ *  - **置き換え**(Issue #552〈#549-B1〉): 保存済みが**結果ページ由来**(`source = 'result'`。過去の結果ページから変換した行)→ 戦績 API を正として上書きし、`source` を NULL に戻す。
+ *    内容が同じでも違っても、版が古くても、不一致・再パース・重複には数えない(`rowsReplacedFromResult`)。初見時刻は**保存時刻に更新する**
+ *    (`first_seen_at` は「戦績 API で初めて保存した時刻」。診断の `firstSeenMin/Max` と、同日の再実行か前日以前かの判定がこの意味で読むため)。
+ *    ただし保存済みの版数が新しい行は、結果ページ由来でも触らない(旧い Worker が新しい版を壊さない。「保存済みが新しい」が先に効く)。
+ *    **初見の馬の判定は戦績 API 由来の行だけで行う**(結果ページ由来の行しか無い馬は初見)。
  *
  * ## 判断材料(`SaveStats`。`horse_run_saves` に1回の保存ごとに1行)
  * 段階 D(結果ページから行を作る)に進めるかは、「初見でない馬の取得で、新しい行が『その時点で race_results に取り込み済みのレース』だけか」で決まる。
@@ -32,7 +37,15 @@ export interface StoredRun {
   readonly firstSeenAt: number;
   /** タプルの JSON 文字列。 */
   readonly data: string;
+  /**
+   * 行の出どころ(migration 0032)。NULL(または未指定)= 戦績 API、`'result'` = 過去の結果ページから変換した行。
+   * 戦績 API の保存が書く行は常に NULL(未指定)。
+   */
+  readonly source?: string | null;
 }
+
+/** 結果ページ由来の行の印(`horse_runs.source`)。 */
+export const SOURCE_RESULT = "result";
 
 /** 書き込む1行(新規・上書きとも同じ形)。 */
 export type PlannedRun = StoredRun;
@@ -74,7 +87,7 @@ export interface SaveStats {
   readonly horsesNewSomeNotInResults: number;
   /** race_results を引けたか。false のとき、取り込み済みかの内訳(上の2つと newInResults)は 0。 */
   readonly inResultsKnown: boolean;
-  /** 提供された戦績の行数(= 鍵なし + 入力内の重複 + 新規 + 保存済みの内訳の和)。 */
+  /** 提供された戦績の行数(= 鍵なし + 入力内の重複 + 新規 + 保存済みの内訳の和 + 結果ページ由来の置き換え)。 */
   readonly rowsOffered: number;
   /** 鍵を作れなかった行(レース ID も日付の形も無い)。保存しない。 */
   readonly rowsNoKey: number;
@@ -99,6 +112,11 @@ export interface SaveStats {
   readonly rowsReparsed: number;
   /** 保存済みの版が新しく、触らなかった。 */
   readonly rowsStoredNewer: number;
+  /**
+   * 保存済みが結果ページ由来の行で、戦績 API の内容で置き換えた(Issue #552)。不一致・再パース・重複・新規のどれにも数えない。
+   * 任意の項目: この項目が増える前の記録には無い(読む側は 0 として扱う)。`summarizeSave` は常に書く(0 を含む)。
+   */
+  readonly rowsReplacedFromResult?: number;
   readonly mismatchSamples: readonly MismatchSample[];
   /** 行の書き込み(新規・上書き)で D1 が報告した rows_written の合計。 */
   readonly rowsWrittenRuns: number;
@@ -123,7 +141,10 @@ export interface HorseRunsPlan {
   readonly input: PlanInput;
   readonly inserts: PlannedRun[];
   readonly updates: PlannedRun[];
-  /** race_results を引く鍵(新規行のレース ID。12桁の数字だけ。重複なし)。 */
+  /**
+   * race_results を引く鍵(新規行と、結果ページ由来を置き換えた行のレース ID。12桁の数字だけ。重複なし)。
+   * 置き換えた鍵を含めるのは、馬レベルの判定(`horsePlans`)が「戦績 API の履歴から見て新しい鍵」で行われるため。
+   */
   readonly newKeys: string[];
   readonly newRows: NewRow[];
   readonly counts: {
@@ -136,7 +157,13 @@ export interface HorseRunsPlan {
     changed: number;
     reparsed: number;
     storedNewer: number;
+    replaced: number;
   };
+  /**
+   * 馬ごとの分類の素。`newKeys` は**戦績 API の履歴から見て新しい鍵**(新規行の鍵 + 結果ページ由来を置き換えた鍵)。
+   * したがって `rowsNew`(行レベル。新規の挿入だけ)とは、置き換えがあるとき数が一致しない。
+   * 結果ページ由来の行の有無で `horsesZeroNew` などの馬レベルの判断材料が動かないようにするため。
+   */
   readonly horsePlans: Array<{ readonly horseId: string; readonly firstSeen: boolean; readonly newKeys: string[] }>;
   readonly samples: MismatchSample[];
 }
@@ -182,7 +209,11 @@ function kindOf(run: HorseRaceResult): RunKind {
 
 /**
  * 保存済みの行と突き合わせて、書く行(新規・上書き)と集計の素を作る。副作用なし。
- * `stored` は、入力の馬の保存済みの行(他の馬の行が混ざっていてもよい)。
+ * `stored` は、入力の馬の保存済みの行(他の馬の行が混ざっていてもよい)。結果ページ由来の行(`source = 'result'`)も渡す(置き換えの判定に要る)。
+ *
+ * 競合(Issue #552): 戦績 API の保存が保存済みの行を読んでから書くまでの間に、結果ページ由来の行が同じ鍵に書かれると、
+ * 新規の挿入は `ON CONFLICT DO NOTHING` で捨てられ、結果ページ由来の行が残る(その回の `rowsNew` は実際より大きく出る)。次の戦績 API の保存で置き換わるので、
+ * データは直る。対策は入れない(結果ページ由来の行を書く側〈#549-B3〉が、戦績 API の保存と同時に走らないようにする)。
  */
 export function planHorseRunsSave(input: PlanInput, stored: readonly StoredRun[]): HorseRunsPlan {
   const byHorse = new Map<string, Map<string, StoredRun>>();
@@ -198,13 +229,15 @@ export function planHorseRunsSave(input: PlanInput, stored: readonly StoredRun[]
   const inserts: PlannedRun[] = [];
   const updates: PlannedRun[] = [];
   const newRows: NewRow[] = [];
+  const replacedKeys: string[] = [];
   const samples: MismatchSample[] = [];
   const horsePlans: HorseRunsPlan["horsePlans"] = [];
-  const counts = { offered: 0, noKey: 0, dupInInput: 0, dupSameDay: 0, dupEarlier: 0, filled: 0, changed: 0, reparsed: 0, storedNewer: 0 };
+  const counts = { offered: 0, noKey: 0, dupInInput: 0, dupSameDay: 0, dupEarlier: 0, filled: 0, changed: 0, reparsed: 0, storedNewer: 0, replaced: 0 };
 
   for (const horse of input.horses) {
     const known = byHorse.get(horse.horseId) ?? new Map<string, StoredRun>();
-    const firstSeen = known.size === 0;
+    // 初見 = 戦績 API 由来(source が NULL)の行が 1 件も無い。結果ページ由来の行しか無い馬も初見。
+    const firstSeen = ![...known.values()].some((r) => r.source !== SOURCE_RESULT);
     const seen = new Set<string>();
     const horseNewKeys: string[] = [];
     for (const run of horse.results) {
@@ -229,6 +262,14 @@ export function planHorseRunsSave(input: PlanInput, stored: readonly StoredRun[]
       }
       if (old.parserVersion > HORSE_RUN_PARSER_VERSION) {
         counts.storedNewer += 1;
+        continue;
+      }
+      if (old.source === SOURCE_RESULT) {
+        // 戦績 API を正とする: 結果ページ由来の行を置き換える(source を NULL に戻し、初見時刻は保存時刻)。不一致・再パース・重複には数えない。
+        counts.replaced += 1;
+        updates.push({ horseId: horse.horseId, raceKey: key, parserVersion: HORSE_RUN_PARSER_VERSION, firstSeenAt: input.savedAt, data });
+        horseNewKeys.push(key);
+        replacedKeys.push(key);
         continue;
       }
       if (old.parserVersion < HORSE_RUN_PARSER_VERSION) {
@@ -258,7 +299,7 @@ export function planHorseRunsSave(input: PlanInput, stored: readonly StoredRun[]
     horsePlans.push({ horseId: horse.horseId, firstSeen, newKeys: horseNewKeys });
   }
 
-  const newKeys = [...new Set(newRows.map((r) => r.key).filter((k) => /^[0-9]{12}$/.test(k)))];
+  const newKeys = [...new Set([...newRows.map((r) => r.key), ...replacedKeys].filter((k) => /^[0-9]{12}$/.test(k)))];
   return { input, inserts, updates, newKeys, newRows, counts, horsePlans, samples };
 }
 
@@ -322,6 +363,7 @@ export function summarizeSave(plan: HorseRunsPlan, inResults: ReadonlySet<string
     rowsChanged: c.changed,
     rowsReparsed: c.reparsed,
     rowsStoredNewer: c.storedNewer,
+    rowsReplacedFromResult: c.replaced,
     mismatchSamples: plan.samples,
     rowsWrittenRuns,
   };

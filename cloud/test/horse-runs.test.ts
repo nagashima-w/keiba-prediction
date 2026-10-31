@@ -249,3 +249,166 @@ describe("summarizeSave: 段階 D の判断材料(馬ごとの分類)", () => {
     expect(s).toMatchObject({ v: 1, raceId: "202606280511", kaisaiDate: "20260628", savedAt: NOW, rowsWrittenRuns: 7 });
   });
 });
+
+/**
+ * Issue #552(#549-B1): 結果ページ由来の行(`source = 'result'`)が混ざったときの保存の計画。
+ * 戦績 API を正とする。結果ページ由来の行は「置き換えた」として上書きし(不一致・再パース・重複に数えない)、初見の馬の判定は戦績 API 由来の行だけで行う。
+ */
+describe("planHorseRunsSave: 結果ページ由来の行(Issue #552)", () => {
+  const h = "2020100001";
+  const RESULT_AT = NOW - 5 * DAY_MS;
+  const fromResult = (r: HorseRaceResult, over: Partial<StoredRun> = {}): StoredRun => stored(h, r, { source: "result", firstSeenAt: RESULT_AT, ...over });
+
+  it("戦績 API の保存は結果ページ由来の行を『置き換えた』として上書きし、source を NULL に戻して初見時刻を保存時刻にする。内容が違っても、同じでも、版が古くても、不一致・再パース・重複には数えない", () => {
+    const apiRows = [run(1), run(2), run(3)];
+    const store = [
+      fromResult({ ...apiRows[0]!, time: "結果ページの値" }), // 内容が違う
+      fromResult(apiRows[1]!), // 内容が同じ
+      fromResult(apiRows[2]!, { parserVersion: HORSE_RUN_PARSER_VERSION - 1 }), // 版が古い
+    ];
+    const plan = planHorseRunsSave(input([{ horseId: h, results: apiRows }]), store);
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates).toHaveLength(3); // 前提: 3 行とも上書きされる(空振りでない)
+    for (const [i, u] of plan.updates.entries()) {
+      expect(u.raceKey).toBe(`20260302000${i + 1}`);
+      expect(u.firstSeenAt).toBe(NOW); // 初見時刻は戦績 API で初めて保存した時刻
+      expect(u.parserVersion).toBe(HORSE_RUN_PARSER_VERSION);
+      expect(u.data).toBe(JSON.stringify(encodeHorseRun(apiRows[i]!)));
+      expect(u.source ?? null).toBeNull(); // 戦績 API(NULL)に戻す
+    }
+    const stats = summarizeSave(plan, new Set(), 0);
+    expect(stats).toMatchObject({ rowsReplacedFromResult: 3, rowsNew: 0, rowsFilled: 0, rowsChanged: 0, rowsReparsed: 0, rowsDupSameDay: 0, rowsDupEarlier: 0, rowsStoredNewer: 0 });
+    expect(stats.mismatchSamples).toEqual([]); // 標本にも入れない
+  });
+
+  it("保存済みの版が新しい結果ページ由来の行は、置き換えずに触らない(旧い Worker の書き込みで新しい版を壊さない。『保存済みが新しい』が先に効く)", () => {
+    const r = run(1);
+    const plan = planHorseRunsSave(input([{ horseId: h, results: [r] }]), [fromResult({ ...r, time: "新" }, { parserVersion: HORSE_RUN_PARSER_VERSION + 1 })]);
+    expect(plan.updates).toEqual([]);
+    expect(summarizeSave(plan, new Set(), 0)).toMatchObject({ rowsStoredNewer: 1, rowsReplacedFromResult: 0 });
+  });
+
+  it("戦績 API 由来の行の扱いは変えない: source が NULL の行は従来どおり(一致・不一致・再パース)。初見時刻は据え置き", () => {
+    const r = run(1);
+    const sameDay = planHorseRunsSave(input([{ horseId: h, results: [r] }]), [stored(h, r, { source: null, firstSeenAt: NOW - 1000 })]);
+    expect(sameDay.updates).toEqual([]);
+    expect(summarizeSave(sameDay, new Set(), 0)).toMatchObject({ rowsDupSameDay: 1, rowsReplacedFromResult: 0 });
+    const changed = planHorseRunsSave(input([{ horseId: h, results: [r] }]), [stored(h, { ...r, time: "x" }, { source: null })]);
+    expect(changed.updates).toHaveLength(1);
+    expect(changed.updates[0]!.firstSeenAt).toBe(NOW - 30 * DAY_MS);
+    expect(summarizeSave(changed, new Set(), 0)).toMatchObject({ rowsChanged: 1, rowsReplacedFromResult: 0 });
+  });
+
+  it("初見の馬の判定は戦績 API 由来の行だけで行う: 結果ページ由来の行しか無い馬は初見。戦績 API 由来の行が 1 つでもあれば初見でない", () => {
+    const onlyResult = "2020100001";
+    const mixed = "2020100002";
+    const store = [
+      stored(onlyResult, run(1), { source: "result" }),
+      stored(mixed, run(1), { source: "result" }),
+      stored(mixed, run(2), { source: null }),
+    ];
+    const plan = planHorseRunsSave(
+      input([
+        { horseId: onlyResult, results: [run(1)] },
+        { horseId: mixed, results: [run(1), run(2)] },
+      ]),
+      store,
+    );
+    expect(plan.horsePlans.map((p) => [p.horseId, p.firstSeen])).toEqual([
+      [onlyResult, true],
+      [mixed, false],
+    ]);
+    const stats = summarizeSave(plan, new Set(), 0);
+    expect(stats).toMatchObject({ horsesFirstSeen: 1, rowsReplacedFromResult: 2 });
+  });
+
+  it("馬レベルの判定(新規 0 行・新規がすべて取り込み済み)は『戦績 API の履歴から見て新しい鍵』で行い、置き換えた鍵を含める。行レベルの rowsNew には含めない(両者の和は一致しない)", () => {
+    const store = [stored(h, run(1), { source: null }), fromResult(run(2))]; // API 由来は race1 だけ。race2 は結果ページ由来
+    const plan = planHorseRunsSave(input([{ horseId: h, results: [run(2), run(1)] }]), store);
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates.map((u) => u.raceKey)).toEqual(["202603020002"]);
+    expect(plan.newKeys).toEqual(["202603020002"]); // race_results を引く鍵に、置き換えた鍵も入る
+    const inResults = summarizeSave(plan, new Set(["202603020002"]), 0);
+    expect(inResults).toMatchObject({ horsesFirstSeen: 0, horsesZeroNew: 0, horsesNewAllInResults: 1, horsesNewSomeNotInResults: 0, rowsNew: 0, newInResults: 0, rowsReplacedFromResult: 1 });
+    const notIn = summarizeSave(plan, new Set(), 0);
+    expect(notIn).toMatchObject({ horsesNewAllInResults: 0, horsesNewSomeNotInResults: 1, rowsNew: 0 });
+  });
+
+  it("件数の恒等式: 提供した行数 = 鍵なし + 入力内の重複 + 新規 + 保存済みの内訳(同日・前日以前・埋まった・変わった・再パース・保存済みが新しい)+ 結果ページ由来の置き換え", () => {
+    const rows = [
+      run(1), // 一致(同日)
+      run(2), // 一致(前日以前)
+      run(3, { pace: "29.9-37.6" }), // 埋まった
+      run(4, { time: "x" }), // 変わった
+      run(5), // 再パース
+      run(6), // 保存済みが新しい
+      run(7), // 新規
+      run(7), // 入力内の重複
+      run(8, { raceIdRaw: null, date: null, venueKind: "海外" }), // 鍵なし
+      run(9), // 結果ページ由来を置き換え
+    ];
+    const store = [
+      stored(h, run(1), { firstSeenAt: NOW }),
+      stored(h, run(2), { firstSeenAt: NOW - 2 * DAY_MS }),
+      stored(h, run(3, { pace: null })),
+      stored(h, run(4)),
+      stored(h, run(5), { parserVersion: HORSE_RUN_PARSER_VERSION - 1 }),
+      stored(h, run(6), { parserVersion: HORSE_RUN_PARSER_VERSION + 1 }),
+      fromResult(run(9)),
+    ];
+    const s = summarizeSave(planHorseRunsSave(input([{ horseId: h, results: rows }]), store), new Set(), 0);
+    expect(s.rowsOffered).toBe(10);
+    const parts = [s.rowsNoKey, s.rowsDupInInput, s.rowsNew, s.rowsDupSameDay, s.rowsDupEarlier, s.rowsFilled, s.rowsChanged, s.rowsReparsed, s.rowsStoredNewer, s.rowsReplacedFromResult];
+    expect(parts).toStrictEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]); // 前提: どの区分も1行ずつ入っている(空振りでない)
+    expect(parts.reduce((x, y) => x! + y!, 0)).toBe(s.rowsOffered);
+  });
+});
+
+describe("summarizeSave: 結果ページ由来の行が 0 件のとき、本番の集計は今までと同じ(Issue #552。固定)", () => {
+  const h = "2020100001";
+  const scenarioRows = [run(1), run(2, { time: "x" }), run(3, { pace: null }), run(4), run(5)];
+  const scenarioStore = (source: string | null | undefined): StoredRun[] => [
+    stored(h, run(1), { source, firstSeenAt: NOW }), // 一致(同日)
+    stored(h, run(2), { source }), // 変わった
+    stored(h, run(3), { source }), // 保存済みの pace に値があり、今回(run(3, { pace: null }))が空 = 変わった
+    stored(h, run(4), { source, parserVersion: HORSE_RUN_PARSER_VERSION - 1 }), // 再パース
+  ];
+
+  it("集計の全項目が期待どおりで、rowsReplacedFromResult だけが新しい項目(0)。source が未指定でも NULL でも同じ", () => {
+    const expected = {
+      v: 1,
+      raceId: "202606280511",
+      kaisaiDate: "20260628",
+      savedAt: NOW,
+      horses: 1,
+      horsesFirstSeen: 0,
+      horsesZeroNew: 0,
+      horsesNewAllInResults: 1,
+      horsesNewSomeNotInResults: 0,
+      inResultsKnown: true,
+      rowsOffered: 5,
+      rowsNoKey: 0,
+      rowsDupInInput: 0,
+      rowsNew: 1,
+      rowsNewFromFirstSeen: 0,
+      newByKind: { central: 1, nar: 0, overseas: 0 },
+      newInResults: 1,
+      rowsDupSameDay: 1,
+      rowsDupEarlier: 0,
+      rowsFilled: 0,
+      rowsChanged: 2,
+      rowsReparsed: 1,
+      rowsStoredNewer: 0,
+      mismatchSamples: [
+        { horseId: h, raceKey: "202603020002", kind: "changed", slots: [19] }, // time
+        { horseId: h, raceKey: "202603020003", kind: "changed", slots: [22] }, // pace(保存済みに値があり、今回が空 = 埋まったのではなく変わった)
+      ],
+      rowsWrittenRuns: 4,
+      rowsReplacedFromResult: 0,
+    };
+    for (const source of [undefined, null]) {
+      const stats = summarizeSave(planHorseRunsSave(input([{ horseId: h, results: scenarioRows }]), scenarioStore(source)), new Set(["202603020005"]), 4);
+      expect(stats, String(source)).toStrictEqual(expected);
+    }
+  });
+});

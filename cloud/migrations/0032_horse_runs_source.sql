@@ -1,0 +1,16 @@
+-- クラウド版(D1)の migration 0032: horse_runs に行の出どころの列 source を足す(Issue #552〈#549-B1〉。親は #549)。exe の SQLite には無い、D1 専用の表の列。
+-- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧 Worker は source を参照せず、列が増えても壊れない)。
+-- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言した追加分」(D1_EXTRA_TABLES の horse_runs)も同時に直す。
+-- ★デプロイの順序: source を読み書きする新しい Worker は、migration の適用より前に出してはならない。deploy-cloud.yml は migration を wrangler deploy より前に適用する。
+--   適用前に新しい Worker が動くと、戦績の保存(horse_runs の読み書き)が失敗する。呼び出し側(RaceDay の計算ステップ)が握って警告にするので、分析は止まらない。
+--
+-- 目的: 過去の結果ページ(#549)から変換した行を、戦績 API の行と同じ表に混ぜる前に、出どころを区別できるようにする。
+-- 印が無いと、結果ページ由来の行が戦績 API の保存で「不一致」(filled・changed)に数えられて上書きされ、初見の馬の判定や、段階 C・D・E の判断材料(診断 GET /api/horse-runs)が歪む。
+--
+-- horse_runs.source:
+--   NULL      戦績 API 由来の行(既存の行はすべてこれ。UPDATE で埋め直さない)
+--   'result'  過去の結果ページから変換した行
+-- 戦績 API を正とする: 戦績 API の保存は、'result' の行を「置き換えた」として上書きし、source を NULL に戻す。
+-- 結果ページ由来の行の書き込みは ON CONFLICT DO NOTHING で、戦績 API の行に触れない。
+-- 索引は作らない(WITHOUT ROWID の副索引は書き込みの行を増やす。診断は全件走査で、出どころごとの集計を同じ走査で行う)。
+ALTER TABLE horse_runs ADD COLUMN source TEXT;
