@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { loadFixture } from "../support/fixtures.js";
 import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
-import { buildRaceRecord, crossCheckRows } from "../../src/scraper/race-record.js";
+import { parseHorseResults } from "../../src/scraper/parse-horse-results.js";
+import { buildRaceRecord, crossCheckRows, RACE_RECORD_PARSER_VERSION } from "../../src/scraper/race-record.js";
 import { parseResultExtra } from "../../src/scraper/parse-result-extra.js";
 
 /**
@@ -266,5 +267,44 @@ describe("crossCheckRows: 既存パーサと補助パーサの突き合わせ", 
   it("補助パーサの馬番が null(列がずれた行)でも、馬名が合えば通す", () => {
     const changed = extra.map((r, i) => (i === 2 ? { ...r, umaban: null, cellsAligned: false } : r));
     expect(crossCheckRows(core, changed)).toBeNull();
+  });
+});
+
+/**
+ * #549-A1: 読み取りの版数と、ラップ表(区間タイム・ペース)。
+ * 版数: 移動前の出力(版数なし)を 1、ラップ表(laps・pace・paceClass)を足した出力を 2 とする。出力の意味を変えたら上げる。
+ */
+describe("buildRaceRecord: 読み取りの版数", () => {
+  it("版数は 2(ラップ表を足した版)で、レコードにも同じ値が入る", () => {
+    expect(RACE_RECORD_PARSER_VERSION).toBe(2);
+    expect(mustOk(CENTRAL_2021, "202105040811", "central").parserVersion).toBe(RACE_RECORD_PARSER_VERSION);
+    expect(mustOk(NAR_2021, "202146110310", "nar").parserVersion).toBe(RACE_RECORD_PARSER_VERSION);
+  });
+});
+
+describe("buildRaceRecord: ラップ表と戦績 API の pace の一致", () => {
+  // 同じ馬・同じレースが、結果ページのフィクスチャと戦績 API のフィクスチャの両方にある実例(全数。
+  // 距離は 1700m〈先頭が 100m の表〉・1800m・2000m)。200 の倍数の距離と 1700m 以外で一致するかは未確認。
+  const CASES = [
+    ["result_202602010607.html", "202602010607", "horse_results_2021105857.json", "29.9-37.6"],
+    ["result_202603020211.html", "202603020211", "horse_results_2023103386.json", "34.5-34.5"],
+    ["result_202605040205.html", "202605040205", "horse_results_2024103584.json", "37.9-34.1"],
+  ] as const;
+
+  it.each(CASES)("%s のペースは、戦績 API(%s)の pace と文字まで一致する", (resultFile, raceId, apiFile, expected) => {
+    const rec = mustOk(fx(resultFile), raceId, "central");
+    const run = parseHorseResults(fx(apiFile)).find((r) => r.raceIdRaw === raceId);
+    // 前提の固定: 戦績 API 側の実例が見つかり、値が期待どおり(見つからないと下の比較が空振りする)
+    expect(run?.pace).toBe(expected);
+    expect(rec.pace).toBe(run!.pace);
+  });
+
+  it("レコードに区間タイム・ペース・区分が入り、障害(表なし)は null", () => {
+    const rec = mustOk(fx("result_202603020211.html"), "202603020211", "central");
+    expect(rec.lapTimes).toHaveLength(9);
+    expect(rec.pace).toBe("34.5-34.5");
+    expect(rec.paceClass).toBe("M");
+    const jump = mustOk(fx("result_202605040709.html"), "202605040709", "central");
+    expect([jump.lapTimes, jump.pace, jump.paceClass]).toEqual([null, null, null]);
   });
 });
