@@ -4,9 +4,9 @@
  */
 import type { BoardRow, RaceRow, TaskMode } from "./api";
 import { buildBulkModel, hasStarted, jstHm, type BulkModel, type BulkUi } from "./bulk";
-import { todayJst, ymdToInput } from "./date";
+import { previousMonthJst, todayJst, ymdToInput } from "./date";
 import { gradeLabelForDisplay } from "./grade";
-import { buildHash, buildTargetsHash, REPORT_HASH, SETTINGS_HASH, VERIFY_HASH, type Route, type Venue } from "./route";
+import { buildHash, buildMonthlyHash, buildTargetsHash, REPORT_HASH, SETTINGS_HASH, VERIFY_HASH, type Route, type Venue } from "./route";
 
 export interface Badge {
   readonly label: string;
@@ -165,6 +165,11 @@ export interface ListModel {
   readonly verifyHref: string;
   /** 日報画面への入口のリンク先(Issue #235)。 */
   readonly reportHref: string;
+  /**
+   * 月報の入口のリンク先(Issue #544)。**今日(JST。`now`)から見た先月**の月報(`#report=YYYYMM`)。一覧で選んでいる開催日ではなく、閲覧者にも出す(日報と同じ)。
+   * 月報は月の最終日の 22:00 に作るので、その日の夜だけは先月を指す(月報の画面の「次の月報」から当月へ進める)。**`now` を省くと null**(リンクを出さない)。
+   */
+  readonly monthlyHref: string | null;
   /** 今日の狙い目の画面への入口のリンク先(Issue #336)。一覧で選んでいる日付(`#targets=YYYYMMDD`)。閲覧者にも出す(読み取りだけの画面)。 */
   readonly targetsHref: string;
   readonly venueTabs: readonly { readonly venue: Venue; readonly label: string; readonly href: string; readonly current: boolean }[];
@@ -208,6 +213,7 @@ export function buildListModel(input: ListModelInput): ListModel {
     settingsHref: input.readOnly === true ? null : SETTINGS_HASH,
     verifyHref: VERIFY_HASH,
     reportHref: REPORT_HASH,
+    monthlyHref: input.now === undefined ? null : buildMonthlyHash(previousMonthJst(input.now)),
     targetsHref: buildTargetsHash(route.date),
     venueTabs: (["central", "nar"] as const).map((venue) => ({
       venue,

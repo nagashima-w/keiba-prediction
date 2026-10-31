@@ -13,6 +13,19 @@ export function todayJst(now: Date): string {
   return `${y}${m}${d}`;
 }
 
+/**
+ * JST の今日から見た先月(YYYYMM。Issue #544。トップの「月報」の入口が指す月)。1 月は前年の 12 月。
+ * 月報は月の最終日の 22:00 に作るので、その日の夜だけは(当月の月報があっても)先月を指す。月報の画面の「次の月報」から当月へ進める。
+ */
+export function previousMonthJst(now: Date): string {
+  const today = todayJst(now);
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(4, 6));
+  const y = month === 1 ? year - 1 : year;
+  const m = month === 1 ? 12 : month - 1;
+  return `${String(y).padStart(4, "0")}${String(m).padStart(2, "0")}`;
+}
+
 /** YYYYMMDD の 8 桁で、実在する日付か(サーバの `parseKaisaiDate` と同じ判定。うるう年を含む)。 */
 export function isRealYmd(value: string): boolean {
   if (!/^[0-9]{8}$/.test(value)) {

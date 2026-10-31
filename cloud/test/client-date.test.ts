@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inputToYmd, isRealYmd, todayJst, ymdToInput, formatJstDateTime } from "../client/date";
+import { inputToYmd, isRealYmd, todayJst, ymdToInput, formatJstDateTime, previousMonthJst } from "../client/date";
 
 /** Issue #184: スマホ画面の日付の純関数。開催日は JST の日付で、`<input type="date">` は YYYY-MM-DD。 */
 
@@ -68,5 +68,32 @@ describe("formatJstDateTime(Issue #185。分析時刻は JST の固定表示。�
   it("解釈できない文字列は「日時不明」(例外にしない。元の文字列を出さない)", () => {
     expect(formatJstDateTime("")).toBe("日時不明");
     expect(formatJstDateTime("昨日")).toBe("日時不明");
+  });
+});
+
+/** Issue #544: トップの「月報」の入口が指す月(JST の今日から見た先月。YYYYMM)。 */
+describe("previousMonthJst(JST の今日から見た先月)", () => {
+  const cases: readonly [string, string][] = [
+    ["2026-10-15T00:00:00Z", "202609"], // 月の途中
+    ["2026-10-31T10:00:00Z", "202609"], // 月の最終日の夜(JST 19:00)は、まだ先月を指す(月報は 22:00 に作る。月報の画面の「次の月報」から当月へ進める)
+    ["2026-11-01T00:00:00Z", "202610"], // JST 11/01 9:00。ここから当月の月報が先月になる
+    ["2026-03-31T00:00:00Z", "202602"], // 31 日のある月 → 日数の短い月
+    ["2026-01-15T00:00:00Z", "202512"], // 1 月 → 前年 12 月(年の境界)
+    ["2026-01-01T00:00:00Z", "202512"], // 1 月 1 日
+    ["2025-12-31T14:59:59Z", "202511"], // JST 12/31 23:59:59 はまだ 12 月 → 先月は 11 月
+    ["2025-12-31T15:00:00Z", "202512"], // UTC では 12/31 でも JST は 1/1 → 先月は前年 12 月(JST の境界)
+    ["2024-03-01T00:00:00Z", "202402"], // うるう年の 2 月
+    ["2026-12-20T00:00:00Z", "202611"], // 12 月は年を戻さない
+  ];
+  for (const [utc, expected] of cases) {
+    it(`${utc} → ${expected}`, () => {
+      expect(previousMonthJst(new Date(utc))).toBe(expected);
+    });
+  }
+
+  it("返す値は実在する月(YYYYMM)で、月報のハッシュにできる", () => {
+    const month = previousMonthJst(new Date("2026-01-15T00:00:00Z"));
+    expect(month).toMatch(/^[0-9]{6}$/);
+    expect(isRealYmd(`${month}01`)).toBe(true);
   });
 });
