@@ -156,6 +156,8 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
     // 検証への入口は閲覧者にも出す(Issue #263。閲覧者の要求は集計のやり直しを起こさない)。設定への入口は管理者だけ(Issue #238。閲覧者は href が null)。日報は閲覧者にも出す。
     h("a", { class: "verify-link", href: model.verifyHref }, ["検証"]),
     h("a", { class: "report-link", href: model.reportHref }, ["日報"]),
+    // 月報の入口(Issue #544)。日報の直後。閲覧者にも出す。`now` を省いたモデルでは出さない(本番の app.ts は必ず now を渡す)。
+    ...(model.monthlyHref === null ? [] : [h("a", { class: "monthly-link", href: model.monthlyHref }, ["月報"])]),
     ...(model.settingsHref === null ? [] : [h("a", { class: "settings-link", href: model.settingsHref }, ["設定"])]),
   ]);
   const notices: VNode[] = [];

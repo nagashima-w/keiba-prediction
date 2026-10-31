@@ -15,7 +15,7 @@ import { sampleOutcome } from "./baba-sample";
 
 /**
  * Issue #294: 日単位の DO(`RaceDayCore`)の中の、馬場の取得(Issue #478 で取得先を JRA のページに替えた。Issue #480 で、当日の値がそろうまで取り直す形にした)。
- * 前夜 21:00 の計画(中央の一覧あり)→ 翌朝 09:00 にアラームで取得 → 保存。そろわなければ 15 分おきに 12:00 まで取り直す。「1 枠 1 回」を、再起動・並行・再計画(救済)でも守る。
+ * 前夜 21:00 の計画(中央の一覧あり)→ 翌朝 09:00 にアラームで取得 → 保存。そろわなければ 10 分おきに 12:00 まで取り直す。「1 枠 1 回」を、再起動・並行・再計画(救済)でも守る。
  * 計画の中央の場(見本の日の一覧は 06・09)が「そろった」の分母なので、取得口の見本もその 2 場で返す。
  * ゲート・保存先・取得口は偽(実 netkeiba にも JRA にも触れない)。ストレージは `node:sqlite`。
  */
@@ -28,8 +28,8 @@ const DATE = "20261012";
 const jst = (s: string): number => Date.parse(`${s}+09:00`);
 const T_2100 = jst("2026-10-11T21:00:00");
 const AT_0900 = jst("2026-10-12T09:00:00");
-/** 枠 k の時刻(09:00 + 15 分 × k)。 */
-const slotAt = (k: number): number => AT_0900 + k * 15 * 60_000;
+/** 枠 k の時刻(09:00 + 10 分 × k)。 */
+const slotAt = (k: number): number => AT_0900 + k * 10 * 60_000;
 /** 見本の日(2026-10-12)の計画の中央の場コード(一覧のフィクスチャの race_id から)。 */
 const PLAN_VENUES = ["06", "09"] as const;
 const CENTRAL_HTML = fixture("race_list_sub_20260927.html");
@@ -305,19 +305,19 @@ describe("開催日の朝に取得する", () => {
 });
 
 describe("当日の値がそろうまで取り直す(Issue #480)", () => {
-  it("値が載るまで 15 分おきに取り直し、そろった枠で止まる(10:15 に載る → 09:00・09:15・…・10:15 の 6 回。以後は 12:30 まで 0 回)", async () => {
+  it("値が載るまで 10 分おきに取り直し、そろった枠で止まる(10:10 に載る → 09:00・09:10・…・10:10 の 8 回。以後は 12:30 まで 0 回)", async () => {
     const h = harness();
-    h.api.respond = () => (h.clock.now >= slotAt(5) ? planOutcome() : notYet());
+    h.api.respond = () => (h.clock.now >= slotAt(7) ? planOutcome() : notYet());
     await plan2100(h);
     const times = await babaTimes(h, jst("2026-10-12T12:30:00"));
-    expect(times).toEqual([0, 1, 2, 3, 4, 5].map(slotAt)); // 09:00 〜 10:15 の 15 分おき
-    expect(h.api.calls).toBe(6);
-    expect(slotAt(5)).toBe(jst("2026-10-12T10:15:00"));
-    expect(h.store.finishes.map((f) => [f.finish.slot, f.finish.complete])).toEqual([[0, false], [1, false], [2, false], [3, false], [4, false], [5, true]]);
+    expect(times).toEqual([0, 1, 2, 3, 4, 5, 6, 7].map(slotAt)); // 09:00 〜 10:10 の 10 分おき
+    expect(h.api.calls).toBe(8);
+    expect(slotAt(7)).toBe(jst("2026-10-12T10:10:00"));
+    expect(h.store.finishes.map((f) => [f.finish.slot, f.finish.complete])).toEqual([[0, false], [1, false], [2, false], [3, false], [4, false], [5, false], [6, false], [7, true]]);
     expect(meta(h, BABA_META_DONE)).toBe("1");
   });
 
-  it("最後まで載らない日は、12:00 の枠までの 13 回で打ち切り。それ以降は 0 回(最大 13 回)", async () => {
+  it("最後まで載らない日は、12:00 の枠までの 19 回で打ち切り。それ以降は 0 回(最大 19 回)", async () => {
     const h = harness();
     h.api.respond = () => notYet();
     await plan2100(h);
@@ -332,7 +332,7 @@ describe("当日の値がそろうまで取り直す(Issue #480)", () => {
     const h = harness();
     h.api.respond = () => {
       const full = planOutcome();
-      return h.clock.now >= slotAt(2) ? full : { ...full, venues: full.venues.slice(0, 1) }; // 06 だけ先に載る → 10:00 に 09 も載る
+      return h.clock.now >= slotAt(2) ? full : { ...full, venues: full.venues.slice(0, 1) }; // 06 だけ先に載る → 09:20 に 09 も載る
     };
     await plan2100(h);
     const times = await babaTimes(h, jst("2026-10-12T12:30:00"));
@@ -344,7 +344,7 @@ describe("当日の値がそろうまで取り直す(Issue #480)", () => {
     ]);
   });
 
-  it("DO が眠っていても、アラームは次の枠の時刻に張られている(取得の直後のアラーム = 次の枠 09:15)", async () => {
+  it("DO が眠っていても、アラームは次の枠の時刻に張られている(取得の直後のアラーム = 次の枠 09:10)", async () => {
     const h = harness();
     h.api.respond = () => notYet();
     await plan2100(h);
@@ -357,14 +357,14 @@ describe("当日の値がそろうまで取り直す(Issue #480)", () => {
     expect(h.alarm.at).toBe(slotAt(1));
   });
 
-  it("最後の枠の後・12:15 以降に起きても取得しない。アラームの候補も張らない(日を越えても何もしない)", async () => {
+  it("最後の枠の後・12:10 以降に起きても取得しない。アラームの候補も張らない(日を越えても何もしない)", async () => {
     const h = harness();
     h.api.respond = () => notYet();
     await plan2100(h);
     h.sql.exec("DELETE FROM race_day_plan");
     h.sql.exec("DELETE FROM race_day_tasks");
-    // 計画の確定が遅い日: 12:15 に初めて起きる → 未実行の枠があっても動かない
-    h.clock.now = jst("2026-10-12T12:15:00");
+    // 計画の確定が遅い日: 12:10 に初めて起きる → 未実行の枠があっても動かない
+    h.clock.now = jst("2026-10-12T12:10:00");
     h.alarm.at = null;
     await h.core.runNextStep();
     expect(h.api.calls).toBe(0);
@@ -384,7 +384,7 @@ describe("同じ枠を二度送らない(再起動・並行・再計画)", () =>
     expect(h.api.calls).toBe(1);
   });
 
-  it("取得が失敗し続ける日(HTTP 500)も、同じ枠は再試行しない(1 枠 1 回)。DO の再起動の後も 13 回を超えない", async () => {
+  it("取得が失敗し続ける日(HTTP 500)も、同じ枠は再試行しない(1 枠 1 回)。DO の再起動の後も 19 回を超えない", async () => {
     const h = harness();
     h.api.respond = () => Promise.reject(new BabaFetchError("http-500"));
     await plan2100(h);
@@ -393,7 +393,7 @@ describe("同じ枠を二度送らない(再起動・並行・再計画)", () =>
     restart(h);
     await h.core.requestPlan({ kaisaiDate: DATE }); // 再配信(already-planned。アラームを張り直す)
     const times = await babaTimes(h, jst("2026-10-12T23:59:00"));
-    expect(times).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(slotAt)); // 枠 0 は済み。次の枠から取り直す(各枠 1 回)
+    expect(times).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map(slotAt)); // 枠 0 は済み。次の枠から取り直す(各枠 1 回)
     expect(h.api.calls).toBe(BABA_FETCH_SLOTS);
   });
 
@@ -459,7 +459,7 @@ describe("同じ枠を二度送らない(再起動・並行・再計画)", () =>
     const labels = await runDue(h, jst("2026-10-12T09:59:00"));
     expect(labels.filter((l) => l.includes(":baba:"))).toEqual([`${DATE}:baba:fetch:ok`]);
     expect(h.api.calls).toBe(1);
-    expect(h.store.finishes[0]!.finish.slot).toBe(2); // 09:30 = 枠 2(遅れて起きた枠を埋めず、いまの枠だけ)
+    expect(h.store.finishes[0]!.finish.slot).toBe(3); // 09:30 = 枠 3(遅れて起きた枠を埋めず、いまの枠だけ)
 
     await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
     restart(h);
@@ -484,7 +484,7 @@ describe("分析を止めない・遅らせない", () => {
     expect(label(await h.core.runNextStep())).toBe(`${DATE}:baba:fetch:failed`); // 先に 1 ステップだけ
     // 同じ起床の次のステップは、すぐ手動の予約の morning(厳密。ゲートは偽でブレーカー拒否)。起床を無駄にしない
     expect(label(await h.core.runNextStep())).toBe(`${raceId}:morning:fetch:failed`);
-    // 続きのステップでも、次の枠(09:15)より前には取得しない(同じ枠は 1 回)
+    // 続きのステップでも、次の枠(09:10)より前には取得しない(同じ枠は 1 回)
     const following: string[] = [];
     for (let i = 0; i < 5 && h.alarm.at !== null && h.alarm.at < slotAt(1); i++) following.push(await tick(h));
     expect(following.filter((l) => l.includes(":baba:"))).toEqual([]);

@@ -96,7 +96,8 @@ export function renderPage(email: string, role: "admin" | "viewer"): string {
 ${paletteCss()}
   * { box-sizing: border-box; }
   body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; line-height: 1.5; color: var(--fg); background: var(--bg); overflow-wrap: anywhere; }
-  main { max-width: 40rem; margin: 0 auto; min-width: 0; }
+  /* Issue #544: 40rem → 50rem。トップの上の並び(開催日・中央/地方・更新・狙い目・検証・日報・月報・設定)の必要幅は実測で約 740px(46.25rem)で、40rem だと「設定」が 2 段目に落ちた。狭い画面は従来どおり折り返す */
+  main { max-width: 50rem; margin: 0 auto; min-width: 0; }
   h1 { font-size: 1.25rem; margin: 0 0 4px; }
   h2 { font-size: 1.05rem; margin: 20px 0 8px; }
   /* Issue #191: 見出しのリンク(押すとトップ=一覧の画面。見出しの見た目のまま・タップしやすい高さ) */
@@ -200,8 +201,8 @@ ${paletteCss()}
   .t-left { margin-left: auto; font-weight: bold; white-space: nowrap; }
   .t-left.soon { color: var(--wait); }
   /* Issue #235: 日報画面(一覧の入口のリンク・レースごとのカード・箇条書き・生の文章。スマホ幅で横に伸ばさない=改行で折り返す) */
-  .report-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
-  .report-link + .settings-link { margin-left: 0; }
+  .report-link, .monthly-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .monthly-link + .settings-link { margin-left: 0; }
   .report-run { min-height: 44px; margin: 8px 0; }
   .report-list { margin: 4px 0 8px; padding-left: 1.3em; }
   .report-summary { margin: 4px 0 8px; overflow-wrap: anywhere; }

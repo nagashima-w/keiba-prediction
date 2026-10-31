@@ -49,7 +49,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 230,500 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 231,500 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -265,7 +265,10 @@ describe("生成物のドリフトと決定性", () => {
     // 新しい上限 230,500 の根拠: 実測 228,883 に約 1.6KB の余裕(#362 の前例。228,883 + 1,617 を 500 バイト単位に切り上げ)。余裕は 1,617 バイト。
     // (追記)Issue #533(単勝・複勝の点数の上限の設定項目 2 つ): 上限は 230,500 のまま据え置き。228,883 → 230,369(+1,486。コミット済みの生成物と、`pnpm run build:client` で作り直した今の生成物を、それぞれ `Buffer.byteLength(CLIENT_JS)` で測った)。
     // 最初の文面では 230,849(上限を 349 超えた)だったので、補助文を短くし、入力の誤りの文言を 2 項目で 1 つにまとめて収めた(上限の引き上げはしていない)。余裕は 131 バイト。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(230_500);
+    // (追記)Issue #544(トップに「月報」の入口を足した): 上限を 230,500 から 231,500 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`): 230,369(2b1bdc6〈作業ブランチの先端〉の生成物)→ 230,677(+308。`pnpm run build:client` の出力〈「230677 バイト」〉)。
+    // 計り方: `git show 2b1bdc6:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。増えたのは、`client/date.ts` の `previousMonthJst`(JST の今日から見た先月)・`list.ts` の `monthlyHref`・`view.ts` の入口のリンク 1 つ(「月報」の文言)。
+    // 上限までの余裕は #533 の後に 131 バイトしか無く、+308 が入らなかったため引き上げた。新しい上限 231,500 の余裕は 823 バイト(500 バイト単位に切り上げ。#362 の前例どおり)。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(231_500);
   });
 });
 
@@ -734,7 +737,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   it("Issue #238: 管理者(data-role=admin)の一覧には「検証」「設定」「日報」の入口が出る(対照)", async () => {
     const { root, calls } = run("", NOT_FOUND, "admin");
     await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
-    expect(linkClasses(root)).toEqual(expect.arrayContaining(["verify-link", "report-link", "settings-link"]));
+    expect(linkClasses(root)).toEqual(expect.arrayContaining(["verify-link", "report-link", "monthly-link", "settings-link"]));
   });
 
   it.each([
@@ -747,6 +750,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
     const classes = linkClasses(root);
     expect(classes).toContain("report-link"); // 前提: 一覧が描画されている
+    expect(classes).toContain("monthly-link"); // Issue #544: 月報の入口も閲覧者に出る
     expect(classes).toContain("verify-link");
     expect(classes).not.toContain("settings-link");
   });

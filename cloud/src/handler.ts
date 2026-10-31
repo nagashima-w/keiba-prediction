@@ -633,7 +633,7 @@ async function handleHorseRuns(request: Request, env: Env, now: () => Date): Pro
 /**
  * `GET /api/baba-fetch[?kaisai_date=YYYYMMDD]`(Issue #360。管理者専用): 馬場の取得の結果(D1 の `baba_fetches`・`baba_fetch_attempts`・`baba_conditions`)。
  * 開催日ごとに、結果の分類・取得の時刻・保存した競馬場の数と中身・捨てた競馬場の理由と計測日時の文字列(`dropped`。旧版の記録は null)を返す。
- * Issue #480 から、当日の値がそろうまで 15 分おきに取り直す(09:00 から 12:00 まで)ので、枠ごとの試み(`attempts`: 枠の番号・時刻・結果・その回で保存した数・そろったか)も日ごとに付ける。
+ * Issue #480 から、当日の値がそろうまで 10 分おきに取り直す(09:00 から 12:00 まで)ので、枠ごとの試み(`attempts`: 枠の番号・時刻・結果・その回で保存した数・そろったか)も日ごとに付ける。
  * 「当日の値がまだ載っていなかった」のか「計測日時が読めなかった」のかを、D1 のコンソールを開かずに確かめるための入口。
  * `kaisai_date` を省くと直近 {@link FETCH_LIST_LIMIT_DEFAULT} 日ぶん(新しい順)、指定するとその日だけ。
  * **JRA の URL・応答の本文・元の JSON は、保存もしておらず、応答にも出ない**(応答は明示の許可リストで作る)。
@@ -673,7 +673,7 @@ async function handleBabaFetch(request: Request, env: Env): Promise<Response> {
         venues_dropped: f.venuesDropped,
         dropped: f.dropped === null ? null : f.dropped.map((d) => ({ venue: d.venue, reason: d.reason, measured: d.measured })),
         saved: f.saved.map((v) => ({ venue_code: v.venueCode, venue_name: v.venueName, measured_at: v.measuredAt })),
-        // 枠ごとの試み(Issue #480。09:00 から 15 分おきに 12:00 まで、当日の値がそろうまで取り直す)。旧版の日・枠の記録が無い日は空。
+        // 枠ごとの試み(Issue #480。09:00 から 10 分おきに 12:00 まで、当日の値がそろうまで取り直す)。旧版の日・枠の記録が無い日は空。
         attempts: f.attempts.map((a) => ({
           slot: a.slot,
           attempted_at: a.attemptedAt,
