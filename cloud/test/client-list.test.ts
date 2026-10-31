@@ -330,3 +330,33 @@ describe("Issue #238: 閲覧者(readOnly)の一覧: 設定への入口を出さ�
     expect(viewer.groups).toHaveLength(1);
   });
 });
+
+describe("Issue #544: トップの「月報」の入口(monthlyHref)", () => {
+  const races = [race("202603020211")];
+
+  it.each([
+    ["月の途中", "2026-10-15T00:00:00Z", "#report=202609"],
+    ["月の最終日の夜(月報は 22:00 に作るので、その日はまだ先月を指す)", "2026-10-31T10:00:00Z", "#report=202609"],
+    ["月初(当月の月報が先月になる)", "2026-11-01T00:00:00Z", "#report=202610"],
+    ["1 月は前年 12 月", "2026-01-15T00:00:00Z", "#report=202512"],
+    ["JST の境界: UTC 12/31 15:00 は JST の 1/1", "2025-12-31T15:00:00Z", "#report=202512"],
+  ])("%s: now=%s → %s(管理者も閲覧者も同じ。日報の入口 reportHref は #report のまま)", (_label, nowIso, expected) => {
+    const admin = buildListModel(input({ list: { kind: "ready", races }, now: new Date(nowIso) }));
+    const viewer = buildListModel(input({ list: { kind: "ready", races }, now: new Date(nowIso), readOnly: true }));
+    expect(admin.monthlyHref).toBe(expected);
+    expect(viewer.monthlyHref).toBe(expected);
+    expect(admin.reportHref).toBe("#report");
+  });
+
+  it("月報の入口は、一覧で選んでいる開催日ではなく今日(now)で決まる(過去の日付の一覧でも、今日から見た先月)", () => {
+    expect(ROUTE.date).toBe("20260628"); // 前提: 一覧の日付は 2026-06
+    const model = buildListModel(input({ list: { kind: "ready", races }, now: new Date("2026-10-15T00:00:00Z") }));
+    expect(model.date).toBe("20260628");
+    expect(model.monthlyHref).toBe("#report=202609");
+  });
+
+  it("now を省くと null(リンクを出さない。日報のハッシュにフォールバックしない)", () => {
+    const model = buildListModel(input({ list: { kind: "ready", races } }));
+    expect(model.monthlyHref).toBeNull();
+  });
+});

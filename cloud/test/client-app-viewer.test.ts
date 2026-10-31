@@ -201,6 +201,9 @@ describe("閲覧者の画面から、管理者の入口・ボタンが消える(
     expect(byClass(admin.tree(), "verify-link")).toHaveLength(1);
     expect(byClass(admin.tree(), "settings-link")).toHaveLength(1);
     expect(byClass(admin.tree(), "report-link")).toHaveLength(1);
+    // Issue #544: 「月報」の入口(日報の直後)。管理者にも閲覧者にも出し、先月(この harness の今日は 2026-06-28 JST なので 202605)の月報を指す
+    expect(byClass(admin.tree(), "monthly-link")).toHaveLength(1);
+    expect(byClass(admin.tree(), "monthly-link")[0]!.attrs?.["href"]).toBe("#report=202605");
     const viewer = harness("viewer", `#date=${DATE}&venue=central`);
     viewer.app.start();
     await viewer.app.whenIdle();
@@ -208,6 +211,8 @@ describe("閲覧者の画面から、管理者の入口・ボタンが消える(
     expect(byClass(viewer.tree(), "verify-link")[0]!.attrs?.["href"]).toBe("#verify");
     expect(byClass(viewer.tree(), "settings-link")).toHaveLength(0);
     expect(byClass(viewer.tree(), "report-link")).toHaveLength(1);
+    expect(byClass(viewer.tree(), "monthly-link")).toHaveLength(1);
+    expect(byClass(viewer.tree(), "monthly-link")[0]!.attrs?.["href"]).toBe("#report=202605");
     // 一覧そのもの(レースの行)は閲覧者にも出る
     expect(byClass(viewer.tree(), "race").length + byClass(viewer.tree(), "venue-toggle").length).toBeGreaterThan(0);
   });
