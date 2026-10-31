@@ -44,9 +44,6 @@ function harness(): Harness {
             },
             first: async () => {
               await run();
-              if (sql.includes("COUNT(DISTINCT horse_id)")) {
-                return { rows: 12, horses: 3, firstSeenMin: 1, firstSeenMax: 2, runDateMin: "2025/01/01", runDateMax: "2026/06/01" };
-              }
               if (sql.includes("COALESCE(SUM(n)")) {
                 return { cells: 4, runs: 40, n10: 2, n30: 1, n100: 0 };
               }
@@ -54,6 +51,10 @@ function harness(): Harness {
             },
             all: async () => {
               await run();
+              // 表の総数は出どころごと(GROUP BY source)の行で返る(Issue #552)。source が NULL = 戦績 API 由来
+              if (sql.includes("COUNT(DISTINCT horse_id)")) {
+                return { results: [{ source: null, rows: 12, horses: 3, firstSeenMin: 1, firstSeenMax: 2, runDateMin: "2025/01/01", runDateMax: "2026/06/01" }] };
+              }
               return { results: [] };
             },
           };
@@ -85,6 +86,7 @@ describe("GET /api/horse-runs: 診断", () => {
     const body = (await res.json()) as { ok: boolean; table: { rows: number; horses: number }; saves: { days: number; sinceMs: number }; note: string; cells?: unknown };
     expect(body.ok).toBe(true);
     expect(body.table).toMatchObject({ rows: 12, horses: 3 });
+    expect((body as { resultRows?: unknown }).resultRows).toStrictEqual({ rows: 0, horses: 0, byParserVersion: {}, runDateMin: null, runDateMax: null }); // Issue #552: 結果ページ由来の行は別の欄
     expect(body.saves.days).toBe(STATUS_DAYS_DEFAULT);
     expect(body.saves.sinceMs).toBe(NOW.getTime() - STATUS_DAYS_DEFAULT * 86_400_000);
     expect(body.note).toContain("手動の発走前だけの分析");

@@ -199,10 +199,10 @@ describe("readHorseRunsStatus: 出どころで分ける(Issue #552)", () => {
       horses: [{ horseId: "2020100001", results: [run(1, { date: "2026/05/03" }), run(2, { date: "2025/12/20", venueKind: "地方", raceIdRaw: "202644031511" })] }],
     });
   }
-  const resultRun = (horseId: string, n: number, patch: Partial<HorseRaceResult>) => ({
+  const resultRun = (horseId: string, n: number, patch: Partial<HorseRaceResult>, parserVersion = HORSE_RUN_PARSER_VERSION + 5) => ({
     horseId,
     raceKey: patch.raceIdRaw ?? raceKey(n),
-    parserVersion: HORSE_RUN_PARSER_VERSION + 5,
+    parserVersion,
     firstSeenAt: NOON - 99 * DAY_MS,
     data: JSON.stringify(encodeHorseRun(run(n, patch))),
   });
@@ -268,7 +268,7 @@ describe("readHorseRunsStatus: 出どころで分ける(Issue #552)", () => {
 
   it("置き換えの件数は期間内の保存の集計に足される。この項目が無い古い記録は 0 として読む(読めなかった数に入れない)", async () => {
     await seed();
-    await writeResultRuns(local.db, [resultRun("2020100003", 1, {}), resultRun("2020100003", 2, {})]);
+    await writeResultRuns(local.db, [resultRun("2020100003", 1, {}, HORSE_RUN_PARSER_VERSION), resultRun("2020100003", 2, {}, HORSE_RUN_PARSER_VERSION)]); // 現行の版(現行より新しい版は置き換えない)
     await new D1HorseRunsStore({ db: local.db }).saveRace({ raceId: "202606280512", kaisaiDate: "20260628", savedAt: NOON + 1000, horses: [{ horseId: "2020100003", results: [run(1), run(2)] }] });
     const old = JSON.parse((await local.db.prepare("SELECT stats_json AS j FROM horse_run_saves ORDER BY saved_at LIMIT 1").first<{ j: string }>())!.j) as Record<string, unknown>;
     delete old["rowsReplacedFromResult"]; // 項目が増える前の記録の形
