@@ -351,6 +351,15 @@ async function main(): Promise<void> {
       check(`${label}: 一覧に 5 件。分析日時の降順(id の順ではない: id は降順に並んでいない)`, items.length === 5 && items.every((a, i) => i === 0 || items[i - 1]!.analyzedAt >= a.analyzedAt) && items.some((a, i) => i > 0 && items[i - 1]!.id < a.id) && items[0]!.analyzedAt === "2026-03-02T05:00:00.000Z", JSON.stringify(items.map((a) => [a.id, a.analyzedAt])));
       const detail = await req(port, "GET", `/api/analyses/${items[items.length - 2]!.id}`);
       check(`${label}: 詳細(D1 + R2)が読める(detail present)`, detail.status === 200 && detail.text.includes('"detail":"present"'), `${detail.status} ${detail.text.slice(0, 200)}`);
+      // Issue #551(#549-A2): 過去の結果ページの保存(R2 → D1)。workerd の実環境で、node:zlib の gzip・R2 の put/get・D1 の目録の UPSERT を通す(本番の Worker はまだ呼ばない)。
+      const archive = await req(port, "GET", "/smoke/race-archive");
+      const archiveJson = parseJson(archive.text);
+      const archiveEntry = archiveJson["entry"] as { raceId?: string; kind?: string; r2Key?: string; parserVersion?: number } | null | undefined;
+      check(`${label}: 過去の結果ページの保存: 1 回目 saved・2 回目 unchanged(同じ中身の再保存)、R2 の中身は gzip(先頭 1f 8b)で、読み戻した HTML とレコードが元と一致し、無いレースは missing。目録は 1 行(中央・R2 のキー)、Class A は +2(put 2 回)・Class B は +2(読み出し 2 回)`,
+        archive.status === 200 && archiveJson["ok"] === true && JSON.stringify(archiveJson["statuses"]) === '["saved","unchanged"]' && archiveJson["readStatus"] === "found" && archiveJson["missingStatus"] === "missing" && archiveJson["htmlSame"] === true && archiveJson["recordSame"] === true
+          && JSON.stringify(archiveJson["gzipHead"]) === "[31,139]" && archiveJson["catalogCount"] === 1 && archiveEntry?.raceId === "202603020211" && archiveEntry.kind === "central" && archiveEntry.r2Key === "race-results/202603020211.json.gz"
+          && (archiveJson["horses"] as number) > 5 && JSON.stringify(archiveJson["opsDelta"]) === '{"classA":2,"classB":2}' && typeof archiveJson["dbSizeBytes"] === "number" && (archiveJson["dbSizeBytes"] as number) > 0,
+        `${archive.status} ${archive.text.slice(0, 400)}`);
 
       // Issue #336: 今日の狙い目(本物の D1 と、本物の日単位の DO の getPlanProgress)。保存した分析のどれかの開催日で、200・形が揃い、分析済みの要約になる。R2 には触れない。
       const targetsDate = items.map((a) => a.kaisaiDate?.replace(/\D/g, "") ?? "").find((d) => d.length === 8);

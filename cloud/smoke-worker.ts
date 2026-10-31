@@ -44,6 +44,8 @@ import { GATE_NAME, type Env } from "./src/handler";
 import { runCloudAnalysis } from "./src/pipeline";
 import { RaceDay } from "./src/race-day-do";
 import { D1AnalysisStore } from "./src/analysis-repository";
+import { D1RaceArchiveStore } from "./src/race-archive-repository";
+import { buildRaceRecord } from "../packages/core/src/scraper/race-record";
 import { D1ResultStore } from "./src/result-repository";
 import worker from "./src/worker";
 
@@ -439,6 +441,48 @@ async function smokeSeedAnalyses(env: SmokeEnv): Promise<Response> {
 }
 
 /**
+ * Issue #551(#549-A2): 過去の結果ページの保存(`D1RaceArchiveStore`: R2 → D1)を、workerd の実環境(本物の D1・R2・`node:zlib` の gzip)で通す。smoke 専用
+ * (認証の関門の前に置く。netkeiba にも Anthropic にも出ない)。本番の Worker はこの部品をまだ呼ばない(呼び出し元は #549-A3)。
+ *  - `/smoke/race-archive`: フィクスチャの結果ページ(中央 202603020211)を読み取り、2 回保存し(1 回目 saved・2 回目 unchanged)、R2 から読み戻し、目録の 1 行を取る。
+ *    R2 のオブジェクトの先頭 2 バイト・目録の件数・r2_ops の回数の増分・読み戻した HTML とレコードが元と同じか(文字列の比較)を返す。
+ */
+async function smokeRaceArchive(env: SmokeEnv): Promise<Response> {
+  const built = buildRaceRecord(resultCentralHtml, "202603020211", "central");
+  if (!built.ok) {
+    return Response.json({ ok: false, error: `読み取れません: ${built.category} ${built.detail}` }, { status: 500 });
+  }
+  const store = new D1RaceArchiveStore({ db: env.DB, bucket: env.ANALYSIS_DETAIL });
+  const opsOf = async (): Promise<{ a: number; b: number }> => {
+    const row = await env.DB.prepare("SELECT COALESCE(SUM(class_a), 0) AS a, COALESCE(SUM(class_b), 0) AS b FROM r2_ops").first<{ a: number; b: number }>();
+    return { a: row?.a ?? 0, b: row?.b ?? 0 };
+  };
+  const opsBefore = await opsOf();
+  const first = await store.saveRaceArchive({ record: built.record, html: resultCentralHtml });
+  const second = await store.saveRaceArchive({ record: built.record, html: resultCentralHtml });
+  const read = await store.readRaceArchive("202603020211");
+  const missing = await store.readRaceArchive("202603020299");
+  const entry = await store.getCatalogEntry("202603020211");
+  const object = await env.ANALYSIS_DETAIL.get("race-results/202603020211.json.gz");
+  const head = object === null ? null : Array.from(new Uint8Array(await object.arrayBuffer()).slice(0, 2));
+  const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM race_archive").first<{ n: number }>();
+  const opsAfter = await opsOf();
+  return Response.json({
+    ok: true,
+    statuses: [first.status, second.status],
+    readStatus: read.status,
+    missingStatus: missing.status,
+    htmlSame: read.status === "found" && read.archive.html === resultCentralHtml,
+    recordSame: read.status === "found" && JSON.stringify(read.archive.record) === JSON.stringify(built.record),
+    gzipHead: head,
+    catalogCount: count?.n ?? null,
+    entry,
+    horses: built.record.horses.length,
+    opsDelta: { classA: opsAfter.a - opsBefore.a, classB: opsAfter.b - opsBefore.b },
+    dbSizeBytes: first.dbSizeBytes,
+  });
+}
+
+/**
  * Issue #279・#280: 月報の DO `MonthlyReportDO` を、workerd の実環境(本物の DO の SQLite・アラーム・D1)で通すための材料の投入。smoke 専用(認証の関門の前に置く。netkeiba にも Anthropic にも Discord にも出ない)。
  *  - `/smoke/monthly/seed?month=YYYYMM`: ローカルの D1 に、その月の分析を 2 件(月初と月末の開催日。版は別々)と、月初の分の結果(1 着の馬の行)を入れる。
  * 月報の作成・作り直しの依頼は、本番の入口(管理者の `POST /api/monthly-reports/run`)を smoke.ts が直接叩く(Issue #280。ここに RPC の近道は持たない)。
@@ -481,6 +525,13 @@ export default {
     if (url.pathname.startsWith("/smoke/race-day/")) {
       try {
         return await smokeRaceDay(url, env);
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
+    if (url.pathname === "/smoke/race-archive") {
+      try {
+        return await smokeRaceArchive(env);
       } catch (error) {
         return Response.json({ ok: false, error: String(error) }, { status: 500 });
       }

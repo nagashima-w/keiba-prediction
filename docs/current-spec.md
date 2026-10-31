@@ -1438,6 +1438,22 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
   (3) 保存の前に今月の行を読むため、**migration 0003 が適用済みであることが前提**(CI は migration を `wrangler deploy` の前に適用する)。適用前に新しい Worker が動くと、保存と詳細の読み出しが失敗する。
   (4) ローカルの D1 での確認で、本番の D1 とは別ビルドの SQLite でありうる(upsert〈`ON CONFLICT DO UPDATE`〉は D1 の SQLite が対応しているはずだが、本番での確認は最初の実保存)。
 
+### 過去の結果ページの保存と目録(#551〈#549-A2〉。**版数は 1.44.0 のまま**〈凍結〉。**本番の Worker はまだ呼ばない**)
+過去 5 年の中央の結果ページを Cloudflare で取って保存する部品。取得そのもの(#549-A3)と、`horse_runs` への変換(#549-B)は別の Issue。
+- **R2**: 1 レース 1 オブジェクト。キーは `race-results/{race_id}.json.gz`。中身は `{format:1, parserVersion, fetchedAt, record, html}` の JSON を gzip(level 1)したもの。`record` は `buildRaceRecord` の出力、`html` は結果ページ(UTF-8)。元のページを残すのは、読み取りを直したときに取り直さず読み直すため。1 件は約 39KB の見込み(手元の 300 件で、HTML が平均 129KB、gzip 後が平均 37KB)。符号化は `cloud/src/race-archive-format.ts`。
+- **D1(migration 0031。追加のみ。D1 専用)**: `race_archive(race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at)`。主キーは `race_id`。`WITHOUT ROWID`・副索引なし。`raw_bytes` は gzip 前の JSON のバイト数。
+- **保存**(`cloud/src/race-archive-repository.ts` の `D1RaceArchiveStore.saveRaceArchive`): 入力の検査と符号化 → D1 の読み取り(今月の `r2_ops` と `SELECT 1`)→ R2 の put(1 回)→ D1 の batch(`r2_ops` の Class A を +1 と、目録の UPSERT)の順。R2 が先で、D1 が後。
+  - 戻り値は `saved`・`unchanged`・`skipped`(`r2-fence`・`db-size`・`db-size-unknown`)。`dbSizeBytes` も返す。
+  - D1 の大きさ(`meta.size_after`)が 400,000,000 バイト(10 進)を超えたら保存しない。数として取れなければ `db-size-unknown` で保存しない。上限は注入できる。
+  - Class A が柵(10 万回。`r2-fence.ts`)に達していたら保存しない。両方に当たるときは `db-size` を返す。
+  - 同じレースを何度保存しても、目録は 1 行。`kind`・`race_date`・`parser_version`・`r2_key`・`raw_bytes` がすべて同じなら、目録は変わらない(書き込みは 0 行)。変わるときは `fetched_at` も新しくする。
+  - 書き込み行数(ローカルの workerd で固定): 新規は 2 行(計数 1・目録 1)、同じ中身の再保存は 1 行(計数だけ)。
+  - R2 の put は 1 回だけで、再試行は呼び出し側が行う。put のあとで D1 が失敗すると R2 にだけ置かれる。もう一度保存すれば目録が書かれる。
+  - **Class A は put のあとに数える**。put が成功して D1 の batch が失敗した保存は、数えられない(1 回につき 1 の過少)。分析の保存(`analysis-repository.ts`)は逆で、put の前に数えている。
+- **読み出し**(`readRaceArchive`): Class B が柵に達していれば R2 を引かず `skipped`。そうでなければ get を 1 回行い、要求を出したら Class B を +1 する(計数の失敗は読み出しを妨げない)。無い・壊れている・別のレースのものは `missing`。get の失敗は例外(`missing` と区別する)。`getCatalogEntry` は目録の 1 行を返す(D1 だけ)。列挙は #549-B で足す。
+- **限界**: 本番の D1 の `size_after` の意味は未確認。本番の R2・D1 での動作は、最初の保存で確かめる。
+- **検査**: `cloud/test/race-archive-format.test.ts`・`race-archive-repository.test.ts`・`migration-0031.test.ts`、`scripts/test/cloud-d1-schema.test.ts`。smoke は `/smoke/race-archive`(workerd 上の `node:zlib`・R2・D1)を確かめる。
+
 ### クラウド版の D1 の容量の見積もり(#171。再現: `pnpm tsx scripts/measure-d1-size.ts`)
 Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 500 MB〈Free〉)。見積もりの手順を残す(#147 の「再現手段がない」への対応)。
 **入力はすべてリポジトリ内**(中央16頭の 202603020211 のフィクスチャ・LLM の実応答 36 本・戦績フィクスチャ5頭)。**乱数は固定の種で、同じ N なら出力は完全に同じ**
