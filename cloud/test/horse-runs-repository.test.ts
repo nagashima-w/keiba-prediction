@@ -328,6 +328,22 @@ describe("D1HorseRunsStore.saveRace: 結果ページ由来の行(Issue #552)", (
     expect(again).toMatchObject({ horsesFirstSeen: 0, rowsReplacedFromResult: 0, rowsDupSameDay: 3, rowsWrittenRuns: 0 });
   });
 
+  it("結果ページ由来の行の版が戦績 API の現行の版より大きくても、戦績 API の保存は置き換える(結果ページ由来の版は別の目盛り。#553)。戦績 API 由来の新しい版の行は従来どおり触らない", async () => {
+    const BIG = HORSE_RUN_PARSER_VERSION + 7;
+    await writeResultRuns(local.db, resultRows(1, [1, 2]).map((r) => ({ ...r, parserVersion: BIG })));
+    await local.db.prepare("INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source) VALUES (?, ?, ?, ?, '[\"新\"]', NULL)").bind(horseId(1), raceKey(3), HORSE_RUN_PARSER_VERSION + 1, RESULT_AT).run();
+    const before = (await local.db.prepare("SELECT race_key, parser_version, source FROM horse_runs ORDER BY race_key").all()).results;
+    expect(before.map((r) => r["parser_version"])).toEqual([BIG, BIG, HORSE_RUN_PARSER_VERSION + 1]); // 前提: 3 行とも現行より新しい版
+    const stats = await new D1HorseRunsStore({ db: local.db }).saveRace(input([{ horseId: horseId(1), results: [run(1), run(2), run(3)] }]));
+    expect(stats).toMatchObject({ rowsReplacedFromResult: 2, rowsStoredNewer: 1, rowsChanged: 0, rowsReparsed: 0 });
+    const rows = (await local.db.prepare("SELECT race_key, parser_version, source, data FROM horse_runs ORDER BY race_key").all()).results;
+    expect(rows).toStrictEqual([
+      { race_key: raceKey(1), parser_version: HORSE_RUN_PARSER_VERSION, source: null, data: JSON.stringify(encodeHorseRun(run(1))) },
+      { race_key: raceKey(2), parser_version: HORSE_RUN_PARSER_VERSION, source: null, data: JSON.stringify(encodeHorseRun(run(2))) },
+      { race_key: raceKey(3), parser_version: HORSE_RUN_PARSER_VERSION + 1, source: null, data: '["新"]' },
+    ]);
+  });
+
   it("書き込みの文の数は変わらない: 置き換えは新規と別の文を増やさず、上書きの文 1 つにまとまる(読み 1・race_results の確認 1・上書き 1・記録 1)", async () => {
     await writeResultRuns(local.db, resultRows(1, [1, 2]));
     const { db, sqls } = recording(local.db);

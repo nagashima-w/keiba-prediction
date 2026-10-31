@@ -281,11 +281,15 @@ describe("planHorseRunsSave: 結果ページ由来の行(Issue #552)", () => {
     expect(stats.mismatchSamples).toEqual([]); // 標本にも入れない
   });
 
-  it("保存済みの版が新しい結果ページ由来の行は、置き換えずに触らない(旧い Worker の書き込みで新しい版を壊さない。『保存済みが新しい』が先に効く)", () => {
+  it("結果ページ由来の行は、保存済みの版が現行より新しくても戦績 API が置き換える(戦績 API を正とする。結果ページ由来の版は別の目盛り。#553)", () => {
     const r = run(1);
-    const plan = planHorseRunsSave(input([{ horseId: h, results: [r] }]), [fromResult({ ...r, time: "新" }, { parserVersion: HORSE_RUN_PARSER_VERSION + 1 })]);
-    expect(plan.updates).toEqual([]);
-    expect(summarizeSave(plan, new Set(), 0)).toMatchObject({ rowsStoredNewer: 1, rowsReplacedFromResult: 0 });
+    const old = fromResult({ ...r, time: "新" }, { parserVersion: HORSE_RUN_PARSER_VERSION + 5 });
+    expect(old.parserVersion).toBeGreaterThan(HORSE_RUN_PARSER_VERSION); // 前提: 現行より新しい版
+    const plan = planHorseRunsSave(input([{ horseId: h, results: [r] }]), [old]);
+    expect(plan.updates).toHaveLength(1); // 前提: 置き換えられる(空振りでない)
+    expect(plan.updates[0]).toMatchObject({ parserVersion: HORSE_RUN_PARSER_VERSION, data: JSON.stringify(encodeHorseRun(r)) });
+    expect(plan.updates[0]!.source ?? null).toBeNull();
+    expect(summarizeSave(plan, new Set(), 0)).toMatchObject({ rowsReplacedFromResult: 1, rowsStoredNewer: 0 });
   });
 
   it("戦績 API 由来の行の扱いは変えない: source が NULL の行は従来どおり(一致・不一致・再パース)。初見時刻は据え置き", () => {

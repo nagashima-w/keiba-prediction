@@ -10,9 +10,8 @@
  *    違ったスロットの番号と種別は、1回の保存で最大 {@link MISMATCH_SAMPLE_LIMIT} 件まで標本として残す。
  *  - **再パース**: 保存済みの版数が古い → 内容が同じでも上書きして版を上げる(不一致には数えない)。保存済みの版数が新しい(旧い Worker が動いているとき)は触らない。
  *  - **置き換え**(Issue #552〈#549-B1〉): 保存済みが**結果ページ由来**(`source = 'result'`。過去の結果ページから変換した行)→ 戦績 API を正として上書きし、`source` を NULL に戻す。
- *    内容が同じでも違っても、版が古くても、不一致・再パース・重複には数えない(`rowsReplacedFromResult`)。初見時刻は**保存時刻に更新する**
+ *    内容が同じでも違っても、版が古くても新しくても(結果ページ由来の行の版は `RESULT_RUN_VERSION` で、戦績 API の版とは別の目盛り。#553)、不一致・再パース・重複には数えない(`rowsReplacedFromResult`)。初見時刻は**保存時刻に更新する**
  *    (`first_seen_at` は「戦績 API で初めて保存した時刻」。診断の `firstSeenMin/Max` と、同日の再実行か前日以前かの判定がこの意味で読むため)。
- *    ただし保存済みの版数が新しい行は、結果ページ由来でも触らない(旧い Worker が新しい版を壊さない。「保存済みが新しい」が先に効く)。
  *    **初見の馬の判定は戦績 API 由来の行だけで行う**(結果ページ由来の行しか無い馬は初見)。
  *
  * ## 判断材料(`SaveStats`。`horse_run_saves` に1回の保存ごとに1行)
@@ -260,16 +259,17 @@ export function planHorseRunsSave(input: PlanInput, stored: readonly StoredRun[]
         horseNewKeys.push(key);
         continue;
       }
-      if (old.parserVersion > HORSE_RUN_PARSER_VERSION) {
-        counts.storedNewer += 1;
-        continue;
-      }
       if (old.source === SOURCE_RESULT) {
         // 戦績 API を正とする: 結果ページ由来の行を置き換える(source を NULL に戻し、初見時刻は保存時刻)。不一致・再パース・重複には数えない。
+        // 結果ページ由来の行の版(RESULT_RUN_VERSION)は戦績 API の版(HORSE_RUN_PARSER_VERSION)とは別の目盛りなので、版の大小は見ない(#553)。
         counts.replaced += 1;
         updates.push({ horseId: horse.horseId, raceKey: key, parserVersion: HORSE_RUN_PARSER_VERSION, firstSeenAt: input.savedAt, data });
         horseNewKeys.push(key);
         replacedKeys.push(key);
+        continue;
+      }
+      if (old.parserVersion > HORSE_RUN_PARSER_VERSION) {
+        counts.storedNewer += 1;
         continue;
       }
       if (old.parserVersion < HORSE_RUN_PARSER_VERSION) {

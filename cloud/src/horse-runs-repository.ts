@@ -127,9 +127,9 @@ async function writeRows(db: HorseRunsDb, sql: string, rows: readonly PlannedRun
 
 /**
  * 結果ページ由来の1行(書く側が渡す)。`source = 'result'` で書かれる。
- * `parserVersion` は**呼び出し側が渡す値をそのまま保存する**(意味は変換の側〈#549-B2〉が決める。この関数は意味を決めない)。
- * ただし戦績 API の保存は、保存済みの版が現行の `HORSE_RUN_PARSER_VERSION` より**新しい**行(結果ページ由来でも)には触れないので、
- * 現行より大きい値を渡すと、戦績 API の保存による置き換えを受けなくなる。版の付け方はこれを踏まえて決めること。
+ * `parserVersion` は**呼び出し側が渡す値をそのまま保存する**(この関数は意味を決めない)。変換の側が `RESULT_RUN_VERSION`
+ * (`packages/core/src/scraper/race-record-to-runs.ts`。#549-B2)を渡す。これは戦績 API の `HORSE_RUN_PARSER_VERSION` とは別の目盛りで、
+ * 戦績 API の保存は結果ページ由来の行を版の大小にかかわらず置き換える(#553)ので、現行より大きくても置き換えは妨げられない。
  */
 export interface ResultRunRow {
   readonly horseId: string;
