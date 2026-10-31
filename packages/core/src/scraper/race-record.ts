@@ -1,7 +1,8 @@
 /**
- * 結果ページ 1 枚から、NDJSON の 1 行(1 レース)を作る。Issue #532。開発用。
+ * 結果ページ 1 枚から、NDJSON の 1 行(1 レース)を作る。Issue #532。#549-A1 で `scripts/history-results/build-record.ts` から core へ移した
+ * (開発用スクリプトと、本番の Cloudflare の取得〈#549-A3〉の両方から使う)。
  *
- * 既存の `parseRaceResult`(着順・通過順・後3F・人気・単勝オッズ・払戻)と、補助パーサ(`result-extra.ts`)の両方で読み、
+ * 既存の `parseRaceResult`(着順・通過順・後3F・人気・単勝オッズ・払戻)と、補助パーサ(`parse-result-extra.ts`)の両方で読み、
  * **行順・馬番・馬名が合うことを確かめてから**馬ごとに合成する。合わなければそのレースは「読めない」として理由つきで返す
  * (値を黙って合成しない)。ほかにも、race_id と title の食い違い(年・レース番号・地方の月日)・種別の置き場違い・文字化けを弾く。
  */
@@ -11,18 +12,21 @@ import {
   kaisaiDateFromNarRaceId,
   parseRaceId,
   venueKindOfRaceId,
-} from "../../packages/core/src/scraper/ids.js";
+  type RaceIdVenueKind,
+} from "./ids.js";
 import {
   parseRaceResult,
   RaceResultNotConfirmedError,
-} from "../../packages/core/src/scraper/parse-race-result.js";
+} from "./parse-race-result.js";
 import type {
   RaceComboPayoutResult,
   RacePayoutEntry,
   RaceResult,
-} from "../../packages/core/src/scraper/types.js";
-import type { Kind } from "./layout.js";
-import { parseResultExtra, ResultExtraError, type ExtraHeader, type ExtraRow } from "./result-extra.js";
+} from "./types.js";
+import { parseResultExtra, ResultExtraError, type ExtraHeader, type ExtraRow } from "./parse-result-extra.js";
+
+/** 中央か地方か(結果ページの置き場の区別)。race_id の場コードが示す種別と同じ型。 */
+export type Kind = RaceIdVenueKind;
 
 /** 読めなかった理由の分類(parse の最後に件数を出す)。 */
 export type RejectCategory =

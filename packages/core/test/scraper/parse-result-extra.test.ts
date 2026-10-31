@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseResultExtra, ResultExtraError } from "../history-results/result-extra.js";
+import { loadFixture } from "../support/fixtures.js";
+import { parseResultExtra, ResultExtraError } from "../../src/scraper/parse-result-extra.js";
 
 /**
  * Issue #532 段階 1: 開発用の補助パーサ(`parseResultExtra`)のテスト。
@@ -8,7 +8,7 @@ import { parseResultExtra, ResultExtraError } from "../history-results/result-ex
  * ネットワークには出ない。
  */
 
-const fx = (name: string): string => readFileSync(new URL(`../../fixtures/${name}`, import.meta.url), "utf8");
+const fx = loadFixture;
 
 const CENTRAL_2021 = fx("history_central_result_202105040811.html");
 const NAR_2021 = fx("history_nar_result_202146110310.html");

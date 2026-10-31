@@ -1,15 +1,15 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseRaceResult } from "../../packages/core/src/scraper/parse-race-result.js";
-import { buildRaceRecord, crossCheckRows } from "../history-results/build-record.js";
-import { parseResultExtra } from "../history-results/result-extra.js";
+import { loadFixture } from "../support/fixtures.js";
+import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
+import { buildRaceRecord, crossCheckRows } from "../../src/scraper/race-record.js";
+import { parseResultExtra } from "../../src/scraper/parse-result-extra.js";
 
 /**
  * Issue #532 段階 1: 既存の `parseRaceResult`(着順・通過順・後3F・人気・オッズ・払戻)と補助パーサの突き合わせ。
  * 行順+馬番+馬名が合わなければ、そのレースは理由つきで「読めない」扱いにする(値を黙って合成しない)。
  */
 
-const fx = (name: string): string => readFileSync(new URL(`../../fixtures/${name}`, import.meta.url), "utf8");
+const fx = loadFixture;
 const CENTRAL_2021 = fx("history_central_result_202105040811.html");
 const NAR_2021 = fx("history_nar_result_202146110310.html");
 

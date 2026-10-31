@@ -1,5 +1,5 @@
 /**
- * 結果ページ(result.html)の補助パーサ。Issue #532(過去 5 年の結果を取って仮説の検証に使う)。開発用。本番には入らない。
+ * 結果ページ(result.html)の補助パーサ。Issue #532(過去 5 年の結果を取って仮説の検証に使う)。#549-A1 で `scripts/history-results/result-extra.ts` から core へ移した(開発用スクリプトと、本番の Cloudflare の取得〈#549-A3〉の両方から使う)。
  *
  * 既存の `parseRaceResult`(packages/core)は着順・通過順・後3F・人気・単勝オッズ・払戻を読む。ここでは、それが読まない
  * 項目(騎手名と騎手 ID・斤量・性齢・馬体重と増減・horse_id・調教師 ID と所属・タイム・着差、見出しの日付・天候・馬場・
@@ -18,9 +18,9 @@
 
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
-import type { RaceIdVenueKind } from "../../packages/core/src/scraper/ids.js";
-import { readRaceClass } from "../../packages/core/src/scraper/race-class.js";
-import { readRaceConditions, type WeightType } from "../../packages/core/src/scraper/race-condition.js";
+import type { RaceIdVenueKind } from "./ids.js";
+import { readRaceClass } from "./race-class.js";
+import { readRaceConditions, type WeightType } from "./race-condition.js";
 
 /** 補助パーサの構造異常(結果の表が無い・行の対応が取れない)。`category` は parse の「読めなかった理由」の分類。 */
 export class ResultExtraError extends Error {
