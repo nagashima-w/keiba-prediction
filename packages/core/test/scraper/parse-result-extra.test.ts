@@ -322,8 +322,10 @@ describe("補助パーサ: ラップ表(区間タイム・ペース・ペース�
     ["result_202605040205.html", "central", 200, 2000, [13.3, 12.1, 12.5, 12.6, 13.2, 13.1, 13.0, 11.6, 11.2, 11.3], "37.9-34.1", "S"],
     ["result_202606040810.html", "central", 200, 1200, [12.0, 10.6, 11.4, 11.7, 11.7, 12.3], "34.0-35.7", "H"],
     ["result_202607020502.html", "central", 200, 1400, [12.6, 11.1, 11.7, 12.1, 11.7, 11.4, 11.4], "35.4-34.5", "S"],
-    // 6 区間未満(1000m の 5 区間)は前 3 と後ろ 3 が重なるので、ペースは null(区間タイムは残す)
-    ["result_202604040112.html", "central", 200, 1000, [11.7, 10.4, 10.9, 11.0, 11.3], null, "M"],
+    // 区間が 6 個未満(1000m の 5 区間)は、最初の 3 区間と最後の 3 区間が重なる(3 番目の区間が両方に入る)。重なる和をそのまま出す:
+    // 前 = 11.7+10.4+10.9 = 33.0、後 = 10.9+11.0+11.3 = 33.2(0.1 秒の整数で足した値を、python で別に計算)。
+    // 戦績 API は地方の 800m(4 区間)・900m(5 区間)で値を返している(race-record.test.ts)。中央の 1000m の実例は無く未確認
+    ["result_202604040112.html", "central", 200, 1000, [11.7, 10.4, 10.9, 11.0, 11.3], "33.0-33.2", "M"],
     // 地方も同じ形(ペースの文字が戦績 API と一致するかは、地方では未確認)
     ["nar_result_202644100810.html", "nar", 200, 1400, [13.1, 12.3, 12.0, 12.2, 12.5, 12.0, 12.5], "37.4-37.0", "M"],
   ];
@@ -408,12 +410,36 @@ describe("補助パーサ: ラップ表(区間タイム・ペース・ペース�
       expect(header.pace).toBeNull();
     });
 
-    it("累計との差が 0.1 秒以内(四捨五入のずれ)なら読める: 実データでは、ラップ表のある 1,211 件中 6 件がこの形", () => {
+    it("累計との差が 0.1 秒以内(四捨五入のずれ)なら読める: 累計と区間は別々に四捨五入されるため、実データでも起きる形", () => {
       // 区間の行の最後のセルを 0.1 秒だけずらす: 11.7 → 11.8(累計との差 0.1)
       const html = mutate(/<td>11\.7<\/td>(\s*<\/tr>\s*<\/tbody>)/, "<td>11.8</td>$1");
       const { header } = parseResultExtra(html, "central");
       expect(header.lapTimes).not.toBeNull();
       expect(header.lapTimes![8]).toBe(11.8);
+    });
+
+    // 3 区間の表に書き換える(見出し・累計・区間のセルを 3 個にそろえる)
+    const withLaps = (n: number): string => {
+      const heads = ["200m", "400m", "600m"].slice(0, n).map((h) => `<th>${h}</th>`).join("");
+      const cum = ["12.1", "22.9", "34.5"].slice(0, n).map((c) => `<td>${c}</td>`).join("");
+      const sec = ["12.1", "10.8", "11.6"].slice(0, n).map((c) => `<td>${c}</td>`).join("");
+      return mutate(
+        /(<table[^>]*Race_HaronTime[^>]*>\s*<tbody>)[\s\S]*?(<\/tbody>)/,
+        `$1<tr class="Header">${heads}</tr><tr class="HaronTime">${cum}</tr><tr class="HaronTime">${sec}</tr>$2`,
+      );
+    };
+
+    it("区間がちょうど 3 個なら、前 3 区間と後ろ 3 区間が同じ区間で、ペースは全体の和を 2 回書く", () => {
+      const { header } = parseResultExtra(withLaps(3), "central");
+      expect(header.lapTimes).toEqual([12.1, 10.8, 11.6]);
+      expect(header.pace).toBe("34.5-34.5");
+    });
+
+    it("区間が 3 個未満(2 個)なら、区間タイムは残してペースだけ null", () => {
+      const { header } = parseResultExtra(withLaps(2), "central");
+      expect(header.lapTimes).toEqual([12.1, 10.8]);
+      expect(header.lapDistances).toEqual([200, 400]);
+      expect(header.pace).toBeNull();
     });
 
     it("ペースの区分が S・M・H のどれでもなければ、区分だけ null(区間タイムは残る)", () => {
