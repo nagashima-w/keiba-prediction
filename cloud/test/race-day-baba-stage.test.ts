@@ -26,7 +26,7 @@ import { SAMPLE_DATE, sampleOutcome } from "./baba-sample";
 /**
  * Issue #294: 馬場の取得ステップ(`BabaStage`)の単体。いつ動けるか(枠と条件)・「試みた」を先に永続化して 1 枠 1 回に収めること・失敗の扱い。
  * Issue #478 で取得先を JRA のページに替えた(取得口は読み取り済みの結果 `BabaFetchOutcome` を返す)。
- * Issue #480 で「1 日 1 回」を「1 枠(09:00 から 15 分おき、12:00 まで)につき 1 回」に広げた(当日の値がそろうまで取り直す)。
+ * Issue #480 で「1 日 1 回」を「1 枠(09:00 から 10 分おき、12:00 まで)につき 1 回」に広げた(当日の値がそろうまで取り直す)。
  * 保存先(D1)・取得口は偽。**実際の JRA には一切アクセスしない**。ストレージは `node:sqlite`(本物の SQLite)。
  * 使う URL・ホストは登場しない(取得口は関数で、URL はその外にある)。
  */
@@ -38,8 +38,9 @@ const jst = (s: string): number => Date.parse(`${s}+09:00`);
 const at = (hhmmss: string): number => jst(`2026-10-25T${hhmmss}`);
 const AT_0900 = at("09:00:00");
 const MIN = 60_000;
-/** 枠 k の時刻(09:00 + 15 分 × k)。 */
-const slotAt = (k: number): number => AT_0900 + k * 15 * MIN;
+/** 枠 k の時刻(09:00 + 10 分 × k)。 */
+const SLOT_MIN = 10;
+const slotAt = (k: number): number => AT_0900 + k * SLOT_MIN * MIN;
 /** 取得口が失敗の分類だけを返した結果(保存する場は無い)。 */
 const failureOutcome = (result: BabaResultClass, dropped = 0): BabaFetchOutcome => ({ result, venues: [], dropped, droppedDetails: [], apiFetchedAt: null, listedVenueCodes: [] });
 
@@ -155,17 +156,17 @@ const setMeta = (h: Pick<Harness, "sql">, key: string, value: string): void => {
   h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
 };
 
-describe("枠の定数(置き値。10/31 の実測の後に見直す。定数 1 か所で変えられる)", () => {
-  it("09:00 から 15 分おき、12:00 まで(9:00・9:15・…・12:00 の 13 枠)", () => {
+describe("枠の定数(10/31 の実測で 10 分おきに改めた〈#480〉。定数 1 か所で変えられる)", () => {
+  it("09:00 から 10 分おき、12:00 まで(9:00・9:10・…・12:00 の 19 枠)", () => {
     expect(BABA_FETCH_START_JST).toBe("09:00");
-    expect(BABA_FETCH_INTERVAL_MIN).toBe(15);
+    expect(BABA_FETCH_INTERVAL_MIN).toBe(10);
     expect(BABA_FETCH_LAST_JST).toBe("12:00");
-    expect(BABA_FETCH_SLOTS).toBe(13);
+    expect(BABA_FETCH_SLOTS).toBe(19);
   });
 });
 
 describe("期限(dueAtMs): 次の枠の時刻(最初の発走前の分析の期限には左右されない)", () => {
-  // 取得は 09:00 から。値が載る前の枠は空振りに終わるだけ(2 本で止まる)ので、載るまで 15 分おきに取り直す。
+  // 取得は 09:00 から。値が載る前の枠は空振りに終わるだけ(2 本で止まる)ので、載るまで 10 分おきに取り直す。
   it("開催日が確定していれば、どの時刻から数えても最初の期限は 09:00(前夜の計画の段階から候補になる)", () => {
     for (const now of [jst("2026-10-24T21:30:00"), at("06:00:00"), at("08:59:59"), AT_0900]) {
       const h = harness({ now });
@@ -173,13 +174,13 @@ describe("期限(dueAtMs): 次の枠の時刻(最初の発走前の分析の期�
     }
   });
 
-  it("最後に試みた枠 k の次の枠(k+1)の時刻が期限になる(全 13 枠。最後の枠 12 の後は null)", () => {
+  it("最後に試みた枠 k の次の枠(k+1)の時刻が期限になる(全 19 枠。最後の枠 18 の後は null)", () => {
     for (let k = 0; k < BABA_FETCH_SLOTS; k++) {
       const h = harness({ now: slotAt(k) });
       setMeta(h, BABA_META_SLOT, String(k));
       expect(h.stage.dueAtMs()).toBe(k + 1 < BABA_FETCH_SLOTS ? slotAt(k + 1) : null);
     }
-    expect(slotAt(BABA_FETCH_SLOTS - 1)).toBe(at("12:00:00")); // 前提: 枠 12 は 12:00(置き値の整合)
+    expect(slotAt(BABA_FETCH_SLOTS - 1)).toBe(at("12:00:00")); // 前提: 枠 18 は 12:00(置き値の整合)
   });
 
   it("BabaFacts は最初の発走前の分析の期限を持たない(期限の式から外した)。計画の場コードを持つ", () => {
@@ -210,11 +211,11 @@ describe("期限(dueAtMs): 次の枠の時刻(最初の発走前の分析の期�
     expect(h.stage.runnable()).toBe(false);
   });
 
-  it("最後の枠の窓(12:00 以上 12:15 未満)を過ぎたら、未実行の枠があっても null。窓の内側は候補のまま", () => {
-    const inside = harness({ now: at("12:14:59") });
+  it("最後の枠の窓(12:00 以上 12:10 未満)を過ぎたら、未実行の枠があっても null。窓の内側は候補のまま", () => {
+    const inside = harness({ now: at("12:09:59") });
     expect(inside.stage.dueAtMs()).not.toBeNull();
     expect(inside.stage.runnable()).toBe(true);
-    const outside = harness({ now: at("12:15:00") });
+    const outside = harness({ now: at("12:10:00") });
     expect(outside.stage.dueAtMs()).toBeNull();
     expect(outside.stage.runnable()).toBe(false);
   });
@@ -247,7 +248,7 @@ describe("動ける時刻(runnable)", () => {
     expect(h.stage.runnable()).toBe(false);
   });
 
-  it("開催日の当日の昼前でも、まだ試みていなければ動ける(同日の遅い計画・取り残し)。12:15 以降は動けない", () => {
+  it("開催日の当日の昼前でも、まだ試みていなければ動ける(同日の遅い計画・取り残し)。12:10 以降は動けない", () => {
     expect(harness({ now: at("11:50:00") }).stage.runnable()).toBe(true);
     expect(harness({ now: at("17:05:00") }).stage.runnable()).toBe(false);
   });
@@ -316,10 +317,10 @@ describe("run: 試みを先に永続化して、1 枠に 1 回だけ取得する
         expect(h.store.finishes[0]?.finish.result).toBe(c.result);
       }
       // 同じ枠の間は動けない(枠の中の別の時刻でも)
-      h.clock.now = AT_0900 + 14 * MIN;
+      h.clock.now = AT_0900 + 9 * MIN;
       expect(h.stage.runnable()).toBe(false);
       // 再起動: 同じ SQLite(DO の永続)・同じ保存先で新しい stage
-      const restarted = harness({ sql: h.sql, store: h.store, now: AT_0900 + 14 * MIN });
+      const restarted = harness({ sql: h.sql, store: h.store, now: AT_0900 + 9 * MIN });
       restarted.behavior.respond = () => {
         throw new Error("同じ枠の 2 回目の取得が送られた");
       };
@@ -397,7 +398,7 @@ describe("run: 試みを先に永続化して、1 枠に 1 回だけ取得する
 });
 
 describe("取り直し: そろうまで次の枠で取り直す(Issue #480)", () => {
-  it("そろわない回(当日の値が無い)→ 次の枠(09:15)で取り直し → そろえば終わり。claim は枠ごと(0 → 1)", async () => {
+  it("そろわない回(当日の値が無い)→ 次の枠(09:10)で取り直し → そろえば終わり。claim は枠ごと(0 → 1)", async () => {
     const h = harness();
     h.behavior.respond = () => failureOutcome("no-today-venues", 3);
     expect((await h.stage.run()).result).toBe("failed");
@@ -418,7 +419,7 @@ describe("取り直し: そろうまで次の枠で取り直す(Issue #480)", ()
     expect(h.stage.runnable()).toBe(false);
   });
 
-  it("最後の枠(12:00)まで 13 回そろわなければ、取得は 13 回で打ち切り。以後は候補にならない", async () => {
+  it("最後の枠(12:00)まで 19 回そろわなければ、取得は 19 回で打ち切り。以後は候補にならない", async () => {
     const h = harness();
     h.behavior.respond = () => failureOutcome("no-today-venues", 3);
     for (let k = 0; k < BABA_FETCH_SLOTS; k++) {
@@ -436,44 +437,46 @@ describe("取り直し: そろうまで次の枠で取り直す(Issue #480)", ()
     expect(h.fetchCalls.n).toBe(BABA_FETCH_SLOTS);
   });
 
-  it("遅れて起きたら、いまの時刻の枠を 1 回だけ(飛ばした枠は埋めない)。10:07 に起きる → 枠 4(10:00)。次の期限は枠 5(10:15)", async () => {
+  it("遅れて起きたら、いまの時刻の枠を 1 回だけ(飛ばした枠は埋めない)。10:04 に起きる → 枠 6(10:00)。次の期限は枠 7(10:10)", async () => {
     const h = harness();
     h.behavior.respond = () => failureOutcome("no-today-venues", 3);
     await h.stage.run(); // 枠 0
-    h.clock.now = at("10:07:00");
+    h.clock.now = at("10:04:00");
     expect(h.stage.runnable()).toBe(true);
     await h.stage.run();
-    expect(h.store.claims.map((c) => c.slot)).toEqual([0, 4]); // 枠 1〜3 は埋めない
-    expect(meta(h, BABA_META_SLOT)).toBe("4");
-    expect(h.stage.dueAtMs()).toBe(slotAt(5));
-    expect(slotAt(5)).toBe(at("10:15:00"));
-    expect(h.stage.runnable()).toBe(false); // 10:07 のうちはもう動かない
+    expect(h.store.claims.map((c) => c.slot)).toEqual([0, 6]); // 枠 1〜5 は埋めない
+    expect(meta(h, BABA_META_SLOT)).toBe("6");
+    expect(h.stage.dueAtMs()).toBe(slotAt(7));
+    expect(slotAt(7)).toBe(at("10:10:00"));
+    expect(h.stage.runnable()).toBe(false); // 10:04 のうちはもう動かない
   });
 
-  it("枠の番号は切り捨て: 枠の半分を過ぎた 10:10 に起きても枠 4(10:00)を取る(四捨五入なら枠 5)。次の枠 5 は 10:15 に取れる", async () => {
+  it("枠の番号は切り捨て: 枠の半分を過ぎた 10:06 に起きても枠 6(10:00)を取る(四捨五入なら枠 7)。次の枠 7 は 10:10 に取れる", async () => {
     const h = harness();
     h.behavior.respond = () => failureOutcome("no-today-venues", 3);
     await h.stage.run(); // 枠 0
-    h.clock.now = at("10:10:00");
-    expect((at("10:10:00") - AT_0900) / (15 * MIN)).toBeGreaterThan(4.5); // 前提: 小数部が 0.5 を超える(round なら 5 になる時刻)
+    h.clock.now = at("10:06:00");
+    const position = (at("10:06:00") - AT_0900) / (SLOT_MIN * MIN);
+    expect(position).toBeGreaterThan(6.5); // 前提: 小数部が 0.5 を超える(round なら 7 になる時刻)
+    expect(Math.floor(position)).toBe(6);
     await h.stage.run();
-    expect(h.store.claims.map((c) => c.slot)).toEqual([0, 4]);
-    expect(h.stage.dueAtMs()).toBe(at("10:15:00"));
-    h.clock.now = at("10:14:59");
+    expect(h.store.claims.map((c) => c.slot)).toEqual([0, 6]);
+    expect(h.stage.dueAtMs()).toBe(at("10:10:00"));
+    h.clock.now = at("10:09:59");
     expect(h.stage.runnable()).toBe(false);
-    h.clock.now = at("10:15:00");
+    h.clock.now = at("10:10:00");
     expect(h.stage.runnable()).toBe(true);
     await h.stage.run();
-    expect(h.store.claims.map((c) => c.slot)).toEqual([0, 4, 5]); // 枠 5 を飛ばさずに取れた
+    expect(h.store.claims.map((c) => c.slot)).toEqual([0, 6, 7]); // 枠 7 を飛ばさずに取れた
   });
 
-  it("計画の確定が遅い日: まだ試みていない 11:47 に動ける → 枠 11(11:45)。最後の枠の窓(12:00〜12:15)は枠 12", async () => {
+  it("計画の確定が遅い日: まだ試みていない 11:47 に動ける → 枠 16(11:40)。最後の枠の窓(12:00〜12:10)は枠 18", async () => {
     const late = harness({ now: at("11:47:00") });
     await late.stage.run();
-    expect(late.store.claims.map((c) => c.slot)).toEqual([11]);
-    const last = harness({ now: at("12:14:59") });
+    expect(late.store.claims.map((c) => c.slot)).toEqual([16]);
+    const last = harness({ now: at("12:09:59") });
     await last.stage.run();
-    expect(last.store.claims.map((c) => c.slot)).toEqual([12]);
+    expect(last.store.claims.map((c) => c.slot)).toEqual([18]);
     expect(last.stage.dueAtMs()).toBeNull(); // 最後の枠の後は候補が無い
   });
 
@@ -576,14 +579,14 @@ describe("取り直し: そろうまで次の枠で取り直す(Issue #480)", ()
   });
 
   describe("旧版(1 日 1 回)の印からの移行", () => {
-    it("枠の印が無く、試みた時刻(baba_attempted_at)だけがある日は、その時刻の枠を最後の枠として続ける(09:30 に試みた → 枠 2 → 次は枠 3〈09:45〉)", () => {
+    it("枠の印が無く、試みた時刻(baba_attempted_at)だけがある日は、その時刻の枠を最後の枠として続ける(09:30 に試みた → 枠 3 → 次は枠 4〈09:40〉)", () => {
       const h = harness({ now: at("09:31:00") });
       setMeta(h, BABA_META_ATTEMPTED, String(at("09:30:00")));
       expect(meta(h, BABA_META_SLOT)).toBeNull(); // 前提: 枠の印は無い
-      expect(h.stage.dueAtMs()).toBe(slotAt(3));
-      expect(slotAt(3)).toBe(at("09:45:00"));
+      expect(h.stage.dueAtMs()).toBe(slotAt(4));
+      expect(slotAt(4)).toBe(at("09:40:00"));
       expect(h.stage.runnable()).toBe(false);
-      h.clock.now = at("09:45:00");
+      h.clock.now = at("09:40:00");
       expect(h.stage.runnable()).toBe(true);
     });
 
@@ -619,7 +622,7 @@ describe("claim の失敗(JRA に何も送っていないので再試行して�
     expect(meta(h, BABA_META_RETRY_AT)).toBeNull();
   });
 
-  it("3 回とも失敗 → その枠は諦める(印を書き、取得口は呼ばない)が、日は諦めない。次の枠(09:15)でまた試みる。警告は固定の文で、例外の文面・URL を含まない", async () => {
+  it("3 回とも失敗 → その枠は諦める(印を書き、取得口は呼ばない)が、日は諦めない。次の枠(09:10)でまた試みる。警告は固定の文で、例外の文面・URL を含まない", async () => {
     const h = harness();
     h.store.claimFailures = 3;
     const results: string[] = [];
