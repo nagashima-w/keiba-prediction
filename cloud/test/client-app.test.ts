@@ -937,3 +937,71 @@ describe("発走前の結果をカードの中に出す(Issue #188)", () => {
     });
   });
 });
+
+/**
+ * Issue #546: 説明文の折りたたみ(「仕組みを見る」)の状態。メモリに持つ(分析 id ごと。既定は閉じる)。ハッシュ・localStorage には持たない。「更新」・画面の往復で消さない。
+ * 結果画面とレース画面のカードは、同じ分析 id なら同じ状態。開閉は取得を起こさない。
+ */
+describe("説明文の折りたたみの状態(Issue #546)", () => {
+  const RACE_HASH = `#date=${DATE}&venue=central&race=${RACE_ID}`;
+  /** 単勝の想定(説明文が出る材料)を持つ分析。 */
+  const withNotes = (over: Record<string, unknown> = {}) => {
+    const body = analysisBody(over);
+    return { ...body, analysis: { ...body.analysis, horses: body.analysis.horses.map((hr) => ({ ...hr, fairWinOdds: 3.2, winOdds: 4.1 })) } };
+  };
+  const notesToggles = (h: Harness): VNode[] => findAll(h.tree(), (n) => String(n.attrs?.["class"]) === "notes-toggle");
+  const winNotes = (h: Harness): VNode[] => findAll(h.tree(), (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("win-odds-note"));
+  const refreshButton = (h: Harness): VNode => findAll(h.tree(), (n) => n.tag === "button" && String(n.attrs?.["class"]) === "refresh")[0]!;
+  const started = async (hash: string): Promise<Harness> => {
+    const h = harness(hash);
+    h.responders.set(ANALYSIS_5, async () => ok(withNotes()));
+    h.responders.set("/api/analyses/6", async () => ok(withNotes({ id: 6 })));
+    h.app.start();
+    await h.app.whenIdle();
+    return h;
+  };
+
+  it("既定は閉じる。ボタンのタップで開き(説明文が出る・aria-expanded=true)、もう一度で閉じる。取得は増えない", async () => {
+    const h = await started(RACE_HASH);
+    const before = h.calls.length;
+    expect(notesToggles(h), "前提: ボタンが 1 つ(馬ごとの評価)").toHaveLength(1);
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("false");
+    expect(winNotes(h)).toHaveLength(0);
+    notesToggles(h)[0]!.on!.click!();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("true");
+    expect(winNotes(h)).toHaveLength(1);
+    notesToggles(h)[0]!.on!.click!();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("false");
+    expect(winNotes(h)).toHaveLength(0);
+    expect(h.calls).toHaveLength(before);
+  });
+
+  it("開いた状態は、「更新」・一覧への往復で保たれる。別の分析 id は既定の閉じる", async () => {
+    const h = await started(RACE_HASH);
+    notesToggles(h)[0]!.on!.click!();
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("true"); // 「更新」で保たれる
+    h.go(`#date=${DATE}&venue=central`);
+    await h.app.whenIdle();
+    h.go(RACE_HASH);
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("true"); // 往復で保たれる
+    h.go(`#date=${DATE}&venue=central&analysis=6`);
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["data-analysis"], "前提: 別の分析 id の結果画面").toBe("6");
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("false");
+  });
+
+  it("結果画面(#analysis=<id>)とレース画面のカードは、同じ分析 id なら同じ状態を共有する", async () => {
+    const h = await started(RACE_HASH);
+    notesToggles(h)[0]!.on!.click!(); // カードの中で開く
+    h.go(`#date=${DATE}&venue=central&analysis=5`);
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("true"); // 結果画面でも開いている
+    notesToggles(h)[0]!.on!.click!(); // 結果画面で閉じる
+    h.go(RACE_HASH);
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("false");
+  });
+});

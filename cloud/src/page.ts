@@ -309,6 +309,16 @@ ${paletteCss()}
   .formation-legend li { break-inside: avoid; }
   .formation-legend li.formation-main { font-weight: bold; }
   .result-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; }
+  /* Issue #546: 結果の先頭の要約(印・買い目と合計・発走時刻・分析時刻・締切直前の再計算の 1 行)と、説明文の開閉のボタン(「仕組みを見る」。タップしやすい高さ 44px 以上。開閉は ▾/▸ の文字でも示す) */
+  .summary { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .summary h2, .summary h3 { margin: 0 0 4px; font-size: 1rem; }
+  .summary-marks { display: flex; flex-wrap: wrap; gap: 2px 14px; list-style: none; margin: 4px 0 0; padding: 0; }
+  .summary-marked-mark { font-weight: bold; }
+  .summary-bet-line { margin: 6px 0 0; font-weight: bold; }
+  .summary-bets { list-style: none; margin: 4px 0 0; padding: 0; }
+  .summary-bet { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--line); }
+  .summary .meta { margin: 4px 0 0; }
+  .notes-toggle { display: block; width: 100%; min-height: 44px; margin: 4px 0; padding: 8px 12px; text-align: left; }
 </style>
 </head>
 <body>

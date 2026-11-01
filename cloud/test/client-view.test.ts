@@ -536,9 +536,9 @@ describe("発走前のカードの結果(Issue #188)", () => {
   it("カードの結果の見出し(h3)は、カードの見出し(h2)の下。結果画面の見出し(h2)の階層は変えない", () => {
     const card = preRaceCard(raceTree(ready(analysis({ id: 7 }))));
     expect(findAll(card, (n) => n.tag === "h2").map(textOf)).toEqual(["発走前"]);
-    expect(findAll(card, (n) => n.tag === "h3").map(textOf)).toEqual(["▾ 分析の結果", "印の付いた馬", "3着内率 上位5頭", "馬ごとの評価", "配分の提案(分析時点)"]); // 開閉・印の付いた馬(#211)・3着内率の上位5頭(#240。既定の分析はモデル null)・馬ごとの評価・配分の提案
+    expect(findAll(card, (n) => n.tag === "h3").map(textOf)).toEqual(["▾ 分析の結果", "要約", "印の付いた馬", "3着内率 上位5頭", "馬ごとの評価", "配分の提案(分析時点)"]); // 開閉・要約(#546)・印の付いた馬(#211)・3着内率の上位5頭(#240。既定の分析はモデル null)・馬ごとの評価・配分の提案
     const screen = resultTree(analysis());
-    expect(findAll(screen, (n) => n.tag === "h2").map(textOf)).toEqual(["印の付いた馬", "3着内率 上位5頭", "馬ごとの評価", "配分の提案(分析時点)"]); // Issue #211: 既定の分析は印「◎」の馬がいる
+    expect(findAll(screen, (n) => n.tag === "h2").map(textOf)).toEqual(["要約", "印の付いた馬", "3着内率 上位5頭", "馬ごとの評価", "配分の提案(分析時点)"]); // 要約(Issue #546)が先頭。Issue #211: 既定の分析は印「◎」の馬がいる
   });
 });
 
@@ -1284,10 +1284,10 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
   const HORSES = [oddsHorse(1, 8.5, 12.3), oddsHorse(2, 4.0, 3.0), oddsHorse(3, null, 5.5), oddsHorse(4, 6.0, null), oddsHorse(5, null, null)];
   const cardTree = (a: AnalysisDetail): VNode => {
     const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
-    return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
+    return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a }, notesOpen: true })), noopActions);
   };
   const screens: readonly [string, (a: AnalysisDetail) => VNode][] = [
-    ["結果画面", resultTree],
+    ["結果画面", (a) => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, notesOpen: true }), noopActions)], // 説明文は既定で閉じる(Issue #546)ので、説明文の中身を見るこのブロックは開いた状態で描く
     ["発走前のカードの中", cardTree],
   ];
 
@@ -1489,9 +1489,9 @@ describe("タイム指数の行と説明の表示(Issue #359。結果画面と�
   const HORSES = [tiHorse(1, "タイム指数 +1.2(レース内 2位)"), tiHorse(2, "タイム指数 —"), tiHorse(3, "タイム指数 +3.0(レース内 1位)")];
   const cardTree = (a: AnalysisDetail, readOnly = false): VNode => {
     const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
-    return renderScreen(buildRaceModel(raceInput({ readOnly, status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
+    return renderScreen(buildRaceModel(raceInput({ readOnly, status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a }, notesOpen: true })), noopActions);
   };
-  const resultOf = (a: AnalysisDetail, readOnly = false): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, readOnly }), noopActions);
+  const resultOf = (a: AnalysisDetail, readOnly = false): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, readOnly, notesOpen: true }), noopActions);
   const screens: readonly [string, (a: AnalysisDetail, readOnly?: boolean) => VNode][] = [
     ["結果画面", resultOf],
     ["発走前のカードの中", cardTree],
@@ -1547,4 +1547,218 @@ describe("タイム指数の行と説明の表示(Issue #359。結果画面と�
       });
     });
   }
+});
+
+/**
+ * Issue #546(#545-A の 1 段目): 結果の先頭の要約のカードと、説明文(単勝・複勝・タイム指数・隊列図の注記)の折りたたみ。結果画面とカードの中の両方。
+ * 守ること: 要約は `resultSections` の先頭・既存の節の class と重ならない(`bet`・`marked`・`horse-list` の数を増やさない)・説明文は既定で閉じる・開閉は `<details>` でなく
+ * ボタン(aria-expanded・▾/▸・data-analysis)・閲覧者にも同じに出る・退化した入力(LLM なし・買い目 0 点・印 0 頭・締切の回なし・発走時刻なし)でも壊れない。
+ */
+describe("要約のカードと説明文の折りたたみ(Issue #546)", () => {
+  const STYLES = ["逃げ", "先行", "差し", "追込"] as const;
+  const ALLOC = {
+    route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.1,
+    includeComboOdds: true, includeWide: true, includeTrio: false, includeQuinella: null, includeExacta: true, includeTrifecta: false, includeBracketQuinella: null, betUnit: 100, oddsStatus: "result",
+    bets: [
+      { betType: "place", comboKey: "01", stake: 700, odds: 1.8, ev: 1.2 },
+      { betType: "wide", comboKey: "0102", stake: 500, odds: 6.5, ev: 1.3 },
+    ],
+  };
+  /** 4 頭(印は 1 番と 3 番)。単勝・複勝の想定と実際・脚質と序盤の位置・タイム指数の説明を持つ(説明文が 4 つ全部出る材料)。 */
+  const rich = (over: Partial<AnalysisDetail> = {}): AnalysisDetail =>
+    analysis({
+      race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result", placeBasis: "top3", startTime: "15:45", distance: 1800, pace: "平均" },
+      timeIndexNote: "タイム指数: 説明の文。",
+      horses: [1, 2, 3, 4].map((u) => ({
+        umaban: u, name: `馬${u}`, prior: 0.3, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.05, isPositive: u === 1, mark: u === 1 ? "◎" : u === 3 ? "〇" : null, reason: null, highlights: [], concerns: [],
+        winProb: 0.25, fairWinOdds: 3.2, winOdds: 4.1, fairPlaceOdds: 1.4, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, legStyle: STYLES[u - 1]!, earlyPos: u / 5, timeIndexLine: "タイム指数 +1.2(レース内 2位)",
+      })),
+      allocation: ALLOC,
+      close: { note: "注記", rounds: [{ label: "発走2分前", summaryLines: ["再計算した"], allocation: { ...ALLOC, bets: [ALLOC.bets[0]!] }, diffLines: ["追加 0点・削除 1点・賭け金の変化 0点(合計 1,200円 → 700円)"] }] },
+      ...over,
+    });
+  const resultOf = (a: AnalysisDetail, over: { readOnly?: boolean; notesOpen?: boolean } = {}, actions: ViewActions = noopActions): VNode =>
+    renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, ...over }), actions);
+  const cardOf = (a: AnalysisDetail, over: { readOnly?: boolean; notesOpen?: boolean; resultOpen?: boolean } = {}, actions: ViewActions = noopActions): VNode => {
+    const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
+    return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a }, ...over })), actions);
+  };
+  const screens: readonly [string, "h2" | "h3", typeof resultOf][] = [
+    ["結果画面", "h2", resultOf],
+    ["発走前のカードの中", "h3", cardOf],
+  ];
+  const sectionClasses = (tree: VNode): string[] => findAll(tree, (n) => n.tag === "section").map((n) => String(n.attrs?.["class"]).split(" ")[0]!);
+  const NOTE_CLASSES = ["win-odds-note", "place-odds-note", "time-index-note", "formation-note"] as const;
+
+  for (const [name, heading, tree] of screens) {
+    describe(name, () => {
+      it("要約は 1 つで、結果の節の中の先頭。見出しは「要約」(階層は画面に合わせる)", () => {
+        const t = tree(rich());
+        const summaries = byClass(t, "summary");
+        expect(summaries).toHaveLength(1);
+        const order = sectionClasses(t);
+        expect(order.indexOf("summary")).toBeGreaterThan(-1);
+        expect(order.indexOf("summary")).toBeLessThan(order.indexOf("marked-horses"));
+        expect(order.indexOf("summary")).toBe(order.findIndex((c) => ["summary", "marked-horses", "top-probs", "development", "formation", "baba", "horses", "allocation", "close"].includes(c)));
+        const head = findAll(summaries[0]!, (n) => n.tag === heading);
+        expect(head.map(textOf)).toEqual(["要約"]);
+      });
+
+      it("要約は見出しの直後で、分析モデル・LLM の usage・LLM を使わなかった理由・詳細の注記の行より前(開いてすぐ判断できるようにするため)。それらの行は残る", () => {
+        const a = rich({
+          model: "claude-x",
+          llmNote: "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)",
+          detail: "missing",
+          llmCalls: [{ ok: true, ms: 41000, inputTokens: 9000, outputTokens: 3000, stopReason: "end_turn", model: "claude-x", replayed: false, error: null }],
+        });
+        const t = tree(a);
+        const metaClasses = ["llm-usage", "llm-note"];
+        const isMeta = (n: VNode): boolean => n.tag === "p" && (textOf(n).startsWith("分析モデル:") || metaClasses.some((c) => String(n.attrs?.["class"] ?? "").split(" ").includes(c)) || textOf(n).includes("取得できませんでした"));
+        const inDocumentOrder = findAll(t, (n) => (n.tag === "section" && String(n.attrs?.["class"]) === "summary") || isMeta(n));
+        const labels = inDocumentOrder.map((n) => (n.tag === "section" ? "summary" : String(n.attrs?.["class"]).includes("llm-usage") ? "llm-usage" : String(n.attrs?.["class"]).includes("llm-note") ? "llm-note" : textOf(n).startsWith("分析モデル:") ? "model" : "detail-note"));
+        expect(labels, "前提: 4 種類の行がすべて出ている").toHaveLength(5);
+        expect(labels).toEqual(["summary", "model", "llm-usage", "llm-note", "detail-note"]);
+      });
+
+      it("中身: 印の付いた馬(印・馬番・馬名)・買い目の一覧と点数・合計・発走時刻・分析時刻・締切直前の再計算の 1 行", () => {
+        const s = byClass(tree(rich()), "summary")[0]!;
+        expect(byClass(s, "summary-marked").map(rawTextOf)).toEqual(["◎ 1 馬1", "〇 3 馬3"]);
+        expect(byClass(s, "summary-bet-line").map(textOf)).toEqual(["買い目 2点・合計 1,200円"]);
+        expect(byClass(s, "summary-bet").map(textOf)).toHaveLength(2);
+        expect(byClass(s, "summary-start").map(textOf)).toEqual(["発走時刻: 15:45"]);
+        expect(byClass(s, "summary-analyzed").map(textOf)).toEqual(["分析時刻: 2026-06-28 14:00"]);
+        expect(byClass(s, "summary-close").map(textOf)).toEqual(["締切直前の再計算(発走2分前): 追加 0点・削除 1点・賭け金の変化 0点(合計 1,200円 → 700円)"]);
+      });
+
+      it("要約の買い目の行は、配分の提案の表の行と同じ文字・同じ順(同じ部品)。既存の節の class(bet・marked)の数は増えない", () => {
+        const t = tree(rich());
+        const inSummary = byClass(byClass(t, "summary")[0]!, "summary-bet").map(textOf);
+        const inAllocation = byClass(byClass(t, "allocation")[0]!, "bet").map(textOf);
+        expect(inAllocation, "前提: 配分の表に 2 行ある").toHaveLength(2);
+        expect(inSummary).toEqual(inAllocation);
+        expect(byClass(t, "bet")).toHaveLength(2 + 1); // 配分の提案 2 + 締切直前の再計算の表 1(要約は summary-bet なので数えない)
+        expect(byClass(t, "marked")).toHaveLength(2); // 「印の付いた馬」の節だけ
+      });
+
+      it("分析時刻は要約にだけ出す(結果の見出しの下の行には出さない)。分析モデルの行は残る", () => {
+        const t = tree(rich());
+        expect(textOf(t).split("分析時刻:").length - 1).toBe(1);
+        expect(byClass(byClass(t, "summary")[0]!, "summary-analyzed")).toHaveLength(1);
+        expect(textOf(t)).toContain("分析モデル:");
+      });
+
+      it("退化した入力(LLM なし・買い目 0 点・印 0 頭・締切の回なし・発走時刻なし)でも、要約は分析時刻と「配分なし」を出し、無い項目は行ごと出さない", () => {
+        const bare = analysis({ allocation: null, close: null, model: null, horses: [rich().horses[1]!, rich().horses[3]!] });
+        const t = tree(bare);
+        expect(byClass(t, "summary"), "前提: 要約は出る").toHaveLength(1);
+        const s = byClass(t, "summary")[0]!;
+        expect(byClass(s, "summary-analyzed").map(textOf)).toEqual(["分析時刻: 2026-06-28 14:00"]);
+        expect(byClass(s, "summary-bet-line").map(textOf)).toEqual(["配分なし"]);
+        for (const cls of ["summary-marks", "summary-marked", "summary-bets", "summary-bet", "summary-start", "summary-close"]) {
+          expect(byClass(s, cls), cls).toHaveLength(0);
+        }
+        // 対照: 材料を足すと、同じ行が出る(上の「出ない」が、実装の抜けでなく入力によること)
+        const full = byClass(tree(rich()), "summary")[0]!;
+        for (const cls of ["summary-marks", "summary-marked", "summary-bets", "summary-bet", "summary-start", "summary-close"]) {
+          expect(byClass(full, cls).length, cls).toBeGreaterThan(0);
+        }
+      });
+
+      it("閲覧者(readOnly)にも、管理者と同じ要約を出す(文字が同じ)", () => {
+        const admin = byClass(tree(rich(), { readOnly: false }), "summary")[0]!;
+        const viewer = byClass(tree(rich(), { readOnly: true }), "summary")[0]!;
+        expect(textOf(admin).length, "前提: 空でない").toBeGreaterThan(20);
+        expect(textOf(viewer)).toBe(textOf(admin));
+      });
+
+      it("配分が「未設定」の分析でも、要約には設定への案内(括弧書き)を出さない(閲覧者・管理者とも「配分なし」だけ)", () => {
+        const unset = rich({ allocation: { ...ALLOC, route: "unset", bankroll: 0, perRaceCap: 0, bets: [] } });
+        for (const readOnly of [false, true]) {
+          const s = byClass(tree(unset, { readOnly }), "summary")[0]!;
+          expect(textOf(s)).toContain("配分なし");
+          expect(textOf(s)).not.toContain("設定");
+        }
+      });
+
+      describe("説明文の折りたたみ(仕組みを見る)", () => {
+        const toggles = (t: VNode): VNode[] => byClass(t, "notes-toggle");
+
+        it("既定は閉じる: 4 つの説明文(単勝・複勝・タイム指数・隊列図の注記)は出さず、開閉のボタンが「▸ 仕組みを見る」(aria-expanded=false・data-analysis)", () => {
+          const t = tree(rich());
+          for (const cls of NOTE_CLASSES) expect(byClass(t, cls), cls).toHaveLength(0);
+          expect(byClass(t, "formation"), "前提: 隊列図の節自体は出ている").toHaveLength(1);
+          expect(byClass(t, "horse-list").length, "前提: 馬のカードは出ている").toBeGreaterThan(0);
+          const ts = toggles(t);
+          expect(ts).toHaveLength(2); // 「馬ごとの評価」の中と「想定隊列図」の中
+          expect(ts.map(textOf)).toEqual(["▸ 仕組みを見る", "▸ 仕組みを見る"]);
+          expect(ts.map((b) => b.attrs?.["aria-expanded"])).toEqual(["false", "false"]);
+          expect(ts.map((b) => b.attrs?.["data-analysis"])).toEqual(["7", "7"]);
+          expect(ts.every((b) => b.tag === "button")).toBe(true);
+        });
+
+        it("開くと、4 つの説明文が出る(文面は変えない)。ボタンは「▾ 仕組みを見る」(aria-expanded=true)。説明文は馬のカードの一覧より前", () => {
+          const t = tree(rich(), { notesOpen: true });
+          expect(byClass(t, "win-odds-note").map(textOf)).toEqual([WIN_ODDS_NOTE]);
+          expect(byClass(t, "place-odds-note").map(textOf)).toEqual([PLACE_ODDS_NOTE]);
+          expect(byClass(t, "time-index-note").map(textOf)).toEqual(["タイム指数: 説明の文。"]);
+          expect(byClass(t, "formation-note")).toHaveLength(1);
+          expect(textOf(byClass(t, "formation-note")[0]!).length).toBeGreaterThan(20);
+          expect(toggles(t).map(textOf)).toEqual(["▾ 仕組みを見る", "▾ 仕組みを見る"]);
+          expect(toggles(t).map((b) => b.attrs?.["aria-expanded"])).toEqual(["true", "true"]);
+          const horses = byClass(t, "horses")[0]!;
+          const kids = (horses.children ?? []).filter((x): x is VNode => typeof x !== "string").map((k) => String(k.attrs?.["class"] ?? ""));
+          expect(kids.findIndex((c) => c.includes("win-odds-note"))).toBeLessThan(kids.findIndex((c) => c.includes("horse-list")));
+          expect(kids.findIndex((c) => c.includes("notes-toggle"))).toBeLessThan(kids.findIndex((c) => c.includes("win-odds-note")));
+        });
+
+        it("ボタンのタップは onToggleNotes(分析 id, 押したあとの状態)。閉→開と開→閉。引数は data-analysis と同じ値", () => {
+          const calls: [number, boolean][] = [];
+          const actions: ViewActions = { ...noopActions, onToggleNotes: (id, open) => void calls.push([id, open]) };
+          for (const b of toggles(tree(rich(), {}, actions))) b.on!.click!();
+          expect(calls).toEqual([[7, true], [7, true]]);
+          for (const b of toggles(tree(rich(), { notesOpen: true }, actions))) b.on!.click!();
+          expect(calls.slice(2)).toEqual([[7, false], [7, false]]);
+          const other = rich({ id: 42 });
+          const t = tree(other, {}, actions);
+          expect(toggles(t).map((b) => b.attrs?.["data-analysis"])).toEqual(["42", "42"]);
+          toggles(t)[0]!.on!.click!();
+          expect(calls[4]).toEqual([42, true]);
+        });
+
+        it("説明文が 1 つも無い節にはボタンを出さない(馬ごとの評価: 想定が全頭『-』・タイム指数の説明なし。隊列図: 脚質の分かる馬が 2 頭未満)", () => {
+          const plain = rich({
+            timeIndexNote: null,
+            horses: rich().horses.map((h) => ({ ...h, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, legStyle: null, earlyPos: null, timeIndexLine: null })),
+          });
+          const t = tree(plain, { notesOpen: true });
+          expect(byClass(t, "horses"), "前提: 馬ごとの評価は出る").toHaveLength(1);
+          expect(byClass(t, "formation"), "前提: 隊列図は出ない").toHaveLength(0);
+          expect(toggles(t)).toHaveLength(0);
+          for (const cls of NOTE_CLASSES) expect(byClass(t, cls), cls).toHaveLength(0);
+          // 対照: 同じ入力で想定を 1 頭だけ入れると、馬ごとの評価のボタンだけが出る
+          const one = rich({ timeIndexNote: null, horses: plain.horses.map((h, i) => (i === 0 ? { ...h, fairWinOdds: 3.2, winOdds: 4.1 } : h)) });
+          expect(toggles(tree(one))).toHaveLength(1);
+        });
+
+        it("`<details>`・`<summary>` は使わない。許可リストの要素・属性だけで組み立てられる(閉・開とも)", () => {
+          for (const notesOpen of [false, true]) {
+            const { tags, texts } = mountAll(tree(rich(), { notesOpen }));
+            expect(tags.filter((x) => ["details", "summary"].includes(x))).toEqual([]);
+            expect(texts.some((x) => x.includes("仕組みを見る"))).toBe(true);
+          }
+        });
+
+        it("クリック処理を持つボタンは data-analysis を持つ(createMounter は関数を比較しない。引数が木に出ていないと古い処理が残る)", () => {
+          const handlers = (t: VNode) => findAll(t, (n) => n.on?.click !== undefined && String(n.attrs?.["class"]) === "notes-toggle");
+          expect(handlers(tree(rich()))).toHaveLength(2);
+          for (const b of handlers(tree(rich()))) expect(Object.keys(b.attrs ?? {}).filter((k) => k.startsWith("data-"))).toEqual(["data-analysis"]);
+        });
+      });
+    });
+  }
+
+  it("発走前のカードで結果を畳んだとき(resultOpen: false)は、要約も描画しない(開いたときだけ出る)", () => {
+    expect(byClass(cardOf(rich(), { resultOpen: true }), "summary"), "前提: 開いていれば出る").toHaveLength(1);
+    expect(byClass(cardOf(rich(), { resultOpen: false }), "summary")).toHaveLength(0);
+  });
 });

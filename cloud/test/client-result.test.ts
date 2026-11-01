@@ -923,3 +923,103 @@ describe("タイム指数の行と説明(Issue #359。サーバが組み立て�
     }
   });
 });
+
+/**
+ * Issue #546(#545-A の 1 段目): 結果の先頭の要約(`content.summary`)と、説明文の開閉(`notesOpen`)・分析 id(`id`)。
+ * 要約の材料はクライアントのモデルにすでにある値だけ(サーバの応答は変えない)。発走時刻(`race.startTime`)だけは、サーバが返していたのをクライアントが読んでいなかったので `api-analysis.ts` で読む。
+ */
+describe("要約(Issue #546)", () => {
+  const ok = (label: string, diff: readonly string[]) => ({ label, summaryLines: ["再計算した", "15:40に実行"], allocation: { ...ALLOCATION, bets: [...ALLOCATION.bets] }, diffLines: diff });
+  const failed = (label: string, summary: string) => ({ label, summaryLines: [summary], allocation: null, diffLines: [] as string[] });
+  const withClose = (rounds: NonNullable<AnalysisDetail["close"]>["rounds"]) => analysis({ close: { note: "注記", rounds } });
+  const summaryOf = (a: AnalysisDetail) => content(a).summary;
+  const raceWith = (startTime: string | null | undefined) => ({ venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result", placeBasis: "top3" as const, ...(startTime === undefined ? {} : { startTime }) });
+
+  it("分析時刻の行は、従来の結果の見出しの下の行と同じ文字(「分析時刻: 2026-06-28 14:00」)", () => {
+    expect(summaryOf(analysis()).analyzedLine).toBe("分析時刻: 2026-06-28 14:00");
+    expect(summaryOf(analysis({ analyzedAt: "2026-06-28T15:00:00.000Z" })).analyzedLine).toBe("分析時刻: 2026-06-29 00:00");
+  });
+
+  describe("発走時刻の行", () => {
+    it("値があれば「発走時刻: HH:mm」。値はそのまま出す(補正しない)", () => {
+      expect(summaryOf(analysis({ race: raceWith("15:45") })).startLine).toBe("発走時刻: 15:45");
+      expect(summaryOf(analysis({ race: raceWith("09:05") })).startLine).toBe("発走時刻: 09:05");
+    });
+
+    it.each([
+      ["null(詳細なし・地方など)", null],
+      ["キー無し(古い応答)", undefined],
+      ["空文字", ""],
+      ["空白だけ", "  "],
+    ] as const)("%s は行ごと出さない(null)", (_name, startTime) => {
+      expect(summaryOf(analysis({ race: raceWith("15:45") })).startLine, "前提: 値があれば出る").not.toBeNull();
+      expect(summaryOf(analysis({ race: raceWith(startTime) })).startLine).toBeNull();
+    });
+  });
+
+  describe("買い目の行(点数と合計)", () => {
+    const alloc = (bets: readonly { betType: string; comboKey: string; stake: number; odds: number | null; ev: number | null }[], over: Record<string, unknown> = {}) => ({ ...ALLOCATION, bets: [...bets], ...over }) as AnalysisDetail["allocation"];
+
+    it("配分あり: 「買い目 N点・合計 X円」。合計は賭け金の数値の和(3 桁区切り・オッズや EV が null の買い目も数える)", () => {
+      const three = alloc([
+        { betType: "place", comboKey: "01", stake: 700, odds: 1.8, ev: 1.2 },
+        { betType: "wide", comboKey: "0102", stake: 500, odds: null, ev: null },
+        { betType: "trio", comboKey: "010203", stake: 100, odds: 12.3, ev: 1.3 },
+      ]);
+      expect(summaryOf(analysis({ allocation: three })).betLine).toBe("買い目 3点・合計 1,300円");
+      expect(content(analysis({ allocation: three })).allocation.bets, "前提: 配分の表と同じ点数").toHaveLength(3);
+      expect(summaryOf(analysis()).betLine, "既定の配分(300 + 200)").toBe("買い目 2点・合計 500円");
+    });
+
+    it("買い目が 1 点だけでも点数と合計を出す(退化した入力)", () => {
+      const one = alloc([{ betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 }]);
+      expect(summaryOf(analysis({ allocation: one })).betLine).toBe("買い目 1点・合計 300円");
+    });
+
+    it.each([
+      ["配分の記録なし(null)", null],
+      ["総資金・1レース上限が未設定", alloc([], { route: "unset", bankroll: 0, perRaceCap: 0 })],
+      ["見送り", alloc([], { route: "place-only", skipReasonCode: "no-edge" })],
+    ] as const)("%s は「配分なし」の 1 語だけ(注記・設定への案内は入れない)", (_name, allocation) => {
+      expect(summaryOf(analysis({ allocation })).betLine).toBe("配分なし");
+      expect(content(analysis({ allocation })).allocation.bets, "前提: 買い目は 0 点").toHaveLength(0);
+    });
+  });
+
+  describe("締切直前の再計算の 1 行", () => {
+    it("一番新しい「再計算できた回」のラベルと差分の 1 行目。後ろの回が失敗・見送りなら、その前の再計算できた回を使う", () => {
+      const rounds = [ok("発走5分前", ["追加 1点・削除 0点・賭け金の変化 0点(合計 500円 → 600円)", "追加 複勝 3 100円"]), ok("発走2分前", ["分析時から変わりませんでした"])];
+      expect(summaryOf(withClose(rounds)).closeLine).toBe("締切直前の再計算(発走2分前): 分析時から変わりませんでした");
+      expect(summaryOf(withClose([rounds[0]!, failed("発走2分前", "失敗(オッズを取り直せませんでした)")])).closeLine).toBe("締切直前の再計算(発走5分前): 追加 1点・削除 0点・賭け金の変化 0点(合計 500円 → 600円)");
+    });
+
+    it("再計算できた回が無い・節が無い・古い応答(キー無し)は出さない(null)", () => {
+      expect(summaryOf(withClose([ok("発走5分前", ["x"])])).closeLine, "前提: 再計算できた回があれば出る").not.toBeNull();
+      expect(summaryOf(withClose([failed("発走5分前", "行わなかった(時刻を過ぎていたため行いませんでした)"), failed("発走2分前", "失敗(計算できませんでした)")])).closeLine).toBeNull();
+      expect(summaryOf(analysis({ close: null })).closeLine).toBeNull();
+      expect(summaryOf(analysis()).closeLine).toBeNull();
+    });
+
+    it("差分の行が無い回(分析時の配分が無い)は、状態の行の 1 行目(「再計算した」)で代える。「配分は0点です」もそのまま出す", () => {
+      expect(summaryOf(withClose([ok("発走5分前", [])])).closeLine).toBe("締切直前の再計算(発走5分前): 再計算した");
+      expect(summaryOf(withClose([ok("発走5分前", ["配分は0点です", "分析時から変わりませんでした"])])).closeLine).toBe("締切直前の再計算(発走5分前): 配分は0点です");
+    });
+  });
+
+  it("要約は閲覧者(readOnly)でも同じ(配分の注記を要約に入れないので、役割による差が無い)", () => {
+    const a = analysis({ race: raceWith("15:45"), close: { note: "注記", rounds: [ok("発走5分前", ["分析時から変わりませんでした"])] } });
+    const admin = buildResultModel({ route: ROUTE, source: ready(a), readOnly: false }).content!.summary;
+    const viewer = buildResultModel({ route: ROUTE, source: ready(a), readOnly: true }).content!.summary;
+    expect(admin.startLine, "前提: 空でない要約").not.toBeNull();
+    expect(viewer).toEqual(admin);
+  });
+});
+
+describe("説明文の開閉の状態と分析 id(Issue #546)", () => {
+  it("既定は閉じる(notesOpen=false)。入力で開く。分析 id を持つ(開閉の状態の鍵)", () => {
+    expect(content(analysis()).notesOpen).toBe(false);
+    const open = buildResultModel({ route: ROUTE, source: ready(analysis()), notesOpen: true }).content!;
+    expect(open.notesOpen).toBe(true);
+    expect(content(analysis({ id: 42 })).id).toBe(42);
+  });
+});

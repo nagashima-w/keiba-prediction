@@ -351,6 +351,23 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
       expect(read({ ...RACE, grade: { a: 1 } })).toBe("unexpected");
     });
 
+    it("Issue #546 race.startTime(発走時刻): 文字列は値を保って読む・null は null・キー無し(古いサーバの応答)は null。文字列でも null でもなければ unexpected", () => {
+      const read = (race: unknown) => {
+        const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, race }));
+        return result.ok ? result.analysis.race.startTime : "unexpected";
+      };
+      // 前提: RACE 自体は startTime を "15:45" で持つ(読んだ値が入力の値であること)。キー無しは、そのキーを消した race で読む。
+      expect(RACE.startTime).toBe("15:45");
+      expect(read(RACE)).toBe("15:45");
+      expect(read({ ...RACE, startTime: "09:05" })).toBe("09:05");
+      expect(read({ ...RACE, startTime: null })).toBeNull();
+      const { startTime: _dropped, ...withoutKey } = RACE;
+      expect("startTime" in withoutKey).toBe(false);
+      expect(read(withoutKey)).toBeNull();
+      expect(read({ ...RACE, startTime: 1545 })).toBe("unexpected");
+      expect(read({ ...RACE, startTime: { a: 1 } })).toBe("unexpected");
+    });
+
     it("Issue #311 earlyPos: 数は値を保って読む・null は null・キー無し(古いサーバの応答)は null。数でも null でもなければ unexpected", () => {
       const read = (over: Record<string, unknown>, drop = false) => {
         const horse: Record<string, unknown> = { ...HORSE, ...over };

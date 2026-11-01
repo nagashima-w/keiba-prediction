@@ -29,6 +29,8 @@ export interface ViewActions {
   readonly onToggleGroup: (key: string, open: boolean) => void;
   /** 発走前のカードの結果の見出しのタップ(Issue #188)。引数は見出しの `data-date`・`data-race` と同じ値。`open` は押したあとの状態(今の逆)。 */
   readonly onToggleResult: (date: string, raceId: string, open: boolean) => void;
+  /** 結果の説明文(「仕組みを見る」)の開閉のボタン(Issue #546)。引数は `data-analysis`(分析 id)と同じ値。`open` は押したあとの状態(今の逆)。 */
+  readonly onToggleNotes: (analysisId: number, open: boolean) => void;
   /** 起動のボタン(Issue #186)。引数(開催日・レース・モード)は、ボタンの `data-*` と同じ値。 */
   readonly onRun: (date: string, raceId: string, mode: TaskMode) => void;
   /** 場ごとの一括実行のボタン(Issue #251)。引数(場のキー・モード)は、ボタンの `data-key`・`data-mode` と同じ値。押すと確認画面を開く。 */
@@ -227,7 +229,7 @@ function cardResult(result: CardResult, actions: ViewActions): VNode {
     ...(open
       ? [
           ...resultMeta(content),
-          ...resultSections(content, "h3"),
+          ...resultSections(content, "h3", actions),
         ]
       : []),
   ]);
@@ -277,12 +279,12 @@ function raceScreen(model: RaceModel, actions: ViewActions): VNode {
 }
 
 /**
- * 結果の見出しの下(結果画面と、発走前のカードの中で共通。Issue #195): 分析時刻・分析モデル・LLM を使わなかった理由(`llmNote`。モデルの有無に関係なく、null でなければ)・詳細の注記。
+ * 結果の見出しの下(結果画面と、発走前のカードの中で共通。Issue #195): 分析モデル・LLM を使わなかった理由(`llmNote`。モデルの有無に関係なく、null でなければ)・詳細の注記。
  * 理由は「分析モデル」の行のすぐ下(モデル欄の近く)に置く。Issue #198: LLM の所要時間・usage(記録があるとき)は、モデルの行と理由の間。
  */
 function resultMeta(content: ResultContent): VNode[] {
   return [
-    h("p", { class: "meta" }, [`分析時刻: ${content.analyzedAt}`]),
+    // 分析時刻は、結果の先頭の要約(`summarySection`。Issue #546)へ移した。
     h("p", { class: "meta" }, [`分析モデル: ${content.model}`]),
     // LLM の所要時間・usage(Issue #198)。要約の1行と、該当するときだけの警告(1件ずつ)。理由の注記より上。
     ...(content.llmUsage === null ? [] : [h("p", { class: "meta llm-usage" }, [content.llmUsage.summary]), ...content.llmUsage.warnings.map((w) => h("p", { class: "notice llm-usage-warn" }, [w]))]),
@@ -334,14 +336,17 @@ function markFixedBadge(change: string | null): VNode {
   return h("span", { class: "mark-fixed" }, [change === null ? MARK_REPAIRED_BADGE : `${MARK_REPAIRED_BADGE} ${change}`]);
 }
 
-/** 印の付いた馬の1行(Issue #211)。印・馬番・馬名。馬名が無ければ印と馬番だけ。数値は出さない。補修した馬には「直」と元の印(Issue #317)。 */
-function markedHorseRow(m: MarkedHorse): VNode {
-  return h("li", { class: "marked" }, [
-    h("span", { class: "marked-mark" }, [m.mark]),
+/**
+ * 印の付いた馬の1行(Issue #211)。印・馬番・馬名。馬名が無ければ印と馬番だけ。数値は出さない。補修した馬には「直」と元の印(Issue #317)。
+ * `cls` は行と中の要素の class の頭(既定「marked」)。要約(Issue #546)は同じ部品を別の class(「summary-marked」)で使い、「印の付いた馬」の節の class を数えるテストと重ならない。
+ */
+function markedHorseRow(m: MarkedHorse, cls = "marked"): VNode {
+  return h("li", { class: cls }, [
+    h("span", { class: `${cls}-mark` }, [m.mark]),
     // 要素の間の隙間は、空白のテキストノードで作る(`.marked` に CSS は無く、`dom.ts` は子をそのまま appendChild する。無いと実ブラウザでは「◎3エートラックス」と詰まる)。
     " ",
     h("strong", {}, [`${m.umaban}`]),
-    ...(m.name === null ? [] : [" ", h("span", { class: "marked-name" }, [m.name])]),
+    ...(m.name === null ? [] : [" ", h("span", { class: `${cls}-name` }, [m.name])]),
     ...(m.markRepair === null ? [] : [" ", markFixedBadge(m.markRepair)]),
   ]);
 }
@@ -375,10 +380,12 @@ function developmentSection(d: DevelopmentSection, heading: "h2" | "h3"): VNode 
  * 図は 10 列の格子(`.formation-track`)で、チップ(`.formation-chip`)の列は `data-slot`(CSS が `grid-column` に割り当てる)。`style` 属性・`canvas`・`svg` は使わない(`dom.ts` の許可リストのまま)。
  * 図は `role="img"` で、読み上げは `aria-label`(前から後ろの馬番)。文字での代替は凡例(全馬の馬番と馬名)。馬名は外から来た文字列(子の文字列はアダプタがテキストノードにする)。
  */
-function formationSection(f: FormationSection, heading: "h2" | "h3"): VNode {
+function formationSection(f: FormationSection, heading: "h2" | "h3", content: ResultContent, actions: ViewActions): VNode {
   return h("section", { class: "formation" }, [
     h(heading, {}, [f.heading]),
-    h("p", { class: "meta formation-note" }, [f.note]),
+    // 注記は説明文の折りたたみ(Issue #546)の対象。既定は閉じる。
+    notesToggle(content, actions),
+    ...(content.notesOpen ? [h("p", { class: "meta formation-note" }, [f.note])] : []),
     h("p", { class: "meta formation-pace" }, [f.paceLine]),
     ...f.phases.map((p) =>
       h("div", { class: "formation-phase" }, [
@@ -396,9 +403,9 @@ function formationSection(f: FormationSection, heading: "h2" | "h3"): VNode {
   ]);
 }
 
-/** 買い目の表の 1 行(配分の提案と、締切直前の再計算で共通)。 */
-const betRow = (b: AllocationBetRowView): VNode =>
-  h("li", { class: "bet" }, [h("strong", {}, [b.betTypeLabel]), h("span", {}, [b.comboLabel]), h("span", {}, [b.stake]), h("small", {}, [`オッズ ${b.odds}・EV ${b.ev}`])]);
+/** 買い目の表の 1 行(配分の提案と、締切直前の再計算で共通。要約〈Issue #546〉も同じ部品を別の class〈`cls`〉で使う)。 */
+const betRow = (b: AllocationBetRowView, cls = "bet"): VNode =>
+  h("li", { class: cls }, [h("strong", {}, [b.betTypeLabel]), h("span", {}, [b.comboLabel]), h("span", {}, [b.stake]), h("small", {}, [`オッズ ${b.odds}・EV ${b.ev}`])]);
 
 /** 締切直前の再計算の節(Issue #344)。回ごとに、見出し・状態の行・表・差分の行。回の見出しは見出しの要素ではなく強調の段落(許可リスト〈`dom.ts`〉に h4 が無く、h2/h3 のどちらの下でも同じ形にできる)。 */
 function closeSection(close: CloseSection, heading: "h2" | "h3"): VNode {
@@ -412,7 +419,7 @@ function closeSection(close: CloseSection, heading: "h2" | "h3"): VNode {
         ...r.notices.map((n) => h("p", { class: "notice" }, [n])),
         ...(r.bets.length === 0
           ? []
-          : [h("ul", { class: "bets" }, r.bets.map(betRow))]),
+          : [h("ul", { class: "bets" }, r.bets.map((b) => betRow(b)))]),
         ...r.diffLines.map((l) => h("p", { class: "meta" }, [l])),
       ]),
     ),
@@ -423,9 +430,43 @@ function closeSection(close: CloseSection, heading: "h2" | "h3"): VNode {
  * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「3着内率の上位5頭」(Issue #240。印の付いた馬の直後)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
  * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
  */
-function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
+/**
+ * 結果の先頭の要約(Issue #546)。印の付いた馬・買い目の点数と合計・買い目の一覧(配分の表と同じ部品〈`betRow`〉)・発走時刻・分析時刻・締切直前の再計算の最新の結果 1 行。
+ * 無い項目は行ごと出さない。class は既存の節(`marked`・`bet`)と重ならない名前にする(それらの数を数える既存のテストが、要約の分を数えない)。
+ */
+function summarySection(content: ResultContent, heading: "h2" | "h3"): VNode {
+  const s = content.summary;
+  const bets = content.allocation.bets;
+  return h("section", { class: "summary" }, [
+    h(heading, {}, ["要約"]),
+    ...(content.markedHorses.length === 0 ? [] : [h("ul", { class: "summary-marks" }, content.markedHorses.map((m) => markedHorseRow(m, "summary-marked")))]),
+    h("p", { class: "summary-bet-line" }, [s.betLine]),
+    ...(bets.length === 0 ? [] : [h("ul", { class: "summary-bets" }, bets.map((b) => betRow(b, "summary-bet")))]),
+    ...(s.startLine === null ? [] : [h("p", { class: "meta summary-start" }, [s.startLine])]),
+    h("p", { class: "meta summary-analyzed" }, [s.analyzedLine]),
+    ...(s.closeLine === null ? [] : [h("p", { class: "meta summary-close" }, [s.closeLine])]),
+  ]);
+}
+
+/**
+ * 説明文の開閉のボタン(Issue #546)。見出しは「仕組みを見る」(開閉が色だけに頼らないよう ▾/▸ を付ける)。`<details>` は使わない(#187 と同じ理由)ので、状態は `app.ts` のメモリ(分析 id ごと)。
+ * クリック処理に渡す値(分析 id)は `data-analysis` にも出す(`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されない)。説明文を持つ節ごとに 1 つ(同じ状態を共有する)。
+ */
+function notesToggle(content: ResultContent, actions: ViewActions): VNode {
+  const open = content.notesOpen;
+  return h(
+    "button",
+    { class: "notes-toggle", "aria-expanded": open ? "true" : "false", "data-analysis": String(content.id) },
+    [`${open ? "▾" : "▸"} 仕組みを見る`],
+    { click: () => actions.onToggleNotes(content.id, !open) },
+  );
+}
+
+function resultSections(content: ResultContent, heading: "h2" | "h3", actions: ViewActions): VNode[] {
   const allocation = content.allocation;
   return [
+    // 要約(Issue #546)。結果の節の先頭。
+    summarySection(content, heading),
     // 印の付いた馬(Issue #211)。印が1頭も無ければ section ごと出さない。凡例はここ(見出しの下)に1回だけ(「馬ごとの評価」の中には出さない)。
     ...(content.markedHorses.length === 0
       ? []
@@ -433,7 +474,7 @@ function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
           h("section", { class: "marked-horses" }, [
             h(heading, {}, ["印の付いた馬"]),
             ...(content.markLegend === null ? [] : [h("p", { class: "meta mark-legend" }, [content.markLegend])]),
-            h("ul", { class: "horse-list" }, content.markedHorses.map(markedHorseRow)),
+            h("ul", { class: "horse-list" }, content.markedHorses.map((m) => markedHorseRow(m))),
           ]),
         ]),
     // 3着内率の上位5頭(Issue #240)。印の有無と独立。率が有限な馬が1頭も無ければ section ごと出さない。凡例は足さない(印の付いた馬の凡例が1回出ている)。
@@ -441,16 +482,17 @@ function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
     // AI の展開予想(Issue #315)。無ければ section ごと出さない。本文は LLM の出力(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
     ...(content.development === null ? [] : [developmentSection(content.development, heading)]),
     // 想定隊列図(Issue #362。旧「レース再生」の位置)。脚質の分かる馬が 2 頭未満の分析は section ごと出さない。
-    ...(content.formation === null ? [] : [formationSection(content.formation, heading)]),
+    ...(content.formation === null ? [] : [formationSection(content.formation, heading, content, actions)]),
     // そのとき LLM が見た当日の馬場の値(Issue #295)。無ければ section ごと出さない。行はサーバの整形(外から来た文字列。子の文字列はアダプタがテキストノードにする)。
     ...(content.baba === null ? [] : [h("section", { class: "baba" }, [h(heading, {}, [content.baba.heading]), ...content.baba.lines.map((line) => h("p", { class: "meta baba-line" }, [line]))])]),
     h("section", { class: "horses" }, [
       h(heading, {}, ["馬ごとの評価"]),
-      // 単勝の想定の説明文(Issue #247)。カードごとには出さず、見出しの下に1回。
-      ...(content.winOddsNote === null ? [] : [h("p", { class: "meta win-odds-note" }, [content.winOddsNote])]),
-      ...(content.placeOddsNote === null ? [] : [h("p", { class: "meta place-odds-note" }, [content.placeOddsNote])]),
-      // タイム指数の説明(Issue #359)。カードごとには出さず、見出しの下に1回。
-      ...(content.timeIndexNote === null ? [] : [h("p", { class: "meta time-index-note" }, [content.timeIndexNote])]),
+      // 説明文(単勝・複勝の想定の説明〈Issue #247・#253〉・タイム指数の説明〈Issue #359〉)は、カードごとには出さず、見出しの下に1回。
+      // Issue #546: 「仕組みを見る」の折りたたみの対象(既定は閉じる)。3 つのどれも無い(全頭『-』など)ときは、ボタンごと出さない。
+      ...(content.winOddsNote === null && content.placeOddsNote === null && content.timeIndexNote === null ? [] : [notesToggle(content, actions)]),
+      ...(!content.notesOpen || content.winOddsNote === null ? [] : [h("p", { class: "meta win-odds-note" }, [content.winOddsNote])]),
+      ...(!content.notesOpen || content.placeOddsNote === null ? [] : [h("p", { class: "meta place-odds-note" }, [content.placeOddsNote])]),
+      ...(!content.notesOpen || content.timeIndexNote === null ? [] : [h("p", { class: "meta time-index-note" }, [content.timeIndexNote])]),
       h("ul", { class: "horse-list" }, content.horses.map(horseCard)),
     ]),
     h("section", { class: "allocation" }, [
@@ -462,7 +504,7 @@ function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
             h(
               "ul",
               { class: "bets" },
-              allocation.bets.map(betRow),
+              allocation.bets.map((b) => betRow(b)),
             ),
           ]),
       ...(allocation.settingsRows.length === 0 ? [] : [h("ul", { class: "settings" }, allocation.settingsRows.map((r) => h("li", {}, [h("small", {}, [r])])))]),
@@ -490,7 +532,7 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
   if (content !== null) {
     body.push(h("h1", { class: "title" }, [content.title]));
     body.push(...resultMeta(content));
-    body.push(...resultSections(content, "h2"));
+    body.push(...resultSections(content, "h2", actions));
   }
   return h("div", { class: "screen" }, [controls, ...body]);
 }

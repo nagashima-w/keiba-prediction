@@ -7,6 +7,7 @@
  *    場ごとの一括実行(Issue #251)も同じ形で `bulk-control.ts` が持つ。板・追跡の道具(`setOverlay`・`forceTrack`)は、`race-data.ts` から関数で渡す。
  * 表示は「現在のハッシュ + キャッシュ」から毎回導く(遅れて届いた結果は、キャッシュに入るだけで、今の画面を壊さない)。
  *  - 結果の開閉(`resultOpen`。Issue #188)は (開催日, race_id) ごとにメモリに持つ(#187 と同じ。既定は開・ハッシュ/localStorage には持たない・「更新」で消さない)。
+ *  - 結果の説明文の開閉(`notesOpen`。Issue #546)は分析 id ごとにメモリに持つ(既定は閉じる。結果画面とカードで共有。ハッシュ/localStorage には持たない・「更新」で消さない)。
  *
  * **Issue #189(設定画面。`#settings`)**: 開くと `GET /api/settings` だけを取る(一覧・板・レース・分析は取らない)。状態・取得・保存・プレビュー(#201・#396)・世代・下書きは `settings-screen.ts` が持ち(Issue #400 R-11 で切り出した。
  *   詳細はそのファイルの先頭)、ここは出入り(`enter`・`leave`)・描画(`model(force)`)・「再読込」を渡すだけ。強制なしの描画は画面に出ている内容の写しから木を作る(打っている欄を壊さない)。
@@ -102,6 +103,8 @@ export function createApp(deps: AppDeps): App {
   const openChoices = new Map<string, Map<string, boolean>>();
   /** 発走前のカードの結果の開閉(Issue #188)。(開催日, race_id) ごとに、利用者が押した値だけを持つ(既定は開)。 */
   const resultOpenChoices = new Map<string, boolean>();
+  /** 結果の説明文(「仕組みを見る」。Issue #546)の開閉。**分析 id ごと**に、利用者が押した値だけを持つ(既定は閉じる)。結果画面とレース画面のカードは、同じ分析なら同じ状態。 */
+  const notesOpenChoices = new Map<number, boolean>();
 
   const listSource = (): ListSource => data.listSource(route.date, route.venue);
   const boardSource = (): BoardSource => data.boardSource(route.date);
@@ -184,6 +187,7 @@ export function createApp(deps: AppDeps): App {
     onRefresh,
     onToggleGroup,
     onToggleResult,
+    onToggleNotes,
     onRun: run.onRun,
     onBulkOpen: bulk.onOpen,
     onBulkGo: bulk.onGo,
@@ -222,7 +226,7 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       case "result": {
-        deps.render(renderScreen(buildResultModel({ route, source: data.analysisSource(route.analysis!), readOnly: !admin }), actions), force);
+        deps.render(renderScreen(buildResultModel({ route, source: data.analysisSource(route.analysis!), readOnly: !admin, notesOpen: notesOpenChoices.get(route.analysis!) ?? false }), actions), force);
         return;
       }
       case "race": {
@@ -242,6 +246,7 @@ export function createApp(deps: AppDeps): App {
               tracking: data.trackingNotice(),
               ...(latestId === null ? {} : { result: data.analysisSource(latestId) }),
               resultOpen: resultOpenChoices.get(key) ?? true,
+              notesOpen: latestId !== null && (notesOpenChoices.get(latestId) ?? false),
               readOnly: !admin,
             }),
             actions,
@@ -383,6 +388,12 @@ export function createApp(deps: AppDeps): App {
   function onToggleResult(date: string, raceId: string, open: boolean): void {
     // 取得は起こさず、描画だけ。
     resultOpenChoices.set(raceKey(date, raceId), open);
+    render();
+  }
+
+  function onToggleNotes(analysisId: number, open: boolean): void {
+    // 取得は起こさず、描画だけ。
+    notesOpenChoices.set(analysisId, open);
     render();
   }
 

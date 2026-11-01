@@ -33,7 +33,7 @@ import { markRank, PREDICTION_MARKS } from "../../packages/core/src/common/predi
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { nameWithGrade } from "./grade";
-import { formatAdjustment } from "../../packages/core/src/view/verify-format";
+import { formatAdjustment, formatYen } from "../../packages/core/src/view/verify-format";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
 import { buildPlaceOddsLine, PLACE_ODDS_NOTE, type PlaceOddsLine } from "../src/place-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
@@ -202,7 +202,31 @@ export interface CloseSection {
   readonly rounds: readonly CloseRoundSection[];
 }
 
+/**
+ * 結果の先頭の要約(Issue #546)。材料はクライアントのモデルにすでにある値だけ(サーバの応答は変えない)。文はクライアントで組み立てる。
+ * 印の付いた馬は `ResultContent.markedHorses`、買い目の一覧は `allocation.bets` を、画面(`view.ts`)が同じ部品で出す(ここには重ねて持たない)。
+ */
+export interface SummarySection {
+  /** 「発走時刻: 15:45」。値の無い(null・空・空白だけの)分析は null(行ごと出さない)。 */
+  readonly startLine: string | null;
+  /** 「分析時刻: 2026-06-28 14:00」(従来の結果の見出しの下の行と同じ文字)。 */
+  readonly analyzedLine: string;
+  /** 「買い目 3点・合計 1,300円」。買い目が無い(配分の記録なし・未設定・見送り)ときは「配分なし」の 1 語(注記・設定への案内は入れない=閲覧者・管理者で差が出ない)。 */
+  readonly betLine: string;
+  /** 締切直前の再計算の最新の結果 1 行(「締切直前の再計算(発走2分前): 分析時から変わりませんでした」)。再計算できた回が無い・節が無いときは null。 */
+  readonly closeLine: string | null;
+}
+
+/** 買い目が無いときの要約の 1 語(Issue #546)。 */
+export const NO_BETS_LINE = "配分なし";
+
 export interface ResultContent {
+  /** 分析 id(Issue #546。説明文の開閉の状態の鍵。結果画面とカードで同じ分析なら同じ状態になる)。 */
+  readonly id: number;
+  /** 先頭の要約(Issue #546)。 */
+  readonly summary: SummarySection;
+  /** 説明文(単勝・複勝・タイム指数・隊列図の注記)を開いているか(Issue #546。既定は閉じる)。文の中身は開閉に関わらず持つ(出すかどうかは画面が決める)。 */
+  readonly notesOpen: boolean;
   /** 想定隊列図の節(Issue #362。AI の展開予想の後・「当日の馬場」の前)。脚質の分かる馬が 2 頭未満の分析は null(節ごと出さない)。 */
   readonly formation: FormationSection | null;
   readonly title: string;
@@ -334,15 +358,45 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
   return { heading: llmEffective ? `${LABEL_ADJUSTED_PROB}の3着内率 上位${TOP_PROB_COUNT}頭` : `${LABEL_PRIOR} 上位${TOP_PROB_COUNT}頭`, rows };
 }
 
+/**
+ * 要約の買い目の行(Issue #546)。点数は配分の表の行数、合計は賭け金(数値)の和。配分の表が空(記録なし・未設定・見送り・判定不能)なら「配分なし」。
+ * 合計は表示用の文字列(「300円」)ではなく、保存された数値(`StoredAllocationBetView.stake`)から足す。
+ */
+function betLineOf(a: AnalysisDetail, bets: AllocationSection["bets"]): string {
+  if (bets.length === 0 || a.allocation === null) return NO_BETS_LINE;
+  return `買い目 ${bets.length}点・合計 ${formatYen(a.allocation.bets.reduce((sum, b) => sum + b.stake, 0))}`;
+}
+
+/**
+ * 要約の締切直前の再計算の行(Issue #546)。**再計算できた回(`allocation` が non-null)のうち一番新しいもの**(回は昇順)の見出しと、差分の 1 行目
+ * (差分の行が無い回は状態の行の 1 行目〈「再計算した」〉)。後ろの回が失敗・見送りでも、その前の再計算できた回を使う。無ければ null。
+ */
+function closeLineOf(close: AnalysisDetail["close"]): string | null {
+  const done = (close?.rounds ?? []).filter((r) => r.allocation !== null);
+  const round = done[done.length - 1];
+  return round === undefined ? null : `${CLOSE_HEADING}(${round.label}): ${round.diffLines[0] ?? round.summaryLines[0]}`;
+}
+
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。`readOnly`(閲覧者。Issue #238)は設定への案内を外す。省略は管理者。 */
-export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
+export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false): ResultContent {
   // LLM が効いたか = モデル ID があるか(core の `view/format.ts` の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
   const llmEffective = a.model !== null && a.model !== "";
   const markedHorses = markedHorsesOf(a.horses);
+  const allocation = allocationOf(a, readOnly);
+  const analyzedAt = formatJstDateTime(a.analyzedAt);
+  const startTime = a.race.startTime ?? null;
   return {
+    id: a.id,
+    notesOpen,
+    summary: {
+      startLine: startTime === null || startTime.trim() === "" ? null : `発走時刻: ${startTime}`,
+      analyzedLine: `分析時刻: ${analyzedAt}`,
+      betLine: betLineOf(a, allocation.bets),
+      closeLine: closeLineOf(a.close),
+    },
     formation: buildFormation(a),
     title: titleOf(a),
-    analyzedAt: formatJstDateTime(a.analyzedAt),
+    analyzedAt,
     model: llmEffective ? a.model! : MODEL_NONE_TEXT,
     llmNote: a.llmNote,
     llmUsage: a.llmCalls !== null && a.llmCalls.length > 0 ? buildLlmUsage(a.llmCalls) : null,
@@ -373,7 +427,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
       placeOdds: buildPlaceOddsLine(h.fairPlaceOdds, h.actualPlaceOddsMin, h.actualPlaceOddsMax, a.race.oddsStatus, a.race.placeBasis),
       timeIndexLine: h.timeIndexLine ?? null,
     })),
-    allocation: allocationOf(a, readOnly),
+    allocation,
     close: closeOf(a, readOnly),
   };
 }
@@ -385,12 +439,12 @@ function backToRace(route: Route, a: AnalysisDetail): string {
   return buildHash({ date, venue: route.venue, race });
 }
 
-export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean }): ResultModel {
+export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean; /** 説明文を開いているか(Issue #546。省略は閉じる)。 */ readonly notesOpen?: boolean }): ResultModel {
   const { route, source } = input;
   const readOnly = input.readOnly === true;
   const listHref = buildHash({ date: route.date, venue: route.venue });
   if (source.kind === "ready") {
-    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly), backHref: backToRace(route, source.analysis) };
+    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly, input.notesOpen === true), backHref: backToRace(route, source.analysis) };
   }
   return {
     kind: "result",
