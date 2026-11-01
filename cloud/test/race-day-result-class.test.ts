@@ -73,6 +73,7 @@ interface FakeStore {
   saveResult(raceId: string, entries: readonly RaceResultEntry[], courseType?: CourseType | null, comboPayouts?: RaceComboPayoutsSaveInput): Promise<void>;
   saveWinOdds(raceId: string, entries: readonly RaceResultEntry[]): Promise<{ readonly rowsWritten: number }>;
   saveScratched(raceId: string, entries: readonly RaceResultEntry[]): Promise<{ readonly rowsWritten: number }>;
+  saveWinPayout(raceId: string, entries: readonly RaceResultEntry[]): Promise<{ readonly rowsWritten: number }>;
   saveRaceClass(raceId: string, raceClass: string | null | undefined): Promise<{ readonly rowsWritten: number }>;
   getRaceResultDetails(raceIds: readonly string[]): Promise<Map<string, RaceResultDetail>>;
 }
@@ -95,6 +96,10 @@ function fakeStore(): FakeStore {
     },
     async saveScratched() {
       store.order.push("saveScratched");
+      return { rowsWritten: 0 };
+    },
+    async saveWinPayout() {
+      store.order.push("saveWinPayout");
       return { rowsWritten: 0 };
     },
     async saveRaceClass(raceId, raceClass) {
@@ -135,7 +140,7 @@ afterEach(() => {
 });
 
 /** `withoutClassMethod` が true なら、結果ストアは `saveRaceClass` を持たない(従来の構成。クラスの保存は黙って省く)。 */
-function harness(options: { withoutClassMethod?: boolean } = {}): Harness {
+function harness(options: { withoutClassMethod?: boolean; withoutPayoutMethod?: boolean } = {}): Harness {
   const sql = openNodeSql();
   opened.push(sql);
   const clock = { now: NOW };
@@ -144,8 +149,10 @@ function harness(options: { withoutClassMethod?: boolean } = {}): Harness {
   const gate = fakeGate();
   const store = fakeStore();
   const resultStore =
-    options.withoutClassMethod === true
-      ? { saveResult: store.saveResult, saveWinOdds: store.saveWinOdds, saveScratched: store.saveScratched, getRaceResultDetails: store.getRaceResultDetails }
+    options.withoutPayoutMethod === true
+      ? { saveResult: store.saveResult, saveWinOdds: store.saveWinOdds, saveScratched: store.saveScratched, saveRaceClass: store.saveRaceClass, getRaceResultDetails: store.getRaceResultDetails }
+      : options.withoutClassMethod === true
+      ? { saveResult: store.saveResult, saveWinOdds: store.saveWinOdds, saveScratched: store.saveScratched, saveWinPayout: store.saveWinPayout, getRaceResultDetails: store.getRaceResultDetails }
       : store;
   const core = new RaceDayCore({
     sql,
@@ -261,12 +268,20 @@ describe("補完モード(winOddsOnly)でもクラスを保存する", () => {
     await h.core.requestResultImport({ kaisaiDate: DATE, raceIds: [R_OPEN], winOddsOnly: true });
   }
 
-  it("saveWinOdds・saveScratched のあとに saveRaceClass を呼ぶ(saveResult は呼ばない)", async () => {
+  it("saveWinOdds・saveScratched・saveWinPayout のあとに saveRaceClass を呼ぶ(saveResult は呼ばない)", async () => {
     const h = harness();
     await importThenFill(h);
     expect(await tick(h)).toBe(`${R_OPEN}:result:import:ok`);
-    expect(h.store.order).toEqual(["saveWinOdds", "saveScratched", "saveRaceClass"]);
+    expect(h.store.order).toEqual(["saveWinOdds", "saveScratched", "saveWinPayout", "saveRaceClass"]);
     expect(h.store.classCalls).toEqual([{ raceId: R_OPEN, raceClass: "オープン" }]);
+  });
+
+  it("Issue #556: 結果ストアが saveWinPayout を持たない構成(従来)では、払戻の保存を省いて取り込みは成功する(オッズ・scratched・クラスは保存する)", async () => {
+    const h = harness({ withoutPayoutMethod: true });
+    await importThenFill(h);
+    expect(await tick(h)).toBe(`${R_OPEN}:result:import:ok`);
+    expect(h.store.order).toEqual(["saveWinOdds", "saveScratched", "saveRaceClass"]);
+    expect(h.warnings).toEqual([]);
   });
 
   it("★補完モードでも、saveRaceClass の失敗で取り込みを失敗にしない(オッズ・scratched は保存済み)", async () => {
@@ -274,7 +289,7 @@ describe("補完モード(winOddsOnly)でもクラスを保存する", () => {
     await importThenFill(h);
     h.store.classFailures = 1;
     expect(await tick(h)).toBe(`${R_OPEN}:result:import:ok`);
-    expect(h.store.order).toEqual(["saveWinOdds", "saveScratched"]);
+    expect(h.store.order).toEqual(["saveWinOdds", "saveScratched", "saveWinPayout"]);
     expect(rowOf(h, R_OPEN)).toMatchObject({ state: "imported", last_class: "imported" });
     expect(h.warnings).toHaveLength(1);
     expect(h.warnings[0]).not.toContain("SECRET");

@@ -76,7 +76,7 @@ export class ResultStage {
   }
 
   /**
-   * 結果の 1 レースを取り込む(取得 → パース → **単勝の払戻が出ていれば**保存)。**多くとも 1 レース・D1 への書き込みは 1 レースぶん(最大 6 文の 1 batch。単勝オッズ・人気が無ければ最大 5 文)に、クラスが読めたときだけ batch の外で UPDATE が 1 文増える(`saveRaceClass`。Issue #426。失敗は握る)**。補完モード(`winOddsOnly`)では batch の代わりに `saveWinOdds`・`saveScratched` の UPDATE 各 1 文(NULL の列だけを埋める)と、同じ `saveRaceClass` になる。
+   * 結果の 1 レースを取り込む(取得 → パース → **単勝の払戻が出ていれば**保存)。**多くとも 1 レース・D1 への書き込みは 1 レースぶん(最大 6 文の 1 batch。単勝オッズ・人気が無ければ最大 5 文)に、クラスが読めたときだけ batch の外で UPDATE が 1 文増える(`saveRaceClass`。Issue #426。失敗は握る)**。補完モード(`winOddsOnly`)では batch の代わりに `saveWinOdds`・`saveScratched`・`saveWinPayout`(Issue #556)の UPDATE 各 1 文(NULL の列だけを埋める)と、同じ `saveRaceClass` になる。
    * 取得は gate 経由・キャッシュなし。core の `importRaceResult` を、`parse` を包んで使う(単勝の払戻が 0 件なら `RaceResultNotConfirmedError` を投げる = 審議中の暫定の着順を保存しない)。
    * 試行回数は取得の前に永続化する(クラッシュしても無限に続かない)。失敗の扱い:
    *  - 未確定・払戻なし・構造の異常・取得の失敗・保存の失敗 → 試行を数えて、{@link RESULT_RETRY_DELAY_MS} 後に再試行。{@link MAX_RESULT_ATTEMPTS} 回で諦める
@@ -129,10 +129,12 @@ export class ResultStage {
         saveResult: async (id, entries, courseType, comboPayouts) => {
           progress.stage = "save";
           if (winOddsOnly) {
-            // 過去分の補完(Issue #259・#270): 確定の単勝オッズ・人気と、取消・除外の記録(scratched)だけを、NULL の列に埋める。保存済みの着順・払戻・組合せ払戻には触れない。
-            // 同じ取得(同じ entries)で両方を埋める。どちらも冪等なので、片方が失敗して再試行になっても、埋まった分は書き直されない。
+            // 過去分の補完(Issue #259・#270・#556): 確定の単勝オッズ・人気、取消・除外の記録(scratched)、単勝の払戻(win_payout)だけを、NULL の列に埋める。保存済みの着順・複勝払戻・組合せ払戻には触れない。
+            // 同じ取得(同じ entries)で埋める。どれも冪等なので、途中で失敗して再試行になっても、埋まった分は書き直されない。
+            // 単勝の払戻の保存の失敗は握らずに伝える(save-failed で再試行): 段階 4 の目的そのものなので、握ると『取り込めた』のに NULL のまま残る。保存先が持たない構成では省く。
             await this.resultStore!.saveWinOdds(id, entries);
             await this.resultStore!.saveScratched(id, entries);
+            await this.resultStore!.saveWinPayout?.(id, entries);
             await this.saveRaceClass(id, progress.raceClass);
             return;
           }
