@@ -9,9 +9,10 @@
  */
 
 import path from "node:path";
+import type { RaceIdVenueKind } from "../../packages/core/src/scraper/ids.js";
 
 /** 中央か地方か。 */
-export type Kind = "central" | "nar";
+export type Kind = RaceIdVenueKind;
 
 /** 取得の段階。 */
 export type Stage = "calendar" | "list" | "result";

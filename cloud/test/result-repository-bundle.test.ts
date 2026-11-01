@@ -65,7 +65,10 @@ describe("結果ストアのバンドル(Issue #207)", () => {
         .replace(/\[\[migrations\]\]\ntag = "v8"\nnew_sqlite_classes = \["MonthlyReportDO"\]\n/, "")
         // Issue #463: 配分の再計算用の書き出しの DO(ALLOCATION_EXPORT・AllocationExportDO)と migration v10 も同じく除く。
         .replace(/\[\[durable_objects\.bindings\]\]\nname = "ALLOCATION_EXPORT"\nclass_name = "AllocationExportDO"\n/, "")
-        .replace(/\[\[migrations\]\]\ntag = "v10"\nnew_sqlite_classes = \["AllocationExportDO"\]\n/, "");
+        .replace(/\[\[migrations\]\]\ntag = "v10"\nnew_sqlite_classes = \["AllocationExportDO"\]\n/, "")
+        // Issue #554: 過去の結果の取得の DO(RACE_ARCHIVE_FETCH・RaceArchiveFetchDO)と migration v11 も同じく除く。
+        .replace(/\[\[durable_objects\.bindings\]\]\nname = "RACE_ARCHIVE_FETCH"\nclass_name = "RaceArchiveFetchDO"\n/, "")
+        .replace(/\[\[migrations\]\]\ntag = "v11"\nnew_sqlite_classes = \["RaceArchiveFetchDO"\]\n/, "");
       expect(withoutRaceDay, "RACE_DAY の binding と migration v2 を除けている").not.toBe(base);
       const config = withoutRaceDay.replace('main = "src/worker.ts"', 'main = "result-store-probe.generated.ts"');
       expect(config).not.toBe(withoutRaceDay);

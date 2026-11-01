@@ -22,16 +22,14 @@
  * - `limit` は新しく出したリクエストの数の上限(スキップは数えない)。
  */
 
-import * as cheerio from "cheerio";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { parseKaisaiDate, parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids.js";
+import { parseRaceId } from "../../packages/core/src/scraper/ids.js";
+import { historyCalendarUrl, historyListUrl, parseCalendarKaisaiDates, parseListRaceIds, validateHistoryPage } from "../../packages/core/src/scraper/history-pages.js";
 import { filterJpnOnlyEntries } from "../../packages/core/src/scraper/jpn-grade.js";
 import { parseRaceList } from "../../packages/core/src/scraper/parse-race-list.js";
-import { parseRaceFieldSize } from "../../packages/core/src/scraper/parse-race-result.js";
-import { PATTERNS, RACE_LIST_SELECTORS } from "../../packages/core/src/scraper/selectors.js";
-import { narRaceListSubUrl, raceListSubUrl, raceResultUrl } from "../../packages/core/src/scraper/urls.js";
+import { raceResultUrl } from "../../packages/core/src/scraper/urls.js";
 import { errorsFilePath, rawFilePath, type Kind, type Stage } from "./layout.js";
 
 export interface FetchOptions {
@@ -141,78 +139,10 @@ function monthsBetween(from: string, to: string): string[] {
   return out;
 }
 
-/** 中央・地方のホスト(urls.ts のビルダから導く。ホストの定数を二重に持たない)。 */
-function originOf(kind: Kind): string {
-  const probe = parseKaisaiDate("20200101");
-  return new URL(kind === "nar" ? narRaceListSubUrl(probe) : raceListSubUrl(probe)).origin;
-}
-
-const calendarUrl = (kind: Kind, month: string): string => {
-  const [y, m] = month.split("-").map(Number);
-  return `${originOf(kind)}/top/calendar.html?year=${y}&month=${m}`;
-};
-
-const listUrl = (kind: Kind, date: string): string => {
-  const d = parseKaisaiDate(date);
-  return kind === "nar" ? narRaceListSubUrl(d) : raceListSubUrl(d);
-};
-
-/** race_id が、その種別(中央 = 場コード 01〜10、地方 = 30〜64。ばんえい 65 は含まない)のものか。 */
-function isIdOfKind(kind: Kind, raceId: string): boolean {
-  try {
-    return venueKindOfRaceId(parseRaceId(raceId)) === kind;
-  } catch {
-    return false;
-  }
-}
-
-/** 一覧の項目のリンクから、その種別の race_id を文書の順に重複なしで取る。 */
-function listRaceIds(html: string, kind: Kind): string[] {
-  const $ = cheerio.load(html);
-  return [
-    ...new Set(
-      $(RACE_LIST_SELECTORS.item)
-        .map((_, li) => PATTERNS.raceIdFromHref.exec($(li).find(RACE_LIST_SELECTORS.itemLink).first().attr("href") ?? "")?.[1])
-        .get()
-        .filter((id): id is string => id !== undefined && /^\d{12}$/.test(id) && isIdOfKind(kind, id)),
-    ),
-  ];
-}
-
-/** 保存前の検査。問題があれば理由、無ければ null。 */
-function validate(kind: Kind, stage: Stage, text: string): string | null {
-  if (text.trim() === "") {
-    return "0 バイト(または空白のみ)の応答";
-  }
-  if (text.includes("\uFFFD")) {
-    return "文字化け(U+FFFD を含む)";
-  }
-  if (stage === "calendar" && !text.includes("Calendar_Table")) {
-    return "カレンダーの表(Calendar_Table)がありません";
-  }
-  if (stage === "list") {
-    if (!text.includes("RaceList_Body")) {
-      return "レース一覧のコンテナ(RaceList_Body)がありません";
-    }
-    if (kind === "central" && listRaceIds(text, kind).length === 0) {
-      return "中央の一覧に race_id が 0 件です(カレンダーには開催日しか載らないので異常)";
-    }
-  }
-  if (stage === "result") {
-    const rows = cheerio.load(text)("#All_Result_Table tbody > tr").length;
-    if (rows === 0) {
-      return "結果の表(#All_Result_Table)に行がありません";
-    }
-    const size = parseRaceFieldSize(text);
-    if (size === null) {
-      return "頭数が読めません(.RaceData02 に N頭 の span がありません)。途中の結果か、構造が変わった可能性があります";
-    }
-    if (size !== rows) {
-      return `頭数 ${size} と結果の行 ${rows} が合いません(途中の結果の可能性)`;
-    }
-  }
-  return null;
-}
+const calendarUrl = historyCalendarUrl;
+const listUrl = historyListUrl;
+const listRaceIds = parseListRaceIds;
+const validate = validateHistoryPage;
 
 /** グレード表記の件数を「表記 件数」の・区切りに整える(件数の多い順、同数は表記の順)。 */
 function formatGradeCounts(counts: Record<string, number>): string {
@@ -318,16 +248,7 @@ export async function runFetch(opts: FetchOptions): Promise<FetchStats> {
         if (calHtml === null) {
           continue;
         }
-        const prefix = month.replace("-", "");
-        const $cal = cheerio.load(calHtml);
-        const dates = [
-          ...new Set(
-            $cal(".Calendar_Table a[href*='kaisai_date=']")
-              .map((_, a) => /kaisai_date=(\d{8})/.exec($cal(a).attr("href") ?? "")?.[1])
-              .get()
-              .filter((d): d is string => d !== undefined && d.startsWith(prefix)),
-          ),
-        ].sort();
+        const dates = parseCalendarKaisaiDates(calHtml, month);
         if (opts.newestFirst === true) {
           dates.reverse();
         }

@@ -1,5 +1,5 @@
 /**
- * 結果ページ(result.html)の補助パーサ。Issue #532(過去 5 年の結果を取って仮説の検証に使う)。開発用。本番には入らない。
+ * 結果ページ(result.html)の補助パーサ。Issue #532(過去 5 年の結果を取って仮説の検証に使う)。#549-A1 で `scripts/history-results/result-extra.ts` から core へ移した(開発用スクリプトと、本番の Cloudflare の取得〈#549-A3〉の両方から使う)。
  *
  * 既存の `parseRaceResult`(packages/core)は着順・通過順・後3F・人気・単勝オッズ・払戻を読む。ここでは、それが読まない
  * 項目(騎手名と騎手 ID・斤量・性齢・馬体重と増減・horse_id・調教師 ID と所属・タイム・着差、見出しの日付・天候・馬場・
@@ -18,9 +18,9 @@
 
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
-import type { RaceIdVenueKind } from "../../packages/core/src/scraper/ids.js";
-import { readRaceClass } from "../../packages/core/src/scraper/race-class.js";
-import { readRaceConditions, type WeightType } from "../../packages/core/src/scraper/race-condition.js";
+import type { RaceIdVenueKind } from "./ids.js";
+import { readRaceClass } from "./race-class.js";
+import { readRaceConditions, type WeightType } from "./race-condition.js";
 
 /** 補助パーサの構造異常(結果の表が無い・行の対応が取れない)。`category` は parse の「読めなかった理由」の分類。 */
 export class ResultExtraError extends Error {
@@ -63,6 +63,26 @@ export interface ExtraHeader {
   readonly filliesOnly: boolean;
   /** `.RaceData02` の span の生の文字(空は除く)。 */
   readonly raceData02Spans: readonly string[];
+  /**
+   * ラップ表(`table.Race_HaronTime`)の区間タイム(秒。`12.8` など)。区間ごとの所要で、累計ではない。
+   * 表が無い(障害など)・読めない(数値でない・見出しの数とセルの数が合わない・累計の行と合わない)ときは null。
+   */
+  readonly lapTimes: readonly number[] | null;
+  /**
+   * `lapTimes` の各区間の終わりの位置(m)。見出し(`200m`)の文字をそのまま持つ。距離が 200 の倍数でないレースは `100, 300, …`。`lapTimes` と同じ長さ。
+   * 1150m のように末尾の見出しが距離と合わない表では、実際の位置と違いうる(未確認)。
+   */
+  readonly lapDistances: readonly number[] | null;
+  /**
+   * ペースの文字(`29.9-37.6`)。最初の 3 区間の和と最後の 3 区間の和を、0.1 秒の整数で足して小数 1 桁で `前-後` と書いたもの。
+   * 区間が 6 個未満のときは前の 3 区間と後ろの 3 区間が重なるが、重なる区間を両方に入れた単純和で出す(根拠と未確認の範囲は `PACE_MIN_LAPS`)。
+   * 区間が 3 個未満のとき、`lapTimes` が null のときは null(区間が 3 個未満でも `lapTimes` は残る)。
+   * 戦績 API の `pace` との一致は、200 の倍数の距離と 1700m の実例でだけ確認済み(1000m 以下・1150m のように末尾の位置が距離と
+   * 合わないレース・地方では未確認)。
+   */
+  readonly pace: string | null;
+  /** ペースの区分(`.RapPace_Title` の S・M・H)。要素が無い・ほかの文字なら null。 */
+  readonly paceClass: "S" | "M" | "H" | null;
 }
 
 export interface ExtraRow {
@@ -140,6 +160,81 @@ const GOING_MAP: Readonly<Record<string, ExtraHeader["going"]>> = {
   不良: "不良",
 };
 
+/**
+ * 区間の数がこれ未満だと、ペースを作らない(最初の 3 区間・最後の 3 区間が取れない)。
+ * 区間が 6 個未満だと両者が重なるが、重なる区間を両方に入れた単純和で出す: 戦績 API は地方の 800m(4 区間。`36.3-36.6`)・900m(5 区間。`28.8-37.7`)
+ * でも pace を返している(フィクスチャ horse_results_2021104387.json。重なる 3 区間の和と見て辻褄が合う)。
+ * 中央の 1000m の実例は無く、API と文字まで一致するかは未確認。
+ */
+const PACE_MIN_LAPS = 3;
+/** 累計の差と区間タイムの食い違いの許容(0.1 秒の整数単位)。累計と区間は別々に四捨五入されるので 1 つはずれうる。 */
+const LAP_ROUNDING_TOLERANCE = 1;
+
+/** 0.1 秒の整数を、小数 1 桁の文字にする(浮動小数点を通さない)。 */
+function formatTenths(tenths: number): string {
+  return `${Math.floor(tenths / 10)}.${tenths % 10}`;
+}
+
+/** ラップ表のセルを 0.1 秒の整数にする。数値として読めなければ null。 */
+function lapCellTenths(raw: string): number | null {
+  const sec = toTimeSec(raw);
+  return sec === null ? null : Math.round(sec * 10);
+}
+
+interface LapTable {
+  readonly lapTimes: readonly number[] | null;
+  readonly lapDistances: readonly number[] | null;
+  readonly pace: string | null;
+}
+
+const NO_LAPS: LapTable = { lapTimes: null, lapDistances: null, pace: null };
+
+/**
+ * ラップ表を読む。構造は「見出し行(`200m`…)・累計の行・区間の行」の 3 行。読めないときは**黙って値を作らず**すべて null にする:
+ * 表が無い、`tr.HaronTime` が 2 行でない、見出し・累計・区間の数が合わない、数値でないセルがある、
+ * 区間の和が累計の差と合わない(行の入れ替わり)。
+ */
+function parseLapTable($: CheerioAPI): LapTable {
+  const $table = $("table.Race_HaronTime").first();
+  if ($table.length === 0) {
+    return NO_LAPS;
+  }
+  const $rows = $table.find("tr.HaronTime");
+  if ($rows.length !== 2) {
+    return NO_LAPS;
+  }
+  const cellTexts = (tr: Parameters<typeof $>[0]): string[] =>
+    $(tr)
+      .children("td")
+      .toArray()
+      .map((td) => $(td).text());
+  const distances = $table
+    .find("tr.Header th")
+    .toArray()
+    .map((th) => /^(\d+)m$/.exec(compact($(th).text()))?.[1])
+    .map((m) => (m === undefined ? null : Number(m)));
+  const cumulative = cellTexts($rows.get(0)!).map(lapCellTenths);
+  const sections = cellTexts($rows.get(1)!).map(lapCellTenths);
+  const n = sections.length;
+  if (n === 0 || distances.length !== n || cumulative.length !== n) {
+    return NO_LAPS;
+  }
+  if (distances.includes(null) || cumulative.includes(null) || sections.includes(null)) {
+    return NO_LAPS;
+  }
+  const cum = cumulative as number[];
+  const sec = sections as number[];
+  for (let i = 0; i < n; i++) {
+    const diff = cum[i]! - (i === 0 ? 0 : cum[i - 1]!);
+    if (Math.abs(diff - sec[i]!) > LAP_ROUNDING_TOLERANCE) {
+      return NO_LAPS;
+    }
+  }
+  const sum = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0);
+  const pace = n >= PACE_MIN_LAPS ? `${formatTenths(sum(sec.slice(0, 3)))}-${formatTenths(sum(sec.slice(-3)))}` : null;
+  return { lapTimes: sec.map((t) => t / 10), lapDistances: distances as number[], pace };
+}
+
 function parseHeader($: CheerioAPI, kind: RaceIdVenueKind): ExtraHeader {
   // title: `天皇賞（秋）(G1) 結果・払戻 | 2021年10月31日 東京11R レース情報(JRA) - netkeiba`
   const title = norm($("title").first().text());
@@ -189,6 +284,8 @@ function parseHeader($: CheerioAPI, kind: RaceIdVenueKind): ExtraHeader {
     return null;
   };
   const cond = readRaceConditions(spans);
+  const laps = parseLapTable($);
+  const paceClassText = norm($(".RapPace_Title span").first().text());
 
   return {
     date,
@@ -212,6 +309,10 @@ function parseHeader($: CheerioAPI, kind: RaceIdVenueKind): ExtraHeader {
     weightType: cond.weightType ?? null,
     filliesOnly: cond.filliesOnly,
     raceData02Spans: spans,
+    lapTimes: laps.lapTimes,
+    lapDistances: laps.lapDistances,
+    pace: laps.pace,
+    paceClass: paceClassText === "S" || paceClassText === "M" || paceClassText === "H" ? paceClassText : null,
   };
 }
 

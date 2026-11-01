@@ -3,7 +3,7 @@ import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-respons
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
 import { PLACE_ODDS_NOTE } from "../src/place-odds-format";
 import { WIN_ODDS_NOTE } from "../src/win-odds-format";
-import { buildResultModel, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER, type ResultSource } from "../client/result";
+import { buildResultModel, DEFAULT_HORSE_SORT, firstSortDir, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER, nextHorseSort, type HorseSort, type HorseSortKey, type ResultSource } from "../client/result";
 import { LABEL_CONCERNS as EXE_LABEL_CONCERNS, LABEL_HIGHLIGHTS as EXE_LABEL_HIGHLIGHTS, MARK_LEGEND } from "../../packages/core/src/view/format";
 import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/core/src/view/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../../packages/core/src/view/bet-allocation-view";
@@ -921,5 +921,299 @@ describe("タイム指数の行と説明(Issue #359。サーバが組み立て�
         expect(built.timeIndexNote).toBe("説明");
       }
     }
+  });
+});
+
+/**
+ * Issue #546(#545-A の 1 段目): 結果の先頭の要約(`content.summary`)と、説明文の開閉(`notesOpen`)・分析 id(`id`)。
+ * 要約の材料はクライアントのモデルにすでにある値だけ(サーバの応答は変えない)。発走時刻(`race.startTime`)だけは、サーバが返していたのをクライアントが読んでいなかったので `api-analysis.ts` で読む。
+ */
+describe("要約(Issue #546)", () => {
+  const ok = (label: string, diff: readonly string[], allocation: NonNullable<AnalysisDetail["allocation"]> = { ...ALLOCATION, bets: [...ALLOCATION.bets] }) => ({ label, summaryLines: ["再計算した", "15:40に実行"], allocation, diffLines: diff });
+  const failed = (label: string, summary: string) => ({ label, summaryLines: [summary], allocation: null, diffLines: [] as string[] });
+  const withClose = (rounds: NonNullable<AnalysisDetail["close"]>["rounds"]) => analysis({ close: { note: "注記", rounds } });
+  const summaryOf = (a: AnalysisDetail) => content(a).summary;
+  const raceWith = (startTime: string | null | undefined) => ({ venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result", placeBasis: "top3" as const, ...(startTime === undefined ? {} : { startTime }) });
+
+  it("分析時刻の行は、従来の結果の見出しの下の行と同じ文字(「分析時刻: 2026-06-28 14:00」)", () => {
+    expect(summaryOf(analysis()).analyzedLine).toBe("分析時刻: 2026-06-28 14:00");
+    expect(summaryOf(analysis({ analyzedAt: "2026-06-28T15:00:00.000Z" })).analyzedLine).toBe("分析時刻: 2026-06-29 00:00");
+  });
+
+  describe("発走時刻の行", () => {
+    it("値があれば「発走時刻: HH:mm」。値はそのまま出す(補正しない)", () => {
+      expect(summaryOf(analysis({ race: raceWith("15:45") })).startLine).toBe("発走時刻: 15:45");
+      expect(summaryOf(analysis({ race: raceWith("09:05") })).startLine).toBe("発走時刻: 09:05");
+    });
+
+    it.each([
+      ["null(詳細なし・地方など)", null],
+      ["キー無し(古い応答)", undefined],
+      ["空文字", ""],
+      ["空白だけ", "  "],
+    ] as const)("%s は行ごと出さない(null)", (_name, startTime) => {
+      expect(summaryOf(analysis({ race: raceWith("15:45") })).startLine, "前提: 値があれば出る").not.toBeNull();
+      expect(summaryOf(analysis({ race: raceWith(startTime) })).startLine).toBeNull();
+    });
+  });
+
+  describe("買い目の行(点数と合計)", () => {
+    const alloc = (bets: readonly { betType: string; comboKey: string; stake: number; odds: number | null; ev: number | null }[], over: Record<string, unknown> = {}) => ({ ...ALLOCATION, bets: [...bets], ...over }) as AnalysisDetail["allocation"];
+
+    it("配分あり(再計算の回なし): 「買い目(分析時点) N点・合計 X円」。合計は賭け金の数値の和(3 桁区切り・オッズや EV が null の買い目も数える)", () => {
+      const three = alloc([
+        { betType: "place", comboKey: "01", stake: 700, odds: 1.8, ev: 1.2 },
+        { betType: "wide", comboKey: "0102", stake: 500, odds: null, ev: null },
+        { betType: "trio", comboKey: "010203", stake: 100, odds: 12.3, ev: 1.3 },
+      ]);
+      expect(summaryOf(analysis({ allocation: three })).betLine).toBe("買い目(分析時点) 3点・合計 1,300円");
+      expect(content(analysis({ allocation: three })).allocation.bets, "前提: 配分の表と同じ点数").toHaveLength(3);
+      expect(summaryOf(analysis()).betLine, "既定の配分(300 + 200)").toBe("買い目(分析時点) 2点・合計 500円");
+    });
+
+    it("買い目が 1 点だけでも点数と合計を出す(退化した入力)", () => {
+      const one = alloc([{ betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 }]);
+      expect(summaryOf(analysis({ allocation: one })).betLine).toBe("買い目(分析時点) 1点・合計 300円");
+    });
+
+    it.each([
+      ["配分の記録なし(null)", null],
+      ["総資金・1レース上限が未設定", alloc([], { route: "unset", bankroll: 0, perRaceCap: 0 })],
+      ["見送り", alloc([], { route: "place-only", skipReasonCode: "no-edge" })],
+    ] as const)("%s は「配分なし」の 1 語だけ(注記・設定への案内は入れない)", (_name, allocation) => {
+      expect(summaryOf(analysis({ allocation })).betLine).toBe("配分なし");
+      expect(content(analysis({ allocation })).allocation.bets, "前提: 買い目は 0 点").toHaveLength(0);
+    });
+  });
+
+  /**
+   * 要約の買い目は**最新の配分**(Issue #546)。締切直前の再計算で再計算できた回(`allocation` が non-null)があれば、一番新しいその回の配分。無ければ分析時点の配分。
+   * 見出しの語で出どころを区別する(利用者が、分析時点の額と再計算後の額を取り違えないため)。分析時点の配分と再計算の配分は、賭け金がすべて違う値にして、どちらから来たかを取り違えられないようにする。
+   */
+  describe("買い目の出どころ(最新の配分)", () => {
+    const bet = (comboKey: string, stake: number) => ({ betType: "place", comboKey, stake, odds: 2.0, ev: 1.2 });
+    const alloc = (bets: readonly ReturnType<typeof bet>[]) => ({ ...ALLOCATION, bets: [...bets] }) as NonNullable<AnalysisDetail["allocation"]>;
+    const ANALYSIS_TIME = alloc([bet("01", 300), bet("02", 200)]); // 合計 500
+    const R5 = alloc([bet("03", 900)]); // 発走5分前: 合計 900
+    const R2 = alloc([bet("04", 1200), bet("05", 400), bet("06", 100)]); // 発走2分前: 合計 1,700
+    const NONE = alloc([]); // 再計算の結果、買い目が 0 点
+    const failedRound = (label: string) => ({ label, summaryLines: ["失敗(オッズを取り直せませんでした)"], allocation: null, diffLines: [] as string[] });
+    const rounds = (...r: NonNullable<AnalysisDetail["close"]>["rounds"]) => analysis({ allocation: ANALYSIS_TIME, close: { note: "注記", rounds: r } });
+
+    it.each([
+      ["再計算の回なし(close が null)", analysis({ allocation: ANALYSIS_TIME, close: null }), "買い目(分析時点) 2点・合計 500円", ["300円", "200円"]],
+      ["再計算の回が 1 つで ok", rounds(ok("発走5分前", ["x"], R5)), "買い目(発走5分前の再計算) 1点・合計 900円", ["900円"]],
+      ["ok が最新(2 回とも ok。最新の回の配分を使う)", rounds(ok("発走5分前", ["x"], R5), ok("発走2分前", ["y"], R2)), "買い目(発走2分前の再計算) 3点・合計 1,700円", ["1,200円", "400円", "100円"]],
+      ["最新が失敗で、前の回が ok(前の回の配分を使う)", rounds(ok("発走5分前", ["x"], R5), failedRound("発走2分前")), "買い目(発走5分前の再計算) 1点・合計 900円", ["900円"]],
+      ["全部失敗・見送り(分析時点の配分を使う)", rounds(failedRound("発走5分前"), failedRound("発走2分前")), "買い目(分析時点) 2点・合計 500円", ["300円", "200円"]],
+      ["再計算の結果が買い目 0 点(「配分なし」ではなく 0 点と合計 0 円。分析時点の額を残さない)", rounds(ok("発走2分前", ["配分は0点です"], NONE)), "買い目(発走2分前の再計算) 0点・合計 0円", []],
+      ["分析時点の配分の記録がなく、再計算の回だけ ok(その回の配分)", analysis({ allocation: null, close: { note: "注記", rounds: [ok("発走2分前", ["x"], R2)] } }), "買い目(発走2分前の再計算) 3点・合計 1,700円", ["1,200円", "400円", "100円"]],
+      ["分析時点の配分の記録がなく、再計算の回もない(配分なし)", analysis({ allocation: null, close: null }), "配分なし", []],
+      ["分析時点が見送り(買い目 0 点)で、再計算の回もない(配分なし)", analysis({ allocation: { ...ALLOCATION, route: "place-only", skipReasonCode: "no-edge", bets: [] }, close: null }), "配分なし", []],
+    ] as const)("%s", (_name, a, betLine, stakes) => {
+      const summary = summaryOf(a);
+      expect(summary.betLine).toBe(betLine);
+      expect(summary.bets.map((b) => b.stake)).toEqual(stakes);
+    });
+
+    it("前提: 分析時点の配分の画面(配分の提案の表)は、再計算の回があっても分析時点のまま(要約だけが最新の配分)", () => {
+      const c = content(rounds(ok("発走2分前", ["y"], R2)));
+      expect(c.allocation.bets.map((b) => b.stake)).toEqual(["300円", "200円"]);
+      expect(c.summary.bets.map((b) => b.stake)).toEqual(["1,200円", "400円", "100円"]);
+    });
+
+    it("要約の買い目の一覧は、配分の表と同じ部品・同じ並び(券種の表示順 → 組合せ)で作る。入力が逆順でも並べ直す", () => {
+      const mixed = alloc([{ betType: "wide", comboKey: "0102", stake: 100, odds: 5, ev: 1.3 }, bet("03", 700)]); // 入力はワイドが先
+      const viaClose = content(rounds(ok("発走2分前", ["x"], mixed))).summary.bets;
+      const viaTable = content(analysis({ allocation: mixed, close: null })).allocation.bets;
+      expect(viaClose, "前提: 2 行").toHaveLength(2);
+      expect(viaClose[0]!.betTypeLabel, "前提: 券種が違う").not.toBe(viaClose[1]!.betTypeLabel);
+      expect(viaClose.map((b) => b.stake), "複勝(700円)が先に並び直されている").toEqual(["700円", "100円"]);
+      expect(viaClose).toEqual(viaTable);
+    });
+  });
+
+  describe("締切直前の再計算の 1 行", () => {
+    it("一番新しい「再計算できた回」のラベルと差分の 1 行目。後ろの回が失敗・見送りなら、その前の再計算できた回を使う", () => {
+      const rounds = [ok("発走5分前", ["追加 1点・削除 0点・賭け金の変化 0点(合計 500円 → 600円)", "追加 複勝 3 100円"]), ok("発走2分前", ["分析時から変わりませんでした"])];
+      expect(summaryOf(withClose(rounds)).closeLine).toBe("締切直前の再計算(発走2分前): 分析時から変わりませんでした");
+      expect(summaryOf(withClose([rounds[0]!, failed("発走2分前", "失敗(オッズを取り直せませんでした)")])).closeLine).toBe("締切直前の再計算(発走5分前): 追加 1点・削除 0点・賭け金の変化 0点(合計 500円 → 600円)");
+    });
+
+    it("再計算できた回が無い・節が無い・古い応答(キー無し)は出さない(null)", () => {
+      expect(summaryOf(withClose([ok("発走5分前", ["x"])])).closeLine, "前提: 再計算できた回があれば出る").not.toBeNull();
+      expect(summaryOf(withClose([failed("発走5分前", "行わなかった(時刻を過ぎていたため行いませんでした)"), failed("発走2分前", "失敗(計算できませんでした)")])).closeLine).toBeNull();
+      expect(summaryOf(analysis({ close: null })).closeLine).toBeNull();
+      expect(summaryOf(analysis()).closeLine).toBeNull();
+    });
+
+    it("差分の行が無い回(分析時の配分が無い)は、状態の行の 1 行目(「再計算した」)で代える。「配分は0点です」もそのまま出す", () => {
+      expect(summaryOf(withClose([ok("発走5分前", [])])).closeLine).toBe("締切直前の再計算(発走5分前): 再計算した");
+      expect(summaryOf(withClose([ok("発走5分前", ["配分は0点です", "分析時から変わりませんでした"])])).closeLine).toBe("締切直前の再計算(発走5分前): 配分は0点です");
+    });
+  });
+
+  it("要約は閲覧者(readOnly)でも同じ(配分の注記を要約に入れないので、役割による差が無い)", () => {
+    const a = analysis({ race: raceWith("15:45"), close: { note: "注記", rounds: [ok("発走5分前", ["分析時から変わりませんでした"])] } });
+    const admin = buildResultModel({ route: ROUTE, source: ready(a), readOnly: false }).content!.summary;
+    const viewer = buildResultModel({ route: ROUTE, source: ready(a), readOnly: true }).content!.summary;
+    expect(admin.startLine, "前提: 空でない要約").not.toBeNull();
+    expect(viewer).toEqual(admin);
+  });
+});
+
+describe("説明文の開閉の状態と分析 id(Issue #546)", () => {
+  it("既定は閉じる(notesOpen=false)。入力で開く。分析 id を持つ(開閉の状態の鍵)", () => {
+    expect(content(analysis()).notesOpen).toBe(false);
+    const open = buildResultModel({ route: ROUTE, source: ready(analysis()), notesOpen: true }).content!;
+    expect(open.notesOpen).toBe(true);
+    expect(content(analysis({ id: 42 })).id).toBe(42);
+  });
+});
+
+/**
+ * Issue #546-2: 馬ごとの評価の表(`content.horseTable`)。列・並べ替え(向き・値の無い馬は末尾・同点は馬番)・並べ替え用の数値の出どころ。
+ * 並べ替えの状態(`horseSort`)は `app.ts` が分析 id ごとにメモリに持ち、`buildResultModel` に渡す。保存しない。
+ */
+describe("馬ごとの評価の表(Issue #546-2)", () => {
+  /** 並びが各列で違う 4 頭(馬番 1〜4)。値の無い馬は列ごとに別の馬にする。 */
+  const four = (): AnalysisHorse[] => [
+    horse(1, { prior: 0.3, adjustedProb: 0.2, placeOddsMin: 3.0, ev: 0.9, winOdds: 12.0, mark: "◎" }),
+    horse(2, { prior: 0.5, adjustedProb: 0.6, placeOddsMin: null, ev: 1.4, winOdds: 3.5, isPositive: true }),
+    horse(3, { prior: 0.1, adjustedProb: 0.1, placeOddsMin: 1.5, ev: null, winOdds: null }),
+    horse(4, { prior: 0.5, adjustedProb: 0.4, placeOddsMin: 2.0, ev: 1.0, winOdds: 40.0, mark: "▲" }),
+  ];
+  const withLlm = { model: "claude-test" };
+  const tableOf = (a: AnalysisDetail, horseSort?: HorseSort, readOnly = false) => {
+    const model = buildResultModel({ route: ROUTE, source: ready(a), readOnly, ...(horseSort === undefined ? {} : { horseSort }) });
+    expect(model.content, "前提: 内容が出る状態").not.toBeNull();
+    expect(model.content!.horseTable, "前提: 表が出る状態").not.toBeNull();
+    return model.content!.horseTable!;
+  };
+  const order = (t: ReturnType<typeof tableOf>): number[] => t.rows.map((r) => r.umaban);
+  const colKeys = (t: ReturnType<typeof tableOf>): string[] => t.columns.map((c) => c.key);
+
+  it("既定の並べ替えは馬番の昇順(向きの初期値の定数も同じ)", () => {
+    const t = tableOf(analysis({ horses: four().reverse() }));
+    expect(order(t)).toEqual([1, 2, 3, 4]);
+    expect(t.sort).toEqual({ key: "umaban", dir: "asc" });
+    expect(DEFAULT_HORSE_SORT).toEqual({ key: "umaban", dir: "asc" });
+  });
+
+  it("列は 馬番・印・馬名・3着内率・(AI補正後)・EV・単勝・複勝下限。補正後は LLM が効いた分析だけ(全頭 null なら列ごと出さない)", () => {
+    const plain = tableOf(analysis({ horses: four() }));
+    expect(colKeys(plain)).toEqual(["umaban", "mark", "name", "prior", "ev", "winOdds", "placeOddsMin"]);
+    expect(plain.columns.map((c) => c.label)).toEqual(["馬番", "印", "馬名", "3着内率", "EV", "単勝 実際", "複勝下限"]);
+    expect(plain.rows.every((r) => r.adjusted === null), "前提: LLM なしは全頭 null").toBe(true);
+    const llm = tableOf(analysis({ ...withLlm, horses: four() }));
+    expect(colKeys(llm)).toEqual(["umaban", "mark", "name", "prior", "adjusted", "ev", "winOdds", "placeOddsMin"]);
+    expect(llm.columns[4]!.label).toBe("AI補正後");
+    expect(llm.rows.every((r) => r.adjusted !== null), "前提: LLM ありは全頭に値").toBe(true);
+  });
+
+  it("単勝の列見出しは、オッズの状態で「実際」「実際(暫定)」「実際(予想)」(予想値を確定値と取り違えない)", () => {
+    const label = (oddsStatus: string | null) =>
+      tableOf(analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "x", grade: null, oddsStatus, placeBasis: "top3" }, horses: four() })).columns.find((c) => c.key === "winOdds")!.label;
+    expect(label("result")).toBe("単勝 実際");
+    expect(label("middle")).toBe("単勝 実際(暫定)");
+    expect(label("yoso")).toBe("単勝 実際(予想)");
+    expect(label(null)).toBe("単勝 実際");
+  });
+
+  it("並べ替えの向きの初期値: 3着内率・補正後・EV は大きい順、馬番・単勝・複勝下限は小さい順。同じ列をもう一度で逆、別の列に替えたら初期値", () => {
+    const first = (key: HorseSortKey) => firstSortDir(key);
+    expect(["prior", "adjusted", "ev"].map((k) => first(k as HorseSortKey))).toEqual(["desc", "desc", "desc"]);
+    expect(["umaban", "winOdds", "placeOddsMin"].map((k) => first(k as HorseSortKey))).toEqual(["asc", "asc", "asc"]);
+    expect(nextHorseSort({ key: "umaban", dir: "asc" }, "umaban")).toEqual({ key: "umaban", dir: "desc" });
+    expect(nextHorseSort({ key: "umaban", dir: "desc" }, "umaban")).toEqual({ key: "umaban", dir: "asc" });
+    expect(nextHorseSort({ key: "umaban", dir: "asc" }, "prior")).toEqual({ key: "prior", dir: "desc" });
+    expect(nextHorseSort({ key: "prior", dir: "desc" }, "prior")).toEqual({ key: "prior", dir: "asc" });
+    expect(nextHorseSort({ key: "prior", dir: "asc" }, "winOdds")).toEqual({ key: "winOdds", dir: "asc" });
+  });
+
+  it("3着内率の大きい順: 同点(馬番 2 と 4 が 50.0%)は馬番の昇順。小さい順でも同点は馬番の昇順", () => {
+    const a = analysis({ horses: four() });
+    expect(order(tableOf(a, { key: "prior", dir: "desc" }))).toEqual([2, 4, 1, 3]);
+    expect(order(tableOf(a, { key: "prior", dir: "asc" }))).toEqual([3, 1, 2, 4]);
+  });
+
+  it("値の無い馬は向きによらず末尾(EV・単勝・複勝下限・補正後。末尾の中は馬番の昇順)", () => {
+    const a = analysis({ ...withLlm, horses: four() });
+    // EV: 馬 3 が null
+    expect(order(tableOf(a, { key: "ev", dir: "desc" }))).toEqual([2, 4, 1, 3]);
+    expect(order(tableOf(a, { key: "ev", dir: "asc" }))).toEqual([1, 4, 2, 3]);
+    // 単勝: 馬 3 が null
+    expect(order(tableOf(a, { key: "winOdds", dir: "asc" }))).toEqual([2, 1, 4, 3]);
+    expect(order(tableOf(a, { key: "winOdds", dir: "desc" }))).toEqual([4, 1, 2, 3]);
+    // 複勝下限: 馬 2 が null
+    expect(order(tableOf(a, { key: "placeOddsMin", dir: "asc" }))).toEqual([3, 4, 1, 2]);
+    expect(order(tableOf(a, { key: "placeOddsMin", dir: "desc" }))).toEqual([1, 4, 3, 2]);
+    // 2 頭が null の末尾は馬番の昇順
+    const two = analysis({ horses: [horse(1, { ev: null }), horse(2, { ev: 1.2 }), horse(3, { ev: null }), horse(4, { ev: 1.5 })] });
+    expect(order(tableOf(two, { key: "ev", dir: "desc" }))).toEqual([4, 2, 1, 3]);
+    expect(order(tableOf(two, { key: "ev", dir: "asc" }))).toEqual([2, 4, 1, 3]);
+  });
+
+  it("補正後の大きい順(LLM あり)。馬番の降順は null を持たないので単純に逆順", () => {
+    const a = analysis({ ...withLlm, horses: four() });
+    expect(order(tableOf(a, { key: "adjusted", dir: "desc" }))).toEqual([2, 4, 1, 3]);
+    expect(order(tableOf(a, { key: "umaban", dir: "desc" }))).toEqual([4, 3, 2, 1]);
+  });
+
+  it("非有限の値(NaN・Infinity)は「値の無い馬」として末尾(整形済みの文字列を読み戻さない)", () => {
+    const a = analysis({ horses: [horse(1, { ev: 1.0 }), horse(2, { ev: Number.NaN }), horse(3, { ev: Number.POSITIVE_INFINITY }), horse(4, { ev: 0.5 })] });
+    expect(order(tableOf(a, { key: "ev", dir: "desc" }))).toEqual([1, 4, 2, 3]);
+    expect(order(tableOf(a, { key: "ev", dir: "asc" }))).toEqual([4, 1, 2, 3]);
+  });
+
+  it("並べ替え用の数値は HorseCard が持つ。推定 EV も実数(値がある扱い)で、表示の文字列は「(推定)」付きのまま", () => {
+    const a = analysis({ ...withLlm, evEstimated: true, horses: four() });
+    const t = tableOf(a, { key: "ev", dir: "desc" });
+    const top = t.rows[0]!;
+    expect(top.umaban).toBe(2);
+    expect(top.ev).toBe("1.40(推定)");
+    expect(top.sortValues).toEqual({ prior: 0.5, adjusted: 0.6, ev: 1.4, winOdds: 3.5, placeOddsMin: null });
+    expect(order(t), "前提: 推定でも EV の大きい順に並ぶ").toEqual([2, 4, 1, 3]);
+    expect(t.rows.find((r) => r.umaban === 3)!.sortValues.ev, "ev が null の馬は null").toBeNull();
+  });
+
+  it("aria-sort・矢印・次の向き: 今の列だけ ascending/descending と矢印、ほかの並べ替えられる列は none。印・馬名は並べ替え対象外(sort が null)", () => {
+    const t = tableOf(analysis({ ...withLlm, horses: four() }), { key: "prior", dir: "desc" });
+    const byKey = Object.fromEntries(t.columns.map((c) => [c.key, c.sort]));
+    expect(byKey["mark"]).toBeNull();
+    expect(byKey["name"]).toBeNull();
+    expect(byKey["prior"]).toEqual({ ariaSort: "descending", arrow: "▼", nextDir: "asc" });
+    expect(byKey["umaban"]).toEqual({ ariaSort: "none", arrow: "", nextDir: "asc" });
+    expect(byKey["ev"]).toEqual({ ariaSort: "none", arrow: "", nextDir: "desc" });
+    const asc = tableOf(analysis({ horses: four() }), { key: "winOdds", dir: "asc" });
+    expect(asc.columns.find((c) => c.key === "winOdds")!.sort).toEqual({ ariaSort: "ascending", arrow: "▲", nextDir: "desc" });
+    expect(asc.columns.filter((c) => c.sort !== null && c.sort.ariaSort !== "none").map((c) => c.key), "前提: 並べ替え中の列は 1 つだけ").toEqual(["winOdds"]);
+  });
+
+  it("補正後の列が無い分析に補正後の並べ替えが残っていても、既定(馬番の昇順)に戻す", () => {
+    const t = tableOf(analysis({ horses: four() }), { key: "adjusted", dir: "desc" });
+    expect(t.sort).toEqual({ key: "umaban", dir: "asc" });
+    expect(order(t)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("カードの並び(content.horses)は並べ替えない(入力の順のまま)", () => {
+    const a = analysis({ horses: four() });
+    const c = buildResultModel({ route: ROUTE, source: ready(a), horseSort: { key: "prior", dir: "desc" } }).content!;
+    expect(c.horses.map((x) => x.umaban)).toEqual([1, 2, 3, 4]);
+    expect(c.horseTable!.rows.map((x) => x.umaban), "前提: 表は並べ替わっている").toEqual([2, 4, 1, 3]);
+  });
+
+  it("閲覧者と管理者で表の中身は同じ(#263 の差は表に持ち込まない)", () => {
+    const a = analysis({ ...withLlm, horses: four() });
+    const sort: HorseSort = { key: "ev", dir: "desc" };
+    const admin = tableOf(a, sort, false);
+    const viewer = tableOf(a, sort, true);
+    expect(admin.rows.length, "前提: 空でない表").toBe(4);
+    expect(viewer).toEqual(admin);
+  });
+
+  it("馬が 0 頭の分析は表を出さない(null)", () => {
+    const c = buildResultModel({ route: ROUTE, source: ready(analysis({ horses: [] })) }).content!;
+    expect(c.horseTable).toBeNull();
   });
 });

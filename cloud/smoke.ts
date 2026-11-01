@@ -36,6 +36,8 @@ import { DEFAULT_CLOUD_SETTINGS } from "./src/settings";
 const BASE_PORT = Number(process.env["SMOKE_PORT"] ?? "8801");
 const CONFIG_PATH = "wrangler.smoke.generated.toml";
 const FAKE_CONFIG_PATH = "wrangler.smoke-fake.generated.toml";
+/** Issue #554: 過去の結果の取得を最後まで通す構成(偽ソケットの構成に、smoke 専用の DO の binding と migration を足したもの)。 */
+const ARCHIVE_CONFIG_PATH = "wrangler.smoke-archive.generated.toml";
 
 const EMAIL = "owner@example.com";
 const AUD = "smoke-aud-0001";
@@ -147,6 +149,9 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
     // Issue #217: 結果の補完を止める(`RESULT_BACKFILL_NIGHTLY_LIMIT=0`)。smoke(CI でも走る)が、時刻によって補完の窓(JST 1:00〜6:00)に当たっても、
     // 本物の netkeiba に出ないことを保証する。補完の DO は kick もアラームも何もしない(`scripts/test/cloud-config-guard.test.ts` が、すべての構成でこの指定があることを固定する)。
     "--var", "RESULT_BACKFILL_NIGHTLY_LIMIT:0",
+    // Issue #554: 過去の結果の取得を止める(`RACE_ARCHIVE_NIGHTLY_LIMIT=0`。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_FETCH`〉にしない: 同じ名前は binding と衝突する)。smoke(CI でも走る)が、時刻によって取得の時間帯(JST 0:00〜8:30)に当たっても、本番のクラスが本物の netkeiba に出ないことを保証する。
+    // 取得の DO は kick もアラームも何もしない(`scripts/test/cloud-config-guard.test.ts` が、すべての構成でこの指定があることを固定する)。取得そのものの確認は、smoke 専用の DO(`RACE_ARCHIVE_SMOKE`)が偽ソケットで行う。
+    "--var", "RACE_ARCHIVE_NIGHTLY_LIMIT:0",
     "--var", `ACCESS_TEAM_NAME:${TEAM}`,
     "--var", `ACCESS_AUD:${aud}`,
     "--var", `ACCESS_ALLOWED_EMAIL:${email}`,
@@ -183,7 +188,7 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const monthly = await req(port, "GET", "/api/monthly-reports");
   check(`${label}: GET /api/monthly-reports は 200(月報は閲覧できる。Issue #279)・POST は 403(admin-only)`, monthly.status === 200 && parseJson(monthly.text)["ok"] === true && (await req(port, "POST", "/api/monthly-reports")).status === 403, `${monthly.status} ${monthly.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/export/allocation-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/settings/prompt-preview"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/export/allocation-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/results/backfill"], ["GET", "/api/race-archive"], ["POST", "/api/race-archive/resume"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/settings/prompt-preview"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
@@ -336,6 +341,14 @@ async function main(): Promise<void> {
       const backfillIdle = await req(port, "GET", "/api/results/backfill");
       const backfillIdleJson = parseJson(backfillIdle.text);
       check(`${label}: GET /api/results/backfill は 200 で state disabled(smoke は補完を止めている)・移行の状態の項目は無い(Issue #394)・残り 0・開催日不明 0・段階 2〈確定オッズ・人気。Issue #259〉の残り 0・補完済み 0(本物の D1 で段階 2 の集計の SQL が動く)・次の実行なし(アラームを張っていない)`, backfillIdle.status === 200 && backfillIdleJson["ok"] === true && backfillIdleJson["state"] === "disabled" && !("migrationState" in backfillIdleJson) && backfillIdleJson["nextRunAt"] === null && backfillIdleJson["remaining"] === 0 && backfillIdleJson["undated"] === 0 && (backfillIdleJson["winOdds"] as { remaining: number; undated: number; filled: number } | undefined)?.remaining === 0 && (backfillIdleJson["winOdds"] as { filled: number }).filled === 0, `${backfillIdle.status} ${backfillIdle.text.slice(0, 300)}`);
+      // Issue #554: 過去の結果の取得(本物の DO `RaceArchiveFetchDO`)。smoke は止めている(`RACE_ARCHIVE_NIGHTLY_LIMIT=0`)ので、状態は disabled・次の実行なし・取得 0 件。再開は何もしない。
+      const archiveIdle = await req(port, "GET", "/api/race-archive");
+      const archiveIdleJson = parseJson(archiveIdle.text);
+      check(`${label}: GET /api/race-archive は 200 で state disabled・次の実行なし・取得も保存も 0 件(smoke は取得を止めている。Issue #554)`, archiveIdle.status === 200 && archiveIdleJson["ok"] === true && archiveIdleJson["state"] === "disabled" && archiveIdleJson["nextRunAt"] === null && (archiveIdleJson["night"] as { requests: number } | undefined)?.requests === 0, `${archiveIdle.status} ${archiveIdle.text.slice(0, 300)}`);
+      check(`${label}: POST /api/race-archive は 405(GET だけ)・GET /api/race-archive/resume は 405(POST だけ)`, (await req(port, "POST", "/api/race-archive", { Origin: `http://127.0.0.1:${port}` })).status === 405 && (await req(port, "GET", "/api/race-archive/resume")).status === 405);
+      const archiveResume = await fetch(`http://127.0.0.1:${port}/api/race-archive/resume`, { method: "POST", headers: { Origin: `http://127.0.0.1:${port}`, "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(30_000) });
+      const archiveResumeJson = parseJson(await archiveResume.text());
+      check(`${label}: POST /api/race-archive/resume は 200 で resumed false・previous disabled(止めている DO は何も変えない)`, archiveResume.status === 200 && archiveResumeJson["resumed"] === false && archiveResumeJson["previous"] === "disabled", `${archiveResume.status}`);
       check(`${label}: POST /api/results/backfill は 405(GET だけ)`, (await req(port, "POST", "/api/results/backfill")).status === 405);
 
       check(`${label}: シードの前は、分析の一覧が空`, (await req(port, "GET", "/api/analyses?limit=200")).text === JSON.stringify({ ok: true, analyses: [] }));
@@ -351,6 +364,15 @@ async function main(): Promise<void> {
       check(`${label}: 一覧に 5 件。分析日時の降順(id の順ではない: id は降順に並んでいない)`, items.length === 5 && items.every((a, i) => i === 0 || items[i - 1]!.analyzedAt >= a.analyzedAt) && items.some((a, i) => i > 0 && items[i - 1]!.id < a.id) && items[0]!.analyzedAt === "2026-03-02T05:00:00.000Z", JSON.stringify(items.map((a) => [a.id, a.analyzedAt])));
       const detail = await req(port, "GET", `/api/analyses/${items[items.length - 2]!.id}`);
       check(`${label}: 詳細(D1 + R2)が読める(detail present)`, detail.status === 200 && detail.text.includes('"detail":"present"'), `${detail.status} ${detail.text.slice(0, 200)}`);
+      // Issue #551(#549-A2): 過去の結果ページの保存(R2 → D1)。workerd の実環境で、node:zlib の gzip・R2 の put/get・D1 の目録の UPSERT を通す(本番の Worker はまだ呼ばない)。
+      const archive = await req(port, "GET", "/smoke/race-archive");
+      const archiveJson = parseJson(archive.text);
+      const archiveEntry = archiveJson["entry"] as { raceId?: string; kind?: string; r2Key?: string; parserVersion?: number } | null | undefined;
+      check(`${label}: 過去の結果ページの保存: 1 回目 saved・2 回目 unchanged(同じ中身の再保存)、R2 の中身は gzip(先頭 1f 8b)で、読み戻した HTML とレコードが元と一致し、無いレースは missing。目録は 1 行(中央・R2 のキー)、Class A は +2(put 2 回)・Class B は +2(読み出し 2 回)`,
+        archive.status === 200 && archiveJson["ok"] === true && JSON.stringify(archiveJson["statuses"]) === '["saved","unchanged"]' && archiveJson["readStatus"] === "found" && archiveJson["missingStatus"] === "missing" && archiveJson["htmlSame"] === true && archiveJson["recordSame"] === true
+          && JSON.stringify(archiveJson["gzipHead"]) === "[31,139]" && archiveJson["catalogCount"] === 1 && archiveEntry?.raceId === "202603020211" && archiveEntry.kind === "central" && archiveEntry.r2Key === "race-results/202603020211.json.gz"
+          && (archiveJson["horses"] as number) > 5 && JSON.stringify(archiveJson["opsDelta"]) === '{"classA":2,"classB":2}' && typeof archiveJson["dbSizeBytes"] === "number" && (archiveJson["dbSizeBytes"] as number) > 0,
+        `${archive.status} ${archive.text.slice(0, 400)}`);
 
       // Issue #336: 今日の狙い目(本物の D1 と、本物の日単位の DO の getPlanProgress)。保存した分析のどれかの開催日で、200・形が揃い、分析済みの要約になる。R2 には触れない。
       const targetsDate = items.map((a) => a.kaisaiDate?.replace(/\D/g, "") ?? "").find((d) => d.length === 8);
@@ -942,9 +964,32 @@ async function main(): Promise<void> {
       const nextDay = await fire(Date.parse("2026-06-30T15:00:00Z"));
       check(`${label}: scheduledTime = 2026-06-30T15:00Z(JST 7/1 0:00)は日付が進み、開催日 20260702 の DO に入る`, nextDay.status === 200 && parseJson(nextDay.text)["outcome"] === "ok" && (await waitPlanDone("20260702")).body["kaisai_date"] === "20260702", `${nextDay.status} ${nextDay.text.slice(0, 200)}`);
     });
+
+    // I. (Issue #554)過去の結果の取得を、workerd の実環境(本物の DO・gate の DO + 偽ソケット・D1・R2・アラーム)で最後まで通す。smoke 専用の DO(`RaceArchiveSmokeDO`)を、この構成だけの binding で足す
+    //    (本番のクラス `RaceArchiveFetchDO` は var で止めたまま)。偽ソケットがカレンダー・一覧・結果ページ(fixture の 202603020211)を返し、DO が gate 経由で取って保存する(netkeiba には出ない)。
+    writeFileSync(
+      ARCHIVE_CONFIG_PATH,
+      `${readFileSync(FAKE_CONFIG_PATH, "utf8")}\n[[durable_objects.bindings]]\nname = "RACE_ARCHIVE_SMOKE"\nclass_name = "RaceArchiveSmokeDO"\n\n[[migrations]]\ntag = "v11-smoke"\nnew_sqlite_classes = ["RaceArchiveSmokeDO"]\n`,
+    );
+    await withWorker(BASE_PORT + 11, ["--config", ARCHIVE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+      const port = BASE_PORT + 11;
+      const label = "I(過去の結果の取得)";
+      let last: Record<string, unknown> = {};
+      for (let i = 0; i < 90; i += 1) {
+        last = parseJson((await req(port, "GET", "/smoke/race-archive-fetch")).text);
+        if (((last["status"] as { totals?: { races?: { done?: number } } } | undefined)?.totals?.races?.done ?? 0) >= 1 && (last["catalogCount"] as number) >= 1) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      const st = last["status"] as { state?: string; night?: { requests?: number; saved?: number }; totals?: { months?: { done?: number }; races?: { done?: number } }; dbSizeBytes?: number | null } | undefined;
+      check(`${label}: 偽ソケットのカレンダー・一覧・結果を gate 経由で取り、保存まで進む(目録 1 件・R2 のオブジェクトあり・状態 running)`, last["ok"] === true && last["catalogCount"] === 1 && last["r2Object"] === true && st?.state === "running" && (st.totals?.races?.done ?? 0) === 1 && (st.night?.saved ?? 0) === 1, JSON.stringify(last).slice(0, 500));
+      check(`${label}: 月のカレンダーを取り終え(先月・今月)、D1 の大きさ(meta.size_after)が数で記録される`, (st?.totals?.months?.done ?? 0) >= 1 && typeof st?.dbSizeBytes === "number" && st.dbSizeBytes > 0, JSON.stringify(st).slice(0, 400));
+    });
   } finally {
     rmSync(CONFIG_PATH, { force: true });
     rmSync(FAKE_CONFIG_PATH, { force: true });
+    rmSync(ARCHIVE_CONFIG_PATH, { force: true });
   }
 
   console.log(failures === 0 ? "\nすべての確認が通りました" : `\n${failures} 件の確認が失敗しました`);

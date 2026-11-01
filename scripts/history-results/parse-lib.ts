@@ -2,7 +2,7 @@
  * 取得済みの raw(結果ページ)を読んで、NDJSON(gzip)を書く(parse の本体)。Issue #532 段階 1。開発用。ネットワークには出ない。
  *
  * - 入力: `<dir>/raw/result/*.html.gz`(中央)と `<dir>/raw/nar/result/*.html.gz`(地方。交流重賞のみ)。
- * - 出力: 1 行 1 レース(`build-record.ts` の `RaceRecord`。`kind` で中央/地方を区別)。日付・race_id の順に並べる。
+ * - 出力: 1 行 1 レース(core の `race-record.ts` の `RaceRecord`。`kind` で中央/地方を区別)。日付・race_id の順に並べる。
  * - 読めなかったページは出力に入れず、理由の分類つきで数え、`<out>.rejects.ndjson` に 1 件ずつ残す。最後に件数を出す。
  * - 読めたレースのうち注意が要るものは件数で報告する(頭数の食い違い・地方で Jpn でない格・ヘッダに無かった列・位置がずれた行・
  *   数値にできなかった増減/タイム)。これらは出力から落とさない(生の文字列も行に残している)。
@@ -12,7 +12,7 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFile
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { isJpnGrade } from "../../packages/core/src/scraper/jpn-grade.js";
-import { buildRaceRecord, type RaceRecord, type RejectCategory } from "./build-record.js";
+import { buildRaceRecord, type RaceRecord, type RejectCategory } from "../../packages/core/src/scraper/race-record.js";
 import { rawFilePath, rawResultDir, type Kind } from "./layout.js";
 
 export interface ParseOptions {
