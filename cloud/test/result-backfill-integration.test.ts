@@ -53,7 +53,7 @@ afterEach(() => {
 
 /**
  * 分析の行を入れる。`raceClass` の既定は「入っている」('オープン'): この結合テストの主題は段階 1・2 なので、分析のクラスは埋まった状態にして段階 3(Issue #426-b。クラスが NULL のレースを取り直す)の対象にしない。
- * 段階 3 のテストは `null` を渡す。
+ * 段階 3 のテストは `null` を渡す。同じく、取得しないことが主題の「取り込み済み」の行には `win_payout` を入れておく(全馬 NULL だと Issue #556 の段階 4 の対象になる)。
  */
 async function addAnalysis(raceId: string, kaisaiDate: string | null, i: number, raceClass: string | null = "オープン"): Promise<void> {
   await local.db
@@ -153,7 +153,7 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
     await addAnalysis(idOf(5, 1), null, 7); // 開催日不明
     await addAnalysis(idOf(6, 1), "20261006", 8);
     // 取り込み済み(Issue #259: 確定オッズも入っている。オッズが NULL の取り込み済みのレースは、段階 2 の対象になる=下の別のテスト)
-    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, ninki) VALUES (?, 1, 1, 2.0, 1)").bind(idOf(6, 1)).run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, win_odds, ninki) VALUES (?, 1, 1, 340, 2.0, 1)").bind(idOf(6, 1)).run();
     const w = world(jst(10, 10, 2));
     await w.core.kick();
     expect(w.backfillAlarm.at).toBe(w.clock.now); // 窓の中なので今
@@ -183,9 +183,9 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
       .prepare("INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f) VALUES (?, 13, 1, 111, 999, '[7,7]', 12.3)")
       .bind(need)
       .run();
-    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, ninki) VALUES (?, 1, 1, 2.0, 1)").bind(alreadyFilled).run();
-    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position) VALUES (?, 1, 1)").bind(idOf(10, 1)).run();
-    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position) VALUES (?, 1, 1)").bind(idOf(5, 1)).run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, win_odds, ninki) VALUES (?, 1, 1, 340, 2.0, 1)").bind(alreadyFilled).run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout) VALUES (?, 1, 1, 340)").bind(idOf(10, 1)).run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout) VALUES (?, 1, 1, 340)").bind(idOf(5, 1)).run();
     const w = world(jst(10, 10, 2));
     await w.core.kick();
     const steps = await w.run(jst(10, 11, 0, 59));
@@ -226,8 +226,8 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
     // pending: 旧い行。馬 finisher はページでは 1 着だが、旧い行では着順なし(わざと)。取消の馬はオッズなし。オッズは入っている(段階 2 の (A) には当たらない)。払戻はページと違う値 999。
     await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, win_odds, ninki) VALUES (?, ?, NULL, 111, 999, 7.7, 3)").bind(pending, finisher).run();
     await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position) VALUES (?, ?, NULL)").bind(pending, scratchedUmaban).run();
-    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, scratched) VALUES (?, 1, NULL, 2.0, 0)").bind(recorded).run();
-    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds) VALUES (?, 1, 1, 2.0)").bind(allFinished).run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, win_odds, scratched) VALUES (?, 1, NULL, 340, 2.0, 0)").bind(recorded).run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, win_odds) VALUES (?, 1, 1, 340, 2.0)").bind(allFinished).run();
     const w = world(jst(10, 10, 2), { htmlByRaceId: { [pending]: RESULT_WITH_SCRATCH_HTML } });
     expect((await w.core.getStatus()).winOdds).toMatchObject({ remaining: 1, scratchedMissing: 1 }); // 前提: 対象は pending の 1 レース(観測値で見える)
     await w.core.kick();
@@ -317,7 +317,7 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
       .bind(need)
       .run();
     for (const id of [hasClass, idOf(10, 1), idOf(5, 1)]) {
-      await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, ninki, scratched) VALUES (?, 1, 1, 2.0, 1, 0)").bind(id).run();
+      await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, win_odds, ninki, scratched) VALUES (?, 1, 1, 340, 2.0, 1, 0)").bind(id).run();
     }
     const before = JSON.stringify((await local.db.prepare("SELECT * FROM race_results ORDER BY race_id, umaban").all()).results);
     const w = world(jst(10, 10, 2));
@@ -334,7 +334,7 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
       { race_id: idOf(10, 1), race_class: null },
       { race_id: idOf(5, 1), race_class: null },
     ]);
-    // 結果の表は 1 バイトも変わらない(補完モードの saveWinOdds・saveScratched は書き込み 0)。
+    // 結果の表は 1 バイトも変わらない(補完モードの saveWinOdds・saveScratched・saveWinPayout は書き込み 0)。
     expect(JSON.stringify((await local.db.prepare("SELECT * FROM race_results ORDER BY race_id, umaban").all()).results)).toBe(before);
     const status = await w.core.getStatus();
     expect(status.state).toBe("done");
@@ -346,6 +346,53 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
       abandoned: { total: 0, byClass: {} },
       distribution: [{ value: "オープン", races: 1 }, { value: "新馬", races: 1 }],
     });
+    // 翌晩: 埋めたレースは取り直さない。新たに対象になるのは、前の晩は「今日」だったレース(20261010)だけ。
+    const urlsBefore = w.gate.urls.length;
+    await w.run(jst(10, 12, 3));
+    expect(w.gate.urls.slice(urlsBefore)).toHaveLength(1);
+    expect(w.gate.urls[urlsBefore]).toContain(idOf(10, 1));
+    expect(w.gate.urls.filter((u) => u.includes(need))).toHaveLength(1);
+  });
+
+  // Issue #556: 段階 4(単勝の払戻の補完)。結果はあるが全馬の win_payout が NULL のレースの結果ページを取り直し、NULL の行にだけ単勝の払戻を書く。
+  it("段階 4: 全馬の win_payout が NULL のレースの結果ページを取り直し、1 着の馬の払戻だけを書く(他の列は 1 バイトも変えない)。払戻のあるレース・今日以降・開催日不明は取得せず、埋めたレースは翌晩以降に再び取得しない", async () => {
+    const need = idOf(8, 1);
+    const hasPayout = idOf(8, 2);
+    await addAnalysis(need, "20261008", 1);
+    await addAnalysis(hasPayout, "20261008", 2);
+    await addAnalysis(idOf(10, 1), "20261010", 3); // 今日
+    await addAnalysis(idOf(5, 1), null, 4); // 開催日不明
+    // need: 段階 1〜3 が済んだ状態(オッズ・人気・scratched・クラスが入っている)で、全馬の払戻が NULL(#100 より前の取り込み)。
+    // 馬番 13 はページで 1 着(払戻 540 円)、馬番 5 はページで 1 着でない(払戻なし)。
+    await local.db
+      .prepare("INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f, win_odds, ninki, scratched) VALUES (?, 13, 1, 111, NULL, '[7,7]', 12.3, 5.4, 1, 0)")
+      .bind(need)
+      .run();
+    await local.db
+      .prepare("INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f, win_odds, ninki, scratched) VALUES (?, 5, 2, 222, NULL, '[3,3]', 12.9, 9.9, 4, 0)")
+      .bind(need)
+      .run();
+    await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, win_odds, ninki, scratched) VALUES (?, 1, 1, 340, 2.0, 1, 0)").bind(hasPayout).run();
+    for (const id of [idOf(10, 1), idOf(5, 1)]) {
+      await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, ninki, scratched) VALUES (?, 1, 1, 2.0, 1, 0)").bind(id).run();
+    }
+    const dump = async (): Promise<Array<Record<string, unknown>>> => (await local.db.prepare("SELECT * FROM race_results ORDER BY race_id, umaban").all<Record<string, unknown>>()).results;
+    const before = await dump();
+    const w = world(jst(10, 10, 2));
+    expect((await w.core.getStatus()).winPayout).toMatchObject({ remaining: 1, undated: 1 }); // 前提: 対象は need の 1 レース(今日のレースは to より後で数えない。開催日不明は undated)
+    await w.core.kick();
+    const steps = await w.run(jst(10, 11, 0, 59));
+    expect(steps).toBeGreaterThan(2); // 前提: 実際に動いた
+    expect(w.gate.urls).toHaveLength(1); // 取得は need の 1 リクエストだけ
+    expect(w.gate.urls[0]).toContain(need);
+    const after = await dump();
+    // 変わるのは need の馬番 13 の win_payout(NULL → 540)だけ。
+    const expected = before.map((r) => (r.race_id === need && r.umaban === 13 ? { ...r, win_payout: 540 } : r));
+    expect(before.find((r) => r.race_id === need && r.umaban === 13)!.win_payout).toBeNull(); // 前提: 書く前は NULL
+    expect(after).toEqual(expected);
+    const status = await w.core.getStatus();
+    expect(status.state).toBe("done");
+    expect(status.winPayout).toEqual({ remaining: 0, undated: 1, filled: 1, stillNull: 0, abandoned: { total: 0, byClass: {} } });
     // 翌晩: 埋めたレースは取り直さない。新たに対象になるのは、前の晩は「今日」だったレース(20261010)だけ。
     const urlsBefore = w.gate.urls.length;
     await w.run(jst(10, 12, 3));
