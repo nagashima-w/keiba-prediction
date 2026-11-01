@@ -149,9 +149,9 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
     // Issue #217: 結果の補完を止める(`RESULT_BACKFILL_NIGHTLY_LIMIT=0`)。smoke(CI でも走る)が、時刻によって補完の窓(JST 1:00〜6:00)に当たっても、
     // 本物の netkeiba に出ないことを保証する。補完の DO は kick もアラームも何もしない(`scripts/test/cloud-config-guard.test.ts` が、すべての構成でこの指定があることを固定する)。
     "--var", "RESULT_BACKFILL_NIGHTLY_LIMIT:0",
-    // Issue #554: 過去の結果の取得を止める(`RACE_ARCHIVE_FETCH=0`)。smoke(CI でも走る)が、時刻によって取得の時間帯(JST 0:00〜8:30)に当たっても、本番のクラスが本物の netkeiba に出ないことを保証する。
+    // Issue #554: 過去の結果の取得を止める(`RACE_ARCHIVE_NIGHTLY_LIMIT=0`。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_FETCH`〉にしない: 同じ名前は binding と衝突する)。smoke(CI でも走る)が、時刻によって取得の時間帯(JST 0:00〜8:30)に当たっても、本番のクラスが本物の netkeiba に出ないことを保証する。
     // 取得の DO は kick もアラームも何もしない(`scripts/test/cloud-config-guard.test.ts` が、すべての構成でこの指定があることを固定する)。取得そのものの確認は、smoke 専用の DO(`RACE_ARCHIVE_SMOKE`)が偽ソケットで行う。
-    "--var", "RACE_ARCHIVE_FETCH:0",
+    "--var", "RACE_ARCHIVE_NIGHTLY_LIMIT:0",
     "--var", `ACCESS_TEAM_NAME:${TEAM}`,
     "--var", `ACCESS_AUD:${aud}`,
     "--var", `ACCESS_ALLOWED_EMAIL:${email}`,
@@ -341,7 +341,7 @@ async function main(): Promise<void> {
       const backfillIdle = await req(port, "GET", "/api/results/backfill");
       const backfillIdleJson = parseJson(backfillIdle.text);
       check(`${label}: GET /api/results/backfill は 200 で state disabled(smoke は補完を止めている)・移行の状態の項目は無い(Issue #394)・残り 0・開催日不明 0・段階 2〈確定オッズ・人気。Issue #259〉の残り 0・補完済み 0(本物の D1 で段階 2 の集計の SQL が動く)・次の実行なし(アラームを張っていない)`, backfillIdle.status === 200 && backfillIdleJson["ok"] === true && backfillIdleJson["state"] === "disabled" && !("migrationState" in backfillIdleJson) && backfillIdleJson["nextRunAt"] === null && backfillIdleJson["remaining"] === 0 && backfillIdleJson["undated"] === 0 && (backfillIdleJson["winOdds"] as { remaining: number; undated: number; filled: number } | undefined)?.remaining === 0 && (backfillIdleJson["winOdds"] as { filled: number }).filled === 0, `${backfillIdle.status} ${backfillIdle.text.slice(0, 300)}`);
-      // Issue #554: 過去の結果の取得(本物の DO `RaceArchiveFetchDO`)。smoke は止めている(`RACE_ARCHIVE_FETCH=0`)ので、状態は disabled・次の実行なし・取得 0 件。再開は何もしない。
+      // Issue #554: 過去の結果の取得(本物の DO `RaceArchiveFetchDO`)。smoke は止めている(`RACE_ARCHIVE_NIGHTLY_LIMIT=0`)ので、状態は disabled・次の実行なし・取得 0 件。再開は何もしない。
       const archiveIdle = await req(port, "GET", "/api/race-archive");
       const archiveIdleJson = parseJson(archiveIdle.text);
       check(`${label}: GET /api/race-archive は 200 で state disabled・次の実行なし・取得も保存も 0 件(smoke は取得を止めている。Issue #554)`, archiveIdle.status === 200 && archiveIdleJson["ok"] === true && archiveIdleJson["state"] === "disabled" && archiveIdleJson["nextRunAt"] === null && (archiveIdleJson["night"] as { requests: number } | undefined)?.requests === 0, `${archiveIdle.status} ${archiveIdle.text.slice(0, 300)}`);

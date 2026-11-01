@@ -686,7 +686,7 @@ describe("wrangler.toml", () => {
     const body = smoke.slice(start, smoke.indexOf("\n}\n", start));
     expect(body).toContain('"--var", "RESULT_BACKFILL_NIGHTLY_LIMIT:0"');
     // Issue #554: 過去の結果の取得も、すべての構成で止めて動かす(取得の時間帯〈JST 0:00〜8:30〉に当たっても、本番のクラスが netkeiba に出ない)
-    expect(body).toContain('"--var", "RACE_ARCHIVE_FETCH:0"');
+    expect(body).toContain('"--var", "RACE_ARCHIVE_NIGHTLY_LIMIT:0"');
     // withWorker の呼び出しのうち、設定ファイル(--config)を使うもの(認証の設定を持つ構成)は、すべて ...vars( を含む
     const calls = [...smoke.matchAll(/await withWorker\([^\n]*\n/g)].map((m) => m[0]);
     const withConfig = calls.filter((c) => c.includes("--config"));
@@ -1396,10 +1396,13 @@ describe("Issue #554: 過去の結果の毎晩の取得(RaceArchiveFetchDO)は�
     expect((doCode.match(/\.fetchRaw\(/g) ?? []).length).toBe(1);
   });
 
-  it("取得を止める var(RACE_ARCHIVE_FETCH=0)は文字列 \"0\" の完全一致だけ。開始時刻 2026-11-04 0:00 JST の定数が固定されている", () => {
+  it("取得を止める var(RACE_ARCHIVE_NIGHTLY_LIMIT=0)は文字列 \"0\" の完全一致だけ。binding の名前と衝突しない(var の名前が DO の binding の名前と同じだと、env の値が上書きされる)。開始時刻 2026-11-04 0:00 JST の定数が固定されている", () => {
     expect(core).toContain("export const ARCHIVE_NOT_BEFORE_MS = Date.UTC(2026, 10, 3, 15, 0, 0);");
     expect(core).toMatch(/value\.trim\(\) === "0"/);
-    expect(doCode).toContain("isArchiveFetchDisabled(this.env.RACE_ARCHIVE_FETCH)");
+    expect(doCode).toContain("isArchiveFetchDisabled(this.env.RACE_ARCHIVE_NIGHTLY_LIMIT)");
+    // ★var の名前が binding の名前(RACE_ARCHIVE_FETCH)と同じでない: DO の env の型に、文字列の RACE_ARCHIVE_FETCH が無い・smoke の var にも無い
+    expect(doCode).not.toMatch(/RACE_ARCHIVE_FETCH\?:\s*string/);
+    expect(stripCode(readTextLf("cloud", "smoke.ts"))).not.toMatch(/"--var",\s*"RACE_ARCHIVE_FETCH[:=]/);
   });
 
   it("本番の入口(worker.ts)は本番のクラスだけを export し、smoke 専用のサブクラス(RaceArchiveSmokeDO)を import しない。smoke 専用のサブクラスは smoke-worker.ts にだけある", () => {

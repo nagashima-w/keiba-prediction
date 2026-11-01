@@ -23,14 +23,19 @@
  *  2. 拒否の連続回数が 1 以上で、最後の開始から 30 分以内 → 出さない(誰かが直前に拒否された。自分が 2 回目になってブレーカーを開かせない、解除後の最初の 1 回を担って再オープンさせない)。
  *     最後の開始から 30 分以上たっていれば古い拒否とみなして進む。
  *  3. 待ち(進行中 + 待ち)が 2 件以上 → 30 秒後に見直す。
+ * **関所の拒否の数が古いまま残る経路(受け入れている)**: 自分が拒否されて止まったあと、関所の「拒否の連続回数」は 1 のまま残る。次の晩の最初のリクエスト(自動再開)の前に、最後の開始から 30 分以上たっているので「古い拒否」とみなして出し、
+ * そこでまた拒否されると、連続回数が 2 になって関所のブレーカーが 30 分開く。本番の取得(出馬表・オッズ・分析)は 9:05 以降で、この取得の時間帯(0:00〜8:30)と重ならないので、巻き込まれるのは夜間の補完くらいで、受け入れる。
  * 出したあとの応答が **HTTP 400・403・429**(`bad-response` に付く受信済みのステータスも同じ)なら、**その場で止める**({@link stopRefused})。再試行しない。
  *
  * ## 止まり方(状態 {@link ArchiveState})
  *  - `night-stopped`: 拒否された(1 回目)・R2 の柵。**次の晩の 0:00 に自動で再開する**。拒否は自動再開の権利を 1 度使う。柵は権利を使わない。
+ *    柵は月単位なので、解けるまで毎晩 1 リクエストを出して確かめる(保存が `skipped` で戻り、また止まる)。**通知は止まった最初の 1 回だけ**(保存に成功すると、次の柵でまた 1 回送る)。
  *  - `manual-stopped`: 自動で再開したあとにまた拒否された。**手で再開するまで動かさない**({@link RaceArchiveFetchCore.resume})。
  *  - `capacity-stopped`: D1 が 400MB を超えた・大きさが読めない(`saveRaceArchive` の `skipped`)。手で再開するまで動かさない。
- *  - 拒否以外の失敗(5xx・network・timeout・保存の例外)が**その晩に連続 {@link ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件**になったら、その晩だけ止めて通知する(状態は `running` のまま。止められたとは数えず、次の晩は普通に動く)。
- *  - 自動再開の権利は、**再開した晩を拒否なしで走り切ったら戻る**(別の機会の停止でもう 1 度自動で再開する。オーケストレーターの判断)。手で再開したときも戻す。
+ *  - 拒否以外の失敗のうち 5xx・network・timeout・bad-response・保存の例外・読み取りの例外(`process-error`)が**その晩に連続 {@link ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件**(9 件では止まらず、10 件で止まる)になったら、その晩だけ止めて通知する
+ *    (状態は `running` のまま。止められたとは数えず、次の晩は普通に動く)。**404・検査の不合格・それ以外の 4xx は数えない**(古いページが 404 だらけでも、1 晩 10 件で止まらない。連続回数を増やしも戻しもしない)。
+ *  - 自動再開の権利は、**再開したあとの最初のリクエストを出すときに使い**、**その晩を拒否なしで走り切ったら戻る**(別の機会の停止でもう 1 度自動で再開する。オーケストレーターの判断)。
+ *    再開した晩が開催日の朝などで 1 件も取らなかったときは、権利は使われないまま、次に取った晩が「再開した晩」になる。手で再開したときも戻す。
  * 通知({@link ArchiveNotice})は状態を書いたあとに送る。送信が失敗したら 10 分後に再送し、3 回で諦める(状態は変わらない)。
  *
  * ## 個別のレース・日・月の失敗
@@ -39,7 +44,7 @@
  *  - 目録(`race_archive`)にあるレースは取らない(`done`・`existing`)。
  *
  * ## 状態(DO の SQLite)
- * `ra_meta`(キー・値)・`ra_month`・`ra_day`・`ra_race`。カレンダー・一覧のページは保存しない(待ち行列が SQLite に残るので、DO が作り直されても取り直さない)。
+ * `ra_meta`(キー・値)・`ra_month`・`ra_day`・`ra_race`(いずれも `WITHOUT ROWID`。主キーの索引を別に持たず、1 行の書き込みが 1 行で済む)。**変わらない値は書かない**(`metaSet` は値が変わるときだけ書く。DO の SQLite の書き込み行数を減らすため)。カレンダー・一覧のページは保存しない(待ち行列が SQLite に残るので、DO が作り直されても取り直さない)。
  * カレンダーは毎晩、今月と先月を取り直す(新しい開催日を足す)。それ以前の月は 1 回取れば終わり。
  *
  * ## 例外を投げない
@@ -62,7 +67,7 @@ export const RACE_ARCHIVE_FETCH_NAME = "main";
 export const ARCHIVE_NIGHTLY_LIMIT_MAX = 100_000;
 
 /**
- * 取得を止める設定の判定(Worker の var `RACE_ARCHIVE_FETCH`)。**文字列 `"0"`(前後の空白は無視)だけ**が「無効」。それ以外(未設定・空・数でない値・`"00"` など)は無効にしない
+ * 取得を止める設定の判定(Worker の var `RACE_ARCHIVE_NIGHTLY_LIMIT`。★binding の名前〈`RACE_ARCHIVE_FETCH`〉とは別の名前にする。同じ名前の var は binding と衝突する)。**文字列 `"0"`(前後の空白は無視)だけ**が「無効」。それ以外(未設定・空・数でない値・`"00"` など)は無効にしない
  * (誤記で止まったまま気づかない、または誤記で意図せず切り替わる、のどちらも避けるため、完全一致にする。`isBackfillDisabled` と同じ流儀)。
  */
 export function isArchiveFetchDisabled(value: string | undefined): boolean {
@@ -179,6 +184,9 @@ export interface RaceArchiveFetchDeps {
   readonly log: (line: string, level: "info" | "error") => void;
   /** 結果ページの読み取り。省略は `buildRaceRecord`(テストが差し替える)。 */
   readonly buildRecord?: (html: string, raceId: string, kind: "central") => BuildResult;
+  /** カレンダーの開催日の抽出・一覧の race_id の抽出。省略は core の関数(テストが、想定外の例外を投げる読み取りに差し替える)。 */
+  readonly parseCalendarDates?: (html: string, month: string) => string[];
+  readonly parseListIds?: (html: string) => string[];
 }
 
 export type CentralDayKind = "kaisai" | "not-kaisai" | "unknown";
@@ -248,6 +256,11 @@ function errorKind(error: unknown): string {
   return error instanceof Error ? error.name.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "Error" : "non-error";
 }
 
+/** 「その晩に連続 {@link ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件」の失敗に数える分類か。 */
+function countsTowardPause(cls: string): boolean {
+  return /^http-5\d\d$/.test(cls) || cls === "network-error" || cls === "timeout" || cls === "bad-response" || cls === "save-failed" || cls === "process-error";
+}
+
 type Work =
   | { readonly kind: "month"; readonly id: string }
   | { readonly kind: "day"; readonly id: string }
@@ -276,30 +289,53 @@ export class RaceArchiveFetchCore {
     this.intervalMs = options.intervalMs ?? ARCHIVE_REQUEST_INTERVAL_MS;
     this.fromMonth = options.fromMonth ?? ARCHIVE_FROM_MONTH;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? ARCHIVE_FETCH_TIMEOUT_MS;
-    deps.sql.exec("CREATE TABLE IF NOT EXISTS ra_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    deps.sql.exec("CREATE TABLE IF NOT EXISTS ra_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID");
     deps.sql.exec(
       `CREATE TABLE IF NOT EXISTS ra_month (
-         month TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending', fetched_on TEXT, nights INTEGER NOT NULL DEFAULT 0, last_night TEXT, last_class TEXT)`,
+         month TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending', fetched_on TEXT, nights INTEGER NOT NULL DEFAULT 0, last_night TEXT, last_class TEXT) WITHOUT ROWID`,
     );
     deps.sql.exec(
       `CREATE TABLE IF NOT EXISTS ra_day (
-         date TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending', nights INTEGER NOT NULL DEFAULT 0, last_night TEXT, last_class TEXT)`,
+         date TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending', nights INTEGER NOT NULL DEFAULT 0, last_night TEXT, last_class TEXT) WITHOUT ROWID`,
     );
     deps.sql.exec(
       `CREATE TABLE IF NOT EXISTS ra_race (
-         race_id TEXT PRIMARY KEY, date TEXT NOT NULL, seq INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', nights INTEGER NOT NULL DEFAULT 0, last_night TEXT, last_class TEXT)`,
+         race_id TEXT PRIMARY KEY, date TEXT NOT NULL, seq INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', nights INTEGER NOT NULL DEFAULT 0, last_night TEXT, last_class TEXT) WITHOUT ROWID`,
     );
   }
 
   // ---- 状態の読み書き ----
 
+  /** ra_meta の読み出しの控え(このインスタンスだけが書くので、書いたときに更新する)。値が無いキーは null。 */
+  private readonly metaCache = new Map<string, string | null>();
+
   private metaGet(key: string): string | null {
+    const cached = this.metaCache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
     const rows = this.deps.sql.exec("SELECT value FROM ra_meta WHERE key = ?", key).toArray() as { value: string }[];
-    return rows[0]?.value ?? null;
+    const value = rows[0]?.value ?? null;
+    this.metaCache.set(key, value);
+    return value;
   }
 
+  /** 値が変わるときだけ書く(DO の SQLite の書き込み行数を減らす。1 晩 6,000 件を超える取得で、変わらない値を毎回書かない)。 */
   private metaSet(key: string, value: string): void {
+    if (this.metaGet(key) === value) {
+      return;
+    }
     this.deps.sql.exec("INSERT INTO ra_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+    this.metaCache.set(key, value);
+  }
+
+  private metaDelete(...keys: string[]): void {
+    for (const key of keys) {
+      if (this.metaGet(key) !== null) {
+        this.deps.sql.exec("DELETE FROM ra_meta WHERE key = ?", key);
+        this.metaCache.set(key, null);
+      }
+    }
   }
 
   private metaNum(key: string, fallback = 0): number {
@@ -374,6 +410,8 @@ export class RaceArchiveFetchCore {
     this.metaSet("resume_at", "0");
     this.metaSet("auto_resume_used", "0");
     this.metaSet("resumed_night", "");
+    this.metaSet("resume_armed", "0");
+    this.metaSet("fence_notified", "0");
     this.deps.log(`race-archive: resume from=${previous}`, "info");
     await this.deps.setAlarm(this.runAt(this.deps.now()));
     return { resumed: true, previous };
@@ -423,8 +461,8 @@ export class RaceArchiveFetchCore {
         return;
       }
       if (this.metaGet("stop_kind") === "refused") {
-        this.metaSet("auto_resume_used", "1");
-        this.metaSet("resumed_night", night);
+        // 権利を使うのは、再開したあとに**最初のリクエストを出すとき**(execute)。再開した晩が開催日の朝などで 1 件も取らなかったときに、権利が戻らなくなるのを避ける。
+        this.metaSet("resume_armed", "1");
       }
       this.metaSet("mode", "running");
       this.deps.log(`race-archive: auto-resume night=${night}`, "info");
@@ -619,10 +657,21 @@ export class RaceArchiveFetchCore {
 
   /** 1 リクエストを出して、結果を処理する。 */
   private async execute(work: Work, night: string): Promise<void> {
+    let url: string;
+    try {
+      url = this.urlOf(work);
+    } catch (error) {
+      // 不正な ID(`parseRaceId` が投げる等)。リクエストは出さず、その晩はもう取らない。
+      this.deps.log(`race-archive: url failed stage=${STAGE_OF[work.kind]} error=${errorKind(error)}`, "error");
+      if (!(await this.failed(work, night, "process-error", this.deps.now()))) {
+        await this.arm(this.deps.now());
+      }
+      return;
+    }
     const startedAt = this.deps.now();
     this.metaSet("last_req_at", String(startedAt));
     this.setWait("active");
-    const result = await this.fetchWithTimeout(this.urlOf(work));
+    const result = await this.fetchWithTimeout(url);
     const after = Math.max(this.deps.now(), startedAt);
     const next = Math.max(after, startedAt + this.intervalMs);
 
@@ -646,6 +695,12 @@ export class RaceArchiveFetchCore {
       }
     }
     this.bump("night_requests");
+    if (this.metaGet("resume_armed") === "1") {
+      // 自動再開の最初のリクエスト。権利を使い、この晩を「再開した晩」にする(この晩を拒否なしで走り切れば、次の晩に権利が戻る)。拒否の判定(下)より前に付ける。
+      this.metaSet("auto_resume_used", "1");
+      this.metaSet("resumed_night", night);
+      this.metaSet("resume_armed", "0");
+    }
 
     if (result.kind === "response" && RESTRICTED_STATUSES.has(result.status)) {
       await this.stopRefused(result.status, STAGE_OF[work.kind], after);
@@ -662,7 +717,14 @@ export class RaceArchiveFetchCore {
     } else if (result.status !== 200) {
       outcome = (await this.failed(work, night, `http-${result.status}`, after)) ? "stopped" : "failed";
     } else {
-      outcome = await this.process(work, night, new TextDecoder("utf-8").decode(new Uint8Array(result.body)), after);
+      try {
+        outcome = await this.process(work, night, new TextDecoder("utf-8").decode(new Uint8Array(result.body)), after);
+      } catch (error) {
+        // 読み取り(`buildRaceRecord` は想定外の例外をそのまま投げ直す)・保存後の記録の例外。握らないと、対象に印が付かず、同じページを 10 分おきに延々と取り直す。
+        // 404 と同じく、その晩はもう取らず、3 晩で諦める(`dead`)。
+        this.deps.log(`race-archive: process failed stage=${STAGE_OF[work.kind]} error=${errorKind(error)}`, "error");
+        outcome = (await this.failed(work, night, "process-error", after)) ? "stopped" : "failed";
+      }
     }
     if (outcome === "stopped") {
       return;
@@ -686,7 +748,7 @@ export class RaceArchiveFetchCore {
     }
     switch (work.kind) {
       case "month": {
-        for (const date of parseCalendarKaisaiDates(text, work.id)) {
+        for (const date of (this.deps.parseCalendarDates ?? parseCalendarKaisaiDates)(text, work.id)) {
           this.deps.sql.exec("INSERT OR IGNORE INTO ra_day (date) VALUES (?)", date);
         }
         this.deps.sql.exec("UPDATE ra_month SET status = 'done', fetched_on = ?, last_class = NULL WHERE month = ?", night, work.id);
@@ -694,7 +756,7 @@ export class RaceArchiveFetchCore {
         return "ok";
       }
       case "day": {
-        parseListRaceIds(text, "central").forEach((id, seq) => {
+        (this.deps.parseListIds ?? ((html: string) => parseListRaceIds(html, "central")))(text).forEach((id, seq) => {
           this.deps.sql.exec("INSERT OR IGNORE INTO ra_race (race_id, date, seq) VALUES (?, ?, ?)", id, work.id, seq);
         });
         this.deps.sql.exec("UPDATE ra_day SET status = 'listed', last_class = NULL WHERE date = ?", work.id);
@@ -735,6 +797,7 @@ export class RaceArchiveFetchCore {
     this.bump("night_saved");
     this.metaSet("db_size", String(saved.dbSizeBytes));
     this.metaSet("fail_streak", "0");
+    this.metaSet("fence_notified", "0");
     return "ok";
   }
 
@@ -759,9 +822,11 @@ export class RaceArchiveFetchCore {
       this.deps.sql.exec(`UPDATE ra_race SET status = ${dead}, nights = ${bumpNights}, last_night = ?, last_class = ? WHERE race_id = ?`, night, night, night, cls, work.id);
     }
     this.bump("night_failed");
-    const streak = this.bump("fail_streak");
+    // 「連続で失敗」に数えるのは、netkeiba 側の不調か、こちらの処理の失敗だけ(5xx・network・timeout・保存の例外・読み取りの例外)。
+    // 404・検査の不合格・それ以外の 4xx は数えない(古いページが 404 だらけでも、1 晩 10 件で止まらない)。数えない失敗は連続回数を増やしも戻しもしない。
+    const streak = countsTowardPause(cls) ? this.bump("fail_streak") : this.metaNum("fail_streak");
     this.deps.log(`race-archive: failed stage=${STAGE_OF[work.kind]} class=${cls} streak=${streak}`, "error");
-    if (streak < ARCHIVE_CONSECUTIVE_FAILURE_LIMIT) {
+    if (!countsTowardPause(cls) || streak < ARCHIVE_CONSECUTIVE_FAILURE_LIMIT) {
       return false;
     }
     const resumeAt = Math.max(nextNightStart(at, this.startMin), this.notBefore);
@@ -799,8 +864,12 @@ export class RaceArchiveFetchCore {
     this.metaSet("mode", "night-stopped");
     this.metaSet("resume_at", String(resumeAt));
     this.deps.log(`race-archive: stopped kind=${kind}`, "error");
-    this.queueNotice({ kind: "r2-fence", at, resumeAt });
-    await this.flushNotice(this.deps.now());
+    // 柵は月単位なので、毎晩 1 リクエストを出して確かめる(次の晩に自動で再開し、また柵で止まる)。通知は止まった最初の 1 回だけ(保存に成功すると、また 1 回送る)。
+    if (this.metaGet("fence_notified") !== "1") {
+      this.metaSet("fence_notified", "1");
+      this.queueNotice({ kind: "r2-fence", at, resumeAt });
+      await this.flushNotice(this.deps.now());
+    }
     await this.arm(resumeAt);
   }
 
@@ -844,11 +913,11 @@ export class RaceArchiveFetchCore {
     const attempts = this.metaNum("notice_attempts") + 1;
     try {
       await this.deps.notify(JSON.parse(raw) as ArchiveNotice);
-      this.deps.sql.exec("DELETE FROM ra_meta WHERE key IN ('pending_notice', 'notice_attempts', 'notice_retry_at')");
+      this.metaDelete("pending_notice", "notice_attempts", "notice_retry_at");
     } catch (error) {
       this.deps.log(`race-archive: notify failed attempt=${attempts} error=${errorKind(error)}`, "error");
       if (attempts >= ARCHIVE_NOTICE_MAX_ATTEMPTS) {
-        this.deps.sql.exec("DELETE FROM ra_meta WHERE key IN ('pending_notice', 'notice_attempts', 'notice_retry_at')");
+        this.metaDelete("pending_notice", "notice_attempts", "notice_retry_at");
       } else {
         this.metaSet("notice_attempts", String(attempts));
         this.metaSet("notice_retry_at", String(now + ARCHIVE_ERROR_RETRY_MS));

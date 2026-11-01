@@ -68,7 +68,10 @@ function withoutRaceDay(toml: string): string {
     .replace(/\[\[migrations\]\]\ntag = "v8"\nnew_sqlite_classes = \["MonthlyReportDO"\]\n/, "")
     // Issue #463: 配分の再計算用の書き出しの DO(ALLOCATION_EXPORT・AllocationExportDO)も同じく除く(migration v10 も)。
     .replace(/\[\[durable_objects\.bindings\]\]\nname = "ALLOCATION_EXPORT"\nclass_name = "AllocationExportDO"\n/, "")
-    .replace(/\[\[migrations\]\]\ntag = "v10"\nnew_sqlite_classes = \["AllocationExportDO"\]\n/, "");
+    .replace(/\[\[migrations\]\]\ntag = "v10"\nnew_sqlite_classes = \["AllocationExportDO"\]\n/, "")
+    // Issue #554: 過去の結果の取得の DO(RACE_ARCHIVE_FETCH・RaceArchiveFetchDO)と migration v11 も同じく除く。
+    .replace(/\[\[durable_objects\.bindings\]\]\nname = "RACE_ARCHIVE_FETCH"\nclass_name = "RaceArchiveFetchDO"\n/, "")
+    .replace(/\[\[migrations\]\]\ntag = "v11"\nnew_sqlite_classes = \["RaceArchiveFetchDO"\]\n/, "");
   expect(stripped, "RACE_DAY の binding と migration v2 を除けている").not.toBe(toml);
   expect(stripped).not.toContain("RaceDay");
   // CloudMigration の binding は無い(v3・v9 の migration の行だけが残る。コメントは除いて見る)
@@ -81,6 +84,7 @@ function withoutRaceDay(toml: string): string {
   expect(stripped, "PRIOR_EXPORT の binding と migration v7 を除けている").not.toContain("PriorExportDO");
   expect(stripped, "MONTHLY_REPORT の binding と migration v8 を除けている").not.toContain("MonthlyReportDO");
   expect(stripped, "ALLOCATION_EXPORT の binding と migration v10 を除けている").not.toContain("AllocationExportDO");
+  expect(stripped, "RACE_ARCHIVE_FETCH の binding と migration v11 を除けている").not.toContain("RaceArchiveFetchDO");
   return stripped;
 }
 

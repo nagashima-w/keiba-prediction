@@ -6,13 +6,14 @@ import {
   ARCHIVE_REQUEST_INTERVAL_MS,
   classifyCentralDay,
   inArchiveWindow,
+  isArchiveFetchDisabled,
   RaceArchiveFetchCore,
   type ArchiveNotice,
   type ArchiveFetchOptions,
   type PlanProgressLike,
 } from "../src/race-archive-fetch-core";
 import type { SaveRaceArchiveResult } from "../src/race-archive-repository";
-import { historyCalendarUrl, historyListUrl } from "../../packages/core/src/scraper/history-pages";
+import { historyCalendarUrl, historyListUrl, parseCalendarKaisaiDates, parseListRaceIds } from "../../packages/core/src/scraper/history-pages";
 import { parseRaceId } from "../../packages/core/src/scraper/ids";
 import { RACE_RECORD_PARSER_VERSION, type BuildResult } from "../../packages/core/src/scraper/race-record";
 import { raceResultUrl } from "../../packages/core/src/scraper/urls";
@@ -76,6 +77,14 @@ class World {
   gateStatus: { blockedUntil: number | null; consecutiveRefusals: number; lastStartAt: number | null; pending: number } = { blockedUntil: null, consecutiveRefusals: 0, lastStartAt: null, pending: 0 };
   gateStatusCalls = 0;
   plan: PlanProgressLike | Error = NOT_KAISAI;
+  /** 日付(YYYYMMDD)ごとの計画(あればそちらを返す)。 */
+  planByDate = new Map<string, PlanProgressLike>();
+  throwOnRace = new Set<string>();
+  throwOnMonth = new Set<string>();
+  throwOnDay = new Set<string>();
+  lastListDate = "";
+  /** 一覧の読み取りが返す race_id を差し替える(不正な ID を返す読み取りの再現)。 */
+  listIdsOverride: string[] | null = null;
   planCalls = 0;
   catalog = new Set<string>();
   saveResults: SaveRaceArchiveResult[] = [];
@@ -105,6 +114,8 @@ class World {
           },
           fetchRaw: async (url) => {
             this.fetchLog.push({ url, at: this.now });
+            const listDate = /kaisai_date=(\d{8})/.exec(url)?.[1];
+            if (listDate !== undefined) this.lastListDate = listDate;
             const route = this.routes.get(url) ?? (url.includes("/race/result.html") ? "ok" : httpStatus(404));
             if (route === "ok") return ok(RESULT_OK);
             if (Array.isArray(route)) {
@@ -116,8 +127,10 @@ class World {
             return route as GateResult;
           },
         },
-        planProgress: async () => {
+        planProgress: async (date) => {
           this.planCalls += 1;
+          const dated = this.planByDate.get(date);
+          if (dated !== undefined) return dated;
           if (this.plan instanceof Error) throw this.plan;
           return this.plan;
         },
@@ -142,8 +155,22 @@ class World {
           this.notices.push(notice);
         },
         log: (line) => this.logs.push(line),
+        parseCalendarDates: (html, month) => {
+          if (this.throwOnMonth.has(month)) throw new TypeError("想定外の例外(カレンダー)");
+          return parseCalendarKaisaiDates(html, month);
+        },
+        parseListIds: (html) => {
+          const ids = parseListRaceIds(html, "central");
+          const date = [...this.throwOnDay].find((d) => this.lastListDate === d);
+          if (date !== undefined) throw new TypeError("想定外の例外(一覧)");
+          return this.listIdsOverride ?? ids;
+        },
         buildRecord: (_html, raceId): BuildResult =>
-          this.rejectRace.has(raceId)
+          this.throwOnRace.has(raceId)
+            ? (() => {
+                throw new TypeError("想定外の例外(結果)");
+              })()
+            : this.rejectRace.has(raceId)
             ? { ok: false, category: "結果未確定", detail: "x" }
             : ({ ok: true, record: { raceId, date: "2026-11-03", kind: "central", parserVersion: 2 } } as unknown as BuildResult),
       },
@@ -214,6 +241,20 @@ describe("classifyCentralDay(計画の中央の行から開催日かを決める
     ["地方の行だけ → 判定不能", { stage: "done", venues: [{ venue: "nar", state: "ok", listed: 8 }] }, "unknown"],
   ] as const)("%s", (_name, progress, expected) => {
     expect(classifyCentralDay(progress as PlanProgressLike)).toBe(expected);
+  });
+});
+
+describe("isArchiveFetchDisabled(取得を止める var。完全一致の \"0\" だけ)", () => {
+  it.each([
+    ["0", true],
+    [" 0 ", true],
+    ["00", false],
+    ["", false],
+    ["1", false],
+    ["off", false],
+    [undefined, false],
+  ] as [string | undefined, boolean][])("%j → %s", (value, expected) => {
+    expect(isArchiveFetchDisabled(value)).toBe(expected);
   });
 });
 
@@ -694,13 +735,16 @@ describe("止められたのではない失敗", () => {
     expect(w.resultFetches.filter((u) => u === resultUrlOf(a[0]!))).toHaveLength(3);
     expect((await w.core.getStatus()).totals.races.dead).toBe(1);
   });
+  it("連続失敗の上限の定数は 10(境界の値をリテラルで固定する: 9 件で止まらず、10 件で止まる)", () => {
+    expect(ARCHIVE_CONSECUTIVE_FAILURE_LIMIT).toBe(10);
+  });
   it(`5xx が連続 ${ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件になったらその晩は止め、Discord に 1 回。止められたとは数えず(状態は running)、次の晩は普通に動く`, async () => {
     const w = mk({ fromMonth: "2026-11" });
     const ids = Array.from({ length: 12 }, (_, i) => rid(1, i + 1));
     w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids }, results: Object.fromEntries(ids.map((id) => [id, [httpStatus(500), ok(RESULT_OK)] as GateResult[]])) });
     await w.core.kick();
     await w.runUntil(jst(11, 5, 23, 59));
-    expect(w.resultFetches).toHaveLength(ARCHIVE_CONSECUTIVE_FAILURE_LIMIT);
+    expect(w.resultFetches).toHaveLength(10);
     expect(w.notices.map((n) => n.kind)).toEqual(["failures"]);
     expect((await w.core.getStatus()).state).toBe("running");
     expect(w.alarm).toBe(jst(11, 6, 0));
@@ -818,5 +862,174 @@ describe("上書きの設定と、状態の持ち越し", () => {
     expect(w.urls().filter((u) => u === listUrl("20261103"))).toHaveLength(3);
     expect(w.saved).toEqual([rid(2, 1)]);
     expect((await w.core.getStatus()).totals.days.dead).toBe(1);
+  });
+});
+
+describe("読み取りが想定外の例外を投げたとき(同じページを延々と取り直さない)", () => {
+  it("結果: 読み取りが投げたレースは、その晩に 1 回しか取らず、他のレースへ進む。3 晩で dead。止まらない(状態 running)", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    const { a } = standard(w);
+    w.throwOnRace.add(a[0]!);
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect(w.resultFetches.filter((u) => u === resultUrlOf(a[0]!))).toHaveLength(1);
+    expect(w.saved).toEqual([a[1], a[2], rid(2, 1)]); // 他のレースは保存された(前提: 無限に取り直していない)
+    expect((await w.core.getStatus()).state).toBe("running");
+    await w.runUntil(jst(11, 8, 23, 59));
+    expect(w.resultFetches.filter((u) => u === resultUrlOf(a[0]!))).toHaveLength(3);
+    expect((await w.core.getStatus()).totals.races.dead).toBe(1);
+  });
+  it("一覧: 読み取りが投げた日は、その晩に 1 回しか取らず、他の日へ進む。3 晩で dead", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    standard(w);
+    w.throwOnDay.add("20261103");
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect(w.urls().filter((u) => u === listUrl("20261103"))).toHaveLength(1);
+    expect(w.saved).toEqual([rid(2, 1)]); // 11/01 の分は進んだ
+    await w.runUntil(jst(11, 8, 23, 59));
+    expect(w.urls().filter((u) => u === listUrl("20261103"))).toHaveLength(3);
+    // 11/03 は dead(11/05 は、後の晩に「今日より前」になって一覧の経路が無く 404 で、同じく 3 晩で dead になるので、日ごとに見る)
+    expect(w.sql.exec("SELECT status FROM ra_day WHERE date = '20261103'").toArray()[0].status).toBe("dead");
+    expect(w.sql.exec("SELECT status FROM ra_day WHERE date = '20261101'").toArray()[0].status).toBe("done");
+  });
+  it("カレンダー: 読み取りが投げた月は、その晩に 1 回しか取らず、他の月へ進む。3 晩で dead", async () => {
+    const w = mk({ fromMonth: "2026-10" });
+    standard(w);
+    w.site({ calendars: { "2026-10": ["20261025"] }, lists: { "20261025": [rid(3, 1)] } });
+    w.throwOnMonth.add("2026-11");
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect(w.urls().filter((u) => u === calUrl("2026-11"))).toHaveLength(1);
+    expect(w.saved).toEqual([rid(3, 1)]); // 先月の分は進んだ
+    await w.runUntil(jst(11, 8, 23, 59));
+    expect(w.urls().filter((u) => u === calUrl("2026-11"))).toHaveLength(3);
+    expect((await w.core.getStatus()).totals.months.dead).toBe(1);
+  });
+  it("URL を組み立てられない ID(不正な race_id)は、リクエストを出さずに失敗として数え、その晩は取り直さず、他のレースへ進む。3 晩で dead", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": [rid(1, 1)] } });
+    w.listIdsOverride = ["999999999999", rid(1, 1)];
+    await w.core.kick();
+    await w.runUntil(jst(11, 8, 23, 59));
+    expect(w.urls().some((u) => u.includes("999999999999"))).toBe(false); // 不正な ID のリクエストは出していない
+    expect(w.saved).toEqual([rid(1, 1)]); // 後ろのレースは保存された(前提: 同じ失敗で足止めされていない)
+    expect(w.sql.exec("SELECT status, nights FROM ra_race WHERE race_id = '999999999999'").toArray()[0]).toEqual({ status: "dead", nights: 3 });
+    expect((await w.core.getStatus()).state).toBe("running");
+  });
+  it("読み取りの例外は「連続失敗」に数える: 10 件続けば、その晩は止めて通知する(状態は running のまま)", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    const ids = Array.from({ length: 12 }, (_, i) => rid(1, i + 1));
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids } });
+    ids.forEach((id) => w.throwOnRace.add(id));
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect(w.resultFetches).toHaveLength(10);
+    expect(w.notices.map((n) => n.kind)).toEqual(["failures"]);
+    expect((await w.core.getStatus()).state).toBe("running");
+  });
+});
+
+describe("「連続失敗」に数えるもの(5xx・network・timeout・保存の例外・読み取りの例外だけ)", () => {
+  const ids = Array.from({ length: 15 }, (_, i) => rid(1, (i % 12) + 1)).map((id, i) => (i < 12 ? id : rid(2, i - 11)));
+  it.each([
+    ["404", () => httpStatus(404)],
+    ["410(それ以外の 4xx)", () => httpStatus(410)],
+    ["検査の不合格(結果の表が無いページ)", () => ok("<html>表なし</html>")],
+  ])("%s が 15 件続いても止まらない(15 件とも取り、通知なし)", async (_name, make) => {
+    const w = mk({ fromMonth: "2026-11" });
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids }, results: Object.fromEntries(ids.map((id) => [id, make()])) });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect(w.resultFetches).toHaveLength(15);
+    expect(w.notices).toHaveLength(0);
+    expect((await w.core.getStatus()).night.failed).toBe(15);
+  });
+  it("数えない失敗は連続回数を増やしも戻しもしない: 5xx 9 件 → 404 3 件 → 5xx 1 件 で 10 件目になり止まる", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    const all = Array.from({ length: 14 }, (_, i) => rid(1, i + 1 > 12 ? 12 : i + 1)).map((_, i) => (i < 12 ? rid(1, i + 1) : rid(2, i - 11)));
+    const results: Record<string, GateResult> = {};
+    all.forEach((id, i) => (results[id] = i < 9 ? httpStatus(500) : i < 12 ? httpStatus(404) : httpStatus(500)));
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": all }, results });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect(w.resultFetches).toHaveLength(13); // 9 + 3 + 1 件目(5xx の 10 件目)で止まる
+    expect(w.notices.map((n) => n.kind)).toEqual(["failures"]);
+  });
+});
+
+describe("自動再開の権利は、再開したあとの最初のリクエストで使う", () => {
+  it("11/5 に 403 → 11/6 は開催日で 1 件も取らない → 11/7 に取って走り切る → 11/8 には権利が戻っている", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    const { a } = standard(w);
+    w.planByDate.set("20261106", KAISAI);
+    w.site({ results: { [a[0]!]: [httpStatus(403), ok(RESULT_OK)] } });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect((await w.core.getStatus()).state).toBe("night-stopped");
+    await w.runUntil(jst(11, 6, 23, 59)); // 11/6: 自動再開はするが、開催日の朝で 1 件も取らない
+    let st = await w.core.getStatus();
+    expect(st.state).toBe("running");
+    expect(w.fetchLog.filter((f) => f.at >= jst(11, 6, 0) && f.at < jst(11, 7, 0))).toHaveLength(0); // 前提: 11/6 は 1 件も取っていない
+    expect(st.autoResume.used).toBe(false); // まだ権利を使っていない
+    await w.runUntil(jst(11, 7, 23, 59)); // 11/7: 取って走り切る
+    st = await w.core.getStatus();
+    expect(w.fetchLog.filter((f) => f.at >= jst(11, 7, 0) && f.at < jst(11, 8, 0)).length).toBeGreaterThan(0);
+    expect(st.autoResume).toEqual({ used: true, resumedNight: "20261107" });
+    await w.runUntil(jst(11, 8, 1)); // 11/8 の夜が始まった時点で戻る
+    expect((await w.core.getStatus()).autoResume).toEqual({ used: false, resumedNight: null });
+  });
+});
+
+describe("R2 の柵で止まっている間の通知は、最初の 1 回だけ", () => {
+  it("柵で 3 晩続けて止まっても通知は 1 回(毎晩 1 リクエストで確かめる)。保存に成功したあと、また柵で止まれば、もう 1 回送る", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    const { a } = standard(w);
+    const fence: SaveRaceArchiveResult = { status: "skipped", reason: "r2-fence", dbSizeBytes: 1 };
+    w.saveResults = [fence, fence, fence];
+    await w.core.kick();
+    await w.runUntil(jst(11, 7, 23, 59)); // 3 晩とも、a[0] の保存で柵
+    expect(w.resultFetches.filter((u) => u === resultUrlOf(a[0]!))).toHaveLength(3); // 毎晩 1 リクエストで確かめている
+    expect(w.notices.filter((n) => n.kind === "r2-fence")).toHaveLength(1);
+    // 4 晩目は柵が解けて保存でき、5 つ目の保存でまた柵になる
+    const saved: SaveRaceArchiveResult = { status: "saved", key: "k", dbSizeBytes: 1 };
+    w.saveResults = [saved, fence];
+    await w.runUntil(jst(11, 8, 23, 59));
+    expect(w.notices.filter((n) => n.kind === "r2-fence")).toHaveLength(2);
+  });
+});
+
+describe("DO の SQLite の書き込み(1 晩 6,000 件の取得でも、無料枠の書き込み行数に収める)", () => {
+  const writesOf = (w: World, from: number): string[] => w.sql.statements.slice(from).filter((q) => /^\s*(INSERT|UPDATE|DELETE)\b/i.test(q));
+
+  it("定常の結果 1 件(取得 → 読み取り → 保存)の書き込み文は 4 文以下(最後の開始時刻・その晩の件数 2 つ・レースの完了)。変わらない値は書かない", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    const ids = Array.from({ length: 6 }, (_, i) => rid(1, i + 1));
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids } });
+    await w.core.kick();
+    // カレンダー・一覧と、結果 2 件(夜の初期化・最初の保存の書き込みを済ませる)
+    for (let i = 0; i < 4; i++) await w.fire();
+    expect(w.saved).toHaveLength(2); // 前提: ここまでに 2 件保存した
+    // 以後の結果 1 件ずつの書き込み文の数を測る
+    const counts: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const before = w.sql.statements.length;
+      const saved = w.saved.length;
+      await w.fire();
+      expect(w.saved.length, "1 回の fire で結果が 1 件保存される").toBe(saved + 1);
+      counts.push(writesOf(w, before).length);
+    }
+    expect(Math.max(...counts)).toBeLessThanOrEqual(4);
+    expect(Math.min(...counts)).toBeGreaterThanOrEqual(3); // 下限も固定する(数えそこねて 0 になっていないこと)
+  });
+  it("同じ値の再設定は書かない(待ちの理由・連続失敗の 0・DB の大きさが変わらないとき)", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    standard(w);
+    await w.core.kick();
+    for (let i = 0; i < 6; i++) await w.fire();
+    const metaWrites = w.sql.statements.filter((q) => /^\s*INSERT INTO ra_meta/i.test(q));
+    // 同じキーを同じ値で書き直していない: 6 リクエストでの ra_meta への書き込みは、キーごとの変更の回数を超えない(下限の確認つき)
+    expect(metaWrites.length).toBeGreaterThan(5);
+    expect(metaWrites.length).toBeLessThan(6 * 4 + 12);
   });
 });

@@ -8,7 +8,7 @@
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v11)に固定される。
  *
- * 動きを変える設定は Worker の var・secret の 2 つだけ(どちらも任意): `RACE_ARCHIVE_FETCH`(文字列 `"0"` だけが「無効」)・`RACE_ARCHIVE_NIGHTLY_LIMIT`(1 晩のリクエスト数を**下げる**上書き。未設定は上限なし)。
+ * 動きを変える設定は Worker の var・secret の 1 つだけ(任意): `RACE_ARCHIVE_NIGHTLY_LIMIT`(1 晩のリクエスト数を**下げる**上書き。未設定は上限なし。文字列 `"0"` だけは取得を止める〈結果の補完の `RESULT_BACKFILL_NIGHTLY_LIMIT` と同じ流儀〉)。
  * **smoke 専用の `options()` の差し替え**(開始時刻・時間帯・間隔を外す)は `smoke-worker.ts` のサブクラスだけが行う。本番のエントリ(`worker.ts`)はそのサブクラスを import しない
  * (`test/bundle-guard.test.ts` が、本番のバンドルに入らないことを固定している)。
  */
@@ -41,9 +41,10 @@ export interface RaceArchiveFetchEnv {
   RACE_DAY: { idFromName(name: string): any; get(id: any): { getPlanProgress(): Promise<PlanProgressLike> } };
   /** Discord の Webhook URL(Worker の secret)。未登録・形式不正なら通知しない(状態は変わる)。 */
   DISCORD_WEBHOOK_URL?: string;
-  /** 任意(var・secret)。文字列 `"0"` だけが取得を止める(アラームを張らず、起きても何もしない。state は `disabled`)。 */
-  RACE_ARCHIVE_FETCH?: string;
-  /** 任意(var・secret)。1 晩のリクエスト数を**下げる**上書き(1 以上の整数。それ以外は無視して上限なし)。 */
+  /**
+   * 任意(var・secret)。1 晩のリクエスト数を**下げる**上書き(1 以上の整数。それ以外は無視して上限なし)。**文字列 `"0"` だけは取得を止める**(アラームを張らず、起きても何もしない。state は `disabled`)。
+   * ★止める var を `RACE_ARCHIVE_FETCH` にしてはならない: それは DO の binding の名前で、同じ名前の var は binding と衝突する(env.RACE_ARCHIVE_FETCH が文字列になり、DO を引けなくなる)。
+   */
   RACE_ARCHIVE_NIGHTLY_LIMIT?: string;
 }
 
@@ -100,7 +101,7 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
    */
   protected options(): ArchiveFetchOptions {
     const nightlyLimit = parseLimitOverride(this.env.RACE_ARCHIVE_NIGHTLY_LIMIT, ARCHIVE_NIGHTLY_LIMIT_MAX);
-    return { ...(isArchiveFetchDisabled(this.env.RACE_ARCHIVE_FETCH) ? { disabled: true } : {}), ...(nightlyLimit === null ? {} : { nightlyLimit }) };
+    return { ...(isArchiveFetchDisabled(this.env.RACE_ARCHIVE_NIGHTLY_LIMIT) ? { disabled: true } : {}), ...(nightlyLimit === null ? {} : { nightlyLimit }) };
   }
 
   /** アラームが無ければ張る(RPC)。cron の `scheduled` が 21 時と 23 時に呼ぶ。 */

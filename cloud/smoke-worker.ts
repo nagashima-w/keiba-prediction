@@ -340,7 +340,7 @@ async function smokeAnalysis(): Promise<Response> {
 /** 日単位の DO(Issue #177)。本番の入口(#180)はまだ無いので、smoke だけが RPC を呼ぶ。 */
 export { RaceDay };
 export { ResultBackfill } from "./src/result-backfill-do";
-// Issue #554: 過去の結果の取得の DO(本番の worker.ts と同じもの。binding RACE_ARCHIVE_FETCH のクラス。smoke の var `RACE_ARCHIVE_FETCH=0` で止めてある)。
+// Issue #554: 過去の結果の取得の DO(本番の worker.ts と同じもの。binding RACE_ARCHIVE_FETCH のクラス。smoke の var `RACE_ARCHIVE_NIGHTLY_LIMIT=0` で止めてある)。
 export { RealRaceArchiveFetchDO as RaceArchiveFetchDO };
 
 /**
