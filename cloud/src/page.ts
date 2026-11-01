@@ -321,15 +321,15 @@ ${paletteCss()}
   .notes-toggle { display: block; width: 100%; min-height: 44px; margin: 4px 0; padding: 8px 12px; text-align: left; }
   /* 馬ごとの評価の表(Issue #546-2)。枠が横にスクロールし、ページ全体は横にはみ出さない。列見出しのボタンは見た目を抑え、タップの高さは 44px を保つ。 */
   .horse-table-wrap { overflow-x: auto; max-width: 100%; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; }
-  .horse-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
-  .horse-table th, .horse-table td { padding: 6px 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
-  /* 馬名の列だけは折り返す(最大幅つき)。375px でも 3着内率・EV など数字の列を、開いてすぐ見えるところに寄せるため。数字の列は nowrap のまま(「1.40(推定)」を割らない)。 */
+  .horse-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+  .horse-table th, .horse-table td { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  /* 馬名の列だけは折り返す(最大幅つき)。375px の幅でも、開いてすぐ 3着内率・AI補正後・EV が枠の中に収まるようにするため(実測は Issue #546-2 のコミットメッセージ)。数字の列は nowrap のまま(「1.40(推定)」を割らない)。 */
   .horse-table th:nth-child(3), .horse-table td:nth-child(3) { text-align: left; }
-  .horse-table td:nth-child(3) { white-space: normal; max-width: 6em; min-width: 4.5em; }
+  .horse-table td:nth-child(3) { white-space: normal; max-width: 6em; min-width: 5em; }
   .horse-table th:nth-child(2), .horse-table td:nth-child(2) { text-align: center; }
   .horse-table th { padding: 0; font-weight: normal; color: var(--muted); }
-  .horse-table th:nth-child(2), .horse-table th:nth-child(3) { padding: 6px 6px; }
-  .horse-table .sort-button { width: 100%; min-height: 44px; padding: 0 6px; border: 0; border-radius: 0; background: transparent; color: inherit; font-size: 0.85rem; white-space: nowrap; }
+  .horse-table th:nth-child(2), .horse-table th:nth-child(3) { padding: 6px 4px; }
+  .horse-table .sort-button { width: 100%; min-height: 44px; padding: 0 3px; border: 0; border-radius: 0; background: transparent; color: inherit; font-size: 0.8rem; white-space: nowrap; }
   .horse-table th[aria-sort="ascending"] .sort-button, .horse-table th[aria-sort="descending"] .sort-button { color: var(--fg); font-weight: bold; }
   .horse-table tbody tr:last-child td { border-bottom: 0; }
   .horse-table .eval-marked td { font-weight: bold; }
