@@ -56,6 +56,19 @@ import type { RaceArchiveCatalogEntry, SaveRaceArchiveResult } from "./race-arch
 import type { RaceArchiveFetchStatus } from "./race-archive-fetch-types";
 import type { SqlLike } from "./sql-like";
 
+/** 過去の結果の取得の DO(`RaceArchiveFetchDO`)の固定名(単一インスタンス)。cron の `scheduled` と管理者の口(`/api/race-archive`)が引く。 */
+export const RACE_ARCHIVE_FETCH_NAME = "main";
+/** 1 晩の件数の上書き(Worker の var `RACE_ARCHIVE_NIGHTLY_LIMIT`)の上限。これを超える値は無視する(事実上の上限なし)。 */
+export const ARCHIVE_NIGHTLY_LIMIT_MAX = 100_000;
+
+/**
+ * 取得を止める設定の判定(Worker の var `RACE_ARCHIVE_FETCH`)。**文字列 `"0"`(前後の空白は無視)だけ**が「無効」。それ以外(未設定・空・数でない値・`"00"` など)は無効にしない
+ * (誤記で止まったまま気づかない、または誤記で意図せず切り替わる、のどちらも避けるため、完全一致にする。`isBackfillDisabled` と同じ流儀)。
+ */
+export function isArchiveFetchDisabled(value: string | undefined): boolean {
+  return value !== undefined && value.trim() === "0";
+}
+
 /** 取得を始める時刻(2026-11-04 0:00 JST = 2026-11-03T15:00:00Z)。これより前には gate にも計画にも触れない(ユーザーの決定)。 */
 export const ARCHIVE_NOT_BEFORE_MS = Date.UTC(2026, 10, 3, 15, 0, 0);
 /** 時間帯の開始(JST の 0 時からの分。含む)。 */

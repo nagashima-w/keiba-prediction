@@ -37,6 +37,8 @@ import { ACTUAL_HIGHER_MARK, buildWinOddsLine } from "./win-odds-format";
 import type { AutoFailReason, AutoRunOutcome } from "./auto-run-result";
 import type { PlanFailureReasons } from "./plan-failure";
 import type { PlanProgress } from "./race-day-core";
+import type { ArchiveNotice } from "./race-archive-fetch-core";
+import { jstHm, jstIsoDate } from "../../packages/core/src/common/jst";
 
 export interface EmbedField {
   readonly name: string;
@@ -527,6 +529,63 @@ export function buildPlanRequestFailedEmbed(kaisaiDate: string): CloudEmbed {
     description: `【失敗】23 時の再実行で、翌日(${label}開催分)の事前分析を依頼できませんでした。画面から手動で実行してください。`,
     color: COLOR_RED,
   });
+}
+
+/** JST の `MM/DD HH:mm`(通知の時刻の表示)。 */
+function jstMonthDayTime(ms: number): string {
+  return `${jstIsoDate(ms).slice(5).replace("-", "/")} ${jstHm(ms)}`;
+}
+
+const ARCHIVE_STAGE_LABEL = { calendar: "カレンダー", list: "一覧", result: "結果ページ" } as const;
+
+/**
+ * 過去の結果の毎晩の取得(Issue #554。`race-archive-fetch-core.ts`)が止まったときの通知。**固定文と数だけ**で、URL・例外の文面・ページの本文は含まない。
+ * 色だけに頼らず、文字(【停止】【一時停止】)でも伝える。分類の文字列(失敗の分類)は英数字とハイフンだけに絞って載せる(外から来る文字を通さない)。
+ * 再開の方法は管理者の口(`POST /api/race-archive/resume`)をパスだけで示す(サイトの URL は DO の状態に持たない)。
+ */
+export function buildArchiveNoticeEmbed(notice: ArchiveNotice): CloudEmbed {
+  switch (notice.kind) {
+    case "refused": {
+      const stage = ARCHIVE_STAGE_LABEL[notice.stage];
+      const resume =
+        notice.willAutoResume && notice.resumeAt !== null
+          ? `その晩はこれ以上取りません。${jstMonthDayTime(notice.resumeAt)}(次の晩)に、1 度だけ自動で再開します。`
+          : "自動で再開したあとにまた止められたため、手で再開するまで動かしません。再開するには、管理者の画面または API で POST /api/race-archive/resume を呼んでください。";
+      return fitEmbed({
+        title: "過去の結果の取得を止めました",
+        description: `【停止】netkeiba にアクセスを制限された可能性があります(HTTP ${notice.httpStatus}。${stage}の取得。${jstMonthDayTime(notice.at)})。\n${resume}`,
+        color: COLOR_RED,
+        fields: [
+          { name: "今夜の保存", value: `${notice.nightSaved} レース`, inline: true },
+          { name: "累計の保存", value: `${notice.totalDone} レース`, inline: true },
+        ],
+      });
+    }
+    case "capacity": {
+      const size =
+        notice.dbSizeBytes === null ? "D1 の大きさを読めません(安全のため止めました)" : `D1 の大きさが上限を超えています(${Math.round(notice.dbSizeBytes / 1_000_000)} MB)`;
+      return fitEmbed({
+        title: "過去の結果の取得を止めました",
+        description: `【停止】${size}。${jstMonthDayTime(notice.at)}。手で再開するまで動かしません。容量を確かめてから、POST /api/race-archive/resume で再開してください。`,
+        color: COLOR_RED,
+        fields: [{ name: "累計の保存", value: `${notice.totalDone} レース`, inline: true }],
+      });
+    }
+    case "r2-fence":
+      return fitEmbed({
+        title: "過去の結果の取得を止めました",
+        description: `【停止】R2 の操作回数の柵に達しました(${jstMonthDayTime(notice.at)})。${jstMonthDayTime(notice.resumeAt)}(次の晩)に自動で再開します。`,
+        color: COLOR_ORANGE,
+      });
+    case "failures": {
+      const cls = notice.lastClass.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40);
+      return fitEmbed({
+        title: "過去の結果の取得を一時停止しました",
+        description: `【一時停止】失敗が連続 ${notice.count} 件になったため、今夜は止めました(最後の分類: ${cls}。${jstMonthDayTime(notice.at)})。アクセスを制限されたのではなく、netkeiba 側の不調などの可能性があります。${jstMonthDayTime(notice.resumeAt)}(次の晩)から普通に再開します。`,
+        color: COLOR_ORANGE,
+      });
+    }
+  }
 }
 
 /**
