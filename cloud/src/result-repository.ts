@@ -162,6 +162,61 @@ export const FILL_SCRATCHED_SQL = `UPDATE race_results SET scratched = j.s
            WHERE race_results.race_id = ? AND race_results.umaban = j.u
              AND race_results.scratched IS NULL AND race_results.finish_position IS NULL`;
 
+/**
+ * 単勝の確定払戻(`win_payout`)を、保存済みの行の NULL に限って埋める文(Issue #556。束縛値は `[行の配列の JSON, race_id]` の 2 個。行は `[umaban, winPayout]`)。
+ * 対象は **`win_payout IS NULL` の行で、入力の払戻が non-null のものだけ**(単勝の払戻の保存は #100〈2026-09-23〉から。それより前に取り込んだ約 1,140 レースは全馬が NULL):
+ *  - 冪等(2 回目は WHERE に当たる行が無く、書き込みは 0 行。別の値を渡しても、保存済みの払戻を上書きしない)
+ *  - 他の列(着順・複勝払戻・通過順・上がり・オッズ・人気・scratched)・組合せ払戻には触れない
+ *  - 結果の行が無い馬番・レースには行を作らない(UPDATE だけ)
+ *  - 同着(1 着が 2 頭)は、入力に両馬の払戻があれば、両方の行に別々の額を書く
+ * 新規の取り込みは `saveResult` の UPSERT が `win_payout` を書くので、この文を使うのは過去分の補完(`saveWinPayout`)だけ。
+ */
+export const FILL_WIN_PAYOUT_SQL = `UPDATE race_results SET win_payout = j.p
+           FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS p FROM json_each(?)) j
+           WHERE race_results.race_id = ? AND race_results.umaban = j.u
+             AND race_results.win_payout IS NULL AND j.p IS NOT NULL`;
+
+/**
+ * 結果の補完の段階 4(Issue #556。単勝の払戻の補完)の列挙。判定は段階 2({@link LIST_WIN_ODDS_BACKFILL_SQL})と同じ形で、条件だけが違う:
+ * 分析済みで、結果の行が**あり**、そのレースの**全馬の `win_payout` が NULL**(1 頭でも払戻があれば対象外=レース単位の判定。同着や取消で一部の馬が NULL のレースを毎晩列挙し直さないため)。
+ * それ以外(開催日が `to` 以下・`GROUP BY race_id` の最小の開催日・**最も新しい日を 1 日だけ**・レースID 昇順・除外するレース ID を JSON 1 つで渡す)は段階 1〜3 と同じ。束縛値は `[to, excludeJson, limit]`。
+ *
+ * ## 読み取り行数
+ * 分析の行ごとに、`race_results` の主キー `(race_id, umaban)` の先頭で、結果の有無(EXISTS)と払戻のある馬の有無(NOT EXISTS。払戻のある馬が見つかれば止まる)を引く。
+ * 全馬 NULL のレースは、その頭数(多くとも 18)を読み切る。したがって読み取りは分析の行数 N に比例する(`test/result-win-payout-backfill-repository.test.ts` の「読み取り行数の上界」が固定)。
+ */
+export const LIST_PAYOUT_BACKFILL_SQL = `WITH u AS (
+             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+             FROM analyses a
+             WHERE a.kaisai_date <= ?
+               AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
+               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_payout IS NOT NULL)
+               AND a.race_id NOT IN (SELECT value FROM json_each(?))
+             GROUP BY a.race_id
+           )
+           SELECT raceId, firstDate FROM u
+           WHERE firstDate = (SELECT MAX(firstDate) FROM u)
+           ORDER BY raceId
+           LIMIT ?`;
+
+/**
+ * 段階 4 の残りの数({@link COUNT_CLASS_BACKFILL_SQL} と同じ形)。対象 = 結果があり、全馬の `win_payout` が NULL のレース。
+ * `dated` = 対象で開催日が `to` 以前かつ除外でないレース、`undated` = 対象で開催日がすべて NULL のレース(日単位の DO の宛先が決まらないので補完できない。数だけ見せる)、
+ * `stillNull` = 対象のうち**除外 ID に入っている**レース(取得済み〈`payout_done`〉または諦めた〈`payout_abandoned`・`odds_abandoned`・`class_abandoned`〉のに、まだ全馬 NULL=ページに単勝の払戻が無い・馬番が行と合わない・書き込みの失敗の目安)。
+ * 束縛値は `[to, excludeJson, excludeJson]`(`dated` と `stillNull` の分)。
+ */
+export const COUNT_PAYOUT_BACKFILL_SQL = `WITH u AS (
+             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+             FROM analyses a
+             WHERE EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
+               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_payout IS NOT NULL)
+             GROUP BY a.race_id
+           )
+           SELECT COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS dated,
+                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated,
+                  COALESCE(SUM(CASE WHEN raceId IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS stillNull
+           FROM u`;
+
 /** codec の復元の文(1 レース)に race_id を足し、`WHERE race_id IN (json_each)` にして複数レースを 1 文で読む。 */
 function toManyRacesSql(codecSelectSql: string, orderBy: string | null): string {
   const selected = codecSelectSql.replace(/^(\s*SELECT\s+)/, "$1race_id AS raceId, ");
@@ -392,6 +447,18 @@ export function buildScratchedStatement(db: ResultDb, raceId: string, results: r
 }
 
 /**
+ * 単勝の払戻を埋める文({@link FILL_WIN_PAYOUT_SQL})。有限の払戻を持つ馬が 1 頭もいなければ null(D1 に何も発行しない)。
+ * D1 には何も発行しない(`prepare().bind()` を組み立てるだけ)。テストが「文の数・束縛値の数」を調べるために export している。
+ */
+export function buildWinPayoutStatement(db: ResultDb, raceId: string, results: readonly RaceResultEntry[]): D1PreparedStatement | null {
+  const rows = results.map((r) => [r.umaban, finiteOrNull(r.winPayout)] as const).filter(([, payout]) => payout !== null);
+  if (rows.length === 0) {
+    return null;
+  }
+  return db.prepare(FILL_WIN_PAYOUT_SQL).bind(JSON.stringify(rows), raceId);
+}
+
+/**
  * 1 レースの結果を書く D1 の文(1 回の batch に渡す)。最大 6 文(オッズ・人気を持つ馬がいなければ最大 5 文)で、馬・券種・払戻の行数によらず一定(上の説明)。
  * 何も書くものが無い(馬も面も組合せも無い)ときは空配列。D1 には何も発行しない(`prepare().bind()` を組み立てるだけ)。
  * テストが「文の数・束縛値の数」を直接調べるために export している。
@@ -493,6 +560,12 @@ export interface ClassBackfillCounts extends BackfillCounts {
   readonly stillNull: number;
 }
 
+/** {@link COUNT_PAYOUT_BACKFILL_SQL} の結果(段階 4。Issue #556)。 */
+export interface PayoutBackfillCounts extends BackfillCounts {
+  /** 対象のうち除外 ID に入っているレース(取得済み・諦めたのに、まだ全馬の単勝の払戻が NULL)。 */
+  readonly stillNull: number;
+}
+
 /** {@link CLASS_DISTRIBUTION_SQL} の 1 行。 */
 export interface ClassDistributionRow {
   readonly value: string;
@@ -505,6 +578,11 @@ export interface ResultRepository {
   saveWinOdds(raceId: string, results: readonly RaceResultEntry[]): Promise<WinOddsOutcome>;
   /** 取消・除外の記録(`scratched`)だけを、着順が NULL で scratched が NULL の行に限って埋める(Issue #270。#72 の残り)。他の列・組合せ払戻には触れない。 */
   saveScratched(raceId: string, results: readonly RaceResultEntry[]): Promise<ScratchedOutcome>;
+  /**
+   * 単勝の確定払戻(`win_payout`)だけを、保存済みの結果の NULL の行に限って埋める(Issue #556。過去分の補完)。既にある払戻・着順・複勝払戻・オッズ・組合せ払戻は上書きしない。
+   * 同着(1 着が 2 頭)は、両馬に別々の払戻を書く。
+   */
+  saveWinPayout(raceId: string, results: readonly RaceResultEntry[]): Promise<WinPayoutOutcome>;
   /**
    * レースのクラス(結果ページの `RaceData02` から読んだ値。Issue #426)を、そのレースの分析(`analyses`)の行のうち `race_class` が NULL のものに書く。入っている値は上書きしない(先着)。
    * クラスが無い(null・undefined・空文字)なら D1 に何も発行しない。結果の表(`race_results` ほか)には触れない。
@@ -522,6 +600,11 @@ export interface WinOddsOutcome {
 
 /** {@link D1ResultStore.saveScratched} の結果。`rowsWritten` は D1 が報告した `meta.rows_written`(書くものが無ければ 0)。 */
 export interface ScratchedOutcome {
+  readonly rowsWritten: number;
+}
+
+/** {@link D1ResultStore.saveWinPayout} の結果。`rowsWritten` は D1 が報告した `meta.rows_written`(書くものが無ければ 0)。 */
+export interface WinPayoutOutcome {
   readonly rowsWritten: number;
 }
 
@@ -597,6 +680,19 @@ export class D1ResultStore implements ResultRepository {
    */
   async saveScratched(raceId: string, results: readonly RaceResultEntry[]): Promise<ScratchedOutcome> {
     const statement = buildScratchedStatement(this.db, raceId, results);
+    if (statement === null) {
+      return { rowsWritten: 0 };
+    }
+    const [result] = await this.db.batch([statement]);
+    return { rowsWritten: result?.meta.rows_written ?? 0 };
+  }
+
+  /**
+   * 単勝の確定払戻**だけ**を、保存済みの結果の `win_payout` が NULL の行に埋める(Issue #556。結果の補完が結果ページを取り直したときに、`saveScratched` の直後に呼ぶ。{@link FILL_WIN_PAYOUT_SQL} の 1 文)。
+   * `saveResult` と違い、他の列・面・組合せ払戻には**一切触れない**。冪等: 2 回目は何も書かない(`rowsWritten` は 0)。有限の払戻を持つ馬が無ければ D1 に何も発行しない。失敗は reject する。
+   */
+  async saveWinPayout(raceId: string, results: readonly RaceResultEntry[]): Promise<WinPayoutOutcome> {
+    const statement = buildWinPayoutStatement(this.db, raceId, results);
     if (statement === null) {
       return { rowsWritten: 0 };
     }
@@ -759,6 +855,32 @@ export class D1ResultStore implements ResultRepository {
     checkBackfillInput(to, exclude);
     const json = JSON.stringify(exclude);
     const row = await this.db.prepare(COUNT_CLASS_BACKFILL_SQL).bind(to, json, json).first<{ dated: number; undated: number; stillNull: number }>();
+    return { dated: row?.dated ?? 0, undated: row?.undated ?? 0, stillNull: row?.stillNull ?? 0 };
+  }
+
+  /**
+   * 結果の補完の段階 4(Issue #556。上の {@link LIST_PAYOUT_BACKFILL_SQL})の列挙。
+   * @throws RangeError to が YYYYMMDD の8桁でない・limit が 1〜{@link UNIMPORTED_MAX_LIMIT} の整数でない・exclude が文字列の配列でない(D1 には発行しない)
+   */
+  async listPayoutBackfillRaces(options: ListBackfillOptions): Promise<UnimportedRace[]> {
+    const { to, exclude, limit } = options;
+    checkBackfillInput(to, exclude);
+    if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
+      throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
+    }
+    const { results } = await this.db.prepare(LIST_PAYOUT_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
+  }
+
+  /**
+   * 結果の補完の段階 4 の残りの数(Issue #556。上の {@link COUNT_PAYOUT_BACKFILL_SQL})。
+   * @throws RangeError to が YYYYMMDD の8桁でない・exclude が文字列の配列でない
+   */
+  async countPayoutBackfill(options: CountBackfillOptions): Promise<PayoutBackfillCounts> {
+    const { to, exclude } = options;
+    checkBackfillInput(to, exclude);
+    const json = JSON.stringify(exclude);
+    const row = await this.db.prepare(COUNT_PAYOUT_BACKFILL_SQL).bind(to, json, json).first<{ dated: number; undated: number; stillNull: number }>();
     return { dated: row?.dated ?? 0, undated: row?.undated ?? 0, stillNull: row?.stillNull ?? 0 };
   }
 

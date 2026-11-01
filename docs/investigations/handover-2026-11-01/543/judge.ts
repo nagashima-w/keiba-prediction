@@ -1,10 +1,10 @@
-// #543 判定: いまの本番の設定にそろえ、候補ごとに 1 か所だけ変えて計算し直す(計画は Issue #543 のコメント)
+// #543 判定(1 レースの上限は 2,000 円。ユーザーの回答・11/1): いまの本番の設定にそろえ、候補ごとに 1 か所だけ変えて計算し直す(計画は Issue #543 のコメント)
 import { writeFileSync } from "node:fs";
 import { loadAllocationDataset, replayableRows, replayedBets, judgeRaceBets } from "/home/user/keiba-prediction/scripts/allocation-dataset.ts";
 const [file, out] = process.argv.slice(2);
 const rows = replayableRows(loadAllocationDataset(file!).rows);
 const ALL_ON = { wide: true, trio: true, quinella: true, exacta: true, trifecta: true, bracketQuinella: true };
-const BASE = { bankroll: 20000, perRaceCap: 3000, kellyFraction: 0.5, evThreshold: 1.0, minHitProb: 0.05, maxWinBetsPerRace: 2, maxPlaceBetsPerRace: 2, includeComboOdds: true, include: ALL_ON };
+const BASE = { bankroll: 20000, perRaceCap: 2000, kellyFraction: 0.5, evThreshold: 1.0, minHitProb: 0.05, maxWinBetsPerRace: 2, maxPlaceBetsPerRace: 2, includeComboOdds: true, include: ALL_ON };
 function scaleAdjust(k: number) {
   return (h: any) => {
     if (typeof h.prior !== "number" || typeof h.adjusted_prob !== "number") return h.adjusted_prob;
