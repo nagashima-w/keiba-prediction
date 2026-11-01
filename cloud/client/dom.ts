@@ -31,7 +31,7 @@ export interface DomRoot {
   replaceChildren(...nodes: any[]): void;
 }
 
-const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress"]);
+const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress", "table", "thead", "tbody", "tr", "th", "td"]);
 const ALLOWED_ATTRS = new Set(["class", "type", "value", "disabled", "href", "role", "checked", "inputmode", "maxlength", "max"]);
 const ALLOWED_INPUTMODES = new Set(["numeric", "decimal", "text"]);
 

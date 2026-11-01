@@ -49,7 +49,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 233,500 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 236,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -272,7 +272,11 @@ describe("生成物のドリフトと決定性", () => {
     // 計り方: `git show 8b7e5a6:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ文字列として取り出して `Buffer.byteLength(CLIENT_JS)` を取った。増えたのは、`parseDetail` の発走時刻(`api-analysis.ts`)、要約の組み立て(`result.ts` の `summary`・`summaryBetsOf`〈最新の配分: 再計算の回があればその回〉・`closeLineOf`)、
     // 要約と「仕組みを見る」のボタンの VNode(`view.ts`)、開閉の状態(`app.ts`)。説明文の中身は動かしておらず、サーバへ移していない(要約の文はクライアントで組み立てる。ユーザーの決定)。日本語の文言は `\u` エスケープで 1 文字 6 バイト。
     // 着手前の見積もり(+2,000〜2,800)より小さかった。上限 231,500 には 2,088 - 823 = 1,265 バイト足りなかったため引き上げた。新しい上限 233,500 の余裕は 735 バイト(500 バイト単位に切り上げ)。次の段階(馬ごとの評価の表)で足す分は、その Issue で改めて測る。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(233_500);
+    // (追記)Issue #546-2(馬ごとの評価の表と並べ替え): 上限を 233,500 から 236,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`): 232,765(aee6099〈作業ブランチの先端〉の生成物)→ 235,339(+2,574。`pnpm run build:client` の出力〈「235339 バイト」〉)。
+    // 計り方: `git show aee6099:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。増えたのは、並べ替えの純関数と列の組み立て(`result.ts` の `horseTableOf`・`nextHorseSort`・`firstSortDir`・
+    // 各馬の `sortValues`)、表の VNode(`view.ts` の `horseTable`)、並べ替えの状態と処理(`app.ts` の `horseSortChoices`・`onSortHorses`)、許可する要素 6 つ(`dom.ts`)。日本語の文言は `\u` エスケープで 1 文字 6 バイト。
+    // 上限 233,500 には 235,339 - 233,500 = 1,839 バイト足りなかったため引き上げた。新しい上限 236,000 の余裕は 661 バイト(500 バイト単位に切り上げ)。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(236_000);
   });
 });
 

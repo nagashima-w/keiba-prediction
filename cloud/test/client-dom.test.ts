@@ -112,6 +112,13 @@ describe("mount(要素・属性の許可リスト)", () => {
     }
   });
 
+  it("表の要素(table・thead・tbody・tr・th・td。Issue #546-2 の馬ごとの評価の表)は作れる。入れ子の順に子が付き、aria-sort も付く", () => {
+    const el = mounted(h("table", {}, [h("thead", {}, [h("tr", {}, [h("th", { "aria-sort": "ascending" }, ["馬番"])])]), h("tbody", {}, [h("tr", {}, [h("td", {}, ["1"])])])]));
+    expect(allElements(el).map((e) => e.tag)).toEqual(["table", "thead", "tr", "th", "tbody", "tr", "td"]);
+    expect(allElements(el).find((e) => e.tag === "th")!.attrs.get("aria-sort")).toBe("ascending");
+    expect(textNodes(el)).toEqual(["馬番", "1"]);
+  });
+
   it("許可されていない属性(on*・style・src・srcdoc・formaction)は付けない(投げる)", () => {
     for (const name of ["onclick", "onerror", "onload", "style", "src", "srcdoc", "formaction", "ONCLICK"]) {
       expect(() => mounted(h("div", { [name]: "x" }, [])), name).toThrow();

@@ -3,7 +3,7 @@ import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-respons
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
 import { PLACE_ODDS_NOTE } from "../src/place-odds-format";
 import { WIN_ODDS_NOTE } from "../src/win-odds-format";
-import { buildResultModel, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER, type ResultSource } from "../client/result";
+import { buildResultModel, DEFAULT_HORSE_SORT, firstSortDir, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER, nextHorseSort, type HorseSort, type HorseSortKey, type ResultSource } from "../client/result";
 import { LABEL_CONCERNS as EXE_LABEL_CONCERNS, LABEL_HIGHLIGHTS as EXE_LABEL_HIGHLIGHTS, MARK_LEGEND } from "../../packages/core/src/view/format";
 import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/core/src/view/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../../packages/core/src/view/bet-allocation-view";
@@ -1068,5 +1068,152 @@ describe("説明文の開閉の状態と分析 id(Issue #546)", () => {
     const open = buildResultModel({ route: ROUTE, source: ready(analysis()), notesOpen: true }).content!;
     expect(open.notesOpen).toBe(true);
     expect(content(analysis({ id: 42 })).id).toBe(42);
+  });
+});
+
+/**
+ * Issue #546-2: 馬ごとの評価の表(`content.horseTable`)。列・並べ替え(向き・値の無い馬は末尾・同点は馬番)・並べ替え用の数値の出どころ。
+ * 並べ替えの状態(`horseSort`)は `app.ts` が分析 id ごとにメモリに持ち、`buildResultModel` に渡す。保存しない。
+ */
+describe("馬ごとの評価の表(Issue #546-2)", () => {
+  /** 並びが各列で違う 4 頭(馬番 1〜4)。値の無い馬は列ごとに別の馬にする。 */
+  const four = (): AnalysisHorse[] => [
+    horse(1, { prior: 0.3, adjustedProb: 0.2, placeOddsMin: 3.0, ev: 0.9, winOdds: 12.0, mark: "◎" }),
+    horse(2, { prior: 0.5, adjustedProb: 0.6, placeOddsMin: null, ev: 1.4, winOdds: 3.5, isPositive: true }),
+    horse(3, { prior: 0.1, adjustedProb: 0.1, placeOddsMin: 1.5, ev: null, winOdds: null }),
+    horse(4, { prior: 0.5, adjustedProb: 0.4, placeOddsMin: 2.0, ev: 1.0, winOdds: 40.0, mark: "▲" }),
+  ];
+  const withLlm = { model: "claude-test" };
+  const tableOf = (a: AnalysisDetail, horseSort?: HorseSort, readOnly = false) => {
+    const model = buildResultModel({ route: ROUTE, source: ready(a), readOnly, ...(horseSort === undefined ? {} : { horseSort }) });
+    expect(model.content, "前提: 内容が出る状態").not.toBeNull();
+    expect(model.content!.horseTable, "前提: 表が出る状態").not.toBeNull();
+    return model.content!.horseTable!;
+  };
+  const order = (t: ReturnType<typeof tableOf>): number[] => t.rows.map((r) => r.umaban);
+  const colKeys = (t: ReturnType<typeof tableOf>): string[] => t.columns.map((c) => c.key);
+
+  it("既定の並べ替えは馬番の昇順(向きの初期値の定数も同じ)", () => {
+    const t = tableOf(analysis({ horses: four().reverse() }));
+    expect(order(t)).toEqual([1, 2, 3, 4]);
+    expect(t.sort).toEqual({ key: "umaban", dir: "asc" });
+    expect(DEFAULT_HORSE_SORT).toEqual({ key: "umaban", dir: "asc" });
+  });
+
+  it("列は 馬番・印・馬名・3着内率・(AI補正後)・EV・単勝・複勝下限。補正後は LLM が効いた分析だけ(全頭 null なら列ごと出さない)", () => {
+    const plain = tableOf(analysis({ horses: four() }));
+    expect(colKeys(plain)).toEqual(["umaban", "mark", "name", "prior", "ev", "winOdds", "placeOddsMin"]);
+    expect(plain.columns.map((c) => c.label)).toEqual(["馬番", "印", "馬名", "3着内率", "EV", "単勝 実際", "複勝下限"]);
+    expect(plain.rows.every((r) => r.adjusted === null), "前提: LLM なしは全頭 null").toBe(true);
+    const llm = tableOf(analysis({ ...withLlm, horses: four() }));
+    expect(colKeys(llm)).toEqual(["umaban", "mark", "name", "prior", "adjusted", "ev", "winOdds", "placeOddsMin"]);
+    expect(llm.columns[4]!.label).toBe("AI補正後");
+    expect(llm.rows.every((r) => r.adjusted !== null), "前提: LLM ありは全頭に値").toBe(true);
+  });
+
+  it("単勝の列見出しは、オッズの状態で「実際」「実際(暫定)」「実際(予想)」(予想値を確定値と取り違えない)", () => {
+    const label = (oddsStatus: string | null) =>
+      tableOf(analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "x", grade: null, oddsStatus, placeBasis: "top3" }, horses: four() })).columns.find((c) => c.key === "winOdds")!.label;
+    expect(label("result")).toBe("単勝 実際");
+    expect(label("middle")).toBe("単勝 実際(暫定)");
+    expect(label("yoso")).toBe("単勝 実際(予想)");
+    expect(label(null)).toBe("単勝 実際");
+  });
+
+  it("並べ替えの向きの初期値: 3着内率・補正後・EV は大きい順、馬番・単勝・複勝下限は小さい順。同じ列をもう一度で逆、別の列に替えたら初期値", () => {
+    const first = (key: HorseSortKey) => firstSortDir(key);
+    expect(["prior", "adjusted", "ev"].map((k) => first(k as HorseSortKey))).toEqual(["desc", "desc", "desc"]);
+    expect(["umaban", "winOdds", "placeOddsMin"].map((k) => first(k as HorseSortKey))).toEqual(["asc", "asc", "asc"]);
+    expect(nextHorseSort({ key: "umaban", dir: "asc" }, "umaban")).toEqual({ key: "umaban", dir: "desc" });
+    expect(nextHorseSort({ key: "umaban", dir: "desc" }, "umaban")).toEqual({ key: "umaban", dir: "asc" });
+    expect(nextHorseSort({ key: "umaban", dir: "asc" }, "prior")).toEqual({ key: "prior", dir: "desc" });
+    expect(nextHorseSort({ key: "prior", dir: "desc" }, "prior")).toEqual({ key: "prior", dir: "asc" });
+    expect(nextHorseSort({ key: "prior", dir: "asc" }, "winOdds")).toEqual({ key: "winOdds", dir: "asc" });
+  });
+
+  it("3着内率の大きい順: 同点(馬番 2 と 4 が 50.0%)は馬番の昇順。小さい順でも同点は馬番の昇順", () => {
+    const a = analysis({ horses: four() });
+    expect(order(tableOf(a, { key: "prior", dir: "desc" }))).toEqual([2, 4, 1, 3]);
+    expect(order(tableOf(a, { key: "prior", dir: "asc" }))).toEqual([3, 1, 2, 4]);
+  });
+
+  it("値の無い馬は向きによらず末尾(EV・単勝・複勝下限・補正後。末尾の中は馬番の昇順)", () => {
+    const a = analysis({ ...withLlm, horses: four() });
+    // EV: 馬 3 が null
+    expect(order(tableOf(a, { key: "ev", dir: "desc" }))).toEqual([2, 4, 1, 3]);
+    expect(order(tableOf(a, { key: "ev", dir: "asc" }))).toEqual([1, 4, 2, 3]);
+    // 単勝: 馬 3 が null
+    expect(order(tableOf(a, { key: "winOdds", dir: "asc" }))).toEqual([2, 1, 4, 3]);
+    expect(order(tableOf(a, { key: "winOdds", dir: "desc" }))).toEqual([4, 1, 2, 3]);
+    // 複勝下限: 馬 2 が null
+    expect(order(tableOf(a, { key: "placeOddsMin", dir: "asc" }))).toEqual([3, 4, 1, 2]);
+    expect(order(tableOf(a, { key: "placeOddsMin", dir: "desc" }))).toEqual([1, 4, 3, 2]);
+    // 2 頭が null の末尾は馬番の昇順
+    const two = analysis({ horses: [horse(1, { ev: null }), horse(2, { ev: 1.2 }), horse(3, { ev: null }), horse(4, { ev: 1.5 })] });
+    expect(order(tableOf(two, { key: "ev", dir: "desc" }))).toEqual([4, 2, 1, 3]);
+    expect(order(tableOf(two, { key: "ev", dir: "asc" }))).toEqual([2, 4, 1, 3]);
+  });
+
+  it("補正後の大きい順(LLM あり)。馬番の降順は null を持たないので単純に逆順", () => {
+    const a = analysis({ ...withLlm, horses: four() });
+    expect(order(tableOf(a, { key: "adjusted", dir: "desc" }))).toEqual([2, 4, 1, 3]);
+    expect(order(tableOf(a, { key: "umaban", dir: "desc" }))).toEqual([4, 3, 2, 1]);
+  });
+
+  it("非有限の値(NaN・Infinity)は「値の無い馬」として末尾(整形済みの文字列を読み戻さない)", () => {
+    const a = analysis({ horses: [horse(1, { ev: 1.0 }), horse(2, { ev: Number.NaN }), horse(3, { ev: Number.POSITIVE_INFINITY }), horse(4, { ev: 0.5 })] });
+    expect(order(tableOf(a, { key: "ev", dir: "desc" }))).toEqual([1, 4, 2, 3]);
+    expect(order(tableOf(a, { key: "ev", dir: "asc" }))).toEqual([4, 1, 2, 3]);
+  });
+
+  it("並べ替え用の数値は HorseCard が持つ。推定 EV も実数(値がある扱い)で、表示の文字列は「(推定)」付きのまま", () => {
+    const a = analysis({ ...withLlm, evEstimated: true, horses: four() });
+    const t = tableOf(a, { key: "ev", dir: "desc" });
+    const top = t.rows[0]!;
+    expect(top.umaban).toBe(2);
+    expect(top.ev).toBe("1.40(推定)");
+    expect(top.sortValues).toEqual({ prior: 0.5, adjusted: 0.6, ev: 1.4, winOdds: 3.5, placeOddsMin: null });
+    expect(order(t), "前提: 推定でも EV の大きい順に並ぶ").toEqual([2, 4, 1, 3]);
+    expect(t.rows.find((r) => r.umaban === 3)!.sortValues.ev, "ev が null の馬は null").toBeNull();
+  });
+
+  it("aria-sort・矢印・次の向き: 今の列だけ ascending/descending と矢印、ほかの並べ替えられる列は none。印・馬名は並べ替え対象外(sort が null)", () => {
+    const t = tableOf(analysis({ ...withLlm, horses: four() }), { key: "prior", dir: "desc" });
+    const byKey = Object.fromEntries(t.columns.map((c) => [c.key, c.sort]));
+    expect(byKey["mark"]).toBeNull();
+    expect(byKey["name"]).toBeNull();
+    expect(byKey["prior"]).toEqual({ ariaSort: "descending", arrow: "▼", nextDir: "asc" });
+    expect(byKey["umaban"]).toEqual({ ariaSort: "none", arrow: "", nextDir: "asc" });
+    expect(byKey["ev"]).toEqual({ ariaSort: "none", arrow: "", nextDir: "desc" });
+    const asc = tableOf(analysis({ horses: four() }), { key: "winOdds", dir: "asc" });
+    expect(asc.columns.find((c) => c.key === "winOdds")!.sort).toEqual({ ariaSort: "ascending", arrow: "▲", nextDir: "desc" });
+    expect(asc.columns.filter((c) => c.sort !== null && c.sort.ariaSort !== "none").map((c) => c.key), "前提: 並べ替え中の列は 1 つだけ").toEqual(["winOdds"]);
+  });
+
+  it("補正後の列が無い分析に補正後の並べ替えが残っていても、既定(馬番の昇順)に戻す", () => {
+    const t = tableOf(analysis({ horses: four() }), { key: "adjusted", dir: "desc" });
+    expect(t.sort).toEqual({ key: "umaban", dir: "asc" });
+    expect(order(t)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("カードの並び(content.horses)は並べ替えない(入力の順のまま)", () => {
+    const a = analysis({ horses: four() });
+    const c = buildResultModel({ route: ROUTE, source: ready(a), horseSort: { key: "prior", dir: "desc" } }).content!;
+    expect(c.horses.map((x) => x.umaban)).toEqual([1, 2, 3, 4]);
+    expect(c.horseTable!.rows.map((x) => x.umaban), "前提: 表は並べ替わっている").toEqual([2, 4, 1, 3]);
+  });
+
+  it("閲覧者と管理者で表の中身は同じ(#263 の差は表に持ち込まない)", () => {
+    const a = analysis({ ...withLlm, horses: four() });
+    const sort: HorseSort = { key: "ev", dir: "desc" };
+    const admin = tableOf(a, sort, false);
+    const viewer = tableOf(a, sort, true);
+    expect(admin.rows.length, "前提: 空でない表").toBe(4);
+    expect(viewer).toEqual(admin);
+  });
+
+  it("馬が 0 頭の分析は表を出さない(null)", () => {
+    const c = buildResultModel({ route: ROUTE, source: ready(analysis({ horses: [] })) }).content!;
+    expect(c.horseTable).toBeNull();
   });
 });

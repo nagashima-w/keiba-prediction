@@ -7,6 +7,7 @@
  *    場ごとの一括実行(Issue #251)も同じ形で `bulk-control.ts` が持つ。板・追跡の道具(`setOverlay`・`forceTrack`)は、`race-data.ts` から関数で渡す。
  * 表示は「現在のハッシュ + キャッシュ」から毎回導く(遅れて届いた結果は、キャッシュに入るだけで、今の画面を壊さない)。
  *  - 結果の開閉(`resultOpen`。Issue #188)は (開催日, race_id) ごとにメモリに持つ(#187 と同じ。既定は開・ハッシュ/localStorage には持たない・「更新」で消さない)。
+ *  - 馬ごとの評価の表の並べ替え(`horseSort`。Issue #546-2)も同じ流儀(分析 id ごとにメモリ。既定は馬番の昇順。ハッシュ/localStorage には持たない・「更新」で消さない・結果画面とカードで共有)。
  *  - 結果の説明文の開閉(`notesOpen`。Issue #546)は分析 id ごとにメモリに持つ(既定は閉じる。結果画面とカードで共有。ハッシュ/localStorage には持たない・「更新」で消さない)。
  *
  * **Issue #189(設定画面。`#settings`)**: 開くと `GET /api/settings` だけを取る(一覧・板・レース・分析は取らない)。状態・取得・保存・プレビュー(#201・#396)・世代・下書きは `settings-screen.ts` が持ち(Issue #400 R-11 で切り出した。
@@ -34,7 +35,7 @@ import { buildListModel, needsListClock, type BoardSource, type ListSource } fro
 import { createListClock } from "./list-clock";
 import { createRaceData } from "./race-data";
 import { buildRaceModel, latestAnalysisIdOf } from "./race";
-import { buildResultModel } from "./result";
+import { buildResultModel, type HorseSort, type HorseSortKey, type SortDir } from "./result";
 import { createSettingsScreen } from "./settings-screen";
 import { createVerifyScreen } from "./verify-screen";
 import { createMonthlyScreen } from "./monthly-screen";
@@ -105,6 +106,8 @@ export function createApp(deps: AppDeps): App {
   const resultOpenChoices = new Map<string, boolean>();
   /** 結果の説明文(「仕組みを見る」。Issue #546)の開閉。**分析 id ごと**に、利用者が押した値だけを持つ(既定は閉じる)。結果画面とレース画面のカードは、同じ分析なら同じ状態。 */
   const notesOpenChoices = new Map<number, boolean>();
+  /** 馬ごとの評価の表の並べ替え(Issue #546-2)。分析 id ごと。既定は馬番の昇順(Map に無い)。メモリだけ(保存しない)。結果画面とカードで共有。 */
+  const horseSortChoices = new Map<number, HorseSort>();
 
   const listSource = (): ListSource => data.listSource(route.date, route.venue);
   const boardSource = (): BoardSource => data.boardSource(route.date);
@@ -188,6 +191,7 @@ export function createApp(deps: AppDeps): App {
     onToggleGroup,
     onToggleResult,
     onToggleNotes,
+    onSortHorses,
     onRun: run.onRun,
     onBulkOpen: bulk.onOpen,
     onBulkGo: bulk.onGo,
@@ -226,7 +230,7 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       case "result": {
-        deps.render(renderScreen(buildResultModel({ route, source: data.analysisSource(route.analysis!), readOnly: !admin, notesOpen: notesOpenChoices.get(route.analysis!) ?? false }), actions), force);
+        deps.render(renderScreen(buildResultModel({ route, source: data.analysisSource(route.analysis!), readOnly: !admin, notesOpen: notesOpenChoices.get(route.analysis!) ?? false, ...horseSortOf(route.analysis!) }), actions), force);
         return;
       }
       case "race": {
@@ -247,6 +251,7 @@ export function createApp(deps: AppDeps): App {
               ...(latestId === null ? {} : { result: data.analysisSource(latestId) }),
               resultOpen: resultOpenChoices.get(key) ?? true,
               notesOpen: latestId !== null && (notesOpenChoices.get(latestId) ?? false),
+              ...(latestId === null ? {} : horseSortOf(latestId)),
               readOnly: !admin,
             }),
             actions,
@@ -388,6 +393,17 @@ export function createApp(deps: AppDeps): App {
   function onToggleResult(date: string, raceId: string, open: boolean): void {
     // 取得は起こさず、描画だけ。
     resultOpenChoices.set(raceKey(date, raceId), open);
+    render();
+  }
+
+  function horseSortOf(analysisId: number): { horseSort?: HorseSort } {
+    const sort = horseSortChoices.get(analysisId);
+    return sort === undefined ? {} : { horseSort: sort };
+  }
+
+  function onSortHorses(analysisId: number, key: HorseSortKey, dir: SortDir): void {
+    // 取得は起こさず、描画だけ。
+    horseSortChoices.set(analysisId, { key, dir });
     render();
   }
 

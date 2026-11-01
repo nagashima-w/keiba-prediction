@@ -14,7 +14,7 @@ import type { PastAnalysis } from "./api-analysis";
 import { formatJstDateTime } from "./date";
 import { nameWithGrade } from "./grade";
 import { badgeOf, pick, type Badge } from "./list";
-import { contentOf, type ResultContent, type ResultSource } from "./result";
+import { contentOf, type HorseSort, type ResultContent, type ResultSource } from "./result";
 import { buildHash, type Route } from "./route";
 
 export type RaceStatusSource =
@@ -53,6 +53,8 @@ export interface RaceModelInput {
   readonly resultOpen?: boolean;
   /** 説明文(「仕組みを見る」。Issue #546)を開いているか。最新の分析の id ごとの状態(`app.ts`)。省略は閉じる。 */
   readonly notesOpen?: boolean;
+  /** 馬ごとの評価の表の並べ替え(Issue #546-2。最新の分析の id ごとの状態〈`app.ts`〉。省略は馬番の昇順)。 */
+  readonly horseSort?: HorseSort;
   /** 閲覧者(Issue #238)。分析の実行ボタンを出さない(カードと状態は同じ)。省略は false(管理者)。 */
   readonly readOnly?: boolean;
 }
@@ -201,12 +203,12 @@ export function latestAnalysisIdOf(rows: readonly BoardRow[], raceId: string): n
   return found !== undefined && found.status === "done" ? found.analysisId : null;
 }
 
-function cardResult(route: Route, rows: readonly BoardRow[], result: ResultSource | undefined, open: boolean, readOnly: boolean, notesOpen: boolean): CardResult | null {
+function cardResult(route: Route, rows: readonly BoardRow[], result: ResultSource | undefined, open: boolean, readOnly: boolean, notesOpen: boolean, horseSort: HorseSort | undefined): CardResult | null {
   const raceId = route.race!;
   if (latestAnalysisIdOf(rows, raceId) === null) return null;
   if (result === undefined || result.kind === "loading") return { kind: "loading" };
   if (result.kind === "error") return { kind: "error", message: result.message };
-  return { kind: "ready", content: contentOf(result.analysis, readOnly, notesOpen), open, date: route.date, raceId };
+  return { kind: "ready", content: contentOf(result.analysis, readOnly, notesOpen, horseSort), open, date: route.date, raceId };
 }
 
 function card(
@@ -220,6 +222,7 @@ function card(
   resultOpen: boolean,
   readOnly: boolean,
   notesOpen: boolean,
+  horseSort: HorseSort | undefined,
 ): TaskCard {
   const raceId = route.race!;
   const found = pick(rows, raceId, mode);
@@ -236,7 +239,7 @@ function card(
     title: mode === "morning" ? "事前分析" : "発走前",
     badge: badgeOf(found),
     error: failedError,
-    result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen, readOnly, notesOpen) : null,
+    result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen, readOnly, notesOpen, horseSort) : null,
     prior: showPrior ? prior.rows.map((r) => ({ rank: r.rank, umaban: r.umaban, name: r.horseName, value: formatPercent(r.prior) })) : null,
   };
 }
@@ -246,7 +249,7 @@ export function buildRaceModel(input: RaceModelInput): RaceModel {
   const prior = status.kind === "ready" ? status.prior : null;
   const cards =
     status.kind === "ready"
-      ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true, input.readOnly === true, input.notesOpen === true))
+      ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true, input.readOnly === true, input.notesOpen === true, input.horseSort))
       : null;
   return {
     kind: "race",
