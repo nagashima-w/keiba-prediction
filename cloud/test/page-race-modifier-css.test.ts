@@ -35,6 +35,13 @@ function listTree(): VNode {
   return renderScreen(model, noopActions);
 }
 
+function listTreeWithBoard(): VNode {
+  const race = (n: number, startTime: string): RaceRow => ({ raceId: `2026020201${String(n).padStart(2, "0")}`, venueName: "福島", raceNumber: n, raceName: `R${n}`, courseType: "芝", distance: 1800, entryCount: 16, grade: null, startTime });
+  const route = parseHash("#date=20260628&venue=central", "20260628");
+  const model = buildListModel({ route, list: { kind: "ready", races: [race(1, "10:00"), race(2, "15:00")] }, board: { kind: "ready", rows: [] }, now: NOW, choices: new Map([["福島#0", true]]) });
+  return renderScreen(model, noopActions);
+}
+
 function targetsTree(): VNode {
   const r = (n: number, startMs: number, skipped: boolean): TargetRace => ({ raceId: `2026050508${String(n).padStart(2, "0")}`, analysisId: n, startMs, startTime: "15:40", place: "東京11R", pick: "◎7", skipped, detail: "x", resultState: null, result: null });
   const data = { date: "20261017", nowMs: NOW_MS, summary: "s", ledger: null, races: [r(1, NOW_MS - 600_000, false), r(2, NOW_MS - 300_000, true), r(3, NOW_MS + 300_000, true), r(4, NOW_MS + 900_000, false)] };
@@ -64,15 +71,34 @@ describe("レース行の修飾のクラスは、既存の CSS の規則と衝�
     expect(rules.length).toBeGreaterThan(50); // CSS を読めている
   });
 
-  it.each(modifiers)("修飾のクラス「%s」は、CSS では `.race.(そのクラス)` のセレクタの中にしか現れない", (cls) => {
-    const selectors = rules.flatMap((r) => r.selectors).filter((s) => mentions(s, cls));
-    expect(selectors.length, `「.${cls}」を使う規則がある`).toBeGreaterThan(0);
-    expect(selectors.filter((s) => s !== `.race.${cls}`)).toEqual([]);
+  // Issue #558: 発走済み(started)は、行全体ではなく**バッジ(.badges)以外の子**を薄くする(行ごと薄くするとバッジの文字のコントラストが 4.5 を割る。page-badge-css.test.ts が数値で固定)。
+  // 規則の形は修飾ごとに 1 つに決めてある(見送りは今までどおり行全体)。単独の `.x`・`ul.past` などとの衝突を防ぐ意図は、「`x` を含むセレクタは `.race.x` で始まる」で保つ。
+  const EXPECTED_SELECTOR: Readonly<Record<string, string>> = { skipped: ".race.skipped", started: ".race.started > :not(.badges)" };
+
+  it("前提: 修飾のクラスごとの期待するセレクタを決めてある(増えたら、この表と数を直す)", () => {
+    expect([...modifiers].sort()).toEqual(Object.keys(EXPECTED_SELECTOR).sort());
   });
 
-  it.each(modifiers)("修飾のクラス「%s」の規則(`.race.(そのクラス)`)が指定するのは opacity だけ", (cls) => {
-    const own = rules.filter((r) => r.selectors.includes(`.race.${cls}`));
+  it.each(modifiers)("修飾のクラス「%s」は、CSS では `.race.(そのクラス)` で始まるセレクタの中にしか現れない(単独の `.x`・別の要素の `.x li` などに使われていない)", (cls) => {
+    const selectors = rules.flatMap((r) => r.selectors).filter((s) => mentions(s, cls));
+    expect(selectors.length, `「.${cls}」を使う規則がある`).toBeGreaterThan(0);
+    expect(selectors.filter((s) => !s.startsWith(`.race.${cls}`))).toEqual([]);
+    expect(selectors).toEqual([EXPECTED_SELECTOR[cls]]); // 規則の形は 1 つだけ
+  });
+
+  it.each(modifiers)("修飾のクラス「%s」の規則が指定するのは opacity だけ(padding・margin などを足さない)", (cls) => {
+    const own = rules.filter((r) => r.selectors.some((s) => mentions(s, cls)));
     expect(own).toHaveLength(1);
+    expect(own[0]!.selectors).toEqual([EXPECTED_SELECTOR[cls]]);
     expect(own[0]!.properties).toEqual(["opacity"]);
+  });
+
+  it("Issue #558: 発走済みの薄さは `.badges` に及ばない(行の直下の子のうち、バッジの入れ物 `.badges` だけが対象外)", () => {
+    const row2 = raceRows(listTreeWithBoard()).find((n) => classesOf(n).includes("started"))!;
+    const kids2 = (row2.children ?? []).filter((c): c is VNode => typeof c !== "string");
+    expect(kids2.filter((k) => classesOf(k).includes("badges"))).toHaveLength(1); // 前提: .badges は行の直下に 1 つ
+    expect(kids2.filter((k) => !classesOf(k).includes("badges")).length).toBeGreaterThanOrEqual(2); // 薄くする側(名前・詳細)が残る
+    // `.race.started > :not(.badges)` の「:not の中身」と、行の直下の .badges が一致している(クラス名の書き換えで検査が空振りしない)
+    expect(EXPECTED_SELECTOR["started"]).toContain(":not(.badges)");
   });
 });

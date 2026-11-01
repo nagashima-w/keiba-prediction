@@ -276,6 +276,8 @@ describe("生成物のドリフトと決定性", () => {
     // 計り方: `git show aee6099:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。増えたのは、並べ替えの純関数と列の組み立て(`result.ts` の `horseTableOf`・`nextHorseSort`・`firstSortDir`・
     // 各馬の `sortValues`)、表の VNode(`view.ts` の `horseTable`)、並べ替えの状態と処理(`app.ts` の `horseSortChoices`・`onSortHorses`)、許可する要素 6 つ(`dom.ts`)。日本語の文言は `\u` エスケープで 1 文字 6 バイト。
     // 上限 233,500 には 235,339 - 233,500 = 1,839 バイト足りなかったため引き上げた。新しい上限 236,000 の余裕は 661 バイト(500 バイト単位に切り上げ)。
+    // Issue #558: 上限は据え置き。一括実行のボタンの文言(「対象 N 件」)の増分は +20(235,339 → 235,359。計り方: 変更前の生成物と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力)。
+    // バッジのピルの CSS は `src/page.ts` にあり、束には入らない。上限 236,000 までの余裕は 641 バイト。
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(236_000);
   });
 });
