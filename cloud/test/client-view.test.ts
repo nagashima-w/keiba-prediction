@@ -1551,7 +1551,7 @@ describe("タイム指数の行と説明の表示(Issue #359。結果画面と�
 
 /**
  * Issue #546(#545-A の 1 段目): 結果の先頭の要約のカードと、説明文(単勝・複勝・タイム指数・隊列図の注記)の折りたたみ。結果画面とカードの中の両方。
- * 守ること: 要約は `resultSections` の先頭・既存の節の class と重ならない(`bet`・`marked`・`horse-list` の数を増やさない)・説明文は既定で閉じる・開閉は `<details>` でなく
+ * 守ること: 要約は結果の見出しの直後(分析モデル以下の行より前)・既存の節の class と重ならない(`bet`・`marked`・`horse-list` の数を増やさない)・説明文は既定で閉じる・開閉は `<details>` でなく
  * ボタン(aria-expanded・▾/▸・data-analysis)・閲覧者にも同じに出る・退化した入力(LLM なし・買い目 0 点・印 0 頭・締切の回なし・発走時刻なし)でも壊れない。
  */
 describe("要約のカードと説明文の折りたたみ(Issue #546)", () => {
@@ -1592,7 +1592,7 @@ describe("要約のカードと説明文の折りたたみ(Issue #546)", () => {
 
   for (const [name, heading, tree] of screens) {
     describe(name, () => {
-      it("要約は 1 つで、結果の節の中の先頭。見出しは「要約」(階層は画面に合わせる)", () => {
+      it("要約は 1 つで、結果の節(印の付いた馬以下)より前。見出しは「要約」(階層は画面に合わせる)", () => {
         const t = tree(rich());
         const summaries = byClass(t, "summary");
         expect(summaries).toHaveLength(1);

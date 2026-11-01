@@ -228,7 +228,7 @@ function cardResult(result: CardResult, actions: ViewActions): VNode {
     h("h3", {}, [toggle]),
     ...(open
       ? [
-          ...resultMeta(content),
+          ...resultMeta(content, "h3"),
           ...resultSections(content, "h3", actions),
         ]
       : []),
@@ -279,12 +279,13 @@ function raceScreen(model: RaceModel, actions: ViewActions): VNode {
 }
 
 /**
- * 結果の見出しの下(結果画面と、発走前のカードの中で共通。Issue #195): 分析モデル・LLM を使わなかった理由(`llmNote`。モデルの有無に関係なく、null でなければ)・詳細の注記。
+ * 結果の見出しの下(結果画面と、発走前のカードの中で共通。Issue #195): 先頭に要約(Issue #546)、続けて分析モデル・LLM を使わなかった理由(`llmNote`。モデルの有無に関係なく、null でなければ)・詳細の注記。
  * 理由は「分析モデル」の行のすぐ下(モデル欄の近く)に置く。Issue #198: LLM の所要時間・usage(記録があるとき)は、モデルの行と理由の間。
  */
-function resultMeta(content: ResultContent): VNode[] {
+function resultMeta(content: ResultContent, heading: "h2" | "h3"): VNode[] {
   return [
-    // 分析時刻は、結果の先頭の要約(`summarySection`。Issue #546)へ移した。
+    // 結果の先頭の要約(Issue #546)。見出しの直後で、分析モデル以下の行より前(開いてすぐ判断できるようにする)。分析時刻は要約の中にある。
+    summarySection(content, heading),
     h("p", { class: "meta" }, [`分析モデル: ${content.model}`]),
     // LLM の所要時間・usage(Issue #198)。要約の1行と、該当するときだけの警告(1件ずつ)。理由の注記より上。
     ...(content.llmUsage === null ? [] : [h("p", { class: "meta llm-usage" }, [content.llmUsage.summary]), ...content.llmUsage.warnings.map((w) => h("p", { class: "notice llm-usage-warn" }, [w]))]),
@@ -431,7 +432,7 @@ function closeSection(close: CloseSection, heading: "h2" | "h3"): VNode {
  * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
  */
 /**
- * 結果の先頭の要約(Issue #546)。印の付いた馬・買い目の点数と合計・買い目の一覧(配分の表と同じ部品〈`betRow`〉)・発走時刻・分析時刻・締切直前の再計算の最新の結果 1 行。
+ * 結果の先頭の要約(Issue #546。`resultMeta` の先頭)。印の付いた馬・買い目の点数と合計・買い目の一覧(配分の表と同じ部品〈`betRow`〉)・発走時刻・分析時刻・締切直前の再計算の最新の結果 1 行。
  * 無い項目は行ごと出さない。class は既存の節(`marked`・`bet`)と重ならない名前にする(それらの数を数える既存のテストが、要約の分を数えない)。
  */
 function summarySection(content: ResultContent, heading: "h2" | "h3"): VNode {
@@ -465,8 +466,6 @@ function notesToggle(content: ResultContent, actions: ViewActions): VNode {
 function resultSections(content: ResultContent, heading: "h2" | "h3", actions: ViewActions): VNode[] {
   const allocation = content.allocation;
   return [
-    // 要約(Issue #546)。結果の節の先頭。
-    summarySection(content, heading),
     // 印の付いた馬(Issue #211)。印が1頭も無ければ section ごと出さない。凡例はここ(見出しの下)に1回だけ(「馬ごとの評価」の中には出さない)。
     ...(content.markedHorses.length === 0
       ? []
@@ -531,7 +530,7 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
   const content = model.content;
   if (content !== null) {
     body.push(h("h1", { class: "title" }, [content.title]));
-    body.push(...resultMeta(content));
+    body.push(...resultMeta(content, "h2"));
     body.push(...resultSections(content, "h2", actions));
   }
   return h("div", { class: "screen" }, [controls, ...body]);
