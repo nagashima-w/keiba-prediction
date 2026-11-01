@@ -53,10 +53,13 @@ const css = ((): string => (/<style>([\s\S]*?)<\/style>/.exec(renderPage("owner@
 interface Rule {
   readonly selectors: string[];
   readonly properties: string[];
+  /** 宣言(プロパティ → 値)。 */
+  readonly values: ReadonlyMap<string, string>;
 }
 const rules: Rule[] = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
   selectors: m[1]!.split(",").map((s) => s.trim()).filter((s) => s !== ""),
   properties: m[2]!.split(";").map((d) => d.split(":")[0]!.trim()).filter((p) => p !== ""),
+  values: new Map(m[2]!.split(";").map((d) => d.trim()).filter((d) => d !== "").map((d): [string, string] => [d.slice(0, d.indexOf(":")).trim(), d.slice(d.indexOf(":") + 1).trim()])),
 }));
 const mentions = (selector: string, cls: string): boolean => new RegExp(`\\.${cls}(?![\\w-])`).test(selector);
 
@@ -72,33 +75,89 @@ describe("レース行の修飾のクラスは、既存の CSS の規則と衝�
   });
 
   // Issue #558: 発走済み(started)は、行全体ではなく**バッジ(.badges)以外の子**を薄くする(行ごと薄くするとバッジの文字のコントラストが 4.5 を割る。page-badge-css.test.ts が数値で固定)。
-  // 規則の形は修飾ごとに 1 つに決めてある(見送りは今までどおり行全体)。単独の `.x`・`ul.past` などとの衝突を防ぐ意図は、「`x` を含むセレクタは `.race.x` で始まる」で保つ。
-  const EXPECTED_SELECTOR: Readonly<Record<string, string>> = { skipped: ".race.skipped", started: ".race.started > :not(.badges)" };
+  // 見送り(skipped)は今までどおり行全体。狙い目の行は `race skipped started`(発走済みの見送り)になりうるので、発走済みの規則は `:not(.skipped)` で外し、薄さの二重がけ(0.65 × 0.65)を避ける。
+  // 単独の `.x`・`ul.past` などとの衝突を防ぐ意図は、「`x` を含むセレクタはすべて `.race.` で始まる」で保つ。
+  const STARTED_RULE = ".race.started:not(.skipped) > :not(.badges)";
+  /** 修飾のクラスを含むセレクタの全部(見送りのクラスは、発走済みの規則の `:not(.skipped)` にも現れる)。 */
+  const EXPECTED_SELECTORS: Readonly<Record<string, readonly string[]>> = { skipped: [".race.skipped", STARTED_RULE], started: [STARTED_RULE] };
 
   it("前提: 修飾のクラスごとの期待するセレクタを決めてある(増えたら、この表と数を直す)", () => {
-    expect([...modifiers].sort()).toEqual(Object.keys(EXPECTED_SELECTOR).sort());
+    expect([...modifiers].sort()).toEqual(Object.keys(EXPECTED_SELECTORS).sort());
   });
 
-  it.each(modifiers)("修飾のクラス「%s」は、CSS では `.race.(そのクラス)` で始まるセレクタの中にしか現れない(単独の `.x`・別の要素の `.x li` などに使われていない)", (cls) => {
+  it.each(modifiers)("修飾のクラス「%s」は、CSS では `.race.` で始まる決まった形のセレクタの中にしか現れない(単独の `.x`・別の要素の `.x li` などに使われていない)", (cls) => {
     const selectors = rules.flatMap((r) => r.selectors).filter((s) => mentions(s, cls));
     expect(selectors.length, `「.${cls}」を使う規則がある`).toBeGreaterThan(0);
-    expect(selectors.filter((s) => !s.startsWith(`.race.${cls}`))).toEqual([]);
-    expect(selectors).toEqual([EXPECTED_SELECTOR[cls]]); // 規則の形は 1 つだけ
+    expect(selectors.filter((s) => !s.startsWith(".race."))).toEqual([]);
+    expect([...selectors].sort()).toEqual([...EXPECTED_SELECTORS[cls]!].sort()); // 規則の形は決まった数だけ
   });
 
-  it.each(modifiers)("修飾のクラス「%s」の規則が指定するのは opacity だけ(padding・margin などを足さない)", (cls) => {
+  it.each(modifiers)("修飾のクラス「%s」を含む規則が指定するのは opacity だけ(padding・margin などを足さない)", (cls) => {
     const own = rules.filter((r) => r.selectors.some((s) => mentions(s, cls)));
-    expect(own).toHaveLength(1);
-    expect(own[0]!.selectors).toEqual([EXPECTED_SELECTOR[cls]]);
-    expect(own[0]!.properties).toEqual(["opacity"]);
+    expect(own.length).toBe(EXPECTED_SELECTORS[cls]!.length); // 規則ごとに 1 つのセレクタ(グループにしていない)
+    for (const r of own) expect(r.properties).toEqual(["opacity"]);
   });
 
-  it("Issue #558: 発走済みの薄さは `.badges` に及ばない(行の直下の子のうち、バッジの入れ物 `.badges` だけが対象外)", () => {
+  /** 行(クラス)と子(クラス)に、CSS の opacity の規則がかかったときの実効の不透明度。対応するセレクタの形は、この 2 つ(`.race.X` と `.race.X:not(.Y) > :not(.Z)`)だけ。 */
+  const effectiveOpacity = (rowClasses: readonly string[], childClasses: readonly string[]): { row: number; child: number } => {
+    let row = 1;
+    let child = 1;
+    for (const rule of rules) {
+      const opacity = rule.values.get("opacity");
+      if (opacity === undefined) continue;
+      for (const sel of rule.selectors) {
+        const m = /^\.race\.([\w-]+)(?::not\(\.([\w-]+)\))?(?: > :not\(\.([\w-]+)\))?$/.exec(sel);
+        if (m === null) continue;
+        if (!rowClasses.includes(m[1]!) || (m[2] !== undefined && rowClasses.includes(m[2]))) continue;
+        if (m[3] === undefined) row *= Number(opacity);
+        else if (!childClasses.includes(m[3])) child *= Number(opacity);
+      }
+    }
+    return { row, child };
+  };
+  const kidsOf = (n: VNode): VNode[] => (n.children ?? []).filter((c): c is VNode => typeof c !== "string");
+
+  it("Issue #558 R1: 見送りだけ・発走済みだけ・両方の行で、名前・詳細の実効の不透明度は 0.65(二重にかからない)。バッジは発走済みでも 1", () => {
+    const list = raceRows(listTreeWithBoard());
+    const targets = raceRows(targetsTree());
+    const both = targets.filter((n) => classesOf(n).includes("skipped") && classesOf(n).includes("started"));
+    const skippedOnly = targets.filter((n) => classesOf(n).includes("skipped") && !classesOf(n).includes("started"));
+    const startedOnly = list.filter((n) => classesOf(n).includes("started"));
+    // 前提: 3 種類の行が実際にある(両方付く行は狙い目の画面にだけ出る)
+    expect(both.length).toBeGreaterThan(0);
+    expect(skippedOnly.length).toBeGreaterThan(0);
+    expect(startedOnly.length).toBeGreaterThan(0);
+    for (const row of [...both, ...skippedOnly, ...startedOnly]) {
+      const kids = kidsOf(row);
+      expect(kids.length).toBeGreaterThanOrEqual(2); // 前提: 名前・詳細の子がある
+      for (const kid of kids) {
+        const { row: r, child: c } = effectiveOpacity(classesOf(row), classesOf(kid));
+        const eff = r * c;
+        expect(eff, `${classesOf(row).join(" ")} の子 ${classesOf(kid).join(" ") || kid.tag}`).toBeCloseTo(classesOf(kid).includes("badges") && !classesOf(row).includes("skipped") ? 1 : 0.65, 5);
+      }
+    }
+  });
+
+  it("対照(検出が空振りでない): 発走済みの規則から `:not(.skipped)` を外した CSS だと、両方付いた行の子は 0.65 × 0.65 になる", () => {
+    const both = raceRows(targetsTree()).find((n) => classesOf(n).includes("skipped") && classesOf(n).includes("started"))!;
+    const kid = kidsOf(both)[0]!;
+    const saved = rules.map((r) => r.selectors.slice());
+    try {
+      for (const r of rules) for (let i = 0; i < r.selectors.length; i++) if (r.selectors[i] === STARTED_RULE) r.selectors[i] = ".race.started > :not(.badges)";
+      const { row, child } = effectiveOpacity(classesOf(both), classesOf(kid));
+      expect(row * child).toBeCloseTo(0.65 * 0.65, 5);
+    } finally {
+      rules.forEach((r, i) => void (r.selectors.splice(0, r.selectors.length, ...saved[i]!)));
+    }
+  });
+
+  it("Issue #558: 発走済みの薄さは `.badges` に及ばない(行の直下に `.badges` が 1 つ、薄くする側の子が 2 つ以上。規則は `:not(.badges)` で外す)", () => {
     const row2 = raceRows(listTreeWithBoard()).find((n) => classesOf(n).includes("started"))!;
-    const kids2 = (row2.children ?? []).filter((c): c is VNode => typeof c !== "string");
+    const kids2 = kidsOf(row2);
     expect(kids2.filter((k) => classesOf(k).includes("badges"))).toHaveLength(1); // 前提: .badges は行の直下に 1 つ
     expect(kids2.filter((k) => !classesOf(k).includes("badges")).length).toBeGreaterThanOrEqual(2); // 薄くする側(名前・詳細)が残る
-    // `.race.started > :not(.badges)` の「:not の中身」と、行の直下の .badges が一致している(クラス名の書き換えで検査が空振りしない)
-    expect(EXPECTED_SELECTOR["started"]).toContain(":not(.badges)");
+    // 実際の CSS の規則が、その `.badges` を外している(上の実効の不透明度のテストが、子のクラスを見て確かめる)
+    const dimming = rules.filter((r) => r.selectors.includes(STARTED_RULE));
+    expect(dimming).toHaveLength(1);
   });
 });

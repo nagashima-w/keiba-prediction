@@ -204,8 +204,9 @@ ${paletteCss()}
   .targets-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   .targets-link + .verify-link { margin-left: 0; }
   .race.skipped { opacity: 0.65; }
-  /* Issue #558: 発走済みは、バッジの入れ物(.badges)以外の子を薄くする(行ごと薄くすると、バッジの文字のコントラストが 4.5 を割る)。狙い目の発走済みの行にも同じ規則(バッジは無い) */
-  .race.started > :not(.badges) { opacity: 0.65; }
+  /* Issue #558: 発走済みは、バッジの入れ物(.badges)以外の子を薄くする(行ごと薄くすると、バッジの文字のコントラストが 4.5 を割る)。狙い目の発走済みの行にも同じ規則(バッジは無い)。
+     見送り(.skipped)の行は上の規則で行全体が薄いので外す(狙い目の行は skipped と started の両方が付きうる。外さないと 0.65 × 0.65 の二重がけになる) */
+  .race.started:not(.skipped) > :not(.badges) { opacity: 0.65; }
   .t-left { margin-left: auto; font-weight: bold; white-space: nowrap; }
   .t-left.soon { color: var(--wait); }
   /* Issue #235: 日報画面(一覧の入口のリンク・レースごとのカード・箇条書き・生の文章。スマホ幅で横に伸ばさない=改行で折り返す) */
