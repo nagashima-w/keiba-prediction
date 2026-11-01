@@ -929,7 +929,7 @@ describe("タイム指数の行と説明(Issue #359。サーバが組み立て�
  * 要約の材料はクライアントのモデルにすでにある値だけ(サーバの応答は変えない)。発走時刻(`race.startTime`)だけは、サーバが返していたのをクライアントが読んでいなかったので `api-analysis.ts` で読む。
  */
 describe("要約(Issue #546)", () => {
-  const ok = (label: string, diff: readonly string[]) => ({ label, summaryLines: ["再計算した", "15:40に実行"], allocation: { ...ALLOCATION, bets: [...ALLOCATION.bets] }, diffLines: diff });
+  const ok = (label: string, diff: readonly string[], allocation: NonNullable<AnalysisDetail["allocation"]> = { ...ALLOCATION, bets: [...ALLOCATION.bets] }) => ({ label, summaryLines: ["再計算した", "15:40に実行"], allocation, diffLines: diff });
   const failed = (label: string, summary: string) => ({ label, summaryLines: [summary], allocation: null, diffLines: [] as string[] });
   const withClose = (rounds: NonNullable<AnalysisDetail["close"]>["rounds"]) => analysis({ close: { note: "注記", rounds } });
   const summaryOf = (a: AnalysisDetail) => content(a).summary;
@@ -960,20 +960,20 @@ describe("要約(Issue #546)", () => {
   describe("買い目の行(点数と合計)", () => {
     const alloc = (bets: readonly { betType: string; comboKey: string; stake: number; odds: number | null; ev: number | null }[], over: Record<string, unknown> = {}) => ({ ...ALLOCATION, bets: [...bets], ...over }) as AnalysisDetail["allocation"];
 
-    it("配分あり: 「買い目 N点・合計 X円」。合計は賭け金の数値の和(3 桁区切り・オッズや EV が null の買い目も数える)", () => {
+    it("配分あり(再計算の回なし): 「買い目(分析時点) N点・合計 X円」。合計は賭け金の数値の和(3 桁区切り・オッズや EV が null の買い目も数える)", () => {
       const three = alloc([
         { betType: "place", comboKey: "01", stake: 700, odds: 1.8, ev: 1.2 },
         { betType: "wide", comboKey: "0102", stake: 500, odds: null, ev: null },
         { betType: "trio", comboKey: "010203", stake: 100, odds: 12.3, ev: 1.3 },
       ]);
-      expect(summaryOf(analysis({ allocation: three })).betLine).toBe("買い目 3点・合計 1,300円");
+      expect(summaryOf(analysis({ allocation: three })).betLine).toBe("買い目(分析時点) 3点・合計 1,300円");
       expect(content(analysis({ allocation: three })).allocation.bets, "前提: 配分の表と同じ点数").toHaveLength(3);
-      expect(summaryOf(analysis()).betLine, "既定の配分(300 + 200)").toBe("買い目 2点・合計 500円");
+      expect(summaryOf(analysis()).betLine, "既定の配分(300 + 200)").toBe("買い目(分析時点) 2点・合計 500円");
     });
 
     it("買い目が 1 点だけでも点数と合計を出す(退化した入力)", () => {
       const one = alloc([{ betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 }]);
-      expect(summaryOf(analysis({ allocation: one })).betLine).toBe("買い目 1点・合計 300円");
+      expect(summaryOf(analysis({ allocation: one })).betLine).toBe("買い目(分析時点) 1点・合計 300円");
     });
 
     it.each([
@@ -983,6 +983,53 @@ describe("要約(Issue #546)", () => {
     ] as const)("%s は「配分なし」の 1 語だけ(注記・設定への案内は入れない)", (_name, allocation) => {
       expect(summaryOf(analysis({ allocation })).betLine).toBe("配分なし");
       expect(content(analysis({ allocation })).allocation.bets, "前提: 買い目は 0 点").toHaveLength(0);
+    });
+  });
+
+  /**
+   * 要約の買い目は**最新の配分**(Issue #546)。締切直前の再計算で再計算できた回(`allocation` が non-null)があれば、一番新しいその回の配分。無ければ分析時点の配分。
+   * 見出しの語で出どころを区別する(利用者が、分析時点の額と再計算後の額を取り違えないため)。分析時点の配分と再計算の配分は、賭け金がすべて違う値にして、どちらから来たかを取り違えられないようにする。
+   */
+  describe("買い目の出どころ(最新の配分)", () => {
+    const bet = (comboKey: string, stake: number) => ({ betType: "place", comboKey, stake, odds: 2.0, ev: 1.2 });
+    const alloc = (bets: readonly ReturnType<typeof bet>[]) => ({ ...ALLOCATION, bets: [...bets] }) as NonNullable<AnalysisDetail["allocation"]>;
+    const ANALYSIS_TIME = alloc([bet("01", 300), bet("02", 200)]); // 合計 500
+    const R5 = alloc([bet("03", 900)]); // 発走5分前: 合計 900
+    const R2 = alloc([bet("04", 1200), bet("05", 400), bet("06", 100)]); // 発走2分前: 合計 1,700
+    const NONE = alloc([]); // 再計算の結果、買い目が 0 点
+    const failedRound = (label: string) => ({ label, summaryLines: ["失敗(オッズを取り直せませんでした)"], allocation: null, diffLines: [] as string[] });
+    const rounds = (...r: NonNullable<AnalysisDetail["close"]>["rounds"]) => analysis({ allocation: ANALYSIS_TIME, close: { note: "注記", rounds: r } });
+
+    it.each([
+      ["再計算の回なし(close が null)", analysis({ allocation: ANALYSIS_TIME, close: null }), "買い目(分析時点) 2点・合計 500円", ["300円", "200円"]],
+      ["再計算の回が 1 つで ok", rounds(ok("発走5分前", ["x"], R5)), "買い目(発走5分前の再計算) 1点・合計 900円", ["900円"]],
+      ["ok が最新(2 回とも ok。最新の回の配分を使う)", rounds(ok("発走5分前", ["x"], R5), ok("発走2分前", ["y"], R2)), "買い目(発走2分前の再計算) 3点・合計 1,700円", ["1,200円", "400円", "100円"]],
+      ["最新が失敗で、前の回が ok(前の回の配分を使う)", rounds(ok("発走5分前", ["x"], R5), failedRound("発走2分前")), "買い目(発走5分前の再計算) 1点・合計 900円", ["900円"]],
+      ["全部失敗・見送り(分析時点の配分を使う)", rounds(failedRound("発走5分前"), failedRound("発走2分前")), "買い目(分析時点) 2点・合計 500円", ["300円", "200円"]],
+      ["再計算の結果が買い目 0 点(「配分なし」ではなく 0 点と合計 0 円。分析時点の額を残さない)", rounds(ok("発走2分前", ["配分は0点です"], NONE)), "買い目(発走2分前の再計算) 0点・合計 0円", []],
+      ["分析時点の配分の記録がなく、再計算の回だけ ok(その回の配分)", analysis({ allocation: null, close: { note: "注記", rounds: [ok("発走2分前", ["x"], R2)] } }), "買い目(発走2分前の再計算) 3点・合計 1,700円", ["1,200円", "400円", "100円"]],
+      ["分析時点の配分の記録がなく、再計算の回もない(配分なし)", analysis({ allocation: null, close: null }), "配分なし", []],
+      ["分析時点が見送り(買い目 0 点)で、再計算の回もない(配分なし)", analysis({ allocation: { ...ALLOCATION, route: "place-only", skipReasonCode: "no-edge", bets: [] }, close: null }), "配分なし", []],
+    ] as const)("%s", (_name, a, betLine, stakes) => {
+      const summary = summaryOf(a);
+      expect(summary.betLine).toBe(betLine);
+      expect(summary.bets.map((b) => b.stake)).toEqual(stakes);
+    });
+
+    it("前提: 分析時点の配分の画面(配分の提案の表)は、再計算の回があっても分析時点のまま(要約だけが最新の配分)", () => {
+      const c = content(rounds(ok("発走2分前", ["y"], R2)));
+      expect(c.allocation.bets.map((b) => b.stake)).toEqual(["300円", "200円"]);
+      expect(c.summary.bets.map((b) => b.stake)).toEqual(["1,200円", "400円", "100円"]);
+    });
+
+    it("要約の買い目の一覧は、配分の表と同じ部品・同じ並び(券種の表示順 → 組合せ)で作る。入力が逆順でも並べ直す", () => {
+      const mixed = alloc([{ betType: "wide", comboKey: "0102", stake: 100, odds: 5, ev: 1.3 }, bet("03", 700)]); // 入力はワイドが先
+      const viaClose = content(rounds(ok("発走2分前", ["x"], mixed))).summary.bets;
+      const viaTable = content(analysis({ allocation: mixed, close: null })).allocation.bets;
+      expect(viaClose, "前提: 2 行").toHaveLength(2);
+      expect(viaClose[0]!.betTypeLabel, "前提: 券種が違う").not.toBe(viaClose[1]!.betTypeLabel);
+      expect(viaClose.map((b) => b.stake), "複勝(700円)が先に並び直されている").toEqual(["700円", "100円"]);
+      expect(viaClose).toEqual(viaTable);
     });
   });
 

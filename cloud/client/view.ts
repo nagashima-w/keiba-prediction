@@ -428,16 +428,12 @@ function closeSection(close: CloseSection, heading: "h2" | "h3"): VNode {
 }
 
 /**
- * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「3着内率の上位5頭」(Issue #240。印の付いた馬の直後)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
- * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
- */
-/**
- * 結果の先頭の要約(Issue #546。`resultMeta` の先頭)。印の付いた馬・買い目の点数と合計・買い目の一覧(配分の表と同じ部品〈`betRow`〉)・発走時刻・分析時刻・締切直前の再計算の最新の結果 1 行。
+ * 結果の先頭の要約(Issue #546。`resultMeta` の先頭)。印の付いた馬・買い目(**最新の配分**。見出しの語で分析時点か再計算かを区別する)の点数と合計・買い目の一覧(配分の表と同じ部品〈`betRow`〉)・発走時刻・分析時刻・締切直前の再計算の最新の結果 1 行。
  * 無い項目は行ごと出さない。class は既存の節(`marked`・`bet`)と重ならない名前にする(それらの数を数える既存のテストが、要約の分を数えない)。
  */
 function summarySection(content: ResultContent, heading: "h2" | "h3"): VNode {
   const s = content.summary;
-  const bets = content.allocation.bets;
+  const bets = s.bets;
   return h("section", { class: "summary" }, [
     h(heading, {}, ["要約"]),
     ...(content.markedHorses.length === 0 ? [] : [h("ul", { class: "summary-marks" }, content.markedHorses.map((m) => markedHorseRow(m, "summary-marked")))]),
@@ -463,6 +459,10 @@ function notesToggle(content: ResultContent, actions: ViewActions): VNode {
   );
 }
 
+/**
+ * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「3着内率の上位5頭」(Issue #240。印の付いた馬の直後)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
+ * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
+ */
 function resultSections(content: ResultContent, heading: "h2" | "h3", actions: ViewActions): VNode[] {
   const allocation = content.allocation;
   return [

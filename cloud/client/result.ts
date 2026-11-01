@@ -204,15 +204,22 @@ export interface CloseSection {
 
 /**
  * 結果の先頭の要約(Issue #546)。材料はクライアントのモデルにすでにある値だけ(サーバの応答は変えない)。文はクライアントで組み立てる。
- * 印の付いた馬は `ResultContent.markedHorses`、買い目の一覧は `allocation.bets` を、画面(`view.ts`)が同じ部品で出す(ここには重ねて持たない)。
+ * 印の付いた馬は `ResultContent.markedHorses` を、画面(`view.ts`)が同じ部品で出す(ここには重ねて持たない)。買い目は**最新の配分**を持つ(`bets`)。
  */
 export interface SummarySection {
   /** 「発走時刻: 15:45」。値の無い(null・空・空白だけの)分析は null(行ごと出さない)。 */
   readonly startLine: string | null;
   /** 「分析時刻: 2026-06-28 14:00」(従来の結果の見出しの下の行と同じ文字)。 */
   readonly analyzedLine: string;
-  /** 「買い目 3点・合計 1,300円」。買い目が無い(配分の記録なし・未設定・見送り)ときは「配分なし」の 1 語(注記・設定への案内は入れない=閲覧者・管理者で差が出ない)。 */
+  /**
+   * 買い目の行。**最新の配分**の点数と合計で、見出しの語で出どころを区別する(利用者が、分析時点の額と再計算後の額を取り違えないため)。
+   *  - 締切直前の再計算で再計算できた回(`allocation` が non-null)があれば、一番新しいその回の配分: 「買い目(発走2分前の再計算) 3点・合計 1,700円」(買い目が 0 点でも「0点・合計 0円」)。
+   *  - 無ければ分析時点の配分: 「買い目(分析時点) 3点・合計 1,300円」。
+   *  - どちらにも買い目が無い(配分の記録なし・未設定・見送り)ときは「配分なし」の 1 語(注記・設定への案内は入れない=閲覧者・管理者で差が出ない)。
+   */
   readonly betLine: string;
+  /** 買い目の一覧(`betLine` と同じ配分の行。配分の表と同じ並び・同じ整形)。「配分なし」のときは空。 */
+  readonly bets: readonly AllocationBetRowView[];
   /** 締切直前の再計算の最新の結果 1 行(「締切直前の再計算(発走2分前): 分析時から変わりませんでした」)。再計算できた回が無い・節が無いときは null。 */
   readonly closeLine: string | null;
 }
@@ -358,22 +365,36 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
   return { heading: llmEffective ? `${LABEL_ADJUSTED_PROB}の3着内率 上位${TOP_PROB_COUNT}頭` : `${LABEL_PRIOR} 上位${TOP_PROB_COUNT}頭`, rows };
 }
 
-/**
- * 要約の買い目の行(Issue #546)。点数は配分の表の行数、合計は賭け金(数値)の和。配分の表が空(記録なし・未設定・見送り・判定不能)なら「配分なし」。
- * 合計は表示用の文字列(「300円」)ではなく、保存された数値(`StoredAllocationBetView.stake`)から足す。
- */
-function betLineOf(a: AnalysisDetail, bets: AllocationSection["bets"]): string {
-  if (bets.length === 0 || a.allocation === null) return NO_BETS_LINE;
-  return `買い目 ${bets.length}点・合計 ${formatYen(a.allocation.bets.reduce((sum, b) => sum + b.stake, 0))}`;
+/** 締切直前の再計算で**再計算できた回(`allocation` が non-null)のうち一番新しいもの**(回は昇順)。無ければ undefined。要約の買い目の行と締切の行が共有する(Issue #546)。 */
+function latestCloseRound(close: AnalysisDetail["close"]): { readonly label: string; readonly summaryLines: readonly string[]; readonly diffLines: readonly string[]; readonly allocation: NonNullable<AnalysisDetail["allocation"]> } | undefined {
+  const done = (close?.rounds ?? []).flatMap((r) => (r.allocation === null ? [] : [{ ...r, allocation: r.allocation }]));
+  return done[done.length - 1];
+}
+
+/** 「買い目(出どころ) N点・合計 X円」。合計は表示用の文字列(「300円」)ではなく、保存された賭け金の数値(`StoredAllocationBetView.stake`)の和。 */
+function betLineText(source: string, shown: readonly AllocationBetRowView[], stored: NonNullable<AnalysisDetail["allocation"]>): string {
+  return `買い目(${source}) ${shown.length}点・合計 ${formatYen(shown.length === 0 ? 0 : stored.bets.reduce((sum, b) => sum + b.stake, 0))}`;
 }
 
 /**
- * 要約の締切直前の再計算の行(Issue #546)。**再計算できた回(`allocation` が non-null)のうち一番新しいもの**(回は昇順)の見出しと、差分の 1 行目
- * (差分の行が無い回は状態の行の 1 行目〈「再計算した」〉)。後ろの回が失敗・見送りでも、その前の再計算できた回を使う。無ければ null。
+ * 要約の買い目(Issue #546)。**最新の配分**: 再計算できた回があれば一番新しいその回の配分(表と同じ部品〈`buildAllocationProposalView`〉の行)、無ければ分析時点の配分(`analysisBets`)。
+ * どちらにも買い目が無い(分析時点の記録なし・未設定・見送り・判定不能)ときは「配分なし」。再計算の結果が 0 点のときは、分析時点の額を残さず「0点・合計 0円」と出す。
+ */
+function summaryBetsOf(a: AnalysisDetail, analysisBets: readonly AllocationBetRowView[]): { readonly betLine: string; readonly bets: readonly AllocationBetRowView[] } {
+  const round = latestCloseRound(a.close);
+  if (round !== undefined) {
+    const bets = buildAllocationProposalView(round.allocation).bets;
+    return { betLine: betLineText(`${round.label}の再計算`, bets, round.allocation), bets };
+  }
+  if (a.allocation === null || analysisBets.length === 0) return { betLine: NO_BETS_LINE, bets: [] };
+  return { betLine: betLineText("分析時点", analysisBets, a.allocation), bets: analysisBets };
+}
+
+/**
+ * 要約の締切直前の再計算の行(Issue #546)。{@link latestCloseRound} の見出しと、差分の 1 行目(差分の行が無い回は状態の行の 1 行目〈「再計算した」〉)。無ければ null。
  */
 function closeLineOf(close: AnalysisDetail["close"]): string | null {
-  const done = (close?.rounds ?? []).filter((r) => r.allocation !== null);
-  const round = done[done.length - 1];
+  const round = latestCloseRound(close);
   return round === undefined ? null : `${CLOSE_HEADING}(${round.label}): ${round.diffLines[0] ?? round.summaryLines[0]}`;
 }
 
@@ -391,7 +412,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false
     summary: {
       startLine: startTime === null || startTime.trim() === "" ? null : `発走時刻: ${startTime}`,
       analyzedLine: `分析時刻: ${analyzedAt}`,
-      betLine: betLineOf(a, allocation.bets),
+      ...summaryBetsOf(a, allocation.bets),
       closeLine: closeLineOf(a.close),
     },
     formation: buildFormation(a),

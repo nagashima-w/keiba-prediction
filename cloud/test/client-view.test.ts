@@ -1623,21 +1623,30 @@ describe("要約のカードと説明文の折りたたみ(Issue #546)", () => {
       it("中身: 印の付いた馬(印・馬番・馬名)・買い目の一覧と点数・合計・発走時刻・分析時刻・締切直前の再計算の 1 行", () => {
         const s = byClass(tree(rich()), "summary")[0]!;
         expect(byClass(s, "summary-marked").map(rawTextOf)).toEqual(["◎ 1 馬1", "〇 3 馬3"]);
-        expect(byClass(s, "summary-bet-line").map(textOf)).toEqual(["買い目 2点・合計 1,200円"]);
-        expect(byClass(s, "summary-bet").map(textOf)).toHaveLength(2);
+        // 買い目は最新の配分(締切直前の再計算の回があればその回。rich は 700円 の 1 点)。見出しの語で出どころを区別する。
+        expect(byClass(s, "summary-bet-line").map(textOf)).toEqual(["買い目(発走2分前の再計算) 1点・合計 700円"]);
+        expect(byClass(s, "summary-bet").map(textOf)).toHaveLength(1);
         expect(byClass(s, "summary-start").map(textOf)).toEqual(["発走時刻: 15:45"]);
         expect(byClass(s, "summary-analyzed").map(textOf)).toEqual(["分析時刻: 2026-06-28 14:00"]);
         expect(byClass(s, "summary-close").map(textOf)).toEqual(["締切直前の再計算(発走2分前): 追加 0点・削除 1点・賭け金の変化 0点(合計 1,200円 → 700円)"]);
       });
 
-      it("要約の買い目の行は、配分の提案の表の行と同じ文字・同じ順(同じ部品)。既存の節の class(bet・marked)の数は増えない", () => {
+      it("要約の買い目の行は、最新の配分の表の行と同じ文字・同じ順(同じ部品)。再計算の回があればその回の表、無ければ分析時点の表。既存の節の class(bet・marked)の数は増えない", () => {
         const t = tree(rich());
         const inSummary = byClass(byClass(t, "summary")[0]!, "summary-bet").map(textOf);
         const inAllocation = byClass(byClass(t, "allocation")[0]!, "bet").map(textOf);
-        expect(inAllocation, "前提: 配分の表に 2 行ある").toHaveLength(2);
-        expect(inSummary).toEqual(inAllocation);
+        const inClose = byClass(byClass(t, "close")[0]!, "bet").map(textOf);
+        expect(inAllocation, "前提: 配分の表(分析時点)に 2 行ある").toHaveLength(2);
+        expect(inClose, "前提: 締切直前の再計算の表に 1 行ある").toHaveLength(1);
+        expect(inSummary).toEqual(inClose);
+        expect(inSummary).not.toEqual(inAllocation);
         expect(byClass(t, "bet")).toHaveLength(2 + 1); // 配分の提案 2 + 締切直前の再計算の表 1(要約は summary-bet なので数えない)
         expect(byClass(t, "marked")).toHaveLength(2); // 「印の付いた馬」の節だけ
+        // 再計算の回が無ければ、分析時点の表と同じ行・見出しは「分析時点」
+        const t2 = tree(rich({ close: null }));
+        const s2 = byClass(t2, "summary")[0]!;
+        expect(byClass(s2, "summary-bet").map(textOf)).toEqual(byClass(byClass(t2, "allocation")[0]!, "bet").map(textOf));
+        expect(byClass(s2, "summary-bet-line").map(textOf)).toEqual(["買い目(分析時点) 2点・合計 1,200円"]);
       });
 
       it("分析時刻は要約にだけ出す(結果の見出しの下の行には出さない)。分析モデルの行は残る", () => {
@@ -1672,7 +1681,7 @@ describe("要約のカードと説明文の折りたたみ(Issue #546)", () => {
       });
 
       it("配分が「未設定」の分析でも、要約には設定への案内(括弧書き)を出さない(閲覧者・管理者とも「配分なし」だけ)", () => {
-        const unset = rich({ allocation: { ...ALLOC, route: "unset", bankroll: 0, perRaceCap: 0, bets: [] } });
+        const unset = rich({ allocation: { ...ALLOC, route: "unset", bankroll: 0, perRaceCap: 0, bets: [] }, close: null }); // 資金が未設定なら再計算の回は ok にならない(`close` なし)
         for (const readOnly of [false, true]) {
           const s = byClass(tree(unset, { readOnly }), "summary")[0]!;
           expect(textOf(s)).toContain("配分なし");
@@ -1738,6 +1747,26 @@ describe("要約のカードと説明文の折りたたみ(Issue #546)", () => {
           // 対照: 同じ入力で想定を 1 頭だけ入れると、馬ごとの評価のボタンだけが出る
           const one = rich({ timeIndexNote: null, horses: plain.horses.map((h, i) => (i === 0 ? { ...h, fairWinOdds: 3.2, winOdds: 4.1 } : h)) });
           expect(toggles(tree(one))).toHaveLength(1);
+        });
+
+        it("馬ごとの評価のボタンは、説明文が 1 つでも残れば出す(単勝だけ・複勝だけ・タイム指数だけ)。3 つとも無ければ出さない", () => {
+          const base = rich({ timeIndexNote: null }).horses;
+          const horsesOnly = (over: Partial<AnalysisDetail["horses"][number]>) => base.map((h) => ({ ...h, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, legStyle: null, earlyPos: null, timeIndexLine: null, ...over }));
+          const cases: readonly [string, AnalysisDetail, string[]][] = [
+            ["単勝だけ", rich({ timeIndexNote: null, horses: horsesOnly({ fairWinOdds: 3.2, winOdds: 4.1 }) }), ["win-odds-note"]],
+            ["複勝だけ", rich({ timeIndexNote: null, horses: horsesOnly({ fairPlaceOdds: 1.4, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3 }) }), ["place-odds-note"]],
+            ["タイム指数だけ", rich({ timeIndexNote: "タイム指数: 説明の文。", horses: horsesOnly({}) }), ["time-index-note"]],
+            ["3 つとも無い", rich({ timeIndexNote: null, horses: horsesOnly({}) }), []],
+          ];
+          for (const [label, a, shown] of cases) {
+            const closed = tree(a);
+            const open = tree(a, { notesOpen: true });
+            // 隊列図のボタンは出ない入力(脚質なし)なので、ボタンの数は「馬ごとの評価」の分だけ
+            expect(byClass(closed, "formation"), `${label}: 前提: 隊列図は出ない`).toHaveLength(0);
+            expect(toggles(closed), label).toHaveLength(shown.length === 0 ? 0 : 1);
+            for (const cls of NOTE_CLASSES) expect(byClass(closed, cls), `${label}(閉): ${cls}`).toHaveLength(0);
+            for (const cls of NOTE_CLASSES) expect(byClass(open, cls), `${label}(開): ${cls}`).toHaveLength(shown.includes(cls) ? 1 : 0);
+          }
         });
 
         it("`<details>`・`<summary>` は使わない。許可リストの要素・属性だけで組み立てられる(閉・開とも)", () => {
