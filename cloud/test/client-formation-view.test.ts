@@ -49,10 +49,12 @@ const textOf = (node: VNode | string): string => (typeof node === "string" ? nod
 
 const ROUTE = { date: "20260628", venue: "central", race: null, analysis: 7, settings: false } as const;
 const view = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route: ROUTE, source: { kind: "ready", analysis: a } }), noopActions);
+/** 説明文(注記)を開いた状態(Issue #546: 説明文は既定で閉じる。注記の中身を見るテストだけ開いて描く)。 */
+const viewOpen = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route: ROUTE, source: { kind: "ready", analysis: a }, notesOpen: true }), noopActions);
 
 describe("結果画面の想定隊列図の節(VNode)", () => {
   it("節は 1 つ。見出し・注記・想定ペースの行・局面ごとの見出しと軸と図。順は『3着内率の上位5頭』のあと・『馬ごとの評価』の前、AI の展開予想のあと", () => {
-    const tree = view(analysis(four(), { text: "前が競る", pace: "ハイ" }));
+    const tree = viewOpen(analysis(four(), { text: "前が競る", pace: "ハイ" }));
     const sections = byClass(tree, "formation");
     expect(sections.length).toBe(1);
     const sec = sections[0]!;
@@ -118,7 +120,7 @@ describe("結果画面の想定隊列図の節(VNode)", () => {
     expect(findAll(tree, (n) => n.tag === "button" && classesOf(n).some((c) => c.startsWith("replay"))).length).toBe(0);
   });
 
-  it("許可リスト(dom.ts)で組み立てられる: 使う要素は div・span・p・section・ul・li・h2・strong だけで canvas・style は使わない", () => {
+  it("許可リスト(dom.ts)で組み立てられる: 使う要素は div・span・p・section・ul・li・h2・strong・button(Issue #546 の「仕組みを見る」)だけで canvas・style は使わない", () => {
     const tags = new Set<string>();
     const attrs = new Set<string>();
     const doc: DomDocument = {
@@ -129,7 +131,7 @@ describe("結果画面の想定隊列図の節(VNode)", () => {
       createTextNode: () => ({}),
     };
     mount(doc, { replaceChildren() {} }, byClass(view(analysis()), "formation")[0]!);
-    expect([...tags].sort()).toEqual(["div", "h2", "li", "p", "section", "span", "strong", "ul"]);
+    expect([...tags].sort()).toEqual(["button", "div", "h2", "li", "p", "section", "span", "strong", "ul"]);
     expect(attrs.has("style")).toBe(false);
     expect(attrs.has("data-slot")).toBe(true);
     expect(attrs.has("role")).toBe(true);

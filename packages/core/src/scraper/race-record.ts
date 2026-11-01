@@ -1,7 +1,8 @@
 /**
- * 結果ページ 1 枚から、NDJSON の 1 行(1 レース)を作る。Issue #532。開発用。
+ * 結果ページ 1 枚から、NDJSON の 1 行(1 レース)を作る。Issue #532。#549-A1 で `scripts/history-results/build-record.ts` から core へ移した
+ * (開発用スクリプトと、本番の Cloudflare の取得〈#549-A3〉の両方から使う)。
  *
- * 既存の `parseRaceResult`(着順・通過順・後3F・人気・単勝オッズ・払戻)と、補助パーサ(`result-extra.ts`)の両方で読み、
+ * 既存の `parseRaceResult`(着順・通過順・後3F・人気・単勝オッズ・払戻)と、補助パーサ(`parse-result-extra.ts`)の両方で読み、
  * **行順・馬番・馬名が合うことを確かめてから**馬ごとに合成する。合わなければそのレースは「読めない」として理由つきで返す
  * (値を黙って合成しない)。ほかにも、race_id と title の食い違い(年・レース番号・地方の月日)・種別の置き場違い・文字化けを弾く。
  */
@@ -11,18 +12,27 @@ import {
   kaisaiDateFromNarRaceId,
   parseRaceId,
   venueKindOfRaceId,
-} from "../../packages/core/src/scraper/ids.js";
+  type RaceIdVenueKind,
+} from "./ids.js";
 import {
   parseRaceResult,
   RaceResultNotConfirmedError,
-} from "../../packages/core/src/scraper/parse-race-result.js";
+} from "./parse-race-result.js";
 import type {
   RaceComboPayoutResult,
   RacePayoutEntry,
   RaceResult,
-} from "../../packages/core/src/scraper/types.js";
-import type { Kind } from "./layout.js";
-import { parseResultExtra, ResultExtraError, type ExtraHeader, type ExtraRow } from "./result-extra.js";
+} from "./types.js";
+import { parseResultExtra, ResultExtraError, type ExtraHeader, type ExtraRow } from "./parse-result-extra.js";
+
+/** 中央か地方か(結果ページの置き場の区別)。race_id の場コードが示す種別と同じ型。 */
+export type Kind = RaceIdVenueKind;
+
+/**
+ * 出力(`RaceRecord`)の意味を変えたら上げる版数。レコードの `parserVersion` に入る。
+ * 1: #549-A1 の前(版数なし。移動前の出力)。 2: ラップ表(`lapTimes`・`lapDistances`・`pace`・`paceClass`)を足した。
+ */
+export const RACE_RECORD_PARSER_VERSION = 2;
 
 /** 読めなかった理由の分類(parse の最後に件数を出す)。 */
 export type RejectCategory =
@@ -47,6 +57,13 @@ export interface RecordHorse {
   readonly finish: number | null;
   /** 非数値の着順の文字(中止・除外・取消など)。数値なら null。 */
   readonly finishStatus: string | null;
+  /**
+   * 降着(`5(降)` の形。戦績 API の表記で、`parseRaceResult` がこの形を想定している)のとき true。
+   * **結果ページでの降着の写り方は未確認**(#549-A1 で保留。降着のあったレースのフィクスチャが無い)。手元の過去の結果(生のページはリポジトリに無く、
+   * この数は再現できない。読んだときは 1,254 レース・16,774 頭)では 0 件だが、拾えていないのではなく降着が無かったと見ている: (1) ページ(script を除く)に「降着」「審議」
+   * 「繰り上げ」「失格」「妨害」「入線」「着順変更」の語が無い、(2) `.Rank` の数字でない値は中止・除外・取消だけ、
+   * (3) 着順とタイムの逆転が 0(降着があれば入線順と着順が食い違う)。実ページを取れたら、写り方を確かめて版数を上げる。
+   */
   readonly finishDemoted: boolean;
   readonly finishRaw: string;
   readonly horseId: string | null;
@@ -88,6 +105,8 @@ export interface RacePayouts {
 }
 
 export interface RaceRecord extends Omit<ExtraHeader, "date" | "venueName" | "raceNumber"> {
+  /** 読み取りの版数({@link RACE_RECORD_PARSER_VERSION})。 */
+  readonly parserVersion: number;
   readonly kind: Kind;
   readonly raceId: string;
   /** `YYYY-MM-DD` */
@@ -252,6 +271,7 @@ export function buildRaceRecord(html: string, raceId: string, kind: Kind): Build
   return {
     ok: true,
     record: {
+      parserVersion: RACE_RECORD_PARSER_VERSION,
       kind,
       raceId,
       date,

@@ -71,6 +71,24 @@
 > 起きていない**。結果を捏造しないこと(CLAUDE.md 冒頭「最重要: 実行と報告の鉄則」、詳細は
 > [`docs/lessons-learned.md`](./lessons-learned.md))。
 
+## ブランチと公開の流れ
+
+規則そのものは CLAUDE.md の「その他」(main への直接の push の禁止・デプロイを確かめたら PR で main に取り込む・Dependabot の扱い)にある。ここには、実際に行っている手順を書く。
+
+- **ブランチは 2 本**: 作業ブランチ `claude/issue-order-processing-wjgpdd` と `main`。開発の push は作業ブランチだけに行い、`main` へは直接 push しない。
+- **作業途中**: 作業ブランチにコミットして push する。メッセージには「(レビュー継続中)」と「メタレビューは未承認」を書き、承認印は付けない(CI は走るが、本番へはデプロイしない)。
+- **公開**(メタレビューの承認の後):
+  1. `git worktree add -q --detach <作業用のディレクトリ> origin/main` で、`main` の先端の作業場所を別に作る。
+  2. そこで作業ブランチを `--no-ff` で merge する。merge のコミットの件名の末尾に `[PUBLISH-APPROVED]` を付ける。承認前のコミットが作業ブランチに載っているときは、ブランチの先端ではなく、承認したコミットを指定して merge する。
+  3. その merge のコミットを、作業ブランチへ push する(`main` には push しない)。承認印が付いているので、`deploy-cloud.yml` の deploy ジョブが本番へデプロイする。
+  4. 作業ブランチから `main` への PR を作る。
+  5. `ci.yml` の verify と、`deploy-cloud.yml` の check・smoke・deploy が、ジョブ単位で success になったことを確かめる(run 全体の success だけでは、deploy が skipped のことがある)。
+  6. PR を merge(merge commit)で `main` に取り込む。
+  7. 作業ブランチを `main` に揃える。作業ブランチに `main` に無いコミットが無ければ `git push origin origin/main:refs/heads/claude/issue-order-processing-wjgpdd`、残っていれば作業ブランチに `origin/main` を merge して push する(force push はしない)。
+  8. 作業用のディレクトリを `git worktree remove` で消し、手元の作業ブランチを `git merge --ff-only origin/main` で揃える。対象の Issue に根拠(PR の番号・merge のコミット・deploy の成否)を書いて閉じる。
+- **Dependabot の PR**: 宛先は作業ブランチ(`.github/dependabot.yml` の `target-branch`)。code-reviewer のレビューとメタレビューを通してから、merge commit で作業ブランチに取り込む(squash しない)。取り込んだだけでは本番に出ないので、次の承認印付きの公開(上の手順)で、ほかの変更と一緒に本番と `main` に入る。
+- **公開の時刻**: 21:00・23:00 の cron の処理と、週末の発走前の分析の時間帯を避ける。
+
 ## セッション運用(タスク単位)
 
 - 2 種のサブエージェント(tdd-implementer / code-reviewer)は**タスク単位**で運用し、無関係な
@@ -79,6 +97,8 @@
   レビューを一貫して担うのが望ましい)。
 - **タスク完了(コミット確認まで)したら 2 体〈tdd-implementer・code-reviewer〉のセッションを破棄**し、次タスクは新規起動する。
 - 未コミットのまま次のサブエージェントを走らせない(作業ツリー競合で成果が消える)。
+- **サブエージェントへの指示には「pkill・killall は使わない。止めるのは自分が起動した PID だけ」を必ず書く**(2026-11-01、#546-1 の実装の担当が `pkill -f workerd` を使った。害は無かったが、ほかの担当の smoke や vitest を巻き込みうる)。smoke や vitest の全件は、`ps` で他のプロセスが無いことを確かめてから、1 つずつ走らせる。
+- レビューは、作業ツリーではなく `git archive` で作ったコピーで行わせる(実装の担当と作業ツリーを取り合わないため)。
 
 ## 報告と承認の方針
 

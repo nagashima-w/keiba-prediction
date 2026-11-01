@@ -183,6 +183,8 @@ export interface AnalysisDetail {
     readonly raceName: string | null;
     readonly grade: string | null;
     readonly oddsStatus: string | null;
+    /** 発走時刻(Issue #546。サーバが `race.startTime` で返す「15:45」の形)。詳細なし・キー無し(古いサーバの応答)は null。パーサは常にキーを持つ(型で省略可なのは `distance` と同じ理由)。 */
+    readonly startTime?: string | null;
     /** 想定複勝オッズの基準(Issue #253。top3=3着内率〈8頭以上〉・top2=2着内率〈5〜7頭。複勝は2着まで〉・null=出さない〈4頭以下〉)。 */
     readonly placeBasis: "top3" | "top2" | null;
     /** 距離(m。Issue #311)。詳細なし・キー無し(古いサーバの応答)は null。パーサは常にキーを持つ(型で省略可なのは `pace` と同じ理由)。 */
@@ -402,6 +404,9 @@ function parseDetail(value: unknown): AnalysisDetail | null {
   if (placeBasis !== "top3" && placeBasis !== "top2" && placeBasis !== null) return null;
   const distance = race["distance"] ?? null;
   if (!numOrNull(distance)) return null;
+  // 発走時刻(Issue #546): キー無し(古いサーバの応答)は null。文字列・null 以外の型は応答ごと不正にする(グレードと同じ)。
+  const startTime = race["startTime"] ?? null;
+  if (!strOrNull(startTime)) return null;
   // コースの回り(`race.turn`。Issue #311)は Issue #375 で廃止した。古いサーバの応答にキーがあっても読まない(値が不正でも応答を拒否しない)。
   // Issue #314: 想定ペースは、キー無し・4 値以外は「不明」(補助の演出なので、応答ごと不正にはしない)。
   const pace = PACES.find((p) => p === race["pace"]) ?? "不明";
@@ -426,7 +431,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     model,
     llmNote,
     llmCalls: parsedCalls,
-    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis, distance, pace },
+    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"], placeBasis, distance, pace, startTime },
     baba: parseLines(value["baba"], BABA_MAX_LINES, BABA_MAX_LINE_LENGTH),
     development: parseDevelopment(value["development"]),
     timeIndexNote: typeof value["timeIndexNote"] === "string" ? value["timeIndexNote"] : null,

@@ -311,7 +311,10 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     await h.app.whenIdle();
     expect(h.calls.filter((u) => u === ANALYSIS_5)).toHaveLength(2);
     expect(h.text()).toContain("福島11R テストステークス");
-    expect(findAll(h.tree(), (n) => n.tag === "button")).toHaveLength(0);
+    // 成功した画面のボタンは、馬ごとの評価の表の列見出し(sort-button。Issue #546-2)だけ。「更新」は無い
+    const okButtons = findAll(h.tree(), (n) => n.tag === "button");
+    expect(okButtons.length, "前提: 表の列見出しのボタンがある").toBeGreaterThan(0);
+    expect(okButtons.every((b) => String(b.attrs?.["class"]) === "sort-button")).toBe(true);
   });
 
   it("結果が 404(無い id)なら「見つかりません」の文言", async () => {
@@ -935,5 +938,145 @@ describe("発走前の結果をカードの中に出す(Issue #188)", () => {
       expect(toggleButton(h).attrs?.["aria-expanded"]).toBe("true"); // 同じ race_id でも日付が違えば別
       expect(toggleButton(h).attrs?.["data-date"]).toBe(OTHER_DATE);
     });
+  });
+});
+
+/**
+ * Issue #546: 説明文の折りたたみ(「仕組みを見る」)の状態。メモリに持つ(分析 id ごと。既定は閉じる)。ハッシュ・localStorage には持たない。「更新」・画面の往復で消さない。
+ * 結果画面とレース画面のカードは、同じ分析 id なら同じ状態。開閉は取得を起こさない。
+ */
+describe("説明文の折りたたみの状態(Issue #546)", () => {
+  const RACE_HASH = `#date=${DATE}&venue=central&race=${RACE_ID}`;
+  /** 単勝の想定(説明文が出る材料)を持つ分析。 */
+  const withNotes = (over: Record<string, unknown> = {}) => {
+    const body = analysisBody(over);
+    return { ...body, analysis: { ...body.analysis, horses: body.analysis.horses.map((hr) => ({ ...hr, fairWinOdds: 3.2, winOdds: 4.1 })) } };
+  };
+  const notesToggles = (h: Harness): VNode[] => findAll(h.tree(), (n) => String(n.attrs?.["class"]) === "notes-toggle");
+  const winNotes = (h: Harness): VNode[] => findAll(h.tree(), (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("win-odds-note"));
+  const refreshButton = (h: Harness): VNode => findAll(h.tree(), (n) => n.tag === "button" && String(n.attrs?.["class"]) === "refresh")[0]!;
+  const started = async (hash: string): Promise<Harness> => {
+    const h = harness(hash);
+    h.responders.set(ANALYSIS_5, async () => ok(withNotes()));
+    h.responders.set("/api/analyses/6", async () => ok(withNotes({ id: 6 })));
+    h.app.start();
+    await h.app.whenIdle();
+    return h;
+  };
+
+  it("既定は閉じる。ボタンのタップで開き(説明文が出る・aria-expanded=true)、もう一度で閉じる。取得は増えない", async () => {
+    const h = await started(RACE_HASH);
+    const before = h.calls.length;
+    expect(notesToggles(h), "前提: ボタンが 1 つ(馬ごとの評価)").toHaveLength(1);
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("false");
+    expect(winNotes(h)).toHaveLength(0);
+    notesToggles(h)[0]!.on!.click!();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("true");
+    expect(winNotes(h)).toHaveLength(1);
+    notesToggles(h)[0]!.on!.click!();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("false");
+    expect(winNotes(h)).toHaveLength(0);
+    expect(h.calls).toHaveLength(before);
+  });
+
+  it("開いた状態は、「更新」・一覧への往復で保たれる。別の分析 id は既定の閉じる", async () => {
+    const h = await started(RACE_HASH);
+    notesToggles(h)[0]!.on!.click!();
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("true"); // 「更新」で保たれる
+    h.go(`#date=${DATE}&venue=central`);
+    await h.app.whenIdle();
+    h.go(RACE_HASH);
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("true"); // 往復で保たれる
+    h.go(`#date=${DATE}&venue=central&analysis=6`);
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["data-analysis"], "前提: 別の分析 id の結果画面").toBe("6");
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("false");
+  });
+
+  it("結果画面(#analysis=<id>)とレース画面のカードは、同じ分析 id なら同じ状態を共有する", async () => {
+    const h = await started(RACE_HASH);
+    notesToggles(h)[0]!.on!.click!(); // カードの中で開く
+    h.go(`#date=${DATE}&venue=central&analysis=5`);
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("true"); // 結果画面でも開いている
+    notesToggles(h)[0]!.on!.click!(); // 結果画面で閉じる
+    h.go(RACE_HASH);
+    await h.app.whenIdle();
+    expect(notesToggles(h)[0]!.attrs?.["aria-expanded"]).toBe("false");
+  });
+});
+
+/**
+ * Issue #546-2: 馬ごとの評価の表の並べ替えの状態。メモリに持つ(分析 id ごと。既定は馬番の昇順)。ハッシュ・localStorage には持たない。「更新」・画面の往復で消さない。
+ * 結果画面とレース画面のカードは、同じ分析 id なら同じ状態。並べ替えは取得を起こさない。
+ */
+describe("馬ごとの評価の表の並べ替えの状態(Issue #546-2)", () => {
+  const RACE_HASH = `#date=${DATE}&venue=central&race=${RACE_ID}`;
+  /** 馬ごとに 3着内率が違う分析(並べ替えで並びが変わる材料)。 */
+  const withVaried = (over: Record<string, unknown> = {}) => {
+    const body = analysisBody(over);
+    const priors = [0.1, 0.5, 0.3];
+    return { ...body, analysis: { ...body.analysis, horses: priors.map((prior, i) => ({ ...body.analysis.horses[0]!, umaban: i + 1, name: `馬${i + 1}`, prior })) } };
+  };
+  const sortButton = (h: Harness, key: string): VNode => findAll(h.tree(), (n) => n.tag === "button" && n.attrs?.["data-sort-key"] === key)[0]!;
+  const umabans = (h: Harness): string[] => findAll(h.tree(), (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("eval-row")).map((r) => String(findAll(r, (n) => n.tag === "td")[0]!.children?.[0]));
+  const refreshButton = (h: Harness): VNode => findAll(h.tree(), (n) => n.tag === "button" && String(n.attrs?.["class"]) === "refresh")[0]!;
+  const started = async (hash: string): Promise<Harness> => {
+    const h = harness(hash);
+    h.responders.set(ANALYSIS_5, async () => ok(withVaried()));
+    h.responders.set("/api/analyses/6", async () => ok(withVaried({ id: 6 })));
+    h.app.start();
+    await h.app.whenIdle();
+    return h;
+  };
+
+  it("既定は馬番の昇順。列見出しのボタンで並べ替わり、同じ列をもう一度で向きが逆。取得は増えない", async () => {
+    const h = await started(RACE_HASH);
+    const before = h.calls.length;
+    const initial = umabans(h);
+    expect(initial.length, "前提: 3 頭以上の表").toBeGreaterThanOrEqual(3);
+    expect(initial).toEqual([...initial].sort((a, b) => Number(a) - Number(b)));
+    sortButton(h, "prior").on!.click!();
+    const desc = umabans(h);
+    expect(desc, "3着内率の大きい順で並びが変わった").not.toEqual(initial);
+    expect(sortButton(h, "prior").attrs?.["data-sort-dir"], "もう一度押すと昇順").toBe("asc");
+    sortButton(h, "prior").on!.click!();
+    const asc = umabans(h);
+    expect(asc, "昇順は降順と違う並び").not.toEqual(desc);
+    expect(h.calls).toHaveLength(before);
+  });
+
+  it("並べ替えは「更新」・一覧への往復で保たれる。別の分析 id は既定の馬番の昇順", async () => {
+    const h = await started(RACE_HASH);
+    const initial = umabans(h);
+    sortButton(h, "prior").on!.click!();
+    const sorted = umabans(h);
+    expect(sorted, "前提: 並びが変わった").not.toEqual(initial);
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(umabans(h)).toEqual(sorted);
+    h.go(`#date=${DATE}&venue=central`);
+    await h.app.whenIdle();
+    h.go(RACE_HASH);
+    await h.app.whenIdle();
+    expect(umabans(h)).toEqual(sorted);
+    h.go(`#date=${DATE}&venue=central&analysis=6`);
+    await h.app.whenIdle();
+    expect(sortButton(h, "prior").attrs?.["data-analysis"], "前提: 別の分析 id の結果画面").toBe("6");
+    expect(umabans(h)).toEqual(initial);
+  });
+
+  it("結果画面(#analysis=<id>)とレース画面のカードは、同じ分析 id なら同じ並べ替えを共有する", async () => {
+    const h = await started(RACE_HASH);
+    const initial = umabans(h);
+    sortButton(h, "prior").on!.click!();
+    const sorted = umabans(h);
+    expect(sorted).not.toEqual(initial);
+    h.go(`#date=${DATE}&venue=central&analysis=5`);
+    await h.app.whenIdle();
+    expect(umabans(h)).toEqual(sorted);
   });
 });

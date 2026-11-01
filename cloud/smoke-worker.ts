@@ -43,7 +43,11 @@ import type { ConnectFn, SocketLike } from "./src/socket-fetch";
 import { GATE_NAME, type Env } from "./src/handler";
 import { runCloudAnalysis } from "./src/pipeline";
 import { RaceDay } from "./src/race-day-do";
+import { RaceArchiveFetchDO as RealRaceArchiveFetchDO } from "./src/race-archive-fetch-do";
+import type { ArchiveFetchOptions, PlanProgressLike } from "./src/race-archive-fetch-core";
 import { D1AnalysisStore } from "./src/analysis-repository";
+import { D1RaceArchiveStore } from "./src/race-archive-repository";
+import { buildRaceRecord } from "../packages/core/src/scraper/race-record";
 import { D1ResultStore } from "./src/result-repository";
 import worker from "./src/worker";
 
@@ -126,10 +130,26 @@ function route(host: string, path: string): { status: number; body: string } {
     if (host === "race.netkeiba.com" && date === "20260628") {
       return { status: 200, body: centralListHtml };
     }
+    // Issue #554: 過去の結果の取得の確認用。9 日の中央の一覧は、結果の fixture のレース(202603020211)1 件だけ。
+    if (host === "race.netkeiba.com" && date.endsWith("09")) {
+      return {
+        status: 200,
+        body: `<div class="RaceList_Body"><ul><li class="RaceList_DataItem"><a href="../race/result.html?race_id=202603020211">x</a></li></ul></div>`,
+      };
+    }
     if (host === "nar.netkeiba.com" && date === "20260927") {
       return { status: 200, body: narListHtml };
     }
     return { status: 200, body: "<html><body></body></html>" };
+  }
+  // Issue #554: 過去の結果の取得の確認用の月のカレンダー(中央)。どの月も 9 日だけが開催日。
+  if (host === "race.netkeiba.com" && path.startsWith("/top/calendar.html")) {
+    const year = /[?&]year=(\d{4})/.exec(path)?.[1] ?? "2026";
+    const month = String(/[?&]month=(\d{1,2})/.exec(path)?.[1] ?? "1").padStart(2, "0");
+    return {
+      status: 200,
+      body: `<div class="Race_Calendar_Main"><table class="Calendar_Table"><tbody><tr><td><a href="../top/race_list.html?kaisai_date=${year}${month}09">x</a></td></tr></tbody></table></div>`,
+    };
   }
   // Issue #177: RaceDay(朝の取得)の確認用。出馬表のほかに、戦績 API(db ホスト)・調教・単勝複勝のオッズ(type=1)を fixture で返す。
   if (host === "db.netkeiba.com" && path.startsWith("/horse/ajax_horse_results.html")) {
@@ -320,6 +340,26 @@ async function smokeAnalysis(): Promise<Response> {
 /** 日単位の DO(Issue #177)。本番の入口(#180)はまだ無いので、smoke だけが RPC を呼ぶ。 */
 export { RaceDay };
 export { ResultBackfill } from "./src/result-backfill-do";
+// Issue #554: 過去の結果の取得の DO(本番の worker.ts と同じもの。binding RACE_ARCHIVE_FETCH のクラス。smoke の var `RACE_ARCHIVE_NIGHTLY_LIMIT=0` で止めてある)。
+export { RealRaceArchiveFetchDO as RaceArchiveFetchDO };
+
+/**
+ * Issue #554: 過去の結果の取得を、workerd の実環境(本物の gate の DO + 偽ソケット・D1・R2・アラーム)で最後まで通すための **smoke 専用の DO**(smoke の一時設定だけが binding `RACE_ARCHIVE_SMOKE` で指す。
+ * 本番の `wrangler.toml` にも本番のエントリ〈worker.ts〉にも無い)。本番の DO を継いで、`options()`(開始時刻・時間帯・間隔を外す。取る範囲は先月から)と `planProgress()`(その日は開催日ではない)だけを差し替える。
+ * 取得は gate を通り、偽ソケットが返す(netkeiba には出ない)。
+ */
+export class RaceArchiveSmokeDO extends RealRaceArchiveFetchDO {
+  protected override options(): ArchiveFetchOptions {
+    const today = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 7);
+    const [y, m] = today.split("-").map(Number) as [number, number];
+    const previous = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+    return { notBeforeMs: 0, windowStartMin: 0, windowEndMin: 24 * 60, intervalMs: 50, fromMonth: previous };
+  }
+
+  protected override planProgress(): Promise<PlanProgressLike> {
+    return Promise.resolve({ stage: "done", venues: [{ venue: "central", state: "ok", listed: 0 }] });
+  }
+}
 export { VerifyReportDO } from "./src/verify-do";
 // Issue #235: 日報の DO(本番の worker.ts と同じもの。binding のクラスが入口から export されている必要がある)。
 export { DailyReportDO } from "./src/daily-report-do";
@@ -329,7 +369,10 @@ export { AllocationExportDO } from "./src/allocation-export-do";
 // Issue #279: 月報の DO(同上)。
 export { MonthlyReportDO } from "./src/monthly-report-do";
 
-type SmokeEnv = Env;
+/** smoke の一時設定だけが持つ binding `RACE_ARCHIVE_SMOKE`(Issue #554。{@link RaceArchiveSmokeDO})を足した Env。 */
+type SmokeEnv = Env & {
+  RACE_ARCHIVE_SMOKE?: { idFromName(name: string): any; get(id: any): { kick(): Promise<void>; getStatus(): Promise<unknown> } };
+};
 
 /**
  * Issue #177: 日単位の DO `RaceDay` を、workerd の実環境(本物の DO の SQLite・アラーム・NetkeibaGate への RPC・偽ソケット)で通す。
@@ -439,6 +482,48 @@ async function smokeSeedAnalyses(env: SmokeEnv): Promise<Response> {
 }
 
 /**
+ * Issue #551(#549-A2): 過去の結果ページの保存(`D1RaceArchiveStore`: R2 → D1)を、workerd の実環境(本物の D1・R2・`node:zlib` の gzip)で通す。smoke 専用
+ * (認証の関門の前に置く。netkeiba にも Anthropic にも出ない)。本番の Worker はこの部品をまだ呼ばない(呼び出し元は #549-A3)。
+ *  - `/smoke/race-archive`: フィクスチャの結果ページ(中央 202603020211)を読み取り、2 回保存し(1 回目 saved・2 回目 unchanged)、R2 から読み戻し、目録の 1 行を取る。
+ *    R2 のオブジェクトの先頭 2 バイト・目録の件数・r2_ops の回数の増分・読み戻した HTML とレコードが元と同じか(文字列の比較)を返す。
+ */
+async function smokeRaceArchive(env: SmokeEnv): Promise<Response> {
+  const built = buildRaceRecord(resultCentralHtml, "202603020211", "central");
+  if (!built.ok) {
+    return Response.json({ ok: false, error: `読み取れません: ${built.category} ${built.detail}` }, { status: 500 });
+  }
+  const store = new D1RaceArchiveStore({ db: env.DB, bucket: env.ANALYSIS_DETAIL });
+  const opsOf = async (): Promise<{ a: number; b: number }> => {
+    const row = await env.DB.prepare("SELECT COALESCE(SUM(class_a), 0) AS a, COALESCE(SUM(class_b), 0) AS b FROM r2_ops").first<{ a: number; b: number }>();
+    return { a: row?.a ?? 0, b: row?.b ?? 0 };
+  };
+  const opsBefore = await opsOf();
+  const first = await store.saveRaceArchive({ record: built.record, html: resultCentralHtml });
+  const second = await store.saveRaceArchive({ record: built.record, html: resultCentralHtml });
+  const read = await store.readRaceArchive("202603020211");
+  const missing = await store.readRaceArchive("202603020299");
+  const entry = await store.getCatalogEntry("202603020211");
+  const object = await env.ANALYSIS_DETAIL.get("race-results/202603020211.json.gz");
+  const head = object === null ? null : Array.from(new Uint8Array(await object.arrayBuffer()).slice(0, 2));
+  const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM race_archive").first<{ n: number }>();
+  const opsAfter = await opsOf();
+  return Response.json({
+    ok: true,
+    statuses: [first.status, second.status],
+    readStatus: read.status,
+    missingStatus: missing.status,
+    htmlSame: read.status === "found" && read.archive.html === resultCentralHtml,
+    recordSame: read.status === "found" && JSON.stringify(read.archive.record) === JSON.stringify(built.record),
+    gzipHead: head,
+    catalogCount: count?.n ?? null,
+    entry,
+    horses: built.record.horses.length,
+    opsDelta: { classA: opsAfter.a - opsBefore.a, classB: opsAfter.b - opsBefore.b },
+    dbSizeBytes: first.dbSizeBytes,
+  });
+}
+
+/**
  * Issue #279・#280: 月報の DO `MonthlyReportDO` を、workerd の実環境(本物の DO の SQLite・アラーム・D1)で通すための材料の投入。smoke 専用(認証の関門の前に置く。netkeiba にも Anthropic にも Discord にも出ない)。
  *  - `/smoke/monthly/seed?month=YYYYMM`: ローカルの D1 に、その月の分析を 2 件(月初と月末の開催日。版は別々)と、月初の分の結果(1 着の馬の行)を入れる。
  * 月報の作成・作り直しの依頼は、本番の入口(管理者の `POST /api/monthly-reports/run`)を smoke.ts が直接叩く(Issue #280。ここに RPC の近道は持たない)。
@@ -481,6 +566,30 @@ export default {
     if (url.pathname.startsWith("/smoke/race-day/")) {
       try {
         return await smokeRaceDay(url, env);
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
+    if (url.pathname === "/smoke/race-archive-fetch") {
+      // Issue #554: 過去の結果の取得(smoke 専用の DO)を kick して状態を返し、保存された目録の件数と R2 のオブジェクトの有無も返す。
+      try {
+        const ns = env.RACE_ARCHIVE_SMOKE;
+        if (ns === undefined) {
+          return Response.json({ ok: false, error: "RACE_ARCHIVE_SMOKE binding なし" }, { status: 500 });
+        }
+        const stub = ns.get(ns.idFromName("main"));
+        await stub.kick();
+        const status = await stub.getStatus();
+        const catalog = await env.DB.prepare("SELECT COUNT(*) AS n FROM race_archive").first<{ n: number }>();
+        const object = await env.ANALYSIS_DETAIL.get("race-results/202603020211.json.gz");
+        return Response.json({ ok: true, status, catalogCount: catalog?.n ?? 0, r2Object: object !== null });
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
+    if (url.pathname === "/smoke/race-archive") {
+      try {
+        return await smokeRaceArchive(env);
       } catch (error) {
         return Response.json({ ok: false, error: String(error) }, { status: 500 });
       }

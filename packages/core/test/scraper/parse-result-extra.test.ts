@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseResultExtra, ResultExtraError } from "../history-results/result-extra.js";
+import { loadFixture } from "../support/fixtures.js";
+import { parseResultExtra, ResultExtraError } from "../../src/scraper/parse-result-extra.js";
 
 /**
  * Issue #532 段階 1: 開発用の補助パーサ(`parseResultExtra`)のテスト。
@@ -8,7 +8,7 @@ import { parseResultExtra, ResultExtraError } from "../history-results/result-ex
  * ネットワークには出ない。
  */
 
-const fx = (name: string): string => readFileSync(new URL(`../../fixtures/${name}`, import.meta.url), "utf8");
+const fx = loadFixture;
 
 const CENTRAL_2021 = fx("history_central_result_202105040811.html");
 const NAR_2021 = fx("history_nar_result_202146110310.html");
@@ -300,5 +300,161 @@ describe("補助パーサ: 壊れた構造は黙って値を作らない", () =>
 
   it("結果テーブルが無いときは例外", () => {
     expect(() => parseResultExtra("<html><title>x</title></html>", "central")).toThrow(ResultExtraError);
+  });
+});
+
+/**
+ * #549-A1: ラップ表(`table.Race_HaronTime`)。区間タイム・位置・ペースの文字(最初の 3 区間の和 − 最後の 3 区間の和)・ペースの区分。
+ * 期待値は、フィクスチャの HTML を python で別に読んで 0.1 秒単位の整数で足した値(パーサの出力を写していない)。
+ * 戦績 API の `pace` との一致は race-record.test.ts で固定する。
+ */
+describe("補助パーサ: ラップ表(区間タイム・ペース・ペースの区分)", () => {
+  // [フィクスチャ, 種別, 先頭の位置(m), 末尾の位置(m), 区間タイム(秒), ペース, 区分]
+  const TABLE: ReadonlyArray<
+    readonly [string, "central" | "nar", number, number, readonly number[], string | null, "S" | "M" | "H"]
+  > = [
+    ["history_central_result_202105040811.html", "central", 200, 2000, [12.8, 11.5, 11.9, 12.0, 12.3, 12.0, 11.8, 11.1, 11.1, 11.4], "36.2-33.6", "S"],
+    ["result_202602010605.html", "central", 200, 1200, [12.5, 11.0, 11.2, 11.4, 11.4, 11.8], "34.7-34.6", "M"],
+    // 距離が 200 の倍数でないレースは、先頭の位置が 100m(最初の区間が 100m 分)。戦績 API の pace と一致する実例(race-record.test.ts)
+    ["result_202602010607.html", "central", 100, 1700, [6.9, 10.8, 12.2, 12.9, 12.2, 12.3, 12.4, 12.7, 12.5], "29.9-37.6", "M"],
+    ["result_202603020210.html", "central", 100, 1700, [7.3, 11.2, 11.8, 12.4, 12.2, 12.1, 12.4, 12.4, 12.4], "30.3-37.2", "M"],
+    ["result_202603020211.html", "central", 200, 1800, [12.1, 10.8, 11.6, 12.3, 12.2, 11.7, 11.4, 11.4, 11.7], "34.5-34.5", "M"],
+    ["result_202605040205.html", "central", 200, 2000, [13.3, 12.1, 12.5, 12.6, 13.2, 13.1, 13.0, 11.6, 11.2, 11.3], "37.9-34.1", "S"],
+    ["result_202606040810.html", "central", 200, 1200, [12.0, 10.6, 11.4, 11.7, 11.7, 12.3], "34.0-35.7", "H"],
+    ["result_202607020502.html", "central", 200, 1400, [12.6, 11.1, 11.7, 12.1, 11.7, 11.4, 11.4], "35.4-34.5", "S"],
+    // 区間が 6 個未満(1000m の 5 区間)は、最初の 3 区間と最後の 3 区間が重なる(3 番目の区間が両方に入る)。重なる和をそのまま出す:
+    // 前 = 11.7+10.4+10.9 = 33.0、後 = 10.9+11.0+11.3 = 33.2(0.1 秒の整数で足した値を、python で別に計算)。
+    // 戦績 API は地方の 800m(4 区間)・900m(5 区間)で値を返している(race-record.test.ts)。中央の 1000m の実例は無く未確認
+    ["result_202604040112.html", "central", 200, 1000, [11.7, 10.4, 10.9, 11.0, 11.3], "33.0-33.2", "M"],
+    // 地方も同じ形(ペースの文字が戦績 API と一致するかは、地方では未確認)
+    ["nar_result_202644100810.html", "nar", 200, 1400, [13.1, 12.3, 12.0, 12.2, 12.5, 12.0, 12.5], "37.4-37.0", "M"],
+  ];
+
+  it.each(TABLE)("%s: 区間タイム・位置・ペース・区分を読む", (file, kind, first, last, laps, pace, cls) => {
+    const { header } = parseResultExtra(fx(file), kind);
+    expect(header.lapTimes).toEqual(laps);
+    expect(header.lapDistances).toHaveLength(laps.length);
+    expect(header.lapDistances![0]).toBe(first);
+    expect(header.lapDistances![laps.length - 1]).toBe(last);
+    expect(header.pace).toBe(pace);
+    expect(header.paceClass).toBe(cls);
+  });
+
+  it("位置は 200m きざみ(先頭が 100m なら 100・300・…)で、レースの距離と末尾が合う", () => {
+    const a = parseResultExtra(fx("result_202602010607.html"), "central").header;
+    expect(a.lapDistances).toEqual([100, 300, 500, 700, 900, 1100, 1300, 1500, 1700]);
+    expect(a.distance).toBe(1700);
+  });
+
+  it("障害レース(ラップ表もペースの区分も無い)は、すべて null", () => {
+    const { header } = parseResultExtra(fx("result_202605040709.html"), "central");
+    expect(header.courseType).toBe("障");
+    expect(header.lapTimes).toBeNull();
+    expect(header.lapDistances).toBeNull();
+    expect(header.pace).toBeNull();
+    expect(header.paceClass).toBeNull();
+  });
+
+  it("ラップ表の無い地方の結果ページも、すべて null(黙って値を作らない)", () => {
+    const { header } = parseResultExtra(fx("nar_result_202654071210.html"), "nar");
+    expect(header.lapTimes).toBeNull();
+    expect(header.pace).toBeNull();
+    expect(header.paceClass).toBeNull();
+  });
+
+  describe("ラップ表が壊れているとき(実物のフィクスチャを書き換えた入力)", () => {
+    const SRC = fx("result_202603020211.html");
+    // 前提の固定: 書き換える前は読める(書き換えが効いていなければ、下のテストは空振りする)
+    it("書き換える前は読める", () => {
+      const { header } = parseResultExtra(SRC, "central");
+      expect(header.lapTimes).toHaveLength(9);
+      expect(header.pace).toBe("34.5-34.5");
+    });
+
+    const mutate = (from: RegExp | string, to: string): string => {
+      const out = SRC.replace(from, to);
+      expect(out).not.toBe(SRC);
+      return out;
+    };
+
+    it("区間のセルに数値でないものがあれば、区間タイムもペースも null", () => {
+      // 区間の行(2 行目)の最初のセルを書き換える
+      const html = mutate(/(<tr class="HaronTime">\s*<td>[^<]*<\/td>[\s\S]*?<\/tr>\s*<tr class="HaronTime">\s*<td>)[^<]*(<\/td>)/, "$1--$2");
+      const { header } = parseResultExtra(html, "central");
+      expect(header.lapTimes).toBeNull();
+      expect(header.pace).toBeNull();
+    });
+
+    it("HaronTime の行が 2 行でなければ(累計だけ)null", () => {
+      const html = mutate(/(<tr class="HaronTime">[\s\S]*?<\/tr>)\s*<tr class="HaronTime">[\s\S]*?<\/tr>/, "$1");
+      const { header } = parseResultExtra(html, "central");
+      expect(header.lapTimes).toBeNull();
+      expect(header.pace).toBeNull();
+    });
+
+    it("見出しの数とセルの数が合わなければ null", () => {
+      const html = mutate(/<th>1800m<\/th>/, "");
+      const { header } = parseResultExtra(html, "central");
+      expect(header.lapTimes).toBeNull();
+      expect(header.lapDistances).toBeNull();
+      expect(header.pace).toBeNull();
+    });
+
+    it("累計の行と区間の行が入れ替わっていれば(区間の和が累計と合わない)null", () => {
+      const rows = [...SRC.matchAll(/<tr class="HaronTime">[\s\S]*?<\/tr>/g)].map((m) => m[0]);
+      expect(rows).toHaveLength(2);
+      const html = SRC.replace(rows[0]!, "@@A@@").replace(rows[1]!, rows[0]!).replace("@@A@@", rows[1]!);
+      expect(html).not.toBe(SRC);
+      const { header } = parseResultExtra(html, "central");
+      expect(header.lapTimes).toBeNull();
+      expect(header.pace).toBeNull();
+    });
+
+    it("累計との差が 0.1 秒以内(四捨五入のずれ)なら読める: 累計と区間は別々に四捨五入されるため、実データでも起きる形", () => {
+      // 区間の行の最後のセルを 0.1 秒だけずらす: 11.7 → 11.8(累計との差 0.1)
+      const html = mutate(/<td>11\.7<\/td>(\s*<\/tr>\s*<\/tbody>)/, "<td>11.8</td>$1");
+      const { header } = parseResultExtra(html, "central");
+      expect(header.lapTimes).not.toBeNull();
+      expect(header.lapTimes![8]).toBe(11.8);
+    });
+
+    // 3 区間の表に書き換える(見出し・累計・区間のセルを 3 個にそろえる)
+    const withLaps = (n: number): string => {
+      const heads = ["200m", "400m", "600m"].slice(0, n).map((h) => `<th>${h}</th>`).join("");
+      const cum = ["12.1", "22.9", "34.5"].slice(0, n).map((c) => `<td>${c}</td>`).join("");
+      const sec = ["12.1", "10.8", "11.6"].slice(0, n).map((c) => `<td>${c}</td>`).join("");
+      return mutate(
+        /(<table[^>]*Race_HaronTime[^>]*>\s*<tbody>)[\s\S]*?(<\/tbody>)/,
+        `$1<tr class="Header">${heads}</tr><tr class="HaronTime">${cum}</tr><tr class="HaronTime">${sec}</tr>$2`,
+      );
+    };
+
+    it("区間がちょうど 3 個なら、前 3 区間と後ろ 3 区間が同じ区間で、ペースは全体の和を 2 回書く", () => {
+      const { header } = parseResultExtra(withLaps(3), "central");
+      expect(header.lapTimes).toEqual([12.1, 10.8, 11.6]);
+      expect(header.pace).toBe("34.5-34.5");
+    });
+
+    it("区間が 3 個未満(2 個)なら、区間タイムは残してペースだけ null", () => {
+      const { header } = parseResultExtra(withLaps(2), "central");
+      expect(header.lapTimes).toEqual([12.1, 10.8]);
+      expect(header.lapDistances).toEqual([200, 400]);
+      expect(header.pace).toBeNull();
+    });
+
+    it("ペースの区分が S・M・H のどれでもなければ、区分だけ null(区間タイムは残る)", () => {
+      const html = mutate(/(RapPace_Title">ペース:<span>)M/, "$1X");
+      const { header } = parseResultExtra(html, "central");
+      expect(header.paceClass).toBeNull();
+      expect(header.lapTimes).toHaveLength(9);
+      expect(header.pace).toBe("34.5-34.5");
+    });
+
+    it("ペースの区分の要素が無ければ、区分だけ null(区間タイムは残る)", () => {
+      const html = mutate(/<div class="RapPace_Title">[\s\S]*?<\/div>/, "");
+      const { header } = parseResultExtra(html, "central");
+      expect(header.paceClass).toBeNull();
+      expect(header.lapTimes).toHaveLength(9);
+    });
   });
 });

@@ -33,8 +33,8 @@ import { markRank, PREDICTION_MARKS } from "../../packages/core/src/common/predi
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { nameWithGrade } from "./grade";
-import { formatAdjustment } from "../../packages/core/src/view/verify-format";
-import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
+import { formatAdjustment, formatYen } from "../../packages/core/src/view/verify-format";
+import { actualWinOddsLabel, ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
 import { buildPlaceOddsLine, PLACE_ODDS_NOTE, type PlaceOddsLine } from "../src/place-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
 import { buildFormation, type FormationSection } from "./formation-model";
@@ -108,6 +108,66 @@ export interface HorseCard {
   readonly placeOdds: PlaceOddsLine;
   /** タイム指数の行(Issue #359。サーバが組み立てた「タイム指数 +1.2(レース内 2位)」〈値のない馬は「タイム指数 —」〉をそのまま)。出さない分析・古いサーバの応答は null。LLM の有無・閲覧者かどうかに依らない。 */
   readonly timeIndexLine: string | null;
+  /**
+   * 馬ごとの評価の表の並べ替え用の数値(Issue #546-2)。**整形済みの文字列〈`prior`・`ev` など〉から読み戻さず**、`AnalysisHorse` の生の値から作る(「1.40(推定)」「1000倍超」を数に戻す処理を持たない)。
+   * 値が無い(null)・非有限(NaN・Infinity)は null(並べ替えでは向きによらず末尾)。推定 EV(`evEstimated`)も実数が入る(値がある扱い)。`adjusted` は LLM が効いたときだけ(`adjusted` の文字列と同じ条件)。
+   */
+  readonly sortValues: HorseSortValues;
+}
+
+/** 並べ替え用の数値(`HorseCard.sortValues`)。馬番は `HorseCard.umaban`。 */
+export interface HorseSortValues {
+  readonly prior: number | null;
+  readonly adjusted: number | null;
+  readonly ev: number | null;
+  readonly winOdds: number | null;
+  readonly placeOddsMin: number | null;
+}
+
+/** 馬ごとの評価の表で並べ替えられる列(Issue #546-2。印・馬名は対象外)。 */
+export type HorseSortKey = "umaban" | "prior" | "adjusted" | "ev" | "winOdds" | "placeOddsMin";
+export type SortDir = "asc" | "desc";
+/** 表の並べ替えの状態(`app.ts` が分析 id ごとにメモリに持つ。保存しない)。 */
+export interface HorseSort {
+  readonly key: HorseSortKey;
+  readonly dir: SortDir;
+}
+
+/** 既定の並べ替え(馬番の昇順)。 */
+export const DEFAULT_HORSE_SORT: HorseSort = { key: "umaban", dir: "asc" };
+
+/** 列を初めて押したときの向き: 確率・EV は大きい順、馬番・オッズは小さい順。 */
+export function firstSortDir(key: HorseSortKey): SortDir {
+  return key === "prior" || key === "adjusted" || key === "ev" ? "desc" : "asc";
+}
+
+/** 列を押したあとの並べ替え。同じ列ならもう一度で向きが逆、別の列なら初めての向き。 */
+export function nextHorseSort(current: HorseSort, key: HorseSortKey): HorseSort {
+  if (current.key === key) {
+    return { key, dir: current.dir === "asc" ? "desc" : "asc" };
+  }
+  return { key, dir: firstSortDir(key) };
+}
+
+/** 馬ごとの評価の表の列(Issue #546-2)。`sort` が null の列(印・馬名)は並べ替えられない(ボタンにしない)。 */
+export interface HorseTableColumn {
+  readonly key: "mark" | "name" | HorseSortKey;
+  readonly label: string;
+  readonly sort: {
+    readonly ariaSort: "ascending" | "descending" | "none";
+    /** 今の並べ替えの列だけ「▲」(小さい順)・「▼」(大きい順)。色に頼らず文字で示す。ほかは空。 */
+    readonly arrow: "▲" | "▼" | "";
+    /** この列を押したあとの向き(`data-sort-dir`。ボタンの処理に渡す値を木に出す)。 */
+    readonly nextDir: SortDir;
+  } | null;
+}
+
+/** 馬ごとの評価の表(Issue #546-2。馬が 0 頭なら null)。`rows` は並べ替え済み(カードの `ResultContent.horses` は入力の順のまま)。 */
+export interface HorseTable {
+  /** 実際に使った並べ替え(要求された列が表に無い〈補正後の列が無い分析で補正後の並べ替え〉ときは既定に戻した値)。 */
+  readonly sort: HorseSort;
+  readonly columns: readonly HorseTableColumn[];
+  readonly rows: readonly HorseCard[];
 }
 
 /** 印の付いた馬の一覧の1行(Issue #211)。印・馬番・馬名だけ(数値は出さない)。 */
@@ -202,7 +262,40 @@ export interface CloseSection {
   readonly rounds: readonly CloseRoundSection[];
 }
 
+/**
+ * 結果の先頭の要約(Issue #546)。材料はクライアントのモデルにすでにある値だけ(サーバの応答は変えない)。文はクライアントで組み立てる。
+ * 印の付いた馬は `ResultContent.markedHorses` を、画面(`view.ts`)が同じ部品で出す(ここには重ねて持たない)。買い目は**最新の配分**を持つ(`bets`)。
+ */
+export interface SummarySection {
+  /** 「発走時刻: 15:45」。値の無い(null・空・空白だけの)分析は null(行ごと出さない)。 */
+  readonly startLine: string | null;
+  /** 「分析時刻: 2026-06-28 14:00」(従来の結果の見出しの下の行と同じ文字)。 */
+  readonly analyzedLine: string;
+  /**
+   * 買い目の行。**最新の配分**の点数と合計で、見出しの語で出どころを区別する(利用者が、分析時点の額と再計算後の額を取り違えないため)。
+   *  - 締切直前の再計算で再計算できた回(`allocation` が non-null)があれば、一番新しいその回の配分: 「買い目(発走2分前の再計算) 3点・合計 1,700円」(買い目が 0 点でも「0点・合計 0円」)。
+   *  - 無ければ分析時点の配分: 「買い目(分析時点) 3点・合計 1,300円」。
+   *  - どちらにも買い目が無い(配分の記録なし・未設定・見送り)ときは「配分なし」の 1 語(注記・設定への案内は入れない=閲覧者・管理者で差が出ない)。
+   */
+  readonly betLine: string;
+  /** 買い目の一覧(`betLine` と同じ配分の行。配分の表と同じ並び・同じ整形)。「配分なし」のときは空。 */
+  readonly bets: readonly AllocationBetRowView[];
+  /** 締切直前の再計算の最新の結果 1 行(「締切直前の再計算(発走2分前): 分析時から変わりませんでした」)。再計算できた回が無い・節が無いときは null。 */
+  readonly closeLine: string | null;
+}
+
+/** 買い目が無いときの要約の 1 語(Issue #546)。 */
+export const NO_BETS_LINE = "配分なし";
+
 export interface ResultContent {
+  /** 分析 id(Issue #546。説明文の開閉の状態の鍵。結果画面とカードで同じ分析なら同じ状態になる)。 */
+  readonly id: number;
+  /** 先頭の要約(Issue #546)。 */
+  readonly summary: SummarySection;
+  /** 説明文(単勝・複勝・タイム指数・隊列図の注記)を開いているか(Issue #546。既定は閉じる)。文の中身は開閉に関わらず持つ(出すかどうかは画面が決める)。 */
+  readonly notesOpen: boolean;
+  /** 馬ごとの評価の表(Issue #546-2。「馬ごとの評価」の節の説明文の下・カードの一覧より前)。馬が 0 頭なら null。 */
+  readonly horseTable: HorseTable | null;
   /** 想定隊列図の節(Issue #362。AI の展開予想の後・「当日の馬場」の前)。脚質の分かる馬が 2 頭未満の分析は null(節ごと出さない)。 */
   readonly formation: FormationSection | null;
   readonly title: string;
@@ -334,15 +427,133 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
   return { heading: llmEffective ? `${LABEL_ADJUSTED_PROB}の3着内率 上位${TOP_PROB_COUNT}頭` : `${LABEL_PRIOR} 上位${TOP_PROB_COUNT}頭`, rows };
 }
 
+/** 締切直前の再計算で**再計算できた回(`allocation` が non-null)のうち一番新しいもの**(回は昇順)。無ければ undefined。要約の買い目の行と締切の行が共有する(Issue #546)。 */
+function latestCloseRound(close: AnalysisDetail["close"]): { readonly label: string; readonly summaryLines: readonly string[]; readonly diffLines: readonly string[]; readonly allocation: NonNullable<AnalysisDetail["allocation"]> } | undefined {
+  const done = (close?.rounds ?? []).flatMap((r) => (r.allocation === null ? [] : [{ ...r, allocation: r.allocation }]));
+  return done[done.length - 1];
+}
+
+/** 「買い目(出どころ) N点・合計 X円」。合計は表示用の文字列(「300円」)ではなく、保存された賭け金の数値(`StoredAllocationBetView.stake`)の和。 */
+function betLineText(source: string, shown: readonly AllocationBetRowView[], stored: NonNullable<AnalysisDetail["allocation"]>): string {
+  return `買い目(${source}) ${shown.length}点・合計 ${formatYen(shown.length === 0 ? 0 : stored.bets.reduce((sum, b) => sum + b.stake, 0))}`;
+}
+
+/**
+ * 要約の買い目(Issue #546)。**最新の配分**: 再計算できた回があれば一番新しいその回の配分(表と同じ部品〈`buildAllocationProposalView`〉の行)、無ければ分析時点の配分(`analysisBets`)。
+ * どちらにも買い目が無い(分析時点の記録なし・未設定・見送り・判定不能)ときは「配分なし」。再計算の結果が 0 点のときは、分析時点の額を残さず「0点・合計 0円」と出す。
+ */
+function summaryBetsOf(a: AnalysisDetail, analysisBets: readonly AllocationBetRowView[]): { readonly betLine: string; readonly bets: readonly AllocationBetRowView[] } {
+  const round = latestCloseRound(a.close);
+  if (round !== undefined) {
+    const bets = buildAllocationProposalView(round.allocation).bets;
+    return { betLine: betLineText(`${round.label}の再計算`, bets, round.allocation), bets };
+  }
+  if (a.allocation === null || analysisBets.length === 0) return { betLine: NO_BETS_LINE, bets: [] };
+  return { betLine: betLineText("分析時点", analysisBets, a.allocation), bets: analysisBets };
+}
+
+/**
+ * 要約の締切直前の再計算の行(Issue #546)。{@link latestCloseRound} の見出しと、差分の 1 行目(差分の行が無い回は状態の行の 1 行目〈「再計算した」〉)。無ければ null。
+ */
+function closeLineOf(close: AnalysisDetail["close"]): string | null {
+  const round = latestCloseRound(close);
+  return round === undefined ? null : `${CLOSE_HEADING}(${round.label}): ${round.diffLines[0] ?? round.summaryLines[0]}`;
+}
+
+/** 有限の数だけを返す(null・NaN・Infinity は null)。並べ替え用の数値に使う。 */
+function finiteOrNull(v: number | null): number | null {
+  return v !== null && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * 馬ごとの評価の表(Issue #546-2)。列は 馬番・印・馬名・3着内率・(AI補正後)・EV・単勝(実際のラベル付き)・複勝下限。補正後の列は**全頭の補正後が null でないときだけ**(LLM が効いた分析だけ。全頭 null なら列ごと出さない)。
+ * 行の並べ替えは、値の無い馬(null)を向きによらず末尾に置き、同点・値の無い馬どうしは馬番の昇順。数値は `HorseCard.sortValues`(整形済みの文字列から読み戻さない)。
+ */
+function horseTableOf(horses: readonly HorseCard[], llmEffective: boolean, oddsStatus: string | null, requested: HorseSort | undefined): HorseTable | null {
+  if (horses.length === 0) {
+    return null;
+  }
+  const showAdjusted = llmEffective && horses.some((x) => x.adjusted !== null);
+  // 補正後の列が無いのに補正後の並べ替えが残っているときは、既定に戻す。
+  const sort = requested === undefined || (requested.key === "adjusted" && !showAdjusted) ? DEFAULT_HORSE_SORT : requested;
+  const sortable = (key: HorseSortKey, label: string): HorseTableColumn => ({
+    key,
+    label,
+    sort:
+      sort.key === key
+        ? { ariaSort: sort.dir === "asc" ? "ascending" : "descending", arrow: sort.dir === "asc" ? "▲" : "▼", nextDir: nextHorseSort(sort, key).dir }
+        : { ariaSort: "none", arrow: "", nextDir: firstSortDir(key) },
+  });
+  const columns: HorseTableColumn[] = [
+    sortable("umaban", "馬番"),
+    { key: "mark", label: "印", sort: null },
+    { key: "name", label: "馬名", sort: null },
+    sortable("prior", LABEL_PRIOR),
+    ...(showAdjusted ? [sortable("adjusted", LABEL_ADJUSTED_PROB)] : []),
+    sortable("ev", "EV"),
+    sortable("winOdds", `単勝 ${actualWinOddsLabel(oddsStatus)}`),
+    sortable("placeOddsMin", "複勝下限"),
+  ];
+  const valueOf = (x: HorseCard): number | null => (sort.key === "umaban" ? x.umaban : x.sortValues[sort.key]);
+  const rows = [...horses].sort((a, b) => {
+    const va = valueOf(a);
+    const vb = valueOf(b);
+    if (va === null || vb === null) {
+      return va === vb ? a.umaban - b.umaban : va === null ? 1 : -1; // 値の無い馬は向きによらず末尾
+    }
+    if (va !== vb) {
+      return sort.dir === "asc" ? va - vb : vb - va;
+    }
+    return a.umaban - b.umaban;
+  });
+  return { sort, columns, rows };
+}
+
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。`readOnly`(閲覧者。Issue #238)は設定への案内を外す。省略は管理者。 */
-export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
+export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false, horseSort: HorseSort | undefined = undefined): ResultContent {
   // LLM が効いたか = モデル ID があるか(core の `view/format.ts` の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
   const llmEffective = a.model !== null && a.model !== "";
   const markedHorses = markedHorsesOf(a.horses);
+  const allocation = allocationOf(a, readOnly);
+  const analyzedAt = formatJstDateTime(a.analyzedAt);
+  const startTime = a.race.startTime ?? null;
+  const horses: HorseCard[] = a.horses.map((h) => ({
+    umaban: h.umaban,
+    name: h.name,
+    mark: h.mark,
+    markRepair: markRepairOf(h),
+    prior: formatPercent(h.prior),
+    adjusted: llmEffective ? formatPercent(h.adjustedProb) : null,
+    adjustedShift: llmEffective ? probShiftOf(h.prior, h.adjustedProb) : null,
+    reason: llmEffective && h.reason !== null && h.reason !== "" ? h.reason : null,
+    highlights: llmEffective ? pointsOf(h.highlights) : [],
+    concerns: llmEffective ? pointsOf(h.concerns) : [],
+    odds: formatOdds(h.placeOddsMin),
+    ev: h.ev === null ? formatEv(null) : `${formatEv(h.ev)}${formatEstimatedEvSuffix(a.evEstimated)}`,
+    positive: h.isPositive,
+    winOdds: buildWinOddsLine(h.fairWinOdds, h.winOdds, a.race.oddsStatus),
+    placeOdds: buildPlaceOddsLine(h.fairPlaceOdds, h.actualPlaceOddsMin, h.actualPlaceOddsMax, a.race.oddsStatus, a.race.placeBasis),
+    timeIndexLine: h.timeIndexLine ?? null,
+    sortValues: {
+      prior: finiteOrNull(h.prior),
+      adjusted: llmEffective ? finiteOrNull(h.adjustedProb) : null,
+      ev: finiteOrNull(h.ev),
+      winOdds: finiteOrNull(h.winOdds),
+      placeOddsMin: finiteOrNull(h.placeOddsMin),
+    },
+  }));
   return {
+    id: a.id,
+    notesOpen,
+    summary: {
+      startLine: startTime === null || startTime.trim() === "" ? null : `発走時刻: ${startTime}`,
+      analyzedLine: `分析時刻: ${analyzedAt}`,
+      ...summaryBetsOf(a, allocation.bets),
+      closeLine: closeLineOf(a.close),
+    },
     formation: buildFormation(a),
     title: titleOf(a),
-    analyzedAt: formatJstDateTime(a.analyzedAt),
+    analyzedAt,
     model: llmEffective ? a.model! : MODEL_NONE_TEXT,
     llmNote: a.llmNote,
     llmUsage: a.llmCalls !== null && a.llmCalls.length > 0 ? buildLlmUsage(a.llmCalls) : null,
@@ -355,25 +566,9 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
     winOddsNote: a.horses.some((h) => h.fairWinOdds !== null || h.winOdds !== null) ? WIN_ODDS_NOTE : null,
     placeOddsNote: a.race.placeBasis !== null && a.horses.some((h) => h.fairPlaceOdds !== null || h.actualPlaceOddsMin !== null) ? PLACE_ODDS_NOTE : null,
     timeIndexNote: a.timeIndexNote ?? null,
-    horses: a.horses.map((h) => ({
-      umaban: h.umaban,
-      name: h.name,
-      mark: h.mark,
-      markRepair: markRepairOf(h),
-      prior: formatPercent(h.prior),
-      adjusted: llmEffective ? formatPercent(h.adjustedProb) : null,
-      adjustedShift: llmEffective ? probShiftOf(h.prior, h.adjustedProb) : null,
-      reason: llmEffective && h.reason !== null && h.reason !== "" ? h.reason : null,
-      highlights: llmEffective ? pointsOf(h.highlights) : [],
-      concerns: llmEffective ? pointsOf(h.concerns) : [],
-      odds: formatOdds(h.placeOddsMin),
-      ev: h.ev === null ? formatEv(null) : `${formatEv(h.ev)}${formatEstimatedEvSuffix(a.evEstimated)}`,
-      positive: h.isPositive,
-      winOdds: buildWinOddsLine(h.fairWinOdds, h.winOdds, a.race.oddsStatus),
-      placeOdds: buildPlaceOddsLine(h.fairPlaceOdds, h.actualPlaceOddsMin, h.actualPlaceOddsMax, a.race.oddsStatus, a.race.placeBasis),
-      timeIndexLine: h.timeIndexLine ?? null,
-    })),
-    allocation: allocationOf(a, readOnly),
+    horses,
+    horseTable: horseTableOf(horses, llmEffective, a.race.oddsStatus, horseSort),
+    allocation,
     close: closeOf(a, readOnly),
   };
 }
@@ -385,12 +580,12 @@ function backToRace(route: Route, a: AnalysisDetail): string {
   return buildHash({ date, venue: route.venue, race });
 }
 
-export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean }): ResultModel {
+export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean; /** 説明文を開いているか(Issue #546。省略は閉じる)。 */ readonly notesOpen?: boolean; /** 馬ごとの評価の表の並べ替え(Issue #546-2。省略は馬番の昇順)。 */ readonly horseSort?: HorseSort }): ResultModel {
   const { route, source } = input;
   const readOnly = input.readOnly === true;
   const listHref = buildHash({ date: route.date, venue: route.venue });
   if (source.kind === "ready") {
-    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly), backHref: backToRace(route, source.analysis) };
+    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly, input.notesOpen === true, input.horseSort), backHref: backToRace(route, source.analysis) };
   }
   return {
     kind: "result",
