@@ -6,6 +6,8 @@
 
 ## ★2026-11-01: 過去の結果の毎晩の取得(#554〈#549-A3〉)
 
+**セッションを替えた(11/1 夕)。この日の状態・予定・次にやることの一覧は、`docs/handover-next-session.md` の「★2026-11-01(日)の引き継ぎ」の節にある。そちらが新しい。**
+
 - **#549-A3**: Cloudflare の Durable Object `RaceArchiveFetchDO` が、**2026-11-04 0:00 JST から**、毎晩 JST 0:00〜8:30 に中央の過去 5 年の結果ページを 5 秒おきに取って R2 と D1 の目録に保存する(中央の開催日の朝は休む)。公開は 11/3 の 21:00 の cron より前(21:00 の `kick` で動き出す)。仕様は `docs/current-spec.md` の「過去の結果の毎晩の取得」。
 - **最初の晩の後(11/4 朝)に確かめること**: ①`GET /api/race-archive`(`state`・`night`・`totals`)②Cloudflare のダッシュボードで DO の稼働時間(Free は 1 日 13,000 GB-s。見積もりは未確認)③止められていないか(Discord の通知)。止めるには var `RACE_ARCHIVE_NIGHTLY_LIMIT=0`、件数を下げるには同じ var に 1 以上の整数。
 - 次: #549-B(`horse_runs` への変換)は、過去の結果がたまってから。
