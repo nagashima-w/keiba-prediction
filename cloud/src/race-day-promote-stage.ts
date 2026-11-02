@@ -74,13 +74,13 @@ export class PromoteStage {
   }
 
   /**
-   * 期限が来た計画の行(planned で `due_ms ≤ now`)を昇格する。**確定済みの日だけ**(Issue #204 G-C3: 確定の途中で落ちた状態で先に昇格すると、その行には morning が積まれず、
+   * 期限が来た計画の行(planned で `due_ms ≤ now`)を昇格する。**確定済みの日、または計画が依頼されていない日だけ**({@link PlanStore.promotionOpen}。Issue #566。Issue #204 G-C3: 確定の途中で落ちた状態で先に昇格すると、その行には morning が積まれず、
    * `morningAllTerminal` が偽のまま残る。確定の前の期限は、アラームの候補にもしない〈{@link PlanStore.nextDueMs}〉)。
    * 行ごとに: 手動の分析との重複の確認(D1。必要なときだけ。{@link PromoteStage.hasRecentManualAnalysis})→ 同期の判定と投入({@link PromoteStage.promoteRow})。
    * **起きたときに必ず状態が変わる**(積めなくても skipped にする)。
    */
   async promoteDue(): Promise<void> {
-    if (this.plan.finalizedAt() === null) {
+    if (!this.plan.promotionOpen()) {
       return;
     }
     for (const row of this.plan.dueRows(this.now())) {

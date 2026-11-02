@@ -30,6 +30,19 @@ export interface PlanStepOutcome {
   readonly result: "ok" | "retry" | "failed";
 }
 
+/**
+ * 計画の行を作るのに要る、1 レースの情報(一覧の行 `RaceListEntry` の一部。**構造的に `RaceListEntry` が満たす**ので、確定は一覧の行をそのまま渡す。
+ * 地方の普通のレースを事前分析の完了の時点で足すとき〈Issue #566〉は、出馬表から同じ形を組み立てて渡す)。
+ */
+export interface PlanRowSource {
+  readonly raceId: string;
+  readonly name: string;
+  readonly raceNumber: number;
+  readonly venue?: string;
+  readonly grade?: string;
+  readonly startTime?: string;
+}
+
 /** 計画の確定が、タスクの行について知りたいこと(本体の `TaskRow` の一部。**行があるか**だけを見る)。 */
 export interface PlanTaskRow {
   readonly status: TaskStatus;
@@ -62,6 +75,9 @@ export interface PlanStageDeps {
   /** 1 日に積めるタスクの上限(本体の `MAX_TASKS_PER_DAY`)。 */
   readonly maxTasksPerDay: number;
 }
+
+/** 見回し({@link PlanStage.sweepNarMorningDone})の前回の試行の時刻(`race_day_meta`)。 */
+const SWEEP_TRY_KEY = "nar_pre_race_sweep_try_at";
 
 export class PlanStage {
   private readonly plan: PlanStore;
@@ -201,8 +217,68 @@ export class PlanStage {
     return { kind: "ran", raceId: "plan", mode: "plan", step: "finalize", result: "ok" };
   }
 
+  /**
+   * 地方の普通のレース(確定の対象〈中央の全件・地方の Jpn〉に入らないレース)の事前分析(morning)が完了したとき、発走前の分析(pre_race)の計画の行を足す(Issue #566)。
+   * 期限・すぐ実行・スキップの判定は確定と同じ({@link PlanStage.buildPlanRow}。offset は計画の offset が決まっていればそれ、まだなら `fallbackOffsetMinutes`〈呼び出し側の設定の値〉)。
+   * **足さないもの**: 地方でないレース(中央は今までどおり確定の対象だけ)・既に計画の行があるレース(最初の計画を変えない)・開催日が未確定・
+   * 判定がスキップになる行(発走済み・発走まで 10 分未満・発走時刻なし・上限。skipped の行も残さない。過去のレースや手動の再実行で自動実行の結果が skipped だらけにならないように)。
+   * **morning は積まない**(この行は morning が完了した後に足すので、確定の「planned で morning が無ければ積む」にも当たらない。課金を増やさない)。同期(await なし)。足したら true。
+   */
+  registerNarMorningDone(source: PlanRowSource, fallbackOffsetMinutes: number): boolean {
+    const kaisaiDate = this.metaGet("kaisai_date");
+    if (kaisaiDate === null || Number(source.raceId.slice(4, 6)) <= 10 || this.plan.planRow(source.raceId) !== null) {
+      return false;
+    }
+    const offset = this.plan.offset();
+    const row = this.buildPlanRow("nar", source, kaisaiDate, offset === null ? fallbackOffsetMinutes : offset.minutes, this.now());
+    if (row.state !== "planned") {
+      return false;
+    }
+    this.plan.insertPlanRow(row);
+    return true;
+  }
+
+  /**
+   * 見回し(Issue #566。`runNextStep` の先頭から呼ぶ): 事前分析(morning)が done なのに計画の行が無い地方のレース(公開の時点で完了済みだった分・完了の時点の追加を取りこぼした分)に、
+   * 地方の一覧から行を足す。**該当が無ければ何もしない**(SQL 1 本だけ。一覧は取りに行かない)。投げない: 失敗は警告にして、次の起床で取り直す。
+   * 一覧(`getRaceList`。ゲート経由のキャッシュ付き)は 1 回の見回しにつき 1 本。**試行の時刻を残し、`retryDelayMs` の間は取り直さない**(一覧に無いレースが残り続けても、起床のたびには取りに行かない)。
+   */
+  async sweepNarMorningDone(): Promise<void> {
+    const kaisaiDate = this.metaGet("kaisai_date");
+    if (kaisaiDate === null || this.plan.narMorningDoneWithoutPlanRow().length === 0) {
+      return;
+    }
+    const nowMs = this.now();
+    const lastTry = this.metaGet(SWEEP_TRY_KEY);
+    if (lastTry !== null && nowMs < Number(lastTry) + this.retryDelayMs) {
+      return;
+    }
+    this.plan.metaSet(SWEEP_TRY_KEY, String(nowMs));
+    try {
+      const result = await this.getRaceList(kaisaiDate, "nar");
+      if (!result.ok) {
+        this.onWarn(`事前分析の計画: 地方の普通のレースの発走前の分析の計画を足せませんでした(一覧を取得できません。理由: ${result.reason})`);
+        return;
+      }
+      const offsetMinutes = this.plan.offset()?.minutes ?? (await this.loadOffsetMinutes());
+      for (const raceId of this.plan.narMorningDoneWithoutPlanRow()) {
+        const entry = result.races.find((r) => r.raceId === raceId);
+        if (entry !== undefined) {
+          this.registerNarMorningDone(entry, offsetMinutes);
+        }
+      }
+    } catch (error) {
+      this.onWarn(`事前分析の計画: 地方の普通のレースの発走前の分析の計画を足せませんでした(${errorMessage(error)})`);
+    }
+  }
+
+  /** 計画の offset が未決定のとき使う、設定の `preRaceOffsetMinutes`(設定の取得口が無い構成は既定値)。読めなければ投げる(呼び出し側が握る)。 */
+  private async loadOffsetMinutes(): Promise<number> {
+    return this.loadSettings === undefined ? DEFAULT_PRE_RACE_OFFSET_MINUTES : (await this.loadSettings()).preRaceOffsetMinutes;
+  }
+
   /** 1対象の計画の行を作る(期限・すぐ実行・スキップの判定と、上限)。 */
-  private buildPlanRow(venue: PlanVenue, entry: RaceListEntry, kaisaiDate: string, offsetMinutes: number, nowMs: number): PlanRowRecord {
+  private buildPlanRow(venue: PlanVenue, entry: PlanRowSource, kaisaiDate: string, offsetMinutes: number, nowMs: number): PlanRowRecord {
     const due = planPreRaceDue({ kaisaiDate, startTime: entry.startTime, offsetMinutes, nowMs });
     let startMs: number | null = null;
     if (entry.startTime !== undefined) {
