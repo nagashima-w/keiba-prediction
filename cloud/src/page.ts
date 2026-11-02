@@ -107,6 +107,14 @@ ${paletteCss()}
   .who { margin: 0 0 12px; font-size: 0.85rem; color: var(--muted); }
   .email { font-weight: bold; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 12px; }
+  /* Issue #560: トップの上の並びを役割で 2 つに分ける。左が一覧の絞り込み(開催日・中央/地方・更新)、右が画面の移動(狙い目・検証・日報・月報・設定)。右寄せは塊が受け持つ(リンクごとの margin-left: auto は持たない)。
+     狭い画面(折り返す幅)では、画面の移動が幅いっぱいの専用の段になり、上に区切り線が入って、リンクが等幅に並ぶ(広い画面の見た目は従来どおり)。境目 48.25rem は、広い画面で 1 段に収まる幅(#544)の少し下 */
+  .list-filters, .list-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+  .list-nav { margin-left: auto; }
+  @media (max-width: 48.25rem) {
+    .list-nav { flex: 1 1 100%; margin-left: 0; padding-top: 8px; border-top: 1px solid var(--line); }
+    .list-nav a { flex: 1 1 0; min-width: 0; padding: 0 4px; white-space: nowrap; }
+  }
   .date { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--muted); }
   input[type="date"] { font-size: 1rem; min-height: 44px; padding: 0 8px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
   .tabs { display: flex; gap: 4px; }
@@ -201,13 +209,11 @@ ${paletteCss()}
   .card-desc { margin: 6px 0 0; font-size: 0.85rem; color: var(--muted); }
   .race-guide { margin: 8px 0 0; font-size: 0.85rem; color: var(--muted); }
   /* Issue #189: 設定画面(トップの入口のリンク・入力欄。タップしやすい高さ 44px 以上。色だけに頼らない=エラーは文字と role=alert) */
-  .settings-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .settings-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   /* Issue #219: 検証画面(一覧の入口のリンク・区分の切替・数値のタイル・内訳の行。スマホ幅で横に伸ばさない=タイルは 2 列・行は折り返す。色だけに頼らない=回収率は太字) */
-  .verify-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
-  .verify-link + .settings-link { margin-left: 0; }
+  .verify-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   /* Issue #336: 今日の狙い目(一覧の入口のリンクは検証の左。行は一覧のレースの行〈.race〉を流用し、残り時間を右端に寄せる。見送りと発走済みは薄く、10 分以内は色+太字で強調する) */
-  .targets-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
-  .targets-link + .verify-link { margin-left: 0; }
+  .targets-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   .race.skipped { opacity: 0.65; }
   /* Issue #558: 発走済みは、バッジの入れ物(.badges)以外の子を薄くする(行ごと薄くすると、バッジの文字のコントラストが 4.5 を割る)。狙い目の発走済みの行にも同じ規則(バッジは無い)。
      見送り(.skipped)の行は上の規則で行全体が薄いので外す(狙い目の行は skipped と started の両方が付きうる。外さないと 0.65 × 0.65 の二重がけになる) */
@@ -216,7 +222,6 @@ ${paletteCss()}
   .t-left.soon { color: var(--wait); }
   /* Issue #235: 日報画面(一覧の入口のリンク・レースごとのカード・箇条書き・生の文章。スマホ幅で横に伸ばさない=改行で折り返す) */
   .report-link, .monthly-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
-  .monthly-link + .settings-link { margin-left: 0; }
   .report-run { min-height: 44px; margin: 8px 0; }
   .report-list { margin: 4px 0 8px; padding-left: 1.3em; }
   .report-summary { margin: 4px 0 8px; overflow-wrap: anywhere; }

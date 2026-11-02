@@ -28,8 +28,13 @@ function tree(over: Partial<ListModelInput> = {}, actions: ViewActions = noopAct
   return renderScreen(model, actions);
 }
 const controlsOf = (t: VNode): VNode => t.children![0] as VNode;
-const filtersOf = (t: VNode): VNode => findAll(t, (n) => n.tag === "div" && classOf(n) === "list-filters")[0]!;
-const navOf = (t: VNode): VNode => findAll(t, (n) => n.tag === "nav" && classOf(n) === "list-nav")[0]!;
+/** 塊が無いとき(Red)は、TypeError ではなく「ちょうど 1 つ」の失敗にする。 */
+function only(found: VNode[], what: string): VNode {
+  expect(found, what).toHaveLength(1);
+  return found[0]!;
+}
+const filtersOf = (t: VNode): VNode => only(findAll(t, (n) => n.tag === "div" && classOf(n) === "list-filters"), "div.list-filters");
+const navOf = (t: VNode): VNode => only(findAll(t, (n) => n.tag === "nav" && classOf(n) === "list-nav"), "nav.list-nav");
 const LINK_CLASSES = ["targets-link", "verify-link", "report-link", "monthly-link", "settings-link"];
 const linksOf = (n: VNode): VNode[] => findAll(n, (x) => x.tag === "a");
 
@@ -43,7 +48,6 @@ describe("一覧の上の並び: 2 つの塊(Issue #560)", () => {
 
   it("絞り込み: role=group・aria-label=一覧の絞り込み。中身は 開催日(label.date の中に date の入力)・中央/地方(nav.tabs)・更新 の順", () => {
     const f = filtersOf(tree());
-    expect(f).toBeDefined();
     expect(f.attrs?.["role"]).toBe("group");
     expect(f.attrs?.["aria-label"]).toBe("一覧の絞り込み");
     const kids = (f.children ?? []).map((k) => (typeof k === "string" ? k : `${k.tag}.${classOf(k)}`));
@@ -54,7 +58,6 @@ describe("一覧の上の並び: 2 つの塊(Issue #560)", () => {
 
   it("画面の移動: aria-label=画面の移動。リンクは 狙い目・検証・日報・月報・設定 の順で、クラス・href・文言は従来どおり", () => {
     const n = navOf(tree());
-    expect(n).toBeDefined();
     expect(n.attrs?.["aria-label"]).toBe("画面の移動");
     expect(linksOf(n).map((a) => [classOf(a), a.attrs?.["href"], textOf(a)])).toEqual([
       ["targets-link", `#targets=${DATE}`, "狙い目"],
@@ -69,8 +72,6 @@ describe("一覧の上の並び: 2 つの塊(Issue #560)", () => {
     const t = tree();
     // 前提: 5 つのリンクと、絞り込みの 3 つが、どちらも画面にある
     expect(findAll(t, (x) => LINK_CLASSES.includes(classOf(x)))).toHaveLength(5);
-    expect(filtersOf(t)).toBeDefined();
-    expect(navOf(t)).toBeDefined();
     expect(findAll(filtersOf(t), (x) => LINK_CLASSES.includes(classOf(x)))).toHaveLength(0);
     expect(findAll(navOf(t), (x) => x.tag === "input" || x.tag === "button" || classOf(x) === "tabs" || classOf(x) === "date")).toHaveLength(0);
   });
@@ -80,7 +81,7 @@ describe("一覧の上の並び: 2 つの塊(Issue #560)", () => {
     expect(linksOf(navOf(viewer)).map(classOf)).toEqual(["targets-link", "verify-link", "report-link", "monthly-link"]);
     const noNow = tree({ now: undefined });
     expect(linksOf(navOf(noNow)).map(classOf)).toEqual(["targets-link", "verify-link", "report-link", "settings-link"]);
-    expect(filtersOf(noNow)).toBeDefined();
+    filtersOf(noNow); // 塊が残る(ちょうど 1 つ)
   });
 
   it("読み込み中の更新ボタンは絞り込みの中で「読み込み中…」・disabled。通常は「更新」・押せる", () => {
