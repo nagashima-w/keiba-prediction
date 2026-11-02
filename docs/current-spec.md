@@ -2509,7 +2509,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
 
 - **根拠**: P・D 型で残る手がかりは「青↔黄」の軸と明度なので、状態の3色は色相だけでなく明度も離した(緑は青みの緑、赤は煉瓦〜朱に寄せ、茶は黄土に寄せた)。**旧配色の色覚シミュレーション後の ΔE2000 の最小は、web ライト 1.5(wait–fail、D 型)・web ダーク 3.5(ok–fail、D 型)・Discord 7.5**(warn–fail、D 型)だった(再現は下の `print-palette-report.ts` の「旧配色」の行。`test/palette.test.ts` は旧配色が閾値 10 を満たさないことを固定する)。
 - **閾値**: 色覚シミュレーション(P・D・T 型)後も **ΔE2000 ≥ 10**、文字色のコントラスト比は **WCAG AA の 4.5:1 以上**。10 は**経験則**(ΔE2000 は約 1 が知覚できる最小差、2〜5 が並べて見比べて分かる差、10 以上が離れて見ても別の色と分かる差、という目安。厳密な標準ではない)。文字・記号を併記するので、色差は唯一の手がかりではなく補強。
-  - 検査する組: web は {ok, wait, fail} の3組と {accent}×{ok, wait, fail} の3組と、**{brand}×{ok, accent} の2組**(ライト・ダーク。brand は #570)。**brand と wait・fail の組はゲートにしない**(下の実測の表を `test/palette.test.ts` が固定する)。Discord は4色の全6組。**`--muted`(未実行のバッジと補助的な文字の色)は ΔE の組に含めない**(未実行には文字のラベルがあるため)。
+  - 検査する組: web は {ok, wait, fail} の3組と {accent}×{ok, wait, fail} の3組と、**{brand}×{ok, accent} の2組**(ライト・ダーク。brand は #570)。**brand と wait・fail の組は合否の判定に入れない**(下の実測の表を `test/palette.test.ts` が固定する)。Discord は4色の全6組。**`--muted`(未実行のバッジと補助的な文字の色)は ΔE の組に含めない**(未実行には文字のラベルがあるため)。
   - コントラスト比は `--fg --muted --accent --brand --ok --wait --fail` を `--bg` と `--card` の上で、ライト・ダーク両方。加えて、塗りのボタンの文字(`--bg`)を背景 `--brand` の上に置いた比(ライト 5.50・ダーク 6.90)。
   - 実測の最小(再現: `cd cloud && pnpm exec tsx print-palette-report.ts`): ΔE2000 はライト 11.6(wait–fail、D 型)・ダーク 10.7(accent–ok、T 型。**余裕は 0.7 と小さい**)・Discord 14.1(ok–none、D 型)。コントラスト比の最小は 4.75(ライトの ok と wait の `--card` 上)。
 - **色覚シミュレーションと色差の実装**: テスト専用の `cloud/test/color-science.ts`(依存パッケージは足していない)。Machado, Oliveira & Fernandes (2009)「A Physiologically-based Model for Simulation of Color Vision Deficiency」(IEEE TVCG 15(6))の行列(重篤度 1.0)を線形 RGB に掛ける。色差は CIEDE2000(Sharma, Wu & Dalal 2005 の実装ノート)。正しさは `test/color-science.test.ts` が、Sharma の公開テストデータ・行列の行和・黒白灰の不変・独立実装(Python の colorspacious の出力。`sRGB1+CVD` の severity=100)の出力との一致(採用色10色 × P・D・T)で固定する。
@@ -2525,11 +2525,11 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
 変更は `cloud/src/page.ts`(CSS と「ログイン中」の HTML)・`cloud/src/palette.ts` だけ。クライアントの束(`cloud/client`・`client-bundle.generated.ts`)は変えていない。
 
 - **強調の色 `--brand`(ロゴのオレンジ)**: ライト #b34700(`--bg` に 5.50・`--card` に 5.05)、ダーク #ff7803(`--bg` に 6.90・`--card` に 6.07)。ライトにロゴの色をそのまま使うと白い背景で 4.5:1 に届かないので、濃さを分けた。使う所は 3 つ。
-  - **主要なボタンの塗り**: `.run`(事前分析・発走前の分析の実行)・`.bulk-go`(場ごとの一括実行の確定)・`.settings-save`(設定の保存)・`.report-run`(日報の作成)。有効のときは背景 `--brand`・文字 `--bg`・太字。**無効のとき**(送信中・待ち・取得済み・保存中)は塗りをやめ、ほかのボタンと同じ `--card` の背景・`--muted` の文字・`--line` の枠、opacity 1 に戻す。押せるかどうかが色で見分けられ、無効でも文字は 4.5 以上(`--muted` on `--card`: ライト 4.87・ダーク 6.18)。実行中かどうかは、ラベルの文字(「送信中…」「待ち」)でも示す。完了後の「やり直す」と失敗後の「再試行」は無効ではないので、塗りのまま。対象外: `.bulk-run`(確認パネルを開く)・`.report-regen-go`(再生成の確定)・更新・戻る・開閉のボタン。
+  - **主要なボタンの塗り**: `.run`(事前分析・発走前の分析の実行)・`.bulk-go`(場ごとの一括実行の確定)・`.settings-save`(設定の保存)・`.report-run`(日報の作成)。有効のときは背景 `--brand`・文字 `--bg`・太字。**無効のとき**(送信中・待ち・取得済み・保存中)は塗りをやめ、ほかのボタンと同じ `--card` の背景・`--muted` の文字・`--line` の枠、opacity 1 に戻す。押せるかどうかが色で見分けられ、無効でも文字は 4.5 以上(`--muted` on `--card`: ライト 4.87・ダーク 6.18)。実行中かどうかはラベルの文字(「送信中…」「待ち」)でも示す。完了後の「やり直す」と失敗後の「再試行」は無効ではないので、塗りのまま。対象外: `.bulk-run`(確認パネルを開く)・`.report-regen-go`(再生成の確定)・更新・戻る・開閉のボタン。
   - **選んでいる状態**: 枠と文字を brand、太字。`.tab`・`.report-tab` の `aria-current="page"`、検証画面の `.verify-venue`・`.verify-target` の `aria-pressed="true"`。
   - **EV プラスの強調**: `.ev-plus`(馬カードの「EVプラス」)・`.ev-table-plus`(馬ごとの評価の表)の文字と、EV プラスの馬カードの枠(`.horse.positive`)。以前は文字が ok〈緑〉と accent〈青〉、枠が ok で、そろっていなかった。**`--ok` の役割は「完了・成功」だけになった**(palette.ts の説明から「EVプラス」を外した)。
-- **リンクの色(`--accent`)は変えない**。ただし `.verify-versions-link`(検証画面の版別比較へのリンク)は色の指定が無く、ブラウザ既定のリンク色だったので、`--accent` にした。accent の枠は、回収率のタイル(`.verify-tile.strong`)と◎のチップ(`.formation-chip.formation-main`)に残る。Discord の色(`DISCORD_COLORS`)は変えていない。
-- **brand と状態の色の色覚シミュレーション後の ΔE2000**(通常・P・D・T 型。再現: `cd cloud && pnpm exec tsx print-palette-report.ts`)。brand–ok・brand–accent は全視覚で 10 以上(最小: ライト 14.4〈brand–ok、P 型〉・ダーク 22.5〈brand–ok、D 型〉)で、ゲートに入れた。brand–wait・brand–fail は閾値を満たさない組があり、**ゲートにせず、実測値を `test/palette.test.ts` で固定している**:
+- **リンクの色(`--accent`)は変えない**。ただし `.verify-versions-link`(検証画面の版別比較へのリンク)は色の指定が無く、ブラウザ既定のリンク色だったので、`--accent` にした。accent の枠は回収率のタイル(`.verify-tile.strong`)と◎のチップ(`.formation-chip.formation-main`)に残る。Discord の色(`DISCORD_COLORS`)は変えていない。
+- **brand と状態の色の色覚シミュレーション後の ΔE2000**(通常・P・D・T 型。再現: `cd cloud && pnpm exec tsx print-palette-report.ts`)。brand–ok・brand–accent は全視覚で 10 以上(最小: ライト 14.4〈brand–ok、P 型〉・ダーク 22.5〈brand–ok、D 型〉)で、合否の判定に入れた。brand–wait・brand–fail は閾値を満たさない組があり、**合否の判定に入れず、実測値を `test/palette.test.ts` で固定している**。
 
   | 組 | 通常 | P | D | T |
   |---|---|---|---|---|
@@ -2539,7 +2539,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
   | ダーク brand–fail | 20.4 | 16.8 | 13.3 | **3.5** |
 
   ライトの brand と wait は D 型でほぼ区別できず、ダークの brand と fail は T 型で近い。状態は文字(「待ち」「失敗」)でも示しているので、止める理由にはしていない。実行ボタンが待ち(wait のバッジ)の状態のときは、ボタンが無効で塗られない。
-- **薄い行の文字のコントラスト**: 発走済み・見送りの行は `opacity: 0.65` をやめ、文字の色(muted)にした(上の #346 の項)。`opacity` が 1 未満になる規則は、押せないボタン全般の `button[disabled]`(0.6)だけ(WCAG は操作できない部品の文字を対象にしない)。`test/page-brand-css.test.ts` が固定する。
+- **薄い行の文字のコントラスト**: 発走済み・見送りの行は `opacity: 0.65` をやめ、文字の色(muted)にした(上の #346 の項)。`opacity` が 1 未満になる規則は押せないボタン全般の `button[disabled]`(0.6)だけ(WCAG は操作できない部品の文字を対象にしない)。`test/page-brand-css.test.ts` が固定する。
 - **「ログイン中」**: 見出しの下の行から、見出し(h1)と同じ行の右端へ移した(`<div class="head">` の中に h1 と `p.who`。小さい文字〈0.75rem〉・muted。狭い幅で見出しとぶつかるときは、折り返した行の右端に寄る)。書き込み先のセレクタ `.who .email` は変えていない。
 - **検査**: `test/palette.test.ts`(brand の値・コントラスト・色差の表)・`test/page-brand-css.test.ts`(新規。ボタン・選択・EV・opacity・ヘッダの CSS)・`test/page-race-modifier-css.test.ts`・`test/page-badge-css.test.ts`(opacity 前提を color 前提に書き換え)。
 
