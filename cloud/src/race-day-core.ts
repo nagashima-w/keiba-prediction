@@ -115,6 +115,7 @@ import { type NotificationPlan, type NotifyKind, type NotifyState } from "./noti
 import type { DiscordNotifier } from "./notify-send";
 import { NotifyStore } from "./notify-store";
 import { startTimeEpochMs } from "./pre-race-time";
+import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import {
   MAX_RESULT_RACES_PER_REQUEST,
   MAX_RESULT_ROWS_PER_DAY,
@@ -1441,6 +1442,8 @@ export class RaceDayCore {
    */
   async runNextStep(): Promise<StepOutcome> {
     // 期限が来た計画の行を昇格する(同期。pre_race を積む)。続けて、同じ起床の中で、積んだ pre_race を処理できる。
+    // 事前分析が完了済みで計画の行が無い地方のレースを拾う(Issue #566。公開の時点で完了していた分。該当が無ければ SQL 1 本だけ)。昇格より前(足した行がすぐ実行なら、同じ起床で昇格できる)。
+    await this.planStage.sweepNarMorningDone();
     await this.promoteStage.promoteDue();
     // 事前分析の計画の段階(会場の一覧の取得・確定)。次の試行の時刻が来ているものだけ(再試行の待ちは、時刻で守る)。
     const venue = this.plan.nextListVenue(this.now());
@@ -1953,6 +1956,8 @@ export class RaceDayCore {
         JSON.stringify(result),
       );
       this.updateTask(task, "done", task.attempts, null);
+      // 地方の普通のレースは、事前分析の完了で発走前の分析の計画の行を足す(Issue #566。中央・交流重賞は確定が足す)。失敗は握る(分析は止めない)。
+      this.registerNarPreRacePlan(task.race_id, scraped, settings.preRaceOffsetMinutes);
       // prior の保存・タスクの完了より後。失敗は握る(分析は止めない)ので、下の catch(計算の失敗)には来ない。
       await this.saveHorseRuns(task.race_id, kaisaiDate, scraped);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "compute", result: "ok" };
@@ -1961,6 +1966,33 @@ export class RaceDayCore {
       this.updateTask(task, "failed", task.attempts, message);
       this.onWarn(`朝の prior の計算に失敗しました(${task.race_id}): ${message}`);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "compute", result: "failed" };
+    }
+  }
+
+  /**
+   * 地方の普通のレースの事前分析が完了したとき、発走前の分析の計画の行を足す(Issue #566。足す規則は {@link PlanStage.registerNarMorningDone})。出馬表(計算ステップが読んだ取得結果)から、
+   * レース名・発走時刻・グレードを取る(追加のリクエストは無い)。会場名・レース番号は race_id から。**投げない**: 失敗は固定の警告にして戻る(分析は止めない。見回し〈{@link PlanStage.sweepNarMorningDone}〉が後で拾う)。
+   */
+  private registerNarPreRacePlan(raceId: string, scraped: RaceData | undefined, offsetMinutes: number): void {
+    if (scraped === undefined) {
+      return;
+    }
+    try {
+      const info = scraped.race;
+      this.planStage.registerNarMorningDone(
+        {
+          raceId,
+          name: info.raceName,
+          raceNumber: Number(raceId.slice(10, 12)),
+          venue: venueNameFromRaceId(raceId),
+          ...(info.grade === undefined ? {} : { grade: info.grade }),
+          // 出馬表の時刻は 1 桁の時間(`9:50`)を取りうる。`startTimeEpochMs` は 2 桁を要求するので揃える(`enqueueResultForAnalyzedRace` と同じ)。
+          ...(info.startTime === undefined ? {} : { startTime: info.startTime.padStart(5, "0") }),
+        },
+        offsetMinutes,
+      );
+    } catch {
+      this.onWarn(`発走前の分析の計画の行を足せませんでした(${raceId})。事前分析は続けます`);
     }
   }
 

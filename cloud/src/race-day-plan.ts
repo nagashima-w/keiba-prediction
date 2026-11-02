@@ -280,11 +280,11 @@ export class PlanStore {
   }
 
   /**
-   * 次に期限が来る planned の行の時刻。無ければ null。**確定済みの日だけ**(確定の前は null): 昇格は確定済みの日だけ動くので、確定の前に期限切れの行が候補になると、
+   * 次に期限が来る planned の行の時刻。無ければ null。**昇格が動ける日だけ**({@link PlanStore.promotionOpen}。確定の前は null): 昇格は確定済みの日だけ動くので、確定の前に期限切れの行が候補になると、
    * 起きても状態が変わらないまま即時に起き続ける(確定待ちの再試行の待ちが未来のとき。Issue #204 G-C3)。
    */
   nextDueMs(): number | null {
-    if (this.finalizedAt() === null) {
+    if (!this.promotionOpen()) {
       return null;
     }
     const rows = this.sql.exec("SELECT MIN(due_ms) AS at FROM race_day_plan WHERE state = 'planned'").toArray() as { at: number | null }[];
@@ -304,10 +304,22 @@ export class PlanStore {
     return !this.venueRows().some((r) => r.state === "pending") && this.finalizedAt() !== null;
   }
 
-  /** 計画の仕事が残っているか(依頼済みで、会場が pending・確定待ち・planned の行がある)。掃除のアラームや一覧の掃除の予約の判定に使う。 */
+  /**
+   * 期限が来た planned の行を pre_race に昇格してよい日か(Issue #566): **確定済みの日**、または**計画が依頼されていない日**。
+   * 依頼済みで未確定の日は動かさない(確定の途中で落ちた状態で先に昇格すると、その行には morning が積まれない〈Issue #204 G-C3〉)。
+   * 計画が依頼されていない日の planned の行は、事前分析(morning)が完了したあとに足された地方の行だけで、morning は済んでいるので、この懸念は当てはまらない。
+   */
+  promotionOpen(): boolean {
+    return this.finalizedAt() !== null || !this.requested();
+  }
+
+  /**
+   * 計画の仕事が残っているか(依頼済みで、会場が pending・確定待ち・planned の行がある。**依頼されていない日は planned の行だけ**〈Issue #566。地方の普通のレースの行〉)。
+   * 掃除のアラームや一覧の掃除の予約の判定に使う。
+   */
   hasPlanWork(): boolean {
     if (!this.requested()) {
-      return false;
+      return this.plannedCount() > 0;
     }
     return this.venueRows().some((r) => r.state === "pending") || this.finalizedAt() === null || this.plannedCount() > 0;
   }
@@ -362,6 +374,20 @@ export class PlanStore {
   centralVenueCodes(): string[] {
     const rows = this.sql.exec("SELECT DISTINCT substr(race_id, 5, 2) AS code FROM race_day_plan WHERE venue = 'central'").toArray() as { code: string }[];
     return rows.map((r) => r.code).filter((code) => /^(0[1-9]|10)$/.test(code)).sort();
+  }
+
+  /**
+   * 地方のレースのうち、事前分析(morning)が done なのに計画の行が無いものの race_id(レースID 順。Issue #566)。地方 = 場コード(race_id の 5〜6 桁目)が 10 より大きい
+   * (`venueKindOfRaceId` と同じ境界)。公開の時点で完了済みの分を拾う見回しと、完了の時点の追加の取りこぼしの救済に使う。
+   */
+  narMorningDoneWithoutPlanRow(): string[] {
+    const rows = this.sql
+      .exec(
+        `SELECT t.race_id AS race_id FROM race_day_tasks t LEFT JOIN race_day_plan p ON p.race_id = t.race_id
+          WHERE t.mode = 'morning' AND t.status = 'done' AND p.race_id IS NULL AND CAST(substr(t.race_id, 5, 2) AS INTEGER) > 10 ORDER BY t.race_id`,
+      )
+      .toArray() as { race_id: string }[];
+    return rows.map((r) => r.race_id);
   }
 
   plannedCount(): number {
