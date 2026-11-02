@@ -108,12 +108,12 @@ ${paletteCss()}
   .email { font-weight: bold; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 12px; }
   /* Issue #560: トップの上の並びを役割で 2 つに分ける。左が一覧の絞り込み(開催日・中央/地方・更新)、右が画面の移動(狙い目・検証・日報・月報・設定)。右寄せは塊が受け持つ(リンクごとの margin-left: auto は持たない)。
-     狭い画面(折り返す幅)では、画面の移動が幅いっぱいの専用の段になり、上に区切り線が入って、リンクが等幅に並ぶ(広い画面の見た目は従来どおり)。境目 48.25rem は、広い画面で 1 段に収まる幅(#544)の少し下 */
+     狭い画面(折り返す幅)では、画面の移動が幅いっぱいの専用の段になり、上に区切り線が入って、リンクが幅いっぱいに並ぶ(余りは均等に分ける。広い画面の見た目は従来どおり)。境目 48.25rem は、広い画面で 1 段に収まる幅(#544)の少し下 */
   .list-filters, .list-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
   .list-nav { margin-left: auto; }
   @media (max-width: 48.25rem) {
     .list-nav { flex: 1 1 100%; margin-left: 0; padding-top: 8px; border-top: 1px solid var(--line); }
-    .list-nav a { flex: 1 1 0; min-width: 0; padding: 0 4px; white-space: nowrap; }
+    .list-nav a { flex: 1 1 auto; padding: 0 4px; white-space: nowrap; }
   }
   .date { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--muted); }
   input[type="date"] { font-size: 1rem; min-height: 44px; padding: 0 8px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }

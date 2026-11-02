@@ -89,7 +89,7 @@ describe("トップの上の並びを 2 つの塊に分ける CSS(Issue #560)", 
     expect(rule).toMatch(/border-radius:\s*8px/);
   });
 
-  it("狭い画面(max-width: 48.25rem)では、画面の移動が幅いっぱいの専用の段になり、上に区切り線が入る。リンクは等幅で折り返さない", () => {
+  it("狭い画面(max-width: 48.25rem)では、画面の移動が幅いっぱいの専用の段になり、上に区切り線が入る。リンクは幅いっぱいに並び、文字の中では折り返さない", () => {
     const block = mediaBlock(NARROW);
     expect(block, "前提: @media がある").not.toBeNull();
     const nav = bodiesIn(block!, ".list-nav");
@@ -99,7 +99,7 @@ describe("トップの上の並びを 2 つの塊に分ける CSS(Issue #560)", 
     expect(nav[0]).toMatch(/border-top:\s*1px solid var\(--line\)/);
     const links = bodiesIn(block!, ".list-nav a");
     expect(links).toHaveLength(1);
-    expect(links[0]).toMatch(/flex:\s*1 1 0/);
+    expect(links[0]).toMatch(/flex:\s*1 1 auto/); // 内容の幅を基準に余りを均等に分ける(基準 0 だと折り返さず、極端に狭い幅で文字がはみ出す)
     expect(links[0]).toMatch(/white-space:\s*nowrap/);
     // 高さ(タップしやすさ)を狭い画面で下げない
     expect(block).not.toMatch(/min-height:\s*(?!44px)/);
