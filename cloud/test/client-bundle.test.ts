@@ -49,7 +49,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 236,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 238,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -278,7 +278,14 @@ describe("生成物のドリフトと決定性", () => {
     // 上限 233,500 には 235,339 - 233,500 = 1,839 バイト足りなかったため引き上げた。新しい上限 236,000 の余裕は 661 バイト(500 バイト単位に切り上げ)。
     // Issue #558: 上限は据え置き。一括実行のボタンの文言(「対象 N 件」)の増分は +20(235,339 → 235,359。計り方: 変更前の生成物と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力)。
     // バッジのピルの CSS は `src/page.ts` にあり、束には入らない。上限 236,000 までの余裕は 641 バイト。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(236_000);
+    // (追記)Issue #559(一覧の先頭の「次に発走するレース」): 上限を 236,000 から 238,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`): 235,359(e4a475f〈作業ブランチの先端〉の生成物)→ 237,327(+1,968。`pnpm run build:client` の出力〈「237327 バイト」〉)。
+    // 計り方: `git show e4a475f:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。増分の内訳(esbuild の metafile の入力ごとの `bytesInOutput` を、e4a475f のワークツリーと今で引いた差。和は 1,968):
+    // `client/list.ts` +1,088(カードの選び方 `nextRacesOf`・`NextRaceItem` の組み立て・発走時刻のエポックミリ秒・ボタンの状態)、`client/view.ts` +784(カードの VNode `nextRaceCard`〈見出し・リンク・バッジ・ボタン・注記〉と固定の見出し文言)、
+    // `packages/core/src/common/jst.ts` +62(`jstEpochMs` が束に入った)、`client/app.ts` +28(`runs` の受け渡し)、`client/race.ts` +6(`isRunning` の export と注記の定数化)。発走までの文言(`remainingText`)・ボタンの文言(`runButtonLabel`)・バッジ・ボタンの VNode(`runButton`)は既存の部品の流用で、束には増えていない。
+    // 日本語の文言は `\u` エスケープで 1 文字 6 バイト。新しく足した固定の文言は、見出し「次に発走するレース」・2 行目の「発走・」・バッジの接頭辞「発走前」の 3 つだけ(「すでに実行中です。…」の注記はレース画面から定数へ移しただけ)。
+    // 上限 236,000 には 237,327 - 236,000 = 1,327 バイト足りなかったため引き上げた。新しい上限 238,000 の余裕は 673 バイト(500 バイト単位に切り上げ。#546-2 の前例どおり)。実測が 237,500 を超えていたら 238,500 にする取り決めだったが、超えなかった。
+    // CSS(`.next-races` ほか 4 規則)は `src/page.ts` にあり、束には入らない。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(238_000);
   });
 });
 

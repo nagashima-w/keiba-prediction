@@ -166,7 +166,8 @@ const goButton = (h: Harness): VNode => {
   return found[0]!;
 };
 const bulkText = (h: Harness): string => byClass(h.tree(), "bulk").map(textOf).join(" ");
-const badgeTexts = (h: Harness): string[] => byClass(h.tree(), "badge").map(textOf);
+/** 一覧のレース行(`ul.races` の下)のバッジ。先頭の「次に発走するレース」のカード(Issue #559)のバッジは数えない。 */
+const badgeTexts = (h: Harness): string[] => byClass(h.tree(), "races").flatMap((ul) => byClass(ul, "badge")).map(textOf);
 
 describe("一括実行: 確認画面を挟む(Issue #251)", () => {
   it("ボタンを押しただけでは POST しない。確認画面に、対象の件数・事前分析の説明が出る。「やめる」で閉じ、POST しない", async () => {
