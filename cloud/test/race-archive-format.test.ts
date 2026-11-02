@@ -72,6 +72,15 @@ describe("encodeRaceArchive / decodeRaceArchive: 実フィクスチャの往復"
     expect(body.length).toBeLessThan(CENTRAL_HTML.length / 3);
   });
 
+  it("gzip の圧縮レベルは 1(CPU を使わない。ヘッダの XFL〈9 バイト目〉が最速を示す 4)。既定の 6 なら 0、9 なら 2 になる", () => {
+    const { body } = encodeRaceArchive({ record: CENTRAL, html: CENTRAL_HTML, fetchedAt: FETCHED_AT });
+    expect(body[8]).toBe(4);
+    // 対照: 同じ JSON を既定のレベル・最大のレベルで圧縮すると XFL が違う(XFL が圧縮レベルを区別できる前提)
+    const json = gunzipSync(body);
+    expect(gzipSync(json)[8]).toBe(0);
+    expect(gzipSync(json, { level: 9 })[8]).toBe(2);
+  });
+
   it("rawBytes は gzip 前の JSON の UTF-8 バイト数。取得時刻だけが違う(長さは同じ ISO 形式)保存では同じ値になる", () => {
     const a = encodeRaceArchive({ record: CENTRAL, html: CENTRAL_HTML, fetchedAt: "2026-11-01T01:02:03.456Z" });
     const b = encodeRaceArchive({ record: CENTRAL, html: CENTRAL_HTML, fetchedAt: "2027-12-31T23:59:59.999Z" });

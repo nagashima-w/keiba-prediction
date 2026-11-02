@@ -104,7 +104,10 @@ ${paletteCss()}
   .home { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: inherit; text-decoration: none; }
   /* Issue #244: 見出しの横の画像(装飾。幅・高さを固定して、読み込み中もレイアウトを動かさない) */
   .logo { width: 32px; height: 32px; flex: none; border-radius: 6px; }
-  .who { margin: 0 0 12px; font-size: 0.85rem; color: var(--muted); }
+  /* Issue #570: 「ログイン中」は見出しと同じ行の右端に小さく出す(狭い幅で見出しとぶつかるときは、折り返した行の右端に寄る)。見出し側の下の余白は .head が持つ */
+  .head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; margin: 0 0 12px; }
+  .head h1 { margin: 0; }
+  .who { margin: 0 0 0 auto; min-width: 0; font-size: 0.75rem; color: var(--muted); }
   .email { font-weight: bold; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 12px; }
   /* Issue #560: トップの上の並びを役割で 2 つに分ける。左が一覧の絞り込み(開催日・中央/地方・更新)、右が画面の移動(狙い目・検証・日報・月報・設定)。右寄せは塊が受け持つ(リンクごとの margin-left: auto は持たない)。
@@ -119,7 +122,8 @@ ${paletteCss()}
   input[type="date"] { font-size: 1rem; min-height: 44px; padding: 0 8px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
   .tabs { display: flex; gap: 4px; }
   .tab, .report-tab { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 64px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
-  .tab[aria-current="page"], .report-tab[aria-current="page"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  /* Issue #570: 選んでいるタブは brand(強調の色)。リンクの色(accent)とは別。太字でも示す */
+  .tab[aria-current="page"], .report-tab[aria-current="page"] { border-color: var(--brand); color: var(--brand); font-weight: bold; }
   button { font-size: 1rem; min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); background: var(--card); }
   button[disabled] { opacity: 0.6; }
   .notice { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); font-size: 0.9rem; }
@@ -141,7 +145,6 @@ ${paletteCss()}
   .bulk-notes { list-style: none; margin: 4px 0; padding: 0; }
   .bulk-notes .notice { margin: 4px 0; }
   .bulk-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .bulk-go { border-color: var(--accent); color: var(--accent); font-weight: bold; }
   .bulk-result p { margin: 0 0 8px; }
   .race { display: block; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); text-decoration: none; }
   /* Issue #559: 一覧の先頭の「次に発走するレース」。見出しは p、行は div.next-race(h2・li・a.race は使わない)。ボタンはリンクの外 */
@@ -183,14 +186,14 @@ ${paletteCss()}
   .close-round { margin: 12px 0 0; }
   .close-round-title { margin: 0 0 4px; }
   .horse { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
-  .horse.positive { border-color: var(--ok); border-width: 2px; }
+  .horse.positive { border-color: var(--brand); border-width: 2px; }
   .horse-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
   .mark { font-weight: bold; }
   /* Issue #317: 印を補修した馬の目印(「直」と元の印→今の印)。色だけに頼らない=文字がある */
   .mark-fixed { font-size: 0.75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
   .horse-line { font-size: 0.9rem; }
   .horse-reason { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
-  .ev-plus { margin-left: 8px; color: var(--ok); }
+  .ev-plus { margin-left: 8px; color: var(--brand); }
   .odds-higher { margin-left: 8px; }
   /* Issue #198: 馬ごとの強調材料・懸念事項(ラベルと箇条書き。色だけに頼らない=ラベルの文字がある)と、LLM の所要時間・usage の警告 */
   .horse-points { margin-top: 4px; padding-left: 8px; border-left: 3px solid var(--line); }
@@ -214,10 +217,10 @@ ${paletteCss()}
   .verify-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   /* Issue #336: 今日の狙い目(一覧の入口のリンクは検証の左。行は一覧のレースの行〈.race〉を流用し、残り時間を右端に寄せる。見送りと発走済みは薄く、10 分以内は色+太字で強調する) */
   .targets-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
-  .race.skipped { opacity: 0.65; }
-  /* Issue #558: 発走済みは、バッジの入れ物(.badges)以外の子を薄くする(行ごと薄くすると、バッジの文字のコントラストが 4.5 を割る)。狙い目の発走済みの行にも同じ規則(バッジは無い)。
-     見送り(.skipped)の行は上の規則で行全体が薄いので外す(狙い目の行は skipped と started の両方が付きうる。外さないと 0.65 × 0.65 の二重がけになる) */
-  .race.started:not(.skipped) > :not(.badges) { opacity: 0.65; }
+  /* Issue #570: 見送りと発走済みの行は、opacity ではなく文字の色(muted)で薄く見せる(opacity だと muted の文字のコントラスト比がライトで約 2.5・ダークで約 3.4 まで落ちて、4.5 を割る)。
+     色は継承なので二重がけにならない。自前の色を持つ子(.race-detail〈muted〉・.t-left.soon〈wait〉・一覧のバッジ〈.badges .badge.* の tone〉)はそれが勝つ(Issue #558 のバッジは、発走済みでも薄くならない) */
+  .race.skipped { color: var(--muted); }
+  .race.started { color: var(--muted); }
   .t-left { margin-left: auto; font-weight: bold; white-space: nowrap; }
   .t-left.soon { color: var(--wait); }
   /* Issue #235: 日報画面(一覧の入口のリンク・レースごとのカード・箇条書き・生の文章。スマホ幅で横に伸ばさない=改行で折り返す) */
@@ -240,11 +243,11 @@ ${paletteCss()}
   .report-race p { margin: 2px 0; overflow-wrap: anywhere; font-size: 0.9rem; }
   .verify-venues { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
   .verify-venue { min-width: 64px; }
-  .verify-venue[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  .verify-venue[aria-pressed="true"] { border-color: var(--brand); color: var(--brand); font-weight: bold; }
   /* Issue #254: 対応表の対象の切替(補正後〈AI〉/補正前〈統計〉)。区分の切替と同じ見た目(押されている側を太字+枠色で示す=色だけに頼らない) */
   .verify-targets { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
   .verify-target { min-width: 64px; }
-  .verify-target[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  .verify-target[aria-pressed="true"] { border-color: var(--brand); color: var(--brand); font-weight: bold; }
   .verify-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
   .verify-tile { display: flex; flex-direction: column; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
   .verify-tile.strong { border-color: var(--accent); }
@@ -269,7 +272,7 @@ ${paletteCss()}
   .verify-version { margin: 12px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
   .verify-version h3 { margin: 0 0 4px; overflow-wrap: anywhere; }
   .verify-version .meta { overflow-wrap: anywhere; }
-  .verify-versions-link { display: block; margin: 8px 0; padding: 10px 0; }
+  .verify-versions-link { display: block; margin: 8px 0; padding: 10px 0; color: var(--accent); }
   .verify-version-toggle { display: block; width: 100%; min-height: 44px; margin: 8px 0 0; padding: 8px 12px; text-align: left; font-weight: bold; }
   .verify-version-calibration-heading { margin: 12px 0 4px; font-size: 0.9rem; font-weight: bold; overflow-wrap: anywhere; }
   .verify-version-table-label { margin: 12px 0 4px; font-weight: bold; }
@@ -353,13 +356,20 @@ ${paletteCss()}
   .horse-table tbody tr:last-child td { border-bottom: 0; }
   .horse-table .eval-marked td { font-weight: bold; }
   .horse-table .eval-positive td { background: var(--card); }
-  .horse-table .ev-table-plus { display: block; font-size: 0.75rem; font-weight: bold; color: var(--accent); }
+  .horse-table .ev-table-plus { display: block; font-size: 0.75rem; font-weight: bold; color: var(--brand); }
+  /* Issue #570: 主要なボタン(事前分析・発走前の分析の実行=.run、場ごとの一括実行の確定=.bulk-go、設定の保存=.settings-save、日報の作成=.report-run)。有効のときは brand の塗りに --bg の文字(コントラスト比は palette.test)。
+     無効(送信中・待ち・取得済み・保存中)のときは塗りをやめ、ほかのボタンと同じ card の背景・muted の文字・line の枠に戻す(opacity 1)。押せるかどうかが色で見分けられ、無効でも文字は 4.5 以上。実行中かどうかは、これまでどおりラベルの文字(「送信中…」「待ち」など)でも示す。
+     詳細度: .x[disabled](0,2,0)は .x(0,1,0)にも button[disabled](0,1,1)にも勝つ。.x は button(0,0,1)に勝つ */
+  .run, .bulk-go, .settings-save, .report-run { border-color: var(--brand); color: var(--bg); background: var(--brand); font-weight: bold; }
+  .run[disabled], .bulk-go[disabled], .settings-save[disabled], .report-run[disabled] { border-color: var(--line); color: var(--muted); background: var(--card); opacity: 1; }
 </style>
 </head>
 <body>
 <main>
+<div class="head">
 <h1><a class="home" href="#"><img class="logo" src="/icons/header-32.png" srcset="/icons/header-64.png 2x, /icons/header-96.png 3x" width="32" height="32" alt="">Uma Driller</a></h1>
 <p class="who">ログイン中: <span class="email">${escapeHtml(email)}</span></p>
+</div>
 <div id="app" data-role="${viewer ? "viewer" : "admin"}" aria-live="polite">読み込み中…</div>
 <noscript><p>この画面には JavaScript が必要です。JavaScript を有効にしてください。</p></noscript>
 </main>

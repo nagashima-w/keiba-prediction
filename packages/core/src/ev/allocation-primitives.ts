@@ -669,7 +669,13 @@ export function runGreedyAllocation(
     let worstFresh = Infinity;
     for (let i = 0; i < n; i++) {
       if (hasLimits && blocked[i] === 1) {
-        continue; // 選ばれない候補は評価しない。安全性の判定(worstFresh)にも使わない(その候補の接触先の資産で、高速パスの可否を決めない)。
+        // 選ばれない候補は評価しない。安全性の判定(worstFresh)にも使わない(その候補の接触先の資産で、高速パスの可否を決めない)。
+        // ただしこの continue は挙動を変えない(等価な変異。Issue #573-11)。候補 i の接触先 outcome j では
+        //   fresh = commonWealth[j] + δ·odds[i] > commonWealth[j] ≥ worstCommon  (odds[i] > 0)
+        // なので、ブロック中の候補を含めても worstFresh が worstCommon を下回ることはなく、safe = min(worstCommon, worstFresh) > NUMERIC_EPS の値は変わらない
+        // (差が出るのは worstCommon が NUMERIC_EPS の 1e-16 以内にあるときの丸めだけで、実質作れない)。実測: この条件を `false` にしても core の test/ev の 1878 件が全部通る。
+        // 残す理由は、ブロック中の候補の freshFlat(下で読まれない)を計算しない分の節約と、読み手に「評価しない」意図を伝えること。
+        continue;
       }
       const cStart = contactOffsets[i]!;
       const cEnd = contactOffsets[i + 1]!;

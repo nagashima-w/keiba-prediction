@@ -23,7 +23,7 @@ import { CVD_TYPES, contrastRatio, deltaE2000Hex, intToHex } from "./color-scien
 const MIN_CONTRAST = 4.5;
 const MIN_DELTA_E = 10;
 
-const KEYS = ["fg", "bg", "muted", "line", "card", "accent", "ok", "wait", "fail"] as const;
+const KEYS = ["fg", "bg", "muted", "line", "card", "accent", "brand", "ok", "wait", "fail"] as const;
 
 /** `{ --fg: #1c1c1e; --bg: ... }` の中身から、変数名 → 色を読む。 */
 function parseVariables(block: string): Record<string, string> {
@@ -61,9 +61,9 @@ const OLD_DISCORD = { ok: 0x2ecc71, warn: 0xe67e22, fail: 0xe74c3c, none: 0x95a5
 
 type Colors = Readonly<Record<string, string>>;
 
-/** 状態の3組({ok, wait, fail} の全組合せ)と、強調色との3組。 */
+/** 状態の3組({ok, wait, fail} の全組合せ)と、強調色(accent)との3組、ロゴのオレンジ(brand)と ok・accent の2組(Issue #570)。brand と wait・fail の組は、閾値を満たさない(下の別の describe で実測の最悪値を固定する)。 */
 function statePairs(c: Colors): readonly (readonly [string, string, string, string])[] {
-  return [
+  const base: (readonly [string, string, string, string])[] = [
     ["ok", "wait", c["ok"]!, c["wait"]!],
     ["ok", "fail", c["ok"]!, c["fail"]!],
     ["wait", "fail", c["wait"]!, c["fail"]!],
@@ -71,6 +71,9 @@ function statePairs(c: Colors): readonly (readonly [string, string, string, stri
     ["accent", "wait", c["accent"]!, c["wait"]!],
     ["accent", "fail", c["accent"]!, c["fail"]!],
   ];
+  // brand は Issue #570 で足した色。旧配色(OLD_WEB。brand を持たない)の検査では、brand の組を含めない
+  if (c["brand"] !== undefined) base.push(["brand", "ok", c["brand"], c["ok"]!], ["brand", "accent", c["brand"], c["accent"]!]);
+  return base;
 }
 
 /** すべての視覚(通常・P・D・T)での ΔE2000 の最小値と、そのときの型。 */
@@ -85,7 +88,7 @@ function worstDeltaE(a: string, b: string): { value: number; type: string } {
 
 describe("web の配色: 実際に配信される CSS と palette.ts の一致", () => {
   for (const { name, vars, palette } of MODES) {
-    it(`${name}: 9 個の変数がすべて読め、palette.ts の値と同じ`, () => {
+    it(`${name}: 10 個の変数がすべて読め、palette.ts の値と同じ`, () => {
       expect(Object.keys(vars).sort()).toEqual([...KEYS].sort()); // 前提: 欠けも余りもない(読み損ないで検査が空振りしない)
       for (const key of KEYS) {
         expect(vars[key]?.toLowerCase(), `--${key}`).toBe(palette[key].toLowerCase());
@@ -93,7 +96,7 @@ describe("web の配色: 実際に配信される CSS と palette.ts の一致",
     });
   }
 
-  it("palette.ts の WEB_LIGHT・WEB_DARK は、検査する 9 個の変数と同じキーを持つ(キーが増えたのに検査が追い付いていない状態を防ぐ)", () => {
+  it("palette.ts の WEB_LIGHT・WEB_DARK は、検査する 10 個の変数と同じキーを持つ(キーが増えたのに検査が追い付いていない状態を防ぐ)", () => {
     expect(Object.keys(WEB_LIGHT).sort()).toEqual([...KEYS].sort());
     expect(Object.keys(WEB_DARK).sort()).toEqual([...KEYS].sort());
   });
@@ -103,7 +106,7 @@ describe("web の配色: 実際に配信される CSS と palette.ts の一致",
   });
 
   it("ライトとダークは別の値(ダークにも同じ値を入れて通るのを防ぐ)", () => {
-    for (const key of ["fg", "bg", "ok", "wait", "fail"] as const) {
+    for (const key of ["fg", "bg", "brand", "ok", "wait", "fail"] as const) {
       expect(WEB_LIGHT[key], key).not.toBe(WEB_DARK[key]);
     }
   });
@@ -122,6 +125,11 @@ describe("Issue #239 R1: 意味の割り当て(どの状態にどの色か)を�
 
   it("web ダーク: ok=緑・wait=琥珀・fail=サーモン", () => {
     expect({ ok: WEB_DARK.ok, wait: WEB_DARK.wait, fail: WEB_DARK.fail }).toEqual({ ok: "#7cd9ac", wait: "#e3b548", fail: "#ec7971" });
+  });
+
+  it("Issue #570: web の brand(ロゴのオレンジ)= ライトは焦げ茶寄りのオレンジ #b34700・ダークはロゴそのもの #ff7803(実際に配信される CSS からも読む)", () => {
+    expect({ light: WEB_LIGHT.brand, dark: WEB_DARK.brand }).toEqual({ light: "#b34700", dark: "#ff7803" });
+    expect({ light: PAGE.light["brand"], dark: PAGE.dark["brand"] }).toEqual({ light: "#b34700", dark: "#ff7803" });
   });
 
   it("実際に配信される CSS でも同じ割り当て(palette.ts の定数ではなく、<style> から読んだ値)", () => {
@@ -168,7 +176,7 @@ describe("Issue #239 R2: 色の直書きが無い(<style> 全体で、16 進・r
 });
 
 describe("web の配色: 文字色のコントラスト比(WCAG AA = 4.5:1 以上)", () => {
-  const TEXT_KEYS = ["fg", "muted", "accent", "ok", "wait", "fail"] as const;
+  const TEXT_KEYS = ["fg", "muted", "accent", "brand", "ok", "wait", "fail"] as const;
   for (const { name, vars } of MODES) {
     for (const key of TEXT_KEYS) {
       for (const surface of ["bg", "card"] as const) {
@@ -184,12 +192,24 @@ describe("web の配色: 文字色のコントラスト比(WCAG AA = 4.5:1 以�
   });
 });
 
+describe("Issue #570: 塗りのボタン(背景 brand に文字 --bg)のコントラスト比(WCAG AA = 4.5:1 以上)", () => {
+  for (const { name, vars } of MODES) {
+    it(`${name}: 文字 --bg を背景 --brand の上に置いたときのコントラスト比が ${MIN_CONTRAST} 以上`, () => {
+      expect(contrastRatio(vars["bg"]!, vars["brand"]!)).toBeGreaterThanOrEqual(MIN_CONTRAST);
+    });
+  }
+
+  it("検査が効く: 文字に --fg を使うと、ライトでもダークでも 4.5 に届かない(だから文字は --bg)", () => {
+    for (const { vars } of MODES) expect(contrastRatio(vars["fg"]!, vars["brand"]!)).toBeLessThan(MIN_CONTRAST);
+  });
+});
+
 describe(`web の配色: 色覚シミュレーション(P・D・T 型)後も ΔE2000 ≥ ${MIN_DELTA_E}`, () => {
   for (const { name, vars } of MODES) {
     const pairs = statePairs(vars);
 
-    it(`${name}: 検査する組は 6 組(状態 3 + 強調色と状態 3)`, () => {
-      expect(pairs).toHaveLength(6);
+    it(`${name}: 検査する組は 8 組(状態 3 + 強調色と状態 3 + brand と ok・accent 2)`, () => {
+      expect(pairs).toHaveLength(8);
     });
 
     for (const [a, b, colorA, colorB] of pairs) {
@@ -209,6 +229,35 @@ describe(`web の配色: 色覚シミュレーション(P・D・T 型)後も ΔE
       const worst = Math.min(...statePairs(OLD_WEB[mode]).map(([, , a, b]) => worstDeltaE(a, b).value));
       expect(worst, `旧配色 ${mode}`).toBeLessThan(MIN_DELTA_E);
     }
+  });
+});
+
+describe("Issue #570: brand と wait・fail の色差(ΔE2000)は閾値 10 を満たさない組がある。ゲートにせず、実測の最悪値を表で固定する", () => {
+  // 状態は文字(「待ち」「失敗」)でも示しているので、色差は補強。brand は塗りのボタン・選んでいるタブ・EV プラスの強調に使い、wait・fail の塗りのバッジと並ぶ場面でも意味は文字で分かる。
+  // ここは「採用した色の実測値」の記録: brand か wait・fail を変えて近づく(または離れる)と赤くなり、docs/current-spec.md の数値の更新を促す。再現: `cd cloud && pnpm exec tsx print-palette-report.ts`。
+  // 値は小数 1 桁(許容 ±0.05)。型は通常・P・D・T(CVD_TYPES の順)。
+  const EXPECTED: Readonly<Record<string, Readonly<Record<string, readonly [number, number, number, number]>>>> = {
+    ライト: { wait: [18.7, 5.0, 1.7, 11.9], fail: [17.7, 15.1, 13.0, 8.8] },
+    ダーク: { wait: [23.2, 12.2, 6.7, 16.4], fail: [20.4, 16.8, 13.3, 3.5] },
+  };
+  for (const { name, vars } of MODES) {
+    for (const other of ["wait", "fail"] as const) {
+      it(`${name}: brand(${vars["brand"]}) と ${other}(${vars[other]}) の ΔE2000(通常・P・D・T)が実測の表のとおり`, () => {
+        const expected = EXPECTED[name]![other]!;
+        expect(expected).toHaveLength(CVD_TYPES.length); // 前提: 型の数と表の列が合っている
+        CVD_TYPES.forEach((type, i) => {
+          expect(deltaE2000Hex(vars["brand"]!, vars[other]!, type), `${type}`).toBeCloseTo(expected[i]!, 1);
+        });
+      });
+    }
+  }
+
+  it("前提(表が自明でない): 4 つの組の最悪値は、ライトの brand–wait(D 型 1.7)とダークの brand–fail(T 型 3.5)のように閾値 10 を割る", () => {
+    const worst = (mode: "light" | "dark", other: "wait" | "fail"): number => worstDeltaE(PAGE[mode]["brand"]!, PAGE[mode][other]!).value;
+    expect(worst("light", "wait")).toBeLessThan(MIN_DELTA_E);
+    expect(worst("dark", "fail")).toBeLessThan(MIN_DELTA_E);
+    expect(worstDeltaE(PAGE.light["brand"]!, PAGE.light["wait"]!).type).toBe("deutan");
+    expect(worstDeltaE(PAGE.dark["brand"]!, PAGE.dark["fail"]!).type).toBe("tritan");
   });
 });
 

@@ -128,16 +128,6 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     }
   }
 
-  // 過去の結果の取得の起動(Issue #554)。21 時・23 時のどちらでも、アラームが無ければ張るだけ(取得は 11/4 0:00 JST 以降の JST 0:00〜8:30 に、DO が gate 経由で行う。ここでは何も取得しない)。
-  // 21 時にも呼ぶのは、公開が 23 時の cron の後に遅れても、翌日の 21 時の cron が拾うため。kick は冪等。事前分析の計画の成否によらず走らせ、失敗しても投げない。
-  if (env.RACE_ARCHIVE_FETCH !== undefined) {
-    try {
-      await env.RACE_ARCHIVE_FETCH.get(env.RACE_ARCHIVE_FETCH.idFromName(RACE_ARCHIVE_FETCH_NAME)).kick();
-    } catch (error) {
-      log(`scheduled: failed class=race-archive-kick-failed error=${errorKind(error)}`, "error");
-    }
-  }
-
   // 23 時の再実行だけ: 結果の取り込み・補完の起動・日報の補完(21 時は翌日分の事前分析の取得が gate を占めるので行わない。Issue #249)。
   // いずれも requestPlan の成否によらず走らせ、失敗しても投げない(計画の失敗が結果を止めない・結果の失敗が計画を失敗させない)。基準は cron の JST の今日(`today`。翌日ではない)。
   if (isRetry) {
@@ -169,6 +159,18 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
   // 最終日は当月を auto(同日 22:00 JST 開始)、月が明けて 3 日以内の 23:00 の実行は前月を catchup(`monthly-report-plan.ts`)。
   if (env.MONTHLY_REPORT !== undefined) {
     await requestMonthlyReports(env.MONTHLY_REPORT, today, kind, log);
+  }
+
+  // 過去の結果の取得の起動(Issue #554)。21 時・23 時のどちらでも、アラームが無ければ張るだけ(取得は 11/4 0:00 JST 以降の JST 0:00〜8:30 に、DO が gate 経由で行う。ここでは何も取得しない)。
+  // 21 時にも呼ぶのは、公開が 23 時の cron の後に遅れても、翌日の 21 時の cron が拾うため。kick は冪等。事前分析の計画の成否によらず走らせ、失敗しても投げない。
+  // **処理の最後**に置く(Issue #573-17): kick は DO の RPC で、固まると後ろの仕事を巻き込むので、結果の取り込み・補完の起動・日報の補完・月報の依頼を先に済ませる。
+  // 先の仕事はいずれも自分で握って投げないので、ここへ必ず届く。計画の失敗の通知・throw(下)より前に置くので、計画が失敗した日も kick は呼ぶ。
+  if (env.RACE_ARCHIVE_FETCH !== undefined) {
+    try {
+      await env.RACE_ARCHIVE_FETCH.get(env.RACE_ARCHIVE_FETCH.idFromName(RACE_ARCHIVE_FETCH_NAME)).kick();
+    } catch (error) {
+      log(`scheduled: failed class=race-archive-kick-failed error=${errorKind(error)}`, "error");
+    }
   }
 
   if (!planned) {
