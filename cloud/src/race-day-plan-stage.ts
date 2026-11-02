@@ -248,7 +248,7 @@ export class PlanStage {
    *
    * **評価済みのレースは覚える**(Issue #573-18。`race_day_meta` の {@link SWEEP_SETTLED_KEY})。一覧を取れた見回しで、行を足さなかったレース(発走済み・発走まで 10 分未満・発走時刻なし・上限〈cap〉・一覧に無い)は、
    * 次の見回しの対象から外す。これらは一覧が変わらない限り足せない(時刻は戻らず、一覧の内容は同じ)のに、`done で行の無い地方のレース` の SQL には残り続けるので、外さないと、その日のうちは
-   * 一覧のキャッシュ(6 時間)が切れるたびに netkeiba へ地方の一覧を取りに行く。**一覧の取得に失敗した起床では覚えない**(次の起床で取り直す)。評価済みでないレース(あとから done になった分)は、今までどおり拾う。
+   * 一覧のキャッシュ(6 時間)が切れるたびに netkeiba へ地方の一覧を取りに行く。**一覧の取得に失敗した起床と、一覧が空(ok で 0 件)の起床では覚えない**(次の起床で取り直す)。評価済みでないレース(あとから done になった分)は、今までどおり拾う。
    */
   async sweepNarMorningDone(): Promise<void> {
     try {
@@ -271,6 +271,11 @@ export class PlanStage {
       const result = await this.getRaceList(kaisaiDate, "nar");
       if (!result.ok) {
         this.onWarn(`事前分析の計画: 地方の普通のレースの発走前の分析の計画を足せませんでした(一覧を取得できません。理由: ${result.reason})`);
+        return;
+      }
+      if (result.races.length === 0) {
+        // 空の一覧(公開前・一時的な空の応答)は、取得の失敗と同じ扱い: 評価済みにせず、`retryDelayMs` のあとに取り直す
+        // (空の一覧はキャッシュされない〈`getRaceList`〉ので、次の見回しで本当に取り直す。警告は出さない: 開催のない日・公開前で毎回出ると騒がしい)。
         return;
       }
       const offsetMinutes = this.plan.offset()?.minutes ?? (await this.loadOffsetMinutes());

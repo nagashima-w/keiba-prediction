@@ -451,6 +451,23 @@ describe("公開の時点で完了済みの分の見回し(アラームのたび
       expect(planRows(h).map((r) => r.race_id)).toEqual([NAR_ID]);
     });
 
+    it("一覧が空(ok で 0 件。公開前・一時的な空の応答)のときは評価済みにしない: 間隔をあけて取り直し、載ったら行を足す", async () => {
+      const h = harness(jstNar("09:00"));
+      h.gate.narList.html = EMPTY_HTML; // 空の一覧(races が 0 件の ok)
+      doneWithoutPlan(h, NAR_ID, NAR_DATE);
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(1);
+      expect(planRows(h)).toEqual([]); // 前提: 足されていない
+      // 前提: 取得は失敗ではなく空の一覧(失敗なら警告が出る)
+      expect(h.warnings.some((w) => w.includes("取得できません"))).toBe(false);
+      // 間隔をあけて取り直し、今度は載っていれば行を足す(空の一覧は覚えない。キャッシュもされない)
+      h.gate.narList.html = narListHtml(NAR_ID, "一覧のレース名", "20:50");
+      h.clock.now += RETRY_DELAY_MS + 1;
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(2);
+      expect(planRows(h).map((r) => r.race_id)).toEqual([NAR_ID]);
+    });
+
     it("評価済みのレースが残っていても、あとから done になった別のレースは今までどおり拾う", async () => {
       const h = harness(jstNar("06:30"));
       h.gate.narList.html = narListHtml(NAR_ID, "発走済みのレース", "06:00");
