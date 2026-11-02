@@ -13,7 +13,7 @@
  * 手順の仕様(試行回数は取得の前に永続化・再試行の上限・offset の決定と既定値へのフォールバック・原子性に頼らない冪等性・上限 cap)は {@link PlanStage.runList}・{@link PlanStage.runFinalize} の JSDoc を参照。
  * メソッドの本体は、参照先の名前(定数・本体のメソッドを `this.` の注入された関数へ)以外、切り出し前から変えていない。
  */
-import { planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
+import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
 import { DEFAULT_PRE_RACE_OFFSET_MINUTES, startTimeEpochMs } from "./pre-race-time";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import type { RaceListResult, RaceListVenue, TaskMode, TaskStatus } from "./race-day-core";
@@ -240,7 +240,7 @@ export class PlanStage {
 
   /**
    * 見回し(Issue #566。`runNextStep` の先頭から呼ぶ): 事前分析(morning)が done なのに計画の行が無い地方のレース(公開の時点で完了済みだった分・完了の時点の追加を取りこぼした分)に、
-   * 地方の一覧から行を足す。**該当が無ければ何もしない**(SQL 1 本だけ。一覧は取りに行かない)。投げない: 失敗は警告にして、次の起床で取り直す。
+   * 地方の一覧から行を足す。**該当が無ければ何もしない**(SQL 1 本だけ。一覧は取りに行かない)。**開催日が今日〈JST〉より前の DO でも何もしない**(掃除のアラームの予約を延ばさないため)。投げない: 失敗は警告にして、次の起床で取り直す。
    * 一覧(`getRaceList`。ゲート経由のキャッシュ付き)は 1 回の見回しにつき 1 本。**試行の時刻を残し、`retryDelayMs` の間は取り直さない**(一覧に無いレースが残り続けても、起床のたびには取りに行かない)。
    */
   async sweepNarMorningDone(): Promise<void> {
@@ -250,7 +250,9 @@ export class PlanStage {
         return;
       }
       const kaisaiDate = this.metaGet("kaisai_date");
-      if (kaisaiDate === null) {
+      // 過去の開催日の DO では見回さない(今日以降だけ)。発走済みなどで行を足せなかった morning done は過去の日にも残り続けるので、見回すと、掃除専用のアラームの起床のたびに
+      // 一覧を取りに行き、一覧の掃除の予約(`purge_due_at`)を後ろへ延ばして、掃除が一度も走らなくなる。
+      if (kaisaiDate === null || kaisaiDate < jstKaisaiDate(this.now())) {
         return;
       }
       const nowMs = this.now();

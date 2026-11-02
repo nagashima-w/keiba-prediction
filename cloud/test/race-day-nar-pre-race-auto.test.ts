@@ -391,4 +391,19 @@ describe("公開の時点で完了済みの分の見回し(アラームのたび
     expect(planRows(h)).toEqual([]);
     expect(h.warnings.some((w) => w.includes("SQL の故障"))).toBe(true);
   });
+
+  it("過去の開催日の DO では見回さない: 発走済みで行を足せなかった morning done が残っても、掃除専用の起床で一覧を取らず、掃除の予約を延ばさず、掃除が走る", async () => {
+    const nextDay = Date.parse("2026-07-14T09:00:00+09:00"); // 開催日(20260712)の 2 日後
+    const h = harness(nextDay);
+    h.gate.narList.html = narListHtml(NAR_ID, "一覧のレース名", "20:50");
+    doneWithoutPlan(h, NAR_ID, NAR_DATE);
+    h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('purge_due_at', ?)", String(nextDay)); // 掃除の時刻が来ている
+    const outcome = await h.core.runNextStep();
+    // 前提: 掃除が走った(掃除専用の起床。予約は消えた)
+    expect(outcome.kind).toBe("idle");
+    expect(h.sql.exec("SELECT value FROM race_day_meta WHERE key = 'purge_due_at'").toArray()).toEqual([]);
+    // 一覧は取りに行かず、行も足さない
+    expect(h.gate.narList.calls).toBe(0);
+    expect(planRows(h)).toEqual([]);
+  });
 });
