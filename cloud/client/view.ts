@@ -7,6 +7,7 @@
 import type { TaskMode } from "./api";
 import type { BulkModel, BulkPanel } from "./bulk";
 import type { Badge, ListModel, NextRaceItem, RaceGroupItem, RaceItem } from "./list";
+import type { Crumb, NeighborLink, RaceNeighbors } from "./neighbors";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
@@ -282,6 +283,23 @@ function taskCard(card: TaskCard, actions: ViewActions): VNode {
   ]);
 }
 
+/** パンくず(Issue #571。見出しの上の小さい 1 行)。リンクがあるのは一覧と日付だけ。競馬場はリンクなしの文字、現在地(R)は `aria-current="page"`。区切りは読み上げない。競馬場名は外から来た文字列(テキストノード)。 */
+function breadcrumbNode(crumbs: readonly Crumb[]): VNode {
+  const parts: VNode[] = [];
+  crumbs.forEach((c, i) => {
+    if (i > 0) parts.push(h("span", { class: "crumb-sep", "aria-hidden": "true" }, ["›"]));
+    parts.push(c.href !== null ? h("a", { href: c.href }, [c.label]) : h("span", c.current ? { "aria-current": "page" } : {}, [c.label]));
+  });
+  return h("nav", { class: "breadcrumb", "aria-label": "パンくず" }, parts);
+}
+
+/** 前後のレース(Issue #571。見出しの下。日報の「前の日報」「次の日報」の nav に倣う)。前後とも無いときは何も出さない。端では、その側を出さない。 */
+function neighborNodes(neighbors: RaceNeighbors | null): VNode[] {
+  if (neighbors === null) return [];
+  const links = [neighbors.prev, neighbors.next].filter((l): l is NeighborLink => l !== null).map((l) => h("a", { class: "tab", href: l.href }, [l.label]));
+  return [h("nav", { class: "tabs race-neighbors", "aria-label": "前後のレース" }, links)];
+}
+
 function raceScreen(model: RaceModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
     h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
@@ -306,7 +324,7 @@ function raceScreen(model: RaceModel, actions: ViewActions): VNode {
   } else {
     pastBody.push(h("ul", { class: "past" }, past.items.map((item) => h("li", {}, [h("a", { class: "past-link", href: item.href }, [item.label])]))));
   }
-  return h("div", { class: "screen" }, [controls, ...trackingNotice(model.tracking, actions), h("h1", { class: "title" }, [model.title]), ...(model.guide === null ? [] : [h("p", { class: "race-guide" }, [model.guide])]), ...body, h("section", { class: "past-section" }, [h("h2", {}, ["過去の分析"]), ...pastBody])]);
+  return h("div", { class: "screen" }, [controls, breadcrumbNode(model.breadcrumb), ...trackingNotice(model.tracking, actions), h("h1", { class: "title" }, [model.title]), ...neighborNodes(model.neighbors), ...(model.guide === null ? [] : [h("p", { class: "race-guide" }, [model.guide])]), ...body, h("section", { class: "past-section" }, [h("h2", {}, ["過去の分析"]), ...pastBody])]);
 }
 
 /**
@@ -600,7 +618,9 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
   }
   const content = model.content;
   if (content !== null) {
+    if (model.breadcrumb !== null) body.push(breadcrumbNode(model.breadcrumb));
     body.push(h("h1", { class: "title" }, [content.title]));
+    body.push(...neighborNodes(model.neighbors));
     body.push(...resultMeta(content, "h2"));
     body.push(...resultSections(content, "h2", actions));
   }

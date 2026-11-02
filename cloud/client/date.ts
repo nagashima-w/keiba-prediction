@@ -71,3 +71,14 @@ export function formatJstDateTime(iso: string): string {
   const pad = (n: number): string => String(n).padStart(2, "0");
   return `${jst.getUTCFullYear()}-${pad(jst.getUTCMonth() + 1)}-${pad(jst.getUTCDate())} ${pad(jst.getUTCHours())}:${pad(jst.getUTCMinutes())}`;
 }
+
+/** 曜日(`Date#getUTCDay` の添字順。日報の見出しとパンくずが共有する。Issue #571)。 */
+export const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+/** `20261103` → `11/3(火)`(パンくずの日付。Issue #571)。形が違えばそのまま。 */
+export function shortDateLabel(ymd: string): string {
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(ymd);
+  if (m === null) return ymd;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  return `${mo}/${d}(${WEEKDAYS[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()]!})`;
+}

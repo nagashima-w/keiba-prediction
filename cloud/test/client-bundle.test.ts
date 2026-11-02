@@ -49,7 +49,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 238,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 240,500 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -286,7 +286,11 @@ describe("生成物のドリフトと決定性", () => {
     // 上限 236,000 には 237,327 - 236,000 = 1,327 バイト足りなかったため引き上げた。新しい上限 238,000 の余裕は 673 バイト(500 バイト単位に切り上げ。#546-2 の前例どおり)。実測が 237,500 を超えていたら 238,500 にする取り決めだったが、超えなかった。
     // CSS(`.next-races` ほか 4 規則)は `src/page.ts` にあり、束には入らない。
     // (追記)Issue #560(上の並びを 2 つの塊に分ける): 上限は据え置き(238,000)。実測: 237,327 → 237,516(+189。`pnpm run build:client` の出力)。`list-filters`・`list-nav` の 2 つの塊の `h()` と、固定の文言「一覧の絞り込み」「画面の移動」の分。余裕は 484 バイト。CSS は `src/page.ts` にあり、束には入らない。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(238_000);
+    // (追記)Issue #571(レース画面・結果画面のパンくずと前後のレース): 上限を 238,000 から 240,500 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`): 237,516(6dec36e〈作業ブランチの起点〉の生成物)→ 239,901(+2,385。`pnpm run build:client` の出力〈「239901 バイト」〉)。
+    // 計り方: `git show 6dec36e:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。増えたのは、前後のレース・パンくず・前後のリンクの純関数(`client/neighbors.ts` の `neighborRaces`・`breadcrumbOf`・`neighborsOf`)、
+    // 短い日付(`date.ts` の `shortDateLabel`。曜日の配列は `report-model.ts` から移して共有)、モデルへの 2 項目(`race.ts`・`result.ts`)、一覧の取得の配線(`race-data.ts` の `syncResultList`・`listRowsOf`)、2 つの VNode(`view.ts` の `breadcrumbNode`・`neighborNodes`)、固定の文言(「一覧」「パンくず」「前後のレース」「前のレース」「次のレース」)。
+    // 日本語の文言は `\u` エスケープで 1 文字 6 バイト。着手前の見積もり(+1,000〜1,800)より大きかった(実測が 239,500 を超えたら 240,500 にする取り決め〈#559 の前例〉。超えた)。新しい上限 240,500 の余裕は 599 バイト。CSS(`.breadcrumb` ほか)は `src/page.ts` にあり、束には入らない。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(240_500);
   });
 });
 
@@ -655,7 +659,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
         return { status: 200, json: async () => ({ ok: true, ...buildPreviewText(body) }) };
       }
       if (url.startsWith("/api/races")) {
-        return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, venue: "central", races: [{ race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null }] }) };
+        return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, venue: "central", races: [{ race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null }, ...["202603020210", "202603020212"].map((id) => ({ race_id: id, venue_name: "福島", race_number: Number(id.slice(10)), race_name: `福島${id.slice(10)}R特別`, course_type: "芝", distance: 1800, entry_count: 16, grade: null }))] }) };
       }
       if (url === `/api/analyses/status?kaisai_date=${DATE}&race_id=${RACE_ID}`) {
         return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, races: [{ race_id: RACE_ID, mode: "morning", status: "done", attempts: 1, error: null, queued_at: 1, updated_at: 2, prior: true, analysis_id: null, detail: null, children_ok: null }], prior: { race_name: "福島民報杯", venue_name: "福島", date: "2026-06-28", computed_at: 5, rows: [{ rank: 1, umaban: 3, horse_name: "アルファ", prior: 0.523 }] } }) };
@@ -904,15 +908,32 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(migration.calls.some((c) => c.url.includes("/api/migration"))).toBe(false);
   });
 
-  it("レース画面(#…&race=): 状態(race_id つき)と過去の分析の 2 本だけを取り、カードと朝の prior を描画する。一覧・板・分析の詳細・POST は呼ばない", async () => {
+  it("レース画面(#…&race=): 状態(race_id つき)・過去の分析・前後のレースのための一覧(Issue #571)の 3 本だけを取り、カードと朝の prior を描画する。板・分析の詳細・POST は呼ばない", async () => {
     const { root, calls } = run(`#date=${DATE}&venue=central&race=${RACE_ID}`);
     await until(() => root.children.some((c) => textOf(c).includes("アルファ")));
-    expect(calls.map((c) => c.url).sort()).toEqual([`/api/analyses/status?kaisai_date=${DATE}&race_id=${RACE_ID}`, `/api/analyses?race_id=${RACE_ID}&kaisai_date=${DATE}&limit=20`].sort());
+    expect(calls.map((c) => c.url).sort()).toEqual([`/api/analyses/status?kaisai_date=${DATE}&race_id=${RACE_ID}`, `/api/analyses?race_id=${RACE_ID}&kaisai_date=${DATE}&limit=20`, `/api/races?kaisai_date=${DATE}&venue=central`].sort());
     expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
     const text = textOf(root.children[0]!);
     expect(text).toContain("事前分析");
     expect(text).toContain("発走前");
     expect(text).toContain("3着内率 52.3%");
+  });
+
+  it("Issue #571: レース画面(生成物の実行)にパンくずと前後のレースが出る。一覧が届くまで前後は無く、届くと前後のレース画面へのリンクが DOM に出る", async () => {
+    const { root } = run(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    const navs = (label: string) => root.children.flatMap(flat).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "nav" && n.attrs.get("aria-label") === label);
+    await until(() => navs("前後のレース").length > 0);
+    const [crumbs] = navs("パンくず");
+    expect(crumbs, "前提: パンくずが DOM にある").toBeDefined();
+    expect(textOf(crumbs!)).toBe("一覧 › 6/28(日) › 福島 › 11R");
+    const current = flat(crumbs!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("aria-current") === "page");
+    expect(current.map((n) => textOf(n))).toEqual(["11R"]);
+    const links = (nav: FakeElement) => flat(nav).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "a").map((a) => [textOf(a), a.attrs.get("href")]);
+    expect(links(crumbs!)).toEqual([["一覧", "#"], ["6/28(日)", `#date=${DATE}&venue=central`]]);
+    expect(links(navs("前後のレース")[0]!)).toEqual([
+      ["前のレース 10R", `#date=${DATE}&venue=central&race=202603020210`],
+      ["次のレース 12R", `#date=${DATE}&venue=central&race=202603020212`],
+    ]);
   });
 
   it("起動のボタン(生成物の実行): 押すと POST が 1 回(同じオリジンの資格情報・referrerPolicy: same-origin・fetch の mode なし)出て、「待ち」になり、追跡のタイマーが張られる。非表示でタイマーが止まる", async () => {
@@ -944,10 +965,10 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(timers.size).toBe(0); // 非表示で止まる
   });
 
-  it("結果画面(#analysis=): /api/analyses/{id} を 1 回だけ取り、馬のカードと配分(core の表示関数〈`view/`。もとは exe の renderer〉の純関数を、Node の組込みの無い環境で実行)を描画する", async () => {
+  it("結果画面(#analysis=): /api/analyses/{id} を 1 回だけ取り(続けて、前後のレースのための一覧を 1 回。Issue #571)、馬のカードと配分(core の表示関数〈`view/`。もとは exe の renderer〉の純関数を、Node の組込みの無い環境で実行)を描画する", async () => {
     const { root, calls } = run("#analysis=5");
     await until(() => root.children.some((c) => textOf(c).includes("配分の提案")));
-    expect(calls.map((c) => c.url)).toEqual(["/api/analyses/5"]);
+    expect(calls.map((c) => c.url)).toEqual(["/api/analyses/5", `/api/races?kaisai_date=${DATE}&venue=central`]);
     const text = textOf(root.children[0]!);
     expect(text).toContain("福島11R テストステークス");
     expect(text).toContain("3着内率 20.0%");

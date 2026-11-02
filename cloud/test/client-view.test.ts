@@ -328,7 +328,8 @@ describe("結果画面の VNode", () => {
     expect(textOf(tree)).toContain("2026-06-28 14:00");
     expect(textOf(tree)).toContain("分析モデル");
     expect(textOf(tree)).toContain("LLM 未使用(統計のみ)");
-    expect(hrefs(tree)).toEqual([`#date=20260628&venue=central&race=${RACE_ID}`]);
+    // 戻るリンク(先頭)と、パンくずの一覧・日付(Issue #571。前後のレースは一覧のキャッシュが無いので出ない)。リンクはこの 3 つだけ
+    expect(hrefs(tree)).toEqual([`#date=20260628&venue=central&race=${RACE_ID}`, "#", "#date=20260628&venue=central"]);
     expect(textOf(resultTree(analysis({ model: "claude-x" })))).toContain("claude-x");
   });
 

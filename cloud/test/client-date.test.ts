@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { inputToYmd, isRealYmd, todayJst, ymdToInput, formatJstDateTime, previousMonthJst } from "../client/date";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { inputToYmd, isRealYmd, todayJst, ymdToInput, formatJstDateTime, previousMonthJst, shortDateLabel, WEEKDAYS } from "../client/date";
 
 /** Issue #184: スマホ画面の日付の純関数。開催日は JST の日付で、`<input type="date">` は YYYY-MM-DD。 */
 
@@ -95,5 +97,32 @@ describe("previousMonthJst(JST の今日から見た先月)", () => {
     const month = previousMonthJst(new Date("2026-01-15T00:00:00Z"));
     expect(month).toMatch(/^[0-9]{6}$/);
     expect(isRealYmd(`${month}01`)).toBe(true);
+  });
+});
+
+describe("shortDateLabel(Issue #571。パンくずの日付「M/D(曜)」)", () => {
+  const cases: readonly [string, string][] = [
+    ["20261103", "11/3(火)"],
+    ["20260105", "1/5(月)"], // 月・日の先頭の 0 を落とす
+    ["20261231", "12/31(木)"],
+    ["20280229", "2/29(火)"], // うるう日
+    ["20260712", "7/12(日)"], // 日曜(WEEKDAYS の添字 0)
+    ["20260711", "7/11(土)"], // 土曜(添字 6)
+  ];
+  for (const [ymd, expected] of cases) {
+    it(`${ymd} → ${expected}`, () => {
+      expect(shortDateLabel(ymd)).toBe(expected);
+    });
+  }
+
+  it("形が違えばそのまま返す", () => {
+    expect(shortDateLabel("abc")).toBe("abc");
+    expect(shortDateLabel("2026110")).toBe("2026110");
+  });
+
+  it("曜日の配列は date.ts に 1 つだけ(report-model.ts は持たず、date.ts のものを共有する)", () => {
+    expect(WEEKDAYS).toEqual(["日", "月", "火", "水", "木", "金", "土"]);
+    const reportModelSource = readFileSync(path.join(__dirname, "..", "client", "report-model.ts"), "utf-8");
+    expect(reportModelSource.includes('["日", "月"'), "report-model.ts に曜日の配列の定義が残っていない").toBe(false);
   });
 });

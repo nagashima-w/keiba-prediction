@@ -123,6 +123,11 @@ ${paletteCss()}
   .tabs { display: flex; gap: 4px; }
   .tab, .report-tab { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 64px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   /* Issue #570: 選んでいるタブは brand(強調の色)。リンクの色(accent)とは別。太字でも示す */
+  /* Issue #571: レース画面・結果画面の見出しの上のパンくず(小さい 1 行。狭い幅では折り返す)と、見出しの下の前後のレース(日報の前後のリンクと同じ .tabs .tab) */
+  .breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 0 0 4px; font-size: 0.8rem; color: var(--muted); }
+  .breadcrumb a { color: var(--accent); }
+  .breadcrumb [aria-current="page"] { color: var(--fg); font-weight: bold; }
+  .race-neighbors { flex-wrap: wrap; margin: 0 0 8px; }
   .tab[aria-current="page"], .report-tab[aria-current="page"] { border-color: var(--brand); color: var(--brand); font-weight: bold; }
   button { font-size: 1rem; min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); background: var(--card); }
   button[disabled] { opacity: 0.6; }

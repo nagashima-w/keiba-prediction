@@ -14,6 +14,7 @@ import type { PastAnalysis } from "./api-analysis";
 import { formatJstDateTime } from "./date";
 import { nameWithGrade } from "./grade";
 import { badgeOf, pick, type Badge } from "./list";
+import { breadcrumbOf, neighborsOf, type Crumb, type RaceNeighbors } from "./neighbors";
 import { contentOf, type HorseSort, type ResultContent, type ResultSource } from "./result";
 import { buildHash, type Route } from "./route";
 
@@ -45,8 +46,13 @@ export interface RaceModelInput {
   readonly tracking?: string | null;
   readonly status: RaceStatusSource;
   readonly past: PastSource;
-  /** 一覧のキャッシュにあれば、そのレースの行(見出し用。無くても一覧は取りに行かない)。 */
+  /** 一覧のキャッシュにあれば、そのレースの行(見出し用)。 */
   readonly listRow: RaceRow | undefined;
+  /**
+   * 一覧のキャッシュの全行(Issue #571。前後のレースを同じ日・同じ競馬場から決める)。一覧が無い(取得中・失敗)ときは省略。
+   * 一覧は画面を開いたときに取る(`race-data.ts`)。省略のときは前後を出さない(パンくずは出す)。
+   */
+  readonly siblings?: readonly RaceRow[];
   /** 最新の分析(`latestAnalysisIdOf`)の結果のソース(Issue #188)。最新の分析があるのに省略・loading のときは「読み込み中」。最新の分析が無いときは使わない。 */
   readonly result?: ResultSource;
   /** 発走前のカードの結果が開いているか(Issue #188)。省略は開(既定)。 */
@@ -117,6 +123,10 @@ export interface RaceModel {
   readonly kind: "race";
   readonly title: string;
   readonly backHref: string;
+  /** パンくず(Issue #571。「一覧 › 11/3(火) › 東京 › 11R」。見出しの上)。競馬場名は一覧の行、無ければ prior から(どちらも無ければ省く)。 */
+  readonly breadcrumb: readonly Crumb[];
+  /** 前後のレース(Issue #571。見出しの下)。一覧が無い・前後とも無いとき null(出さない)。 */
+  readonly neighbors: RaceNeighbors | null;
   /** 状態または過去の分析を取得中(「更新」を無効にする)。 */
   readonly loading: boolean;
   /** 状態の取得に失敗したときの注記(このとき `cards` は null)。 */
@@ -258,6 +268,8 @@ export function buildRaceModel(input: RaceModelInput): RaceModel {
     kind: "race",
     title: titleOf(route, listRow, prior),
     backHref: buildHash({ date: route.date, venue: route.venue }),
+    breadcrumb: breadcrumbOf({ date: route.date, venue: route.venue, venueName: listRow?.venueName ?? prior?.venueName ?? null, raceId: route.race! }),
+    neighbors: neighborsOf(input.siblings, route.date, route.venue, route.race!),
     // 結果の取得中も「更新」を無効にする(取得中の連打で、同じものを同時に 2 本取らない)。
     loading: status.kind === "loading" || past.kind === "loading" || (cards ?? []).some((c) => c.result?.kind === "loading"),
     statusNotice: status.kind === "error" ? status.message : null,
