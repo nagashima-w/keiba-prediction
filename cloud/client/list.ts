@@ -3,9 +3,12 @@
  * `view.ts` がこれを VNode にする。
  */
 import type { BoardRow, RaceRow, TaskMode } from "./api";
+import { jstEpochMs } from "../../packages/core/src/common/jst";
 import { buildBulkModel, hasStarted, jstHm, type BulkModel, type BulkUi } from "./bulk";
 import { previousMonthJst, todayJst, ymdToInput } from "./date";
 import { gradeLabelForDisplay } from "./grade";
+import { ALREADY_RUNNING_NOTE, isRunning, runButtonLabel, type RunButton, type RunUi } from "./race";
+import { remainingText } from "./targets-model";
 import { buildHash, buildMonthlyHash, buildTargetsHash, REPORT_HASH, SETTINGS_HASH, VERIFY_HASH, type Route, type Venue } from "./route";
 
 export interface Badge {
@@ -124,6 +127,39 @@ export interface ListModelInput {
    * **省略は並べ替えない**(従来どおり)。閲覧者にも効く(`bulk` とは別)。
    */
   readonly now?: Date;
+  /**
+   * 「次に発走するレース」のカード(Issue #559)の、そのレースの発走前の分析の起動の操作の表示(`run.runsFor(date, raceId)`)。送信中・失敗・すでに実行中を出す。
+   * 省略は「何も押していない」。
+   */
+  readonly runs?: (raceId: string) => ReadonlyMap<TaskMode, RunUi>;
+}
+
+/**
+ * 一覧の先頭の「次に発走するレース」の 1 件(Issue #559)。画面で選んでいる区分の今日の一覧の中で、最も早く発走するレース
+ * (同じ発走時刻のレースは全部)。発走前の分析(`pre_race`)の状態だけを出す。
+ */
+export interface NextRaceItem {
+  readonly raceId: string;
+  /** 「福島 11R」。 */
+  readonly label: string;
+  readonly name: string;
+  readonly grade: string | null;
+  /** 「15:40」。 */
+  readonly startTime: string;
+  /** 発走までの文言(「あと12分」「まもなく」。狙い目の画面と同じ `remainingText`)。 */
+  readonly left: string;
+  readonly href: string;
+  /** 発走前の分析のバッジ。板が取れていないときは null(出さない)。 */
+  readonly badge: Badge | null;
+  /**
+   * 発走前の分析の起動のボタン。管理者だけ(閲覧者は null)。**完了(done)のレースは null**(再実行による LLM の再課金を防ぐ。詳細はリンクから)。
+   * 板が取れていないときは出すが押せない(状態が分からないまま起動させない)。
+   */
+  readonly button: RunButton | null;
+  /** 起動の失敗の文言(レース画面と同じ)。 */
+  readonly runError: string | null;
+  /** 「すでに実行中」の注記(板も実行中のときだけ)。 */
+  readonly runInfo: string | null;
 }
 
 export interface RaceItem {
@@ -183,6 +219,11 @@ export interface ListModel {
   /** 成功で、開催が 0 件。 */
   readonly empty: boolean;
   readonly groups: readonly RaceGroupItem[];
+  /**
+   * 「次に発走するレース」(Issue #559)。**今日(JST)の開催日で `now` があり、一覧が取れているとき**、未発走のうち最も早い発走時刻のレース(同時刻は全部。race_id 順)。
+   * 空配列はカードを出さない(今日でない・`now` なし・一覧が未取得・発走時刻の分かるレースが無い・全部発走済み)。発走済みの境界は {@link hasStarted} と同じ。
+   */
+  readonly next: readonly NextRaceItem[];
 }
 
 /** 今日(JST)の開催日の一覧に、時間の経過で並び・薄さが変わるレースがあるか(Issue #346。再描画のタイマーを張るかの判定)。時刻の無いレースだけ・全部発走済み・今日でない日は false。 */
@@ -194,6 +235,37 @@ export function needsListClock(races: readonly RaceRow[], date: string, now: Dat
 
 /** 板の失敗の注記の前置き(バッジが出ない理由を示す。Issue #186 段階1)。 */
 export const BOARD_NOTICE_PREFIX = "実行状態(バッジ)を取得できませんでした。";
+
+/** 「次に発走するレース」の元(Issue #559)。`races` は取得済みの一覧。`ListModel.next` の注を参照。 */
+function nextRacesOf(input: ListModelInput, races: readonly RaceRow[], today: boolean, hm: string): NextRaceItem[] {
+  const { route, board, now } = input;
+  if (now === undefined || !today) return [];
+  const pending = races.filter((r) => r.startTime !== null && !hasStarted(r.startTime, today, hm));
+  const first = pending.reduce<string | null>((min, r) => (min === null || r.startTime! < min ? r.startTime! : min), null);
+  if (first === null) return [];
+  const sorted = pending.filter((r) => r.startTime === first).sort((a, b) => (a.raceId < b.raceId ? -1 : a.raceId > b.raceId ? 1 : 0));
+  // 発走時刻(JST)のエポックミリ秒。開催日 YYYYMMDD と発走時刻 HH:MM から作る(同時刻のレースは共通)。
+  const startMs = jstEpochMs(Number(route.date.slice(0, 4)), Number(route.date.slice(4, 6)), Number(route.date.slice(6, 8)), Number(first.slice(0, 2)), Number(first.slice(3, 5)));
+  return sorted.map((r): NextRaceItem => {
+    const found = board.kind === "ready" ? pick(board.rows, r.raceId, "pre_race") : undefined;
+    const run = input.runs?.(r.raceId).get("pre_race");
+    const sending = run?.kind === "sending";
+    const button: RunButton = { label: runButtonLabel("pre_race", found?.status, sending), disabled: board.kind !== "ready" || sending || isRunning(found?.status), date: route.date, raceId: r.raceId, mode: "pre_race" };
+    return {
+      raceId: r.raceId,
+      label: `${r.venueName ?? UNKNOWN_VENUE} ${r.raceNumber}R`,
+      name: r.raceName,
+      grade: gradeLabelForDisplay(r.grade),
+      startTime: first,
+      left: remainingText(startMs, now.getTime()).text,
+      href: buildHash({ date: route.date, venue: route.venue, race: r.raceId }),
+      badge: board.kind === "ready" ? badgeOf(found) : null,
+      button: input.readOnly === true || found?.status === "done" ? null : button,
+      runError: run?.kind === "error" ? run.message : null,
+      runInfo: run?.kind === "already" && isRunning(found?.status) ? ALREADY_RUNNING_NOTE : null,
+    };
+  });
+}
 
 export function buildListModel(input: ListModelInput): ListModel {
   const { route, list, board } = input;
@@ -226,6 +298,7 @@ export function buildListModel(input: ListModelInput): ListModel {
     boardNotice: board.kind === "error" ? `${BOARD_NOTICE_PREFIX}${board.message}` : null,
     tracking: input.tracking ?? null,
     empty: list.kind === "ready" && list.races.length === 0,
+    next: nextRacesOf(input, races, today, hm),
     groups: rawGroups.map((g, i) => ({
       key: keys[i]!,
       name: g.name,

@@ -6,7 +6,7 @@
  */
 import type { TaskMode } from "./api";
 import type { BulkModel, BulkPanel } from "./bulk";
-import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
+import type { Badge, ListModel, NextRaceItem, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
@@ -117,6 +117,31 @@ function bulkPanel(key: string, panel: BulkPanel, actions: ViewActions): VNode {
 }
 
 /** 場ごとの一括実行(Issue #251。管理者だけ=閲覧者は `bulk` が null で呼ばれない)。ボタン 2 つ・無効の理由・確認画面/送信中/結果。 */
+/**
+ * 一覧の先頭の「次に発走するレース」(Issue #559)。見出しは `p`/`strong`、リンクは `a.next-link`(`h2`・`li`・`a.race` は使わない=一覧の行を数える検査と別)。
+ * ボタンはリンクの外(`a` の中に `button` は置けない)。バッジは一覧の行と同じピル(`.badges .badge`)。
+ */
+function nextRaceCard(items: readonly NextRaceItem[], actions: ViewActions): VNode[] {
+  if (items.length === 0) return [];
+  return [
+    h("section", { class: "next-races" }, [
+      h("p", { class: "next-head" }, [h("strong", {}, ["次に発走するレース"])]),
+      ...items.map((n) =>
+        h("div", { class: "next-race" }, [
+          h("a", { class: "next-link", href: n.href }, [
+            h("span", { class: "race-head" }, [h("strong", {}, [n.label]), h("span", { class: "race-name" }, [n.name]), ...(n.grade === null ? [] : [h("span", { class: "grade" }, [n.grade])])]),
+            h("span", { class: "race-detail" }, [`${n.startTime} 発走・${n.left}`]),
+          ]),
+          ...(n.badge === null ? [] : [h("span", { class: "badges" }, [badge("発走前", n.badge)])]),
+          ...(n.button === null ? [] : [runButton(n.button, actions)]),
+          ...(n.runError === null ? [] : [h("p", { class: "card-error", role: "alert" }, [n.runError])]),
+          ...(n.runInfo === null ? [] : [h("p", { class: "card-note" }, [n.runInfo])]),
+        ]),
+      ),
+    ]),
+  ];
+}
+
 function bulkSection(key: string, bulk: BulkModel, actions: ViewActions): VNode {
   return h("div", { class: "bulk", "data-key": key }, [
     h(
@@ -178,7 +203,7 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
   for (const group of model.groups) {
     body.push(venueSection(group, actions));
   }
-  return h("div", { class: "screen" }, [controls, ...trackingNotice(model.tracking, actions), ...notices, ...body]);
+  return h("div", { class: "screen" }, [controls, ...nextRaceCard(model.next, actions), ...trackingNotice(model.tracking, actions), ...notices, ...body]);
 }
 
 const loadingLabel = (loading: boolean, label: string): string => (loading ? "読み込み中…" : label);

@@ -291,6 +291,7 @@ export function createApp(deps: AppDeps): App {
               readOnly: !admin,
               now: deps.now(),
               bulk: { now: deps.now(), states: bulk.statesOf(listKey(route.date, route.venue)) },
+              runs: (raceId) => run.runsFor(route.date, raceId),
             }),
             actions,
           ),

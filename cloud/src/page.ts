@@ -136,6 +136,11 @@ ${paletteCss()}
   .bulk-go { border-color: var(--accent); color: var(--accent); font-weight: bold; }
   .bulk-result p { margin: 0 0 8px; }
   .race { display: block; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); text-decoration: none; }
+  /* Issue #559: 一覧の先頭の「次に発走するレース」。見出しは p、行は div.next-race(h2・li・a.race は使わない)。ボタンはリンクの外 */
+  .next-races { margin: 0 0 12px; }
+  .next-head { margin: 8px 0 4px; }
+  .next-race { margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .next-link { display: block; color: var(--fg); text-decoration: none; }
   .race-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
   .race-detail { display: block; font-size: 0.85rem; color: var(--muted); }
   .race-result { font-weight: 600; color: inherit; }
