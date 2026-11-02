@@ -123,8 +123,18 @@ describe("バッジの VNode(Issue #558): 色だけに頼らず文字を残す",
   it("5 状態(未実行・待ち・取得済み・完了・失敗)がそれぞれ `badge (tone)` のクラスと「前置き: ラベル」の文字を持つ", () => {
     const rows = [board(1, "morning", "queued"), board(1, "pre_race", "fetched"), board(2, "morning", "done"), board(2, "pre_race", "failed")];
     const model = buildListModel({ route: parseHash(`#date=${DATE}&venue=central`, DATE), list: { kind: "ready", races: [race(1), race(2), race(3)] }, board: { kind: "ready", rows }, now: NOW, choices: new Map([["福島#0", true]]) });
-    const badges = findAll(renderScreen(model, noopActions), (n) => n.tag === "span" && String(n.attrs?.["class"] ?? "").split(" ").includes("badge"));
+    const tree = renderScreen(model, noopActions);
+    // 一覧のレース行(`ul.races` の下)のバッジだけを見る。先頭の「次に発走するレース」のカード(Issue #559)のバッジは数えない(カードの検査は client-view-list-next.test.ts)。
+    const isBadge = (n: VNode): boolean => n.tag === "span" && String(n.attrs?.["class"] ?? "").split(" ").includes("badge");
+    const badges = findAll(tree, (n) => n.tag === "ul" && String(n.attrs?.["class"] ?? "").split(" ").includes("races")).flatMap((ul) => findAll(ul, isBadge));
     expect(badges).toHaveLength(6); // 3 レース × 2
+    // 対照: カードは実際に出ていて(前提)、木全体で数えると 6 + カードの 3 件になる(絞らないと 6 にならない)
+    expect(findAll(tree, isBadge)).toHaveLength(9);
+    // カードを出さない状態(now なし)でも、絞った数・木全体の数とも 6 のまま(絞り込みで結果が変わらない)
+    const noCard = renderScreen(buildListModel({ route: parseHash(`#date=${DATE}&venue=central`, DATE), list: { kind: "ready", races: [race(1), race(2), race(3)] }, board: { kind: "ready", rows }, choices: new Map([["福島#0", true]]) }), noopActions);
+    expect(findAll(noCard, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("next-races"))).toHaveLength(0);
+    expect(findAll(noCard, isBadge)).toHaveLength(6);
+    expect(findAll(noCard, (n) => n.tag === "ul" && String(n.attrs?.["class"] ?? "").split(" ").includes("races")).flatMap((ul) => findAll(ul, isBadge))).toHaveLength(6);
     const got = badges.map((b) => [String(b.attrs?.["class"]), textOf(b)]);
     expect(got).toEqual([
       ["badge wait", "事前: 待ち"],

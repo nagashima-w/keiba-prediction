@@ -175,7 +175,10 @@ function titleOf(route: Route, listRow: RaceRow | undefined, prior: MorningPrior
   return `レース ${raceId}`;
 }
 
-const isRunning = (status: TaskStatus | undefined): boolean => status === "queued" || status === "fetched";
+export const isRunning = (status: TaskStatus | undefined): boolean => status === "queued" || status === "fetched";
+
+/** 起動の応答が「すでに実行中」で、板も実行中のときの注記(レース画面のカードと、一覧の「次に発走するレース」が共有する)。 */
+export const ALREADY_RUNNING_NOTE = "すでに実行中です。状態を追跡します。";
 
 /** 起動のボタンの文言(板の状態から)。送信中は状態によらず「送信中…」。 */
 export function runButtonLabel(mode: TaskMode, status: TaskStatus | undefined, sending: boolean): string {
@@ -234,7 +237,7 @@ function card(
     description: CARD_DESCRIPTIONS[mode],
     button: readOnly ? null : { label: runButtonLabel(mode, found?.status, sending), disabled: sending || isRunning(found?.status), date: route.date, raceId, mode },
     runError: run?.kind === "error" ? run.message : null,
-    runInfo: run?.kind === "already" && isRunning(found?.status) ? "すでに実行中です。状態を追跡します。" : null,
+    runInfo: run?.kind === "already" && isRunning(found?.status) ? ALREADY_RUNNING_NOTE : null,
     priorNotice: mode === "morning" ? priorNotice : null,
     title: mode === "morning" ? "事前分析" : "発走前",
     badge: badgeOf(found),

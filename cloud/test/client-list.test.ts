@@ -360,3 +360,216 @@ describe("Issue #544: トップの「月報」の入口(monthlyHref)", () => {
     expect(model.monthlyHref).toBeNull();
   });
 });
+
+describe("Issue #559: 一覧の先頭の「次に発走するレース」(ListModel.next)", () => {
+  const DATE = "20260628";
+  /** 2026-06-28 の JST の時刻(`HH:MM` または `HH:MM:SS`)。 */
+  const at = (hms: string): Date => new Date(`2026-06-28T${hms.length === 5 ? `${hms}:00` : hms}+09:00`);
+  const raceAt = (venue: string, n: number, startTime: string | null, over: Partial<RaceRow> = {}): RaceRow =>
+    race(`2026${venue === "福島" ? "03" : "08"}0201${String(n).padStart(2, "0")}`, { venueName: venue, raceNumber: n, startTime, ...over });
+  const f = (n: number, startTime: string | null, over: Partial<RaceRow> = {}): RaceRow => raceAt("福島", n, startTime, over);
+  const ready = (races: RaceRow[], now: Date | undefined, over: Partial<ListModelInput> = {}): ListModelInput =>
+    input({ route: { ...ROUTE, date: DATE }, list: { kind: "ready", races }, ...(now === undefined ? {} : { now }), ...over });
+  const ids = (m: ReturnType<typeof buildListModel>): string[] => m.next.map((n) => n.raceId.slice(-2));
+
+  describe("どのレースが「次」か(今日の一覧の中だけから。最も早い発走時刻のもの)", () => {
+    it("未発走の中で最も早い発走時刻の 1 レースだけ(前提: 一覧には 3 レースある)", () => {
+      const races = [f(3, "12:00"), f(1, "10:00"), f(2, "11:00")];
+      const m = buildListModel(ready(races, at("09:00")));
+      expect(m.groups[0]!.races).toHaveLength(3);
+      expect(ids(m)).toEqual(["01"]);
+    });
+
+    it("発走時刻ちょうど(10:00:00)のレースは次から外れ、1 分前(09:59:59)は次のまま。境界は hasStarted(HH:MM の比較)と同じ", () => {
+      const races = [f(1, "10:00"), f(2, "11:00")];
+      expect(ids(buildListModel(ready(races, at("09:59:59"))))).toEqual(["01"]);
+      expect(ids(buildListModel(ready(races, at("10:00:00"))))).toEqual(["02"]);
+      expect(ids(buildListModel(ready(races, at("10:00:59"))))).toEqual(["02"]); // 分未満の秒は見ない(一覧の並べ替えと同じ瞬間)
+    });
+
+    it("最も早い発走時刻を共有するレースは全部(race_id 順。入力が逆順でも)", () => {
+      const races = [f(5, "12:00"), f(2, "12:00"), f(9, "13:00"), f(1, "10:00")];
+      const m = buildListModel(ready(races, at("11:00")));
+      expect(ids(m)).toEqual(["02", "05"]);
+      // 前提: 2 つの会場が混ざっても、時刻が同じなら全部(会場名つきのラベル)
+      const mixed = buildListModel(ready([raceAt("福島", 5, "12:00"), raceAt("京都", 2, "12:00")], at("11:00")));
+      expect(mixed.next.map((n) => n.label)).toEqual(["福島 5R", "京都 2R"]); // race_id: 福島 2026 03…05 < 京都 2026 08…02
+    });
+
+    it("会場をまたいで最も早いもの(福島 12:00 より京都 11:30)", () => {
+      const m = buildListModel(ready([raceAt("福島", 1, "12:00"), raceAt("京都", 3, "11:30")], at("11:00")));
+      expect(m.next.map((n) => n.label)).toEqual(["京都 3R"]);
+    });
+
+    it("発走時刻の分からないレースは対象にしない(時刻のあるレースが残っていればそちら。時刻不明は最も早いと見なさない)", () => {
+      const m = buildListModel(ready([f(1, null), f(2, "13:00")], at("11:00")));
+      expect(ids(m)).toEqual(["02"]);
+    });
+
+    it.each([
+      ["時刻の分からないレースだけ", [f(1, null), f(2, null)], at("09:00")],
+      ["全部発走済み", [f(1, "10:00"), f(2, "11:00")], at("11:00")],
+      ["一覧が空", [], at("09:00")],
+      ["now なし", [f(1, "10:00")], undefined],
+    ] as const)("カードを出さない(空配列): %s", (_label, races, now) => {
+      const m = buildListModel(ready([...races], now));
+      expect(m.next).toEqual([]);
+    });
+
+    it.each([
+      ["過去の開催日", "20260627"],
+      ["未来の開催日", "20260629"],
+    ])("今日以外の開催日(%s)は出さない(前提: 一覧には時刻つきのレースがある)", (_label, date) => {
+      const m = buildListModel(input({ route: { ...ROUTE, date }, list: { kind: "ready", races: [f(1, "23:00")] }, now: at("09:00") }));
+      expect(m.groups[0]!.races).toHaveLength(1);
+      expect(m.next).toEqual([]);
+    });
+
+    it("一覧が loading・error のときは出さない", () => {
+      expect(buildListModel(input({ route: { ...ROUTE, date: DATE }, list: { kind: "loading" }, now: at("09:00") })).next).toEqual([]);
+      expect(buildListModel(input({ route: { ...ROUTE, date: DATE }, list: { kind: "error", message: "失敗" }, now: at("09:00") })).next).toEqual([]);
+    });
+  });
+
+  describe("カードの内容", () => {
+    it("ラベル・レース名・発走時刻・リンク先(レース画面のハッシュ。区分は画面で選んでいる区分)", () => {
+      const m = buildListModel(ready([f(11, "15:40", { raceName: "福島民報杯", grade: "G3" })], at("09:00"), { route: { ...ROUTE, date: DATE, venue: "central" } }));
+      const n = m.next[0]!;
+      expect(n.label).toBe("福島 11R");
+      expect(n.name).toBe("福島民報杯");
+      expect(n.startTime).toBe("15:40");
+      expect(n.grade).toBe("G3");
+      expect(n.href).toBe(`#date=${DATE}&venue=central&race=${n.raceId}`);
+    });
+
+    it("会場名が無いレースは「会場不明」(一覧の見出しと同じ)", () => {
+      const m = buildListModel(ready([f(1, "10:00", { venueName: null })], at("09:00")));
+      expect(m.next[0]!.label).toBe("会場不明 1R");
+    });
+
+    it.each([
+      ["30 秒前でも", "11:59:30", "まもなく"],
+      ["1 分前", "11:59:00", "あと1分"],
+      ["12 分前", "11:48", "あと12分"],
+      ["59 分前", "11:01", "あと59分"],
+      ["ちょうど 1 時間前(分の端数なし)", "11:00", "あと1時間"],
+      ["1 時間 5 分前", "10:55", "あと1時間5分"],
+      ["3 時間 30 分前", "08:30", "あと3時間30分"],
+    ])("発走 12:00 まで: %s(%s)→「%s」", (_label, hms, expected) => {
+      const m = buildListModel(ready([f(1, "12:00")], at(hms)));
+      expect(m.next).toHaveLength(1);
+      expect(m.next[0]!.left).toBe(expected);
+    });
+  });
+
+  describe("状態のバッジとボタン(発走前の分析 pre_race だけ。管理者だけがボタン)", () => {
+    const R = f(1, "12:00");
+    const board = (rows: BoardRow[]): Partial<ListModelInput> => ({ board: { kind: "ready", rows } });
+    const first = (over: Partial<ListModelInput>) => buildListModel(ready([R], at("11:00"), over)).next[0]!;
+
+    it.each([
+      ["行なし", [], { label: "未実行", tone: "none" }, "発走前の分析を実行", false],
+      ["queued", [row(R.raceId, "pre_race", "queued")], { label: "待ち", tone: "wait" }, "待ち", true],
+      ["fetched", [row(R.raceId, "pre_race", "fetched")], { label: "取得済み", tone: "wait" }, "取得済み", true],
+      ["failed", [row(R.raceId, "pre_race", "failed")], { label: "失敗", tone: "fail" }, "再試行", false],
+    ] as const)("管理者・pre_race=%s: バッジ %j・ボタン「%s」(押せない=%s)", (_name, rows, badge, label, disabled) => {
+      const n = first(board([...rows]));
+      expect(n.badge).toEqual(badge);
+      expect(n.button).toEqual({ label, disabled, date: DATE, raceId: R.raceId, mode: "pre_race" });
+    });
+
+    it("pre_race が完了(done)のレースは、ボタンを出さない(null)。バッジ「完了」とリンクは残る(再実行による LLM の再課金を防ぐ)", () => {
+      const n = first(board([row(R.raceId, "pre_race", "done", { analysisId: 7 })]));
+      expect(n.badge).toEqual({ label: "完了", tone: "ok" });
+      expect(n.button).toBeNull();
+      expect(n.href).toContain(`race=${R.raceId}`);
+    });
+
+    it("morning の行はバッジにもボタンにも効かない(pre_race の行だけを見る)。morning が done でも pre_race が無ければ「未実行」・実行できる", () => {
+      const n = first(board([row(R.raceId, "morning", "done", { analysisId: 3 })]));
+      expect(n.badge).toEqual({ label: "未実行", tone: "none" });
+      expect(n.button).toEqual({ label: "発走前の分析を実行", disabled: false, date: DATE, raceId: R.raceId, mode: "pre_race" });
+      // 逆: morning が実行中でも、pre_race が無ければ押せる
+      expect(first(board([row(R.raceId, "morning", "queued")])).button!.disabled).toBe(false);
+    });
+
+    it("別のレースの行は混ざらない(同じ mode でも race_id が違えば無視)", () => {
+      const n = first(board([row(f(2, "13:00").raceId, "pre_race", "done", { analysisId: 9 })]));
+      expect(n.badge).toEqual({ label: "未実行", tone: "none" });
+      expect(n.button).not.toBeNull();
+    });
+
+    it.each([
+      ["板が未取得(none)", { kind: "none" }],
+      ["板の取得に失敗(error)", { kind: "error", message: "失敗" }],
+    ] as const)("%s: バッジなし(null)・ボタンは出すが押せない(押せない理由は状態が分からないこと)", (_name, b) => {
+      const n = first({ board: b });
+      expect(n.badge).toBeNull();
+      expect(n.button).toEqual({ label: "発走前の分析を実行", disabled: true, date: DATE, raceId: R.raceId, mode: "pre_race" });
+    });
+
+    it.each([
+      ["行なし", []],
+      ["queued", [row(R.raceId, "pre_race", "queued")]],
+      ["failed", [row(R.raceId, "pre_race", "failed")]],
+      ["done", [row(R.raceId, "pre_race", "done", { analysisId: 7 })]],
+    ])("閲覧者(readOnly): pre_race=%s でもボタンは出さない(null)。バッジは出す", (_name, rows) => {
+      const n = first({ ...board(rows), readOnly: true });
+      expect(n.button).toBeNull();
+      expect(n.badge).not.toBeNull();
+    });
+
+    it("閲覧者でも板が無ければバッジなし・ボタンなし", () => {
+      const n = first({ readOnly: true });
+      expect(n.badge).toBeNull();
+      expect(n.button).toBeNull();
+    });
+  });
+
+  describe("実行の操作の表示(runs。レース画面と同じ RunUi)", () => {
+    const R = f(1, "12:00");
+    const asked: string[] = [];
+    const runsOf = (map: Record<string, ReadonlyMap<"morning" | "pre_race", { kind: "sending" } | { kind: "error"; message: string } | { kind: "already" }>>) => (id: string) => {
+      asked.push(id);
+      return map[id] ?? new Map();
+    };
+    const first = (rows: BoardRow[], runs: ReturnType<typeof runsOf>, over: Partial<ListModelInput> = {}) =>
+      buildListModel(ready([R], at("11:00"), { board: { kind: "ready", rows }, runs, ...over })).next[0]!;
+
+    it("送信中: ボタンは「送信中…」で押せない(板の状態によらない)", () => {
+      const n = first([], runsOf({ [R.raceId]: new Map([["pre_race", { kind: "sending" }]]) }));
+      expect(n.button).toEqual({ label: "送信中…", disabled: true, date: DATE, raceId: R.raceId, mode: "pre_race" });
+    });
+
+    it("失敗: 文言を runError に。ボタンは押せる(再試行できる)", () => {
+      const n = first([], runsOf({ [R.raceId]: new Map([["pre_race", { kind: "error", message: "失敗しました" }]]) }));
+      expect(n.runError).toBe("失敗しました");
+      expect(n.button!.disabled).toBe(false);
+    });
+
+    it("すでに実行中(already): 板が実行中のときだけ注記を出す。板が実行中でなければ出さない", () => {
+      const already = runsOf({ [R.raceId]: new Map([["pre_race", { kind: "already" }]]) });
+      expect(first([row(R.raceId, "pre_race", "queued")], already).runInfo).toBe("すでに実行中です。状態を追跡します。");
+      expect(first([], already).runInfo).toBeNull();
+    });
+
+    it("morning の操作は無関係(pre_race のボタンに効かない)", () => {
+      const n = first([], runsOf({ [R.raceId]: new Map([["morning", { kind: "sending" }]]) }));
+      expect(n.button!.label).toBe("発走前の分析を実行");
+      expect(n.runError).toBeNull();
+    });
+
+    it("runs は「次」のレースの race_id で引く(同時刻の 2 レースなら 2 つとも。一覧の他のレースでは引かない)", () => {
+      asked.length = 0;
+      const m = buildListModel(ready([f(1, "12:00"), f(2, "12:00"), f(3, "13:00")], at("11:00"), { runs: runsOf({}) }));
+      expect(m.next).toHaveLength(2);
+      expect([...new Set(asked)].sort()).toEqual(m.next.map((n) => n.raceId).sort());
+    });
+
+    it("runs を渡さない・状態が無いとき: 注記・失敗は null", () => {
+      const n = buildListModel(ready([R], at("11:00"))).next[0]!;
+      expect(n.runError).toBeNull();
+      expect(n.runInfo).toBeNull();
+    });
+  });
+});
