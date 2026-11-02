@@ -244,17 +244,21 @@ export class PlanStage {
    * 一覧(`getRaceList`。ゲート経由のキャッシュ付き)は 1 回の見回しにつき 1 本。**試行の時刻を残し、`retryDelayMs` の間は取り直さない**(一覧に無いレースが残り続けても、起床のたびには取りに行かない)。
    */
   async sweepNarMorningDone(): Promise<void> {
-    const kaisaiDate = this.metaGet("kaisai_date");
-    if (kaisaiDate === null || this.plan.narMorningDoneWithoutPlanRow().length === 0) {
-      return;
-    }
-    const nowMs = this.now();
-    const lastTry = this.metaGet(SWEEP_TRY_KEY);
-    if (lastTry !== null && nowMs < Number(lastTry) + this.retryDelayMs) {
-      return;
-    }
-    this.plan.metaSet(SWEEP_TRY_KEY, String(nowMs));
     try {
+      // 該当の確認(SQL 1 本)を先に。該当が無い起床では、ほかの読み(開催日の meta など)を増やさない。
+      if (this.plan.narMorningDoneWithoutPlanRow().length === 0) {
+        return;
+      }
+      const kaisaiDate = this.metaGet("kaisai_date");
+      if (kaisaiDate === null) {
+        return;
+      }
+      const nowMs = this.now();
+      const lastTry = this.metaGet(SWEEP_TRY_KEY);
+      if (lastTry !== null && nowMs < Number(lastTry) + this.retryDelayMs) {
+        return;
+      }
+      this.plan.metaSet(SWEEP_TRY_KEY, String(nowMs));
       const result = await this.getRaceList(kaisaiDate, "nar");
       if (!result.ok) {
         this.onWarn(`事前分析の計画: 地方の普通のレースの発走前の分析の計画を足せませんでした(一覧を取得できません。理由: ${result.reason})`);

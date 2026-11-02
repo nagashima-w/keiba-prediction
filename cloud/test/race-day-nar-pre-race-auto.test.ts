@@ -104,6 +104,8 @@ interface Harness {
   readonly clock: { now: number };
   readonly alarm: { at: number | null };
   readonly warnings: string[];
+  /** 設定すると、DO の SQL の実行の前に呼ばれる(故障注入。投げれば、その文は実行されない)。 */
+  fault: ((query: string) => void) | null;
 }
 const opened: NodeSql[] = [];
 afterEach(() => {
@@ -117,8 +119,14 @@ function harness(startMs: number, offsetMinutes = 45, overrides: Partial<RaceDay
   const alarm: { at: number | null } = { at: null };
   const warnings: string[] = [];
   const gate = fakeGate();
+  const h = { sql, gate, clock, alarm, warnings, fault: null } as Harness;
   const core = new RaceDayCore({
-    sql,
+    sql: {
+      exec(query, ...bindings) {
+        h.fault?.(query);
+        return sql.exec(query, ...bindings);
+      },
+    },
     now: () => clock.now,
     gate,
     setAlarm: (at) => {
@@ -129,7 +137,8 @@ function harness(startMs: number, offsetMinutes = 45, overrides: Partial<RaceDay
     loadSettings: async () => ({ ...DEFAULT_CLOUD_SETTINGS, preRaceOffsetMinutes: offsetMinutes }),
     ...overrides,
   });
-  return { core, sql, gate, clock, alarm, warnings };
+  (h as { core: RaceDayCore }).core = core;
+  return h;
 }
 
 const label = (o: StepOutcome): string => (o.kind === "idle" ? "idle" : `${o.raceId}:${o.mode}:${o.step}:${o.result}`);
@@ -370,5 +379,16 @@ describe("公開の時点で完了済みの分の見回し(アラームのたび
     doneWithoutPlan(h, NAR_ID, NAR_DATE);
     await expect(h.core.runNextStep()).resolves.toBeDefined();
     expect(planRows(h)).toEqual([]);
+  });
+
+  it("見回しの SQL が失敗しても、runNextStep は投げない(足す機能の失敗で、既存のステップを止めない)。警告を出す", async () => {
+    const h = harness(jstNar("09:00"));
+    doneWithoutPlan(h, NAR_ID, NAR_DATE);
+    h.fault = (query) => {
+      if (query.includes("LEFT JOIN race_day_plan")) throw new Error("SQL の故障");
+    };
+    await expect(h.core.runNextStep()).resolves.toBeDefined();
+    expect(planRows(h)).toEqual([]);
+    expect(h.warnings.some((w) => w.includes("SQL の故障"))).toBe(true);
   });
 });
