@@ -82,6 +82,32 @@ function harness(): Harness {
 
 const deps = (h: Harness) => ({ log: (line: string) => void h.logs.push(line), sleep: async () => {}, });
 
+describe("過去の結果の取得の kick は処理の最後(Issue #573-17)", () => {
+  const archive = (events: string[]) =>
+    ({
+      idFromName: (n: string) => n,
+      get: () => ({
+        kick: async () => {
+          events.push("archive-kick");
+        },
+        getStatus: async () => null,
+        resume: async () => null,
+      }),
+    }) as never;
+
+  it("23 時: 日報の補完の依頼のあとに kick する", async () => {
+    const h = harness();
+    h.dates = ["20261007"];
+    const events: string[] = [];
+    h.requestImpl = async () => {
+      events.push("report");
+      return { accepted: true };
+    };
+    await runScheduled({ scheduledTime: JST_2300 }, { ...h.env(), RACE_ARCHIVE_FETCH: archive(events) }, deps(h));
+    expect(events).toEqual(["report", "archive-kick"]);
+  });
+});
+
 describe("日報の取り残しの補完(cron)", () => {
   it(`今日の前日までの ${REPORT_CATCHUP_DAYS} 日(両端を含む)を D1 に問い合わせ、返った日を日報の DO(main)へ catchup で依頼する。今日は範囲に含めない`, async () => {
     const h = harness();

@@ -63,6 +63,33 @@ function harness(): Harness {
 
 const deps = (h: Harness) => ({ log: (line: string) => void h.logs.push(line), sleep: async () => {} });
 
+describe("過去の結果の取得の kick は処理の最後(Issue #573-17)", () => {
+  it("月報の依頼のあとに kick する。事前分析の計画が失敗しても kick する", async () => {
+    for (const planFails of [false, true]) {
+      const h = harness();
+      h.planFails = planFails;
+      const events: string[] = [];
+      h.requestImpl = async () => {
+        events.push("monthly");
+        return { accepted: true };
+      };
+      const archive = {
+        idFromName: (n: string) => n,
+        get: () => ({
+          kick: async () => {
+            events.push("archive-kick");
+          },
+          getStatus: async () => null,
+          resume: async () => null,
+        }),
+      } as never;
+      const run = runScheduled({ scheduledTime: at("20261031", 21) }, { ...h.env(), RACE_ARCHIVE_FETCH: archive }, deps(h));
+      await (planFails ? run.catch(() => undefined) : run);
+      expect(events, `planFails=${String(planFails)}`).toEqual(["monthly", "archive-kick"]);
+    }
+  });
+});
+
 describe("月報の依頼(cron)", () => {
   it("最終日の 21:00 の実行(1 本目)は、当月を auto で、同日 22:00 JST 開始で依頼する。月報の DO の名前は main", async () => {
     const h = harness();

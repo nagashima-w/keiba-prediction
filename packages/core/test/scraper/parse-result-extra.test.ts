@@ -400,6 +400,35 @@ describe("補助パーサ: ラップ表(区間タイム・ペース・ペース�
       expect(header.pace).toBeNull();
     });
 
+    it("見出しが「数字+m」の形でなければ(単位が無い・単位が違う・前後に余計な文字がある)、区間タイムも位置もペースも null", () => {
+      // 前提: 書き換え前の見出しは 9 個とも「数字+m」で読める(読めていなければ、下の null は書き換えと無関係に成り立つ)
+      expect(parseResultExtra(SRC, "central").header.lapDistances).toHaveLength(9);
+      for (const [label, to] of [
+        ["単位なし", "<th>1800</th>"],
+        ["単位が違う(km)", "<th>1800km</th>"],
+        ["後ろに余計な文字", "<th>1800m以上</th>"],
+        ["前に余計な文字", "<th>約1800m</th>"],
+        ["数字が無い", "<th>m</th>"],
+      ] as const) {
+        const html = mutate(/<th>1800m<\/th>/, to);
+        const { header } = parseResultExtra(html, "central");
+        expect(header.lapTimes, label).toBeNull();
+        expect(header.lapDistances, label).toBeNull();
+        expect(header.pace, label).toBeNull();
+      }
+    });
+
+    it("累計との差が 0.2 秒以上なら null(許容は 0.1 秒まで。0.1 秒は読める、という上のテストの上側の境目)", () => {
+      // 前提: 書き換え前の最後の区間は 11.7(上のテストが 11.8 でも読めることを固定している)
+      expect(parseResultExtra(SRC, "central").header.lapTimes![8]).toBe(11.7);
+      for (const shifted of ["11.9", "12.0", "11.5"]) {
+        const html = mutate(/<td>11\.7<\/td>(\s*<\/tr>\s*<\/tbody>)/, `<td>${shifted}</td>$1`);
+        const { header } = parseResultExtra(html, "central");
+        expect(header.lapTimes, shifted).toBeNull();
+        expect(header.pace, shifted).toBeNull();
+      }
+    });
+
     it("累計の行と区間の行が入れ替わっていれば(区間の和が累計と合わない)null", () => {
       const rows = [...SRC.matchAll(/<tr class="HaronTime">[\s\S]*?<\/tr>/g)].map((m) => m[0]);
       expect(rows).toHaveLength(2);

@@ -13,6 +13,18 @@ const NOT_CALLED = (): never => {
   throw new Error("呼ばれない想定");
 };
 
+/** 出どころごとの総数の行(GROUP BY source)。 */
+interface TotalsRow {
+  readonly source: string | null;
+  readonly rows: number;
+  readonly horses: number;
+  readonly firstSeenMin: number | null;
+  readonly firstSeenMax: number | null;
+  readonly runDateMin: string | null;
+  readonly runDateMax: string | null;
+}
+const API_TOTALS: TotalsRow = { source: null, rows: 12, horses: 3, firstSeenMin: 1, firstSeenMax: 2, runDateMin: "2025/01/01", runDateMax: "2026/06/01" };
+
 interface Harness {
   readonly sqls: string[];
   readonly binds: unknown[][];
@@ -20,7 +32,7 @@ interface Harness {
   env(): Env;
 }
 
-function harness(): Harness {
+function harness(totals: readonly TotalsRow[] = [API_TOTALS]): Harness {
   const h: Harness = {
     sqls: [],
     binds: [],
@@ -53,7 +65,7 @@ function harness(): Harness {
               await run();
               // 表の総数は出どころごと(GROUP BY source)の行で返る(Issue #552)。source が NULL = 戦績 API 由来
               if (sql.includes("COUNT(DISTINCT horse_id)")) {
-                return { results: [{ source: null, rows: 12, horses: 3, firstSeenMin: 1, firstSeenMax: 2, runDateMin: "2025/01/01", runDateMax: "2026/06/01" }] };
+                return { results: totals };
               }
               return { results: [] };
             },
@@ -94,6 +106,19 @@ describe("GET /api/horse-runs: 診断", () => {
     expect(h.sqls.some((s) => s.includes("COALESCE(SUM(n)"))).toBe(false);
     // 読み取りだけ(書き込みの文を発行しない)
     expect(h.sqls.every((s) => /^SELECT/.test(s))).toBe(true);
+  });
+
+  it("結果ページ由来の行だけがあり、戦績 API の行が 0 件のとき: table は 0 件のまま、resultRows にその行が出る(結果ページ由来の行を table に混ぜない)", async () => {
+    const { deps, token } = await setup();
+    const result: TotalsRow = { source: "result", rows: 7, horses: 5, firstSeenMin: 10, firstSeenMax: 20, runDateMin: "2024/02/03", runDateMax: "2026/05/06" };
+    const h = harness([result]);
+    const res = await handle(get(token), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { table: { rows: number; horses: number; runDateMin: unknown; firstSeenMin: unknown }; resultRows: { rows: number; horses: number; runDateMin: unknown; runDateMax: unknown } };
+    expect(body.table).toMatchObject({ rows: 0, horses: 0, runDateMin: null, firstSeenMin: null });
+    expect(body.resultRows).toMatchObject({ rows: 7, horses: 5, runDateMin: "2024/02/03", runDateMax: "2026/05/06" });
+    // 前提: 結果ページ由来の行の値を結果の欄に出している(上の table の 0 は、行そのものが読まれていないからではない)
+    expect(body.resultRows.rows).not.toBe(body.table.rows);
   });
 
   it("days=7&cells=1: 期間が 7 日になり、セルの分布も返す(全件走査の文を発行する)", async () => {

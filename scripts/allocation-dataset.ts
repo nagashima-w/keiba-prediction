@@ -110,8 +110,8 @@ function keyProblem(label: string, value: unknown, expected: readonly string[]):
 const LEGACY_LIMIT_COLUMNS = ["max_win_bets", "max_place_bets"] as const;
 
 /**
- * 点数の上限の 2 列(`max_win_bets`・`max_place_bets`)が無い古い書き出し(Issue #533 より前)を読めるようにする。`allocation.settings` がオブジェクトで、この 2 列が
- * キーとして無いときだけ、無い列を null で補う(NULL は『上限なし』と解釈する既存の規則に乗る)。ほかの列の欠落・型の違いは補わず、そのあとの検査で拒まれる。
+ * 点数の上限の 2 列(`max_win_bets`・`max_place_bets`)が無い古い書き出し(Issue #533 より前)を読めるようにする。`allocation.settings` がオブジェクトのとき、この 2 列を**1 列ずつ**見て、
+ * キーとして無い列だけを null で補う(片方だけ無ければ、その 1 列だけを補う。NULL は『上限なし』と解釈する既存の規則に乗る)。ほかの列の欠落・型の違いは補わず、そのあとの検査で拒まれる。
  * 検査の前に呼ぶ。`parsed` は書き換える。
  */
 function fillLegacyLimitColumns(parsed: unknown): void {

@@ -79,6 +79,9 @@ export interface PlanStageDeps {
 /** 見回し({@link PlanStage.sweepNarMorningDone})の前回の試行の時刻(`race_day_meta`)。 */
 const SWEEP_TRY_KEY = "nar_pre_race_sweep_try_at";
 
+/** 見回しが評価済みで、計画の行を足さなかったレースの race_id(`race_day_meta` の JSON 配列。Issue #573-18)。 */
+const SWEEP_SETTLED_KEY = "nar_pre_race_sweep_settled";
+
 export class PlanStage {
   private readonly plan: PlanStore;
   private readonly now: () => number;
@@ -242,11 +245,15 @@ export class PlanStage {
    * 見回し(Issue #566。`runNextStep` の先頭から呼ぶ): 事前分析(morning)が done なのに計画の行が無い地方のレース(公開の時点で完了済みだった分・完了の時点の追加を取りこぼした分)に、
    * 地方の一覧から行を足す。**該当が無ければ何もしない**(SQL 1 本だけ。一覧は取りに行かない)。**開催日が今日〈JST〉より前の DO でも何もしない**(掃除のアラームの予約を延ばさないため)。投げない: 失敗は警告にして、次の起床で取り直す。
    * 一覧(`getRaceList`。ゲート経由のキャッシュ付き)は 1 回の見回しにつき 1 本。**試行の時刻を残し、`retryDelayMs` の間は取り直さない**(一覧に無いレースが残り続けても、起床のたびには取りに行かない)。
+   *
+   * **評価済みのレースは覚える**(Issue #573-18。`race_day_meta` の {@link SWEEP_SETTLED_KEY})。一覧を取れた見回しで、行を足さなかったレース(発走済み・発走まで 10 分未満・発走時刻なし・上限〈cap〉・一覧に無い)は、
+   * 次の見回しの対象から外す。これらは一覧が変わらない限り足せない(時刻は戻らず、一覧の内容は同じ)のに、`done で行の無い地方のレース` の SQL には残り続けるので、外さないと、その日のうちは
+   * 一覧のキャッシュ(6 時間)が切れるたびに netkeiba へ地方の一覧を取りに行く。**一覧の取得に失敗した起床では覚えない**(次の起床で取り直す)。評価済みでないレース(あとから done になった分)は、今までどおり拾う。
    */
   async sweepNarMorningDone(): Promise<void> {
     try {
       // 該当の確認(SQL 1 本)を先に。該当が無い起床では、ほかの読み(開催日の meta など)を増やさない。
-      if (this.plan.narMorningDoneWithoutPlanRow().length === 0) {
+      if (this.unsettledNarMorningDone().length === 0) {
         return;
       }
       const kaisaiDate = this.metaGet("kaisai_date");
@@ -267,15 +274,43 @@ export class PlanStage {
         return;
       }
       const offsetMinutes = this.plan.offset()?.minutes ?? (await this.loadOffsetMinutes());
-      for (const raceId of this.plan.narMorningDoneWithoutPlanRow()) {
+      const settledNow: string[] = [];
+      for (const raceId of this.unsettledNarMorningDone()) {
         const entry = result.races.find((r) => r.raceId === raceId);
-        if (entry !== undefined) {
-          this.registerNarMorningDone(entry, offsetMinutes);
+        if (entry === undefined || !this.registerNarMorningDone(entry, offsetMinutes)) {
+          settledNow.push(raceId); // 足さなかった(一覧に無い・発走済み・間に合わない・発走時刻なし・上限)。次からは見回さない
         }
+      }
+      if (settledNow.length > 0) {
+        this.plan.metaSet(SWEEP_SETTLED_KEY, JSON.stringify([...this.settledRaceIds(), ...settledNow]));
       }
     } catch (error) {
       this.onWarn(`事前分析の計画: 地方の普通のレースの発走前の分析の計画を足せませんでした(${errorMessage(error)})`);
     }
+  }
+
+  /** 見回しが評価済みにしたレースの race_id(`race_day_meta`。壊れていれば空)。 */
+  private settledRaceIds(): string[] {
+    const raw = this.metaGet(SWEEP_SETTLED_KEY);
+    if (raw === null) {
+      return [];
+    }
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** done で行の無い地方のレースのうち、見回しがまだ評価していないもの。該当の SQL が 0 件なら、meta は読まない。 */
+  private unsettledNarMorningDone(): string[] {
+    const ids = this.plan.narMorningDoneWithoutPlanRow();
+    if (ids.length === 0) {
+      return [];
+    }
+    const settled = new Set(this.settledRaceIds());
+    return ids.filter((id) => !settled.has(id));
   }
 
   /** 計画の offset が未決定のとき使う、設定の `preRaceOffsetMinutes`(設定の取得口が無い構成は既定値)。読めなければ投げる(呼び出し側が握る)。 */
