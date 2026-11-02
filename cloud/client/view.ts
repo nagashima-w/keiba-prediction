@@ -172,7 +172,8 @@ function trackingNotice(message: string | null, actions: ViewActions): VNode[] {
 }
 
 function listScreen(model: ListModel, actions: ViewActions): VNode {
-  const controls = h("div", { class: "controls" }, [
+  // Issue #560: 上の並びは役割で 2 つに分ける。一覧の絞り込み(開催日・中央/地方・更新)と、画面の移動(狙い目・検証・日報・月報・設定)。リンクのクラス名・href・並びは変えない。
+  const filters = h("div", { class: "list-filters", role: "group", "aria-label": "一覧の絞り込み" }, [
     h("label", { class: "date" }, [h("span", {}, ["開催日"]), h("input", { type: "date", value: model.dateInput }, [], { change: actions.onDateChange })]),
     h(
       "nav",
@@ -180,6 +181,8 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
       model.venueTabs.map((t) => h("a", { class: "tab", href: t.href, "aria-current": t.current ? "page" : undefined }, [t.label])),
     ),
     h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+  ]);
+  const screens = h("nav", { class: "list-nav", "aria-label": "画面の移動" }, [
     // 今日の狙い目への入口(Issue #336)。閲覧者にも出す(読み取りだけ)。
     h("a", { class: "targets-link", href: model.targetsHref }, ["狙い目"]),
     // 検証への入口は閲覧者にも出す(Issue #263。閲覧者の要求は集計のやり直しを起こさない)。設定への入口は管理者だけ(Issue #238。閲覧者は href が null)。日報は閲覧者にも出す。
@@ -189,6 +192,7 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
     ...(model.monthlyHref === null ? [] : [h("a", { class: "monthly-link", href: model.monthlyHref }, ["月報"])]),
     ...(model.settingsHref === null ? [] : [h("a", { class: "settings-link", href: model.settingsHref }, ["設定"])]),
   ]);
+  const controls = h("div", { class: "controls" }, [filters, screens]);
   const notices: VNode[] = [];
   if (model.error !== null) {
     notices.push(h("p", { class: "notice error", role: "alert" }, [model.error]));
