@@ -7,7 +7,9 @@ import { buildTargetsModel } from "../client/targets-model";
 import { renderScreen } from "../client/view";
 import type { VNode } from "../client/vnode";
 import { renderPage } from "../src/page";
+import { WEB_DARK, WEB_LIGHT } from "../src/palette";
 import { noopActions } from "./client-fakes";
+import { contrastRatio } from "./color-science";
 
 /**
  * Issue #346(レビューの【要修正】): レース行(`a.race`)に足す修飾のクラス(発走済み・見送り)の名前が、page.ts の既存の CSS の規則と衝突しないこと(静的な検査)。
@@ -15,7 +17,9 @@ import { noopActions } from "./client-fakes";
  * `.race { padding: 10px 12px }` と詳細度が同じで後ろにあるため勝ち、薄くした行だけ padding が 0 になった(一覧と、公開済みの #336 の狙い目)。
  * 守ること(クラス名は、実際に VNode に出ているものから集める=名前を書き換えても検査が追従する):
  *  - 修飾のクラス `x` は、CSS の中で `.race.x` の規則(セレクタ)の中にしか現れない(単独の `.x`・別の要素の `.x li` などに使われていない)。
- *  - その規則(`.race.x`)が指定するのは `opacity` だけ。
+ *  - その規則(`.race.x`)が指定するのは `color` だけ。
+ * Issue #570: 薄く見せる方法を opacity から文字の色(`color: var(--muted)`)に変えた(opacity だと muted の文字のコントラスト比がライトで約 2.5・ダークで約 3.4 まで落ちて、WCAG の 4.5 を割るため)。
+ * 発走済み・見送りの規則は、それぞれ `.race.started`・`.race.skipped` の 1 つずつ。バッジ(`.badges .badge.*`)は自前の `color` を持つので、行の色の影響を受けない。
  */
 
 const NOW = new Date("2026-06-28T05:00:00Z"); // JST 14:00(開催日 20260628 の今日)
@@ -74,12 +78,11 @@ describe("レース行の修飾のクラスは、既存の CSS の規則と衝�
     expect(rules.length).toBeGreaterThan(50); // CSS を読めている
   });
 
-  // Issue #558: 発走済み(started)は、行全体ではなく**バッジ(.badges)以外の子**を薄くする(行ごと薄くするとバッジの文字のコントラストが 4.5 を割る。page-badge-css.test.ts が数値で固定)。
-  // 見送り(skipped)は今までどおり行全体。狙い目の行は `race skipped started`(発走済みの見送り)になりうるので、発走済みの規則は `:not(.skipped)` で外し、薄さの二重がけ(0.65 × 0.65)を避ける。
+  // Issue #570: 発走済み(started)・見送り(skipped)の行は、行の文字の色を muted にして薄く見せる(opacity は使わない)。
+  // 色は継承なので、二重がけは起きない(opacity 版の `:not(.skipped)` は不要になった)。自前の色を持つ子(.race-detail〈muted〉・.t-left.soon〈wait〉・バッジ)はそれが勝つ。
   // 単独の `.x`・`ul.past` などとの衝突を防ぐ意図は、「`x` を含むセレクタはすべて `.race.` で始まる」で保つ。
-  const STARTED_RULE = ".race.started:not(.skipped) > :not(.badges)";
-  /** 修飾のクラスを含むセレクタの全部(見送りのクラスは、発走済みの規則の `:not(.skipped)` にも現れる)。 */
-  const EXPECTED_SELECTORS: Readonly<Record<string, readonly string[]>> = { skipped: [".race.skipped", STARTED_RULE], started: [STARTED_RULE] };
+  /** 修飾のクラスを含むセレクタの全部。 */
+  const EXPECTED_SELECTORS: Readonly<Record<string, readonly string[]>> = { skipped: [".race.skipped"], started: [".race.started"] };
 
   it("前提: 修飾のクラスごとの期待するセレクタを決めてある(増えたら、この表と数を直す)", () => {
     expect([...modifiers].sort()).toEqual(Object.keys(EXPECTED_SELECTORS).sort());
@@ -92,72 +95,73 @@ describe("レース行の修飾のクラスは、既存の CSS の規則と衝�
     expect([...selectors].sort()).toEqual([...EXPECTED_SELECTORS[cls]!].sort()); // 規則の形は決まった数だけ
   });
 
-  it.each(modifiers)("修飾のクラス「%s」を含む規則が指定するのは opacity だけ(padding・margin などを足さない)", (cls) => {
+  it.each(modifiers)("修飾のクラス「%s」を含む規則が指定するのは color だけ(padding・margin・opacity などを足さない)", (cls) => {
     const own = rules.filter((r) => r.selectors.some((s) => mentions(s, cls)));
     expect(own.length).toBe(EXPECTED_SELECTORS[cls]!.length); // 規則ごとに 1 つのセレクタ(グループにしていない)
-    for (const r of own) expect(r.properties).toEqual(["opacity"]);
+    for (const r of own) expect(r.properties).toEqual(["color"]);
   });
 
-  /** 行(クラス)と子(クラス)に、CSS の opacity の規則がかかったときの実効の不透明度。対応するセレクタの形は、この 2 つ(`.race.X` と `.race.X:not(.Y) > :not(.Z)`)だけ。 */
-  const effectiveOpacity = (rowClasses: readonly string[], childClasses: readonly string[]): { row: number; child: number } => {
-    let row = 1;
-    let child = 1;
+  /** 行のクラスに対して、CSS の `.race.X { color }` が決める行の文字色(CSS 変数の式)。何もかからなければ null(= `.race` の既定の fg)。 */
+  const rowColor = (rowClasses: readonly string[]): string | null => {
+    let color: string | null = null;
     for (const rule of rules) {
-      const opacity = rule.values.get("opacity");
-      if (opacity === undefined) continue;
+      const value = rule.values.get("color");
+      if (value === undefined) continue;
       for (const sel of rule.selectors) {
-        const m = /^\.race\.([\w-]+)(?::not\(\.([\w-]+)\))?(?: > :not\(\.([\w-]+)\))?$/.exec(sel);
-        if (m === null) continue;
-        if (!rowClasses.includes(m[1]!) || (m[2] !== undefined && rowClasses.includes(m[2]))) continue;
-        if (m[3] === undefined) row *= Number(opacity);
-        else if (!childClasses.includes(m[3])) child *= Number(opacity);
+        const m = /^\.race\.([\w-]+)$/.exec(sel);
+        if (m !== null && rowClasses.includes(m[1]!)) color = value;
       }
     }
-    return { row, child };
+    return color;
   };
   const kidsOf = (n: VNode): VNode[] => (n.children ?? []).filter((c): c is VNode => typeof c !== "string");
 
-  it("Issue #558 R1: 見送りだけ・発走済みだけ・両方の行で、名前・詳細の実効の不透明度は 0.65(二重にかからない)。バッジは発走済みでも 1", () => {
+  it("Issue #570 R1: 見送りだけ・発走済みだけ・両方の行の文字色は muted(二重にかからない。ふつうの行はかからない)。不透明度は変えない", () => {
     const list = raceRows(listTreeWithBoard());
     const targets = raceRows(targetsTree());
     const both = targets.filter((n) => classesOf(n).includes("skipped") && classesOf(n).includes("started"));
     const skippedOnly = targets.filter((n) => classesOf(n).includes("skipped") && !classesOf(n).includes("started"));
     const startedOnly = list.filter((n) => classesOf(n).includes("started"));
-    // 前提: 3 種類の行が実際にある(両方付く行は狙い目の画面にだけ出る)
+    const plain = list.filter((n) => !classesOf(n).includes("started") && !classesOf(n).includes("skipped"));
+    // 前提: 4 種類の行が実際にある(両方付く行は狙い目の画面にだけ出る)
     expect(both.length).toBeGreaterThan(0);
     expect(skippedOnly.length).toBeGreaterThan(0);
     expect(startedOnly.length).toBeGreaterThan(0);
-    for (const row of [...both, ...skippedOnly, ...startedOnly]) {
-      const kids = kidsOf(row);
-      expect(kids.length).toBeGreaterThanOrEqual(2); // 前提: 名前・詳細の子がある
-      for (const kid of kids) {
-        const { row: r, child: c } = effectiveOpacity(classesOf(row), classesOf(kid));
-        const eff = r * c;
-        expect(eff, `${classesOf(row).join(" ")} の子 ${classesOf(kid).join(" ") || kid.tag}`).toBeCloseTo(classesOf(kid).includes("badges") && !classesOf(row).includes("skipped") ? 1 : 0.65, 5);
-      }
-    }
+    expect(plain.length).toBeGreaterThan(0);
+    for (const row of [...both, ...skippedOnly, ...startedOnly]) expect(rowColor(classesOf(row)), classesOf(row).join(" ")).toBe("var(--muted)");
+    for (const row of plain) expect(rowColor(classesOf(row)), "ふつうの行").toBeNull();
+    // 薄さは色だけ。行・子のどちらにも opacity はかからない
+    expect(rules.filter((r) => r.selectors.some((s) => s.startsWith(".race."))).filter((r) => r.values.has("opacity"))).toEqual([]);
   });
 
-  it("対照(検出が空振りでない): 発走済みの規則から `:not(.skipped)` を外した CSS だと、両方付いた行の子は 0.65 × 0.65 になる", () => {
-    const both = raceRows(targetsTree()).find((n) => classesOf(n).includes("skipped") && classesOf(n).includes("started"))!;
-    const kid = kidsOf(both)[0]!;
-    const saved = rules.map((r) => r.selectors.slice());
+  it("対照(検出が空振りでない): 発走済みの規則の色を変える/消すと、実効の色が変わる(rowColor が規則を見ている)", () => {
+    const row = raceRows(listTreeWithBoard()).find((n) => classesOf(n).includes("started"))!;
+    expect(rowColor(classesOf(row))).toBe("var(--muted)");
+    const target = rules.find((r) => r.selectors.includes(".race.started"))!;
+    const saved = target.values.get("color");
     try {
-      for (const r of rules) for (let i = 0; i < r.selectors.length; i++) if (r.selectors[i] === STARTED_RULE) r.selectors[i] = ".race.started > :not(.badges)";
-      const { row, child } = effectiveOpacity(classesOf(both), classesOf(kid));
-      expect(row * child).toBeCloseTo(0.65 * 0.65, 5);
+      (target.values as Map<string, string>).set("color", "var(--fg)");
+      expect(rowColor(classesOf(row))).toBe("var(--fg)");
+      (target.values as Map<string, string>).delete("color");
+      expect(rowColor(classesOf(row))).toBeNull();
     } finally {
-      rules.forEach((r, i) => void (r.selectors.splice(0, r.selectors.length, ...saved[i]!)));
+      (target.values as Map<string, string>).set("color", saved!);
     }
   });
 
-  it("Issue #558: 発走済みの薄さは `.badges` に及ばない(行の直下に `.badges` が 1 つ、薄くする側の子が 2 つ以上。規則は `:not(.badges)` で外す)", () => {
+  it("Issue #570: 薄い行の文字(muted)はライトでもダークでも card の上で 4.5 以上(opacity 版は約 2.5 / 約 3.4 で割っていた)", () => {
+    for (const p of [WEB_LIGHT, WEB_DARK]) expect(contrastRatio(p.muted, p.card)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("Issue #558・#570: バッジは発走済みでも薄くならない(行の直下に `.badges` が 1 つ、薄くなる側の子が 2 つ以上。バッジの tone は自前の color を持つので行の色が及ばない)", () => {
     const row2 = raceRows(listTreeWithBoard()).find((n) => classesOf(n).includes("started"))!;
     const kids2 = kidsOf(row2);
     expect(kids2.filter((k) => classesOf(k).includes("badges"))).toHaveLength(1); // 前提: .badges は行の直下に 1 つ
     expect(kids2.filter((k) => !classesOf(k).includes("badges")).length).toBeGreaterThanOrEqual(2); // 薄くする側(名前・詳細)が残る
-    // 実際の CSS の規則が、その `.badges` を外している(上の実効の不透明度のテストが、子のクラスを見て確かめる)
-    const dimming = rules.filter((r) => r.selectors.includes(STARTED_RULE));
-    expect(dimming).toHaveLength(1);
+    // `.badges .badge.{ok,wait,fail,none}` がそれぞれ自前の color を持つ(継承で行の muted にならない)
+    for (const tone of ["ok", "wait", "fail", "none"]) {
+      const own = rules.filter((r) => r.selectors.includes(`.badges .badge.${tone}`) && r.values.has("color"));
+      expect(own.length, `.badges .badge.${tone} の color`).toBeGreaterThan(0);
+    }
   });
 });

@@ -14,7 +14,7 @@ import { contrastRatio } from "./color-science";
  *  - 色だけに頼らない: 文字(ラベル)は VNode に残る(5 状態すべて)。
  *  - 暗い配色・明るい配色の両方で読める: 文字と背景の組が `palette.ts` の組(新しい色リテラルを足さない)で、コントラスト比 4.5 以上。
  *  - 一覧の中だけ(`.badges .badge`)。レース画面のタスクカードの `.badge` は変えない。
- *  - 発走済みの行でも読める: 薄さ(opacity)は `.badges` にかけない(page-race-modifier-css.test.ts)。ここでは、行ごと薄くした場合に基準を割ることを数値で示す。
+ *  - 発走済みの行でも読める: 行の薄さは文字の色(`color: var(--muted)`。Issue #570 で opacity から変えた)で、バッジは自前の色を持つので影響されない(page-race-modifier-css.test.ts)。ここでは、旧方式(行ごと opacity 0.65)だと基準を割ることを数値で示す。
  */
 
 const MIN_CONTRAST = 4.5;
@@ -100,7 +100,7 @@ describe("バッジの CSS(Issue #558): 一覧の `.badges .badge`", () => {
     for (const r of withBg) expect(r.selectors.filter((s) => !s.startsWith(".badges .badge"))).toEqual([]);
   });
 
-  it("対照(検査が空振りでない): 行ごと opacity 0.65 にすると、ライトの ok・wait の文字は 4.5 を割る(だから `.badges` は薄くしない)", () => {
+  it("対照(検査が空振りでない): 旧方式の行ごと opacity 0.65 だと、ライトの ok・wait の文字は 4.5 を割る(だから opacity ではなく色で薄く見せ、バッジは薄くしない)", () => {
     const hex = (h: string, i: number): number => parseInt(h.slice(1 + 2 * i, 3 + 2 * i), 16);
     const mix = (a: string, b: string, t: number): string => "#" + [0, 1, 2].map((i) => Math.round(hex(a, i) * t + hex(b, i) * (1 - t)).toString(16).padStart(2, "0")).join("");
     for (const tone of ["ok", "wait"] as const) {
