@@ -91,7 +91,7 @@ export type BulkUi =
 
 export interface BulkButton {
   readonly mode: TaskMode;
-  /** 「事前分析を一括実行(6)」。括弧の中は対象の件数。 */
+  /** 「事前分析を一括実行(対象 6 件)」。括弧の中は対象の件数(Issue #558。失敗の再試行を含み、発走前の分析では発走済み・時刻不明を除くので、「未実施」とは書かない)。 */
   readonly label: string;
   readonly count: number;
   readonly disabled: boolean;
@@ -169,7 +169,7 @@ export function buildBulkModel(input: BuildBulkInput): BulkModel {
   const sending = input.ui?.kind === "sending";
   const buttons = MODES.map((mode): BulkButton => {
     const count = selectBulkTargets({ mode, races: input.races, board: input.board ?? [], date: input.date, now: input.now }).raceIds.length;
-    return { mode, label: `${MODE_LABELS[mode]}を一括実行(${count})`, count, disabled: past || noBoard || sending || count === 0 };
+    return { mode, label: `${MODE_LABELS[mode]}を一括実行(対象 ${count} 件)`, count, disabled: past || noBoard || sending || count === 0 };
   });
   let panel: BulkPanel | null = null;
   const ui = input.ui;
