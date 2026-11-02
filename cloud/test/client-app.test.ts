@@ -12,7 +12,9 @@ import { deferred } from "./client-fakes";
  *  - 失敗は自動で再試行しない(「更新」だけが取り直す)。同時に同じものを 2 本取らない
  *  - 起動のボタンを押さない限り `POST` は呼ばない(起動は #186。client-app-run.test.ts。旧版は「POST は呼ばない」)
  * Issue #185: レース画面(`status?race_id=`・過去の分析の一覧を、開いたときに 1 回)・結果画面(`/api/analyses/{id}` を、開いたときに 1 回。メモリにキャッシュ)も同じ方針。
- * レース画面・結果画面は、一覧(`/api/races`)と板(`status`〈race_id なし〉)を取らない(netkeiba に出ない・DO を余計に起こさない)。
+ * レース画面・結果画面は、板(`status`〈race_id なし〉)を取らない(DO を余計に起こさない)。
+ * **Issue #571(ユーザーの決定で、以前の「レース画面・結果画面は一覧〈`/api/races`。netkeiba に出る〉を取らない」を改めた)**: 前後のレースのため、レース画面・結果画面を開いたとき、その (開催日, 区分) の一覧が
+ * キャッシュに無ければ一覧の画面と同じ口で 1 回取る(一覧の画面から来たときは増えない)。結果画面は分析の開催日の一覧を、分析が届いてから取る。前後・パンくずの中身は `client-app-neighbors.test.ts`。
  */
 
 const DATE = "20260628";
@@ -227,11 +229,12 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     expect(h.calls).toHaveLength(before + 3); // レース画面に戻っても取り直さない(最新の分析も)
   });
 
-  it("race 付きのハッシュで直接開くと、状態(race_id つき)・過去の分析・最新の分析(発走前が完了している行の id。Issue #188)の 3 本だけを取る。一覧(netkeiba に出る)・板(race_id なし)・POST は呼ばない", async () => {
+  it("race 付きのハッシュで直接開くと、状態(race_id つき)・過去の分析・最新の分析(発走前が完了している行の id。Issue #188)・前後のレースのための一覧(Issue #571)の 4 本だけを取る。板(race_id なし)・POST は呼ばない", async () => {
     const h = harness(`#date=${DATE}&venue=central&race=${RACE_ID}`);
     h.app.start();
     await h.app.whenIdle();
-    expect(h.calls.sort()).toEqual([ANALYSIS_5, PAST, RACE_STATUS].sort());
+    expect(h.calls.sort()).toEqual([ANALYSIS_5, PAST, RACE_STATUS, RACES_CENTRAL].sort());
+    expect(h.calls).not.toContain(BOARD);
     expect(h.text()).toContain("事前分析");
     expect(h.text()).toContain("発走前");
     expect(h.text()).toContain("1位"); // 朝が完了・prior あり → 順位
@@ -245,11 +248,11 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     expect(h.hashes).toEqual([]);
   });
 
-  it("結果画面(#analysis=<id>)は、開いたとき /api/analyses/{id} を 1 回だけ取る。往復・再描画で取り直さない。一覧・板・レース画面の取得は起こさない", async () => {
+  it("結果画面(#analysis=<id>)は、開いたとき /api/analyses/{id} を 1 回だけ取る(往復・再描画で取り直さない)。続けて、分析の開催日の一覧を 1 回(Issue #571)。板・レース画面の取得は起こさない", async () => {
     const h = harness(`#analysis=5`);
     h.app.start();
     await h.app.whenIdle();
-    expect(h.calls).toEqual([ANALYSIS_5]);
+    expect(h.calls).toEqual([ANALYSIS_5, RACES_CENTRAL]);
     expect(h.text()).toContain("福島11R テストステークス");
     expect(h.text()).toContain("LLM 未使用(統計のみ)");
     h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
@@ -260,7 +263,7 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     h.go(`#analysis=5`);
     await h.app.whenIdle();
     expect(h.calls.filter((u) => u === ANALYSIS_5)).toHaveLength(1);
-    expect(h.calls.filter((u) => u.startsWith("/api/races") || u === BOARD)).toEqual([]);
+    expect(h.calls.filter((u) => u.startsWith("/api/races") || u === BOARD), "一覧は 1 回のまま(レース画面へ行って戻っても増えない)。板は取らない").toEqual([RACES_CENTRAL]);
   });
 
   it("別の分析 id は別に 1 回取る。取得中に何度 hashchange しても 1 本", async () => {
@@ -277,17 +280,17 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     h.go(`#analysis=5`);
     release();
     await h.app.whenIdle();
-    expect(h.calls).toEqual([ANALYSIS_5]);
+    expect(h.calls, "分析 5 は 1 本。届いたあとに、その開催日の一覧を 1 回(Issue #571)").toEqual([ANALYSIS_5, RACES_CENTRAL]);
     h.go(`#analysis=6`);
     await h.app.whenIdle();
-    expect(h.calls).toEqual([ANALYSIS_5, "/api/analyses/6"]);
+    expect(h.calls, "分析 6 は同じ開催日・区分なので、一覧は取り直さない").toEqual([ANALYSIS_5, RACES_CENTRAL, "/api/analyses/6"]);
   });
 
   it("race と analysis が両方あるハッシュは、結果画面(analysis)を開く", async () => {
     const h = harness(`#date=${DATE}&venue=central&race=${RACE_ID}&analysis=5`);
     h.app.start();
     await h.app.whenIdle();
-    expect(h.calls).toEqual([ANALYSIS_5]);
+    expect(h.calls).toEqual([ANALYSIS_5, RACES_CENTRAL]);
     expect(h.text()).toContain("分析時刻");
   });
 
@@ -366,12 +369,14 @@ describe("レース画面の失敗・更新", () => {
     const OTHER = "20260627";
     h.responders.set(`/api/analyses/status?kaisai_date=${OTHER}&race_id=${RACE_ID}`, async () => ok(raceStatusBody([boardRow(RACE_ID, "morning", "failed")])));
     h.responders.set(`/api/analyses?race_id=${RACE_ID}&kaisai_date=${OTHER}&limit=20`, async () => ok(pastBody([])));
+    h.responders.set(`/api/races?kaisai_date=${OTHER}&venue=central`, async () => ok({ ok: true, kaisai_date: OTHER, venue: "central", races: [] }));
     h.app.start();
     await h.app.whenIdle();
     h.go(`#date=${OTHER}&venue=central&race=${RACE_ID}`);
     await h.app.whenIdle();
-    // 1 つ目の日: 状態・過去の分析・最新の分析(Issue #188。発走前が完了)。2 つ目の日: 状態・過去の分析(発走前の行が無いので、分析は取らない)
-    expect(h.calls).toHaveLength(5);
+    // 1 つ目の日: 状態・過去の分析・最新の分析(Issue #188。発走前が完了)・一覧(Issue #571)。2 つ目の日: 状態・過去の分析(発走前の行が無いので、分析は取らない)・その日の一覧(日付ごとに別のキー)
+    expect(h.calls).toHaveLength(7);
+    expect(h.calls.filter((u) => u.startsWith("/api/races")).sort()).toEqual([RACES_CENTRAL, `/api/races?kaisai_date=${OTHER}&venue=central`].sort());
     expect(h.calls.filter((u) => u === ANALYSIS_5)).toHaveLength(1);
     expect(h.text()).toContain("失敗");
     expect(h.text()).not.toContain("1位");
@@ -801,7 +806,7 @@ describe("発走前の結果をカードの中に出す(Issue #188)", () => {
       h.responders.set(RACE_STATUS, async () => ok(raceStatusBody(rows as ReturnType<typeof boardRow>[])));
       h.app.start();
       await h.app.whenIdle();
-      expect(h.calls.sort()).toEqual([PAST, RACE_STATUS].sort()); // 前提: 状態は取れて(カードが出て)いる
+      expect(h.calls.sort()).toEqual([PAST, RACE_STATUS, RACES_CENTRAL].sort()); // 前提: 状態は取れて(カードが出て)いる。分析(/api/analyses/{id})は取らない。一覧は前後のレースのため(Issue #571)
       expect(findAll(h.tree(), (n) => n.attrs?.["class"] === "card")).toHaveLength(2);
       expect(horsesIn(h.tree())).toHaveLength(0);
       expect(findAll(h.tree(), (n) => String(n.attrs?.["class"]) === "result-toggle")).toHaveLength(0);

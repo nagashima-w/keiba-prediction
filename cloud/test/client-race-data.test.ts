@@ -25,6 +25,8 @@ const fail503: Resp = { status: 503, json: async () => ({ ok: false, error: { ty
 const boardRow = (mode: string, status: string, over: Record<string, unknown> = {}) => ({ race_id: RACE_ID, mode, status, attempts: 0, error: null, queued_at: 1, updated_at: 2, prior: false, analysis_id: null, detail: null, children_ok: null, ...over });
 const racesBody = { ok: true, kaisai_date: DATE, venue: "central", races: [{ race_id: RACE_ID, venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null }] };
 
+const analysisBody = (kaisaiDate: string) => ({ id: 5, raceId: RACE_ID, analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate, evEstimated: false, model: null, llmNote: null, llmCalls: null, promptVersion: null, race: { venueName: "福島", raceNumber: 11, raceName: "テスト", startTime: null, courseType: null, distance: null, weather: null, trackCondition: null, oddsStatus: null, placeBasis: null }, horses: [], allocation: null, detail: "present" });
+
 interface Fixture {
   readonly data: RaceData;
   readonly calls: string[];
@@ -179,20 +181,101 @@ describe("createRaceData: 取得は冪等で、完了したら再描画を要求
     expect(f.data.listRowOf(DATE, "nar", RACE_ID)?.raceName).toBe("地方のレース");
   });
 
-  it("ensureRace: 状態と過去の分析を 1 本ずつ取り(一覧・板は取らない)、pending は取得中の間だけ待ち対象を返す", async () => {
+  it("ensureRace: 状態・過去の分析・前後のレースのための一覧を 1 本ずつ取り(板は取らない。Issue #571 で一覧を足した)、pending は取得中の間だけ待ち対象を返す", async () => {
     const f = fixture();
     f.replies.set(STATUS_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], prior: null }));
     f.replies.set(PAST_URL, () => ok({ ok: true, analyses: [] }));
+    f.replies.set(RACES_URL, () => ok(racesBody));
     expect(f.data.pending()).toHaveLength(0);
-    f.data.ensureRace(DATE, RACE_ID);
-    f.data.ensureRace(DATE, RACE_ID);
-    expect(f.calls).toEqual([STATUS_URL, PAST_URL]);
-    expect(f.data.pending()).toHaveLength(2);
+    f.data.ensureRace(DATE, RACE_ID, "central");
+    f.data.ensureRace(DATE, RACE_ID, "central");
+    expect(f.calls).toEqual([STATUS_URL, PAST_URL, RACES_URL]);
+    expect(f.calls, "板(race_id なし)は取らない").not.toContain(BOARD_URL);
+    expect(f.data.pending()).toHaveLength(3);
     await Promise.all(f.data.pending());
     expect(f.data.pending()).toHaveLength(0);
     expect(f.data.raceStatusSource(DATE, RACE_ID).kind).toBe("ready");
     expect(f.data.pastSource(DATE, RACE_ID).kind).toBe("ready");
-    expect(f.calls).toHaveLength(2);
+    expect(f.data.listRowsOf(DATE, "central")?.map((r) => r.raceId)).toEqual([RACE_ID]);
+    expect(f.calls).toHaveLength(3);
+  });
+
+  it("ensureRace の一覧は一覧の画面と同じキャッシュ・門を使う: ensureList で取ってあれば取らず、ensureRace で取ったあとの ensureList も一覧を取り直さない(板だけ取る)。区分ごとに別", async () => {
+    const f = fixture();
+    f.replies.set(STATUS_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], prior: null }));
+    f.replies.set(PAST_URL, () => ok({ ok: true, analyses: [] }));
+    f.replies.set(RACES_URL, () => ok(racesBody));
+    f.replies.set(BOARD_URL, () => ok({ ok: true, kaisai_date: DATE, races: [] }));
+    f.data.ensureList(DATE, "central");
+    await Promise.all(f.data.pending());
+    expect(f.calls.filter((u) => u === BOARD_URL), "前提: 一覧の画面は板も取る").toHaveLength(1);
+    f.data.ensureRace(DATE, RACE_ID, "central");
+    await Promise.all(f.data.pending());
+    expect(f.calls.filter((u) => u === RACES_URL), "一覧の画面で取ってあれば、レース画面は取らない").toHaveLength(1);
+
+    const g = fixture();
+    g.replies.set(STATUS_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], prior: null }));
+    g.replies.set(PAST_URL, () => ok({ ok: true, analyses: [] }));
+    g.replies.set(RACES_URL, () => ok(racesBody));
+    g.replies.set(BOARD_URL, () => ok({ ok: true, kaisai_date: DATE, races: [] }));
+    g.data.ensureRace(DATE, RACE_ID, "central");
+    await Promise.all(g.data.pending());
+    g.data.ensureList(DATE, "central");
+    await Promise.all(g.data.pending());
+    expect(g.calls.filter((u) => u === RACES_URL), "レース画面で取ってあれば、一覧の画面は取り直さない").toHaveLength(1);
+    expect(g.calls.filter((u) => u === BOARD_URL), "板は status?race_id= の応答で種まきされているので、一覧の画面も取らない(従来どおり)").toHaveLength(0);
+    expect(g.data.boardSource(DATE).kind).toBe("ready");
+
+    const NAR_URL = `/api/races?kaisai_date=${DATE}&venue=nar`;
+    g.replies.set(NAR_URL, () => ok({ ok: true, kaisai_date: DATE, venue: "nar", races: [] }));
+    g.data.ensureRace(DATE, RACE_ID, "nar");
+    expect(g.calls.filter((u) => u === NAR_URL), "区分が違えば別の一覧").toHaveLength(1);
+  });
+
+  it("ensureRace の一覧が失敗しても、状態・過去の分析は影響を受けず、再試行しない(refreshRace も一覧に触れない)", async () => {
+    const f = fixture();
+    f.replies.set(STATUS_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], prior: null }));
+    f.replies.set(PAST_URL, () => ok({ ok: true, analyses: [] }));
+    f.replies.set(RACES_URL, () => fail503);
+    f.data.ensureRace(DATE, RACE_ID, "central");
+    await Promise.all(f.data.pending());
+    expect(f.data.raceStatusSource(DATE, RACE_ID).kind).toBe("ready");
+    expect(f.data.pastSource(DATE, RACE_ID).kind).toBe("ready");
+    expect(f.data.listSource(DATE, "central").kind, "前提: 一覧は失敗した").toBe("error");
+    expect(f.data.listRowsOf(DATE, "central")).toBeUndefined();
+    f.data.ensureRace(DATE, RACE_ID, "central");
+    f.data.refreshRace(DATE, RACE_ID, "central");
+    await Promise.all(f.data.pending());
+    expect(f.calls.filter((u) => u === RACES_URL)).toHaveLength(1);
+    expect(f.calls.filter((u) => u === STATUS_URL), "前提: refreshRace は状態を取り直した").toHaveLength(2);
+  });
+
+  it("ensureResult: 分析が届く前は一覧を取らず、届いたら分析の開催日(kaisaiDate)・route の区分の一覧を 1 回だけ取る(結果画面のときだけ)", async () => {
+    const f = fixture();
+    f.setRoute({ analysis: 5, date: "20260101" });
+    f.setScreen("result");
+    const OTHER_URL = `/api/races?kaisai_date=${DATE}&venue=central`;
+    const body = f.hold(ANALYSIS_URL);
+    f.replies.set(OTHER_URL, () => ok(racesBody));
+    f.data.ensureResult(5);
+    expect(f.calls, "分析が届くまでは一覧を取らない").toEqual([ANALYSIS_URL]);
+    body.resolve(ok({ ok: true, analysis: analysisBody(DATE) }));
+    await Promise.all(f.data.pending());
+    await Promise.all(f.data.pending());
+    expect(f.calls, "route の日付(20260101)ではなく、分析の開催日の一覧").toEqual([ANALYSIS_URL, OTHER_URL]);
+    f.data.ensureResult(5);
+    expect(f.calls, "重ねて呼んでも増えない").toHaveLength(2);
+  });
+
+  it("結果画面でないときに届いた分析は、一覧を取らない(レース画面の最新の分析〈Issue #188〉や、離れたあとに届いた分析)", async () => {
+    const f = fixture();
+    f.setRoute({ analysis: 5 });
+    f.setScreen("race");
+    f.replies.set(ANALYSIS_URL, () => ok({ ok: true, analysis: analysisBody(DATE) }));
+    f.data.ensureResult(5);
+    await Promise.all(f.data.pending());
+    expect(f.data.analysisSource(5).kind, "前提: 分析は届いた").toBe("ready");
+    expect(f.calls).toEqual([ANALYSIS_URL]);
   });
 });
 
@@ -205,15 +288,16 @@ describe("createRaceData: route と画面の判定は依存から受け取る", 
     f.replies.set(STATUS_URL, () => ok({ ok: true, kaisai_date: DATE, races: rows, prior: null }));
     f.replies.set(PAST_URL, () => ok({ ok: true, analyses: [] }));
     f.replies.set(BOARD_URL, () => ok({ ok: true, kaisai_date: DATE, races: rows }));
-    f.data.ensureRace(DATE, RACE_ID);
+    f.replies.set(RACES_URL, () => ok(racesBody));
+    f.data.ensureRace(DATE, RACE_ID, "central");
     await Promise.all(f.data.pending());
-    expect(f.calls).toEqual([STATUS_URL, PAST_URL]);
+    expect(f.calls).toEqual([STATUS_URL, PAST_URL, RACES_URL]);
     expect(f.timers.pending(), "実行中の行があるので追跡が始まっている").toBe(1);
     // 画面は別の画面(admin-only など)だが、route はまだそのレースを指している
     f.setScreen("admin-only");
     rows = [boardRow("pre_race", "done", { analysis_id: 7 })];
     await f.timers.advance(3000);
-    expect(f.calls.slice(2), "追跡の板の取得だけ。過去の分析は取り直さない").toEqual([BOARD_URL]);
+    expect(f.calls.slice(3), "追跡の板の取得だけ。過去の分析は取り直さない").toEqual([BOARD_URL]);
     expect(f.data.pastSource(DATE, RACE_ID).kind, "キャッシュは捨てられている").toBe("loading");
     // 次の完了(再実行)は、画面がレースなら過去の分析を取り直す
     f.setScreen("race");

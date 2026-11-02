@@ -11,7 +11,12 @@
  * Issue #185: レース画面(`#…&race=`)は、状態(`status?race_id=`)と過去の分析の一覧(`GET /api/analyses`)を (開催日, race_id) ごとに 1 回ずつ取る。
  * 結果画面(`#analysis=`)は `GET /api/analyses/{id}` を id ごとに 1 回(⚠️ サーバは R2 の操作回数を使う)。いずれも画面の往復で取り直さず、失敗も自動で再試行しない
  * (「更新」だけが、そのレースの 2 本、または失敗した分析の 1 本を取り直す。成功した分析に「更新」は無い)。
- * **レース画面・結果画面は、一覧(netkeiba に出る)と板(race_id なし)を取らない**。`race` と `analysis` が両方あれば結果画面(analysis)。
+ * **レース画面・結果画面は、板(race_id なし)を取らない**。`race` と `analysis` が両方あれば結果画面(analysis)。
+ * **Issue #571(前後のレース。ユーザーの決定で、以前の「レース画面・結果画面は一覧を取らない」を改めた)**: 前後のレースを同じ日・同じ競馬場の一覧から決めるため、レース画面・結果画面を開いたとき、
+ *  その (開催日, 区分) の一覧(netkeiba に出る)がキャッシュに無ければ**一覧の画面と同じ口(`loadRaces`)で取る**(同じキャッシュ・同じ門〈races・raceErrors・raceInflight〉なので、一覧の画面から来たときは取得が増えず、
+ *  一覧とレースの往復でも取り直さない)。取得中・失敗のときは前後を出さない(画面のほかの部分は壊さず、エラーの表示も増やさない)。**失敗は自動で再試行しない**(一覧の画面の「更新」だけが取り直す。レース画面の「更新」は一覧に触れない)。
+ *  - レース画面: `ensureRace` が route の (開催日, 区分) の一覧を取る
+ *  - 結果画面: 一覧の開催日は分析の開催日(`raceDateOf`。ハッシュの日付は直接開いたとき既定の今日のことがある)なので、**分析が届いてから**取る(`syncResultList`。冪等。呼ぶのは `ensureResult` と分析の取得の成功だけ。描画からは取らない)
  * 表示は「現在のハッシュ + キャッシュ」から毎回導く(遅れて届いた結果は、キャッシュに入るだけで、今の画面を壊さない)。
  *
  * **Issue #186(追跡)**:
@@ -38,7 +43,7 @@ import { createBoardStore, type BoardCompletion, type BoardStore } from "./board
 import { listKey, raceKey } from "./keys";
 import type { BoardSource, ListSource } from "./list";
 import { latestAnalysisIdOf, type PastSource, type RaceStatusSource } from "./race";
-import type { ResultSource } from "./result";
+import { raceDateOf, type ResultSource } from "./result";
 import type { Route, Venue } from "./route";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
 
@@ -62,6 +67,8 @@ export interface RaceData {
   listSource(date: string, venue: Venue): ListSource;
   /** 一覧のキャッシュにあるそのレースの行(レース画面の見出し用)。 */
   listRowOf(date: string, venue: Venue, raceId: string): RaceRow | undefined;
+  /** 一覧のキャッシュの全行(Issue #571。前後のレースの元)。取得前・取得中・失敗は undefined。 */
+  listRowsOf(date: string, venue: Venue): readonly RaceRow[] | undefined;
   boardSource(date: string): BoardSource;
   /** その開催日の板を手動で取得中か。 */
   boardLoading(date: string): boolean;
@@ -76,11 +83,12 @@ export interface RaceData {
   forceTrack(date: string): void;
   // ---- 取得(無ければ取る。冪等) ----
   ensureList(date: string, venue: Venue): void;
-  ensureRace(date: string, raceId: string): void;
+  /** レース画面に必要なもの(状態・過去の分析・最新の分析)と、前後のレースのための一覧(Issue #571)。 */
+  ensureRace(date: string, raceId: string, venue: Venue): void;
   ensureResult(id: number): void;
   // ---- 「更新」(取得中・成功済みは何もしない。キャッシュを捨てて取り直し、再描画を要求する) ----
   refreshList(date: string, venue: Venue): void;
-  refreshRace(date: string, raceId: string): void;
+  refreshRace(date: string, raceId: string, venue: Venue): void;
   refreshResult(id: number): void;
   // ---- 追跡 ----
   /** 「状態を更新」(停止中なら再開。すぐ 1 回取る)。 */
@@ -321,8 +329,10 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     if (analyses.has(id) || analysisErrors.has(id) || analysisInflight.has(id)) return;
     const promise = fetchAnalysis(deps.fetch, id).then((result) => {
       analysisInflight.delete(id);
-      if (result.ok) analyses.set(id, result.analysis);
-      else analysisErrors.set(id, failureMessage(result.error));
+      if (result.ok) {
+        analyses.set(id, result.analysis);
+        syncResultList(); // 結果画面なら、分析の開催日の一覧を取る(Issue #571)
+      } else analysisErrors.set(id, failureMessage(result.error));
       deps.onChange();
     });
     analysisInflight.set(id, promise);
@@ -342,22 +352,35 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     if (id !== null) loadAnalysis(id);
   }
 
+  /**
+   * 結果画面の前後のレースのための一覧(Issue #571)を、無ければ取りに行く。冪等(`loadRaces` の 3 つの門)。結果画面でない・分析がまだ届いていない(日付が分からない)ときは何もしない。
+   * 呼ぶのは `ensureResult` と `loadAnalysis` の成功だけ(描画からは呼ばない)。
+   */
+  function syncResultList(): void {
+    if (currentScreen() !== "result") return;
+    const route = deps.route();
+    const cached = analyses.get(route.analysis!);
+    if (cached !== undefined) loadRaces(raceDateOf(route, cached), route.venue);
+  }
+
   /** 一覧の画面に必要なものを、無ければ取りに行く(一覧と板)。 */
   function ensureList(date: string, venue: Venue): void {
     loadRaces(date, venue);
     loadBoard(date);
   }
 
-  /** レース画面に必要なものを、無ければ取りに行く(状態と過去の分析だけ。一覧・板は取らない)。 */
-  function ensureRace(date: string, raceId: string): void {
+  /** レース画面に必要なものを、無ければ取りに行く(状態・過去の分析・最新の分析と、前後のレースのための一覧〈Issue #571〉。板は取らない)。 */
+  function ensureRace(date: string, raceId: string, venue: Venue): void {
     loadRaceStatus(date, raceId);
     loadPast(date, raceId);
+    loadRaces(date, venue);
     syncLatestAnalysis();
   }
 
-  /** 結果画面に必要なものを、無ければ取りに行く(分析 1 本だけ)。 */
+  /** 結果画面に必要なものを、無ければ取りに行く(分析 1 本と、分析の開催日の一覧〈Issue #571。分析が届いてから〉)。 */
   function ensureResult(id: number): void {
     loadAnalysis(id);
+    syncResultList();
   }
 
   // ---- 「更新」 ----
@@ -370,7 +393,7 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     deps.onChange();
   }
 
-  function refreshRace(date: string, raceId: string): void {
+  function refreshRace(date: string, raceId: string, venue: Venue): void {
     const key = raceKey(date, raceId);
     const status = raceStatusSource(date, raceId);
     const latestId = status.kind === "ready" ? latestAnalysisIdOf(status.rows, raceId) : null;
@@ -382,7 +405,7 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     priorNotices.delete(key);
     pasts.delete(key);
     pastErrors.delete(key);
-    ensureRace(date, raceId);
+    ensureRace(date, raceId, venue); // 一覧は取り直さない(キャッシュ済みなら増えない。失敗も再試行しない)
     deps.onChange();
   }
 
@@ -432,6 +455,7 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
   return {
     listSource,
     listRowOf: (date, venue, raceId) => races.get(listKey(date, venue))?.find((r) => r.raceId === raceId),
+    listRowsOf: (date, venue) => races.get(listKey(date, venue)),
     boardSource,
     boardLoading: (date) => boardInflight.has(date),
     raceStatusSource,

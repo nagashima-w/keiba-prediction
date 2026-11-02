@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { RaceRow } from "../client/api";
 import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-response";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
 import { PLACE_ODDS_NOTE } from "../src/place-odds-format";
@@ -1215,5 +1216,59 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
   it("馬が 0 頭の分析は表を出さない(null)", () => {
     const c = buildResultModel({ route: ROUTE, source: ready(analysis({ horses: [] })) }).content!;
     expect(c.horseTable).toBeNull();
+  });
+});
+
+/** Issue #571: 結果画面のパンくずと前後のレース(行き先はレース画面。日付は分析の開催日を優先する)。 */
+describe("パンくずと前後のレース(Issue #571)", () => {
+  const listRow = (raceId: string): RaceRow => ({ raceId, venueName: "福島", raceNumber: Number(raceId.slice(10)), raceName: `R${raceId.slice(10)}`, courseType: "芝", distance: 1800, entryCount: 16, grade: null, startTime: null });
+  const SIBLINGS = ["202603020210", "202603020211", "202603020212", "202609020101"].map(listRow);
+
+  it("内容があれば「一覧 › 6/28(日) › 福島 › 11R」。競馬場名は分析のレース情報(race.venueName)から。null なら節を省く", () => {
+    const model = buildResultModel({ route: ROUTE, source: ready(analysis()) });
+    expect(model.breadcrumb?.map((c) => c.label)).toEqual(["一覧", "6/28(日)", "福島", "11R"]);
+    const noVenue = buildResultModel({ route: ROUTE, source: ready(analysis({ race: { ...analysis().race, venueName: null } })) });
+    expect(noVenue.breadcrumb?.map((c) => c.label)).toEqual(["一覧", "6/28(日)", "11R"]);
+  });
+
+  it("日付は分析の kaisaiDate を優先(ハッシュの日付は既定の今日のことがある)。無効なら route の日付。リンクの区分は route の区分", () => {
+    const route: Route = { date: "20261007", venue: "nar", race: null, analysis: 7, settings: false };
+    const fromAnalysis = buildResultModel({ route, source: ready(analysis({ kaisaiDate: "20260628" })) });
+    expect(fromAnalysis.breadcrumb?.[1]).toMatchObject({ label: "6/28(日)", href: "#date=20260628&venue=nar" });
+    const fallback = buildResultModel({ route, source: ready(analysis({ kaisaiDate: null })) });
+    expect(fallback.breadcrumb?.[1]).toMatchObject({ label: "10/7(水)", href: "#date=20261007&venue=nar" });
+  });
+
+  it("前後のレース: 行き先は前後のレースの「レース画面」(analysis を持たない)。日付は分析の開催日", () => {
+    const route: Route = { date: "20261007", venue: "central", race: null, analysis: 7, settings: false };
+    const model = buildResultModel({ route, source: ready(analysis({ kaisaiDate: "20260628" })), siblings: SIBLINGS });
+    expect(model.neighbors).toEqual({
+      prev: { label: "前のレース 10R", href: "#date=20260628&venue=central&race=202603020210" },
+      next: { label: "次のレース 12R", href: "#date=20260628&venue=central&race=202603020212" },
+    });
+    expect(model.neighbors?.prev?.href).not.toContain("analysis=");
+  });
+
+  it("一覧が無い・読み込み中・失敗のときは前後なし(パンくずは内容があるときだけ)", () => {
+    expect(buildResultModel({ route: ROUTE, source: ready(analysis()) }).neighbors).toBeNull();
+    expect(buildResultModel({ route: ROUTE, source: ready(analysis()) }).breadcrumb).not.toBeNull();
+    for (const source of [{ kind: "loading" }, { kind: "error", message: "取得できません" }] as const) {
+      const model = buildResultModel({ route: ROUTE, source, siblings: SIBLINGS });
+      expect(model.breadcrumb).toBeNull();
+      expect(model.neighbors).toBeNull();
+    }
+  });
+
+  it("race_id が 12 桁でない分析: パンくずの R と前後を出さない", () => {
+    const model = buildResultModel({ route: ROUTE, source: ready(analysis({ raceId: "短い" })), siblings: SIBLINGS });
+    expect(model.breadcrumb?.map((c) => c.label)).toEqual(["一覧", "6/28(日)", "福島"]);
+    expect(model.neighbors).toBeNull();
+  });
+
+  it("閲覧者(readOnly)でも同じに出る", () => {
+    const admin = buildResultModel({ route: ROUTE, source: ready(analysis()), siblings: SIBLINGS });
+    const viewer = buildResultModel({ route: ROUTE, source: ready(analysis()), siblings: SIBLINGS, readOnly: true });
+    expect(admin.neighbors, "前提: 管理者では前後が出る").toBeTruthy();
+    expect(viewer.neighbors).toEqual(admin.neighbors);
   });
 });

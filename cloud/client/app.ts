@@ -35,7 +35,7 @@ import { buildListModel, needsListClock, type BoardSource, type ListSource } fro
 import { createListClock } from "./list-clock";
 import { createRaceData } from "./race-data";
 import { buildRaceModel, latestAnalysisIdOf } from "./race";
-import { buildResultModel, type HorseSort, type HorseSortKey, type SortDir } from "./result";
+import { buildResultModel, raceDateOf, type HorseSort, type HorseSortKey, type SortDir } from "./result";
 import { createSettingsScreen } from "./settings-screen";
 import { createVerifyScreen } from "./verify-screen";
 import { createMonthlyScreen } from "./monthly-screen";
@@ -230,13 +230,18 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       case "result": {
-        deps.render(renderScreen(buildResultModel({ route, source: data.analysisSource(route.analysis!), readOnly: !admin, notesOpen: notesOpenChoices.get(route.analysis!) ?? false, ...horseSortOf(route.analysis!) }), actions), force);
+        const resultSource = data.analysisSource(route.analysis!);
+        // 前後のレースの元(Issue #571)は、分析の開催日・route の区分の一覧のキャッシュ(分析が届いていなければ無い)。
+        const resultDate = resultSource.kind === "ready" ? raceDateOf(route, resultSource.analysis) : route.date;
+        const resultSiblings = data.listRowsOf(resultDate, route.venue);
+        deps.render(renderScreen(buildResultModel({ route, source: resultSource, ...(resultSiblings === undefined ? {} : { siblings: resultSiblings }), readOnly: !admin, notesOpen: notesOpenChoices.get(route.analysis!) ?? false, ...horseSortOf(route.analysis!) }), actions), force);
         return;
       }
       case "race": {
         const raceId = route.race!;
         const key = raceKey(route.date, raceId);
         const listRow = data.listRowOf(route.date, route.venue, raceId);
+        const siblings = data.listRowsOf(route.date, route.venue);
         const status = data.raceStatusSource(route.date, raceId);
         const latestId = status.kind === "ready" ? latestAnalysisIdOf(status.rows, raceId) : null;
         deps.render(
@@ -246,6 +251,7 @@ export function createApp(deps: AppDeps): App {
               status,
               past: data.pastSource(route.date, raceId),
               listRow,
+              ...(siblings === undefined ? {} : { siblings }),
               runs: run.runsFor(route.date, raceId),
               tracking: data.trackingNotice(),
               ...(latestId === null ? {} : { result: data.analysisSource(latestId) }),
@@ -304,7 +310,7 @@ export function createApp(deps: AppDeps): App {
     }
   }
 
-  /** 今の画面に必要なものを、無ければ取りに行く。結果画面は分析 1 本だけ・レース画面は状態と過去の分析だけ(一覧・板は取らない)。 */
+  /** 今の画面に必要なものを、無ければ取りに行く。結果画面は分析 1 本と(届いたあとに)その開催日の一覧・レース画面は状態と過去の分析と一覧(板は取らない。一覧は Issue #571 の前後のレースのため)。 */
   function ensureLoaded(): void {
     const screen = currentScreen();
     switch (screen) {
@@ -314,7 +320,7 @@ export function createApp(deps: AppDeps): App {
         data.ensureResult(route.analysis!);
         return;
       case "race":
-        data.ensureRace(route.date, route.race!);
+        data.ensureRace(route.date, route.race!, route.venue);
         return;
       case "list":
         data.ensureList(route.date, route.venue);
@@ -423,7 +429,7 @@ export function createApp(deps: AppDeps): App {
         data.refreshResult(route.analysis!); // 失敗した分析だけを取り直す(取得中は何もしない)
         return;
       case "race":
-        data.refreshRace(route.date, route.race!); // 状態・過去の分析と、失敗した最新の分析を取り直す
+        data.refreshRace(route.date, route.race!, route.venue); // 状態・過去の分析と、失敗した最新の分析を取り直す
         return;
       case "list":
         data.refreshList(route.date, route.venue); // 一覧と板を取り直す
