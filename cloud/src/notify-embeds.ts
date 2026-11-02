@@ -4,7 +4,7 @@
  *  - 分析の完了: core の `buildAnalysisEmbed` を流用する({@link buildAnalysisNotificationEmbed})。材料は、計算ステップの保存と同じ同期区間で、保存する `AnalysisRecord` から作る
  *    (馬名・コース・距離は `record.raceSnapshot` にある。D1 の要約には馬名もコースも無い。R2 に頼ると、R2 が使えないときに通知が劣化する)。LLM が効かなかったときは、固定の理由文を末尾に足す。
  *  - 失敗(赤)・手動スキップ(灰色): 理由ごとの**固定文だけ**を載せる(タスクのエラー文の生の値は載せない)。
- *  - 事前分析のまとめ: 中央は場ごとの field、地方は「地方 交流重賞」の field。**上限(AC-D4)は {@link fitEmbed} が最後に保証する**。
+ *  - 事前分析のまとめ: 中央は場ごとの field、地方は「地方 交流重賞」と「地方(事前分析済み)」の field。**上限(AC-D4)は {@link fitEmbed} が最後に保証する**。
  *  - 出馬表の見出しを読めなかったレースの通知(Issue #522): 件数と例を 1 つ({@link buildHeaderUnreadEmbed})。
  *
  * `fields` は core の `DiscordEmbed` に無い(title・description・color だけ)ので、ここで {@link CloudEmbed} として拡張する(core には触らない)。
@@ -23,6 +23,7 @@ import type { SkipReasonCode } from "../../packages/core/src/ev/combo-bet-alloca
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key";
+import { isJpnGrade } from "../../packages/core/src/scraper/jpn-grade";
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import { formatYen } from "../../packages/core/src/view/verify-format";
 import { isRecord } from "../../packages/core/src/common/guards";
@@ -690,7 +691,9 @@ export interface SummaryInput {
 }
 
 /**
- * 事前分析のまとめ(AC-D3・AC-D5)。中央は場ごとの field、地方は「地方 交流重賞」の field。一覧の取得に失敗した会場は、description と field に出す。
+ * 事前分析のまとめ(AC-D3・AC-D5)。中央は場ごとの field、地方は「地方 交流重賞」と「地方(事前分析済み)」の 2 つの field。一覧の取得に失敗した会場は、description と field に出す。
+ * **地方の交流重賞の判定は、自動実行の対象の判定〈`selectAutoRunTargets` の `filterJpnOnlyEntries`〉と同じ関数 `isJpnGrade`**(計画の行の `grade` が Jpn1〜3)。
+ * 計画に載る地方は、交流重賞のほかに、事前分析が完了した地方の普通のレース(Issue #566)もある。後者は「地方(事前分析済み)」に出す(行があるときだけ。Issue #568)。
  * 準備の成否は morning タスクの状態(done=事前分析OK・failed=事前分析失敗・それ以外=未完了)。上限超過(cap)のスキップは失敗として数える。
  * 長さの保証は {@link fitEmbed}。
  */
@@ -698,6 +701,8 @@ export function buildSummaryEmbed(input: SummaryInput): CloudEmbed {
   const { progress } = input;
   const central = progress.rows.filter((r) => r.venue === "central");
   const narRows = progress.rows.filter((r) => r.venue === "nar");
+  const jpnRows = narRows.filter((r) => isJpnGrade(r.grade ?? undefined));
+  const otherNarRows = narRows.filter((r) => !isJpnGrade(r.grade ?? undefined));
   let ok = 0;
   let failed = 0;
   let incomplete = 0;
@@ -719,7 +724,7 @@ export function buildSummaryEmbed(input: SummaryInput): CloudEmbed {
   const venueLabel = (v: PlanVenueState): string => (v.venue === "central" ? "中央" : "地方");
 
   const lines = [
-    `対象 ${progress.rows.length} 件(中央 ${central.length}・地方 交流重賞 ${narRows.length})`,
+    `対象 ${progress.rows.length} 件(中央 ${central.length}・地方 ${narRows.length}〈うち交流重賞 ${jpnRows.length}〉)`,
     `事前分析OK ${ok} / 失敗 ${failed}${cap > 0 ? `(うち上限超過 ${cap})` : ""} / 未完了 ${incomplete}`,
   ];
   const skipParts = SKIP_BREAKDOWN_ORDER.filter((reason) => (skipCounts[reason] ?? 0) > 0).map((reason) => `${SKIP_LABELS[reason]} ${skipCounts[reason]}`);
@@ -752,10 +757,10 @@ export function buildSummaryEmbed(input: SummaryInput): CloudEmbed {
   }
   // 地方: 交流重賞。
   const narVenue = progress.venues.find((v) => v.venue === "nar");
-  if (narVenue !== undefined || narRows.length > 0) {
+  if (narVenue !== undefined || jpnRows.length > 0) {
     let value: string;
-    if (narRows.length > 0) {
-      value = [...narRows].sort(byRaceNumber).map((r) => rowLine(r, true)).join("\n");
+    if (jpnRows.length > 0) {
+      value = [...jpnRows].sort(byRaceNumber).map((r) => rowLine(r, true)).join("\n");
     } else if (narVenue?.state === "failed") {
       value = listFailureText(narVenue);
     } else if (narVenue?.listed === 0) {
@@ -766,6 +771,10 @@ export function buildSummaryEmbed(input: SummaryInput): CloudEmbed {
       value = "対象はありません";
     }
     fields.push({ name: "地方 交流重賞", value });
+  }
+  // 地方: 交流重賞以外(事前分析が完了して計画に載ったレース。Issue #566・#568)。行があるときだけ出す。
+  if (otherNarRows.length > 0) {
+    fields.push({ name: "地方(事前分析済み)", value: [...otherNarRows].sort(byRaceNumber).map((r) => rowLine(r, true)).join("\n") });
   }
 
   const color = failedVenues.length > 0 || (ok === 0 && failed > 0) ? COLOR_RED : failed > 0 || incomplete > 0 ? COLOR_ORANGE : COLOR_GREEN;

@@ -641,7 +641,7 @@ describe("buildSummaryEmbed(AC-D3・AC-D5: 事前分析のまとめ)", () => {
     expect(out.fields![0]!.value).toBe("1R 中山1 10:05 事前分析OK");
     expect(out.fields![2]!.value).toBe("水沢 11R 地方Jpn 20:10 事前分析OK");
     expect(out.color).toBe(DISCORD_COLORS.ok);
-    expect(out.description).toContain("対象 3 件(中央 2・地方 交流重賞 1)");
+    expect(out.description).toContain("対象 3 件(中央 2・地方 1〈うち交流重賞 1〉)");
   });
 
   it("準備の成否: morning done=事前分析OK・failed=事前分析失敗・未完了(null・queued・fetched)。失敗があれば橙、未完了の件数は description に出る", () => {
@@ -730,6 +730,101 @@ describe("buildSummaryEmbed(AC-D3・AC-D5: 事前分析のまとめ)", () => {
   it("会場名が無い中央の行は、レースID から導出した会場名の field に入る", () => {
     const out = buildSummaryEmbed({ kaisaiDate: "20260927", progress: progress({ rows: [row({ raceId: "202609030901", venueName: null })] }) });
     expect(out.fields![0]!.name).toBe("阪神");
+  });
+
+  describe("地方の交流重賞と普通のレースの分け方(Issue #568)", () => {
+    // 判定は自動実行の対象の判定(`filterJpnOnlyEntries` の `isJpnGrade`)と同じ。grade が Jpn1〜3 の行だけが交流重賞。
+    const funabashi = (n: number, over: Partial<Row> = {}): Row =>
+      row({ raceId: `2026431102${String(n).padStart(2, "0")}`, venue: "nar", venueName: "船橋", raceNumber: n, raceName: `船橋${n}`, startTime: `${String(10 + n).padStart(2, "0")}:00`, state: "planned", disposition: "scheduled", ...over });
+    const centralVenueEmpty = venue({ venue: "central", listed: 0, targeted: 0 });
+
+    it("11/2 の再現: 地方の普通のレース(grade なし)8 件だけ。件数は「地方 8〈うち交流重賞 0〉」、「地方 交流重賞」は「ありません」、8 件は「地方(事前分析済み)」に出る", () => {
+      const rows = [5, 6, 7, 8, 9, 10, 11, 12].map((n) => funabashi(n));
+      expect(rows).toHaveLength(8); // 前提: 8 件
+      const out = buildSummaryEmbed({ kaisaiDate: "20261102", progress: progress({ rows, venues: [centralVenueEmpty, venue({ venue: "nar", listed: 12, targeted: 0 })] }) });
+      expect(out.description!.split("\n")[0]).toBe("対象 8 件(中央 0・地方 8〈うち交流重賞 0〉)");
+      expect(out.fields!.map((f) => f.name)).toEqual(["中央", "地方 交流重賞", "地方(事前分析済み)"]);
+      expect(out.fields![1]!.value).toBe("交流重賞はありません(一覧 12 件)");
+      expect(out.fields![2]!.value).toBe(
+        [
+          "船橋 5R 船橋5 15:00 事前分析OK",
+          "船橋 6R 船橋6 16:00 事前分析OK",
+          "船橋 7R 船橋7 17:00 事前分析OK",
+          "船橋 8R 船橋8 18:00 事前分析OK",
+          "船橋 9R 船橋9 19:00 事前分析OK",
+          "船橋 10R 船橋10 20:00 事前分析OK",
+          "船橋 11R 船橋11 21:00 事前分析OK",
+          "船橋 12R 船橋12 22:00 事前分析OK",
+        ].join("\n"),
+      );
+    });
+
+    it("交流重賞だけ: 件数は「地方 2〈うち交流重賞 2〉」、「地方 交流重賞」に 2 行、「地方(事前分析済み)」の field は出ない(Jpn1〜3 の全部と前後に空白のある表記を交流重賞とする)", () => {
+      const rows = [funabashi(11, { grade: "Jpn1", raceName: "Jpn一" }), funabashi(12, { grade: " Jpn3 ", raceName: "Jpn三" })];
+      const out = buildSummaryEmbed({ kaisaiDate: "20261102", progress: progress({ rows, venues: [centralVenueEmpty, venue({ venue: "nar", listed: 12, targeted: 2 })] }) });
+      expect(out.description!.split("\n")[0]).toBe("対象 2 件(中央 0・地方 2〈うち交流重賞 2〉)");
+      expect(out.fields!.map((f) => f.name)).toEqual(["中央", "地方 交流重賞"]);
+      expect(out.fields![1]!.value).toBe("船橋 11R Jpn一 21:00 事前分析OK\n船橋 12R Jpn三 22:00 事前分析OK");
+    });
+
+    it("地方に交流重賞と普通のレースが混ざる: 件数は「地方 5〈うち交流重賞 2〉」、重賞(grade が「重賞」)・L・OP は交流重賞ではなく「地方(事前分析済み)」に入る。行はレース番号順", () => {
+      const rows = [
+        funabashi(12, { grade: "Jpn2", raceName: "Jpn二" }),
+        funabashi(5),
+        funabashi(8, { grade: "重賞", raceName: "地方重賞" }),
+        funabashi(11, { grade: "Jpn3", raceName: "Jpn三" }),
+        funabashi(9, { grade: "L", raceName: "リステッド" }),
+      ];
+      const out = buildSummaryEmbed({ kaisaiDate: "20261102", progress: progress({ rows, venues: [centralVenueEmpty, venue({ venue: "nar", listed: 12, targeted: 2 })] }) });
+      expect(out.description!.split("\n")[0]).toBe("対象 5 件(中央 0・地方 5〈うち交流重賞 2〉)");
+      expect(out.fields!.map((f) => f.name)).toEqual(["中央", "地方 交流重賞", "地方(事前分析済み)"]);
+      expect(out.fields![1]!.value).toBe("船橋 11R Jpn三 21:00 事前分析OK\n船橋 12R Jpn二 22:00 事前分析OK");
+      expect(out.fields![2]!.value).toBe("船橋 5R 船橋5 15:00 事前分析OK\n船橋 8R 地方重賞 18:00 事前分析OK\n船橋 9R リステッド 19:00 事前分析OK");
+    });
+
+    it("中央と混ざる: 中央は場ごとの field のまま、その後ろに「地方 交流重賞」「地方(事前分析済み)」の順。件数は「中央 2・地方 2〈うち交流重賞 1〉」", () => {
+      const rows = [
+        row({ raceId: "202606040901", raceNumber: 1, raceName: "中山1", venueName: "中山", startTime: "10:05" }),
+        row({ raceId: "202609030901", raceNumber: 1, raceName: "阪神1", venueName: "阪神", startTime: "10:10" }),
+        funabashi(11, { grade: "Jpn3", raceName: "Jpn三" }),
+        funabashi(6),
+      ];
+      const out = buildSummaryEmbed({ kaisaiDate: "20261102", progress: progress({ rows, venues: [venue({ venue: "central", listed: 2, targeted: 2 }), venue({ venue: "nar", listed: 12, targeted: 1 })] }) });
+      expect(out.description!.split("\n")[0]).toBe("対象 4 件(中央 2・地方 2〈うち交流重賞 1〉)");
+      expect(out.fields!.map((f) => f.name)).toEqual(["中山", "阪神", "地方 交流重賞", "地方(事前分析済み)"]);
+      expect(out.fields![2]!.value).toBe("船橋 11R Jpn三 21:00 事前分析OK");
+      expect(out.fields![3]!.value).toBe("船橋 6R 船橋6 16:00 事前分析OK");
+    });
+
+    it("地方の一覧の取得失敗でも、普通のレースの行(事前分析済み)は「地方(事前分析済み)」に出る。「地方 交流重賞」には取得失敗が出る", () => {
+      const out = buildSummaryEmbed({
+        kaisaiDate: "20261102",
+        progress: progress({ rows: [funabashi(6)], venues: [centralVenueEmpty, venue({ venue: "nar", state: "failed", reason: "blocked", listed: null, targeted: null })] }),
+      });
+      expect(out.fields!.map((f) => f.name)).toEqual(["中央", "地方 交流重賞", "地方(事前分析済み)"]);
+      expect(out.fields![1]!.value).toBe("一覧を取得できませんでした(取得制限中)");
+      expect(out.fields![2]!.value).toBe("船橋 6R 船橋6 16:00 事前分析OK");
+    });
+
+    it("上限(AC-D4): 中央 36 + 交流重賞 12 + 普通のレース 60 でも、全体 6000・各 field 1024 以内。溢れる行は最後の「地方(事前分析済み)」から「…ほか N 件」になる", () => {
+      const longName = "あ".repeat(30);
+      const centralRows = ["中山", "阪神", "小倉"].flatMap((name, v) =>
+        Array.from({ length: 12 }, (_, i) => row({ raceId: `2026${["06", "09", "10"][v]}0301${String(i + 1).padStart(2, "0")}`, venueName: name, raceNumber: i + 1, raceName: longName, startTime: "15:40", morning: "queued" })),
+      );
+      const jpn = Array.from({ length: 12 }, (_, i) => funabashi(i + 1, { raceId: `2026431102J${String(i).padStart(1, "0")}${String(i).padStart(1, "0")}`, grade: "Jpn1", raceName: longName }));
+      const normal = Array.from({ length: 60 }, (_, i) => funabashi(1 + (i % 12), { raceId: `2026441102${String(i).padStart(2, "0")}`, venueName: "大井", raceName: longName }));
+      const out = buildSummaryEmbed({ kaisaiDate: "20261102", progress: progress({ rows: [...centralRows, ...jpn, ...normal], morningAllTerminal: false }) });
+      expect(out.fields!.map((f) => f.name)).toEqual(["中山", "阪神", "小倉", "地方 交流重賞", "地方(事前分析済み)"]);
+      expect(embedLength(out)).toBeLessThanOrEqual(6000);
+      for (const f of out.fields!) {
+        expect(f.value.length).toBeLessThanOrEqual(1024);
+      }
+      const other = out.fields![4]!.value.split("\n");
+      const dropped = Number(/…ほか (\d+) 件/.exec(other.at(-1)!)![1]);
+      expect(dropped).toBeGreaterThan(0);
+      expect(other.length - 1 + dropped).toBe(60);
+      expect(out.description!.split("\n")[0]).toBe("対象 108 件(中央 36・地方 72〈うち交流重賞 12〉)");
+    });
   });
 
   describe("最大ケース(AC-D4): 中央 36 レース + 地方 Jpn。上限内に収まり、切り詰めが要らない", () => {
