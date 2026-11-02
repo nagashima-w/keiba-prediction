@@ -30,7 +30,9 @@ import { buildAllocationProposalView, type AllocationBetRowView, type Allocation
 import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/core/src/view/bet-allocation-view";
 import { formatEstimatedEvSuffix, formatEv, formatMarkRepair, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, MARK_LEGEND } from "../../packages/core/src/view/format";
 import { markRank, PREDICTION_MARKS } from "../../packages/core/src/common/prediction-marks";
+import type { RaceRow } from "./api";
 import type { AnalysisDetail } from "./api-analysis";
+import { breadcrumbOf, neighborsOf, type Crumb, type RaceNeighbors } from "./neighbors";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { nameWithGrade } from "./grade";
 import { formatAdjustment, formatYen } from "../../packages/core/src/view/verify-format";
@@ -336,6 +338,10 @@ export interface ResultModel {
   readonly content: ResultContent | null;
   /** 戻り先。内容があればそのレースの画面、無ければ一覧。 */
   readonly backHref: string;
+  /** パンくず(Issue #571。見出しの上)。内容があるときだけ(無ければ null)。日付は分析の開催日を優先する。 */
+  readonly breadcrumb: readonly Crumb[] | null;
+  /** 前後のレース(Issue #571。見出しの下。行き先は前後のレースの**レース画面**)。内容と一覧があり、前後があるときだけ(それ以外は null)。 */
+  readonly neighbors: RaceNeighbors | null;
 }
 
 function titleOf(a: AnalysisDetail): string {
@@ -573,19 +579,34 @@ export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false
   };
 }
 
-/** そのレースの画面へ戻るハッシュ。日付は分析の開催日(`kaisaiDate`)を優先する(ハッシュの日付は、直接開いたときは既定の「今日」のことがある)。 */
+/** 分析の開催日。`kaisaiDate` が実在の日付ならそれ、無ければ route の日付(ハッシュの日付は、直接開いたときは既定の「今日」のことがある)。戻り先・パンくず・前後のレース・一覧の取得(`race-data.ts`)が共有する。 */
+export function raceDateOf(route: Route, a: AnalysisDetail): string {
+  return a.kaisaiDate !== null && isRealYmd(a.kaisaiDate) ? a.kaisaiDate : route.date;
+}
+
+/** そのレースの画面へ戻るハッシュ。日付は分析の開催日(`raceDateOf`)。 */
 function backToRace(route: Route, a: AnalysisDetail): string {
-  const date = a.kaisaiDate !== null && isRealYmd(a.kaisaiDate) ? a.kaisaiDate : route.date;
+  const date = raceDateOf(route, a);
   const race = /^[0-9]{12}$/.test(a.raceId) ? a.raceId : null;
   return buildHash({ date, venue: route.venue, race });
 }
 
-export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean; /** 説明文を開いているか(Issue #546。省略は閉じる)。 */ readonly notesOpen?: boolean; /** 馬ごとの評価の表の並べ替え(Issue #546-2。省略は馬番の昇順)。 */ readonly horseSort?: HorseSort }): ResultModel {
+export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; /** 一覧のキャッシュの全行(Issue #571。前後のレースを決める)。無い(取得中・失敗)ときは省略。 */ readonly siblings?: readonly RaceRow[]; readonly readOnly?: boolean; /** 説明文を開いているか(Issue #546。省略は閉じる)。 */ readonly notesOpen?: boolean; /** 馬ごとの評価の表の並べ替え(Issue #546-2。省略は馬番の昇順)。 */ readonly horseSort?: HorseSort }): ResultModel {
   const { route, source } = input;
   const readOnly = input.readOnly === true;
   const listHref = buildHash({ date: route.date, venue: route.venue });
   if (source.kind === "ready") {
-    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly, input.notesOpen === true, input.horseSort), backHref: backToRace(route, source.analysis) };
+    const a = source.analysis;
+    const date = raceDateOf(route, a);
+    return {
+      kind: "result",
+      loading: false,
+      error: null,
+      content: contentOf(a, readOnly, input.notesOpen === true, input.horseSort),
+      backHref: backToRace(route, a),
+      breadcrumb: breadcrumbOf({ date, venue: route.venue, venueName: a.race.venueName, raceId: a.raceId }),
+      neighbors: neighborsOf(input.siblings, date, route.venue, a.raceId),
+    };
   }
   return {
     kind: "result",
@@ -593,5 +614,7 @@ export function buildResultModel(input: { readonly route: Route; readonly source
     error: source.kind === "error" ? source.message : null,
     content: null,
     backHref: listHref,
+    breadcrumb: null,
+    neighbors: null,
   };
 }

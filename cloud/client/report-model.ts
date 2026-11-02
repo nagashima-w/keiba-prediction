@@ -6,7 +6,7 @@
  * (文章が無い理由・状態の説明)はすべてクライアントの固定の文言(サーバの `note` は読まない)。
  */
 import type { ReportDetail, ReportJob, ReportListItem, ReportRace, ReportStats, ReportTemplateStat } from "./api-report";
-import { formatJstDateTime, ymdToInput } from "./date";
+import { formatJstDateTime, WEEKDAYS, ymdToInput } from "./date";
 import { buildMonthlyHash, buildReportHash } from "./route";
 import { formatExpectedHits } from "../src/expected-format";
 import { formatRecoveryPercent } from "../src/recovery-format";
@@ -167,8 +167,6 @@ export interface ReportModel {
   readonly regen: { readonly label: string; readonly disabled: boolean; readonly confirm: { readonly text: string; readonly goLabel: string; readonly cancelLabel: string } | null } | null;
   readonly body: ReportBodyView | null;
 }
-
-const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
 
 /** `20261010` → `2026年10月10日(土)`。形が違えばそのまま。 */
 export function dateLabel(ymd: string): string {

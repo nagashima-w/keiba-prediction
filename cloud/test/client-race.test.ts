@@ -541,3 +541,66 @@ describe("手動で分析するときの案内(guide。Issue #312)", () => {
     expect(buildRaceModel(input({ readOnly: false })).guide, "対照: 管理者なら出る").not.toBeNull();
   });
 });
+
+/** Issue #571: パンくずと前後のレース(同じ日・同じ競馬場。一覧のキャッシュ `siblings` から導く)。 */
+describe("パンくずと前後のレース(Issue #571)", () => {
+  /** RACE_ID(2026 03 02 02 11)と同じ日・同じ競馬場の R10〜R12 と、同じ日の別の競馬場の 1R。 */
+  const listRow = (raceId: string, venueName: string | null = "福島"): RaceRow => ({ raceId, venueName, raceNumber: Number(raceId.slice(10)), raceName: `R${raceId.slice(10)}`, courseType: "芝", distance: 1800, entryCount: 16, grade: null, startTime: null });
+  const SIBLINGS = ["202603020210", "202603020211", "202603020212", "202609020101"].map((id) => listRow(id));
+
+  it("パンくずは「一覧 › 6/28(日) › 福島 › 11R」。一覧が無く(listRow なし)、状態も取れていなくても出る(競馬場の節だけ省く)", () => {
+    const withRow = buildRaceModel(input({ listRow: listRow(RACE_ID) }));
+    expect(withRow.breadcrumb.map((c) => c.label)).toEqual(["一覧", "6/28(日)", "福島", "11R"]);
+    expect(withRow.breadcrumb[1]).toMatchObject({ href: "#date=20260628&venue=central" });
+    const bare = buildRaceModel(input({ status: { kind: "loading" }, past: { kind: "loading" } }));
+    expect(bare.breadcrumb.map((c) => c.label)).toEqual(["一覧", "6/28(日)", "11R"]);
+  });
+
+  it("競馬場名は一覧の行を優先し、無ければ prior の競馬場名。どちらも無い(null)ときは節を省く", () => {
+    const both = buildRaceModel(input({ listRow: listRow(RACE_ID, "一覧の場"), status: { kind: "ready", rows: [], prior: { ...PRIOR, venueName: "priorの場" } } }));
+    expect(both.breadcrumb.map((c) => c.label)).toContain("一覧の場");
+    expect(both.breadcrumb.map((c) => c.label)).not.toContain("priorの場");
+    const priorOnly = buildRaceModel(input({ status: { kind: "ready", rows: [], prior: { ...PRIOR, venueName: "priorの場" } } }));
+    expect(priorOnly.breadcrumb.map((c) => c.label)).toEqual(["一覧", "6/28(日)", "priorの場", "11R"]);
+    const rowNull = buildRaceModel(input({ listRow: listRow(RACE_ID, null), status: { kind: "ready", rows: [], prior: { ...PRIOR, venueName: "priorの場" } } }));
+    expect(rowNull.breadcrumb.map((c) => c.label), "listRow の競馬場名が null なら prior へ落ちる").toContain("priorの場");
+    const neither = buildRaceModel(input({ listRow: listRow(RACE_ID, null), status: { kind: "ready", rows: [], prior: { ...PRIOR, venueName: null } } }));
+    expect(neither.breadcrumb.map((c) => c.label)).toEqual(["一覧", "6/28(日)", "11R"]);
+  });
+
+  it("前後のレース: 同じ競馬場の R10・R12 へ(行き先はレース画面)。同じ日の別の競馬場は混ざらない", () => {
+    const model = buildRaceModel(input({ siblings: SIBLINGS }));
+    expect(model.neighbors).toEqual({
+      prev: { label: "前のレース 10R", href: "#date=20260628&venue=central&race=202603020210" },
+      next: { label: "次のレース 12R", href: "#date=20260628&venue=central&race=202603020212" },
+    });
+  });
+
+  it("端のレースは、その側だけ null(R12 は次が無い。別の競馬場の 1R を次にしない)", () => {
+    const model = buildRaceModel(input({ route: { ...ROUTE, race: "202603020212" }, siblings: SIBLINGS }));
+    expect(model.neighbors?.prev?.label).toBe("前のレース 11R");
+    expect(model.neighbors?.next).toBeNull();
+  });
+
+  it("地方: 前後のリンクの区分は nar のまま", () => {
+    const nar = (r: number) => listRow(`2026440628${String(r).padStart(2, "0")}`, "大井");
+    const model = buildRaceModel(input({ route: { date: "20260628", venue: "nar", race: "202644062805", analysis: null, settings: false }, siblings: [nar(4), nar(5), nar(6)] }));
+    expect(model.neighbors?.prev?.href).toBe("#date=20260628&venue=nar&race=202644062804");
+    expect(model.neighbors?.next?.href).toBe("#date=20260628&venue=nar&race=202644062806");
+    expect(model.breadcrumb[1]).toMatchObject({ href: "#date=20260628&venue=nar" });
+  });
+
+  it("一覧が無い(siblings なし・取得前や失敗)ときは前後なし。パンくずは出る。そのレースが一覧に無いときも前後なし", () => {
+    expect(buildRaceModel(input()).neighbors).toBeNull();
+    expect(buildRaceModel(input()).breadcrumb.length).toBeGreaterThan(0);
+    expect(buildRaceModel(input({ siblings: [listRow("202609020101")] })).neighbors).toBeNull();
+  });
+
+  it("閲覧者(readOnly)でも同じに出る", () => {
+    const admin = buildRaceModel(input({ siblings: SIBLINGS }));
+    const viewer = buildRaceModel(input({ siblings: SIBLINGS, readOnly: true }));
+    expect(admin.neighbors, "前提: 管理者では前後が出る").toBeTruthy();
+    expect(viewer.neighbors).toEqual(admin.neighbors);
+    expect(viewer.breadcrumb).toEqual(admin.breadcrumb);
+  });
+});
