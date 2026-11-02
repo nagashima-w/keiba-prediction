@@ -88,7 +88,11 @@ export interface RaceArchiveCatalogEntry {
   readonly r2Key: string;
   /** gzip 前の JSON の UTF-8 バイト数。 */
   readonly rawBytes: number;
-  /** 取得した時刻(ISO 形式の UTC)。 */
+  /**
+   * 目録の行の中身が**最後に変わった**時刻(ISO 形式の UTC)。最後に取った時刻ではない。
+   * 同じ内容(`unchanged`)の保存は目録の行を変えないので、この値も進まない。最後に取った時刻は R2 のオブジェクトの中身の `fetchedAt` で、
+   * `unchanged` でも R2 へは毎回上書きする(R2 の put は Class A の操作で、1 回ごとに `r2_ops` の Class A を数える)。
+   */
   readonly fetchedAt: string;
 }
 

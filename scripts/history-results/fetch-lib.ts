@@ -19,7 +19,8 @@
  *   アクセスを制限されたときに叩き続けないため。成功が 1 件あれば数え直す。raw は残るので、再実行で続きから取る。
  * - errors.ndjson は追記のログで、再実行のたびに同じ失敗が重ねて載ることがある(`list-unparsed` は取得済みの一覧を読み直すたびに載る)。
  *   取れたものは raw に入るので、「まだ取れていないもの」は raw との差で分かる。
- * - `limit` は新しく出したリクエストの数の上限(スキップは数えない)。
+ * - `limit` は新しく出したリクエストの数の上限(スキップは数えない)。**数えるのは URL ごとの取得の呼び出し(`fetchText`)で、`HttpClient` が 5xx・通信エラーで行う再試行は数えない**
+ *   (再試行は 1 URL につき最大 `DEFAULT_MAX_RETRIES` 回〈2〉なので、実際に netkeiba へ出る HTTP リクエストは `limit` の最大 3 倍になりうる)。
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -370,7 +371,7 @@ export type ParsedFetchArgs =
 
 export const FETCH_USAGE =
   "使い方: pnpm tsx scripts/history-results/fetch.ts --from 2021-11 --to 2026-10 --out <ディレクトリ> [--central] [--nar-jpn] [--limit N] [--max-consecutive-failures N] [--interval-ms N] [--newest-first]\n" +
-  "  --central と --nar-jpn はどちらも付けなければ両方。--limit は新しく出すリクエストの数の上限(再実行で続きから)。\n" +
+  "  --central と --nar-jpn はどちらも付けなければ両方。--limit は新しく出すリクエストの数の上限(再実行で続きから。5xx・通信エラーの再試行は数えないので、実際の HTTP リクエストは最大 3 倍)。\n" +
   "  --interval-ms は最低間隔(既定 10000、1500 未満は不可)。--newest-first は新しい月・開催日から取る。\n" +
   "  HTTP 400・403・429 は、アクセスの制限を疑ってその場で打ち切る(終了コード 1)。\n" +
   "  取得の失敗が連続 20 件(--max-consecutive-failures で変更)になったら打ち切り、終了コード 1 で終わる。";

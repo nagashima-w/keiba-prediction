@@ -4,6 +4,7 @@
  *
  * 考え方: P・D 型の色覚では「赤↔緑」「赤↔茶」の差が縮む。残る手がかりは「青↔黄」の軸と明度なので、状態の3色(ok・wait・fail)は、色相の差だけに頼らず明度も離した。
  * 全体の雰囲気は変えず、緑は青みの緑、赤は朱〜煉瓦色に寄せた。状態は色だけで示さない(バッジ・通知には文字がある。文字のない所には記号を足した)。
+ * 強調の色 brand(Issue #570)はロゴのオレンジ。ダークはロゴそのもの(#ff7803)、ライトは文字として 4.5:1 を満たす濃さ(#b34700)。brand と wait・fail は P・D・T 型で近づく組がある(ライトの wait は D 型で 1.7)が、状態は文字でも示す。実測値は test/palette.test.ts と docs/current-spec.md。
  * 採用した色の根拠とテストは docs/current-spec.md の「配色」の節。数値(コントラスト比・色覚シミュレーション後の色差)は test/palette.test.ts が固定する。
  */
 
@@ -15,7 +16,9 @@ export interface WebPalette {
   readonly line: string;
   readonly card: string;
   readonly accent: string;
-  /** 完了・成功・EVプラス。 */
+  /** 強調(Issue #570。ロゴのオレンジ)。主要なボタンの塗り・選んでいるタブ・EV プラスの強調。リンクの色は accent のまま。 */
+  readonly brand: string;
+  /** 完了・成功。 */
   readonly ok: string;
   /** 待機・注意。 */
   readonly wait: string;
@@ -30,6 +33,7 @@ export const WEB_LIGHT: WebPalette = {
   line: "#d8d8dc",
   card: "#f5f5f7",
   accent: "#0a58ca",
+  brand: "#b34700",
   ok: "#177c55",
   wait: "#8e6610",
   fail: "#922b2b",
@@ -42,6 +46,7 @@ export const WEB_DARK: WebPalette = {
   line: "#3a3a3f",
   card: "#212125",
   accent: "#7cacf8",
+  brand: "#ff7803",
   ok: "#7cd9ac",
   wait: "#e3b548",
   fail: "#ec7971",
@@ -60,7 +65,7 @@ export const DISCORD_COLORS = {
 } as const;
 
 /** CSS 変数の並び(page.ts の `:root` の中の順)。 */
-const WEB_KEYS = ["fg", "bg", "muted", "line", "card", "accent", "ok", "wait", "fail"] as const;
+const WEB_KEYS = ["fg", "bg", "muted", "line", "card", "accent", "brand", "ok", "wait", "fail"] as const;
 
 function variables(palette: WebPalette): string {
   return WEB_KEYS.map((key) => `--${key}: ${palette[key]};`).join(" ");

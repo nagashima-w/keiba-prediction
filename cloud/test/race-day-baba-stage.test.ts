@@ -248,8 +248,10 @@ describe("動ける時刻(runnable)", () => {
     expect(h.stage.runnable()).toBe(false);
   });
 
-  it("開催日の当日の昼前でも、まだ試みていなければ動ける(同日の遅い計画・取り残し)。12:10 以降は動けない", () => {
+  it("開催日の当日の昼前でも、まだ試みていなければ動ける(同日の遅い計画・取り残し)。12:10 以降は動けない(境目の 12:09:59 は動け、12:10:00 は動けない。17:05 も動けない)", () => {
     expect(harness({ now: at("11:50:00") }).stage.runnable()).toBe(true);
+    expect(harness({ now: at("12:09:59") }).stage.runnable()).toBe(true);
+    expect(harness({ now: at("12:10:00") }).stage.runnable()).toBe(false);
     expect(harness({ now: at("17:05:00") }).stage.runnable()).toBe(false);
   });
 
