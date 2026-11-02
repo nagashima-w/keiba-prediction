@@ -123,6 +123,16 @@ async function r2Keys(): Promise<string[]> {
   return (await local.r2.list()).objects.map((o) => o.key).sort();
 }
 
+describe("保存: R2 のオブジェクトの種類", () => {
+  it("R2 に書くオブジェクトの contentType は application/gzip(中身は gzip)", async () => {
+    const { store } = makeStore();
+    await store.saveRaceArchive({ record: CENTRAL, html: CENTRAL_HTML });
+    const object = await local.r2.get(CENTRAL_KEY);
+    expect(object).not.toBeNull(); // 前提: 書かれている(null なら下の検査が空振りする)
+    expect(object!.httpMetadata?.contentType).toBe("application/gzip");
+  });
+});
+
 describe("保存: 新規(R2 → D1)", () => {
   it("中央の 1 レース: R2 の put 1 回・get 0 回、D1 は読み取りの batch(2 文)と書き込みの batch(2 文)。書き込み行数は目録 1 + 計数 1 = 2。目録の行・r2_ops が期待どおり", async () => {
     const { store, calls, batches } = makeStore();
@@ -136,6 +146,8 @@ describe("保存: 新規(R2 → D1)", () => {
     // D1: 2 回の batch(読み取り: r2_ops と SELECT 1 / 書き込み: 計数と目録)
     expect(batches.map((b) => b.size)).toEqual([2, 2]);
     expect(batches[0]!.metas.map((m) => m.rowsWritten)).toEqual([0, 0]); // 読み取りの batch は書かない
+    // `SELECT 1`(大きさを得るためだけの文)は表を読まないので、読み取り行数を増やさない(JSDoc の主張。ローカルの D1 の実測で 0)
+    expect(batches[0]!.metas[1]!.rowsRead).toBe(0);
     expect(batches[1]!.metas.map((m) => m.rowsWritten)).toEqual([1, 1]); // 計数 1 行・目録 1 行
     expect(batches[1]!.metas.map((m) => m.changes)).toEqual([1, 1]);
 

@@ -32,7 +32,46 @@ describe("トップの上の並びの CSS(Issue #544)", () => {
     expect(shared[0]).toMatch(/border:\s*1px solid var\(--line\)/);
     expect(shared[0]).toMatch(/border-radius:\s*8px/);
     // 右寄せ(margin-left: auto)は画面の移動の塊(.list-nav)が担う(Issue #560)。この規則自体は寄せない
+    expect(pushesRight(shared[0]!)).toBe(false); // margin-left だけでなく、margin-inline-start・margin の一括指定でも寄せない
     expect(shared[0]).not.toMatch(/margin-left/);
+  });
+});
+
+/**
+ * 規則の本体が、要素を右へ寄せる(左の余白が `auto`)かどうか。`margin-left: auto` のほか、論理プロパティ(`margin-inline-start: auto`・`margin-inline: … auto`)と、
+ * 一括指定(`margin: 0 0 0 auto`・`margin: 0 auto` など)も見る。一括指定は値の数(1〜4 個)ごとに「左」の値を取り出す(1 個→その値、2・3 個→2 番目、4 個→4 番目)。
+ * 左右とも `auto` の `margin: 0 auto`(中央寄せ)も、左が auto なので該当にする(5 つのリンクの規則には置かないので、引っかかれば見直す)。
+ */
+function pushesRight(body: string): boolean {
+  if (/margin-left\s*:\s*auto\b/.test(body)) return true;
+  if (/margin-inline(?:-start)?\s*:[^;}]*\bauto\b/.test(body)) return true;
+  for (const m of body.matchAll(/(?:^|[;{\s])margin\s*:\s*([^;}]+)/g)) {
+    const v = m[1]!.replace(/!important/g, "").trim().split(/\s+/);
+    const left = v.length === 1 ? v[0] : v.length === 4 ? v[3] : v[1];
+    if (left === "auto") return true;
+  }
+  return false;
+}
+
+describe("pushesRight(右寄せの余白の判定。下の検査が空振りしないための前提)", () => {
+  it.each([
+    ["margin-left: auto", true],
+    ["margin-left:auto !important", true],
+    ["margin-inline-start: auto", true],
+    ["margin-inline: auto 0", true],
+    ["margin: 0 0 0 auto", true],
+    ["margin: 0 0 0 auto !important", true],
+    ["margin: 0 auto", true],
+    ["margin: auto", true],
+    ["min-height: 44px; margin: 0 0 0 auto; border: 0", true],
+    ["margin-left: 0", false],
+    ["margin-inline-start: 4px", false],
+    ["margin: 0 auto 0 0", false], // 右だけ auto(左へ寄せる)
+    ["margin: 4px 8px", false],
+    ["margin-right: auto", false],
+    ["margin-top: auto", false],
+  ])("%s → %s", (body, expected) => {
+    expect(pushesRight(body)).toBe(expected);
   });
 });
 
@@ -67,6 +106,7 @@ describe("トップの上の並びを 2 つの塊に分ける CSS(Issue #560)", 
     expect(shared[0]).toMatch(/display:\s*flex/);
     expect(shared[0]).toMatch(/flex-wrap:\s*wrap/);
     expect(shared[0]).not.toMatch(/margin-left/); // 絞り込みは寄せない(共通の規則に margin-left を置かない)
+    expect(pushesRight(shared[0]!)).toBe(false); // 別の書き方(margin-inline-start・margin の一括指定)でも寄せない
     const nav = bodiesOf(".list-nav", outerCss);
     expect(nav).toHaveLength(1);
     expect(nav[0]).toMatch(/margin-left:\s*auto/);
@@ -77,6 +117,7 @@ describe("トップの上の並びを 2 つの塊に分ける CSS(Issue #560)", 
       const rules = css.split("}").filter((r) => (r.split("{")[0] ?? "").split(",").some((s) => s.trim() === `.${cls}` || s.trim().endsWith(`+ .${cls}`)));
       expect(rules.length, `前提: .${cls} の規則がある`).toBeGreaterThan(0);
       expect(rules.join("}"), cls).not.toMatch(/margin-left/);
+      expect(pushesRight(rules.join("}")), `${cls}: 別の書き方の右寄せ`).toBe(false);
     }
     expect(css).not.toMatch(/\.(verify|targets|monthly)-link\s*\+\s*\.(verify|settings)-link/);
   });

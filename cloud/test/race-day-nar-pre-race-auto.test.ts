@@ -381,6 +381,120 @@ describe("公開の時点で完了済みの分の見回し(アラームのたび
     expect(planRows(h)).toEqual([]);
   });
 
+  describe("評価済みのレースは覚えて、次からは一覧を取りに行かない(Issue #573-18)", () => {
+    // 一覧のキャッシュの寿命は 6 時間(core の既定)。キャッシュが切れたあとの見回しが、netkeiba へまた取りに行くかを見る。
+    const CACHE_TTL_PASSED_MS = 6 * 60 * 60_000 + 60_000;
+    const SECOND_ID = "202654071211";
+
+    it("発走済みで行を足せなかった地方のレースは、一覧を見たあと対象から外れる: キャッシュが切れても(6 時間後)、一覧を取り直さない", async () => {
+      const h = harness(jstNar("06:30"));
+      h.gate.narList.html = narListHtml(NAR_ID, "一覧のレース名", "06:00"); // 開催日の同じ日の朝に発走済み
+      doneWithoutPlan(h, NAR_ID, NAR_DATE);
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(1);
+      expect(planRows(h)).toEqual([]); // 前提: 発走済みなので足されない(該当に残り続ける種類のレース)
+      // 前提: SQL の上では、まだ「done で行の無い地方のレース」に当たる(外れたのは、評価済みの印による)
+      expect((h.core as unknown as { plan: { narMorningDoneWithoutPlanRow(): string[] } }).plan.narMorningDoneWithoutPlanRow()).toEqual([NAR_ID]);
+      h.clock.now += CACHE_TTL_PASSED_MS; // 同じ日の昼(開催日は今日のまま)
+      await h.core.runNextStep();
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(1);
+    });
+
+    it("1 日のタスクの上限(cap)で足せなかったレースも評価済みになる", async () => {
+      const h = harness(jstNar("09:00"));
+      h.gate.narList.html = narListHtml(NAR_ID, "一覧のレース名", "20:50"); // 期限前で、上限が無ければ足される
+      doneWithoutPlan(h, NAR_ID, NAR_DATE);
+      // 中央の done を 100 件(上限 100 に達する。中央は地方の見回しの対象外)
+      for (let i = 0; i < 100; i++) {
+        h.sql.exec(
+          `INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at, error, analyzed_at, fetch_started_at, settings_json, analysis_id, detail, children_ok)
+           VALUES (?, 'morning', 'done', 1, 1, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`,
+          `2026010101${String(i).padStart(2, "0")}`,
+          h.clock.now,
+          h.clock.now,
+        );
+      }
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(1);
+      expect(planRows(h)).toEqual([]); // 前提: 上限で足されなかった(skipped の行も残さない)
+      h.clock.now += CACHE_TTL_PASSED_MS;
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(1);
+    });
+
+    it("一覧に無いレースも評価済みになる", async () => {
+      const h = harness(jstNar("09:00"));
+      h.gate.narList.html = narListHtml(SECOND_ID, "別のレース", "20:50"); // NAR_ID は一覧に無い
+      doneWithoutPlan(h, NAR_ID, NAR_DATE);
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(1);
+      expect(planRows(h)).toEqual([]);
+      h.clock.now += CACHE_TTL_PASSED_MS;
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(1);
+    });
+
+    it("一覧の取得に失敗した起床では評価済みにしない: 取り直した一覧で発走前のレースなら行を足し、そのあとは取りに行かない", async () => {
+      const h = harness(jstNar("09:00"));
+      h.gate.narList.html = narListHtml(NAR_ID, "一覧のレース名", "20:50");
+      h.gate.narList.failures = Array.from({ length: 30 }, () => httpError());
+      doneWithoutPlan(h, NAR_ID, NAR_DATE);
+      await h.core.runNextStep();
+      expect(planRows(h)).toEqual([]);
+      const callsAfterFailure = h.gate.narList.calls;
+      expect(callsAfterFailure).toBeGreaterThan(0);
+      h.gate.narList.failures = []; // 以後は成功する
+      h.clock.now += RETRY_DELAY_MS + 1;
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBeGreaterThan(callsAfterFailure); // 失敗した起床では印を付けず、取り直した
+      expect(planRows(h).map((r) => r.race_id)).toEqual([NAR_ID]);
+    });
+
+    it("一覧が空(ok で 0 件。公開前・一時的な空の応答)のときは評価済みにしない: 間隔をあけて取り直し、載ったら行を足す", async () => {
+      const h = harness(jstNar("09:00"));
+      h.gate.narList.html = EMPTY_HTML; // 空の一覧(races が 0 件の ok)
+      doneWithoutPlan(h, NAR_ID, NAR_DATE);
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(1);
+      expect(planRows(h)).toEqual([]); // 前提: 足されていない
+      // 前提: 取得は失敗ではなく空の一覧(失敗なら警告が出る)
+      expect(h.warnings.some((w) => w.includes("取得できません"))).toBe(false);
+      // 間隔をあけて取り直し、今度は載っていれば行を足す(空の一覧は覚えない。キャッシュもされない)
+      h.gate.narList.html = narListHtml(NAR_ID, "一覧のレース名", "20:50");
+      h.clock.now += RETRY_DELAY_MS + 1;
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(2);
+      expect(planRows(h).map((r) => r.race_id)).toEqual([NAR_ID]);
+    });
+
+    it("評価済みのレースが残っていても、あとから done になった別のレースは今までどおり拾う", async () => {
+      const h = harness(jstNar("06:30"));
+      h.gate.narList.html = narListHtml(NAR_ID, "発走済みのレース", "06:00");
+      doneWithoutPlan(h, NAR_ID, NAR_DATE);
+      await h.core.runNextStep();
+      expect(planRows(h)).toEqual([]);
+      expect(h.gate.narList.calls).toBe(1);
+      // 別のレースが done になる(足されなかった: たとえば完了の時点の追加を取りこぼした)
+      h.sql.exec(
+        `INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at, error, analyzed_at, fetch_started_at, settings_json, analysis_id, detail, children_ok)
+         VALUES (?, 'morning', 'done', 1, 1, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`,
+        SECOND_ID,
+        h.clock.now,
+        h.clock.now,
+      );
+      h.gate.narList.html = narListHtml(SECOND_ID, "あとのレース", "20:50");
+      h.clock.now += CACHE_TTL_PASSED_MS;
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(2); // 評価済みでない分があるので、一覧を取りに行く
+      expect(planRows(h).map((r) => r.race_id)).toEqual([SECOND_ID]);
+      // 両方とも評価済みになったので、もう取りに行かない
+      h.clock.now += CACHE_TTL_PASSED_MS;
+      await h.core.runNextStep();
+      expect(h.gate.narList.calls).toBe(2);
+    });
+  });
+
   it("見回しの SQL が失敗しても、runNextStep は投げない(足す機能の失敗で、既存のステップを止めない)。警告を出す", async () => {
     const h = harness(jstNar("09:00"));
     doneWithoutPlan(h, NAR_ID, NAR_DATE);

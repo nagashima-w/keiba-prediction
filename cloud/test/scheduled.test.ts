@@ -783,6 +783,26 @@ describe("runScheduled: 過去の結果の取得の起動(Issue #554)。21 時�
     expect(f.events.indexOf("archive-kick")).toBeGreaterThan(f.events.findIndex((e) => e.startsWith("plan:")));
   });
 
+  it("23 時(retry): 取得の DO の kick は処理の最後(結果の取り込み・結果の補完の kick のあと)。取得の DO の呼び出しが固まっても、先の仕事は済んでいる(Issue #573-17)", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const a = fakeArchive(f.events, () => new Promise<void>(() => undefined)); // kick が返ってこない(固まる)
+    const backfill = {
+      idFromName: (n: string) => n,
+      get: () => ({
+        kick: async () => {
+          f.events.push("backfill-kick");
+        },
+        getStatus: NOT_CALLED,
+      }),
+    };
+    const store: DispatchStore = { listUnimportedRacesByDay: async () => [{ raceId: "202603020211", kaisaiDate: "20260627" }] };
+    // 固まる kick を待たずに、他の呼び出しがすべて記録された時点で検査する
+    void runScheduled({ scheduledTime: RETRY_0628_2300 }, { ...envOf(f), RESULT_BACKFILL: backfill as never, RACE_ARCHIVE_FETCH: a.namespace }, { ...h.deps, store });
+    await vi.waitFor(() => expect(f.events).toContain("archive-kick"));
+    expect(f.events).toEqual(["plan:20260629", "result:20260627", "backfill-kick", "archive-kick"]);
+  });
+
   it("binding が無い構成では呼ばない(例外で落とさない)", async () => {
     const f = fakeNamespace();
     const h = harness();
