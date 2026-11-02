@@ -72,7 +72,7 @@ describe("一括実行のボタン(Issue #251)", () => {
     const section = byClass(tree, "venue")[0]!;
     const children = section.children as VNode[];
     expect(children.map((c) => c.tag)).toEqual(["h2", "div", "ul"]); // 見出し → 一括実行 → レースの一覧
-    expect(byClass(section, "bulk-run").map((b) => textOf(b))).toEqual(["事前分析を一括実行(2)", "発走前の分析を一括実行(2)"]);
+    expect(byClass(section, "bulk-run").map((b) => textOf(b))).toEqual(["事前分析を一括実行(対象 2 件)", "発走前の分析を一括実行(対象 2 件)"]);
   });
 
   it("クリック処理の引数(場のキー・モード)が data-* に出ている。押すと onBulkOpen(場のキー, モード) を呼ぶ", () => {

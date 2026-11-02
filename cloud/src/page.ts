@@ -141,11 +141,17 @@ ${paletteCss()}
   .race-result { font-weight: 600; color: inherit; }
   .result-pending, .result-pending_payout, .result-none, .result-excluded, .result-no_proposal { font-weight: normal; color: var(--muted); }
   .grade { font-size: 0.75rem; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; }
-  .badges { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 0.8rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px; font-size: 0.8rem; }
   .badge.ok { color: var(--ok); }
   .badge.wait { color: var(--wait); }
   .badge.fail { color: var(--fail); }
   .badge.none { color: var(--muted); }
+  /* Issue #558: 一覧のバッジ(ピル)。ok・wait・fail は tone 色の塗りに --bg の文字、未実行は --line の枠線に --muted の文字(新しい色は足さない=文字と背景の組は palette.test で 4.5 以上の組)。文字(「事前: 完了」)は残す。タスクカードの .badge は変えない(.badges の中だけ) */
+  .badges .badge { display: inline-block; padding: 0 8px; border: 1px solid transparent; border-radius: 999px; font-weight: 600; line-height: 1.6; }
+  .badges .badge.ok { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+  .badges .badge.wait { background: var(--wait); border-color: var(--wait); color: var(--bg); }
+  .badges .badge.fail { background: var(--fail); border-color: var(--fail); color: var(--bg); }
+  .badges .badge.none { background: transparent; border-color: var(--line); color: var(--muted); }
   .back { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
   /* Issue #185: レース画面・結果画面(色だけに頼らない。強調は文字〈EVプラス〉も付ける) */
   .controls .back { margin-right: auto; }
@@ -197,7 +203,10 @@ ${paletteCss()}
   /* Issue #336: 今日の狙い目(一覧の入口のリンクは検証の左。行は一覧のレースの行〈.race〉を流用し、残り時間を右端に寄せる。見送りと発走済みは薄く、10 分以内は色+太字で強調する) */
   .targets-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   .targets-link + .verify-link { margin-left: 0; }
-  .race.skipped, .race.started { opacity: 0.65; }
+  .race.skipped { opacity: 0.65; }
+  /* Issue #558: 発走済みは、バッジの入れ物(.badges)以外の子を薄くする(行ごと薄くすると、バッジの文字のコントラストが 4.5 を割る)。狙い目の発走済みの行にも同じ規則(バッジは無い)。
+     見送り(.skipped)の行は上の規則で行全体が薄いので外す(狙い目の行は skipped と started の両方が付きうる。外さないと 0.65 × 0.65 の二重がけになる) */
+  .race.started:not(.skipped) > :not(.badges) { opacity: 0.65; }
   .t-left { margin-left: auto; font-weight: bold; white-space: nowrap; }
   .t-left.soon { color: var(--wait); }
   /* Issue #235: 日報画面(一覧の入口のリンク・レースごとのカード・箇条書き・生の文章。スマホ幅で横に伸ばさない=改行で折り返す) */

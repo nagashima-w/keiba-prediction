@@ -102,7 +102,7 @@ describe("buildBulkModel(Issue #251): ボタンの出し方", () => {
   it("2 つのボタン(事前分析・発走前の分析)を、対象の件数つきで返す。発走前は今日の発走済み・時刻不明を除いた件数", () => {
     const model = buildBulkModel(input());
     expect(model.buttons.map((b) => b.mode)).toEqual(["morning", "pre_race"]);
-    expect(model.buttons.map((b) => b.label)).toEqual(["事前分析を一括実行(6)", "発走前の分析を一括実行(3)"]);
+    expect(model.buttons.map((b) => b.label)).toEqual(["事前分析を一括実行(対象 6 件)", "発走前の分析を一括実行(対象 3 件)"]);
     expect(model.buttons.map((b) => b.count)).toEqual([6, 3]);
     expect(model.buttons.map((b) => b.disabled)).toEqual([false, false]);
     expect(model.note).toBeNull();
@@ -112,8 +112,17 @@ describe("buildBulkModel(Issue #251): ボタンの出し方", () => {
   it("対象が 0 件のモードのボタンは無効(件数 0 と表示)。もう一方は影響を受けない", () => {
     const board = RACES.map((r) => row(r.raceId, "morning", "done"));
     const model = buildBulkModel(input({ board }));
-    expect(model.buttons[0]).toMatchObject({ mode: "morning", count: 0, disabled: true, label: "事前分析を一括実行(0)" });
+    expect(model.buttons[0]).toMatchObject({ mode: "morning", count: 0, disabled: true, label: "事前分析を一括実行(対象 0 件)" });
     expect(model.buttons[1]).toMatchObject({ mode: "pre_race", count: 3, disabled: false });
+  });
+
+  it("Issue #558: 括弧の中は「対象 N 件」。失敗(再試行)を数え、発走前では発走済み・時刻不明を除くので、「未実施」とは書かない", () => {
+    // 事前分析: 完了 2・失敗 1・未実行 3 → 対象 4(失敗を含む。完了だけ除く)。発走前: 失敗 1(R3・14:01)を含め、発走済み 2(R1・R2)と時刻不明 1(R4)を除いた R3・R5・R6 = 3
+    const board = [row(id(1), "morning", "done"), row(id(2), "morning", "done"), row(id(3), "morning", "failed"), row(id(3), "pre_race", "failed")];
+    const model = buildBulkModel(input({ board }));
+    expect(model.buttons.map((b) => b.count)).toEqual([4, 3]); // 前提: 件数が 0 や 1 に退化していない。失敗を含み、モードごとに違う
+    expect(model.buttons.map((b) => b.label)).toEqual(["事前分析を一括実行(対象 4 件)", "発走前の分析を一括実行(対象 3 件)"]);
+    for (const b of model.buttons) expect(b.label).not.toContain("未実施");
   });
 
   it("過去の開催日は両方無効で、理由の注記を出す(対象の件数を数えても押せない)", () => {

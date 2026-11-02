@@ -280,6 +280,7 @@ exe 版の公開を止め(#248)、コードも削除した(#285)。運用は web
 ## ドキュメント一覧
 本リポジトリの主要ドキュメント。参照漏れを防ぐため一箇所に集約する(規約の唯一の正は本 `CLAUDE.md`)。
 
+- [`.claude/core-rules.md`](./.claude/core-rules.md) — **最重要の決まりの要点**(10 項目)。`.claude/settings.json` のフックで、毎回の入力の前(UserPromptSubmit)と圧縮の直後(SessionStart の `compact`)にコンテキストへ付く(Issue #561)。この `CLAUDE.md` の決まりを変えたら、こちらも合わせて直す。
 - [`keiba-ev-tool-spec.md`](./keiba-ev-tool-spec.md) — 当初の設計・計画(Phase 1→6)の記録。中央競馬前提。
 - [`docs/current-spec.md`](./docs/current-spec.md) — **実装済みの現状仕様(v1)**。取得・スコアリング・LLM分析・検証・エクスポート・Discord を実コードに基づき記述(exe の配布は記録として残す)。
 - [`docs/development-workflow.md`](./docs/development-workflow.md) — 開発ワークフローの導線・要約(2体のサブエージェント・着手前ゲート・TDD・2段レビュー・報告方針)。詳細は本 `CLAUDE.md` と `.claude/agents/*.md`。

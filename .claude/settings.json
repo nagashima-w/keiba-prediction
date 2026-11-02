@@ -3,7 +3,6 @@
   "permissions": {
     "allow": [
       "mcp__Claude_Code_Remote__send_later",
-
       "Bash(pnpm test)",
       "Bash(pnpm test *)",
       "Bash(pnpm typecheck)",
@@ -14,7 +13,6 @@
       "Bash(pnpm -r typecheck *)",
       "Bash(pnpm -w -r test *)",
       "Bash(pnpm -w -r typecheck *)",
-
       "mcp__github__actions_list",
       "mcp__github__actions_get",
       "mcp__github__get_job_logs",
@@ -27,6 +25,29 @@
       "mcp__github__list_commits",
       "mcp__github__get_commit",
       "mcp__github__get_file_contents"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat \"$CLAUDE_PROJECT_DIR/.claude/core-rules.md\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat \"$CLAUDE_PROJECT_DIR/.claude/core-rules.md\""
+          }
+        ]
+      }
     ]
   }
 }
