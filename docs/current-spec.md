@@ -1453,6 +1453,10 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
   - R2 の put は 1 回だけで、再試行は呼び出し側が行う。put のあとで D1 が失敗すると R2 にだけ置かれる。もう一度保存すれば目録が書かれる。
   - **Class A は put のあとに数える**。put が成功して D1 の batch が失敗した保存は、数えられない(1 回につき 1 の過少)。分析の保存(`analysis-repository.ts`)は逆で、put の前に数えている。
 - **読み出し**(`readRaceArchive`): Class B が柵に達していれば R2 を引かず `skipped`。そうでなければ get を 1 回行い、要求を出したら Class B を +1 する(計数の失敗は読み出しを妨げない)。無い・壊れている・別のレースのものは `missing`。get の失敗は例外(`missing` と区別する)。`getCatalogEntry` は目録の 1 行を返す(D1 だけ)。列挙は #549-B で足す。
+- **変換の済み印と列挙**(#588〈#549-B3-1〉。migration 0033。追加のみ): `race_archive.runs_version`(整数・NULL 可。NULL = 未変換、値 = 変換した時の `RESULT_RUN_VERSION`)。目録の行の中身が変わる保存(`saved`)は印を NULL に戻し、変わらない再保存(`unchanged`)は据え置く。副索引は作らない。
+  - **列挙**(`listCatalogPage(afterRaceId, limit)`): 主キー(`race_id`)順のカーソルで 1〜200 件。読む行は limit 件ぶん(全件走査にならない)。目録の行に `runsVersion` を含める。
+  - **一括の読み出し**(`readRaceArchives(raceIds)`): 1 回に 40 件まで(Worker の Free の 1 呼び出し 50 の内側)。柵の確認 1 回・get を並列に N 回・Class B の計数 1 回(+N)。1 件の get が例外でもほかは読み、その件は `error`(`missing` と区別する)。Class B が柵に達していれば R2 を引かず `skipped`。
+  - **変換して書く**(`cloud/src/race-archive-runs.ts` の `convertRaceArchives(db, targets, now)`): 読み取り結果を `raceRecordToRuns` で走ごとの行にして、D1 の batch 1 回で「新規の行(`ON CONFLICT DO NOTHING`。戦績 API の行・既にある結果ページ由来の行に触れない)・結果ページ由来で版が古い行だけの書き直し・済み印」を一緒に書く。済み印は、目録の `raw_bytes`・`parser_version` が読んだ時と同じときだけ付ける(主キーで引く)。変換を拒否したレース(頭数の宣言と行数が合わない等)は、行を書かず、拒否した版で印を付ける。戻り値に書き込み行数の合計(`rowsWritten`)を返す。呼び出すのは毎晩の変換の DO(#590)で、#588 の時点では本番の Worker は呼ばない。
 - **限界**: 本番の D1 の `size_after` の意味は未確認。本番の R2・D1 での動作は、最初の保存で確かめる。
 - **検査**: `cloud/test/race-archive-format.test.ts`・`race-archive-repository.test.ts`・`migration-0031.test.ts`、`scripts/test/cloud-d1-schema.test.ts`。smoke は `/smoke/race-archive`(workerd 上の `node:zlib`・R2・D1)を確かめる。
 

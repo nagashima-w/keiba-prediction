@@ -36,6 +36,11 @@
  * ## 目録の 1 行の取得 {@link D1RaceArchiveStore.getCatalogEntry}
  * D1 だけ(R2 には触れない)。列挙(読み取りの版ごと・日付の範囲など)は #549-B2 が必要になったときに足す。
  *
+ * ## 目録の印 `runs_version` と列挙(Issue #588〈#549-B3-1〉。migration 0033)
+ * `runs_version` は horse_runs への変換の済み印(NULL = 未変換。印を書くのは `race-archive-runs.ts` の変換だけ)。**目録の行の中身が変わる保存(UPSERT が更新する場合)は NULL に戻す**
+ * (中身が変わったので変換をやり直す。変わらない再保存は印を据え置く)。{@link D1RaceArchiveStore.listCatalogPage} は主キー(race_id)順のカーソルで読む(副索引なし。読む行は limit 件ぶん)。
+ * {@link D1RaceArchiveStore.readRaceArchives} は複数レースの一括の読み出し(柵の確認 1 回・get N 回・計数 1 回。Worker の Free の 1 呼び出し 50 の内側に収めるため {@link READ_BATCH_MAX} 件まで)。
+ *
  * ## 限界
  * `meta.size_after` はローカルの workerd の D1 では、ページ単位の「データベースの大きさ(バイト)」として返ることを確認した。本番の D1 での意味は未確認
  * (取れなければ `db-size-unknown` で保存しない)。本番の R2・D1 での挙動は、本番の最初の保存で確かめる。
@@ -55,6 +60,11 @@ export type RaceArchiveBucket = Pick<R2Bucket, "get" | "put">;
  * D1 の無料枠の上限は 1 DB 500MB で、本番の保存(分析など)を巻き込まないよう、余裕を持たせて 400MB に置く(#549 のユーザーの決定)。
  */
 export const DB_SIZE_LIMIT_BYTES = 400_000_000;
+
+/** 一括の読み出し({@link D1RaceArchiveStore.readRaceArchives})の 1 回の上限。柵の確認 1 + get N + 計数 1 に、呼び出し側の D1 の 2〜3 文を足しても、Free の 1 呼び出し 50 の内側に収まる。 */
+export const READ_BATCH_MAX = 40;
+/** 目録の列挙({@link D1RaceArchiveStore.listCatalogPage})の 1 回の上限。 */
+export const CATALOG_PAGE_MAX = 200;
 
 export type SkipReason = "r2-fence" | "db-size" | "db-size-unknown";
 
@@ -94,7 +104,19 @@ export interface RaceArchiveCatalogEntry {
    * `unchanged` でも R2 へは毎回上書きする(R2 の put は Class A の操作で、1 回ごとに `r2_ops` の Class A を数える)。
    */
   readonly fetchedAt: string;
+  /** horse_runs への変換の済み印(Issue #588。migration 0033)。NULL = 未変換。値は変換した時の core の `RESULT_RUN_VERSION`。 */
+  readonly runsVersion: number | null;
 }
+
+/** 一括の読み出しの 1 件分。`error` = get が例外(「無い」と区別する。次の機会にやり直す)。 */
+export type ReadRaceArchivesOutcome =
+  | { readonly status: "found"; readonly archive: RaceArchivePayload }
+  | { readonly status: "missing" }
+  | { readonly status: "error" };
+
+export type ReadRaceArchivesResult =
+  | { readonly status: "read"; readonly items: ReadonlyArray<{ readonly raceId: string; readonly outcome: ReadRaceArchivesOutcome }> }
+  | { readonly status: "skipped"; readonly reason: "r2-fence" };
 
 export interface D1RaceArchiveStoreOptions {
   readonly db: RaceArchiveDb;
@@ -113,10 +135,12 @@ const SELECT_SIZE_SQL = "SELECT 1";
 const COUNT_WRITE_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1";
 /** Class B(読み出し)の +1。 */
 const COUNT_READ_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, 1) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + 1";
+/** Class B の +N(一括の読み出し。出した要求の数をまとめて数える)。 */
+const COUNT_READ_N_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + excluded.class_b";
 
 /**
  * 目録の UPSERT。**比較の対象に `fetched_at` を入れない**(入れると毎回更新になり、同じ中身の再保存で D1 の書き込みが増える)。
- * 更新するときは `fetched_at` も新しくする。WHERE が偽なら、行は変わらず `changes` 0・`rows_written` 0(ローカルの workerd の D1 で実測)。
+ * 更新するときは `fetched_at` も新しくし、変換の済み印 `runs_version` を NULL に戻す(中身が変わったので、変換をやり直す。Issue #588)。WHERE が偽なら、行は変わらず `changes` 0・`rows_written` 0(ローカルの workerd の D1 で実測)。
  */
 const UPSERT_CATALOG_SQL = `INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -126,14 +150,18 @@ ON CONFLICT(race_id) DO UPDATE SET
   parser_version = excluded.parser_version,
   r2_key = excluded.r2_key,
   raw_bytes = excluded.raw_bytes,
-  fetched_at = excluded.fetched_at
+  fetched_at = excluded.fetched_at,
+  runs_version = NULL
 WHERE race_archive.kind IS NOT excluded.kind
   OR race_archive.race_date IS NOT excluded.race_date
   OR race_archive.parser_version IS NOT excluded.parser_version
   OR race_archive.r2_key IS NOT excluded.r2_key
   OR race_archive.raw_bytes IS NOT excluded.raw_bytes`;
 
-const SELECT_CATALOG_SQL = "SELECT race_id AS raceId, kind, race_date AS raceDate, parser_version AS parserVersion, r2_key AS r2Key, raw_bytes AS rawBytes, fetched_at AS fetchedAt FROM race_archive WHERE race_id = ?";
+const CATALOG_COLUMNS = "race_id AS raceId, kind, race_date AS raceDate, parser_version AS parserVersion, r2_key AS r2Key, raw_bytes AS rawBytes, fetched_at AS fetchedAt, runs_version AS runsVersion";
+const SELECT_CATALOG_SQL = `SELECT ${CATALOG_COLUMNS} FROM race_archive WHERE race_id = ?`;
+/** 主キー順のカーソル読み。読む行は LIMIT 件ぶん(副索引なし)。 */
+const SELECT_CATALOG_PAGE_SQL = `SELECT ${CATALOG_COLUMNS} FROM race_archive WHERE race_id > ? ORDER BY race_id LIMIT ?`;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -240,6 +268,69 @@ export class D1RaceArchiveStore {
   async getCatalogEntry(raceId: string): Promise<RaceArchiveCatalogEntry | null> {
     assertRaceId(raceId);
     return this.db.prepare(SELECT_CATALOG_SQL).bind(raceId).first<RaceArchiveCatalogEntry>();
+  }
+
+  /**
+   * 目録を主キー(race_id)順に、`afterRaceId` より後ろから `limit` 件読む(D1 だけ。R2 には触れない)。`afterRaceId` が空文字なら先頭から。
+   * 副索引は無く、読む行は limit 件ぶん。続きは、戻った最後の `raceId` を渡す。末尾を過ぎたら空配列。
+   */
+  async listCatalogPage(afterRaceId: string, limit: number): Promise<RaceArchiveCatalogEntry[]> {
+    if (afterRaceId !== "") {
+      assertRaceId(afterRaceId);
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > CATALOG_PAGE_MAX) {
+      throw new RangeError(`limit は 1〜${CATALOG_PAGE_MAX} の整数でなければなりません: ${String(limit)}`);
+    }
+    const { results } = await this.db.prepare(SELECT_CATALOG_PAGE_SQL).bind(afterRaceId, limit).all<RaceArchiveCatalogEntry>();
+    return results;
+  }
+
+  /**
+   * 複数レースを R2 から一括で読む(最大 {@link READ_BATCH_MAX} 件)。{@link readRaceArchive} との違い: 柵の確認は 1 回、get は並列に N 回、Class B の計数は 1 回(+N)。
+   * 1 件の get が例外でも、ほかの件は読む(その件は `error`。「無い」`missing` と区別する)。Class B が柵に達していれば R2 を引かず `skipped`(計数もしない)。
+   * 計数は出した要求の数(失敗した get も含む)。計数の失敗は読み出しを妨げない(best-effort)。race_id が 12 桁でない・重複・上限超過は RangeError(R2・D1 に触れる前)。
+   */
+  async readRaceArchives(raceIds: readonly string[]): Promise<ReadRaceArchivesResult> {
+    if (raceIds.length > READ_BATCH_MAX) {
+      throw new RangeError(`一括で読めるのは ${READ_BATCH_MAX} 件までです: ${raceIds.length}`);
+    }
+    const keys = raceIds.map((id) => raceArchiveKeyOf(id)); // 12 桁でなければここで RangeError
+    if (new Set(raceIds).size !== raceIds.length) {
+      throw new RangeError("race_id が重複しています");
+    }
+    if (raceIds.length === 0) {
+      return { status: "read", items: [] };
+    }
+    const ym = monthKey(this.now());
+    const usage = (await this.db.prepare(SELECT_R2_USAGE_SQL).bind(ym).first<R2Usage>()) ?? { classA: 0, classB: 0 };
+    if (!isReadAllowed(usage)) {
+      return { status: "skipped", reason: "r2-fence" };
+    }
+    const settled = await Promise.allSettled(
+      keys.map(async (key) => {
+        const object = await this.bucket.get(key);
+        return object === null ? null : new Uint8Array(await object.arrayBuffer());
+      }),
+    );
+    try {
+      await this.db.prepare(COUNT_READ_N_SQL).bind(ym, raceIds.length).run();
+    } catch {
+      // best-effort: 計数に失敗しても、読み出しの結果は返す。
+    }
+    const items = raceIds.map((raceId, i) => {
+      const r = settled[i]!;
+      let outcome: ReadRaceArchivesOutcome;
+      if (r.status === "rejected") {
+        outcome = { status: "error" };
+      } else if (r.value === null) {
+        outcome = { status: "missing" };
+      } else {
+        const archive = decodeRaceArchive(r.value);
+        outcome = archive === null || archive.record.raceId !== raceId ? { status: "missing" } : { status: "found", archive };
+      }
+      return { raceId, outcome };
+    });
+    return { status: "read", items };
   }
 
   private async countRead(ym: number): Promise<void> {

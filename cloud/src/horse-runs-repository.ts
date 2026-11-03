@@ -146,6 +146,19 @@ function asResultRows(rows: readonly ResultRunRow[]): PlannedRun[] {
 }
 
 /**
+ * 結果ページ由来の行を書く文を、実行せずに用意する(Issue #588)。呼び出し側が D1 の `batch` に入れて、別の文(済み印の更新)と一緒に成功・失敗させる。
+ * {@link writeResultRuns}・{@link rewriteResultRuns} と同じ SQL・同じ分け方({@link RUNS_WRITE_CHUNK} 行ごとに 1 文。0 行なら文なし)。
+ */
+export function prepareWriteResultRuns(db: HorseRunsDb, rows: readonly ResultRunRow[]): D1PreparedStatement[] {
+  return chunks(asResultRows(rows), RUNS_WRITE_CHUNK).map((chunk) => db.prepare(INSERT_SQL).bind(encodeRows(chunk)));
+}
+
+/** {@link rewriteResultRuns} の文を、実行せずに用意する。 */
+export function prepareRewriteResultRuns(db: HorseRunsDb, rows: readonly ResultRunRow[]): D1PreparedStatement[] {
+  return chunks(asResultRows(rows), RUNS_WRITE_CHUNK).map((chunk) => db.prepare(REWRITE_RESULT_SQL).bind(encodeRows(chunk)));
+}
+
+/**
  * 結果ページ由来の行を新規に書く(`ON CONFLICT DO NOTHING`)。鍵 (馬 ID, 鍵) が既にある行は書かない
  * = **戦績 API の行に触れない**(結果ページ由来の行どうしの重なりも書かない)。D1 の `rows_written` の合計を返す。
  * 500 行({@link RUNS_WRITE_CHUNK})ごとに 1 文。0 行なら文を発行しない。失敗は投げる。
