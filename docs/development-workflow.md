@@ -87,7 +87,7 @@
   7. 作業ブランチを `main` に揃える。作業ブランチに `main` に無いコミットが無ければ `git push origin origin/main:refs/heads/claude/issue-order-processing-wjgpdd`、残っていれば作業ブランチに `origin/main` を merge して push する(force push はしない)。
   8. 作業用のディレクトリを `git worktree remove` で消し、手元の作業ブランチを `git merge --ff-only origin/main` で揃える。対象の Issue に根拠(PR の番号・merge のコミット・deploy の成否)を書いて閉じる。
 - **Dependabot の PR**: 宛先は作業ブランチ(`.github/dependabot.yml` の `target-branch`)。code-reviewer のレビューとメタレビューを通してから、merge commit で作業ブランチに取り込む(squash しない)。取り込んだだけでは本番に出ないので、次の承認印付きの公開(上の手順)で、ほかの変更と一緒に本番と `main` に入る。
-- **公開の時刻**: 21:00・23:00 の cron の処理と、週末の発走前の分析の時間帯を避ける。
+- **公開の時刻**: 21:00・23:00 の cron の処理と、0:00〜8:30 の過去の結果の取得(#554)と、発走前の分析が動く直前を避ける。それ以外なら、メタレビューで承認できたものは平日の日中でも公開してよい(ユーザーの決定 2026-11-03)。公開したら通知する。ただし 0:00〜8:00 は通知を送らず、朝の知らせにまとめる。
 
 ## セッション運用(タスク単位)
 
