@@ -92,6 +92,9 @@ class World {
   saveThrows = 0;
   notifyCalls = 0;
   rejectRace = new Set<string>();
+  /** 文ごとの `rowsRead` を偽る(省略は 0)。呼ばれた文の回数(0 始まり)も渡す。 */
+  rowsReadOf: ((query: string, nth: number) => number) | null = null;
+  private readonly execCounts = new Map<string, number>();
   core!: RaceArchiveFetchCore;
 
   constructor(readonly options: ArchiveFetchOptions = { fromMonth: "2026-11" }) {
@@ -101,7 +104,14 @@ class World {
   makeCore(): RaceArchiveFetchCore {
     return new RaceArchiveFetchCore(
       {
-        sql: this.sql,
+        sql: {
+          exec: (query: string, ...bindings: unknown[]) => {
+            const cursor = this.sql.exec(query, ...bindings);
+            const nth = this.execCounts.get(query) ?? 0;
+            this.execCounts.set(query, nth + 1);
+            return { toArray: () => cursor.toArray(), rowsRead: this.rowsReadOf === null ? undefined : this.rowsReadOf(query, nth) };
+          },
+        },
         now: () => this.now,
         setAlarm: (at) => {
           this.alarm = at;
@@ -1031,5 +1041,161 @@ describe("DO の SQLite の書き込み(1 晩 6,000 件の取得でも、無料�
     // 同じキーを同じ値で書き直していない: 6 リクエストでの ra_meta への書き込みは、キーごとの変更の回数を超えない(下限の確認つき)
     expect(metaWrites.length).toBeGreaterThan(5);
     expect(metaWrites.length).toBeLessThan(6 * 4 + 12);
+  });
+});
+
+describe("起床ごとの SQL は表の全部を読まない(Issue #593。DO の rows_read の無料枠が尽きかけた)", () => {
+  /** 全走査を許す文(状態の口だけ。起床の経路には出ない)。一覧に無い新しい全走査の文が増えたら落ちる。 */
+  const ALLOWED_SCANS: readonly string[] = [
+    // 月の表は約 60 行で、起床ごとの月の選択も状態の口の COUNT も全部読んでよい(据え置き)
+    "SELECT month FROM ra_month",
+    "SELECT COUNT(*) AS n FROM ra_month WHERE status = ?",
+    // skipped の分類ごとの件数(状態の口だけ。skipped の行だけを読み、GROUP BY の一時表が要る)
+    "SELECT last_class AS cls, COUNT(*) AS n FROM ra_race WHERE status = 'skipped' GROUP BY last_class",
+  ];
+  const isAllowed = (q: string): boolean => ALLOWED_SCANS.some((a) => q.replace(/\s+/g, " ").trim().startsWith(a));
+  const FORBIDDEN = /SCAN ra_race|SCAN ra_day|USE TEMP B-TREE/;
+
+  /** 重ならない妥当な race_id(年 2026・場 01〜10・回 1〜6・日 1〜12・R 1〜12。8,640 通り)。 */
+  const validRaceId = (i: number): string => {
+    const two = (n: number): string => String(n).padStart(2, "0");
+    return `2026${two((i % 10) + 1)}${two((Math.floor(i / 10) % 6) + 1)}${two((Math.floor(i / 60) % 12) + 1)}${two((Math.floor(i / 720) % 12) + 1)}`;
+  };
+
+  /** 数千行の表を入れる(race_id は 12 桁、日付は 2026-01〜10)。 */
+  function seed(w: World, input: { races: number; pendingRaces: boolean; days: number }): void {
+    for (let i = 0; i < input.days; i += 1) {
+      const m = String(1 + (i % 10)).padStart(2, "0");
+      const d = String(1 + (Math.floor(i / 10) % 28)).padStart(2, "0");
+      w.sql.exec("INSERT OR IGNORE INTO ra_day (date, status) VALUES (?, ?)", `2026-${m}-${d}x${i}`, i % 3 === 0 ? "pending" : "done");
+    }
+    for (let i = 0; i < input.races; i += 1) {
+      const m = String(1 + (i % 10)).padStart(2, "0");
+      const d = String(1 + (Math.floor(i / 10) % 28)).padStart(2, "0");
+      const status = input.pendingRaces && i % 3 === 0 ? "pending" : i % 7 === 0 ? "skipped" : "done";
+      w.sql.exec("INSERT INTO ra_race (race_id, date, seq, status, last_class) VALUES (?, ?, ?, ?, ?)", validRaceId(i), `2026-${m}-${d}`, i % 12, status, status === "skipped" ? "結果未確定" : null);
+    }
+  }
+
+  /** 計画を引く(同じ文が別の束縛で何度も出るので、文の文字列で重複を除く)。 */
+  const planOf = (w: World, queries: Iterable<string>): { query: string; plan: string[] }[] =>
+    [...new Set(queries)].filter((q) => /^\s*(SELECT|UPDATE|DELETE)\b/i.test(q)).map((query) => ({ query, plan: w.sql.plan(query) }));
+
+  it("レース・日・月を取る夜の全文に全走査と一時表(ORDER BY)が無い。状態の口も、許す一覧の外に全走査が無い", async () => {
+    const wake: string[] = [];
+    // (1) 取れるレースが残っている夜: 次のレース・closeDayIfDone を通る
+    const w1 = mk({ fromMonth: "2026-11" });
+    seed(w1, { races: 5000, pendingRaces: true, days: 2000 });
+    w1.sql.exec("INSERT INTO ra_day (date, status) VALUES ('2026-01-01', 'listed')");
+    w1.site({ calendars: { "2026-11": [] } });
+    const from1 = w1.sql.statements.length;
+    await w1.core.kick();
+    for (let i = 0; i < 40; i += 1) await w1.fire();
+    wake.push(...w1.sql.statements.slice(from1));
+    // (2) レースが残っていない夜: 次の日(一覧)を通る
+    const w2 = mk({ fromMonth: "2026-11" });
+    seed(w2, { races: 5000, pendingRaces: false, days: 2000 });
+    w2.site({ calendars: { "2026-11": [] } });
+    const from2 = w2.sql.statements.length;
+    await w2.core.kick();
+    for (let i = 0; i < 6; i += 1) await w2.fire();
+    wake.push(...w2.sql.statements.slice(from2));
+    // 前提を固定する(通っていなければ、検査が空振りする)
+    const has = (re: RegExp): boolean => wake.some((q) => re.test(q));
+    expect(has(/FROM ra_race WHERE status = 'pending' AND date < \?/)).toBe(true);
+    expect(has(/SELECT COUNT\(\*\) AS n FROM ra_race WHERE date = \? AND status = 'pending'/)).toBe(true);
+    expect(has(/SELECT date FROM ra_day WHERE status = 'pending'/)).toBe(true);
+    expect(has(/UPDATE ra_race SET status = 'done'/)).toBe(true);
+    // 状態の口(進捗の読み取り)と停止時の文も集める
+    const from3 = w1.sql.statements.length;
+    await w1.core.getStatus();
+    const statusQueries = w1.sql.statements.slice(from3);
+    expect(statusQueries.length).toBeGreaterThanOrEqual(9);
+
+    const all = planOf(w1, [...wake, ...statusQueries, "SELECT COUNT(*) AS n FROM ra_race WHERE status = 'done'"]);
+    expect(all.length).toBeGreaterThanOrEqual(10);
+    const bad = all.filter((p) => !isAllowed(p.query) && p.plan.some((line) => FORBIDDEN.test(line)));
+    expect(bad, `全走査・一時表が残る文: ${JSON.stringify(bad)}`).toEqual([]);
+    // 許す一覧の文は、実際に全走査か一時表を使っている(使っていないなら一覧から外す。一覧が不要に広がるのを防ぐ)
+    const allowedUsed = all.filter((p) => isAllowed(p.query));
+    expect(allowedUsed.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("1 晩の読み取り行数の予算(Issue #593 AC-2)", () => {
+  const LIMIT = 1000;
+  /** 最初の「次のレース」の選択だけが n 行読んだことにする。 */
+  const firstRaceSelectReads = (w: World, n: number): void => {
+    w.rowsReadOf = (query, nth) => (/FROM ra_race WHERE status = 'pending' AND date < \?/.test(query) && nth === 0 ? n : 0);
+  };
+  const setup = (): World => {
+    const w = mk({ fromMonth: "2026-11", nightlyRowsLimit: LIMIT });
+    standard(w);
+    return w;
+  };
+
+  it("予算ちょうどでは止めない(次の起床でも取る)", async () => {
+    const w = setup();
+    firstRaceSelectReads(w, LIMIT);
+    await w.core.kick();
+    await w.runUntil(T0 + 30 * MIN);
+    expect((await w.core.getStatus()).state).toBe("running");
+    expect(w.notices.filter((n) => n.kind === "rows-budget")).toEqual([]);
+    expect(w.saved.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("予算を 1 行超えたら、その晩の取得を止めて通知する(次の晩 0:00 に自動で再開)", async () => {
+    const w = setup();
+    firstRaceSelectReads(w, LIMIT + 1);
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect((await w.core.getStatus()).state).toBe("night-stopped");
+    expect(w.saved).toEqual([]); // 最初の「次のレース」の選択(一覧を取った起床。まだ空)で予算を超え、次の起床の先頭で止まった
+    const notices = w.notices.filter((n) => n.kind === "rows-budget");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ kind: "rows-budget", limit: LIMIT, resumeAt: jst(11, 6, 0) });
+    expect((notices[0] as { rowsRead: number }).rowsRead).toBeGreaterThan(LIMIT);
+    // 次の晩は 0 から数え直して続きを取る
+    w.rowsReadOf = null;
+    await w.runUntil(jst(11, 6, 3));
+    expect(w.saved.length).toBeGreaterThanOrEqual(3);
+    expect((await w.core.getStatus()).night.date).toBe("20261106");
+    expect(w.notices.filter((n) => n.kind === "rows-budget")).toHaveLength(1);
+  });
+
+  it("rowsRead を返さない SQL(テストの node:sqlite など)では数えず、止めない", async () => {
+    const w = setup();
+    await w.core.kick();
+    await w.runUntil(T0 + 30 * MIN);
+    expect((await w.core.getStatus()).night.rowsRead).toBe(0);
+    expect(w.notices).toEqual([]);
+  });
+
+  it.each([
+    [9_999, false],
+    [10_000, true],
+  ])("起床ごとには書かない: 前回の保存から %i 行増えたとき、保存される = %s", async (n, saved) => {
+    const w = mk({ fromMonth: "2026-11", nightlyRowsLimit: 10_000_000 });
+    standard(w);
+    firstRaceSelectReads(w, n);
+    await w.core.kick();
+    await w.fire(); // カレンダー
+    await w.fire(); // 一覧
+    await w.fire(); // 次のレースの選択(n 行)
+    const row = w.sql.exec("SELECT value FROM ra_meta WHERE key = 'night_rows_read'").toArray() as { value: string }[];
+    expect(row.length === 1 && Number(row[0]!.value) >= n).toBe(saved);
+    expect((await w.core.getStatus()).night.rowsRead).toBeGreaterThanOrEqual(n);
+  });
+
+  it("DO が作り直されても、保存した値から数え直す(コンストラクタで復元)", async () => {
+    const w = mk({ fromMonth: "2026-11", nightlyRowsLimit: 10_000_000 });
+    standard(w);
+    firstRaceSelectReads(w, 25_000);
+    await w.core.kick();
+    for (let i = 0; i < 4; i += 1) await w.fire();
+    const before = (await w.core.getStatus()).night.rowsRead;
+    expect(before).toBeGreaterThanOrEqual(25_000);
+    w.core = w.makeCore();
+    expect((await w.core.getStatus()).night.rowsRead).toBeGreaterThanOrEqual(25_000);
   });
 });
