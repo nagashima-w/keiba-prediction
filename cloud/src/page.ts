@@ -305,6 +305,16 @@ ${paletteCss()}
   .field-help { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); }
   .field-error { margin: 4px 0 0; font-size: 0.85rem; font-weight: bold; color: var(--fail); }
   .settings-save { display: block; width: 100%; margin: 8px 0 12px; font-weight: bold; }
+  /* Issue #580: 保存の帯は画面の下に固定する(sticky。最後の子なので項目を隠さない)。下の余白は端末の安全領域。ボタンは幅いっぱい・高さ 44px 以上。 */
+  .settings-bar { position: sticky; bottom: 0; z-index: 5; margin: 16px -16px 0; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--bg); border-top: 1px solid var(--line); }
+  .settings-bar .notice { margin: 0 0 8px; }
+  .settings-bar .settings-save { margin: 0; }
+  .settings-bar-status { margin: 0 0 8px; font-size: 0.9rem; font-weight: bold; }
+  /* 既定のバッジと「変更あり」の印は文字で出す(色だけに頼らない)。変えた項目は左に線も引く */
+  .field-badge, .field-changed { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; font-size: 0.75rem; font-weight: normal; color: var(--muted); }
+  .field-changed { border-color: var(--brand); color: var(--brand); font-weight: bold; }
+  .field.changed { padding-left: 8px; border-left: 4px solid var(--brand); }
+  .field-yen { margin: 4px 0 0; min-height: 1.5em; font-size: 1rem; font-weight: bold; }
   /* Issue #218: スコアリングの重みの節(入力欄は通常の項目と同じ縦並び。ボタンは幅 100%・高さ 44px 以上) */
   .weights { margin: 24px 0 16px; padding-top: 8px; border-top: 1px solid var(--line); }
   .weights h2 { margin: 8px 0 4px; font-size: 1.05rem; }

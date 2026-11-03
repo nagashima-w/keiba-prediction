@@ -659,12 +659,19 @@ function settingsField(field: FieldModel, actions: ViewActions): VNode {
       control = h("input", { ...common, type: "text", value: String(field.value), ...(field.inputmode === null ? {} : { inputmode: field.inputmode }) }, [], onTyped);
       break;
   }
+  // 既定のバッジと「変更あり」の印(Issue #580)。印は文字で出す(色だけに頼らない)。
+  const tags: VNode[] = [
+    ...(field.badge === null ? [] : [h("span", { class: "field-badge" }, [field.badge])]),
+    ...(field.changed ? [h("span", { class: "field-changed" }, ["変更あり"])] : []),
+  ];
   const label =
     field.kind === "checkbox"
-      ? h("label", { class: "field-check" }, [control, h("span", {}, [field.label])])
-      : h("label", { class: "field-label" }, [h("span", { class: "field-name" }, [field.label]), control]);
-  return h("div", { class: "field" }, [
+      ? h("label", { class: "field-check" }, [control, h("span", {}, [field.label, ...tags])])
+      : h("label", { class: "field-label" }, [h("span", { class: "field-name" }, [field.label, ...tags]), control]);
+  return h("div", { class: field.changed ? "field changed" : "field" }, [
     label,
+    // 金額の整形(「¥20,000」)。打つたびに `main.ts` が文字だけを書き換える(木は作り直さない)。
+    ...(field.yen === null ? [] : [h("p", { class: "field-yen", "data-yen-for": field.key }, [field.yen])]),
     ...(field.help === null ? [] : [h("p", { class: "field-help" }, [field.help])]),
     ...(field.error === null ? [] : [h("p", { class: "field-error", role: "alert" }, [field.error])]),
   ]);
@@ -727,17 +734,18 @@ function settingsScreen(model: SettingsModel, actions: ViewActions): VNode {
     if (model.weights !== null) {
       body.push(weightsSection(model.weights, actions));
     }
-    body.push(h("button", { class: "settings-save", disabled: model.saving }, [model.saving ? "保存中…" : "保存"], { click: actions.onSettingsSave }));
-    if (model.saveNotice !== null) {
-      body.push(
-        model.saveNotice.tone === "error"
-          ? h("p", { class: "notice error", role: "alert" }, [model.saveNotice.text])
-          : h("p", { class: "notice" }, [model.saveNotice.text]),
-      );
-    }
     if (model.preview !== null) {
       body.push(previewSection(model.preview, model.saving, actions));
     }
+    // Issue #580: 保存の帯は画面の下に固定する(CSS の sticky。スクロールしても見える)。最後の子にして、項目・プレビューを隠さない。
+    // 状態の文(保存済み・未保存・保存中・「保存しました」)は帯の中の 1 行。失敗だけは別の段落(role=alert)。
+    body.push(
+      h("div", { class: "settings-bar" }, [
+        ...(model.saveNotice !== null && model.saveNotice.tone === "error" ? [h("p", { class: "notice error", role: "alert" }, [model.saveNotice.text])] : []),
+        h("p", { class: "settings-bar-status", role: "status" }, [model.barStatus]),
+        h("button", { class: "settings-save", disabled: model.saving }, [model.saving ? "保存中…" : "保存"], { click: actions.onSettingsSave }),
+      ]),
+    );
   }
   return h("div", { class: "screen" }, [controls, h("h1", { class: "title" }, ["設定"]), ...body]);
 }

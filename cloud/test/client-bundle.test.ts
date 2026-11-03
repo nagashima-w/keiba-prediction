@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { buildPreviewText } from "../src/prompt-preview";
 import { buildClientJs, CLIENT_DIR, GENERATED_PATH, listBundledInputs, renderGeneratedModule } from "../build-client";
 import { CLIENT_JS } from "../src/client-bundle.generated";
+import { LIVE_SELECTORS } from "../client/settings-form";
 
 /**
  * Issue #184: クライアントのバンドル(`client/` → `src/client-bundle.generated.ts`)の検査。
@@ -49,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 243,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 245,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -301,7 +302,10 @@ describe("生成物のドリフトと決定性", () => {
     // (追記)Issue #579(日報・月報の回収率のタイルの色と文字、日報のレース行の損益): 上限は 242,000 から 243,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`): 241,899(163a5e36〈作業ブランチの起点〉の生成物)→ 242,725(+826。`pnpm run build:client` の出力〈「242725 バイト」〉)。
     // 計り方: 起点の生成物と今の生成物を、それぞれ `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` で測った。増えたのは、`report-model.ts` の `recoveryTile`・`moneyOf`・`netText`(「▲100%以上」「▼100%未満」の文言を含む)と、`view.ts` の `tilesNode` の注記・`reportRaceNode` の損益の行。
     // 新しい上限 243,000 の余裕は 243,000 - 242,725 = 275 バイト(500 バイト単位に切り上げ)。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(243_000);
+    // (追記)Issue #580(設定の画面: 下に固定した保存の帯・金額の「¥20,000」・既定のバッジと変更の印・未保存の判定・打つたびの文字の書き換え): 上限は 243,000 から 245,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`)は 242,725 → 244,541(+1,816)。
+    // 計り方: 起点(7df8a32d)の生成物と今の生成物を、それぞれ `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` で測った(今の値は `pnpm run build:client` の出力)。
+    // 新しい上限 245,000 の余裕は 245,000 - 244,541 = 459 バイト(500 バイト単位に切り上げ)。増えたのは日本語の文言(`\u` エスケープ)と `settings-form.ts` の整形・既定の判定・帯の文、`view.ts` の帯とバッジ。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(245_000);
   });
 });
 
@@ -629,6 +633,13 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
       replaced: 0,
       replaceChildren(...nodes: (FakeElement | FakeText)[]) { this.replaced += 1; this.children = nodes; },
       getAttribute: (name: string): string | null => (name === "data-role" ? role : null),
+      // Issue #580: 設定の画面の打つたびの書き換え(`main.ts` の patchText)が使う。偽の木から、設定の書き換え先の選択子(`.クラス` と `.クラス[data-yen-for="項目"]`)だけを探す。ほかの選択子は null。
+      querySelector(selector: string): FakeElement | null {
+        const m = /^\.([a-z-]+)(?:\[data-yen-for="(\w+)"\])?$/.exec(selector);
+        if (m === null) return null;
+        const hit = this.children.flatMap(flat).find((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("class")?.split(" ").includes(m[1]!) === true && (m[2] === undefined || n.attrs.get("data-yen-for") === m[2]));
+        return hit ?? null;
+      },
     };
     const listeners = new Map<string, (() => void)[]>();
     const calls: { url: string; init: { method?: string; credentials?: string; referrerPolicy?: string; body?: unknown; headers?: Record<string, string> } }[] = [];
@@ -866,6 +877,11 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(field("includeWideInAllocation").checked).toBe(true);
     expect(field("includeComboOdds").checked).toBeFalsy();
     field("bankroll").listeners.get("change")![0]!({ target: { value: "123456" } });
+    // Issue #580: 打つたびの書き換え(生成物の main.ts → 選択子 → textContent)。金額の整形と帯の文が、木を作り直さずに変わる
+    field("bankroll").listeners.get("input")![0]!({ target: { value: "123456" } });
+    const bankrollYen = (root.querySelector(LIVE_SELECTORS["yen-bankroll"]) as unknown as { textContent?: string } | null);
+    expect(bankrollYen?.textContent).toBe("¥123,456");
+    expect((root.querySelector(LIVE_SELECTORS["bar-status"]) as unknown as { textContent?: string } | null)?.textContent).toBe("未保存の変更があります");
     field("analysisModel").listeners.get("change")![0]!({ target: { value: "opus" } });
     field("includeComboOdds").listeners.get("change")![0]!({ target: { value: "on", checked: true } });
     field("biasWeightVenue").listeners.get("input")![0]!({ target: { value: "0.75" } }); // Issue #218: 重みの欄(生成物の実行)

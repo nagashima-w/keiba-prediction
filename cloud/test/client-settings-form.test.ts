@@ -2,8 +2,15 @@ import { describe, expect, it } from "vitest";
 import { CLIP_VARIANTS } from "@keiba/core/analyzer/clip-variants";
 import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/core/src/analysis/app-settings";
 import {
+  BAR_TEXT_CLEAN,
+  BAR_TEXT_DIRTY,
+  BAR_TEXT_SAVING,
   buildSettingsModel,
   draftFromSettings,
+  yenInputText,
+  LIVE_SELECTORS,
+  liveTargetOfYen,
+  SAVED_NOTICE,
   FIELD_ORDER,
   PREVIEW_LOADING_TEXT,
   resetWeightsInDraft,
@@ -464,8 +471,12 @@ describe("buildSettingsModel", () => {
 
   it("補助文: 各券種の配分は、組合せオッズの取得が OFF の間は効果がない旨と、既定が ON である旨。組合せの取得は、OFF の間は組合せの券種が配分に入らない旨と、地方の三連複・三連単は頭数ぶんのリクエストが要る旨", () => {
     const byKey = Object.fromEntries(buildSettingsModel(READY_INPUT()).fields.map((f) => [f.key, f.help ?? ""]));
+    const badges = Object.fromEntries(buildSettingsModel(READY_INPUT()).fields.map((f) => [f.key, f.badge]));
+    expect(badges["includeComboOdds"]).toBe("[既定: OFF]"); // 旧「既定は OFF です」
     for (const key of ["includeWideInAllocation", "includeQuinellaInAllocation", "includeBracketQuinellaInAllocation", "includeExactaInAllocation", "includeTrioInAllocation", "includeTrifectaInAllocation"]) {
-      expect(byKey[key], key).toContain("既定は ON");
+      // Issue #580: 「既定は ON です」は文から外し、バッジ「[既定: ON]」で読めるようにした(旧版が保証していた「既定が ON と分かる」は下の badge で保つ)
+      expect(byKey[key], key).not.toContain("既定は ON");
+      expect(badges[key], key).toBe("[既定: ON]");
       expect(byKey[key], key).toContain("OFF の間は効果がありません");
     }
     expect(byKey["includeComboOdds"]).toContain("OFF の間は、組合せの券種は配分に入りません");
@@ -769,5 +780,100 @@ describe("Issue #218: resetWeightsInDraft(「重みを既定値に戻す」。�
     expect(validateDraft(draft).ok).toBe(false);
     const result = validateDraft(resetWeightsInDraft(draft));
     expect(result).toEqual({ ok: true, settings: DEFAULT_CLOUD_SETTINGS });
+  });
+});
+
+
+describe("Issue #580: 金額の整形・既定のバッジ・変更の印・未保存の判定", () => {
+  const model = (over: Partial<SettingsModelInput> = {}) => buildSettingsModel({ ...READY_INPUT(), ...over });
+  const fieldOf = (m: ReturnType<typeof model>, key: string) => m.fields.find((f) => f.key === key)!;
+
+  it.each([
+    ["20000", "¥20,000"],
+    ["100000000", "¥100,000,000"],
+    [" 1500 ", "¥1,500"],
+    ["0", "¥0(未設定)"],
+    ["", ""],
+    ["abc", ""],
+    ["-5", ""],
+    ["12.5", ""],
+    ["1,000", ""],
+  ])("yenInputText(%j) = %j(整数だけ。入力の値の形式は変えない)", (text, expected) => {
+    expect(yenInputText(text)).toBe(expected);
+    if (expected !== "") expect(expected).not.toBe(text); // 整形が元の文字列と同じでない(素通りの実装を通さない)
+  });
+
+  it("金額の項目(資金・1レースの上限)だけが yen を持つ。値は下書きの文字のまま(整形は yen に別に出す)", () => {
+    const m = model({ draft: setDraftValue(setDraftValue(draftFromSettings(DEFAULT_CLOUD_SETTINGS), "bankroll", "20000"), "perRaceCap", "x") });
+    expect(fieldOf(m, "bankroll").yen).toBe("¥20,000");
+    expect(fieldOf(m, "bankroll").value).toBe("20000");
+    expect(fieldOf(m, "perRaceCap").yen).toBe("");
+    expect(m.fields.filter((f) => f.yen !== null).map((f) => f.key)).toEqual(["bankroll", "perRaceCap"]);
+    expect(model({ draft: draftFromSettings(DEFAULT_CLOUD_SETTINGS) }).weights!.groups.flatMap((g) => g.fields).every((f) => f.yen === null)).toBe(true);
+  });
+
+  it("バッジ: 既定値は DEFAULT_CLOUD_SETTINGS から取る。ラベル・補助文から外した既定の情報(0.5・0.05・2・45・1・ON/OFF・¥0)が、バッジで必ず読める", () => {
+    const m = model({ draft: draftFromSettings(DEFAULT_CLOUD_SETTINGS) });
+    const badges = Object.fromEntries(m.fields.map((f) => [f.key, f.badge]));
+    expect(badges["evThreshold"]).toBe("[既定: 1]");
+    expect(badges["kellyFraction"]).toBe("[既定: 0.5]");
+    expect(badges["minHitProb"]).toBe("[既定: 0.05]");
+    expect(badges["maxWinBetsPerRace"]).toBe("[既定: 2]");
+    expect(badges["maxPlaceBetsPerRace"]).toBe("[既定: 2]");
+    expect(badges["preRaceOffsetMinutes"]).toBe(`[既定: ${DEFAULT_CLOUD_SETTINGS.preRaceOffsetMinutes}]`);
+    expect(badges["preRaceOffsetMinutes"]).toBe("[既定: 45]");
+    expect(badges["bankroll"]).toBe("[既定: ¥0(未設定)]");
+    expect(badges["perRaceCap"]).toBe("[既定: ¥0(未設定)]");
+    expect(badges["includeComboOdds"]).toBe("[既定: OFF]");
+    expect(badges["includeTrifectaInAllocation"]).toBe("[既定: ON]");
+    // バッジは現在の値でなく既定(下書きを変えても同じ)
+    const changed = model({ draft: setDraftValue(draftFromSettings(DEFAULT_CLOUD_SETTINGS), "kellyFraction", "0.25") });
+    expect(fieldOf(changed, "kellyFraction").badge).toBe("[既定: 0.5]");
+    // 外した語は文に残らない
+    const texts = m.fields.map((f) => `${f.label}${f.help ?? ""}`).join("\n");
+    expect(texts).not.toMatch(/既定(は|1\.0| \d)/);
+  });
+
+  it("選択・追加指示・重みにはバッジを付けない(選択肢のラベルが既定を示す)", () => {
+    const m = model({ draft: draftFromSettings(DEFAULT_CLOUD_SETTINGS) });
+    for (const k of ["clipVariant", "analysisModel", "additionalInstruction"]) expect(fieldOf(m, k).badge, k).toBeNull();
+    expect(m.weights!.groups.flatMap((g) => g.fields).map((f) => f.badge)).toEqual(Array(15).fill(null));
+  });
+
+  it("changed: 既定のままなら false、変えた項目だけ true(数値は数で比べる=0.50 は 0.5 と同じ。数に読めない入力は変えた扱い。真偽・選択・追加指示・重みも)", () => {
+    const base = draftFromSettings(DEFAULT_CLOUD_SETTINGS);
+    expect(model({ draft: base }).fields.some((f) => f.changed)).toBe(false);
+    expect(model({ draft: base }).weights!.groups.flatMap((g) => g.fields).some((f) => f.changed)).toBe(false);
+    const draft = [
+      ["kellyFraction", "0.50"], // 同じ値
+      ["minHitProb", "0.1"], // 変更
+      ["evThreshold", "abc"], // 数に読めない
+      ["includeWideInAllocation", "false"],
+      ["clipVariant", "wide15"],
+      ["additionalInstruction", "x"],
+      ["biasWeightVenue", "2"],
+    ].reduce((d, [k, v]) => setDraftValue(d, k as never, v!), base);
+    const m = model({ draft });
+    const changedKeys = [...m.fields, ...m.weights!.groups.flatMap((g) => g.fields)].filter((f) => f.changed).map((f) => f.key);
+    expect(changedKeys.sort()).toEqual(["additionalInstruction", "biasWeightVenue", "clipVariant", "evThreshold", "includeWideInAllocation", "minHitProb"].sort());
+  });
+
+  it("帯の状態の文: 保存中 > 未保存 > 保存しました > 変更なし の優先。dirty は入力から渡す", () => {
+    const text = (over: Partial<SettingsModelInput>) => model(over).barStatus;
+    expect(text({})).toBe(BAR_TEXT_CLEAN);
+    expect(text({ dirty: true })).toBe(BAR_TEXT_DIRTY);
+    expect(text({ save: { kind: "saving" }, dirty: true })).toBe(BAR_TEXT_SAVING);
+    expect(text({ save: { kind: "saved" } })).toBe(SAVED_NOTICE);
+    expect(text({ save: { kind: "saved" }, dirty: true })).toBe(BAR_TEXT_DIRTY);
+    expect(new Set([BAR_TEXT_CLEAN, BAR_TEXT_DIRTY, BAR_TEXT_SAVING, SAVED_NOTICE]).size).toBe(4);
+    expect(model({ dirty: true }).dirty).toBe(true);
+    expect(model({}).dirty).toBe(false);
+  });
+
+  it("書き換え先の選択子は定数の 3 つだけ。金額の項目以外は書き換え先を持たない", () => {
+    expect(Object.keys(LIVE_SELECTORS).sort()).toEqual(["bar-status", "yen-bankroll", "yen-perRaceCap"]);
+    expect(liveTargetOfYen("bankroll")).toBe("yen-bankroll");
+    expect(liveTargetOfYen("perRaceCap")).toBe("yen-perRaceCap");
+    expect(liveTargetOfYen("kellyFraction")).toBeNull();
   });
 });
