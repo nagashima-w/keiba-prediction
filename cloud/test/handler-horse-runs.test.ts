@@ -57,7 +57,7 @@ function harness(totals: readonly TotalsRow[] = [API_TOTALS]): Harness {
             first: async () => {
               await run();
               if (sql.includes("COALESCE(SUM(n)")) {
-                return { cells: 4, runs: 40, n10: 2, n30: 1, n100: 0 };
+                return sql.includes("source = 'result'") ? { cells: 6, runs: 90, n10: 4, n30: 2, n100: 0, resultRuns: 50 } : { cells: 4, runs: 40, n10: 2, n30: 1, n100: 0 };
               }
               return null;
             },
@@ -130,6 +130,7 @@ describe("GET /api/horse-runs: 診断", () => {
     expect(body.saves.days).toBe(7);
     expect(body.saves.sinceMs).toBe(NOW.getTime() - 7 * 86_400_000);
     expect(body.cells).toStrictEqual({ cells: 4, runs: 40, n10: 2, n30: 1, n100: 0 });
+    expect((body as { cellsWithResult?: unknown }).cellsWithResult).toStrictEqual({ cells: 6, runs: 90, n10: 4, n30: 2, n100: 0, resultRuns: 50 }); // Issue #591
     expect(h.sqls.some((s) => s.includes("COALESCE(SUM(n)"))).toBe(true);
   });
 

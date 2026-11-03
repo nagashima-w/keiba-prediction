@@ -309,13 +309,19 @@ export interface HorseRunsStatus {
   readonly resultRows: ResultRowsStatus;
   /** `cells=1` のときだけ。戦績 API 由来の中央の走を、騎手 × 競馬場 × 芝ダ × 距離帯(200m)のセルに分けた走数の分布(段階 E の判断材料)。 */
   readonly cells?: { readonly cells: number; readonly runs: number; readonly n10: number; readonly n30: number; readonly n100: number };
+  /**
+   * `cells=1` のときだけ(Issue #591)。{@link HorseRunsStatus.cells} と同じ見方で、**結果ページ由来の行(`source = 'result'`)も数えた**分布。
+   * 11/10 の #256 の判断(段階 E)で、過去の結果から入れた行を含めたセルの厚みを見るためのもの。`resultRuns` は、そのうち結果ページ由来の走数。
+   * 同じ (馬, レース) は主キーで 1 行なので、戦績 API の行と結果ページ由来の行を二重に数えることは無い(戦績 API の保存は結果ページ由来の行を置き換える)。
+   */
+  readonly cellsWithResult?: { readonly cells: number; readonly runs: number; readonly n10: number; readonly n30: number; readonly n100: number; readonly resultRuns: number };
   /** 段階Aの限界(診断の読み手に伝える固定文)。 */
   readonly note: string;
 }
 
 export const STATUS_NOTE =
   "段階A: 保存は事前分析(morning)の計算ステップだけ。手動の発走前だけの分析(事前分析を経ない)の戦績は貯まらない。読み出し・集計は段階Aに無い(この診断だけ)。" +
-  "table・cells・saves は戦績 API 由来の行だけの集計で、過去の結果ページから変換した行(source = 'result')は含まない。その件数は resultRows に別に出す。";
+  "table・cells・saves は戦績 API 由来の行だけの集計で、過去の結果ページから変換した行(source = 'result')は含まない。その件数は resultRows に別に出す。結果ページ由来の行も数えたセルの分布は、cells=1 のときの cellsWithResult(Issue #591)。";
 
 export interface StatusOptions {
   /** 保存の記録を読む期間の始点(エポックミリ秒)。 */
@@ -323,6 +329,19 @@ export interface StatusOptions {
   readonly days: number;
   /** true のときだけ、セルの分布を数える(horse_runs の全件走査)。 */
   readonly cells: boolean;
+}
+
+/**
+ * セルの分布の SQL。中央・騎手 ID・競馬場・芝ダ・距離のある走を、騎手 × 競馬場 × 芝ダ × 距離帯(200m)で数える。
+ * `sourceWhere` は出どころの条件(定数だけ。利用者の入力は入らない)、`resultFlag` は結果ページ由来の走を 1 と数える式。
+ */
+function cellsSql(sourceWhere: string, resultFlag: string): string {
+  return (
+    "SELECT COUNT(*) AS cells, COALESCE(SUM(n), 0) AS runs, COALESCE(SUM(n >= 10), 0) AS n10, COALESCE(SUM(n >= 30), 0) AS n30, COALESCE(SUM(n >= 100), 0) AS n100, COALESCE(SUM(r), 0) AS resultRuns FROM (" +
+    `SELECT COUNT(*) AS n, SUM(${resultFlag}) AS r FROM horse_runs WHERE ${sourceWhere} AND json_extract(data, '$[6]') = '中央' AND json_extract(data, '$[14]') IS NOT NULL ` +
+    "AND json_extract(data, '$[1]') IS NOT NULL AND json_extract(data, '$[16]') IS NOT NULL AND json_extract(data, '$[17]') IS NOT NULL " +
+    "GROUP BY json_extract(data, '$[1][1]'), json_extract(data, '$[16]'), CAST(json_extract(data, '$[17]') AS INTEGER) / 200, json_extract(data, '$[14]'))"
+  );
 }
 
 /** 状態を読む(読み取りだけ。失敗は投げる)。 */
@@ -412,13 +431,21 @@ export async function readHorseRunsStatus(db: HorseRunsDb, options: StatusOption
   if (!options.cells) {
     return status;
   }
-  const cells = await db
-    .prepare(
-      "SELECT COUNT(*) AS cells, COALESCE(SUM(n), 0) AS runs, COALESCE(SUM(n >= 10), 0) AS n10, COALESCE(SUM(n >= 30), 0) AS n30, COALESCE(SUM(n >= 100), 0) AS n100 FROM (" +
-        "SELECT COUNT(*) AS n FROM horse_runs WHERE source IS NULL AND json_extract(data, '$[6]') = '中央' AND json_extract(data, '$[14]') IS NOT NULL " +
-        "AND json_extract(data, '$[1]') IS NOT NULL AND json_extract(data, '$[16]') IS NOT NULL AND json_extract(data, '$[17]') IS NOT NULL " +
-        "GROUP BY json_extract(data, '$[1][1]'), json_extract(data, '$[16]'), CAST(json_extract(data, '$[17]') AS INTEGER) / 200, json_extract(data, '$[14]'))",
-    )
-    .first<{ cells: number; runs: number; n10: number; n30: number; n100: number }>();
-  return { ...status, cells: { cells: cells?.cells ?? 0, runs: cells?.runs ?? 0, n10: cells?.n10 ?? 0, n30: cells?.n30 ?? 0, n100: cells?.n100 ?? 0 } };
+  const cells = await db.prepare(cellsSql("source IS NULL", "0")).first<{ cells: number; runs: number; n10: number; n30: number; n100: number }>();
+  // 結果ページ由来を含むセル(Issue #591)。出どころが NULL・'result' 以外の行は数えない。
+  const withResult = await db
+    .prepare(cellsSql(`(source IS NULL OR source = '${SOURCE_RESULT}')`, `CASE WHEN source = '${SOURCE_RESULT}' THEN 1 ELSE 0 END`))
+    .first<{ cells: number; runs: number; n10: number; n30: number; n100: number; resultRuns: number }>();
+  return {
+    ...status,
+    cells: { cells: cells?.cells ?? 0, runs: cells?.runs ?? 0, n10: cells?.n10 ?? 0, n30: cells?.n30 ?? 0, n100: cells?.n100 ?? 0 },
+    cellsWithResult: {
+      cells: withResult?.cells ?? 0,
+      runs: withResult?.runs ?? 0,
+      n10: withResult?.n10 ?? 0,
+      n30: withResult?.n30 ?? 0,
+      n100: withResult?.n100 ?? 0,
+      resultRuns: withResult?.resultRuns ?? 0,
+    },
+  };
 }
