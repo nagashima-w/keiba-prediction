@@ -578,6 +578,12 @@ export function buildArchiveNoticeEmbed(notice: ArchiveNotice): CloudEmbed {
         description: `【停止】R2 の操作回数の柵に達しました(${jstMonthDayTime(notice.at)})。${jstMonthDayTime(notice.resumeAt)}(次の晩)に自動で再開します。`,
         color: COLOR_ORANGE,
       });
+    case "rows-budget":
+      return fitEmbed({
+        title: "過去の結果の取得を止めました",
+        description: `【停止】今夜の読み取り行数の予算を超えました(${notice.rowsRead.toLocaleString("en-US")} 行 / 予算 ${notice.limit.toLocaleString("en-US")} 行。${jstMonthDayTime(notice.at)})。${jstMonthDayTime(notice.resumeAt)}(次の晩)に自動で再開します。毎晩止まるときは、全走査が戻っていないか確かめてください。`,
+        color: COLOR_ORANGE,
+      });
     case "failures": {
       const cls = notice.lastClass.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40);
       return fitEmbed({

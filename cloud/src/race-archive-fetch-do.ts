@@ -19,6 +19,7 @@ import { buildArchiveNoticeEmbed } from "./notify-embeds";
 import { createDiscordNotifier } from "./notify-send";
 import {
   ARCHIVE_NIGHTLY_LIMIT_MAX,
+  ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX,
   isArchiveFetchDisabled,
   RaceArchiveFetchCore,
   type ArchiveFetchOptions,
@@ -46,6 +47,8 @@ export interface RaceArchiveFetchEnv {
    * ★止める var を `RACE_ARCHIVE_FETCH` にしてはならない: それは DO の binding の名前で、同じ名前の var は binding と衝突する(env.RACE_ARCHIVE_FETCH が文字列になり、DO を引けなくなる)。
    */
   RACE_ARCHIVE_NIGHTLY_LIMIT?: string;
+  /** 任意。1 晩に core の SQL が読む行数の予算(Issue #593。1 以上の整数。未設定・不正な値は既定の 100 万行)。超えた晩は取得を止めて通知する。 */
+  RACE_ARCHIVE_NIGHTLY_ROWS_LIMIT?: string;
 }
 
 export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
@@ -101,7 +104,8 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
    */
   protected options(): ArchiveFetchOptions {
     const nightlyLimit = parseLimitOverride(this.env.RACE_ARCHIVE_NIGHTLY_LIMIT, ARCHIVE_NIGHTLY_LIMIT_MAX);
-    return { ...(isArchiveFetchDisabled(this.env.RACE_ARCHIVE_NIGHTLY_LIMIT) ? { disabled: true } : {}), ...(nightlyLimit === null ? {} : { nightlyLimit }) };
+    const nightlyRowsLimit = parseLimitOverride(this.env.RACE_ARCHIVE_NIGHTLY_ROWS_LIMIT, ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX);
+    return { ...(nightlyRowsLimit === null ? {} : { nightlyRowsLimit }), ...(isArchiveFetchDisabled(this.env.RACE_ARCHIVE_NIGHTLY_LIMIT) ? { disabled: true } : {}), ...(nightlyLimit === null ? {} : { nightlyLimit }) };
   }
 
   /** アラームが無ければ張る(RPC)。cron の `scheduled` が 21 時と 23 時に呼ぶ。 */

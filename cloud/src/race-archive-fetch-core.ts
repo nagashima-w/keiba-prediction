@@ -82,6 +82,15 @@ export const ARCHIVE_WINDOW_START_MIN = 0;
 export const ARCHIVE_WINDOW_END_MIN = 8 * 60 + 30;
 /** リクエストどうしの最低間隔(ミリ秒。開始から開始まで)。gate の 2 秒に加えて、この取得はさらにあける(ユーザーの決定)。 */
 export const ARCHIVE_REQUEST_INTERVAL_MS = 5000;
+/**
+ * 1 晩に core の SQL が読む行数の予算の既定(Issue #593。DO の SQLite の rows_read は無料枠が 1 日 500 万行)。回帰して全走査が戻っても、1 日の枠を使い切る前に止める守り。
+ * 索引ありの 1 起床は約 80 行(月の表の約 61 行が大半)で、窓 8 時間半・約 5,300 起床/晩で約 42 万行。Worker の var `RACE_ARCHIVE_NIGHTLY_ROWS_LIMIT` で変える。
+ */
+export const ARCHIVE_NIGHTLY_ROWS_LIMIT = 1_000_000;
+/** その var の上限(これを超える値は既定に戻す)。 */
+export const ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX = 100_000_000;
+/** 数えた読み取り行数を保存する間隔(前回の保存からこれだけ増えたとき)。起床ごとには書かない。DO が追い出されて失う数え漏れの上限でもある。 */
+export const ARCHIVE_ROWS_PERSIST_STEP = 10_000;
 /** 取る範囲の最初の月(中央の過去 5 年。#532)。 */
 export const ARCHIVE_FROM_MONTH = "2021-11";
 /** gate の待ち(進行中 + 待ち)がこの数以上なら出さない。 */
@@ -121,6 +130,8 @@ export interface ArchiveFetchOptions {
   readonly disabled?: boolean;
   /** 1 晩のリクエスト数の上限(下げる方向の上書き)。省略は上限なし。 */
   readonly nightlyLimit?: number;
+  /** 1 晩に core の SQL が読む行数の予算(省略は {@link ARCHIVE_NIGHTLY_ROWS_LIMIT})。これを超えた晩は取得を止める。 */
+  readonly nightlyRowsLimit?: number;
   readonly notBeforeMs?: number;
   readonly windowStartMin?: number;
   readonly windowEndMin?: number;
@@ -159,6 +170,7 @@ export type ArchiveNotice =
     }
   | { readonly kind: "capacity"; readonly reason: "db-size" | "db-size-unknown"; readonly dbSizeBytes: number | null; readonly at: number; readonly totalDone: number }
   | { readonly kind: "r2-fence"; readonly at: number; readonly resumeAt: number }
+  | { readonly kind: "rows-budget"; readonly at: number; readonly resumeAt: number; readonly rowsRead: number; readonly limit: number }
   | { readonly kind: "failures"; readonly count: number; readonly lastClass: string; readonly at: number; readonly resumeAt: number };
 
 export interface RaceArchiveFetchDeps {
@@ -272,6 +284,10 @@ export class RaceArchiveFetchCore {
   private readonly deps: RaceArchiveFetchDeps;
   private readonly disabled: boolean;
   private readonly nightlyLimit: number | null;
+  private readonly nightlyRowsLimit: number;
+  /** その晩に読んだ行数(メモリ。{@link ARCHIVE_ROWS_PERSIST_STEP} 行増えるたびと、区切り・停止時に `night_rows_read` へ保存する)。 */
+  private rowsRead = 0;
+  private rowsReadSaved = 0;
   private readonly notBefore: number;
   private readonly startMin: number;
   private readonly endMin: number;
@@ -283,6 +299,7 @@ export class RaceArchiveFetchCore {
     this.deps = deps;
     this.disabled = options.disabled === true;
     this.nightlyLimit = options.nightlyLimit ?? null;
+    this.nightlyRowsLimit = options.nightlyRowsLimit ?? ARCHIVE_NIGHTLY_ROWS_LIMIT;
     this.notBefore = options.notBeforeMs ?? ARCHIVE_NOT_BEFORE_MS;
     this.startMin = options.windowStartMin ?? ARCHIVE_WINDOW_START_MIN;
     this.endMin = options.windowEndMin ?? ARCHIVE_WINDOW_END_MIN;
@@ -302,6 +319,29 @@ export class RaceArchiveFetchCore {
       `CREATE TABLE IF NOT EXISTS ra_race (
          race_id TEXT PRIMARY KEY, date TEXT NOT NULL, seq INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', nights INTEGER NOT NULL DEFAULT 0, last_night TEXT, last_class TEXT) WITHOUT ROWID`,
     );
+    // 起床ごとの選択・数え上げが表の全部を読まないための索引(Issue #593)。向きは `ORDER BY date DESC, seq ASC` に合わせる(一時表を作らない)。
+    // 索引は書き込みを増やす(作成は表の行数ぶん 1 回、以後は status が変わる更新ごとに +数行)ので、この 2 本に絞る。ra_month は約 60 行なので要らない。
+    deps.sql.exec("CREATE INDEX IF NOT EXISTS ra_race_status_date ON ra_race (status, date DESC, seq)");
+    deps.sql.exec("CREATE INDEX IF NOT EXISTS ra_day_status_date ON ra_day (status, date DESC)");
+    this.rowsRead = this.metaNum("night_rows_read");
+    this.rowsReadSaved = this.rowsRead;
+  }
+
+  /** core の SQL の実行の出口。カーソルの `rowsRead`(本物の DO だけが返す)を足し上げて、1 晩の読み取り行数の予算に使う。結果はここで取り出す。 */
+  private q(query: string, ...bindings: unknown[]): { toArray(): any[] } {
+    const cursor = this.deps.sql.exec(query, ...bindings);
+    const rows = cursor.toArray();
+    this.rowsRead += cursor.rowsRead ?? 0;
+    return { toArray: () => rows };
+  }
+
+  /** 数えた行数を保存する(`force` でなければ、前回の保存から一定行数増えたときだけ。起床ごとの書き込みを増やさない)。 */
+  private persistRowsRead(force: boolean): void {
+    if (this.rowsRead === this.rowsReadSaved || (!force && this.rowsRead - this.rowsReadSaved < ARCHIVE_ROWS_PERSIST_STEP)) {
+      return;
+    }
+    this.rowsReadSaved = this.rowsRead;
+    this.metaSet("night_rows_read", String(this.rowsRead));
   }
 
   // ---- 状態の読み書き ----
@@ -314,7 +354,7 @@ export class RaceArchiveFetchCore {
     if (cached !== undefined) {
       return cached;
     }
-    const rows = this.deps.sql.exec("SELECT value FROM ra_meta WHERE key = ?", key).toArray() as { value: string }[];
+    const rows = this.q("SELECT value FROM ra_meta WHERE key = ?", key).toArray() as { value: string }[];
     const value = rows[0]?.value ?? null;
     this.metaCache.set(key, value);
     return value;
@@ -325,14 +365,14 @@ export class RaceArchiveFetchCore {
     if (this.metaGet(key) === value) {
       return;
     }
-    this.deps.sql.exec("INSERT INTO ra_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+    this.q("INSERT INTO ra_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
     this.metaCache.set(key, value);
   }
 
   private metaDelete(...keys: string[]): void {
     for (const key of keys) {
       if (this.metaGet(key) !== null) {
-        this.deps.sql.exec("DELETE FROM ra_meta WHERE key = ?", key);
+        this.q("DELETE FROM ra_meta WHERE key = ?", key);
         this.metaCache.set(key, null);
       }
     }
@@ -350,7 +390,7 @@ export class RaceArchiveFetchCore {
   }
 
   private count(sql: string, ...binds: unknown[]): number {
-    return ((this.deps.sql.exec(sql, ...binds).toArray() as { n: number }[])[0]?.n ?? 0) as number;
+    return ((this.q(sql, ...binds).toArray() as { n: number }[])[0]?.n ?? 0) as number;
   }
 
   // ---- アラーム ----
@@ -426,6 +466,7 @@ export class RaceArchiveFetchCore {
     }
     try {
       await this.step();
+      this.persistRowsRead(false);
     } catch (error) {
       this.deps.log(`race-archive: step failed error=${errorKind(error)}`, "error");
       try {
@@ -491,6 +532,10 @@ export class RaceArchiveFetchCore {
       return;
     }
 
+    if (this.rowsRead > this.nightlyRowsLimit) {
+      await this.stopNight("rows-budget", now);
+      return;
+    }
     if (this.nightlyLimit !== null && this.metaNum("night_requests") >= this.nightlyLimit) {
       this.setWait("night-limit");
       await this.arm(nextNightStart(now, this.startMin));
@@ -531,7 +576,7 @@ export class RaceArchiveFetchCore {
       if (work.kind === "race") {
         const entry = await this.deps.archive.getCatalogEntry(work.id);
         if (entry !== null) {
-          this.deps.sql.exec("UPDATE ra_race SET status = 'done', last_class = 'existing' WHERE race_id = ?", work.id);
+          this.q("UPDATE ra_race SET status = 'done', last_class = 'existing' WHERE race_id = ?", work.id);
           this.closeDayIfDone(work.date);
           continue;
         }
@@ -557,6 +602,9 @@ export class RaceArchiveFetchCore {
     this.metaSet("night_saved", "0");
     this.metaSet("night_failed", "0");
     this.metaSet("fail_streak", "0");
+    this.metaSet("night_rows_read", "0");
+    this.rowsRead = 0;
+    this.rowsReadSaved = 0;
   }
 
   /** その晩、取ってよいか(夜ごとに 1 回判定してその晩は使い回す。判定不能は 10 分おきに引き直す)。 */
@@ -589,7 +637,7 @@ export class RaceArchiveFetchCore {
       return;
     }
     for (const month of monthsBetween(this.fromMonth, monthOfDate(night))) {
-      this.deps.sql.exec("INSERT OR IGNORE INTO ra_month (month) VALUES (?)", month);
+      this.q("INSERT OR IGNORE INTO ra_month (month) VALUES (?)", month);
     }
     this.metaSet("months_seeded", night);
   }
@@ -599,8 +647,7 @@ export class RaceArchiveFetchCore {
     const cur = monthOfDate(night);
     const prev = previousMonth(cur);
     const month = (
-      this.deps.sql
-        .exec(
+      this.q(
           `SELECT month FROM ra_month
            WHERE COALESCE(last_night, '') <> ? AND status <> 'dead' AND (status = 'pending' OR (month IN (?, ?) AND COALESCE(fetched_on, '') <> ?))
            ORDER BY month DESC LIMIT 1`,
@@ -615,16 +662,14 @@ export class RaceArchiveFetchCore {
       return { kind: "month", id: month.month };
     }
     const race = (
-      this.deps.sql
-        .exec("SELECT race_id, date FROM ra_race WHERE status = 'pending' AND date < ? AND COALESCE(last_night, '') <> ? ORDER BY date DESC, seq ASC LIMIT 1", night, night)
+      this.q("SELECT race_id, date FROM ra_race WHERE status = 'pending' AND date < ? AND COALESCE(last_night, '') <> ? ORDER BY date DESC, seq ASC LIMIT 1", night, night)
         .toArray() as { race_id: string; date: string }[]
     )[0];
     if (race !== undefined) {
       return { kind: "race", id: race.race_id, date: race.date };
     }
     const day = (
-      this.deps.sql
-        .exec("SELECT date FROM ra_day WHERE status = 'pending' AND date < ? AND COALESCE(last_night, '') <> ? ORDER BY date DESC LIMIT 1", night, night)
+      this.q("SELECT date FROM ra_day WHERE status = 'pending' AND date < ? AND COALESCE(last_night, '') <> ? ORDER BY date DESC LIMIT 1", night, night)
         .toArray() as { date: string }[]
     )[0];
     return day === undefined ? null : { kind: "day", id: day.date };
@@ -749,17 +794,17 @@ export class RaceArchiveFetchCore {
     switch (work.kind) {
       case "month": {
         for (const date of (this.deps.parseCalendarDates ?? parseCalendarKaisaiDates)(text, work.id)) {
-          this.deps.sql.exec("INSERT OR IGNORE INTO ra_day (date) VALUES (?)", date);
+          this.q("INSERT OR IGNORE INTO ra_day (date) VALUES (?)", date);
         }
-        this.deps.sql.exec("UPDATE ra_month SET status = 'done', fetched_on = ?, last_class = NULL WHERE month = ?", night, work.id);
+        this.q("UPDATE ra_month SET status = 'done', fetched_on = ?, last_class = NULL WHERE month = ?", night, work.id);
         this.metaSet("fail_streak", "0");
         return "ok";
       }
       case "day": {
         (this.deps.parseListIds ?? ((html: string) => parseListRaceIds(html, "central")))(text).forEach((id, seq) => {
-          this.deps.sql.exec("INSERT OR IGNORE INTO ra_race (race_id, date, seq) VALUES (?, ?, ?)", id, work.id, seq);
+          this.q("INSERT OR IGNORE INTO ra_race (race_id, date, seq) VALUES (?, ?, ?)", id, work.id, seq);
         });
-        this.deps.sql.exec("UPDATE ra_day SET status = 'listed', last_class = NULL WHERE date = ?", work.id);
+        this.q("UPDATE ra_day SET status = 'listed', last_class = NULL WHERE date = ?", work.id);
         this.closeDayIfDone(work.id);
         this.metaSet("fail_streak", "0");
         return "ok";
@@ -772,7 +817,7 @@ export class RaceArchiveFetchCore {
   private async processResult(work: Extract<Work, { kind: "race" }>, night: string, html: string, at: number): Promise<"ok" | "failed" | "stopped"> {
     const built = (this.deps.buildRecord ?? buildRaceRecord)(html, work.id, "central");
     if (!built.ok) {
-      this.deps.sql.exec("UPDATE ra_race SET status = 'skipped', last_class = ?, last_night = ? WHERE race_id = ?", built.category, night, work.id);
+      this.q("UPDATE ra_race SET status = 'skipped', last_class = ?, last_night = ? WHERE race_id = ?", built.category, night, work.id);
       this.closeDayIfDone(work.date);
       this.metaSet("fail_streak", "0");
       return "ok";
@@ -792,7 +837,7 @@ export class RaceArchiveFetchCore {
       }
       return "stopped";
     }
-    this.deps.sql.exec("UPDATE ra_race SET status = 'done', last_class = NULL WHERE race_id = ?", work.id);
+    this.q("UPDATE ra_race SET status = 'done', last_class = NULL WHERE race_id = ?", work.id);
     this.closeDayIfDone(work.date);
     this.bump("night_saved");
     this.metaSet("db_size", String(saved.dbSizeBytes));
@@ -804,7 +849,7 @@ export class RaceArchiveFetchCore {
   /** その日のレースが残っていなければ、日を完了にする。 */
   private closeDayIfDone(date: string): void {
     if (this.count("SELECT COUNT(*) AS n FROM ra_race WHERE date = ? AND status = 'pending'", date) === 0) {
-      this.deps.sql.exec("UPDATE ra_day SET status = 'done' WHERE date = ? AND status = 'listed'", date);
+      this.q("UPDATE ra_day SET status = 'done' WHERE date = ? AND status = 'listed'", date);
     }
   }
 
@@ -815,11 +860,11 @@ export class RaceArchiveFetchCore {
     const dead = `CASE WHEN status = 'pending' AND nights + (CASE WHEN COALESCE(last_night, '') <> ? THEN 1 ELSE 0 END) >= ${ARCHIVE_MAX_NIGHTS} THEN 'dead' ELSE status END`;
     const bumpNights = "nights + (CASE WHEN COALESCE(last_night, '') <> ? THEN 1 ELSE 0 END)";
     if (work.kind === "month") {
-      this.deps.sql.exec(`UPDATE ra_month SET status = ${dead}, nights = ${bumpNights}, last_night = ?, last_class = ? WHERE month = ?`, night, night, night, cls, work.id);
+      this.q(`UPDATE ra_month SET status = ${dead}, nights = ${bumpNights}, last_night = ?, last_class = ? WHERE month = ?`, night, night, night, cls, work.id);
     } else if (work.kind === "day") {
-      this.deps.sql.exec(`UPDATE ra_day SET status = ${dead}, nights = ${bumpNights}, last_night = ?, last_class = ? WHERE date = ?`, night, night, night, cls, work.id);
+      this.q(`UPDATE ra_day SET status = ${dead}, nights = ${bumpNights}, last_night = ?, last_class = ? WHERE date = ?`, night, night, night, cls, work.id);
     } else {
-      this.deps.sql.exec(`UPDATE ra_race SET status = ${dead}, nights = ${bumpNights}, last_night = ?, last_class = ? WHERE race_id = ?`, night, night, night, cls, work.id);
+      this.q(`UPDATE ra_race SET status = ${dead}, nights = ${bumpNights}, last_night = ?, last_class = ? WHERE race_id = ?`, night, night, night, cls, work.id);
     }
     this.bump("night_failed");
     // 「連続で失敗」に数えるのは、netkeiba 側の不調か、こちらの処理の失敗だけ(5xx・network・timeout・保存の例外・読み取りの例外)。
@@ -858,12 +903,20 @@ export class RaceArchiveFetchCore {
   }
 
   /** R2 の柵に達した。次の晩に自動で再開する(自動再開の権利は使わない)。 */
-  private async stopNight(kind: "r2-fence", at: number): Promise<void> {
+  private async stopNight(kind: "r2-fence" | "rows-budget", at: number): Promise<void> {
     const resumeAt = this.nightStopResumeAt(at);
     this.recordStop(kind, kind, at, resumeAt);
     this.metaSet("mode", "night-stopped");
     this.metaSet("resume_at", String(resumeAt));
+    this.persistRowsRead(true);
     this.deps.log(`race-archive: stopped kind=${kind}`, "error");
+    if (kind === "rows-budget") {
+      // 毎晩止まるのは回帰したとき。止まった晩ごとに 1 回だけ知らせる(止まった晩は次の晩まで起床しても、ここには来ない)。
+      this.queueNotice({ kind: "rows-budget", at, resumeAt, rowsRead: this.rowsRead, limit: this.nightlyRowsLimit });
+      await this.flushNotice(this.deps.now());
+      await this.arm(resumeAt);
+      return;
+    }
     // 柵は月単位なので、毎晩 1 リクエストを出して確かめる(次の晩に自動で再開し、また柵で止まる)。通知は止まった最初の 1 回だけ(保存に成功すると、また 1 回送る)。
     if (this.metaGet("fence_notified") !== "1") {
       this.metaSet("fence_notified", "1");
@@ -932,7 +985,7 @@ export class RaceArchiveFetchCore {
     const races = (status: string): number => this.count("SELECT COUNT(*) AS n FROM ra_race WHERE status = ?", status);
     const days = (status: string): number => this.count("SELECT COUNT(*) AS n FROM ra_day WHERE status = ?", status);
     const months = (status: string): number => this.count("SELECT COUNT(*) AS n FROM ra_month WHERE status = ?", status);
-    const skipped = this.deps.sql.exec("SELECT last_class AS cls, COUNT(*) AS n FROM ra_race WHERE status = 'skipped' GROUP BY last_class").toArray() as { cls: string | null; n: number }[];
+    const skipped = this.q("SELECT last_class AS cls, COUNT(*) AS n FROM ra_race WHERE status = 'skipped' GROUP BY last_class").toArray() as { cls: string | null; n: number }[];
     const lastStopRaw = this.metaGet("last_stop");
     const lastReq = this.metaGet("last_req_at");
     const dbSize = this.metaGet("db_size");
@@ -941,7 +994,7 @@ export class RaceArchiveFetchCore {
       waitReason: this.disabled ? "disabled" : (this.metaGet("wait_reason") ?? "none"),
       nextRunAt: this.disabled ? null : await this.deps.getAlarm(),
       notBeforeMs: this.notBefore,
-      night: { date: this.metaGet("night_date"), requests: this.metaNum("night_requests"), saved: this.metaNum("night_saved"), failed: this.metaNum("night_failed") },
+      night: { date: this.metaGet("night_date"), requests: this.metaNum("night_requests"), saved: this.metaNum("night_saved"), failed: this.metaNum("night_failed"), rowsRead: this.rowsRead },
       totals: {
         months: { pending: months("pending"), done: months("done"), dead: months("dead") },
         days: { pending: days("pending"), listed: days("listed"), done: days("done"), dead: days("dead") },

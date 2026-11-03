@@ -52,6 +52,13 @@ describe("buildArchiveNoticeEmbed", () => {
     expect(t).toContain("R2");
     expect(t).toContain("11/06 00:00");
   });
+  it("読み取り行数の予算: 読んだ行数・予算・次の晩に自動で再開することを出す", () => {
+    const t = text(buildArchiveNoticeEmbed({ kind: "rows-budget", at: AT, resumeAt: RESUME, rowsRead: 1_000_123, limit: 1_000_000 }));
+    expect(t).toContain("【停止】");
+    expect(t).toContain("1,000,123");
+    expect(t).toContain("1,000,000");
+    expect(t).toContain("11/06 00:00");
+  });
   it("連続失敗: その晩だけ止めたこと(止められたのではない)・件数・最後の分類・次の晩に普通に動くことを出す", () => {
     const t = text(buildArchiveNoticeEmbed({ kind: "failures", count: 10, lastClass: "http-500", at: AT, resumeAt: RESUME }));
     expect(t).toContain("【一時停止】");
@@ -69,6 +76,7 @@ describe("buildArchiveNoticeEmbed", () => {
       { kind: "refused", httpStatus: 400, stage: "calendar", at: AT, willAutoResume: true, resumeAt: RESUME, nightSaved: 1, totalDone: 2 },
       { kind: "capacity", reason: "db-size", dbSizeBytes: 400_000_001, at: AT, totalDone: 3 },
       { kind: "r2-fence", at: AT, resumeAt: RESUME },
+      { kind: "rows-budget", at: AT, resumeAt: RESUME, rowsRead: 5, limit: 4 },
       { kind: "failures", count: 10, lastClass: "timeout", at: AT, resumeAt: RESUME },
     ];
     for (const n of notices) {
