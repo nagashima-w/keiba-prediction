@@ -75,6 +75,19 @@ export interface TileView {
   readonly label: string;
   readonly value: string;
   readonly strong: boolean;
+  /** 回収率のタイルの損益(Issue #579)。`gain`: 丸める前の回収率が 100% 以上(損益ゼロを含む)、`loss`: 未満。回収率が無い・回収率のタイルでないときは省略。 */
+  readonly tone?: "gain" | "loss";
+  /** `tone` を文字でも示す注記(色だけに頼らない)。`tone` と同時に付く。 */
+  readonly toneText?: string;
+}
+
+/** 損益の金額(Issue #579)。レースごとの行の賭け金・払戻・差額。差額の色は `tone`(払戻が賭け金より多ければ gain、少なければ loss、同じなら none)。 */
+export interface RaceMoneyView {
+  readonly stake: string;
+  readonly payout: string;
+  /** 「+700円」「−300円」「±0円」(マイナスは U+2212)。 */
+  readonly net: string;
+  readonly tone: "gain" | "loss" | "none";
 }
 
 export interface RowView {
@@ -91,6 +104,8 @@ export interface RaceRowView {
   readonly marks: string | null;
   /** 買い目の成績(判定できたもの)。買い目が無ければその旨。 */
   readonly bets: string;
+  /** 賭け金・払戻・差額(Issue #579)。判定できた買い目が無いとき null。 */
+  readonly money: RaceMoneyView | null;
   /** LLM のレース別の一言。 */
   readonly comment: string | null;
 }
@@ -233,10 +248,29 @@ function betsText(r: ReportRace): string {
   return `買い目: ${parts.join("・")}`;
 }
 
+/** 差額の文言。マイナスは U+2212(狙い目の `netText` と同じ書き方)。 */
+function netText(net: number): string {
+  return net > 0 ? `+${formatYen(net)}` : net < 0 ? `\u2212${formatYen(-net)}` : "±0円";
+}
+
+function moneyOf(r: ReportRace): RaceMoneyView | null {
+  if (r.judgedBetCount === 0) return null;
+  const net = r.totalReturn - r.totalStake;
+  return { stake: formatYen(r.totalStake), payout: formatYen(r.totalReturn), net: netText(net), tone: net > 0 ? "gain" : net < 0 ? "loss" : "none" };
+}
+
 function raceRow(r: ReportRace): RaceRowView {
   const result = r.hasResult ? (r.top3.length === 0 ? "着順の記録なし" : r.top3.map((t) => `${t.finishPosition}着 ${horseText(t.umaban, t.name)}`).join(" / ")) : "結果なし(未取得・中止などで取り込めていません)";
   const marks = r.marks.length === 0 ? null : r.marks.map((m) => `${m.mark} ${horseText(m.umaban, m.name)}${m.finishPosition === null ? "" : ` → ${m.finishPosition}着`}`).join(" / ");
-  return { raceId: r.raceId, title: r.title, result, marks, bets: betsText(r), comment: r.comment };
+  return { raceId: r.raceId, title: r.title, result, marks, bets: betsText(r), comment: r.comment, money: moneyOf(r) };
+}
+
+/** 回収率のタイル。丸める前の値が 100% 以上なら gain(損益ゼロを含む)、未満なら loss。値が無いときは色も注記も付けない(Issue #579)。 */
+function recoveryTile(rate: number | null): TileView {
+  if (rate === null) return { label: "回収率", value: "-", strong: true };
+  return rate >= 1
+    ? { label: "回収率", value: formatRecoveryPercent(rate), strong: true, tone: "gain", toneText: "▲100%以上" }
+    : { label: "回収率", value: formatRecoveryPercent(rate), strong: true, tone: "loss", toneText: "▼100%未満" };
 }
 
 /** 賭け金・払戻・回収率・的中(+ 見込みと実際)のタイル。その日と累計で同じ書き方。見込みは、この項目を持つ日報で、確率のある買い目があるときだけ。 */
@@ -244,7 +278,7 @@ export function statTiles(s: ReportStats): TileView[] {
   const tiles: TileView[] = [
     { label: "賭け金", value: formatYen(s.totalStake), strong: false },
     { label: "払戻", value: formatYen(s.totalReturn), strong: false },
-    { label: "回収率", value: s.recoveryRate === null ? "-" : formatRecoveryPercent(s.recoveryRate), strong: true },
+    recoveryTile(s.recoveryRate),
     { label: "的中", value: `${s.judgedBetCount} 点中 ${s.hitBetCount} 点${refundText(s.refundedBetCount)}`, strong: false },
   ];
   const expected = formatExpectedHits(s); // 項目が欠けた(この項目を持つ前の)日報では null

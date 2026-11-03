@@ -153,7 +153,7 @@ describe("buildMonthlyModel: 月報の本文", () => {
     expect(body().tiles).toStrictEqual([
       { label: "賭け金", value: "300円", strong: false },
       { label: "払戻", value: "800円", strong: false },
-      { label: "回収率", value: "266.7%", strong: true },
+      { label: "回収率", value: "266.7%", strong: true, tone: "gain", toneText: "▲100%以上" },
       { label: "的中", value: "2 点中 1 点", strong: false },
       { label: "見込みと実際", value: "見込み 0.80 点・実際 1 点", strong: false },
     ]);

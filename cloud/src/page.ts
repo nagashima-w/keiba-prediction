@@ -260,6 +260,17 @@ ${paletteCss()}
   .verify-tile.strong { border-color: var(--accent); }
   .verify-tile-label { font-size: 0.8rem; color: var(--muted); }
   .verify-tile-value { font-size: 1.1rem; }
+  /* Issue #579: 日報・月報の回収率のタイル。100% 以上は ok、未満は fail の枠(2px)と値の色。注記の文字(▲▼)でも示す。色は palette の ok・fail だけ(--card 上の文字のコントラスト比は palette.test) */
+  .report-screen .verify-tile-value { font-size: 1.5rem; }
+  .verify-tile-tone { font-size: 0.8rem; font-weight: bold; }
+  .verify-tile.gain { border: 2px solid var(--ok); }
+  .verify-tile.gain .verify-tile-value, .verify-tile.gain .verify-tile-tone { color: var(--ok); }
+  .verify-tile.loss { border: 2px solid var(--fail); }
+  .verify-tile.loss .verify-tile-value, .verify-tile.loss .verify-tile-tone { color: var(--fail); }
+  .report-money { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; font-variant-numeric: tabular-nums; text-align: right; }
+  .report-net { font-weight: bold; }
+  .report-net.gain { color: var(--ok); }
+  .report-net.loss { color: var(--fail); }
   .verify-rows { list-style: none; margin: 4px 0 12px; padding: 0; }
   /* Issue #369: 値が長い行(日報・月報の「もしも」。『判定できた 36 レース中 …(対象外 18 レース)』)は、値を次の行へ回し、値の中でも折り返す(ラベルは潰さない)。
      1 行に収まる行は、ラベルが左・値の箱が右(margin-left: auto。text-align は付けない = 折り返した値の中は左揃えで、行頭がそろう)。
