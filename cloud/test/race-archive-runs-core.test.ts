@@ -7,6 +7,7 @@ import {
   ARCHIVE_RUNS_CONSECUTIVE_FAILURE_LIMIT,
   ARCHIVE_RUNS_MAX_NIGHTS,
   ARCHIVE_RUNS_NIGHTLY_ROWS_DEFAULT,
+  ARCHIVE_RUNS_READ_COUNT_ROWS,
   RaceArchiveRunsCore,
   isArchiveRunsDisabled,
   type ArchiveRunsOptions,
@@ -289,13 +290,14 @@ describe("走査と変換", () => {
   it("1 晩の書き込み行数の上限に達したら、その晩はもう読まない。次の晩の開始に張る。次の晩は続きから", async () => {
     h = new Harness({ nightlyRows: 600 });
     h.seed(200);
-    h.rowsPerRace = 14; // 1 ステップ = 20×14+1 = 281 行
+    h.rowsPerRace = 14; // 1 ステップ = 変換 20×14+1 = 281 行 + Class B の計数 1 行 = 282 行
+    expect(ARCHIVE_RUNS_READ_COUNT_ROWS).toBe(1);
     h.alarm = NIGHT1;
     await h.fire();
     await h.fire();
-    expect((await h.core.getStatus()).night.rows).toBe(562);
+    expect((await h.core.getStatus()).night.rows).toBe(564);
     await h.fire(); // 562 < 600: もう 1 ステップ(上限を超えるのは最後の 1 ステップぶんだけ)
-    expect((await h.core.getStatus()).night.rows).toBe(843);
+    expect((await h.core.getStatus()).night.rows).toBe(846);
     const readsSoFar = h.reads.length;
     await h.fire();
     expect(h.reads.length).toBe(readsSoFar); // 上限に達したので読まない
@@ -304,7 +306,7 @@ describe("走査と変換", () => {
     await h.fire();
     expect(h.reads.length).toBe(readsSoFar + 1);
     expect(h.reads[h.reads.length - 1]![0]).toBe(idOf(61)); // 続きから
-    expect((await h.core.getStatus()).night.rows).toBe(281); // 晩が変わったので数え直す
+    expect((await h.core.getStatus()).night.rows).toBe(282); // 晩が変わったので数え直す
   });
 
   it("上限は下げる方向の上書きだけ: nightlyRows を指定すればそれが上限。指定が無ければ既定", async () => {
@@ -544,7 +546,7 @@ describe("DO の書き込みを増やさない・状態の読み取り", () => {
     const s = await h.core.getStatus();
     expect(s).toMatchObject({
       state: "running",
-      night: { date: "2026-11-05", rows: 20 * 14 + 1, races: 20, failed: 0 },
+      night: { date: "2026-11-05", rows: 20 * 14 + 1 + 1, races: 20, failed: 0 },
       catalog: { total: 30 },
       nightlyRowLimit: ARCHIVE_RUNS_NIGHTLY_ROWS_DEFAULT,
       dbSizeBytes: 24_000_000,
@@ -552,5 +554,62 @@ describe("DO の書き込みを増やさない・状態の読み取り", () => {
     });
     expect(s.nextRunAt).toBe(h.alarm);
     expect(s.catalog.byVersion).toEqual({ null: 10 });
+  });
+});
+
+describe("DO の SQLite: 起床の経路の SQL は表の全部を読まない(EXPLAIN QUERY PLAN。#593 の事故を踏まえた決まり)", () => {
+  /** 文の中の ? の数。 */
+  const placeholders = (q: string): number => (q.match(/\?/g) ?? []).length;
+  const plan = (q: string): string[] => (h.sql.exec(`EXPLAIN QUERY PLAN ${q}`, ...Array.from({ length: placeholders(q) }, () => null)).toArray() as Array<{ detail: string }>).map((r) => r.detail);
+
+  it("起床のたびに流れる SQL(状態の読み取りを除く)のすべてが主キーの SEARCH で、SCAN も一時 B-tree(並べ替え・グループ化)も使わない。対照: 状態の読み取りの数え上げは SCAN になる", async () => {
+    h = new Harness();
+    h.seed(80);
+    h.rejectIds = new Set([idOf(3)]);
+    h.readOutcome = new Map([[idOf(5), "error"], [idOf(6), "missing"]]);
+    h.alarm = NIGHT1;
+    h.convertThrows = 1; // まとめの失敗 → 1 件ずつ
+    await h.runUntil(NIGHT1 + 3 * HOUR); // 失敗・拒否・周の終わり・休みを通る
+    h.convertSize = DB_SIZE_LIMIT_BYTES + 1; // 容量で止まる → 次の晩に確かめる(通知も送る)
+    h.catalog.push(entryOf(500));
+    h.alarm = NIGHT2;
+    await h.fire();
+    h.dbSize = 1;
+    h.alarm = at(2026, 11, 7, 1, 0);
+    await h.fire();
+
+    const wake = [...new Set(h.sql.statements)].filter((q) => /^\s*(SELECT|INSERT|UPDATE|DELETE)\b/i.test(q) && !q.startsWith("EXPLAIN"));
+    expect(wake.length).toBeGreaterThanOrEqual(8); // 前提: 経路の SQL を実際に集められている(空なら下の検査が空振り)
+    const tables = wake.filter((q) => /rr_(meta|fail|reject)/.test(q));
+    expect(tables.length).toBe(wake.length); // 前提: 集めた文はすべて DO の状態の表への文
+    for (const q of wake) {
+      const rows = plan(q);
+      if (!/^\s*INSERT/i.test(q)) expect(rows.length, q).toBeGreaterThan(0); // INSERT ... ON CONFLICT は読む表が無く、計画の行が空
+      for (const detail of rows) {
+        expect(detail, q).not.toMatch(/\bSCAN\b/);
+        expect(detail, q).not.toMatch(/TEMP B-TREE/);
+      }
+    }
+    // 前提の確認: 失敗の記録・拒否の記録・メタの 3 つの表すべてに触れる文が含まれている
+    for (const table of ["rr_meta", "rr_fail", "rr_reject"]) expect(wake.some((q) => q.includes(table)), table).toBe(true);
+
+    // 対照: 状態の読み取りの数え上げ(getStatus だけが流す)は SCAN / TEMP B-TREE になる。検出が空振りでないことの確認
+    expect(plan("SELECT COUNT(*) AS n FROM rr_fail WHERE nights < ?").join("|")).toMatch(/\bSCAN\b/);
+    expect(plan("SELECT class AS cls, COUNT(*) AS n FROM rr_reject GROUP BY class").join("|")).toMatch(/TEMP B-TREE|SCAN/);
+    // 状態の読み取りの文は、起床の経路の集合に入っていない(getStatus を呼んでいないので、集合にこれらが無い)
+    expect(wake.some((q) => q.includes("GROUP BY") || q.includes("nights <"))).toBe(false);
+  });
+
+  it("1 ステップが DO の SQLite に書く行数は、20 レースの変換で 10 行以下(カーソル・今夜の数・累計・周の数・D1 の大きさ。変わらない値は書かない)", async () => {
+    h = new Harness();
+    h.seed(100);
+    h.alarm = NIGHT1;
+    await h.fire(); // 初回(キーの作成を含む)
+    const before = h.sql.statements.length;
+    await h.fire();
+    const writes = h.sql.statements.slice(before).filter((q) => /^\s*(INSERT|UPDATE|DELETE)\b/i.test(q));
+    expect(h.converts).toHaveLength(2); // 前提: 2 回目も実際に変換している
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.length).toBeLessThanOrEqual(10);
   });
 });

@@ -168,21 +168,26 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
   // 21 時にも呼ぶのは、公開が 23 時の cron の後に遅れても、翌日の 21 時の cron が拾うため。kick は冪等。事前分析の計画の成否によらず走らせ、失敗しても投げない。
   // **処理の最後**に置く(Issue #573-17): kick は DO の RPC で、固まると後ろの仕事を巻き込むので、結果の取り込み・補完の起動・日報の補完・月報の依頼を先に済ませる。
   // 先の仕事はいずれも自分で握って投げないので、ここへ必ず届く。計画の失敗の通知・throw(下)より前に置くので、計画が失敗した日も kick は呼ぶ。
-  if (env.RACE_ARCHIVE_FETCH !== undefined) {
-    try {
-      await env.RACE_ARCHIVE_FETCH.get(env.RACE_ARCHIVE_FETCH.idFromName(RACE_ARCHIVE_FETCH_NAME)).kick();
-    } catch (error) {
-      log(`scheduled: failed class=race-archive-kick-failed error=${errorKind(error)}`, "error");
-    }
-  }
-  // 過去の結果の毎晩の変換の起動(Issue #590)。取得の kick と同じく、アラームが無ければ張るだけ(変換は JST 1:00〜8:30 に、DO が R2 と D1 だけで行う。netkeiba には出ない)。失敗しても投げない。
-  if (env.RACE_ARCHIVE_RUNS !== undefined) {
-    try {
-      await env.RACE_ARCHIVE_RUNS.get(env.RACE_ARCHIVE_RUNS.idFromName(RACE_ARCHIVE_RUNS_NAME)).kick();
-    } catch (error) {
-      log(`scheduled: failed class=race-archive-runs-kick-failed error=${errorKind(error)}`, "error");
-    }
-  }
+  // 取得の kick と変換の kick(Issue #590)は並べて待つ(片方が遅くても、もう片方を直列に待たせない)。どちらも失敗を握る。
+  await Promise.all([
+    (async (): Promise<void> => {
+      if (env.RACE_ARCHIVE_FETCH === undefined) return;
+      try {
+        await env.RACE_ARCHIVE_FETCH.get(env.RACE_ARCHIVE_FETCH.idFromName(RACE_ARCHIVE_FETCH_NAME)).kick();
+      } catch (error) {
+        log(`scheduled: failed class=race-archive-kick-failed error=${errorKind(error)}`, "error");
+      }
+    })(),
+    // 過去の結果の毎晩の変換の起動(Issue #590)。アラームが無ければ張るだけ(変換は JST 1:00〜8:30 に、DO が R2 と D1 だけで行う。netkeiba には出ない)。
+    (async (): Promise<void> => {
+      if (env.RACE_ARCHIVE_RUNS === undefined) return;
+      try {
+        await env.RACE_ARCHIVE_RUNS.get(env.RACE_ARCHIVE_RUNS.idFromName(RACE_ARCHIVE_RUNS_NAME)).kick();
+      } catch (error) {
+        log(`scheduled: failed class=race-archive-runs-kick-failed error=${errorKind(error)}`, "error");
+      }
+    })(),
+  ]);
 
   if (!planned) {
     log(`scheduled: failed class=request-plan-failed kind=${kind} date=${kaisaiDate}`, "error");

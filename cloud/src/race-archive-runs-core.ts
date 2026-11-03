@@ -13,7 +13,7 @@
  *  - **JST 1:00 以上 8:30 未満**だけ。21:00・23:00 の事前分析(戦績 API の保存)と重ならないようにする(#552 の【記録】6: 戦績 API の保存の読みと書きの間に結果ページ由来の行が書かれると、
  *    新規の挿入が捨てられて、その回の `rowsNew` が大きく出る。次の保存で直る。時間帯を分けるだけで受け入れる)。取得の DO(0:00〜8:30)とは別のアラームで、止め合わない。
  *  - **1 晩の書き込み行数の上限**: 既定 {@link ARCHIVE_RUNS_NIGHTLY_ROWS_DEFAULT}(30,000 行。D1 の Free の 1 日 10 万行を超えると、その日は発走前の分析も保存できなくなる)。
- *    変換の結果の `rowsWritten`(batch の各文の `rows_written` の合計)を数える。**上限を超えるのは最後の 1 ステップぶん**(約 300 行)だけ。下げる方向の上書き(Worker の var)だけ受ける。
+ *    変換の結果の `rowsWritten`(batch の各文の `rows_written` の合計)に、1 ステップの Class B の計数 1 行({@link ARCHIVE_RUNS_READ_COUNT_ROWS})を足して数える。**上限を超えるのは最後の 1 ステップぶん**(約 300 行)だけ。下げる方向の上書き(Worker の var)だけ受ける。
  *  - 無効(var が `"0"`): アラームを張らず、起きても何もしない。
  *
  * ## 失敗と止まり方(すべて、次の晩に自動で再開する。手での再開の口は無い)
@@ -25,8 +25,16 @@
  *  - 変換を拒否したレース(頭数の宣言と行数が合わない等)は**失敗に数えない**。理由の分類を数えるだけ(`rejectedByClass`)。
  *  - **通知は止まったときの最初の 1 回だけ**(成功するまで同じ理由では再送しない)。送信が失敗したら 10 分後に再送し、3 回で諦める(状態は変わらない)。
  *
+ * ## D1 の行数の見積もり(`test/race-archive-runs-budget.test.ts` がローカル D1 の `meta` で測る。48 レース・768 走・3 ステップの実測)
+ *  - 書き込み: 1 レースあたり 走数(1 走 1 行。horse_runs は WITHOUT ROWID で副索引なし)+ 印 1 + 1 ステップあたり Class B の計数 1 = 実測 819 行(= 768 + 48 + 3)。書き直しは版が同じなら 0 行。
+ *    1 晩の上限 L(既定 30,000)なら、変換できるのは約 L / 17 ≒ 1,760 レース(約 2.8 万走)。
+ *  - 読み取り: 1 走あたり 約 3 行(新規の挿入の照合 1 + 書き直しの照合 約 2)+ 1 レースあたり 約 3(印)+ 目録の列挙 1 ステップ最大 100 行。実測 2,689 行(うち目録の列挙 232、horse_runs 2,307、印 144)。
+ *    L = 30,000 の晩で約 10 万行(D1 の Free の 1 日 500 万行の約 2%)。目録の 1 周(約 1.7 万行)を 1 時間おきに見直しても 1 晩 約 12 万行を超えない。
+ *
  * ## 状態(DO の SQLite)
  * `rr_meta`(キー・値)・`rr_fail`(失敗したレース)・`rr_reject`(拒否したレースの分類)。いずれも `WITHOUT ROWID`。**変わらない値は書かない**。
+ * **起床の経路の SQL は、すべて主キーの SEARCH になる**(表の全部を読む SCAN・一時 B-tree の並べ替えを流さない。テストが `EXPLAIN QUERY PLAN` で固定する。#593 の事故を踏まえた決まり)。
+ * 表の全体を数える SQL は状態の読み取り(`getStatus`。管理者の口)だけにある。
  * 目録の件数(総数・印の版ごと)は D1 から読む(`catalogCounts`。状態の読み取りのときだけ。目録の全件走査になるので管理者の口でだけ呼ぶ)。
  *
  * ## 例外を投げない
@@ -59,6 +67,8 @@ export const ARCHIVE_RUNS_STEP_DELAY_MS = 1000;
 export const ARCHIVE_RUNS_SCAN_DELAY_MS = 200;
 /** 何も変換しなかった周のあと、見直すまでの間隔。 */
 export const ARCHIVE_RUNS_IDLE_MS = 60 * 60_000;
+/** 1 ステップの一括の読み出しが D1 に書く行数(`r2_ops` の Class B の計数 1 行)。1 晩の書き込み行数に数える。 */
+export const ARCHIVE_RUNS_READ_COUNT_ROWS = 1;
 /** 個別のレースを諦めるまでの晩数。 */
 export const ARCHIVE_RUNS_MAX_NIGHTS = 3;
 /** 連続でこのステップ数だけ失敗したら、その晩は止める。 */
@@ -418,13 +428,12 @@ export class RaceArchiveRunsCore {
       if (o.status === "converted") {
         converted += 1;
         rows += o.runs;
-        this.clearFailure(o.raceId);
       } else {
         this.deps.sql.exec("INSERT INTO rr_reject (race_id, class) VALUES (?, ?) ON CONFLICT(race_id) DO UPDATE SET class = excluded.class", o.raceId, classifyRejection(o.reason));
-        this.clearFailure(o.raceId);
       }
     }
-    this.metaSet("night_rows", String(this.metaNum("night_rows") + result.rowsWritten));
+    this.clearFailures(result.outcomes.map((o) => o.raceId));
+    this.metaSet("night_rows", String(this.metaNum("night_rows") + result.rowsWritten + ARCHIVE_RUNS_READ_COUNT_ROWS));
     this.metaSet("night_races", String(this.metaNum("night_races") + result.outcomes.length));
     this.metaSet("total_races", String(this.metaNum("total_races") + converted));
     this.metaSet("total_rows", String(this.metaNum("total_rows") + rows));
@@ -464,9 +473,10 @@ export class RaceArchiveRunsCore {
     );
   }
 
-  private clearFailure(raceId: string): void {
-    if (this.count("SELECT COUNT(*) AS n FROM rr_fail WHERE race_id = ?", raceId) > 0) {
-      this.deps.sql.exec("DELETE FROM rr_fail WHERE race_id = ?", raceId);
+  /** 変換できた(または拒否で決着した)レースの失敗の記録を、1 文でまとめて消す(主キーの SEARCH。記録が無ければ 0 行の書き込み)。 */
+  private clearFailures(raceIds: readonly string[]): void {
+    if (raceIds.length > 0) {
+      this.deps.sql.exec(`DELETE FROM rr_fail WHERE race_id IN (${raceIds.map(() => "?").join(", ")})`, ...raceIds);
     }
   }
 

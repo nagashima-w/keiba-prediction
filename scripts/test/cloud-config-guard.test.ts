@@ -100,9 +100,9 @@ describe("wrangler.toml", () => {
     const blocks = [...tomlCode.matchAll(/^\[\[migrations\]\]\n((?:(?!\[)[^\n]*\n?)*)/gm)].map((m) => m[1]!);
     const field = (body: string, key: string): string | null => new RegExp(`^${key} = \\[([^\\]]*)\\]$`, "m").exec(body)?.[1] ?? null;
     const tagOf = (body: string): string | null => /^tag = "(v\d+)"$/m.exec(body)?.[1] ?? null;
-    // 前提: migration を実際に読めている(空振りでない)。v1〜v11 の 11 ブロック
-    expect(blocks.length, "migration ブロックの数(v1〜v11)").toBe(11);
-    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11"]);
+    // 前提: migration を実際に読めている(空振りでない)。v1〜v12 の 12 ブロック
+    expect(blocks.length, "migration ブロックの数(v1〜v12)").toBe(12);
+    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12"]);
     // 追加(new_sqlite_classes)は v1〜v8・v10・v11 の各 1 クラス。v3 の CloudMigration は残す(v9 の deleted_classes が指す先行の migration。wrangler が同じ toml 内で存在を検査する)
     expect(blocks.map((b) => field(b, "new_sqlite_classes"))).toEqual([
       '"NetkeibaGate"',
@@ -116,9 +116,10 @@ describe("wrangler.toml", () => {
       null,
       '"AllocationExportDO"',
       '"RaceArchiveFetchDO"',
+      '"RaceArchiveRunsDO"',
     ]);
     // 削除(deleted_classes)は v9 の 1 回だけで、中身は CloudMigration ちょうど 1 クラス。他のクラスの削除は禁じる
-    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"', null, null]);
+    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"', null, null, null]);
     expect((tomlCode.match(/deleted_classes/g) ?? []).length, "deleted_classes は toml 全体で 1 回").toBe(1);
     // v9 は削除だけ(同じブロックに追加・改名・移管を混ぜない)
     expect(blocks[8]!.trim().split("\n")).toEqual(['tag = "v9"', 'deleted_classes = ["CloudMigration"]']);
@@ -143,13 +144,17 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "AllocationExportDO"$/m);
     expect(tomlCode).toMatch(/^name = "RACE_ARCHIVE_FETCH"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceArchiveFetchDO"$/m);
+    expect(tomlCode).toMatch(/^name = "RACE_ARCHIVE_RUNS"$/m);
+    expect(tomlCode).toMatch(/^class_name = "RaceArchiveRunsDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|transferred_classes|new_classes)\s*=/m);
     // DO のバインディングはちょうど9つ(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT・ALLOCATION_EXPORT・RACE_ARCHIVE_FETCH〈Issue #554〉。Issue #394 で CLOUD_MIGRATION を外し、Issue #463 で ALLOCATION_EXPORT を足した)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(9);
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(10);
     // v10 は追加だけ(同じブロックに削除・改名・移管を混ぜない)
     expect(blocks[9]!.trim().split("\n")).toEqual(['tag = "v10"', 'new_sqlite_classes = ["AllocationExportDO"]']);
     // v11 も追加だけ(Issue #554。過去の結果の取得の DO)
     expect(blocks[10]!.trim().split("\n")).toEqual(['tag = "v11"', 'new_sqlite_classes = ["RaceArchiveFetchDO"]']);
+    // v12 も追加だけ(Issue #590。過去の結果の毎晩の変換の DO)
+    expect(blocks[11]!.trim().split("\n")).toEqual(['tag = "v12"', 'new_sqlite_classes = ["RaceArchiveRunsDO"]']);
   });
 
   it("Issue #206・#249: cron はちょうど2本で `0 12 * * *`(UTC 12:00 = JST 21:00)と `0 14 * * *`(UTC 14:00 = JST 23:00)。朝 9 時の定時実行は無い。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -687,6 +692,8 @@ describe("wrangler.toml", () => {
     expect(body).toContain('"--var", "RESULT_BACKFILL_NIGHTLY_LIMIT:0"');
     // Issue #554: 過去の結果の取得も、すべての構成で止めて動かす(取得の時間帯〈JST 0:00〜8:30〉に当たっても、本番のクラスが netkeiba に出ない)
     expect(body).toContain('"--var", "RACE_ARCHIVE_NIGHTLY_LIMIT:0"');
+    // Issue #590: 過去の結果の毎晩の変換も、すべての構成で止めて動かす(変換の時間帯〈JST 1:00〜8:30〉に当たっても、本番のクラスが D1 に書かない)
+    expect(body).toContain('"--var", "RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT:0"');
     // withWorker の呼び出しのうち、設定ファイル(--config)を使うもの(認証の設定を持つ構成)は、すべて ...vars( を含む
     const calls = [...smoke.matchAll(/await withWorker\([^\n]*\n/g)].map((m) => m[0]);
     const withConfig = calls.filter((c) => c.includes("--config"));
@@ -1314,7 +1321,7 @@ describe("Issue #216・#394・#402: 移行の DO(CloudMigration)は削除済み�
       if (b > 0) bindingSites[f] = b;
     }
     // kick を呼ぶのは scheduled.ts(毎日の起動)と result-backfill-do.ts(DO 自身が getStatus・kick の RPC から core に委譲する 2 つ)だけ
-    expect(kickSites).toEqual({ "race-archive-fetch-do.ts": 2, "result-backfill-do.ts": 2, "scheduled.ts": 2 }); // scheduled.ts の 2 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)
+    expect(kickSites).toEqual({ "race-archive-fetch-do.ts": 2, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "scheduled.ts": 3 }); // scheduled.ts の 3 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)
     // env.RESULT_BACKFILL に触れるのは scheduled.ts(有無の確認・get・idFromName の 3 回)と handler.ts(namespace 変数への代入の 1 回)だけ
     expect(bindingSites).toEqual({ "handler.ts": 1, "scheduled.ts": 3 });
     // handler.ts: 補完の DO は getStatus だけ(kick・start は呼ばない)。GET /api/results/backfill の 1 本
@@ -1413,6 +1420,71 @@ describe("Issue #554: 過去の結果の毎晩の取得(RaceArchiveFetchDO)は�
     expect(sites(/RaceArchiveSmokeDO/g)).toEqual({});
     // 本番の toml に smoke 専用の binding・migration は無い
     expect(tomlCode).not.toMatch(/RACE_ARCHIVE_SMOKE|RaceArchiveSmokeDO/);
+  });
+});
+
+describe("Issue #590: 過去の結果の毎晩の変換(RaceArchiveRunsDO)は、netkeiba にも gate にも出ず、DO の SQLite の起床の経路で表の全部を読まない", () => {
+  const srcDir = path.join(ROOT, "cloud", "src");
+  const core = stripCode(readTextLf("cloud", "src", "race-archive-runs-core.ts"));
+  const doCode = stripCode(readTextLf("cloud", "src", "race-archive-runs-do.ts"));
+  const runs = stripCode(readTextLf("cloud", "src", "race-archive-runs.ts"));
+  const smokeWorker = stripCode(readTextLf("cloud", "smoke-worker.ts"));
+  const sites = (pattern: RegExp): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const f of readdirSync(srcDir).filter((x) => x.endsWith(".ts") && x !== "client-bundle.generated.ts")) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(pattern) ?? []).length;
+      if (n > 0) out[f] = n;
+    }
+    return out;
+  };
+
+  it("前提: 純ロジック・DO・変換の部品を読めている", () => {
+    expect(core.length).toBeGreaterThan(5000);
+    expect(doCode.length).toBeGreaterThan(1500);
+    expect(runs.length).toBeGreaterThan(1500);
+  });
+
+  it("純ロジック・DO・変換の部品に、netkeiba の取得口(gate・fetchRaw・日単位の DO)・socket・グローバルの fetch・LLM がない。純ロジックは cloudflare:* と env. を持たない", () => {
+    expect(core).not.toMatch(/cloudflare:/);
+    expect(core).not.toContain("env.");
+    for (const [name, code] of [["race-archive-runs-core.ts", core], ["race-archive-runs-do.ts", doCode], ["race-archive-runs.ts", runs]] as const) {
+      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "RESULT_BACKFILL", "createGateHttpClient", "HttpClient", "socket", "ANTHROPIC", "createCloudLlm", ".requestPlan(", ".getPlanProgress("]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+    // gate の出口を使うファイルに、変換の部品が加わっていない(fetchRaw を呼ぶ箇所は #554 の時点のまま)
+    expect(Object.keys(sites(/\.fetchRaw\(/g)).filter((f) => f.startsWith("race-archive-runs"))).toEqual([]);
+  });
+
+  it("DO の SQLite に流す SQL は、起床の経路では主キーの引きと、メタ・失敗・拒否の記録の読み書きだけ。表の全部を数える SQL(GROUP BY・COUNT(*) の範囲指定)は状態の読み取り(getStatus)にだけある", () => {
+    const stepBody = core.slice(core.indexOf("private async step("), core.indexOf("async getStatus("));
+    expect(stepBody.length).toBeGreaterThan(3000); // 前提: 起床の経路の本体を読めている
+    expect(stepBody).not.toMatch(/GROUP BY|ORDER BY|COUNT\(\*\)|DISTINCT/);
+    const statusBody = core.slice(core.indexOf("async getStatus("));
+    expect(statusBody).toMatch(/GROUP BY class/); // 前提: 数え上げは getStatus にある(検査が空振りでない)
+    expect(statusBody).toMatch(/COUNT\(\*\)/);
+  });
+
+  it("変換を止める var(RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT=0)は文字列 \"0\" の完全一致だけ。var の名前が DO の binding の名前(RACE_ARCHIVE_RUNS)と同じでない", () => {
+    expect(core).toMatch(/value\.trim\(\) === "0"/);
+    expect(doCode).toContain("isArchiveRunsDisabled(this.env.RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT)");
+    expect(doCode).not.toMatch(/RACE_ARCHIVE_RUNS\?:\s*string/);
+    expect(stripCode(readTextLf("cloud", "smoke.ts"))).not.toMatch(/"--var",\s*"RACE_ARCHIVE_RUNS[:=]/);
+  });
+
+  it("本番の入口(worker.ts)は本番のクラスだけを export し、smoke 専用のサブクラス(RaceArchiveRunsSmokeDO)を import しない。smoke 専用のサブクラスは smoke-worker.ts にだけある。本番の toml に smoke 専用の binding は無い", () => {
+    const worker = stripCode(readTextLf("cloud", "src", "worker.ts"));
+    expect(worker).toMatch(/export \{ RaceArchiveRunsDO \} from/);
+    expect(worker).not.toContain("RaceArchiveRunsSmokeDO");
+    expect(smokeWorker).toContain("class RaceArchiveRunsSmokeDO extends RealRaceArchiveRunsDO");
+    expect(sites(/RaceArchiveRunsSmokeDO/g)).toEqual({});
+    expect(tomlCode).not.toMatch(/RACE_ARCHIVE_RUNS_SMOKE|RaceArchiveRunsSmokeDO/);
+  });
+
+  it("変換を呼ぶのは変換の DO だけ(convertRaceArchives の呼び出し箇所)。cron は kick だけで、変換の本体を直接呼ばない", () => {
+    expect(sites(/(?<!function\s)\bconvertRaceArchives\(/g)).toEqual({ "race-archive-runs-do.ts": 1 });
+    expect(Object.keys(sites(/RACE_ARCHIVE_RUNS\b/g)).sort()).toEqual(["handler.ts", "scheduled.ts"]); // binding に触れるのは handler.ts(状態の読み取り)と scheduled.ts(kick)だけ
   });
 });
 
@@ -1627,7 +1699,7 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
   it("LLM の依存(createCloudLlm)を作るのは、発走前の分析の DO(race-day-do.ts)・日報の DO(daily-report-do.ts)・月報の DO(monthly-report-do.ts。Issue #280)の 3 箇所だけ。Discord の送信(createDiscordNotifier)は、この 3 箇所と、scheduled.ts の失敗通知の 1 箇所(Issue #249)と、過去の結果の取得の DO(race-archive-fetch-do.ts。Issue #554)の停止の通知の 1 箇所だけ", () => {
     expect(sites(/(?<!function\s)\bcreateCloudLlm\(/g)).toEqual({ "daily-report-do.ts": 1, "monthly-report-do.ts": 1, "race-day-do.ts": 1 });
     // Issue #249: scheduled.ts の 1 箇所が加わった(23 時の再実行で計画の依頼が 3 回とも失敗したときの固定文の通知だけ。上の scheduled.ts の検査が固定する)
-    expect(sites(/(?<!function\s)\bcreateDiscordNotifier\(/g)).toEqual({ "daily-report-do.ts": 1, "monthly-report-do.ts": 1, "race-archive-fetch-do.ts": 1, "race-day-do.ts": 1, "scheduled.ts": 1 });
+    expect(sites(/(?<!function\s)\bcreateDiscordNotifier\(/g)).toEqual({ "daily-report-do.ts": 1, "monthly-report-do.ts": 1, "race-archive-fetch-do.ts": 1, "race-archive-runs-do.ts": 1, "race-day-do.ts": 1, "scheduled.ts": 1 });
   });
 
   it("日報の作成の依頼(.requestReport( の呼び出し)の箇所: 手動 POST(handler.ts)・取り残しの補完(scheduled.ts)・日単位の DO の配線(race-day-do.ts)・その中の呼び出し(race-day-core.ts)・DO の RPC の委譲(daily-report-do.ts)だけ", () => {
