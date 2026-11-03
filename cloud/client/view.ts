@@ -422,7 +422,7 @@ function horseTable(content: ResultContent, table: HorseTable, actions: ViewActi
       h("td", {}, [r.odds]),
     ]);
   });
-  return h("div", { class: "horse-table-wrap", role: "region", "aria-label": "馬ごとの評価の表" }, [h("table", { class: "horse-table" }, [h("thead", {}, [h("tr", {}, head)]), h("tbody", {}, rows)])]);
+  return h("div", { class: "horse-table-wrap", "data-analysis": String(content.id), role: "region", "aria-label": "馬ごとの評価の表" }, [h("table", { class: "horse-table" }, [h("thead", {}, [h("tr", {}, head)]), h("tbody", {}, rows)])]);
 }
 
 /** 印を補修した馬の目印(Issue #317)。「直」と、あれば「元の印→今の印」。固定の語彙だけ(LLM の生の文字列は出さない)。 */

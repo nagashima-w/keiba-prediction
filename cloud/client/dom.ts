@@ -25,10 +25,21 @@ export interface DomElement {
 export interface DomDocument {
   createElement(tag: string): DomElement;
   createTextNode(text: string): unknown;
+  /** フォーカス中の要素(実ブラウザの `document.activeElement`)。偽の document は持たなくてよい(持たなければフォーカスは戻さない)。 */
+  readonly activeElement?: RestorableElement | null;
 }
 
 export interface DomRoot {
   replaceChildren(...nodes: any[]): void;
+  /** 実ブラウザの `Element.querySelector`。偽の root は持たなくてよい(持たなければスクロールもフォーカスも戻さない)。 */
+  querySelector?(selector: string): RestorableElement | null;
+}
+
+/** 作り直しのあとに状態を戻すために読み書きする、要素の最小の形(Issue #578-2)。 */
+export interface RestorableElement {
+  scrollLeft?: number;
+  getAttribute?(name: string): string | null;
+  focus?(): void;
 }
 
 const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress", "table", "thead", "tbody", "tr", "th", "td"]);
@@ -113,6 +124,41 @@ function build(doc: DomDocument, node: VNode | string): unknown {
   return el;
 }
 
+/** 馬ごとの評価の表の枠(`view.ts` の `horseTable`。`data-analysis` に分析 id を持つ)。1 画面に 1 つの前提: 結果画面は 1 つ、レース画面は発走前のカードだけが結果を持つ(`client-race.test.ts` の「結果を持つのは発走前のカードだけ」が守る)。 */
+const HORSE_TABLE_WRAP = ".horse-table-wrap";
+const SORT_KEY_PATTERN = /^[A-Za-z]+$/;
+const ANALYSIS_ID_PATTERN = /^[0-9]+$/;
+
+interface Restore {
+  readonly scroll: { readonly analysis: string; readonly left: number } | null;
+  readonly focus: { readonly analysis: string; readonly key: string } | null;
+}
+
+/** 作り直す前に、表の枠の横スクロールと、フォーカス中の並べ替えボタンを控える(Issue #578-2)。 */
+function captureRestore(doc: DomDocument, root: DomRoot): Restore {
+  const wrap = root.querySelector?.(HORSE_TABLE_WRAP) ?? null;
+  const wrapAnalysis = wrap?.getAttribute?.("data-analysis") ?? null;
+  const scroll = wrap !== null && wrapAnalysis !== null && typeof wrap.scrollLeft === "number" && wrap.scrollLeft > 0 ? { analysis: wrapAnalysis, left: wrap.scrollLeft } : null;
+  const active = doc.activeElement ?? null;
+  const key = active?.getAttribute?.("data-sort-key") ?? null;
+  const analysis = active?.getAttribute?.("data-analysis") ?? null;
+  const focus = active?.getAttribute?.("class") === "sort-button" && key !== null && analysis !== null && SORT_KEY_PATTERN.test(key) && ANALYSIS_ID_PATTERN.test(analysis) ? { analysis, key } : null;
+  return { scroll, focus };
+}
+
+/** 作り直したあとの木に、控えた状態を戻す。同じ分析の表・同じ列のボタンがあるときだけ(別の分析・表の無い画面では何もしない)。 */
+function applyRestore(root: DomRoot, restore: Restore): void {
+  if (restore.scroll !== null) {
+    const wrap = root.querySelector?.(HORSE_TABLE_WRAP) ?? null;
+    if (wrap !== null && wrap.getAttribute?.("data-analysis") === restore.scroll.analysis) {
+      wrap.scrollLeft = restore.scroll.left;
+    }
+  }
+  if (restore.focus !== null) {
+    root.querySelector?.(`button.sort-button[data-sort-key="${restore.focus.key}"][data-analysis="${restore.focus.analysis}"]`)?.focus?.();
+  }
+}
+
 /**
  * 描画の関数を作る(Issue #186 段階1)。**直前に描いた木と JSON 直列化して同一なら、DOM を触らない**。
  * ポーリング(段階2)の再描画が、タップ中のボタン・日付ピッカー・フォーカスを壊さないための土台。
@@ -121,6 +167,7 @@ function build(doc: DomDocument, node: VNode | string): unknown {
  * そのため呼び出し側(`view.ts`)は、クリック処理に渡す引数を必ず `data-*` 属性にも出す(引数が違えば木が違う)。
  * 組み立て(許可リストの検査を含む)が投げたときは root を変えず、「直前の木」も更新しない(画面に出ているのは直前に成功した木のまま)。
  * **`force` が true のときは、同じ木でも置き換える**(Issue #186。日付の入力欄に不正な値を入れられたとき、入力欄を画面のデータの値に戻す。木は変わっていないので、省略すると入力欄が食い違ったまま残る)。
+  * **Issue #578-2: 作り直す前に、馬ごとの評価の表の枠の横スクロールと、フォーカス中の並べ替えボタンを控え、作り直したあとの同じ分析の表・同じ列のボタンへ戻す**(`captureRestore`・`applyRestore`)。
  */
 export function createMounter(doc: DomDocument, root: DomRoot): (vnode: VNode, force?: boolean) => void {
   let last: string | null = null;
@@ -129,7 +176,9 @@ export function createMounter(doc: DomDocument, root: DomRoot): (vnode: VNode, f
     if (!force && serialized === last) {
       return;
     }
+    const restore = captureRestore(doc, root);
     root.replaceChildren(build(doc, vnode));
     last = serialized;
+    applyRestore(root, restore);
   };
 }
