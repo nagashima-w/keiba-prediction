@@ -752,11 +752,17 @@ function verifyNotice(n: VerifyNotice): VNode {
   return notice(n.tone, n.text);
 }
 
-function tilesNode(tiles: readonly { readonly label: string; readonly value: string; readonly strong: boolean }[]): VNode {
+function tilesNode(tiles: readonly { readonly label: string; readonly value: string; readonly strong: boolean; readonly tone?: "gain" | "loss"; readonly toneText?: string }[]): VNode {
   return h(
     "div",
     { class: "verify-tiles" },
-    tiles.map((t) => h("div", { class: t.strong ? "verify-tile strong" : "verify-tile" }, [h("span", { class: "verify-tile-label" }, [t.label]), h("strong", { class: "verify-tile-value" }, [t.value])])),
+    tiles.map((t) =>
+      h("div", { class: `${t.strong ? "verify-tile strong" : "verify-tile"}${t.tone === undefined ? "" : ` ${t.tone}`}` }, [
+        h("span", { class: "verify-tile-label" }, [t.label]),
+        h("strong", { class: "verify-tile-value" }, [t.value]),
+        ...(t.toneText === undefined ? [] : [h("span", { class: "verify-tile-tone" }, [t.toneText])]),
+      ]),
+    ),
   );
 }
 
@@ -938,6 +944,15 @@ function reportRaceNode(r: RaceRowView): VNode {
     h("p", { class: "report-result" }, [r.result]),
     ...(r.marks === null ? [] : [h("p", { class: "report-marks" }, [r.marks])]),
     h("p", { class: "report-bets" }, [r.bets]),
+    ...(r.money === null
+      ? []
+      : [
+          h("p", { class: "report-money" }, [
+            h("span", {}, [`賭け金 ${r.money.stake}`]),
+            h("span", {}, [`払戻 ${r.money.payout}`]),
+            h("span", { class: `report-net ${r.money.tone}` }, [`差額 ${r.money.net}`]),
+          ]),
+        ]),
     ...(r.comment === null ? [] : [h("p", { class: "report-comment" }, [`一言: ${r.comment}`])]),
   ]);
 }
