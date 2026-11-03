@@ -37,6 +37,7 @@ import { createRaceData } from "./race-data";
 import { buildRaceModel, latestAnalysisIdOf } from "./race";
 import { buildResultModel, raceDateOf, type HorseSort, type HorseSortKey, type SortDir } from "./result";
 import { createSettingsScreen } from "./settings-screen";
+import type { LiveTarget } from "./settings-form";
 import { createVerifyScreen } from "./verify-screen";
 import { createMonthlyScreen } from "./monthly-screen";
 import { createReportScreen } from "./report-screen";
@@ -52,6 +53,8 @@ export interface AppDeps {
   readonly now: () => Date;
   /** 描画。`force` が true のときは、木が同じでも DOM を置き換える(日付の入力欄を画面の値に戻すため。`createMounter`)。 */
   readonly render: (tree: VNode, force?: boolean) => void;
+  /** 設定の画面で、木を作り直さず決まった場所の文字だけを書き換える(Issue #580。省略可=Node のテスト)。 */
+  readonly patchText?: (target: LiveTarget, text: string) => void;
   readonly getHash: () => string;
   readonly setHash: (hash: string) => void;
   /** 追跡のタイマー(Issue #186。`setTimeout` の薄い包み。テストでは偽物を渡して時間を手で進める)。 */
@@ -139,6 +142,7 @@ export function createApp(deps: AppDeps): App {
     fetch: deps.fetch,
     isActive: () => currentScreen() === "settings",
     onChange: (force) => render(force),
+    ...(deps.patchText === undefined ? {} : { patchText: deps.patchText }),
   });
 
   // ---- 検証画面(Issue #219) ----

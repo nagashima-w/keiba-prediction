@@ -47,6 +47,17 @@ describe("スマホ画面(renderPage)の名前と見出しのリンク", () => {
     expect(html).toMatch(/\.settings-save\s*\{[^}]*width:\s*100%/);
   });
 
+  it("Issue #580: 保存の帯は画面の下に固定する(sticky・bottom: 0)。下の余白は端末の安全領域。変えた項目は左の線に加えて文字でも示す(色だけに頼らない規則がある)", () => {
+    const bar = /\.settings-bar\s*\{([^}]*)\}/.exec(html);
+    expect(bar, "前提: .settings-bar の規則がある").not.toBeNull();
+    expect(bar![1]).toMatch(/position:\s*sticky/);
+    expect(bar![1]).toMatch(/bottom:\s*0/);
+    expect(bar![1]).toMatch(/env\(safe-area-inset-bottom/);
+    expect(bar![1]).toMatch(/background:\s*var\(--bg\)/);
+    expect(html).toMatch(/\.field\.changed\s*\{[^}]*border-left/);
+    expect(html).toMatch(/\.field-yen\s*\{/);
+  });
+
   it("Issue #201: プロンプトのプレビューは、開閉・反映のボタンが 44px 以上。文面は等幅・改行を保つ・折り返す。内側のスクロール(max-height・overflow)は付けない", () => {
     expect(html).toMatch(/\.preview-toggle\s*\{[^}]*min-height:\s*44px/);
     expect(html).toMatch(/\.preview-refresh\s*\{[^}]*min-height:\s*44px/);

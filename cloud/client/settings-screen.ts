@@ -22,7 +22,7 @@
 import type { FetchLike } from "./api";
 import { fetchPromptPreview, previewRequestKey } from "./api-prompt-preview";
 import { fetchSettings, postSettings, settingsFailureMessage } from "./api-settings";
-import { buildSettingsModel, draftFromSettings, resetWeightsInDraft, setDraftValue, validateDraft, WEIGHT_FIELD_ORDER, type FieldErrors, type FieldKey, type PreviewFetchState, type SettingsDraft, type SettingsLoadState, type SettingsModel, type SettingsSaveState } from "./settings-form";
+import { barStatusText, buildSettingsModel, draftFromSettings, yenInputText, liveTargetOfYen, type LiveTarget, resetWeightsInDraft, setDraftValue, validateDraft, WEIGHT_FIELD_ORDER, type FieldErrors, type FieldKey, type PreviewFetchState, type SettingsDraft, type SettingsLoadState, type SettingsModel, type SettingsSaveState } from "./settings-form";
 
 export interface SettingsScreenDeps {
   readonly fetch: FetchLike;
@@ -30,6 +30,11 @@ export interface SettingsScreenDeps {
   readonly isActive: () => boolean;
   /** 画面の再描画の要求。`force` が true のときは、木が同じでも DOM を置き換える。 */
   readonly onChange: (force?: boolean) => void;
+  /**
+   * 木を作り直さずに、決まった場所(`LiveTarget`)の文字だけを書き換える(Issue #580。打つたびの「¥20,000」と「未保存の変更があります」)。省略・場所が無いときは何もしない。
+   * 入力欄そのものには触れないので、打っている欄のフォーカス・値・キーボードは変わらない。
+   */
+  readonly patchText?: (target: LiveTarget, text: string) => void;
 }
 
 export interface SettingsScreen {
@@ -58,6 +63,8 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
   /** 取得の状態。null は「まだ取っていない(この画面にいない)」。 */
   let settingsLoad: SettingsLoadState | null = null;
   let settingsDraft: SettingsDraft | null = null;
+  /** 基準の下書き(読み込み直後・保存の成功直後。Issue #580)。未保存の変更の判定は、これと今の下書きの比較(保存の失敗では更新しない)。 */
+  let settingsBaseline: SettingsDraft | null = null;
   let settingsErrors: FieldErrors = {};
   let settingsSave: SettingsSaveState = { kind: "idle" };
   /** 世代。離れる・取り直すたびに増やし、古い世代の応答を捨てる。 */
@@ -68,7 +75,7 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
    * 次の強制描画(保存・再読込・取得完了・検証エラー・失敗)まで木に出さない。木が同じなら `createMounter` は DOM を置き換えない(打っている欄がフォーカスを失わない・スマホのキーボードが閉じない)。
    * 下書き(`settingsDraft`)自体は最新のまま(保存はそれを読む)。null は「まだ写していない(画面に入った直後)」。
    */
-  let settingsShown: { load: SettingsLoadState; draft: SettingsDraft | null; errors: FieldErrors; save: SettingsSaveState; previewOpen: boolean } | null = null;
+  let settingsShown: { load: SettingsLoadState; draft: SettingsDraft | null; errors: FieldErrors; save: SettingsSaveState; previewOpen: boolean; dirty: boolean } | null = null;
   /** プロンプトのプレビューを開いているか(Issue #201)。メモリだけ(既定は閉じている。画面を離れたら破棄。「再読込」では変えない)。 */
   let settingsPreviewOpen = false;
   /** プレビューの文面の取得(Issue #396)。`key` は取得したときの入力の鍵(`previewRequestKey`)、`state` は取得中・成功・失敗。 */
@@ -87,6 +94,7 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
     const gen = settingsGen;
     settingsLoad = { kind: "loading" };
     settingsDraft = null;
+    settingsBaseline = null;
     settingsErrors = {};
     settingsSave = { kind: "idle" };
     // 飛んでいるプレビューの応答は世代(上)で捨てられるので、文面の状態も捨てる(Issue #396 R1)。残すと取得中のまま・同じ鍵で取り直されず、「組み立てています…」で止まる。
@@ -99,6 +107,7 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
       if (result.ok) {
         settingsLoad = { kind: "ready", source: result.source };
         settingsDraft = draftFromSettings(result.settings);
+        settingsBaseline = settingsDraft;
       } else {
         settingsLoad = { kind: "error", message: settingsFailureMessage(result.error, "load") };
       }
@@ -154,8 +163,14 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
     settingsPreviewHold = false;
     settingsLoad = null;
     settingsDraft = null;
+    settingsBaseline = null;
     settingsErrors = {};
     settingsSave = { kind: "idle" };
+  }
+
+  /** 未保存の変更があるか(基準の下書きと今の下書きの比較。キーの並びは同じ作りなので JSON で比べる)。 */
+  function isDirty(): boolean {
+    return settingsDraft !== null && settingsBaseline !== null && JSON.stringify(settingsDraft) !== JSON.stringify(settingsBaseline);
   }
 
   /** 入力欄の変更。**下書きを書くだけで、再描画しない**(入力中の欄・フォーカスを壊さない)。保存中・取得前は無視。 */
@@ -164,6 +179,10 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
     settingsDraft = setDraftValue(settingsDraft, key as FieldKey, value);
     // 「保存しました」の通知は、未保存の入力が生まれた時点で状態から外す(描画はしない。次の描画から出さない)。
     if (settingsSave.kind === "saved") settingsSave = { kind: "idle" };
+    // 木は作り直さず、金額の整形と帯の状態の文だけを書き換える(Issue #580)。
+    const yen = liveTargetOfYen(key);
+    if (yen !== null) deps.patchText?.(yen, yenInputText(value));
+    deps.patchText?.("bar-status", barStatusText(isDirty(), false));
   }
 
   /**
@@ -199,7 +218,7 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
     const remaining: Partial<Record<FieldKey, string>> = { ...settingsErrors };
     for (const key of WEIGHT_FIELD_ORDER) delete remaining[key];
     settingsErrors = remaining;
-    if (settingsSave.kind === "saved") settingsSave = { kind: "idle" }; // 未保存の変更が生まれたので、「保存しました」を外す
+    if (settingsSave.kind === "saved") settingsSave = { kind: "idle" }; // 未保存の変更が生まれたので、「保存しました」を外す(強制描画で帯の状態も変わる)
     deps.onChange(true);
   }
 
@@ -221,6 +240,7 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
       if (gen !== settingsGen) return; // 離れた・取り直した(古い応答)
       if (result.ok) {
         settingsDraft = draftFromSettings(result.settings);
+        settingsBaseline = settingsDraft;
         settingsLoad = { kind: "ready", source: "d1" };
         settingsSave = { kind: "saved" };
       } else {
@@ -234,7 +254,7 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
   /** 描画用データ。強制描画のとき、または画面に入った直後(まだ写していない)は、今の状態を写す。それ以外(強制なし)は、画面に出ている内容の写しから作る。 */
   function model(force: boolean): SettingsModel {
     if (force || settingsShown === null) {
-      settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave, previewOpen: settingsPreviewOpen };
+      settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave, previewOpen: settingsPreviewOpen, dirty: isDirty() };
       syncSettingsPreview(); // 写しを更新したときだけ、プレビューの文面を取り直すかを決める(Issue #396)
     }
     return buildSettingsModel({ ...settingsShown, previewFetch: settingsPreview?.state ?? null });
