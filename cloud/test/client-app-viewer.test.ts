@@ -60,7 +60,7 @@ const ANALYSIS_5 = {
     promptVersion: null,
     race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: null, courseType: null, distance: null, weather: null, trackCondition: null, oddsStatus: null, placeBasis: null },
     horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null }],
-    allocation: { route: "unset", unavailableReason: null, fallbackReason: null, skipReasonCode: null, bankroll: 0, perRaceCap: 0, kellyFraction: 0.25, evThreshold: 1.1, includeComboOdds: false, includeWide: true, includeTrio: true, includeQuinella: null, includeExacta: null, includeTrifecta: null, includeBracketQuinella: null, betUnit: 100, oddsStatus: "result", bets: [] },
+    allocation: { route: "unset", unavailableReason: null, fallbackReason: null, skipReasonCode: null, bankroll: 0, perRaceCap: 0, kellyFraction: 0.25, evThreshold: 1.1, includeComboOdds: false, includeWide: true, includeTrio: true, includeQuinella: null, includeExacta: null, includeTrifecta: null, includeBracketQuinella: null, maxWinBets: null, maxPlaceBets: null, betUnit: 100, oddsStatus: "result", bets: [] },
     detail: "present",
   },
 };

@@ -360,6 +360,9 @@ export interface D1AnalysisStoreOptions {
   readonly now?: () => Date;
 }
 
+/** 配分メタの点数の上限(Issue #578。束縛値は analysis_id 1つ)。`max_win_bets`・`max_place_bets` は D1 専用の列で、共有の `SELECT_ALLOCATION_META_SQL` には入れない。 */
+export const SELECT_ALLOCATION_CAPS_SQL = "SELECT max_win_bets AS maxWinBets, max_place_bets AS maxPlaceBets FROM analysis_allocation_meta WHERE analysis_id = ?";
+
 export class D1AnalysisStore implements AnalysisRepository {
   private readonly db: AnalysisDb;
   private readonly bucket: AnalysisBucket;
@@ -512,15 +515,23 @@ export class D1AnalysisStore implements AnalysisRepository {
   }
 
   async getStoredAllocation(analysisId: number): Promise<StoredAllocation | undefined> {
-    const [meta, bets] = await this.db.batch<unknown>([
+    const [meta, bets, caps] = await this.db.batch<unknown>([
       this.db.prepare(SELECT_ALLOCATION_META_SQL).bind(analysisId),
       this.db.prepare(SELECT_ALLOCATION_BETS_SQL).bind(analysisId),
+      this.db.prepare(SELECT_ALLOCATION_CAPS_SQL).bind(analysisId),
     ]);
     const metaRow = meta?.results[0] as AllocationMetaRow | undefined;
     if (metaRow === undefined) {
       return undefined;
     }
-    return toStoredAllocation(metaRow, (bets?.results ?? []) as StoredAllocationBetDetail[]);
+    const stored = toStoredAllocation(metaRow, (bets?.results ?? []) as StoredAllocationBetDetail[]);
+    // 点数の上限(Issue #578)は D1 専用の列(共有の SELECT には入れない)。NULL(旧い行)はキーを付けない。
+    const capsRow = caps?.results[0] as { maxWinBets: number | null; maxPlaceBets: number | null } | undefined;
+    return {
+      ...stored,
+      ...(capsRow?.maxWinBets == null ? {} : { maxWinBets: capsRow.maxWinBets }),
+      ...(capsRow?.maxPlaceBets == null ? {} : { maxPlaceBets: capsRow.maxPlaceBets }),
+    };
   }
 
   /**
