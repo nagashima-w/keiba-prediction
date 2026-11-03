@@ -23,6 +23,6 @@ describe("開発用の道具は Worker の束に入らない", () => {
 
   it("道具のファイルは実在する(名前を変えて、この検査が空振りしないようにする)", () => {
     const names = readdirSync(CLOUD);
-    for (const t of ["cf-readonly-client.ts", "pull-race-archive.ts"]) expect(names).toContain(t);
+    for (const t of ["cf-readonly-client.ts", "pull-race-archive.ts", "build-prior-dataset.ts"]) expect(names).toContain(t);
   });
 });
