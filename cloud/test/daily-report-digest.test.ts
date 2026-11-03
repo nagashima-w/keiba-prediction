@@ -75,7 +75,7 @@ describe("buildRaceDigest", () => {
 
   it("結果が無ければ hasResult=false・top3 は空・着順は null、買い目は判定不能で賭け金・払戻は 0 に数えない", () => {
     const v = view(raceId, [horse(1, { mark: "◎" })], {
-      allocation: { route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok", bets: [{ betType: "win", comboKey: "01", stake: 300, odds: 4.5, ev: 1.2 }] },
+      allocation: { route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, maxWinBets: null, maxPlaceBets: null, oddsStatus: "ok", bets: [{ betType: "win", comboKey: "01", stake: 300, odds: 4.5, ev: 1.2 }] },
     });
     const d = buildRaceDigest(v, undefined);
     expect(d.hasResult).toBe(false);
@@ -90,7 +90,7 @@ describe("buildRaceDigest", () => {
 
   it("買い目の結果から、判定できた賭け金・払戻・的中数を集計する(判定不能の賭け金は別に持つ)", () => {
     const v = view(raceId, [horse(1, { mark: "◎" })], {
-      allocation: { route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok",
+      allocation: { route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, maxWinBets: null, maxPlaceBets: null, oddsStatus: "ok",
         bets: [
           { betType: "win", comboKey: "07", stake: 300, odds: 4.8, ev: 1.2 },
           { betType: "place", comboKey: "01", stake: 200, odds: 1.5, ev: 1.1 },
@@ -108,7 +108,7 @@ describe("buildRaceDigest", () => {
   it("配分が無い(null)ときは買い目 0 件・allocationNote に理由は出さない。スキップの配分は理由コードを allocationNote に残す", () => {
     expect(buildRaceDigest(view(raceId, [horse(1)]), undefined).allocationNote).toBeNull();
     const skipped = view(raceId, [horse(1)], {
-      allocation: { route: "mixed", skipReasonCode: "no-ev", unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: false, includeWide: false, includeTrio: false, includeQuinella: null, includeExacta: null, includeTrifecta: null, includeBracketQuinella: null, oddsStatus: "ok", bets: [] },
+      allocation: { route: "mixed", skipReasonCode: "no-ev", unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: false, includeWide: false, includeTrio: false, includeQuinella: null, includeExacta: null, includeTrifecta: null, includeBracketQuinella: null, maxWinBets: null, maxPlaceBets: null, oddsStatus: "ok", bets: [] },
     });
     const d = buildRaceDigest(skipped, undefined);
     expect(d.bets).toEqual([]);
@@ -124,7 +124,7 @@ describe("buildRaceDigest", () => {
 describe("buildDayStats", () => {
   const raceId = (n: number): string => `2026050308${String(n).padStart(2, "0")}`;
   const bets = (rows: Array<[string, string, number]>) => rows.map(([betType, comboKey, stake]) => ({ betType, comboKey, stake, odds: 3, ev: 1.1 }));
-  const alloc = (b: ReturnType<typeof bets>): NonNullable<AnalysisView["allocation"]> => ({ route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok", bets: b });
+  const alloc = (b: ReturnType<typeof bets>): NonNullable<AnalysisView["allocation"]> => ({ route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, maxWinBets: null, maxPlaceBets: null, oddsStatus: "ok", bets: b });
 
   function digests() {
     // R1: 結果あり。◎が 1 着(単勝 400 円が 200 円的中 = 800 円)、〇が 5 着。
@@ -363,7 +363,7 @@ describe("buildDayStats", () => {
 describe("Issue #272: ダイジェストの定型の結果(templates)と統計の whatIf", () => {
   const alloc = (b: Array<[string, string, number]>): NonNullable<AnalysisView["allocation"]> => ({
     route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1,
-    includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok",
+    includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, maxWinBets: null, maxPlaceBets: null, oddsStatus: "ok",
     bets: b.map(([betType, comboKey, stake]) => ({ betType, comboKey, stake, odds: 5, ev: 1.1 })),
   });
   const marked = (): AnalysisViewHorse[] => [horse(1, { mark: "◎" }), horse(2, { mark: "〇" }), horse(3, { mark: "▲" }), horse(4, { mark: "△" }), horse(5)];

@@ -277,6 +277,22 @@ describe("createRaceData: 取得は冪等で、完了したら再描画を要求
     expect(f.data.analysisSource(5).kind, "前提: 分析は届いた").toBe("ready");
     expect(f.calls).toEqual([ANALYSIS_URL]);
   });
+
+  it("ensureResult: 分析がキャッシュにあり一覧が無いまま結果画面に戻ったとき(取得中に離れて戻った場合)、ensureResult が一覧を取る(Issue #578)", async () => {
+    const f = fixture();
+    const LIST_URL = `/api/races?kaisai_date=${DATE}&venue=central`;
+    f.setRoute({ analysis: 5, date: "20260101" });
+    f.setScreen("race"); // 結果画面でないときに分析が届く(一覧は取られない)
+    f.replies.set(ANALYSIS_URL, () => ok({ ok: true, analysis: analysisBody(DATE) }));
+    f.replies.set(LIST_URL, () => ok(racesBody));
+    f.data.ensureResult(5);
+    await Promise.all(f.data.pending());
+    expect(f.data.analysisSource(5).kind, "前提: 分析はキャッシュにある").toBe("ready");
+    expect(f.calls, "前提: 一覧はまだ取っていない").toEqual([ANALYSIS_URL]);
+    f.setScreen("result"); // 戻ってきた
+    f.data.ensureResult(5);
+    expect(f.calls, "分析は取り直さず、分析の開催日の一覧だけを取る").toEqual([ANALYSIS_URL, LIST_URL]);
+  });
 });
 
 describe("createRaceData: route と画面の判定は依存から受け取る", () => {

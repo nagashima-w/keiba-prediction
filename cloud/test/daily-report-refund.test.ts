@@ -15,7 +15,7 @@ function horse(umaban: number, over: Partial<AnalysisViewHorse> = {}): AnalysisV
 
 const alloc = (rows: Array<[string, string, number, number, number]>): NonNullable<AnalysisView["allocation"]> => ({
   route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1,
-  includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok",
+  includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, maxWinBets: null, maxPlaceBets: null, oddsStatus: "ok",
   bets: rows.map(([betType, comboKey, stake, odds, ev]) => ({ betType, comboKey, stake, odds, ev })),
 });
 

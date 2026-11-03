@@ -49,7 +49,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 240,500 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 242,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -290,7 +290,15 @@ describe("生成物のドリフトと決定性", () => {
     // 計り方: `git show 6dec36e:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。増えたのは、前後のレース・パンくず・前後のリンクの純関数(`client/neighbors.ts` の `neighborRaces`・`breadcrumbOf`・`neighborsOf`)、
     // 短い日付(`date.ts` の `shortDateLabel`。曜日の配列は `report-model.ts` から移して共有)、モデルへの 2 項目(`race.ts`・`result.ts`)、一覧の取得の配線(`race-data.ts` の `syncResultList`・`listRowsOf`)、2 つの VNode(`view.ts` の `breadcrumbNode`・`neighborNodes`)、固定の文言(「一覧」「パンくず」「前後のレース」「前のレース」「次のレース」)。
     // 日本語の文言は `\u` エスケープで 1 文字 6 バイト。着手前の見積もり(+1,000〜1,800)より大きかった(実測が 239,500 を超えたら 240,500 にする取り決め〈#559 の前例〉。超えた)。新しい上限 240,500 の余裕は 599 バイト。CSS(`.breadcrumb` ほか)は `src/page.ts` にあり、束には入らない。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(240_500);
+    // (追記)Issue #572(一覧の「最終更新」): 上限を 240,500 から 241,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`): 239,901(1589e85〈作業ブランチの起点〉の生成物)→ 240,678(+777。`pnpm run build:client` の出力〈「240678 バイト」〉)。
+    // 計り方: `git show 1589e85:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。増えたのは、文言の関数(`list.ts` の `updatedLabel`)、モデルへの 2 項目(`updatedLabel`・`listLoading`)、取得の時刻の記録(`race-data.ts` の `racesAt`・`boardAt`・`updatedAtOf`)、
+    // VNode の 2 か所(`view.ts` の最終更新の行と、読み込み中の本文)、固定の文言(「最終更新」「読み込み中…」)。着手前の見積もり(+400〜700)より大きかった。上限 240,500 には 240,678 - 240,500 = 178 バイト足りなかったため引き上げた。新しい上限 241,000 の余裕は 322 バイト(500 バイト単位に切り上げ)。CSS(`.list-updated`)は `src/page.ts` にあり、束には入らない。
+    // (追記)Issue #578-1(過去の分析の実効設定に単勝・複勝の点数の上限を出す): 上限は 241,000 から 242,000 へ引き上げた(項目 1 の後の中間値は 241,500)。実測(`Buffer.byteLength(CLIENT_JS)`): 240,678(c4732f2〈作業ブランチの起点〉の生成物)→ 241,018(+340。`pnpm run build:client` の出力〈「241018 バイト」〉)。
+    // 計り方: `git show c4732f2:cloud/src/client-bundle.generated.ts` と今の生成物を、それぞれ import して `Buffer.byteLength(CLIENT_JS)` を取った。増えたのは、`allocation-proposal-view.ts` の `maxBetsText` と 2 行の文言、`api-analysis.ts` の応答の検査と写し(2 項目ずつ)。項目 3 の切り出し(`badge.ts`)は 240,678 のまま増減なし(生成物の中身は関数の出現順で変わる)。
+    // (追記)Issue #578-2(馬ごとの評価の表の並べ替えで、横スクロールと列見出しのフォーカスを戻す): 241,018(項目 1 の後)→ 241,899(+881。`pnpm run build:client` の出力〈「241899 バイト」〉。`focus({ preventScroll: true })` の 18 バイトを含む)。#578 全体では 240,678 → 241,899(+1,221)。
+    // 計り方は項目 1 と同じ(直前の生成物と今の生成物を import して `Buffer.byteLength(CLIENT_JS)` を取った)。増えたのは、`dom.ts` の `captureRestore`・`applyRestore`(selector の文字列と属性名を含む)と、`view.ts` の表の枠の `data-analysis`。着手前の見積もり(+300〜600)より大きかった。
+    // 新しい上限 242,000 の余裕は 242,000 - 241,899 = 101 バイト(500 バイト単位に切り上げ)。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(242_000);
   });
 });
 
@@ -555,7 +563,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null }],
     allocation: {
       route: "mixed", unavailableReason: null, fallbackReason: "no-combo-candidates", skipReasonCode: null, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.1,
-      includeComboOdds: true, includeWide: true, includeTrio: false, includeQuinella: null, includeExacta: true, includeTrifecta: false, includeBracketQuinella: null, betUnit: 100, oddsStatus: "result",
+      includeComboOdds: true, includeWide: true, includeTrio: false, includeQuinella: null, includeExacta: true, includeTrifecta: false, includeBracketQuinella: null, maxWinBets: 2, maxPlaceBets: 0, betUnit: 100, oddsStatus: "result",
       bets: [{ betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 }],
     },
     detail: "present",

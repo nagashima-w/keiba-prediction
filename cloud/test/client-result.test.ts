@@ -372,6 +372,12 @@ describe("配分(exe の buildAllocationProposalView を流用)", () => {
     expect(allocation.settingsRows).toContain("馬連: 記録なし");
   });
 
+  it("点数の上限(Issue #578): 実効設定に『単勝の点数の上限』『複勝の点数の上限』が出る(値・上限なし・記録なし)", () => {
+    const rowsOf = (caps: { maxWinBets: number | null; maxPlaceBets: number | null }) => content(analysis({ allocation: { ...analysis().allocation!, ...caps } })).allocation.settingsRows;
+    expect(rowsOf({ maxWinBets: 2, maxPlaceBets: 0 })).toEqual(expect.arrayContaining(["単勝の点数の上限: 2 点", "複勝の点数の上限: 上限なし"]));
+    expect(rowsOf({ maxWinBets: null, maxPlaceBets: null })).toEqual(expect.arrayContaining(["単勝の点数の上限: 記録なし", "複勝の点数の上限: 記録なし"]));
+  });
+
   it("fallbackReason が null ならフォールバックの注記は出ない(値があるときだけ出る)", () => {
     const allocation = content(analysis({ allocation: { ...ALLOCATION, bets: [...ALLOCATION.bets], fallbackReason: null } })).allocation;
     expect(allocation.notices).toEqual([]);

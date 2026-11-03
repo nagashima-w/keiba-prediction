@@ -6,7 +6,8 @@
  */
 import type { TaskMode } from "./api";
 import type { BulkModel, BulkPanel } from "./bulk";
-import type { Badge, ListModel, NextRaceItem, RaceGroupItem, RaceItem } from "./list";
+import type { Badge } from "./badge";
+import type { ListModel, NextRaceItem, RaceGroupItem, RaceItem } from "./list";
 import type { Crumb, NeighborLink, RaceNeighbors } from "./neighbors";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
@@ -202,13 +203,18 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
     notices.push(h("p", { class: "notice" }, [model.boardNotice]));
   }
   const body: VNode[] = [];
+  if (model.listLoading) {
+    body.push(h("p", { class: "empty" }, ["読み込み中…"]));
+  }
   if (model.empty) {
     body.push(h("p", { class: "empty" }, ["この日・この区分の開催はありません。"]));
   }
   for (const group of model.groups) {
     body.push(venueSection(group, actions));
   }
-  return h("div", { class: "screen" }, [controls, ...nextRaceCard(model.next, actions), ...trackingNotice(model.tracking, actions), ...notices, ...body]);
+  // Issue #572: 最終更新の行は controls の直後(「次に発走するレース」のカードの前)。絞り込みの塊の外。
+  const updated = model.updatedLabel === null ? [] : [h("p", { class: "list-updated" }, [model.updatedLabel])];
+  return h("div", { class: "screen" }, [controls, ...updated, ...nextRaceCard(model.next, actions), ...trackingNotice(model.tracking, actions), ...notices, ...body]);
 }
 
 const loadingLabel = (loading: boolean, label: string): string => (loading ? "読み込み中…" : label);
@@ -416,7 +422,7 @@ function horseTable(content: ResultContent, table: HorseTable, actions: ViewActi
       h("td", {}, [r.odds]),
     ]);
   });
-  return h("div", { class: "horse-table-wrap", role: "region", "aria-label": "馬ごとの評価の表" }, [h("table", { class: "horse-table" }, [h("thead", {}, [h("tr", {}, head)]), h("tbody", {}, rows)])]);
+  return h("div", { class: "horse-table-wrap", "data-analysis": String(content.id), role: "region", "aria-label": "馬ごとの評価の表" }, [h("table", { class: "horse-table" }, [h("thead", {}, [h("tr", {}, head)]), h("tbody", {}, rows)])]);
 }
 
 /** 印を補修した馬の目印(Issue #317)。「直」と、あれば「元の印→今の印」。固定の語彙だけ(LLM の生の文字列は出さない)。 */

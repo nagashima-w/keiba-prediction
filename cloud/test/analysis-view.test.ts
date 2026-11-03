@@ -188,7 +188,7 @@ describe("buildAnalysisView(Issue #183)", () => {
     }
     expect(sorted(view.allocation!)).toEqual([
       "bankroll", "betUnit", "bets", "evThreshold", "fallbackReason", "includeBracketQuinella", "includeComboOdds", "includeExacta", "includeQuinella", "includeTrifecta", "includeTrio", "includeWide",
-      "kellyFraction", "oddsStatus", "perRaceCap", "route", "skipReasonCode", "unavailableReason",
+      "kellyFraction", "maxPlaceBets", "maxWinBets", "oddsStatus", "perRaceCap", "route", "skipReasonCode", "unavailableReason",
     ]);
     for (const b of view.allocation!.bets) {
       expect(sorted(b)).toEqual(["betType", "comboKey", "ev", "odds", "stake"]);
@@ -218,6 +218,8 @@ describe("buildAnalysisView(Issue #183)", () => {
       includeExacta: true,
       includeTrifecta: false,
       includeBracketQuinella: null,
+      maxWinBets: null,
+      maxPlaceBets: null,
       oddsStatus: "確定",
       bets: [
         { betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 },
@@ -225,6 +227,11 @@ describe("buildAnalysisView(Issue #183)", () => {
       ],
     });
     expect(buildAnalysisView(detail(analysis(), "present"), undefined).allocation).toBeNull();
+    // #578: 点数の上限は値をそのまま写す(0=上限なしを null に潰さない。持たない記録は null=記録なし。単勝と複勝は取り違えない)
+    const caps = buildAnalysisView(detail(analysis(), "present"), { ...ALLOCATION, maxWinBets: 0, maxPlaceBets: 3 }).allocation!;
+    expect([caps.maxWinBets, caps.maxPlaceBets]).toEqual([0, 3]);
+    const capsSwapped = buildAnalysisView(detail(analysis(), "present"), { ...ALLOCATION, maxWinBets: 4, maxPlaceBets: 0 }).allocation!;
+    expect([capsSwapped.maxWinBets, capsSwapped.maxPlaceBets]).toEqual([4, 0]);
     // #185: fallbackReason・betUnit は値をそのまま写す(null も null のまま。0 や空文字に潰さない。exe の表示関数が「記録なし」と「値あり」を区別するため)
     const nulls = buildAnalysisView(detail(analysis(), "present"), { ...ALLOCATION, fallbackReason: null, betUnit: null }).allocation!;
     expect(nulls.fallbackReason).toBeNull();

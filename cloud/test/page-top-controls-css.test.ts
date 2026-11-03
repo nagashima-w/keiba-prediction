@@ -153,3 +153,13 @@ describe("トップの上の並びを 2 つの塊に分ける CSS(Issue #560)", 
     expect(bodiesOf(".list-nav a", outerCss)).toHaveLength(0);
   });
 });
+
+describe("一覧の「最終更新」の行の CSS(Issue #572)", () => {
+  it(".list-updated は小さい字・控えめな色で、余白は下だけ(上の並びと次のカードの間に 1 行入る)", () => {
+    const rule = bodiesOf(".list-updated");
+    expect(rule).toHaveLength(1);
+    expect(rule[0]).toMatch(/font-size:\s*0\.8rem/);
+    expect(rule[0]).toMatch(/color:\s*var\(--muted\)/);
+    expect(rule[0]).toMatch(/margin:\s*0 0 8px/);
+  });
+});

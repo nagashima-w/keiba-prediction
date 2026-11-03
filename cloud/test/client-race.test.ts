@@ -182,6 +182,12 @@ describe("カードの結果(`card.result`。発走前のカードだけ。最�
     expect(model.loading).toBe(false);
   });
 
+  it("結果(=馬ごとの評価の表)を持つのは発走前のカードだけ。結果が ready でも朝のカードは null(Issue #578-2: 画面に表の枠は 1 つ。`createMounter` はその前提でスクロールを戻す)", () => {
+    const [morning, preRace] = cards(buildRaceModel(input({ status: doneRows(), result: { kind: "ready", analysis: ANALYSIS } })));
+    expect(preRace!.result?.kind, "前提: 発走前のカードの結果は ready").toBe("ready");
+    expect(morning!.result).toBeNull();
+  });
+
   it("resultOpen: false なら open: false(内容は持つ)。開閉は取得を伴わない(content は同じ)", () => {
     const open = cards(buildRaceModel(input({ status: doneRows(), result: { kind: "ready", analysis: ANALYSIS } })))[1]!.result;
     const closed = cards(buildRaceModel(input({ status: doneRows(), result: { kind: "ready", analysis: ANALYSIS }, resultOpen: false })))[1]!.result;

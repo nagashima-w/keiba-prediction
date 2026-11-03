@@ -314,6 +314,8 @@ function parseAllocation(value: unknown): StoredAllocationView | null {
     !boolOrNull(v["includeExacta"]) ||
     !boolOrNull(v["includeTrifecta"]) ||
     !boolOrNull(v["includeBracketQuinella"]) ||
+    !numOrNull(v["maxWinBets"]) ||
+    !numOrNull(v["maxPlaceBets"]) ||
     !numOrNull(v["betUnit"]) ||
     !isStr(v["oddsStatus"])
   ) {
@@ -341,6 +343,8 @@ function parseAllocation(value: unknown): StoredAllocationView | null {
     includeExacta: v["includeExacta"],
     includeTrifecta: v["includeTrifecta"],
     includeBracketQuinella: v["includeBracketQuinella"],
+    maxWinBets: v["maxWinBets"],
+    maxPlaceBets: v["maxPlaceBets"],
     betUnit: v["betUnit"],
     oddsStatus: v["oddsStatus"],
     bets,

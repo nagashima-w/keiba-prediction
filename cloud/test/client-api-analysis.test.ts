@@ -166,6 +166,8 @@ const ALLOCATION = {
   includeExacta: true,
   includeTrifecta: false,
   includeBracketQuinella: null,
+  maxWinBets: 2,
+  maxPlaceBets: null,
   oddsStatus: "result",
   bets: [
     { betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 },
@@ -610,6 +612,18 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
       expect(parseAnalysisResponse(200, wrap({ ...ANALYSIS, allocation: rest }))).toEqual({ ok: false, error: { kind: "unexpected", httpStatus: 200 } });
     });
   }
+
+  it("点数の上限(Issue #578): 整数・0・null を読み、そのまま写す。文字列・真偽値は unexpected(ケリー係数などの数値の項目と同じ扱い)", () => {
+    for (const [win, place] of [[3, 0], [0, null], [null, 5]] as const) {
+      const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, allocation: { ...ALLOCATION, maxWinBets: win, maxPlaceBets: place } }));
+      expect(result.ok && [result.analysis.allocation?.maxWinBets, result.analysis.allocation?.maxPlaceBets]).toEqual([win, place]);
+    }
+    for (const bad of ["2", true, {}]) {
+      for (const key of ["maxWinBets", "maxPlaceBets"]) {
+        expect(parseAnalysisResponse(200, wrap({ ...ANALYSIS, allocation: { ...ALLOCATION, [key]: bad } })), `${key}=${JSON.stringify(bad)}`).toEqual({ ok: false, error: { kind: "unexpected", httpStatus: 200 } });
+      }
+    }
+  });
 
   const malformed: readonly [string, unknown][] = [
     ["analysis が無い", { ok: true }],

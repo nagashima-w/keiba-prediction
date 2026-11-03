@@ -293,6 +293,7 @@ export function createApp(deps: AppDeps): App {
               board: boardSource(),
               boardLoading: data.boardLoading(route.date),
               tracking: data.trackingNotice(),
+              updatedAt: data.updatedAtOf(route.date, route.venue),
               choices: openChoices.get(listKey(route.date, route.venue)),
               readOnly: !admin,
               now: deps.now(),

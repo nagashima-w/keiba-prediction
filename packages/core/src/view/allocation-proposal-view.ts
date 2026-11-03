@@ -93,7 +93,7 @@ export interface AllocationProposalView {
   readonly notices: readonly string[];
   /** 買い目行(配分ありのときのみ非空)。 */
   readonly bets: readonly AllocationBetRowView[];
-  /** 実効設定12項目(「ラベル: 値」の文字列配列。Issue #118で馬連を追加し8→9項目、Issue #126で馬単を追加し9→10項目、Issue #140で三連単を追加し10→11項目、Issue #151で枠連を追加し11→12項目)。記録が無ければ空配列。 */
+  /** 実効設定14項目(「ラベル: 値」の文字列配列。Issue #118で馬連を追加し8→9項目、Issue #126で馬単を追加し9→10項目、Issue #140で三連単を追加し10→11項目、Issue #151で枠連を追加し11→12項目、Issue #578で単勝・複勝の点数の上限を追加し12→14項目)。記録が無ければ空配列。 */
   readonly settingsRows: readonly string[];
 }
 
@@ -285,7 +285,7 @@ function betTypeLabel(betType: string): string {
 /** オッズ発売状態(odds_status)→日本語ラベル。
  *
  * 既存の `oddsStatusNote`(format.ts)は流用しない: (i) `"result"`(確定)で `null` を返す設計
- * (実効設定は12項目すべてに値が要るため使えない)、(ii) 文言が実行中のラン向け(「発売後に
+ * (実効設定は14項目すべてに値が要るため使えない)、(ii) 文言が実行中のラン向け(「発売後に
  * 再分析推奨」)で過去分析の再表示には不適切、という用途の違いによる(`oddsStatusNote` 自体は
  * 改変しない。旧 exe の`BatchAnalysisView.tsx`(#287 で削除。3c1664e まで) が依存していた。現在は `view/format.ts` の定義とそのテスト `test/view/format.test.ts` が固定している)。
  */
@@ -320,16 +320,26 @@ function onOffOrUnrecorded(value: boolean | null): string {
 }
 
 /**
- * 実効設定12項目(AC5。Issue #118〈#24-D3b-3〉で「馬連」をワイドと三連複の間に追加し8→9項目、
+ * 実効設定14項目(AC5。Issue #118〈#24-D3b-3〉で「馬連」をワイドと三連複の間に追加し8→9項目、
  * Issue #126〈#24-E3c〉で「馬単」を馬連と三連複の間に追加し9→10項目、Issue #140〈#25-E3c〉で
  * 「三連単」を馬単と三連複の間に追加し10→11項目、Issue #151〈#26-E3c〉で「枠連」を馬連と馬単の間に
- * 追加し11→12項目)を「ラベル: 値」の文字列配列にする。
+ * 追加し11→12項目、Issue #578で「単勝の点数の上限」「複勝の点数の上限」をケリー係数の直後に追加し12→14項目)を「ラベル: 値」の文字列配列にする。
  */
+/** 点数の上限(Issue #578)の値。null・省略=記録なし(0〈上限なし〉と断定しない)、0=上限なし、それ以外=「N 点」。 */
+function maxBetsText(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "記録なし";
+  }
+  return value === 0 ? "上限なし" : `${value} 点`;
+}
+
 function buildSettingsRows(a: StoredAllocationView): readonly string[] {
   return [
     `総資金: ${formatYen(a.bankroll)}`,
     `1レース上限: ${formatYen(a.perRaceCap)}`,
     `ケリー係数: ${a.kellyFraction}`,
+    `単勝の点数の上限: ${maxBetsText(a.maxWinBets)}`,
+    `複勝の点数の上限: ${maxBetsText(a.maxPlaceBets)}`,
     `EV閾値: ${a.evThreshold}`,
     `ワイド: ${onOff(a.includeWide)}`,
     `馬連: ${onOffOrUnrecorded(a.includeQuinella)}`,
