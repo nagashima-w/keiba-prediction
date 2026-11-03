@@ -39,7 +39,7 @@ export interface DomRoot {
 export interface RestorableElement {
   scrollLeft?: number;
   getAttribute?(name: string): string | null;
-  focus?(): void;
+  focus?(options?: { preventScroll?: boolean }): void;
 }
 
 const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress", "table", "thead", "tbody", "tr", "th", "td"]);
@@ -155,7 +155,7 @@ function applyRestore(root: DomRoot, restore: Restore): void {
     }
   }
   if (restore.focus !== null) {
-    root.querySelector?.(`button.sort-button[data-sort-key="${restore.focus.key}"][data-analysis="${restore.focus.analysis}"]`)?.focus?.();
+    root.querySelector?.(`button.sort-button[data-sort-key="${restore.focus.key}"][data-analysis="${restore.focus.analysis}"]`)?.focus?.({ preventScroll: true }); // ブラウザによっては、フォーカスでページ側がスクロールするため
   }
 }
 

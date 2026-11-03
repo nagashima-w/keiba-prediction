@@ -23,7 +23,10 @@ class FakeEl {
     return c;
   }
   addEventListener(): void {}
-  focus(): void {
+  /** 戻すときに渡された focus の引数(テスト側の `focus()` は引数なし=undefined)。 */
+  focusOptions: unknown[] = [];
+  focus(options?: { preventScroll?: boolean }): void {
+    this.focusOptions.push(options);
     this.doc.activeElement = this;
   }
   descendants(): FakeEl[] {
@@ -103,6 +106,7 @@ describe("createMounter: 作り直しのあとに、表の横スクロールと�
     expect(button(root, 5, "ev"), "前提: ボタンは作り直された").not.toBe(before);
     expect(doc.activeElement).toBe(button(root, 5, "ev"));
     expect(doc.activeElement).not.toBe(button(root, 5, "winOdds"));
+    expect(button(root, 5, "ev").focusOptions, "戻すときは preventScroll: true を付ける(ブラウザによってはページ側がスクロールするため)").toEqual([{ preventScroll: true }]);
   });
 
   it("別の分析の表へ移ったときは戻さない(スクロールもフォーカスも)", () => {
