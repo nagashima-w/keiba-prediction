@@ -345,17 +345,19 @@ export interface StatusOptions {
 }
 
 /**
- * セルの分布の SQL。中央・騎手 ID・競馬場・芝ダ・距離のある走を、騎手 × 競馬場 × 芝ダ × 距離帯(200m)で数える。
- * `sourceWhere` は出どころの条件(定数だけ。利用者の入力は入らない)、`resultFlag` は結果ページ由来の走を 1 と数える式。
+ * セルの分布の SQL(**全件走査 1 本**。Issue #591)。中央・騎手 ID・競馬場・芝ダ・距離のある走を、騎手 × 競馬場 × 芝ダ × 距離帯(200m)のセルに分け、
+ * セルごとに戦績 API 由来の走数 `a`(`source IS NULL`)と結果ページ由来の走数 `r`(`source = 'result'`)を数える(出どころが NULL・'result' 以外の行は数えない)。
+ * `source = 'result'` ではなく `source IS 'result'` と書くのは、戦績 API 由来の行(source が NULL)で NULL にならず 0 を返す(SUM が全部 NULL になるのを避ける)ため。
+ * 外側の集計で、`cells`(戦績 API 由来だけ。`a > 0` のセルを `a` で数える。#591 より前と同じ値)と `cellsWithResult`(`a + r` で数える)を同じ結果の 1 行で返す。
+ * 走査を 2 本にしない理由: D1 の読み取りは 1 日 500 万行(Free)で、`cells=1` の 1 回は全件走査の本数 × N 行を読む(ローカルの D1 の実測は 1 本あたり 1.5〜2N)。
  */
-function cellsSql(sourceWhere: string, resultFlag: string): string {
-  return (
-    "SELECT COUNT(*) AS cells, COALESCE(SUM(n), 0) AS runs, COALESCE(SUM(n >= 10), 0) AS n10, COALESCE(SUM(n >= 30), 0) AS n30, COALESCE(SUM(n >= 100), 0) AS n100, COALESCE(SUM(r), 0) AS resultRuns FROM (" +
-    `SELECT COUNT(*) AS n, SUM(${resultFlag}) AS r FROM horse_runs WHERE ${sourceWhere} AND json_extract(data, '$[6]') = '中央' AND json_extract(data, '$[14]') IS NOT NULL ` +
-    "AND json_extract(data, '$[1]') IS NOT NULL AND json_extract(data, '$[16]') IS NOT NULL AND json_extract(data, '$[17]') IS NOT NULL " +
-    "GROUP BY json_extract(data, '$[1][1]'), json_extract(data, '$[16]'), CAST(json_extract(data, '$[17]') AS INTEGER) / 200, json_extract(data, '$[14]'))"
-  );
-}
+const CELLS_SQL =
+  "SELECT " +
+  "COALESCE(SUM(a > 0), 0) AS cells, COALESCE(SUM(a), 0) AS runs, COALESCE(SUM(a >= 10), 0) AS n10, COALESCE(SUM(a >= 30), 0) AS n30, COALESCE(SUM(a >= 100), 0) AS n100, " +
+  "COUNT(*) AS wCells, COALESCE(SUM(a + r), 0) AS wRuns, COALESCE(SUM(a + r >= 10), 0) AS wN10, COALESCE(SUM(a + r >= 30), 0) AS wN30, COALESCE(SUM(a + r >= 100), 0) AS wN100, COALESCE(SUM(r), 0) AS resultRuns FROM (" +
+  `SELECT SUM(source IS NULL) AS a, SUM(source IS '${SOURCE_RESULT}') AS r FROM horse_runs WHERE (source IS NULL OR source = '${SOURCE_RESULT}') AND json_extract(data, '$[6]') = '中央' AND json_extract(data, '$[14]') IS NOT NULL ` +
+  "AND json_extract(data, '$[1]') IS NOT NULL AND json_extract(data, '$[16]') IS NOT NULL AND json_extract(data, '$[17]') IS NOT NULL " +
+  "GROUP BY json_extract(data, '$[1][1]'), json_extract(data, '$[16]'), CAST(json_extract(data, '$[17]') AS INTEGER) / 200, json_extract(data, '$[14]'))";
 
 /** 状態を読む(読み取りだけ。失敗は投げる)。 */
 export async function readHorseRunsStatus(db: HorseRunsDb, options: StatusOptions): Promise<HorseRunsStatus> {
@@ -444,21 +446,12 @@ export async function readHorseRunsStatus(db: HorseRunsDb, options: StatusOption
   if (!options.cells) {
     return status;
   }
-  const cells = await db.prepare(cellsSql("source IS NULL", "0")).first<{ cells: number; runs: number; n10: number; n30: number; n100: number }>();
-  // 結果ページ由来を含むセル(Issue #591)。出どころが NULL・'result' 以外の行は数えない。
-  const withResult = await db
-    .prepare(cellsSql(`(source IS NULL OR source = '${SOURCE_RESULT}')`, `CASE WHEN source = '${SOURCE_RESULT}' THEN 1 ELSE 0 END`))
-    .first<{ cells: number; runs: number; n10: number; n30: number; n100: number; resultRuns: number }>();
+  const c = await db
+    .prepare(CELLS_SQL)
+    .first<{ cells: number; runs: number; n10: number; n30: number; n100: number; wCells: number; wRuns: number; wN10: number; wN30: number; wN100: number; resultRuns: number }>();
   return {
     ...status,
-    cells: { cells: cells?.cells ?? 0, runs: cells?.runs ?? 0, n10: cells?.n10 ?? 0, n30: cells?.n30 ?? 0, n100: cells?.n100 ?? 0 },
-    cellsWithResult: {
-      cells: withResult?.cells ?? 0,
-      runs: withResult?.runs ?? 0,
-      n10: withResult?.n10 ?? 0,
-      n30: withResult?.n30 ?? 0,
-      n100: withResult?.n100 ?? 0,
-      resultRuns: withResult?.resultRuns ?? 0,
-    },
+    cells: { cells: c?.cells ?? 0, runs: c?.runs ?? 0, n10: c?.n10 ?? 0, n30: c?.n30 ?? 0, n100: c?.n100 ?? 0 },
+    cellsWithResult: { cells: c?.wCells ?? 0, runs: c?.wRuns ?? 0, n10: c?.wN10 ?? 0, n30: c?.wN30 ?? 0, n100: c?.wN100 ?? 0, resultRuns: c?.resultRuns ?? 0 },
   };
 }
