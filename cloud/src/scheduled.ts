@@ -31,7 +31,7 @@
  * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。計画・既存の結果の依頼を失敗させない。
  */
 import { jstKaisaiDate, planTargetDate, scheduledRunKind, type ScheduledRunKind } from "./auto-run-plan";
-import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceDayNamespaceLike } from "./handler";
+import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike } from "./handler";
 import { DAILY_REPORT_NAME } from "./daily-report-core";
 import { D1ReportStore } from "./daily-report-repository";
 import { MONTHLY_REPORT_NAME } from "./monthly-report-core";
@@ -40,6 +40,7 @@ import { buildPlanRequestFailedEmbed } from "./notify-embeds";
 import { classifyNotifyError, createDiscordNotifier, webhookStatus } from "./notify-send";
 import type { DiscordFetchLike } from "../../packages/core/src/notify/discord";
 import { RACE_ARCHIVE_FETCH_NAME } from "./race-archive-fetch-core";
+import { RACE_ARCHIVE_RUNS_NAME } from "./race-archive-runs-core";
 import { RESULT_BACKFILL_NAME } from "./result-backfill-core";
 import { addDaysToKaisaiDate, CRON_RESULT_MAX_DAYS, dispatchResultImports, errorKind, resultWindowFor, type DispatchStore } from "./result-dispatch";
 import { D1ResultStore, type ResultDb } from "./result-repository";
@@ -58,6 +59,8 @@ export interface ScheduledEnv {
   readonly RESULT_BACKFILL?: BackfillNamespaceLike;
   /** 過去の結果の取得の DO(Issue #554)。無い構成では kick を呼ばない。 */
   readonly RACE_ARCHIVE_FETCH?: RaceArchiveNamespaceLike;
+  /** 過去の結果の毎晩の変換の DO(Issue #590)。無い構成では kick を呼ばない。 */
+  readonly RACE_ARCHIVE_RUNS?: RaceArchiveRunsNamespaceLike;
   /** 日報の DO(Issue #235)。無い構成では日報の取り残しの補完をしない。 */
   readonly DAILY_REPORT?: DailyReportNamespaceLike;
   /** 月報の DO(Issue #265・#279)。無い構成では月報を依頼しない。 */
@@ -170,6 +173,14 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
       await env.RACE_ARCHIVE_FETCH.get(env.RACE_ARCHIVE_FETCH.idFromName(RACE_ARCHIVE_FETCH_NAME)).kick();
     } catch (error) {
       log(`scheduled: failed class=race-archive-kick-failed error=${errorKind(error)}`, "error");
+    }
+  }
+  // 過去の結果の毎晩の変換の起動(Issue #590)。取得の kick と同じく、アラームが無ければ張るだけ(変換は JST 1:00〜8:30 に、DO が R2 と D1 だけで行う。netkeiba には出ない)。失敗しても投げない。
+  if (env.RACE_ARCHIVE_RUNS !== undefined) {
+    try {
+      await env.RACE_ARCHIVE_RUNS.get(env.RACE_ARCHIVE_RUNS.idFromName(RACE_ARCHIVE_RUNS_NAME)).kick();
+    } catch (error) {
+      log(`scheduled: failed class=race-archive-runs-kick-failed error=${errorKind(error)}`, "error");
     }
   }
 

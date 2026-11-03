@@ -100,6 +100,15 @@ class_name = "AllocationExportDO"
 name = "RACE_ARCHIVE_FETCH"
 class_name = "RaceArchiveFetchDO"
 
+# 過去の結果(R2 の読み取り結果)を horse_runs に入れる毎晩の変換の Durable Object(Issue #590〈#549-B3-2〉)。`idFromName("main")` の単一インスタンス。
+# JST 1:00〜8:30 の間だけ、目録(race_archive)の未変換のレースを 1 ステップ最大 20 件、R2 から読んで horse_runs に書く(1 晩の書き込み行数の既定は 3 万行)。
+# netkeiba にも gate にも出ない(R2 と D1 だけ)。cron の `scheduled`(21 時・23 時)が kick してアラームを張る。管理者の口は `GET /api/race-archive/runs`(読み取りだけ)。
+# D1 が 400MB を超えたら止めて知らせる(次の晩に大きさを読み直し、下回れば自動で再開)。
+# 止める・行数を下げる var: `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT`(任意。"0" で止める。1 以上の整数で 1 晩の書き込み行数を下げる)。★binding と同じ名前〈RACE_ARCHIVE_RUNS〉の var は衝突するので使わない。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "RACE_ARCHIVE_RUNS"
+class_name = "RaceArchiveRunsDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["NetkeibaGate"]
@@ -157,6 +166,11 @@ new_sqlite_classes = ["AllocationExportDO"]
 [[migrations]]
 tag = "v11"
 new_sqlite_classes = ["RaceArchiveFetchDO"]
+
+# 追加だけ(v1〜v11 には触れない)。Issue #590。
+[[migrations]]
+tag = "v12"
+new_sqlite_classes = ["RaceArchiveRunsDO"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。
