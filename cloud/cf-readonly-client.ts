@@ -43,6 +43,10 @@ function skeletonOf(sql: string): string {
       i = end + 2;
       out += " ";
     } else if (c === "'" || c === '"' || c === "`") {
+      // 接頭辞つきの引用符(E'...'・X'...'・N'...'、識別子の直後の引用符)は、解釈の違いで文の切れ目が隠れうるので拒否する。
+      if (i > 0 && /[A-Za-z0-9_$]/.test(sql[i - 1]!)) {
+        throw new Error("読み取り専用の守り: 接頭辞つきの引用符は送れません");
+      }
       let j = i + 1;
       for (;;) {
         if (j >= sql.length) {
@@ -69,11 +73,25 @@ function skeletonOf(sql: string): string {
 
 /**
  * 読み取りの SQL だけを通す。通らなければ例外。
- * 通す条件: コメントと文字列リテラルを除いたうえで、(1) 先頭の語が SELECT か WITH (2) `;` は末尾にしか無い(複数の文にしない) (3) 書き込み・DDL・PRAGMA などの語を含まない。
+ * 通す条件: 先に `[ ]`・制御文字・接頭辞つきの引用符・本体の ASCII 以外を拒否し、そのうえで、コメントと文字列リテラルを除いて、(1) 先頭の語が SELECT か WITH (2) `;` は末尾にしか無い(複数の文にしない) (3) 書き込み・DDL・PRAGMA などの語を含まない。
  * 文字列リテラルの中の語は見ない。列名の一部(`updated_at` など)は語として数えない。保守的な検査で、`replace()` 関数のように読み取りに使える語も拒否する。
  */
 export function assertReadOnlySql(sql: string): void {
-  const code = skeletonOf(sql).trim().replace(/;+\s*$/, "").trim();
+  // 骨格を作る前に、解釈の食い違いの元になるものを丸ごと拒否する(この道具の SQL はどれも使わない)。
+  // - `[`・`]`: SQLite の `[識別子]` の引用。中の ' や -- や /* を、この検査だけが文字列・コメントの始まりと読むと、`;` と書き込みの文が隠れる。
+  // - 制御文字(NUL・ESC・垂直タブ・DEL など。タブ・改行・復帰は許す)。
+  if (/[[\]]/.test(sql)) {
+    throw new Error("読み取り専用の守り: [ ] は送れません");
+  }
+  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(sql)) {
+    throw new Error("読み取り専用の守り: 制御文字は送れません");
+  }
+  const skeleton = skeletonOf(sql);
+  // コメントと文字列を除いた部分に ASCII 以外があれば拒否する(全角のセミコロン・Unicode の空白・ゼロ幅の文字など。見た目や解釈が食い違う)。
+  if (/[^\u0000-\u007F]/.test(skeleton)) {
+    throw new Error("読み取り専用の守り: SQL の本体に ASCII 以外の文字は使えません");
+  }
+  const code = skeleton.trim().replace(/;+\s*$/, "").trim();
   if (code === "") {
     throw new Error("読み取り専用の守り: 空の SQL です");
   }

@@ -18,6 +18,10 @@ describe("assertReadOnlySql: 書き込みの文を通さない", () => {
     ["WITH ... SELECT", "WITH t AS (SELECT 1 AS a) SELECT a FROM t"],
     ["列名に予約語を含む(updated_at・deleted)", "SELECT updated_at, deleted FROM x WHERE y = ?"],
     ["文字列リテラルの中の予約語", "SELECT * FROM x WHERE name = 'DELETE FROM y'"],
+    ["文字列の中の '' (引用符の重ね)", "SELECT * FROM x WHERE a = 'it''s; DELETE FROM t' AND b = ?"],
+    ["識別子の中の \"\" の重ね", 'SELECT "a""; DELETE FROM t; --" FROM t'],
+    ["識別子の中の `` の重ね", "SELECT `a``; DELETE FROM t; --` FROM t"],
+    ["文字列の中の日本語・全角のセミコロン", "SELECT * FROM x WHERE a = '日本語；' -- コメント\n"],
     ["json_each の IN", "SELECT a FROM t WHERE id IN (SELECT value FROM json_each(?))"],
   ];
   for (const [name, sql] of ok) {
@@ -51,10 +55,37 @@ describe("assertReadOnlySql: 書き込みの文を通さない", () => {
     ["空", ""],
     ["コメントだけ", "-- SELECT 1"],
     ["EXPLAIN", "EXPLAIN SELECT 1"],
+    // SQLite の [識別子] の引用。中の ' や -- や /* を、検査だけが文字列・コメントの始まりと読むと、; と書き込みの文が隠れる(レビューの指摘)。
+    ["[ ] の中の --", "SELECT [a--] FROM t; DELETE FROM t"],
+    ["[ ] の中の '", "SELECT [a'] FROM t; DELETE FROM t WHERE [b'] IS NULL"],
+    ["[ ] の中の /* と */", "SELECT [a/*] FROM t; DELETE FROM t; SELECT [b*/] FROM t"],
+    ["[ ] を使うだけの SELECT も拒否する(この道具の SQL は使わない)", "SELECT [a] FROM t"],
+    ["] だけ", "SELECT a] FROM t"],
+    // 接頭辞つきの文字列(E'...'・X'...'・N'...')。接頭辞のある引用符は拒否する。
+    ["E'...'", "SELECT E'a\\'; DELETE FROM t; --' FROM t"],
+    ["X'...'", "SELECT X'00' FROM t"],
+    ["N'...'", "SELECT N'a' FROM t"],
+    ["識別子の直後の引用符", "SELECT a'b' FROM t"],
+    // Unicode の空白・全角のセミコロン・制御文字。
+    ["全角のセミコロン", "SELECT 1\uFF1B DELETE FROM t"],
+    ["ギリシャ語の疑問符(セミコロンに見える)", "SELECT 1\u037E DELETE FROM t"],
+    ["NBSP", "SELECT\u00A01"],
+    ["行区切り U+2028", "SELECT\u20281"],
+    ["ゼロ幅スペース", "SELECT\u200B1"],
+    ["NUL", "SELECT 1\u0000; DELETE FROM t"],
+    ["NUL を文字列の中に", "SELECT 'a\u0000b' FROM t"],
+    ["制御文字(ESC)", "SELECT\u001B1"],
+    ["垂直タブ", "SELECT\u000B1"],
+    ["DEL", "SELECT 1\u007F"],
+    ["コメントの中の NUL", "SELECT 1 -- a\u0000\nFROM t"],
   ];
   for (const [name, sql] of ng) {
-    it(`拒否する: ${name}`, () => {
+    it(`拒否する: ${name}`, async () => {
       expect(() => assertReadOnlySql(sql)).toThrow();
+      // 窓口を通しても、HTTP は 1 回も送られない。
+      const { fetch: f, calls } = fakeFetch(() => d1Ok([]));
+      await expect(client(f).query(sql, [])).rejects.toThrow();
+      expect(calls).toHaveLength(0);
     });
   }
 });

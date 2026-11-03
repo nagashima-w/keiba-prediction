@@ -1,5 +1,7 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
+import { asReadonlyBucket, asReadonlyD1, ReadonlyCloudflare } from "../cf-readonly-client";
+import { D1PriorExportStore } from "../src/prior-export-store";
 import { buildPriorDataset, diffAgainstProduction } from "../build-prior-dataset";
 import { PriorExportCore, type PriorExportStorePort } from "../src/prior-export-core";
 import { assembleFile, PRIOR_ROW_KEYS, PRIOR_ROW_KEYS_V6_ADDED, type PriorDatasetRow } from "../src/prior-export-format";
@@ -138,5 +140,24 @@ describe("diffAgainstProduction: 本番の format 5 との突き合わせ", () =
     const d = diffAgainstProduction(bytes, prodLike(rows, "2026-10-30T00:00:00.000Z"));
     expect(d.localRows).toBe(0);
     expect(d.onlyInProd).toBe(3);
+  });
+});
+
+describe("道具が本番のストアに送る SQL は、読み取り専用の検査(`[ ]`・制御文字・ASCII 以外の拒否を含む)をすべて通る", () => {
+  it("D1PriorExportStore の readUsage・readCandidates・readLookups・readRaceData が送る SQL が、1 つも拒否されない", async () => {
+    const sent: string[] = [];
+    const f = (async (_url: string, init?: RequestInit) => {
+      sent.push((JSON.parse(String(init?.body)) as { sql: string }).sql);
+      return new Response(JSON.stringify({ success: true, errors: [], result: [{ results: [], meta: { rows_read: 0 } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const client = new ReadonlyCloudflare({ accountId: "A", token: "T", fetch: f, sleep: async () => {}, minIntervalMs: 0 });
+    const store = new D1PriorExportStore({ db: asReadonlyD1(client) as never, bucket: asReadonlyBucket(client) as never });
+    await store.readUsage();
+    await store.readCandidates();
+    await store.readLookups();
+    await store.readRaceData([1], ["202601010101"]);
+    // 空振り防止: 実際に送られた文の数(使用量 1 + 候補 1 + 対応 2 + 馬・結果・面 3)。
+    expect(sent).toHaveLength(7);
+    expect(sent.some((sql) => sql.includes("["))).toBe(false);
   });
 });
