@@ -1,0 +1,13 @@
+-- クラウド版(D1)の migration 0033: race_archive に、horse_runs への変換の済み印 runs_version を足す(Issue #588〈#549-B3-1〉。親は #549)。exe の SQLite には無い、D1 専用の表の列。
+-- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧 Worker は runs_version を参照せず、列が増えても壊れない)。
+-- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言した追加分」(D1_EXTRA_TABLES の race_archive)も同時に直す。
+-- ★デプロイの順序: runs_version を読み書きする新しい Worker は、migration の適用より前に出してはならない。deploy-cloud.yml は migration を wrangler deploy より前に適用する。
+--   適用前に新しい Worker が目録を保存すると、UPSERT が列を参照して失敗する(取得 DO は保存の例外を握って数える)。
+--
+-- 目的: 目録の各レースを horse_runs に変換したか、どの版で変換したかを、変換と同じ batch で記録する(取得が進むたびに入れ直す仕組みの「どこまで入れたか」)。
+-- race_archive.runs_version:
+--   NULL  未変換
+--   整数  変換した時の core の RESULT_RUN_VERSION(変換を拒否したレース〈頭数の宣言と行数が合わない等〉も、拒否した版で印を付け、同じ版では再試行しない)
+-- 目録の行の中身が変わる保存(saveRaceArchive の UPSERT が更新する場合)は runs_version を NULL に戻す(中身が変わったので、変換をやり直す)。
+-- 索引は作らない(WITHOUT ROWID の副索引は書き込みの行を増やす。未変換の列挙は主キー順のカーソルで行う)。
+ALTER TABLE race_archive ADD COLUMN runs_version INTEGER;

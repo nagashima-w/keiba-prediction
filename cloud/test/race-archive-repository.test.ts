@@ -154,7 +154,7 @@ describe("保存: 新規(R2 → D1)", () => {
     // 目録の行
     const rows = await catalog();
     const encoded = encodeRaceArchive({ record: CENTRAL, html: CENTRAL_HTML, fetchedAt: T1 });
-    expect(rows).toEqual([{ race_id: "202105040811", kind: "central", race_date: "2021-10-31", parser_version: CENTRAL.parserVersion, r2_key: CENTRAL_KEY, raw_bytes: encoded.rawBytes, fetched_at: T1 }]);
+    expect(rows).toEqual([{ race_id: "202105040811", kind: "central", race_date: "2021-10-31", parser_version: CENTRAL.parserVersion, r2_key: CENTRAL_KEY, raw_bytes: encoded.rawBytes, fetched_at: T1, runs_version: null }]);
     // r2_ops: 今月(UTC 2026-11)の Class A が 1、Class B は 0
     expect(await ops()).toEqual({ classA: 1, classB: 0 });
     // 戻り値の大きさは、ローカルの D1 が返した実際の値(ページ単位の正の数)
@@ -466,6 +466,7 @@ describe("目録の 1 行の取得", () => {
       r2Key: CENTRAL_KEY,
       rawBytes: encodeRaceArchive({ record: CENTRAL, html: CENTRAL_HTML, fetchedAt: T1 }).rawBytes,
       fetchedAt: T1,
+      runsVersion: null, // Issue #588: 変換していないレースは null
     });
     expect(await store.getCatalogEntry("202146110310")).toBeNull();
     expect(calls).toEqual([]); // R2 には触れない

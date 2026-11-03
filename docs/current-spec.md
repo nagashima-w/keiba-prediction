@@ -1453,6 +1453,10 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
   - R2 の put は 1 回だけで、再試行は呼び出し側が行う。put のあとで D1 が失敗すると R2 にだけ置かれる。もう一度保存すれば目録が書かれる。
   - **Class A は put のあとに数える**。put が成功して D1 の batch が失敗した保存は、数えられない(1 回につき 1 の過少)。分析の保存(`analysis-repository.ts`)は逆で、put の前に数えている。
 - **読み出し**(`readRaceArchive`): Class B が柵に達していれば R2 を引かず `skipped`。そうでなければ get を 1 回行い、要求を出したら Class B を +1 する(計数の失敗は読み出しを妨げない)。無い・壊れている・別のレースのものは `missing`。get の失敗は例外(`missing` と区別する)。`getCatalogEntry` は目録の 1 行を返す(D1 だけ)。列挙は #549-B で足す。
+- **変換の済み印と列挙**(#588〈#549-B3-1〉。migration 0033。追加のみ): `race_archive.runs_version`(整数・NULL 可。NULL = 未変換、値 = 変換した時の `RESULT_RUN_VERSION`)。目録の行の中身が変わる保存(`saved`)は印を NULL に戻し、変わらない再保存(`unchanged`)は据え置く。副索引は作らない。
+  - **列挙**(`listCatalogPage(afterRaceId, limit)`): 主キー(`race_id`)順のカーソルで 1〜200 件。読む行は limit 件ぶん(全件走査にならない)。目録の行に `runsVersion` を含める。
+  - **一括の読み出し**(`readRaceArchives(raceIds)`): 1 回に 40 件まで(Worker の Free の 1 呼び出し 50 の内側)。柵の確認 1 回・get を並列に N 回・Class B の計数 1 回(+N)。1 件の get が例外でもほかは読み、その件は `error`(`missing` と区別する)。Class B が柵に達していれば R2 を引かず `skipped`。
+  - **変換して書く**(`cloud/src/race-archive-runs.ts` の `convertRaceArchives(db, targets, now)`): 読み取り結果を `raceRecordToRuns` で走ごとの行にして、D1 の batch 1 回で「新規の行(`ON CONFLICT DO NOTHING`。戦績 API の行・既にある結果ページ由来の行に触れない)・結果ページ由来で版が古い行だけの書き直し・済み印」を一緒に書く。済み印は、目録の `raw_bytes`・`parser_version` が読んだ時と同じときだけ付ける(主キーで引く)。変換を拒否したレース(頭数の宣言と行数が合わない等)は、行を書かず、拒否した版で印を付ける。戻り値に書き込み行数の合計(`rowsWritten`)を返す。呼び出すのは毎晩の変換の DO(#590)で、#588 の時点では本番の Worker は呼ばない。
 - **限界**: 本番の D1 の `size_after` の意味は未確認。本番の R2・D1 での動作は、最初の保存で確かめる。
 - **検査**: `cloud/test/race-archive-format.test.ts`・`race-archive-repository.test.ts`・`migration-0031.test.ts`、`scripts/test/cloud-d1-schema.test.ts`。smoke は `/smoke/race-archive`(workerd 上の `node:zlib`・R2・D1)を確かめる。
 
@@ -2618,6 +2622,7 @@ exe からクラウド版への移行は #167 で完了した。**移行画面(#
   - **確かめられていない点**: 実例(戦績 API と同じ馬・同じレース)は 3 件(中央 2・地方 1)。中央の 1 着・同着・降着・取消の API 側の文字・障害の馬場と天候の文字は実例なしで、合成のレコードで確かめた。取得できていない実例の候補は、変換の JSDoc に残している。
   - **版**: 結果ページ由来の行の `parser_version` は `RESULT_RUN_VERSION`(1)。戦績 API の `HORSE_RUN_PARSER_VERSION` とは別の目盛りで、変換かレコードの意味(`RACE_RECORD_PARSER_VERSION`)を変えたら上げる。テストが 2 つの版の組を固定する。
 - **診断の変更**: `table`(行数・馬の数・開催区分別・版数別・走った日・初見時刻)と `cells=1` の分布は、戦績 API 由来の行(`source IS NULL`)だけを数える。結果ページ由来の行は、新しい欄 `resultRows`(`rows`・`horses`・`byParserVersion`・`runDateMin`・`runDateMax`)に別に出す。全件走査の本数は変えず、出どころごとに `GROUP BY` して 1 回の走査で分ける。結果ページ由来の行が 0 件の間は、既存の項目の値は変わらない(テストで固定している)。クライアントはこの診断を読まない。
+  - **結果ページ由来を含むセル**(Issue #591): `cells=1` のとき、`cells`(戦績 API 由来だけ。従来のまま)に加えて `cellsWithResult` を返す。`cells` と同じ見方で、結果ページ由来の行(`source = 'result'`)も数える(`resultRuns` はそのうちの走数)。出どころが NULL・`'result'` 以外の行は数えない。11/10 の #256 の判断で、過去の結果から入れた行を含めたセルの厚みを見るためのもの。`cells` と同じ全件走査 1 本で数える(`cells=1` の全件走査は合計 3 本のまま。ローカルの D1 の実測で 1 本あたり 2N 行、1 回で 6N 行を読む。テストが `meta.rows_read` で固定)。
 
 ### クラウド版の月報 段階 A(統計・保存・画面。#265 の段階 A = #279。**版数は 1.44.0 のまま**。単独では公開しない)
 当月 1 日〜最終日の予想と結果を、毎月の最終日の夜(22 時ごろ)に D1 から再集計して保存し、日報の画面の中の「月」で見られるようにする。**LLM の文章・Discord の要約・作り直しは段階 B(#280)、補正前/補正後の当たり具合は #281**。段階 A は LLM・Discord・netkeiba に出ない。ユーザーの決定(2026-10-13): 最終日の 22 時ごろ・当月 1 日〜最終日・使うモデルは予想と同じ(段階 B)・閲覧者にも見せる。
