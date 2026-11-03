@@ -164,6 +164,9 @@ export interface AnalysisViewAllocation {
   readonly includeExacta: boolean | null;
   readonly includeTrifecta: boolean | null;
   readonly includeBracketQuinella: boolean | null;
+  /** 使った単勝・複勝の点数の上限(Issue #578。0=上限なし。null=記録なし〈旧い行、および締切の再計算の回〉)。 */
+  readonly maxWinBets: number | null;
+  readonly maxPlaceBets: number | null;
   readonly oddsStatus: string;
   readonly bets: readonly { readonly betType: string; readonly comboKey: string; readonly stake: number; readonly odds: number | null; readonly ev: number | null }[];
 }
@@ -391,6 +394,8 @@ function allocationViewOf(allocation: StoredAllocation): AnalysisViewAllocation 
     includeExacta: allocation.includeExacta,
     includeTrifecta: allocation.includeTrifecta,
     includeBracketQuinella: allocation.includeBracketQuinella,
+    maxWinBets: allocation.maxWinBets ?? null,
+    maxPlaceBets: allocation.maxPlaceBets ?? null,
     oddsStatus: allocation.oddsStatus,
     bets: allocation.bets.map((b) => ({ betType: b.betType, comboKey: b.comboKey, stake: b.stake, odds: b.odds, ev: b.ev })),
   };

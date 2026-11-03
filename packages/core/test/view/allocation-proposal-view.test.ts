@@ -677,8 +677,8 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(exe の 
   });
 });
 
-describe("実効設定(AC5): 12項目がラベル+値の文字列配列として、列とラベルが取り違えなく対応すること(Issue #118〈#24-D3b-3〉で「馬連」を追加し8→9項目、Issue #126〈#24-E3c〉で「馬単」を追加し9→10項目、Issue #140〈#25-E3c〉で「三連単」を追加し10→11項目、Issue #151〈#26-E3c〉で「枠連」を馬連と馬単の間に追加し11→12項目)", () => {
-  it("1組目の値ベクトルで12行すべてが期待どおりであること(枠連=true)", () => {
+describe("実効設定(AC5): 14項目がラベル+値の文字列配列として、列とラベルが取り違えなく対応すること(Issue #118〈#24-D3b-3〉で「馬連」を追加し8→9項目、Issue #126〈#24-E3c〉で「馬単」を追加し9→10項目、Issue #140〈#25-E3c〉で「三連単」を追加し10→11項目、Issue #151〈#26-E3c〉で「枠連」を馬連と馬単の間に追加し11→12項目、Issue #578で単勝・複勝の点数の上限をケリー係数の直後に追加し12→14項目)", () => {
+  it("1組目の値ベクトルで14行すべてが期待どおりであること(枠連=true)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
@@ -686,6 +686,8 @@ describe("実効設定(AC5): 12項目がラベル+値の文字列配列として
         bankroll: 123400,
         perRaceCap: 56700,
         kellyFraction: 0.42,
+        maxWinBets: 2,
+        maxPlaceBets: 0,
         evThreshold: 1.08,
         includeWide: true,
         includeTrio: false,
@@ -702,6 +704,8 @@ describe("実効設定(AC5): 12項目がラベル+値の文字列配列として
       `総資金: ${formatYen(123400)}`,
       `1レース上限: ${formatYen(56700)}`,
       `ケリー係数: 0.42`,
+      `単勝の点数の上限: 2 点`,
+      `複勝の点数の上限: 上限なし`,
       `EV閾値: 1.08`,
       `ワイド: ON`,
       `馬連: OFF`,
@@ -717,13 +721,15 @@ describe("実効設定(AC5): 12項目がラベル+値の文字列配列として
   // 2組目は枠連=null(記録なし)にする。1組目のtrueと合わせ、枠連の値がワイド(T,F)・馬連(F,T)・
   // 馬単(T,F)・三連単(F,T)のいずれの行とも「少なくとも1組で異なる文字列」になり、
   // 隣接行(馬連・馬単)およびその他の行との取り違えを検出できる。
-  it("2組目の異なる値ベクトルでも12行すべてが期待どおりであること(取り違え検出。枠連=null=記録なし)", () => {
+  it("2組目の異なる値ベクトルでも14行すべてが期待どおりであること(取り違え検出。枠連=null=記録なし)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "unset",
         bankroll: 0,
         perRaceCap: 99999,
         kellyFraction: 0.11,
+        maxWinBets: null,
+        maxPlaceBets: 7,
         evThreshold: 2.5,
         includeWide: false,
         includeTrio: true,
@@ -739,6 +745,8 @@ describe("実効設定(AC5): 12項目がラベル+値の文字列配列として
       `総資金: ${formatYen(0)}`,
       `1レース上限: ${formatYen(99999)}`,
       `ケリー係数: 0.11`,
+      `単勝の点数の上限: 記録なし`,
+      `複勝の点数の上限: 7 点`,
       `EV閾値: 2.5`,
       `ワイド: OFF`,
       `馬連: ON`,
@@ -851,6 +859,25 @@ describe("実効設定(AC5): 12項目がラベル+値の文字列配列として
     expect([...idx].sort((a, b) => a - b)).toEqual(idx);
   });
 
+  it("点数の上限(Issue #578): 値あり=『N 点』、0=『上限なし』、null=『記録なし』、省略(旧い呼び出し)=『記録なし』。単勝と複勝の行は取り違えない", () => {
+    const rowsOf = (o: Partial<StoredAllocationView>) => buildAllocationProposalView(allocation(o)).settingsRows;
+    const rows = rowsOf({ maxWinBets: 3, maxPlaceBets: 5 });
+    expect(rows).toContain("単勝の点数の上限: 3 点");
+    expect(rows).toContain("複勝の点数の上限: 5 点");
+    expect(rowsOf({ maxWinBets: 0, maxPlaceBets: 0 })).toEqual(expect.arrayContaining(["単勝の点数の上限: 上限なし", "複勝の点数の上限: 上限なし"]));
+    expect(rowsOf({ maxWinBets: null, maxPlaceBets: null })).toEqual(expect.arrayContaining(["単勝の点数の上限: 記録なし", "複勝の点数の上限: 記録なし"]));
+    expect(rowsOf({})).toEqual(expect.arrayContaining(["単勝の点数の上限: 記録なし", "複勝の点数の上限: 記録なし"]));
+    // 取り違え: 単勝だけ 0、複勝だけ null
+    const mixed = rowsOf({ maxWinBets: 0, maxPlaceBets: null });
+    expect(mixed).toContain("単勝の点数の上限: 上限なし");
+    expect(mixed).toContain("複勝の点数の上限: 記録なし");
+    // 並び: ケリー係数の直後に 単勝 → 複勝
+    const i = rows.findIndex((r) => r.startsWith("ケリー係数: "));
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(rows[i + 1]).toBe("単勝の点数の上限: 3 点");
+    expect(rows[i + 2]).toBe("複勝の点数の上限: 5 点");
+  });
+
   it("oddsStatus='result'は『確定』になること", () => {
     const view = buildAllocationProposalView(allocation({ oddsStatus: "result" }));
     expect(view.settingsRows.at(-1)).toBe("オッズ状態: 確定");
@@ -866,23 +893,23 @@ describe("実効設定(AC5): 12項目がラベル+値の文字列配列として
   });
 
   it.each(["unset", "yoso", "invalid"] as const)(
-    "route=%s(記録はある状態)でも実効設定12項目が出ること",
+    "route=%s(記録はある状態)でも実効設定14項目が出ること",
     (route) => {
-      expect(buildAllocationProposalView(allocation({ route })).settingsRows).toHaveLength(12);
+      expect(buildAllocationProposalView(allocation({ route })).settingsRows).toHaveLength(14);
     },
   );
 
-  it("route='unavailable'でも実効設定12項目が出ること", () => {
+  it("route='unavailable'でも実効設定14項目が出ること", () => {
     expect(
       buildAllocationProposalView(
         allocation({ route: "unavailable", unavailableReason: "not-sold" }),
       ).settingsRows,
-    ).toHaveLength(12);
+    ).toHaveLength(14);
   });
 
-  it("判定不能(未知route)でも実効設定12項目が出ること(実効設定自体は正常な値のため)", () => {
+  it("判定不能(未知route)でも実効設定14項目が出ること(実効設定自体は正常な値のため)", () => {
     expect(buildAllocationProposalView(allocation({ route: "SOMETHING_UNKNOWN" })).settingsRows).toHaveLength(
-      12,
+      14,
     );
   });
 });

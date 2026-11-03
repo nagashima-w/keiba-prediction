@@ -1014,6 +1014,16 @@ describe("単勝・複勝の点数の上限の記録(Issue #533。meta.maxWinBet
     expect(row).toEqual({ min_hit_prob: 0.05, below_floor_count: 7, missed_json: null, max_win_bets: 1, max_place_bets: 2 });
   });
 
+  it("getStoredAllocation が上限を返す(Issue #578): 単勝と複勝を別々に。0(上限なし)は 0 のまま。持たない旧い記録は、キー自体を付けない(共有の契約の形を変えない)", async () => {
+    const two = (await store().getStoredAllocation((await store().saveAnalysis(withMax(1, { maxWinBets: 2, maxPlaceBets: 5 }))).id))!;
+    expect([two.maxWinBets, two.maxPlaceBets]).toEqual([2, 5]);
+    const zero = (await store().getStoredAllocation((await store().saveAnalysis(withMax(2, { maxWinBets: 0, maxPlaceBets: 0 }))).id))!;
+    expect([zero.maxWinBets, zero.maxPlaceBets]).toEqual([0, 0]);
+    const old = (await store().getStoredAllocation((await store().saveAnalysis(mkRecord(9, 2, 1))).id))!;
+    expect(Object.keys(old)).not.toContain("maxWinBets");
+    expect(Object.keys(old)).not.toContain("maxPlaceBets");
+  });
+
   it("旧い記録(maxWinBets・maxPlaceBets を持たない)は、2列とも NULL のまま(記録なし=上限なしの意味)", async () => {
     expect(await maxRow((await store().saveAnalysis(mkRecord(9, 2, 1))).id)).toEqual({ max_win_bets: null, max_place_bets: null });
   });

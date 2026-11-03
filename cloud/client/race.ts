@@ -13,7 +13,7 @@ import type { BoardRow, MorningPriorView, RaceRow, TaskMode, TaskStatus } from "
 import type { PastAnalysis } from "./api-analysis";
 import { formatJstDateTime } from "./date";
 import { nameWithGrade } from "./grade";
-import { badgeOf, pick, type Badge } from "./list";
+import { badgeOf, pick, type Badge } from "./badge";
 import { breadcrumbOf, neighborsOf, type Crumb, type RaceNeighbors } from "./neighbors";
 import { contentOf, type HorseSort, type ResultContent, type ResultSource } from "./result";
 import { buildHash, type Route } from "./route";

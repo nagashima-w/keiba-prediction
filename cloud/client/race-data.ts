@@ -70,6 +70,11 @@ export interface RaceData {
   /** 一覧のキャッシュの全行(Issue #571。前後のレースの元)。取得前・取得中・失敗は undefined。 */
   listRowsOf(date: string, venue: Venue): readonly RaceRow[] | undefined;
   boardSource(date: string): BoardSource;
+  /**
+   * 一覧の「最終更新」の時刻(Issue #572。端末の時計のエポックミリ秒)。一覧(その (開催日, 区分))の取得に成功した時刻と、板(その開催日)が取れているときのその最終成功の時刻の**古いほう**。
+   * 一覧が取れていなければ null。板が取れていない(未取得・失敗)ときは一覧の時刻だけ。
+   */
+  updatedAtOf(date: string, venue: Venue): number | null;
   /** その開催日の板を手動で取得中か。 */
   boardLoading(date: string): boolean;
   raceStatusSource(date: string, raceId: string): RaceStatusSource;
@@ -113,6 +118,10 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
   const races = new Map<string, readonly RaceRow[]>();
   const raceErrors = new Map<string, string>();
   const raceInflight = new Map<string, Promise<void>>();
+  /** 一覧の取得に成功した時刻(Issue #572。キーは `races` と同じ。端末の時計のエポックミリ秒)。`races` と同じ場所で入れ、捨てる。 */
+  const racesAt = new Map<string, number>();
+  /** 板の最終成功の時刻(Issue #572。開催日ごと。`store.apply` が採用した応答だけ。手動の取り直しで板を捨てるとき一緒に捨てる)。 */
+  const boardAt = new Map<string, number>();
   // 板(`status`。race_id なし)は開催日ごと。行・通し番号・オーバーレイ・完了の検知は board-state.ts。手動の取得(開いたとき・「更新」)の失敗・取得中だけをここに持つ。
   const store = createBoardStore();
   const boardErrors = new Map<string, string>();
@@ -168,6 +177,13 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     return { kind: "loading" };
   }
 
+  function updatedAtOf(date: string, venue: Venue): number | null {
+    const listAt = racesAt.get(listKey(date, venue));
+    if (listAt === undefined) return null;
+    const board = boardAt.get(date);
+    return board === undefined || boardSource(date).kind !== "ready" ? listAt : Math.min(listAt, board);
+  }
+
   function boardSource(date: string): BoardSource {
     const rows = store.effectiveRows(date);
     if (rows !== null) return { kind: "ready", rows };
@@ -213,7 +229,8 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
 
   /** 取得した板を適用する(古い応答は捨てられる)。完了への遷移があれば、prior・過去の分析を取り直す。`priorFreshFor`: この取得は、そのレースの prior と同時に取ったもの(朝の完了で取り直さない)。 */
   function applyBoard(date: string, rows: readonly BoardRow[], seq: number, priorFreshFor?: string): void {
-    const { completions } = store.apply(date, rows, seq);
+    const { applied, completions } = store.apply(date, rows, seq);
+    if (applied) boardAt.set(date, deps.now().getTime());
     const forced = forceDates.get(date);
     if (forced !== undefined && seq > forced) forceDates.delete(date); // 登録より後に出した取得が届いた(板が最新になった)
     for (const completion of completions) {
@@ -252,8 +269,10 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     if (races.has(key) || raceErrors.has(key) || raceInflight.has(key)) return;
     const promise = fetchRaces(deps.fetch, date, venue).then((result) => {
       raceInflight.delete(key);
-      if (result.ok) races.set(key, result.races);
-      else raceErrors.set(key, failureMessage(result.error));
+      if (result.ok) {
+        races.set(key, result.races);
+        racesAt.set(key, deps.now().getTime());
+      } else raceErrors.set(key, failureMessage(result.error));
       deps.onChange();
     });
     raceInflight.set(key, promise);
@@ -414,10 +433,12 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     if (raceInflight.has(listKey(date, venue)) || boardInflight.has(date)) return;
     const key = listKey(date, venue);
     races.delete(key);
+    racesAt.delete(key);
     raceErrors.delete(key);
     // 板を捨てると、取得が届くまで「実行中の日」が見えなくなり、追跡が「全部終わった」と誤って止まる。実行中だった日は、取得が成功するまで追跡の対象に残す。
     if (store.activeDates().includes(date)) forceDates.set(date, store.nextSeq());
     store.clear(date);
+    boardAt.delete(date);
     boardErrors.delete(date);
     ensureList(date, venue);
     deps.onChange();
@@ -457,6 +478,7 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     listRowOf: (date, venue, raceId) => races.get(listKey(date, venue))?.find((r) => r.raceId === raceId),
     listRowsOf: (date, venue) => races.get(listKey(date, venue)),
     boardSource,
+    updatedAtOf,
     boardLoading: (date) => boardInflight.has(date),
     raceStatusSource,
     pastSource,

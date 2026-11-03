@@ -90,7 +90,7 @@ function buildDay(races: number, bets: readonly BetSpec[]): RaceInput[] {
       horses, detail: "present",
       allocation: {
         route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 20000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1,
-        includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok",
+        includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, maxWinBets: null, maxPlaceBets: null, oddsStatus: "ok",
         bets: list.map((b, k) => ({ betType: b.type, comboKey: String(k + 2).padStart(2, "0"), stake: b.stake, odds: b.odds, ev: b.p * b.odds })),
       },
     };

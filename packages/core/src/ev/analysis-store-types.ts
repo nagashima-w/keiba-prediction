@@ -353,6 +353,14 @@ export interface StoredAllocation {
   readonly includeBracketQuinella: boolean | null;
   /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
   readonly betUnit: number | null;
+  /**
+   * 使った単勝の点数の上限(Issue #578。0=上限なし)。D1 の `max_win_bets` に値があるときだけキーを持つ(NULL=記録なし=旧い行、および締切の再計算の回〈この列を持たない〉は、キーなし)。
+   * 共有の契約(`analysis-store-contract.json`)の形を変えないため、`toStoredAllocation` ではなく cloud の `getStoredAllocation` が足す。
+   * 型は表示用の `StoredAllocationView`(analysis-types.ts)と完全一致させる(`analysis-types-allocation-pin.test.ts`)ので `number | null` だが、cloud が付けるのは数値のときだけ(null は付けずキーなし。読み手は省略と null を同じ「記録なし」とみなす)。他の「記録なし」を持つ項目(`includeQuinella` など)の `| null` と同じ向き。
+   */
+  readonly maxWinBets?: number | null;
+  /** 使った複勝の点数の上限(Issue #578)。扱いは `maxWinBets` と同じ。 */
+  readonly maxPlaceBets?: number | null;
   /** オッズ発売状態(発売前/中間/確定)。`scraper/types.ts` の `OddsStatus` の値をそのまま受け取る。 */
   readonly oddsStatus: string;
   /** stake>0 の明細のみ(#59 決定(a)を引き継ぐ)。 */

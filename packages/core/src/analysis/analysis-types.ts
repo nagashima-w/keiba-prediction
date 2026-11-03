@@ -823,6 +823,13 @@ export interface StoredAllocationView {
    * 同型)。
    */
   readonly includeBracketQuinella: boolean | null;
+  /**
+   * 使った単勝の点数の上限(Issue #578。整数、0=上限なし)。保存のない旧い行は null(「記録なし」。0〈上限なし〉と断定しない)。
+   * 省略可: 旧い呼び出し・手組みのテストは省略でき、省略は null と同じ「記録なし」になる。
+   */
+  readonly maxWinBets?: number | null;
+  /** 使った複勝の点数の上限(Issue #578)。扱いは `maxWinBets` と同じ。 */
+  readonly maxPlaceBets?: number | null;
   readonly betUnit: number | null;
   readonly oddsStatus: string;
   readonly bets: readonly StoredAllocationBetView[];

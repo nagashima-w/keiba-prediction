@@ -20,7 +20,7 @@ function horse(umaban: number, name: string, over: Partial<AnalysisViewHorse> = 
 export function fixtureRaceInputs(): RaceInput[] {
   const allocation = (bets: Array<[string, string, number, number]>): NonNullable<AnalysisView["allocation"]> => ({
     route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 20000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1,
-    includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok",
+    includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, maxWinBets: null, maxPlaceBets: null, oddsStatus: "ok",
     bets: bets.map(([betType, comboKey, stake, odds]) => ({ betType, comboKey, stake, odds, ev: 1.15 })),
   });
   const view = (n: number, id: number, raceName: string, horses: AnalysisViewHorse[], bets: Array<[string, string, number, number]>): AnalysisView => ({
