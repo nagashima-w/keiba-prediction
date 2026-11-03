@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RaceRow } from "../client/api";
-import { badgeOf, buildListModel } from "../client/list";
+import { badgeOf } from "../client/badge";
+import { buildListModel } from "../client/list";
 import { parseHash } from "../client/route";
 import { renderScreen } from "../client/view";
 import type { VNode } from "../client/vnode";

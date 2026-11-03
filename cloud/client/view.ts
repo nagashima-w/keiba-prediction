@@ -6,7 +6,8 @@
  */
 import type { TaskMode } from "./api";
 import type { BulkModel, BulkPanel } from "./bulk";
-import type { Badge, ListModel, NextRaceItem, RaceGroupItem, RaceItem } from "./list";
+import type { Badge } from "./badge";
+import type { ListModel, NextRaceItem, RaceGroupItem, RaceItem } from "./list";
 import type { Crumb, NeighborLink, RaceNeighbors } from "./neighbors";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";

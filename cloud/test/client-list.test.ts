@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BoardRow, RaceRow } from "../client/api";
-import { badgeOf, buildListModel, groupKeys, groupRaces, summarizeGroup, type ListModelInput } from "../client/list";
+import { badgeOf } from "../client/badge";
+import { buildListModel, groupKeys, groupRaces, summarizeGroup, type ListModelInput } from "../client/list";
 import type { Route } from "../client/route";
 
 /** Issue #184: 一覧の画面の表示用データ(純関数)。場ごとのまとまり・R 順・板の (race_id, mode) ごとのバッジ・各状態の表示。 */

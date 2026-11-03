@@ -7,34 +7,10 @@ import { jstEpochMs, jstHm as jstHmOfMs } from "../../packages/core/src/common/j
 import { buildBulkModel, hasStarted, jstHm, type BulkModel, type BulkUi } from "./bulk";
 import { previousMonthJst, todayJst, ymdToInput } from "./date";
 import { gradeLabelForDisplay } from "./grade";
+import { badgeOf, pick, type Badge } from "./badge";
 import { ALREADY_RUNNING_NOTE, isRunning, runButtonLabel, type RunButton, type RunUi } from "./race";
 import { remainingText } from "./targets-model";
 import { buildHash, buildMonthlyHash, buildTargetsHash, REPORT_HASH, SETTINGS_HASH, VERIFY_HASH, type Route, type Venue } from "./route";
-
-export interface Badge {
-  readonly label: string;
-  readonly tone: "none" | "wait" | "ok" | "fail";
-}
-
-/** 板の行 → バッジ。行が無ければ「未実行」。 */
-export function badgeOf(row: BoardRow | undefined): Badge {
-  if (row === undefined) return { label: "未実行", tone: "none" };
-  switch (row.status) {
-    case "queued":
-      return { label: "待ち", tone: "wait" };
-    case "fetched":
-      return { label: "取得済み", tone: "wait" };
-    case "done":
-      return { label: "完了", tone: "ok" };
-    case "failed":
-      return { label: "失敗", tone: "fail" };
-  }
-}
-
-/** 板から (race_id, mode) の行を探す(race_id だけで引くと、同じレースの 2 つのモードを取り違える)。 */
-export function pick(board: readonly BoardRow[], raceId: string, mode: TaskMode): BoardRow | undefined {
-  return board.find((r) => r.raceId === raceId && r.mode === mode);
-}
 
 export interface RaceGroup {
   readonly name: string;
