@@ -3,7 +3,7 @@
  * `view.ts` がこれを VNode にする。
  */
 import type { BoardRow, RaceRow, TaskMode } from "./api";
-import { jstEpochMs } from "../../packages/core/src/common/jst";
+import { jstEpochMs, jstHm as jstHmOfMs } from "../../packages/core/src/common/jst";
 import { buildBulkModel, hasStarted, jstHm, type BulkModel, type BulkUi } from "./bulk";
 import { previousMonthJst, todayJst, ymdToInput } from "./date";
 import { gradeLabelForDisplay } from "./grade";
@@ -113,6 +113,11 @@ export interface ListModelInput {
   readonly boardLoading?: boolean;
   /** 追跡の停止の注記(止まっているときだけ。省略・null は出さない。Issue #186)。 */
   readonly tracking?: string | null;
+  /**
+   * 最終更新の時刻(Issue #572。端末の時計のエポックミリ秒。一覧と板の取得に成功した時刻のうち古いほう〈板が取れていないときは一覧のみ〉。`race-data.ts` の `updatedAtOf`)。
+   * 省略・null、または一覧が取れていないときは出さない。
+   */
+  readonly updatedAt?: number | null;
   /** 利用者が押した場の開閉(キーは `groupKeys`)。無い場は既定(場が 2 つ以上なら閉・1 つなら開)。省略は「何も押していない」。 */
   readonly choices?: ReadonlyMap<string, boolean>;
   /** 閲覧者(Issue #238)。設定への入口を出さない(検証への入口は Issue #263 で閲覧者にも出す)。省略は false(管理者)。 */
@@ -211,6 +216,10 @@ export interface ListModel {
   readonly venueTabs: readonly { readonly venue: Venue; readonly label: string; readonly href: string; readonly current: boolean }[];
   /** 一覧または板を取得中(「更新」を無効にする)。 */
   readonly loading: boolean;
+  /** 一覧そのものを取得中(Issue #572。本文に「読み込み中…」を出す。板だけの取得中は false)。 */
+  readonly listLoading: boolean;
+  /** 「最終更新 09:48」(Issue #572)。一覧が取れていて `updatedAt` があるときだけ。出さないとき null。 */
+  readonly updatedLabel: string | null;
   readonly error: string | null;
   /** 板だけが失敗したときの注記(何の失敗かを示す前置きつき)。 */
   readonly boardNotice: string | null;
@@ -231,6 +240,16 @@ export function needsListClock(races: readonly RaceRow[], date: string, now: Dat
   if (todayJst(now) !== date) return false; // 今日でない日は、並びも薄さも変わらない
   const hm = jstHm(now);
   return races.some((r) => r.startTime !== null && !hasStarted(r.startTime, true, hm));
+}
+
+/**
+ * 「最終更新 09:48」の文言(Issue #572)。時刻は JST(UTC+9。ブラウザのタイムゾーンに依存しない)の「HH:MM」。
+ * 取得した日(JST)が今日(JST。`nowMs`)と違えば、「最終更新 11/2 09:48」のように「M/D」を前に付ける(タブを開いたままにした翌日に、前日の時刻を今日のものと取り違えないため)。
+ */
+export function updatedLabel(atMs: number, nowMs: number): string {
+  const day = todayJst(new Date(atMs));
+  const date = day === todayJst(new Date(nowMs)) ? "" : `${Number(day.slice(4, 6))}/${Number(day.slice(6, 8))} `;
+  return `最終更新 ${date}${jstHmOfMs(atMs)}`;
 }
 
 /** 板の失敗の注記の前置き(バッジが出ない理由を示す。Issue #186 段階1)。 */
@@ -294,6 +313,8 @@ export function buildListModel(input: ListModelInput): ListModel {
       current: venue === route.venue,
     })),
     loading: list.kind === "loading" || input.boardLoading === true,
+    listLoading: list.kind === "loading",
+    updatedLabel: list.kind === "ready" && input.updatedAt != null ? updatedLabel(input.updatedAt, input.now?.getTime() ?? input.updatedAt) : null,
     error: list.kind === "error" ? list.message : null,
     boardNotice: board.kind === "error" ? `${BOARD_NOTICE_PREFIX}${board.message}` : null,
     tracking: input.tracking ?? null,

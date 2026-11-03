@@ -118,6 +118,8 @@ ${paletteCss()}
     .list-nav { flex: 1 1 100%; margin-left: 0; padding-top: 8px; border-top: 1px solid var(--line); }
     .list-nav a { flex: 1 1 auto; padding: 0 4px; white-space: nowrap; }
   }
+  /* Issue #572: 一覧の「最終更新 09:48」。上の並びの直後の小さい 1 行(狭い幅でも折り返さない長さ。日付が付いても 1 行に収まる) */
+  .list-updated { margin: 0 0 8px; font-size: 0.8rem; color: var(--muted); }
   .date { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--muted); }
   input[type="date"] { font-size: 1rem; min-height: 44px; padding: 0 8px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
   .tabs { display: flex; gap: 4px; }

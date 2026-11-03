@@ -202,13 +202,18 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
     notices.push(h("p", { class: "notice" }, [model.boardNotice]));
   }
   const body: VNode[] = [];
+  if (model.listLoading) {
+    body.push(h("p", { class: "empty" }, ["読み込み中…"]));
+  }
   if (model.empty) {
     body.push(h("p", { class: "empty" }, ["この日・この区分の開催はありません。"]));
   }
   for (const group of model.groups) {
     body.push(venueSection(group, actions));
   }
-  return h("div", { class: "screen" }, [controls, ...nextRaceCard(model.next, actions), ...trackingNotice(model.tracking, actions), ...notices, ...body]);
+  // Issue #572: 最終更新の行は controls の直後(「次に発走するレース」のカードの前)。絞り込みの塊の外。
+  const updated = model.updatedLabel === null ? [] : [h("p", { class: "list-updated" }, [model.updatedLabel])];
+  return h("div", { class: "screen" }, [controls, ...updated, ...nextRaceCard(model.next, actions), ...trackingNotice(model.tracking, actions), ...notices, ...body]);
 }
 
 const loadingLabel = (loading: boolean, label: string): string => (loading ? "読み込み中…" : label);
