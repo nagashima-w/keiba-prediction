@@ -398,6 +398,25 @@ export const COUNT_CLASS_BACKFILL_SQL = `WITH u AS (
                   COALESCE(SUM(CASE WHEN raceId IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS stillNull
            FROM u`;
 
+/**
+ * 結果の補完の「1 晩ぶんの待ち行列」の列挙(Issue #598)。段階 1〜4 の列挙 SQL({@link LIST_BACKFILL_SQL} など)から導く: 判定(`u` の CTE)は**同一の文字列**で、
+ * 末尾の「最も新しい日だけ」(`WHERE firstDate = (SELECT MAX(firstDate) FROM u)` と `ORDER BY raceId`)を、**日の新しい順 → 同じ日は race_id 昇順**(`ORDER BY firstDate DESC, raceId`)に替えるだけ。
+ * `LIMIT` は 1 晩の残りの件数(最大 150)で、複数の日にまたがって返る。束縛値は元の SQL と同じ `[to, excludeJson, limit]`。
+ * 元の SQL の形が想定と違えば、読み込み時に落とす(判定の本体を二重に持たない)。
+ */
+function toQueueSql(listSql: string): string {
+  const newestDayTail = "WHERE firstDate = (SELECT MAX(firstDate) FROM u)\n           ORDER BY raceId\n           LIMIT ?";
+  if (!listSql.includes(newestDayTail)) {
+    throw new Error("補完の列挙の SQL の末尾の形が想定と違います");
+  }
+  return listSql.replace(newestDayTail, "ORDER BY firstDate DESC, raceId\n           LIMIT ?");
+}
+
+export const LIST_BACKFILL_QUEUE_SQL = toQueueSql(LIST_BACKFILL_SQL);
+export const LIST_WIN_ODDS_BACKFILL_QUEUE_SQL = toQueueSql(LIST_WIN_ODDS_BACKFILL_SQL);
+export const LIST_CLASS_BACKFILL_QUEUE_SQL = toQueueSql(LIST_CLASS_BACKFILL_SQL);
+export const LIST_PAYOUT_BACKFILL_QUEUE_SQL = toQueueSql(LIST_PAYOUT_BACKFILL_SQL);
+
 /** 保存済みのクラスの分布の上位の件数(状態の応答の大きさの歯止め)。 */
 export const CLASS_DISTRIBUTION_LIMIT = 40;
 
@@ -536,6 +555,11 @@ export interface ListBackfillOptions {
   readonly exclude: readonly string[];
   /** 件数。1〜{@link UNIMPORTED_MAX_LIMIT} の整数。 */
   readonly limit: number;
+  /**
+   * true なら、最も新しい日 1 日ではなく、**日の新しい順に複数の日にまたがって** `limit` 件まで返す(Issue #598。補完の 1 晩ぶんの待ち行列。
+   * 並びは (開催日の降順, レースID の昇順)。1 日だけの版の連結と同じ並び)。省略・false は従来どおり最も新しい日だけ。
+   */
+  readonly multiDay?: boolean;
 }
 
 export interface CountBackfillOptions {
@@ -802,7 +826,7 @@ export class D1ResultStore implements ResultRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
       throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
     }
-    const { results } = await this.db.prepare(LIST_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    const { results } = await this.db.prepare(options.multiDay === true ? LIST_BACKFILL_QUEUE_SQL : LIST_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
   }
 
@@ -816,7 +840,7 @@ export class D1ResultStore implements ResultRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
       throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
     }
-    const { results } = await this.db.prepare(LIST_WIN_ODDS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    const { results } = await this.db.prepare(options.multiDay === true ? LIST_WIN_ODDS_BACKFILL_QUEUE_SQL : LIST_WIN_ODDS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
   }
 
@@ -842,7 +866,7 @@ export class D1ResultStore implements ResultRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
       throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
     }
-    const { results } = await this.db.prepare(LIST_CLASS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    const { results } = await this.db.prepare(options.multiDay === true ? LIST_CLASS_BACKFILL_QUEUE_SQL : LIST_CLASS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
   }
 
@@ -868,7 +892,7 @@ export class D1ResultStore implements ResultRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
       throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
     }
-    const { results } = await this.db.prepare(LIST_PAYOUT_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    const { results } = await this.db.prepare(options.multiDay === true ? LIST_PAYOUT_BACKFILL_QUEUE_SQL : LIST_PAYOUT_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
   }
 

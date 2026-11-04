@@ -103,11 +103,13 @@ class World {
   }
 
   store: BackfillStore = {
-    listBackfillRaces: async ({ to, exclude, limit }) => {
+    listBackfillRaces: async ({ to, exclude, limit, multiDay }) => {
       this.listCalls.push({ to, exclude: [...exclude], limit });
       if (this.listError) throw new Error("D1 SECRET-LIST");
       const candidates = this.unimported.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId));
       if (candidates.length === 0) return [];
+      // 待ち行列(Issue #598): multiDay なら日の新しい順 → race_id 昇順で、日をまたいで limit 件。
+      if (multiDay === true) return [...candidates].sort((a, b) => b.kaisaiDate.localeCompare(a.kaisaiDate) || a.raceId.localeCompare(b.raceId)).slice(0, limit);
       const newest = candidates.map((r) => r.kaisaiDate).sort().at(-1)!;
       return candidates
         .filter((r) => r.kaisaiDate === newest)
@@ -118,10 +120,12 @@ class World {
       dated: this.unimported.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId)).length,
       undated: this.undated,
     }),
-    listWinOddsBackfillRaces: async ({ to, exclude, limit }) => {
+    listWinOddsBackfillRaces: async ({ to, exclude, limit, multiDay }) => {
       this.oddsListCalls.push({ to, exclude: [...exclude], limit });
       const candidates = this.needOdds.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId));
       if (candidates.length === 0) return [];
+      // 待ち行列(Issue #598): multiDay なら日の新しい順 → race_id 昇順で、日をまたいで limit 件。
+      if (multiDay === true) return [...candidates].sort((a, b) => b.kaisaiDate.localeCompare(a.kaisaiDate) || a.raceId.localeCompare(b.raceId)).slice(0, limit);
       const newest = candidates.map((r) => r.kaisaiDate).sort().at(-1)!;
       return candidates
         .filter((r) => r.kaisaiDate === newest)
@@ -133,10 +137,12 @@ class World {
       undated: this.undatedOdds,
       scratchedMissing: this.scratchedMissing,
     }),
-    listClassBackfillRaces: async ({ to, exclude, limit }) => {
+    listClassBackfillRaces: async ({ to, exclude, limit, multiDay }) => {
       this.classListCalls.push({ to, exclude: [...exclude], limit });
       const candidates = this.needClass.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId));
       if (candidates.length === 0) return [];
+      // 待ち行列(Issue #598): multiDay なら日の新しい順 → race_id 昇順で、日をまたいで limit 件。
+      if (multiDay === true) return [...candidates].sort((a, b) => b.kaisaiDate.localeCompare(a.kaisaiDate) || a.raceId.localeCompare(b.raceId)).slice(0, limit);
       const newest = candidates.map((r) => r.kaisaiDate).sort().at(-1)!;
       return candidates
         .filter((r) => r.kaisaiDate === newest)
@@ -236,7 +242,7 @@ describe("段階 3: 段階 1・2 が尽きたら、結果はあるがクラス�
     await core.runNextStep();
     expect(w.listCalls).toHaveLength(1); // 段階 1 を先に引く(空)
     expect(w.oddsListCalls).toHaveLength(1); // 段階 2 を次に引く(空)
-    expect(w.classListCalls).toEqual([{ to: YESTERDAY, exclude: [], limit: 30 }]);
+    expect(w.classListCalls).toEqual([{ to: YESTERDAY, exclude: [], limit: 150 }]); // 待ち行列(Issue #598): 1 晩の残りの件数を 1 回で取る
     expect(w.day("20261009").requests).toEqual([races("20261009", 30).map((r) => r.raceId)]);
     expect(w.day("20261009").flags).toEqual([true]);
     expect(w.alarm).toBe(T0 + BACKFILL_POLL_MS);
@@ -332,13 +338,13 @@ describe("段階 3 の状態(DO の SQLite の別の表 backfill_class)", () => 
     await core.runNextStep();
     expect(w.needClass).toHaveLength(3); // 前提: D1 の列挙の対象には残っている
     expect(w.day("20261009").requests).toHaveLength(1);
-    expect(w.classListCalls.at(-1)!.exclude).toEqual(races("20261009", 3).map((r) => r.raceId).sort());
     expect(rowsOf(sql)).toEqual(races("20261009", 3).map((r) => ({ race_id: r.raceId, state: "class_done" })).sort((a, b) => a.race_id.localeCompare(b.race_id)));
     for (const day of [11, 12, 13]) {
       w.now = jst(10, day, 2);
       await core.runNextStep();
     }
     expect(w.day("20261009").requests).toHaveLength(1);
+    expect(w.classListCalls.at(-1)!.exclude).toEqual(races("20261009", 3).map((r) => r.raceId).sort()); // 翌晩以降の列挙は class_done を除外する(待ち行列の導入前は回収の直後の再列挙でも確かめていた)
     const status = await core.getStatus();
     expect(status.raceClass).toMatchObject({ remaining: 0, filled: 3, abandoned: { total: 0, byClass: {} } });
     expect(status.state).toBe("done");
@@ -468,7 +474,13 @@ describe("段階 3 の状態(DO の SQLite の別の表 backfill_class)", () => 
     w.settleImported("20261009", false, true);
     w.now += BACKFILL_POLL_MS;
     await core.runNextStep();
-    expect(w.classListCalls.at(-1)!.exclude).toEqual([ids[0]!.raceId, ids[1]!.raceId]); // 今夜は全部試した
+    // 待ち行列(Issue #598): 段階 3 の列挙は今夜 1 回だけ(件数が要求に満たないので尽きている)。今夜は全部試したので、これ以上依頼しない。
+    expect(w.classListCalls).toHaveLength(1);
+    expect(w.day("20261009").requests).toHaveLength(2);
+    // 翌晩の列挙は、段階 3 が取得を終えたレース(class_done)を除く。段階 2 が試しただけのレース(fill_done)は除かない(クラスの補完が要る)。
+    w.now = jst(10, 11, 2);
+    await core.runNextStep();
+    expect(w.classListCalls.at(-1)!.exclude).toEqual([ids[1]!.raceId]);
   });
 
   it("★段階 2 で諦めた(odds_abandoned)レースは、段階 3 の列挙から除く: D1 の列挙の対象に残っていても、除外 ID に入り、依頼しない(Issue #433 変異 C。件数側の除外は getStatus のテストが見るが、列挙側は別の SQL)", async () => {
