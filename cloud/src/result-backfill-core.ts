@@ -82,7 +82,7 @@ import { jstKaisaiDate } from "./auto-run-plan";
 import { checkRaceDate } from "./race-date";
 import type { ResultImportProgress } from "./race-day-core";
 import { addDaysToKaisaiDate, dispatchResultImports, errorKind, type DispatchStore, type ResultDayStub } from "./result-dispatch";
-import type { BackfillCounts, ClassBackfillCounts, ClassDistributionRow, CountBackfillOptions, ListBackfillOptions, PayoutBackfillCounts, UnimportedRace, WinOddsBackfillCounts } from "./result-repository";
+import { UNIMPORTED_MAX_LIMIT, type BackfillCounts, type ClassBackfillCounts, type ClassDistributionRow, type CountBackfillOptions, type ListBackfillOptions, type PayoutBackfillCounts, type UnimportedRace, type WinOddsBackfillCounts } from "./result-repository";
 import type { SqlLike } from "./sql-like";
 
 /** 結果の補完の DO(`ResultBackfill`)の固定名(単一インスタンス)。cron の `scheduled` と `GET /api/results/backfill` が引く。 */
@@ -258,6 +258,19 @@ const KIND_STATE: Record<BackfillKind, { readonly table: "backfill_race" | "back
   "race-class": { table: "backfill_class", tried: "class_tried", abandoned: "class_abandoned" },
   "win-payout": { table: "backfill_payout", tried: "payout_tried", abandoned: "payout_abandoned" },
 };
+
+/**
+ * その晩の待ち行列(Issue #598。`backfill_meta` の `queue`)。`kind` = いま列挙している段階 / `built` = その段階の列挙を流した / `full` = 最後の列挙が要求した件数ちょうどを返した(まだ残りがありうる) /
+ * `items` = `[raceId, kaisaiDate]` を、日の新しい順 → 同じ日は race_id 昇順で / `exhausted` = その晩に尽きた段階。`night` が違えば捨てる。
+ */
+interface QueueState {
+  night: string;
+  kind: BackfillKind | null;
+  built: boolean;
+  full: boolean;
+  items: Array<[string, string]>;
+  exhausted: BackfillKind[];
+}
 
 interface Inflight {
   /** 段階。省略(この変更より前に保存された飛行中の記録)は `results`。 */
@@ -569,31 +582,34 @@ export class ResultBackfillCore {
     //    段階 1(未取込の結果)が尽きたら(列挙が空で、不正な除外もなかったとき)、段階 2(確定の単勝オッズ・人気の補完。Issue #259)を同じ仕組みで列挙・依頼する。
     const to = addDaysToKaisaiDate(night, -1);
     const limit = Math.min(this.chunkSize, remainingTonight);
+    // 段階の順は 1 → 2 → 3 → 4。前の段階が空(列挙が空で、不正なレースの除外もない)のときだけ次へ進む。段階 3 は列挙を持つ Store のときだけ、段階 4 は段階 3 の後で列挙を持つ Store のときだけ。
+    // その晩に尽きた段階は待ち行列の状態(`exhausted`)に記録し、以後のステップでは列挙しない(Issue #598。以前は毎ステップ、尽きた段階の列挙も流していた)。
+    const stages: BackfillKind[] = ["results", "win-odds"];
+    if (this.deps.store.listClassBackfillRaces !== undefined) {
+      stages.push("race-class");
+      if (this.deps.store.listPayoutBackfillRaces !== undefined) {
+        stages.push("win-payout");
+      }
+    }
+    const queue = this.loadQueue(night);
     let kind: BackfillKind = "results";
-    let attempted = await this.listAndDispatch("results", night, to, limit);
-    if (!attempted.result.listFailed && attempted.listed.length === 0 && attempted.skipped === 0) {
-      kind = "win-odds";
-      attempted = await this.listAndDispatch("win-odds", night, to, limit);
+    let attempted: Awaited<ReturnType<ResultBackfillCore["listAndDispatch"]>> | null = null;
+    for (const stage of stages) {
+      if (queue.exhausted.includes(stage)) {
+        continue;
+      }
+      kind = stage;
+      attempted = await this.listAndDispatch(stage, night, to, limit, remainingTonight, queue);
+      if (attempted.result.listFailed || attempted.listed.length > 0 || attempted.skipped > 0) {
+        break;
+      }
+      queue.exhausted.push(stage);
+      this.saveQueue(queue);
     }
-    if (
-      kind === "win-odds" &&
-      this.deps.store.listClassBackfillRaces !== undefined &&
-      !attempted.result.listFailed &&
-      attempted.listed.length === 0 &&
-      attempted.skipped === 0
-    ) {
-      kind = "race-class";
-      attempted = await this.listAndDispatch("race-class", night, to, limit);
-    }
-    if (
-      kind === "race-class" &&
-      this.deps.store.listPayoutBackfillRaces !== undefined &&
-      !attempted.result.listFailed &&
-      attempted.listed.length === 0 &&
-      attempted.skipped === 0
-    ) {
-      kind = "win-payout";
-      attempted = await this.listAndDispatch("win-payout", night, to, limit);
+    if (attempted === null) {
+      // 全部の段階がその晩は尽きている。
+      await this.setAlarm(nextNight);
+      return;
     }
     const { listed, skipped, result } = attempted;
     if (result.listFailed) {
@@ -621,58 +637,110 @@ export class ResultBackfillCore {
   }
 
   /**
-   * 1 つの段階の列挙 → 依頼(Issue #259 で、段階 1 の本文をそのまま切り出した)。不正なレースは依頼の前に記録して除外し、チャンクが全部不正だったら列挙し直す(有限回)。
+   * 1 つの段階の列挙 → 依頼(Issue #259 で、段階 1 の本文をそのまま切り出した)。不正なレースは依頼の前に記録して除外し、チャンクが全部不正だったら次のチャンクを取る(有限回)。
    * 段階 2(`win-odds`)は列挙を `listWinOddsBackfillRaces` に、依頼を `winOddsOnly: true` に替えるだけで、検査・記録・依頼の仕方は同じ。
+   *
+   * ## 1 晩ぶんの待ち行列(Issue #598)
+   * 列挙は**段階に入った最初のステップで 1 回だけ** D1 に流し(`multiDay`。日の新しい順 → 同じ日は race_id 昇順で、その晩の残りの件数まで)、結果を `queue`(DO の SQLite の `backfill_meta`)に持つ。
+   * 以後のステップは、待ち行列の先頭から**同じ開催日の連続した最大 `limit` 件**を 1 チャンクとして取り出して依頼する(1 回の依頼は 1 開催日だけ。以前の「最も新しい日を 1 日だけ」の列挙の連結と同じ並び・割り方)。
+   * 待ち行列が空になったとき、最後の列挙が要求した件数に満たなかった(`full` でない)なら、その段階はその晩は尽きている(D1 に流さず空を返す)。要求した件数ちょうどなら、まだ残りがありうるので列挙し直す
+   * (その晩に試したものは除外される)。待ち行列は依頼の後に保存する(書く前に落ちれば、同じチャンクをもう一度依頼するだけ=日単位の DO の取り込みは冪等)。
    */
   private async listAndDispatch(
     kind: BackfillKind,
     night: string,
     to: string,
     limit: number,
+    remainingTonight: number,
+    queue: QueueState,
   ): Promise<{ listed: UnimportedRace[]; skipped: number; result: Awaited<ReturnType<typeof dispatchResultImports>> }> {
-    let listed: UnimportedRace[] = [];
+    const listed: UnimportedRace[] = [];
     let skipped = 0;
-    let result: Awaited<ReturnType<typeof dispatchResultImports>> | null = null;
-    for (let attempt = 0; attempt < BACKFILL_MAX_RELIST; attempt += 1) {
-      const exclude = this.excludedIds(night, kind);
-      listed = [];
-      skipped = 0;
-      const store: DispatchStore = {
-        listUnimportedRacesByDay: async () => {
-          const found =
-            kind === "win-payout"
-              ? await this.deps.store.listPayoutBackfillRaces!({ to, exclude, limit })
-              : kind === "race-class"
-                ? await this.deps.store.listClassBackfillRaces!({ to, exclude, limit })
-                : kind === "win-odds"
-                  ? await this.deps.store.listWinOddsBackfillRaces({ to, exclude, limit })
-                  : await this.deps.store.listBackfillRaces({ to, exclude, limit });
-          for (const race of found) {
-            if (checkRaceDate(race.raceId, race.kaisaiDate).ok) {
-              listed.push(race);
+    const store: DispatchStore = {
+      listUnimportedRacesByDay: async () => {
+        for (let attempt = 0; attempt < BACKFILL_MAX_RELIST; attempt += 1) {
+          if (queue.kind !== kind) {
+            queue.kind = kind;
+            queue.built = false;
+            queue.full = false;
+            queue.items = [];
+          }
+          if (queue.items.length === 0) {
+            if (queue.built && !queue.full) {
+              skipped = 0; // 最後の列挙は要求した件数に満たなかった = この段階はその晩は尽きている(不正なレースを除いた残りが空。以前の「最後の再列挙が空」と同じ)
+              break;
+            }
+            const want = Math.min(Math.max(remainingTonight, 1), UNIMPORTED_MAX_LIMIT);
+            const options = { to, exclude: this.excludedIds(night, kind), limit: want, multiDay: true };
+            const found =
+              kind === "win-payout"
+                ? await this.deps.store.listPayoutBackfillRaces!(options)
+                : kind === "race-class"
+                  ? await this.deps.store.listClassBackfillRaces!(options)
+                  : kind === "win-odds"
+                    ? await this.deps.store.listWinOddsBackfillRaces(options)
+                    : await this.deps.store.listBackfillRaces(options);
+            queue.built = true;
+            queue.full = found.length >= want;
+            queue.items = found.map((r) => [r.raceId, r.kaisaiDate]);
+            if (found.length === 0) {
+              skipped = 0; // 列挙が空 = 尽きている
+              break;
+            }
+          }
+          // 先頭の開催日の連続した最大 limit 件を 1 チャンクにする(2 日を混ぜない)。
+          const day = queue.items[0]![1];
+          let take = 0;
+          while (take < queue.items.length && take < limit && queue.items[take]![1] === day) {
+            take += 1;
+          }
+          for (const [raceId, kaisaiDate] of queue.items.splice(0, take)) {
+            if (checkRaceDate(raceId, kaisaiDate).ok) {
+              listed.push({ raceId, kaisaiDate });
             } else {
-              this.recordFailure(race.raceId, "invalid-race", night, false, kind);
+              this.recordFailure(raceId, "invalid-race", night, false, kind);
               skipped += 1;
             }
           }
-          return listed;
-        },
-      };
-      result = await dispatchResultImports({
-        from: BACKFILL_FROM,
-        to,
-        maxDays: 1,
-        store,
-        stubFor: this.deps.stubFor,
-        log: this.deps.log,
-        // 段階 2〜4 は「NULL の列だけを埋める」補完モード(段階 3 は結果ステージが saveRaceClass も呼ぶ。段階 4 は saveWinPayout が単勝の払戻を埋める)。
-        ...(kind !== "results" ? { winOddsOnly: true } : {}),
-      });
-      if (result.listFailed || listed.length > 0 || skipped === 0) {
-        break;
+          if (listed.length > 0) {
+            break;
+          }
+        }
+        return listed;
+      },
+    };
+    const result = await dispatchResultImports({
+      from: BACKFILL_FROM,
+      to,
+      maxDays: 1,
+      store,
+      stubFor: this.deps.stubFor,
+      log: this.deps.log,
+      // 段階 2〜4 は「NULL の列だけを埋める」補完モード(段階 3 は結果ステージが saveRaceClass も呼ぶ。段階 4 は saveWinPayout が単勝の払戻を埋める)。
+      ...(kind !== "results" ? { winOddsOnly: true } : {}),
+    });
+    this.saveQueue(queue);
+    return { listed, skipped, result };
+  }
+
+  /** その晩の待ち行列を読む。無い・別の晩のものは、空の状態から始める(晩をまたいで持ち越さない)。 */
+  private loadQueue(night: string): QueueState {
+    const raw = this.metaGet("queue");
+    if (raw !== null) {
+      try {
+        const parsed = JSON.parse(raw) as QueueState;
+        if (parsed.night === night && Array.isArray(parsed.items) && Array.isArray(parsed.exhausted)) {
+          return parsed;
+        }
+      } catch {
+        // 壊れた値は捨てて、空から始める(補完は冪等。取り直すだけ)。
       }
     }
-    return { listed, skipped, result: result! };
+    return { night, kind: null, built: false, full: false, items: [], exhausted: [] };
+  }
+
+  private saveQueue(queue: QueueState): void {
+    this.metaPut("queue", JSON.stringify(queue));
   }
 
   /**

@@ -105,11 +105,13 @@ class World {
   }
 
   store: BackfillStore = {
-    listBackfillRaces: async ({ to, exclude, limit }) => {
+    listBackfillRaces: async ({ to, exclude, limit, multiDay }) => {
       this.listCalls.push({ to, exclude: [...exclude], limit });
       if (this.listError) throw new Error("D1 SECRET-LIST");
       const candidates = this.unimported.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId));
       if (candidates.length === 0) return [];
+      // 待ち行列(Issue #598): multiDay なら日の新しい順 → race_id 昇順で、日をまたいで limit 件。
+      if (multiDay === true) return [...candidates].sort((a, b) => b.kaisaiDate.localeCompare(a.kaisaiDate) || a.raceId.localeCompare(b.raceId)).slice(0, limit);
       const newest = candidates.map((r) => r.kaisaiDate).sort().at(-1)!;
       return candidates
         .filter((r) => r.kaisaiDate === newest)
@@ -120,10 +122,12 @@ class World {
       dated: this.unimported.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId)).length,
       undated: this.undated,
     }),
-    listWinOddsBackfillRaces: async ({ to, exclude, limit }) => {
+    listWinOddsBackfillRaces: async ({ to, exclude, limit, multiDay }) => {
       this.oddsListCalls.push({ to, exclude: [...exclude], limit });
       const candidates = this.needOdds.filter((r) => r.kaisaiDate <= to && !exclude.includes(r.raceId));
       if (candidates.length === 0) return [];
+      // 待ち行列(Issue #598): multiDay なら日の新しい順 → race_id 昇順で、日をまたいで limit 件。
+      if (multiDay === true) return [...candidates].sort((a, b) => b.kaisaiDate.localeCompare(a.kaisaiDate) || a.raceId.localeCompare(b.raceId)).slice(0, limit);
       const newest = candidates.map((r) => r.kaisaiDate).sort().at(-1)!;
       return candidates
         .filter((r) => r.kaisaiDate === newest)
@@ -338,7 +342,7 @@ describe("依頼: 未取込のある最も新しい日を、1 回 30 レース�
     w.unimported = [...races("20261009", 45), ...races("20261001", 5)];
     const { core } = make(w);
     await core.runNextStep();
-    expect(w.listCalls).toEqual([{ to: YESTERDAY, exclude: [], limit: 30 }]);
+    expect(w.listCalls).toEqual([{ to: YESTERDAY, exclude: [], limit: BACKFILL_NIGHTLY_LIMIT }]); // 待ち行列(Issue #598): 1 晩の残りの件数ぶんを 1 回で取る(依頼は 30 件ずつ)
     expect(w.day("20261009").requests).toEqual([races("20261009", 30).map((r) => r.raceId)]);
     expect([...w.days.keys()]).toEqual(["20261009"]); // 古い日の DO は開かない
     expect(w.alarm).toBe(T0 + BACKFILL_POLL_MS);
@@ -420,7 +424,7 @@ describe("1 晩の上限", () => {
     const sizes = [...w.days.values()].flatMap((d) => d.requests.map((r) => r.length));
     expect(sizes).toEqual([30, 30, 30, 10, 30, 20]); // 20261009 の 100 → 30 30 30 10(1 チャンクは 1 つの日だけ)、20261008 は 30 と 20(= 150 - 130)
     expect(sizes.reduce((a, b) => a + b, 0)).toBe(BACKFILL_NIGHTLY_LIMIT);
-    expect(w.listCalls.length).toBe(6); // 上限に達した後は列挙しない(本物の D1 は limit 0 を RangeError にする)
+    expect(w.listCalls.length).toBe(1); // 待ち行列(Issue #598): 1 晩の列挙は 1 回(150 件)。以前は 6 回(チャンクごと)。上限に達した後は列挙しない(本物の D1 は limit 0 を RangeError にする)
     expect(w.listCalls.every((c) => c.limit >= 1)).toBe(true);
     expect(w.alarm).toBe(jst(10, 11, 1));
     expect((await core.getStatus()).state).toBe("waiting-window");
@@ -537,10 +541,31 @@ describe("取得できなかったレースの記録(無限に再試行しない
     w.unimported = races(YESTERDAY, 1);
     const { core } = make(w);
     await failOnce(w, core, "fetch-failed");
-    // 回収した tick の中で再び列挙しているが、そのレースは除外されて空 → 翌晩にアラーム。
-    expect(w.listCalls.at(-1)!.exclude).toEqual([idOf(YESTERDAY, 1)]);
+    // 待ち行列(Issue #598): 試したレースは待ち行列から出ており、列挙は最初の 1 回だけ(件数が要求に満たないので、その段階はその晩は尽きている)→ 翌晩にアラーム。
+    expect(w.listCalls).toHaveLength(1);
     expect(w.day(YESTERDAY).requests.length).toBe(1);
     expect(w.alarm).toBe(jst(10, 11, 1));
+  });
+
+  it("要求した件数ちょうどが返った段階は、待ち行列が空になったあと列挙し直す。その列挙は、その晩に試したレース(まだ D1 に残っている)を除外する", async () => {
+    const w = new World();
+    // 上限 4: 列挙は 4 件を要求し、不正な 2 件と有効な 2 件が返る(ちょうど要求した件数 = まだ残りがありうる)。不正な 2 件は依頼せず、有効な 2 件は依頼する(上限は残り 2 件)。
+    const bad = [
+      { raceId: "12345", kaisaiDate: YESTERDAY },
+      { raceId: "12346", kaisaiDate: YESTERDAY },
+    ];
+    w.unimported = [...bad, ...races(YESTERDAY, 2), ...races("20261001", 1)];
+    const { core } = make(w, { nightlyLimit: 4, chunkSize: 4 });
+    await core.runNextStep();
+    expect(w.listCalls).toEqual([{ to: YESTERDAY, exclude: [], limit: 4 }]);
+    expect(w.day(YESTERDAY).requests).toEqual([races(YESTERDAY, 2).map((r) => r.raceId)]);
+    w.settleGaveUp(YESTERDAY, "fetch-failed"); // 取得できず(一時的な失敗。D1 の未取込に残る)
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep(); // 回収(試した扱い)。待ち行列は空で、最後の列挙は要求した件数ちょうど → 列挙し直す
+    expect(w.listCalls).toHaveLength(2);
+    expect(w.listCalls[1]!.exclude.sort()).toEqual([...bad.map((b) => b.raceId), ...races(YESTERDAY, 2).map((r) => r.raceId)].sort()); // 不正な 2 件(abandoned)と、試した 2 件
+    expect(w.listCalls[1]!.limit).toBe(2); // 残りの上限
+    expect(w.day("20261001").requests).toEqual([[idOf("20261001", 1)]]);
   });
 
   it("blocked・busy(gate の都合): 晩数に数えず、その晩は止める(翌晩にアラーム)。5 晩続いたら永久に除外する", async () => {
@@ -726,10 +751,16 @@ describe("日単位の DO が受け付けないレース(不正なレースID・
     w.unimported = [...bad.map((b) => ({ raceId: b.raceId, kaisaiDate: b.kaisaiDate })), ...races("20261001", 2)];
     const { core } = make(w, { chunkSize: 3 });
     await core.runNextStep();
-    expect(w.listCalls.length).toBe(2); // 1 回目は全部不正 → 2 回目で古い日の有効なレース
-    expect(w.listCalls[1]!.exclude.sort()).toEqual(bad.map((b) => b.raceId).sort());
+    expect(w.listCalls.length).toBe(1); // 待ち行列(Issue #598): 列挙は 1 回。全部不正なチャンクは捨て、同じ tick で待ち行列の次のチャンク(古い日の有効なレース)を取る
     expect(w.day("20261001").requests).toEqual([races("20261001", 2).map((r) => r.raceId)]);
     expect((await core.getStatus()).abandoned.total).toBe(3);
+    // 永久に除外したレースは次の列挙から外れる(翌晩の列挙の除外に入る)。
+    w.settleImported("20261001");
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep();
+    w.now = jst(10, 11, 2);
+    await core.runNextStep();
+    expect(w.listCalls.at(-1)!.exclude.sort()).toEqual(bad.map((b) => b.raceId).sort());
   });
 
   it("不正なレースだけが残っているなら、依頼せず(DO を開かず)、次の晩にアラームを張る。再列挙は有限回(無限ループしない)", async () => {
@@ -739,7 +770,7 @@ describe("日単位の DO が受け付けないレース(不正なレースID・
     await core.runNextStep();
     expect(w.days.size).toBe(0);
     expect(w.alarm).toBe(jst(10, 11, 1));
-    expect(w.listCalls.length).toBeLessThanOrEqual(4); // 3 件を 1 件ずつ除外して、最後に空
+    expect(w.listCalls.length).toBe(1); // 待ち行列(Issue #598): 列挙は 1 回(3 件を 1 件ずつ捨てて、最後は件数が要求に満たないので尽きている。以前は最大 4 回)
     expect((await core.getStatus()).abandoned.total).toBe(3);
   });
 });
@@ -856,7 +887,7 @@ describe("段階 2: 段階 1 が尽きたら、結果はあるがオッズが無
     const { core } = make(w);
     await core.runNextStep();
     expect(w.listCalls).toHaveLength(1); // 段階 1 を先に引く(空)
-    expect(w.oddsListCalls).toEqual([{ to: YESTERDAY, exclude: [], limit: 30 }]);
+    expect(w.oddsListCalls).toEqual([{ to: YESTERDAY, exclude: [], limit: BACKFILL_NIGHTLY_LIMIT }]);
     expect(w.day("20261009").requests).toEqual([races("20261009", 30).map((r) => r.raceId)]);
     expect(w.day("20261009").flags).toEqual([true]);
     expect(w.alarm).toBe(T0 + BACKFILL_POLL_MS);
@@ -899,16 +930,16 @@ describe("段階 2: 段階 1 が尽きたら、結果はあるがオッズが無
     await core.runNextStep();
     w.settleImported("20261009", true); // 成功したが D1 にはオッズが入らず、列挙の対象に残る
     w.now += BACKFILL_POLL_MS;
-    await core.runNextStep(); // 回収。続けて列挙するが、全部 fill_done で除外されて空
+    await core.runNextStep(); // 回収(fill_done)。待ち行列は空で尽きている
     expect(w.needOdds).toHaveLength(3); // 前提: D1 の列挙の対象には残っている
     expect(w.day("20261009").requests).toHaveLength(1);
-    expect(w.oddsListCalls.at(-1)!.exclude).toEqual(races("20261009", 3).map((r) => r.raceId).sort());
     expect((sql.exec("SELECT state, COUNT(*) AS n FROM backfill_race GROUP BY state").toArray() as Array<{ state: string; n: number }>)).toEqual([{ state: "fill_done", n: 3 }]);
     for (const day of [11, 12, 13]) {
       w.now = jst(10, day, 2);
       await core.runNextStep();
     }
     expect(w.day("20261009").requests).toHaveLength(1); // 追加の依頼なし
+    expect(w.oddsListCalls.at(-1)!.exclude).toEqual(races("20261009", 3).map((r) => r.raceId).sort()); // 翌晩以降の列挙は fill_done を除外する(以前は回収の直後の再列挙でも確かめていた)
     const status = await core.getStatus();
     expect(status.winOdds).toEqual({ remaining: 0, undated: 0, filled: 3, scratchedMissing: 0, abandoned: { total: 0, byClass: {} } });
     expect(status.state).toBe("done");
@@ -1028,7 +1059,7 @@ describe("段階 2 と不正なレース(Issue #259)", () => {
     w.needOdds = races("20261008", 2);
     const { core } = make(w, { chunkSize: 1 });
     await core.runNextStep();
-    expect(w.listCalls).toHaveLength(BACKFILL_MAX_RELIST);
+    expect(w.listCalls).toHaveLength(1); // 待ち行列(Issue #598): 列挙は 1 回で、不正なレースを BACKFILL_MAX_RELIST 件ずつ捨てる(以前は 1 件ごとに再列挙)
     expect(w.oddsListCalls).toEqual([]); // 段階 2 は列挙しない
     expect(w.days.size).toBe(0);
     expect(w.alarm).toBe(T0 + BACKFILL_POLL_MS); // 続きは次のステップ
@@ -1074,11 +1105,11 @@ describe("Issue #270: 完了の印 fill_done と、旧い odds_done の扱い", 
     w.now += BACKFILL_POLL_MS;
     await core.runNextStep();
     expect(stateRows(sql).map((r) => r.state)).toEqual(["fill_done", "fill_done"]); // 上書きされ、件数は増えない
-    expect(w.oddsListCalls.at(-1)!.exclude).toEqual(legacy.map((r) => r.raceId).sort()); // 以後は除外される
     for (const day of [11, 12]) {
       w.now = jst(10, day, 2);
       await core.runNextStep();
     }
+    expect(w.oddsListCalls.at(-1)!.exclude).toEqual(legacy.map((r) => r.raceId).sort()); // 以後は除外される
     expect(w.day(YESTERDAY).requests).toHaveLength(1); // 二度と依頼しない(ping-pong しない)
   });
 
