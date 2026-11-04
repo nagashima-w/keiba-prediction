@@ -185,6 +185,8 @@ const D1_EXTRA_INDEXES: Readonly<Record<string, readonly IndexInfo[]>> = {
     { origin: "c", unique: 0, columns: ["analyzed_at"], name: "idx_analyses_analyzed_at" },
     { origin: "c", unique: 0, columns: ["race_id", "analyzed_at"], name: "idx_analyses_race_analyzed" },
     { origin: "c", unique: 0, columns: ["kaisai_date", "analyzed_at"], name: "idx_analyses_kaisai_analyzed" },
+    // 0034(Issue #600): 検証の画面の未確定の一覧のための部分索引(start_time か cond_read が NULL の行だけ)。
+    { origin: "c", unique: 0, columns: ["id"], name: "idx_analyses_pending" },
   ],
 };
 
@@ -519,8 +521,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql の33本だけで、番号は 0001 から連続している(後から足すときは 0034 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0035_race_backfill.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql・0035_race_backfill.sql の35本だけで、番号は 0001 から連続している(後から足すときは 0036 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -591,8 +593,8 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     expect(detail).toEqual({ name: "detail_key", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 });
     expect(exe["analyses"]!.columns.find((c) => c.name === "detail_key")).toBeUndefined();
     const indexNames = actual["analyses"]!.indexes.filter((i) => i.origin === "c").map((i) => i.name);
-    expect(indexNames).toEqual(expect.arrayContaining(["idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race"]));
-    expect(indexNames).toHaveLength(7);
+    expect(indexNames).toEqual(expect.arrayContaining(["idx_analyses_kaisai_date", "idx_analyses_pending", "idx_analyses_prompt_version_race", "idx_analyses_race"]));
+    expect(indexNames).toHaveLength(8); // 0001〜0002 の3つ+0008 の4つ+0034(Issue #600)の1つ
   });
 
   it("Issue #173: r2_ops 表が実際に入っている(ym が主キー・class_a と class_b は NOT NULL。宣言だけして 0003 に書き忘れても気づける)", () => {
@@ -639,7 +641,7 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     const names = ["course_type", "distance", "track_condition", "grade", "race_name", "cond_read"];
     const before = schemaAfter(sqls.slice(0, 22));
     for (const n of names) expect(before["analyses"]!.columns.map((c) => c.name), n).not.toContain(n);
-    const after = schemaAfter(sqls);
+    const after = schemaAfter(sqls.slice(0, 33));
     for (const n of names) {
       expect(after["analyses"]!.columns.find((c) => c.name === n), n).toEqual(D1_EXTRA_COLUMNS["analyses"]!.find((c) => c.name === n));
       expect(exe["analyses"]!.columns.map((c) => c.name), n).not.toContain(n);
@@ -662,7 +664,7 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
   it("Issue #426: race_class(TEXT・NULL 可)は 0024 だけが足す。0001〜0023 までには無い。exe には無い D1 専用(D1_EXTRA_COLUMNS に宣言している)。追加のみ(ALTER TABLE ... ADD COLUMN の1文だけ・UPDATE なし・索引なし)", () => {
     const before = schemaAfter(sqls.slice(0, 23));
     expect(before["analyses"]!.columns.map((c) => c.name)).not.toContain("race_class");
-    const after = schemaAfter(sqls);
+    const after = schemaAfter(sqls.slice(0, 33));
     expect(after["analyses"]!.columns.find((c) => c.name === "race_class")).toEqual(D1_EXTRA_COLUMNS["analyses"]!.find((c) => c.name === "race_class"));
     expect(after["analyses"]!.columns.find((c) => c.name === "race_class")).toEqual({ name: "race_class", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 });
     expect(exe["analyses"]!.columns.map((c) => c.name)).not.toContain("race_class");
@@ -883,6 +885,17 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
       "CREATE INDEX idx_analyses_race_analyzed ON analyses (race_id, analyzed_at)",
       "CREATE INDEX idx_analyses_kaisai_analyzed ON analyses (kaisai_date, analyzed_at)",
     ]);
+  });
+
+  it("Issue #600: idx_analyses_pending は 0034 だけが足す(analyses (id) の部分索引。WHERE は start_time IS NULL OR cond_read IS NULL)。0001〜0033 までには無い。exe には無い D1 専用(D1_EXTRA_INDEXES に宣言している)。追加のみ(CREATE INDEX の1文だけ)", () => {
+    const names = (schema: Schema): string[] => schema["analyses"]!.indexes.map((i) => i.name ?? "");
+    expect(names(schemaAfter(sqls.slice(0, 33)))).not.toContain("idx_analyses_pending");
+    expect(names(schemaAfter(sqls))).toContain("idx_analyses_pending");
+    expect(names(exe)).not.toContain("idx_analyses_pending");
+    expect(D1_EXTRA_INDEXES["analyses"]!.map((i) => i.name)).toContain("idx_analyses_pending");
+    const code = sqls[33]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n").trim();
+    expect(code).toBe("CREATE INDEX IF NOT EXISTS idx_analyses_pending ON analyses (id) WHERE start_time IS NULL OR cond_read IS NULL;");
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter([...sqls.slice(0, 33), ""]))).not.toEqual([]); // 0034 を落とすと差分になる(空振りでない)
   });
 
   const m0008 = sqls[7] ?? "";
