@@ -158,9 +158,10 @@ describe("saveScratched: 旧い行(scratched が NULL)の、着順が NULL の�
     expect(buildScratchedStatement(local.db, RACE, [])).toBeNull();
     await seedOldResult();
     await store(spy).saveScratched(RACE, PAGE);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2); // 補完の文 + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)
     expect(calls[0]!.binds).toBe(2);
-    expect(batches).toEqual([1]);
+    expect(calls[1]!.binds).toBe(1);
+    expect(batches).toEqual([2]);
   });
 
   it("実フィクスチャ(取消あり result_202606040901): パース → 変換 → 補完で、取消の 1 頭だけが 1 になり、他の着順なしの行があれば 0", async () => {

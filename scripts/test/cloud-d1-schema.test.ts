@@ -384,6 +384,26 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     indexes: [{ origin: "pk", unique: 1, columns: ["race_id"], name: null }],
   },
+  // 0035 の中身(Issue #597)。結果の補完のレース単位の状態(主キーは race_id。WITHOUT ROWID)。段階 1〜4 の未完了・済み・諦めの行だけの部分索引が 4 本(キーは (stN, kaisai_date, race_id))。導出は cloud/src/race-backfill-state.ts。
+  race_backfill: {
+    columns: [
+      { name: "kaisai_date", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "race_id", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "sm", type: "INTEGER", notnull: 1, dflt_value: "0", pk: 0 },
+      { name: "st1", type: "INTEGER", notnull: 1, dflt_value: "0", pk: 0 },
+      { name: "st2", type: "INTEGER", notnull: 1, dflt_value: "0", pk: 0 },
+      { name: "st3", type: "INTEGER", notnull: 1, dflt_value: "0", pk: 0 },
+      { name: "st4", type: "INTEGER", notnull: 1, dflt_value: "0", pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [
+      { origin: "c", unique: 0, columns: ["st1", "kaisai_date", "race_id"], name: "idx_race_backfill_st1" },
+      { origin: "c", unique: 0, columns: ["st2", "kaisai_date", "race_id"], name: "idx_race_backfill_st2" },
+      { origin: "c", unique: 0, columns: ["st3", "kaisai_date", "race_id"], name: "idx_race_backfill_st3" },
+      { origin: "c", unique: 0, columns: ["st4", "kaisai_date", "race_id"], name: "idx_race_backfill_st4" },
+      { origin: "pk", unique: 1, columns: ["race_id"], name: null },
+    ],
+  },
   baba_conditions: {
     columns: [
       { name: "cushion", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
@@ -501,8 +521,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql の34本だけで、番号は 0001 から連続している(後から足すときは 0035 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql・0035_race_backfill.sql の35本だけで、番号は 0001 から連続している(後から足すときは 0036 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -593,8 +613,8 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
   });
 
   it("Issue #445: WITHOUT ROWID の表の集合が、宣言と一致する(主キーが行の実体になる表。外すと書き込みの行が増える。構造の比較〈列・索引〉には現れないので別に固定する)", () => {
-    // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)・0026(baba_fetch_attempts)・0027(kaisai_days)・0028(jockey_names)・0030(trainer_names)・0031(race_archive)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
-    const declared = ["baba_conditions", "baba_fetch_attempts", "baba_fetches", "horse_run_saves", "horse_runs", "jockey_names", "kaisai_days", "race_archive", "race_conditions", "trainer_names"];
+    // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)・0026(baba_fetch_attempts)・0027(kaisai_days)・0028(jockey_names)・0030(trainer_names)・0031(race_archive)・0035(race_backfill)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
+    const declared = ["baba_conditions", "baba_fetch_attempts", "baba_fetches", "horse_run_saves", "horse_runs", "jockey_names", "kaisai_days", "race_archive", "race_backfill", "race_conditions", "trainer_names"];
     const wrTables = (sqlList: readonly string[]): string[] => {
       const db = openEmptyDb();
       try {

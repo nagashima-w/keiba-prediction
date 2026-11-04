@@ -100,7 +100,7 @@ describe("検証の補完(commitStartTimes)がスナップショットのクラ�
     await analyses().saveAnalysis(mkRecord(RACE_A));
     const spy = spyDb(local.db);
     await new D1VerifyStore({ db: spy.db, bucket: local.r2, now: () => NOW }).commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: { ...FACTS, raceClass: "オープン" } }]);
-    expect(spy.batches).toEqual([2]);
+    expect(spy.batches).toEqual([3]); // 2 文 + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)
     expect(await classOf(1)).toBe("オープン");
   });
 

@@ -174,7 +174,7 @@ describe("commitStartTimes(D1 への書き込み)", () => {
     expect(await startTimeOf(1)).toBe("15:45");
     expect(await startTimeOf(2)).toBe("");
     expect(await startTimeOf(3)).toBe("10:00");
-    expect(spy.batches).toEqual([2]);
+    expect(spy.batches).toEqual([3]); // 更新・Class B のカウント + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)
     expect(written).toBeGreaterThanOrEqual(2);
     const usage = await local.db.prepare("SELECT class_a AS a, class_b AS b FROM r2_ops WHERE ym = 202610").first<{ a: number; b: number }>();
     expect(usage!.b).toBeGreaterThanOrEqual(3);
@@ -402,7 +402,7 @@ describe("commitStartTimes(Issue #389): 発走時刻と条件を 1 文で書く"
     const spy = spyDb(local.db);
     const s = new D1VerifyStore({ db: spy.db, bucket: local.r2, now: () => NOW });
     await s.commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: SNAP_FACTS }]);
-    expect(spy.batches).toEqual([2]);
+    expect(spy.batches).toEqual([3]); // 更新 + Class B のカウント + 補完の状態の作り直しの 1 文(Issue #597)
     expect(await condRowOf(1)).toEqual({ start_time: "15:45", course_type: "芝", distance: 1600, track_condition: "稍", grade: "G3", race_name: "3歳以上1勝クラス", cond_read: 1 });
   });
 
