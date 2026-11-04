@@ -40,6 +40,7 @@ import { isValidMonth, monthRange } from "./monthly-month";
 import { DAILY_REPORT_NAME, type ReportMode, type ReportStatus, type RequestReportResult } from "./daily-report-core";
 import { RACE_ARCHIVE_FETCH_NAME } from "./race-archive-fetch-core";
 import type { RaceArchiveFetchStatus } from "./race-archive-fetch-types";
+import { RACE_ARCHIVE_RUNS_NAME, type RaceArchiveRunsStatus } from "./race-archive-runs-core";
 import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-core";
 import type { GetReportOptions, VerifyResponse, ViewerVerifyResponse } from "./verify-core";
 import type { ExportMode, ExportResponse } from "./prior-export-core";
@@ -127,6 +128,20 @@ export interface RaceArchiveStubLike {
   getStatus(): Promise<RaceArchiveFetchStatus>;
   /** 手で再開する(止まっていなければ何もしない)。 */
   resume(): Promise<{ readonly resumed: boolean; readonly previous: string }>;
+}
+
+/** 過去の結果の毎晩の変換の DO(RaceArchiveRunsDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #590。 */
+export interface RaceArchiveRunsStubLike {
+  /** アラームが無ければ張る(cron の `scheduled` から 21 時と 23 時に)。 */
+  kick(): Promise<void>;
+  /** 進捗の読み取り(アラームが無ければ張り直す)。 */
+  getStatus(): Promise<RaceArchiveRunsStatus>;
+}
+
+/** 過去の結果の毎晩の変換の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link RACE_ARCHIVE_RUNS_NAME})。 */
+export interface RaceArchiveRunsNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): RaceArchiveRunsStubLike;
 }
 
 /** 過去の結果の取得の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link RACE_ARCHIVE_FETCH_NAME})。 */
@@ -219,6 +234,8 @@ export interface Env extends AccessEnv {
   RESULT_BACKFILL?: BackfillNamespaceLike;
   /** 過去の結果の取得の DO(RaceArchiveFetchDO。wrangler.toml の binding)。Issue #554。本番では常にある。無い構成では `/api/race-archive` が 503 になり、cron は kick を呼ばない。 */
   RACE_ARCHIVE_FETCH?: RaceArchiveNamespaceLike;
+  /** 過去の結果の毎晩の変換の DO(RaceArchiveRunsDO。wrangler.toml の binding)。Issue #590。本番では常にある。無い構成では `/api/race-archive/runs` が 503 になり、cron は kick しない。 */
+  RACE_ARCHIVE_RUNS?: RaceArchiveRunsNamespaceLike;
   /** 検証の集計の DO(VerifyReportDO。wrangler.toml の binding)。Issue #219。本番では常にある。無い構成では `GET /api/verify` が 503 になる。 */
   VERIFY_REPORT?: VerifyNamespaceLike;
   /** 統計モデル用の書き出しの DO(PriorExportDO。wrangler.toml の binding)。Issue #266。本番では常にある。無い構成では `GET /api/export/prior-dataset` が 503 になる。 */
@@ -560,6 +577,14 @@ export async function handle(
     return methodNotAllowed("POST");
   }
 
+  if (pathname === "/api/race-archive/runs") {
+    // 読み取り専用(過去の結果の毎晩の変換の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。手で動かす口(POST)は無い。Issue #590。
+    if (method !== "GET") {
+      return methodNotAllowed("GET");
+    }
+    return handleRaceArchiveRunsStatus(env);
+  }
+
   if (pathname === "/api/analyses/status") {
     // 読み取り専用(DO の状態を読むだけ)。GET だけ。
     if (method !== "GET") {
@@ -642,6 +667,22 @@ async function handleRaceArchiveStatus(env: Env): Promise<Response> {
     return json({ ok: true, ...(await namespace.get(namespace.idFromName(RACE_ARCHIVE_FETCH_NAME)).getStatus()) });
   } catch {
     return json({ ok: false, error: { type: "race-archive-error" } }, 503);
+  }
+}
+
+/**
+ * `GET /api/race-archive/runs`: 過去の結果の毎晩の変換の状態(動作・待ちの理由・止まった理由・次の実行・今夜の書き込み行数と上限・目録の件数〈総数と印の版ごと〉・失敗と諦めたレース・拒否の分類・累計)。
+ * 目録の件数は D1 の全件走査(約 1.7 万行)なので、管理者の口でだけ読む。DO の失敗・binding なしは 503(文面は返さない)。Issue #590。
+ */
+async function handleRaceArchiveRunsStatus(env: Env): Promise<Response> {
+  try {
+    const namespace = env.RACE_ARCHIVE_RUNS;
+    if (namespace === undefined) {
+      throw new Error("RACE_ARCHIVE_RUNS binding がありません");
+    }
+    return json({ ok: true, ...(await namespace.get(namespace.idFromName(RACE_ARCHIVE_RUNS_NAME)).getStatus()) });
+  } catch {
+    return json({ ok: false, error: { type: "race-archive-runs-error" } }, 503);
   }
 }
 
