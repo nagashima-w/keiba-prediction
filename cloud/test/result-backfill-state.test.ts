@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { D1AnalysisStore } from "../src/analysis-repository";
-import { RECOMPUTE_RACES_SQL, raceBackfillStateSelect } from "../src/race-backfill-state";
+import { RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, raceBackfillStateSelect } from "../src/race-backfill-state";
 import {
   COUNT_BACKFILL_SQL,
   COUNT_CLASS_BACKFILL_SQL,
@@ -479,6 +479,28 @@ describe("D1 の書き込み行数(meta.rows_written。見積りの再現): 状�
     expect(afterResult).toBeLessThanOrEqual(8);
     expect(await recomputeWrites("WR1")).toBe(0); // 変化なし → 書かない
     process.stderr.write(`REPORT rows_written: 新しい分析 3 / 結果の保存 ${afterResult}\n`);
+  });
+});
+
+describe("整合検査の読み取り行数(meta.rows_read。1 晩 1 回の全走査の見積りの再現)", () => {
+  it("N レース(各 13 頭・分析 1 行)の整合検査は、読み取りがレース数に比例する(1 レースあたり 20 行以下に固定)。状態が変わらなければ書き込みは 0", async () => {
+    const races = 300;
+    const nums = JSON.stringify(Array.from({ length: races }, (_, i) => i));
+    await local.db
+      .prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date, race_class) SELECT 'V' || printf('%05d', value), '2026-10-06T00:00:00.000Z', 0, '20261003', 'オープン' FROM json_each(?)")
+      .bind(nums)
+      .run();
+    await local.db
+      .prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, scratched, win_payout) SELECT 'V' || printf('%05d', r.value), h.value + 1, h.value + 1, 2.0, 0, CASE WHEN h.value = 0 THEN 300 ELSE NULL END FROM json_each(?) r, json_each(?) h")
+      .bind(nums, JSON.stringify(Array.from({ length: 13 }, (_, i) => i)))
+      .run();
+    await drift(); // 初回(状態の行を作る)
+    const again = await local.db.prepare(RECONCILE_RACE_BACKFILL_SQL).run();
+    expect(again.meta.changes).toBe(0);
+    expect(again.meta.rows_written).toBe(0);
+    process.stderr.write(`REPORT reconcile rows_read=${again.meta.rows_read} races=${races}\n`);
+    expect(again.meta.rows_read!).toBeGreaterThan(races); // 前提(空振り防止): 全レースを読んでいる
+    expect(again.meta.rows_read!).toBeLessThanOrEqual(races * 20); // 結果の表を 1 回走査(13 頭)+ 分析 1 行 + 結合。レースごとの相関副問い合わせ版は約 35 行/レースだった
   });
 });
 

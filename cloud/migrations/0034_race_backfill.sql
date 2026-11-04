@@ -23,10 +23,16 @@ CREATE INDEX idx_race_backfill_st4 ON race_backfill (st4, kaisai_date DESC, race
 -- 初期の投入: 既存の全レースの状態を作る(済み・諦めの写しは DO の初回の起動が行う)。
 INSERT INTO race_backfill (race_id, kaisai_date, sm, st1, st2, st3, st4)
 SELECT race_id, kaisai_date, sm, st1, st2, st3, st4 FROM (SELECT a.race_id AS race_id, MIN(a.kaisai_date) AS kaisai_date,
-             CASE WHEN EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.finish_position IS NULL AND r.scratched IS NULL) THEN 1 ELSE 0 END AS sm,
-             CASE WHEN NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) THEN 1 ELSE 0 END AS st1,
-             CASE WHEN EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) AND (NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL) OR EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.finish_position IS NULL AND r.scratched IS NULL)) THEN 1 ELSE 0 END AS st2,
-             CASE WHEN EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) AND MAX(CASE WHEN a.race_class IS NULL THEN 1 ELSE 0 END) = 1 THEN 1 ELSE 0 END AS st3,
-             CASE WHEN EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_payout IS NOT NULL) THEN 1 ELSE 0 END AS st4
-      FROM analyses a 
+             CASE WHEN rr.sm > 0 THEN 1 ELSE 0 END AS sm,
+             CASE WHEN rr.n IS NULL THEN 1 ELSE 0 END AS st1,
+             CASE WHEN rr.n IS NOT NULL AND (rr.odds = 0 OR rr.sm > 0) THEN 1 ELSE 0 END AS st2,
+             CASE WHEN rr.n IS NOT NULL AND MAX(CASE WHEN a.race_class IS NULL THEN 1 ELSE 0 END) = 1 THEN 1 ELSE 0 END AS st3,
+             CASE WHEN rr.n IS NOT NULL AND rr.payout = 0 THEN 1 ELSE 0 END AS st4
+      FROM analyses a
+      LEFT JOIN (SELECT race_id, COUNT(*) AS n,
+                        SUM(CASE WHEN win_odds IS NOT NULL THEN 1 ELSE 0 END) AS odds,
+                        SUM(CASE WHEN finish_position IS NULL AND scratched IS NULL THEN 1 ELSE 0 END) AS sm,
+                        SUM(CASE WHEN win_payout IS NOT NULL THEN 1 ELSE 0 END) AS payout
+                 FROM race_results  GROUP BY race_id) rr ON rr.race_id = a.race_id
+      
       GROUP BY a.race_id);

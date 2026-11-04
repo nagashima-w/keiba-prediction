@@ -21,23 +21,26 @@
  * 同じレースの分析で開催日が食い違うことはまれ(中央は ID が日付を決める)で、食い違っても最小は同じ日になるのが普通。
  */
 
-const HAS_RESULTS = "EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)";
-const NO_WIN_ODDS = "NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL)";
-const SCRATCHED_MISSING = "EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.finish_position IS NULL AND r.scratched IS NULL)";
-const NO_WIN_PAYOUT = "NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_payout IS NOT NULL)";
-
 /**
- * 状態の導出の SELECT(分析の `where` で絞ったレースごとに 1 行。列は `race_id`・`kaisai_date`・`sm`・`st1`〜`st4`。値は 0/1)。
- * `where` は空文字か `WHERE …`。migration 0034 は `where` が空のものをそのまま持つ。
+ * 状態の導出の SELECT(分析の `analysesWhere` で絞ったレースごとに 1 行。列は `race_id`・`kaisai_date`・`sm`・`st1`〜`st4`。値は 0/1)。
+ * 結果の表はレースごとの集計(`rr`: 馬の数・オッズのある馬・着順も scratched も NULL の馬・払戻のある馬)を 1 回だけ作って結合する。
+ * `analysesWhere`・`resultsWhere` は空文字か `WHERE …`(絞り込みの JSON は番号つきの `?1` で共有する)。migration 0034 は両方が空のものをそのまま持つ。
+ * 全レースの整合検査は結果の表を 1 回だけ走査する(レースごとの相関副問い合わせだと 1 レースあたり約 35 行を読んでいた)。
  */
-export function raceBackfillStateSelect(where: string): string {
+export function raceBackfillStateSelect(analysesWhere: string, resultsWhere = ""): string {
   return `SELECT a.race_id AS race_id, MIN(a.kaisai_date) AS kaisai_date,
-             CASE WHEN ${SCRATCHED_MISSING} THEN 1 ELSE 0 END AS sm,
-             CASE WHEN NOT ${HAS_RESULTS} THEN 1 ELSE 0 END AS st1,
-             CASE WHEN ${HAS_RESULTS} AND (${NO_WIN_ODDS} OR ${SCRATCHED_MISSING}) THEN 1 ELSE 0 END AS st2,
-             CASE WHEN ${HAS_RESULTS} AND MAX(CASE WHEN a.race_class IS NULL THEN 1 ELSE 0 END) = 1 THEN 1 ELSE 0 END AS st3,
-             CASE WHEN ${HAS_RESULTS} AND ${NO_WIN_PAYOUT} THEN 1 ELSE 0 END AS st4
-      FROM analyses a ${where}
+             CASE WHEN rr.sm > 0 THEN 1 ELSE 0 END AS sm,
+             CASE WHEN rr.n IS NULL THEN 1 ELSE 0 END AS st1,
+             CASE WHEN rr.n IS NOT NULL AND (rr.odds = 0 OR rr.sm > 0) THEN 1 ELSE 0 END AS st2,
+             CASE WHEN rr.n IS NOT NULL AND MAX(CASE WHEN a.race_class IS NULL THEN 1 ELSE 0 END) = 1 THEN 1 ELSE 0 END AS st3,
+             CASE WHEN rr.n IS NOT NULL AND rr.payout = 0 THEN 1 ELSE 0 END AS st4
+      FROM analyses a
+      LEFT JOIN (SELECT race_id, COUNT(*) AS n,
+                        SUM(CASE WHEN win_odds IS NOT NULL THEN 1 ELSE 0 END) AS odds,
+                        SUM(CASE WHEN finish_position IS NULL AND scratched IS NULL THEN 1 ELSE 0 END) AS sm,
+                        SUM(CASE WHEN win_payout IS NOT NULL THEN 1 ELSE 0 END) AS payout
+                 FROM race_results ${resultsWhere} GROUP BY race_id) rr ON rr.race_id = a.race_id
+      ${analysesWhere}
       GROUP BY a.race_id`;
 }
 
@@ -60,11 +63,14 @@ function upsertState(select: string): string {
  * 書き込みの batch の最後に足す 1 文(race_id の JSON 配列 1 つを束縛。1 レースなら `[raceId]`)。そのレースの分析・結果の行だけを読む(馬の行は多くとも約 18)。
  * 状態が変わらなければ書かない。分析の行が無いレース(結果だけがあるレース)には行を作らない。
  */
-export const RECOMPUTE_RACES_SQL = upsertState(raceBackfillStateSelect("WHERE a.race_id IN (SELECT value FROM json_each(?))"));
+export const RECOMPUTE_RACES_SQL = upsertState(raceBackfillStateSelect("WHERE a.race_id IN (SELECT value FROM json_each(?1))", "WHERE race_id IN (SELECT value FROM json_each(?1))"));
 
 /** 検証の DO の書き込み(`analyses.id` で更新する)用。分析の id の JSON 配列を束縛し、その分析のレースの状態を作り直す。 */
 export const RECOMPUTE_BY_ANALYSIS_IDS_SQL = upsertState(
-  raceBackfillStateSelect("WHERE a.race_id IN (SELECT race_id FROM analyses WHERE id IN (SELECT value FROM json_each(?)))"),
+  raceBackfillStateSelect(
+    "WHERE a.race_id IN (SELECT race_id FROM analyses WHERE id IN (SELECT value FROM json_each(?1)))",
+    "WHERE race_id IN (SELECT race_id FROM analyses WHERE id IN (SELECT value FROM json_each(?1)))",
+  ),
 );
 
 /**

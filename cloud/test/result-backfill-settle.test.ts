@@ -282,14 +282,16 @@ describe("増分の写し: 取り込み・諦めのたびに、段階ごとの�
 describe("整合検査: 1 晩 1 回、最初のステップで(写しのあと・列挙の前)", () => {
   it("同じ晩の 2 回目以降のステップでは流さず、翌晩にまた流す。順序は 写し → 整合検査 → 列挙", async () => {
     const w = new Fake();
-    w.pending[1] = [race(1)];
+    w.pending[1] = Array.from({ length: 90 }, (_, i) => race(i + 1)); // 30 件ずつ 3 チャンク = 3 ステップで依頼する(待ち行列は最初のステップで 1 回だけ作る)
     const { core } = make(w);
     await core.runNextStep();
     expect(w.log.slice(0, 3)).toEqual(["settle", "reconcile", "list1"]);
-    w.now += BACKFILL_POLL_MS;
-    await core.runNextStep();
-    w.now += BACKFILL_POLL_MS;
-    await core.runNextStep();
+    for (let i = 0; i < 2; i += 1) {
+      for (const row of w.dayRows.values()) row.state = "imported"; // 回収できるようにして、次のステップが列挙の段階まで進むようにする
+      w.now += BACKFILL_POLL_MS;
+      await core.runNextStep();
+    }
+    expect(w.dayRows.size).toBe(90); // 前提(空振り防止): 3 ステップとも依頼まで進んだ
     expect(w.reconcileCalls).toBe(1);
     w.now = jst(10, 11, 2);
     await core.runNextStep();
