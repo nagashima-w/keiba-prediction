@@ -107,8 +107,14 @@ const WATERMARK_SQL =
   "SELECT (SELECT MAX(id) FROM analyses) AS analyses, (SELECT MAX(rowid) FROM race_results) AS results, (SELECT MAX(rowid) FROM race_combo_payouts) AS comboPayouts, (SELECT MAX(rowid) FROM race_combo_payout_imports) AS comboImports";
 
 /** 総数は窓関数(`COUNT(*) OVER ()`)で同じクエリから得る(`LIMIT` の前に全該当行を数える)。 */
-const PENDING_SQL = `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, detail_key AS detailKey, COUNT(*) OVER () AS total
-  FROM analyses WHERE id > ? AND (start_time IS NULL OR cond_read IS NULL) ORDER BY id LIMIT ?`;
+export const PENDING_PREDICATE = "start_time IS NULL OR cond_read IS NULL";
+
+/**
+ * 未確定の一覧。★WHERE の `PENDING_PREDICATE` は、migration 0034 の部分索引 `idx_analyses_pending` の WHERE と同じ形でなければならない
+ * (違うと索引が使われず、分析の表のほぼ全部を読む。Issue #600。cloud/test/verify-pending-index.test.ts が照らす)。
+ */
+export const PENDING_SQL = `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, detail_key AS detailKey, COUNT(*) OVER () AS total
+  FROM analyses WHERE id > ? AND (${PENDING_PREDICATE}) ORDER BY id LIMIT ?`;
 
 /**
  * JSON 配列 `[[id, 発走時刻, 条件の印, 芝ダ, 距離, 馬場, グレード, レース名, クラス], …]` で複数行を 1 文で更新する(Issue #389。クラスは Issue #426)。**確認済みの値は上書きしない**:
