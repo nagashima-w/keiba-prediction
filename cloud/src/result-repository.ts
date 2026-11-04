@@ -178,7 +178,7 @@ export const FILL_WIN_PAYOUT_SQL = `UPDATE race_results SET win_payout = j.p
              AND race_results.win_payout IS NULL AND j.p IS NOT NULL`;
 
 /**
- * 結果の補完の段階 4 の列挙(単勝の払戻の補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0034。導出は `race-backfill-state.ts`)の部分索引から読む
+ * 結果の補完の段階 4 の列挙(単勝の払戻の補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0035。導出は `race-backfill-state.ts`)の部分索引から読む
  * (以前は `analyses` の全部を毎回読んでいた)。対象 = `st4 = 1`(未完了。済み・諦め〈2〉と条件が偽〈0〉は含まない)で、開催日が `to` 以下(NULL は含まない)。
  * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
  * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
@@ -259,7 +259,7 @@ export const LIST_UNIMPORTED_BY_DAY_SQL = `SELECT raceId, firstDate FROM (
 export const UNIMPORTED_BY_DAY_MAX_DAYS = 31;
 
 /**
- * 結果の補完の段階 1 の列挙(結果の取り込み。結果の行が 1 件も無いレース)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0034。導出は `race-backfill-state.ts`)の部分索引から読む
+ * 結果の補完の段階 1 の列挙(結果の取り込み。結果の行が 1 件も無いレース)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0035。導出は `race-backfill-state.ts`)の部分索引から読む
  * (以前は `analyses` の全部を毎回読んでいた)。対象 = `st1 = 1`(未完了。済み・諦め〈2〉と条件が偽〈0〉は含まない)で、開催日が `to` 以下(NULL は含まない)。
  * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
  * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
@@ -284,7 +284,7 @@ export const COUNT_BACKFILL_SQL = `SELECT COALESCE(SUM(CASE WHEN kaisai_date IS 
 
 
 /**
- * 結果の補完の段階 2 の列挙(単勝オッズ・scratched の補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0034。導出は `race-backfill-state.ts`)の部分索引から読む
+ * 結果の補完の段階 2 の列挙(単勝オッズ・scratched の補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0035。導出は `race-backfill-state.ts`)の部分索引から読む
  * (以前は `analyses` の全部を毎回読んでいた)。対象 = `st2 = 1`(未完了。済み・諦め〈2〉と条件が偽〈0〉は含まない)で、開催日が `to` 以下(NULL は含まない)。
  * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
  * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
@@ -311,7 +311,7 @@ export const COUNT_WIN_ODDS_BACKFILL_SQL = `SELECT COALESCE(SUM(CASE WHEN kaisai
 
 
 /**
- * 結果の補完の段階 3 の列挙(レースのクラスの補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0034。導出は `race-backfill-state.ts`)の部分索引から読む
+ * 結果の補完の段階 3 の列挙(レースのクラスの補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0035。導出は `race-backfill-state.ts`)の部分索引から読む
  * (以前は `analyses` の全部を毎回読んでいた)。対象 = `st3 = 1`(未完了。済み・諦め〈2〉と条件が偽〈0〉は含まない)で、開催日が `to` 以下(NULL は含まない)。
  * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
  * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。

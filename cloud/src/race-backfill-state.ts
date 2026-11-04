@@ -1,11 +1,11 @@
 /**
- * 結果の補完の「レース単位の状態の表」`race_backfill`(migration 0034。Issue #597)の、状態の導出の SQL。
+ * 結果の補完の「レース単位の状態の表」`race_backfill`(migration 0035。Issue #597)の、状態の導出の SQL。
  *
  * 補完の列挙・件数の SQL は、以前は `analyses` の全部を毎回読んでいた(読み取りが分析の行数 N に比例)。ここでは、レースごとの小さな表に**段階ごとの状態**を持ち、
  * 未完了の行だけの部分索引から読む。状態の導出(条件)は**この 1 か所**にあり、次の 3 つが同じ式を使う(migration の初期投入はこの式の文字列をそのまま持ち、テストが一致を固定する):
  *  - 書き込みの batch の最後の 1 文({@link RECOMPUTE_RACES_SQL}・{@link RECOMPUTE_BY_ANALYSIS_IDS_SQL}): 書いたレースの状態を作り直す
  *  - 整合検査({@link RECONCILE_RACE_BACKFILL_SQL}): 全レースを作り直し、食い違いを直す(補完の 1 晩 1 回)
- *  - migration 0034 の初期投入
+ *  - migration 0035 の初期投入
  *
  * ## 列
  * `kaisai_date` = そのレースの分析の最小の開催日(全部 NULL なら NULL=補完の対象外)/ `sm` = 着順が NULL で scratched が NULL の行がある(段階 2 の観測値 `scratchedMissing`)/
@@ -24,7 +24,7 @@
 /**
  * 状態の導出の SELECT(分析の `analysesWhere` で絞ったレースごとに 1 行。列は `race_id`・`kaisai_date`・`sm`・`st1`〜`st4`。値は 0/1)。
  * 結果の表はレースごとの集計(`rr`: 馬の数・オッズのある馬・着順も scratched も NULL の馬・払戻のある馬)を 1 回だけ作って結合する。
- * `analysesWhere`・`resultsWhere` は空文字か `WHERE …`(絞り込みの JSON は番号つきの `?1` で共有する)。migration 0034 は両方が空のものをそのまま持つ。
+ * `analysesWhere`・`resultsWhere` は空文字か `WHERE …`(絞り込みの JSON は番号つきの `?1` で共有する)。migration 0035 は両方が空のものをそのまま持つ。
  * 全レースの整合検査は結果の表を 1 回だけ走査する(レースごとの相関副問い合わせだと 1 レースあたり約 35 行を読んでいた)。
  */
 export function raceBackfillStateSelect(analysesWhere: string, resultsWhere = ""): string {

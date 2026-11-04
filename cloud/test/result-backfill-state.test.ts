@@ -504,16 +504,16 @@ describe("整合検査の読み取り行数(meta.rows_read。1 晩 1 回の全�
   });
 });
 
-describe("migration 0034 の初期投入は、再計算の式と同じ文字列", () => {
+describe("migration 0035 の初期投入は、再計算の式と同じ文字列", () => {
   const normalize = (sql: string): string => sql.replace(/\s+/g, " ").trim();
 
   it("migration の SELECT は raceBackfillStateSelect('') と(空白を除いて)同じ", () => {
-    const migration = readFileSync(path.join(ROOT, "migrations", "0034_race_backfill.sql"), "utf-8");
+    const migration = readFileSync(path.join(ROOT, "migrations", "0035_race_backfill.sql"), "utf-8");
     expect(normalize(migration)).toContain(normalize(raceBackfillStateSelect("")));
   });
 
   it("migration は追加だけ(既存の表・列を変えない)", () => {
-    const migration = readFileSync(path.join(ROOT, "migrations", "0034_race_backfill.sql"), "utf-8");
+    const migration = readFileSync(path.join(ROOT, "migrations", "0035_race_backfill.sql"), "utf-8");
     const statements = migration.replace(/^--.*$/gm, "").split(";").map((s) => s.trim()).filter((s) => s !== "");
     for (const st of statements) {
       expect(st, st.slice(0, 60)).toMatch(/^(CREATE TABLE race_backfill|CREATE INDEX idx_race_backfill_st\d|INSERT INTO race_backfill)/);
@@ -525,7 +525,7 @@ describe("migration 0034 の初期投入は、再計算の式と同じ文字列"
     await resultStore().saveResult(RACE, [horse(1, { winOdds: 3.4 })] as never);
     await local.db.prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date) VALUES ('NOROW', '2026-10-06T00:00:00.000Z', 0, NULL)").run();
     await local.db.prepare("DELETE FROM race_backfill").run(); // 投入前の状態(migration の時点では表は空)
-    const migration = readFileSync(path.join(ROOT, "migrations", "0034_race_backfill.sql"), "utf-8");
+    const migration = readFileSync(path.join(ROOT, "migrations", "0035_race_backfill.sql"), "utf-8");
     const insert = migration.replace(/^--.*$/gm, "").split(";").map((s) => s.trim()).find((s) => s.startsWith("INSERT INTO race_backfill"))!;
     await local.db.prepare(insert).run();
     expect(await stateOf("NOROW")).toEqual({ kaisai_date: null, sm: 0, st1: 1, st2: 0, st3: 0, st4: 0 }); // 開催日 NULL の分析のレースも行を作る(undated として数える)
