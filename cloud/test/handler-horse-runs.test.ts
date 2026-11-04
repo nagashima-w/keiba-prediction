@@ -56,8 +56,8 @@ function harness(totals: readonly TotalsRow[] = [API_TOTALS]): Harness {
             },
             first: async () => {
               await run();
-              if (sql.includes("COALESCE(SUM(n)")) {
-                return { cells: 4, runs: 40, n10: 2, n30: 1, n100: 0 };
+              if (sql.includes("COALESCE(SUM(a + r)")) {
+                return { cells: 4, runs: 40, n10: 2, n30: 1, n100: 0, wCells: 6, wRuns: 90, wN10: 4, wN30: 2, wN100: 0, resultRuns: 50 }; // 全件走査 1 本の結果(Issue #591)
               }
               return null;
             },
@@ -103,7 +103,7 @@ describe("GET /api/horse-runs: 診断", () => {
     expect(body.saves.sinceMs).toBe(NOW.getTime() - STATUS_DAYS_DEFAULT * 86_400_000);
     expect(body.note).toContain("手動の発走前だけの分析");
     expect(body.cells).toBeUndefined();
-    expect(h.sqls.some((s) => s.includes("COALESCE(SUM(n)"))).toBe(false);
+    expect(h.sqls.some((s) => s.includes("COALESCE(SUM(a + r)"))).toBe(false);
     // 読み取りだけ(書き込みの文を発行しない)
     expect(h.sqls.every((s) => /^SELECT/.test(s))).toBe(true);
   });
@@ -130,7 +130,8 @@ describe("GET /api/horse-runs: 診断", () => {
     expect(body.saves.days).toBe(7);
     expect(body.saves.sinceMs).toBe(NOW.getTime() - 7 * 86_400_000);
     expect(body.cells).toStrictEqual({ cells: 4, runs: 40, n10: 2, n30: 1, n100: 0 });
-    expect(h.sqls.some((s) => s.includes("COALESCE(SUM(n)"))).toBe(true);
+    expect((body as { cellsWithResult?: unknown }).cellsWithResult).toStrictEqual({ cells: 6, runs: 90, n10: 4, n30: 2, n100: 0, resultRuns: 50 }); // Issue #591
+    expect(h.sqls.filter((s) => s.includes("COALESCE(SUM(a + r)"))).toHaveLength(1); // セルの分布の全件走査は 1 本だけ(Issue #591。D1 の読み取り行数を増やさない)
   });
 
   it(`days は 1〜${STATUS_DAYS_MAX} の整数、cells は 0 か 1。未知のクエリ・重複は 400(D1 に触れない)`, async () => {

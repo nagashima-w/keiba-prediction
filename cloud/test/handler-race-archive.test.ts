@@ -15,7 +15,7 @@ const STATUS: RaceArchiveFetchStatus = {
   waitReason: "stopped",
   nextRunAt: null,
   notBeforeMs: 1_793_718_000_000,
-  night: { date: "20261105", requests: 120, saved: 100, failed: 2 },
+  night: { date: "20261105", requests: 120, saved: 100, failed: 2, rowsRead: 4000 },
   totals: { months: { pending: 0, done: 60, dead: 0 }, days: { pending: 3, listed: 1, done: 400, dead: 0 }, races: { pending: 40, done: 9000, existing: 12, skipped: 3, dead: 1 } },
   skippedByClass: { 結果未確定: 3 },
   lastStop: { kind: "refused", detail: "http-403", at: 1_793_800_000_000, resumeAt: null },

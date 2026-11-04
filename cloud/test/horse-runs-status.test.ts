@@ -291,3 +291,105 @@ describe("readHorseRunsStatus: 出どころで分ける(Issue #552)", () => {
     expect(STATUS_NOTE).toContain("手動の発走前だけの分析");
   });
 });
+
+/**
+ * Issue #591(#549-B3-3): `cells=1` のとき、結果ページ由来の行を含めたセルの分布 `cellsWithResult` も返す(#256 の 11/10 の判断の材料)。
+ * 既存の `cells`(戦績 API 由来だけ)は変えない。同じ (馬, レース) は主キーで 1 行なので、戦績 API の行と結果ページ由来の行を二重に数えることは無い。
+ */
+describe("readHorseRunsStatus: 結果ページ由来を含むセル(Issue #591)", () => {
+  const resultRun = (horseId: string, n: number, patch: Partial<HorseRaceResult>) => ({
+    horseId,
+    raceKey: patch.raceIdRaw ?? raceKey(n),
+    parserVersion: 1,
+    firstSeenAt: NOON,
+    data: JSON.stringify(encodeHorseRun(run(n, patch))),
+  });
+
+  it("結果ページ由来が 0 件なら、cellsWithResult は cells と同じ分布で resultRuns は 0", async () => {
+    const store = new D1HorseRunsStore({ db: local.db });
+    await store.saveRace({ raceId: "202606280511", kaisaiDate: "20260628", savedAt: NOON, horses: [{ horseId: "2020100001", results: Array.from({ length: 12 }, (_, i) => run(i + 1, { jockeyId: "A" })) }] });
+    const s = await readHorseRunsStatus(local.db, { sinceMs: 0, days: 14, cells: true });
+    expect(s.cells).toStrictEqual({ cells: 1, runs: 12, n10: 1, n30: 0, n100: 0 });
+    expect(s.cellsWithResult).toStrictEqual({ cells: 1, runs: 12, n10: 1, n30: 0, n100: 0, resultRuns: 0 });
+  });
+
+  it("結果ページ由来の中央の走は cellsWithResult にだけ入る(cells は変わらない)。地方・騎手なし・距離なしは数えない。戦績 API の行と同じ鍵の結果ページ由来の行は(DO NOTHING で入らないので)二重に数えない", async () => {
+    const store = new D1HorseRunsStore({ db: local.db });
+    await store.saveRace({ raceId: "202606280511", kaisaiDate: "20260628", savedAt: NOON, horses: [{ horseId: "2020100001", results: Array.from({ length: 12 }, (_, i) => run(i + 1, { jockeyId: "A" })) }] });
+    await writeResultRuns(local.db, [
+      ...Array.from({ length: 30 }, (_, i) => resultRun("2020100002", i + 101, { jockeyId: "A" })), // 同じセルに 30 走
+      ...Array.from({ length: 5 }, (_, i) => resultRun("2020100003", i + 201, { jockeyId: "B" })), // 別のセル(騎手 B)
+      ...Array.from({ length: 4 }, (_, i) => resultRun("2020100004", i + 301, { jockeyId: "A", venueKind: "地方" })), // 数えない
+      resultRun("2020100005", 401, { jockeyId: null }), // 数えない
+      resultRun("2020100005", 402, { jockeyId: "A", distance: null }), // 数えない
+      resultRun("2020100001", 1, { jockeyId: "A" }), // 戦績 API の行と同じ鍵: 書かれない
+    ]);
+    const s = await readHorseRunsStatus(local.db, { sinceMs: 0, days: 14, cells: true });
+    expect(s.resultRows.rows).toBe(30 + 5 + 4 + 1 + 1); // 前提: 同じ鍵の 1 行は入っていない(入ったなら 42)
+    expect(s.cells).toStrictEqual({ cells: 1, runs: 12, n10: 1, n30: 0, n100: 0 });
+    expect(s.cellsWithResult).toStrictEqual({ cells: 2, runs: 12 + 30 + 5, n10: 1, n30: 1, n100: 0, resultRuns: 35 }); // セル A = 12(戦績 API)+ 30(結果ページ由来)= 42、セル B = 5
+  });
+
+  it("cells=0 のときは cells も cellsWithResult も付けない", async () => {
+    const s = await readHorseRunsStatus(local.db, { sinceMs: 0, days: 14, cells: false });
+    expect(s.cells).toBeUndefined();
+    expect(s.cellsWithResult).toBeUndefined();
+  });
+
+  it("出どころが NULL・'result' 以外の行は、cellsWithResult にも数えない", async () => {
+    await local.db.prepare("INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source) VALUES (?, ?, 1, ?, ?, 'other')").bind("2020100009", raceKey(900), NOON, JSON.stringify(encodeHorseRun(run(900, { jockeyId: "A" })))).run();
+    const s = await readHorseRunsStatus(local.db, { sinceMs: 0, days: 14, cells: true });
+    expect(s.cellsWithResult).toStrictEqual({ cells: 0, runs: 0, n10: 0, n30: 0, n100: 0, resultRuns: 0 });
+  });
+});
+
+/**
+ * Issue #591(レビュー差し戻し): `cells=1` の horse_runs の全件走査の本数を、#591 の前の 3 本から増やさない。D1 の読み取りは 1 日 500 万行(Free)。
+ * 見積もり(ローカルの D1 の `meta.rows_read` の実測。このテストが再現する): horse_runs が N 行のとき、全件走査 1 本は 2N 行を読み(WITHOUT ROWID の主キー順の走査 + 集計)、`cells=1` の 1 回は 3 本で 6N + 小さな定数行。
+ * N = 20 万行なら約 120 万行で、1 日 500 万行(Free)の約 24%(4 回で使い切る)。結果ページ由来を含むセル(`cellsWithResult`)を別の走査にすると 4 本・8N(約 160 万行、3 回で使い切る)になるので、`cells` と同じ走査 1 本で数える。
+ * ★「3N」ではなく 6N なのは、実測が 1 本 2N だったため(レビューの見積もり 3N + 定数は、走査 1 本を N と数えた値で、実測の 1 本 2N とは食い違う)。
+ */
+describe("readHorseRunsStatus: cells=1 の読み取り行数の上界(meta.rows_read。Issue #591)", () => {
+  /** local.db を包んで、各文の meta.rows_read を足し上げる(first も all で読んで meta を得る)。 */
+  function metered(): { db: Pick<D1Database, "prepare">; total: () => number; statements: () => number } {
+    let total = 0;
+    let statements = 0;
+    const db = {
+      prepare(sql: string) {
+        const stmt = local.db.prepare(sql);
+        const wrap = (bound: D1PreparedStatement): D1PreparedStatement =>
+          ({
+            bind: (...args: unknown[]) => wrap(bound.bind(...args)),
+            all: async () => {
+              const r = await bound.all();
+              total += r.meta.rows_read ?? 0;
+              statements += 1;
+                            return r;
+            },
+            first: async () => {
+              const r = await bound.all();
+              total += r.meta.rows_read ?? 0;
+              statements += 1;
+                            return r.results[0] ?? null;
+            },
+          }) as unknown as D1PreparedStatement;
+        return wrap(stmt);
+      },
+    };
+    return { db, total: () => total, statements: () => statements };
+  }
+
+  it("N = 600 行(戦績 API 300・結果ページ由来 300、中央・騎手あり)で、cells=1 の 1 回の rows_read は 6N + 100 以下(全件走査の文は 3 本。1 本 2N)", async () => {
+    const store = new D1HorseRunsStore({ db: local.db });
+    await store.saveRace({ raceId: "202606280511", kaisaiDate: "20260628", savedAt: NOON, horses: [{ horseId: "2020100001", results: Array.from({ length: 300 }, (_, i) => run(i + 1, { jockeyId: "A" })) }] });
+    const resultRows = Array.from({ length: 300 }, (_, i) => ({ horseId: "2020100002", raceKey: raceKey(i + 1001), parserVersion: 1, firstSeenAt: NOON, data: JSON.stringify(encodeHorseRun(run(i + 1001, { jockeyId: "A" }))) }));
+    await writeResultRuns(local.db, resultRows);
+    const N = (await local.db.prepare("SELECT COUNT(*) AS n FROM horse_runs").first<{ n: number }>())!.n;
+    expect(N).toBe(600); // 前提: 行がある(0 行だと上界が空振りになる)
+    const m = metered();
+    const s = await readHorseRunsStatus(m.db, { sinceMs: 0, days: 14, cells: true });
+    expect(s.cellsWithResult!.runs).toBe(600); // 前提: セルの分布が実際に両方の出どころを数えている
+    expect(m.total()).toBeGreaterThanOrEqual(6 * N - 100); // 前提: 3 本の全件走査(各 2N)を実際に測れている(測れていないなら上界が空振り)
+    expect(m.total()).toBeLessThanOrEqual(6 * N + 100); // 4 本に増やすと 8N で落ちる
+  });
+});

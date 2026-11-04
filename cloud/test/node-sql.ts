@@ -9,6 +9,8 @@ import type { SqlLike } from "../src/sql-like";
 export interface NodeSql extends SqlLike {
   /** 実行した文の数(キャッシュの読み書きの回数を数えるテストに使う)。 */
   readonly statements: string[];
+  /** 文の実行計画(`EXPLAIN QUERY PLAN` の各行の説明)。束縛値は文字列の仮の値で埋める(計画は値に依らない)。 */
+  plan(query: string): string[];
   close(): void;
 }
 
@@ -27,6 +29,10 @@ export function openNodeSql(): NodeSql {
       }
       stmt.run(...(bindings as never[]));
       return { toArray: () => [] };
+    },
+    plan(query: string) {
+      const binds = Array.from({ length: (query.match(/\?/g) ?? []).length }, () => "x");
+      return (db.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...(binds as never[])) as { detail: string }[]).map((r) => r.detail);
     },
     close() {
       db.close();

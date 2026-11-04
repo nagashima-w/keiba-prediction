@@ -4,5 +4,5 @@
  * `exec` は同期。SELECT の結果は `toArray()` で取り出す。
  */
 export interface SqlLike {
-  exec(query: string, ...bindings: any[]): { toArray(): any[] };
+  exec(query: string, ...bindings: any[]): { toArray(): any[]; /** 本物の DO のカーソルだけが返す、その文が読んだ行数(Issue #593)。 */ readonly rowsRead?: number };
 }

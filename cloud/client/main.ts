@@ -7,6 +7,7 @@ import { createApp } from "./app";
 import { createMounter } from "./dom";
 import { applyDisplayName, fetchDisplayName, WHO_NAME_SELECTOR } from "./identity";
 import { roleFromAttribute } from "./role";
+import { LIVE_SELECTORS } from "./settings-form";
 const root = document.getElementById("app");
 if (root !== null) {
   // 同じ木なら DOM を触らない(Issue #186。ポーリングの再描画がタップ・開閉・日付ピッカーを壊さない)。
@@ -15,6 +16,11 @@ if (root !== null) {
     fetch: (url, init) => fetch(url, init),
     now: () => new Date(),
     render: mountTree,
+    // Issue #580: 設定の画面の打つたびの表示(「¥20,000」・未保存の変更)。決まった選択子(定数)の要素の textContent だけを書く。見つからなければ何もしない。
+    patchText: (target, text) => {
+      const el = root.querySelector(LIVE_SELECTORS[target]);
+      if (el !== null) el.textContent = text;
+    },
     getHash: () => location.hash,
     setHash: (hash) => {
       location.hash = hash;

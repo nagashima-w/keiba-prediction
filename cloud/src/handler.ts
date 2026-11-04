@@ -677,7 +677,7 @@ const HORSE_RUNS_PARAMS = new Set(["days", "cells"]);
  * `GET /api/horse-runs[?days=N][&cells=1]`(Issue #256 段階A。管理者専用): 各馬の戦績の蓄積(D1 の `horse_runs`・`horse_run_saves`)の状態。
  * 2〜4 週後に、取得を減らす段階 D・騎手 × コースの集計の段階 E に進むかを判断する材料(表の行数・馬の数・開催区分別・保存の集計〈新規/重複/不一致/初見の馬/新規行の取り込み済み割合〉)。
  *  - `days`(1〜{@link STATUS_DAYS_MAX}。既定 {@link STATUS_DAYS_DEFAULT}): 保存の集計を読む期間。
- *  - `cells=1`: 中央の走を 騎手 × 競馬場 × 芝ダ × 距離帯のセルに分けた走数の分布(段階 E の判断材料。horse_runs の全件走査なので、付けたときだけ)。
+ *  - `cells=1`: 中央の走を 騎手 × 競馬場 × 芝ダ × 距離帯のセルに分けた走数の分布(段階 E の判断材料。horse_runs の全件走査なので、付けたときだけ)。戦績 API 由来の行だけの `cells` と、結果ページ由来の行も数えた `cellsWithResult` の 2 つを返す(Issue #591)。
  * 読み取り専用。順序は: `Sec-Fetch-Site`(別サイトからなら 403。全件走査を外から起こされないため)→ 入力の検証(400。ここまでで D1 に触れない)→ D1(失敗は 503 の固定の種類名だけ)。
  */
 async function handleHorseRuns(request: Request, env: Env, now: () => Date): Promise<Response> {
