@@ -44,6 +44,8 @@ import { GATE_NAME, type Env } from "./src/handler";
 import { runCloudAnalysis } from "./src/pipeline";
 import { RaceDay } from "./src/race-day-do";
 import { RaceArchiveFetchDO as RealRaceArchiveFetchDO } from "./src/race-archive-fetch-do";
+import { RaceArchiveRunsDO as RealRaceArchiveRunsDO } from "./src/race-archive-runs-do";
+import type { ArchiveRunsOptions } from "./src/race-archive-runs-core";
 import type { ArchiveFetchOptions, PlanProgressLike } from "./src/race-archive-fetch-core";
 import { D1AnalysisStore } from "./src/analysis-repository";
 import { D1RaceArchiveStore } from "./src/race-archive-repository";
@@ -360,6 +362,18 @@ export class RaceArchiveSmokeDO extends RealRaceArchiveFetchDO {
     return Promise.resolve({ stage: "done", venues: [{ venue: "central", state: "ok", listed: 0 }] });
   }
 }
+// Issue #590: 過去の結果の毎晩の変換の DO(本番の worker.ts と同じもの。binding RACE_ARCHIVE_RUNS のクラス。smoke の var `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT=0` で止めてある)。
+export { RealRaceArchiveRunsDO as RaceArchiveRunsDO };
+
+/**
+ * Issue #590: 過去の結果の毎晩の変換を、workerd の実環境(本物の DO の SQLite・アラーム・D1・R2・変換)で最後まで通すための **smoke 専用の DO**(smoke の一時設定だけが binding `RACE_ARCHIVE_RUNS_SMOKE` で指す。
+ * 本番の `wrangler.toml` にも本番のエントリ〈worker.ts〉にも無い)。本番の DO を継いで、`options()`(時間帯を外す)だけを差し替える。netkeiba には出ない(変換の DO は R2 と D1 だけ)。
+ */
+export class RaceArchiveRunsSmokeDO extends RealRaceArchiveRunsDO {
+  protected override options(): ArchiveRunsOptions {
+    return { windowStartMin: 0, windowEndMin: 24 * 60 };
+  }
+}
 export { VerifyReportDO } from "./src/verify-do";
 // Issue #235: 日報の DO(本番の worker.ts と同じもの。binding のクラスが入口から export されている必要がある)。
 export { DailyReportDO } from "./src/daily-report-do";
@@ -372,6 +386,8 @@ export { MonthlyReportDO } from "./src/monthly-report-do";
 /** smoke の一時設定だけが持つ binding `RACE_ARCHIVE_SMOKE`(Issue #554。{@link RaceArchiveSmokeDO})を足した Env。 */
 type SmokeEnv = Env & {
   RACE_ARCHIVE_SMOKE?: { idFromName(name: string): any; get(id: any): { kick(): Promise<void>; getStatus(): Promise<unknown> } };
+  /** smoke の一時設定だけが持つ binding `RACE_ARCHIVE_RUNS_SMOKE`(Issue #590。{@link RaceArchiveRunsSmokeDO})。 */
+  RACE_ARCHIVE_RUNS_SMOKE?: { idFromName(name: string): any; get(id: any): { kick(): Promise<void>; getStatus(): Promise<unknown> } };
 };
 
 /**
@@ -583,6 +599,25 @@ export default {
         const catalog = await env.DB.prepare("SELECT COUNT(*) AS n FROM race_archive").first<{ n: number }>();
         const object = await env.ANALYSIS_DETAIL.get("race-results/202603020211.json.gz");
         return Response.json({ ok: true, status, catalogCount: catalog?.n ?? 0, r2Object: object !== null });
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
+    if (url.pathname === "/smoke/race-archive-runs") {
+      // Issue #590: 過去の結果の毎晩の変換(smoke 専用の DO)を kick して状態を返し、horse_runs の結果ページ由来の行数と、目録の済み印を返す。
+      try {
+        const ns = env.RACE_ARCHIVE_RUNS_SMOKE;
+        if (ns === undefined) {
+          return Response.json({ ok: false, error: "RACE_ARCHIVE_RUNS_SMOKE binding なし" }, { status: 500 });
+        }
+        const stub = ns.get(ns.idFromName("main"));
+        await stub.kick();
+        const status = await stub.getStatus();
+        const rows = await env.DB.prepare("SELECT COUNT(*) AS n FROM horse_runs WHERE source = 'result'").first<{ n: number }>();
+        const apiRows = await env.DB.prepare("SELECT COUNT(*) AS n FROM horse_runs WHERE source IS NULL").first<{ n: number }>();
+        const mark = await env.DB.prepare("SELECT runs_version AS v FROM race_archive WHERE race_id = '202603020211'").first<{ v: number | null }>();
+        const sample = await env.DB.prepare("SELECT data FROM horse_runs WHERE source = 'result' AND race_key = '202603020211' LIMIT 1").first<{ data: string }>();
+        return Response.json({ ok: true, status, resultRows: rows?.n ?? 0, apiRows: apiRows?.n ?? 0, runsVersion: mark === null ? "no-row" : mark.v, sample: sample?.data ?? null });
       } catch (error) {
         return Response.json({ ok: false, error: String(error) }, { status: 500 });
       }

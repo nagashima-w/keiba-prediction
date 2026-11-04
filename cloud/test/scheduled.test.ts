@@ -842,6 +842,79 @@ describe("runScheduled: 過去の結果の取得の起動(Issue #554)。21 時�
     expect(h.text()).not.toContain("SECRET-CANARY");
   });
 
+  describe("過去の結果の毎晩の変換の kick(Issue #590)", () => {
+    function fakeRuns(events: string[], behavior: () => Promise<void> = async () => undefined) {
+      const names: string[] = [];
+      let kicks = 0;
+      return {
+        names,
+        kicks: () => kicks,
+        namespace: {
+          idFromName: (name: string) => {
+            names.push(name);
+            return name;
+          },
+          get: () => ({
+            kick: async () => {
+              kicks += 1;
+              events.push("runs-kick");
+              await behavior();
+            },
+            getStatus: NOT_CALLED,
+          }),
+        },
+      };
+    }
+
+    it.each([
+      ["21 時(first)", FIRST_0627_2100],
+      ["23 時(retry)", RETRY_0628_2300],
+    ])("%s: 固定名 main の変換の DO の kick を 1 回呼ぶ。取得の DO の kick とは別に呼ぶ", async (_name, scheduledTime) => {
+      const f = fakeNamespace();
+      const h = harness();
+      const a = fakeArchive(f.events);
+      const r = fakeRuns(f.events);
+      await runScheduled({ scheduledTime }, { ...envOf(f), RACE_ARCHIVE_FETCH: a.namespace, RACE_ARCHIVE_RUNS: r.namespace as never }, { ...h.deps, store: { listUnimportedRacesByDay: async () => [] } });
+      expect(r.kicks()).toBe(1);
+      expect(r.names).toEqual(["main"]);
+      expect(a.kicks()).toBe(1);
+      expect(f.events.indexOf("runs-kick")).toBeGreaterThan(f.events.findIndex((e) => e.startsWith("plan:")));
+    });
+
+    it("変換の kick が固まっても、取得の kick は呼ばれる(並べて待つ。直列に待たせない)", async () => {
+      const f = fakeNamespace();
+      const h = harness();
+      const a = fakeArchive(f.events);
+      const r = fakeRuns(f.events, () => new Promise<void>(() => undefined));
+      void runScheduled({ scheduledTime: FIRST_0627_2100 }, { ...envOf(f), RACE_ARCHIVE_FETCH: a.namespace, RACE_ARCHIVE_RUNS: r.namespace as never }, h.deps);
+      await vi.waitFor(() => expect(f.events).toContain("archive-kick"));
+      expect(f.events).toContain("runs-kick");
+    });
+
+    it("変換の kick が失敗しても、計画は成功のまま・取得の kick も呼ばれる。分類だけをログに出し、例外の文面を出さない", async () => {
+      const f = fakeNamespace();
+      const h = harness();
+      const a = fakeArchive(f.events);
+      const r = fakeRuns(f.events, async () => {
+        throw new Error("詳細 SECRET-CANARY-RUNS");
+      });
+      await expect(runScheduled({ scheduledTime: FIRST_0627_2100 }, { ...envOf(f), RACE_ARCHIVE_FETCH: a.namespace, RACE_ARCHIVE_RUNS: r.namespace as never }, h.deps)).resolves.toBeUndefined();
+      expect(a.kicks()).toBe(1);
+      expect(h.text()).toContain("race-archive-runs-kick-failed");
+      expect(h.text()).not.toContain("SECRET-CANARY");
+    });
+
+    it("binding が無い構成では呼ばない(例外で落とさない)。requestPlan が失敗しても kick は呼ぶ", async () => {
+      const f = fakeNamespace();
+      const h = harness();
+      await expect(runScheduled({ scheduledTime: FIRST_0627_2100 }, envOf(f), h.deps)).resolves.toBeUndefined();
+      f.script = [() => Promise.reject(new Error("x")), () => Promise.reject(new Error("x")), () => Promise.reject(new Error("x"))];
+      const r = fakeRuns(f.events);
+      await expect(runScheduled({ scheduledTime: FIRST_0627_2100 }, { ...envOf(f), RACE_ARCHIVE_RUNS: r.namespace as never }, h.deps)).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+      expect(r.kicks()).toBe(1);
+    });
+  });
+
   it("requestPlan が 3 回とも失敗しても kick は呼ぶ(取得は事前分析の計画に依らない)。最後は従来どおり固定文言で投げる", async () => {
     const f = fakeNamespace();
     const h = harness();

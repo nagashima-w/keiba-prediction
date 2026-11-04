@@ -31,7 +31,7 @@
  * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。計画・既存の結果の依頼を失敗させない。
  */
 import { jstKaisaiDate, planTargetDate, scheduledRunKind, type ScheduledRunKind } from "./auto-run-plan";
-import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceDayNamespaceLike } from "./handler";
+import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike } from "./handler";
 import { DAILY_REPORT_NAME } from "./daily-report-core";
 import { D1ReportStore } from "./daily-report-repository";
 import { MONTHLY_REPORT_NAME } from "./monthly-report-core";
@@ -40,6 +40,7 @@ import { buildPlanRequestFailedEmbed } from "./notify-embeds";
 import { classifyNotifyError, createDiscordNotifier, webhookStatus } from "./notify-send";
 import type { DiscordFetchLike } from "../../packages/core/src/notify/discord";
 import { RACE_ARCHIVE_FETCH_NAME } from "./race-archive-fetch-core";
+import { RACE_ARCHIVE_RUNS_NAME } from "./race-archive-runs-core";
 import { RESULT_BACKFILL_NAME } from "./result-backfill-core";
 import { addDaysToKaisaiDate, CRON_RESULT_MAX_DAYS, dispatchResultImports, errorKind, resultWindowFor, type DispatchStore } from "./result-dispatch";
 import { D1ResultStore, type ResultDb } from "./result-repository";
@@ -58,6 +59,8 @@ export interface ScheduledEnv {
   readonly RESULT_BACKFILL?: BackfillNamespaceLike;
   /** 過去の結果の取得の DO(Issue #554)。無い構成では kick を呼ばない。 */
   readonly RACE_ARCHIVE_FETCH?: RaceArchiveNamespaceLike;
+  /** 過去の結果の毎晩の変換の DO(Issue #590)。無い構成では kick を呼ばない。 */
+  readonly RACE_ARCHIVE_RUNS?: RaceArchiveRunsNamespaceLike;
   /** 日報の DO(Issue #235)。無い構成では日報の取り残しの補完をしない。 */
   readonly DAILY_REPORT?: DailyReportNamespaceLike;
   /** 月報の DO(Issue #265・#279)。無い構成では月報を依頼しない。 */
@@ -165,13 +168,26 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
   // 21 時にも呼ぶのは、公開が 23 時の cron の後に遅れても、翌日の 21 時の cron が拾うため。kick は冪等。事前分析の計画の成否によらず走らせ、失敗しても投げない。
   // **処理の最後**に置く(Issue #573-17): kick は DO の RPC で、固まると後ろの仕事を巻き込むので、結果の取り込み・補完の起動・日報の補完・月報の依頼を先に済ませる。
   // 先の仕事はいずれも自分で握って投げないので、ここへ必ず届く。計画の失敗の通知・throw(下)より前に置くので、計画が失敗した日も kick は呼ぶ。
-  if (env.RACE_ARCHIVE_FETCH !== undefined) {
-    try {
-      await env.RACE_ARCHIVE_FETCH.get(env.RACE_ARCHIVE_FETCH.idFromName(RACE_ARCHIVE_FETCH_NAME)).kick();
-    } catch (error) {
-      log(`scheduled: failed class=race-archive-kick-failed error=${errorKind(error)}`, "error");
-    }
-  }
+  // 取得の kick と変換の kick(Issue #590)は並べて待つ(片方が遅くても、もう片方を直列に待たせない)。どちらも失敗を握る。
+  await Promise.all([
+    (async (): Promise<void> => {
+      if (env.RACE_ARCHIVE_FETCH === undefined) return;
+      try {
+        await env.RACE_ARCHIVE_FETCH.get(env.RACE_ARCHIVE_FETCH.idFromName(RACE_ARCHIVE_FETCH_NAME)).kick();
+      } catch (error) {
+        log(`scheduled: failed class=race-archive-kick-failed error=${errorKind(error)}`, "error");
+      }
+    })(),
+    // 過去の結果の毎晩の変換の起動(Issue #590)。アラームが無ければ張るだけ(変換は JST 1:00〜8:30 に、DO が R2 と D1 だけで行う。netkeiba には出ない)。
+    (async (): Promise<void> => {
+      if (env.RACE_ARCHIVE_RUNS === undefined) return;
+      try {
+        await env.RACE_ARCHIVE_RUNS.get(env.RACE_ARCHIVE_RUNS.idFromName(RACE_ARCHIVE_RUNS_NAME)).kick();
+      } catch (error) {
+        log(`scheduled: failed class=race-archive-runs-kick-failed error=${errorKind(error)}`, "error");
+      }
+    })(),
+  ]);
 
   if (!planned) {
     log(`scheduled: failed class=request-plan-failed kind=${kind} date=${kaisaiDate}`, "error");

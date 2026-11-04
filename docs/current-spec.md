@@ -1483,6 +1483,20 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **検査**: `cloud/test/race-archive-fetch-core.test.ts`(状態機械。時計・アラーム・gate・計画・保存・通知は偽物で、状態は本物の SQLite)・`race-archive-notice-embed.test.ts`・`handler-race-archive.test.ts`・`scheduled.test.ts`・`route-policy.test.ts`、`scripts/test/cloud-config-guard.test.ts`(binding・migration・fetchRaw の呼び出し箇所・kick の箇所・Discord の箇所・smoke の var)。`cloud/smoke.ts` は、本番のクラスが止まっていること(`state=disabled`)と、**smoke 専用の DO(`RaceArchiveSmokeDO`。smoke の一時設定だけの binding)が、偽ソケットのカレンダー・一覧・結果を gate 経由で取って R2 と D1 の目録に保存する**ところまでを workerd で通す。
 - **まだ確かめていないこと**: 本番の `meta.size_after` の意味(読めなければ `db-size-unknown` で最初の保存で止まり、Discord に出る)/ 本番の gate・netkeiba での 5 秒間隔の取得が止められずに続くか(#532 では 1 晩に 1,000 件取った翌日に 5 件で HTTP 400 になった前例がある。件数の制限の可能性)/ 上の無料枠の見積もり。
 
+### 過去の結果の毎晩の変換(#590〈#549-B3-2〉。**版数は 1.44.0 のまま**〈凍結〉。公開すると、その晩の JST 1:00 から、本番の D1 の `horse_runs` に書き込みが始まる)
+取得(#554)が R2 と目録に保存した過去の結果を、毎晩、`horse_runs` に `source = 'result'` で入れる。取得が進むたびに、未変換のレースを拾って入れ直す。**netkeiba にも gate にも出ない**(R2 と D1 だけを読み書きする)。
+- **担当は新しい DO `RaceArchiveRunsDO`**(binding `RACE_ARCHIVE_RUNS`・migration v12・単一インスタンス `main`)。純ロジックは `cloud/src/race-archive-runs-core.ts`(`RaceArchiveRunsCore`)、変換して書く部品は `race-archive-runs.ts`(#588 の `convertRaceArchives`)。取得の DO とは別のアラームで、止め合わない。
+- **時間帯**: JST 1:00 以上 8:30 未満。21:00・23:00 の事前分析(戦績 API の `horse_runs` の保存)と重ならないようにする。重なると、その回の `rowsNew` が実際より大きく出ることがある(#552 の【記録】6。次の保存で直る。時間帯を分けるだけで受け入れた)。
+- **走査**: 目録を主キー(race_id)順のカーソルで 100 行ずつ読み、未変換(`runs_version` が NULL か現行の版より小さい)のうち先頭 20 件を 1 ステップで変換する(R2 の一括の読み出し 20 回・D1 の batch 1 回)。目録の末尾に着いたら先頭に戻る。変換のあった周のあとは続けて見直し、何も変換しなかった周のあとは 1 時間休む(`caught-up`)。
+- **1 晩の書き込み行数の上限**: 既定 30,000 行(ユーザーの決定。D1 の Free の 1 日 10 万行を超えると、その日は発走前の分析も保存できなくなるため、低く始めて実測を見て上げる)。変換の `rows_written` と 1 ステップの Class B の計数 1 行を数える。超えるのは最後の 1 ステップぶん(約 300 行)だけで、超えたらその晩はやめて、次の晩に続きから変換する。var `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT` で下げられる(`"0"` で止める。★binding と同じ名前の var は使わない)。
+- **行数の見積もり**(ローカル D1 の `meta` の実測。`cloud/test/race-archive-runs-budget.test.ts`。合成した 48 レース・768 走・3 ステップ): 書き込み 819 行(= 走数 768 + 印 48 + 計数 3。1 レースあたり約 17 行。horse_runs は WITHOUT ROWID で副索引なし)、読み取り 2,689 行。30,000 行の晩で変換できるのは約 1,760 レース(約 2.8 万走)、読み取りは約 10 万行(D1 の 1 日 500 万行の約 2%)。
+- **DO の SQLite**: `rr_meta`・`rr_fail`・`rr_reject`(いずれも `WITHOUT ROWID`)。起床の経路の SQL はすべて主キーの SEARCH で、SCAN・一時 B-tree を使わない(`test/race-archive-runs-core.test.ts` が `EXPLAIN QUERY PLAN` で固定する)。表の全部を数える SQL は `getStatus` にだけある。1 ステップが DO に書く行は 10 行以下。
+- **失敗**: R2 の get の例外・R2 に無い → そのレースの失敗(その晩は再試行せず、3 晩で諦める)。変換の batch の例外 → 次のステップは 1 件ずつに切り分ける。失敗が連続 10 ステップでその晩は止めて通知する。変換を拒否したレース(頭数の宣言と行数が合わない等)は失敗に数えず、拒否の版で印を付ける。
+- **止まり方(すべて次の晩に自動で再開。手での再開の口は無い)**: `failures`(上)/ `capacity`(変換の結果の D1 の大きさ〈`meta.size_after`〉が 400,000,000 バイトを超えた。次の晩に大きさを読み直し、超えている・読めないあいだは止まったまま。通知は繰り返さない)/ `r2-fence`(Class B の柵。次の晩に 1 回確かめる)。通知(Discord。`buildArchiveRunsNoticeEmbed`)は止まった最初の 1 回だけ。
+- **管理者の口**: `GET /api/race-archive/runs`(管理者専用・GET だけ)。状態・待ちの理由・止まった理由・次の実行・今夜の書き込み行数と上限・目録の件数(総数と印の版ごと。D1 の全件走査なので管理者の口でだけ読む)・失敗と諦めたレース・拒否の分類・累計を返す。
+- **起動**: cron の `scheduled` が 21:00 と 23:00 の両方で、取得の `kick()` と並べて(`Promise.all`)変換の `kick()` を呼ぶ。失敗しても投げない(分類 `race-archive-runs-kick-failed` だけをログに出す)。
+- **検査**: `cloud/test/race-archive-runs-core.test.ts`・`race-archive-runs-budget.test.ts`・`handler-race-archive-runs.test.ts`、`scripts/test/cloud-config-guard.test.ts`(#590 の節)、smoke の J(取得が保存した 1 レースを、smoke 専用の DO が変換する)。
+
 ### クラウド版の D1 の容量の見積もり(#171。再現: `pnpm tsx scripts/measure-d1-size.ts`)
 Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 500 MB〈Free〉)。見積もりの手順を残す(#147 の「再現手段がない」への対応)。
 **入力はすべてリポジトリ内**(中央16頭の 202603020211 のフィクスチャ・LLM の実応答 36 本・戦績フィクスチャ5頭)。**乱数は固定の種で、同じ N なら出力は完全に同じ**
