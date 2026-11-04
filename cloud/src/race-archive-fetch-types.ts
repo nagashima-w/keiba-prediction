@@ -9,7 +9,7 @@ export interface RaceArchiveFetchStatus {
   readonly waitReason: string;
   readonly nextRunAt: number | null;
   readonly notBeforeMs: number;
-  readonly night: { readonly date: string | null; readonly requests: number; readonly saved: number; readonly failed: number };
+  readonly night: { readonly date: string | null; readonly requests: number; readonly saved: number; readonly failed: number; /** その晩に core の SQL が読んだ行数(本物の DO だけ数える。Issue #593) */ readonly rowsRead: number };
   readonly totals: {
     readonly months: { readonly pending: number; readonly done: number; readonly dead: number };
     readonly days: { readonly pending: number; readonly listed: number; readonly done: number; readonly dead: number };

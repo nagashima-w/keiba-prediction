@@ -95,7 +95,7 @@ class_name = "AllocationExportDO"
 # **2026-11-04 0:00 JST より前には取らない**(コードの定数。ユーザーの決定)。JST 0:00〜8:30 の間だけ、5 秒に 1 件、gate(NetkeibaGate)経由で取る。**中央の開催日の朝は取らない**
 # (その日の日単位の DO の計画で判定。判定できなければ休む)。止められた(HTTP 400・403・429)ら、その場で止めて Discord で知らせ、次の晩に 1 度だけ自動で再開する(また止められたら手で再開するまで動かさない)。
 # D1 が 400MB を超えたら止めて知らせる。cron の `scheduled`(21 時・23 時)が kick してアラームを張る。管理者の口は `GET /api/race-archive`・`POST /api/race-archive/resume`。
-# 止める・件数を下げる var: `RACE_ARCHIVE_NIGHTLY_LIMIT`(任意。"0" で止める。1 以上の整数で 1 晩のリクエスト数を下げる)。★binding と同じ名前〈RACE_ARCHIVE_FETCH〉の var は衝突するので使わない。クラス名は migration に固定される。
+# 止める・件数を下げる var: `RACE_ARCHIVE_NIGHTLY_LIMIT`(任意。"0" で止める。1 以上の整数で 1 晩のリクエスト数を下げる)。★binding と同じ名前〈RACE_ARCHIVE_FETCH〉の var は衝突するので使わない。クラス名は migration に固定される。 1 晩に読む行数の予算の var: `RACE_ARCHIVE_NIGHTLY_ROWS_LIMIT`(任意。未設定は既定の 100 万行で動く。超えた晩は取得を止めて Discord に知らせる〈Issue #593〉)。
 [[durable_objects.bindings]]
 name = "RACE_ARCHIVE_FETCH"
 class_name = "RaceArchiveFetchDO"

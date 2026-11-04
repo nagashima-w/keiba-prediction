@@ -146,6 +146,19 @@ function asResultRows(rows: readonly ResultRunRow[]): PlannedRun[] {
 }
 
 /**
+ * 結果ページ由来の行を書く文を、実行せずに用意する(Issue #588)。呼び出し側が D1 の `batch` に入れて、別の文(済み印の更新)と一緒に成功・失敗させる。
+ * {@link writeResultRuns}・{@link rewriteResultRuns} と同じ SQL・同じ分け方({@link RUNS_WRITE_CHUNK} 行ごとに 1 文。0 行なら文なし)。
+ */
+export function prepareWriteResultRuns(db: HorseRunsDb, rows: readonly ResultRunRow[]): D1PreparedStatement[] {
+  return chunks(asResultRows(rows), RUNS_WRITE_CHUNK).map((chunk) => db.prepare(INSERT_SQL).bind(encodeRows(chunk)));
+}
+
+/** {@link rewriteResultRuns} の文を、実行せずに用意する。 */
+export function prepareRewriteResultRuns(db: HorseRunsDb, rows: readonly ResultRunRow[]): D1PreparedStatement[] {
+  return chunks(asResultRows(rows), RUNS_WRITE_CHUNK).map((chunk) => db.prepare(REWRITE_RESULT_SQL).bind(encodeRows(chunk)));
+}
+
+/**
  * 結果ページ由来の行を新規に書く(`ON CONFLICT DO NOTHING`)。鍵 (馬 ID, 鍵) が既にある行は書かない
  * = **戦績 API の行に触れない**(結果ページ由来の行どうしの重なりも書かない)。D1 の `rows_written` の合計を返す。
  * 500 行({@link RUNS_WRITE_CHUNK})ごとに 1 文。0 行なら文を発行しない。失敗は投げる。
@@ -309,13 +322,19 @@ export interface HorseRunsStatus {
   readonly resultRows: ResultRowsStatus;
   /** `cells=1` のときだけ。戦績 API 由来の中央の走を、騎手 × 競馬場 × 芝ダ × 距離帯(200m)のセルに分けた走数の分布(段階 E の判断材料)。 */
   readonly cells?: { readonly cells: number; readonly runs: number; readonly n10: number; readonly n30: number; readonly n100: number };
+  /**
+   * `cells=1` のときだけ(Issue #591)。{@link HorseRunsStatus.cells} と同じ見方で、**結果ページ由来の行(`source = 'result'`)も数えた**分布。
+   * 11/10 の #256 の判断(段階 E)で、過去の結果から入れた行を含めたセルの厚みを見るためのもの。`resultRuns` は、そのうち結果ページ由来の走数。
+   * 同じ (馬, レース) は主キーで 1 行なので、戦績 API の行と結果ページ由来の行を二重に数えることは無い(戦績 API の保存は結果ページ由来の行を置き換える)。
+   */
+  readonly cellsWithResult?: { readonly cells: number; readonly runs: number; readonly n10: number; readonly n30: number; readonly n100: number; readonly resultRuns: number };
   /** 段階Aの限界(診断の読み手に伝える固定文)。 */
   readonly note: string;
 }
 
 export const STATUS_NOTE =
   "段階A: 保存は事前分析(morning)の計算ステップだけ。手動の発走前だけの分析(事前分析を経ない)の戦績は貯まらない。読み出し・集計は段階Aに無い(この診断だけ)。" +
-  "table・cells・saves は戦績 API 由来の行だけの集計で、過去の結果ページから変換した行(source = 'result')は含まない。その件数は resultRows に別に出す。";
+  "table・cells・saves は戦績 API 由来の行だけの集計で、過去の結果ページから変換した行(source = 'result')は含まない。その件数は resultRows に別に出す。結果ページ由来の行も数えたセルの分布は、cells=1 のときの cellsWithResult(Issue #591)。";
 
 export interface StatusOptions {
   /** 保存の記録を読む期間の始点(エポックミリ秒)。 */
@@ -324,6 +343,21 @@ export interface StatusOptions {
   /** true のときだけ、セルの分布を数える(horse_runs の全件走査)。 */
   readonly cells: boolean;
 }
+
+/**
+ * セルの分布の SQL(**全件走査 1 本**。Issue #591)。中央・騎手 ID・競馬場・芝ダ・距離のある走を、騎手 × 競馬場 × 芝ダ × 距離帯(200m)のセルに分け、
+ * セルごとに戦績 API 由来の走数 `a`(`source IS NULL`)と結果ページ由来の走数 `r`(`source = 'result'`)を数える(出どころが NULL・'result' 以外の行は数えない)。
+ * `source = 'result'` ではなく `source IS 'result'` と書くのは、戦績 API 由来の行(source が NULL)で NULL にならず 0 を返す(SUM が全部 NULL になるのを避ける)ため。
+ * 外側の集計で、`cells`(戦績 API 由来だけ。`a > 0` のセルを `a` で数える。#591 より前と同じ値)と `cellsWithResult`(`a + r` で数える)を同じ結果の 1 行で返す。
+ * 走査を 2 本にしない理由: D1 の読み取りは 1 日 500 万行(Free)で、`cells=1` の 1 回は全件走査の本数 × N 行を読む(ローカルの D1 の実測は 1 本あたり 1.5〜2N)。
+ */
+const CELLS_SQL =
+  "SELECT " +
+  "COALESCE(SUM(a > 0), 0) AS cells, COALESCE(SUM(a), 0) AS runs, COALESCE(SUM(a >= 10), 0) AS n10, COALESCE(SUM(a >= 30), 0) AS n30, COALESCE(SUM(a >= 100), 0) AS n100, " +
+  "COUNT(*) AS wCells, COALESCE(SUM(a + r), 0) AS wRuns, COALESCE(SUM(a + r >= 10), 0) AS wN10, COALESCE(SUM(a + r >= 30), 0) AS wN30, COALESCE(SUM(a + r >= 100), 0) AS wN100, COALESCE(SUM(r), 0) AS resultRuns FROM (" +
+  `SELECT SUM(source IS NULL) AS a, SUM(source IS '${SOURCE_RESULT}') AS r FROM horse_runs WHERE (source IS NULL OR source = '${SOURCE_RESULT}') AND json_extract(data, '$[6]') = '中央' AND json_extract(data, '$[14]') IS NOT NULL ` +
+  "AND json_extract(data, '$[1]') IS NOT NULL AND json_extract(data, '$[16]') IS NOT NULL AND json_extract(data, '$[17]') IS NOT NULL " +
+  "GROUP BY json_extract(data, '$[1][1]'), json_extract(data, '$[16]'), CAST(json_extract(data, '$[17]') AS INTEGER) / 200, json_extract(data, '$[14]'))";
 
 /** 状態を読む(読み取りだけ。失敗は投げる)。 */
 export async function readHorseRunsStatus(db: HorseRunsDb, options: StatusOptions): Promise<HorseRunsStatus> {
@@ -412,13 +446,12 @@ export async function readHorseRunsStatus(db: HorseRunsDb, options: StatusOption
   if (!options.cells) {
     return status;
   }
-  const cells = await db
-    .prepare(
-      "SELECT COUNT(*) AS cells, COALESCE(SUM(n), 0) AS runs, COALESCE(SUM(n >= 10), 0) AS n10, COALESCE(SUM(n >= 30), 0) AS n30, COALESCE(SUM(n >= 100), 0) AS n100 FROM (" +
-        "SELECT COUNT(*) AS n FROM horse_runs WHERE source IS NULL AND json_extract(data, '$[6]') = '中央' AND json_extract(data, '$[14]') IS NOT NULL " +
-        "AND json_extract(data, '$[1]') IS NOT NULL AND json_extract(data, '$[16]') IS NOT NULL AND json_extract(data, '$[17]') IS NOT NULL " +
-        "GROUP BY json_extract(data, '$[1][1]'), json_extract(data, '$[16]'), CAST(json_extract(data, '$[17]') AS INTEGER) / 200, json_extract(data, '$[14]'))",
-    )
-    .first<{ cells: number; runs: number; n10: number; n30: number; n100: number }>();
-  return { ...status, cells: { cells: cells?.cells ?? 0, runs: cells?.runs ?? 0, n10: cells?.n10 ?? 0, n30: cells?.n30 ?? 0, n100: cells?.n100 ?? 0 } };
+  const c = await db
+    .prepare(CELLS_SQL)
+    .first<{ cells: number; runs: number; n10: number; n30: number; n100: number; wCells: number; wRuns: number; wN10: number; wN30: number; wN100: number; resultRuns: number }>();
+  return {
+    ...status,
+    cells: { cells: c?.cells ?? 0, runs: c?.runs ?? 0, n10: c?.n10 ?? 0, n30: c?.n30 ?? 0, n100: c?.n100 ?? 0 },
+    cellsWithResult: { cells: c?.wCells ?? 0, runs: c?.wRuns ?? 0, n10: c?.wN10 ?? 0, n30: c?.wN30 ?? 0, n100: c?.wN100 ?? 0, resultRuns: c?.resultRuns ?? 0 },
+  };
 }

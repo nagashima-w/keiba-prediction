@@ -98,6 +98,59 @@ function parseNumberInput(text: string): number | null {
 /** 1,000,000 のような桁区切り。 */
 const withCommas = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
+/** 金額の項目(円)。入力欄の下に「¥20,000」の形の整形を添える(Issue #580。入力の値の形式は変えない)。 */
+const YEN_KEYS: ReadonlySet<FieldKey> = new Set<FieldKey>(["bankroll", "perRaceCap"]);
+
+/**
+ * 金額の入力を「¥20,000」の形にする(Issue #580)。0 以上の整数だけ(空・不正・負・小数は空文字=何も出さない)。0 は未設定を表すので注記を添える。
+ * 範囲外(上限超え)も整形はする(範囲の誤りは保存の押下時のエラーが伝える)。
+ */
+export function yenInputText(text: string): string {
+  const n = parseNumberInput(text);
+  if (n === null || !Number.isSafeInteger(n) || n < 0) return "";
+  return n === 0 ? "¥0(未設定)" : `¥${withCommas(n)}`;
+}
+
+/** 既定値の表示(バッジ「[既定: ON]」用。Issue #580)。既定値は `DEFAULT_CLOUD_SETTINGS`(サーバと同じ定義)から取る。 */
+function defaultText(key: FieldKey): string {
+  const v = DEFAULT_CLOUD_SETTINGS[key];
+  if (typeof v === "boolean") return v ? "ON" : "OFF";
+  return YEN_KEYS.has(key) ? yenInputText(String(v)) : String(v);
+}
+
+/** バッジを付ける項目(選択・追加指示は選択肢のラベル/空欄で既定が読める・重みは数が多いので付けない)。 */
+const BADGE_KEYS: ReadonlySet<FieldKey> = new Set<FieldKey>([
+  "evThreshold", "includeComboOdds", "includeWideInAllocation", "includeQuinellaInAllocation", "includeBracketQuinellaInAllocation", "includeExactaInAllocation", "includeTrioInAllocation", "includeTrifectaInAllocation",
+  "bankroll", "perRaceCap", "kellyFraction", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace", "preRaceOffsetMinutes",
+]);
+
+/** 既定から変えているか(下書きの値と既定を比べる。数値は数にして比べる=`0.50` と `0.5` は同じ。数に読めない入力は「変えている」)。 */
+export function isChangedFromDefault(key: FieldKey, value: DraftValue): boolean {
+  const def = DEFAULT_CLOUD_SETTINGS[key];
+  if (typeof def === "number") return typeof value !== "string" || parseNumberInput(value) !== def;
+  return value !== def;
+}
+
+/** 設定の画面で、木を作り直さずに文字だけを書き換える場所(Issue #580。`main.ts` が決まった選択子に対応づける。自由な文字列は受けない)。 */
+export type LiveTarget = "bar-status" | "yen-bankroll" | "yen-perRaceCap";
+export const LIVE_SELECTORS: Readonly<Record<LiveTarget, string>> = {
+  "bar-status": ".settings-bar-status",
+  "yen-bankroll": '.field-yen[data-yen-for="bankroll"]',
+  "yen-perRaceCap": '.field-yen[data-yen-for="perRaceCap"]',
+};
+/** 金額の項目 → 書き換え先。金額でない項目は null。 */
+export function liveTargetOfYen(key: string): LiveTarget | null {
+  return key === "bankroll" ? "yen-bankroll" : key === "perRaceCap" ? "yen-perRaceCap" : null;
+}
+
+export const BAR_TEXT_DIRTY = "未保存の変更があります";
+export const BAR_TEXT_CLEAN = "変更はありません(保存済み)";
+export const BAR_TEXT_SAVING = "保存中…";
+/** 下に固定した帯の状態の文(打つたびに `main.ts` が書き換える文と、描画の文を同じ関数で作る)。 */
+export function barStatusText(dirty: boolean, saving: boolean, saved = false): string {
+  return saving ? BAR_TEXT_SAVING : dirty ? BAR_TEXT_DIRTY : saved ? SAVED_NOTICE : BAR_TEXT_CLEAN;
+}
+
 /** 単勝・複勝の点数の上限(Issue #533)の入力の誤り。2 項目で同じ文言(バンドルの大きさを抑えるため 1 つにまとめた)。 */
 function maxBetsError(): string {
   return `0以上${MAX_BETS_PER_RACE_MAX}以下の整数を入力してください(半角。0は上限なし)。`;
@@ -158,6 +211,8 @@ export interface SettingsModelInput {
   readonly draft: SettingsDraft | null;
   readonly errors: FieldErrors;
   readonly save: SettingsSaveState;
+  /** 未保存の変更があるか(Issue #580。省略は false)。 */
+  readonly dirty?: boolean;
   /** プロンプトのプレビューを開いているか(Issue #201。省略は閉じている)。 */
   readonly previewOpen?: boolean;
   /** プロンプトのプレビューの文面の取得の状態(Issue #396。文面はサーバが組み立てる)。開いていて、まだ取得を始めていない(省略)ときは取得中と同じ表示。 */
@@ -193,6 +248,12 @@ export interface FieldModel {
   readonly value: DraftValue;
   readonly error: string | null;
   readonly disabled: boolean;
+  /** 既定値のバッジの文(「[既定: ON]」。Issue #580)。付けない項目は null。 */
+  readonly badge: string | null;
+  /** 既定から変えているか(「変更あり」の印。表示中の下書きと既定を比べる)。 */
+  readonly changed: boolean;
+  /** 金額の項目の整形(「¥20,000」。金額でない項目は null、入力が不正なら空文字)。 */
+  readonly yen: string | null;
   /** 数字のキーボード(text の数値欄だけ)。 */
   readonly inputmode: "numeric" | "decimal" | null;
   /** 文字数の上限(textarea だけ)。 */
@@ -222,6 +283,10 @@ export interface SettingsModel {
   readonly sourceNote: string | null;
   readonly saving: boolean;
   readonly saveNotice: { readonly tone: "ok" | "error"; readonly text: string } | null;
+  /** 未保存の変更があるか(下書きと、読み込み・保存直後の下書きの比較。Issue #580)。 */
+  readonly dirty: boolean;
+  /** 下に固定した帯の状態の文。 */
+  readonly barStatus: string;
   readonly fields: readonly FieldModel[];
   /** スコアリングの重みの節(Issue #218)。下書きを取得できていないとき(項目が出ないとき)は null。 */
   readonly weights: WeightsModel | null;
@@ -230,7 +295,7 @@ export interface SettingsModel {
 }
 
 const COMBO_NAME = "ワイド・馬連・馬単・三連複・三連単・枠連";
-const ALLOCATION_HELP = "既定は ON です。上の「オッズも取得する」が OFF の間は効果がありません(取得したオッズが無いため)。";
+const ALLOCATION_HELP = "上の「オッズも取得する」が OFF の間は効果がありません(取得したオッズが無いため)。";
 /**
  * 追加指示・クリップ幅の補助文。LLM は Worker の secret `ANTHROPIC_API_KEY` があるときだけ使う(Issue #194)ので、**キーの有無のどちらでも嘘にならない書き方**にする
  * (画面からキーの有無は分からない)。画面に出す文なので、Issue 番号は書かない。
@@ -287,11 +352,11 @@ interface FieldSpec {
 }
 
 const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
-  evThreshold: { kind: "text", label: "EV閾値(この値を超える馬券を抽出。既定1.0)", help: "0より大きい数値。EV(的中確率 × オッズ)がこの値を超える馬券を、複勝と組合せの全券種で配分の候補にします。馬ごとの「EVプラス」の判定にも、同じ値を使います。", inputmode: "decimal" },
+  evThreshold: { kind: "text", label: "EV閾値(この値を超える馬券を抽出)", help: "0より大きい数値。EV(的中確率 × オッズ)がこの値を超える馬券を、複勝と組合せの全券種で配分の候補にします。馬ごとの「EVプラス」の判定にも、同じ値を使います。", inputmode: "decimal" },
   includeComboOdds: {
     kind: "checkbox",
     label: INCLUDE_COMBO_ODDS_LABELS.checkbox,
-    help: `既定は OFF です。ON にすると、発走前の分析で${COMBO_NAME}のオッズも取得します(取得するぶん分析に時間がかかります)。OFF の間は、組合せの券種は配分に入りません。地方競馬の三連複・三連単は頭数ぶん(最大18)のリクエストを取得します。`,
+    help: `ON にすると、発走前の分析で${COMBO_NAME}のオッズも取得します(取得するぶん分析に時間がかかります)。OFF の間は、組合せの券種は配分に入りません。地方競馬の三連複・三連単は頭数ぶん(最大18)のリクエストを取得します。`,
   },
   includeWideInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.wide.checkbox, help: ALLOCATION_HELP },
   includeQuinellaInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.quinella.checkbox, help: ALLOCATION_HELP },
@@ -301,17 +366,17 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
   includeTrifectaInAllocation: { kind: "checkbox", label: ALLOCATION_BET_TYPE_LABELS.trifecta.checkbox, help: ALLOCATION_HELP },
   bankroll: { kind: "text", label: BET_ALLOCATION_LABELS.bankroll, help: `${BET_ALLOCATION_LABELS.bankrollHelp}。0 以上 100,000,000 以下の整数(円)。0 のままだと配分の提案は出ません。`, inputmode: "numeric" },
   perRaceCap: { kind: "text", label: BET_ALLOCATION_LABELS.perRaceCap, help: "1レースで使う金額の上限(円)。0 以上 10,000,000 以下の整数。0 のままだと配分の提案は出ません。", inputmode: "numeric" },
-  kellyFraction: { kind: "text", label: BET_ALLOCATION_LABELS.kellyFraction, help: "0.05〜1(既定 0.5)。小さいほど1回あたりの配分額が控えめになり、資産変動が穏やかになります。", inputmode: "decimal" },
-  minHitProb: { kind: "text", label: "この的中確率未満の買い目は買わない(既定 0.05)", help: "0〜1。EVがプラスでも、的中確率がこの値未満の買い目は配分の候補から外します(全券種)。0 にすると外しません。", inputmode: "decimal" },
+  kellyFraction: { kind: "text", label: BET_ALLOCATION_LABELS.kellyFraction, help: "0.05〜1。小さいほど1回あたりの配分額が控えめになり、資産変動が穏やかになります。", inputmode: "decimal" },
+  minHitProb: { kind: "text", label: "この的中確率未満の買い目は買わない", help: "0〜1。EVがプラスでも、的中確率がこの値未満の買い目は配分の候補から外します(全券種)。0 にすると外しません。", inputmode: "decimal" },
   maxWinBetsPerRace: {
     kind: "text",
-    label: "単勝は1レースに何点まで買うか(既定 2)",
+    label: "単勝は1レースに何点まで買うか",
     help: `0〜${MAX_BETS_PER_RACE_MAX} の整数。1レースで買う単勝の点数の上限です。0 にすると上限なしです。単勝は、組合せオッズを取得する設定のときだけ配分に入ります。`,
     inputmode: "numeric",
   },
   maxPlaceBetsPerRace: {
     kind: "text",
-    label: "複勝は1レースに何点まで買うか(既定 2)",
+    label: "複勝は1レースに何点まで買うか",
     help: `0〜${MAX_BETS_PER_RACE_MAX} の整数。1レースで買う複勝の点数の上限です(単勝とは別に数えます)。0 にすると上限なしです。`,
     inputmode: "numeric",
   },
@@ -326,7 +391,7 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
   preRaceOffsetMinutes: {
     kind: "text",
     label: "発走の何分前に評価するか",
-    help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。変更は、毎晩 21:00(日本時間)に行う翌日分の事前分析の計画から反映されます。その時刻より前に保存した変更は、翌日の分から効きます。すでに計画した日の分は変わりません。`,
+    help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数。変更は、毎晩 21:00(日本時間)に行う翌日分の事前分析の計画から反映されます。その時刻より前に保存した変更は、翌日の分から効きます。すでに計画した日の分は変わりません。`,
     inputmode: "numeric",
   },
   // スコアリングの重み15項目(Issue #218・#353・#354)。ラベルは core の共有定数(`app-settings.ts`。旧 exe と共有していた)。
@@ -411,6 +476,9 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
       value: draftNow[key],
       error: errors[key] ?? null,
       disabled: saving,
+      badge: BADGE_KEYS.has(key) ? `[既定: ${defaultText(key)}]` : null,
+      changed: isChangedFromDefault(key, draftNow[key]),
+      yen: YEN_KEYS.has(key) ? yenInputText(String(draftNow[key])) : null,
       inputmode: spec.inputmode ?? null,
       maxlength: spec.maxlength ?? null,
       ...(spec.options === undefined ? {} : { options: spec.options }),
@@ -437,6 +505,8 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
     sourceNote: load.kind === "ready" ? (load.source === "default" ? SOURCE_NOTE_DEFAULT : load.source === "invalid" ? SOURCE_NOTE_INVALID : null) : null,
     saving,
     saveNotice: save.kind === "saved" ? { tone: "ok", text: SAVED_NOTICE } : save.kind === "error" ? { tone: "error", text: save.message } : null,
+    dirty: input.dirty === true,
+    barStatus: barStatusText(input.dirty === true, saving, save.kind === "saved"),
     fields,
     weights,
     preview: ready ? buildPreviewModel(input.previewOpen === true, input.previewFetch) : null,

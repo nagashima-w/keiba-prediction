@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DomDocument } from "../client/dom";
 import { mount } from "./support/dom-mount";
 import { buildListModel } from "../client/list";
-import { buildSettingsModel, draftFromSettings, FIELD_ORDER, setDraftValue, WEIGHT_FIELD_ORDER, type PreviewFetchState, type SettingsModelInput } from "../client/settings-form";
+import { buildSettingsModel, draftFromSettings, FIELD_ORDER, LIVE_SELECTORS, setDraftValue, WEIGHT_FIELD_ORDER, type PreviewFetchState, type SettingsModelInput } from "../client/settings-form";
 import { renderScreen, type ViewActions } from "../client/view";
 import type { VNode } from "../client/vnode";
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
@@ -217,12 +217,13 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
     const top = t.children as VNode[];
     const idx = (pred: (c: VNode) => boolean): number => top.findIndex((c) => typeof c !== "string" && pred(c));
     const weightsIndex = idx((c) => byClass(c, "weights").length > 0 || (c.attrs?.["class"] ?? "") === "weights");
-    const saveIndex = idx((c) => c.attrs?.["class"] === "settings-save");
+    const saveIndex = idx((c) => byClass(c, "settings-save").length > 0); // 保存ボタンは帯(settings-bar)の中
     const previewIndex = idx((c) => byClass(c, "preview-toggle").length > 0);
     const lastFieldIndex = Math.max(...FIELD_ORDER.map((k) => idx((c) => inputs(c).some((n) => n.attrs?.["data-field"] === k))));
     expect(weightsIndex).toBeGreaterThan(lastFieldIndex);
     expect(saveIndex).toBeGreaterThan(weightsIndex);
-    expect(previewIndex).toBeGreaterThan(saveIndex);
+    expect(previewIndex).toBeGreaterThan(weightsIndex);
+    expect(saveIndex).toBeGreaterThan(previewIndex); // Issue #580: 保存の帯は画面の末尾(プレビューより後ろ)
   });
 
   it("変更の処理は、重みの欄でも項目名と入力の値で onSettingsInput を呼ぶ(change と input の両方)", () => {
@@ -376,13 +377,14 @@ describe("Issue #201・#396: プロンプトのプレビュー(VNode。文面は
     expect(refresh(normal)[0]!.attrs?.["disabled"]).toBeFalsy();
   });
 
-  it("プレビューは保存ボタンより後ろ(画面の末尾)にある。入力欄(data-field)は増えない(33 個のまま)", () => {
+  it("Issue #580: プレビューは保存の帯より前に置き、帯が画面の末尾(最後の子)。入力欄(data-field)は増えない(33 個のまま)", () => {
     const t = tree({ ...OPEN });
     const top = t.children as VNode[];
-    const saveIndex = top.findIndex((c) => typeof c !== "string" && (c.attrs?.["class"] === "settings-save"));
+    const saveIndex = top.findIndex((c) => typeof c !== "string" && byClass(c, "settings-save").length > 0);
     const previewIndex = top.findIndex((c) => typeof c !== "string" && byClass(c, "preview-toggle").length > 0);
-    expect(saveIndex).toBeGreaterThan(0);
-    expect(previewIndex).toBeGreaterThan(saveIndex);
+    expect(previewIndex).toBeGreaterThan(0);
+    expect(saveIndex).toBe(top.length - 1);
+    expect(previewIndex).toBeLessThan(saveIndex);
     expect(inputs(t).length).toBe(33);
   });
 
@@ -404,5 +406,72 @@ describe("Issue #201・#396: プロンプトのプレビュー(VNode。文面は
     const other = JSON.stringify(tree({ previewOpen: true, previewFetch: { kind: "ready", preview: { text: "別の文面", clamped: false, promptVersion: "v-test" } } }));
     const loading = JSON.stringify(tree({ previewOpen: true, previewFetch: { kind: "loading", previous: null } }));
     expect(new Set([closed, opened, other, loading]).size).toBe(4);
+  });
+});
+
+
+describe("Issue #580: 下に固定した保存の帯と、金額・バッジ・変更の印の VNode", () => {
+  const bar = (t: VNode): VNode => {
+    const found = byClass(t, "settings-bar");
+    expect(found.length).toBe(1);
+    return found[0]!;
+  };
+
+  it("帯(settings-bar)は画面の最後の子で、保存ボタン 1 つと状態の文(role=status)を持つ", () => {
+    const t = tree({ dirty: true });
+    expect((t.children as VNode[])[(t.children as VNode[]).length - 1]).toBe(bar(t));
+    expect(byClass(bar(t), "settings-save").length).toBe(1);
+    const status = byClass(bar(t), "settings-bar-status");
+    expect(status.length).toBe(1);
+    expect(status[0]!.attrs?.["role"]).toBe("status");
+    expect(textOf(status[0]!)).toBe("未保存の変更があります");
+    expect(byClass(tree({}), "settings-bar-status").map(textOf)).toEqual(["変更はありません(保存済み)"]);
+  });
+
+  it("保存の成功は帯の状態の文に出る(「保存しました。…」。文面は変えない)。失敗は帯の中の role=alert", () => {
+    expect(byClass(tree({ save: { kind: "saved" } }), "settings-bar-status").map(textOf)).toEqual(["保存しました。次に実行する発走前の分析から使われます。"]);
+    const failed = tree({ save: { kind: "error", message: "保存できませんでした" } });
+    const alerts = findAll(bar(failed), (n) => n.attrs?.["role"] === "alert");
+    expect(alerts.map(textOf)).toEqual(["保存できませんでした"]);
+    expect(findAll(failed, (n) => n.attrs?.["role"] === "alert").length).toBe(1);
+    expect(findAll(tree({ save: { kind: "saved" } }), (n) => n.attrs?.["role"] === "alert").length).toBe(0);
+  });
+
+  it("保存中は帯の文が「保存中…」で、ボタンが disabled", () => {
+    const t = tree({ save: { kind: "saving" } });
+    expect(byClass(bar(t), "settings-bar-status").map(textOf)).toEqual(["保存中…"]);
+    expect(byClass(bar(t), "settings-save")[0]!.attrs?.["disabled"]).toBe(true);
+  });
+
+  it("金額の項目は、入力欄の下に整形(field-yen。data-yen-for に項目名)を持つ。入力欄の value は下書きのまま", () => {
+    const t = tree({ draft: setDraftValue(draftFromSettings(CUSTOM), "bankroll", "20000") });
+    const yen = byClass(t, "field-yen");
+    expect(yen.map((n) => n.attrs?.["data-yen-for"])).toEqual(["bankroll", "perRaceCap"]);
+    expect(yen.map(textOf)).toEqual(["¥20,000", "¥50,000"]);
+    const bankroll = inputs(t).find((n) => n.attrs?.["data-field"] === "bankroll")!;
+    expect(bankroll.attrs?.["value"]).toBe("20000");
+  });
+
+  it("バッジ(field-badge)と変更の印(field-changed。文字「変更あり」)。変えた項目の field には changed の class", () => {
+    const base = draftFromSettings(DEFAULT_CLOUD_SETTINGS);
+    const clean = tree({ draft: base });
+    expect(byClass(clean, "field-changed")).toEqual([]);
+    expect(byClass(clean, "field").length).toBe(33);
+    expect(byClass(clean, "field-badge").length).toBe(15);
+    expect(byClass(clean, "field-badge").map(textOf)).toContain("[既定: ON]");
+    const t = tree({ draft: setDraftValue(setDraftValue(base, "kellyFraction", "0.25"), "biasWeightVenue", "2") });
+    expect(byClass(t, "field-changed").map(textOf)).toEqual(["変更あり", "変更あり"]);
+    expect(byClass(t, "changed").length).toBe(2);
+    expect(byClass(t, "field-badge").length).toBe(15); // 重みにはバッジを付けない
+  });
+
+  it("書き換え先の選択子(LIVE_SELECTORS)は、描いた木の要素に実際に当たる(class と data-yen-for が一致)。当たらないと打つたびの表示が静かに効かない", () => {
+    const t = tree({});
+    const matches = (selector: string): number => {
+      const m = /^\.([a-z-]+)(?:\[data-yen-for="(\w+)"\])?$/.exec(selector);
+      expect(m, selector).not.toBeNull();
+      return byClass(t, m![1]!).filter((n) => m![2] === undefined || n.attrs?.["data-yen-for"] === m![2]).length;
+    };
+    for (const sel of Object.values(LIVE_SELECTORS)) expect(matches(sel), sel).toBe(1);
   });
 });
