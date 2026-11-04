@@ -118,7 +118,7 @@ describe("AC-c1: カウンタは保存と同じトランザクションで増え
     expect(await usage(OCT)).toEqual({ class_a: 1, class_b: 0 });
   });
 
-  it("柵の判定のための読み取り(SELECT … FROM r2_ops WHERE ym = ?)を、保存の batch の前に 1 回だけ発行する。batch は 6 文", async () => {
+  it("柵の判定のための読み取り(SELECT … FROM r2_ops WHERE ym = ?)を、保存の batch の前に 1 回だけ発行する。batch は 7 文(6 文 + 補完の状態の作り直し)", async () => {
     const events: Array<{ kind: "prepare"; sql: string } | { kind: "batch"; size: number }> = [];
     const db = {
       prepare(sql: string) {
@@ -138,7 +138,7 @@ describe("AC-c1: カウンタは保存と同じトランザクションで増え
     const batchAt = events.findIndex((e) => e.kind === "batch");
     expect(batchAt).toBeGreaterThanOrEqual(0);
     expect(readAt).toBeLessThan(batchAt);
-    expect(events[batchAt]).toEqual({ kind: "batch", size: 6 });
+    expect(events[batchAt]).toEqual({ kind: "batch", size: 7 }); // 保存の 6 文 + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)
     // 読み取りの文は SELECT(書き込みではない)。月(束縛値)が効いていることは、AC-c2 の月ごとの柵のテストが確かめる
     expect((reads[0] as { sql: string }).sql).toMatch(/^\s*SELECT\b/i);
   });
@@ -239,7 +239,7 @@ describe("AC-c3: 閾値の境界(Class A = 書き込み)。上限 −1 はまだ
     const { store } = storeAt("2026-10-06T12:00:00Z", local.r2, db);
     await store.saveAnalysis(mkRecord(1));
     await store.saveAnalysis(mkRecord(2, { allocation: undefined }));
-    expect(sizes).toEqual([4, 2]);
+    expect(sizes).toEqual([5, 3]); // 配分あり 4 文・なし 2 文 + 補完の状態の作り直しの 1 文ずつ(Issue #597)
     expect(sqls.filter((sql) => /UPDATE r2_ops|INTO r2_ops|detail_key/.test(sql))).toEqual([]);
   });
 

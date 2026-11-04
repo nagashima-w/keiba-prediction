@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { COUNT_CLASS_BACKFILL_SQL, D1ResultStore, LIST_CLASS_BACKFILL_SQL, UNIMPORTED_MAX_LIMIT } from "../src/result-repository";
+import { D1ResultStore, UNIMPORTED_MAX_LIMIT } from "../src/result-repository";
+import { withState } from "./race-backfill-test-helpers";
 import { openLocalBindings, spyDb, type LocalBindings } from "./local-bindings";
 
 /**
@@ -19,7 +20,7 @@ beforeEach(async () => {
   await local.reset();
 });
 
-const store = (): D1ResultStore => new D1ResultStore({ db: local.db });
+const store = (): D1ResultStore => withState(new D1ResultStore({ db: local.db }));
 
 async function addAnalysis(raceId: string, kaisaiDate: string | null, raceClass: string | null = null, i = 0): Promise<void> {
   await local.db
@@ -34,7 +35,7 @@ async function addResult(raceId: string, horses = 2): Promise<void> {
 }
 const ids = (rows: ReadonlyArray<{ raceId: string }>): string[] => rows.map((r) => r.raceId);
 
-describe("listClassBackfillRaces: 結果はあるがクラスが NULL のレースの、最も新しい日(to 以前)", () => {
+describe("listClassBackfillRaces: 結果はあるがクラスが NULL のレースの、開催日の新しい順 → レースID 昇順(to 以前。日をまたぐ。Issue #597・#598)", () => {
   it("結果の行があり race_class が NULL のレースだけを返す。結果なし・クラスあり・to より後・開催日 NULL は返さない", async () => {
     await addAnalysis("NEED2", "20261003");
     await addAnalysis("NEED1", "20261003");
@@ -60,12 +61,12 @@ describe("listClassBackfillRaces: 結果はあるがクラスが NULL のレー�
     expect(ids(await store().listClassBackfillRaces({ to: "20261004", exclude: [], limit: 50 }))).toEqual(["MIXED"]);
   });
 
-  it("新しい日が尽きれば(クラスが入った・除外)、次に新しい日に移る。除外のレースは返さない。limit で切る", async () => {
+  it("新しい日が先に並び、クラスが入った・除外のレースは返さない。limit で切る", async () => {
     await addAnalysis("N1", "20261003");
     await addResult("N1");
     await addAnalysis("O1", "20261001");
     await addResult("O1");
-    expect(ids(await store().listClassBackfillRaces({ to: "20261004", exclude: [], limit: 50 }))).toEqual(["N1"]);
+    expect(ids(await store().listClassBackfillRaces({ to: "20261004", exclude: [], limit: 50 }))).toEqual(["N1", "O1"]);
     expect(ids(await store().listClassBackfillRaces({ to: "20261004", exclude: ["N1"], limit: 50 }))).toEqual(["O1"]);
     await local.db.prepare("UPDATE analyses SET race_class = '1勝クラス' WHERE race_id = 'N1'").run();
     expect(ids(await store().listClassBackfillRaces({ to: "20261004", exclude: [], limit: 50 }))).toEqual(["O1"]);
@@ -102,14 +103,14 @@ describe("countClassBackfill: dated・undated・stillNull", () => {
     await addAnalysis("HAS", "20261003", "オープン");
     await addAnalysis("NORES", "20261003");
     for (const id of ["A", "B", "C", "D", "U", "HAS"]) await addResult(id);
-    expect(await store().countClassBackfill({ to: "20261004", exclude: ["C"] })).toStrictEqual({ dated: 2, undated: 1, stillNull: 1 });
-    expect(await store().countClassBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 3, undated: 1, stillNull: 0 });
+    expect(await store().countClassBackfill({ to: "20261004" })).toStrictEqual({ dated: 3, undated: 1, stillNull: 0 });
+    await store().settleBackfill([{ stage: 3, raceIds: ["C"] }]); // 取得済みなのにまだ NULL = 済み・諦めの状態(2)(以前は除外の JSON。Issue #597)
+    expect(await store().countClassBackfill({ to: "20261004" })).toStrictEqual({ dated: 2, undated: 1, stillNull: 1 });
   });
 
   it("空の D1 は全部 0。入力の検査は列挙と同じ(RangeError)", async () => {
-    expect(await store().countClassBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 0, undated: 0, stillNull: 0 });
-    await expect(store().countClassBackfill({ to: "x", exclude: [] })).rejects.toThrow(RangeError);
-    await expect(store().countClassBackfill({ to: "20261004", exclude: "A" as unknown as string[] })).rejects.toThrow(RangeError);
+    expect(await store().countClassBackfill({ to: "20261004" })).toStrictEqual({ dated: 0, undated: 0, stillNull: 0 });
+    await expect(store().countClassBackfill({ to: "x" })).rejects.toThrow(RangeError);
   });
 });
 
@@ -133,26 +134,6 @@ describe("classDistribution: race_class の値ごとのレース数(上位 40)",
     const out = await store().classDistribution();
     expect(out).toHaveLength(40);
     expect(out[0]).toStrictEqual({ value: "V00", races: 1 });
-  });
-});
-
-describe("読み取り行数の上界(meta.rows_read。見積りの再現)", () => {
-  it("N = 600 件の分析(300 レース × 2、全部対象)で、列挙 1 回の rows_read は 5N 以下・件数 1 回は 3N 以下(索引なしの race_class を見る分の全走査を含む。実測は列挙 2,700・件数 1,500)", async () => {
-    const N = 600;
-    for (let r = 0; r < N / 2; r += 1) {
-      const id = `R${String(r).padStart(4, "0")}`;
-      await addAnalysis(id, "20261001", null, r * 2);
-      await addAnalysis(id, "20261001", null, r * 2 + 1);
-      await addResult(id);
-    }
-    // rows_read は D1 の meta から読む(生の prepare で実行して測る)。SQL は本番のものをそのまま使う。
-    const list = await local.db.prepare(LIST_CLASS_BACKFILL_SQL).bind("20261004", "[]", 30).all();
-    const count = await local.db.prepare(COUNT_CLASS_BACKFILL_SQL).bind("20261004", "[]", "[]").all();
-    expect(list.results).toHaveLength(30); // 前提(空振り防止): 対象が実際に列挙されている
-    expect(list.meta.rows_read).toBeGreaterThan(0);
-    expect(count.meta.rows_read).toBeGreaterThan(0);
-    expect(list.meta.rows_read!).toBeLessThanOrEqual(5 * N);
-    expect(count.meta.rows_read!).toBeLessThanOrEqual(3 * N);
   });
 });
 

@@ -39,7 +39,7 @@ export function countingDb(real: D1Database): { db: ResultDb; calls: AllCall[] }
   return { db, calls };
 }
 
-/** 補完の列挙の SQL か(旧版の `LIST_*_BACKFILL_SQL` も、新版の待ち行列用の SQL も当たる。件数の SQL・他の SQL は当たらない)。 */
+/** 補完の列挙の SQL か(`LIST_*_BACKFILL_SQL`。件数の SQL・他の SQL は当たらない)。 */
 export function isBackfillListSql(sql: string): boolean {
-  return sql.includes("FROM analyses a") && sql.includes("SELECT raceId, firstDate FROM u");
+  return sql.includes("FROM race_backfill") && sql.includes("ORDER BY kaisai_date DESC, race_id");
 }
