@@ -3,6 +3,7 @@
 -- 状態の導出の式は cloud/src/race-backfill-state.ts の raceBackfillStateSelect('') と同じ文字列(テストが一致を固定する)。
 -- st1〜st4: 0 = 条件が偽 / 1 = 対象(未完了)/ 2 = 条件は真のままだが済み・諦め(DO の記録の写し。初回の写しは DO が行う)。
 
+-- WITHOUT ROWID: 主キーが行の実体になる(他の D1 専用の表と同じ。主キーの別の索引を持たず、書き込みの行が 1 つ減る。Issue #445)。
 CREATE TABLE race_backfill (
   race_id TEXT PRIMARY KEY,
   kaisai_date TEXT,
@@ -11,7 +12,7 @@ CREATE TABLE race_backfill (
   st2 INTEGER NOT NULL DEFAULT 0,
   st3 INTEGER NOT NULL DEFAULT 0,
   st4 INTEGER NOT NULL DEFAULT 0
-);
+) WITHOUT ROWID;
 
 -- 部分索引: 状態が 0 でない行だけ(未完了と済み・諦め)。クエリ側にも `stN > 0` を書く(SQLite は `stN = 1` だけでは部分索引を使わない)。
 -- kaisai_date DESC・race_id 昇順の並びで、列挙は索引の先頭から LIMIT 件で止まる。

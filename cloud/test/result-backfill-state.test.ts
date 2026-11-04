@@ -470,15 +470,15 @@ describe("D1 の書き込み行数(meta.rows_written。見積りの再現): 状�
     return r.meta.rows_written ?? 0;
   }
 
-  it("新しい分析 → 3 行(状態の行 + 主キーの索引 + 段階 1 の部分索引)。結果の保存で段階 1 が外れ、段階 3・4 が付く → 3 行。変化なしの再計算 → 0 行", async () => {
+  it("新しい分析 → 2 行(状態の行〈WITHOUT ROWID なので主キーの索引は別に持たない〉+ 段階 1 の部分索引)。結果の保存で段階 1 が外れ、段階 3・4 が付く → 3 行。変化なしの再計算 → 0 行", async () => {
     await local.db.prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date) VALUES ('WR1', '2026-10-06T00:00:00.000Z', 0, '20261003')").run();
-    expect(await recomputeWrites("WR1")).toBe(3);
+    expect(await recomputeWrites("WR1")).toBe(2);
     await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds) VALUES ('WR1', 1, 1, 3.4)").run();
     const afterResult = await recomputeWrites("WR1"); // st1: 1→0(索引から外れる)・st3: 0→1・st4: 0→1(索引に入る)
     expect(afterResult).toBeGreaterThan(0);
     expect(afterResult).toBeLessThanOrEqual(8);
     expect(await recomputeWrites("WR1")).toBe(0); // 変化なし → 書かない
-    process.stderr.write(`REPORT rows_written: 新しい分析 3 / 結果の保存 ${afterResult}\n`);
+    process.stderr.write(`REPORT rows_written: 新しい分析 2 / 結果の保存 ${afterResult}\n`);
   });
 });
 
