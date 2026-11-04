@@ -37,6 +37,7 @@
  *   17 桁の浮動小数の往復はローカルの D1 で一致を確かめた(本番の SQLite のビルドでの確認は最初の実保存)。
  */
 
+import { RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, settleRaceBackfillSql } from "./race-backfill-state";
 import {
   comboPayoutParams,
   DELETE_COMBO_PAYOUTS_SQL,
@@ -177,45 +178,30 @@ export const FILL_WIN_PAYOUT_SQL = `UPDATE race_results SET win_payout = j.p
              AND race_results.win_payout IS NULL AND j.p IS NOT NULL`;
 
 /**
- * 結果の補完の段階 4(Issue #556。単勝の払戻の補完)の列挙。判定は段階 2({@link LIST_WIN_ODDS_BACKFILL_SQL})と同じ形で、条件だけが違う:
- * 分析済みで、結果の行が**あり**、そのレースの**全馬の `win_payout` が NULL**(1 頭でも払戻があれば対象外=レース単位の判定。同着や取消で一部の馬が NULL のレースを毎晩列挙し直さないため)。
- * それ以外(開催日が `to` 以下・`GROUP BY race_id` の最小の開催日・**最も新しい日を 1 日だけ**・レースID 昇順・除外するレース ID を JSON 1 つで渡す)は段階 1〜3 と同じ。束縛値は `[to, excludeJson, limit]`。
- *
- * ## 読み取り行数
- * 分析の行ごとに、`race_results` の主キー `(race_id, umaban)` の先頭で、結果の有無(EXISTS)と払戻のある馬の有無(NOT EXISTS。払戻のある馬が見つかれば止まる)を引く。
- * 全馬 NULL のレースは、その頭数(多くとも 18)を読み切る。したがって読み取りは分析の行数 N に比例する(`test/result-win-payout-backfill-repository.test.ts` の「読み取り行数の上界」が固定)。
+ * 結果の補完の段階 4 の列挙(単勝の払戻の補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0034。導出は `race-backfill-state.ts`)の部分索引から読む
+ * (以前は `analyses` の全部を毎回読んでいた)。対象 = `st4 = 1`(未完了。済み・諦め〈2〉と条件が偽〈0〉は含まない)で、開催日が `to` 以下(NULL は含まない)。
+ * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
+ * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
+ * 束縛値は `[to, excludeJson, limit]`。索引は `(stN, kaisai_date DESC, race_id) WHERE stN > 0`。**`stN > 0` を式にも書く**(SQLite は `stN = 1` だけでは部分索引を使わない)。
+ * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
  */
-export const LIST_PAYOUT_BACKFILL_SQL = `WITH u AS (
-             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
-             FROM analyses a
-             WHERE a.kaisai_date <= ?
-               AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_payout IS NOT NULL)
-               AND a.race_id NOT IN (SELECT value FROM json_each(?))
-             GROUP BY a.race_id
-           )
-           SELECT raceId, firstDate FROM u
-           WHERE firstDate = (SELECT MAX(firstDate) FROM u)
-           ORDER BY raceId
+export const LIST_PAYOUT_BACKFILL_SQL = `SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill
+           WHERE st4 > 0 AND st4 = 1 AND kaisai_date <= ?
+             AND race_id NOT IN (SELECT value FROM json_each(?))
+           ORDER BY kaisai_date DESC, race_id
            LIMIT ?`;
 
+
 /**
- * 段階 4 の残りの数({@link COUNT_CLASS_BACKFILL_SQL} と同じ形)。対象 = 結果があり、全馬の `win_payout` が NULL のレース。
- * `dated` = 対象で開催日が `to` 以前かつ除外でないレース、`undated` = 対象で開催日がすべて NULL のレース(日単位の DO の宛先が決まらないので補完できない。数だけ見せる)、
- * `stillNull` = 対象のうち**除外 ID に入っている**レース(取得済み〈`payout_done`〉または諦めた〈`payout_abandoned`・`odds_abandoned`・`class_abandoned`〉のに、まだ全馬 NULL=ページに単勝の払戻が無い・馬番が行と合わない・書き込みの失敗の目安)。
- * 束縛値は `[to, excludeJson, excludeJson]`(`dated` と `stillNull` の分)。
+ * 段階 4 の残りの数(Issue #597 から `race_backfill` の部分索引を読む。対象 = 結果があり、全馬の `win_payout` が NULL のレース)。`dated` = 対象(`st4 = 1`)で開催日が `to` 以前のレース、`undated` = 対象で開催日が NULL のレース
+ * (日単位の DO の宛先が決まらないので補完できない。数だけ見せる)。済み・諦め(`st4 = 2`)は D1 の状態にあるので、除外の JSON は取らない。
+ * `stillNull` = 対象のうち**済み・諦め**(`st4 = 2`)のレース(取得済み、または諦めたのに、まだ条件が真=ページに無い・語彙に無い・書き込みの失敗の目安)。束縛値は `[to]`。
  */
-export const COUNT_PAYOUT_BACKFILL_SQL = `WITH u AS (
-             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
-             FROM analyses a
-             WHERE EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_payout IS NOT NULL)
-             GROUP BY a.race_id
-           )
-           SELECT COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS dated,
-                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated,
-                  COALESCE(SUM(CASE WHEN raceId IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS stillNull
-           FROM u`;
+export const COUNT_PAYOUT_BACKFILL_SQL = `SELECT COALESCE(SUM(CASE WHEN kaisai_date IS NOT NULL AND kaisai_date <= ? THEN 1 ELSE 0 END), 0) AS dated,
+                  COALESCE(SUM(CASE WHEN kaisai_date IS NULL THEN 1 ELSE 0 END), 0) AS undated,
+                  (SELECT COUNT(*) FROM race_backfill WHERE st4 > 0 AND st4 = 2) AS stillNull
+           FROM race_backfill WHERE st4 > 0 AND st4 = 1`;
+
 
 /** codec の復元の文(1 レース)に race_id を足し、`WHERE race_id IN (json_each)` にして複数レースを 1 文で読む。 */
 function toManyRacesSql(codecSelectSql: string, orderBy: string | null): string {
@@ -273,151 +259,89 @@ export const LIST_UNIMPORTED_BY_DAY_SQL = `SELECT raceId, firstDate FROM (
 export const UNIMPORTED_BY_DAY_MAX_DAYS = 31;
 
 /**
- * 結果の補完(Issue #217〈#167-C〉。`result-backfill-core.ts`)の列挙。判定は {@link LIST_UNIMPORTED_BY_DAY_SQL} と同じ(分析済み・`race_results` に行が 1 件も無い・`GROUP BY race_id` で最小の開催日)。
- * 違いは、窓の下限が無い(開催日が `to` 以下の全部。開催日が NULL の分析は `<=` の比較に入らない)・**未取込のある最も新しい日を 1 日だけ**(その日のレースID 昇順で `limit` 件)・
- * 除外するレース ID(永久に諦めたもの・その晩に試したもの)を JSON 配列 1 つで渡せる(`NOT IN (SELECT value FROM json_each(?))`。束縛は 1 つで、除外の数に依らない)。
- * 束縛値は `[to, excludeJson, limit]`。
+ * 結果の補完の段階 1 の列挙(結果の取り込み。結果の行が 1 件も無いレース)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0034。導出は `race-backfill-state.ts`)の部分索引から読む
+ * (以前は `analyses` の全部を毎回読んでいた)。対象 = `st1 = 1`(未完了。済み・諦め〈2〉と条件が偽〈0〉は含まない)で、開催日が `to` 以下(NULL は含まない)。
+ * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
+ * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
+ * 束縛値は `[to, excludeJson, limit]`。索引は `(stN, kaisai_date DESC, race_id) WHERE stN > 0`。**`stN > 0` を式にも書く**(SQLite は `stN = 1` だけでは部分索引を使わない)。
+ * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
  */
-export const LIST_BACKFILL_SQL = `WITH u AS (
-             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
-             FROM analyses a
-             WHERE a.kaisai_date <= ?
-               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-               AND a.race_id NOT IN (SELECT value FROM json_each(?))
-             GROUP BY a.race_id
-           )
-           SELECT raceId, firstDate FROM u
-           WHERE firstDate = (SELECT MAX(firstDate) FROM u)
-           ORDER BY raceId
+export const LIST_BACKFILL_SQL = `SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill
+           WHERE st1 > 0 AND st1 = 1 AND kaisai_date <= ?
+             AND race_id NOT IN (SELECT value FROM json_each(?))
+           ORDER BY kaisai_date DESC, race_id
            LIMIT ?`;
 
-/**
- * 結果の補完の残りの数。`dated` = 未取込で開催日が `to` 以前のレース(除外を除く)、`undated` = 未取込で開催日がすべて NULL のレース(日単位の DO の宛先が決まらないので補完の対象外。数だけ見せる)。
- * `GROUP BY race_id` の最小の開催日が NULL なのは、そのレースの分析の開催日がすべて NULL のとき。束縛値は `[to, excludeJson]`。
- */
-export const COUNT_BACKFILL_SQL = `WITH u AS (
-             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
-             FROM analyses a
-             WHERE NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-             GROUP BY a.race_id
-           )
-           SELECT COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS dated,
-                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated
-           FROM u`;
 
 /**
- * 結果の補完の段階 2 で、scratched が欠けるレース(Issue #270 の (B))の条件: **着順が NULL で scratched が NULL の行が 1 つでもある**。
- * `scratched` を記録する前(migration 0013 より前)に取り込んだ行・exe から移した行のうち、取消か中止か判別できないもの。着順のある馬は取消でありえないので数えない。
- * 補完で埋まる(`saveScratched`)と、そのレースはこの条件から外れる。PK(race_id, umaban)の先頭で引くので、分析 1 行につき 1 レースの行だけを読む。
+ * 段階 1 の残りの数(Issue #597 から `race_backfill` の部分索引を読む。対象 = 結果の行が 1 件も無いレース)。`dated` = 対象(`st1 = 1`)で開催日が `to` 以前のレース、`undated` = 対象で開催日が NULL のレース
+ * (日単位の DO の宛先が決まらないので補完できない。数だけ見せる)。済み・諦め(`st1 = 2`)は D1 の状態にあるので、除外の JSON は取らない。
+ * 束縛値は `[to]`。
  */
-const SCRATCHED_MISSING_EXISTS = `EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.finish_position IS NULL AND r.scratched IS NULL)`;
+export const COUNT_BACKFILL_SQL = `SELECT COALESCE(SUM(CASE WHEN kaisai_date IS NOT NULL AND kaisai_date <= ? THEN 1 ELSE 0 END), 0) AS dated,
+                  COALESCE(SUM(CASE WHEN kaisai_date IS NULL THEN 1 ELSE 0 END), 0) AS undated
+           FROM race_backfill WHERE st1 > 0 AND st1 = 1`;
+
 
 /**
- * 結果の補完の段階 2(Issue #259・#270)の列挙。**段階 1({@link LIST_BACKFILL_SQL})の逆**: 分析済みで、結果の行が**あり**、次の (A) または (B) に当たるレース。
- *  - (A)(Issue #259)確定の単勝オッズ(`win_odds`)が**1 頭も入っていない**。「1 頭も」にするのは、除外・取消の馬が NULL のまま残るレースを、毎晩列挙し直さないため(レース単位の判定)
- *  - (B)(Issue #270)着順が NULL で scratched が NULL の行がある({@link SCRATCHED_MISSING_EXISTS})。オッズが入っていても対象
- * 同じ取得 1 回で、両方を埋める(`winOddsOnly` の依頼。オッズ・人気は `saveWinOdds`、scratched は `saveScratched`)。それ以外(開催日が `to` 以下・`GROUP BY race_id` の最小の開催日・
- * 未取込のある最も新しい日を 1 日だけ・レースID 昇順・除外するレース ID を JSON 1 つで渡す)は段階 1 と同じ。束縛値は `[to, excludeJson, limit]`。
+ * 結果の補完の段階 2 の列挙(単勝オッズ・scratched の補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0034。導出は `race-backfill-state.ts`)の部分索引から読む
+ * (以前は `analyses` の全部を毎回読んでいた)。対象 = `st2 = 1`(未完了。済み・諦め〈2〉と条件が偽〈0〉は含まない)で、開催日が `to` 以下(NULL は含まない)。
+ * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
+ * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
+ * 束縛値は `[to, excludeJson, limit]`。索引は `(stN, kaisai_date DESC, race_id) WHERE stN > 0`。**`stN > 0` を式にも書く**(SQLite は `stN = 1` だけでは部分索引を使わない)。
+ * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
  */
-export const LIST_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
-             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
-             FROM analyses a
-             WHERE a.kaisai_date <= ?
-               AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-               AND (NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL)
-                    OR ${SCRATCHED_MISSING_EXISTS})
-               AND a.race_id NOT IN (SELECT value FROM json_each(?))
-             GROUP BY a.race_id
-           )
-           SELECT raceId, firstDate FROM u
-           WHERE firstDate = (SELECT MAX(firstDate) FROM u)
-           ORDER BY raceId
+export const LIST_WIN_ODDS_BACKFILL_SQL = `SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill
+           WHERE st2 > 0 AND st2 = 1 AND kaisai_date <= ?
+             AND race_id NOT IN (SELECT value FROM json_each(?))
+           ORDER BY kaisai_date DESC, race_id
            LIMIT ?`;
 
+
 /**
- * 段階 2 の残りの数({@link COUNT_BACKFILL_SQL} と同じ形)。`dated` = 対象((A) または (B))で開催日が `to` 以前のレース(除外を除く)、`undated` = 対象で開催日がすべて NULL のレース
- * (日単位の DO の宛先が決まらないので補完できない。数だけ見せる)、`scratchedMissing`(Issue #270)= `dated` のうち (B) に当たるレース(オッズも欠けているレースを含む。本番の件数を後から確かめる観測値)。
- * 束縛値は `[to, excludeJson, to, excludeJson]`(`dated` と `scratchedMissing` の分)。
+ * 段階 2 の残りの数(Issue #597 から `race_backfill` の部分索引を読む。対象 = 結果があり、オッズが全頭 NULL または scratched が欠けるレース)。`dated` = 対象(`st2 = 1`)で開催日が `to` 以前のレース、`undated` = 対象で開催日が NULL のレース
+ * (日単位の DO の宛先が決まらないので補完できない。数だけ見せる)。済み・諦め(`st2 = 2`)は D1 の状態にあるので、除外の JSON は取らない。
+ * `scratchedMissing`(Issue #270)= `dated` のうち scratched が欠ける行があるレース(オッズも欠けているレースを含む。本番の件数を後から確かめる観測値)。束縛値は `[to, to]`。
  */
-export const COUNT_WIN_ODDS_BACKFILL_SQL = `WITH u AS (
-             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate, MAX(${SCRATCHED_MISSING_EXISTS}) AS scratchedMissing
-             FROM analyses a
-             WHERE EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-               AND (NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.win_odds IS NOT NULL)
-                    OR ${SCRATCHED_MISSING_EXISTS})
-             GROUP BY a.race_id
-           )
-           SELECT COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS dated,
-                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated,
-                  COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) AND scratchedMissing = 1 THEN 1 ELSE 0 END), 0) AS scratchedMissing
-           FROM u`;
+export const COUNT_WIN_ODDS_BACKFILL_SQL = `SELECT COALESCE(SUM(CASE WHEN kaisai_date IS NOT NULL AND kaisai_date <= ? THEN 1 ELSE 0 END), 0) AS dated,
+                  COALESCE(SUM(CASE WHEN kaisai_date IS NULL THEN 1 ELSE 0 END), 0) AS undated,
+                  COALESCE(SUM(CASE WHEN kaisai_date IS NOT NULL AND kaisai_date <= ? AND sm = 1 THEN 1 ELSE 0 END), 0) AS scratchedMissing
+           FROM race_backfill WHERE st2 > 0 AND st2 = 1`;
+
 
 
 /**
- * 結果の補完の段階 3(Issue #426-b。レースのクラスの補完)の列挙。判定は段階 2({@link LIST_WIN_ODDS_BACKFILL_SQL})と同じ形で、条件だけが違う:
- * 分析済みで、結果の行が**あり**、そのレースの分析の行に **`race_class` が NULL のものがある**(同じレースの分析のうち 1 行でも NULL なら対象。`UPDATE analyses SET race_class = ? WHERE race_id = ?` が全行に書く)。
- * それ以外(開催日が `to` 以下・`GROUP BY race_id` の最小の開催日・**最も新しい日を 1 日だけ**・レースID 昇順・除外するレース ID を JSON 1 つで渡す)は段階 1・2 と同じ。束縛値は `[to, excludeJson, limit]`。
- *
- * ## 読み取り行数(索引)
- * `analyses.kaisai_date` の索引(`idx_analyses_kaisai_date`)の範囲走査で `to` 以前の分析の行を読み、本体の行で `race_class IS NULL` を見る(`race_class` に索引は無い=書き込みの行を増やさないため。0024)。
- * クラスが NULL の行ごとに、`race_results` の主キー `(race_id, umaban)` の先頭で結果の有無を 1 行だけ引く。したがって読み取りは分析の行数 N に比例する。
- * 実測(`test/result-class-backfill-repository.test.ts` の「読み取り行数の上界」。N = 600 件・300 レース・全部対象のローカル D1 の `meta.rows_read`): 列挙 2,700 行(4.5N)・件数 1,500 行(2.5N)。
- * 上界(列挙 5N 以下・件数 3N 以下)をそのテストが固定している。除外の JSON の要素数は別に加わる。
- * **除外の JSON は束縛値**(SQL 文の長さではなく値の大きさ)。完了したレースの数に比例して増える(レース ID は 12 桁+引用符・区切りで約 16 バイト)ので、
- * D1 の 1 つの値の大きさの上限(未確認。SQL 文は 100KB と認識)に近づく規模(数千レース)になったら、完了の印を D1 側(`analyses`)に移す設計に替えること。
+ * 結果の補完の段階 3 の列挙(レースのクラスの補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0034。導出は `race-backfill-state.ts`)の部分索引から読む
+ * (以前は `analyses` の全部を毎回読んでいた)。対象 = `st3 = 1`(未完了。済み・諦め〈2〉と条件が偽〈0〉は含まない)で、開催日が `to` 以下(NULL は含まない)。
+ * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
+ * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
+ * 束縛値は `[to, excludeJson, limit]`。索引は `(stN, kaisai_date DESC, race_id) WHERE stN > 0`。**`stN > 0` を式にも書く**(SQLite は `stN = 1` だけでは部分索引を使わない)。
+ * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
  */
-export const LIST_CLASS_BACKFILL_SQL = `WITH u AS (
-             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
-             FROM analyses a
-             WHERE a.kaisai_date <= ?
-               AND a.race_class IS NULL
-               AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-               AND a.race_id NOT IN (SELECT value FROM json_each(?))
-             GROUP BY a.race_id
-           )
-           SELECT raceId, firstDate FROM u
-           WHERE firstDate = (SELECT MAX(firstDate) FROM u)
-           ORDER BY raceId
+export const LIST_CLASS_BACKFILL_SQL = `SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill
+           WHERE st3 > 0 AND st3 = 1 AND kaisai_date <= ?
+             AND race_id NOT IN (SELECT value FROM json_each(?))
+           ORDER BY kaisai_date DESC, race_id
            LIMIT ?`;
 
-/**
- * 段階 3 の残りの数({@link COUNT_BACKFILL_SQL} と同じ形)。対象 = 結果があり、クラスが NULL の分析の行があるレース。
- * `dated` = 対象で開催日が `to` 以前かつ除外でないレース、`undated` = 対象で開催日がすべて NULL のレース(日単位の DO の宛先が決まらないので補完できない。数だけ見せる)、
- * `stillNull` = 対象のうち**除外 ID に入っている**レース(取得済み〈`class_done`〉または諦めた〈`class_abandoned`・`odds_abandoned`〉のに、まだクラスが NULL=語彙に無い表記・区分の無いページ・書き込みの失敗の目安)。
- * 束縛値は `[to, excludeJson, excludeJson]`(`dated` と `stillNull` の分)。
- */
-export const COUNT_CLASS_BACKFILL_SQL = `WITH u AS (
-             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
-             FROM analyses a
-             WHERE a.race_class IS NULL
-               AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
-             GROUP BY a.race_id
-           )
-           SELECT COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS dated,
-                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated,
-                  COALESCE(SUM(CASE WHEN raceId IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS stillNull
-           FROM u`;
 
 /**
- * 結果の補完の「1 晩ぶんの待ち行列」の列挙(Issue #598)。段階 1〜4 の列挙 SQL({@link LIST_BACKFILL_SQL} など)から導く: 判定(`u` の CTE)は**同一の文字列**で、
- * 末尾の「最も新しい日だけ」(`WHERE firstDate = (SELECT MAX(firstDate) FROM u)` と `ORDER BY raceId`)を、**日の新しい順 → 同じ日は race_id 昇順**(`ORDER BY firstDate DESC, raceId`)に替えるだけ。
- * `LIMIT` は 1 晩の残りの件数(最大 150)で、複数の日にまたがって返る。束縛値は元の SQL と同じ `[to, excludeJson, limit]`。
- * 元の SQL の形が想定と違えば、読み込み時に落とす(判定の本体を二重に持たない)。
+ * 段階 3 の残りの数(Issue #597 から `race_backfill` の部分索引を読む。対象 = 結果があり、クラスが NULL の分析の行があるレース)。`dated` = 対象(`st3 = 1`)で開催日が `to` 以前のレース、`undated` = 対象で開催日が NULL のレース
+ * (日単位の DO の宛先が決まらないので補完できない。数だけ見せる)。済み・諦め(`st3 = 2`)は D1 の状態にあるので、除外の JSON は取らない。
+ * `stillNull` = 対象のうち**済み・諦め**(`st3 = 2`)のレース(取得済み、または諦めたのに、まだ条件が真=ページに無い・語彙に無い・書き込みの失敗の目安)。束縛値は `[to]`。
  */
-function toQueueSql(listSql: string): string {
-  const newestDayTail = "WHERE firstDate = (SELECT MAX(firstDate) FROM u)\n           ORDER BY raceId\n           LIMIT ?";
-  if (!listSql.includes(newestDayTail)) {
-    throw new Error("補完の列挙の SQL の末尾の形が想定と違います");
-  }
-  return listSql.replace(newestDayTail, "ORDER BY firstDate DESC, raceId\n           LIMIT ?");
-}
+export const COUNT_CLASS_BACKFILL_SQL = `SELECT COALESCE(SUM(CASE WHEN kaisai_date IS NOT NULL AND kaisai_date <= ? THEN 1 ELSE 0 END), 0) AS dated,
+                  COALESCE(SUM(CASE WHEN kaisai_date IS NULL THEN 1 ELSE 0 END), 0) AS undated,
+                  (SELECT COUNT(*) FROM race_backfill WHERE st3 > 0 AND st3 = 2) AS stillNull
+           FROM race_backfill WHERE st3 > 0 AND st3 = 1`;
 
-export const LIST_BACKFILL_QUEUE_SQL = toQueueSql(LIST_BACKFILL_SQL);
-export const LIST_WIN_ODDS_BACKFILL_QUEUE_SQL = toQueueSql(LIST_WIN_ODDS_BACKFILL_SQL);
-export const LIST_CLASS_BACKFILL_QUEUE_SQL = toQueueSql(LIST_CLASS_BACKFILL_SQL);
-export const LIST_PAYOUT_BACKFILL_QUEUE_SQL = toQueueSql(LIST_PAYOUT_BACKFILL_SQL);
 
 /** 保存済みのクラスの分布の上位の件数(状態の応答の大きさの歯止め)。 */
+/** {@link D1ResultStore.settleBackfill} の 1 文あたりのレース ID の数(束縛する JSON の大きさの歯止め。1 件約 16 バイトで約 8KB)。 */
+export const SETTLE_IDS_PER_STATEMENT = 500;
+/** {@link D1ResultStore.settleBackfill} の 1 回の batch の文の数(D1 の 1 回の呼び出しあたりの文の数の制約に収める)。 */
+export const SETTLE_BATCH_STATEMENTS = 20;
+
 export const CLASS_DISTRIBUTION_LIMIT = 40;
 
 /**
@@ -475,6 +399,11 @@ export function buildWinPayoutStatement(db: ResultDb, raceId: string, results: r
     return null;
   }
   return db.prepare(FILL_WIN_PAYOUT_SQL).bind(JSON.stringify(rows), raceId);
+}
+
+/** 補完の状態(race_backfill)の作り直しの 1 文(1 レース。Issue #597)。書き込みの batch の最後に足す。 */
+export function recomputeRaceBackfillStatement(db: ResultDb, raceId: string): D1PreparedStatement {
+  return db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify([raceId]));
 }
 
 /**
@@ -551,20 +480,14 @@ export interface ListUnimportedByDayOptions {
 export interface ListBackfillOptions {
   /** 開催日の上限(YYYYMMDD。含む)。 */
   readonly to: string;
-  /** 除外するレース ID。 */
+  /** 除外するレース ID(その晩に試したもの)。済み・諦めは D1 の状態(`race_backfill`)にあるので入れない。 */
   readonly exclude: readonly string[];
-  /** 件数。1〜{@link UNIMPORTED_MAX_LIMIT} の整数。 */
+  /** 件数。1〜{@link UNIMPORTED_MAX_LIMIT} の整数。日をまたいで、開催日の新しい順 → race_id 昇順に返す。 */
   readonly limit: number;
-  /**
-   * true なら、最も新しい日 1 日ではなく、**日の新しい順に複数の日にまたがって** `limit` 件まで返す(Issue #598。補完の 1 晩ぶんの待ち行列。
-   * 並びは (開催日の降順, レースID の昇順)。1 日だけの版の連結と同じ並び)。省略・false は従来どおり最も新しい日だけ。
-   */
-  readonly multiDay?: boolean;
 }
 
 export interface CountBackfillOptions {
   readonly to: string;
-  readonly exclude: readonly string[];
 }
 
 /** {@link COUNT_BACKFILL_SQL} の結果。 */
@@ -680,7 +603,8 @@ export class D1ResultStore implements ResultRepository {
     if (statements.length === 0) {
       return;
     }
-    await this.db.batch(statements);
+    // 補完の状態(race_backfill。Issue #597)の作り直しを batch の最後に 1 文。結果の行を書くとき(馬の行がある)だけ。面・組合せ払戻だけの保存は状態の条件に触れない。
+    await this.db.batch(results.length > 0 ? [...statements, recomputeRaceBackfillStatement(this.db, raceId)] : statements);
   }
 
   /**
@@ -693,7 +617,7 @@ export class D1ResultStore implements ResultRepository {
     if (statement === null) {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([statement]);
+    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -707,7 +631,7 @@ export class D1ResultStore implements ResultRepository {
     if (statement === null) {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([statement]);
+    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -720,7 +644,7 @@ export class D1ResultStore implements ResultRepository {
     if (statement === null) {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([statement]);
+    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -733,8 +657,8 @@ export class D1ResultStore implements ResultRepository {
     if (typeof raceClass !== "string" || raceClass === "") {
       return { rowsWritten: 0 };
     }
-    const result = await this.db.prepare(SAVE_RACE_CLASS_SQL).bind(raceClass, raceId).run();
-    return { rowsWritten: result.meta.rows_written ?? 0 };
+    const [result] = await this.db.batch([this.db.prepare(SAVE_RACE_CLASS_SQL).bind(raceClass, raceId), recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
+    return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
   /**
@@ -826,7 +750,7 @@ export class D1ResultStore implements ResultRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
       throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
     }
-    const { results } = await this.db.prepare(options.multiDay === true ? LIST_BACKFILL_QUEUE_SQL : LIST_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    const { results } = await this.db.prepare(LIST_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
   }
 
@@ -840,19 +764,18 @@ export class D1ResultStore implements ResultRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
       throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
     }
-    const { results } = await this.db.prepare(options.multiDay === true ? LIST_WIN_ODDS_BACKFILL_QUEUE_SQL : LIST_WIN_ODDS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    const { results } = await this.db.prepare(LIST_WIN_ODDS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
   }
 
   /**
    * 結果の補完の段階 2 の残りの数(Issue #259。上の {@link COUNT_WIN_ODDS_BACKFILL_SQL})。
-   * @throws RangeError to が YYYYMMDD の8桁でない・exclude が文字列の配列でない
+   * @throws RangeError to が YYYYMMDD の8桁でない
    */
   async countWinOddsBackfill(options: CountBackfillOptions): Promise<WinOddsBackfillCounts> {
-    const { to, exclude } = options;
-    checkBackfillInput(to, exclude);
-    const json = JSON.stringify(exclude);
-    const row = await this.db.prepare(COUNT_WIN_ODDS_BACKFILL_SQL).bind(to, json, to, json).first<{ dated: number; undated: number; scratchedMissing: number }>();
+    const { to } = options;
+    checkBackfillInput(to, []);
+    const row = await this.db.prepare(COUNT_WIN_ODDS_BACKFILL_SQL).bind(to, to).first<{ dated: number; undated: number; scratchedMissing: number }>();
     return { dated: row?.dated ?? 0, undated: row?.undated ?? 0, scratchedMissing: row?.scratchedMissing ?? 0 };
   }
 
@@ -866,19 +789,18 @@ export class D1ResultStore implements ResultRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
       throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
     }
-    const { results } = await this.db.prepare(options.multiDay === true ? LIST_CLASS_BACKFILL_QUEUE_SQL : LIST_CLASS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    const { results } = await this.db.prepare(LIST_CLASS_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
   }
 
   /**
    * 結果の補完の段階 3 の残りの数(Issue #426-b。上の {@link COUNT_CLASS_BACKFILL_SQL})。
-   * @throws RangeError to が YYYYMMDD の8桁でない・exclude が文字列の配列でない
+   * @throws RangeError to が YYYYMMDD の8桁でない
    */
   async countClassBackfill(options: CountBackfillOptions): Promise<ClassBackfillCounts> {
-    const { to, exclude } = options;
-    checkBackfillInput(to, exclude);
-    const json = JSON.stringify(exclude);
-    const row = await this.db.prepare(COUNT_CLASS_BACKFILL_SQL).bind(to, json, json).first<{ dated: number; undated: number; stillNull: number }>();
+    const { to } = options;
+    checkBackfillInput(to, []);
+    const row = await this.db.prepare(COUNT_CLASS_BACKFILL_SQL).bind(to).first<{ dated: number; undated: number; stillNull: number }>();
     return { dated: row?.dated ?? 0, undated: row?.undated ?? 0, stillNull: row?.stillNull ?? 0 };
   }
 
@@ -892,20 +814,51 @@ export class D1ResultStore implements ResultRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
       throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
     }
-    const { results } = await this.db.prepare(options.multiDay === true ? LIST_PAYOUT_BACKFILL_QUEUE_SQL : LIST_PAYOUT_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    const { results } = await this.db.prepare(LIST_PAYOUT_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
   }
 
   /**
    * 結果の補完の段階 4 の残りの数(Issue #556。上の {@link COUNT_PAYOUT_BACKFILL_SQL})。
-   * @throws RangeError to が YYYYMMDD の8桁でない・exclude が文字列の配列でない
+   * @throws RangeError to が YYYYMMDD の8桁でない
    */
   async countPayoutBackfill(options: CountBackfillOptions): Promise<PayoutBackfillCounts> {
-    const { to, exclude } = options;
-    checkBackfillInput(to, exclude);
-    const json = JSON.stringify(exclude);
-    const row = await this.db.prepare(COUNT_PAYOUT_BACKFILL_SQL).bind(to, json, json).first<{ dated: number; undated: number; stillNull: number }>();
+    const { to } = options;
+    checkBackfillInput(to, []);
+    const row = await this.db.prepare(COUNT_PAYOUT_BACKFILL_SQL).bind(to).first<{ dated: number; undated: number; stillNull: number }>();
     return { dated: row?.dated ?? 0, undated: row?.undated ?? 0, stillNull: row?.stillNull ?? 0 };
+  }
+
+  /**
+   * 済み・諦めを D1 の状態に写す(Issue #597。補完の DO の記録を `race_backfill` に反映する)。`stages` の各段階について、対象(状態 1)のレースを済み・諦め(2)にする。
+   * 条件が偽(0)のレースは変えない。冪等。1 回の batch の文の数は {@link SETTLE_BATCH_STATEMENTS} 以下に分け、1 文のレース ID は {@link SETTLE_IDS_PER_STATEMENT} 件以下に分ける。
+   * @returns 実際に 2 にした行数(段階ごと)
+   */
+  async settleBackfill(stages: ReadonlyArray<{ readonly stage: 1 | 2 | 3 | 4; readonly raceIds: readonly string[] }>): Promise<Record<1 | 2 | 3 | 4, number>> {
+    const changed: Record<1 | 2 | 3 | 4, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    const statements: Array<{ stage: 1 | 2 | 3 | 4; statement: D1PreparedStatement }> = [];
+    for (const { stage, raceIds } of stages) {
+      for (let i = 0; i < raceIds.length; i += SETTLE_IDS_PER_STATEMENT) {
+        statements.push({ stage, statement: this.db.prepare(settleRaceBackfillSql(stage)).bind(JSON.stringify(raceIds.slice(i, i + SETTLE_IDS_PER_STATEMENT))) });
+      }
+    }
+    for (let i = 0; i < statements.length; i += SETTLE_BATCH_STATEMENTS) {
+      const part = statements.slice(i, i + SETTLE_BATCH_STATEMENTS);
+      const results = await this.db.batch(part.map((p) => p.statement));
+      part.forEach((p, k) => {
+        changed[p.stage] += results[k]?.meta.changes ?? 0;
+      });
+    }
+    return changed;
+  }
+
+  /**
+   * 整合検査(Issue #597。{@link RECONCILE_RACE_BACKFILL_SQL}): 全レースの状態を作り直し、食い違う行を直す。分析の全走査(O(N))が 1 回。
+   * @returns 直した行数(0 でなければ、書き込みの経路のどこかが状態の作り直しを呼んでいない兆し)
+   */
+  async reconcileBackfillState(): Promise<number> {
+    const [result] = await this.db.batch([this.db.prepare(RECONCILE_RACE_BACKFILL_SQL)]);
+    return result?.meta.changes ?? 0;
   }
 
   /** 保存済みのクラスの分布(Issue #426-b。上の {@link CLASS_DISTRIBUTION_SQL})。 */
@@ -916,12 +869,12 @@ export class D1ResultStore implements ResultRepository {
 
   /**
    * 結果の補完の残りの数(Issue #217。上の {@link COUNT_BACKFILL_SQL})。
-   * @throws RangeError to が YYYYMMDD の8桁でない・exclude が文字列の配列でない
+   * @throws RangeError to が YYYYMMDD の8桁でない
    */
   async countBackfill(options: CountBackfillOptions): Promise<BackfillCounts> {
-    const { to, exclude } = options;
-    checkBackfillInput(to, exclude);
-    const row = await this.db.prepare(COUNT_BACKFILL_SQL).bind(to, JSON.stringify(exclude)).first<{ dated: number; undated: number }>();
+    const { to } = options;
+    checkBackfillInput(to, []);
+    const row = await this.db.prepare(COUNT_BACKFILL_SQL).bind(to).first<{ dated: number; undated: number }>();
     return { dated: row?.dated ?? 0, undated: row?.undated ?? 0 };
   }
 }

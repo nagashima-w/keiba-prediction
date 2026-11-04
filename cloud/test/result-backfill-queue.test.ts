@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { ResultBackfillCore, type BackfillDayStub, type BackfillOptions } from "../src/result-backfill-core";
 import type { ResultImportProgress } from "../src/race-day-core";
+import { RECOMPUTE_RACES_SQL } from "../src/race-backfill-state";
 import { D1ResultStore } from "../src/result-repository";
 import { countingDb, isBackfillListSql } from "./counting-db";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
@@ -59,6 +60,7 @@ async function seed(date: string, n: number, kind: "stage1" | "stage2" | "stage4
       }
     }
   }
+  await new D1ResultStore({ db: local.db }).reconcileBackfillState(); // 補完の状態(race_backfill)を作る(本番では書き込みの経路が書く)
   return ids;
 }
 
@@ -88,6 +90,7 @@ async function runNight(options: { backfill?: BackfillOptions; stage1Result?: "f
           if (winOddsOnly === true) {
             await local.db.prepare("UPDATE race_results SET win_odds = COALESCE(win_odds, 2.0), win_payout = COALESCE(win_payout, 200) WHERE race_id = ?").bind(id).run();
             await local.db.prepare("UPDATE analyses SET race_class = COALESCE(race_class, 'オープン') WHERE race_id = ?").bind(id).run();
+            await local.db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify([id])).run(); // 本番の保存の経路が batch の最後に流す文
           } else {
             for (const umaban of [1, 2]) {
               await local.db
@@ -95,6 +98,7 @@ async function runNight(options: { backfill?: BackfillOptions; stage1Result?: "f
                 .bind(id, umaban, umaban, options.stage1Result === "noOdds" ? null : 2.0, 200)
                 .run();
             }
+            await local.db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify([id])).run(); // 本番の保存の経路が batch の最後に流す文
           }
         }
         return { accepted: raceIds.length, ignored: { inProgress: 0, imported: 0, alreadyToday: 0 } };
@@ -237,6 +241,7 @@ describe("不正なレース: 依頼の前に記録して除外し、残りは�
     const bad = "202505090099";
     await local.db.prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date, race_class) VALUES (?, '2026-10-06T00:00:00.000Z', 0, '20261009', 'オープン')").bind(bad).run();
     await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds) VALUES (?, 1, 1, 3.5)").bind(bad).run();
+    await new D1ResultStore({ db: local.db }).reconcileBackfillState();
     const night = await runNight();
     await night.run();
     expect(night.requests.map((r) => r.raceIds)).toEqual([good]);

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { D1ResultStore, UNIMPORTED_MAX_LIMIT } from "../src/result-repository";
+import { withState } from "./race-backfill-test-helpers";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
 
 /**
@@ -19,7 +20,7 @@ beforeEach(async () => {
   await local.reset();
 });
 
-const store = (): D1ResultStore => new D1ResultStore({ db: local.db });
+const store = (): D1ResultStore => withState(new D1ResultStore({ db: local.db }));
 
 async function addAnalysis(raceId: string, kaisaiDate: string | null, i = 0): Promise<void> {
   await local.db
@@ -62,12 +63,12 @@ describe("listWinOddsBackfillRaces: 結果はあるがオッズが 1 頭も無�
     expect((await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId)).toEqual(["EMPTY"]);
   });
 
-  it("新しい日が尽きれば(オッズが入った・除外)、次に新しい日に移る。除外のレースは返さない。limit で切る", async () => {
+  it("新しい日が先に並び、オッズが入った・除外のレースは返さない。limit で切る(日をまたぐ。Issue #597・#598)", async () => {
     await addAnalysis("N1", "20261003");
     await addResult("N1");
     await addAnalysis("O1", "20261001");
     await addResult("O1");
-    expect((await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId)).toEqual(["N1"]);
+    expect((await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId)).toEqual(["N1", "O1"]);
     expect((await store().listWinOddsBackfillRaces({ to: "20261004", exclude: ["N1"], limit: 50 })).map((r) => r.raceId)).toEqual(["O1"]);
     await local.db.prepare("UPDATE race_results SET win_odds = 2.0 WHERE race_id = 'N1' AND umaban = 1").run();
     expect((await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId)).toEqual(["O1"]);
@@ -82,7 +83,10 @@ describe("listWinOddsBackfillRaces: 結果はあるがオッズが 1 頭も無�
     await addAnalysis("OTHER", "20261003");
     await addResult("SPLIT");
     await addResult("OTHER");
-    expect(await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).toStrictEqual([{ raceId: "OTHER", kaisaiDate: "20261003" }]);
+    expect(await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).toStrictEqual([
+      { raceId: "OTHER", kaisaiDate: "20261003" },
+      { raceId: "SPLIT", kaisaiDate: "20261002" }, // 最小の開催日
+    ]);
   });
 
   it("入力の検証は段階 1 と同じ(to が YYYYMMDD・limit が 1〜上限の整数・exclude が配列)", async () => {
@@ -95,7 +99,7 @@ describe("listWinOddsBackfillRaces: 結果はあるがオッズが 1 頭も無�
     ]) {
       await expect(s.listWinOddsBackfillRaces(bad)).rejects.toBeInstanceOf(RangeError);
     }
-    await expect(s.countWinOddsBackfill({ to: "bad", exclude: [] })).rejects.toBeInstanceOf(RangeError);
+    await expect(s.countWinOddsBackfill({ to: "bad" })).rejects.toBeInstanceOf(RangeError);
   });
 });
 
@@ -113,8 +117,9 @@ describe("countWinOddsBackfill: 残り(開催日あり・to 以前・除外を�
     await addAnalysis("U2", null);
     for (const id of ["D1", "D2", "D3", "FUT", "U1", "U2"]) await addResult(id);
     await addResult("DONE", [2.0]);
-    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: ["D3"] })).toStrictEqual({ dated: 2, undated: 2, scratchedMissing: 0 });
-    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 3, undated: 2, scratchedMissing: 0 });
+    expect(await store().countWinOddsBackfill({ to: "20261004" })).toStrictEqual({ dated: 3, undated: 2, scratchedMissing: 0 });
+    await store().settleBackfill([{ stage: 2, raceIds: ["D3"] }]); // 除外 = 済み・諦めの状態(2)(以前は除外の JSON。Issue #597)
+    expect(await store().countWinOddsBackfill({ to: "20261004" })).toStrictEqual({ dated: 2, undated: 2, scratchedMissing: 0 });
   });
 });
 
@@ -156,7 +161,7 @@ describe("Issue #270 listWinOddsBackfillRaces: オッズが入っていても、
     expect(await store().listWinOddsBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).toEqual([]); // 馬 1 は着順ありで NULL のままだが、対象にしない
   });
 
-  it("(B) のレースにも、除外・to・開催日 NULL・最も新しい日 1 日だけ・limit の規則がそのまま効く", async () => {
+  it("(B) のレースにも、除外・to・開催日 NULL・日の新しい順・limit の規則がそのまま効く", async () => {
     await addAnalysis("NEW1", "20261003");
     await addAnalysis("NEW2", "20261003");
     await addAnalysis("OLD1", "20261001");
@@ -164,7 +169,7 @@ describe("Issue #270 listWinOddsBackfillRaces: オッズが入っていても、
     await addAnalysis("UNDATED", null);
     for (const id of ["NEW1", "NEW2", "OLD1", "AFTER", "UNDATED"]) await addResultRows(id, [[1, 3.4, null], [null, 5.0, null]]);
     const ids = async (opts: { exclude: string[]; limit: number }) => (await store().listWinOddsBackfillRaces({ to: "20261004", ...opts })).map((r) => r.raceId);
-    expect(await ids({ exclude: [], limit: 50 })).toEqual(["NEW1", "NEW2"]);
+    expect(await ids({ exclude: [], limit: 50 })).toEqual(["NEW1", "NEW2", "OLD1"]);
     expect(await ids({ exclude: [], limit: 1 })).toEqual(["NEW1"]);
     expect(await ids({ exclude: ["NEW1", "NEW2"], limit: 50 })).toEqual(["OLD1"]);
   });
@@ -183,7 +188,8 @@ describe("Issue #270 countWinOddsBackfill: scratched が欠けて対象になる
     await addResultRows("OK", [[1, 3.4, 0], [null, 5.0, 0]]);
     await addResultRows("U_B", [[1, 3.4, null], [null, 5.0, null]]); // (B)・開催日 NULL
     await addResultRows("U_A", [[1, null, 0]]); // (A)・開催日 NULL
-    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: ["EXCL_B"] })).toStrictEqual({ dated: 3, undated: 2, scratchedMissing: 2 });
-    expect(await store().countWinOddsBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 4, undated: 2, scratchedMissing: 3 });
+    expect(await store().countWinOddsBackfill({ to: "20261004" })).toStrictEqual({ dated: 4, undated: 2, scratchedMissing: 3 });
+    await store().settleBackfill([{ stage: 2, raceIds: ["EXCL_B"] }]); // 除外 = 済み・諦めの状態(2)(両方の数から外れる)
+    expect(await store().countWinOddsBackfill({ to: "20261004" })).toStrictEqual({ dated: 3, undated: 2, scratchedMissing: 2 });
   });
 });

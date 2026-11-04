@@ -228,6 +228,7 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
     await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position) VALUES (?, ?, NULL)").bind(pending, scratchedUmaban).run();
     await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, win_odds, scratched) VALUES (?, 1, NULL, 340, 2.0, 0)").bind(recorded).run();
     await local.db.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, win_odds) VALUES (?, 1, 1, 340, 2.0)").bind(allFinished).run();
+    await new D1ResultStore({ db: local.db }).reconcileBackfillState(); // 生の INSERT は状態(race_backfill)を作らないので、状態の取得の前に作り直す(Issue #597)
     const w = world(jst(10, 10, 2), { htmlByRaceId: { [pending]: RESULT_WITH_SCRATCH_HTML } });
     expect((await w.core.getStatus()).winOdds).toMatchObject({ remaining: 1, scratchedMissing: 1 }); // 前提: 対象は pending の 1 レース(観測値で見える)
     await w.core.kick();
@@ -378,6 +379,7 @@ describe("結果の補完の結合(本物の補完 + 本物の日単位の DO + 
     }
     const dump = async (): Promise<Array<Record<string, unknown>>> => (await local.db.prepare("SELECT * FROM race_results ORDER BY race_id, umaban").all<Record<string, unknown>>()).results;
     const before = await dump();
+    await new D1ResultStore({ db: local.db }).reconcileBackfillState(); // 生の INSERT は状態(race_backfill)を作らないので、状態の取得の前に作り直す(Issue #597)
     const w = world(jst(10, 10, 2));
     expect((await w.core.getStatus()).winPayout).toMatchObject({ remaining: 1, undated: 1 }); // 前提: 対象は need の 1 レース(今日のレースは to より後で数えない。開催日不明は undated)
     await w.core.kick();

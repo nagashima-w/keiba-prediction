@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { COUNT_PAYOUT_BACKFILL_SQL, D1ResultStore, LIST_PAYOUT_BACKFILL_SQL, UNIMPORTED_MAX_LIMIT } from "../src/result-repository";
+import { D1ResultStore, UNIMPORTED_MAX_LIMIT } from "../src/result-repository";
+import { withState } from "./race-backfill-test-helpers";
 import { openLocalBindings, spyDb, type LocalBindings } from "./local-bindings";
 
 /**
@@ -18,7 +19,7 @@ beforeEach(async () => {
   await local.reset();
 });
 
-const store = (): D1ResultStore => new D1ResultStore({ db: local.db });
+const store = (): D1ResultStore => withState(new D1ResultStore({ db: local.db }));
 
 async function addAnalysis(raceId: string, kaisaiDate: string | null, i = 0): Promise<void> {
   await local.db
@@ -72,12 +73,12 @@ describe("listPayoutBackfillRaces: 結果はあるが全馬の win_payout が NU
     ]);
   });
 
-  it("新しい日が尽きれば(払戻が入った・除外)、次に新しい日に移る。除外のレースは返さない。limit で切る", async () => {
+  it("新しい日が先に並び、払戻が入った・除外のレースは返さない。limit で切る(日をまたぐ。Issue #597・#598)", async () => {
     await addAnalysis("N1", "20261003");
     await addResult("N1");
     await addAnalysis("O1", "20261001");
     await addResult("O1");
-    expect(ids(await store().listPayoutBackfillRaces({ to: "20261004", exclude: [], limit: 50 }))).toEqual(["N1"]);
+    expect(ids(await store().listPayoutBackfillRaces({ to: "20261004", exclude: [], limit: 50 }))).toEqual(["N1", "O1"]);
     expect(ids(await store().listPayoutBackfillRaces({ to: "20261004", exclude: ["N1"], limit: 50 }))).toEqual(["O1"]);
     await local.db.prepare("UPDATE race_results SET win_payout = 250 WHERE race_id = 'N1' AND umaban = 1").run();
     expect(ids(await store().listPayoutBackfillRaces({ to: "20261004", exclude: [], limit: 50 }))).toEqual(["O1"]);
@@ -115,33 +116,14 @@ describe("countPayoutBackfill: dated・undated・stillNull", () => {
     await addAnalysis("NORES", "20261003");
     for (const id of ["A", "B", "C", "D", "U"]) await addResult(id);
     await addResult("PAID", [200, null]);
-    expect(await store().countPayoutBackfill({ to: "20261004", exclude: ["C"] })).toStrictEqual({ dated: 2, undated: 1, stillNull: 1 });
-    expect(await store().countPayoutBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 3, undated: 1, stillNull: 0 });
+    expect(await store().countPayoutBackfill({ to: "20261004" })).toStrictEqual({ dated: 3, undated: 1, stillNull: 0 });
+    await store().settleBackfill([{ stage: 4, raceIds: ["C"] }]); // 取得済みなのにまだ NULL = 済み・諦めの状態(2)(以前は除外の JSON。Issue #597)
+    expect(await store().countPayoutBackfill({ to: "20261004" })).toStrictEqual({ dated: 2, undated: 1, stillNull: 1 });
   });
 
   it("空の D1 は全部 0。入力の検査は列挙と同じ(RangeError)", async () => {
-    expect(await store().countPayoutBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 0, undated: 0, stillNull: 0 });
-    await expect(store().countPayoutBackfill({ to: "x", exclude: [] })).rejects.toThrow(RangeError);
-    await expect(store().countPayoutBackfill({ to: "20261004", exclude: "A" as unknown as string[] })).rejects.toThrow(RangeError);
-  });
-});
-
-describe("読み取り行数の上界(meta.rows_read。【記録】区分の見積りの再現)", () => {
-  it("N = 600 件の分析(300 レース × 2、全部対象。各 2 頭)で、列挙 1 回の rows_read は 8N 以下・件数 1 回は 6N 以下(実測はローカルの D1 で列挙 4,498・件数 3,298。N に比例する)", async () => {
-    const N = 600;
-    for (let r = 0; r < N / 2; r += 1) {
-      const id = `R${String(r).padStart(4, "0")}`;
-      await addAnalysis(id, "20261001", r * 2);
-      await addAnalysis(id, "20261001", r * 2 + 1);
-      await addResult(id);
-    }
-    const list = await local.db.prepare(LIST_PAYOUT_BACKFILL_SQL).bind("20261004", "[]", 30).all();
-    const count = await local.db.prepare(COUNT_PAYOUT_BACKFILL_SQL).bind("20261004", "[]", "[]").all();
-    expect(list.results).toHaveLength(30); // 前提(空振り防止): 対象が実際に列挙されている
-    expect(list.meta.rows_read).toBeGreaterThan(0);
-    expect(count.meta.rows_read).toBeGreaterThan(0);
-    expect(list.meta.rows_read!).toBeLessThanOrEqual(8 * N);
-    expect(count.meta.rows_read!).toBeLessThanOrEqual(6 * N);
+    expect(await store().countPayoutBackfill({ to: "20261004" })).toStrictEqual({ dated: 0, undated: 0, stillNull: 0 });
+    await expect(store().countPayoutBackfill({ to: "x" })).rejects.toThrow(RangeError);
   });
 });
 

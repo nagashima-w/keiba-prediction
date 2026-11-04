@@ -45,6 +45,7 @@
  * - 孤立サロゲートは元に戻らない(U+FFFD に置き換わる)。
  */
 
+import { RECOMPUTE_RACES_SQL } from "./race-backfill-state";
 import { serializeMissed } from "./missed-bets";
 import {
   allocationBetParams,
@@ -398,7 +399,12 @@ export class D1AnalysisStore implements AnalysisRepository {
     // R2 の操作回数の柵(Class A)。達していたら、R2 に書かず D1 に要約だけを保存する(カウンタは増やさない)。
     const ym = monthKey(this.now());
     const writeYm = isWriteAllowed(await this.readUsage(ym)) ? ym : null;
-    const results = await this.db.batch(buildSaveStatements(this.db, record, writeYm, extra.llmNote, serializeLlmCalls(extra.llmCalls), serializeMarkRepair(extra.markRepair)));
+    // 補完の状態(race_backfill。Issue #597)の作り直しを batch の最後に 1 文(分析の最小の開催日・クラスの欠けが変わるので、保存のたびにそのレースを作り直す)。
+    // 分析の INSERT の位置({@link analysesInsertIndex})は変わらない。
+    const results = await this.db.batch([
+      ...buildSaveStatements(this.db, record, writeYm, extra.llmNote, serializeLlmCalls(extra.llmCalls), serializeMarkRepair(extra.markRepair)),
+      this.db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify([record.raceId])),
+    ]);
     const id = results[analysesInsertIndex(writeYm)]?.meta.last_row_id;
     if (typeof id !== "number" || !(id > 0)) {
       throw new Error("analyses の採番 id を取得できませんでした");

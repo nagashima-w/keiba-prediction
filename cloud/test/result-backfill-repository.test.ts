@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { D1ResultStore, LIST_BACKFILL_SQL, UNIMPORTED_MAX_LIMIT } from "../src/result-repository";
+import { withState } from "./race-backfill-test-helpers";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
 
 /**
@@ -19,7 +20,7 @@ beforeEach(async () => {
   await local.reset();
 });
 
-const store = (): D1ResultStore => new D1ResultStore({ db: local.db });
+const store = (): D1ResultStore => withState(new D1ResultStore({ db: local.db }));
 
 async function addAnalysis(raceId: string, kaisaiDate: string | null, i = 0): Promise<void> {
   await local.db
@@ -28,11 +29,11 @@ async function addAnalysis(raceId: string, kaisaiDate: string | null, i = 0): Pr
     .run();
 }
 
-describe("listBackfillRaces: 未取込のある最も新しい日(to 以前)を、その日のぶんだけ", () => {
-  it("to 以前で最も新しい未取込の日だけを返す(その日のレースID 昇順)。to より後・開催日が NULL・結果のあるレースは含めない", async () => {
+describe("listBackfillRaces: 未取込のレースを、開催日の新しい順 → レースID 昇順に、日をまたいで返す(to 以前。Issue #597・#598。以前は最も新しい日 1 日だけ)", () => {
+  it("to 以前の未取込を、開催日の新しい順 → 同じ日はレースID 昇順で返す。to より後・開催日が NULL・結果のあるレースは含めない", async () => {
     await addAnalysis("B2", "20261003");
     await addAnalysis("A2", "20261003");
-    await addAnalysis("OTHERDAY", "20261001"); // 古い日(返らない)
+    await addAnalysis("OTHERDAY", "20261001"); // 古い日(新しい日のあとに続く)
     await addAnalysis("AFTER", "20261005"); // to の後
     await addAnalysis("NULLDATE", null);
     await addAnalysis("DONE", "20261003");
@@ -41,16 +42,17 @@ describe("listBackfillRaces: 未取込のある最も新しい日(to 以前)を�
     expect(list).toStrictEqual([
       { raceId: "A2", kaisaiDate: "20261003" },
       { raceId: "B2", kaisaiDate: "20261003" },
+      { raceId: "OTHERDAY", kaisaiDate: "20261001" },
     ]);
   });
 
-  it("新しい日が尽きれば(取り込み済み・除外)、次に新しい日に移る", async () => {
+  it("新しい日が取り込み済み・除外なら、その日は出ず、次に新しい日が先頭に来る(新しい日があれば新しい日が先)", async () => {
     await addAnalysis("N1", "20261003");
     await addAnalysis("O1", "20261001");
     await local.db.prepare("INSERT INTO race_results (race_id, umaban) VALUES ('N1', 1)").run();
     expect(await store().listBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).toStrictEqual([{ raceId: "O1", kaisaiDate: "20261001" }]);
     await addAnalysis("N2", "20261003");
-    expect((await store().listBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId)).toEqual(["N2"]);
+    expect((await store().listBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId)).toEqual(["N2", "O1"]);
     expect(await store().listBackfillRaces({ to: "20261004", exclude: ["N2"], limit: 50 })).toStrictEqual([{ raceId: "O1", kaisaiDate: "20261001" }]);
   });
 
@@ -72,11 +74,14 @@ describe("listBackfillRaces: 未取込のある最も新しい日(to 以前)を�
     expect(await store().listBackfillRaces({ to: "20261003", exclude: ["KEEP"], limit: 50 })).toStrictEqual([]);
   });
 
-  it("開催日が分かれている同じレース(MIN を採る)は、最小の開催日の日に属する", async () => {
+  it("開催日が分かれている同じレース(MIN を採る)は、最小の開催日で返る", async () => {
     await addAnalysis("SPLIT", "20261003", 1);
     await addAnalysis("SPLIT", "20261002", 2);
     await addAnalysis("OTHER", "20261003");
-    expect(await store().listBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).toStrictEqual([{ raceId: "OTHER", kaisaiDate: "20261003" }]);
+    expect(await store().listBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).toStrictEqual([
+      { raceId: "OTHER", kaisaiDate: "20261003" },
+      { raceId: "SPLIT", kaisaiDate: "20261002" }, // 最小の開催日(2 行の 20261003 と 20261002 のうち後者)
+    ]);
   });
 
   it("入力の検証: to が YYYYMMDD でない・limit が 1〜上限の整数でない・exclude が配列でないと RangeError(D1 には発行しない)", async () => {
@@ -93,9 +98,10 @@ describe("listBackfillRaces: 未取込のある最も新しい日(to 以前)を�
     await expect(s.listBackfillRaces({ to: "20261004", exclude: [], limit: UNIMPORTED_MAX_LIMIT })).resolves.toEqual([]); // 境界は通る
   });
 
-  it("SQL は NOT EXISTS で判定する(COUNT(finish_position) ではない)・NULL の開催日は比較に入らない", () => {
-    expect(LIST_BACKFILL_SQL).toContain("NOT EXISTS (SELECT 1 FROM race_results");
-    expect(LIST_BACKFILL_SQL).not.toContain("COUNT(finish_position)");
+  it("SQL は race_backfill の部分索引から読む(`st1 > 0 AND st1 = 1`)。分析の表を読まない(判定の NOT EXISTS は状態の導出の式 race-backfill-state.ts にある)・NULL の開催日は比較に入らない", () => {
+    expect(LIST_BACKFILL_SQL).toContain("FROM race_backfill");
+    expect(LIST_BACKFILL_SQL).toContain("st1 > 0 AND st1 = 1");
+    expect(LIST_BACKFILL_SQL).not.toContain("analyses");
   });
 });
 
@@ -115,20 +121,22 @@ describe("countBackfill: 残り(開催日あり・to 以前・除外を除く)�
     await addAnalysis("MIX", "20261001", 2);
     await addAnalysis("UDONE", null);
     await local.db.prepare("INSERT INTO race_results (race_id, umaban) VALUES ('UDONE', 1)").run();
-    const counts = await store().countBackfill({ to: "20261004", exclude: ["D3"] });
+    await store().reconcileBackfillState();
+    await store().settleBackfill([{ stage: 1, raceIds: ["D3"] }]); // 諦めた(除外)= 済み・諦めの状態(2)にする(以前は除外の JSON。Issue #597)
+    const counts = await store().countBackfill({ to: "20261004" });
     expect(counts).toStrictEqual({ dated: 3, undated: 2 }); // dated = D1, D2, MIX / undated = U1, U2
   });
 
   it("境界: 開催日がちょうど to(= 昨日)のレースは dated に入る(含む)。to の翌日(= 今日)は入らない。列挙(listBackfillRaces)と同じ境界", async () => {
     await addAnalysis("EDGE", "20261004");
     await addAnalysis("TODAY", "20261005");
-    const counts = await store().countBackfill({ to: "20261004", exclude: [] });
+    const counts = await store().countBackfill({ to: "20261004" });
     expect(counts).toStrictEqual({ dated: 1, undated: 0 });
     expect((await store().listBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId)).toEqual(["EDGE"]);
-    expect((await store().countBackfill({ to: "20261003", exclude: [] })).dated).toBe(0); // to を 1 日前にすると入らない
+    expect((await store().countBackfill({ to: "20261003" })).dated).toBe(0); // to を 1 日前にすると入らない
   });
 
   it("何も無ければ 0 と 0(SUM が NULL にならない)", async () => {
-    expect(await store().countBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 0, undated: 0 });
+    expect(await store().countBackfill({ to: "20261004" })).toStrictEqual({ dated: 0, undated: 0 });
   });
 });

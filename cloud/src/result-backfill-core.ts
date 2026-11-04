@@ -168,6 +168,13 @@ export interface BackfillStore {
    */
   listPayoutBackfillRaces?(options: ListBackfillOptions): Promise<UnimportedRace[]>;
   countPayoutBackfill?(options: CountBackfillOptions): Promise<PayoutBackfillCounts>;
+  /**
+   * 済み・諦めを D1 の状態(`race_backfill`。Issue #597)に写す。**省略可**: 無い Store(従来の構成・既存のテストの偽物)では写さず、整合検査もしない。
+   * 本番の `D1ResultStore` は両方持つ。戻り値は段階ごとに実際に状態 2 にした行数。
+   */
+  settleBackfill?(stages: ReadonlyArray<{ readonly stage: 1 | 2 | 3 | 4; readonly raceIds: readonly string[] }>): Promise<Record<1 | 2 | 3 | 4, number>>;
+  /** 整合検査(Issue #597): 全レースの状態を作り直し、食い違いを直す。直した行数を返す。 */
+  reconcileBackfillState?(): Promise<number>;
 }
 
 export interface BackfillDeps {
@@ -325,6 +332,8 @@ export class ResultBackfillCore {
   private readonly startHour: number;
   private readonly endHour: number;
   private readonly disabled: boolean;
+  /** D1 に写す前の済み・諦め(段階 → レース ID)。メモリだけ(落ちても `settle_dirty` が残り、次のステップが全部を写し直す)。 */
+  private readonly pendingSettle = new Map<1 | 2 | 3 | 4, Set<string>>();
 
   constructor(deps: BackfillDeps, options: BackfillOptions = {}) {
     this.deps = deps;
@@ -386,71 +395,109 @@ export class ResultBackfillCore {
   }
 
   /**
-   * 列挙から除外するレース ID: 永久に除外したもの + その晩に試したもの。段階 2 の `odds_abandoned`・`fill_done`(補完を終えた)も含める
-   * (段階 1 の列挙に混ざっても、そのレースは結果があるので当たらない。段階 2 の列挙は、これで補完済みのレースを再び選ばない)。
-   * **旧い `odds_done`(Issue #270 より前に、オッズだけの補完を終えた印)は含めない**: それらのレースは scratched が NULL のままなので、D1 の条件(scratched の欠け)が選ぶ限り取り直す。
-   * 取り込めたら `fill_done` に上書きされ、以後は除外される(1 つの `race_id` に状態は 1 つなので、`odds_done` ↔ 別の状態で行き来しない)。
+   * 列挙から除外するレース ID: **その晩に試したもの**だけ(Issue #597)。済み・諦めは D1 の状態(`race_backfill` の 2。{@link markSettled})にあるので、除外の JSON には入れない
+   * (以前は済み・諦めの数だけ JSON が育ち、列挙の読み取りが増えていた)。同じ晩に重ねて取らないよう、段階をまたいで見る:
+   * 段階 1・2 は段階 1・2 の表(`backfill_race`)、段階 3 は段階 3 の表(`backfill_class`)と `backfill_race`、段階 4 は 3 つの表すべて(`last_night` が今夜の行)。
    */
   private excludedIds(night: string, kind: BackfillKind = "results"): string[] {
-    if (kind === "race-class") {
-      return this.classExcludedIds(night);
+    const tables = kind === "win-payout" ? ["backfill_payout", "backfill_class", "backfill_race"] : kind === "race-class" ? ["backfill_class", "backfill_race"] : ["backfill_race"];
+    const ids = new Set<string>();
+    for (const table of tables) {
+      for (const row of this.deps.sql.exec(`SELECT race_id FROM ${table} WHERE last_night = ?`, night).toArray() as { race_id: string }[]) {
+        ids.add(row.race_id);
+      }
     }
-    if (kind === "win-payout") {
-      return this.payoutExcludedIds(night);
+    return [...ids].sort();
+  }
+
+  // ---- 済み・諦めの D1 への写し(Issue #597) ----
+
+  /**
+   * 済み・諦めを D1 の状態に写す対象に積む(DO の記録を書いた直後に呼ぶ)。`stages` は D1 の段階(1〜4): 段階 1 の諦め → [1] / 段階 2 の `odds_abandoned` → [2, 3, 4] / `fill_done` → [2] /
+   * 段階 3 の `class_abandoned` → [3, 4] / `class_done` → [3] / 段階 4 の `payout_abandoned`・`payout_done` → [4](他の段階の除外の規則は、DO の以前の除外の JSON と同じ)。
+   * 写す前に落ちても分かるよう、積むと同時に `settle_dirty` を立てる(次のステップが DO の記録の全部を写し直す。{@link ensureSynced})。
+   */
+  private markSettled(raceId: string, stages: ReadonlyArray<1 | 2 | 3 | 4>): void {
+    if (this.deps.store.settleBackfill === undefined) {
+      return;
     }
-    const rows = this.deps.sql
-      .exec("SELECT race_id FROM backfill_race WHERE state IN ('abandoned', 'odds_abandoned', 'fill_done') OR last_night = ? ORDER BY race_id", night)
-      .toArray() as { race_id: string }[];
-    return rows.map((r) => r.race_id);
+    this.metaPut("settle_dirty", "1");
+    for (const stage of stages) {
+      const set = this.pendingSettle.get(stage) ?? new Set<string>();
+      set.add(raceId);
+      this.pendingSettle.set(stage, set);
+    }
+  }
+
+  /** 積んだ分を D1 に写す。失敗しても握る(`settle_dirty` が残るので、次のステップが写し直す)。 */
+  private async flushSettle(): Promise<void> {
+    const store = this.deps.store;
+    if (store.settleBackfill === undefined || this.pendingSettle.size === 0) {
+      return;
+    }
+    const entries = [...this.pendingSettle].map(([stage, ids]) => ({ stage, raceIds: [...ids].sort() }));
+    this.pendingSettle.clear();
+    try {
+      await store.settleBackfill(entries);
+      this.metaDelete("settle_dirty");
+    } catch (error) {
+      this.deps.onWarn(`result-backfill: settle flush failed error=${errorKind(error)}`);
+    }
+  }
+
+  /** DO の記録の済み・諦めの全部を、段階ごとのレース ID にする(初回の写し・やり直し用)。 */
+  private collectSettled(): Array<{ stage: 1 | 2 | 3 | 4; raceIds: string[] }> {
+    const ids = (sql: string): string[] => (this.deps.sql.exec(sql).toArray() as { race_id: string }[]).map((r) => r.race_id);
+    const abandoned1 = ids("SELECT race_id FROM backfill_race WHERE state = 'abandoned'");
+    const oddsAbandoned = ids("SELECT race_id FROM backfill_race WHERE state = 'odds_abandoned'");
+    const fillDone = ids("SELECT race_id FROM backfill_race WHERE state = 'fill_done'");
+    const classAbandoned = ids("SELECT race_id FROM backfill_class WHERE state = 'class_abandoned'");
+    const classDone = ids("SELECT race_id FROM backfill_class WHERE state = 'class_done'");
+    const payoutSettled = ids("SELECT race_id FROM backfill_payout WHERE state IN ('payout_abandoned', 'payout_done')");
+    const uniq = (...lists: string[][]): string[] => [...new Set(lists.flat())].sort();
+    return [
+      { stage: 1, raceIds: uniq(abandoned1) },
+      { stage: 2, raceIds: uniq(oddsAbandoned, fillDone) },
+      { stage: 3, raceIds: uniq(oddsAbandoned, classAbandoned, classDone) },
+      { stage: 4, raceIds: uniq(oddsAbandoned, classAbandoned, payoutSettled) },
+    ];
   }
 
   /**
-   * 段階 3 の列挙から除外するレース ID(Issue #426-b): 取得を終えた・永久に除外したもの(`class_done`・`class_abandoned`)+ 結果ページが取れず諦めた段階 2 の `odds_abandoned`
-   * (同じページを取り直しても同じ理由で失敗する)+ **その晩に試したもの**(段階 3 の表と、段階 1・2 の表のどちらでも。同じ晩に重ねて取らない)。
-   * 段階 2 の `fill_done` は含めない(それらのレースこそ、クラスの補完が要る)。
+   * D1 の状態に済み・諦めが写されていること(初回、または写しの失敗・中断のあと)を保証する。**写されるまで列挙しない**(写す前に列挙すると、済み・諦めのレースを取り直す)。
+   * DO の記録の全部を写し(冪等)、写した件数と実際に状態 2 にした件数を固定の形で記録する(本番での確認用)。失敗は投げる(ステップの失敗として 10 分後に再試行)。
    */
-  private classExcludedIds(night: string): string[] {
-    const own = this.deps.sql.exec("SELECT race_id FROM backfill_class WHERE state IN ('class_abandoned', 'class_done') OR last_night = ?", night).toArray() as { race_id: string }[];
-    const other = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state = 'odds_abandoned' OR last_night = ?", night).toArray() as { race_id: string }[];
-    return [...new Set([...own, ...other].map((r) => r.race_id))].sort();
+  async ensureSynced(): Promise<void> {
+    const store = this.deps.store;
+    if (store.settleBackfill === undefined || (this.metaGet("d1_settled_synced") === "1" && this.metaGet("settle_dirty") !== "1")) {
+      return;
+    }
+    const sets = this.collectSettled();
+    const changed = await store.settleBackfill(sets);
+    this.pendingSettle.clear();
+    this.metaPut("d1_settled_synced", "1");
+    this.metaDelete("settle_dirty");
+    const of = (stage: 1 | 2 | 3 | 4): string => `${sets.find((s) => s.stage === stage)!.raceIds.length}/${changed[stage]}`;
+    this.deps.log(`result-backfill: d1-settled-synced (DO の記録の件数/状態 2 にした件数) stage1=${of(1)} stage2=${of(2)} stage3=${of(3)} stage4=${of(4)}`, "info");
   }
 
-  /**
-   * 段階 4 の列挙から除くレース ID(Issue #556): 取得を終えた・永久に除外したもの(`payout_done`・`payout_abandoned`)+ 結果ページが取れず諦めた段階 2 の `odds_abandoned`・段階 3 の `class_abandoned`
-   * (同じページを取り直しても同じ理由で失敗する)+ **その晩に試したもの**(3 つの表のどれでも。同じ晩に重ねて取らない)。段階 2 の `fill_done`・段階 3 の `class_done` は含めない(それらのレースこそ払戻の補完が要る)。
-   */
-  private payoutExcludedIds(night: string): string[] {
-    const own = this.deps.sql.exec("SELECT race_id FROM backfill_payout WHERE state IN ('payout_abandoned', 'payout_done') OR last_night = ?", night).toArray() as { race_id: string }[];
-    const cls = this.deps.sql.exec("SELECT race_id FROM backfill_class WHERE state = 'class_abandoned' OR last_night = ?", night).toArray() as { race_id: string }[];
-    const odds = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state = 'odds_abandoned' OR last_night = ?", night).toArray() as { race_id: string }[];
-    return [...new Set([...own, ...cls, ...odds].map((r) => r.race_id))].sort();
-  }
-
-  /** 段階 4 の状況の数えで除く、取得を終えた・永久に除外したレース ID(今夜の試行は含めない=今夜試したレースも `remaining` に数える)。 */
-  private payoutCountExcludedIds(): string[] {
-    const own = this.deps.sql.exec("SELECT race_id FROM backfill_payout WHERE state IN ('payout_abandoned', 'payout_done')").toArray() as { race_id: string }[];
-    const cls = this.deps.sql.exec("SELECT race_id FROM backfill_class WHERE state = 'class_abandoned'").toArray() as { race_id: string }[];
-    const odds = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state = 'odds_abandoned'").toArray() as { race_id: string }[];
-    return [...new Set([...own, ...cls, ...odds].map((r) => r.race_id))].sort();
-  }
-
-  /** 段階 3 の状況の数えで除く、取得を終えた・永久に除外したレース ID(今夜の試行は含めない=今夜試したレースも `remaining` に数える)。 */
-  private classCountExcludedIds(): string[] {
-    const own = this.deps.sql.exec("SELECT race_id FROM backfill_class WHERE state IN ('class_abandoned', 'class_done')").toArray() as { race_id: string }[];
-    const other = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state = 'odds_abandoned'").toArray() as { race_id: string }[];
-    return [...new Set([...own, ...other].map((r) => r.race_id))].sort();
-  }
-
-  /** 段階 1 の残りの数えで除く、永久に除外したレース ID(段階 2 の状態は含めない)。 */
-  private abandonedIds(): string[] {
-    const rows = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state = 'abandoned' ORDER BY race_id").toArray() as { race_id: string }[];
-    return rows.map((r) => r.race_id);
-  }
-
-  /** 段階 2 の残りの数えで除く、補完を終えた(`fill_done`)・永久に除外した(`odds_abandoned`)レース ID。旧い `odds_done` は含めない(`excludedIds` の説明)。 */
-  private oddsExcludedIds(): string[] {
-    const rows = this.deps.sql.exec("SELECT race_id FROM backfill_race WHERE state IN ('odds_abandoned', 'fill_done') ORDER BY race_id").toArray() as { race_id: string }[];
-    return rows.map((r) => r.race_id);
+  /** 整合検査(1 晩 1 回。Issue #597): 全レースの状態を作り直し、食い違いを直す。0 でなければ書き込みの経路のどこかが状態の作り直しを呼んでいない兆しなので警告に出す。失敗は握る。 */
+  private async reconcileTonight(night: string): Promise<void> {
+    const store = this.deps.store;
+    if (store.reconcileBackfillState === undefined || this.metaGet("reconciled_night") === night) {
+      return;
+    }
+    try {
+      const fixed = await store.reconcileBackfillState();
+      this.metaPut("reconciled_night", night);
+      if (fixed > 0) {
+        this.deps.onWarn(`result-backfill: race_backfill drift fixed count=${fixed}`);
+      } else {
+        this.deps.log("result-backfill: race_backfill reconciled drift=0", "info");
+      }
+    } catch (error) {
+      this.deps.onWarn(`result-backfill: race_backfill reconcile failed error=${errorKind(error)}`);
+    }
   }
 
   /** 取得できなかったレースを記録する(上の「取得できないレース」の規則)。 */
@@ -472,6 +519,9 @@ export class ResultBackfillCore {
       cls,
       abandon ? abandoned : tried,
     );
+    if (abandon) {
+      this.markSettled(raceId, kind === "results" ? [1] : kind === "win-odds" ? [2, 3, 4] : kind === "race-class" ? [3, 4] : [4]);
+    }
   }
 
   /** 段階 3 で取得を終えたレースを記録する(ページにクラスが無くても・語彙に無い表記でも・保存に失敗しても、二度と列挙しない。D1 が NULL のままなら `raceClass.stillNull` に数える)。 */
@@ -482,6 +532,7 @@ export class ResultBackfillCore {
       raceId,
       night,
     );
+    this.markSettled(raceId, [3]);
   }
 
   /** 段階 4 で取得を終えたレースを記録する(取得できたのに D1 が全馬 NULL のままでも、二度と列挙しない。`winPayout.stillNull` に数える)。 */
@@ -492,6 +543,7 @@ export class ResultBackfillCore {
       raceId,
       night,
     );
+    this.markSettled(raceId, [4]);
   }
 
   /** 段階 2 で補完を終えたレースを記録する(ページにオッズが無くて列に入らなかった、または着順なしの馬が D1 に残ったレースも、二度と列挙しない)。旧い `odds_done` の行は `fill_done` に上書きする。 */
@@ -502,6 +554,7 @@ export class ResultBackfillCore {
       raceId,
       night,
     );
+    this.markSettled(raceId, [2]);
   }
 
   // ---- アラーム ----
@@ -560,6 +613,10 @@ export class ResultBackfillCore {
       await this.setAlarm(nextNight);
       return;
     }
+
+    // 2b. D1 の状態(race_backfill。Issue #597)の準備: 済み・諦めの写し(**写されるまで列挙しない**。失敗はステップの失敗として 10 分後に再試行)と、1 晩 1 回の整合検査(失敗は握る)。
+    await this.ensureSynced();
+    await this.reconcileTonight(night);
 
     // 3. gate が混んでいたら引く(既存の自動実行が先)。
     let gate: { readonly blockedUntil: number | null; readonly pending: number };
@@ -626,6 +683,7 @@ export class ResultBackfillCore {
       for (const race of listed) {
         this.recordFailure(race.raceId, "dispatch-failed", night, false, kind);
       }
+      await this.flushSettle(); // 5 晩続けば諦める(D1 の状態にも写す)
       this.metaPut("paused_night", night);
       await this.setAlarm(nextNight);
       return;
@@ -671,7 +729,7 @@ export class ResultBackfillCore {
               break;
             }
             const want = Math.min(Math.max(remainingTonight, 1), UNIMPORTED_MAX_LIMIT);
-            const options = { to, exclude: this.excludedIds(night, kind), limit: want, multiDay: true };
+            const options = { to, exclude: this.excludedIds(night, kind), limit: want };
             const found =
               kind === "win-payout"
                 ? await this.deps.store.listPayoutBackfillRaces!(options)
@@ -719,6 +777,7 @@ export class ResultBackfillCore {
       // 段階 2〜4 は「NULL の列だけを埋める」補完モード(段階 3 は結果ステージが saveRaceClass も呼ぶ。段階 4 は saveWinPayout が単勝の払戻を埋める)。
       ...(kind !== "results" ? { winOddsOnly: true } : {}),
     });
+    await this.flushSettle(); // 不正なレースの諦め(invalid-race)の D1 への写し(Issue #597)
     this.saveQueue(queue);
     return { listed, skipped, result };
   }
@@ -795,6 +854,7 @@ export class ResultBackfillCore {
     for (const f of failures) {
       this.recordFailure(f.raceId, f.cls, inflight.night, systemic, kind);
     }
+    await this.flushSettle(); // 済み・諦めの D1 への写し(Issue #597)
     if (kind === "results") {
       this.metaPut("imported", String(this.count("imported") + imported));
     }
@@ -812,14 +872,14 @@ export class ResultBackfillCore {
     const now = this.deps.now();
     const night = jstKaisaiDate(now);
     const to = addDaysToKaisaiDate(night, -1);
-    const counts = await this.deps.store.countBackfill({ to, exclude: this.abandonedIds() });
-    const oddsCounts = await this.deps.store.countWinOddsBackfill({ to, exclude: this.oddsExcludedIds() });
+    const counts = await this.deps.store.countBackfill({ to });
+    const oddsCounts = await this.deps.store.countWinOddsBackfill({ to });
     // 段階 3(Issue #426-b)。Store が持たない構成(従来)では、すべて 0・空。
     const classCounts: ClassBackfillCounts =
-      this.deps.store.countClassBackfill === undefined ? { dated: 0, undated: 0, stillNull: 0 } : await this.deps.store.countClassBackfill({ to, exclude: this.classCountExcludedIds() });
+      this.deps.store.countClassBackfill === undefined ? { dated: 0, undated: 0, stillNull: 0 } : await this.deps.store.countClassBackfill({ to });
     // 段階 4(Issue #556)。Store が持たない構成(従来)では、すべて 0・空。
     const payoutCounts: PayoutBackfillCounts =
-      this.deps.store.countPayoutBackfill === undefined ? { dated: 0, undated: 0, stillNull: 0 } : await this.deps.store.countPayoutBackfill({ to, exclude: this.payoutCountExcludedIds() });
+      this.deps.store.countPayoutBackfill === undefined ? { dated: 0, undated: 0, stillNull: 0 } : await this.deps.store.countPayoutBackfill({ to });
     const payoutByClass: Record<string, number> = {};
     let payoutAbandoned = 0;
     for (const row of this.deps.sql.exec("SELECT last_class AS cls, COUNT(*) AS n FROM backfill_payout WHERE state = 'payout_abandoned' GROUP BY last_class ORDER BY last_class").toArray() as { cls: string; n: number }[]) {
