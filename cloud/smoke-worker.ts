@@ -39,6 +39,7 @@ import resultCentralHtml from "../fixtures/result_202603020211.html";
 import resultNarPresaleHtml from "../fixtures/nar_result_presale_202642071612.html";
 import narListHtml from "../fixtures/nar_race_list_sub_20260927.html";
 import { NetkeibaGate as RealGate } from "./src/netkeiba-gate-do";
+import { RECONCILE_RACE_BACKFILL_SQL } from "./src/race-backfill-state";
 import type { ConnectFn, SocketLike } from "./src/socket-fetch";
 import { GATE_NAME, type Env } from "./src/handler";
 import { runCloudAnalysis } from "./src/pipeline";
@@ -441,6 +442,7 @@ async function smokeResults(url: URL, env: SmokeEnv): Promise<Response> {
       env.DB.prepare("DELETE FROM race_combo_payouts WHERE race_id = ?").bind(raceId),
       env.DB.prepare("DELETE FROM race_combo_payout_imports WHERE race_id = ?").bind(raceId),
     ]);
+    await env.DB.prepare(RECONCILE_RACE_BACKFILL_SQL).run(); // 生の DELETE も補完の状態(race_backfill。Issue #597)を作り直す
     return Response.json({ ok: true });
   }
   const detail = (await new D1ResultStore({ db: env.DB }).getRaceResultDetails([raceId])).get(raceId);
@@ -494,6 +496,7 @@ async function smokeSeedAnalyses(env: SmokeEnv): Promise<Response> {
   for (const raceId of ["202603020211", "202603020212"]) {
     await env.DB.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, place_payout) VALUES (?, 1, 1, 400, 150)").bind(raceId).run();
   }
+  await env.DB.prepare(RECONCILE_RACE_BACKFILL_SQL).run(); // 生の INSERT は補完の状態(race_backfill。Issue #597)を作らないので、作り直す(本番の経路は batch の最後に流す)
   return Response.json({ ok: true, saved: results });
 }
 
@@ -551,6 +554,7 @@ async function smokeMonthly(url: URL, env: SmokeEnv): Promise<Response> {
   await analysis(`${month}0000000001`, `${month.slice(0, 4)}-${month.slice(4)}-01T04:00:00.000Z`, `${month}01`, "v-smoke-1");
   await analysis(`${month}0000000002`, `${month.slice(0, 4)}-${month.slice(4)}-28T04:00:00.000Z`, `${month}28`, "v-smoke-2");
   await env.DB.prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_payout, place_payout) VALUES (?, 1, 1, 400, 150)").bind(`${month}0000000001`).run();
+  await env.DB.prepare(RECONCILE_RACE_BACKFILL_SQL).run(); // 補完の状態(race_backfill。Issue #597)を作り直す
   return Response.json({ ok: true });
 }
 
