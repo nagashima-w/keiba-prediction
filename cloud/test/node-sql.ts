@@ -23,7 +23,7 @@ export function openNodeSql(): NodeSql {
       statements.push(query);
       const stmt = db.prepare(query);
       // SELECT 系(列を返す文)は all()、それ以外は run()
-      if (/^\s*(SELECT|WITH)\b/i.test(query)) {
+      if (/^\s*(SELECT|WITH|EXPLAIN)\b/i.test(query)) {
         const rows = stmt.all(...(bindings as never[])) as Record<string, unknown>[];
         return { toArray: () => rows.map((r) => ({ ...r })) };
       }

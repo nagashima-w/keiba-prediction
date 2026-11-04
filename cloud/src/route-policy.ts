@@ -103,6 +103,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // 過去の結果の毎晩の取得(Issue #554)。状態(GET)と手動の再開(POST)。取得の進み具合・止まった理由が見えるので管理者だけ。netkeiba には出ない(DO の状態を読む・動かす)
   exact("/api/race-archive", ADMIN_ONLY),
   exact("/api/race-archive/resume", ADMIN_ONLY),
+  // 過去の結果の毎晩の変換(Issue #590)。状態(GET だけ)。変換の進み具合・止まった理由が見えるので管理者だけ。netkeiba には出ない(DO の状態を読む)
+  exact("/api/race-archive/runs", ADMIN_ONLY),
   exact("/api/reports/run", ADMIN_ONLY), // 日報の手動作成(LLM を呼ぶ)
   exact("/api/monthly-reports/run", ADMIN_ONLY), // 月報の手動作成と作り直し(Issue #280。LLM を呼ぶ)
   // 統計モデルの見直し用の書き出し(Issue #266)。分析・結果の全件に近い内容(prior・補正・着順・オッズ)が出るので管理者だけ。作成は DO が R2 の詳細を大量に読む

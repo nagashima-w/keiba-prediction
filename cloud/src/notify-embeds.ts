@@ -39,6 +39,7 @@ import type { AutoFailReason, AutoRunOutcome } from "./auto-run-result";
 import type { PlanFailureReasons } from "./plan-failure";
 import type { PlanProgress } from "./race-day-core";
 import type { ArchiveNotice } from "./race-archive-fetch-core";
+import type { RunsNotice } from "./race-archive-runs-core";
 import { jstHm, jstIsoDate } from "../../packages/core/src/common/jst";
 
 export interface EmbedField {
@@ -592,6 +593,35 @@ export function buildArchiveNoticeEmbed(notice: ArchiveNotice): CloudEmbed {
         color: COLOR_ORANGE,
       });
     }
+  }
+}
+
+/**
+ * 過去の結果の毎晩の変換(Issue #590。`race-archive-runs-core.ts`)が止まったときの通知。**固定文と数だけ**で、例外の文面・ページの本文は含まない。
+ * 色だけに頼らず、文字(【停止】【一時停止】)でも伝える。再開は自動(次の晩に確かめ直す)なので、手での再開の案内は書かない。
+ */
+export function buildArchiveRunsNoticeEmbed(notice: RunsNotice): CloudEmbed {
+  switch (notice.kind) {
+    case "failures":
+      return fitEmbed({
+        title: "過去の結果の変換を一時停止しました",
+        description: `【一時停止】変換の失敗が連続 ${notice.count} 回になったため、今夜は止めました(${jstMonthDayTime(notice.at)})。${jstMonthDayTime(notice.resumeAt)}(次の晩)から自動で再開します。`,
+        color: COLOR_ORANGE,
+      });
+    case "capacity": {
+      const size = notice.dbSizeBytes === null ? "D1 の大きさを読めません(安全のため止めました)" : `D1 の大きさが上限を超えています(${Math.round(notice.dbSizeBytes / 1_000_000)} MB)`;
+      return fitEmbed({
+        title: "過去の結果の変換を止めました",
+        description: `【停止】${size}。${jstMonthDayTime(notice.at)}。毎晩の最初に大きさを読み直し、上限を下回れば自動で再開します。`,
+        color: COLOR_RED,
+      });
+    }
+    case "r2-fence":
+      return fitEmbed({
+        title: "過去の結果の変換を止めました",
+        description: `【停止】R2 の操作回数の柵に達しました(${jstMonthDayTime(notice.at)})。${jstMonthDayTime(notice.resumeAt)}(次の晩)に確かめ直し、解けていれば自動で再開します。`,
+        color: COLOR_ORANGE,
+      });
   }
 }
 
