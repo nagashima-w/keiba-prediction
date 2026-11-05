@@ -10,7 +10,7 @@
 - **いまの D1 の読み取りは、無料枠(1 日 500 万行)の 1〜8% に収まっている。** #597・#600 の公開後の 1 日は、コード由来の読み取り(診断の SQL を除く)が 6 万〜41 万行と見込める(§2.3)。急ぐ理由は無い。
 - ただし、**表が増えると読み取りも比例して増える全走査が 5 つある**(§6 の上位 5 件)。そのうち 1 つ(検証の再計算)は、1 年後に 1 日の上限(20 回)まで使うと無料枠を超える。もう 1 つ(変換 DO の目録の走査)は、**取得と変換が終わる 1〜2 週間後には今の 8 倍近く**(1.8 万 → 13.8 万行/晩)になる。
 - **Issue の「D1 の容量 5 GB」は、無料枠では当てはまらない。** 無料枠の上限は **1 DB あたり 500 MB**(`docs/current-spec.md` の「クラウド版の D1 の容量の見積もり」。コードの `DB_SIZE_LIMIT_BYTES` は余裕を見て 400 MB)。5 GB はアカウント全体の合計。1 年後の見積もりは 500 MB に対して書いた(§5)。
-- **整合検査(`RECONCILE_RACE_BACKFILL_SQL`)が、本番で一度も走った形跡が無い**(§7)。#597 の公開後、夜の窓は 11/5 の 01:00 JST の 1 回だけあったが、D1 の SQL 別の集計に該当の SQL が現れない。失敗が握られているか、そこに届いていないかは、ログを見るまで分からない。
+- **整合検査(`RECONCILE_RACE_BACKFILL_SQL`)は本番で動いている**(メインが Workers Observability で確認: 11/5 01:00 JST に `result-backfill: race_backfill reconciled drift=0`、その直前に `d1-settled-synced … stage1=0/0 stage2=1241/0 stage3=1274/11 stage4=447/0`)。ただし `d1QueriesAdaptiveGroups` の SQL 別の集計には現れない。**この集計には出ない SQL がある**ので、集計の無いことを「走っていない」の根拠にしてはいけない(§7)。
 - 結果の補完の `excludedIds` は、**1 晩に 7 表ぶんを全部読む**(`backfill_race` 4 回・`backfill_class` 2 回・`backfill_payout` 1 回)。表は補完の積み残しを消化する間だけ増え、**積み残しが無くなれば増えない**。DO の読み取りの上限(無料枠 1 日 500 万行)に対しては 0.15% で、優先度は低い(§4.2)。
 
 ### 0.2 直す候補の上位 5 件(効き目の大きい順)
@@ -21,7 +21,7 @@
 |---|---|---|---|---|---|---|
 | 1 | 検証の再計算 `VERIFY_READ_SQL` 7 本 + `VERIFY_CLOSE_READ_SQL` 2 本(`verify-read.ts`・`verify-close.ts`。`D1VerifyStore.readAll`) | **70,624 行**(全表を読む。合成データ。§3.3) | 実測の最大は 10/11 の約 30.8 万行(その日の読み取りの 70%。馬の全件読みが 10 回)。1 日の上限は 20 回 = 141 万行 | 1 回 約 33 万行。20 回で 660 万行(**無料枠を超える**) | **まず設定**: `VERIFY_DAILY_LIMIT` を 20 → 6 程度に下げる(上限が 1 年後でも 200 万行に収まる)。**次に SQL**: 開催日ごとに読み、変わった開催日だけ読み直す(1 開催日 約 600 行〔24 分析の日。§3.3〕)。核の `computeVerifyReport` が全件を前提にしているので、中間結果を DO の kv に開催日別に持つ設計変更が要る | D1 は 0。kv に開催日別の中間結果(1 日 数 KB)を書く |
 | 2 | 変換 DO の目録の走査 `SELECT_CATALOG_PAGE_SQL`(`race-archive-repository.ts`。呼び元は `race-archive-runs-core.ts` の `step`) | 100 行/ページ。**1 周 = 目録の全行**。変換が終わると、窓(01:00〜08:30 JST)の間、**1 時間おきに 1 周**(01:00〜08:00 の 8 周/晩) | 11/4(UTC)に 337 回・31,147 行 | 取得の完了後は 8 周 × 約 1.7 万行 = 約 13.8 万行/晩。1 年後は約 16.6 万行/晩 | **索引で直す**: 部分索引 `ON race_archive (race_id) WHERE runs_version IS NULL` を足し、未変換だけを `WHERE runs_version IS NULL AND race_id > ? ORDER BY race_id LIMIT ?` で引く。計測: 全部変換済みで 1 行、30 件が未変換で 30 行(現行は 100 行/ページで、1 周が目録の全行) | 索引の行が、レース 1 件につき +2(入る +1・変換で消える +1)。取得の完了までに約 3.5 万行、以後は年に約 7 千行。10 万行/日の中 |
-| 3 | 整合検査 `RECONCILE_RACE_BACKFILL_SQL`(`race-backfill-state.ts`。呼び元は `result-backfill-core.ts` の `reconcileTonight`。夜に 1 回) | **30,318 行**(分析 + 結果の全部。合成データ)。本番の移行の初期投入が同じ SELECT で 1 回 30,092 行 | 30,000 行/夜(**本番で走った形跡が無い**。§7) | 約 13 万行/夜 | **SQL の書き換え**: 直近 14 日の開催日のレースに絞る(`raceBackfillStateSelect` の `analysesWhere`・`resultsWhere` に開催日の範囲を渡す)。計測: 96 レースで 2,305 行(**−92%**)。全件の検査は月に 1 回にする | 0(ずれが無ければ) |
+| 3 | 整合検査 `RECONCILE_RACE_BACKFILL_SQL`(`race-backfill-state.ts`。呼び元は `result-backfill-core.ts` の `reconcileTonight`。夜に 1 回) | **30,318 行**(分析 + 結果の全部。合成データ)。本番の移行の初期投入が同じ SELECT で 1 回 30,092 行 | 30,000 行/夜(本番で動作済み(ログで確認)だが SQL 別の集計には出ない。§7) | 約 13 万行/夜 | **SQL の書き換え**: 直近 14 日の開催日のレースに絞る(`raceBackfillStateSelect` の `analysesWhere`・`resultsWhere` に開催日の範囲を渡す)。計測: 96 レースで 2,305 行(**−92%**)。全件の検査は月に 1 回にする | 0(ずれが無ければ) |
 | 4 | 期間集計 `READ_PERIOD_SQL` 6 本(`daily-report-repository.ts`。日報の 28 日累計と月報) | 6 文の合計で 1 回 12,781 行(28 日・合成データ)。本番の実測は 1 回 約 3 万行(2.7〜3.4 万) | 8,000〜175,000 行(10/31〜11/3 の 4 日の実測) | 約 2 倍(窓の中の分析数に比例) | **SQL の書き換え**: 1 文目で最新の分析 ID とレース ID を取り、残り 5 文は `json_each` で引く(今は 6 文それぞれが `ROW_NUMBER()` の CTE を作り直す)。計測: 12,781 → 8,738 行(**−32%**) | 0 |
 | 5 | `FILL_WIN_ODDS_SQL`・`FILL_SCRATCHED_SQL`・`FILL_WIN_PAYOUT_SQL`(`result-repository.ts`) | 14 頭で **239 行**(馬の数 n の 2 乗で増える)。直すと **15 行**(−94%) | 約 2.6 万行(10/31〜11/4 の 5 日で 19,000〜34,000 行/日)。補完の積み残しが消化中のぶんを含む | 新しい結果の取り込みのぶんだけ。36〜45 レース/日 × 177 行 = 0.6〜0.8 万行 | **SQL の書き換え**: 馬番をキーにしたオブジェクトの JSON を束縛し、`json_extract(?1, '$."' \|\| umaban \|\| '"[0]')` で引く(`race_results` の `race_id = ?` の行だけを読む)。3 本とも同じ形 | 0(書き換わる行は同じ) |
 
@@ -191,7 +191,7 @@ D1 の大きさは 33,406,976 バイト。
 | `SAVE_RACE_CLASS_SQL` | 補完の段階 3 | 本番 2.8 | 実測 0.3 千 |
 | `RECOMPUTE_RACES_SQL`(`race_backfill` の作り直し) | 書き込みの batch の末尾(結果・オッズ・払戻・クラス・**分析の保存**) | 計測 25(1 レース)。本番 23 | 11/4 に 501 回・11.5k |
 | `RECOMPUTE_BY_ANALYSIS_IDS_SQL` | 検証の補完 tick(1 回 30 分析) | 計測 928 | 補完中だけ |
-| `RECONCILE_RACE_BACKFILL_SQL` | 補完 DO、夜に 1 回 | 計測 30,318 | **本番で未観測**(§7) |
+| `RECONCILE_RACE_BACKFILL_SQL` | 補完 DO、夜に 1 回 | 計測 30,318 | 動作はログで確認済み。SQL 別の集計には出ない(§7) |
 | `LIST_*_BACKFILL_SQL`(4 本)・`COUNT_*_BACKFILL_SQL`(4 本) | 補完 DO の列挙(1 晩 4 回)・status | 本番 1 行/回(`LIST_WIN_ODDS` 28 回 28 行)。計測 0〜316 | <1 千 |
 | `settleRaceBackfillSql`(`UPDATE race_backfill SET stN = 2 …`) | 補完 DO の済みの写し(500 ID/文) | 計測 1,501(500 ID。1 ID あたり 3 行) | 本番 14 回・770 行 |
 | `LIST_UNIMPORTED_BY_DAY_SQL` | cron(21:00・23:00 JST の retry)と手動 | 計測 343。本番 7 回・973 行(139/回) | 0.3 千 |
@@ -336,7 +336,7 @@ D1 の大きさは 33,406,976 バイト。
 - 何を: `RECONCILE_RACE_BACKFILL_SQL`(夜に 1 回の全レース再計算)。
 - どう直すか: `raceBackfillStateSelect(analysesWhere, resultsWhere)` に、`kaisai_date >= 14 日前` のレースだけを渡す(`WHERE a.race_id IN (SELECT race_id FROM analyses WHERE kaisai_date >= ?1 AND kaisai_date <= ?2)` と、結果側の同じ絞り)。全件の検査は月に 1 回。
 - 書き込みの増え方: 0(ずれが無ければ)。
-- 効き目: 3.0 万 → 約 2.3 千(96 レース)。1 年後 B は 13 万 → 約 2.3 千。**ただし本番で走っているかの確認が先**(§7)。
+- 効き目: 3.0 万 → 約 2.3 千(96 レース)。1 年後 B は 13 万 → 約 2.3 千。(本番で動いていることはログで確認済み。§7)
 
 **4. 期間集計を、ID を先に取って引く**
 - 何を: `READ_PERIOD_SQL` 6 本(日報の 28 日累計・月報)。6 文それぞれが、同じ `latest` の CTE(`ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC …)`)を作り直している。
@@ -356,9 +356,9 @@ D1 の大きさは 33,406,976 バイト。
 - DO の `excludedIds`・status の走査(§4.2)。`last_night`・`state` の索引は DO の書き込みが増える。優先度は低い。
 - `PENDING_SQL` の `COUNT(*) OVER ()`: 未確定の行を全部読む(補完中だけ)。`COUNT` を別の文にして `LIMIT` を効かせる。
 
-## 7. 未確認と、次の Issue の候補
+## 7. 注意・未確認と、次の Issue の候補
 
-- **整合検査が本番で走ったか**: 11/5 の 01:00 JST の夜(#597 の公開の後の最初の窓)に、`RECONCILE_RACE_BACKFILL_SQL` に当たる SQL(`ON CONFLICT(race_id) DO UPDATE SET kaisai_date` で `json_each` が無い形)が、30 日分の D1 の SQL 別の集計に**無い**。同じ夜に補完の書き込み(`UPDATE race_results SET win_payout` 267 回)は記録されているので、DO は動いている。`reconcileTonight` は失敗を握る(`result-backfill: race_backfill reconcile failed` を warn に出すだけ)ので、ログ(`wrangler tail`・Cloudflare のログ)で `race_backfill reconciled` か `reconcile failed` を確認する。**確認できるまで、整合検査が動いているとは書かない**。
+- **SQL 別の集計に出ない SQL がある(注意)**: 整合検査(`RECONCILE_RACE_BACKFILL_SQL`)は、11/5 01:00 JST に動いている(Workers Observability のログ。`race_backfill reconciled drift=0`)のに、30 日分の `d1QueriesAdaptiveGroups` には該当の SQL(`ON CONFLICT(race_id) DO UPDATE SET kaisai_date` で `json_each` が無い形)が出ない。サンプリングなどの取りこぼしか、SQL の文字列の束ね方の違いと見られる(原因は未確認)。したがって、この文書の「本番の実測」は**下限**で、集計に出ない SQL の読み取りは含まれていない可能性がある。整合検査の 1 回の読み取りは、合成データの計測(30,318 行)と移行の同じ SELECT の実測(30,092 行)から見て約 3 万行/晩。
 - **DO のストレージの大きさ**: GraphQL で取れなかった(§5.3)。日ごとの `RaceDay` の `race_day_morning_prior` が 1 年でどれだけになるかは、DO の中で `ctx.storage.sql.databaseSize` を記録する変更が要る。
 - **`RaceArchiveFetchDO` の表の行数**: DO の SQLite を外から読めない。取得の status(`GET /api/race-archive`)は管理者の認証が要るので、今回は呼んでいない。
 - **検証の再計算が 1 日に何回走るか**: D1 の集計からは、`readAll` 系の SQL が出た日(10/10・10/11・10/12・10/17・10/25)の読み取りしか分からない。現行の SQL と完全に一致する文だけを数えると、10/11 は約 30.8 万行(その日の 70%。馬の全件読みが 10 回)、10/17 は約 12.4 万行(33%。4 回)、10/25 は約 12.7 万行(9%。3 回)。30 日の合計は 646,434 行(4.5%)。
