@@ -37,7 +37,7 @@
  *   17 桁の浮動小数の往復はローカルの D1 で一致を確かめた(本番の SQLite のビルドでの確認は最初の実保存)。
  */
 
-import { RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, settleRaceBackfillSql } from "./race-backfill-state";
+import { RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, RECONCILE_RECENT_RACE_BACKFILL_SQL, settleRaceBackfillSql } from "./race-backfill-state";
 import {
   comboPayoutParams,
   DELETE_COMBO_PAYOUTS_SQL,
@@ -854,10 +854,12 @@ export class D1ResultStore implements ResultRepository {
 
   /**
    * 整合検査(Issue #597。{@link RECONCILE_RACE_BACKFILL_SQL}): 全レースの状態を作り直し、食い違う行を直す。分析の全走査(O(N))が 1 回。
+   * `sinceKaisaiDate`(YYYYMMDD)を渡すと、その日以降の開催日の分析を持つレースだけを作り直す(Issue #614。{@link RECONCILE_RECENT_RACE_BACKFILL_SQL})。省略は全件。
    * @returns 直した行数(0 でなければ、書き込みの経路のどこかが状態の作り直しを呼んでいない兆し)
    */
-  async reconcileBackfillState(): Promise<number> {
-    const [result] = await this.db.batch([this.db.prepare(RECONCILE_RACE_BACKFILL_SQL)]);
+  async reconcileBackfillState(sinceKaisaiDate?: string): Promise<number> {
+    const stmt = sinceKaisaiDate === undefined ? this.db.prepare(RECONCILE_RACE_BACKFILL_SQL) : this.db.prepare(RECONCILE_RECENT_RACE_BACKFILL_SQL).bind(sinceKaisaiDate);
+    const [result] = await this.db.batch([stmt]);
     return result?.meta.changes ?? 0;
   }
 

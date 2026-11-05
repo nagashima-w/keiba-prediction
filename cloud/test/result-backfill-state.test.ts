@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { D1AnalysisStore } from "../src/analysis-repository";
-import { RECOMPUTE_BY_ANALYSIS_IDS_SQL, RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, raceBackfillStateSelect } from "../src/race-backfill-state";
+import { RECOMPUTE_BY_ANALYSIS_IDS_SQL, RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, RECONCILE_RECENT_RACE_BACKFILL_SQL, raceBackfillStateSelect } from "../src/race-backfill-state";
 import {
   COUNT_BACKFILL_SQL,
   COUNT_CLASS_BACKFILL_SQL,
@@ -584,5 +584,93 @@ describe("migration 0035 の初期投入は、再計算の式と同じ文字列"
     expect(await stateOf("NOROW")).toEqual({ kaisai_date: null, sm: 0, st1: 1, st2: 0, st3: 0, st4: 0 }); // 開催日 NULL の分析のレースも行を作る(undated として数える)
     expect(sts(await stateOf(RACE))).toEqual([0, 0, 1, 1]);
     expect(await drift()).toBe(0); // 初期投入の結果は、整合検査(同じ式)と食い違わない
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. 直近だけの整合検査(Issue #614)
+// ---------------------------------------------------------------------------
+
+describe("直近だけの整合検査 reconcileBackfillState(since) (Issue #614)", () => {
+  const SINCE = "20261022"; // 夜 20261105 の 14 日前
+  /** 古いレース(since より前)を n 件入れる。各 13 頭の結果つき。 */
+  async function seedRaces(prefix: string, n: number, kaisaiDate: string): Promise<void> {
+    const nums = JSON.stringify(Array.from({ length: n }, (_, i) => i));
+    await local.db
+      .prepare(`INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date, race_class) SELECT '${prefix}' || printf('%05d', value), '2026-10-06T00:00:00.000Z', 0, '${kaisaiDate}', 'オープン' FROM json_each(?)`)
+      .bind(nums)
+      .run();
+    await local.db
+      .prepare(`INSERT INTO race_results (race_id, umaban, finish_position, win_odds, scratched, win_payout) SELECT '${prefix}' || printf('%05d', r.value), h.value + 1, h.value + 1, 2.0, 0, CASE WHEN h.value = 0 THEN 300 ELSE NULL END FROM json_each(?) r, json_each(?) h`)
+      .bind(nums, JSON.stringify(Array.from({ length: 13 }, (_, i) => i)))
+      .run();
+  }
+  const recentRows = async (since: string): Promise<number> =>
+    (await local.db.prepare(RECONCILE_RECENT_RACE_BACKFILL_SQL).bind(since).run()).meta.rows_read ?? 0;
+
+  it("直近のレースの食い違いは直す。since より前のレースの食い違いは直近の検査では直さず、全件の検査で直す", async () => {
+    await seedRaces("RC", 3, "20261030"); // 直近
+    await seedRaces("OLD", 3, "20261001"); // 古い
+    await resultStore().reconcileBackfillState(); // 全件で状態を作る
+    await local.db.prepare("UPDATE race_backfill SET st1 = 1 WHERE race_id IN ('RC00000', 'OLD00000')").run(); // 結果があるのに st1=1 の食い違い
+    await local.db.prepare("DELETE FROM race_backfill WHERE race_id = 'RC00001'").run(); // 直近の行の欠け
+    expect(await resultStore().reconcileBackfillState(SINCE)).toBe(2); // RC00000 と RC00001 だけ
+    expect((await stateOf("RC00000"))!.st1).toBe(0);
+    expect(await stateOf("RC00001")).not.toBeNull();
+    expect((await stateOf("OLD00000"))!.st1).toBe(1); // 古いほうは直らない
+    expect(await resultStore().reconcileBackfillState()).toBe(1); // 引数なし = 全件
+    expect((await stateOf("OLD00000"))!.st1).toBe(0);
+  });
+
+  it("開催日の境界: since ちょうどは含み、1 日前は含まない", async () => {
+    await seedRaces("B1", 1, SINCE);
+    await seedRaces("B0", 1, "20261021");
+    await drift();
+    await local.db.prepare("UPDATE race_backfill SET st1 = 1").run();
+    expect(await resultStore().reconcileBackfillState(SINCE)).toBe(1);
+    expect((await stateOf("B100000"))!.st1).toBe(0);
+    expect((await stateOf("B000000"))!.st1).toBe(1);
+  });
+
+  it("絞った検査で作る各レースの状態は、全件の検査で作るものと一致する(同じレースに新旧の分析の行がある場合も)", async () => {
+    await seedRaces("RC", 4, "20261030");
+    // 同じレースの分析が 2 行で、古い開催日の行(race_class NULL)がある: 最小の開催日と st3 は分析の全行で決まる
+    await local.db.prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date, race_class) VALUES ('RC00000', '2026-10-07T00:00:00.000Z', 0, '20261001', NULL)").run();
+    await local.db.prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date, race_class) VALUES ('RC00001', '2026-10-07T00:00:00.000Z', 0, '20261030', NULL)").run();
+    await local.db.prepare("DELETE FROM race_results WHERE race_id = 'RC00002'").run();
+    await resultStore().reconcileBackfillState(SINCE);
+    const recent = (await local.db.prepare("SELECT race_id, kaisai_date, sm, st1, st2, st3, st4 FROM race_backfill ORDER BY race_id").all()).results;
+    await local.db.prepare("DELETE FROM race_backfill").run();
+    await resultStore().reconcileBackfillState();
+    const full = (await local.db.prepare("SELECT race_id, kaisai_date, sm, st1, st2, st3, st4 FROM race_backfill ORDER BY race_id").all()).results;
+    expect(full).toHaveLength(4); // 前提: RC00000 は最小の開催日が 20261001 だが、直近の行も持つので対象
+    expect(recent).toEqual(full);
+    expect(full.find((r) => r.race_id === "RC00000")!.kaisai_date).toBe("20261001");
+    expect(full.find((r) => r.race_id === "RC00000")!.st3).toBe(1);
+  });
+
+  it("meta.rows_read: 古いレースを増やしても、直近の検査は増えない(全件の検査は増える)", async () => {
+    await seedRaces("RC", 20, "20261030");
+    await seedRaces("OLD", 20, "20261001");
+    await resultStore().reconcileBackfillState();
+    // 前提: 直近のレースが実際に直る
+    await local.db.prepare("UPDATE race_backfill SET st1 = 1 WHERE race_id = 'RC00000'").run();
+    expect(await resultStore().reconcileBackfillState(SINCE)).toBe(1);
+    const small = await recentRows(SINCE);
+    const fullSmall = (await local.db.prepare(RECONCILE_RACE_BACKFILL_SQL).run()).meta.rows_read ?? 0;
+    await seedRaces("OLE", 200, "20260901");
+    await resultStore().reconcileBackfillState();
+    const big = await recentRows(SINCE);
+    const fullBig = (await local.db.prepare(RECONCILE_RACE_BACKFILL_SQL).run()).meta.rows_read ?? 0;
+    process.stderr.write(`REPORT recent rows_read: 古い 20 件 ${small} / 古い 220 件 ${big} / 全件 ${fullSmall} → ${fullBig}\n`);
+    expect(small).toBeGreaterThan(20); // 前提: 直近の 20 レースは読んでいる
+    expect(big).toBe(small);
+    expect(fullBig).toBeGreaterThan(fullSmall * 3); // 対照: 全件は古いレースに比例して増える
+  });
+
+  it("EXPLAIN QUERY PLAN: 開催日の索引(kaisai_date が先頭の idx_analyses_kaisai_*)で SEARCH し、analyses の全表の SCAN が出ない", async () => {
+    const plan = await planOf(RECONCILE_RECENT_RACE_BACKFILL_SQL, [SINCE]);
+    expect(plan.some((d) => /SEARCH analyses USING (COVERING )?INDEX idx_analyses_kaisai_\w+ \(kaisai_date>\?\)/.test(d)), plan.join(" / ")).toBe(true);
+    expect(plan.some((d) => /^SCAN (a|analyses)\b(?! USING)/.test(d)), plan.join(" / ")).toBe(false);
   });
 });
