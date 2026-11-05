@@ -25,11 +25,12 @@ model: sonnet
 2. **観点を選ぶ**: `docs/review-checklist.md` の冒頭にある「差分の種類ごとの読む節」の表を見て、この差分に合う節を読む。
    全部を毎回読む必要はない。観点は「見つけ方」であって、止める基準ではない(下の「区分」で決める)
 3. **検証を自分で実行する**(実装者の報告を信用しない)。ただし**全部のテストと smoke は流さない**。
-   それは実装担当(`scripts/verify-all.sh`)と CI の仕事である。あなたが流すのは次の 3 つである。
+   それは実装担当(`scripts/verify-all.sh`。既定はユニットの全件と関係するインテグレーションだけ)と、push 後の CI の仕事である(Issue #620)。あなたが流すのは次の 3 つである。
    - (a) 型検査: リポジトリルートの `pnpm typecheck`(`-r` 無し)と、`cloud/` の `pnpm run typecheck`
      (client 用の tsconfig を含む。ブラウザ向けバンドルの破綻はテストでは検出できない)
    - (b) 差分に関係するテストファイル: 変更したテストと、変更したコードを読むテスト
-     (ルート直下 `scripts/test/` のテストは `pnpm exec vitest run <ファイル>`、`cloud/` のテストは `cloud/` で `npx vitest run <ファイル>`)
+     (ルート直下 `scripts/test/` のテストは `pnpm exec vitest run <ファイル>`、`cloud/` のテストは `cloud/` で `npx vitest run <ファイル>`。
+     本物の workerd を開くテストは `*.integration.test.ts` で、遅い。差分に関係するものだけを流す)
    - (c) 変異の注入(下の「必須の成果物」)
    - 実装担当の報告に `scripts/verify-all.sh` の要約が無い、または赤がある場合は指摘する
    - 確率の質のコード(`packages/core/src/ev/probability-quality*.ts`・`scripts/probability-quality-41*/`)に触れる差分は、

@@ -38,20 +38,25 @@ model: sonnet
 **`scripts/verify-all.sh` を流し、その要約を報告に貼ってください。** 他人の報告や「通るはず」で代替しません。
 
 ```
-SMOKE_PORT=<他のセッションと重ならないポート> scripts/verify-all.sh
+scripts/verify-all.sh
 ```
 
-これは CI が流す次の段を順に流し、各段の終了コード・所要時間・テストの要約行だけを出します(全文のログは一時ディレクトリに残り、その場所も出ます)。
-1 つでも失敗すると 0 以外で終わります。
+テストは 3 層に分けています(Issue #620。cloud のテスト全件は手元で約 32 分かかるため)。手元では速い検査だけを流し、全件と smoke は push 後の CI をメインが確かめます。
+
+- **ユニット**(偽の D1・DO を差し込んだテストなど): TDD の 1 周ごとに全件流します(cloud は `cd cloud && pnpm run test:unit`)。
+- **インテグレーション**(本物のローカルの D1・R2〈workerd〉を開く、または `wrangler` を実行するテスト。cloud の `*.integration.test.ts`): 変えたものに関係する分だけ流します(`verify-all.sh` が流します)。
+  新しいテストが `local-bindings` や `wrangler` を使うなら、ファイル名を `*.integration.test.ts` にします(`cloud/test/test-layers.test.ts` が検査します)。
+- **全件と smoke**: 通常は流しません(CI の仕事)。`scripts/verify-all.sh --full` で CI と同じ全段を流せますが、30 分を超えるので、指示があるときだけにします。
+
+既定の `scripts/verify-all.sh` が流す段は次のとおりです。各段の終了コード・所要時間・テストの要約行だけを出します(全文のログは一時ディレクトリに残り、その場所も出ます)。1 つでも失敗すると 0 以外で終わります。
 
 1. ルートの `pnpm typecheck`、`pnpm test`(`-r` 無し。ルート直下 `scripts/` のテスト・型検査は `-r` 付きでは実行されない。Issue #38)
-2. `cloud/` の `pnpm run typecheck`・`pnpm test`・`pnpm run deploy:dry`・`pnpm exec wrangler d1 migrations apply DB --local`・`pnpm run smoke`
+2. `cloud/` の `pnpm run typecheck`・`pnpm run test:unit`・関係するインテグレーション(`scripts/verify-related-integration.mjs`。基点は環境変数 `VERIFY_BASE`、既定は終了時フックと同じ。merge-base から未追跡までを変更とみなす)・`pnpm run deploy:dry`・`pnpm exec wrangler d1 migrations apply DB --local`
 
-- **全部で 30 分を超えます**(cloud のテストだけで 20 分ほど)。Bash の背景実行で流すときは、`timeout` を最大(7200000)にしてください。
-
-- **smoke は `SMOKE_PORT` を他のセッションと分けます。** 実行の前に `ps` で他の wrangler・workerd が動いていないことを確かめます。
+- cloud の `test:unit` だけで 7 分ほど、全体で 10 分を超えます。Bash の背景実行で流すときは、`timeout` を最大(7200000)にしてください。
+- `--full` を付けたときの smoke は `SMOKE_PORT` を他のセッションと分けます。実行の前に `ps` で他の wrangler・workerd が動いていないことを確かめます。
 - vitest は Node 環境で走るため、**ブラウザ向けのバンドル(`cloud/client`)の破綻はテストだけでは検出できません**。cloud の
-  `pnpm run typecheck`(client 用の tsconfig を含む)と `cloud/test/client-bundle.test.ts`・`import-guard.test.ts` が検出します。
+  `pnpm run typecheck`(client 用の tsconfig を含む)と `cloud/test/client-bundle.test.ts`・`import-guard.test.ts`(ユニットの層で、毎回流れます)が検出します。
   cloud/client から core を使うときは、バレル(`@keiba/core`)を import せず、`client-bundle.test.ts` の許可リストにある入口を使ってください。
 - **確率の質のコード**(`packages/core/src/ev/probability-quality*.ts`・`scripts/probability-quality-41*/`)に触れる変更では、
   `scripts/verify-all.sh --research` で、リポジトリルートの `pnpm test:research` も流します(**条件付き。触れない変更では不要**)。

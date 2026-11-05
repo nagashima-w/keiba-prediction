@@ -7,6 +7,8 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "build:client": "tsx build-client.ts",
     "test": "vitest run",
+    "test:unit": "vitest run --exclude '**/*.integration.test.ts'",
+    "test:integration": "vitest run '.integration.test.ts'",
     "deploy:dry": "wrangler deploy --dry-run --outdir dist-dry",
     "smoke": "tsx smoke.ts",
     "report:prompt": "tsx print-report-prompt.ts",
