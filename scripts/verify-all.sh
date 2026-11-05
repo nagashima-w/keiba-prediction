@@ -92,7 +92,7 @@ if [ "$dry" -eq 1 ]; then
 fi
 
 if [ -n "$smoke_port" ]; then export SMOKE_PORT="$smoke_port"; fi
-if [ "${VERIFY_ALL_STUB:-}" != "1" ] && pgrep -f 'workerd|wrangler' >/dev/null 2>&1; then
+if [ "$full" -eq 1 ] && [ "${VERIFY_ALL_STUB:-}" != "1" ] && pgrep -f 'workerd|wrangler' >/dev/null 2>&1; then
   echo "注意: wrangler・workerd が動いています。smoke は固定のポートを使うので、SMOKE_PORT を他と分けてください(現在: ${SMOKE_PORT:-既定の 8801})" >&2
 fi
 
