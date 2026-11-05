@@ -19,9 +19,9 @@
 
 | 順 | SQL(場所) | 1 回の読み取り(根拠) | いまの 1 日 | 1 年後(B)の 1 日 | 直し方 | 書き込みの増え方 |
 |---|---|---|---|---|---|---|
-| 1 | 検証の再計算 `VERIFY_READ_SQL` 7 本 + `VERIFY_CLOSE_READ_SQL` 2 本(`verify-read.ts`・`verify-close.ts`。`D1VerifyStore.readAll`) | **70,624 行**(全表を読む。合成データ。§3.3) | 実測の最大は 10/11 の約 30.8 万行(その日の読み取りの 70%。馬の全件読みが 10 回)。1 日の上限は 20 回 = 141 万行 | 1 回 約 33 万行。20 回で 660 万行(**無料枠を超える**) | **まず設定**: `VERIFY_DAILY_LIMIT` を 20 → 6 程度に下げる(上限が 1 年後でも 200 万行に収まる)。**次に SQL**: 開催日ごとに読み、変わった開催日だけ読み直す(1 開催日 約 600 行〔24 分析の日。§3.3〕)。核の `computeVerifyReport` が全件を前提にしているので、中間結果を DO の kv に開催日別に持つ設計変更が要る | D1 は 0。kv に開催日別の中間結果(1 日 数 KB)を書く |
+| 1 | 検証の再計算 `VERIFY_READ_SQL` 7 本 + `VERIFY_CLOSE_READ_SQL` 2 本(`verify-read.ts`・`verify-close.ts`。`D1VerifyStore.readAll`) | **70,624 行**(全表を読む。合成データ。§3.3) | 実測の最大は 10/11 の約 30.8 万行(その日の読み取りの 70%。馬の全件読みが 10 回。**馬の SQL だけを数えた下限。全 9 本が走っていれば 100 万行近く**)。1 日の上限は 20 回 = 141 万行 | 1 回 約 33 万行。20 回で 660 万行(**無料枠を超える**。ただし上限の 20 回を使い切った最悪の場合。実測の最大は 10 回/日で、その場合の 1 年後は約 330 万行) | **まず設定**: `VERIFY_DAILY_LIMIT` を 20 → 6 程度に下げる(上限が 1 年後でも 200 万行に収まる)。**次に SQL**: 開催日ごとに読み、変わった開催日だけ読み直す(1 開催日 約 600 行〔24 分析の日。§3.3〕)。核の `computeVerifyReport` が全件を前提にしているので、中間結果を DO の kv に開催日別に持つ設計変更が要る | D1 は 0。kv に開催日別の中間結果(1 日 数 KB)を書く |
 | 2 | 変換 DO の目録の走査 `SELECT_CATALOG_PAGE_SQL`(`race-archive-repository.ts`。呼び元は `race-archive-runs-core.ts` の `step`) | 100 行/ページ。**1 周 = 目録の全行**。変換が終わると、窓(01:00〜08:30 JST)の間、**1 時間おきに 1 周**(01:00〜08:00 の 8 周/晩) | 11/4(UTC)に 337 回・31,147 行 | 取得の完了後は 8 周 × 約 1.7 万行 = 約 13.8 万行/晩。1 年後は約 16.6 万行/晩 | **索引で直す**: 部分索引 `ON race_archive (race_id) WHERE runs_version IS NULL` を足し、未変換だけを `WHERE runs_version IS NULL AND race_id > ? ORDER BY race_id LIMIT ?` で引く。計測: 全部変換済みで 1 行、30 件が未変換で 30 行(現行は 100 行/ページで、1 周が目録の全行) | 索引の行が、レース 1 件につき +2(入る +1・変換で消える +1)。取得の完了までに約 3.5 万行、以後は年に約 7 千行。10 万行/日の中 |
-| 3 | 整合検査 `RECONCILE_RACE_BACKFILL_SQL`(`race-backfill-state.ts`。呼び元は `result-backfill-core.ts` の `reconcileTonight`。夜に 1 回) | **30,318 行**(分析 + 結果の全部。合成データ)。本番の移行の初期投入が同じ SELECT で 1 回 30,092 行 | 30,000 行/夜(本番で動作済み(ログで確認)だが SQL 別の集計には出ない。§7) | 約 13 万行/夜 | **SQL の書き換え**: 直近 14 日の開催日のレースに絞る(`raceBackfillStateSelect` の `analysesWhere`・`resultsWhere` に開催日の範囲を渡す)。計測: 96 レースで 2,305 行(**−92%**)。全件の検査は月に 1 回にする | 0(ずれが無ければ) |
+| 3 | 整合検査 `RECONCILE_RACE_BACKFILL_SQL`(`race-backfill-state.ts`。呼び元は `result-backfill-core.ts` の `reconcileTonight`。夜に 1 回) | **30,318 行**(分析 + 結果の全部。合成データ)。本番の移行の初期投入が同じ SELECT で 1 回 30,092 行 | 30,000 行/夜(推定。ログで動作は確認済み、SQL 別の集計には出ない。§7) | 約 13 万行/夜 | **SQL の書き換え**: 直近 14 日の開催日のレースに絞る(`raceBackfillStateSelect` の `analysesWhere`・`resultsWhere` に開催日の範囲を渡す)。計測: 96 レースで 2,305 行(**−92%**)。全件の検査は月に 1 回にする | 0(ずれが無ければ) |
 | 4 | 期間集計 `READ_PERIOD_SQL` 6 本(`daily-report-repository.ts`。日報の 28 日累計と月報) | 6 文の合計で 1 回 12,781 行(28 日・合成データ)。本番の実測は 1 回 約 3 万行(2.7〜3.4 万) | 8,000〜175,000 行(10/31〜11/3 の 4 日の実測) | 約 2 倍(窓の中の分析数に比例) | **SQL の書き換え**: 1 文目で最新の分析 ID とレース ID を取り、残り 5 文は `json_each` で引く(今は 6 文それぞれが `ROW_NUMBER()` の CTE を作り直す)。計測: 12,781 → 8,738 行(**−32%**) | 0 |
 | 5 | `FILL_WIN_ODDS_SQL`・`FILL_SCRATCHED_SQL`・`FILL_WIN_PAYOUT_SQL`(`result-repository.ts`) | 14 頭で **239 行**(馬の数 n の 2 乗で増える)。直すと **15 行**(−94%) | 約 2.6 万行(10/31〜11/4 の 5 日で 19,000〜34,000 行/日)。補完の積み残しが消化中のぶんを含む | 新しい結果の取り込みのぶんだけ。36〜45 レース/日 × 177 行 = 0.6〜0.8 万行 | **SQL の書き換え**: 馬番をキーにしたオブジェクトの JSON を束縛し、`json_extract(?1, '$."' \|\| umaban \|\| '"[0]')` で引く(`race_results` の `race_id = ?` の行だけを読む)。3 本とも同じ形 | 0(書き換わる行は同じ) |
 
@@ -41,6 +41,7 @@
 
 | 数字の種類 | どう取ったか | 信頼度 |
 |---|---|---|
+| (注意) | `d1QueriesAdaptiveGroups` には出ない SQL がある(整合検査など。§7) | **本番の SQL 別の実測は下限** |
 | 本番の行数 | D1 の API で `SELECT COUNT(*)` を表ごとに 1 回(27 表) | 実測。2026-11-05 12:00 JST ごろ |
 | 本番の SQL ごとの回数・読み取り行数 | GraphQL `d1QueriesAdaptiveGroups`(30 日分。`db-usage-594/fetch-d1-queries.py`。結果の集計は `prod-d1-queries-30d.tsv`) | 実測。日付は UTC 日(JST の 09:00〜翌 09:00) |
 | DO の読み取り・書き込み | GraphQL `durableObjectsPeriodicGroups`(時間ごと。名前空間 ID は `GET /workers/durable_objects/namespaces` で名前に引いた) | 実測 |
@@ -84,7 +85,7 @@ D1 の大きさは 33,406,976 バイト。
 | 11/1 | 1,260,218 | 6,114 | `horse_runs` の診断 9.8 万、期間集計 17.5 万、旧い列挙 55.8 万 |
 | 11/2 | 774,585 | 2,811 | 旧い列挙 77.4 万 |
 | 11/3 | 1,490,237 | 5,553 | 旧い列挙 73.3 万、診断の SQL 69.6 万 |
-| 11/4 | 396,380 | 29,529 | 過去の結果の変換(`horse_runs` の書き込み)。#597 の公開(11/4 12:40 UTC)の後 |
+| 11/4 | 396,380 | 29,529 | (注意)SQL 別の集計に出ない SQL があり、SQL 別の実測は下限。過去の結果の変換(`horse_runs` の書き込み)。#597 の公開(11/4 12:40 UTC)の後 |
 
 書き込みの最大は 29,529 行(11/4)で、無料枠の 10 万行/日の 3 割。変換の 1 晩の上限(`ARCHIVE_RUNS_NIGHTLY_ROWS_DEFAULT` = 30,000 行)が効いている。
 
@@ -329,6 +330,7 @@ D1 の大きさは 33,406,976 バイト。
 **2. 変換 DO の目録を、未変換だけ引く**
 - 何を: `SELECT_CATALOG_PAGE_SQL` の毎時の全周(`race-archive-runs-core.ts` の `step` → `endOfPass` が、変換が 0 件の周のあと 1 時間待って、また先頭から周る)。
 - どう直すか: 部分索引 `idx_race_archive_runs_pending ON race_archive (race_id) WHERE runs_version IS NULL` を足し、`WHERE runs_version IS NULL AND race_id > ? ORDER BY race_id LIMIT ?` で未変換だけを引く(`RESULT_RUN_VERSION` を上げて再変換するときだけは、全走査の旧い形に切り替える)。
+- 注意: 部分索引の案では、`blocked`(今夜失敗した・諦めた)のレースは `runs_version IS NULL` のまま索引に残り続ける。毎周それらを読み飛ばすので、読み取りは「ほぼ 0」ではなく失敗中のレース数ぶん残る(`rr_fail` の `nights >= 3` の諦めたレースは永久に残る)。
 - 書き込みの増え方: 索引の行がレース 1 件につき +2(入る +1・変換で消える +1)。取得の完了までに約 3.5 万行、以後は年に約 7 千行。
 - 効き目: 完了後の 13.8 万行/晩 → ほぼ 0。
 
