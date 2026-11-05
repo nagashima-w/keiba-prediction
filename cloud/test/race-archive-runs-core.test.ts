@@ -48,7 +48,7 @@ class Harness {
   alarm: number | null = null;
   catalog: RaceArchiveCatalogEntry[] = [];
   /** 目録の列挙の呼び出し(カーソルと limit)。 */
-  pages: Array<{ after: string; limit: number }> = [];
+  pages: Array<{ after: string; limit: number; scope: string }> = [];
   reads: string[][] = [];
   converts: ConvertTarget[][] = [];
   notices: RunsNotice[] = [];
@@ -83,9 +83,9 @@ class Harness {
         },
         getAlarm: async () => this.alarm,
         archive: {
-          listCatalogPage: async (after, limit) => {
-            this.pages.push({ after, limit });
-            return this.catalog.filter((e) => e.raceId > after).sort((a, b) => (a.raceId < b.raceId ? -1 : 1)).slice(0, limit);
+          listCatalogPage: async (after, limit, scope) => {
+            this.pages.push({ after, limit, scope });
+            return this.catalog.filter((e) => e.raceId > after && (scope === "all" || e.runsVersion === null)).sort((a, b) => (a.raceId < b.raceId ? -1 : 1)).slice(0, limit);
           },
           readRaceArchives: async (ids): Promise<ReadRaceArchivesResult> => {
             this.reads.push([...ids]);
@@ -635,5 +635,102 @@ describe("DO の SQLite: 起床の経路の SQL は表の全部を読まない(E
     expect(h.converts).toHaveLength(2); // 前提: 2 回目も実際に変換している
     expect(writes.length).toBeGreaterThan(0);
     expect(writes.length).toBeLessThanOrEqual(10);
+  });
+});
+
+describe("目録の走査の範囲(Issue #613。未変換だけを索引から読む `pending` と、版の古い行も見直す `all`)", () => {
+  const scopes = (): string[] => h.pages.map((p) => p.scope);
+
+  it("最初の周は全行を読む(all)。版の古い行も変換し、先頭から読み切って古い行が残らなければ、次の周から pending に切り替わる", async () => {
+    h = new Harness();
+    h.seed(30, (n) => (n % 3 === 0 ? { runsVersion: RESULT_RUN_VERSION - 1 } : n % 3 === 1 ? { runsVersion: RESULT_RUN_VERSION } : {}));
+    const stale = h.catalog.filter((e) => e.runsVersion !== null && e.runsVersion < RESULT_RUN_VERSION).map((e) => e.raceId);
+    const pending = h.catalog.filter((e) => e.runsVersion === null).map((e) => e.raceId);
+    expect(stale).toHaveLength(10); // 前提: 版の古い行がある
+    expect(pending).toHaveLength(10); // 前提: 未変換の行がある
+    h.alarm = NIGHT1;
+    await h.runUntil(NIGHT1 + 3 * HOUR);
+    expect(h.convertedIds().sort()).toEqual([...stale, ...pending].sort()); // 版の古い行も変換した
+    expect(scopes()[0]).toBe("all");
+    expect(scopes()).toContain("pending"); // 全走査の周が済んだあとは pending
+    expect(scopes().lastIndexOf("all")).toBeLessThan(scopes().indexOf("pending")); // 戻らない
+    expect(h.sql.exec("SELECT value FROM rr_meta WHERE key = 'stale_checked_version'").toArray()).toEqual([{ value: String(RESULT_RUN_VERSION) }]);
+  });
+
+  it("pending に切り替わったあとは、版の古い行を新たに作っても拾わない(版を上げたときだけ全走査に戻る)。未変換の行は拾う", async () => {
+    h = new Harness();
+    h.seed(5);
+    h.alarm = NIGHT1;
+    await h.runUntil(NIGHT1 + 3 * HOUR);
+    expect(scopes().at(-1)).toBe("pending"); // 前提
+    h.catalog.push(entryOf(0)); // 未変換の新しい行
+    h.catalog.push(entryOf(99, { runsVersion: RESULT_RUN_VERSION - 1 })); // 版の古い行(版を上げずに生まれることは通常ない)
+    const before = h.convertedIds().length;
+    await h.runUntil(NIGHT1 + 8 * HOUR);
+    expect(h.convertedIds().slice(before)).toEqual([idOf(0)]);
+    // 版が上がった(完了の印が別の版)なら、全走査に戻る
+    h.sql.exec("UPDATE rr_meta SET value = ? WHERE key = 'stale_checked_version'", String(RESULT_RUN_VERSION - 1));
+    h.core = h.makeCore();
+    h.alarm = NIGHT2;
+    await h.runUntil(NIGHT2 + 3 * HOUR);
+    expect(h.convertedIds().slice(before)).toEqual([idOf(0), idOf(99)]);
+  });
+
+  it("版の古い行が失敗・諦めで残っている間は、全走査の完了にしない(pending に切り替えない)。残りが無くなった周のあとで切り替わる", async () => {
+    h = new Harness();
+    h.seed(3, (n) => (n === 2 ? { runsVersion: RESULT_RUN_VERSION - 1 } : {}));
+    h.readOutcome = new Map([[idOf(2), "error"]]);
+    h.alarm = NIGHT1;
+    await h.runUntil(NIGHT1 + 3 * HOUR);
+    expect(h.convertedIds().sort()).toEqual([idOf(1), idOf(3)]); // 前提: 版の古い行(2)は変換できていない
+    expect(new Set(scopes())).toEqual(new Set(["all"])); // 全周が all のまま
+    h.readOutcome = new Map(); // 翌晩は読めるようになった
+    h.alarm = NIGHT2;
+    await h.runUntil(NIGHT2 + 3 * HOUR);
+    expect(h.convertedIds()).toContain(idOf(2));
+    expect(scopes()).toContain("pending");
+  });
+
+  it("途中のカーソルから再開した all の周は、完了の印を付けない(先頭から読み切っていないため)", async () => {
+    h = new Harness();
+    h.seed(45);
+    h.alarm = NIGHT1;
+    await h.fire(); // 1 ステップ(カーソルは 20 件目)
+    // 旧版の DO が残した状態を模す: 周の頭の記録(pass_all_version)が無いまま、カーソルだけが途中にある
+    h.sql.exec("DELETE FROM rr_meta WHERE key IN ('pass_all_version', 'pass_stale_blocked')");
+    h.core = h.makeCore();
+    await h.runUntil(NIGHT1 + 3 * HOUR);
+    const firstPass = scopes().indexOf("pending");
+    // 最初の周(途中から)は all。その周の終わりでは印が付かず、次の周(先頭から)も all。その周の終わりで付いて、以降 pending
+    expect(firstPass).toBeGreaterThan(0);
+    const allPasses = h.pages.filter((p, i) => p.after === "" && i < firstPass).length;
+    expect(allPasses).toBe(2); // 最初の周(途中から。印は付かない)と、次の周(先頭から。この周の終わりで印が付く)。途中の周で印が付くと 1 になる
+  });
+
+  it("失敗中・諦めたレース(未変換のまま)があっても、1 周の中で同じ行を 2 回読まない(カーソルは単調に進む)。変換するレースは pending でも all でも同じ", async () => {
+    const run = async (preset: boolean): Promise<{ h: Harness }> => {
+      const x = new Harness();
+      x.seed(60);
+      x.readOutcome = new Map([[idOf(5), "missing"], [idOf(45), "error"]]);
+      if (preset) x.sql.exec("INSERT INTO rr_meta (key, value) VALUES ('stale_checked_version', ?)", String(RESULT_RUN_VERSION));
+      x.core = x.makeCore();
+      x.alarm = NIGHT1;
+      await x.runUntil(NIGHT1 + 3 * HOUR);
+      return { h: x };
+    };
+    const a = await run(false);
+    const b = await run(true);
+    expect(b.h.pages[0]!.scope).toBe("pending"); // 前提: 比べる側は最初から pending
+    expect(a.h.pages[0]!.scope).toBe("all");
+    expect(b.h.convertedIds().sort()).toEqual(a.h.convertedIds().sort()); // 変換の結果は変わらない
+    expect(b.h.convertedIds()).toHaveLength(58); // 前提: 失敗した 2 件以外
+    h = b.h;
+    // 1 周の中のカーソルは増える一方(同じ位置から読み直さない)。周の頭(after が空)で区切る
+    const afters = b.h.pages.map((p) => p.after);
+    for (let i = 1; i < afters.length; i += 1) {
+      if (afters[i] === "") continue; // 次の周の頭
+      expect(afters[i]! > afters[i - 1]! || afters[i - 1] === "", `${i}`).toBe(true);
+    }
+    a.h.sql.close();
   });
 });

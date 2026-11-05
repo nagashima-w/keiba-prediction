@@ -45,7 +45,7 @@ export class RaceArchiveRunsDO extends DurableObject<RaceArchiveRunsEnv> {
         setAlarm: (at) => ctx.storage.setAlarm(at),
         getAlarm: () => ctx.storage.getAlarm(),
         archive: {
-          listCatalogPage: (after, limit) => store.listCatalogPage(after, limit),
+          listCatalogPage: (after, limit, scope) => store.listCatalogPage(after, limit, scope),
           readRaceArchives: (ids) => store.readRaceArchives(ids),
         },
         convert: (targets, now) => convertRaceArchives(env.DB, targets, now),

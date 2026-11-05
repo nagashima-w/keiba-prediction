@@ -7,6 +7,7 @@
  * ## 何をするか
  * 目録(`race_archive`)を主キー(race_id)順のカーソルで読み、**未変換のレース**(`runs_version` が NULL か現行の `RESULT_RUN_VERSION` より小さい)を
  * 1 ステップあたり最大 {@link ARCHIVE_RUNS_STEP_RACES} 件、R2 から一括で読み、`convertRaceArchives`(#588。D1 の batch 1 回)で `horse_runs` に書いて済み印を付ける。
+ * 走査の範囲(Issue #613): 通常は未変換(`runs_version` が NULL)の行だけを部分索引(migration 0036)から読む。版({@link RESULT_RUN_VERSION})を上げた直後の 1 周だけは全行を読んで、版の古い行を拾う(`scanScope`)。
  * 取得が進むと目録が増えるので、周(目録の末尾まで)が終わるたびに先頭から見直す。**変換があった周のあとは続けて見直し、何も変換しなかった周のあとは 1 時間休む**({@link ARCHIVE_RUNS_IDLE_MS})。
  *
  * ## いつ動くか(ユーザーの決定。#590)
@@ -43,7 +44,7 @@
 import { JST_OFFSET_MS } from "../../packages/core/src/common/jst";
 import { RESULT_RUN_VERSION } from "../../packages/core/src/scraper/race-record-to-runs";
 import { nextArchiveWindowStart, inArchiveWindow } from "./race-archive-fetch-core";
-import { CATALOG_PAGE_MAX, DB_SIZE_LIMIT_BYTES, READ_BATCH_MAX, type RaceArchiveCatalogEntry, type ReadRaceArchivesResult } from "./race-archive-repository";
+import { CATALOG_PAGE_MAX, DB_SIZE_LIMIT_BYTES, READ_BATCH_MAX, type CatalogScope, type RaceArchiveCatalogEntry, type ReadRaceArchivesResult } from "./race-archive-repository";
 import type { ConvertBatchResult, ConvertTarget } from "./race-archive-runs";
 import type { SqlLike } from "./sql-like";
 import { shouldRearm } from "./stale-alarm";
@@ -114,7 +115,7 @@ export interface ArchiveRunsDeps {
   readonly setAlarm: (at: number) => void | Promise<void>;
   readonly getAlarm: () => Promise<number | null>;
   readonly archive: {
-    listCatalogPage(afterRaceId: string, limit: number): Promise<RaceArchiveCatalogEntry[]>;
+    listCatalogPage(afterRaceId: string, limit: number, scope: CatalogScope): Promise<RaceArchiveCatalogEntry[]>;
     readRaceArchives(raceIds: readonly string[]): Promise<ReadRaceArchivesResult>;
   };
   /** 変換して書く(`convertRaceArchives`)。失敗は throw。 */
@@ -330,7 +331,9 @@ export class RaceArchiveRunsCore {
     // 次の候補: 目録を主キー順に読み、未変換で、今夜まだ失敗していない・諦めていないものを選ぶ。
     const take = this.metaGet("solo") === "1" ? 1 : this.stepRaces;
     const cursor = this.metaGet("cursor") ?? "";
-    const page = await this.deps.archive.listCatalogPage(cursor, this.pageSize);
+    const scope = this.scanScope();
+    if (cursor === "") this.beginPass(scope);
+    const page = await this.deps.archive.listCatalogPage(cursor, this.pageSize, scope);
     if (page.length === 0) {
       await this.endOfPass(now);
       return;
@@ -342,14 +345,17 @@ export class RaceArchiveRunsCore {
     );
     const candidates: RaceArchiveCatalogEntry[] = [];
     let lastScanned = cursor;
+    let staleBlocked = 0;
     for (const e of page) {
       lastScanned = e.raceId;
+      if (e.runsVersion !== null && e.runsVersion < RESULT_RUN_VERSION && blocked.has(e.raceId)) staleBlocked += 1;
       if ((e.runsVersion === null || e.runsVersion < RESULT_RUN_VERSION) && !blocked.has(e.raceId)) {
         candidates.push(e);
         if (candidates.length >= take) break;
       }
     }
     this.metaSet("cursor", lastScanned);
+    if (staleBlocked > 0) this.metaSet("pass_stale_blocked", String(this.metaNum("pass_stale_blocked") + staleBlocked));
     if (candidates.length === 0) {
       this.setWait("active");
       await this.arm(now + ARCHIVE_RUNS_SCAN_DELAY_MS);
@@ -357,6 +363,32 @@ export class RaceArchiveRunsCore {
     }
 
     await this.convertStep(candidates, now, night, cursor);
+  }
+
+  /**
+   * 目録の走査の範囲(Issue #613)。通常は未変換(印が NULL)だけを部分索引から読む(`pending`)。
+   * ただし**この版({@link RESULT_RUN_VERSION})で、版の古い行(印が NULL でなく版より小さい)を見直す全走査をまだ完了していない**間は、全行を読む(`all`)。
+   * 版の古い行が生まれるのは版を上げたときだけ(保存は印を NULL に戻す)なので、版ごとに 1 周の全走査を済ませれば、以後は `pending` で足りる。
+   */
+  private scanScope(): CatalogScope {
+    return this.metaGet("stale_checked_version") === String(RESULT_RUN_VERSION) ? "pending" : "all";
+  }
+
+  /** 周の頭(カーソルが空)で呼ぶ。`all` の周は、先頭から始めた周であること(と版)を覚える。途中から再開した周は、完了の印を付けない。 */
+  private beginPass(scope: CatalogScope): void {
+    if (scope === "all") {
+      this.metaSet("pass_all_version", String(RESULT_RUN_VERSION));
+      this.metaSet("pass_stale_blocked", "0");
+    } else {
+      this.metaDelete("pass_all_version", "pass_stale_blocked");
+    }
+  }
+
+  /** 版の古い行(印が NULL でない)の変換が失敗した。この周の全走査は完了にしない(同じ周のうちに、のちに blocked として読まれるとは限らないため)。 */
+  private noteStaleLeft(entry: RaceArchiveCatalogEntry | undefined): void {
+    if (entry !== undefined && entry.runsVersion !== null && entry.runsVersion < RESULT_RUN_VERSION) {
+      this.metaSet("pass_stale_blocked", String(this.metaNum("pass_stale_blocked") + 1));
+    }
   }
 
   /** 今夜もう失敗した、または諦めたレース(失敗の記録から)。 */
@@ -376,6 +408,11 @@ export class RaceArchiveRunsCore {
     this.metaSet("cursor", "");
     const converted = this.metaNum("pass_converted");
     this.metaSet("pass_converted", "0");
+    // 先頭から読み切った全走査の周で、版の古い行が失敗・諦めで残っていなければ、この版の全走査は完了(以後は未変換だけを読む)。
+    if (this.metaGet("pass_all_version") === String(RESULT_RUN_VERSION) && this.metaNum("pass_stale_blocked") === 0) {
+      this.metaSet("stale_checked_version", String(RESULT_RUN_VERSION));
+    }
+    this.metaDelete("pass_all_version", "pass_stale_blocked");
     if (converted === 0) {
       this.setWait("caught-up");
       await this.arm(now + ARCHIVE_RUNS_IDLE_MS);
@@ -398,6 +435,7 @@ export class RaceArchiveRunsCore {
       if (item === undefined || item.outcome.status !== "found") {
         readFailures += 1;
         this.recordFailure(c.raceId, night, item?.outcome.status === "missing" ? "r2-missing" : "r2-error");
+        this.noteStaleLeft(c);
         continue;
       }
       targets.push({ raceId: c.raceId, rawBytes: c.rawBytes, parserVersion: c.parserVersion, record: item.outcome.archive.record });
@@ -415,6 +453,7 @@ export class RaceArchiveRunsCore {
       this.deps.log(`race-archive-runs: convert failed class=convert-failed error=${errorKind(error)} races=${targets.length}`, "error");
       if (targets.length === 1) {
         this.recordFailure(targets[0]!.raceId, night, "convert-failed");
+        this.noteStaleLeft(candidates.find((c) => c.raceId === targets[0]!.raceId));
         this.metaSet("night_failed", String(this.metaNum("night_failed") + 1));
       } else {
         // 切り分けのため、同じレースから 1 件ずつやり直す(カーソルを戻す)。
