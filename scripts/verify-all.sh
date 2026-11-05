@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 全部の検証を CI と同じコマンドで順に流し、要約だけを出す(Issue #606)。
+# 検証を順に流し、要約だけを出す。既定は速い層だけ、--full で CI と同じ全段(Issue #606・#620)。
 #
 # 使い方:
 #   SMOKE_PORT=18814 scripts/verify-all.sh [--research] [--dry-run] [--smoke-port N]
@@ -49,7 +49,7 @@ while [ $# -gt 0 ]; do
       smoke_port="${1:-}"
       if [ -z "$smoke_port" ]; then echo "--smoke-port には番号が要ります" >&2; exit 2; fi
       ;;
-    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
     *) echo "不明な引数: $1" >&2; exit 2 ;;
   esac
   shift
