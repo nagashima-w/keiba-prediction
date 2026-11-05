@@ -75,22 +75,23 @@ const PERIOD_LATEST_CTE = `WITH latest AS (
 )`;
 
 /**
- * 期間の再集計が読む 6 文(Issue #264)。**読み取り専用・R2 に触れない**。どれも束縛値は `[from, to, 上限 + 1]` の 3 つで、1 回の `db.batch`(サブリクエスト 1)で流す。
- * 日報の `readResults`(3 文)と同じ表・同じ列を、レース ID の JSON の代わりに「最新の分析の副問い合わせ」で絞って読む。
- * 並びは主キー順(`analysis_bets`・`analysis_horses`・`race_results` の主キーの先頭が id/race_id)。
+ * 期間の再集計が読む 6 文(Issue #264)。**読み取り専用・R2 に触れない**。1 段目の `races` だけが `latest` の CTE を持ち、束縛値は `[from, to, 上限 + 1]` の 3 つ。
+ * 残り 5 文は 1 段目の結果を `json_each` で引く(Issue #615。以前は 6 文が同じ `latest` を作り直していた。`prior-export-store.ts` と同じ書き方)。束縛値は JSON 1 つで、
+ * `bets`・`marks` は分析 ID の配列、`results`・`combos`・`imports` はレース ID の配列。2 回の `db.batch`(`readPeriodRawFrom`)で流す。
+ * 日報の `readResults`(3 文)と同じ表・同じ列を読む。並びは主キー順(`analysis_bets`・`analysis_horses`・`race_results` の主キーの先頭が id/race_id)。
  */
 export const READ_PERIOD_SQL = {
   races: `${PERIOD_LATEST_CTE} SELECT id AS analysisId, race_id AS raceId, kaisai_date AS kaisaiDate, model, prompt_version AS promptVersion FROM latest ORDER BY race_id`,
-  bets: `${PERIOD_LATEST_CTE} SELECT b.analysis_id AS analysisId, b.bet_type AS betType, b.combo_key AS comboKey, b.stake, b.odds, b.ev
-           FROM analysis_bets b JOIN latest l ON l.id = b.analysis_id ORDER BY b.analysis_id, b.bet_type, b.combo_key`,
-  marks: `${PERIOD_LATEST_CTE} SELECT h.analysis_id AS analysisId, h.umaban, h.mark
-           FROM analysis_horses h JOIN latest l ON l.id = h.analysis_id WHERE h.mark IS NOT NULL ORDER BY h.analysis_id, h.umaban`,
-  results: `${PERIOD_LATEST_CTE} SELECT r.race_id AS raceId, r.umaban, r.finish_position AS finishPosition, r.win_payout AS winPayout, r.place_payout AS placePayout, r.scratched, r.wakuban
-           FROM race_results r WHERE r.race_id IN (SELECT race_id FROM latest) ORDER BY r.race_id, r.umaban`,
-  combos: `${PERIOD_LATEST_CTE} SELECT c.race_id AS raceId, c.bet_type AS betType, c.combo_key AS comboKey, c.payout
-           FROM race_combo_payouts c WHERE c.race_id IN (SELECT race_id FROM latest) ORDER BY c.race_id, c.bet_type, c.combo_key`,
-  imports: `${PERIOD_LATEST_CTE} SELECT i.race_id AS raceId, i.bet_type AS betType
-           FROM race_combo_payout_imports i WHERE i.race_id IN (SELECT race_id FROM latest)`,
+  bets: `SELECT b.analysis_id AS analysisId, b.bet_type AS betType, b.combo_key AS comboKey, b.stake, b.odds, b.ev
+           FROM analysis_bets b WHERE b.analysis_id IN (SELECT value FROM json_each(?)) ORDER BY b.analysis_id, b.bet_type, b.combo_key`,
+  marks: `SELECT h.analysis_id AS analysisId, h.umaban, h.mark
+           FROM analysis_horses h WHERE h.analysis_id IN (SELECT value FROM json_each(?)) AND h.mark IS NOT NULL ORDER BY h.analysis_id, h.umaban`,
+  results: `SELECT r.race_id AS raceId, r.umaban, r.finish_position AS finishPosition, r.win_payout AS winPayout, r.place_payout AS placePayout, r.scratched, r.wakuban
+           FROM race_results r WHERE r.race_id IN (SELECT value FROM json_each(?)) ORDER BY r.race_id, r.umaban`,
+  combos: `SELECT c.race_id AS raceId, c.bet_type AS betType, c.combo_key AS comboKey, c.payout
+           FROM race_combo_payouts c WHERE c.race_id IN (SELECT value FROM json_each(?)) ORDER BY c.race_id, c.bet_type, c.combo_key`,
+  imports: `SELECT i.race_id AS raceId, i.bet_type AS betType
+           FROM race_combo_payout_imports i WHERE i.race_id IN (SELECT value FROM json_each(?))`,
 } as const;
 
 /**
@@ -109,25 +110,52 @@ function wakubanField(value: number | null | undefined): { wakuban?: number } {
   return value === null || value === undefined ? {} : { wakuban: value };
 }
 
+/** {@link readPeriodRawFrom} の戻り値(D1 の行のまま。`scratched`・`wakuban` はまだ INTEGER)。 */
+export interface PeriodRawRows {
+  readonly races: unknown[];
+  readonly bets: unknown[];
+  readonly marks: unknown[];
+  readonly results: unknown[];
+  readonly combos: unknown[];
+  readonly imports: unknown[];
+  /** D1 が報告した `meta.rows_read` の、2 回の batch の合計。 */
+  readonly rowsRead: number;
+}
+
 /**
- * 期間 `[fromDate, toDate]` の、レースごとに最新の分析の行を読む(Issue #264)。1 回の batch(サブリクエスト 1)。`rowsRead` は D1 が報告した `meta.rows_read` の合計(実測用)。
+ * 期間の 6 文を **2 回の batch**(Issue #615)で流して、D1 の行のまま返す。1 回目は `races` の 1 文(最新の分析の ID・レース ID)で、`limit` を超えたら例外。
+ * 2 回目は残り 5 文に、1 回目の分析 ID の配列(bets・marks)とレース ID の配列(results・combos・imports)を JSON で束縛する。対象のレースが 0 件なら 2 回目は発行しない。
+ */
+export async function readPeriodRawFrom(db: ReportDb, fromDate: string, toDate: string, limit: number = PERIOD_ANALYSES_LIMIT): Promise<PeriodRawRows> {
+  const [first] = await db.batch([db.prepare(READ_PERIOD_SQL.races).bind(fromDate, toDate, limit + 1)]);
+  const races = (first?.results ?? []) as Array<{ analysisId: number; raceId: string }>;
+  if (races.length > limit) {
+    throw new RangeError(`期間 ${fromDate}〜${toDate} に分析したレースが上限(${limit} 件)を超えています。一部だけの集計は返しません`);
+  }
+  const firstRead = first?.meta?.rows_read ?? 0;
+  if (races.length === 0) {
+    return { races, bets: [], marks: [], results: [], combos: [], imports: [], rowsRead: firstRead };
+  }
+  const analysisIds = JSON.stringify(races.map((r) => r.analysisId));
+  const raceIds = JSON.stringify(races.map((r) => r.raceId));
+  const responses = await db.batch([
+    db.prepare(READ_PERIOD_SQL.bets).bind(analysisIds),
+    db.prepare(READ_PERIOD_SQL.marks).bind(analysisIds),
+    db.prepare(READ_PERIOD_SQL.results).bind(raceIds),
+    db.prepare(READ_PERIOD_SQL.combos).bind(raceIds),
+    db.prepare(READ_PERIOD_SQL.imports).bind(raceIds),
+  ]);
+  const [bets, marks, results, combos, imports] = responses.map((r) => (r?.results ?? []) as unknown[]);
+  const rowsRead = responses.reduce((n, r) => n + (r?.meta?.rows_read ?? 0), firstRead);
+  return { races, bets: bets ?? [], marks: marks ?? [], results: results ?? [], combos: combos ?? [], imports: imports ?? [], rowsRead };
+}
+
+/**
+ * 期間 `[fromDate, toDate]` の、レースごとに最新の分析の行を読む(Issue #264)。2 回の batch(サブリクエスト 2。Issue #615。{@link readPeriodRawFrom})。`rowsRead` は D1 が報告した `meta.rows_read` の合計(実測用)。
  * 対象のレースが `limit` を超えたら例外(一部だけの集計を返さない)。日報の 28 日累計(`D1ReportSource`)と月報(`D1MonthlySource`。Issue #279)が共有する。
  */
 export async function readPeriodRowsFrom(db: ReportDb, fromDate: string, toDate: string, limit: number = PERIOD_ANALYSES_LIMIT): Promise<{ readonly rows: PeriodRows; readonly rowsRead: number }> {
-  const bind = (sql: string) => db.prepare(sql).bind(fromDate, toDate, limit + 1);
-  const responses = await db.batch([
-    bind(READ_PERIOD_SQL.races),
-    bind(READ_PERIOD_SQL.bets),
-    bind(READ_PERIOD_SQL.marks),
-    bind(READ_PERIOD_SQL.results),
-    bind(READ_PERIOD_SQL.combos),
-    bind(READ_PERIOD_SQL.imports),
-  ]);
-  const [races, bets, marks, results, combos, imports] = responses.map((r) => (r?.results ?? []) as unknown[]);
-  if ((races?.length ?? 0) > limit) {
-    throw new RangeError(`期間 ${fromDate}〜${toDate} に分析したレースが上限(${limit} 件)を超えています。一部だけの集計は返しません`);
-  }
-  const rowsRead = responses.reduce((n, r) => n + (r?.meta?.rows_read ?? 0), 0);
+  const { races, bets, marks, results, combos, imports, rowsRead } = await readPeriodRawFrom(db, fromDate, toDate, limit);
   return {
     rows: {
       races: races as PeriodRows["races"],

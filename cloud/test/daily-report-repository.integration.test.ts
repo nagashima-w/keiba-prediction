@@ -351,15 +351,19 @@ describe("D1ReportSource.readPeriodStats(Issue #264)", () => {
     expect(s.unjudgedStake).toBe(400); // 100 + 300(古い 900 と 200 は入らない)
   });
 
-  it("D1 への発行は 1 回の batch だけ(サブリクエスト 1)。SQL は 6 文で、どれも束縛は (from, to, 上限+1) の 3 つ", async () => {
+  it("D1 への発行は 2 回の batch(サブリクエスト 2。Issue #615)。1 段目は races の 1 文(束縛は (from, to, 上限+1) の 3 つ)、2 段目は残り 5 文(束縛は JSON 1 つ)", async () => {
     const { db, prepared, batches } = spyDb(local.db);
     const s = new D1ReportSource({ db, analyses: new D1AnalysisStore({ db, bucket: local.r2 }) });
+    await analyses().saveAnalysis(rec(1, "20261001", "2026-10-01T01:00:00.000Z", [["win", "01", 100, 4, 1.2]])); // 2 段目を発行させる(対象のレースが 1 件以上)
+    prepared.length = 0;
+    batches.length = 0;
     await s.readPeriodStats("20260914", "20261010");
-    expect(batches).toEqual([6]);
+    expect(batches).toEqual([1, 5]);
     expect(prepared).toHaveLength(6);
     expect(new Set(prepared).size).toBe(6);
-    for (const sql of Object.values(READ_PERIOD_SQL)) {
-      expect(sql.match(/\?/g)).toHaveLength(3);
+    expect(READ_PERIOD_SQL.races.match(/\?/g)).toHaveLength(3);
+    for (const sql of [READ_PERIOD_SQL.bets, READ_PERIOD_SQL.marks, READ_PERIOD_SQL.results, READ_PERIOD_SQL.combos, READ_PERIOD_SQL.imports]) {
+      expect(sql.match(/\?/g)).toHaveLength(1);
     }
     expect(Object.keys(READ_PERIOD_SQL)).toHaveLength(6);
   });
@@ -434,12 +438,13 @@ describe("D1ReportSource.readPeriodStats(Issue #264)", () => {
       expect(rows.results).toHaveLength(races * 14);
       expect(rows.combos).toHaveLength(races * 9);
       expect(rows.imports).toHaveLength(races * 3);
-      // 実測(ローカルの workerd。このテストで再現できる): 300 レースで 30,001 行、1000 レースで 100,001 行 = 1 レースあたり約 100 行(レース数に比例。二乗では増えない)。
+      // 実測(ローカルの workerd。このテストで再現できる): 300 レースで 19,796 行、1000 レースで 65,996 行 = 1 レースあたり約 66 行(レース数に比例。二乗では増えない)。
+      // Issue #615 で 2 段階の batch にする前は、300 レースで 30,001 行・1000 レースで 100,001 行(1 レースあたり約 100 行。同じ seed)だった(約 34% 減)。
       // 内訳の目安: 返す行 38(レース 1・買い目 5・印 6・結果 14・組合せ払戻 9・取込印 3)+ 印の無い馬 8 + 最新の分析の選別と結合。本番の D1 の数え方がローカルと同じとは限らない。
       // Issue #278: 結果の SQL に scratched 列を足しても rows_read は変わらない(同じ行の列を足すだけ)。足す前も後も 300 レースで 30,001 行・1000 レースで 100,001 行(このテストの seed で測った)。
-      // 1000 レース(上限の 1/3)でも約 10 万行 = Free の 1 日 500 万行の約 2%。日報は 1 日 1 回。
+      // 1000 レース(上限の 1/3)でも約 6.6 万行 = Free の 1 日 500 万行の約 1.3%。日報は 1 日 1 回。
       expect(rowsRead).toBeGreaterThan(races * 40); // 計測が働いている(各表の行を実際に走査している)
-      expect(rowsRead).toBeLessThanOrEqual(races * 120); // 実測 100 行/レースに 2 割の余裕。二乗に増える書き方(結合の取り違え)になれば超える
+      expect(rowsRead).toBeLessThanOrEqual(races * 80); // 実測 66 行/レースに 2 割の余裕(旧い 1 文ずつ CTE を作る形は 100 行/レースで、これを超える)。二乗に増える書き方(結合の取り違え)になれば超える
       const stats = await source().readPeriodStats("20260901", "20261010");
       expect(stats.raceCount).toBe(races);
       expect(stats.dayCount).toBe(8);
