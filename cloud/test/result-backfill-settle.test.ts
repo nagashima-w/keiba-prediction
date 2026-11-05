@@ -33,6 +33,7 @@ class Fake {
   settleCalls: SettleCall[] = [];
   settleFail = 0; // この回数だけ settleBackfill を失敗させる
   reconcileCalls = 0;
+  reconcileArgs: Array<string | undefined> = [];
   reconcileResult: number | Error = 0;
   warns: string[] = [];
   infos: string[] = [];
@@ -56,8 +57,9 @@ class Fake {
       this.settleCalls.push(stages.map((s) => ({ stage: s.stage, raceIds: [...s.raceIds] })));
       return { 1: 0, 2: 0, 3: 0, 4: 0 };
     },
-    reconcileBackfillState: async () => {
+    reconcileBackfillState: async (since?: string) => {
       this.log.push("reconcile");
+      this.reconcileArgs.push(since);
       this.reconcileCalls += 1;
       if (this.reconcileResult instanceof Error) throw this.reconcileResult;
       return this.reconcileResult;
@@ -302,13 +304,13 @@ describe("整合検査: 1 晩 1 回、最初のステップで(写しのあと�
     const drifted = new Fake();
     drifted.reconcileResult = 3;
     await make(drifted).core.runNextStep();
-    expect(drifted.warns).toContain("result-backfill: race_backfill drift fixed count=3");
+    expect(drifted.warns).toContain("result-backfill: race_backfill drift fixed scope=full count=3");
 
     const clean = new Fake();
     clean.reconcileResult = 0;
     await make(clean).core.runNextStep();
     expect(clean.warns.filter((m) => m.includes("drift"))).toEqual([]);
-    expect(clean.infos.some((l) => l.includes("reconciled drift=0"))).toBe(true);
+    expect(clean.infos.some((l) => l.includes("reconciled scope=full drift=0"))).toBe(true);
   });
 
   it("整合検査が失敗しても補完は続ける(警告に出し、印は立てない=次のステップでやり直す)", async () => {
@@ -326,5 +328,46 @@ describe("整合検査: 1 晩 1 回、最初のステップで(写しのあと�
     w.now += BACKFILL_POLL_MS;
     await core.runNextStep();
     expect(w.reconcileCalls).toBe(2); // 印が立たなかったので次のステップでやり直した
+  });
+});
+
+describe("整合検査の範囲: 全件は前回の全件から 7 晩以上たったとき、それ以外は直近 14 日(Issue #614)", () => {
+  /** 指定の晩(10 月 d 日の 2 時台 JST。夜 = 202610dd)に 1 ステップ進める。 */
+  const stepOn = async (core: ResultBackfillCore, w: Fake, day: number): Promise<void> => {
+    w.now = jst(10, day, 2);
+    await core.runNextStep();
+  };
+
+  it("初回は全件(引数なし)、2〜7 晩目は直近 14 日、前回の全件から 7 晩後に全件。6 晩後は直近", async () => {
+    const w = new Fake();
+    const { core } = make(w);
+    await stepOn(core, w, 1);
+    await stepOn(core, w, 2);
+    await stepOn(core, w, 7); // 全件の 6 晩後
+    await stepOn(core, w, 8); // 7 晩後
+    await stepOn(core, w, 9);
+    expect(w.reconcileArgs).toEqual([undefined, "20260918", "20260923", undefined, "20260925"]);
+  });
+
+  it("検査が失敗した晩は全件をしたことにしない(翌ステップでまた全件)", async () => {
+    const w = new Fake();
+    w.reconcileResult = new Error("D1 SECRET");
+    const { core } = make(w);
+    await stepOn(core, w, 1);
+    w.reconcileResult = 0;
+    await stepOn(core, w, 1);
+    await stepOn(core, w, 2);
+    expect(w.reconcileArgs).toEqual([undefined, undefined, "20260918"]);
+  });
+
+  it("ログと警告にどちらの検査かが出る", async () => {
+    const w = new Fake();
+    w.reconcileResult = 3;
+    const { core } = make(w);
+    await stepOn(core, w, 1);
+    w.reconcileResult = 0;
+    await stepOn(core, w, 2);
+    expect(w.warns).toContain("result-backfill: race_backfill drift fixed scope=full count=3");
+    expect(w.infos.some((l) => l.includes("reconciled scope=recent drift=0"))).toBe(true);
   });
 });

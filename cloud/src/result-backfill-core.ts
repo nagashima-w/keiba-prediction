@@ -108,6 +108,17 @@ export const BACKFILL_GATE_BUSY_DELAY_MS = 5 * 60_000;
 export const BACKFILL_ERROR_RETRY_MS = 10 * 60_000;
 /** 一時的な失敗でレースを諦めるまでの晩数。 */
 export const BACKFILL_MAX_NIGHTS = 3;
+
+/** 整合検査(Issue #614): 全件の検査は、前回の全件からこの暦日数以上たった晩にする。それ以外の晩は直近の開催日だけ。 */
+export const RECONCILE_FULL_EVERY_NIGHTS = 7;
+/** 整合検査(Issue #614): 直近の検査が対象にする開催日の範囲(その晩の何日前以降か)。 */
+export const RECONCILE_RECENT_DAYS = 14;
+
+/** YYYYMMDD どうしの暦日の差(`to` − `from`)。 */
+function daysBetween(from: string, to: string): number {
+  const ms = (d: string): number => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(4, 6)) - 1, Number(d.slice(6, 8)));
+  return Math.round((ms(to) - ms(from)) / 86_400_000);
+}
 /** gate の都合の失敗が続いてレースを諦めるまでの晩数。 */
 export const BACKFILL_MAX_DEFER_NIGHTS = 5;
 
@@ -174,8 +185,8 @@ export interface BackfillStore {
    * 本番の `D1ResultStore` は両方持つ。戻り値は段階ごとに実際に状態 2 にした行数。
    */
   settleBackfill?(stages: ReadonlyArray<{ readonly stage: 1 | 2 | 3 | 4; readonly raceIds: readonly string[] }>): Promise<Record<1 | 2 | 3 | 4, number>>;
-  /** 整合検査(Issue #597): 全レースの状態を作り直し、食い違いを直す。直した行数を返す。 */
-  reconcileBackfillState?(): Promise<number>;
+  /** 整合検査(Issue #597): レースの状態を作り直し、食い違いを直す。直した行数を返す。`sinceKaisaiDate`(YYYYMMDD)を渡すとその日以降の開催日のレースだけ(Issue #614)。省略は全件。 */
+  reconcileBackfillState?(sinceKaisaiDate?: string): Promise<number>;
 }
 
 export interface BackfillDeps {
@@ -482,22 +493,32 @@ export class ResultBackfillCore {
     this.deps.log(`result-backfill: d1-settled-synced (DO の記録の件数/状態 2 にした件数) stage1=${of(1)} stage2=${of(2)} stage3=${of(3)} stage4=${of(4)}`, "info");
   }
 
-  /** 整合検査(1 晩 1 回。Issue #597): 全レースの状態を作り直し、食い違いを直す。0 でなければ書き込みの経路のどこかが状態の作り直しを呼んでいない兆しなので警告に出す。失敗は握る。 */
+  /**
+   * 整合検査(1 晩 1 回。Issue #597): レースの状態を作り直し、食い違いを直す。0 でなければ書き込みの経路のどこかが状態の作り直しを呼んでいない兆しなので警告に出す。失敗は握る。
+   * 範囲(Issue #614): 全件は前回の全件から {@link RECONCILE_FULL_EVERY_NIGHTS} 晩以上たった晩(または一度もしていない晩)、それ以外は直近 {@link RECONCILE_RECENT_DAYS} 日の開催日のレースだけ。
+   * 全件をした晩(`reconciled_full_night`)は、全件が成功したときだけ記録する。
+   */
   private async reconcileTonight(night: string): Promise<void> {
     const store = this.deps.store;
     if (store.reconcileBackfillState === undefined || this.metaGet("reconciled_night") === night) {
       return;
     }
+    const lastFull = this.metaGet("reconciled_full_night");
+    const full = lastFull === null || daysBetween(lastFull, night) >= RECONCILE_FULL_EVERY_NIGHTS;
+    const scope = full ? "full" : "recent";
     try {
-      const fixed = await store.reconcileBackfillState();
+      const fixed = await (full ? store.reconcileBackfillState() : store.reconcileBackfillState(addDaysToKaisaiDate(night, -RECONCILE_RECENT_DAYS)));
       this.metaPut("reconciled_night", night);
+      if (full) {
+        this.metaPut("reconciled_full_night", night);
+      }
       if (fixed > 0) {
-        this.deps.onWarn(`result-backfill: race_backfill drift fixed count=${fixed}`);
+        this.deps.onWarn(`result-backfill: race_backfill drift fixed scope=${scope} count=${fixed}`);
       } else {
-        this.deps.log("result-backfill: race_backfill reconciled drift=0", "info");
+        this.deps.log(`result-backfill: race_backfill reconciled scope=${scope} drift=0`, "info");
       }
     } catch (error) {
-      this.deps.onWarn(`result-backfill: race_backfill reconcile failed error=${errorKind(error)}`);
+      this.deps.onWarn(`result-backfill: race_backfill reconcile failed scope=${scope} error=${errorKind(error)}`);
     }
   }
 
