@@ -52,6 +52,7 @@ class World {
   alarm: number | null = null;
   gate: { blockedUntil: number | null; pending: number } = { blockedUntil: null, pending: 0 };
   gateError = false;
+  logs: string[] = [];
   /** 未取込のレース(取り込み済みになると消える)。 */
   unimported: Array<{ raceId: string; kaisaiDate: string }> = [];
   undated = 0;
@@ -203,7 +204,9 @@ function make(world: World, options: BackfillOptions = {}, sql: NodeSql = openNo
       },
       store: world.store,
       stubFor: world.stubFor,
-      log: () => undefined,
+      log: (line) => {
+        world.logs.push(line);
+      },
       onWarn: (m) => world.warns.push(m),
     },
     options,
@@ -855,6 +858,26 @@ describe("kick(cron から毎日 1 回。アラームが無いときだけ張る
     w.now = jst(10, 10, 3);
     await core.kick();
     expect(w.alarm).toBe(jst(10, 10, 3));
+  });
+
+  it("今より 15 分以上前の残ったアラームは無いのと同じに張り直す。14 分前は触らない(#603)", async () => {
+    const now = jst(10, 10, 9);
+    const rows: [string, number | null, boolean][] = [
+      ["アラームなし", null, true],
+      ["今より後", now + 5 * 60_000, false],
+      ["14 分前", now - 14 * 60_000, false],
+      ["16 分前", now - 16 * 60_000, true],
+    ];
+    for (const [name, alarm, arms] of rows) {
+      const w = new World();
+      const { core } = make(w);
+      w.now = now;
+      w.alarm = alarm;
+      await core.kick();
+      expect(w.alarm, name).toBe(arms ? jst(10, 11, 1) : alarm);
+      const stale = w.logs.filter((l) => l.includes("stale alarm"));
+      expect(stale, name).toEqual(arms && alarm !== null ? [`result-backfill: stale alarm at=${new Date(alarm).toISOString()} re-armed`] : []);
+    }
   });
 
   it("飛行中のチャンクがあるときにアラームが無ければ、すぐ(進行を見る)に張る", async () => {

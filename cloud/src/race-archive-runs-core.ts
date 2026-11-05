@@ -46,6 +46,7 @@ import { nextArchiveWindowStart, inArchiveWindow } from "./race-archive-fetch-co
 import { CATALOG_PAGE_MAX, DB_SIZE_LIMIT_BYTES, READ_BATCH_MAX, type RaceArchiveCatalogEntry, type ReadRaceArchivesResult } from "./race-archive-repository";
 import type { ConvertBatchResult, ConvertTarget } from "./race-archive-runs";
 import type { SqlLike } from "./sql-like";
+import { shouldRearm } from "./stale-alarm";
 
 /** 変換の DO の固定名(単一インスタンス)。cron の `scheduled` と管理者の口が引く。 */
 export const RACE_ARCHIVE_RUNS_NAME = "main";
@@ -252,8 +253,10 @@ export class RaceArchiveRunsCore {
 
   /** アラームが無ければ張る(cron の `scheduled` と状態の読み取りが呼ぶ)。 */
   async kick(): Promise<void> {
-    if (this.disabled || (await this.deps.getAlarm()) !== null) return;
-    await this.arm(nextArchiveWindowStart(this.deps.now(), this.startMin, this.endMin));
+    if (this.disabled) return;
+    const now = this.deps.now();
+    if (!shouldRearm(await this.deps.getAlarm(), now, (iso) => this.deps.log(`race-archive-runs: stale alarm at=${iso} re-armed`, "info"))) return;
+    await this.arm(nextArchiveWindowStart(now, this.startMin, this.endMin));
   }
 
   /** アラーム: 次のステップを 1 つ実行する。例外は投げない(失敗は 10 分後の再試行)。 */

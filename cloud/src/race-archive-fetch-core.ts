@@ -60,6 +60,7 @@ import type { GateResult } from "./gate-core";
 import type { RaceArchiveCatalogEntry, SaveRaceArchiveResult } from "./race-archive-repository";
 import type { RaceArchiveFetchStatus } from "./race-archive-fetch-types";
 import type { SqlLike } from "./sql-like";
+import { shouldRearm } from "./stale-alarm";
 
 /** 過去の結果の取得の DO(`RaceArchiveFetchDO`)の固定名(単一インスタンス)。cron の `scheduled` と管理者の口(`/api/race-archive`)が引く。 */
 export const RACE_ARCHIVE_FETCH_NAME = "main";
@@ -420,10 +421,13 @@ export class RaceArchiveFetchCore {
 
   /** アラームが無ければ張る(cron の `scheduled` と状態の読み取りが呼ぶ)。 */
   async kick(): Promise<void> {
-    if (this.disabled || (await this.deps.getAlarm()) !== null) {
+    if (this.disabled) {
       return;
     }
     const now = this.deps.now();
+    if (!shouldRearm(await this.deps.getAlarm(), now, (iso) => this.deps.log(`race-archive: stale alarm at=${iso} re-armed`, "info"))) {
+      return;
+    }
     switch (this.mode()) {
       case "manual-stopped":
       case "capacity-stopped":

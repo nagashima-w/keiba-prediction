@@ -184,13 +184,37 @@ describe("アラーム・時間帯(JST 1:00〜8:30)", () => {
     h.now = at(2026, 11, 5, 12, 0);
     await h.core.kick();
     expect(h.alarm).toBe(at(2026, 11, 6, 1, 0));
-    h.alarm = 123;
+    h.alarm = at(2026, 11, 5, 12, 5); // 今より後
     await h.core.kick();
-    expect(h.alarm).toBe(123);
+    expect(h.alarm).toBe(at(2026, 11, 5, 12, 5));
     const off = new Harness({ disabled: true });
     await off.core.kick();
     expect(off.alarm).toBeNull();
     off.sql.close();
+  });
+
+  it("kick: 今より 15 分以上前の残ったアラームは無いのと同じに張り直す。14 分前は触らない(#603)", async () => {
+    const now = at(2026, 11, 5, 12, 0);
+    const base = new Harness();
+    base.now = now;
+    await base.core.kick();
+    expect(base.alarm).toBe(at(2026, 11, 6, 1, 0));
+    const rows: [string, number, boolean][] = [
+      ["今より後", now + 5 * 60_000, false],
+      ["14 分前", now - 14 * 60_000, false],
+      ["16 分前", now - 16 * 60_000, true],
+    ];
+    for (const [name, alarm, arms] of rows) {
+      const x = new Harness();
+      x.now = now;
+      x.alarm = alarm;
+      await x.core.kick();
+      expect(x.alarm, name).toBe(arms ? base.alarm : alarm);
+      expect(x.logs.filter((l) => l.includes("stale alarm")), name).toEqual(arms ? [`race-archive-runs: stale alarm at=${new Date(alarm).toISOString()} re-armed`] : []);
+      x.sql.close();
+    }
+    base.sql.close();
+    h = new Harness(); // afterEach が閉じるもの(前のテストの h を二重に閉じない)
   });
 
   it("時間帯の外で起きたら、目録にも R2 にも触れず、次の開始に張る(8:30 ちょうどは外、1:00 ちょうどは中)", async () => {
