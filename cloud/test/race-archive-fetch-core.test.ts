@@ -1251,6 +1251,21 @@ describe("kick: 残ったアラーム(今より 15 分以上前)は無いのと�
       w.alarm = now - 16 * MIN;
       await w.core.kick();
       expect(w.alarm, mode).toBe(now - 16 * MIN);
+      // 張らないので「re-armed」とは書かず、止まっていて張らなかった旨のログにする(#604)
+      expect(w.logs.filter((l) => l.includes("stale alarm")), mode).toEqual([`race-archive: stale alarm at=${new Date(now - 16 * MIN).toISOString()} (stopped, not re-armed)`]);
+    }
+  });
+  it("manual-stopped・capacity-stopped: 通知の再送が待っていれば、残ったアラームを張り直し、ログも re-armed(#604)", async () => {
+    for (const mode of ["manual-stopped", "capacity-stopped"]) {
+      const w = mk({ fromMonth: "2026-11" });
+      withMode(w, mode);
+      w.sql.exec("INSERT INTO ra_meta (key, value) VALUES ('pending_notice', '{}'), ('notice_retry_at', ?)", String(now + 3 * MIN));
+      w.core = w.makeCore();
+      w.now = now;
+      w.alarm = now - 16 * MIN;
+      await w.core.kick();
+      expect(w.alarm, mode).toBe(now + 3 * MIN);
+      expect(w.logs.filter((l) => l.includes("stale alarm")), mode).toEqual([`race-archive: stale alarm at=${new Date(now - 16 * MIN).toISOString()} re-armed`]);
     }
   });
   it("night-stopped: 残ったアラームのときも max(resume_at, runAt(now)) で張る", async () => {

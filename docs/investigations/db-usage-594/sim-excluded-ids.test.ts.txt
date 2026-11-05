@@ -1,0 +1,181 @@
+/**
+ * Issue #612: 結果の補完の DO の SQLite の `excludedIds` が 1 晩に何回・どの表を読むかを数える(出力は sim-excluded-ids-result.json)。
+ * このファイルは docs/investigations/db-usage-594/sim-excluded-ids.test.ts.txt(vitest が拾わないよう .txt)。
+ * 流し方: cp <このファイル> cloud/test/zz-sim-612.test.ts && cd cloud && SIM_OUT=/tmp/sim.json pnpm exec vitest run test/zz-sim-612.test.ts(流したらコピーは消す)。
+ * 下の本体(`describe("excludedIds の回数(#612)"`)より前は、cloud/test/result-backfill-queue.test.ts(Issue #598)の seed・runNight をそのまま写したもの。
+ */
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+import { ResultBackfillCore, type BackfillDayStub, type BackfillOptions } from "../src/result-backfill-core";
+import type { ResultImportProgress } from "../src/race-day-core";
+import { RECOMPUTE_RACES_SQL } from "../src/race-backfill-state";
+import { D1ResultStore } from "../src/result-repository";
+import { countingDb, isBackfillListSql } from "./counting-db";
+import { openLocalBindings, type LocalBindings } from "./local-bindings";
+import { openNodeSql, type NodeSql } from "./node-sql";
+
+/**
+ * (Issue #598: 結果の補完の「1 晩ぶんの待ち行列」。本物の `ResultBackfillCore`・本物の D1(ローカルの workerd。`D1ResultStore`)を繋ぎ、日単位の DO・gate・時計だけを偽物にする。
+ * 固定すること(いずれも**待ち行列を入れる前の版でも通る**ように、観測は「依頼の並び」と「列挙の回数・rows_read」だけにする):
+ *  - 依頼されたレースの並びとチャンクの割り方(日の新しい順・同じ日は race_id 昇順・30 件刻み・1 チャンクに 2 日を混ぜない・1 晩 150 件)
+ *  - 1 晩ぶんの列挙の SQL の回数と rows_read の合計の上界
+ *  - 段階 1 で結果が入った直後に増える段階 2 の対象を、同じ晩に拾う
+ *  - 件数の SQL は夜のステップでは流れない
+ */
+
+const JST = 9 * 3600_000;
+const jst = (month: number, day: number, hour: number, minute = 0): number => Date.UTC(2026, month - 1, day, hour, minute) - JST;
+/** 既定の「今」: 2026-10-10 JST 02:00(窓の中)。補完の `to` は昨日(20261009)。 */
+const T0 = jst(10, 10, 2);
+const WINDOW_END = jst(10, 10, 6);
+
+/** 検証を通る 12 桁の中央のレースID(年 + 場コード 05 + 日 + ブロック + レース番号)。 */
+const idOf = (date: string, n: number): string => `2026${"05"}${date.slice(6, 8)}${String(Math.floor((n - 1) / 12)).padStart(2, "0")}${String(((n - 1) % 12) + 1).padStart(2, "0")}`;
+
+let local: LocalBindings;
+const opened: NodeSql[] = [];
+beforeAll(async () => {
+  local = await openLocalBindings();
+}, 180_000);
+afterAll(async () => {
+  await local?.dispose();
+});
+beforeEach(async () => {
+  await local.reset();
+});
+afterEach(() => {
+  for (const sql of opened.splice(0)) sql.close();
+});
+
+/** 分析の行(クラス入り)。`stage1` は結果なし。`stage4` は結果があり単勝の払戻だけが全馬 NULL(オッズ・着順あり)。 */
+async function seed(date: string, n: number, kind: "stage1" | "stage2" | "stage4"): Promise<string[]> {
+  const ids: string[] = [];
+  for (let i = 1; i <= n; i += 1) {
+    const id = idOf(date, i);
+    ids.push(id);
+    await local.db
+      .prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date, race_class) VALUES (?, ?, 0, ?, 'オープン')")
+      .bind(id, `2026-10-06T00:00:${String(i % 60).padStart(2, "0")}.000Z`, date)
+      .run();
+    if (kind !== "stage1") {
+      for (const umaban of [1, 2]) {
+        await local.db
+          .prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds) VALUES (?, ?, ?, ?)")
+          .bind(id, umaban, umaban, kind === "stage4" ? 3.5 : null)
+          .run();
+      }
+    }
+  }
+  await new D1ResultStore({ db: local.db }).reconcileBackfillState(); // 補完の状態(race_backfill)を作る(本番では書き込みの経路が書く)
+  return ids;
+}
+
+interface Request {
+  readonly date: string;
+  readonly raceIds: string[];
+  readonly winOddsOnly: boolean;
+}
+
+/**
+ * 1 晩ぶんを、アラームを時刻順に動かして回す。日単位の DO の偽物は、依頼を受けたら**その場で D1 を「取り込み済み」の状態にする**:
+ * 通常の依頼(段階 1)は結果の行を足す(`stage1Result` が `"noOdds"` ならオッズ無し=段階 2 の対象になる)。補完モードの依頼(段階 2〜4)は、オッズ・単勝の払戻・クラスを埋める。
+ */
+async function runNight(options: { backfill?: BackfillOptions; stage1Result?: "full" | "noOdds"; failDispatchOn?: (n: number) => boolean } = {}) {
+  const { db, calls } = countingDb(local.db);
+  const clock = { now: T0 };
+  const alarm: { at: number | null } = { at: null };
+  const requests: Request[] = [];
+  const sql = openNodeSql();
+  opened.push(sql);
+  const stubFor = (date: string): BackfillDayStub =>
+    ({
+      requestResultImport: async ({ raceIds, winOddsOnly }: { raceIds: readonly string[]; winOddsOnly?: boolean }) => {
+        requests.push({ date, raceIds: [...raceIds], winOddsOnly: winOddsOnly === true });
+        if (options.failDispatchOn?.(requests.length) === true) throw new Error("RPC SECRET");
+        for (const id of raceIds) {
+          if (winOddsOnly === true) {
+            await local.db.prepare("UPDATE race_results SET win_odds = COALESCE(win_odds, 2.0), win_payout = COALESCE(win_payout, 200) WHERE race_id = ?").bind(id).run();
+            await local.db.prepare("UPDATE analyses SET race_class = COALESCE(race_class, 'オープン') WHERE race_id = ?").bind(id).run();
+            await local.db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify([id])).run(); // 本番の保存の経路が batch の最後に流す文
+          } else {
+            for (const umaban of [1, 2]) {
+              await local.db
+                .prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, win_payout) VALUES (?, ?, ?, ?, ?)")
+                .bind(id, umaban, umaban, options.stage1Result === "noOdds" ? null : 2.0, 200)
+                .run();
+            }
+            await local.db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify([id])).run(); // 本番の保存の経路が batch の最後に流す文
+          }
+        }
+        return { accepted: raceIds.length, ignored: { inProgress: 0, imported: 0, alreadyToday: 0 } };
+      },
+      getResultImportProgress: async (): Promise<ResultImportProgress> => {
+        const races = requests.flatMap((r) => r.raceIds).map((raceId) => ({ raceId, state: "imported" as const, attempts: 0, deferrals: 0, requestedOn: "20261010", nextTryAt: null, lastClass: "imported" as const, updatedAt: 0 }));
+        return { total: races.length, queued: 0, imported: races.length, gaveUp: 0, races };
+      },
+    }) as unknown as BackfillDayStub;
+  const makeCore = (): ResultBackfillCore =>
+    new ResultBackfillCore(
+      {
+        sql,
+        now: () => clock.now,
+        setAlarm: (at) => void (alarm.at = at),
+        getAlarm: async () => alarm.at,
+        gateStatus: async () => ({ blockedUntil: null, pending: 0 }),
+        store: new D1ResultStore({ db }),
+        stubFor,
+        log: () => undefined,
+        onWarn: () => undefined,
+      },
+      options.backfill ?? {},
+    );
+  let core = makeCore();
+  await core.kick();
+  let steps = 0;
+  /** アラームを窓の終わりまで動かす。`recreateEvery` ステップごとに core を作り直す(DO の追い出しの再現。状態は同じ SQLite)。 */
+  async function run(recreateEvery = 0, until = WINDOW_END): Promise<void> {
+    for (; steps < 4000; steps += 1) {
+      if (alarm.at === null || alarm.at >= until) break;
+      clock.now = Math.max(clock.now, alarm.at);
+      alarm.at = null;
+      if (recreateEvery > 0 && steps > 0 && steps % recreateEvery === 0) core = makeCore();
+      await core.runNextStep();
+    }
+  }
+  return { run, requests, calls, clock, alarm, sql, core: () => core, steps: () => steps };
+}
+
+
+// ---- #612: 結果の補完の DO の SQLite(excludedIds)が 1 晩に何回・どの表を読むかを数える ----
+import { writeFileSync } from "node:fs";
+describe("excludedIds の回数(#612)", () => {
+  it("段階 4 の対象が 540 レース・DO の 3 表に済みの行が約 1,000 ずつある晩", async () => {
+    // D1: 段階 4 の対象 540 レース(23 日 × 24 レース + 余り)
+    let n = 0;
+    for (let d = 0; d < 23; d += 1) {
+      const date = `202610${String(1 + d).padStart(2, "0")}`;
+      await seed(date, d < 22 ? 24 : 12, "stage4");
+      n += d < 22 ? 24 : 12;
+    }
+    const night = await runNight();
+    // DO の 3 表に、過去の晩に済んだ行を入れる(本番の件数の目安: backfill_race 1,100・backfill_class 1,000・backfill_payout 1,000)
+    const fill = (table: string, state: string, rows: number): void => {
+      for (let i = 0; i < rows; i += 1) {
+        night.sql.exec(`INSERT INTO ${table} (race_id, nights, defers, last_night, last_class, state) VALUES (?, 0, 0, '20260901', 'imported', ?)`, `X${table}${i}`, state);
+      }
+    };
+    fill("backfill_race", "fill_done", 1100);
+    fill("backfill_class", "class_done", 1000);
+    fill("backfill_payout", "payout_done", 1000);
+    night.sql.statements.length = 0;
+    await night.run();
+    const scans = night.sql.statements.filter((q) => /^SELECT race_id FROM backfill_\w+ WHERE last_night = \?/.test(q.replace(/\s+/g, " ").trim()));
+    const byTable: Record<string, number> = {};
+    for (const q of scans) { const t = /FROM (backfill_\w+)/.exec(q)![1]!; byTable[t] = (byTable[t] ?? 0) + 1; }
+    const total = Object.entries(byTable).reduce((s, [t, c]) => s + c * (t === "backfill_race" ? 1100 : 1000), 0);
+    const all = night.sql.statements.length;
+    const bySql: Record<string, number> = {};
+    for (const q of night.sql.statements) { const k = q.replace(/\s+/g, " ").trim().slice(0, 70); bySql[k] = (bySql[k] ?? 0) + 1; }
+    writeFileSync(process.env["SIM_OUT"] ?? "/tmp/sim-612.json", JSON.stringify({ races: n, requests: night.requests.length, steps: night.steps(), excludedScans: byTable, excludedRowsScanned: total, allStatements: all, bySql }, null, 1));
+  }, 120_000);
+});

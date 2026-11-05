@@ -1,0 +1,23 @@
+diff --git a/cloud/test/local-bindings.ts b/cloud/test/local-bindings.ts
+index f1439ae4..31f79072 100644
+--- a/cloud/test/local-bindings.ts
++++ b/cloud/test/local-bindings.ts
+@@ -3,7 +3,7 @@
+  * **本番の D1・R2 には一切触れない**(`--local`・一時ディレクトリ。wrangler.toml に `remote = true` は無い)。
+  */
+ import { execFileSync } from "node:child_process";
+-import { mkdtempSync, rmSync } from "node:fs";
++import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import path from "node:path";
+ import { fileURLToPath } from "node:url";
+@@ -33,7 +33,8 @@ export async function openLocalBindings(): Promise<LocalBindings> {
+     configPath: path.join(CLOUD, "wrangler.toml"),
+     persist: { path: path.join(stateDir, "v3") },
+   });
+-  const db = proxy.env.DB;
++  const rawDb = proxy.env.DB;
++  const db = new Proxy(rawDb, { get(t, k) { if (k === "prepare") { return (sql: string) => { try { (globalThis as any).process.env.SQL_LOG && appendFileSync((globalThis as any).process.env.SQL_LOG, JSON.stringify(sql) + "\n"); } catch {} return t.prepare(sql); }; } const v = (t as any)[k]; return typeof v === "function" ? v.bind(t) : v; } }) as D1Database;
+   return {
+     db,
+     r2: proxy.env.ANALYSIS_DETAIL,

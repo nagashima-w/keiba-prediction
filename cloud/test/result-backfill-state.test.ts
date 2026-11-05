@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { D1AnalysisStore } from "../src/analysis-repository";
-import { RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, raceBackfillStateSelect } from "../src/race-backfill-state";
+import { RECOMPUTE_BY_ANALYSIS_IDS_SQL, RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, raceBackfillStateSelect } from "../src/race-backfill-state";
 import {
   COUNT_BACKFILL_SQL,
   COUNT_CLASS_BACKFILL_SQL,
@@ -501,6 +501,59 @@ describe("整合検査の読み取り行数(meta.rows_read。1 晩 1 回の全�
     process.stderr.write(`REPORT reconcile rows_read=${again.meta.rows_read} races=${races}\n`);
     expect(again.meta.rows_read!).toBeGreaterThan(races); // 前提(空振り防止): 全レースを読んでいる
     expect(again.meta.rows_read!).toBeLessThanOrEqual(races * 20); // 結果の表を 1 回走査(13 頭)+ 分析 1 行 + 結合。レースごとの相関副問い合わせ版は約 35 行/レースだった
+  });
+});
+
+describe("作り直しの読み取り行数(meta.rows_read): 1 レース分の作り直しは、全体のレース数に比例しない(#604)", () => {
+  /** N レース(各 13 頭・分析 1 行)を入れ、整合検査で状態を作る。対象のレース V00000 は結果の行を消して、段階 1 が 0 → 1 に変わる状態にする。 */
+  async function seed(races: number): Promise<void> {
+    await local.reset();
+    const nums = JSON.stringify(Array.from({ length: races }, (_, i) => i));
+    await local.db
+      .prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date, race_class) SELECT 'V' || printf('%05d', value), '2026-10-06T00:00:00.000Z', 0, '20261003', 'オープン' FROM json_each(?)")
+      .bind(nums)
+      .run();
+    await local.db
+      .prepare("INSERT INTO race_results (race_id, umaban, finish_position, win_odds, scratched, win_payout) SELECT 'V' || printf('%05d', r.value), h.value + 1, h.value + 1, 2.0, 0, CASE WHEN h.value = 0 THEN 300 ELSE NULL END FROM json_each(?) r, json_each(?) h")
+      .bind(nums, JSON.stringify(Array.from({ length: 13 }, (_, i) => i)))
+      .run();
+    await local.db.prepare(RECONCILE_RACE_BACKFILL_SQL).run();
+    expect(((await local.db.prepare("SELECT st1 FROM race_backfill WHERE race_id = 'V00000'").first<{ st1: number }>())!).st1).toBe(0); // 前提: 結果があるので段階 1 は対象でない
+    await local.db.prepare("DELETE FROM race_results WHERE race_id = 'V00000'").run();
+  }
+  const st1 = async (): Promise<number> => (await local.db.prepare("SELECT st1 FROM race_backfill WHERE race_id = 'V00000'").first<{ st1: number }>())!.st1;
+
+  const cases: ReadonlyArray<readonly [string, () => Promise<{ readonly rowsRead: number; readonly changes: number }>]> = [
+    [
+      "RECOMPUTE_RACES_SQL(race_id で指す)",
+      async () => {
+        const r = await local.db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify(["V00000"])).run();
+        return { rowsRead: r.meta.rows_read!, changes: r.meta.changes };
+      },
+    ],
+    [
+      "RECOMPUTE_BY_ANALYSIS_IDS_SQL(分析の id で指す)",
+      async () => {
+        const id = (await local.db.prepare("SELECT id FROM analyses WHERE race_id = 'V00000'").first<{ id: number }>())!.id;
+        const r = await local.db.prepare(RECOMPUTE_BY_ANALYSIS_IDS_SQL).bind(JSON.stringify([id])).run();
+        return { rowsRead: r.meta.rows_read!, changes: r.meta.changes };
+      },
+    ],
+  ];
+  it.each(cases)("%s: 30 レースと 600 レースで読み取り行数が同じで、小さい(40 行以下)。実際に状態を書き換える(空振りでない)", async (_name, run) => {
+    const measured: number[] = [];
+    for (const races of [30, 600]) {
+      await seed(races);
+      expect(await st1()).toBe(0); // 前提: 作り直し前は 0(結果の行を消しただけでは、表はまだ古い)
+      const { rowsRead, changes } = await run();
+      expect(changes, `${races} レース`).toBeGreaterThan(0); // 状態の行が実際に書き換わった
+      expect(await st1(), `${races} レース`).toBe(1);
+      expect(rowsRead, `${races} レース`).toBeGreaterThan(0);
+      measured.push(rowsRead);
+    }
+    process.stderr.write(`REPORT recompute rows_read 30/600 レース = ${measured.join("/")}\n`);
+    expect(measured[1]).toBe(measured[0]); // レース数が 20 倍でも変わらない
+    expect(measured[0]!).toBeLessThanOrEqual(40);
   });
 });
 

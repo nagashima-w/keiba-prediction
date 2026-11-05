@@ -1,0 +1,265 @@
+/**
+ * Issue #612 の調査用の計測。このファイルは docs/investigations/db-usage-594/measure.test.ts.txt(vitest が拾わないよう .txt)。
+ * 流し方: cp <このファイル> cloud/test/zz-measure-612.test.ts && cd cloud && MEASURE_OUT=/tmp/measure.json pnpm exec vitest run test/zz-measure-612.test.ts(流したらコピーは消す)。
+ * 出力は measure-result.json(同じディレクトリ)と同じ形。合成データの分布は一様で、本番の分布とは違う(行数の規模だけを本番に合わせた)。
+ * 本番の行数(2026-11-05 JST に実測)と同じ規模の合成データをローカルの D1(workerd)に作り、各 SQL の `meta.rows_read` を測る。
+ * 本番の D1 には一切触れない。結果は環境変数 MEASURE_OUT の JSON ファイルへ書く。
+ */
+import { writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, it } from "vitest";
+import { openLocalBindings, type LocalBindings } from "./local-bindings";
+import { FILL_SCRATCHED_SQL, FILL_WIN_ODDS_SQL, FILL_WIN_PAYOUT_SQL, LIST_BACKFILL_SQL, LIST_PAYOUT_BACKFILL_SQL, LIST_CLASS_BACKFILL_SQL, LIST_WIN_ODDS_BACKFILL_SQL, COUNT_BACKFILL_SQL, COUNT_WIN_ODDS_BACKFILL_SQL, COUNT_CLASS_BACKFILL_SQL, COUNT_PAYOUT_BACKFILL_SQL, CLASS_DISTRIBUTION_SQL, LIST_UNIMPORTED_BY_DAY_SQL, LIST_UNIMPORTED_SQL, SAVE_RACE_CLASS_SQL } from "../src/result-repository";
+import { raceBackfillStateSelect, RECOMPUTE_RACES_SQL, RECOMPUTE_BY_ANALYSIS_IDS_SQL, RECONCILE_RACE_BACKFILL_SQL, settleRaceBackfillSql } from "../src/race-backfill-state";
+import { READ_PERIOD_SQL, LIST_DAY_ANALYSES_SQL, NEEDING_REPORT_SQL, READ_RESULTS_SQL } from "../src/daily-report-repository";
+import { LAST_DAY_STATUS_SQL } from "../src/monthly-report-repository";
+import { VERIFY_READ_SQL, VERIFY_DAY_ANALYSES_SQL, verifyDayAllocationSql, verifyDayResultSql } from "../src/verify-read";
+import { VERIFY_CLOSE_READ_SQL } from "../src/verify-close";
+import { PENDING_SQL } from "../src/verify-store";
+import { TARGETS_ANALYSES_SQL, targetsSql, targetsCloseSql } from "../src/targets-repository";
+import { CANDIDATES_SQL, LOOKUPS_SQL } from "../src/prior-export-store";
+import { FIT_CANDIDATES_SQL } from "../src/adjustment-fit-read";
+import { SELECT_ANALYSIS_HORSES_SQL, SELECT_ALLOCATION_META_SQL, SELECT_ALLOCATION_BETS_SQL } from "../../packages/core/src/ev/analysis-store-codec.js";
+
+const OUT = process.env["MEASURE_OUT"] ?? "/tmp/measure-612.json";
+const results: Array<{ name: string; reads: number; writes: number; rows: number }> = [];
+
+let b: LocalBindings;
+let db: D1Database;
+
+async function exec(sql: string): Promise<void> {
+  await db.prepare(sql).run();
+}
+
+async function measure(name: string, sql: string, ...binds: unknown[]): Promise<void> {
+  try {
+    const r = await db.prepare(sql).bind(...binds).all();
+    results.push({ name, reads: r.meta.rows_read ?? -1, writes: r.meta.rows_written ?? -1, rows: r.results.length });
+  } catch (e) {
+    results.push({ name: name + " [ERR " + String(e).slice(0, 60) + "]", reads: -1, writes: -1, rows: 0 });
+  }
+}
+
+async function measureWrite(name: string, sql: string, ...binds: unknown[]): Promise<void> {
+  // 書き込みの文は、後続の計測を汚さないよう、一時的に実行して meta を取る(データは変わるので最後の方で流す)
+  try {
+    const r = await db.prepare(sql).bind(...binds).run();
+    results.push({ name, reads: r.meta.rows_read ?? -1, writes: r.meta.rows_written ?? -1, rows: r.meta.changes ?? 0 });
+  } catch (e) {
+    results.push({ name: name + " [ERR " + String(e).slice(0, 60) + "]", reads: -1, writes: -1, rows: 0 });
+  }
+}
+
+const N = (n: number): string => `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < ${n})`;
+
+beforeAll(async () => {
+  b = await openLocalBindings();
+  db = b.db;
+  await b.reset();
+  // レース 1605(1 日 24 レース、日付は 2026-01-03 から 4.1 日刻み)。race_id は 12 桁
+  const RACE = (i: string): string => `'2026' || printf('%08d', ${i})`;
+  const DATE = (i: string): string => `strftime('%Y%m%d', date('2026-01-03', '+' || (((${i} - 1) / 24) * 41 / 10) || ' days'))`;
+  // analyses 2524(race = (n-1) % 1605 + 1)。start_time・cond_read は設定済み、race_class は 99% 設定済み
+  await exec(`${N(2524)} INSERT INTO analyses (id, race_id, analyzed_at, ev_estimated, prompt_version, kaisai_date, model, detail_key, start_time, cond_read, race_class, course_type, distance)
+    SELECT i, ${RACE("((i - 1) % 1605 + 1)")}, strftime('%Y-%m-%dT%H:%M:%fZ', '2026-07-14', '+' || (i * 4) || ' minutes'), 1, 'v' || (i % 3), ${DATE("((i - 1) % 1605 + 1)")}, 'm', 'analyses/' || i || '.json.gz', '10:00', 1, CASE WHEN i % 100 = 0 THEN NULL ELSE 'g3' END, '芝', 1600 FROM n`);
+  // analysis_horses 33348(1 分析 13.2 頭: 13 頭 + 余りは 14 頭)
+  await exec(`${N(33348)} INSERT INTO analysis_horses (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, mark, reason)
+    SELECT CASE WHEN i <= 32812 THEN (i - 1) / 13 + 1 ELSE i - 32812 END, CASE WHEN i <= 32812 THEN ((i - 1) % 13) + 1 ELSE 14 END, 0.1, 0.1, 2.0, 1.1, 1, CASE WHEN (i % 13) = 0 THEN '◎' ELSE NULL END, 'x' FROM n`);
+  await exec(`${N(885)} INSERT INTO analysis_allocation_meta (analysis_id, route, bankroll, per_race_cap, kelly_fraction, ev_threshold, include_combo_odds, include_wide, include_trio) SELECT 2524 - i, 'ok', 1000, 100, 0.5, 1.0, 0, 0, 0 FROM n`).catch(async () => {
+    // 列が足りないときは列数を調べて合わせる(下のフォールバック)
+    const cols = (await db.prepare("PRAGMA table_info(analysis_allocation_meta)").all()).results as Array<{ name: string; notnull: number; type: string }>;
+    const names = cols.filter((c) => c.notnull === 1).map((c) => c.name);
+    const vals = cols.filter((c) => c.notnull === 1).map((c) => (c.name === "analysis_id" ? "2524 - i" : c.type === "TEXT" ? "'x'" : "1"));
+    await exec(`${N(885)} INSERT INTO analysis_allocation_meta (${names.join(",")}) SELECT ${vals.join(",")} FROM n`);
+  });
+  await exec(`${N(1756)} INSERT INTO analysis_bets (analysis_id, bet_type, combo_key, stake, odds, ev) SELECT 2524 - ((i - 1) / 2), CASE WHEN i % 2 = 0 THEN 'win' ELSE 'place' END, '' || i, 100, 5.0, 1.2 FROM n`);
+  // analysis_close 416 / close_bets 2044
+  const closeCols = (await db.prepare("PRAGMA table_info(analysis_close)").all()).results as Array<{ name: string; notnull: number; type: string }>;
+  const cn = closeCols.filter((c) => c.notnull === 1).map((c) => c.name);
+  const cv = cn.map((c) => (c === "analysis_id" ? "2524 - ((i - 1) / 2)" : c === "round" ? "((i - 1) % 2) + 1" : c === "status" ? "'ok'" : closeCols.find((x) => x.name === c)?.type === "TEXT" ? "'x'" : "1"));
+  await exec(`${N(416)} INSERT INTO analysis_close (${cn.join(",")}) SELECT ${cv.join(",")} FROM n`);
+  await exec(`${N(2044)} INSERT INTO analysis_close_bets (analysis_id, round, bet_type, combo_key, stake, odds, ev) SELECT 2524 - ((i - 1) / 10), ((i - 1) % 2) + 1, 'win', '' || i, 100, 5.0, 1.2 FROM n`);
+  // race_results: 1522 レース × 14 頭 = 21308(実測 20911 に近い)。最後の 83 レースは結果なし
+  await exec(`${N(21308)} INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f, win_odds, ninki, scratched, wakuban)
+    SELECT ${RACE("((i - 1) / 14 + 1)")}, ((i - 1) % 14) + 1, ((i - 1) % 14) + 1, 150, CASE WHEN (i - 1) % 14 = 0 THEN 500 ELSE NULL END, '[1,2,3,4]', 34.5, 3.5, ((i - 1) % 14) + 1, 0, ((i - 1) % 8) + 1 FROM n`);
+  await exec(`${N(1522)} INSERT INTO race_result_meta (race_id, course_type) SELECT ${RACE("i")}, '芝' FROM n`);
+  await exec(`${N(4927)} INSERT INTO race_combo_payouts (race_id, bet_type, combo_key, payout) SELECT ${RACE("((i - 1) / 3 + 1)")}, 'wide', '' || i, 300 FROM n`);
+  await exec(`${N(3416)} INSERT INTO race_combo_payout_imports (race_id, bet_type) SELECT ${RACE("((i - 1) / 2 + 1)")}, CASE WHEN i % 2 = 0 THEN 'wide' ELSE 'trio' END FROM n`);
+  // horse_runs 50058。data は 230 バイト前後の JSON 配列
+  await exec(`${N(50058)} INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source)
+    SELECT 'h' || printf('%06d', i % 12000), ${RACE("(i % 1605 + 1)")} || '_' || i, 3, 1790000000000 + i,
+      json_array('20260101', json_array('x', 'y'), 3, 4, 5, 6, '中央', 8, 9, 10, 11, 12, 13, 14, 15, 'g', 'k', 1600, substr('${"a".repeat(120)}', 1, 120)), CASE WHEN i % 25 = 0 THEN NULL ELSE 'result' END FROM n`);
+  await exec(`${N(2264)} INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at, runs_version) SELECT '2024' || printf('%08d', i), 'central', '2024-01-01', 3, 'k' || i, 40000, '2026-11-04T10:00:00Z', 1 FROM n`);
+  await exec(`${N(120)} INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) SELECT 'j' || i, 'id' || i, '20260101' FROM n`);
+  await exec(`${N(220)} INSERT INTO jockey_results (jockey_id, kind, years_json, fetched_at) SELECT 'id' || i, 'central', '[]', 1 FROM n`);
+  await exec(`${N(15)} INSERT INTO daily_reports (kaisai_date, created_at, model, race_count, total_stake, total_return, summary, body_json) SELECT strftime('%Y%m%d', date('2026-10-10', '+' || i || ' days')), 'x', 'm', 10, 1, 1, 's', '{}' FROM n`);
+  // race_backfill: 状態。st4 は 540 レースが未完了(1)、他は 0
+  await exec(`INSERT INTO race_backfill (race_id, kaisai_date, sm, st1, st2, st3, st4) SELECT race_id, MIN(kaisai_date), 0, 0, 0, 0, 0 FROM analyses GROUP BY race_id`);
+  await exec(`UPDATE race_backfill SET st4 = 1 WHERE race_id IN (SELECT race_id FROM race_backfill ORDER BY race_id DESC LIMIT 540)`);
+}, 600_000);
+
+afterAll(async () => {
+  writeFileSync(OUT, JSON.stringify(results, null, 1));
+  await b.dispose();
+});
+
+const RACE_ID = "202600000100";
+let day = "20260515";
+const racesJson36 = JSON.stringify(Array.from({ length: 36 }, (_, i) => `2026${String(100 + i).padStart(8, "0")}`));
+const oneRaceJson = JSON.stringify([RACE_ID]);
+const idsList30 = Array.from({ length: 30 }, (_, i) => 2400 + i).join(",");
+const rows14 = (f: (u: number) => unknown[]): string => JSON.stringify(Array.from({ length: 14 }, (_, k) => f(k + 1)));
+
+describe("計測(#612)", () => {
+  it("読み取りの SQL", async () => {
+    day = ((await db.prepare("SELECT kaisai_date AS d FROM analyses WHERE id = 1200").first()) as { d: string }).d;
+    const monthFrom = day.slice(0, 6) + "01";
+    const monthTo = day.slice(0, 6) + "31";
+    const day28From = ((await db.prepare("SELECT strftime('%Y%m%d', date(substr(?,1,4)||'-'||substr(?,5,2)||'-'||substr(?,7,2), '-27 days')) AS d").bind(day, day, day).first()) as { d: string }).d;
+    void monthFrom; void monthTo; void day28From;
+    // --- race_results の補完の UPDATE(書き込みなので、元に戻せるよう先に値を NULL にして測る)
+    await exec(`UPDATE race_results SET win_odds = NULL, ninki = NULL, win_payout = NULL, scratched = NULL WHERE race_id = '${RACE_ID}'`);
+    await exec(`UPDATE race_results SET finish_position = NULL WHERE race_id = '${RACE_ID}'`);
+    await measureWrite("FILL_WIN_ODDS(14頭・全部NULL)", FILL_WIN_ODDS_SQL, rows14((u) => [u, 3.5, u]), RACE_ID);
+    await measureWrite("FILL_WIN_ODDS(14頭・2回目=冪等)", FILL_WIN_ODDS_SQL, rows14((u) => [u, 3.5, u]), RACE_ID);
+    await measureWrite("FILL_SCRATCHED(14頭)", FILL_SCRATCHED_SQL, rows14((u) => [u, 0]), RACE_ID);
+    await measureWrite("FILL_WIN_PAYOUT(14頭)", FILL_WIN_PAYOUT_SQL, rows14((u) => [u, u === 1 ? 500 : null]), RACE_ID);
+    await measureWrite("SAVE_RACE_CLASS", SAVE_RACE_CLASS_SQL, "g3", RACE_ID);
+    // 書き換え案: json_each を外側にした FILL_WIN_ODDS(読み取りの比較用。コードは変えない)
+    await exec(`UPDATE race_results SET win_odds = NULL, ninki = NULL WHERE race_id = '${RACE_ID}'`);
+    const FILL_ODDS_OUTER = `UPDATE race_results SET win_odds = COALESCE(race_results.win_odds, j.o), ninki = COALESCE(race_results.ninki, j.n)
+           FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS o, json_extract(value,'$[2]') AS n FROM json_each(?) ) j
+           WHERE race_results.race_id = ? AND race_results.umaban = j.u
+             AND ((race_results.win_odds IS NULL AND j.o IS NOT NULL) OR (race_results.ninki IS NULL AND j.n IS NOT NULL))`;
+    void FILL_ODDS_OUTER;
+    const V_MAT = `WITH j AS MATERIALIZED (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS o, json_extract(value,'$[2]') AS n FROM json_each(?))
+      UPDATE race_results SET win_odds = COALESCE(race_results.win_odds, j.o), ninki = COALESCE(race_results.ninki, j.n)
+      FROM j WHERE race_results.race_id = ? AND race_results.umaban = j.u
+        AND ((race_results.win_odds IS NULL AND j.o IS NOT NULL) OR (race_results.ninki IS NULL AND j.n IS NOT NULL))`;
+    await measureWrite("案A FILL_WIN_ODDS MATERIALIZED CTE", V_MAT, rows14((u) => [u, 3.5, u]), RACE_ID);
+    await exec(`UPDATE race_results SET win_odds = NULL, ninki = NULL WHERE race_id = '${RACE_ID}'`);
+    const objJson = JSON.stringify(Object.fromEntries(Array.from({ length: 14 }, (_, k) => [String(k + 1), [3.5, k + 1]])));
+    const V_OBJ = `UPDATE race_results SET win_odds = COALESCE(win_odds, json_extract(?1, '$."' || umaban || '"[0]')), ninki = COALESCE(ninki, json_extract(?1, '$."' || umaban || '"[1]'))
+      WHERE race_id = ?2 AND ((win_odds IS NULL AND json_extract(?1, '$."' || umaban || '"[0]') IS NOT NULL) OR (ninki IS NULL AND json_extract(?1, '$."' || umaban || '"[1]') IS NOT NULL))`;
+    await measureWrite("案B FILL_WIN_ODDS オブジェクトJSON(初回)", V_OBJ, objJson, RACE_ID);
+    await measureWrite("案B FILL_WIN_ODDS オブジェクトJSON(2回目・冪等)", V_OBJ, objJson, RACE_ID);
+    await exec(`UPDATE race_results SET win_odds = NULL, ninki = NULL WHERE race_id = '${RACE_ID}'`);
+    // --- 状態の表
+    await measureWrite("RECOMPUTE_RACES(1レース)", RECOMPUTE_RACES_SQL, oneRaceJson);
+    await measureWrite("RECOMPUTE_BY_ANALYSIS_IDS(30件)", RECOMPUTE_BY_ANALYSIS_IDS_SQL, JSON.stringify(Array.from({ length: 30 }, (_, i) => 2400 + i)));
+    await measureWrite("RECONCILE(全レース)", RECONCILE_RACE_BACKFILL_SQL);
+    await measureWrite("settle(500 ID)", settleRaceBackfillSql(4), JSON.stringify(Array.from({ length: 500 }, (_, i) => `2026${String(1000 + i).padStart(8, "0")}`)));
+    const excl = JSON.stringify(Array.from({ length: 150 }, (_, i) => `2026${String(1000 + i).padStart(8, "0")}`));
+    await measure("LIST_PAYOUT_BACKFILL(limit150・除外150)", LIST_PAYOUT_BACKFILL_SQL, "20261231", excl, 150);
+    await measure("LIST_BACKFILL(st1 該当なし)", LIST_BACKFILL_SQL, "20261231", excl, 150);
+    await measure("LIST_WIN_ODDS_BACKFILL", LIST_WIN_ODDS_BACKFILL_SQL, "20261231", excl, 150);
+    await measure("LIST_CLASS_BACKFILL", LIST_CLASS_BACKFILL_SQL, "20261231", excl, 150);
+    await measure("COUNT_BACKFILL", COUNT_BACKFILL_SQL, "20261231");
+    await measure("COUNT_WIN_ODDS_BACKFILL", COUNT_WIN_ODDS_BACKFILL_SQL, "20261231", "20261231");
+    await measure("COUNT_CLASS_BACKFILL", COUNT_CLASS_BACKFILL_SQL, "20261231");
+    await measure("COUNT_PAYOUT_BACKFILL", COUNT_PAYOUT_BACKFILL_SQL, "20261231");
+    await measure("CLASS_DISTRIBUTION", CLASS_DISTRIBUTION_SQL);
+    await measure("LIST_UNIMPORTED_BY_DAY(31日窓)", LIST_UNIMPORTED_BY_DAY_SQL, day28From, day, 40, 31, 150);
+    await measure("LIST_UNIMPORTED(31日窓)", LIST_UNIMPORTED_SQL, day28From, day, 150);
+    // --- 一覧・詳細
+    await measure("一覧(絞り込みなし・50件)analyses", "SELECT id FROM analyses ORDER BY analyzed_at DESC, id DESC LIMIT ?", 50);
+    await measure("一覧(絞り込みなし・50件)horses", "SELECT analysis_id, umaban FROM analysis_horses WHERE analysis_id IN (SELECT id FROM analyses ORDER BY analyzed_at DESC, id DESC LIMIT ?) ORDER BY analysis_id DESC, umaban", 50);
+    await measure("一覧(kaisai_date)analyses", "SELECT id FROM analyses WHERE kaisai_date = ? ORDER BY analyzed_at DESC, id DESC LIMIT ?", day, 50);
+    await measure("一覧(race_id)analyses", "SELECT id FROM analyses WHERE race_id = ? ORDER BY analyzed_at DESC, id DESC LIMIT ?", RACE_ID, 50);
+    await measure("詳細 SELECT_ONE", "SELECT id, detail_key FROM analyses WHERE id = ?", 1200);
+    await measure("詳細 horses", SELECT_ANALYSIS_HORSES_SQL, 1200);
+    await measure("詳細 allocation meta", SELECT_ALLOCATION_META_SQL, 2000);
+    await measure("詳細 allocation bets", SELECT_ALLOCATION_BETS_SQL, 2000);
+    await measure("対象一覧 TARGETS_ANALYSES", TARGETS_ANALYSES_SQL, day);
+    await measure("対象一覧 bets(30件)", targetsSql(idsList30).bets);
+    await measure("対象一覧 marks(30件)", targetsSql(idsList30).marks, "◎");
+    await measure("対象一覧 close rounds", targetsCloseSql(idsList30).rounds);
+    await measure("対象一覧 close bets", targetsCloseSql(idsList30).bets);
+    await measure("結果 SELECT_DETAILS(36レース)", "SELECT race_id, umaban, finish_position, passing_json, last3f FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban", racesJson36);
+    // --- 日報・月報
+    await measure("日報 LIST_DAY_ANALYSES", LIST_DAY_ANALYSES_SQL, day, 1000);
+    await measure("日報 NEEDING_REPORT(3日窓)", NEEDING_REPORT_SQL, day28From, day);
+    await measure("日報 results", READ_RESULTS_SQL.results, racesJson36);
+    for (const [name, from, to] of [["28日", day28From, day], ["1か月", monthFrom, monthTo]] as const) {
+      let total = 0;
+      for (const key of ["races", "bets", "marks", "results", "combos", "imports"] as const) {
+        const r = await db.prepare(READ_PERIOD_SQL[key]).bind(from, to, 3001).all();
+        results.push({ name: `期間集計 ${name} ${key}`, reads: r.meta.rows_read ?? -1, writes: 0, rows: r.results.length });
+        total += r.meta.rows_read ?? 0;
+      }
+      results.push({ name: `期間集計 ${name} 6文の合計`, reads: total, writes: 0, rows: 0 });
+    }
+    await measure("月報 LAST_DAY_STATUS", LAST_DAY_STATUS_SQL, day, day);
+    // --- 検証
+    await measure("検証 watermark", "SELECT (SELECT MAX(id) FROM analyses) AS analyses, (SELECT MAX(rowid) FROM race_results) AS results, (SELECT MAX(rowid) FROM race_combo_payouts) AS comboPayouts, (SELECT MAX(rowid) FROM race_combo_payout_imports) AS comboImports");
+    await measure("検証 PENDING(cursor 0, limit 1)", PENDING_SQL, 0, 1);
+    let verifyTotal = 0;
+    for (const [k, sql] of Object.entries(VERIFY_READ_SQL)) {
+      const r = await db.prepare(sql).all();
+      results.push({ name: `検証 readAll ${k}`, reads: r.meta.rows_read ?? -1, writes: 0, rows: r.results.length });
+      verifyTotal += r.meta.rows_read ?? 0;
+    }
+    for (const [k, sql] of Object.entries(VERIFY_CLOSE_READ_SQL)) {
+      const r = await db.prepare(sql).all();
+      results.push({ name: `検証 readAll close ${k}`, reads: r.meta.rows_read ?? -1, writes: 0, rows: r.results.length });
+      verifyTotal += r.meta.rows_read ?? 0;
+    }
+    results.push({ name: "検証 readAll 合計", reads: verifyTotal, writes: 0, rows: 0 });
+    await measure("検証(1日)analyses", VERIFY_DAY_ANALYSES_SQL, day);
+    const dayIds = (await db.prepare("SELECT id FROM analyses WHERE kaisai_date = ?").bind(day).all()).results.map((r) => (r as { id: number }).id);
+    const dayRaces = (await db.prepare("SELECT DISTINCT race_id FROM analyses WHERE kaisai_date = ?").bind(day).all()).results.map((r) => (r as { race_id: string }).race_id);
+    await measure("検証(1日)allocationMeta", verifyDayAllocationSql(dayIds).allocationMeta);
+    await measure("検証(1日)bets", verifyDayAllocationSql(dayIds).bets);
+    await measure("検証(1日)results", verifyDayResultSql(dayRaces).results);
+    await measure("検証(1日)comboPayouts", verifyDayResultSql(dayRaces).comboPayouts);
+    // --- horse_runs
+    await measure("horse_runs 状態1 GROUP BY source", "SELECT source, COUNT(*) AS rows, COUNT(DISTINCT horse_id) AS horses, MIN(first_seen_at) AS firstSeenMin, MAX(first_seen_at) AS firstSeenMax, MIN(json_extract(data, '$[0]')) AS runDateMin, MAX(json_extract(data, '$[0]')) AS runDateMax FROM horse_runs GROUP BY source");
+    await measure("horse_runs 状態2 GROUP BY version,kind", "SELECT source, parser_version AS version, json_extract(data, '$[6]') AS kind, COUNT(*) AS n FROM horse_runs GROUP BY source, parser_version, json_extract(data, '$[6]')");
+    await measure("horse_runs 状態3 CELLS", "SELECT COUNT(*) AS wCells FROM (SELECT SUM(source IS NULL) AS a, SUM(source IS 'result') AS r FROM horse_runs WHERE (source IS NULL OR source = 'result') AND json_extract(data, '$[6]') = '中央' AND json_extract(data, '$[14]') IS NOT NULL GROUP BY json_extract(data, '$[1][1]'), json_extract(data, '$[16]'), CAST(json_extract(data, '$[17]') AS INTEGER) / 200, json_extract(data, '$[14]'))");
+    await measure("horse_runs 馬の履歴(8頭)", "SELECT horse_id, race_key, data FROM horse_runs WHERE horse_id IN (?, ?, ?, ?, ?, ?, ?, ?)", "h000001", "h000002", "h000003", "h000004", "h000005", "h000006", "h000007", "h000008");
+    await measure("horse_runs IN_RESULTS(14)", "SELECT DISTINCT race_id AS raceId FROM race_results WHERE race_id IN (SELECT value FROM json_each(?))", racesJson36);
+    // --- 目録・その他
+    await measure("race_archive 目録ページ(limit 100)", "SELECT race_id FROM race_archive WHERE race_id > ? ORDER BY race_id LIMIT ?", "", 100);
+    await measure("書き出し CANDIDATES(prior)", CANDIDATES_SQL);
+    await measure("書き出し FIT_CANDIDATES(1か月)", FIT_CANDIDATES_SQL, monthFrom, monthTo, 10001);
+    await measure("書き出し LOOKUPS(jockey)", LOOKUPS_SQL);
+    await measure("D1 ヘルスの probe", "SELECT detail_key, llm_note, llm_calls_json, (SELECT highlights_json FROM analysis_horses LIMIT 1) AS h, (SELECT concerns_json FROM analysis_horses LIMIT 1) AS c, start_time, (SELECT scratched FROM race_results LIMIT 1) AS s, (SELECT wakuban FROM race_results LIMIT 1) AS w FROM analyses LIMIT 1");
+    // --- 直す案の計測(コードは変えない。読み取りの比較用)
+    // 案: 期間集計。1 文目で最新の分析 ID とレース ID を取り、残りは json_each で引く(CTE の再計算を 5 回省く)
+    {
+      const first = await db.prepare(READ_PERIOD_SQL.races).bind(day28From, day, 3001).all();
+      const ids = JSON.stringify(first.results.map((r) => (r as { analysisId: number }).analysisId));
+      const raceIds = JSON.stringify(first.results.map((r) => (r as { raceId: string }).raceId));
+      let total = first.meta.rows_read ?? 0;
+      for (const [sql, arg] of [
+        ["SELECT analysis_id, bet_type, combo_key, stake, odds, ev FROM analysis_bets WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analysis_id, bet_type, combo_key", ids],
+        ["SELECT analysis_id, umaban, mark FROM analysis_horses WHERE analysis_id IN (SELECT value FROM json_each(?)) AND mark IS NOT NULL ORDER BY analysis_id, umaban", ids],
+        ["SELECT race_id, umaban, finish_position, win_payout, place_payout, scratched, wakuban FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban", raceIds],
+        ["SELECT race_id, bet_type, combo_key, payout FROM race_combo_payouts WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, bet_type, combo_key", raceIds],
+        ["SELECT race_id, bet_type FROM race_combo_payout_imports WHERE race_id IN (SELECT value FROM json_each(?))", raceIds],
+      ] as const) {
+        const r = await db.prepare(sql).bind(arg).all();
+        total += r.meta.rows_read ?? 0;
+      }
+      results.push({ name: "案 期間集計 28日 ID を先に取って json_each(6文の合計)", reads: total, writes: 0, rows: 0 });
+    }
+    // 案: 整合検査を直近 14 日の開催日に絞る
+    {
+      const from = ((await db.prepare("SELECT strftime('%Y%m%d', date(substr(?,1,4)||'-'||substr(?,5,2)||'-'||substr(?,7,2), '-14 days')) AS d").bind(day, day, day).first()) as { d: string }).d;
+      const win = raceBackfillStateSelect("WHERE a.race_id IN (SELECT race_id FROM analyses WHERE kaisai_date >= ?1 AND kaisai_date <= ?2)", "WHERE race_id IN (SELECT race_id FROM analyses WHERE kaisai_date >= ?1 AND kaisai_date <= ?2)");
+      const r = await db.prepare(win).bind(from, day).all();
+      results.push({ name: "案 整合検査を直近14日に絞る(SELECT のみ)", reads: r.meta.rows_read ?? -1, writes: 0, rows: r.results.length });
+    }
+    // 案: 変換 DO の目録の走査。runs_version の部分索引 + 未変換だけを引く
+    {
+      const before = await db.prepare("SELECT race_id FROM race_archive WHERE race_id > ? ORDER BY race_id LIMIT ?").bind("", 100).all();
+      results.push({ name: "現行 目録 1 ページ(100)", reads: before.meta.rows_read ?? -1, writes: 0, rows: before.results.length });
+      await exec("CREATE INDEX idx_race_archive_runs_612 ON race_archive (race_id) WHERE runs_version IS NULL");
+      const after = await db.prepare("SELECT race_id FROM race_archive WHERE runs_version IS NULL AND race_id > ? ORDER BY race_id LIMIT ?").bind("", 100).all();
+      results.push({ name: "案 目録: 未変換だけ引く(部分索引。全部変換済みのとき)", reads: after.meta.rows_read ?? -1, writes: 0, rows: after.results.length });
+      await exec("UPDATE race_archive SET runs_version = NULL WHERE race_id IN (SELECT race_id FROM race_archive LIMIT 30)");
+      const some = await db.prepare("SELECT race_id FROM race_archive WHERE runs_version IS NULL AND race_id > ? ORDER BY race_id LIMIT ?").bind("", 100).all();
+      results.push({ name: "案 目録: 未変換だけ引く(部分索引。30 件が未変換)", reads: some.meta.rows_read ?? -1, writes: 0, rows: some.results.length });
+    }
+    await measure("kaisai_days 窓", "SELECT track_code, year, kai, nichi, kaisai_date, fence FROM kaisai_days WHERE track_code = ? AND year >= ? AND kaisai_date < ?", "05", 2025, "20261101");
+  }, 600_000);
+});
