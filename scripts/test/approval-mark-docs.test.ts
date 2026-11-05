@@ -140,11 +140,13 @@ const INSTRUCTION_DOCS: readonly (readonly string[])[] = [
   ["docs", "gate-and-meta-review.md"],
   [".claude", "agents", "code-reviewer.md"],
   [".claude", "agents", "tdd-implementer.md"],
+  // Issue #606: code-reviewer.md から走査の観点を移した文書。レビュー担当が毎回読む現在形の指示なので、定義ファイルと同じく対象にする。
+  ["docs", "review-checklist.md"],
 ];
 
 describe("5. 廃止した exe 公開の運用が、運用の指示文書に現在形で残っていない(Issue #248)", () => {
-  it("前提: 検査対象の文書が 5 つあり、いずれも読めて空でない(空振りしていない)", () => {
-    expect(INSTRUCTION_DOCS.length).toBe(5);
+  it("前提: 検査対象の文書が 6 つあり、いずれも読めて空でない(空振りしていない)", () => {
+    expect(INSTRUCTION_DOCS.length).toBe(6);
     for (const segments of INSTRUCTION_DOCS) {
       expect(readNormalized(...segments).length, segments.join("/")).toBeGreaterThan(100);
     }
