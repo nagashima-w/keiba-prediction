@@ -3,12 +3,13 @@
  * **本番の D1・R2 には一切触れない**(`--local`・一時ディレクトリ。wrangler.toml に `remote = true` は無い)。
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 import type { AnalysisBucket, AnalysisDb } from "../src/analysis-repository";
+import { checkpointSqliteFiles, computeTemplateKey, ensureD1Template } from "./d1-template-core";
 
 const CLOUD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WRANGLER = path.join(CLOUD, "node_modules", ".bin", "wrangler");
@@ -21,14 +22,32 @@ export interface LocalBindings {
   dispose(): Promise<void>;
 }
 
+/**
+ * Issue #621: migration を当てた D1 の状態(ひな形)を、最初に必要になったときに 1 回だけ作る(wrangler の適用が 1 回あたり約 35 秒で、
+ * 時間の大半を占めていたため)。置き場所は鍵(migration・wrangler.toml・wrangler の版)ごと、排他と完成品だけを見せる作りは d1-template-core.ts。
+ * ひな形は掃除しない(鍵が変わるたびに 1.3MB ほどが tmpdir に残るだけで、掃除の処理自体が並列の取り合いの種になるため)。
+ * migration を当てること自体の確認(d1-schema.integration.test.ts)は、この方式を使わず今の形のまま行う。
+ */
+export function getMigratedTemplate(): Promise<string> {
+  return ensureD1Template({
+    root: tmpdir(),
+    key: computeTemplateKey(CLOUD),
+    async build(dir) {
+      execFileSync(WRANGLER, ["d1", "migrations", "apply", "DB", "--local", "--persist-to", dir], {
+        cwd: CLOUD,
+        env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
+        stdio: "pipe",
+        timeout: 300_000,
+      });
+      // wrangler は終了後も -wal(migration の内容が主に入る)・-shm を残すため、閉じた状態に整えてから完成品にする。
+      checkpointSqliteFiles(dir);
+    },
+  });
+}
+
 export async function openLocalBindings(): Promise<LocalBindings> {
   const stateDir = mkdtempSync(path.join(tmpdir(), "keiba-local-bindings-"));
-  execFileSync(WRANGLER, ["d1", "migrations", "apply", "DB", "--local", "--persist-to", stateDir], {
-    cwd: CLOUD,
-    env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
-    stdio: "pipe",
-    timeout: 120_000,
-  });
+  cpSync(await getMigratedTemplate(), stateDir, { recursive: true });
   const proxy = await getPlatformProxy<{ DB: D1Database; ANALYSIS_DETAIL: R2Bucket }>({
     configPath: path.join(CLOUD, "wrangler.toml"),
     persist: { path: path.join(stateDir, "v3") },
