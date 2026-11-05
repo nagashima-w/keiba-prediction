@@ -39,7 +39,7 @@
    こちらから見えない事象を「〜されました」「〜なしで通りました」と書いてはならない
    (ツール呼び出しが結果を返したことは、ユーザーが許可を押した後でも同じに見える)。
    観測手段が無いなら「〜のはずです。違っていたら教えてください」と書いて止める。
-9. **「テスト全緑」を成功の代理指標にしない。** CI が実行する内容(`ci.yml` の `pnpm typecheck`・`pnpm test`、`deploy-cloud.yml` の deploy 以外のジョブの `run:` 全部)をローカル検証が覆っているかを、オーケストレーター自身が確認する。vitest は Node 環境で走るため、**ブラウザ向けのバンドル(`cloud/client`)の破綻はテストだけでは検出できない**(過去に `node:zlib` の混入で CI が落ちた)。これを検出するのは、cloud の `pnpm run typecheck`(client 用の tsconfig を含む)と、`cloud/test/client-bundle.test.ts`・`import-guard.test.ts` である。サブエージェントへの検証要件には、cloud の `pnpm run typecheck`・`npx vitest run`・`pnpm run smoke` を必ず含めること。
+9. **「テスト全緑」を成功の代理指標にしない。** CI が実行する内容(`ci.yml` の `pnpm typecheck`・`pnpm test`、`deploy-cloud.yml` の deploy 以外のジョブの `run:` 全部)をローカル検証が覆っているかを、オーケストレーター自身が確認する。vitest は Node 環境で走るため、**ブラウザ向けのバンドル(`cloud/client`)の破綻はテストだけでは検出できない**(過去に `node:zlib` の混入で CI が落ちた)。これを検出するのは、cloud の `pnpm run typecheck`(client 用の tsconfig を含む)と、`cloud/test/client-bundle.test.ts`・`import-guard.test.ts` である。サブエージェントへの検証要件は次のとおり(Issue #606)。**実装担当**には `scripts/verify-all.sh`(ルートの typecheck・test、cloud の typecheck・test・deploy:dry・D1 の migration〈ローカル〉・smoke を CI と同じコマンドで流し、要約を出す。確率の質のコードに触れるときは `--research`。`SMOKE_PORT` は他と分ける)を流して要約を報告に貼らせる。**レビュー担当**には、ルートの `pnpm typecheck` と cloud の `pnpm run typecheck`、差分に関係するテストファイル、変異の注入を求める(全部のテストと smoke は流させない。実装担当の報告にスクリプトの要約が無い・赤がある場合は指摘させる)。スクリプトが CI の `run:` を覆っていることは `scripts/test/verify-all.test.ts` が固定している。
    (exe の削除〈#285〉で `pnpm --filter @keiba/app build` は無くなった。実行しても何もせず exit 0 で終わるため、検証要件に書かない。)
 10. **サブエージェントの「稼働中」表示を稼働の証拠にしない。** 中断(API エラー・session limit 等)から
     再開を指示したときは、**再開指示が実際に届いたことと、その後に本当に動いていることを実物で確認して
@@ -108,6 +108,7 @@ tdd-implementer とのやり取りを全てメインが中継していたため�
 ### サブエージェントのライフサイクル(必須)
 - 2種のサブエージェント(tdd-implementer / code-reviewer)は**タスク単位で運用**する。無関係な過去タスクのコンテキストを持ち越さない
 - 1タスクの間は、各エージェントのセッションを保持し `SendMessage`(コンテキスト保持のまま再開)で往復してよい
+- **実装担当は、渡された作業ブランチ(work-XXX)にコミットしてよい**(件名に「(レビュー継続中)」、本文に「メタレビューは未承認」。push・公開・承認印はメインだけ。作業ごとの worktree で作業し、依存は install する)
 - **タスクが完了(コミット確認まで)したら、そのタスクで使った2体のセッションは破棄し、次タスクは新規に起動する**(使い回して肥大化させない)
 - **tdd-implementer と code-reviewer は互いに直接通信できない。** その間のやり取りはメインが中継する
 - 中断したセッションは同一 `agentId` のままコンテキストを保持して再開できる。ただし**再開できたことは
@@ -146,7 +147,7 @@ tdd-implementer とのやり取りを全てメインが中継していたため�
 **この基準は着手前ゲート(メイン)にも適用する。** AC に「散文の全数走査」「到達不能経路の
 変異注入」を**必須項目として書かない**。書くならそれが【記録】区分であることを明示する。
 
-⚠️ **`.claude/agents/code-reviewer.md` の走査観点は削除しない。** あれは「見つけ方」の蓄積で
+⚠️ **`docs/review-checklist.md` の走査観点は削除しない**(Issue #606 で `.claude/agents/code-reviewer.md` から移した)。あれは「見つけ方」の蓄積で
 あって「止める基準」ではない。**見つけたうえで、止めるかどうかを上の3区分で判断する。**
 
 ## 開発項目の管理: GitHub Issue(必須)
@@ -187,7 +188,7 @@ tdd-implementer とのやり取りを全てメインが中継していたため�
 **Issue を完了・追加したら同ファイルも更新する**(open な Issue と食い違ったら GitHub が正)。
 
 ## ワークフロー(オーケストレーション)
-メインセッションは進行管理と**ゲート/メタレビュー**を担い、**実装とレビューはサブエージェントに委譲する**。1タスクの間は2体のセッションを保持し、`SendMessage` で往復する(タスク完了で破棄):
+メインセッションは進行管理と**ゲート/メタレビュー**を担い、**実装とレビューはサブエージェントに委譲する**。1タスクの間は2体のセッションを保持し、`SendMessage` で往復する(タスク完了で破棄)。実装担当は渡された作業ブランチ(work-XXX)にコミットしてよいが、push・公開はメインだけが行う:
 
 1. 仕様書(または指示)から次に実装すべき機能を1つ選び、受け入れ条件を整理してタスク案を作る
 2. **着手前ゲート(メイン自身が行う)**: タスク案・対象コード・仕様・CLAUDE.md を突き合わせて精査し、
@@ -286,6 +287,7 @@ exe 版の公開を止め(#248)、コードも削除した(#285)。運用は web
 - [`docs/current-spec.md`](./docs/current-spec.md) — **実装済みの現状仕様(v1)**。取得・スコアリング・LLM分析・検証・エクスポート・Discord を実コードに基づき記述(exe の配布は記録として残す)。
 - [`docs/development-workflow.md`](./docs/development-workflow.md) — 開発ワークフローの導線・要約(2体のサブエージェント・着手前ゲート・TDD・2段レビュー・報告方針)。詳細は本 `CLAUDE.md` と `.claude/agents/*.md`。
 - [`docs/gate-and-meta-review.md`](./docs/gate-and-meta-review.md) — **着手前ゲートとメタレビューの手引き**(オーケストレーター用)。旧 `.claude/agents/boss.md` を 2026-09-24 の boss 廃止に伴って移したもので、蓄積された観点は削っていない。ゲート自身が持ち込みうる欠陥・数値の再現欄・フィクスチャの指定方法・失われた独立性の埋め合わせ。
+- [`docs/review-checklist.md`](./docs/review-checklist.md) — **レビューの観点集**。`.claude/agents/code-reviewer.md` から移した走査の観点(見つけ方の蓄積。止める基準ではない)。冒頭に「差分の種類ごとに読む節」の表がある。
 - [`docs/lessons-learned.md`](./docs/lessons-learned.md) — 過去セッションの重大失敗(ツール結果・ユーザー同意の捏造等)の記録と再発防止の鉄則。本ファイル冒頭「最重要」の詳細。
 - [`docs/nar-scraping-plan.md`](./docs/nar-scraping-plan.md) — 地方競馬(NAR)スクレイピングの実測調査結果と対応方針(URL・HTML構造・race_id体系の中央との差分)。
 - [`docs/wide-trio-odds-investigation.md`](./docs/wide-trio-odds-investigation.md) — ワイド・3連複オッズ(機能D-1、Issue #13)の実測調査記録。中央/地方の取得経路・型(幅/単一値)・1レース分の必要リクエスト数(地方3連複は軸馬別取得)・発売条件4状態・フィクスチャ対応表。
