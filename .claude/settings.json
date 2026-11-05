@@ -38,6 +38,30 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/md-lint-hook.mjs\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "tdd-implementer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/implementer-verify-hook.mjs\"",
+            "timeout": 900
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "compact",
