@@ -43,7 +43,9 @@ SMOKE_PORT=<他のセッションと重ならないポート> scripts/verify-all
 1 つでも失敗すると 0 以外で終わります。
 
 1. ルートの `pnpm typecheck`、`pnpm test`(`-r` 無し。ルート直下 `scripts/` のテスト・型検査は `-r` 付きでは実行されない。Issue #38)
-2. `cloud/` の `pnpm run typecheck`・`npx vitest run`・`pnpm run deploy:dry`・`wrangler d1 migrations apply DB --local`・`pnpm run smoke`
+2. `cloud/` の `pnpm run typecheck`・`pnpm test`・`pnpm run deploy:dry`・`pnpm exec wrangler d1 migrations apply DB --local`・`pnpm run smoke`
+
+- **全部で 30 分を超えます**(cloud のテストだけで 20 分ほど)。Bash の背景実行で流すときは、`timeout` を最大(7200000)にしてください。
 
 - **smoke は `SMOKE_PORT` を他のセッションと分けます。** 実行の前に `ps` で他の wrangler・workerd が動いていないことを確かめます。
 - vitest は Node 環境で走るため、**ブラウザ向けのバンドル(`cloud/client`)の破綻はテストだけでは検出できません**。cloud の
@@ -100,7 +102,7 @@ SMOKE_PORT=<他のセッションと重ならないポート> scripts/verify-all
   中継された数値をそのまま転記することも同様に禁止**
 
 ## 完了報告の形式
-以下を必ず含めて報告する:
+報告には次を必ず含める。
 - 実装した機能と対応する仕様書の箇所
 - 追加・変更したファイル一覧
 - テスト実行結果(Red時とGreen時の両方のサマリ)
