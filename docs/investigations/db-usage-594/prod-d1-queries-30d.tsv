@@ -1,0 +1,363 @@
+calls	rows_read	rows_written	in_current_code	sql_shape(先頭200字)
+210	3870933	0	no(旧版・診断・移行)	WITH u AS ( SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate FROM analyses a WHERE a.kaisai_date <= ? AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) AND (NOT EXISTS (
+267	1753270	0	no(旧版・診断・移行)	WITH u AS ( SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate FROM analyses a WHERE a.kaisai_date <= ? AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) AND a.race_id
+36	1191453	0	no(旧版・診断・移行)	WITH u AS ( SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate FROM analyses a WHERE a.kaisai_date <= ? AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) AND NOT EXISTS (S
+120	863438	0	no(旧版・診断・移行)	WITH u AS ( SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate FROM analyses a WHERE a.kaisai_date <= ? AND a.race_class IS NULL AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.r
+3539	707047	21899	yes	UPDATE race_results SET win_odds = COALESCE(race_results.win_odds, j.o), ninki = COALESCE(race_results.ninki, j.n) FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS o, json_e
+104	638690	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, detail_key AS detailKey, COUNT(*) OVER () AS total FROM analyses WHERE id > ? AND (start_time IS NULL OR cond_read IS NULL) ORDER BY id LIMIT ?
+19	583652	0	yes	SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, NULL AS reason, NULL AS highlights_json, NULL AS concerns_json FROM a
+9	365083	0	no(旧版・診断・移行)	WITH u AS ( SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate FROM analyses a WHERE a.kaisai_date <= ? AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) AND NOT EXISTS (S
+93	274869	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, detail_key AS detailKey, COUNT(*) OVER () AS total FROM analyses WHERE id > ? AND start_time IS NULL ORDER BY id LIMIT ?
+1	264298	0	no(旧版・診断・移行)	SELECT count(DISTINCT r.race_id) AS n FROM race_results r WHERE NOT EXISTS (SELECT 1 FROM race_results x WHERE x.race_id=r.race_id AND x.win_payout IS NOT NULL) AND EXISTS (SELECT 1 FROM analyses a WH
+35	241926	0	yes	WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC
+9	166983	0	yes	SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban FROM race_results ORDER BY race_id, umaban
+3	153804	0	no(旧版・診断・移行)	SELECT source, COUNT(*) n, COUNT(DISTINCT horse_id) h, MIN(json_extract(data,'$[0]')) dmin, MAX(json_extract(data,'$[0]')) dmax FROM horse_runs GROUP BY source
+10	152974	0	yes	SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout FROM race_results ORDER BY race_id, umaban
+3	126725	0	no(旧版・診断・移行)	WITH u AS ( SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate, MAX(EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id AND r.finish_position IS NULL AND r.scratched IS NULL)) AS
+264	121888	0	yes	SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob AS adjustedProb, place_odds_min AS placeOddsMin FROM analysis_horses WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analy
+18	110480	0	yes	WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC
+227	106363	0	yes	SELECT race_id AS raceId, umaban, finish_position AS finishPosition, win_odds AS winOdds, ninki FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban
+1	106086	0	no(旧版・診断・移行)	WITH latest AS ( SELECT MAX(a.id) AS id, a.race_id FROM analyses a JOIN analysis_allocation_meta m ON m.analysis_id = a.id WHERE a.kaisai_date >= '20260901' GROUP BY a.race_id ), bets AS ( SELECT a.ra
+171	105161	0	yes	SELECT DISTINCT race_id AS raceId FROM race_results WHERE race_id IN (SELECT value FROM json_each(?))
+2	98444	0	yes	SELECT source, COUNT(*) AS rows, COUNT(DISTINCT horse_id) AS horses, MIN(first_seen_at) AS firstSeenMin, MAX(first_seen_at) AS firstSeenMax FROM horse_runs GROUP BY source
+2	84546	0	no(旧版・診断・移行)	SELECT parser_version AS version, json_extract(data, '$[6]') AS kind, COUNT(*) AS n FROM horse_runs GROUP BY parser_version, json_extract(data, '$[6]')
+1	84422	0	no(旧版・診断・移行)	SELECT (SELECT COUNT(*) FROM race_results) AS rr_rows, (SELECT COUNT(DISTINCT race_id) FROM race_results) AS rr_races, (SELECT COUNT(DISTINCT a.race_id) FROM analyses a WHERE NOT EXISTS (SELECT 1 FROM
+154	80224	0	yes	UPDATE horse_runs SET parser_version = v.parser_version, data = v.data FROM (SELECT json_extract(value, '$[0]') AS horse_id, json_extract(value, '$[1]') AS race_key, json_extract(value, '$[2]') AS par
+16	75888	0	yes	WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC
+2462	65440	62978	no(旧版・診断・移行)	INSERT INTO analysis_horses (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason, highlights_json, concerns_json) SELECT (SELECT max(id) FROM a
+34	62028	0	yes	WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC
+2	60184	4640	no(旧版・診断・移行)	-- 初期の投入: 既存の全レースの状態を作る(済み・諦めの写しは DO の初回の起動が行う)。 INSERT INTO race_backfill (race_id, kaisai_date, sm, st1, st2, st3, st4) SELECT race_id, kaisai_date, sm, st1, st2, st3, st4 FROM (SELECT a.race_id AS 
+162	59504	0	yes	SELECT analysis_id AS analysisId, MIN(umaban) AS umaban FROM analysis_horses WHERE analysis_id IN (…) AND mark = ? GROUP BY analysis_id
+1	51268	0	no(旧版・診断・移行)	SELECT substr(race_key,1,4) y, COUNT(*) n FROM horse_runs GROUP BY y ORDER BY y
+1	51268	0	no(旧版・診断・移行)	SELECT source, COUNT(*) n, COUNT(DISTINCT horse_id) horses FROM horse_runs GROUP BY source
+1	50058	0	no(旧版・診断・移行)	SELECT COUNT(*) n FROM horse_runs WHERE source = 'result'
+2	49224	0	no(旧版・診断・移行)	SELECT source, COUNT(*) n FROM horse_runs WHERE first_seen_at >= 1793530800000 GROUP BY source
+12	48302	0	yes	WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC
+3080	47812	153	yes	UPDATE race_results SET scratched = j.s FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS s FROM json_each(?)) j WHERE race_results.race_id = ? AND race_results.umaban = j.u 
+2	42273	0	no(旧版・診断・移行)	SELECT COUNT(*) AS rows, COUNT(DISTINCT horse_id) AS horses, MIN(first_seen_at) AS firstSeenMin, MAX(first_seen_at) AS firstSeenMax, MIN(json_extract(data, '$[0]')) AS runDateMin, MAX(json_extract(dat
+2	41822	0	no(旧版・診断・移行)	SELECT COUNT(DISTINCT race_id) races_with_results FROM race_results WHERE finish_position IS NOT NULL
+1479	38578	38578	no(旧版・診断・移行)	INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f) SELECT ?, json_extract(value,'$[0]'), json_extract(value,'$[1]'), json_extract(value,'$[2]')
+153	34719	0	yes	SELECT analysis_id AS analysisId, round, COUNT(*) AS betCount, SUM(stake) AS totalStake, MAX(ev) AS maxEv FROM analysis_close_bets WHERE stake > 0 AND analysis_id IN (…) GROUP BY analysis_id, round
+15	34046	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, NULL 
+1	33588	0	no(旧版・診断・移行)	SELECT COUNT(DISTINCT a.race_id) n FROM analyses a WHERE EXISTS (SELECT 1 FROM race_results r WHERE r.race_id=a.race_id) AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id=a.race_id AND r.wi
+118	32610	0	yes	SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban, win_odds AS winOdds, ninki FROM race_results WHERE race_i
+179	31547	0	yes	SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, bet_type
+1	31180	0	no(旧版・診断・移行)	WITH d AS ( SELECT substr(race_key, 1, 4) AS yr, substr(race_key, 5, 2) AS venue, CAST(substr(race_key, 7, 2) AS INTEGER) AS kai, CAST(substr(race_key, 9, 2) AS INTEGER) AS nichi, json_extract(data, '
+337	31147	0	no(旧版・診断・移行)	SELECT race_id AS raceId, kind, race_date AS raceDate, parser_version AS parserVersion, r2_key AS r2Key, raw_bytes AS rawBytes, fetched_at AS fetchedAt, runs_version AS runsVersion FROM race_archive W
+6	29562	0	no(旧版・診断・移行)	SELECT COUNT(*) c FROM race_combo_payouts
+1	29030	0	no(旧版・診断・移行)	WITH d AS ( SELECT substr(race_key, 1, 4) AS yr, substr(race_key, 5, 2) AS venue, CAST(substr(race_key, 7, 2) AS INTEGER) AS kai, CAST(substr(race_key, 9, 2) AS INTEGER) AS nichi, json_extract(data, '
+1	28964	521	no(旧版・診断・移行)	INSERT OR IGNORE INTO kaisai_days (track_code, year, kai, nichi, kaisai_date, fence) SELECT substr(race_key, 5, 2), CAST(substr(race_key, 1, 4) AS INTEGER), CAST(substr(race_key, 7, 2) AS INTEGER), CA
+109	28694	23288	yes	INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source) SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(valu
+1	28158	0	no(旧版・診断・移行)	SELECT COUNT(*) n, COUNT(DISTINCT race_key) races FROM horse_runs WHERE race_key IN (SELECT DISTINCT race_id FROM analyses WHERE substr(race_id,5,2) BETWEEN '01' AND '10')
+1	26442	0	no(旧版・診断・移行)	SELECT substr(d,1,6) m, COUNT(*) n, SUM(p IS NULL) null_payout FROM (SELECT r.race_id, MAX(a.kaisai_date) d, MAX(r.win_payout) p FROM race_results r JOIN analyses a ON a.race_id=r.race_id WHERE r.fini
+296	26333	0	yes	SELECT race_id AS raceId, course_type AS courseType FROM race_result_meta WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id
+184	26112	0	yes	SELECT id AS analysisId, race_id AS raceId, analyzed_at AS analyzedAt FROM ( SELECT id, race_id, analyzed_at, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC, id DESC) AS rn FROM ana
+101	25897	0	yes	SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob AS adjustedProb, place_odds_min AS placeOddsMin, ev FROM analysis_horses WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY a
+164	23403	0	yes	SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout FROM race_combo_payouts WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, bet_type, combo_key
+174	22832	22832	yes	INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data) SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]
+889	22636	0	yes	SELECT jockey_id AS jockeyId, years_json AS yearsJson, fetched_at AS fetchedAt FROM jockey_results WHERE kind = ? AND jockey_id IN (…)
+1	22342	0	no(旧版・診断・移行)	SELECT substr(race_id,1,4)||'-'||CASE WHEN substr(race_id,5,2) BETWEEN '01' AND '10' THEN 'JRA' ELSE 'NAR' END AS k, substr(race_id,1,4) y, COUNT(*) winners, SUM(win_payout IS NULL) null_payout, SUM(w
+781	22001	781	yes	UPDATE race_results SET win_payout = j.p FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS p FROM json_each(?)) j WHERE race_results.race_id = ? AND race_results.umaban = j.u
+147	21858	0	yes	SELECT analysis_id AS analysisId, COUNT(*) AS betCount, SUM(stake) AS totalStake, MAX(ev) AS maxEv FROM analysis_bets WHERE stake > 0 AND analysis_id IN (…) GROUP BY analysis_id
+1	21199	0	no(旧版・診断・移行)	SELECT CASE WHEN substr(race_id,5,2) BETWEEN '01' AND '10' THEN 'JRA' ELSE 'NAR' END k, COUNT(*) n, SUM(win_payout = CAST(ROUND(win_odds*100) AS INTEGER)) same FROM race_results WHERE finish_position=
+1	20911	0	no(旧版・診断・移行)	SELECT COUNT(*) n FROM race_results r WHERE finish_position=1 AND win_payout IS NULL
+1	20761	0	no(旧版・診断・移行)	SELECT race_id, umaban, win_odds, win_payout, (SELECT COUNT(*) FROM race_results x WHERE x.race_id=r.race_id AND x.finish_position=1) winners FROM race_results r WHERE finish_position=1 AND win_payout
+1	20745	0	no(旧版・診断・移行)	SELECT COUNT(*) dead_heat_races FROM (SELECT race_id FROM race_results WHERE finish_position=1 GROUP BY race_id HAVING COUNT(*)>1)
+1	20096	0	yes	SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban, ninki FROM race_results ORDER BY race_id, umaban
+11	19766	0	yes	SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports
+4	19255	0	no(旧版・診断・移行)	WITH u AS ( SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate FROM analyses a WHERE NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) GROUP BY a.race_id ) SELECT COALESCE
+10	19230	0	yes	SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout FROM race_combo_payouts ORDER BY race_id, bet_type, combo_key
+1	18549	0	no(旧版・診断・移行)	SELECT count(DISTINCT race_id) AS races FROM race_results WHERE race_id LIKE '202603%' AND race_id >= '2026030000'
+241	18344	0	yes	SELECT race_id AS raceId, umaban, finish_position AS finishPosition, passing_json AS passingJson, last3f FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban
+187	17870	0	yes	SELECT analysis_id AS analysisId, round, status FROM analysis_close WHERE analysis_id IN (…) ORDER BY analysis_id, round
+66	17841	0	yes	SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban, ninki FROM race_results WHERE race_id IN (…) ORDER BY rac
+1	17721	0	no(旧版・診断・移行)	SELECT COUNT(*) AS n, COUNT(DISTINCT horse_id) AS horses, SUM(length(data)) AS bytes FROM horse_runs;
+1	17721	0	no(旧版・診断・移行)	SELECT horse_id, race_key, data FROM horse_runs
+227	15003	0	yes	SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analysis_id, bet_type, c
+3	14456	0	yes	SELECT a.id AS id, a.race_id AS raceId, a.analyzed_at AS analyzedAt, a.kaisai_date AS kaisaiDate, a.prompt_version AS promptVersion, a.detail_key AS detailKey, a.ev_estimated AS evEstimated, a.prompt_
+97	13794	0	yes	SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports WHERE race_id IN (…)
+1	13323	0	no(旧版・診断・移行)	WITH latest AS ( SELECT MAX(a.id) AS id, a.race_id FROM analyses a JOIN analysis_allocation_meta m ON m.analysis_id = a.id WHERE a.kaisai_date >= '20260901' GROUP BY a.race_id ), bets AS ( SELECT a.id
+493	12107	0	yes	SELECT trainer_id AS trainerId, years_json AS yearsJson, fetched_at AS fetchedAt FROM trainer_results WHERE kind = ? AND trainer_id IN (…)
+501	11510	131	yes	INSERT INTO race_backfill (race_id, kaisai_date, sm, st1, st2, st3, st4) SELECT race_id, kaisai_date, sm, st1, st2, st3, st4 FROM (SELECT a.race_id AS race_id, MIN(a.kaisai_date) AS kaisai_date, CASE 
+2	10455	0	no(旧版・診断・移行)	WITH u AS ( SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate FROM analyses a WHERE a.race_class IS NULL AND EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) GROUP BY a.race
+76	10320	2580	yes	UPDATE analyses SET start_time = CASE WHEN analyses.start_time IS NULL THEN j.t ELSE analyses.start_time END, course_type = CASE WHEN analyses.cond_read IS NULL AND j.f IS NOT NULL THEN j.c ELSE analy
+2	10244	0	no(旧版・診断・移行)	SELECT CASE WHEN a.exe_analysis_id IS NOT NULL THEN 'exe' ELSE 'web' END AS origin, substr(a.analyzed_at,1,7) AS ym, CASE WHEN CAST(substr(a.race_id,5,2) AS INTEGER) <= 10 THEN 'central' ELSE 'nar' EN
+2	9974	0	yes	SELECT race_id AS raceId, umaban, finish_position AS finishPosition, scratched, ninki FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban
+1	9400	0	no(旧版・診断・移行)	WITH latest AS ( SELECT MAX(a.id) AS id, a.race_id FROM analyses a JOIN analysis_allocation_meta m ON m.analysis_id = a.id WHERE a.kaisai_date >= '20260901' GROUP BY a.race_id ), per_race AS ( SELECT 
+2	9205	0	yes	SELECT race_class AS value, COUNT(DISTINCT race_id) AS races FROM analyses WHERE race_class IS NOT NULL GROUP BY race_class ORDER BY races DESC, value ASC LIMIT ?
+74	9132	2283	no(旧版・診断・移行)	UPDATE analyses SET start_time = j.t FROM (SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS t FROM json_each(?)) AS j WHERE analyses.id = j.id AND analyses.start_time IS NULL
+45	9061	0	yes	SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout FROM race_combo_payouts WHERE race_id IN (…) ORDER BY race_id, bet_type, combo_key
+14	8859	0	yes	SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode FROM analysis_allocation_meta
+1	8163	0	no(旧版・診断・移行)	SELECT kaisai_date, CASE WHEN substr(race_id,5,2) BETWEEN '01' AND '10' THEN 'C' ELSE 'N' END k, COUNT(DISTINCT race_id) races, COUNT(*) rows_, GROUP_CONCAT(DISTINCT prompt_version) v, (SELECT COUNT(D
+567	7962	0	yes	SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason, highlights_json, concerns_json FROM analysis_horses WHERE analysis_id = ? ORDER BY umaban
+1	7591	0	no(旧版・診断・移行)	SELECT CASE WHEN substr(race_id,5,2) BETWEEN '01' AND '10' THEN 'central' ELSE 'nar' END k, COUNT(DISTINCT a.race_id) races FROM analyses a WHERE EXISTS (SELECT 1 FROM race_results r WHERE r.race_id=a
+2	7243	0	yes	WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC
+42	7201	0	yes	SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets WHERE analysis_id IN (…) ORDER BY analysis_id, bet_type, combo_key
+7060	7060	0	yes	SELECT class_a AS classA, class_b AS classB FROM r2_ops WHERE ym = ?
+114	6840	2280	yes	UPDATE race_archive SET runs_version = ? FROM (SELECT json_extract(value, '$[0]') AS race_id, json_extract(value, '$[1]') AS raw_bytes, json_extract(value, '$[2]') AS parser_version FROM json_each(?))
+199	6610	0	yes	SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason, NULL AS highlights_json, NULL AS concerns_json FROM analysis_
+1	6577	0	no(旧版・診断・移行)	SELECT m.route, m.skip_reason_code, COUNT(*) AS races, SUM(CASE WHEN EXISTS (SELECT 1 FROM analysis_bets b WHERE b.analysis_id = a.id) THEN 1 ELSE 0 END) AS races_with_bets FROM analyses a LEFT JOIN a
+2909	5818	2909	no(旧版・診断・移行)	UPDATE analyses SET detail_key = 'analyses/' || id || '.json.gz' WHERE id = (SELECT max(id) FROM analyses)
+2182	5795	2529	yes	UPDATE analyses SET race_class = ? WHERE race_id = ? AND race_class IS NULL
+1	5755	0	no(旧版・診断・移行)	SELECT a.prompt_version AS ver, COUNT(DISTINCT a.id) AS analyses, COUNT(*) AS calls, MAX(json_extract(c.value, '$.outputTokens')) AS max_out, ROUND(AVG(json_extract(c.value, '$.outputTokens'))) AS avg
+20	5607	0	yes	SELECT analysis_id AS analysisId, route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason, skip_reason_code AS skipReasonCode, combo_odds_wide AS comboOddsWide, combo_odds_tr
+2789	5578	22276	no(旧版・診断・移行)	INSERT INTO analyses (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date, model, raw_response, race_snapshot_json, history_cutoff_date, prompt_lookahead_guarded) V
+3	5514	0	no(旧版・診断・移行)	SELECT kind, count(*) AS n, min(race_date) AS first_date, max(race_date) AS last_date, max(fetched_at) AS last_fetched FROM race_archive GROUP BY kind
+2	5184	134	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0034: 検証の画面の未確定の一覧のための部分索引を足す(Issue #600。親は #594)。exe の SQLite には無い、D1 専用の索引。 -- migration は追加のみ(既存の表・列を壊さない。索引を足すだけなので、反映までの旧 Worker にも影響しない)。 -- ★ここを変えるときは、scripts/test/cloud
+1	5063	0	no(旧版・診断・移行)	SELECT prompt_version, CASE WHEN CAST(substr(race_id,5,2) AS INTEGER) BETWEEN 1 AND 10 THEN 'jra' ELSE 'nar' END AS org, min(kaisai_date) AS d0, max(kaisai_date) AS d1, count(*) AS n, count(DISTINCT r
+287	5055	0	yes	SELECT race_id AS raceId, course_type AS courseType FROM race_result_meta WHERE race_id IN (SELECT value FROM json_each(?))
+1	5048	0	no(旧版・診断・移行)	SELECT substr(kaisai_date,1,6) AS ym, COUNT(*) AS n, COUNT(DISTINCT race_id) AS races FROM analyses GROUP BY ym ORDER BY ym
+2	5048	0	no(旧版・診断・移行)	SELECT COUNT(*) n, COUNT(DISTINCT race_id) races, MIN(kaisai_date) mn, MAX(kaisai_date) mx FROM analyses
+2	5018	0	no(旧版・診断・移行)	SELECT COUNT(*) AS n FROM analyses
+1	4898	0	no(旧版・診断・移行)	SELECT COUNT(DISTINCT b.analysis_id) analyses, COUNT(*) bets, MIN(a.kaisai_date) first_d, MAX(a.kaisai_date) last_d FROM analysis_bets b JOIN analyses a ON a.id=b.analysis_id WHERE b.bet_type='win' AN
+915	4821	3940	no(旧版・診断・移行)	INSERT INTO analysis_bets (analysis_id, bet_type, combo_key, stake, odds, ev) SELECT (SELECT max(id) FROM analyses), json_extract(value,'$[0]'), json_extract(value,'$[1]'), json_extract(value,'$[2]'),
+284	4726	0	yes	SELECT (SELECT COUNT(*) FROM analysis_horses WHERE analysis_id = ?) AS horses, (SELECT COUNT(*) FROM analysis_bets WHERE analysis_id = ?) AS bets
+7	4714	0	yes	SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake FROM analysis_bets ORDER BY analysis_id, bet_type, combo_key
+236	4680	0	yes	SELECT horse_id AS horseId, race_key AS raceKey, parser_version AS parserVersion, first_seen_at AS firstSeenAt, data FROM horse_runs WHERE horse_id IN (…)
+4631	4631	4631	yes	INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1
+1	4553	7	no(旧版・診断・移行)	INSERT OR IGNORE INTO kaisai_days (track_code, year, kai, nichi, kaisai_date, fence) SELECT substr(race_id, 5, 2), CAST(substr(race_id, 1, 4) AS INTEGER), CAST(substr(race_id, 7, 2) AS INTEGER), CAST(
+2	4530	0	no(旧版・診断・移行)	SELECT race_id AS raceId, kind, race_date AS raceDate, parser_version AS parserVersion, r2_key AS r2Key, raw_bytes AS rawBytes, fetched_at AS fetchedAt FROM race_archive ORDER BY race_date, race_id
+1	4528	0	no(旧版・診断・移行)	SELECT kind, substr(race_date,1,4) AS y, COUNT(*) AS n, MIN(fetched_at) AS first, MAX(fetched_at) AS last FROM race_archive GROUP BY kind, y ORDER BY kind, y
+1	4528	0	no(旧版・診断・移行)	SELECT kind, substr(race_date,1,4) AS y, COUNT(*) AS n, SUM(raw_bytes) AS bytes, MIN(fetched_at) AS first, MAX(fetched_at) AS last FROM race_archive GROUP BY kind, y ORDER BY kind, y
+35	4349	0	yes	SELECT race_id AS raceId, umaban, finish_position AS finishPosition, win_payout AS winPayout, place_payout AS placePayout, scratched, wakuban FROM race_results WHERE race_id IN (SELECT value FROM json
+29	4342	0	yes	SELECT raceId, firstDate FROM ( SELECT raceId, firstDate, ROW_NUMBER() OVER (PARTITION BY firstDate ORDER BY raceId) AS rn, DENSE_RANK() OVER (ORDER BY firstDate DESC) AS dayRank FROM ( SELECT a.race_
+684	4104	0	no(旧版・診断・移行)	SELECT id, exe_analysis_id AS exeId, race_id AS raceId, analyzed_at AS analyzedAt FROM analyses WHERE exe_analysis_id IS NOT NULL AND exe_analysis_id IN (SELECT value FROM json_each(?))
+231	4089	0	no(旧版・診断・移行)	SELECT * FROM "d1_migrations" ORDER BY id
+1918	3836	3836	no(旧版・診断・移行)	UPDATE analyses SET exe_analysis_id = ? WHERE id = (SELECT max(id) FROM analyses)
+73	3814	0	yes	SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode, include_combo_odds AS includeComboOdds FROM analysis_allocation_meta WHERE analysis_id IN (…)
+3	3690	0	yes	SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets ORDER BY analysis_id, bet_type, combo_key
+1	3425	0	no(旧版・診断・移行)	SELECT prompt_version AS v, CASE WHEN CAST(substr(race_id,5,2) AS INTEGER) BETWEEN 1 AND 10 THEN 'jra' ELSE 'nar' END AS org, min(kaisai_date) AS d0, max(kaisai_date) AS d1, count(*) AS n, count(DISTI
+1	3389	0	no(旧版・診断・移行)	WITH calls AS ( SELECT a.id, (SELECT COUNT(*) FROM analysis_horses h WHERE h.analysis_id = a.id) AS n, json_extract(c.value, '$.inputTokens') AS inp, json_extract(c.value, '$.outputTokens') AS outp FR
+3	3327	0	no(旧版・診断・移行)	SELECT race_date, COUNT(*) n FROM race_archive GROUP BY 1 ORDER BY 1 DESC LIMIT ?
+1	3134	0	no(旧版・診断・移行)	WITH t AS ( SELECT a.id, ROUND((julianday(substr(a.kaisai_date,1,4)||'-'||substr(a.kaisai_date,5,2)||'-'||substr(a.kaisai_date,7,2)||' '||a.start_time||':00', '-9 hours') - julianday(a.analyzed_at)) *
+227	2843	5686	no(旧版・診断・移行)	INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f, scratched, wakuban) SELECT ?, json_extract(value,'$[0]'), json_extract(value,'$[1]'), json_e
+567	2713	0	yes	SELECT bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets WHERE analysis_id = ? ORDER BY bet_type, combo_key
+219	2652	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model
+1	2544	0	no(旧版・診断・移行)	SELECT prompt_version, COUNT(DISTINCT race_id) races, SUM(CASE WHEN substr(race_id,5,2) BETWEEN '01' AND '10' THEN 1 ELSE 0 END) central_rows, MIN(kaisai_date) mn, MAX(kaisai_date) mx FROM analyses GR
+1	2544	0	no(旧版・診断・移行)	SELECT prompt_version, COUNT(DISTINCT race_id) races, MIN(kaisai_date) mn, MAX(kaisai_date) mx FROM analyses GROUP BY prompt_version ORDER BY mn
+1	2538	0	no(旧版・診断・移行)	SELECT n AS llm_analyses_per_race, COUNT(*) AS races, SUM(n) AS analyses FROM ( SELECT race_id, COUNT(*) AS n FROM analyses WHERE exe_analysis_id IS NULL AND (model IS NOT NULL OR llm_calls_json IS NO
+314	2536	5072	no(旧版・診断・移行)	INSERT INTO race_combo_payouts (race_id, bet_type, combo_key, payout) SELECT ?, json_extract(value,'$[0]'), json_extract(value,'$[1]'), json_extract(value,'$[2]') FROM json_each(?) WHERE true
+1	2524	0	no(旧版・診断・移行)	SELECT COUNT(*) AS n, COUNT(DISTINCT race_id) AS races, MIN(kaisai_date) AS mn, MAX(kaisai_date) AS mx FROM analyses
+1	2524	0	no(旧版・診断・移行)	SELECT COUNT(*) AS pending, SUM(start_time IS NULL) AS no_start, SUM(cond_read IS NULL) AS no_cond FROM analyses WHERE start_time IS NULL OR cond_read IS NULL
+1	2524	0	no(旧版・診断・移行)	SELECT COUNT(*) n FROM analyses
+1	2519	0	no(旧版・診断・移行)	SELECT id, race_id, analyzed_at, start_time, grade, race_name, race_class FROM analyses WHERE race_id LIKE '2026301103%' ORDER BY race_id
+1	2519	0	no(旧版・診断・移行)	SELECT race_id, analyzed_at, start_time, grade, race_name FROM analyses WHERE kaisai_date='20261103' OR race_id LIKE '2026__1103%' ORDER BY race_id
+784	2352	784	no(旧版・診断・移行)	INSERT INTO analysis_allocation_meta (analysis_id, route, unavailable_reason, fallback_reason, skip_reason_code, combo_odds_wide, combo_odds_trio, bankroll, per_race_cap, kelly_fraction, ev_threshold,
+83	2328	0	yes	SELECT analysis_id AS analysisId, route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason, skip_reason_code AS skipReasonCode, combo_odds_wide AS comboOddsWide, combo_odds_tr
+2	2268	0	yes	SELECT a.id AS id, a.race_id AS raceId, a.analyzed_at AS analyzedAt, a.kaisai_date AS kaisaiDate, a.prompt_version AS promptVersion, a.detail_key AS detailKey, a.ev_estimated AS evEstimated, a.prompt_
+1	2264	0	no(旧版・診断・移行)	SELECT COUNT(*) n, SUM(runs_version IS NOT NULL) rv, MAX(fetched_at) last FROM race_archive
+373	2128	4256	no(旧版・診断・移行)	INSERT OR IGNORE INTO race_combo_payouts (race_id, bet_type, combo_key, payout) SELECT ?, json_extract(value,'$[0]'), json_extract(value,'$[1]'), json_extract(value,'$[2]') FROM json_each(?) WHERE NOT
+413	1998	3996	yes	INSERT INTO analysis_close_bets (analysis_id, round, bet_type, combo_key, stake, odds, ev) SELECT ?, ?, json_extract(value,'$[0]'), json_extract(value,'$[1]'), json_extract(value,'$[2]'), json_extract
+27	1941	0	yes	SELECT DISTINCT a.kaisai_date AS kaisaiDate FROM analyses a WHERE a.kaisai_date >= ? AND a.kaisai_date <= ? AND NOT EXISTS (SELECT 1 FROM daily_reports d WHERE d.kaisai_date = a.kaisai_date) ORDER BY 
+24	1914	0	yes	SELECT track_code, year, kai, nichi, kaisai_date, fence FROM kaisai_days WHERE track_code = ? AND year >= ? AND kaisai_date < ?
+300	1800	3600	no(旧版・診断・移行)	INSERT INTO race_combo_payout_imports (race_id, bet_type) SELECT ?, json_extract(value,'$[0]') FROM json_each(?) WHERE true ON CONFLICT(race_id, bet_type) DO NOTHING
+251	1757	0	no(旧版・診断・移行)	DELETE FROM race_combo_payouts WHERE race_id = ? AND bet_type IN (SELECT value FROM json_each(?))
+1	1605	0	no(旧版・診断・移行)	SELECT COUNT(*) c FROM race_backfill
+1	1605	0	no(旧版・診断・移行)	SELECT COUNT(*) AS n, SUM(st2=1) a2, SUM(st2=2) b2, SUM(st3=1) a3, SUM(st3=2) b3, SUM(st4=1) a4, SUM(st4=2) b4 FROM race_backfill
+1	1605	0	no(旧版・診断・移行)	SELECT COUNT(*) AS n, SUM(st1>0) AS s1, SUM(st2>0) AS s2, SUM(st3>0) AS s3, SUM(st4>0) AS s4, SUM(st4=2) AS s4done FROM race_backfill
+1	1605	0	no(旧版・診断・移行)	SELECT COUNT(*) n, SUM(st1=1) a1, SUM(st2=1) a2, SUM(st2=2) b2, SUM(st3=1) a3, SUM(st3=2) b3, SUM(st4=1) a4, SUM(st4=2) b4 FROM race_backfill
+1389	1389	1389	yes	INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, 1) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + 1
+99	1328	2656	no(旧版・診断・移行)	INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f) SELECT ?, json_extract(value,'$[0]'), json_extract(value,'$[1]'), json_extract(value,'$[2]')
+361	1186	2372	no(旧版・診断・移行)	INSERT OR IGNORE INTO race_combo_payout_imports (race_id, bet_type) SELECT ?, json_extract(value,'$[0]') FROM json_each(?)
+36	1052	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, NULL 
+1	984	0	no(旧版・診断・移行)	SELECT a.id, a.race_id, a.analyzed_at, a.start_time, b.bet_type, b.combo_key, b.odds, b.stake, ROUND((julianday(substr(a.kaisai_date,1,4)||'-'||substr(a.kaisai_date,5,2)||'-'||substr(a.kaisai_date,7,2
+19	847	0	no(旧版・診断・移行)	SELECT * FROM sqlite_master
+396	792	792	yes	INSERT INTO analysis_close (analysis_id, round, status, reason, due_at, fired_at, late_ms, odds_official_datetime, route, unavailable_reason, fallback_reason, skip_reason_code, bankroll, per_race_cap,
+14	770	0	no(旧版・診断・移行)	UPDATE race_backfill SET st4 = 2 WHERE st4 = 1 AND race_id IN (SELECT value FROM json_each(?))
+1	768	0	no(旧版・診断・移行)	SELECT track_code, kai, COUNT(*) AS n_days, MAX(nichi) AS max_nichi, MIN(kaisai_date) AS first_date, MAX(kaisai_date) AS last_date, SUM(fence IS NOT NULL) AS fenced FROM kaisai_days WHERE year = 2026 
+745	745	0	yes	SELECT settings_json FROM cloud_settings WHERE id = 1
+287	708	0	yes	SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason, NULL AS highlights_json, NULL AS concerns_json FROM analysis_
+638	638	0	yes	SELECT route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason, skip_reason_code AS skipReasonCode, bankroll, per_race_cap AS perRaceCap, kelly_fraction AS kellyFraction, ev_
+241	482	241	no(旧版・診断・移行)	UPDATE analyses SET llm_calls_json = ? WHERE id = (SELECT max(id) FROM analyses)
+29	416	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, NULL 
+1	409	0	no(旧版・診断・移行)	SELECT (SELECT COUNT(*) FROM jockey_results) j, (SELECT COUNT(*) FROM trainer_results) t
+1	406	0	no(旧版・診断・移行)	SELECT kaisai_date AS d, substr(race_id,5,2) AS jo, count(*) AS n, count(DISTINCT race_id) AS races FROM analyses WHERE kaisai_date >= '20261017' AND CAST(substr(race_id,5,2) AS INTEGER) BETWEEN 1 AND
+391	391	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model
+373	373	373	yes	INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + ?
+92	368	0	yes	SELECT (SELECT MAX(id) FROM analyses) AS analyses, (SELECT MAX(rowid) FROM race_results) AS results, (SELECT MAX(rowid) FROM race_combo_payouts) AS comboPayouts, (SELECT MAX(rowid) FROM race_combo_pay
+5	360	0	yes	SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports WHERE race_id IN (SELECT value FROM json_each(?))
+88	332	0	yes	SELECT round, bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_close_bets WHERE analysis_id = ? ORDER BY round, bet_type, combo_key
+10	290	0	yes	SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason, NULL AS highlights_json, NULL AS concerns_json FROM analysis_
+2	277	0	yes	SELECT stats_json AS statsJson FROM horse_run_saves WHERE saved_at >= ? ORDER BY saved_at LIMIT ?
+34	270	0	yes	SELECT kaisai_date AS kaisaiDate, created_at AS createdAt, model, race_count AS raceCount, total_stake AS totalStake, total_return AS totalReturn, summary FROM daily_reports ORDER BY kaisai_date DESC 
+1	268	0	no(旧版・診断・移行)	SELECT COUNT(*) c FROM trainer_names
+1	240	0	no(旧版・診断・移行)	SELECT CASE WHEN substr(race_id,5,2) BETWEEN '01' AND '10' THEN 'C' ELSE 'N' END k, weight_type, COUNT(*) n FROM race_conditions GROUP BY k, weight_type
+7	231	224	no(旧版・診断・移行)	INSERT INTO analysis_horses (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason) SELECT (SELECT max(id) FROM analyses), json_extract(value,'$[
+1	225	0	no(旧版・診断・移行)	SELECT k.value AS kind, COUNT(*) AS n FROM analyses a, json_each(a.mark_repair_json, '$.attempts') t, json_each(t.value, '$.kinds') k WHERE a.kaisai_date >= '20261016' AND a.mark_repair_json IS NOT NU
+117	218	596	yes	INSERT INTO jockey_results (jockey_id, kind, years_json, fetched_at) VALUES (…) ON CONFLICT (jockey_id, kind) DO UPDATE SET years_json = excluded.years_json, fetched_at = excluded.fetched_at
+99	198	99	no(旧版・診断・移行)	UPDATE analysis_allocation_meta SET min_hit_prob = ?, below_floor_count = ?, missed_json = ?, max_win_bets = ?, max_place_bets = ? WHERE analysis_id = (SELECT max(id) FROM analyses)
+12	192	0	yes	SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason FROM analysis_horses WHERE analysis_id = ? ORDER BY umaban
+1	189	0	yes	SELECT jockey_name AS name, MIN(jockey_id) AS id FROM jockey_names GROUP BY jockey_name HAVING COUNT(*) = 1 ORDER BY jockey_name
+187	187	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model
+4	184	4	no(旧版・診断・移行)	ALTER TABLE analyses ADD COLUMN track_condition TEXT
+4	184	4	no(旧版・診断・移行)	ALTER TABLE analyses ADD COLUMN cond_read INTEGER
+9	178	0	yes	SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason FROM analysis_horses WHERE analysis_id IN (SELECT id FROM anal
+2	156	0	no(旧版・診断・移行)	SELECT name FROM sqlite_master WHERE type='table' ORDER BY name
+1	145	0	no(旧版・診断・移行)	SELECT COUNT(*) AS analyses, SUM(mark_repair_json IS NOT NULL) AS with_violation, SUM(json_extract(mark_repair_json, '$.repaired') = 1) AS repaired FROM analyses WHERE kaisai_date >= '20261016' AND mo
+2	102	2	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0032: horse_runs に行の出どころの列 source を足す(Issue #552〈#549-B1〉。親は #549)。exe の SQLite には無い、D1 専用の表の列。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧 Worker は source を参照せず、列が増
+2	98	2	no(旧版・診断・移行)	ALTER TABLE analysis_allocation_meta ADD COLUMN max_place_bets INTEGER
+2	98	2	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0029: 単勝・複勝の点数の上限の記録(Issue #533)。exe の SQLite には無い、D1 専用の列。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧い行は NULL のまま)。 -- ★ここを変えるときは、scripts/test/cloud-d1-schema.test
+2	92	2	no(旧版・診断・移行)	ALTER TABLE analysis_allocation_meta ADD COLUMN below_floor_count INTEGER
+2	90	2	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0021: 馬場の API の取得の診断の記録(Issue #360)。exe の SQLite には無い、D1 専用の列。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧い行は NULL のまま)。 -- ★ここを変えるときは、scripts/test/cloud-d1-schema.t
+97	88	0	yes	SELECT round, status, reason, due_at AS dueAt, fired_at AS firedAt, late_ms AS lateMs, odds_official_datetime AS oddsOfficialDatetime, route, unavailable_reason AS unavailableReason, fallback_reason A
+6	84	168	no(旧版・診断・移行)	INSERT INTO race_results (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f, scratched) SELECT ?, json_extract(value,'$[0]'), json_extract(value,'$[1]'), json_extract(va
+82	82	82	yes	INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + excluded.class_b
+6	78	0	no(旧版・診断・移行)	SELECT COUNT(*) c FROM baba_conditions
+2	78	2	no(旧版・診断・移行)	ALTER TABLE analyses ADD COLUMN mark_repair_json TEXT;
+6	73	0	yes	SELECT horse_id AS horseId, race_key AS raceKey, parser_version AS parserVersion, first_seen_at AS firstSeenAt, data, source FROM horse_runs WHERE horse_id IN (…)
+1	67	0	no(旧版・診断・移行)	SELECT name FROM sqlite_master WHERE type="index" AND name NOT LIKE "sqlite_%" ORDER BY name
+2	62	2	no(旧版・診断・移行)	ALTER TABLE race_results ADD COLUMN win_odds REAL;
+2	58	2	no(旧版・診断・移行)	ALTER TABLE analyses ADD COLUMN start_time TEXT;
+2	58	0	no(旧版・診断・移行)	SELECT kaisai_date, created_at FROM daily_reports ORDER BY created_at DESC LIMIT ?
+185	52	0	yes	SELECT measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_condition, dirt_goal_condition, dirt_corner4_condition, dirt_g
+1	51	1	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0033: race_archive に、horse_runs への変換の済み印 runs_version を足す(Issue #588〈#549-B3-1〉。親は #549)。exe の SQLite には無い、D1 専用の表の列。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧 Wor
+27	51	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model
+2	50	2	no(旧版・診断・移行)	ALTER TABLE analysis_horses ADD COLUMN concerns_json TEXT;
+2	50	2	no(旧版・診断・移行)	ALTER TABLE analyses ADD COLUMN llm_calls_json TEXT;
+1	49	22	no(旧版・診断・移行)	UPDATE kaisai_days SET fence = 'A' WHERE fence IS NULL AND year = 2026 AND kai = 4 AND ((track_code IN (…) AND nichi BETWEEN 1 AND 9) OR (track_code = '04' AND nichi BETWEEN 1 AND 4))
+56	49	0	yes	SELECT kaisai_date AS kaisaiDate, created_at AS createdAt, model, race_count AS raceCount, total_stake AS totalStake, total_return AS totalReturn, summary, body_json AS bodyJson, llm_calls_json AS llm
+1	48	0	no(旧版・診断・移行)	SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%setting%'
+1	48	0	no(旧版・診断・移行)	SELECT kaisai_date, substr(race_id,5,2) AS venue, COUNT(*) n, MIN(start_time) first_start, MAX(start_time) last_start, MAX(analyzed_at) last_analyzed FROM analyses WHERE kaisai_date >= '20261101' GROU
+1	48	0	no(旧版・診断・移行)	SELECT sql FROM sqlite_master WHERE name='analyses'
+1	46	1	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0024: レースのクラスの写し(Issue #426〈#389 の案 B〉)。exe の SQLite には無い、D1 専用の列。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧い行は NULL のまま)。 -- ★ここを変えるときは、scripts/test/cloud-d1-sche
+3	45	0	no(旧版・診断・移行)	SELECT COUNT(*) c FROM daily_reports
+4	40	20	no(旧版・診断・移行)	CREATE INDEX idx_analyses_race_analyzed ON analyses (race_id, analyzed_at);
+5	40	0	yes	SELECT kaisai_date, venue_code, venue_name, measured_at FROM baba_conditions WHERE kaisai_date >= ? AND kaisai_date <= ? ORDER BY kaisai_date DESC, venue_code
+1	37	1	no(旧版・診断・移行)	ALTER TABLE race_results ADD COLUMN wakuban INTEGER;
+6	36	0	no(旧版・診断・移行)	SELECT COUNT(*) c FROM baba_fetches
+1	33	1	no(旧版・診断・移行)	ALTER TABLE race_results ADD COLUMN scratched INTEGER;
+28	28	0	yes	SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill WHERE st2 > 0 AND st2 = 1 AND kaisai_date <= ? AND race_id NOT IN (SELECT value FROM json_each(?)) ORDER BY kaisai_date DESC, race
+14	28	14	no(旧版・診断・移行)	UPDATE analyses SET llm_calls_json = ?, mark_repair_json = ? WHERE id = (SELECT max(id) FROM analyses)
+11	22	11	no(旧版・診断・移行)	UPDATE analyses SET llm_note = ?, llm_calls_json = ?, mark_repair_json = ? WHERE id = (SELECT max(id) FROM analyses)
+1	13	0	no(旧版・診断・移行)	SELECT kaisai_date, GROUP_CONCAT(venue_name) v FROM baba_conditions GROUP BY kaisai_date ORDER BY kaisai_date
+1	13	0	no(旧版・診断・移行)	SELECT COUNT(*) n FROM baba_conditions
+2	13	0	yes	SELECT kaisai_date, slot, attempted_at, finished_at, result, api_fetched_at, venues_saved, venues_dropped, dropped_json, complete FROM baba_fetch_attempts WHERE kaisai_date >= ? AND kaisai_date <= ? O
+3	11	0	yes	SELECT kaisai_date, attempted_at, finished_at, result, api_fetched_at, venues_saved, venues_dropped, dropped_json FROM baba_fetches ORDER BY kaisai_date DESC LIMIT ?
+1	10	0	no(旧版・診断・移行)	SELECT * FROM race_result_meta WHERE race_id IN (…)
+263	10	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model
+10	10	10	yes	INSERT INTO cloud_settings (id, settings_json, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at
+3	9	0	yes	SELECT detail_key, llm_note, llm_calls_json, (SELECT highlights_json FROM analysis_horses LIMIT ?) AS highlights_json, (SELECT concerns_json FROM analysis_horses LIMIT 1) AS concerns_json FROM analyse
+1	8	0	no(旧版・診断・移行)	SELECT id, race_id, analyzed_at, kaisai_date, start_time, grade, race_name FROM analyses ORDER BY id DESC LIMIT ?
+1	8	0	no(旧版・診断・移行)	SELECT race_id, analyzed_at FROM analyses WHERE kaisai_date='20261102' AND substr(race_id,5,2)='43' ORDER BY race_id, analyzed_at
+6	6	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model
+1	6	0	no(旧版・診断・移行)	SELECT COUNT(*) AS n FROM pragma_table_info('horse_runs') WHERE name='source'
+6	6	18	no(旧版・診断・移行)	CREATE TABLE race_combo_payouts ( race_id TEXT NOT NULL, bet_type TEXT NOT NULL, combo_key TEXT NOT NULL, payout INTEGER NOT NULL, PRIMARY KEY (race_id, bet_type, combo_key) );
+2	6	2	yes	UPDATE baba_fetch_attempts SET finished_at = ?, result = ?, api_fetched_at = ?, venues_saved = (SELECT COUNT(*) FROM baba_conditions WHERE kaisai_date = ? AND saved_at = ?), venues_dropped = ?, droppe
+1	6	0	no(旧版・診断・移行)	SELECT race_id, analyzed_at, model FROM analyses WHERE kaisai_date='20261102' AND substr(race_id,5,2)='43' ORDER BY race_id, analyzed_at
+6	6	0	yes	SELECT max_win_bets AS maxWinBets, max_place_bets AS maxPlaceBets FROM analysis_allocation_meta WHERE analysis_id = ?
+6	6	0	no(旧版・診断・移行)	SELECT COUNT(*) c FROM monthly_reports
+6	6	6	yes	UPDATE baba_fetches SET finished_at = CASE WHEN (result = 'ok' AND ? <> 'ok') THEN finished_at ELSE ? END, api_fetched_at = CASE WHEN (result = 'ok' AND ? <> 'ok') THEN api_fetched_at ELSE ? END, venu
+5	6	0	yes	SELECT id, analyzed_at AS analyzedAt, prompt_version AS promptVersion, model FROM analyses WHERE race_id = ? AND analyzed_at >= ? AND analyzed_at <= ? ORDER BY analyzed_at, id
+1	5	0	no(旧版・診断・移行)	SELECT id, race_id, analyzed_at, start_time FROM analyses WHERE kaisai_date='20261103' ORDER BY id
+1	5	0	yes	SELECT id AS analysisId, race_id AS raceId FROM analyses WHERE kaisai_date = ? ORDER BY race_id, analyzed_at DESC, id DESC LIMIT ?
+2	4	2	no(旧版・診断・移行)	CREATE INDEX idx_race_backfill_st4 ON race_backfill (st4, kaisai_date DESC, race_id) WHERE st4 > 0
+2	4	2	no(旧版・診断・移行)	CREATE INDEX idx_analyses_kaisai_date ON analyses (kaisai_date);
+1	4	0	no(旧版・診断・移行)	SELECT race_id, analyzed_at, prompt_version FROM analyses WHERE kaisai_date='20261102' AND substr(race_id,5,2)='43' ORDER BY race_id, analyzed_at
+2	4	2	no(旧版・診断・移行)	-- 部分索引: 状態が 0 でない行だけ(未完了と済み・諦め)。クエリ側にも `stN > 0` を書く(SQLite は `stN = 1` だけでは部分索引を使わない)。 -- kaisai_date DESC・race_id 昇順の並びで、列挙は索引の先頭から LIMIT 件で止まる。 CREATE INDEX idx_race_backfill_st1 ON race_backfill 
+2	4	0	no(旧版・診断・移行)	SELECT venue_code, venue_name, measured_at, cushion, turf_condition, dirt_condition FROM baba_conditions WHERE kaisai_date = '20261024'
+238	4	10	no(旧版・診断・移行)	CREATE TABLE IF NOT EXISTS "d1_migrations"( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL );
+2	4	0	yes	SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason, NULL AS highlights_json, NULL AS concerns_json FROM analysis_
+2	4	2	no(旧版・診断・移行)	UPDATE analyses SET llm_note = ?, llm_calls_json = ? WHERE id = (SELECT max(id) FROM analyses)
+2	4	0	yes	SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason FROM analysis_horses WHERE analysis_id IN (SELECT id FROM anal
+4	4	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model
+4	4	0	yes	SELECT month, created_at AS createdAt, model, race_count AS raceCount, total_stake AS totalStake, total_return AS totalReturn, summary, body_json AS bodyJson, llm_calls_json AS llmCallsJson FROM month
+5	4	0	yes	SELECT 1 AS done FROM baba_fetch_attempts WHERE kaisai_date = ? AND complete = 1 LIMIT ?
+5	4	0	yes	SELECT 1 AS present FROM monthly_reports WHERE month = ?
+1	3	0	yes	SELECT detail_key, llm_note, llm_calls_json, (SELECT highlights_json FROM analysis_horses LIMIT ?) AS highlights_json, (SELECT concerns_json FROM analysis_horses LIMIT 1) AS concerns_json, start_time 
+1	3	0	no(旧版・診断・移行)	SELECT name FROM d1_migrations ORDER BY id DESC LIMIT ?
+1	3	0	yes	SELECT kaisai_date, venue_code, venue_name, measured_at, cushion FROM baba_conditions WHERE kaisai_date = '20261018'
+3	3	0	yes	SELECT month, created_at AS createdAt, model, race_count AS raceCount, total_stake AS totalStake, total_return AS totalReturn, summary FROM monthly_reports ORDER BY month DESC LIMIT ?
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0025_min_hit_prob.sql')
+2	2	0	no(旧版・診断・移行)	SELECT class_b AS classB FROM r2_ops WHERE ym = ?
+2	2	4	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0031: 過去の結果ページの目録 race_archive(Issue #551〈#549-A2〉。親は #549)。exe の SQLite には無い、D1 専用の表。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため)。 -- ★ここを変えるときは、scripts/test/cloud-d
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0034_analyses_pending_index.sql')
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0026_baba_attempts.sql')
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0030_trainer_names.sql')
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0004_settings.sql');
+2	2	4	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0027: 開催日ごとの記録 kaisai_days(Issue #519)。exe の SQLite には無い、D1 専用の表。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため)。 -- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0028_jockey_names.sql')
+1	2	1	no(旧版・診断・移行)	CREATE INDEX idx_race_backfill_st3 ON race_backfill (st3, kaisai_date DESC, race_id) WHERE st3 > 0
+2	2	2	yes	INSERT INTO daily_reports (kaisai_date, created_at, model, race_count, total_stake, total_return, summary, body_json, llm_calls_json) VALUES (…) ON CONFLICT(kaisai_date) DO UPDATE SET created_at = exc
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0032_horse_runs_source.sql')
+2	2	4	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0028: 出馬表の騎手名と騎手 ID の組 jockey_names(Issue #526 段階 1b)。exe の SQLite には無い、D1 専用の表。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため)。 -- ★ここを変えるときは、scripts/test/cloud-d1-sche
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0002_d1.sql');
+2	2	4	no(旧版・診断・移行)	CREATE TABLE analyses ( id INTEGER PRIMARY KEY AUTOINCREMENT, race_id TEXT NOT NULL, analyzed_at TEXT NOT NULL, ev_estimated INTEGER, prompt_version TEXT, additional_instruction TEXT, kaisai_date TEXT
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0027_kaisai_days.sql')
+10	2	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model
+2	2	4	no(旧版・診断・移行)	CREATE TABLE baba_fetches ( kaisai_date TEXT NOT NULL PRIMARY KEY, attempted_at INTEGER NOT NULL, finished_at INTEGER, result TEXT, api_fetched_at TEXT, venues_saved INTEGER, venues_dropped INTEGER ) 
+2	2	6	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0011_win_odds.sql');
+2	2	2	no(旧版・診断・移行)	UPDATE baba_fetches SET finished_at = ?, result = ?, api_fetched_at = ?, venues_saved = ?, venues_dropped = ? WHERE kaisai_date = ?
+2	2	2	no(旧版・診断・移行)	UPDATE baba_fetches SET finished_at = ?, result = ?, api_fetched_at = ?, venues_saved = ?, venues_dropped = ?, dropped_json = ? WHERE kaisai_date = ?
+2	2	0	yes	SELECT kaisai_date, attempted_at, finished_at, result, api_fetched_at, venues_saved, venues_dropped, dropped_json FROM baba_fetches WHERE kaisai_date = ?
+2221	1	0	no(旧版・診断・移行)	SELECT race_id AS raceId, kind, race_date AS raceDate, parser_version AS parserVersion, r2_key AS r2Key, raw_bytes AS rawBytes, fetched_at AS fetchedAt FROM race_archive WHERE race_id = ?
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0016_result_wakuban.sql');
+1	1	0	no(旧版・診断・移行)	SELECT detail_key FROM analyses LIMIT ?
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0020_trainer_results.sql')
+1	1	3	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0020: 調教師の年ごとの成績の表(Issue #354〈#348 の TR1〉)。exe の SQLite には無い、D1 専用の表。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため)。 -- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts 
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0022_race_conditions.sql')
+1	1	0	no(旧版・診断・移行)	SELECT detail_key, llm_note FROM analyses LIMIT ?
+1	1	0	no(旧版・診断・移行)	SELECT body_json FROM monthly_reports WHERE month='202610'
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0013_result_scratched.sql');
+1	1	0	no(旧版・診断・移行)	SELECT month, length(body_json) len, created_at FROM monthly_reports ORDER BY month
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0010_daily_reports.sql');
+1	1	0	yes	SELECT kaisai_date, venue_code, venue_name, measured_at, cushion FROM baba_conditions ORDER BY kaisai_date DESC LIMIT ?
+1	1	3	no(旧版・診断・移行)	CREATE TABLE daily_reports ( kaisai_date TEXT PRIMARY KEY, created_at TEXT NOT NULL, model TEXT, race_count INTEGER NOT NULL, total_stake INTEGER NOT NULL, total_return INTEGER NOT NULL, summary TEXT,
+1	1	3	no(旧版・診断・移行)	CREATE TABLE monthly_reports ( month TEXT PRIMARY KEY, created_at TEXT NOT NULL, model TEXT, race_count INTEGER NOT NULL, total_stake INTEGER NOT NULL, total_return INTEGER NOT NULL, summary TEXT, bod
+1	1	3	no(旧版・診断・移行)	-- analysis_close_bets: ok の回の買い目(stake > 0 の行だけ。analysis_bets と同じ形・同じ意味)。 CREATE TABLE analysis_close_bets ( analysis_id INTEGER NOT NULL, round INTEGER NOT NULL, bet_type TEXT NOT NULL, combo_key TE
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0015_monthly_reports.sql');
+9	1	0	yes	SELECT 1 AS present FROM daily_reports WHERE kaisai_date = ?
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0019_close.sql')
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0033_race_archive_runs_version.sql')
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0014_horse_runs.sql');
+1	1	3	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0019: 締切の直前の再計算の結果(Issue #338〈#335-A1〉)。exe の SQLite には無い、D1 専用の表。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。分析時の提案の行〈analysis_allocation_meta・analysis_bets〉は上書きしない)
+1	1	2	no(旧版・診断・移行)	-- クラウド版(D1)の migration 0022: レースの条件(負担重量の種別・牝馬限定)の記録(Issue #421 段階 1)。exe の SQLite には無い、D1 専用の表。 -- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。表が無い間は新しい Worker の保存が失敗するが、警告になるだけで分析は止まらない)。 -- 
+1	1	2	no(旧版・診断・移行)	CREATE TABLE horse_runs ( horse_id TEXT NOT NULL, race_key TEXT NOT NULL, parser_version INTEGER NOT NULL, first_seen_at INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (horse_id, race_key) ) WITHOU
+1	1	0	no(旧版・診断・移行)	SELECT max(analyzed_at) AS last FROM analyses
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0009_start_time.sql');
+1	1	2	no(旧版・診断・移行)	CREATE TABLE horse_run_saves ( saved_at INTEGER NOT NULL, race_id TEXT NOT NULL, stats_json TEXT NOT NULL, PRIMARY KEY (saved_at, race_id) ) WITHOUT ROWID;
+1	1	0	no(旧版・診断・移行)	SELECT kaisai_date, created_at, race_count FROM daily_reports WHERE kaisai_date='20261103'
+1	1	0	no(旧版・診断・移行)	SELECT * FROM cloud_settings
+1	1	3	no(旧版・診断・移行)	CREATE TABLE jockey_results ( jockey_id TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN (…)), years_json TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (jockey_id, kind) );
+1	1	3	no(旧版・診断・移行)	INSERT INTO "d1_migrations" (name) values ('0024_race_class.sql')
+1	1	0	yes	SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model
+1	1	0	no(旧版・診断・移行)	SELECT max(analyzed_at) AS last_analysis FROM analyses
+223	0	106	yes	INSERT INTO race_conditions (race_id, weight_type, fillies_only, saved_at) VALUES (…) ON CONFLICT (race_id) DO UPDATE SET weight_type = excluded.weight_type, fillies_only = excluded.fillies_only, save
+322	0	644	no(旧版・診断・移行)	INSERT INTO race_result_meta (race_id, course_type) VALUES (…) ON CONFLICT(race_id) DO UPDATE SET course_type = excluded.course_type
+9	0	9	yes	INSERT INTO baba_fetch_attempts (kaisai_date, slot, attempted_at) VALUES (…) ON CONFLICT (kaisai_date, slot) DO NOTHING
+1	0	0	no(旧版・診断・移行)	PRAGMA table_info(analyses)
+57	0	320	yes	INSERT INTO trainer_names (trainer_name, trainer_id, first_seen) VALUES (…) ON CONFLICT DO NOTHING
+405	0	0	yes	DELETE FROM analysis_close_bets WHERE analysis_id = ? AND round = ?
+62	0	372	yes	INSERT INTO trainer_results (trainer_id, kind, years_json, fetched_at) VALUES (…) ON CONFLICT (trainer_id, kind) DO UPDATE SET years_json = excluded.years_json, fetched_at = excluded.fetched_at
+9	0	6	yes	INSERT INTO baba_fetches (kaisai_date, attempted_at) VALUES (…) ON CONFLICT (kaisai_date) DO NOTHING
+39	0	6	yes	INSERT INTO kaisai_days (track_code, year, kai, nichi, kaisai_date, fence) VALUES (…) ON CONFLICT (track_code, year, kai, nichi) DO UPDATE SET fence = excluded.fence WHERE kaisai_days.fence IS NULL AN
+53	0	141	yes	INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) VALUES (…) ON CONFLICT DO NOTHING
+1	0	0	no(旧版・診断・移行)	PRAGMA table_info(daily_reports)
+14	0	28	yes	INSERT OR IGNORE INTO daily_reports (kaisai_date, created_at, model, race_count, total_stake, total_return, summary, body_json, llm_calls_json) VALUES (…)
+967	0	1934	no(旧版・診断・移行)	INSERT OR IGNORE INTO race_result_meta (race_id, course_type) VALUES (…)
+1	0	0	no(旧版・診断・移行)	SELECT count(*) AS n, max(analyzed_at) AS last FROM analyses WHERE kaisai_date='20261104'
+2325	0	0	yes	SELECT 1
+1	0	1	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+7	0	7	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+220	0	220	yes	INSERT INTO horse_run_saves (saved_at, race_id, stats_json) VALUES (…) ON CONFLICT (saved_at, race_id) DO UPDATE SET stats_json = excluded.stats_json
+1	0	0	no(旧版・診断・移行)	SELECT COUNT(*) n FROM race_archive
+1	0	0	no(旧版・診断・移行)	SELECT count(*) AS n FROM race_results rr WHERE 1=0
+1	0	1	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+1	0	1	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+1	0	1	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+1	0	0	no(旧版・診断・移行)	WITH u AS ( SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate FROM analyses a WHERE EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) AND NOT EXISTS (SELECT 1 FROM race_resul
+1	0	0	no(旧版・診断・移行)	SELECT * FROM baba_conditions LIMIT ?
+1	0	0	no(旧版・診断・移行)	PRAGMA table_info(race_result_meta)
+1	0	0	no(旧版・診断・移行)	SELECT mode, count(*) AS n, min(start_time) AS first_start FROM analyses WHERE kaisai_date='20261103' GROUP BY mode
+1	0	1	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+1	0	0	no(旧版・診断・移行)	WITH latest AS ( SELECT MAX(a.id) AS id, a.race_id FROM analyses a JOIN analysis_allocation_meta m ON m.analysis_id = a.id WHERE a.kaisai_date >= '20260901' GROUP BY a.race_id ), bets AS ( SELECT a.ra
+3	0	3	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+1	0	0	no(旧版・診断・移行)	SELECT count(*) AS n, min(start_time) AS first_start, max(start_time) AS last_start FROM analyses WHERE kaisai_date='20261103'
+1	0	0	no(旧版・診断・移行)	WITH latest AS ( SELECT MAX(a.id) AS id, a.race_id FROM analyses a JOIN analysis_allocation_meta m ON m.analysis_id = a.id WHERE a.kaisai_date >= '20260901' GROUP BY a.race_id ), bets AS ( SELECT a.ra
+1	0	0	no(旧版・診断・移行)	SELECT kaisai_date, created_at, race_count, total_stake, total_return FROM daily_reports WHERE kaisai_date='20261103'
+1	0	1	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+1	0	1	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+1	0	0	no(旧版・診断・移行)	SELECT count(*) AS n, min(start_time) AS first_start, max(start_time) AS last_start, max(created_at) AS last_created FROM analyses WHERE kaisai_date='20261103'
+1	0	0	no(旧版・診断・移行)	SELECT mode, count(*) AS n, min(start_time) AS first_start, max(start_time) AS last_start FROM analyses WHERE kaisai_date='20261103' GROUP BY mode
+1	0	2	yes	INSERT OR IGNORE INTO monthly_reports (month, created_at, model, race_count, total_stake, total_return, summary, body_json, llm_calls_json) VALUES (…)
+1	0	1	yes	INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_con
+2310	0	2310	yes	INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at) VALUES (…) ON CONFLICT(race_id) DO UPDATE SET kind = excluded.kind, race_date = excluded.race_date, p

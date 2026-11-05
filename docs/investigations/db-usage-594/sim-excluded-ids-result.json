@@ -1,0 +1,27 @@
+{
+ "races": 540,
+ "requests": 7,
+ "steps": 8,
+ "excludedScans": {
+  "backfill_race": 4,
+  "backfill_class": 2,
+  "backfill_payout": 1
+ },
+ "excludedRowsScanned": 7400,
+ "allStatements": 434,
+ "bySql": {
+  "SELECT value FROM backfill_meta WHERE key = ?": 71,
+  "SELECT race_id FROM backfill_race WHERE state = 'abandoned'": 1,
+  "SELECT race_id FROM backfill_race WHERE state = 'odds_abandoned'": 1,
+  "SELECT race_id FROM backfill_race WHERE state = 'fill_done'": 1,
+  "SELECT race_id FROM backfill_class WHERE state = 'class_abandoned'": 1,
+  "SELECT race_id FROM backfill_class WHERE state = 'class_done'": 1,
+  "SELECT race_id FROM backfill_payout WHERE state IN ('payout_abandoned'": 1,
+  "INSERT INTO backfill_meta (key, value) VALUES (?, ?) ON CONFLICT(key) ": 185,
+  "DELETE FROM backfill_meta WHERE key = ?": 15,
+  "SELECT race_id FROM backfill_race WHERE last_night = ?": 4,
+  "SELECT race_id FROM backfill_class WHERE last_night = ?": 2,
+  "SELECT race_id FROM backfill_payout WHERE last_night = ?": 1,
+  "INSERT INTO backfill_payout (race_id, nights, defers, last_night, last": 150
+ }
+}

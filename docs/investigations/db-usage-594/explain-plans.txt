@@ -1,0 +1,733 @@
+## SELECT (SELECT MAX(id) FROM analyses) AS analyses, (SELECT MAX(rowid) FROM race_results) AS results, (SELECT MAX(rowid) FROM race_combo_payouts) AS comboPayouts, (SELECT MAX(rowid) FROM race_combo_payout_imports) AS comb
+   記録した回数(テスト内): 7
+   SCAN CONSTANT ROW
+   SCALAR SUBQUERY 1
+   SEARCH analyses
+   SCALAR SUBQUERY 2
+   SEARCH race_results
+   SCALAR SUBQUERY 3
+   SEARCH race_combo_payouts
+   SCALAR SUBQUERY 4
+   SEARCH race_combo_payout_imports
+## SELECT class_a AS classA, class_b AS classB FROM r2_ops WHERE ym = ?
+   記録した回数(テスト内): 1705
+   SEARCH r2_ops USING INTEGER PRIMARY KEY (rowid=?)
+## INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1
+   記録した回数(テスト内): 1503
+## INSERT INTO race_backfill (race_id, kaisai_date, sm, st1, st2, st3, st4) SELECT race_id, kaisai_date, sm, st1, st2, st3, st4 FROM (SELECT a.race_id AS race_id, MIN(a.kaisai_date) AS kaisai_date, CASE WHEN rr.sm > 0 THEN 
+   記録した回数(テスト内): 2185
+   注意: SEARCH rr USING AUTOMATIC COVERING INDEX (race_id=?) LEFT-JOIN / SCAN (subquery-4)
+   CO-ROUTINE (subquery-4)
+   MATERIALIZE rr
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   SEARCH a USING INDEX idx_analyses_race (race_id=?)
+   LIST SUBQUERY 3
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   SEARCH rr USING AUTOMATIC COVERING INDEX (race_id=?) LEFT-JOIN
+   SCAN (subquery-4)
+## SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model, NULL AS rawRespons
+   記録した回数(テスト内): 123
+   SEARCH analyses USING INTEGER PRIMARY KEY (rowid=?)
+## SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason, highlights_json, concerns_json FROM analysis_horses WHERE analysis_id = ? ORDER BY umaban
+   記録した回数(テスト内): 123
+   SEARCH analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+## INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, 1) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + 1
+   記録した回数(テスト内): 108
+## SELECT route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason, skip_reason_code AS skipReasonCode, bankroll, per_race_cap AS perRaceCap, kelly_fraction AS kellyFraction, ev_threshold AS evThres
+   記録した回数(テスト内): 72
+   SEARCH analysis_allocation_meta USING INTEGER PRIMARY KEY (rowid=?)
+## SELECT bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets WHERE analysis_id = ? ORDER BY bet_type, combo_key
+   記録した回数(テスト内): 72
+   SEARCH analysis_bets USING INDEX sqlite_autoindex_analysis_bets_1 (analysis_id=?)
+## SELECT max_win_bets AS maxWinBets, max_place_bets AS maxPlaceBets FROM analysis_allocation_meta WHERE analysis_id = ?
+   記録した回数(テスト内): 72
+   SEARCH analysis_allocation_meta USING INTEGER PRIMARY KEY (rowid=?)
+## SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, detail_key AS detailKey, COUNT(*) OVER () AS total FROM analyses WHERE id > ? AND (start_time IS NULL OR cond_read IS NULL) ORDER BY id LIMIT ?
+   記録した回数(テスト内): 35
+   注意: SCAN (subquery-2) / USE TEMP B-TREE FOR ORDER BY
+   CO-ROUTINE (subquery-2)
+   SEARCH analyses USING INDEX idx_analyses_pending (id>?)
+   SCAN (subquery-2)
+   USE TEMP B-TREE FOR ORDER BY
+## SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model, NULL AS rawRespons
+   記録した回数(テスト内): 37
+   SEARCH analyses USING INDEX idx_analyses_race_analyzed (race_id=?)
+## SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason, NULL AS highlights_json, NULL AS concerns_json FROM analysis_horses WHERE analysi
+   記録した回数(テスト内): 36
+   注意: USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+   SEARCH analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+   LIST SUBQUERY 1
+   SEARCH analyses USING COVERING INDEX idx_analyses_race_analyzed (race_id=?)
+   USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+## UPDATE analyses SET detail_key = NULL WHERE id = 1
+   記録した回数(テスト内): 2
+   SEARCH analyses USING INTEGER PRIMARY KEY (rowid=?)
+## UPDATE analyses SET start_time = CASE WHEN analyses.start_time IS NULL THEN j.t ELSE analyses.start_time END, course_type = CASE WHEN analyses.cond_read IS NULL AND j.f IS NOT NULL THEN j.c ELSE analyses.course_type END,
+   記録した回数(テスト内): 29
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   SEARCH analyses USING INTEGER PRIMARY KEY (rowid=?)
+## INSERT INTO race_backfill (race_id, kaisai_date, sm, st1, st2, st3, st4) SELECT race_id, kaisai_date, sm, st1, st2, st3, st4 FROM (SELECT a.race_id AS race_id, MIN(a.kaisai_date) AS kaisai_date, CASE WHEN rr.sm > 0 THEN 
+   記録した回数(テスト内): 29
+   注意: SEARCH rr USING AUTOMATIC COVERING INDEX (race_id=?) LEFT-JOIN / SCAN (subquery-6)
+   CO-ROUTINE (subquery-6)
+   MATERIALIZE rr
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   LIST SUBQUERY 2
+   SEARCH analyses USING INTEGER PRIMARY KEY (rowid=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   SEARCH a USING INDEX idx_analyses_race (race_id=?)
+   LIST SUBQUERY 5
+   SEARCH analyses USING INTEGER PRIMARY KEY (rowid=?)
+   LIST SUBQUERY 4
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   SEARCH rr USING AUTOMATIC COVERING INDEX (race_id=?) LEFT-JOIN
+   SCAN (subquery-6)
+## INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + ?
+   記録した回数(テスト内): 39
+## SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model, NULL AS rawRespons
+   記録した回数(テスト内): 25
+   注意: SCAN analyses USING INDEX idx_analyses_analyzed_at
+   SCAN analyses USING INDEX idx_analyses_analyzed_at
+## SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason, NULL AS highlights_json, NULL AS concerns_json FROM analysis_horses WHERE analysi
+   記録した回数(テスト内): 25
+   注意: SCAN analyses USING COVERING INDEX idx_analyses_analyzed_at / USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+   SEARCH analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+   LIST SUBQUERY 1
+   SCAN analyses USING COVERING INDEX idx_analyses_analyzed_at
+   USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+## SELECT DISTINCT race_id AS raceId FROM analyses WHERE prompt_version = ? ORDER BY race_id
+   記録した回数(テスト内): 6
+   SEARCH analyses USING COVERING INDEX idx_analyses_prompt_version_race (prompt_version=?)
+## UPDATE analyses SET detail_key = NULL WHERE id = ?
+   記録した回数(テスト内): 4
+   SEARCH analyses USING INTEGER PRIMARY KEY (rowid=?)
+## INSERT INTO r2_ops (ym, class_a, class_b) VALUES (<n>, 3, 7)
+   記録した回数(テスト内): 1
+## SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, NULL AS model, NULL AS ra
+   記録した回数(テスト内): 15
+   注意: SCAN analyses
+   SCAN analyses
+## SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, NULL AS reason, NULL AS highlights_json, NULL AS concerns_json FROM analysis_horses ORDER
+   記録した回数(テスト内): 14
+   注意: SCAN analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1
+   SCAN analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1
+## SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode, include_combo_odds AS includeComboOdds FROM analysis_allocation_meta
+   記録した回数(テスト内): 15
+   注意: SCAN analysis_allocation_meta
+   SCAN analysis_allocation_meta
+## SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets ORDER BY analysis_id, bet_type, combo_key
+   記録した回数(テスト内): 15
+   注意: SCAN analysis_bets USING INDEX sqlite_autoindex_analysis_bets_1
+   SCAN analysis_bets USING INDEX sqlite_autoindex_analysis_bets_1
+## SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban, ninki FROM race_results ORDER BY race_id, umaban
+   記録した回数(テスト内): 15
+   注意: SCAN race_results USING INDEX sqlite_autoindex_race_results_1
+   SCAN race_results USING INDEX sqlite_autoindex_race_results_1
+## SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout FROM race_combo_payouts ORDER BY race_id, bet_type, combo_key
+   記録した回数(テスト内): 15
+   注意: SCAN race_combo_payouts USING INDEX sqlite_autoindex_race_combo_payouts_1
+   SCAN race_combo_payouts USING INDEX sqlite_autoindex_race_combo_payouts_1
+## SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports
+   記録した回数(テスト内): 15
+   注意: SCAN race_combo_payout_imports
+   SCAN race_combo_payout_imports
+## SELECT analysis_id AS analysisId, round, status, route, skip_reason_code AS skipReasonCode, reason FROM analysis_close ORDER BY analysis_id, round
+   記録した回数(テスト内): 3
+   注意: SCAN analysis_close USING INDEX sqlite_autoindex_analysis_close_1
+   SCAN analysis_close USING INDEX sqlite_autoindex_analysis_close_1
+## SELECT analysis_id AS analysisId, round, bet_type AS betType, combo_key AS comboKey, stake FROM analysis_close_bets ORDER BY analysis_id, round, bet_type, combo_key
+   記録した回数(テスト内): 3
+   注意: SCAN analysis_close_bets USING INDEX sqlite_autoindex_analysis_close_bets_1
+   SCAN analysis_close_bets USING INDEX sqlite_autoindex_analysis_close_bets_1
+## DELETE FROM analysis_close_bets WHERE analysis_id = ? AND round = ?
+   記録した回数(テスト内): 300
+   SEARCH analysis_close_bets USING COVERING INDEX sqlite_autoindex_analysis_close_bets_1 (analysis_id=? AND round=?)
+## INSERT INTO analysis_close (analysis_id, round, status, reason, due_at, fired_at, late_ms, odds_official_datetime, route, unavailable_reason, fallback_reason, skip_reason_code, bankroll, per_race_cap, kelly_fraction, ev_
+   記録した回数(テスト内): 300
+## INSERT INTO analysis_close_bets (analysis_id, round, bet_type, combo_key, stake, odds, ev) SELECT ?, ?, json_extract(value,'$[0]'), json_extract(value,'$[1]'), json_extract(value,'$[2]'), json_extract(value,'$[3]'), json
+   記録した回数(テスト内): 230
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, umaban, finish_position AS finishPosition, passing_json AS passingJson, last3f FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban
+   記録した回数(テスト内): 27
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, course_type AS courseType FROM race_result_meta WHERE race_id IN (SELECT value FROM json_each(?))
+   記録した回数(テスト内): 27
+   SEARCH race_result_meta USING INDEX sqlite_autoindex_race_result_meta_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate FROM analyses a WHERE a.kaisai_date >= ? AND a.kaisai_date <= ? AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id) GROUP BY a.race_id ORD
+   記録した回数(テスト内): 10
+   注意: USE TEMP B-TREE FOR GROUP BY / USE TEMP B-TREE FOR ORDER BY
+   SEARCH a USING INDEX idx_analyses_kaisai_analyzed (kaisai_date>? AND kaisai_date<?)
+   CORRELATED SCALAR SUBQUERY 1
+   SEARCH r USING COVERING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   USE TEMP B-TREE FOR GROUP BY
+   USE TEMP B-TREE FOR ORDER BY
+## SELECT raceId, firstDate FROM ( SELECT raceId, firstDate, ROW_NUMBER() OVER (PARTITION BY firstDate ORDER BY raceId) AS rn, DENSE_RANK() OVER (ORDER BY firstDate DESC) AS dayRank FROM ( SELECT a.race_id AS raceId, MIN(a.
+   記録した回数(テスト内): 15
+   注意: USE TEMP B-TREE FOR GROUP BY / SCAN (subquery-2) / USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-6) / USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-5) / SCAN (subquery-3) / USE TEMP B-TREE FOR ORDER BY
+   CO-ROUTINE (subquery-3)
+   CO-ROUTINE (subquery-5)
+   CO-ROUTINE (subquery-6)
+   CO-ROUTINE (subquery-2)
+   SEARCH a USING INDEX idx_analyses_kaisai_analyzed (kaisai_date>? AND kaisai_date<?)
+   CORRELATED SCALAR SUBQUERY 1
+   SEARCH r USING COVERING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   USE TEMP B-TREE FOR GROUP BY
+   SCAN (subquery-2)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-6)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-5)
+   SCAN (subquery-3)
+   USE TEMP B-TREE FOR ORDER BY
+## UPDATE race_results SET win_odds = COALESCE(race_results.win_odds, j.o), ninki = COALESCE(race_results.ninki, j.n) FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS o, json_extract(value,'$[2]')
+   記録した回数(テスト内): 227
+   注意: json_each が内側のループ(行数の 2 乗で読む): SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model, NULL AS rawRespons
+   記録した回数(テスト内): 6
+   SEARCH analyses USING INDEX idx_analyses_kaisai_analyzed (kaisai_date=?)
+## SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason, NULL AS highlights_json, NULL AS concerns_json FROM analysis_horses WHERE analysi
+   記録した回数(テスト内): 5
+   注意: USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+   SEARCH analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+   LIST SUBQUERY 1
+   SEARCH analyses USING COVERING INDEX idx_analyses_kaisai_analyzed (kaisai_date=?)
+   USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+## SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model, NULL AS rawRespons
+   記録した回数(テスト内): 6
+   SEARCH analyses USING INDEX idx_analyses_kaisai_analyzed (kaisai_date=?)
+## SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, NULL AS contributions_json, mark, reason, NULL AS highlights_json, NULL AS concerns_json FROM analysis_horses WHERE analysi
+   記録した回数(テスト内): 6
+   注意: USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+   SEARCH analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+   LIST SUBQUERY 1
+   SEARCH analyses USING INDEX idx_analyses_kaisai_analyzed (kaisai_date=?)
+   USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+## INSERT INTO race_backfill (race_id, kaisai_date, sm, st1, st2, st3, st4) SELECT race_id, kaisai_date, sm, st1, st2, st3, st4 FROM (SELECT a.race_id AS race_id, MIN(a.kaisai_date) AS kaisai_date, CASE WHEN rr.sm > 0 THEN 
+   記録した回数(テスト内): 165
+   注意: SCAN race_results USING INDEX sqlite_autoindex_race_results_1 / SCAN a USING INDEX idx_analyses_race / SEARCH rr USING AUTOMATIC COVERING INDEX (race_id=?) LEFT-JOIN / SCAN (subquery-2)
+   CO-ROUTINE (subquery-2)
+   MATERIALIZE rr
+   SCAN race_results USING INDEX sqlite_autoindex_race_results_1
+   SCAN a USING INDEX idx_analyses_race
+   SEARCH rr USING AUTOMATIC COVERING INDEX (race_id=?) LEFT-JOIN
+   SCAN (subquery-2)
+## SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill WHERE st4 > 0 AND st4 = 1 AND kaisai_date <= ? AND race_id NOT IN (SELECT value FROM json_each(?)) ORDER BY kaisai_date DESC, race_id LIMIT ?
+   記録した回数(テスト内): 44
+   SEARCH race_backfill USING COVERING INDEX idx_race_backfill_st4 (st4=? AND kaisai_date<?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   CREATE BLOOM FILTER
+## SELECT COALESCE(SUM(CASE WHEN kaisai_date IS NOT NULL AND kaisai_date <= ? THEN 1 ELSE 0 END), 0) AS dated, COALESCE(SUM(CASE WHEN kaisai_date IS NULL THEN 1 ELSE 0 END), 0) AS undated, (SELECT COUNT(*) FROM race_backfil
+   記録した回数(テスト内): 21
+   SEARCH race_backfill USING COVERING INDEX idx_race_backfill_st4 (st4=?)
+   SCALAR SUBQUERY 1
+   SEARCH race_backfill USING COVERING INDEX idx_race_backfill_st4 (st4=?)
+## SELECT 1 AS present FROM daily_reports WHERE kaisai_date = ?
+   記録した回数(テスト内): 2
+   SEARCH daily_reports USING COVERING INDEX sqlite_autoindex_daily_reports_1 (kaisai_date=?)
+## INSERT OR IGNORE INTO daily_reports (kaisai_date, created_at, model, race_count, total_stake, total_return, summary, body_json, llm_calls_json) VALUES (…)
+   記録した回数(テスト内): 17
+## SELECT kaisai_date AS kaisaiDate, created_at AS createdAt, model, race_count AS raceCount, total_stake AS totalStake, total_return AS totalReturn, summary, body_json AS bodyJson, llm_calls_json AS llmCallsJson FROM daily
+   記録した回数(テスト内): 15
+   SEARCH daily_reports USING INDEX sqlite_autoindex_daily_reports_1 (kaisai_date=?)
+## SELECT kaisai_date AS kaisaiDate, created_at AS createdAt, model, race_count AS raceCount, total_stake AS totalStake, total_return AS totalReturn, summary FROM daily_reports ORDER BY kaisai_date DESC LIMIT ?
+   記録した回数(テスト内): 4
+   注意: SCAN daily_reports USING INDEX sqlite_autoindex_daily_reports_1
+   SCAN daily_reports USING INDEX sqlite_autoindex_daily_reports_1
+## INSERT INTO daily_reports (kaisai_date, created_at, race_count, total_stake, total_return, body_json) VALUES ('<id>', 'x', 0, 0, 0, '{broken')
+   記録した回数(テスト内): 1
+## SELECT DISTINCT a.kaisai_date AS kaisaiDate FROM analyses a WHERE a.kaisai_date >= ? AND a.kaisai_date <= ? AND NOT EXISTS (SELECT 1 FROM daily_reports d WHERE d.kaisai_date = a.kaisai_date) ORDER BY a.kaisai_date
+   記録した回数(テスト内): 2
+   SEARCH a USING COVERING INDEX idx_analyses_kaisai_date (kaisai_date>? AND kaisai_date<?)
+   CORRELATED SCALAR SUBQUERY 1
+   SEARCH d USING COVERING INDEX sqlite_autoindex_daily_reports_1 (kaisai_date=?)
+## SELECT id AS analysisId, race_id AS raceId FROM analyses WHERE kaisai_date = ? ORDER BY race_id, analyzed_at DESC, id DESC LIMIT ?
+   記録した回数(テスト内): 2
+   注意: USE TEMP B-TREE FOR ORDER BY
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date=?)
+   USE TEMP B-TREE FOR ORDER BY
+## SELECT race_id AS raceId, umaban, finish_position AS finishPosition, win_payout AS winPayout, place_payout AS placePayout, scratched, wakuban FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY r
+   記録した回数(テスト内): 10
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout FROM race_combo_payouts WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, bet_type, combo_key
+   記録した回数(テスト内): 26
+   SEARCH race_combo_payouts USING INDEX sqlite_autoindex_race_combo_payouts_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports WHERE race_id IN (SELECT value FROM json_each(?))
+   記録した回数(テスト内): 10
+   SEARCH race_combo_payout_imports USING COVERING INDEX sqlite_autoindex_race_combo_payout_imports_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill WHERE st1 > 0 AND st1 = 1 AND kaisai_date <= ? AND race_id NOT IN (SELECT value FROM json_each(?)) ORDER BY kaisai_date DESC, race_id LIMIT ?
+   記録した回数(テスト内): 43
+   SEARCH race_backfill USING COVERING INDEX idx_race_backfill_st1 (st1=? AND kaisai_date<?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   CREATE BLOOM FILTER
+## SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill WHERE st2 > 0 AND st2 = 1 AND kaisai_date <= ? AND race_id NOT IN (SELECT value FROM json_each(?)) ORDER BY kaisai_date DESC, race_id LIMIT ?
+   記録した回数(テスト内): 43
+   SEARCH race_backfill USING COVERING INDEX idx_race_backfill_st2 (st2=? AND kaisai_date<?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   CREATE BLOOM FILTER
+## SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill WHERE st3 > 0 AND st3 = 1 AND kaisai_date <= ? AND race_id NOT IN (SELECT value FROM json_each(?)) ORDER BY kaisai_date DESC, race_id LIMIT ?
+   記録した回数(テスト内): 38
+   SEARCH race_backfill USING COVERING INDEX idx_race_backfill_st3 (st3=? AND kaisai_date<?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   CREATE BLOOM FILTER
+## SELECT COALESCE(SUM(CASE WHEN kaisai_date IS NOT NULL AND kaisai_date <= ? THEN 1 ELSE 0 END), 0) AS dated, COALESCE(SUM(CASE WHEN kaisai_date IS NULL THEN 1 ELSE 0 END), 0) AS undated FROM race_backfill WHERE st1 > 0 AN
+   記録した回数(テスト内): 16
+   SEARCH race_backfill USING COVERING INDEX idx_race_backfill_st1 (st1=?)
+## SELECT COALESCE(SUM(CASE WHEN kaisai_date IS NOT NULL AND kaisai_date <= ? THEN 1 ELSE 0 END), 0) AS dated, COALESCE(SUM(CASE WHEN kaisai_date IS NULL THEN 1 ELSE 0 END), 0) AS undated, COALESCE(SUM(CASE WHEN kaisai_date
+   記録した回数(テスト内): 16
+   SEARCH race_backfill USING INDEX idx_race_backfill_st2 (st2=?)
+## SELECT COALESCE(SUM(CASE WHEN kaisai_date IS NOT NULL AND kaisai_date <= ? THEN 1 ELSE 0 END), 0) AS dated, COALESCE(SUM(CASE WHEN kaisai_date IS NULL THEN 1 ELSE 0 END), 0) AS undated, (SELECT COUNT(*) FROM race_backfil
+   記録した回数(テスト内): 15
+   SEARCH race_backfill USING COVERING INDEX idx_race_backfill_st3 (st3=?)
+   SCALAR SUBQUERY 1
+   SEARCH race_backfill USING COVERING INDEX idx_race_backfill_st3 (st3=?)
+## UPDATE race_results SET win_payout = j.p FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS p FROM json_each(?)) j WHERE race_results.race_id = ? AND race_results.umaban = j.u AND race_results.wi
+   記録した回数(テスト内): 19
+   注意: json_each が内側のループ(行数の 2 乗で読む): SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## UPDATE analyses SET race_class = ? WHERE race_id = ? AND race_class IS NULL
+   記録した回数(テスト内): 45
+   SEARCH analyses USING INDEX idx_analyses_race_analyzed (race_id=?)
+## UPDATE race_results SET scratched = j.s FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS s FROM json_each(?)) j WHERE race_results.race_id = ? AND race_results.umaban = j.u AND race_results.scr
+   記録した回数(テスト内): 56
+   注意: json_each が内側のループ(行数の 2 乗で読む): SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC, id DESC) AS rn FRO
+   記録した回数(テスト内): 28
+   注意: USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-4) / SCAN (subquery-1) / USE TEMP B-TREE FOR ORDER BY / SCAN latest
+   CO-ROUTINE latest
+   CO-ROUTINE (subquery-1)
+   CO-ROUTINE (subquery-4)
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date>? AND kaisai_date<?)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-4)
+   SCAN (subquery-1)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN latest
+## WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC, id DESC) AS rn FRO
+   記録した回数(テスト内): 28
+   注意: USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-4) / SCAN (subquery-1) / USE TEMP B-TREE FOR ORDER BY / SCAN l / USE TEMP B-TREE FOR ORDER BY
+   CO-ROUTINE latest
+   CO-ROUTINE (subquery-1)
+   CO-ROUTINE (subquery-4)
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date>? AND kaisai_date<?)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-4)
+   SCAN (subquery-1)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN l
+   SEARCH b USING INDEX sqlite_autoindex_analysis_bets_1 (analysis_id=?)
+   USE TEMP B-TREE FOR ORDER BY
+## WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC, id DESC) AS rn FRO
+   記録した回数(テスト内): 28
+   注意: USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-4) / SCAN (subquery-1) / USE TEMP B-TREE FOR ORDER BY / SCAN l / USE TEMP B-TREE FOR ORDER BY
+   CO-ROUTINE latest
+   CO-ROUTINE (subquery-1)
+   CO-ROUTINE (subquery-4)
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date>? AND kaisai_date<?)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-4)
+   SCAN (subquery-1)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN l
+   SEARCH h USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+   USE TEMP B-TREE FOR ORDER BY
+## WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC, id DESC) AS rn FRO
+   記録した回数(テスト内): 28
+   注意: USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-5) / SCAN (subquery-1) / USE TEMP B-TREE FOR ORDER BY
+   SEARCH r USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   LIST SUBQUERY 3
+   CO-ROUTINE (subquery-1)
+   CO-ROUTINE (subquery-5)
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date>? AND kaisai_date<?)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-5)
+   SCAN (subquery-1)
+   USE TEMP B-TREE FOR ORDER BY
+## WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC, id DESC) AS rn FRO
+   記録した回数(テスト内): 28
+   注意: USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-5) / SCAN (subquery-1) / USE TEMP B-TREE FOR ORDER BY
+   SEARCH c USING INDEX sqlite_autoindex_race_combo_payouts_1 (race_id=?)
+   LIST SUBQUERY 3
+   CO-ROUTINE (subquery-1)
+   CO-ROUTINE (subquery-5)
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date>? AND kaisai_date<?)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-5)
+   SCAN (subquery-1)
+   USE TEMP B-TREE FOR ORDER BY
+## WITH latest AS ( SELECT id, race_id, kaisai_date, model, prompt_version FROM ( SELECT id, race_id, kaisai_date, model, prompt_version, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC, id DESC) AS rn FRO
+   記録した回数(テスト内): 28
+   注意: USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-5) / SCAN (subquery-1) / USE TEMP B-TREE FOR ORDER BY
+   SEARCH i USING COVERING INDEX sqlite_autoindex_race_combo_payout_imports_1 (race_id=?)
+   LIST SUBQUERY 3
+   CO-ROUTINE (subquery-1)
+   CO-ROUTINE (subquery-5)
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date>? AND kaisai_date<?)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-5)
+   SCAN (subquery-1)
+   USE TEMP B-TREE FOR ORDER BY
+## INSERT INTO race_backfill (race_id, kaisai_date, sm, st1, st2, st3, st4) SELECT race_id, kaisai_date, sm, st1, st2, st3, st4 FROM (SELECT a.race_id AS race_id, MIN(a.kaisai_date) AS kaisai_date, CASE WHEN rr.sm > 0 THEN 
+   記録した回数(テスト内): 1
+   注意: SCAN race_results USING INDEX sqlite_autoindex_race_results_1 / SCAN a USING INDEX idx_analyses_race / SEARCH rr USING AUTOMATIC COVERING INDEX (race_id=?) LEFT-JOIN / SCAN (subquery-2)
+   CO-ROUTINE (subquery-2)
+   MATERIALIZE rr
+   SCAN race_results USING INDEX sqlite_autoindex_race_results_1
+   SCAN a USING INDEX idx_analyses_race
+   SEARCH rr USING AUTOMATIC COVERING INDEX (race_id=?) LEFT-JOIN
+   SCAN (subquery-2)
+## SELECT 1 AS present FROM monthly_reports WHERE month = ?
+   記録した回数(テスト内): 2
+   SEARCH monthly_reports USING COVERING INDEX sqlite_autoindex_monthly_reports_1 (month=?)
+## INSERT OR IGNORE INTO monthly_reports (month, created_at, model, race_count, total_stake, total_return, summary, body_json, llm_calls_json) VALUES (…)
+   記録した回数(テスト内): 15
+## SELECT month, created_at AS createdAt, model, race_count AS raceCount, total_stake AS totalStake, total_return AS totalReturn, summary, body_json AS bodyJson, llm_calls_json AS llmCallsJson FROM monthly_reports WHERE mon
+   記録した回数(テスト内): 14
+   SEARCH monthly_reports USING INDEX sqlite_autoindex_monthly_reports_1 (month=?)
+## SELECT month, created_at AS createdAt, model, race_count AS raceCount, total_stake AS totalStake, total_return AS totalReturn, summary FROM monthly_reports ORDER BY month DESC LIMIT ?
+   記録した回数(テスト内): 4
+   注意: SCAN monthly_reports USING INDEX sqlite_autoindex_monthly_reports_1
+   SCAN monthly_reports USING INDEX sqlite_autoindex_monthly_reports_1
+## INSERT INTO monthly_reports (month, created_at, race_count, total_stake, total_return, body_json) VALUES ('<n>', 'x', 1, 0, 0, 'これは JSON ではない')
+   記録した回数(テスト内): 1
+## INSERT INTO daily_reports (kaisai_date, created_at, model, race_count, total_stake, total_return, summary, body_json, llm_calls_json) VALUES (…) ON CONFLICT(kaisai_date) DO UPDATE SET created_at = excluded.created_at, mo
+   記録した回数(テスト内): 7
+## INSERT INTO monthly_reports (month, created_at, model, race_count, total_stake, total_return, summary, body_json, llm_calls_json) VALUES (…) ON CONFLICT(month) DO UPDATE SET created_at = excluded.created_at, model = excl
+   記録した回数(テスト内): 7
+## SELECT a.id AS id, a.race_id AS raceId, a.analyzed_at AS analyzedAt, a.kaisai_date AS kaisaiDate, a.prompt_version AS promptVersion, a.detail_key AS detailKey, a.ev_estimated AS evEstimated, a.prompt_lookahead_guarded AS
+   記録した回数(テスト内): 19
+   注意: USE TEMP B-TREE FOR ORDER BY
+   SEARCH a USING INDEX idx_analyses_kaisai_date (kaisai_date>? AND kaisai_date<?)
+   SEARCH r EXISTS USING COVERING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   USE TEMP B-TREE FOR ORDER BY
+## SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob AS adjustedProb FROM analysis_horses WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analysis_id, umaban
+   記録した回数(テスト内): 11
+   SEARCH analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, umaban, finish_position AS finishPosition, scratched, ninki FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban
+   記録した回数(テスト内): 11
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## WITH latest AS ( SELECT race_id FROM ( SELECT race_id, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC, id DESC) AS rn FROM analyses WHERE kaisai_date = ? ) WHERE rn = 1 ) SELECT (SELECT COUNT(*) FROM l
+   記録した回数(テスト内): 6
+   注意: USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-8) / SCAN (subquery-1) / USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-9) / SCAN (subquery-1)
+   SCAN CONSTANT ROW
+   SCALAR SUBQUERY 3
+   CO-ROUTINE (subquery-1)
+   CO-ROUTINE (subquery-8)
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date=?)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-8)
+   SCAN (subquery-1)
+   SCALAR SUBQUERY 5
+   CO-ROUTINE (subquery-1)
+   CO-ROUTINE (subquery-9)
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date=?)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-9)
+   SCAN (subquery-1)
+   CORRELATED SCALAR SUBQUERY 4
+   SEARCH r USING COVERING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   SCALAR SUBQUERY 6
+   SEARCH d USING COVERING INDEX sqlite_autoindex_daily_reports_1 (kaisai_date=?)
+## INSERT INTO daily_reports (kaisai_date, created_at, race_count, total_stake, total_return, body_json) VALUES (?, 'x', 1, 0, 0, '{}')
+   記録した回数(テスト内): 2
+## SELECT race_class AS value, COUNT(DISTINCT race_id) AS races FROM analyses WHERE race_class IS NOT NULL GROUP BY race_class ORDER BY races DESC, value ASC LIMIT 40
+   記録した回数(テスト内): 13
+   注意: SCAN analyses / USE TEMP B-TREE FOR GROUP BY / USE TEMP B-TREE FOR count(DISTINCT) / USE TEMP B-TREE FOR ORDER BY
+   SCAN analyses
+   USE TEMP B-TREE FOR GROUP BY
+   USE TEMP B-TREE FOR count(DISTINCT)
+   USE TEMP B-TREE FOR ORDER BY
+## SELECT 1 AS done FROM baba_fetch_attempts WHERE kaisai_date = ? AND complete = 1 LIMIT 1
+   記録した回数(テスト内): 55
+   SEARCH baba_fetch_attempts USING PRIMARY KEY (kaisai_date=?)
+## INSERT INTO baba_fetch_attempts (kaisai_date, slot, attempted_at) VALUES (…) ON CONFLICT (kaisai_date, slot) DO NOTHING
+   記録した回数(テスト内): 54
+## INSERT INTO baba_fetches (kaisai_date, attempted_at) VALUES (…) ON CONFLICT (kaisai_date) DO NOTHING
+   記録した回数(テスト内): 54
+## INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_condition, dirt_goal_co
+   記録した回数(テスト内): 44
+## UPDATE baba_fetch_attempts SET finished_at = ?, result = ?, api_fetched_at = ?, venues_saved = (SELECT COUNT(*) FROM baba_conditions WHERE kaisai_date = ? AND saved_at = ?), venues_dropped = ?, dropped_json = ?, complete
+   記録した回数(テスト内): 37
+   SEARCH baba_fetch_attempts USING PRIMARY KEY (kaisai_date=? AND slot=?)
+   SCALAR SUBQUERY 1
+   SEARCH baba_conditions USING PRIMARY KEY (kaisai_date=?)
+## UPDATE baba_fetches SET finished_at = CASE WHEN (result = 'ok' AND ? <> 'ok') THEN finished_at ELSE ? END, api_fetched_at = CASE WHEN (result = 'ok' AND ? <> 'ok') THEN api_fetched_at ELSE ? END, venues_dropped = CASE WH
+   記録した回数(テスト内): 37
+   SEARCH baba_fetches USING PRIMARY KEY (kaisai_date=?)
+   SCALAR SUBQUERY 1
+   SEARCH baba_conditions USING PRIMARY KEY (kaisai_date=?)
+## INSERT INTO baba_fetches (kaisai_date, attempted_at, finished_at, result, api_fetched_at, venues_saved, venues_dropped) VALUES ('<id>', 300, 310, 'no-today-venues', '<n>-10-10T23:00:00.000Z', 0, 3)
+   記録した回数(テスト内): 3
+## SELECT kaisai_date, attempted_at, finished_at, result, api_fetched_at, venues_saved, venues_dropped, dropped_json FROM baba_fetches ORDER BY kaisai_date DESC LIMIT ?
+   記録した回数(テスト内): 6
+   注意: SCAN baba_fetches
+   SCAN baba_fetches
+## SELECT kaisai_date, venue_code, venue_name, measured_at FROM baba_conditions WHERE kaisai_date >= ? AND kaisai_date <= ? ORDER BY kaisai_date DESC, venue_code
+   記録した回数(テスト内): 8
+   注意: USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+   SEARCH baba_conditions USING PRIMARY KEY (kaisai_date>? AND kaisai_date<?)
+   USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+## SELECT kaisai_date, slot, attempted_at, finished_at, result, api_fetched_at, venues_saved, venues_dropped, dropped_json, complete FROM baba_fetch_attempts WHERE kaisai_date >= ? AND kaisai_date <= ? ORDER BY kaisai_date 
+   記録した回数(テスト内): 8
+   注意: USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+   SEARCH baba_fetch_attempts USING PRIMARY KEY (kaisai_date>? AND kaisai_date<?)
+   USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+## SELECT kaisai_date, attempted_at, finished_at, result, api_fetched_at, venues_saved, venues_dropped, dropped_json FROM baba_fetches WHERE kaisai_date = ?
+   記録した回数(テスト内): 3
+   SEARCH baba_fetches USING PRIMARY KEY (kaisai_date=?)
+## INSERT INTO baba_fetches (kaisai_date, attempted_at, finished_at, result, venues_saved, venues_dropped, dropped_json) VALUES ('<id>', 1, 2, 'no-today-venues', 0, 1, ?)
+   記録した回数(テスト内): 1
+## INSERT INTO baba_fetches (kaisai_date, attempted_at, finished_at, result, venues_saved, venues_dropped, dropped_json) VALUES ('<id>', 1, 2, 'no-today-venues', 0, 2, ?)
+   記録した回数(テスト内): 1
+## INSERT INTO baba_fetches (kaisai_date, attempted_at, finished_at, result, venues_saved, venues_dropped, dropped_json) VALUES ('<id>', 1, 2, 'no-today-venues', 0, 3, ?)
+   記録した回数(テスト内): 1
+## SELECT 1
+   記録した回数(テスト内): 98
+   SCAN CONSTANT ROW
+## INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at) VALUES (…) ON CONFLICT(race_id) DO UPDATE SET kind = excluded.kind, race_date = excluded.race_date, parser_version = excl
+   記録した回数(テスト内): 85
+## INSERT INTO r2_ops (ym, class_a, class_b) VALUES (…)
+   記録した回数(テスト内): 5
+## SELECT round, status, reason, due_at AS dueAt, fired_at AS firedAt, late_ms AS lateMs, odds_official_datetime AS oddsOfficialDatetime, route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason, sk
+   記録した回数(テスト内): 35
+   SEARCH analysis_close USING INDEX sqlite_autoindex_analysis_close_1 (analysis_id=?)
+## SELECT round, bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_close_bets WHERE analysis_id = ? ORDER BY round, bet_type, combo_key
+   記録した回数(テスト内): 35
+   SEARCH analysis_close_bets USING INDEX sqlite_autoindex_analysis_close_bets_1 (analysis_id=?)
+## SELECT id AS analysisId, race_id AS raceId, analyzed_at AS analyzedAt FROM ( SELECT id, race_id, analyzed_at, ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY analyzed_at DESC, id DESC) AS rn FROM analyses WHERE kaisai_d
+   記録した回数(テスト内): 30
+   注意: USE TEMP B-TREE FOR ORDER BY / SCAN (subquery-3) / SCAN (subquery-1) / USE TEMP B-TREE FOR ORDER BY
+   CO-ROUTINE (subquery-1)
+   CO-ROUTINE (subquery-3)
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date=?)
+   USE TEMP B-TREE FOR ORDER BY
+   SCAN (subquery-3)
+   SCAN (subquery-1)
+   USE TEMP B-TREE FOR ORDER BY
+## SELECT analysis_id AS analysisId, round, status FROM analysis_close WHERE analysis_id IN (…) ORDER BY analysis_id, round
+   記録した回数(テスト内): 27
+   SEARCH analysis_close USING INDEX sqlite_autoindex_analysis_close_1 (analysis_id=?)
+## SELECT analysis_id AS analysisId, round, COUNT(*) AS betCount, SUM(stake) AS totalStake, MAX(ev) AS maxEv FROM analysis_close_bets WHERE stake > 0 AND analysis_id IN (…) GROUP BY analysis_id, round
+   記録した回数(テスト内): 27
+   SEARCH analysis_close_bets USING INDEX sqlite_autoindex_analysis_close_bets_1 (analysis_id=?)
+## SELECT analysis_id AS analysisId, COUNT(*) AS betCount, SUM(stake) AS totalStake, MAX(ev) AS maxEv FROM analysis_bets WHERE stake > 0 AND analysis_id IN (…) GROUP BY analysis_id
+   記録した回数(テスト内): 27
+   SEARCH analysis_bets USING INDEX sqlite_autoindex_analysis_bets_1 (analysis_id=?)
+## SELECT analysis_id AS analysisId, MIN(umaban) AS umaban FROM analysis_horses WHERE analysis_id IN (…) AND mark = ? GROUP BY analysis_id
+   記録した回数(テスト内): 26
+   SEARCH analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+## SELECT source, COUNT(*) AS rows, COUNT(DISTINCT horse_id) AS horses, MIN(first_seen_at) AS firstSeenMin, MAX(first_seen_at) AS firstSeenMax, MIN(json_extract(data, '$[0]')) AS runDateMin, MAX(json_extract(data, '$[0]')) 
+   記録した回数(テスト内): 15
+   注意: SCAN horse_runs / USE TEMP B-TREE FOR GROUP BY / USE TEMP B-TREE FOR count(DISTINCT)
+   SCAN horse_runs
+   USE TEMP B-TREE FOR GROUP BY
+   USE TEMP B-TREE FOR count(DISTINCT)
+## SELECT source, parser_version AS version, json_extract(data, '$[6]') AS kind, COUNT(*) AS n FROM horse_runs GROUP BY source, parser_version, json_extract(data, '$[6]')
+   記録した回数(テスト内): 15
+   注意: SCAN horse_runs / USE TEMP B-TREE FOR GROUP BY
+   SCAN horse_runs
+   USE TEMP B-TREE FOR GROUP BY
+## SELECT stats_json AS statsJson FROM horse_run_saves WHERE saved_at >= ? ORDER BY saved_at LIMIT ?
+   記録した回数(テスト内): 15
+   SEARCH horse_run_saves USING PRIMARY KEY (saved_at>?)
+## SELECT horse_id AS horseId, race_key AS raceKey, parser_version AS parserVersion, first_seen_at AS firstSeenAt, data, source FROM horse_runs WHERE horse_id IN (…)
+   記録した回数(テスト内): 42
+   SEARCH horse_runs USING PRIMARY KEY (horse_id=?)
+## SELECT DISTINCT race_id AS raceId FROM race_results WHERE race_id IN (SELECT value FROM json_each(?))
+   記録した回数(テスト内): 33
+   SEARCH race_results USING COVERING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source) SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_ext
+   記録した回数(テスト内): 61
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## INSERT INTO horse_run_saves (saved_at, race_id, stats_json) VALUES (…) ON CONFLICT (saved_at, race_id) DO UPDATE SET stats_json = excluded.stats_json
+   記録した回数(テスト内): 41
+## INSERT INTO horse_run_saves (saved_at, race_id, stats_json) VALUES (…)
+   記録した回数(テスト内): 3
+## INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source) SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_ext
+   記録した回数(テスト内): 7
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source) VALUES (?, ?, 1, ?, ?, 'other')
+   記録した回数(テスト内): 1
+## SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, NULL AS model, NULL AS ra
+   記録した回数(テスト内): 12
+   SEARCH analyses USING INDEX idx_analyses_kaisai_date (kaisai_date=?)
+## SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode, include_combo_odds AS includeComboOdds FROM analysis_allocation_meta WHERE analysis_id IN (…)
+   記録した回数(テスト内): 10
+   SEARCH analysis_allocation_meta USING INTEGER PRIMARY KEY (rowid=?)
+## SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets WHERE analysis_id IN (…) ORDER BY analysis_id, bet_type, combo_key
+   記録した回数(テスト内): 10
+   SEARCH analysis_bets USING INDEX sqlite_autoindex_analysis_bets_1 (analysis_id=?)
+## SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban, ninki FROM race_results WHERE race_id IN (…) ORDER BY race_id, umaban
+   記録した回数(テスト内): 10
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+## SELECT race_id AS raceId, bet_type AS betType, combo_key AS comboKey, payout FROM race_combo_payouts WHERE race_id IN (…) ORDER BY race_id, bet_type, combo_key
+   記録した回数(テスト内): 10
+   SEARCH race_combo_payouts USING INDEX sqlite_autoindex_race_combo_payouts_1 (race_id=?)
+## SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports WHERE race_id IN (…)
+   記録した回数(テスト内): 10
+   SEARCH race_combo_payout_imports USING COVERING INDEX sqlite_autoindex_race_combo_payout_imports_1 (race_id=?)
+## UPDATE horse_runs SET parser_version = v.parser_version, data = v.data FROM (SELECT json_extract(value, '$[0]') AS horse_id, json_extract(value, '$[1]') AS race_key, json_extract(value, '$[2]') AS parser_version, json_ex
+   記録した回数(テスト内): 17
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   SEARCH horse_runs USING PRIMARY KEY (horse_id=? AND race_key=?)
+## INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source) VALUES (?, ?, ?, ?, '["新"]', NULL)
+   記録した回数(テスト内): 1
+## SELECT a.id AS id, a.race_id AS raceId, a.analyzed_at AS analyzedAt, a.kaisai_date AS kaisaiDate, a.prompt_version AS promptVersion, a.detail_key AS detailKey, a.ev_estimated AS evEstimated, a.prompt_lookahead_guarded AS
+   記録した回数(テスト内): 17
+   注意: SCAN a
+   SCAN a
+   SEARCH r EXISTS USING COVERING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+## SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob AS adjustedProb, place_odds_min AS placeOddsMin FROM analysis_horses WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analysis_id, umaban
+   記録した回数(テスト内): 3
+   SEARCH analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, umaban, finish_position AS finishPosition, win_odds AS winOdds, ninki FROM race_results WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, umaban
+   記録した回数(テスト内): 3
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, course_type AS courseType FROM race_result_meta WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id
+   記録した回数(テスト内): 3
+   SEARCH race_result_meta USING INDEX sqlite_autoindex_race_result_meta_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) VALUES (…)
+   記録した回数(テスト内): 13
+## SELECT jockey_name AS name, MIN(jockey_id) AS id FROM jockey_names GROUP BY jockey_name HAVING COUNT(*) = 1 ORDER BY jockey_name
+   記録した回数(テスト内): 11
+   注意: SCAN jockey_names
+   SCAN jockey_names
+## SELECT trainer_name AS name, MIN(trainer_id) AS id FROM trainer_names GROUP BY trainer_name HAVING COUNT(*) = 1 ORDER BY trainer_name
+   記録した回数(テスト内): 11
+   注意: SCAN trainer_names
+   SCAN trainer_names
+## INSERT INTO trainer_names (trainer_name, trainer_id, first_seen) VALUES (…)
+   記録した回数(テスト内): 13
+## INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) VALUES (?, ?, '<id>')
+   記録した回数(テスト内): 2
+## SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob AS adjustedProb, place_odds_min AS placeOddsMin, ev FROM analysis_horses WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analysis_id, umaban
+   記録した回数(テスト内): 16
+   SEARCH analysis_horses USING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, umaban, finish_position AS finishPosition, place_payout AS placePayout, win_payout AS winPayout, scratched, wakuban, win_odds AS winOdds, ninki FROM race_results WHERE race_id IN (SELECT value F
+   記録した回数(テスト内): 16
+   SEARCH race_results USING INDEX sqlite_autoindex_race_results_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT analysis_id AS analysisId, route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason, skip_reason_code AS skipReasonCode, combo_odds_wide AS comboOddsWide, combo_odds_trio AS comboOddsTrio,
+   記録した回数(テスト内): 16
+   SEARCH analysis_allocation_meta USING INTEGER PRIMARY KEY (rowid=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY analysis_id, bet_type, combo_key
+   記録した回数(テスト内): 16
+   SEARCH analysis_bets USING INDEX sqlite_autoindex_analysis_bets_1 (analysis_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## SELECT race_id AS raceId, bet_type AS betType FROM race_combo_payout_imports WHERE race_id IN (SELECT value FROM json_each(?)) ORDER BY race_id, bet_type
+   記録した回数(テスト内): 16
+   SEARCH race_combo_payout_imports USING COVERING INDEX sqlite_autoindex_race_combo_payout_imports_1 (race_id=?)
+   LIST SUBQUERY 1
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+## INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at) VALUES (?, ?, ?, ?, ?, ?, '<n>-11-01T01:02:03.456Z')
+   記録した回数(テスト内): 13
+## UPDATE race_archive SET runs_version = ? FROM (SELECT json_extract(value, '$[0]') AS race_id, json_extract(value, '$[1]') AS raw_bytes, json_extract(value, '$[2]') AS parser_version FROM json_each(?)) AS v WHERE race_arc
+   記録した回数(テスト内): 15
+   SCAN json_each VIRTUAL TABLE INDEX 1:
+   SEARCH race_archive USING PRIMARY KEY (race_id=?)
+## INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source) VALUES (?, ?, 1, <n>, '["戦績API"]', NULL)
+   記録した回数(テスト内): 1
+## INSERT INTO horse_runs (horse_id, race_key, parser_version, first_seen_at, data, source) VALUES (?, ?, ?, <n>, ?, 'result')
+   記録した回数(テスト内): 3
+## INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at) VALUES (?, 'central', '<n>-11-01', 2, 'k', 1, 'x')
+   記録した回数(テスト内): 300
+## INSERT INTO trainer_names (trainer_name, trainer_id, first_seen) VALUES (…) ON CONFLICT DO NOTHING
+   記録した回数(テスト内): 13
+   SCAN 16-ROW VALUES CLAUSE
+## SELECT (SELECT COUNT(*) FROM analysis_horses WHERE analysis_id = ?) AS horses, (SELECT COUNT(*) FROM analysis_bets WHERE analysis_id = ?) AS bets
+   記録した回数(テスト内): 19
+   SCAN CONSTANT ROW
+   SCALAR SUBQUERY 1
+   SEARCH analysis_horses USING COVERING INDEX sqlite_autoindex_analysis_horses_1 (analysis_id=?)
+   SCALAR SUBQUERY 2
+   SEARCH analysis_bets USING COVERING INDEX sqlite_autoindex_analysis_bets_1 (analysis_id=?)
+## SELECT id, analyzed_at AS analyzedAt, prompt_version AS promptVersion, model FROM analyses WHERE race_id = ? AND analyzed_at >= ? AND analyzed_at <= ? ORDER BY analyzed_at, id
+   記録した回数(テスト内): 3
+   SEARCH analyses USING INDEX idx_analyses_race_analyzed (race_id=? AND analyzed_at>? AND analyzed_at<?)
+## INSERT INTO kaisai_days (track_code, year, kai, nichi, kaisai_date, fence) VALUES (…) ON CONFLICT (track_code, year, kai, nichi) DO UPDATE SET fence = excluded.fence WHERE kaisai_days.fence IS NULL AND excluded.fence IS 
+   記録した回数(テスト内): 43
+## SELECT track_code, year, kai, nichi, kaisai_date, fence FROM kaisai_days WHERE track_code = ? AND year >= ? AND kaisai_date < ?
+   記録した回数(テスト内): 5
+   SEARCH kaisai_days USING PRIMARY KEY (track_code=? AND year>?)
+## SELECT track_code, year, kai, nichi, kaisai_date, fence FROM kaisai_days WHERE track_code = '03' AND kai = 2 AND nichi = 2
+   記録した回数(テスト内): 1
+   SEARCH kaisai_days USING PRIMARY KEY (track_code=?)
+## INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at) VALUES (?, 'central', '<n>-11-01', 2, ?, 100, ?)
+   記録した回数(テスト内): 305
+## INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, ?) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + excluded.class_b
+   記録した回数(テスト内): 8
+## INSERT INTO analysis_close (analysis_id, round, status, reason, due_at, fired_at, late_ms) VALUES (?, 2, 'skipped', 'nar-unsupported', '<n>-06-28T06:43:00.000Z', '<n>-06-28T06:43:00.000Z', 0)
+   記録した回数(テスト内): 1
+## INSERT INTO jockey_names (jockey_name, jockey_id, first_seen) VALUES (…) ON CONFLICT DO NOTHING
+   記録した回数(テスト内): 13
+   SCAN 16-ROW VALUES CLAUSE
+## INSERT INTO race_conditions (race_id, weight_type, fillies_only, saved_at) VALUES (…) ON CONFLICT (race_id) DO UPDATE SET weight_type = excluded.weight_type, fillies_only = excluded.fillies_only, saved_at = excluded.save
+   記録した回数(テスト内): 13
+## SELECT measured_at, cushion, turf_condition, turf_goal_condition, turf_corner4_condition, turf_goal_moisture, turf_corner4_moisture, dirt_condition, dirt_goal_condition, dirt_corner4_condition, dirt_goal_moisture, dirt_c
+   記録した回数(テスト内): 11
+   SEARCH baba_conditions USING PRIMARY KEY (kaisai_date=? AND venue_code=?)
+## INSERT INTO trainer_results (trainer_id, kind, years_json, fetched_at) VALUES (…) ON CONFLICT (trainer_id, kind) DO UPDATE SET years_json = excluded.years_json, fetched_at = excluded.fetched_at
+   記録した回数(テスト内): 11
+   SCAN 2-ROW VALUES CLAUSE
+## SELECT trainer_id AS trainerId, years_json AS yearsJson, fetched_at AS fetchedAt FROM trainer_results WHERE kind = ? AND trainer_id IN (…)
+   記録した回数(テスト内): 8
+   SEARCH trainer_results USING INDEX sqlite_autoindex_trainer_results_1 (trainer_id=? AND kind=?)
+## INSERT INTO trainer_results (trainer_id, kind, years_json, fetched_at) VALUES (?, 'central', ?, ?)
+   記録した回数(テスト内): 6
+## INSERT INTO jockey_results (jockey_id, kind, years_json, fetched_at) VALUES (…) ON CONFLICT (jockey_id, kind) DO UPDATE SET years_json = excluded.years_json, fetched_at = excluded.fetched_at
+   記録した回数(テスト内): 11
+   SCAN 2-ROW VALUES CLAUSE
+## SELECT jockey_id AS jockeyId, years_json AS yearsJson, fetched_at AS fetchedAt FROM jockey_results WHERE kind = ? AND jockey_id IN (…)
+   記録した回数(テスト内): 8
+   SEARCH jockey_results USING INDEX sqlite_autoindex_jockey_results_1 (jockey_id=? AND kind=?)
+## INSERT INTO jockey_results (jockey_id, kind, years_json, fetched_at) VALUES (?, 'central', ?, ?)
+   記録した回数(テスト内): 6
+## SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model, NULL AS rawRespons
+   記録した回数(テスト内): 1
+   注意: SCAN analyses USING INDEX idx_analyses_analyzed_at
+   SCAN analyses USING INDEX idx_analyses_analyzed_at
+## INSERT INTO baba_conditions (kaisai_date, venue_code, venue_name, measured_at, cushion, turf_condition, turf_goal_moisture, used_course, turf_state_text, saved_at) VALUES (…)
+   記録した回数(テスト内): 1
+## SELECT track_code, year, kai, nichi, kaisai_date, fence FROM kaisai_days ORDER BY track_code, year, kai, nichi
+   記録した回数(テスト内): 6
+   注意: SCAN kaisai_days
+   SCAN kaisai_days
