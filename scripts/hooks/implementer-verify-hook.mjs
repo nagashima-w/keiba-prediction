@@ -10,8 +10,12 @@
 //
 // 振る舞い:
 //   - agent_type が tdd-implementer 以外なら何もしない(ログには残す)。
-//   - worktree の決め方: 入力の cwd が「メインの作業ツリー以外の worktree」ならそれ。違えば agent_transcript_path の最後の cwd。
-//     どちらも決まらない・メインの作業ツリー(git worktree list の先頭)なら流さない。
+//   - worktree の決め方(Issue #617): 実装担当は `cd /home/user/wt-XXX && ...` と打ち、シェルの作業場所は呼び出しのたびに
+//     メインへ戻るため、入力の cwd も記録の cwd も作業場所を指さない。そこで、まず agent_transcript_path の記録の中身から探す:
+//     Edit・Write・MultiEdit・NotebookEdit の file_path がメイン以外の worktree の中にあれば、最後のものを採る。
+//     無ければ Bash のコマンドに出てくるメイン以外の worktree のパス(最後の出現)を採る。
+//     それでも決まらなければ、入力の cwd が「メインの作業ツリー以外の worktree」ならそれ、違えば記録の最後の cwd。
+//     どれも決まらない・メインの作業ツリー(git worktree list の先頭)なら流さない。
 //   - 変更 = merge-base(HEAD, ベース) から HEAD と作業ツリー(未追跡を含む)まで。変更が無ければ何もしない。
 //   - 失敗: stop_hook_active が偽なら、要約を標準エラー出力へ出して終了コード 2(実装担当が作業を続ける)。
 //     真(2 回目)なら止めず、結果をログと systemMessage に残して終了コード 0。
@@ -70,6 +74,88 @@ export function lastCwdFromTranscript(file) {
     // 読めない
   }
   return null;
+}
+
+const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+/** dir から見える git worktree の一覧(実在するパス。先頭がメインの作業ツリー)。取れなければ空。 */
+export function listWorktrees(dir) {
+  if (!dir || !existsSync(dir)) return [];
+  const list = git(dir, ["worktree", "list", "--porcelain"]);
+  if (list.status !== 0) return [];
+  return list.stdout
+    .split("\n")
+    .filter((l) => l.startsWith("worktree "))
+    .map((l) => l.slice(9))
+    .filter((p) => existsSync(p))
+    .map((p) => {
+      try {
+        return realpathSync(p);
+      } catch {
+        return p;
+      }
+    });
+}
+
+/** text の中で wt(の直後が区切り)が最後に出る位置。無ければ -1。wt-60 と wt-604 のような接頭辞の取り違えを避ける。 */
+function lastIndexOfPath(text, wt) {
+  let from = text.length;
+  for (;;) {
+    const i = text.lastIndexOf(wt, from);
+    if (i < 0) return -1;
+    const next = text[i + wt.length];
+    if (next === undefined || !/[A-Za-z0-9_.-]/.test(next)) return i;
+    from = i - 1;
+    if (from < 0) return -1;
+  }
+}
+
+/** text の中に最後に出るメイン以外の worktree(パスが長いものを優先)。 */
+function lastWorktreeIn(text, others) {
+  let best = null;
+  for (const wt of others) {
+    const i = lastIndexOfPath(text, wt);
+    if (i >= 0 && (best === null || i > best.i || (i === best.i && wt.length > best.wt.length))) best = { i, wt };
+  }
+  return best?.wt ?? null;
+}
+
+/**
+ * 記録(JSONL)の tool_use から作業した worktree を探す。大きな記録でも遅くならないよう、"tool_use" を含む行だけを JSON にする。
+ * Edit 系の file_path を優先し(最後のもの)、無ければ Bash の command(最後のもの)。メインの作業ツリーは除く。
+ */
+export function worktreeFromTranscriptActions(file, worktrees) {
+  const others = worktrees.slice(1);
+  if (others.length === 0) return null;
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  let fromEdit = null;
+  let fromBash = null;
+  for (const l of text.split("\n")) {
+    if (!l.includes('"tool_use"')) continue;
+    let o;
+    try {
+      o = JSON.parse(l);
+    } catch {
+      continue;
+    }
+    const content = o?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const b of content) {
+      if (b?.type !== "tool_use" || typeof b.input !== "object" || b.input === null) continue;
+      if (EDIT_TOOLS.has(b.name)) {
+        const fp = b.input.file_path ?? b.input.notebook_path;
+        if (typeof fp === "string") fromEdit = lastWorktreeIn(fp, others) ?? fromEdit;
+      } else if (b.name === "Bash" && typeof b.input.command === "string") {
+        fromBash = lastWorktreeIn(b.input.command, others) ?? fromBash;
+      }
+    }
+  }
+  return fromEdit ?? fromBash;
 }
 
 /** dir が属する git worktree のルート。メインの作業ツリー(git worktree list の先頭)なら null。 */
@@ -145,13 +231,16 @@ function main() {
     return 0;
   }
 
-  const fromCwd = linkedWorktreeRoot(input.cwd);
   const transcriptCwd = hasTranscript ? lastCwdFromTranscript(input.agent_transcript_path) : null;
-  const fromTranscript = fromCwd ? null : linkedWorktreeRoot(transcriptCwd);
-  const root = fromCwd ?? fromTranscript;
+  const t0Pick = Date.now();
+  const fromActions = hasTranscript ? worktreeFromTranscriptActions(input.agent_transcript_path, listWorktrees(input.cwd ?? transcriptCwd)) : null;
+  const fromCwd = fromActions ? null : linkedWorktreeRoot(input.cwd);
+  const fromTranscript = fromActions || fromCwd ? null : linkedWorktreeRoot(transcriptCwd);
+  const root = fromActions ?? fromCwd ?? fromTranscript;
   log(
-    `worktree 判定: 入力の cwd から=${fromCwd ?? "なし"} / transcript の最後の cwd=${transcriptCwd ?? "なし"} → ` +
-      `採用=${root ?? "なし"}(${fromCwd ? "入力の cwd" : fromTranscript ? "transcript" : "決まらない、またはメインの作業ツリー"})`,
+    `worktree 判定: transcript の操作から=${fromActions ?? "なし"} / 入力の cwd から=${fromCwd ?? "なし"} / transcript の最後の cwd=${transcriptCwd ?? "なし"} → ` +
+      `採用=${root ?? "なし"}(${fromActions ? "transcript の操作" : fromCwd ? "入力の cwd" : fromTranscript ? "transcript" : "決まらない、またはメインの作業ツリー"}) ` +
+      `判定 ${Date.now() - t0Pick} ms`,
   );
   if (!root) {
     log("worktree を決められない(またはメインの作業ツリー)ので流さない");
