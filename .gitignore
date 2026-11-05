@@ -14,3 +14,6 @@ cloud/wrangler.measure-allocation-export.generated.toml
 
 # 日本語の推敲スキル yomiyasu が検査の記録を書く場所(Issue #466)
 .yomiyasu/
+
+# Claude Code のフックのログ(Issue #607)
+.claude/hook-logs/
