@@ -1199,3 +1199,82 @@ describe("1 晩の読み取り行数の予算(Issue #593 AC-2)", () => {
     expect((await w.core.getStatus()).night.rowsRead).toBeGreaterThanOrEqual(25_000);
   });
 });
+
+describe("kick: 残ったアラーム(今より 15 分以上前)は無いのと同じに張り直す(#603)", () => {
+  const MIN = 60_000;
+  /** 状態(mode)を DB に直接置き、キャッシュを捨てるため core を作り直す。 */
+  const withMode = (w: World, mode: string, resumeAt = 0): void => {
+    w.sql.exec("INSERT INTO ra_meta (key, value) VALUES ('mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", mode);
+    w.sql.exec("INSERT INTO ra_meta (key, value) VALUES ('resume_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", String(resumeAt));
+    w.core = w.makeCore();
+  };
+  const now = jst(11, 5, 12, 0);
+  const rows: { name: string; alarm: number | null; arms: boolean }[] = [
+    { name: "アラームなし", alarm: null, arms: true },
+    { name: "今より後", alarm: now + 5 * MIN, arms: false },
+    { name: "今より 14 分前", alarm: now - 14 * MIN, arms: false },
+    { name: "今より 16 分前", alarm: now - 16 * MIN, arms: true },
+  ];
+  for (const r of rows) {
+    it(`running: ${r.name} → ${r.arms ? "張る" : "張らない"}`, async () => {
+      const w = mk({ fromMonth: "2026-11" });
+      standard(w);
+      w.now = now;
+      // アラームなしのときに張る時刻(基準)
+      const base = mk({ fromMonth: "2026-11" });
+      base.now = now;
+      await base.core.kick();
+      expect(base.alarm).toBe(jst(11, 6, 0)); // 基準は null でない(比較が自明にならない)
+      w.alarm = r.alarm;
+      await w.core.kick();
+      if (r.arms) {
+        expect(w.alarm).toBe(base.alarm);
+        expect(w.logs.filter((l) => l.startsWith("race-archive: stale alarm at=")).length).toBe(r.alarm === null ? 0 : 1);
+      } else {
+        expect(w.alarm).toBe(r.alarm);
+        expect(w.logs.some((l) => l.includes("stale alarm"))).toBe(false);
+      }
+    });
+  }
+  it("ログは 1 行で、残ったアラームの時刻(ISO)だけを出す", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    w.now = now;
+    w.alarm = now - 16 * MIN;
+    await w.core.kick();
+    expect(w.logs.filter((l) => l.includes("stale alarm"))).toEqual([`race-archive: stale alarm at=${new Date(now - 16 * MIN).toISOString()} re-armed`]);
+  });
+  it("manual-stopped・capacity-stopped: 16 分前の残ったアラームでも張らない(通知の再送が無ければ)", async () => {
+    for (const mode of ["manual-stopped", "capacity-stopped"]) {
+      const w = mk({ fromMonth: "2026-11" });
+      withMode(w, mode);
+      w.now = now;
+      w.alarm = now - 16 * MIN;
+      await w.core.kick();
+      expect(w.alarm, mode).toBe(now - 16 * MIN);
+    }
+  });
+  it("night-stopped: 残ったアラームのときも max(resume_at, runAt(now)) で張る", async () => {
+    const later = jst(11, 7, 0);
+    for (const [resumeAt, expected] of [[later, later], [0, jst(11, 6, 0)]] as const) {
+      const w = mk({ fromMonth: "2026-11" });
+      withMode(w, "night-stopped", resumeAt);
+      w.now = now;
+      w.alarm = now - 16 * MIN;
+      await w.core.kick();
+      expect(w.alarm).toBe(expected);
+      const none = mk({ fromMonth: "2026-11" });
+      withMode(none, "night-stopped", resumeAt);
+      none.now = now;
+      await none.core.kick();
+      expect(none.alarm).toBe(expected); // アラームなしのときと同じ
+    }
+  });
+  it("本番の再現: 11/4 3:48:32 JST のアラームが残り、今が 11/4 21:00 JST なら、次の 0:00 に張る", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    w.now = jst(11, 4, 21, 0);
+    w.alarm = 1793731712228;
+    expect(w.alarm).toBe(jst(11, 4, 3, 48, 32) + 228); // 本番の nextRunAt
+    await w.core.kick();
+    expect(w.alarm).toBe(jst(11, 5, 0));
+  });
+});

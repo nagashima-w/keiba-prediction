@@ -84,6 +84,7 @@ import type { ResultImportProgress } from "./race-day-core";
 import { addDaysToKaisaiDate, dispatchResultImports, errorKind, type DispatchStore, type ResultDayStub } from "./result-dispatch";
 import { UNIMPORTED_MAX_LIMIT, type BackfillCounts, type ClassBackfillCounts, type ClassDistributionRow, type CountBackfillOptions, type ListBackfillOptions, type PayoutBackfillCounts, type UnimportedRace, type WinOddsBackfillCounts } from "./result-repository";
 import type { SqlLike } from "./sql-like";
+import { shouldRearm } from "./stale-alarm";
 
 /** 結果の補完の DO(`ResultBackfill`)の固定名(単一インスタンス)。cron の `scheduled` と `GET /api/results/backfill` が引く。 */
 export const RESULT_BACKFILL_NAME = "main";
@@ -565,10 +566,13 @@ export class ResultBackfillCore {
 
   /** アラームが無ければ張る(cron から毎日 1 回・状態の読み取りから)。飛行中のチャンクがあれば今(進行を見る)、無ければ次の窓の開始(窓の中なら今)。 */
   async kick(): Promise<void> {
-    if (this.disabled || (await this.deps.getAlarm()) !== null) {
+    if (this.disabled) {
       return;
     }
     const now = this.deps.now();
+    if (!shouldRearm(await this.deps.getAlarm(), now, (iso) => this.deps.log(`result-backfill: stale alarm at=${iso} re-armed`, "info"))) {
+      return;
+    }
     await this.setAlarm(this.loadInflight() !== null ? now : nextBackfillWindowStart(now, false, this.startHour, this.endHour));
   }
 
