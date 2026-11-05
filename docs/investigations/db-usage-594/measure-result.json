@@ -1,0 +1,530 @@
+[
+ {
+  "name": "FILL_WIN_ODDS(14頭・全部NULL)",
+  "reads": 239,
+  "writes": 14,
+  "rows": 14
+ },
+ {
+  "name": "FILL_WIN_ODDS(14頭・2回目=冪等)",
+  "reads": 212,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "FILL_SCRATCHED(14頭)",
+  "reads": 239,
+  "writes": 14,
+  "rows": 14
+ },
+ {
+  "name": "FILL_WIN_PAYOUT(14頭)",
+  "reads": 213,
+  "writes": 1,
+  "rows": 1
+ },
+ {
+  "name": "SAVE_RACE_CLASS",
+  "reads": 3,
+  "writes": 1,
+  "rows": 1
+ },
+ {
+  "name": "案A FILL_WIN_ODDS MATERIALIZED CTE",
+  "reads": 70,
+  "writes": 14,
+  "rows": 14
+ },
+ {
+  "name": "案B FILL_WIN_ODDS オブジェクトJSON(初回)",
+  "reads": 15,
+  "writes": 14,
+  "rows": 14
+ },
+ {
+  "name": "案B FILL_WIN_ODDS オブジェクトJSON(2回目・冪等)",
+  "reads": 15,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "RECOMPUTE_RACES(1レース)",
+  "reads": 25,
+  "writes": 2,
+  "rows": 1
+ },
+ {
+  "name": "RECOMPUTE_BY_ANALYSIS_IDS(30件)",
+  "reads": 928,
+  "writes": 4,
+  "rows": 2
+ },
+ {
+  "name": "RECONCILE(全レース)",
+  "reads": 30318,
+  "writes": 660,
+  "rows": 556
+ },
+ {
+  "name": "settle(500 ID)",
+  "reads": 1501,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "LIST_PAYOUT_BACKFILL(limit150・除外150)",
+  "reads": 1,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "LIST_BACKFILL(st1 該当なし)",
+  "reads": 316,
+  "writes": 0,
+  "rows": 83
+ },
+ {
+  "name": "LIST_WIN_ODDS_BACKFILL",
+  "reads": 152,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "LIST_CLASS_BACKFILL",
+  "reads": 196,
+  "writes": 0,
+  "rows": 21
+ },
+ {
+  "name": "COUNT_BACKFILL",
+  "reads": 83,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "COUNT_WIN_ODDS_BACKFILL",
+  "reads": 1,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "COUNT_CLASS_BACKFILL",
+  "reads": 23,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "COUNT_PAYOUT_BACKFILL",
+  "reads": 0,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "CLASS_DISTRIBUTION",
+  "reads": 5025,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "LIST_UNIMPORTED_BY_DAY(31日窓)",
+  "reads": 343,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "LIST_UNIMPORTED(31日窓)",
+  "reads": 339,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "一覧(絞り込みなし・50件)analyses",
+  "reads": 50,
+  "writes": 0,
+  "rows": 50
+ },
+ {
+  "name": "一覧(絞り込みなし・50件)horses",
+  "reads": 1450,
+  "writes": 0,
+  "rows": 650
+ },
+ {
+  "name": "一覧(kaisai_date)analyses",
+  "reads": 25,
+  "writes": 0,
+  "rows": 24
+ },
+ {
+  "name": "一覧(race_id)analyses",
+  "reads": 3,
+  "writes": 0,
+  "rows": 2
+ },
+ {
+  "name": "詳細 SELECT_ONE",
+  "reads": 1,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "詳細 horses",
+  "reads": 14,
+  "writes": 0,
+  "rows": 13
+ },
+ {
+  "name": "詳細 allocation meta",
+  "reads": 1,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "詳細 allocation bets",
+  "reads": 3,
+  "writes": 0,
+  "rows": 2
+ },
+ {
+  "name": "対象一覧 TARGETS_ANALYSES",
+  "reads": 146,
+  "writes": 0,
+  "rows": 24
+ },
+ {
+  "name": "対象一覧 bets(30件)",
+  "reads": 120,
+  "writes": 0,
+  "rows": 30
+ },
+ {
+  "name": "対象一覧 marks(30件)",
+  "reads": 450,
+  "writes": 0,
+  "rows": 30
+ },
+ {
+  "name": "対象一覧 close rounds",
+  "reads": 120,
+  "writes": 0,
+  "rows": 60
+ },
+ {
+  "name": "対象一覧 close bets",
+  "reads": 360,
+  "writes": 0,
+  "rows": 60
+ },
+ {
+  "name": "結果 SELECT_DETAILS(36レース)",
+  "reads": 612,
+  "writes": 0,
+  "rows": 504
+ },
+ {
+  "name": "日報 LIST_DAY_ANALYSES",
+  "reads": 49,
+  "writes": 0,
+  "rows": 24
+ },
+ {
+  "name": "日報 NEEDING_REPORT(3日窓)",
+  "reads": 169,
+  "writes": 0,
+  "rows": 7
+ },
+ {
+  "name": "日報 results",
+  "reads": 612,
+  "writes": 0,
+  "rows": 504
+ },
+ {
+  "name": "期間集計 28日 races",
+  "reads": 1010,
+  "writes": 0,
+  "rows": 168
+ },
+ {
+  "name": "期間集計 28日 bets",
+  "reads": 1011,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "期間集計 28日 marks",
+  "reads": 3530,
+  "writes": 0,
+  "rows": 168
+ },
+ {
+  "name": "期間集計 28日 results",
+  "reads": 3698,
+  "writes": 0,
+  "rows": 2352
+ },
+ {
+  "name": "期間集計 28日 combos",
+  "reads": 1850,
+  "writes": 0,
+  "rows": 504
+ },
+ {
+  "name": "期間集計 28日 imports",
+  "reads": 1682,
+  "writes": 0,
+  "rows": 336
+ },
+ {
+  "name": "期間集計 28日 6文の合計",
+  "reads": 12781,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "期間集計 1か月 races",
+  "reads": 1154,
+  "writes": 0,
+  "rows": 192
+ },
+ {
+  "name": "期間集計 1か月 bets",
+  "reads": 1155,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "期間集計 1か月 marks",
+  "reads": 4034,
+  "writes": 0,
+  "rows": 192
+ },
+ {
+  "name": "期間集計 1か月 results",
+  "reads": 4226,
+  "writes": 0,
+  "rows": 2688
+ },
+ {
+  "name": "期間集計 1か月 combos",
+  "reads": 2114,
+  "writes": 0,
+  "rows": 576
+ },
+ {
+  "name": "期間集計 1か月 imports",
+  "reads": 1922,
+  "writes": 0,
+  "rows": 384
+ },
+ {
+  "name": "期間集計 1か月 6文の合計",
+  "reads": 14605,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "月報 LAST_DAY_STATUS",
+  "reads": 268,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "検証 watermark",
+  "reads": 4,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "検証 PENDING(cursor 0, limit 1)",
+  "reads": 3,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "検証 readAll analyses",
+  "reads": 2524,
+  "writes": 0,
+  "rows": 2524
+ },
+ {
+  "name": "検証 readAll horses",
+  "reads": 33348,
+  "writes": 0,
+  "rows": 33348
+ },
+ {
+  "name": "検証 readAll allocationMeta",
+  "reads": 885,
+  "writes": 0,
+  "rows": 885
+ },
+ {
+  "name": "検証 readAll bets",
+  "reads": 1756,
+  "writes": 0,
+  "rows": 1756
+ },
+ {
+  "name": "検証 readAll results",
+  "reads": 21308,
+  "writes": 0,
+  "rows": 21308
+ },
+ {
+  "name": "検証 readAll comboPayouts",
+  "reads": 4927,
+  "writes": 0,
+  "rows": 4927
+ },
+ {
+  "name": "検証 readAll comboImports",
+  "reads": 3416,
+  "writes": 0,
+  "rows": 3416
+ },
+ {
+  "name": "検証 readAll close meta",
+  "reads": 416,
+  "writes": 0,
+  "rows": 416
+ },
+ {
+  "name": "検証 readAll close bets",
+  "reads": 2044,
+  "writes": 0,
+  "rows": 2044
+ },
+ {
+  "name": "検証 readAll 合計",
+  "reads": 70624,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "検証(1日)analyses",
+  "reads": 25,
+  "writes": 0,
+  "rows": 24
+ },
+ {
+  "name": "検証(1日)allocationMeta",
+  "reads": 48,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "検証(1日)bets",
+  "reads": 24,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "検証(1日)results",
+  "reads": 384,
+  "writes": 0,
+  "rows": 336
+ },
+ {
+  "name": "検証(1日)comboPayouts",
+  "reads": 120,
+  "writes": 0,
+  "rows": 72
+ },
+ {
+  "name": "horse_runs 状態1 GROUP BY source",
+  "reads": 100116,
+  "writes": 0,
+  "rows": 2
+ },
+ {
+  "name": "horse_runs 状態2 GROUP BY version,kind",
+  "reads": 100116,
+  "writes": 0,
+  "rows": 2
+ },
+ {
+  "name": "horse_runs 状態3 CELLS",
+  "reads": 100116,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "horse_runs 馬の履歴(8頭)",
+  "reads": 56,
+  "writes": 0,
+  "rows": 40
+ },
+ {
+  "name": "horse_runs IN_RESULTS(14)",
+  "reads": 612,
+  "writes": 0,
+  "rows": 36
+ },
+ {
+  "name": "race_archive 目録ページ(limit 100)",
+  "reads": 100,
+  "writes": 0,
+  "rows": 100
+ },
+ {
+  "name": "書き出し CANDIDATES(prior)",
+  "reads": 4965,
+  "writes": 0,
+  "rows": 2441
+ },
+ {
+  "name": "書き出し FIT_CANDIDATES(1か月)",
+  "reads": 577,
+  "writes": 0,
+  "rows": 192
+ },
+ {
+  "name": "書き出し LOOKUPS(jockey)",
+  "reads": 120,
+  "writes": 0,
+  "rows": 120
+ },
+ {
+  "name": "D1 ヘルスの probe",
+  "reads": 5,
+  "writes": 0,
+  "rows": 1
+ },
+ {
+  "name": "案 期間集計 28日 ID を先に取って json_each(6文の合計)",
+  "reads": 8738,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "案 整合検査を直近14日に絞る(SELECT のみ)",
+  "reads": 2305,
+  "writes": 0,
+  "rows": 96
+ },
+ {
+  "name": "現行 目録 1 ページ(100)",
+  "reads": 100,
+  "writes": 0,
+  "rows": 100
+ },
+ {
+  "name": "案 目録: 未変換だけ引く(部分索引。全部変換済みのとき)",
+  "reads": 1,
+  "writes": 0,
+  "rows": 0
+ },
+ {
+  "name": "案 目録: 未変換だけ引く(部分索引。30 件が未変換)",
+  "reads": 30,
+  "writes": 0,
+  "rows": 30
+ },
+ {
+  "name": "kaisai_days 窓",
+  "reads": 1,
+  "writes": 0,
+  "rows": 0
+ }
+]
