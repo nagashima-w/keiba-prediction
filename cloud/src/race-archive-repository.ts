@@ -38,7 +38,7 @@
  *
  * ## 目録の印 `runs_version` と列挙(Issue #588〈#549-B3-1〉。migration 0033)
  * `runs_version` は horse_runs への変換の済み印(NULL = 未変換。印を書くのは `race-archive-runs.ts` の変換だけ)。**目録の行の中身が変わる保存(UPSERT が更新する場合)は NULL に戻す**
- * (中身が変わったので変換をやり直す。変わらない再保存は印を据え置く)。{@link D1RaceArchiveStore.listCatalogPage} は主キー(race_id)順のカーソルで読む(副索引なし。読む行は limit 件ぶん)。
+ * (中身が変わったので変換をやり直す。変わらない再保存は印を据え置く)。{@link D1RaceArchiveStore.listCatalogPage} は主キー(race_id)順のカーソルで読む(`pending` は未変換だけを部分索引から読む。Issue #613)。
  * {@link D1RaceArchiveStore.readRaceArchives} は複数レースの一括の読み出し(柵の確認 1 回・get N 回・計数 1 回。Worker の Free の 1 呼び出し 50 の内側に収めるため {@link READ_BATCH_MAX} 件まで)。
  *
  * ## 限界
@@ -160,8 +160,16 @@ WHERE race_archive.kind IS NOT excluded.kind
 
 const CATALOG_COLUMNS = "race_id AS raceId, kind, race_date AS raceDate, parser_version AS parserVersion, r2_key AS r2Key, raw_bytes AS rawBytes, fetched_at AS fetchedAt, runs_version AS runsVersion";
 const SELECT_CATALOG_SQL = `SELECT ${CATALOG_COLUMNS} FROM race_archive WHERE race_id = ?`;
-/** 主キー順のカーソル読み。読む行は LIMIT 件ぶん(副索引なし)。 */
-const SELECT_CATALOG_PAGE_SQL = `SELECT ${CATALOG_COLUMNS} FROM race_archive WHERE race_id > ? ORDER BY race_id LIMIT ?`;
+/** 主キー順のカーソル読み(版が古い行も含めて全部)。読む行は LIMIT 件ぶん。 */
+export const SELECT_CATALOG_PAGE_SQL = `SELECT ${CATALOG_COLUMNS} FROM race_archive WHERE race_id > ? ORDER BY race_id LIMIT ?`;
+/**
+ * 未変換(`runs_version IS NULL`)の行だけの、主キー順のカーソル読み(Issue #613)。migration 0036 の部分索引 `idx_race_archive_runs_pending` から引く。
+ * ★この WHERE の `runs_version IS NULL` は、索引の WHERE と同じ形でなければならない(違うと SQLite は部分索引を使わず、全行を読む)。
+ */
+export const SELECT_CATALOG_PENDING_PAGE_SQL = `SELECT ${CATALOG_COLUMNS} FROM race_archive WHERE runs_version IS NULL AND race_id > ? ORDER BY race_id LIMIT ?`;
+
+/** 目録の列挙の範囲。`pending` は未変換(印が NULL)だけ、`all` は版の古い行も含めた全部。 */
+export type CatalogScope = "pending" | "all";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -272,16 +280,19 @@ export class D1RaceArchiveStore {
 
   /**
    * 目録を主キー(race_id)順に、`afterRaceId` より後ろから `limit` 件読む(D1 だけ。R2 には触れない)。`afterRaceId` が空文字なら先頭から。
-   * 副索引は無く、読む行は limit 件ぶん。続きは、戻った最後の `raceId` を渡す。末尾を過ぎたら空配列。
+   * 続きは、戻った最後の `raceId` を渡す。末尾を過ぎたら空配列。
+   * `scope`(既定 `all`): `all` は全行を主キー順に読む(読む行は limit 件ぶん)。`pending` は未変換(`runs_version` が NULL)の行だけを部分索引から読む
+   * (変換済みの行の数に依らず、読む行は未変換の行の数と limit に比例する。Issue #613)。
    */
-  async listCatalogPage(afterRaceId: string, limit: number): Promise<RaceArchiveCatalogEntry[]> {
+  async listCatalogPage(afterRaceId: string, limit: number, scope: CatalogScope = "all"): Promise<RaceArchiveCatalogEntry[]> {
     if (afterRaceId !== "") {
       assertRaceId(afterRaceId);
     }
     if (!Number.isInteger(limit) || limit < 1 || limit > CATALOG_PAGE_MAX) {
       throw new RangeError(`limit は 1〜${CATALOG_PAGE_MAX} の整数でなければなりません: ${String(limit)}`);
     }
-    const { results } = await this.db.prepare(SELECT_CATALOG_PAGE_SQL).bind(afterRaceId, limit).all<RaceArchiveCatalogEntry>();
+    const sql = scope === "pending" ? SELECT_CATALOG_PENDING_PAGE_SQL : SELECT_CATALOG_PAGE_SQL;
+    const { results } = await this.db.prepare(sql).bind(afterRaceId, limit).all<RaceArchiveCatalogEntry>();
     return results;
   }
 
