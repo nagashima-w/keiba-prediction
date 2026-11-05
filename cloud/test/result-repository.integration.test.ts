@@ -148,8 +148,8 @@ describe("AC-A3: 1回の batch・文の数は定数・バインドの上限(1文
   it("18頭・全6券種: batch は1回で5文(馬・面・組合せの DELETE・INSERT・マーカー)。どの文のバインドも2個以内", async () => {
     const rec = recordingDb(local.db);
     await store(rec.db).saveResult(eighteen.raceId, eighteen.entries, eighteen.courseType, eighteen.comboPayouts);
-    expect(rec.batches).toEqual([6]); // 5 文 + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)
-    expect(rec.statements).toHaveLength(6);
+    expect(rec.batches).toEqual([7]); // 5 文 + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)+ 検証の変更の印の 1 文(Issue #624)
+    expect(rec.statements).toHaveLength(7);
     expect(Math.max(...rec.statements.map((s) => s.binds))).toBeLessThanOrEqual(2);
     expect((await dump()).race_results).toHaveLength(18);
   });
@@ -165,13 +165,13 @@ describe("AC-A3: 1回の batch・文の数は定数・バインドの上限(1文
         trifecta: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 100 }] },
       },
     );
-    expect(rec.batches).toEqual([6]); // 5 文 + 補完の状態の作り直しの 1 文(Issue #597)。行数に依らず一定
+    expect(rec.batches).toEqual([7]); // 5 文 + 補完の状態の作り直しの 1 文(Issue #597)+ 検証の変更の印の 1 文(Issue #624)。行数に依らず一定
   });
 
   it("面なし・組合せなし(最小): 馬の1文だけの batch。何も渡さない(馬も面も組合せも無い)ときは batch を呼ばない", async () => {
     const rec = recordingDb(local.db);
     await store(rec.db).saveResult("202603020211", [{ umaban: 1, finishPosition: 1 }]);
-    expect(rec.batches).toEqual([2]); // 馬の 1 文 + 補完の状態の作り直しの 1 文(Issue #597)
+    expect(rec.batches).toEqual([3]); // 馬の 1 文 + 補完の状態の作り直しの 1 文(Issue #597)+ 検証の変更の印の 1 文(Issue #624)
     rec.reset();
     await store(rec.db).saveResult("202603020211", [], null, {});
     expect(rec.batches).toEqual([]);
@@ -181,7 +181,7 @@ describe("AC-A3: 1回の batch・文の数は定数・バインドの上限(1文
   it("面あり・組合せなし: 2文(馬・面)", async () => {
     const rec = recordingDb(local.db);
     await store(rec.db).saveResult("202603020211", [{ umaban: 1, finishPosition: 1 }], "ダ");
-    expect(rec.batches).toEqual([3]); // 馬・面 + 補完の状態の作り直しの 1 文(Issue #597)
+    expect(rec.batches).toEqual([4]); // 馬・面 + 補完の状態の作り直しの 1 文(Issue #597)+ 検証の変更の印の 1 文(Issue #624)
   });
 
   it("払戻が全券種で0件(マーカーだけ): DELETE とマーカーの2文で、払戻の INSERT 文は発行しない", async () => {
@@ -190,7 +190,7 @@ describe("AC-A3: 1回の batch・文の数は定数・バインドの上限(1文
       wide: { state: "parsed", payouts: [] },
       trio: { state: "parsed", payouts: [] },
     });
-    expect(rec.batches).toEqual([4]); // 馬 + DELETE + マーカー + 補完の状態の作り直しの 1 文(Issue #597)
+    expect(rec.batches).toEqual([5]); // 馬 + DELETE + マーカー + 補完の状態の作り直しの 1 文(Issue #597)+ 検証の変更の印の 1 文(Issue #624)
     expect(rec.statements.some((s) => /INSERT INTO race_combo_payouts/.test(s.sql))).toBe(false);
   });
 
