@@ -48,6 +48,7 @@ import { computeCloseComparison, type CloseComparison } from "./verify-close";
 import { computeVerifyBreakdowns, type BreakdownSection } from "./verify-breakdown";
 import { buildConditionFactsIndex } from "./verify-race-conditions";
 import type { ConditionResolution, PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "./verify-store";
+import { isStaleAlarm } from "./stale-alarm";
 
 /** 集計の有効期間(透かしが同じ間)。既存の行の更新〈`race_results` の UPSERT〉は透かしに出ないため、この時間で拾う。 */
 export const VERIFY_TTL_MS = 60 * 60_000;
@@ -501,6 +502,12 @@ export class VerifyCore {
     return this.deps.kv.get<Backfill>("backfill") ?? { attempts: 0, lastFailureAt: null, resumeAt: null };
   }
 
+  /** アラームが無い、またはハンドラの例外で残った(15 分以上前の)ものか(#604。`stale-alarm.ts`)。 */
+  private async alarmMissingOrStale(now: number): Promise<boolean> {
+    const alarm = await this.deps.getAlarm();
+    return alarm === null || isStaleAlarm(alarm, now);
+  }
+
   /**
    * 補完待ちがあるときに、アラームを保証する(自己回復)。止まっている理由を返す。
    *  - R2 の柵で止まっている(`resumeAt` が未来): その時刻にアラームを張る。過ぎていたら止まっていないことにして、今張る。
@@ -508,12 +515,12 @@ export class VerifyCore {
    *  - それ以外: アラームが無ければ今張る。
    */
   private async armBackfill(): Promise<{ readonly blocked: "r2-fence" | "error" | null; readonly resumeAt: number | null }> {
-    const { kv, now, setAlarm, getAlarm } = this.deps;
+    const { kv, now, setAlarm } = this.deps;
     const t = now();
     const state = this.readBackfill();
     if (state.resumeAt !== null) {
       if (t < state.resumeAt) {
-        if ((await getAlarm()) === null) await setAlarm(state.resumeAt);
+        if (await this.alarmMissingOrStale(t)) await setAlarm(state.resumeAt);
         return { blocked: "r2-fence", resumeAt: state.resumeAt };
       }
       kv.put("backfill", { ...state, resumeAt: null } satisfies Backfill);
@@ -528,7 +535,7 @@ export class VerifyCore {
       await setAlarm(t);
       return { blocked: null, resumeAt: null };
     }
-    if ((await getAlarm()) === null) {
+    if (await this.alarmMissingOrStale(t)) {
       await setAlarm(t);
     }
     return { blocked: null, resumeAt: null };

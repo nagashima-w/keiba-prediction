@@ -593,6 +593,32 @@ describe("getReport: 発走時刻の補完が終わっていないとき", () =>
     expect(res).toEqual({ status: "preparing", remaining: 1, blocked: "r2-fence", resumeAt: "2026-11-01T00:05:00.000Z" });
   });
 
+  it("残ったアラーム(16 分前)は張り直し、14 分前なら触らない(#604)", async () => {
+    for (const [ago, rearm] of [[16, true], [14, false]] as const) {
+      const { core, store, alarms, clock, getAlarm } = setup();
+      store.state.pending = [pendingRow(1)];
+      await core.getReport("all");
+      expect(getAlarm()).toBe(T0); // 前提: 最初のアラームが張られている
+      clock.now = T0 + ago * 60_000;
+      await core.getReport("all");
+      expect(alarms, `${ago} 分前`).toEqual(rearm ? [T0, clock.now] : [T0]);
+    }
+  });
+
+  it("R2 の柵で止まり resumeAt が未来のとき、残ったアラーム(16 分前)は resumeAt に張り直し、14 分前なら触らない(#604)", async () => {
+    for (const [ago, rearm] of [[16, true], [14, false]] as const) {
+      const { core, store, alarms, kv, clock } = setup();
+      store.state.pending = [pendingRow(1)];
+      await core.getReport("all");
+      const resumeAt = T0 + 60 * 60_000;
+      kv.put("backfill", { attempts: 0, lastFailureAt: null, resumeAt });
+      clock.now = T0 + ago * 60_000;
+      const res = await core.getReport("all");
+      expect(res, `${ago} 分前`).toMatchObject({ blocked: "r2-fence" });
+      expect(alarms, `${ago} 分前`).toEqual(rearm ? [T0, resumeAt] : [T0]);
+    }
+  });
+
   it("アラームが無いのに補完待ちがあれば張り直す(自己回復)。張られていれば張り直さない", async () => {
     const { core, store, alarms, getAlarm } = setup();
     store.state.pending = [pendingRow(1)];

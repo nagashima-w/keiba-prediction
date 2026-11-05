@@ -425,18 +425,28 @@ export class RaceArchiveFetchCore {
       return;
     }
     const now = this.deps.now();
-    if (!shouldRearm(await this.deps.getAlarm(), now, (iso) => this.deps.log(`race-archive: stale alarm at=${iso} re-armed`, "info"))) {
+    let staleIso: string | null = null;
+    if (!shouldRearm(await this.deps.getAlarm(), now, (iso) => { staleIso = iso; })) {
       return;
     }
+    // 残ったアラームのログ。止まる状態では通知の再送が無ければ張らないので、「張り直した」と書かない(#604)。
+    const logStale = (rearmed: boolean): void => {
+      if (staleIso !== null) {
+        this.deps.log(`race-archive: stale alarm at=${staleIso} ${rearmed ? "re-armed" : "(stopped, not re-armed)"}`, "info");
+      }
+    };
     switch (this.mode()) {
       case "manual-stopped":
       case "capacity-stopped":
+        logStale(this.noticeRetryAt() !== null);
         await this.arm(null);
         return;
       case "night-stopped":
+        logStale(true);
         await this.arm(Math.max(this.metaNum("resume_at"), this.runAt(now)));
         return;
       default:
+        logStale(true);
         await this.arm(this.runAt(now));
     }
   }
