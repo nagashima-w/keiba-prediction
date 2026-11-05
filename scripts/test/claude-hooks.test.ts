@@ -336,6 +336,112 @@ describe("B: implementer-verify-hook(SubagentStop)", () => {
     expect(logOf(logDir)).toContain("(transcript)");
   });
 
+  // 記録(JSONL)の形: assistant の message.content に tool_use が入る。cwd は呼び出しのたびにメインへ戻るため作業場所を指さない。
+  const toolUse = (cwd: string, name: string, input: Record<string, unknown>) => ({
+    type: "assistant",
+    cwd,
+    message: { role: "assistant", content: [{ type: "text", text: "作業" }, { type: "tool_use", id: "t", name, input }] },
+  });
+  const writeTranscript = (entries: unknown[]) => {
+    const tr = path.join(path.resolve(tmp()), "agent.jsonl");
+    writeFileSync(tr, entries.map((o) => JSON.stringify(o)).join("\n") + "\n");
+    return tr;
+  };
+  /** 2つ目の worktree を作る。 */
+  const addWorktree = (main: string, name: string) => {
+    const p = path.join(path.resolve(tmp()), name);
+    sh(main, "git", ["worktree", "add", "-q", "-b", name, p]);
+    return realTmpPath(p);
+  };
+  const FAIL = { HOOK_VERIFY_FAIL_STAGE: "root-typecheck" };
+
+  it("cwd が常にメインの記録でも、Edit の file_path が worktree の中なら、その worktree を採る", () => {
+    const { main, wt, logDir } = setup();
+    write(path.join(wt, "scripts/x.ts"), "export {};\n");
+    const tr = writeTranscript([
+      toolUse(main, "Bash", { command: `cd ${wt} && ls` }),
+      toolUse(main, "Edit", { file_path: path.join(wt, "scripts/x.ts"), old_string: "a", new_string: "b" }),
+      { type: "user", cwd: main },
+    ]);
+    const r = run(VERIFY_HOOK, stop(main, { agent_transcript_path: tr }), env(logDir, FAIL));
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain(wt);
+    expect(logOf(logDir)).toContain("(transcript の操作)");
+  });
+
+  it("メインの作業ツリーのファイルだけを触った記録では流さない", () => {
+    const { main, wt, logDir } = setup();
+    write(path.join(wt, "scripts/x.ts"), "export {};\n"); // worktree には変更があるが、記録は main だけ
+    write(path.join(main, "scripts/y.ts"), "export {};\n");
+    const tr = writeTranscript([
+      toolUse(main, "Write", { file_path: path.join(main, "scripts/y.ts"), content: "" }),
+      toolUse(main, "Bash", { command: `cd ${main} && git status` }),
+    ]);
+    const r = run(VERIFY_HOOK, stop(main, { agent_transcript_path: tr }), env(logDir, FAIL));
+    expect(r.code).toBe(0);
+    expect(stages(logDir)).toEqual([]);
+    // 空振りでないこと: 記録に wt への Edit を足すと流れて失敗する
+    const tr2 = writeTranscript([toolUse(main, "Edit", { file_path: path.join(wt, "scripts/x.ts") })]);
+    expect(run(VERIFY_HOOK, stop(main, { agent_transcript_path: tr2 }), env(logDir, FAIL)).code).toBe(2);
+  });
+
+  it("Edit・Write が無く Bash だけの記録でも、コマンドに出る worktree を採る(python での書き換え等)", () => {
+    const { main, wt, logDir } = setup();
+    write(path.join(wt, "scripts/x.ts"), "export {};\n");
+    const tr = writeTranscript([toolUse(main, "Bash", { command: `cd ${wt}/cloud && python3 - <<'E'\nprint(1)\nE` })]);
+    const r = run(VERIFY_HOOK, stop(main, { agent_transcript_path: tr }), env(logDir, FAIL));
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain(wt);
+  });
+
+  it("複数の worktree を触ったら、最後に触ったものを採る(Edit 同士・Bash 同士・コマンド内の複数・Edit 優先)", () => {
+    const { main, wt, logDir } = setup();
+    const wt2 = addWorktree(main, "wt2");
+    expect(wt2).not.toBe(wt);
+    write(path.join(wt, "scripts/x.ts"), "export {};\n");
+    write(path.join(wt2, "scripts/x.ts"), "export {};\n");
+    const pick = (entries: unknown[]) => {
+      const r = run(VERIFY_HOOK, stop(main, { agent_transcript_path: writeTranscript(entries) }), env(logDir, FAIL));
+      expect(r.code).toBe(2);
+      return r.stderr.includes(`worktree: ${wt2}\n`) ? "wt2" : r.stderr.includes(`worktree: ${wt}\n`) ? "wt" : "?";
+    };
+    expect(pick([toolUse(main, "Edit", { file_path: `${wt}/a` }), toolUse(main, "MultiEdit", { file_path: `${wt2}/b` })])).toBe("wt2");
+    expect(pick([toolUse(main, "Edit", { file_path: `${wt2}/a` }), toolUse(main, "Write", { file_path: `${wt}/b` })])).toBe("wt");
+    expect(pick([toolUse(main, "Bash", { command: `cd ${wt} && ls` }), toolUse(main, "Bash", { command: `cd ${wt2} && ls` })])).toBe("wt2");
+    expect(pick([toolUse(main, "Bash", { command: `cd ${wt2} && ls; cd ${wt} && ls` })])).toBe("wt");
+    // Edit があれば、後の Bash より Edit を優先する(Bash は Edit が無いときの代替)
+    expect(pick([toolUse(main, "Edit", { file_path: `${wt}/a` }), toolUse(main, "Bash", { command: `cd ${wt2} && ls` })])).toBe("wt");
+  });
+
+  it("パスの接頭辞が同じでも取り違えない(wt の直後に文字が続くパスは wt ではない)", () => {
+    const { main, wt, logDir } = setup();
+    write(path.join(wt, "scripts/x.ts"), "export {};\n");
+    const tr = writeTranscript([toolUse(main, "Bash", { command: `cd ${wt}-other && ls` })]);
+    const r = run(VERIFY_HOOK, stop(main, { agent_transcript_path: tr }), env(logDir, FAIL));
+    expect(r.code).toBe(0);
+    expect(stages(logDir)).toEqual([]);
+    // 空振りでないこと: 区切りのあるパスなら採る
+    const tr2 = writeTranscript([toolUse(main, "Bash", { command: `cd ${wt}/ && ls` })]);
+    expect(run(VERIFY_HOOK, stop(main, { agent_transcript_path: tr2 }), env(logDir, FAIL)).code).toBe(2);
+  });
+
+  it("大きな記録(約 30 MB)でも速い", () => {
+    const { main, wt, logDir } = setup();
+    write(path.join(wt, "scripts/x.ts"), "export {};\n");
+    const filler = { type: "user", cwd: main, message: { role: "user", content: [{ type: "tool_result", content: "x".repeat(20000) }] } };
+    const entries: unknown[] = [];
+    for (let i = 0; i < 1500; i++) entries.push(filler);
+    entries.push(toolUse(main, "Edit", { file_path: `${wt}/scripts/x.ts` }));
+    const tr = writeTranscript(entries);
+    const t0 = Date.now();
+    const r = run(VERIFY_HOOK, stop(main, { agent_transcript_path: tr }), env(logDir));
+    const ms = Date.now() - t0;
+    expect(readFileSync(tr).length).toBeGreaterThan(30_000_000);
+    expect(r.code).toBe(0);
+    expect(stages(logDir)).toContain("root-related");
+    expect(ms).toBeLessThan(3000);
+  });
+
   it("決まった worktree がメインの作業ツリーなら、変更があっても流さない", () => {
     const { main, logDir } = setup();
     write(path.join(main, "scripts/x.ts"), "export {};\n");
