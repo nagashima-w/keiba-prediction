@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildSaveStatements } from "../src/analysis-repository";
+import { RECOMPUTE_RACES_SQL } from "../src/race-backfill-state";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { contractCases } from "./fixtures-contract";
 import { openLocalBindings, type LocalBindings } from "./local-bindings";
@@ -79,5 +80,19 @@ describe("1回の保存の D1 の書き込み行数(meta.rows_written)", () => {
     const per = results.map((r) => r.meta.rows_written);
     expect(per).toEqual([9, 32, 1, 20]);
     expect(per.reduce((a, b) => a + b, 0)).toBe(62);
+  });
+
+  // saveAnalysis は、buildSaveStatements の最後に補完の状態の作り直し(RECOMPUTE_RACES_SQL。Issue #597)を 1 文足す。その行数を測る(#604)。
+  it("saveAnalysis の batch(本体 64 行 + 状態の作り直しの 1 文): 新しいレースの最初の分析は +2 行(状態の行 + 段階 1 の部分索引)で合計 66。同じレースの 2 件目の分析は +0 行", async () => {
+    const run = async (): Promise<number[]> => {
+      const results = await local.db.batch([...buildSaveStatements(local.db, record(16, 10), 202610), local.db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify(["202603020211"]))]);
+      return results.map((r) => r.meta.rows_written);
+    };
+    const first = await run();
+    expect(first).toEqual([1, 9, 1, 32, 1, 20, 2]);
+    expect(first.reduce((a, b) => a + b, 0)).toBe(66);
+    const second = await run(); // 前提: 2 回目も本体の 64 行は書く(分析は毎回 INSERT)。状態は変わらないので作り直しは 0 行
+    expect(second.slice(0, 6).reduce((a, b) => a + b, 0)).toBe(64);
+    expect(second[6]).toBe(0);
   });
 });

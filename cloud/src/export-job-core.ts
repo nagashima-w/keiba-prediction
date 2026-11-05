@@ -42,6 +42,7 @@
  */
 
 import { jstIsoDate, nextJstMidnight } from "../../packages/core/src/common/jst";
+import { isStaleAlarm } from "./stale-alarm";
 import { isReadAllowed, isWriteAllowed, type R2Usage } from "./r2-fence";
 import type { CandidateRow } from "./prior-export-format";
 
@@ -273,8 +274,11 @@ export class ExportJobCore<
   }
 
   private async ensureAlarm(): Promise<void> {
-    if ((await this.deps.getAlarm()) === null) {
-      await this.deps.setAlarm(this.deps.now());
+    const now = this.deps.now();
+    const alarm = await this.deps.getAlarm();
+    // 無い、またはハンドラの例外で残った(15 分以上前の)アラームなら張り直す(#604。`stale-alarm.ts`)。
+    if (alarm === null || isStaleAlarm(alarm, now)) {
+      await this.deps.setAlarm(now);
     }
   }
 

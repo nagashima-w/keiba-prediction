@@ -388,6 +388,20 @@ describe("作成中の扱い(prior-dataset の書き出しと同じ取り決め)
     expect(w.alarms).toHaveLength(1);
   });
 
+  it("作成中に残ったアラーム(16 分前)は張り直す。14 分前なら触らない(#604)", async () => {
+    for (const [ago, rearm] of [[16, true], [14, false]] as const) {
+      const w = world(5);
+      const core = w.core({ batchSize: 2 });
+      await core.request("download");
+      await w.drain(core, 1);
+      w.alarms.length = 0;
+      const stale = w.clock.now - ago * 60_000;
+      w.alarms.push(stale);
+      expect((await core.request("download")).status, `${ago} 分前`).toBe("building");
+      expect(w.alarms, `${ago} 分前`).toEqual(rearm ? [stale, w.clock.now] : [stale]);
+    }
+  });
+
   it("作成中なのにアラームが無ければ張り直す(自己回復)。DO が作り直された後も続きから進む", async () => {
     const w = world(5);
     const first = w.core({ batchSize: 2 });
