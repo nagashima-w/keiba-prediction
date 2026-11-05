@@ -170,4 +170,22 @@ describe("閉じた状態: checkpointSqliteFiles", () => {
     reopened.close();
     expect(readFileSync(path.join(copy, "x.sqlite")).length).toBeGreaterThan(0);
   });
+
+  it("チェックポイント後も中身のある -wal が残るなら、消さずに throw する(データを黙って捨てない)", () => {
+    const dir = path.join(root, "orphan");
+    mkdirSync(dir);
+    // 対応する主ファイルが無い、中身のある -wal(チェックポイントでは取り込めない)
+    writeFileSync(path.join(dir, "x.sqlite-wal"), "データ");
+    expect(() => checkpointSqliteFiles(dir)).toThrow(/-wal に内容が残っている/);
+    expect(existsSync(path.join(dir, "x.sqlite-wal"))).toBe(true);
+  });
+
+  it("空の -wal・-shm の残骸は消す(前のテストと対比: 内容の有無だけが違う)", () => {
+    const dir = path.join(root, "empty-leftover");
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, "x.sqlite-wal"), "");
+    writeFileSync(path.join(dir, "x.sqlite-shm"), "s");
+    checkpointSqliteFiles(dir);
+    expect(readdirSync(dir)).toEqual([]);
+  });
 });

@@ -22,7 +22,7 @@ let b: LocalBindings;
 beforeAll(async () => {
   a = await openLocalBindings();
   b = await openLocalBindings();
-});
+}, 180_000); // まっさらな環境で最初にひな形を作る側になると、migration の適用に約 31 秒かかる(他のインテグレーションのテストと同じ余裕)
 afterAll(async () => {
   await a?.dispose();
   await b?.dispose();
