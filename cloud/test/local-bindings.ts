@@ -57,7 +57,7 @@ export async function openLocalBindings(): Promise<LocalBindings> {
     db,
     r2: proxy.env.ANALYSIS_DETAIL,
     async reset() {
-      for (const table of ["race_backfill", "analysis_close_bets", "analysis_close", "analysis_bets", "analysis_horses", "analysis_allocation_meta", "analyses", "race_combo_payouts", "race_combo_payout_imports", "race_result_meta", "race_results", "daily_reports", "monthly_reports", "jockey_results", "trainer_results", "horse_runs", "horse_run_saves", "race_conditions", "baba_fetch_attempts", "baba_fetches", "baba_conditions", "kaisai_days", "jockey_names", "trainer_names", "race_archive", "r2_ops", "cloud_settings"]) {
+      for (const table of ["verify_race_mark", "race_backfill", "analysis_close_bets", "analysis_close", "analysis_bets", "analysis_horses", "analysis_allocation_meta", "analyses", "race_combo_payouts", "race_combo_payout_imports", "race_result_meta", "race_results", "daily_reports", "monthly_reports", "jockey_results", "trainer_results", "horse_runs", "horse_run_saves", "race_conditions", "baba_fetch_attempts", "baba_fetches", "baba_conditions", "kaisai_days", "jockey_names", "trainer_names", "race_archive", "r2_ops", "cloud_settings"]) {
         await db.prepare(`DELETE FROM ${table}`).run();
       }
     },
@@ -112,19 +112,38 @@ export function spyBucket(real: R2Bucket, options: SpyBucketOptions = {}): { buc
   return { bucket, calls };
 }
 
-/** D1 の窓口の記録つき転送: 発行された SQL と、batch の文の数を記録する。 */
-export function spyDb(real: D1Database): { db: AnalysisDb; prepared: string[]; batches: number[] } {
+/**
+ * D1 の窓口の記録つき転送: 発行された SQL と、batch の文の数を記録する。
+ * Issue #624: `batchSqls` は batch ごとの文の SQL の並び(bind した文を、元の SQL に対応づけて記録する。変更の印が最後に入っているかの確認に使う)。
+ */
+export function spyDb(real: D1Database): { db: AnalysisDb; prepared: string[]; batches: number[]; batchSqls: string[][] } {
   const prepared: string[] = [];
   const batches: number[] = [];
+  const batchSqls: string[][] = [];
+  const sqlOf = new WeakMap<object, string>();
   const db = {
     prepare(sql: string) {
       prepared.push(sql);
-      return real.prepare(sql);
+      const stmt = real.prepare(sql);
+      return new Proxy(stmt, {
+        get(target, prop) {
+          if (prop === "bind") {
+            return (...args: unknown[]) => {
+              const bound = target.bind(...args);
+              sqlOf.set(bound, sql);
+              return bound;
+            };
+          }
+          const v = Reflect.get(target, prop) as unknown;
+          return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+        },
+      });
     },
     batch(statements: D1PreparedStatement[]) {
       batches.push(statements.length);
+      batchSqls.push(statements.map((s) => sqlOf.get(s) ?? ""));
       return real.batch(statements);
     },
   } as unknown as AnalysisDb;
-  return { db, prepared, batches };
+  return { db, prepared, batches, batchSqls };
 }

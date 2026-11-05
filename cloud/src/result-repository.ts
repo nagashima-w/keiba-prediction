@@ -37,6 +37,7 @@
  *   17 桁の浮動小数の往復はローカルの D1 で一致を確かめた(本番の SQLite のビルドでの確認は最初の実保存)。
  */
 
+import { verifyRaceMarkStatement } from "./verify-race-mark";
 import { RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, RECONCILE_RECENT_RACE_BACKFILL_SQL, settleRaceBackfillSql } from "./race-backfill-state";
 import {
   comboPayoutParams,
@@ -614,7 +615,8 @@ export class D1ResultStore implements ResultRepository {
       return;
     }
     // 補完の状態(race_backfill。Issue #597)の作り直しを batch の最後に 1 文。結果の行を書くとき(馬の行がある)だけ。面・組合せ払戻だけの保存は状態の条件に触れない。
-    await this.db.batch(results.length > 0 ? [...statements, recomputeRaceBackfillStatement(this.db, raceId)] : statements);
+    // 検証の差分のための、レースの変更の印(Issue #624)は、書く文があるときは(結果が空で組合せ払戻だけのときも)最後に 1 文。
+    await this.db.batch([...statements, ...(results.length > 0 ? [recomputeRaceBackfillStatement(this.db, raceId)] : []), verifyRaceMarkStatement(this.db, raceId)]);
   }
 
   /**
@@ -627,7 +629,7 @@ export class D1ResultStore implements ResultRepository {
     if (statement === null) {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
+    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId), verifyRaceMarkStatement(this.db, raceId)]); // 状態の作り直し(Issue #597)と、検証の差分のための変更の印(Issue #624)を最後に
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -641,7 +643,7 @@ export class D1ResultStore implements ResultRepository {
     if (statement === null) {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
+    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId), verifyRaceMarkStatement(this.db, raceId)]); // 状態の作り直し(Issue #597)と、検証の差分のための変更の印(Issue #624)を最後に
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -654,7 +656,7 @@ export class D1ResultStore implements ResultRepository {
     if (statement === null) {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
+    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId), verifyRaceMarkStatement(this.db, raceId)]); // 状態の作り直し(Issue #597)と、検証の差分のための変更の印(Issue #624)を最後に
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -667,7 +669,7 @@ export class D1ResultStore implements ResultRepository {
     if (typeof raceClass !== "string" || raceClass === "") {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([this.db.prepare(SAVE_RACE_CLASS_SQL).bind(raceClass, raceId), recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
+    const [result] = await this.db.batch([this.db.prepare(SAVE_RACE_CLASS_SQL).bind(raceClass, raceId), recomputeRaceBackfillStatement(this.db, raceId), verifyRaceMarkStatement(this.db, raceId)]); // 状態の作り直し(Issue #597)と、検証の差分のための変更の印(Issue #624)を最後に
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 

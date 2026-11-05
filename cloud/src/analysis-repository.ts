@@ -46,6 +46,7 @@
  */
 
 import { RECOMPUTE_RACES_SQL } from "./race-backfill-state";
+import { verifyRaceMarkByAnalysisIdsStatement, verifyRaceMarkStatement } from "./verify-race-mark";
 import { serializeMissed } from "./missed-bets";
 import {
   allocationBetParams,
@@ -404,6 +405,7 @@ export class D1AnalysisStore implements AnalysisRepository {
     const results = await this.db.batch([
       ...buildSaveStatements(this.db, record, writeYm, extra.llmNote, serializeLlmCalls(extra.llmCalls), serializeMarkRepair(extra.markRepair)),
       this.db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify([record.raceId])),
+      verifyRaceMarkStatement(this.db, record.raceId), // 検証の差分のための、レースの変更の印(Issue #624)。最後に 1 文
     ]);
     const id = results[analysesInsertIndex(writeYm)]?.meta.last_row_id;
     if (typeof id !== "number" || !(id > 0)) {
@@ -555,6 +557,7 @@ export class D1AnalysisStore implements AnalysisRepository {
     if ((payload.allocation?.bets.length ?? 0) > 0) {
       statements.push(this.db.prepare(INSERT_CLOSE_BETS_SQL).bind(analysisId, payload.round, closeBetsJson(payload)));
     }
+    statements.push(verifyRaceMarkByAnalysisIdsStatement(this.db, [analysisId])); // 検証の差分のための、レースの変更の印(Issue #624)。最後に 1 文
     await this.db.batch(statements);
   }
 
