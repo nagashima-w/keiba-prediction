@@ -156,7 +156,7 @@
  *   selectIncludedAnalyses による絞り込みを使わず(結果未保存・推定EVも母集団に含めるため)、
  *   latest選択(chooseLatestPerRace)のみを共有する点が異なる。
  * - 1頭ごとの賭け判定・払戻計算(EVプラス馬に stakePerBet 円賭ける・実配当優先/複勝オッズ下限近似
- *   フォールバック)も computeHorseBetOutcome に集約し、computeVerifyReportForAnalyses と
+ *   フォールバック)も computeHorseBetOutcome に集約し、buildVerifyRacePart と
  *   buildRaceBreakdown の両方から呼ぶことで数値の完全一致を保証する。
  * - 着順不明(finishPosition=null。中止・除外)の馬は isPlaced=null・賭け金/払戻0として表示に含める
  *   (verifyの集計対象からは除外されるが、レース単位の表示では「結果不明」であることを示す必要が
@@ -214,7 +214,6 @@ import {
   type BetJudgment,
   type ProposedBetOutcome,
 } from "./proposed-bet-judgment.js";
-import { computeBrierScore, type BrierObservation } from "./probability-quality-metrics.js";
 import { classifyLookaheadSuspicion } from "./lookahead-suspicion.js";
 
 /**
@@ -509,20 +508,20 @@ export interface ProposedBetUnknownBetType {
  * 買い目をまだ作らなかった(#123・#24-E3bで対応予定だった)ため、`betCount`は構造的に常に0だった。
  * quinellaが#112で辿った経緯(買い目0件の間は画面に表示しない)と同じ理由により、
  * 画面への表示追加は#123へ申し送った(`exacta`フィールド自体はここ・
- * `computeProposedBetReport`・`overall`合算には最初から含めた。表示だけを見送った)。
+ * `accumulateProposedBet`・`overall`合算には最初から含めた。表示だけを見送った)。
  * その後Issue #125(#24-E3b)で配分が馬単の買い目を作るようになり、`betCount`は実際の買い目の数になった。
  *
  * ★三連単(trifecta)はIssue #131・#25-Fで確定払戻の取込・回収率判定に対応した。当時は配分が三連単の
  * 買い目をまだ作らなかったため`betCount`は構造的に常に0だった(exactaと同じ経緯)。
  * 画面への表示追加は#132へ申し送った(`trifecta`フィールド自体はここ・
- * `computeProposedBetReport`・`overall`合算には最初から含めた。表示だけを見送った)。
+ * `accumulateProposedBet`・`overall`合算には最初から含めた。表示だけを見送った)。
  * その後Issue #139(#25-E3b)で配分が三連単の買い目を作るようになり、`betCount`は実際の買い目の数になった。
  *
  * ★枠連(bracketQuinella)はIssue #145・#26-Fで確定払戻の取込・回収率判定に対応した。#145の時点では
  * 配分が枠連の買い目をまだ作らず(候補・設定は#146以降に分割)`betCount`は構造的に常に0だった
  * (exacta・trifectaと同じ経緯)。**Issue #150(#26-E3b)で配分が枠連の買い目を作るようになり、
  * 検証画面の内訳・判定不能の行にも表示している。** `bracketQuinella`フィールド自体は
- * ここ・`computeProposedBetReport`・`overall`合算には#145から含めている。
+ * ここ・`accumulateProposedBet`・`overall`合算には#145から含めている。
  * **買い目の`comboKey`は枠番の組(`buildAllocationBetComboKey("bracketQuinella", [4,7])`→"0407"。
  * 同枠は"0101")、払戻側のキーも同じ枠番の組で、的中判定は他の組合せ券種と同じ文字列の完全一致**
  * (馬番からの変換はここでは一切行わない)。
@@ -787,7 +786,7 @@ export function computeRaceLedger(
     // hasPayout(表示用)と規則HのracePayoutAvailable(集計用)は同じ「そのレースにplacePayout
     // 非null行が1件以上あるか」という判定式であり、raceHasPlacePayoutに一本化している
     // (Issue#59で繰り返し問題になった二重定義を避けるため。ここと computeHorseBetOutcome の
-    // 呼び出し元〈buildRaceBreakdown・computeVerifyReportForAnalyses〉が同じ関数を共有する)。
+    // 呼び出し元〈buildRaceBreakdown・buildVerifyRacePart〉が同じ関数を共有する)。
     const hasPayout = hasResult && raceHasPlacePayout(results!);
     const breakdown = buildRaceBreakdown(analysis, results ?? [], config);
     return {
@@ -829,7 +828,7 @@ export function computeVerifyReport(
   venueKind: VerifyVenueFilter = "all",
 ): VerifyReport {
   const analyses = filterAnalysesByVenueKind(store.listAnalyses(), venueKind);
-  return computeVerifyReportForAnalyses(store, analyses, config);
+  return finalizeVerifyPart(buildVerifyPart(store, analyses, config), config, "all");
 }
 
 /**
@@ -881,35 +880,79 @@ export function computeVerifyReportByPromptVersion(
   store: VerifyDataSource,
   config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
 ): readonly PromptVersionVerifyReport[] {
-  const analyses = store.listAnalyses();
+  return finalizePromptVersionParts(buildPromptVersionParts(store, store.listAnalyses(), config), config);
+}
+
+/**
+ * プロンプト版ごとの部分(Issue #625)。`part` はその版の分析だけで作った {@link VerifyPart}(最新の選択は版の中で行う)。
+ * `additionalInstructions` はその版の**全分析**(除外した分析も含む)の追加指示で、昇順・重複なしの配列(非 null は昇順、null は末尾)。
+ */
+export interface PromptVersionPart {
+  readonly promptVersion: string | null;
+  readonly part: VerifyPart;
+  readonly additionalInstructions: readonly (string | null)[];
+}
+
+/** 分析の集合から、版ごとの部分を作る(順は版の初出の順。並べ替えは確定のときに行う)。同じレースの分析は全部渡す。 */
+export function buildPromptVersionParts(
+  store: VerifyDataSource,
+  analyses: readonly StoredAnalysis[],
+  config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
+): PromptVersionPart[] {
   const groups = new Map<string | null, StoredAnalysis[]>();
   for (const analysis of analyses) {
-    const key = analysis.promptVersion;
-    const group = groups.get(key);
+    const group = groups.get(analysis.promptVersion);
     if (group === undefined) {
-      groups.set(key, [analysis]);
+      groups.set(analysis.promptVersion, [analysis]);
     } else {
       group.push(analysis);
     }
   }
-
-  const sortedVersions = [...groups.keys()]
-    .filter((v): v is string => v !== null)
-    .sort((a, b) => a.localeCompare(b));
-  const orderedKeys: Array<string | null> = groups.has(null)
-    ? [...sortedVersions, null]
-    : sortedVersions;
-
-  return orderedKeys.map((key) => ({
-    promptVersion: key,
-    report: computeVerifyReportForAnalyses(store, groups.get(key)!, config),
-    additionalInstructions: distinctAdditionalInstructions(groups.get(key)!),
+  return [...groups.entries()].map(([promptVersion, group]) => ({
+    promptVersion,
+    part: buildVerifyPart(store, group, config),
+    additionalInstructions: distinctAdditionalInstructions(group),
   }));
+}
+
+/** 版ごとの部分を合わせる。同じ版の部分は {@link mergeVerifyParts} で合わせ、追加指示は和集合にする(整列は確定のとき)。 */
+export function mergePromptVersionParts(lists: readonly (readonly PromptVersionPart[])[]): PromptVersionPart[] {
+  const byVersion = new Map<string | null, PromptVersionPart[]>();
+  for (const list of lists) {
+    for (const item of list) {
+      const group = byVersion.get(item.promptVersion);
+      if (group === undefined) {
+        byVersion.set(item.promptVersion, [item]);
+      } else {
+        group.push(item);
+      }
+    }
+  }
+  return [...byVersion.entries()].map(([promptVersion, items]) => ({
+    promptVersion,
+    part: mergeVerifyParts(items.map((i) => i.part)),
+    additionalInstructions: sortAdditionalInstructions(new Set(items.flatMap((i) => i.additionalInstructions))),
+  }));
+}
+
+/** 版ごとの部分を確定する。返す配列は版番号の昇順(String 比較)で、版不明(null)は末尾。 */
+export function finalizePromptVersionParts(parts: readonly PromptVersionPart[], config: VerifyConfig = DEFAULT_VERIFY_CONFIG): readonly PromptVersionVerifyReport[] {
+  const byVersion = new Map(parts.map((p) => [p.promptVersion, p] as const));
+  const sortedVersions = [...byVersion.keys()].filter((v): v is string => v !== null).sort((a, b) => a.localeCompare(b));
+  const orderedKeys: Array<string | null> = byVersion.has(null) ? [...sortedVersions, null] : sortedVersions;
+  return orderedKeys.map((key) => {
+    const item = byVersion.get(key)!;
+    return {
+      promptVersion: key,
+      report: finalizeVerifyPart(item.part, config, "all"),
+      additionalInstructions: sortAdditionalInstructions(new Set(item.additionalInstructions)),
+    };
+  });
 }
 
 /**
  * 分析集合から集計対象を選び、除外件数の内訳とともに返す(Task#34)。
- * computeVerifyReportForAnalyses(全体集計・版別集計)から呼ばれる母集団選定ロジック
+ * buildVerifyPart(全体集計・版別集計)から呼ばれる母集団選定ロジック
  * (結果未保存除外→先読みリーク疑い/判別不能の除外→latestモードの二重計上防止→推定EV除外)。
  * 旧公開関数 computeRaceBreakdown もかつてこのロジックを共有していたが、検証画面UI統合で
  * computeRaceBreakdown は廃止された。computeRaceLedger は結果未保存・推定EVも母集団に含める
@@ -1035,7 +1078,7 @@ interface HorseBetOutcome {
 
 /**
  * 1頭分の賭け判定・払戻計算(Task#34。Issue#70で規則H・規則Uを追加)。
- * computeVerifyReportForAnalyses の回収率集計ループと private buildRaceBreakdown(computeRaceLedgerが
+ * buildVerifyRacePart の回収率集計ループと private buildRaceBreakdown(computeRaceLedgerが
  * 内部で再利用)の両方から呼ばれる共通ロジック(「EVプラス馬に stakePerBet 円賭ける・的中時は
  * 実配当優先/複勝オッズ下限で近似フォールバック」)。呼び出し元でのロジック分岐(if文の条件・
  * 払戻計算式)の重複を無くし、両者の数値が常に一致することを保証する。
@@ -1187,7 +1230,11 @@ function buildRaceBreakdown(
 function distinctAdditionalInstructions(
   analyses: readonly StoredAnalysis[],
 ): readonly (string | null)[] {
-  const values = new Set(analyses.map((a) => a.additionalInstruction));
+  return sortAdditionalInstructions(new Set(analyses.map((a) => a.additionalInstruction)));
+}
+
+/** 追加指示の集合を、非 null は昇順・null は末尾の配列にする。 */
+function sortAdditionalInstructions(values: ReadonlySet<string | null>): readonly (string | null)[] {
   const nonNull = [...values]
     .filter((v): v is string => v !== null)
     .sort((a, b) => a.localeCompare(b));
@@ -1195,17 +1242,71 @@ function distinctAdditionalInstructions(
 }
 
 /**
- * verifyレポート算出の共通本体。computeVerifyReport(全体集計)と
- * computeVerifyReportByPromptVersion(版別集計)の両方から、集計対象の分析集合だけを変えて呼ばれる。
- * @param store 実結果(getResult)の取得に使う AnalysisStore
- * @param analyses 集計対象の分析集合(呼び出し側で絞り込み済み)
- * @param config verify設定
+ * 1 レースぶんの部分(Issue #625)。検証の集計を「部分を作る・部分を合わせる・確定する」に分けたときの、合わせる単位。
+ * 構造化複製できる値だけで持つ(Map・Set・関数・クラスの実体を持たない)ので、開催日ごとの保存(段階 3)にそのまま入れられる。
+ * 較正の帯は、0 でない帯だけを疎に持つ。
+ *
+ * 部分は**分析の選別(結果の有無・先読み・最新・推定 EV)を済ませた**値で、選別はレース単位で閉じている。
+ * そのため {@link buildVerifyPart} に渡す分析の集合は、レースが欠けてはならない(同じレースの分析は全部渡す)。
  */
-function computeVerifyReportForAnalyses(
+export interface VerifyRacePart {
+  readonly raceId: string;
+  /** race_id から判定した開催区分。判定不能は null(区分を絞ると、どちらにも入らない)。 */
+  readonly venueKind: RaceIdVenueKind | null;
+  /** 畳む順の鍵。そのレースで採用した分析の ID の最小値(採用が無いレースは、渡された分析の ID の最小値)。今の関数が採用した分析を ID の順に足すのと同じ順になる。 */
+  readonly orderKey: number;
+  readonly includedAnalysisCount: number;
+  readonly excludedAnalysisCount: number;
+  readonly supersededAnalysisCount: number;
+  readonly excludedEstimatedCount: number;
+  readonly excludedLookaheadSuspectCount: number;
+  readonly excludedLookaheadUnknownCount: number;
+  readonly bet: {
+    readonly betCount: number;
+    readonly totalStake: number;
+    readonly totalReturn: number;
+    readonly actualPayoutCount: number;
+    readonly approximatePayoutCount: number;
+    readonly unjudgedOddsCount: number;
+  };
+  /** 補正後の確率で分けた帯(0 でない帯だけ。`index` は帯の番号)。 */
+  readonly bins: readonly { readonly index: number; readonly predicted: number; readonly placed: number; readonly probSum: number }[];
+  /** 補正前(prior)で分けた帯。 */
+  readonly priorBins: readonly { readonly index: number; readonly predicted: number; readonly placed: number; readonly probSum: number }[];
+  /** Brier の和。`invalid` は 1 件でも確率が不正(NaN・負・1超)な観測があったか。 */
+  readonly brier: {
+    readonly n: number;
+    readonly priorSquaredSum: number;
+    readonly adjustedSquaredSum: number;
+    readonly priorInvalid: boolean;
+    readonly adjustedInvalid: boolean;
+  };
+  readonly directions: Readonly<Record<AdjustmentDirection, { readonly count: number; readonly placed: number; readonly adjustmentSum: number }>>;
+  /** 印別(印なしは `none`)。0 件の印も含めて持つ。 */
+  readonly marks: Readonly<Record<string, { readonly count: number; readonly placed: number; readonly won: number }>>;
+  readonly proposedBet: ProposedBetPart;
+}
+
+/** 部分の集まり。`races` は `orderKey` の昇順(同じ `raceId` は 1 つだけ)。`binCount` は較正の帯の数(合わせる部分どうしで同じでなければならない)。 */
+export interface VerifyPart {
+  readonly binCount: number;
+  readonly races: readonly VerifyRacePart[];
+}
+
+const MARK_NONE_KEY = "none";
+const markKeyOf = (mark: PredictionMark | null): string => (mark === null ? MARK_NONE_KEY : mark);
+
+function isInvalidBrierProbability(p: number): boolean {
+  return !Number.isFinite(p) || p < 0 || p > 1;
+}
+
+/** 1 レースぶんの分析(同じレースの全分析)から部分を作る。集計の本体(旧 `computeVerifyReportForAnalyses` の 1 レース分)。 */
+function buildVerifyRacePart(
   store: VerifyDataSource,
+  raceId: string,
   analyses: readonly StoredAnalysis[],
   config: VerifyConfig,
-): VerifyReport {
+): VerifyRacePart {
   const { calibrationBins, directionEpsilon } = config;
 
   const newBins = (): BinCounter[] =>
@@ -1217,9 +1318,12 @@ function computeVerifyReportForAnalyses(
   const bins = newBins();
   // 補正前(prior)で帯に分けた対応表(Issue #254)。補正後の bins と同じループ・同じ母集団で計上する。
   const priorBins = newBins();
-  // Brier の観測(Issue #271)。キャリブレーションと同じループ・同じ位置で積むので、母集団は両者で必ず一致する。
-  const priorObservations: BrierObservation[] = [];
-  const adjustedObservations: BrierObservation[] = [];
+  // Brier の和(Issue #271)。キャリブレーションと同じループ・同じ位置で積むので、母集団は両者で必ず一致する。
+  let brierN = 0;
+  let priorSquaredSum = 0;
+  let adjustedSquaredSum = 0;
+  let priorInvalid = false;
+  let adjustedInvalid = false;
 
   // 補正傾向サマリ(Task#26)の可変カウンタ。回収率・キャリブレーションと同じループで計上する
   // (母集団を既存verifyと揃えるため)。
@@ -1293,8 +1397,11 @@ function computeVerifyReportForAnalyses(
         priorBins[priorBinIndex]!.placed += 1;
       }
       // Brier の観測(Issue #271): キャリブレーションの 2 つの表に入る馬と同じ馬を、同じ結果(3 着以内か)で積む。
-      priorObservations.push({ probability: horse.prior, occurred: isInTopThree });
-      adjustedObservations.push({ probability: horse.adjustedProb, occurred: isInTopThree });
+      brierN += 1;
+      priorInvalid = priorInvalid || isInvalidBrierProbability(horse.prior);
+      adjustedInvalid = adjustedInvalid || isInvalidBrierProbability(horse.adjustedProb);
+      priorSquaredSum += (horse.prior - (isInTopThree ? 1 : 0)) ** 2;
+      adjustedSquaredSum += (horse.adjustedProb - (isInTopThree ? 1 : 0)) ** 2;
 
       // 補正傾向サマリ(1) 補正方向×結果: diff の符号とεで3群に分類する(Task#26)。
       const diff = horse.adjustedProb - horse.prior;
@@ -1342,42 +1449,165 @@ function computeVerifyReportForAnalyses(
     }
   }
 
-  const calibration = bins.map((c, i) => finalizeBin(c, i, calibrationBins));
-  const priorCalibration = priorBins.map((c, i) => finalizeBin(c, i, calibrationBins));
-
+  const sparse = (counters: readonly BinCounter[]): VerifyRacePart["bins"] =>
+    counters.flatMap((c, index) => (c.predicted === 0 ? [] : [{ index, predicted: c.predicted, placed: c.placed, probSum: c.probSum }]));
+  const orderKey = selected.included.length > 0 ? Math.min(...selected.included.map((i) => i.analysis.id)) : Math.min(...analyses.map((a) => a.id));
   return {
+    raceId,
+    venueKind: raceIdVenueKindSafe(raceId),
+    orderKey,
     includedAnalysisCount: selected.included.length,
     excludedAnalysisCount: selected.excludedAnalysisCount,
     supersededAnalysisCount: selected.supersededAnalysisCount,
     excludedEstimatedCount: selected.excludedEstimatedCount,
     excludedLookaheadSuspectCount: selected.excludedLookaheadSuspectCount,
     excludedLookaheadUnknownCount: selected.excludedLookaheadUnknownCount,
+    bet: { betCount, totalStake, totalReturn, actualPayoutCount, approximatePayoutCount, unjudgedOddsCount },
+    bins: sparse(bins),
+    priorBins: sparse(priorBins),
+    brier: { n: brierN, priorSquaredSum, adjustedSquaredSum, priorInvalid, adjustedInvalid },
+    directions: {
+      raised: { ...directionCounters.raised },
+      lowered: { ...directionCounters.lowered },
+      unchanged: { ...directionCounters.unchanged },
+    },
+    marks: Object.fromEntries([...PREDICTION_MARKS, null].map((mark) => [markKeyOf(mark), { ...markCounters.get(mark)! }])),
+    proposedBet: accumulateProposedBet(store, selected.included),
+  };
+}
+
+/**
+ * 分析の集合から部分を作る(Issue #625)。レースごとに 1 つの {@link VerifyRacePart} を作り、`orderKey` の昇順で返す。
+ * **同じレースの分析は全部渡す**(最新の選択がレース単位のため)。区分では絞らない(区分は {@link finalizeVerifyPart} で絞る)。
+ */
+export function buildVerifyPart(
+  store: VerifyDataSource,
+  analyses: readonly StoredAnalysis[],
+  config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
+): VerifyPart {
+  const byRace = new Map<string, StoredAnalysis[]>();
+  for (const analysis of analyses) {
+    const group = byRace.get(analysis.raceId);
+    if (group === undefined) {
+      byRace.set(analysis.raceId, [analysis]);
+    } else {
+      group.push(analysis);
+    }
+  }
+  const races = [...byRace.entries()].map(([raceId, group]) => buildVerifyRacePart(store, raceId, group, config));
+  return { binCount: config.calibrationBins, races: races.sort((a, b) => a.orderKey - b.orderKey) };
+}
+
+/**
+ * 部分を合わせる(Issue #625)。レースの項目を `orderKey` の昇順に並べるだけで、合計は取らない(畳むのは {@link finalizeVerifyPart})。
+ * 順は項目の中身だけで決まるので、分け方・渡す順によらず結果は同じ。同じ `raceId` が 2 つの部分にまたがる場合と、帯の数が違う場合は例外を投げる。
+ */
+export function mergeVerifyParts(parts: readonly VerifyPart[]): VerifyPart {
+  const binCount = parts[0]?.binCount ?? DEFAULT_VERIFY_BIN_COUNT;
+  const seen = new Set<string>();
+  const races: VerifyRacePart[] = [];
+  for (const part of parts) {
+    if (part.binCount !== binCount) {
+      throw new Error(`較正の帯の数が違う部分は合わせられません(${binCount} と ${part.binCount})`);
+    }
+    for (const race of part.races) {
+      if (seen.has(race.raceId)) {
+        throw new Error(`同じレースが複数の部分にあります: ${race.raceId}`);
+      }
+      seen.add(race.raceId);
+      races.push(race);
+    }
+  }
+  return { binCount, races: races.sort((a, b) => a.orderKey - b.orderKey) };
+}
+
+/**
+ * 部分を確定して {@link VerifyReport} にする(Issue #625)。`orderKey` の順に畳み、`venue` が "all" 以外なら開催区分が一致するレースだけを畳む。
+ * `config` は部分を作ったときと同じものを渡す(`calibrationBins` が部分と違えば例外)。
+ */
+export function finalizeVerifyPart(part: VerifyPart, config: VerifyConfig = DEFAULT_VERIFY_CONFIG, venue: VerifyVenueFilter = "all"): VerifyReport {
+  if (part.binCount !== config.calibrationBins) {
+    throw new Error(`部分の帯の数(${part.binCount})が設定(${config.calibrationBins})と違います`);
+  }
+  const { calibrationBins } = config;
+  const races = [...part.races].sort((a, b) => a.orderKey - b.orderKey).filter((r) => venue === "all" || r.venueKind === venue);
+  const bins: BinCounter[] = Array.from({ length: calibrationBins }, () => ({ predicted: 0, placed: 0, probSum: 0 }));
+  const priorBins: BinCounter[] = Array.from({ length: calibrationBins }, () => ({ predicted: 0, placed: 0, probSum: 0 }));
+  const directions: Record<AdjustmentDirection, DirectionCounter> = {
+    raised: { count: 0, placed: 0, adjustmentSum: 0 },
+    lowered: { count: 0, placed: 0, adjustmentSum: 0 },
+    unchanged: { count: 0, placed: 0, adjustmentSum: 0 },
+  };
+  const marks = new Map<PredictionMark | null, MarkCounter>([...PREDICTION_MARKS, null].map((mark) => [mark, { count: 0, placed: 0, won: 0 }]));
+  const counts = { included: 0, excluded: 0, superseded: 0, estimated: 0, suspect: 0, unknown: 0 };
+  const bet = { betCount: 0, totalStake: 0, totalReturn: 0, actualPayoutCount: 0, approximatePayoutCount: 0, unjudgedOddsCount: 0 };
+  const brier = { n: 0, priorSquaredSum: 0, adjustedSquaredSum: 0, priorInvalid: false, adjustedInvalid: false };
+  for (const race of races) {
+    counts.included += race.includedAnalysisCount;
+    counts.excluded += race.excludedAnalysisCount;
+    counts.superseded += race.supersededAnalysisCount;
+    counts.estimated += race.excludedEstimatedCount;
+    counts.suspect += race.excludedLookaheadSuspectCount;
+    counts.unknown += race.excludedLookaheadUnknownCount;
+    bet.betCount += race.bet.betCount;
+    bet.totalStake += race.bet.totalStake;
+    bet.totalReturn += race.bet.totalReturn;
+    bet.actualPayoutCount += race.bet.actualPayoutCount;
+    bet.approximatePayoutCount += race.bet.approximatePayoutCount;
+    bet.unjudgedOddsCount += race.bet.unjudgedOddsCount;
+    for (const [target, source] of [[bins, race.bins], [priorBins, race.priorBins]] as const) {
+      for (const b of source) {
+        target[b.index]!.predicted += b.predicted;
+        target[b.index]!.placed += b.placed;
+        target[b.index]!.probSum += b.probSum;
+      }
+    }
+    brier.n += race.brier.n;
+    brier.priorSquaredSum += race.brier.priorSquaredSum;
+    brier.adjustedSquaredSum += race.brier.adjustedSquaredSum;
+    brier.priorInvalid = brier.priorInvalid || race.brier.priorInvalid;
+    brier.adjustedInvalid = brier.adjustedInvalid || race.brier.adjustedInvalid;
+    for (const d of ["raised", "lowered", "unchanged"] as const) {
+      directions[d].count += race.directions[d].count;
+      directions[d].placed += race.directions[d].placed;
+      directions[d].adjustmentSum += race.directions[d].adjustmentSum;
+    }
+    for (const [mark, counter] of marks) {
+      const m = race.marks[markKeyOf(mark)];
+      if (m !== undefined) {
+        counter.count += m.count;
+        counter.placed += m.placed;
+        counter.won += m.won;
+      }
+    }
+  }
+  const calibration = bins.map((c, i) => finalizeBin(c, i, calibrationBins));
+  const priorCalibration = priorBins.map((c, i) => finalizeBin(c, i, calibrationBins));
+  const brierOf = (sum: number, invalid: boolean): number | null => (brier.n === 0 || invalid ? null : sum / brier.n);
+  return {
+    includedAnalysisCount: counts.included,
+    excludedAnalysisCount: counts.excluded,
+    supersededAnalysisCount: counts.superseded,
+    excludedEstimatedCount: counts.estimated,
+    excludedLookaheadSuspectCount: counts.suspect,
+    excludedLookaheadUnknownCount: counts.unknown,
     bet: {
-      betCount,
-      totalStake,
-      totalReturn,
-      recoveryRate: totalStake === 0 ? null : totalReturn / totalStake,
-      actualPayoutCount,
-      approximatePayoutCount,
-      unjudgedOddsCount,
+      ...bet,
+      recoveryRate: bet.totalStake === 0 ? null : bet.totalReturn / bet.totalStake,
     },
     calibration,
     priorCalibration,
     quality: {
-      evaluatedCount: adjustedObservations.length,
-      priorBrier: computeBrierScore(priorObservations).value,
-      adjustedBrier: computeBrierScore(adjustedObservations).value,
+      evaluatedCount: brier.n,
+      priorBrier: brierOf(brier.priorSquaredSum, brier.priorInvalid),
+      adjustedBrier: brierOf(brier.adjustedSquaredSum, brier.adjustedInvalid),
     },
     trend: {
-      directionGroups: (["raised", "lowered", "unchanged"] as const).map((direction) =>
-        finalizeDirectionGroup(direction, directionCounters[direction]),
-      ),
+      directionGroups: (["raised", "lowered", "unchanged"] as const).map((direction) => finalizeDirectionGroup(direction, directions[direction])),
       calibrationBias: calibration.map(toCalibrationBiasBin),
-      markStats: [...PREDICTION_MARKS, null].map((mark) =>
-        finalizeMarkStat(mark, markCounters.get(mark)!),
-      ),
+      markStats: [...PREDICTION_MARKS, null].map((mark) => finalizeMarkStat(mark, marks.get(mark)!)),
     },
-    proposedBet: computeProposedBetReport(store, selected.included),
+    proposedBet: finalizeProposedBetParts(races.map((r) => r.proposedBet)),
   };
 }
 
@@ -1563,7 +1793,7 @@ function finalizeProposedBetOverall(
 export type { ProposedBetOutcome };
 
 /**
- * 配分ベースの買い目 1 件の判定の事象(Issue #384)。`computeProposedBetReport` が各買い目を判定するのと**同じ場所**から出す。
+ * 配分ベースの買い目 1 件の判定の事象(Issue #384)。`accumulateProposedBet` が各買い目を判定するのと**同じ場所**から出す。
  * 人気帯・条件ごとの内訳(cloud の `verify-breakdown.ts`)が、本体の集計と同じ判定を使うための窓口で、判定の規則はここにしか無い。
  * 未知の券種の行(`unknownBetType` に数える行)は判定していないので事象に出ない。
  */
@@ -1592,7 +1822,7 @@ export interface ProposedBetEvent {
 export function collectProposedBetEvents(store: VerifyDataSource, config: VerifyConfig = DEFAULT_VERIFY_CONFIG): ProposedBetEvent[] {
   const selected = selectIncludedAnalyses(store, store.listAnalyses(), config);
   const events: ProposedBetEvent[] = [];
-  computeProposedBetReport(store, selected.included, (event) => events.push(event));
+  accumulateProposedBet(store, selected.included, (event) => events.push(event));
   return events;
 }
 
@@ -1649,11 +1879,11 @@ export function collectProposedBetEvents(store: VerifyDataSource, config: Verify
  * 除外しており〈本ファイル冒頭コメント「着順不明・非数値は集計対象外」〉、`proposedBet`系とは扱いが異なる**
  * (一律100円の系は今回変えない)。
  */
-function computeProposedBetReport(
+function accumulateProposedBet(
   store: VerifyDataSource,
   included: ReadonlyArray<{ analysis: StoredAnalysis; results: readonly RaceResultEntry[] }>,
   onEvent?: (event: ProposedBetEvent) => void,
-): ProposedBetReport {
+): ProposedBetPart {
   let allocated = 0;
   let skipped = 0;
   let unreached = 0;
@@ -1765,25 +1995,78 @@ function computeProposedBetReport(
   }
 
   return {
+    allocated,
+    skipped,
+    unreached,
+    noRecord,
+    byType: accumulatorByBetType,
+    unknown: { count: unknown.count, totalStake: unknown.totalStake, betTypes: [...unknown.betTypes].sort() },
+  };
+}
+
+/** 配分ベースの買い目の券種別累計(部分の中身。構造化複製できる値だけ)。 */
+export type ProposedBetAccumulatorPart = ProposedBetAccumulator;
+
+/** 配分ベースの買い目の券種(8つ。overall の足し順もこの順)。 */
+const PROPOSED_BET_PART_TYPES = ["place", "win", "wide", "trio", "quinella", "exacta", "trifecta", "bracketQuinella"] as const;
+
+/**
+ * 配分ベースの回収率の部分(Issue #625)。確定前の累計で、レースの部分どうしを足し合わせられる。
+ * `unknown.betTypes` は昇順・重複なしの配列(Set は持たない)。
+ */
+export interface ProposedBetPart {
+  readonly allocated: number;
+  readonly skipped: number;
+  readonly unreached: number;
+  readonly noRecord: number;
+  readonly byType: Readonly<Record<(typeof PROPOSED_BET_PART_TYPES)[number], ProposedBetAccumulatorPart>>;
+  readonly unknown: { readonly count: number; readonly totalStake: number; readonly betTypes: readonly string[] };
+}
+
+function addAccumulator(into: ProposedBetAccumulator, from: ProposedBetAccumulatorPart): void {
+  into.betCount += from.betCount;
+  into.totalStake += from.totalStake;
+  into.totalReturn += from.totalReturn;
+  into.unjudgedCount += from.unjudgedCount;
+  into.refundedCount += from.refundedCount;
+  into.refundedStake += from.refundedStake;
+  into.flatStake += from.flatStake;
+  into.flatReturn += from.flatReturn;
+}
+
+/** 配分ベースの部分を、渡された順に足し合わせて確定する(`accumulateProposedBet` の確定側)。 */
+function finalizeProposedBetParts(parts: readonly ProposedBetPart[]): ProposedBetReport {
+  const total = Object.fromEntries(PROPOSED_BET_PART_TYPES.map((t) => [t, emptyProposedBetAccumulator()])) as Record<(typeof PROPOSED_BET_PART_TYPES)[number], ProposedBetAccumulator>;
+  const unknown = emptyUnknownBetTypeAccumulator();
+  let allocated = 0;
+  let skipped = 0;
+  let unreached = 0;
+  let noRecord = 0;
+  for (const part of parts) {
+    allocated += part.allocated;
+    skipped += part.skipped;
+    unreached += part.unreached;
+    noRecord += part.noRecord;
+    for (const t of PROPOSED_BET_PART_TYPES) {
+      addAccumulator(total[t], part.byType[t]);
+    }
+    unknown.count += part.unknown.count;
+    unknown.totalStake += part.unknown.totalStake;
+    for (const b of part.unknown.betTypes) {
+      unknown.betTypes.add(b);
+    }
+  }
+  return {
     population: { allocated, skipped, unreached, noRecord },
-    overall: finalizeProposedBetOverall(
-      place,
-      win,
-      wide,
-      trio,
-      quinella,
-      exacta,
-      trifecta,
-      bracketQuinella,
-    ),
-    place: finalizeProposedBetSummary(place),
-    win: finalizeProposedBetSummary(win),
-    wide: finalizeProposedBetSummary(wide),
-    trio: finalizeProposedBetSummary(trio),
-    quinella: finalizeProposedBetSummary(quinella),
-    exacta: finalizeProposedBetSummary(exacta),
-    trifecta: finalizeProposedBetSummary(trifecta),
-    bracketQuinella: finalizeProposedBetSummary(bracketQuinella),
+    overall: finalizeProposedBetOverall(total.place, total.win, total.wide, total.trio, total.quinella, total.exacta, total.trifecta, total.bracketQuinella),
+    place: finalizeProposedBetSummary(total.place),
+    win: finalizeProposedBetSummary(total.win),
+    wide: finalizeProposedBetSummary(total.wide),
+    trio: finalizeProposedBetSummary(total.trio),
+    quinella: finalizeProposedBetSummary(total.quinella),
+    exacta: finalizeProposedBetSummary(total.exacta),
+    trifecta: finalizeProposedBetSummary(total.trifecta),
+    bracketQuinella: finalizeProposedBetSummary(total.bracketQuinella),
     unknownBetType: finalizeUnknownBetType(unknown),
   };
 }
