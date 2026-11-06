@@ -788,7 +788,14 @@ export class VerifyCore {
     const t = now();
     const state = this.readBackfill();
     // 自分の待ち(失敗後の退避・保留の再試行・R2 の柵の再開)が明けていなければ何もしない。差分の集計の tick が alarm を前倒ししても、補完を待ちより早く走らせない(Issue #628)。
-    if ((state.notBefore ?? 0) > t || (state.resumeAt !== null && state.resumeAt > t)) return;
+    const wake = Math.max(state.notBefore ?? 0, state.resumeAt ?? 0);
+    if (wake > t) {
+      // DO の alarm は 1 つだけ。差分の集計が前倒しで張ると、補完が張った待ちの時刻の alarm は上書きされて消える。何も張らずに返ると補完が止まるので、待ちの時刻に張り直す
+      // (alarm が無い・古い・待ちの時刻より後のとき。待ちの時刻より前の alarm はそのまま。それが鳴ったときにまたここに来る)。
+      const alarm = await this.deps.getAlarm();
+      if (alarm === null || isStaleAlarm(alarm, t) || alarm > wake) await setAlarm(wake);
+      return;
+    }
     try {
       const usage = await store.readUsage();
       if (!isReadAllowed(usage)) {

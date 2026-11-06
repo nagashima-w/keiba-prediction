@@ -1459,4 +1459,87 @@ describe("runBackfillTick は自分の待ちが明けるまで何もしない(Is
     await core.runBackfillTick();
     expect(store.calls).toEqual([]);
   });
+
+  it("待ちの途中で alarm が無い・前倒しされた状態で呼ばれたら、store を呼ばずに、alarm を待ちの時刻(notBefore。R2 の柵なら resumeAt)に張り直す。待ちの時刻より前の alarm はそのまま", async () => {
+    const { core, store, kv, clock, alarms, getAlarm, clearAlarm } = setup();
+    store.state.pending = [pendingRow(1)];
+    store.state.failResolve = true;
+    await core.runBackfillTick();
+    const wake = kv.get<{ notBefore: number }>("backfill")!.notBefore;
+    expect(wake).toBe(T0 + VERIFY_BACKOFF_MS[0]!); // 前提: 待ちに入った
+    store.calls.length = 0;
+    clock.now += 1000;
+    clearAlarm(); // 並走が上書きして、その alarm も鳴り終わった状態
+    await core.runBackfillTick();
+    expect(store.calls).toEqual([]);
+    expect(getAlarm()).toBe(wake);
+    // 既に待ちの時刻に張られているなら張り直さない
+    alarms.length = 0;
+    await core.runBackfillTick();
+    expect(alarms).toEqual([]);
+    // 待ちの時刻より後ろの alarm は、待ちの時刻に前倒しする
+    (core as unknown as { deps: VerifyCoreDeps }).deps.setAlarm(wake + 600_000);
+    await core.runBackfillTick();
+    expect(getAlarm()).toBe(wake);
+    // 待ちの時刻より前の alarm はそのまま(それが鳴ったときにまたここに来る)
+    alarms.length = 0;
+    (core as unknown as { deps: VerifyCoreDeps }).deps.setAlarm(wake - 500);
+    alarms.length = 0;
+    await core.runBackfillTick();
+    expect(alarms).toEqual([]);
+    expect(getAlarm()).toBe(wake - 500);
+    // 待ちの時刻に呼ぶと補完が進む
+    clock.now = wake;
+    await core.runBackfillTick();
+    expect(store.calls).toContain("resolve");
+  });
+
+  it("R2 の柵の再開時刻(resumeAt)でも、alarm が無ければ resumeAt に張り直す", async () => {
+    const { core, store, kv, clock, getAlarm, clearAlarm } = setup();
+    store.state.pending = [pendingRow(1)];
+    store.state.usage = { classA: 0, classB: R2_FENCE_LIMITS.classB };
+    await core.runBackfillTick();
+    const resumeAt = kv.get<{ resumeAt: number }>("backfill")!.resumeAt;
+    clearAlarm();
+    store.calls.length = 0;
+    clock.now += 1000;
+    await core.runBackfillTick();
+    expect(store.calls).toEqual([]);
+    expect(getAlarm()).toBe(resumeAt);
+  });
+
+  it("並走が前倒しした後の alarm(筋書き: 補完が 2 回目の失敗 → 同じ alarm の中で並走も失敗して前倒し → 60 秒後に補完は守りに入り、並走は何も張らない)でも、最後に alarm が待ちの時刻に残り、そこで補完が進む", async () => {
+    const { core, store, kv, clock, getAlarm, clearAlarm } = setup();
+    // 並走の読み取り口(listPending が失敗すると、runPartsTick は例外を握って 60 秒後の alarm を張る)
+    Object.assign(store.port, { readMaxSeq: async () => 0, readMarks: async () => ({ marks: [], rowsRead: 0 }), readDays: async () => ({ days: [], rowsRead: 0 }), readDay: async () => ({ rows: rowsOf([]), close: null, rowsRead: 0 }) });
+    store.state.pending = [pendingRow(1)];
+    store.state.failResolve = true;
+    await core.runBackfillTick(); // 1 回目の失敗(待ち 30 秒)
+    clock.now += VERIFY_BACKOFF_MS[0]!;
+    await core.runBackfillTick(); // 2 回目の失敗(待ち 2 分)
+    const wake = kv.get<{ notBefore: number }>("backfill")!.notBefore;
+    expect(wake).toBe(clock.now + VERIFY_BACKOFF_MS[1]!); // 前提: 待ちは 60 秒より長い
+    expect(getAlarm()).toBe(wake);
+    // 同じ alarm() の中で並走が失敗: 60 秒後の alarm で待ちの alarm を上書きする
+    const failing = store.port.listPending;
+    store.port.listPending = async () => {
+      throw new Error("D1_ERROR");
+    };
+    await core.runPartsTick();
+    expect(getAlarm()).toBe(clock.now + 60_000); // 前提: 前倒しで上書きされた
+    // 60 秒後の alarm: 補完は守りに入り、並走は(listPending が成功して補完待ち > 0 なので)何も張らない
+    store.port.listPending = failing;
+    clearAlarm();
+    clock.now += 60_000;
+    store.calls.length = 0;
+    await core.runBackfillTick();
+    await core.runPartsTick();
+    expect(store.calls).not.toContain("resolve");
+    expect(getAlarm()).toBe(wake); // alarm が残っている(補完は止まらない)
+    clearAlarm();
+    clock.now = wake;
+    store.state.failResolve = false;
+    await core.runBackfillTick();
+    expect(store.calls).toContain("resolve");
+  });
 });
