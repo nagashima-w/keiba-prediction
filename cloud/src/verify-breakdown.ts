@@ -46,7 +46,7 @@
  */
 
 import { collectProposedBetEvents, PRODUCTION_VERIFY_CONFIG, type ProposedBetEvent, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
-import type { StoredAnalysisHorse, VerifyDataSource } from "../../packages/core/src/ev/analysis-store-types.js";
+import type { StoredAnalysis, StoredAnalysisHorse, VerifyDataSource } from "../../packages/core/src/ev/analysis-store-types.js";
 import { wilsonInterval } from "../../packages/core/src/ev/binomial-interval.js";
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes.js";
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key.js";
@@ -213,20 +213,31 @@ export interface PopularityStats {
   readonly gap: readonly { readonly key: GapKey; readonly stat: BandStat }[];
 }
 
-interface Accumulator {
-  bets: number;
-  stake: number;
-  payout: number;
-  hits: number;
-  evBets: number;
-  evStake: number;
-  evWeighted: number;
-  expectedHits: number;
-  clusters: Map<string, { x1: number; y1: number; x2: number; y2: number }>;
+/**
+ * 1 つの行(帯など)の、1 レースぶんの累計(Issue #625。部分の中身)。行のクラスタ(ブートストラップの単位)は、この累計そのもの: 行 × レースで 1 つ。
+ * `firstAnalysisId` は、この行でこのレースの買い目が最初に出た分析の ID。確定のとき、クラスタを今と同じ並び(分析 ID の順)にそろえて再標本を作るために持つ。
+ */
+export interface BreakdownRowPart {
+  readonly bets: number;
+  readonly stake: number;
+  readonly payout: number;
+  readonly hits: number;
+  readonly evBets: number;
+  readonly evStake: number;
+  readonly evWeighted: number;
+  readonly expectedHits: number;
+  /** クラスタの値: x1 = 払戻、y1 = 賭け金、x2 = 的中数、y2 = 予想した的中数。 */
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+  readonly firstAnalysisId: number;
 }
 
-function emptyAccumulator(): Accumulator {
-  return { bets: 0, stake: 0, payout: 0, hits: 0, evBets: 0, evStake: 0, evWeighted: 0, expectedHits: 0, clusters: new Map() };
+type Accumulator = { -readonly [K in keyof BreakdownRowPart]: BreakdownRowPart[K] };
+
+function emptyAccumulator(firstAnalysisId: number): Accumulator {
+  return { bets: 0, stake: 0, payout: 0, hits: 0, evBets: 0, evStake: 0, evWeighted: 0, expectedHits: 0, x1: 0, y1: 0, x2: 0, y2: 0, firstAnalysisId };
 }
 
 interface BetExtra {
@@ -245,13 +256,14 @@ export function buildBetExtras(rows: readonly VerifyBetRow[]): Map<string, BetEx
 
 const isFiniteNumber = (v: number | null | undefined): v is number => v !== null && v !== undefined && Number.isFinite(v);
 
+/** 買い目 1 件を、その行のこのレースぶんの累計に足す(行 × レースの累計がクラスタ)。 */
 function addEvent(acc: Accumulator, event: ProposedBetEvent, extra: BetExtra | undefined): void {
   acc.bets += 1;
   acc.stake += event.stake;
   acc.payout += event.payout;
-  const cluster = acc.clusters.get(event.raceId) ?? { x1: 0, y1: 0, x2: 0, y2: 0 };
-  cluster.x1 += event.payout;
-  cluster.y1 += event.stake;
+  acc.x1 += event.payout;
+  acc.y1 += event.stake;
+  acc.firstAnalysisId = Math.min(acc.firstAnalysisId, event.analysisId);
   const ev = extra?.ev ?? null;
   if (isFiniteNumber(ev)) {
     acc.evBets += 1;
@@ -261,31 +273,42 @@ function addEvent(acc: Accumulator, event: ProposedBetEvent, extra: BetExtra | u
     if ((event.outcome === "hit" || event.outcome === "miss") && isFiniteNumber(odds) && odds > 0) {
       const p = ev / odds;
       acc.expectedHits += p;
-      cluster.y2 += p;
+      acc.y2 += p;
       if (event.outcome === "hit") {
         acc.hits += 1;
-        cluster.x2 += 1;
+        acc.x2 += 1;
       }
     }
   }
-  acc.clusters.set(event.raceId, cluster);
 }
 
-function finalize(acc: Accumulator): BandStat {
-  const clusters = [...acc.clusters.values()];
+/** 行ごとの、レースの累計(`races` の順に足す)から 1 行の集計を確定する。クラスタは分析 ID の順にそろえてから再標本を作る(今と同じ乱数の引き方)。 */
+function finalize(rows: readonly BreakdownRowPart[]): BandStat {
+  const total = emptyAccumulator(0);
+  for (const r of rows) {
+    total.bets += r.bets;
+    total.stake += r.stake;
+    total.payout += r.payout;
+    total.hits += r.hits;
+    total.evBets += r.evBets;
+    total.evStake += r.evStake;
+    total.evWeighted += r.evWeighted;
+    total.expectedHits += r.expectedHits;
+  }
+  const clusters = [...rows].sort((a, b) => a.firstAnalysisId - b.firstAnalysisId);
   const intervals = clusters.length >= 2 ? bootstrapRatioIntervals(clusters) : { first: null, second: null };
   return {
-    bets: acc.bets,
+    bets: total.bets,
     races: clusters.length,
-    stake: acc.stake,
-    payout: acc.payout,
-    hits: acc.hits,
-    evBets: acc.evBets,
-    evMissing: acc.bets - acc.evBets,
-    meanEv: acc.evStake > 0 ? acc.evWeighted / acc.evStake : null,
-    expectedHits: acc.expectedHits,
-    recovery: acc.stake > 0 ? acc.payout / acc.stake : null,
-    hitRatio: acc.expectedHits > 0 ? acc.hits / acc.expectedHits : null,
+    stake: total.stake,
+    payout: total.payout,
+    hits: total.hits,
+    evBets: total.evBets,
+    evMissing: total.bets - total.evBets,
+    meanEv: total.evStake > 0 ? total.evWeighted / total.evStake : null,
+    expectedHits: total.expectedHits,
+    recovery: total.stake > 0 ? total.payout / total.stake : null,
+    hitRatio: total.expectedHits > 0 ? total.hits / total.expectedHits : null,
     recoveryInterval: intervals.first,
     hitRatioInterval: intervals.second,
   };
@@ -380,18 +403,62 @@ function gapKeyOf(legs: readonly number[], ranks: ReadonlyMap<number, number>, n
   return legs.length === 0 ? "unknown" : up && down ? "both" : up ? "winLonger" : down ? "placeLonger" : "small";
 }
 
+/** 行のキー: 券種グループ × 帯(`place:0`〜`place:3`、人気不明は `place:u`)と、単複のずれの行(`gap:winLonger` ほか)。 */
+const groupRowKey = (group: PopularityGroupKey, band: number | "u"): string => `${group}:${band}`;
+const gapRowKey = (gap: GapKey): string => `gap:${gap}`;
+
 /**
- * 判定済みの事象(判定不能は除く)を、券種に合わせた人気の帯と、単複の人気のずれの行に分けて集計する。
- * `events` は呼び出し側が区分で絞ったもの。`extras` は買い目の odds・ev(`buildBetExtras`)。
+ * 1 レースぶんの部分(Issue #625)。構造化複製できる値だけで持つ。区分は確定のときに `venueKind` で絞る。
+ * **部分の中に、条件のラベル(軸の見出し)と頭数帯の添字を解決して持つ**(確定のときにソースを引かないため)。ラベルや帯の定義を変えたら、保存した部分は古くなる(段階 3 の版数の対象)。
  */
-export function buildPopularityStats(
-  source: VerifyDataSource,
+export interface BreakdownRacePart {
+  readonly raceId: string;
+  readonly venueKind: "central" | "nar" | null;
+  /** 畳む順の鍵。このレースの判定できた買い目を出した分析の ID の最小値。 */
+  readonly orderKey: number;
+  /** 行のキー({@link groupRowKey}・{@link gapRowKey})→ このレースの累計。買い目の無い行は持たない。 */
+  readonly rows: Readonly<Record<string, BreakdownRowPart>>;
+  /** 枠連(対象外)の点数と賭け金。 */
+  readonly excluded: { readonly bets: number; readonly stake: number };
+  /** レース台帳の行(判定できた買い目がある)と、条件のラベル。 */
+  readonly ledger: {
+    readonly analysisId: number;
+    readonly bets: number;
+    readonly stake: number;
+    readonly payout: number;
+    readonly hit: boolean;
+    /** 頭数帯の添字(0〜3)。頭数不明は -1。 */
+    readonly fieldBand: number;
+    readonly labels: Readonly<Record<AxisKey, string>>;
+  };
+}
+
+/** 内訳の部分の集まり。`races` は `orderKey` の昇順(同じ `raceId` は 1 つだけ)。 */
+export interface BreakdownPart {
+  readonly races: readonly BreakdownRacePart[];
+}
+
+/** 1 レースの判定済みの事象から、そのレースの部分を作る(判定できた買い目が無ければ null)。 */
+function buildBreakdownRacePart(
+  raceId: string,
   events: readonly ProposedBetEvent[],
   extras: ReadonlyMap<string, BetExtra>,
-  lookups: PopularityLookups = createPopularityLookups(source),
-): PopularityStats {
-  const groups = new Map(GROUP_ORDER.map((g) => [g.key, { bands: Array.from({ length: 4 }, emptyAccumulator), unknown: emptyAccumulator() }] as const));
-  const gap = new Map(GAP_ORDER.map((k) => [k, emptyAccumulator()] as const));
+  lookups: PopularityLookups,
+  facts: ReadonlyMap<number, RaceConditionFacts>,
+): BreakdownRacePart | null {
+  const ledgerRow = buildRaceLedger(events)[0];
+  if (ledgerRow === undefined) {
+    return null;
+  }
+  const rows = new Map<string, Accumulator>();
+  const rowOf = (key: string): Accumulator => {
+    let acc = rows.get(key);
+    if (acc === undefined) {
+      acc = emptyAccumulator(Number.POSITIVE_INFINITY);
+      rows.set(key, acc);
+    }
+    return acc;
+  };
   let excluded = { bets: 0, stake: 0 };
   for (const event of events) {
     if (event.outcome === "unjudged") {
@@ -410,17 +477,107 @@ export function buildPopularityStats(
     const ranks = lookups.ranksOf(event.analysisId);
     const ninki = lookups.ninkiOf(event.raceId);
     const popularity = maxOver(legs, meta.basis === "analysis" ? ranks : ninki);
-    const target = groups.get(meta.key)!;
-    addEvent(popularity === null ? target.unknown : target.bands[popularityBandIndex(popularity)]!, event, extra);
-    addEvent(gap.get(gapKeyOf(legs, ranks, ninki))!, event, extra);
+    addEvent(rowOf(groupRowKey(meta.key, popularity === null ? "u" : popularityBandIndex(popularity))), event, extra);
+    addEvent(rowOf(gapRowKey(gapKeyOf(legs, ranks, ninki))), event, extra);
   }
+  const kind = venueKindOf(raceId);
+  const size = lookups.fieldSizeOf(ledgerRow.analysisId);
   return {
-    groups: GROUP_ORDER.map(({ key, basis }) => {
-      const g = groups.get(key)!;
-      return { key, basis, bands: g.bands.map(finalize), unknown: finalize(g.unknown), excluded: key === "combo" ? excluded : null };
-    }),
-    gap: GAP_ORDER.map((key) => ({ key, stat: finalize(gap.get(key)!) })),
+    raceId,
+    venueKind: kind,
+    orderKey: ledgerRow.analysisId,
+    rows: Object.fromEntries(rows),
+    excluded,
+    ledger: {
+      analysisId: ledgerRow.analysisId,
+      bets: ledgerRow.bets,
+      stake: ledgerRow.stake,
+      payout: ledgerRow.payout,
+      hit: ledgerRow.hit,
+      fieldBand: size <= 0 ? -1 : fieldSizeBandIndex(size),
+      labels: axisLabelsOf(facts.get(ledgerRow.analysisId) ?? null, kind),
+    },
   };
+}
+
+/**
+ * 判定済みの事象(区分では絞らない)から内訳の部分を作る(Issue #625)。`events` は**レースが欠けない**集合(同じレースの事象は全部渡す)。
+ * `extras` は買い目の odds・ev(`buildBetExtras`)、`facts` は分析 ID → 条件(省略は全レースが各軸の『不明』)。
+ */
+export function buildBreakdownParts(
+  events: readonly ProposedBetEvent[],
+  extras: ReadonlyMap<string, BetExtra>,
+  lookups: PopularityLookups,
+  facts: ReadonlyMap<number, RaceConditionFacts> = new Map(),
+): BreakdownPart {
+  const byRace = new Map<string, ProposedBetEvent[]>();
+  for (const event of events) {
+    const group = byRace.get(event.raceId);
+    if (group === undefined) {
+      byRace.set(event.raceId, [event]);
+    } else {
+      group.push(event);
+    }
+  }
+  const races: BreakdownRacePart[] = [];
+  for (const [raceId, group] of byRace) {
+    const part = buildBreakdownRacePart(raceId, group, extras, lookups, facts);
+    if (part !== null) {
+      races.push(part);
+    }
+  }
+  return { races: races.sort((x, y) => x.orderKey - y.orderKey) };
+}
+
+/** 内訳の部分を合わせる。レースの項目を `orderKey` の昇順に並べるだけで、同じ `raceId` が 2 つの部分にあれば例外を投げる。 */
+export function mergeBreakdownParts(parts: readonly BreakdownPart[]): BreakdownPart {
+  const seen = new Set<string>();
+  const races: BreakdownRacePart[] = [];
+  for (const part of parts) {
+    for (const race of part.races) {
+      if (seen.has(race.raceId)) {
+        throw new Error(`同じレースが複数の部分にあります: ${race.raceId}`);
+      }
+      seen.add(race.raceId);
+      races.push(race);
+    }
+  }
+  return { races: races.sort((x, y) => x.orderKey - y.orderKey) };
+}
+
+/** 区分で絞り、`orderKey` の順にそろえたレースの部分。 */
+function scopedRaces(part: BreakdownPart, venue: VerifyVenueFilter): BreakdownRacePart[] {
+  return [...part.races].sort((x, y) => x.orderKey - y.orderKey).filter((r) => venue === "all" || r.venueKind === venue);
+}
+
+/** 部分から、人気帯と単複のずれの集計を確定する。 */
+function finalizePopularity(races: readonly BreakdownRacePart[]): PopularityStats {
+  const rowsOf = (key: string): BreakdownRowPart[] => races.flatMap((r) => (r.rows[key] === undefined ? [] : [r.rows[key]!]));
+  const excluded = races.reduce((acc, r) => ({ bets: acc.bets + r.excluded.bets, stake: acc.stake + r.excluded.stake }), { bets: 0, stake: 0 });
+  return {
+    groups: GROUP_ORDER.map(({ key, basis }) => ({
+      key,
+      basis,
+      bands: Array.from({ length: 4 }, (_, band) => finalize(rowsOf(groupRowKey(key, band)))),
+      unknown: finalize(rowsOf(groupRowKey(key, "u"))),
+      excluded: key === "combo" ? excluded : null,
+    })),
+    gap: GAP_ORDER.map((key) => ({ key, stat: finalize(rowsOf(gapRowKey(key))) })),
+  };
+}
+
+/**
+ * 判定済みの事象(判定不能は除く)を、券種に合わせた人気の帯と、単複の人気のずれの行に分けて集計する。
+ * `events` は呼び出し側が区分で絞ったもの。`extras` は買い目の odds・ev(`buildBetExtras`)。
+ * 事象から部分を作って確定する(Issue #625)。
+ */
+export function buildPopularityStats(
+  source: VerifyDataSource,
+  events: readonly ProposedBetEvent[],
+  extras: ReadonlyMap<string, BetExtra>,
+  lookups: PopularityLookups = createPopularityLookups(source),
+): PopularityStats {
+  return finalizePopularity(scopedRaces(buildBreakdownParts(events, extras, lookups), "all"));
 }
 
 // ---------------------------------------------------------------------------
@@ -663,17 +820,10 @@ function venueLabelOf(raceId: string): string {
   }
 }
 
-/**
- * 買い目のあったレースを、開催区分・競馬場・頭数帯の条件で分けて集計する(Issue #385-A)。`events` は呼び出し側が区分で絞ったもの。
- * 競馬場は場コード順(中央 01〜10、地方 30〜)で、{@link CONDITION_MERGE_MIN_RACES} 未満の場は「その他の場」にまとめる。頭数は分析時の出走頭数(馬の行の数)で、分からないレースは「頭数不明」。
- */
-export function buildConditionStats(
-  source: VerifyDataSource,
-  events: readonly ProposedBetEvent[],
-  lookups: PopularityLookups = createPopularityLookups(source),
-  facts: ReadonlyMap<number, RaceConditionFacts> = new Map(),
-): ConditionStats {
-  const ledger = buildRaceLedger(events);
+/** 部分から、条件ごとの集計を確定する(レースの順は部分の `orderKey` の順 = 分析 ID の順)。 */
+function finalizeConditions(races: readonly BreakdownRacePart[]): ConditionStats {
+  const entries = races.map((r) => ({ row: { raceId: r.raceId, ...r.ledger } as RaceLedgerRow, part: r }));
+  const ledger = entries.map((e) => e.row);
   const overall = summarizeRaces("全体", ledger, null);
 
   const byVenue = new Map<string, RaceLedgerRow[]>();
@@ -681,34 +831,33 @@ export function buildConditionStats(
   const field: RaceBucket[] = FIELD_BAND_LABELS.map(() => ({ races: [] }));
   const fieldUnknown: RaceLedgerRow[] = [];
   const axisRaces: Record<AxisKey, Map<string, RaceLedgerRow[]>> = { distance: new Map(), track: new Map(), surface: new Map(), class: new Map() };
-  for (const race of ledger) {
+  for (const { row: race, part } of entries) {
     const code = race.raceId.slice(4, 6);
     byVenue.set(code, [...(byVenue.get(code) ?? []), race]);
-    const k = venueKindOf(race.raceId);
+    const k = part.venueKind;
     if (k !== null) {
       kind[k].push(race);
     }
-    const labels = axisLabelsOf(facts.get(race.analysisId) ?? null, k);
     for (const axis of AXIS_KEYS) {
-      axisRaces[axis].set(labels[axis], [...(axisRaces[axis].get(labels[axis]) ?? []), race]);
+      const label = part.ledger.labels[axis];
+      axisRaces[axis].set(label, [...(axisRaces[axis].get(label) ?? []), race]);
     }
-    const size = lookups.fieldSizeOf(race.analysisId);
-    if (size <= 0) {
+    if (part.ledger.fieldBand < 0) {
       fieldUnknown.push(race);
     } else {
-      field[fieldSizeBandIndex(size)]!.races.push(race);
+      field[part.ledger.fieldBand]!.races.push(race);
     }
   }
 
-  const row = (label: string, races: readonly RaceLedgerRow[]): ConditionRow => summarizeRaces(label, races, overall.recovery);
+  const row = (label: string, rs: readonly RaceLedgerRow[]): ConditionRow => summarizeRaces(label, rs, overall.recovery);
   const venueRows: ConditionRow[] = [];
   const merged: RaceLedgerRow[] = [];
   for (const code of [...byVenue.keys()].sort()) {
-    const races = byVenue.get(code)!;
-    if (races.length < CONDITION_MERGE_MIN_RACES) {
-      merged.push(...races);
+    const rs = byVenue.get(code)!;
+    if (rs.length < CONDITION_MERGE_MIN_RACES) {
+      merged.push(...rs);
     } else {
-      venueRows.push(row(venueLabelOf(races[0]!.raceId), races));
+      venueRows.push(row(venueLabelOf(rs[0]!.raceId), rs));
     }
   }
   if (merged.length > 0) {
@@ -722,8 +871,8 @@ export function buildConditionStats(
   /** 軸の行: 見出しの並びの順で、レースのある行だけ(『不明』は並びの最後)。 */
   const axisRows = (axis: AxisKey, order: readonly string[]): ConditionRow[] =>
     order.flatMap((label) => {
-      const races = axisRaces[axis].get(label);
-      return races === undefined ? [] : [row(label, races)];
+      const rs = axisRaces[axis].get(label);
+      return rs === undefined ? [] : [row(label, rs)];
     });
   return {
     overall: {
@@ -740,6 +889,20 @@ export function buildConditionStats(
       { key: "class", rows: axisRows("class", CLASS_LABELS) },
     ],
   };
+}
+
+/**
+ * 買い目のあったレースを、開催区分・競馬場・頭数帯の条件で分けて集計する(Issue #385-A)。`events` は呼び出し側が区分で絞ったもの。
+ * 競馬場は場コード順(中央 01〜10、地方 30〜)で、{@link CONDITION_MERGE_MIN_RACES} 未満の場は「その他の場」にまとめる(合わせた後で決める)。頭数は分析時の出走頭数(馬の行の数)で、分からないレースは「頭数不明」。
+ * 事象から部分を作って確定する(Issue #625)。
+ */
+export function buildConditionStats(
+  source: VerifyDataSource,
+  events: readonly ProposedBetEvent[],
+  lookups: PopularityLookups = createPopularityLookups(source),
+  facts: ReadonlyMap<number, RaceConditionFacts> = new Map(),
+): ConditionStats {
+  return finalizeConditions(scopedRaces(buildBreakdownParts(events, new Map(), lookups, facts), "all"));
 }
 
 /** 条件の行の項目。`withDiff` が偽(全体の行)なら『全体との差』と『注意』は出さない。 */
@@ -845,26 +1008,42 @@ function venueKindOf(raceId: string): "central" | "nar" | null {
 }
 
 /**
- * 人気帯の内訳を、区分(all・central・nar)ごとに作る。買い目の判定は core の `collectProposedBetEvents`(本体の `proposedBet` と同じ判定)を 1 回だけ回し、
- * 区分は race_id で分ける(最新選択・先読みの除外はレース単位なので、区分で絞った本体の集計と一致する)。判定できた買い目が 1 つも無い区分は null。
- * `betRows` は全件の読みの買い目の行(odds・ev を持つ)。`facts` は分析 id → 条件の索引(`buildConditionFactsIndex`。省略は全レースが各軸の『不明』〈クラスは地方が『地方(対象外)』〉= 距離帯・馬場・芝ダ・クラスの節は出ない)。
+ * 内訳の部分を作る(Issue #625)。買い目の判定は core の `collectProposedBetEvents`(本体の `proposedBet` と同じ判定)を、渡された分析の集合で回す。
+ * `analyses` は**レースが欠けない**集合(同じレースの分析は全部渡す)。区分では絞らない。
+ * `betRows` は買い目の行(odds・ev を持つ。`analyses` に関係する行だけでよい)。`facts` は分析 id → 条件の索引(`buildConditionFactsIndex`)。
+ */
+export function buildVerifyBreakdownParts(
+  source: VerifyDataSource,
+  betRows: readonly VerifyBetRow[],
+  analyses: readonly StoredAnalysis[],
+  facts: ReadonlyMap<number, RaceConditionFacts> = new Map(),
+): BreakdownPart {
+  const events = collectProposedBetEvents(source, PRODUCTION_VERIFY_CONFIG, analyses);
+  return buildBreakdownParts(events, buildBetExtras(betRows), createPopularityLookups(source), facts);
+}
+
+/** 内訳の部分を確定する。判定できた買い目が 1 つも無い区分は null。区分は `venueKind` で絞り、レースは分析 ID の順に足す。 */
+export function finalizeVerifyBreakdowns(part: BreakdownPart): Record<VerifyVenueFilter, VerifyBreakdownResult | null> {
+  const build = (filter: VerifyVenueFilter): VerifyBreakdownResult | null => {
+    const races = scopedRaces(part, filter);
+    if (races.length === 0) {
+      return null;
+    }
+    const stats = finalizePopularity(races);
+    const conditions = finalizeConditions(races);
+    return { stats, conditions, sections: [...renderPopularitySections(stats), ...renderConditionSections(conditions, filter)] };
+  };
+  return { all: build("all"), central: build("central"), nar: build("nar") };
+}
+
+/**
+ * 人気帯の内訳を、区分(all・central・nar)ごとに作る。全分析を 1 つの部分にして確定する(部分の作り方・合わせ方は {@link buildVerifyBreakdownParts}・{@link mergeBreakdownParts}・{@link finalizeVerifyBreakdowns})。
+ * 判定できた買い目が 1 つも無い区分は null。`betRows` は全件の読みの買い目の行(odds・ev を持つ)。`facts` は分析 id → 条件の索引(省略は全レースが各軸の『不明』〈クラスは地方が『地方(対象外)』〉= 距離帯・馬場・芝ダ・クラスの節は出ない)。
  */
 export function computeVerifyBreakdowns(
   source: VerifyDataSource,
   betRows: readonly VerifyBetRow[],
   facts: ReadonlyMap<number, RaceConditionFacts> = new Map(),
 ): Record<VerifyVenueFilter, VerifyBreakdownResult | null> {
-  const events = collectProposedBetEvents(source, PRODUCTION_VERIFY_CONFIG);
-  const extras = buildBetExtras(betRows);
-  const lookups = createPopularityLookups(source);
-  const build = (filter: VerifyVenueFilter): VerifyBreakdownResult | null => {
-    const scoped = filter === "all" ? events : events.filter((e) => venueKindOf(e.raceId) === filter);
-    if (!scoped.some((e) => e.outcome !== "unjudged")) {
-      return null;
-    }
-    const stats = buildPopularityStats(source, scoped, extras, lookups);
-    const conditions = buildConditionStats(source, scoped, lookups, facts);
-    return { stats, conditions, sections: [...renderPopularitySections(stats), ...renderConditionSections(conditions, filter)] };
-  };
-  return { all: build("all"), central: build("central"), nar: build("nar") };
+  return finalizeVerifyBreakdowns(buildVerifyBreakdownParts(source, betRows, source.listAnalyses(), facts));
 }

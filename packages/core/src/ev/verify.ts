@@ -1818,9 +1818,14 @@ export interface ProposedBetEvent {
  * 集計対象の分析(`computeVerifyReport` の `proposedBet` と同じ選別)の配分ベースの買い目を、1 件ずつの判定の事象にして返す(Issue #384)。
  * 区分は絞らない(all)。区分ごとの内訳は、事象の `raceId` から呼び出し側が分ける(最新選択・先読みの除外はレース単位なので、区分で絞った集計と一致する)。
  * 券種ごとに事象を足し上げると、`computeVerifyReport` の `proposedBet` の券種別の要約と一致する。
+ * `analyses` を渡すと、その分析の集合だけを対象にする(Issue #625。開催日ごとの部分を作るとき。**同じレースの分析は全部渡す**)。省略は全分析。
  */
-export function collectProposedBetEvents(store: VerifyDataSource, config: VerifyConfig = DEFAULT_VERIFY_CONFIG): ProposedBetEvent[] {
-  const selected = selectIncludedAnalyses(store, store.listAnalyses(), config);
+export function collectProposedBetEvents(
+  store: VerifyDataSource,
+  config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
+  analyses: readonly StoredAnalysis[] = store.listAnalyses(),
+): ProposedBetEvent[] {
+  const selected = selectIncludedAnalyses(store, analyses, config);
   const events: ProposedBetEvent[] = [];
   accumulateProposedBet(store, selected.included, (event) => events.push(event));
   return events;
