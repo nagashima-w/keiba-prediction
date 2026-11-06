@@ -793,7 +793,7 @@ export class VerifyCore {
       // DO の alarm は 1 つだけ。差分の集計が前倒しで張ると、補完が張った待ちの時刻の alarm は上書きされて消える。何も張らずに返ると補完が止まるので、待ちの時刻に張り直す
       // (alarm が無い・古い・待ちの時刻より後のとき。待ちの時刻より前の alarm はそのまま。それが鳴ったときにまたここに来る)。
       const alarm = await this.deps.getAlarm();
-      if (alarm === null || isStaleAlarm(alarm, t) || alarm > wake) await setAlarm(wake);
+      if (alarm === null || alarm <= t || alarm > wake) await setAlarm(wake); // `alarm <= t`: 今か過去の alarm(鳴っている最中のものを `getAlarm()` が返す場合も、古く残ったものも)。ハンドラの中で getAlarm が null を返す前提に依らない
       return;
     }
     try {

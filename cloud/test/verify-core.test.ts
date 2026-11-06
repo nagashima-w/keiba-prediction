@@ -1542,4 +1542,19 @@ describe("runBackfillTick は自分の待ちが明けるまで何もしない(Is
     await core.runBackfillTick();
     expect(store.calls).toContain("resolve");
   });
+
+  it("getAlarm が今の時刻(鳴っている最中の alarm)を返す状態でも、待ちの途中なら store を呼ばずに alarm を待ちの時刻に張る(ハンドラの中の getAlarm が null を返す前提に依らない)", async () => {
+    const { core, store, kv, clock, getAlarm } = setup();
+    store.state.pending = [pendingRow(1)];
+    store.state.failResolve = true;
+    await core.runBackfillTick();
+    const wake = kv.get<{ notBefore: number }>("backfill")!.notBefore;
+    expect(wake).toBe(T0 + VERIFY_BACKOFF_MS[0]!); // 前提: 待ちに入った
+    clock.now += 1000;
+    (core as unknown as { deps: VerifyCoreDeps }).deps.setAlarm(clock.now); // いま鳴っている alarm が getAlarm に見える
+    store.calls.length = 0;
+    await core.runBackfillTick();
+    expect(store.calls).toEqual([]);
+    expect(getAlarm()).toBe(wake);
+  });
 });
