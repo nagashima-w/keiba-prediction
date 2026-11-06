@@ -20,6 +20,7 @@ import { raceResultUrl } from "../../packages/core/src/scraper/urls";
 import { readFileSync } from "node:fs";
 import { pathFromMeta } from "./meta-path.js";
 import { openNodeSql, type NodeSql } from "./node-sql";
+import { checkDoStatements, type DoPlanException } from "./sql-plan";
 
 /**
  * Issue #554(#549-A3-2): 過去の結果を毎晩取得する状態機械(`RaceArchiveFetchCore`)。時計・アラーム・gate・計画・保存・通知は偽物。
@@ -1291,5 +1292,31 @@ describe("kick: 残ったアラーム(今より 15 分以上前)は無いのと�
     expect(w.alarm).toBe(jst(11, 4, 3, 48, 32) + 228); // 本番の nextRunAt
     await w.core.kick();
     expect(w.alarm).toBe(jst(11, 5, 0));
+  });
+});
+
+describe("DO の SQLite: 流れた SQL の実行計画(EXPLAIN QUERY PLAN。Issue #632)", () => {
+  /** 全走査・一時の並べ替えを許す文。月の表は 1 年 12 行ほど。status は管理者の status の画面だけが流す(起床の経路の外)。 */
+  const EXCEPTIONS: DoPlanException[] = [
+    { match: /^SELECT month FROM ra_month WHERE COALESCE\(last_night/, reason: "月の選択。ra_month は月ごとに 1 行(1 年で約 12 行)で、起床のたびに全部読んでも小さい" },
+    { match: /^SELECT COUNT\(\*\) AS n FROM ra_month WHERE status = \?/, reason: "status の画面だけ。月ごとに 1 行の表" },
+    { match: /^SELECT last_class AS cls, COUNT\(\*\) AS n FROM ra_race WHERE status = 'skipped' GROUP BY last_class/, reason: "status の画面だけ。status の索引で skipped の行に絞ってから一時のグループ化" },
+  ];
+
+  it("取得 → 完了・失敗・拒否を通して流れた全部の文(状態の読み取りを含む)に、例外に載せていない全走査・一時の並べ替えが無い。例外は今も該当する", async () => {
+    const w = mk({ fromMonth: "2026-10" });
+    const { a, b } = standard(w);
+    w.site({ calendars: { "2026-10": ["20261025"] }, lists: { "20261025": [rid(3, 1)] } });
+    w.rejectRace.add(a[0]!);
+    await w.core.kick();
+    await w.runUntil(T0 + 8 * HOUR);
+    await w.core.getStatus();
+    expect(w.resultFetches.length).toBeGreaterThanOrEqual(3); // 前提: 実際に取得まで走っている
+    const r = checkDoStatements(w.sql.statements, (q) => w.sql.plan(q), EXCEPTIONS);
+    expect(r.checked).toBeGreaterThanOrEqual(15); // 前提: 経路の SQL を集められている(空だと検査が空振りする)
+    expect(r.flagged).toBeGreaterThanOrEqual(2); // 前提: 検出が空振りでない(例外の文が実際に引っかかっている)
+    expect(r.unexpected).toEqual([]);
+    expect(r.stale).toEqual([]);
+    void b;
   });
 });

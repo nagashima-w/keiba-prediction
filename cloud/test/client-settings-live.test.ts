@@ -42,6 +42,7 @@ async function setup(postResponse: (body: Record<string, unknown>) => Resp = (b)
   });
   app.start();
   await app.whenIdle();
+  findAll(renders[renders.length - 1]!.tree, (n) => n.tag === "button" && n.attrs?.["data-section"] === "advanced")[0]!.on!.click!(); // Issue #581: 上級の設定(ケリー係数)は初めは閉じている
   const tree = (): VNode => renders[renders.length - 1]!.tree;
   const barText = (): string => JSON.stringify(findAll(tree(), (n) => n.attrs?.["class"] === "settings-bar-status"));
   return { app, renders, patches, tree, barText, type: (k: string, v: string) => field(tree(), k).on!.input!(v), save: () => findAll(tree(), (n) => n.attrs?.["class"] === "settings-save")[0]!.on!.click!() };

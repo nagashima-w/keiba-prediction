@@ -31,7 +31,8 @@ function mountAll(tree: VNode): void {
 }
 
 const CUSTOM: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 500_000, perRaceCap: 50_000, includeComboOdds: true, includeTrioInAllocation: false, additionalInstruction: "1行目\n2行目", clipVariant: "wide15", analysisModel: "haiku", preRaceOffsetMinutes: 90 };
-const input = (over: Partial<SettingsModelInput> = {}): SettingsModelInput => ({ load: { kind: "ready", source: "d1" }, draft: draftFromSettings(CUSTOM), errors: {}, save: { kind: "idle" }, ...over });
+/** Issue #581: 初めは LLM分析・上級の設定が閉じているので、項目単位の検査は全部開いた木で行う(節の開閉は client-settings-sections.test.ts)。 */
+const input = (over: Partial<SettingsModelInput> = {}): SettingsModelInput => ({ load: { kind: "ready", source: "d1" }, draft: draftFromSettings(CUSTOM), errors: {}, save: { kind: "idle" }, sectionOpen: { funds: true, odds: true, llm: true, advanced: true }, ...over });
 const tree = (over: Partial<SettingsModelInput> = {}, actions: ViewActions = noopActions): VNode => renderScreen(buildSettingsModel(input(over)), actions);
 
 describe("設定画面の VNode", () => {
@@ -45,7 +46,8 @@ describe("設定画面の VNode", () => {
   it("入力欄は 33 個(既存の 18〈Issue #470 で的中確率の下限、Issue #533 で単勝・複勝の点数の上限を足した〉+ スコアリングの重み 15。Issue #218・#353)で、すべて data-field に項目名を持つ(FIELD_ORDER の順、そのあとに WEIGHT_FIELD_ORDER の順)", () => {
     const fields = inputs(tree());
     expect(fields.length).toBe(33);
-    expect(fields.map((n) => n.attrs?.["data-field"])).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER]);
+    // Issue #581: 並びは節の順(資金と配分 → オッズの取得と券種 → LLM分析 → 上級の設定〈重みを含む〉)。項目の集合は FIELD_ORDER + WEIGHT_FIELD_ORDER と同じ。
+    expect([...fields.map((n) => String(n.attrs?.["data-field"]))].sort()).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER].sort());
   });
 
   it("入力欄の要素と値: 数値は type=text(inputmode)・追加指示は textarea(maxlength=2000)・クリップ幅は select(value と option)・真偽は checkbox(checked)", () => {
@@ -76,7 +78,8 @@ describe("設定画面の VNode", () => {
       expect(n.on?.change, String(n.attrs?.["data-field"])).toBeDefined();
       n.on!.change!(`値:${String(n.attrs?.["data-field"])}`);
     }
-    expect(calls).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER].map((k) => [k, `値:${k}`]));
+    expect(fields.length, "前提: 33 項目すべてに処理がある").toBe(33);
+    expect(calls).toEqual(fields.map((n) => [String(n.attrs?.["data-field"]), `値:${String(n.attrs?.["data-field"])}`]));
   });
 
   it("Issue #189: 文字を打つ欄(数値の text・textarea)は、change に加えて input でも onSettingsInput を呼ぶ(入力中の値を、保存の直前に取りこぼさない)。checkbox・select は change だけ", () => {
@@ -94,7 +97,7 @@ describe("設定画面の VNode", () => {
         expect(n.on?.input, `${key} は input を持たない`).toBeUndefined();
       }
     }
-    expect(calls).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER].filter((k) => typed.has(k)).map((k) => [k, `入力:${k}`]));
+    expect(calls).toEqual(fields.map((n) => String(n.attrs?.["data-field"])).filter((k) => typed.has(k)).map((k) => [k, `入力:${k}`]));
     expect(typed.size).toBe(9 + 15); // 既存の9項目(Issue #470 で minHitProb、Issue #533 で単勝・複勝の点数の上限を足した)+ 重み15項目(数値の text 欄)
   });
 
@@ -193,8 +196,7 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
 
   it("節(section.weights)に、見出し(h2)・説明・小見出し(h3)2つ・入力欄15個がある。小見出しは「環境・状態バイアス補正」→「基礎スコア」で、各小見出しの下に 7 個・8 個の入力欄が並ぶ", () => {
     const s = section(tree());
-    expect(findAll(s, (n) => n.tag === "h2").map(textOf)).toEqual(["スコアリングの重み"]);
-    expect(findAll(s, (n) => n.tag === "h3").map(textOf)).toEqual(["環境・状態バイアス補正", "基礎スコア"]);
+    expect(findAll(s, (n) => n.tag === "h3").map(textOf)).toEqual(["スコアリングの重み", "環境・状態バイアス補正", "基礎スコア"]); // Issue #581: 上級の設定の中なので、節の見出しは h3(h2 は節の見出し)
     expect(inputs(s).map((n) => n.attrs?.["data-field"])).toEqual([...WEIGHT_FIELD_ORDER]);
     const groups = byClass(s, "weights-group");
     expect(groups.map((g) => inputs(g).length)).toEqual([7, 8]);
@@ -212,7 +214,7 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
     expect(labels.some((l) => l.startsWith("馬場状態適性(道悪)"))).toBe(true);
   });
 
-  it("入力欄の位置: 通常の項目 16 個の後ろ・保存ボタンの前。プレビューより前", () => {
+  it("入力欄の位置: 重みは最後の節(上級の設定)の中で通常の項目の後ろ・保存ボタンの前。プレビューより前", () => {
     const t = tree({ previewOpen: true });
     const top = t.children as VNode[];
     const idx = (pred: (c: VNode) => boolean): number => top.findIndex((c) => typeof c !== "string" && pred(c));
@@ -220,7 +222,10 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
     const saveIndex = idx((c) => byClass(c, "settings-save").length > 0); // 保存ボタンは帯(settings-bar)の中
     const previewIndex = idx((c) => byClass(c, "preview-toggle").length > 0);
     const lastFieldIndex = Math.max(...FIELD_ORDER.map((k) => idx((c) => inputs(c).some((n) => n.attrs?.["data-field"] === k))));
-    expect(weightsIndex).toBeGreaterThan(lastFieldIndex);
+    expect(weightsIndex).toBeGreaterThanOrEqual(lastFieldIndex); // Issue #581: 重みは最後の節(上級の設定)の中にある
+    const advancedKeys = inputs(top[weightsIndex] as VNode).map((n) => String(n.attrs?.["data-field"]));
+    expect(advancedKeys).toEqual(["kellyFraction", "preRaceOffsetMinutes", ...WEIGHT_FIELD_ORDER]); // 節の中でも、通常の項目のあとに重み
+    expect(weightsIndex).toBeGreaterThan(idx((c) => inputs(c).some((n) => n.attrs?.["data-field"] === "additionalInstruction")));
     expect(saveIndex).toBeGreaterThan(weightsIndex);
     expect(previewIndex).toBeGreaterThan(weightsIndex);
     expect(saveIndex).toBeGreaterThan(previewIndex); // Issue #580: 保存の帯は画面の末尾(プレビューより後ろ)
