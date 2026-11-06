@@ -71,7 +71,7 @@ DO の SQLite は、SQL を文字列定数で持たず、コアのメソッド�
 
 ここで検査する(全走査も一時の並べ替えも無いもの): 上のほか、再計算の保存・読み(`analysis-close.ts`)、`NEEDING_REPORT_SQL`、`READ_RESULTS_SQL`、`READ_PERIOD_SQL` の残り 5 本、`RECORD_SQL`、`INSERT_MONTHLY_SQL`・`REPLACE_MONTHLY_SQL`、`RECOMPUTE_RACES_SQL`・`RECOMPUTE_BY_ANALYSIS_IDS_SQL`、`settleRaceBackfillSql`、`SAVE_RACE_CLASS_SQL`、設定の読み書き、`VERIFY_DAY_ANALYSES_SQL`・`VERIFY_NO_DATE_ANALYSES_SQL`、騎手名・調教師名の書き込み、`targetsSql`・`targetsCloseSql`・`verifyDayHorsesSql`・`verifyDayAllocationSql`・`verifyDayResultSql`・`verifyDayCloseSql` の各文。
 
-既存の検査(integration テスト):
+#### 既存の検査(integration テスト)
 
 - `FIT_*_SQL` 3 本: `monthly-report-repository.integration.test.ts`
 - `LOAD_SQL`: `kaisai-days-repository.integration.test.ts`
@@ -81,7 +81,7 @@ DO の SQLite は、SQL を文字列定数で持たず、コアのメソッド�
 - `LIST_*_BACKFILL_SQL`・`COUNT_*_BACKFILL_SQL` 8 本と `RECONCILE_RECENT_RACE_BACKFILL_SQL`: `result-backfill-state.integration.test.ts`
 - `FILL_WIN_ODDS_SQL`・`FILL_SCRATCHED_SQL`・`FILL_WIN_PAYOUT_SQL`: `result-fill-sql-equivalence.integration.test.ts`
 
-既知の例外(今も全走査がある):
+#### 既知の例外(今も全走査がある)
 
 | SQL | 呼ばれ方 | 理由 | Issue |
 |---|---|---|---|
@@ -92,7 +92,7 @@ DO の SQLite は、SQL を文字列定数で持たず、コアのメソッド�
 | `RECONCILE_RACE_BACKFILL_SQL` | 結果の補完の整合検査(夜に 1 回) | 分析と結果の全件の突き合わせ。直近だけの `RECONCILE_RECENT_RACE_BACKFILL_SQL` もある | #612 |
 | `CLASS_DISTRIBUTION_SQL` | 補完の status を開くたび(管理者) | 分析の全件を `race_class` で集計する | #612 |
 
-未検査(export されない SQL):
+#### 未検査(export されない SQL)
 
 - `horse-runs-repository.ts` の `readHorseRunsStatus`(`horse_runs` の `GROUP BY` 3 文。管理者の `/api/horse-runs` だけ。画面は自動で呼ばない)は、`horse_runs` を全件読む。診断用である(db-usage-594.md §3.2)。
 - `horse-runs-repository.ts` の `READ_SQL_HEAD`(`horse_id IN (…)`)、`analysis-repository.ts` の `listStatements`・`readStored` の `IN` 句など、実行時に組み立てる SQL は、`analysis-repository.integration.test.ts`・`analysis-list-order.integration.test.ts` などが計画を見ている。この一覧の自動の漏れ止めには載らない。
