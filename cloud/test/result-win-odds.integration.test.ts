@@ -88,7 +88,7 @@ describe("saveResult: 取り込みと同時に確定オッズ・人気を保存�
   it("オッズを持つ馬がいれば、馬の UPSERT の直後に UPDATE が 1 文足される(順序: UPSERT → オッズ UPDATE → 面)。どの文のバインドも 2 個以内。除外の馬は null のまま", async () => {
     const spy = spyDb();
     await store(spy.db).saveResult("202603020211", ENTRIES, "芝");
-    expect(spy.calls.map((c) => /^\s*(INSERT INTO|UPDATE)\s+(\w+)/.exec(c.sql)!.slice(1, 3).join(" "))).toEqual(["INSERT INTO race_results", "UPDATE race_results", "INSERT INTO race_result_meta", "INSERT INTO race_backfill"]); // 最後は補完の状態の作り直し(Issue #597)
+    expect(spy.calls.map((c) => /^\s*(INSERT INTO|UPDATE)\s+(\w+)/.exec(c.sql)!.slice(1, 3).join(" "))).toEqual(["INSERT INTO race_results", "UPDATE race_results", "INSERT INTO race_result_meta", "INSERT INTO race_backfill", "INSERT INTO verify_race_mark"]); // 最後の 2 文は補完の状態の作り直し(Issue #597)と検証の変更の印(Issue #624)
     expect(Math.max(...spy.calls.map((c) => c.binds))).toBeLessThanOrEqual(2);
     expect((await rows("202603020211")).map((r) => [r["umaban"], r["win_odds"], r["ninki"]])).toEqual([
       [1, 4.5, 2],
@@ -260,7 +260,7 @@ describe("saveWinOdds: 過去分の補完(オッズ・人気だけを、NULL の
     await store().saveResult("202603020211", eighteen.map(({ winOdds: _o, ninki: _n, ...rest }) => rest), null);
     const spy = spyDb();
     await store(spy.db).saveWinOdds("202603020211", eighteen);
-    expect(spy.calls).toHaveLength(2); // オッズの補完 + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)
+    expect(spy.calls).toHaveLength(3); // オッズの補完 + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)+ 検証の変更の印の 1 文(Issue #624)
     expect(spy.calls[0]!.binds).toBe(2);
     expect((await rows("202603020211")).filter((r) => r["win_odds"] !== null)).toHaveLength(18);
   });

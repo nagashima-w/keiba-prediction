@@ -1,16 +1,20 @@
 /**
- * 全部の検証を流すスクリプト(scripts/verify-all.sh)が、CI の流すコマンドを覆っていることの静的・動的テスト(Issue #606)。
+ * 全部の検証を流すスクリプト(scripts/verify-all.sh)の、段の形と CI との対応の静的・動的テスト(Issue #606・#620)。
  *
- * 背景: レビュー担当は全部のテストと smoke を流さず、実装担当がこのスクリプトを流し、CI がもう一度流す、という分担にした。
- * そのため「CI に段を足したのにスクリプトに足し忘れる」と、ローカルの検証だけが CI より甘くなる(CLAUDE.md 鉄則 9 の再発)。
- * このテストは、CI の run: のコマンドとスクリプトの段を突き合わせ、片方だけに足すと赤くなるようにする。
+ * 背景: #606 で、レビュー担当は全部のテストと smoke を流さず、実装担当がこのスクリプトを流す分担にした。#620 でテストを 3 層
+ * (ユニット/インテグレーション/全件と smoke)に分け、既定では速い検査(ユニットの全件と、関係するインテグレーション)だけを流し、
+ * 全件と smoke は push 後の CI で確かめる形にした。`--full` は CI が流す段をそのまま全部流す(従来の挙動)。
+ * 「CI に段を足したのにスクリプト(--full)に足し忘れる」と、全件の検証だけが CI より甘くなる(CLAUDE.md 鉄則 9 の再発)ので、
+ * このテストは CI の run: のコマンドと `--full` の段を突き合わせ、片方だけに足すと赤くなるようにする。
  *
  * 検証する不変条件:
  * 1. ci.yml と deploy-cloud.yml の deploy 以外のジョブの run: のうち、依存のインストール以外のコマンド(作業ディレクトリつき)が、
- *    `--dry-run` の出力に 1 つ残らず現れる(CI → スクリプト)。
- * 2. `--dry-run` の出力の段(確率の質の `--research` の段を除く)は、どれも CI の run: に現れる(スクリプト → CI。CI に無い検証を黙って足さない)。
+ *    `--full --dry-run` の出力に 1 つ残らず現れる(CI → スクリプト)。
+ * 2. `--full --dry-run` の出力の段(確率の質の `--research` の段を除く)は、どれも CI の run: に現れる(スクリプト → CI。CI に無い検証を黙って足さない)。
  * 3. 段の順序: ルートの型検査 → ルートのテスト → cloud の型検査 → テスト → dry-run → D1 の migration(ローカル)の順(deploy-cloud.yml の check ジョブの順)で、
  *    smoke は最後。
+ * 3b. 既定(--full 無し)の形: smoke と cloud の全件(`pnpm test`)を流さず、ユニットの全件(`pnpm run test:unit`)と関係するインテグレーション、
+ *    `deploy:dry`、D1 の migration を流す。CI に無い段は、ユニットの全件と関係するインテグレーションの 2 つだけ。
  * 4. `--research` を付けたときだけ `pnpm test:research` の段が足され、その script がルートの package.json に実在する。
  * 5. SMOKE_PORT は環境変数でも `--smoke-port` でも渡せ、引数が環境変数に優先する。指定が無いときは出力しない。
  * 6. 失敗の伝播: 全段を `true` に差し替えると 0 で終わり、どの 1 段を `false` にしても 0 以外で終わる(その段だけが終了コード 1、ほかは 0)。
@@ -108,8 +112,10 @@ const CI_RUNS = [
   ...extractRuns(readTextLf(".github", "workflows", "ci.yml")),
   ...extractRuns(readTextLf(".github", "workflows", "deploy-cloud.yml")),
 ];
-const DRY = parseStages(runScript(["--dry-run"]).stdout);
+const DRY = parseStages(runScript(["--dry-run", "--full"]).stdout);
+const DRY_DEFAULT = parseStages(runScript(["--dry-run"]).stdout);
 const DRY_RESEARCH = parseStages(runScript(["--dry-run", "--research"]).stdout);
+const DRY_FULL_RESEARCH = parseStages(runScript(["--dry-run", "--full", "--research"]).stdout);
 
 describe("verify-all.sh は CI の run: を覆う", () => {
   it("前提: CI の run: を抽出できていて、複数行の run: は deploy 以外のジョブに無い", () => {
@@ -121,14 +127,15 @@ describe("verify-all.sh は CI の run: を覆う", () => {
     expect(CI_RUNS.some((r) => r.job === "deploy")).toBe(false);
   });
 
-  it("CI の run:(インストール以外)は、すべて --dry-run の段に現れる", () => {
+  it("CI の run:(インストール以外)は、すべて --full --dry-run の段に現れる", () => {
     const nonInstall = CI_RUNS.filter((r) => !INSTALL.test(r.cmd));
     expect(nonInstall.length).toBeGreaterThanOrEqual(7);
     expect(missingInScript(CI_RUNS, DRY)).toEqual([]);
   });
 
-  it("--dry-run の段(--research を除く)は、すべて CI の run: に現れる", () => {
+  it("--full --dry-run の段(--research を除く)は、すべて CI の run: に現れる", () => {
     expect(DRY.length).toBe(7);
+    expect(DRY_DEFAULT.length).toBe(7);
     const stray = DRY.filter((s) => !CI_RUNS.some((r) => r.dir === s.dir && r.cmd === s.cmd));
     expect(stray).toEqual([]);
   });
@@ -145,11 +152,47 @@ describe("verify-all.sh は CI の run: を覆う", () => {
     ]);
   });
 
+  it("既定(--full 無し)の形: smoke と cloud の全件を流さず、ユニットの全件・関係するインテグレーション・deploy:dry・D1 の migration を流す", () => {
+    expect(DRY_DEFAULT.map((s) => s.id)).toEqual([
+      "root-typecheck",
+      "root-test",
+      "cloud-typecheck",
+      "cloud-test-unit",
+      "cloud-test-integration-related",
+      "cloud-deploy-dry",
+      "cloud-d1-migrate-local",
+    ]);
+    expect(DRY_DEFAULT.some((s) => s.id === "cloud-smoke" || s.id === "cloud-test")).toBe(false);
+    expect(DRY_DEFAULT.some((s) => /\bsmoke\b/.test(s.cmd))).toBe(false);
+    expect(DRY_DEFAULT.find((s) => s.id === "cloud-test-unit")).toEqual({ id: "cloud-test-unit", dir: "cloud", cmd: "pnpm run test:unit" });
+    // CI に無い段は、ユニットの全件と関係するインテグレーションの 2 つだけ(それ以外は CI と同じコマンド)。
+    const notInCi = DRY_DEFAULT.filter((s) => !CI_RUNS.some((r) => r.dir === s.dir && r.cmd === s.cmd)).map((s) => s.id);
+    expect(notInCi).toEqual(["cloud-test-unit", "cloud-test-integration-related"]);
+    // --full の段は、既定の段に cloud の全件と smoke を足し、ユニットと関係するインテグレーションを外したもの。
+    expect(DRY.map((s) => s.id).filter((id) => !DRY_DEFAULT.some((d) => d.id === id))).toEqual(["cloud-test", "cloud-smoke"]);
+  });
+
+  it("test:unit・test:integration が cloud の package.json にあり、test は全件のまま、CI は test:unit を使わない", () => {
+    const pkg = JSON.parse(readTextLf("cloud", "package.json")) as { scripts: Record<string, string> };
+    expect(pkg.scripts["test"]).toBe("vitest run");
+    expect(pkg.scripts["test:unit"]).toContain("--exclude");
+    expect(pkg.scripts["test:integration"]).toContain(".integration.test.ts");
+    expect(CI_RUNS.some((r) => /test:(unit|integration)/.test(r.cmd))).toBe(false);
+  });
+
+  it("関係するインテグレーションの段のスクリプトが実在する", () => {
+    const stage = DRY_DEFAULT.find((s) => s.id === "cloud-test-integration-related");
+    expect(stage?.cmd).toBe("node ../scripts/verify-related-integration.mjs");
+    expect(() => readTextLf("scripts", "verify-related-integration.mjs")).not.toThrow();
+  });
+
   it("--research を付けたときだけ pnpm test:research の段が足され、その script が実在する", () => {
     expect(DRY.some((s) => s.cmd === "pnpm test:research")).toBe(false);
-    const extra = DRY_RESEARCH.filter((s) => !DRY.some((d) => d.id === s.id));
+    expect(DRY_DEFAULT.some((s) => s.cmd === "pnpm test:research")).toBe(false);
+    const extra = DRY_RESEARCH.filter((s) => !DRY_DEFAULT.some((d) => d.id === s.id));
     expect(extra).toEqual([{ id: "root-test-research", dir: ".", cmd: "pnpm test:research" }]);
-    expect(DRY_RESEARCH.length).toBe(DRY.length + 1);
+    expect(DRY_RESEARCH.length).toBe(DRY_DEFAULT.length + 1);
+    expect(DRY_FULL_RESEARCH.length).toBe(DRY.length + 1);
     const pkg = JSON.parse(readTextLf("package.json")) as { scripts: Record<string, string> };
     expect(pkg.scripts["test:research"]).toBeTruthy();
     // 普段の test から外している(だから --research が要る)。
@@ -172,26 +215,33 @@ describe("verify-all.sh の引数と環境変数", () => {
 });
 
 describe("verify-all.sh の失敗の伝播(コマンドを true/false に差し替えて流す)", () => {
-  it("全段を true に差し替えると 0 で終わり、全段が終了コード 0", () => {
-    const r = runScript(["--research"], { VERIFY_ALL_STUB: "1" });
-    expect(r.code).toBe(0);
-    for (const s of DRY_RESEARCH) {
-      expect(r.stdout).toMatch(new RegExp(`^${s.id}\\s+終了コード=0 `, "m"));
-    }
-    expect(r.stdout).toContain("全段成功");
-  });
-
-  for (const stage of DRY_RESEARCH) {
-    it(`${stage.id} だけが失敗しても 0 以外で終わり、その段だけが終了コード 1 になる`, () => {
-      const r = runScript(["--research"], { VERIFY_ALL_STUB: "1", VERIFY_ALL_FAIL_STAGE: stage.id });
-      expect(r.code).toBe(1);
-      expect(r.stdout).toMatch(new RegExp(`^${stage.id}\\s+終了コード=1 `, "m"));
-      const others = DRY_RESEARCH.filter((s) => s.id !== stage.id);
-      expect(others.length).toBe(DRY_RESEARCH.length - 1);
-      for (const s of others) {
+  const MODES: Array<{ name: string; flags: string[]; stages: Stage[] }> = [
+    { name: "既定", flags: ["--research"], stages: DRY_RESEARCH },
+    { name: "--full", flags: ["--full", "--research"], stages: DRY_FULL_RESEARCH },
+  ];
+  for (const mode of MODES) {
+    it(`${mode.name}: 全段を true に差し替えると 0 で終わり、全段が終了コード 0`, () => {
+      const r = runScript(mode.flags, { VERIFY_ALL_STUB: "1" });
+      expect(r.code).toBe(0);
+      expect(mode.stages.length).toBeGreaterThanOrEqual(8);
+      for (const s of mode.stages) {
         expect(r.stdout).toMatch(new RegExp(`^${s.id}\\s+終了コード=0 `, "m"));
       }
+      expect(r.stdout).toContain("全段成功");
     });
+
+    for (const stage of mode.stages) {
+      it(`${mode.name}: ${stage.id} だけが失敗しても 0 以外で終わり、その段だけが終了コード 1 になる`, () => {
+        const r = runScript(mode.flags, { VERIFY_ALL_STUB: "1", VERIFY_ALL_FAIL_STAGE: stage.id });
+        expect(r.code).toBe(1);
+        expect(r.stdout).toMatch(new RegExp(`^${stage.id}\\s+終了コード=1 `, "m"));
+        const others = mode.stages.filter((s) => s.id !== stage.id);
+        expect(others.length).toBe(mode.stages.length - 1);
+        for (const s of others) {
+          expect(r.stdout).toMatch(new RegExp(`^${s.id}\\s+終了コード=0 `, "m"));
+        }
+      });
+    }
   }
 });
 

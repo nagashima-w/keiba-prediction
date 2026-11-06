@@ -121,7 +121,7 @@ describe("毎晩の変換の D1 の行数(実測)", () => {
           alarm = t;
         },
         getAlarm: async () => alarm,
-        archive: { listCatalogPage: (a, l) => meteredStore.listCatalogPage(a, l), readRaceArchives: (ids) => meteredStore.readRaceArchives(ids) },
+        archive: { listCatalogPage: (a, l, s) => meteredStore.listCatalogPage(a, l, s), readRaceArchives: (ids) => meteredStore.readRaceArchives(ids) },
         convert: (t, n) => {
           convertSteps += 1;
           return convertRaceArchives(metered as never, t, n);

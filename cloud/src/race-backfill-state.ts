@@ -4,7 +4,7 @@
  * 補完の列挙・件数の SQL は、以前は `analyses` の全部を毎回読んでいた(読み取りが分析の行数 N に比例)。ここでは、レースごとの小さな表に**段階ごとの状態**を持ち、
  * 未完了の行だけの部分索引から読む。状態の導出(条件)は**この 1 か所**にあり、次の 3 つが同じ式を使う(migration の初期投入はこの式の文字列をそのまま持ち、テストが一致を固定する):
  *  - 書き込みの batch の最後の 1 文({@link RECOMPUTE_RACES_SQL}・{@link RECOMPUTE_BY_ANALYSIS_IDS_SQL}): 書いたレースの状態を作り直す
- *  - 整合検査({@link RECONCILE_RACE_BACKFILL_SQL}): 全レースを作り直し、食い違いを直す(補完の 1 晩 1 回)
+ *  - 整合検査({@link RECONCILE_RACE_BACKFILL_SQL}・直近だけの {@link RECONCILE_RECENT_RACE_BACKFILL_SQL}): レースを作り直し、食い違いを直す(補完の 1 晩 1 回。全件は 7 晩に 1 回、他は直近 14 日)
  *  - migration 0035 の初期投入
  *
  * ## 列
@@ -78,6 +78,17 @@ export const RECOMPUTE_BY_ANALYSIS_IDS_SQL = upsertState(
  * 直した行数(`meta.changes`)が 0 でなければ、書き込みの経路のどこかが再計算を呼んでいない兆し。
  */
 export const RECONCILE_RACE_BACKFILL_SQL = upsertState(raceBackfillStateSelect(""));
+
+/**
+ * 直近だけの整合検査(Issue #614): 開催日が `?1`(YYYYMMDD)以降の分析を持つレースだけを作り直す。**そのレースの分析・結果の行は全部読む**(最小の開催日と段階 3 が全件の検査と同じ値になるように)。
+ * 開催日の索引(`idx_analyses_kaisai_date`)で絞るので、読み取りは古いレースの数に依らない。開催日が NULL の分析だけのレースは対象外(全件の検査が直す)。
+ */
+export const RECONCILE_RECENT_RACE_BACKFILL_SQL = upsertState(
+  raceBackfillStateSelect(
+    "WHERE a.race_id IN (SELECT race_id FROM analyses WHERE kaisai_date >= ?1)",
+    "WHERE race_id IN (SELECT race_id FROM analyses WHERE kaisai_date >= ?1)",
+  ),
+);
 
 /** 済み・諦めを写す文(段階 `stage` の対象〈状態 1〉を 2 にする)。レース ID の JSON 配列を束縛する。 */
 export function settleRaceBackfillSql(stage: 1 | 2 | 3 | 4): string {

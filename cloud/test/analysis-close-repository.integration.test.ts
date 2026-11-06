@@ -150,13 +150,13 @@ describe("D1AnalysisStore.saveClose / getStoredClose(Issue #338)", () => {
     expect(await count("analysis_close_bets")).toBe(0);
   });
 
-  it("D1 の文は 1 回の batch に 3 文(行の UPSERT・買い目の削除・買い目の挿入)で、買い目の数によらず一定。買い目が無い回は 2 文", async () => {
+  it("D1 の文は 1 回の batch に 3 文(行の UPSERT・買い目の削除・買い目の挿入)で、買い目の数によらず一定。買い目が無い回は 2 文。それぞれの最後に検証の変更の印の 1 文(Issue #624)が付く", async () => {
     const id = await saveBase();
     const spy = spyDb(local.db);
     const spied = new D1AnalysisStore({ db: spy.db, bucket: local.r2 });
     await spied.saveClose(id, okPayload(1, Array.from({ length: 40 }, (_, i) => 100 + i)));
     await spied.saveClose(id, { round: 2, status: "skipped", reason: "unset", dueAtMs: DUE, firedAtMs: DUE, lateMs: 0, oddsOfficialDatetime: null, allocation: null });
-    expect(spy.batches).toEqual([3, 2]);
+    expect(spy.batches).toEqual([4, 3]);
     expect(await count("analysis_close_bets")).toBe(40);
   });
 

@@ -29,6 +29,7 @@
  */
 
 import { RECOMPUTE_BY_ANALYSIS_IDS_SQL } from "./race-backfill-state";
+import { verifyRaceMarkByAnalysisIdsStatement } from "./verify-race-mark";
 import { decodeDetail } from "./analysis-detail";
 import { extractStartTime } from "../../packages/core/src/ev/lookahead-suspicion.js";
 import { monthKey, type R2Usage } from "./r2-fence";
@@ -250,6 +251,8 @@ export class D1VerifyStore {
       statements.push(this.db.prepare(COMMIT_SQL).bind(JSON.stringify(rows)));
       // クラス(race_class)を埋めることがあるので、補完の状態(race_backfill。Issue #597)をその分析のレースについて作り直す(状態が変わらなければ書かない)。
       statements.push(this.db.prepare(RECOMPUTE_BY_ANALYSIS_IDS_SQL).bind(JSON.stringify(resolved.map((r) => r.id))));
+      // 検証の差分のための、レースの変更の印(Issue #624)。分析 ID からレースを引いて 1 文(複数のレースは別の seq)。
+      statements.push(verifyRaceMarkByAnalysisIdsStatement(this.db, resolved.map((r) => r.id)));
     }
     if (gets > 0) {
       const ym = monthKey(this.now());

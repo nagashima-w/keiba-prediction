@@ -37,7 +37,8 @@
  *   17 桁の浮動小数の往復はローカルの D1 で一致を確かめた(本番の SQLite のビルドでの確認は最初の実保存)。
  */
 
-import { RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, settleRaceBackfillSql } from "./race-backfill-state";
+import { verifyRaceMarkStatement } from "./verify-race-mark";
+import { RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, RECONCILE_RECENT_RACE_BACKFILL_SQL, settleRaceBackfillSql } from "./race-backfill-state";
 import {
   comboPayoutParams,
   DELETE_COMBO_PAYOUTS_SQL,
@@ -137,7 +138,23 @@ const INSERT_COMBOS_JSON_SQL = jsonEachInsertSelectSql(INSERT_COMBO_PAYOUT_SQL);
 const MARK_IMPORTED_JSON_SQL = jsonEachInsertSelectSql(MARK_COMBO_IMPORTED_SQL);
 
 /**
- * 確定の単勝オッズ・人気を埋める文(Issue #259。migration 0011 の D1 専用の列。束縛値は `[行の配列の JSON, race_id]` の 2 個。行は `[umaban, winOdds, ninki]`)。
+ * 補完の UPDATE 3 文が共有する、束縛した JSON(`?1`。馬番をキーにしたオブジェクト)から、その行の馬番の値を引く式(Issue #615)。
+ * 以前は `UPDATE … FROM (SELECT … FROM json_each(?)) j WHERE umaban = j.u` で、実行計画が「`race_results` を外側、`json_each` を内側」になり、
+ * 外側の全行 × 内側の全要素(馬の数の 2 乗。14 頭で 239 行)を読んでいた。この形は `race_results` を `race_id` の索引で 1 回引き、行ごとに JSON から値を引く(14 頭で 15 行)。
+ * 入力に無い馬番は `json_extract` が NULL を返し、WHERE の `IS NOT NULL` で落ちる(触らない)。
+ */
+const JSON_BY_UMABAN = `json_extract(?1, '$."' || umaban || '"')`;
+const JSON_VALUE = JSON_BY_UMABAN;
+const JSON_ODDS = `json_extract(${JSON_BY_UMABAN}, '$[0]')`;
+const JSON_NINKI = `json_extract(${JSON_BY_UMABAN}, '$[1]')`;
+
+/** `[馬番, 値]` の並びを、補完の UPDATE が引く「馬番をキーにしたオブジェクト」にする(Issue #615)。同じ馬番が重複したら**後勝ち**(旧い SQL では不定だった。呼び出し元は 1 頭 1 行で作る)。 */
+function byUmaban(pairs: ReadonlyArray<readonly [number, unknown]>): Record<string, unknown> {
+  return Object.fromEntries(pairs.map(([umaban, value]) => [String(umaban), value]));
+}
+
+/**
+ * 確定の単勝オッズ・人気を埋める文(Issue #259。migration 0011 の D1 専用の列。束縛値は `[JSON, race_id]` の 2 個。JSON は馬番をキーにしたオブジェクトで、値は `[winOdds, ninki]`。Issue #615)。
  * **NULL の列だけを埋める**: 入力が non-null で、保存済みの列が NULL の馬の、その列だけ(`COALESCE` で、既に値のある列は残す)。したがって
  *  - 冪等(2 回目は WHERE に当たる行が無く、書き込みは 0 行。別の値を渡しても上書きしない)
  *  - 他の列(着順・払戻・通過順・上がり)には触れない
@@ -145,26 +162,23 @@ const MARK_IMPORTED_JSON_SQL = jsonEachInsertSelectSql(MARK_COMBO_IMPORTED_SQL);
  * 新規の取り込み(`saveResult` の 6 文目)と、過去分の補完(`saveWinOdds`)が**同じこの 1 文**を使う(経路を 1 つにして、冪等性の検査を 1 か所にする)。
  * 馬ごとの UPSERT(codec の文)は、この 2 列を SET に含めない: 再取り込みで、保存済みのオッズが消えない。
  */
-export const FILL_WIN_ODDS_SQL = `UPDATE race_results SET win_odds = COALESCE(race_results.win_odds, j.o), ninki = COALESCE(race_results.ninki, j.n)
-           FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS o, json_extract(value,'$[2]') AS n FROM json_each(?)) j
-           WHERE race_results.race_id = ? AND race_results.umaban = j.u
-             AND ((race_results.win_odds IS NULL AND j.o IS NOT NULL) OR (race_results.ninki IS NULL AND j.n IS NOT NULL))`;
+export const FILL_WIN_ODDS_SQL = `UPDATE race_results SET win_odds = COALESCE(win_odds, ${JSON_ODDS}), ninki = COALESCE(ninki, ${JSON_NINKI})
+           WHERE race_id = ?2
+             AND ((win_odds IS NULL AND ${JSON_ODDS} IS NOT NULL) OR (ninki IS NULL AND ${JSON_NINKI} IS NOT NULL))`;
 
 /**
- * 取消・除外の記録(`scratched`)を、保存済みの行の NULL に限って埋める文(Issue #270。#72 の残り。束縛値は `[行の配列の JSON, race_id]` の 2 個。行は `[umaban, scratched]`で、scratched は取消・除外が 1・それ以外が 0)。
+ * 取消・除外の記録(`scratched`)を、保存済みの行の NULL に限って埋める文(Issue #270。#72 の残り。束縛値は `[JSON, race_id]` の 2 個。JSON は馬番をキーにしたオブジェクトで、値は scratched(Issue #615)で、scratched は取消・除外が 1・それ以外が 0)。
  * 対象は **`scratched IS NULL` かつ `finish_position IS NULL` の行だけ**(`scratched` を記録する前に取り込んだ行のうち、取消か中止か判別できない行。着順のある馬は取消でありえないので書かない):
  *  - 冪等(2 回目は WHERE に当たる行が無く、書き込みは 0 行。別の値を渡しても、記録済みの 0/1 を上書きしない)
  *  - 他の列(着順・払戻・通過順・上がり・オッズ・人気)には触れない
  *  - 結果の行が無い馬番・レースには行を作らない(UPDATE だけ)
  * 新規の取り込みは `saveResult` の UPSERT が scratched を書く(全頭に 0/1)ので、この文を使うのは過去分の補完(`saveScratched`)だけ。
  */
-export const FILL_SCRATCHED_SQL = `UPDATE race_results SET scratched = j.s
-           FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS s FROM json_each(?)) j
-           WHERE race_results.race_id = ? AND race_results.umaban = j.u
-             AND race_results.scratched IS NULL AND race_results.finish_position IS NULL`;
+export const FILL_SCRATCHED_SQL = `UPDATE race_results SET scratched = ${JSON_VALUE}
+           WHERE race_id = ?2 AND scratched IS NULL AND finish_position IS NULL AND ${JSON_VALUE} IS NOT NULL`;
 
 /**
- * 単勝の確定払戻(`win_payout`)を、保存済みの行の NULL に限って埋める文(Issue #556。束縛値は `[行の配列の JSON, race_id]` の 2 個。行は `[umaban, winPayout]`)。
+ * 単勝の確定払戻(`win_payout`)を、保存済みの行の NULL に限って埋める文(Issue #556。束縛値は `[JSON, race_id]` の 2 個。JSON は馬番をキーにしたオブジェクトで、値は winPayout。Issue #615)。
  * 対象は **`win_payout IS NULL` の行で、入力の払戻が non-null のものだけ**(単勝の払戻の保存は #100〈2026-09-23〉から。それより前に取り込んだ約 1,140 レースは全馬が NULL):
  *  - 冪等(2 回目は WHERE に当たる行が無く、書き込みは 0 行。別の値を渡しても、保存済みの払戻を上書きしない)
  *  - 他の列(着順・複勝払戻・通過順・上がり・オッズ・人気・scratched)・組合せ払戻には触れない
@@ -172,10 +186,8 @@ export const FILL_SCRATCHED_SQL = `UPDATE race_results SET scratched = j.s
  *  - 同着(1 着が 2 頭)は、入力に両馬の払戻があれば、両方の行に別々の額を書く
  * 新規の取り込みは `saveResult` の UPSERT が `win_payout` を書くので、この文を使うのは過去分の補完(`saveWinPayout`)だけ。
  */
-export const FILL_WIN_PAYOUT_SQL = `UPDATE race_results SET win_payout = j.p
-           FROM (SELECT json_extract(value,'$[0]') AS u, json_extract(value,'$[1]') AS p FROM json_each(?)) j
-           WHERE race_results.race_id = ? AND race_results.umaban = j.u
-             AND race_results.win_payout IS NULL AND j.p IS NOT NULL`;
+export const FILL_WIN_PAYOUT_SQL = `UPDATE race_results SET win_payout = ${JSON_VALUE}
+           WHERE race_id = ?2 AND win_payout IS NULL AND ${JSON_VALUE} IS NOT NULL`;
 
 /**
  * 結果の補完の段階 4 の列挙(単勝の払戻の補完)。Issue #597 から**レース単位の状態の表 `race_backfill`**(migration 0035。導出は `race-backfill-state.ts`)の部分索引から読む
@@ -373,7 +385,7 @@ export function buildWinOddsStatement(db: ResultDb, raceId: string, results: rea
   if (rows.length === 0) {
     return null;
   }
-  return db.prepare(FILL_WIN_ODDS_SQL).bind(JSON.stringify(rows), raceId);
+  return db.prepare(FILL_WIN_ODDS_SQL).bind(JSON.stringify(byUmaban(rows.map(([u, o, n]) => [u, [o, n]]))), raceId);
 }
 
 /**
@@ -385,8 +397,7 @@ export function buildScratchedStatement(db: ResultDb, raceId: string, results: r
   if (results.length === 0) {
     return null;
   }
-  const rows = results.map((r) => [r.umaban, r.scratched === true ? 1 : 0] as const);
-  return db.prepare(FILL_SCRATCHED_SQL).bind(JSON.stringify(rows), raceId);
+  return db.prepare(FILL_SCRATCHED_SQL).bind(JSON.stringify(byUmaban(results.map((r) => [r.umaban, r.scratched === true ? 1 : 0]))), raceId);
 }
 
 /**
@@ -398,7 +409,7 @@ export function buildWinPayoutStatement(db: ResultDb, raceId: string, results: r
   if (rows.length === 0) {
     return null;
   }
-  return db.prepare(FILL_WIN_PAYOUT_SQL).bind(JSON.stringify(rows), raceId);
+  return db.prepare(FILL_WIN_PAYOUT_SQL).bind(JSON.stringify(byUmaban(rows)), raceId);
 }
 
 /** 補完の状態(race_backfill)の作り直しの 1 文(1 レース。Issue #597)。書き込みの batch の最後に足す。 */
@@ -604,7 +615,8 @@ export class D1ResultStore implements ResultRepository {
       return;
     }
     // 補完の状態(race_backfill。Issue #597)の作り直しを batch の最後に 1 文。結果の行を書くとき(馬の行がある)だけ。面・組合せ払戻だけの保存は状態の条件に触れない。
-    await this.db.batch(results.length > 0 ? [...statements, recomputeRaceBackfillStatement(this.db, raceId)] : statements);
+    // 検証の差分のための、レースの変更の印(Issue #624)は、書く文があるときは(結果が空で組合せ払戻だけのときも)最後に 1 文。
+    await this.db.batch([...statements, ...(results.length > 0 ? [recomputeRaceBackfillStatement(this.db, raceId)] : []), verifyRaceMarkStatement(this.db, raceId)]);
   }
 
   /**
@@ -617,7 +629,7 @@ export class D1ResultStore implements ResultRepository {
     if (statement === null) {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
+    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId), verifyRaceMarkStatement(this.db, raceId)]); // 状態の作り直し(Issue #597)と、検証の差分のための変更の印(Issue #624)を最後に
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -631,7 +643,7 @@ export class D1ResultStore implements ResultRepository {
     if (statement === null) {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
+    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId), verifyRaceMarkStatement(this.db, raceId)]); // 状態の作り直し(Issue #597)と、検証の差分のための変更の印(Issue #624)を最後に
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -644,7 +656,7 @@ export class D1ResultStore implements ResultRepository {
     if (statement === null) {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
+    const [result] = await this.db.batch([statement, recomputeRaceBackfillStatement(this.db, raceId), verifyRaceMarkStatement(this.db, raceId)]); // 状態の作り直し(Issue #597)と、検証の差分のための変更の印(Issue #624)を最後に
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -657,7 +669,7 @@ export class D1ResultStore implements ResultRepository {
     if (typeof raceClass !== "string" || raceClass === "") {
       return { rowsWritten: 0 };
     }
-    const [result] = await this.db.batch([this.db.prepare(SAVE_RACE_CLASS_SQL).bind(raceClass, raceId), recomputeRaceBackfillStatement(this.db, raceId)]); // 状態の作り直しを最後に 1 文(Issue #597)
+    const [result] = await this.db.batch([this.db.prepare(SAVE_RACE_CLASS_SQL).bind(raceClass, raceId), recomputeRaceBackfillStatement(this.db, raceId), verifyRaceMarkStatement(this.db, raceId)]); // 状態の作り直し(Issue #597)と、検証の差分のための変更の印(Issue #624)を最後に
     return { rowsWritten: result?.meta.rows_written ?? 0 };
   }
 
@@ -854,10 +866,12 @@ export class D1ResultStore implements ResultRepository {
 
   /**
    * 整合検査(Issue #597。{@link RECONCILE_RACE_BACKFILL_SQL}): 全レースの状態を作り直し、食い違う行を直す。分析の全走査(O(N))が 1 回。
+   * `sinceKaisaiDate`(YYYYMMDD)を渡すと、その日以降の開催日の分析を持つレースだけを作り直す(Issue #614。{@link RECONCILE_RECENT_RACE_BACKFILL_SQL})。省略は全件。
    * @returns 直した行数(0 でなければ、書き込みの経路のどこかが状態の作り直しを呼んでいない兆し)
    */
-  async reconcileBackfillState(): Promise<number> {
-    const [result] = await this.db.batch([this.db.prepare(RECONCILE_RACE_BACKFILL_SQL)]);
+  async reconcileBackfillState(sinceKaisaiDate?: string): Promise<number> {
+    const stmt = sinceKaisaiDate === undefined ? this.db.prepare(RECONCILE_RACE_BACKFILL_SQL) : this.db.prepare(RECONCILE_RECENT_RACE_BACKFILL_SQL).bind(sinceKaisaiDate);
+    const [result] = await this.db.batch([stmt]);
     return result?.meta.changes ?? 0;
   }
 

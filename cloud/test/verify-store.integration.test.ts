@@ -174,7 +174,7 @@ describe("commitStartTimes(D1 への書き込み)", () => {
     expect(await startTimeOf(1)).toBe("15:45");
     expect(await startTimeOf(2)).toBe("");
     expect(await startTimeOf(3)).toBe("10:00");
-    expect(spy.batches).toEqual([3]); // 更新・Class B のカウント + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)
+    expect(spy.batches).toEqual([4]); // 更新・Class B のカウント + 補完の状態(race_backfill)の作り直しの 1 文(Issue #597)+ 検証の変更の印の 1 文(Issue #624)
     expect(written).toBeGreaterThanOrEqual(2);
     const usage = await local.db.prepare("SELECT class_a AS a, class_b AS b FROM r2_ops WHERE ym = 202610").first<{ a: number; b: number }>();
     expect(usage!.b).toBeGreaterThanOrEqual(3);
@@ -402,7 +402,7 @@ describe("commitStartTimes(Issue #389): 発走時刻と条件を 1 文で書く"
     const spy = spyDb(local.db);
     const s = new D1VerifyStore({ db: spy.db, bucket: local.r2, now: () => NOW });
     await s.commitStartTimes([{ id: 1, value: "15:45" }], 1, [{ id: 1, facts: SNAP_FACTS }]);
-    expect(spy.batches).toEqual([3]); // 更新 + Class B のカウント + 補完の状態の作り直しの 1 文(Issue #597)
+    expect(spy.batches).toEqual([4]); // 更新 + Class B のカウント + 補完の状態の作り直しの 1 文(Issue #597)+ 検証の変更の印の 1 文(Issue #624)
     expect(await condRowOf(1)).toEqual({ start_time: "15:45", course_type: "芝", distance: 1600, track_condition: "稍", grade: "G3", race_name: "3歳以上1勝クラス", cond_read: 1 });
   });
 
@@ -449,7 +449,7 @@ describe("commitStartTimes(Issue #389): 発走時刻と条件を 1 文で書く"
     await local.db.prepare("UPDATE analyses SET start_time = '10:00', cond_read = 0 WHERE id = 1").run();
     const written = await verifyStore().commitStartTimes([{ id: 1, value: "15:45" }], 0, [{ id: 1, facts: SNAP_FACTS }]);
     expect(await condRowOf(1)).toEqual({ start_time: "10:00", course_type: null, distance: null, track_condition: null, grade: null, race_name: null, cond_read: 0 });
-    expect(written).toBe(0);
+    expect(written).toBe(2); // 分析の行は書かれない(上の toEqual)。書かれるのは検証の変更の印(Issue #624)の 2 行(表と索引)だけ
   });
 
   it("条件の引数を渡さない呼び出し(従来の呼び方)は、条件の列に触れない(cond_read は NULL のまま)", async () => {

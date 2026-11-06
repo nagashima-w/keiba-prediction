@@ -304,21 +304,22 @@ describe("D1MonthlySource.readMonthStats", () => {
     expect(s.unjudgedStake).toBe(100);
   });
 
-  it("D1 への発行: 成績の再集計は 1 回の batch(6 文。期間の再集計と同じ SQL)。補正の当たり具合の候補が無いときは、それだけ(サブリクエスト 2: batch 1 + 候補 1 文)", async () => {
+  it("D1 への発行: 対象のレースが無い月は、成績の再集計の 1 段目(races の 1 文)だけ。補正の当たり具合の候補が無いときは、それだけ(Issue #615。サブリクエスト 2: batch 1 + 候補 1 文)", async () => {
     const { db, prepared, batches } = spyDb(local.db);
     await new D1MonthlySource({ db }).readMonthStats("20261001", "20261031");
-    expect(batches).toEqual([6]);
-    expect(prepared).toHaveLength(7);
-    expect(new Set(prepared.slice(0, 6))).toEqual(new Set(Object.values(READ_PERIOD_SQL)));
-    expect(prepared[6]).toBe(FIT_CANDIDATES_SQL);
+    expect(batches).toEqual([1]);
+    expect(prepared).toHaveLength(2);
+    expect(prepared[0]).toBe(READ_PERIOD_SQL.races);
+    expect(prepared[1]).toBe(FIT_CANDIDATES_SQL);
   });
 
-  it("D1 への発行: 補正の当たり具合の標本があるときは、成績の batch 6 文 + 候補 1 文 + 馬と結果の batch 2 文(サブリクエスト 3)。どれも読み取り専用", async () => {
+  it("D1 への発行: 補正の当たり具合の標本があるときは、成績の batch 2 回(1 文 + 5 文。Issue #615)+ 候補 1 文 + 馬と結果の batch 2 文(サブリクエスト 4)。どれも読み取り専用", async () => {
     await seedFitRace({ raceNo: 1 });
     const { db, prepared, batches } = spyDb(local.db);
     await new D1MonthlySource({ db }).readMonthStats("20261001", "20261031");
-    expect(batches).toEqual([6, 2]);
+    expect(batches).toEqual([1, 5, 2]);
     expect(prepared).toHaveLength(9);
+    expect(new Set(prepared.slice(0, 6))).toEqual(new Set(Object.values(READ_PERIOD_SQL)));
     expect(prepared.slice(6)).toEqual([FIT_CANDIDATES_SQL, FIT_HORSES_SQL, FIT_RESULTS_SQL]);
     for (const sql of [FIT_CANDIDATES_SQL, FIT_HORSES_SQL, FIT_RESULTS_SQL]) {
       expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER)\b/i);

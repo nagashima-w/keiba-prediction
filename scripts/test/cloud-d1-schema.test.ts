@@ -382,7 +382,11 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
       { name: "runs_version", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
     ],
     foreignKeys: [],
-    indexes: [{ origin: "pk", unique: 1, columns: ["race_id"], name: null }],
+    // 0036(Issue #613): 変換の目録の走査のための部分索引(runs_version が NULL の行だけ)。
+    indexes: [
+      { origin: "c", unique: 0, columns: ["race_id"], name: "idx_race_archive_runs_pending" },
+      { origin: "pk", unique: 1, columns: ["race_id"], name: null },
+    ],
   },
   // 0035 の中身(Issue #597)。結果の補完のレース単位の状態(主キーは race_id。WITHOUT ROWID)。段階 1〜4 の未完了・済み・諦めの行だけの部分索引が 4 本(キーは (stN, kaisai_date, race_id))。導出は cloud/src/race-backfill-state.ts。
   race_backfill: {
@@ -401,6 +405,19 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
       { origin: "c", unique: 0, columns: ["st2", "kaisai_date", "race_id"], name: "idx_race_backfill_st2" },
       { origin: "c", unique: 0, columns: ["st3", "kaisai_date", "race_id"], name: "idx_race_backfill_st3" },
       { origin: "c", unique: 0, columns: ["st4", "kaisai_date", "race_id"], name: "idx_race_backfill_st4" },
+      { origin: "pk", unique: 1, columns: ["race_id"], name: null },
+    ],
+  },
+  // 0037 の中身(Issue #624)。検証の差分の再計算のための、レースの変更の印(主キーは race_id。WITHOUT ROWID)。seq の索引が 1 本。
+  verify_race_mark: {
+    columns: [
+      { name: "kaisai_date", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "race_id", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "seq", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [
+      { origin: "c", unique: 0, columns: ["seq"], name: "idx_verify_race_mark_seq" },
       { origin: "pk", unique: 1, columns: ["race_id"], name: null },
     ],
   },
@@ -521,8 +538,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql・0035_race_backfill.sql の35本だけで、番号は 0001 から連続している(後から足すときは 0036 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql・0035_race_backfill.sql・0036_race_archive_runs_pending_index.sql・0037_verify_race_mark.sql の37本だけで、番号は 0001 から連続している(後から足すときは 0038 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql", "0036_race_archive_runs_pending_index.sql", "0037_verify_race_mark.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -614,7 +631,7 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
 
   it("Issue #445: WITHOUT ROWID の表の集合が、宣言と一致する(主キーが行の実体になる表。外すと書き込みの行が増える。構造の比較〈列・索引〉には現れないので別に固定する)", () => {
     // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)・0026(baba_fetch_attempts)・0027(kaisai_days)・0028(jockey_names)・0030(trainer_names)・0031(race_archive)・0035(race_backfill)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
-    const declared = ["baba_conditions", "baba_fetch_attempts", "baba_fetches", "horse_run_saves", "horse_runs", "jockey_names", "kaisai_days", "race_archive", "race_backfill", "race_conditions", "trainer_names"];
+    const declared = ["baba_conditions", "baba_fetch_attempts", "baba_fetches", "horse_run_saves", "horse_runs", "jockey_names", "kaisai_days", "race_archive", "race_backfill", "race_conditions", "trainer_names", "verify_race_mark"];
     const wrTables = (sqlList: readonly string[]): string[] => {
       const db = openEmptyDb();
       try {
@@ -758,9 +775,9 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
   it("Issue #551: race_archive は 0031 だけが足す新しい表(主キー race_id・WITHOUT ROWID・副索引なし)。0001〜0030 までには無く、exe には無い D1 専用(D1_EXTRA_TABLES に宣言している)。既存の表は変えない(CREATE TABLE の1文だけ)", () => {
     const before = schemaAfter(sqls.slice(0, 30));
     expect(Object.keys(before)).not.toContain("race_archive");
-    const after = schemaAfter(sqls.slice(0, 31)); // 0031 までを適用した状態(0032・0033 の列追加は含めない)
+    const after = schemaAfter(sqls.slice(0, 31)); // 0031 までを適用した状態(0032・0033 の列追加と 0036 の索引は含めない)
     // 宣言(D1_EXTRA_TABLES)は 0033 の runs_version を含むので、それを除いた形と一致する(0033 の列は Issue #588 のテストが固定する)
-    expect(after["race_archive"]).toEqual({ ...D1_EXTRA_TABLES["race_archive"]!, columns: D1_EXTRA_TABLES["race_archive"]!.columns.filter((c) => c.name !== "runs_version") });
+    expect(after["race_archive"]).toEqual({ ...D1_EXTRA_TABLES["race_archive"]!, columns: D1_EXTRA_TABLES["race_archive"]!.columns.filter((c) => c.name !== "runs_version"), indexes: [{ origin: "pk", unique: 1, columns: ["race_id"], name: null }] }); // 0036 の索引も除く(Issue #613 のテストが固定する)
     expect(Object.keys(exe)).not.toContain("race_archive");
     for (const [table, schema] of Object.entries(before)) {
       expect(after[table], table).toEqual(schema); // 既存の表は列も索引も変わらない
@@ -896,6 +913,32 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     const code = sqls[33]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n").trim();
     expect(code).toBe("CREATE INDEX IF NOT EXISTS idx_analyses_pending ON analyses (id) WHERE start_time IS NULL OR cond_read IS NULL;");
     expect(diffSchemas(expectedD1Schema(exe), schemaAfter([...sqls.slice(0, 33), ""]))).not.toEqual([]); // 0034 を落とすと差分になる(空振りでない)
+  });
+
+  it("Issue #624: verify_race_mark(レースの変更の印)は 0037 だけが足す。0001〜0036 までには無い。D1 専用(D1_EXTRA_TABLES に宣言した)で、exe には無い。seq の索引を持つ", () => {
+    const before = schemaAfter(sqls.slice(0, 36));
+    const after = schemaAfter(sqls);
+    expect(before["verify_race_mark"]).toBeUndefined();
+    expect(after["verify_race_mark"]).toEqual(D1_EXTRA_TABLES["verify_race_mark"]);
+    expect(exe["verify_race_mark"]).toBeUndefined();
+    expect(after["verify_race_mark"]!.indexes.map((i) => i.name)).toContain("idx_verify_race_mark_seq");
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter(sqls.slice(0, 36)))).not.toEqual([]); // 0037 を落とすと差分になる(空振りでない)
+  });
+
+  it("Issue #613: idx_race_archive_runs_pending は 0036 だけが足す(race_archive (race_id) の部分索引。WHERE は runs_version IS NULL)。0001〜0035 までには無い。D1 専用(D1_EXTRA_TABLES に宣言している)。追加のみ(CREATE INDEX の1文だけ)", () => {
+    const before = schemaAfter(sqls.slice(0, 35));
+    const after = schemaAfter(sqls);
+    const names = (schema: Schema): string[] => schema["race_archive"]!.indexes.map((i) => i.name ?? "");
+    expect(names(before)).not.toContain("idx_race_archive_runs_pending");
+    expect(names(after)).toContain("idx_race_archive_runs_pending");
+    expect(D1_EXTRA_TABLES["race_archive"]!.indexes.map((i) => i.name)).toContain("idx_race_archive_runs_pending");
+    expect(after["race_archive"]!.columns).toEqual(before["race_archive"]!.columns); // 列は変わらない
+    for (const [table, schema] of Object.entries(before)) {
+      if (table !== "race_archive") expect(after[table], table).toEqual(schema); // ほかの表は変わらない
+    }
+    const code = sqls[35]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n").trim();
+    expect(code).toBe("CREATE INDEX IF NOT EXISTS idx_race_archive_runs_pending ON race_archive (race_id) WHERE runs_version IS NULL;");
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter([...sqls.slice(0, 35), ""]))).not.toEqual([]); // 0036 を落とすと差分になる(空振りでない)
   });
 
   const m0008 = sqls[7] ?? "";
