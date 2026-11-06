@@ -24,6 +24,7 @@ import {
 import type { ResultClass } from "../src/race-day-result";
 import type { ResultImportProgress } from "../src/race-day-core";
 import { openNodeSql, type NodeSql } from "./node-sql";
+import { checkDoStatements, type DoPlanException } from "./sql-plan";
 
 /**
  * Issue #217(#167-C): 結果の補完の状態機械(`ResultBackfillCore`)。移行が `completed` のときだけ、JST 01:00〜06:00 の間、1 晩 150 レース・1 回 30 レースまで、
@@ -1202,5 +1203,42 @@ describe("Issue #270: 1 晩の取得の本数は、scratched の補完を足し�
     await core.runNextStep();
     expect(w.day("20261009").requests.slice(5).map((r) => r.length)).toEqual([30, 20]); // 翌晩: 残りの 50
     expect(new Set(w.day("20261009").requests.flat()).size).toBe(200);
+  });
+});
+
+describe("DO の SQLite: 流れた SQL の実行計画(EXPLAIN QUERY PLAN。Issue #632)", () => {
+  /**
+   * 全走査・一時の並べ替えを許す文。3 つの表(backfill_race・backfill_class・backfill_payout)は主キー(race_id)の索引しか無い。
+   * 表は補完の積み残しを消化する間だけ増え、積み残しが無くなれば増えない(docs/investigations/db-usage-594.md §4.2)。索引は足さない(別の Issue)。
+   */
+  const EXCEPTIONS: DoPlanException[] = [
+    { match: /^SELECT race_id FROM backfill_\w+ WHERE last_night = \?/, reason: "excludedIds: その晩に試したレースを列挙から外すための読み。last_night に索引が無い(1 晩に 7 表ぶんを読む)" },
+    { match: /^SELECT race_id FROM backfill_\w+ WHERE state /, reason: "collectSettled: 済み・諦めのレースを D1 の状態へ写すための読み。state に索引が無い" },
+    { match: /^SELECT last_class AS cls, COUNT\(\*\) AS n FROM backfill_\w+ WHERE state /, reason: "status の画面だけ(諦めた数の分類別)。起床の経路の外" },
+    { match: /^SELECT COUNT\(\*\) AS n FROM backfill_\w+ WHERE state /, reason: "status の画面だけ(済みの数)。起床の経路の外" },
+  ];
+
+  it("夜の補完(依頼・諦め・翌晩)と status を通して流れた全部の文に、例外に載せていない全走査・一時の並べ替えが無い。例外は今も該当する", async () => {
+    const w = new World();
+    w.unimported = [...races(YESTERDAY, 40), ...races("20261008", 5)];
+    const { core, sql } = make(w);
+    await core.runNextStep();
+    // 依頼した 2 レースを諦め(分類つき)にして、除外・記録の経路にも通す
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 1))!.state = "gave_up";
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 1))!.lastClass = "no-payout";
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 2))!.state = "gave_up";
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 2))!.lastClass = "parse-error";
+    for (let i = 0; i < 6 && w.alarm !== null; i += 1) {
+      w.now = Math.max(w.now, w.alarm);
+      await core.runNextStep();
+      for (const date of w.days.keys()) w.settleImported(date);
+    }
+    await core.getStatus();
+    expect((await core.getStatus()).abandoned.total).toBeGreaterThan(0); // 前提: 諦めの経路を通っている
+    const r = checkDoStatements(sql.statements, (q) => sql.plan(q), EXCEPTIONS);
+    expect(r.checked).toBeGreaterThanOrEqual(12); // 前提: 経路の SQL を集められている(空だと検査が空振りする)
+    expect(r.flagged).toBeGreaterThanOrEqual(8); // 前提: 検出が空振りでない(例外の文が実際に引っかかっている)
+    expect(r.unexpected).toEqual([]);
+    expect(r.stale).toEqual([]);
   });
 });

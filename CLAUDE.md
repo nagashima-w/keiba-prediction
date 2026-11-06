@@ -301,5 +301,6 @@ exe 版の公開を止め(#248)、コードも削除した(#285)。運用は web
 - [`docs/prompt-improvement-plan.md`](./docs/prompt-improvement-plan.md) — 検証結果(回収率)に基づく LLM プロンプト改善の仕組みの検討メモ(過学習リスク・記録/可視化を先行する方針)。
 - [`docs/handover-next-session.md`](./docs/handover-next-session.md) — 過去セッションから次セッションへの引き継ぎ(実装済みタスクの仕様記録・技術メモ)。
 - [`docs/versioning.md`](./docs/versioning.md) — 版数運用規約(major/minor/patch の基準、公開1回につき必ず1回上げる運用、`packages/core` 対象外の理由)。**Issue #248 で 1.44.0 に凍結済み(以後は上げない)。** 規約の本文は 1.44.0 までの運用の記録。exe のコードは #285 で削除(最後に残っているコミットは 3c1664e)。
+- [`docs/db-sql-rules.md`](./docs/db-sql-rules.md) — **D1・DO の SQLite に SQL を足すときの決まり**(全走査を入れない・索引の書き込みの見積もり・migration は追加だけ・`json_each` での束縛など)と、実行計画の検査の一覧(Issue #632)。`cloud/test/sql-plan-inventory.test.ts` が、export された SQL の検査漏れを赤にする。
 - [`docs/issue-order.md`](./docs/issue-order.md) — **Issue の着手順**。次に何をやるか、依存関係・前提、着手しないと決めた理由を集約。
 - 補足: [`README.md`](./README.md) は利用者向けの概要・最後の exe の案内・Discord 設定・開発コマンド、[`GETTING_STARTED.md`](./GETTING_STARTED.md) はクラウド版の開始手順。
