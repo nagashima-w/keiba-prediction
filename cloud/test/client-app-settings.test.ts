@@ -125,7 +125,16 @@ async function started(over: Partial<Pick<Harness, "getResponder" | "postRespond
   Object.assign(h, over);
   h.app.start();
   await h.app.whenIdle();
+  openAllSections(h);
   return h;
+}
+
+/** Issue #581: 初めは LLM分析・上級の設定が閉じている。これまでの項目単位の検査のために、取得できていれば閉じた節を全部開く(節の開閉そのものは client-settings-sections.test.ts)。 */
+function openAllSections(h: Harness): void {
+  for (const id of ["funds", "odds", "llm", "advanced"]) {
+    const toggle = findAll(h.tree(), (n) => n.tag === "button" && n.attrs?.["data-section"] === id && n.attrs?.["aria-expanded"] === "false")[0];
+    if (toggle !== undefined) toggle.on!.click!();
+  }
 }
 
 describe("設定画面を開く", () => {
@@ -580,6 +589,7 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
     expect(t.timers.pending(), "前提: 追跡のタイマーが張られている").toBe(1);
     t.go("#settings");
     await t.app.whenIdle();
+    findAll(t.tree(), (n) => n.tag === "button" && n.attrs?.["data-section"] === "llm")[0]!.on!.click!(); // Issue #581: 追加指示の節(閉じている)を開く
     const field = (key: string): VNode => findAll(t.tree(), (n) => n.attrs?.["data-field"] === key)[0]!;
     expect(field("bankroll").attrs?.["value"]).toBe("500000"); // 前提: 設定画面が出ている
     const polls = (): number => t.calls.filter((c) => c === "GET /api/analyses/status?kaisai_date=20260628").length;
@@ -628,6 +638,7 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
     const t = await trackedHarness();
     t.go("#settings");
     await t.app.whenIdle();
+    findAll(t.tree(), (n) => n.tag === "button" && n.attrs?.["data-section"] === "llm")[0]!.on!.click!(); // Issue #581: 追加指示の節(閉じている)を開く
     const field = (key: string): VNode => findAll(t.tree(), (n) => n.attrs?.["data-field"] === key)[0]!;
     const previewOf = (): string => String(findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "prompt-preview")[0]!.children![0]);
     findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "preview-toggle")[0]!.on!.click!();
@@ -657,6 +668,7 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
     const t = await trackedHarness();
     t.go("#settings");
     await t.app.whenIdle();
+    findAll(t.tree(), (n) => n.tag === "button" && n.attrs?.["data-section"] === "llm")[0]!.on!.click!(); // Issue #581: 追加指示の節(閉じている)を開く
     const field = (key: string): VNode => findAll(t.tree(), (n) => n.attrs?.["data-field"] === key)[0]!;
     field("bankroll").on!.input!("abc");
     expect(field("bankroll").attrs?.["value"]).toBe("500000"); // 打っている途中は木に出さない

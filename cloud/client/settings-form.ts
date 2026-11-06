@@ -56,6 +56,32 @@ export const FIELD_ORDER: readonly FieldKey[] = [
   "preRaceOffsetMinutes",
 ];
 
+/** 設定の節(Issue #581。項目のまとまり)。 */
+export type SettingsSectionId = "funds" | "odds" | "llm" | "advanced";
+/** 節ごとの、利用者が決めた開閉(無い節は初めの開閉)。 */
+export type SectionOpen = Readonly<Partial<Record<SettingsSectionId, boolean>>>;
+interface SectionSpec {
+  readonly id: SettingsSectionId;
+  readonly heading: string;
+  /** 初めに開いているか(ふだん触る節は開、上級・LLM は閉)。 */
+  readonly defaultOpen: boolean;
+  readonly keys: readonly FieldKey[];
+  /** 重み15項目(と「既定値に戻す」)をこの節に含むか。 */
+  readonly hasWeights: boolean;
+}
+/** 節の並びと中身。`FIELD_ORDER` の18項目がちょうど1回ずつ入る(`client-settings-sections.test.ts` が固定)。 */
+export const SECTIONS: readonly SectionSpec[] = [
+  { id: "funds", heading: "資金と配分", defaultOpen: true, keys: ["bankroll", "perRaceCap", "evThreshold", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace"], hasWeights: false },
+  { id: "odds", heading: "オッズの取得と券種", defaultOpen: true, keys: ["includeComboOdds", "includeWideInAllocation", "includeQuinellaInAllocation", "includeBracketQuinellaInAllocation", "includeExactaInAllocation", "includeTrioInAllocation", "includeTrifectaInAllocation"], hasWeights: false },
+  { id: "llm", heading: "LLM分析", defaultOpen: false, keys: ["additionalInstruction", "clipVariant", "analysisModel"], hasWeights: false },
+  { id: "advanced", heading: "上級の設定", defaultOpen: false, keys: ["kellyFraction", "preRaceOffsetMinutes"], hasWeights: true },
+];
+
+/** 検証の誤りがある項目を含む節(保存の押下で閉じた節を開くのに使う。Issue #581)。 */
+export function sectionsWithErrors(errors: FieldErrors): SettingsSectionId[] {
+  return SECTIONS.filter((s) => s.keys.some((k) => errors[k] !== undefined) || (s.hasWeights && WEIGHT_FIELD_ORDER.some((k) => errors[k] !== undefined))).map((s) => s.id);
+}
+
 /** スコアリングの重み15項目の並び(Issue #218・#353・#354。対応表 `SCORING_WEIGHT_FIELDS` の並び = 旧 exe の設定画面の並び: バイアス7 → 基礎6、タイム指数、末尾に調教師成績)。画面では `fields` とは別の節に出す。 */
 export const WEIGHT_FIELD_ORDER: readonly FieldKey[] = SCORING_WEIGHT_FIELDS.map((f) => f.field);
 
@@ -217,6 +243,8 @@ export interface SettingsModelInput {
   readonly previewOpen?: boolean;
   /** プロンプトのプレビューの文面の取得の状態(Issue #396。文面はサーバが組み立てる)。開いていて、まだ取得を始めていない(省略)ときは取得中と同じ表示。 */
   readonly previewFetch?: PreviewFetchState | null;
+  /** 利用者が決めた節の開閉(Issue #581。省略は、どの節も初めの開閉)。 */
+  readonly sectionOpen?: SectionOpen;
 }
 
 /**
@@ -273,6 +301,20 @@ export interface WeightsModel {
   readonly resetDisabled: boolean;
 }
 
+/** 節の表示用データ(Issue #581)。 */
+export interface SectionModel {
+  readonly id: SettingsSectionId;
+  readonly heading: string;
+  readonly open: boolean;
+  /** 節の中(上級の設定は重みも)で、既定から変えた項目の数。 */
+  readonly changedCount: number;
+  /** 「変更あり N 件」(0 件は null)。色だけに頼らず文字で出す。 */
+  readonly changedText: string | null;
+  readonly fields: readonly FieldModel[];
+  /** 重み15項目をこの節の中に出すか(開いているときだけ出る)。 */
+  readonly hasWeights: boolean;
+}
+
 export interface SettingsModel {
   readonly kind: "settings";
   /** 戻り先(トップ=一覧)。 */
@@ -288,6 +330,8 @@ export interface SettingsModel {
   /** 下に固定した帯の状態の文。 */
   readonly barStatus: string;
   readonly fields: readonly FieldModel[];
+  /** 項目のまとまり(Issue #581)。画面はこの順に節を出す。 */
+  readonly sections: readonly SectionModel[];
   /** スコアリングの重みの節(Issue #218)。下書きを取得できていないとき(項目が出ないとき)は null。 */
   readonly weights: WeightsModel | null;
   /** プロンプトのプレビュー(Issue #201)。下書きを取得できていないとき(項目が出ないとき)は null。 */
@@ -485,6 +529,7 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
     };
   };
   const fields: FieldModel[] = ready ? FIELD_ORDER.map((key) => fieldOf(key, draft)) : [];
+  const fieldsByKey = new Map(fields.map((f) => [f.key, f] as const));
   const weights: WeightsModel | null = ready
     ? {
         heading: WEIGHTS_HEADING,
@@ -497,6 +542,11 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
         resetDisabled: saving,
       }
     : null;
+  const sections: SectionModel[] = SECTIONS.map((spec) => {
+    const own = spec.keys.map((key) => fieldsByKey.get(key)).filter((f): f is FieldModel => f !== undefined);
+    const changedCount = own.filter((f) => f.changed).length + (spec.hasWeights && weights !== null ? weights.groups.flatMap((g) => g.fields).filter((f) => f.changed).length : 0);
+    return { id: spec.id, heading: spec.heading, open: input.sectionOpen?.[spec.id] ?? spec.defaultOpen, changedCount, changedText: changedCount > 0 ? `変更あり ${changedCount} 件` : null, fields: own, hasWeights: spec.hasWeights };
+  });
   return {
     kind: "settings",
     backHref: "#",
@@ -508,6 +558,7 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
     dirty: input.dirty === true,
     barStatus: barStatusText(input.dirty === true, saving, save.kind === "saved"),
     fields,
+    sections: ready ? sections : [],
     weights,
     preview: ready ? buildPreviewModel(input.previewOpen === true, input.previewFetch) : null,
   };

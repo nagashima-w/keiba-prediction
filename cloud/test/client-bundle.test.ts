@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 245,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 250,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -305,7 +305,9 @@ describe("生成物のドリフトと決定性", () => {
     // (追記)Issue #580(設定の画面: 下に固定した保存の帯・金額の「¥20,000」・既定のバッジと変更の印・未保存の判定・打つたびの文字の書き換え): 上限は 243,000 から 245,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`)は 242,725 → 244,541(+1,816)。
     // 計り方: 起点(7df8a32d)の生成物と今の生成物を、それぞれ `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` で測った(今の値は `pnpm run build:client` の出力)。
     // 新しい上限 245,000 の余裕は 245,000 - 244,541 = 459 バイト(500 バイト単位に切り上げ)。増えたのは日本語の文言(`\u` エスケープ)と `settings-form.ts` の整形・既定の判定・帯の文、`view.ts` の帯とバッジ。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(245_000);
+    // (追記)Issue #581(設定の画面: 項目を4つの節に分け、LLM分析・上級の設定を初めは閉じる。節の見出しの開閉ボタン・「変更あり N 件」・保存の押下で誤りのある閉じた節を開く処理): 上限は 245,000 から 250,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`)は 244,541(8fdbc05f〈作業ブランチの起点〉の生成物)→ 246,560(+2,019。`pnpm run build:client` の出力〈「246560 バイト」〉)。
+    // 計り方: `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` を、起点と今のそれぞれで実行した。新しい上限 250,000 の余裕は 250,000 - 246,560 = 3,440 バイト(約 1.4%)。増えたのは節の定義 `SECTIONS`(見出しの文言は `\u` エスケープ)・節の表示用データ・`view.ts` の `settingsSection`・`settings-screen.ts` の開閉の記録と `sectionsWithErrors`。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(250_000);
   });
 });
 
@@ -867,7 +869,15 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     const { root, calls } = run("#settings");
     await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
-    const fields = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.has("data-field"));
+    const fieldsOf = () => flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.has("data-field"));
+    // Issue #581: 初めは資金と配分(6)・オッズの取得と券種(7)の 13 個だけ。LLM分析・上級の設定は閉じているので、開閉ボタン(生成物の実行)で開いてから 33 個を確かめる。
+    expect(fieldsOf().length).toBe(13);
+    for (const id of ["llm", "advanced"]) {
+      const toggle = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && n.attrs.get("data-section") === id)!;
+      expect(toggle.attrs.get("aria-expanded")).toBe("false");
+      toggle.listeners.get("click")![0]!(undefined);
+    }
+    const fields = fieldsOf();
     expect(fields.length).toBe(33);
     expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", "input", "input", "input", ...Array(15).fill("input"), "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)。重み15項目は input(Issue #218・#353)
     const field = (key: string) => fields.find((n) => n.attrs.get("data-field") === key)!;
@@ -902,6 +912,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     const toggleOf = () => elements().find((n) => n.attrs.get("class") === "preview-toggle")!;
     expect(toggleOf().attrs.get("aria-expanded")).toBe("false");
     expect(elements().some((n) => n.attrs.get("class") === "prompt-preview")).toBe(false); // 前提: 開くまで文面は無い
+    elements().find((n) => n.tag === "button" && n.attrs.get("data-section") === "llm")!.listeners.get("click")![0]!(undefined); // Issue #581: 追加指示の節(閉じている)を開く
     const area = elements().find((n) => n.attrs.get("data-field") === "additionalInstruction")!;
     area.listeners.get("input")![0]!({ target: { value: "スモークの追加指示" } });
     toggleOf().listeners.get("click")![0]!(undefined);

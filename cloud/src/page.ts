@@ -317,8 +317,13 @@ ${paletteCss()}
   .field-yen { margin: 4px 0 0; min-height: 1.5em; font-size: 1rem; font-weight: bold; }
   /* Issue #218: スコアリングの重みの節(入力欄は通常の項目と同じ縦並び。ボタンは幅 100%・高さ 44px 以上) */
   .weights { margin: 24px 0 16px; padding-top: 8px; border-top: 1px solid var(--line); }
-  .weights h2 { margin: 8px 0 4px; font-size: 1.05rem; }
   .weights h3 { margin: 16px 0 8px; font-size: 0.95rem; }
+  .weights .weights-heading { margin: 8px 0 4px; font-size: 1.05rem; }
+  /* Issue #581: 設定の節(開閉の見出しは h2 の中のボタン。閉じた節の中身は木に出ない。「変更あり N 件」は文字) */
+  .settings-section { margin: 16px 0; }
+  .settings-section h2 { margin: 8px 0; font-size: 1.05rem; }
+  .section-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; }
+  .section-changed { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px solid var(--brand); border-radius: 4px; font-size: 0.75rem; color: var(--brand); }
   .weights-help { margin: 4px 0; font-size: 0.8rem; color: var(--muted); }
   .weights-reset { display: block; width: 100%; min-height: 44px; margin: 8px 0 0; font-weight: bold; }
   /* Issue #201: 設定画面のプロンプトのプレビュー(開閉の見出しは h3 の中のボタン。文面は div。改行・折り返しは CSS。内側のスクロールは付けない=スマホで操作しづらいため、ページのスクロールに任せる) */

@@ -22,7 +22,7 @@
 import type { FetchLike } from "./api";
 import { fetchPromptPreview, previewRequestKey } from "./api-prompt-preview";
 import { fetchSettings, postSettings, settingsFailureMessage } from "./api-settings";
-import { barStatusText, buildSettingsModel, draftFromSettings, yenInputText, liveTargetOfYen, type LiveTarget, resetWeightsInDraft, setDraftValue, validateDraft, WEIGHT_FIELD_ORDER, type FieldErrors, type FieldKey, type PreviewFetchState, type SettingsDraft, type SettingsLoadState, type SettingsModel, type SettingsSaveState } from "./settings-form";
+import { barStatusText, sectionsWithErrors, SECTIONS, type SectionOpen, type SettingsSectionId, buildSettingsModel, draftFromSettings, yenInputText, liveTargetOfYen, type LiveTarget, resetWeightsInDraft, setDraftValue, validateDraft, WEIGHT_FIELD_ORDER, type FieldErrors, type FieldKey, type PreviewFetchState, type SettingsDraft, type SettingsLoadState, type SettingsModel, type SettingsSaveState } from "./settings-form";
 
 export interface SettingsScreenDeps {
   readonly fetch: FetchLike;
@@ -53,6 +53,8 @@ export interface SettingsScreen {
   onPreviewRefresh(): void;
   /** 「重みを既定値に戻す」(Issue #218)。 */
   onWeightsReset(): void;
+  /** 節の開閉(Issue #581)。`open` は押したあとの状態。 */
+  onSectionToggle(id: string, open: boolean): void;
   /** 描画用データ。`force` が true、または画面に入った直後は今の状態を写し、それ以外は画面に出ている内容の写しから作る。 */
   model(force: boolean): SettingsModel;
   /** 取得中のもの(テスト用の待ち)。 */
@@ -75,7 +77,9 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
    * 次の強制描画(保存・再読込・取得完了・検証エラー・失敗)まで木に出さない。木が同じなら `createMounter` は DOM を置き換えない(打っている欄がフォーカスを失わない・スマホのキーボードが閉じない)。
    * 下書き(`settingsDraft`)自体は最新のまま(保存はそれを読む)。null は「まだ写していない(画面に入った直後)」。
    */
-  let settingsShown: { load: SettingsLoadState; draft: SettingsDraft | null; errors: FieldErrors; save: SettingsSaveState; previewOpen: boolean; dirty: boolean } | null = null;
+  let settingsShown: { load: SettingsLoadState; draft: SettingsDraft | null; errors: FieldErrors; save: SettingsSaveState; previewOpen: boolean; dirty: boolean; sectionOpen: SectionOpen } | null = null;
+  /** 利用者が決めた節の開閉(Issue #581)。メモリだけ(画面を離れたら破棄。「再読込」「保存」では変えない)。保存の押下で誤りが見つかった閉じた節だけ、ここで開く。 */
+  let settingsSectionOpen: SectionOpen = {};
   /** プロンプトのプレビューを開いているか(Issue #201)。メモリだけ(既定は閉じている。画面を離れたら破棄。「再読込」では変えない)。 */
   let settingsPreviewOpen = false;
   /** プレビューの文面の取得(Issue #396)。`key` は取得したときの入力の鍵(`previewRequestKey`)、`state` は取得中・成功・失敗。 */
@@ -161,6 +165,7 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
     settingsPreviewSeq += 1;
     settingsPreviewForce = false;
     settingsPreviewHold = false;
+    settingsSectionOpen = {};
     settingsLoad = null;
     settingsDraft = null;
     settingsBaseline = null;
@@ -222,11 +227,20 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
     deps.onChange(true);
   }
 
+  /** 節の開閉(Issue #581)。強制描画(写しを現在の下書きへ更新してから描く=打った値が入力欄に残る)。下書きが無い(取得前・失敗)は無視。未知の節は無視。 */
+  function onSettingsSectionToggle(id: string, open: boolean): void {
+    if (!deps.isActive() || settingsDraft === null || !SECTIONS.some((s) => s.id === id)) return;
+    settingsSectionOpen = { ...settingsSectionOpen, [id as SettingsSectionId]: open };
+    deps.onChange(true);
+  }
+
   function onSettingsSave(): void {
     if (!deps.isActive() || settingsLoad?.kind !== "ready" || settingsDraft === null || settingsSave.kind === "saving") return;
     const checked = validateDraft(settingsDraft);
     if (!checked.ok) {
       settingsErrors = checked.errors;
+      // 誤りのある節は、閉じていれば開いて知らせる(開いたあとは利用者が閉じられる。次の保存の押下まで開き直さない)。
+      for (const id of sectionsWithErrors(checked.errors)) settingsSectionOpen = { ...settingsSectionOpen, [id]: true };
       settingsSave = { kind: "idle" };
       deps.onChange(true);
       return;
@@ -254,7 +268,7 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
   /** 描画用データ。強制描画のとき、または画面に入った直後(まだ写していない)は、今の状態を写す。それ以外(強制なし)は、画面に出ている内容の写しから作る。 */
   function model(force: boolean): SettingsModel {
     if (force || settingsShown === null) {
-      settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave, previewOpen: settingsPreviewOpen, dirty: isDirty() };
+      settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave, previewOpen: settingsPreviewOpen, dirty: isDirty(), sectionOpen: settingsSectionOpen };
       syncSettingsPreview(); // 写しを更新したときだけ、プレビューの文面を取り直すかを決める(Issue #396)
     }
     return buildSettingsModel({ ...settingsShown, previewFetch: settingsPreview?.state ?? null });
@@ -281,6 +295,7 @@ export function createSettingsScreen(deps: SettingsScreenDeps): SettingsScreen {
     onPreviewToggle: onSettingsPreviewToggle,
     onPreviewRefresh: onSettingsPreviewRefresh,
     onWeightsReset: onSettingsWeightsReset,
+    onSectionToggle: onSettingsSectionToggle,
     model,
     pending: () => [...settingsInflight],
   };

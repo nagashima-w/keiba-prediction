@@ -244,6 +244,7 @@ describe("設定画面(#settings)", () => {
   it("プレビューの応答で入力に追いついた(強制描画で写しを更新した)あとでも、「入力中の内容を反映」はその都度取り直す(取得が止まらない)", async () => {
     const h = await started();
     byClass(h.tree(), "preview-toggle")[0]!.on!.click!(); // 開く(取得 1 回目)
+    findAll(h.tree(), (n) => n.tag === "button" && n.attrs?.["data-section"] === "llm")[0]!.on!.click!(); // Issue #581: 追加指示の節(閉じている)を開く
     h.type("additionalInstruction", "指示A"); // 取得中に打つ(写しと下書きが違う状態で応答を迎える)
     await h.app.whenIdle();
     // 応答のとき、下書きが写しと違うので強制描画に切り替わり、新しい取得は起こさない
