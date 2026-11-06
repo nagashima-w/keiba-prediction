@@ -8,9 +8,9 @@
  *
  * 版別は**区分(全体/中央のみ/地方のみ)に依らず全体**(exe の版別比較と同じ。core の関数に区分の引数が無い)。
  */
-import type { CalibrationBin, PromptVersionVerifyReport, VerifyQuality } from "../../packages/core/src/ev/verify.js";
-import { computeVerifyReportByPromptVersion, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
-import type { VerifyDataSource } from "../../packages/core/src/ev/analysis-store-types.js";
+import type { CalibrationBin, PromptVersionPart, PromptVersionVerifyReport, VerifyQuality } from "../../packages/core/src/ev/verify.js";
+import { buildPromptVersionParts, finalizePromptVersionParts, mergePromptVersionParts, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
+import type { StoredAnalysis, VerifyDataSource } from "../../packages/core/src/ev/analysis-store-types.js";
 
 /** 版別比較の 1 版(画面が使う項目だけ)。 */
 export interface PromptVersionSummary {
@@ -51,7 +51,25 @@ export function summarizePromptVersions(reports: readonly PromptVersionVerifyRep
   }));
 }
 
-/** 版別比較を計算して射影する(設定は旧 exe の検証画面と同じ `PRODUCTION_VERIFY_CONFIG`)。 */
+/**
+ * 版別比較の部分を作る(Issue #625)。開催日ごとの保存(段階 3)の単位。`analyses` は**レースが欠けない**集合(同じレースの分析は全部渡す)。
+ * 設定は旧 exe の検証画面と同じ `PRODUCTION_VERIFY_CONFIG`。部分は構造化複製できる値だけで持つ(core の {@link PromptVersionPart})。
+ */
+export function buildPromptVersionSummaryParts(source: VerifyDataSource, analyses: readonly StoredAnalysis[]): PromptVersionPart[] {
+  return buildPromptVersionParts(source, analyses, PRODUCTION_VERIFY_CONFIG);
+}
+
+/** 版別比較の部分を合わせる(分け方・渡す順によらず、確定した結果は同じ)。 */
+export function mergePromptVersionSummaryParts(lists: readonly (readonly PromptVersionPart[])[]): PromptVersionPart[] {
+  return mergePromptVersionParts(lists);
+}
+
+/** 版別比較の部分を確定して射影する。 */
+export function finalizePromptVersionSummaries(parts: readonly PromptVersionPart[]): PromptVersionSummary[] {
+  return summarizePromptVersions(finalizePromptVersionParts(parts, PRODUCTION_VERIFY_CONFIG));
+}
+
+/** 版別比較を計算して射影する(設定は旧 exe の検証画面と同じ `PRODUCTION_VERIFY_CONFIG`)。全分析を 1 つの部分にして確定する。 */
 export function computePromptVersionSummaries(source: VerifyDataSource): PromptVersionSummary[] {
-  return summarizePromptVersions(computeVerifyReportByPromptVersion(source, PRODUCTION_VERIFY_CONFIG));
+  return finalizePromptVersionSummaries(buildPromptVersionSummaryParts(source, source.listAnalyses()));
 }

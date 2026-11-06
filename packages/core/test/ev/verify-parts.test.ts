@@ -102,7 +102,7 @@ describe("今の関数は基点の実装と同じ値を返す(Issue #625)", () =
 });
 
 describe("分け方によらず確定した結果が同じ(Issue #625)", () => {
-  function splits(seed: number, analyses: Parameters<typeof splitByRace>[0]) {
+  function splits(analyses: Parameters<typeof splitByRace>[0]) {
     return {
       一度: [analyses],
       "1 レースずつ": splitByRace(analyses, (_r, i) => i),
@@ -116,7 +116,7 @@ describe("分け方によらず確定した結果が同じ(Issue #625)", () => {
       it(`全体: 分け方を変えても完全一致(seed=${seed}, 設定=${name})`, () => {
         const { source, analyses } = randomVerifyData(seed, 36, { dirtyProbability: seed === 22 });
         const baseline = finalizeVerifyPart(buildVerifyPart(source, analyses, config), config, "all");
-        for (const [label, chunks] of Object.entries(splits(seed, analyses))) {
+        for (const [label, chunks] of Object.entries(splits(analyses))) {
           // 前提: 1 レースずつ・塊のときは複数の塊に分かれている
           if (label !== "一度") expect(chunks.length).toBeGreaterThan(2);
           const parts = chunks.map((c) => buildVerifyPart(source, c, config));
