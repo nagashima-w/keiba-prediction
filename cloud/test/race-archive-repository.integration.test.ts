@@ -134,7 +134,7 @@ describe("保存: R2 のオブジェクトの種類", () => {
 });
 
 describe("保存: 新規(R2 → D1)", () => {
-  it("中央の 1 レース: R2 の put 1 回・get 0 回、D1 は読み取りの batch(2 文)と書き込みの batch(2 文)。書き込み行数は目録 2〈行 + 部分索引〉+ 計数 1。目録の行・r2_ops が期待どおり", async () => {
+  it("中央の 1 レース: R2 の put 1 回・get 0 回、D1 は読み取りの batch(2 文)と書き込みの batch(2 文)。書き込み行数は目録 3〈行 + 部分索引 2 本〉+ 計数 1。目録の行・r2_ops が期待どおり", async () => {
     const { store, calls, batches } = makeStore();
     const result = await store.saveRaceArchive({ record: CENTRAL, html: CENTRAL_HTML });
     expect(result.status).toBe("saved");
@@ -148,13 +148,13 @@ describe("保存: 新規(R2 → D1)", () => {
     expect(batches[0]!.metas.map((m) => m.rowsWritten)).toEqual([0, 0]); // 読み取りの batch は書かない
     // `SELECT 1`(大きさを得るためだけの文)は表を読まないので、読み取り行数を増やさない(JSDoc の主張。ローカルの D1 の実測で 0)
     expect(batches[0]!.metas[1]!.rowsRead).toBe(0);
-    expect(batches[1]!.metas.map((m) => m.rowsWritten)).toEqual([1, 2]); // 計数 1 行・目録 2 行(行 1 + 部分索引 idx_race_archive_runs_pending の 1。migration 0036・Issue #613。未変換で入るため)
+    expect(batches[1]!.metas.map((m) => m.rowsWritten)).toEqual([1, 3]); // 計数 1 行・目録 3 行(行 1 + 部分索引 idx_race_archive_runs_pending の 1〈migration 0036・Issue #613。未変換で入るため〉+ 部分索引 idx_race_archive_market_pending の 1〈migration 0039・Issue #642。未処理で入るため〉)
     expect(batches[1]!.metas.map((m) => m.changes)).toEqual([1, 1]);
 
     // 目録の行
     const rows = await catalog();
     const encoded = encodeRaceArchive({ record: CENTRAL, html: CENTRAL_HTML, fetchedAt: T1 });
-    expect(rows).toEqual([{ race_id: "202105040811", kind: "central", race_date: "2021-10-31", parser_version: CENTRAL.parserVersion, r2_key: CENTRAL_KEY, raw_bytes: encoded.rawBytes, fetched_at: T1, runs_version: null }]);
+    expect(rows).toEqual([{ race_id: "202105040811", kind: "central", race_date: "2021-10-31", parser_version: CENTRAL.parserVersion, r2_key: CENTRAL_KEY, raw_bytes: encoded.rawBytes, fetched_at: T1, runs_version: null, market_version: null }]);
     // r2_ops: 今月(UTC 2026-11)の Class A が 1、Class B は 0
     expect(await ops()).toEqual({ classA: 1, classB: 0 });
     // 戻り値の大きさは、ローカルの D1 が返した実際の値(ページ単位の正の数)
@@ -231,13 +231,13 @@ describe("保存: 冪等(同じレースを何度保存しても目録は 1 行)
     expect(await ops()).toEqual({ classA: 3, classB: 0 });
   });
 
-  it("HTML が変わった(長さが違う)再保存: saved。raw_bytes と fetched_at が新しくなる。書き込み行数は目録 2〈行 + 部分索引〉+ 計数 1", async () => {
+  it("HTML が変わった(長さが違う)再保存: saved。raw_bytes と fetched_at が新しくなる。書き込み行数は目録 3〈行 + 部分索引 2 本〉+ 計数 1", async () => {
     await makeStore().store.saveRaceArchive({ record: CENTRAL, html: CENTRAL_HTML });
     clock = new Date(T2);
     const changed = `${CENTRAL_HTML}<!-- 追記 -->`;
     const second = makeStore();
     expect((await second.store.saveRaceArchive({ record: CENTRAL, html: changed })).status).toBe("saved");
-    expect(second.batches[1]!.metas.map((m) => [m.changes, m.rowsWritten])).toEqual([[1, 1], [1, 2]]); // 目録は行 1 + 部分索引 1(runs_version = NULL に戻す更新は索引の行も書く。0036・Issue #613。ローカルの D1 で測った値)
+    expect(second.batches[1]!.metas.map((m) => [m.changes, m.rowsWritten])).toEqual([[1, 1], [1, 3]]); // 目録は行 1 + 部分索引 2(runs_version・market_version = NULL に戻す更新は索引の行も書く。0036・Issue #613、0039・Issue #642。ローカルの D1 で測った値)
     const [row] = await catalog();
     expect(row!["fetched_at"]).toBe(T2);
     expect(row!["raw_bytes"]).toBe(encodeRaceArchive({ record: CENTRAL, html: changed, fetchedAt: T2 }).rawBytes);

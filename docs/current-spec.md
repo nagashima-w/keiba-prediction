@@ -1497,6 +1497,22 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **起動**: cron の `scheduled` が 21:00 と 23:00 の両方で、取得の `kick()` と並べて(`Promise.all`)変換の `kick()` を呼ぶ。失敗しても投げない(分類 `race-archive-runs-kick-failed` だけをログに出す)。
 - **検査**: `cloud/test/race-archive-runs-core.test.ts`・`race-archive-runs-budget.test.ts`・`handler-race-archive-runs.test.ts`、`scripts/test/cloud-config-guard.test.ts`(#590 の節)、smoke の J(取得が保存した 1 レースを、smoke 専用の DO が変換する)。
 
+### 騎手・調教師の「市場の予測との差」の指標(#642。**版数は 1.44.0 のまま**〈凍結〉。公開すると、その晩の JST 3:00 から、本番の D1 に書き込みが始まる)
+中央の過去の結果から、騎手・調教師ごとに「市場の予測より 3 着内にどれだけ多く来たか」の指標を毎晩作って D1 に保存する。画面は #643・#644、分析(LLM・配分)には使わない。
+- **式**(`cloud/src/market-edge-calc.ts`。#548 の `explore.py` と同じ): 馬ごとに q = 1/単勝オッズをレースの中で合計 1 に割り戻す。3 着内(finish ≤ 3)を、切片 + logit(q) + log(頭数) のロジスティック回帰で予測した確率を p とし、読み残し = y − p。指標 = 騎手(調教師)ごとの読み残しの合計 ÷(件数 + 30)。件数・3 着内率・p の平均も持つ。
+  - オッズが正で着順が数字の馬だけを使う(取消・除外・中止は除く)。頭数は残った馬の数。**残りが 5 頭に満たないレースは使わない**(`explore.py` の `len(hs) < 5` と同じ。手元の 7,718 レースで 1 レース〈4 頭〉が除かれ、105,316 頭になる)。
+  - 騎手・調教師ごとに全体の 1 つの値だけ(芝ダ別・競馬場別は作らない)。集計の期間は、計算する日(JST)から遡って 2 年の開催日。名前は、窓の中で最後に出たレースの記録の名前(結果ページの略称)。
+  - 係数は**毎晩当て直す**(ニュートン法・初期値 0・反復は最大 25 回。収束は最後の更新幅が 1e-8 未満)。収束しなかった晩は前日の係数を使い、`market_edge_meta.converged` を 0 にする。前日の係数が無いときは何も書かない。
+- **担当は新しい DO `RaceMarketEdgeDO`**(binding `RACE_MARKET_EDGE`・migration v13・単一インスタンス `main`)。純ロジックは `cloud/src/market-edge-core.ts`。**netkeiba にも gate にも出ない**(R2 と D1 だけ)。取得の DO・変換の DO とは別のアラームで、止め合わない。cron の `scheduled` が 21:00 と 23:00 に `kick()` する。
+- **時間帯**: JST 3:00 以上 8:30 未満(開催日の朝も動かす)。**1 晩の書き込み行数の上限**は既定 20,000 行(var `RACE_MARKET_EDGE_NIGHTLY_LIMIT` で下げる。`"0"` で止める。★binding と同じ名前の var は衝突するので使わない)。
+- **取り込み**(migration 0039。追加のみ): 目録に `race_archive.market_version`(NULL = 未処理、1 = 取り込み済み、-1 = 窓より古いので読まずに印だけ)と、未処理の中央だけの部分索引 `idx_race_archive_market_pending` を足した。目録の中身が変わる再保存は NULL に戻す。DO は未処理のレースを主キー順に 100 件ずつ読み、窓の中のものを 1 ステップ最大 20 件、R2 から読んで `race_market_rows`(1 レース 1 行。馬ごとの [騎手 ID, 名前, 調教師 ID, 名前, q, y] の JSON)に書く。計算に入る馬が 4 頭以下のレースは行を作らず、印だけ付ける。
+- **集計**: 未処理が尽きた周の終わりで、**その日(JST)まだ集計していなければ 1 回**。窓の `race_market_rows` を開催日の索引の範囲で 500 行ずつ読み(約 7,700 行 → 約 16 回)、係数を当て直し、`market_edge`(騎手・調教師ごと 1 行。主キー (person_kind, person_id))と `market_edge_meta`(計算した日・期間・係数・収束・反復の回数・レース数・馬数。1 行)を 1 回の batch で置き換え、窓から外れた人と窓より古い市場の行を消す。**取り込みが一通り終わるまで(1 晩の上限に当たった晩などは)集計しない**ので、初回の埋め戻しの間、`market_edge` は空のまま。読み出しは `D1MarketEdgeStore.readEdges(kind)`・`readMeta()`(画面の #643・#644 が使う)。
+- **書き込み行数の見積もり**(ローカルの workerd の D1 の `meta.rows_written` の実測。`cloud/test/market-edge-repository.integration.test.ts`・`market-edge-budget.integration.test.ts`。D1 の課金上の数え方がこれより多い可能性があるので、上限は余裕を見て決めた): 窓の中の 1 レースの取り込みは 3 行(市場の行が本体 + 日付の索引で 2、目録の印が 1)、窓より古い 1 レースは印だけで 1 行、ステップごとの R2 の Class B の計数が 1 行。**取得の DO の目録の保存も 1 レースにつき 1 行増える**(新しい部分索引。保存の目録の書き込みが 2 行から 3 行になった。`race-archive-repository.integration.test.ts` が固定)。集計 1 回は 人数 + 記録 1 行(+ 窓から外れた人の削除 + 古い市場の行の削除)。手元の分析の 7,718 レース・騎手 236 人・調教師 269 人にあてはめると、窓の中の約 7,700 レースの取り込みが約 2.3 万行、窓より古い約 1 万レースの印が約 1 万行(この数は 5 年分の取得が終わった後の見込み)、集計 1 回が約 510 行。上限が 2 万行なので、初回の埋め戻しは 2〜3 晩かかる。
+- **失敗と止まり方**: 変換の DO と同じ(R2 の get の失敗はそのレースの失敗、3 晩で諦める。保存の失敗は 1 件ずつに切り分け。連続 10 ステップの失敗・R2 の柵・D1 の大きさ 400,000,000 バイト超でその晩は止め、次の晩に自動で再開)。Discord には知らせない(ログのみ)。管理者の口はまだ無い(DO の `getStatus` の RPC はある)。
+- **DO の SQLite**: `me_meta`・`me_fail`(いずれも `WITHOUT ROWID`)。起床の経路の SQL は主キーの引きだけ。
+- **値の突き合わせ**: 手元の過去の結果 7,718 レース(2024-08-10〜2026-11-01)に同じ式をかけると、係数が [2.857, 0.922, −0.556]、荻野極が +0.041(1,330 騎乗)、松若が +0.031(1,150 騎乗)で、`explore.py` の結果と小数第 3 位まで一致する。
+- **検査**: `cloud/test/market-edge-calc.test.ts`(純関数。Python の参照実装との突き合わせ)・`market-edge-aggregate.test.ts`・`market-edge-core.test.ts`・`market-edge-repository.integration.test.ts`・`market-edge-budget.integration.test.ts`、`scripts/test/cloud-config-guard.test.ts`(#642 の節)、`scripts/test/cloud-d1-schema.test.ts`。
+
 ### クラウド版の D1 の容量の見積もり(#171。再現: `pnpm tsx scripts/measure-d1-size.ts`)
 Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 500 MB〈Free〉)。見積もりの手順を残す(#147 の「再現手段がない」への対応)。
 **入力はすべてリポジトリ内**(中央16頭の 202603020211 のフィクスチャ・LLM の実応答 36 本・戦績フィクスチャ5頭)。**乱数は固定の種で、同じ N なら出力は完全に同じ**
