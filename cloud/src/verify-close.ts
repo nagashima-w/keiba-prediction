@@ -25,8 +25,8 @@
  * ## 表が無い・行が無い
  * 行が 1 つも無ければ null(比較なし)。表が無い(migration 前)ときの読み出しの失敗は `D1VerifyStore.readAll` が握って `close: null` にするので、ここには届かない。
  */
-import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
-import type { StoredAllocationSummary, VerifyDataSource } from "../../packages/core/src/ev/analysis-store-types.js";
+import { buildVerifyPart, finalizeVerifyPart, PRODUCTION_VERIFY_CONFIG, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
+import type { StoredAllocationSummary, StoredAnalysis, VerifyDataSource } from "../../packages/core/src/ev/analysis-store-types.js";
 import { closeComboBasis, CLOSE_ROUNDS, venueKindOfRaceIdSafe, type CloseComboBasis } from "./analysis-close";
 
 /** 比較が読む D1 の文(束縛値なし)。どちらも主キーの順(並べ替えの一時領域を使わない)。`analysis_close_bets` は ok の回の行だけがある(migration 0019)。 */
@@ -34,6 +34,21 @@ export const VERIFY_CLOSE_READ_SQL = {
   meta: "SELECT analysis_id AS analysisId, round, status, route, skip_reason_code AS skipReasonCode, reason FROM analysis_close ORDER BY analysis_id, round",
   bets: "SELECT analysis_id AS analysisId, round, bet_type AS betType, combo_key AS comboKey, stake FROM analysis_close_bets ORDER BY analysis_id, round, bet_type, combo_key",
 } as const;
+
+/**
+ * 1 日ぶんの締切直前の再計算の SQL(Issue #628)。`analysisIds` はその日の分析の id(整数でなければ投げる)。{@link VERIFY_CLOSE_READ_SQL} と同じ列・同じ並びで、`WHERE` だけを足したもの(主キーの先頭で引く)。
+ */
+export function verifyDayCloseSql(analysisIds: readonly number[]): { readonly meta: string; readonly bets: string } {
+  if (!analysisIds.every((id) => Number.isSafeInteger(id))) {
+    throw new TypeError("分析 id が整数ではありません");
+  }
+  const ids = analysisIds.length === 0 ? "NULL" : analysisIds.join(",");
+  const where = (sql: string, order: string): string => sql.replace(` ${order}`, ` WHERE analysis_id IN (${ids}) ${order}`);
+  return {
+    meta: where(VERIFY_CLOSE_READ_SQL.meta, "ORDER BY analysis_id, round"),
+    bets: where(VERIFY_CLOSE_READ_SQL.bets, "ORDER BY analysis_id, round, bet_type, combo_key"),
+  };
+}
 
 export interface VerifyCloseMetaRow {
   readonly analysisId: number;
@@ -114,34 +129,64 @@ const BASES: readonly CloseComboBasis[] = ["refetched", "analysis"];
 /** 母集団の分類の見本(`route: "unset"` は「配分の計算に未到達」に数えられ、賭け金は 0)。対象の数を得るためだけに使う。 */
 const PRESENCE_STUB: StoredAllocationSummary = { route: "unset", skipReasonCode: null, bets: [] };
 
+/** 配分ベースの回収率の 4 値の部分(和で合わせられる値。`count` は母集団 4 分類のうち記録なしを除く合計)。 */
+export interface CloseSummaryPart {
+  readonly betCount: number;
+  readonly totalStake: number;
+  readonly totalReturn: number;
+  readonly count: number;
+}
+
+/** 1 レース・1 回・1 基準ぶんの部分(再計算側・分析時側・対象の 3 つ)。対象の無い(0 件の)組は持たない。 */
+export interface CloseCellPart {
+  readonly round: number;
+  readonly basis: CloseComboBasis;
+  readonly recalc: CloseSummaryPart;
+  readonly base: CloseSummaryPart;
+  readonly target: CloseSummaryPart;
+}
+
+/** 1 レースぶんの部分(Issue #625)。構造化複製できる値だけで持つ。区分は確定のときに `venueKind` で絞る。 */
+export interface CloseRacePart {
+  readonly raceId: string;
+  readonly venueKind: "central" | "nar" | null;
+  /** 畳む順の鍵。このレースの分析の ID の最小値。 */
+  readonly orderKey: number;
+  readonly cells: readonly CloseCellPart[];
+}
+
+/** 比較の部分の集まり。`races` は `orderKey` の昇順(同じ `raceId` は 1 つだけ)。 */
+export interface CloseComparisonPart {
+  readonly races: readonly CloseRacePart[];
+}
+
 function summarize(
   source: VerifyDataSource,
-  venue: VerifyVenueFilter,
+  analyses: readonly StoredAnalysis[],
   allocationOf: (analysisId: number) => StoredAllocationSummary | undefined,
-): { summary: CloseSummary; count: number } {
+): CloseSummaryPart {
   const derived: VerifyDataSource = { ...source, getAllocationForVerify: allocationOf };
-  const { overall, population } = computeVerifyReport(derived, PRODUCTION_VERIFY_CONFIG, venue).proposedBet;
+  const { overall, population } = finalizeVerifyPart(buildVerifyPart(derived, analyses, PRODUCTION_VERIFY_CONFIG), PRODUCTION_VERIFY_CONFIG, "all").proposedBet;
   return {
-    summary: { betCount: overall.betCount, totalStake: overall.totalStake, totalReturn: overall.totalReturn, recoveryRate: overall.recoveryRate },
+    betCount: overall.betCount,
+    totalStake: overall.totalStake,
+    totalReturn: overall.totalReturn,
     count: population.allocated + population.skipped + population.unreached,
   };
 }
+
+const toSummary = (p: CloseSummaryPart): CloseSummary => ({ betCount: p.betCount, totalStake: p.totalStake, totalReturn: p.totalReturn, recoveryRate: p.totalStake === 0 ? null : p.totalReturn / p.totalStake });
+const ZERO_PART: CloseSummaryPart = { betCount: 0, totalStake: 0, totalReturn: 0, count: 0 };
 
 /** 旧い仕組み(Issue #338)が地方に書いた理由。比較から除く。 */
 const LEGACY_NAR_REASON = "nar-unsupported";
 
 /**
- * 区分・回・基準ごとの、分析時と再計算の回収率の比較を作る(クラス冒頭の説明)。対象が 1 つも無ければ null。
- * 行は回ごとに、`refetched` → `analysis` の順。**どの回も少なくとも 1 行は出す**(対象の無い回は `refetched` の 0 件の行)。`analysis` の行は対象があるときだけ。
- * `refetched` の行は、対象が無く、同じ回の `analysis` の行に対象があるときだけ省く(0 件の行を並べない)。
- * 定義にない回(`CLOSE_ROUNDS` にない番号)の行は無視する。
+ * 比較の部分を作る(Issue #625)。`analyses` は**レースが欠けない**集合(同じレースの分析は全部渡す)。区分では絞らない。
+ * 分析ごとの基準(場 × 分析時の組合せ設定)と、回ごとの再計算の配分は、渡された分析に関係する行だけを使う。
  */
-export function computeCloseComparison(source: VerifyDataSource, close: VerifyCloseRows, options: CloseComparisonOptions): CloseComparison | null {
-  const { venue, comboOnIds } = options;
+export function buildCloseParts(source: VerifyDataSource, close: VerifyCloseRows, analyses: readonly StoredAnalysis[], comboOnIds: ReadonlySet<number>): CloseComparisonPart {
   const metaRows = close.meta.filter((m) => m.reason !== LEGACY_NAR_REASON);
-  if (metaRows.length === 0) {
-    return null;
-  }
   const betsByKey = new Map<string, StoredAllocationSummary["bets"][number][]>();
   for (const b of close.bets) {
     const key = `${b.analysisId}:${b.round}`;
@@ -153,27 +198,103 @@ export function computeCloseComparison(source: VerifyDataSource, close: VerifyCl
       bets.push(bet);
     }
   }
-  // 分析ごとの基準(場 × 分析時の組合せ設定)。場が判らない分析は持たない=どの行にも入らない。
-  const basisOf = new Map<number, CloseComboBasis>();
-  for (const a of source.listAnalyses()) {
-    basisOf.set(a.id, closeComboBasis(venueKindOfRaceIdSafe(a.raceId), comboOnIds.has(a.id)));
+  const byRace = new Map<string, StoredAnalysis[]>();
+  for (const a of analyses) {
+    const group = byRace.get(a.raceId);
+    if (group === undefined) {
+      byRace.set(a.raceId, [a]);
+    } else {
+      group.push(a);
+    }
   }
-  const rounds: CloseRoundComparison[] = [];
-  for (const { round, leadMs } of CLOSE_ROUNDS) {
-    const rowsOfRound = metaRows.filter((m) => m.round === round);
-    const perBasis = BASES.map((basis) => {
-      const inBasis = (analysisId: number): boolean => basisOf.get(analysisId) === basis;
-      const present = new Set(rowsOfRound.filter((m) => inBasis(m.analysisId)).map((m) => m.analysisId));
-      // 再計算の配分(ok で、経路がある行だけ。経路が無い ok は配分なし扱い)。
-      const recalcAllocations = new Map<number, StoredAllocationSummary>();
-      for (const m of rowsOfRound) {
-        if (inBasis(m.analysisId) && m.status === "ok" && m.route !== null) {
-          recalcAllocations.set(m.analysisId, { route: m.route, skipReasonCode: m.skipReasonCode, bets: betsByKey.get(`${m.analysisId}:${round}`) ?? [] });
+  const metaByAnalysis = new Map<number, VerifyCloseMetaRow[]>();
+  for (const m of metaRows) {
+    const rows = metaByAnalysis.get(m.analysisId);
+    if (rows === undefined) {
+      metaByAnalysis.set(m.analysisId, [m]);
+    } else {
+      rows.push(m);
+    }
+  }
+  const races: CloseRacePart[] = [];
+  for (const [raceId, raceAnalyses] of byRace) {
+    // 分析ごとの基準(場 × 分析時の組合せ設定)。場が判らない分析は持たない=どの行にも入らない。
+    const basisOf = new Map<number, CloseComboBasis>();
+    for (const a of raceAnalyses) {
+      basisOf.set(a.id, closeComboBasis(venueKindOfRaceIdSafe(a.raceId), comboOnIds.has(a.id)));
+    }
+    const cells: CloseCellPart[] = [];
+    for (const { round } of CLOSE_ROUNDS) {
+      const rowsOfRound = raceAnalyses.flatMap((a) => (metaByAnalysis.get(a.id) ?? []).filter((m) => m.round === round));
+      for (const basis of BASES) {
+        const inBasis = (analysisId: number): boolean => basisOf.get(analysisId) === basis;
+        const present = new Set(rowsOfRound.filter((m) => inBasis(m.analysisId)).map((m) => m.analysisId));
+        if (present.size === 0) {
+          continue; // 対象が無い組は、再計算側・分析時側・対象のどれも 0 件
+        }
+        // 再計算の配分(ok で、経路がある行だけ。経路が無い ok は配分なし扱い)。
+        const recalcAllocations = new Map<number, StoredAllocationSummary>();
+        for (const m of rowsOfRound) {
+          if (inBasis(m.analysisId) && m.status === "ok" && m.route !== null) {
+            recalcAllocations.set(m.analysisId, { route: m.route, skipReasonCode: m.skipReasonCode, bets: betsByKey.get(`${m.analysisId}:${round}`) ?? [] });
+          }
+        }
+        cells.push({
+          round,
+          basis,
+          recalc: summarize(source, raceAnalyses, (id) => recalcAllocations.get(id)),
+          base: summarize(source, raceAnalyses, (id) => (recalcAllocations.has(id) ? source.getAllocationForVerify(id) : undefined)),
+          target: summarize(source, raceAnalyses, (id) => (present.has(id) ? PRESENCE_STUB : undefined)),
+        });
+      }
+    }
+    races.push({ raceId, venueKind: venueKindOfRaceIdSafe(raceId), orderKey: Math.min(...raceAnalyses.map((a) => a.id)), cells });
+  }
+  return { races: races.sort((a, b) => a.orderKey - b.orderKey) };
+}
+
+/** 比較の部分を合わせる。レースの項目を `orderKey` の昇順に並べるだけで、同じ `raceId` が 2 つの部分にあれば例外を投げる。 */
+export function mergeCloseParts(parts: readonly CloseComparisonPart[]): CloseComparisonPart {
+  const seen = new Set<string>();
+  const races: CloseRacePart[] = [];
+  for (const part of parts) {
+    for (const race of part.races) {
+      if (seen.has(race.raceId)) {
+        throw new Error(`同じレースが複数の部分にあります: ${race.raceId}`);
+      }
+      seen.add(race.raceId);
+      races.push(race);
+    }
+  }
+  return { races: races.sort((a, b) => a.orderKey - b.orderKey) };
+}
+
+/**
+ * 比較の部分を確定する(Issue #625)。`venue` が "all" 以外なら開催区分が一致するレースだけを `orderKey` の順に足す。対象が 1 つも無ければ null。
+ * 行は回ごとに、`refetched` → `analysis` の順。**どの回も少なくとも 1 行は出す**(対象の無い回は `refetched` の 0 件の行)。`analysis` の行は対象があるときだけ。
+ * `refetched` の行は、対象が無く、同じ回の `analysis` の行に対象があるときだけ省く(0 件の行を並べない)。
+ * 定義にない回(`CLOSE_ROUNDS` にない番号)の行は無視する。
+ */
+export function finalizeCloseParts(part: CloseComparisonPart, venue: VerifyVenueFilter): CloseComparison | null {
+  const races = [...part.races].sort((a, b) => a.orderKey - b.orderKey).filter((r) => venue === "all" || r.venueKind === venue);
+  const sum = (round: number, basis: CloseComboBasis, pick: (c: CloseCellPart) => CloseSummaryPart): CloseSummaryPart => {
+    let total = ZERO_PART;
+    for (const race of races) {
+      for (const cell of race.cells) {
+        if (cell.round === round && cell.basis === basis) {
+          const p = pick(cell);
+          total = { betCount: total.betCount + p.betCount, totalStake: total.totalStake + p.totalStake, totalReturn: total.totalReturn + p.totalReturn, count: total.count + p.count };
         }
       }
-      const recalc = summarize(source, venue, (id) => recalcAllocations.get(id));
-      const base = summarize(source, venue, (id) => (recalcAllocations.has(id) ? source.getAllocationForVerify(id) : undefined));
-      const target = summarize(source, venue, (id) => (present.has(id) ? PRESENCE_STUB : undefined));
+    }
+    return total;
+  };
+  const rounds: CloseRoundComparison[] = [];
+  for (const { round, leadMs } of CLOSE_ROUNDS) {
+    const perBasis = BASES.map((basis) => {
+      const recalc = sum(round, basis, (c) => c.recalc);
+      const base = sum(round, basis, (c) => c.base);
+      const target = sum(round, basis, (c) => c.target);
       const row: CloseRoundComparison = {
         round,
         basis,
@@ -181,8 +302,8 @@ export function computeCloseComparison(source: VerifyDataSource, close: VerifyCl
         leadMinutes: leadMs / 60_000,
         okCount: recalc.count,
         targetCount: target.count,
-        base: base.summary,
-        recalc: recalc.summary,
+        base: toSummary(base),
+        recalc: toSummary(recalc),
       };
       return row;
     });
@@ -196,4 +317,11 @@ export function computeCloseComparison(source: VerifyDataSource, close: VerifyCl
     }
   }
   return rounds.some((r) => r.targetCount > 0) ? { description: CLOSE_COMPARISON_DESCRIPTION, rounds } : null;
+}
+
+/**
+ * 区分・回・基準ごとの、分析時と再計算の回収率の比較を作る。対象が 1 つも無ければ null。全分析を 1 つの部分にして確定する(部分の作り方・合わせ方は {@link buildCloseParts}・{@link mergeCloseParts}・{@link finalizeCloseParts})。
+ */
+export function computeCloseComparison(source: VerifyDataSource, close: VerifyCloseRows, options: CloseComparisonOptions): CloseComparison | null {
+  return finalizeCloseParts(buildCloseParts(source, close, source.listAnalyses(), options.comboOnIds), options.venue);
 }

@@ -33,8 +33,21 @@ import { verifyRaceMarkByAnalysisIdsStatement } from "./verify-race-mark";
 import { decodeDetail } from "./analysis-detail";
 import { extractStartTime } from "../../packages/core/src/ev/lookahead-suspicion.js";
 import { monthKey, type R2Usage } from "./r2-fence";
-import { START_TIME_ABSENT, START_TIME_LOST, VERIFY_READ_SQL, type VerifyReadRows } from "./verify-read";
-import { VERIFY_CLOSE_READ_SQL, type VerifyCloseRows } from "./verify-close";
+import {
+  START_TIME_ABSENT,
+  START_TIME_LOST,
+  VERIFY_DAY_ANALYSES_SQL,
+  VERIFY_NO_DATE_ANALYSES_SQL,
+  VERIFY_READ_SQL,
+  verifyDayAllocationSql,
+  verifyDayHorsesSql,
+  verifyDayResultSql,
+  type VerifyAnalysisRow,
+  type VerifyReadRows,
+} from "./verify-read";
+import { VERIFY_CLOSE_READ_SQL, verifyDayCloseSql, type VerifyCloseRows } from "./verify-close";
+import { NO_DATE_DAY } from "./verify-parts";
+import type { VerifyMark } from "./verify-core";
 import { extractRaceFacts, type RaceFacts } from "./race-facts";
 
 export type VerifyDb = Pick<D1Database, "prepare" | "batch">;
@@ -282,5 +295,61 @@ export class D1VerifyStore {
     counts["closeMeta"] = close.meta.length;
     counts["closeBets"] = close.bets.length;
     return { rows, rowsRead, counts, close };
+  }
+
+  // -------------------------------------------------------------------------
+  // 差分の集計の読み(Issue #628)
+  // -------------------------------------------------------------------------
+
+  /** 変更の印(`verify_race_mark`)の seq の最大値。印が無ければ 0。主キーでない列の索引(`idx_verify_race_mark_seq`)の末尾 1 行を読む。 */
+  async readMaxSeq(): Promise<number> {
+    const row = await this.db.prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM verify_race_mark").first<{ seq: number }>();
+    return row?.seq ?? 0;
+  }
+
+  /** `seq > afterSeq` の印を seq の昇順に `limit` 件まで(`idx_verify_race_mark_seq` の範囲)。 */
+  async readMarks(afterSeq: number, limit: number): Promise<{ readonly marks: VerifyMark[]; readonly rowsRead: number }> {
+    const r = await this.db
+      .prepare("SELECT race_id AS raceId, kaisai_date AS kaisaiDate, seq FROM verify_race_mark WHERE seq > ? ORDER BY seq LIMIT ?")
+      .bind(afterSeq, limit)
+      .all<VerifyMark>();
+    return { marks: r.results ?? [], rowsRead: r.meta.rows_read ?? 0 };
+  }
+
+  /** 分析のある開催日の一覧(開催日が NULL の分析があれば {@link NO_DATE_DAY})。`idx_analyses_kaisai_date` を最後まで走る(読む行は分析の行数。作り直しの最初の 1 回だけ)。 */
+  async readDays(): Promise<{ readonly days: string[]; readonly rowsRead: number }> {
+    const r = await this.db.prepare("SELECT kaisai_date AS d FROM analyses GROUP BY kaisai_date ORDER BY kaisai_date").all<{ d: string | null }>();
+    return { days: (r.results ?? []).map((x) => x.d ?? NO_DATE_DAY), rowsRead: r.meta.rows_read ?? 0 };
+  }
+
+  /**
+   * 1 日ぶんの行を読む。**全件の読みと同じ列・同じ並びを、その日で絞ったもの**(`verify-read.ts` の `verifyDay*Sql`)。D1 の文は 9 つ(分析 1 → 馬・配分メタ・買い目・結果・組合せ払戻・取込印の 6 → 再計算 2)。
+   * 再計算の 2 文は別の batch で、読めなければ(表が無い)握って `close: null`(全件の読みと同じ)。結果などは、その日の**全レース**(買い目の有無に依らない)。
+   */
+  async readDay(day: string): Promise<{ readonly rows: VerifyReadRows; readonly close: VerifyCloseRows | null; readonly rowsRead: number }> {
+    const first = await this.db.batch<Record<string, unknown>>([day === NO_DATE_DAY ? this.db.prepare(VERIFY_NO_DATE_ANALYSES_SQL) : this.db.prepare(VERIFY_DAY_ANALYSES_SQL).bind(day)]);
+    const analyses = (first[0]?.results ?? []) as unknown as VerifyAnalysisRow[];
+    let rowsRead = first.reduce((n, r) => n + (r.meta.rows_read ?? 0), 0);
+    const empty = { analyses, horses: [], allocationMeta: [], bets: [], results: [], comboPayouts: [], comboImports: [] } satisfies VerifyReadRows;
+    if (analyses.length === 0) return { rows: empty, close: { meta: [], bets: [] }, rowsRead };
+    const ids = analyses.map((a) => a.id);
+    const allocation = verifyDayAllocationSql(ids);
+    const result = verifyDayResultSql([...new Set(analyses.map((a) => a.raceId))].sort());
+    const second = await this.db.batch<Record<string, unknown>>([
+      this.db.prepare(verifyDayHorsesSql(ids)),
+      this.db.prepare(allocation.allocationMeta),
+      this.db.prepare(allocation.bets),
+      this.db.prepare(result.results),
+      this.db.prepare(result.comboPayouts),
+      this.db.prepare(result.comboImports),
+    ]);
+    rowsRead += second.reduce((n, r) => n + (r.meta.rows_read ?? 0), 0);
+    const at = (i: number): never => (second[i]?.results ?? []) as never;
+    const rows: VerifyReadRows = { analyses, horses: at(0), allocationMeta: at(1), bets: at(2), results: at(3), comboPayouts: at(4), comboImports: at(5) };
+    const closeSql = verifyDayCloseSql(ids);
+    const closeResults = await this.db.batch<Record<string, unknown>>([this.db.prepare(closeSql.meta), this.db.prepare(closeSql.bets)]).catch(() => null);
+    if (closeResults === null) return { rows, close: null, rowsRead };
+    rowsRead += closeResults.reduce((n, r) => n + (r.meta.rows_read ?? 0), 0);
+    return { rows, close: { meta: (closeResults[0]?.results ?? []) as never, bets: (closeResults[1]?.results ?? []) as never }, rowsRead };
   }
 }

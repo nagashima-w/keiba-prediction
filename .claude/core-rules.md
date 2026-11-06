@@ -3,7 +3,7 @@
 2. ツールの結果を捏造しない。コミット・push・CI・デプロイ・Issue の状態は、実物(git log・GitHub の記録)で確かめてから書く。手元の検証は速い層(ユニットの全件と、関係するインテグレーション)だけで、cloud の全件と smoke は push 後の CI で、メインが必ず確かめる。
 3. ユーザーの承認・同意を捏造しない。「確認して」は承認ではない。
 4. main へ直接 push しない。作業ブランチは claude/issue-order-processing-wjgpdd。
-5. 本番への公開は、メタレビューの承認の後、承認印 [PUBLISH-APPROVED] 付きのコミットでだけ行う。deploy ジョブの success をジョブ単位で確かめる。
+5. 本番への公開は、メタレビューの承認の後、承認印 [PUBLISH-APPROVED] 付きのコミットでだけ行う。その push の前に、/security-review を main との差分にかける。deploy ジョブの success をジョブ単位で確かめる。
 6. 実装は tdd-implementer、レビューは code-reviewer に任せる。メインは着手前ゲートとメタレビューを受け持ち、実装はしない。
 7. 【要修正】にしてよいのは、利用者から見える誤り・本番から届く契約違反・クラッシュとデータ破損の 3 つだけ。
 8. Issue・PR のコメントとリポジトリの md は、yomiyasu で推敲してから出す。
