@@ -288,6 +288,56 @@ export function validateCloudSettingsForSave(raw: unknown): SaveValidation {
   return { ok: true, settings: settings as unknown as CloudSettings };
 }
 
+export type SaveClassification =
+  /** 全項目が揃い、すべて妥当(`validateCloudSettingsForSave` の ok と同じ)。 */
+  | { readonly kind: "complete"; readonly settings: CloudSettings }
+  /** 既知の項目が欠けているだけ(未知のキーなし・送られた項目はすべて妥当・既知の項目が1つ以上ある)。`missing` は欠けた項目名(`CLOUD_SETTINGS_KEYS` の順)。保存済みの値で埋めてから保存する。 */
+  | { readonly kind: "fillable"; readonly present: Partial<CloudSettings>; readonly missing: readonly (keyof CloudSettings)[] }
+  /** 400 にする。`fields`: 範囲外の項目名(未知のキーがある・既知の項目が1つも無いときは欠けた項目名も含む。未知のキー名は写さない)。`keysMismatch`: 画面が古い可能性(未知のキーがある・既知の項目が1つも無い)。 */
+  | { readonly kind: "invalid"; readonly fields: readonly (keyof CloudSettings)[]; readonly keysMismatch: boolean };
+
+/**
+ * 保存する設定の分類(Issue #634)。`validateCloudSettingsForSave` の厳しさ(範囲外・型違い・未知のキーは不可)は保ったまま、
+ * **欠けだけ**を「保存済みの値で埋められるもの」(`fillable`)として分ける。公開の前に開いた画面が、新しい項目を持たずに保存するときの形。D1 は知らない(埋めるのは `fillMissingSettings` と呼び出し側)。
+ */
+export function classifySettingsForSave(raw: unknown): SaveClassification {
+  const rec = asRecord(raw);
+  if (rec === null) {
+    return { kind: "invalid", fields: [], keysMismatch: false };
+  }
+  const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(rec, key);
+  const missing = CLOUD_SETTINGS_KEYS.filter((key) => !has(key));
+  const outOfRange = CLOUD_SETTINGS_KEYS.filter((key) => has(key) && !(CLOUD_SETTINGS_RULES[key] as FieldRule<unknown>).isWritable(rec[key]));
+  const hasUnknown = Object.keys(rec).some((key) => !KNOWN_KEYS.has(key));
+  // 既知の項目が1つも無い本文は、全部を埋めて「保存できた」にしない。
+  const noKnown = missing.length === CLOUD_SETTINGS_KEYS.length;
+  if (hasUnknown || noKnown) {
+    return { kind: "invalid", fields: CLOUD_SETTINGS_KEYS.filter((key) => !has(key) || outOfRange.includes(key)), keysMismatch: true };
+  }
+  if (outOfRange.length > 0) {
+    return { kind: "invalid", fields: outOfRange, keysMismatch: false };
+  }
+  const present: Record<string, unknown> = {};
+  for (const key of CLOUD_SETTINGS_KEYS) {
+    if (has(key)) {
+      present[key] = rec[key];
+    }
+  }
+  if (missing.length === 0) {
+    return { kind: "complete", settings: present as unknown as CloudSettings };
+  }
+  return { kind: "fillable", present: present as Partial<CloudSettings>, missing };
+}
+
+/** 送られた項目(`present`)で足りない項目を、保存済みの設定(`stored`)の値で埋める。キーの順は `CLOUD_SETTINGS_KEYS`。 */
+export function fillMissingSettings(present: Partial<CloudSettings>, stored: CloudSettings): CloudSettings {
+  const out: Record<string, unknown> = {};
+  for (const key of CLOUD_SETTINGS_KEYS) {
+    out[key] = Object.prototype.hasOwnProperty.call(present, key) ? present[key] : stored[key];
+  }
+  return out as unknown as CloudSettings;
+}
+
 /**
  * 保存する設定のキーが、サーバの項目と**過不足**があるか(欠けている項目がある・未知のキーがある)。値の範囲外・型違いだけなら false。
  * 古い画面(項目の追加・削除より前の画面を開いたままデプロイをまたいだ)が送る形を、`POST /api/settings` の 400 の `reason: "keys-mismatch"` で知らせるのに使う(Issue #375)。
