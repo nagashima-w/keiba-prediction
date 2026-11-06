@@ -485,8 +485,9 @@ describe("補完の通し(Issue #389。実 D1・実 R2 + VerifyCore): 既存分�
     const data = new Map<string, unknown>();
     const kv: VerifyKv = { get: <T>(k: string) => data.get(k) as T | undefined, put: (k: string, v: unknown) => void data.set(k, JSON.parse(JSON.stringify(v))) };
     const alarms: number[] = [];
-    const c = new VerifyCore({ kv, now: () => NOW.getTime(), setAlarm: (at) => void alarms.push(at), getAlarm: async () => null, store: verifyStore(bucket) }, {});
-    return { c, kv, alarms };
+    const clock = { t: NOW.getTime() };
+    const c = new VerifyCore({ kv, now: () => clock.t, setAlarm: (at) => void alarms.push(at), getAlarm: async () => null, store: verifyStore(bucket) }, {});
+    return { c, kv, alarms, clock };
   }
   const classB = async () => (await local.db.prepare("SELECT class_b AS b FROM r2_ops WHERE ym = 202610").first<{ b: number }>())?.b ?? 0;
 
@@ -536,13 +537,14 @@ describe("補完の通し(Issue #389。実 D1・実 R2 + VerifyCore): 既存分�
     await local.db.prepare("UPDATE analyses SET start_time = '09:00'").run();
     let broken = true;
     const flaky = { get: async (key: string) => { if (broken && key.endsWith("/2.json.gz")) throw new Error("R2_ERROR"); return local.r2.get(key); } } as unknown as VerifyBucket;
-    const { c, kv } = core(flaky);
+    const { c, kv, clock } = core(flaky);
     await c.runBackfillTick();
     expect((await condRowOf(1)).cond_read).toBe(1);
     expect((await condRowOf(2)).cond_read).toBeNull();
     expect((await condRowOf(3)).cond_read).toBe(1);
     expect(kv.get("cursor2")).toBe(1);
     broken = false;
+    clock.t += 60_000; // 失敗後の退避の待ち(30 秒)が明けてから(待ちの途中の tick は何もしない=Issue #628)
     await c.runBackfillTick();
     expect((await condRowOf(2)).cond_read).toBe(1);
     expect((await verifyStore().listPending(0, 10)).total).toBe(0);

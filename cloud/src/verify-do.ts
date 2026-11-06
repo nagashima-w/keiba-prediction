@@ -59,5 +59,7 @@ export class VerifyReportDO extends DurableObject<VerifyReportEnv> {
   /** アラーム: 発走時刻の補完を 1 tick 進める(例外は握る: 失敗は状態に記録され、退避の間隔で再試行される)。 */
   async alarm(): Promise<void> {
     await this.core.runBackfillTick();
+    // 差分の集計の並走(Issue #628)。例外は握る(画面の集計・補完には触れない)。
+    await this.core.runPartsTick();
   }
 }
