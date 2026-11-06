@@ -2725,6 +2725,20 @@ JRA の開催日の朝に、JRA のページ(クッション値・含水率・�
 - **表**(migration 0017。追加のみ。0021 で `dropped_json` を追加。0026〈#480〉で `baba_fetch_attempts` を追加): `baba_fetch_attempts`(開催日 × 枠が主キー。枠ごとの試みの時刻・結果・その回で保存した数・そろったか。`/api/baba-fetch` の `attempts`)、`baba_fetches`(開催日が主キー。その日の要約。試みの時刻・結果の分類・取得の時刻・保存数・捨てた数・捨てた理由の診断)と `baba_conditions`(開催日 × 場コードが主キー。クッション値・芝とダートの状態〈全体・ゴール前・4角〉と含水率・降水量・使用コース・芝丈・芝の状態の文章・`raw_json`)。読み書きは `cloud/src/baba-repository.ts` の `D1BabaStore` だけ。
 - **配線**: `race-day-do.ts` の `fetchBaba: createJraBabaFetcher()`・`babaStore: new D1BabaStore({ db: env.DB })`。secret は要らない。取得口を作るのはこの 1 箇所だけで、JRA を取る起点は **handler.ts の確認口 `GET /api/jra/check`(#488。管理者が開いたときだけ)と、この日単位の DO の馬場の段階だけ**(cron・worker・他の DO からは呼ばない)。止める手段(secret の削除)は無い(常時有効。止めるにはコードの変更)。`/api/health` には出さない。手順は `cloud/README.md` の「馬場の取得」。
 - **テスト**: `jra-baba-parse`(実物のフィクスチャ〈`fixtures/jra_*_20261025.*`。東京・京都・新潟〉と合成の見本による表駆動の読み取り)・`jra-baba-fetch`(注入した偽の fetch と待ち。取る順・間隔・各 1 回・一部失敗・上限・タイムアウト。グローバルの fetch は呼ばれたら落ちるスタブ)・`jra-check`(#488 の確認口。部品の切り出し後も挙動は同じ)・`baba-repository`(ローカルの D1)・`race-day-baba-stage`(段階の単体: 枠・そろった判定・1 枠 1 回・失敗)・`race-day-baba`(core の統合: 09:00 の取得・最初の分析の期限が 08:30〜10:00 でも 09:00 から・10 分おきの取り直しと 12:00 での打ち切り・再起動・並行・救済)・`handler-baba-fetch`(診断の入口)・`migration-0017`・`migration-0021`・`migration-0026`・`race-day-alarm`(候補)・`scripts/test/cloud-config-guard`(取得の起点と外向きの通信の箇所・D1 の書き込み 5 文)・`bundle-guard`(本番のバンドルの配線)。
+### クラウド版の JRA の出馬表の取得(#639。保存するだけ)
+中央の開催日の朝に、馬ごとの血統(父・母・母の父)・馬主・生産者と、レースごとのブリンカー・減量・マルガイの印を、JRA の出馬表の詳細ページから取って D1 に保存する。**分析・プロンプト・画面には使わない**(効くかは #542・#636 で測ってから。`cloud/test/jra-entries-isolation.test.ts` が、読む経路が無いことを固定している)。
+- **出どころ**: 出馬表の主は netkeiba のまま(ユーザーの決定・2026-11-06 の #637)。JRA の馬の番号(`accessU.html?CNAME=pw01dud00<10 桁>/…` の 10 桁)は netkeiba の馬の ID と同じなので、変換は要らない。JRA が壊れても、足した項目が欠けるだけで分析は止まらない。地方は対象外(keiba.go.jp の出馬表は robots.txt で禁止)。
+- **いつ・どこで**: 日単位の DO の取得の段階(`race-day-jra-entries.ts` の `JraEntriesStage`)。開催日の **07:00 JST 以降**(前夜は動かさない)、15:00 まで。優先度は最も低く、分析のタスクが無いときだけ(馬場の取得が動けるうちは馬場が先)。
+- **たどり方**: 開催の選択 `POST accessD.html`(本文 `cname=pw01dli00/F3`)→ 場ごとのレースの選択(`pw01drl00…`)→ レースごとの詳細(`pw01dde…`)。CNAME の末尾は確認用の符号で計算できず、たどった値を DO の `race_day_meta` に置いて使い回す。1 開催日(3 場・36 レース)で 1 + 3 + 36 = 40 本。
+- **1 起床の本数**: 開催の選択 + 場ごとのレースの選択(1 + 場の数)を 1 起床、以後は 1 場ずつ(詳細 12 本)。1 起床の JRA への本数は 13 本以下(`JRA_ENTRIES_PAGES_PER_STEP`)。D1 の文は、場ごとに claim 2 + 保存 3 × チャンク(40 頭ずつ)+ 記録 1。
+- **1 回の試みは 1 回**: JRA に出る前に D1 の `jra_entry_fetches` へ (開催日, 場, 試行番号) を INSERT し(`claim`)、試行の回数を DO の meta に書く。失敗は 10 分後に、失敗したレースだけ取り直す。場ごとに最大 3 回。詳細が `param-error`(符号が古い)なら開催の選択からたどり直す(1 回だけ)。
+- **失敗の見分け**: 符号が違うと HTTP 200 の「パラメータエラー」のページが返るので、状態コードに加えて <title> を見る。馬の行が読めない・日付 / 場 / 回 / 日目 / R が取りに行った CNAME と合わないページも失敗(`shape-mismatch`・`race-mismatch`)にする。
+- **本文の上限**: 詳細ページは約 25 万バイト(18 頭で 252,680)で、馬場の既定の 256KB のすぐ手前。詳細ページだけ 1MB(`JRA_ENTRY_MAX_BODY_BYTES`)を `fetchOne` の引数で渡す。馬場の取得・確認口の既定は変えない。
+- **表**(migration 0038。追加のみ。出どころに依らない名前で、`source` 列を持つ。#640 の netkeiba の馬のページ由来の分も同じ表に入る前提): `horse_profiles`(馬ごと。血統・生産者は上書き、読めなかった項目で既存の値を消さない)・`horse_owner_history`(馬 × 馬主。見た最初と最後の開催日)・`race_horse_entries`(レース × 馬。馬番・ブリンカー・減量・マルガイ)・`jra_entry_fetches`(取得の記録)。値が変わらなければ書かない。1 開催日の書き込みは最大で約 1,750 行。
+- **確かめられた印だけ**: 減量(今回の騎手の `p.jockey > span.mark.jockey` の `title="3kg減量"`)とマルガイ(馬名の前の `maru-gai.png`)。マルチなどは、詳細ページで載り方を確かめていないので読まない。ブリンカーに「初めて着ける」の区別は無い(#636)。
+- **観測**: 1 起床の所要時間と結果を、固定の語のログ(`JRA の出馬表の取得: 場=… 試行=… 結果=… 本数=… 保存=…/… 所要=…ms`)と meta(`jra_entries_last_ms`)に残す。CPU 時間は Workers の観測で見る(手元の Node での測定値は、再現できる形で残していないので、ここには書かない)。
+- **配線**: `race-day-do.ts` の `fetchJraEntries: createJraEntriesFetcher()`・`jraEntriesStore: new D1JraEntriesStore({ db: env.DB })`。secret は要らない。
+
 ### クラウド版の当日の馬場の値の LLM・画面への反映(#295〈#293-B〉。**版数は 1.44.0 のまま**・`PROMPT_VERSION` は "2026-10-13.2")
 
 #294 で D1 の `baba_conditions` に貯めた当日の馬場の値(朝の計測値。取得先は、当時は外部の API で、#478 で JRA のページに替えた)を、発走前の分析の LLM と分析の画面に出す。

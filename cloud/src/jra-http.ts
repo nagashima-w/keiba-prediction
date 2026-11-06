@@ -3,7 +3,7 @@
  *
  * 守ること(`jra-check.ts`・`jra-baba-fetch.ts` の冒頭に、使う側の約束が書いてある):
  *  - 1 本につき fetch は 1 回だけ。再試行しない。リダイレクトは追わない(`redirect: "manual"`。3xx は `redirect` の失敗)。
- *  - タイムアウトは {@link JRA_TIMEOUT_MS}(本文の読み出しも含む。1 本ごと)。本文は {@link JRA_MAX_BODY_BYTES} まで(超えたら打ち切って `too-large`)。
+ *  - タイムアウトは {@link JRA_TIMEOUT_MS}(本文の読み出しも含む。1 本ごと)。本文は {@link JRA_MAX_BODY_BYTES} まで(超えたら打ち切って `too-large`)。出馬表の詳細ページだけ、`fetchOne` の引数で {@link JRA_ENTRY_MAX_BODY_BYTES}(Issue #639)。
  *  - UA などのヘッダは付けない(#488 で、素の fetch で届くと確かめた)。
  *  - 例外のメッセージ・URL・本文は残さない(失敗は分類名だけ)。Shift_JIS は `iconv-lite` で読む(`TextDecoder("shift_jis")` が workerd で使えるかには頼らない)。
  * このファイルは **fetch 関数を呼ぶ部品**(`fetchOne`)を持つが、グローバルの `fetch` そのものは呼ばない(注入された関数を呼ぶだけ)。取得の起点は使う側が持つ。
@@ -14,6 +14,8 @@ export const JRA_CUSHION_URL = "https://www.jra.go.jp/keiba/baba/_data_cushion.h
 export const JRA_MOIST_URL = "https://www.jra.go.jp/keiba/baba/_data_moist.html";
 export const JRA_ACCESS_URL = "https://www.jra.go.jp/JRADB/accessJ.html";
 export const JRA_ACCESS_BODY = "CNAME=pw01iwtS3/CD";
+/** 出馬表(開催の選択・レースの選択・詳細。Issue #639)の入口。`jra-entries-fetch.ts` だけが使う。 */
+export const JRA_ACCESS_D_URL = "https://www.jra.go.jp/JRADB/accessD.html";
 
 /** コースの情報のページの URL。1 は `index.html`、2 以降は `index2.html`・`index3.html`。 */
 export const jraCourseUrl = (n: number): string => `https://www.jra.go.jp/keiba/baba/index${n <= 1 ? "" : String(n)}.html`;
@@ -22,6 +24,11 @@ export const jraCourseUrl = (n: number): string => `https://www.jra.go.jp/keiba/
 export const JRA_TIMEOUT_MS = 10_000;
 /** 本文の上限(バイト)。コースの情報のページ(約 75KB)が最大で、その 3 倍以上。 */
 export const JRA_MAX_BODY_BYTES = 256 * 1024;
+/**
+ * 出馬表の詳細ページの本文の上限(バイト。Issue #639)。1 レースの詳細ページは約 25 万バイト(18 頭で 252,680 バイト。勝負服の画像を馬ごとに base64 で埋め込む)で、
+ * {@link JRA_MAX_BODY_BYTES} のすぐ手前。最大の頭数(18 頭)でこの大きさなので、4 倍の 1MB を上限にする。**詳細ページの取得だけ**が `fetchOne` の引数で渡す(馬場の取得・確認口の既定は変えない)。
+ */
+export const JRA_ENTRY_MAX_BODY_BYTES = 1024 * 1024;
 /** 本のあいだの待ち(ミリ秒)。JRA への取得は 1.5 秒以上あける(#477 の承認の範囲)。 */
 export const JRA_GAP_MS = 1_500;
 
@@ -65,10 +72,10 @@ class ReadFailure extends Error {
   }
 }
 
-/** 本文を上限まで読む(バイト列のまま)。上限を超えたら打ち切って `too-large` を投げる。読み出しの失敗は分類して投げ直す。 */
-async function readBytes(response: Response): Promise<Uint8Array> {
+/** 本文を `maxBytes` まで読む(バイト列のまま)。上限を超えたら打ち切って `too-large` を投げる。読み出しの失敗は分類して投げ直す。 */
+async function readBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get("content-length"));
-  if (response.headers.get("content-length") !== null && Number.isFinite(declared) && declared > JRA_MAX_BODY_BYTES) {
+  if (response.headers.get("content-length") !== null && Number.isFinite(declared) && declared > maxBytes) {
     void response.body?.cancel().catch(() => undefined);
     throw new ReadFailure("too-large");
   }
@@ -85,7 +92,7 @@ async function readBytes(response: Response): Promise<Uint8Array> {
         break;
       }
       total += value.byteLength;
-      if (total > JRA_MAX_BODY_BYTES) {
+      if (total > maxBytes) {
         void reader.cancel().catch(() => undefined);
         throw new ReadFailure("too-large");
       }
@@ -115,7 +122,14 @@ function failed(status: JraFailure, httpStatus: number | null, contentType: stri
 }
 
 /** 1 本を取る。例外は投げない(失敗は分類名に落とす)。`ok` はここでは false で、呼び出し側が本文の形を見て決める。 */
-export async function fetchOne(fetchFn: JraFetchLike, url: string, init: RequestInit, timeoutMs: number): Promise<JraFetched> {
+export async function fetchOne(
+  fetchFn: JraFetchLike,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  /** 本文の上限(バイト)。省略時は {@link JRA_MAX_BODY_BYTES}。 */
+  maxBytes: number = JRA_MAX_BODY_BYTES,
+): Promise<JraFetched> {
   const signal = AbortSignal.timeout(timeoutMs);
   let response: Response;
   try {
@@ -131,7 +145,7 @@ export async function fetchOne(fetchFn: JraFetchLike, url: string, init: Request
     return failed("redirect", httpStatus, contentType);
   }
   try {
-    const body = await readBytes(response);
+    const body = await readBytes(response, maxBytes);
     return { summary: { status: httpStatus, httpStatus, bytes: body.byteLength, contentType, ok: false }, body };
   } catch (error) {
     return failed(error instanceof ReadFailure ? error.failure : "network", httpStatus, contentType);
