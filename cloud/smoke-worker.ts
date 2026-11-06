@@ -365,6 +365,8 @@ export class RaceArchiveSmokeDO extends RealRaceArchiveFetchDO {
 }
 // Issue #590: 過去の結果の毎晩の変換の DO(本番の worker.ts と同じもの。binding RACE_ARCHIVE_RUNS のクラス。smoke の var `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT=0` で止めてある)。
 export { RealRaceArchiveRunsDO as RaceArchiveRunsDO };
+// Issue #642: 騎手・調教師の指標の毎晩の計算の DO(本番の worker.ts と同じもの。binding RACE_MARKET_EDGE のクラス。smoke の var `RACE_MARKET_EDGE_NIGHTLY_LIMIT=0` で止めてある)。
+export { RaceMarketEdgeDO } from "./src/market-edge-do";
 
 /**
  * Issue #590: 過去の結果の毎晩の変換を、workerd の実環境(本物の DO の SQLite・アラーム・D1・R2・変換)で最後まで通すための **smoke 専用の DO**(smoke の一時設定だけが binding `RACE_ARCHIVE_RUNS_SMOKE` で指す。

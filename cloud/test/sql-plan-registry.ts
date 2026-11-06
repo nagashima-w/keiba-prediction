@@ -55,6 +55,17 @@ export const HERE: Record<string, PlanEntry> = {
     "verify-read.ts::VERIFY_NO_DATE_ANALYSES_SQL",
     "jockey-names-repository.ts::recordSql",
     "trainer-names-repository.ts::recordSql",
+    // 騎手・調教師の指標(Issue #642)。未処理の列挙は部分索引、集計の読みは日付の索引の範囲、置き換えは主キー。実際の読み取り行数は market-edge-repository.integration.test.ts が固定している。
+    "market-edge-repository.ts::SELECT_MARKET_PENDING_PAGE_SQL",
+    "market-edge-repository.ts::MARK_MARKET_VERSION_SQL",
+    "market-edge-repository.ts::SELECT_MARKET_WINDOW_PAGE_SQL",
+    "market-edge-repository.ts::PRUNE_MARKET_ROWS_SQL",
+    "market-edge-repository.ts::UPSERT_MARKET_EDGES_SQL",
+    "market-edge-repository.ts::DELETE_STALE_MARKET_EDGES_SQL",
+    "market-edge-repository.ts::UPSERT_MARKET_EDGE_META_SQL",
+    "market-edge-repository.ts::SELECT_MARKET_EDGES_SQL",
+    "market-edge-repository.ts::SELECT_MARKET_EDGE_META_SQL",
+    "market-edge-repository.ts::saveMarketRowsSql",
     // 組み立て関数(サンプルの引数 ids=1,2 で SQL にしたもの)
     "targets-repository.ts::targetsSql.bets",
     "targets-repository.ts::targetsSql.marks",
