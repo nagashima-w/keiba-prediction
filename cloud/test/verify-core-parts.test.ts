@@ -229,6 +229,31 @@ describe("差分の集計の並走: 差分の読みと突き合わせ", () => {
     expect(check(t.kv)).toMatchObject({ checked: 2, matched: 2, mismatched: 0 });
   });
 
+  it("kv の 1 値は 100KB 以下(レースが多くても。「レース → 日」の索引はレースごとのキー)。索引は日の部分の入れ替えで外れたレースのぶんが消える", async () => {
+    const rows = manyDayRows(45, 110); // 4,900 レース前後(索引を 1 つの値にすれば 100KB を超える数)
+    const t = setup(rows);
+    await t.core.getReport("all");
+    await t.drain(2000);
+    const raceCount = new Set(rows.analyses.map((a) => a.raceId)).size;
+    const index = [...t.kv.data.keys()].filter((k) => k.startsWith("prd:"));
+    expect(index).toHaveLength(raceCount);
+    expect(raceCount).toBeGreaterThan(4000);
+    expect(JSON.stringify(Object.fromEntries(index.map((k) => [k, t.kv.data.get(k)]))).length).toBeGreaterThan(100_000); // 前提: 1 つにまとめると上限を超える
+    for (const [key, value] of t.kv.data) {
+      if (key === "cache") continue; // 既存の集計(今の形のまま。本件の対象外)
+      expect(JSON.stringify(value).length, key).toBeLessThanOrEqual(100_000);
+    }
+    // 日の部分を作り直して、レースが外れる(分析が消える)と、そのレースの索引も消える
+    const gone = rows.analyses.find((a) => a.kaisaiDate === "20260103")!.raceId;
+    t.db.rows = { ...rows, analyses: rows.analyses.filter((a) => a.raceId !== gone) };
+    t.touch(gone);
+    t.clock.now += 6 * 60_000;
+    await t.core.getReport("all");
+    await t.drain(50);
+    expect(t.kv.data.has(`prd:${gone}`)).toBe(false);
+    expect([...t.kv.data.keys()].filter((k) => k.startsWith("prd:"))).toHaveLength(raceCount - 1);
+  });
+
   it("印の無い変更(結果の行の書き換え)は、突き合わせのずれとして見つかる。警告に出し、診断に件数が出る。画面の集計はそのまま返す", async () => {
     const rows = manyDayRows(3, 4);
     const t = setup(rows);

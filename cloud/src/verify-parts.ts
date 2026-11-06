@@ -121,6 +121,8 @@ export interface DayMeta {
   readonly chunks: { readonly all: number; readonly ver: number; readonly close: number; readonly bd: number };
   readonly binCount: number;
   readonly closeNull: boolean;
+  /** この日の部分に入っているレース(「レース → 日」の索引のキーを消すために持つ。1 日ぶんなので小さい)。 */
+  readonly raceIds: readonly string[];
   readonly versionHeads: readonly { readonly promptVersion: string | null; readonly additionalInstructions: readonly (string | null)[] }[];
   readonly startTimeGaps: { readonly lost: number; readonly affecting: number };
 }
@@ -160,6 +162,7 @@ export function encodeDay(day: string, parts: DayParts, maxBytes: number = PART_
     chunks: { all: sets.all.length, ver: sets.ver.length, close: sets.close.length, bd: sets.bd.length },
     binCount: parts.all.binCount,
     closeNull: parts.close === null,
+    raceIds: parts.all.races.map((r) => r.raceId),
     versionHeads: parts.versions.map((v) => ({ promptVersion: v.promptVersion, additionalInstructions: v.additionalInstructions })),
     startTimeGaps: parts.startTimeGaps,
   };

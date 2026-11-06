@@ -155,8 +155,11 @@ const VERIFY_PARTS_MARKS_LIMIT = 500;
 const VERIFY_PARTS_RETRY_MS = 60_000;
 const VERIFY_PARTS_MAX_FAILS = 8;
 
-/** 「レース → 今そのレースの部分が入っている日」の索引の kv のキー(Issue #628)。印の開催日が変わったとき、旧い日も作り直すために使う。 */
-const RACE_TO_PART_KEY = "prd";
+/**
+ * 「レース → 今そのレースの部分が入っている日」の索引の kv のキー(Issue #628)。**レースごとに 1 つのキー**(`prd:<raceId>` → 日)にして、1 値を小さく保つ(レースが増えても 100KB を超えない)。
+ * 印の開催日が変わったとき、旧い日も作り直すために使う。
+ */
+const raceToPartKey = (raceId: string): string => `prd:${raceId}`;
 
 /** 差分の集計の状態(kv の `pm`)。 */
 interface PartsState {
@@ -640,17 +643,15 @@ export class VerifyCore {
       const { days } = await port.readDays();
       state = { v: PARTS_VERSION, partsSeq: seq, dirty: [...days], days: [], fails: 0 };
       kv.put("pm", state);
-      kv.put(RACE_TO_PART_KEY, {});
     }
     // ① 印を先に読む(開催日が NULL の印は捨てず、NULL の日を作り直す対象にする)。
     const { marks } = await port.readMarks(state.partsSeq, VERIFY_PARTS_MARKS_LIMIT);
     if (marks.length > 0) {
       const dirty = new Set(state.dirty);
-      const raceDay = kv.get<Record<string, string>>(RACE_TO_PART_KEY) ?? {};
       for (const m of marks) {
         dirty.add(m.kaisaiDate ?? NO_DATE_DAY);
         // 開催日が変わったレース(NULL → 日付・日付 → 別の日付)は、今それが入っている旧い日の部分からも外す(二重に数えない)ので、旧い日も作り直す。
-        const current = raceDay[m.raceId];
+        const current = kv.get<string>(raceToPartKey(m.raceId));
         if (current !== undefined) dirty.add(current);
       }
       state = { ...state, partsSeq: Math.max(...marks.map((m) => m.seq)), dirty: [...dirty].sort() };
@@ -664,9 +665,7 @@ export class VerifyCore {
       if (stored) {
         for (const [key, value] of encodeDay(day, buildDayParts(read.rows, read.close))) kv.put(key, value);
       }
-      const raceDay = Object.fromEntries(Object.entries(kv.get<Record<string, string>>(RACE_TO_PART_KEY) ?? {}).filter(([, d]) => d !== day));
-      if (stored) for (const a of read.rows.analyses) raceDay[a.raceId] = day;
-      kv.put(RACE_TO_PART_KEY, raceDay);
+      if (stored) for (const raceId of new Set(read.rows.analyses.map((a) => a.raceId))) kv.put(raceToPartKey(raceId), day);
       const days: Set<string> = new Set(state.days);
       if (stored) days.add(day);
       else days.delete(day);
@@ -688,6 +687,10 @@ export class VerifyCore {
       const meta = kv.get<DayMeta>(dayMetaKey(day));
       if (meta !== undefined) {
         for (const key of dayChunkKeys(day, meta)) kv.delete?.(key);
+        // 索引は、この日を指しているレースだけ消す(別の日に移ったレースの新しい索引を消さない)。
+        for (const raceId of meta.raceIds ?? []) {
+          if (kv.get<string>(raceToPartKey(raceId)) === day) kv.delete?.(raceToPartKey(raceId));
+        }
       }
       kv.delete?.(dayMetaKey(day));
     }
