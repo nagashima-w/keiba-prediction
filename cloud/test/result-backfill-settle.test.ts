@@ -371,3 +371,70 @@ describe("整合検査の範囲: 全件は前回の全件から 7 晩以上た�
     expect(w.infos.some((l) => l.includes("reconciled scope=recent drift=0"))).toBe(true);
   });
 });
+
+describe("開催日が NULL の分析に開催日を入れる段(Issue #630)", () => {
+  type FillResult = { races: number; analyses: number; undecided: number };
+  /** 偽の Store に fillNullKaisaiDates を差す(既定の Fake には無い=従来の Store と同じ)。呼び出しを log に残す。 */
+  function withFill(w: Fake, result: FillResult | Error): { calls: () => number } {
+    let calls = 0;
+    w.store.fillNullKaisaiDates = async () => {
+      w.log.push("fill-kaisai");
+      calls += 1;
+      if (result instanceof Error) throw result;
+      return result;
+    };
+    return { calls: () => calls };
+  }
+
+  it("順序は 写し → 開催日の補完 → 整合検査 → 列挙。件数 3 つ(レース・分析・決められず)をログに出し、警告は出さない", async () => {
+    const w = new Fake();
+    withFill(w, { races: 7, analyses: 11, undecided: 2 });
+    w.pending[1] = [race(1)];
+    await make(w).core.runNextStep();
+    expect(w.log.slice(0, 4)).toEqual(["settle", "fill-kaisai", "reconcile", "list1"]);
+    expect(w.infos).toContain("result-backfill: kaisai_date filled races=7 analyses=11 undecided=2");
+    expect(w.warns.filter((m) => m.includes("kaisai_date"))).toEqual([]);
+  });
+
+  it("1 晩 1 回(同じ晩の 2 回目のステップでは呼ばない)。翌晩にまた呼ぶ(NULL が残っていても次の晩に試す)", async () => {
+    const w = new Fake();
+    const fill = withFill(w, { races: 0, analyses: 0, undecided: 3 });
+    w.pending[1] = Array.from({ length: 90 }, (_, i) => race(i + 1));
+    const { core } = make(w);
+    await core.runNextStep();
+    for (let i = 0; i < 2; i += 1) {
+      for (const row of w.dayRows.values()) row.state = "imported";
+      w.now += BACKFILL_POLL_MS;
+      await core.runNextStep();
+    }
+    expect(w.dayRows.size).toBe(90); // 前提(空振り防止): 3 ステップとも進んだ
+    expect(fill.calls()).toBe(1);
+    w.now = jst(10, 11, 2);
+    await core.runNextStep();
+    expect(fill.calls()).toBe(2);
+  });
+
+  it("失敗しても補完は続ける(警告に出し、秘密を含めず、印は立てない=次のステップでやり直す)", async () => {
+    const w = new Fake();
+    const fill = withFill(w, new Error("D1 SECRET-FILL"));
+    w.pending[1] = [race(1)];
+    const { core } = make(w);
+    await core.runNextStep();
+    expect(w.log).toContain("list1"); // 前提: 失敗の後も列挙まで進んだ
+    expect(w.warns.some((m) => m.startsWith("result-backfill: kaisai_date fill failed"))).toBe(true);
+    expect(w.warns.join("\n")).not.toContain("SECRET-FILL");
+    expect(w.dayRows.size).toBeGreaterThan(0); // 前提: 依頼まで進んだ(飛行中のチャンクがある)
+    for (const row of w.dayRows.values()) row.state = "imported";
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep();
+    expect(fill.calls()).toBe(2);
+  });
+
+  it("fillNullKaisaiDates を持たない Store では何もしない", async () => {
+    const w = new Fake();
+    w.pending[1] = [race(1)];
+    await make(w).core.runNextStep();
+    expect(w.log).not.toContain("fill-kaisai");
+    expect(w.infos.filter((l) => l.includes("kaisai_date"))).toEqual([]);
+  });
+});

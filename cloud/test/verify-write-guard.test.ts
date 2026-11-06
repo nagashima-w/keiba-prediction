@@ -42,8 +42,8 @@ const CODEC_WRITE_CONSTANTS = [
 /** 許可リスト: 検証の表に書き込む SQL を持つファイル(これ以外に増えたら赤)。 */
 const ALLOWED_WRITERS = ["analysis-close.ts", "analysis-repository.ts", "result-repository.ts", "verify-store.ts"];
 
-/** 印の呼び出し箇所の数(経路の数)。8 経路 = analysis-repository 2(saveAnalysis・saveClose)+ result-repository 5(saveResult・saveWinOdds・saveScratched・saveWinPayout・saveRaceClass)+ verify-store 1(commitStartTimes)。 */
-const MARK_CALL_SITES: Readonly<Record<string, number>> = { "analysis-repository.ts": 2, "result-repository.ts": 5, "verify-store.ts": 1 };
+/** 印の呼び出し箇所の数(経路の数)。9 経路 = analysis-repository 2(saveAnalysis・saveClose)+ result-repository 6(saveResult・saveWinOdds・saveScratched・saveWinPayout・saveRaceClass・fillNullKaisaiDates〈Issue #630〉)+ verify-store 1(commitStartTimes)。 */
+const MARK_CALL_SITES: Readonly<Record<string, number>> = { "analysis-repository.ts": 2, "result-repository.ts": 6, "verify-store.ts": 1 };
 
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
@@ -84,12 +84,12 @@ describe("検証が読む表への書き込みの経路(許可リスト)", () =>
     expect(writers).toEqual(ALLOWED_WRITERS);
   });
 
-  it("印を付ける経路の数が固定されている(8 経路。許可リストの書き手が印を呼ばないままにならない)", () => {
+  it("印を付ける経路の数が固定されている(9 経路。許可リストの書き手が印を呼ばないままにならない)", () => {
     for (const [name, expected] of Object.entries(MARK_CALL_SITES)) {
       const code = files.find((f) => f.name === name)!.code;
       const calls = code.match(/\bverifyRaceMark(?:ByAnalysisIds)?Statement\(/g) ?? [];
       expect(calls.length, name).toBe(expected);
     }
-    expect(Object.values(MARK_CALL_SITES).reduce((a, b) => a + b, 0)).toBe(8);
+    expect(Object.values(MARK_CALL_SITES).reduce((a, b) => a + b, 0)).toBe(9);
   });
 });
