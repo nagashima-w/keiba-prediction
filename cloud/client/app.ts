@@ -206,6 +206,7 @@ export function createApp(deps: AppDeps): App {
     onSettingsPreviewToggle: settings.onPreviewToggle,
     onSettingsPreviewRefresh: settings.onPreviewRefresh,
     onSettingsWeightsReset: settings.onWeightsReset,
+    onSettingsSectionToggle: settings.onSectionToggle,
     onVerifyVenue: verify.onVenue,
     onVerifyVersionToggle: verify.onVersionToggle,
     onVerifyCalibrationTarget: verify.onCalibrationTarget,

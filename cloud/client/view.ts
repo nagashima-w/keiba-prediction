@@ -13,7 +13,7 @@ import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
 import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type CloseSection, type DevelopmentSection, type HorseCard, type HorseSortKey, type HorseTable, type MarkedHorse, type ResultContent, type ResultModel, type SortDir, type TopProbHorse } from "./result";
-import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
+import type { FieldModel, PreviewModel, SectionModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
 import type { MonthlyBodyView, MonthlyModel } from "./monthly-model";
@@ -55,6 +55,8 @@ export interface ViewActions {
   readonly onSettingsPreviewRefresh: () => void;
   /** 「重みを既定値に戻す」(Issue #218): 下書きの重み15項目だけを既定値に戻す(保存はしない)。 */
   readonly onSettingsWeightsReset: () => void;
+  /** 設定の節の開閉(Issue #581。押したあとの状態を渡す)。 */
+  readonly onSettingsSectionToggle: (id: string, open: boolean) => void;
   /** 検証画面の区分の切替(Issue #219）。 */
   readonly onVerifyVenue: (venue: VerifyVenue) => void;
   /** 検証画面の版別キャリブレーションの開閉(Issue #220)。`key` は版のキー、`open` は押したあとの状態。 */
@@ -705,12 +707,27 @@ function previewSection(preview: PreviewModel, saving: boolean, actions: ViewAct
  * 開閉はしない(常に表示。`<details>` は使わない=#187・#188 と同じ理由。状態も増やさない)。スマホ幅では、入力欄は通常の項目と同じ縦並び(幅 100%・高さ 44px 以上)。
  */
 function weightsSection(weights: WeightsModel, actions: ViewActions): VNode {
-  return h("section", { class: "weights" }, [
-    h("h2", {}, [weights.heading]),
+  return h("div", { class: "weights" }, [
+    h("h3", { class: "weights-heading" }, [weights.heading]),
     ...weights.help.map((line) => h("p", { class: "weights-help" }, [line])),
     ...weights.groups.map((group) => h("div", { class: "weights-group" }, [h("h3", {}, [group.heading]), ...group.fields.map((f) => settingsField(f, actions))])),
     h("button", { class: "weights-reset", disabled: weights.resetDisabled }, [weights.resetLabel], { click: actions.onSettingsWeightsReset }),
   ]);
+}
+
+/**
+ * 設定の節(Issue #581)。見出しは `h2` の中のボタン(`<details>` は使わない=#187 と同じ理由。開閉はプレビューと同じ作り)。閉じた節の中身(入力欄・重み・リセット)は木に出さない。
+ * 「変更あり N 件」はボタンの文字の中(閉じていても分かる。色だけに頼らない)。
+ */
+function settingsSection(section: SectionModel, weights: WeightsModel | null, actions: ViewActions): VNode {
+  const toggle = h(
+    "button",
+    { class: "section-toggle", "aria-expanded": section.open ? "true" : "false", "data-section": section.id, "data-open-after": section.open ? "false" : "true" },
+    [`${section.open ? "▾" : "▸"} ${section.heading}`, ...(section.changedText === null ? [] : [h("span", { class: "section-changed" }, [section.changedText])])],
+    { click: () => actions.onSettingsSectionToggle(section.id, !section.open) },
+  );
+  const inner = section.open ? [...section.fields.map((f) => settingsField(f, actions)), ...(section.hasWeights && weights !== null ? [weightsSection(weights, actions)] : [])] : [];
+  return h("section", { class: "settings-section", "data-section": section.id }, [h("h2", {}, [toggle]), ...inner]);
 }
 
 function settingsScreen(model: SettingsModel, actions: ViewActions): VNode {
@@ -730,10 +747,7 @@ function settingsScreen(model: SettingsModel, actions: ViewActions): VNode {
   }
   if (model.fields.length > 0) {
     body.push(h("p", { class: "meta" }, ["保存した設定は、次に実行する発走前の分析から使われます(実行中の分析は、始めたときの設定のままです)。"]));
-    body.push(...model.fields.map((f) => settingsField(f, actions)));
-    if (model.weights !== null) {
-      body.push(weightsSection(model.weights, actions));
-    }
+    body.push(...model.sections.map((section) => settingsSection(section, model.weights, actions)));
     if (model.preview !== null) {
       body.push(previewSection(model.preview, model.saving, actions));
     }
