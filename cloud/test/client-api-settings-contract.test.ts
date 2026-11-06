@@ -92,9 +92,13 @@ describe("契約: GET・POST /api/settings の本物の応答をクライアン�
     expect(await fetchSettings(c.fetch)).toEqual({ ok: true, settings: CHANGED, source: "d1" });
   });
 
-  it("POST: キーが欠けた・未知のキーがある(古い画面が送る形)は、サーバが 400(keys-mismatch)にし、クライアントは staleScreen。範囲外は staleScreen にならない。D1 に書かない (Issue #375)", async () => {
+  it("POST: 欠けだけ(公開の前に開いた画面が送る形)はサーバが保存済みの値で埋めて 200 にする。未知のキー(欠け+未知を含む)は 400(keys-mismatch)で、クライアントは staleScreen。範囲外は staleScreen にならない。400 のときは D1 に書かない (Issue #375・#634)", async () => {
     const { bankroll: _omit, ...missing } = CHANGED;
-    for (const body of [missing, { ...CHANGED, removedItem: 1 }]) {
+    const filled = await connect();
+    expect(await postSettings(filled.fetch, missing as unknown as typeof CHANGED)).toEqual({ ok: true, settings: { ...CHANGED, bankroll: DEFAULT_CLOUD_SETTINGS.bankroll } });
+    expect(filled.writes).toBe(1);
+    expect(DEFAULT_CLOUD_SETTINGS.bankroll).not.toBe(CHANGED.bankroll); // 前提
+    for (const body of [{ ...missing, removedItem: 1 }, { ...CHANGED, removedItem: 1 }]) {
       const c = await connect();
       expect(await postSettings(c.fetch, body as unknown as typeof CHANGED)).toEqual({ ok: false, error: { kind: "bad-request", staleScreen: true } });
       expect(c.writes).toBe(0);

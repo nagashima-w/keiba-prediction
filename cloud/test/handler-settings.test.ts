@@ -286,11 +286,10 @@ describe("POST /api/settings", () => {
     expect(f.row).toBe(before);
   });
 
-  it("キーが欠けている(部分更新は受けない)・未知のキーがある・__proto__ キーがあるときは 400 で、D1 に書かない。未知のキー名は本文に写さない", async () => {
+  it("未知のキーがある・__proto__ キーがある・既知の項目が無い({})ときは 400 で、D1 に書かない。未知のキー名は本文に写さない(欠けだけは保存済みの値で埋める。Issue #634)", async () => {
     const { deps, token } = await setup();
-    const { bankroll: _omit, ...missing } = FULL;
     const cases: Array<[string, string]> = [
-      ["欠け", JSON.stringify(missing)],
+      ["既知の項目なし", "{}"],
       ["未知のキー", JSON.stringify({ ...FULL, secretKeyName: 1 })],
       ["__proto__", `{"__proto__":{"bankroll":1},${JSON.stringify(FULL).slice(1)}`],
     ];
@@ -303,7 +302,7 @@ describe("POST /api/settings", () => {
     }
   });
 
-  it("400 の本文の error.reason: キーの過不足(欠け・未知・__proto__)は \"keys-mismatch\"(画面が古い可能性。Issue #375)。範囲外の値・JSON として読めない本文・オブジェクトでない本文には付けない", async () => {
+  it("400 の本文の error.reason: キーの過不足(未知・__proto__・欠け+未知・既知の項目なし)は \"keys-mismatch\"(画面が古い可能性。Issue #375)。範囲外の値・欠け+範囲外・JSON として読めない本文・オブジェクトでない本文には付けない(欠けだけは 200。Issue #634)", async () => {
     const { deps, token } = await setup();
     const { bankroll: _omit, ...missing } = FULL;
     const reasonOf = async (raw: string): Promise<{ status: number; reason: unknown }> => {
@@ -312,16 +311,17 @@ describe("POST /api/settings", () => {
       return { status: response.status, reason: body.error.reason };
     };
     for (const [name, raw] of [
-      ["欠け", JSON.stringify(missing)],
+      ["欠け+未知", JSON.stringify({ ...missing, newItem: 1 })],
+      ["既知の項目なし", "{}"],
       ["未知のキー", JSON.stringify({ ...FULL, newItem: 1 })],
       ["__proto__", `{"__proto__":{"bankroll":1},${JSON.stringify(FULL).slice(1)}`],
-      ["欠けと範囲外が同時", JSON.stringify({ ...missing, perRaceCap: -1 })],
     ] as const) {
       expect(await reasonOf(raw), name).toEqual({ status: 400, reason: "keys-mismatch" });
     }
     for (const [name, raw] of [
       ["範囲外", JSON.stringify({ ...FULL, bankroll: 10.5 })],
       ["型違い", JSON.stringify({ ...FULL, includeComboOdds: "true" })],
+      ["欠けと範囲外が同時", JSON.stringify({ ...missing, perRaceCap: -1 })],
       ["JSON でない", "{"],
       ["配列", "[]"],
     ] as const) {
@@ -329,6 +329,80 @@ describe("POST /api/settings", () => {
       expect(out.status, name).toBe(400); // 前提: 400 になっている(reason が無いのは別の理由ではない)
       expect(out.reason, name).toBeUndefined();
     }
+  });
+
+
+  describe("欠けた項目は保存済みの値で埋める(Issue #634)", () => {
+    const { bankroll: _omit, kellyFraction: _omit2, ...missing } = FULL;
+    const STORED = { ...FULL, bankroll: 777_000, kellyFraction: 0.1 };
+
+    it("欠けだけ: 保存済みの値で埋めて 200。応答と保存した行は全項目(欠けた項目は保存済みの値、送った項目は送った値)。読みは1回・書きは1回", async () => {
+      const { deps, token } = await setup();
+      const f = fakeDb(JSON.stringify(STORED));
+      const response = await handle(post(token, missing), envOf(f), {}, deps);
+      expect(response.status).toBe(200);
+      const expected = { ...FULL, bankroll: 777_000, kellyFraction: 0.1 };
+      expect(await response.json()).toEqual({ ok: true, settings: expected });
+      expect(JSON.parse(f.row!.settings_json)).toEqual(expected);
+      expect(FULL.bankroll).not.toBe(777_000); // 前提: 埋めた値が送った値由来ではない
+      expect(f.sqls.filter((q) => q === SELECT_SETTINGS_SQL)).toHaveLength(1);
+      expect(f.sqls.filter((q) => q === UPSERT_SETTINGS_SQL)).toHaveLength(1);
+    });
+
+    it("保存済みの行が無い・壊れているときは既定値で埋める", async () => {
+      const { deps, token } = await setup();
+      for (const initial of [null, "{"]) {
+        const f = fakeDb(initial);
+        const response = await handle(post(token, missing), envOf(f), {}, deps);
+        expect(response.status, String(initial)).toBe(200);
+        expect(await response.json(), String(initial)).toEqual({ ok: true, settings: { ...FULL, bankroll: DEFAULT_CLOUD_SETTINGS.bankroll, kellyFraction: DEFAULT_CLOUD_SETTINGS.kellyFraction } });
+        expect(DEFAULT_CLOUD_SETTINGS.bankroll).not.toBe(FULL.bankroll); // 前提
+      }
+    });
+
+    it("欠けなしなら D1 を読まない(SELECT を出さない)", async () => {
+      const { deps, token } = await setup();
+      const f = fakeDb(JSON.stringify(STORED));
+      const response = await handle(post(token, FULL), envOf(f), {}, deps);
+      expect(response.status).toBe(200);
+      expect(f.sqls).toEqual([UPSERT_SETTINGS_SQL]);
+    });
+
+    it("欠け+範囲外は 400(fields は範囲外だけ・reason なし)で、D1 に触れない", async () => {
+      const { deps, token } = await setup();
+      const f = fakeDb(JSON.stringify(STORED));
+      const response = await handle(post(token, { ...missing, perRaceCap: -1 }), envOf(f), {}, deps);
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: { fields: string[]; reason?: unknown } };
+      expect(body.error.fields).toEqual(["perRaceCap"]);
+      expect(body.error.reason).toBeUndefined();
+      expect(f.sqls).toEqual([]);
+    });
+
+    it("欠け+未知のキーは 400(fields に欠けも入る・reason は keys-mismatch)で、D1 に触れない", async () => {
+      const { deps, token } = await setup();
+      const f = fakeDb(JSON.stringify(STORED));
+      const response = await handle(post(token, { ...missing, newItem: 1 }), envOf(f), {}, deps);
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: { fields: string[]; reason?: unknown } };
+      expect(body.error.fields).toEqual(["bankroll", "kellyFraction"]);
+      expect(body.error.reason).toBe("keys-mismatch");
+      expect(f.sqls).toEqual([]);
+    });
+
+    it("保存済みの値の読み出しが失敗したら 503(d1-error・文面なし)で、書かない", async () => {
+      const { deps, token } = await setup();
+      const f = fakeDb(JSON.stringify(STORED));
+      f.failRead = true;
+      const before = f.row;
+      const response = await handle(post(token, missing), envOf(f), {}, deps);
+      expect(response.status).toBe(503);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({ ok: false, error: { type: "d1-error" } });
+      expect(text).not.toContain("secret-sql-detail");
+      expect(f.sqls).toEqual([SELECT_SETTINGS_SQL]);
+      expect(f.row).toBe(before);
+    });
   });
 
   it("D1 の書き込みが失敗したら 503(d1-error)。例外の文面・SQL を返さない", async () => {
