@@ -93,6 +93,24 @@ describe("内訳の部分(Issue #625)", () => {
     });
   }
 
+  it("クラスタの並びは行の firstAnalysisId の昇順で決まる(部分のレースの並びではない)", () => {
+    const { source, analyses, betRows, facts } = randomInputs(87, 60);
+    const part = buildVerifyBreakdownParts(source, betRows, analyses, facts);
+    const baseline = finalizeVerifyBreakdowns(part);
+    // 行の firstAnalysisId だけを逆順に付け替える(レースの順 orderKey は変えない)
+    const reversed = {
+      races: part.races.map((r) => ({
+        ...r,
+        rows: Object.fromEntries(Object.entries(r.rows).map(([k, row]) => [k, { ...row, firstAnalysisId: -row.firstAnalysisId }])),
+      })),
+    };
+    const changed = finalizeVerifyBreakdowns(reversed);
+    const intervals = (x: typeof baseline): unknown => x.all!.stats.groups.flatMap((g) => g.bands.map((b) => [b.recoveryInterval, b.hitRatioInterval]));
+    // 前提: 付け替えなければ同じ(順だけが違う)で、付け替えると区間の端が変わる(並びが再標本に効いている)
+    expect(finalizeVerifyBreakdowns(part)).toStrictEqual(baseline);
+    expect(intervals(changed)).not.toStrictEqual(intervals(baseline));
+  });
+
   it("部分は構造化複製できる", () => {
     const { source, analyses, betRows, facts } = randomInputs(85, 40);
     const part = buildVerifyBreakdownParts(source, betRows, analyses, facts);
