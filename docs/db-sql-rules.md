@@ -48,7 +48,11 @@ DO の SQLite は、SQL を文字列定数で持たず、コアのメソッド�
 
 - Node 組込みの SQLite は、本番の D1 と同じビルドとは限らない。計画の細部はずれうる。大筋(索引を使うか全走査か)は同じなので、デプロイ後は D1 の分析(読み取り行数)でも確かめる。
 - 計画が全走査でなくても、読む行数が表の大きさに比例することはある(`SEARCH` の範囲が広い場合など)。この検査は全走査と一時の並べ替えを捕まえるだけで、行数は見ない。行数は `meta.rows_read` を見る integration テストで確かめる(`verify-pending-index.integration.test.ts` など)。
-- export されない SQL(`horse_runs` の status など)は、一覧に載らない。下の一覧に「未検査」と書いて残す。
+- 自動の収集が拾わない SQL は、手で検査を足す。種類と主な例は次のとおり。この種類の SQL を足すときは、検査を手でテストか上の一覧に足す。
+  - export されない定数と、`prepare("…")` への直書き。例: `allocation-export-store.ts` の `HORSES_SQL`・`BETS_SQL`、`analysis-repository.ts` の `SELECT_ONE_SQL`、`baba-repository.ts`・`jockey-results-repository.ts`・`trainer-results-repository.ts`、`result-repository.ts` の直書き、`horse_runs` の status。
+  - 配列や、2 段より深い入れ子のオブジェクトで export された SQL(収集は文字列定数と、1 段のオブジェクトの値だけを拾う)。
+  - 名前が `…Sql` でない、export された組み立て関数(漏れ止めは名前が `…Sql` の関数だけを見る)。
+  - `*-do.ts`・`worker.ts`(取り込まない。今は SQL の定数が無い。足したら、収集の対象にできるか確かめる)。
 
 ## 検査の一覧
 
@@ -82,7 +86,7 @@ DO の SQLite は、SQL を文字列定数で持たず、コアのメソッド�
 | SQL | 呼ばれ方 | 理由 | Issue |
 |---|---|---|---|
 | `VERIFY_READ_SQL` 7 本・`VERIFY_CLOSE_READ_SQL` 2 本 | 検証の再計算(`readAll`) | 全件読み。開催日ごとの差分の再計算へ置き換え中 | #616 |
-| `D1_HEALTH_SQL` | `/api/health` | 各表を `LIMIT 1` で 1 行だけ読んで止まる(1 回 5 行)。計画は `SCAN` と出るが全件は読まない | #612 |
+| `D1_HEALTH_SQL` | `/api/health` | 各表を `LIMIT 1` で読んで止まる。計画は `SCAN` と出るが、読む行数は表の大きさに依らない少数 | #612 |
 | `CANDIDATES_SQL` | 統計モデルの書き出し(管理者の要求) | 分析の全件を読む。書き出した日だけ | #612 |
 | `LOOKUPS_SQL`・`TRAINER_LOOKUPS_SQL` | 同上 | 騎手名・調教師名の表の全件。小さい表 | #612 |
 | `RECONCILE_RACE_BACKFILL_SQL` | 結果の補完の整合検査(夜に 1 回) | 分析と結果の全件の突き合わせ。直近だけの `RECONCILE_RECENT_RACE_BACKFILL_SQL` もある | #612 |

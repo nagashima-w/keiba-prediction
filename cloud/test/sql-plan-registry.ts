@@ -109,7 +109,7 @@ export const EXCEPTIONS: Record<string, PlanEntry> = {
     "検証の再計算(readAll)の全件読み。開催日ごとの差分の再計算へ置き換え中",
     "#616",
   ),
-  ...exception(["d1-health.ts::D1_HEALTH_SQL"], "各表を LIMIT 1 で 1 行だけ読んで止まる疎通確認(1 回 5 行。計画は SCAN と出るが全件は読まない)", "#612"),
+  ...exception(["d1-health.ts::D1_HEALTH_SQL"], "各表を LIMIT 1 で読んで止まる疎通確認(計画は SCAN と出るが、読む行数は表の大きさに依らない少数)", "#612"),
   ...exception(["prior-export-store.ts::CANDIDATES_SQL"], "統計モデルの書き出し(管理者の要求)が分析の全件を読む。書き出した日だけ走る", "#612"),
   ...exception(["prior-export-store.ts::LOOKUPS_SQL", "prior-export-store.ts::TRAINER_LOOKUPS_SQL"], "騎手名・調教師名の表の全件(統計モデルの書き出しだけ。小さい表: 本番で 189・268 行)", "#612"),
   ...exception(["race-backfill-state.ts::RECONCILE_RACE_BACKFILL_SQL"], "結果の補完の整合検査。分析と結果の全件を突き合わせる(夜に 1 回)。直近だけの RECONCILE_RECENT_RACE_BACKFILL_SQL もある", "#612"),
