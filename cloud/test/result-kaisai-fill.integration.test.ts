@@ -67,6 +67,14 @@ describe("fillNullKaisaiDates", () => {
     expect(await dateOf(CEN_A)).toEqual(["20260102"]);
   });
 
+  it("同じレースに NULL の分析と、決めた日付と違う日付の入った分析が混ざっても、後者は書き換えない(UPDATE の kaisai_date IS NULL の条件)", async () => {
+    await addAnalysis(NAR_A, null);
+    await addAnalysis(NAR_A, "20260101"); // レース ID からは 20260715 になるが、別の日付が入っている
+    const r = await store().fillNullKaisaiDates();
+    expect(r).toEqual({ races: 1, analyses: 1, undecided: 0 }); // 前提(空振り防止): NULL の 1 行は埋まった
+    expect(await dateOf(NAR_A)).toEqual(["20260715", "20260101"]);
+  });
+
   it("目録の race_date が YYYY-MM-DD でなければ書かない(NULL のまま、undecided)", async () => {
     await addAnalysis(CEN_A, null);
     await addArchive(CEN_A, "2026/05/03");
