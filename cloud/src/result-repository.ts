@@ -37,6 +37,7 @@
  *   17 桁の浮動小数の往復はローカルの D1 で一致を確かめた(本番の SQLite のビルドでの確認は最初の実保存)。
  */
 
+import { kaisaiDateFromNarRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids.js";
 import { verifyRaceMarkStatement } from "./verify-race-mark";
 import { RECOMPUTE_RACES_SQL, RECONCILE_RACE_BACKFILL_SQL, RECONCILE_RECENT_RACE_BACKFILL_SQL, settleRaceBackfillSql } from "./race-backfill-state";
 import {
@@ -875,6 +876,57 @@ export class D1ResultStore implements ResultRepository {
     return result?.meta.changes ?? 0;
   }
 
+  /**
+   * 開催日(`kaisai_date`)が NULL の分析に開催日を入れる(Issue #630。補完の DO が 1 晩 1 回呼ぶ)。
+   * 決め方: 地方はレース ID の日付({@link kaisaiDateFromNarRaceId})、中央は過去の結果の目録 `race_archive.race_date`(`YYYY-MM-DD`)から `-` を除いたもの。
+   * 決められない分析(中央で目録に無い・日付の書式が違う)は NULL のまま残し、`undecided`(分析の数)に数える。
+   * 書くのは `kaisai_date IS NULL` の行だけ。入れたレースは同じ batch で補完の状態と検証の変更の印を作り直す(開催日が入ると補完の一覧に新しく出る)。
+   * 読みは `kaisai_date IS NULL` の索引の探索だけ。NULL が 0 件なら目録も読まず、書き込みも流さない。
+   * @returns races: 入れたレース数 / analyses: 入れた分析の数 / undecided: 決められずに残した分析の数
+   */
+  async fillNullKaisaiDates(): Promise<{ races: number; analyses: number; undecided: number }> {
+    const { results: nulls } = await this.db.prepare("SELECT id, race_id FROM analyses WHERE kaisai_date IS NULL").all<{ id: number; race_id: string }>();
+    if (nulls.length === 0) {
+      return { races: 0, analyses: 0, undecided: 0 };
+    }
+    const centralIds = [...new Set(nulls.filter((n) => venueKindOfRaceId(n.race_id as never) !== "nar").map((n) => n.race_id))];
+    const archived = new Map<string, string>();
+    if (centralIds.length > 0) {
+      const { results } = await this.db
+        .prepare("SELECT race_id, race_date FROM race_archive WHERE race_id IN (SELECT value FROM json_each(?1))")
+        .bind(JSON.stringify(centralIds))
+        .all<{ race_id: string; race_date: string }>();
+      for (const r of results) {
+        archived.set(r.race_id, r.race_date);
+      }
+    }
+    const decided = new Map<string, string>();
+    const perRaceAnalyses = new Map<string, number>();
+    let undecided = 0;
+    for (const n of nulls) {
+      const date = decideKaisaiDate(n.race_id, archived);
+      if (date === null) {
+        undecided += 1;
+        continue;
+      }
+      decided.set(n.race_id, date);
+      perRaceAnalyses.set(n.race_id, (perRaceAnalyses.get(n.race_id) ?? 0) + 1);
+    }
+    const raceIds = [...decided.keys()];
+    for (let i = 0; i < raceIds.length; i += FILL_KAISAI_BATCH_RACES) {
+      const statements: D1PreparedStatement[] = [];
+      for (const raceId of raceIds.slice(i, i + FILL_KAISAI_BATCH_RACES)) {
+        statements.push(
+          this.db.prepare("UPDATE analyses SET kaisai_date = ?1 WHERE race_id = ?2 AND kaisai_date IS NULL").bind(decided.get(raceId)!, raceId),
+          recomputeRaceBackfillStatement(this.db, raceId),
+          verifyRaceMarkStatement(this.db, raceId),
+        );
+      }
+      await this.db.batch(statements);
+    }
+    return { races: raceIds.length, analyses: [...perRaceAnalyses.values()].reduce((a, b) => a + b, 0), undecided };
+  }
+
   /** 保存済みのクラスの分布(Issue #426-b。上の {@link CLASS_DISTRIBUTION_SQL})。 */
   async classDistribution(): Promise<ClassDistributionRow[]> {
     const { results } = await this.db.prepare(CLASS_DISTRIBUTION_SQL).all<ClassDistributionRow>();
@@ -891,4 +943,16 @@ export class D1ResultStore implements ResultRepository {
     const row = await this.db.prepare(COUNT_BACKFILL_SQL).bind(to).first<{ dated: number; undated: number }>();
     return { dated: row?.dated ?? 0, undated: row?.undated ?? 0 };
   }
+}
+
+/** {@link D1ResultStore.fillNullKaisaiDates} の 1 回の batch に入れるレース数(1 レース 3 文)。 */
+const FILL_KAISAI_BATCH_RACES = 50;
+
+/** 開催日を決める(決められなければ null)。結果は `YYYYMMDD` の 8 桁の数字に限る。 */
+function decideKaisaiDate(raceId: string, archived: ReadonlyMap<string, string>): string | null {
+  if (venueKindOfRaceId(raceId as never) === "nar") {
+    return kaisaiDateFromNarRaceId(raceId);
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(archived.get(raceId) ?? "");
+  return m === null ? null : `${m[1]}${m[2]}${m[3]}`;
 }

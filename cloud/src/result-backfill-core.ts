@@ -187,6 +187,11 @@ export interface BackfillStore {
   settleBackfill?(stages: ReadonlyArray<{ readonly stage: 1 | 2 | 3 | 4; readonly raceIds: readonly string[] }>): Promise<Record<1 | 2 | 3 | 4, number>>;
   /** 整合検査(Issue #597): レースの状態を作り直し、食い違いを直す。直した行数を返す。`sinceKaisaiDate`(YYYYMMDD)を渡すとその日以降の開催日のレースだけ(Issue #614)。省略は全件。 */
   reconcileBackfillState?(sinceKaisaiDate?: string): Promise<number>;
+  /**
+   * 開催日(`kaisai_date`)が NULL の分析に開催日を入れる(Issue #630。1 晩 1 回)。**省略可**: 無い Store では何もしない。
+   * 戻り値は入れたレース数・入れた分析の数・決められずに残した分析の数。
+   */
+  fillNullKaisaiDates?(): Promise<{ races: number; analyses: number; undecided: number }>;
 }
 
 export interface BackfillDeps {
@@ -522,6 +527,24 @@ export class ResultBackfillCore {
     }
   }
 
+  /**
+   * 開催日が NULL の分析に開催日を入れる(1 晩 1 回。Issue #630)。決め方は {@link BackfillStore.fillNullKaisaiDates}。
+   * 成功した晩(`kaisai_filled_night`)だけ記録し、決められずに残ったものは翌晩にまた試す。失敗は握って警告に出し(次のステップでやり直す)、補完の本体は止めない。
+   */
+  private async fillUndatedTonight(night: string): Promise<void> {
+    const store = this.deps.store;
+    if (store.fillNullKaisaiDates === undefined || this.metaGet("kaisai_filled_night") === night) {
+      return;
+    }
+    try {
+      const r = await store.fillNullKaisaiDates();
+      this.metaPut("kaisai_filled_night", night);
+      this.deps.log(`result-backfill: kaisai_date filled races=${r.races} analyses=${r.analyses} undecided=${r.undecided}`, "info");
+    } catch (error) {
+      this.deps.onWarn(`result-backfill: kaisai_date fill failed error=${errorKind(error)}`);
+    }
+  }
+
   /** 取得できなかったレースを記録する(上の「取得できないレース」の規則)。 */
   private recordFailure(raceId: string, cls: string, night: string, systemic = false, kind: BackfillKind = "results"): void {
     // 段階 3・4 は別の表(backfill_class・backfill_payout)に書く(段階 1・2 の backfill_race の状態を上書きしない)。表名・状態名は {@link KIND_STATE} の定数だけ(利用者の入力は入らない)。
@@ -641,6 +664,7 @@ export class ResultBackfillCore {
 
     // 2b. D1 の状態(race_backfill。Issue #597)の準備: 済み・諦めの写し(**写されるまで列挙しない**。失敗はステップの失敗として 10 分後に再試行)と、1 晩 1 回の整合検査(失敗は握る)。
     await this.ensureSynced();
+    await this.fillUndatedTonight(night);
     await this.reconcileTonight(night);
 
     // 3. gate が混んでいたら引く(既存の自動実行が先)。
