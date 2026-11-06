@@ -84,6 +84,10 @@ describe("migration の適用(ローカルの D1)", () => {
       "race_archive", // Issue #551(0031。過去の結果ページの目録。本体は R2 の race-results/)
       "race_backfill", // Issue #597(0035。結果の補完のレース単位の状態。列挙・件数が部分索引から読む)
       "verify_race_mark", // Issue #624(0037。検証の差分の再計算のための、レースの変更の印)
+      "horse_profiles", // Issue #639(0038。馬ごとの血統・生産者)
+      "horse_owner_history", // Issue #639(0038。馬 × 馬主の履歴)
+      "race_horse_entries", // Issue #639(0038。レース × 馬の出走時の情報。ブリンカー・減量・マルガイ)
+      "jra_entry_fetches", // Issue #639(0038。JRA の出馬表の取得の記録)
     ].sort());
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("detail_key");
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("llm_note"); // Issue #194(0005)
