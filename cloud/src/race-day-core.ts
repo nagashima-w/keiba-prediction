@@ -128,6 +128,9 @@ import {
 import type { ResultRepository } from "./result-repository";
 import { requireCacheKeyForPost } from "./post-cache-guard";
 import { BabaStage, type BabaFetcher, type BabaReader, type BabaStepOutcome, type BabaStore } from "./race-day-baba";
+import { JraEntriesStage, type JraEntriesStepOutcome } from "./race-day-jra-entries";
+import type { JraEntriesFetcher } from "./jra-entries-fetch";
+import type { JraEntriesStoreLike } from "./jra-entries-repository";
 import { NAR_TRIFECTA_AXES_PER_STEP, NarTrifectaStore } from "./race-day-nar-trifecta";
 import { PlanStore, type PlanSkipReason, type PlanVenue } from "./race-day-plan";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
@@ -233,6 +236,11 @@ export interface AlarmInputs {
    */
   readonly babaAtMs?: number | null;
   /**
+   * JRA の出馬表の取得(Issue #639)の期限({@link JraEntriesStage.dueAtMs})。**動けるとき**({@link RaceDayCore.backgroundIdle}: タスクが無く、計画の段階が終わっている)だけ入れる
+   * (タスクがあるあいだに now を張ると、再試行待ちのタスクの間隔を無視した撃ち直しが続く。結果の取り込みと同じ考え方)。省略・null は候補なし。
+   */
+  readonly jraEntriesAtMs?: number | null;
+  /**
    * 日報の時刻の下限(Issue #291)。**未来のときだけ**候補にする(下限の時刻に起きて、日報を依頼する)。過去・now・null・省略は候補なし
    * (他の候補と違い「過去は now」にしない: 下限を過ぎたあとに候補に残ると、即時のアラームのループになる)。
    */
@@ -284,6 +292,9 @@ export function nextAlarmAt(i: AlarmInputs): number | null {
   }
   if (i.babaAtMs !== undefined && i.babaAtMs !== null) {
     candidates.push(Math.max(i.babaAtMs, i.nowMs));
+  }
+  if (i.jraEntriesAtMs !== undefined && i.jraEntriesAtMs !== null) {
+    candidates.push(Math.max(i.jraEntriesAtMs, i.nowMs));
   }
   if (i.reportHoldAtMs !== undefined && i.reportHoldAtMs !== null && i.reportHoldAtMs > i.nowMs) {
     candidates.push(i.reportHoldAtMs);
@@ -428,6 +439,15 @@ export interface RaceDayDeps {
    */
   readonly babaReader?: BabaReader;
   /**
+   * JRA の出馬表の取得口(Issue #639。DO のラッパが `createJraEntriesFetcher` で作る)。**URL そのものは持たない**。渡さなければこの段階全体が無効(印も書かず、アラームの候補にもしない。テスト用。本番は常に渡す)。
+   * `jraEntriesStore` と両方があるときだけ動く。保存するだけで、分析・プロンプト・画面には使わない。
+   */
+  readonly fetchJraEntries?: JraEntriesFetcher;
+  /** JRA の出馬表の取得の試み・馬・馬主・出走時の情報の保存先(本番は D1。migration 0038)。 */
+  readonly jraEntriesStore?: JraEntriesStoreLike;
+  /** 固定の語のログ(JRA の出馬表の取得の所要時間など。観測用)。省略時は出さない。 */
+  readonly onInfo?: (message: string) => void;
+  /**
    * 開催日ごとの記録(D1 の `kaisai_days`。migration 0027。Issue #519)。**発走前の計算ステップだけ**が使う:
    *  - 書き込み: 中央のレースを分析するたびに、そのレースの (場コード, 年, 回, 日次)・開催日・柵(芝で読めたときだけ)を 1 回書く(LLM を使うかどうかに関係なく。地方は書かない)。
    *    同じ日・同じ場の行は 1 つで、柵は先着(既存の値は上書きしない)。失敗は握って警告にし(固定の語だけ)、分析は止めない。
@@ -499,7 +519,9 @@ export type StepOutcome =
   /** 締切の直前の再計算の 1 ステップ(Issue #338。`mode: "close"`。形と各値の意味は {@link CloseStepOutcome})。 */
   | CloseStepOutcome
   /** 馬場の取得(Issue #294。`mode: "baba"`)。`raceId` は開催日。`ok` は当日の競馬場の値を D1 に保存した(その日の分が全部そろっていなくてもよい)、`retry` は試みの記録(D1)の失敗で再試行待ち、`failed` はこの枠は取得しない(同じ枠では再試行しない。次の枠で取り直す。Issue #480)。 */
-  | BabaStepOutcome;
+  | BabaStepOutcome
+  /** JRA の出馬表の取得(Issue #639。`mode: "jra-entries"`)。`raceId` は開催日。`ok` はその回の取得が済んだ(失敗がなかった)、`retry` は試みの記録(D1)の失敗、`failed` は一部または全部の失敗(10 分後に取り直す)。形は {@link JraEntriesStepOutcome}。 */
+  | JraEntriesStepOutcome;
 
 /** 通知の1件の状態(状態から読める。失敗の分類だけで、URL・メッセージ・本文は持たない。`getNotifications`)。 */
 export interface NotificationRecord {
@@ -775,6 +797,7 @@ export class RaceDayCore {
   /** 結果の取り込みの表(Issue #208。新しい表だけ)。 */
   private readonly results: ResultImportStore;
   private readonly baba: BabaStage;
+  private readonly jraEntries: JraEntriesStage;
   private readonly babaReader: BabaReader | undefined;
   private readonly kaisaiDaysStore: KaisaiDaysStore | undefined;
   private readonly jockeyNamesStore: JockeyNamesStore | undefined;
@@ -857,6 +880,21 @@ export class RaceDayCore {
       }),
       retryDelayMs: RETRY_DELAY_MS,
       maxClaimAttempts: MAX_ATTEMPTS,
+    });
+    // JRA の出馬表の取得(Issue #639)。メタは既存の race_day_meta。取得口・保存先が無ければ段階全体が無効。保存するだけ(分析には使わない)。
+    this.jraEntries = new JraEntriesStage({
+      sql: this.sql,
+      now: this.now,
+      fetcher: deps.fetchJraEntries,
+      store: deps.jraEntriesStore,
+      onWarn,
+      ...(deps.onInfo === undefined ? {} : { onInfo: deps.onInfo }),
+      facts: () => ({
+        kaisaiDate: this.metaGet("kaisai_date"),
+        planFinalized: this.plan.finalizedAt() !== null,
+        centralListed: this.plan.centralListed(),
+        venueCodes: this.plan.centralVenueCodes(),
+      }),
     });
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
     // RaceDay から gate への呼び出しは直列(同時に1本)。HttpClient は間隔 0・再試行 0(間隔制御は gate だけが行う)。
@@ -1484,6 +1522,12 @@ export class RaceDayCore {
     }
     const next = this.pickNext();
     if (next === null) {
+      // JRA の出馬表の取得(Issue #639)。タスクが無いときだけ(最も低い優先度。分析・通知・締切・馬場を押しのけない)。保存するだけで、失敗しても例外にしない(次の起床で続きが進む)。
+      if (this.backgroundIdle() && this.jraEntries.runnable()) {
+        const outcome = await this.jraEntries.run();
+        await this.armAlarm();
+        return outcome;
+      }
       // 結果の取り込み(Issue #208。最も低い優先度)。動けるとき({@link resultsRunnable})だけ、時刻が来ている 1 レース。
       const due = this.resultsRunnable() ? this.results.nextDue(this.now()) : null;
       if (due !== null) {
@@ -1663,6 +1707,7 @@ export class RaceDayCore {
       notifyAtMs: this.earliest(this.notifyPlan().nextAtMs, this.rescueStage.judgeAtMs()),
       resultAtMs: this.resultsRunnable() ? this.results.nextTryAtMs() : null,
       babaAtMs: this.baba.dueAtMs(),
+      jraEntriesAtMs: this.backgroundIdle() ? this.jraEntries.dueAtMs() : null,
       reportHoldAtMs: this.reportHold.pendingAlarmAt(),
       reportJudgePending: rows.length === 0 && this.reportHold.judgePending(),
       closeAtMs: this.close.nextAtMs(),
@@ -1727,13 +1772,15 @@ export class RaceDayCore {
    * **両方がこれを使う**(別々に書くと、アラームだけ張って動かない〈即時ループ〉か、動くのにアラームが無い〈停止〉が起きる)。
    * タスクの条件が要る理由: {@link pickNext} は queued を時刻を見ずに返すので、結果の候補で起きると、再試行待ちのタスクが間隔を無視して走る。
    */
-  private resultsRunnable(): boolean {
-    if (this.resultStore === undefined) {
-      return false;
-    }
+  /** タスク(queued・fetched)が無く、計画の段階が終わっている(期限を待つ planned の行は数えない)。結果の取り込みと JRA の出馬表の取得が、動けるかの判定に使う。 */
+  private backgroundIdle(): boolean {
     const pending = (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks WHERE status IN ('queued', 'fetched')").toArray() as { n: number }[])[0]?.n ?? 0;
-    // Issue #209: 期限を待つ planned の行は「仕事」に数えない(今日の DO では最終レースまで残る)。会場の一覧・確定の途中は数える。
     return pending === 0 && this.plan.planStageSettled();
+  }
+
+  private resultsRunnable(): boolean {
+    // Issue #209: 期限を待つ planned の行は「仕事」に数えない(今日の DO では最終レースまで残る)。会場の一覧・確定の途中は数える({@link backgroundIdle})。
+    return this.resultStore !== undefined && this.backgroundIdle();
   }
 
   // ---- 朝(morning) ----

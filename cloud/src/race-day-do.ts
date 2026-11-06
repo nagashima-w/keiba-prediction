@@ -19,6 +19,8 @@ import { D1JockeyNamesStore } from "./jockey-names-repository";
 import { D1KaisaiDaysStore } from "./kaisai-days-repository";
 import { D1TrainerNamesStore } from "./trainer-names-repository";
 import { createJraBabaFetcher } from "./jra-baba-fetch";
+import { createJraEntriesFetcher } from "./jra-entries-fetch";
+import { D1JraEntriesStore } from "./jra-entries-repository";
 import { createCloudLlm } from "./llm-sender";
 import { createDiscordNotifier, webhookStatus } from "./notify-send";
 import { resolveAppBaseUrl } from "./notify-link";
@@ -136,6 +138,12 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       babaStore: new D1BabaStore({ db: env.DB }),
       // 貯めた当日の馬場の値の読み出し(Issue #295)。発走前の分析が、そのレースの開催日 × 場コードの 1 行を D1 から読む(表が無い間は読み出しが失敗して値なしで続ける)。
       babaReader: new D1BabaStore({ db: env.DB }),
+      // JRA の出馬表の取得(Issue #639)。中央の開催日の朝(07:00 JST 以降)に、馬の血統・馬主・生産者とレースごとのブリンカー・減量・マルガイを JRA の詳細ページから取り、D1 に保存する(保存するだけ。分析・プロンプト・画面には使わない)。
+      // secret は要らない(JRA のページは素の fetch で届く)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(horse_profiles・horse_owner_history・race_horse_entries・jra_entry_fetches〈migration 0038〉)。
+      // 表が無い間(migration の適用前に Worker が先に出た場合)は、claim が失敗して取得が止まるだけで、分析は止まらない。
+      fetchJraEntries: createJraEntriesFetcher(),
+      jraEntriesStore: new D1JraEntriesStore({ db: env.DB }),
+      onInfo: (message) => console.log(message),
       // 開催日ごとの記録(Issue #519。D1 の kaisai_days〈migration 0027〉)。発走前の計算が、中央のレースごとに書き、芝の開催進行の通算・柵の日数を数える過去の行を読む。
       // 書き込み・読み出しの失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
       kaisaiDaysStore: new D1KaisaiDaysStore({ db: env.DB }),
