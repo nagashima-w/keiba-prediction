@@ -2736,7 +2736,7 @@ JRA の開催日の朝に、JRA のページ(クッション値・含水率・�
 - **本文の上限**: 詳細ページは約 25 万バイト(18 頭で 252,680)で、馬場の既定の 256KB のすぐ手前。詳細ページだけ 1MB(`JRA_ENTRY_MAX_BODY_BYTES`)を `fetchOne` の引数で渡す。馬場の取得・確認口の既定は変えない。
 - **表**(migration 0038。追加のみ。出どころに依らない名前で、`source` 列を持つ。#640 の netkeiba の馬のページ由来の分も同じ表に入る前提): `horse_profiles`(馬ごと。血統・生産者は上書き、読めなかった項目で既存の値を消さない)・`horse_owner_history`(馬 × 馬主。見た最初と最後の開催日)・`race_horse_entries`(レース × 馬。馬番・ブリンカー・減量・マルガイ)・`jra_entry_fetches`(取得の記録)。値が変わらなければ書かない。1 開催日の書き込みは最大で約 1,750 行。
 - **確かめられた印だけ**: 減量(今回の騎手の `p.jockey > span.mark.jockey` の `title="3kg減量"`)とマルガイ(馬名の前の `maru-gai.png`)。マルチなどは、詳細ページで載り方を確かめていないので読まない。ブリンカーに「初めて着ける」の区別は無い(#636)。
-- **観測**: 1 起床の所要時間と結果を、固定の語のログ(`JRA の出馬表の取得: 場=… 試行=… 結果=… 本数=… 保存=…/… 所要=…ms`)と meta(`jra_entries_last_ms`)に残す。CPU 時間は Workers の観測で見る(手元の Node での 1 ページ当たりは、デコード約 2.5ms + 読み取り約 0.4ms)。
+- **観測**: 1 起床の所要時間と結果を、固定の語のログ(`JRA の出馬表の取得: 場=… 試行=… 結果=… 本数=… 保存=…/… 所要=…ms`)と meta(`jra_entries_last_ms`)に残す。CPU 時間は Workers の観測で見る(手元の Node での測定値は、再現できる形で残していないので、ここには書かない)。
 - **配線**: `race-day-do.ts` の `fetchJraEntries: createJraEntriesFetcher()`・`jraEntriesStore: new D1JraEntriesStore({ db: env.DB })`。secret は要らない。
 
 ### クラウド版の当日の馬場の値の LLM・画面への反映(#295〈#293-B〉。**版数は 1.44.0 のまま**・`PROMPT_VERSION` は "2026-10-13.2")
