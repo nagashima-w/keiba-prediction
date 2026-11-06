@@ -210,6 +210,14 @@ export const COMPARE_REL_TOLERANCE = 1e-12;
 /** 区間の端(完全一致を求める)のキー名。 */
 const EXACT_KEY = /bound|lower|upper|interval/i;
 
+/**
+ * 突き合わせの前の正規化(JSON を通す)。DO の kv(structured clone)から読んだ値は `undefined`・`NaN` を保ちうるが、保存の形(JSON)では消える/null になる。
+ * **両側に同じ正規化をかけて**、本番でだけ偽のずれが出ないようにする。
+ */
+export function normalizeForCompare<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 /** 2 つの値の違う場所(path)を返す。同じなら空。path は `reports.all.x[3]` の形(値は含めない)。`limit` 件で打ち切る。 */
 export function compareAssembled(a: unknown, b: unknown, limit = 20): string[] {
   const diffs: string[] = [];

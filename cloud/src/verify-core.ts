@@ -52,7 +52,7 @@ import { computePromptVersionSummaries, type PromptVersionSummary } from "./veri
 import { computeCloseComparison, type CloseComparison } from "./verify-close";
 import { computeVerifyBreakdowns, type BreakdownSection } from "./verify-breakdown";
 import { buildConditionFactsIndex } from "./verify-race-conditions";
-import { assembleFromParts, buildDayParts, compareAssembled, dayChunkKeys, dayMetaKey, decodeDay, encodeDay, NO_DATE_DAY, PARTS_VERSION, type DayMeta, type DayParts } from "./verify-parts";
+import { assembleFromParts, buildDayParts, compareAssembled, normalizeForCompare, dayChunkKeys, dayMetaKey, decodeDay, encodeDay, NO_DATE_DAY, PARTS_VERSION, type DayMeta, type DayParts } from "./verify-parts";
 import type { VerifyReadRows } from "./verify-read";
 import type { VerifyCloseRows } from "./verify-close";
 import type { ConditionResolution, PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "./verify-store";
@@ -273,6 +273,8 @@ interface Backfill {
   lastFailureAt: number | null;
   /** R2 の柵で止まっているときの再開時刻。 */
   resumeAt: number | null;
+  /** 失敗後の退避・保留の再試行の待ちが明ける時刻(Issue #628)。これより前の `runBackfillTick` は何もしない。無い・null は待ちなし。 */
+  notBefore?: number | null;
 }
 
 export type StaleReason = "backfilling" | "min-interval" | "daily-limit";
@@ -722,9 +724,9 @@ export class VerifyCore {
       }
       days.push(parts);
     }
-    const assembled = JSON.parse(JSON.stringify(assembleFromParts(days))) as ReturnType<typeof assembleFromParts>;
+    const assembled = normalizeForCompare(assembleFromParts(days));
     const current = { reports: cache.reports, promptVersions: cache.promptVersions, closeByVenue: cache.closeByVenue ?? { all: null, central: null, nar: null }, breakdownByVenue: cache.breakdownByVenue ?? { all: null, central: null, nar: null }, startTimeGaps: cache.diag.startTimeGaps };
-    const diffs = compareAssembled(current, assembled);
+    const diffs = compareAssembled(normalizeForCompare(current), assembled);
     if (diffs.length === 0) {
       record({ checked: prev.checked + 1, matched: prev.matched + 1 });
       return;
@@ -785,6 +787,8 @@ export class VerifyCore {
     const { kv, now, setAlarm, store, onWarn } = this.deps;
     const t = now();
     const state = this.readBackfill();
+    // 自分の待ち(失敗後の退避・保留の再試行・R2 の柵の再開)が明けていなければ何もしない。差分の集計の tick が alarm を前倒ししても、補完を待ちより早く走らせない(Issue #628)。
+    if ((state.notBefore ?? 0) > t || (state.resumeAt !== null && state.resumeAt > t)) return;
     try {
       const usage = await store.readUsage();
       if (!isReadAllowed(usage)) {
@@ -835,12 +839,13 @@ export class VerifyCore {
         await this.recordFailure(state, t);
         return;
       }
-      kv.put("backfill", { attempts: 0, lastFailureAt: state.lastFailureAt, resumeAt: null } satisfies Backfill);
       const remaining = page.total - resolved.length;
+      // 残りが(このページの)保留だけなら間隔を空ける(詳細が R2 に現れるのを待つ)。他に進められる行があれば、すぐ続ける。
+      const unresolvedInPage = page.rows.length - resolved.length;
+      const onlyDeferred = remaining > 0 && page.total === page.rows.length && unresolvedInPage > 0 && unresolvedInPage === deferred.length;
+      // 待ちの時刻(notBefore)を残す: 差分の集計のアラームがこの待ちより前に alarm() を呼んでも、補完の tick は待ちが明けるまで何もしない(Issue #628)。
+      kv.put("backfill", { attempts: 0, lastFailureAt: state.lastFailureAt, resumeAt: null, notBefore: onlyDeferred ? t + VERIFY_DEFER_RETRY_MS : null } satisfies Backfill);
       if (remaining > 0) {
-        // 残りが(このページの)保留だけなら間隔を空ける(詳細が R2 に現れるのを待つ)。他に進められる行があれば、すぐ続ける。
-        const unresolvedInPage = page.rows.length - resolved.length;
-        const onlyDeferred = page.total === page.rows.length && unresolvedInPage > 0 && unresolvedInPage === deferred.length;
         await setAlarm(t + (onlyDeferred ? VERIFY_DEFER_RETRY_MS : VERIFY_TICK_DELAY_MS));
       }
     } catch {
@@ -852,9 +857,9 @@ export class VerifyCore {
 
   private async recordFailure(state: Backfill, t: number): Promise<void> {
     const attempts = state.attempts + 1;
-    this.deps.kv.put("backfill", { attempts, lastFailureAt: t, resumeAt: null } satisfies Backfill);
+    const delay = VERIFY_BACKOFF_MS[Math.min(attempts - 1, VERIFY_BACKOFF_MS.length - 1)]!;
+    this.deps.kv.put("backfill", { attempts, lastFailureAt: t, resumeAt: null, notBefore: attempts < VERIFY_MAX_ATTEMPTS ? t + delay : null } satisfies Backfill);
     if (attempts < VERIFY_MAX_ATTEMPTS) {
-      const delay = VERIFY_BACKOFF_MS[Math.min(attempts - 1, VERIFY_BACKOFF_MS.length - 1)]!;
       await this.deps.setAlarm(t + delay);
     }
   }

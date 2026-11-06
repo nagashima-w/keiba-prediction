@@ -254,6 +254,18 @@ describe("差分の集計の並走: 差分の読みと突き合わせ", () => {
     expect([...t.kv.data.keys()].filter((k) => k.startsWith("prd:"))).toHaveLength(raceCount - 1);
   });
 
+  it("突き合わせは今の集計(kv から structured clone で読むので undefined・NaN を保ちうる)も JSON と同じ形にそろえてから比べる(本番でだけ偽のずれが出ない)", async () => {
+    const t = setup(manyDayRows(3, 3));
+    await t.core.getReport("all");
+    // 今の集計に、JSON では消える/null になる値(undefined のキー・NaN)を入れる(structured clone の kv の再現)。内容は JSON にすれば同じ。
+    const cache = t.kv.data.get("cache") as { closeByVenue: Record<string, unknown>; reports: { all: Record<string, unknown> } };
+    expect(cache.closeByVenue["all"]).toBeNull(); // 前提: 差分の集計側も null(close の行が空)
+    cache.closeByVenue["all"] = Number.NaN;
+    cache.reports.all["__undefinedKey"] = undefined;
+    await t.drain();
+    expect(check(t.kv)).toMatchObject({ checked: 1, matched: 1, mismatched: 0 });
+  });
+
   it("印の無い変更(結果の行の書き換え)は、突き合わせのずれとして見つかる。警告に出し、診断に件数が出る。画面の集計はそのまま返す", async () => {
     const rows = manyDayRows(3, 4);
     const t = setup(rows);

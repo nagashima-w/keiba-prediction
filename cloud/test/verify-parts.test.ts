@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleFromParts, buildDayParts, chunkBySize, compareAssembled, decodeDay, encodeDay, NO_DATE_DAY, PARTS_VERSION } from "../src/verify-parts";
+import { normalizeForCompare, assembleFromParts, buildDayParts, chunkBySize, compareAssembled, decodeDay, encodeDay, NO_DATE_DAY, PARTS_VERSION } from "../src/verify-parts";
 import { buildVerifySource } from "../src/verify-read";
 import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG } from "../../packages/core/src/ev/verify.js";
 import { computePromptVersionSummaries } from "../src/verify-versions";
@@ -105,5 +105,14 @@ describe("compareAssembled(件数・金額・集合・区間の端は完全一�
     const x = { a: Array.from({ length: 50 }, () => 1) };
     const y = { a: Array.from({ length: 50 }, () => 2) };
     expect(compareAssembled(x, y, 5)).toHaveLength(5);
+  });
+});
+
+describe("normalizeForCompare(Issue #628。structured clone の値と JSON の値を同じ形にそろえる)", () => {
+  it("undefined のキーは消え、NaN は null になる。正規化しないと、同じ内容でもずれと判定される", () => {
+    const fromKv = { a: undefined, b: NaN, c: [1, undefined] as unknown[] };
+    const fromJson = { b: null, c: [1, null] as unknown[] };
+    expect(compareAssembled(fromKv, fromJson).length).toBeGreaterThan(0); // 前提: そろえないとずれる
+    expect(compareAssembled(normalizeForCompare(fromKv), normalizeForCompare(fromJson))).toEqual([]);
   });
 });
