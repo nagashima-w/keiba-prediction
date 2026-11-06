@@ -7,9 +7,11 @@ import {
   analysisModelFamily,
   ANALYSIS_MODEL_IDS,
   CLOUD_SETTINGS_KEYS,
+  classifySettingsForSave,
   CLOUD_SETTINGS_RULES,
   coerceCloudSettings,
   DEFAULT_CLOUD_SETTINGS,
+  fillMissingSettings,
   hasSettingsKeysMismatch,
   loadSettings,
   saveSettings,
@@ -582,5 +584,86 @@ describe("maxWinBetsPerRace・maxPlaceBetsPerRace(単勝・複勝の点数の上
       expect(validateCloudSettingsForSave({ ...FULL, [key]: 1.5 })).toEqual({ ok: false, fields: [key] });
       expect(validateCloudSettingsForSave({ ...FULL, [key]: -1 })).toEqual({ ok: false, fields: [key] });
     }
+  });
+});
+
+describe("classifySettingsForSave / fillMissingSettings(欠けだけなら保存済みの値で埋める。Issue #634)", () => {
+  const STORED: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 123_000, kellyFraction: 0.1 };
+
+  it("欠けなし(全項目が妥当): complete で、validateCloudSettingsForSave と同じ settings", () => {
+    expect(classifySettingsForSave({ ...FULL })).toEqual({ kind: "complete", settings: FULL });
+  });
+
+  it.each(CLOUD_SETTINGS_KEYS.map((key) => [key] as const))("キー %s だけが欠け: fillable(missing はその項目名だけ)", (key) => {
+    const body: Record<string, unknown> = { ...FULL };
+    delete body[key];
+    const result = classifySettingsForSave(body);
+    expect(result.kind).toBe("fillable");
+    if (result.kind !== "fillable") return;
+    expect(result.missing).toEqual([key]);
+    expect(Object.keys(result.present)).toHaveLength(CLOUD_SETTINGS_KEYS.length - 1);
+  });
+
+  it("複数の欠け: missing は CLOUD_SETTINGS_KEYS の順。present は送られた値をそのまま持つ", () => {
+    const { bankroll: _a, evThreshold: _b, ...rest } = FULL;
+    const result = classifySettingsForSave(rest);
+    expect(result.kind).toBe("fillable");
+    if (result.kind !== "fillable") return;
+    expect(result.missing).toEqual(CLOUD_SETTINGS_KEYS.filter((k) => k === "evThreshold" || k === "bankroll"));
+    expect(result.missing).toHaveLength(2);
+    expect(result.present).toEqual(rest);
+  });
+
+  it("欠け+範囲外: invalid(fields は範囲外だけ。欠けは入れない)。keysMismatch は false", () => {
+    const { bankroll: _omit, ...rest } = FULL;
+    expect(classifySettingsForSave({ ...rest, perRaceCap: -1 })).toEqual({ kind: "invalid", fields: ["perRaceCap"], keysMismatch: false });
+  });
+
+  it("欠け+型違い: invalid(型違いの項目だけ名指し)", () => {
+    const { bankroll: _omit, ...rest } = FULL;
+    expect(classifySettingsForSave({ ...rest, includeComboOdds: "true" })).toEqual({ kind: "invalid", fields: ["includeComboOdds"], keysMismatch: false });
+  });
+
+  it("欠け+未知のキー: invalid(fields に欠けも入る。keysMismatch は true)。未知のキー名は写さない", () => {
+    const { bankroll: _omit, ...rest } = FULL;
+    const result = classifySettingsForSave({ ...rest, secretKey: 1 });
+    expect(result).toEqual({ kind: "invalid", fields: ["bankroll"], keysMismatch: true });
+    expect(JSON.stringify(result)).not.toContain("secretKey");
+  });
+
+  it("未知のキーだけ(欠けなし): invalid(fields は空・keysMismatch は true)。__proto__ の own キーも同じ", () => {
+    expect(classifySettingsForSave({ ...FULL, extra: 1 })).toEqual({ kind: "invalid", fields: [], keysMismatch: true });
+    const body = JSON.parse(`{"__proto__":{"bankroll":1},${JSON.stringify(FULL).slice(1)}`) as unknown;
+    expect(Object.keys(body as object)).toContain("__proto__");
+    expect(classifySettingsForSave(body)).toEqual({ kind: "invalid", fields: [], keysMismatch: true });
+  });
+
+  it("既知の項目が 1 つも無い本文({}・未知のキーだけ): invalid。{} は keysMismatch ありで fields は全項目", () => {
+    const empty = classifySettingsForSave({});
+    expect(empty.kind).toBe("invalid");
+    expect(empty).toEqual({ kind: "invalid", fields: [...CLOUD_SETTINGS_KEYS], keysMismatch: true });
+    expect(classifySettingsForSave({ foo: 1 }).kind).toBe("invalid");
+  });
+
+  it("範囲外だけ(欠けなし): invalid(keysMismatch は false)", () => {
+    expect(classifySettingsForSave({ ...FULL, bankroll: 10.5 })).toEqual({ kind: "invalid", fields: ["bankroll"], keysMismatch: false });
+  });
+
+  it("オブジェクトでない入力(null・配列・文字列・数値): invalid(fields 空・keysMismatch は false)", () => {
+    for (const raw of [null, undefined, [], "x", 5]) {
+      expect(classifySettingsForSave(raw), String(raw)).toEqual({ kind: "invalid", fields: [], keysMismatch: false });
+    }
+  });
+
+  it("fillMissingSettings: 欠けた項目だけ stored の値になり、送られた項目は present の値のまま。全項目が揃う", () => {
+    const { bankroll: _a, kellyFraction: _b, ...present } = FULL;
+    const filled = fillMissingSettings(present, STORED);
+    expect(filled.bankroll).toBe(123_000);
+    expect(filled.kellyFraction).toBe(0.1);
+    expect(filled.evThreshold).toBe(FULL.evThreshold);
+    expect(filled.perRaceCap).toBe(FULL.perRaceCap);
+    expect(Object.keys(filled)).toEqual([...CLOUD_SETTINGS_KEYS]);
+    expect(validateCloudSettingsForSave(filled).ok).toBe(true);
+    expect(FULL.bankroll).not.toBe(123_000); // 前提: 埋めた値が present 由来ではない
   });
 });
