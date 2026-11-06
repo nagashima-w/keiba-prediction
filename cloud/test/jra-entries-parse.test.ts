@@ -172,8 +172,10 @@ describe("parseEntryPage の失敗の判定", () => {
     }
   });
   it("同じ馬の行が重複していたら、2 回目は保存せず skipped に数える(同じ馬を二重に返さない)", () => {
-    const start = DDE_TOKYO11R.indexOf('<tr>\n<td class="waku"');
-    const end = DDE_TOKYO11R.indexOf('<tr>\n<td class="waku"', start + 10);
+    // 行の区切りは CRLF と LF が混ざっている(原本のまま)ので、`<tr>` と `<td class="waku"` のあいだの空白は正規表現で読む。
+    const starts = [...DDE_TOKYO11R.matchAll(/<tr>\s*<td class="waku"/g)].map((m) => m.index!);
+    const start = starts[0]!;
+    const end = starts[1]!;
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
     const firstRow = DDE_TOKYO11R.slice(start, end);

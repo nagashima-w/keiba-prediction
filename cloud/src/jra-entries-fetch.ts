@@ -16,9 +16,8 @@
  * netkeiba 用の gate は通さない(許可リストは netkeiba のホストだけ)。例外は投げない(失敗は固定の語。例外の文面・URL・本文は残さない)。
  */
 import { isParamErrorPage, parseEntryPage, parseRaceCname, parseRaceListPage, parseVenueListPage, type JraEntryHorse, type JraRaceCname, type JraVenueLink } from "./jra-entries-parse";
-import { JRA_ENTRY_MAX_BODY_BYTES, JRA_GAP_MS, JRA_TIMEOUT_MS, decodeShiftJis, fetchOne, type JraFailure, type JraFetchLike } from "./jra-http";
+import { JRA_ACCESS_D_URL, JRA_ENTRY_MAX_BODY_BYTES, JRA_GAP_MS, JRA_TIMEOUT_MS, decodeShiftJis, fetchOne, type JraFailure, type JraFetchLike } from "./jra-http";
 
-const ACCESS_D_URL = "https://www.jra.go.jp/JRADB/accessD.html";
 /** 開催の選択の本文(固定。#636 で実際に通した値)。 */
 const DLI_BODY = "cname=pw01dli00/F3";
 
@@ -108,7 +107,7 @@ export function createJraEntriesFetcher(deps: CreateJraEntriesFetcherDeps = {}):
           if (!DATE_PATTERN.test(date)) {
             return { status: "shape-mismatch" };
           }
-          const p = await page(ACCESS_D_URL, post(DLI_BODY));
+          const p = await page(JRA_ACCESS_D_URL, post(DLI_BODY));
           if (p.status !== "ok") {
             return { status: p.status };
           }
@@ -120,7 +119,7 @@ export function createJraEntriesFetcher(deps: CreateJraEntriesFetcherDeps = {}):
           if (!DRL_CNAME_PATTERN.test(drlCname) || !DATE_PATTERN.test(date) || !VENUE_PATTERN.test(venueCode)) {
             return { status: "shape-mismatch" };
           }
-          const p = await page(ACCESS_D_URL, post(`cname=${drlCname}`));
+          const p = await page(JRA_ACCESS_D_URL, post(`cname=${drlCname}`));
           if (p.status !== "ok") {
             return { status: p.status };
           }
@@ -132,7 +131,7 @@ export function createJraEntriesFetcher(deps: CreateJraEntriesFetcherDeps = {}):
           if (expected === null) {
             return { status: "shape-mismatch" };
           }
-          const p = await page(`${ACCESS_D_URL}?CNAME=${cname}`, { method: "GET" }, JRA_ENTRY_MAX_BODY_BYTES);
+          const p = await page(`${JRA_ACCESS_D_URL}?CNAME=${cname}`, { method: "GET" }, JRA_ENTRY_MAX_BODY_BYTES);
           if (p.status !== "ok") {
             return { status: p.status };
           }

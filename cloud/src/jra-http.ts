@@ -14,6 +14,8 @@ export const JRA_CUSHION_URL = "https://www.jra.go.jp/keiba/baba/_data_cushion.h
 export const JRA_MOIST_URL = "https://www.jra.go.jp/keiba/baba/_data_moist.html";
 export const JRA_ACCESS_URL = "https://www.jra.go.jp/JRADB/accessJ.html";
 export const JRA_ACCESS_BODY = "CNAME=pw01iwtS3/CD";
+/** 出馬表(開催の選択・レースの選択・詳細。Issue #639)の入口。`jra-entries-fetch.ts` だけが使う。 */
+export const JRA_ACCESS_D_URL = "https://www.jra.go.jp/JRADB/accessD.html";
 
 /** コースの情報のページの URL。1 は `index.html`、2 以降は `index2.html`・`index3.html`。 */
 export const jraCourseUrl = (n: number): string => `https://www.jra.go.jp/keiba/baba/index${n <= 1 ? "" : String(n)}.html`;
