@@ -35,6 +35,21 @@ export const VERIFY_CLOSE_READ_SQL = {
   bets: "SELECT analysis_id AS analysisId, round, bet_type AS betType, combo_key AS comboKey, stake FROM analysis_close_bets ORDER BY analysis_id, round, bet_type, combo_key",
 } as const;
 
+/**
+ * 1 日ぶんの締切直前の再計算の SQL(Issue #628)。`analysisIds` はその日の分析の id(整数でなければ投げる)。{@link VERIFY_CLOSE_READ_SQL} と同じ列・同じ並びで、`WHERE` だけを足したもの(主キーの先頭で引く)。
+ */
+export function verifyDayCloseSql(analysisIds: readonly number[]): { readonly meta: string; readonly bets: string } {
+  if (!analysisIds.every((id) => Number.isSafeInteger(id))) {
+    throw new TypeError("分析 id が整数ではありません");
+  }
+  const ids = analysisIds.length === 0 ? "NULL" : analysisIds.join(",");
+  const where = (sql: string, order: string): string => sql.replace(` ${order}`, ` WHERE analysis_id IN (${ids}) ${order}`);
+  return {
+    meta: where(VERIFY_CLOSE_READ_SQL.meta, "ORDER BY analysis_id, round"),
+    bets: where(VERIFY_CLOSE_READ_SQL.bets, "ORDER BY analysis_id, round, bet_type, combo_key"),
+  };
+}
+
 export interface VerifyCloseMetaRow {
   readonly analysisId: number;
   readonly round: number;

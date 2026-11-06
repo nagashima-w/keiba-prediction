@@ -19,6 +19,11 @@
  *    **透かし(`Watermark`)に再計算の表は足さない**: 比較に入るのは結果が出ている分析だけで、再計算の行は発走の 5 分前・直前に書かれ(結果の取込より前)、結果の取込は `race_results` の透かしを動かす。
  *    同じ行の再保存〈UPSERT。rowid が変わらない〉が結果の後に起きても、TTL(1 時間)で拾う。
  *
+ * ## 差分の集計の並走(Issue #628。#616 の段階 3 の前半。`verify-parts.ts`)
+ * 画面に出す集計(上の `cache`)は変えず、開催日ごとの部分(kv の `pd:<日>:…`)を別に持ち、同じ時点の `cache` と突き合わせて記録する(診断の `partsCheck`)。部分の更新は**アラームの tick**(`runPartsTick`)で行う:
+ * 印(`verify_race_mark`)を先に読み、印の付いた開催日だけを D1 から読み直す。初回・部分の形の版が変わった後の全部の作り直しも同じ道(全日を作り直す対象にして、tick ごとに {@link VERIFY_PARTS_DAYS_PER_TICK} 日ずつ。1 日 20 回の再計算の柵に数えない)。
+ * 並走の失敗は握る(警告だけ。画面の集計・補完のアラームには触れない)。突き合わせは、再計算の後に印が動いていないときだけ(動いたら見送りに数える)。後半で、`assembleFromParts` の結果を今の集計の代わりに返す。
+ *
  * ## 閲覧者の要求(`getViewerReport`。Issue #263)
  * 閲覧者(友人)にも検証画面を見せるが、**閲覧者の要求は集計のやり直しを起こさない**。`getReport` とは別のメソッドにしてあり(`refresh` の引数も無い)、kv のキャッシュを読むだけ:
  *  - 再計算しない(柵〈最短間隔・1 日の上限〉の記録 `runs` に触れない)。D1(透かし・補完待ち)も R2 も読まず、補完のアラームも張らない。だから閲覧者が何度開いても、管理者の再計算の枠を減らさない。
@@ -47,6 +52,9 @@ import { computePromptVersionSummaries, type PromptVersionSummary } from "./veri
 import { computeCloseComparison, type CloseComparison } from "./verify-close";
 import { computeVerifyBreakdowns, type BreakdownSection } from "./verify-breakdown";
 import { buildConditionFactsIndex } from "./verify-race-conditions";
+import { assembleFromParts, buildDayParts, compareAssembled, dayChunkKeys, dayMetaKey, decodeDay, encodeDay, NO_DATE_DAY, PARTS_VERSION, type DayMeta, type DayParts } from "./verify-parts";
+import type { VerifyReadRows } from "./verify-read";
+import type { VerifyCloseRows } from "./verify-close";
 import type { ConditionResolution, PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "./verify-store";
 import { isStaleAlarm } from "./stale-alarm";
 
@@ -108,6 +116,8 @@ const CACHE_VERSION = 6;
 export interface VerifyKv {
   get<T = unknown>(key: string): T | undefined;
   put(key: string, value: unknown): void;
+  /** 差分の部分(Issue #628)の古い塊を消す。無い読み取り口(既存の偽物)では消さない。 */
+  delete?(key: string): unknown;
 }
 
 /** D1・R2 の窓口(`D1VerifyStore` がこれを満たす。テストでは偽物)。 */
@@ -119,6 +129,57 @@ export interface VerifyStorePort {
   /** `conditions` は `resolved` の行ごとの条件の結果(Issue #389)。 */
   commitStartTimes(resolved: readonly StartTimeResolution[], gets: number, conditions?: readonly ConditionResolution[]): Promise<number>;
   readAll(): Promise<ReadAllResult>;
+  // 差分の集計(Issue #628)。4 つとも持つ読み取り口でだけ並走する(持たない既存の偽物では何もしない)。
+  /** 変更の印(`verify_race_mark`)の seq の最大値(無ければ 0)。 */
+  readMaxSeq?(): Promise<number>;
+  /** `seq > afterSeq` の印を seq の昇順に `limit` 件まで。 */
+  readMarks?(afterSeq: number, limit: number): Promise<{ readonly marks: readonly VerifyMark[]; readonly rowsRead: number }>;
+  /** 分析のある開催日の一覧(開催日が NULL の分析があれば {@link NO_DATE_DAY} を含む)。 */
+  readDays?(): Promise<{ readonly days: readonly string[]; readonly rowsRead: number }>;
+  /** 1 日ぶんの行(全件の読みと同じ列・同じ並び)と、その日の再計算の行(読めなければ null)。`day` は {@link NO_DATE_DAY} なら開催日が NULL の分析。 */
+  readDay?(day: string): Promise<{ readonly rows: VerifyReadRows; readonly close: VerifyCloseRows | null; readonly rowsRead: number }>;
+}
+
+/** 変更の印の 1 行。 */
+export interface VerifyMark {
+  readonly raceId: string;
+  readonly kaisaiDate: string | null;
+  readonly seq: number;
+}
+
+/** 1 回の tick で作り直す開催日の数。1 日あたり D1 の 9 文(分析 1・残り 8)で、印 1 + 最大 1 + 9 × 4 = 38 文 < Free の 50。 */
+export const VERIFY_PARTS_DAYS_PER_TICK = 4;
+/** 1 回の tick で読む印の数の上限。 */
+const VERIFY_PARTS_MARKS_LIMIT = 500;
+/** 失敗後の再試行までの間隔と、連続して失敗してよい回数(超えたら次の再計算まで止める)。 */
+const VERIFY_PARTS_RETRY_MS = 60_000;
+const VERIFY_PARTS_MAX_FAILS = 8;
+
+/** 差分の集計の状態(kv の `pm`)。 */
+interface PartsState {
+  readonly v: number;
+  /** ここまでの印は読み終えた(印を先に読み、データは後に読む)。 */
+  readonly partsSeq: number;
+  /** 作り直し待ちの開催日。 */
+  readonly dirty: readonly string[];
+  /** 部分を保存してある開催日。 */
+  readonly days: readonly string[];
+  readonly fails: number;
+}
+
+/** 突き合わせの記録(kv の `partsCheck`)。診断に出す。 */
+export interface PartsCheck {
+  /** 突き合わせた回数(一致 + ずれ)。 */
+  readonly checked: number;
+  readonly matched: number;
+  /** ずれがあった回数。 */
+  readonly mismatched: number;
+  /** 見送った回数(再計算の後にデータが動いた。ずれに数えない)。 */
+  readonly skipped: number;
+  /** 最後に突き合わせ・見送りを決めた集計(`computedAt`)。同じ集計を 2 度数えない。 */
+  readonly lastComputedAt: number | null;
+  /** 直近のずれの場所(path。値は含めない)。 */
+  readonly lastPaths: readonly string[];
 }
 
 export interface VerifyCoreDeps {
@@ -161,6 +222,8 @@ export interface VerifyDiag {
    * `affecting` > 0 のとき、exe には時刻があった旧い行が、web では「時刻なし」として判定される可能性がある。
    */
   readonly startTimeGaps: { readonly lost: number; readonly affecting: number };
+  /** 差分の集計との突き合わせの記録(Issue #628。並走の間だけ。画面の値は変えない)。差分の読みを持たない読み取り口・まだ何も記録が無いときは無い。 */
+  readonly partsCheck?: PartsCheck;
 }
 
 interface CacheEntry {
@@ -190,6 +253,12 @@ interface Runs {
   count: number;
   /** 最後に再計算した時刻。 */
   lastAt: number;
+}
+
+/** 再計算の基準にした印の最大値(kv の `partsBase`。`cache` と同時に書く)。 */
+interface PartsBase {
+  readonly seq: number;
+  readonly computedAt: number;
 }
 
 interface Backfill {
@@ -402,8 +471,14 @@ export class VerifyCore {
       stale: reason !== null,
       staleReason: reason,
       nextRecomputeAt: nextAt === null ? null : new Date(nextAt).toISOString(),
-      diag: cache.diag,
+      diag: this.withPartsCheck(cache.diag),
     };
+  }
+
+  /** 診断に、差分の集計との突き合わせの記録を足す(記録があるときだけ。応答の他の項目は変えない)。 */
+  private withPartsCheck(diag: VerifyDiag): VerifyDiag {
+    const check = this.deps.kv.get<PartsCheck>("partsCheck");
+    return check === undefined ? diag : { ...diag, partsCheck: check };
   }
 
   /** 再計算してよいか(最短間隔・1 日の上限)。 */
@@ -425,6 +500,8 @@ export class VerifyCore {
 
   private async recompute(watermark: Watermark): Promise<CacheEntry | { readonly preparing: number }> {
     const { kv, now, store } = this.deps;
+    // 差分の集計(Issue #628)の基準: 再計算の読みの**前**に印の最大値を読む。この後の書き込みは印が進むので、突き合わせは「印が基準のまま」のときだけ行う。失敗しても本体の集計は出す。
+    const baseSeq = await this.readBaseSeq();
     const t0 = now();
     const read = await store.readAll();
     const t1 = now();
@@ -488,10 +565,156 @@ export class VerifyCore {
       diag: { rowsRead: read.rowsRead, counts: read.counts, readMs: t1 - t0, computeMs: t2 - t1, promptVersionsMs: t3 - t2, closeMs: t4 - t3, breakdownMs: t5 - t4, startTimeGaps: countStartTimeGaps(read.rows.analyses) },
     };
     kv.put("cache", entry);
+    if (baseSeq !== null) {
+      kv.put("partsBase", { seq: baseSeq, computedAt: t3 } satisfies PartsBase);
+    }
     const prev = kv.get<Runs>("runs");
     const day = jstIsoDate(t3);
     kv.put("runs", { day, count: prev !== undefined && prev.day === day ? prev.count + 1 : 1, lastAt: t3 } satisfies Runs);
+    if (baseSeq !== null) {
+      await this.armParts(t3);
+    }
     return entry;
+  }
+
+  // -------------------------------------------------------------------------
+  // 差分の集計(Issue #628。#616 の段階 3 の前半。画面に出す集計は今のまま変えない)
+  // -------------------------------------------------------------------------
+
+  /** 再計算の基準にする印の最大値。差分の読みを持たない読み取り口・失敗のときは null(並走しない。本体の集計は止めない)。 */
+  private async readBaseSeq(): Promise<number | null> {
+    const { store } = this.deps;
+    if (store.readMaxSeq === undefined) return null;
+    try {
+      return await store.readMaxSeq();
+    } catch {
+      this.deps.onWarn?.("検証の差分の集計の基準(変更の印)を読めませんでした(並走せずに集計します)");
+      return null;
+    }
+  }
+
+  /** 差分の tick のアラームを張る。**既にあるアラームが先なら動かさない**(補完のアラームを遅らせない)。 */
+  private async armParts(at: number): Promise<void> {
+    try {
+      const { getAlarm, setAlarm, now } = this.deps;
+      const current = await getAlarm();
+      if (current === null || isStaleAlarm(current, now()) || current > at) {
+        await setAlarm(at);
+      }
+    } catch {
+      // アラームを張れなくても本体は止めない(次の再計算で張り直す)。
+    }
+  }
+
+  /**
+   * アラーム: 差分の集計を 1 tick 進める(補完の tick の後に呼ぶ)。**例外は握る**(失敗は警告に出し、再試行のアラームを張る。画面の集計には触れない)。
+   * 差分の読みを持たない読み取り口では何もしない。補完待ちが残っている間も何も読まない(補完前の発走時刻・条件で部分を作らない。補完の書き込みも印が付くので、後から拾える)。
+   */
+  async runPartsTick(): Promise<void> {
+    const { store, kv, now, onWarn } = this.deps;
+    if (store.readMaxSeq === undefined || store.readMarks === undefined || store.readDays === undefined || store.readDay === undefined) return;
+    const port = { readMaxSeq: store.readMaxSeq.bind(store), readMarks: store.readMarks.bind(store), readDays: store.readDays.bind(store), readDay: store.readDay.bind(store) };
+    try {
+      const page = await store.listPending(kv.get<number>(CURSOR_KEY) ?? 0, 1);
+      if (page.total > 0) return;
+      await this.partsStep(port);
+    } catch {
+      onWarn?.("検証の差分の部分の更新で例外が起きました(再試行します)");
+      const state = kv.get<PartsState>("pm");
+      const fails = (state?.fails ?? 0) + 1;
+      if (state !== undefined) kv.put("pm", { ...state, fails } satisfies PartsState);
+      if (fails < VERIFY_PARTS_MAX_FAILS) await this.armParts(now() + VERIFY_PARTS_RETRY_MS);
+    }
+  }
+
+  private async partsStep(port: Required<Pick<VerifyStorePort, "readMaxSeq" | "readMarks" | "readDays" | "readDay">>): Promise<void> {
+    const { kv, now } = this.deps;
+    let state = kv.get<PartsState>("pm");
+    // 部分の形の版が違う・初回: 古い部分を捨て、**印の最大値を先に読み**、全部の日を作り直す対象にする(1 日 20 回の再計算の柵とは別枠。tick ごとに少しずつ進める)。
+    if (state === undefined || state.v !== PARTS_VERSION) {
+      this.dropDays(state?.days ?? []);
+      const seq = await port.readMaxSeq();
+      const { days } = await port.readDays();
+      state = { v: PARTS_VERSION, partsSeq: seq, dirty: [...days], days: [], fails: 0 };
+      kv.put("pm", state);
+    }
+    // ① 印を先に読む(開催日が NULL の印は捨てず、NULL の日を作り直す対象にする)。
+    const { marks } = await port.readMarks(state.partsSeq, VERIFY_PARTS_MARKS_LIMIT);
+    if (marks.length > 0) {
+      const dirty = new Set(state.dirty);
+      for (const m of marks) dirty.add(m.kaisaiDate ?? NO_DATE_DAY);
+      state = { ...state, partsSeq: Math.max(...marks.map((m) => m.seq)), dirty: [...dirty].sort() };
+      kv.put("pm", state);
+    }
+    // ② データを後に読む(1 tick に最大 VERIFY_PARTS_DAYS_PER_TICK 日)。
+    for (const day of state.dirty.slice(0, VERIFY_PARTS_DAYS_PER_TICK)) {
+      const read = await port.readDay(day);
+      const stored = read.rows.analyses.length > 0;
+      this.dropDays([day].filter((d) => state!.days.includes(d)));
+      if (stored) {
+        for (const [key, value] of encodeDay(day, buildDayParts(read.rows, read.close))) kv.put(key, value);
+      }
+      const days: Set<string> = new Set(state.days);
+      if (stored) days.add(day);
+      else days.delete(day);
+      state = { ...state, dirty: state.dirty.filter((d) => d !== day), days: [...days].sort(), fails: 0 };
+      kv.put("pm", state);
+    }
+    const more = state.dirty.length > 0 || marks.length === VERIFY_PARTS_MARKS_LIMIT;
+    if (more) {
+      await this.armParts(now() + VERIFY_TICK_DELAY_MS);
+      return;
+    }
+    await this.compareParts(state, port.readMaxSeq);
+  }
+
+  /** 保存してある日の部分(メタと塊)を消す。 */
+  private dropDays(days: readonly string[]): void {
+    const { kv } = this.deps;
+    for (const day of days) {
+      const meta = kv.get<DayMeta>(dayMetaKey(day));
+      if (meta !== undefined) {
+        for (const key of dayChunkKeys(day, meta)) kv.delete?.(key);
+      }
+      kv.delete?.(dayMetaKey(day));
+    }
+  }
+
+  /**
+   * 差分で組んだ集計と、今の集計(`cache`)を突き合わせて記録する。**同じ時点のときだけ**: 部分が追いついていて(印が再計算の基準と同じ)、いま印を読み直しても動いていないとき。
+   * そうでなければ見送る(ずれに数えない)。1 つの集計につき 1 回だけ数える。
+   */
+  private async compareParts(state: PartsState, readMaxSeq: () => Promise<number>): Promise<void> {
+    const { kv, onWarn } = this.deps;
+    const cache = this.readCache();
+    const base = kv.get<PartsBase>("partsBase");
+    const prev = kv.get<PartsCheck>("partsCheck") ?? { checked: 0, matched: 0, mismatched: 0, skipped: 0, lastComputedAt: null, lastPaths: [] };
+    if (cache === null || base === undefined || base.computedAt !== cache.computedAt || prev.lastComputedAt === cache.computedAt) return;
+    const record = (next: Partial<PartsCheck>): void => kv.put("partsCheck", { ...prev, lastComputedAt: cache.computedAt, ...next } satisfies PartsCheck);
+    if (state.partsSeq !== base.seq || (await readMaxSeq()) !== base.seq) {
+      record({ skipped: prev.skipped + 1 });
+      return;
+    }
+    const days: DayParts[] = [];
+    for (const day of state.days) {
+      const parts = decodeDay(day, (key) => kv.get(key));
+      if (parts === null) {
+        // 保存が欠けている(版違い・塊の欠落): 作り直す。突き合わせは次回。
+        kv.put("pm", { ...state, dirty: [...new Set([...state.dirty, day])].sort() } satisfies PartsState);
+        await this.armParts(this.deps.now() + VERIFY_TICK_DELAY_MS);
+        return;
+      }
+      days.push(parts);
+    }
+    const assembled = JSON.parse(JSON.stringify(assembleFromParts(days))) as ReturnType<typeof assembleFromParts>;
+    const current = { reports: cache.reports, promptVersions: cache.promptVersions, closeByVenue: cache.closeByVenue ?? { all: null, central: null, nar: null }, breakdownByVenue: cache.breakdownByVenue ?? { all: null, central: null, nar: null }, startTimeGaps: cache.diag.startTimeGaps };
+    const diffs = compareAssembled(current, assembled);
+    if (diffs.length === 0) {
+      record({ checked: prev.checked + 1, matched: prev.matched + 1 });
+      return;
+    }
+    record({ checked: prev.checked + 1, mismatched: prev.mismatched + 1, lastPaths: diffs });
+    onWarn?.(`検証の差分の集計と今の集計に突き合わせのずれがあります(${diffs.length} 件以上。例: ${diffs.slice(0, 3).join(", ")})`);
   }
 
   // -------------------------------------------------------------------------

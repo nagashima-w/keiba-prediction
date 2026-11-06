@@ -45,6 +45,10 @@ const ANALYSES_HEAD = `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, 
        course_type AS courseType, distance, track_condition AS trackCondition, grade, race_name AS raceName, cond_read AS condRead,
        race_class AS raceClass
   FROM analyses`;
+const HORSES_HEAD = `SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive,
+       NULL AS contributions_json, mark, NULL AS reason, NULL AS highlights_json, NULL AS concerns_json
+  FROM analysis_horses`;
+const HORSES_ORDER = `ORDER BY analysis_id, umaban`;
 const ALLOCATION_META_HEAD = `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode, include_combo_odds AS includeComboOdds FROM analysis_allocation_meta`;
 /** 買い目の `odds`・`ev`(Issue #384)は、人気帯の内訳が「予想した期待値」(`ev`)と「予想した的中確率」(`ev ÷ odds`)に使う。列を足すだけで読み取り行数は変わらない。1 日ぶんの読み(今日の狙い目)と列を揃える(`targets-repository.test.ts` が行の一致を固定している)。 */
 const BETS_HEAD = `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev
@@ -62,9 +66,7 @@ const COMBO_IMPORTS_HEAD = `SELECT race_id AS raceId, bet_type AS betType FROM r
 /** 集計が D1 から読む表ごとの SQL(束縛値なし)。 */
 export const VERIFY_READ_SQL = {
   analyses: `${ANALYSES_HEAD} ORDER BY id`,
-  horses: `SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive,
-       NULL AS contributions_json, mark, NULL AS reason, NULL AS highlights_json, NULL AS concerns_json
-  FROM analysis_horses ORDER BY analysis_id, umaban`,
+  horses: `${HORSES_HEAD} ${HORSES_ORDER}`,
   allocationMeta: ALLOCATION_META_HEAD,
   bets: `${BETS_HEAD} ${BETS_ORDER}`,
   results: `${RESULTS_HEAD} ${RESULTS_ORDER}`,
@@ -74,6 +76,9 @@ export const VERIFY_READ_SQL = {
 
 /** 1 日ぶんの分析(束縛値は開催日)。全件の読みと同じ列・同じ並び。 */
 export const VERIFY_DAY_ANALYSES_SQL = `${ANALYSES_HEAD} WHERE kaisai_date = ? ORDER BY id`;
+
+/** 1 日ぶんの分析(開催日が NULL の分析の日。Issue #628)。全件の読みと同じ列・同じ並び。 */
+export const VERIFY_NO_DATE_ANALYSES_SQL = `${ANALYSES_HEAD} WHERE kaisai_date IS NULL ORDER BY id`;
 
 /** 整数の列(`1,2,3`)。値は D1 から読んだ整数だけ(整数でなければ投げる。利用者の入力は入らない)。空の配列は `NULL`(`IN (NULL)` は常に偽で、文として有効)。 */
 function intList(ids: readonly number[]): string {
@@ -89,6 +94,11 @@ function raceIdList(raceIds: readonly string[]): string {
     throw new TypeError("race_id の形が想定と違います");
   }
   return raceIds.length === 0 ? "NULL" : raceIds.map((id) => `'${id}'`).join(",");
+}
+
+/** 1 日ぶんの馬の SQL(Issue #628)。`analysisIds` はその日の分析の id。全件の読みと同じ列・同じ並びで、`WHERE` だけを足したもの(主キーの先頭で引く)。 */
+export function verifyDayHorsesSql(analysisIds: readonly number[]): string {
+  return `${HORSES_HEAD} WHERE analysis_id IN (${intList(analysisIds)}) ${HORSES_ORDER}`;
 }
 
 /**
