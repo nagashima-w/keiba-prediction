@@ -207,6 +207,28 @@ describe("差分の集計の並走: 差分の読みと突き合わせ", () => {
     expect(check(t.kv)).toMatchObject({ mismatched: 0 });
   });
 
+  it.each([
+    ["開催日が NULL から日付に変わる", null, "20260105"],
+    ["日付から別の日付に変わる", "20260102", "20260105"],
+  ] as const)("%s: 旧い日と新しい日の両方を作り直し、二重に数えず、突き合わせが一致する", async (_name, from, to) => {
+    const rows = manyDayRows(5, 3);
+    const t = setup(rows);
+    await t.core.getReport("all");
+    await t.drain();
+    expect(check(t.kv)).toMatchObject({ checked: 1, matched: 1 });
+    const target = rows.analyses.find((a) => (a.kaisaiDate ?? null) === from)!.raceId;
+    // 前提: そのレースの分析は 1 日にしか無く、新しい日にまだ無い
+    expect(rows.analyses.filter((a) => a.raceId === target).every((a) => (a.kaisaiDate ?? null) === from)).toBe(true);
+    t.db.rows = { ...rows, analyses: rows.analyses.map((a) => (a.raceId === target ? { ...a, kaisaiDate: to } : a)) };
+    t.touch(target); // 印の日は新しい日
+    t.log.readDay.length = 0;
+    t.clock.now += 6 * 60_000;
+    await t.core.getReport("all");
+    await t.drain();
+    expect(new Set(t.log.readDay)).toEqual(new Set([from ?? NO_DATE_DAY, to]));
+    expect(check(t.kv)).toMatchObject({ checked: 2, matched: 2, mismatched: 0 });
+  });
+
   it("印の無い変更(結果の行の書き換え)は、突き合わせのずれとして見つかる。警告に出し、診断に件数が出る。画面の集計はそのまま返す", async () => {
     const rows = manyDayRows(3, 4);
     const t = setup(rows);

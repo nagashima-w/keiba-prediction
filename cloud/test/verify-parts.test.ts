@@ -61,6 +61,9 @@ describe("chunkBySize / encodeDay(1 値の大きさを上限以下に保つ)", (
     const chunks = chunkBySize([{ a: 1 }, { pad: "x".repeat(500) }, { b: 2 }], 100);
     expect(chunks).toEqual([[{ a: 1 }], [{ pad: "x".repeat(500) }], [{ b: 2 }]]);
   });
+  it("先頭の項目が上限を超えるときも、空の塊を作らない", () => {
+    expect(chunkBySize([{ pad: "x".repeat(500) }, { a: 1 }], 100)).toEqual([[{ pad: "x".repeat(500) }], [{ a: 1 }]]);
+  });
   it("encodeDay: 上限を小さくすると 1 種類が複数のキーに分かれ、decodeDay で元に戻る。キーの値はどれも上限以下", () => {
     const rows = manyDayRows(1, 12);
     const day = rows.analyses[0]!.kaisaiDate!;
@@ -87,6 +90,7 @@ describe("compareAssembled(件数・金額・集合・区間の端は完全一�
   it.each([
     ["同じ", { a: 1, b: [1, 2], c: "x" }, { a: 1, b: [1, 2], c: "x" }, []],
     ["整数の違いは許さない", { a: 100 }, { a: 101 }, ["a"]],
+    ["大きな整数の 1 の違いも許さない(相対では 1e-12 以内でも、整数は完全一致)", { a: 1e15 }, { a: 1e15 + 1 }, ["a"]],
     ["小数は相対 1e-12 以内なら同じ", { a: 0.1234567890123 }, { a: 0.1234567890123 * (1 + 5e-13) }, []],
     ["小数は相対 1e-12 を超えるとずれ", { a: 0.1234567890123 }, { a: 0.1234567890123 * (1 + 3e-12) }, ["a"]],
     ["区間の端(キー名に bound)は小数でも完全一致", { lowerBound: 0.5 }, { lowerBound: 0.5 * (1 + 1e-14) }, ["lowerBound"]],
