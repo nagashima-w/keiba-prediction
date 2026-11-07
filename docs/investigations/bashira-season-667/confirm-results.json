@@ -1,0 +1,1113 @@
+{
+ "holm_alpha": 0.05,
+ "k": 11,
+ "baselines": {
+  "ALL": {
+   "1-3": {
+    "n": 52792,
+    "win_rate": 0.2212,
+    "top3_rate": 0.5297,
+    "win_roi": 0.79,
+    "place_roi": 0.833
+   },
+   "4-9": {
+    "n": 102761,
+    "win_rate": 0.0509,
+    "top3_rate": 0.2055,
+    "win_roi": 0.753,
+    "place_roi": 0.762
+   },
+   "10+": {
+    "n": 84451,
+    "win_rate": 0.0084,
+    "top3_rate": 0.0445,
+    "win_roi": 0.611,
+    "place_roi": 0.624
+   }
+  },
+  "H34": {
+   "1-3": {
+    "n": 19500,
+    "win_rate": 0.2114,
+    "top3_rate": 0.5079,
+    "win_roi": 0.78,
+    "place_roi": 0.81
+   },
+   "4-9": {
+    "n": 42221,
+    "win_rate": 0.0492,
+    "top3_rate": 0.1991,
+    "win_roi": 0.738,
+    "place_roi": 0.749
+   },
+   "10+": {
+    "n": 38660,
+    "win_rate": 0.0082,
+    "top3_rate": 0.0427,
+    "win_roi": 0.582,
+    "place_roi": 0.601
+   }
+  },
+  "HEAVY": {
+   "1-3": {
+    "n": 6330,
+    "win_rate": 0.218,
+    "top3_rate": 0.5152,
+    "win_roi": 0.792,
+    "place_roi": 0.823
+   },
+   "4-9": {
+    "n": 12319,
+    "win_rate": 0.051,
+    "top3_rate": 0.2102,
+    "win_roi": 0.728,
+    "place_roi": 0.797
+   },
+   "10+": {
+    "n": 10386,
+    "win_rate": 0.0092,
+    "top3_rate": 0.046,
+    "win_roi": 0.708,
+    "place_roi": 0.621
+   }
+  },
+  "MIX": {
+   "1-3": {
+    "n": 16657,
+    "win_rate": 0.2138,
+    "top3_rate": 0.5062,
+    "win_roi": 0.779,
+    "place_roi": 0.823
+   },
+   "4-9": {
+    "n": 32937,
+    "win_rate": 0.0526,
+    "top3_rate": 0.2105,
+    "win_roi": 0.753,
+    "place_roi": 0.772
+   },
+   "10+": {
+    "n": 26510,
+    "win_rate": 0.0105,
+    "top3_rate": 0.0505,
+    "win_roi": 0.649,
+    "place_roi": 0.639
+   }
+  }
+ },
+ "candidates": [
+  {
+   "id": "S01",
+   "label": "夏(6〜8 月)の牝馬",
+   "baseline": "H34",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 9402,
+    "obs": 2001,
+    "exp": 1818.8,
+    "ratio": 1.1,
+    "z": 4.86,
+    "q_bh": 5.7e-05,
+    "win_roi": 0.84,
+    "place_roi": 0.83,
+    "avg_odds": 24.3
+   },
+   "confirm": {
+    "n": 11958,
+    "obs": 2557,
+    "exp": 2319.8,
+    "ratio": 1.102,
+    "z": 5.6,
+    "same_direction": true,
+    "p_one_sided": 1.0717590258310968e-08,
+    "win_roi": 0.793,
+    "place_roi": 0.798,
+    "avg_odds": 26.3,
+    "p_holm": 0.0
+   },
+   "survived": true
+  },
+  {
+   "id": "S01",
+   "label": "夏(6〜8 月)の牝馬",
+   "baseline": "H34",
+   "band": "10+",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 8624,
+    "obs": 93,
+    "exp": 68.1,
+    "ratio": 1.365,
+    "z": 3.03,
+    "q_bh": 0.021291,
+    "win_roi": 0.769,
+    "place_roi": 0.697,
+    "avg_odds": 143.0
+   },
+   "confirm": {
+    "n": 10077,
+    "obs": 96,
+    "exp": 74.4,
+    "ratio": 1.291,
+    "z": 2.52,
+    "same_direction": true,
+    "p_one_sided": 0.005867741715332567,
+    "win_roi": 0.627,
+    "place_roi": 0.666,
+    "avg_odds": 153.0,
+    "p_holm": 0.017603
+   },
+   "survived": true
+  },
+  {
+   "id": "S01",
+   "label": "夏(6〜8 月)の牝馬",
+   "baseline": "H34",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 8624,
+    "obs": 428,
+    "exp": 343.2,
+    "ratio": 1.247,
+    "z": 4.71,
+    "q_bh": 7.9e-05,
+    "win_roi": 0.769,
+    "place_roi": 0.697,
+    "avg_odds": 143.0
+   },
+   "confirm": {
+    "n": 10077,
+    "obs": 482,
+    "exp": 398.9,
+    "ratio": 1.208,
+    "z": 4.28,
+    "same_direction": true,
+    "p_one_sided": 9.344665670196367e-06,
+    "win_roi": 0.627,
+    "place_roi": 0.666,
+    "avg_odds": 153.0,
+    "p_holm": 6.5e-05
+   },
+   "survived": true
+  },
+  {
+   "id": "S02",
+   "label": "冬(12〜2 月)の牝馬",
+   "baseline": "H34",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "under",
+   "explore": {
+    "n": 3582,
+    "obs": 672,
+    "exp": 767.7,
+    "ratio": 0.875,
+    "z": -3.97,
+    "q_bh": 0.001409,
+    "win_roi": 0.743,
+    "place_roi": 0.784,
+    "avg_odds": 4.7
+   },
+   "confirm": {
+    "n": 4374,
+    "obs": 879,
+    "exp": 932.4,
+    "ratio": 0.943,
+    "z": -2.01,
+    "same_direction": true,
+    "p_one_sided": 0.022215594429431502,
+    "win_roi": 0.737,
+    "place_roi": 0.786,
+    "avg_odds": 4.6,
+    "p_holm": 0.029257
+   },
+   "survived": true
+  },
+  {
+   "id": "S02",
+   "label": "冬(12〜2 月)の牝馬",
+   "baseline": "H34",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 3582,
+    "obs": 1749,
+    "exp": 1843.4,
+    "ratio": 0.949,
+    "z": -3.2,
+    "q_bh": 0.013241,
+    "win_roi": 0.743,
+    "place_roi": 0.784,
+    "avg_odds": 4.7
+   },
+   "confirm": {
+    "n": 4374,
+    "obs": 2130,
+    "exp": 2238.5,
+    "ratio": 0.952,
+    "z": -3.34,
+    "same_direction": true,
+    "p_one_sided": 0.00041889194945036984,
+    "win_roi": 0.737,
+    "place_roi": 0.786,
+    "avg_odds": 4.6,
+    "p_holm": 0.002094
+   },
+   "survived": true
+  },
+  {
+   "id": "S03",
+   "label": "夏(6〜8 月)の全馬",
+   "baseline": "ALL",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 18354,
+    "obs": 913,
+    "exp": 823.9,
+    "ratio": 1.108,
+    "z": 3.2,
+    "q_bh": 0.013241,
+    "win_roi": 0.688,
+    "place_roi": 0.686,
+    "avg_odds": 140.7
+   },
+   "confirm": {
+    "n": 21090,
+    "obs": 968,
+    "exp": 904.2,
+    "ratio": 1.071,
+    "z": 2.18,
+    "same_direction": true,
+    "p_one_sided": 0.01462873077598926,
+    "win_roi": 0.63,
+    "place_roi": 0.644,
+    "avg_odds": 149.8,
+    "p_holm": 0.029257
+   },
+   "survived": true
+  },
+  {
+   "id": "S09",
+   "label": "3 歳馬が古馬混合戦(3歳以上)に初めて出る",
+   "baseline": "MIX",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 3142,
+    "obs": 600,
+    "exp": 682.1,
+    "ratio": 0.88,
+    "z": -3.61,
+    "q_bh": 0.004463,
+    "win_roi": 0.788,
+    "place_roi": 0.689,
+    "avg_odds": 20.1
+   },
+   "confirm": {
+    "n": 3854,
+    "obs": 796,
+    "exp": 870.8,
+    "ratio": 0.914,
+    "z": -2.94,
+    "same_direction": true,
+    "p_one_sided": 0.0016410612341569999,
+    "win_roi": 0.716,
+    "place_roi": 0.753,
+    "avg_odds": 21.3,
+    "p_holm": 0.006564
+   },
+   "survived": true
+  },
+  {
+   "id": "S10",
+   "label": "3 歳馬の古馬混合戦(初めてに限らない)",
+   "baseline": "MIX",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 6490,
+    "obs": 1477,
+    "exp": 1361.1,
+    "ratio": 1.085,
+    "z": 3.59,
+    "q_bh": 0.004463,
+    "win_roi": 0.819,
+    "place_roi": 0.82,
+    "avg_odds": 4.4
+   },
+   "confirm": {
+    "n": 9545,
+    "obs": 2354,
+    "exp": 1795.2,
+    "ratio": 1.311,
+    "z": 14.87,
+    "same_direction": true,
+    "p_one_sided": 2.5806669890036386e-50,
+    "win_roi": 0.826,
+    "place_roi": 0.843,
+    "avg_odds": 4.2,
+    "p_holm": 0.0
+   },
+   "survived": true
+  },
+  {
+   "id": "S14",
+   "label": "前走で後方(馬場を問わない。S12 の対照)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 6202,
+    "obs": 3016,
+    "exp": 3146.9,
+    "ratio": 0.958,
+    "z": -3.38,
+    "q_bh": 0.00861,
+    "win_roi": 0.844,
+    "place_roi": 0.826,
+    "avg_odds": 5.0
+   },
+   "confirm": {
+    "n": 6459,
+    "obs": 3146,
+    "exp": 3290.3,
+    "ratio": 0.956,
+    "z": -3.66,
+    "same_direction": true,
+    "p_one_sided": 0.0001261076241384867,
+    "win_roi": 0.793,
+    "place_roi": 0.822,
+    "avg_odds": 5.0,
+    "p_holm": 0.000757
+   },
+   "survived": true
+  },
+  {
+   "id": "S14",
+   "label": "前走で後方(馬場を問わない。S12 の対照)",
+   "baseline": "ALL",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 34213,
+    "obs": 1327,
+    "exp": 1498.0,
+    "ratio": 0.886,
+    "z": -4.56,
+    "q_bh": 0.000125,
+    "win_roi": 0.661,
+    "place_roi": 0.614,
+    "avg_odds": 176.1
+   },
+   "confirm": {
+    "n": 36612,
+    "obs": 1358,
+    "exp": 1552.5,
+    "ratio": 0.875,
+    "z": -5.08,
+    "same_direction": true,
+    "p_one_sided": 1.887174341580603e-07,
+    "win_roi": 0.634,
+    "place_roi": 0.597,
+    "avg_odds": 190.7,
+    "p_holm": 2e-06
+   },
+   "survived": true
+  },
+  {
+   "id": "S16",
+   "label": "牝馬の牡牝混合戦(牝馬限定戦を除く)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 8883,
+    "obs": 4420,
+    "exp": 4665.7,
+    "ratio": 0.947,
+    "z": -5.33,
+    "q_bh": 1e-05,
+    "win_roi": 0.781,
+    "place_roi": 0.806,
+    "avg_odds": 4.7
+   },
+   "confirm": {
+    "n": 10054,
+    "obs": 4940,
+    "exp": 5361.8,
+    "ratio": 0.921,
+    "z": -8.6,
+    "same_direction": true,
+    "p_one_sided": 3.985804962848192e-18,
+    "win_roi": 0.762,
+    "place_roi": 0.794,
+    "avg_odds": 4.6,
+    "p_holm": 0.0
+   },
+   "survived": true
+  }
+ ],
+ "rows": [
+  {
+   "id": "C01",
+   "label": "対照: 奇数の馬番",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 26702,
+   "win_roi": 0.781,
+   "place_roi": 0.823,
+   "avg_odds": 4.5,
+   "win": {
+    "obs": 5835,
+    "exp": 5963.0,
+    "ratio": 0.979,
+    "z": -1.92,
+    "p_two_sided": 0.05438948963155468
+   },
+   "top3": {
+    "obs": 13990,
+    "exp": 14283.6,
+    "ratio": 0.979,
+    "z": -3.68,
+    "p_two_sided": 0.00023550719574680706
+   }
+  },
+  {
+   "id": "C01",
+   "label": "対照: 奇数の馬番",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 52728,
+   "win_roi": 0.738,
+   "place_roi": 0.742,
+   "avg_odds": 27.8,
+   "win": {
+    "obs": 2613,
+    "exp": 2744.2,
+    "ratio": 0.952,
+    "z": -2.59,
+    "p_two_sided": 0.009567520758694268
+   },
+   "top3": {
+    "obs": 10518,
+    "exp": 11125.7,
+    "ratio": 0.945,
+    "z": -6.63,
+    "p_two_sided": 3.464872474930407e-11
+   }
+  },
+  {
+   "id": "C01",
+   "label": "対照: 奇数の馬番",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 43416,
+   "win_roi": 0.521,
+   "place_roi": 0.592,
+   "avg_odds": 160.4,
+   "win": {
+    "obs": 320,
+    "exp": 413.2,
+    "ratio": 0.774,
+    "z": -4.62,
+    "p_two_sided": 3.884458132530551e-06
+   },
+   "top3": {
+    "obs": 1875,
+    "exp": 1992.6,
+    "ratio": 0.941,
+    "z": -2.72,
+    "p_two_sided": 0.006584809941460945
+   }
+  },
+  {
+   "id": "S01",
+   "label": "夏(6〜8 月)の牝馬",
+   "baseline": "H34",
+   "band": "1-3",
+   "n": 5724,
+   "win_roi": 0.849,
+   "place_roi": 0.836,
+   "avg_odds": 4.5,
+   "win": {
+    "obs": 1310,
+    "exp": 1188.6,
+    "ratio": 1.102,
+    "z": 4.03,
+    "p_two_sided": 5.585613344222965e-05
+   },
+   "top3": {
+    "obs": 2986,
+    "exp": 2915.8,
+    "ratio": 1.024,
+    "z": 1.89,
+    "p_two_sided": 0.05869944541364821
+   }
+  },
+  {
+   "id": "S01",
+   "label": "夏(6〜8 月)の牝馬",
+   "baseline": "H34",
+   "band": "4-9",
+   "n": 11958,
+   "win_roi": 0.793,
+   "place_roi": 0.798,
+   "avg_odds": 26.3,
+   "win": {
+    "obs": 652,
+    "exp": 565.1,
+    "ratio": 1.154,
+    "z": 3.77,
+    "p_two_sided": 0.0001616330228695336
+   },
+   "top3": {
+    "obs": 2557,
+    "exp": 2319.8,
+    "ratio": 1.102,
+    "z": 5.6,
+    "p_two_sided": 2.1326521805646708e-08
+   }
+  },
+  {
+   "id": "S01",
+   "label": "夏(6〜8 月)の牝馬",
+   "baseline": "H34",
+   "band": "10+",
+   "n": 10077,
+   "win_roi": 0.627,
+   "place_roi": 0.666,
+   "avg_odds": 153.0,
+   "win": {
+    "obs": 96,
+    "exp": 74.4,
+    "ratio": 1.291,
+    "z": 2.52,
+    "p_two_sided": 0.011678635277975323
+   },
+   "top3": {
+    "obs": 482,
+    "exp": 398.9,
+    "ratio": 1.208,
+    "z": 4.28,
+    "p_two_sided": 1.900828347923829e-05
+   }
+  },
+  {
+   "id": "S02",
+   "label": "冬(12〜2 月)の牝馬",
+   "baseline": "H34",
+   "band": "1-3",
+   "n": 4374,
+   "win_roi": 0.737,
+   "place_roi": 0.786,
+   "avg_odds": 4.6,
+   "win": {
+    "obs": 879,
+    "exp": 932.4,
+    "ratio": 0.943,
+    "z": -2.01,
+    "p_two_sided": 0.04431214878012458
+   },
+   "top3": {
+    "obs": 2130,
+    "exp": 2238.5,
+    "ratio": 0.952,
+    "z": -3.34,
+    "p_two_sided": 0.0008380081661992002
+   }
+  },
+  {
+   "id": "S02",
+   "label": "冬(12〜2 月)の牝馬",
+   "baseline": "H34",
+   "band": "4-9",
+   "n": 9685,
+   "win_roi": 0.657,
+   "place_roi": 0.709,
+   "avg_odds": 27.7,
+   "win": {
+    "obs": 433,
+    "exp": 483.3,
+    "ratio": 0.896,
+    "z": -2.36,
+    "p_two_sided": 0.018090786076135786
+   },
+   "top3": {
+    "obs": 1822,
+    "exp": 1939.7,
+    "ratio": 0.939,
+    "z": -3.05,
+    "p_two_sided": 0.002284429385288592
+   }
+  },
+  {
+   "id": "S02",
+   "label": "冬(12〜2 月)の牝馬",
+   "baseline": "H34",
+   "band": "10+",
+   "n": 9671,
+   "win_roi": 0.558,
+   "place_roi": 0.532,
+   "avg_odds": 175.4,
+   "win": {
+    "obs": 67,
+    "exp": 81.1,
+    "ratio": 0.826,
+    "z": -1.58,
+    "p_two_sided": 0.11492544544472902
+   },
+   "top3": {
+    "obs": 372,
+    "exp": 417.7,
+    "ratio": 0.891,
+    "z": -2.3,
+    "p_two_sided": 0.021298552794647672
+   }
+  },
+  {
+   "id": "S03",
+   "label": "夏(6〜8 月)の全馬",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 13564,
+   "win_roi": 0.788,
+   "place_roi": 0.823,
+   "avg_odds": 4.5,
+   "win": {
+    "obs": 2994,
+    "exp": 3025.8,
+    "ratio": 0.989,
+    "z": -0.67,
+    "p_two_sided": 0.5028646522923405
+   },
+   "top3": {
+    "obs": 7085,
+    "exp": 7290.4,
+    "ratio": 0.972,
+    "z": -3.61,
+    "p_two_sided": 0.00030539291509749044
+   }
+  },
+  {
+   "id": "S03",
+   "label": "夏(6〜8 月)の全馬",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 26404,
+   "win_roi": 0.746,
+   "place_roi": 0.773,
+   "avg_odds": 26.1,
+   "win": {
+    "obs": 1354,
+    "exp": 1324.0,
+    "ratio": 1.023,
+    "z": 0.85,
+    "p_two_sided": 0.39358533427617914
+   },
+   "top3": {
+    "obs": 5539,
+    "exp": 5359.2,
+    "ratio": 1.034,
+    "z": 2.81,
+    "p_two_sided": 0.004906054894510887
+   }
+  },
+  {
+   "id": "S03",
+   "label": "夏(6〜8 月)の全馬",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 21090,
+   "win_roi": 0.63,
+   "place_roi": 0.644,
+   "avg_odds": 149.8,
+   "win": {
+    "obs": 189,
+    "exp": 166.9,
+    "ratio": 1.132,
+    "z": 1.72,
+    "p_two_sided": 0.08594412618632587
+   },
+   "top3": {
+    "obs": 968,
+    "exp": 904.2,
+    "ratio": 1.071,
+    "z": 2.18,
+    "p_two_sided": 0.028907930457829027
+   }
+  },
+  {
+   "id": "S04",
+   "label": "冬(12〜2 月)の全馬",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 12554,
+   "win_roi": 0.799,
+   "place_roi": 0.836,
+   "avg_odds": 4.5,
+   "win": {
+    "obs": 2793,
+    "exp": 2763.8,
+    "ratio": 1.011,
+    "z": 0.64,
+    "p_two_sided": 0.5196605672907815
+   },
+   "top3": {
+    "obs": 6612,
+    "exp": 6641.2,
+    "ratio": 0.996,
+    "z": -0.53,
+    "p_two_sided": 0.5943982066420808
+   }
+  },
+  {
+   "id": "S04",
+   "label": "冬(12〜2 月)の全馬",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 24707,
+   "win_roi": 0.744,
+   "place_roi": 0.759,
+   "avg_odds": 27.6,
+   "win": {
+    "obs": 1239,
+    "exp": 1261.8,
+    "ratio": 0.982,
+    "z": -0.66,
+    "p_two_sided": 0.5073412238215697
+   },
+   "top3": {
+    "obs": 5032,
+    "exp": 5081.4,
+    "ratio": 0.99,
+    "z": -0.79,
+    "p_two_sided": 0.4275411673222643
+   }
+  },
+  {
+   "id": "S04",
+   "label": "冬(12〜2 月)の全馬",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 21586,
+   "win_roi": 0.577,
+   "place_roi": 0.594,
+   "avg_odds": 171.5,
+   "win": {
+    "obs": 164,
+    "exp": 184.1,
+    "ratio": 0.891,
+    "z": -1.49,
+    "p_two_sided": 0.1356839175795897
+   },
+   "top3": {
+    "obs": 929,
+    "exp": 953.7,
+    "ratio": 0.974,
+    "z": -0.82,
+    "p_two_sided": 0.410338908859962
+   }
+  },
+  {
+   "id": "S09",
+   "label": "3 歳馬が古馬混合戦(3歳以上)に初めて出る",
+   "baseline": "MIX",
+   "band": "1-3",
+   "n": 3330,
+   "win_roi": 0.84,
+   "place_roi": 0.836,
+   "avg_odds": 4.1,
+   "win": {
+    "obs": 835,
+    "exp": 731.8,
+    "ratio": 1.141,
+    "z": 4.42,
+    "p_two_sided": 9.968212193552031e-06
+   },
+   "top3": {
+    "obs": 1780,
+    "exp": 1745.6,
+    "ratio": 1.02,
+    "z": 1.22,
+    "p_two_sided": 0.22398757799495053
+   }
+  },
+  {
+   "id": "S09",
+   "label": "3 歳馬が古馬混合戦(3歳以上)に初めて出る",
+   "baseline": "MIX",
+   "band": "4-9",
+   "n": 3854,
+   "win_roi": 0.716,
+   "place_roi": 0.753,
+   "avg_odds": 21.3,
+   "win": {
+    "obs": 210,
+    "exp": 216.8,
+    "ratio": 0.969,
+    "z": -0.48,
+    "p_two_sided": 0.6336996669761565
+   },
+   "top3": {
+    "obs": 796,
+    "exp": 870.8,
+    "ratio": 0.914,
+    "z": -2.94,
+    "p_two_sided": 0.0033208685640525146
+   }
+  },
+  {
+   "id": "S09",
+   "label": "3 歳馬が古馬混合戦(3歳以上)に初めて出る",
+   "baseline": "MIX",
+   "band": "10+",
+   "n": 1861,
+   "win_roi": 0.823,
+   "place_roi": 0.55,
+   "avg_odds": 127.6,
+   "win": {
+    "obs": 23,
+    "exp": 19.0,
+    "ratio": 1.211,
+    "z": 0.93,
+    "p_two_sided": 0.3538498304346351
+   },
+   "top3": {
+    "obs": 87,
+    "exp": 95.0,
+    "ratio": 0.915,
+    "z": -0.85,
+    "p_two_sided": 0.39415322362408434
+   }
+  },
+  {
+   "id": "S10",
+   "label": "3 歳馬の古馬混合戦(初めてに限らない)",
+   "baseline": "MIX",
+   "band": "1-3",
+   "n": 9545,
+   "win_roi": 0.826,
+   "place_roi": 0.843,
+   "avg_odds": 4.2,
+   "win": {
+    "obs": 2354,
+    "exp": 1795.2,
+    "ratio": 1.311,
+    "z": 14.87,
+    "p_two_sided": 5.473497997581051e-50
+   },
+   "top3": {
+    "obs": 5145,
+    "exp": 4760.1,
+    "ratio": 1.081,
+    "z": 7.99,
+    "p_two_sided": 1.3390028176096784e-15
+   }
+  },
+  {
+   "id": "S10",
+   "label": "3 歳馬の古馬混合戦(初めてに限らない)",
+   "baseline": "MIX",
+   "band": "4-9",
+   "n": 10869,
+   "win_roi": 0.788,
+   "place_roi": 0.762,
+   "avg_odds": 20.4,
+   "win": {
+    "obs": 654,
+    "exp": 559.8,
+    "ratio": 1.168,
+    "z": 4.11,
+    "p_two_sided": 3.974690528249704e-05
+   },
+   "top3": {
+    "obs": 2354,
+    "exp": 2479.5,
+    "ratio": 0.949,
+    "z": -2.93,
+    "p_two_sided": 0.003378084479856624
+   }
+  },
+  {
+   "id": "S10",
+   "label": "3 歳馬の古馬混合戦(初めてに限らない)",
+   "baseline": "MIX",
+   "band": "10+",
+   "n": 5035,
+   "win_roi": 0.804,
+   "place_roi": 0.63,
+   "avg_odds": 116.9,
+   "win": {
+    "obs": 66,
+    "exp": 45.7,
+    "ratio": 1.446,
+    "z": 3.03,
+    "p_two_sided": 0.002436106245681243
+   },
+   "top3": {
+    "obs": 250,
+    "exp": 259.4,
+    "ratio": 0.964,
+    "z": -0.61,
+    "p_two_sided": 0.544440873102956
+   }
+  },
+  {
+   "id": "S14",
+   "label": "前走で後方(馬場を問わない。S12 の対照)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 6459,
+   "win_roi": 0.793,
+   "place_roi": 0.822,
+   "avg_odds": 5.0,
+   "win": {
+    "obs": 1246,
+    "exp": 1317.9,
+    "ratio": 0.945,
+    "z": -2.27,
+    "p_two_sided": 0.023358882492177994
+   },
+   "top3": {
+    "obs": 3146,
+    "exp": 3290.3,
+    "ratio": 0.956,
+    "z": -3.66,
+    "p_two_sided": 0.00025673563490434407
+   }
+  },
+  {
+   "id": "S14",
+   "label": "前走で後方(馬場を問わない。S12 の対照)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 24896,
+   "win_roi": 0.795,
+   "place_roi": 0.748,
+   "avg_odds": 34.2,
+   "win": {
+    "obs": 1158,
+    "exp": 1150.7,
+    "ratio": 1.006,
+    "z": 0.22,
+    "p_two_sided": 0.8242719756554182
+   },
+   "top3": {
+    "obs": 4603,
+    "exp": 4792.1,
+    "ratio": 0.961,
+    "z": -3.1,
+    "p_two_sided": 0.0019144126362720222
+   }
+  },
+  {
+   "id": "S14",
+   "label": "前走で後方(馬場を問わない。S12 の対照)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 36612,
+   "win_roi": 0.634,
+   "place_roi": 0.597,
+   "avg_odds": 190.7,
+   "win": {
+    "obs": 252,
+    "exp": 283.0,
+    "ratio": 0.89,
+    "z": -1.86,
+    "p_two_sided": 0.063534051831966
+   },
+   "top3": {
+    "obs": 1358,
+    "exp": 1552.5,
+    "ratio": 0.875,
+    "z": -5.08,
+    "p_two_sided": 3.695852075380001e-07
+   }
+  },
+  {
+   "id": "S16",
+   "label": "牝馬の牡牝混合戦(牝馬限定戦を除く)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 10054,
+   "win_roi": 0.762,
+   "place_roi": 0.794,
+   "avg_odds": 4.6,
+   "win": {
+    "obs": 2042,
+    "exp": 2227.7,
+    "ratio": 0.917,
+    "z": -4.56,
+    "p_two_sided": 5.051775606954531e-06
+   },
+   "top3": {
+    "obs": 4940,
+    "exp": 5361.8,
+    "ratio": 0.921,
+    "z": -8.6,
+    "p_two_sided": 7.741927260206373e-18
+   }
+  },
+  {
+   "id": "S16",
+   "label": "牝馬の牡牝混合戦(牝馬限定戦を除く)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 23196,
+   "win_roi": 0.73,
+   "place_roi": 0.73,
+   "avg_odds": 28.4,
+   "win": {
+    "obs": 1123,
+    "exp": 1155.5,
+    "ratio": 0.972,
+    "z": -0.99,
+    "p_two_sided": 0.3229434304693508
+   },
+   "top3": {
+    "obs": 4533,
+    "exp": 4710.0,
+    "ratio": 0.962,
+    "z": -2.95,
+    "p_two_sided": 0.003165570111484505
+   }
+  },
+  {
+   "id": "S16",
+   "label": "牝馬の牡牝混合戦(牝馬限定戦を除く)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 21983,
+   "win_roi": 0.649,
+   "place_roi": 0.589,
+   "avg_odds": 163.7,
+   "win": {
+    "obs": 200,
+    "exp": 171.2,
+    "ratio": 1.168,
+    "z": 2.21,
+    "p_two_sided": 0.02698670677166245
+   },
+   "top3": {
+    "obs": 938,
+    "exp": 944.1,
+    "ratio": 0.994,
+    "z": -0.2,
+    "p_two_sided": 0.8380558727151495
+   }
+  }
+ ]
+}
