@@ -46,6 +46,7 @@
  */
 
 import { RECOMPUTE_RACES_SQL } from "./race-backfill-state";
+import { saveShadow } from "./analysis-shadow-repository";
 import { verifyRaceMarkByAnalysisIdsStatement, verifyRaceMarkStatement } from "./verify-race-mark";
 import { serializeMissed } from "./missed-bets";
 import {
@@ -113,6 +114,10 @@ export interface SaveResult {
    * `skipped`: R2 の操作回数の柵(Class A が無料枠の 10%)に達していたので、R2 に書かなかった(D1 に要約だけを保存。`detail_key` は NULL。Issue #173)。
    */
   readonly detail: "stored" | "failed" | "skipped";
+  /**
+   * 統計モデルの並走(Issue #649)の書き込みの結果。記録が無い分析は省略。`saved`: 書いた。`failed`: 書けなかった(分析の保存は成功。呼び出し側が警告にする)。
+   */
+  readonly shadow?: "saved" | "failed";
 }
 
 export type DetailStatus = "present" | "missing" | "none";
@@ -411,14 +416,16 @@ export class D1AnalysisStore implements AnalysisRepository {
     if (typeof id !== "number" || !(id > 0)) {
       throw new Error("analyses の採番 id を取得できませんでした");
     }
+    // 統計モデルの並走(Issue #649)は、分析の保存が成功して id が決まったあとに、別の呼び出しで書く。失敗しても分析の保存は成功のまま(戻り値で知らせ、呼び出し側が警告にする)。
+    const shadow = await this.saveShadowBestEffort(id, record);
     if (writeYm === null) {
-      return { id, detail: "skipped" };
+      return { id, detail: "skipped", ...shadow };
     }
     const key = detailKeyOf(id);
     for (let attempt = 0; attempt <= DETAIL_PUT_RETRIES; attempt += 1) {
       try {
         await this.bucket.put(key, body, { httpMetadata: { contentType: "application/gzip" } });
-        return { id, detail: "stored" };
+        return { id, detail: "stored", ...shadow };
       } catch {
         // 同じキー・同じ本文で再試行する(冪等)。
       }
@@ -428,7 +435,20 @@ export class D1AnalysisStore implements AnalysisRepository {
     } catch {
       // detail_key が残っても、読み出し側は R2 に無いオブジェクトを「詳細なし」として扱う。保存は失敗にしない。
     }
-    return { id, detail: "failed" };
+    return { id, detail: "failed", ...shadow };
+  }
+
+  /** 影の記録を書く。記録が無ければ何もしない({})。書けなくても例外にしない(`{ shadow: "failed" }`)。 */
+  private async saveShadowBestEffort(id: number, record: AnalysisRecord): Promise<{ shadow?: "saved" | "failed" }> {
+    if (record.shadow === undefined) {
+      return {};
+    }
+    try {
+      await saveShadow(this.db, id, record.shadow);
+      return { shadow: "saved" };
+    } catch {
+      return { shadow: "failed" };
+    }
   }
 
   async listAnalysisSummaries(filter: AnalysisListFilter = {}): Promise<AnalysisSummary[]> {

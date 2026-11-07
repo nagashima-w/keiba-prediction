@@ -18,6 +18,9 @@ const exception = (keys: readonly string[], reason: string, issue: string, tempB
 /** ここ(sql-plan-inventory.test.ts)で検査する: 実在の表の全走査が無い。一時の並べ替えを持つものは、範囲が絞られている理由つき。 */
 export const HERE: Record<string, PlanEntry> = {
   ...here([
+    // 統計モデルの並走の記録(Issue #649)。json_each から主キーの表への INSERT だけ(読み取りなし)。書き込みの行数は analysis-shadow.integration.test.ts が固定している。
+    "analysis-shadow-repository.ts::INSERT_SHADOW_HORSES_SQL",
+    "analysis-shadow-repository.ts::INSERT_SHADOW_PROBS_SQL",
     "analysis-close.ts::UPSERT_CLOSE_SQL",
     "analysis-close.ts::DELETE_CLOSE_BETS_SQL",
     "analysis-close.ts::INSERT_CLOSE_BETS_SQL",

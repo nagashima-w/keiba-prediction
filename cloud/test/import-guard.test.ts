@@ -208,11 +208,12 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
   const relCore = (f: string): string => path.relative(CORE_SRC, f).split(path.sep).join("/");
   const relOutside = (f: string): string => path.relative(path.join(CLOUD, ".."), f).split(path.sep).join("/");
 
-  it("前提(空振り防止): runAnalysis の閉包(core の analysis/ の13ファイル。うち analysis-types.ts は型だけで繋がる)を実際に辿れている。閉包は cloud/ と packages/core/src の外へ出ない(Issue #286・#287)", () => {
+  it("前提(空振り防止): runAnalysis の閉包(core の analysis/ の14ファイル。うち analysis-types.ts は型だけで繋がる)を実際に辿れている。閉包は cloud/ と packages/core/src の外へ出ない(Issue #286・#287)", () => {
     // Issue #286(#285 の段階A): 旧 app の8ファイル(main/ の4本と shared/ の4本)は packages/core/src/analysis/ へ移った。同じ8ファイルが閉包に入っていることを固定する。
     // Issue #296: 券種ごとの EV プラスの点数 `combo-stats.ts`(パイプラインが書き、クラウドの API が読む)が加わり 9 ファイルになった。
     // Issue #338: 締切の直前の再計算が使う `recompute-allocation.ts`(runAnalysis の EV・配分の部分を抽出した純関数。runAnalysis も呼ぶ)と `allocation-diff.ts`(配分の差分。API の応答が使う)が加わり 11 ファイルになった。
     // Issue #400(R-10a): runAnalysis を段ごとに分け、LLM の材料集め `analysis-llm-materials.ts` と、結果行・保存レコード・結果の組み立て `analysis-record.ts` が加わり 13 ファイルになった(いずれも analysis-pipeline.ts から値で import される)。
+    // Issue #649: 統計モデルの並走(影の計算)の記録を作る `shadow-record.ts`(runAnalysis が呼ぶ。計算本体は ev/stat-shadow*.ts)が加わり 14 ファイルになった。
     expect([...coreFiles].map(relCore).filter((f) => f.startsWith("analysis/")).sort()).toEqual(
       [
         "analysis/allocation-diff.ts",
@@ -227,6 +228,7 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
         "analysis/mixed-race-allocation.ts",
         "analysis/race-allocation.ts",
         "analysis/recompute-allocation.ts",
+        "analysis/shadow-record.ts",
         "analysis/venue-codes.ts",
       ],
     );

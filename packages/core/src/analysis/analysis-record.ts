@@ -30,6 +30,7 @@ import type { RaceIdVenueKind } from "../scraper/ids.js";
 import type { PriorResult } from "../scorer/prior.js";
 import type { DayBaba } from "../analyzer/day-baba.js";
 import type { HorseEv } from "../ev/expected-value.js";
+import type { ShadowRecord } from "../ev/stat-shadow-record.js";
 
 /** LLM分析後の1頭分(補正後確率と根拠)。 */
 export interface AdjustedHorse {
@@ -134,6 +135,8 @@ export interface BuildAnalysisRecordArgs {
   readonly evByUmaban: ReadonlyMap<number, HorseEv>;
   /** 配分提案。計算しない呼び出しでは undefined(キー自体を持たせない)。 */
   readonly allocation: AnalysisAllocationRecord | undefined;
+  /** 統計モデルの並走の記録(Issue #649)。作らなかった呼び出しでは undefined(キー自体を持たせない)。 */
+  readonly shadow?: ShadowRecord | undefined;
 }
 
 /** 保存レコード(`deps.saveAnalysis` に渡す `AnalysisRecord`)を組み立てる。 */
@@ -156,6 +159,7 @@ export function buildAnalysisRecord(args: BuildAnalysisRecordArgs): AnalysisReco
     adjustedByUmaban,
     evByUmaban,
     allocation,
+    shadow,
   } = args;
   return {
     raceId,
@@ -223,6 +227,8 @@ export function buildAnalysisRecord(args: BuildAnalysisRecordArgs): AnalysisReco
     // 配分提案(Issue #59)。deps.allocationSettings===nullのときはキー自体を持たせない
     // (`allocation: undefined`という明示的な代入はしない。wideCombo等と同じ流儀)。
     ...(allocation !== undefined ? { allocation } : {}),
+    // 統計モデルの並走(Issue #649)。作っていないときはキー自体を持たせない(従来の記録と同じ形)。
+    ...(shadow !== undefined ? { shadow } : {}),
   };
 }
 

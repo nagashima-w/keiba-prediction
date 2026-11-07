@@ -10,6 +10,7 @@
 import type { PredictionMark } from "../analyzer/parse-response.js";
 import type { ComboBetType } from "../scraper/combo-odds-key.js";
 import type { CourseType, RaceComboPayoutResult } from "../scraper/types.js";
+import type { ShadowRecord } from "./stat-shadow-record.js";
 
 /** 保存する分析の1頭分。 */
 export interface AnalysisHorseRecord {
@@ -126,6 +127,11 @@ export interface AnalysisRecord {
    * 1行書くのが#59の核心の不変条件。呼び出し側〈analysis/allocation-record.ts〉が保証する)。
    */
   readonly allocation?: AnalysisAllocationRecord;
+  /**
+   * 統計モデルの並走(影の計算。Issue #649)の記録。**買い目・配分・EV・画面・LLM には使わない**(別の表に記録するだけ)。
+   * 計算しなかった分析(`AnalysisPipelineDeps.shadow` が偽・予想オッズ〈yoso〉・地方)は省略。D1 の `analysis_shadow_*` の 2 表に、分析の保存の直後に別の呼び出しで書く(失敗しても分析の保存は成功のまま)。
+   */
+  readonly shadow?: ShadowRecord;
 }
 
 /**
