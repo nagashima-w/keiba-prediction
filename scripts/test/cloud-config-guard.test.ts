@@ -674,10 +674,27 @@ describe("wrangler.toml", () => {
   });
 
   it("設定値(チーム名・AUD・メール)を [vars] に置かず、secrets.required も使わない(未設定は Worker が 403 で受ける)", () => {
-    expect(tomlCode).not.toMatch(/^\[vars\]/m);
+    // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
+    const varsBody = /^\[vars\]\n((?:[^\[\n][^\n]*\n|\n)*)/m.exec(tomlCode)?.[1] ?? "";
+    const varKeys = [...varsBody.matchAll(/^([A-Z_]+)\s*=/gm)].map((m) => m[1]);
+    expect(varKeys.sort()).toEqual(["RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN"]);
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);
     expect(tomlCode).not.toMatch(/^\[secrets\]/m);
     expect(tomlCode).not.toMatch(/keep_vars/);
+  });
+
+  it("Issue #655: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 5000 ミリ秒。止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む)は変えない", () => {
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "5000"$/m);
+    expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
+    // 検出の確認(空振りでない): 止める値が書かれていれば拾える形
+    expect('RACE_ARCHIVE_NIGHTLY_LIMIT = "0"\n').toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
+    const code = readTextLf("cloud", "src", "race-archive-fetch-core.ts");
+    expect(code).toMatch(/export const ARCHIVE_WINDOW_END_MIN = 8 \* 60 \+ 30;/);
+    const doCode = readTextLf("cloud", "src", "race-archive-fetch-do.ts");
+    expect(doCode).toContain("this.env.RACE_ARCHIVE_WINDOW_END_MIN");
+    expect(doCode).toContain("this.env.RACE_ARCHIVE_SKIP_RACE_DAY");
+    expect(doCode).toContain("this.env.RACE_ARCHIVE_MIN_INTERVAL_MS");
+    expect(code).toMatch(/export const ARCHIVE_REQUEST_INTERVAL_MS = 5000;/);
   });
 
   it("本番の main は src/worker.ts で、smoke 専用エントリ(偽ソケット。smoke.ts が一時設定でだけ指す)を指さない", () => {
