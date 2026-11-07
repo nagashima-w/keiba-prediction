@@ -54,6 +54,11 @@ describe("horseRatios", () => {
     expect(hr[0]).toMatchObject({ ratio: 0.5, ninki: 1, types: ["wide", "win"] });
     expect(hr[1]).toMatchObject({ ratio: 1.5, types: ["wide"] });
   });
+  it("取消の馬は外す", () => {
+    const r = row({ bets: [] });
+    (r.result.horses[0] as { scratched: boolean | null }).scratched = true;
+    expect(horseRatios(r).map((h) => h.umaban)).toEqual([2]);
+  });
   it("買い目が無い行は全馬が入らなかった側", () => {
     const hr = horseRatios(row({ bets: [] }));
     expect(hr.length).toBe(2);

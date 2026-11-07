@@ -54,7 +54,7 @@ export function horseRatios(row: AllocationRaceRow): HorseRatio[] {
   const out: HorseRatio[] = [];
   for (const h of row.horses) {
     const f = fin.get(h.umaban);
-    if (f === undefined || f.scratched === 1 || !pos(h.win_odds) || !pos(f.win_odds) || h.ninki === null) continue;
+    if (f === undefined || f.scratched === true || !pos(h.win_odds) || !pos(f.win_odds) || h.ninki === null) continue;
     out.push({ umaban: h.umaban, ratio: f.win_odds / h.win_odds, ninki: h.ninki, types: bought.get(h.umaban) ?? [] });
   }
   return out;
@@ -91,7 +91,7 @@ export function betRecords(row: AllocationRaceRow): BetRecord[] {
     const o = j.judgment.outcome;
     const b = j.bet;
     if (o !== "hit" && o !== "miss") continue;
-    if (!pos(b.odds) || !Number.isFinite(b.ev)) continue;
+    if (!pos(b.odds) || b.ev === null || !Number.isFinite(b.ev)) continue;
     const p = b.ev / b.odds;
     const hit = o === "hit";
     const horses = keyHorses(b.bet_type, b.combo_key);
