@@ -119,7 +119,59 @@
 ## 8. 追記(探索の集計を引いたあと、確認の期間を引く前。2026-11-07)
 - 探索の期間の get_stats は 44 回(全馬 2・仮説 38・対照 3・事前登録の外 1)。牝馬の 1 回は値の綴りの誤りで入力検査に落ちたので引き直した(集計は走っていない)。
 - 生の応答は scratchpad の `b663/explore/<id>.json` に保存した(`avg_odds` だけ小数 3 桁に丸めて書き写した。他の列はそのまま)。
-- 芝→ダート替わり(H32)はダートの走だけなので、期待値は**ダートだけの全馬**から作る。これは全馬(ALL)から芝の全馬(ALL_TURF)を層ごとに引いて作れる(件数・払戻は加法的)ので、呼び出しは増やしていない。
+- 芝→ダート替わり(H32)はダートの走だけなので、期待値は**ダートだけの全馬**から作る。これは全馬(ALL)から芝の全馬(ALL_TURF)を層ごとに引いて作れる(件数・払戻は加法的)ので、呼び出しは増やしていない。ダート→芝替わり(H33)は芝の走だけなので、同じ理由で芝だけの全馬(ALL_TURF)を基準にする。
 - 市場取引 (市)(H29)は 2016〜2020 の走に 1 件も無かった(row_count 0)。検定の数には入れたまま(p=1)で、候補にはならない。
 - 走査した検定は 228(仮説 38 × 帯 3 × 指標 2)。候補は 31(仮説 21 件)。対照 3 件(芦毛・栗毛・土曜日)はどの帯・指標でも |z| < 1.5 で、方法が偽の差を出している様子は無い。
 - 確認の期間は、全馬 2 回 + 候補になった仮説 21 回 = 23 回を引く予定。
+
+## 9. 付録: 実際に送った get_stats の filters・past_runs(確認の期間を引いたあとの記録。2026-11-07)
+生の応答のファイルには条件が残っていないので、送った値をここに書き写す。全呼び出しに共通: `dimensions: ["race_condition","win_odds_rank"]`、`metrics: [count where official_result=1 → wins, count where official_result≤3 → top3, sum win_payout → win_return, sum place_payout → place_return, avg win_odds → avg_odds]`、`limit: 1000`、filters の基本 `race_meeting_date: {gte, lte}`(探索 2016-01-01〜2020-12-31、確認 2021-01-01〜2026-11-03)・`surface: ["芝","ダート"]`(芝のみの仮説は `"芝"`、H32 は `"ダート"`)・`career_starts: {gte: 1}`・`race_condition: ["未勝利","1勝クラス","2勝クラス","3勝クラス","オープン"]`。以下は仮説ごとに足した条件(JSON の値をそのまま)。
+
+| # | 足した filters / past_runs | 基準 |
+|---|---|---|
+| ALL | (基本のみ) | — |
+| ALL_TURF | `surface: "芝"` | — |
+| H01 | `is_jockey_change: true` | ALL |
+| H02 | `is_jockey_change_from_announced: true` | ALL |
+| H03 | `is_jockey_change: true`, `jockey_foreigner: ["日本在住の外国人","海外在住の外国人"]` | ALL |
+| H04 | `jockey_foreigner: "海外在住の外国人"` | ALL |
+| H05 | `horse_weight_difference_with_previous_race: {gte: 10}` | ALL |
+| H06 | `horse_weight_difference_with_previous_race: {lte: -10}` | ALL |
+| H07 | `horse_weight: {lte: 418}` | ALL |
+| H08 | `horse_weight: {gte: 520}` | ALL |
+| H09 | `days_since_last_race: {lte: 7}` | ALL |
+| H10 | `days_since_last_race: {gte: 8, lte: 14}` | ALL |
+| H11 | `days_since_last_race: {gte: 180}` | ALL |
+| H12 | `distance_change: {gte: 400}` | ALL |
+| H13 | `distance_change: {lte: -400}` | ALL |
+| H14 | `past_runs: {runs: 1, agg: "count", where: {is_fastest_last_3f: true, official_result: {gte: 4}}, value: {gte: 1}}` | ALL |
+| H15 | `past_runs: {runs: 1, agg: "count", where: {gain_from_corner4: {gte: 5}}, value: {gte: 1}}` | ALL |
+| H16 | `past_runs: {runs: 1, agg: "count", where: {win_odds_rank: 1, official_result: {gte: 4}}, value: {gte: 1}}` | ALL |
+| H17 | `prev_official_result: 1` | ALL |
+| H18 | `surface: "芝"`, `rail_type: ["B","C","D"]`, `bracket_number: {lte: 2}` | ALL_TURF |
+| H19 | `surface: "芝"`, `rail_type: ["B","C","D"]`, `bracket_number: {gte: 7}` | ALL_TURF |
+| H20 | `surface: "芝"`, `rail_type: "A"`, `bracket_number: {lte: 2}` | ALL_TURF |
+| H21 | `breeder_name: "ノーザンファーム"`(name_resolution: ノーザンファーム に解決) | ALL |
+| H22 | `breeder_name: "社台ファーム"`(社台ファーム に解決) | ALL |
+| H23 | `owner_name: "サンデーレーシング"`(有限会社 サンデーレーシング に解決) | ALL |
+| H24 | `owner_name: "キャロットファーム"`(有限会社 キャロットファーム に解決) | ALL |
+| H25 | `jockey_apprentice: ["☆ 1kg減","△ 2kg減","▲ 3kg減","★ 4kg減","◇ 2kg減"]` | ALL |
+| H26 | `jockey_sex: "女性"` | ALL |
+| H27 | `horse_symbol: ["(外)","(父)(外)","(外)(地)","(外)[地]","(父)(外)(地)","(父)(外)[地]","[外]","(父)[外]","(招)(外)"]` | ALL |
+| H28 | `horse_symbol: ["(地)","(父)(地)","(市)(地)","(外)(地)","(父)(市)(地)","[地]","(外)[地]","(父)[地]","(市)[地]","(父)(市)[地]","(父)(外)(地)","(父)(外)[地]"]` | ALL |
+| H29 | `horse_symbol: ["(市)","(父)(市)","(市)(地)","(父)(市)(地)","(招)(市)","(招)(父)(市)","(市)[地]","(父)(市)[地]"]`(row_count 0) | ALL |
+| H30 | `trainer_east_west: "西"`, `race_track: ["東京","中山","新潟","福島"]` | ALL |
+| H31 | `trainer_east_west: "東"`, `race_track: ["京都","阪神","中京","小倉"]` | ALL |
+| H32 | `surface: "ダート"`, `prev_surface: "芝"` | ALL_DIRT(= ALL − ALL_TURF) |
+| H33 | `surface: "芝"`, `prev_surface: "ダート"` | ALL_TURF |
+| H34 | `horse_sex: "牝馬"` | ALL |
+| H35 | `horse_sex: "セン馬"` | ALL |
+| H36 | `horse_age: {gte: 7}` | ALL |
+| H37 | `bracket_number: 1` | ALL |
+| H38 | `bracket_number: 8` | ALL |
+| C01 | `coat_color: "芦毛"` | ALL |
+| C02 | `coat_color: "栗毛"` | ALL |
+| C03 | `day_of_the_week: "土曜日"` | ALL |
+| X01 | `blinker: true`(事前登録の外) | ALL |
+
+確認の期間で引いたのは ALL・ALL_TURF と、候補になった H01・H03・H07・H08・H10・H11・H12・H15・H19・H20・H21・H25・H26・H28・H30・H31・H32・H33・H34・H35・H36(条件は上と同じで、期間だけ変えた)。H27 と H28 の値は (外)(地) など 4 つが重なる(どちらにも入れた)。
