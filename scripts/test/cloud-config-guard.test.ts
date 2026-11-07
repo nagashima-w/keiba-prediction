@@ -100,10 +100,10 @@ describe("wrangler.toml", () => {
     const blocks = [...tomlCode.matchAll(/^\[\[migrations\]\]\n((?:(?!\[)[^\n]*\n?)*)/gm)].map((m) => m[1]!);
     const field = (body: string, key: string): string | null => new RegExp(`^${key} = \\[([^\\]]*)\\]$`, "m").exec(body)?.[1] ?? null;
     const tagOf = (body: string): string | null => /^tag = "(v\d+)"$/m.exec(body)?.[1] ?? null;
-    // 前提: migration を実際に読めている(空振りでない)。v1〜v12 の 12 ブロック
-    expect(blocks.length, "migration ブロックの数(v1〜v12)").toBe(12);
-    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12"]);
-    // 追加(new_sqlite_classes)は v1〜v8・v10・v11 の各 1 クラス。v3 の CloudMigration は残す(v9 の deleted_classes が指す先行の migration。wrangler が同じ toml 内で存在を検査する)
+    // 前提: migration を実際に読めている(空振りでない)。v1〜v13 の 13 ブロック
+    expect(blocks.length, "migration ブロックの数(v1〜v13)").toBe(13);
+    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13"]);
+    // 追加(new_sqlite_classes)は v1〜v8・v10〜v13 の各 1 クラス。v3 の CloudMigration は残す(v9 の deleted_classes が指す先行の migration。wrangler が同じ toml 内で存在を検査する)
     expect(blocks.map((b) => field(b, "new_sqlite_classes"))).toEqual([
       '"NetkeibaGate"',
       '"RaceDay"',
@@ -117,9 +117,10 @@ describe("wrangler.toml", () => {
       '"AllocationExportDO"',
       '"RaceArchiveFetchDO"',
       '"RaceArchiveRunsDO"',
+      '"RaceMarketEdgeDO"',
     ]);
     // 削除(deleted_classes)は v9 の 1 回だけで、中身は CloudMigration ちょうど 1 クラス。他のクラスの削除は禁じる
-    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"', null, null, null]);
+    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"', null, null, null, null]);
     expect((tomlCode.match(/deleted_classes/g) ?? []).length, "deleted_classes は toml 全体で 1 回").toBe(1);
     // v9 は削除だけ(同じブロックに追加・改名・移管を混ぜない)
     expect(blocks[8]!.trim().split("\n")).toEqual(['tag = "v9"', 'deleted_classes = ["CloudMigration"]']);
@@ -146,15 +147,19 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "RaceArchiveFetchDO"$/m);
     expect(tomlCode).toMatch(/^name = "RACE_ARCHIVE_RUNS"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceArchiveRunsDO"$/m);
+    expect(tomlCode).toMatch(/^name = "RACE_MARKET_EDGE"$/m);
+    expect(tomlCode).toMatch(/^class_name = "RaceMarketEdgeDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|transferred_classes|new_classes)\s*=/m);
-    // DO のバインディングはちょうど9つ(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT・ALLOCATION_EXPORT・RACE_ARCHIVE_FETCH〈Issue #554〉。Issue #394 で CLOUD_MIGRATION を外し、Issue #463 で ALLOCATION_EXPORT を足した)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(10);
+    // DO のバインディングはちょうど11(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT・ALLOCATION_EXPORT・RACE_ARCHIVE_FETCH〈Issue #554〉・RACE_ARCHIVE_RUNS〈Issue #590〉・RACE_MARKET_EDGE〈Issue #642〉。Issue #394 で CLOUD_MIGRATION を外し、Issue #463 で ALLOCATION_EXPORT を足した)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(11);
     // v10 は追加だけ(同じブロックに削除・改名・移管を混ぜない)
     expect(blocks[9]!.trim().split("\n")).toEqual(['tag = "v10"', 'new_sqlite_classes = ["AllocationExportDO"]']);
     // v11 も追加だけ(Issue #554。過去の結果の取得の DO)
     expect(blocks[10]!.trim().split("\n")).toEqual(['tag = "v11"', 'new_sqlite_classes = ["RaceArchiveFetchDO"]']);
     // v12 も追加だけ(Issue #590。過去の結果の毎晩の変換の DO)
     expect(blocks[11]!.trim().split("\n")).toEqual(['tag = "v12"', 'new_sqlite_classes = ["RaceArchiveRunsDO"]']);
+    // v13 も追加だけ(Issue #642。騎手・調教師の指標の DO)
+    expect(blocks[12]!.trim().split("\n")).toEqual(['tag = "v13"', 'new_sqlite_classes = ["RaceMarketEdgeDO"]']);
   });
 
   it("Issue #206・#249: cron はちょうど2本で `0 12 * * *`(UTC 12:00 = JST 21:00)と `0 14 * * *`(UTC 14:00 = JST 23:00)。朝 9 時の定時実行は無い。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -669,10 +674,27 @@ describe("wrangler.toml", () => {
   });
 
   it("設定値(チーム名・AUD・メール)を [vars] に置かず、secrets.required も使わない(未設定は Worker が 403 で受ける)", () => {
-    expect(tomlCode).not.toMatch(/^\[vars\]/m);
+    // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
+    const varsBody = /^\[vars\]\n((?:[^\[\n][^\n]*\n|\n)*)/m.exec(tomlCode)?.[1] ?? "";
+    const varKeys = [...varsBody.matchAll(/^([A-Z_]+)\s*=/gm)].map((m) => m[1]);
+    expect(varKeys.sort()).toEqual(["RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN"]);
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);
     expect(tomlCode).not.toMatch(/^\[secrets\]/m);
     expect(tomlCode).not.toMatch(/keep_vars/);
+  });
+
+  it("Issue #655: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 5000 ミリ秒。止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む)は変えない", () => {
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "5000"$/m);
+    expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
+    // 検出の確認(空振りでない): 止める値が書かれていれば拾える形
+    expect('RACE_ARCHIVE_NIGHTLY_LIMIT = "0"\n').toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
+    const code = readTextLf("cloud", "src", "race-archive-fetch-core.ts");
+    expect(code).toMatch(/export const ARCHIVE_WINDOW_END_MIN = 8 \* 60 \+ 30;/);
+    const doCode = readTextLf("cloud", "src", "race-archive-fetch-do.ts");
+    expect(doCode).toContain("this.env.RACE_ARCHIVE_WINDOW_END_MIN");
+    expect(doCode).toContain("this.env.RACE_ARCHIVE_SKIP_RACE_DAY");
+    expect(doCode).toContain("this.env.RACE_ARCHIVE_MIN_INTERVAL_MS");
+    expect(code).toMatch(/export const ARCHIVE_REQUEST_INTERVAL_MS = 5000;/);
   });
 
   it("本番の main は src/worker.ts で、smoke 専用エントリ(偽ソケット。smoke.ts が一時設定でだけ指す)を指さない", () => {
@@ -692,6 +714,8 @@ describe("wrangler.toml", () => {
     expect(body).toContain('"--var", "RESULT_BACKFILL_NIGHTLY_LIMIT:0"');
     // Issue #554: 過去の結果の取得も、すべての構成で止めて動かす(取得の時間帯〈JST 0:00〜8:30〉に当たっても、本番のクラスが netkeiba に出ない)
     expect(body).toContain('"--var", "RACE_ARCHIVE_NIGHTLY_LIMIT:0"');
+    // Issue #642: 騎手・調教師の指標の毎晩の計算も、すべての構成で止めて動かす(計算の時間帯〈JST 3:00〜8:30〉に当たっても、本番のクラスが D1 に書かない)
+    expect(body).toContain('"--var", "RACE_MARKET_EDGE_NIGHTLY_LIMIT:0"');
     // Issue #590: 過去の結果の毎晩の変換も、すべての構成で止めて動かす(変換の時間帯〈JST 1:00〜8:30〉に当たっても、本番のクラスが D1 に書かない)
     expect(body).toContain('"--var", "RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT:0"');
     // withWorker の呼び出しのうち、設定ファイル(--config)を使うもの(認証の設定を持つ構成)は、すべて ...vars( を含む
@@ -1321,7 +1345,7 @@ describe("Issue #216・#394・#402: 移行の DO(CloudMigration)は削除済み�
       if (b > 0) bindingSites[f] = b;
     }
     // kick を呼ぶのは scheduled.ts(毎日の起動)と result-backfill-do.ts(DO 自身が getStatus・kick の RPC から core に委譲する 2 つ)だけ
-    expect(kickSites).toEqual({ "race-archive-fetch-do.ts": 2, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "scheduled.ts": 3 }); // scheduled.ts の 3 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)
+    expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "scheduled.ts": 4 }); // scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)
     // env.RESULT_BACKFILL に触れるのは scheduled.ts(有無の確認・get・idFromName の 3 回)と handler.ts(namespace 変数への代入の 1 回)だけ
     expect(bindingSites).toEqual({ "handler.ts": 1, "scheduled.ts": 3 });
     // handler.ts: 補完の DO は getStatus だけ(kick・start は呼ばない)。GET /api/results/backfill の 1 本
@@ -1485,6 +1509,83 @@ describe("Issue #590: 過去の結果の毎晩の変換(RaceArchiveRunsDO)は、
   it("変換を呼ぶのは変換の DO だけ(convertRaceArchives の呼び出し箇所)。cron は kick だけで、変換の本体を直接呼ばない", () => {
     expect(sites(/(?<!function\s)\bconvertRaceArchives\(/g)).toEqual({ "race-archive-runs-do.ts": 1 });
     expect(Object.keys(sites(/RACE_ARCHIVE_RUNS\b/g)).sort()).toEqual(["handler.ts", "scheduled.ts"]); // binding に触れるのは handler.ts(状態の読み取り)と scheduled.ts(kick)だけ
+  });
+});
+
+describe("Issue #642: 騎手・調教師の指標の毎晩の計算(RaceMarketEdgeDO)は、netkeiba にも gate にも出ず、DO の SQLite の起床の経路で表の全部を読まず、D1 の SQL は集計の部品とリポジトリだけにある", () => {
+  const srcDir = path.join(ROOT, "cloud", "src");
+  const core = stripCode(readTextLf("cloud", "src", "market-edge-core.ts"));
+  const doCode = stripCode(readTextLf("cloud", "src", "market-edge-do.ts"));
+  const calc = stripCode(readTextLf("cloud", "src", "market-edge-calc.ts"));
+  const aggregate = stripCode(readTextLf("cloud", "src", "market-edge-aggregate.ts"));
+  const repo = stripCode(readTextLf("cloud", "src", "market-edge-repository.ts"));
+  const sites = (pattern: RegExp): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const f of readdirSync(srcDir).filter((x) => x.endsWith(".ts") && x !== "client-bundle.generated.ts")) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(pattern) ?? []).length;
+      if (n > 0) out[f] = n;
+    }
+    return out;
+  };
+
+  it("前提: 純ロジック・DO・純関数・集計・リポジトリを読めている", () => {
+    expect(core.length).toBeGreaterThan(5000);
+    expect(doCode.length).toBeGreaterThan(1000);
+    expect(calc.length).toBeGreaterThan(3000);
+    expect(aggregate.length).toBeGreaterThan(1000);
+    expect(repo.length).toBeGreaterThan(5000);
+  });
+
+  it("5 つのソースに、netkeiba の取得口(gate・fetchRaw・日単位の DO)・socket・グローバルの fetch・LLM がない。純ロジック・純関数・集計は cloudflare:* と env. を持たない", () => {
+    for (const [name, code] of [["market-edge-core.ts", core], ["market-edge-calc.ts", calc], ["market-edge-aggregate.ts", aggregate]] as const) {
+      expect(code, `${name} に cloudflare:* が無い`).not.toMatch(/cloudflare:/);
+      expect(code, `${name} に env. が無い`).not.toContain("env.");
+    }
+    for (const [name, code] of [["market-edge-core.ts", core], ["market-edge-do.ts", doCode], ["market-edge-calc.ts", calc], ["market-edge-aggregate.ts", aggregate], ["market-edge-repository.ts", repo]] as const) {
+      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "RESULT_BACKFILL", "createGateHttpClient", "HttpClient", "socket", "ANTHROPIC", "createCloudLlm", ".requestPlan(", ".getPlanProgress("]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+    expect(Object.keys(sites(/\.fetchRaw\(/g)).filter((f) => f.startsWith("market-edge"))).toEqual([]);
+  });
+
+  it("DO の SQLite に流す SQL は、起床の経路では主キーの引きと、メタ・失敗の記録の読み書きだけ。表の全部を数える SQL(COUNT(*))は状態の読み取り(getStatus)にだけある", () => {
+    const stepBody = core.slice(core.indexOf("private async step("), core.indexOf("async getStatus("));
+    expect(stepBody.length).toBeGreaterThan(3000); // 前提: 起床の経路の本体を読めている
+    expect(stepBody).not.toMatch(/GROUP BY|ORDER BY|COUNT\(\*\)|DISTINCT/);
+    const statusBody = core.slice(core.indexOf("async getStatus("));
+    expect(statusBody).toMatch(/COUNT\(\*\)/); // 前提: 数え上げは getStatus にある(検査が空振りでない)
+  });
+
+  it("D1 の SQL(prepare)は market-edge-repository.ts にだけある。コア・DO・集計・純関数は D1 の SQL を持たない", () => {
+    expect((repo.match(/\.prepare\(/g) ?? []).length).toBeGreaterThan(8); // 前提: リポジトリの読み書きを数えられている
+    for (const [name, code] of [["market-edge-core.ts", core], ["market-edge-do.ts", doCode], ["market-edge-calc.ts", calc], ["market-edge-aggregate.ts", aggregate]] as const) {
+      expect(code, `${name} に prepare( が無い`).not.toMatch(/\.prepare\(/);
+    }
+  });
+
+  it("計算を止める var(RACE_MARKET_EDGE_NIGHTLY_LIMIT=0)は文字列 \"0\" の完全一致だけ。var の名前が DO の binding の名前(RACE_MARKET_EDGE)と同じでない", () => {
+    expect(core).toMatch(/value\.trim\(\) === "0"/);
+    expect(doCode).toContain("isMarketEdgeDisabled(this.env.RACE_MARKET_EDGE_NIGHTLY_LIMIT)");
+    expect(doCode).not.toMatch(/RACE_MARKET_EDGE\?:\s*string/);
+    expect(stripCode(readTextLf("cloud", "smoke.ts"))).not.toMatch(/"--var",\s*"RACE_MARKET_EDGE[:=]/);
+  });
+
+  it("本番の入口(worker.ts)は本番のクラスを export し、smoke の入口(smoke-worker.ts)も同じ本番のクラスを export する(サブクラスにしない)。binding に触れるのは scheduled.ts(kick)だけ", () => {
+    const worker = stripCode(readTextLf("cloud", "src", "worker.ts"));
+    expect(worker).toMatch(/export \{ RaceMarketEdgeDO \} from "\.\/market-edge-do"/);
+    expect(stripCode(readTextLf("cloud", "smoke-worker.ts"))).toMatch(/export \{ RaceMarketEdgeDO \} from "\.\/src\/market-edge-do"/);
+    expect(Object.keys(sites(/\bRACE_MARKET_EDGE\b/g)).sort()).toEqual(["handler.ts", "scheduled.ts"]);
+  });
+
+  it("D1 の集計用の表(race_market_rows・market_edge・market_edge_meta)に触れるのは market-edge-repository.ts と、目録の UPSERT(race-archive-repository.ts の market_version のリセット)だけ", () => {
+    expect(Object.keys(sites(/\b(race_market_rows|market_edge_meta|market_edge)\b/g)).sort()).toEqual(["market-edge-repository.ts"]);
+    expect(Object.keys(sites(/\bmarket_version\b/g)).sort()).toEqual(["market-edge-repository.ts", "race-archive-repository.ts"]);
+  });
+
+  it("Issue #649: 統計モデルの並走の表(analysis_shadow_horses・analysis_shadow_probs)に触れるのは analysis-shadow-repository.ts だけ(書き込みは D1AnalysisStore がそこの saveShadow を呼ぶ)。買い目・配分・画面・LLM の経路からは読まない", () => {
+    expect(Object.keys(sites(/\b(analysis_shadow_horses|analysis_shadow_probs)\b/g)).sort()).toEqual(["analysis-shadow-repository.ts"]);
   });
 });
 

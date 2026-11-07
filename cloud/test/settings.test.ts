@@ -39,6 +39,7 @@ describe("既定値", () => {
       minHitProb: 0.05, // Issue #470: 的中確率が 0.05 未満の買い目は買わない(ユーザー決定 2026-10-23)
       maxWinBetsPerRace: 2, // Issue #533: 単勝は1レース2点まで(ユーザー決定 2026-10-29)
       maxPlaceBetsPerRace: 2, // Issue #533: 複勝は1レース2点まで(同上)
+      marketShrinkWeight: 0.5, // Issue #656: モデルの確率を市場に半分寄せる(ユーザー決定 2026-11-07)
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
@@ -284,6 +285,7 @@ const FULL: CloudSettings = {
   minHitProb: 0.12, // Issue #470: 既定(0.05)と別の値
   maxWinBetsPerRace: 3, // Issue #533: 既定(2)と別の値。複勝とも別の値(取り違えを検出する)
   maxPlaceBetsPerRace: 4,
+  marketShrinkWeight: 0.3,
   includeComboOdds: true,
   includeWideInAllocation: false,
   includeTrioInAllocation: false,
@@ -331,6 +333,9 @@ const BOUNDARIES: ReadonlyArray<{ key: keyof CloudSettings; raw: unknown; read: 
   // Issue #470: 的中確率の下限。読む側も書く側も 0〜1(0 は下限なし、1 は全部外す)。部分集合が真部分集合でない。
   ...[0, 0.05, 0.2, 1].map((raw) => ({ key: "minHitProb" as const, raw, read: true, write: true })),
   ...[-0.01, 1.0001, "0.05", null, Number.NaN, Number.POSITIVE_INFINITY].map((raw) => ({ key: "minHitProb" as const, raw, read: false, write: false })),
+  // Issue #656: 市場に寄せる割合。0〜1(0 は市場のみ、1 は寄せない)。読む側も書く側も同じ。
+  ...[0, 0.25, 0.5, 0.75, 1].map((raw) => ({ key: "marketShrinkWeight" as const, raw, read: true, write: true })),
+  ...[-0.01, 1.0001, "0.5", null, Number.NaN, Number.POSITIVE_INFINITY].map((raw) => ({ key: "marketShrinkWeight" as const, raw, read: false, write: false })),
   // Issue #533: 単勝・複勝の点数の上限。整数 0〜18(0 は上限なし。18 は中央競馬の最大頭数)。読む側も書く側も同じ。
   ...[0, 1, 2, 17, 18].flatMap((raw) => (["maxWinBetsPerRace", "maxPlaceBetsPerRace"] as const).map((key) => ({ key, raw, read: true, write: true }))),
   ...[-1, 19, 1.5, 0.5, "2", null, Number.NaN, Number.POSITIVE_INFINITY].flatMap((raw) => (["maxWinBetsPerRace", "maxPlaceBetsPerRace"] as const).map((key) => ({ key, raw, read: false, write: false }))),
@@ -503,7 +508,7 @@ describe("saveSettings(D1 の1行に UPSERT)", () => {
     expect(record[0]!.args.length).toBe(2);
     expect(record[0]!.args[1]).toBe("2026-10-07T01:02:03.000Z");
     expect(JSON.parse(record[0]!.args[0] as string)).toEqual(FULL);
-    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(33); // 既存の18項目(Issue #470で的中確率の下限、Issue #533で単勝・複勝の点数の上限を足した)+ 重み15項目
+    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(34); // 既存の19項目(Issue #656 で市場に寄せる割合を足した。18項目(Issue #470で的中確率の下限、Issue #533で単勝・複勝の点数の上限を足した)+ 重み15項目
     expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(Object.keys(DEFAULT_CLOUD_SETTINGS).length);
   });
 
@@ -665,5 +670,27 @@ describe("classifySettingsForSave / fillMissingSettings(欠けだけなら保存
     expect(Object.keys(filled)).toEqual([...CLOUD_SETTINGS_KEYS]);
     expect(validateCloudSettingsForSave(filled).ok).toBe(true);
     expect(FULL.bankroll).not.toBe(123_000); // 前提: 埋めた値が present 由来ではない
+  });
+});
+
+describe("marketShrinkWeight(配分の前に確率を市場に寄せる割合。Issue #656)", () => {
+  it("項目の無い旧い行(今の本番の行)は既定の 0.5 で読む(保存し直さなくても、デプロイ時点から効く)。不正な値もその項目だけ 0.5 に戻す", () => {
+    expect(DEFAULT_CLOUD_SETTINGS.marketShrinkWeight).toBe(0.5);
+    expect(coerceCloudSettings({ bankroll: 100000 }).marketShrinkWeight).toBe(0.5);
+    expect(coerceCloudSettings({ marketShrinkWeight: 1.5 }).marketShrinkWeight).toBe(0.5);
+    expect(coerceCloudSettings({ marketShrinkWeight: "0.2" }).marketShrinkWeight).toBe(0.5);
+  });
+
+  it("0(市場のみ)・1(寄せない)・途中の値は採用する", () => {
+    for (const v of [0, 0.3, 1]) expect(coerceCloudSettings({ marketShrinkWeight: v }).marketShrinkWeight).toBe(v);
+  });
+
+  it("保存の検証: 項目が欠けた本文は不正でその項目だけを名指しする。範囲外は名指しされる", () => {
+    const { marketShrinkWeight: _omit, ...rest } = FULL;
+    const missing = validateCloudSettingsForSave(rest);
+    expect(missing.ok).toBe(false);
+    expect(JSON.stringify(missing)).toContain("marketShrinkWeight");
+    expect(validateCloudSettingsForSave({ ...FULL, marketShrinkWeight: 1.2 }).ok).toBe(false);
+    expect(validateCloudSettingsForSave({ ...FULL, marketShrinkWeight: 0 }).ok).toBe(true);
   });
 });

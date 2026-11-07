@@ -140,7 +140,7 @@ const COUNT_READ_N_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0
 
 /**
  * 目録の UPSERT。**比較の対象に `fetched_at` を入れない**(入れると毎回更新になり、同じ中身の再保存で D1 の書き込みが増える)。
- * 更新するときは `fetched_at` も新しくし、変換の済み印 `runs_version` を NULL に戻す(中身が変わったので、変換をやり直す。Issue #588)。WHERE が偽なら、行は変わらず `changes` 0・`rows_written` 0(ローカルの workerd の D1 で実測)。
+ * 更新するときは `fetched_at` も新しくし、変換の済み印 `runs_version` と、市場の行への取り込み印 `market_version`(Issue #642。migration 0039)を NULL に戻す(中身が変わったので、変換と取り込みをやり直す。Issue #588)。WHERE が偽なら、行は変わらず `changes` 0・`rows_written` 0(ローカルの workerd の D1 で実測)。
  */
 const UPSERT_CATALOG_SQL = `INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -151,7 +151,8 @@ ON CONFLICT(race_id) DO UPDATE SET
   r2_key = excluded.r2_key,
   raw_bytes = excluded.raw_bytes,
   fetched_at = excluded.fetched_at,
-  runs_version = NULL
+  runs_version = NULL,
+  market_version = NULL
 WHERE race_archive.kind IS NOT excluded.kind
   OR race_archive.race_date IS NOT excluded.race_date
   OR race_archive.parser_version IS NOT excluded.parser_version

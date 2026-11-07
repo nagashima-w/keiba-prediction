@@ -163,6 +163,8 @@ const BASE: CloudSettings = {
   // Issue #470: このファイルは地方の三連単の取得の段階と、買い目に三連単が入ること・入らないことを調べる。既定の下限(0.05)は三連単の買い目をほぼ全て外すので、下限なしにする
   // (下限そのものは min-hit-prob 系のテストと race-day-close.test.ts が調べる)。
   minHitProb: 0,
+  // Issue #656: 市場に寄せる割合も寄せない(1)にする(このファイルは地方の三連単の取得の段階と、買い目に三連単が入ることを調べる。寄せると三連単の買い目が外れて前提が崩れる)。
+  marketShrinkWeight: 1,
   includeComboOdds: true,
   baseScoreWeightJockey: 0,
 };

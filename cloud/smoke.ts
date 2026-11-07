@@ -155,6 +155,8 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
     // Issue #590: 過去の結果の毎晩の変換も止める(`RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT=0`。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_RUNS`〉にしない)。本番のクラスは何もしない。
     // 変換そのものの確認は、smoke 専用の DO(`RACE_ARCHIVE_RUNS_SMOKE`)が行う(netkeiba には出ない)。
     "--var", "RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT:0",
+    // Issue #642: 騎手・調教師の指標の毎晩の計算も止める(`RACE_MARKET_EDGE_NIGHTLY_LIMIT=0`。★var の名前を DO の binding の名前〈`RACE_MARKET_EDGE`〉にしない)。本番のクラスは何もしない(R2 と D1 だけを触る DO で、netkeiba には出ない)。
+    "--var", "RACE_MARKET_EDGE_NIGHTLY_LIMIT:0",
     "--var", `ACCESS_TEAM_NAME:${TEAM}`,
     "--var", `ACCESS_AUD:${aud}`,
     "--var", `ACCESS_ALLOWED_EMAIL:${email}`,

@@ -18,6 +18,9 @@ const exception = (keys: readonly string[], reason: string, issue: string, tempB
 /** ここ(sql-plan-inventory.test.ts)で検査する: 実在の表の全走査が無い。一時の並べ替えを持つものは、範囲が絞られている理由つき。 */
 export const HERE: Record<string, PlanEntry> = {
   ...here([
+    // 統計モデルの並走の記録(Issue #649)。json_each から主キーの表への INSERT だけ(読み取りなし)。書き込みの行数は analysis-shadow.integration.test.ts が固定している。
+    "analysis-shadow-repository.ts::INSERT_SHADOW_HORSES_SQL",
+    "analysis-shadow-repository.ts::INSERT_SHADOW_PROBS_SQL",
     "analysis-close.ts::UPSERT_CLOSE_SQL",
     "analysis-close.ts::DELETE_CLOSE_BETS_SQL",
     "analysis-close.ts::INSERT_CLOSE_BETS_SQL",
@@ -55,6 +58,17 @@ export const HERE: Record<string, PlanEntry> = {
     "verify-read.ts::VERIFY_NO_DATE_ANALYSES_SQL",
     "jockey-names-repository.ts::recordSql",
     "trainer-names-repository.ts::recordSql",
+    // 騎手・調教師の指標(Issue #642)。未処理の列挙は部分索引、集計の読みは日付の索引の範囲、置き換えは主キー。実際の読み取り行数は market-edge-repository.integration.test.ts が固定している。
+    "market-edge-repository.ts::SELECT_MARKET_PENDING_PAGE_SQL",
+    "market-edge-repository.ts::MARK_MARKET_VERSION_SQL",
+    "market-edge-repository.ts::SELECT_MARKET_WINDOW_PAGE_SQL",
+    "market-edge-repository.ts::PRUNE_MARKET_ROWS_SQL",
+    "market-edge-repository.ts::UPSERT_MARKET_EDGES_SQL",
+    "market-edge-repository.ts::DELETE_STALE_MARKET_EDGES_SQL",
+    "market-edge-repository.ts::UPSERT_MARKET_EDGE_META_SQL",
+    "market-edge-repository.ts::SELECT_MARKET_EDGES_SQL",
+    "market-edge-repository.ts::SELECT_MARKET_EDGE_META_SQL",
+    "market-edge-repository.ts::saveMarketRowsSql",
     // 組み立て関数(サンプルの引数 ids=1,2 で SQL にしたもの)
     "targets-repository.ts::targetsSql.bets",
     "targets-repository.ts::targetsSql.marks",

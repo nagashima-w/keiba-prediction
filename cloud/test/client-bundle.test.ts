@@ -579,7 +579,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   };
 
   const SETTINGS = {
-    evThreshold: 1, additionalInstruction: "", clipVariant: "default", analysisModel: "auto", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, minHitProb: 0.05, maxWinBetsPerRace: 2, maxPlaceBetsPerRace: 2, includeComboOdds: false,
+    evThreshold: 1, additionalInstruction: "", clipVariant: "default", analysisModel: "auto", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, minHitProb: 0.05, marketShrinkWeight: 0.5, maxWinBetsPerRace: 2, maxPlaceBetsPerRace: 2, includeComboOdds: false,
     includeWideInAllocation: true, includeTrioInAllocation: true, includeQuinellaInAllocation: true, includeExactaInAllocation: true, includeTrifectaInAllocation: true,
     includeBracketQuinellaInAllocation: true, preRaceOffsetMinutes: 45,
     // Issue #218・#353: スコアリングの重み15項目(既定値)
@@ -878,8 +878,8 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
       toggle.listeners.get("click")![0]!(undefined);
     }
     const fields = fieldsOf();
-    expect(fields.length).toBe(33);
-    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", "input", "input", "input", ...Array(15).fill("input"), "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)。重み15項目は input(Issue #218・#353)
+    expect(fields.length).toBe(34);
+    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", "input", "input", "input", "input", ...Array(15).fill("input"), "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)。重み15項目は input(Issue #218・#353)
     const field = (key: string) => fields.find((n) => n.attrs.get("data-field") === key)!;
     expect(field("bankroll").value).toBe("500000");
     expect(field("clipVariant").value).toBe("default"); // select は option を入れたあとに value が設定される

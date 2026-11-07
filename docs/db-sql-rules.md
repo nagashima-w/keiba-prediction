@@ -56,11 +56,11 @@ DO の SQLite は、SQL を文字列定数で持たず、コアのメソッド�
 
 ## 検査の一覧
 
-数は `cloud/test/sql-plan-registry.ts` の鍵の数である(2026-11-06 時点、#639 の分を含む。`collectExportedSql()` が 76 件、組み立て関数が 15 件で、合計 91 件)。
+数は `cloud/test/sql-plan-registry.ts` の鍵の数である(2026-11-06 時点、#639・#642 の分を含む。`collectExportedSql()` が 85 件、組み立て関数が 16 件で、合計 101 件)。
 
 | 区分 | 件数 |
 |---|---:|
-| ここで検査する | 55(うち、一時の並べ替えを理由つきで許すもの 6) |
+| ここで検査する | 65(うち、一時の並べ替えを理由つきで許すもの 6) |
 | 既存の検査 | 21 |
 | 既知の例外 | 15 |
 | 検査対象外 | 0 |
@@ -101,6 +101,7 @@ DO の SQLite は、SQL を文字列定数で持たず、コアのメソッド�
 
 | DO | 検査 | 全走査・一時の並べ替えの例外 |
 |---|---|---|
+| 騎手・調教師の指標(`market-edge-core.ts`。#642) | `market-edge-core.test.ts`。起床の経路の文に全走査が無いことを `EXPLAIN` で確かめる | なし(status の `COUNT(*)` だけ全走査で、起床の経路の外) |
 | 変換(`race-archive-runs-core.ts`) | `race-archive-runs-core.test.ts`。起床の経路の文はすべて主キーの `SEARCH`(対照つき) | なし(status の文だけ全走査で、起床の経路の外) |
 | 取得(`race-archive-fetch-core.ts`) | `race-archive-fetch-core.test.ts` | `ra_month` の選択(月ごとに 1 行の表)・`ra_month` の status の数え上げ・`skipped` の `GROUP BY`(status の画面だけ) |
 | 補完(`result-backfill-core.ts`) | `result-backfill-core.test.ts` | `excludedIds`(`last_night` に索引が無い)・`collectSettled`(`state` に索引が無い)・status の数え上げ(db-usage-594.md §4.2。索引は別の Issue) |

@@ -74,7 +74,7 @@ export interface CloseInput {
   /** 開催日(YYYYMMDD)。 */
   readonly kaisaiDate: string;
   readonly horses: readonly CloseInputHorse[];
-  /** 設定のスナップショットのうち、配分に使う 13 項目(分析時と同じ値。Issue #470 で的中確率の下限 `minHitProb`、Issue #533 で単勝・複勝の点数の上限 `maxWinBets`・`maxPlaceBets` を足して 10 → 13。旧い入力には無く、いずれも 0 で読む)。 */
+  /** 設定のスナップショットのうち、配分に使う 14 項目(分析時と同じ値。Issue #656 で市場に寄せる割合 `marketShrinkWeight` を足して 13 → 14、旧い入力には無く 1〈寄せない〉で読む。Issue #470 で的中確率の下限 `minHitProb`、Issue #533 で単勝・複勝の点数の上限 `maxWinBets`・`maxPlaceBets` を足して 10 → 13。旧い入力には無く、いずれも 0 で読む)。 */
   readonly allocationSettings: AnalysisAllocationSettings;
   /** EV の閾値(分析時の設定の `evThreshold`)。 */
   readonly evThreshold: number;
@@ -154,6 +154,15 @@ export function parseCloseInput(text: string): CloseInput | null {
   if (maxWinBets === null || maxPlaceBets === null) {
     return null;
   }
+  // 市場に寄せる割合(Issue #656)。**項目の無い旧い入力は 1(寄せない)で読む**: その分析は寄せる前の Worker が配分したので、再計算も寄せずに揃える
+  // (設定の表の旧い行を 0.5 で読む〈settings.ts〉のとは意図して違う。上限・下限と同じ理由)。あるのに 0〜1 の数でないものは壊れた入力。
+  let marketShrinkWeight = 1;
+  if (settings.marketShrinkWeight !== undefined) {
+    if (!isFiniteNumber(settings.marketShrinkWeight) || settings.marketShrinkWeight < 0 || settings.marketShrinkWeight > 1) {
+      return null;
+    }
+    marketShrinkWeight = settings.marketShrinkWeight;
+  }
   const seen = new Set<number>();
   const horses: CloseInputHorse[] = [];
   for (const h of raw.horses as unknown[]) {
@@ -181,6 +190,7 @@ export function parseCloseInput(text: string): CloseInput | null {
       minHitProb,
       maxWinBets,
       maxPlaceBets,
+      marketShrinkWeight,
       includeComboOdds: settings.includeComboOdds as boolean,
       includeWideInAllocation: settings.includeWideInAllocation as boolean,
       includeTrioInAllocation: settings.includeTrioInAllocation as boolean,

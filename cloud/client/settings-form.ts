@@ -50,6 +50,7 @@ export const FIELD_ORDER: readonly FieldKey[] = [
   "minHitProb",
   "maxWinBetsPerRace",
   "maxPlaceBetsPerRace",
+  "marketShrinkWeight",
   "additionalInstruction",
   "clipVariant",
   "analysisModel",
@@ -74,7 +75,7 @@ export const SECTIONS: readonly SectionSpec[] = [
   { id: "funds", heading: "資金と配分", defaultOpen: true, keys: ["bankroll", "perRaceCap", "evThreshold", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace"], hasWeights: false },
   { id: "odds", heading: "オッズの取得と券種", defaultOpen: true, keys: ["includeComboOdds", "includeWideInAllocation", "includeQuinellaInAllocation", "includeBracketQuinellaInAllocation", "includeExactaInAllocation", "includeTrioInAllocation", "includeTrifectaInAllocation"], hasWeights: false },
   { id: "llm", heading: "LLM分析", defaultOpen: false, keys: ["additionalInstruction", "clipVariant", "analysisModel"], hasWeights: false },
-  { id: "advanced", heading: "上級の設定", defaultOpen: false, keys: ["kellyFraction", "preRaceOffsetMinutes"], hasWeights: true },
+  { id: "advanced", heading: "上級の設定", defaultOpen: false, keys: ["kellyFraction", "marketShrinkWeight", "preRaceOffsetMinutes"], hasWeights: true },
 ];
 
 /** 検証の誤りがある項目を含む節(保存の押下で閉じた節を開くのに使う。Issue #581)。 */
@@ -147,7 +148,7 @@ function defaultText(key: FieldKey): string {
 /** バッジを付ける項目(選択・追加指示は選択肢のラベル/空欄で既定が読める・重みは数が多いので付けない)。 */
 const BADGE_KEYS: ReadonlySet<FieldKey> = new Set<FieldKey>([
   "evThreshold", "includeComboOdds", "includeWideInAllocation", "includeQuinellaInAllocation", "includeBracketQuinellaInAllocation", "includeExactaInAllocation", "includeTrioInAllocation", "includeTrifectaInAllocation",
-  "bankroll", "perRaceCap", "kellyFraction", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace", "preRaceOffsetMinutes",
+  "bankroll", "perRaceCap", "kellyFraction", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace", "marketShrinkWeight", "preRaceOffsetMinutes",
 ]);
 
 /** 既定から変えているか(下書きの値と既定を比べる。数値は数にして比べる=`0.50` と `0.5` は同じ。数に読めない入力は「変えている」)。 */
@@ -193,6 +194,7 @@ const ERROR_TEXT: Readonly<Record<FieldKey, (draftValue: DraftValue) => string>>
   minHitProb: () => "0以上1以下の数値を入力してください(半角。0は下限なし)。",
   maxWinBetsPerRace: maxBetsError,
   maxPlaceBetsPerRace: maxBetsError,
+  marketShrinkWeight: () => "0以上1以下の数値を入力してください(半角。1は寄せない)。",
   includeComboOdds: () => "チェックの状態が不正です。",
   includeWideInAllocation: () => "チェックの状態が不正です。",
   includeTrioInAllocation: () => "チェックの状態が不正です。",
@@ -423,6 +425,12 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
     label: "複勝は1レースに何点まで買うか",
     help: `0〜${MAX_BETS_PER_RACE_MAX} の整数。1レースで買う複勝の点数の上限です(単勝とは別に数えます)。0 にすると上限なしです。`,
     inputmode: "numeric",
+  },
+  marketShrinkWeight: {
+    kind: "text",
+    label: "モデルの確率を市場の確率に寄せる割合",
+    help: "0〜1。配分の前に、モデルの確率を市場(単勝オッズ)の確率にどれだけ寄せるかです。1 は寄せません(モデルの確率のまま)、0 は市場の確率だけにします。画面に出す確率は変わりません。",
+    inputmode: "decimal",
   },
   additionalInstruction: {
     kind: "textarea",

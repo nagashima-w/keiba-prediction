@@ -63,6 +63,8 @@ interface FakeSink extends AnalysisSink {
   /** save をこの回数だけ、保存せずに例外にする(D1・R2 の一時的な失敗)。 */
   failBeforeSave: number;
   childrenOverride: { horses: number; bets: number } | null;
+  /** save の戻り値の shadow(統計モデルの並走の書き込みの結果。Issue #649)。undefined は戻り値に載せない(記録の無い保存)。 */
+  shadowResult: "saved" | "failed" | undefined;
 }
 
 function fakeSink(): FakeSink {
@@ -72,6 +74,7 @@ function fakeSink(): FakeSink {
     crashAfterSave: 0,
     failBeforeSave: 0,
     childrenOverride: null,
+    shadowResult: undefined,
     async save(record) {
       sink.calls.push("save");
       if (sink.failBeforeSave > 0) {
@@ -83,7 +86,7 @@ function fakeSink(): FakeSink {
         sink.crashAfterSave -= 1;
         throw new Error("保存後のクラッシュ");
       }
-      return { id: sink.saved.length, detail: "stored" };
+      return { id: sink.saved.length, detail: "stored", ...(sink.shadowResult === undefined ? {} : { shadow: sink.shadowResult }) };
     },
     async findByAnalyzedAt(raceId, analyzedAt) {
       sink.calls.push("find");
@@ -114,6 +117,8 @@ const ALL_ON: CloudSettings = {
   // Issue #533: 単勝・複勝の点数の上限も、このファイルでは上限なしにする(既定の2点だと、買い目の券種・本数を調べる対照が崩れる)。上限そのものは下の専用のテストが調べる。
   maxWinBetsPerRace: 0,
   maxPlaceBetsPerRace: 0,
+  // Issue #656: 市場に寄せる割合も寄せない(1)にする(このファイルが調べるのは取得の本数と券種の買い目の再現で、寄せると買い目の数・種類が変わり前提が崩れる)。寄せる配分そのものは race-day-close.test.ts(既定の 0.5)と専用のテストが調べる。
+  marketShrinkWeight: 1,
   includeComboOdds: true,
   // このファイルの取得の本数(19・25・8・2 本など)は、騎手の成績を取らない取得で固定している。Issue #226 で、既定の重み(騎手 0.15)のときは騎手の
   // 年度別成績も取る(16頭・騎手16人で+16本)ようになったので、ここでは騎手の重みを 0(= 取らない)にして従来の検査の意味を保つ
@@ -403,6 +408,41 @@ describe("発走前の分析: 計算・保存ステップ(AC-c5・c1・c6)", () 
     expect(h.core.getBoard().races.find((r) => r.mode === "pre_race")).toMatchObject({ status: "done", analysisId: 1, detail: "stored", childrenOk: true });
   });
 
+  it("Issue #649: 発走前の計算は、統計モデルの並走(影の計算)の記録を付けて保存する。馬は全頭・確率は 2 モデル分。買い目・配分は従来どおり", async () => {
+    const h = harness();
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await h.core.runNextStep(); // fetch
+    await h.core.runNextStep(); // compute
+    const record = h.sink.saved[0]!;
+    expect(record.shadow).toBeDefined();
+    expect(record.shadow!.horses).toHaveLength(16);
+    expect(record.shadow!.probs).toHaveLength(32);
+    expect(record.shadow!.horses.every((x) => x.inputWinOdds !== null && x.marketQ !== null)).toBe(true);
+    expect(record.allocation?.bets.length ?? 0).toBeGreaterThan(1);
+    expect(h.warnings.filter((w) => w.includes("並走"))).toEqual([]);
+  });
+
+  it("Issue #649: 影の記録の書き込みが失敗した(保存先が shadow: failed を返す)ときは警告にするが、分析は done のまま(保存は成功している)", async () => {
+    const h = harness();
+    h.sink.shadowResult = "failed";
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await h.core.runNextStep(); // fetch
+    expect(await h.core.runNextStep()).toMatchObject({ kind: "ran", mode: "pre_race", step: "compute", result: "ok" });
+    expect(h.warnings.filter((w) => w.includes("並走") && w.includes("書けませんでした"))).toHaveLength(1);
+    expect(h.core.getBoard().races.find((r) => r.mode === "pre_race")).toMatchObject({ status: "done", analysisId: 1, detail: "stored" });
+  });
+
+  it("Issue #649: 書き込みが成功(saved)・記録なし(undefined)のときは、並走の警告を出さない", async () => {
+    for (const result of ["saved", undefined] as const) {
+      const h = harness();
+      h.sink.shadowResult = result;
+      await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+      await h.core.runNextStep();
+      await h.core.runNextStep();
+      expect(h.warnings.filter((w) => w.includes("並走"))).toEqual([]);
+    }
+  });
+
   it("組合せの券種も配分に入る(設定が組合せ ON・各券種 ON): 買い目の券種が単勝・複勝だけでなく、ワイド・馬連など複数に及ぶ", async () => {
     const h = harness();
     await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
@@ -484,6 +524,23 @@ describe("発走前の分析: 計算・保存ステップ(AC-c5・c1・c6)", () 
     expect(limited.bets.every((b) => b.betType === "place")).toBe(true);
     expect(limited.meta.maxPlaceBets).toBe(2);
     expect(limited.meta.maxWinBets).toBe(1);
+  });
+
+  it("Issue #656: 市場に寄せる割合(設定)が、取得 → 計算 → 保存した配分まで届く。保存する馬の行(補正後の確率・EV)は寄せない", async () => {
+    const run = async (patch: Partial<CloudSettings>) => {
+      const h = harness();
+      h.settings = { ...ALL_ON, ...patch };
+      await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+      await h.core.runNextStep();
+      await h.core.runNextStep();
+      return h.sink.saved[0]!;
+    };
+    const keep = await run({ marketShrinkWeight: 1 });
+    const shrunk = await run({ marketShrinkWeight: 0.5 });
+    const key = (r: typeof keep) => r.allocation!.bets.map((b) => `${b.betType}:${b.comboKey}:${b.stake}`).join(",");
+    expect(keep.allocation!.bets.length).toBeGreaterThan(2); // 前提
+    expect(key(shrunk)).not.toBe(key(keep));
+    expect(JSON.stringify(shrunk.horses.map((x) => [x.umaban, x.adjustedProb, x.ev, x.isPositive]))).toBe(JSON.stringify(keep.horses.map((x) => [x.umaban, x.adjustedProb, x.ev, x.isPositive])));
   });
 
   it("EV の閾値(設定)が効く: 閾値が極端に低いと EV プラスの馬がいて、極端に高いといない", async () => {

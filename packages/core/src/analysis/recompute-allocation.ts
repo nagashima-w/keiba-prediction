@@ -25,6 +25,7 @@ import {
 } from "../pipeline.js";
 import type { HorseEv } from "../ev/expected-value.js";
 import type { PlaceJointModel } from "../ev/place-joint-model.js";
+import { shrinkTowardMarket } from "../ev/market-shrink.js";
 import type { AnalysisRow } from "./analysis-types.js";
 import type { MixedCandidateBuildInput } from "./mixed-candidates.js";
 import { buildMixedRaceAllocationWithOutcome } from "./mixed-race-allocation.js";
@@ -74,6 +75,8 @@ export interface AllocationForRowsInput {
   readonly comboOdds?: RaceData["meta"]["comboOdds"];
   readonly allocationSettings: AnalysisAllocationSettings;
   readonly evConfig?: EvConfig;
+  /** 発売前(yoso)の推定 EV の設定。市場に寄せた確率で EV を作り直すときだけ使う(省略 = 既定)。 */
+  readonly estimatedPlaceConfig?: EstimatedPlaceConfig;
   /**
    * 的中確率の下限(Issue #470)で外れた買い目について、外さなかった場合の賭け金を記録するか(既定 false)。分析時の保存だけが true にする。
    * 締切の直前の再計算は false(下限は適用するが、記録のための2回目の配分は呼ばない)。
@@ -94,6 +97,31 @@ export interface AllocationForRowsResult {
 }
 
 /**
+ * 配分に渡す行を作る(Issue #656)。`allocationSettings.marketShrinkWeight` が 1 未満なら、補正後の 3着内率を市場(単勝オッズ)に寄せ(`shrinkTowardMarket`)、
+ * その確率で EV を作り直した行を返す(`adjustedProb`・`ev`・`isPositive`・`placeOddsMin` だけを差し替える)。省略・1 は入力の行をそのまま返す。
+ * **配分に渡す行だけ**を変える。呼び出し側の行(画面・保存)は変えない。保存する買い目の `ev` は、寄せた確率で計算した値になる(ev ÷ odds が配分の的中確率)。
+ */
+function rowsForAllocation(input: AllocationForRowsInput): readonly AnalysisRow[] {
+  const w = input.allocationSettings.marketShrinkWeight ?? 1;
+  if (w >= 1) return input.rows;
+  const mixed = shrinkTowardMarket(
+    input.rows.map((r) => ({ umaban: r.umaban, p: r.adjustedProb, winOdds: input.odds.win[r.umaban]?.odds ?? null })),
+    w,
+  );
+  const { evResults } = computeEvForProbs(
+    input.rows.map((r) => ({ umaban: r.umaban, placeProb: mixed.get(r.umaban)! })),
+    input.odds,
+    input.evConfig,
+    input.estimatedPlaceConfig,
+  );
+  const evByUmaban = new Map(evResults.map((e) => [e.umaban, e]));
+  return input.rows.map((r) => {
+    const e = evByUmaban.get(r.umaban)!;
+    return { ...r, adjustedProb: mixed.get(r.umaban)!, placeOddsMin: e.placeOddsMin, ev: e.ev, isPositive: e.isPositive };
+  });
+}
+
+/**
  * 手順 (6) 配分提案。EV 閾値は evConfig から導出する単一ソース(allocationSettings には持たせない)。
  * `buildMixedRaceAllocationWithOutcome` 自体の例外(呼び出し元の前提が崩れている場合の防御。極めて稀)は、無効の記録(route="invalid")に変えて返す。
  */
@@ -104,7 +132,7 @@ export function buildAllocationForRows(input: AllocationForRowsInput): Allocatio
   // MixedCandidateBuildInput は条件付き spread で組む(組合せオッズが無い券種はキー自体を持たせない)。
   const raceForAllocation: MixedCandidateBuildInput = {
     oddsStatus: odds.oddsStatus,
-    rows: input.rows,
+    rows: rowsForAllocation(input),
     raceId: input.raceId,
     ...(odds.wideCombo !== undefined ? { wideCombo: odds.wideCombo } : {}),
     ...(odds.trioCombo !== undefined ? { trioCombo: odds.trioCombo } : {}),
@@ -200,6 +228,7 @@ export function recomputeAllocationFromProbs(input: RecomputeAllocationInput): R
     comboOdds: input.comboOdds,
     allocationSettings: input.allocationSettings,
     evConfig: input.evConfig,
+    estimatedPlaceConfig: input.estimatedPlaceConfig,
     model: input.model,
   });
   return { oddsStatus: input.odds.oddsStatus, evEstimated, rows, allocation, comboStats };
