@@ -1,0 +1,7 @@
+# 手元の学習用(本番・リポジトリの依存には入れない。#649 段階 1)。確かめた版:
+# Python 3.13。次を pip で入れる。xgboost・scikit-learn・shap は学習と SHAP の確認のためだけ。
+numpy==2.5.3
+pandas==3.0.5
+scikit-learn==1.9.1
+xgboost==2.1.1
+shap==0.54.1
