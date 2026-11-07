@@ -3,14 +3,18 @@
  * 入力: hist.ndjson.gz(RaceRecord)・horse_runs.csv(馬ごとの戦績。1 行 1 走)・extras.ndjson.gz(#652。騎手の指標など)。リポジトリに入れない。
  * 出力: horses.ndjson.gz・races.ndjson.gz。
  *
- * 使い方: pnpm tsx scripts/market-blindspots-653/build.ts <hist.ndjson.gz> <horse_runs.csv> <extras.ndjson.gz> <出力ディレクトリ>
+
+ * horse_runs.csv の代わりに `-` を渡すと、hist のレースから作った走だけで戦績を作る(生き残りの偏りを避ける版。horse-runs.ts)。
+ *
+ * 使い方: pnpm tsx scripts/market-blindspots-653/build.ts <hist.ndjson.gz> <horse_runs.csv|-> <extras.ndjson.gz> <出力ディレクトリ>
  */
-import { createReadStream, createWriteStream, readFileSync } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { createGunzip, createGzip } from "node:zlib";
 import type { RaceRecord, RecordHorse } from "../../packages/core/src/scraper/race-record.js";
 import { marketShares } from "../stat-model-649/lib.js";
-import { CONDITION_IDS, classFromName, evaluateConditions, styleAverage, type HorseContext, type PrevRun } from "./conditions.js";
+import { CONDITION_IDS, evaluateConditions, styleAverage, type HorseContext, type PrevRun } from "./conditions.js";
+import { loadExtraRuns } from "./horse-runs.js";
 import { computeTrends, distanceBand, type TrendRace } from "./trend.js";
 
 const ran = (h: RecordHorse): boolean => h.finishStatus !== "取消" && h.finishStatus !== "除外";
@@ -70,36 +74,10 @@ async function main(): Promise<void> {
       });
     }
   }
-  // 2) horse_runs.csv(hist に無い走だけ)。
-  // horse_runs.csv は `horse_id,"<JSON を CSV の引用で包んだもの>"` の 1 行 1 走(引用内の " は "" )。
-  const rows = readFileSync(runsPath, "utf8")
-    .split(/\r?\n/)
-    .filter((l) => l !== "")
-    .map((l) => {
-      const k = l.indexOf(",");
-      const body = l.slice(k + 1);
-      return [l.slice(0, k), body.startsWith('"') ? body.slice(1, -1).replace(/""/g, '"') : body];
-    });
-  let extraRuns = 0;
-  for (const [horseId, data] of rows.slice(1)) {
-    if (horseId === undefined || data === undefined) continue;
-    for (const a of [JSON.parse(data) as unknown[]]) {
-      const raceId = String(a[5]);
-      if (histRaceIds.has(raceId)) continue;
-      const date = String(a[0]).replace(/\//g, "-");
-      const passing = a[21] as number[] | null;
-      const finish = typeof a[12] === "number" && a[12] > 0 ? (a[12] as number) : null;
-      const margin = typeof a[20] === "number" ? Math.max(0, a[20] as number) : null;
-      push(horseId, {
-        date, raceId, venueName: String((a[1] as unknown[])[1] ?? ""), courseType: String(a[16] ?? ""), distance: Number(a[17] ?? 0),
-        going: typeof a[18] === "string" ? (a[18] as string) : null, raceClass: classFromName(String(a[4] ?? "")), n: Number(a[7] ?? 0), finish,
-        pos4: Array.isArray(passing) && passing.length > 0 ? passing[passing.length - 1]! : null, last3fRank: null, marginSec: margin,
-        jockeyId: typeof a[14] === "string" ? (a[14] as string) : null, jockeyMark: null, markKnown: false, trainerId: null, trainerKnown: false,
-        ninki: typeof a[11] === "number" ? (a[11] as number) : null, jEdge: null,
-      });
-      extraRuns += 1;
-    }
-  }
+  // 2) horse_runs.csv(hist に無い走だけ。`-` なら読まない)。
+  const extraList = loadExtraRuns(runsPath, histRaceIds);
+  for (const e of extraList) push(e.horseId, e.run);
+  const extraRuns = extraList.length;
   for (const l of runs.values()) l.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
   // 3) その日の傾向(60 分前・40 分前・すべて)。
