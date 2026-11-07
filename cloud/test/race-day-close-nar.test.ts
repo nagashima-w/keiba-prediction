@@ -136,6 +136,8 @@ const SETTINGS_ON: CloudSettings = {
   // Issue #533: 単勝・複勝の点数の上限もなしにする(既定の2点だと、複勝だけの経路の『分析時の配分が多点』の前提が成り立たない。上限そのものは race-day-pre-race.test.ts と core のテストが調べる)。
   maxWinBetsPerRace: 0,
   maxPlaceBetsPerRace: 0,
+  // Issue #656: 市場に寄せる割合も寄せない(1)にする(このファイルが調べるのは取得の本数と券種の買い目の再現で、寄せると買い目の数・種類が変わり前提が崩れる)。寄せる配分そのものは race-day-close.test.ts(既定の 0.5)と専用のテストが調べる。
+  marketShrinkWeight: 1,
   includeComboOdds: true,
   baseScoreWeightJockey: 0, // 騎手の成績を取らない(取得の本数を固定する。race-day-close.test.ts と同じ理由)
   baseScoreWeightTrainer: 0,
@@ -429,6 +431,41 @@ describe("入力の的中確率の下限(allocationSettings.minHitProb。Issue #
   it("数でない・範囲外の値は壊れた入力として弾く(null)", () => {
     for (const bad of ["0.05", null, Number.NaN, -0.01, 1.01]) {
       expect(parse({ minHitProb: bad }), String(bad)).toBeNull();
+    }
+  });
+});
+
+describe("入力の市場に寄せる割合(allocationSettings.marketShrinkWeight。Issue #656)の検査(parseCloseInput)", () => {
+  const base = {
+    v: 1,
+    kaisaiDate: DATE,
+    horses: [{ umaban: 1, wakuban: 1, horseName: "テスト", prior: 0.3, adjustedProb: 0.3, hadWinOdds: true, hadPlaceOdds: true }],
+    evThreshold: 1.1,
+    baseRoute: "mixed",
+  };
+  const settings = {
+    bankroll: 1000,
+    perRaceCap: 1000,
+    kellyFraction: 0.5,
+    includeComboOdds: true,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
+  };
+  const parse = (extra: Record<string, unknown>) => parseCloseInput(JSON.stringify({ ...base, allocationSettings: { ...settings, ...extra } }));
+
+  it("あれば、そのまま読む(0.3 も 0 も 1 も)", () => {
+    for (const v of [0.3, 0, 1]) expect(parse({ marketShrinkWeight: v })!.allocationSettings.marketShrinkWeight).toBe(v);
+  });
+  it("項目の無い旧い入力は 1(寄せない)で読む。設定の表の旧い行は 0.5 で読む(settings.ts)のとは意図して違う: 寄せる前の Worker が配分した分析は、再計算も寄せずに揃える", () => {
+    expect(parse({})!.allocationSettings.marketShrinkWeight).toBe(1);
+  });
+  it("数でない・範囲外の値は壊れた入力として弾く(null)", () => {
+    for (const bad of ["0.5", null, Number.NaN, -0.01, 1.01]) {
+      expect(parse({ marketShrinkWeight: bad }), String(bad)).toBeNull();
     }
   });
 });

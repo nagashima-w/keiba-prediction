@@ -660,6 +660,7 @@ export async function runAnalysis(
       comboOdds: race.meta.comboOdds,
       allocationSettings: deps.allocationSettings,
       evConfig: deps.evConfig,
+      estimatedPlaceConfig: deps.estimatedPlaceConfig,
       // Issue #470: 分析時の保存は、下限で外れた買い目の「外さなかった場合の賭け金」も記録する。
       recordMissed: true,
     });

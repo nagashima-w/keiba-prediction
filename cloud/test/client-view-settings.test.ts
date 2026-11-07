@@ -43,9 +43,9 @@ describe("設定画面の VNode", () => {
     expect(() => mountAll(renderScreen(buildSettingsModel({ load: { kind: "loading" }, draft: null, errors: {}, save: { kind: "idle" } }), noopActions))).not.toThrow();
   });
 
-  it("入力欄は 33 個(既存の 18〈Issue #470 で的中確率の下限、Issue #533 で単勝・複勝の点数の上限を足した〉+ スコアリングの重み 15。Issue #218・#353)で、すべて data-field に項目名を持つ(FIELD_ORDER の順、そのあとに WEIGHT_FIELD_ORDER の順)", () => {
+  it("入力欄は 34 個(既存の 19〈Issue #656 で市場に寄せる割合を足した。18〈Issue #470 で的中確率の下限、Issue #533 で単勝・複勝の点数の上限を足した〉+ スコアリングの重み 15。Issue #218・#353)で、すべて data-field に項目名を持つ(FIELD_ORDER の順、そのあとに WEIGHT_FIELD_ORDER の順)", () => {
     const fields = inputs(tree());
-    expect(fields.length).toBe(33);
+    expect(fields.length).toBe(34);
     // Issue #581: 並びは節の順(資金と配分 → オッズの取得と券種 → LLM分析 → 上級の設定〈重みを含む〉)。項目の集合は FIELD_ORDER + WEIGHT_FIELD_ORDER と同じ。
     expect([...fields.map((n) => String(n.attrs?.["data-field"]))].sort()).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER].sort());
   });
@@ -78,14 +78,14 @@ describe("設定画面の VNode", () => {
       expect(n.on?.change, String(n.attrs?.["data-field"])).toBeDefined();
       n.on!.change!(`値:${String(n.attrs?.["data-field"])}`);
     }
-    expect(fields.length, "前提: 33 項目すべてに処理がある").toBe(33);
+    expect(fields.length, "前提: 34 項目すべてに処理がある").toBe(34);
     expect(calls).toEqual(fields.map((n) => [String(n.attrs?.["data-field"]), `値:${String(n.attrs?.["data-field"])}`]));
   });
 
   it("Issue #189: 文字を打つ欄(数値の text・textarea)は、change に加えて input でも onSettingsInput を呼ぶ(入力中の値を、保存の直前に取りこぼさない)。checkbox・select は change だけ", () => {
     const calls: [string, string][] = [];
     const actions: ViewActions = { ...noopActions, onSettingsInput: (key, value) => void calls.push([key, value]) };
-    const typed = new Set<string>(["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace", "additionalInstruction", "preRaceOffsetMinutes", ...WEIGHT_FIELD_ORDER]);
+    const typed = new Set<string>(["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace", "marketShrinkWeight", "additionalInstruction", "preRaceOffsetMinutes", ...WEIGHT_FIELD_ORDER]);
     const fields = inputs(tree({}, actions));
     for (const n of fields) {
       const key = String(n.attrs?.["data-field"]);
@@ -98,7 +98,7 @@ describe("設定画面の VNode", () => {
       }
     }
     expect(calls).toEqual(fields.map((n) => String(n.attrs?.["data-field"])).filter((k) => typed.has(k)).map((k) => [k, `入力:${k}`]));
-    expect(typed.size).toBe(9 + 15); // 既存の9項目(Issue #470 で minHitProb、Issue #533 で単勝・複勝の点数の上限を足した)+ 重み15項目(数値の text 欄)
+    expect(typed.size).toBe(10 + 15); // 既存の10項目(Issue #656 で marketShrinkWeight を足した。9項目は(Issue #470 で minHitProb、Issue #533 で単勝・複勝の点数の上限を足した)+ 重み15項目(数値の text 欄)
   });
 
   it("保存ボタン(class=settings-save。文言は「保存」)のクリックは onSettingsSave。保存中は disabled・文言「保存中…」。入力欄も disabled", () => {
@@ -224,7 +224,7 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
     const lastFieldIndex = Math.max(...FIELD_ORDER.map((k) => idx((c) => inputs(c).some((n) => n.attrs?.["data-field"] === k))));
     expect(weightsIndex).toBeGreaterThanOrEqual(lastFieldIndex); // Issue #581: 重みは最後の節(上級の設定)の中にある
     const advancedKeys = inputs(top[weightsIndex] as VNode).map((n) => String(n.attrs?.["data-field"]));
-    expect(advancedKeys).toEqual(["kellyFraction", "preRaceOffsetMinutes", ...WEIGHT_FIELD_ORDER]); // 節の中でも、通常の項目のあとに重み
+    expect(advancedKeys).toEqual(["kellyFraction", "marketShrinkWeight", "preRaceOffsetMinutes", ...WEIGHT_FIELD_ORDER]); // 節の中でも、通常の項目のあとに重み
     expect(weightsIndex).toBeGreaterThan(idx((c) => inputs(c).some((n) => n.attrs?.["data-field"] === "additionalInstruction")));
     expect(saveIndex).toBeGreaterThan(weightsIndex);
     expect(previewIndex).toBeGreaterThan(weightsIndex);
@@ -382,7 +382,7 @@ describe("Issue #201・#396: プロンプトのプレビュー(VNode。文面は
     expect(refresh(normal)[0]!.attrs?.["disabled"]).toBeFalsy();
   });
 
-  it("Issue #580: プレビューは保存の帯より前に置き、帯が画面の末尾(最後の子)。入力欄(data-field)は増えない(33 個のまま)", () => {
+  it("Issue #580: プレビューは保存の帯より前に置き、帯が画面の末尾(最後の子)。入力欄(data-field)は増えない(34 個のまま)", () => {
     const t = tree({ ...OPEN });
     const top = t.children as VNode[];
     const saveIndex = top.findIndex((c) => typeof c !== "string" && byClass(c, "settings-save").length > 0);
@@ -390,7 +390,7 @@ describe("Issue #201・#396: プロンプトのプレビュー(VNode。文面は
     expect(previewIndex).toBeGreaterThan(0);
     expect(saveIndex).toBe(top.length - 1);
     expect(previewIndex).toBeLessThan(saveIndex);
-    expect(inputs(t).length).toBe(33);
+    expect(inputs(t).length).toBe(34);
   });
 
   it("読み込み中・取得の失敗では、プレビューのボタンも出ない", () => {
@@ -461,13 +461,13 @@ describe("Issue #580: 下に固定した保存の帯と、金額・バッジ・�
     const base = draftFromSettings(DEFAULT_CLOUD_SETTINGS);
     const clean = tree({ draft: base });
     expect(byClass(clean, "field-changed")).toEqual([]);
-    expect(byClass(clean, "field").length).toBe(33);
-    expect(byClass(clean, "field-badge").length).toBe(15);
+    expect(byClass(clean, "field").length).toBe(34);
+    expect(byClass(clean, "field-badge").length).toBe(16);
     expect(byClass(clean, "field-badge").map(textOf)).toContain("[既定: ON]");
     const t = tree({ draft: setDraftValue(setDraftValue(base, "kellyFraction", "0.25"), "biasWeightVenue", "2") });
     expect(byClass(t, "field-changed").map(textOf)).toEqual(["変更あり", "変更あり"]);
     expect(byClass(t, "changed").length).toBe(2);
-    expect(byClass(t, "field-badge").length).toBe(15); // 重みにはバッジを付けない
+    expect(byClass(t, "field-badge").length).toBe(16); // 重みにはバッジを付けない
   });
 
   it("書き換え先の選択子(LIVE_SELECTORS)は、描いた木の要素に実際に当たる(class と data-yen-for が一致)。当たらないと打つたびの表示が静かに効かない", () => {

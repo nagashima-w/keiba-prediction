@@ -21,7 +21,7 @@ describe("allocationSettingsOf(Issue #470: 的中確率の下限 minHitProb を�
     expect(allocationSettingsOf(DEFAULT_CLOUD_SETTINGS).maxPlaceBets).toBe(2);
   });
 
-  it("配分に使う13項目(総資金・上限・ケリー係数・下限・単勝と複勝の点数の上限・組合せオッズ・6券種)を、過不足なく持つ", () => {
+  it("配分に使う14項目(総資金・上限・ケリー係数・下限・単勝と複勝の点数の上限・組合せオッズ・6券種)を、過不足なく持つ", () => {
     expect(Object.keys(allocationSettingsOf(DEFAULT_CLOUD_SETTINGS)).sort()).toEqual(
       [
         "bankroll",
@@ -30,6 +30,7 @@ describe("allocationSettingsOf(Issue #470: 的中確率の下限 minHitProb を�
         "minHitProb",
         "maxWinBets",
         "maxPlaceBets",
+        "marketShrinkWeight",
         "includeComboOdds",
         "includeWideInAllocation",
         "includeTrioInAllocation",

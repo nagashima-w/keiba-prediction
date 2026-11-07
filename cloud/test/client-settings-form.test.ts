@@ -42,6 +42,7 @@ const FULL: CloudSettings = {
   minHitProb: 0.12,
   maxWinBetsPerRace: 3,
   maxPlaceBetsPerRace: 4,
+  marketShrinkWeight: 0.3,
   includeComboOdds: true,
   includeWideInAllocation: false,
   includeTrioInAllocation: false,
@@ -85,6 +86,7 @@ describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何
       "minHitProb",
       "maxWinBetsPerRace",
       "maxPlaceBetsPerRace",
+      "marketShrinkWeight",
       "additionalInstruction",
       "clipVariant",
       "analysisModel",
@@ -92,11 +94,11 @@ describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何
     ]);
   });
 
-  it("設定の全項目 = FIELD_ORDER(18項目。Issue #470で的中確率の下限、Issue #533で単勝・複勝の点数の上限を足した)+ WEIGHT_FIELD_ORDER(スコアリングの重み15項目。Issue #218・#353)を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
-    expect(FIELD_ORDER.length).toBe(18);
+  it("設定の全項目 = FIELD_ORDER(19項目。Issue #470で的中確率の下限、Issue #533で単勝・複勝の点数の上限、Issue #656で市場に寄せる割合を足した)+ WEIGHT_FIELD_ORDER(スコアリングの重み15項目。Issue #218・#353)を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
+    expect(FIELD_ORDER.length).toBe(19);
     expect(WEIGHT_FIELD_ORDER.length).toBe(15);
     const all = [...FIELD_ORDER, ...WEIGHT_FIELD_ORDER];
-    expect(new Set(all).size).toBe(33);
+    expect(new Set(all).size).toBe(34);
     expect(all.length).toBe(CLOUD_SETTINGS_KEYS.length);
     expect([...all].sort()).toEqual([...CLOUD_SETTINGS_KEYS].sort());
   });
@@ -509,7 +511,7 @@ describe("buildSettingsModel", () => {
     expect(idle.fields.every((f) => !f.disabled)).toBe(true);
     const saving = buildSettingsModel(READY_INPUT({ save: { kind: "saving" } }));
     expect(saving.saving).toBe(true);
-    expect(saving.fields.length).toBe(18);
+    expect(saving.fields.length).toBe(19);
     expect(saving.fields.every((f) => f.disabled)).toBe(true);
     const saved = buildSettingsModel(READY_INPUT({ save: { kind: "saved" } }));
     expect(saved.saveNotice).toEqual({ tone: "ok", text: "保存しました。次に実行する発走前の分析から使われます。" });

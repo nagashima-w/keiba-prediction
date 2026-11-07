@@ -541,7 +541,7 @@ describe("締切の直前の再計算: 取り直しと再計算(中央)", () => 
         horses: race.horses.map((x) => ({ umaban: x.shutuba.umaban, wakuban: x.shutuba.wakuban, horseName: x.shutuba.name, prior: saved.horses.find((s) => s.umaban === x.shutuba.umaban)!.prior, adjustedProb: saved.horses.find((s) => s.umaban === x.shutuba.umaban)!.adjustedProb })),
         odds: race.odds,
         comboOdds: race.meta.comboOdds,
-        allocationSettings: { bankroll: ALL_ON.bankroll, perRaceCap: ALL_ON.perRaceCap, kellyFraction: ALL_ON.kellyFraction, minHitProb: ALL_ON.minHitProb, maxWinBets: ALL_ON.maxWinBetsPerRace, maxPlaceBets: ALL_ON.maxPlaceBetsPerRace, includeComboOdds: true, includeWideInAllocation: ALL_ON.includeWideInAllocation, includeTrioInAllocation: ALL_ON.includeTrioInAllocation, includeQuinellaInAllocation: ALL_ON.includeQuinellaInAllocation, includeExactaInAllocation: ALL_ON.includeExactaInAllocation, includeTrifectaInAllocation: ALL_ON.includeTrifectaInAllocation, includeBracketQuinellaInAllocation: ALL_ON.includeBracketQuinellaInAllocation },
+        allocationSettings: { bankroll: ALL_ON.bankroll, perRaceCap: ALL_ON.perRaceCap, kellyFraction: ALL_ON.kellyFraction, minHitProb: ALL_ON.minHitProb, maxWinBets: ALL_ON.maxWinBetsPerRace, maxPlaceBets: ALL_ON.maxPlaceBetsPerRace, marketShrinkWeight: ALL_ON.marketShrinkWeight, includeComboOdds: true, includeWideInAllocation: ALL_ON.includeWideInAllocation, includeTrioInAllocation: ALL_ON.includeTrioInAllocation, includeQuinellaInAllocation: ALL_ON.includeQuinellaInAllocation, includeExactaInAllocation: ALL_ON.includeExactaInAllocation, includeTrifectaInAllocation: ALL_ON.includeTrifectaInAllocation, includeBracketQuinellaInAllocation: ALL_ON.includeBracketQuinellaInAllocation },
         evConfig: { threshold: ALL_ON.evThreshold },
       }).allocation;
     };
@@ -743,8 +743,11 @@ describe("締切の直前の再計算: 行わない・失敗の語彙", () => {
     const h = harness();
     await analyze(h);
     const row = h.sql.exec("SELECT input_json FROM race_day_close_input WHERE race_id = ?", RACE).toArray()[0] as { input_json: string };
-    const input = JSON.parse(row.input_json) as { horses: { adjustedProb: number }[] };
+    const input = JSON.parse(row.input_json) as { horses: { adjustedProb: number }[]; allocationSettings: { marketShrinkWeight?: number } };
     input.horses = input.horses.map((x) => ({ ...x, adjustedProb: 0 }));
+    // Issue #656: 市場に寄せると確率 0 は救われて計算できてしまうので、寄せない(1)の入力で『確率が不正』の経路を確かめる。
+    expect(input.allocationSettings.marketShrinkWeight, "前提: 入力に寄せる割合が控えられている").toBe(ALL_ON.marketShrinkWeight);
+    input.allocationSettings.marketShrinkWeight = 1;
     h.sql.exec("UPDATE race_day_close_input SET input_json = ? WHERE race_id = ?", JSON.stringify(input), RACE);
     expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "failed", reason: "compute-failed" });
     expect(h.sink.closes[0]!.payload).toMatchObject({ status: "failed", reason: "compute-failed", allocation: null });
