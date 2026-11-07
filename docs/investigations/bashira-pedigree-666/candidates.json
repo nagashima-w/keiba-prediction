@@ -1,0 +1,100 @@
+{
+ "criteria": {
+  "min_n": 300,
+  "z_min": 3.0,
+  "bh_q": 0.05,
+  "tests": 350
+ },
+ "candidates": [
+  {
+   "family": "F0",
+   "label": "種牡馬(条件なし)",
+   "name": "キンシャサノキセキ",
+   "outcome": "win",
+   "direction": "under",
+   "explore": {
+    "n": 4337,
+    "obs": 292,
+    "exp": 353.3,
+    "ratio": 0.827,
+    "z": -3.62,
+    "q_bh": 0.045188,
+    "win_roi": 0.627,
+    "place_roi": 0.746,
+    "avg_odds": 49.4
+   }
+  },
+  {
+   "family": "F2",
+   "label": "種牡馬 × 重・不良",
+   "name": "ダイワメジャー",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 648,
+    "obs": 132,
+    "exp": 166.2,
+    "ratio": 0.794,
+    "z": -3.43,
+    "q_bh": 0.045188,
+    "win_roi": 1.157,
+    "place_roi": 0.67,
+    "avg_odds": 41.4
+   }
+  },
+  {
+   "family": "F3",
+   "label": "母父 × ダート",
+   "name": "アグネスタキオン",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 3230,
+    "obs": 618,
+    "exp": 688.7,
+    "ratio": 0.897,
+    "z": -3.41,
+    "q_bh": 0.045188,
+    "win_roi": 0.55,
+    "place_roi": 0.643,
+    "avg_odds": 69.2
+   }
+  },
+  {
+   "family": "F5",
+   "label": "種牡馬 × 2歳戦",
+   "name": "ヘニーヒューズ",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 433,
+    "obs": 71,
+    "exp": 50.1,
+    "ratio": 1.418,
+    "z": 3.43,
+    "q_bh": 0.045188,
+    "win_roi": 1.517,
+    "place_roi": 1.05,
+    "avg_odds": 45.4
+   }
+  },
+  {
+   "family": "F5",
+   "label": "種牡馬 × 2歳戦",
+   "name": "ヘニーヒューズ",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 433,
+    "obs": 170,
+    "exp": 135.8,
+    "ratio": 1.252,
+    "z": 4.14,
+    "q_bh": 0.012009,
+    "win_roi": 1.517,
+    "place_roi": 1.05,
+    "avg_odds": 45.4
+   }
+  }
+ ]
+}
