@@ -1,0 +1,475 @@
+{
+ "criteria": {
+  "min_n": 300,
+  "z_min": 3.0,
+  "bh_q": 0.05,
+  "tests": 228
+ },
+ "candidates": [
+  {
+   "id": "H01",
+   "label": "乗り替わり(前走比)",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 24100,
+    "obs": 5223,
+    "exp": 4985.6,
+    "ratio": 1.048,
+    "z": 3.86,
+    "q_bh": 0.001643
+   }
+  },
+  {
+   "id": "H03",
+   "label": "外国人騎手への乗り替わり",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 4717,
+    "obs": 1189,
+    "exp": 1087.5,
+    "ratio": 1.093,
+    "z": 3.58,
+    "q_bh": 0.004198
+   }
+  },
+  {
+   "id": "H07",
+   "label": "馬体重 420kg 未満",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 866,
+    "obs": 401,
+    "exp": 451.1,
+    "ratio": 0.889,
+    "z": -3.47,
+    "q_bh": 0.005843
+   }
+  },
+  {
+   "id": "H07",
+   "label": "馬体重 420kg 未満",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 2939,
+    "obs": 482,
+    "exp": 549.1,
+    "ratio": 0.878,
+    "z": -3.24,
+    "q_bh": 0.010015
+   }
+  },
+  {
+   "id": "H08",
+   "label": "馬体重 520kg 以上",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 3213,
+    "obs": 780,
+    "exp": 703.0,
+    "ratio": 1.109,
+    "z": 3.35,
+    "q_bh": 0.007772
+   }
+  },
+  {
+   "id": "H10",
+   "label": "中 1 週(8〜14 日)",
+   "band": "4-9",
+   "outcome": "win",
+   "direction": "under",
+   "explore": {
+    "n": 11116,
+    "obs": 482,
+    "exp": 580.2,
+    "ratio": 0.831,
+    "z": -4.22,
+    "q_bh": 0.000474
+   }
+  },
+  {
+   "id": "H11",
+   "label": "休み明け(180 日以上)",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 1106,
+    "obs": 478,
+    "exp": 556.9,
+    "ratio": 0.858,
+    "z": -4.83,
+    "q_bh": 5.3e-05
+   }
+  },
+  {
+   "id": "H11",
+   "label": "休み明け(180 日以上)",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 3735,
+    "obs": 115,
+    "exp": 175.3,
+    "ratio": 0.656,
+    "z": -4.7,
+    "q_bh": 7.4e-05
+   }
+  },
+  {
+   "id": "H12",
+   "label": "距離延長 400m 以上",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 6112,
+    "obs": 1042,
+    "exp": 1149.7,
+    "ratio": 0.906,
+    "z": -3.59,
+    "q_bh": 0.004196
+   }
+  },
+  {
+   "id": "H12",
+   "label": "距離延長 400m 以上",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 8479,
+    "obs": 283,
+    "exp": 367.8,
+    "ratio": 0.77,
+    "z": -4.56,
+    "q_bh": 0.000108
+   }
+  },
+  {
+   "id": "H15",
+   "label": "前走で 4 角から 5 頭以上押し上げ",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 5985,
+    "obs": 385,
+    "exp": 331.2,
+    "ratio": 1.162,
+    "z": 3.06,
+    "q_bh": 0.015977
+   }
+  },
+  {
+   "id": "H19",
+   "label": "柵 B〜D × 7〜8 枠(芝)",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 5512,
+    "obs": 216,
+    "exp": 265.0,
+    "ratio": 0.815,
+    "z": -3.11,
+    "q_bh": 0.014183
+   }
+  },
+  {
+   "id": "H20",
+   "label": "柵 A × 1〜2 枠(芝。H18 の対照)",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 3577,
+    "obs": 216,
+    "exp": 158.0,
+    "ratio": 1.367,
+    "z": 4.75,
+    "q_bh": 6.5e-05
+   }
+  },
+  {
+   "id": "H21",
+   "label": "生産者 ノーザンファーム",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 8655,
+    "obs": 2055,
+    "exp": 1934.5,
+    "ratio": 1.062,
+    "z": 3.17,
+    "q_bh": 0.011991
+   }
+  },
+  {
+   "id": "H21",
+   "label": "生産者 ノーザンファーム",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 8655,
+    "obs": 4718,
+    "exp": 4563.6,
+    "ratio": 1.034,
+    "z": 3.39,
+    "q_bh": 0.007256
+   }
+  },
+  {
+   "id": "H25",
+   "label": "見習騎手の減量",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 4542,
+    "obs": 2250,
+    "exp": 2378.7,
+    "ratio": 0.946,
+    "z": -3.89,
+    "q_bh": 0.001522
+   }
+  },
+  {
+   "id": "H25",
+   "label": "見習騎手の減量",
+   "band": "10+",
+   "outcome": "win",
+   "direction": "under",
+   "explore": {
+    "n": 17343,
+    "obs": 111,
+    "exp": 152.4,
+    "ratio": 0.729,
+    "z": -3.37,
+    "q_bh": 0.007405
+   }
+  },
+  {
+   "id": "H26",
+   "label": "女性騎手",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 1222,
+    "obs": 157,
+    "exp": 242.9,
+    "ratio": 0.646,
+    "z": -6.28,
+    "q_bh": 0.0
+   }
+  },
+  {
+   "id": "H26",
+   "label": "女性騎手",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 806,
+    "obs": 22,
+    "exp": 44.2,
+    "ratio": 0.497,
+    "z": -3.46,
+    "q_bh": 0.005965
+   }
+  },
+  {
+   "id": "H28",
+   "label": "地方所属 (地)",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 7832,
+    "obs": 299,
+    "exp": 387.2,
+    "ratio": 0.772,
+    "z": -4.63,
+    "q_bh": 9.3e-05
+   }
+  },
+  {
+   "id": "H30",
+   "label": "関西馬の関東遠征",
+   "band": "4-9",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 7990,
+    "obs": 508,
+    "exp": 428.3,
+    "ratio": 1.186,
+    "z": 3.98,
+    "q_bh": 0.0011
+   }
+  },
+  {
+   "id": "H30",
+   "label": "関西馬の関東遠征",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 7990,
+    "obs": 1829,
+    "exp": 1666.2,
+    "ratio": 1.098,
+    "z": 4.57,
+    "q_bh": 0.000108
+   }
+  },
+  {
+   "id": "H30",
+   "label": "関西馬の関東遠征",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 5290,
+    "obs": 355,
+    "exp": 286.8,
+    "ratio": 1.238,
+    "z": 4.17,
+    "q_bh": 0.000536
+   }
+  },
+  {
+   "id": "H31",
+   "label": "関東馬の関西遠征",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 1561,
+    "obs": 691,
+    "exp": 793.1,
+    "ratio": 0.871,
+    "z": -5.26,
+    "q_bh": 7e-06
+   }
+  },
+  {
+   "id": "H31",
+   "label": "関東馬の関西遠征",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 4695,
+    "obs": 833,
+    "exp": 920.9,
+    "ratio": 0.905,
+    "z": -3.29,
+    "q_bh": 0.008796
+   }
+  },
+  {
+   "id": "H32",
+   "label": "芝→ダート替わり",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 2088,
+    "obs": 930,
+    "exp": 1092.5,
+    "ratio": 0.851,
+    "z": -7.26,
+    "q_bh": 0.0
+   }
+  },
+  {
+   "id": "H32",
+   "label": "芝→ダート替わり",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 6947,
+    "obs": 1173,
+    "exp": 1367.4,
+    "ratio": 0.858,
+    "z": -5.98,
+    "q_bh": 0.0
+   }
+  },
+  {
+   "id": "H33",
+   "label": "ダート→芝替わり",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 3644,
+    "obs": 572,
+    "exp": 656.7,
+    "ratio": 0.871,
+    "z": -3.72,
+    "q_bh": 0.002698
+   }
+  },
+  {
+   "id": "H34",
+   "label": "牝馬",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 16235,
+    "obs": 8287,
+    "exp": 8645.4,
+    "ratio": 0.959,
+    "z": -5.76,
+    "q_bh": 0.0
+   }
+  },
+  {
+   "id": "H35",
+   "label": "セン馬",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 3937,
+    "obs": 242,
+    "exp": 197.1,
+    "ratio": 1.228,
+    "z": 3.31,
+    "q_bh": 0.0086
+   }
+  },
+  {
+   "id": "H36",
+   "label": "7 歳以上",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 5198,
+    "obs": 237,
+    "exp": 290.1,
+    "ratio": 0.817,
+    "z": -3.23,
+    "q_bh": 0.010015
+   }
+  }
+ ]
+}
