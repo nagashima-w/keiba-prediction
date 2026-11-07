@@ -12,7 +12,7 @@ import type { RaceRecord, RecordHorse } from "../../packages/core/src/scraper/ra
 
 export const FLAG_NAMES = [
   "noprev", "turf2dirt", "dirt2turf", "rest180", "mid1w", "distUp400", "filly", "age7", "wLight", "wHeavy",
-  "eastInWest", "westInEast", "foreignJC", "foreignJCnoLemaire", "gain4",
+  "eastInWest", "westInEast", "foreignJC", "foreignJCnoLemaire", "foreignJCnoLD", "gain4",
 ] as const;
 export type FlagName = (typeof FLAG_NAMES)[number];
 export type Flags = Record<FlagName, 0 | 1>;
@@ -47,9 +47,17 @@ export function daysBetween(a: string, b: string): number {
   return Math.round((t(b) - t(a)) / 86400000);
 }
 
-/** hist の騎手名は 3 文字に切れている。カタカナだけの名前を外国人騎手とみなす(日本在住か短期免許かの区別はできない)。 */
+/** ルメール(C.ルメール)と M.デムーロの jockeyId。2015 年に通年免許を取った(hist の名前は 3 文字に切れ、表記もゆれるので ID で見分ける)。 */
+export const LEMAIRE_ID = "05339";
+export const M_DEMUROU_ID = "05212";
+
+/**
+ * hist の騎手名は 3 文字に切れている。外国人騎手とみなすのは、(1) カタカナだけの名前(ルメー・レーン)、
+ * (2) 同姓の区別に付く全角の頭文字 + カタカナ(Ｍデム・Ｃ．ル・Ａルメ・Ｈドイ)。日本人騎手は漢字なのでどちらにも当たらない。
+ * 日本在住か短期免許かの区別はできない。
+ */
 export function isForeignName(name: string | null): boolean {
-  return name !== null && /^[ァ-ヶー]+$/.test(name);
+  return name !== null && /^(?:[Ａ-Ｚ][．.]?)?[ァ-ヶー]+$/.test(name);
 }
 
 const b = (x: boolean): 0 | 1 => (x ? 1 : 0);
@@ -73,7 +81,8 @@ export function computeFlags(cur: CurInfo, prev: RunInfo | null): Flags {
     eastInWest: b(cur.trainerArea === "美浦" && cur.venueName !== null && WEST_VENUES.has(cur.venueName)),
     westInEast: b(cur.trainerArea === "栗東" && cur.venueName !== null && EAST_VENUES.has(cur.venueName)),
     foreignJC: b(foreignJC),
-    foreignJCnoLemaire: b(foreignJC && !(cur.jockeyName ?? "").startsWith("ルメ")),
+    foreignJCnoLemaire: b(foreignJC && cur.jockeyId !== LEMAIRE_ID),
+    foreignJCnoLD: b(foreignJC && cur.jockeyId !== LEMAIRE_ID && cur.jockeyId !== M_DEMUROU_ID),
     gain4: b(flatPrev && prev!.pos4 !== null && prev!.finish !== null && prev!.pos4 - prev!.finish >= 5),
   };
 }
@@ -82,23 +91,23 @@ export type FeatureRow = { raceId: string; umaban: number } & Flags;
 
 const ran = (h: RecordHorse): boolean => h.finishStatus !== "取消" && h.finishStatus !== "除外";
 
-/** 時間順に走査して、平地のレースの 1 頭 1 行を出す。障害のレースは行を出さないが、その馬の「直近の 1 走」には入れる。取消・除外は入れない。 */
+/**
+ * 時間順に走査して、1 頭 1 行を出す。取消・除外は行を出さず、「直近の 1 走」にも入れない。
+ * 障害のレースにも行を出す(#649 の fit.py が障害のレースを除かないので、足す前と同じ行の集合にそろえる。障害のレースの芝ダ替わりは 0)。
+ */
 export function buildFeatureRows(records: readonly RaceRecord[]): FeatureRow[] {
   const sorted = [...records].sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.raceId < y.raceId ? -1 : 1));
   const last = new Map<string, RunInfo>();
   const out: FeatureRow[] = [];
   for (const rec of sorted) {
     const horses = rec.horses.filter(ran);
-    const jump = rec.courseType === "障";
-    if (!jump) {
-      for (const h of horses) {
-        const prev = h.horseId === null ? null : (last.get(h.horseId) ?? null);
-        const cur: CurInfo = {
-          date: rec.date, venueName: rec.venueName, courseType: rec.courseType ?? "", distance: rec.distance ?? 0, sex: h.sex, age: h.age,
-          bodyWeight: h.bodyWeight, trainerArea: h.trainerArea, jockeyId: h.jockeyId, jockeyName: h.jockeyName,
-        };
-        out.push({ raceId: rec.raceId, umaban: h.umaban, ...computeFlags(cur, prev) });
-      }
+    for (const h of horses) {
+      const prev = h.horseId === null ? null : (last.get(h.horseId) ?? null);
+      const cur: CurInfo = {
+        date: rec.date, venueName: rec.venueName, courseType: rec.courseType ?? "", distance: rec.distance ?? 0, sex: h.sex, age: h.age,
+        bodyWeight: h.bodyWeight, trainerArea: h.trainerArea, jockeyId: h.jockeyId, jockeyName: h.jockeyName,
+      };
+      out.push({ raceId: rec.raceId, umaban: h.umaban, ...computeFlags(cur, prev) });
     }
     for (const h of horses) {
       if (h.horseId === null) continue;

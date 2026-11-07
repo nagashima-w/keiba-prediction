@@ -19,9 +19,10 @@ FEATURE_START, HOLDOUT_START, LAST_MONTH, MIN_FIELD, LR_C = '2025-02', '2026-08'
 OBJS = {'win': 1, 'top2': 2, 'top3': 3}
 BOOT, SEED = 1000, 664
 FLAGS = ['noprev', 'turf2dirt', 'dirt2turf', 'rest180', 'mid1w', 'distUp400', 'filly', 'age7', 'wLight', 'wHeavy',
-         'eastInWest', 'westInEast', 'foreignJC', 'foreignJCnoLemaire', 'gain4']
+         'eastInWest', 'westInEast', 'foreignJC', 'foreignJCnoLemaire', 'foreignJCnoLD', 'gain4']
 MK = ['mk_▲', 'mk_△', 'mk_☆', 'mk_◇', 'mk_★']
-PREV_BASED = {'turf2dirt', 'dirt2turf', 'rest180', 'mid1w', 'distUp400', 'foreignJC', 'foreignJCnoLemaire', 'gain4'}
+PREV_BASED = {'turf2dirt', 'dirt2turf', 'rest180', 'mid1w', 'distUp400', 'foreignJC', 'foreignJCnoLemaire', 'foreignJCnoLD', 'gain4'}
+VARIANT = {'foreignJCnoLemaire', 'foreignJCnoLD'}   # 参考表だけの版(決め方に使う all には入れない)
 
 repro = sys.argv[1] == '--repro'
 args = sys.argv[2:] if repro else sys.argv[1:]
@@ -118,14 +119,13 @@ def normalize(s, k):
         lo = np.where(big, lo, c)
     return np.clip(1 / (1 + np.exp(-(s + ((lo + hi) / 2)[rid]))), 1e-6, 1 - 1e-6)
 
-ALL_ADD = [f for f in FLAGS if f != 'foreignJCnoLemaire'] + MK
-NO_MK = [f for f in FLAGS if f != 'foreignJCnoLemaire']
+ALL_ADD = [f for f in FLAGS if f not in VARIANT] + MK
+NO_MK = [f for f in FLAGS if f not in VARIANT]
 MODELS = {}
 for odds, base in (('noodds', BASE_NO), ('odds', BASE_L)):
     MODELS[f'{odds}_base'] = base
     MODELS[f'{odds}_all'] = base + ALL_ADD
     # 単独追加(参考。決め方には使わない)
-    MODELS[f'{odds}_all_noLemaire'] = base + [('foreignJCnoLemaire' if f == 'foreignJC' else f) for f in ALL_ADD]
     MODELS[f'{odds}_all_noMk'] = base + NO_MK
     MODELS[f'{odds}_only_mk'] = base + MK
     for f in FLAGS:
@@ -168,7 +168,7 @@ for name in MODELS:
     res['logloss'][name] = {obj: float(race_loss[(name, obj)].sum() / nh.sum()) for obj in OBJS}
     res['bands'][name] = {obj: band_table(name, obj) for obj in OBJS}
 for odds in ('noodds', 'odds'):
-    for add in ['all', 'all_noLemaire', 'all_noMk', 'only_mk'] + [f'only_{f}' for f in FLAGS if f != 'noprev']:
+    for add in ['all', 'all_noMk', 'only_mk'] + [f'only_{f}' for f in FLAGS if f != 'noprev']:
         res['pairs'][f'{odds}_{add}'] = {obj: dict(zip(('diff', 'lo', 'hi'), diff(f'{odds}_{add}', f'{odds}_base', obj))) for obj in OBJS}
 
 os.makedirs(last, exist_ok=True)

@@ -23,7 +23,10 @@ describe("daysBetween", () => {
 });
 
 describe("isForeignName(カタカナだけの騎手名)", () => {
-  it.each([["ルメー", true], ["レーン", true], ["ディー", true], ["田中", false], ["鮫島駿", false], ["", false], [null, false], ["Aルメ", false]])(
+  it.each([
+    ["ルメー", true], ["レーン", true], ["ディー", true], ["Ｍデム", true], ["Ｍ．デ", true], ["Ｃ．ル", true], ["Ａルメ", true], ["Ｈドイ", true],
+    ["田中", false], ["鮫島駿", false], ["", false], [null, false], ["Aルメ", false], ["Ｍ", false], ["Ｍ田中", false],
+  ])(
     "%s → %s", (n, e) => expect(isForeignName(n as string | null)).toBe(e));
 });
 
@@ -31,7 +34,7 @@ describe("computeFlags: 前走なし", () => {
   it("前走が無いとき noprev=1 で、前走を使う旗はすべて 0", () => {
     const f = computeFlags(cur(), null);
     expect(f.noprev).toBe(1);
-    for (const k of ["turf2dirt", "dirt2turf", "rest180", "mid1w", "distUp400", "foreignJC", "foreignJCnoLemaire", "gain4"] as const) expect(f[k]).toBe(0);
+    for (const k of ["turf2dirt", "dirt2turf", "rest180", "mid1w", "distUp400", "foreignJC", "foreignJCnoLemaire", "foreignJCnoLD", "gain4"] as const) expect(f[k]).toBe(0);
   });
   it("前走があれば noprev=0", () => expect(computeFlags(cur(), prev()).noprev).toBe(0));
 });
@@ -95,12 +98,28 @@ describe("computeFlags: 外国人騎手への乗り替わり", () => {
   it("前走も同じ騎手なら乗り替わりではない", () => expect(computeFlags(cur({ jockeyId: "F1", jockeyName: "レーン" }), prev({ jockeyId: "F1" })).foreignJC).toBe(0));
   it("日本人騎手への乗り替わりは 0", () => expect(computeFlags(cur({ jockeyId: "J2", jockeyName: "田中" }), prev({ jockeyId: "J1" })).foreignJC).toBe(0));
   it("前走の騎手IDが無ければ乗り替わりは判定できず 0", () => expect(computeFlags(cur({ jockeyId: "F1", jockeyName: "レーン" }), prev({ jockeyId: null })).foreignJC).toBe(0));
-  it("ルメー騎手は foreignJC=1 だが、ルメー除きの版は 0", () => {
-    const f = computeFlags(cur({ jockeyId: "L1", jockeyName: "ルメー" }), prev({ jockeyId: "J1" }));
-    expect([f.foreignJC, f.foreignJCnoLemaire]).toEqual([1, 0]);
+  it("Ｍデムは名前がカタカナだけでなくても外国人(jockeyId 05212)", () =>
+    expect(computeFlags(cur({ jockeyId: "05212", jockeyName: "Ｍデム" }), prev({ jockeyId: "J1" })).foreignJC).toBe(1));
+  it("ルメール(05339)は foreignJC=1 だが、ルメール除きの版・ルメールとＭデムーロ除きの版は 0", () => {
+    const f = computeFlags(cur({ jockeyId: "05339", jockeyName: "ルメー" }), prev({ jockeyId: "J1" }));
+    expect([f.foreignJC, f.foreignJCnoLemaire, f.foreignJCnoLD]).toEqual([1, 0, 0]);
   });
-  it("ルメー以外の外国人はルメー除きの版でも 1", () =>
-    expect(computeFlags(cur({ jockeyId: "F1", jockeyName: "レーン" }), prev({ jockeyId: "J1" })).foreignJCnoLemaire).toBe(1));
+  it("名前が「Ｃ．ル」でも jockeyId 05339 ならルメール", () =>
+    expect(computeFlags(cur({ jockeyId: "05339", jockeyName: "Ｃ．ル" }), prev({ jockeyId: "J1" })).foreignJCnoLemaire).toBe(0));
+  it("Ｍデムーロ(05212)は、ルメール除きでは 1、ルメールとＭデムーロ除きでは 0", () => {
+    const f = computeFlags(cur({ jockeyId: "05212", jockeyName: "Ｍデム" }), prev({ jockeyId: "J1" }));
+    expect([f.foreignJC, f.foreignJCnoLemaire, f.foreignJCnoLD]).toEqual([1, 1, 0]);
+  });
+  it("弟のＣデムーロ(05473。短期免許)は、ルメールとＭデムーロ除きの版でも 1(兄だけを ID で除く)", () => {
+    const f = computeFlags(cur({ jockeyId: "05473", jockeyName: "Ｃデム" }), prev({ jockeyId: "J1" }));
+    expect([f.foreignJC, f.foreignJCnoLemaire, f.foreignJCnoLD]).toEqual([1, 1, 1]);
+  });
+  it("Ａルメ(05659。ルメールではない)と、その他の外国人は、どの版でも 1", () => {
+    for (const [id, nm] of [["05659", "Ａルメ"], ["05585", "レーン"]] as const) {
+      const f = computeFlags(cur({ jockeyId: id, jockeyName: nm }), prev({ jockeyId: "J1" }));
+      expect([f.foreignJC, f.foreignJCnoLemaire, f.foreignJCnoLD]).toEqual([1, 1, 1]);
+    }
+  });
 });
 
 describe("computeFlags: 前走で 4 角から押し上げ", () => {
@@ -123,7 +142,7 @@ const race = (o: Record<string, unknown>, horses: RecordHorse[]): RaceRecord =>
   ({ raceId: "r", date: "2025-05-04", venueName: "東京", courseType: "芝", distance: 1600, horses, ...o }) as unknown as RaceRecord;
 
 describe("buildFeatureRows: 時間順の走査", () => {
-  it("初出走は noprev=1、2走目は前走を引く。取消・除外の馬は戦績に入れない。障害のレースの行は出さないが戦績には入れる", () => {
+  it("初出走は noprev=1、2走目は前走を引く。取消・除外の馬は戦績に入れない。障害のレースにも行を出し(fit.py が障害を除かないため)、戦績にも入れる", () => {
     const recs = [
       race({ raceId: "r3", date: "2025-12-01", courseType: "ダ", distance: 2000 }, [horse({ umaban: 1, horseId: "H1" })]),
       race({ raceId: "r1", date: "2025-05-04" }, [horse({ umaban: 1, horseId: "H1", passing: [10, 10, 10, 9], finish: 3 }), horse({ umaban: 2, horseId: "H2", finishStatus: "取消", finish: null })]),
@@ -132,7 +151,9 @@ describe("buildFeatureRows: 時間順の走査", () => {
     const rows = buildFeatureRows(recs);
     const key = (id: string, u: number) => rows.find((r) => r.raceId === id && r.umaban === u)!;
     expect(key("r1", 1).noprev).toBe(1);
-    expect(rows.find((r) => r.raceId === "r2")).toBeUndefined(); // 障害の行は出さない
+    expect(key("r2", 1).noprev).toBe(0); // 障害のレースの行もある。前走は r1(芝・平地)
+    expect([key("r2", 1).turf2dirt, key("r2", 1).dirt2turf, key("r2", 1).distUp400]).toEqual([0, 0, 1]); // 今走が障害なら芝ダ替わりは 0。距離は 3000−1600
+    expect(rows.find((r) => r.raceId === "r1" && r.umaban === 2)).toBeUndefined(); // 取消の馬の行は出さない
     expect(key("r3", 1).noprev).toBe(0);
     expect(key("r3", 1).rest180).toBe(1); // 前走は r2(障害)の 2025-06-01 で、183 日 → 180 日以上
   });
