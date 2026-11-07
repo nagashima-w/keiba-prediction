@@ -6,6 +6,7 @@
 使い方:
   explore <raw_dir> <out_dir>                   探索。候補を out_dir/candidates.json に書く
   confirm <raw_dir> <candidates.json> <out_dir> 確認。固定した候補に Holm の補正を当てる
+  classcheck <cond.json> <base.json>            参考。クラス × 人気順の形で引いた 1 頭分を、同じ形の基準で評価する
 
 raw_dir のファイル:
   基準(#663 の形): ALL, ALL_TURF, H12, H32, HEAVY, JUV。columns は [race_condition, win_odds_rank, starts, wins, top3, win_return, place_return, avg_odds]
@@ -255,11 +256,44 @@ def print_table(table: list[dict]) -> None:
               f"{a['win_roi']}\t{a['place_roi']}\t{a['avg_odds']}")
 
 
+def cmd_classcheck(cond_path: str, base_path: str) -> None:
+    """参考: #663 の形(クラス × 人気順)で引いた 1 頭分の集計を、同じ形の基準に対してクラス × 人気順の層で評価する(計画 §5.3)。
+    #663 の analyze.py の evaluate を使い、帯ごとと全体(帯を足し上げたもの)を出す。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "analyze663", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bashira-blindspots-663", "analyze.py"))
+    a663 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(a663)
+    with open(cond_path, encoding="utf-8") as f:
+        cond = a663.to_strata(json.load(f))
+    with open(base_path, encoding="utf-8") as f:
+        base = a663.to_strata(json.load(f))
+    rows = a663.evaluate(cond, base)
+    tot = {"n": 0, "win_obs": 0, "win_exp": 0.0, "win_var": 0.0, "top3_obs": 0, "top3_exp": 0.0, "top3_var": 0.0}
+    rest = a663.subtract(base, cond)
+    for key, c in cond.items():
+        r = rest.get(key)
+        if r is None or r["starts"] == 0:
+            continue
+        tot["n"] += c["starts"]
+        for k, field in (("win", "wins"), ("top3", "top3")):
+            p = r[field] / r["starts"]
+            tot[f"{k}_obs"] += c[field]; tot[f"{k}_exp"] += c["starts"] * p; tot[f"{k}_var"] += c["starts"] * p * (1 - p)
+    out = {"bands": rows, "all": {"n": tot["n"]}}
+    for k in ("win", "top3"):
+        z = (tot[f"{k}_obs"] - tot[f"{k}_exp"]) / math.sqrt(tot[f"{k}_var"]) if tot[f"{k}_var"] > 0 else 0.0
+        out["all"][k] = {"obs": tot[f"{k}_obs"], "exp": round(tot[f"{k}_exp"], 1),
+                         "ratio": round(tot[f"{k}_obs"] / tot[f"{k}_exp"], 3) if tot[f"{k}_exp"] > 0 else None, "z": round(z, 2)}
+    print(json.dumps(out, ensure_ascii=False, indent=1))
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 4 and sys.argv[1] == "explore":
         cmd_explore(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 5 and sys.argv[1] == "confirm":
         cmd_confirm(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif len(sys.argv) >= 4 and sys.argv[1] == "classcheck":
+        cmd_classcheck(sys.argv[2], sys.argv[3])
     else:
         print(__doc__)
         sys.exit(2)
