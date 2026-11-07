@@ -98,6 +98,7 @@ import {
   buildAnalysisRows,
   type AdjustedHorse,
 } from "./analysis-record.js";
+import { buildShadowRecord, type ShadowRecord } from "./shadow-record.js";
 
 /** runAnalysis に注入する依存。すべて関数注入でモック可能。 */
 export interface AnalysisPipelineDeps {
@@ -136,6 +137,14 @@ export interface AnalysisPipelineDeps {
   readonly estimatedPlaceConfig?: EstimatedPlaceConfig;
   /** scorer設定。省略時は core の既定。 */
   readonly scorerConfig?: ScorerConfig;
+  /**
+   * 統計モデルの並走(影の計算。Issue #649)をするか。省略・false は計算しない(従来どおり)。true のとき、中央で単勝オッズが予想でない(result・middle)分析だけ、
+   * 学習済みのロジスティック回帰の勝率・2着内率・3着内率と、#653 の印を `AnalysisRecord.shadow` に載せる。**買い目・配分・EV・画面・LLM のどれにも使わない**
+   * (プロンプトの組み立て・配分の計算より後ろで作り、記録に載せるだけ。`analysis-pipeline-shadow.test.ts` が固定する)。計算が throw しても分析は続ける(`onShadowError` に渡す)。
+   */
+  readonly shadow?: boolean;
+  /** 影の計算が throw したときの通知(警告の材料。分析は止めない)。 */
+  readonly onShadowError?: (info: { readonly raceId: RaceId; readonly message: string }) => void;
   /** LLMスキップ理由(analyze=null のとき結果メタに載せる文言)。 */
   readonly llmSkipReason?: string;
   /**
@@ -667,6 +676,17 @@ export async function runAnalysis(
     comboStats = computed.comboStats;
   }
 
+  // (6b) 統計モデルの並走(影の計算。Issue #649)。LLM のプロンプトの組み立て・EV・配分の計算が済んだあとに作り、保存の記録に載せるだけ(それらには渡さない)。
+  // 予想オッズ(発売前)と地方では作らない(学習が中央の確定に近いオッズ。発売前の予想値は入力に使えない)。失敗は握って分析を続ける。
+  let shadow: ShadowRecord | undefined;
+  if (deps.shadow === true && venueKind === "central" && race.odds.oddsStatus !== "yoso") {
+    try {
+      shadow = buildShadowRecord(race, priorByUmaban, analysisDate);
+    } catch (error) {
+      deps.onShadowError?.({ raceId, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   // (7) 保存。
   const analyzedAt = now().toISOString();
   notify({
@@ -693,6 +713,7 @@ export async function runAnalysis(
     adjustedByUmaban,
     evByUmaban,
     allocation,
+    shadow,
   });
   await deps.saveAnalysis(record);
 

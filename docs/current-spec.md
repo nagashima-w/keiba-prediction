@@ -1513,6 +1513,18 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **値の突き合わせ**: 手元の過去の結果 7,718 レース(2024-08-10〜2026-11-01)に同じ式をかけると、係数が [2.857, 0.922, −0.556]、荻野極が +0.041(1,330 騎乗)、松若が +0.031(1,150 騎乗)で、`explore.py` の結果と小数第 3 位まで一致する。
 - **検査**: `cloud/test/market-edge-calc.test.ts`(純関数。Python の参照実装との突き合わせ)・`market-edge-aggregate.test.ts`・`market-edge-core.test.ts`・`market-edge-repository.integration.test.ts`・`market-edge-budget.integration.test.ts`、`scripts/test/cloud-config-guard.test.ts`(#642 の節)、`scripts/test/cloud-d1-schema.test.ts`。
 
+### 統計モデルの並走(影の計算。#649 段階 2・3。**版数は 1.44.0 のまま**〈凍結〉)
+発走前の分析のときだけ、学習済みのロジスティック回帰で各馬の勝率・2着内率・3着内率を計算し、D1 の別の表に記録する。**買い目・配分・EV・画面・LLM のプロンプトのどれにも使わない**(結果が出たあとに、いまのやり方と並べて比べるための記録)。
+- **モデル**(`packages/core/src/ev/stat-shadow.ts`・係数は自動生成の `stat-shadow-coef.ts`): 目的(勝率・2着内率・3着内率)ごとの標準化 + L2 のロジスティック回帰を 2 つ。版の名前は `lr649-odds-2026-11-07`(オッズ入り)と `lr649-noodds-2026-11-07`(オッズなし)。係数は #649 の保留を開けた評価と同じ学習(中央 2025-02〜2026-10、6,113 レース・83,806 頭)。係数を学び直したら新しい名前にして、古い名前の行は書き換えない。
+  - 特徴量: logit(q)(オッズ入りだけ。q = 1/単勝オッズをレース内で合計 1 に割り戻した値)・ln(頭数)・logit(prior。1e-4 で切る)・15 項目の寄与(名前の昇順。無ければ 0)。分析の時点の単勝オッズを使う(学習は確定オッズ。市場側に有利な比べ方である点は #649 のコメントのとおり)。
+  - 確率にする: 馬ごとのスコアに全馬共通のロジットを足して、合計を 1・2・3 に合わせ、[1e-6, 1−1e-6] に切る。
+  - 計算しない場合: 頭数 5 未満(学習が 5 頭以上だけ)・地方・単勝オッズが予想(yoso)・オッズが 1 頭でも欠けるレースはオッズ入りの版だけ省く(オッズなしの版は作る)。
+- **印**(`stat-shadow-flags.ts`。#653 の探索の定義に合わせた。買い目には使わない): 休み明け(前走から 181 日以上)・芝ダ替わり・前走で逃げた(前走の最初のコーナーの通過順 ÷ 前走の頭数 ≤ 0.125)・人気薄(q < 0.05)で直近 3 走の平均着順が 11.5 以上。1/0、前走が分からない馬は 4 つとも null。
+- **配線**: `runAnalysis` の `deps.shadow`(cloud の発走前の計算だけ true)。プロンプトの組み立て・EV・配分の計算のあとに `AnalysisRecord.shadow` を作る(`analysis/shadow-record.ts`)。計算が throw しても分析は続け、`onShadowError` が警告にする。
+- **保存**(migration 0040。追加のみ): `analysis_shadow_horses`(分析 × 馬。入力のオッズ・q・印)と `analysis_shadow_probs`(分析 × 馬 × モデル。3 つの確率)。どちらも `WITHOUT ROWID`・副索引なし。**分析の保存の batch には入れず**、保存が成功して id が決まったあとに別の呼び出しで書く(`cloud/src/analysis-shadow-repository.ts`)。書けなくても分析の保存は成功のままで、`SaveResult.shadow = "failed"` を DO が警告にする(表が無い旧スキーマでも分析は止まらない)。
+- **書き込み行数の見積もり**: 1 分析で最大 3N 行(N = 頭数)。本番の分析の実測(2026-07-19〜11-03 の 61 開催日)で、1 日あたり中央値 16 レース・209 頭、最大 36 レース・495 頭 → 最大の日で約 1,485 行(1 日 10 万行の約 1.5%)。
+- **検査**: `packages/core/test/ev/stat-shadow.test.ts`(Python の sklearn で計算した値との突き合わせ 12 レース)・`stat-shadow-flags.test.ts`(#653 のスクリプトとの突き合わせと境界)・`test/analysis/analysis-pipeline-shadow*.test.ts`(既存の出力が変わらないこと・失敗しても分析が続くこと)・`cloud/test/analysis-shadow.integration.test.ts`(ローカルの D1 への書き込みと、書けなくても分析が成功すること)。学習の再現は `scripts/stat-model-649/`(`export_coef.py`・`gen_coef_ts.py`)。
+
 ### クラウド版の D1 の容量の見積もり(#171。再現: `pnpm tsx scripts/measure-d1-size.ts`)
 Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 500 MB〈Free〉)。見積もりの手順を残す(#147 の「再現手段がない」への対応)。
 **入力はすべてリポジトリ内**(中央16頭の 202603020211 のフィクスチャ・LLM の実応答 36 本・戦績フィクスチャ5頭)。**乱数は固定の種で、同じ N なら出力は完全に同じ**

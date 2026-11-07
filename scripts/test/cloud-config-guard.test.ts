@@ -1566,6 +1566,10 @@ describe("Issue #642: 騎手・調教師の指標の毎晩の計算(RaceMarketEd
     expect(Object.keys(sites(/\b(race_market_rows|market_edge_meta|market_edge)\b/g)).sort()).toEqual(["market-edge-repository.ts"]);
     expect(Object.keys(sites(/\bmarket_version\b/g)).sort()).toEqual(["market-edge-repository.ts", "race-archive-repository.ts"]);
   });
+
+  it("Issue #649: 統計モデルの並走の表(analysis_shadow_horses・analysis_shadow_probs)に触れるのは analysis-shadow-repository.ts だけ(書き込みは D1AnalysisStore がそこの saveShadow を呼ぶ)。買い目・配分・画面・LLM の経路からは読まない", () => {
+    expect(Object.keys(sites(/\b(analysis_shadow_horses|analysis_shadow_probs)\b/g)).sort()).toEqual(["analysis-shadow-repository.ts"]);
+  });
 });
 
 describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM にも出ず、他の DO・cron と干渉せず、Worker は D1・R2 に触れない", () => {

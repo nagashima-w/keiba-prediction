@@ -466,6 +466,33 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     indexes: [],
   },
+  // 0040 の中身(Issue #649)。統計モデルの並走(影の計算)の記録。どちらも WITHOUT ROWID(主キーが行の実体。副索引なし = 書き込みの行を増やさない)。
+  analysis_shadow_horses: {
+    columns: [
+      { name: "analysis_id", type: "INTEGER", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "flag_front_runner", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "flag_long_rest", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "flag_longshot_slump", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "flag_surface_change", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "input_win_odds", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "market_q", type: "REAL", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "umaban", type: "INTEGER", notnull: 1, dflt_value: null, pk: 2 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["analysis_id", "umaban"], name: null }],
+  },
+  analysis_shadow_probs: {
+    columns: [
+      { name: "analysis_id", type: "INTEGER", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "model", type: "TEXT", notnull: 1, dflt_value: null, pk: 3 },
+      { name: "top2_prob", type: "REAL", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "top3_prob", type: "REAL", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "umaban", type: "INTEGER", notnull: 1, dflt_value: null, pk: 2 },
+      { name: "win_prob", type: "REAL", notnull: 1, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["analysis_id", "umaban", "model"], name: null }],
+  },
   // 0038 の中身(Issue #639)。馬の血統・生産者(馬ごと)、馬主の履歴、レースごとの出走時の情報、JRA の出馬表の取得の記録。どれも WITHOUT ROWID(主キーが行の実体。他の D1 専用の表と同じ。Issue #445)。
   horse_profiles: {
     columns: [
@@ -643,7 +670,7 @@ const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
   it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql・0035_race_backfill.sql・0036_race_archive_runs_pending_index.sql・0037_verify_race_mark.sql・0038_horse_profiles.sql・0039_market_edge.sql の39本だけで、番号は 0001 から連続している(後から足すときは 0040 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql", "0036_race_archive_runs_pending_index.sql", "0037_verify_race_mark.sql", "0038_horse_profiles.sql", "0039_market_edge.sql"]);
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql", "0036_race_archive_runs_pending_index.sql", "0037_verify_race_mark.sql", "0038_horse_profiles.sql", "0039_market_edge.sql", "0040_analysis_shadow.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -734,8 +761,8 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
   });
 
   it("Issue #445: WITHOUT ROWID の表の集合が、宣言と一致する(主キーが行の実体になる表。外すと書き込みの行が増える。構造の比較〈列・索引〉には現れないので別に固定する)", () => {
-    // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)・0026(baba_fetch_attempts)・0027(kaisai_days)・0028(jockey_names)・0030(trainer_names)・0031(race_archive)・0035(race_backfill)・0038(horse_profiles・horse_owner_history・race_horse_entries・jra_entry_fetches)・0039(race_market_rows・market_edge。market_edge_meta は rowid の別名の主キーなので対象外)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
-    const declared = ["baba_conditions", "baba_fetch_attempts", "baba_fetches", "horse_run_saves", "horse_runs", "jockey_names", "kaisai_days", "race_archive", "race_backfill", "race_conditions", "trainer_names", "verify_race_mark"].concat(["horse_profiles", "horse_owner_history", "race_horse_entries", "jra_entry_fetches"]).concat(["race_market_rows", "market_edge"]).sort();
+    // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)・0026(baba_fetch_attempts)・0027(kaisai_days)・0028(jockey_names)・0030(trainer_names)・0031(race_archive)・0035(race_backfill)・0038(horse_profiles・horse_owner_history・race_horse_entries・jra_entry_fetches)・0039(race_market_rows・market_edge。market_edge_meta は rowid の別名の主キーなので対象外)・0040(analysis_shadow_horses・analysis_shadow_probs)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
+    const declared = ["baba_conditions", "baba_fetch_attempts", "baba_fetches", "horse_run_saves", "horse_runs", "jockey_names", "kaisai_days", "race_archive", "race_backfill", "race_conditions", "trainer_names", "verify_race_mark"].concat(["horse_profiles", "horse_owner_history", "race_horse_entries", "jra_entry_fetches"]).concat(["race_market_rows", "market_edge"]).concat(["analysis_shadow_horses", "analysis_shadow_probs"]).sort();
     const wrTables = (sqlList: readonly string[]): string[] => {
       const db = openEmptyDb();
       try {
@@ -1064,6 +1091,24 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     expect(statements.map((x) => x.split(/\s+/).slice(0, 3).join(" "))).toEqual(["ALTER TABLE race_archive", "CREATE INDEX IF", "CREATE TABLE race_market_rows", "CREATE INDEX idx_race_market_rows_date", "CREATE TABLE market_edge", "CREATE TABLE market_edge_meta"]);
     expect(statements[1]).toBe("CREATE INDEX IF NOT EXISTS idx_race_archive_market_pending ON race_archive (race_id) WHERE market_version IS NULL AND kind = 'central'");
     expect(diffSchemas(expectedD1Schema(exe), schemaAfter(sqls.slice(0, 38)))).not.toEqual([]); // 0039 を落とすと差分になる(空振りでない)
+  });
+
+  it("Issue #649: analysis_shadow_horses・analysis_shadow_probs は 0040 だけが足す新しい表(WITHOUT ROWID・副索引なし)。0001〜0039 までには無く、exe には無い D1 専用(D1_EXTRA_TABLES に宣言した)。既存の表は変えない(CREATE TABLE の 2 文だけ。追加のみ)", () => {
+    const before = schemaAfter(sqls.slice(0, 39));
+    const after = schemaAfter(sqls.slice(0, 40));
+    for (const table of ["analysis_shadow_horses", "analysis_shadow_probs"]) {
+      expect(before[table], table).toBeUndefined();
+      expect(after[table], table).toEqual(D1_EXTRA_TABLES[table]);
+      expect(exe[table], table).toBeUndefined();
+    }
+    for (const [table, schema] of Object.entries(before)) {
+      expect(after[table], table).toEqual(schema); // 既存の表は変わらない
+    }
+    const code = sqls[39]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    expect(code).not.toMatch(/\b(UPDATE|DELETE|DROP|INSERT|ALTER)\b/i);
+    const statements = code.split(";").map((x) => x.trim()).filter((x) => x !== "");
+    expect(statements.map((x) => x.split(/\s+/).slice(0, 3).join(" "))).toEqual(["CREATE TABLE analysis_shadow_horses", "CREATE TABLE analysis_shadow_probs"]);
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter(sqls.slice(0, 39)))).not.toEqual([]); // 0040 を落とすと差分になる(空振りでない)
   });
 
   it("Issue #613: idx_race_archive_runs_pending は 0036 だけが足す(race_archive (race_id) の部分索引。WHERE は runs_version IS NULL)。0001〜0035 までには無い。D1 専用(D1_EXTRA_TABLES に宣言している)。追加のみ(CREATE INDEX の1文だけ)", () => {

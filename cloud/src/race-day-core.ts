@@ -342,7 +342,7 @@ export type TaskMode = "morning" | "pre_race";
  */
 export interface AnalysisSink {
   /** `extra.llmNote`(発走前の計算ステップは常に渡す): LLM が使われなかった・一部しか使われなかった理由(固定文言。問題なく効いたときは null)。D1 の `analyses.llm_note` に保存される(Issue #194 b2)。`extra.llmCalls`: LLM を呼んだ1回ごとの記録(キー未登録は null)。D1 の `analyses.llm_calls_json` に保存される(Issue #197 段2)。`extra.markRepair`: 印を補修した・補修が要る違反があった記録(固定の語彙だけ。D1 の `analyses.mark_repair_json`。Issue #317)。 */
-  save(record: AnalysisRecord, extra?: AnalysisSaveExtra): Promise<{ readonly id: number; readonly detail: "stored" | "failed" | "skipped" }>;
+  save(record: AnalysisRecord, extra?: AnalysisSaveExtra): Promise<{ readonly id: number; readonly detail: "stored" | "failed" | "skipped"; readonly shadow?: "saved" | "failed" }>;
   findByAnalyzedAt(raceId: string, analyzedAt: string): Promise<number | null>;
   /**
    * 同じレースの、分析時刻が `[fromIso, toIso]`(両端を含む。ISO 8601 の UTC)の分析(id・分析時刻・prompt_version・model だけ)。**自動の昇格が、手動の分析との重複を確かめる**ために呼ぶ
@@ -2369,6 +2369,10 @@ export class RaceDayCore {
             // LLM を呼んだ1回ごとの記録(所要時間・usage・stop_reason。Issue #197 段2)。キー未登録(cloudAnalyze なし)は null(NULL で保存)。
             const saved = await sink.save(toSave, { llmNote: outcome.note, llmCalls: cloudAnalyze === null ? null : cloudAnalyze.calls(), markRepair: outcome.markRepair ?? null });
             analysisId = saved.id;
+            // 影の記録の書き込みの失敗(Issue #649)。分析の保存は成功しているので、警告にして続ける。
+            if (saved.shadow === "failed") {
+              this.onWarn(`発走前の分析(${task.race_id}): 統計モデルの並走(影の計算)の記録を書けませんでした(分析の保存は成功しています)`);
+            }
             // 通知の材料を、analysis_id の永続化より前に積む(Issue #205。同じ同期区間。以降の再実行が、材料の無い done にならない)。
             this.notifyStage.putAnalysisMaterial(task, record, outcome, saved.id);
             // 締切の直前の再計算の入力と回の行(Issue #338)も、同じ同期区間で積む。失敗は握る(分析は止めない)。
@@ -2405,6 +2409,9 @@ export class RaceDayCore {
                 onKaisaiDaysError: (info: { readonly raceId: string }) => this.onWarn(`発走前の分析(${info.raceId}): 過去の開催日の記録を読み出せなかったため、芝の開催進行の通算・柵の日数なしで続けます`),
               }),
           llmSkipReason: LLM_NOTE_NO_KEY,
+          // 統計モデルの並走(影の計算。Issue #649)。買い目・配分・画面・LLM には使わず、別の表に記録するだけ。計算の失敗は警告にして分析は続ける。
+          shadow: true,
+          onShadowError: (info) => this.onWarn(`発走前の分析(${info.raceId}): 統計モデルの並走(影の計算)に失敗しました: ${redactSecrets(info.message).slice(0, 200)}`),
         });
         // LLM が効かなかったとき(キー未登録・フォールバック)は、固定の理由だけを警告に残す(API のエラーの本文・診断メッセージは出さない)。
         if (this.llm !== undefined && cloudAnalyze !== null) {

@@ -63,6 +63,8 @@ interface FakeSink extends AnalysisSink {
   /** save をこの回数だけ、保存せずに例外にする(D1・R2 の一時的な失敗)。 */
   failBeforeSave: number;
   childrenOverride: { horses: number; bets: number } | null;
+  /** save の戻り値の shadow(統計モデルの並走の書き込みの結果。Issue #649)。undefined は戻り値に載せない(記録の無い保存)。 */
+  shadowResult: "saved" | "failed" | undefined;
 }
 
 function fakeSink(): FakeSink {
@@ -72,6 +74,7 @@ function fakeSink(): FakeSink {
     crashAfterSave: 0,
     failBeforeSave: 0,
     childrenOverride: null,
+    shadowResult: undefined,
     async save(record) {
       sink.calls.push("save");
       if (sink.failBeforeSave > 0) {
@@ -83,7 +86,7 @@ function fakeSink(): FakeSink {
         sink.crashAfterSave -= 1;
         throw new Error("保存後のクラッシュ");
       }
-      return { id: sink.saved.length, detail: "stored" };
+      return { id: sink.saved.length, detail: "stored", ...(sink.shadowResult === undefined ? {} : { shadow: sink.shadowResult }) };
     },
     async findByAnalyzedAt(raceId, analyzedAt) {
       sink.calls.push("find");
@@ -401,6 +404,41 @@ describe("発走前の分析: 計算・保存ステップ(AC-c5・c1・c6)", () 
     expect(record.allocation?.bets.length ?? 0).toBeGreaterThan(1); // 設定 ON(資金あり・組合せあり): 配分は多点
     expect(record.analyzedAt).toBe(new Date(h.clock.now).toISOString());
     expect(h.core.getBoard().races.find((r) => r.mode === "pre_race")).toMatchObject({ status: "done", analysisId: 1, detail: "stored", childrenOk: true });
+  });
+
+  it("Issue #649: 発走前の計算は、統計モデルの並走(影の計算)の記録を付けて保存する。馬は全頭・確率は 2 モデル分。買い目・配分は従来どおり", async () => {
+    const h = harness();
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await h.core.runNextStep(); // fetch
+    await h.core.runNextStep(); // compute
+    const record = h.sink.saved[0]!;
+    expect(record.shadow).toBeDefined();
+    expect(record.shadow!.horses).toHaveLength(16);
+    expect(record.shadow!.probs).toHaveLength(32);
+    expect(record.shadow!.horses.every((x) => x.inputWinOdds !== null && x.marketQ !== null)).toBe(true);
+    expect(record.allocation?.bets.length ?? 0).toBeGreaterThan(1);
+    expect(h.warnings.filter((w) => w.includes("並走"))).toEqual([]);
+  });
+
+  it("Issue #649: 影の記録の書き込みが失敗した(保存先が shadow: failed を返す)ときは警告にするが、分析は done のまま(保存は成功している)", async () => {
+    const h = harness();
+    h.sink.shadowResult = "failed";
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await h.core.runNextStep(); // fetch
+    expect(await h.core.runNextStep()).toMatchObject({ kind: "ran", mode: "pre_race", step: "compute", result: "ok" });
+    expect(h.warnings.filter((w) => w.includes("並走") && w.includes("書けませんでした"))).toHaveLength(1);
+    expect(h.core.getBoard().races.find((r) => r.mode === "pre_race")).toMatchObject({ status: "done", analysisId: 1, detail: "stored" });
+  });
+
+  it("Issue #649: 書き込みが成功(saved)・記録なし(undefined)のときは、並走の警告を出さない", async () => {
+    for (const result of ["saved", undefined] as const) {
+      const h = harness();
+      h.sink.shadowResult = result;
+      await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+      await h.core.runNextStep();
+      await h.core.runNextStep();
+      expect(h.warnings.filter((w) => w.includes("並走"))).toEqual([]);
+    }
   });
 
   it("組合せの券種も配分に入る(設定が組合せ ON・各券種 ON): 買い目の券種が単勝・複勝だけでなく、ワイド・馬連など複数に及ぶ", async () => {

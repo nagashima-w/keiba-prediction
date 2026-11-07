@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { normalizeLogitShift as coreNormalizeLogitShift } from "../../packages/core/src/ev/stat-shadow.js";
 import {
   RideIndex,
   SumIndex,
@@ -273,5 +274,26 @@ describe("relativeStats: そのレースの中での相対値(平均との差・
     b.forEach((x, i) => expect(x.diffMean).toBeCloseTo(a[i]!.diffMean, 12));
     const c = relativeStats([2, 4, 8]);
     expect(c[0]!.diffTop).not.toBe(a[0]!.diffTop);
+  });
+});
+
+describe("評価用の normalizeLogitShift は、本番(core の影の計算)の同名の関数と同じ値を返す(写しがずれない)", () => {
+  it("乱数でない固定の入力 5 組・目標 1・2・3 で、1e-12 以内に一致する", () => {
+    const inputs = [
+      [-2, -1, 0, 1, 2, -3],
+      [0.5, 0.4, 0.3, 0.2, 0.1, 0, -0.1, -0.2],
+      [3, -3, 2, -2, 1, -1, 0, 0, 0],
+      [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6],
+      [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07],
+    ];
+    for (const l of inputs) {
+      for (const t of [1, 2, 3]) {
+        const a = normalizeLogitShift(l, t);
+        const b = coreNormalizeLogitShift(l, t);
+        a.forEach((v, i) => expect(Math.abs(v - b[i]!)).toBeLessThan(1e-12));
+      }
+    }
+    // 入力が互いに違うので、一致は自明ではない(全馬同じ値ではない)。
+    expect(new Set(normalizeLogitShift(inputs[0]!, 2)).size).toBeGreaterThan(3);
   });
 });
