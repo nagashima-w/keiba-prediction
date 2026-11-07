@@ -10,6 +10,7 @@
  *
  * explore: 期間の全レースで形(計画 §5-A)と条件(§5-B)を集計し、§6 の目安で候補を選んで
  *   candidates.json(F1〜F4、エントロピーの境、割引 λ・μ)と results-<label>.json を書く。
+ *   --no-candidates を付けると candidates.json を書かない(後半の全表を記述のために出すとき。候補は固定済み)。
  * confirm: candidates.json の候補だけを別の期間で集計し、§7 の判定を judgement-<label>.json と
  *   judgement-<label>.md に書く。
  *
@@ -65,6 +66,8 @@ interface Args {
   candidates?: string;
   reps: number;
   seed: number;
+  /** explore で候補(candidates.json)を書かない(後半の記述のための全表だけを出す)。 */
+  noCandidates: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -86,6 +89,7 @@ function parseArgs(argv: readonly string[]): Args {
     candidates: mode === "confirm" ? get("candidates") : undefined,
     reps: Number(get("reps", "2000")),
     seed: Number(get("seed", "654")),
+    noCandidates: argv.includes("--no-candidates"),
   };
 }
 
@@ -364,7 +368,8 @@ function main(): void {
       params: { entropyCuts: cuts, discount: fit.discount, reps: args.reps, seed: args.seed },
       candidates: [...formCandidates, ...condCandidates, ...f4Candidates],
     };
-    writeFileSync(join(args.out, "candidates.json"), JSON.stringify(candidates, null, 1));
+    if (args.noCandidates) console.log("--no-candidates: candidates.json は書かない(記述のための全表だけ)");
+    else writeFileSync(join(args.out, "candidates.json"), JSON.stringify(candidates, null, 1));
     writeFileSync(
       join(args.out, `results-${args.label}.json`),
       JSON.stringify(
@@ -383,7 +388,7 @@ function main(): void {
         1,
       ),
     );
-    console.log(`書き出し: ${join(args.out, "candidates.json")}、${join(args.out, `results-${args.label}.json`)}`);
+    console.log(`書き出し: ${join(args.out, `results-${args.label}.json`)}`);
     return;
   }
 
