@@ -109,14 +109,18 @@ describe("migration の適用(ローカルの D1)", () => {
     for (const c of ["max_win_bets", "max_place_bets"]) {
       expect((await rows("PRAGMA table_info(analysis_allocation_meta)")).map((r) => r["name"]), c).toContain(c);
     }
+    // Issue #658(0041。cloud 専用): 配分に使った市場へ寄せる割合(メタ行と締切の再計算の行に1列ずつ。新しい表は作らない)
+    for (const t of ["analysis_allocation_meta", "analysis_close"]) {
+      expect((await rows(`PRAGMA table_info(${t})`)).map((r) => r["name"]), t).toContain("market_shrink_weight");
+    }
     // Issue #197(0006): 馬ごとの強調材料・懸念事項。exe の analysis_horses と同じ列(並びも reason の後ろ)。
     expect((await rows("PRAGMA table_info(analysis_horses)")).map((r) => r["name"]).slice(-3)).toEqual(["reason", "highlights_json", "concerns_json"]);
     const indexes = (await rows("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx\\_%' ESCAPE '\\' ORDER BY name")).map((r) => r["name"]);
     expect(indexes).toEqual(["idx_analyses_analyzed_at", "idx_analyses_exe_id", "idx_analyses_kaisai_analyzed", "idx_analyses_kaisai_date", "idx_analyses_pending", "idx_analyses_prompt_version_race", "idx_analyses_race", "idx_analyses_race_analyzed", "idx_race_archive_market_pending", "idx_race_archive_runs_pending", "idx_race_backfill_st1", "idx_race_backfill_st2", "idx_race_backfill_st3", "idx_race_backfill_st4", "idx_race_market_rows_date", "idx_verify_race_mark_seq"]); // idx_race_archive_runs_pending は Issue #613(0036。変換の目録の走査の部分索引)、idx_race_archive_market_pending・idx_race_market_rows_date は Issue #642(0039)、idx_race_backfill_st1〜4 は Issue #597(0035。補完の部分索引)
   });
 
-  it("migration は40本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql", "0036_race_archive_runs_pending_index.sql", "0037_verify_race_mark.sql", "0038_horse_profiles.sql", "0039_market_edge.sql", "0040_analysis_shadow.sql"]);
+  it("migration は41本とも適用済みとして記録されている(d1_migrations)", async () => {
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql", "0036_race_archive_runs_pending_index.sql", "0037_verify_race_mark.sql", "0038_horse_profiles.sql", "0039_market_edge.sql", "0040_analysis_shadow.sql", "0041_market_shrink_weight.sql"]);
     expect((await rows("PRAGMA table_info(race_results)")).map((r) => r["name"])).toContain("scratched"); // Issue #72(0013)
     expect((await rows("PRAGMA table_info(race_results)")).map((r) => r["name"])).toContain("wakuban"); // Issue #269(0016)
   });
@@ -295,6 +299,18 @@ describe("D1 の疎通確認(/api/health が使う checkD1)を、実エンジン
         await db.prepare(`ALTER TABLE analysis_allocation_meta RENAME COLUMN ${column}_renamed TO ${column}`).run();
       }
       expect(await checkD1(db), column).toEqual({ ok: true });
+    }
+  });
+
+  it("対照: 0041 の market_shrink_weight 列が無い状態(migration の未適用相当。Issue #658)では、どちらの表の列でも ok:false になる(分析の保存・締切の再計算の保存が落ちる状態を、疎通確認で気づく)", async () => {
+    for (const table of ["analysis_allocation_meta", "analysis_close"]) {
+      await db.prepare(`ALTER TABLE ${table} RENAME COLUMN market_shrink_weight TO market_shrink_weight_renamed`).run();
+      try {
+        expect(await checkD1(db), table).toEqual({ ok: false });
+      } finally {
+        await db.prepare(`ALTER TABLE ${table} RENAME COLUMN market_shrink_weight_renamed TO market_shrink_weight`).run();
+      }
+      expect(await checkD1(db), table).toEqual({ ok: true });
     }
   });
 

@@ -336,6 +336,8 @@ export interface AllocationMetaInput {
   /** 使った単勝・複勝の点数の上限(0=上限なし)。NULL = Issue #533 より前の行(上限なしで配分した)。 */
   readonly maxWinBets: number | null;
   readonly maxPlaceBets: number | null;
+  /** 配分に使った市場へ寄せる割合(Issue #658)。NULL = 記録なし(配分を作っていない・#656 の公開より前・#656 から #658 の公開までの行)。 */
+  readonly marketShrinkWeight: number | null;
   readonly belowFloorCount: number | null;
   readonly missedJson: string | null;
 }
@@ -385,6 +387,8 @@ export interface AllocationRowSettings {
   /** 使った単勝・複勝の点数の上限(0=上限なし)。NULL は NULL のまま(Issue #533 より前の行。読み手は上限なしと解釈する)。 */
   readonly max_win_bets: number | null;
   readonly max_place_bets: number | null;
+  /** 配分に使った、モデルの 3着内率を市場へ寄せる割合(0〜1。1 は寄せない。Issue #658)。設定の値で、実際に寄せたかは別。NULL は NULL のまま(notes 参照)。 */
+  readonly market_shrink_weight: number | null;
 }
 
 export interface AllocationRowCodes {
@@ -484,7 +488,7 @@ export const ALLOCATION_ROW_KEYS = [
 export const ALLOCATION_HORSE_KEYS = ["umaban", "wakuban", "prior", "adjusted_prob", "win_odds", "ninki", "place_min", "place_max", "place_odds_min", "ev"] as const;
 export const ALLOCATION_SETTINGS_KEYS = [
   "bankroll", "per_race_cap", "kelly_fraction", "ev_threshold", "include_combo_odds", "include_wide", "include_trio", "include_quinella", "include_exacta",
-  "include_trifecta", "include_bracket_quinella", "min_hit_prob", "max_win_bets", "max_place_bets",
+  "include_trifecta", "include_bracket_quinella", "min_hit_prob", "max_win_bets", "max_place_bets", "market_shrink_weight",
 ] as const;
 export const ALLOCATION_CODES_KEYS = [
   "route", "unavailable_reason", "fallback_reason", "skip_reason_code", "combo_odds_wide", "combo_odds_trio", "bet_unit", "greedy_steps", "candidate_cap",
@@ -604,6 +608,7 @@ export function buildAllocationRaceRow(input: BuildAllocationRowInput): Allocati
             min_hit_prob: meta.minHitProb,
             max_win_bets: meta.maxWinBets,
             max_place_bets: meta.maxPlaceBets,
+            market_shrink_weight: meta.marketShrinkWeight,
           },
           codes: {
             route: meta.route,
@@ -682,6 +687,7 @@ const NOTES: readonly string[] = [
   "1 行 1 レース。母集団は検証画面と同じ規則(先読みの疑い・発走の前後を判定できない分析を除き、clean と発走時刻の補完待ちを合わせた中でレースごとに最新 1 件。最新が補完待ちのレースは、古い clean に代えず書き出さない〈uncheckedRaces〉。最新の clean が推定 EV のレースは丸ごと除外)。excluded の uncheckedRaces を除く項目(分析の件数)の和 + races = 結果のあるレースの分析の総数。",
   "has_odds が false のレースは、分析時点のオッズを再構成できなかった(馬のオッズ・組合せは空。配分を計算し直せない)。原因は次の 4 つ: (1) 分析に詳細のキー(detail_key)が無い (2) R2 に詳細が無い・壊れていて読めない (3) 詳細が別のレースのものだった (4) 詳細の raceSnapshot が無い・壊れている・馬を 1 頭も読めない。R2 からの取得そのものが失敗したときは has_odds を false にせず、作成を再試行する。",
   "allocation の settings・codes は analysis_allocation_meta の値で、D1 の NULL は NULL のまま(旧い行〈include_quinella などは #118 より前、min_hit_prob は #470 より前、max_win_bets・max_place_bets は #533 より前〉の解釈は読み手の責務。max_win_bets・max_place_bets は1レースあたりの単勝・複勝の点数の上限で、0 と NULL は上限なし)。allocation が null の分析は配分の記録が無い。",
+  "market_shrink_weight は、その配分を作ったときの、モデルの 3着内率を市場〈単勝オッズ〉へ寄せる割合の設定(0〜1。1 は寄せない)。設定の値で、実際に寄せたかは別(単勝オッズのある馬が 5 頭未満・3 頭以下の立ては、1 未満でも寄せずに配分する)。NULL = 記録なし: 配分を作っていない分析〈route が unset・yoso・unavailable・invalid〉、#656 の公開〈承認印のコミット 86d9cc1c。11/7 の夜〉より前の行〈寄せていない〉、#656 の公開から #658 の公開までの行〈設定を変えていなければ 0.5 で寄せている〉。区別は analyzed_at で行う。",
   "bet_unit・greedy_steps・candidate_cap・model_id は分析時の実効値。コードの既定値が変わった後の分析は、計算し直しても一致しないことがある。",
   "horses の win_odds・ninki・place_min・place_max は分析時点のオッズ(R2 の raceSnapshot)。place_odds_min・ev は保存済みの値(再計算の照合用)。result の win_odds・ninki は結果ページの確定値で、別物。",
   "combos は券種ごとの組合せオッズ(スナップショットのまま)。キーが無い券種は取得していない、{} は取得したが空。馬単・三連単のキーは順序つき(1 桁目が 1 着)、枠連のキーは枠番。combo_states は取得の状態(診断の本体は載せない)。",

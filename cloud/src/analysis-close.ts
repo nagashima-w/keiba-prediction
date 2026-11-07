@@ -131,8 +131,8 @@ export const UPSERT_CLOSE_SQL = `INSERT INTO analysis_close
   (analysis_id, round, status, reason, due_at, fired_at, late_ms, odds_official_datetime,
    route, unavailable_reason, fallback_reason, skip_reason_code, bankroll, per_race_cap, kelly_fraction, ev_threshold,
    include_combo_odds, include_wide, include_trio, include_quinella, include_exacta, include_trifecta, include_bracket_quinella,
-   bet_unit, odds_status)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+   bet_unit, odds_status, market_shrink_weight)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(analysis_id, round) DO UPDATE SET
    status = excluded.status, reason = excluded.reason, due_at = excluded.due_at, fired_at = excluded.fired_at, late_ms = excluded.late_ms,
    odds_official_datetime = excluded.odds_official_datetime, route = excluded.route, unavailable_reason = excluded.unavailable_reason,
@@ -140,7 +140,8 @@ export const UPSERT_CLOSE_SQL = `INSERT INTO analysis_close
    per_race_cap = excluded.per_race_cap, kelly_fraction = excluded.kelly_fraction, ev_threshold = excluded.ev_threshold,
    include_combo_odds = excluded.include_combo_odds, include_wide = excluded.include_wide, include_trio = excluded.include_trio,
    include_quinella = excluded.include_quinella, include_exacta = excluded.include_exacta, include_trifecta = excluded.include_trifecta,
-   include_bracket_quinella = excluded.include_bracket_quinella, bet_unit = excluded.bet_unit, odds_status = excluded.odds_status`;
+   include_bracket_quinella = excluded.include_bracket_quinella, bet_unit = excluded.bet_unit, odds_status = excluded.odds_status,
+   market_shrink_weight = excluded.market_shrink_weight`;
 
 /** 回の買い目の削除(再保存で、前の保存の買い目を残さない。束縛値は analysis_id・round)。 */
 export const DELETE_CLOSE_BETS_SQL = "DELETE FROM analysis_close_bets WHERE analysis_id = ? AND round = ?";
@@ -193,6 +194,7 @@ export function closeRowParams(analysisId: number, payload: CloseSavePayload): r
     flag(m?.includeBracketQuinella),
     m?.betUnit ?? null,
     m?.oddsStatus ?? null,
+    m?.marketShrinkWeight ?? null,
   ];
 }
 

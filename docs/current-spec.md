@@ -970,7 +970,8 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   - 変わる: 配分の買い目(賭け金・点数)、**保存する買い目の `ev`**(寄せた確率で計算した値。買い目の ev ÷ odds が、配分が使った的中確率になる。月報の「見込みの的中数」はこの値で計算される)、的中確率の下限(`minHitProb`)の判定、`comboStats`。
   - 変わらない: 画面に出す補正後の 3着内率、LLM の入力、D1 の `analysis_horses` の `adjusted_prob`・`ev`・`is_positive`(馬の行は寄せる前の確率から計算した値のまま)。**したがって、馬の行の EV と、同じ馬の複勝の買い目の `ev` は一致しなくなる。**
 - **当てる場所**: `buildAllocationForRows`(`recompute-allocation.ts`)が、配分に渡す行だけを作り直す(`adjustedProb`・`ev`・`isPositive`・`placeOddsMin` を差し替え)。発走前の分析(`runAnalysis`)と締切直前の再計算(`recomputeAllocationFromProbs`)は同じ関数を通る。再計算は、取り直した新しい単勝オッズで m を作り直す。
-- **記録しないもの**: メタ行(D1)・配分の書き出し(`allocation-dataset`)には w の列を足していない(形式の版は 1 のまま)。**そのため、`scripts/allocation-dataset.ts` の計算し直しは寄せずに計算する(`marketShrinkWeight` を渡さない)。デプロイ後の行を計算し直しても、分析時の配分とは一致しない**(一致率の集計に使えない)。列を足す対応は別の Issue で行う。
+- **記録**(Issue #658): 配分に使った w を、D1 の `analysis_allocation_meta.market_shrink_weight`(分析時)と `analysis_close.market_shrink_weight`(締切直前の再計算。migration 0041)に残し、配分の書き出しの `allocation.settings.market_shrink_weight` に出す(形式の版は 1 のまま。`allocation-dataset` は列が無い古い書き出しも読み、null とみなす)。**設定の値**で、実際に寄せたかは別(単勝オッズのある馬が 5 頭未満・3 頭以下の立ては、1 未満でも寄せない)。配分を作らない分析(unset・yoso・unavailable・invalid)と、#656 の公開(86d9cc1c。11/7 の夜)より前の行は NULL(寄せていない)。#656 から #658 の公開までの行も NULL だが、設定を変えていなければ 0.5 で寄せている(区別は analyzed_at)。予想オッズ(yoso)・未設定(unset)では寄せの計算を省く(出力は同じ)。
+- **計算し直しは未対応**: `scripts/allocation-dataset.ts` の計算し直しは w を読まず、寄せずに計算する。**デプロイ後の行を計算し直しても、分析時の配分とは一致しない**(一致率の集計に使えない)。w を読ませる対応は別の Issue で行う。
 - **締切直前の再計算の入力**(`input_json` の `allocationSettings`)に `marketShrinkWeight` が無い旧い入力は **1(寄せない)** で読む。設定の表の旧い行を 0.5 で読むのとは意図して違う(寄せる前の Worker が配分した分析と、再計算を揃えるため。下限・上限と同じ扱い)。
 
 ## 6. エクスポート(analysis/analysis-export)

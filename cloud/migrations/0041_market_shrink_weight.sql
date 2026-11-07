@@ -1,0 +1,21 @@
+-- クラウド版(D1)の migration 0041: 配分に使った「市場へ寄せる割合」の記録(Issue #658)。exe の SQLite には無い、D1 専用の列。
+-- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧い行は NULL のまま)。
+-- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言した追加分」(D1_EXTRA_COLUMNS・D1_EXTRA_TABLES の analysis_close)も同時に直す。
+-- ★デプロイの順序: この列に書く新しい Worker は、migration の適用より前に出してはならない(分析の保存の batch と、締切の再計算の保存が落ちる)。
+--   deploy-cloud.yml は migration を wrangler deploy より前に適用する。旧い Worker はこの列を参照しないので、適用後も壊れない(共存)。
+--
+-- Issue #656 で、配分の前にモデルの 3着内率を市場〈単勝オッズ〉の 3着内率へ寄せる設定 marketShrinkWeight(既定 0.5。1 は寄せない)を入れた。
+-- 配分を計算し直す・回収率を比べるときに、保存した配分を作ったときの割合を知れるよう、使った値を残す。
+--
+--   market_shrink_weight  その配分を作ったときの marketShrinkWeight(0〜1)。設定の値で、実際に寄せたかは別
+--                         〈単勝オッズのある馬が 5 頭未満・3 頭以下の立ては、1 未満でも寄せずに配分する〉。
+--                         NULL = 記録なし。次のどれか:
+--                           ・配分を作っていない(route が unset・yoso・unavailable・invalid。analysis_close は status が ok 以外の回も)
+--                           ・#656 の公開(承認印のコミット 86d9cc1c。11/7 の夜)より前の行。寄せていない
+--                           ・#656 の公開から本件の公開までの行。設定を変えていなければ 0.5 で寄せている
+--                         区別は analyzed_at(analysis_close は fired_at)で行う。バックフィルはしない。
+-- 対象は analysis_allocation_meta(分析時の配分。cloud の保存が #470・#533 の UPDATE に列を足して書く)と analysis_close(締切の直前の再計算の配分)。
+-- 書き込みの見積もり: 新しい表・索引・行は作らない(列を 1 つずつ足すだけ)。分析の保存の batch の文数は変わらない(#470・#533 の UPDATE の SET が 1 列増える)。
+--   締切の再計算の UPSERT も文数は同じ(列が 1 つ増える)。書き込み行は 1 日あたりで増えない。
+ALTER TABLE analysis_allocation_meta ADD COLUMN market_shrink_weight REAL;
+ALTER TABLE analysis_close ADD COLUMN market_shrink_weight REAL;

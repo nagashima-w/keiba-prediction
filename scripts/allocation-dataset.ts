@@ -107,7 +107,7 @@ function keyProblem(label: string, value: unknown, expected: readonly string[]):
 }
 
 /** 点数の上限の列(Issue #533 で足した。形式の版は 1 のまま)。これが無い古い書き出しは null とみなす(Issue #535-D)。 */
-const LEGACY_LIMIT_COLUMNS = ["max_win_bets", "max_place_bets"] as const;
+const LEGACY_LIMIT_COLUMNS = ["max_win_bets", "max_place_bets", "market_shrink_weight"] as const;
 
 /**
  * 点数の上限の 2 列(`max_win_bets`・`max_place_bets`)が無い古い書き出し(Issue #533 より前)を読めるようにする。`allocation.settings` がオブジェクトのとき、この 2 列を**1 列ずつ**見て、
@@ -166,7 +166,7 @@ function rowProblem(row: unknown): string | null {
       if (p !== null) return p;
     }
     const s = alloc["settings"] as Record<string, unknown>;
-    if (![s["bankroll"], s["per_race_cap"], s["kelly_fraction"], s["ev_threshold"]].every(isNum) || !isNumOrNull(s["min_hit_prob"]) || !isNumOrNull(s["max_win_bets"]) || !isNumOrNull(s["max_place_bets"])) return "allocation.settings の数の列の型が違います";
+    if (![s["bankroll"], s["per_race_cap"], s["kelly_fraction"], s["ev_threshold"]].every(isNum) || !isNumOrNull(s["min_hit_prob"]) || !isNumOrNull(s["max_win_bets"]) || !isNumOrNull(s["max_place_bets"]) || !isNumOrNull(s["market_shrink_weight"])) return "allocation.settings の数の列の型が違います";
     if (!Array.isArray(alloc["bets"])) return "allocation.bets が配列ではありません";
     for (const [i, b] of (alloc["bets"] as unknown[]).entries()) {
       const p = keyProblem(`allocation.bets[${i}]`, b, ALLOCATION_BET_KEYS);
