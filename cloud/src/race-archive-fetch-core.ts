@@ -5,7 +5,7 @@
  * アラームの中の失敗は握って 10 分後に再試行する。
  *
  * ## 何をするか
- * 中央の過去 5 年(2021-11〜今月。{@link ARCHIVE_FROM_MONTH})の結果ページを、**カレンダー → 開催日の一覧 → 結果ページ**の順に、新しい月・新しい開催日から 1 件ずつ取り、
+ * 中央の 2021-01〜今月(当初は過去 5 年の 2021-11〜。Issue #655 で 2021 年を丸ごと入れた。{@link ARCHIVE_FROM_MONTH})の結果ページを、**カレンダー → 開催日の一覧 → 結果ページ**の順に、新しい月・新しい開催日から 1 件ずつ取り、
  * `buildRaceRecord` で読んで `saveRaceArchive`(R2 → D1 の目録)に渡す。取り終えた後は、新しい開催(今日より前の確定済みの開催日)を毎晩追いかける。地方は対象外。
  * 取得は gate(`NetkeibaGate`)の `fetchRaw` だけを通る(許可リスト・直列化・最小間隔 2 秒・ブレーカー)。**そのうえでこの取得はリクエストどうしを {@link ARCHIVE_REQUEST_INTERVAL_MS}(5 秒)以上あける**。
  *
@@ -57,6 +57,7 @@ import { buildRaceRecord, type BuildResult } from "../../packages/core/src/scrap
 import { raceResultUrl } from "../../packages/core/src/scraper/urls";
 import { jstKaisaiDate } from "./auto-run-plan";
 import type { GateResult } from "./gate-core";
+import { parseLimitOverride } from "./limit-override";
 import type { RaceArchiveCatalogEntry, SaveRaceArchiveResult } from "./race-archive-repository";
 import type { RaceArchiveFetchStatus } from "./race-archive-fetch-types";
 import type { SqlLike } from "./sql-like";
@@ -73,6 +74,28 @@ export const ARCHIVE_NIGHTLY_LIMIT_MAX = 100_000;
  */
 export function isArchiveFetchDisabled(value: string | undefined): boolean {
   return value !== undefined && value.trim() === "0";
+}
+
+/**
+ * 中央の開催日にも取る設定の判定(Worker の var `RACE_ARCHIVE_SKIP_RACE_DAY`。Issue #655。★binding の名前とは別の名前)。**文字列 `"0"`(前後の空白は無視)だけ**が「開催日も取る」。
+ * それ以外(未設定・空・`"00"` など)は従来どおり開催日に休む(誤記で意図せず本番の朝の取得に重ならないよう、完全一致にする。`isArchiveFetchDisabled` と同じ流儀)。
+ */
+export function isArchiveRaceDayRestDisabled(value: string | undefined): boolean {
+  return value !== undefined && value.trim() === "0";
+}
+
+/** 時間帯の終わりの上書き(Worker の var `RACE_ARCHIVE_WINDOW_END_MIN`。Issue #655。JST の 0 時からの分)。1〜1440(1440 = 終日)の整数だけ採用し、それ以外・未設定は undefined(既定の 8:30)。 */
+export function parseArchiveWindowEndMin(value: string | undefined): number | undefined {
+  return parseLimitOverride(value, 24 * 60) ?? undefined;
+}
+
+/** 取得のリクエスト間隔の上書き(Worker の var `RACE_ARCHIVE_MIN_INTERVAL_MS`。Issue #655。ミリ秒)の範囲。gate の最低間隔(1.5 秒)を下回る値は無視する。 */
+export const ARCHIVE_MIN_INTERVAL_OVERRIDE_MIN_MS = 1500;
+export const ARCHIVE_MIN_INTERVAL_OVERRIDE_MAX_MS = 60_000;
+/** 取得のリクエスト間隔の上書きの読み取り。1500〜60000 の整数だけ採用し、それ以外・未設定は undefined(既定の {@link ARCHIVE_REQUEST_INTERVAL_MS})。 */
+export function parseArchiveMinIntervalMs(value: string | undefined): number | undefined {
+  const n = parseLimitOverride(value, ARCHIVE_MIN_INTERVAL_OVERRIDE_MAX_MS);
+  return n !== null && n >= ARCHIVE_MIN_INTERVAL_OVERRIDE_MIN_MS ? n : undefined;
 }
 
 /** 取得を始める時刻(2026-11-04 0:00 JST = 2026-11-03T15:00:00Z)。これより前には gate にも計画にも触れない(ユーザーの決定)。 */
@@ -92,8 +115,8 @@ export const ARCHIVE_NIGHTLY_ROWS_LIMIT = 1_000_000;
 export const ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX = 100_000_000;
 /** 数えた読み取り行数を保存する間隔(前回の保存からこれだけ増えたとき)。起床ごとには書かない。DO が追い出されて失う数え漏れの上限でもある。 */
 export const ARCHIVE_ROWS_PERSIST_STEP = 10_000;
-/** 取る範囲の最初の月(中央の過去 5 年。#532)。 */
-export const ARCHIVE_FROM_MONTH = "2021-11";
+/** 取る範囲の最初の月(中央の 2021 年から。#532 の過去 5 年〈2021-11〉を、2021 年を丸ごと入れて年ごとに比べられるよう 2021-01 に広げた。Issue #655)。 */
+export const ARCHIVE_FROM_MONTH = "2021-01";
 /** gate の待ち(進行中 + 待ち)がこの数以上なら出さない。 */
 export const ARCHIVE_GATE_BUSY_PENDING = 2;
 /** gate が混んでいるとき、見直す間隔。 */
@@ -136,6 +159,8 @@ export interface ArchiveFetchOptions {
   readonly notBeforeMs?: number;
   readonly windowStartMin?: number;
   readonly windowEndMin?: number;
+  /** 中央の開催日(その日の分)に休むか(既定 true)。false なら開催日の判定(計画・カレンダーの補助)を飛ばして取る。取る対象が「今日より前の開催日」だけなのは変わらない(Issue #655)。 */
+  readonly skipCentralRaceDay?: boolean;
   readonly intervalMs?: number;
   /** 取る範囲の最初の月(`YYYY-MM`)。 */
   readonly fromMonth?: string;
@@ -292,6 +317,7 @@ export class RaceArchiveFetchCore {
   private readonly notBefore: number;
   private readonly startMin: number;
   private readonly endMin: number;
+  private readonly skipCentralRaceDay: boolean;
   private readonly intervalMs: number;
   private readonly fromMonth: string;
   private readonly fetchTimeoutMs: number;
@@ -304,6 +330,7 @@ export class RaceArchiveFetchCore {
     this.notBefore = options.notBeforeMs ?? ARCHIVE_NOT_BEFORE_MS;
     this.startMin = options.windowStartMin ?? ARCHIVE_WINDOW_START_MIN;
     this.endMin = options.windowEndMin ?? ARCHIVE_WINDOW_END_MIN;
+    this.skipCentralRaceDay = options.skipCentralRaceDay !== false;
     this.intervalMs = options.intervalMs ?? ARCHIVE_REQUEST_INTERVAL_MS;
     this.fromMonth = options.fromMonth ?? ARCHIVE_FROM_MONTH;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? ARCHIVE_FETCH_TIMEOUT_MS;
@@ -623,6 +650,9 @@ export class RaceArchiveFetchCore {
 
   /** その晩、取ってよいか(夜ごとに 1 回判定してその晩は使い回す。判定不能は 10 分おきに引き直す)。 */
   private async restDecision(now: number, night: string): Promise<"go" | "kaisai" | "unknown"> {
+    if (!this.skipCentralRaceDay) {
+      return "go"; // 開催日も取る設定(Issue #655)。判定も補助も飛ばす。取る対象は nextWork の `date < night`(今日より前)のまま。
+    }
     if (this.metaGet("rest_date") === night) {
       const cached = this.metaGet("rest_result");
       if (cached === "kaisai") return "kaisai";
@@ -647,13 +677,15 @@ export class RaceArchiveFetchCore {
   }
 
   private seedMonths(night: string): void {
-    if (this.metaGet("months_seeded") === night) {
+    // 種まきは晩ごとに 1 回。最初の月も印に含める(Issue #655: 範囲を広げて公開した晩に、既に種まきが済んでいても、新しい月を同じ晩のうちに入れるため)。
+    const seededKey = `${night}|${this.fromMonth}`;
+    if (this.metaGet("months_seeded") === seededKey) {
       return;
     }
     for (const month of monthsBetween(this.fromMonth, monthOfDate(night))) {
       this.q("INSERT OR IGNORE INTO ra_month (month) VALUES (?)", month);
     }
-    this.metaSet("months_seeded", night);
+    this.metaSet("months_seeded", seededKey);
   }
 
   /** 次にやること: 月(カレンダー)→ レース(結果)→ 日(一覧)の順。いずれも新しいものから。その晩に試して駄目だったものは除く。 */

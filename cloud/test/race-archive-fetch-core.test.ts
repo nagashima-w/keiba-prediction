@@ -2,11 +2,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { GateResult } from "../src/gate-core";
 import {
   ARCHIVE_CONSECUTIVE_FAILURE_LIMIT,
+  ARCHIVE_FROM_MONTH,
   ARCHIVE_NOT_BEFORE_MS,
   ARCHIVE_REQUEST_INTERVAL_MS,
   classifyCentralDay,
   inArchiveWindow,
   isArchiveFetchDisabled,
+  isArchiveRaceDayRestDisabled,
+  parseArchiveMinIntervalMs,
+  parseArchiveWindowEndMin,
   RaceArchiveFetchCore,
   type ArchiveNotice,
   type ArchiveFetchOptions,
@@ -1318,5 +1322,269 @@ describe("DO の SQLite: 流れた SQL の実行計画(EXPLAIN QUERY PLAN。Issu
     expect(r.unexpected).toEqual([]);
     expect(r.stale).toEqual([]);
     void b;
+  });
+});
+
+describe("Issue #655: 時間帯の終わりと開催日の休みを var で変える(純関数)", () => {
+  it.each([
+    ["0", true],
+    [" 0 ", true],
+    ["00", false],
+    ["", false],
+    ["1", false],
+    ["off", false],
+    [undefined, false],
+  ] as [string | undefined, boolean][])("isArchiveRaceDayRestDisabled(%j) → %s(完全一致の \"0\" だけが「開催日も取る」)", (value, expected) => {
+    expect(isArchiveRaceDayRestDisabled(value)).toBe(expected);
+  });
+  it.each([
+    ["1440", 1440],
+    [" 510 ", 510],
+    ["1", 1],
+    ["0", undefined],
+    ["1441", undefined],
+    ["8.5", undefined],
+    ["-1", undefined],
+    ["", undefined],
+    ["abc", undefined],
+    [undefined, undefined],
+  ] as [string | undefined, number | undefined][])("parseArchiveWindowEndMin(%j) → %s(1〜1440 の整数だけ。それ以外・未設定は既定の 8:30 に任せる)", (value, expected) => {
+    expect(parseArchiveWindowEndMin(value)).toBe(expected);
+  });
+});
+
+describe("Issue #655: 中央の開催日にも取る(skipCentralRaceDay: false)", () => {
+  it("開催日の計画でも休まず取る。計画も引かず、理由は kaisai-day にならない", async () => {
+    const w = mk({ fromMonth: "2026-11", skipCentralRaceDay: false });
+    standard(w);
+    w.plan = KAISAI;
+    await w.core.kick();
+    await w.fire();
+    expect(w.planCalls).toBe(0);
+    expect(w.fetchLog).toHaveLength(1);
+    await w.runUntil(T0 + 5 * MIN);
+    expect(w.saved.length).toBeGreaterThanOrEqual(3);
+    expect((await w.core.getStatus()).waitReason).not.toBe("kaisai-day");
+  });
+  it("カレンダーに今日があっても休まない(休む方向の補助も効かない)", async () => {
+    const w = mk({ fromMonth: "2026-11", skipCentralRaceDay: false });
+    standard(w); // カレンダーに今日(11/05)がある
+    await w.core.kick();
+    await w.runUntil(T0 + 5 * MIN);
+    expect(w.sql.exec("SELECT COUNT(*) AS n FROM ra_day WHERE date = '20261105'").toArray()[0].n).toBe(1); // 前提: 今日が開催日として取り込まれた
+    expect(w.saved.length).toBeGreaterThanOrEqual(3);
+    expect(w.planCalls).toBe(0);
+  });
+  it("判定不能(計画の取得が失敗)でも休まない", async () => {
+    const w = mk({ fromMonth: "2026-11", skipCentralRaceDay: false });
+    standard(w);
+    w.plan = new Error("rpc");
+    await w.core.kick();
+    await w.fire();
+    expect(w.fetchLog).toHaveLength(1);
+  });
+  it("対照: 指定なし・true は従来どおり開催日に休む", async () => {
+    for (const options of [{ fromMonth: "2026-11" }, { fromMonth: "2026-11", skipCentralRaceDay: true }]) {
+      const w = mk(options);
+      standard(w);
+      w.plan = KAISAI;
+      await w.core.kick();
+      await w.fire();
+      expect(w.planCalls).toBe(1);
+      expect(w.fetchLog).toHaveLength(0);
+      expect((await w.core.getStatus()).waitReason).toBe("kaisai-day");
+    }
+  });
+  it("今日のレースは取らない: 今日(11/05)が開催日で一覧に結果があっても、今日の一覧も結果も取らない。今日より前の分だけ取る", async () => {
+    const w = mk({ fromMonth: "2026-11", skipCentralRaceDay: false });
+    const { a, b } = standard(w);
+    const today = [rid(3, 1), rid(3, 2)];
+    w.site({ lists: { "20261105": today }, results: Object.fromEntries(today.map((id) => [id, "ok"])) });
+    w.plan = KAISAI;
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 7, 0));
+    expect([...w.saved].sort()).toEqual([...a, ...b].sort()); // 前提: 今日より前の 4 レースは取れた
+    expect(w.urls()).not.toContain(listUrl("20261105"));
+    for (const id of today) expect(w.urls()).not.toContain(resultUrlOf(id));
+    expect(w.saved.filter((id) => today.includes(id))).toEqual([]);
+  });
+});
+
+describe("Issue #655: 時間帯を終日(windowEndMin: 1440)にする", () => {
+  const allDay = (extra: ArchiveFetchOptions = {}): World => mk({ fromMonth: "2026-11", windowEndMin: 1440, skipCentralRaceDay: false, ...extra });
+
+  it("23:59:59 にも取る(8:30 の外が無い)。既定の 8:30 では取らない対照付き", async () => {
+    const w = allDay();
+    standard(w);
+    w.now = jst(11, 5, 23, 59, 59);
+    w.alarm = w.now;
+    await w.fire();
+    expect(w.fetchLog).toHaveLength(1);
+    const base = mk({ fromMonth: "2026-11", skipCentralRaceDay: false });
+    standard(base);
+    base.now = jst(11, 5, 23, 59, 59);
+    base.alarm = base.now;
+    await base.fire();
+    expect(base.fetchLog).toHaveLength(0); // 対照
+  });
+  it("8:30 を過ぎても続けて取る(時間帯の外のアラームを張らない)", async () => {
+    const w = allDay();
+    standard(w);
+    w.now = jst(11, 5, 8, 30, 0);
+    w.alarm = w.now;
+    await w.fire();
+    expect(w.fetchLog).toHaveLength(1);
+    expect(w.alarm).toBe(w.now + ARCHIVE_REQUEST_INTERVAL_MS); // 時間帯の外ではなく、間隔の分だけあとに張る
+  });
+  it("1 件ずつの間隔は変わらない: 取得どうしは 5 秒以上あく。1 日分を回しても暴走しない", async () => {
+    const w = allDay();
+    standard(w);
+    await w.core.kick();
+    const steps = await w.runUntil(jst(11, 5, 23, 59, 59));
+    expect(steps).toBeLessThan(5000);
+    expect(w.fetchLog.length).toBeGreaterThanOrEqual(5); // 前提: カレンダー・一覧 2・結果 4 まで進んだ
+    for (let i = 1; i < w.fetchLog.length; i += 1) {
+      expect(w.fetchLog[i]!.at - w.fetchLog[i - 1]!.at).toBeGreaterThanOrEqual(ARCHIVE_REQUEST_INTERVAL_MS);
+    }
+  });
+  it("取り切ったあと(caught-up)は、次の晩 0:00 にアラームを張る(即時のループにならない)", async () => {
+    const w = allDay();
+    standard(w);
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59, 59), 200);
+    expect((await w.core.getStatus()).waitReason).toBe("caught-up");
+    expect(w.alarm).toBe(jst(11, 6, 0));
+    const before = w.fetchLog.length;
+    // 0:00 になる: 新しい晩が始まる(件数・失敗の数を 0 に戻す)
+    await w.fire();
+    expect((await w.core.getStatus()).night.date).toBe("20261106");
+    expect(w.alarm === null || w.alarm > w.now).toBe(true);
+    expect(w.fetchLog.length).toBeGreaterThanOrEqual(before);
+  });
+  it("「その晩」の切り替わりは JST 0:00 のまま: 23:59:59 と 0:00:00 で晩が替わり、1 晩の件数の上限は晩ごとに数える", async () => {
+    const w = allDay({ nightlyLimit: 2 });
+    standard(w);
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59, 59), 300);
+    let st = await w.core.getStatus();
+    expect(st.night.date).toBe("20261105");
+    expect(st.night.requests).toBe(2); // 前提: 上限(2 件)まで取って止まった
+    expect(st.waitReason).toBe("night-limit");
+    expect(w.alarm).toBe(jst(11, 6, 0));
+    await w.runUntil(jst(11, 6, 0, 0, 30), 300);
+    st = await w.core.getStatus();
+    expect(st.night.date).toBe("20261106");
+    expect(st.night.requests).toBeGreaterThanOrEqual(1);
+    expect(st.night.requests).toBeLessThanOrEqual(2);
+  });
+  it("1 晩の行数の予算: 終日でも超えた晩は止まり、次の晩 0:00 に再開する(8:30 の外が無くても無限に読まない)", async () => {
+    const LIMIT = 1000;
+    const w = allDay({ nightlyRowsLimit: LIMIT });
+    standard(w);
+    w.rowsReadOf = (query, nth) => (/FROM ra_race WHERE status = 'pending' AND date < \?/.test(query) && nth === 0 ? LIMIT + 1 : 0);
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59, 59), 300);
+    expect((await w.core.getStatus()).state).toBe("night-stopped");
+    expect(w.notices.filter((n) => n.kind === "rows-budget")).toHaveLength(1);
+    expect(w.alarm).toBe(jst(11, 6, 0));
+    w.rowsReadOf = null;
+    await w.runUntil(jst(11, 6, 3), 300);
+    expect((await w.core.getStatus()).state).toBe("running");
+    expect(w.saved.length).toBeGreaterThanOrEqual(3);
+  });
+  it("拒否で止まる決まりは終日でも変わらない(HTTP 429 → その場で止め、次の晩 0:00 まで取らない)", async () => {
+    const w = allDay();
+    const { a } = standard(w);
+    w.site({ results: { [a[0]!]: [httpStatus(429), ok(RESULT_OK)] } });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59, 59), 300);
+    expect((await w.core.getStatus()).state).toBe("night-stopped");
+    expect(w.alarm).toBe(jst(11, 6, 0));
+    expect(w.resultFetches).toHaveLength(1);
+  });
+});
+
+describe("Issue #655: 取得のリクエスト間隔の var(RACE_ARCHIVE_MIN_INTERVAL_MS)", () => {
+  it.each([
+    ["1500", 1500],
+    ["3000", 3000],
+    [" 60000 ", 60000],
+    ["1499", undefined],
+    ["60001", undefined],
+    ["0", undefined],
+    ["3000.5", undefined],
+    ["-3000", undefined],
+    ["", undefined],
+    ["abc", undefined],
+    [undefined, undefined],
+  ] as [string | undefined, number | undefined][])("parseArchiveMinIntervalMs(%j) → %s(1500〜60000 の整数だけ。それ以外・未設定は既定に任せる)", (value, expected) => {
+    expect(parseArchiveMinIntervalMs(value)).toBe(expected);
+  });
+  it("間隔を 3000 にすると、取得どうしはちょうど 3 秒あく(5 秒ではない)。指定なしは従来どおり 5 秒", async () => {
+    const gaps = async (options: ArchiveFetchOptions): Promise<number[]> => {
+      const w = mk({ fromMonth: "2026-11", ...options });
+      standard(w);
+      await w.core.kick();
+      await w.runUntil(T0 + 60_000, 200);
+      expect(w.fetchLog.length).toBeGreaterThanOrEqual(5); // 前提: 複数回取った
+      return w.fetchLog.slice(1).map((f, i) => f.at - w.fetchLog[i]!.at);
+    };
+    const fast = await gaps({ intervalMs: 3000 });
+    expect(fast.every((g) => g === 3000)).toBe(true);
+    const normal = await gaps({});
+    expect(normal.every((g) => g === ARCHIVE_REQUEST_INTERVAL_MS)).toBe(true);
+    expect(ARCHIVE_REQUEST_INTERVAL_MS).toBe(5000);
+  });
+  it("終日 + 間隔 3 秒 + 開催日も取る: 拒否(HTTP 429)で止まり、次の晩は 0:00 JST に自動で再開する(night-stopped の動きは変わらない)", async () => {
+    const w = mk({ fromMonth: "2026-11", windowEndMin: 1440, skipCentralRaceDay: false, intervalMs: 3000 });
+    const { a } = standard(w);
+    w.site({ results: { [a[0]!]: [httpStatus(429), ok(RESULT_OK)] } });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59, 59), 300);
+    const stopped = await w.core.getStatus();
+    expect(stopped.state).toBe("night-stopped");
+    expect(w.resultFetches).toHaveLength(1);
+    expect(w.alarm).toBe(jst(11, 6, 0)); // 終日でも「次の日」は 0:00 JST
+    expect(w.notices.filter((n) => n.kind === "refused")).toHaveLength(1);
+    const before = w.fetchLog.length;
+    await w.runUntil(jst(11, 6, 0, 1, 0), 300);
+    expect(w.fetchLog.length).toBeGreaterThan(before); // 0:00 に自動で再開して取り始めた
+    expect((await w.core.getStatus()).state).toBe("running");
+  });
+});
+
+describe("Issue #655: 取る範囲の最初の月を 2021-01 に広げる", () => {
+  it("既定の最初の月は 2021-01(2021 年を丸ごと入れる)", () => {
+    expect(ARCHIVE_FROM_MONTH).toBe("2021-01");
+  });
+  it("既定の最初の月から 2026-11 までの月が、すべて「まだ取っていない月」として入る(2021-01〜2026-11 の 71 か月)", async () => {
+    const w = mk({ notBeforeMs: 0 });
+    await w.core.kick();
+    await w.fire();
+    const months = (w.sql.exec("SELECT month FROM ra_month ORDER BY month").toArray() as { month: string }[]).map((r) => r.month);
+    expect(months).toHaveLength(71);
+    expect(months[0]).toBe("2021-01");
+    expect(months[months.length - 1]).toBe("2026-11");
+  });
+  it("範囲を広げる前の状態が残っていても、新しく広がる月を見落とさず取りに行く(同じ晩のうちでも。取り終えた月は取り直さない)", async () => {
+    const w = mk({ fromMonth: "2026-09", windowEndMin: 1440 });
+    w.site({ calendars: { "2026-09": [], "2026-10": [], "2026-11": [] } });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59), 200);
+    const status = (): Record<string, string> =>
+      Object.fromEntries((w.sql.exec("SELECT month, status FROM ra_month").toArray() as { month: string; status: string }[]).map((r) => [r.month, r.status]));
+    expect(status()).toEqual({ "2026-09": "done", "2026-10": "done", "2026-11": "done" }); // 前提: 広げる前の範囲は取り終えた(古い状態が残っている)
+    expect((w.sql.exec("SELECT value FROM ra_meta WHERE key = 'months_seeded'").toArray() as { value: string }[]).length).toBe(1); // 前提: 今夜の種まきは済んでいる
+    w.site({ calendars: { "2026-06": [], "2026-07": [], "2026-08": [] } });
+    const before = w.fetchLog.length;
+    Object.assign(w.options, { fromMonth: "2026-06" }); // 公開で範囲が広がり、DO が作り直される(同じ SQLite・同じ晩)
+    w.core = w.makeCore();
+    w.now = jst(11, 5, 23, 59, 30);
+    w.alarm = w.now; // 作り直された DO の次の起床(取り切った状態の次の起床は 0:00 だが、ここでは同じ晩のうちに起きたことにする)
+    await w.runUntil(jst(11, 5, 23, 59, 59), 200);
+    expect(Object.keys(status()).sort()).toEqual(["2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"]);
+    const fetched = w.urls().slice(before);
+    for (const m of ["2026-06", "2026-07", "2026-08"]) expect(fetched).toContain(calUrl(m));
+    expect(fetched).not.toContain(calUrl("2026-09")); // 取り終えた月(今月・先月ではない)は取り直さない
   });
 });

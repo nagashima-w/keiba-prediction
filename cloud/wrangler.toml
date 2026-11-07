@@ -4,7 +4,8 @@
 #   これらは Worker の secret(ACCESS_TEAM_NAME / ACCESS_AUD / ACCESS_ALLOWED_EMAIL と、任意の ADMIN_USER〈管理者。Issue #238〉)として、
 #   ユーザーがダッシュボードで登録する。secret は wrangler deploy で消えない
 #   (vars にするとダッシュボードの値は次のデプロイで上書きされる)。
-#   したがって [vars] も `secrets.required` も置かない(未設定なら Worker が全リクエストに 403 を返す)。
+#   したがって認証の設定には `secrets.required` を置かず、[vars] にも置かない(未設定なら Worker が全リクエストに 403 を返す)。
+#   [vars] に置いてよいのは、過去の結果の取得の時間帯・間隔を変える RACE_ARCHIVE_* の 3 つだけ(Issue #655。下の [vars])。
 name = "keiba-cloud"
 main = "src/worker.ts"
 compatibility_date = "2026-10-01"
@@ -91,7 +92,7 @@ class_name = "MonthlyReportDO"
 name = "ALLOCATION_EXPORT"
 class_name = "AllocationExportDO"
 
-# 過去の結果(中央の過去 5 年)を毎晩取得して R2 と D1 の目録に保存する Durable Object(Issue #554〈#549-A3〉)。`idFromName("main")` の単一インスタンス。
+# 過去の結果(中央の 2021-01 から。当初は過去 5 年の 2021-11 から。Issue #655 で広げた)を毎晩取得して R2 と D1 の目録に保存する Durable Object(Issue #554〈#549-A3〉)。`idFromName("main")` の単一インスタンス。
 # **2026-11-04 0:00 JST より前には取らない**(コードの定数。ユーザーの決定)。JST 0:00〜8:30 の間だけ、5 秒に 1 件、gate(NetkeibaGate)経由で取る。**中央の開催日の朝は取らない**
 # (その日の日単位の DO の計画で判定。判定できなければ休む)。止められた(HTTP 400・403・429)ら、その場で止めて Discord で知らせ、次の晩に 1 度だけ自動で再開する(また止められたら手で再開するまで動かさない)。
 # D1 が 400MB を超えたら止めて知らせる。cron の `scheduled`(21 時・23 時)が kick してアラームを張る。管理者の口は `GET /api/race-archive`・`POST /api/race-archive/resume`。
@@ -99,6 +100,19 @@ class_name = "AllocationExportDO"
 [[durable_objects.bindings]]
 name = "RACE_ARCHIVE_FETCH"
 class_name = "RaceArchiveFetchDO"
+
+# Issue #655: 過去の結果の取得を、日中と中央の開催日にも動かす(本番の値)。ユーザーの決定(2026-11-07): 日中の分析に支障が出ても構わないので、取得を優先する。
+# - RACE_ARCHIVE_WINDOW_END_MIN = "1440": 取得の時間帯の終わり(JST の 0 時からの分)を 24:00 にする(終日。既定は 8:30 = 510)。
+# - RACE_ARCHIVE_SKIP_RACE_DAY = "0": 中央の開催日にも取る(文字列 "0" だけが有効。既定は休む)。取る対象が今日より前の開催日だけなのは変わらない。
+# - RACE_ARCHIVE_MIN_INTERVAL_MS = "3000": 取得の DO が次のリクエストを出すまでの最小の間隔を 3 秒にする(1500〜60000 の整数。未設定はコードの既定 5 秒)。窓口(gate)の 1.5 秒の間隔は分析と共有のまま変えず、
+#   この DO のアラームの間隔だけに効く。終日取り続けるので、分析のための窓口の空きを残し、断られにくくするため、窓口の最低(1.5 秒)より広げる。
+# 分析と同じ netkeiba の窓口(1.5 秒の間隔)を取り合うので、分析が遅れることがある。断られると窓口が 30 分止まり、分析にも効く(ユーザーは受け入れた)。
+# ★戻し方: この [vars] の 3 行(と [vars] の見出し)を消して公開する(var が無ければ、コードの既定 = 0:00〜8:30・開催日は休む、に戻る)。
+# 認証の設定(ACCESS_*)はここに置かない(secret)。1 晩の件数・行数の上限の var(RACE_ARCHIVE_NIGHTLY_LIMIT・RACE_ARCHIVE_NIGHTLY_ROWS_LIMIT)はここに置いていない(未設定)。
+[vars]
+RACE_ARCHIVE_WINDOW_END_MIN = "1440"
+RACE_ARCHIVE_SKIP_RACE_DAY = "0"
+RACE_ARCHIVE_MIN_INTERVAL_MS = "3000"
 
 # 過去の結果(R2 の読み取り結果)を horse_runs に入れる毎晩の変換の Durable Object(Issue #590〈#549-B3-2〉)。`idFromName("main")` の単一インスタンス。
 # JST 1:00〜8:30 の間だけ、目録(race_archive)の未変換のレースを 1 ステップ最大 20 件、R2 から読んで horse_runs に書く(1 晩の書き込み行数の既定は 3 万行)。

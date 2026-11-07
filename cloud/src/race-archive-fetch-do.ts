@@ -8,7 +8,7 @@
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v11)に固定される。
  *
- * 動きを変える設定は Worker の var・secret の 1 つだけ(任意): `RACE_ARCHIVE_NIGHTLY_LIMIT`(1 晩のリクエスト数を**下げる**上書き。未設定は上限なし。文字列 `"0"` だけは取得を止める〈結果の補完の `RESULT_BACKFILL_NIGHTLY_LIMIT` と同じ流儀〉)。
+ * 動きを変える設定は Worker の var・secret(すべて任意。時間帯の終わり・開催日の休みは Issue #655): `RACE_ARCHIVE_WINDOW_END_MIN`(時間帯の終わり。0 時からの分、1〜1440)・`RACE_ARCHIVE_SKIP_RACE_DAY`("0" で開催日にも取る)・`RACE_ARCHIVE_MIN_INTERVAL_MS`(リクエスト間隔。1500〜60000)・`RACE_ARCHIVE_NIGHTLY_LIMIT`(1 晩のリクエスト数を**下げる**上書き。未設定は上限なし。文字列 `"0"` だけは取得を止める〈結果の補完の `RESULT_BACKFILL_NIGHTLY_LIMIT` と同じ流儀〉)。
  * **smoke 専用の `options()` の差し替え**(開始時刻・時間帯・間隔を外す)は `smoke-worker.ts` のサブクラスだけが行う。本番のエントリ(`worker.ts`)はそのサブクラスを import しない
  * (`test/bundle-guard.test.ts` が、本番のバンドルに入らないことを固定している)。
  */
@@ -21,6 +21,9 @@ import {
   ARCHIVE_NIGHTLY_LIMIT_MAX,
   ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX,
   isArchiveFetchDisabled,
+  isArchiveRaceDayRestDisabled,
+  parseArchiveMinIntervalMs,
+  parseArchiveWindowEndMin,
   RaceArchiveFetchCore,
   type ArchiveFetchOptions,
   type PlanProgressLike,
@@ -49,6 +52,12 @@ export interface RaceArchiveFetchEnv {
   RACE_ARCHIVE_NIGHTLY_LIMIT?: string;
   /** 任意。1 晩に core の SQL が読む行数の予算(Issue #593。1 以上の整数。未設定・不正な値は既定の 100 万行)。超えた晩は取得を止めて通知する。 */
   RACE_ARCHIVE_NIGHTLY_ROWS_LIMIT?: string;
+  /** 任意(Issue #655)。取得の時間帯の終わり(JST の 0 時からの分。1〜1440 の整数。1440 = 終日。未設定・不正な値は既定の 8:30)。開始は 0:00 のまま。 */
+  RACE_ARCHIVE_WINDOW_END_MIN?: string;
+  /** 任意(Issue #655)。**文字列 `"0"` だけ**が「中央の開催日にも取る」(それ以外・未設定は従来どおり開催日に休む)。取る対象が今日より前の開催日だけなのは変わらない。 */
+  RACE_ARCHIVE_SKIP_RACE_DAY?: string;
+  /** 任意(Issue #655)。取得のリクエスト間隔(ミリ秒。開始から開始まで)。1500〜60000 の整数だけ採用し、それ以外・未設定は既定(コードの 5 秒)。gate の間隔は変えず、この DO のアラームの間隔だけに効く。 */
+  RACE_ARCHIVE_MIN_INTERVAL_MS?: string;
 }
 
 export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
@@ -105,7 +114,14 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
   protected options(): ArchiveFetchOptions {
     const nightlyLimit = parseLimitOverride(this.env.RACE_ARCHIVE_NIGHTLY_LIMIT, ARCHIVE_NIGHTLY_LIMIT_MAX);
     const nightlyRowsLimit = parseLimitOverride(this.env.RACE_ARCHIVE_NIGHTLY_ROWS_LIMIT, ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX);
-    return { ...(nightlyRowsLimit === null ? {} : { nightlyRowsLimit }), ...(isArchiveFetchDisabled(this.env.RACE_ARCHIVE_NIGHTLY_LIMIT) ? { disabled: true } : {}), ...(nightlyLimit === null ? {} : { nightlyLimit }) };
+    const windowEndMin = parseArchiveWindowEndMin(this.env.RACE_ARCHIVE_WINDOW_END_MIN);
+    const intervalMs = parseArchiveMinIntervalMs(this.env.RACE_ARCHIVE_MIN_INTERVAL_MS);
+    return {
+      ...(intervalMs === undefined ? {} : { intervalMs }),
+      ...(windowEndMin === undefined ? {} : { windowEndMin }),
+      ...(isArchiveRaceDayRestDisabled(this.env.RACE_ARCHIVE_SKIP_RACE_DAY) ? { skipCentralRaceDay: false } : {}),
+      ...(nightlyRowsLimit === null ? {} : { nightlyRowsLimit }), ...(isArchiveFetchDisabled(this.env.RACE_ARCHIVE_NIGHTLY_LIMIT) ? { disabled: true } : {}), ...(nightlyLimit === null ? {} : { nightlyLimit }),
+    };
   }
 
   /** アラームが無ければ張る(RPC)。cron の `scheduled` が 21 時と 23 時に呼ぶ。 */
