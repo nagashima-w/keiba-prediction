@@ -155,3 +155,43 @@ describe("marketShares・normalizeLogitShift", () => {
     expect(normalizeLogitShift([0, 1, 2], 3)).toEqual([1, 1, 1]);
   });
 });
+
+describe("computeShadowProbs: prior の端(Issue #659)", () => {
+  const race = golden.races.find((r) => r.horses.length >= 12)!;
+  /** 先頭馬の prior だけ差し替えた入力で、両モデルの確率を出す。 */
+  const withPrior = (prior: number) => computeShadowProbs(race.horses.map((h, i) => toInput(i === 0 ? { ...h, prior } : h)));
+  const first = (probs: ReturnType<typeof computeShadowProbs>, model: string) => probs.find((p) => p.umaban === race.horses[0]!.umaban && p.model === model)!;
+  const EDGES = [0, 1e-6, 1e-4, 1e-3, 0.5, 1 - 1e-4, 1 - 1e-6, 1];
+
+  it("prior が 0・1・その近くでも、全確率が有限で、レース内の合計が 1・2・3 のまま(両モデル)", () => {
+    for (const prior of EDGES) {
+      const probs = withPrior(prior);
+      expect(probs.length).toBe(race.horses.length * 2);
+      for (const model of [SHADOW_MODEL_ODDS, SHADOW_MODEL_NODDS]) {
+        const mine = probs.filter((p) => p.model === model);
+        expect(mine.length).toBe(race.horses.length);
+        for (const p of mine) for (const v of [p.winProb, p.top2Prob, p.top3Prob]) expect(Number.isFinite(v)).toBe(true);
+        expect(sum(mine.map((p) => p.winProb))).toBeCloseTo(1, 6);
+        expect(sum(mine.map((p) => p.top2Prob))).toBeCloseTo(2, 6);
+        expect(sum(mine.map((p) => p.top3Prob))).toBeCloseTo(3, 6);
+      }
+    }
+  });
+  it("prior を動かすと値が動く(以降の「一致」が、重み 0 で自明に成り立つ空振りでない)", () => {
+    for (const model of [SHADOW_MODEL_ODDS, SHADOW_MODEL_NODDS]) {
+      expect(Math.abs(first(withPrior(1e-3), model).top3Prob - first(withPrior(0.5), model).top3Prob)).toBeGreaterThan(1e-3);
+    }
+  });
+  it("下限 1e-4 で切る: prior 0・1e-6 は 1e-4 と全く同じ確率、1e-3 は違う", () => {
+    const base = withPrior(1e-4);
+    expect(withPrior(0)).toEqual(base);
+    expect(withPrior(1e-6)).toEqual(base);
+    expect(withPrior(1e-3)).not.toEqual(base);
+  });
+  it("上限 1−1e-4 で切る: prior 1・1−1e-6 は 1−1e-4 と全く同じ確率、1−1e-3 は違う", () => {
+    const base = withPrior(1 - 1e-4);
+    expect(withPrior(1)).toEqual(base);
+    expect(withPrior(1 - 1e-6)).toEqual(base);
+    expect(withPrior(1 - 1e-3)).not.toEqual(base);
+  });
+});

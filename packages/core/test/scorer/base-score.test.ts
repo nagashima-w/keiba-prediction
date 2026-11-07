@@ -112,6 +112,38 @@ describe("computeRecentFormScore(近走着順・重み減衰付き)", () => {
   });
 });
 
+describe("computeRecentFormScore: 走数の境界(Issue #659。学習の特徴量 c_近走着順 の元)", () => {
+  const dates = ["2025/07/01", "2025/06/01", "2025/05/01", "2025/04/01", "2025/03/01", "2025/02/01", "2025/01/01"];
+  const featuresOf = (finishes: number[]) =>
+    deriveRaceFeatures(finishes.map((f, i) => makeResult({ date: dates[i]!, finishPosition: rank(f) })));
+  it("既定の上限は 6 走。走数 1・2・3・6 はそのまま数え、7 走目は見ない", () => {
+    expect(DEFAULT_SCORER_CONFIG.baseScore.recentFormMaxRuns).toBe(6);
+    for (const n of [1, 2, 3, 6]) {
+      const c = computeRecentFormScore(featuresOf(new Array(n).fill(1)), DEFAULT_SCORER_CONFIG);
+      expect(c.applied).toBe(true);
+      expect(c.sampleCount).toBe(n);
+    }
+    // 7 走目だけ 18 着。見ていれば補正が下がる。
+    const six = computeRecentFormScore(featuresOf([1, 1, 1, 1, 1, 1]), DEFAULT_SCORER_CONFIG);
+    const seven = computeRecentFormScore(featuresOf([1, 1, 1, 1, 1, 1, 18]), DEFAULT_SCORER_CONFIG);
+    expect(seven.sampleCount).toBe(6);
+    expect(seven.correction).toBe(six.correction);
+    // 前提: 7 走目の 18 着を入れると結果が変わる設定(上限を 7 に広げる)なら、差が出る。
+    const wide = computeRecentFormScore(featuresOf([1, 1, 1, 1, 1, 1, 18]), cfg({ recentFormMaxRuns: 7 }));
+    expect(wide.correction).toBeLessThan(six.correction);
+  });
+  it("非数値の走は数に入れず、数値の着順を 6 走まで集める(中止を挟むと 7 走分を見る)", () => {
+    const f = deriveRaceFeatures([
+      makeResult({ date: "2025/07/01", finishPosition: { kind: "非数値", text: "中" } }),
+      ...dates.slice(1).map((d) => makeResult({ date: d, finishPosition: rank(1) })),
+      makeResult({ date: "2024/12/01", finishPosition: rank(18) }),
+    ]);
+    const c = computeRecentFormScore(f, DEFAULT_SCORER_CONFIG);
+    expect(c.sampleCount).toBe(6);
+    expect(c.targetRate).toBeCloseTo(1, 10); // 18 着(7 つ目の数値)は入らない
+  });
+});
+
 describe("computeLast3fScore(上がり3F水準の代替評価)", () => {
   it("速い上がりを使えた率で補正されること(芝閾値)", () => {
     // 芝閾値34.9、上がり[34.0, 35.5, 34.9] → 速い(<=34.9)は2走 → 率2/3。

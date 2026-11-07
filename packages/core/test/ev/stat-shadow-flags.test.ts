@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { computeShadowFlags, type ShadowFlags } from "../../src/ev/stat-shadow-flags.js";
+import { NO_FLAGS, computeShadowFlags, type ShadowFlag, type ShadowFlags } from "../../src/ev/stat-shadow-flags.js";
 import type { HorseRaceResult } from "../../src/scraper/types.js";
 
 interface GoldenRun {
@@ -103,5 +103,52 @@ describe("computeShadowFlags: 境界(表)", () => {
     const b = run({ date: "2026/04/01", courseType: "芝" });
     expect(computeShadowFlags([a, b], TODAY, 0.1)).toEqual(computeShadowFlags([b, a], TODAY, 0.1));
     expect(computeShadowFlags([a, b], TODAY, 0.1).surfaceChange).toBe(1);
+  });
+});
+
+describe("computeShadowFlags: 直近 3 走の境界(Issue #659)", () => {
+  const fin = (value: number) => ({ kind: "順位", value }) as const;
+  /** 新しい順の着順(数値は順位、文字列は非数値)から、1 週間ずつ遡る戦績を作る。 */
+  const runsOf = (finishes: Array<number | string>): HorseRaceResult[] =>
+    finishes.map((f, i) => {
+      const d = new Date(Date.UTC(2026, 9, 3) - i * 7 * 86400000);
+      const date = `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
+      return run({ date, finish: typeof f === "number" ? fin(f) : { kind: "非数値", text: f } });
+    });
+  const slump = (finishes: Array<number | string>, q = 0.01): ShadowFlag => {
+    expect(q).toBeLessThan(0.05); // 人気薄の側を無条件に固定(q で 0 になる空振りを防ぐ)
+    return computeShadowFlags(runsOf(finishes), TODAY, q).longshotSlump;
+  };
+
+  it("0 走 → 4 つとも null(longshotSlump も 0 にならない)", () => {
+    expect(computeShadowFlags([], TODAY, 0.01)).toEqual(NO_FLAGS);
+  });
+  it("1 走: 着順 12 → 平均 12 で 1(母数を 3 に水増ししない)", () => {
+    expect(slump([12])).toBe(1);
+  });
+  it("1 走: 着順 11 → 平均 11 で 0(11.5 未満)", () => {
+    expect(slump([11])).toBe(0);
+  });
+  it("2 走: 12・11 → 平均 11.5 ちょうどで 1", () => {
+    expect(slump([12, 11])).toBe(1);
+  });
+  it("3 走ちょうど: 12・12・10(平均 11.33)→ 0。3 走目まで平均に入る", () => {
+    expect(slump([12, 12, 10])).toBe(0);
+  });
+  it("3 走ちょうど: 13・11・11(平均 11.67)→ 1", () => {
+    expect(slump([13, 11, 11])).toBe(1);
+  });
+  it("4 走目以降は無関係(4 走前が 1 着でも、18 着でも結果は同じ)", () => {
+    expect(slump([12, 12, 11, 1])).toBe(1);
+    expect(slump([12, 12, 11, 1, 1, 1])).toBe(1);
+    expect(slump([12, 10, 12, 18])).toBe(0);
+    expect(slump([12, 10, 12, 18, 18])).toBe(0);
+  });
+  it("直近 3 走の中の非数値は平均から除くだけで、4 走目を繰り上げない(12・中止・11 → 平均 11.5)", () => {
+    // 繰り上げると 4 走目の 1 着が入って (12+11+1)/3 = 8 になり 0 になる。
+    expect(slump([12, "中", 11, 1])).toBe(1);
+  });
+  it("非数値が 4 走目にあるだけなら無関係", () => {
+    expect(slump([12, 12, 11, "中"])).toBe(1);
   });
 });
