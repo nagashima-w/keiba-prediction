@@ -25,7 +25,7 @@ const toggleOf = (t: VNode, id: string): VNode => findAll(t, (n) => n.attrs?.["d
 const FUNDS: FieldKey[] = ["bankroll", "perRaceCap", "evThreshold", "minHitProb", "maxWinBetsPerRace", "maxPlaceBetsPerRace"];
 const ODDS: FieldKey[] = ["includeComboOdds", "includeWideInAllocation", "includeQuinellaInAllocation", "includeBracketQuinellaInAllocation", "includeExactaInAllocation", "includeTrioInAllocation", "includeTrifectaInAllocation"];
 const LLM: FieldKey[] = ["additionalInstruction", "clipVariant", "analysisModel"];
-const ADVANCED: FieldKey[] = ["kellyFraction", "preRaceOffsetMinutes", ...WEIGHT_FIELD_ORDER];
+const ADVANCED: FieldKey[] = ["kellyFraction", "marketShrinkWeight", "preRaceOffsetMinutes", ...WEIGHT_FIELD_ORDER];
 
 const input = (over: Partial<SettingsModelInput> = {}): SettingsModelInput => ({ load: { kind: "ready", source: "d1" }, draft: draftFromSettings(DEFAULT_CLOUD_SETTINGS), errors: {}, save: { kind: "idle" }, ...over });
 const tree = (over: Partial<SettingsModelInput> = {}, actions: ViewActions = noopActions): VNode => renderScreen(buildSettingsModel(input(over)), actions);
@@ -40,11 +40,11 @@ describe("Issue #581: 節の表示用データ", () => {
       ["llm", "LLM分析", false],
       ["advanced", "上級の設定", false],
     ]);
-    expect(m.sections.map((s) => s.fields.map((f) => f.key))).toEqual([FUNDS, ODDS, LLM, ["kellyFraction", "preRaceOffsetMinutes"]]);
+    expect(m.sections.map((s) => s.fields.map((f) => f.key))).toEqual([FUNDS, ODDS, LLM, ["kellyFraction", "marketShrinkWeight", "preRaceOffsetMinutes"]]);
     expect(m.sections.map((s) => s.hasWeights)).toEqual([false, false, false, true]);
   });
 
-  it("18項目がどれもちょうど1つの節に入る(落ち・重複がない)", () => {
+  it("19項目がどれもちょうど1つの節に入る(落ち・重複がない)", () => {
     const keys = buildSettingsModel(input()).sections.flatMap((s) => s.fields.map((f) => f.key));
     expect(keys.length).toBe(FIELD_ORDER.length);
     expect([...keys].sort()).toEqual([...FIELD_ORDER].sort());
@@ -75,15 +75,15 @@ describe("Issue #581: 節の VNode", () => {
     expect(byClass(tree(), "weights")).toEqual([]);
   });
 
-  it("すべて開くと33項目(18 + 重み15)が出て、重みの小見出し2つとリセットボタンは上級の設定の中にある", () => {
+  it("すべて開くと34項目(19 + 重み15)が出て、重みの小見出し2つとリセットボタンは上級の設定の中にある", () => {
     const t = tree({ sectionOpen: ALL_OPEN });
     expect([...fieldKeys(t)].sort()).toEqual([...FIELD_ORDER, ...WEIGHT_FIELD_ORDER].sort());
-    expect(fieldKeys(t).length).toBe(33);
+    expect(fieldKeys(t).length).toBe(34);
     const advanced = byClass(t, "settings-section").find((n) => n.attrs?.["data-section"] === "advanced")!;
     expect(textOf(advanced)).toContain("環境・状態バイアス補正");
     expect(textOf(advanced)).toContain("基礎スコア");
     expect(byClass(advanced, "weights-reset").length).toBe(1);
-    expect(fieldKeys(advanced)).toEqual(ADVANCED.slice(0, 2).concat(WEIGHT_FIELD_ORDER));
+    expect(fieldKeys(advanced)).toEqual(ADVANCED.slice(0, 3).concat(WEIGHT_FIELD_ORDER));
   });
 
   it("開閉ボタンは aria-expanded と data-open-after を持ち、押すと onSettingsSectionToggle(節, 今の逆)", () => {
@@ -153,7 +153,7 @@ describe("Issue #581: 画面の制御(開閉・保存)", () => {
     expect(String(findAll(h.tree(), (n) => n.attrs?.["data-field"] === "kellyFraction")[0]!.attrs?.["value"])).toBe("0.3");
   });
 
-  it("閉じた節の項目も保存に含まれる: 開いて値を変え、閉じてから保存すると、POST は全33項目を持ち、変えた値が入っている", async () => {
+  it("閉じた節の項目も保存に含まれる: 開いて値を変え、閉じてから保存すると、POST は全34項目を持ち、変えた値が入っている", async () => {
     const h = await setup();
     h.toggle("advanced");
     h.type("kellyFraction", "0.3");

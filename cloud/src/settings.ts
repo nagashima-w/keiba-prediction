@@ -11,6 +11,8 @@ import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "./pre-race-time.js";
  *  - `minHitProb`(的中確率の下限。Issue #470)は既定 0.05。項目の無い旧い行も 0.05 で読む(保存し直さなくても、デプロイ時点から効く)。0〜1 で、0 は下限なし。
  *  - `maxWinBetsPerRace`・`maxPlaceBetsPerRace`(1 レースあたりの単勝・複勝の点数の上限。Issue #533)は既定 2。項目の無い旧い行も 2 で読む(保存し直さなくても、デプロイ時点から効く)。整数 0〜18 で、0 は上限なし。
  *    **分析時のスナップショット〈締切直前の再計算の入力 `input_json`〉の旧い入力は 0 で読む**(`race-day-close.ts`)。設定の表の旧い行〈2〉とは意図して違う: スナップショットは『上限を知らない旧い Worker が上限なしで配分した分析』なので、再計算も上限なしに揃える。
+ *  - `marketShrinkWeight`(配分の前に、モデルの確率を市場〈単勝オッズ〉の確率に寄せる割合。Issue #656)は既定 0.5。項目の無い旧い行も 0.5 で読む(保存し直さなくても、デプロイ時点から効く)。0〜1 で、1 は寄せない、0 は市場のみ。
+ *    **分析時のスナップショット〈締切直前の再計算の入力 `input_json`〉の旧い入力は 1(寄せない)で読む**(`race-day-close.ts`。上限と同じ理由: 寄せる前の Worker が配分した分析は、再計算も寄せずに揃える)。
  *  - `includeComboOdds`(組合せオッズの取得)は既定 OFF(オプトイン)。OFF なら、組合せの券種は配分に入らない(exe と同じ)。
  *  - 各券種の `include*InAllocation` は既定 ON。
  *  - `preRaceOffsetMinutes`(発走何分前に評価するか。Issue #189)は **cloud 専用の項目**(exe には無い)。既定 45 分は `pre-race-time.ts` の定数と同じ値(定義は1か所)。
@@ -103,6 +105,12 @@ export interface CloudSettings extends Readonly<Record<ScoringWeightField, numbe
   readonly maxWinBetsPerRace: number;
   /** 複勝の点数の上限(1レースあたり。整数 0〜18。Issue #533)。意味・既定・旧い行の扱いは `maxWinBetsPerRace` と同じ。複勝は組合せを混ぜる経路と複勝だけの経路の両方に効く。単勝とは別々に数える。 */
   readonly maxPlaceBetsPerRace: number;
+  /**
+   * 配分の前に、補正後の 3着内率を市場(単勝オッズ)の 3着内率にどれだけ寄せるか(0〜1。Issue #656)。1 は寄せない、0 は市場のみ。
+   * 既定 0.5(ユーザー決定 2026-11-07。本番の配分の書き出し 545 レースの試算で、見込みの的中数÷実際の的中数が 1.73 → 1.13、回収率の点推定が 78.8% → 94.0%。差の 95% 区間は 0 をまたぐ)。項目の無い旧い行も 0.5 で読む。
+   * 配分と、配分に渡す EV だけに効く。画面の補正後の 3着内率・LLM の入力・保存する馬の行(`adjusted_prob`・`ev`)は変わらない。保存する買い目の `ev` は、寄せた確率で計算した値になる。
+   */
+  readonly marketShrinkWeight: number;
   /** ワイド・3連複・馬連・馬単・三連単〈中央・地方。地方は Issue #283 から〉・枠連のオッズを取得するか。 */
   readonly includeComboOdds: boolean;
   readonly includeWideInAllocation: boolean;
@@ -127,6 +135,7 @@ export const DEFAULT_CLOUD_SETTINGS: CloudSettings = {
   minHitProb: 0.05,
   maxWinBetsPerRace: 2,
   maxPlaceBetsPerRace: 2,
+  marketShrinkWeight: 0.5,
   includeComboOdds: false,
   includeWideInAllocation: true,
   includeTrioInAllocation: true,
@@ -230,6 +239,8 @@ export const CLOUD_SETTINGS_RULES: { readonly [K in keyof CloudSettings]: FieldR
   // Issue #533: 単勝・複勝の点数の上限。整数 0〜18(0 は上限なし)。読む側と書く側で同じ述語。
   maxWinBetsPerRace: rule(D.maxWinBetsPerRace, numberWhere((n) => Number.isInteger(n) && n >= 0 && n <= MAX_BETS_PER_RACE_MAX)),
   maxPlaceBetsPerRace: rule(D.maxPlaceBetsPerRace, numberWhere((n) => Number.isInteger(n) && n >= 0 && n <= MAX_BETS_PER_RACE_MAX)),
+  // Issue #656: 市場に寄せる割合。0〜1(読む側と書く側で同じ述語)。
+  marketShrinkWeight: rule(D.marketShrinkWeight, numberWhere((n) => n >= 0 && n <= 1)),
   includeComboOdds: rule(D.includeComboOdds, isBoolean),
   includeWideInAllocation: rule(D.includeWideInAllocation, isBoolean),
   includeTrioInAllocation: rule(D.includeTrioInAllocation, isBoolean),
