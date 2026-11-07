@@ -65,7 +65,7 @@ export const MIN_D: Readonly<Record<Target, number>> = { place: 1.0, win: 0.5 };
 /** Holm 補正。入力の順序のまま、補正した p 値を返す(単調性を保つ)。 */
 export function holmAdjust(pvals: readonly number[]): number[] {
   const m = pvals.length;
-  const order = pvals.map((p, i) => i).sort((a, b) => pvals[a]! - pvals[b]!);
+  const order = pvals.map((_, i) => i).sort((a, b) => pvals[a]! - pvals[b]!);
   const adj = new Array<number>(m).fill(0);
   let running = 0;
   order.forEach((i, rank) => {
