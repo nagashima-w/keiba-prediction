@@ -1,0 +1,2257 @@
+{
+ "plan": "docs/investigations/payout-patterns-654/plan.md §6",
+ "period": {
+  "from": "2024-08-10",
+  "to": "2025-09-30"
+ },
+ "params": {
+  "entropyCuts": [
+   0.7202385861294166,
+   0.7908570966068383
+  ],
+  "discount": {
+   "lambda": 0.8,
+   "mu": 0.7000000000000001
+  },
+  "reps": 2000,
+  "seed": 654
+ },
+ "candidates": [
+  {
+   "id": "quinella:R:{R1,R2}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 1085,
+    "expectedHits": 1219.220611341309,
+    "z": -3.843952961927381,
+    "roi": 0.8079499494438828
+   }
+  },
+  {
+   "id": "wide:R:{R1,R2}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 2258,
+    "expectedHits": 2886.5822411978415,
+    "z": -11.699576443375312,
+    "roi": 0.8078741152679474
+   }
+  },
+  {
+   "id": "quinella:R:{R1,R3}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 635,
+    "expectedHits": 695.2377661350826,
+    "z": -2.2845579578814057,
+    "roi": 0.790346806176694
+   }
+  },
+  {
+   "id": "wide:R:{R1,R3}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 1773,
+    "expectedHits": 1934.3102474918285,
+    "z": -3.6677429519743465,
+    "roi": 0.8132393890810902
+   }
+  },
+  {
+   "id": "quinella:R:{R1,R4}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 333,
+    "expectedHits": 288.20557517989187,
+    "z": 2.6385952455786743,
+    "roi": 0.9121979054779806
+   }
+  },
+  {
+   "id": "wide:R:{R1,R4}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 939,
+    "expectedHits": 828.9893676967723,
+    "z": 3.820851691375835,
+    "roi": 0.8037124060150376
+   }
+  },
+  {
+   "id": "wide:R:{R2,R2}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 725,
+    "expectedHits": 900.5034952472498,
+    "z": -5.848480802374917,
+    "roi": 0.8099595551061678
+   }
+  },
+  {
+   "id": "wide:R:{R2,R4}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 1105,
+    "expectedHits": 946.7480991705214,
+    "z": 5.143179885747444,
+    "roi": 0.708827873254565
+   }
+  },
+  {
+   "id": "wide:R:{R2,R5}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 310,
+    "expectedHits": 276.68674542804524,
+    "z": 2.0027322260920113,
+    "roi": 0.6371192934606144
+   }
+  },
+  {
+   "id": "wide:R:{R3,R3}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 562,
+    "expectedHits": 483.8239835068118,
+    "z": 3.5541016147619553,
+    "roi": 0.7183876964678046
+   }
+  },
+  {
+   "id": "quinella:R:{R3,R4}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 228,
+    "expectedHits": 179.3604056518029,
+    "z": 3.6318395654326485,
+    "roi": 0.6340740243465808
+   }
+  },
+  {
+   "id": "wide:R:{R3,R4}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 960,
+    "expectedHits": 653.7704345957321,
+    "z": 11.97662577558938,
+    "roi": 0.6954506802721089
+   }
+  },
+  {
+   "id": "quinella:R:{R3,R5}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 75,
+    "expectedHits": 53.72906281160082,
+    "z": 2.901896993236368,
+    "roi": 0.6076152131090764
+   }
+  },
+  {
+   "id": "wide:R:{R3,R5}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 296,
+    "expectedHits": 194.4631496661771,
+    "z": 7.281234692525155,
+    "roi": 0.6080676234387514
+   }
+  },
+  {
+   "id": "quinella:R:{R4,R4}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3823,
+    "hits": 63,
+    "expectedHits": 32.148673784652125,
+    "z": 5.441170151395675,
+    "roi": 0.8065766973240283
+   }
+  },
+  {
+   "id": "wide:R:{R4,R4}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3823,
+    "hits": 225,
+    "expectedHits": 118.19306671755749,
+    "z": 9.824341373910727,
+    "roi": 0.652618200305033
+   }
+  },
+  {
+   "id": "wide:R:{R4,R5}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 194,
+    "expectedHits": 104.7444163927966,
+    "z": 8.721073633942257,
+    "roi": 0.45589648678485617
+   }
+  },
+  {
+   "id": "wide:R:{R5,R5}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3006,
+    "hits": 39,
+    "expectedHits": 16.628810333863537,
+    "z": 5.486033937845763,
+    "roi": 0.3760632951379914
+   }
+  },
+  {
+   "id": "exacta:R:R1>R4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 236,
+    "expectedHits": 172.84264886117245,
+    "z": 4.803949688730923,
+    "roi": 0.91203007518797
+   }
+  },
+  {
+   "id": "exacta:R:R2>R1",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 440,
+    "expectedHits": 525.2739294644925,
+    "z": -3.7206888498882646,
+    "roi": 0.7587588473205258
+   }
+  },
+  {
+   "id": "exacta:R:R2>R3",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 401,
+    "expectedHits": 336.8679364409125,
+    "z": 3.4941808258381575,
+    "roi": 0.7337271116361489
+   }
+  },
+  {
+   "id": "exacta:R:R2>R4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 169,
+    "expectedHits": 142.5388872291577,
+    "z": 2.2163657058300834,
+    "roi": 0.6356135875402793
+   }
+  },
+  {
+   "id": "exacta:R:R2>R5",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 56,
+    "expectedHits": 42.41237648248186,
+    "z": 2.086398208354198,
+    "roi": 0.6174329501915709
+   }
+  },
+  {
+   "id": "exacta:R:R3>R1",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 198,
+    "expectedHits": 284.23319299828063,
+    "z": -5.11489909256925,
+    "roi": 0.6387055944646022
+   }
+  },
+  {
+   "id": "exacta:R:R3>R4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 126,
+    "expectedHits": 92.13618526414648,
+    "z": 3.5279365518327044,
+    "roi": 0.6575725026852847
+   }
+  },
+  {
+   "id": "exacta:R:R3>R5",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 40,
+    "expectedHits": 27.904026680151734,
+    "z": 2.289851828591484,
+    "roi": 0.5362967292248414
+   }
+  },
+  {
+   "id": "exacta:R:R4>R4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3823,
+    "hits": 65,
+    "expectedHits": 32.148673784652004,
+    "z": 5.793905078472444,
+    "roi": 0.8514350418265009
+   }
+  },
+  {
+   "id": "trio:R:{R1,R2,R2}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 371,
+    "expectedHits": 565.5550020767055,
+    "z": -8.180973336497177,
+    "roi": 0.7778058645096056
+   }
+  },
+  {
+   "id": "trio:R:{R1,R2,R3}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 965,
+    "expectedHits": 1187.8934616947251,
+    "z": -6.467085209703225,
+    "roi": 0.7770230360307147
+   }
+  },
+  {
+   "id": "trio:R:{R1,R3,R4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 293,
+    "expectedHits": 259.0482633399542,
+    "z": 2.109461731772152,
+    "roi": 0.7349579305406373
+   }
+  },
+  {
+   "id": "trio:R:{R1,R4,R4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3823,
+    "hits": 74,
+    "expectedHits": 43.72783896029983,
+    "z": 4.577880139790244,
+    "roi": 0.8529001247862458
+   }
+  },
+  {
+   "id": "trio:R:{R1,R4,R5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 55,
+    "expectedHits": 36.878157533995136,
+    "z": 2.984130030434991,
+    "roi": 0.525264627573219
+   }
+  },
+  {
+   "id": "trio:R:{R2,R3,R4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 316,
+    "expectedHits": 222.68686915872834,
+    "z": 6.253101186616213,
+    "roi": 0.6509745345506623
+   }
+  },
+  {
+   "id": "trio:R:{R2,R3,R5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 86,
+    "expectedHits": 63.976317058173215,
+    "z": 2.753469870076554,
+    "roi": 0.6101002229582008
+   }
+  },
+  {
+   "id": "trio:R:{R2,R4,R4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3823,
+    "hits": 53,
+    "expectedHits": 37.49014145205934,
+    "z": 2.5330822837416758,
+    "roi": 0.5530757498729029
+   }
+  },
+  {
+   "id": "trio:R:{R2,R4,R5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 48,
+    "expectedHits": 32.322891637207896,
+    "z": 2.75747038686996,
+    "roi": 0.4163127475810118
+   }
+  },
+  {
+   "id": "trio:R:{R3,R3,R4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 85,
+    "expectedHits": 48.7712586727782,
+    "z": 5.187657125045146,
+    "roi": 0.624391335481561
+   }
+  },
+  {
+   "id": "trio:R:{R3,R4,R4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3823,
+    "hits": 64,
+    "expectedHits": 25.977810125642716,
+    "z": 7.459948978898045,
+    "roi": 0.6788248524903329
+   }
+  },
+  {
+   "id": "trio:R:{R3,R4,R5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 53,
+    "expectedHits": 22.537164500208853,
+    "z": 6.416832278451423,
+    "roi": 0.5326655410524493
+   }
+  },
+  {
+   "id": "trifecta:R:R1>{R2,R2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 168,
+    "expectedHits": 250.4025876694563,
+    "z": -5.207406054251152,
+    "roi": 0.6651668351870577
+   }
+  },
+  {
+   "id": "trifecta:R:R1>{R2,R3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 486,
+    "expectedHits": 534.2952409254824,
+    "z": -2.089361962646748,
+    "roi": 0.7289659100497848
+   }
+  },
+  {
+   "id": "trifecta:R:R1>{R2,R4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 246,
+    "expectedHits": 201.54356919380083,
+    "z": 3.131483441977648,
+    "roi": 0.8148664070891515
+   }
+  },
+  {
+   "id": "trifecta:R:R1>{R3,R3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 126,
+    "expectedHits": 94.65769234612688,
+    "z": 3.221462001222129,
+    "roi": 0.8092360993746831
+   }
+  },
+  {
+   "id": "trifecta:R:R1>{R3,R4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 155,
+    "expectedHits": 119.07571203785066,
+    "z": 3.2921269604919434,
+    "roi": 0.7177295918367347
+   }
+  },
+  {
+   "id": "trifecta:R:R1>{R3,R5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 55,
+    "expectedHits": 33.15579694038619,
+    "z": 3.793643088508448,
+    "roi": 0.7125343637032707
+   }
+  },
+  {
+   "id": "trifecta:R:R1>{R4,R4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3823,
+    "hits": 49,
+    "expectedHits": 20.31447961085991,
+    "z": 6.364435391201684,
+    "roi": 1.0487891112446273
+   }
+  },
+  {
+   "id": "trifecta:R:R1>{R4,R5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 33,
+    "expectedHits": 17.088631163154805,
+    "z": 3.8490531224674647,
+    "roi": 0.5228886616014027
+   }
+  },
+  {
+   "id": "trifecta:R:R2>{R1,R2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 203,
+    "expectedHits": 315.15241440725,
+    "z": -6.317544477226234,
+    "roi": 0.6740394337714863
+   }
+  },
+  {
+   "id": "trifecta:R:R2>{R1,R3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 312,
+    "expectedHits": 367.1022632070697,
+    "z": -2.8759140727442785,
+    "roi": 0.7535482237785841
+   }
+  },
+  {
+   "id": "trifecta:R:R2>{R2,R3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 184,
+    "expectedHits": 158.64471429130074,
+    "z": 2.013055298918748,
+    "roi": 0.7396569909712261
+   }
+  },
+  {
+   "id": "trifecta:R:R2>{R3,R3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 89,
+    "expectedHits": 65.78671482059508,
+    "z": 2.8619860132268458,
+    "roi": 0.6294743958086868
+   }
+  },
+  {
+   "id": "trifecta:R:R2>{R3,R4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 157,
+    "expectedHits": 84.03569072454401,
+    "z": 7.959368069614573,
+    "roi": 0.7137078186537773
+   }
+  },
+  {
+   "id": "trifecta:R:R2>{R3,R5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3251,
+    "hits": 45,
+    "expectedHits": 24.283217832685768,
+    "z": 4.204062672512064,
+    "roi": 0.8682528086239366
+   }
+  },
+  {
+   "id": "trifecta:R:R3>{R1,R2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 169,
+    "expectedHits": 286.4959575621693,
+    "z": -6.941665394391695,
+    "roi": 0.6426757235676315
+   }
+  },
+  {
+   "id": "trifecta:R:R3>{R1,R3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 91,
+    "expectedHits": 112.74940494794475,
+    "z": -2.048284365893999,
+    "roi": 0.649947186074024
+   }
+  },
+  {
+   "id": "trifecta:R:R3>{R2,R4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 98,
+    "expectedHits": 72.56263263299029,
+    "z": 2.9861776912427302,
+    "roi": 0.6958976682778375
+   }
+  },
+  {
+   "id": "trifecta:R:R3>{R3,R4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 61,
+    "expectedHits": 33.421051404242114,
+    "z": 4.770541202729376,
+    "roi": 0.6737390350877193
+   }
+  },
+  {
+   "id": "trifecta:R:R4>{R1,R2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3907,
+    "hits": 61,
+    "expectedHits": 102.24992732828188,
+    "z": -4.079356718463733,
+    "roi": 0.6446076127819549
+   }
+  },
+  {
+   "id": "trifecta:R:R4>{R3,R4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3823,
+    "hits": 45,
+    "expectedHits": 16.84337297368917,
+    "z": 6.86066312945223,
+    "roi": 0.886237309546918
+   }
+  },
+  {
+   "id": "quinella:Q:{Q1,Q2}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1641,
+    "hits": 435,
+    "expectedHits": 485.4056404749855,
+    "z": -2.2878456858749683,
+    "roi": 0.8372714486638537
+   }
+  },
+  {
+   "id": "wide:Q:{Q1,Q2}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1641,
+    "hits": 843,
+    "expectedHits": 1076.6647896966356,
+    "z": -7.121197315222682,
+    "roi": 0.8276605719643695
+   }
+  },
+  {
+   "id": "quinella:Q:{Q1,Q3}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1962,
+    "hits": 423,
+    "expectedHits": 501.72403042716894,
+    "z": -3.514591621255355,
+    "roi": 0.7602286258633008
+   }
+  },
+  {
+   "id": "wide:Q:{Q1,Q3}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1962,
+    "hits": 1045,
+    "expectedHits": 1281.5996516710427,
+    "z": -6.609032850557487,
+    "roi": 0.7998809240295308
+   }
+  },
+  {
+   "id": "wide:Q:{Q1,Q5}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2193,
+    "hits": 642,
+    "expectedHits": 560.4345117012688,
+    "z": 3.4454345528945858,
+    "roi": 0.6659478827361563
+   }
+  },
+  {
+   "id": "wide:Q:{Q2,Q2}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1995,
+    "hits": 895,
+    "expectedHits": 1112.5616471967408,
+    "z": -6.522593238951025,
+    "roi": 0.8457841031149301
+   }
+  },
+  {
+   "id": "quinella:Q:{Q2,Q3}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3084,
+    "hits": 607,
+    "expectedHits": 669.3476449885405,
+    "z": -2.409873155740014,
+    "roi": 0.7443877150263137
+   }
+  },
+  {
+   "id": "wide:Q:{Q2,Q3}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3084,
+    "hits": 1724,
+    "expectedHits": 2085.8268814690946,
+    "z": -7.9224899871105094,
+    "roi": 0.7728143900714791
+   }
+  },
+  {
+   "id": "wide:Q:{Q2,Q4}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3188,
+    "hits": 1284,
+    "expectedHits": 1197.1972922421335,
+    "z": 2.508709705537751,
+    "roi": 0.8311864406779661
+   }
+  },
+  {
+   "id": "wide:Q:{Q2,Q5}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3362,
+    "hits": 932,
+    "expectedHits": 776.5526423715467,
+    "z": 5.578248960553695,
+    "roi": 0.668749847482857
+   }
+  },
+  {
+   "id": "quinella:Q:{Q3,Q4}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3443,
+    "hits": 287,
+    "expectedHits": 238.879126266704,
+    "z": 3.113467977552118,
+    "roi": 0.7886092053250943
+   }
+  },
+  {
+   "id": "wide:Q:{Q3,Q4}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3443,
+    "hits": 1056,
+    "expectedHits": 885.3511967246113,
+    "z": 5.73515893413364,
+    "roi": 0.8047526012085965
+   }
+  },
+  {
+   "id": "wide:Q:{Q3,Q5}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3631,
+    "hits": 748,
+    "expectedHits": 584.4872944063941,
+    "z": 6.763382777771347,
+    "roi": 0.6430678214614519
+   }
+  },
+  {
+   "id": "quinella:Q:{Q4,Q4}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3008,
+    "hits": 81,
+    "expectedHits": 57.79441209642536,
+    "z": 3.0524576723273156,
+    "roi": 0.7142439499756374
+   }
+  },
+  {
+   "id": "wide:Q:{Q4,Q4}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3008,
+    "hits": 346,
+    "expectedHits": 224.9825011296342,
+    "z": 8.068147005143718,
+    "roi": 0.7922689621568946
+   }
+  },
+  {
+   "id": "quinella:Q:{Q4,Q5}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3722,
+    "hits": 128,
+    "expectedHits": 75.09513719414731,
+    "z": 6.105056464029645,
+    "roi": 0.6837617861590465
+   }
+  },
+  {
+   "id": "wide:Q:{Q4,Q5}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3722,
+    "hits": 563,
+    "expectedHits": 301.8573955767714,
+    "z": 15.030617423445477,
+    "roi": 0.6773839174524106
+   }
+  },
+  {
+   "id": "quinella:Q:{Q5,Q5}",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3855,
+    "hits": 37,
+    "expectedHits": 22.756390985857134,
+    "z": 2.9858525028865817,
+    "roi": 0.3667728665012185
+   }
+  },
+  {
+   "id": "wide:Q:{Q5,Q5}",
+   "family": "F2",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3855,
+    "hits": 193,
+    "expectedHits": 94.19246195539016,
+    "z": 10.180802300936438,
+    "roi": 0.36417600107317727
+   }
+  },
+  {
+   "id": "exacta:Q:Q1>Q4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2052,
+    "hits": 232,
+    "expectedHits": 186.38177940696505,
+    "z": 3.341462673634912,
+    "roi": 0.8810762007945107
+   }
+  },
+  {
+   "id": "exacta:Q:Q1>Q5",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2193,
+    "hits": 156,
+    "expectedHits": 125.1198618581528,
+    "z": 2.760680237684483,
+    "roi": 0.702801302931596
+   }
+  },
+  {
+   "id": "exacta:Q:Q2>Q4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3188,
+    "hits": 238,
+    "expectedHits": 196.42904730904604,
+    "z": 2.966109106865304,
+    "roi": 0.7398017268947873
+   }
+  },
+  {
+   "id": "exacta:Q:Q2>Q5",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3362,
+    "hits": 179,
+    "expectedHits": 124.97426597849547,
+    "z": 4.832706037706608,
+    "roi": 0.6295053564020596
+   }
+  },
+  {
+   "id": "exacta:Q:Q3>Q1",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1962,
+    "hits": 144,
+    "expectedHits": 195.6376659266386,
+    "z": -3.691818715435435,
+    "roi": 0.7065729935698976
+   }
+  },
+  {
+   "id": "exacta:Q:Q3>Q2",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3084,
+    "hits": 255,
+    "expectedHits": 313.01344512735346,
+    "z": -3.27904336739674,
+    "roi": 0.7181525410415521
+   }
+  },
+  {
+   "id": "exacta:Q:Q3>Q4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3443,
+    "hits": 155,
+    "expectedHits": 123.44632043970753,
+    "z": 2.8399515832289786,
+    "roi": 0.7411286291971466
+   }
+  },
+  {
+   "id": "exacta:Q:Q3>Q5",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3631,
+    "hits": 108,
+    "expectedHits": 80.32890726380019,
+    "z": 3.0873820884478764,
+    "roi": 0.5590565008354077
+   }
+  },
+  {
+   "id": "exacta:Q:Q4>Q1",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 2052,
+    "hits": 66,
+    "expectedHits": 109.75679251441173,
+    "z": -4.176666280612434,
+    "roi": 0.5487721198988804
+   }
+  },
+  {
+   "id": "exacta:Q:Q4>Q4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3008,
+    "hits": 83,
+    "expectedHits": 57.79441209642569,
+    "z": 3.315537210325705,
+    "roi": 0.7534838395322397
+   }
+  },
+  {
+   "id": "exacta:Q:Q4>Q5",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3722,
+    "hits": 68,
+    "expectedHits": 38.193510476062805,
+    "z": 4.8229864415930885,
+    "roi": 0.7478429105141434
+   }
+  },
+  {
+   "id": "exacta:Q:Q5>Q1",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 2193,
+    "hits": 48,
+    "expectedHits": 69.88630820211728,
+    "z": -2.6180411055654136,
+    "roi": 0.41381758957654724
+   }
+  },
+  {
+   "id": "exacta:Q:Q5>Q2",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3362,
+    "hits": 61,
+    "expectedHits": 99.44794497728736,
+    "z": -3.855451332345803,
+    "roi": 0.5209790380438761
+   }
+  },
+  {
+   "id": "exacta:Q:Q5>Q4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3722,
+    "hits": 61,
+    "expectedHits": 36.90162671808497,
+    "z": 3.9670253124076478,
+    "roi": 0.686866215975805
+   }
+  },
+  {
+   "id": "exacta:Q:Q5>Q5",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3855,
+    "hits": 37,
+    "expectedHits": 22.756390985857504,
+    "z": 2.98585250288648,
+    "roi": 0.4045548550092785
+   }
+  },
+  {
+   "id": "trio:Q:{Q1,Q2,Q2}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 440,
+    "hits": 83,
+    "expectedHits": 113.83487463409342,
+    "z": -2.8900444355224213,
+    "roi": 0.89125
+   }
+  },
+  {
+   "id": "trio:Q:{Q1,Q2,Q3}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1414,
+    "hits": 264,
+    "expectedHits": 378.8823392526278,
+    "z": -5.902025602730843,
+    "roi": 0.8125416944629753
+   }
+  },
+  {
+   "id": "trio:Q:{Q1,Q2,Q4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1513,
+    "hits": 213,
+    "expectedHits": 261.03001895523147,
+    "z": -2.972812583180669,
+    "roi": 0.7931423611111111
+   }
+  },
+  {
+   "id": "trio:Q:{Q1,Q3,Q3}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1322,
+    "hits": 151,
+    "expectedHits": 195.6824419371067,
+    "z": -3.19419164985325,
+    "roi": 0.7525233044037287
+   }
+  },
+  {
+   "id": "trio:Q:{Q1,Q4,Q5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2040,
+    "hits": 129,
+    "expectedHits": 101.57516535558814,
+    "z": 2.7211360046207225,
+    "roi": 0.6197879184385563
+   }
+  },
+  {
+   "id": "trio:Q:{Q1,Q5,Q5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2135,
+    "hits": 59,
+    "expectedHits": 33.1022183852948,
+    "z": 4.5012591226648135,
+    "roi": 0.6351773236155984
+   }
+  },
+  {
+   "id": "trio:Q:{Q2,Q2,Q2}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 755,
+    "hits": 75,
+    "expectedHits": 109.93433111775948,
+    "z": -3.331852469621184,
+    "roi": 0.8337782340862423
+   }
+  },
+  {
+   "id": "trio:Q:{Q2,Q2,Q3}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1777,
+    "hits": 236,
+    "expectedHits": 345.99826483029983,
+    "z": -5.9135581810664375,
+    "roi": 0.7197282929710573
+   }
+  },
+  {
+   "id": "trio:Q:{Q2,Q4,Q4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2543,
+    "hits": 100,
+    "expectedHits": 73.93191457692326,
+    "z": 3.0317484133232995,
+    "roi": 0.7584400719463672
+   }
+  },
+  {
+   "id": "trio:Q:{Q2,Q4,Q5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3172,
+    "hits": 158,
+    "expectedHits": 96.36440212558881,
+    "z": 6.278751536316207,
+    "roi": 0.6676189076659319
+   }
+  },
+  {
+   "id": "trio:Q:{Q2,Q5,Q5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3294,
+    "hits": 47,
+    "expectedHits": 29.129269818939513,
+    "z": 3.31113965532329,
+    "roi": 0.36938372399262576
+   }
+  },
+  {
+   "id": "trio:Q:{Q3,Q3,Q4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2598,
+    "hits": 117,
+    "expectedHits": 89.99489235948404,
+    "z": 2.846669064337884,
+    "roi": 0.7688923468666007
+   }
+  },
+  {
+   "id": "trio:Q:{Q3,Q3,Q5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2749,
+    "hits": 78,
+    "expectedHits": 59.10518414872297,
+    "z": 2.457705697448403,
+    "roi": 0.6027349457652176
+   }
+  },
+  {
+   "id": "trio:Q:{Q3,Q4,Q4}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2761,
+    "hits": 73,
+    "expectedHits": 45.085679102660585,
+    "z": 4.157265478236513,
+    "roi": 0.75877368482994
+   }
+  },
+  {
+   "id": "trio:Q:{Q3,Q4,Q5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3428,
+    "hits": 132,
+    "expectedHits": 59.69529421592938,
+    "z": 9.358290334584336,
+    "roi": 0.7583825616431652
+   }
+  },
+  {
+   "id": "trio:Q:{Q3,Q5,Q5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3561,
+    "hits": 30,
+    "expectedHits": 18.4330874507633,
+    "z": 2.6941291468637703,
+    "roi": 0.31714366881020634
+   }
+  },
+  {
+   "id": "trio:Q:{Q4,Q4,Q5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2991,
+    "hits": 39,
+    "expectedHits": 13.564815093288145,
+    "z": 6.906022041410426,
+    "roi": 0.7681900256860202
+   }
+  },
+  {
+   "id": "trio:Q:{Q4,Q5,Q5}",
+   "family": "F2",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3647,
+    "hits": 33,
+    "expectedHits": 8.54645184654606,
+    "z": 8.36467281485758,
+    "roi": 0.6066174000671817
+   }
+  },
+  {
+   "id": "trifecta:Q:Q1>{Q2,Q3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1414,
+    "hits": 127,
+    "expectedHits": 173.9625023975995,
+    "z": -3.560601800598815,
+    "roi": 0.7103235490326885
+   }
+  },
+  {
+   "id": "trifecta:Q:Q1>{Q2,Q4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1513,
+    "hits": 98,
+    "expectedHits": 124.63835737378486,
+    "z": -2.386061221768293,
+    "roi": 0.7039713541666667
+   }
+  },
+  {
+   "id": "trifecta:Q:Q1>{Q3,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 1953,
+    "hits": 114,
+    "expectedHits": 93.75192851056394,
+    "z": 2.0911903226406747,
+    "roi": 0.7142774252039891
+   }
+  },
+  {
+   "id": "trifecta:Q:Q1>{Q4,Q4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 1586,
+    "hits": 57,
+    "expectedHits": 37.774792812644264,
+    "z": 3.1280233285280614,
+    "roi": 0.7846526523238627
+   }
+  },
+  {
+   "id": "trifecta:Q:Q1>{Q4,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2040,
+    "hits": 102,
+    "expectedHits": 54.84024251471854,
+    "z": 6.368276035083775,
+    "roi": 0.8415181005342929
+   }
+  },
+  {
+   "id": "trifecta:Q:Q1>{Q5,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2135,
+    "hits": 41,
+    "expectedHits": 18.317049623330316,
+    "z": 5.299950112596532,
+    "roi": 0.6942426177774438
+   }
+  },
+  {
+   "id": "trifecta:Q:Q2>{Q1,Q2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 440,
+    "hits": 48,
+    "expectedHits": 64.98537658073859,
+    "z": -2.10701370284301,
+    "roi": 0.8559895833333333
+   }
+  },
+  {
+   "id": "trifecta:Q:Q2>{Q1,Q3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1414,
+    "hits": 86,
+    "expectedHits": 115.6926469909057,
+    "z": -2.760552661029694,
+    "roi": 0.761307538358906
+   }
+  },
+  {
+   "id": "trifecta:Q:Q2>{Q2,Q2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 755,
+    "hits": 75,
+    "expectedHits": 109.9343311177593,
+    "z": -3.3318524696211695,
+    "roi": 0.738466803559206
+   }
+  },
+  {
+   "id": "trifecta:Q:Q2>{Q2,Q3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1777,
+    "hits": 187,
+    "expectedHits": 246.92260669431295,
+    "z": -3.8133816361203796,
+    "roi": 0.6832102776137035
+   }
+  },
+  {
+   "id": "trifecta:Q:Q2>{Q2,Q4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 1882,
+    "hits": 170,
+    "expectedHits": 145.6327195579968,
+    "z": 2.019191836726625,
+    "roi": 0.8889840308370044
+   }
+  },
+  {
+   "id": "trifecta:Q:Q2>{Q2,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 1984,
+    "hits": 131,
+    "expectedHits": 93.52275917014421,
+    "z": 3.8753323520483653,
+    "roi": 0.7532263047328748
+   }
+  },
+  {
+   "id": "trifecta:Q:Q2>{Q3,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3072,
+    "hits": 110,
+    "expectedHits": 75.5091035926438,
+    "z": 3.969216832310848,
+    "roi": 0.5982952374128212
+   }
+  },
+  {
+   "id": "trifecta:Q:Q2>{Q4,Q4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2543,
+    "hits": 55,
+    "expectedHits": 29.69964369060475,
+    "z": 4.642490438183189,
+    "roi": 0.861429661525045
+   }
+  },
+  {
+   "id": "trifecta:Q:Q2>{Q4,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3172,
+    "hits": 79,
+    "expectedHits": 39.24659790438633,
+    "z": 6.345608782109798,
+    "roi": 0.6906216017634093
+   }
+  },
+  {
+   "id": "trifecta:Q:Q3>{Q1,Q2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1414,
+    "hits": 51,
+    "expectedHits": 89.22718986412285,
+    "z": -4.0469120473122775,
+    "roi": 0.7511674449633089
+   }
+  },
+  {
+   "id": "trifecta:Q:Q3>{Q1,Q3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1322,
+    "hits": 62,
+    "expectedHits": 99.11678977695357,
+    "z": -3.7281793221335002,
+    "roi": 0.6318466730954677
+   }
+  },
+  {
+   "id": "trifecta:Q:Q3>{Q2,Q2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1777,
+    "hits": 49,
+    "expectedHits": 99.07565813598619,
+    "z": -5.030871017033523,
+    "roi": 0.5610676314235086
+   }
+  },
+  {
+   "id": "trifecta:Q:Q3>{Q3,Q4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2598,
+    "hits": 88,
+    "expectedHits": 62.088524912287276,
+    "z": 3.2884138308692257,
+    "roi": 0.7297189607205168
+   }
+  },
+  {
+   "id": "trifecta:Q:Q3>{Q3,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2749,
+    "hits": 62,
+    "expectedHits": 41.45004747514447,
+    "z": 3.191892870795755,
+    "roi": 0.5243643958537466
+   }
+  },
+  {
+   "id": "trifecta:Q:Q3>{Q4,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3428,
+    "hits": 55,
+    "expectedHits": 21.621217442746712,
+    "z": 7.1784457090206475,
+    "roi": 0.7118329709663663
+   }
+  },
+  {
+   "id": "trifecta:Q:Q4>{Q1,Q2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1513,
+    "hits": 38,
+    "expectedHits": 54.44582292981788,
+    "z": -2.2288114324381656,
+    "roi": 0.9195095486111111
+   }
+  },
+  {
+   "id": "trifecta:Q:Q4>{Q1,Q3}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1820,
+    "hits": 42,
+    "expectedHits": 58.6450007364025,
+    "z": -2.1735434216532834,
+    "roi": 0.7425657058075456
+   }
+  },
+  {
+   "id": "trifecta:Q:Q4>{Q2,Q2}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 1882,
+    "hits": 37,
+    "expectedHits": 52.16503168142853,
+    "z": -2.0996822854232473,
+    "roi": 0.7856718061674008
+   }
+  },
+  {
+   "id": "trifecta:Q:Q4>{Q2,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3172,
+    "hits": 50,
+    "expectedHits": 29.402322489601882,
+    "z": 3.7986338673107336,
+    "roi": 0.7362855743325986
+   }
+  },
+  {
+   "id": "trifecta:Q:Q4>{Q3,Q4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2761,
+    "hits": 46,
+    "expectedHits": 29.005511517954616,
+    "z": 3.1554974452232933,
+    "roi": 0.8440184771095681
+   }
+  },
+  {
+   "id": "trifecta:Q:Q4>{Q3,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3428,
+    "hits": 38,
+    "expectedHits": 19.554906371785087,
+    "z": 4.17112297027451,
+    "roi": 0.6977331674135387
+   }
+  },
+  {
+   "id": "trifecta:Q:Q4>{Q4,Q5}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 2991,
+    "hits": 30,
+    "expectedHits": 9.20081386936762,
+    "z": 6.856985306853565,
+    "roi": 0.9664075811907124
+   }
+  },
+  {
+   "id": "trifecta:Q:Q5>{Q3,Q4}",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": 1,
+   "firstHalf": {
+    "races": 3428,
+    "hits": 39,
+    "expectedHits": 18.519170401397226,
+    "z": 4.759230951399523,
+    "roi": 1.1144511014324565
+   }
+  },
+  {
+   "id": "quinella:box3",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 1332,
+    "expectedHits": 1476.5508945948125,
+    "z": -3.7618075455830784,
+    "roi": 0.8002275025278058
+   }
+  },
+  {
+   "id": "exacta:box3",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 1334,
+    "expectedHits": 1476.5508945948086,
+    "z": -3.709759337149161,
+    "roi": 0.7739214694978093
+   }
+  },
+  {
+   "id": "trio:box3",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 371,
+    "expectedHits": 565.5550020767055,
+    "z": -8.180973336497177,
+    "roi": 0.7778058645096056
+   }
+  },
+  {
+   "id": "trifecta:box3",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 371,
+    "expectedHits": 565.5550020767057,
+    "z": -8.180973336497185,
+    "roi": 0.6710819009100101
+   }
+  },
+  {
+   "id": "quinella:box4",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 1903,
+    "expectedHits": 2087.35265897682,
+    "z": -4.0350738836456514,
+    "roi": 0.7679558476575665
+   }
+  },
+  {
+   "id": "exacta:box4",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 1905,
+    "expectedHits": 2087.3526589768076,
+    "z": -3.991298286308846,
+    "roi": 0.7432275867880014
+   }
+  },
+  {
+   "id": "trio:box4",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 920,
+    "expectedHits": 1234.629603648539,
+    "z": -8.954291741331032,
+    "roi": 0.7954436299292215
+   }
+  },
+  {
+   "id": "trifecta:box4",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 922,
+    "expectedHits": 1234.6296036485194,
+    "z": -8.897372165820205,
+    "roi": 0.7145222446916076
+   }
+  },
+  {
+   "id": "quinella:box5",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 2396,
+    "expectedHits": 2572.037630293298,
+    "z": -3.4710978342499454,
+    "roi": 0.7548559150657229
+   }
+  },
+  {
+   "id": "exacta:box5",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 2398,
+    "expectedHits": 2572.0376302932837,
+    "z": -3.431661972400509,
+    "roi": 0.7378159757330637
+   }
+  },
+  {
+   "id": "trio:box5",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 1456,
+    "expectedHits": 1855.6724456742202,
+    "z": -9.277982488851078,
+    "roi": 0.7300176946410516
+   }
+  },
+  {
+   "id": "trifecta:box5",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 1458,
+    "expectedHits": 1855.672445674204,
+    "z": -9.231554557231892,
+    "roi": 0.6781791371755983
+   }
+  },
+  {
+   "id": "quinella:box6",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3939,
+    "hits": 2762,
+    "expectedHits": 2926.715653512988,
+    "z": -3.0447007098575347,
+    "roi": 0.7326191080646526
+   }
+  },
+  {
+   "id": "exacta:box6",
+   "family": "F2",
+   "bet": "exacta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3939,
+    "hits": 2766,
+    "expectedHits": 2926.715653512983,
+    "z": -2.970762364717286,
+    "roi": 0.7127502750275028
+   }
+  },
+  {
+   "id": "trio:box6",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3939,
+    "hits": 1980,
+    "expectedHits": 2358.4869008390456,
+    "z": -7.793528344240758,
+    "roi": 0.7173787763391724
+   }
+  },
+  {
+   "id": "trifecta:box6",
+   "family": "F2",
+   "bet": "trifecta",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3939,
+    "hits": 1985,
+    "expectedHits": 2358.486900838959,
+    "z": -7.690571962829834,
+    "roi": 0.6659598459845985
+   }
+  },
+  {
+   "id": "quinella:fav-axis",
+   "family": "F2",
+   "bet": "quinella",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 2128,
+    "expectedHits": 2286.151181781161,
+    "z": -3.3076531979676798,
+    "roi": 0.7840125454472812
+   }
+  },
+  {
+   "id": "wide:fav-axis",
+   "family": "F2",
+   "bet": "wide",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 5233,
+    "expectedHits": 5892.574958752338,
+    "z": -8.592342913722083,
+    "roi": 0.7660553757641136
+   }
+  },
+  {
+   "id": "trio:fav-axis",
+   "family": "F2",
+   "bet": "trio",
+   "direction": -1,
+   "firstHalf": {
+    "races": 3956,
+    "hits": 2619,
+    "expectedHits": 2946.287479376071,
+    "z": -6.029646219155847,
+    "roi": 0.6878924086065348
+   }
+  },
+  {
+   "id": "filliesOnly=yes|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 575,
+    "bigHits": 202,
+    "bigHitsExpected": 151.10439030350452,
+    "ratio": 1.3368241623838184
+   }
+  },
+  {
+   "id": "distance=<=1400|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 1390,
+    "bigHits": 527,
+    "bigHitsExpected": 404.16660138737876,
+    "ratio": 1.3039177363764651
+   }
+  },
+  {
+   "id": "distance=>=2201|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 297,
+    "bigHits": 81,
+    "bigHitsExpected": 60.37631062289156,
+    "ratio": 1.3415857836349645
+   }
+  },
+  {
+   "id": "raceClass=2勝クラス|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 530,
+    "bigHits": 176,
+    "bigHitsExpected": 133.74744492265714,
+    "ratio": 1.315912988855798
+   }
+  },
+  {
+   "id": "raceClass=3勝クラス|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 242,
+    "bigHits": 100,
+    "bigHitsExpected": 76.39668672895499,
+    "ratio": 1.3089572896634423
+   }
+  },
+  {
+   "id": "weightType=ハンデ|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 214,
+    "bigHits": 111,
+    "bigHitsExpected": 77.88745044510775,
+    "ratio": 1.4251333092258396
+   }
+  },
+  {
+   "id": "raceClass=オープン|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 350,
+    "bigHits": 152,
+    "bigHitsExpected": 107.00012168424004,
+    "ratio": 1.420559132152725
+   }
+  },
+  {
+   "id": "graded=yes|wide",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "wide",
+   "direction": 1,
+   "firstHalf": {
+    "races": 227,
+    "bigHits": 41,
+    "bigHitsExpected": 29.03187014481705,
+    "ratio": 1.4122410921336934
+   }
+  },
+  {
+   "id": "graded=yes|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 227,
+    "bigHits": 103,
+    "bigHitsExpected": 73.9595582119281,
+    "ratio": 1.3926529915830175
+   }
+  },
+  {
+   "id": "going=稍重|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 593,
+    "bigHits": 202,
+    "bigHitsExpected": 150.8135817654033,
+    "ratio": 1.3394019135108086
+   }
+  },
+  {
+   "id": "venue=京都|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 539,
+    "bigHits": 185,
+    "bigHitsExpected": 127.8823099528882,
+    "ratio": 1.4466426206107312
+   }
+  },
+  {
+   "id": "season=3-5|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 911,
+    "bigHits": 328,
+    "bigHitsExpected": 238.31331100407664,
+    "ratio": 1.3763394021846693
+   }
+  },
+  {
+   "id": "venue=阪神|trio",
+   "family": "F3",
+   "f3Kind": "big",
+   "bet": "trio",
+   "direction": 1,
+   "firstHalf": {
+    "races": 372,
+    "bigHits": 122,
+    "bigHitsExpected": 86.56738929644413,
+    "ratio": 1.4093066799348575
+   }
+  }
+ ]
+}
