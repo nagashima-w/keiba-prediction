@@ -233,6 +233,7 @@ K6(芝→ダート −1.78pt)・I4(休み明け×牝 −2.86pt)・I1(休み明�
 **なぜ作ったか。** `horse_runs.csv` にある馬は「本番が 2026 年に分析した馬」(2,213 頭)なので、2024-08 より前の走が付いていること自体が「2026 年まで走り続けた」印になる(生き残りの偏り。別の探索 `market-blindspots-653-fable` の plan.md §10 が見つけた。そちらは同じ偏りを外した戦績で探索し直し、前半の |z| 上位の 11 件が後半で 1 件も残らず、残った 5 件は 4 件が「買いすぎ」の向きという結論だった。ここでは数値の突き合わせはしていない)。元の版は hist に無い 9,041 走を足していた。この節は、`build.ts` の第 2 引数を `-` にして、**hist の全レースから作った走だけ**で戦績を作り直し、条件の定義・閾値・手順(plan.md)を変えずに流し直した結果。
 
 - 手順: `pnpm tsx scripts/market-blindspots-653/build.ts <hist> - <extras> <出力>` →  `hypotheses.py` → `races.py` → `longshots.py`(20 倍)→ `report_tables.py`。
+- この節の表の再現: `PYTHONDONTWRITEBYTECODE=1 python3 -I scripts/market-blindspots-653/report_nohr_section.py <元の版の出力> <外した版の出力> <出力.md>`(この節の本文と一致することを確かめた)。
 - 元の版の再現を先に確かめた: 元の引数で作り直した `horses.ndjson.gz`・`races.ndjson.gz`・`races.json`・`ls20.json` は元の出力とバイト単位で一致、`hyp.json` は浮動小数点の末尾(約 1e-13 の相対差)だけが違った。木と XGBoost の乱数は固定(`random_state=0`・`seed=0`)。
 - テスト: 今回足した `horse-runs.ts`(`horse_runs.csv` の読み込みと、`-` で読まない指定)は、テストを先に書き、モジュールが無い状態の失敗(Red)を実行で確かめてから実装し、通ること(Green、3 件)を確かめた。集計・木・XGBoost の Python にテストがないのは元のまま。
 - 後半は計画どおり、前半で通ったものだけ見た。**ただし、元の版の前半を見たあとで材料を変えて流し直しているので、これは事前登録の 1 回目の判定ではなく、2 回目の判定**(通る条件が増えた方向の変化には、その分の割引が要る)。
