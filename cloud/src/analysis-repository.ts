@@ -215,7 +215,7 @@ const INSERT_META_SQL = withNewIdSql(INSERT_ALLOCATION_META_SQL);
 /**
  * 的中確率の下限と、下限で外した買い目の記録(Issue #470)・単勝と複勝の点数の上限の記録(Issue #533)。core の codec の INSERT(exe と共有)には列を足さず、メタ行の INSERT の直後に
  * **1文の UPDATE** で書く(`mark_repair_json` と同じ流儀)。どちらの記録を持つかで SET の列が変わる(`updateMetaExtrasSql`): 下限の記録があれば min_hit_prob → below_floor_count → missed_json
- * (束縛値もこの順)、上限の記録があればその後ろに max_win_bets → max_place_bets。文は増やさない(1文に束ねる)。
+ * (束縛値もこの順)、上限の記録があればその後ろに max_win_bets → max_place_bets、配分に使った寄せの割合(Issue #658)があればさらにその後ろに market_shrink_weight。文は増やさない(1文に束ねる)。
  */
 function updateMetaExtrasSql(columns: readonly string[]): string {
   return `UPDATE analysis_allocation_meta SET ${columns.map((c) => `${c} = ?`).join(", ")} WHERE analysis_id = ${NEW_ID}`;
@@ -333,6 +333,11 @@ export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: num
     if (meta.maxWinBets !== undefined && meta.maxPlaceBets !== undefined) {
       metaColumns.push("max_win_bets", "max_place_bets");
       metaBinds.push(meta.maxWinBets, meta.maxPlaceBets);
+    }
+    // Issue #658: 配分に使った市場へ寄せる割合。配分を作った経路だけが持つ(unset・yoso などは持たない = NULL)。
+    if (meta.marketShrinkWeight !== undefined) {
+      metaColumns.push("market_shrink_weight");
+      metaBinds.push(meta.marketShrinkWeight);
     }
     if (metaColumns.length > 0) {
       statements.push(db.prepare(updateMetaExtrasSql(metaColumns)).bind(...metaBinds));

@@ -222,6 +222,14 @@ export interface AnalysisAllocationMetaRecord {
   /** 使った複勝の点数の上限(Issue #533。0=上限なし)。D1 の `max_place_bets`。扱いは `maxWinBets` と同じ。 */
   readonly maxPlaceBets?: number;
   /**
+   * 配分に使った、モデルの 3着内率を市場へ寄せる割合(Issue #658。0〜1。1 は寄せない)。D1 の `analysis_allocation_meta.market_shrink_weight`(NULL=記録なし)。
+   * **設定の値**で、実際に寄せたかは別(単勝オッズのある馬が 5 頭未満・3 頭以下の立ては、1 未満でも寄せない)。
+   * 配分を作った経路(place-only・mixed)だけ持つ。配分を作らない経路(unset・yoso・unavailable・invalid)と、重みを渡さない呼び出しは省略(= NULL)。
+   * `minHitProb` と同じく共有の INSERT には含めない(D1 専用の列。cloud の保存が別の UPDATE で書く)。
+   * NULL の意味: #656 の公開(11/7 の夜)より前は寄せていない。そこから #658 の公開までは、設定を変えていなければ 0.5 で寄せている。
+   */
+  readonly marketShrinkWeight?: number;
+  /**
    * 的中確率の下限で外れた EV プラスの買い目の件数(Issue #470)。D1 の `below_floor_count`。
    * 配分の計算に到達しなかった経路(unset・yoso・unavailable・invalid)は null(判定していない)。0=外れた候補なし。
    */

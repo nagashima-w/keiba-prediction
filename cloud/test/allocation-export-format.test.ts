@@ -334,7 +334,7 @@ const META: AllocationMetaInput = {
   route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOddsWide: "present", comboOddsTrio: "present",
   bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.05, includeComboOdds: 1, includeWide: 1, includeTrio: 0,
   includeQuinella: null, includeExacta: 0, includeTrifecta: 1, includeBracketQuinella: null, betUnit: 100, greedySteps: 1000, candidateCap: 2000,
-  modelId: "plackett-luce", modelApproximate: 0, oddsStatus: "result", minHitProb: null, belowFloorCount: 3, maxWinBets: 2, maxPlaceBets: null,
+  modelId: "plackett-luce", modelApproximate: 0, oddsStatus: "result", minHitProb: null, belowFloorCount: 3, maxWinBets: 2, maxPlaceBets: null, marketShrinkWeight: 0.5,
   missedJson: JSON.stringify([{ bet_type: "trifecta", combo_key: "010203", hit_prob: 0.001, odds: 900, ev: 1.2, would_stake: 100, reason: "SECRET-MISSED", extra: { a: 1 } }, "x", { bet_type: { a: 1 } }]),
 };
 
@@ -396,13 +396,28 @@ describe("buildAllocationRaceRow(1 行 1 レース。列は許可リストと完
   it("設定と配分のコードは meta の値のまま。D1 の NULL は NULL のまま(0/1 は boolean)で、旧い行の列を OFF や 0 に補わない", () => {
     expect(row.allocation!.settings).toEqual({
       bankroll: 10000, per_race_cap: 3000, kelly_fraction: 0.25, ev_threshold: 1.05, include_combo_odds: true, include_wide: true, include_trio: false,
-      include_quinella: null, include_exacta: false, include_trifecta: true, include_bracket_quinella: null, min_hit_prob: null, max_win_bets: 2, max_place_bets: null,
+      include_quinella: null, include_exacta: false, include_trifecta: true, include_bracket_quinella: null, min_hit_prob: null, max_win_bets: 2, max_place_bets: null, market_shrink_weight: 0.5,
     });
     expect(row.allocation!.codes).toEqual({
       route: "mixed", unavailable_reason: null, fallback_reason: null, skip_reason_code: null, combo_odds_wide: "present", combo_odds_trio: "present",
       bet_unit: 100, greedy_steps: 1000, candidate_cap: 2000, model_id: "plackett-luce", model_approximate: false, below_floor_count: 3,
     });
     expect(row.allocation!.odds_status).toBe("result");
+  });
+
+  it("Issue #658: market_shrink_weight は meta の値のまま(0・1 も 0・1 のまま)。D1 の NULL は NULL のまま(0 や 1 に補わない)。設定の列の末尾に置く", () => {
+    const wOf = (marketShrinkWeight: number | null) => buildAllocationRaceRow(rowInput({ meta: { ...META, marketShrinkWeight } })).allocation!.settings.market_shrink_weight;
+    expect([wOf(0.3), wOf(1), wOf(0), wOf(null)]).toEqual([0.3, 1, 0, null]);
+    expect(Object.keys(row.allocation!.settings).pop()).toBe("market_shrink_weight");
+    expect([...ALLOCATION_SETTINGS_KEYS].pop()).toBe("market_shrink_weight");
+    expect(Object.keys(row.allocation!.settings)).toEqual([...ALLOCATION_SETTINGS_KEYS]);
+  });
+
+  it("Issue #658: メタ行の注記は market_shrink_weight の NULL の意味(配分を作っていない・#656 の公開より前・#656 から #658 の公開まで)と、設定の値で実際に寄せたかは別であることを書いている", () => {
+    const head = JSON.parse(new TextDecoder().decode(gunzipSync(buildAllocationHead({ generatedAt: "2026-10-26T03:00:00.000Z", rows: 0, races: 0, missingOdds: 0, noAllocation: 0, excluded: { suspect: 0, unknown: 0, unchecked: 0, uncheckedRaces: 0, superseded: 0, estimated: 0 } })))) as { _meta: { notes: string[] } };
+    const notes = head._meta.notes.filter((n) => n.startsWith("market_shrink_weight は"));
+    expect(notes).toHaveLength(1);
+    for (const phrase of ["実際に寄せたかは別", "NULL = 記録なし", "unset・yoso・unavailable・invalid", "86d9cc1c", "0.5 で寄せている"]) expect(notes[0], phrase).toContain(phrase);
   });
 
   it("提案した買い目は D1 の並びのまま。馬単・三連単のキーは順序つきのまま(1 桁目が 1 着)", () => {

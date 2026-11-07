@@ -55,10 +55,11 @@ const PRIOR: Scenario[] = [
   { name: "候補 0 件(除外だけ。メタ行だけのファイル)", races: 0, batchSize: 2, candidates: excluded, sha256: "cDuhF/4uYbM/fo6Nyh1P/6ZzziLCxgRG+sbnJF9nh+A=", plainBytes: 8731 },
   { name: "7 レース・batch 3・5 頭", races: 7, batchSize: 3, horses: 5, sha256: "FDaJqAv2bI9S74iuq/rRUcsItoSUTrrFr3PGYCAZqR8=", plainBytes: 41310 },
 ];
+  // Issue #658: 設定の列 market_shrink_weight(配分のメタのある行に 1 つ。`"market_shrink_weight":null,` の 28 バイト)と、メタ行の注記 1 つ(699 バイト)を足したので、起点の値から測り直した。差は 5 行で 5×28+699=839、メタなし 1 行の版は 4×28+699=811、メタ行だけの版は 699(測った差と一致)。
 const ALLOCATION: Scenario[] = [
-  { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "jK9gg3shwuHhxzlM5//LIGCTPzE5s6KCQyhEcr9ciaU=", plainBytes: 13238 },
-  { name: "5 レース・batch 2・詳細なし(101)・配分のメタなし(102)", races: 5, batchSize: 2, noDetail: [101], noMeta: [102], sha256: "dp75SO9NsKgJpUSGHeMVUol+gyR9Y4trjIi/tDYqIQc=", plainBytes: 12524 },
-  { name: "候補 0 件(除外だけ。メタ行だけのファイル)", races: 0, batchSize: 2, candidates: excluded, sha256: "Cb8nmBXQbsviPhRnre7qTrSNaWV5cJ8Q/8sJ+bHkTio=", plainBytes: 3298 },
+  { name: "5 レース・batch 2", races: 5, batchSize: 2, sha256: "s1RPbFRzHTpZLGfjQl//ROxJzG1A/dplhNDXDRvH2F0=", plainBytes: 14077 },
+  { name: "5 レース・batch 2・詳細なし(101)・配分のメタなし(102)", races: 5, batchSize: 2, noDetail: [101], noMeta: [102], sha256: "lgiS2fQdNz30Eb+ogbJbu1h3YYoq+qLYoLfPqW9mAiI=", plainBytes: 13335 },
+  { name: "候補 0 件(除外だけ。メタ行だけのファイル)", races: 0, batchSize: 2, candidates: excluded, sha256: "9i8HdsOtK8W8h7fo4vCIgK53WfO2QyvyOiZTKmdm/nM=", plainBytes: 3997 },
 ];
 
 function candidatesOf(s: Scenario) {

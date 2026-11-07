@@ -219,6 +219,8 @@ describe("GET /api/targets(本物の D1。Issue #336)", () => {
       const sql = readFileSync(pathFromMeta("../migrations/0019_close.sql", import.meta.url), "utf-8");
       const statements = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n").split(";").map((s) => s.replace(/\s+/g, " ").trim()).filter((s) => s !== "");
       for (const s of statements) await local.db.prepare(s).run();
+      // 0019 のあとに足された analysis_close の列(0041。Issue #658)。作り直した表にも足す。
+      await local.db.prepare("ALTER TABLE analysis_close ADD COLUMN market_shrink_weight REAL").run();
     }
   });
 

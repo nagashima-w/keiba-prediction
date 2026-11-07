@@ -58,7 +58,7 @@ const META: AllocationMetaInput = {
   route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOddsWide: "present", comboOddsTrio: "present",
   bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: 1, includeWide: 1, includeTrio: 1,
   includeQuinella: 1, includeExacta: 1, includeTrifecta: 1, includeBracketQuinella: 1, betUnit: 100, greedySteps: 1000, candidateCap: 2000,
-  modelId: "plackett-luce", modelApproximate: 0, oddsStatus: "result", minHitProb: 0, maxWinBets: 0, maxPlaceBets: 0, belowFloorCount: null, missedJson: null,
+  modelId: "plackett-luce", modelApproximate: 0, oddsStatus: "result", minHitProb: 0, maxWinBets: 0, maxPlaceBets: 0, marketShrinkWeight: null, belowFloorCount: null, missedJson: null,
 };
 
 const HORSES = Array.from({ length: 6 }, (_, k) => ({ umaban: k + 1, prior: 0.3, adjustedProb: 0.3, placeOddsMin: 2, ev: 1.1 }));
@@ -136,6 +136,7 @@ describe("parseAllocationDataset(読み込みの検証。黙って捨てない)"
       ["settings の型", (r) => { r["allocation"]["settings"]["kelly_fraction"] = null; }, /allocation\.settings の数の列の型が違います/],
       ["settings の点数の上限の型(単勝。Issue #533)", (r) => { r["allocation"]["settings"]["max_win_bets"] = "2"; }, /allocation\.settings の数の列の型が違います/],
       ["settings の点数の上限の型(複勝。Issue #533)", (r) => { r["allocation"]["settings"]["max_place_bets"] = true; }, /allocation\.settings の数の列の型が違います/],
+      ["settings の市場へ寄せる割合の型(Issue #658)", (r) => { r["allocation"]["settings"]["market_shrink_weight"] = "0.5"; }, /allocation\.settings の数の列の型が違います/],
       ["codes の列", (r) => { r["allocation"]["codes"]["extra"] = 1; }, /allocation\.codes に知らない列があります\(extra\)/],
       ["買い目の型", (r) => { r["allocation"]["bets"][0]["stake"] = "300"; }, /allocation\.bets\[0\] の型が違います/],
       ["買い目の列", (r) => { r["allocation"]["bets"][0]["extra"] = 1; }, /allocation\.bets\[0\] に知らない列があります\(extra\)/],
@@ -1268,6 +1269,29 @@ describe("replayRace: 単勝・複勝の点数の上限(Issue #533)", () => {
     for (const pair of ["maxWinBetsPerRace=19", "maxPlaceBetsPerRace=-1", "maxPlaceBetsPerRace=1.5"]) {
       expect(() => parseOverrides([pair]), pair).toThrow();
     }
+  });
+});
+
+// Issue #658: 設定の列に market_shrink_weight(配分に使った市場へ寄せる割合)が増えても、書き出しを読める。リプレイは読まない(スコープ外)。
+describe("parseAllocationDataset: market_shrink_weight 列(Issue #658)", () => {
+  const file = (change: (row: Record<string, any>) => void): Uint8Array => {
+    const row = JSON.parse(JSON.stringify(raceRow({ includeComboOdds: 0, maxWinBets: 0, maxPlaceBets: 0 }))) as Record<string, any>;
+    change(row);
+    return gz(`${JSON.stringify({ _meta: { format: ALLOCATION_EXPORT_FORMAT, rows: 1 } })}\n${JSON.stringify(row)}\n`);
+  };
+  const weightOf = (change: (row: Record<string, any>) => void): unknown => parseAllocationDataset(file(change)).rows[0]!.allocation!.settings.market_shrink_weight;
+
+  it("列のある書き出しは読め、値はそのまま(0.3・1・0・null)。列が無い古い書き出しも読め、null になる", () => {
+    expect([0.3, 1, 0, null].map((w) => weightOf((r) => { r["allocation"]["settings"]["market_shrink_weight"] = w; }))).toEqual([0.3, 1, 0, null]);
+    expect(weightOf((r) => { delete r["allocation"]["settings"]["market_shrink_weight"]; })).toBeNull();
+  });
+
+  it("前提: 既定の行は列を持つ(空振り防止)。列の有無・値は、NULL を解釈する列に数えない(legacy-settings にしない)", () => {
+    const row = parseAllocationDataset(file(() => {})).rows[0]!;
+    expect(Object.keys(row.allocation!.settings)).toContain("market_shrink_weight");
+    const withNull = parseAllocationDataset(file((r) => { r["allocation"]["settings"]["market_shrink_weight"] = null; })).rows[0]!;
+    expect(classifyReplay(withNull).nullSettings).not.toContain("market_shrink_weight");
+    expect(classifyReplay(withNull).reason).toBe(classifyReplay(row).reason);
   });
 });
 

@@ -29,6 +29,7 @@ import { shrinkTowardMarket } from "../ev/market-shrink.js";
 import type { AnalysisRow } from "./analysis-types.js";
 import type { MixedCandidateBuildInput } from "./mixed-candidates.js";
 import { buildMixedRaceAllocationWithOutcome } from "./mixed-race-allocation.js";
+import { isBetAllocationUnset } from "./race-allocation.js";
 import {
   buildAllocationRecord,
   buildInvalidAllocationRecordForException,
@@ -104,6 +105,8 @@ export interface AllocationForRowsResult {
 function rowsForAllocation(input: AllocationForRowsInput): readonly AnalysisRow[] {
   const w = input.allocationSettings.marketShrinkWeight ?? 1;
   if (w >= 1) return input.rows;
+  // Issue #658: 配分を作らない分析(予想オッズ〈yoso〉・未設定〈unset〉)は行を配分に使わない。寄せの計算を省く(出力は同じ)。
+  if (input.odds.oddsStatus === "yoso" || isBetAllocationUnset(input.allocationSettings)) return input.rows;
   const mixed = shrinkTowardMarket(
     input.rows.map((r) => ({ umaban: r.umaban, p: r.adjustedProb, winOdds: input.odds.win[r.umaban]?.odds ?? null })),
     w,
@@ -119,6 +122,17 @@ function rowsForAllocation(input: AllocationForRowsInput): readonly AnalysisRow[
     const e = evByUmaban.get(r.umaban)!;
     return { ...r, adjustedProb: mixed.get(r.umaban)!, placeOddsMin: e.placeOddsMin, ev: e.ev, isPositive: e.isPositive };
   });
+}
+
+/**
+ * メタ行に、配分に使った市場へ寄せる割合を載せる(Issue #658)。載せるのは**配分を作った経路**(route が place-only・mixed)で、設定が w を持つときだけ。
+ * 配分を作らない経路(unset・yoso・unavailable・invalid)と、w を持たない呼び出しは、キー自体を持たせない(D1 の NULL = 記録なし)。
+ * 載せるのは**設定の w**で、実際に寄せたかは別(単勝オッズのある馬が 5 頭未満・3 頭以下の立ては、w < 1 でも寄せずに配分する)。
+ */
+function withUsedShrinkWeight(record: AnalysisAllocationRecord, w: number | undefined): AnalysisAllocationRecord {
+  const route = record.meta.route;
+  if (w === undefined || (route !== "place-only" && route !== "mixed")) return record;
+  return { ...record, meta: { ...record.meta, marketShrinkWeight: w } };
 }
 
 /**
@@ -145,7 +159,7 @@ export function buildAllocationForRows(input: AllocationForRowsInput): Allocatio
   try {
     const outcome = buildMixedRaceAllocationWithOutcome(raceForAllocation, mixedSettings, input.model);
     return {
-      allocation: buildAllocationRecord(outcome, mixedSettings, odds.oddsStatus),
+      allocation: withUsedShrinkWeight(buildAllocationRecord(outcome, mixedSettings, odds.oddsStatus), input.allocationSettings.marketShrinkWeight),
       comboStats: buildComboStats(outcome),
     };
   } catch {
