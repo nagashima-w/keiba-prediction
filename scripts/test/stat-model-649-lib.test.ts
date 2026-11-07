@@ -7,6 +7,12 @@
 import { describe, expect, it } from "vitest";
 import {
   RideIndex,
+  SumIndex,
+  relativeStats,
+  clampProbs,
+  splitCsvLines,
+  burdenRelative,
+  shrunkEdge,
   brier,
   fitLogistic,
   logLoss,
@@ -171,5 +177,101 @@ describe("singleWinRoi: 確率 × オッズが 1 を超える馬に 1 ずつ賭�
   });
   it("賭けが 0 件なら roi は null(0 と区別する)", () => {
     expect(singleWinRoi([{ p: 0.1, odds: 2, win: true }]).roi).toBeNull();
+  });
+});
+
+describe("SumIndex: 値の合計を、基準日より前の窓(開始日を含み、終了日を含まない)で集計する", () => {
+  const idx = new SumIndex();
+  idx.add("J", "2025-01-10", 0.5);
+  idx.add("J", "2025-03-01", -0.25);
+  idx.add("J", "2025-06-01", 1);
+  idx.add("K", "2025-02-01", 2);
+  idx.finalize();
+  it("開始日は含み、終了日は含まない(終了日と同日の値は先読みになる)", () => {
+    expect(idx.sumBetween("J", "2025-01-10", "2025-06-01")).toEqual({ n: 2, sum: 0.25 });
+    expect(idx.sumBetween("J", "2025-01-11", "2025-06-02")).toEqual({ n: 2, sum: 0.75 });
+    // 終了日の違いで値が変わる(境界が効いている)ことを固定する。
+    expect(idx.sumBetween("J", "2025-01-10", "2025-06-02")!.n).toBe(3);
+  });
+  it("知らない ID は undefined、窓が空なら n=0", () => {
+    expect(idx.sumBetween("Z", "2025-01-01", "2026-01-01")).toBeUndefined();
+    expect(idx.sumBetween("K", "2026-01-01", "2027-01-01")).toEqual({ n: 0, sum: 0 });
+  });
+  it("add の順序に依存しない", () => {
+    const a = new SumIndex();
+    a.add("X", "2025-05-01", 1);
+    a.add("X", "2025-01-01", 2);
+    a.finalize();
+    expect(a.sumBetween("X", "2025-01-01", "2025-03-01")).toEqual({ n: 1, sum: 2 });
+  });
+});
+
+describe("shrunkEdge: 読み残しの合計 ÷ (件数 + 縮み)", () => {
+  it("窓に件数が無い(undefined・n=0)なら 0", () => {
+    expect(shrunkEdge(undefined, 30)).toBe(0);
+    expect(shrunkEdge({ n: 0, sum: 0 }, 30)).toBe(0);
+  });
+  it("sum=3, n=70, 縮み 30 → 0.03(件数だけで割ると 0.0429 になり、縮みが効いていることが分かる)", () => {
+    expect(shrunkEdge({ n: 70, sum: 3 }, 30)).toBeCloseTo(0.03, 12);
+    expect(3 / 70).not.toBeCloseTo(0.03, 3);
+  });
+});
+
+describe("burdenRelative: 斤量のレース内の相対値", () => {
+  it("平均との差・最軽量との差・順位(最軽量 0、最重量 1)", () => {
+    const r = burdenRelative([54, 56, 58, 56]);
+    expect(r.map((x) => x.diffMean)).toEqual([-2, 0, 2, 0]);
+    expect(r.map((x) => x.diffMin)).toEqual([0, 2, 4, 2]);
+    // 56 が 2 頭: 順位は平均順位 (2+3)/2=2.5 → (2.5−1)/(4−1)=0.5。
+    expect(r.map((x) => x.rank)).toEqual([0, 0.5, 1, 0.5]);
+  });
+  it("全頭同じ斤量なら差は 0、順位は 0.5(退化入力でも 0 割りにならない)", () => {
+    const r = burdenRelative([55, 55, 55]);
+    expect(r.every((x) => x.diffMean === 0 && x.diffMin === 0 && x.rank === 0.5)).toBe(true);
+  });
+  it("1 頭だけなら差は 0、順位は 0.5", () => {
+    expect(burdenRelative([55])).toEqual([{ diffMean: 0, diffMin: 0, rank: 0.5 }]);
+  });
+});
+
+describe("splitCsvLines: CRLF でも最後の列名・値に改行が残らない", () => {
+  it("LF と CRLF で同じ結果。最後の列名が一致する(#649 の保留の評価で、CRLF のため最後の列が見つからず XGBoost の 3着内率が NaN になった)", () => {
+    const lf = splitCsvLines("a,b,xgb_top3\n1,2,3\n");
+    const crlf = splitCsvLines("a,b,xgb_top3\r\n1,2,3\r\n");
+    expect(crlf).toEqual(lf);
+    expect(crlf[0]![2]).toBe("xgb_top3");
+    expect(crlf[1]).toEqual(["1", "2", "3"]);
+  });
+});
+
+describe("clampProbs: 確率を [1e-6, 1−1e-6] に切る", () => {
+  it("0 と 1 は切られ、範囲内はそのまま。NaN は NaN のまま(黙って直さない)", () => {
+    const r = clampProbs([0, 1, 0.3, Number.NaN]);
+    expect(r[0]).toBe(1e-6);
+    expect(r[1]).toBe(1 - 1e-6);
+    expect(r[2]).toBe(0.3);
+    expect(Number.isNaN(r[3]!)).toBe(true);
+  });
+});
+
+describe("relativeStats: そのレースの中での相対値(平均との差・1 番手との差・順位 0〜1)", () => {
+  it("手計算: [0.2, 0.5, 0.5, 0.8] → 平均 0.5、最大 0.8、同値は平均順位", () => {
+    const r = relativeStats([0.2, 0.5, 0.5, 0.8]);
+    expect(r.map((x) => Number(x.diffMean.toFixed(12)))).toEqual([-0.3, 0, 0, 0.3]);
+    expect(r.map((x) => Number(x.diffTop.toFixed(12)))).toEqual([-0.6, -0.3, -0.3, 0]);
+    // 0.5 が 2 頭: 平均順位 2.5 → (2.5−1)/3 = 0.5。
+    expect(r.map((x) => x.rank)).toEqual([0, 0.5, 0.5, 1]);
+  });
+  it("全頭同値・1 頭だけは、差 0・順位 0.5(0 割りにならない)", () => {
+    expect(relativeStats([3, 3, 3]).every((x) => x.diffMean === 0 && x.diffTop === 0 && x.rank === 0.5)).toBe(true);
+    expect(relativeStats([3])).toEqual([{ diffMean: 0, diffTop: 0, rank: 0.5 }]);
+  });
+  it("値を足す・定数倍の変換で順位は変わらない(順位は相対値)が、差は変わる", () => {
+    const a = relativeStats([1, 2, 4]);
+    const b = relativeStats([11, 12, 14]);
+    expect(b.map((x) => x.rank)).toEqual(a.map((x) => x.rank));
+    b.forEach((x, i) => expect(x.diffMean).toBeCloseTo(a[i]!.diffMean, 12));
+    const c = relativeStats([2, 4, 8]);
+    expect(c[0]!.diffTop).not.toBe(a[0]!.diffTop);
   });
 });

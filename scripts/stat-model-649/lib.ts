@@ -304,3 +304,96 @@ export function singleWinRoi(rows: ReadonlyArray<{ p: number; odds: number; win:
   }
   return { bets, stake: bets, payout, roi: bets === 0 ? null : payout / bets };
 }
+
+/** CSV の本文を行と列に分ける(CRLF でも LF でも同じ。引用符は使わない前提 = fit.py の出力)。最後の列に `\r` が残ると列名が一致しなくなる。 */
+export function splitCsvLines(text: string): string[][] {
+  return text
+    .split(/\r?\n/)
+    .filter((l) => l !== "")
+    .map((l) => l.split(","));
+}
+
+/** 確率を [1e-6, 1−1e-6] に切る(NaN は NaN のまま。黙って直さない)。 */
+export function clampProbs(ps: readonly number[]): number[] {
+  return ps.map((p) => (Number.isNaN(p) ? p : clampProb(p)));
+}
+
+/** 値(読み残しなど)の合計を、日付の窓で集計する索引。`RideIndex` の合計版。 */
+export class SumIndex {
+  private readonly items = new Map<string, Array<{ date: string; v: number }>>();
+  private cum = new Map<string, { dates: string[]; sums: number[] }>();
+
+  add(id: string, date: string, v: number): void {
+    const l = this.items.get(id) ?? [];
+    l.push({ date, v });
+    this.items.set(id, l);
+  }
+
+  finalize(): void {
+    this.cum = new Map();
+    for (const [id, list] of this.items) {
+      list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      const sums: number[] = [0];
+      list.forEach((r) => sums.push(sums[sums.length - 1]! + r.v));
+      this.cum.set(id, { dates: list.map((r) => r.date), sums });
+    }
+  }
+
+  private countBefore(dates: readonly string[], d: string): number {
+    let lo = 0;
+    let hi = dates.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (dates[mid]! < d) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /** `from` 以上 `to` 未満の件数と合計。ID が一度も add されていなければ undefined。 */
+  sumBetween(id: string, from: string, to: string): { n: number; sum: number } | undefined {
+    const c = this.cum.get(id);
+    if (c === undefined) return undefined;
+    const a = this.countBefore(c.dates, from);
+    const b = Math.max(a, this.countBefore(c.dates, to));
+    return { n: b - a, sum: c.sums[b]! - c.sums[a]! };
+  }
+}
+
+/** 騎手の市場比の指標(#642): 読み残しの合計 ÷ (件数 + 縮み)。データなし・件数 0 は 0。 */
+export function shrunkEdge(s: { n: number; sum: number } | undefined, shrink: number): number {
+  if (s === undefined || s.n === 0) return 0;
+  return s.sum / (s.n + shrink);
+}
+
+/**
+ * 斤量のレース内の相対値: 平均との差・最軽量との差・順位(最軽量 0、最重量 1。同じ斤量は平均順位。全頭同じ・1 頭だけは 0.5)。
+ * ユーザーの指摘(11/7): 斤量は他の馬との兼ね合いなので、前走比だけでは疑わしい。
+ */
+export function burdenRelative(burdens: readonly number[]): Array<{ diffMean: number; diffMin: number; rank: number }> {
+  const n = burdens.length;
+  const mean = burdens.reduce((s, v) => s + v, 0) / n;
+  const min = Math.min(...burdens);
+  return burdens.map((b) => {
+    const lower = burdens.filter((x) => x < b).length;
+    const equal = burdens.filter((x) => x === b).length;
+    const avgRank = lower + (equal + 1) / 2; // 1 始まりの平均順位
+    return { diffMean: b - mean, diffMin: b - min, rank: n <= 1 ? 0.5 : equal === n ? 0.5 : (avgRank - 1) / (n - 1) };
+  });
+}
+
+/**
+ * 値のレース内の相対値: 平均との差・1 番手(最大)との差・順位(最小 0、最大 1。同値は平均順位。全頭同値・1 頭だけは 0.5)。
+ * 「レースはメンバーの中での相対的な強さで決まる」(ユーザー・11/7)ので、主な項目を相対値にして入れる版に使う。
+ */
+export function relativeStats(values: readonly number[]): Array<{ diffMean: number; diffTop: number; rank: number }> {
+  const n = values.length;
+  const mean = values.reduce((s, v) => s + v, 0) / n;
+  const top = Math.max(...values);
+  return values.map((v) => {
+    const lower = values.filter((x) => x < v).length;
+    const equal = values.filter((x) => x === v).length;
+    const avgRank = lower + (equal + 1) / 2;
+    return { diffMean: v - mean, diffTop: v - top, rank: n <= 1 || equal === n ? 0.5 : (avgRank - 1) / (n - 1) };
+  });
+}
