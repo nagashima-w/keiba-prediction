@@ -1,0 +1,67 @@
+# #667 計画(BASHIRA で季節・性別・斤量の変化などの見落としを探す。事前登録。結果を見る前に書く)
+
+**状態: 計画。この文書をコミットしてから探索の期間(2016〜2020)の集計を引く。確認の期間(2021〜2026-11-03)は、候補を `candidates.json` に固定してコミットしてから 1 回だけ引く。**
+
+## 1. 書く前に見たもの(順序の記録)
+- #663・#665・#666 の計画と報告(比べ方・基準の作り方・多重比較の扱い)。#663 で牝馬(牝馬限定戦を含む)の 1〜3 番人気の 3着内が 0.959 倍で残っていること、重・不良の全馬の応答(#666 の HEAVY)が両期間で scratchpad にあることは知っている。
+- BASHIRA の `get_stats` の入力スキーマ(`race_month`・`horse_sex`・`horse_age`・`race_type`・`weight_type`・`weight_to_carry_kg`・`weather`・`track_condition`・`fourth_corner_position`・`race_symbol`・`horse_number`、past_runs の書き方)。
+- 本 Issue の条件の集計の結果は何も見ていない。
+
+## 2. データと取り方(#663 と同じ)
+- BASHIRA の `get_stats`。JRA の芝・ダート、新馬を除く(`career_starts ≥ 1`)、クラスは未勝利・1勝・2勝・3勝・オープン。`dimensions: ["race_condition","win_odds_rank"]`、metrics は勝ち数・3着内数・単勝払戻・複勝払戻・単勝オッズの平均。
+- 期待値は、**条件に当たらない馬(基準 − 条件)**のクラス × 人気順(1〜18)ごとの率。帯(1〜3・4〜9・10 番人気以下)ごとに実際/期待・z・回収率・平均オッズ。
+- 期間: 探索 2016-01-01〜2020-12-31、確認 2021-01-01〜2026-11-03。全馬(ALL)・牝馬(H34)は #663 の応答、重・不良(HEAVY)は #666 の応答を両期間で使い回す。
+- 生の応答は scratchpad(`/tmp/claude-0/-home-user-keiba-prediction/6255576e-d816-5938-a938-9fa3fb2459d6/scratchpad/b667/<explore|confirm>/<id>.json`)。`get_entries` は使わない。
+- 呼び出しは 1 本ずつ。この Issue で get_stats 40 回(120 回分)以内。見積もり: 探索 18(仮説 15・対照 1・基準 2)、確認 ≤ 18(基準 ≤ 2・候補 ≤ 16)。
+
+## 3. 仮説の一覧(事前登録。結果を見る前に固定)
+1 行が get_stats 1 回。filters は基本(期間・芝ダ・career_starts ≥ 1・5 クラス)に足す。**基準の列**は、期待値を作る集合(条件はその部分集合)。季節 × 性別のように「主効果と組み合わせ」を分けたいものは、基準を主効果の集合にする(夏の牝馬は「牝馬全体」と比べる。全馬と比べると #663 で見た牝馬の主効果が混ざる)。
+
+| # | 条件 | 足す filters / past_runs | 基準 |
+|---|---|---|---|
+| S01 | 夏(6〜8 月)の牝馬 | `race_month: [6,7,8]`, `horse_sex: "牝馬"` | H34(牝馬) |
+| S02 | 冬(12〜2 月)の牝馬 | `race_month: [12,1,2]`, `horse_sex: "牝馬"` | H34 |
+| S03 | 夏(6〜8 月)の全馬 | `race_month: [6,7,8]` | ALL |
+| S04 | 冬(12〜2 月)の全馬 | `race_month: [12,1,2]` | ALL |
+| S05 | ハンデ戦の軽ハンデ(52kg 以下) | `weight_type: "ハンデ"`, `weight_to_carry_kg: {lte: 52}` | HANDI(ハンデ戦の全馬。新しく引く) |
+| S06 | ハンデ戦の重ハンデ(57.5kg 以上) | `weight_type: "ハンデ"`, `weight_to_carry_kg: {gte: 57.5}` | HANDI |
+| S07 | 斤量増(近似。今回 57kg 以上 ∧ 前走 55kg 以下) | `weight_to_carry_kg: {gte: 57}`, `past_runs {runs:1, agg:max, field:weight_to_carry_kg, value:{lte:55}}` | ALL |
+| S08 | 斤量減(近似。今回 54kg 以下 ∧ 前走 56kg 以上) | `weight_to_carry_kg: {lte: 54}`, `past_runs {runs:1, agg:min, field:weight_to_carry_kg, value:{gte:56}}` | ALL |
+| S09 | 3 歳馬が古馬混合戦(3歳以上)に初めて出る | `horse_age: 3`, `race_type: "3歳以上"`, `past_runs {runs:20, agg:count, where:{race_type:"3歳以上"}, value:{eq:0}}` | MIX(3歳以上戦の全馬。新しく引く) |
+| S10 | 3 歳馬の古馬混合戦(初めてに限らない) | `horse_age: 3`, `race_type: "3歳以上"` | MIX |
+| S11 | 重・不良 × 前走で先行(前走 4 角 3 番手以内) | `track_condition: ["重","不良"]`, `past_runs {runs:1, agg:count, where:{fourth_corner_position:{lte:3}}, value:{gte:1}}` | HEAVY |
+| S12 | 重・不良 × 前走で後方(前走 4 角 10 番手以下) | `track_condition: ["重","不良"]`, `past_runs {runs:1, agg:count, where:{fourth_corner_position:{gte:10}}, value:{gte:1}}` | HEAVY |
+| S13 | 前走で先行(馬場を問わない。S11 の対照) | `past_runs {runs:1, agg:count, where:{fourth_corner_position:{lte:3}}, value:{gte:1}}` | ALL |
+| S14 | 前走で後方(馬場を問わない。S12 の対照) | `past_runs {runs:1, agg:count, where:{fourth_corner_position:{gte:10}}, value:{gte:1}}` | ALL |
+| S15 | 雨(天候が雨・小雨) | `weather: ["雨","小雨"]` | ALL |
+| S16 | 牝馬の牡牝混合戦(牝馬限定戦を除く) | `horse_sex: "牝馬"`, `race_symbol` の not_in に「牝」を含む全値 | ALL |
+| C01 | 対照: 奇数の馬番 | `horse_number: [1,3,5,7,9,11,13,15,17]` | ALL |
+| HANDI | 基準: ハンデ戦の全馬 | `weight_type: "ハンデ"` | — |
+| MIX | 基準: 3歳以上戦の全馬 | `race_type: "3歳以上"` | — |
+
+近似と注意:
+- **斤量の増減は BASHIRA では差を直接書けない**(今回の斤量と前走の斤量の差は列に無い)。S07・S08 は「今回 ≥ 57 ∧ 前走 ≤ 55」「今回 ≤ 54 ∧ 前走 ≥ 56」で、±2kg 以上の増減の**一部**(斤量の水準で切った部分集合)を拾う近似。斤量増は 3 歳馬が秋に古馬混合戦へ入るとき(56→57)やハンデの増量、斤量減は見習騎手の減量・牝馬の別定・ハンデの減量が混ざる。S09・S10 と重なる部分があることは読みに書く。
+- 前走の斤量は past_runs の `weight_to_carry_kg` の max/min(runs:1 なので前走そのもの)。前走が地方・海外なら斤量は入っていることがある(JRA 限定の列ではない)。
+- S09 の「初めて」は過去 20 走に 3歳以上戦が無いこと。2歳・3歳限定戦しか走っていない 3 歳馬が、はじめて古馬と当たる走。
+- 重・不良は芝ダで分けない(#666 と同じ)。4 角の通過順は頭数で割っていない(3 番手以内・10 番手以下の絶対値)。
+- S16 の `race_symbol` の not_in は、enum のうち「牝」を含む値(「牝」「牝 (指定)」「(混合) 牝」「(国際) 牝 (特指)」など)を全部列挙する。
+- 対照 C01(奇数の馬番)は効くはずのない条件。候補になったら方法の欠陥を疑う。
+
+## 4. 判定の基準(事前登録)
+### 候補(探索)
+条件 × 帯(3)× 指標(勝ち・3着内)ごとに、n ≥ 300・|z| ≥ 3・走査した全検定(仮説 16 × 3 × 2 = 96。対照は数に入れない)で BH 補正した q < 0.05。
+
+### 残る(確認。候補を固定してから 1 回だけ引く)
+n ≥ 300・探索と同じ向き・同じ向きの片側 p を候補の数 K で Holm 補正して < 0.05。
+- 確認の期間で条件を作り直さない。残らなかった候補も表に残す。
+- 残った条件には、探索・確認の実際/期待・z・単勝と複勝の回収率(基準の同じ帯との差)・平均オッズを添える。組み合わせの仮説(S01・S02・S11・S12)は、対応する主効果(S03・S04・S13・S14)の同じ帯の値を並べて、組み合わせに固有かを読む(記述)。
+
+## 5. 実装
+- `scripts/bashira-season-667/analyze.py`: #663 の `analyze.py` の関数を読み込み、ファイルの `baseline` に書いた id(ALL・H34・HEAVY・HANDI・MIX)を基準にして評価する。`explore` で `explore-results.json`・`candidates.json`、`confirm` で `confirm-results.json`。
+- 生の応答は `b667/<explore|confirm>/<id>.json`(#663 と同じ形)。
+
+## 6. あらかじめ分かっている限界
+- #663 §6 と同じ(人気順だけの層のオッズの幅、芝ダを層に入れない、同じレースの馬どうしの相関を無視、基準の率の標準誤差を無視、外回りと内回りの区別が無い、確定オッズと分析の時点のオッズの違い)。
+- 斤量の増減は近似(§3)。
+- 季節は月で切る(6〜8 月・12〜2 月)。開催場(夏の北海道・冬の中山京都)と重なるので、季節の効果と場の効果は分けられない。
+- 検定の数は 96 で、仮説は「よく言われる条件」に寄っている。
