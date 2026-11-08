@@ -219,7 +219,9 @@ function wakubanOfCaption(caption: ReturnType<CheerioAPI>): number | null {
  *
  * - 表のクラスで絞る(`COMBO_TABLE_SELECTOR`)。確定後の頁の発売票数の表は混ざらない。
  * - 組の読み方: 馬連・ワイド=`caption`が若い馬番・`th`が大きい馬番、馬単=`caption`が1着・`th`が2着、
- *   枠連=`caption`が若い枠・`th`が大きい枠(同枠も有効)。
+ *   枠連=`caption`が若い枠・`th`が大きい枠(同枠も有効)、3連複=`caption`が`小-中`・`th`が大
+ *   (軸馬を指定した頁は caption が中の1頭で、小は `div.fuku3_unit` の見出し)、
+ *   3連単=表を包む `li` 直下の2つの `div.p_line` が1着・2着・`th`が3着。
  * - ワイドの値は幅(`span.min` / `span.max`)で `oddsMin` / `oddsMax` に分ける。ほかの券種の `oddsMax` は null。
  * - 人気は頁に無いので常に null。
  * - **空きのセル(`&nbsp;`。自分自身との組・1頭だけの枠の同枠)は組が存在しないのでキーを作らない。**
@@ -240,7 +242,7 @@ export function parseJraComboOdds(html: string, betType: ComboBetType): ComboOdd
   const entries: ComboOddsEntry[] = [];
   tables.each((_, table) => {
     const caption = $(table).find("caption").first();
-    const head = headNumbers($, caption, betType);
+    const head = headNumbers($, $(table), caption, betType);
     if (head === null) {
       throw new ComboOddsParseError(`caption を読めません(betType=${betType}, 値: "${cellText($, caption)}")`);
     }
@@ -277,7 +279,31 @@ export function parseJraComboOdds(html: string, betType: ComboBetType): ComboOdd
 }
 
 /** 表の caption が示す、組の先頭側の番号(`th` の前に付く要素)。読めなければ null。 */
-function headNumbers($: CheerioAPI, caption: ReturnType<CheerioAPI>, betType: ComboBetType): number[] | null {
+function headNumbers(
+  $: CheerioAPI,
+  table: ReturnType<CheerioAPI>,
+  caption: ReturnType<CheerioAPI>,
+  betType: ComboBetType,
+): number[] | null {
+  if (betType === "trio") {
+    const text = cellText($, caption);
+    const m = /^([0-9]+)-([0-9]+)$/.exec(text);
+    if (m !== null) return [Number(m[1]), Number(m[2])];
+    // 軸馬を指定した頁(`Z01` など)は caption が中の1頭だけで、軸馬は組を包む `div.fuku3_unit` の見出し(`h4 .num`)にある。
+    const mid = toInt(text);
+    const axis = toInt(cellText($, table.closest("div.fuku3_unit").find("h4 .num").first()));
+    return mid === null || axis === null ? null : [axis, mid];
+  }
+  if (betType === "trifecta") {
+    // 1着・2着は表の外(同じ li の直下の div.p_line)にある。caption の p_line は3着の見出しで、ここには含まない。
+    const nums = table
+      .closest("li")
+      .children("div.p_line")
+      .find(".num")
+      .map((_, el) => toInt(cellText($, $(el))))
+      .get();
+    return nums.length === 2 && nums.every((n): n is number => n !== null) ? nums : null;
+  }
   if (betType === "bracketQuinella") {
     const w = wakubanOfCaption(caption);
     return w === null ? null : [w];

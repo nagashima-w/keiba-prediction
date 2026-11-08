@@ -84,6 +84,16 @@ describe("parseJraWinPlaceOdds(人気)", () => {
     expect(s.place[7]?.ninki).toBe(2);
   });
 
+  it("td.pop が計算した順位より優先される(合成: 馬番 14 の人気 4 を 9 に書き換えると 9 になる)", () => {
+    const html = loadShiftJisFixture("jra_odds_tanpuku_ninki_202605050208.html");
+    const edited = html.replace(/<td class="pop">4<\/td>/, '<td class="pop">9</td>');
+    expect(edited).not.toBe(html); // 前提: 書き換えが当たった
+    const r = parseJraWinPlaceOdds(edited, RACE_DATE);
+    if (r.state !== "available") throw new Error("unreachable");
+    expect(r.snapshot.win[14]?.ninki).toBe(9);
+    expect(r.snapshot.place[14]?.ninki).toBe(9);
+  });
+
   it("馬番順の頁(ou)では単勝オッズの昇順で順位を作る(同オッズは小さい方の順位)", () => {
     const s = snapshotOf("jra_odds_tanpuku_202605050208.html");
     expect(s.win[5]?.odds).toBe(4.3);
@@ -218,5 +228,95 @@ describe("parseJraComboOdds(読めなかった頁)", () => {
   it("券種と頁が食い違う(馬連の頁を馬単として読む)と unavailable", () => {
     const html = loadShiftJisFixture("jra_odds_umaren_202605050208.html");
     expect(parseJraComboOdds(html, "exacta").state).toBe("unavailable");
+  });
+});
+
+describe("parseJraComboOdds(3連複・3連単)", () => {
+  // 組の数は fixtures の HTML から別手段(python の正規表現)で数えた値(14頭: 14C3=364、14P3=2184)。
+  it("3連複: 発売中・確定後とも 364 組。キーは昇順の3桁組、値は単一(oddsMax は null)", () => {
+    for (const file of ["jra_odds_sanrenpuku_202605050208.html", "jra_odds_sanrenpuku_final_202605050208.html"]) {
+      const m = comboOf(file, "trio");
+      expect(m.size, file).toBe(364);
+      for (const [key, cell] of m) {
+        expect(parseComboOddsKey(key), key).toHaveLength(3);
+        expect(cell.oddsMax).toBeNull();
+      }
+    }
+    // 仮の値と同じ 99999.9 のセルは netkeiba のパーサと同じく null になる(`toComboOddsNumber`。偽陽性は保守側)。
+    // 確定後の頁に 1 組だけある(1-3-11。python で数えた値)。発売中の頁には無い。
+    const nulls = (m: ReadonlyMap<string, { oddsMin: number | null }>) => [...m.values()].filter((c) => c.oddsMin === null).length;
+    expect(nulls(comboOf("jra_odds_sanrenpuku_202605050208.html", "trio"))).toBe(0);
+    expect(nulls(comboOf("jra_odds_sanrenpuku_final_202605050208.html", "trio"))).toBe(1);
+    expect(comboOf("jra_odds_sanrenpuku_final_202605050208.html", "trio").get("010311")?.oddsMin).toBeNull();
+    const a = comboOf("jra_odds_sanrenpuku_202605050208.html", "trio");
+    expect(a.get(buildComboOddsKey([1, 2, 3]))?.oddsMin).toBe(1058.5);
+    expect(a.get(buildComboOddsKey([1, 2, 14]))?.oddsMin).toBe(285.5);
+    expect(a.get(buildComboOddsKey([12, 13, 14]))?.oddsMin).toBe(1042.5);
+  });
+
+  it("3連複(軸馬1の頁): 1 を含む 78 組(= 13C2)だけを返す", () => {
+    const m = comboOf("jra_odds_sanrenpuku_jiku01_202605050208.html", "trio");
+    expect(m.size).toBe(78);
+    for (const key of m.keys()) expect(parseComboOddsKey(key)![0]).toBe(1);
+  });
+
+  it("3連単: 確定後は 2184 組(票数なし 0。99999.9 の 1 組だけ仮の値として null)、発売中は票数なし 83 組を null で残して 2184 組", () => {
+    const fin = comboOf("jra_odds_sanrentan_final_202605050208.html", "trifecta");
+    expect(fin.size).toBe(2184);
+    expect(loadShiftJisFixture("jra_odds_sanrentan_final_202605050208.html")).not.toContain("票数なし</td>");
+    expect([...fin.values()].filter((c) => c.oddsMin === null)).toHaveLength(1);
+    const mid = comboOf("jra_odds_sanrentan_202605050208.html", "trifecta");
+    expect(mid.size).toBe(2184);
+    expect([...mid.values()].filter((c) => c.oddsMin === null)).toHaveLength(83);
+    // 前提: 確定後と発売中でキーの集合は同じ
+    expect([...mid.keys()].sort()).toEqual([...fin.keys()].sort());
+  });
+
+  it("3連単: 順序付きキー(1着・2着・3着)。1→2→3 は 2949.0、2→1→3 は 8191.8 で別の値。14→13→1 は 12287.7", () => {
+    const m = comboOf("jra_odds_sanrentan_202605050208.html", "trifecta");
+    expect(m.get(buildOrderedComboOddsKey([1, 2, 3]))?.oddsMin).toBe(2949.0);
+    expect(m.get(buildOrderedComboOddsKey([2, 1, 3]))?.oddsMin).toBe(8191.8);
+    expect(m.get(buildOrderedComboOddsKey([14, 13, 1]))?.oddsMin).toBe(12287.7);
+    expect(m.has(buildOrderedComboOddsKey([1, 2, 2]))).toBe(false); // 3着が2着と同じ組は空き
+  });
+
+  it("3連単(1着=1番の頁): 1 着が 1 の 13×12=156 組(うち票数なし 7)だけ", () => {
+    const m = comboOf("jra_odds_sanrentan_jiku1_202605050208.html", "trifecta");
+    expect(m.size).toBe(156);
+    expect([...m.values()].filter((c) => c.oddsMin === null)).toHaveLength(7);
+    for (const key of m.keys()) expect(parseComboOddsKey(key)![0]).toBe(1);
+  });
+
+  it("3連単: toComboOddsScalarMap に通すと票数なしは null のまま", () => {
+    const scalar = toComboOddsScalarMap(comboOf("jra_odds_sanrentan_202605050208.html", "trifecta"));
+    expect([...scalar.values()].filter((v) => v === null)).toHaveLength(83);
+  });
+
+  it("全組が票数なしの頁は unavailable(合成: 3連単の頁の数値セルを全部『票数なし』に置換)", () => {
+    const html = loadShiftJisFixture("jra_odds_sanrentan_202605050208.html").replace(
+      /<td>(<strong[^>]*>)?[0-9][0-9,.]*(<\/strong>)?<\/td>/g,
+      '<td class="zero">票数なし</td>',
+    );
+    expect(html).toContain("票数なし");
+    expect(parseJraComboOdds(html, "trifecta").state).toBe("unavailable");
+  });
+});
+
+describe("parseJraComboOdds(構造の壊れ・計時)", () => {
+  it("馬番が範囲外の行は throw(ComboOddsParseError)", () => {
+    const html = loadShiftJisFixture("jra_odds_umaren_202605050208.html").replace(
+      '<th scope="row">2</th>',
+      '<th scope="row">99</th>',
+    );
+    expect(() => parseJraComboOdds(html, "quinella")).toThrow();
+  });
+
+  it("3連単の頁(約509KB)を1回パースした時間を標準エラーに出す(#673 の判断材料。値は環境依存で断定しない)", () => {
+    const html = loadShiftJisFixture("jra_odds_sanrentan_202605050208.html");
+    const t0 = performance.now();
+    const r = parseJraComboOdds(html, "trifecta");
+    const ms = performance.now() - t0;
+    expect(r.state).toBe("available");
+    console.error(`[計時] 3連単 ${html.length} 文字を parseJraComboOdds: ${ms.toFixed(0)}ms`);
   });
 });
