@@ -1,0 +1,159 @@
+{
+ "criteria": {
+  "min_n": 200,
+  "bh_q": 0.05,
+  "tests": 42
+ },
+ "candidates": [
+  {
+   "id": "K10",
+   "label": "前走 1 着",
+   "side": "人気",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 2078,
+    "obs": 1278,
+    "exp": 1348.1,
+    "ratio": 0.948,
+    "z": -3.1,
+    "q_bh": 0.016501
+   }
+  },
+  {
+   "id": "K11",
+   "label": "前走 2〜3 着",
+   "side": "人気",
+   "outcome": "win",
+   "direction": "under",
+   "explore": {
+    "n": 9065,
+    "obs": 3023,
+    "exp": 3197.1,
+    "ratio": 0.946,
+    "z": -2.55,
+    "q_bh": 0.046148
+   }
+  },
+  {
+   "id": "K13",
+   "label": "2歳戦",
+   "side": "レース",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 3172,
+    "obs": 2246,
+    "exp": 2129.0,
+    "ratio": 1.055,
+    "z": 4.11,
+    "q_bh": 0.000836
+   }
+  },
+  {
+   "id": "K15",
+   "label": "ハンデ戦",
+   "side": "レース",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 1004,
+    "obs": 543,
+    "exp": 613.5,
+    "ratio": 0.885,
+    "z": -4.49,
+    "q_bh": 0.000297
+   }
+  },
+  {
+   "id": "K16",
+   "label": "重・不良",
+   "side": "レース",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 2107,
+    "obs": 1293,
+    "exp": 1352.2,
+    "ratio": 0.956,
+    "z": -2.57,
+    "q_bh": 0.046148
+   }
+  },
+  {
+   "id": "K17",
+   "label": "小倉・福島",
+   "side": "レース",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 2252,
+    "obs": 1341,
+    "exp": 1402.9,
+    "ratio": 0.956,
+    "z": -2.54,
+    "q_bh": 0.046148
+   }
+  },
+  {
+   "id": "K17",
+   "label": "小倉・福島",
+   "side": "レース",
+   "outcome": "win",
+   "direction": "under",
+   "explore": {
+    "n": 2252,
+    "obs": 633,
+    "exp": 695.5,
+    "ratio": 0.91,
+    "z": -2.71,
+    "q_bh": 0.040837
+   }
+  },
+  {
+   "id": "K18",
+   "label": "牝馬",
+   "side": "レース",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 5922,
+    "obs": 3658,
+    "exp": 3826.5,
+    "ratio": 0.956,
+    "z": -3.73,
+    "q_bh": 0.00234
+   }
+  },
+  {
+   "id": "K18",
+   "label": "牝馬",
+   "side": "レース",
+   "outcome": "win",
+   "direction": "under",
+   "explore": {
+    "n": 5922,
+    "obs": 1813,
+    "exp": 1940.5,
+    "ratio": 0.934,
+    "z": -2.92,
+    "q_bh": 0.024741
+   }
+  },
+  {
+   "id": "K19",
+   "label": "16 頭以上",
+   "side": "レース",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 7755,
+    "obs": 4727,
+    "exp": 4944.2,
+    "ratio": 0.956,
+    "z": -3.69,
+    "q_bh": 0.00234
+   }
+  }
+ ]
+}
