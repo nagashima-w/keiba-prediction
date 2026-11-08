@@ -674,17 +674,17 @@ describe("wrangler.toml", () => {
   });
 
   it("設定値(チーム名・AUD・メール)を [vars] に置かず、secrets.required も使わない(未設定は Worker が 403 で受ける)", () => {
-    // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つと、#642 の 1 晩の上限(Issue #669)の 4 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
+    // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つと、#642 の 1 晩の上限(Issue #669)と、JRA のオッズを使うか(Issue #675)の 5 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
     const varsBody = /^\[vars\]\n((?:[^\[\n][^\n]*\n|\n)*)/m.exec(tomlCode)?.[1] ?? "";
     const varKeys = [...varsBody.matchAll(/^([A-Z_]+)\s*=/gm)].map((m) => m[1]);
-    expect(varKeys.sort()).toEqual(["RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]);
+    expect(varKeys.sort()).toEqual(["JRA_ODDS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]);
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);
     expect(tomlCode).not.toMatch(/^\[secrets\]/m);
     expect(tomlCode).not.toMatch(/keep_vars/);
   });
 
   it("Issue #655・#669: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 20000 ミリ秒(書き込みが Free の 1 日 10 万行に迫ったため5000 から広げた)。#642 の 1 晩の上限は 1〜20000 未満の数(止める \"0\" ではない)。取得の止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む・5000)は変えない", () => {
-    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"$/m);
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"$/m);
     // Issue #669: #642 の上限は、止める "0" ではなく、既定(20000)より小さい正の整数。取得の間隔は parseArchiveMinIntervalMs の範囲(1500〜60000)内
     const edgeLimit = Number(/^RACE_MARKET_EDGE_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1]);
     expect(edgeLimit).toBeGreaterThanOrEqual(1);
@@ -693,6 +693,11 @@ describe("wrangler.toml", () => {
     expect(intervalMs).toBeGreaterThanOrEqual(1500);
     expect(intervalMs).toBeLessThanOrEqual(60_000);
     expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
+    // Issue #675: JRA のオッズを使う(既定は使う。"0" だけが無効)。DO のラッパは var を見て取得口を渡すかを決め、無効なら渡さない
+    expect(Number(/^JRA_ODDS_ENABLED = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(1);
+    const raceDayDo = readTextLf("cloud", "src", "race-day-do.ts");
+    expect(raceDayDo).toContain("isJraOddsDisabled(env.JRA_ODDS_ENABLED)");
+    expect(raceDayDo).toMatch(/\.\.\.\(isJraOddsDisabled\(env\.JRA_ODDS_ENABLED\) \? \{\} : \{ fetchJraOdds: createJraOddsFetcher\(/);
     // 検出の確認(空振りでない): 止める値が書かれていれば拾える形
     expect('RACE_ARCHIVE_NIGHTLY_LIMIT = "0"\n').toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
     const code = readTextLf("cloud", "src", "race-archive-fetch-core.ts");
@@ -725,6 +730,8 @@ describe("wrangler.toml", () => {
     expect(body).toContain('"--var", "RACE_MARKET_EDGE_NIGHTLY_LIMIT:0"');
     // Issue #590: 過去の結果の毎晩の変換も、すべての構成で止めて動かす(変換の時間帯〈JST 1:00〜8:30〉に当たっても、本番のクラスが D1 に書かない)
     expect(body).toContain('"--var", "RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT:0"');
+    // Issue #675: JRA のオッズも、すべての構成で使わない(中央の発走前の分析で、本物の JRA に出ない)
+    expect(body).toContain('"--var", "JRA_ODDS_ENABLED:0"');
     // withWorker の呼び出しのうち、設定ファイル(--config)を使うもの(認証の設定を持つ構成)は、すべて ...vars( を含む
     const calls = [...smoke.matchAll(/await withWorker\([^\n]*\n/g)].map((m) => m[0]);
     const withConfig = calls.filter((c) => c.includes("--config"));
@@ -735,6 +742,8 @@ describe("wrangler.toml", () => {
     }
     // 無設定の構成(認証の設定が無く、全リクエストが 403)は DO に届かない
     expect(calls.filter((c) => !c.includes("--config"))).toHaveLength(1);
+    // Issue #676: 無設定の構成にも JRA を使わない指定を付ける(将来この構成から DO に届くようになっても本物の JRA に出ない)
+    expect(calls.find((c) => !c.includes("--config")), "無設定の構成").toContain('"--var", "JRA_ODDS_ENABLED:0"');
     // 対照(検出の確認。空振りでない)
     expect(("await withWorker(1, [\"--config\", P], async () => {\n").includes("...vars(")).toBe(false);
   });

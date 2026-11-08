@@ -214,3 +214,23 @@ describe("D1AnalysisStore.saveClose / getStoredClose(Issue #338)", () => {
     expect(rounds.map((r) => [r.round, r.status, r.reason])).toEqual([[2, "failed", null]]);
   });
 });
+
+describe("D1AnalysisStore.saveClose: 取得元(odds_sources_json。Issue #676・migration 0043)", () => {
+  const sourcesOf = async (id: number, round: number): Promise<string | null> =>
+    (await local.db.prepare("SELECT odds_sources_json AS s FROM analysis_close WHERE analysis_id = ? AND round = ?").bind(id, round).first<{ s: string | null }>())!.s;
+
+  it("取得元を保存し、同じ (分析, 回) の再保存で上書きされる。記録なしの回は NULL。ほかの列は変わらない", async () => {
+    const id = await saveBase();
+    const jra = { winPlace: { source: "jra", officialDatetime: "2026-10-17 15:41:30" }, wide: { source: "netkeiba", officialDatetime: null, fallbackReason: "horse-set-mismatch" } } as const;
+    await store().saveClose(id, okPayload(1, [300, 200], { oddsSources: jra }));
+    await store().saveClose(id, okPayload(2, [300, 200]));
+    expect(JSON.parse((await sourcesOf(id, 1))!)).toEqual({ v: 1, sources: jra });
+    expect(await sourcesOf(id, 2)).toBeNull();
+    // 再保存(UPSERT)で上書きされる
+    await store().saveClose(id, okPayload(1, [300, 200], { oddsSources: { winPlace: { source: "netkeiba", officialDatetime: null, fallbackReason: "override-unavailable" } } }));
+    expect(JSON.parse((await sourcesOf(id, 1))!).sources.winPlace.source).toBe("netkeiba");
+    // 既存の読み出し(odds_official_datetime ほか)は変わらない
+    const rounds = await store().getStoredClose(id);
+    expect(rounds[0]).toMatchObject({ round: 1, oddsOfficialDatetime: "2026-10-17 15:41:30" });
+  });
+});

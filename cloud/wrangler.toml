@@ -5,7 +5,7 @@
 #   ユーザーがダッシュボードで登録する。secret は wrangler deploy で消えない
 #   (vars にするとダッシュボードの値は次のデプロイで上書きされる)。
 #   したがって認証の設定には `secrets.required` を置かず、[vars] にも置かない(未設定なら Worker が全リクエストに 403 を返す)。
-#   [vars] に置いてよいのは、過去の結果の取得の時間帯・間隔を変える RACE_ARCHIVE_* の 3 つだけ(Issue #655。下の [vars])。
+#   [vars] に置いてよいのは、過去の結果の取得の時間帯・間隔を変える RACE_ARCHIVE_* の 3 つと、#642 の 1 晩の上限、JRA のオッズを使うか(JRA_ODDS_ENABLED。Issue #675)だけ(下の [vars])。
 name = "keiba-cloud"
 main = "src/worker.ts"
 compatibility_date = "2026-10-01"
@@ -109,13 +109,18 @@ class_name = "RaceArchiveFetchDO"
 #   取得には書き込みの上限が無いので、間隔で絞る。20 秒なら終日で約 4,300 レース = 約 1.7 万行。夜の戦績の変換(上限 3 万行)と #642 の取り込み(下の 1 万行)を足しても 6 万行ほどで、10 万行に収まる。
 # - RACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000": #642 の騎手・調教師の指標の 1 晩の書き込み行数の上限を、既定の 2 万行から 1 万行に下げる(Issue #669。止める "0" ではない。1 以上の整数だけ)。
 # 分析と同じ netkeiba の窓口(1.5 秒の間隔)を取り合うので、分析が遅れることがある。断られると窓口が 30 分止まり、分析にも効く(ユーザーは受け入れた)。
-# ★戻し方: この [vars] の 4 行(と [vars] の見出し)を消して公開する(var が無ければ、コードの既定 = 0:00〜8:30・開催日は休む、に戻る)。
+# - JRA_ODDS_ENABLED = "1": 中央の発走前の分析で、オッズを JRA の公式サイトから取る(Issue #675。#668-D)。netkeiba の無料のオッズは発走の約 65 分前と約 5 分前にしか更新されず、30 分前の分析が約 1 時間前のオッズで
+#   計算されていた。JRA は約 3 分刻み。文字列 "0" だけが無効(未設定・"1" は使う)。**accessO.html が本番の Worker から通るかは公開前に未確認**(同じホストの accessJ・accessD は通っている)。公開後の最初の開催日に、
+#   D1 の analyses.odds_sources_json(券種ごとの取得元)と Worker のログ(「JRA オッズ」)で確かめる。
+# ★JRA のオッズの戻し方: JRA_ODDS_ENABLED を "0" にして、承認印つきで公開する(約 20 分。今までの動きに戻る。ダッシュボードの値は次のデプロイで上書きされるので、ダッシュボードだけでは切らない)。
+# ★戻し方(過去の結果の取得の 4 行): RACE_ARCHIVE_* と RACE_MARKET_EDGE_NIGHTLY_LIMIT の 4 行を消して公開する(var が無ければ、コードの既定 = 0:00〜8:30・開催日は休む、に戻る)。
 # 認証の設定(ACCESS_*)はここに置かない(secret)。1 晩の件数・行数の上限の var(RACE_ARCHIVE_NIGHTLY_LIMIT・RACE_ARCHIVE_NIGHTLY_ROWS_LIMIT)はここに置いていない(未設定)。smoke は `--var RACE_MARKET_EDGE_NIGHTLY_LIMIT:0` で #642 を止める(wrangler dev は --var が [vars] より優先される)。
 [vars]
 RACE_ARCHIVE_WINDOW_END_MIN = "1440"
 RACE_ARCHIVE_SKIP_RACE_DAY = "0"
 RACE_ARCHIVE_MIN_INTERVAL_MS = "20000"
 RACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"
+JRA_ODDS_ENABLED = "1"
 
 # 過去の結果(R2 の読み取り結果)を horse_runs に入れる毎晩の変換の Durable Object(Issue #590〈#549-B3-2〉)。`idFromName("main")` の単一インスタンス。
 # JST 1:00〜8:30 の間だけ、目録(race_archive)の未変換のレースを 1 ステップ最大 20 件、R2 から読んで horse_runs に書く(1 晩の書き込み行数の既定は 3 万行)。

@@ -1,0 +1,13 @@
+-- クラウド版(D1)の migration 0043: 締切の直前の再計算が使ったオッズの取得元の記録(Issue #676。#668-E)。exe の SQLite には無い、D1 専用の列。
+-- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧い行は NULL のまま)。索引は付けない(書き込みを増やさない。docs/db-sql-rules.md)。
+-- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言した追加分」(D1_EXTRA_TABLES の analysis_close)も同時に直す。
+-- ★デプロイの順序: deploy-cloud.yml は migration を wrangler deploy より前に適用するので、新しい Worker が列の無い D1 に当たることは無い。
+--   新しい Worker は UPSERT_CLOSE_SQL にこの列を含める(NULL を書く保存もある)ので、列が無いと再計算の保存が全部失敗する。この列を SELECT する読み出しは、まだ無い。
+--
+-- analysis_close.odds_sources_json: その回の再計算が使ったオッズの、券種ごとの取得元(JSON の文字列。形は 0042 の analyses.odds_sources_json と同じ)。
+--   JRA のオッズを使わない構成の回・地方・旧い行・行わなかった/失敗した回は NULL。
+--   {"v":1,"sources":{"winPlace":{"source":"jra","officialDatetime":"2026-11-08 10:37:00"},
+--                     "wide":{"source":"netkeiba","officialDatetime":null,"fallbackReason":"override-unavailable"}, …}}
+--   odds_official_datetime(既存の列)には、採用した単勝・複勝の頁の時刻が入る(JRA を採用したら JRA の頁の時刻、netkeiba に戻したら netkeiba の時刻)。
+--   集計の例: SELECT c.round, s.key, s.value ->> '$.source' AS source, count(*) FROM analysis_close c, json_each(c.odds_sources_json, '$.sources') s GROUP BY c.round, s.key, source;
+ALTER TABLE analysis_close ADD COLUMN odds_sources_json TEXT;
