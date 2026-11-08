@@ -268,7 +268,8 @@ async function main(): Promise<void> {
 
   try {
     // A. 設定なし。
-    await withWorker(BASE_PORT, [], async () => {
+    // Issue #676: 設定なしの構成にも JRA を使わない指定を付ける(今は DO に届かず JRA に出る経路が無いが、将来この構成から DO に届くようになっても、本物の JRA に出ない)。
+    await withWorker(BASE_PORT, ["--var", "JRA_ODDS_ENABLED:0"], async () => {
       await expectAllForbidden(BASE_PORT, "A(設定なし)");
     });
 

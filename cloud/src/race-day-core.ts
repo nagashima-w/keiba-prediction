@@ -94,6 +94,9 @@
  * 発走前の分析(`pre_race`。自動・手動とも)が保存されたら、その同じ同期区間で再計算の入力(馬ごとの確率ほか)と回の行(発走の 5 分前・2 分前〈暫定〉)を積む({@link CloseStage.register})。
  * 時刻が来たら {@link CloseStage.runStep}(通知・馬場・タスクの前に 1 ステップ)が、**オッズだけ**を取り直し(出馬表・戦績・調教はキャッシュ専用、オッズだけ `bypassCache`)、確率は分析時のまま
  * 配分を作り直して(`recomputeAllocationFromProbs`。LLM は呼ばない)D1 に保存する。結果が決まったら保存の前に DO に書く=保存の再試行・再実行で取り直さない。中央・地方とも対象(Issue #379)。
+ * **JRA のオッズ(Issue #676。#668-E)**: 取得口 `fetchJraOdds` を渡したとき、中央の再計算は `scrapeRace` の前に JRA の頁(単勝複勝・組合せ ON なら 6 式別。三連単は最後)を同じ起床の中で 1 本ずつ順に取り、
+ * 取得キャッシュに JSON を置いて、計算の段が `oddsOverride` として券種ごとに優先する(使えない券種は上の netkeiba の取り直しに戻る)。**この回の初回の起動時刻より古い JSON は使わない**(発走前の分析の JSON を誤用しない)。
+ * 回の期限の 20 秒前({@link CLOSE_JRA_STOP_BEFORE_MS})を過ぎたら新しい頁は送らない。取得元は `analysis_close.odds_sources_json`(migration 0043)に残る。地方・取得口なしは従来どおり。
  * 地方で組合せが ON のときは**部分的な取り直し**: 単勝・複勝(1 本)だけ取り直し、組合せは分析時のオッズ(取得キャッシュの、分析の取得〜保存の期間のエントリ)のまま配分を作り直す(読めなければ failed の `combo-missing`)。通知はしない。
  */
 import { CachedFetcher, type TextFetcher } from "../../packages/core/src/scraper/cached-fetcher";
@@ -940,6 +943,8 @@ export class RaceDayCore {
       networkFetcher: this.networkFetcher,
       cacheOnly: this.cacheOnly,
       cache: this.cache,
+      // JRA のオッズ(Issue #676): 取得口を渡したときだけ、中央の再計算が JRA の頁を取る(var JRA_ODDS_ENABLED が "0" のときは渡されない=従来どおり)。
+      ...(deps.fetchJraOdds === undefined ? {} : { jraOdds: { fetcher: deps.fetchJraOdds, cache: this.cache, onInfo: deps.onInfo } }),
     });
     // 日報の時刻の下限の段階(Issue #399〈R-9b〉。表は無く、`race_day_meta` の 3 キーだけ。ここでは SQL を出さない)。
     this.reportHold = new ReportHoldStage({

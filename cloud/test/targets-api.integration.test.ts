@@ -221,6 +221,8 @@ describe("GET /api/targets(本物の D1。Issue #336)", () => {
       for (const s of statements) await local.db.prepare(s).run();
       // 0019 のあとに足された analysis_close の列(0041。Issue #658)。作り直した表にも足す。
       await local.db.prepare("ALTER TABLE analysis_close ADD COLUMN market_shrink_weight REAL").run();
+      // 0043(Issue #676)の取得元の列も同じく足す(UPSERT_CLOSE_SQL が書く)。
+      await local.db.prepare("ALTER TABLE analysis_close ADD COLUMN odds_sources_json TEXT").run();
     }
   });
 

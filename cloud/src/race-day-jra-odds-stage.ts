@@ -15,9 +15,9 @@
  */
 import type { ComboBetType } from "../../packages/core/src/scraper/combo-odds-key";
 import { JRA_ODDS_PAGES, parseJraOddsCname, type JraOddsPage, type JraOddsRaceLinks } from "../../packages/core/src/scraper/parse-jra-odds-index";
-import type { JraOddsFailure, JraOddsFetcher } from "./jra-odds-fetch";
+import type { JraOddsFailure, JraOddsFetcher, JraOddsSession } from "./jra-odds-fetch";
 import { JRA_PAGE_FOR_BET, jraLinksCacheKey, jraOddsCacheKey, parseJraOddsPage } from "./jra-odds-cache";
-import type { JraOddsStageStore } from "./race-day-jra-odds";
+import type { JraOddsStagePort } from "./race-day-jra-odds";
 
 /** 取得キャッシュのうち使う部分。 */
 export interface JraOddsStageCache {
@@ -26,7 +26,7 @@ export interface JraOddsStageCache {
 }
 
 export interface JraOddsStageDeps {
-  readonly store: JraOddsStageStore;
+  readonly store: JraOddsStagePort;
   readonly fetcher: JraOddsFetcher;
   readonly cache: JraOddsStageCache;
   readonly now: () => number;
@@ -63,17 +63,47 @@ export function linksMatch(value: unknown, raceId: string, date: string): value 
 
 const toIsoDate = (yyyymmdd: string): string => `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
 
+/** `run` の追加の指定。 */
+export interface JraOddsRunOptions {
+  /**
+   * 時間の守り(Issue #676。締切の再計算が渡す)。**開催選択・レース選択・各頁を送る前に** `now >= stopAt` なら、それ以降は送らず、残りの頁を failed にする(警告の語は `deadline`)。
+   * 省略時は守りなし(発走前の分析の段は渡さない)。
+   */
+  readonly stopAt?: number;
+}
+
 export class JraOddsStage {
   constructor(private readonly deps: JraOddsStageDeps) {}
 
+  /** 1 本の頁を「取る → パース → JSON を置く」まで行い、結果の語だけを返す。生の HTML・パースの木・JSON はこの関数の外へ出ない(戻ったら参照が切れる。1 頁ずつ処理するための境界)。 */
+  private async fetchAndStore(
+    session: JraOddsSession,
+    raceId: string,
+    page: JraOddsPage,
+    cname: string,
+    date: string,
+  ): Promise<{ readonly status: "ok" } | { readonly status: "fetch-failed"; readonly word: string } | { readonly status: "parse-failed"; readonly word: string }> {
+    const result = await session.fetchOdds(cname);
+    if (result.status !== "ok") {
+      return { status: "fetch-failed", word: result.status };
+    }
+    const parsed = parseJraOddsPage(page, result.value, toIsoDate(date), BET_FOR_PAGE[page]);
+    if (parsed.status !== "ok") {
+      return { status: "parse-failed", word: parsed.status };
+    }
+    this.deps.cache.set(jraOddsCacheKey(raceId, page), parsed.json);
+    return { status: "ok" };
+  }
+
   /** 1 起床ぶん。`date` は開催日 YYYYMMDD。例外を投げない。 */
-  async run(raceId: string, instance: number, date: string): Promise<void> {
+  async run(raceId: string, instance: number, date: string, options: JraOddsRunOptions = {}): Promise<void> {
     const { store, cache } = this.deps;
     const startedAt = this.deps.now();
     const batch = store.nextBatch(raceId, instance);
     if (batch.length === 0) {
       return;
     }
+    const pastStop = (): boolean => options.stopAt !== undefined && this.deps.now() >= options.stopAt;
     let sent = 0;
     try {
       const session = this.deps.fetcher.open();
@@ -116,6 +146,11 @@ export class JraOddsStage {
       let links = readLinks();
       let rediscovered = false;
       if (links === null) {
+        if (pastStop()) {
+          this.failAll(raceId, instance, "deadline");
+          this.info(raceId, batch.length, 0, batch.length, session.requestCount, startedAt);
+          return;
+        }
         const found = await discover();
         if ("failure" in found) {
           sent = session.requestCount;
@@ -129,31 +164,36 @@ export class JraOddsStage {
       let ok = 0;
       let failed = 0;
       for (const page of batch) {
-        let result = await session.fetchOdds(links.cnames[page]);
-        if (result.status === "param-error" && !rediscovered) {
+        if (pastStop()) {
+          // 残りの頁は送らない(その券種は netkeiba のまま)。この頁以降をまとめて failed にする。
+          const rest = batch.length - ok - failed;
+          this.failAll(raceId, instance, "deadline");
+          failed += rest;
+          break;
+        }
+        let result = await this.fetchAndStore(session, raceId, page, links.cnames[page], date);
+        if (result.status === "fetch-failed" && result.word === "param-error" && !rediscovered) {
           rediscovered = true; // たどり直しは段全体で 1 回だけ
           const found = await discover();
           if ("failure" in found) {
-            result = { status: found.failure };
+            result = { status: "fetch-failed", word: found.failure };
           } else {
             links = found.links;
-            result = await session.fetchOdds(links.cnames[page]);
+            result = await this.fetchAndStore(session, raceId, page, links.cnames[page], date);
           }
         }
-        if (result.status !== "ok") {
+        if (result.status === "fetch-failed") {
           store.mark(raceId, instance, page, "failed");
           failed += 1;
-          this.deps.onWarn(`JRA オッズの取得に失敗しました(${raceId}。頁 ${page}): ${safeWord(result.status)}`);
+          this.deps.onWarn(`JRA オッズの取得に失敗しました(${raceId}。頁 ${page}): ${safeWord(result.word)}`);
           continue;
         }
-        const parsed = parseJraOddsPage(page, result.value, toIsoDate(date), BET_FOR_PAGE[page]);
-        if (parsed.status !== "ok") {
+        if (result.status === "parse-failed") {
           store.mark(raceId, instance, page, "failed");
           failed += 1;
-          this.deps.onWarn(`JRA オッズの読み取りに失敗しました(${raceId}。頁 ${page}): ${parsed.status}`);
+          this.deps.onWarn(`JRA オッズの読み取りに失敗しました(${raceId}。頁 ${page}): ${result.word}`);
           continue;
         }
-        cache.set(jraOddsCacheKey(raceId, page), parsed.json);
         store.mark(raceId, instance, page, "done");
         ok += 1;
       }

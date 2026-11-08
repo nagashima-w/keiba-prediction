@@ -10,7 +10,7 @@ import { CLOSE_FINAL_LEAD_MS, CLOSE_FIRST_LEAD_MS, type CloseSavePayload } from 
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
 import { parseCloseInput } from "../src/race-day-close";
-import { RaceDayCore, type AnalysisSink, type StepOutcome } from "../src/race-day-core";
+import { RaceDayCore, type AnalysisSink, type RaceDayDeps, type StepOutcome } from "../src/race-day-core";
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
@@ -158,7 +158,7 @@ afterEach(() => {
   for (const sql of opened.splice(0)) sql.close();
 });
 
-function harness(settings: CloudSettings): Harness {
+function harness(settings: CloudSettings, extraDeps: Partial<RaceDayDeps> = {}): Harness {
   const sql = openNodeSql();
   opened.push(sql);
   const clock = { now: Date.parse("2026-07-12T09:00:00Z") };
@@ -174,6 +174,7 @@ function harness(settings: CloudSettings): Harness {
     onWarn: (message) => warnings.push(message),
     sink,
     loadSettings: async () => h.settings,
+    ...extraDeps,
   });
   return h;
 }
@@ -521,5 +522,24 @@ describe("入力の点数の上限(allocationSettings.maxWinBets・maxPlaceBets�
       }
       expect(parse({ [key]: 18 }), `${key}=18`).not.toBeNull();
     }
+  });
+});
+
+describe("締切の直前の再計算(地方): JRA のオッズの取得口があっても使わない(Issue #676)", () => {
+  it("取得口を渡しても、地方の再計算は JRA の取得口を一度も開かず、netkeiba の単勝・複勝 1 本だけを取り直す。payload に oddsSources のキーは付かない", async () => {
+    let opened = 0;
+    const jra = {
+      open() {
+        opened += 1;
+        throw new Error("地方では開かれないはず");
+      },
+    };
+    const h = harness({ ...SETTINGS_ON, includeComboOdds: false }, { fetchJraOdds: jra });
+    await analyze(h);
+    const before = h.gate.urls.length;
+    expect(await fire(h, DUE1)).toMatchObject({ round: 1, result: "ok", reason: null });
+    expect(h.gate.urls.slice(before)).toEqual([b1Url]);
+    expect(opened).toBe(0);
+    expect("oddsSources" in h.sink.closes[0]!.payload).toBe(false);
   });
 });

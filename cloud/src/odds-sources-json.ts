@@ -1,4 +1,4 @@
-import type { OddsSourcesMeta } from "../../packages/core/src/scraper/odds-override";
+import type { OddsSourcesMeta } from "../../packages/core/src/scraper/odds-override.js";
 
 /** `analyses.odds_sources_json` の JSON の版。形を変えたら上げる。 */
 export const ODDS_SOURCES_VERSION = 1;

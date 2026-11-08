@@ -27,7 +27,56 @@ export function jraOddsPagesFor(includeComboOdds: boolean): readonly JraOddsPage
   return [...JRA_ODDS_PAGES.filter((p) => p !== "sanrentan"), "sanrentan"];
 }
 
-export class JraOddsStageStore {
+/** 段(`JraOddsStage`)が表に求める操作。DO の表({@link JraOddsStageStore})と、締切の再計算が使うメモリ上の実装({@link MemoryJraOddsStageStore})が満たす。 */
+export interface JraOddsStagePort {
+  nextBatch(raceId: string, instance: number): JraOddsPage[];
+  mark(raceId: string, instance: number, page: JraOddsPage, state: Exclude<JraOddsPageState, "pending">): void;
+  failAllPending(raceId: string, instance: number): number;
+  hasPending(raceId: string, instance: number): boolean;
+}
+
+/**
+ * 進み具合をメモリだけに持つ実装(締切の再計算用。Issue #676)。1 つのレース・1 回の再計算の中だけで使い捨てる(DO の表に書かない=掃除の `clearOrphans` に巻き込まれない)。
+ * DO が再起動すれば消えるが、再計算の結果は保存の前に DO の `payload_json` に書くので、消えるのは結果が決まる前の取得の進み具合だけ(やり直すだけで済む)。
+ * `nextBatch` の規則は DO の表と同じ(三連単以外が残っていればそれらをまとめて、三連単だけが残っていれば三連単だけ)。
+ */
+export class MemoryJraOddsStageStore implements JraOddsStagePort {
+  private readonly states = new Map<JraOddsPage, JraOddsPageState>();
+
+  constructor(pages: readonly JraOddsPage[]) {
+    for (const page of pages) {
+      this.states.set(page, "pending");
+    }
+  }
+
+  private pending(): JraOddsPage[] {
+    return JRA_ODDS_PAGES.filter((p) => this.states.get(p) === "pending");
+  }
+
+  hasPending(): boolean {
+    return this.pending().length > 0;
+  }
+
+  nextBatch(): JraOddsPage[] {
+    const pending = this.pending();
+    const rest = pending.filter((p) => p !== "sanrentan");
+    return rest.length > 0 ? rest : pending;
+  }
+
+  mark(_raceId: string, _instance: number, page: JraOddsPage, state: Exclude<JraOddsPageState, "pending">): void {
+    this.states.set(page, state);
+  }
+
+  failAllPending(): number {
+    const pending = this.pending();
+    for (const page of pending) {
+      this.states.set(page, "failed");
+    }
+    return pending.length;
+  }
+}
+
+export class JraOddsStageStore implements JraOddsStagePort {
   constructor(private readonly sql: SqlLike) {
     sql.exec(
       `CREATE TABLE IF NOT EXISTS race_day_jra_odds (

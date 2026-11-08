@@ -742,6 +742,8 @@ describe("wrangler.toml", () => {
     }
     // 無設定の構成(認証の設定が無く、全リクエストが 403)は DO に届かない
     expect(calls.filter((c) => !c.includes("--config"))).toHaveLength(1);
+    // Issue #676: 無設定の構成にも JRA を使わない指定を付ける(将来この構成から DO に届くようになっても本物の JRA に出ない)
+    expect(calls.find((c) => !c.includes("--config")), "無設定の構成").toContain('"--var", "JRA_ODDS_ENABLED:0"');
     // 対照(検出の確認。空振りでない)
     expect(("await withWorker(1, [\"--config\", P], async () => {\n").includes("...vars(")).toBe(false);
   });

@@ -11,6 +11,7 @@
  * 手順の仕様(順序・再試行・理由の語彙)は、各メソッドの JSDoc と `race-day-core.ts` 冒頭の「締切の直前の再計算」を参照。メソッドの本体は切り出し前から変えていない。
  */
 import type { CachedFetcher } from "../../packages/core/src/scraper/cached-fetcher";
+import type { OddsOverride } from "../../packages/core/src/scraper/odds-override";
 import { scrapeRace, type RaceData, type RaceFetcher } from "../../packages/core/src/scraper/scrape-race";
 import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
 import { narOddsPageUrl } from "../../packages/core/src/scraper/urls";
@@ -19,6 +20,8 @@ import { recomputeAllocationFromProbs } from "../../packages/core/src/analysis/r
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { closeComboBasis, type CloseReason, type CloseRound, type CloseSavePayload } from "./analysis-close";
 import type { DoSqlCacheStore } from "./do-cache-store";
+import { createJraOddsOverride, jraOddsCacheKey } from "./jra-odds-cache";
+import type { JraOddsFetcher } from "./jra-odds-fetch";
 import { redactSecrets } from "./llm-run";
 import { startTimeEpochMs } from "./pre-race-time";
 import {
@@ -32,8 +35,27 @@ import {
   type CloseStore,
   type CloseTaskRow,
 } from "./race-day-close";
+import { jraOddsPagesFor, MemoryJraOddsStageStore } from "./race-day-jra-odds";
+import { JraOddsStage, type JraOddsStageCache } from "./race-day-jra-odds-stage";
 import { allocationSettingsOf, CACHE_ONLY_TTL, CacheMissError, errorMessage, isFatalFetchError, ODDS_URL_PATTERN } from "./race-day-support";
 import type { CloudSettings } from "./settings";
+
+/**
+ * JRA のオッズの頁を取るのを止める幅(Issue #676。ユーザー決定: 20 秒)。**回の期限(次の回の時刻。最後の回は発走)の何ミリ秒前を過ぎたら、新しい頁を送らないか**。
+ * 20 秒の理由: JRA の 1 本はタイムアウトが 10 秒(`JRA_TIMEOUT_MS`)なので、守りの時刻の直前に始めた頁も期限の 10 秒前までに終わる。残りの 10 秒前後で、取れなかった券種の
+ * netkeiba の取り直し(gate の間隔つき)・再計算・D1 の保存が済む見込み。送らなかった頁の券種は netkeiba のまま(`oddsSources` に `override-unavailable` が残る)。
+ * 守りは「頁を送る前」だけを見る(取得の最中には止めない)。回 2(発走の 2 分前)は 120 秒のうち守りの時刻まで 100 秒、回 1(5 分前)は次の回まで 180 秒のうち 160 秒ある。
+ */
+export const CLOSE_JRA_STOP_BEFORE_MS = 20_000;
+
+/** 再計算が JRA の頁を取るのに使う部品(DO のラッパが `fetchJraOdds` を渡したときだけ。無ければ従来どおり netkeiba だけ)。 */
+export interface CloseJraOddsDeps {
+  readonly fetcher: JraOddsFetcher;
+  /** 頁の JSON を置く取得キャッシュ(発走前の分析の段と同じキー `jra-odds:<raceId>:<頁>` に上書きする。読み手は計算の段の `createJraOddsOverride` だけ)。 */
+  readonly cache: JraOddsStageCache;
+  /** 固定の語のログ(所要時間・本数)。 */
+  readonly onInfo?: (message: string) => void;
+}
 
 /** 1 ステップの結果(`StepOutcome` の 1 種)。`round` は回(1 = 発走 5 分前、2 = 2 分前〈暫定〉)。`ok` は再計算できて D1 に保存した、`retry` は取得か保存の再試行待ち、`failed` は再計算できなかった・行わなかった(D1 に失敗・スキップの行を保存した。保存を諦めた回も含む)。`reason` は D1 に書いた固定の理由(`ok`・`retry` は null)。 */
 export interface CloseStepOutcome {
@@ -73,6 +95,8 @@ export interface CloseStageDeps {
   readonly cacheOnly: CachedFetcher;
   /** 取得キャッシュ(`fetch_cache`)。地方の部分的な取り直しが、分析時の組合せオッズを読むのに使う。 */
   readonly cache: Pick<DoSqlCacheStore, "get">;
+  /** JRA のオッズの取得(Issue #676)。中央のレースの再計算だけが使う。省略時は使わない。 */
+  readonly jraOdds?: CloseJraOddsDeps;
 }
 
 export class CloseStage {
@@ -84,6 +108,7 @@ export class CloseStage {
   private readonly networkFetcher: CachedFetcher;
   private readonly cacheOnly: CachedFetcher;
   private readonly cache: Pick<DoSqlCacheStore, "get">;
+  private readonly jraOdds: CloseJraOddsDeps | undefined;
 
   constructor(deps: CloseStageDeps) {
     this.close = deps.store;
@@ -94,6 +119,37 @@ export class CloseStage {
     this.networkFetcher = deps.networkFetcher;
     this.cacheOnly = deps.cacheOnly;
     this.cache = deps.cache;
+    this.jraOdds = deps.jraOdds;
+  }
+
+  /**
+   * この回の JRA の頁を、1 本ずつ順に取って JSON を取得キャッシュに置く(Issue #676)。**例外を投げない**(失敗した頁の券種は、計算の段が netkeiba に戻す)。
+   * 取る頁は、この回の起動時刻({@link oddsSince})以降の JSON がまだ無いものだけ(取得の再試行で、取れた頁を取り直さない)。三連単は最後。
+   * 発走前の分析の段と同じ部品({@link JraOddsStage})を、メモリ上の進み具合({@link MemoryJraOddsStageStore})で使う: 三連単以外をまとめて 1 回、残りが三連単だけならもう 1 回(リンクはキャッシュから読む)。
+   * メモリ: 頁は「取る → デコード → パース → 小さな JSON にして置く」を 1 本ずつ順に行う(並行しない)。生の HTML・パースの木は `JraOddsStage` の頁ごとの関数が戻った時点で参照が切れる。
+   */
+  private async fetchJraPages(raceId: string, kaisaiDate: string, includeComboOdds: boolean, oddsSince: number, supersedeAt: number): Promise<void> {
+    const jra = this.jraOdds;
+    if (jra === undefined) {
+      return;
+    }
+    try {
+      const pages = jraOddsPagesFor(includeComboOdds).filter((page) => {
+        const entry = jra.cache.get(jraOddsCacheKey(raceId, page));
+        return entry === undefined || entry.fetchedAt < oddsSince;
+      });
+      if (pages.length === 0) {
+        return;
+      }
+      const store = new MemoryJraOddsStageStore(pages);
+      const stage = new JraOddsStage({ store, fetcher: jra.fetcher, cache: jra.cache, now: this.now, onWarn: this.onWarn, onInfo: jra.onInfo });
+      // 最大 2 回: 三連単以外 → 三連単。途中で打ち切り(開催選択の失敗・守り)になれば pending が無くなる。
+      for (let i = 0; i < 2 && store.hasPending(); i += 1) {
+        await stage.run(raceId, 0, kaisaiDate, { stopAt: supersedeAt - CLOSE_JRA_STOP_BEFORE_MS });
+      }
+    } catch {
+      // 取得口・キャッシュの例外。文面は残さない(URL・cname が入りうる)。計算の段が netkeiba に戻す。
+    }
   }
 
   /**
@@ -275,11 +331,22 @@ export class CloseStage {
       const retryable = !(error instanceof CacheMissError);
       return retryable && attempts < CLOSE_FETCH_MAX_ATTEMPTS && retryAt < supersedeAt ? ({ kind: "retry" as const, attempts, nextTryAt: retryAt }) : failed("fetch-failed");
     };
+    // 中央で JRA の取得口があるときだけ、再計算の前に JRA の頁を取り、計算の段が券種ごとに優先する(使えない券種は netkeiba の取り直しに戻る)。古い JSON は `oddsSince`(この回の初回の起動時刻)で弾く。
+    let oddsOverride: OddsOverride | undefined;
+    if (venueKind === "central" && this.jraOdds !== undefined) {
+      await this.fetchJraPages(row.race_id, input.kaisaiDate, input.allocationSettings.includeComboOdds, firedAtMs, supersedeAt);
+      oddsOverride = createJraOddsOverride({ cache: this.cache, raceId: row.race_id, oddsSince: firedAtMs });
+    }
     let race: RaceData;
     try {
       race = await scrapeRace(
         raceId,
-        { fetcher: this.closeFetcher(venueKind === "nar" ? narOddsPageUrl(raceId) : "", comboWindow), now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL },
+        {
+          fetcher: this.closeFetcher(venueKind === "nar" ? narOddsPageUrl(raceId) : "", comboWindow),
+          now: () => new Date(this.now()),
+          ttl: CACHE_ONLY_TTL,
+          ...(oddsOverride === undefined ? {} : { oddsOverride }),
+        },
         // 騎手の成績は要らない(オッズだけを取り直す)。組合せは分析時の設定(スナップショット)と同じ。地方三連単の段階取得(`deferNarTrifecta`)は使わない(部分的な取り直しは、軸ごとのページもキャッシュから読む)。
         { includeComboOdds: input.allocationSettings.includeComboOdds, includeJockeyStats: false, bypassOddsCache: true },
       );
@@ -313,7 +380,14 @@ export class CloseStage {
       if (recomputed.allocation.meta.route === "invalid") {
         return failed("compute-failed");
       }
-      return result({ ...base, status: "ok", reason: null, oddsOfficialDatetime: race.odds.officialDatetime, allocation: recomputed.allocation });
+      return result({
+        ...base,
+        status: "ok",
+        reason: null,
+        oddsOfficialDatetime: race.odds.officialDatetime,
+        allocation: recomputed.allocation,
+        ...(race.meta.oddsSources === undefined ? {} : { oddsSources: race.meta.oddsSources }),
+      });
     } catch {
       return failed("compute-failed");
     }
