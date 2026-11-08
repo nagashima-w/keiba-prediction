@@ -488,8 +488,10 @@ def run_prep(table_path, out_dir):
         if base_ds is None:
             base_ds = ds if lab == "1k" else None
         sens[lab] = {"k": kk, "sd_D": sd(ds), "ds": ds}
+    ref = sens["1k"]["ds"]
     for lab in sens:
-        sens[lab]["corr_with_1k"] = corr(sens[lab]["ds"], sens["1k"]["ds"])
+        sens[lab]["corr_with_1k"] = corr(sens[lab]["ds"], ref)
+    for lab in sens:
         del sens[lab]["ds"]
     sdd_all = sorted(ridge2([(e[0], e[1]) for e in horse_ents(h, res)], k)[2] for r in ex for h in r["horses"])
     out = {
