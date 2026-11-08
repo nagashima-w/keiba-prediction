@@ -71,12 +71,13 @@ function assertRaceDate(raceDate: string): void {
  * 頁の見出し(`div.cell.time > strong`)から発売状態と時刻を読む。
  * 「発走時刻」の `div.cell.time` も同じクラスを持つため、本文が「現在オッズ」「最終オッズ」の `strong` だけを見る。
  * 見つからなければ null。
+ * `raceDate` が null のときは日付が分からないので、発売中の頁の `officialDatetime` は null にする(状態だけを読みたいとき)。
  */
 export function parseJraOddsHeader(
   $: CheerioAPI,
-  raceDate: string,
+  raceDate: string | null,
 ): JraOddsHeader | null {
-  assertRaceDate(raceDate);
+  if (raceDate !== null) assertRaceDate(raceDate);
   let found: JraOddsHeader | null = null;
   $("div.cell.time strong").each((_, el) => {
     if (found !== null) return;
@@ -89,7 +90,7 @@ export function parseJraOddsHeader(
     if (m !== null) {
       const hh = String(Number(m[1])).padStart(2, "0");
       const mm = String(Number(m[2])).padStart(2, "0");
-      found = { oddsStatus: "middle", officialDatetime: `${raceDate} ${hh}:${mm}:00` };
+      found = { oddsStatus: "middle", officialDatetime: raceDate === null ? null : `${raceDate} ${hh}:${mm}:00` };
     }
   });
   return found;
@@ -231,8 +232,28 @@ function wakubanOfCaption(caption: ReturnType<CheerioAPI>): number | null {
  *   `ComboOddsParseError` で throw する。
  */
 export function parseJraComboOdds(html: string, betType: ComboBetType): ComboOddsParseResult {
+  return parseJraComboOddsWithHeader(html, betType, null).result;
+}
+
+/** 組合せの頁のパース結果と、頁の見出し(発売状態と時刻。読めなければ null)。 */
+export interface JraComboOddsWithHeader {
+  readonly result: ComboOddsParseResult;
+  readonly header: JraOddsHeader | null;
+}
+
+/**
+ * `parseJraComboOdds` と同じパースに、頁の見出し(発売状態・時刻)を添えて返す(Issue #673 段階 A)。
+ * 取り込み側が頁の時刻を記録するために使う(見出しを読むためだけに頁を二度読み込まない)。
+ * `raceDate`(`YYYY-MM-DD`)を渡すと、発売中の頁の `header.officialDatetime` が `YYYY-MM-DD HH:MM:00` になる。null なら null。
+ * パースの結果(`result`)は `raceDate` に依らない。
+ */
+export function parseJraComboOddsWithHeader(html: string, betType: ComboBetType, raceDate: string | null): JraComboOddsWithHeader {
   const $ = cheerio.load(html);
-  const header = parseJraOddsHeader($, "1970-01-01");
+  const header = parseJraOddsHeader($, raceDate);
+  return { result: parseComboTables($, betType, header), header };
+}
+
+function parseComboTables($: CheerioAPI, betType: ComboBetType, header: JraOddsHeader | null): ComboOddsParseResult {
   if (header === null) return comboUnavailable(null, "header");
   const selector = COMBO_TABLE_SELECTOR[betType];
   const tables = $(selector);
@@ -312,9 +333,9 @@ function headNumbers(
   return n === null ? null : [n];
 }
 
-/** 空きのセル(`&nbsp;` だけ)か。票数なし(`td.zero`)は空きではない。 */
+/** 空きのセル(`&nbsp;` だけ。本文が空)か。票数なし(`td.zero`)は本文が「票数なし」なので空きではない。 */
 function isEmptyCell($: CheerioAPI, td: ReturnType<CheerioAPI>): boolean {
-  return !td.hasClass("zero") && cellText($, td) === "";
+  return cellText($, td) === "";
 }
 
 /** セルの値。ワイドは幅、それ以外は単一値。票数なし・非数値は null。 */

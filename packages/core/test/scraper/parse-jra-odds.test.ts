@@ -11,7 +11,7 @@ import {
   toComboOddsScalarMap,
   type ComboBetType,
 } from "../../src/scraper/combo-odds-key.js";
-import { parseJraComboOdds, parseJraWinPlaceOdds } from "../../src/scraper/parse-jra-odds.js";
+import { parseJraComboOdds, parseJraComboOddsWithHeader, parseJraWinPlaceOdds } from "../../src/scraper/parse-jra-odds.js";
 import type { OddsSnapshot } from "../../src/scraper/types.js";
 import { loadShiftJisFixture } from "../support/fixtures.js";
 
@@ -260,7 +260,7 @@ describe("parseJraComboOdds(3連複・3連単)", () => {
     for (const key of m.keys()) expect(parseComboOddsKey(key)![0]).toBe(1);
   });
 
-  it("3連単: 確定後は 2184 組(票数なし 0。99999.9 の 1 組だけ仮の値として null)、発売中は票数なし 83 組を null で残して 2184 組", () => {
+  it("3連単: 確定後は 2184 組(票数なし 0。999999.9 の 1 組だけ仮の値として null)、発売中は票数なし 83 組を null で残して 2184 組", () => {
     const fin = comboOf("jra_odds_sanrentan_final_202605050208.html", "trifecta");
     expect(fin.size).toBe(2184);
     expect(loadShiftJisFixture("jra_odds_sanrentan_final_202605050208.html")).not.toContain("票数なし</td>");
@@ -318,5 +318,37 @@ describe("parseJraComboOdds(構造の壊れ・計時)", () => {
     const ms = performance.now() - t0;
     expect(r.state).toBe("available");
     console.error(`[計時] 3連単 ${html.length} 文字を parseJraComboOdds: ${ms.toFixed(0)}ms`);
+  });
+});
+
+describe("parseJraComboOddsWithHeader(頁の見出しを添える。Issue #673 段階 A)", () => {
+  const cases = [
+    ["jra_odds_wakuren_202605050208.html", "bracketQuinella"],
+    ["jra_odds_umaren_202605050208.html", "quinella"],
+    ["jra_odds_wide_202605050208.html", "wide"],
+    ["jra_odds_umatan_202605050208.html", "exacta"],
+    ["jra_odds_sanrenpuku_202605050208.html", "trio"],
+    ["jra_odds_sanrentan_202605050208.html", "trifecta"],
+  ] as const;
+
+  it.each(cases)("%s: 見出しは発売中・10:37。結果は parseJraComboOdds と同じ", (file, betType) => {
+    const html = loadShiftJisFixture(file);
+    const withHeader = parseJraComboOddsWithHeader(html, betType, RACE_DATE);
+    expect(withHeader.header).toEqual({ oddsStatus: "middle", officialDatetime: "2026-11-08 10:37:00" });
+    expect(withHeader.result.state).toBe("available");
+    expect(withHeader.result).toEqual(parseJraComboOdds(html, betType));
+  });
+
+  it("確定後の頁は result・時刻 null。raceDate が null なら発売中の時刻も null(結果は変わらない)", () => {
+    const fin = parseJraComboOddsWithHeader(loadShiftJisFixture("jra_odds_umaren_final_202605050208.html"), "quinella", RACE_DATE);
+    expect(fin.header).toEqual({ oddsStatus: "result", officialDatetime: null });
+    const noDate = parseJraComboOddsWithHeader(loadShiftJisFixture("jra_odds_umaren_202605050208.html"), "quinella", null);
+    expect(noDate.header).toEqual({ oddsStatus: "middle", officialDatetime: null });
+  });
+
+  it("見出しの無い頁は header が null で unavailable", () => {
+    const r = parseJraComboOddsWithHeader("<html><body></body></html>", "wide", RACE_DATE);
+    expect(r.header).toBeNull();
+    expect(r.result.state).toBe("unavailable");
   });
 });

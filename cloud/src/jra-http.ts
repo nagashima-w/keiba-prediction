@@ -17,6 +17,9 @@ export const JRA_ACCESS_BODY = "CNAME=pw01iwtS3/CD";
 /** 出馬表(開催の選択・レースの選択・詳細。Issue #639)の入口。`jra-entries-fetch.ts` だけが使う。 */
 export const JRA_ACCESS_D_URL = "https://www.jra.go.jp/JRADB/accessD.html";
 
+/** オッズ(開催の選択・レースの選択・各式別の頁。Issue #673)の入口。`jra-odds-fetch.ts` だけが使う。 */
+export const JRA_ACCESS_O_URL = "https://www.jra.go.jp/JRADB/accessO.html";
+
 /** コースの情報のページの URL。1 は `index.html`、2 以降は `index2.html`・`index3.html`。 */
 export const jraCourseUrl = (n: number): string => `https://www.jra.go.jp/keiba/baba/index${n <= 1 ? "" : String(n)}.html`;
 
@@ -29,6 +32,12 @@ export const JRA_MAX_BODY_BYTES = 256 * 1024;
  * {@link JRA_MAX_BODY_BYTES} のすぐ手前。最大の頭数(18 頭)でこの大きさなので、4 倍の 1MB を上限にする。**詳細ページの取得だけ**が `fetchOne` の引数で渡す(馬場の取得・確認口の既定は変えない)。
  */
 export const JRA_ENTRY_MAX_BODY_BYTES = 1024 * 1024;
+/**
+ * オッズの頁の本文の上限(バイト。Issue #673)。3連単は 14 頭で約 509KB(509,291 バイト)、18 頭は約 1.1MB の見積もり(`docs/jra-odds-investigation.md` §4.7)で、
+ * 約 2 倍の 2MiB にする(取得キャッシュの 1 行の上限と同じ値)。超えたら `too-large`(呼び出し側がその式別だけ netkeiba のままにする)。
+ * **オッズの取得だけ**が `fetchOne` の引数で渡す(馬場・出馬表の上限は変えない)。
+ */
+export const JRA_ODDS_MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** 本のあいだの待ち(ミリ秒)。JRA への取得は 1.5 秒以上あける(#477 の承認の範囲)。 */
 export const JRA_GAP_MS = 1_500;
 
