@@ -15,10 +15,11 @@ import os
 import pickle
 import sys
 
-import common688 as K
-import evaluate as V
-import features as Fe
-import fit as Fi
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common688 as K  # noqa: E402
+import evaluate as V  # noqa: E402
+import features as Fe  # noqa: E402
+import fit as Fi  # noqa: E402
 
 PREP_PATH = os.path.join(K.HERE, "..", "..", "docs", "investigations", "pace-fit-687", "prep-results.json")
 _G = {}
