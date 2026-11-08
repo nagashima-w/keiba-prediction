@@ -22,15 +22,25 @@
  */
 
 import type { CachedFetchTextOptions } from "./cached-fetcher.js";
-import { toComboOddsScalarMap, type ComboBetType } from "./combo-odds-key.js";
+import { toComboOddsScalarMap, type ComboBetType, type ComboOddsCell } from "./combo-odds-key.js";
 import { fetchNewspaperConditions, newspaperCacheKey } from "./fetch-newspaper.js";
 import {
+  expectedBracketQuinellaComboCount,
+  expectedCountForUmabans,
   fetchBracketQuinellaOdds,
   fetchComboOdds,
   type ComboOddsFetchDiagnostics,
   type ComboOddsFetchResult,
   type ComboOddsFetchState,
 } from "./fetch-combo-odds.js";
+import {
+  comboMatchesRunners,
+  winPlaceMatchesRunners,
+  type OddsFallbackReason,
+  type OddsOverride,
+  type OddsSourceKind,
+  type OddsSourcesMeta,
+} from "./odds-override.js";
 import type { HorseId, KaisaiDate, RaceId } from "./ids.js";
 import { parseJockeyId, parseTrainerId, venueKindOfRaceId } from "./ids.js";
 import type { JockeyResultsStore } from "./jockey-results-store.js";
@@ -190,6 +200,8 @@ export interface RaceFetcher {
   fetchText(url: string, options?: CachedFetchTextOptions): Promise<string>;
 }
 
+export type { OddsOverride, OddsOverrideCombo, OddsSourcesMeta, OddsSourceRecord, OddsSourceKind, OddsSourceName, OddsFallbackReason } from "./odds-override.js";
+
 /** scrapeRace / listRaces に注入する依存。 */
 export interface ScrapeDeps {
   /** キャッシュ付きフェッチャ(通常は CachedFetcher)。 */
@@ -210,6 +222,12 @@ export interface ScrapeDeps {
    * 読み書きの失敗は投げずに警告にして取得へフォールバックする。省略時は保存先なしで、毎回取得する。
    */
   readonly trainerStore?: TrainerResultsStore;
+  /**
+   * 中央のオッズ(単勝・複勝と、`includeComboOdds` のときの組合せ)を別の取得元に差し替える差し込み口(Issue #673 段階 B。`odds-override.ts`)。
+   * **未指定なら発行する URL 列も戻り値の形も従来のまま**(`meta.oddsSources` のキーも付かない)。指定すると、中央のレースだけ、券種ごとに先に問い合わせ、
+   * 値が返り出走馬と食い違わなければ採用して netkeiba へは取りに行かない。返らない・例外・食い違いのときはその券種だけ netkeiba に戻し、理由を `meta.oddsSources` に残す。地方は対象外。
+   */
+  readonly oddsOverride?: OddsOverride;
 }
 
 /** scrapeRace の呼び出しオプション。 */
@@ -385,6 +403,12 @@ export interface RaceDataMeta {
    * 逐次表示は #49 へ分離した。`onProgress`コールバックは現状持たない。
    */
   readonly comboOdds?: ComboOddsScrapeOutcome;
+  /**
+   * オッズの取得元(券種ごと)と、そのオッズの時刻(Issue #673 段階 B)。`deps.oddsOverride` を渡し、中央のレースを取ったときだけ付く
+   * (未指定・地方ではキー自体が無い)。問い合わせた単位だけが入る(`includeComboOdds` が false なら `winPlace` だけ)。
+   * 差し込みを採用すれば `source:"jra"`、netkeiba に戻せば `source:"netkeiba"` と理由(`fallbackReason`)。
+   */
+  readonly oddsSources?: OddsSourcesMeta;
   /**
    * 出馬表に取消・除外の印が付いていたため、出走馬(`RaceData.horses`)から除いた馬
    * (Issue #154)。**除いた馬がいるときだけ設定される**(いなければキー自体が無い。取消の
@@ -689,6 +713,46 @@ async function fetchBracketQuinellaOutcome(
   );
 }
 
+/** 差し込みに問い合わせた結果。 */
+type OverrideAsk<T> = { readonly kind: "used"; readonly value: T } | { readonly kind: "fallback"; readonly reason: OddsFallbackReason };
+
+/**
+ * 差し込みに 1 回問い合わせる。null は `override-unavailable`、例外は `override-error`(握る=取得全体を落とさない)、
+ * 値が出走馬と食い違えば `horse-set-mismatch`。いずれも呼び出し側は netkeiba に戻す。
+ */
+async function askOverride<T>(ask: () => Promise<T | null>, accepts: (value: T) => boolean): Promise<OverrideAsk<T>> {
+  let value: T | null;
+  try {
+    value = await ask();
+  } catch {
+    return { kind: "fallback", reason: "override-error" };
+  }
+  if (value === null) {
+    return { kind: "fallback", reason: "override-unavailable" };
+  }
+  return accepts(value) ? { kind: "used", value } : { kind: "fallback", reason: "horse-set-mismatch" };
+}
+
+/** 差し込みの組合せを、netkeiba の取得結果と同じ形(`ComboOddsFetchResult`)にする。取得は差し込み側が行ったので、リクエスト数は 0。 */
+function overrideComboResult(betType: ComboBetType, odds: ReadonlyMap<string, ComboOddsCell>, expectedCount: number): ComboOddsFetchResult {
+  return {
+    state: "available",
+    odds,
+    diagnostics: {
+      betType,
+      requestCount: 0,
+      expectedComboCount: expectedCount,
+      obtainedComboCount: odds.size,
+      missingComboCount: Math.max(0, expectedCount - odds.size),
+      axisUmabans: [],
+      attempts: [{ axis: null, state: "available", comboCount: odds.size }],
+      numericConflictCount: 0,
+      nullWinConflictCount: 0,
+      conflictSamples: [],
+    },
+  };
+}
+
 /** 組合せオッズ1券種分の取得結果(`OddsSnapshot`用のRecordと、診断値の要約)。 */
 interface ComboOddsBetTypeResult {
   readonly record: Record<string, number | null>;
@@ -857,13 +921,32 @@ export async function scrapeRace(
     maxAgeMs: ttl.oddsMs,
     bypassCache: options.bypassOddsCache ?? false,
   };
-  const baseOdds = isNar
-    ? parseNarOdds(
-        await fetcher.fetchText(narOddsPageUrl(raceId), oddsFetchOptions),
-      )
-    : parseOdds(
-        await fetcher.fetchText(oddsApiUrl(raceId), oddsFetchOptions),
-      );
+  // 差し込み(Issue #673 段階 B): 中央で `deps.oddsOverride` があるときだけ、券種ごとに先に問い合わせる。無ければ以降はすべて従来どおり。
+  const override = !isNar ? deps.oddsOverride : undefined;
+  const oddsSources: Partial<Record<OddsSourceKind, OddsSourcesMeta[OddsSourceKind]>> = {};
+  const runnerUmabans = shutuba.horses.map((h) => h.umaban);
+  let overriddenOdds: OddsSnapshot | null = null;
+  if (override?.winPlace !== undefined) {
+    const asked = await askOverride(() => override.winPlace!(), (snapshot) => winPlaceMatchesRunners(snapshot, runnerUmabans));
+    if (asked.kind === "used") {
+      overriddenOdds = asked.value;
+      oddsSources.winPlace = { source: override.source, officialDatetime: asked.value.officialDatetime };
+    } else {
+      oddsSources.winPlace = { source: "netkeiba", officialDatetime: null, fallbackReason: asked.reason };
+    }
+  }
+  const baseOdds =
+    overriddenOdds ??
+    (isNar
+      ? parseNarOdds(
+          await fetcher.fetchText(narOddsPageUrl(raceId), oddsFetchOptions),
+        )
+      : parseOdds(
+          await fetcher.fetchText(oddsApiUrl(raceId), oddsFetchOptions),
+        ));
+  if (oddsSources.winPlace?.source === "netkeiba") {
+    oddsSources.winPlace = { ...oddsSources.winPlace, officialDatetime: baseOdds.officialDatetime };
+  }
   // オッズ取得直後の時刻。着手時刻(fetchedAt)とは別に記録する。
   // 組合せオッズ(下記(5))はこの後に取得するが、既存の意味(「単勝・複勝オッズ取得直後」)を
   // 変えないため、(5)より前のこの位置で確定させる(オプトインしない既定呼び出しでは
@@ -909,58 +992,49 @@ export async function scrapeRace(
     const startingUmabans = shutuba.horses.map((h) => h.umaban);
     // TTL/bypassCacheは単勝・複勝オッズと同じ揮発性のデータとして扱い、専用のカテゴリは
     // 設けない(oddsFetchOptionsをそのまま流用する。デザイン判断)。
-    const wideOutcome = await fetchComboBetTypeOdds(
-      "wide",
-      raceId,
-      startingUmabans,
-      fetcher,
-      oddsFetchOptions,
-      warnings,
-    );
-    const trioOutcome = await fetchComboBetTypeOdds(
-      "trio",
-      raceId,
-      startingUmabans,
-      fetcher,
-      oddsFetchOptions,
-      warnings,
-    );
-    const quinellaOutcome = await fetchComboBetTypeOdds(
-      "quinella",
-      raceId,
-      startingUmabans,
-      fetcher,
-      oddsFetchOptions,
-      warnings,
-    );
-    const exactaOutcome = await fetchComboBetTypeOdds(
-      "exacta",
-      raceId,
-      startingUmabans,
-      fetcher,
-      oddsFetchOptions,
-      warnings,
-    );
+    // 差し込みがあれば、券種ごとに先に問い合わせ、採用できなければその券種だけ従来の取得に戻る(`comboWithOverride`)。
+    const runnerSet: ReadonlySet<number> = new Set(startingUmabans);
+    const comboWithOverride = async (
+      betType: ComboBetType,
+      validNumbers: ReadonlySet<number>,
+      expectedCount: number,
+      viaNetkeiba: () => Promise<ComboOddsBetTypeResult | undefined>,
+    ): Promise<ComboOddsBetTypeResult | undefined> => {
+      if (override?.combo === undefined) {
+        return viaNetkeiba();
+      }
+      const asked = await askOverride(
+        () => override.combo!(betType),
+        (value) => comboMatchesRunners(value.odds, validNumbers, expectedCount),
+      );
+      if (asked.kind === "used") {
+        oddsSources[betType] = { source: override.source, officialDatetime: asked.value.officialDatetime };
+        return runComboBetTypeFetch(betType, async () => overrideComboResult(betType, asked.value.odds, expectedCount), warnings);
+      }
+      oddsSources[betType] = { source: "netkeiba", officialDatetime: null, fallbackReason: asked.reason };
+      return viaNetkeiba();
+    };
+    const umabanCombo = (betType: ComboBetType) =>
+      comboWithOverride(betType, runnerSet, expectedCountForUmabans(betType, startingUmabans), () =>
+        fetchComboBetTypeOdds(betType, raceId, startingUmabans, fetcher, oddsFetchOptions, warnings),
+      );
+    const wideOutcome = await umabanCombo("wide");
+    const trioOutcome = await umabanCombo("trio");
+    const quinellaOutcome = await umabanCombo("quinella");
+    const exactaOutcome = await umabanCombo("exacta");
     // 三連単: 中央は1リクエスト、地方は軸(1着固定)ごとに頭数分(Issue #283。旧: 地方は取得しない)。
     // 地方で`deferNarTrifecta`のときだけ取得しない(リクエストも警告も発生しない。上記コメント参照)。
     const trifectaOutcome =
       isNar && options.deferNarTrifecta === true
         ? undefined
-        : await fetchComboBetTypeOdds(
-            "trifecta",
-            raceId,
-            startingUmabans,
-            fetcher,
-            oddsFetchOptions,
-            warnings,
-          );
+        : await umabanCombo("trifecta");
     // 枠連(Issue #148・#26-E2): 中央・地方とも取得する。最後(三連単の後)に発行する。
-    const bracketQuinellaOutcome = await fetchBracketQuinellaOutcome(
-      raceId,
-      shutuba.horses.map((h) => h.wakuban),
-      fetcher,
-      oddsFetchOptions,
-      warnings,
+    const wakubans = shutuba.horses.map((h) => h.wakuban);
+    const bracketQuinellaOutcome = await comboWithOverride(
+      "bracketQuinella",
+      new Set([1, 2, 3, 4, 5, 6, 7, 8]),
+      expectedBracketQuinellaComboCount(wakubans),
+      () => fetchBracketQuinellaOutcome(raceId, wakubans, fetcher, oddsFetchOptions, warnings),
     );
     wideCombo = wideOutcome?.record;
     trioCombo = trioOutcome?.record;
@@ -1091,6 +1165,7 @@ export async function scrapeRace(
       oddsFetchedAt,
       warnings,
       comboOdds,
+      ...(override !== undefined ? { oddsSources } : {}),
       ...(scratchedHorses.length > 0 ? { scratched: scratchedHorses } : {}),
     },
     ...(jockeyStats !== undefined ? { jockeyStats } : {}),
