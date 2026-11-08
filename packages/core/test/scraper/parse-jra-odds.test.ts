@@ -4,7 +4,14 @@
  * 実サイトへのリクエストは含まない。
  */
 import { describe, expect, it } from "vitest";
-import { parseJraWinPlaceOdds } from "../../src/scraper/parse-jra-odds.js";
+import {
+  buildComboOddsKey,
+  buildOrderedComboOddsKey,
+  parseComboOddsKey,
+  toComboOddsScalarMap,
+  type ComboBetType,
+} from "../../src/scraper/combo-odds-key.js";
+import { parseJraComboOdds, parseJraWinPlaceOdds } from "../../src/scraper/parse-jra-odds.js";
 import type { OddsSnapshot } from "../../src/scraper/types.js";
 import { loadShiftJisFixture } from "../support/fixtures.js";
 
@@ -108,5 +115,108 @@ describe("parseJraWinPlaceOdds(読めなかった頁)", () => {
     expect(() =>
       parseJraWinPlaceOdds(loadShiftJisFixture("jra_odds_tanpuku_202605050208.html"), "11/8"),
     ).toThrow();
+  });
+});
+
+/** available を前提として先に固定し、組のMapを取り出す(空振り防止)。 */
+function comboOf(file: string, betType: ComboBetType) {
+  const result = parseJraComboOdds(loadShiftJisFixture(file), betType);
+  expect(result.state).toBe("available");
+  if (result.state !== "available") throw new Error("unreachable");
+  return result.odds;
+}
+
+describe("parseJraComboOdds(2要素の券種: 組の数・代表値。発売中と確定後)", () => {
+  // 組の数は fixtures の HTML から別手段(python の正規表現)で数えた値。枠連は 8 枠の 36 組から、同枠が空の 2 組を引いた 34。
+  it.each([
+    ["bracketQuinella", "wakuren", 34],
+    ["quinella", "umaren", 91],
+    ["wide", "wide", 91],
+    ["exacta", "umatan", 182],
+  ] as const)("%s: 発売中・確定後とも %i 組", (betType, name, count) => {
+    for (const file of [`jra_odds_${name}_202605050208.html`, `jra_odds_${name}_final_202605050208.html`]) {
+      expect(comboOf(file, betType).size, file).toBe(count);
+    }
+  });
+
+  it("馬連: 1-2 は発売中 137.5・確定 237.0、13-14 は 344.4・299.3。人気は null", () => {
+    const a = comboOf("jra_odds_umaren_202605050208.html", "quinella");
+    const b = comboOf("jra_odds_umaren_final_202605050208.html", "quinella");
+    expect(a.get(buildComboOddsKey([1, 2]))).toEqual({ oddsMin: 137.5, oddsMax: null, ninki: null });
+    expect(b.get(buildComboOddsKey([1, 2]))?.oddsMin).toBe(237.0);
+    expect(a.get(buildComboOddsKey([13, 14]))?.oddsMin).toBe(344.4);
+    expect(b.get(buildComboOddsKey([13, 14]))?.oddsMin).toBe(299.3);
+  });
+
+  it("ワイド: 幅を oddsMin / oddsMax に分ける(1-2 は 32.6-35.2、確定 51.9-56.6)", () => {
+    const a = comboOf("jra_odds_wide_202605050208.html", "wide");
+    const b = comboOf("jra_odds_wide_final_202605050208.html", "wide");
+    expect(a.get(buildComboOddsKey([1, 2]))).toEqual({ oddsMin: 32.6, oddsMax: 35.2, ninki: null });
+    expect(b.get(buildComboOddsKey([1, 2]))).toEqual({ oddsMin: 51.9, oddsMax: 56.6, ninki: null });
+    expect(a.get(buildComboOddsKey([13, 14]))).toMatchObject({ oddsMin: 51.2, oddsMax: 53.4 });
+  });
+
+  it("馬連・ワイドは oddsMax が単一値の券種では null(馬連)、幅の券種では下限以上(ワイド)", () => {
+    const wide = comboOf("jra_odds_wide_202605050208.html", "wide");
+    expect(wide.size).toBe(91);
+    for (const [key, cell] of wide) {
+      expect(cell.oddsMin, key).not.toBeNull();
+      expect(cell.oddsMax as number, key).toBeGreaterThanOrEqual(cell.oddsMin as number);
+    }
+    const q = comboOf("jra_odds_umaren_202605050208.html", "quinella");
+    for (const cell of q.values()) expect(cell.oddsMax).toBeNull();
+  });
+
+  it("馬単: 順序付きキーで 1 桁目が 1 着(1→2 は 485.1、2→1 は 246.2 で別の値)。自分自身との組は作らない", () => {
+    const a = comboOf("jra_odds_umatan_202605050208.html", "exacta");
+    expect(a.get(buildOrderedComboOddsKey([1, 2]))?.oddsMin).toBe(485.1);
+    expect(a.get(buildOrderedComboOddsKey([2, 1]))?.oddsMin).toBe(246.2);
+    expect(a.get(buildOrderedComboOddsKey([14, 13]))?.oddsMin).toBe(970.3);
+    expect(a.has(buildOrderedComboOddsKey([1, 1]))).toBe(false);
+    expect(a.has("0101")).toBe(false);
+    // 逆順の組が潰れていない(1→2 と 2→1 の両方が存在する)ことを組の数でも固定する
+    expect(a.size).toBe(14 * 13);
+  });
+
+  it("枠連: 枠番のキー。同枠(1-1、2-2)は空きなのでキーを作らず、同枠でも値のある組(3-3 など)は残る", () => {
+    const a = comboOf("jra_odds_wakuren_202605050208.html", "bracketQuinella");
+    expect(a.get(buildComboOddsKey([1, 2]))?.oddsMin).toBe(73.4);
+    expect(a.get(buildComboOddsKey([2, 3]))?.oddsMin).toBe(56.3);
+    expect(a.has("0101")).toBe(false);
+    expect(a.has("0202")).toBe(false);
+    expect(a.has("0303")).toBe(true); // 枠 3 は 2 頭: 同枠の組が実在する
+    expect(a.has("0102")).toBe(true);
+  });
+
+  it("確定後の頁の発売票数の表(div#votes)が組に混ざらない: 組の数が発売中と同じ", () => {
+    const html = loadShiftJisFixture("jra_odds_umaren_final_202605050208.html");
+    expect(html).toContain('id="votes"'); // 前提: 確定後の頁には発売票数の表がある
+    expect(comboOf("jra_odds_umaren_final_202605050208.html", "quinella").size).toBe(91);
+  });
+
+  it("消費者への通し: toComboOddsScalarMap の値が下限、全キーが parseComboOddsKey で戻せる", () => {
+    const wide = comboOf("jra_odds_wide_202605050208.html", "wide");
+    const scalar = toComboOddsScalarMap(wide);
+    expect(scalar.get("0102")).toBe(32.6);
+    for (const key of wide.keys()) {
+      const back = parseComboOddsKey(key);
+      expect(back, key).not.toBeNull();
+      expect(back).toHaveLength(2);
+    }
+  });
+});
+
+describe("parseJraComboOdds(読めなかった頁)", () => {
+  it.each([
+    ["空文字", ""],
+    ["開催選択", loadShiftJisFixture("jra_odds_oli_20261108.html")],
+    ["単勝・複勝の頁(組合せの表が無い)", loadShiftJisFixture("jra_odds_tanpuku_202605050208.html")],
+  ])("%s は unavailable(throw しない)", (_n, html) => {
+    expect(parseJraComboOdds(html, "quinella").state).toBe("unavailable");
+  });
+
+  it("券種と頁が食い違う(馬連の頁を馬単として読む)と unavailable", () => {
+    const html = loadShiftJisFixture("jra_odds_umaren_202605050208.html");
+    expect(parseJraComboOdds(html, "exacta").state).toBe("unavailable");
   });
 });

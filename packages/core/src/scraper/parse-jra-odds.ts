@@ -21,6 +21,15 @@
 
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
+import {
+  buildComboOddsCellMapFor,
+  COMBO_SIZE,
+  ComboOddsKeyError,
+  validateComboUmabansFor,
+  type ComboBetType,
+  type ComboOddsEntry,
+} from "./combo-odds-key.js";
+import { ComboOddsParseError, toComboOddsNumber, type ComboOddsParseResult } from "./parse-combo-odds.js";
 import type { OddsSnapshot, PlaceOdds, WinOdds } from "./types.js";
 import { toNinki } from "./ninki.js";
 import { toOddsNumber } from "./odds-number.js";
@@ -175,4 +184,119 @@ export function parseJraWinPlaceOdds(html: string, raceDate: string): JraWinPlac
     state: "available",
     snapshot: { officialDatetime: header.officialDatetime, oddsStatus: header.oddsStatus, win, place },
   };
+}
+
+/** 券種 → JRA の頁で組を包む表のクラス(`docs/jra-odds-investigation.md` §4)。確定後の頁の発売票数の表(`div#votes`)を除くための絞り込み。 */
+const COMBO_TABLE_SELECTOR: Record<ComboBetType, string> = {
+  bracketQuinella: "table.waku",
+  quinella: "table.umaren",
+  wide: "table.wide",
+  exacta: "table.umatan",
+  trio: "table.fuku3",
+  trifecta: "table.tan3",
+};
+
+function comboUnavailable(rawStatus: string | null, missingKey: string | null): ComboOddsParseResult {
+  return { state: "unavailable", reason: { rawStatus, rawReason: null, missingKey } };
+}
+
+/** 整数だけの文字列を数値化する。それ以外は null。 */
+function toInt(text: string): number | null {
+  return /^[0-9]+$/.test(text) ? Number(text) : null;
+}
+
+/** 枠連の caption(`<img alt="枠1白">`、クラス `waku1`)から枠番を読む。 */
+function wakubanOfCaption(caption: ReturnType<CheerioAPI>): number | null {
+  const cls = /\bwaku([1-8])\b/.exec(caption.attr("class") ?? "");
+  if (cls !== null) return Number(cls[1]);
+  const alt = /^枠([1-8])/.exec(caption.find("img").first().attr("alt") ?? "");
+  return alt !== null ? Number(alt[1]) : null;
+}
+
+/**
+ * JRA の組合せオッズの頁(枠連・馬連・ワイド・馬単・3連複・3連単)をパースする。
+ * 戻り値・キー形式は `parseComboOdds`(netkeiba)と同じ。
+ *
+ * - 表のクラスで絞る(`COMBO_TABLE_SELECTOR`)。確定後の頁の発売票数の表は混ざらない。
+ * - 組の読み方: 馬連・ワイド=`caption`が若い馬番・`th`が大きい馬番、馬単=`caption`が1着・`th`が2着、
+ *   枠連=`caption`が若い枠・`th`が大きい枠(同枠も有効)。
+ * - ワイドの値は幅(`span.min` / `span.max`)で `oddsMin` / `oddsMax` に分ける。ほかの券種の `oddsMax` は null。
+ * - 人気は頁に無いので常に null。
+ * - **空きのセル(`&nbsp;`。自分自身との組・1頭だけの枠の同枠)は組が存在しないのでキーを作らない。**
+ *   **票数なし(`td.zero`)のセルは、netkeiba の「数値でない」セルと同じくキーを残して `oddsMin: null`** にする。
+ *   全セルが null なら `unavailable`(地方 `parseNarComboOdds` の「全セル0」と同じ扱い)。
+ * - 見出しが読めない・券種の表が無い・組が0件の頁は `unavailable`(throw しない)。馬番が範囲外などの構造の壊れは
+ *   `ComboOddsParseError` で throw する。
+ */
+export function parseJraComboOdds(html: string, betType: ComboBetType): ComboOddsParseResult {
+  const $ = cheerio.load(html);
+  const header = parseJraOddsHeader($, "1970-01-01");
+  if (header === null) return comboUnavailable(null, "header");
+  const selector = COMBO_TABLE_SELECTOR[betType];
+  const tables = $(selector);
+  if (tables.length === 0) return comboUnavailable(header.oddsStatus, selector);
+
+  const comboSize = COMBO_SIZE[betType];
+  const entries: ComboOddsEntry[] = [];
+  tables.each((_, table) => {
+    const caption = $(table).find("caption").first();
+    const head = headNumbers($, caption, betType);
+    if (head === null) {
+      throw new ComboOddsParseError(`caption を読めません(betType=${betType}, 値: "${cellText($, caption)}")`);
+    }
+    $(table)
+      .find("tr")
+      .each((__, tr) => {
+        const th = toInt(cellText($, $(tr).find("th").first()));
+        const td = $(tr).find("td").first();
+        if (th === null || td.length === 0) return;
+        if (isEmptyCell($, td)) return; // 組が存在しない
+        const umabans = [...head, th];
+        if (umabans.length !== comboSize) {
+          throw new ComboOddsParseError(`組の要素数が券種と一致しません(betType=${betType})`);
+        }
+        try {
+          validateComboUmabansFor(betType, umabans, comboSize);
+        } catch (e) {
+          if (e instanceof ComboOddsKeyError) throw new ComboOddsParseError(e.message);
+          throw e;
+        }
+        entries.push({ umabans, cell: cellOf($, td, betType) });
+      });
+  });
+
+  if (entries.length === 0 || entries.every((e) => e.cell.oddsMin === null)) {
+    return comboUnavailable(header.oddsStatus, null);
+  }
+  try {
+    return { state: "available", odds: buildComboOddsCellMapFor(betType, entries) };
+  } catch (e) {
+    if (e instanceof ComboOddsKeyError) throw new ComboOddsParseError(e.message);
+    throw e;
+  }
+}
+
+/** 表の caption が示す、組の先頭側の番号(`th` の前に付く要素)。読めなければ null。 */
+function headNumbers($: CheerioAPI, caption: ReturnType<CheerioAPI>, betType: ComboBetType): number[] | null {
+  if (betType === "bracketQuinella") {
+    const w = wakubanOfCaption(caption);
+    return w === null ? null : [w];
+  }
+  const n = toInt(cellText($, caption));
+  return n === null ? null : [n];
+}
+
+/** 空きのセル(`&nbsp;` だけ)か。票数なし(`td.zero`)は空きではない。 */
+function isEmptyCell($: CheerioAPI, td: ReturnType<CheerioAPI>): boolean {
+  return !td.hasClass("zero") && cellText($, td) === "";
+}
+
+/** セルの値。ワイドは幅、それ以外は単一値。票数なし・非数値は null。 */
+function cellOf($: CheerioAPI, td: ReturnType<CheerioAPI>, betType: ComboBetType): ComboOddsEntry["cell"] {
+  if (betType === "wide") {
+    const oddsMin = toComboOddsNumber(cellText($, td.find("span.min").first()));
+    const max = toComboOddsNumber(cellText($, td.find("span.max").first()));
+    return { oddsMin, oddsMax: max === 0 ? null : max, ninki: null };
+  }
+  return { oddsMin: toComboOddsNumber(cellText($, td)), oddsMax: null, ninki: null };
 }
