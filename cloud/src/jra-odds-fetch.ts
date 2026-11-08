@@ -19,17 +19,24 @@
  *
  * ## param-error の判定について
  * 符号が違うとき、`accessD` は HTTP 200 の「パラメータエラー」の頁(title)を返す。`accessO` で同じ頁が返るかは**未観測**のため、`accessD` と同じ判定
- * (`isParamErrorPage`)を使う。別の形のエラーなら、パーサ側が `unavailable`(見出しが読めない)にして netkeiba に戻る。
+ * を使う。別の形のエラーなら、パーサ側が `unavailable`(見出しが読めない)にして netkeiba に戻る。
  */
 import { parseJraOddsCname, parseJraOddsRaceListPage, parseJraOddsVenueListPage, type JraOddsPage, type JraOddsRaceLinks, type JraOddsVenueLink } from "../../packages/core/src/scraper/parse-jra-odds-index";
-import { isParamErrorPage } from "./jra-entries-parse";
-import type { JraPageFailure } from "./jra-entries-fetch";
-import { JRA_ACCESS_O_URL, JRA_GAP_MS, JRA_ODDS_MAX_BODY_BYTES, JRA_TIMEOUT_MS, decodeShiftJis, fetchOne, type JraFetchLike } from "./jra-http";
+import { JRA_ACCESS_O_URL, JRA_GAP_MS, JRA_ODDS_MAX_BODY_BYTES, JRA_TIMEOUT_MS, decodeShiftJis, fetchOne, type JraFailure, type JraFetchLike } from "./jra-http";
 
 /** 開催選択の本文(固定。調査記録 §2.1)。 */
 const OLI_BODY = "cname=pw15oli00/6D";
 
-/** 1 本の失敗の語。出馬表の取得口と同じ語に、指定の場・レースが開催選択・レース選択に無かった `not-found` を足す。 */
+/** 取得 1 本の失敗の語(出馬表の取得口〈`jra-entries-fetch.ts`〉と同じ語。出馬表の段への依存を作らないため、ここで定義する)。 */
+type JraPageFailure = JraFailure | `http-${number}` | "param-error" | "shape-mismatch";
+
+/** 符号が違うときに HTTP 200 で返る「パラメータエラー」の頁か(<title> で見る。`jra-entries-parse.ts` の同名の関数と同じ判定)。 */
+function isParamErrorPage(html: string): boolean {
+  const title = /<title>([^<]*)<\/title>/.exec(html);
+  return title !== null && title[1]!.includes("パラメータエラー");
+}
+
+/** 1 本の失敗の語。上に、指定の場・レースが開催選択・レース選択に無かった `not-found` を足す。 */
 export type JraOddsFailure = JraPageFailure | "not-found";
 export type JraOddsResult<T> = { readonly status: "ok"; readonly value: T } | { readonly status: JraOddsFailure };
 
