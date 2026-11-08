@@ -108,6 +108,21 @@ describe("shrinkTowardMarket(寄せる)", () => {
     FIELD.forEach((h, i) => expect(out.get(h.umaban)).toBeCloseTo(sigmoid(z[i]! + (lo + hi) / 2), 9));
   });
 
+  it("w を 0・0.3・0.5・0.8・1 と動かすと、モデルの確率 p からの L1 距離が単調に減る(w=1 は 0)。馬ごとに『間に入る』は共通のずらしのため成り立たないので、距離で固定する", () => {
+    const ws = [0, 0.3, 0.5, 0.8, 1] as const;
+    const l1 = ws.map((w) => {
+      const out = shrinkTowardMarket(FIELD, w);
+      return FIELD.reduce((a, h) => a + Math.abs(out.get(h.umaban)! - h.p), 0);
+    });
+    // 前提: w=0 の距離は 0 でなく(退化しない)、隣り合う w の距離は互いに 0.01 以上離れている(自明な等号で通らない)
+    expect(l1[0]!).toBeGreaterThan(0.5);
+    for (let i = 1; i < l1.length; i++) expect(l1[i - 1]! - l1[i]!).toBeGreaterThan(0.01);
+    // w=1 は『寄せない』と一致(距離 0)
+    expect(l1[4]!).toBe(0);
+    // 向きの取り違え(w と 1−w の入れ替え)は、w=0.3 と 0.8 の距離の大小が逆転して赤になる
+    expect(l1[1]!).toBeGreaterThan(l1[3]!);
+  });
+
   it("一部の馬だけオッズが無い: その馬は混ぜず(m=p)、ほかは寄せ、全体を合計 3 に合わせる", () => {
     const horses: ShrinkHorse[] = FIELD.map((h) => (h.umaban === 2 ? { ...h, winOdds: null } : h));
     const out = shrinkTowardMarket(horses, 0.5);

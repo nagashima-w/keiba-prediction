@@ -674,17 +674,24 @@ describe("wrangler.toml", () => {
   });
 
   it("設定値(チーム名・AUD・メール)を [vars] に置かず、secrets.required も使わない(未設定は Worker が 403 で受ける)", () => {
-    // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
+    // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つと、#642 の 1 晩の上限(Issue #669)の 4 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
     const varsBody = /^\[vars\]\n((?:[^\[\n][^\n]*\n|\n)*)/m.exec(tomlCode)?.[1] ?? "";
     const varKeys = [...varsBody.matchAll(/^([A-Z_]+)\s*=/gm)].map((m) => m[1]);
-    expect(varKeys.sort()).toEqual(["RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN"]);
+    expect(varKeys.sort()).toEqual(["RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]);
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);
     expect(tomlCode).not.toMatch(/^\[secrets\]/m);
     expect(tomlCode).not.toMatch(/keep_vars/);
   });
 
-  it("Issue #655: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 5000 ミリ秒。止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む)は変えない", () => {
-    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "5000"$/m);
+  it("Issue #655・#669: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 20000 ミリ秒(書き込みが Free の 1 日 10 万行に迫ったため5000 から広げた)。#642 の 1 晩の上限は 1〜20000 未満の数(止める \"0\" ではない)。取得の止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む・5000)は変えない", () => {
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"$/m);
+    // Issue #669: #642 の上限は、止める "0" ではなく、既定(20000)より小さい正の整数。取得の間隔は parseArchiveMinIntervalMs の範囲(1500〜60000)内
+    const edgeLimit = Number(/^RACE_MARKET_EDGE_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1]);
+    expect(edgeLimit).toBeGreaterThanOrEqual(1);
+    expect(edgeLimit).toBeLessThan(20_000);
+    const intervalMs = Number(/^RACE_ARCHIVE_MIN_INTERVAL_MS = "(\d+)"$/m.exec(tomlCode)?.[1]);
+    expect(intervalMs).toBeGreaterThanOrEqual(1500);
+    expect(intervalMs).toBeLessThanOrEqual(60_000);
     expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
     // 検出の確認(空振りでない): 止める値が書かれていれば拾える形
     expect('RACE_ARCHIVE_NIGHTLY_LIMIT = "0"\n').toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
@@ -2335,7 +2342,7 @@ describe("Issue #294・#478: 馬場の取得は JRA のページから、取得�
   });
 
   it("他の DO・cron・日報・月報は、馬場の取得を参照しない(アラームは DO ごとに 1 つ。干渉しない)。入口(handler.ts)と ルートの表(route-policy.ts)は診断の入口 /api/baba-fetch だけが例外(次のテスト)", () => {
-    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["jra-http.ts", "jra-check.ts", "jra-entries-fetch.ts", "race-day-core.ts", "race-day-do.ts", "race-day-plan.ts", "handler.ts", "route-policy.ts"].includes(n))) {
+    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["jra-http.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-odds-fetch.ts", "race-day-core.ts", "race-day-do.ts", "race-day-plan.ts", "handler.ts", "route-policy.ts"].includes(n))) {
       expect(code(f), `${f} は馬場の取得を参照しない`).not.toMatch(/baba-(conditions|fetch|repository)|jra-baba|jra-http|race-day-baba|BabaStage|BABA_API_URL|createJraBabaFetcher/);
     }
   });
@@ -2402,8 +2409,8 @@ describe("Issue #488・#478: JRA のページの取得の起点は、管理者�
     expect(code("handler.ts")).toContain("async function handleJraCheck(");
   });
 
-  it("JRA の URL(jra.go.jp)を持つ cloud/src のファイルは jra-http.ts だけ(取得先の URL 5 本: クッション値・含水率・開催情報・コースの情報と、出馬表の accessD〈#639〉)", () => {
-    expect(sites(/jra\.go\.jp/g)).toEqual({ "jra-http.ts": 5 });
+  it("JRA の URL(jra.go.jp)を持つ cloud/src のファイルは jra-http.ts だけ(取得先の URL 6 本: クッション値・含水率・開催情報・コースの情報と、出馬表の accessD〈#639〉・オッズの accessO〈#673〉)", () => {
+    expect(sites(/jra\.go\.jp/g)).toEqual({ "jra-http.ts": 6 });
   });
 
   it("確認口の部品(jra-check・runJraCheck・JRA_CHECK)を参照するのは jra-check.ts と handler.ts だけ。runJraCheck の呼び出し(定義は数えない)は handler.ts の 1 箇所だけ", () => {
@@ -2414,20 +2421,21 @@ describe("Issue #488・#478: JRA のページの取得の起点は、管理者�
 
   it("JRA の取得に関わるモジュール(jra-http・jra-check・jra-baba-fetch・jra-baba-parse)を参照するのは、handler.ts・race-day-do.ts と、それら自身だけ。scheduled・worker・他の DO・core・段階は参照しない", () => {
     // 出馬表の取得口(jra-entries-fetch.ts。#639)も jra-http.ts の部品を使う。それを使う側は race-day-do.ts と core(race-day-core.ts は取得口の型だけ)で、cloud/test/jra-entries-isolation.test.ts が固定している。
-    expect(Object.keys(sites(/jra-(?:http|check|baba-fetch|baba-parse)/g)).sort()).toEqual(["handler.ts", "jra-baba-fetch.ts", "jra-baba-parse.ts", "jra-check.ts", "jra-entries-fetch.ts", "race-day-do.ts"]);
+    expect(Object.keys(sites(/jra-(?:http|check|baba-fetch|baba-parse)/g)).sort()).toEqual(["handler.ts", "jra-baba-fetch.ts", "jra-baba-parse.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-odds-fetch.ts", "race-day-do.ts"]);
     // jra-http.ts を import するのは取得の 3 つと読み取りの型の 1 つ(順にその 1 回ずつ)
-    expect(sites(/from\s*"\.\/jra-http"/g)).toEqual({ "jra-baba-fetch.ts": 1, "jra-baba-parse.ts": 1, "jra-check.ts": 1, "jra-entries-fetch.ts": 1 });
+    expect(sites(/from\s*"\.\/jra-http"/g)).toEqual({ "jra-baba-fetch.ts": 1, "jra-baba-parse.ts": 1, "jra-check.ts": 1, "jra-entries-fetch.ts": 1, "jra-odds-fetch.ts": 1 });
     // jra-baba-fetch は race-day-do.ts だけが import する。jra-baba-parse は jra-baba-fetch だけが import する(保存の段階・core は読み取りに触れない)
     expect(sites(/from\s*"\.\/jra-baba-fetch"/g)).toEqual({ "race-day-do.ts": 1 });
     expect(sites(/from\s*"\.\/jra-baba-parse"/g)).toEqual({ "jra-baba-fetch.ts": 1 });
     // jra-http の関数(fetchOne・jraCourseUrl)を呼ぶのは取得の 2 つだけ
-    expect(Object.keys(sites(/\bfetchOne\(|\bjraCourseUrl\(/g)).sort()).toEqual(["jra-baba-fetch.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-http.ts"]);
+    expect(Object.keys(sites(/\bfetchOne\(|\bjraCourseUrl\(/g)).sort()).toEqual(["jra-baba-fetch.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-http.ts", "jra-odds-fetch.ts"]);
   });
 
   it("グローバルの fetch を呼ぶのは jra-check.ts の 1 箇所と jra-baba-fetch.ts の 1 箇所と jra-entries-fetch.ts の 1 箇所(#639。どれも注入できる既定)だけ。jra-http.ts・handler.ts は fetch( を呼ばない(注入された関数を渡すだけ)", () => {
     expect((code("jra-check.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
     expect((code("jra-baba-fetch.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
     expect((code("jra-entries-fetch.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
+    expect((code("jra-odds-fetch.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1); // #673。注入できる既定の 1 箇所
     expect((code("jra-http.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(0);
     expect((code("handler.ts").match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(0);
     expect(code("handler.ts")).not.toMatch(/\.fetch\(/);

@@ -186,6 +186,8 @@ async function recreateCloseTables(): Promise<void> {
     .filter((s) => s !== "");
   expect(statements).toHaveLength(2); // 前提: analysis_close と analysis_close_bets の 2 文
   for (const s of statements) await local.db.prepare(s).run();
+  // 0019 のあとに足された analysis_close の列(0041。Issue #658)。作り直した表にも足す(締切の再計算の保存が書く)。
+  await local.db.prepare("ALTER TABLE analysis_close ADD COLUMN market_shrink_weight REAL").run();
 }
 
 describe("D1TargetsStore.readDay: 再計算の表が無い間(migration の適用前に Worker が先に出た場合)", () => {

@@ -955,7 +955,7 @@ describe("的中確率の下限と、下限で外した買い目の記録(Issue 
 });
 
 describe("単勝・複勝の点数の上限の記録(Issue #533。meta.maxWinBets・maxPlaceBets)", () => {
-  function withMax(i: number, over: { maxWinBets?: number; maxPlaceBets?: number; minHitProb?: number; belowFloorCount?: number | null; missed?: null }): AnalysisRecord {
+  function withMax(i: number, over: { maxWinBets?: number; maxPlaceBets?: number; marketShrinkWeight?: number; minHitProb?: number; belowFloorCount?: number | null; missed?: null }): AnalysisRecord {
     const base = mkRecord(i, 2, 1);
     return { ...base, allocation: { ...base.allocation!, meta: { ...base.allocation!.meta, ...over } } };
   }
@@ -1022,6 +1022,38 @@ describe("単勝・複勝の点数の上限の記録(Issue #533。meta.maxWinBet
     const old = (await store().getStoredAllocation((await store().saveAnalysis(mkRecord(9, 2, 1))).id))!;
     expect(Object.keys(old)).not.toContain("maxWinBets");
     expect(Object.keys(old)).not.toContain("maxPlaceBets");
+  });
+
+  it("Issue #658 保存の文: 配分に使った寄せの割合は、同じ UPDATE 1文の末尾の列 market_shrink_weight に書く。上限・下限と一緒でも列の対応がずれず、文は増えない。持たない記録は列に触れない", () => {
+    const only = fake();
+    buildSaveStatements(only.db, withMax(1, { marketShrinkWeight: 0.3 }), YM);
+    const last = only.statements[only.statements.length - 1]!;
+    expect(last.sql).toBe("UPDATE analysis_allocation_meta SET market_shrink_weight = ? WHERE analysis_id = (SELECT max(id) FROM analyses)");
+    expect(last.binds).toEqual([0.3]);
+    const all = fake();
+    buildSaveStatements(all.db, withMax(1, { minHitProb: 0.05, belowFloorCount: 2, missed: null, maxWinBets: 2, maxPlaceBets: 3, marketShrinkWeight: 0.8 }), YM);
+    const u = all.statements[all.statements.length - 1]!;
+    expect(u.sql).toBe(
+      "UPDATE analysis_allocation_meta SET min_hit_prob = ?, below_floor_count = ?, missed_json = ?, max_win_bets = ?, max_place_bets = ?, market_shrink_weight = ? WHERE analysis_id = (SELECT max(id) FROM analyses)",
+    );
+    expect(u.binds).toEqual([0.05, 2, null, 2, 3, 0.8]);
+    expect(all.statements.filter((st) => /^UPDATE analysis_allocation_meta/.test(st.sql))).toHaveLength(1);
+    const without = fake();
+    buildSaveStatements(without.db, mkRecord(1, 2, 1), YM);
+    expect(without.statements.some((st) => /market_shrink_weight/.test(st.sql))).toBe(false);
+  });
+
+  it("Issue #658 D1 に保存して読み戻す: 記録した割合がそのまま入る(1 は 1、0 は NULL でなく 0)。持たない記録は NULL", async () => {
+    const weightOf = async (id: number): Promise<number | null> =>
+      (await local.db.prepare("SELECT market_shrink_weight FROM analysis_allocation_meta WHERE analysis_id = ?").bind(id).first<{ market_shrink_weight: number | null }>())!.market_shrink_weight;
+    expect(await weightOf((await store().saveAnalysis(withMax(1, { marketShrinkWeight: 0.3 }))).id)).toBe(0.3);
+    expect(await weightOf((await store().saveAnalysis(withMax(2, { marketShrinkWeight: 1 }))).id)).toBe(1);
+    expect(await weightOf((await store().saveAnalysis(withMax(3, { marketShrinkWeight: 0 }))).id)).toBe(0);
+    expect(await weightOf((await store().saveAnalysis(mkRecord(9, 2, 1))).id)).toBeNull();
+    // 下限・上限と一緒でも、それぞれの列の値がずれない
+    const saved = await store().saveAnalysis(withMax(4, { minHitProb: 0.05, belowFloorCount: 7, missed: null, maxWinBets: 1, maxPlaceBets: 2, marketShrinkWeight: 0.5 }));
+    const row = (await local.db.prepare("SELECT min_hit_prob, max_win_bets, max_place_bets, market_shrink_weight FROM analysis_allocation_meta WHERE analysis_id = ?").bind(saved.id).first())!;
+    expect(row).toEqual({ min_hit_prob: 0.05, max_win_bets: 1, max_place_bets: 2, market_shrink_weight: 0.5 });
   });
 
   it("旧い記録(maxWinBets・maxPlaceBets を持たない)は、2列とも NULL のまま(記録なし=上限なしの意味)", async () => {

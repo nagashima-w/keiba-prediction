@@ -54,6 +54,17 @@ const recompute = (b: Baseline, horses: readonly RecomputeHorseInput[], marketSh
     allocationSettings: { ...ALL_BETS_SETTINGS, ...(marketShrinkWeight === undefined ? {} : { marketShrinkWeight }) },
   });
 
+/**
+ * 比較用: メタ行の marketShrinkWeight(Issue #658。配分に使った重みの記録)だけを除いた JSON。
+ * 重みを渡した呼び出しと渡さない呼び出しは、この記録の有無だけが違う。買い目・メタの他の列・馬の行の比較は弱めない(記録そのものは recompute-allocation-market-shrink-record.test.ts が固定する)。
+ */
+function withoutWeight<T>(x: T): unknown {
+  const c = viaJson(x) as { allocation?: { meta?: Record<string, unknown> }; meta?: Record<string, unknown> };
+  delete c.allocation?.meta?.["marketShrinkWeight"];
+  delete c.meta?.["marketShrinkWeight"];
+  return c;
+}
+
 /** 配分の比較用: 買い目(種別・キー・賭け金・オッズ・ev)。 */
 const betsOf = (r: ReturnType<typeof recomputeAllocationFromProbs>) => r.allocation.bets.map((x) => `${x.betType}:${x.comboKey}:${x.stake}:${x.odds}:${x.ev}`);
 
@@ -62,7 +73,7 @@ describe("配分の前に確率を市場に寄せる(Issue #656)", { timeout: 60
     const b = await baseline();
     const plain = recompute(b, b.horses);
     expect(plain.allocation.bets.length).toBeGreaterThan(5);
-    expect(viaJson(recompute(b, b.horses, 1))).toEqual(viaJson(plain));
+    expect(withoutWeight(recompute(b, b.horses, 1))).toEqual(withoutWeight(plain));
   });
 
   it("w=0.5: 配分は変わる(差が 0 でない)が、馬の行(補正後の確率・EV・isPositive・複勝下限)は変わらない", async () => {
@@ -85,7 +96,7 @@ describe("配分の前に確率を市場に寄せる(Issue #656)", { timeout: 60
     expect(b.horses.some((h) => Math.abs(mixed.get(h.umaban)! - h.adjustedProb) > 0.01)).toBe(true);
     const viaSetting = recompute(b, b.horses, 0.5);
     const viaPreMixed = recompute(b, b.horses.map((h) => ({ ...h, adjustedProb: mixed.get(h.umaban)! })));
-    expect(viaJson(viaSetting.allocation)).toEqual(viaJson(viaPreMixed.allocation));
+    expect(withoutWeight(viaSetting.allocation)).toEqual(withoutWeight(viaPreMixed.allocation));
     expect(viaJson(viaSetting.comboStats)).toEqual(viaJson(viaPreMixed.comboStats));
   });
 
@@ -135,6 +146,6 @@ describe("配分の前に確率を市場に寄せる(Issue #656)", { timeout: 60
   it("単勝オッズが全馬に無ければ寄せない(従来と同じ配分)", async () => {
     const b = await baseline();
     const noWin: RaceData["odds"] = { ...b.race.odds, win: Object.fromEntries(Object.entries(b.race.odds.win).map(([k, v]) => [k, { ...v, odds: null }])) } as RaceData["odds"];
-    expect(viaJson(recompute(b, b.horses, 0.5, noWin).allocation)).toEqual(viaJson(recompute(b, b.horses, undefined, noWin).allocation));
+    expect(withoutWeight(recompute(b, b.horses, 0.5, noWin).allocation)).toEqual(withoutWeight(recompute(b, b.horses, undefined, noWin).allocation));
   });
 });

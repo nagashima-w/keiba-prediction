@@ -1,0 +1,1516 @@
+{
+ "min_n": 300,
+ "holm_alpha": 0.05,
+ "flags": [
+  {
+   "id": "T1",
+   "period": "p1624",
+   "cond": "FR1C",
+   "base": "ALL_1C",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "n": 4423,
+   "obs": 2252,
+   "exp": 2446.8,
+   "ratio": 0.92,
+   "z": -6.0,
+   "same_direction": true,
+   "p_one_sided": 9.865876450377012e-10,
+   "win_roi": 0.72,
+   "place_roi": 0.791,
+   "avg_odds": 4.4,
+   "p_holm": 0.0,
+   "passed": true
+  },
+  {
+   "id": "T2",
+   "period": "p1624",
+   "cond": "FR1C",
+   "base": "ALL_1C",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "n": 7051,
+   "obs": 1416,
+   "exp": 1547.7,
+   "ratio": 0.915,
+   "z": -3.87,
+   "same_direction": true,
+   "p_one_sided": 5.441767663369977e-05,
+   "win_roi": 0.834,
+   "place_roi": 0.766,
+   "avg_odds": 22.2,
+   "p_holm": 0.000109,
+   "passed": true
+  },
+  {
+   "id": "T3",
+   "period": "p1624",
+   "cond": "FR1C",
+   "base": "ALL_1C",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "n": 3513,
+   "obs": 175,
+   "exp": 181.5,
+   "ratio": 0.964,
+   "z": -0.5,
+   "same_direction": true,
+   "p_one_sided": 0.3085375387259869,
+   "win_roi": 0.699,
+   "place_roi": 0.629,
+   "avg_odds": 114.4,
+   "p_holm": 0.308538,
+   "passed": false
+  },
+  {
+   "id": "T4",
+   "period": "p1624",
+   "cond": "SLUMP",
+   "base": "ALL",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "n": 5676,
+   "obs": 565,
+   "exp": 790.9,
+   "ratio": 0.714,
+   "z": -8.74,
+   "same_direction": true,
+   "p_one_sided": 1.1655521378082404e-18,
+   "win_roi": 0.664,
+   "place_roi": 0.722,
+   "avg_odds": 58.7,
+   "p_holm": 0.0,
+   "passed": true
+  },
+  {
+   "id": "T5",
+   "period": "p1624",
+   "cond": "SLUMP",
+   "base": "ALL",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "n": 31787,
+   "obs": 813,
+   "exp": 1163.2,
+   "ratio": 0.699,
+   "z": -10.54,
+   "same_direction": true,
+   "p_one_sided": 2.8249449333964143e-26,
+   "win_roi": 0.585,
+   "place_roi": 0.511,
+   "avg_odds": 225.9,
+   "p_holm": 0.0,
+   "passed": true
+  }
+ ],
+ "blinker": [
+  {
+   "id": "B1",
+   "period": "p1620",
+   "cond": "BL_FIRST",
+   "base": "ALL",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "n": 1966,
+   "obs": 309,
+   "exp": 370.4,
+   "ratio": 0.834,
+   "z": -3.61,
+   "same_direction": true,
+   "p_one_sided": 0.0001530985025737555,
+   "win_roi": 0.719,
+   "place_roi": 0.702,
+   "avg_odds": 29.0,
+   "p_holm": 0.000306,
+   "passed": true
+  },
+  {
+   "id": "B2",
+   "period": "p1620",
+   "cond": "BL_CONT",
+   "base": "ALL",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "n": 5400,
+   "obs": 296,
+   "exp": 276.8,
+   "ratio": 1.069,
+   "z": 1.19,
+   "same_direction": true,
+   "p_one_sided": 0.11702319602310876,
+   "win_roi": 0.782,
+   "place_roi": 0.733,
+   "avg_odds": 130.9,
+   "p_holm": 0.117023,
+   "passed": false
+  },
+  {
+   "id": "B1",
+   "period": "p2126",
+   "cond": "BL_FIRST",
+   "base": "ALL",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "n": 3153,
+   "obs": 569,
+   "exp": 617.5,
+   "ratio": 0.921,
+   "z": -2.22,
+   "same_direction": true,
+   "p_one_sided": 0.013209383807256277,
+   "win_roi": 0.77,
+   "place_roi": 0.722,
+   "avg_odds": 29.7,
+   "p_holm": 0.026419,
+   "passed": true
+  },
+  {
+   "id": "B2",
+   "period": "p2126",
+   "cond": "BL_CONT",
+   "base": "ALL",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "n": 8603,
+   "obs": 458,
+   "exp": 415.4,
+   "ratio": 1.102,
+   "z": 2.15,
+   "same_direction": true,
+   "p_one_sided": 0.015777607391090517,
+   "win_roi": 0.823,
+   "place_roi": 0.683,
+   "avg_odds": 134.9,
+   "p_holm": 0.026419,
+   "passed": true
+  }
+ ],
+ "baselines": {
+  "p1624/ALL": {
+   "1-3": {
+    "n": 77863,
+    "win_rate": 0.218,
+    "top3_rate": 0.5263,
+    "win_roi": 0.795,
+    "place_roi": 0.83
+   },
+   "4-9": {
+    "n": 152434,
+    "win_rate": 0.0517,
+    "top3_rate": 0.2039,
+    "win_roi": 0.764,
+    "place_roi": 0.764
+   },
+   "10+": {
+    "n": 128895,
+    "win_rate": 0.0087,
+    "top3_rate": 0.0459,
+    "win_roi": 0.631,
+    "place_roi": 0.646
+   }
+  },
+  "p1624/ALL_1C": {
+   "1-3": {
+    "n": 32206,
+    "win_rate": 0.2192,
+    "top3_rate": 0.5419,
+    "win_roi": 0.788,
+    "place_roi": 0.843
+   },
+   "4-9": {
+    "n": 63078,
+    "win_rate": 0.0522,
+    "top3_rate": 0.2082,
+    "win_roi": 0.783,
+    "place_roi": 0.779
+   },
+   "10+": {
+    "n": 47393,
+    "win_rate": 0.009,
+    "top3_rate": 0.0469,
+    "win_roi": 0.69,
+    "place_roi": 0.685
+   }
+  },
+  "p1624/ODDS16": {
+   "1-3": {
+    "n": 86,
+    "win_rate": 0.0581,
+    "top3_rate": 0.3721,
+    "win_roi": 1.129,
+    "place_roi": 1.155
+   },
+   "4-9": {
+    "n": 85634,
+    "win_rate": 0.0274,
+    "top3_rate": 0.1369,
+    "win_roi": 0.722,
+    "place_roi": 0.743
+   },
+   "10+": {
+    "n": 128863,
+    "win_rate": 0.0087,
+    "top3_rate": 0.0458,
+    "win_roi": 0.631,
+    "place_roi": 0.646
+   }
+  },
+  "p1620/ALL": {
+   "1-3": {
+    "n": 45224,
+    "win_rate": 0.2159,
+    "top3_rate": 0.5238,
+    "win_roi": 0.796,
+    "place_roi": 0.827
+   },
+   "4-9": {
+    "n": 88802,
+    "win_rate": 0.0521,
+    "top3_rate": 0.2031,
+    "win_roi": 0.779,
+    "place_roi": 0.766
+   },
+   "10+": {
+    "n": 76756,
+    "win_rate": 0.0091,
+    "top3_rate": 0.0467,
+    "win_roi": 0.661,
+    "place_roi": 0.656
+   }
+  },
+  "p2126/ALL": {
+   "1-3": {
+    "n": 52792,
+    "win_rate": 0.2212,
+    "top3_rate": 0.5297,
+    "win_roi": 0.79,
+    "place_roi": 0.833
+   },
+   "4-9": {
+    "n": 102761,
+    "win_rate": 0.0509,
+    "top3_rate": 0.2055,
+    "win_roi": 0.753,
+    "place_roi": 0.762
+   },
+   "10+": {
+    "n": 84451,
+    "win_rate": 0.0084,
+    "top3_rate": 0.0445,
+    "win_roi": 0.611,
+    "place_roi": 0.624
+   }
+  }
+ },
+ "rows": [
+  {
+   "period": "p1624",
+   "id": "FR1C",
+   "label": "前走で逃げた(1 コーナー ≤ 頭数の 1/8)",
+   "baseline": "ALL_1C",
+   "band": "1-3",
+   "n": 4423,
+   "win_roi": 0.72,
+   "place_roi": 0.791,
+   "avg_odds": 4.4,
+   "win": {
+    "obs": 928,
+    "exp": 992.7,
+    "ratio": 0.935,
+    "z": -2.38,
+    "p_two_sided": 0.017369757622571126
+   },
+   "top3": {
+    "obs": 2252,
+    "exp": 2446.8,
+    "ratio": 0.92,
+    "z": -6.0,
+    "p_two_sided": 1.922563022240662e-09
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR1C",
+   "label": "前走で逃げた(1 コーナー ≤ 頭数の 1/8)",
+   "baseline": "ALL_1C",
+   "band": "4-9",
+   "n": 7051,
+   "win_roi": 0.834,
+   "place_roi": 0.766,
+   "avg_odds": 22.2,
+   "win": {
+    "obs": 427,
+    "exp": 383.0,
+    "ratio": 1.115,
+    "z": 2.33,
+    "p_two_sided": 0.020067086549968353
+   },
+   "top3": {
+    "obs": 1416,
+    "exp": 1547.7,
+    "ratio": 0.915,
+    "z": -3.87,
+    "p_two_sided": 0.00010904640017490168
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR1C",
+   "label": "前走で逃げた(1 コーナー ≤ 頭数の 1/8)",
+   "baseline": "ALL_1C",
+   "band": "10+",
+   "n": 3513,
+   "win_roi": 0.699,
+   "place_roi": 0.629,
+   "avg_odds": 114.4,
+   "win": {
+    "obs": 40,
+    "exp": 33.6,
+    "ratio": 1.192,
+    "z": 1.12,
+    "p_two_sided": 0.2634446607005516
+   },
+   "top3": {
+    "obs": 175,
+    "exp": 181.5,
+    "ratio": 0.964,
+    "z": -0.5,
+    "p_two_sided": 0.616713160021727
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR3C",
+   "label": "参考: 前走で 3 コーナー ≤ 頭数の 1/8",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 13637,
+   "win_roi": 0.779,
+   "place_roi": 0.809,
+   "avg_odds": 4.3,
+   "win": {
+    "obs": 3088,
+    "exp": 3069.3,
+    "ratio": 1.006,
+    "z": 0.39,
+    "p_two_sided": 0.6949226021995005
+   },
+   "top3": {
+    "obs": 7032,
+    "exp": 7373.5,
+    "ratio": 0.954,
+    "z": -5.98,
+    "p_two_sided": 2.195875177663344e-09
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR3C",
+   "label": "参考: 前走で 3 コーナー ≤ 頭数の 1/8",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 18994,
+   "win_roi": 0.808,
+   "place_roi": 0.77,
+   "avg_odds": 20.8,
+   "win": {
+    "obs": 1133,
+    "exp": 1040.3,
+    "ratio": 1.089,
+    "z": 2.98,
+    "p_two_sided": 0.00292249011627872
+   },
+   "top3": {
+    "obs": 3949,
+    "exp": 4115.1,
+    "ratio": 0.96,
+    "z": -2.98,
+    "p_two_sided": 0.002847903273842536
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR3C",
+   "label": "参考: 前走で 3 コーナー ≤ 頭数の 1/8",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 9075,
+   "win_roi": 0.629,
+   "place_roi": 0.629,
+   "avg_odds": 103.6,
+   "win": {
+    "obs": 106,
+    "exp": 91.6,
+    "ratio": 1.158,
+    "z": 1.52,
+    "p_two_sided": 0.12901992039954446
+   },
+   "top3": {
+    "obs": 491,
+    "exp": 483.9,
+    "ratio": 1.015,
+    "z": 0.33,
+    "p_two_sided": 0.738827415863651
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "SLUMP",
+   "label": "人気薄(オッズ 16.1 以上)で直近 3 走の平均着順 11.5 以上",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 3,
+   "win_roi": 0.0,
+   "place_roi": 4.867,
+   "avg_odds": 18.3,
+   "win": {
+    "obs": 0,
+    "exp": 0.4,
+    "ratio": 0.0,
+    "z": -0.68,
+    "p_two_sided": 0.4976438470394332
+   },
+   "top3": {
+    "obs": 2,
+    "exp": 1.3,
+    "ratio": 1.532,
+    "z": 0.81,
+    "p_two_sided": 0.4186560695574976
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "SLUMP",
+   "label": "人気薄(オッズ 16.1 以上)で直近 3 走の平均着順 11.5 以上",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 5676,
+   "win_roi": 0.664,
+   "place_roi": 0.722,
+   "avg_odds": 58.7,
+   "win": {
+    "obs": 116,
+    "exp": 174.6,
+    "ratio": 0.664,
+    "z": -4.52,
+    "p_two_sided": 6.112384230123583e-06
+   },
+   "top3": {
+    "obs": 565,
+    "exp": 790.9,
+    "ratio": 0.714,
+    "z": -8.74,
+    "p_two_sided": 2.3963248562702374e-18
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "SLUMP",
+   "label": "人気薄(オッズ 16.1 以上)で直近 3 走の平均着順 11.5 以上",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 31787,
+   "win_roi": 0.585,
+   "place_roi": 0.511,
+   "avg_odds": 225.9,
+   "win": {
+    "obs": 188,
+    "exp": 207.5,
+    "ratio": 0.906,
+    "z": -1.36,
+    "p_two_sided": 0.1729254569849278
+   },
+   "top3": {
+    "obs": 813,
+    "exp": 1163.2,
+    "ratio": 0.699,
+    "z": -10.54,
+    "p_two_sided": 5.831220292322792e-26
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "SLUMP",
+   "label": "人気薄(オッズ 16.1 以上)で直近 3 走の平均着順 11.5 以上",
+   "baseline": "ODDS16",
+   "band": "1-3",
+   "n": 3,
+   "win_roi": 0.0,
+   "place_roi": 4.867,
+   "avg_odds": 18.3,
+   "win": {
+    "obs": 0,
+    "exp": 0.2,
+    "ratio": 0.0,
+    "z": -0.49,
+    "p_two_sided": 0.6276258050283593
+   },
+   "top3": {
+    "obs": 2,
+    "exp": 0.9,
+    "ratio": 2.292,
+    "z": 1.43,
+    "p_two_sided": 0.1518648370595695
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "SLUMP",
+   "label": "人気薄(オッズ 16.1 以上)で直近 3 走の平均着順 11.5 以上",
+   "baseline": "ODDS16",
+   "band": "4-9",
+   "n": 5676,
+   "win_roi": 0.664,
+   "place_roi": 0.722,
+   "avg_odds": 58.7,
+   "win": {
+    "obs": 116,
+    "exp": 144.1,
+    "ratio": 0.805,
+    "z": -2.38,
+    "p_two_sided": 0.017475953988984834
+   },
+   "top3": {
+    "obs": 565,
+    "exp": 725.7,
+    "ratio": 0.779,
+    "z": -6.41,
+    "p_two_sided": 1.4098249680108514e-10
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "SLUMP",
+   "label": "人気薄(オッズ 16.1 以上)で直近 3 走の平均着順 11.5 以上",
+   "baseline": "ODDS16",
+   "band": "10+",
+   "n": 31787,
+   "win_roi": 0.585,
+   "place_roi": 0.511,
+   "avg_odds": 225.9,
+   "win": {
+    "obs": 188,
+    "exp": 207.5,
+    "ratio": 0.906,
+    "z": -1.36,
+    "p_two_sided": 0.17306819977687904
+   },
+   "top3": {
+    "obs": 813,
+    "exp": 1163.2,
+    "ratio": 0.699,
+    "z": -10.54,
+    "p_two_sided": 5.835898644188779e-26
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "ODDS16",
+   "label": "単勝オッズ 16.1 以上(q<0.05 の近似。参考の基準)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 86,
+   "win_roi": 1.129,
+   "place_roi": 1.155,
+   "avg_odds": 19.6,
+   "win": {
+    "obs": 5,
+    "exp": 12.2,
+    "ratio": 0.411,
+    "z": -2.22,
+    "p_two_sided": 0.026423291875440947
+   },
+   "top3": {
+    "obs": 32,
+    "exp": 38.0,
+    "ratio": 0.842,
+    "z": -1.31,
+    "p_two_sided": 0.1907186373985757
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "ODDS16",
+   "label": "単勝オッズ 16.1 以上(q<0.05 の近似。参考の基準)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 85634,
+   "win_roi": 0.722,
+   "place_roi": 0.743,
+   "avg_odds": 37.9,
+   "win": {
+    "obs": 2347,
+    "exp": 5336.5,
+    "ratio": 0.44,
+    "z": -42.42,
+    "p_two_sided": 0.0
+   },
+   "top3": {
+    "obs": 11722,
+    "exp": 19568.9,
+    "ratio": 0.599,
+    "z": -64.17,
+    "p_two_sided": 0.0
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "ODDS16",
+   "label": "単勝オッズ 16.1 以上(q<0.05 の近似。参考の基準)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 65692,
+   "win_roi": 0.636,
+   "place_roi": 0.628,
+   "avg_odds": 161.5,
+   "win": {
+    "obs": 609,
+    "exp": 390.8,
+    "ratio": 1.558,
+    "z": 12.34,
+    "p_two_sided": 5.481985821677787e-35
+   },
+   "top3": {
+    "obs": 3082,
+    "exp": 2566.8,
+    "ratio": 1.201,
+    "z": 11.83,
+    "p_two_sided": 2.7817658955102633e-32
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR1C_A",
+   "label": "前走 1 コーナー 1 番手・頭数 8〜15",
+   "baseline": "ALL_1C",
+   "band": "1-3",
+   "n": 2168,
+   "win_roi": 0.686,
+   "place_roi": 0.777,
+   "avg_odds": 4.3,
+   "win": {
+    "obs": 432,
+    "exp": 482.3,
+    "ratio": 0.896,
+    "z": -2.65,
+    "p_two_sided": 0.00808773531363166
+   },
+   "top3": {
+    "obs": 1091,
+    "exp": 1188.4,
+    "ratio": 0.918,
+    "z": -4.28,
+    "p_two_sided": 1.863567385658473e-05
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR1C_A",
+   "label": "前走 1 コーナー 1 番手・頭数 8〜15",
+   "baseline": "ALL_1C",
+   "band": "4-9",
+   "n": 3584,
+   "win_roi": 0.813,
+   "place_roi": 0.75,
+   "avg_odds": 22.3,
+   "win": {
+    "obs": 210,
+    "exp": 199.6,
+    "ratio": 1.052,
+    "z": 0.77,
+    "p_two_sided": 0.4436419832420294
+   },
+   "top3": {
+    "obs": 687,
+    "exp": 792.4,
+    "ratio": 0.867,
+    "z": -4.33,
+    "p_two_sided": 1.503253408686007e-05
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR1C_A",
+   "label": "前走 1 コーナー 1 番手・頭数 8〜15",
+   "baseline": "ALL_1C",
+   "band": "10+",
+   "n": 1613,
+   "win_roi": 0.478,
+   "place_roi": 0.629,
+   "avg_odds": 110.3,
+   "win": {
+    "obs": 14,
+    "exp": 16.5,
+    "ratio": 0.847,
+    "z": -0.63,
+    "p_two_sided": 0.5300088872482498
+   },
+   "top3": {
+    "obs": 82,
+    "exp": 86.9,
+    "ratio": 0.944,
+    "z": -0.54,
+    "p_two_sided": 0.5882870431603183
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR1C_B",
+   "label": "前走 1 コーナー 2 番手以内・頭数 16 以上",
+   "baseline": "ALL_1C",
+   "band": "1-3",
+   "n": 2255,
+   "win_roi": 0.751,
+   "place_roi": 0.805,
+   "avg_odds": 4.4,
+   "win": {
+    "obs": 496,
+    "exp": 505.1,
+    "ratio": 0.982,
+    "z": -0.47,
+    "p_two_sided": 0.6390029517969871
+   },
+   "top3": {
+    "obs": 1161,
+    "exp": 1244.2,
+    "ratio": 0.933,
+    "z": -3.59,
+    "p_two_sided": 0.0003312926464479441
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR1C_B",
+   "label": "前走 1 コーナー 2 番手以内・頭数 16 以上",
+   "baseline": "ALL_1C",
+   "band": "4-9",
+   "n": 3467,
+   "win_roi": 0.855,
+   "place_roi": 0.782,
+   "avg_odds": 22.0,
+   "win": {
+    "obs": 217,
+    "exp": 186.3,
+    "ratio": 1.165,
+    "z": 2.33,
+    "p_two_sided": 0.0198435472487896
+   },
+   "top3": {
+    "obs": 729,
+    "exp": 747.1,
+    "ratio": 0.976,
+    "z": -0.76,
+    "p_two_sided": 0.4456241713929577
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "FR1C_B",
+   "label": "前走 1 コーナー 2 番手以内・頭数 16 以上",
+   "baseline": "ALL_1C",
+   "band": "10+",
+   "n": 1900,
+   "win_roi": 0.887,
+   "place_roi": 0.63,
+   "avg_odds": 117.8,
+   "win": {
+    "obs": 26,
+    "exp": 17.4,
+    "ratio": 1.49,
+    "z": 2.06,
+    "p_two_sided": 0.03927631506566594
+   },
+   "top3": {
+    "obs": 93,
+    "exp": 94.5,
+    "ratio": 0.985,
+    "z": -0.16,
+    "p_two_sided": 0.876704373434357
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "ALL_1C",
+   "label": "前走に 1 コーナーの通過順がある馬(基準)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 32206,
+   "win_roi": 0.788,
+   "place_roi": 0.843,
+   "avg_odds": 4.5,
+   "win": {
+    "obs": 7058,
+    "exp": 6981.9,
+    "ratio": 1.011,
+    "z": 1.05,
+    "p_two_sided": 0.2932821482652898
+   },
+   "top3": {
+    "obs": 17451,
+    "exp": 16553.2,
+    "ratio": 1.054,
+    "z": 10.21,
+    "p_two_sided": 1.737304265181641e-24
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "ALL_1C",
+   "label": "前走に 1 コーナーの通過順がある馬(基準)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 63078,
+   "win_roi": 0.783,
+   "place_roi": 0.779,
+   "avg_odds": 26.6,
+   "win": {
+    "obs": 3294,
+    "exp": 3261.3,
+    "ratio": 1.01,
+    "z": 0.59,
+    "p_two_sided": 0.5537401345992247
+   },
+   "top3": {
+    "obs": 13131,
+    "exp": 12751.6,
+    "ratio": 1.03,
+    "z": 3.83,
+    "p_two_sided": 0.000125594875721918
+   }
+  },
+  {
+   "period": "p1624",
+   "id": "ALL_1C",
+   "label": "前走に 1 コーナーの通過順がある馬(基準)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 47393,
+   "win_roi": 0.69,
+   "place_roi": 0.685,
+   "avg_odds": 151.6,
+   "win": {
+    "obs": 427,
+    "exp": 435.8,
+    "ratio": 0.98,
+    "z": -0.43,
+    "p_two_sided": 0.6701879108331555
+   },
+   "top3": {
+    "obs": 2225,
+    "exp": 2278.6,
+    "ratio": 0.976,
+    "z": -1.16,
+    "p_two_sided": 0.24600555415589676
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_FIRST",
+   "label": "初ブリンカー(今回着用・過去 20 走で未着用)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 577,
+   "win_roi": 0.898,
+   "place_roi": 0.849,
+   "avg_odds": 5.0,
+   "win": {
+    "obs": 128,
+    "exp": 117.4,
+    "ratio": 1.09,
+    "z": 1.12,
+    "p_two_sided": 0.26407238616813844
+   },
+   "top3": {
+    "obs": 290,
+    "exp": 298.4,
+    "ratio": 0.972,
+    "z": -0.71,
+    "p_two_sided": 0.47638468562400876
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_FIRST",
+   "label": "初ブリンカー(今回着用・過去 20 走で未着用)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 1966,
+   "win_roi": 0.719,
+   "place_roi": 0.702,
+   "avg_odds": 29.0,
+   "win": {
+    "obs": 81,
+    "exp": 92.1,
+    "ratio": 0.879,
+    "z": -1.2,
+    "p_two_sided": 0.23169689393850187
+   },
+   "top3": {
+    "obs": 309,
+    "exp": 370.4,
+    "ratio": 0.834,
+    "z": -3.61,
+    "p_two_sided": 0.0003067708792858668
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_FIRST",
+   "label": "初ブリンカー(今回着用・過去 20 走で未着用)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 2000,
+   "win_roi": 0.764,
+   "place_roi": 0.559,
+   "avg_odds": 142.6,
+   "win": {
+    "obs": 18,
+    "exp": 17.8,
+    "ratio": 1.013,
+    "z": 0.05,
+    "p_two_sided": 0.957691914300957
+   },
+   "top3": {
+    "obs": 81,
+    "exp": 90.6,
+    "ratio": 0.894,
+    "z": -1.04,
+    "p_two_sided": 0.2988682008912641
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_RE",
+   "label": "再装着(前走は未着用・それ以前の 20 走以内に着用あり)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 138,
+   "win_roi": 0.866,
+   "place_roi": 0.802,
+   "avg_odds": 5.1,
+   "win": {
+    "obs": 27,
+    "exp": 28.4,
+    "ratio": 0.952,
+    "z": -0.29,
+    "p_two_sided": 0.7706694434234576
+   },
+   "top3": {
+    "obs": 68,
+    "exp": 69.7,
+    "ratio": 0.976,
+    "z": -0.29,
+    "p_two_sided": 0.7692780090258717
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_RE",
+   "label": "再装着(前走は未着用・それ以前の 20 走以内に着用あり)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 445,
+   "win_roi": 1.041,
+   "place_roi": 0.766,
+   "avg_odds": 29.2,
+   "win": {
+    "obs": 25,
+    "exp": 21.7,
+    "ratio": 1.152,
+    "z": 0.73,
+    "p_two_sided": 0.4655323592228076
+   },
+   "top3": {
+    "obs": 85,
+    "exp": 84.9,
+    "ratio": 1.001,
+    "z": 0.01,
+    "p_two_sided": 0.9937385318718874
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_RE",
+   "label": "再装着(前走は未着用・それ以前の 20 走以内に着用あり)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 625,
+   "win_roi": 0.802,
+   "place_roi": 0.992,
+   "avg_odds": 135.3,
+   "win": {
+    "obs": 9,
+    "exp": 6.0,
+    "ratio": 1.494,
+    "z": 1.22,
+    "p_two_sided": 0.22249288957075186
+   },
+   "top3": {
+    "obs": 38,
+    "exp": 31.1,
+    "ratio": 1.222,
+    "z": 1.28,
+    "p_two_sided": 0.20056953141734976
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_CONT",
+   "label": "続けて着けている(今回着用・前走も着用)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 2946,
+   "win_roi": 0.748,
+   "place_roi": 0.812,
+   "avg_odds": 4.7,
+   "win": {
+    "obs": 566,
+    "exp": 623.8,
+    "ratio": 0.907,
+    "z": -2.66,
+    "p_two_sided": 0.00788717005323621
+   },
+   "top3": {
+    "obs": 1479,
+    "exp": 1519.5,
+    "ratio": 0.973,
+    "z": -1.52,
+    "p_two_sided": 0.12781008470544497
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_CONT",
+   "label": "続けて着けている(今回着用・前走も着用)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 6349,
+   "win_roi": 0.768,
+   "place_roi": 0.754,
+   "avg_odds": 23.0,
+   "win": {
+    "obs": 331,
+    "exp": 331.8,
+    "ratio": 0.998,
+    "z": -0.04,
+    "p_two_sided": 0.9646443809876691
+   },
+   "top3": {
+    "obs": 1297,
+    "exp": 1284.5,
+    "ratio": 1.01,
+    "z": 0.4,
+    "p_two_sided": 0.6915565646086845
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_CONT",
+   "label": "続けて着けている(今回着用・前走も着用)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 5400,
+   "win_roi": 0.782,
+   "place_roi": 0.733,
+   "avg_odds": 130.9,
+   "win": {
+    "obs": 58,
+    "exp": 54.8,
+    "ratio": 1.058,
+    "z": 0.43,
+    "p_two_sided": 0.6667944974386715
+   },
+   "top3": {
+    "obs": 296,
+    "exp": 276.8,
+    "ratio": 1.069,
+    "z": 1.19,
+    "p_two_sided": 0.23327012540066722
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_PREVOFF",
+   "label": "前走は未着用で今回着用(初 + 再装着)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 715,
+   "win_roi": 0.892,
+   "place_roi": 0.84,
+   "avg_odds": 5.0,
+   "win": {
+    "obs": 155,
+    "exp": 145.7,
+    "ratio": 1.064,
+    "z": 0.88,
+    "p_two_sided": 0.38037741272059944
+   },
+   "top3": {
+    "obs": 358,
+    "exp": 368.1,
+    "ratio": 0.972,
+    "z": -0.77,
+    "p_two_sided": 0.4398649780637534
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_PREVOFF",
+   "label": "前走は未着用で今回着用(初 + 再装着)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 2411,
+   "win_roi": 0.778,
+   "place_roi": 0.714,
+   "avg_odds": 29.1,
+   "win": {
+    "obs": 106,
+    "exp": 113.8,
+    "ratio": 0.932,
+    "z": -0.75,
+    "p_two_sided": 0.4526715060424338
+   },
+   "top3": {
+    "obs": 394,
+    "exp": 455.6,
+    "ratio": 0.865,
+    "z": -3.27,
+    "p_two_sided": 0.0010924024502065265
+   }
+  },
+  {
+   "period": "p1620",
+   "id": "BL_PREVOFF",
+   "label": "前走は未着用で今回着用(初 + 再装着)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 2625,
+   "win_roi": 0.773,
+   "place_roi": 0.662,
+   "avg_odds": 140.9,
+   "win": {
+    "obs": 27,
+    "exp": 23.8,
+    "ratio": 1.137,
+    "z": 0.67,
+    "p_two_sided": 0.5027265849439133
+   },
+   "top3": {
+    "obs": 119,
+    "exp": 121.7,
+    "ratio": 0.978,
+    "z": -0.25,
+    "p_two_sided": 0.8029967626867979
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_FIRST",
+   "label": "初ブリンカー(今回着用・過去 20 走で未着用)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 974,
+   "win_roi": 0.809,
+   "place_roi": 0.871,
+   "avg_odds": 5.0,
+   "win": {
+    "obs": 190,
+    "exp": 200.6,
+    "ratio": 0.947,
+    "z": -0.86,
+    "p_two_sided": 0.3902800507454104
+   },
+   "top3": {
+    "obs": 496,
+    "exp": 505.5,
+    "ratio": 0.981,
+    "z": -0.62,
+    "p_two_sided": 0.5347040881219923
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_FIRST",
+   "label": "初ブリンカー(今回着用・過去 20 走で未着用)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 3153,
+   "win_roi": 0.77,
+   "place_roi": 0.722,
+   "avg_odds": 29.7,
+   "win": {
+    "obs": 158,
+    "exp": 148.7,
+    "ratio": 1.063,
+    "z": 0.79,
+    "p_two_sided": 0.4307303833260175
+   },
+   "top3": {
+    "obs": 569,
+    "exp": 617.5,
+    "ratio": 0.921,
+    "z": -2.22,
+    "p_two_sided": 0.0260889041630631
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_FIRST",
+   "label": "初ブリンカー(今回着用・過去 20 走で未着用)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 2686,
+   "win_roi": 0.659,
+   "place_roi": 0.671,
+   "avg_odds": 147.0,
+   "win": {
+    "obs": 23,
+    "exp": 21.5,
+    "ratio": 1.07,
+    "z": 0.33,
+    "p_two_sided": 0.7435253676132
+   },
+   "top3": {
+    "obs": 118,
+    "exp": 117.1,
+    "ratio": 1.008,
+    "z": 0.09,
+    "p_two_sided": 0.9317969569830992
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_RE",
+   "label": "再装着(前走は未着用・それ以前の 20 走以内に着用あり)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 182,
+   "win_roi": 0.825,
+   "place_roi": 0.87,
+   "avg_odds": 5.0,
+   "win": {
+    "obs": 38,
+    "exp": 36.5,
+    "ratio": 1.04,
+    "z": 0.28,
+    "p_two_sided": 0.7820998497766524
+   },
+   "top3": {
+    "obs": 93,
+    "exp": 91.4,
+    "ratio": 1.018,
+    "z": 0.25,
+    "p_two_sided": 0.8044580677613943
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_RE",
+   "label": "再装着(前走は未着用・それ以前の 20 走以内に着用あり)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 727,
+   "win_roi": 0.716,
+   "place_roi": 0.753,
+   "avg_odds": 29.5,
+   "win": {
+    "obs": 33,
+    "exp": 34.5,
+    "ratio": 0.957,
+    "z": -0.26,
+    "p_two_sided": 0.7937779319635239
+   },
+   "top3": {
+    "obs": 130,
+    "exp": 140.5,
+    "ratio": 0.925,
+    "z": -1.0,
+    "p_two_sided": 0.31636897663986296
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_RE",
+   "label": "再装着(前走は未着用・それ以前の 20 走以内に着用あり)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 965,
+   "win_roi": 0.566,
+   "place_roi": 0.737,
+   "avg_odds": 144.2,
+   "win": {
+    "obs": 6,
+    "exp": 8.9,
+    "ratio": 0.672,
+    "z": -0.99,
+    "p_two_sided": 0.32336406746352236
+   },
+   "top3": {
+    "obs": 55,
+    "exp": 46.5,
+    "ratio": 1.183,
+    "z": 1.29,
+    "p_two_sided": 0.19873156612913787
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_CONT",
+   "label": "続けて着けている(今回着用・前走も着用)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 4506,
+   "win_roi": 0.774,
+   "place_roi": 0.812,
+   "avg_odds": 4.7,
+   "win": {
+    "obs": 911,
+    "exp": 970.2,
+    "ratio": 0.939,
+    "z": -2.19,
+    "p_two_sided": 0.028259406837515315
+   },
+   "top3": {
+    "obs": 2237,
+    "exp": 2346.7,
+    "ratio": 0.953,
+    "z": -3.34,
+    "p_two_sided": 0.0008459571421588856
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_CONT",
+   "label": "続けて着けている(今回着用・前走も着用)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 10449,
+   "win_roi": 0.82,
+   "place_roi": 0.763,
+   "avg_odds": 24.8,
+   "win": {
+    "obs": 572,
+    "exp": 526.6,
+    "ratio": 1.086,
+    "z": 2.04,
+    "p_two_sided": 0.04117161244728329
+   },
+   "top3": {
+    "obs": 2166,
+    "exp": 2144.0,
+    "ratio": 1.01,
+    "z": 0.54,
+    "p_two_sided": 0.5867744595530531
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_CONT",
+   "label": "続けて着けている(今回着用・前走も着用)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 8603,
+   "win_roi": 0.823,
+   "place_roi": 0.683,
+   "avg_odds": 134.9,
+   "win": {
+    "obs": 104,
+    "exp": 78.6,
+    "ratio": 1.324,
+    "z": 2.89,
+    "p_two_sided": 0.003887212965757948
+   },
+   "top3": {
+    "obs": 458,
+    "exp": 415.4,
+    "ratio": 1.102,
+    "z": 2.15,
+    "p_two_sided": 0.03132737901414456
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_PREVOFF",
+   "label": "前走は未着用で今回着用(初 + 再装着)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 1156,
+   "win_roi": 0.812,
+   "place_roi": 0.87,
+   "avg_odds": 5.0,
+   "win": {
+    "obs": 228,
+    "exp": 237.2,
+    "ratio": 0.961,
+    "z": -0.68,
+    "p_two_sided": 0.4939503304572719
+   },
+   "top3": {
+    "obs": 589,
+    "exp": 596.8,
+    "ratio": 0.987,
+    "z": -0.47,
+    "p_two_sided": 0.6389395221013627
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_PREVOFF",
+   "label": "前走は未着用で今回着用(初 + 再装着)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 3880,
+   "win_roi": 0.759,
+   "place_roi": 0.728,
+   "avg_odds": 29.7,
+   "win": {
+    "obs": 191,
+    "exp": 183.3,
+    "ratio": 1.042,
+    "z": 0.59,
+    "p_two_sided": 0.5554321010869242
+   },
+   "top3": {
+    "obs": 699,
+    "exp": 758.7,
+    "ratio": 0.921,
+    "z": -2.47,
+    "p_two_sided": 0.013470367169459922
+   }
+  },
+  {
+   "period": "p2126",
+   "id": "BL_PREVOFF",
+   "label": "前走は未着用で今回着用(初 + 再装着)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 3651,
+   "win_roi": 0.634,
+   "place_roi": 0.688,
+   "avg_odds": 146.2,
+   "win": {
+    "obs": 29,
+    "exp": 30.6,
+    "ratio": 0.948,
+    "z": -0.29,
+    "p_two_sided": 0.7708656860885278
+   },
+   "top3": {
+    "obs": 173,
+    "exp": 163.4,
+    "ratio": 1.059,
+    "z": 0.77,
+    "p_two_sided": 0.44064986362675845
+   }
+  }
+ ]
+}

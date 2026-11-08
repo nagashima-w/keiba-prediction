@@ -1,0 +1,2419 @@
+{
+ "holm_alpha": 0.05,
+ "k": 31,
+ "candidates": [
+  {
+   "id": "H01",
+   "label": "乗り替わり(前走比)",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 24100,
+    "obs": 5223,
+    "exp": 4985.6,
+    "ratio": 1.048,
+    "z": 3.86,
+    "q_bh": 0.001643
+   },
+   "confirm": {
+    "n": 28091,
+    "obs": 6163,
+    "exp": 6060.7,
+    "ratio": 1.017,
+    "z": 1.52,
+    "same_direction": true,
+    "p_one_sided": 0.06425548781893584,
+    "win_roi": 0.807,
+    "place_roi": 0.839,
+    "avg_odds": 4.6,
+    "p_holm": 0.385533
+   },
+   "survived": false
+  },
+  {
+   "id": "H03",
+   "label": "外国人騎手への乗り替わり",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 4717,
+    "obs": 1189,
+    "exp": 1087.5,
+    "ratio": 1.093,
+    "z": 3.58,
+    "q_bh": 0.004198
+   },
+   "confirm": {
+    "n": 3766,
+    "obs": 1008,
+    "exp": 884.4,
+    "ratio": 1.14,
+    "z": 4.85,
+    "same_direction": true,
+    "p_one_sided": 6.173073720091988e-07,
+    "win_roi": 0.834,
+    "place_roi": 0.867,
+    "avg_odds": 3.9,
+    "p_holm": 1.4e-05
+   },
+   "survived": true
+  },
+  {
+   "id": "H07",
+   "label": "馬体重 420kg 未満",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 866,
+    "obs": 401,
+    "exp": 451.1,
+    "ratio": 0.889,
+    "z": -3.47,
+    "q_bh": 0.005843
+   },
+   "confirm": {
+    "n": 966,
+    "obs": 449,
+    "exp": 502.3,
+    "ratio": 0.894,
+    "z": -3.5,
+    "same_direction": true,
+    "p_one_sided": 0.00023262907903552504,
+    "win_roi": 0.766,
+    "place_roi": 0.765,
+    "avg_odds": 5.1,
+    "p_holm": 0.003257
+   },
+   "survived": true
+  },
+  {
+   "id": "H07",
+   "label": "馬体重 420kg 未満",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 2939,
+    "obs": 482,
+    "exp": 549.1,
+    "ratio": 0.878,
+    "z": -3.24,
+    "q_bh": 0.010015
+   },
+   "confirm": {
+    "n": 3708,
+    "obs": 585,
+    "exp": 686.7,
+    "ratio": 0.852,
+    "z": -4.39,
+    "same_direction": true,
+    "p_one_sided": 5.667533041826754e-06,
+    "win_roi": 0.65,
+    "place_roi": 0.635,
+    "avg_odds": 38.6,
+    "p_holm": 0.000119
+   },
+   "survived": true
+  },
+  {
+   "id": "H08",
+   "label": "馬体重 520kg 以上",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 3213,
+    "obs": 780,
+    "exp": 703.0,
+    "ratio": 1.109,
+    "z": 3.35,
+    "q_bh": 0.007772
+   },
+   "confirm": {
+    "n": 3802,
+    "obs": 914,
+    "exp": 841.1,
+    "ratio": 1.087,
+    "z": 2.91,
+    "same_direction": true,
+    "p_one_sided": 0.001807143780806431,
+    "win_roi": 0.829,
+    "place_roi": 0.844,
+    "avg_odds": 4.4,
+    "p_holm": 0.023493
+   },
+   "survived": true
+  },
+  {
+   "id": "H10",
+   "label": "中 1 週(8〜14 日)",
+   "band": "4-9",
+   "outcome": "win",
+   "direction": "under",
+   "explore": {
+    "n": 11116,
+    "obs": 482,
+    "exp": 580.2,
+    "ratio": 0.831,
+    "z": -4.22,
+    "q_bh": 0.000474
+   },
+   "confirm": {
+    "n": 12444,
+    "obs": 533,
+    "exp": 621.8,
+    "ratio": 0.857,
+    "z": -3.68,
+    "same_direction": true,
+    "p_one_sided": 0.00011661697681536816,
+    "win_roi": 0.665,
+    "place_roi": 0.743,
+    "avg_odds": 34.7,
+    "p_holm": 0.001749
+   },
+   "survived": true
+  },
+  {
+   "id": "H11",
+   "label": "休み明け(180 日以上)",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 1106,
+    "obs": 478,
+    "exp": 556.9,
+    "ratio": 0.858,
+    "z": -4.83,
+    "q_bh": 5.3e-05
+   },
+   "confirm": {
+    "n": 1388,
+    "obs": 619,
+    "exp": 720.2,
+    "ratio": 0.86,
+    "z": -5.53,
+    "same_direction": true,
+    "p_one_sided": 1.6011539388090975e-08,
+    "win_roi": 0.769,
+    "place_roi": 0.793,
+    "avg_odds": 4.7,
+    "p_holm": 0.0
+   },
+   "survived": true
+  },
+  {
+   "id": "H11",
+   "label": "休み明け(180 日以上)",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 3735,
+    "obs": 115,
+    "exp": 175.3,
+    "ratio": 0.656,
+    "z": -4.7,
+    "q_bh": 7.4e-05
+   },
+   "confirm": {
+    "n": 3968,
+    "obs": 116,
+    "exp": 180.3,
+    "ratio": 0.643,
+    "z": -4.93,
+    "same_direction": true,
+    "p_one_sided": 4.11148083843931e-07,
+    "win_roi": 0.478,
+    "place_roi": 0.447,
+    "avg_odds": 153.9,
+    "p_holm": 1e-05
+   },
+   "survived": true
+  },
+  {
+   "id": "H12",
+   "label": "距離延長 400m 以上",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 6112,
+    "obs": 1042,
+    "exp": 1149.7,
+    "ratio": 0.906,
+    "z": -3.59,
+    "q_bh": 0.004196
+   },
+   "confirm": {
+    "n": 6734,
+    "obs": 1147,
+    "exp": 1276.9,
+    "ratio": 0.898,
+    "z": -4.12,
+    "same_direction": true,
+    "p_one_sided": 1.8943619950553294e-05,
+    "win_roi": 0.705,
+    "place_roi": 0.713,
+    "avg_odds": 41.2,
+    "p_holm": 0.000379
+   },
+   "survived": true
+  },
+  {
+   "id": "H12",
+   "label": "距離延長 400m 以上",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 8479,
+    "obs": 283,
+    "exp": 367.8,
+    "ratio": 0.77,
+    "z": -4.56,
+    "q_bh": 0.000108
+   },
+   "confirm": {
+    "n": 8305,
+    "obs": 250,
+    "exp": 347.0,
+    "ratio": 0.72,
+    "z": -5.36,
+    "same_direction": true,
+    "p_one_sided": 4.161097594981976e-08,
+    "win_roi": 0.523,
+    "place_roi": 0.479,
+    "avg_odds": 200.1,
+    "p_holm": 1e-06
+   },
+   "survived": true
+  },
+  {
+   "id": "H15",
+   "label": "前走で 4 角から 5 頭以上押し上げ",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 5985,
+    "obs": 385,
+    "exp": 331.2,
+    "ratio": 1.162,
+    "z": 3.06,
+    "q_bh": 0.015977
+   },
+   "confirm": {
+    "n": 6505,
+    "obs": 395,
+    "exp": 345.2,
+    "ratio": 1.144,
+    "z": 2.77,
+    "same_direction": true,
+    "p_one_sided": 0.002802814632765031,
+    "win_roi": 0.464,
+    "place_roi": 0.668,
+    "avg_odds": 104.3,
+    "p_holm": 0.033634
+   },
+   "survived": true
+  },
+  {
+   "id": "H19",
+   "label": "柵 B〜D × 7〜8 枠(芝)",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 5512,
+    "obs": 216,
+    "exp": 265.0,
+    "ratio": 0.815,
+    "z": -3.11,
+    "q_bh": 0.014183
+   },
+   "confirm": {
+    "n": 5341,
+    "obs": 225,
+    "exp": 256.7,
+    "ratio": 0.877,
+    "z": -2.04,
+    "same_direction": true,
+    "p_one_sided": 0.020675162866070056,
+    "win_roi": 0.633,
+    "place_roi": 0.629,
+    "avg_odds": 163.6,
+    "p_holm": 0.186076
+   },
+   "survived": false
+  },
+  {
+   "id": "H20",
+   "label": "柵 A × 1〜2 枠(芝。H18 の対照)",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 3577,
+    "obs": 216,
+    "exp": 158.0,
+    "ratio": 1.367,
+    "z": 4.75,
+    "q_bh": 6.5e-05
+   },
+   "confirm": {
+    "n": 4174,
+    "obs": 192,
+    "exp": 184.5,
+    "ratio": 1.04,
+    "z": 0.57,
+    "same_direction": true,
+    "p_one_sided": 0.28433884904632417,
+    "win_roi": 0.846,
+    "place_roi": 0.675,
+    "avg_odds": 147.3,
+    "p_holm": 1.0
+   },
+   "survived": false
+  },
+  {
+   "id": "H21",
+   "label": "生産者 ノーザンファーム",
+   "band": "1-3",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 8655,
+    "obs": 2055,
+    "exp": 1934.5,
+    "ratio": 1.062,
+    "z": 3.17,
+    "q_bh": 0.011991
+   },
+   "confirm": {
+    "n": 10594,
+    "obs": 2456,
+    "exp": 2437.1,
+    "ratio": 1.008,
+    "z": 0.45,
+    "same_direction": true,
+    "p_one_sided": 0.32635522028792,
+    "win_roi": 0.752,
+    "place_roi": 0.811,
+    "avg_odds": 4.1,
+    "p_holm": 1.0
+   },
+   "survived": false
+  },
+  {
+   "id": "H21",
+   "label": "生産者 ノーザンファーム",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 8655,
+    "obs": 4718,
+    "exp": 4563.6,
+    "ratio": 1.034,
+    "z": 3.39,
+    "q_bh": 0.007256
+   },
+   "confirm": {
+    "n": 10594,
+    "obs": 5707,
+    "exp": 5692.8,
+    "ratio": 1.002,
+    "z": 0.28,
+    "same_direction": true,
+    "p_one_sided": 0.3897387524442028,
+    "win_roi": 0.752,
+    "place_roi": 0.811,
+    "avg_odds": 4.1,
+    "p_holm": 1.0
+   },
+   "survived": false
+  },
+  {
+   "id": "H25",
+   "label": "見習騎手の減量",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 4542,
+    "obs": 2250,
+    "exp": 2378.7,
+    "ratio": 0.946,
+    "z": -3.89,
+    "q_bh": 0.001522
+   },
+   "confirm": {
+    "n": 5453,
+    "obs": 2723,
+    "exp": 2901.3,
+    "ratio": 0.939,
+    "z": -4.94,
+    "same_direction": true,
+    "p_one_sided": 3.906128543183264e-07,
+    "win_roi": 0.805,
+    "place_roi": 0.827,
+    "avg_odds": 4.8,
+    "p_holm": 1e-05
+   },
+   "survived": true
+  },
+  {
+   "id": "H25",
+   "label": "見習騎手の減量",
+   "band": "10+",
+   "outcome": "win",
+   "direction": "under",
+   "explore": {
+    "n": 17343,
+    "obs": 111,
+    "exp": 152.4,
+    "ratio": 0.729,
+    "z": -3.37,
+    "q_bh": 0.007405
+   },
+   "confirm": {
+    "n": 20703,
+    "obs": 142,
+    "exp": 146.1,
+    "ratio": 0.972,
+    "z": -0.34,
+    "same_direction": true,
+    "p_one_sided": 0.36692826396397193,
+    "win_roi": 0.59,
+    "place_roi": 0.579,
+    "avg_odds": 187.0,
+    "p_holm": 1.0
+   },
+   "survived": false
+  },
+  {
+   "id": "H26",
+   "label": "女性騎手",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 1222,
+    "obs": 157,
+    "exp": 242.9,
+    "ratio": 0.646,
+    "z": -6.28,
+    "q_bh": 0.0
+   },
+   "confirm": {
+    "n": 4393,
+    "obs": 771,
+    "exp": 877.6,
+    "ratio": 0.879,
+    "z": -4.11,
+    "same_direction": true,
+    "p_one_sided": 1.9782955868224065e-05,
+    "win_roi": 0.653,
+    "place_roi": 0.679,
+    "avg_odds": 29.7,
+    "p_holm": 0.000379
+   },
+   "survived": true
+  },
+  {
+   "id": "H26",
+   "label": "女性騎手",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 806,
+    "obs": 22,
+    "exp": 44.2,
+    "ratio": 0.497,
+    "z": -3.46,
+    "q_bh": 0.005965
+   },
+   "confirm": {
+    "n": 4279,
+    "obs": 159,
+    "exp": 185.9,
+    "ratio": 0.855,
+    "z": -2.03,
+    "same_direction": true,
+    "p_one_sided": 0.021178269642672286,
+    "win_roi": 0.419,
+    "place_roi": 0.49,
+    "avg_odds": 140.2,
+    "p_holm": 0.186076
+   },
+   "survived": false
+  },
+  {
+   "id": "H28",
+   "label": "地方所属 (地)",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 7832,
+    "obs": 299,
+    "exp": 387.2,
+    "ratio": 0.772,
+    "z": -4.63,
+    "q_bh": 9.3e-05
+   },
+   "confirm": {
+    "n": 8475,
+    "obs": 345,
+    "exp": 379.1,
+    "ratio": 0.91,
+    "z": -1.8,
+    "same_direction": true,
+    "p_one_sided": 0.03593031911292581,
+    "win_roi": 0.41,
+    "place_roi": 0.611,
+    "avg_odds": 172.0,
+    "p_holm": 0.251512
+   },
+   "survived": false
+  },
+  {
+   "id": "H30",
+   "label": "関西馬の関東遠征",
+   "band": "4-9",
+   "outcome": "win",
+   "direction": "over",
+   "explore": {
+    "n": 7990,
+    "obs": 508,
+    "exp": 428.3,
+    "ratio": 1.186,
+    "z": 3.98,
+    "q_bh": 0.0011
+   },
+   "confirm": {
+    "n": 10467,
+    "obs": 648,
+    "exp": 558.7,
+    "ratio": 1.16,
+    "z": 3.91,
+    "same_direction": true,
+    "p_one_sided": 4.6148060556208884e-05,
+    "win_roi": 0.845,
+    "place_roi": 0.806,
+    "avg_odds": 20.9,
+    "p_holm": 0.000785
+   },
+   "survived": true
+  },
+  {
+   "id": "H30",
+   "label": "関西馬の関東遠征",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 7990,
+    "obs": 1829,
+    "exp": 1666.2,
+    "ratio": 1.098,
+    "z": 4.57,
+    "q_bh": 0.000108
+   },
+   "confirm": {
+    "n": 10467,
+    "obs": 2310,
+    "exp": 2218.9,
+    "ratio": 1.041,
+    "z": 2.22,
+    "same_direction": true,
+    "p_one_sided": 0.013209383807256277,
+    "win_roi": 0.845,
+    "place_roi": 0.806,
+    "avg_odds": 20.9,
+    "p_holm": 0.145303
+   },
+   "survived": false
+  },
+  {
+   "id": "H30",
+   "label": "関西馬の関東遠征",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 5290,
+    "obs": 355,
+    "exp": 286.8,
+    "ratio": 1.238,
+    "z": 4.17,
+    "q_bh": 0.000536
+   },
+   "confirm": {
+    "n": 7140,
+    "obs": 412,
+    "exp": 371.1,
+    "ratio": 1.11,
+    "z": 2.19,
+    "same_direction": true,
+    "p_one_sided": 0.014262118410668883,
+    "win_roi": 0.603,
+    "place_roi": 0.652,
+    "avg_odds": 109.1,
+    "p_holm": 0.145303
+   },
+   "survived": false
+  },
+  {
+   "id": "H31",
+   "label": "関東馬の関西遠征",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 1561,
+    "obs": 691,
+    "exp": 793.1,
+    "ratio": 0.871,
+    "z": -5.26,
+    "q_bh": 7e-06
+   },
+   "confirm": {
+    "n": 1905,
+    "obs": 880,
+    "exp": 978.4,
+    "ratio": 0.899,
+    "z": -4.59,
+    "same_direction": true,
+    "p_one_sided": 2.2162300481175476e-06,
+    "win_roi": 0.74,
+    "place_roi": 0.769,
+    "avg_odds": 4.7,
+    "p_holm": 4.9e-05
+   },
+   "survived": true
+  },
+  {
+   "id": "H31",
+   "label": "関東馬の関西遠征",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 4695,
+    "obs": 833,
+    "exp": 920.9,
+    "ratio": 0.905,
+    "z": -3.29,
+    "q_bh": 0.008796
+   },
+   "confirm": {
+    "n": 5740,
+    "obs": 990,
+    "exp": 1134.1,
+    "ratio": 0.873,
+    "z": -4.87,
+    "same_direction": true,
+    "p_one_sided": 5.579912432097827e-07,
+    "win_roi": 0.604,
+    "place_roi": 0.668,
+    "avg_odds": 33.0,
+    "p_holm": 1.3e-05
+   },
+   "survived": true
+  },
+  {
+   "id": "H32",
+   "label": "芝→ダート替わり",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 2088,
+    "obs": 930,
+    "exp": 1092.5,
+    "ratio": 0.851,
+    "z": -7.26,
+    "q_bh": 0.0
+   },
+   "confirm": {
+    "n": 2489,
+    "obs": 1135,
+    "exp": 1342.8,
+    "ratio": 0.845,
+    "z": -8.52,
+    "same_direction": true,
+    "p_one_sided": 7.977666076683275e-18,
+    "win_roi": 0.827,
+    "place_roi": 0.824,
+    "avg_odds": 5.0,
+    "p_holm": 0.0
+   },
+   "survived": true
+  },
+  {
+   "id": "H32",
+   "label": "芝→ダート替わり",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 6947,
+    "obs": 1173,
+    "exp": 1367.4,
+    "ratio": 0.858,
+    "z": -5.98,
+    "q_bh": 0.0
+   },
+   "confirm": {
+    "n": 7660,
+    "obs": 1241,
+    "exp": 1544.6,
+    "ratio": 0.803,
+    "z": -8.85,
+    "same_direction": true,
+    "p_one_sided": 4.375964799309073e-19,
+    "win_roi": 0.726,
+    "place_roi": 0.701,
+    "avg_odds": 31.3,
+    "p_holm": 0.0
+   },
+   "survived": true
+  },
+  {
+   "id": "H33",
+   "label": "ダート→芝替わり",
+   "band": "4-9",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 3644,
+    "obs": 572,
+    "exp": 656.7,
+    "ratio": 0.871,
+    "z": -3.72,
+    "q_bh": 0.002698
+   },
+   "confirm": {
+    "n": 4416,
+    "obs": 723,
+    "exp": 817.7,
+    "ratio": 0.884,
+    "z": -3.76,
+    "same_direction": true,
+    "p_one_sided": 8.495667849799812e-05,
+    "win_roi": 0.726,
+    "place_roi": 0.757,
+    "avg_odds": 41.8,
+    "p_holm": 0.001359
+   },
+   "survived": true
+  },
+  {
+   "id": "H34",
+   "label": "牝馬",
+   "band": "1-3",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 16235,
+    "obs": 8287,
+    "exp": 8645.4,
+    "ratio": 0.959,
+    "z": -5.76,
+    "q_bh": 0.0
+   },
+   "confirm": {
+    "n": 19500,
+    "obs": 9904,
+    "exp": 10622.0,
+    "ratio": 0.932,
+    "z": -10.56,
+    "same_direction": true,
+    "p_one_sided": 2.2833091328593693e-26,
+    "win_roi": 0.78,
+    "place_roi": 0.81,
+    "avg_odds": 4.6,
+    "p_holm": 0.0
+   },
+   "survived": true
+  },
+  {
+   "id": "H35",
+   "label": "セン馬",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "over",
+   "explore": {
+    "n": 3937,
+    "obs": 242,
+    "exp": 197.1,
+    "ratio": 1.228,
+    "z": 3.31,
+    "q_bh": 0.0086
+   },
+   "confirm": {
+    "n": 5299,
+    "obs": 257,
+    "exp": 257.0,
+    "ratio": 1.0,
+    "z": -0.0,
+    "same_direction": false,
+    "p_one_sided": 0.5,
+    "win_roi": 0.655,
+    "place_roi": 0.728,
+    "avg_odds": 144.3,
+    "p_holm": 1.0
+   },
+   "survived": false
+  },
+  {
+   "id": "H36",
+   "label": "7 歳以上",
+   "band": "10+",
+   "outcome": "top3",
+   "direction": "under",
+   "explore": {
+    "n": 5198,
+    "obs": 237,
+    "exp": 290.1,
+    "ratio": 0.817,
+    "z": -3.23,
+    "q_bh": 0.010015
+   },
+   "confirm": {
+    "n": 5321,
+    "obs": 208,
+    "exp": 271.0,
+    "ratio": 0.768,
+    "z": -3.96,
+    "same_direction": true,
+    "p_one_sided": 3.7474881691073525e-05,
+    "win_roi": 0.52,
+    "place_roi": 0.548,
+    "avg_odds": 149.9,
+    "p_holm": 0.000675
+   },
+   "survived": true
+  }
+ ],
+ "rows": [
+  {
+   "id": "H01",
+   "label": "乗り替わり(前走比)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 28091,
+   "win_roi": 0.807,
+   "place_roi": 0.839,
+   "avg_odds": 4.6,
+   "win": {
+    "obs": 6163,
+    "exp": 6060.7,
+    "ratio": 1.017,
+    "z": 1.52,
+    "p_two_sided": 0.1283256015671549
+   },
+   "top3": {
+    "obs": 14650,
+    "exp": 14854.8,
+    "ratio": 0.986,
+    "z": -2.5,
+    "p_two_sided": 0.012466998564199562
+   }
+  },
+  {
+   "id": "H01",
+   "label": "乗り替わり(前走比)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 63901,
+   "win_roi": 0.744,
+   "place_roi": 0.764,
+   "avg_odds": 28.2,
+   "win": {
+    "obs": 3142,
+    "exp": 3244.4,
+    "ratio": 0.968,
+    "z": -1.86,
+    "p_two_sided": 0.0629638079699519
+   },
+   "top3": {
+    "obs": 12702,
+    "exp": 13216.4,
+    "ratio": 0.961,
+    "z": -5.14,
+    "p_two_sided": 2.812613187663039e-07
+   }
+  },
+  {
+   "id": "H01",
+   "label": "乗り替わり(前走比)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 59886,
+   "win_roi": 0.623,
+   "place_roi": 0.638,
+   "avg_odds": 159.5,
+   "win": {
+    "obs": 510,
+    "exp": 473.1,
+    "ratio": 1.078,
+    "z": 1.71,
+    "p_two_sided": 0.08803142159927821
+   },
+   "top3": {
+    "obs": 2651,
+    "exp": 2616.9,
+    "ratio": 1.013,
+    "z": 0.69,
+    "p_two_sided": 0.49171296292107003
+   }
+  },
+  {
+   "id": "H03",
+   "label": "外国人騎手への乗り替わり",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 3766,
+   "win_roi": 0.834,
+   "place_roi": 0.867,
+   "avg_odds": 3.9,
+   "win": {
+    "obs": 1008,
+    "exp": 884.4,
+    "ratio": 1.14,
+    "z": 4.85,
+    "p_two_sided": 1.2277713341923139e-06
+   },
+   "top3": {
+    "obs": 2194,
+    "exp": 2045.6,
+    "ratio": 1.073,
+    "z": 4.95,
+    "p_two_sided": 7.244645170353274e-07
+   }
+  },
+  {
+   "id": "H03",
+   "label": "外国人騎手への乗り替わり",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 3247,
+   "win_roi": 0.731,
+   "place_roi": 0.742,
+   "avg_odds": 19.7,
+   "win": {
+    "obs": 187,
+    "exp": 189.9,
+    "ratio": 0.985,
+    "z": -0.22,
+    "p_two_sided": 0.8248210356676269
+   },
+   "top3": {
+    "obs": 703,
+    "exp": 743.0,
+    "ratio": 0.946,
+    "z": -1.7,
+    "p_two_sided": 0.08895114404278603
+   }
+  },
+  {
+   "id": "H03",
+   "label": "外国人騎手への乗り替わり",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 967,
+   "win_roi": 0.554,
+   "place_roi": 0.707,
+   "avg_odds": 92.0,
+   "win": {
+    "obs": 9,
+    "exp": 11.2,
+    "ratio": 0.801,
+    "z": -0.67,
+    "p_two_sided": 0.5017879934637356
+   },
+   "top3": {
+    "obs": 68,
+    "exp": 56.5,
+    "ratio": 1.205,
+    "z": 1.59,
+    "p_two_sided": 0.11164600192542767
+   }
+  },
+  {
+   "id": "H07",
+   "label": "馬体重 420kg 未満",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 966,
+   "win_roi": 0.766,
+   "place_roi": 0.765,
+   "avg_odds": 5.1,
+   "win": {
+    "obs": 173,
+    "exp": 198.4,
+    "ratio": 0.872,
+    "z": -2.07,
+    "p_two_sided": 0.03860577759802734
+   },
+   "top3": {
+    "obs": 449,
+    "exp": 502.3,
+    "ratio": 0.894,
+    "z": -3.5,
+    "p_two_sided": 0.000467700231113929
+   }
+  },
+  {
+   "id": "H07",
+   "label": "馬体重 420kg 未満",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 3708,
+   "win_roi": 0.65,
+   "place_roi": 0.635,
+   "avg_odds": 38.6,
+   "win": {
+    "obs": 142,
+    "exp": 162.5,
+    "ratio": 0.874,
+    "z": -1.66,
+    "p_two_sided": 0.0977004814333697
+   },
+   "top3": {
+    "obs": 585,
+    "exp": 686.7,
+    "ratio": 0.852,
+    "z": -4.39,
+    "p_two_sided": 1.109522375177126e-05
+   }
+  },
+  {
+   "id": "H07",
+   "label": "馬体重 420kg 未満",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 5662,
+   "win_roi": 0.4,
+   "place_roi": 0.516,
+   "avg_odds": 222.2,
+   "win": {
+    "obs": 29,
+    "exp": 35.4,
+    "ratio": 0.818,
+    "z": -1.09,
+    "p_two_sided": 0.27735140923288176
+   },
+   "top3": {
+    "obs": 166,
+    "exp": 195.5,
+    "ratio": 0.849,
+    "z": -2.17,
+    "p_two_sided": 0.030358749100924627
+   }
+  },
+  {
+   "id": "H08",
+   "label": "馬体重 520kg 以上",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 3802,
+   "win_roi": 0.829,
+   "place_roi": 0.844,
+   "avg_odds": 4.4,
+   "win": {
+    "obs": 914,
+    "exp": 841.1,
+    "ratio": 1.087,
+    "z": 2.91,
+    "p_two_sided": 0.003610167699679639
+   },
+   "top3": {
+    "obs": 2035,
+    "exp": 1999.4,
+    "ratio": 1.018,
+    "z": 1.18,
+    "p_two_sided": 0.23776256876790497
+   }
+  },
+  {
+   "id": "H08",
+   "label": "馬体重 520kg 以上",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 6061,
+   "win_roi": 0.807,
+   "place_roi": 0.767,
+   "avg_odds": 24.3,
+   "win": {
+    "obs": 335,
+    "exp": 322.3,
+    "ratio": 1.039,
+    "z": 0.73,
+    "p_two_sided": 0.46370967549048253
+   },
+   "top3": {
+    "obs": 1240,
+    "exp": 1285.2,
+    "ratio": 0.965,
+    "z": -1.45,
+    "p_two_sided": 0.1477422540288997
+   }
+  },
+  {
+   "id": "H08",
+   "label": "馬体重 520kg 以上",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 4328,
+   "win_roi": 0.771,
+   "place_roi": 0.66,
+   "avg_odds": 139.2,
+   "win": {
+    "obs": 48,
+    "exp": 41.0,
+    "ratio": 1.172,
+    "z": 1.11,
+    "p_two_sided": 0.2682806440939935
+   },
+   "top3": {
+    "obs": 209,
+    "exp": 214.3,
+    "ratio": 0.975,
+    "z": -0.38,
+    "p_two_sided": 0.7072306962409857
+   }
+  },
+  {
+   "id": "H10",
+   "label": "中 1 週(8〜14 日)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 5611,
+   "win_roi": 0.76,
+   "place_roi": 0.818,
+   "avg_odds": 4.5,
+   "win": {
+    "obs": 1189,
+    "exp": 1251.2,
+    "ratio": 0.95,
+    "z": -2.04,
+    "p_two_sided": 0.0411758877168076
+   },
+   "top3": {
+    "obs": 2979,
+    "exp": 3011.7,
+    "ratio": 0.989,
+    "z": -0.89,
+    "p_two_sided": 0.37125882015979517
+   }
+  },
+  {
+   "id": "H10",
+   "label": "中 1 週(8〜14 日)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 12444,
+   "win_roi": 0.665,
+   "place_roi": 0.743,
+   "avg_odds": 34.7,
+   "win": {
+    "obs": 533,
+    "exp": 621.8,
+    "ratio": 0.857,
+    "z": -3.68,
+    "p_two_sided": 0.00023406399197010324
+   },
+   "top3": {
+    "obs": 2489,
+    "exp": 2505.3,
+    "ratio": 0.993,
+    "z": -0.37,
+    "p_two_sided": 0.7094681394715764
+   }
+  },
+  {
+   "id": "H10",
+   "label": "中 1 週(8〜14 日)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 9399,
+   "win_roi": 0.505,
+   "place_roi": 0.545,
+   "avg_odds": 182.0,
+   "win": {
+    "obs": 52,
+    "exp": 82.8,
+    "ratio": 0.628,
+    "z": -3.41,
+    "p_two_sided": 0.00065297502080207
+   },
+   "top3": {
+    "obs": 347,
+    "exp": 430.4,
+    "ratio": 0.806,
+    "z": -4.14,
+    "p_two_sided": 3.4529434877946866e-05
+   }
+  },
+  {
+   "id": "H11",
+   "label": "休み明け(180 日以上)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 1388,
+   "win_roi": 0.769,
+   "place_roi": 0.793,
+   "avg_odds": 4.7,
+   "win": {
+    "obs": 276,
+    "exp": 294.8,
+    "ratio": 0.936,
+    "z": -1.26,
+    "p_two_sided": 0.20863009000055993
+   },
+   "top3": {
+    "obs": 619,
+    "exp": 720.2,
+    "ratio": 0.86,
+    "z": -5.53,
+    "p_two_sided": 3.133843670161798e-08
+   }
+  },
+  {
+   "id": "H11",
+   "label": "休み明け(180 日以上)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 3351,
+   "win_roi": 0.7,
+   "place_roi": 0.734,
+   "avg_odds": 26.1,
+   "win": {
+    "obs": 157,
+    "exp": 167.6,
+    "ratio": 0.937,
+    "z": -0.84,
+    "p_two_sided": 0.3984964054883282
+   },
+   "top3": {
+    "obs": 584,
+    "exp": 678.4,
+    "ratio": 0.861,
+    "z": -4.14,
+    "p_two_sided": 3.442349538474753e-05
+   }
+  },
+  {
+   "id": "H11",
+   "label": "休み明け(180 日以上)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 3968,
+   "win_roi": 0.478,
+   "place_roi": 0.447,
+   "avg_odds": 153.9,
+   "win": {
+    "obs": 28,
+    "exp": 34.2,
+    "ratio": 0.819,
+    "z": -1.07,
+    "p_two_sided": 0.28613459081488113
+   },
+   "top3": {
+    "obs": 116,
+    "exp": 180.3,
+    "ratio": 0.643,
+    "z": -4.93,
+    "p_two_sided": 8.140755571508758e-07
+   }
+  },
+  {
+   "id": "H12",
+   "label": "距離延長 400m 以上",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 1751,
+   "win_roi": 0.888,
+   "place_roi": 0.902,
+   "avg_odds": 4.9,
+   "win": {
+    "obs": 401,
+    "exp": 360.1,
+    "ratio": 1.113,
+    "z": 2.47,
+    "p_two_sided": 0.0136948165568667
+   },
+   "top3": {
+    "obs": 944,
+    "exp": 896.5,
+    "ratio": 1.053,
+    "z": 2.31,
+    "p_two_sided": 0.02083053697763708
+   }
+  },
+  {
+   "id": "H12",
+   "label": "距離延長 400m 以上",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 6734,
+   "win_roi": 0.705,
+   "place_roi": 0.713,
+   "avg_odds": 41.2,
+   "win": {
+    "obs": 286,
+    "exp": 308.5,
+    "ratio": 0.927,
+    "z": -1.32,
+    "p_two_sided": 0.18627240405784085
+   },
+   "top3": {
+    "obs": 1147,
+    "exp": 1276.9,
+    "ratio": 0.898,
+    "z": -4.12,
+    "p_two_sided": 3.7449312121861905e-05
+   }
+  },
+  {
+   "id": "H12",
+   "label": "距離延長 400m 以上",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 8305,
+   "win_roi": 0.523,
+   "place_roi": 0.479,
+   "avg_odds": 200.1,
+   "win": {
+    "obs": 54,
+    "exp": 62.7,
+    "ratio": 0.861,
+    "z": -1.1,
+    "p_two_sided": 0.2696533682339028
+   },
+   "top3": {
+    "obs": 250,
+    "exp": 347.0,
+    "ratio": 0.72,
+    "z": -5.36,
+    "p_two_sided": 8.246017032287193e-08
+   }
+  },
+  {
+   "id": "H15",
+   "label": "前走で 4 角から 5 頭以上押し上げ",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 8837,
+   "win_roi": 0.785,
+   "place_roi": 0.828,
+   "avg_odds": 4.5,
+   "win": {
+    "obs": 1895,
+    "exp": 1941.8,
+    "ratio": 0.976,
+    "z": -1.23,
+    "p_two_sided": 0.2196344470176152
+   },
+   "top3": {
+    "obs": 4691,
+    "exp": 4619.1,
+    "ratio": 1.016,
+    "z": 1.56,
+    "p_two_sided": 0.11831816450559207
+   }
+  },
+  {
+   "id": "H15",
+   "label": "前走で 4 角から 5 頭以上押し上げ",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 14269,
+   "win_roi": 0.752,
+   "place_roi": 0.75,
+   "avg_odds": 20.9,
+   "win": {
+    "obs": 785,
+    "exp": 785.1,
+    "ratio": 1.0,
+    "z": -0.0,
+    "p_two_sided": 0.9963504277518324
+   },
+   "top3": {
+    "obs": 3191,
+    "exp": 3087.7,
+    "ratio": 1.033,
+    "z": 2.14,
+    "p_two_sided": 0.03210381968644561
+   }
+  },
+  {
+   "id": "H15",
+   "label": "前走で 4 角から 5 頭以上押し上げ",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 6505,
+   "win_roi": 0.464,
+   "place_roi": 0.668,
+   "avg_odds": 104.3,
+   "win": {
+    "obs": 58,
+    "exp": 69.7,
+    "ratio": 0.833,
+    "z": -1.41,
+    "p_two_sided": 0.15926949920250802
+   },
+   "top3": {
+    "obs": 395,
+    "exp": 345.2,
+    "ratio": 1.144,
+    "z": 2.77,
+    "p_two_sided": 0.005577622575723632
+   }
+  },
+  {
+   "id": "H19",
+   "label": "柵 B〜D × 7〜8 枠(芝)",
+   "baseline": "ALL_TURF",
+   "band": "1-3",
+   "n": 3419,
+   "win_roi": 0.781,
+   "place_roi": 0.805,
+   "avg_odds": 4.4,
+   "win": {
+    "obs": 749,
+    "exp": 750.5,
+    "ratio": 0.998,
+    "z": -0.06,
+    "p_two_sided": 0.9491253286013405
+   },
+   "top3": {
+    "obs": 1778,
+    "exp": 1811.3,
+    "ratio": 0.982,
+    "z": -1.16,
+    "p_two_sided": 0.24419791769892518
+   }
+  },
+  {
+   "id": "H19",
+   "label": "柵 B〜D × 7〜8 枠(芝)",
+   "baseline": "ALL_TURF",
+   "band": "4-9",
+   "n": 6945,
+   "win_roi": 0.736,
+   "place_roi": 0.735,
+   "avg_odds": 29.5,
+   "win": {
+    "obs": 354,
+    "exp": 354.6,
+    "ratio": 0.998,
+    "z": -0.03,
+    "p_two_sided": 0.9756861394080726
+   },
+   "top3": {
+    "obs": 1391,
+    "exp": 1450.1,
+    "ratio": 0.959,
+    "z": -1.79,
+    "p_two_sided": 0.07385485242240422
+   }
+  },
+  {
+   "id": "H19",
+   "label": "柵 B〜D × 7〜8 枠(芝)",
+   "baseline": "ALL_TURF",
+   "band": "10+",
+   "n": 5341,
+   "win_roi": 0.633,
+   "place_roi": 0.629,
+   "avg_odds": 163.6,
+   "win": {
+    "obs": 48,
+    "exp": 53.5,
+    "ratio": 0.898,
+    "z": -0.75,
+    "p_two_sided": 0.45060682638355587
+   },
+   "top3": {
+    "obs": 225,
+    "exp": 256.7,
+    "ratio": 0.877,
+    "z": -2.04,
+    "p_two_sided": 0.04104915981448201
+   }
+  },
+  {
+   "id": "H20",
+   "label": "柵 A × 1〜2 枠(芝。H18 の対照)",
+   "baseline": "ALL_TURF",
+   "band": "1-3",
+   "n": 3028,
+   "win_roi": 0.801,
+   "place_roi": 0.826,
+   "avg_odds": 4.4,
+   "win": {
+    "obs": 693,
+    "exp": 673.4,
+    "ratio": 1.029,
+    "z": 0.88,
+    "p_two_sided": 0.3813173903513202
+   },
+   "top3": {
+    "obs": 1616,
+    "exp": 1614.0,
+    "ratio": 1.001,
+    "z": 0.07,
+    "p_two_sided": 0.9410605984352262
+   }
+  },
+  {
+   "id": "H20",
+   "label": "柵 A × 1〜2 枠(芝。H18 の対照)",
+   "baseline": "ALL_TURF",
+   "band": "4-9",
+   "n": 5535,
+   "win_roi": 0.778,
+   "place_roi": 0.766,
+   "avg_odds": 28.4,
+   "win": {
+    "obs": 277,
+    "exp": 291.1,
+    "ratio": 0.952,
+    "z": -0.86,
+    "p_two_sided": 0.3922764406017595
+   },
+   "top3": {
+    "obs": 1196,
+    "exp": 1168.7,
+    "ratio": 1.023,
+    "z": 0.92,
+    "p_two_sided": 0.3568299217267933
+   }
+  },
+  {
+   "id": "H20",
+   "label": "柵 A × 1〜2 枠(芝。H18 の対照)",
+   "baseline": "ALL_TURF",
+   "band": "10+",
+   "n": 4174,
+   "win_roi": 0.846,
+   "place_roi": 0.675,
+   "avg_odds": 147.3,
+   "win": {
+    "obs": 48,
+    "exp": 36.6,
+    "ratio": 1.312,
+    "z": 1.9,
+    "p_two_sided": 0.05724536928104312
+   },
+   "top3": {
+    "obs": 192,
+    "exp": 184.5,
+    "ratio": 1.04,
+    "z": 0.57,
+    "p_two_sided": 0.571274563633765
+   }
+  },
+  {
+   "id": "H21",
+   "label": "生産者 ノーザンファーム",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 10594,
+   "win_roi": 0.752,
+   "place_roi": 0.811,
+   "avg_odds": 4.1,
+   "win": {
+    "obs": 2456,
+    "exp": 2437.1,
+    "ratio": 1.008,
+    "z": 0.45,
+    "p_two_sided": 0.6557302933419844
+   },
+   "top3": {
+    "obs": 5707,
+    "exp": 5692.8,
+    "ratio": 1.002,
+    "z": 0.28,
+    "p_two_sided": 0.7782499154421518
+   }
+  },
+  {
+   "id": "H21",
+   "label": "生産者 ノーザンファーム",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 12900,
+   "win_roi": 0.72,
+   "place_roi": 0.737,
+   "avg_odds": 21.4,
+   "win": {
+    "obs": 676,
+    "exp": 719.0,
+    "ratio": 0.94,
+    "z": -1.66,
+    "p_two_sided": 0.09668977275833734
+   },
+   "top3": {
+    "obs": 2671,
+    "exp": 2830.5,
+    "ratio": 0.944,
+    "z": -3.46,
+    "p_two_sided": 0.0005389605119737122
+   }
+  },
+  {
+   "id": "H21",
+   "label": "生産者 ノーザンファーム",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 6539,
+   "win_roi": 0.49,
+   "place_roi": 0.643,
+   "avg_odds": 105.9,
+   "win": {
+    "obs": 55,
+    "exp": 69.8,
+    "ratio": 0.788,
+    "z": -1.78,
+    "p_two_sided": 0.07442526392169449
+   },
+   "top3": {
+    "obs": 345,
+    "exp": 349.3,
+    "ratio": 0.988,
+    "z": -0.24,
+    "p_two_sided": 0.8099273664221721
+   }
+  },
+  {
+   "id": "H25",
+   "label": "見習騎手の減量",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 5453,
+   "win_roi": 0.805,
+   "place_roi": 0.827,
+   "avg_odds": 4.8,
+   "win": {
+    "obs": 1134,
+    "exp": 1171.6,
+    "ratio": 0.968,
+    "z": -1.27,
+    "p_two_sided": 0.20524931213207107
+   },
+   "top3": {
+    "obs": 2723,
+    "exp": 2901.3,
+    "ratio": 0.939,
+    "z": -4.94,
+    "p_two_sided": 7.915092291770175e-07
+   }
+  },
+  {
+   "id": "H25",
+   "label": "見習騎手の減量",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 17336,
+   "win_roi": 0.77,
+   "place_roi": 0.755,
+   "avg_odds": 32.6,
+   "win": {
+    "obs": 835,
+    "exp": 791.4,
+    "ratio": 1.055,
+    "z": 1.6,
+    "p_two_sided": 0.1102141424421442
+   },
+   "top3": {
+    "obs": 3264,
+    "exp": 3348.4,
+    "ratio": 0.975,
+    "z": -1.66,
+    "p_two_sided": 0.09656678049275194
+   }
+  },
+  {
+   "id": "H25",
+   "label": "見習騎手の減量",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 20703,
+   "win_roi": 0.59,
+   "place_roi": 0.579,
+   "avg_odds": 187.0,
+   "win": {
+    "obs": 142,
+    "exp": 146.1,
+    "ratio": 0.972,
+    "z": -0.34,
+    "p_two_sided": 0.7311240487954227
+   },
+   "top3": {
+    "obs": 745,
+    "exp": 819.6,
+    "ratio": 0.909,
+    "z": -2.68,
+    "p_two_sided": 0.007414121706617078
+   }
+  },
+  {
+   "id": "H26",
+   "label": "女性騎手",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 1590,
+   "win_roi": 0.795,
+   "place_roi": 0.765,
+   "avg_odds": 4.8,
+   "win": {
+    "obs": 322,
+    "exp": 336.6,
+    "ratio": 0.957,
+    "z": -0.92,
+    "p_two_sided": 0.36013392528293553
+   },
+   "top3": {
+    "obs": 740,
+    "exp": 834.2,
+    "ratio": 0.887,
+    "z": -4.82,
+    "p_two_sided": 1.4113742514424587e-06
+   }
+  },
+  {
+   "id": "H26",
+   "label": "女性騎手",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 4393,
+   "win_roi": 0.653,
+   "place_roi": 0.679,
+   "avg_odds": 29.7,
+   "win": {
+    "obs": 208,
+    "exp": 212.6,
+    "ratio": 0.978,
+    "z": -0.33,
+    "p_two_sided": 0.7422145831415826
+   },
+   "top3": {
+    "obs": 771,
+    "exp": 877.6,
+    "ratio": 0.879,
+    "z": -4.11,
+    "p_two_sided": 3.892658479928404e-05
+   }
+  },
+  {
+   "id": "H26",
+   "label": "女性騎手",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 4279,
+   "win_roi": 0.419,
+   "place_roi": 0.49,
+   "avg_odds": 140.2,
+   "win": {
+    "obs": 32,
+    "exp": 34.1,
+    "ratio": 0.938,
+    "z": -0.36,
+    "p_two_sided": 0.7171418208965838
+   },
+   "top3": {
+    "obs": 159,
+    "exp": 185.9,
+    "ratio": 0.855,
+    "z": -2.03,
+    "p_two_sided": 0.04269060939889961
+   }
+  },
+  {
+   "id": "H28",
+   "label": "地方所属 (地)",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 1212,
+   "win_roi": 0.813,
+   "place_roi": 0.82,
+   "avg_odds": 4.9,
+   "win": {
+    "obs": 228,
+    "exp": 248.1,
+    "ratio": 0.919,
+    "z": -1.46,
+    "p_two_sided": 0.14437726856335456
+   },
+   "top3": {
+    "obs": 558,
+    "exp": 610.9,
+    "ratio": 0.913,
+    "z": -3.09,
+    "p_two_sided": 0.0020035013236891354
+   }
+  },
+  {
+   "id": "H28",
+   "label": "地方所属 (地)",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 5200,
+   "win_roi": 0.718,
+   "place_roi": 0.73,
+   "avg_odds": 35.0,
+   "win": {
+    "obs": 227,
+    "exp": 245.0,
+    "ratio": 0.926,
+    "z": -1.19,
+    "p_two_sided": 0.23491458605128812
+   },
+   "top3": {
+    "obs": 994,
+    "exp": 993.3,
+    "ratio": 1.001,
+    "z": 0.02,
+    "p_two_sided": 0.981023220242367
+   }
+  },
+  {
+   "id": "H28",
+   "label": "地方所属 (地)",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 8475,
+   "win_roi": 0.41,
+   "place_roi": 0.611,
+   "avg_odds": 172.0,
+   "win": {
+    "obs": 54,
+    "exp": 74.9,
+    "ratio": 0.721,
+    "z": -2.43,
+    "p_two_sided": 0.015148916207531763
+   },
+   "top3": {
+    "obs": 345,
+    "exp": 379.1,
+    "ratio": 0.91,
+    "z": -1.8,
+    "p_two_sided": 0.0717195444639697
+   }
+  },
+  {
+   "id": "H30",
+   "label": "関西馬の関東遠征",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 5980,
+   "win_roi": 0.842,
+   "place_roi": 0.857,
+   "avg_odds": 4.6,
+   "win": {
+    "obs": 1326,
+    "exp": 1281.1,
+    "ratio": 1.035,
+    "z": 1.44,
+    "p_two_sided": 0.14867858123299166
+   },
+   "top3": {
+    "obs": 3078,
+    "exp": 3085.5,
+    "ratio": 0.998,
+    "z": -0.2,
+    "p_two_sided": 0.8428992099941888
+   }
+  },
+  {
+   "id": "H30",
+   "label": "関西馬の関東遠征",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 10467,
+   "win_roi": 0.845,
+   "place_roi": 0.806,
+   "avg_odds": 20.9,
+   "win": {
+    "obs": 648,
+    "exp": 558.7,
+    "ratio": 1.16,
+    "z": 3.91,
+    "p_two_sided": 9.307052825858709e-05
+   },
+   "top3": {
+    "obs": 2310,
+    "exp": 2218.9,
+    "ratio": 1.041,
+    "z": 2.22,
+    "p_two_sided": 0.026394703817963865
+   }
+  },
+  {
+   "id": "H30",
+   "label": "関西馬の関東遠征",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 7140,
+   "win_roi": 0.603,
+   "place_roi": 0.652,
+   "avg_odds": 109.1,
+   "win": {
+    "obs": 78,
+    "exp": 72.7,
+    "ratio": 1.073,
+    "z": 0.62,
+    "p_two_sided": 0.5325680560277017
+   },
+   "top3": {
+    "obs": 412,
+    "exp": 371.1,
+    "ratio": 1.11,
+    "z": 2.19,
+    "p_two_sided": 0.028223391822668607
+   }
+  },
+  {
+   "id": "H31",
+   "label": "関東馬の関西遠征",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 1905,
+   "win_roi": 0.74,
+   "place_roi": 0.769,
+   "avg_odds": 4.7,
+   "win": {
+    "obs": 350,
+    "exp": 402.5,
+    "ratio": 0.87,
+    "z": -3.01,
+    "p_two_sided": 0.002631129365627934
+   },
+   "top3": {
+    "obs": 880,
+    "exp": 978.4,
+    "ratio": 0.899,
+    "z": -4.59,
+    "p_two_sided": 4.428145251853569e-06
+   }
+  },
+  {
+   "id": "H31",
+   "label": "関東馬の関西遠征",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 5740,
+   "win_roi": 0.604,
+   "place_roi": 0.668,
+   "avg_odds": 33.0,
+   "win": {
+    "obs": 242,
+    "exp": 281.6,
+    "ratio": 0.859,
+    "z": -2.44,
+    "p_two_sided": 0.014828331937178118
+   },
+   "top3": {
+    "obs": 990,
+    "exp": 1134.1,
+    "ratio": 0.873,
+    "z": -4.87,
+    "p_two_sided": 1.1064887048304453e-06
+   }
+  },
+  {
+   "id": "H31",
+   "label": "関東馬の関西遠征",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 7217,
+   "win_roi": 0.582,
+   "place_roi": 0.554,
+   "avg_odds": 164.7,
+   "win": {
+    "obs": 58,
+    "exp": 60.0,
+    "ratio": 0.967,
+    "z": -0.26,
+    "p_two_sided": 0.7954833865891416
+   },
+   "top3": {
+    "obs": 297,
+    "exp": 316.2,
+    "ratio": 0.939,
+    "z": -1.11,
+    "p_two_sided": 0.26589128118079375
+   }
+  },
+  {
+   "id": "H32",
+   "label": "芝→ダート替わり",
+   "baseline": "ALL_DIRT",
+   "band": "1-3",
+   "n": 2489,
+   "win_roi": 0.827,
+   "place_roi": 0.824,
+   "avg_odds": 5.0,
+   "win": {
+    "obs": 522,
+    "exp": 522.6,
+    "ratio": 0.999,
+    "z": -0.03,
+    "p_two_sided": 0.9751619390559562
+   },
+   "top3": {
+    "obs": 1135,
+    "exp": 1342.8,
+    "ratio": 0.845,
+    "z": -8.52,
+    "p_two_sided": 1.585879258249143e-17
+   }
+  },
+  {
+   "id": "H32",
+   "label": "芝→ダート替わり",
+   "baseline": "ALL_DIRT",
+   "band": "4-9",
+   "n": 7660,
+   "win_roi": 0.726,
+   "place_roi": 0.701,
+   "avg_odds": 31.3,
+   "win": {
+    "obs": 369,
+    "exp": 357.5,
+    "ratio": 1.032,
+    "z": 0.63,
+    "p_two_sided": 0.5304930953646353
+   },
+   "top3": {
+    "obs": 1241,
+    "exp": 1544.6,
+    "ratio": 0.803,
+    "z": -8.85,
+    "p_two_sided": 9.137305924682442e-19
+   }
+  },
+  {
+   "id": "H32",
+   "label": "芝→ダート替わり",
+   "baseline": "ALL_DIRT",
+   "band": "10+",
+   "n": 7193,
+   "win_roi": 0.584,
+   "place_roi": 0.567,
+   "avg_odds": 165.7,
+   "win": {
+    "obs": 50,
+    "exp": 49.2,
+    "ratio": 1.016,
+    "z": 0.11,
+    "p_two_sided": 0.9092423423244239
+   },
+   "top3": {
+    "obs": 244,
+    "exp": 303.1,
+    "ratio": 0.805,
+    "z": -3.49,
+    "p_two_sided": 0.00048078568654393044
+   }
+  },
+  {
+   "id": "H33",
+   "label": "ダート→芝替わり",
+   "baseline": "ALL_TURF",
+   "band": "1-3",
+   "n": 681,
+   "win_roi": 0.803,
+   "place_roi": 0.807,
+   "avg_odds": 5.5,
+   "win": {
+    "obs": 116,
+    "exp": 127.6,
+    "ratio": 0.909,
+    "z": -1.16,
+    "p_two_sided": 0.2474611207143162
+   },
+   "top3": {
+    "obs": 286,
+    "exp": 340.0,
+    "ratio": 0.841,
+    "z": -4.2,
+    "p_two_sided": 2.668535774163428e-05
+   }
+  },
+  {
+   "id": "H33",
+   "label": "ダート→芝替わり",
+   "baseline": "ALL_TURF",
+   "band": "4-9",
+   "n": 4416,
+   "win_roi": 0.726,
+   "place_roi": 0.757,
+   "avg_odds": 41.8,
+   "win": {
+    "obs": 187,
+    "exp": 192.0,
+    "ratio": 0.974,
+    "z": -0.37,
+    "p_two_sided": 0.7095947030396741
+   },
+   "top3": {
+    "obs": 723,
+    "exp": 817.7,
+    "ratio": 0.884,
+    "z": -3.76,
+    "p_two_sided": 0.00017202051110745461
+   }
+  },
+  {
+   "id": "H33",
+   "label": "ダート→芝替わり",
+   "baseline": "ALL_TURF",
+   "band": "10+",
+   "n": 7337,
+   "win_roi": 0.497,
+   "place_roi": 0.57,
+   "avg_odds": 194.8,
+   "win": {
+    "obs": 50,
+    "exp": 58.9,
+    "ratio": 0.849,
+    "z": -1.16,
+    "p_two_sided": 0.2444020983257904
+   },
+   "top3": {
+    "obs": 238,
+    "exp": 294.0,
+    "ratio": 0.81,
+    "z": -3.36,
+    "p_two_sided": 0.0007898069089386381
+   }
+  },
+  {
+   "id": "H34",
+   "label": "牝馬",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 19500,
+   "win_roi": 0.78,
+   "place_roi": 0.81,
+   "avg_odds": 4.6,
+   "win": {
+    "obs": 4122,
+    "exp": 4407.8,
+    "ratio": 0.935,
+    "z": -5.01,
+    "p_two_sided": 5.347654078232372e-07
+   },
+   "top3": {
+    "obs": 9904,
+    "exp": 10622.0,
+    "ratio": 0.932,
+    "z": -10.56,
+    "p_two_sided": 4.700270233468408e-26
+   }
+  },
+  {
+   "id": "H34",
+   "label": "牝馬",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 42221,
+   "win_roi": 0.738,
+   "place_roi": 0.749,
+   "avg_odds": 27.6,
+   "win": {
+    "obs": 2079,
+    "exp": 2096.8,
+    "ratio": 0.992,
+    "z": -0.4,
+    "p_two_sided": 0.6878994871602617
+   },
+   "top3": {
+    "obs": 8407,
+    "exp": 8605.8,
+    "ratio": 0.977,
+    "z": -2.46,
+    "p_two_sided": 0.014003998129933571
+   }
+  },
+  {
+   "id": "H34",
+   "label": "牝馬",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 38660,
+   "win_roi": 0.582,
+   "place_roi": 0.601,
+   "avg_odds": 165.0,
+   "win": {
+    "obs": 316,
+    "exp": 297.0,
+    "ratio": 1.064,
+    "z": 1.11,
+    "p_two_sided": 0.2666757372407488
+   },
+   "top3": {
+    "obs": 1649,
+    "exp": 1623.5,
+    "ratio": 1.016,
+    "z": 0.65,
+    "p_two_sided": 0.5148908430952273
+   }
+  },
+  {
+   "id": "H35",
+   "label": "セン馬",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 1594,
+   "win_roi": 0.855,
+   "place_roi": 0.835,
+   "avg_odds": 4.9,
+   "win": {
+    "obs": 329,
+    "exp": 325.7,
+    "ratio": 1.01,
+    "z": 0.21,
+    "p_two_sided": 0.8338560264092636
+   },
+   "top3": {
+    "obs": 777,
+    "exp": 806.0,
+    "ratio": 0.964,
+    "z": -1.48,
+    "p_two_sided": 0.13891974266753282
+   }
+  },
+  {
+   "id": "H35",
+   "label": "セン馬",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 5126,
+   "win_roi": 0.699,
+   "place_roi": 0.786,
+   "avg_odds": 30.0,
+   "win": {
+    "obs": 238,
+    "exp": 253.0,
+    "ratio": 0.941,
+    "z": -0.98,
+    "p_two_sided": 0.32934027578029734
+   },
+   "top3": {
+    "obs": 1030,
+    "exp": 1021.6,
+    "ratio": 1.008,
+    "z": 0.3,
+    "p_two_sided": 0.7640464454244753
+   }
+  },
+  {
+   "id": "H35",
+   "label": "セン馬",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 5299,
+   "win_roi": 0.655,
+   "place_roi": 0.728,
+   "avg_odds": 144.3,
+   "win": {
+    "obs": 48,
+    "exp": 49.7,
+    "ratio": 0.966,
+    "z": -0.24,
+    "p_two_sided": 0.8121269721296326
+   },
+   "top3": {
+    "obs": 257,
+    "exp": 257.0,
+    "ratio": 1.0,
+    "z": -0.0,
+    "p_two_sided": 0.9990092583672915
+   }
+  },
+  {
+   "id": "H36",
+   "label": "7 歳以上",
+   "baseline": "ALL",
+   "band": "1-3",
+   "n": 343,
+   "win_roi": 0.487,
+   "place_roi": 0.776,
+   "avg_odds": 5.6,
+   "win": {
+    "obs": 36,
+    "exp": 61.5,
+    "ratio": 0.585,
+    "z": -3.64,
+    "p_two_sided": 0.0002677224365037289
+   },
+   "top3": {
+    "obs": 146,
+    "exp": 159.0,
+    "ratio": 0.918,
+    "z": -1.43,
+    "p_two_sided": 0.15372420729391917
+   }
+  },
+  {
+   "id": "H36",
+   "label": "7 歳以上",
+   "baseline": "ALL",
+   "band": "4-9",
+   "n": 2506,
+   "win_roi": 0.753,
+   "place_roi": 0.681,
+   "avg_odds": 37.9,
+   "win": {
+    "obs": 104,
+    "exp": 116.0,
+    "ratio": 0.896,
+    "z": -1.15,
+    "p_two_sided": 0.25076633568552076
+   },
+   "top3": {
+    "obs": 422,
+    "exp": 464.8,
+    "ratio": 0.908,
+    "z": -2.23,
+    "p_two_sided": 0.02547418681975287
+   }
+  },
+  {
+   "id": "H36",
+   "label": "7 歳以上",
+   "baseline": "ALL",
+   "band": "10+",
+   "n": 5321,
+   "win_roi": 0.52,
+   "place_roi": 0.548,
+   "avg_odds": 149.9,
+   "win": {
+    "obs": 37,
+    "exp": 54.2,
+    "ratio": 0.683,
+    "z": -2.35,
+    "p_two_sided": 0.018714662099911763
+   },
+   "top3": {
+    "obs": 208,
+    "exp": 271.0,
+    "ratio": 0.768,
+    "z": -3.96,
+    "p_two_sided": 7.614125674969747e-05
+   }
+  }
+ ]
+}

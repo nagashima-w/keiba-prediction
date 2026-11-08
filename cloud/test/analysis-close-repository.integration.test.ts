@@ -68,6 +68,24 @@ describe("D1AnalysisStore.saveClose / getStoredClose(Issue #338)", () => {
     expect(r.allocation!.bets.length).toBe(3);
   });
 
+  it("Issue #658: 再計算の配分に使った寄せの割合が analysis_close.market_shrink_weight に入る。持たない配分・配分なしの回は NULL。再保存は上書き", async () => {
+    const id = await saveBase();
+    const weightOf = async (round: number): Promise<number | null> =>
+      (await local.db.prepare("SELECT market_shrink_weight AS w FROM analysis_close WHERE analysis_id = ? AND round = ?").bind(id, round).first<{ w: number | null }>())!.w;
+    const withWeight = (w: number): AnalysisAllocationRecord => ({ ...allocation([300, 200]), meta: { ...allocation([300, 200]).meta, marketShrinkWeight: w } });
+    await store().saveClose(id, okPayload(1, [300, 200], { allocation: withWeight(0.3) }));
+    expect(await weightOf(1)).toBe(0.3);
+    await store().saveClose(id, okPayload(2, [300, 200]));
+    expect(await weightOf(2)).toBeNull();
+    await store().saveClose(id, okPayload(1, [300, 200], { allocation: withWeight(0.8) }));
+    expect(await weightOf(1)).toBe(0.8);
+    // 重みのある回を、配分なしの失敗で上書きすると NULL に戻る(前の保存の値を残さない)
+    await store().saveClose(id, { round: 1, status: "failed", reason: "blocked", dueAtMs: DUE, firedAtMs: DUE + 10, lateMs: 10, oddsOfficialDatetime: null, allocation: null });
+    expect(await weightOf(1)).toBeNull();
+    // 分析時の提案の行(analysis_allocation_meta)には触れない
+    expect((await local.db.prepare("SELECT market_shrink_weight AS w FROM analysis_allocation_meta WHERE analysis_id = ?").bind(id).first<{ w: number | null }>())!.w).toBeNull();
+  });
+
   it("failed・skipped の回は、理由つきで配分なしの 1 行になり、買い目の行は作られない", async () => {
     const id = await saveBase();
     await store().saveClose(id, { round: 1, status: "failed", reason: "blocked", dueAtMs: DUE, firedAtMs: DUE + 10, lateMs: 10, oddsOfficialDatetime: null, allocation: null });

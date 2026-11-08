@@ -237,7 +237,7 @@ function expectedCountFor(betType: ComboBetType, n: number, r: number): number {
  * 出走馬番から期待組合せ数を導出する(枠連以外。`fetchComboOdds`の経路が使う)。
  * 頭数nは重複を除いた出走馬番の数で、`expectedCountFor`にbetTypeの構成頭数を渡す。
  */
-function expectedCountForUmabans(betType: ComboBetType, startingUmabans: readonly number[]): number {
+export function expectedCountForUmabans(betType: ComboBetType, startingUmabans: readonly number[]): number {
   return expectedCountFor(betType, new Set(startingUmabans).size, COMBO_SIZE[betType]);
 }
 

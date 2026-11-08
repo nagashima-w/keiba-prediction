@@ -12,3 +12,13 @@ export function loadFixture(name: string): string {
   const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
   return readFileSync(fileURLToPath(url), "utf-8");
 }
+
+/**
+ * `fixtures/` 配下の Shift_JIS のファイル(JRA 公式サイトの頁を取得したままのバイト列)を、
+ * デコードした文字列として読み込む(Issue #672)。本番ではデコードは呼び出し側(`cloud/src/jra-http.ts`)の仕事で、
+ * core のパーサは文字列だけを受ける。
+ */
+export function loadShiftJisFixture(name: string): string {
+  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
+  return new TextDecoder("shift_jis").decode(readFileSync(fileURLToPath(url)));
+}

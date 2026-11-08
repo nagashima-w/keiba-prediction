@@ -184,7 +184,8 @@ export interface AnalysisAllocationSettings {
   /**
    * 配分の前に、補正後の 3着内率を市場(単勝オッズ)の 3着内率に寄せる割合(設定の `marketShrinkWeight`。Issue #656。0〜1。1 は寄せない)。
    * **省略 = 1(寄せない)**: 計算し直しの道具(`scripts/allocation-dataset.ts`)・旧い入力(締切の再計算の `input_json`)は、この項目を持たない。
-   * 効くのは配分と、配分に渡す EV だけ(`buildAllocationForRows`)。画面・保存の補正後の確率と EV は変わらない。メタ行(D1)・配分の書き出しには記録しない。
+   * 効くのは配分と、配分に渡す EV だけ(`buildAllocationForRows`)。画面・保存の補正後の確率と EV は変わらない。
+   * 配分を作った経路では、メタ行(D1 の `market_shrink_weight`)・配分の書き出しに、この値を記録する(Issue #658。`buildAllocationForRows` が載せる。配分を作らない経路は記録しない)。
    */
   readonly marketShrinkWeight?: number;
 }
