@@ -143,6 +143,24 @@ describe("単勝・複勝の差し込み", () => {
     expect(r2.meta.oddsSources?.winPlace).toMatchObject({ source: "jra" });
   });
 
+  it("出走馬の複勝の下限が欠けている(place に無い・oddsMin が null)なら採用せず netkeiba に戻る(#675 記録 5)", async () => {
+    const snapshot = parseOdds(loadFixture("odds_202603020211.json"));
+    // 前提: 元の値は全 16 頭に複勝の下限がある(欠けを作る前に、欠けていないことを固定する)
+    expect(Object.keys(snapshot.place)).toHaveLength(16);
+    expect(Object.values(snapshot.place).every((p) => p.oddsMin !== null)).toBe(true);
+    const { 5: _dropped, ...withoutFive } = snapshot.place;
+    const noPlaceEntry = { ...snapshot, place: withoutFive };
+    const nullMin = { ...snapshot, place: { ...snapshot.place, 5: { oddsMin: null, oddsMax: null, ninki: null } } };
+    for (const [label, bad] of [["place に馬が無い", noPlaceEntry], ["下限が null", nullMin]] as const) {
+      const fetcher = new Recording();
+      const { override } = makeOverride({ winPlace: async () => bad });
+      const data = await scrapeRace(RACE_ID, { fetcher, now: NOW, oddsOverride: override });
+      expect(fetcher.urls.filter((u) => u.includes("api_get_jra_odds")), label).toHaveLength(1);
+      expect(data.odds.place[5], label).toEqual(snapshot.place[5]);
+      expect(data.meta.oddsSources?.winPlace, label).toMatchObject({ source: "netkeiba", fallbackReason: "horse-set-mismatch" });
+    }
+  });
+
   it("差し込みが例外を投げても scrapeRace は失敗せず、netkeiba に戻って理由 override-error", async () => {
     const fetcher = new Recording();
     const { override } = makeOverride({
@@ -206,6 +224,21 @@ describe("組合せの差し込み(券種ごと)", () => {
       expect(Object.keys(data.odds.wideCombo!), label).toHaveLength(120);
       expect(data.meta.oddsSources?.wide, label).toMatchObject({ source: "netkeiba", fallbackReason: "horse-set-mismatch" });
     }
+  });
+
+  it("組の数が期待数と同じでも、キーに範囲外の馬番(17)が混ざっていれば採用せず netkeiba に戻る(#675 記録 4。数の検査では落ちない)", async () => {
+    const wide = comboMap("wide");
+    const [firstKey] = [...wide.keys()];
+    const swapped = new Map(wide);
+    swapped.delete(firstKey!);
+    swapped.set("0117", { oddsMin: 5, oddsMax: 6, ninki: null });
+    expect(swapped.size).toBe(wide.size); // 前提: 数は一致(数の検査では落ちない)
+    expect(swapped.has("0117") && !wide.has("0117")).toBe(true); // 前提: 範囲外のキーが入れ替わっている
+    const fetcher = new Recording();
+    const { override } = makeOverride({ combo: async (bet) => (bet === "wide" ? { odds: swapped, officialDatetime: null } : null) });
+    const data = await scrapeRace(RACE_ID, { fetcher, now: NOW, oddsOverride: override }, OPTIONS);
+    expect(fetcher.urls.filter((u) => u.includes("type=5"))).toHaveLength(1);
+    expect(data.meta.oddsSources?.wide).toMatchObject({ source: "netkeiba", fallbackReason: "horse-set-mismatch" });
   });
 
   it("枠連は枠の構成から期待数 36 を求めて判定する(35 件は戻る)", async () => {
