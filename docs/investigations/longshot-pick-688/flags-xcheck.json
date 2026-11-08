@@ -1,0 +1,55 @@
+{
+ "n_cases": 4014,
+ "n_by_kind": {
+  "real": 2500,
+  "synthetic": 1500,
+  "fixed": 14
+ },
+ "n_mismatch": 0,
+ "mismatch_examples": [],
+ "ts_value_counts": {
+  "real": {
+   "longRest=0": 2112,
+   "surfaceChange=0": 1891,
+   "frontRunner=0": 1944,
+   "longshotSlump=0": 1984,
+   "longshotSlump=1": 192,
+   "longRest=None": 323,
+   "surfaceChange=None": 323,
+   "frontRunner=None": 324,
+   "longshotSlump=None": 324,
+   "surfaceChange=1": 286,
+   "frontRunner=1": 232,
+   "longRest=1": 65
+  },
+  "synthetic": {
+   "longRest=0": 1074,
+   "surfaceChange=1": 661,
+   "frontRunner=None": 707,
+   "longshotSlump=0": 869,
+   "surfaceChange=None": 545,
+   "frontRunner=0": 485,
+   "frontRunner=1": 308,
+   "longshotSlump=1": 165,
+   "longRest=None": 251,
+   "longshotSlump=None": 466,
+   "surfaceChange=0": 294,
+   "longRest=1": 175
+  },
+  "fixed": {
+   "longRest=None": 2,
+   "surfaceChange=None": 3,
+   "frontRunner=None": 4,
+   "longshotSlump=None": 4,
+   "longRest=0": 11,
+   "surfaceChange=0": 8,
+   "frontRunner=0": 7,
+   "longshotSlump=0": 9,
+   "longRest=1": 1,
+   "surfaceChange=1": 3,
+   "frontRunner=1": 3,
+   "longshotSlump=1": 1
+  }
+ },
+ "real_longrest_share_among_has_prior": 0.029857602204869087
+}
