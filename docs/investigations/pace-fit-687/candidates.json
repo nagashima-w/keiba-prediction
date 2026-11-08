@@ -1,0 +1,5 @@
+{
+ "rule": "n>=300 かつ BH q<0.05(plan §5。向きは問わない)",
+ "m_tested": 6,
+ "candidates": []
+}
