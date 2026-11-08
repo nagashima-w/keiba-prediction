@@ -1,0 +1,344 @@
+{
+ "R_D1400": {
+  "label": "距離1400m以下",
+  "races": 7121,
+  "S1": {
+   "level": 0.1911,
+   "rest": 0.1667,
+   "z": 4.31
+  },
+  "S2": {
+   "level": 1.537,
+   "rest": 1.621
+  },
+  "fav_fail": {
+   "level": 0.3702,
+   "rest": 0.3354
+  },
+  "4-9_win": {
+   "n": 42409,
+   "roi": 0.76,
+   "rest_roi": 0.76,
+   "exp_roi_same_rank": 0.759,
+   "diff_pt": 0.1,
+   "z": 0.04,
+   "p_one_sided_high": 0.4833074113105507,
+   "p_holm": 1.0
+  },
+  "4-9_place": {
+   "n": 42409,
+   "roi": 0.765,
+   "rest_roi": 0.758,
+   "exp_roi_same_rank": 0.758,
+   "diff_pt": 0.7,
+   "z": 0.6,
+   "p_one_sided_high": 0.27398396797512076,
+   "p_holm": 1.0
+  },
+  "10+_win": {
+   "n": 40724,
+   "roi": 0.596,
+   "rest_roi": 0.619,
+   "exp_roi_same_rank": 0.607,
+   "diff_pt": -1.0,
+   "z": -0.18,
+   "p_one_sided_high": 0.5705143837363472,
+   "p_holm": 1.0
+  },
+  "10+_place": {
+   "n": 40724,
+   "roi": 0.623,
+   "rest_roi": 0.617,
+   "exp_roi_same_rank": 0.608,
+   "diff_pt": 1.5,
+   "z": 0.62,
+   "p_one_sided_high": 0.2669655617798233,
+   "p_holm": 1.0
+  }
+ },
+ "R_KOKURA": {
+  "label": "小倉",
+  "races": 1582,
+  "S1": {
+   "level": 0.2099,
+   "rest": 0.1726,
+   "z": 3.73
+  },
+  "S2": {
+   "level": 1.494,
+   "rest": 1.599
+  },
+  "fav_fail": {
+   "level": 0.3925,
+   "rest": 0.3442
+  },
+  "4-9_win": {
+   "n": 9339,
+   "roi": 0.714,
+   "rest_roi": 0.764,
+   "exp_roi_same_rank": 0.764,
+   "diff_pt": -5.0,
+   "z": -1.31,
+   "p_one_sided_high": 0.9055877109104706,
+   "p_holm": 1.0
+  },
+  "4-9_place": {
+   "n": 9339,
+   "roi": 0.771,
+   "rest_roi": 0.76,
+   "exp_roi_same_rank": 0.76,
+   "diff_pt": 1.2,
+   "z": 0.61,
+   "p_one_sided_high": 0.2724144156513433,
+   "p_holm": 1.0
+  },
+  "10+_win": {
+   "n": 8362,
+   "roi": 0.767,
+   "rest_roi": 0.594,
+   "exp_roi_same_rank": 0.584,
+   "diff_pt": 18.2,
+   "z": 1.72,
+   "p_one_sided_high": 0.04287827304923336,
+   "p_holm": 0.81469
+  },
+  "10+_place": {
+   "n": 8362,
+   "roi": 0.713,
+   "rest_roi": 0.611,
+   "exp_roi_same_rank": 0.601,
+   "diff_pt": 11.3,
+   "z": 2.54,
+   "p_one_sided_high": 0.005482195302497181,
+   "p_holm": 0.12609
+  }
+ },
+ "R_FUKUSHIMA": {
+  "label": "福島",
+  "races": 1176,
+  "S1": {
+   "level": 0.2151,
+   "rest": 0.1728,
+   "z": 3.7
+  },
+  "S2": {
+   "level": 1.51,
+   "rest": 1.595
+  },
+  "fav_fail": {
+   "level": 0.392,
+   "rest": 0.3453
+  },
+  "4-9_win": {
+   "n": 7018,
+   "roi": 0.781,
+   "rest_roi": 0.759,
+   "exp_roi_same_rank": 0.758,
+   "diff_pt": 2.3,
+   "z": 0.47,
+   "p_one_sided_high": 0.319564331577746,
+   "p_holm": 1.0
+  },
+  "4-9_place": {
+   "n": 7018,
+   "roi": 0.77,
+   "rest_roi": 0.76,
+   "exp_roi_same_rank": 0.76,
+   "diff_pt": 1.0,
+   "z": 0.48,
+   "p_one_sided_high": 0.31443801970264645,
+   "p_holm": 1.0
+  },
+  "10+_win": {
+   "n": 6459,
+   "roi": 0.734,
+   "rest_roi": 0.607,
+   "exp_roi_same_rank": 0.6,
+   "diff_pt": 13.3,
+   "z": 1.08,
+   "p_one_sided_high": 0.14040018999497716,
+   "p_holm": 1.0
+  },
+  "10+_place": {
+   "n": 6459,
+   "roi": 0.655,
+   "rest_roi": 0.622,
+   "exp_roi_same_rank": 0.619,
+   "diff_pt": 3.6,
+   "z": 0.73,
+   "p_one_sided_high": 0.23390708202278254,
+   "p_holm": 1.0
+  }
+ },
+ "R_HANDI": {
+  "label": "ハンデ戦",
+  "races": 1115,
+  "S1": {
+   "level": 0.27,
+   "rest": 0.1699,
+   "z": 8.52
+  },
+  "S2": {
+   "level": 1.381,
+   "rest": 1.603
+  },
+  "fav_fail": {
+   "level": 0.4457,
+   "rest": 0.3422
+  },
+  "4-9_win": {
+   "n": 6663,
+   "roi": 0.819,
+   "rest_roi": 0.756,
+   "exp_roi_same_rank": 0.756,
+   "diff_pt": 6.3,
+   "z": 1.31,
+   "p_one_sided_high": 0.0954383930330516,
+   "p_holm": 1.0
+  },
+  "4-9_place": {
+   "n": 6663,
+   "roi": 0.782,
+   "rest_roi": 0.759,
+   "exp_roi_same_rank": 0.759,
+   "diff_pt": 2.3,
+   "z": 1.09,
+   "p_one_sided_high": 0.1386538725728126,
+   "p_holm": 1.0
+  },
+  "10+_win": {
+   "n": 6259,
+   "roi": 0.806,
+   "rest_roi": 0.596,
+   "exp_roi_same_rank": 0.59,
+   "diff_pt": 21.6,
+   "z": 2.03,
+   "p_one_sided_high": 0.02138193836316016,
+   "p_holm": 0.42946
+  },
+  "10+_place": {
+   "n": 6259,
+   "roi": 0.733,
+   "rest_roi": 0.612,
+   "exp_roi_same_rank": 0.607,
+   "diff_pt": 12.6,
+   "z": 2.81,
+   "p_one_sided_high": 0.0024755825104739912,
+   "p_holm": 0.05941
+  }
+ },
+ "R_AGE3": {
+  "label": "3歳限定戦",
+  "races": 6298,
+  "S1": {
+   "level": 0.1683,
+   "rest": 0.1792,
+   "z": -1.86
+  },
+  "S2": {
+   "level": 1.624,
+   "rest": 1.574
+  },
+  "fav_fail": {
+   "level": 0.3285,
+   "rest": 0.3575
+  },
+  "4-9_win": {
+   "n": 37519,
+   "roi": 0.76,
+   "rest_roi": 0.76,
+   "exp_roi_same_rank": 0.759,
+   "diff_pt": 0.1,
+   "z": 0.03,
+   "p_one_sided_high": 0.4870291964757757,
+   "p_holm": 1.0
+  },
+  "4-9_place": {
+   "n": 37519,
+   "roi": 0.754,
+   "rest_roi": 0.764,
+   "exp_roi_same_rank": 0.764,
+   "diff_pt": -1.0,
+   "z": -0.85,
+   "p_one_sided_high": 0.8030948886467641,
+   "p_holm": 1.0
+  },
+  "10+_win": {
+   "n": 35745,
+   "roi": 0.554,
+   "rest_roi": 0.643,
+   "exp_roi_same_rank": 0.633,
+   "diff_pt": -7.9,
+   "z": -1.32,
+   "p_one_sided_high": 0.9065317599102822,
+   "p_holm": 1.0
+  },
+  "10+_place": {
+   "n": 35745,
+   "roi": 0.591,
+   "rest_roi": 0.637,
+   "exp_roi_same_rank": 0.631,
+   "diff_pt": -4.0,
+   "z": -1.51,
+   "p_one_sided_high": 0.9340940128200578,
+   "p_holm": 1.0
+  }
+ },
+ "R_N16": {
+  "label": "頭数16以上",
+  "races": 8053,
+  "S1": {
+   "level": 0.2105,
+   "rest": 0.151,
+   "z": 10.73
+  },
+  "S2": {
+   "level": 1.48,
+   "rest": 1.668
+  },
+  "fav_fail": {
+   "level": 0.3857,
+   "rest": 0.3215
+  },
+  "4-9_win": {
+   "n": 48311,
+   "roi": 0.776,
+   "rest_roi": 0.749,
+   "exp_roi_same_rank": 0.748,
+   "diff_pt": 2.7,
+   "z": 1.12,
+   "p_one_sided_high": 0.13152960854773915,
+   "p_holm": 1.0
+  },
+  "4-9_place": {
+   "n": 48311,
+   "roi": 0.768,
+   "rest_roi": 0.755,
+   "exp_roi_same_rank": 0.755,
+   "diff_pt": 1.3,
+   "z": 1.16,
+   "p_one_sided_high": 0.12230449033560173,
+   "p_holm": 1.0
+  },
+  "10+_win": {
+   "n": 48256,
+   "roi": 0.651,
+   "rest_roi": 0.577,
+   "exp_roi_same_rank": 0.522,
+   "diff_pt": 12.8,
+   "z": 2.04,
+   "p_one_sided_high": 0.020450595767580442,
+   "p_holm": 0.42946
+  },
+  "10+_place": {
+   "n": 48256,
+   "roi": 0.657,
+   "rest_roi": 0.609,
+   "exp_roi_same_rank": 0.585,
+   "diff_pt": 7.2,
+   "z": 2.52,
+   "p_one_sided_high": 0.005915945586687919,
+   "p_holm": 0.13015
+  }
+ }
+}
