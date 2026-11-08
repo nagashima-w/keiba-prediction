@@ -157,6 +157,8 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
     "--var", "RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT:0",
     // Issue #642: 騎手・調教師の指標の毎晩の計算も止める(`RACE_MARKET_EDGE_NIGHTLY_LIMIT=0`。★var の名前を DO の binding の名前〈`RACE_MARKET_EDGE`〉にしない)。本番のクラスは何もしない(R2 と D1 だけを触る DO で、netkeiba には出ない)。
     "--var", "RACE_MARKET_EDGE_NIGHTLY_LIMIT:0",
+    // Issue #675: JRA のオッズを使わない(`JRA_ODDS_ENABLED=0`)。smoke(CI でも走る)が、中央の発走前の分析で本物の JRA に出ないことを保証する(取得口を DO に渡さない)。`scripts/test/cloud-config-guard.test.ts` が、vars() にこの指定があることを固定する。
+    "--var", "JRA_ODDS_ENABLED:0",
     "--var", `ACCESS_TEAM_NAME:${TEAM}`,
     "--var", `ACCESS_AUD:${aud}`,
     "--var", `ACCESS_ALLOWED_EMAIL:${email}`,

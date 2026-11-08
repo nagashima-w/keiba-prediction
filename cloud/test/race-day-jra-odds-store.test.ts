@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { JraOddsStageStore, jraOddsPagesFor } from "../src/race-day-jra-odds";
+import { JraOddsStageStore, isJraOddsDisabled, jraOddsPagesFor } from "../src/race-day-jra-odds";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
 /** Issue #675 段階 A: JRA のオッズの段階(頁ごとの進み具合)の表。 */
@@ -74,5 +74,15 @@ describe("次に取る頁(1 起床の分け方)", () => {
     s.clearOrphans();
     const rows = (sql.exec("SELECT DISTINCT race_id FROM race_day_jra_odds ORDER BY race_id").toArray() as { race_id: string }[]).map((r) => r.race_id);
     expect(rows).toEqual(["A"]);
+  });
+});
+
+describe("JRA のオッズを使わない設定(var JRA_ODDS_ENABLED)", () => {
+  it('文字列 "0"(前後の空白は無視)だけが無効。未設定・"1"・空・"false"・"00" は有効(既定は使う)', () => {
+    expect(isJraOddsDisabled("0")).toBe(true);
+    expect(isJraOddsDisabled(" 0 ")).toBe(true);
+    for (const v of [undefined, "1", "", "false", "00", "off", "０"]) {
+      expect(isJraOddsDisabled(v), String(v)).toBe(false);
+    }
   });
 });

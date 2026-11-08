@@ -20,6 +20,8 @@ import { D1KaisaiDaysStore } from "./kaisai-days-repository";
 import { D1TrainerNamesStore } from "./trainer-names-repository";
 import { createJraBabaFetcher } from "./jra-baba-fetch";
 import { createJraEntriesFetcher } from "./jra-entries-fetch";
+import { createJraOddsFetcher, createJraPacer } from "./jra-odds-fetch";
+import { isJraOddsDisabled } from "./race-day-jra-odds";
 import { D1JraEntriesStore } from "./jra-entries-repository";
 import { createCloudLlm } from "./llm-sender";
 import { createDiscordNotifier, webhookStatus } from "./notify-send";
@@ -66,6 +68,11 @@ export interface RaceDayEnv {
    * https のオリジンだけ有効。未登録・形式不正ならリンクを付けない(通知は送る)。検証済みの値だけを `RaceDayCore` に渡し、材料(`payload_json`)には入れない(送信の直前に足す)。値はログに出さない。
    */
   APP_BASE_URL?: string;
+  /**
+   * 中央の発走前の分析で JRA のオッズを使うか(Worker の var。Issue #675。`wrangler.toml` の [vars])。**文字列 `"0"` だけ**が無効(未設定・それ以外は使う)。
+   * 無効のときは JRA に出ず、計算も netkeiba のオッズだけを使う(今までと同じ動き。D1 の取得元の記録も付かない)。判定は {@link isJraOddsDisabled}。
+   */
+  JRA_ODDS_ENABLED?: string;
   NETKEIBA_GATE: {
     idFromName(name: string): any;
     get(id: any): Required<GateLike> & { status(): Promise<GateStatus> };
@@ -142,6 +149,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // secret は要らない(JRA のページは素の fetch で届く)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(horse_profiles・horse_owner_history・race_horse_entries・jra_entry_fetches〈migration 0038〉)。
       // 表が無い間(migration の適用前に Worker が先に出た場合)は、claim が失敗して取得が止まるだけで、分析は止まらない。
       fetchJraEntries: createJraEntriesFetcher(),
+      // JRA のオッズの取得(Issue #675。#668-D)。中央の発走前の分析で、取得ステップの後に別のアラームで頁を取り、計算が券種ごとに JRA を優先する(使えない券種は netkeiba のまま)。secret は要らない。
+      // URL は取得口の中にだけある。JRA への 1.5 秒の間隔は、この DO の中で共有する(pacer。出馬表・馬場の取得口には渡さない=それらの動きは変えない)。var JRA_ODDS_ENABLED が "0" のときは渡さない(今までの動き)。
+      ...(isJraOddsDisabled(env.JRA_ODDS_ENABLED) ? {} : { fetchJraOdds: createJraOddsFetcher({ pacer: createJraPacer() }) }),
       jraEntriesStore: new D1JraEntriesStore({ db: env.DB }),
       onInfo: (message) => console.log(message),
       // 開催日ごとの記録(Issue #519。D1 の kaisai_days〈migration 0027〉)。発走前の計算が、中央のレースごとに書き、芝の開催進行の通算・柵の日数を数える過去の行を読む。

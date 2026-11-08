@@ -96,3 +96,12 @@ export class JraOddsStageStore {
     );
   }
 }
+
+/**
+ * JRA のオッズを使わない設定の判定(Worker の var `JRA_ODDS_ENABLED`)。**文字列 `"0"`(前後の空白は無視)だけ**が無効。未設定・`"1"`・それ以外は有効(既定は使う)。
+ * 無効のとき DO のラッパは取得口を渡さない(段階に入らず、計算も netkeiba のオッズだけを使う=今までと同じ動き)。
+ * 本番の値は `wrangler.toml` の [vars]。切るときは `"0"` にして承認印つきで公開する(ダッシュボードの値は次のデプロイで上書きされる)。
+ */
+export function isJraOddsDisabled(value: string | undefined): boolean {
+  return value !== undefined && value.trim() === "0";
+}
