@@ -14,6 +14,8 @@
 import { parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids.js";
 import { toStoredAllocation, type AllocationMetaRow } from "../../packages/core/src/ev/analysis-store-codec.js";
 import type { AnalysisAllocationRecord, StoredAllocation, StoredAllocationBetDetail } from "../../packages/core/src/ev/analysis-store-types.js";
+import type { OddsSourcesMeta } from "../../packages/core/src/scraper/odds-override.js";
+import { serializeOddsSources } from "./odds-sources-json.js";
 
 /** 1 回目: 発走の何ミリ秒前に起こすか(ユーザー決定 2026-10-16: 5 分前)。 */
 export const CLOSE_FIRST_LEAD_MS = 5 * 60_000;
@@ -102,6 +104,11 @@ export interface CloseSavePayload {
   readonly oddsOfficialDatetime: string | null;
   /** 再計算した配分(`status === "ok"` のときだけ。それ以外は null)。 */
   readonly allocation: AnalysisAllocationRecord | null;
+  /**
+   * 再計算が使ったオッズの券種ごとの取得元(Issue #676。`analysis_close.odds_sources_json`。形は `analyses.odds_sources_json` と同じ)。
+   * 中央で JRA の取得口があった回の `ok` だけ付く。それ以外(JRA を使わない構成・地方・行わなかった/失敗した回・この機能の前に DO が控えた結果)はキー自体が無い=NULL で保存する。
+   */
+  readonly oddsSources?: OddsSourcesMeta;
 }
 
 /** 保存の前の形の検査(不整合は書かずに投げる)。`ok` ⇔ 配分あり・理由なし。`failed`・`skipped` ⇔ 配分なし・その区分の理由。 */
@@ -131,8 +138,8 @@ export const UPSERT_CLOSE_SQL = `INSERT INTO analysis_close
   (analysis_id, round, status, reason, due_at, fired_at, late_ms, odds_official_datetime,
    route, unavailable_reason, fallback_reason, skip_reason_code, bankroll, per_race_cap, kelly_fraction, ev_threshold,
    include_combo_odds, include_wide, include_trio, include_quinella, include_exacta, include_trifecta, include_bracket_quinella,
-   bet_unit, odds_status, market_shrink_weight)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+   bet_unit, odds_status, market_shrink_weight, odds_sources_json)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(analysis_id, round) DO UPDATE SET
    status = excluded.status, reason = excluded.reason, due_at = excluded.due_at, fired_at = excluded.fired_at, late_ms = excluded.late_ms,
    odds_official_datetime = excluded.odds_official_datetime, route = excluded.route, unavailable_reason = excluded.unavailable_reason,
@@ -141,7 +148,7 @@ export const UPSERT_CLOSE_SQL = `INSERT INTO analysis_close
    include_combo_odds = excluded.include_combo_odds, include_wide = excluded.include_wide, include_trio = excluded.include_trio,
    include_quinella = excluded.include_quinella, include_exacta = excluded.include_exacta, include_trifecta = excluded.include_trifecta,
    include_bracket_quinella = excluded.include_bracket_quinella, bet_unit = excluded.bet_unit, odds_status = excluded.odds_status,
-   market_shrink_weight = excluded.market_shrink_weight`;
+   market_shrink_weight = excluded.market_shrink_weight, odds_sources_json = excluded.odds_sources_json`;
 
 /** 回の買い目の削除(再保存で、前の保存の買い目を残さない。束縛値は analysis_id・round)。 */
 export const DELETE_CLOSE_BETS_SQL = "DELETE FROM analysis_close_bets WHERE analysis_id = ? AND round = ?";
@@ -195,6 +202,7 @@ export function closeRowParams(analysisId: number, payload: CloseSavePayload): r
     m?.betUnit ?? null,
     m?.oddsStatus ?? null,
     m?.marketShrinkWeight ?? null,
+    serializeOddsSources(payload.oddsSources),
   ];
 }
 

@@ -1,0 +1,14 @@
+-- クラウド版(D1)の migration 0042: オッズの取得元の記録(Issue #675。#668-D)。exe の SQLite には無い、D1 専用の列。
+-- migration は追加のみ(既存の表・列を壊さない。反映までの間は旧 Worker が動くため。旧い行は NULL のまま)。索引は付けない(書き込みを増やさない。docs/db-sql-rules.md)。
+-- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言した追加分」(D1_EXTRA_COLUMNS)も同時に直す。
+-- ★デプロイの順序: 列を UPDATE するのは、JRA のオッズを使った保存だけ(使わない保存・var JRA_ODDS_ENABLED=0 の保存は列に触れない)。
+--   deploy-cloud.yml は migration を wrangler deploy より前に適用するので、新しい Worker が列の無い D1 に当たることは無い。この列を SELECT する読み出しは、まだ無い。
+--
+-- analyses.odds_sources_json: 発走前の分析が使ったオッズの、券種ごとの取得元(JSON の文字列)。JRA のオッズを使わない構成の分析・地方・旧い行は NULL。
+--   {"v":1,"sources":{"winPlace":{"source":"jra","officialDatetime":"2026-11-08 10:37:00"},
+--                     "wide":{"source":"netkeiba","officialDatetime":null,"fallbackReason":"horse-set-mismatch"}, …}}
+--   キー: winPlace(単勝・複勝)と、組合せの券種(wide・trio・quinella・exacta・trifecta・bracketQuinella)のうち、問い合わせたもの。
+--   source: "jra" | "netkeiba"。officialDatetime: そのオッズの頁の時刻(JST の "YYYY-MM-DD HH:MM:SS")。netkeiba の組合せなど分からないときは null。
+--   fallbackReason: netkeiba に戻したときだけ。"override-unavailable"(JRA の頁が取れなかった・読めなかった・古かった)| "override-error" | "horse-set-mismatch"(出走馬と食い違った)。
+--   集計の例: SELECT s.key, s.value ->> '$.source' AS source, count(*) FROM analyses a, json_each(a.odds_sources_json, '$.sources') s GROUP BY s.key, source;
+ALTER TABLE analyses ADD COLUMN odds_sources_json TEXT;

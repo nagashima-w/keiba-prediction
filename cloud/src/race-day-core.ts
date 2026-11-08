@@ -40,6 +40,12 @@
  * {@link RaceDayCore.runNarTrifectaStep}(**別のアラーム**。1回に最大 {@link NAR_TRIFECTA_AXES_PER_STEP} 軸を取って `fetch_cache` に積む)を呼ぶ。pending が尽きたら計算ステップ(ネットワークに出ない。キャッシュから三連単をインラインで読む)。
  * 1アラームあたりの gate への呼び出しは、取得ステップ ≤ 43(`scrapeRace` が ≤ 40〈騎手の上限〉+ 前走の条件 1 + 重賞の傾向 1 + 日報の下限の一覧 1)・段階 ≤ 9・計算 0。外から見える `status` は増やさない(段階の間も `fetched`)。失敗・打ち切りでも三連単なしで計算に進む。
  *
+ * ## JRA のオッズの段階(Issue #675。#668-D)
+ * 取得口 `fetchJraOdds` を渡したとき、中央の発走前(pre_race)は、取得ステップの成功後に頁(単勝複勝・組合せ ON なら 6 式別)を `race_day_jra_odds`(`race-day-jra-odds.ts`)に pending で登録し、
+ * 計算の前に {@link RaceDayCore.runJraOddsStep}(**別のアラーム**。netkeiba の窓口は通さない)で JRA の頁を取る。三連単以外をまとめて 1 起床(最大 8 本)・三連単は単独の 1 起床(JSON 化のメモリのピークを重ねない)。
+ * 取った頁はその場でパースして JSON を `fetch_cache` に置き(`jra-odds-cache.ts`)、計算ステップが `oddsOverride` として券種ごとに優先する(使えない券種・取得ステップより古い JSON・出走馬と食い違う券種は netkeiba のまま)。
+ * 失敗は全部握る(タスクは failed にしない)。券種ごとの取得元は `AnalysisSaveExtra.oddsSources` で保存先へ渡す。取得口を渡さなければ従来どおり。
+ *
  * ## 予約(schedule)
  * 予約だけをして戻る(`setAlarm(now)`)。本処理はアラームの中(`runNextStep`)。同じレースが実行中(queued・fetched)なら受け付けない。
  * DO は1つの開催日だけを扱う(最初の予約の開催日に固定し、別の日・raceId の年と違う日は拒否する)。
@@ -88,6 +94,9 @@
  * 発走前の分析(`pre_race`。自動・手動とも)が保存されたら、その同じ同期区間で再計算の入力(馬ごとの確率ほか)と回の行(発走の 5 分前・2 分前〈暫定〉)を積む({@link CloseStage.register})。
  * 時刻が来たら {@link CloseStage.runStep}(通知・馬場・タスクの前に 1 ステップ)が、**オッズだけ**を取り直し(出馬表・戦績・調教はキャッシュ専用、オッズだけ `bypassCache`)、確率は分析時のまま
  * 配分を作り直して(`recomputeAllocationFromProbs`。LLM は呼ばない)D1 に保存する。結果が決まったら保存の前に DO に書く=保存の再試行・再実行で取り直さない。中央・地方とも対象(Issue #379)。
+ * **JRA のオッズ(Issue #676。#668-E)**: 取得口 `fetchJraOdds` を渡したとき、中央の再計算は `scrapeRace` の前に JRA の頁(単勝複勝・組合せ ON なら 6 式別。三連単は最後)を同じ起床の中で 1 本ずつ順に取り、
+ * 取得キャッシュに JSON を置いて、計算の段が `oddsOverride` として券種ごとに優先する(使えない券種は上の netkeiba の取り直しに戻る)。**この回の初回の起動時刻より古い JSON は使わない**(発走前の分析の JSON を誤用しない)。
+ * 回の期限の 20 秒前({@link CLOSE_JRA_STOP_BEFORE_MS})を過ぎたら新しい頁は送らない。取得元は `analysis_close.odds_sources_json`(migration 0043)に残る。地方・取得口なしは従来どおり。
  * 地方で組合せが ON のときは**部分的な取り直し**: 単勝・複勝(1 本)だけ取り直し、組合せは分析時のオッズ(取得キャッシュの、分析の取得〜保存の期間のエントリ)のまま配分を作り直す(読めなければ failed の `combo-missing`)。通知はしない。
  */
 import { CachedFetcher, type TextFetcher } from "../../packages/core/src/scraper/cached-fetcher";
@@ -96,6 +105,7 @@ import { collectGradeWinnerTrend } from "../../packages/core/src/analyzer/grade-
 import { fetchGradeWinnerEntries, gradeWinnerCacheKey } from "../../packages/core/src/scraper/fetch-grade-winner";
 import { newspaperCacheKey } from "../../packages/core/src/scraper/fetch-newspaper";
 import { GradeWinnerParseError } from "../../packages/core/src/scraper/parse-grade-winner";
+import type { OddsOverride, OddsSourcesMeta } from "../../packages/core/src/scraper/odds-override";
 import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher } from "../../packages/core/src/scraper/scrape-race";
 import { centralVenueInfoFromRaceId, parseKaisaiDate, parseRaceId, venueKindOfRaceId } from "../../packages/core/src/scraper/ids";
 import { deriveNarTrifectaAxisUmabans } from "../../packages/core/src/scraper/nar-trifecta-axis";
@@ -132,6 +142,10 @@ import { JraEntriesStage, type JraEntriesStepOutcome } from "./race-day-jra-entr
 import type { JraEntriesFetcher } from "./jra-entries-fetch";
 import type { JraEntriesStoreLike } from "./jra-entries-repository";
 import { NAR_TRIFECTA_AXES_PER_STEP, NarTrifectaStore } from "./race-day-nar-trifecta";
+import { JraOddsStageStore, jraOddsPagesFor } from "./race-day-jra-odds";
+import { createJraOddsOverride } from "./jra-odds-cache";
+import { JraOddsStage } from "./race-day-jra-odds-stage";
+import type { JraOddsFetcher } from "./jra-odds-fetch";
 import { PlanStore, type PlanSkipReason, type PlanVenue } from "./race-day-plan";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { DoSqlCacheStore } from "./do-cache-store";
@@ -443,6 +457,12 @@ export interface RaceDayDeps {
    * `jraEntriesStore` と両方があるときだけ動く。保存するだけで、分析・プロンプト・画面には使わない。
    */
   readonly fetchJraEntries?: JraEntriesFetcher;
+  /**
+   * JRA のオッズの取得口(Issue #675。DO のラッパが `createJraOddsFetcher` で作る。**URL そのものは持たない**)。渡すと、中央の発走前の分析で、取得ステップの後・計算ステップの前に
+   * 別のアラームの段階({@link RaceDayCore.runJraOddsStep})を挟み、計算ステップが券種ごとに JRA のオッズを優先する(使えない券種は netkeiba のまま)。
+   * **渡さなければ従来どおり**(段階に入らず、`oddsSources` も付かない)。var `JRA_ODDS_ENABLED` が `"0"` のとき、ラッパは渡さない。
+   */
+  readonly fetchJraOdds?: JraOddsFetcher;
   /** JRA の出馬表の取得の試み・馬・馬主・出走時の情報の保存先(本番は D1。migration 0038)。 */
   readonly jraEntriesStore?: JraEntriesStoreLike;
   /** 固定の語のログ(JRA の出馬表の取得の所要時間など。観測用)。省略時は出さない。 */
@@ -773,6 +793,9 @@ export class RaceDayCore {
   private readonly plan: PlanStore;
   /** 地方三連単の軸ごとの取得(別のアラームの段階)の進み具合の表(Issue #283。新しい表だけ。既存の表には ALTER しない)。 */
   private readonly narTrifecta: NarTrifectaStore;
+  private readonly jraOdds: JraOddsStageStore;
+  private readonly jraOddsStage: JraOddsStage | undefined;
+  private readonly jraOddsEnabled: boolean;
   /** 締切の直前の再計算の表(Issue #338。新しい表だけ)。 */
   private readonly close: CloseStore;
   /** 締切の直前の再計算の段階(手順。表は `close`)。コンストラクタの最後に作る。 */
@@ -897,6 +920,13 @@ export class RaceDayCore {
       }),
     });
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
+    // JRA のオッズの段階(Issue #675。新しい表だけ。取得口を渡したときだけ動く)。
+    this.jraOdds = new JraOddsStageStore(this.sql);
+    this.jraOddsEnabled = deps.fetchJraOdds !== undefined;
+    this.jraOddsStage =
+      deps.fetchJraOdds === undefined
+        ? undefined
+        : new JraOddsStage({ store: this.jraOdds, fetcher: deps.fetchJraOdds, cache: this.cache, now: this.now, onWarn: this.onWarn, onInfo: deps.onInfo });
     // RaceDay から gate への呼び出しは直列(同時に1本)。HttpClient は間隔 0・再試行 0(間隔制御は gate だけが行う)。
     // 結果のページは同じ HttpClient(同じ直列化した gate)を、キャッシュを通さずに使う(DO の SQLite に結果のページを溜めない。Issue #208)。
     const httpClient = createGateHttpClient(serializeGate(deps.gate), { onWarn });
@@ -913,6 +943,8 @@ export class RaceDayCore {
       networkFetcher: this.networkFetcher,
       cacheOnly: this.cacheOnly,
       cache: this.cache,
+      // JRA のオッズ(Issue #676): 取得口を渡したときだけ、中央の再計算が JRA の頁を取る(var JRA_ODDS_ENABLED が "0" のときは渡されない=従来どおり)。
+      ...(deps.fetchJraOdds === undefined ? {} : { jraOdds: { fetcher: deps.fetchJraOdds, cache: this.cache, onInfo: deps.onInfo } }),
     });
     // 日報の時刻の下限の段階(Issue #399〈R-9b〉。表は無く、`race_day_meta` の 3 キーだけ。ここでは SQL を出さない)。
     this.reportHold = new ReportHoldStage({
@@ -1614,7 +1646,11 @@ export class RaceDayCore {
         return this.runPreRaceFetch(task);
       }
       // 地方三連単の段階(Issue #283): 取得済み(fetched)でも、軸ごとの取得が残っていれば、計算より先にそれを進める(計算は pending が尽きるまで待つ)。
-      return this.narTrifecta.hasPending(task.race_id, task.queued_at) ? this.runNarTrifectaStep(task) : this.runPreRaceCompute(task);
+      if (this.narTrifecta.hasPending(task.race_id, task.queued_at)) {
+        return this.runNarTrifectaStep(task);
+      }
+      // JRA のオッズの段階(Issue #675): 中央だけ。地方三連単の段階とは同じレースで同時に立たない(中央と地方の別)ので、順序は決まらなくてよいが、地方を先にしておく。
+      return this.jraOdds.hasPending(task.race_id, task.queued_at) ? this.runJraOddsStep(task) : this.runPreRaceCompute(task);
     }
     return task.status === "fetched" ? this.runCompute(task) : this.runFetch(task);
   }
@@ -1641,6 +1677,7 @@ export class RaceDayCore {
     // 進行中のタスクが無いので、残っている LLM の応答の記録は孤立している(消し損ねた分)。
     SqlLlmResponseStore.clearOrphans(this.sql);
     this.narTrifecta.clearOrphans();
+    this.jraOdds.clearOrphans();
     const purged = this.purgeCache();
     await this.rearm();
     return { kind: "idle", purged };
@@ -2071,6 +2108,7 @@ export class RaceDayCore {
     options: { readonly includeComboOdds: boolean; readonly includeJockeyStats: boolean; readonly includeTrainerStats: boolean; readonly includePrevConditions: boolean },
     warnLabel: string,
     oddsSince?: number,
+    oddsOverride?: OddsOverride,
   ) {
     const fetcher: RaceFetcher =
       oddsSince === undefined
@@ -2092,7 +2130,7 @@ export class RaceDayCore {
     // 保存先に無い騎手をキャッシュから読めなくなる(Issue #283)。取得ステップの `scrapeRace` には渡さない(そちらの上限は有効のまま)。
     const race = await scrapeRace(
       raceId,
-      { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL, jockeyStore: this.jockeyStore, trainerStore: this.trainerStore },
+      { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL, jockeyStore: this.jockeyStore, trainerStore: this.trainerStore, ...(oddsOverride === undefined ? {} : { oddsOverride }) },
       { ...options, jockeyRequestLimit: Number.MAX_SAFE_INTEGER },
     );
     // 騎手の成績(種別=騎手)はキャッシュに無くても失敗にしない(その騎手は補正なし。戦績は無いと prior が作れないので失敗にする)。
@@ -2196,6 +2234,10 @@ export class RaceDayCore {
       if (settings.includeComboOdds && venueKindOfRaceId(parseRaceId(task.race_id)) === "nar") {
         this.narTrifecta.begin(task.race_id, task.queued_at, deriveNarTrifectaAxisUmabans(race.horses.map((h) => h.shutuba.umaban)));
       }
+      // JRA のオッズの段階の頁を登録する(取得口があり、中央のレースだけ。`fetched` への更新と同じ同期区間)。
+      if (this.jraOddsEnabled && venueKindOfRaceId(parseRaceId(task.race_id)) !== "nar") {
+        this.jraOdds.begin(task.race_id, task.queued_at, jraOddsPagesFor(settings.includeComboOdds));
+      }
       this.updateTask(task, "fetched", attempts, null);
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "ok" };
     } catch (error) {
@@ -2279,6 +2321,27 @@ export class RaceDayCore {
   }
 
   /**
+   * JRA のオッズの段階(Issue #675): 取得済み(fetched)の中央の発走前のタスクで、JRA の頁が残っているとき、**1 回のアラーム**で次の頁を取る
+   * (三連単以外をまとめて 1 起床、三連単は単独の 1 起床。1 起床の本数は最大 9 本)。取った頁はその場でパースして JSON を取得キャッシュに置く({@link JraOddsStage})。
+   * netkeiba の窓口(gate)は通さない。**失敗は全部握る**(失敗した券種は netkeiba のまま計算に進む。タスクは failed にしない)。
+   * 自動の発走前は、発走済みなら取得を撃たず failed にする({@link failIfStarted}。地方三連単の段階と同じ)。段階のステップの結果は `step: "fetch"` で返す。
+   */
+  private async runJraOddsStep(task: TaskRow): Promise<StepOutcome> {
+    const started = this.failIfStarted(task, "fetch");
+    if (started !== null) {
+      this.jraOdds.clear(task.race_id);
+      return started;
+    }
+    const kaisaiDate = this.metaGet("kaisai_date");
+    if (kaisaiDate === null || this.jraOddsStage === undefined) {
+      this.jraOdds.failAllPending(task.race_id, task.queued_at); // 起きないはずの組合せ。計算に進む
+    } else {
+      await this.jraOddsStage.run(task.race_id, task.queued_at, kaisaiDate);
+    }
+    return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "ok" };
+  }
+
+  /**
    * 発走前の計算・保存ステップ: **netkeiba には出ず**(gate は0回)、キャッシュだけで prior → LLM(Issue #194)→ EV → 配分を作り、`AnalysisSink` で D1・R2 に保存する。
    * **LLM の呼び出し(Anthropic の API)はこのステップの中**(`analyze`)。「ネットワークに出ない」という前提が守っているのは gate・netkeiba(間隔制御・ブレーカー)で、LLM は別の注入口(sender)から出る。
    * LLM は **常に使う**(`llm` が渡されていれば。費用の上限・ON/OFF の設定は無い)。失敗(API のエラー・切り詰め・拒否・解析失敗)でも止めず、prior で保存し、理由(固定文言)を `AnalysisSaveExtra.llmNote` で渡す。
@@ -2314,6 +2377,7 @@ export class RaceDayCore {
       const settings = coerceCloudSettings(JSON.parse(task.settings_json));
       let analysisId = task.analysis_id;
       let expected: { horses: number; bets: number } | null = null;
+      let oddsSources: OddsSourcesMeta | undefined;
       let scrapeWarnings: readonly { readonly kind: string; readonly message: string; readonly jockeyId?: string; readonly trainerId?: string }[] = [];
       if (analysisId === null) {
         const raceId = parseRaceId(task.race_id);
@@ -2336,10 +2400,14 @@ export class RaceDayCore {
                 warn: this.onWarn,
                 now: this.now, // LLM の呼び出しの所要時間を測る(Issue #197 段2)
               });
+        // JRA のオッズの差し込み(Issue #675): 段階を使う中央のレースだけ。キャッシュの JSON だけを読む(取得ステップの開始より古い JSON は無いものとして netkeiba に戻る)。
+        const oddsOverride =
+          this.jraOddsEnabled && venueKindOfRaceId(raceId) !== "nar" ? createJraOddsOverride({ cache: this.cache, raceId: task.race_id, oddsSince }) : undefined;
         await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
           scrape: async (id) => {
-            const race = await this.scrapeFromCache(id, { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), includePrevConditions: true }, `発走前の分析(${id})`, oddsSince);
+            const race = await this.scrapeFromCache(id, { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), includeTrainerStats: wantsTrainerStats(settings), includePrevConditions: true }, `発走前の分析(${id})`, oddsSince, oddsOverride);
             scrapeWarnings = race.meta.warnings;
+            oddsSources = race.meta.oddsSources;
             // 開催日の記録(Issue #519)。LLM を使うかどうかに関係なく、中央のレースを分析するたびに書く(失敗は握って警告にし、分析は止めない)。
             await this.recordKaisaiDay(task.race_id, kaisaiDate, race);
             // 出馬表の騎手名と騎手 ID の組(Issue #526 段階 1b。統計モデル用の書き出しが、騎手 ID の無い過去の行を名前から埋める材料。失敗は握る)。
@@ -2367,7 +2435,7 @@ export class RaceDayCore {
               return;
             }
             // LLM を呼んだ1回ごとの記録(所要時間・usage・stop_reason。Issue #197 段2)。キー未登録(cloudAnalyze なし)は null(NULL で保存)。
-            const saved = await sink.save(toSave, { llmNote: outcome.note, llmCalls: cloudAnalyze === null ? null : cloudAnalyze.calls(), markRepair: outcome.markRepair ?? null });
+            const saved = await sink.save(toSave, { llmNote: outcome.note, llmCalls: cloudAnalyze === null ? null : cloudAnalyze.calls(), markRepair: outcome.markRepair ?? null, ...(oddsSources === undefined ? {} : { oddsSources }) });
             analysisId = saved.id;
             // 影の記録の書き込みの失敗(Issue #649)。分析の保存は成功しているので、警告にして続ける。
             if (saved.shadow === "failed") {
@@ -2439,6 +2507,7 @@ export class RaceDayCore {
       }
       this.updateTask(task, "done", task.attempts, null);
       this.narTrifecta.clear(task.race_id); // 地方三連単の段階の行は、完了したら要らない
+      this.jraOdds.clear(task.race_id);
       // 完了した(保存済み)ので、LLM の応答の記録は要らない。
       SqlLlmResponseStore.clear(this.sql, task.race_id, task.mode);
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "compute", result: "ok" };
@@ -2447,6 +2516,7 @@ export class RaceDayCore {
       if (computeAttempts >= MAX_ATTEMPTS) {
         this.updateTask(task, "failed", task.attempts, message);
         this.narTrifecta.clear(task.race_id);
+        this.jraOdds.clear(task.race_id);
         this.recordAutoFail(task, "compute-exhausted");
         SqlLlmResponseStore.clear(this.sql, task.race_id, task.mode); // 諦めたので、記録は要らない(再予約は新しい実行)
         this.onWarn(`発走前の計算・保存に失敗しました(${task.race_id}。試行 ${computeAttempts} 回): ${message}`);

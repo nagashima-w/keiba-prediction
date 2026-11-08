@@ -57,13 +57,14 @@ export interface OddsOverride {
 }
 
 /**
- * 単勝・複勝の差し込みを採用してよいか。出走馬(取消を除く)の全員に単勝オッズがあり、出走馬以外の欄は
- * 取消馬の空欄(単勝が null。netkeiba も取消馬の欄を残す)だけであること。
+ * 単勝・複勝の差し込みを採用してよいか。出走馬(取消を除く)の全員に単勝オッズと複勝の下限があり(#675。複勝が欠けたまま採用すると
+ * 配分・期待値が崩れる)、出走馬以外の欄は取消馬の空欄(単勝が null。netkeiba も取消馬の欄を残す)だけであること。
  */
 export function winPlaceMatchesRunners(snapshot: OddsSnapshot, runnerUmabans: readonly number[]): boolean {
   const runners = new Set(runnerUmabans);
   for (const umaban of runners) {
     if ((snapshot.win[umaban]?.odds ?? null) === null) return false;
+    if ((snapshot.place[umaban]?.oddsMin ?? null) === null) return false;
   }
   for (const [key, win] of Object.entries(snapshot.win)) {
     if (!runners.has(Number(key)) && win.odds !== null) return false;

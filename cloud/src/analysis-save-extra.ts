@@ -1,4 +1,5 @@
 import type { MarkRepairReport } from "@keiba/core/llm";
+import type { OddsSourcesMeta } from "../../packages/core/src/scraper/odds-override";
 import type { LlmCallRecord } from "./llm-calls";
 
 /**
@@ -21,6 +22,11 @@ export interface AnalysisSaveExtra {
    * D1 の `analyses.mark_repair_json` に保存される(固定の語彙だけ。`mark-repair.ts`)。
    */
   readonly markRepair?: MarkRepairReport | null;
+  /**
+   * オッズの取得元(券種ごとの取得元・頁の時刻・netkeiba に戻した理由。Issue #675。core の `RaceDataMeta.oddsSources`)。JRA のオッズを使わない構成(var で止めた・取得口なし)・地方・旧い経路は
+   * 省略(= 記録なし。キー自体を渡さない)。D1 への保存は段階 B(`analyses.odds_sources_json`)。
+   */
+  readonly oddsSources?: OddsSourcesMeta | null;
 }
 
 /**

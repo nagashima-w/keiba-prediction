@@ -77,6 +77,7 @@ import type {
 import type { AnalysisSaveExtra, RecentAnalysis } from "./analysis-save-extra";
 import { parseLlmCalls, serializeLlmCalls, type LlmCallRecord } from "./llm-calls";
 import { parseMarkRepair, serializeMarkRepair, type MarkRepairRecord } from "./mark-repair";
+import { serializeOddsSources } from "./odds-sources-json";
 export type { AnalysisSaveExtra, RecentAnalysis };
 import { contributionsOf, decodeDetail, DETAIL_KEY_SQL, detailKeyOf, encodeDetail } from "./analysis-detail";
 import {
@@ -225,7 +226,7 @@ const UPDATE_DETAIL_KEY_SQL = `UPDATE analyses SET detail_key = ${DETAIL_KEY_SQL
  * 理由(固定文言。Issue #194)・LLM 呼び出しの記録(Issue #197 段2)・印の補修の記録(Issue #317)。core の codec の INSERT(exe と共有)には列を足さず、
  * どれかがあるときだけ、直後に **1文の UPDATE** で書く(`detail_key` の UPDATE と同じ形)。無いものは SET に出さない
  * (補修の記録が無い保存は mark_repair_json に触れない。列が無い旧スキーマでも、補修の無い分析の保存は壊れない)。
- * 列の順は llm_note → llm_calls_json → mark_repair_json(束縛値も同じ順)。
+ * 列の順は llm_note → llm_calls_json → mark_repair_json → odds_sources_json(Issue #675。束縛値も同じ順)。
  */
 function updateExtrasSql(columns: readonly string[]): string {
   return `UPDATE analyses SET ${columns.map((c) => `${c} = ?`).join(", ")} WHERE id = ${NEW_ID}`;
@@ -300,7 +301,7 @@ function listStatements(db: AnalysisDb, filter: AnalysisListFilter, limit: numbe
  *
  * テストが「batch を使わず逐次実行したときの対照」にも使うため export している。
  */
-export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: number | null, llmNote: string | null = null, llmCallsJson: string | null = null, markRepairJson: string | null = null): D1PreparedStatement[] {
+export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: number | null, llmNote: string | null = null, llmCallsJson: string | null = null, markRepairJson: string | null = null, oddsSourcesJson: string | null = null): D1PreparedStatement[] {
   const statements: D1PreparedStatement[] = [];
   if (ym !== null) {
     statements.push(db.prepare(COUNT_WRITE_SQL).bind(ym));
@@ -313,6 +314,8 @@ export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: num
   if (llmNote !== null) extras.push(["llm_note", llmNote]);
   if (llmCallsJson !== null) extras.push(["llm_calls_json", llmCallsJson]);
   if (markRepairJson !== null) extras.push(["mark_repair_json", markRepairJson]);
+  // Issue #675: オッズの取得元の記録。JRA のオッズを使う構成の保存だけが持つ(無い保存は列に触れない=migration 0042 の適用前に Worker が先に出ても、これまでの保存は動く)。
+  if (oddsSourcesJson !== null) extras.push(["odds_sources_json", oddsSourcesJson]);
   if (extras.length > 0) {
     statements.push(db.prepare(updateExtrasSql(extras.map(([c]) => c))).bind(...extras.map(([, v]) => v)));
   }
@@ -413,7 +416,7 @@ export class D1AnalysisStore implements AnalysisRepository {
     // 補完の状態(race_backfill。Issue #597)の作り直しを batch の最後に 1 文(分析の最小の開催日・クラスの欠けが変わるので、保存のたびにそのレースを作り直す)。
     // 分析の INSERT の位置({@link analysesInsertIndex})は変わらない。
     const results = await this.db.batch([
-      ...buildSaveStatements(this.db, record, writeYm, extra.llmNote, serializeLlmCalls(extra.llmCalls), serializeMarkRepair(extra.markRepair)),
+      ...buildSaveStatements(this.db, record, writeYm, extra.llmNote, serializeLlmCalls(extra.llmCalls), serializeMarkRepair(extra.markRepair), serializeOddsSources(extra.oddsSources)),
       this.db.prepare(RECOMPUTE_RACES_SQL).bind(JSON.stringify([record.raceId])),
       verifyRaceMarkStatement(this.db, record.raceId), // 検証の差分のための、レースの変更の印(Issue #624)。最後に 1 文
     ]);
