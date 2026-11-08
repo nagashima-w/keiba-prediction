@@ -68,7 +68,7 @@ def cmd_eval(races, out):
     verdict = {}
     for name in C.CANDIDATE_ORDER[1:]:
         s = res["formulas"][name]["shifted"]
-        verdict[name] = {"logloss_smaller": s["logloss"] < f0["logloss"], "D6_smaller": s["D6"] < f0["D6"]}
+        verdict[name] = {"logloss_smaller": bool(s["logloss"] < f0["logloss"]), "D6_smaller": bool(s["D6"] < f0["D6"])}
         verdict[name]["pass"] = verdict[name]["logloss_smaller"] and verdict[name]["D6_smaller"]
     chosen = next((n for n in C.CANDIDATE_ORDER[1:] if verdict[n]["pass"]), "F0")
     res["verdict"] = verdict
