@@ -6,11 +6,14 @@
 // 基点: 環境変数 VERIFY_BASE(ref)。無ければ scripts/hooks/implementer-verify-hook.mjs の既定と同じ ref。
 //       merge-base(HEAD, 基点) から HEAD・作業ツリー・未追跡までを「変更」とする(作業中にコミットしても差分が空にならない)。
 //       merge-base が決まらなければ HEAD からの変更だけ(注意を出す)。
+//                 (3) 差分に cloud/wrangler.toml・cloud/migrations/・cloud/smoke*.ts があれば、それらを import せず読むテストの固定の一覧を足す
+//                     (import をたどる (1) では選ばれないため。Issue #701。一覧は verify-related-config.mjs)。
 // 流すのは cloud/ で `vitest run <ファイル…>`。該当が無ければ何も流さず 0 で終わる。
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildTargets } from "./verify-related-config.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLOUD = path.join(ROOT, "cloud");
@@ -28,7 +31,9 @@ if (mb.status !== 0) console.error(`注意: merge-base 失敗(${baseRef})。HEAD
 
 const diff = git(["diff", "--name-only", baseSha]).stdout.split("\n");
 const untracked = git(["ls-files", "--others", "--exclude-standard"]).stdout.split("\n");
-const changed = [...new Set([...diff, ...untracked].filter(Boolean))].filter((f) => existsSync(path.join(ROOT, f)));
+// 削除されたファイルもトリガーの判定には使う(changedAll)。流す対象の判定には、実在するものだけ使う(changed)。
+const changedAll = [...new Set([...diff, ...untracked].filter(Boolean))];
+const changed = changedAll.filter((f) => existsSync(path.join(ROOT, f)));
 
 const vitest = path.join(CLOUD, "node_modules", ".bin", "vitest");
 const listed = spawnSync(vitest, ["list", "--filesOnly", "--changed", baseSha], { cwd: CLOUD, encoding: "utf8" });
@@ -38,7 +43,7 @@ if (listed.status !== 0) {
 }
 const affected = listed.stdout.split("\n").map((l) => l.trim()).filter((l) => l.endsWith(".test.ts"));
 const direct = changed.filter((f) => f.startsWith("cloud/test/") && f.endsWith(SUFFIX)).map((f) => f.slice("cloud/".length));
-const targets = [...new Set([...affected, ...direct])].filter((f) => f.endsWith(SUFFIX)).sort();
+const targets = buildTargets({ affected, direct, changedAll });
 
 console.log(`基点 ${baseSha.slice(0, 8)}、変更 ${changed.length} 件、関係するインテグレーションのテスト ${targets.length} 件`);
 if (targets.length === 0) {
