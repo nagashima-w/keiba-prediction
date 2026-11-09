@@ -201,6 +201,9 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
   if (model.error !== null) {
     notices.push(h("p", { class: "notice error", role: "alert" }, [model.error]));
   }
+  if (model.refreshNotice !== null) {
+    notices.push(h("p", { class: "notice" }, [model.refreshNotice]));
+  }
   if (model.boardNotice !== null) {
     notices.push(h("p", { class: "notice" }, [model.boardNotice]));
   }
