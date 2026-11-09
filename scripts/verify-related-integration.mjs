@@ -8,6 +8,7 @@
 //       merge-base が決まらなければ 0 以外で終わる(0 件で成功して検査したことにしない。Issue #626)。
 //                 (3) 差分に cloud/wrangler.toml・cloud/migrations/・cloud/smoke*.ts があれば、それらを import せず読むテストの固定の一覧を足す
 //                     (import をたどる (1) では選ばれないため。Issue #701。一覧は verify-related-config.mjs)。
+//                 (4) 差分に cloud/src・packages/core/src の .ts があれば、ソースを文字列で読むテストの固定の一覧を足す(Issue #717)。
 // 流すのは cloud/ で `vitest run <ファイル…>`。該当が無ければ何も流さず 0 で終わる。
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
