@@ -369,6 +369,21 @@ describe("B: implementer-verify-hook(SubagentStop)", () => {
     expect(logOf(logDir)).toContain("(transcript の操作)");
   });
 
+  it("入力の cwd が存在しないパスでも、記録の最後の cwd から worktree の一覧を取り、Edit の file_path で worktree を採る(Issue #617 の記録・#626)", () => {
+    const { main, wt, logDir } = setup();
+    write(path.join(wt, "scripts/x.ts"), "export {};\n");
+    const gone = path.join(path.resolve(tmp()), "gone-dir");
+    expect(existsSync(gone)).toBe(false); // 前提: 存在しないパス
+    const tr = writeTranscript([
+      toolUse(main, "Edit", { file_path: path.join(wt, "scripts/x.ts"), old_string: "a", new_string: "b" }),
+      { type: "user", cwd: main },
+    ]);
+    const r = run(VERIFY_HOOK, stop(gone, { agent_transcript_path: tr }), env(logDir, FAIL));
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain(wt);
+    expect(logOf(logDir)).toContain("(transcript の操作)");
+  });
+
   it("メインの作業ツリーのファイルだけを触った記録では流さない", () => {
     const { main, wt, logDir } = setup();
     write(path.join(wt, "scripts/x.ts"), "export {};\n"); // worktree には変更があるが、記録は main だけ

@@ -5,6 +5,7 @@ import type { MarketRow } from "../src/market-edge-calc";
 import {
   MARKET_EDGE_MAX_NIGHTS,
   MARKET_EDGE_NIGHTLY_ROWS_DEFAULT,
+  MARKET_EDGE_PAGE_SIZE_MAX,
   MARKET_EDGE_READ_COUNT_ROWS,
   RaceMarketEdgeCore,
   isMarketEdgeDisabled,
@@ -351,6 +352,17 @@ describe("1 晩の書き込み行数の上限", () => {
     expect(h.catalog.every((e) => e.mark === 1)).toBe(true);
   });
 
+  it("ちょうど上限に等しいときも止まる(境界。1 ステップ 5 レース = 行 10 + 印 5 + 計数 1 = 16 行で、上限 16 なら 1 ステップで止まる。Issue #626)", async () => {
+    const h = make({ nightlyRows: 16, stepRaces: 5 });
+    h.seed(60);
+    await h.drainNight(NIGHT2);
+    // 前提: 1 ステップ分だけ進んだ(取り込みは途中で、残りがある)
+    expect(h.catalog.filter((e) => e.mark === 1)).toHaveLength(5);
+    const status = await h.core.getStatus();
+    expect(status.night.rows).toBe(16);
+    expect(status.waitReason).toBe("night-limit");
+  });
+
   it("既定は 20,000 行。1 ステップの Class B の計数 1 行を足して数える", async () => {
     expect(MARKET_EDGE_NIGHTLY_ROWS_DEFAULT).toBe(20_000);
     expect(MARKET_EDGE_READ_COUNT_ROWS).toBe(1);
@@ -359,6 +371,19 @@ describe("1 晩の書き込み行数の上限", () => {
     await h.core.runNextStep();
     // 行 4 × 2 + 印 4 + 計数 1
     expect((await h.core.getStatus()).night.rows).toBe(4 * 2 + 4 + MARKET_EDGE_READ_COUNT_ROWS);
+  });
+});
+
+describe("1 ページの件数の上限(DO の SQLite の束縛値の上限 100。Issue #626)", () => {
+  it("pageSize に 100 を超える値を渡しても、目録の 1 ページは 100 件まで(IN の束縛値が 100 個を超えない)", async () => {
+    expect(MARKET_EDGE_PAGE_SIZE_MAX).toBe(100);
+    const h = make({ pageSize: 150 });
+    h.seed(150);
+    await h.core.runNextStep();
+    // 前提: 150 件が未処理で、ページを読んだ
+    expect(h.catalog.filter((e) => e.mark === null).length).toBeGreaterThan(0);
+    expect(h.pages.length).toBeGreaterThan(0);
+    expect(h.pages.every((p) => p.limit <= 100)).toBe(true);
   });
 });
 

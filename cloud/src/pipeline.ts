@@ -9,7 +9,7 @@
  * 取り込めるのは、`runAnalysis` の閉包が Electron・better-sqlite3・Node 固有の API を値で import しないため。core は
  * バレル(`@keiba/core`)ではなく、狭い入口 `@keiba/core/pipeline`(better-sqlite3 に依存するモジュールを型でも経由しない)から取る
  * (`wrangler.toml` の `[alias]`・`tsconfig.json` の `paths`・`vitest.config.ts` の `alias` が `@keiba/core` を `packages/core/src` に向ける)。
- * 静的ガード: `test/import-guard.test.ts`。バンドルの実物の検査: `test/bundle-guard.test.ts`。
+ * 静的ガード: `test/import-guard.test.ts`。バンドルの実物の検査: `test/bundle-guard.integration.test.ts`。
  *
  * **deps は非同期でもよい**(D1 は非同期): `saveAnalysis` は Promise でもよく、runAnalysis が完了を待つ(reject は伝わる)。
  * 当日傾向は `getRaceResultDetails`(前のレースの ID をまとめて1回で引く。D1 の1呼び出しあたりのクエリ数の上限を避ける)で渡す。

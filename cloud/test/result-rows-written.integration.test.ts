@@ -9,7 +9,7 @@ import { openLocalBindings, type LocalBindings } from "./local-bindings";
 
 /**
  * Issue #217(#167-C): 結果 1 レースを D1 に新規保存するときの書き込み行数(`meta.rows_written`)の測定。結果の補完(`result-backfill-core.ts`)の 1 晩の上限(150 レース)が、
- * D1 の Free の書き込み枠(10 万行/日)に対してどれだけかを、**コミット済みの再現手段**で確定する。再現: `cd cloud && pnpm exec vitest run test/result-rows-written.test.ts`。
+ * D1 の Free の書き込み枠(10 万行/日)に対してどれだけかを、**コミット済みの再現手段**で確定する。再現: `cd cloud && pnpm exec vitest run test/result-rows-written.integration.test.ts`。
  *
  * 内訳(新規保存・`buildSaveResultStatements` の 5 文のうち、DELETE は消す行が無いので 0): 馬 2H(`race_results` は複合主キーの自動索引で行が 2 倍)・面 2(`race_result_meta` は `race_id TEXT PRIMARY KEY` で索引つき)・
  * 組合せの払戻 2C(C = 全券種の払戻の行数。同じく複合主キー)・取込マーカー 2M(M = parsed の券種の数)。合計 = 2H + 2 + 2C + 2M。

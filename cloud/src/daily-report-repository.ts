@@ -7,7 +7,7 @@
  *
  * ## サブリクエスト(Workers Free は 1 呼び出し 50)
  * `readRaces` が 1 回に読むのは {@link REPORT_READ_CHUNK}(8)レースまで。1 レースは分析の詳細の batch 1・R2 の get 1・読み出しの回数の記録 1・配分の batch 1 の計 4、
- * 結果の batch が 1 で、8 レースで 33(`test/daily-report-repository.test.ts` が数えて固定している)。
+ * 結果の batch が 1 で、8 レースで 33(`test/daily-report-repository.integration.test.ts` が数えて固定している)。
  */
 import type { AnalysisDetailResult, AnalysisRepository } from "./analysis-repository";
 import { buildAnalysisView } from "./analysis-view";

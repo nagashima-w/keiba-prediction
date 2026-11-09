@@ -49,6 +49,8 @@ export const MARKET_EDGE_NIGHTLY_ROWS_MAX = 100_000;
 export const MARKET_EDGE_STEP_RACES = 20;
 /** 目録の 1 回の読み(未処理の列挙)の件数。窓より古い印だけのレースもここで拾うので、取り込みの件数より大きい。 */
 export const MARKET_EDGE_PAGE_SIZE = 100;
+/** 1 ページの件数の上限。`blockedIds` が race_id を `IN (?, …)` に束縛するので、DO の SQLite の束縛値の上限(100 個)を超えさせない(Issue #626〈#648〉)。 */
+export const MARKET_EDGE_PAGE_SIZE_MAX = 100;
 export const MARKET_EDGE_STEP_DELAY_MS = 1000;
 export const MARKET_EDGE_SCAN_DELAY_MS = 200;
 /** 取り込むものが無かった周のあと、見直すまで休む時間。 */
@@ -166,7 +168,7 @@ export class RaceMarketEdgeCore {
     this.startMin = options.windowStartMin ?? MARKET_EDGE_WINDOW_START_MIN;
     this.endMin = options.windowEndMin ?? MARKET_EDGE_WINDOW_END_MIN;
     this.stepRaces = Math.min(options.stepRaces ?? MARKET_EDGE_STEP_RACES, READ_BATCH_MAX);
-    this.pageSize = Math.min(options.pageSize ?? MARKET_EDGE_PAGE_SIZE, CATALOG_PAGE_MAX);
+    this.pageSize = Math.min(options.pageSize ?? MARKET_EDGE_PAGE_SIZE, MARKET_EDGE_PAGE_SIZE_MAX, CATALOG_PAGE_MAX);
     this.maxDbBytes = options.maxDbBytes ?? DB_SIZE_LIMIT_BYTES;
     deps.sql.exec("CREATE TABLE IF NOT EXISTS me_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID");
     deps.sql.exec("CREATE TABLE IF NOT EXISTS me_fail (race_id TEXT PRIMARY KEY, nights INTEGER NOT NULL, last_night TEXT NOT NULL, last_class TEXT NOT NULL) WITHOUT ROWID");

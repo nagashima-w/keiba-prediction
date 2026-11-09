@@ -3,9 +3,9 @@
  *
  *  - {@link D1MonthlyStore}: `monthly_reports`(migration 0015)の保存・読み出し。1 か月 1 行で、通常の保存は同じ月を上書きしない(`INSERT OR IGNORE`)。上書きは作り直し(Issue #280)だけが、`REPLACE_MONTHLY_SQL` の 1 文の UPSERT で行う。
  *  - {@link D1MonthlySource}: 月の統計の再集計と、最終日 1 日分の状態の読み出し。
- *    - 月の統計は、日報の 28 日累計の「直前 27 日」と同じ 6 文の 1 回の batch(サブリクエスト 1。`readPeriodRowsFrom`)で行を読み、`buildMonthStats` で日ごと・版ごとの行つきの統計にする。
+ *    - 月の統計は、日報の 28 日累計の「直前 27 日」と同じ 6 文の 2 回の batch(サブリクエスト 2。Issue #615。`readPeriodRowsFrom`)で行を読み、`buildMonthStats` で日ごと・版ごとの行つきの統計にする。
  *      読み取り行数は日報の期間の再集計と同じ(1 レースあたり約 100 行。月に 300〜1000 レースなら約 3 万〜10 万行。上限 `PERIOD_ANALYSES_LIMIT`〈3000〉レースを超えれば例外)。
- *    - **補正の当たり具合**(Issue #509。`adjustmentFit`)は、そのあとに別に読む(`adjustment-fit-read.ts`。候補 1 文 + 馬と結果の batch 2 文 = サブリクエスト 2。合わせて read 段階は 3)。
+ *    - **補正の当たり具合**(Issue #509。`adjustmentFit`)は、そのあとに別に読む(`adjustment-fit-read.ts`。候補 1 文 + 馬と結果の batch 2 文 = サブリクエスト 2。合わせて read 段階は 4)。
  *      **この節の失敗で月報そのものを failed にしない**: 一時的な失敗は 1 度だけ取り直し、続けて失敗したら本文に `{ unavailable: "read-failed" }` の印を残す(上限超過は `too-many`、計算の失敗は `compute-failed`。
  *      例外の本文は警告にも本文にも入れない)。成績の統計の読み出しの失敗は今までどおり例外(段階の再試行に任せる)。
  *    - 最終日の状態は軽い 1 問い合わせ({@link LAST_DAY_STATUS_SQL})。待ちのたびに大きな再集計を読み直さないために分けている。

@@ -6,6 +6,7 @@
  * これらが変わると別の置き場所になり、古いひな形は使われない。
  * 排他: `<root>/keiba-d1-template-<鍵>.lock` を mkdir(原子的)で取った 1 者だけが、一時ディレクトリに作り、完成したら rename で置く。
  * したがって置き場所が存在すれば常に完成品で、作りかけは読まれない。作る側が死んでロックが残っても、期限(既定 10 分)を過ぎれば奪う。
+ * 期限を超えて作り続ける側がいて 2 者が作ったときは、後から rename する側が、既にある完成品を見て自分の作りかけを捨てる(Issue #626)。
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
@@ -69,7 +70,12 @@ export async function ensureD1Template(options: EnsureTemplateOptions): Promise<
     try {
       if (!existsSync(finalDir)) {
         await build(stage);
-        renameSync(stage, finalDir);
+        try {
+          renameSync(stage, finalDir);
+        } catch (error) {
+          // 作っている間に期限を過ぎてロックを奪われ、別の者が先に完成品を置いたとき(Issue #626〈#621〉)。完成品があるなら自分の作りかけは捨てて成功とする。
+          if (!existsSync(finalDir)) throw error;
+        }
       }
     } finally {
       rmSync(stage, { recursive: true, force: true });

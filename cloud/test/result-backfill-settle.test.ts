@@ -349,6 +349,30 @@ describe("整合検査の範囲: 全件は前回の全件から 7 晩以上た�
     expect(w.reconcileArgs).toEqual([undefined, "20260918", "20260923", undefined, "20260925"]);
   });
 
+  it("月またぎ・年またぎでも 7 晩の数え方が変わらない(9/25 → 10/2 は 7 晩後で全件、12/28 → 1/3 は 6 晩後で直近。Issue #626)", async () => {
+    const at = (month: number, day: number, year = 2026): number => Date.UTC(year, month - 1, day, 2) - 9 * 3_600_000;
+    const run = async (first: [number, number, number], second: [number, number, number]): Promise<(string | undefined)[]> => {
+      const w = new Fake();
+      const { core } = make(w);
+      w.now = at(first[1], first[2], first[0]);
+      await core.runNextStep();
+      w.now = at(second[1], second[2], second[0]);
+      await core.runNextStep();
+      return w.reconcileArgs;
+    };
+    // 月またぎ: 9/25 と 10/2 は 7 日差。2 回目は全件(引数なし)。
+    const month = await run([2026, 9, 25], [2026, 10, 2]);
+    expect(month).toHaveLength(2);
+    expect(month[1]).toBeUndefined();
+    // 年またぎ: 12/28 と 1/3 は 6 日差。2 回目は直近(14 日前の 2026-12-20)。
+    const year = await run([2026, 12, 28], [2027, 1, 3]);
+    expect(year).toHaveLength(2);
+    expect(year[1]).toBe("20261220");
+    // 年またぎで 7 日差(12/28 → 1/4)は全件。
+    const yearFull = await run([2026, 12, 28], [2027, 1, 4]);
+    expect(yearFull[1]).toBeUndefined();
+  });
+
   it("検査が失敗した晩は全件をしたことにしない(翌ステップでまた全件)", async () => {
     const w = new Fake();
     w.reconcileResult = new Error("D1 SECRET");

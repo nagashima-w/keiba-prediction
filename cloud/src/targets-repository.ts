@@ -12,7 +12,7 @@
  *    買い目のない分析(一覧に載らない)の馬は読まない。そのため買い目のない分析の `markUmaban` は常に null。失敗は握らず投げる。
  * 買い目・馬・再計算は主キーの先頭(analysis_id)で引く。
  *
- * 読み取り行数の予算は {@link TARGETS_ROWS_READ_BUDGET}(`test/targets-repository.test.ts` が、最悪の日〈72 レース全部が分析済み・買い目 10 点・再計算 2 回〉と現実的な日〈3 分の 1 が狙い目〉で実測して固定)。
+ * 読み取り行数の予算は {@link TARGETS_ROWS_READ_BUDGET}(`test/targets-repository.integration.test.ts` が、最悪の日〈72 レース全部が分析済み・買い目 10 点・再計算 2 回〉と現実的な日〈3 分の 1 が狙い目〉で実測して固定)。
  * 読み取り行数は買い目の行数にほぼ比例する(1 分析あたりの買い目が 10 点を大きく超える日は予算を超えうる)。
  */
 import type { TargetsAnalysisRow, TargetsCloseRoundRow } from "./targets-view";
@@ -36,7 +36,7 @@ export const TARGETS_ROWS_READ_BUDGET = 5000;
 
 /**
  * 収支の途中経過(Issue #361。{@link D1TargetsStore.readLedger})の読み取り行数の予算(`meta.rows_read` の合計がこれ未満)。**上の {@link TARGETS_ROWS_READ_BUDGET} とは別の読みで、1 回の取得では両方が流れる**
- * (合計は `TARGETS_ROWS_READ_BUDGET` + この値)。根拠は `test/targets-repository.test.ts` の最悪の日の実測(出力の `[targets-ledger]` 行)。
+ * (合計は `TARGETS_ROWS_READ_BUDGET` + この値)。根拠は `test/targets-repository.integration.test.ts` の最悪の日の実測(出力の `[targets-ledger]` 行)。
  */
 export const TARGETS_LEDGER_ROWS_READ_BUDGET = 5000;
 

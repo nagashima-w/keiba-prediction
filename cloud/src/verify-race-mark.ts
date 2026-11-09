@@ -6,7 +6,7 @@
  * D1 の batch は 1 つのトランザクションで直列に動くので、`MAX(seq)` は他の書き込みと衝突しない(`MAX` は uncorrelated な副問い合わせなので、文の中で 1 回だけ評価される)。
  * 読む側(開催日ごとの差分の再計算)は段階 3。この段階では書くだけ。
  *
- * 経路は 8 つ: `saveAnalysis`・`saveResult`・`saveWinOdds`・`saveScratched`・`saveWinPayout`・`saveRaceClass`(`result-repository.ts`)・検証の DO の `commitStartTimes`・`saveClose`。
+ * 経路は 9 つ(呼び出し箇所の数。`grep -o "verifyRaceMarkStatement(\|verifyRaceMarkByAnalysisIdsStatement(" cloud/src/*.ts` の analysis-repository 2・result-repository 6・verify-store 1): `saveAnalysis`・`saveClose`(`analysis-repository.ts`)・`saveResult`・`saveWinOdds`・`saveScratched`・`saveWinPayout`・`saveRaceClass`・`fillNullKaisaiDates`(Issue #630。`result-repository.ts`)・検証の DO の `commitStartTimes`。
  * 新しい経路を足したら、ここの文を batch の最後に足す(`cloud/test/verify-write-guard.test.ts` が書き手のファイルと呼び出し箇所の数を固定している)。
  */
 import type { AnalysisDb } from "./analysis-repository";

@@ -3,7 +3,7 @@
  *
  * **応答を信用しない**(`api.ts` と同じ): 型違い・欠損は「想定外の応答」(`unexpected`)にし、一部の行だけを黙って落として返さない。
  * 文言(要約・場と R・◎・2 行目)はサーバが組み立てた文字列をそのまま出す(クライアントの束を太らせない)。残り時間だけがクライアントで変わる。
- * サーバ側のキー名・形のドリフトは `test/targets-api.test.ts`(実際の `handle()` の応答を通す)が検出する。
+ * サーバ側のキー名・形のドリフトは `test/targets-api.integration.test.ts`(実際の `handle()` の応答を通す)が検出する。
  */
 import { classify, getJson, isNum, isRecord, isStr, strOrNull, type ApiFailure, type FetchLike } from "./api";
 

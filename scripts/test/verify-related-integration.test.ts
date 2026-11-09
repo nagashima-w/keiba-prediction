@@ -9,6 +9,7 @@
  * 2. 一覧が古くならない: cloud/test の *.integration.test.ts の本文(コメント行を除く)を検索して、wrangler.toml・migrations・
  *    smoke のファイルを読むものを見つけ、一覧に無ければ赤。一覧に実在しない名前が残っても赤。
  */
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,5 +131,17 @@ describe("関係するインテグレーションの補強: 一覧が古くな�
     expect(readsWatchedFiles('execFileSync(WRANGLER, ["d1", "migrations", "apply"])')).toBe(true);
     expect(readsWatchedFiles('readFileSync(path.join(CLOUD, "smoke-worker.ts"), "utf-8")')).toBe(true);
     expect(readsWatchedFiles(" * wrangler.toml と migrations/ をコメントで言及\n// smoke.ts\nconst x = 1;")).toBe(false);
+  });
+});
+
+describe("関係するインテグレーション: 基点が取れないとき(Issue #626〈#620 の記録〉)", () => {
+  it("基点の ref が存在しない(merge-base が取れない)ときは、0 件で成功せず、0 以外で終わって基点を知らせる", () => {
+    const missing = "refs/heads/no-such-base-626";
+    // 前提: その ref は実在しない
+    expect(spawnSync("git", ["rev-parse", "--verify", "--quiet", missing], { cwd: ROOT }).status).not.toBe(0);
+    const r = spawnSync(process.execPath, [path.join(ROOT, "scripts", "verify-related-integration.mjs")], { cwd: ROOT, encoding: "utf8", env: { ...process.env, VERIFY_BASE: missing }, timeout: 60_000 });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(missing);
+    expect(r.stdout).not.toContain("関係するインテグレーションのテストなし");
   });
 });

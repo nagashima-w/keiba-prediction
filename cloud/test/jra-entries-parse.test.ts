@@ -128,7 +128,7 @@ describe("parseEntryPage(11/7 東京 2R。2 歳未勝利の 13 頭)", () => {
   if (result.status !== "ok") throw new Error(`読めない: ${result.status}`);
   const horses = result.horses;
 
-  it("13 頭・減量の印は今回の騎手の分だけ(馬柱の過去の走りの騎手の印は拾わない)", () => {
+  it("13 頭・減量の印は今回の騎手の分だけ(減量の正規表現が `<p class=\"jockey\"><span title=` の形に限られるので、馬柱側の印は拾わない。`PAST_START` の切り出しは JRA が馬柱のマークアップを変えたときの備えで、このテストでは切り出しの有無を区別できない。Issue #645)", () => {
     expect(horses).toHaveLength(13);
     expect(horses.filter((h) => h.reductionKg > 0).map((h) => h.reductionKg)).toEqual([3, 1, 2, 3]);
   });
