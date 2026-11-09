@@ -77,7 +77,10 @@ function withoutRaceDay(toml: string): string {
     .replace(/\[\[migrations\]\]\ntag = "v12"\nnew_sqlite_classes = \["RaceArchiveRunsDO"\]\n/, "")
     // Issue #642: 騎手・調教師の指標の DO(RACE_MARKET_EDGE・RaceMarketEdgeDO)と migration v13 も同じく除く。
     .replace(/\[\[durable_objects\.bindings\]\]\nname = "RACE_MARKET_EDGE"\nclass_name = "RaceMarketEdgeDO"\n/, "")
-    .replace(/\[\[migrations\]\]\ntag = "v13"\nnew_sqlite_classes = \["RaceMarketEdgeDO"\]\n/, "");
+    .replace(/\[\[migrations\]\]\ntag = "v13"\nnew_sqlite_classes = \["RaceMarketEdgeDO"\]\n/, "")
+    // Issue #697: 馬ごとの頁の埋め戻しの DO(JRA_HORSE_BACKFILL・JraHorseBackfillDO)と migration v14 も同じく除く。
+    .replace(/\[\[durable_objects\.bindings\]\]\nname = "JRA_HORSE_BACKFILL"\nclass_name = "JraHorseBackfillDO"\n/, "")
+    .replace(/\[\[migrations\]\]\ntag = "v14"\nnew_sqlite_classes = \["JraHorseBackfillDO"\]\n/, "");
   expect(stripped, "RACE_DAY の binding と migration v2 を除けている").not.toBe(toml);
   expect(stripped).not.toContain("RaceDay");
   // CloudMigration の binding は無い(v3・v9 の migration の行だけが残る。コメントは除いて見る)
@@ -93,6 +96,7 @@ function withoutRaceDay(toml: string): string {
   expect(stripped, "RACE_ARCHIVE_FETCH の binding と migration v11 を除けている").not.toContain("RaceArchiveFetchDO");
   expect(stripped, "RACE_ARCHIVE_RUNS の binding と migration v12 を除けている").not.toContain("RaceArchiveRunsDO");
   expect(stripped, "RACE_MARKET_EDGE の binding と migration v13 を除けている").not.toContain("RaceMarketEdgeDO");
+  expect(stripped, "JRA_HORSE_BACKFILL の binding と migration v14 を除けている").not.toContain("JraHorseBackfillDO");
   return stripped;
 }
 
