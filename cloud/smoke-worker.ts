@@ -369,6 +369,7 @@ export { RealRaceArchiveRunsDO as RaceArchiveRunsDO };
 export { RaceMarketEdgeDO } from "./src/market-edge-do";
 // Issue #697: 馬ごとの頁の埋め戻しの DO(本番の worker.ts と同じもの。binding JRA_HORSE_BACKFILL のクラス。smoke の var `JRA_HORSE_BACKFILL_ENABLED=0` で止めてある)。
 export { JraHorseBackfillDO } from "./src/jra-horse-backfill-do";
+export { JraBlinkerBackfillDO } from "./src/jra-blinker-backfill-do";
 
 /**
  * Issue #590: 過去の結果の毎晩の変換を、workerd の実環境(本物の DO の SQLite・アラーム・D1・R2・変換)で最後まで通すための **smoke 専用の DO**(smoke の一時設定だけが binding `RACE_ARCHIVE_RUNS_SMOKE` で指す。
