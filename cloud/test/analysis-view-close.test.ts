@@ -178,3 +178,37 @@ describe("buildAnalysisView の close の画面用の文言(Issue #344)", () => 
     expect(buildAnalysisView(detail(), BASE, [okRound(9, BASE)]).close!.rounds[0]!.label).toBe("第9回");
   });
 });
+
+describe("オッズの取得元の行(Issue #677)", () => {
+  const withSources = (json: string | null): AnalysisDetailResult => ({ ...detail(), oddsSourcesJson: json });
+  const SRC = JSON.stringify({ v: 1, sources: { winPlace: { source: "jra", officialDatetime: "2026-06-28 14:05:00" }, trifecta: { source: "netkeiba", officialDatetime: null } } });
+
+  it("分析: oddsSourcesJson から lines を返す。記録なし・壊れた JSON・キーなしは null(キーは常にある)", () => {
+    expect(buildAnalysisView(withSources(SRC), BASE).oddsSources).toEqual({ lines: ["オッズ: 単勝・複勝は JRA(6/28 14:05 現在)、3連単は netkeiba"] });
+    expect(buildAnalysisView(withSources(null), BASE).oddsSources).toBeNull();
+    expect(buildAnalysisView(withSources("{"), BASE).oddsSources).toBeNull();
+    const none = buildAnalysisView(detail(), BASE);
+    expect(none.oddsSources).toBeNull();
+    expect("oddsSources" in none).toBe(true);
+  });
+
+  it("再計算の回: summaryLines の末尾に 1 行足す。回ごとに自分の記録を使い、分析時と同じ内容でも省かない。記録なしの回は足さない", () => {
+    const r1 = { ...okRound(1, BASE), oddsSourcesJson: SRC };
+    const r2 = { ...okRound(2, BASE), oddsSourcesJson: JSON.stringify({ v: 1, sources: { winPlace: { source: "jra", officialDatetime: "2026-06-28 14:08:00" } } }) };
+    const view = buildAnalysisView(withSources(SRC), BASE, [r1, r2]);
+    const [a, b] = view.close!.rounds;
+    expect(a!.summaryLines.at(-1)).toBe("オッズ: 単勝・複勝は JRA(6/28 14:05 現在)、3連単は netkeiba");
+    expect(b!.summaryLines.at(-1)).toBe("オッズ: JRA(6/28 14:08 現在)");
+    const plain = buildAnalysisView(withSources(SRC), BASE, [okRound(1, BASE)]).close!.rounds[0]!;
+    expect(plain.summaryLines.some((l) => l.startsWith("オッズ:"))).toBe(false);
+    expect(a!.summaryLines.length).toBe(plain.summaryLines.length + 1);
+  });
+
+  it("再計算の summaryLines の行数は、最大の場合(地方の組合せの注記つき + オッズの行)でもクライアントの上限(4 行)に収まる", () => {
+    const r = { ...okRound(1, BASE), oddsSourcesJson: SRC };
+    const nar = { ...detail("202654071210"), oddsSourcesJson: null };
+    const lines = buildAnalysisView(nar, BASE, [r]).close!.rounds[0]!.summaryLines;
+    expect(lines.length).toBe(4);
+    expect(lines.at(-1)).toMatch(/^オッズ: /);
+  });
+});

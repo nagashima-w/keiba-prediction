@@ -225,6 +225,8 @@ export interface AnalysisDetail {
   readonly close?: AnalysisClose | null;
   /** 前の分析との差(Issue #583)。前の分析が無い・読み出しに失敗・形が不正・キー無し(古いサーバの応答)は null(補助の表示なので、分析全体の解析は失敗させない)。 */
   readonly previousDiff?: AnalysisPreviousDiff | null;
+  /** オッズの取得元と時刻の行(Issue #677。サーバの整形。最大 2 行)。記録なし・形が不正・キー無しは null。 */
+  readonly oddsSources?: { readonly lines: readonly string[] } | null;
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
   readonly detail: DetailState;
@@ -460,6 +462,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
     close: parseClose(value["close"]),
     previousDiff: parsePreviousDiff(value["previousDiff"]),
+    oddsSources: parseLines(value["oddsSources"], 2, CLOSE_MAX_LINE_LENGTH),
     horses: parsedHorses,
     allocation: parsedAllocation,
     detail,
