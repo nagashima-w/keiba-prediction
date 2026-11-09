@@ -26,6 +26,8 @@ export interface TargetRace {
   readonly resultState: string | null;
   /** 結果の文言(「的中 +1,200円」「結果待ち」など。サーバが組み立てる)。収支が無いとき null。 */
   readonly result: string | null;
+  /** 結果の種別(バッジ用。Issue #585)。キーが無い(旧い応答)・想定外の値は null。 */
+  readonly resultKind: ResultKind | null;
 }
 
 export interface TargetsData {
@@ -41,6 +43,9 @@ export interface TargetsData {
 
 export type TargetsResult = { readonly ok: true; readonly data: TargetsData } | { readonly ok: false; readonly error: ApiFailure };
 
+export type ResultKind = "hit" | "miss" | "refund" | "pending";
+const kindOf = (v: unknown): ResultKind | null => (v === "hit" || v === "miss" || v === "refund" || v === "pending" ? v : null);
+
 function parseRace(row: unknown): TargetRace | null {
   if (!isRecord(row)) return null;
   const { race_id, analysis_id, start_ms, start_time, place, pick, skipped, detail } = row;
@@ -50,7 +55,7 @@ function parseRace(row: unknown): TargetRace | null {
   if (!isStr(race_id) || !isNum(analysis_id) || !Number.isInteger(analysis_id) || analysis_id < 1) return null;
   if (!(start_ms === null || isNum(start_ms)) || !strOrNull(start_time) || !isStr(place) || !strOrNull(pick) || typeof skipped !== "boolean" || !isStr(detail)) return null;
   if (!strOrNull(resultState) || !strOrNull(result)) return null;
-  return { raceId: race_id, analysisId: analysis_id, startMs: start_ms, startTime: start_time, place, pick, skipped, detail, resultState, result };
+  return { raceId: race_id, analysisId: analysis_id, startMs: start_ms, startTime: start_time, place, pick, skipped, detail, resultState, result, resultKind: kindOf(row["result_kind"]) };
 }
 
 export function parseTargetsResponse(status: number, body: unknown): TargetsResult {

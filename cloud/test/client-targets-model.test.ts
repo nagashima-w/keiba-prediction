@@ -29,7 +29,7 @@ describe("remainingText(境界値)", () => {
 });
 
 function race(id: string, startMs: number | null, overrides: Partial<TargetRace> = {}): TargetRace {
-  return { raceId: id, analysisId: Number(id.slice(-4)), startMs, startTime: startMs === null ? null : "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", resultState: null, result: null, ...overrides };
+  return { raceId: id, analysisId: Number(id.slice(-4)), startMs, startTime: startMs === null ? null : "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", resultState: null, result: null, resultKind: null, ...overrides };
 }
 
 function data(races: TargetRace[], overrides: Partial<TargetsData> = {}): TargetsData {
@@ -131,6 +131,20 @@ describe("buildTargetsModel: 収支の途中経過(Issue #361)", () => {
     for (const [state, text, shown] of states) {
       expect(build(data([race(R(5), null, { resultState: state, result: text })])).upcoming[0]!.result, state).toBe(shown);
     }
+  });
+
+  it("バッジ(Issue #585): 結果の文言を出す行にだけ resultKind を渡す。未発走の行・時刻不明の待ち・種別が null の行は空", () => {
+    const m = build(data([
+      race(R(1), NOW - 30 * MIN, { resultState: "settled", result: "的中 +1,200円", resultKind: "hit" }),
+      race(R(2), NOW - 20 * MIN, { resultState: "none", result: "結果なし", resultKind: null }),
+      race(R(3), NOW + 30 * MIN, { resultState: "pending", result: "結果待ち", resultKind: "pending" }),
+      race(R(4), null, { resultState: "pending", result: "結果待ち", resultKind: "pending" }),
+      race(R(5), null, { resultState: "settled", result: "不的中 \u2212300円", resultKind: "miss" }),
+    ]));
+    expect(m.past.map((r) => [r.key, r.resultKind])).toEqual([[R(2), ""], [R(1), "hit"]]);
+    expect(m.upcoming.map((r) => [r.key, r.resultKind])).toEqual([[R(3), ""], [R(4), ""], [R(5), "miss"]]);
+    // 前提: 隠した行の元データには種別がある(表示側で隠している)
+    expect(race(R(3), NOW + 30 * MIN, { resultKind: "pending" }).resultKind).toBe("pending");
   });
 
   it("結果の文言が null(収支なし・ledger に無い行)は空", () => {

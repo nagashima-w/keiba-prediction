@@ -3,7 +3,7 @@
  * 未発走(発走の近い順。時刻不明は末尾)と発走済み(下。新しいものが先)に分け、残り時間の文言を作る。「今」は引数(端末の時計をサーバの時刻で補正した値。`targets-screen.ts`)。
  * 文言(要約・場と R・◎・2 行目)はサーバが組み立てたものをそのまま使う。ここで作る日本語は残り時間だけ(束を太らせない)。
  */
-import type { TargetRace, TargetsData } from "./api-targets";
+import type { ResultKind, TargetRace, TargetsData } from "./api-targets";
 import { ymdToInput } from "./date";
 import { buildHash } from "./route";
 
@@ -41,6 +41,8 @@ export interface TargetRow {
   readonly result: string;
   /** 結果の状態(クラス名に使う)。`result` が空のとき空。 */
   readonly resultState: string;
+  /** 結果の種別(バッジ。Issue #585)。結果の文言を出す行で、種別があるときだけ。無いとき空。 */
+  readonly resultKind: ResultKind | "";
 }
 
 export interface TargetsModel {
@@ -82,7 +84,7 @@ function rowOf(date: string, r: TargetRace, nowMs: number): TargetRow {
   const left = remainingText(r.startMs, nowMs);
   const shown = showsResult(r, nowMs);
   const venue = Number(r.raceId.slice(4, 6)) >= NAR_TRACK_CODE_MIN ? "nar" : "central";
-  return { key: r.raceId, href: buildHash({ date, venue, analysis: r.analysisId }), time: r.startTime ?? "--:--", place: r.place, pick: r.pick ?? "", detail: r.detail, left: left.text, soon: left.soon, skipped: r.skipped, result: shown ? r.result! : "", resultState: shown ? r.resultState! : "" };
+  return { key: r.raceId, href: buildHash({ date, venue, analysis: r.analysisId }), time: r.startTime ?? "--:--", place: r.place, pick: r.pick ?? "", detail: r.detail, left: left.text, soon: left.soon, skipped: r.skipped, result: shown ? r.result! : "", resultState: shown ? r.resultState! : "", resultKind: shown ? (r.resultKind ?? "") : "" };
 }
 
 export function buildTargetsModel(input: TargetsModelInput): TargetsModel {
