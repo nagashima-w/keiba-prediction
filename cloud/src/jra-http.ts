@@ -20,6 +20,9 @@ export const JRA_ACCESS_D_URL = "https://www.jra.go.jp/JRADB/accessD.html";
 /** オッズ(開催の選択・レースの選択・各式別の頁。Issue #673)の入口。`jra-odds-fetch.ts` だけが使う。 */
 export const JRA_ACCESS_O_URL = "https://www.jra.go.jp/JRADB/accessO.html";
 
+/** 馬ごとの頁(競走馬情報。Issue #697)の入口。GET で `?CNAME=pw01dud10<馬の ID 10 桁>/<2 桁>`(2 桁は `jra-horse-cname.ts`)。`jra-horse-fetch.ts` だけが使う。 */
+export const JRA_ACCESS_U_URL = "https://www.jra.go.jp/JRADB/accessU.html";
+
 /** コースの情報のページの URL。1 は `index.html`、2 以降は `index2.html`・`index3.html`。 */
 export const jraCourseUrl = (n: number): string => `https://www.jra.go.jp/keiba/baba/index${n <= 1 ? "" : String(n)}.html`;
 

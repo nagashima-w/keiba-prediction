@@ -31,10 +31,10 @@ describe("保存するだけ(読む側に足さない)", () => {
     expect(SRC.map(rel)).toContain("cloud/src/race-day-core.ts");
   });
 
-  it("馬・馬主・出走時の情報の表を名指しするのは、保存先(jra-entries-repository.ts)だけ。分析・プロンプト・画面・検証のどこも読まない", () => {
+  it("馬・馬主・出走時の情報の表を名指しするのは、保存先(jra-entries-repository.ts と、馬の頁の埋め戻しの保存先 jra-horse-repository.ts〈Issue #697〉)だけ。分析・プロンプト・画面・検証のどこも読まない", () => {
     const tables = /\b(horse_profiles|horse_owner_history|race_horse_entries)\b/;
     const hits = SRC.filter((f) => tables.test(read(f))).map(rel);
-    expect(hits).toEqual(["cloud/src/jra-entries-repository.ts"]);
+    expect(hits).toEqual(["cloud/src/jra-entries-repository.ts", "cloud/src/jra-horse-repository.ts"]);
   });
 
   it("取得の段・取得口・保存先を import するのは、日単位の DO の core と DO のラッパだけ(分析の経路は import しない)", () => {

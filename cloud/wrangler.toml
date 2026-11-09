@@ -140,6 +140,15 @@ class_name = "RaceArchiveRunsDO"
 name = "RACE_MARKET_EDGE"
 class_name = "RaceMarketEdgeDO"
 
+# JRA の馬ごとの頁から、2021 年以降に中央で走った馬の父・母・母の父・生産者を取って `horse_profiles`(source = 'jra_horse')に貯める Durable Object(Issue #697。親は #695)。`idFromName("main")` の単一インスタンス。
+# **JST 18:00〜翌 8:00 だけ**、1 回の起床で最大 40 頭を、3 秒以上あけて直列で取る(JRA の公式サイトだけ。netkeiba にも gate にも出ない)。1 日(JST)の `horse_profiles` への書き込みは 15,000 行まで。
+# 出馬表から入った行(source = 'jra')は上書きしない。馬主は書かない。cron の `scheduled`(21 時・23 時)が kick してアラームを張る(新しい cron は足さない)。
+# 止める・行数を下げる var(どちらも任意。**[vars] には置かない**=既定は動く): `JRA_HORSE_BACKFILL_ENABLED`("0" で止める)・`JRA_HORSE_BACKFILL_DAILY_ROWS`(1 日の書き込み行数を下げる)。
+# ★binding と同じ名前〈JRA_HORSE_BACKFILL〉の var は衝突するので使わない。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "JRA_HORSE_BACKFILL"
+class_name = "JraHorseBackfillDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["NetkeibaGate"]
@@ -207,6 +216,11 @@ new_sqlite_classes = ["RaceArchiveRunsDO"]
 [[migrations]]
 tag = "v13"
 new_sqlite_classes = ["RaceMarketEdgeDO"]
+
+# 追加だけ(v1〜v13 には触れない)。Issue #697。
+[[migrations]]
+tag = "v14"
+new_sqlite_classes = ["JraHorseBackfillDO"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。

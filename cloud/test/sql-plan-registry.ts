@@ -43,6 +43,10 @@ export const HERE: Record<string, PlanEntry> = {
     "jra-entries-repository.ts::UPSERT_PROFILES_SQL",
     "jra-entries-repository.ts::UPSERT_OWNERS_SQL",
     "jra-entries-repository.ts::UPSERT_ENTRIES_SQL",
+    // 馬の頁から取った属性の保存と、取る馬の読み出し(Issue #697)。horse_runs の主キーの範囲読み・json_each から horse_profiles の主キーの引き・json_each からの INSERT。
+    "jra-horse-repository.ts::LIST_HORSE_IDS_SQL",
+    "jra-horse-repository.ts::FILTER_MISSING_SQL",
+    "jra-horse-repository.ts::INSERT_HORSE_PROFILES_SQL",
     "monthly-report-repository.ts::INSERT_MONTHLY_SQL",
     "monthly-report-repository.ts::REPLACE_MONTHLY_SQL",
     "prior-export-store.ts::SELECT_R2_USAGE_SQL",

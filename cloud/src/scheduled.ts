@@ -31,7 +31,7 @@
  * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。計画・既存の結果の依頼を失敗させない。
  */
 import { jstKaisaiDate, planTargetDate, scheduledRunKind, type ScheduledRunKind } from "./auto-run-plan";
-import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike, RaceMarketEdgeNamespaceLike } from "./handler";
+import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike, RaceMarketEdgeNamespaceLike, JraHorseBackfillNamespaceLike } from "./handler";
 import { DAILY_REPORT_NAME } from "./daily-report-core";
 import { D1ReportStore } from "./daily-report-repository";
 import { MONTHLY_REPORT_NAME } from "./monthly-report-core";
@@ -41,6 +41,7 @@ import { classifyNotifyError, createDiscordNotifier, webhookStatus } from "./not
 import type { DiscordFetchLike } from "../../packages/core/src/notify/discord";
 import { RACE_ARCHIVE_FETCH_NAME } from "./race-archive-fetch-core";
 import { RACE_MARKET_EDGE_NAME } from "./market-edge-core";
+import { JRA_HORSE_BACKFILL_NAME } from "./jra-horse-backfill-core";
 import { RACE_ARCHIVE_RUNS_NAME } from "./race-archive-runs-core";
 import { RESULT_BACKFILL_NAME } from "./result-backfill-core";
 import { addDaysToKaisaiDate, CRON_RESULT_MAX_DAYS, dispatchResultImports, errorKind, resultWindowFor, type DispatchStore } from "./result-dispatch";
@@ -64,6 +65,7 @@ export interface ScheduledEnv {
   readonly RACE_ARCHIVE_RUNS?: RaceArchiveRunsNamespaceLike;
   /** 騎手・調教師の指標の DO(Issue #642)。無い構成では kick を呼ばない。 */
   readonly RACE_MARKET_EDGE?: RaceMarketEdgeNamespaceLike;
+  readonly JRA_HORSE_BACKFILL?: JraHorseBackfillNamespaceLike;
   /** 日報の DO(Issue #235)。無い構成では日報の取り残しの補完をしない。 */
   readonly DAILY_REPORT?: DailyReportNamespaceLike;
   /** 月報の DO(Issue #265・#279)。無い構成では月報を依頼しない。 */
@@ -197,6 +199,15 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
         await env.RACE_MARKET_EDGE.get(env.RACE_MARKET_EDGE.idFromName(RACE_MARKET_EDGE_NAME)).kick();
       } catch (error) {
         log(`scheduled: failed class=race-market-edge-kick-failed error=${errorKind(error)}`, "error");
+      }
+    })(),
+    // 馬ごとの頁の埋め戻しの起動(Issue #697)。アラームが無ければ張るだけ(取得は JST 18:00〜翌 8:00 に、DO が JRA の公式サイトと D1 だけで行う。netkeiba には出ない)。
+    (async (): Promise<void> => {
+      if (env.JRA_HORSE_BACKFILL === undefined) return;
+      try {
+        await env.JRA_HORSE_BACKFILL.get(env.JRA_HORSE_BACKFILL.idFromName(JRA_HORSE_BACKFILL_NAME)).kick();
+      } catch (error) {
+        log(`scheduled: failed class=jra-horse-backfill-kick-failed error=${errorKind(error)}`, "error");
       }
     })(),
   ]);

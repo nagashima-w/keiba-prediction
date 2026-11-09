@@ -156,6 +156,18 @@ export interface RaceMarketEdgeNamespaceLike {
   get(id: any): RaceMarketEdgeStubLike;
 }
 
+/** 馬ごとの頁の埋め戻しの DO(JraHorseBackfillDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #697。 */
+export interface JraHorseBackfillStubLike {
+  /** アラームが無ければ張る(cron の `scheduled` から 21 時と 23 時に)。 */
+  kick(): Promise<void>;
+}
+
+/** 馬ごとの頁の埋め戻しの DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 `JRA_HORSE_BACKFILL_NAME`。jra-horse-backfill-core.ts)。 */
+export interface JraHorseBackfillNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): JraHorseBackfillStubLike;
+}
+
 /** 過去の結果の取得の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link RACE_ARCHIVE_FETCH_NAME})。 */
 export interface RaceArchiveNamespaceLike {
   idFromName(name: string): any;
@@ -250,6 +262,8 @@ export interface Env extends AccessEnv {
   RACE_ARCHIVE_RUNS?: RaceArchiveRunsNamespaceLike;
   /** 騎手・調教師の指標の DO(RaceMarketEdgeDO。wrangler.toml の binding)。Issue #642。本番では常にある。無い構成では cron は kick しない。 */
   RACE_MARKET_EDGE?: RaceMarketEdgeNamespaceLike;
+  /** 馬ごとの頁の埋め戻しの DO(JraHorseBackfillDO。wrangler.toml の binding)。Issue #697。本番では常にある。無い構成では cron は kick しない。 */
+  JRA_HORSE_BACKFILL?: JraHorseBackfillNamespaceLike;
   /** 検証の集計の DO(VerifyReportDO。wrangler.toml の binding)。Issue #219。本番では常にある。無い構成では `GET /api/verify` が 503 になる。 */
   VERIFY_REPORT?: VerifyNamespaceLike;
   /** 統計モデル用の書き出しの DO(PriorExportDO。wrangler.toml の binding)。Issue #266。本番では常にある。無い構成では `GET /api/export/prior-dataset` が 503 になる。 */
