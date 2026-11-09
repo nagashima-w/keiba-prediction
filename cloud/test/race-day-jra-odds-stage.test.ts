@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import type { JraOddsRaceLinks, JraOddsVenueLink } from "../../packages/core/src/scraper/parse-jra-odds-index";
@@ -15,6 +15,26 @@ import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { newspaperOnlyPostRaw } from "./newspaper-post";
 import { openNodeSql, type NodeSql } from "./node-sql";
 import { fixtureForUrl } from "./pipeline-fixtures";
+import { fixtureForUrl14 } from "./shutuba-14";
+
+// Issue #680: 差し込みの例外を DO の単位で起こすため、JRA のオッズの差し込みの作成だけ、フラグが立っているときに例外を投げるものに差し替える(ほかは本物)。
+const overrideFault = vi.hoisted(() => ({ throwMessage: null as string | null }));
+vi.mock("../src/jra-odds-cache", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/jra-odds-cache")>();
+  return {
+    ...actual,
+    createJraOddsOverride: (deps: Parameters<typeof actual.createJraOddsOverride>[0]) => {
+      const real = actual.createJraOddsOverride(deps);
+      return {
+        ...real,
+        winPlace: async () => {
+          if (overrideFault.throwMessage !== null) throw new Error(overrideFault.throwMessage);
+          return real.winPlace!();
+        },
+      };
+    },
+  };
+});
 
 /**
  * Issue #675 段階 A: 発走前の取得の段の後・計算の段の前に、JRA のオッズの段階(別のアラーム)を挟む。
@@ -65,6 +85,8 @@ interface FakeJra extends JraOddsFetcher {
   /** 頁(cname の式別桁)→ その呼び出し回での結果の上書き。null なら見本の頁。 */
   oddsOverride: (page: string, nth: number) => JraOddsResult<string> | null;
   throwOnOpen: boolean;
+  /** 単勝複勝の頁(既定は 16 頭に増やしたもの。`field14` のときは見本の 14 頭)。 */
+  tanpukuHtml: () => string;
 }
 
 function fakeJra(): FakeJra {
@@ -74,6 +96,7 @@ function fakeJra(): FakeJra {
     listVenuesResult: () => ({ status: "ok", value: [VENUE] }),
     oddsOverride: () => null,
     throwOnOpen: false,
+    tanpukuHtml: tanpuku16,
     open(): JraOddsSession {
       if (jra.throwOnOpen) throw new Error("secret-url https://example.invalid/x?cname=ABC");
       const record = { listVenues: 0, listRaces: 0, fetchOdds: [] as string[] };
@@ -98,7 +121,7 @@ function fakeJra(): FakeJra {
           const page = PAGES.find((p) => cname.startsWith(`pw15${DIGIT[p]}`))!;
           record.fetchOdds.push(page);
           seen[page] = (seen[page] ?? 0) + 1;
-          return jra.oddsOverride(page, seen[page]!) ?? { status: "ok", value: PAGE_HTML[page]!() };
+          return jra.oddsOverride(page, seen[page]!) ?? { status: "ok", value: (page === "tanpuku" ? jra.tanpukuHtml : PAGE_HTML[page]!)() };
         },
       };
     },
@@ -186,9 +209,11 @@ interface Harness {
 }
 const opened: NodeSql[] = [];
 afterEach(() => {
+  overrideFault.throwMessage = null;
   for (const sql of opened.splice(0)) sql.close();
 });
-function harness(opts: { withJra?: boolean; settings?: CloudSettings } = {}): Harness {
+/** `field14`: DO の出馬表を 14 頭にそろえ(`shutuba-14.ts`)、JRA の見本(14 頭)をそのまま使う。既定は 16 頭(組合せの頁は食い違う)。 */
+function harness(opts: { withJra?: boolean; settings?: CloudSettings; field14?: boolean } = {}): Harness {
   const sql = openNodeSql();
   opened.push(sql);
   const clock = { now: Date.parse("2026-06-28T00:00:00Z") };
@@ -199,6 +224,10 @@ function harness(opts: { withJra?: boolean; settings?: CloudSettings } = {}): Ha
   const sink = fakeSink();
   const jra = fakeJra();
   const h = { sql, gate, sink, jra, clock, alarm, warnings, infos, settings: opts.settings ?? BASE } as Harness;
+  if (opts.field14 === true) {
+    gate.route = fixtureForUrl14;
+    jra.tanpukuHtml = () => jraHtml("jra_odds_tanpuku_202605050208.html");
+  }
   const deps: RaceDayDeps = {
     sql,
     now: () => clock.now,
@@ -299,6 +328,30 @@ describe("JRA のオッズの段階: 組合せ ON(7 頁。三連単は単独の�
   });
 });
 
+describe("JRA のオッズの段階: 組合せを JRA から採用する(出走馬 14 頭が見本と一致。Issue #680)", () => {
+  it("DO の出馬表を 14 頭にすると、7 頁のうち組合せ 6 券種もすべて JRA が採用され、netkeiba に戻る理由は付かない。組合せの警告も出ない", async () => {
+    const h = harness({ settings: COMBO_ON, field14: true });
+    await schedule(h);
+    const labels = await runAll(h);
+    expect(labels).toEqual(["pre_race:fetch:ok", "pre_race:fetch:ok", "pre_race:fetch:ok", "pre_race:compute:ok"]);
+    expect(taskStatus(h)).toBe("done");
+    const sources = h.sink.extras[0]!.oddsSources!;
+    expect(Object.keys(sources).sort()).toEqual(["bracketQuinella", "exacta", "quinella", "trifecta", "trio", "wide", "winPlace"]); // 前提: 7 単位すべてが記録されている
+    for (const [bet, record] of Object.entries(sources)) {
+      expect(record, bet).toMatchObject({ source: "jra", officialDatetime: "2026-06-28 10:37:00" });
+      expect(record, bet).not.toHaveProperty("fallbackReason");
+    }
+    expect(h.warnings.filter((w) => w.includes("組合せ"))).toEqual([]);
+  });
+
+  it("同じ 14 頭でも、JRA を使わない構成(取得口なし)では取得元の記録が付かない(従来どおり)", async () => {
+    const h = harness({ settings: COMBO_ON, field14: true, withJra: false });
+    await schedule(h);
+    await runAll(h);
+    expect(h.sink.extras[0]!.oddsSources).toBeUndefined();
+  });
+});
+
 describe("JRA のオッズの段階: 失敗は握る(分析は止めない)", () => {
   it("開催選択の失敗: 残りの頁を全部 failed にして、netkeiba のまま計算まで進む。警告は固定の語だけ(URL を含めない)", async () => {
     const h = harness({ settings: COMBO_ON });
@@ -352,6 +405,89 @@ describe("JRA のオッズの段階: 失敗は握る(分析は止めない)", ()
     await runAll(h2);
     expect(totalRequests(h2.jra)).toBe(1 + 1 + 1 + 2 + 1); // 取り直しも param-error でも、それ以上は撃たない
     expect(h2.sink.extras[0]!.oddsSources!.winPlace).toMatchObject({ source: "netkeiba", fallbackReason: "override-unavailable" });
+  });
+});
+
+describe("JRA のオッズの段階: 発走済みのレースは取らない(failIfStarted。Issue #680)", () => {
+  const START = Date.parse("2026-06-28T15:45:00+09:00");
+  /** 取得ステップを終え(段の前)、計画の行(発走時刻)を足して、auto: 自動の印を付けるか。 */
+  async function readyForJraStage(h: Harness, auto: boolean): Promise<void> {
+    await schedule(h);
+    expect((await step(h)).label).toBe("pre_race:fetch:ok"); // 取得ステップ(JRA の段の前)
+    expect((h.sql.exec("SELECT status FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as { status: string }[])[0]!.status).toBe("fetched"); // 前提: 次は JRA の段
+    h.sql.exec(
+      `INSERT INTO race_day_plan (race_id, venue, venue_name, race_number, race_name, grade, start_time, start_ms, due_ms, offset_minutes, disposition, skip_reason, state, planned_at, promoted_at)
+       VALUES (?, 'central', '東京', 11, 'x', NULL, '15:45', ?, NULL, 45, 'scheduled', NULL, 'promoted', ?, NULL)`,
+      RACE,
+      START,
+      h.clock.now,
+    );
+    if (auto) {
+      const queuedAt = (h.sql.exec("SELECT queued_at FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as { queued_at: number }[])[0]!.queued_at;
+      h.sql.exec("INSERT INTO race_day_auto_pre_race (race_id, enqueued_at, fail_reason) VALUES (?, ?, NULL)", RACE, queuedAt);
+    }
+  }
+
+  it("自動の発走前: 発走時刻に達していたら JRA に 1 本も出ず(取得口を開かない)、failed(理由 started)になり、段の行が消える", async () => {
+    const h = harness();
+    await readyForJraStage(h, true);
+    expect(stageRows(h).length).toBeGreaterThan(0); // 前提: 段の行がある(消えたことを確かめられる)
+    h.alarm.at = null;
+    h.clock.now = START; // 発走ちょうど(now >= start)
+    const outcome = await h.core.runNextStep();
+    expect(outcome).toMatchObject({ kind: "ran", mode: "pre_race", step: "fetch", result: "failed" });
+    expect(h.jra.sessions).toHaveLength(0);
+    expect(taskStatus(h)).toBe("failed");
+    expect(stageRows(h)).toEqual([]);
+    expect((h.sql.exec("SELECT fail_reason FROM race_day_auto_pre_race WHERE race_id = ?", RACE).toArray() as { fail_reason: string }[])[0]!.fail_reason).toBe("started");
+  });
+
+  it("自動の発走前: 発走の 1 ミリ秒前なら守りは働かず、JRA の段が動く", async () => {
+    const h = harness();
+    await readyForJraStage(h, true);
+    h.alarm.at = null;
+    h.clock.now = START - 1;
+    const outcome = await h.core.runNextStep();
+    expect(outcome).toMatchObject({ kind: "ran", mode: "pre_race", step: "fetch", result: "ok" });
+    expect(totalRequests(h.jra)).toBeGreaterThan(0);
+  });
+
+  it("手動の発走前(自動の印なし)は、発走後でも JRA の段が動く(守りは自動だけ)", async () => {
+    const h = harness();
+    await readyForJraStage(h, false);
+    h.alarm.at = null;
+    h.clock.now = START + 60_000;
+    const outcome = await h.core.runNextStep();
+    expect(outcome).toMatchObject({ kind: "ran", mode: "pre_race", step: "fetch", result: "ok" });
+    expect(totalRequests(h.jra)).toBeGreaterThan(0);
+  });
+});
+
+describe("JRA のオッズの段階: 差し込みの例外の中身(Issue #680)", () => {
+  it("差し込みが例外を投げると、理由は固定の語 override-error のまま、例外の名前と文面はログ(onWarn)にだけ残る。保存される分析・取得元の記録には文面が入らない", async () => {
+    const h = harness();
+    overrideFault.throwMessage = "SECRETMSG https://example.invalid/x?cname=ABC";
+    await schedule(h);
+    await runAll(h);
+    expect(taskStatus(h)).toBe("done");
+    expect(h.sink.extras[0]!.oddsSources!.winPlace).toMatchObject({ source: "netkeiba", fallbackReason: "override-error" });
+    const logged = h.warnings.filter((w) => w.includes("JRA のオッズを使えませんでした"));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain(`${RACE}) ・winPlace`.replace(") ・", ")・"));
+    expect(logged[0]).toContain("Error: SECRETMSG");
+    // 保存されるもの(分析の記録と付帯情報)にも、画面向けの警告にも、文面は入らない
+    expect(JSON.stringify(h.sink.saved)).not.toContain("SECRETMSG");
+    expect(JSON.stringify(h.sink.extras)).not.toContain("SECRETMSG");
+  });
+
+  it("ログの 1 行は 300 字に切り詰める", async () => {
+    const h = harness();
+    overrideFault.throwMessage = "x".repeat(2000);
+    await schedule(h);
+    await runAll(h);
+    const logged = h.warnings.filter((w) => w.includes("JRA のオッズを使えませんでした"));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]!.length).toBe(301);
   });
 });
 

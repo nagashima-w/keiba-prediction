@@ -18,9 +18,8 @@ import { D1BabaStore } from "./baba-repository";
 import { D1JockeyNamesStore } from "./jockey-names-repository";
 import { D1KaisaiDaysStore } from "./kaisai-days-repository";
 import { D1TrainerNamesStore } from "./trainer-names-repository";
-import { createJraBabaFetcher } from "./jra-baba-fetch";
 import { createJraEntriesFetcher } from "./jra-entries-fetch";
-import { createJraOddsFetcher, createJraPacer } from "./jra-odds-fetch";
+import { createJraFetchers } from "./jra-fetchers";
 import { isJraOddsDisabled } from "./race-day-jra-odds";
 import { D1JraEntriesStore } from "./jra-entries-repository";
 import { createCloudLlm } from "./llm-sender";
@@ -113,6 +112,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
               throw new Error("日報の依頼が断られました");
             }
           };
+    // JRA の取得口(馬場・オッズ)。同じ間隔の部品を共有する(Issue #680)。var JRA_ODDS_ENABLED が "0" のときはオッズを渡さない(今までの動き)。
+    const jraFetchers = createJraFetchers({ oddsEnabled: !isJraOddsDisabled(env.JRA_ODDS_ENABLED) });
     this.core = new RaceDayCore({
       sql: ctx.storage.sql,
       now: () => Date.now(),
@@ -141,7 +142,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 失敗は握って警告にする(取得ステップを止めない)ので、migration の適用前に Worker が先に出ても動く。
       raceConditionsStore: new D1RaceConditionsStore({ db: env.DB }),
       // 馬場の取得(Issue #294。Issue #478 で取得先を JRA のページに替えた)。secret は要らない(JRA のページは素の fetch で届く〈#488〉)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(baba_fetches・baba_conditions〈migration 0017〉)。
-      fetchBaba: createJraBabaFetcher(),
+      fetchBaba: jraFetchers.fetchBaba,
       babaStore: new D1BabaStore({ db: env.DB }),
       // 貯めた当日の馬場の値の読み出し(Issue #295)。発走前の分析が、そのレースの開催日 × 場コードの 1 行を D1 から読む(表が無い間は読み出しが失敗して値なしで続ける)。
       babaReader: new D1BabaStore({ db: env.DB }),
@@ -150,8 +151,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 表が無い間(migration の適用前に Worker が先に出た場合)は、claim が失敗して取得が止まるだけで、分析は止まらない。
       fetchJraEntries: createJraEntriesFetcher(),
       // JRA のオッズの取得(Issue #675。#668-D)。中央の発走前の分析で、取得ステップの後に別のアラームで頁を取り、計算が券種ごとに JRA を優先する(使えない券種は netkeiba のまま)。secret は要らない。
-      // URL は取得口の中にだけある。JRA への 1.5 秒の間隔は、この DO の中で共有する(pacer。出馬表・馬場の取得口には渡さない=それらの動きは変えない)。var JRA_ODDS_ENABLED が "0" のときは渡さない(今までの動き)。
-      ...(isJraOddsDisabled(env.JRA_ODDS_ENABLED) ? {} : { fetchJraOdds: createJraOddsFetcher({ pacer: createJraPacer() }) }),
+      // URL は取得口の中にだけある。JRA への 1.5 秒の間隔は、この DO の中で馬場の取得口と共有する(pacer。`jra-fetchers.ts`。Issue #680。出馬表の取得口には渡さない=その動きは変えない)。var JRA_ODDS_ENABLED が "0" のときは渡さない(今までの動き)。
+      ...(jraFetchers.fetchJraOdds === undefined ? {} : { fetchJraOdds: jraFetchers.fetchJraOdds }),
       jraEntriesStore: new D1JraEntriesStore({ db: env.DB }),
       onInfo: (message) => console.log(message),
       // 開催日ごとの記録(Issue #519。D1 の kaisai_days〈migration 0027〉)。発走前の計算が、中央のレースごとに書き、芝の開催進行の通算・柵の日数を数える過去の行を読む。

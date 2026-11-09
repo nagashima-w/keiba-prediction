@@ -15,7 +15,7 @@
  * ## 本の間隔
  * 既定は session ごと(`jra-entries-fetch.ts` と同じ。最初の 1 本の前は待たず、2 本目以降は {@link JRA_GAP_MS} 待つ)。
  * **`pacer`(共有の間隔。{@link createJraPacer})を渡すと、session をまたいで**直前の送信から {@link JRA_GAP_MS} 未満なら残りを待つ。
- * 出馬表・馬場の既存の段はこの pacer を使っていない(動きを変えない)。段をまたぐ共有が要るかは #675 で配線するときに決める。
+ * DO(RaceDayDO)では馬場の取得口と共有する(`jra-fetchers.ts`。Issue #680)。出馬表の段はこの pacer を使っていない(動きを変えない)。
  *
  * ## param-error の判定について
  * 符号が違うとき、`accessD` は HTTP 200 の「パラメータエラー」の頁(title)を返す。`accessO` で同じ頁が返るかは**未観測**のため、`accessD` と同じ判定
