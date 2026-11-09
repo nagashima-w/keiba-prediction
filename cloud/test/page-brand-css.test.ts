@@ -150,3 +150,28 @@ describe("Issue #570: 「ログイン中」を見出しと同じ行の右端に�
     expect(declsOf(".home").get("min-height")).toBe("44px");
   });
 });
+
+describe("Issue #582: 馬ごとの評価の表の棒(.horse-bar)", () => {
+  const BAR_RULES = [".horse-bar", ".horse-bar::-webkit-progress-bar", ".horse-bar::-webkit-progress-value", ".horse-bar::-moz-progress-bar"] as const;
+
+  it("規則がある: 横に伸びず(max-width)細い。幅を取りすぎない", () => {
+    expect(countRules(".horse-bar")).toBeGreaterThan(0);
+    const d = declsOf(".horse-bar");
+    expect(d.get("display")).toBe("block");
+    expect(d.get("height")).toMatch(/^\d+px$/);
+    expect(d.get("width")).toMatch(/px|em/);
+  });
+
+  it("色は既存の変数 1 色(--brand が値、--line が地)。ライト・ダークとも、地(card・bg)の上で見える(3:1 以上)", () => {
+    expect(declsOf(".horse-bar::-webkit-progress-value").get("background")).toBe("var(--brand)");
+    expect(declsOf(".horse-bar::-moz-progress-bar").get("background")).toBe("var(--brand)");
+    expect(declsOf(".horse-bar::-webkit-progress-bar").get("background")).toBe("var(--line)");
+    expect(declsOf(".horse-bar").get("background")).toBe("var(--line)");
+    for (const p of [WEB_LIGHT, WEB_DARK]) for (const surface of [p.bg, p.card]) expect(contrastRatio(p.brand, surface)).toBeGreaterThanOrEqual(3);
+    for (const p of [WEB_LIGHT, WEB_DARK]) expect(contrastRatio(p.brand, p.line)).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(BAR_RULES)("%s の規則が存在する", (selector) => {
+    expect(countRules(selector)).toBeGreaterThan(0);
+  });
+});
