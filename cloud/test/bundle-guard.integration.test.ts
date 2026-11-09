@@ -673,13 +673,16 @@ describe("通知(Discord)のバンドル(Issue #205)", () => {
 });
 
 /**
- * Issue #294(#293-A)・#478(#477-B): 馬場の取得の配線。本番のバンドル(worker.ts)に、RaceDay の取得口の配線の行そのもの(`fetchBaba: createJraBabaFetcher()`)・JRA のページの取得先・保存先の配線・取得の段階(DO の状態のキー)・
+ * Issue #294(#293-A)・#478(#477-B): 馬場の取得の配線。本番のバンドル(worker.ts)に、RaceDay の取得口の配線の行そのもの(#680 で `jra-fetchers.ts` の `fetchBaba: createJraBabaFetcher({ …, pacer })` と、DO の `fetchBaba: jraFetchers.fetchBaba` の 2 段に)・JRA のページの取得先・保存先の配線・取得の段階(DO の状態のキー)・
  * 保存先の表の名前が入っていること。配線が外れると、取得が黙って止まる(取得口は省略可能で、テストは偽の取得口を直接渡すため、全テストが緑のまま)ので、行そのものを検査する。
  * 【Issue #478で改訂】旧: 外部の API の取得口の配線の行(`createBabaFetcher(env.BABA_API_URL)`)。保証していたこと(配線の行がバンドルに入る・handler.ts には配線が無い・保存先の配線と表の名前がバンドルに入る)は変えず、
  * 取得先が JRA になったので「JRA のページの URL と開催情報の本文がバンドルに入る」を足し、「secret `BABA_API_URL` がバンドルにもソースにも残らない」を足した。
  */
 describe("馬場の取得のバンドル(Issue #294・#478)", () => {
-  const FETCHER_WIRING_LINE = "fetchBaba: createJraBabaFetcher()";
+  // #680: 取得口の組み立ては jra-fetchers.ts(馬場とオッズが同じ間隔を共有する)。DO は createJraFetchers を呼び、その fetchBaba を渡す。
+  const FETCHER_WIRING_LINE = "fetchBaba: createJraBabaFetcher({ ...fetchDep, ...waitDep, pacer })";
+  const DO_FETCHERS_CALL = "createJraFetchers(";
+  const DO_FETCHER_WIRING_LINE = "fetchBaba: jraFetchers.fetchBaba";
   const STORE_WIRING_LINE = "babaStore: new D1BabaStore({ db: env.DB })";
 
   it(
@@ -687,11 +690,14 @@ describe("馬場の取得のバンドル(Issue #294・#478)", () => {
     () => {
       const doSource = readFileSync(path.join(CLOUD, "src", "race-day-do.ts"), "utf-8");
       const handlerSource = readFileSync(path.join(CLOUD, "src", "handler.ts"), "utf-8");
-      expect(doSource.includes(FETCHER_WIRING_LINE), "race-day-do.ts に取得口の配線の行がある").toBe(true);
+      const fetchersSource = readFileSync(path.join(CLOUD, "src", "jra-fetchers.ts"), "utf-8");
+      expect(fetchersSource.includes(FETCHER_WIRING_LINE), "jra-fetchers.ts に取得口の配線の行がある").toBe(true);
+      expect(doSource.includes(DO_FETCHERS_CALL), "race-day-do.ts が createJraFetchers を呼ぶ").toBe(true);
+      expect(doSource.includes(DO_FETCHER_WIRING_LINE), "race-day-do.ts が組み立てた馬場の取得口を渡す").toBe(true);
       expect(doSource.includes(STORE_WIRING_LINE), "race-day-do.ts に保存先の配線の行がある").toBe(true);
       expect(handlerSource.includes("createJraBabaFetcher"), "handler.ts は馬場の取得口を作らない(起点は日単位の DO の馬場の段階だけ)").toBe(false);
       const code = bundle(null, "worker.js");
-      for (const marker of [FETCHER_WIRING_LINE, STORE_WIRING_LINE, "baba_attempted_at", "INSERT INTO baba_fetches", "INSERT INTO baba_conditions", "/keiba/baba/_data_cushion.html", "/keiba/baba/_data_moist.html", "CNAME=pw01iwtS3/CD"]) {
+      for (const marker of [FETCHER_WIRING_LINE, DO_FETCHER_WIRING_LINE, STORE_WIRING_LINE, "baba_attempted_at", "INSERT INTO baba_fetches", "INSERT INTO baba_conditions", "/keiba/baba/_data_cushion.html", "/keiba/baba/_data_moist.html", "CNAME=pw01iwtS3/CD"]) {
         expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
       }
       expect(code.includes("BABA_API_URL"), "本番のバンドルに外部の API の secret の名前が残っていない").toBe(false);
