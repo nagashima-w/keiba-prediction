@@ -23,7 +23,9 @@
  *
  * ## 失敗
  *  - 誤りの頁・読めない頁・場日にレースが無い・月に場日が無い・大きすぎる頁は、DO の SQLite の `bb_skip` に記録して飛ばす。
- *  - timeout・network・redirect・HTTP の失敗は記録せず、次の起床で同じ頁をもう一度取る。**同じ頁の失敗が {@link BLINKER_BACKFILL_MAX_TRIES} 回に達したら諦めて `gave-up` で飛ばす**(1 頁のために終われなくなるのを防ぐ)。
+ *  - timeout・network・redirect・HTTP の失敗は、数え上げず、記録もせず、次の起床で同じ頁をもう一度取る(回数で諦めない。止まる仕組みは下の「連続 3 回の起床」に任せる)。
+ *    **月の頁と過去検索の頁は、1 回の起床では 1 回しか取らない**(失敗したらその起床はそこで終える)。結果の頁・場日の頁は、失敗した頁をその起床では飛ばして他の頁を進める。
+ *  - 月の頁が取れたのに読めない(誤りの頁)ときは、1 日 1 回までの再試行を {@link BLINKER_BACKFILL_MONTH_UNREADABLE_DAYS} 日続けてから、その月を飛ばして記録する。再試行の日までは、その日は翌日 18:00 まで休む。過去検索の頁が読めないときは飛ばさない(止める仕組みに任せる)。
  *  - **連続 {@link BLINKER_BACKFILL_FAILURE_LIMIT} 回の起床で 1 頁も読めなかったら止まる**(翌日 18:00 に自動で再開)。「読めた」は、頁として理解できたもの(場日にレースが無い・月に場日が無い、も含む)。
  *    取得に失敗した頁・誤りの頁・読めない頁だけの起床は数える。アラームの中の例外(D1 の失敗など)は 10 分後に再試行し、同じく連続に数える。書けなかった起床は、取り終えの印も飛ばす記録(結果の頁)も進めない。
  *
@@ -54,7 +56,8 @@ export const BLINKER_BACKFILL_DAILY_ROWS_MAX = 14_000;
 /** 1 レースで書く行の最大(レースの行 1 + 印の馬 18)。 */
 export const BLINKER_BACKFILL_ROWS_PER_RACE_MAX = 19;
 export const BLINKER_BACKFILL_FAILURE_LIMIT = 3;
-export const BLINKER_BACKFILL_MAX_TRIES = 10;
+/** 月の頁が「取れたが読めない」(誤りの頁)ときに、1 日 1 回までの再試行を続ける日数。この日数に達したら、その月を飛ばして記録する。 */
+export const BLINKER_BACKFILL_MONTH_UNREADABLE_DAYS = 3;
 export const BLINKER_BACKFILL_ERROR_RETRY_MS = 10 * 60_000;
 
 /** 取る範囲: 月は 2021-01〜2026-11、日は 2026-11-06 まで(それ以降は出馬表の取得が持つ)。 */
@@ -127,11 +130,11 @@ function nextMonth(yyyymm: string): string {
   return m === 12 ? `${y + 1}01` : `${y}${String(m + 1).padStart(2, "0")}`;
 }
 
-type SkipReason = "param-error" | "unparsable" | "too-large" | "gave-up" | "no-days" | "no-races" | "no-param";
+type SkipReason = "param-error" | "unparsable" | "too-large" | "no-days" | "no-races" | "no-param";
 
 type Unit =
-  | { readonly kind: "race"; readonly cname: string; readonly raceId: string; readonly tries: number }
-  | { readonly kind: "day"; readonly cname: string; readonly tries: number }
+  | { readonly kind: "race"; readonly cname: string; readonly raceId: string }
+  | { readonly kind: "day"; readonly cname: string }
   | { readonly kind: "param" }
   | { readonly kind: "month"; readonly month: string }
   | { readonly kind: "finished" }
@@ -149,8 +152,8 @@ export class JraBlinkerBackfillCore {
     this.dailyRows =
       options.dailyRows !== undefined && Number.isInteger(options.dailyRows) && options.dailyRows >= 1 ? Math.min(options.dailyRows, BLINKER_BACKFILL_DAILY_ROWS_MAX) : BLINKER_BACKFILL_DAILY_ROWS_MAX;
     deps.sql.exec("CREATE TABLE IF NOT EXISTS bb_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID");
-    deps.sql.exec("CREATE TABLE IF NOT EXISTS bb_days (ord INTEGER PRIMARY KEY, cname TEXT NOT NULL UNIQUE, tries INTEGER NOT NULL DEFAULT 0)");
-    deps.sql.exec("CREATE TABLE IF NOT EXISTS bb_races (ord INTEGER PRIMARY KEY, cname TEXT NOT NULL UNIQUE, race_id TEXT NOT NULL, tries INTEGER NOT NULL DEFAULT 0)");
+    deps.sql.exec("CREATE TABLE IF NOT EXISTS bb_days (ord INTEGER PRIMARY KEY, cname TEXT NOT NULL UNIQUE)");
+    deps.sql.exec("CREATE TABLE IF NOT EXISTS bb_races (ord INTEGER PRIMARY KEY, cname TEXT NOT NULL UNIQUE, race_id TEXT NOT NULL)");
     deps.sql.exec("CREATE TABLE IF NOT EXISTS bb_skip (cname TEXT PRIMARY KEY, reason TEXT NOT NULL, day TEXT NOT NULL) WITHOUT ROWID");
   }
 
@@ -237,13 +240,13 @@ export class JraBlinkerBackfillCore {
   /** 次の 1 本。この起床で扱い済み(`handled`)の cname は選ばない。積んだ頁が全部扱い済みなら none、空で最後の月を終えていれば finished。 */
   private nextUnit(handled: ReadonlySet<string>): Unit {
     const skipJson = JSON.stringify([...handled]);
-    const race = this.firstRow<{ cname: string; race_id: string; tries: number }>(
-      "SELECT cname, race_id, tries FROM bb_races WHERE cname NOT IN (SELECT value FROM json_each(?)) ORDER BY ord LIMIT 1",
+    const race = this.firstRow<{ cname: string; race_id: string }>(
+      "SELECT cname, race_id FROM bb_races WHERE cname NOT IN (SELECT value FROM json_each(?)) ORDER BY ord LIMIT 1",
       skipJson,
     );
-    if (race !== null) return { kind: "race", cname: race.cname, raceId: race.race_id, tries: race.tries };
-    const day = this.firstRow<{ cname: string; tries: number }>("SELECT cname, tries FROM bb_days WHERE cname NOT IN (SELECT value FROM json_each(?)) ORDER BY ord LIMIT 1", skipJson);
-    if (day !== null) return { kind: "day", cname: day.cname, tries: day.tries };
+    if (race !== null) return { kind: "race", cname: race.cname, raceId: race.race_id };
+    const day = this.firstRow<{ cname: string }>("SELECT cname FROM bb_days WHERE cname NOT IN (SELECT value FROM json_each(?)) ORDER BY ord LIMIT 1", skipJson);
+    if (day !== null) return { kind: "day", cname: day.cname };
     if (this.metaGet("param_table") === null) return { kind: "param" };
     const month = this.metaGet("month") ?? BLINKER_BACKFILL_FIRST_MONTH;
     if (month > BLINKER_BACKFILL_LAST_MONTH) {
@@ -285,6 +288,7 @@ export class JraBlinkerBackfillCore {
     let failed = 0;
     let skipped = 0;
     let reachedEnd = false;
+    let monthRetryTomorrow = false;
     let lastStartAt: number | null = null;
 
     for (;;) {
@@ -300,6 +304,10 @@ export class JraBlinkerBackfillCore {
       if (unit.kind === "race" && remaining - pendingRows < BLINKER_BACKFILL_ROWS_PER_RACE_MAX) break;
 
       const cname = unit.kind === "race" || unit.kind === "day" ? unit.cname : unit.kind === "param" ? PAST_SEARCH_CNAME : this.monthCnameOf(unit.month);
+      if (unit.kind === "month" && this.metaGet("month_bad_day") === day) {
+        monthRetryTomorrow = true; // 誤りの頁だった月の再試行は 1 日 1 回まで。この日はもう取らない。
+        break;
+      }
       if (cname === null && unit.kind === "month") {
         // 過去検索の表に無い月: 飛ばして次の月へ。
         this.recordSkip(`month:${unit.month}`, "no-param", day);
@@ -320,16 +328,15 @@ export class JraBlinkerBackfillCore {
       const outcome = await deps.fetchPage(cname);
       if (unit.kind === "race" || unit.kind === "day") handled.add(cname);
 
-      // 取得の失敗: 記録せず次の起床で取り直す。同じ頁の失敗が上限に達したら諦めて飛ばす。too-large は取り直さない。
+      // 取得の失敗: 数えず、記録せず、次の起床で取り直す(回数で諦めない)。too-large は取り直さない(結果の頁・場日の頁・月の頁を飛ばして記録する)。
+      // 月の頁と過去検索の頁は、1 回の起床で 1 回しか取らない: 失敗したらその起床はそこで終える。
       if (outcome.kind === "failed") {
-        const tooLarge = outcome.reason === "too-large";
-        const tries = this.bumpTries(unit);
-        if (tooLarge || tries >= BLINKER_BACKFILL_MAX_TRIES) {
-          const reason: SkipReason = tooLarge ? "too-large" : "gave-up";
+        if (outcome.reason === "too-large" && unit.kind !== "param") {
           skipped += 1;
-          this.skipUnit(unit, reason, day, raceSkips);
+          this.skipUnit(unit, "too-large", day, raceSkips);
         } else {
           failed += 1;
+          if (unit.kind === "month" || unit.kind === "param") break;
         }
         continue;
       }
@@ -338,7 +345,7 @@ export class JraBlinkerBackfillCore {
         const parsed = parseParamTable(outcome.html);
         if (!parsed.ok) {
           failed += 1;
-          continue;
+          break; // 読めない過去検索の頁は飛ばせない: その起床を終え、連続 3 回の起床で止める仕組みに任せる。
         }
         const needed: Record<string, string> = {};
         for (let m = BLINKER_BACKFILL_FIRST_MONTH; m <= BLINKER_BACKFILL_LAST_MONTH; m = nextMonth(m)) {
@@ -355,13 +362,26 @@ export class JraBlinkerBackfillCore {
             if (d.date > BLINKER_BACKFILL_LAST_DATE) continue;
             deps.sql.exec("INSERT INTO bb_days (cname) VALUES (?) ON CONFLICT(cname) DO NOTHING", d.cname);
           }
+        } else if (parsed.reason === "param-error") {
+          // 取れたが読めない(誤りの頁): 1 日 1 回までの再試行を数日続けてから飛ばす。
+          const days = this.metaNum("month_bad_days") + 1;
+          this.metaSet("month_bad_days", String(days));
+          this.metaSet("month_bad_day", day);
+          failed += 1;
+          if (days < BLINKER_BACKFILL_MONTH_UNREADABLE_DAYS) {
+            monthRetryTomorrow = true;
+            break;
+          }
+          this.recordSkip(`month:${unit.month}`, "param-error", day);
+          skipped += 1;
         } else {
-          if (parsed.reason === "no-days") readable += 1;
+          readable += 1; // 場日が無い月: 頁は読めた。記録して飛ばす。
           this.recordSkip(`month:${unit.month}`, parsed.reason, day);
           skipped += 1;
         }
         this.metaSet("month", nextMonth(unit.month));
-        this.metaSet("month_tries", "0");
+        this.metaSet("month_bad_days", "0");
+        this.metaSet("month_bad_day", "");
       } else if (unit.kind === "day") {
         const parsed = parseDayRaces(outcome.html, unit.cname);
         if (parsed.ok) {
@@ -417,6 +437,11 @@ export class JraBlinkerBackfillCore {
       deps.log("jra-blinker-backfill: finished", "info");
       return; // 最後まで進んだ: アラームを張らず、次の kick でも何もしない。
     }
+    if (monthRetryTomorrow) {
+      this.metaSet("wait_reason", "month-retry");
+      await deps.setAlarm(nextBlinkerDayEvening(deps.now()));
+      return;
+    }
     this.metaSet("wait_reason", "active");
     await deps.setAlarm(deps.now() + BLINKER_BACKFILL_NEXT_DELAY_MS);
   }
@@ -426,24 +451,6 @@ export class JraBlinkerBackfillCore {
     const table = JSON.parse(this.metaGet("param_table") ?? "{}") as Record<string, string>;
     const code = table[month];
     return code === undefined ? null : monthCname(month, code);
-  }
-
-  /** 失敗の回数を 1 つ増やして返す。過去検索の頁は数えない(飛ばせないので、止める仕組みに任せる)。 */
-  private bumpTries(unit: Unit): number {
-    if (unit.kind === "race") {
-      this.deps.sql.exec("UPDATE bb_races SET tries = tries + 1 WHERE cname = ?", unit.cname);
-      return unit.tries + 1;
-    }
-    if (unit.kind === "day") {
-      this.deps.sql.exec("UPDATE bb_days SET tries = tries + 1 WHERE cname = ?", unit.cname);
-      return unit.tries + 1;
-    }
-    if (unit.kind === "month") {
-      const tries = this.metaNum("month_tries") + 1;
-      this.metaSet("month_tries", String(tries));
-      return tries;
-    }
-    return 0;
   }
 
   /** 頁を飛ばす。結果の頁は D1 の書き込みのあとに記録する(`raceSkips`)。場日・月はすぐ記録して先へ進む。 */
@@ -456,7 +463,8 @@ export class JraBlinkerBackfillCore {
     } else if (unit.kind === "month") {
       this.recordSkip(`month:${unit.month}`, reason, day);
       this.metaSet("month", nextMonth(unit.month));
-      this.metaSet("month_tries", "0");
+      this.metaSet("month_bad_days", "0");
+      this.metaSet("month_bad_day", "");
     }
   }
 }

@@ -341,6 +341,18 @@ describe("起床 1 回の上限: 40 本・サブリクエスト 48", () => {
     expect(subrequests, "打ち切りが早すぎない").toBeGreaterThanOrEqual(BLINKER_BACKFILL_SUBREQUEST_MAX - 3);
   });
 
+  it("書き込みを待つレースがある起床でも、取得と D1 の呼び出し(場日の確認・終わりの書き込み)の合計は 48 以下", async () => {
+    h = new Harness();
+    for (let i = 0; i < 30; i++) h.world.addDay("202101", races(1), `202101${String((i % 28) + 1).padStart(2, "0")}`); // 1 場日 = 取得 2(場日・結果)+ 確認 1
+    h.start();
+    await h.core.runNextStep();
+    const subrequests = h.fetched.length + h.store.filterCalls.length + h.store.saveCalls.length;
+    expect(h.store.saveCalls).toHaveLength(1); // 書き込みを待つレースがある(前提)
+    expect(h.fetched.length).toBeLessThan(40); // 40 本より先に、48 の枠で止まっている(前提)
+    expect(subrequests).toBeLessThanOrEqual(BLINKER_BACKFILL_SUBREQUEST_MAX);
+    expect(subrequests).toBeGreaterThanOrEqual(BLINKER_BACKFILL_SUBREQUEST_MAX - 3);
+  });
+
   it("書き込みは起床につき 1 回(レースごとに書かない)", async () => {
     h = new Harness();
     h.world.addDay("202101", races(12));
@@ -524,30 +536,134 @@ describe("飛ばす頁・再試行", () => {
     expect(h.fetched.filter((f) => f.cname === sdeOf(d, 0))).toHaveLength(2);
   });
 
-  it("月の頁の失敗の回数は、月が進むたびに 0 に戻る(前の月の失敗が次の月の「諦め」を早めない)。どちらの月も 6 回失敗してから成功しても、諦めずに取り終える", async () => {
+  it("過去検索の頁・月の頁は、1 回の起床では 1 回しか取らない(失敗したらその起床はそこで終える)。同じ頁を 10 回続けて取りに行かない", async () => {
     h = new Harness();
-    const d1 = h.world.addDay("202101", races(1));
-    const d2 = h.world.addDay("202102", races(1));
+    h.world.addDay("202101", races(2));
     h.start();
-    h.flaky.set(monthCname("202101", codeOf("202101")), 6);
-    h.flaky.set(monthCname("202102", codeOf("202102")), 6);
-    await h.runUntilQuiet(80);
-    expect(h.sql.exec("SELECT reason FROM bb_skip WHERE reason = 'gave-up'").toArray()).toEqual([]);
-    expect(h.store.done.has(raceIdOf(d1, 0)) && h.store.done.has(raceIdOf(d2, 0))).toBe(true);
-    expect(h.fetched.filter((f) => f.cname === monthCname("202102", codeOf("202102")))).toHaveLength(7);
+    const month = monthCname("202101", codeOf("202101"));
+    h.overrides.set(PAST_SEARCH_CNAME, { kind: "failed", reason: "timeout" });
+    await h.core.runNextStep();
+    expect(h.fetched.map((f) => f.cname)).toEqual([PAST_SEARCH_CNAME]); // 1 回だけ。その起床はここで終わり
+    h.overrides.delete(PAST_SEARCH_CNAME);
+    h.overrides.set(month, { kind: "failed", reason: "network" });
+    h.now = h.alarm!;
+    await h.core.runNextStep();
+    expect(h.fetched.filter((f) => f.cname === month)).toHaveLength(1);
+    expect(h.fetched).toHaveLength(3); // 1 起床目の過去検索 1 + 2 起床目の過去検索 1 と月 1(2 起床目は月の失敗で終わる)
+    // 過去検索の頁が取れても読めない(解析の失敗)ときも、1 回で終える
+    h.sql.close();
+    h = new Harness();
+    h.world.addDay("202101", races(1));
+    h.start();
+    h.overrides.set(PAST_SEARCH_CNAME, { kind: "page", html: "<html><head><title>過去レース結果検索　JRA</title></head><body>表なし</body></html>" });
+    await h.core.runNextStep();
+    expect(h.fetched.map((f) => f.cname)).toEqual([PAST_SEARCH_CNAME]);
+    expect(h.skips()).toEqual([]);
+    expect(h.logs.some((l) => l.includes("step failed")), "例外でなく、読めない頁として終える").toBe(false);
+    expect(h.meta("param_table")).toBeNull();
   });
 
-  it("大きすぎる頁(too-large)は取り直さず記録して飛ばす。同じ頁の失敗が 10 回続いたら、諦めて記録して飛ばす(終わらなくなるのを防ぐ)", async () => {
+  it("誤りの頁の日数は、月が進んだら 0 に戻る: 1 つ目の月が 1 日だけ誤りでも、2 つ目の月は 3 日目の再試行で初めて飛ばす", async () => {
+    h = new Harness();
+    h.world.addDay("202103", races(1));
+    h.start();
+    const bad = { kind: "page", html: "<html><head><title>パラメータエラー　JRA</title></head></html>" } as const;
+    const m1 = monthCname("202101", codeOf("202101"));
+    const m2 = monthCname("202102", codeOf("202102"));
+    h.overrides.set(m1, bad);
+    h.overrides.set(m2, bad);
+    h.now = jst(10, 20);
+    await h.core.runNextStep(); // 1 つ目の月: 1 日目の誤り
+    h.overrides.delete(m1); // 翌日は読める(場日の無い月として飛ばされる)
+    h.now = jst(11, 18);
+    await h.core.runNextStep(); // 1 つ目の月が読め、2 つ目の月の 1 日目の誤りで止まる
+    expect(h.fetched.filter((f) => f.cname === m2)).toHaveLength(1);
+    expect(h.sql.exec("SELECT cname FROM bb_skip WHERE cname = 'month:202102'").toArray()).toEqual([]);
+    h.now = jst(12, 18);
+    await h.core.runNextStep(); // 2 日目
+    expect(h.sql.exec("SELECT cname FROM bb_skip WHERE cname = 'month:202102'").toArray()).toEqual([]);
+    h.now = jst(13, 18);
+    await h.core.runNextStep(); // 3 日目で飛ばす
+    expect(h.sql.exec("SELECT reason FROM bb_skip WHERE cname = 'month:202102'").toArray()).toEqual([{ reason: "param-error" }]);
+  });
+
+  it("timeout が続いても月を飛ばさない(回数で諦めない)。30 回失敗してから成功しても、その月の場日を取り終え、gave-up の記録は無い。月の頁は 1 起床 1 回", async () => {
+    h = new Harness();
+    const d = h.world.addDay("202101", races(2));
+    h.start();
+    const month = monthCname("202101", codeOf("202101"));
+    h.flaky.set(month, 30);
+    for (let wakes = 0; wakes < 31; wakes++) {
+      h.alarm = null;
+      await h.core.runNextStep();
+      if (h.alarm !== null) h.now = Math.max(h.now, h.alarm);
+    }
+    expect(h.fetched.filter((f) => f.cname === month).length).toBeGreaterThanOrEqual(30); // 失敗は 1 起床につき 1 回
+    expect(h.sql.exec("SELECT reason FROM bb_skip WHERE cname = 'month:202101'").toArray()).toEqual([]);
+    await h.runUntilQuiet(10);
+    expect(h.store.done.has(raceIdOf(d, 0)) && h.store.done.has(raceIdOf(d, 1))).toBe(true);
+    expect(h.sql.exec("SELECT reason FROM bb_skip WHERE reason = 'gave-up'").toArray()).toEqual([]);
+  });
+
+  it("結果の頁・場日の頁も、HTTP や timeout の失敗が何回続いても飛ばさない(記録しない)。成功すれば書く", async () => {
+    h = new Harness();
+    const d = h.world.addDay("202101", races(2));
+    h.start();
+    h.flaky.set(sdeOf(d, 1), 25);
+    h.flaky.set(srlOf(d), 12);
+    for (let i = 0; i < 80; i++) {
+      h.alarm = null;
+      await h.core.runNextStep();
+      if (h.alarm !== null) h.now = Math.max(h.now, h.alarm);
+    }
+    expect(h.skips()).toEqual([]);
+    expect(h.store.done.has(raceIdOf(d, 1))).toBe(true);
+    expect(h.fetched.filter((f) => f.cname === sdeOf(d, 1)).length).toBe(26);
+  });
+
+  it("月の頁が取れたのに読めない(誤りの頁)ときは、1 日 1 回までの再試行を 3 日続けてから飛ばして記録し、次の月へ進む。同じ日の別の起床では取り直さず、翌日 18:00 まで休む", async () => {
+    h = new Harness();
+    const d = h.world.addDay("202102", races(1));
+    h.start();
+    const month = monthCname("202101", codeOf("202101"));
+    h.overrides.set(month, { kind: "page", html: "<html><head><title>パラメータエラー　JRA</title></head></html>" });
+    h.now = jst(10, 20);
+    await h.core.runNextStep();
+    expect(h.fetched.filter((f) => f.cname === month)).toHaveLength(1);
+    expect(h.alarm).toBe(jst(11, 18));
+    expect(h.meta("wait_reason")).toBe("month-retry");
+    await h.core.runNextStep(); // 同じ日の別の起床
+    expect(h.fetched.filter((f) => f.cname === month)).toHaveLength(1);
+    expect(h.meta("month")).toBeNull();
+    h.now = jst(11, 18);
+    await h.core.runNextStep();
+    expect(h.fetched.filter((f) => f.cname === month)).toHaveLength(2);
+    expect(h.sql.exec("SELECT cname FROM bb_skip WHERE cname = 'month:202101'").toArray()).toEqual([]);
+    expect(h.meta("month")).toBeNull();
+    h.now = jst(12, 18);
+    await h.core.runNextStep();
+    expect(h.fetched.filter((f) => f.cname === month)).toHaveLength(3);
+    expect(h.sql.exec("SELECT reason FROM bb_skip WHERE cname = 'month:202101'").toArray()).toEqual([{ reason: "param-error" }]);
+    expect(h.meta("month")).not.toBeNull(); // 次の月へ進んだ
+    await h.runUntilQuiet();
+    expect(h.store.done.has(raceIdOf(d, 0))).toBe(true);
+  });
+
+  it("大きすぎる頁(too-large)は取り直さず記録して飛ばす。他の失敗は、飛ばさず取り直し続ける", async () => {
     h = new Harness();
     const d = h.world.addDay("202101", races(3));
     h.start();
     h.overrides.set(sdeOf(d, 0), { kind: "failed", reason: "too-large" });
     h.overrides.set(sdeOf(d, 1), { kind: "failed", reason: "http" });
-    await h.runUntilQuiet(40);
+    for (let i = 0; i < 15; i++) {
+      h.alarm = null;
+      await h.core.runNextStep();
+      if (h.alarm !== null) h.now = Math.max(h.now, h.alarm);
+    }
     expect(h.skips().find((s) => s.cname === sdeOf(d, 0))?.reason).toBe("too-large");
     expect(h.fetched.filter((f) => f.cname === sdeOf(d, 0))).toHaveLength(1);
-    expect(h.fetched.filter((f) => f.cname === sdeOf(d, 1))).toHaveLength(10);
-    expect(h.skips().find((s) => s.cname === sdeOf(d, 1))?.reason).toBe("gave-up");
+    expect(h.fetched.filter((f) => f.cname === sdeOf(d, 1)).length).toBeGreaterThan(10);
+    expect(h.skips().find((s) => s.cname === sdeOf(d, 1))).toBeUndefined();
     expect(h.store.done.has(raceIdOf(d, 2))).toBe(true);
   });
 
