@@ -44,7 +44,7 @@ import {
 
 /**
  * Issue #463: 開発側のローダ(`scripts/allocation-dataset.ts`)。読み込みの検証(黙って捨てない)・払戻の判定が検証画面と同じ結果になること・計算し直しの比較の骨格。
- * 実データに近い往復(runAnalysis → D1 → 書き出し → ローダ → 計算し直し)は `cloud/test/allocation-export-roundtrip.test.ts`。ここは合成した行だけで、ネットワークにも D1 にも触れない。
+ * 実データに近い往復(runAnalysis → D1 → 書き出し → ローダ → 計算し直し)は `cloud/test/allocation-export-roundtrip.integration.test.ts`。ここは合成した行だけで、ネットワークにも D1 にも触れない。
  */
 
 const EXCLUDED: AllocationExcludedCounts = { suspect: 0, unknown: 0, unchecked: 0, uncheckedRaces: 0, superseded: 0, estimated: 0 };

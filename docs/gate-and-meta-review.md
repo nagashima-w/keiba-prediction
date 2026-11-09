@@ -90,7 +90,7 @@
   実装者・レビュアー・メインの3者が同じコマンドを使ったため、`docs/current-spec.md` の版表記の
   漏れを誰も検出できず、CI で初めて落ちた(当時の `packages/app` は #285 で削除済み。パスは 3c1664e のもの)。
   いまの実行場所は次のとおり: ルートの vitest は `scripts/test/**` だけを含む。packages/core のテストは
-  ルートの `pnpm test`(`pnpm -r test` を含む)で、cloud のテストは `cd cloud && npx vitest run` で実行する。
+  ルートの `pnpm test`(`pnpm -r test` を含む)で、cloud のテストは、ユニットを `cd cloud && pnpm run test:unit`、インテグレーション(`*.integration.test.ts`)を関係する分だけ `scripts/verify-all.sh` で、全件は push 後の CI で流す(Issue #620)。
   **ただし確率の質の測定のテストは、Issue #395 で普段の `pnpm test` から外した**(ルートの `scripts/test/probability-quality-41-*.test.ts` と、
   packages/core の `probability-quality`・`brier-quality-report`・`paired-brier-comparison` の 3 ファイル。一覧は `vitest.research-tests.ts`・
   `packages/core/vitest.research-tests.ts`)。それらのテストは **`pnpm test:research`** で流す(型検査は外していない)。

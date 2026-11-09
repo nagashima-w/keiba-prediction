@@ -5,7 +5,7 @@
  * 各シナリオ(入力の `steps`。同じレースへの再保存を含む)を、新しい空の `AnalysisStore` に順に保存し、4表のダンプ(race_results・race_result_meta・
  * race_combo_payouts・race_combo_payout_imports。主キー順)と、`getRaceResultDetail` の復元結果を取る。それが golden JSON(`race-result-contract.json`)で、
  * cloud 側のテストが同じ入力から D1 で同じダンプ・復元結果になることを確かめる。生成手順は `scripts/gen-race-result-contract.ts`
- * (`pnpm tsx scripts/gen-race-result-contract.ts`)。検証は `test/ev/race-result-contract.test.ts`(exe 側)と cloud/test/result-repository.test.ts(D1 側)。
+ * (`pnpm tsx scripts/gen-race-result-contract.ts`)。検証は `test/ev/race-result-contract.test.ts`(exe 側)と cloud/test/result-repository.integration.test.ts(D1 側)。
  *
  * 入力はリポジトリ内のフィクスチャ(`fixtures/`)と固定の合成値だけ(実ネットワークには触れない)。入力は JSON を一度往復させてから exe に渡す
  * (cloud 側が JSON から読んだ入力と、完全に同じ値にするため。undefined のキーは消える)。
@@ -79,8 +79,8 @@ export interface RaceResultContract {
 /**
  * 実フィクスチャのパース結果から、実際の取込と同じ入力(toResultEntries・面・全券種の払戻)を作る。
  * Issue #259: `toResultEntries` が詰める確定の人気・単勝オッズ(`ninki`・`winOdds`)は、**D1 専用の列**に入るもので、exe の codec・この golden の 4 表には関係しない。
- * golden を変えない(exe と D1 の 4 表の一致という契約を、オッズの追加で動かさない)ため、ここでは取り除く。オッズの保存は `cloud/test/result-win-odds.test.ts` が固定する。
- * Issue #269 の枠番(`wakuban`。D1 の `race_results.wakuban`)も同じ理由で取り除く(exe の codec は読まない。D1 の保存は `cloud/test/result-wakuban.test.ts` が固定する)。
+ * golden を変えない(exe と D1 の 4 表の一致という契約を、オッズの追加で動かさない)ため、ここでは取り除く。オッズの保存は `cloud/test/result-win-odds.integration.test.ts` が固定する。
+ * Issue #269 の枠番(`wakuban`。D1 の `race_results.wakuban`)も同じ理由で取り除く(exe の codec は読まない。D1 の保存は `cloud/test/result-wakuban.integration.test.ts` が固定する)。
  */
 function stepFromFixture(raceId: string, fixture: string): ContractStep {
   const result = parseRaceResult(loadFixture(fixture));

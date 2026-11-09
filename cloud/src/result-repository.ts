@@ -12,7 +12,7 @@
  * (3) `race_results.wakuban`(migration 0016。Issue #269。結果ページの各馬の枠番〈1〜8〉。枠連の買い目の返還の判定が読む。D1 専用)。{@link withWakubanColumn} が、同じ UPSERT に足す。枠番の無い馬は NULL。移行で入れた行は触れない = NULL。
  * SQL の文・束縛値の変換・復元(`toStoredPassing`・`toStoredCourseType` ほか)は core の codec(`analysis-store-codec.ts`)が持ち、exe の `AnalysisStore` と共有する。
  * 同じ入力から、exe の `AnalysisStore.saveResult` と同じ4表になることは、共有 golden(`packages/core/test/golden/race-result-contract.json`)で固定している
- * (exe 側: core の `race-result-contract.test.ts`。D1 側: `cloud/test/result-repository.test.ts`)。
+ * (exe 側: core の `race-result-contract.test.ts`。D1 側: `cloud/test/result-repository.integration.test.ts`)。
  *
  * ## 書き込み(saveResult)
  * **1 回の `batch`**(D1 の batch は 1 つのトランザクション。exe の `db.transaction` と同じく、途中で失敗すれば全てロールバックされる)に、**最大 6 文**
@@ -32,7 +32,7 @@
  * - `listUnimportedRaces({ from, to, limit })`: 分析済み(`analyses` に行がある)なのに結果が無い(`race_results` に**行が 1 件も無い**)レース。バックフィル(#208)の対象の特定に使う。
  *   判定は必ず `NOT EXISTS`(行の有無)。全頭が中止・除外(着順が全て NULL)のレースは行があるので「取り込み済み」とみなす(`COUNT(finish_position)` で判定すると誤る)。
  *
- * ## 既知の差分(exe の SQLite との違い。【記録】。`test/result-repository.test.ts` が固定している)
+ * ## 既知の差分(exe の SQLite との違い。【記録】。`test/result-repository.integration.test.ts` が固定している)
  * - 値は JSON 文字列を経由して D1 に入る(馬・組合せ)。NaN・Infinity は NULL になる(exe の better-sqlite3 は REAL で束縛する)。実データ(着順・払戻・上がり3F〈小数 1 桁〉)では差は出ない。
  *   17 桁の浮動小数の往復はローカルの D1 で一致を確かめた(本番の SQLite のビルドでの確認は最初の実保存)。
  */
@@ -196,7 +196,7 @@ export const FILL_WIN_PAYOUT_SQL = `UPDATE race_results SET win_payout = ${JSON_
  * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
  * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
  * 束縛値は `[to, excludeJson, limit]`。索引は `(stN, kaisai_date DESC, race_id) WHERE stN > 0`。**`stN > 0` を式にも書く**(SQLite は `stN = 1` だけでは部分索引を使わない)。
- * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
+ * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.integration.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
  */
 export const LIST_PAYOUT_BACKFILL_SQL = `SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill
            WHERE st4 > 0 AND st4 = 1 AND kaisai_date <= ?
@@ -277,7 +277,7 @@ export const UNIMPORTED_BY_DAY_MAX_DAYS = 31;
  * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
  * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
  * 束縛値は `[to, excludeJson, limit]`。索引は `(stN, kaisai_date DESC, race_id) WHERE stN > 0`。**`stN > 0` を式にも書く**(SQLite は `stN = 1` だけでは部分索引を使わない)。
- * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
+ * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.integration.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
  */
 export const LIST_BACKFILL_SQL = `SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill
            WHERE st1 > 0 AND st1 = 1 AND kaisai_date <= ?
@@ -302,7 +302,7 @@ export const COUNT_BACKFILL_SQL = `SELECT COALESCE(SUM(CASE WHEN kaisai_date IS 
  * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
  * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
  * 束縛値は `[to, excludeJson, limit]`。索引は `(stN, kaisai_date DESC, race_id) WHERE stN > 0`。**`stN > 0` を式にも書く**(SQLite は `stN = 1` だけでは部分索引を使わない)。
- * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
+ * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.integration.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
  */
 export const LIST_WIN_ODDS_BACKFILL_SQL = `SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill
            WHERE st2 > 0 AND st2 = 1 AND kaisai_date <= ?
@@ -329,7 +329,7 @@ export const COUNT_WIN_ODDS_BACKFILL_SQL = `SELECT COALESCE(SUM(CASE WHEN kaisai
  * 並びは**開催日の新しい順 → 同じ日は race_id 昇順**で、`limit` 件まで日をまたいで返す(Issue #598 の 1 晩ぶんの待ち行列。以前は「最も新しい日を 1 日だけ」の版もあった)。
  * 除外するレース ID(その晩に試したもの。JSON 1 つ)は `NOT IN (SELECT value FROM json_each(?))`。済み・諦めは D1 の状態(2)にあるので、除外の JSON には入れない。
  * 束縛値は `[to, excludeJson, limit]`。索引は `(stN, kaisai_date DESC, race_id) WHERE stN > 0`。**`stN > 0` を式にも書く**(SQLite は `stN = 1` だけでは部分索引を使わない)。
- * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
+ * 読み取りは、返す件数と除外の JSON の要素数に比例する(分析の行数 N に依らない。`test/result-backfill-state.integration.test.ts` が `EXPLAIN QUERY PLAN` と `meta.rows_read` で固定)。
  */
 export const LIST_CLASS_BACKFILL_SQL = `SELECT race_id AS raceId, kaisai_date AS firstDate FROM race_backfill
            WHERE st3 > 0 AND st3 = 1 AND kaisai_date <= ?

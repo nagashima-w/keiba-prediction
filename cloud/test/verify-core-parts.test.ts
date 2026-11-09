@@ -266,6 +266,18 @@ describe("差分の集計の並走: 差分の読みと突き合わせ", () => {
     expect(check(t.kv)).toMatchObject({ checked: 1, matched: 1, mismatched: 0 });
   });
 
+  it("発走時刻の欠落の件数(startTimeGaps)も突き合わせの対象。今の集計の値が違うと、そのパスがずれとして出る(Issue #626)", async () => {
+    const t = setup(manyDayRows(3, 3));
+    await t.core.getReport("all");
+    const cache = t.kv.data.get("cache") as { diag: { startTimeGaps: { lost: number; affecting: number } } };
+    // 前提: 書き換える前の値は、差分の集計側と一致しうる形(数値のオブジェクト)
+    expect(typeof cache.diag.startTimeGaps.lost).toBe("number");
+    cache.diag.startTimeGaps = { lost: cache.diag.startTimeGaps.lost + 7, affecting: cache.diag.startTimeGaps.affecting + 7 };
+    await t.drain();
+    expect(check(t.kv)).toMatchObject({ checked: 1, matched: 0, mismatched: 1 });
+    expect(JSON.stringify((check(t.kv) as { lastPaths?: string[] }).lastPaths)).toContain("startTimeGaps");
+  });
+
   it("印の無い変更(結果の行の書き換え)は、突き合わせのずれとして見つかる。警告に出し、診断に件数が出る。画面の集計はそのまま返す", async () => {
     const rows = manyDayRows(3, 4);
     const t = setup(rows);

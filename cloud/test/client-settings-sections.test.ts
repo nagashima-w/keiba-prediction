@@ -115,6 +115,7 @@ const ok = (body: unknown): Resp => ({ status: 200, json: async () => body });
 async function setup() {
   const renders: VNode[] = [];
   const posts: Record<string, unknown>[] = [];
+  let hash = "#settings";
   const fetchLike: FetchLike = async (url, init) => {
     if (url === "/api/settings" && init.method === "GET") return ok({ ok: true, settings: DEFAULT_CLOUD_SETTINGS satisfies CloudSettings, source: "d1" });
     if (url === "/api/settings" && init.method === "POST") {
@@ -124,13 +125,14 @@ async function setup() {
     }
     throw new Error(`想定外: ${init.method} ${url}`);
   };
-  const app: App = createApp({ role: "admin", fetch: fetchLike, now: () => new Date("2026-06-28T00:00:00Z"), render: (t) => void renders.push(t), patchText: () => {}, getHash: () => "#settings", setHash: () => {}, timers: { set: () => 0, clear: () => {} }, isVisible: () => true });
+  const app: App = createApp({ role: "admin", fetch: fetchLike, now: () => new Date("2026-06-28T00:00:00Z"), render: (t) => void renders.push(t), patchText: () => {}, getHash: () => hash, setHash: () => {}, timers: { set: () => 0, clear: () => {} }, isVisible: () => true });
   app.start();
   await app.whenIdle();
   const tree = (): VNode => renders[renders.length - 1]!;
   const field = (k: string): VNode => findAll(tree(), (n) => n.attrs?.["data-field"] === k)[0]!;
   return {
     app, posts, tree,
+    goTo: (h: string) => { hash = h; app.onHashChange(); },
     toggle: (id: string) => toggleOf(tree(), id).on!.click!(),
     isOpen: (id: string) => toggleOf(tree(), id).attrs?.["aria-expanded"] === "true",
     type: (k: string, v: string) => (field(k).on!.input ?? field(k).on!.change!)(v),
@@ -186,6 +188,20 @@ describe("Issue #581: 画面の制御(開閉・保存)", () => {
     expect(h.isOpen("llm")).toBe(false);
     h.save(); // 次の保存の押下では、誤りが残っていれば開く
     expect(h.isOpen("llm")).toBe(true);
+  });
+
+  it("画面を離れると開閉が初めの状態に戻る(設定に入る → LLM 分析を開く → 別の画面へ → 戻る → LLM 分析は閉じている。Issue #626〈#581 の記録〉)", async () => {
+    const h = await setup();
+    h.toggle("llm");
+    expect([h.isOpen("llm"), h.isOpen("funds")]).toEqual([true, true]); // 前提: 開いた(資金と配分は初めから開)
+    h.toggle("funds"); // 初めの状態から変えたものがもう 1 つある
+    expect(h.isOpen("funds")).toBe(false);
+    h.goTo("#/");
+    await h.app.whenIdle();
+    expect(findAll(h.tree(), (n) => n.attrs?.["data-field"] !== undefined && n.attrs?.["data-field"] === "clipVariant")).toEqual([]); // 前提: 設定の画面を離れた
+    h.goTo("#settings");
+    await h.app.whenIdle();
+    expect([h.isOpen("llm"), h.isOpen("funds")]).toEqual([false, true]);
   });
 
   it("上級の設定の重みの誤りでも、上級の設定が開く", async () => {

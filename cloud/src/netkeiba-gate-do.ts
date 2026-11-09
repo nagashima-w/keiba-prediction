@@ -32,7 +32,7 @@ export class NetkeibaGate extends DurableObject {
    * ソケットの接続関数。本番は `cloudflare:sockets` の `connect`。
    * **ローカルの smoke(`smoke-worker.ts`。netkeiba へ出さない)だけが、サブクラスでこれを偽ソケットに差し替える。**
    * 本番のエントリ(`worker.ts`)はそのサブクラスを import しないので、偽ソケットは本番のバンドルに入らない
-   * (`test/bundle-guard.test.ts` が、本番の dry-run のバンドルに入らないことを固定している)。
+   * (`test/bundle-guard.integration.test.ts` が、本番の dry-run のバンドルに入らないことを固定している)。
    */
   protected connectFn(): ConnectFn {
     return connect as ConnectFn;

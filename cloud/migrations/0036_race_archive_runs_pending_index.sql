@@ -5,5 +5,5 @@
 --   形が違うと SQLite は部分索引を使わず、目録の全行を読む(cloud/test/race-archive-runs-index.test.ts が両者を照らす)。
 --
 -- 目的: 未変換(runs_version が NULL)の目録の行だけを索引に入れ、変換の DO が毎周、目録の全行(2,264 行)を読み直さずに済むようにする。
---   書き込みの増分: 作成時は未変換の行の数。以後はレースを目録に入れるたび 1 行(未変換で入るため)と、変換したとき 1 行(索引から外れる)。つまり 1 レースにつき +2 行。
+--   書き込みの増分: 作成時は未変換の行の数。以後はレースを目録に入れるたび +1 行(未変換で入るため)。変換して索引から外れるときは +0 行(手元のローカル D1 の rows_written の実測。本番の数え方は公開後の rows_written で確かめる。Issue #626)。
 CREATE INDEX IF NOT EXISTS idx_race_archive_runs_pending ON race_archive (race_id) WHERE runs_version IS NULL;

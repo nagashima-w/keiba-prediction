@@ -233,7 +233,11 @@ function main() {
 
   const transcriptCwd = hasTranscript ? lastCwdFromTranscript(input.agent_transcript_path) : null;
   const t0Pick = Date.now();
-  const fromActions = hasTranscript ? worktreeFromTranscriptActions(input.agent_transcript_path, listWorktrees(input.cwd ?? transcriptCwd)) : null;
+  const fromActions = hasTranscript ? worktreeFromTranscriptActions(input.agent_transcript_path, (() => {
+    // 入力の cwd が存在しないパスなら一覧が空になるので、記録の最後の cwd にも当たる(Issue #626〈#617 の記録〉)
+    const fromInput = listWorktrees(input.cwd);
+    return fromInput.length > 0 ? fromInput : listWorktrees(transcriptCwd);
+  })()) : null;
   const fromCwd = fromActions ? null : linkedWorktreeRoot(input.cwd);
   const fromTranscript = fromActions || fromCwd ? null : linkedWorktreeRoot(transcriptCwd);
   const root = fromActions ?? fromCwd ?? fromTranscript;

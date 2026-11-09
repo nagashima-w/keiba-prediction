@@ -154,7 +154,7 @@ function build(seed: number): Dataset {
     }
   }
   // 取消・除外の記録(0013。Issue #72)。exe の AnalysisStore は scratched を保存しないので、D1 の列は全行 NULL(記録なし)のまま = 返還の判定が働かない。
-  // 両者の一致が成り立つのは、この「記録なし」の状態(旧い行・移行した行)。scratched を持つ行の集計は cloud/test/result-scratched.test.ts と core の verify-refund.test.ts が見る。
+  // 両者の一致が成り立つのは、この「記録なし」の状態(旧い行・移行した行)。scratched を持つ行の集計は cloud/test/result-scratched.integration.test.ts と core の verify-refund.test.ts が見る。
   db.exec("ALTER TABLE race_results ADD COLUMN scratched INTEGER");
   // 枠番(0016。Issue #269)。exe の AnalysisStore は wakuban を保存しないので、D1 の列は全行 NULL(記録なし)のまま = 枠連の返還の判定が働かない(scratched と同じ)。
   db.exec("ALTER TABLE race_results ADD COLUMN wakuban INTEGER");

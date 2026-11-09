@@ -126,7 +126,7 @@ export const PENDING_PREDICATE = "start_time IS NULL OR cond_read IS NULL";
 
 /**
  * 未確定の一覧。★WHERE の `PENDING_PREDICATE` は、migration 0034 の部分索引 `idx_analyses_pending` の WHERE と同じ形でなければならない
- * (違うと索引が使われず、分析の表のほぼ全部を読む。Issue #600。cloud/test/verify-pending-index.test.ts が照らす)。
+ * (違うと索引が使われず、分析の表のほぼ全部を読む。Issue #600。cloud/test/verify-pending-index.integration.test.ts が照らす)。
  */
 export const PENDING_SQL = `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, detail_key AS detailKey, COUNT(*) OVER () AS total
   FROM analyses WHERE id > ? AND (${PENDING_PREDICATE}) ORDER BY id LIMIT ?`;

@@ -79,6 +79,16 @@ describe("締切直前の比較の部分(Issue #625)", () => {
     expect(computeCloseComparison(source, { meta: [], bets: [] }, { venue: "all", comboOnIds: new Set() })).toBeNull();
   });
 
+  it("同じレースが複数の部分にあると合わせられない(Issue #626)", () => {
+    const { source, analyses } = randomVerifyData(76, 30);
+    const { close, comboOnIds } = randomClose(analyses, 76);
+    const part = buildCloseParts(source, close, analyses, comboOnIds);
+    // 前提: 部分にレースがある(空だと重なりが起きない)
+    expect(part.races.length).toBeGreaterThan(3);
+    expect(() => mergeCloseParts([part, part])).toThrow(/同じレースが複数の部分/);
+    expect(() => mergeCloseParts([part])).not.toThrow();
+  });
+
   it("部分は構造化複製できる", () => {
     const { source, analyses } = randomVerifyData(75, 30);
     const { close, comboOnIds } = randomClose(analyses, 75);
