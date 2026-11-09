@@ -392,6 +392,11 @@ function horseCard(horse: HorseCard): VNode {
   ]);
 }
 
+/** 3着内率の大きさの棒(Issue #582)。`progress` の千分率(max=1000。0〜1 の外は収める)。値が無ければ出さない。数字は別に残る補助なので読み上げは隠す。`style` は使わない(許可リストのまま)。 */
+function probBar(v: number | null): VNode[] {
+  return v === null ? [] : [h("progress", { class: "horse-bar", value: String(Math.round(Math.min(1, Math.max(0, v)) * 1000)), max: "1000", "aria-hidden": "true" }, [])];
+}
+
 /**
  * 馬ごとの評価の表(Issue #546-2)。`overflow-x: auto` の枠(`horse-table-wrap`)に入れ、375px でもページ全体は横にはみ出さない(表が枠の中で横にスクロールする)。
  * 列見出しの並べ替えはボタン。クリック処理に渡す値(分析 id・列・押したあとの向き)は `data-*` にも出す(`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されない。
@@ -420,8 +425,8 @@ function horseTable(content: ResultContent, table: HorseTable, actions: ViewActi
       h("td", {}, [`${r.umaban}`]),
       h("td", {}, marked ? [h("strong", {}, [r.mark!])] : []),
       h("td", {}, r.name === null ? [] : [r.name]),
-      h("td", {}, [r.prior]),
-      ...(hasAdjusted ? [h("td", {}, [r.adjusted ?? "-"])] : []),
+      h("td", {}, [r.prior, ...probBar(r.sortValues.prior)]),
+      ...(hasAdjusted ? [h("td", {}, [r.adjusted ?? "-", ...probBar(r.sortValues.adjusted)])] : []),
       h("td", {}, [r.ev, ...(r.positive ? [h("small", { class: "ev-table-plus" }, ["EVプラス"])] : [])]),
       h("td", {}, [r.winOdds.actual]),
       h("td", {}, [r.odds]),

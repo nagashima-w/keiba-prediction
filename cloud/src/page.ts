@@ -389,6 +389,11 @@ ${paletteCss()}
   .horse-table tbody tr:last-child td { border-bottom: 0; }
   .horse-table .eval-marked td { font-weight: bold; }
   .horse-table .eval-positive td { background: var(--card); }
+  /* Issue #582: 3着内率の棒(progress。数字の下。色は brand 1 色・地は line。ライト・ダークとも変数) */
+  .horse-bar { display: block; width: 3.5em; height: 6px; margin: 2px 0 0 auto; border: 0; border-radius: 3px; overflow: hidden; background: var(--line); appearance: none; }
+  .horse-bar::-webkit-progress-bar { background: var(--line); }
+  .horse-bar::-webkit-progress-value { background: var(--brand); }
+  .horse-bar::-moz-progress-bar { background: var(--brand); }
   .horse-table .ev-table-plus { display: block; font-size: 0.75rem; font-weight: bold; color: var(--brand); }
   /* Issue #570: 主要なボタン(事前分析・発走前の分析の実行=.run、場ごとの一括実行の確定=.bulk-go、設定の保存=.settings-save、日報の作成=.report-run)。有効のときは brand の塗りに --bg の文字(コントラスト比は palette.test)。
      無効(送信中・待ち・取得済み・保存中)のときは塗りをやめ、ほかのボタンと同じ card の背景・muted の文字・line の枠に戻す(opacity 1)。押せるかどうかが色で見分けられ、無効でも文字は 4.5 以上。実行中かどうかは、これまでどおりラベルの文字(「送信中…」「待ち」など)でも示す。
