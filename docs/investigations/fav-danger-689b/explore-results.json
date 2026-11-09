@@ -1,0 +1,2515 @@
+{
+ "min_n": 200,
+ "tests": 42,
+ "untested_n_lt_min": [],
+ "base": {
+  "b1": {
+   "n": 672,
+   "win_rate": 0.625,
+   "top3_rate": 0.8973,
+   "win_roi": 0.816,
+   "place_roi": 0.953
+  },
+  "b2": {
+   "n": 3101,
+   "win_rate": 0.454,
+   "top3_rate": 0.7888,
+   "win_roi": 0.78,
+   "place_roi": 0.876
+  },
+  "b3": {
+   "n": 7356,
+   "win_rate": 0.3248,
+   "top3_rate": 0.6588,
+   "win_roi": 0.786,
+   "place_roi": 0.838
+  },
+  "b4": {
+   "n": 5479,
+   "win_rate": 0.2205,
+   "top3_rate": 0.5089,
+   "win_roi": 0.772,
+   "place_roi": 0.792
+  }
+ },
+ "rows": [
+  {
+   "id": "K01",
+   "label": "休み明け(前走から 181 日以上)",
+   "side": "敗因",
+   "group": "all",
+   "n": 292,
+   "rest_n": 16316,
+   "skipped_bands": [],
+   "win_roi": 0.777,
+   "place_roi": 0.818,
+   "rest_place_roi": 0.835,
+   "avg_odds": 2.8,
+   "win": {
+    "obs": 88,
+    "exp": 89.8,
+    "ratio": 0.979,
+    "rate": 0.3014,
+    "z": -0.24,
+    "p_two_sided": 0.813229263363671,
+    "q_bh": 0.875785
+   },
+   "top3": {
+    "obs": 166,
+    "exp": 182.0,
+    "ratio": 0.912,
+    "rate": 0.5685,
+    "z": -1.96,
+    "p_two_sided": 0.050090620813095066,
+    "q_bh": 0.140254
+   }
+  },
+  {
+   "id": "K01",
+   "label": "休み明け(前走から 181 日以上)",
+   "side": "敗因",
+   "group": "1倍台",
+   "n": 52,
+   "rest_n": 3721,
+   "skipped_bands": [],
+   "win_roi": 0.787,
+   "place_roi": 0.935,
+   "rest_place_roi": 0.889,
+   "avg_odds": 1.72,
+   "win": {
+    "obs": 24,
+    "exp": 24.3,
+    "ratio": 0.988,
+    "rate": 0.4615,
+    "z": -0.08,
+    "p_two_sided": 0.9350793148007108
+   },
+   "top3": {
+    "obs": 43,
+    "exp": 41.4,
+    "ratio": 1.038,
+    "rate": 0.8269,
+    "z": 0.54,
+    "p_two_sided": 0.5901502184915182
+   }
+  },
+  {
+   "id": "K01",
+   "label": "休み明け(前走から 181 日以上)",
+   "side": "敗因",
+   "group": "2倍台",
+   "n": 121,
+   "rest_n": 7235,
+   "skipped_bands": [],
+   "win_roi": 0.717,
+   "place_roi": 0.717,
+   "rest_place_roi": 0.84,
+   "avg_odds": 2.5,
+   "win": {
+    "obs": 36,
+    "exp": 39.4,
+    "ratio": 0.915,
+    "rate": 0.2975,
+    "z": -0.65,
+    "p_two_sided": 0.5186773826847626
+   },
+   "top3": {
+    "obs": 62,
+    "exp": 80.0,
+    "ratio": 0.775,
+    "rate": 0.5124,
+    "z": -3.42,
+    "p_two_sided": 0.000615796224419023
+   }
+  },
+  {
+   "id": "K01",
+   "label": "休み明け(前走から 181 日以上)",
+   "side": "敗因",
+   "group": "3倍以上",
+   "n": 119,
+   "rest_n": 5360,
+   "skipped_bands": [],
+   "win_roi": 0.833,
+   "place_roi": 0.87,
+   "rest_place_roi": 0.79,
+   "avg_odds": 3.58,
+   "win": {
+    "obs": 28,
+    "exp": 26.2,
+    "ratio": 1.069,
+    "rate": 0.2353,
+    "z": 0.39,
+    "p_two_sided": 0.6934621791312077
+   },
+   "top3": {
+    "obs": 61,
+    "exp": 60.5,
+    "ratio": 1.008,
+    "rate": 0.5126,
+    "z": 0.08,
+    "p_two_sided": 0.9340113007971108
+   }
+  },
+  {
+   "id": "K02",
+   "label": "間隔が詰まっている(前走から 21 日以内)",
+   "side": "敗因",
+   "group": "all",
+   "n": 5282,
+   "rest_n": 11326,
+   "skipped_bands": [],
+   "win_roi": 0.751,
+   "place_roi": 0.823,
+   "rest_place_roi": 0.84,
+   "avg_odds": 2.63,
+   "win": {
+    "obs": 1668,
+    "exp": 1758.1,
+    "ratio": 0.949,
+    "rate": 0.3158,
+    "z": -2.23,
+    "p_two_sided": 0.02560693301494491,
+    "q_bh": 0.08273
+   },
+   "top3": {
+    "obs": 3400,
+    "exp": 3404.9,
+    "ratio": 0.999,
+    "rate": 0.6437,
+    "z": -0.12,
+    "p_two_sided": 0.9052068177914738,
+    "q_bh": 0.950467
+   }
+  },
+  {
+   "id": "K02",
+   "label": "間隔が詰まっている(前走から 21 日以内)",
+   "side": "敗因",
+   "group": "1倍台",
+   "n": 1196,
+   "rest_n": 2577,
+   "skipped_bands": [],
+   "win_roi": 0.749,
+   "place_roi": 0.885,
+   "rest_place_roi": 0.892,
+   "avg_odds": 1.66,
+   "win": {
+    "obs": 553,
+    "exp": 592.3,
+    "ratio": 0.934,
+    "rate": 0.4624,
+    "z": -1.89,
+    "p_two_sided": 0.05831847883106071
+   },
+   "top3": {
+    "obs": 966,
+    "exp": 967.0,
+    "ratio": 0.999,
+    "rate": 0.8077,
+    "z": -0.06,
+    "p_two_sided": 0.9494741017650586
+   }
+  },
+  {
+   "id": "K02",
+   "label": "間隔が詰まっている(前走から 21 日以内)",
+   "side": "敗因",
+   "group": "2倍台",
+   "n": 2386,
+   "rest_n": 4970,
+   "skipped_bands": [],
+   "win_roi": 0.771,
+   "place_roi": 0.832,
+   "rest_place_roi": 0.84,
+   "avg_odds": 2.45,
+   "win": {
+    "obs": 759,
+    "exp": 782.5,
+    "ratio": 0.97,
+    "rate": 0.3181,
+    "z": -0.85,
+    "p_two_sided": 0.39778946047983016
+   },
+   "top3": {
+    "obs": 1584,
+    "exp": 1566.0,
+    "ratio": 1.011,
+    "rate": 0.6639,
+    "z": 0.64,
+    "p_two_sided": 0.5234325227810331
+   }
+  },
+  {
+   "id": "K02",
+   "label": "間隔が詰まっている(前走から 21 日以内)",
+   "side": "敗因",
+   "group": "3倍以上",
+   "n": 1700,
+   "rest_n": 3779,
+   "skipped_bands": [],
+   "win_roi": 0.723,
+   "place_roi": 0.765,
+   "rest_place_roi": 0.804,
+   "avg_odds": 3.58,
+   "win": {
+    "obs": 356,
+    "exp": 383.3,
+    "ratio": 0.929,
+    "rate": 0.2094,
+    "z": -1.33,
+    "p_two_sided": 0.1850890209951494
+   },
+   "top3": {
+    "obs": 850,
+    "exp": 871.8,
+    "ratio": 0.975,
+    "rate": 0.5,
+    "z": -0.88,
+    "p_two_sided": 0.37936144519795706
+   }
+  },
+  {
+   "id": "K03",
+   "label": "芝ダ替わり(芝→ダートまたはダート→芝)",
+   "side": "敗因",
+   "group": "all",
+   "n": 525,
+   "rest_n": 16083,
+   "skipped_bands": [],
+   "win_roi": 0.77,
+   "place_roi": 0.831,
+   "rest_place_roi": 0.835,
+   "avg_odds": 2.87,
+   "win": {
+    "obs": 161,
+    "exp": 157.0,
+    "ratio": 1.025,
+    "rate": 0.3067,
+    "z": 0.38,
+    "p_two_sided": 0.7047416188024738,
+    "q_bh": 0.837547
+   },
+   "top3": {
+    "obs": 308,
+    "exp": 321.6,
+    "ratio": 0.958,
+    "rate": 0.5867,
+    "z": -1.23,
+    "p_two_sided": 0.22044627798470606,
+    "q_bh": 0.37035
+   }
+  },
+  {
+   "id": "K03",
+   "label": "芝ダ替わり(芝→ダートまたはダート→芝)",
+   "side": "敗因",
+   "group": "1倍台",
+   "n": 70,
+   "rest_n": 3703,
+   "skipped_bands": [],
+   "win_roi": 1.013,
+   "place_roi": 0.924,
+   "rest_place_roi": 0.889,
+   "avg_odds": 1.69,
+   "win": {
+    "obs": 43,
+    "exp": 33.5,
+    "ratio": 1.284,
+    "rate": 0.6143,
+    "z": 2.27,
+    "p_two_sided": 0.023103550633987148
+   },
+   "top3": {
+    "obs": 58,
+    "exp": 56.4,
+    "ratio": 1.029,
+    "rate": 0.8286,
+    "z": 0.49,
+    "p_two_sided": 0.6255847001614665
+   }
+  },
+  {
+   "id": "K03",
+   "label": "芝ダ替わり(芝→ダートまたはダート→芝)",
+   "side": "敗因",
+   "group": "2倍台",
+   "n": 220,
+   "rest_n": 7136,
+   "skipped_bands": [],
+   "win_roi": 0.841,
+   "place_roi": 0.934,
+   "rest_place_roi": 0.835,
+   "avg_odds": 2.49,
+   "win": {
+    "obs": 75,
+    "exp": 71.3,
+    "ratio": 1.051,
+    "rate": 0.3409,
+    "z": 0.52,
+    "p_two_sided": 0.6037334404339874
+   },
+   "top3": {
+    "obs": 150,
+    "exp": 144.8,
+    "ratio": 1.036,
+    "rate": 0.6818,
+    "z": 0.73,
+    "p_two_sided": 0.4643554175609953
+   }
+  },
+  {
+   "id": "K03",
+   "label": "芝ダ替わり(芝→ダートまたはダート→芝)",
+   "side": "敗因",
+   "group": "3倍以上",
+   "n": 235,
+   "rest_n": 5244,
+   "skipped_bands": [],
+   "win_roi": 0.631,
+   "place_roi": 0.708,
+   "rest_place_roi": 0.796,
+   "avg_odds": 3.59,
+   "win": {
+    "obs": 43,
+    "exp": 52.2,
+    "ratio": 0.824,
+    "rate": 0.183,
+    "z": -1.42,
+    "p_two_sided": 0.15637655759845162
+   },
+   "top3": {
+    "obs": 100,
+    "exp": 120.5,
+    "ratio": 0.83,
+    "rate": 0.4255,
+    "z": -2.61,
+    "p_two_sided": 0.009012874303204748
+   }
+  },
+  {
+   "id": "K04",
+   "label": "距離延長 400m 以上",
+   "side": "敗因",
+   "group": "all",
+   "n": 400,
+   "rest_n": 16208,
+   "skipped_bands": [],
+   "win_roi": 0.898,
+   "place_roi": 0.841,
+   "rest_place_roi": 0.834,
+   "avg_odds": 2.62,
+   "win": {
+    "obs": 149,
+    "exp": 132.0,
+    "ratio": 1.128,
+    "rate": 0.3725,
+    "z": 1.82,
+    "p_two_sided": 0.06811809621131294,
+    "q_bh": 0.168292
+   },
+   "top3": {
+    "obs": 260,
+    "exp": 259.4,
+    "ratio": 1.002,
+    "rate": 0.65,
+    "z": 0.07,
+    "p_two_sided": 0.9459606447725674,
+    "q_bh": 0.969033
+   }
+  },
+  {
+   "id": "K04",
+   "label": "距離延長 400m 以上",
+   "side": "敗因",
+   "group": "1倍台",
+   "n": 95,
+   "rest_n": 3678,
+   "skipped_bands": [],
+   "win_roi": 0.735,
+   "place_roi": 0.849,
+   "rest_place_roi": 0.891,
+   "avg_odds": 1.63,
+   "win": {
+    "obs": 44,
+    "exp": 46.3,
+    "ratio": 0.951,
+    "rate": 0.4632,
+    "z": -0.46,
+    "p_two_sided": 0.6426952518970239
+   },
+   "top3": {
+    "obs": 74,
+    "exp": 77.0,
+    "ratio": 0.962,
+    "rate": 0.7789,
+    "z": -0.77,
+    "p_two_sided": 0.4426460332592352
+   }
+  },
+  {
+   "id": "K04",
+   "label": "距離延長 400m 以上",
+   "side": "敗因",
+   "group": "2倍台",
+   "n": 182,
+   "rest_n": 7174,
+   "skipped_bands": [],
+   "win_roi": 0.928,
+   "place_roi": 0.837,
+   "rest_place_roi": 0.838,
+   "avg_odds": 2.45,
+   "win": {
+    "obs": 70,
+    "exp": 58.8,
+    "ratio": 1.19,
+    "rate": 0.3846,
+    "z": 1.75,
+    "p_two_sided": 0.08084108691684232
+   },
+   "top3": {
+    "obs": 121,
+    "exp": 119.9,
+    "ratio": 1.009,
+    "rate": 0.6648,
+    "z": 0.17,
+    "p_two_sided": 0.8615420046686677
+   }
+  },
+  {
+   "id": "K04",
+   "label": "距離延長 400m 以上",
+   "side": "敗因",
+   "group": "3倍以上",
+   "n": 123,
+   "rest_n": 5356,
+   "skipped_bands": [],
+   "win_roi": 0.981,
+   "place_roi": 0.84,
+   "rest_place_roi": 0.791,
+   "avg_odds": 3.62,
+   "win": {
+    "obs": 35,
+    "exp": 26.9,
+    "ratio": 1.299,
+    "rate": 0.2846,
+    "z": 1.73,
+    "p_two_sided": 0.0829725284960137
+   },
+   "top3": {
+    "obs": 65,
+    "exp": 62.5,
+    "ratio": 1.039,
+    "rate": 0.5285,
+    "z": 0.44,
+    "p_two_sided": 0.660041589741483
+   }
+  },
+  {
+   "id": "K05",
+   "label": "外枠(枠番 7 以上)",
+   "side": "敗因",
+   "group": "all",
+   "n": 4790,
+   "rest_n": 11818,
+   "skipped_bands": [],
+   "win_roi": 0.793,
+   "place_roi": 0.847,
+   "rest_place_roi": 0.829,
+   "avg_odds": 2.64,
+   "win": {
+    "obs": 1588,
+    "exp": 1556.1,
+    "ratio": 1.021,
+    "rate": 0.3315,
+    "z": 0.85,
+    "p_two_sided": 0.3961035483638038,
+    "q_bh": 0.554545
+   },
+   "top3": {
+    "obs": 3132,
+    "exp": 3064.7,
+    "ratio": 1.022,
+    "rate": 0.6539,
+    "z": 1.76,
+    "p_two_sided": 0.07855729661657739,
+    "q_bh": 0.173653
+   }
+  },
+  {
+   "id": "K05",
+   "label": "外枠(枠番 7 以上)",
+   "side": "敗因",
+   "group": "1倍台",
+   "n": 1069,
+   "rest_n": 2704,
+   "skipped_bands": [],
+   "win_roi": 0.804,
+   "place_roi": 0.9,
+   "rest_place_roi": 0.886,
+   "avg_odds": 1.66,
+   "win": {
+    "obs": 531,
+    "exp": 511.4,
+    "ratio": 1.038,
+    "rate": 0.4967,
+    "z": 1.02,
+    "p_two_sided": 0.3068620126962054
+   },
+   "top3": {
+    "obs": 872,
+    "exp": 859.7,
+    "ratio": 1.014,
+    "rate": 0.8157,
+    "z": 0.81,
+    "p_two_sided": 0.41846520473756027
+   }
+  },
+  {
+   "id": "K05",
+   "label": "外枠(枠番 7 以上)",
+   "side": "敗因",
+   "group": "2倍台",
+   "n": 2183,
+   "rest_n": 5173,
+   "skipped_bands": [],
+   "win_roi": 0.787,
+   "place_roi": 0.844,
+   "rest_place_roi": 0.835,
+   "avg_odds": 2.46,
+   "win": {
+    "obs": 707,
+    "exp": 709.8,
+    "ratio": 0.996,
+    "rate": 0.3239,
+    "z": -0.11,
+    "p_two_sided": 0.914475276570305
+   },
+   "top3": {
+    "obs": 1451,
+    "exp": 1432.7,
+    "ratio": 1.013,
+    "rate": 0.6647,
+    "z": 0.69,
+    "p_two_sided": 0.4881241080304555
+   }
+  },
+  {
+   "id": "K05",
+   "label": "外枠(枠番 7 以上)",
+   "side": "敗因",
+   "group": "3倍以上",
+   "n": 1538,
+   "rest_n": 3941,
+   "skipped_bands": [],
+   "win_roi": 0.794,
+   "place_roi": 0.815,
+   "rest_place_roi": 0.783,
+   "avg_odds": 3.58,
+   "win": {
+    "obs": 350,
+    "exp": 334.8,
+    "ratio": 1.045,
+    "rate": 0.2276,
+    "z": 0.79,
+    "p_two_sided": 0.4290466964935725
+   },
+   "top3": {
+    "obs": 809,
+    "exp": 772.3,
+    "ratio": 1.047,
+    "rate": 0.526,
+    "z": 1.59,
+    "p_two_sided": 0.11254718093998003
+   }
+  },
+  {
+   "id": "K06",
+   "label": "馬体重が前走から 10kg 以上減",
+   "side": "敗因",
+   "group": "all",
+   "n": 577,
+   "rest_n": 16031,
+   "skipped_bands": [],
+   "win_roi": 0.82,
+   "place_roi": 0.835,
+   "rest_place_roi": 0.835,
+   "avg_odds": 2.72,
+   "win": {
+    "obs": 185,
+    "exp": 181.5,
+    "ratio": 1.019,
+    "rate": 0.3206,
+    "z": 0.31,
+    "p_two_sided": 0.754732197766446,
+    "q_bh": 0.854594
+   },
+   "top3": {
+    "obs": 364,
+    "exp": 363.9,
+    "ratio": 1.0,
+    "rate": 0.6308,
+    "z": 0.01,
+    "p_two_sided": 0.9920930826256281,
+    "q_bh": 0.992093
+   }
+  },
+  {
+   "id": "K06",
+   "label": "馬体重が前走から 10kg 以上減",
+   "side": "敗因",
+   "group": "1倍台",
+   "n": 104,
+   "rest_n": 3669,
+   "skipped_bands": [],
+   "win_roi": 0.798,
+   "place_roi": 0.864,
+   "rest_place_roi": 0.891,
+   "avg_odds": 1.69,
+   "win": {
+    "obs": 50,
+    "exp": 50.0,
+    "ratio": 1.001,
+    "rate": 0.4808,
+    "z": 0.01,
+    "p_two_sided": 0.9929764584213443
+   },
+   "top3": {
+    "obs": 82,
+    "exp": 83.8,
+    "ratio": 0.978,
+    "rate": 0.7885,
+    "z": -0.45,
+    "p_two_sided": 0.6534610664341097
+   }
+  },
+  {
+   "id": "K06",
+   "label": "馬体重が前走から 10kg 以上減",
+   "side": "敗因",
+   "group": "2倍台",
+   "n": 263,
+   "rest_n": 7093,
+   "skipped_bands": [],
+   "win_roi": 0.757,
+   "place_roi": 0.882,
+   "rest_place_roi": 0.836,
+   "avg_odds": 2.47,
+   "win": {
+    "obs": 81,
+    "exp": 85.6,
+    "ratio": 0.947,
+    "rate": 0.308,
+    "z": -0.59,
+    "p_two_sided": 0.5538991398931808
+   },
+   "top3": {
+    "obs": 178,
+    "exp": 173.1,
+    "ratio": 1.028,
+    "rate": 0.6768,
+    "z": 0.63,
+    "p_two_sided": 0.5301064803250135
+   }
+  },
+  {
+   "id": "K06",
+   "label": "馬体重が前走から 10kg 以上減",
+   "side": "敗因",
+   "group": "3倍以上",
+   "n": 210,
+   "rest_n": 5269,
+   "skipped_bands": [],
+   "win_roi": 0.909,
+   "place_roi": 0.761,
+   "rest_place_roi": 0.793,
+   "avg_odds": 3.54,
+   "win": {
+    "obs": 54,
+    "exp": 46.0,
+    "ratio": 1.174,
+    "rate": 0.2571,
+    "z": 1.31,
+    "p_two_sided": 0.19124193228331418
+   },
+   "top3": {
+    "obs": 104,
+    "exp": 107.0,
+    "ratio": 0.972,
+    "rate": 0.4952,
+    "z": -0.4,
+    "p_two_sided": 0.6873771436580574
+   }
+  },
+  {
+   "id": "K07",
+   "label": "出遅れ癖の近似(過去 5 走で 14 頭以上の 1 コーナー 10 番手以下が 2 回以上)",
+   "side": "敗因",
+   "group": "all",
+   "n": 905,
+   "rest_n": 15703,
+   "skipped_bands": [],
+   "win_roi": 0.689,
+   "place_roi": 0.786,
+   "rest_place_roi": 0.837,
+   "avg_odds": 2.8,
+   "win": {
+    "obs": 248,
+    "exp": 278.7,
+    "ratio": 0.89,
+    "rate": 0.274,
+    "z": -2.19,
+    "p_two_sided": 0.028397541373012734,
+    "q_bh": 0.085193
+   },
+   "top3": {
+    "obs": 541,
+    "exp": 563.2,
+    "ratio": 0.961,
+    "rate": 0.5978,
+    "z": -1.51,
+    "p_two_sided": 0.12999328581969644,
+    "q_bh": 0.248169
+   }
+  },
+  {
+   "id": "K07",
+   "label": "出遅れ癖の近似(過去 5 走で 14 頭以上の 1 コーナー 10 番手以下が 2 回以上)",
+   "side": "敗因",
+   "group": "1倍台",
+   "n": 147,
+   "rest_n": 3626,
+   "skipped_bands": [],
+   "win_roi": 0.716,
+   "place_roi": 0.886,
+   "rest_place_roi": 0.89,
+   "avg_odds": 1.7,
+   "win": {
+    "obs": 64,
+    "exp": 69.2,
+    "ratio": 0.924,
+    "rate": 0.4354,
+    "z": -0.85,
+    "p_two_sided": 0.39426600291816105
+   },
+   "top3": {
+    "obs": 118,
+    "exp": 117.4,
+    "ratio": 1.005,
+    "rate": 0.8027,
+    "z": 0.13,
+    "p_two_sided": 0.8982762797208153
+   }
+  },
+  {
+   "id": "K07",
+   "label": "出遅れ癖の近似(過去 5 走で 14 頭以上の 1 コーナー 10 番手以下が 2 回以上)",
+   "side": "敗因",
+   "group": "2倍台",
+   "n": 391,
+   "rest_n": 6965,
+   "skipped_bands": [],
+   "win_roi": 0.724,
+   "place_roi": 0.83,
+   "rest_place_roi": 0.838,
+   "avg_odds": 2.46,
+   "win": {
+    "obs": 116,
+    "exp": 127.6,
+    "ratio": 0.909,
+    "rate": 0.2967,
+    "z": -1.22,
+    "p_two_sided": 0.22280099831653744
+   },
+   "top3": {
+    "obs": 258,
+    "exp": 257.6,
+    "ratio": 1.002,
+    "rate": 0.6598,
+    "z": 0.05,
+    "p_two_sided": 0.9636053188883379
+   }
+  },
+  {
+   "id": "K07",
+   "label": "出遅れ癖の近似(過去 5 走で 14 頭以上の 1 コーナー 10 番手以下が 2 回以上)",
+   "side": "敗因",
+   "group": "3倍以上",
+   "n": 367,
+   "rest_n": 5112,
+   "skipped_bands": [],
+   "win_roi": 0.64,
+   "place_roi": 0.698,
+   "rest_place_roi": 0.799,
+   "avg_odds": 3.6,
+   "win": {
+    "obs": 68,
+    "exp": 81.8,
+    "ratio": 0.831,
+    "rate": 0.1853,
+    "z": -1.68,
+    "p_two_sided": 0.09226094841748424
+   },
+   "top3": {
+    "obs": 165,
+    "exp": 188.3,
+    "ratio": 0.876,
+    "rate": 0.4496,
+    "z": -2.35,
+    "p_two_sided": 0.018722905298335462
+   }
+  },
+  {
+   "id": "K08",
+   "label": "前走で先行(前走の 3 コーナー 2 番手以内)",
+   "side": "人気",
+   "group": "all",
+   "n": 4221,
+   "rest_n": 12387,
+   "skipped_bands": [],
+   "win_roi": 0.774,
+   "place_roi": 0.82,
+   "rest_place_roi": 0.839,
+   "avg_odds": 2.59,
+   "win": {
+    "obs": 1402,
+    "exp": 1418.0,
+    "ratio": 0.989,
+    "rate": 0.3321,
+    "z": -0.46,
+    "p_two_sided": 0.6443264451705302,
+    "q_bh": 0.808802
+   },
+   "top3": {
+    "obs": 2689,
+    "exp": 2771.7,
+    "ratio": 0.97,
+    "rate": 0.6371,
+    "z": -2.38,
+    "p_two_sided": 0.017314886255435195,
+    "q_bh": 0.060602
+   }
+  },
+  {
+   "id": "K08",
+   "label": "前走で先行(前走の 3 コーナー 2 番手以内)",
+   "side": "人気",
+   "group": "1倍台",
+   "n": 1052,
+   "rest_n": 2721,
+   "skipped_bands": [],
+   "win_roi": 0.782,
+   "place_roi": 0.895,
+   "rest_place_roi": 0.888,
+   "avg_odds": 1.63,
+   "win": {
+    "obs": 517,
+    "exp": 519.0,
+    "ratio": 0.996,
+    "rate": 0.4914,
+    "z": -0.11,
+    "p_two_sided": 0.9158146061728792
+   },
+   "top3": {
+    "obs": 858,
+    "exp": 855.0,
+    "ratio": 1.004,
+    "rate": 0.8156,
+    "z": 0.2,
+    "p_two_sided": 0.8387623491490103
+   }
+  },
+  {
+   "id": "K08",
+   "label": "前走で先行(前走の 3 コーナー 2 番手以内)",
+   "side": "人気",
+   "group": "2倍台",
+   "n": 1886,
+   "rest_n": 5470,
+   "skipped_bands": [],
+   "win_roi": 0.769,
+   "place_roi": 0.809,
+   "rest_place_roi": 0.848,
+   "avg_odds": 2.44,
+   "win": {
+    "obs": 601,
+    "exp": 616.5,
+    "ratio": 0.975,
+    "rate": 0.3187,
+    "z": -0.66,
+    "p_two_sided": 0.5114639410479307
+   },
+   "top3": {
+    "obs": 1199,
+    "exp": 1257.4,
+    "ratio": 0.954,
+    "rate": 0.6357,
+    "z": -2.45,
+    "p_two_sided": 0.014370714773772983
+   }
+  },
+  {
+   "id": "K08",
+   "label": "前走で先行(前走の 3 コーナー 2 番手以内)",
+   "side": "人気",
+   "group": "3倍以上",
+   "n": 1283,
+   "rest_n": 4196,
+   "skipped_bands": [],
+   "win_roi": 0.775,
+   "place_roi": 0.775,
+   "rest_place_roi": 0.797,
+   "avg_odds": 3.59,
+   "win": {
+    "obs": 284,
+    "exp": 282.5,
+    "ratio": 1.005,
+    "rate": 0.2214,
+    "z": 0.09,
+    "p_two_sided": 0.9309213772826631
+   },
+   "top3": {
+    "obs": 632,
+    "exp": 659.2,
+    "ratio": 0.959,
+    "rate": 0.4926,
+    "z": -1.33,
+    "p_two_sided": 0.1831957436524317
+   }
+  },
+  {
+   "id": "K09",
+   "label": "前走 4 着以下",
+   "side": "敗因",
+   "group": "all",
+   "n": 3913,
+   "rest_n": 12695,
+   "skipped_bands": [],
+   "win_roi": 0.819,
+   "place_roi": 0.846,
+   "rest_place_roi": 0.831,
+   "avg_odds": 3.03,
+   "win": {
+    "obs": 1142,
+    "exp": 1099.7,
+    "ratio": 1.038,
+    "rate": 0.2918,
+    "z": 1.29,
+    "p_two_sided": 0.19615186943969948,
+    "q_bh": 0.343266
+   },
+   "top3": {
+    "obs": 2338,
+    "exp": 2321.9,
+    "ratio": 1.007,
+    "rate": 0.5975,
+    "z": 0.45,
+    "p_two_sided": 0.6547446329087496,
+    "q_bh": 0.808802
+   }
+  },
+  {
+   "id": "K09",
+   "label": "前走 4 着以下",
+   "side": "敗因",
+   "group": "1倍台",
+   "n": 346,
+   "rest_n": 3427,
+   "skipped_bands": [],
+   "win_roi": 0.814,
+   "place_roi": 0.887,
+   "rest_place_roi": 0.89,
+   "avg_odds": 1.75,
+   "win": {
+    "obs": 164,
+    "exp": 161.0,
+    "ratio": 1.018,
+    "rate": 0.474,
+    "z": 0.3,
+    "p_two_sided": 0.7609914002003445
+   },
+   "top3": {
+    "obs": 275,
+    "exp": 275.6,
+    "ratio": 0.998,
+    "rate": 0.7948,
+    "z": -0.08,
+    "p_two_sided": 0.9373916535801495
+   }
+  },
+  {
+   "id": "K09",
+   "label": "前走 4 着以下",
+   "side": "敗因",
+   "group": "2倍台",
+   "n": 1572,
+   "rest_n": 5784,
+   "skipped_bands": [],
+   "win_roi": 0.821,
+   "place_roi": 0.868,
+   "rest_place_roi": 0.829,
+   "avg_odds": 2.5,
+   "win": {
+    "obs": 524,
+    "exp": 506.9,
+    "ratio": 1.034,
+    "rate": 0.3333,
+    "z": 0.82,
+    "p_two_sided": 0.4135022864503658
+   },
+   "top3": {
+    "obs": 1044,
+    "exp": 1033.3,
+    "ratio": 1.01,
+    "rate": 0.6641,
+    "z": 0.5,
+    "p_two_sided": 0.6145284836435628
+   }
+  },
+  {
+   "id": "K09",
+   "label": "前走 4 着以下",
+   "side": "敗因",
+   "group": "3倍以上",
+   "n": 1995,
+   "rest_n": 3484,
+   "skipped_bands": [],
+   "win_roi": 0.817,
+   "place_roi": 0.821,
+   "rest_place_roi": 0.775,
+   "avg_odds": 3.66,
+   "win": {
+    "obs": 454,
+    "exp": 431.8,
+    "ratio": 1.052,
+    "rate": 0.2276,
+    "z": 0.96,
+    "p_two_sided": 0.3380497564693842
+   },
+   "top3": {
+    "obs": 1019,
+    "exp": 1013.0,
+    "ratio": 1.006,
+    "rate": 0.5108,
+    "z": 0.22,
+    "p_two_sided": 0.8292397490384986
+   }
+  },
+  {
+   "id": "K10",
+   "label": "前走 1 着",
+   "side": "人気",
+   "group": "all",
+   "n": 2078,
+   "rest_n": 14530,
+   "skipped_bands": [],
+   "win_roi": 0.795,
+   "place_roi": 0.811,
+   "rest_place_roi": 0.838,
+   "avg_odds": 2.65,
+   "win": {
+    "obs": 700,
+    "exp": 679.6,
+    "ratio": 1.03,
+    "rate": 0.3369,
+    "z": 0.91,
+    "p_two_sided": 0.36116964574530536,
+    "q_bh": 0.523073
+   },
+   "top3": {
+    "obs": 1278,
+    "exp": 1348.1,
+    "ratio": 0.948,
+    "rate": 0.615,
+    "z": -3.1,
+    "p_two_sided": 0.0019644383334977466,
+    "q_bh": 0.016501
+   }
+  },
+  {
+   "id": "K10",
+   "label": "前走 1 着",
+   "side": "人気",
+   "group": "1倍台",
+   "n": 494,
+   "rest_n": 3279,
+   "skipped_bands": [],
+   "win_roi": 0.827,
+   "place_roi": 0.887,
+   "rest_place_roi": 0.89,
+   "avg_odds": 1.65,
+   "win": {
+    "obs": 255,
+    "exp": 237.9,
+    "ratio": 1.072,
+    "rate": 0.5162,
+    "z": 1.45,
+    "p_two_sided": 0.14714711055367813
+   },
+   "top3": {
+    "obs": 396,
+    "exp": 400.3,
+    "ratio": 0.989,
+    "rate": 0.8016,
+    "z": -0.46,
+    "p_two_sided": 0.6422200571656056
+   }
+  },
+  {
+   "id": "K10",
+   "label": "前走 1 着",
+   "side": "人気",
+   "group": "2倍台",
+   "n": 891,
+   "rest_n": 6465,
+   "skipped_bands": [],
+   "win_roi": 0.786,
+   "place_roi": 0.825,
+   "rest_place_roi": 0.839,
+   "avg_odds": 2.46,
+   "win": {
+    "obs": 288,
+    "exp": 289.6,
+    "ratio": 0.995,
+    "rate": 0.3232,
+    "z": -0.1,
+    "p_two_sided": 0.9167918713491815
+   },
+   "top3": {
+    "obs": 562,
+    "exp": 590.4,
+    "ratio": 0.952,
+    "rate": 0.6308,
+    "z": -1.88,
+    "p_two_sided": 0.05978200995507481
+   }
+  },
+  {
+   "id": "K10",
+   "label": "前走 1 着",
+   "side": "人気",
+   "group": "3倍以上",
+   "n": 693,
+   "rest_n": 4786,
+   "skipped_bands": [],
+   "win_roi": 0.784,
+   "place_roi": 0.738,
+   "rest_place_roi": 0.8,
+   "avg_odds": 3.6,
+   "win": {
+    "obs": 157,
+    "exp": 152.2,
+    "ratio": 1.032,
+    "rate": 0.2266,
+    "z": 0.41,
+    "p_two_sided": 0.6798922670194436
+   },
+   "top3": {
+    "obs": 320,
+    "exp": 357.4,
+    "ratio": 0.895,
+    "rate": 0.4618,
+    "z": -2.65,
+    "p_two_sided": 0.007973016769314282
+   }
+  },
+  {
+   "id": "K11",
+   "label": "前走 2〜3 着",
+   "side": "人気",
+   "group": "all",
+   "n": 9065,
+   "rest_n": 7543,
+   "skipped_bands": [],
+   "win_roi": 0.755,
+   "place_roi": 0.834,
+   "rest_place_roi": 0.835,
+   "avg_odds": 2.51,
+   "win": {
+    "obs": 3023,
+    "exp": 3197.1,
+    "ratio": 0.946,
+    "rate": 0.3335,
+    "z": -2.55,
+    "p_two_sided": 0.010728134603576175,
+    "q_bh": 0.046148
+   },
+   "top3": {
+    "obs": 6042,
+    "exp": 5920.0,
+    "ratio": 1.021,
+    "rate": 0.6665,
+    "z": 1.85,
+    "p_two_sided": 0.06429547038905928,
+    "q_bh": 0.168292
+   }
+  },
+  {
+   "id": "K11",
+   "label": "前走 2〜3 着",
+   "side": "人気",
+   "group": "1倍台",
+   "n": 2494,
+   "rest_n": 1279,
+   "skipped_bands": [],
+   "win_roi": 0.771,
+   "place_roi": 0.893,
+   "rest_place_roi": 0.884,
+   "avg_odds": 1.65,
+   "win": {
+    "obs": 1190,
+    "exp": 1259.3,
+    "ratio": 0.945,
+    "rate": 0.4771,
+    "z": -1.63,
+    "p_two_sided": 0.10322427851447136
+   },
+   "top3": {
+    "obs": 2028,
+    "exp": 1999.6,
+    "ratio": 1.014,
+    "rate": 0.8132,
+    "z": 0.85,
+    "p_two_sided": 0.3947098775812286
+   }
+  },
+  {
+   "id": "K11",
+   "label": "前走 2〜3 着",
+   "side": "人気",
+   "group": "2倍台",
+   "n": 4169,
+   "rest_n": 3187,
+   "skipped_bands": [],
+   "win_roi": 0.765,
+   "place_roi": 0.831,
+   "rest_place_roi": 0.846,
+   "avg_odds": 2.44,
+   "win": {
+    "obs": 1326,
+    "exp": 1390.5,
+    "ratio": 0.954,
+    "rate": 0.3181,
+    "z": -1.4,
+    "p_two_sided": 0.16003568657719244
+   },
+   "top3": {
+    "obs": 2771,
+    "exp": 2714.4,
+    "ratio": 1.021,
+    "rate": 0.6647,
+    "z": 1.22,
+    "p_two_sided": 0.223309189058582
+   }
+  },
+  {
+   "id": "K11",
+   "label": "前走 2〜3 着",
+   "side": "人気",
+   "group": "3倍以上",
+   "n": 2402,
+   "rest_n": 3077,
+   "skipped_bands": [],
+   "win_roi": 0.722,
+   "place_roi": 0.78,
+   "rest_place_roi": 0.802,
+   "avg_odds": 3.54,
+   "win": {
+    "obs": 507,
+    "exp": 547.2,
+    "ratio": 0.926,
+    "rate": 0.2111,
+    "z": -1.48,
+    "p_two_sided": 0.13793669653616614
+   },
+   "top3": {
+    "obs": 1243,
+    "exp": 1206.1,
+    "ratio": 1.031,
+    "rate": 0.5175,
+    "z": 1.13,
+    "p_two_sided": 0.2587203706478798
+   }
+  },
+  {
+   "id": "K12",
+   "label": "キャリアが浅い(通算 2 走以内)",
+   "side": "敗因",
+   "group": "all",
+   "n": 4430,
+   "rest_n": 12178,
+   "skipped_bands": [],
+   "win_roi": 0.789,
+   "place_roi": 0.834,
+   "rest_place_roi": 0.835,
+   "avg_odds": 2.42,
+   "win": {
+    "obs": 1601,
+    "exp": 1559.9,
+    "ratio": 1.026,
+    "rate": 0.3614,
+    "z": 1.1,
+    "p_two_sided": 0.2703085081321583,
+    "q_bh": 0.42048
+   },
+   "top3": {
+    "obs": 2972,
+    "exp": 2992.6,
+    "ratio": 0.993,
+    "rate": 0.6709,
+    "z": -0.58,
+    "p_two_sided": 0.563461280239251,
+    "q_bh": 0.763399
+   }
+  },
+  {
+   "id": "K12",
+   "label": "キャリアが浅い(通算 2 走以内)",
+   "side": "敗因",
+   "group": "1倍台",
+   "n": 1416,
+   "rest_n": 2357,
+   "skipped_bands": [],
+   "win_roi": 0.787,
+   "place_roi": 0.885,
+   "rest_place_roi": 0.893,
+   "avg_odds": 1.62,
+   "win": {
+    "obs": 708,
+    "exp": 694.3,
+    "ratio": 1.02,
+    "rate": 0.5,
+    "z": 0.57,
+    "p_two_sided": 0.5660652354008511
+   },
+   "top3": {
+    "obs": 1148,
+    "exp": 1154.8,
+    "ratio": 0.994,
+    "rate": 0.8107,
+    "z": -0.37,
+    "p_two_sided": 0.7094217319028764
+   }
+  },
+  {
+   "id": "K12",
+   "label": "キャリアが浅い(通算 2 走以内)",
+   "side": "敗因",
+   "group": "2倍台",
+   "n": 1997,
+   "rest_n": 5359,
+   "skipped_bands": [],
+   "win_roi": 0.801,
+   "place_roi": 0.824,
+   "rest_place_roi": 0.843,
+   "avg_odds": 2.44,
+   "win": {
+    "obs": 666,
+    "exp": 642.1,
+    "ratio": 1.037,
+    "rate": 0.3335,
+    "z": 0.98,
+    "p_two_sided": 0.32896827581158117
+   },
+   "top3": {
+    "obs": 1298,
+    "exp": 1322.1,
+    "ratio": 0.982,
+    "rate": 0.65,
+    "z": -0.97,
+    "p_two_sided": 0.3307809543995003
+   }
+  },
+  {
+   "id": "K12",
+   "label": "キャリアが浅い(通算 2 走以内)",
+   "side": "敗因",
+   "group": "3倍以上",
+   "n": 1017,
+   "rest_n": 4462,
+   "skipped_bands": [],
+   "win_roi": 0.769,
+   "place_roi": 0.785,
+   "rest_place_roi": 0.794,
+   "avg_odds": 3.51,
+   "win": {
+    "obs": 227,
+    "exp": 223.6,
+    "ratio": 1.015,
+    "rate": 0.2232,
+    "z": 0.23,
+    "p_two_sided": 0.8161654670004633
+   },
+   "top3": {
+    "obs": 526,
+    "exp": 515.6,
+    "ratio": 1.02,
+    "rate": 0.5172,
+    "z": 0.59,
+    "p_two_sided": 0.5547674746136396
+   }
+  },
+  {
+   "id": "K13",
+   "label": "2歳戦",
+   "side": "レース",
+   "group": "all",
+   "n": 3172,
+   "rest_n": 13436,
+   "skipped_bands": [],
+   "win_roi": 0.821,
+   "place_roi": 0.865,
+   "rest_place_roi": 0.827,
+   "avg_odds": 2.4,
+   "win": {
+    "obs": 1199,
+    "exp": 1127.0,
+    "ratio": 1.064,
+    "rate": 0.378,
+    "z": 2.41,
+    "p_two_sided": 0.015917104026006924,
+    "q_bh": 0.060602
+   },
+   "top3": {
+    "obs": 2246,
+    "exp": 2129.0,
+    "ratio": 1.055,
+    "rate": 0.7081,
+    "z": 4.11,
+    "p_two_sided": 3.9812803510634125e-05,
+    "q_bh": 0.000836
+   }
+  },
+  {
+   "id": "K13",
+   "label": "2歳戦",
+   "side": "レース",
+   "group": "1倍台",
+   "n": 1061,
+   "rest_n": 2712,
+   "skipped_bands": [],
+   "win_roi": 0.805,
+   "place_roi": 0.91,
+   "rest_place_roi": 0.882,
+   "avg_odds": 1.62,
+   "win": {
+    "obs": 543,
+    "exp": 523.5,
+    "ratio": 1.037,
+    "rate": 0.5118,
+    "z": 1.01,
+    "p_two_sided": 0.31177016987018336
+   },
+   "top3": {
+    "obs": 891,
+    "exp": 855.9,
+    "ratio": 1.041,
+    "rate": 0.8398,
+    "z": 2.37,
+    "p_two_sided": 0.01755271606329373
+   }
+  },
+  {
+   "id": "K13",
+   "label": "2歳戦",
+   "side": "レース",
+   "group": "2倍台",
+   "n": 1412,
+   "rest_n": 5944,
+   "skipped_bands": [],
+   "win_roi": 0.83,
+   "place_roi": 0.84,
+   "rest_place_roi": 0.837,
+   "avg_odds": 2.44,
+   "win": {
+    "obs": 490,
+    "exp": 451.1,
+    "ratio": 1.086,
+    "rate": 0.347,
+    "z": 1.99,
+    "p_two_sided": 0.04694961833950921
+   },
+   "top3": {
+    "obs": 960,
+    "exp": 923.1,
+    "ratio": 1.04,
+    "rate": 0.6799,
+    "z": 1.86,
+    "p_two_sided": 0.0627771177280371
+   }
+  },
+  {
+   "id": "K13",
+   "label": "2歳戦",
+   "side": "レース",
+   "group": "3倍以上",
+   "n": 699,
+   "rest_n": 4780,
+   "skipped_bands": [],
+   "win_roi": 0.827,
+   "place_roi": 0.848,
+   "rest_place_roi": 0.784,
+   "avg_odds": 3.53,
+   "win": {
+    "obs": 166,
+    "exp": 152.4,
+    "ratio": 1.089,
+    "rate": 0.2375,
+    "z": 1.16,
+    "p_two_sided": 0.24564693144775118
+   },
+   "top3": {
+    "obs": 395,
+    "exp": 349.9,
+    "ratio": 1.129,
+    "rate": 0.5651,
+    "z": 3.18,
+    "p_two_sided": 0.00145058643870853
+   }
+  },
+  {
+   "id": "K14",
+   "label": "乗り替わり",
+   "side": "レース",
+   "group": "all",
+   "n": 7664,
+   "rest_n": 8944,
+   "skipped_bands": [],
+   "win_roi": 0.796,
+   "place_roi": 0.838,
+   "rest_place_roi": 0.831,
+   "avg_odds": 2.72,
+   "win": {
+    "obs": 2474,
+    "exp": 2412.4,
+    "ratio": 1.026,
+    "rate": 0.3228,
+    "z": 1.13,
+    "p_two_sided": 0.2574275789283247,
+    "q_bh": 0.415845
+   },
+   "top3": {
+    "obs": 4851,
+    "exp": 4871.4,
+    "ratio": 0.996,
+    "rate": 0.633,
+    "z": -0.36,
+    "p_two_sided": 0.7178976715571495,
+    "q_bh": 0.837547
+   }
+  },
+  {
+   "id": "K14",
+   "label": "乗り替わり",
+   "side": "レース",
+   "group": "1倍台",
+   "n": 1522,
+   "rest_n": 2251,
+   "skipped_bands": [],
+   "win_roi": 0.793,
+   "place_roi": 0.884,
+   "rest_place_roi": 0.894,
+   "avg_odds": 1.68,
+   "win": {
+    "obs": 735,
+    "exp": 729.5,
+    "ratio": 1.008,
+    "rate": 0.4829,
+    "z": 0.22,
+    "p_two_sided": 0.8273464766665881
+   },
+   "top3": {
+    "obs": 1215,
+    "exp": 1233.3,
+    "ratio": 0.985,
+    "rate": 0.7983,
+    "z": -0.91,
+    "p_two_sided": 0.36079774714606005
+   }
+  },
+  {
+   "id": "K14",
+   "label": "乗り替わり",
+   "side": "レース",
+   "group": "2倍台",
+   "n": 3400,
+   "rest_n": 3956,
+   "skipped_bands": [],
+   "win_roi": 0.813,
+   "place_roi": 0.857,
+   "rest_place_roi": 0.821,
+   "avg_odds": 2.46,
+   "win": {
+    "obs": 1135,
+    "exp": 1077.8,
+    "ratio": 1.053,
+    "rate": 0.3338,
+    "z": 1.54,
+    "p_two_sided": 0.12419301981351738
+   },
+   "top3": {
+    "obs": 2267,
+    "exp": 2216.5,
+    "ratio": 1.023,
+    "rate": 0.6668,
+    "z": 1.34,
+    "p_two_sided": 0.18065320145496114
+   }
+  },
+  {
+   "id": "K14",
+   "label": "乗り替わり",
+   "side": "レース",
+   "group": "3倍以上",
+   "n": 2742,
+   "rest_n": 2737,
+   "skipped_bands": [],
+   "win_roi": 0.776,
+   "place_roi": 0.789,
+   "rest_place_roi": 0.795,
+   "avg_odds": 3.61,
+   "win": {
+    "obs": 604,
+    "exp": 605.1,
+    "ratio": 0.998,
+    "rate": 0.2203,
+    "z": -0.04,
+    "p_two_sided": 0.9713427262424442
+   },
+   "top3": {
+    "obs": 1369,
+    "exp": 1421.6,
+    "ratio": 0.963,
+    "rate": 0.4993,
+    "z": -1.42,
+    "p_two_sided": 0.15562240487401732
+   }
+  },
+  {
+   "id": "K15",
+   "label": "ハンデ戦",
+   "side": "レース",
+   "group": "all",
+   "n": 1004,
+   "rest_n": 15604,
+   "skipped_bands": [],
+   "win_roi": 0.76,
+   "place_roi": 0.758,
+   "rest_place_roi": 0.839,
+   "avg_odds": 2.99,
+   "win": {
+    "obs": 282,
+    "exp": 297.1,
+    "ratio": 0.949,
+    "rate": 0.2809,
+    "z": -1.03,
+    "p_two_sided": 0.3035778932997141,
+    "q_bh": 0.455367
+   },
+   "top3": {
+    "obs": 543,
+    "exp": 613.5,
+    "ratio": 0.885,
+    "rate": 0.5408,
+    "z": -4.49,
+    "p_two_sided": 7.068024683332731e-06,
+    "q_bh": 0.000297
+   }
+  },
+  {
+   "id": "K15",
+   "label": "ハンデ戦",
+   "side": "レース",
+   "group": "1倍台",
+   "n": 130,
+   "rest_n": 3643,
+   "skipped_bands": [],
+   "win_roi": 0.832,
+   "place_roi": 0.795,
+   "rest_place_roi": 0.893,
+   "avg_odds": 1.69,
+   "win": {
+    "obs": 64,
+    "exp": 61.3,
+    "ratio": 1.045,
+    "rate": 0.4923,
+    "z": 0.48,
+    "p_two_sided": 0.6336907948132408
+   },
+   "top3": {
+    "obs": 92,
+    "exp": 104.4,
+    "ratio": 0.881,
+    "rate": 0.7077,
+    "z": -2.69,
+    "p_two_sided": 0.007195688519231015
+   }
+  },
+  {
+   "id": "K15",
+   "label": "ハンデ戦",
+   "side": "レース",
+   "group": "2倍台",
+   "n": 399,
+   "rest_n": 6957,
+   "skipped_bands": [],
+   "win_roi": 0.8,
+   "place_roi": 0.807,
+   "rest_place_roi": 0.839,
+   "avg_odds": 2.48,
+   "win": {
+    "obs": 129,
+    "exp": 129.6,
+    "ratio": 0.995,
+    "rate": 0.3233,
+    "z": -0.06,
+    "p_two_sided": 0.9489183637660442
+   },
+   "top3": {
+    "obs": 247,
+    "exp": 263.8,
+    "ratio": 0.936,
+    "rate": 0.619,
+    "z": -1.72,
+    "p_two_sided": 0.08518291360588524
+   }
+  },
+  {
+   "id": "K15",
+   "label": "ハンデ戦",
+   "side": "レース",
+   "group": "3倍以上",
+   "n": 475,
+   "rest_n": 5004,
+   "skipped_bands": [],
+   "win_roi": 0.707,
+   "place_roi": 0.706,
+   "rest_place_roi": 0.8,
+   "avg_odds": 3.78,
+   "win": {
+    "obs": 89,
+    "exp": 106.2,
+    "ratio": 0.838,
+    "rate": 0.1874,
+    "z": -1.82,
+    "p_two_sided": 0.06855074949649398
+   },
+   "top3": {
+    "obs": 204,
+    "exp": 245.3,
+    "ratio": 0.832,
+    "rate": 0.4295,
+    "z": -3.62,
+    "p_two_sided": 0.0002933708192021091
+   }
+  },
+  {
+   "id": "K16",
+   "label": "重・不良",
+   "side": "レース",
+   "group": "all",
+   "n": 2107,
+   "rest_n": 14501,
+   "skipped_bands": [],
+   "win_roi": 0.747,
+   "place_roi": 0.807,
+   "rest_place_roi": 0.839,
+   "avg_odds": 2.68,
+   "win": {
+    "obs": 643,
+    "exp": 682.8,
+    "ratio": 0.942,
+    "rate": 0.3052,
+    "z": -1.78,
+    "p_two_sided": 0.07588307710659378,
+    "q_bh": 0.173653
+   },
+   "top3": {
+    "obs": 1293,
+    "exp": 1352.2,
+    "ratio": 0.956,
+    "rate": 0.6137,
+    "z": -2.57,
+    "p_two_sided": 0.010047785776867565,
+    "q_bh": 0.046148
+   }
+  },
+  {
+   "id": "K16",
+   "label": "重・不良",
+   "side": "レース",
+   "group": "1倍台",
+   "n": 440,
+   "rest_n": 3333,
+   "skipped_bands": [],
+   "win_roi": 0.762,
+   "place_roi": 0.864,
+   "rest_place_roi": 0.893,
+   "avg_odds": 1.67,
+   "win": {
+    "obs": 204,
+    "exp": 212.6,
+    "ratio": 0.96,
+    "rate": 0.4636,
+    "z": -0.78,
+    "p_two_sided": 0.4369429543403238
+   },
+   "top3": {
+    "obs": 344,
+    "exp": 356.0,
+    "ratio": 0.966,
+    "rate": 0.7818,
+    "z": -1.36,
+    "p_two_sided": 0.17272954613086494
+   }
+  },
+  {
+   "id": "K16",
+   "label": "重・不良",
+   "side": "レース",
+   "group": "2倍台",
+   "n": 946,
+   "rest_n": 6410,
+   "skipped_bands": [],
+   "win_roi": 0.725,
+   "place_roi": 0.809,
+   "rest_place_roi": 0.842,
+   "avg_odds": 2.46,
+   "win": {
+    "obs": 282,
+    "exp": 311.0,
+    "ratio": 0.907,
+    "rate": 0.2981,
+    "z": -1.88,
+    "p_two_sided": 0.060571715171932
+   },
+   "top3": {
+    "obs": 596,
+    "exp": 627.2,
+    "ratio": 0.95,
+    "rate": 0.63,
+    "z": -2.0,
+    "p_two_sided": 0.04563883272232034
+   }
+  },
+  {
+   "id": "K16",
+   "label": "重・不良",
+   "side": "レース",
+   "group": "3倍以上",
+   "n": 721,
+   "rest_n": 4758,
+   "skipped_bands": [],
+   "win_roi": 0.766,
+   "place_roi": 0.769,
+   "rest_place_roi": 0.796,
+   "avg_odds": 3.59,
+   "win": {
+    "obs": 157,
+    "exp": 159.3,
+    "ratio": 0.986,
+    "rate": 0.2178,
+    "z": -0.19,
+    "p_two_sided": 0.8497770667774642
+   },
+   "top3": {
+    "obs": 353,
+    "exp": 369.0,
+    "ratio": 0.957,
+    "rate": 0.4896,
+    "z": -1.11,
+    "p_two_sided": 0.2671018772856183
+   }
+  },
+  {
+   "id": "K17",
+   "label": "小倉・福島",
+   "side": "レース",
+   "group": "all",
+   "n": 2252,
+   "rest_n": 14356,
+   "skipped_bands": [],
+   "win_roi": 0.721,
+   "place_roi": 0.804,
+   "rest_place_roi": 0.839,
+   "avg_odds": 2.84,
+   "win": {
+    "obs": 633,
+    "exp": 695.5,
+    "ratio": 0.91,
+    "rate": 0.2811,
+    "z": -2.71,
+    "p_two_sided": 0.006806244683843063,
+    "q_bh": 0.040837
+   },
+   "top3": {
+    "obs": 1341,
+    "exp": 1402.9,
+    "ratio": 0.956,
+    "rate": 0.5955,
+    "z": -2.54,
+    "p_two_sided": 0.010987543173100507,
+    "q_bh": 0.046148
+   }
+  },
+  {
+   "id": "K17",
+   "label": "小倉・福島",
+   "side": "レース",
+   "group": "1倍台",
+   "n": 361,
+   "rest_n": 3412,
+   "skipped_bands": [],
+   "win_roi": 0.782,
+   "place_roi": 0.89,
+   "rest_place_roi": 0.89,
+   "avg_odds": 1.7,
+   "win": {
+    "obs": 168,
+    "exp": 170.6,
+    "ratio": 0.985,
+    "rate": 0.4654,
+    "z": -0.26,
+    "p_two_sided": 0.7945589507395954
+   },
+   "top3": {
+    "obs": 288,
+    "exp": 289.0,
+    "ratio": 0.997,
+    "rate": 0.7978,
+    "z": -0.12,
+    "p_two_sided": 0.9033815862249384
+   }
+  },
+  {
+   "id": "K17",
+   "label": "小倉・福島",
+   "side": "レース",
+   "group": "2倍台",
+   "n": 949,
+   "rest_n": 6407,
+   "skipped_bands": [],
+   "win_roi": 0.723,
+   "place_roi": 0.823,
+   "rest_place_roi": 0.84,
+   "avg_odds": 2.47,
+   "win": {
+    "obs": 282,
+    "exp": 312.1,
+    "ratio": 0.904,
+    "rate": 0.2972,
+    "z": -1.95,
+    "p_two_sided": 0.05160114981975176
+   },
+   "top3": {
+    "obs": 604,
+    "exp": 628.3,
+    "ratio": 0.961,
+    "rate": 0.6365,
+    "z": -1.55,
+    "p_two_sided": 0.12015720553040032
+   }
+  },
+  {
+   "id": "K17",
+   "label": "小倉・福島",
+   "side": "レース",
+   "group": "3倍以上",
+   "n": 942,
+   "rest_n": 4537,
+   "skipped_bands": [],
+   "win_roi": 0.697,
+   "place_roi": 0.752,
+   "rest_place_roi": 0.8,
+   "avg_odds": 3.65,
+   "win": {
+    "obs": 183,
+    "exp": 212.8,
+    "ratio": 0.86,
+    "rate": 0.1943,
+    "z": -2.13,
+    "p_two_sided": 0.03297225666311576
+   },
+   "top3": {
+    "obs": 449,
+    "exp": 485.6,
+    "ratio": 0.925,
+    "rate": 0.4766,
+    "z": -2.17,
+    "p_two_sided": 0.02979003764984651
+   }
+  },
+  {
+   "id": "K18",
+   "label": "牝馬",
+   "side": "レース",
+   "group": "all",
+   "n": 5922,
+   "rest_n": 10686,
+   "skipped_bands": [],
+   "win_roi": 0.745,
+   "place_roi": 0.809,
+   "rest_place_roi": 0.849,
+   "avg_odds": 2.71,
+   "win": {
+    "obs": 1813,
+    "exp": 1940.5,
+    "ratio": 0.934,
+    "rate": 0.3061,
+    "z": -2.92,
+    "p_two_sided": 0.0035344559741380217,
+    "q_bh": 0.024741
+   },
+   "top3": {
+    "obs": 3658,
+    "exp": 3826.5,
+    "ratio": 0.956,
+    "rate": 0.6177,
+    "z": -3.73,
+    "p_two_sided": 0.0001887326953850595,
+    "q_bh": 0.00234
+   }
+  },
+  {
+   "id": "K18",
+   "label": "牝馬",
+   "side": "レース",
+   "group": "1倍台",
+   "n": 1205,
+   "rest_n": 2568,
+   "skipped_bands": [],
+   "win_roi": 0.753,
+   "place_roi": 0.873,
+   "rest_place_roi": 0.898,
+   "avg_odds": 1.67,
+   "win": {
+    "obs": 556,
+    "exp": 593.6,
+    "ratio": 0.937,
+    "rate": 0.4614,
+    "z": -1.8,
+    "p_two_sided": 0.07134636063874551
+   },
+   "top3": {
+    "obs": 954,
+    "exp": 980.7,
+    "ratio": 0.973,
+    "rate": 0.7917,
+    "z": -1.61,
+    "p_two_sided": 0.10728385013041321
+   }
+  },
+  {
+   "id": "K18",
+   "label": "牝馬",
+   "side": "レース",
+   "group": "2倍台",
+   "n": 2621,
+   "rest_n": 4735,
+   "skipped_bands": [],
+   "win_roi": 0.766,
+   "place_roi": 0.821,
+   "rest_place_roi": 0.847,
+   "avg_odds": 2.46,
+   "win": {
+    "obs": 831,
+    "exp": 862.4,
+    "ratio": 0.964,
+    "rate": 0.3171,
+    "z": -1.05,
+    "p_two_sided": 0.29317320184861817
+   },
+   "top3": {
+    "obs": 1687,
+    "exp": 1748.6,
+    "ratio": 0.965,
+    "rate": 0.6436,
+    "z": -2.04,
+    "p_two_sided": 0.04165750599880414
+   }
+  },
+  {
+   "id": "K18",
+   "label": "牝馬",
+   "side": "レース",
+   "group": "3倍以上",
+   "n": 2096,
+   "rest_n": 3383,
+   "skipped_bands": [],
+   "win_roi": 0.714,
+   "place_roi": 0.756,
+   "rest_place_roi": 0.815,
+   "avg_odds": 3.62,
+   "win": {
+    "obs": 426,
+    "exp": 484.5,
+    "ratio": 0.879,
+    "rate": 0.2032,
+    "z": -2.42,
+    "p_two_sided": 0.01543342318955541
+   },
+   "top3": {
+    "obs": 1017,
+    "exp": 1097.3,
+    "ratio": 0.927,
+    "rate": 0.4852,
+    "z": -2.76,
+    "p_two_sided": 0.005862729189612692
+   }
+  },
+  {
+   "id": "K19",
+   "label": "16 頭以上",
+   "side": "レース",
+   "group": "all",
+   "n": 7755,
+   "rest_n": 8853,
+   "skipped_bands": [],
+   "win_roi": 0.772,
+   "place_roi": 0.826,
+   "rest_place_roi": 0.842,
+   "avg_odds": 2.8,
+   "win": {
+    "obs": 2366,
+    "exp": 2454.6,
+    "ratio": 0.964,
+    "rate": 0.3051,
+    "z": -1.6,
+    "p_two_sided": 0.10952374952645844,
+    "q_bh": 0.23
+   },
+   "top3": {
+    "obs": 4727,
+    "exp": 4944.2,
+    "ratio": 0.956,
+    "rate": 0.6095,
+    "z": -3.69,
+    "p_two_sided": 0.00022286179364811506,
+    "q_bh": 0.00234
+   }
+  },
+  {
+   "id": "K19",
+   "label": "16 頭以上",
+   "side": "レース",
+   "group": "1倍台",
+   "n": 1397,
+   "rest_n": 2376,
+   "skipped_bands": [],
+   "win_roi": 0.787,
+   "place_roi": 0.875,
+   "rest_place_roi": 0.899,
+   "avg_odds": 1.68,
+   "win": {
+    "obs": 670,
+    "exp": 671.3,
+    "ratio": 0.998,
+    "rate": 0.4796,
+    "z": -0.06,
+    "p_two_sided": 0.9544321868760532
+   },
+   "top3": {
+    "obs": 1093,
+    "exp": 1144.2,
+    "ratio": 0.955,
+    "rate": 0.7824,
+    "z": -2.74,
+    "p_two_sided": 0.006184274078738186
+   }
+  },
+  {
+   "id": "K19",
+   "label": "16 頭以上",
+   "side": "レース",
+   "group": "2倍台",
+   "n": 3237,
+   "rest_n": 4119,
+   "skipped_bands": [],
+   "win_roi": 0.776,
+   "place_roi": 0.833,
+   "rest_place_roi": 0.841,
+   "avg_odds": 2.47,
+   "win": {
+    "obs": 1026,
+    "exp": 1071.1,
+    "ratio": 0.958,
+    "rate": 0.317,
+    "z": -1.27,
+    "p_two_sided": 0.20485527193140474
+   },
+   "top3": {
+    "obs": 2067,
+    "exp": 2183.9,
+    "ratio": 0.946,
+    "rate": 0.6386,
+    "z": -3.24,
+    "p_two_sided": 0.0011793866380895009
+   }
+  },
+  {
+   "id": "K19",
+   "label": "16 頭以上",
+   "side": "レース",
+   "group": "3倍以上",
+   "n": 3121,
+   "rest_n": 2358,
+   "skipped_bands": [],
+   "win_roi": 0.761,
+   "place_roi": 0.797,
+   "rest_place_roi": 0.786,
+   "avg_odds": 3.64,
+   "win": {
+    "obs": 670,
+    "exp": 712.1,
+    "ratio": 0.941,
+    "rate": 0.2147,
+    "z": -1.19,
+    "p_two_sided": 0.23322319091098215
+   },
+   "top3": {
+    "obs": 1567,
+    "exp": 1616.1,
+    "ratio": 0.97,
+    "rate": 0.5021,
+    "z": -1.15,
+    "p_two_sided": 0.2488677953245899
+   }
+  },
+  {
+   "id": "K20",
+   "label": "外国人騎手(人気の騎手の近似)",
+   "side": "人気",
+   "group": "all",
+   "n": 3584,
+   "rest_n": 13024,
+   "skipped_bands": [],
+   "win_roi": 0.76,
+   "place_roi": 0.834,
+   "rest_place_roi": 0.835,
+   "avg_odds": 2.42,
+   "win": {
+    "obs": 1260,
+    "exp": 1269.2,
+    "ratio": 0.993,
+    "rate": 0.3516,
+    "z": -0.29,
+    "p_two_sided": 0.7732043444376842,
+    "q_bh": 0.854594
+   },
+   "top3": {
+    "obs": 2375,
+    "exp": 2423.3,
+    "ratio": 0.98,
+    "rate": 0.6627,
+    "z": -1.57,
+    "p_two_sided": 0.11721829072069623,
+    "q_bh": 0.234437
+   }
+  },
+  {
+   "id": "K20",
+   "label": "外国人騎手(人気の騎手の近似)",
+   "side": "人気",
+   "group": "1倍台",
+   "n": 1146,
+   "rest_n": 2627,
+   "skipped_bands": [],
+   "win_roi": 0.778,
+   "place_roi": 0.882,
+   "rest_place_roi": 0.893,
+   "avg_odds": 1.63,
+   "win": {
+    "obs": 560,
+    "exp": 566.6,
+    "ratio": 0.988,
+    "rate": 0.4887,
+    "z": -0.33,
+    "p_two_sided": 0.7424199030206322
+   },
+   "top3": {
+    "obs": 919,
+    "exp": 938.9,
+    "ratio": 0.979,
+    "rate": 0.8019,
+    "z": -1.27,
+    "p_two_sided": 0.20328557975690248
+   }
+  },
+  {
+   "id": "K20",
+   "label": "外国人騎手(人気の騎手の近似)",
+   "side": "人気",
+   "group": "2倍台",
+   "n": 1588,
+   "rest_n": 5768,
+   "skipped_bands": [],
+   "win_roi": 0.79,
+   "place_roi": 0.823,
+   "rest_place_roi": 0.842,
+   "avg_odds": 2.41,
+   "win": {
+    "obs": 528,
+    "exp": 512.4,
+    "ratio": 1.031,
+    "rate": 0.3325,
+    "z": 0.74,
+    "p_two_sided": 0.4578763889518218
+   },
+   "top3": {
+    "obs": 1029,
+    "exp": 1050.9,
+    "ratio": 0.979,
+    "rate": 0.648,
+    "z": -1.02,
+    "p_two_sided": 0.3054430458685986
+   }
+  },
+  {
+   "id": "K20",
+   "label": "外国人騎手(人気の騎手の近似)",
+   "side": "人気",
+   "group": "3倍以上",
+   "n": 850,
+   "rest_n": 4629,
+   "skipped_bands": [],
+   "win_roi": 0.681,
+   "place_roi": 0.789,
+   "rest_place_roi": 0.793,
+   "avg_odds": 3.5,
+   "win": {
+    "obs": 172,
+    "exp": 190.2,
+    "ratio": 0.904,
+    "rate": 0.2024,
+    "z": -1.39,
+    "p_two_sided": 0.16551278783951937
+   },
+   "top3": {
+    "obs": 427,
+    "exp": 433.5,
+    "ratio": 0.985,
+    "rate": 0.5024,
+    "z": -0.41,
+    "p_two_sided": 0.6800844772310418
+   }
+  },
+  {
+   "id": "K21",
+   "label": "乗り替わりで外国人騎手に",
+   "side": "人気",
+   "group": "all",
+   "n": 2036,
+   "rest_n": 14572,
+   "skipped_bands": [],
+   "win_roi": 0.773,
+   "place_roi": 0.831,
+   "rest_place_roi": 0.835,
+   "avg_odds": 2.51,
+   "win": {
+    "obs": 703,
+    "exp": 691.7,
+    "ratio": 1.016,
+    "rate": 0.3453,
+    "z": 0.5,
+    "p_two_sided": 0.6141816215236959,
+    "q_bh": 0.806113
+   },
+   "top3": {
+    "obs": 1316,
+    "exp": 1345.7,
+    "ratio": 0.978,
+    "rate": 0.6464,
+    "z": -1.34,
+    "p_two_sided": 0.18054513473258557,
+    "q_bh": 0.329691
+   }
+  },
+  {
+   "id": "K21",
+   "label": "乗り替わりで外国人騎手に",
+   "side": "人気",
+   "group": "1倍台",
+   "n": 558,
+   "rest_n": 3215,
+   "skipped_bands": [],
+   "win_roi": 0.792,
+   "place_roi": 0.876,
+   "rest_place_roi": 0.892,
+   "avg_odds": 1.65,
+   "win": {
+    "obs": 275,
+    "exp": 270.9,
+    "ratio": 1.015,
+    "rate": 0.4928,
+    "z": 0.32,
+    "p_two_sided": 0.746634992938932
+   },
+   "top3": {
+    "obs": 441,
+    "exp": 453.6,
+    "ratio": 0.972,
+    "rate": 0.7903,
+    "z": -1.26,
+    "p_two_sided": 0.20821171408382685
+   }
+  },
+  {
+   "id": "K21",
+   "label": "乗り替わりで外国人騎手に",
+   "side": "人気",
+   "group": "2倍台",
+   "n": 921,
+   "rest_n": 6435,
+   "skipped_bands": [],
+   "win_roi": 0.805,
+   "place_roi": 0.83,
+   "rest_place_roi": 0.839,
+   "avg_odds": 2.42,
+   "win": {
+    "obs": 312,
+    "exp": 297.3,
+    "ratio": 1.05,
+    "rate": 0.3388,
+    "z": 0.97,
+    "p_two_sided": 0.3322558339001279
+   },
+   "top3": {
+    "obs": 599,
+    "exp": 607.8,
+    "ratio": 0.985,
+    "rate": 0.6504,
+    "z": -0.58,
+    "p_two_sided": 0.5652908401502555
+   }
+  },
+  {
+   "id": "K21",
+   "label": "乗り替わりで外国人騎手に",
+   "side": "人気",
+   "group": "3倍以上",
+   "n": 557,
+   "rest_n": 4922,
+   "skipped_bands": [],
+   "win_roi": 0.7,
+   "place_roi": 0.786,
+   "rest_place_roi": 0.793,
+   "avg_odds": 3.52,
+   "win": {
+    "obs": 116,
+    "exp": 123.6,
+    "ratio": 0.939,
+    "rate": 0.2083,
+    "z": -0.73,
+    "p_two_sided": 0.46297592023458756
+   },
+   "top3": {
+    "obs": 276,
+    "exp": 284.3,
+    "ratio": 0.971,
+    "rate": 0.4955,
+    "z": -0.66,
+    "p_two_sided": 0.506393386629396
+   }
+  }
+ ]
+}

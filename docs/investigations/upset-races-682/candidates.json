@@ -1,0 +1,298 @@
+{
+ "criteria": {
+  "min_n": 300,
+  "z_min": 3.0,
+  "bh_q": 0.05,
+  "tests": 72
+ },
+ "candidates": [
+  {
+   "x": "X02",
+   "x_label": "距離",
+   "level": "<=1400",
+   "direction": "over",
+   "explore": {
+    "n": 6398,
+    "obs": 2384,
+    "exp": 2214.8,
+    "fail_rate": 0.3726,
+    "exp_rate": 0.3462,
+    "ratio": 1.076,
+    "z": 3.47,
+    "q_bh": 0.0024772912738779233
+   }
+  },
+  {
+   "x": "X06",
+   "x_label": "競馬場",
+   "level": "小倉",
+   "direction": "over",
+   "explore": {
+    "n": 1163,
+    "obs": 466,
+    "exp": 408.1,
+    "fail_rate": 0.4007,
+    "exp_rate": 0.3509,
+    "ratio": 1.142,
+    "z": 3.42,
+    "q_bh": 0.00266281249577524
+   }
+  },
+  {
+   "x": "X06",
+   "x_label": "競馬場",
+   "level": "福島",
+   "direction": "over",
+   "explore": {
+    "n": 1089,
+    "obs": 445,
+    "exp": 383.0,
+    "fail_rate": 0.4086,
+    "exp_rate": 0.3517,
+    "ratio": 1.162,
+    "z": 3.79,
+    "q_bh": 0.0008341274465816677
+   }
+  },
+  {
+   "x": "X07",
+   "x_label": "重量種別",
+   "level": "ハンデ",
+   "direction": "over",
+   "explore": {
+    "n": 1004,
+    "obs": 461,
+    "exp": 360.2,
+    "fail_rate": 0.4592,
+    "exp_rate": 0.3588,
+    "ratio": 1.28,
+    "z": 5.56,
+    "q_bh": 2.1951572757669935e-07
+   }
+  },
+  {
+   "x": "X07",
+   "x_label": "重量種別",
+   "level": "馬齢",
+   "direction": "under",
+   "explore": {
+    "n": 1019,
+    "obs": 340,
+    "exp": 398.6,
+    "fail_rate": 0.3337,
+    "exp_rate": 0.3911,
+    "ratio": 0.853,
+    "z": -3.45,
+    "q_bh": 0.0024772912738779233
+   }
+  },
+  {
+   "x": "X08",
+   "x_label": "競走種別",
+   "level": "2歳",
+   "direction": "under",
+   "explore": {
+    "n": 3172,
+    "obs": 926,
+    "exp": 1162.8,
+    "fail_rate": 0.2919,
+    "exp_rate": 0.3666,
+    "ratio": 0.796,
+    "z": -5.27,
+    "q_bh": 8.700490129754431e-07
+   }
+  },
+  {
+   "x": "X08",
+   "x_label": "競走種別",
+   "level": "3歳",
+   "direction": "over",
+   "explore": {
+    "n": 5278,
+    "obs": 1803,
+    "exp": 1573.3,
+    "fail_rate": 0.3416,
+    "exp_rate": 0.2981,
+    "ratio": 1.146,
+    "z": 3.95,
+    "q_bh": 0.00046025124283928976
+   }
+  },
+  {
+   "x": "X12",
+   "x_label": "1番人気の馬齢",
+   "level": "2",
+   "direction": "under",
+   "explore": {
+    "n": 3172,
+    "obs": 926,
+    "exp": 1162.8,
+    "fail_rate": 0.2919,
+    "exp_rate": 0.3666,
+    "ratio": 0.796,
+    "z": -5.27,
+    "q_bh": 8.700490129754431e-07
+   }
+  },
+  {
+   "x": "X12",
+   "x_label": "1番人気の馬齢",
+   "level": "3",
+   "direction": "over",
+   "explore": {
+    "n": 7676,
+    "obs": 2714,
+    "exp": 2502.7,
+    "fail_rate": 0.3536,
+    "exp_rate": 0.326,
+    "ratio": 1.084,
+    "z": 3.18,
+    "q_bh": 0.005825688836490926
+   }
+  },
+  {
+   "x": "X13",
+   "x_label": "1番人気の性別",
+   "level": "牝馬",
+   "direction": "over",
+   "explore": {
+    "n": 5923,
+    "obs": 2264,
+    "exp": 1998.8,
+    "fail_rate": 0.3822,
+    "exp_rate": 0.3375,
+    "ratio": 1.133,
+    "z": 5.76,
+    "q_bh": 8.68420463113029e-08
+   }
+  },
+  {
+   "x": "X13",
+   "x_label": "1番人気の性別",
+   "level": "牡馬",
+   "direction": "under",
+   "explore": {
+    "n": 10242,
+    "obs": 3492,
+    "exp": 3943.5,
+    "fail_rate": 0.3409,
+    "exp_rate": 0.385,
+    "ratio": 0.886,
+    "z": -5.71,
+    "q_bh": 9.976431964155267e-08
+   }
+  },
+  {
+   "x": "X15",
+   "x_label": "1番人気の単勝オッズ",
+   "level": "<=1.9",
+   "direction": "under",
+   "explore": {
+    "n": 3773,
+    "obs": 724,
+    "exp": 1500.1,
+    "fail_rate": 0.1919,
+    "exp_rate": 0.3976,
+    "ratio": 0.483,
+    "z": -23.13,
+    "q_bh": 1.6234050813382402e-116
+   }
+  },
+  {
+   "x": "X15",
+   "x_label": "1番人気の単勝オッズ",
+   "level": "2.0-2.9",
+   "direction": "under",
+   "explore": {
+    "n": 7356,
+    "obs": 2510,
+    "exp": 2705.9,
+    "fail_rate": 0.3412,
+    "exp_rate": 0.3678,
+    "ratio": 0.928,
+    "z": -3.56,
+    "q_bh": 0.0018750223009963722
+   }
+  },
+  {
+   "x": "X15",
+   "x_label": "1番人気の単勝オッズ",
+   "level": "3.0-3.9",
+   "direction": "over",
+   "explore": {
+    "n": 4298,
+    "obs": 1976,
+    "exp": 1401.6,
+    "fail_rate": 0.4597,
+    "exp_rate": 0.3261,
+    "ratio": 1.41,
+    "z": 15.64,
+    "q_bh": 8.67926149850494e-54
+   }
+  },
+  {
+   "x": "X15",
+   "x_label": "1番人気の単勝オッズ",
+   "level": ">=4.0",
+   "direction": "over",
+   "explore": {
+    "n": 1181,
+    "obs": 715,
+    "exp": 409.7,
+    "fail_rate": 0.6054,
+    "exp_rate": 0.3469,
+    "ratio": 1.745,
+    "z": 17.67,
+    "q_bh": 2.389108462151833e-68
+   }
+  },
+  {
+   "x": "X16",
+   "x_label": "頭数(出走予定)",
+   "level": "<=9",
+   "direction": "under",
+   "explore": {
+    "n": 1253,
+    "obs": 293,
+    "exp": 475.2,
+    "fail_rate": 0.2338,
+    "exp_rate": 0.3793,
+    "ratio": 0.617,
+    "z": -10.23,
+    "q_bh": 2.7374641553626037e-23
+   }
+  },
+  {
+   "x": "X16",
+   "x_label": "頭数(出走予定)",
+   "level": "10-12",
+   "direction": "under",
+   "explore": {
+    "n": 3094,
+    "obs": 974,
+    "exp": 1167.8,
+    "fail_rate": 0.3148,
+    "exp_rate": 0.3774,
+    "ratio": 0.834,
+    "z": -6.48,
+    "q_bh": 1.1256552915048561e-09
+   }
+  },
+  {
+   "x": "X16",
+   "x_label": "頭数(出走予定)",
+   "level": ">=16",
+   "direction": "over",
+   "explore": {
+    "n": 7757,
+    "obs": 3028,
+    "exp": 2482.1,
+    "fail_rate": 0.3904,
+    "exp_rate": 0.32,
+    "ratio": 1.22,
+    "z": 9.27,
+    "q_bh": 2.663627820664327e-19
+   }
+  }
+ ]
+}

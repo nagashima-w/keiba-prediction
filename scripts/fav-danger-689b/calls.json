@@ -1,0 +1,40 @@
+{
+  "note": "BASHIRA get_stats の呼び出しの仕様(#689 2回目)。base_filters と band・period の filters を全呼び出しに足す。metrics は共通。",
+  "base_filters": {"win_odds_rank": 1, "surface": ["芝", "ダート"], "local_overseas_type": "JRA"},
+  "bands": {
+    "b1": {"win_odds": {"gte": 1.0, "lte": 1.4}},
+    "b2": {"win_odds": {"gte": 1.5, "lte": 1.9}},
+    "b3": {"win_odds": {"gte": 2.0, "lte": 2.9}},
+    "b4": {"win_odds": {"gte": 3.0}}
+  },
+  "periods": {
+    "explore": {"race_meeting_date": {"gte": "2016-01-01", "lte": "2020-12-31"}},
+    "confirm": {"race_meeting_date": {"gte": "2021-01-01", "lte": "2026-11-03"}}
+  },
+  "metrics": [
+    {"agg": "count", "where": {"official_result": 1}, "as": "wins"},
+    {"agg": "count", "where": {"official_result": {"lte": 3}}, "as": "top3"},
+    {"agg": "sum", "field": "win_payout", "as": "win_return"},
+    {"agg": "sum", "field": "place_payout", "as": "place_return"},
+    {"agg": "avg", "field": "win_odds", "as": "avg_odds"}
+  ],
+  "calls": {
+    "B": {"dims": [], "filters": {}},
+    "DAYS_LONG": {"dims": [], "filters": {"days_since_last_race": {"gte": 181}}},
+    "DAYS_SHORT": {"dims": [], "filters": {"days_since_last_race": {"lte": 21}}},
+    "D1": {"dims": ["prev_surface", "surface"], "filters": {}},
+    "DIST_UP": {"dims": [], "filters": {"distance_change": {"gte": 400}}},
+    "WT_DOWN": {"dims": [], "filters": {"horse_weight_difference_with_previous_race": {"lte": -10}}},
+    "SLOW": {"dims": [], "filters": {}, "past_runs": {"runs": 5, "agg": "count", "where": {"first_corner_position": {"gte": 10}, "scheduled_horse_count": {"gte": 14}}, "value": {"gte": 2}}},
+    "FRONT": {"dims": [], "filters": {}, "past_runs": {"runs": 1, "agg": "count", "where": {"third_corner_position": {"lte": 2}}, "value": {"gte": 1}}},
+    "PREV4": {"dims": [], "filters": {"prev_official_result": {"gte": 4}}},
+    "PREV1": {"dims": [], "filters": {"prev_official_result": 1}},
+    "PREV23": {"dims": [], "filters": {"prev_official_result": {"gte": 2, "lte": 3}}},
+    "CAR2": {"dims": [], "filters": {"career_starts": {"lte": 2}}},
+    "D2": {"dims": ["race_type", "bracket_number"], "filters": {}},
+    "D3": {"dims": ["weight_type", "track_condition"], "filters": {}},
+    "D4": {"dims": ["race_track", "horse_sex"], "filters": {}},
+    "H16": {"dims": [], "filters": {"scheduled_horse_count": {"gte": 16}}},
+    "D5": {"dims": ["jockey_foreigner", "is_jockey_change"], "filters": {}}
+  }
+}
