@@ -156,7 +156,7 @@ describe("一覧の最終更新(Issue #572)", () => {
     }
   });
 
-  it("「更新」: 取り直しの間は消えて『読み込み中…』、届いたら取り直しが成功した時刻(10:00)になる", async () => {
+  it("「更新」: 取り直しの間は前の時刻(09:00)が残り(Issue #576)、届いたら取り直しが成功した時刻(10:00)になる", async () => {
     const h = harness("admin", `#date=${DATE}&venue=central`);
     h.app.start();
     await h.app.whenIdle();
@@ -165,14 +165,14 @@ describe("一覧の最終更新(Issue #572)", () => {
     const races = deferred<Resp>();
     h.responders.set(RACES_CENTRAL, () => races.promise);
     refreshButton(h).on!.click!();
-    expect(h.updated()).toBeNull();
-    expect(textOf(byClass(h.tree(), "empty")[0]!)).toBe("読み込み中…");
+    expect(h.updated()).toBe("最終更新 09:00");
+    expect(byClass(h.tree(), "empty")).toHaveLength(0);
     races.resolve(ok(racesBody("central", [RACE_ID])));
     await h.app.whenIdle();
     expect(h.updated()).toBe("最終更新 10:00");
   });
 
-  it("「更新」が失敗したら、最終更新は出ない(エラーの注記だけ。前の時刻は残さない)", async () => {
+  it("「更新」が失敗したら、最終更新は前の時刻(09:00)のまま残る(Issue #576。一覧の注記は出る。エラー扱いの注記ではない)", async () => {
     const h = harness("admin", `#date=${DATE}&venue=central`);
     h.app.start();
     await h.app.whenIdle();
@@ -180,8 +180,8 @@ describe("一覧の最終更新(Issue #572)", () => {
     h.responders.set(RACES_CENTRAL, async () => fail503);
     refreshButton(h).on!.click!();
     await h.app.whenIdle();
-    expect(h.updated()).toBeNull();
-    expect(byClass(h.tree(), "notice").some((n) => String(n.attrs?.["class"]).includes("error"))).toBe(true);
+    expect(h.updated()).toBe("最終更新 09:00");
+    expect(byClass(h.tree(), "notice").map(textOf).some((t) => t.includes("更新できませんでした"))).toBe(true);
   });
 
   it("初回の一覧が失敗したら出ない", async () => {

@@ -125,6 +125,9 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
   // 板(`status`。race_id なし)は開催日ごと。行・通し番号・オーバーレイ・完了の検知は board-state.ts。手動の取得(開いたとき・「更新」)の失敗・取得中だけをここに持つ。
   const store = createBoardStore();
   const boardErrors = new Map<string, string>();
+  /** 「更新」の取り直しに失敗した理由(Issue #576。前の一覧・板は残している)。一覧は (開催日, 区分)・板は開催日ごと。次の「更新」を押した時点で消す。 */
+  const listRefreshErrors = new Map<string, string>();
+  const boardRefreshErrors = new Map<string, string>();
   const boardInflight = new Map<string, Promise<void>>();
   /**
    * 追跡で、実行中の行が無くても取る開催日(開催日 → 登録時の通し番号)。202 の本文が想定外だったとき・手動の更新で板を捨てたときに入れる。
@@ -171,7 +174,10 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
   function listSource(date: string, venue: Venue): ListSource {
     const key = listKey(date, venue);
     const cached = races.get(key);
-    if (cached !== undefined) return { kind: "ready", races: cached };
+    if (cached !== undefined) {
+      const notice = listRefreshErrors.get(key);
+      return { kind: "ready", races: cached, ...(raceInflight.has(key) ? { refreshing: true } : {}), ...(notice === undefined ? {} : { refreshNotice: notice }) };
+    }
     const error = raceErrors.get(key);
     if (error !== undefined) return { kind: "error", message: error };
     return { kind: "loading" };
@@ -186,7 +192,10 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
 
   function boardSource(date: string): BoardSource {
     const rows = store.effectiveRows(date);
-    if (rows !== null) return { kind: "ready", rows };
+    if (rows !== null) {
+      const notice = boardRefreshErrors.get(date);
+      return { kind: "ready", rows, ...(notice === undefined ? {} : { notice }) };
+    }
     const error = boardErrors.get(date);
     if (error !== undefined) return { kind: "error", message: error };
     return { kind: "none" };
@@ -428,20 +437,55 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     deps.onChange();
   }
 
+  /**
+   * 一覧の「更新」(Issue #576)。**キャッシュがあるキーは捨てずに取り直す**: 取り直しの間も前の一覧・バッジ・最終更新を出し、
+   * 失敗したら前の内容を残して注記を足し、成功したら置き換える。板を捨てないので、実行中の日は追跡の対象に残る(`forceDates` で救わない)。
+   * キャッシュが無いキー(読み込み中・最初の取得の失敗)は、これまでどおり失敗を消して取り直す。別の (開催日, 区分) のキャッシュは見ない。
+   */
   function refreshList(date: string, venue: Venue): void {
     // 取得中は何もしない(同じものを同時に 2 本取らない。ボタンも disabled)。
     if (raceInflight.has(listKey(date, venue)) || boardInflight.has(date)) return;
     const key = listKey(date, venue);
-    races.delete(key);
-    racesAt.delete(key);
-    raceErrors.delete(key);
-    // 板を捨てると、取得が届くまで「実行中の日」が見えなくなり、追跡が「全部終わった」と誤って止まる。実行中だった日は、取得が成功するまで追跡の対象に残す。
-    if (store.activeDates().includes(date)) forceDates.set(date, store.nextSeq());
-    store.clear(date);
-    boardAt.delete(date);
-    boardErrors.delete(date);
-    ensureList(date, venue);
+    listRefreshErrors.delete(key);
+    boardRefreshErrors.delete(date);
+    if (races.has(key)) softRefreshRaces(date, venue);
+    else {
+      raceErrors.delete(key);
+      loadRaces(date, venue);
+    }
+    if (store.has(date)) softRefreshBoard(date);
+    else {
+      boardAt.delete(date);
+      boardErrors.delete(date);
+      loadBoard(date);
+    }
     deps.onChange();
+  }
+
+  function softRefreshRaces(date: string, venue: Venue): void {
+    const key = listKey(date, venue);
+    const promise = fetchRaces(deps.fetch, date, venue).then((result) => {
+      raceInflight.delete(key);
+      if (result.ok) {
+        races.set(key, result.races);
+        racesAt.set(key, deps.now().getTime());
+      } else listRefreshErrors.set(key, failureMessage(result.error));
+      deps.onChange();
+    });
+    raceInflight.set(key, promise);
+  }
+
+  function softRefreshBoard(date: string): void {
+    const seq = store.nextSeq();
+    const promise = fetchBoard(deps.fetch, date).then((result) => {
+      boardInflight.delete(date);
+      if (result.ok) {
+        applyBoard(date, result.rows, seq); // 追跡の応答のほうが新しければ捨てられる(失敗ではない)
+        ensureTracking();
+      } else boardRefreshErrors.set(date, failureMessage(result.error));
+      deps.onChange();
+    });
+    boardInflight.set(date, promise);
   }
 
   // ---- 追跡 ----

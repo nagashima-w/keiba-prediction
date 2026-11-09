@@ -448,22 +448,21 @@ describe("追跡", () => {
     expect(h.count(BOARD_URL), "強制の対象が残っているので、3 秒後にもう 1 回取る").toBe(2);
   });
 
-  it("一覧の「更新」より前に出した古いポーリングの応答が、あとから届いても、実行中だった日は追跡の対象に残る(板の取り直しが届くまで)", async () => {
+  it("一覧の「更新」より前に出した古いポーリングの応答が先に届いて追跡が止まりかけても、取り直しが実行中の行を持って届けば追跡は続く(Issue #576。板は捨てない)", async () => {
     const h = await started(LIST_HASH, (x) => (x.rows = [jrow(RACE_ID, "morning", "queued")]));
     const poll = holdOnce(h, `GET ${BOARD_URL}`);
     await h.timers.advance(3000);
     expect(h.count(BOARD_URL), "前提: 一覧を開いたとき 1 回 + 古いポーリングが保留されている").toBe(2);
     const manual = holdOnce(h, `GET ${BOARD_URL}`);
-    click(refreshButton(h)); // 実行中の日を強制の対象にして、板を捨てて取り直す
+    click(refreshButton(h));
     await h.settle();
     expect(h.count(BOARD_URL), "前提: 手動の取り直しが保留されている").toBe(3);
-    h.rows = [jrow(RACE_ID, "morning", "failed", { error: "x" })]; // 実行中の行の無い板(失敗。完了ではない)
-    poll.resolve(ok({ ok: true, kaisai_date: DATE, races: h.rows }));
+    poll.resolve(ok({ ok: true, kaisai_date: DATE, races: [jrow(RACE_ID, "morning", "failed", { error: "x" })] })); // 実行中の行の無い板(古い)
+    await h.settle();
+    manual.resolve(ok({ ok: true, kaisai_date: DATE, races: [jrow(RACE_ID, "morning", "queued")] })); // 新しい取り直しは、まだ実行中
     await h.settle();
     await h.timers.advance(3000);
-    expect(h.count(BOARD_URL), "強制の対象が残っているので、3 秒後に追跡がもう 1 回取る").toBe(4);
-    manual.resolve(ok({ ok: true, kaisai_date: DATE, races: h.rows }));
-    await h.settle();
+    expect(h.count(BOARD_URL), "取り直しが実行中の行を持って届いたので、3 秒後に追跡がもう 1 回取る").toBe(4);
   });
 });
 
@@ -635,5 +634,202 @@ describe("配線: レース画面の見出しは一覧の行から作り、一�
     expect(h.count(NAR_RACES_URL), "「更新」は地方の一覧を取り直す").toBe(2);
     expect(h.count(BOARD_URL), "板も取り直す").toBe(2);
     expect(h.gets().filter((u) => u.includes("venue=central")), "地方の一覧の「更新」が中央の一覧を取らない").toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Issue #576: 一覧の「更新」は前の一覧とバッジを残す(取り直しの間も、失敗したときも)
+// ---------------------------------------------------------------------------------------------
+describe("一覧の「更新」は前の内容を残す(Issue #576)", () => {
+  const NAR_LIST_HASH2 = `#date=${DATE}&venue=nar`;
+  const NAR_RACES_URL2 = `/api/races?kaisai_date=${DATE}&venue=nar`;
+  const listRow = (raceId: string, name: string) => ({ ...raceRow(raceId, name), start_time: "20:00" });
+  const racesOf = (...rows: unknown[]) => ok({ ok: true, kaisai_date: DATE, venue: "central", races: rows });
+  const raceLinkNames = (h: Harness): string[] => byClass(h.tree(), "race").map((n) => textOf(n));
+  const badgeTexts = (h: Harness): string[] => byClass(h.tree(), "badge").map((n) => textOf(n));
+  const updated = (h: Harness): string | null => {
+    const found = byClass(h.tree(), "list-updated");
+    return found.length === 0 ? null : textOf(found[0]!);
+  };
+  const noticeTexts = (h: Harness): string[] => byClass(h.tree(), "notice").map((n) => textOf(n));
+  const doneRows = (): JsonRow[] => [jrow(RACE_ID, "morning", "done", { analysis_id: 1 }), jrow(RACE_ID, "pre_race", "failed", { error: "x" })];
+
+  it("取り直しの間も、前の一覧・バッジ・「最終更新」が残る(ボタンは読み込み中。「読み込み中…」の段落は出さない)", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = doneRows()));
+    const before = updated(h);
+    expect(before, "前提: 最終更新が出ている").toMatch(/^最終更新 /);
+    const beforeNames = raceLinkNames(h);
+    const beforeBadges = badgeTexts(h);
+    expect(beforeNames.length, "前提: 一覧の行がある").toBeGreaterThan(0);
+    expect(beforeBadges.length, "前提: バッジがある").toBeGreaterThan(0);
+    await h.timers.advance(60_000);
+    const races = holdOnce(h, `GET ${RACES_URL}`);
+    const board = holdOnce(h, `GET ${BOARD_URL}`);
+    click(refreshButton(h));
+    expect(h.count(RACES_URL), "前提: 取り直しが走った").toBe(2);
+    expect(refreshButton(h).attrs?.["disabled"]).toBe(true);
+    expect(textOf(refreshButton(h))).toBe("読み込み中…");
+    expect(raceLinkNames(h)).toEqual(beforeNames);
+    expect(badgeTexts(h)).toEqual(beforeBadges);
+    expect(updated(h)).toBe(before);
+    expect(byClass(h.tree(), "empty"), "キャッシュがあるので『読み込み中…』の段落は出さない").toHaveLength(0);
+    races.resolve(racesOf(listRow(RACE_ID, "福島民報杯")));
+    board.resolve(ok({ ok: true, kaisai_date: DATE, races: doneRows() }));
+    await h.settle();
+  });
+
+  it("板が先に届いても、一覧の取り直しが終わるまでボタンは読み込み中のまま(二重に押せない)", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = doneRows()));
+    const races = holdOnce(h, `GET ${RACES_URL}`);
+    click(refreshButton(h));
+    await h.settle();
+    expect(refreshButton(h).attrs?.["disabled"], "板は届いたが、一覧がまだ").toBe(true);
+    races.resolve(racesOf(listRow(RACE_ID, "福島民報杯")));
+    await h.settle();
+    expect(refreshButton(h).attrs?.["disabled"]).toBe(false);
+  });
+
+  it("成功したら新しい一覧とバッジに置き換わり、「最終更新」は取り直しの時刻になる。注記は出ない", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = [jrow(RACE_ID, "morning", "failed", { error: "x" })]));
+    const before = updated(h);
+    await h.timers.advance(5 * 60_000);
+    replyOnce(h, `GET ${RACES_URL}`, racesOf(listRow(RACE_ID, "福島民報杯"), listRow(OTHER_RACE_ID, "新しい12R")));
+    h.rows = doneRows();
+    click(refreshButton(h));
+    await h.settle();
+    expect(raceLinkNames(h).join("|")).toContain("新しい12R");
+    expect(badgeTexts(h)).toContain("事前: 完了");
+    expect(updated(h)).not.toBe(before);
+    expect(updated(h)).toMatch(/^最終更新 /);
+    expect(noticeTexts(h).join("|")).not.toContain("更新できませんでした");
+    expect(refreshButton(h).attrs?.["disabled"]).toBe(false);
+  });
+
+  it("一覧の取り直しに失敗したら、前の一覧・バッジ・「最終更新」を残し、失敗の注記を出す(サーバの文面は出さない)。次に押した時点で注記は消え、また失敗したら新しく出る", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = doneRows()));
+    const before = updated(h);
+    const beforeNames = raceLinkNames(h);
+    const beforeBadges = badgeTexts(h);
+    await h.timers.advance(5 * 60_000);
+    replyOnce(h, `GET ${RACES_URL}`, fail503());
+    click(refreshButton(h));
+    await h.settle();
+    expect(raceLinkNames(h)).toEqual(beforeNames);
+    expect(badgeTexts(h)).toEqual(beforeBadges);
+    expect(updated(h)).toBe(before);
+    const notes = noticeTexts(h).filter((t) => t.includes("更新できませんでした"));
+    expect(notes, "失敗の注記がちょうど 1 つ").toHaveLength(1);
+    expect(notes[0]).toContain("前の一覧を表示しています");
+    expect(notes[0]).toContain("サーバでエラーが起きました");
+    expect(h.text()).not.toContain("サーバの文面");
+    expect(refreshButton(h).attrs?.["disabled"]).toBe(false);
+    // 次に押した時点で注記は消える(取り直しの間)
+    const held = holdOnce(h, `GET ${RACES_URL}`);
+    click(refreshButton(h));
+    expect(noticeTexts(h).join("|")).not.toContain("更新できませんでした");
+    held.resolve(fail503());
+    await h.settle();
+    expect(noticeTexts(h).filter((t) => t.includes("更新できませんでした"))).toHaveLength(1);
+    expect(raceLinkNames(h)).toEqual(beforeNames);
+  });
+
+  it("一覧は成功・板は失敗: 一覧は置き換わり、バッジは前のまま残って板の注記が出る。「最終更新」は古い板の時刻のまま", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = doneRows()));
+    const before = updated(h);
+    const beforeBadges = badgeTexts(h);
+    await h.timers.advance(5 * 60_000);
+    replyOnce(h, `GET ${RACES_URL}`, racesOf(listRow(RACE_ID, "福島民報杯"), listRow(OTHER_RACE_ID, "新しい12R")));
+    replyOnce(h, `GET ${BOARD_URL}`, fail503());
+    click(refreshButton(h));
+    await h.settle();
+    expect(raceLinkNames(h).join("|")).toContain("新しい12R");
+    expect(beforeBadges, "前提: 前のバッジに『事前: 完了』がある").toContain("事前: 完了");
+    expect(badgeTexts(h), "前のバッジが残る(失敗で消えない)").toContain("事前: 完了");
+    expect(updated(h)).toBe(before);
+    const notes = noticeTexts(h).filter((t) => t.includes("実行状態(バッジ)を取得できませんでした"));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("前の状態を表示しています");
+    expect(h.text()).not.toContain("サーバの文面");
+  });
+
+  it("板の取り直しに失敗しても、追跡は止まらない(次の周期で取る)。取り直しの間も同じ", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = [jrow(RACE_ID, "morning", "queued")]));
+    expect(h.count(BOARD_URL), "前提: 一覧を開いたときの板は 1 回").toBe(1);
+    const manual = holdOnce(h, `GET ${BOARD_URL}`);
+    click(refreshButton(h));
+    await h.settle();
+    expect(h.count(BOARD_URL), "前提: 取り直しが保留されている").toBe(2);
+    await h.timers.advance(3000);
+    expect(h.count(BOARD_URL), "取り直しの最中も追跡が取る").toBe(3);
+    manual.resolve(fail503());
+    await h.settle();
+    await h.timers.advance(3000);
+    expect(h.count(BOARD_URL), "取り直しが失敗したあとも追跡が続く").toBe(4);
+  });
+
+  it("取り直しが成功した前後でも、追跡は続く(実行中の行を持って届く)", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = [jrow(RACE_ID, "morning", "queued")]));
+    click(refreshButton(h));
+    await h.settle();
+    expect(h.count(BOARD_URL), "前提: 取り直しで板が 2 回目").toBe(2);
+    await h.timers.advance(3000);
+    expect(h.count(BOARD_URL)).toBe(3);
+  });
+
+  it("古い追跡の応答が、あとから届いても、新しい取り直しの結果を上書きしない", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = [jrow(RACE_ID, "morning", "queued")]));
+    const poll = holdOnce(h, `GET ${BOARD_URL}`);
+    await h.timers.advance(3000);
+    expect(h.count(BOARD_URL), "前提: 古い追跡が保留されている").toBe(2);
+    click(refreshButton(h));
+    await h.settle();
+    expect(h.count(BOARD_URL), "前提: 取り直しが済んだ").toBe(3);
+    h.rows = [jrow(RACE_ID, "morning", "done", { analysis_id: 1 })];
+    click(refreshButton(h));
+    await h.settle();
+    expect(badgeTexts(h)).toContain("事前: 完了");
+    poll.resolve(ok({ ok: true, kaisai_date: DATE, races: [jrow(RACE_ID, "morning", "queued")] })); // 古い応答(待ち)
+    await h.settle();
+    expect(badgeTexts(h), "古い応答で『待ち』に戻らない").toContain("事前: 完了");
+    expect(badgeTexts(h)).not.toContain("事前: 待ち");
+  });
+
+  it("取り直しの最中に別の区分へ切り替えたら、前の一覧を出さない(空から取る)。区分を戻すと取り直しの結果が出る", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = doneRows()));
+    const races = holdOnce(h, `GET ${RACES_URL}`);
+    click(refreshButton(h));
+    h.responders.set(`GET ${NAR_RACES_URL2}`, async () => ok({ ok: true, kaisai_date: DATE, venue: "nar", races: [] }));
+    const narRaces = deferred<Resp>();
+    h.responders.set(`GET ${NAR_RACES_URL2}`, () => narRaces.promise);
+    h.go(NAR_LIST_HASH2);
+    expect(raceLinkNames(h), "地方の一覧に中央の行を出さない").toEqual([]);
+    expect(textOf(byClass(h.tree(), "empty")[0]!)).toBe("読み込み中…");
+    expect(updated(h)).toBeNull();
+    narRaces.resolve(ok({ ok: true, kaisai_date: DATE, venue: "nar", races: [] }));
+    races.resolve(racesOf(listRow(RACE_ID, "福島民報杯"), listRow(OTHER_RACE_ID, "戻った12R")));
+    await h.settle();
+    h.go(LIST_HASH);
+    expect(raceLinkNames(h).join("|")).toContain("戻った12R");
+  });
+
+  it("開催日を切り替えたときも、前の日の一覧を出さない", async () => {
+    const h = await started(LIST_HASH, (x) => (x.rows = doneRows()));
+    const d2 = deferred<Resp>();
+    h.responders.set(`GET /api/races?kaisai_date=${DATE2}&venue=central`, () => d2.promise);
+    h.responders.set(`GET ${BOARD_URL2}`, async () => ok({ ok: true, kaisai_date: DATE2, races: [] }));
+    h.go(`#date=${DATE2}&venue=central`);
+    expect(raceLinkNames(h)).toEqual([]);
+    expect(updated(h)).toBeNull();
+    d2.resolve(ok({ ok: true, kaisai_date: DATE2, venue: "central", races: [] }));
+    await h.settle();
+  });
+
+  it("キャッシュの無い状態(最初の取得が失敗)からの「更新」は、これまでどおり取り直し、成功したら一覧が出る", async () => {
+    const h = await started(LIST_HASH, (x) => replyOnce(x, `GET ${RACES_URL}`, fail503()));
+    expect(raceLinkNames(h)).toEqual([]);
+    click(refreshButton(h));
+    await h.settle();
+    expect(raceLinkNames(h).length).toBeGreaterThan(0);
+    expect(byClass(h.tree(), "notice").filter((n) => String(n.attrs?.["class"]).includes("error"))).toHaveLength(0);
   });
 });
