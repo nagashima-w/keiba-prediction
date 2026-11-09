@@ -12,6 +12,7 @@ export { RaceArchiveFetchDO } from "./race-archive-fetch-do";
 export { RaceArchiveRunsDO } from "./race-archive-runs-do";
 export { RaceMarketEdgeDO } from "./market-edge-do";
 export { JraHorseBackfillDO } from "./jra-horse-backfill-do";
+export { JraBlinkerBackfillDO } from "./jra-blinker-backfill-do";
 export { VerifyReportDO } from "./verify-do";
 export { DailyReportDO } from "./daily-report-do";
 export { PriorExportDO } from "./prior-export-do";

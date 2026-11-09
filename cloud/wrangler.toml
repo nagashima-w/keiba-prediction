@@ -5,7 +5,7 @@
 #   ユーザーがダッシュボードで登録する。secret は wrangler deploy で消えない
 #   (vars にするとダッシュボードの値は次のデプロイで上書きされる)。
 #   したがって認証の設定には `secrets.required` を置かず、[vars] にも置かない(未設定なら Worker が全リクエストに 403 を返す)。
-#   [vars] に置いてよいのは、過去の結果の取得の時間帯・間隔を変える RACE_ARCHIVE_* の 3 つと、#642 の 1 晩の上限、JRA のオッズを使うか(JRA_ODDS_ENABLED。Issue #675)だけ(下の [vars])。
+#   [vars] に置いてよいのは、過去の結果の取得の時間帯・間隔を変える RACE_ARCHIVE_* の 3 つと、#642 の 1 晩の上限、JRA のオッズを使うか(JRA_ODDS_ENABLED。Issue #675)、過去のブリンカーの埋め戻しを止めるか(JRA_BLINKER_BACKFILL_ENABLED。Issue #698)だけ(下の [vars])。
 name = "keiba-cloud"
 main = "src/worker.ts"
 compatibility_date = "2026-10-01"
@@ -121,6 +121,9 @@ RACE_ARCHIVE_SKIP_RACE_DAY = "0"
 RACE_ARCHIVE_MIN_INTERVAL_MS = "20000"
 RACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"
 JRA_ODDS_ENABLED = "1"
+# 過去のレースのブリンカー着用の埋め戻し(Issue #698)は**止めて公開する**("0")。馬ごとの頁の埋め戻し(#697)の取得が終わってから、メインが "1" に変えて公開する(ユーザーの決定)。
+# 文字列 "0" だけが止める(未設定でも動く)。★binding と同じ名前〈JRA_BLINKER_BACKFILL〉の var は衝突するので使わない。
+JRA_BLINKER_BACKFILL_ENABLED = "0"
 
 # 過去の結果(R2 の読み取り結果)を horse_runs に入れる毎晩の変換の Durable Object(Issue #590〈#549-B3-2〉)。`idFromName("main")` の単一インスタンス。
 # JST 1:00〜8:30 の間だけ、目録(race_archive)の未変換のレースを 1 ステップ最大 20 件、R2 から読んで horse_runs に書く(1 晩の書き込み行数の既定は 3 万行)。
@@ -148,6 +151,14 @@ class_name = "RaceMarketEdgeDO"
 [[durable_objects.bindings]]
 name = "JRA_HORSE_BACKFILL"
 class_name = "JraHorseBackfillDO"
+
+# JRA の過去の結果の頁から、2021-01〜2026-11-06 の中央のレースでブリンカーを着けていた馬を取って `past_blinker_horses`(取り終えたレースは `past_blinker_races`)に貯める Durable Object(Issue #698。親は #695)。`idFromName("main")` の単一インスタンス。
+# **JST 18:00〜翌 8:00 だけ**、1 回の起床で最大 40 本(頁の種類を問わない)を、3 秒以上あけて直列で取る(JRA の公式サイトだけ。netkeiba にも gate にも出ない)。1 日(JST)の書き込みは 2 つの表の合計で 14,000 行まで。
+# 最後まで進んだら止まる。cron の `scheduled`(21 時・23 時)が kick してアラームを張る(新しい cron は足さない)。
+# 止める・行数を下げる var: `JRA_BLINKER_BACKFILL_ENABLED`("0" で止める。上の [vars] で "0" にして公開している)・`JRA_BLINKER_BACKFILL_DAILY_ROWS`(任意。1 日の書き込み行数を下げる)。★binding と同じ名前〈JRA_BLINKER_BACKFILL〉の var は衝突するので使わない。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "JRA_BLINKER_BACKFILL"
+class_name = "JraBlinkerBackfillDO"
 
 [[migrations]]
 tag = "v1"
@@ -221,6 +232,11 @@ new_sqlite_classes = ["RaceMarketEdgeDO"]
 [[migrations]]
 tag = "v14"
 new_sqlite_classes = ["JraHorseBackfillDO"]
+
+# 追加だけ(v1〜v14 には触れない)。Issue #698。
+[[migrations]]
+tag = "v15"
+new_sqlite_classes = ["JraBlinkerBackfillDO"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。

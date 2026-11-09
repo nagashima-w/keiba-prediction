@@ -47,6 +47,10 @@ export const HERE: Record<string, PlanEntry> = {
     "jra-horse-repository.ts::LIST_HORSE_IDS_SQL",
     "jra-horse-repository.ts::FILTER_MISSING_SQL",
     "jra-horse-repository.ts::INSERT_HORSE_PROFILES_SQL",
+    // 過去のレースのブリンカー着用の保存と、取り終えたレースの確認(Issue #698)。json_each から past_blinker_races の主キーの引き・json_each からの INSERT 2 本。
+    "past-blinker-repository.ts::FILTER_DONE_SQL",
+    "past-blinker-repository.ts::INSERT_BLINKER_HORSES_SQL",
+    "past-blinker-repository.ts::INSERT_RACES_SQL",
     "monthly-report-repository.ts::INSERT_MONTHLY_SQL",
     "monthly-report-repository.ts::REPLACE_MONTHLY_SQL",
     "prior-export-store.ts::SELECT_R2_USAGE_SQL",

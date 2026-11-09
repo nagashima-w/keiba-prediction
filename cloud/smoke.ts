@@ -159,6 +159,8 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
     "--var", "RACE_MARKET_EDGE_NIGHTLY_LIMIT:0",
     // Issue #697: 馬ごとの頁の埋め戻しも止める(`JRA_HORSE_BACKFILL_ENABLED=0`。★var の名前を DO の binding の名前〈`JRA_HORSE_BACKFILL`〉にしない)。本番のクラスは何もしない(JRA の公式サイトと D1 だけの DO)。
     "--var", "JRA_HORSE_BACKFILL_ENABLED:0",
+    // Issue #698: 過去のレースのブリンカー着用の埋め戻しも止める(`JRA_BLINKER_BACKFILL_ENABLED=0`。★var の名前を DO の binding の名前〈`JRA_BLINKER_BACKFILL`〉にしない)。本番の toml でも "0" だが、smoke の構成では toml の [vars] より --var が優先されるので明示する。
+    "--var", "JRA_BLINKER_BACKFILL_ENABLED:0",
     // Issue #675: JRA のオッズを使わない(`JRA_ODDS_ENABLED=0`)。smoke(CI でも走る)が、中央の発走前の分析で本物の JRA に出ないことを保証する(取得口を DO に渡さない)。`scripts/test/cloud-config-guard.test.ts` が、vars() にこの指定があることを固定する。
     "--var", "JRA_ODDS_ENABLED:0",
     "--var", `ACCESS_TEAM_NAME:${TEAM}`,

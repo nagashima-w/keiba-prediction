@@ -31,7 +31,7 @@
  * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。計画・既存の結果の依頼を失敗させない。
  */
 import { jstKaisaiDate, planTargetDate, scheduledRunKind, type ScheduledRunKind } from "./auto-run-plan";
-import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike, RaceMarketEdgeNamespaceLike, JraHorseBackfillNamespaceLike } from "./handler";
+import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike, RaceMarketEdgeNamespaceLike, JraHorseBackfillNamespaceLike, JraBlinkerBackfillNamespaceLike } from "./handler";
 import { DAILY_REPORT_NAME } from "./daily-report-core";
 import { D1ReportStore } from "./daily-report-repository";
 import { MONTHLY_REPORT_NAME } from "./monthly-report-core";
@@ -41,6 +41,7 @@ import { classifyNotifyError, createDiscordNotifier, webhookStatus } from "./not
 import type { DiscordFetchLike } from "../../packages/core/src/notify/discord";
 import { RACE_ARCHIVE_FETCH_NAME } from "./race-archive-fetch-core";
 import { RACE_MARKET_EDGE_NAME } from "./market-edge-core";
+import { JRA_BLINKER_BACKFILL_NAME } from "./jra-blinker-backfill-core";
 import { JRA_HORSE_BACKFILL_NAME } from "./jra-horse-backfill-core";
 import { RACE_ARCHIVE_RUNS_NAME } from "./race-archive-runs-core";
 import { RESULT_BACKFILL_NAME } from "./result-backfill-core";
@@ -66,6 +67,7 @@ export interface ScheduledEnv {
   /** 騎手・調教師の指標の DO(Issue #642)。無い構成では kick を呼ばない。 */
   readonly RACE_MARKET_EDGE?: RaceMarketEdgeNamespaceLike;
   readonly JRA_HORSE_BACKFILL?: JraHorseBackfillNamespaceLike;
+  readonly JRA_BLINKER_BACKFILL?: JraBlinkerBackfillNamespaceLike;
   /** 日報の DO(Issue #235)。無い構成では日報の取り残しの補完をしない。 */
   readonly DAILY_REPORT?: DailyReportNamespaceLike;
   /** 月報の DO(Issue #265・#279)。無い構成では月報を依頼しない。 */
@@ -208,6 +210,15 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
         await env.JRA_HORSE_BACKFILL.get(env.JRA_HORSE_BACKFILL.idFromName(JRA_HORSE_BACKFILL_NAME)).kick();
       } catch (error) {
         log(`scheduled: failed class=jra-horse-backfill-kick-failed error=${errorKind(error)}`, "error");
+      }
+    })(),
+    // 過去のレースのブリンカー着用の埋め戻しの起動(Issue #698)。アラームが無ければ張るだけ(取得は JST 18:00〜翌 8:00 に、DO が JRA の公式サイトと D1 だけで行う。netkeiba には出ない。var で止めている間は何もしない)。
+    (async (): Promise<void> => {
+      if (env.JRA_BLINKER_BACKFILL === undefined) return;
+      try {
+        await env.JRA_BLINKER_BACKFILL.get(env.JRA_BLINKER_BACKFILL.idFromName(JRA_BLINKER_BACKFILL_NAME)).kick();
+      } catch (error) {
+        log(`scheduled: failed class=jra-blinker-backfill-kick-failed error=${errorKind(error)}`, "error");
       }
     })(),
   ]);
