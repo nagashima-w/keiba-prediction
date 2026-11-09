@@ -15,6 +15,7 @@ import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { newspaperOnlyPostRaw } from "./newspaper-post";
 import { openNodeSql, type NodeSql } from "./node-sql";
 import { fixtureForUrl } from "./pipeline-fixtures";
+import { fixtureForUrl14 } from "./shutuba-14";
 
 // Issue #680: 差し込みの例外を DO の単位で起こすため、JRA のオッズの差し込みの作成だけ、フラグが立っているときに例外を投げるものに差し替える(ほかは本物)。
 const overrideFault = vi.hoisted(() => ({ throwMessage: null as string | null }));
@@ -84,6 +85,8 @@ interface FakeJra extends JraOddsFetcher {
   /** 頁(cname の式別桁)→ その呼び出し回での結果の上書き。null なら見本の頁。 */
   oddsOverride: (page: string, nth: number) => JraOddsResult<string> | null;
   throwOnOpen: boolean;
+  /** 単勝複勝の頁(既定は 16 頭に増やしたもの。`field14` のときは見本の 14 頭)。 */
+  tanpukuHtml: () => string;
 }
 
 function fakeJra(): FakeJra {
@@ -93,6 +96,7 @@ function fakeJra(): FakeJra {
     listVenuesResult: () => ({ status: "ok", value: [VENUE] }),
     oddsOverride: () => null,
     throwOnOpen: false,
+    tanpukuHtml: tanpuku16,
     open(): JraOddsSession {
       if (jra.throwOnOpen) throw new Error("secret-url https://example.invalid/x?cname=ABC");
       const record = { listVenues: 0, listRaces: 0, fetchOdds: [] as string[] };
@@ -117,7 +121,7 @@ function fakeJra(): FakeJra {
           const page = PAGES.find((p) => cname.startsWith(`pw15${DIGIT[p]}`))!;
           record.fetchOdds.push(page);
           seen[page] = (seen[page] ?? 0) + 1;
-          return jra.oddsOverride(page, seen[page]!) ?? { status: "ok", value: PAGE_HTML[page]!() };
+          return jra.oddsOverride(page, seen[page]!) ?? { status: "ok", value: (page === "tanpuku" ? jra.tanpukuHtml : PAGE_HTML[page]!)() };
         },
       };
     },
@@ -208,7 +212,8 @@ afterEach(() => {
   overrideFault.throwMessage = null;
   for (const sql of opened.splice(0)) sql.close();
 });
-function harness(opts: { withJra?: boolean; settings?: CloudSettings } = {}): Harness {
+/** `field14`: DO の出馬表を 14 頭にそろえ(`shutuba-14.ts`)、JRA の見本(14 頭)をそのまま使う。既定は 16 頭(組合せの頁は食い違う)。 */
+function harness(opts: { withJra?: boolean; settings?: CloudSettings; field14?: boolean } = {}): Harness {
   const sql = openNodeSql();
   opened.push(sql);
   const clock = { now: Date.parse("2026-06-28T00:00:00Z") };
@@ -219,6 +224,10 @@ function harness(opts: { withJra?: boolean; settings?: CloudSettings } = {}): Ha
   const sink = fakeSink();
   const jra = fakeJra();
   const h = { sql, gate, sink, jra, clock, alarm, warnings, infos, settings: opts.settings ?? BASE } as Harness;
+  if (opts.field14 === true) {
+    gate.route = fixtureForUrl14;
+    jra.tanpukuHtml = () => jraHtml("jra_odds_tanpuku_202605050208.html");
+  }
   const deps: RaceDayDeps = {
     sql,
     now: () => clock.now,
@@ -316,6 +325,30 @@ describe("JRA のオッズの段階: 組合せ ON(7 頁。三連単は単独の�
     // 場の全レースのリンクを置いた(次のレースが発見を省ける)
     const keys = (h.sql.exec("SELECT key FROM fetch_cache WHERE key LIKE 'jra-odds-links:%' ORDER BY key").toArray() as { key: string }[]).map((r) => r.key);
     expect(keys).toEqual([jraLinksCacheKey(OTHER_RACE), jraLinksCacheKey(RACE)].sort());
+  });
+});
+
+describe("JRA のオッズの段階: 組合せを JRA から採用する(出走馬 14 頭が見本と一致。Issue #680)", () => {
+  it("DO の出馬表を 14 頭にすると、7 頁のうち組合せ 6 券種もすべて JRA が採用され、netkeiba に戻る理由は付かない。組合せの警告も出ない", async () => {
+    const h = harness({ settings: COMBO_ON, field14: true });
+    await schedule(h);
+    const labels = await runAll(h);
+    expect(labels).toEqual(["pre_race:fetch:ok", "pre_race:fetch:ok", "pre_race:fetch:ok", "pre_race:compute:ok"]);
+    expect(taskStatus(h)).toBe("done");
+    const sources = h.sink.extras[0]!.oddsSources!;
+    expect(Object.keys(sources).sort()).toEqual(["bracketQuinella", "exacta", "quinella", "trifecta", "trio", "wide", "winPlace"]); // 前提: 7 単位すべてが記録されている
+    for (const [bet, record] of Object.entries(sources)) {
+      expect(record, bet).toMatchObject({ source: "jra", officialDatetime: "2026-06-28 10:37:00" });
+      expect(record, bet).not.toHaveProperty("fallbackReason");
+    }
+    expect(h.warnings.filter((w) => w.includes("組合せ"))).toEqual([]);
+  });
+
+  it("同じ 14 頭でも、JRA を使わない構成(取得口なし)では取得元の記録が付かない(従来どおり)", async () => {
+    const h = harness({ settings: COMBO_ON, field14: true, withJra: false });
+    await schedule(h);
+    await runAll(h);
+    expect(h.sink.extras[0]!.oddsSources).toBeUndefined();
   });
 });
 

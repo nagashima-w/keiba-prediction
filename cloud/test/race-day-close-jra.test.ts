@@ -18,6 +18,7 @@ import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { newspaperOnlyPostRaw } from "./newspaper-post";
 import { openNodeSql, type NodeSql } from "./node-sql";
 import { fixtureForUrl } from "./pipeline-fixtures";
+import { fixtureForUrl14 } from "./shutuba-14";
 
 // Issue #680: 差し込みの例外を DO の単位で起こすため、JRA のオッズの差し込みの作成だけ、フラグが立っているときに例外を投げるものに差し替える(ほかは本物)。
 const overrideFault = vi.hoisted(() => ({ throwMessage: null as string | null }));
@@ -92,6 +93,8 @@ interface FakeJra extends JraOddsFetcher {
   /** 頁 → その呼び出し回での結果の上書き。null なら見本の頁。 */
   oddsOverride: (page: string, nth: number) => JraOddsResult<string> | null;
   throwOnOpen: boolean;
+  /** 単勝複勝の頁(既定は 16 頭に増やしたもの。`field14` のときは見本の 14 頭)。 */
+  tanpukuHtml: () => string;
   /** 1 本送るごとに進める時計(ミリ秒。JRA への間隔と往復の想定)。 */
   advanceMsPerRequest: number;
   /** 動きの列(同時に 2 本以上が出ていないか・取る → 次の順を見る)。 */
@@ -107,6 +110,7 @@ function fakeJra(clock: { now: number }): FakeJra {
     listVenuesResult: () => ({ status: "ok", value: [VENUE] }),
     oddsOverride: () => null,
     throwOnOpen: false,
+    tanpukuHtml: tanpuku16,
     advanceMsPerRequest: 0,
     events: [],
     inFlight: 0,
@@ -150,7 +154,7 @@ function fakeJra(clock: { now: number }): FakeJra {
           return enter(`fetch:${page}`, () => {
             record.fetchOdds.push(page);
             seen[page] = (seen[page] ?? 0) + 1;
-            return jra.oddsOverride(page, seen[page]!) ?? { status: "ok", value: PAGE_HTML[page]!() };
+            return jra.oddsOverride(page, seen[page]!) ?? { status: "ok", value: (page === "tanpuku" ? jra.tanpukuHtml : PAGE_HTML[page]!)() };
           });
         },
       };
@@ -247,7 +251,8 @@ afterEach(() => {
   overrideFault.throwMessage = null;
   for (const sql of opened.splice(0)) sql.close();
 });
-function harness(opts: { withJra?: boolean; settings?: CloudSettings } = {}): Harness {
+/** `field14`: DO の出馬表を 14 頭にそろえ(`shutuba-14.ts`)、JRA の見本(14 頭)をそのまま使う。既定は 16 頭(組合せの頁は食い違う)。 */
+function harness(opts: { withJra?: boolean; settings?: CloudSettings; field14?: boolean } = {}): Harness {
   const sql = openNodeSql();
   opened.push(sql);
   const clock = { now: Date.parse("2026-06-28T00:00:00Z") };
@@ -257,6 +262,10 @@ function harness(opts: { withJra?: boolean; settings?: CloudSettings } = {}): Ha
   const sink = fakeSink();
   const jra = fakeJra(clock);
   const h = { sql, gate, sink, jra, clock, warnings, infos, settings: opts.settings ?? BASE } as Harness;
+  if (opts.field14 === true) {
+    gate.body = fixtureForUrl14;
+    jra.tanpukuHtml = () => jraHtml("jra_odds_tanpuku_202605050208.html");
+  }
   const deps: RaceDayDeps = {
     sql,
     now: () => clock.now,
@@ -392,6 +401,21 @@ describe("締切の再計算 × JRA のオッズ: 単勝複勝(組合せ OFF)", 
     expect(outcome).toMatchObject({ round: 1, result: "ok" });
     expect(h.sink.closes[0]!.payload.oddsSources?.winPlace).toMatchObject({ source: "netkeiba", fallbackReason: "override-unavailable" });
     expect(h.warnings.join("\n")).not.toMatch(/example\.invalid|secret-url|cname=ABC/);
+  });
+});
+
+describe("締切の再計算 × JRA のオッズ: 組合せを JRA から採用する(出走馬 14 頭が見本と一致。Issue #680)", () => {
+  it("DO の出馬表を 14 頭にすると、再計算の 7 頁のうち組合せ 6 券種もすべて JRA が採用され、payload に取得元 jra が残る(理由は付かない)", async () => {
+    const h = harness({ settings: COMBO_ON, field14: true });
+    await analyze(h);
+    const outcome = await fire(h, DUE1);
+    expect(outcome).toMatchObject({ round: 1, result: "ok" });
+    const sources = h.sink.closes[0]!.payload.oddsSources!;
+    expect(Object.keys(sources).sort()).toEqual(["bracketQuinella", "exacta", "quinella", "trifecta", "trio", "wide", "winPlace"]); // 前提: 7 単位すべてが記録されている
+    for (const [bet, record] of Object.entries(sources)) {
+      expect(record, bet).toMatchObject({ source: "jra" });
+      expect(record, bet).not.toHaveProperty("fallbackReason");
+    }
   });
 });
 
