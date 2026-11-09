@@ -348,7 +348,7 @@ describe("GET /api/targets(Issue #336)", () => {
     expect(text).not.toContain("CANARY");
     const races = (JSON.parse(text) as { races: unknown[] }).races;
     expect(races).toHaveLength(2); // 前提: 行がある(キーの検査が空振りしない)
-    expect(sortedKeys(races[0])).toEqual(["analysis_id", "bet_count", "detail", "max_ev", "pick", "place", "race_id", "result", "result_state", "round", "skipped", "source", "start_ms", "start_time", "total_stake"]);
+    expect(sortedKeys(races[0])).toEqual(["analysis_id", "bet_count", "detail", "max_ev", "pick", "place", "race_id", "result", "result_kind", "result_state", "round", "skipped", "source", "start_ms", "start_time", "total_stake"]);
   });
 });
 
@@ -375,9 +375,9 @@ describe("GET /api/targets: 収支の途中経過(DO の RPC の結果を載せ�
     expect(day.ledgerInputs).toEqual([{ kaisaiDate: DATE, nowMs: AFTER.getTime() }]);
     expect(body["ledger"]).toBe("確定 1R: 投資 300円 / 回収 4,500円 / 回収率 1500.0%(結果待ち 1R)");
     const races = body["races"] as Record<string, any>[];
-    expect(races.map((r) => [r["race_id"], r["source"], r["result_state"], r["result"]])).toEqual([
-      [R11, "analysis", "settled", "的中 +4,200円"],
-      [R12, "close", "pending", "結果待ち"],
+    expect(races.map((r) => [r["race_id"], r["source"], r["result_state"], r["result"], r["result_kind"]])).toEqual([
+      [R11, "analysis", "settled", "的中 +4,200円", "hit"],
+      [R12, "close", "pending", "結果待ち", "pending"],
     ]);
   });
 
@@ -405,7 +405,7 @@ describe("GET /api/targets: 収支の途中経過(DO の RPC の結果を載せ�
     expect(body["ledger"]).toBeNull();
     const races = body["races"] as Record<string, any>[];
     expect(races).toHaveLength(2);
-    expect(races.every((r) => r["result"] === null && r["result_state"] === null)).toBe(true);
+    expect(races.every((r) => r["result"] === null && r["result_state"] === null && r["result_kind"] === null)).toBe(true);
   });
 
   it("DO の RPC が失敗(同期の例外も含む)しても一覧は 200 のまま。収支だけ null。例外の文面は出さない", async () => {

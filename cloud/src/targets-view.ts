@@ -92,7 +92,11 @@ export interface TargetsRace {
   readonly result_state: LedgerState | null;
   /** 結果の文言(「的中 +1,200円」「結果待ち」など)。`result_state` が null のとき null。 */
   readonly result: string | null;
+  /** 結果の種別(バッジ用。Issue #585)。文言の主たる結果と同じ関数から作る。`result_state` が null・結果なし・対象外・提案なしのとき null。再計算の買い目を採った行も、分析時の提案の結果を指す(文言に「分析時の提案:」が付く)。 */
+  readonly result_kind: ResultKind | null;
 }
+
+export type ResultKind = "hit" | "miss" | "refund" | "pending";
 
 export interface TargetsView {
   readonly kaisai_date: string;
@@ -144,11 +148,30 @@ function netText(net: number): string {
 
 const EXCLUDED_TEXT = { "lookahead-suspect": "集計対象外(発走後の分析)", "lookahead-unknown": "集計対象外(発走前の分析か判定できません)", estimated: "集計対象外(発売前の推定)" } as const;
 
+/** 確定した行の種別。文言の先頭の語とバッジの種別は、この 1 つの判定から作る(食い違わない)。 */
+function settledKindOf(l: LedgerRaceResult): "hit" | "miss" | "refund" {
+  return l.hit ? "hit" : l.refundedStake === l.stake ? "refund" : "miss";
+}
+const SETTLED_HEAD = { hit: "的中", refund: "返還", miss: "不的中" } as const;
+
+/** 行の結果の種別(バッジ用)。確定は的中・不的中・返還、待ちは pending、それ以外は null。 */
+function resultKindOf(l: LedgerRaceResult): ResultKind | null {
+  switch (l.state) {
+    case "settled":
+      return settledKindOf(l);
+    case "pending":
+    case "pending_payout":
+      return "pending";
+    default:
+      return null;
+  }
+}
+
 /** 行の結果の文言。`viaClose`: 一覧の行が再計算の買い目を採っている(損益の基準が行の買い目と違う)。 */
 function resultTextOf(l: LedgerRaceResult, viaClose: boolean): string {
   switch (l.state) {
     case "settled": {
-      const head = l.hit ? "的中" : l.refundedStake === l.stake ? "返還" : "不的中";
+      const head = SETTLED_HEAD[settledKindOf(l)];
       const body = `${head} ${netText(l.payout - l.stake)}`;
       return viaClose ? `分析時の提案: ${body}(投資 ${yen(l.stake)})` : body;
     }
@@ -217,6 +240,7 @@ export function buildTargetsView(input: TargetsViewInput): TargetsView {
       detail: isSkipped ? `見送り・${label}の再計算で0点` : detailOf(betCount, totalStake, maxEv, label === null ? "分析時" : `${label}の再計算`),
       result_state: ledgerRace === undefined ? null : ledgerRace.state,
       result: ledgerRace === undefined ? null : resultTextOf(ledgerRace, chosen !== null),
+      result_kind: ledgerRace === undefined ? null : resultKindOf(ledgerRace),
     });
   }
 

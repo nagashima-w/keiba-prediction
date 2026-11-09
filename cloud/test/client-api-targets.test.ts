@@ -20,7 +20,7 @@ describe("parseTargetsResponse", () => {
         nowMs: 999_000,
         summary: "分析済み 1 レース中、狙い目 1",
         ledger: null,
-        races: [{ raceId: "202605050811", analysisId: 11, startMs: 1_000_000, startTime: "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", resultState: null, result: null }],
+        races: [{ raceId: "202605050811", analysisId: 11, startMs: 1_000_000, startTime: "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", resultState: null, result: null, resultKind: null }],
       },
     });
   });
@@ -36,6 +36,19 @@ describe("parseTargetsResponse", () => {
     expect("ledger" in BODY || "result" in RACE).toBe(false);
     const absent = parseTargetsResponse(200, BODY);
     expect(absent.ok && [absent.data.ledger, absent.data.races[0]!.resultState, absent.data.races[0]!.result]).toEqual([null, null, null]);
+  });
+
+  it("result_kind(Issue #585): 5 値(hit・miss・refund・pending・null)を読む。キーが無い(旧い応答)・想定外の値・型違いは null で、行は捨てない", () => {
+    for (const kind of ["hit", "miss", "refund", "pending"]) {
+      const parsed = parseTargetsResponse(200, { ...BODY, races: [{ ...RACE, result_state: "settled", result: "x", result_kind: kind }] });
+      expect(parsed.ok && parsed.data.races[0]!.resultKind, kind).toBe(kind);
+    }
+    expect("result_kind" in RACE).toBe(false); // 前提: 旧い応答にはキーが無い
+    for (const bad of [undefined, null, "win", "", 1, true, {}, "HIT"]) {
+      const parsed = parseTargetsResponse(200, { ...BODY, races: [{ ...RACE, result_state: "settled", result: "x", ...(bad === undefined ? {} : { result_kind: bad }) }] });
+      expect(parsed.ok, String(bad)).toBe(true);
+      expect(parsed.ok && parsed.data.races[0]!.resultKind, String(bad)).toBeNull();
+    }
   });
 
   it("時刻なし・◎なし(null)は null のまま。races が空の配列でも成功", () => {
