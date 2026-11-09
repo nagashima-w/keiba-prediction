@@ -5,8 +5,7 @@
  * 出馬表の取得口(`createJraEntriesFetcher`)は共有しない(朝の別の時間帯で、動きを変えない)。
  */
 import type { BabaFetcher } from "./baba-conditions";
-import type { JraFetchLike } from "./jra-http";
-import { createJraBabaFetcher } from "./jra-baba-fetch";
+import { createJraBabaFetcher, type CreateJraBabaFetcherDeps } from "./jra-baba-fetch";
 import { createJraOddsFetcher, createJraPacer, type JraOddsFetcher, type JraPacer } from "./jra-odds-fetch";
 
 export interface CreateJraFetchersDeps {
@@ -15,7 +14,7 @@ export interface CreateJraFetchersDeps {
   /** 共有する間隔の部品。省略時はここで 1 つ作る(本番)。テストで差し替える。 */
   readonly pacer?: JraPacer;
   /** テスト用: 送信に使う fetch。省略時はグローバルの `fetch`。 */
-  readonly fetch?: JraFetchLike;
+  readonly fetch?: CreateJraBabaFetcherDeps["fetch"];
   /** テスト用: 間隔の待ち(省略時は `setTimeout`)。 */
   readonly wait?: (ms: number) => Promise<void>;
 }
