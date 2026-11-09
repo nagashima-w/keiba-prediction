@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import type { JraOddsPage, JraOddsRaceLinks, JraOddsVenueLink } from "../../packages/core/src/scraper/parse-jra-odds-index";
@@ -18,6 +18,25 @@ import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 import { newspaperOnlyPostRaw } from "./newspaper-post";
 import { openNodeSql, type NodeSql } from "./node-sql";
 import { fixtureForUrl } from "./pipeline-fixtures";
+
+// Issue #680: 差し込みの例外を DO の単位で起こすため、JRA のオッズの差し込みの作成だけ、フラグが立っているときに例外を投げるものに差し替える(ほかは本物)。
+const overrideFault = vi.hoisted(() => ({ throwMessage: null as string | null }));
+vi.mock("../src/jra-odds-cache", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/jra-odds-cache")>();
+  return {
+    ...actual,
+    createJraOddsOverride: (deps: Parameters<typeof actual.createJraOddsOverride>[0]) => {
+      const real = actual.createJraOddsOverride(deps);
+      return {
+        ...real,
+        winPlace: async () => {
+          if (overrideFault.throwMessage !== null) throw new Error(overrideFault.throwMessage);
+          return real.winPlace!();
+        },
+      };
+    },
+  };
+});
 
 /**
  * Issue #676(#668-E): 締切の直前の再計算(発走 5 分前・2 分前)が、中央のオッズを JRA の公式サイトから取る。
@@ -225,6 +244,7 @@ interface Harness {
 }
 const opened: NodeSql[] = [];
 afterEach(() => {
+  overrideFault.throwMessage = null;
   for (const sql of opened.splice(0)) sql.close();
 });
 function harness(opts: { withJra?: boolean; settings?: CloudSettings } = {}): Harness {
@@ -372,6 +392,22 @@ describe("締切の再計算 × JRA のオッズ: 単勝複勝(組合せ OFF)", 
     expect(outcome).toMatchObject({ round: 1, result: "ok" });
     expect(h.sink.closes[0]!.payload.oddsSources?.winPlace).toMatchObject({ source: "netkeiba", fallbackReason: "override-unavailable" });
     expect(h.warnings.join("\n")).not.toMatch(/example\.invalid|secret-url|cname=ABC/);
+  });
+});
+
+describe("締切の再計算 × JRA のオッズ: 差し込みの例外の中身(Issue #680)", () => {
+  it("再計算で差し込みが例外を投げても、理由は override-error のまま。例外の名前と文面はログにだけ残り、保存される payload には入らない", async () => {
+    const h = harness();
+    await analyze(h);
+    overrideFault.throwMessage = "SECRETMSG https://example.invalid/x?cname=ABC";
+    const outcome = await fire(h, DUE1);
+    expect(outcome).toMatchObject({ round: 1, result: "ok" });
+    expect(h.sink.closes[0]!.payload.oddsSources?.winPlace).toMatchObject({ source: "netkeiba", fallbackReason: "override-error" });
+    const logged = h.warnings.filter((w) => w.includes("JRA のオッズを使えませんでした"));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain(`${RACE}・winPlace`);
+    expect(logged[0]).toContain("Error: SECRETMSG");
+    expect(JSON.stringify(h.sink.closes)).not.toContain("SECRETMSG");
   });
 });
 

@@ -37,7 +37,7 @@ import {
 } from "./race-day-close";
 import { jraOddsPagesFor, MemoryJraOddsStageStore } from "./race-day-jra-odds";
 import { JraOddsStage, type JraOddsStageCache } from "./race-day-jra-odds-stage";
-import { allocationSettingsOf, CACHE_ONLY_TTL, CacheMissError, errorMessage, isFatalFetchError, ODDS_URL_PATTERN } from "./race-day-support";
+import { allocationSettingsOf, CACHE_ONLY_TTL, CacheMissError, errorMessage, isFatalFetchError, ODDS_URL_PATTERN, overrideErrorLogger } from "./race-day-support";
 import type { CloudSettings } from "./settings";
 
 /**
@@ -345,7 +345,7 @@ export class CloseStage {
           fetcher: this.closeFetcher(venueKind === "nar" ? narOddsPageUrl(raceId) : "", comboWindow),
           now: () => new Date(this.now()),
           ttl: CACHE_ONLY_TTL,
-          ...(oddsOverride === undefined ? {} : { oddsOverride }),
+          ...(oddsOverride === undefined ? {} : { oddsOverride, onOverrideError: overrideErrorLogger(this.onWarn, row.race_id) }),
         },
         // 騎手の成績は要らない(オッズだけを取り直す)。組合せは分析時の設定(スナップショット)と同じ。地方三連単の段階取得(`deferNarTrifecta`)は使わない(部分的な取り直しは、軸ごとのページもキャッシュから読む)。
         { includeComboOdds: input.allocationSettings.includeComboOdds, includeJockeyStats: false, bypassOddsCache: true },

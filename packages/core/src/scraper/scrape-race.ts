@@ -228,6 +228,12 @@ export interface ScrapeDeps {
    * 値が返り出走馬と食い違わなければ採用して netkeiba へは取りに行かない。返らない・例外・食い違いのときはその券種だけ netkeiba に戻し、理由を `meta.oddsSources` に残す。地方は対象外。
    */
   readonly oddsOverride?: OddsOverride;
+  /**
+   * 差し込みが例外を投げたとき(`fallbackReason: "override-error"`)に、その例外を呼び出し側へ渡す(Issue #680)。JRA の不具合を調べる材料をログに残すため。
+   * **`meta.warnings`(利用者の画面)にも `meta.oddsSources`(D1)にも例外の文面は入れない**(理由は固定の語のまま)。受け取った側が、ログだけに出す。
+   * 渡すのは例外そのものなので、文面の整形(伏せ字・長さの制限)は受け取った側の仕事。未指定なら何もしない。
+   */
+  readonly onOverrideError?: (info: { readonly kind: OddsSourceKind; readonly error: unknown }) => void;
 }
 
 /** scrapeRace の呼び出しオプション。 */
@@ -720,11 +726,20 @@ type OverrideAsk<T> = { readonly kind: "used"; readonly value: T } | { readonly 
  * 差し込みに 1 回問い合わせる。null は `override-unavailable`、例外は `override-error`(握る=取得全体を落とさない)、
  * 値が出走馬と食い違えば `horse-set-mismatch`。いずれも呼び出し側は netkeiba に戻す。
  */
-async function askOverride<T>(ask: () => Promise<T | null>, accepts: (value: T) => boolean): Promise<OverrideAsk<T>> {
+async function askOverride<T>(
+  ask: () => Promise<T | null>,
+  accepts: (value: T) => boolean,
+  onError?: (error: unknown) => void,
+): Promise<OverrideAsk<T>> {
   let value: T | null;
   try {
     value = await ask();
-  } catch {
+  } catch (error) {
+    try {
+      onError?.(error); // 通知の失敗で取得全体を落とさない
+    } catch {
+      // 握る
+    }
     return { kind: "fallback", reason: "override-error" };
   }
   if (value === null) {
@@ -927,7 +942,7 @@ export async function scrapeRace(
   const runnerUmabans = shutuba.horses.map((h) => h.umaban);
   let overriddenOdds: OddsSnapshot | null = null;
   if (override?.winPlace !== undefined) {
-    const asked = await askOverride(() => override.winPlace!(), (snapshot) => winPlaceMatchesRunners(snapshot, runnerUmabans));
+    const asked = await askOverride(() => override.winPlace!(), (snapshot) => winPlaceMatchesRunners(snapshot, runnerUmabans), (error) => deps.onOverrideError?.({ kind: "winPlace", error }));
     if (asked.kind === "used") {
       overriddenOdds = asked.value;
       oddsSources.winPlace = { source: override.source, officialDatetime: asked.value.officialDatetime };
@@ -1006,6 +1021,7 @@ export async function scrapeRace(
       const asked = await askOverride(
         () => override.combo!(betType),
         (value) => comboMatchesRunners(value.odds, validNumbers, expectedCount),
+        (error) => deps.onOverrideError?.({ kind: betType, error }),
       );
       if (asked.kind === "used") {
         oddsSources[betType] = { source: override.source, officialDatetime: asked.value.officialDatetime };
