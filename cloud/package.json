@@ -21,7 +21,7 @@
     "jose": "6.2.15"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261104.1",
+    "@cloudflare/workers-types": "5.20261106.1",
     "@types/node": "^24.0.0",
     "esbuild": "0.28.2",
     "tsx": "^4.20.6",
