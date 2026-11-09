@@ -74,3 +74,23 @@ export function isFatalFetchError(error: unknown): boolean {
   }
   return false;
 }
+
+/** 差し込みの例外をログに残すときの 1 行の長さの上限(Issue #680)。 */
+export const OVERRIDE_ERROR_LOG_MAX_CHARS = 300;
+
+/**
+ * `scrapeRace` の `onOverrideError`(JRA のオッズの差し込みが例外を投げた)に渡す関数を作る(Issue #680)。
+ * 例外の名前と文面を **`onWarn`(DO のログ)にだけ**出す。利用者の画面(`result.warnings`)にも D1(`odds_sources_json`)にも入れない
+ * (理由はそちらでは固定の語 `override-error` のまま。内部の語を画面に出さない #677 の方針)。1 行は {@link OVERRIDE_ERROR_LOG_MAX_CHARS} 字に切り詰める。
+ * 鍵の形の伏せ字は、渡された `onWarn`(本体の包み)が行う。ログの出力の失敗で取得を落とさない(`scrapeRace` 側でも握る)。
+ */
+export function overrideErrorLogger(
+  onWarn: (message: string) => void,
+  label: string,
+): (info: { readonly kind: string; readonly error: unknown }) => void {
+  return ({ kind, error }) => {
+    const name = error instanceof Error ? error.name : typeof error;
+    const line = `JRA のオッズを使えませんでした(${label}・${kind}): ${name}: ${errorMessage(error)}`;
+    onWarn(line.length > OVERRIDE_ERROR_LOG_MAX_CHARS ? `${line.slice(0, OVERRIDE_ERROR_LOG_MAX_CHARS)}…` : line);
+  };
+}

@@ -172,6 +172,32 @@ describe("単勝・複勝の差し込み", () => {
     expect(data.odds.win[1]).toBeDefined();
     expect(data.meta.oddsSources?.winPlace).toMatchObject({ source: "netkeiba", fallbackReason: "override-error" });
   });
+
+  it("差し込みの例外は onOverrideError に 1 回渡る(券種 winPlace・例外そのもの)。meta の警告と oddsSources には例外の文面が入らない(Issue #680)", async () => {
+    const secret = "壊れた https://example.invalid/x?cname=SECRET";
+    const calls: { kind: string; error: unknown }[] = [];
+    const { override } = makeOverride({
+      winPlace: async () => {
+        throw new Error(secret);
+      },
+    });
+    const data = await scrapeRace(RACE_ID, { fetcher: new Recording(), now: NOW, oddsOverride: override, onOverrideError: (info) => calls.push(info) });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.kind).toBe("winPlace");
+    expect((calls[0]!.error as Error).message).toBe(secret);
+    // 利用者の画面(warnings)と D1 に入る oddsSources には、文面を出さない
+    expect(JSON.stringify(data.meta.warnings)).not.toContain("SECRET");
+    expect(JSON.stringify(data.meta.oddsSources)).not.toContain("SECRET");
+    expect(Object.keys(data.meta.oddsSources!.winPlace!).sort()).toEqual(["fallbackReason", "officialDatetime", "source"]); // 記録の形に余計な欄(例外の文面)が増えない
+    expect(data.meta.oddsSources?.winPlace).toMatchObject({ source: "netkeiba", fallbackReason: "override-error" });
+  });
+
+  it("null や食い違いでは onOverrideError は呼ばれない", async () => {
+    const calls: unknown[] = [];
+    const { override } = makeOverride({ winPlace: async () => null });
+    await scrapeRace(RACE_ID, { fetcher: new Recording(), now: NOW, oddsOverride: override, onOverrideError: (i) => calls.push(i) });
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe("組合せの差し込み(券種ごと)", () => {
@@ -260,7 +286,9 @@ describe("組合せの差し込み(券種ごと)", () => {
         return bet === "quinella" ? { odds: comboMap("quinella"), officialDatetime: null } : null;
       },
     });
-    const data = await scrapeRace(RACE_ID, { fetcher, now: NOW, oddsOverride: override }, OPTIONS);
+    const errorKinds: string[] = [];
+    const data = await scrapeRace(RACE_ID, { fetcher, now: NOW, oddsOverride: override, onOverrideError: (i) => errorKinds.push(i.kind) }, OPTIONS);
+    expect(errorKinds).toEqual(["trio"]); // 例外を投げた券種だけが、券種名つきで通知される
     expect(data.meta.oddsSources?.trio).toMatchObject({ source: "netkeiba", fallbackReason: "override-error" });
     expect(data.meta.oddsSources?.quinella).toMatchObject({ source: "jra" });
     expect(Object.keys(data.odds.trioCombo!)).toHaveLength(560);

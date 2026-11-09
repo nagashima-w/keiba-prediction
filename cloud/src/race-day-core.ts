@@ -169,7 +169,7 @@ import { RescueStage } from "./race-day-rescue-stage";
 import { PromoteStage } from "./race-day-promote-stage";
 import { ResultStage, type ResultStepOutcome } from "./race-day-result-stage";
 import { REPORT_HOLD_KEY, REPORT_REQUESTED_KEY, ReportHoldStage } from "./race-day-report-hold-stage";
-import { allocationSettingsOf, CACHE_MISS_HEAD, CACHE_ONLY_TTL, CacheMissError, errorMessage, isFatalFetchError, ODDS_URL_PATTERN } from "./race-day-support";
+import { allocationSettingsOf, CACHE_MISS_HEAD, CACHE_ONLY_TTL, CacheMissError, errorMessage, isFatalFetchError, ODDS_URL_PATTERN, overrideErrorLogger } from "./race-day-support";
 
 /** オッズの URL の分類(`race-day-support.ts` に移した。従来の import 先を保つため再 export する)。 */
 export { ODDS_URL_PATTERN };
@@ -2130,7 +2130,7 @@ export class RaceDayCore {
     // 保存先に無い騎手をキャッシュから読めなくなる(Issue #283)。取得ステップの `scrapeRace` には渡さない(そちらの上限は有効のまま)。
     const race = await scrapeRace(
       raceId,
-      { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL, jockeyStore: this.jockeyStore, trainerStore: this.trainerStore, ...(oddsOverride === undefined ? {} : { oddsOverride }) },
+      { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL, jockeyStore: this.jockeyStore, trainerStore: this.trainerStore, ...(oddsOverride === undefined ? {} : { oddsOverride, onOverrideError: overrideErrorLogger(this.onWarn, warnLabel) }) },
       { ...options, jockeyRequestLimit: Number.MAX_SAFE_INTEGER },
     );
     // 騎手の成績(種別=騎手)はキャッシュに無くても失敗にしない(その騎手は補正なし。戦績は無いと prior が作れないので失敗にする)。

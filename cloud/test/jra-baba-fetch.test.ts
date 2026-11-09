@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { JRA_GAP_MS, JRA_MAX_BODY_BYTES, JRA_TIMEOUT_MS, type JraFetchLike } from "../src/jra-http";
 import { createJraBabaFetcher } from "../src/jra-baba-fetch";
+import { createJraPacer } from "../src/jra-odds-fetch";
 
 import { installFetchTrap } from "./fetch-trap";
 import { FIXTURE_NAMES, NOW_MONDAY, NOW_SUNDAY, accessJson, coursePage, cushionHtml, fixtureBytes, fixtureText, moistHtml, sjis } from "./jra-baba-samples";
@@ -519,5 +520,58 @@ describe("Issue #490-1: ページの構造が変わったら、判定の結果�
     const h = harness({ moist: () => html(sjis(moist)) });
     const outcome = await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait })(NOW_SUNDAY);
     expect(JSON.parse(outcome.venues.find((v) => v.venueName === "東京")!.rawJson!).sources.moist).toBe("ok");
+  });
+});
+
+describe("共有の間隔(pacer。Issue #680)", () => {
+  /** 偽の時計つきの pacer。待ちは時計を進めるだけ(実時間を使わない)。 */
+  function fakePacer() {
+    const clock = { t: 100_000 };
+    const waits: number[] = [];
+    const pacer = createJraPacer({
+      now: () => clock.t,
+      wait: async (ms) => {
+        waits.push(ms);
+        clock.t += ms;
+      },
+    });
+    return { clock, waits, pacer };
+  }
+
+  it("pacer を渡すと、間隔は pacer が守る: 自前の待ち(wait)は一度も呼ばれず、6 本の間に pacer の待ちが 5 回(各 1.5 秒)入る", async () => {
+    const h = harness();
+    const p = fakePacer();
+    const outcome = await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait, pacer: p.pacer })(NOW_SUNDAY);
+    expect(outcome.result).toBe("ok");
+    expect(h.calls).toHaveLength(6); // 前提: 6 本取っている
+    expect(h.waits).toEqual([]); // 自前の待ちは使わない
+    expect(p.waits).toEqual([JRA_GAP_MS, JRA_GAP_MS, JRA_GAP_MS, JRA_GAP_MS, JRA_GAP_MS]);
+  });
+
+  it("他の段(オッズ)が直前に送っていたら、馬場の最初の 1 本も残りを待つ(最初の 1 本で待たない実装は、ここで落ちる)", async () => {
+    const h = harness();
+    const p = fakePacer();
+    await p.pacer.beforeRequest(); // オッズの段が送った
+    p.clock.t += 400;
+    p.waits.length = 0;
+    await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait, pacer: p.pacer })(NOW_SUNDAY);
+    expect(p.waits[0]).toBe(JRA_GAP_MS - 400);
+    expect(p.waits).toHaveLength(5 + 1); // 最初の 1 本の残り + 以降 5 回
+  });
+
+  it("直前の送信から十分に経っていれば、最初の 1 本は待たない", async () => {
+    const h = harness();
+    const p = fakePacer();
+    await p.pacer.beforeRequest();
+    p.clock.t += 60_000;
+    p.waits.length = 0;
+    await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait, pacer: p.pacer })(NOW_SUNDAY);
+    expect(p.waits).toHaveLength(5);
+  });
+
+  it("pacer を渡さない既存の動きは変えない(自前の待ちが 5 回)", async () => {
+    const h = harness();
+    await createJraBabaFetcher({ fetch: h.fetch, wait: h.wait })(NOW_SUNDAY);
+    expect(h.waits).toEqual([JRA_GAP_MS, JRA_GAP_MS, JRA_GAP_MS, JRA_GAP_MS, JRA_GAP_MS]);
   });
 });

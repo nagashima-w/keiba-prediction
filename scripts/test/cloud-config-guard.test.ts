@@ -707,7 +707,9 @@ describe("wrangler.toml", () => {
     expect(Number(/^JRA_ODDS_ENABLED = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(1);
     const raceDayDo = readTextLf("cloud", "src", "race-day-do.ts");
     expect(raceDayDo).toContain("isJraOddsDisabled(env.JRA_ODDS_ENABLED)");
-    expect(raceDayDo).toMatch(/\.\.\.\(isJraOddsDisabled\(env\.JRA_ODDS_ENABLED\) \? \{\} : \{ fetchJraOdds: createJraOddsFetcher\(/);
+    // #680: 取得口の組み立ては jra-fetchers.ts(馬場とオッズが同じ間隔を共有する)。無効のときは fetchJraOdds が無く、DO は無いときは渡さない
+    expect(raceDayDo).toMatch(/createJraFetchers\(\{ oddsEnabled: !isJraOddsDisabled\(env\.JRA_ODDS_ENABLED\) \}\)/);
+    expect(raceDayDo).toMatch(/\.\.\.\(jraFetchers\.fetchJraOdds === undefined \? \{\} : \{ fetchJraOdds: jraFetchers\.fetchJraOdds \}\)/);
     // 検出の確認(空振りでない): 止める値が書かれていれば拾える形
     expect('RACE_ARCHIVE_NIGHTLY_LIMIT = "0"\n').toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
     const code = readTextLf("cloud", "src", "race-archive-fetch-core.ts");
@@ -2452,17 +2454,20 @@ describe("Issue #294・#478: 馬場の取得は JRA のページから、取得�
     }
   });
 
-  it("外部の API の secret BABA_API_URL は、cloud/src のどのファイルにも現れない。wrangler.toml の [vars] にも、deploy-cloud.yml にも置かない。取得口の配線の行は race-day-do.ts の 1 行", () => {
+  it("外部の API の secret BABA_API_URL は、cloud/src のどのファイルにも現れない。wrangler.toml の [vars] にも、deploy-cloud.yml にも置かない。取得口の配線の行は race-day-do.ts の 1 行(#680 で、組み立ては jra-fetchers.ts の createJraFetchers に移した)", () => {
     expect(sites(/\bBABA_API_URL\b/g)).toEqual({});
-    expect(code("race-day-do.ts")).toContain("fetchBaba: createJraBabaFetcher()");
+    expect(code("race-day-do.ts")).toContain("fetchBaba: jraFetchers.fetchBaba");
+    expect(code("race-day-do.ts")).toContain("createJraFetchers(");
     expect((code("race-day-do.ts").match(/\bfetchBaba:/g) ?? []).length).toBe(1);
     expect(tomlCode).not.toMatch(/BABA/);
     expect(readTextLf(".github", "workflows", "deploy-cloud.yml")).not.toMatch(/BABA/);
   });
 
-  it("取得口を作る createJraBabaFetcher の呼び出しは race-day-do.ts の 1 箇所だけ。fetchBaba を使うのは core(段階へ渡す)と DO(配線)だけ", () => {
-    expect(sites(/(?<!function\s)\bcreateJraBabaFetcher\(/g)).toEqual({ "race-day-do.ts": 1 });
-    expect(Object.keys(sites(/\bfetchBaba\b/g)).sort()).toEqual(["race-day-core.ts", "race-day-do.ts"]);
+  it("取得口を作る createJraBabaFetcher の呼び出しは jra-fetchers.ts の 1 箇所だけ(#680。馬場とオッズの間隔の共有のため DO から切り出した組み立て。createJraFetchers を呼ぶのは race-day-do.ts の 1 箇所だけ)。fetchBaba を使うのは core(段階へ渡す)と DO(配線)と、その組み立てだけ", () => {
+    expect(sites(/(?<!function\s)\bcreateJraBabaFetcher\(/g)).toEqual({ "jra-fetchers.ts": 1 });
+    expect(sites(/(?<!function\s)\bcreateJraFetchers\(/g)).toEqual({ "race-day-do.ts": 1 });
+    expect(sites(/from\s*"\.\/jra-fetchers"/g)).toEqual({ "race-day-do.ts": 1 });
+    expect(Object.keys(sites(/\bfetchBaba\b/g)).sort()).toEqual(["jra-fetchers.ts", "race-day-core.ts", "race-day-do.ts"]);
   });
 
   it("グローバルの fetch を呼ぶのは jra-baba-fetch.ts の 1 箇所(注入できる既定)だけ。jra-http.ts・core・段階・純ロジック・保存先には外向きの通信が無い", () => {
@@ -2542,7 +2547,7 @@ describe("Issue #294・#478: 馬場の取得は JRA のページから、取得�
   });
 
   it("他の DO・cron・日報・月報は、馬場の取得を参照しない(アラームは DO ごとに 1 つ。干渉しない)。入口(handler.ts)と ルートの表(route-policy.ts)は診断の入口 /api/baba-fetch だけが例外(次のテスト)", () => {
-    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["jra-http.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-horse-fetch.ts", "jra-result-fetch.ts", "jra-odds-fetch.ts", "race-day-core.ts", "race-day-do.ts", "race-day-plan.ts", "handler.ts", "route-policy.ts"].includes(n))) {
+    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["jra-http.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-horse-fetch.ts", "jra-result-fetch.ts", "jra-odds-fetch.ts", "jra-fetchers.ts", "race-day-core.ts", "race-day-do.ts", "race-day-plan.ts", "handler.ts", "route-policy.ts"].includes(n))) {
       expect(code(f), `${f} は馬場の取得を参照しない`).not.toMatch(/baba-(conditions|fetch|repository)|jra-baba|jra-http|race-day-baba|BabaStage|BABA_API_URL|createJraBabaFetcher/);
     }
   });
@@ -2619,13 +2624,13 @@ describe("Issue #488・#478: JRA のページの取得の起点は、管理者�
     expect(sites(/(?<!function\s)\brunJraCheck\(/g)).toEqual({ "handler.ts": 1 });
   });
 
-  it("JRA の取得に関わるモジュール(jra-http・jra-check・jra-baba-fetch・jra-baba-parse)を参照するのは、handler.ts・race-day-do.ts と、それら自身だけ。scheduled・worker・他の DO・core・段階は参照しない", () => {
+  it("JRA の取得に関わるモジュール(jra-http・jra-check・jra-baba-fetch・jra-baba-parse)を参照するのは、handler.ts・jra-fetchers.ts(#680。race-day-do.ts はその経由)と、それら自身だけ。scheduled・worker・他の DO・core・段階は参照しない", () => {
     // 出馬表の取得口(jra-entries-fetch.ts。#639)も jra-http.ts の部品を使う。それを使う側は race-day-do.ts と core(race-day-core.ts は取得口の型だけ)で、cloud/test/jra-entries-isolation.test.ts が固定している。
-    expect(Object.keys(sites(/jra-(?:http|check|baba-fetch|baba-parse)/g)).sort()).toEqual(["handler.ts", "jra-baba-fetch.ts", "jra-baba-parse.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-horse-fetch.ts", "jra-odds-fetch.ts", "jra-result-fetch.ts", "race-day-do.ts"]);
+    expect(Object.keys(sites(/jra-(?:http|check|baba-fetch|baba-parse)/g)).sort()).toEqual(["handler.ts", "jra-baba-fetch.ts", "jra-baba-parse.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-fetchers.ts", "jra-horse-fetch.ts", "jra-odds-fetch.ts", "jra-result-fetch.ts"]); // #680: race-day-do.ts は jra-fetchers.ts 経由で、これらを直接は参照しない
     // jra-http.ts を import するのは取得の 3 つと読み取りの型の 1 つ(順にその 1 回ずつ)
     expect(sites(/from\s*"\.\/jra-http"/g)).toEqual({ "jra-baba-fetch.ts": 1, "jra-baba-parse.ts": 1, "jra-check.ts": 1, "jra-entries-fetch.ts": 1, "jra-horse-fetch.ts": 1, "jra-odds-fetch.ts": 1, "jra-result-fetch.ts": 1 });
     // jra-baba-fetch は race-day-do.ts だけが import する。jra-baba-parse は jra-baba-fetch だけが import する(保存の段階・core は読み取りに触れない)
-    expect(sites(/from\s*"\.\/jra-baba-fetch"/g)).toEqual({ "race-day-do.ts": 1 });
+    expect(sites(/from\s*"\.\/jra-baba-fetch"/g)).toEqual({ "jra-fetchers.ts": 1 }); // #680: race-day-do.ts は jra-fetchers.ts 経由
     expect(sites(/from\s*"\.\/jra-baba-parse"/g)).toEqual({ "jra-baba-fetch.ts": 1 });
     // jra-http の関数(fetchOne・jraCourseUrl)を呼ぶのは取得の 2 つだけ
     expect(Object.keys(sites(/\bfetchOne\(|\bjraCourseUrl\(/g)).sort()).toEqual(["jra-baba-fetch.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-horse-fetch.ts", "jra-http.ts", "jra-odds-fetch.ts", "jra-result-fetch.ts"]);
