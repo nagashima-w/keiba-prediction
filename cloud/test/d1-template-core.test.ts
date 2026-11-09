@@ -144,6 +144,22 @@ describe("ensureD1Template: 1 回だけ作り、完成品だけを見せる", ()
     expect(existsSync(path.join(dir, "v3", "second"))).toBe(true);
     expect(existsSync(lock)).toBe(false);
   });
+
+  it("期限を超えて作り続ける側がいて、ロックを奪った別の側が先に完成させても、どちらも失敗せず同じ完成品を返す(Issue #626〈#621 の記録〉)", async () => {
+    const slow = { n: 0 };
+    const fast = { n: 0 };
+    const a = ensureD1Template({ root, key, build: fakeBuild(slow, 400), pollMs: 10, lockStaleMs: 60 });
+    await sleep(120); // A のロックが期限(60ms)を過ぎる
+    const b = ensureD1Template({ root, key, build: fakeBuild(fast, 0), pollMs: 10, lockStaleMs: 60 });
+    const [dirA, dirB] = await Promise.all([a, b]);
+    // 前提: 2 者がそれぞれ作った(奪われた)。そうでなければこのテストは何も確かめていない
+    expect(slow.n).toBe(1);
+    expect(fast.n).toBe(1);
+    expect(dirA).toBe(dirB);
+    expect(existsSync(path.join(dirA, "v3", "second"))).toBe(true);
+    // 一時ディレクトリを残さない
+    expect(readdirSync(root).filter((f) => f.includes(".tmp-"))).toEqual([]);
+  });
 });
 
 describe("閉じた状態: checkpointSqliteFiles", () => {

@@ -20,7 +20,7 @@
  *    日単位の DO の結果の取り込み自体も最低の優先度(タスクがあれば動かない)。
  *
  * ## D1 の書き込み
- * 結果 1 レースの新規保存は 38〜62 行(保存済みの結果ページ 14 本での `meta.rows_written`。再現: `test/result-rows-written.test.ts`)。1 晩 150 レースなら多くとも約 9,300 行で、Free の 10 万行/日の約 9%。
+ * 結果 1 レースの新規保存は 38〜62 行(保存済みの結果ページ 14 本での `meta.rows_written`。再現: `test/result-rows-written.integration.test.ts`)。1 晩 150 レースなら多くとも約 9,300 行で、Free の 10 万行/日の約 9%。
  *
  * ## 取得できないレース(無限に再試行しない)
  * 日単位の DO が 1 回の依頼で最大 3 回試して諦めた(`gave_up`)レースを、ここが記録する(`backfill_race`)。
@@ -50,7 +50,7 @@
  * 段階 1・2 が尽きたら(段階 2 の列挙も空で、不正なレースの除外もなかったとき)、**結果はあるが、そのレースの分析の行に `race_class` が NULL のものがある**レースを、同じ仕組みで少しずつ埋める
  * (出馬表・結果ページの `div.RaceData02` のクラス。#426-a の結果ステージが、結果ページを読んだときに `saveRaceClass` で書く)。既存の分析は、スナップショットにクラスが無いので、結果ページを取り直さないとクラスが分からない。
  * 取得は同じ `dispatchResultImports`(呼び出し箇所は増えない)に **`winOddsOnly: true`**(「NULL の列だけを埋める」補完モード)を渡して依頼する。補完モードの `saveWinOdds`・`saveScratched` は、保存済みの結果に対して
- * 書き込み 0(WHERE が NULL の列だけに当たる。実 D1 の `test/result-class-backfill-repository.test.ts` が固定)で、その直後の `saveRaceClass` だけが書く。窓・1 晩 {@link BACKFILL_NIGHTLY_LIMIT} レース・
+ * 書き込み 0(WHERE が NULL の列だけに当たる。実 D1 の `test/result-class-backfill-repository.integration.test.ts` が固定)で、その直後の `saveRaceClass` だけが書く。窓・1 晩 {@link BACKFILL_NIGHTLY_LIMIT} レース・
  * 1 回 {@link BACKFILL_CHUNK_SIZE} レース・gate の都合・失敗の扱いは**段階 1・2 と共有**する(段階 1・2 が先なので、段階 3 は両者の枠を食わない)。
  * **状態は DO の SQLite の別の表 `backfill_class`**(`class_tried`・`class_abandoned`・`class_done`)。`backfill_race` は 1 レースにつき状態が 1 つなので、段階 3 が段階 2 の `fill_done` を上書きすると、
  * オッズが NULL のまま D1 に残るレースを段階 2 が毎晩列挙し直す(無限の再取得)。別の表なら、段階 1・2 の状態・除外は一切変わらない。

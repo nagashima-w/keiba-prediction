@@ -129,7 +129,7 @@ pnpm typecheck                     # 型検査(packages/core と scripts/)
 cd cloud
 pnpm install --ignore-workspace --frozen-lockfile   # 依存インストール(cloud 独自の lockfile)
 pnpm run typecheck                                  # 型検査(client 用の tsconfig を含む)
-npx vitest run                                      # cloud のテスト
+pnpm run test:unit                                  # cloud のユニットのテスト(インテグレーションは pnpm run test:integration、全件は pnpm test)
 pnpm run smoke                                      # workerd を起動して動作を確かめる
 ```
 

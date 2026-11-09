@@ -188,6 +188,38 @@ describe("部分の性質(Issue #625)", () => {
     }
   });
 
+  it("確定は、渡された部分の並びによらず orderKey の昇順に畳む(並びを逆にした部分でも、合わせた部分と完全に同じ。Issue #626)", () => {
+    const { source, analyses } = randomVerifyData(57, 40);
+    const merged = mergeVerifyParts(splitByRace(analyses, (_r, i) => i).map((c) => buildVerifyPart(source, c, PRODUCTION_VERIFY_CONFIG)));
+    // 前提: 並びを変えて意味がある(2 レース以上で、逆順は元の順と違う)
+    expect(merged.races.length).toBeGreaterThan(10);
+    const reversed: VerifyPart = { ...merged, races: [...merged.races].reverse() };
+    expect(reversed.races.map((r) => r.raceId)).not.toEqual(merged.races.map((r) => r.raceId));
+    expect(finalizeVerifyPart(reversed, PRODUCTION_VERIFY_CONFIG)).toStrictEqual(finalizeVerifyPart(merged, PRODUCTION_VERIFY_CONFIG));
+  });
+
+  it("補正前の確率(prior)が範囲外のレースがあると priorBrier は null、補正後の確率が正常なら adjustedBrier は残る。分け方によらず同じ(Issue #626)", () => {
+    const { source, analyses } = randomVerifyData(58, 20);
+    const clean = finalizeVerifyPart(mergeVerifyParts([buildVerifyPart(source, analyses, DEFAULT_VERIFY_CONFIG)]), DEFAULT_VERIFY_CONFIG);
+    // 前提: 正常な入力では両方の Brier が数値で、評価した馬がいる
+    expect(clean.quality.evaluatedCount).toBeGreaterThan(0);
+    expect(clean.quality.priorBrier).not.toBeNull();
+    expect(clean.quality.adjustedBrier).not.toBeNull();
+    for (const bad of [1.3, -0.1, Number.POSITIVE_INFINITY]) {
+      // 不正な prior は、畳む順で最初に評価されるレース 1 つだけに入れる(後ろのレースが正常でも、不正の印が失われない)
+      const firstRace = mergeVerifyParts([buildVerifyPart(source, analyses, DEFAULT_VERIFY_CONFIG)]).races.find((r) => r.brier.n > 0)!;
+      const lastRace = mergeVerifyParts([buildVerifyPart(source, analyses, DEFAULT_VERIFY_CONFIG)]).races.filter((r) => r.brier.n > 0).at(-1)!;
+      expect(firstRace.raceId).not.toBe(lastRace.raceId);
+      const dirty = analyses.map((a) => (a.raceId === firstRace.raceId ? { ...a, horses: a.horses.map((h) => ({ ...h, prior: bad })) } : a));
+      const report = finalizeVerifyPart(mergeVerifyParts([buildVerifyPart(source, dirty, DEFAULT_VERIFY_CONFIG)]), DEFAULT_VERIFY_CONFIG);
+      expect(report.quality.priorBrier, `prior=${bad}`).toBeNull();
+      expect(report.quality.adjustedBrier, `prior=${bad}`).not.toBeNull();
+      // 分け方によらず(1 レースずつでも)同じ
+      const split = mergeVerifyParts(splitByRace(dirty, (_r, i) => i).map((c) => buildVerifyPart(source, c, DEFAULT_VERIFY_CONFIG)));
+      expect(finalizeVerifyPart(split, DEFAULT_VERIFY_CONFIG).quality.priorBrier, `分割 prior=${bad}`).toBeNull();
+    }
+  });
+
   it("同じレースが複数の部分にあると合わせられない", () => {
     const { source, analyses } = randomVerifyData(52, 10);
     const part = buildVerifyPart(source, analyses, DEFAULT_VERIFY_CONFIG);

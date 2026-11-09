@@ -25,7 +25,7 @@
  * - 月は UTC の yyyymm(`r2-fence.ts` の `monthKey`)。時計は `now` で注入できる。
  *
  * ### `(SELECT max(id) FROM analyses)` に依存してよい理由(事実と推論を分ける)
- * - **確認済みの事実**(ローカルの workerd。`test/analysis-repository.test.ts` の AC-b3b): 20 件の保存を `Promise.all` で同時に走らせても、
+ * - **確認済みの事実**(ローカルの workerd。`test/analysis-repository.integration.test.ts` の AC-b3b): 20 件の保存を `Promise.all` で同時に走らせても、
  *   子の行の取り違えは 0 件。対照として、同じ文を batch を使わず 1 文ずつ並行に実行すると、失敗か取り違えが起きる(検査が空振りでない)。
  * - **推論**(公式ドキュメントでの確認は未了。本番の D1 では未検証): D1 の batch は 1 つのトランザクションで、SQLite は書き込みトランザクションを
  *   直列に処理するので、batch の途中に他の保存は割り込めない。この推論が本番で崩れたら、保存ごとの一意のトークンで子の行を引く設計
@@ -40,7 +40,7 @@
  *   Free の D1 は読み取り 500 万行/日なので、**全件読みの口は作らない**。
  * - `getR2Usage`: 今月の Class A・B の回数と、柵の上限・許可の状態(画面〈#165〉と通知〈#166〉への接続は、それぞれの Issue)。
  *
- * ## 既知の差分(exe の SQLite との違い。【記録】。`test/analysis-repository.test.ts` が固定している)
+ * ## 既知の差分(exe の SQLite との違い。【記録】。`test/analysis-repository.integration.test.ts` が固定している)
  * - Infinity・NaN は NULL、-0 は 0 になる(D1 の bind も同じ)。NOT NULL の列(prior など)に NaN を渡すと、制約違反で保存全体が失敗する。
  * - 孤立サロゲートは元に戻らない(U+FFFD に置き換わる)。
  */

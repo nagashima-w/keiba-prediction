@@ -7,7 +7,7 @@ import { openLocalBindings, type LocalBindings } from "./local-bindings";
 
 /**
  * Issue #175: 1回の保存が D1 に書く行数(`meta.rows_written`)の測定。`docs/current-spec.md` の「書き込み行数」(#171 では約 60 行の暫定値で、
- * リポジトリに再現手段が無かった)を、**このテストで確定する**。再現: `cd cloud && pnpm exec vitest run test/rows-written.test.ts`。
+ * リポジトリに再現手段が無かった)を、**このテストで確定する**。再現: `cd cloud && pnpm exec vitest run test/rows-written.integration.test.ts`。
  *
  * 内訳(16 頭・買い目 10 件・配分あり): R2 の操作回数のカウンタ 1(`r2_ops` の upsert。#173。`ym INTEGER PRIMARY KEY` なので索引なし。月の最初の保存は INSERT、以降は UPDATE で、どちらも 1 行)・
  * analyses 5(表 1 + 索引 3〈idx_analyses_race・kaisai_date・prompt_version_race〉+ sqlite_sequence 1)・

@@ -5,7 +5,7 @@
 //                 (2) 変えたファイルそのものがインテグレーションのテストなら、それも含める。
 // 基点: 環境変数 VERIFY_BASE(ref)。無ければ scripts/hooks/implementer-verify-hook.mjs の既定と同じ ref。
 //       merge-base(HEAD, 基点) から HEAD・作業ツリー・未追跡までを「変更」とする(作業中にコミットしても差分が空にならない)。
-//       merge-base が決まらなければ HEAD からの変更だけ(注意を出す)。
+//       merge-base が決まらなければ 0 以外で終わる(0 件で成功して検査したことにしない。Issue #626)。
 //                 (3) 差分に cloud/wrangler.toml・cloud/migrations/・cloud/smoke*.ts があれば、それらを import せず読むテストの固定の一覧を足す
 //                     (import をたどる (1) では選ばれないため。Issue #701。一覧は verify-related-config.mjs)。
 // 流すのは cloud/ で `vitest run <ファイル…>`。該当が無ければ何も流さず 0 で終わる。
@@ -26,8 +26,13 @@ function git(args) {
 
 const baseRef = process.env.VERIFY_BASE || DEFAULT_BASE;
 const mb = git(["merge-base", "HEAD", baseRef]);
-const baseSha = mb.status === 0 ? mb.stdout.trim() : "HEAD";
-if (mb.status !== 0) console.error(`注意: merge-base 失敗(${baseRef})。HEAD からの変更だけを見る`);
+if (mb.status !== 0) {
+  // 基点が取れないまま HEAD からの変更だけを見ると、全部コミット済みなら 0 件で成功してしまい、検査したことにならない(Issue #626〈#620 の記録〉)。
+  console.error(`エラー: 基点が取れない(merge-base HEAD ${baseRef} が失敗)。関係するインテグレーションのテストを選べないので、検査したことにならない。`);
+  console.error("VERIFY_BASE に実在する ref を渡すか、`git fetch` で基点の ref を取り込む。");
+  process.exit(2);
+}
+const baseSha = mb.stdout.trim();
 
 const diff = git(["diff", "--name-only", baseSha]).stdout.split("\n");
 const untracked = git(["ls-files", "--others", "--exclude-standard"]).stdout.split("\n");

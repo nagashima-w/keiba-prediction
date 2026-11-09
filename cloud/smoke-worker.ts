@@ -7,7 +7,7 @@
  * fixture を HTTP/1.1 の応答として返す)に差し替えたサブクラスを `NetkeibaGate` として export する。
  *
  * **本番のバンドルには入らない**: 本番のエントリ(`src/worker.ts`)はこのファイルを import しない。偽ソケットの印({@link SMOKE_FAKE_SOCKET_MARKER})が
- * 本番の dry-run のバンドルに無いことを `test/bundle-guard.test.ts` が固定している。
+ * 本番の dry-run のバンドルに無いことを `test/bundle-guard.integration.test.ts` が固定している。
  */
 import centralHtml from "../fixtures/shutuba_202603020211.html";
 import jockeyResults01170Html from "../fixtures/jockey_results_01170.html";

@@ -15,7 +15,7 @@ import { FROZEN_INIT_MIGRATION_SHA256, sha256OfLf } from "../gen-cloud-d1-migrat
  *
  * 比較の方法: migration を空の SQLite(better-sqlite3 の :memory:)に順に流し、`PRAGMA table_info` / `foreign_key_list` /
  * `index_list` / `index_info` で作った構造を、exe 側の同じ構造と比べる(列の集合・型・NOT NULL・既定値・主キー・外部キー・索引)。
- * D1 の実エンジン(workerd)での適用は cloud/test/d1-schema.test.ts が、wrangler の実コマンドで確かめる。
+ * D1 の実エンジン(workerd)での適用は cloud/test/d1-schema.integration.test.ts が、wrangler の実コマンドで確かめる。
  *
  * 限界: 比較できるのは構造(列・制約・索引)だけで、値の往復(NULL・浮動小数)は #172(ストア)のテストが担う。
  */

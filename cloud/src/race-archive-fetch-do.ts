@@ -10,7 +10,7 @@
  *
  * 動きを変える設定は Worker の var・secret(すべて任意。時間帯の終わり・開催日の休みは Issue #655): `RACE_ARCHIVE_WINDOW_END_MIN`(時間帯の終わり。0 時からの分、1〜1440)・`RACE_ARCHIVE_SKIP_RACE_DAY`("0" で開催日にも取る)・`RACE_ARCHIVE_MIN_INTERVAL_MS`(リクエスト間隔。1500〜60000)・`RACE_ARCHIVE_NIGHTLY_LIMIT`(1 晩のリクエスト数を**下げる**上書き。未設定は上限なし。文字列 `"0"` だけは取得を止める〈結果の補完の `RESULT_BACKFILL_NIGHTLY_LIMIT` と同じ流儀〉)。
  * **smoke 専用の `options()` の差し替え**(開始時刻・時間帯・間隔を外す)は `smoke-worker.ts` のサブクラスだけが行う。本番のエントリ(`worker.ts`)はそのサブクラスを import しない
- * (`test/bundle-guard.test.ts` が、本番のバンドルに入らないことを固定している)。
+ * (`test/bundle-guard.integration.test.ts` が、本番のバンドルに入らないことを固定している)。
  */
 import { DurableObject } from "cloudflare:workers";
 import type { GateStatus } from "./gate-core";

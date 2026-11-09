@@ -12,7 +12,7 @@ import {
  *
  * `test/golden/race-result-contract.json` は、同じ入力(シナリオ)を exe の `AnalysisStore.saveResult` で保存したときの**4表のダンプ**
  * (race_results・race_result_meta・race_combo_payouts・race_combo_payout_imports)と、`getRaceResultDetail` の復元結果。
- * クラウド版の `D1ResultStore`(cloud/test/result-repository.test.ts)が同じファイルを読み、**同じ入力から同じダンプ・同じ復元結果**になることを確かめる。
+ * クラウド版の `D1ResultStore`(cloud/test/result-repository.integration.test.ts)が同じファイルを読み、**同じ入力から同じダンプ・同じ復元結果**になることを確かめる。
  * ここ(exe 側)は、golden が exe の実際の出力であること(= golden が exe から乖離していないこと)を固定する。
  *
  * golden は `pnpm tsx scripts/gen-race-result-contract.ts`(リポジトリルートで)で生成する。入力はリポジトリ内のフィクスチャ(`fixtures/`)と固定の合成値で、

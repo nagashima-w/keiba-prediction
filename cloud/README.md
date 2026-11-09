@@ -51,7 +51,7 @@ pnpm exec wrangler d1 migrations apply DB --local   # D1 の migration をロー
   - **exe と cloud は `analysis-store-codec.ts` を共有している**: codec の INSERT が指す列は、本番の D1 に migration を適用してから使う(デプロイの前に migration を反映するのはこのため。`deploy-cloud.yml`)。
 - **RaceDay(DO の SQLite)の表にスキーマ変更の仕組みは無い**: `CREATE TABLE IF NOT EXISTS` だけで作る(`src/race-day-core.ts` のコンストラクタ)。本番の RaceDay は未デプロイなので、今は列を足してよい。**最初の本番デプロイのあとに列を足すときは `ALTER TABLE ... ADD COLUMN` が要る**(D1 の migration とは別。足さないと、作成済みの表に列が無く INSERT/SELECT が落ちる)。
 - **ローカルでの適用**: `pnpm exec wrangler d1 migrations apply DB --local`(資格情報なしで動く。再実行しても何も起きない)。`pnpm run smoke` は、起動の前に一時の保存先へ同じ migration を適用する。
-- **テスト**(`test/d1-schema.test.ts`): 実コマンドで migration を適用したローカル(workerd)の D1 を `getPlatformProxy` で開き、外部キーと索引(`EXPLAIN QUERY PLAN`)を確かめる。
+- **テスト**(`test/d1-schema.integration.test.ts`): 実コマンドで migration を適用したローカル(workerd)の D1 を `getPlatformProxy` で開き、外部キーと索引(`EXPLAIN QUERY PLAN`)を確かめる。
   ★**同じ SQL の文字列で `EXPLAIN QUERY PLAN` を繰り返すと、索引を DROP した後も古い実行計画が返る**(ローカルの D1 で実測)ので、テストは毎回文字列を変えている。
   ローカルの D1 は「1回の呼び出しで 50 クエリ」の制限を**強制しない**(bind 変数 100 個の制限は強制する)。本番の D1 とは別ビルドの SQLite でありうるので、`/api/health`(下)と最初の本番の実保存(#164 以降)で本番の挙動を確かめる。
 - **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok }, secrets: { anthropic, discord, appBaseUrl } }`。DO と D1 は独立に確認し、どちらかが駄目なら 503(理由・例外の文面は返さない)。`secrets.anthropic` は、Worker の secret `ANTHROPIC_API_KEY` が**登録されているか**(空白だけは未登録)の boolean だけで、**値・長さ・一部は返さない**。`ok` の判定には含めない(キーが無くても、分析は LLM なしで動く)。`secrets.discord`(Issue #205)は、Worker の secret `DISCORD_WEBHOOK_URL` が**通知に使える形(Discord の Webhook の URL)で登録されているか**の boolean だけ(値・長さ・一部は返さない。`false` は「未登録」か「形式が不正」。`ok` には含めない)。`secrets.appBaseUrl`(Issue #230)は、Worker の secret `APP_BASE_URL` が**通知のリンクに使える形(https のオリジン)で登録されているか**の boolean だけ(値・長さ・一部は返さない。`false` は「未登録」か「形式が不正」。`ok` には含めない)。**デプロイ後の実機確認**: Access でログインしたブラウザで `/api/health` を開き、`d1.ok` が `true` であること(キーを登録したあとは `secrets.anthropic` も `true`)
@@ -84,7 +84,7 @@ R2 の権限確認と binding は、次の「R2(分析の詳細オブジェク�
 **この Issue は binding と権限確認だけ**で、R2 を使うコード(保存・読み出し)は #175(下の「分析履歴ストア」)、操作回数の安全柵は #173。health には R2 の疎通確認を足さない(足すと操作回数が増えるため)。
 - **binding**: `wrangler.toml` の `[[r2_buckets]]`。binding 名 `ANALYSIS_DETAIL`・bucket_name `keiba-cloud-r2`(ユーザーがダッシュボードで作成済み。ロケーションはアジア太平洋)。
   **`remote = true`・`preview_bucket_name`・`jurisdiction` は付けない**(ローカルのテスト・開発が本番のバケットに繋がる。`scripts/test/cloud-config-guard.test.ts` が検査)。
-- **ローカル**: `wrangler dev --local`・`getPlatformProxy` で、R2 はローカルのシミュレータで動く(資格情報は不要。`test/r2-binding.test.ts` が put・get・上書き・存在しないキー〈null〉・バイト列の往復を確かめる)。
+- **ローカル**: `wrangler dev --local`・`getPlatformProxy` で、R2 はローカルのシミュレータで動く(資格情報は不要。`test/r2-binding.integration.test.ts` が put・get・上書き・存在しないキー〈null〉・バイト列の往復を確かめる)。
   `pnpm run deploy:dry`(CI の check ジョブも実行する)も資格情報なしで binding を認識する。
 - **圧縮(決定 2026-10-06)**: 詳細オブジェクトは `node:zlib` の **level 1** の gzip で置く(#175 で実装)。workerd 上の CPU 時間の実測は `docs/current-spec.md` の「R2 の詳細オブジェクトの圧縮」。再現: `pnpm tsx scripts/measure-worker-cpu.ts`。
 
@@ -93,8 +93,8 @@ R2 の権限確認と binding は、次の「R2(分析の詳細オブジェク�
 - **コンストラクタは `{ db, bucket }` だけ**(Worker からでも DO からでも使える。R2 は `get`・`put` だけ。LIST・HEAD は型で使えない)。**保存の呼び出し元はまだ無い**(#164)。
 - **本番の入口は読み取り専用の `GET /api/analyses?race_id=&kaisai_date=&limit=`**(Access の後ろ。D1 だけ。limit は既定 50・上限 200)。**デプロイ後の実機確認**: Access でログインしたブラウザで開き、`{"ok":true,"analyses":[]}` が返ること
   (保存の経路がまだ無いので、空の一覧が正しい。`503` で `d1-error` なら、migration の適用か binding を `/api/health` で確かめる)。
-- **core は相対 import で、バレルや better-sqlite3 を使うモジュールは import しない**(`test/import-guard.test.ts` が推移的に検査。バンドルの実物は `test/bundle-guard.test.ts`)。
-- **テスト**: `test/analysis-repository.test.ts`(ローカルの workerd の D1・R2。AC-b2〜b10・一覧・版別の COVERING INDEX など)・`test/analysis-detail.test.ts`(符号化)・`test/rows-written.test.ts`(1回の保存の D1 の書き込み行数。再現手段)。
+- **core は相対 import で、バレルや better-sqlite3 を使うモジュールは import しない**(`test/import-guard.test.ts` が推移的に検査。バンドルの実物は `test/bundle-guard.integration.test.ts`)。
+- **テスト**: `test/analysis-repository.integration.test.ts`(ローカルの workerd の D1・R2。AC-b2〜b10・一覧・版別の COVERING INDEX など)・`test/analysis-detail.test.ts`(符号化)・`test/rows-written.integration.test.ts`(1回の保存の D1 の書き込み行数。再現手段)。
   ローカルの D1 は「1回の呼び出しで 50 クエリ」を強制しないので、文の数は記録した値で直接 assert している。**batch が他の保存と交錯しない**(`(SELECT max(id) FROM analyses)` の前提)ことは、ローカルの並行テストで確かめたが本番では未検証。最初の本番の実保存で確かめる。
 
 ### R2 の操作回数の安全柵(Issue #173〈#169-c〉)
@@ -103,7 +103,7 @@ R2 の権限確認と binding は、次の「R2(分析の詳細オブジェク�
 - **Class B(読み出し。GET)が 100 万回/月に達したら**: 詳細の表示だけを拒否する(`getAnalysisDetail` が R2 を引かず `detail: "missing"`。要約・配分は出る)。
 - **月は UTC の yyyymm**。`getR2Usage()` で今月の回数・柵の上限・許可の状態を返す(画面〈#165〉・通知〈#166〉への接続は、それぞれの Issue)。
 - **migration 0003 が適用済みであることが前提**(保存と詳細の読み出しが今月の行を読む)。CI は migration を `wrangler deploy` の前に適用する。**手元で確かめるとき**は `pnpm exec wrangler d1 migrations apply DB --local`。
-- テスト: `test/r2-fence.test.ts`(純関数)・`test/analysis-fence.test.ts`(D1・R2 のローカル。カウンタ・月の境界・閾値の境界・読み出しの柵・best-effort)。
+- テスト: `test/r2-fence.test.ts`(純関数)・`test/analysis-fence.integration.test.ts`(D1・R2 のローカル。カウンタ・月の境界・閾値の境界・読み出しの柵・best-effort)。
 
 ### デプロイ時の R2 のステップと、ステータスコードの読み方
 `deploy` ジョブは、D1 の権限確認の次(D1 の migration と `wrangler deploy` の前)に **「R2 の権限を確認」** を実行する(`.github/workflows/deploy-cloud.yml`)。
@@ -395,19 +395,19 @@ netkeiba の取得が、本番(Cloudflare)で通ることを、出馬表1本で�
 ## ローカル smoke の偽ソケット(netkeiba へ出さない)
 `pnpm run smoke` の E は、`main` を `smoke-worker.ts` にした一時設定で起動する。`smoke-worker.ts` は DO の接続関数(`connectFn()`)を、fixture を返す偽ソケットに差し替えたサブクラスを `NetkeibaGate` として export する。
 workerd と nodejs_compat の実環境で、Worker → DO → ソケットクライアント → HttpClient → cheerio が通り、2 秒間隔・ブレーカーが効くことを確かめる。**本番の `main` は `src/worker.ts` で、偽ソケットは本番のバンドルに入らない**
-(`test/bundle-guard.test.ts` が、本番の `wrangler deploy --dry-run` のバンドルに偽ソケットの印が無いこと・core が入っていること・圧縮後 3 MB 以内を固定している)。
+(`test/bundle-guard.integration.test.ts` が、本番の `wrangler deploy --dry-run` のバンドルに偽ソケットの印が無いこと・core が入っていること・圧縮後 3 MB 以内を固定している)。
 
 ## LLM の土台(Issue #193〈#179-a〉。**この Issue は挙動を変えない**。実行本体は #194〈下の「発走前の分析の LLM」〉)
 発走前の分析で LLM(Anthropic の API)を使うための**依存と入口**を足した(#193)。#193 の時点では、本番の入口(`worker.ts`)・`RaceDay` は LLM を呼ばなかった。
 - **`@anthropic-ai/sdk` を cloud の依存に足した理由**: core の `anthropic-client.ts`(メッセージ送信)・`model-selection.ts`(Models API)が値で import する。cloud は workspace の外で `packages/core/node_modules` が CI に無いので、cheerio と同じく cloud/node_modules に入れ、**3か所の alias**(`wrangler.toml`・`tsconfig.json`・`vitest.config.ts`)で向ける。
   版は core の `package.json` の範囲と同じ版を **exact で固定**する(#193 の時点は 0.70.1。**Issue #324 で 0.133.0 に更新**、**Issue #460 で 0.135.0 に更新**、**PR #500〈Dependabot〉で 1.2.0 に更新**。`scripts/test/cloud-config-guard.test.ts` が一致と、`pnpm-lock.yaml` への固定を検査)。推移的に増えるのは、#193 の時点では 3 パッケージ(json-schema-to-ts・@babel/runtime・ts-algebra)。0.133.0 では standardwebhooks・@stablelib/base64・fast-sha256 が増えた。`@opentelemetry/api`(OpenTelemetry の API。0.134.0 から SDK の依存に入った。0.133.0 には無い)は、0.135.0 でも 1.2.0 でも入っている(cloud の lockfile では 0.135.0 が 1.9.1、1.2.0 が 1.10.0)。**入っていても本番では働かない**: global の tracer provider が登録されていないので span は作られない(cloud・core のどちらにも provider の登録は無く、workerd にも OTel の実装は無い)。provider があっても本文は既定で載らない(`metadata_only`)。根拠は #460 のレビュー。環境変数は上の「`ANTHROPIC_*` は登録しない」の一覧。
-- **`@keiba/core/llm`**(core の `src/llm.ts`): `analyze-race`・`anthropic-client`・`model-selection` の再 export だけの狭い入口。better-sqlite3 を値でも型でも経由しない(`packages/core/test/ev/native-free-modules.test.ts`)。`@keiba/core/pipeline` に足さない理由は、SDK がバンドルに入る経路を「この入口を import したとき」だけにするため(`test/bundle-guard.test.ts` が、pipeline だけの入口に SDK の文字列が無いことを検査)。
+- **`@keiba/core/llm`**(core の `src/llm.ts`): `analyze-race`・`anthropic-client`・`model-selection` の再 export だけの狭い入口。better-sqlite3 を値でも型でも経由しない(`packages/core/test/ev/native-free-modules.test.ts`)。`@keiba/core/pipeline` に足さない理由は、SDK がバンドルに入る経路を「この入口を import したとき」だけにするため(`test/bundle-guard.integration.test.ts` が、pipeline だけの入口に SDK の文字列が無いことを検査)。
 - **`src/llm-sender.ts`**: クラウド版の呼び出しの設定値を1か所に置く(sender の上限時間 180 秒〈**暫定**。実 API で測ってから調整〉・モデル一覧 30 秒・SDK の内部再試行 0 回)。core の `createSdkMessageSender`・`createSdkModelLister` に、省略可の `timeout`・`maxRetries` を足した(exe は渡さない。省略時は SDK の既定のまま)。
   再試行を 0 にする理由: SDK の既定(2 回)と `analyzeRace` の再送(1 回)が重なると、1 レースの HTTP が最大 9 本になる。cloud は `analyzeRace` の再送だけに任せる。
-- **バンドルの実測**(`wrangler deploy --dry-run`): SDK + `analyzeRace` 一式の入口(NetkeibaGate の export を含む probe)で 309.94 KiB・gzip 63.10 KiB(本番の現状は 1952.76 KiB・gzip 512.63 KiB)(`test/bundle-guard.test.ts` が、本番との和が 3 MB に収まることと、単体 512 KiB 以内を検査)。
+- **バンドルの実測**(`wrangler deploy --dry-run`): SDK + `analyzeRace` 一式の入口(NetkeibaGate の export を含む probe)で 309.94 KiB・gzip 63.10 KiB(本番の現状は 1952.76 KiB・gzip 512.63 KiB)(`test/bundle-guard.integration.test.ts` が、本番との和が 3 MB に収まることと、単体 512 KiB 以内を検査)。
   - **Issue #324(SDK 0.70.1 → 0.133.0、iconv-lite 0.6.3 → 0.7.3)の前後の本番の dry-run**(`cloud/` で `npx wrangler deploy --dry-run --outdir dist-dry` の `Total Upload`): 更新前 3276.39 KiB・gzip 869.44 KiB → 更新後 3992.01 KiB・gzip 975.54 KiB。`node:` の import は更新前後とも `node:stream` 1・`node:zlib` 3 で増えていない。
   - **Issue #460(SDK 0.133.0 → 0.135.0、wrangler 4.149.0 → 4.151.1、`upload_source_maps = false` を明示)の後の本番の dry-run**(同じコマンド。Issue #465 で作業ツリーに `cd cloud && pnpm install --ignore-workspace --frozen-lockfile` したうえで測り直した): `Total Upload: 4307.60 KiB / gzip: 1025.23 KiB`(`dist-dry` には `worker.js` と `README.md` だけで、source map は無い)。
-    #324 の後(3992.01 KiB・gzip 975.54 KiB)からの差は +315.59 KiB・gzip +49.69 KiB(2 つの測定値の引き算)。増加の原因を #460 のコメントは SDK 0.135.0 の OpenTelemetry の配線とするが、内訳はここでは測っていない。上限(`test/bundle-guard.test.ts` の圧縮後 3 MB)からは遠い。
+    #324 の後(3992.01 KiB・gzip 975.54 KiB)からの差は +315.59 KiB・gzip +49.69 KiB(2 つの測定値の引き算)。増加の原因を #460 のコメントは SDK 0.135.0 の OpenTelemetry の配線とするが、内訳はここでは測っていない。上限(`test/bundle-guard.integration.test.ts` の圧縮後 3 MB)からは遠い。
   - **PR #500・#501(SDK 0.135.0 → 1.2.0、wrangler 4.151.3 → 4.152.0)の前後の本番の dry-run**(同じコマンド。dca1b5f と ffd7fe3 を `git worktree add` で別々に展開し、それぞれ cloud で `pnpm install --ignore-workspace --frozen-lockfile` してから実行した。code-reviewer が測り直した値): `Total Upload` は 4379.68 KiB・gzip 1040.92 KiB → 4464.02 KiB・gzip 1054.30 KiB(差は +84.34 KiB・gzip +13.38 KiB)。出力先には `worker.js` と `README.md` だけがあり、source map は無い。`node:stream` 1・`node:zlib` 4 の import は変わらない(`worker.js` の `from "node:..."` の数)。
   - **1.0.0 で変わった、API へ送るヘッダ**(PR #500。偽 fetch で新旧の SDK のリクエストを比べた): `anthropic-version` は `2023-06-01` → `2026-10-21`、API キーは `x-api-key: <キー>` → `Authorization: Bearer <キー>`(`x-api-key` は付かない)。本文・URL・メソッドは同じ。`temperature`・`top_p`・`top_k` は新しい版で 400 になるが、本番コードは送っていない。**実 API で Bearer と新しい版が受理されることは、偽 fetch では確かめられない**(`analyses.llm_note` に LLM の失敗の理由が残るので、公開の後の最初の分析で確認する)。
 - **Workers での実行**: 偽 fetch を注入した workerd(`wrangler dev --local`)で、Models API の取得 → メッセージ送信が通ること、`timeout` が効くこと、429 で `maxRetries` の既定が 3 本・0 が 1 本であることを確かめた。**実 API には出ていない。**
@@ -439,7 +439,7 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **単勝の想定・実際のオッズ(Issue #247)**: 馬ごとのカードに「単勝 想定(目安) 8.5倍 / 実際 12.3倍」の1行(結果画面と発走前のカードの中の両方)。想定 = 払戻率 0.8 ÷ 勝率(地方も 80% と仮定した概算)で、勝率は補正後の3着内率から**配分の単勝候補と同じ関数**で推定した目安(AI が直接判断した値ではない)。計算はサーバ(`GET /api/analyses/{id}` の馬ごとの `winProb`・`fairWinOdds`・`winOdds` と `race.oddsStatus`)で、クライアントの束に Plackett-Luce を入れない。実際のラベルは確定=「実際」・発売中=「実際(暫定)」・発売前=「実際(予想)」。欠損は「-」・1000 を超える値は「1000倍超」。丸めた値どうしで実際が想定より高いときは「↑想定より高い」(文字だけ)。説明文は「馬ごとの評価」の見出しの下に1回。Discord の「印」の馬の行にも同じ書式(`単勝 想定…/実際…`。#253 で「単勝 」の接頭辞を付けた)で添える。詳細は `docs/current-spec.md` の「クラウド版の単勝の想定オッズ(#247)」。
 - **複勝の想定・実際のオッズ(Issue #253)**: 馬ごとのカードの単勝の行の下に「複勝 想定(目安) 2.0倍 / 実際 1.5〜2.3倍」の1行(結果画面と発走前のカードの中の両方)。想定 = 払戻率 0.8 ÷ 複勝の的中率(地方も 80% と仮定した概算)。的中率は出走頭数で決まる: **8頭以上は補正後の3着内率そのもの**、**5〜7頭(複勝は2着まで)は2着内率**(勝率と同じ Plackett-Luce の分布の1着+2着の確率。見出しは「複勝(2着まで)」)、**4頭以下は出さない**(想定も実際も「-」)。判定は配分の `resolvePlaceBetTarget` と同じ(`cloud/src/place-odds-view.ts`)。実際は raceSnapshot の `placeOddsMin`・`placeOddsMax`(**上限は #253 から保存**。過去の分析は上限が無く「実際 1.5倍〜」)。想定が 1.0 倍を割る(的中率 80% 超)ときは「1.0倍未満」。「↑想定より高い」は**実際の下限**と想定を丸めた値どうしで比べ、想定が 1.0倍未満のときは比べない。計算はサーバ(`GET /api/analyses/{id}` の馬ごとの `fairPlaceOdds`・`actualPlaceOddsMin`・`actualPlaceOddsMax` と `race.placeBasis`)。説明文は単勝とは別の段落。Discord の「印」の馬の行は、単勝(「単勝 想定…/実際…」)に続けて「複勝 想定…/実際…(下限〜上限)」を1行で添える。詳細は `docs/current-spec.md` の「クラウド版の複勝の想定オッズ(#253)」。
 - **印の付いた馬(Issue #211)**: 結果画面と発走前のカードの中(開いたときだけ)の、「馬ごとの評価」より上に、印の付いた馬の一覧(1行は印・馬番・馬名。数値は出さない)を出す。印の順(◎〇▲△☆注。core の `PREDICTION_MARKS` と同じ順をクライアントの `KNOWN_MARK_ORDER` に持ち、テストで一致を固定)→ 馬番の昇順。`PREDICTION_MARKS` に無い印は既知の印の後ろに馬番の昇順で置く(落とさない)。印の無い馬(null・空白だけ)は含めず、1頭も無ければ section ごと出さない。馬名が無い(null・空文字)馬は印と馬番だけ。サーバ・D1・exe・`page.ts` の CSS は無変更(`horse-list` を再利用)。
-- **取得関数**: `api-analysis.ts` の `AnalysisDetail` に `llmNote`(`string | null`。キー欠落・型違いは想定外の応答)。`test/client-api-analysis-contract.test.ts` が、本物の `handle()` の応答(理由あり・印の制約違反・過去の分析〈null〉)を通す。
+- **取得関数**: `api-analysis.ts` の `AnalysisDetail` に `llmNote`(`string | null`。キー欠落・型違いは想定外の応答)。`test/client-api-analysis-contract.integration.test.ts` が、本物の `handle()` の応答(理由あり・印の制約違反・過去の分析〈null〉)を通す。
 - **文言**: カードの説明・設定の補助文は上の「カードの説明」「設定画面」。画面に Issue 番号は出さない(設定の「発走何分前」の補助文に出ていた「(#166)」も消した)。
 
 ## スマホ画面に強調材料・懸念事項と LLM の usage を出す(Issue #198〈#196-c〉。v1.20.1)
@@ -451,8 +451,8 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
   - **警告の行**(該当するものだけ。並びは切り詰め → 拒否 → 失敗 → 再生 → 記録の欠け): 「出力の上限に達して途中で切れた呼び出しが N 回ありました」(`stopReason` が `max_tokens`。上限の数値は記録に無いので書かない)・「拒否された呼び出しが N 回ありました」(`refusal`)・「失敗した呼び出しが N 回ありました」・「うち N 回は、前の実行で記録した応答を再生したものです(時間・トークン数は元の呼び出しの値)」・「一部の呼び出しは時間・トークン数の記録が無く、合計はその分を含みません」(測っていない旧い記録の再生など。失敗の呼び出しのトークンが null なのは欠けに数えない)。
   - 外から来た文字列(`stopReason`・`model`・`error`)は画面に出さない(`stopReason` は固定の2語との一致を数えるだけ)。
   - 時間の表記は 1 秒未満・整数秒・「2分05秒」。トークンの桁区切りは自前(ロケールに依らない)。
-- **取得関数**(`api-analysis.ts`): `AnalysisHorse` に `highlights`・`concerns`(文字列の配列。**キー欠落・配列でない・文字列でない要素が1つでもあれば想定外の応答**)、`AnalysisDetail` に `llmCalls`(`null` か、要素を検査した配列。キー欠落・要素のキーの型違いは想定外。空配列は受け付ける)。`test/client-api-analysis-contract.test.ts` が、本物の `handle()` の応答(項目あり・旧い分析)を通す。
-- **R1**(`test/analysis-llm-calls.test.ts`): `getAnalysisDetail` が `detail: "missing"` を返す経路(Class B の柵・R2 のオブジェクトが無い・壊れている・get が例外)でも、`llmNote`・`llmCalls`・馬の `highlights`・`concerns` は D1 の値のまま返る。
+- **取得関数**(`api-analysis.ts`): `AnalysisHorse` に `highlights`・`concerns`(文字列の配列。**キー欠落・配列でない・文字列でない要素が1つでもあれば想定外の応答**)、`AnalysisDetail` に `llmCalls`(`null` か、要素を検査した配列。キー欠落・要素のキーの型違いは想定外。空配列は受け付ける)。`test/client-api-analysis-contract.integration.test.ts` が、本物の `handle()` の応答(項目あり・旧い分析)を通す。
+- **R1**(`test/analysis-llm-calls.integration.test.ts`): `getAnalysisDetail` が `detail: "missing"` を返す経路(Class B の柵・R2 のオブジェクトが無い・壊れている・get が例外)でも、`llmNote`・`llmCalls`・馬の `highlights`・`concerns` は D1 の値のまま返る。
 
 ## 設定画面にプロンプトのプレビューを出す(Issue #201。v1.20.2)
 **Issue #396 で、文面の組み立てをクライアントからサーバへ移した**(下の「Issue #396」の箇条書き)。以下の箇条書きのうち、「クライアントで呼ぶ」「ネットワークには出ない」「ビルド」「型検査の閉包」「検査」の記述は #201 のときの記録で、今は #396 の記述が正しい。
@@ -509,7 +509,7 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **デプロイの確認**: CI の「Worker をデプロイ」のログに `Deployed keiba-cloud triggers` と `schedule: 0 12 * * *`・`schedule: 0 14 * * *` が出る(`deploy:dry` は schedule を出さない)。登録に失敗すると `Trigger configuration ... was only partially updated` で赤になる(Worker のコードは既にアップロード済みで、cron だけ無い状態)。API トークンの権限で通るかは**未確認**(初回のデプロイの結果で確かめる)。
 - **初回の注意**: cron はデプロイ直後には発火せず、**次の 21:00 JST**に最初に発火する。本番では手動で `scheduled` を起動する手段が無い。翌日が開催日の夜(金曜・土曜・開催のある祝日の前日)に最初の発火が来るようにデプロイすると、観測しやすい。
 - **ローカルでの確認**: `wrangler dev` の `/cdn-cgi/local/scheduled?cron=0+12+*+*+*&time=<エポックミリ秒>`(`--test-scheduled` は不要。実測)で cron を手動発火できる(`cron` の引数は情報だけで、実行の種類は `time` の JST の時刻で決まる)。`pnpm run smoke` の構成 G が、偽ソケットでこれを通す(過去の開催日なので全件 skip になり、Claude API にも netkeiba にも出ない)。
-- 検査: `test/scheduled.test.ts`・`test/scheduled-report.test.ts`・`test/pre-analysis-schedule.test.ts`(実行の種類・翌日の開催日・曜日の表)・`test/race-day-rescue.test.ts`(救済の冪等性・判定と通知)・`test/plan-failure.test.ts`(失敗の判定の表・文面・通知の候補)・`test/handler-plan.test.ts`・`test/race-day-rpc-surface.test.ts`・`test/race-day-plan.test.ts`(G-E2)・`test/bundle-guard.test.ts`(`async scheduled(` が本番のバンドルにある)・`scripts/test/cloud-config-guard.test.ts`(cron 2 本・toml と定数の整合・`scheduled.ts` の Discord 参照が失敗通知の 1 箇所だけ)・smoke。
+- 検査: `test/scheduled.test.ts`・`test/scheduled-report.test.ts`・`test/pre-analysis-schedule.test.ts`(実行の種類・翌日の開催日・曜日の表)・`test/race-day-rescue.test.ts`(救済の冪等性・判定と通知)・`test/plan-failure.test.ts`(失敗の判定の表・文面・通知の候補)・`test/handler-plan.test.ts`・`test/race-day-rpc-surface.test.ts`・`test/race-day-plan.test.ts`(G-E2)・`test/bundle-guard.integration.test.ts`(`async scheduled(` が本番のバンドルにある)・`scripts/test/cloud-config-guard.test.ts`(cron 2 本・toml と定数の整合・`scheduled.ts` の Discord 参照が失敗通知の 1 箇所だけ)・smoke。
 
 ## 結果の自動取り込み(Issue #208〈#182-B〉。**公開すると、次の 23 時の cron から自動で始まる**。Issue #249 まで 9:00 JST)
 分析した過去のレースの結果(着順・払戻)を netkeiba から取得して D1 に保存する(保存の形は exe と同じ。仕様は `docs/current-spec.md` の「クラウド版の結果の自動取り込み」)。LLM・課金は増えない。当日中の取り込みは Issue #209(次の節)。
@@ -520,7 +520,7 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **観測**: `GET /api/plan?kaisai_date=YYYYMMDD` の `result_import`(取り込み待ち・取り込み済み・諦めた件数と、各レースの状態・試行回数・直近の分類)。取り込まれないレースがあるときは、まずここの `last_class`(`not-confirmed`・`no-payout`・`parse-error`・`fetch-failed`・`save-failed`・`blocked`・`busy`)を見る。その日の事前分析の計画が止まっている(`plan.stage` が `done` でない)と、その日の結果は取り込まれない。
 - **止め方**: 取り込みだけを止める専用の設定は無い。cron ごと止めるなら上の「定時の自動実行」の止め方(`crons = []`)。手動の `POST /api/results/import` は、cron を止めても使える。
 - **ローカルでの確認**: `pnpm run smoke` の構成 F の末尾が、cron の手動発火 → 偽ソケットの結果ページ(実フィクスチャ)→ D1 に 16 頭が保存されることまでを通す。netkeiba にも出ない。
-- 検査: `test/race-day-result.test.ts`・`test/result-dispatch.test.ts`・`test/handler-results.test.ts`・`test/scheduled.test.ts`・`test/result-repository.test.ts`・`scripts/test/cloud-config-guard.test.ts`・smoke。
+- 検査: `test/race-day-result.test.ts`・`test/result-dispatch.integration.test.ts`・`test/handler-results.test.ts`・`test/scheduled.test.ts`・`test/result-repository.integration.test.ts`・`scripts/test/cloud-config-guard.test.ts`・smoke。
 
 ## 当日中の結果の取り込みと当日傾向(Issue #209。**公開後に計画が確定する開催日から、本番で動く**)
 計画の確定時に、発走時刻のある計画の行ごとに結果の取り込みの行を積み(発走 + 15 分が最初の試行)、全頭の着順がそろったページだけを D1 に保存する。発走前の分析は、保存済みの前のレースの結果から、プロンプトに「当日の同場・同面傾向」を入れる(仕様と実測は `docs/current-spec.md` の「クラウド版の当日中の結果の取り込みと当日傾向」)。LLM・課金は増えない。
@@ -529,7 +529,7 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **効く範囲**: 同じ場・同じ面で、取り込み済みの前のレースが 2 つ以上あるとき(目安は R5 以降)。**地方は結果ページに通過順の列が無く、ほとんど効かない**(実質、中央だけ)。「発走の何分前に評価するか」が大きいほど、前のレースの結果が間に合わず入らない。
 - **発走前の分析を押しのけない**: 結果は最も低い優先度(各ステップの先頭で期限が来た行を昇格し、タスクがあるあいだは結果は動かない)。期限を待つ planned の行が残る今日の DO でも動く。
 - **止め方**: 取り込みだけを止める専用の設定は無い(cron ごと止めるなら「定時の自動実行」の止め方)。D1 の読み出しが失敗したときは、当日傾向なしで分析を続ける(警告ログだけ)。
-- 検査: `test/race-day-result-sameday.test.ts`(積む行・全頭の判定・5 分おき 10 回・今日の DO で動く条件・fuzz)・`test/race-day-sameday-trend.test.ts`(配線・D1 の統合・リークの対照)・core の `parse-race-result.test.ts`(`parseRaceFieldSize`)。
+- 検査: `test/race-day-result-sameday.test.ts`(積む行・全頭の判定・5 分おき 10 回・今日の DO で動く条件・fuzz)・`test/race-day-sameday-trend.integration.test.ts`(配線・D1 の統合・リークの対照)・core の `parse-race-result.test.ts`(`parseRaceFieldSize`)。
 
 ## exe からの移行機能の廃止(Issue #394〈#390 D-2〉。ユーザー決定 2026-10-19)
 exe からクラウド版への移行は #167 で完了した。取り込みの API・DO・画面・形式の検証は、使わなくなったので削除した。**動作の記述(API・予算・画面)は、削除前のコミット `46410ab` の本節と `docs/current-spec.md` で読める。**
@@ -542,7 +542,7 @@ exe からクラウド版への移行は #167 で完了した。取り込みの 
   - **R2 の `migration/` の下**: 取り込みが失敗で終わっていたり途中で止まっていたりすると、アップロードされたファイル(`migration/<uuid>.ndjson.gz`)が残っている可能性がある(完了時は削除される)。本番の R2 は確認していない。**触っていない**。
 - **一覧の並び**: `GET /api/analyses`(とレース画面の過去の分析)は**分析日時の降順**(同時刻は id の降順)。migration `0008` の索引 3 つ(`idx_analyses_analyzed_at`・`_race_analyzed`・`_kaisai_analyzed`)で、並べ替えの一時領域を使わず先頭の N 件だけを読む。この並びと索引は、移行とは関係なく今も使う。
 - **結果の補完との関係**: 結果の補完(下)は、以前は移行の DO が `completed` のときだけ動いていたが、その条件は外した(本番の移行は `completed` だった)。
-- **検査**: `test/analysis-list-order.test.ts`(一覧の並び)、`test/bundle-guard.test.ts`(CloudMigration が本番のバンドルに無い)、`scripts/test/cloud-config-guard.test.ts`(binding は 7 つ・migration は v1〜v9・`deleted_classes` は v9 の `CloudMigration` だけ)、smoke の H(旧い移行の API は受け付けない)。
+- **検査**: `test/analysis-list-order.integration.test.ts`(一覧の並び)、`test/bundle-guard.integration.test.ts`(CloudMigration が本番のバンドルに無い)、`scripts/test/cloud-config-guard.test.ts`(binding は 7 つ・migration は v1〜v9・`deleted_classes` は v9 の `CloudMigration` だけ)、smoke の H(旧い移行の API は受け付けない)。
 
 ## 検証画面(Issue #219。v1.32.0。**デプロイ後の最初の `GET /api/verify` で、D1 の読み取り行数の実値を確かめる**)
 exe の検証画面のうち、累積回収率と配分ベースの回収率を、一覧の「検証」リンク(`#verify`)から見られる。集計は新しい DO `VerifyReportDO`(migration v5・binding `VERIFY_REPORT`)が、core の `computeVerifyReport`(exe と同じ関数・同じ設定)で行い、結果を 3 区分(全体/中央のみ/地方のみ)同時にキャッシュする。仕様と実測は `docs/current-spec.md` の「クラウド版の検証画面(回収率)」。
@@ -588,14 +588,14 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - **いつ動くか**: ①**移行の状態は見ない**(Issue #394。以前は移行の DO が `completed` のときだけ動かしていた) ②**JST 01:00〜06:00 の間だけ**(事前分析の cron〈21:00・23:00〉・発走前の分析の時間帯を避ける) ③**1 晩 150 レースまで・1 回 30 レースまで**(1 つの開催日だけ。新しい日から) ④**飛行中のチャンクは常に 1 つ**(日単位の DO は gate への呼び出しを 1 本に直列化するので、補完が gate に並べるのは同時に 1 本) ⑤依頼の前に gate の状態(`status()`)を読み、ブレーカーが開いていれば解除の 1 分後まで、待ちが 4 以上なら 5 分待つ(**既存の毎日の自動実行が常に先**)。
 - **起動**: cron の `scheduled` が毎日 `kick()` を呼ぶ(アラームが無ければ張るだけ)。`GET /api/results/backfill` の読み取りでも、アラームが無ければ張り直す(自己回復)。失敗しても事前分析の計画・結果の依頼を失敗させない。
 - **取得できないレース**: 永続的な分類(`not-confirmed`・`no-payout`・`parse-error`・`incomplete`、および依頼の前の検査で落ちる `invalid-race`)は 1 サイクル(日単位の DO の 3 試行)で永久に除外。**ただし系統的な障害**(1 つのチャンクで取り込みが 0 件かつ失敗が全件、同じ永続的な分類。netkeiba が夜間に 200 のメンテナンス画面を返す等)は一時的な扱い(晩数に数える)にし、その晩のレースを一括で永久に除外しない(本当に未確定のレースも 3 晩目には除外される)。一時的な分類(`fetch-failed`・`save-failed`・40 分たっても進まない `stalled`)は 1 晩に 1 回、3 晩目で除外。gate の都合(`blocked`・`busy`)・依頼の失敗は晩数に数えずその晩は止め、5 晩続いたら除外。**除外は `backfill_race` の記録(DO の SQLite)で、無限には続かない**。
-- **D1 の書き込み**: 結果 1 レースの新規保存は 38〜62 行(保存済みの結果ページ 14 本の実測。再現: `cd cloud && pnpm exec vitest run test/result-rows-written.test.ts`)。150 レース/晩なら多くとも約 9,300 行で、Free の 10 万行/日の約 9%。
+- **D1 の書き込み**: 結果 1 レースの新規保存は 38〜62 行(保存済みの結果ページ 14 本の実測。再現: `cd cloud && pnpm exec vitest run test/result-rows-written.integration.test.ts`)。150 レース/晩なら多くとも約 9,300 行で、Free の 10 万行/日の約 9%。
 - **観測**: `GET /api/results/backfill`(GET だけ・Access の後ろ)→ `{ ok, state, remaining, undated, imported, abandoned: { total, byClass }, tonight: { night, dispatched, limit }, inflight, nextRunAt, window }`。`state` は `ready`・`running`・`paused`・`waiting-window`・`done`・`disabled`(`RESULT_BACKFILL_NIGHTLY_LIMIT="0"` で止めたとき)。画面は無い(Issue #394 で、移行画面の 1 行を廃止した)。管理者がこの API を直接開いて見る。`migrationState` の項目と `waiting-migration` の状態は Issue #394 で無くした。
 - **上書き(下げる方向だけ)**: Worker の var `RESULT_BACKFILL_NIGHTLY_LIMIT`(1〜150 の整数。それ以外・150 を超える値は無視)。
 - **止め方**: Worker の var `RESULT_BACKFILL_NIGHTLY_LIMIT` を **`0`** にしてデプロイする(完全一致の `"0"` だけ。前後の空白は無視)。補完の DO は `kick` でアラームを張らず、起きても何もしない・アラームを張り直さない(止める前に張られていたアラームは、起きた時点で連鎖が終わる)。`GET /api/results/backfill` の `state` は `disabled`。結果の自動取り込み(cron の 7 日)は止まらない。再開するには var を消す(または 1〜150 にする)。cron ごと止めるなら上の「定時の自動実行」の止め方(`crons = []`)。
 - **smoke・CI**: `cloud/smoke.ts` のすべての構成が `RESULT_BACKFILL_NIGHTLY_LIMIT:0` で動く(CI の smoke が補完の窓に当たっても netkeiba に出ない。`scripts/test/cloud-config-guard.test.ts` が固定)。**窓の中でも smoke を実行してよい**。
-- **検査**: `test/result-backfill-core.test.ts`(状態機械・窓・上限・gate・除外・永続)・`test/result-backfill-repository.test.ts`(ローカルの D1)・`test/result-rows-written.test.ts`・`test/handler-backfill.test.ts`・`test/scheduled.test.ts`(kick)・`test/bundle-guard.test.ts`・`scripts/test/cloud-config-guard.test.ts`・smoke(構成 H)。
+- **検査**: `test/result-backfill-core.test.ts`(状態機械・窓・上限・gate・除外・永続)・`test/result-backfill-repository.integration.test.ts`(ローカルの D1)・`test/result-rows-written.integration.test.ts`・`test/handler-backfill.test.ts`・`test/scheduled.test.ts`(kick)・`test/bundle-guard.integration.test.ts`・`scripts/test/cloud-config-guard.test.ts`・smoke(構成 H)。
 
-- **段階 2: 確定の単勝オッズ・人気の補完(Issue #259)**: 段階 1(未取込の結果)が尽きたら、結果はあるがオッズが 1 頭も入っていないレース(`race_results.win_odds` が全頭 NULL。migration 0011 より前に取り込んだ分)を、同じ仕組み(窓・1 晩 150 レース・1 回 30 レース・gate の都合・失敗の扱い)で少しずつ埋める。結果ページを取り直して、**確定の単勝オッズ・人気だけ**を NULL の列に保存する(着順・払戻・組合せ払戻は上書きしない)。取り込めたレースは `backfill_race` に `fill_done` で残し、二度と列挙しない。**Issue #270 で、取消・除外の記録(`race_results.scratched` が NULL の旧い行のうち、着順が NULL の行)の補完も同じ取得 1 回で行うようにした**(`saveScratched`。NULL の行にだけ書く)。`GET /api/results/backfill` の `winOdds`(`remaining`・`undated`・`filled`・`scratchedMissing`・`abandoned`)で進捗が分かる。開催日が NULL の分析のレースは対象外。仕様と実測は `docs/current-spec.md` の「クラウド版の確定単勝オッズ・人気の保存と補完」。検査: `test/result-win-odds.test.ts`・`test/result-win-odds-backfill-repository.test.ts`・`test/result-backfill-core.test.ts`(段階 2 の節)・`test/race-day-result.test.ts`(`winOddsOnly` の節)。
+- **段階 2: 確定の単勝オッズ・人気の補完(Issue #259)**: 段階 1(未取込の結果)が尽きたら、結果はあるがオッズが 1 頭も入っていないレース(`race_results.win_odds` が全頭 NULL。migration 0011 より前に取り込んだ分)を、同じ仕組み(窓・1 晩 150 レース・1 回 30 レース・gate の都合・失敗の扱い)で少しずつ埋める。結果ページを取り直して、**確定の単勝オッズ・人気だけ**を NULL の列に保存する(着順・払戻・組合せ払戻は上書きしない)。取り込めたレースは `backfill_race` に `fill_done` で残し、二度と列挙しない。**Issue #270 で、取消・除外の記録(`race_results.scratched` が NULL の旧い行のうち、着順が NULL の行)の補完も同じ取得 1 回で行うようにした**(`saveScratched`。NULL の行にだけ書く)。`GET /api/results/backfill` の `winOdds`(`remaining`・`undated`・`filled`・`scratchedMissing`・`abandoned`)で進捗が分かる。開催日が NULL の分析のレースは対象外。仕様と実測は `docs/current-spec.md` の「クラウド版の確定単勝オッズ・人気の保存と補完」。検査: `test/result-win-odds.integration.test.ts`・`test/result-win-odds-backfill-repository.integration.test.ts`・`test/result-backfill-core.test.ts`(段階 2 の節)・`test/race-day-result.test.ts`(`winOddsOnly` の節)。
 
 ## 手動起動の入口(Issue #180)
 **管理者だけ**(Issue #238。閲覧者は 403)。Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・一括の予約〈`POST /api/analyses/run/bulk`。Issue #251〉・下の `GET /api/races`・`GET /api/netkeiba/check`。ほかに、定時の起点は cron の `scheduled` の `requestPlan` 1 つ〈Issue #206。手動 4 + 定時 1 の計 5 つ〉。さらに結果の取り込みの依頼〈Issue #208。cron と `POST /api/results/import` が共有する `dispatchResultImports` の中の 1 箇所〉で、呼び出し箇所は計 6 つ)。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定する。
@@ -607,7 +607,7 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - `GET /api/races?kaisai_date=20260628&venue=central|nar` — 開催日のレース一覧(場 → R の順)。`venue` は必須。開催日の DO(RaceDay)が、gate 経由・DO のキャッシュ(6 時間)で取る。**netkeiba に出うる GET**(HEAD は 405。`Sec-Fetch-Site` が `same-origin`・`none` 以外なら 403)。開催なしの日は `races: []`。取得の失敗は 503 `netkeiba-unavailable`(`reason`: `blocked`・`busy`・`failed`)。
   **デプロイ後の実機確認**: Access でログインしたブラウザで、開催のある日と開催のない日を開く。公開前の日・遠い未来・過去の日付で netkeiba が何を返すかは、まだ実測していない。
 - `GET /api/analyses/{id}` — 分析1件(馬名つき・配分つき)。`rawResponse`・`contributions`・raceSnapshot の全体は返さない。R2 の柵に達した・R2 に無いときは、馬名なしの同じ形(`detail: "missing"`)。**詳細が present のとき、D1 の書き込みが1行ある**(`r2_ops` の Class B の +1)ので、画面から自動で繰り返し呼ばない。
-- 検査: `test/race-day-list.test.ts`・`test/handler-races.test.ts`・`test/analysis-view.test.ts`・`test/handler-analysis-detail.test.ts`、smoke。
+- 検査: `test/race-day-list.test.ts`・`test/handler-races.test.ts`・`test/analysis-view.test.ts`・`test/handler-analysis-detail.integration.test.ts`、smoke。
 
 ## 設定(Issue #178)
 発走前の分析の設定(資金・1レース上限・ケリー係数・組合せオッズの取得・各券種の配分など)は D1 の `cloud_settings` の1行(`id = 1`)。**行が無ければ全項目が exe の既定値**(資金・1レース上限は 0 = 配分提案なし、組合せオッズの取得は OFF)。

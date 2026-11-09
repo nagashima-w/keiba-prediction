@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
  *
  * 検出は 2 通り: (1) SQL の文字列に「INSERT/UPDATE/DELETE/REPLACE … 表の名前」がある、(2) core の codec が持つ書き込みの SQL の定数を参照している(codec の文は表の名前を定数で組む)。
  * コメントは除いて見る(コメントに書かれた SQL を数えない)。
+ * 限界(Issue #626): 固定するのはファイル単位の許可リストと印の呼び出し箇所の数だけで、「どの関数の batch の最後に付くか」「付けた印のレース ID が正しいか」は見ない。経路ごとの印は統合テスト(verify-race-mark.integration.test.ts ほか)が見る。
  */
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 

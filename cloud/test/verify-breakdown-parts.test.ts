@@ -111,6 +111,15 @@ describe("内訳の部分(Issue #625)", () => {
     expect(intervals(changed)).not.toStrictEqual(intervals(baseline));
   });
 
+  it("同じレースが複数の部分にあると合わせられない(Issue #626)", () => {
+    const { source, analyses, betRows, facts } = randomInputs(88, 30);
+    const part = buildVerifyBreakdownParts(source, betRows, analyses, facts);
+    // 前提: 部分にレースがある(空だと重なりが起きない)
+    expect(part.races.length).toBeGreaterThan(3);
+    expect(() => mergeBreakdownParts([part, part])).toThrow(/同じレースが複数の部分/);
+    expect(() => mergeBreakdownParts([part])).not.toThrow();
+  });
+
   it("部分は構造化複製できる", () => {
     const { source, analyses, betRows, facts } = randomInputs(85, 40);
     const part = buildVerifyBreakdownParts(source, betRows, analyses, facts);
