@@ -645,7 +645,8 @@ describe("場ごとの開閉(#187)", () => {
     const before = h.calls.length;
     refreshButton(h).on!.click!();
     expect(h.calls.length).toBeGreaterThan(before); // 前提: 取り直しが実際に走った
-    expect(toggles(h)).toHaveLength(0); // 取り直しの間は一覧が空(読み込み中)
+    expect(toggles(h)).toHaveLength(2); // Issue #576: 取り直しの間も前の一覧が残る(開閉の状態もそのまま)
+    expect(expanded(h)).toEqual(["false", "true"]);
     await h.app.whenIdle();
     expect(toggles(h)).toHaveLength(2);
     expect(expanded(h)).toEqual(["false", "true"]);
@@ -685,13 +686,21 @@ describe("場ごとの開閉(#187)", () => {
     expect(fuku).not.toContain("実行中");
     expect(fuku).not.toContain("失敗");
 
+    // Issue #576: 板の「更新」に失敗しても、前の板(バッジ・要約)は残る。失敗の注記が出る
     h.responders.set(BOARD, async () => ({ status: 503, json: async () => ({ ok: false, error: { type: "race-day-error" } }) }));
     refreshButton(h).on!.click!();
     await h.app.whenIdle();
-    expect(toggles(h).map(textOf).join(" ")).not.toContain("実行中");
-    expect(toggles(h).map(textOf).join(" ")).not.toContain("失敗");
-    // Issue #186(ユーザーの依頼): 見出しにレース数(旧版は `2R`)は出さない。要約が無ければ「▸ 場名」だけ
-    expect(toggles(h).map(textOf)).toEqual(["▸ 函館", "▸ 福島"]);
+    expect(textOf(toggles(h)[0]!)).toBe("▸ 函館・実行中 1・失敗 1");
+
+    // 板が最初から取れていないときは、要約を出さない(これまでの保証。場名だけ。Issue #186: 数字+R は出さない)
+    const g = await started(`#date=${DATE}&venue=central`);
+    g.responders.set("/api/races?kaisai_date=20260627&venue=central", async () => ok(racesBody("central", TWO_VENUES)));
+    g.responders.set("/api/analyses/status?kaisai_date=20260627", async () => ({ status: 503, json: async () => ({ ok: false, error: { type: "race-day-error" } }) }));
+    g.go(`#date=20260627&venue=central`);
+    await g.app.whenIdle();
+    expect(toggles(g).map(textOf).join(" ")).not.toContain("実行中");
+    expect(toggles(g).map(textOf).join(" ")).not.toContain("失敗");
+    expect(toggles(g).map(textOf)).toEqual(["▸ 函館", "▸ 福島"]);
   });
 });
 

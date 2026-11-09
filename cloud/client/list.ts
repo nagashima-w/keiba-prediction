@@ -78,8 +78,13 @@ export function summarizeGroup(races: readonly RaceRow[], board: BoardSource): G
   return { running, failed };
 }
 
-export type ListSource = { readonly kind: "loading" } | { readonly kind: "error"; readonly message: string } | { readonly kind: "ready"; readonly races: readonly RaceRow[] };
-export type BoardSource = { readonly kind: "none" } | { readonly kind: "error"; readonly message: string } | { readonly kind: "ready"; readonly rows: readonly BoardRow[] };
+/** ready の `refreshing`: 「更新」の取り直し中(前の一覧を出したまま)。`refreshNotice`: 取り直しに失敗した注記(前の一覧を残している。Issue #576)。 */
+export type ListSource =
+  | { readonly kind: "loading" }
+  | { readonly kind: "error"; readonly message: string }
+  | { readonly kind: "ready"; readonly races: readonly RaceRow[]; readonly refreshing?: boolean; readonly refreshNotice?: string };
+/** ready の `notice`: 板の取り直しに失敗した理由(前のバッジを残している。Issue #576)。 */
+export type BoardSource = { readonly kind: "none" } | { readonly kind: "error"; readonly message: string } | { readonly kind: "ready"; readonly rows: readonly BoardRow[]; readonly notice?: string };
 
 export interface ListModelInput {
   readonly route: Route;
@@ -198,6 +203,8 @@ export interface ListModel {
   readonly updatedLabel: string | null;
   readonly error: string | null;
   /** 板だけが失敗したときの注記(何の失敗かを示す前置きつき)。 */
+  /** 「更新」の取り直しに失敗した注記(前の一覧を残している。Issue #576)。 */
+  readonly refreshNotice: string | null;
   readonly boardNotice: string | null;
   /** 追跡の停止の注記(「状態を更新」つき)。止まっていないとき null。 */
   readonly tracking: string | null;
@@ -229,6 +236,9 @@ export function updatedLabel(atMs: number, nowMs: number): string {
 }
 
 /** 板の失敗の注記の前置き(バッジが出ない理由を示す。Issue #186 段階1)。 */
+/** 一覧の「更新」に失敗したとき、前の一覧を残している注記の前置き(Issue #576)。 */
+export const REFRESH_NOTICE_PREFIX = "更新できませんでした。前の一覧を表示しています。";
+const KEPT_BOARD_NOTE = "前の状態を表示しています。";
 export const BOARD_NOTICE_PREFIX = "実行状態(バッジ)を取得できませんでした。";
 
 /** 「次に発走するレース」の元(Issue #559)。`races` は取得済みの一覧。`ListModel.next` の注を参照。 */
@@ -288,11 +298,12 @@ export function buildListModel(input: ListModelInput): ListModel {
       href: buildHash({ date: route.date, venue }),
       current: venue === route.venue,
     })),
-    loading: list.kind === "loading" || input.boardLoading === true,
+    loading: list.kind === "loading" || (list.kind === "ready" && list.refreshing === true) || input.boardLoading === true,
     listLoading: list.kind === "loading",
     updatedLabel: list.kind === "ready" && input.updatedAt != null ? updatedLabel(input.updatedAt, input.now?.getTime() ?? input.updatedAt) : null,
     error: list.kind === "error" ? list.message : null,
-    boardNotice: board.kind === "error" ? `${BOARD_NOTICE_PREFIX}${board.message}` : null,
+    refreshNotice: list.kind === "ready" && list.refreshNotice !== undefined ? `${REFRESH_NOTICE_PREFIX}${list.refreshNotice}` : null,
+    boardNotice: board.kind === "error" ? `${BOARD_NOTICE_PREFIX}${board.message}` : board.kind === "ready" && board.notice !== undefined ? `${BOARD_NOTICE_PREFIX}${board.notice}${KEPT_BOARD_NOTE}` : null,
     tracking: input.tracking ?? null,
     empty: list.kind === "ready" && list.races.length === 0,
     next: nextRacesOf(input, races, today, hm),
