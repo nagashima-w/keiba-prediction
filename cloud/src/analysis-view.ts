@@ -24,6 +24,7 @@ import { diffAllocationBets, type AllocationDiff } from "../../packages/core/src
 import { CLOSE_NOTE, closeDiffLines, closeLabelOf, closeSummaryLines } from "./close-view";
 import { closeComboBasis, CLOSE_ROUNDS, venueKindOfRaceIdSafe, type CloseReason, type CloseStatus, type StoredCloseRound } from "./analysis-close";
 import type { StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
+import type { AnalysisViewPreviousDiff } from "./analysis-diff-view";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
 import type { PlaceOddsBasis } from "../../packages/core/src/ev/place-odds-estimate";
 import type { AnalysisDetailResult, DetailStatus } from "./analysis-repository";
@@ -268,6 +269,11 @@ export interface AnalysisView {
    * 分析時の提案(`allocation`)は上書きされない。画面は A-2。型で省略可なのは、この項目を使わない呼び出し側の固定データ(日報のテストなど)を壊さないため(`baba`・`combos`・`development` と同じ)。
    */
   readonly close?: AnalysisViewClose | null;
+  /**
+   * 前の分析との差(Issue #583。同じレースで、この分析の 1 つ前の分析との比較。変わったところだけを日本語の行にしたもの)。前の分析が無い・読み出しに失敗したときは null
+   * (差だけを諦める。詳細の本体は壊さない)。組み立ては `analysis-diff-view.ts`(handler が付ける。`buildAnalysisView` は付けない)。閲覧者にも同じに見せる(使う項目は既に閲覧者に見えているものだけ)。
+   */
+  readonly previousDiff?: AnalysisViewPreviousDiff | null;
   readonly detail: DetailStatus;
 }
 
@@ -376,7 +382,7 @@ function combosViewOf(rawSnapshot: unknown, allocation: StoredAllocation | undef
 }
 
 /** 保存済みの配分(分析時の提案、または締切の再計算)を、応答の形にする。許可したキーを明示して写す。 */
-function allocationViewOf(allocation: StoredAllocation): AnalysisViewAllocation {
+export function allocationViewOf(allocation: StoredAllocation): AnalysisViewAllocation {
   return {
     route: allocation.route,
     skipReasonCode: allocation.skipReasonCode,

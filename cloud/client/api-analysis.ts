@@ -160,6 +160,15 @@ const CLOSE_MAX_SUMMARY_LINES = 4;
 const CLOSE_MAX_DIFF_LINES = 10;
 const CLOSE_MAX_LINE_LENGTH = 300;
 
+/** 前の分析との差(Issue #583)。見出しと行はサーバが組み立てたもの(クライアントは並べるだけ)。 */
+export interface AnalysisPreviousDiff {
+  readonly title: string;
+  readonly lines: readonly string[];
+}
+
+/** 差の行の上限(印・買い目・3 着内率・注記を合わせて多くても 20 行ほど)。想定外に大きい応答は読まない。 */
+const DIFF_MAX_LINES = 40;
+
 export interface AnalysisDetail {
   readonly id: number;
   readonly raceId: string;
@@ -214,6 +223,8 @@ export interface AnalysisDetail {
    * 形が不正な値は null にする(補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
    */
   readonly close?: AnalysisClose | null;
+  /** 前の分析との差(Issue #583)。前の分析が無い・読み出しに失敗・形が不正・キー無し(古いサーバの応答)は null(補助の表示なので、分析全体の解析は失敗させない)。 */
+  readonly previousDiff?: AnalysisPreviousDiff | null;
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
   readonly detail: DetailState;
@@ -383,6 +394,13 @@ function parseClose(value: unknown): AnalysisClose | null {
   return { note: value["note"], rounds };
 }
 
+/** 前の分析との差(Issue #583)。見出しが文字列(100 字以内)で、行が 1〜{@link DIFF_MAX_LINES} 行(各 300 字以内)。それ以外は null。 */
+function parsePreviousDiff(value: unknown): AnalysisPreviousDiff | null {
+  const parsed = parseLines(value, DIFF_MAX_LINES, CLOSE_MAX_LINE_LENGTH);
+  const title = isRecord(value) ? value["title"] : null;
+  return parsed === null || !isStr(title) || title.length > 100 ? null : { title, lines: parsed.lines };
+}
+
 function parseDetail(value: unknown): AnalysisDetail | null {
   if (!isRecord(value)) return null;
   const { id, raceId, analyzedAt, kaisaiDate, evEstimated, model, llmNote, llmCalls, race, horses, allocation, detail } = value;
@@ -441,6 +459,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     timeIndexNote: typeof value["timeIndexNote"] === "string" ? value["timeIndexNote"] : null,
     combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
     close: parseClose(value["close"]),
+    previousDiff: parsePreviousDiff(value["previousDiff"]),
     horses: parsedHorses,
     allocation: parsedAllocation,
     detail,
