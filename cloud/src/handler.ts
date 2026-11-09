@@ -19,7 +19,8 @@ import { ANALYSIS_DETAIL_PATTERN, MONTHLY_REPORTS_PREFIX, REPORTS_PREFIX, requir
 import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
 import { runJraCheck, type JraFetchLike } from "./jra-check";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
-import { buildAnalysisView } from "./analysis-view";
+import { allocationViewOf, buildAnalysisView, type AnalysisView } from "./analysis-view";
+import { buildPreviousDiff, type AnalysisViewPreviousDiff } from "./analysis-diff-view";
 import { CLIENT_JS } from "./client-bundle.generated";
 import { ICON_CACHE_CONTROL, iconAsset } from "./icons";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
@@ -1164,10 +1165,34 @@ async function handleAnalysisDetail(url: URL, idText: string, env: Env): Promise
     } catch {
       close = undefined;
     }
-    return json({ ok: true, analysis: buildAnalysisView(result, allocation, close) });
+    const view = buildAnalysisView(result, allocation, close);
+    return json({ ok: true, analysis: { ...view, previousDiff: await previousDiffOf(store, view) } });
   } catch {
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "d1-error" } }, 503);
+  }
+}
+
+/**
+ * 前の分析との差(Issue #583)。同じレースの 1 つ前の分析を D1 から読み(R2 には触れない)、差の行を組み立てる。
+ * 前が無い・読み出しの失敗は null(`close` と同じく、差だけを諦める。配分と違い、無くても「買い目なし」と誤読されない付加情報のため)。例外の文面は返さない。
+ */
+async function previousDiffOf(store: D1AnalysisStore, view: AnalysisView): Promise<AnalysisViewPreviousDiff | null> {
+  try {
+    const prev = await store.getPreviousForDiff({ id: view.id, raceId: view.raceId, analyzedAt: view.analyzedAt });
+    if (prev === undefined) {
+      return null;
+    }
+    return buildPreviousDiff(view, {
+      id: prev.id,
+      analyzedAt: prev.analyzedAt,
+      model: prev.model,
+      llmNote: prev.llmNote,
+      horses: prev.horses.map((h) => ({ umaban: h.umaban, name: null, mark: h.mark, prior: h.prior, adjustedProb: h.adjustedProb })),
+      allocation: prev.allocation === undefined ? null : allocationViewOf(prev.allocation),
+    });
+  } catch {
+    return null;
   }
 }
 

@@ -168,11 +168,23 @@ export interface R2UsageReport extends R2Usage {
   readonly readAllowed: boolean;
 }
 
+/** 前の分析との差(Issue #583)に使う、前の分析の D1 の値。大きな列・R2 は読まない。 */
+export interface PreviousForDiff {
+  readonly id: number;
+  readonly analyzedAt: string;
+  readonly model: string | null;
+  readonly llmNote: string | null;
+  readonly horses: readonly { readonly umaban: number; readonly mark: string | null; readonly prior: number; readonly adjustedProb: number }[];
+  /** 配分(記録が無ければ undefined)。 */
+  readonly allocation: StoredAllocation | undefined;
+}
+
 export interface AnalysisRepository {
   saveAnalysis(record: AnalysisRecord, extra?: AnalysisSaveExtra): Promise<SaveResult>;
   listAnalysisSummaries(filter?: AnalysisListFilter): Promise<AnalysisSummary[]>;
   getAnalysisDetail(analysisId: number): Promise<AnalysisDetailResult | undefined>;
   getStoredAllocation(analysisId: number): Promise<StoredAllocation | undefined>;
+  getPreviousForDiff(current: { readonly id: number; readonly raceId: string; readonly analyzedAt: string }): Promise<PreviousForDiff | undefined>;
   listAnalyzedRaceIdsByPromptVersion(version: string): Promise<string[]>;
   listRecentForRace(raceId: string, fromIso: string, toIso: string): Promise<RecentAnalysis[]>;
   /** 今月の R2 の操作回数(Class A・B)と、柵の状態(Issue #173)。 */
@@ -378,6 +390,17 @@ export interface D1AnalysisStoreOptions {
 /** 配分メタの点数の上限(Issue #578。束縛値は analysis_id 1つ)。`max_win_bets`・`max_place_bets` は D1 専用の列で、共有の `SELECT_ALLOCATION_META_SQL` には入れない。 */
 export const SELECT_ALLOCATION_CAPS_SQL = "SELECT max_win_bets AS maxWinBets, max_place_bets AS maxPlaceBets FROM analysis_allocation_meta WHERE analysis_id = ?";
 
+/**
+ * 同じレースで、表示中の分析の 1 つ前の分析(Issue #583)。並びは一覧と同じ (分析日時の降順, id の降順)。索引は `idx_analyses_race_analyzed (race_id, analyzed_at)`、LIMIT 1。
+ * 束縛: race_id・analyzed_at・analyzed_at・id。
+ */
+export const PREVIOUS_ANALYSIS_SQL = `SELECT id, analyzed_at AS analyzedAt, model, llm_note AS llmNote FROM analyses
+  WHERE race_id = ? AND (analyzed_at < ? OR (analyzed_at = ? AND id < ?))
+  ORDER BY analyzed_at DESC, id DESC LIMIT 1`;
+
+/** 前の分析の馬(差に使う 4 列だけ。contributions 等の大きな列は読まない)。主キー(analysis_id, umaban)の範囲。 */
+export const DIFF_HORSES_SQL = "SELECT umaban, mark, prior, adjusted_prob AS adjustedProb FROM analysis_horses WHERE analysis_id = ? ORDER BY umaban";
+
 export class D1AnalysisStore implements AnalysisRepository {
   private readonly db: AnalysisDb;
   private readonly bucket: AnalysisBucket;
@@ -548,6 +571,27 @@ export class D1AnalysisStore implements AnalysisRepository {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 表示中の分析の 1 つ前の分析(同じレース。Issue #583)を、差の材料として読む。D1 だけ(R2 に触れない)。無ければ undefined。
+   * 読む行数は、分析 1 + 馬(出走頭数)+ 配分(メタ 1 + 買い目の数)。例外は呼び出し側が受ける(差だけを諦める)。
+   */
+  async getPreviousForDiff(current: { readonly id: number; readonly raceId: string; readonly analyzedAt: string }): Promise<PreviousForDiff | undefined> {
+    const [found] = await this.db.batch<unknown>([this.db.prepare(PREVIOUS_ANALYSIS_SQL).bind(current.raceId, current.analyzedAt, current.analyzedAt, current.id)]);
+    const row = found?.results[0] as { id: number; analyzedAt: string; model: string | null; llmNote: string | null } | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    const [horses, allocation] = await Promise.all([this.db.batch<unknown>([this.db.prepare(DIFF_HORSES_SQL).bind(row.id)]), this.getStoredAllocation(row.id)]);
+    return {
+      id: row.id,
+      analyzedAt: row.analyzedAt,
+      model: row.model,
+      llmNote: row.llmNote,
+      horses: (horses[0]?.results ?? []) as PreviousForDiff["horses"],
+      allocation,
+    };
   }
 
   async getStoredAllocation(analysisId: number): Promise<StoredAllocation | undefined> {
