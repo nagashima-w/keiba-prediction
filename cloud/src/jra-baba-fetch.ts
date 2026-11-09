@@ -47,6 +47,7 @@ import {
   jraCourseUrl,
   type JraFetchLike,
 } from "./jra-http";
+import type { JraPacer } from "./jra-odds-fetch";
 
 export type { BabaFetcher };
 
@@ -60,6 +61,11 @@ export interface CreateJraBabaFetcherDeps {
   readonly wait?: (ms: number) => Promise<void>;
   /** 1 本ごとのタイムアウト(ミリ秒)。省略時は {@link JRA_TIMEOUT_MS}。 */
   readonly timeoutMs?: number;
+  /**
+   * 共有の間隔(Issue #680。{@link createJraPacer})。渡すと、**最初の 1 本も含めて毎回**送信の前に呼び、他の段(オッズ)の送信との間隔も {@link JRA_GAP_MS} 以上にする
+   * (自前の `wait` は使わない)。省略時は従来どおり、この取得の中だけで間隔を数える(最初の 1 本は待たない)。
+   */
+  readonly pacer?: JraPacer;
   /** 現在時刻(エポックミリ秒)。`apiFetchedAt`(クッション値のページを取り終えた時刻)に使う。省略時は `Date.now`。テストで固定する。 */
   readonly now?: () => number;
 }
@@ -84,7 +90,9 @@ export function createJraBabaFetcher(deps: CreateJraBabaFetcherDeps = {}): BabaF
     let first = true;
     /** 1 本を取って文字列にする。2 本目以降は先に待つ。失敗は語に落とす(投げない)。 */
     const page = async (url: string, init: RequestInit): Promise<Page> => {
-      if (!first) {
+      if (deps.pacer !== undefined) {
+        await deps.pacer.beforeRequest();
+      } else if (!first) {
         await wait(JRA_GAP_MS);
       }
       first = false;
