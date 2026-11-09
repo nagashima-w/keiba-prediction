@@ -173,8 +173,8 @@ describe("設定", () => {
     for (const v of [undefined, "", "00", "1", "off", "false"]) expect(isArchiveRunsDisabled(v), String(v)).toBe(false);
   });
 
-  it("既定の 1 晩の書き込み行数は 30,000(Free の 1 日 10 万行の内側。ユーザーの決定)", () => {
-    expect(ARCHIVE_RUNS_NIGHTLY_ROWS_DEFAULT).toBe(30_000);
+  it("既定の 1 晩の書き込み行数は 60,000(Free の 1 日 10 万行の内側。2026-11-09 のユーザーの決定。#704)", () => {
+    expect(ARCHIVE_RUNS_NIGHTLY_ROWS_DEFAULT).toBe(60_000);
   });
 });
 
