@@ -1849,7 +1849,7 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
         expect(textOf(t)).not.toContain("AI補正後 ");
         const llm = tree(mk({ model: "claude-x" }));
         expect(findAll(llm, (n) => n.tag === "th")).toHaveLength(8);
-        const first = findAll(rowsOf(llm)[0]!, (n) => n.tag === "td").map(textOf);
+        const first = findAll(rowsOf(llm)[0]!, (n) => n.tag === "td").map(rawTextOf);
         expect(first).toEqual(["1", "◎", "アルファ", "30.0%", "20.0%", "0.90", "12.0倍", "3.0"]);
       });
 
@@ -1908,7 +1908,7 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
 
       it("値の無い馬(EV・単勝・複勝下限)のセルは「-」。推定の EV は『(推定)』付きのまま、補修の『直』は表に出さない", () => {
         const t = tree(mk({ evEstimated: true }));
-        const cells = (i: number) => findAll(rowsOf(t)[i]!, (n) => n.tag === "td").map(textOf);
+        const cells = (i: number) => findAll(rowsOf(t)[i]!, (n) => n.tag === "td").map(rawTextOf);
         expect(cells(2)).toEqual(["3", "▲", "<b>チャーリー</b>", "10.0%", "-", "-", "1.5"]);
         expect(cells(0)[4]).toBe("0.90(推定)");
         expect(cells(1)[6]).toBe("-");
@@ -1939,6 +1939,44 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
         expect(wrap.attrs?.["role"]).toBe("region");
         expect(String(wrap.attrs?.["aria-label"])).toContain("馬ごとの評価");
         expect(findAll(wrap, (n) => n.tag === "table")).toHaveLength(1);
+      });
+
+      it("Issue #582: 3着内率・AI補正後のセルに、数字の下に細い棒(progress。value は千分率・max=1000・aria-hidden)。数字の文字列は今のまま", () => {
+        const t = tree(mk({ model: "claude-x" }));
+        const cellsOf = (i: number) => findAll(rowsOf(t)[i]!, (n) => n.tag === "td");
+        const barOf = (td: VNode): VNode[] => findAll(td, (n) => n.tag === "progress");
+        // 3着内率(3 列目の次=index 3)と AI補正後(index 4)にだけ棒。EV 以降には出ない
+        const tds = cellsOf(0);
+        expect(barOf(tds[3]!)).toHaveLength(1);
+        expect(barOf(tds[4]!)).toHaveLength(1);
+        for (const i of [0, 1, 2, 5, 6, 7]) expect(barOf(tds[i]!), `列 ${i} には棒が無い`).toHaveLength(0);
+        expect(findAll(t, (n) => n.tag === "progress" && String(n.attrs?.["class"]) === "horse-bar")).toHaveLength(6); // 3 頭 × 2 列
+        // 値が数字(0.3 → 300、0.2 → 200)と一致する
+        expect(barOf(tds[3]!)[0]!.attrs).toMatchObject({ class: "horse-bar", value: "300", max: "1000", "aria-hidden": "true" });
+        expect(barOf(tds[4]!)[0]!.attrs).toMatchObject({ value: "200", max: "1000", "aria-hidden": "true" });
+        expect(barOf(cellsOf(1)[3]!)[0]!.attrs?.["value"]).toBe("500");
+        expect(barOf(cellsOf(1)[4]!)[0]!.attrs?.["value"]).toBe("600");
+        // 数字の文字列は変わらない(棒は子の末尾。textContent は数字だけ)
+        expect(rowsOf(t).map((r) => findAll(r, (n) => n.tag === "td").map(rawTextOf).slice(3, 5))).toEqual([["30.0%", "20.0%"], ["50.0%", "60.0%"], ["10.0%", "10.0%"]]);
+        expect(tds[3]!.children![0]).toBe("30.0%");
+        // LLM なしでは補正後の列ごと無いので、棒は 3 着内率の 3 本だけ
+        expect(findAll(tree(mk()), (n) => n.tag === "progress")).toHaveLength(3);
+      });
+
+      it("Issue #582: 値が無い(null)・非有限のときは棒を出さず数字(または -)だけ。範囲外は 0〜1000 に収める", () => {
+        const odd = (prior: number | null, adjustedProb: number | null): AnalysisDetail =>
+          analysis({ model: "claude-x", horses: [{ ...HORSES_T[0]!, prior, adjustedProb } as unknown as AnalysisDetail["horses"][number]] });
+        const bars = (a: AnalysisDetail): string[] => findAll(tree(a), (n) => n.tag === "progress").map((n) => String(n.attrs?.["value"]));
+        expect(bars(odd(0.25, 0.4)), "前提: 値があれば 2 本").toEqual(["250", "400"]);
+        expect(bars(odd(null, 0.4))).toEqual(["400"]);
+        expect(bars(odd(Number.NaN, Number.POSITIVE_INFINITY))).toEqual([]);
+        expect(bars(odd(-0.2, 1.5)), "0 未満は 0、1 超は 1000").toEqual(["0", "1000"]);
+      });
+
+      it("Issue #582: 棒の属性は許可リストの範囲(style を使わない)。実 DOM のアダプタで作れる", () => {
+        const { tags } = mountAll(tree(mk({ model: "claude-x" })));
+        expect(tags).toContain("progress");
+        expect(JSON.stringify(tree(mk({ model: "claude-x" })))).not.toContain('"style"');
       });
 
       it("閲覧者(readOnly)にも同じ表(行・列・並べ替えのボタン)を出す", () => {
