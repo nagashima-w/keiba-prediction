@@ -367,6 +367,8 @@ export class RaceArchiveSmokeDO extends RealRaceArchiveFetchDO {
 export { RealRaceArchiveRunsDO as RaceArchiveRunsDO };
 // Issue #642: 騎手・調教師の指標の毎晩の計算の DO(本番の worker.ts と同じもの。binding RACE_MARKET_EDGE のクラス。smoke の var `RACE_MARKET_EDGE_NIGHTLY_LIMIT=0` で止めてある)。
 export { RaceMarketEdgeDO } from "./src/market-edge-do";
+// Issue #697: 馬ごとの頁の埋め戻しの DO(本番の worker.ts と同じもの。binding JRA_HORSE_BACKFILL のクラス。smoke の var `JRA_HORSE_BACKFILL_ENABLED=0` で止めてある)。
+export { JraHorseBackfillDO } from "./src/jra-horse-backfill-do";
 
 /**
  * Issue #590: 過去の結果の毎晩の変換を、workerd の実環境(本物の DO の SQLite・アラーム・D1・R2・変換)で最後まで通すための **smoke 専用の DO**(smoke の一時設定だけが binding `RACE_ARCHIVE_RUNS_SMOKE` で指す。
