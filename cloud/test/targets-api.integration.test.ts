@@ -257,9 +257,9 @@ describe("GET /api/targets: 収支の途中経過(本物の D1。Issue #361)", (
     expect([...doCalls].sort()).toEqual(["getPlanProgress", "getTargetsLedger"]);
     expect(body["ledger"]).toBe("確定 1R: 投資 600円 / 回収 1,500円 / 回収率 250.0%(結果待ち 1R)");
     const races = body["races"] as Record<string, any>[];
-    expect(races.map((r) => [r["race_id"], r["source"], r["result_state"], r["result"]])).toEqual([
-      [R11, "close", "settled", "分析時の提案: 的中 +900円(投資 600円)"],
-      [R12, "close", "pending", "結果待ち"],
+    expect(races.map((r) => [r["race_id"], r["source"], r["result_state"], r["result"], r["result_kind"]])).toEqual([
+      [R11, "close", "settled", "分析時の提案: 的中 +900円(投資 600円)", "hit"],
+      [R12, "close", "pending", "結果待ち", "pending"],
     ]);
     const viewer = await call({ now: AFTER, imports, email: "stranger@example.com" });
     expect(viewer.status).toBe(200);

@@ -1128,12 +1128,16 @@ function adminOnlyScreen(model: AdminOnlyModel): VNode {
   ]);
 }
 
+/** 結果のバッジ(Issue #585)。語は固定、色は #558 の tone(ok・fail・none・wait)。 */
+const KIND_BADGE = { hit: { label: "的中", tone: "ok" }, miss: { label: "不的中", tone: "fail" }, refund: { label: "返還", tone: "none" }, pending: { label: "未確定", tone: "wait" } } as const;
+
 /** 行。発走済み(クラス `started`。`past` は詳細カードの `ul.past` の規則と衝突する)は薄く出す(隠さず下に回す。決定)。見送り(`skipped`)も薄い。 */
 function targetRow(r: TargetRow, past: boolean): VNode {
   return h("li", {}, [
     h("a", { class: `race${r.skipped ? " skipped" : ""}${past ? " started" : ""}`, href: r.href }, [
       h("div", { class: "race-head" }, [h("strong", {}, [r.time]), h("span", {}, [r.place]), ...(r.pick === "" ? [] : [h("span", {}, [r.pick])]), h("span", { class: r.soon ? "t-left soon" : "t-left" }, [r.left])]),
       h("span", { class: "race-detail" }, [r.detail]),
+      ...(r.resultKind === "" ? [] : [h("span", { class: "badges" }, [h("span", { class: `badge ${KIND_BADGE[r.resultKind].tone}` }, [KIND_BADGE[r.resultKind].label])])]),
       ...(r.result === "" ? [] : [h("span", { class: `race-detail race-result result-${r.resultState}` }, [r.result])]),
     ]),
   ]);

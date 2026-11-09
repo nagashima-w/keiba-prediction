@@ -24,7 +24,7 @@ const textOf = (node: VNode | string): string => (typeof node === "string" ? nod
 const byClass = (tree: VNode, cls: string): VNode[] => findAll(tree, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes(cls));
 
 function race(id: string, startMs: number | null, overrides: Partial<TargetRace> = {}): TargetRace {
-  return { raceId: id, analysisId: Number(id.slice(-4)), startMs, startTime: startMs === null ? null : "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", resultState: null, result: null, ...overrides };
+  return { raceId: id, analysisId: Number(id.slice(-4)), startMs, startTime: startMs === null ? null : "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", resultState: null, result: null, resultKind: null, ...overrides };
 }
 const R = (n: number) => `2026050508${String(n).padStart(2, "0")}`;
 
@@ -146,6 +146,44 @@ describe("収支の途中経過(Issue #361)", () => {
     const results = byClass(t, "race-result");
     // 発走済みは新しい行が先(R2 → R1)
     expect(results.map((n) => String(n.attrs?.["class"]))).toEqual(["race-detail race-result result-pending", "race-detail race-result result-settled"]);
+  });
+});
+
+describe("結果のバッジ(Issue #585)", () => {
+  const rowsOf = (kinds: Partial<TargetRace>[]) => tree(kinds.map((o, i) => race(R(i + 1), NOW - (60 - i) * MIN, o)));
+
+  it("種別ごとに固定の語と tone を出す(的中=ok・不的中=fail・返還=none・未確定=wait)。バッジは .badges の中の .badge で、結果の文言の前にある", () => {
+    const t = rowsOf([
+      { resultState: "settled", result: "的中 +1,200円", resultKind: "hit" },
+      { resultState: "settled", result: "不的中 \u2212300円", resultKind: "miss" },
+      { resultState: "settled", result: "返還 ±0円", resultKind: "refund" },
+      { resultState: "pending", result: "結果待ち", resultKind: "pending" },
+    ]);
+    const badges = byClass(t, "badge");
+    // 発走済みは新しい行が先(R4 → R1)
+    expect(badges.map((b) => [textOf(b), String(b.attrs?.["class"])])).toEqual([
+      ["未確定", "badge wait"],
+      ["返還", "badge none"],
+      ["不的中", "badge fail"],
+      ["的中", "badge ok"],
+    ]);
+    for (const row of byClass(t, "race")) {
+      const kids = row.children ?? [];
+      const iBadge = kids.findIndex((k) => typeof k !== "string" && byClass(k, "badge").length > 0 || (typeof k !== "string" && String(k.attrs?.["class"]).split(" ").includes("badges")));
+      const iResult = kids.findIndex((k) => typeof k !== "string" && String(k.attrs?.["class"]).includes("race-result"));
+      expect(iBadge).toBeGreaterThanOrEqual(0);
+      expect(iBadge).toBeLessThan(iResult);
+    }
+    expect(byClass(t, "badges").every((b) => b.tag === "span")).toBe(true);
+  });
+
+  it("種別が null の行(結果なし・対象外など)・未発走の行にはバッジを出さない。文言は残る", () => {
+    const t = tree([
+      race(R(1), NOW - 30 * MIN, { resultState: "none", result: "結果なし", resultKind: null }),
+      race(R(2), NOW + 30 * MIN, { resultState: "pending", result: "結果待ち", resultKind: "pending" }),
+    ]);
+    expect(byClass(t, "badge")).toEqual([]);
+    expect(byClass(t, "race-result").map(textOf)).toEqual(["結果なし"]);
   });
 });
 

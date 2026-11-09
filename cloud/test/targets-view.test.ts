@@ -238,7 +238,7 @@ describe("並びと要約", () => {
 
   it("応答の各レースのキーは許可したものだけ(内部の列を展開して漏らさない)", () => {
     const race = build([analysis(R11)], [], [planRow(R11, "15:40")]).races[0]!;
-    expect(Object.keys(race).sort()).toEqual(["analysis_id", "bet_count", "detail", "max_ev", "pick", "place", "race_id", "result", "result_state", "round", "skipped", "source", "start_ms", "start_time", "total_stake"]);
+    expect(Object.keys(race).sort()).toEqual(["analysis_id", "bet_count", "detail", "max_ev", "pick", "place", "race_id", "result", "result_kind", "result_state", "round", "skipped", "source", "start_ms", "start_time", "total_stake"]);
   });
 });
 
@@ -319,6 +319,42 @@ describe("収支の途中経過の文言", () => {
       ["excluded", "集計対象外(発売前の推定)"],
       ["no_proposal", "分析時の提案なし"],
     ]);
+  });
+
+  it("各行の result_kind(Issue #585): 確定は的中=hit・返還だけ=refund・それ以外=miss(一部返還で当たりなしは miss)。待ちは pending。結果なし・対象外・提案なし・ledger なしは null", () => {
+    const ids = ["202605050801", "202605050802", "202605050803", "202605050804", "202605050805", "202605050806", "202605050807", "202605050808", "202605050809"];
+    const states: LedgerRaceResult[] = [
+      settled(ids[0]!, 300, 1500),
+      settled(ids[1]!, 300, 0),
+      settled(ids[2]!, 300, 300, { refundedStake: 300, hit: false }),
+      settled(ids[3]!, 600, 300, { refundedStake: 300, hit: false }), // 一部だけ返還・当たりなし
+      other(ids[4]!, "pending"),
+      other(ids[5]!, "pending_payout"),
+      other(ids[6]!, "none"),
+      other(ids[7]!, "excluded", "estimated"),
+      other(ids[8]!, "no_proposal"),
+    ];
+    const view = withLedger(ids.map((id) => analysis(id)), ledgerOf(states));
+    expect(view.races.map((r) => r.result_kind)).toEqual(["hit", "miss", "refund", "miss", "pending", "pending", null, null, null]);
+    // 前提: 返還の行と一部返還の行は、払戻が賭け金以下で当たりなしという同じ形(賭け金との一致で分かれる)
+    expect(view.races[3]!.result).toBe("不的中 \u2212300円");
+    expect(view.races[2]!.result).toBe("返還 ±0円");
+    expect(withLedger([analysis(R11)], null).races[0]!.result_kind).toBeNull();
+  });
+
+  it("各行の result_kind は文言の主たる結果と一致する。再計算の買い目を採った行(「分析時の提案: …」)も、分析時の提案の結果を指す", () => {
+    const head: Record<string, string> = { hit: "的中", miss: "不的中", refund: "返還" };
+    const a = analysis(R11);
+    const b = analysis(R12);
+    const c = analysis("202605050813");
+    const ledger = ledgerOf([settled(R11, 500, 1700), settled(R12, 300, 0), settled("202605050813", 300, 300, { refundedStake: 300, hit: false })]);
+    const view = withLedger([a, b, c], ledger, [closeRound(a, 1), closeRound(b, 2), closeRound(c, 1)]);
+    expect(view.races.every((r) => r.source === "close")).toBe(true); // 前提: 全行が再計算を採った行
+    for (const r of view.races) {
+      expect(r.result!.startsWith("分析時の提案: ")).toBe(true);
+      expect(r.result!.replace("分析時の提案: ", "").startsWith(head[r.result_kind!]!), r.race_id).toBe(true);
+    }
+    expect(view.races.map((r) => r.result_kind)).toEqual(["hit", "miss", "refund"]);
   });
 
   it("ledger に無いレースの行は結果なし(null)", () => {
