@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildRaceSnapshot } from "../../packages/core/src/analysis/analysis-export";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
-import { D1AnalysisStore, type AnalysisDb } from "../src/analysis-repository";
+import { D1AnalysisStore, PREVIOUS_ANALYSIS_SQL, type AnalysisDb } from "../src/analysis-repository";
 import { handle, type Env } from "../src/handler";
 import { monthKey, R2_FENCE_LIMITS } from "../src/r2-fence";
 import { contractCases } from "./fixtures-contract";
@@ -385,6 +385,76 @@ describe("GET /api/analyses/{id}: ローカルの D1・R2 で保存した分析�
     expect(batchCount).toBe(2); // 前提: 配分の読み出しまで進んだ
     expect(status).toBe(503);
     expect(JSON.parse(text)).toEqual({ ok: false, error: { type: "d1-error" } });
+    expect(text).not.toContain("SECRET");
+  });
+});
+
+describe("GET /api/analyses/{id}: 前の分析との差(Issue #583)", () => {
+  /** 馬ごとの値を差し替えた分析の材料(1 番だけ印と確率を変える)。 */
+  async function twoAnalyses() {
+    const base = await record({ analyzedAt: "2026-06-28T01:00:00.000Z" });
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    const first = await store.saveAnalysis({ ...base, model: "claude-x" });
+    const second = await store.saveAnalysis({
+      ...base,
+      analyzedAt: "2026-06-28T02:00:00.000Z",
+      model: "claude-x",
+      horses: base.horses.map((h) => (h.umaban === 1 ? { ...h, mark: "◎" as const, adjustedProb: 0.2 } : h)),
+      allocation: { meta: base.allocation!.meta, bets: [{ betType: "place", comboKey: "01", stake: 600, odds: 1.8, ev: 1.2 }] },
+    });
+    return { first, second };
+  }
+
+  it("最新の分析には、1 つ前との差(印・買い目と金額・3 着内率)が付く。R2 の GET は詳細の 1 回だけ(差のために増えない)", async () => {
+    const { first, second } = await twoAnalyses();
+    const { race } = await scrapeFixtureRace();
+    const name1 = race.horses.find((h) => h.shutuba.umaban === 1)!.shutuba.name;
+    const spy = spyBucket(local.r2);
+    const { status, body } = await getView(second.id, spy.bucket);
+    expect(status).toBe(200);
+    const diff = body.analysis.previousDiff as { previousId: number; title: string; lines: string[] };
+    expect(diff.previousId).toBe(first.id);
+    expect(diff.title).toBe("前の分析(6/28 10:00)との差");
+    expect(diff.lines).toContain(`印 1番 ${name1}: なし → ◎`);
+    expect(diff.lines.some((l) => l.startsWith(`3着内率 1番 ${name1}: 補正後 10.0% → 20.0%(+10.0)`))).toBe(true);
+    expect(diff.lines.some((l) => l.startsWith("買い目 追加 0点・削除 1点・金額の変化 1点"))).toBe(true);
+    // 前提: 3 種類の変化がそろっている(退化していない)
+    expect(diff.lines.length).toBeGreaterThanOrEqual(5);
+    expect(spy.calls.filter((c) => c.op === "get")).toHaveLength(1);
+    expect(spy.calls.filter((c) => c.op === "put")).toHaveLength(0);
+  });
+
+  it("過去の分析(古いほう)を開いても、さらに前があればその差が付く。最古の分析は previousDiff: null", async () => {
+    const { first, second } = await twoAnalyses();
+    const oldest = await getView(first.id, local.r2);
+    expect(oldest.status).toBe(200);
+    expect(oldest.body.analysis.previousDiff).toBeNull();
+    // 前提: 同じレースに新しい分析があっても、古いほうの差は新しい分析と比べない
+    expect(second.id).toBeGreaterThan(first.id);
+  });
+
+  it("同じ内容の分析が続けば「変わったところはありません」", async () => {
+    const base = await record({ analyzedAt: "2026-06-28T01:00:00.000Z" });
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    await store.saveAnalysis({ ...base, model: "claude-x" });
+    const second = await store.saveAnalysis({ ...base, analyzedAt: "2026-06-28T02:00:00.000Z", model: "claude-x" });
+    const { body } = await getView(second.id, local.r2);
+    expect((body.analysis.previousDiff as { lines: string[] }).lines).toEqual(["変わったところはありません"]);
+  });
+
+  it("前の分析の読み出しが失敗しても、詳細は 200 で返り、previousDiff だけが null(例外の文面は載せない)", async () => {
+    const { second } = await twoAnalyses();
+    const failing = {
+      prepare: (sql: string) => {
+        if (sql === PREVIOUS_ANALYSIS_SQL) throw new Error("D1_ERROR: SECRET-previous");
+        return local.db.prepare(sql);
+      },
+      batch: (statements: D1PreparedStatement[]) => local.db.batch(statements),
+    } as unknown as AnalysisDb;
+    const { status, text, body } = await getView(second.id, local.r2, failing);
+    expect(status).toBe(200);
+    expect(body.analysis.previousDiff).toBeNull();
+    expect(body.analysis.horses.length).toBeGreaterThan(1);
     expect(text).not.toContain("SECRET");
   });
 });

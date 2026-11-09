@@ -309,6 +309,8 @@ export interface ResultContent {
   readonly llmUsage: LlmUsageView | null;
   /** 印の付いた馬の一覧(Issue #211)。印の順 → 馬番の昇順。印の無い馬(null・空白だけ)は含めない。未知の印は既知の印の後ろに馬番の昇順。 */
   readonly markedHorses: readonly MarkedHorse[];
+  /** 前の分析との差の節(Issue #583。印の付いた馬の前)。前の分析が無い・古いサーバの応答は null(節ごと出さない)。見出しと行はサーバの整形。 */
+  readonly prevDiff: BabaSection | null;
   /** 印の凡例(core の `MARK_LEGEND`)。**一覧が空でないときだけ**(「印の付いた馬」の見出しの下に出す)。 */
   readonly markLegend: string | null;
   /** 3着内率の上位5頭(Issue #240。印の付いた馬の直後)。率が有限な馬が1頭も無ければ null(節ごと出さない)。 */
@@ -564,6 +566,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false
     llmNote: a.llmNote,
     llmUsage: a.llmCalls !== null && a.llmCalls.length > 0 ? buildLlmUsage(a.llmCalls) : null,
     markedHorses,
+    prevDiff: a.previousDiff == null ? null : { heading: a.previousDiff.title, lines: a.previousDiff.lines },
     markLegend: markedHorses.length > 0 ? MARK_LEGEND : null,
     topProbs: topProbsOf(a.horses, llmEffective),
     baba: a.baba == null ? null : { heading: BABA_HEADING, lines: a.baba.lines },

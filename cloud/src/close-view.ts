@@ -76,7 +76,7 @@ interface DiffRow {
 }
 
 /** 差分の行(追加・削除・賭け金の変化)を、変化の絶対値が大きい順(同値は券種・キー順)に並べる。 */
-function diffRows(diff: AllocationDiff): DiffRow[] {
+export function diffRows(diff: AllocationDiff): DiffRow[] {
   const label = (betType: string, comboKey: string): string => {
     const l = betRowLabels(betType, comboKey);
     return `${l.betTypeLabel} ${l.comboLabel}`;

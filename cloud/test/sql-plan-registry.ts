@@ -27,6 +27,9 @@ export const HERE: Record<string, PlanEntry> = {
     "analysis-close.ts::SELECT_CLOSE_SQL",
     "analysis-close.ts::SELECT_CLOSE_BETS_SQL",
     "analysis-repository.ts::SELECT_ALLOCATION_CAPS_SQL",
+    // 前の分析との差(Issue #583)。前の分析は索引 idx_analyses_race_analyzed の範囲+LIMIT 1、馬は主キーの範囲。
+    "analysis-repository.ts::PREVIOUS_ANALYSIS_SQL",
+    "analysis-repository.ts::DIFF_HORSES_SQL",
     "daily-report-repository.ts::NEEDING_REPORT_SQL",
     "daily-report-repository.ts::READ_RESULTS_SQL.results",
     "daily-report-repository.ts::READ_RESULTS_SQL.combos",

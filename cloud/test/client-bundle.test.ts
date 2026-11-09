@@ -307,6 +307,7 @@ describe("生成物のドリフトと決定性", () => {
     // 新しい上限 245,000 の余裕は 245,000 - 244,541 = 459 バイト(500 バイト単位に切り上げ)。増えたのは日本語の文言(`\u` エスケープ)と `settings-form.ts` の整形・既定の判定・帯の文、`view.ts` の帯とバッジ。
     // (追記)Issue #581(設定の画面: 項目を4つの節に分け、LLM分析・上級の設定を初めは閉じる。節の見出しの開閉ボタン・「変更あり N 件」・保存の押下で誤りのある閉じた節を開く処理): 上限は 245,000 から 250,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`)は 244,541(8fdbc05f〈作業ブランチの起点〉の生成物)→ 246,560(+2,019。`pnpm run build:client` の出力〈「246560 バイト」〉)。
     // 計り方: `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` を、起点と今のそれぞれで実行した。新しい上限 250,000 の余裕は 250,000 - 246,560 = 3,440 バイト(約 1.4%)。増えたのは節の定義 `SECTIONS`(見出しの文言は `\u` エスケープ)・節の表示用データ・`view.ts` の `settingsSection`・`settings-screen.ts` の開閉の記録と `sectionsWithErrors`。
+    // (追記)Issue #583(前の分析との差の節。クライアントは見出しと行を解析して並べるだけで、文言はサーバが組み立てる): 上限は 250,000 のまま。実測は 247,561(4c288aa8 の生成物)→ 247,955(+394。`pnpm run build:client` の出力)。余裕は 250,000 - 247,955 = 2,045 バイト。計り方は上の #581 の追記と同じ。
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(250_000);
   });
 });
