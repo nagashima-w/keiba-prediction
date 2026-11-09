@@ -277,6 +277,7 @@
 - 同じ期間を別の仮説に使うのはよい。どの期間に何を当てたかを、計画に書く。
 - 結果を見たあとの内訳は「記述」と明記し、検定と分ける。確かめていない推測は推測と書く。
 - 道具は `scripts/<名前>-<Issue 番号>/`、記録は `docs/investigations/<名前>-<Issue 番号>/` に置く。生データはコミットしない。
+- **#700 以降の探索は、道具も計画も結果も、このリポジトリと Issue に置かない**(ユーザー指定・2026-11-09。このリポジトリは公開で、分析の結果が見える場所にあると優位性が下がるため)。道具と計画と記録は非公開のリポジトリ `nagashima-w/keiba-research`(ブランチ `work`)に置き、報告のまとめは Notion に置く。Issue には進み具合だけを書き、材料・モデル・数値は書かない。#682〜#694 の公開済みの記録は、そのまま残す。
 
 ## その他
 - **main ブランチへ直接 push してはならない**(ユーザー指定・2026-10-14)。公開の push は作業ブランチだけに行う。本番デプロイ(deploy ジョブの success)を確認した変更は、指示を待たずに PR のマージで main に取り込む(ユーザー指定・2026-10-17)。main への直接 push は引き続き禁止。
@@ -288,7 +289,7 @@
 ## ドキュメント一覧
 本リポジトリの主要ドキュメント。参照漏れを防ぐため一箇所に集約する(規約の唯一の正は本 `CLAUDE.md`)。
 
-- [`.claude/core-rules.md`](./.claude/core-rules.md) — **最重要の決まりの要点**(11 項目)。`.claude/settings.json` のフックで、毎回の入力の前(UserPromptSubmit)と圧縮の直後(SessionStart の `compact`)にコンテキストへ付く(Issue #561)。この `CLAUDE.md` の決まりを変えたら、こちらも合わせて直す。
+- [`.claude/core-rules.md`](./.claude/core-rules.md) — **最重要の決まりの要点**(12 項目)。`.claude/settings.json` のフックで、毎回の入力の前(UserPromptSubmit)と圧縮の直後(SessionStart の `compact`)にコンテキストへ付く(Issue #561)。この `CLAUDE.md` の決まりを変えたら、こちらも合わせて直す。
 - [`keiba-ev-tool-spec.md`](./keiba-ev-tool-spec.md) — 当初の設計・計画(Phase 1→6)の記録。中央競馬前提。
 - [`docs/current-spec.md`](./docs/current-spec.md) — **実装済みの現状仕様(v1)**。取得・スコアリング・LLM分析・検証・エクスポート・Discord を実コードに基づき記述(exe の配布は記録として残す)。
 - [`docs/development-workflow.md`](./docs/development-workflow.md) — 開発ワークフローの導線・要約(2体のサブエージェント・着手前ゲート・TDD・2段レビュー・報告方針)。詳細は本 `CLAUDE.md` と `.claude/agents/*.md`。

@@ -234,3 +234,17 @@ describe("D1AnalysisStore.saveClose: 取得元(odds_sources_json。Issue #676・
     expect(rounds[0]).toMatchObject({ round: 1, oddsOfficialDatetime: "2026-10-17 15:41:30" });
   });
 });
+
+describe("getStoredClose の odds_sources_json(Issue #677)", () => {
+  it("回ごとの記録の JSON を返す。記録のない回は null(取り違えない)", async () => {
+    const id = await saveBase();
+    const sources = { winPlace: { source: "jra" as const, officialDatetime: "2026-10-17 15:41:00" } };
+    await store().saveClose(id, okPayload(1, [300, 200], { oddsSources: sources }));
+    await store().saveClose(id, okPayload(2, [300, 200]));
+    const rounds = await store().getStoredClose(id);
+    expect(rounds.map((r) => r.round)).toEqual([1, 2]);
+    expect(rounds[0]!.oddsSourcesJson).toBe(JSON.stringify({ v: 1, sources }));
+    expect(rounds[1]!.oddsSourcesJson).toBeNull();
+  });
+});
+

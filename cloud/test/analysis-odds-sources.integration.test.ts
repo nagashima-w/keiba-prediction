@@ -80,4 +80,11 @@ describe("保存: odds_sources_json 列", () => {
       { k: "winPlace", source: "jra", n: 1 },
     ]);
   });
+  it("読み出し(Issue #677): getAnalysisDetail が記録の JSON を返す。記録なしの分析は null", async () => {
+    const s = store();
+    const a = await s.saveAnalysis(mkRecord(1), { llmNote: null, oddsSources: SOURCES });
+    const b = await s.saveAnalysis(mkRecord(2), { llmNote: null });
+    expect((await s.getAnalysisDetail(a.id))!.oddsSourcesJson).toBe(serializeOddsSources(SOURCES));
+    expect((await s.getAnalysisDetail(b.id))!.oddsSourcesJson).toBeNull();
+  });
 });

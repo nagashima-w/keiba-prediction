@@ -136,6 +136,8 @@ export interface AnalysisDetailResult {
    * 省略可なのは、この項目を使わない呼び出し側の固定データ(テスト)を壊さないため(`getAnalysisDetail` は常にキーを持つ)。
    */
   readonly markRepair?: MarkRepairRecord | null;
+  /** 分析が使ったオッズの取得元の JSON 文字列(D1 の `odds_sources_json`。Issue #677。記録なし・旧い行は null。読み方は `odds-sources-view.ts`)。省略可なのは `markRepair` と同じ理由。 */
+  readonly oddsSourcesJson?: string | null;
 }
 
 /** 一覧の馬は、大きな列(contributions)と、強調材料・懸念事項(Issue #197。詳細の画面だけが使うので、一覧では読まない)を持たない。 */
@@ -258,7 +260,7 @@ const SUMMARY_COLUMNS = `id, race_id AS raceId, analyzed_at AS analyzedAt, ev_es
        history_cutoff_date AS historyCutoffDate, prompt_lookahead_guarded AS promptLookaheadGuarded,
        detail_key IS NOT NULL AS hasDetail, llm_note AS llmNote`;
 
-const SELECT_ONE_SQL = `SELECT ${SUMMARY_COLUMNS}, detail_key AS detailKey, llm_calls_json AS llmCallsJson, mark_repair_json AS markRepairJson FROM analyses WHERE id = ?`;
+const SELECT_ONE_SQL = `SELECT ${SUMMARY_COLUMNS}, detail_key AS detailKey, llm_calls_json AS llmCallsJson, mark_repair_json AS markRepairJson, odds_sources_json AS oddsSourcesJson FROM analyses WHERE id = ?`;
 
 /**
  * 同じレースの、分析時刻が `[from, to]`(両端を含む。ISO 8601 の UTC 文字列。`analyzed_at` は `toISOString()` の固定長 24 文字なので、文字列の大小が時刻の大小と一致する)の分析。
@@ -507,7 +509,7 @@ export class D1AnalysisStore implements AnalysisRepository {
       this.db.prepare(SELECT_ANALYSIS_HORSES_SQL).bind(analysisId),
       this.db.prepare(SELECT_R2_USAGE_SQL).bind(ym),
     ]);
-    const row = analyses?.results[0] as (AnalysisRow & { detailKey: string | null; llmNote: string | null; llmCallsJson: string | null; markRepairJson: string | null }) | undefined;
+    const row = analyses?.results[0] as (AnalysisRow & { detailKey: string | null; llmNote: string | null; llmCallsJson: string | null; markRepairJson: string | null; oddsSourcesJson: string | null }) | undefined;
     if (row === undefined) {
       return undefined;
     }
@@ -515,18 +517,19 @@ export class D1AnalysisStore implements AnalysisRepository {
     const llmNote = row.llmNote ?? null;
     const llmCalls = parseLlmCalls(row.llmCallsJson);
     const markRepair = parseMarkRepair(row.markRepairJson);
+    const oddsSourcesJson = row.oddsSourcesJson ?? null;
     if (row.detailKey === null) {
-      return { analysis: toStoredAnalysis(row, horseRows), detail: "none", llmNote, llmCalls, markRepair };
+      return { analysis: toStoredAnalysis(row, horseRows), detail: "none", llmNote, llmCalls, markRepair, oddsSourcesJson };
     }
     // R2 の操作回数の柵(Class B)。達していたら R2 を引かず、詳細の表示だけを拒否する(要約は出す。カウンタは増やさない)。
     const usage = (usageRows?.results[0] as R2Usage | undefined) ?? { classA: 0, classB: 0 };
     if (!isReadAllowed(usage)) {
-      return { analysis: toStoredAnalysis(row, horseRows), detail: "missing", llmNote, llmCalls, markRepair };
+      return { analysis: toStoredAnalysis(row, horseRows), detail: "missing", llmNote, llmCalls, markRepair, oddsSourcesJson };
     }
     const payload = await this.readDetail(row.detailKey, row.raceId);
     await this.countRead(ym);
     if (payload === null) {
-      return { analysis: toStoredAnalysis(row, horseRows), detail: "missing", llmNote, llmCalls, markRepair };
+      return { analysis: toStoredAnalysis(row, horseRows), detail: "missing", llmNote, llmCalls, markRepair, oddsSourcesJson };
     }
     const merged: AnalysisRow = {
       ...row,
@@ -537,7 +540,7 @@ export class D1AnalysisStore implements AnalysisRepository {
       const c = contributionsOf(payload, h.umaban);
       return { ...h, contributions_json: c === null ? null : JSON.stringify(c) };
     });
-    return { analysis: toStoredAnalysis(merged, mergedHorses), detail: "present", llmNote, llmCalls, markRepair };
+    return { analysis: toStoredAnalysis(merged, mergedHorses), detail: "present", llmNote, llmCalls, markRepair, oddsSourcesJson };
   }
 
   /** 今月の Class A(書き込み)を +1 する(Issue #216。移行のアップロードが R2 に置いたとき。保存の batch の外で数える場合の窓口)。 */
