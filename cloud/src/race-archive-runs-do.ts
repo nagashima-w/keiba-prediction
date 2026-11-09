@@ -7,7 +7,7 @@
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v12)に固定される。
  *
- * 動きを変える設定は Worker の var・secret の 1 つだけ(任意): `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT`(1 晩の書き込み行数を**下げる**上書き。未設定は既定の 30,000 行。文字列 `"0"` だけは変換を止める)。
+ * 動きを変える設定は Worker の var・secret の 1 つだけ(任意): `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT`(1 晩の書き込み行数を**下げる**上書き。未設定は既定の 60,000 行。文字列 `"0"` だけは変換を止める)。
  * **smoke 専用の `options()` の差し替え**(時間帯を外す)は `smoke-worker.ts` のサブクラスだけが行う。本番のエントリ(`worker.ts`)はそのサブクラスを import しない。
  */
 import { DurableObject } from "cloudflare:workers";
@@ -25,7 +25,7 @@ export interface RaceArchiveRunsEnv {
   /** Discord の Webhook URL(Worker の secret)。未登録・形式不正なら通知しない(状態は変わる)。 */
   DISCORD_WEBHOOK_URL?: string;
   /**
-   * 任意(var・secret)。1 晩の書き込み行数を**下げる**上書き(1 以上の整数。それ以外・上限超えは無視して既定の 30,000)。**文字列 `"0"` だけは変換を止める**(アラームを張らず、起きても何もしない。state は `disabled`)。
+   * 任意(var・secret)。1 晩の書き込み行数を**下げる**上書き(1 以上の整数。それ以外・上限超えは無視して既定の 60,000)。**文字列 `"0"` だけは変換を止める**(アラームを張らず、起きても何もしない。state は `disabled`)。
    * ★止める var を `RACE_ARCHIVE_RUNS` にしてはならない: それは DO の binding の名前で、同じ名前の var は binding と衝突する。
    */
   RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT?: string;
