@@ -561,6 +561,8 @@ function notesToggle(content: ResultContent, actions: ViewActions): VNode {
 function resultSections(content: ResultContent, heading: "h2" | "h3", actions: ViewActions): VNode[] {
   const allocation = content.allocation;
   return [
+    // オッズの取得元と時刻(Issue #677)。見出しは持たず、サーバの整形した 1〜2 行を並べる。無ければ section ごと出さない。
+    ...(content.oddsLines === null ? [] : [h("section", { class: "odds-sources" }, content.oddsLines.map((line) => h("p", { class: "meta" }, [line])))]),
     // 前の分析との差(Issue #583)。無ければ section ごと出さない。見出しと行はサーバの整形(子の文字列はアダプタがテキストノードにする)。
     ...(content.prevDiff === null ? [] : [h("section", { class: "prev-diff" }, [h(heading, {}, [content.prevDiff.heading]), ...content.prevDiff.lines.map((line) => h("p", { class: "meta" }, [line]))])]),
     // 印の付いた馬(Issue #211)。印が1頭も無ければ section ごと出さない。凡例はここ(見出しの下)に1回だけ(「馬ごとの評価」の中には出さない)。

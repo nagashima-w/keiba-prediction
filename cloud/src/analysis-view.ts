@@ -21,6 +21,7 @@ import { toSafeRaceSnapshot } from "../../packages/core/src/analysis/analysis-ex
 import { venueNameFromRaceId } from "../../packages/core/src/analysis/venue-codes";
 import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
 import { diffAllocationBets, type AllocationDiff } from "../../packages/core/src/analysis/allocation-diff";
+import { oddsSourcesLineOfClose, oddsSourcesLines } from "./odds-sources-view";
 import { CLOSE_NOTE, closeDiffLines, closeLabelOf, closeSummaryLines } from "./close-view";
 import { closeComboBasis, CLOSE_ROUNDS, venueKindOfRaceIdSafe, type CloseReason, type CloseStatus, type StoredCloseRound } from "./analysis-close";
 import type { StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
@@ -274,6 +275,11 @@ export interface AnalysisView {
    * (差だけを諦める。詳細の本体は壊さない)。組み立ては `analysis-diff-view.ts`(handler が付ける。`buildAnalysisView` は付けない)。閲覧者にも同じに見せる(使う項目は既に閲覧者に見えているものだけ)。
    */
   readonly previousDiff?: AnalysisViewPreviousDiff | null;
+  /**
+   * オッズの取得元と時刻の行(Issue #677。「オッズ: JRA(11/14 12:05 現在)」。最大 2 行)。記録なし(旧い分析・JRA を使わない構成・地方)・読めない値は null(何も出さない)。
+   * 文言はサーバで組み立てる(`odds-sources-view.ts`)。閲覧者にも同じに見せる。`buildAnalysisView` は常にキーを持つ。
+   */
+  readonly oddsSources?: { readonly lines: readonly string[] } | null;
   readonly detail: DetailStatus;
 }
 
@@ -407,6 +413,18 @@ export function allocationViewOf(allocation: StoredAllocation): AnalysisViewAllo
   };
 }
 
+/** 再計算の回の行の末尾に、取得元の行を足す(記録なしはそのまま)。 */
+function withOddsSourcesLine(lines: string[], json: string | null | undefined): string[] {
+  const line = oddsSourcesLineOfClose(json);
+  return line === null ? lines : [...lines, line];
+}
+
+/** 取得元の行(記録なし・読めない値は null)。 */
+function oddsSourcesViewOf(json: string | null | undefined): { readonly lines: readonly string[] } | null {
+  const lines = oddsSourcesLines(json);
+  return lines.length === 0 ? null : { lines };
+}
+
 /** 締切の直前の再計算の結果を、応答の形にする(回の昇順。無ければ null)。差分は分析時の提案との比較。 */
 function closeViewOf(close: readonly StoredCloseRound[] | undefined, proposal: StoredAllocation | undefined, venueKind: "central" | "nar"): AnalysisViewClose | null {
   if (close === undefined || close.length === 0) {
@@ -431,7 +449,8 @@ function closeViewOf(close: readonly StoredCloseRound[] | undefined, proposal: S
         diff,
         label: closeLabelOf(r.round, leadMinutes),
         // 組合せの扱いは、場と、その回の配分の設定(ok のときだけ配分がある)から導く(Issue #379。`closeComboBasis`)。
-        summaryLines: closeSummaryLines(r.allocation === null ? r : { ...r, comboBasis: closeComboBasis(venueKind, r.allocation.includeComboOdds) }),
+        // 末尾にオッズの取得元の行(Issue #677)。分析時と同じ内容でも回ごとに必ず出す(新しい時刻になっているかを見るため)。
+        summaryLines: withOddsSourcesLine(closeSummaryLines(r.allocation === null ? r : { ...r, comboBasis: closeComboBasis(venueKind, r.allocation.includeComboOdds) }), r.oddsSourcesJson),
         diffLines: r.allocation === null ? [] : closeDiffLines(diff, r.allocation.bets.length),
       };
     });
@@ -515,6 +534,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
     })),
     allocation: allocation === undefined ? null : allocationViewOf(allocation),
     close: closeViewOf(close, allocation, venueKindOfRaceIdSafe(analysis.raceId)),
+    oddsSources: oddsSourcesViewOf(result.oddsSourcesJson),
     detail,
   };
 }

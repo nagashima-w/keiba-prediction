@@ -162,7 +162,8 @@ export const SELECT_CLOSE_SQL = `SELECT round, status, reason, due_at AS dueAt, 
        route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason, skip_reason_code AS skipReasonCode, bankroll, per_race_cap AS perRaceCap,
        kelly_fraction AS kellyFraction, ev_threshold AS evThreshold, include_combo_odds AS includeComboOdds, include_wide AS includeWide,
        include_trio AS includeTrio, include_quinella AS includeQuinella, include_exacta AS includeExacta, include_trifecta AS includeTrifecta,
-       include_bracket_quinella AS includeBracketQuinella, bet_unit AS betUnit, odds_status AS oddsStatus
+       include_bracket_quinella AS includeBracketQuinella, bet_unit AS betUnit, odds_status AS oddsStatus,
+       odds_sources_json AS oddsSourcesJson
   FROM analysis_close WHERE analysis_id = ? ORDER BY round`;
 
 /** 分析 1 件の買い目(回・券種・キーの昇順。束縛値は analysis_id)。 */
@@ -241,6 +242,8 @@ export interface CloseRow {
   readonly includeBracketQuinella: number | null;
   readonly betUnit: number | null;
   readonly oddsStatus: string | null;
+  /** その回の再計算が使ったオッズの取得元(`analysis_close.odds_sources_json`。Issue #677)。記録なし・旧い行は null。省略可なのは、この項目を使わない呼び出し側の固定データを壊さないため。 */
+  readonly oddsSourcesJson?: string | null;
 }
 
 /** {@link SELECT_CLOSE_BETS_SQL} の行。 */
@@ -257,6 +260,8 @@ export interface StoredCloseRound {
   readonly firedAt: string;
   readonly lateMs: number;
   readonly oddsOfficialDatetime: string | null;
+  /** その回の再計算が使ったオッズの取得元の JSON 文字列(Issue #677。読み方は `odds-sources-view.ts`)。記録なしは null。 */
+  readonly oddsSourcesJson?: string | null;
   readonly allocation: StoredAllocation | null;
 }
 
@@ -318,6 +323,7 @@ export function toStoredCloseRound(row: CloseRow, bets: readonly CloseBetRow[]):
     firedAt: row.firedAt,
     lateMs: row.lateMs,
     oddsOfficialDatetime: row.oddsOfficialDatetime,
+    oddsSourcesJson: row.oddsSourcesJson ?? null,
     allocation,
   };
 }
