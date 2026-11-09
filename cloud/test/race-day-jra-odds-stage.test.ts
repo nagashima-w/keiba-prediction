@@ -375,6 +375,61 @@ describe("JRA のオッズの段階: 失敗は握る(分析は止めない)", ()
   });
 });
 
+describe("JRA のオッズの段階: 発走済みのレースは取らない(failIfStarted。Issue #680)", () => {
+  const START = Date.parse("2026-06-28T15:45:00+09:00");
+  /** 取得ステップを終え(段の前)、計画の行(発走時刻)を足して、auto: 自動の印を付けるか。 */
+  async function readyForJraStage(h: Harness, auto: boolean): Promise<void> {
+    await schedule(h);
+    expect((await step(h)).label).toBe("pre_race:fetch:ok"); // 取得ステップ(JRA の段の前)
+    expect((h.sql.exec("SELECT status FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as { status: string }[])[0]!.status).toBe("fetched"); // 前提: 次は JRA の段
+    h.sql.exec(
+      `INSERT INTO race_day_plan (race_id, venue, venue_name, race_number, race_name, grade, start_time, start_ms, due_ms, offset_minutes, disposition, skip_reason, state, planned_at, promoted_at)
+       VALUES (?, 'central', '東京', 11, 'x', NULL, '15:45', ?, NULL, 45, 'scheduled', NULL, 'promoted', ?, NULL)`,
+      RACE,
+      START,
+      h.clock.now,
+    );
+    if (auto) {
+      const queuedAt = (h.sql.exec("SELECT queued_at FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as { queued_at: number }[])[0]!.queued_at;
+      h.sql.exec("INSERT INTO race_day_auto_pre_race (race_id, enqueued_at, fail_reason) VALUES (?, ?, NULL)", RACE, queuedAt);
+    }
+  }
+
+  it("自動の発走前: 発走時刻に達していたら JRA に 1 本も出ず(取得口を開かない)、failed(理由 started)になり、段の行が消える", async () => {
+    const h = harness();
+    await readyForJraStage(h, true);
+    expect(stageRows(h).length).toBeGreaterThan(0); // 前提: 段の行がある(消えたことを確かめられる)
+    h.alarm.at = null;
+    h.clock.now = START; // 発走ちょうど(now >= start)
+    const outcome = await h.core.runNextStep();
+    expect(outcome).toMatchObject({ kind: "ran", mode: "pre_race", step: "fetch", result: "failed" });
+    expect(h.jra.sessions).toHaveLength(0);
+    expect(taskStatus(h)).toBe("failed");
+    expect(stageRows(h)).toEqual([]);
+    expect((h.sql.exec("SELECT fail_reason FROM race_day_auto_pre_race WHERE race_id = ?", RACE).toArray() as { fail_reason: string }[])[0]!.fail_reason).toBe("started");
+  });
+
+  it("自動の発走前: 発走の 1 ミリ秒前なら守りは働かず、JRA の段が動く", async () => {
+    const h = harness();
+    await readyForJraStage(h, true);
+    h.alarm.at = null;
+    h.clock.now = START - 1;
+    const outcome = await h.core.runNextStep();
+    expect(outcome).toMatchObject({ kind: "ran", mode: "pre_race", step: "fetch", result: "ok" });
+    expect(totalRequests(h.jra)).toBeGreaterThan(0);
+  });
+
+  it("手動の発走前(自動の印なし)は、発走後でも JRA の段が動く(守りは自動だけ)", async () => {
+    const h = harness();
+    await readyForJraStage(h, false);
+    h.alarm.at = null;
+    h.clock.now = START + 60_000;
+    const outcome = await h.core.runNextStep();
+    expect(outcome).toMatchObject({ kind: "ran", mode: "pre_race", step: "fetch", result: "ok" });
+    expect(totalRequests(h.jra)).toBeGreaterThan(0);
+  });
+});
+
 describe("JRA のオッズの段階: 差し込みの例外の中身(Issue #680)", () => {
   it("差し込みが例外を投げると、理由は固定の語 override-error のまま、例外の名前と文面はログ(onWarn)にだけ残る。保存される分析・取得元の記録には文面が入らない", async () => {
     const h = harness();
