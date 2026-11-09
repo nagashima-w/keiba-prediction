@@ -24,7 +24,10 @@
       "mcp__github__pull_request_read",
       "mcp__github__list_commits",
       "mcp__github__get_commit",
-      "mcp__github__get_file_contents"
+      "mcp__github__get_file_contents",
+      "mcp__Notion__notion-fetch",
+      "mcp__Notion__notion-create-pages",
+      "mcp__Notion__notion-update-page"
     ]
   },
   "hooks": {
