@@ -26,6 +26,8 @@ function memoryKv(): VerifyKv & { readonly data: Map<string, unknown> } {
 function setup(rows: VerifyReadRows, opts: { withParts?: boolean } = {}) {
   const db = { rows, close: { meta: [], bets: [] } as VerifyCloseRows, seq: 0, marks: new Map<string, { date: string | null; seq: number }>(), watermark: 1 };
   const log = { readDay: [] as string[], partsRowsRead: 0, markCalls: 0, statements: 0, readAll: 0, inflightDays: 0, maxInflightDays: 0 };
+  /** 週 1 回の突き合わせ(Issue #723)の試験用: 補完待ちの件数・readAll の中で起こす書き込み。 */
+  const hooks = { pending: 0, onReadAll: null as (() => void) | null };
   const touch = (raceId: string): void => {
     const date = db.rows.analyses.find((a) => a.raceId === raceId)?.kaisaiDate ?? null;
     db.seq += 1;
@@ -33,13 +35,13 @@ function setup(rows: VerifyReadRows, opts: { withParts?: boolean } = {}) {
     db.watermark += 1;
   };
   for (const raceId of new Set(rows.analyses.map((a) => a.raceId))) touch(raceId);
-  const failure = { readDay: false };
+  const failure = { readDay: false, readAll: false };
   const port: VerifyStorePort = {
     async readWatermark(): Promise<Watermark> {
       return { analyses: db.watermark, results: db.watermark, comboPayouts: null, comboImports: null };
     },
     async listPending(): Promise<PendingPage> {
-      return { rows: [], total: 0 };
+      return { rows: [], total: hooks.pending };
     },
     async readUsage() {
       return { classA: 0, classB: 0 };
@@ -52,7 +54,10 @@ function setup(rows: VerifyReadRows, opts: { withParts?: boolean } = {}) {
     },
     async readAll(): Promise<ReadAllResult> {
       log.readAll += 1;
-      return { rows: db.rows, rowsRead: 1, counts: { analyses: db.rows.analyses.length }, close: db.close };
+      if (failure.readAll) throw new Error("D1_ERROR");
+      const snapshot = db.rows;
+      hooks.onReadAll?.();
+      return { rows: snapshot, rowsRead: 1, counts: { analyses: db.rows.analyses.length }, close: db.close };
     },
     ...(opts.withParts === false
       ? {}
@@ -116,7 +121,7 @@ function setup(rows: VerifyReadRows, opts: { withParts?: boolean } = {}) {
     }
     return n;
   }
-  return { core, db, kv, log, touch, clock, warns, alarms, drain, failure, getAlarm: () => alarm, setAlarmDirect: (at: number | null) => (alarm = at) };
+  return { core, db, kv, log, touch, clock, warns, alarms, drain, failure, hooks, getAlarm: () => alarm, setAlarmDirect: (at: number | null) => (alarm = at) };
 }
 
 /** 今の db の行を「全件を読む形」(差分の読みを持たない読み取り口)で集計した応答と、差分の道の応答を、3 区分で突き合わせる(件数・集合は完全一致、小数は相対 1e-12)。 */
@@ -597,5 +602,228 @@ describe("再計算を部分から組み立てる(Issue #721): 診断と並行",
     expect(new Set(pm.days).size).toBe(pm.days.length);
     t.clock.now += 6 * 60_000;
     await expectSameAsFullRead(t);
+  });
+});
+
+/**
+ * Issue #723(#616 の段階 4): 週 1 回、全部を読む集計(readAll)と、開催日ごとの部分から組んだ集計を突き合わせる。
+ * 起こし方: cron が 23 時台に `requestWeeklyCheck` を呼び(前回から JST の日付で 7 日以上のときだけアラームを張る)、アラームの中で `runWeeklyCheck` が走る。
+ */
+describe("週 1 回の全件の突き合わせ(Issue #723)", () => {
+  const jst = (s: string): number => Date.parse(`${s}+09:00`);
+  type T = ReturnType<typeof setup>;
+  const ready = async (): Promise<T> => {
+    const t = setup(manyDayRows(4, 2));
+    expect((await t.core.getReport("all")).status).toBe("ready");
+    await t.drain();
+    expect(check(t.kv)).toMatchObject({ checked: 1, matched: 1 }); // 前提: 部分が揃い、再計算ごとの突き合わせは済んでいる
+    return t;
+  };
+  const weekly = (kv: T["kv"]) => (kv.get("partsCheck") ?? {}) as { checked: number; matched: number; mismatched: number; skipped: number; lastFullAt?: number; lastFullRowsRead?: number; lastFullMs?: number; lastPaths: string[] };
+  const screen = (kv: T["kv"]): string => JSON.stringify(["cache", "runs", "rebuilds", "partsBase"].map((k) => kv.get(k) ?? null));
+  /** DO の `alarm()` と同じ順(補完 → 部分 → 週 1 回)で、アラームが張られている間(上限つき)回す。 */
+  const runAlarms = async (t: T): Promise<void> => {
+    for (let i = 0; i < 40 && t.getAlarm() !== null; i += 1) {
+      t.setAlarmDirect(null);
+      await t.core.runBackfillTick();
+      const progressed = await t.core.runPartsTickWithProgress();
+      await t.core.runWeeklyCheck({ afterWork: progressed });
+      t.clock.now += 1_000;
+    }
+  };
+  /** 時刻を合わせて、kick → アラーム(追いつきの再試行を含む)までを行う。 */
+  const night = async (t: T, when: string): Promise<void> => {
+    t.clock.now = jst(when);
+    t.setAlarmDirect(null);
+    await t.core.requestWeeklyCheck();
+    await runAlarms(t);
+  };
+
+  it("週の境界: 前回から JST の日付で 7 日未満ならアラームを張らず、7 日以上で張る。23 時台の kick だけを受ける(21 時台・22 時台は張らない)", async () => {
+    const t = await ready();
+    t.kv.put("partsCheck", { ...weekly(t.kv), lastFullAt: jst("2026-10-10T23:50:00") });
+    const armed = async (when: string): Promise<boolean> => {
+      t.clock.now = jst(when);
+      t.setAlarmDirect(null);
+      await t.core.requestWeeklyCheck();
+      return t.getAlarm() !== null;
+    };
+    expect(await armed("2026-10-16T23:05:00")).toBe(false); // 6 日
+    expect(await armed("2026-10-17T21:05:00")).toBe(false); // 7 日だが 21 時台
+    expect(await armed("2026-10-17T22:59:00")).toBe(false);
+    expect(await armed("2026-10-17T23:05:00")).toBe(true); // 日付の差が 7(24 時間×7 には 45 分足りない)
+    t.setAlarmDirect(null);
+    expect(await armed("2026-10-18T23:59:00")).toBe(true);
+    expect(await armed("2026-10-19T00:05:00")).toBe(false); // 0 時台
+  });
+
+  it("前回の記録が無ければ(初回)23 時台の kick で張る。kick が無ければ、アラームが鳴っても突き合わせない(readAll を読まない)", async () => {
+    const t = await ready();
+    expect(weekly(t.kv).lastFullAt).toBeUndefined();
+    const reads = t.log.readAll;
+    t.clock.now = jst("2026-10-12T10:00:00");
+    await t.core.runWeeklyCheck();
+    expect(t.log.readAll).toBe(reads);
+    await night(t, "2026-10-12T23:05:00");
+    expect(t.log.readAll).toBe(reads + 1);
+  });
+
+  it("一致: 記録が増え(checked・matched・lastFullAt・読んだ行数・所要時間)、画面の集計・再計算の回数・基準の印は 1 つも変わらない", async () => {
+    const t = await ready();
+    const before = screen(t.kv);
+    const reads = t.log.readAll;
+    await night(t, "2026-10-12T23:05:00");
+    expect(t.log.readAll).toBe(reads + 1);
+    expect(weekly(t.kv)).toMatchObject({ checked: 2, matched: 2, mismatched: 0, skipped: 0, lastFullRowsRead: 1 });
+    expect(weekly(t.kv).lastFullAt).toBeGreaterThanOrEqual(jst("2026-10-12T23:05:00"));
+    expect(weekly(t.kv).lastFullAt).toBeLessThan(jst("2026-10-12T23:06:00"));
+    expect(typeof weekly(t.kv).lastFullMs).toBe("number");
+    expect(screen(t.kv)).toBe(before);
+    expect(t.warns).toEqual([]);
+    // 1 回の kick で 1 回だけ(アラームがもう一度鳴っても読まない)
+    await t.core.runWeeklyCheck();
+    expect(t.log.readAll).toBe(reads + 1);
+  });
+
+  it("ずれ(印を付けない書き込み): mismatched・lastPaths・警告(固定文+件数+例。値は含めない)、部分を全部の日で置き直し(古い塊は消え、版は同じ)、画面の集計は変えない。tick で部分が揃い、翌週は一致する", async () => {
+    const t = await ready();
+    const before = screen(t.kv);
+    const first = t.db.rows.results[0]!.raceId;
+    t.db.rows = { ...t.db.rows, results: t.db.rows.results.map((r) => (r.raceId === first ? { ...r, placePayout: r.placePayout === null ? null : r.placePayout + 1000 } : r)) }; // 印なし
+    t.clock.now = jst("2026-10-12T23:05:00");
+    await t.core.requestWeeklyCheck();
+    await t.core.runWeeklyCheck(); // 1 回目のアラーム(部分の tick の前)だけ: 置き直した直後の状態を確かめる
+    const w = weekly(t.kv);
+    expect(w).toMatchObject({ checked: 2, matched: 1, mismatched: 1, });
+    expect(w.lastFullAt).toBeGreaterThanOrEqual(jst("2026-10-12T23:05:00"));
+    expect(w.lastPaths.length).toBeGreaterThan(0);
+    expect(t.warns.filter((m) => m.includes("突き合わせのずれ")).length).toBe(1);
+    expect(t.warns.join("")).not.toMatch(/1[0-9]{3}/); // 値(払戻)は含めない
+    const pm = t.kv.get("pm") as { v: number; dirty: string[]; days: string[] };
+    expect(pm.v).toBe(PARTS_VERSION);
+    expect(pm.dirty).toHaveLength(5); // 4 日 + 開催日が NULL の日
+    expect(pm.days).toEqual([]);
+    expect([...t.kv.data.keys()].filter((k) => k.startsWith("pd:"))).toEqual([]); // 古い塊は消えている
+    expect(t.getAlarm()).not.toBeNull();
+    expect(screen(t.kv)).toBe(before);
+    await t.drain();
+    expect((t.kv.get("pm") as { dirty: string[]; days: string[] }).dirty).toEqual([]);
+    expect((t.kv.get("pm") as { days: string[] }).days).toHaveLength(5);
+    await night(t, "2026-10-19T23:05:00");
+    expect(weekly(t.kv)).toMatchObject({ checked: 3, matched: 2, mismatched: 1, }); // 作り直した部分は全件の読みと一致する
+    expect(screen(t.kv)).toBe(before);
+  });
+
+  describe("見送り(ずれに数えない・記録を進めない・翌晩に再試行する)", () => {
+    const expectSkipped = (t: T, before: string): void => {
+      expect(weekly(t.kv)).toMatchObject({ checked: 1, matched: 1, mismatched: 0, skipped: 1 });
+      expect(weekly(t.kv).lastFullAt).toBeUndefined();
+      expect(screen(t.kv)).toBe(before);
+      expect(t.warns).toEqual([]);
+    };
+    const retry = async (t: T): Promise<void> => {
+      await night(t, "2026-10-13T23:05:00");
+      expect(weekly(t.kv)).toMatchObject({ checked: 2, matched: 2, skipped: 1 });
+      expect(weekly(t.kv).lastFullAt).toBeGreaterThanOrEqual(jst("2026-10-13T23:05:00"));
+    };
+
+    it("全件を読んでいる間に印が進んだ(読んだ時点と部分が違うかもしれない): 比べずに見送り、翌晩に再試行して一致する", async () => {
+      const t = await ready();
+      const before = screen(t.kv);
+      t.hooks.onReadAll = () => {
+        t.hooks.onReadAll = null;
+        t.touch(t.db.rows.analyses[0]!.raceId);
+      };
+      await night(t, "2026-10-12T23:05:00");
+      expectSkipped(t, before);
+      await retry(t);
+    });
+
+    it("部分が追いついていない(印が進んでいる): 全件を読まずに部分の追いつきを待ち、追いついたら同じ晩のうちに突き合わせる(見送りに数えない)", async () => {
+      const t = await ready();
+      const before = screen(t.kv);
+      t.touch(t.db.rows.analyses[0]!.raceId);
+      const reads = t.log.readAll;
+      t.clock.now = jst("2026-10-12T23:05:00");
+      t.setAlarmDirect(null);
+      await t.core.requestWeeklyCheck();
+      await t.core.runWeeklyCheck(); // 1 回目のアラーム(部分の tick の前): 追いついていないので全件は読まない
+      expect(t.log.readAll).toBe(reads);
+      expect(t.getAlarm()).not.toBeNull(); // 再試行のために張り直している
+      await runAlarms(t);
+      expect(t.log.readAll).toBe(reads + 1);
+      expect(weekly(t.kv)).toMatchObject({ checked: 2, matched: 2, skipped: 0 });
+      expect(weekly(t.kv).lastFullAt).toBeDefined();
+      expect(screen(t.kv)).toBe(before);
+    });
+
+    it("部分がいつまでも追いつかない(D1 の読みが失敗し続ける): 再試行を重ねたあと見送る(skipped+1・記録は進めない)。翌晩にまた依頼される", async () => {
+      const t = await ready();
+      const before = screen(t.kv);
+      t.touch(t.db.rows.analyses[0]!.raceId);
+      t.failure.readDay = true;
+      const reads = t.log.readAll;
+      await night(t, "2026-10-12T23:05:00");
+      expect(t.log.readAll).toBe(reads);
+      expect(weekly(t.kv).skipped).toBe(1);
+      expect(weekly(t.kv).lastFullAt).toBeUndefined();
+      expect(screen(t.kv)).toBe(before);
+      t.failure.readDay = false;
+      t.setAlarmDirect(null);
+      await night(t, "2026-10-13T23:05:00");
+      expect(weekly(t.kv)).toMatchObject({ skipped: 1, matched: 2 });
+    });
+
+    it("発走時刻の補完待ちがある間: 全件を読まずに見送る", async () => {
+      const t = await ready();
+      const before = screen(t.kv);
+      t.hooks.pending = 3;
+      const reads = t.log.readAll;
+      await night(t, "2026-10-12T23:05:00");
+      expect(t.log.readAll).toBe(reads);
+      expectSkipped(t, before);
+      t.hooks.pending = 0;
+      await retry(t);
+    });
+
+    it("全件の読みに未確認の分析(発走時刻が NULL)が混ざった: 見送る", async () => {
+      const t = await ready();
+      const before = screen(t.kv);
+      const rows = t.db.rows;
+      t.db.rows = { ...rows, analyses: rows.analyses.map((a, i) => (i === 0 ? { ...a, startTime: null } : a)) };
+      await night(t, "2026-10-12T23:05:00");
+      expect(t.log.readAll).toBeGreaterThan(0);
+      expectSkipped(t, before);
+      t.db.rows = rows;
+      await retry(t);
+    });
+  });
+
+  it("同じアラームで部分の tick が進んだ回(afterWork)は、全件を読まずに依頼を残し、次のアラームを張る。次のアラームで突き合わせる", async () => {
+    const t = await ready();
+    t.clock.now = jst("2026-10-12T23:05:00");
+    t.setAlarmDirect(null);
+    await t.core.requestWeeklyCheck();
+    t.setAlarmDirect(null);
+    const reads = t.log.readAll;
+    await t.core.runWeeklyCheck({ afterWork: true });
+    expect(t.log.readAll).toBe(reads);
+    expect(t.getAlarm()).not.toBeNull();
+    expect(weekly(t.kv).checked).toBe(1);
+    await t.core.runWeeklyCheck({ afterWork: false });
+    expect(t.log.readAll).toBe(reads + 1);
+    expect(weekly(t.kv)).toMatchObject({ checked: 2, matched: 2 });
+  });
+
+  it("D1 の読みが失敗しても例外を投げない。警告を出し、記録は進めない(翌晩に再試行する)", async () => {
+    const t = await ready();
+    t.failure.readAll = true;
+    await expect(night(t, "2026-10-12T23:05:00")).resolves.toBeUndefined();
+    expect(t.warns.some((m) => m.includes("週 1 回"))).toBe(true);
+    expect(weekly(t.kv).lastFullAt).toBeUndefined();
+    t.failure.readAll = false;
+    await night(t, "2026-10-13T23:05:00");
+    expect(weekly(t.kv)).toMatchObject({ matched: 2 });
+    expect(weekly(t.kv).lastFullAt).toBeGreaterThanOrEqual(jst("2026-10-13T23:05:00"));
   });
 });

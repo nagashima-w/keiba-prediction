@@ -31,7 +31,8 @@
  * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。計画・既存の結果の依頼を失敗させない。
  */
 import { jstKaisaiDate, planTargetDate, scheduledRunKind, type ScheduledRunKind } from "./auto-run-plan";
-import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike, RaceMarketEdgeNamespaceLike, JraHorseBackfillNamespaceLike, JraBlinkerBackfillNamespaceLike } from "./handler";
+import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike, RaceMarketEdgeNamespaceLike, JraHorseBackfillNamespaceLike, JraBlinkerBackfillNamespaceLike, VerifyNamespaceLike } from "./handler";
+import { VERIFY_NAME } from "./verify-name";
 import { DAILY_REPORT_NAME } from "./daily-report-core";
 import { D1ReportStore } from "./daily-report-repository";
 import { MONTHLY_REPORT_NAME } from "./monthly-report-core";
@@ -68,6 +69,8 @@ export interface ScheduledEnv {
   readonly RACE_MARKET_EDGE?: RaceMarketEdgeNamespaceLike;
   readonly JRA_HORSE_BACKFILL?: JraHorseBackfillNamespaceLike;
   readonly JRA_BLINKER_BACKFILL?: JraBlinkerBackfillNamespaceLike;
+  /** 検証の集計の DO(Issue #723)。週 1 回の全件の突き合わせの依頼にだけ使う。無い構成では呼ばない。 */
+  readonly VERIFY_REPORT?: VerifyNamespaceLike;
   /** 日報の DO(Issue #235)。無い構成では日報の取り残しの補完をしない。 */
   readonly DAILY_REPORT?: DailyReportNamespaceLike;
   /** 月報の DO(Issue #265・#279)。無い構成では月報を依頼しない。 */
@@ -219,6 +222,15 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
         await env.JRA_BLINKER_BACKFILL.get(env.JRA_BLINKER_BACKFILL.idFromName(JRA_BLINKER_BACKFILL_NAME)).kick();
       } catch (error) {
         log(`scheduled: failed class=jra-blinker-backfill-kick-failed error=${errorKind(error)}`, "error");
+      }
+    })(),
+    // 検証の週 1 回の全件の突き合わせの依頼(Issue #723)。DO が「JST 23 時台」「前回から JST の日付で 7 日以上」を判断して、アラームを張るだけ(冪等。突き合わせは D1 だけを読み、netkeiba には出ない)。失敗は握る。
+    (async (): Promise<void> => {
+      if (env.VERIFY_REPORT === undefined) return;
+      try {
+        await env.VERIFY_REPORT.get(env.VERIFY_REPORT.idFromName(VERIFY_NAME)).requestWeeklyCheck?.();
+      } catch (error) {
+        log(`scheduled: failed class=verify-weekly-check-failed error=${errorKind(error)}`, "error");
       }
     })(),
   ]);

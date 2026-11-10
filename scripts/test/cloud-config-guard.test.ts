@@ -1932,7 +1932,8 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
       if (n > 0) sites[f] = n;
     }
     // handler.ts(Env の型・env.VERIFY_REPORT・binding なしのエラー文)・worker.ts(export の VerifyReportDO)・verify-do.ts(クラス定義の VerifyReportDO)だけ
-    expect(Object.keys(sites).sort()).toEqual(["handler.ts", "verify-do.ts", "worker.ts"]);
+    // + scheduled.ts(Issue #723。週 1 回の突き合わせの依頼 `requestWeeklyCheck` を出す 1 箇所。下の「cron の scheduled…」の検査が、それ以外を呼ばないことを固定する)
+    expect(Object.keys(sites).sort()).toEqual(["handler.ts", "scheduled.ts", "verify-do.ts", "worker.ts"]);
     expect((handler.match(/\benv\.VERIFY_REPORT\b/g) ?? []).length).toBe(1);
   });
 
@@ -1971,11 +1972,16 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
   });
 
   it("cron の scheduled・RaceDay・result-dispatch・他の DO は、検証の DO を参照しない", () => {
-    for (const f of ["scheduled.ts", ...RACE_DAY_FILES, "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts"]) {
+    for (const f of [...RACE_DAY_FILES, "result-dispatch.ts", "netkeiba-gate-do.ts", "result-backfill-do.ts", "result-backfill-core.ts"]) {
       const code = stripCode(readTextLf("cloud", "src", f));
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は検証を参照しない`).not.toMatch(/VERIFY_REPORT|VerifyReport|verify-core|verify-do|verify-store/);
     }
+    // Issue #723: cron の scheduled だけが、検証の DO の binding に触れる。呼ぶのは `requestWeeklyCheck` の 1 箇所だけ(集計・閲覧・コア・ストアには触れない)。
+    const scheduled = stripCode(readTextLf("cloud", "src", "scheduled.ts"));
+    expect(scheduled).not.toMatch(/VerifyReport|verify-core|verify-do|verify-store|\.getReport\(|\.getViewerReport\(/);
+    expect((scheduled.match(/\.requestWeeklyCheck\??\.?\(/g) ?? []).length).toBe(1);
+    expect((scheduled.match(/\benv\.VERIFY_REPORT\.get\(/g) ?? []).length).toBe(1);
   });
 });
 
