@@ -59,6 +59,7 @@ class_name = "ResultBackfill"
 
 # 検証の集計の Durable Object(Issue #219〈web の検証画面(1)〉)。`idFromName("main")` の単一インスタンスが、分析・結果の全件を D1 から読んで core の検証の集計を行い、結果をキャッシュする
 # (Workers Free の CPU 10ms に収まらないため DO で行う)。アラームで、旧い分析の発走時刻を R2 の詳細から D1 へ少しずつ写す。netkeiba にも LLM にも出ない。クラス名は migration に固定される。
+# Issue #723: cron の `scheduled`(21 時・23 時。新しい cron は足さない)が `requestWeeklyCheck` で、週 1 回の全件の突き合わせ(部分の集計と全部を読む集計の比較。JST 23 時台の kick だけが受けられ、前回から 7 日以上のときだけアラームを張る)を依頼する。
 [[durable_objects.bindings]]
 name = "VERIFY_REPORT"
 class_name = "VerifyReportDO"
