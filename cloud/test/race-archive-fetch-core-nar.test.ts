@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GateResult } from "../src/gate-core";
-import { RaceArchiveFetchCore, type ArchiveFetchOptions, type ArchiveNotice } from "../src/race-archive-fetch-core";
+import { buildNarArchiveOptions, NAR_ARCHIVE_REQUEST_INTERVAL_MS, RaceArchiveFetchCore, type ArchiveFetchOptions, type ArchiveNotice } from "../src/race-archive-fetch-core";
 import { historyCalendarUrl, historyListUrl } from "../../packages/core/src/scraper/history-pages";
 import { buildRaceRecord, type RaceRecord } from "../../packages/core/src/scraper/race-record";
 import { raceResultUrl } from "../../packages/core/src/scraper/urls";
@@ -237,5 +237,28 @@ describe("前提の確認", () => {
   it("実物の結果ページ 202146110310 は kind=nar の記録に読める", () => {
     const built = buildRaceRecord(NAR_RESULT, "202146110310", "nar");
     expect(built.ok).toBe(true);
+  });
+});
+
+describe("buildNarArchiveOptions(地方用の DO の var → 設定。中央の var とは別名)", () => {
+  it("var が無ければ kind=nar・間隔 20 秒・時間帯と上限は既定のまま(開催日を休む設定は持たない)", () => {
+    expect(NAR_ARCHIVE_REQUEST_INTERVAL_MS).toBe(20_000);
+    expect(buildNarArchiveOptions({})).toEqual({ kind: "nar", intervalMs: 20_000 });
+  });
+  it("RACE_ARCHIVE_NAR_NIGHTLY_LIMIT=150 で 1 晩 150 件、\"0\" は取得を止める(完全一致だけ)", () => {
+    expect(buildNarArchiveOptions({ RACE_ARCHIVE_NAR_NIGHTLY_LIMIT: "150" })).toMatchObject({ nightlyLimit: 150 });
+    expect(buildNarArchiveOptions({ RACE_ARCHIVE_NAR_NIGHTLY_LIMIT: "0" })).toMatchObject({ disabled: true });
+    expect(buildNarArchiveOptions({ RACE_ARCHIVE_NAR_NIGHTLY_LIMIT: "00" })).not.toHaveProperty("disabled");
+    expect(buildNarArchiveOptions({ RACE_ARCHIVE_NAR_NIGHTLY_LIMIT: "abc" })).not.toHaveProperty("nightlyLimit");
+  });
+  it("間隔・時間帯の終わりは地方用の var で変えられる。範囲外・不正は既定", () => {
+    expect(buildNarArchiveOptions({ RACE_ARCHIVE_NAR_MIN_INTERVAL_MS: "10000" })).toMatchObject({ intervalMs: 10_000 });
+    expect(buildNarArchiveOptions({ RACE_ARCHIVE_NAR_MIN_INTERVAL_MS: "100" })).toMatchObject({ intervalMs: 20_000 });
+    expect(buildNarArchiveOptions({ RACE_ARCHIVE_NAR_WINDOW_END_MIN: "600" })).toMatchObject({ windowEndMin: 600 });
+    expect(buildNarArchiveOptions({ RACE_ARCHIVE_NAR_WINDOW_END_MIN: "9999" })).not.toHaveProperty("windowEndMin");
+  });
+  it("中央の var(RACE_ARCHIVE_NIGHTLY_LIMIT など)は読まない: 中央を止めても地方は止まらない", () => {
+    const env = { RACE_ARCHIVE_NIGHTLY_LIMIT: "0", RACE_ARCHIVE_WINDOW_END_MIN: "1440", RACE_ARCHIVE_MIN_INTERVAL_MS: "5000" } as Record<string, string>;
+    expect(buildNarArchiveOptions(env)).toEqual({ kind: "nar", intervalMs: 20_000 });
   });
 });

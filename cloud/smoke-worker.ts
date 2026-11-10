@@ -44,7 +44,7 @@ import type { ConnectFn, SocketLike } from "./src/socket-fetch";
 import { GATE_NAME, type Env } from "./src/handler";
 import { runCloudAnalysis } from "./src/pipeline";
 import { RaceDay } from "./src/race-day-do";
-import { RaceArchiveFetchDO as RealRaceArchiveFetchDO } from "./src/race-archive-fetch-do";
+import { RaceArchiveFetchDO as RealRaceArchiveFetchDO, RaceArchiveNarFetchDO as RealRaceArchiveNarFetchDO } from "./src/race-archive-fetch-do";
 import { RaceArchiveRunsDO as RealRaceArchiveRunsDO } from "./src/race-archive-runs-do";
 import type { ArchiveRunsOptions } from "./src/race-archive-runs-core";
 import type { ArchiveFetchOptions, PlanProgressLike } from "./src/race-archive-fetch-core";
@@ -345,6 +345,8 @@ export { RaceDay };
 export { ResultBackfill } from "./src/result-backfill-do";
 // Issue #554: 過去の結果の取得の DO(本番の worker.ts と同じもの。binding RACE_ARCHIVE_FETCH のクラス。smoke の var `RACE_ARCHIVE_NIGHTLY_LIMIT=0` で止めてある)。
 export { RealRaceArchiveFetchDO as RaceArchiveFetchDO };
+// Issue #635: 地方の交流重賞の取得の DO(本番の worker.ts と同じもの。binding RACE_ARCHIVE_FETCH_NAR のクラス。smoke の var `RACE_ARCHIVE_NAR_NIGHTLY_LIMIT=0` で止めてある)。
+export { RealRaceArchiveNarFetchDO as RaceArchiveNarFetchDO };
 
 /**
  * Issue #554: 過去の結果の取得を、workerd の実環境(本物の gate の DO + 偽ソケット・D1・R2・アラーム)で最後まで通すための **smoke 専用の DO**(smoke の一時設定だけが binding `RACE_ARCHIVE_SMOKE` で指す。

@@ -98,6 +98,41 @@ export function parseArchiveMinIntervalMs(value: string | undefined): number | u
   return n !== null && n >= ARCHIVE_MIN_INTERVAL_OVERRIDE_MIN_MS ? n : undefined;
 }
 
+/** 地方の交流重賞(Jpn)の取得の DO(`RaceArchiveNarFetchDO`)の固定名(単一インスタンス)。中央の {@link RACE_ARCHIVE_FETCH_NAME} とは別の DO クラス・別の SQLite(Issue #635)。 */
+export const RACE_ARCHIVE_NAR_FETCH_NAME = "nar";
+/** 地方の取得のリクエスト間隔の既定(ミリ秒。開始から開始まで)。中央の既定(5 秒)より長く、本番の中央の取得の設定(20 秒)と同じ(Issue #635。ユーザーの決定)。 */
+export const NAR_ARCHIVE_REQUEST_INTERVAL_MS = 20_000;
+
+/** 地方用の DO が読む var(すべて任意の文字列。★中央の `RACE_ARCHIVE_*` とも binding の名前とも別名にする)。 */
+export interface NarArchiveVars {
+  /** 1 晩のリクエスト数を**下げる**上書き(1 以上の整数)。文字列 `"0"` だけは取得を止める。 */
+  readonly RACE_ARCHIVE_NAR_NIGHTLY_LIMIT?: string;
+  /** 時間帯の終わり(JST の 0 時からの分。1〜1440)。未設定は既定の 8:30。 */
+  readonly RACE_ARCHIVE_NAR_WINDOW_END_MIN?: string;
+  /** リクエスト間隔(ミリ秒。1500〜60000)。未設定は {@link NAR_ARCHIVE_REQUEST_INTERVAL_MS}。 */
+  readonly RACE_ARCHIVE_NAR_MIN_INTERVAL_MS?: string;
+  /** 1 晩に core の SQL が読む行数の予算(未設定は既定)。 */
+  readonly RACE_ARCHIVE_NAR_NIGHTLY_ROWS_LIMIT?: string;
+}
+
+/**
+ * 地方用の DO の設定(var → {@link ArchiveFetchOptions})。**中央の var は読まない**(中央を止めても地方は止まらず、中央の「終日・開催日も取る」の設定が地方に及ばない)。
+ * 開催日の朝を休む設定は持たない(地方は休む判定を行わない。{@link ArchiveFetchOptions.kind})。
+ */
+export function buildNarArchiveOptions(vars: NarArchiveVars): ArchiveFetchOptions {
+  const nightlyLimit = parseLimitOverride(vars.RACE_ARCHIVE_NAR_NIGHTLY_LIMIT, ARCHIVE_NIGHTLY_LIMIT_MAX);
+  const nightlyRowsLimit = parseLimitOverride(vars.RACE_ARCHIVE_NAR_NIGHTLY_ROWS_LIMIT, ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX);
+  const windowEndMin = parseArchiveWindowEndMin(vars.RACE_ARCHIVE_NAR_WINDOW_END_MIN);
+  return {
+    kind: "nar",
+    intervalMs: parseArchiveMinIntervalMs(vars.RACE_ARCHIVE_NAR_MIN_INTERVAL_MS) ?? NAR_ARCHIVE_REQUEST_INTERVAL_MS,
+    ...(windowEndMin === undefined ? {} : { windowEndMin }),
+    ...(nightlyRowsLimit === null ? {} : { nightlyRowsLimit }),
+    ...(isArchiveFetchDisabled(vars.RACE_ARCHIVE_NAR_NIGHTLY_LIMIT) ? { disabled: true } : {}),
+    ...(nightlyLimit === null ? {} : { nightlyLimit }),
+  };
+}
+
 /** 取得を始める時刻(2026-11-04 0:00 JST = 2026-11-03T15:00:00Z)。これより前には gate にも計画にも触れない(ユーザーの決定)。 */
 export const ARCHIVE_NOT_BEFORE_MS = Date.UTC(2026, 10, 3, 15, 0, 0);
 /** 時間帯の開始(JST の 0 時からの分。含む)。 */

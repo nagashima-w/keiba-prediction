@@ -5,7 +5,7 @@
 #   ユーザーがダッシュボードで登録する。secret は wrangler deploy で消えない
 #   (vars にするとダッシュボードの値は次のデプロイで上書きされる)。
 #   したがって認証の設定には `secrets.required` を置かず、[vars] にも置かない(未設定なら Worker が全リクエストに 403 を返す)。
-#   [vars] に置いてよいのは、過去の結果の取得の時間帯・間隔を変える RACE_ARCHIVE_* の 3 つと、#642 の 1 晩の上限、JRA のオッズを使うか(JRA_ODDS_ENABLED。Issue #675)、過去のブリンカーの埋め戻しを止めるか(JRA_BLINKER_BACKFILL_ENABLED。Issue #698)だけ(下の [vars])。
+#   [vars] に置いてよいのは、過去の結果の取得の時間帯・間隔を変える RACE_ARCHIVE_* の 3 つと、地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT。Issue #635)と、#642 の 1 晩の上限、JRA のオッズを使うか(JRA_ODDS_ENABLED。Issue #675)、過去のブリンカーの埋め戻しを止めるか(JRA_BLINKER_BACKFILL_ENABLED。Issue #698)だけ(下の [vars])。
 name = "keiba-cloud"
 main = "src/worker.ts"
 compatibility_date = "2026-10-01"
@@ -102,6 +102,14 @@ class_name = "AllocationExportDO"
 name = "RACE_ARCHIVE_FETCH"
 class_name = "RaceArchiveFetchDO"
 
+# 地方の交流重賞(Jpn1・Jpn2・Jpn3)の過去の結果(2021-01 から)を毎晩取得する Durable Object(Issue #635)。`idFromName("nar")` の単一インスタンス。中央の DO の子クラスで、SQLite・アラーム・停止の状態は中央と別。
+# nar.netkeiba.com から、カレンダー → 開催日の一覧(Jpn のレースだけ選ぶ)→ 結果ページの順に、JST 0:00〜8:30 の間だけ、20 秒に 1 件、gate 経由で取る。開催日の朝を休む判定は行わない。今日以降の開催日は取らない。
+# 止める・件数を下げる var(中央の RACE_ARCHIVE_* とは別名。★binding と同じ名前の var は衝突するので使わない): `RACE_ARCHIVE_NAR_NIGHTLY_LIMIT`("0" で止める。1 以上の整数で 1 晩のリクエスト数を下げる。本番の初期値は 150)・
+# `RACE_ARCHIVE_NAR_WINDOW_END_MIN`・`RACE_ARCHIVE_NAR_MIN_INTERVAL_MS`・`RACE_ARCHIVE_NAR_NIGHTLY_ROWS_LIMIT`。管理者の口は `GET /api/race-archive/nar`・`POST /api/race-archive/nar/resume`。クラス名は migration(v16)に固定される。
+[[durable_objects.bindings]]
+name = "RACE_ARCHIVE_FETCH_NAR"
+class_name = "RaceArchiveNarFetchDO"
+
 # Issue #655: 過去の結果の取得を、日中と中央の開催日にも動かす(本番の値)。ユーザーの決定(2026-11-07): 日中の分析に支障が出ても構わないので、取得を優先する。
 # - RACE_ARCHIVE_WINDOW_END_MIN = "1440": 取得の時間帯の終わり(JST の 0 時からの分)を 24:00 にする(終日。既定は 8:30 = 510)。
 # - RACE_ARCHIVE_SKIP_RACE_DAY = "0": 中央の開催日にも取る(文字列 "0" だけが有効。既定は休む)。取る対象が今日より前の開催日だけなのは変わらない。
@@ -120,6 +128,8 @@ class_name = "RaceArchiveFetchDO"
 RACE_ARCHIVE_WINDOW_END_MIN = "1440"
 RACE_ARCHIVE_SKIP_RACE_DAY = "0"
 RACE_ARCHIVE_MIN_INTERVAL_MS = "20000"
+# 地方の交流重賞の取得(Issue #635)。1 晩 150 件から始め、様子を見てから上げる(ユーザーの決定)。時間帯(0:00〜8:30)と間隔(20 秒)はコードの既定のまま。
+RACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "150"
 RACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"
 JRA_ODDS_ENABLED = "1"
 # 過去のレースのブリンカー着用の埋め戻し(Issue #698)は**止めて公開する**("0")。馬ごとの頁の埋め戻し(#697)の取得が終わってから、メインが "1" に変えて公開する(ユーザーの決定)。
@@ -238,6 +248,11 @@ new_sqlite_classes = ["JraHorseBackfillDO"]
 [[migrations]]
 tag = "v15"
 new_sqlite_classes = ["JraBlinkerBackfillDO"]
+
+# 追加だけ(v1〜v15 には触れない)。Issue #635。地方の交流重賞の過去の結果の取得の DO。
+[[migrations]]
+tag = "v16"
+new_sqlite_classes = ["RaceArchiveNarFetchDO"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。
