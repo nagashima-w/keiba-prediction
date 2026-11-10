@@ -98,4 +98,23 @@ describe("buildArchiveNoticeEmbed", () => {
     }
     expect(central).toContain("/api/race-archive/resume");
   });
+  it("追い切り(scope: oikiri)の通知は、追い切りの取得であることと、追い切りのページ・追い切り用の再開の口を出す。中央・地方の通知にはどちらも出ない(Issue #731)", () => {
+    const base = { kind: "refused", httpStatus: 400, stage: "result", at: AT, willAutoResume: false, resumeAt: null, nightSaved: 3, totalDone: 10 } as const;
+    const central = text(buildArchiveNoticeEmbed(base));
+    const nar = text(buildArchiveNoticeEmbed({ ...base, scope: "nar" }));
+    const oikiri = buildArchiveNoticeEmbed({ ...base, scope: "oikiri" });
+    const t = text(oikiri);
+    expect(oikiri.title).toContain("追い切り");
+    expect(t).toContain("/api/race-archive/oikiri/resume");
+    expect(t).toContain("追い切りのページ");
+    expect(t).not.toContain("結果ページ");
+    expect(central).not.toContain("追い切り");
+    expect(nar).not.toContain("追い切り");
+    expect(central).toContain("/api/race-archive/resume");
+    for (const kind of ["capacity", "r2-fence", "rows-budget", "failures"] as const) {
+      const n = { capacity: { kind: "capacity", reason: "db-size", dbSizeBytes: 1, at: AT, totalDone: 1 }, "r2-fence": { kind: "r2-fence", at: AT, resumeAt: RESUME }, "rows-budget": { kind: "rows-budget", at: AT, resumeAt: RESUME, rowsRead: 1, limit: 1 }, failures: { kind: "failures", count: 10, lastClass: "http-500", at: AT, resumeAt: RESUME } }[kind] as ArchiveNotice;
+      expect(buildArchiveNoticeEmbed({ ...n, scope: "oikiri" }).title, kind).toContain("追い切り");
+      expect(buildArchiveNoticeEmbed(n).title, kind).not.toContain("追い切り");
+    }
+  });
 });

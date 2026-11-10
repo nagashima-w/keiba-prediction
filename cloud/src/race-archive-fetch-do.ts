@@ -21,6 +21,7 @@ import {
   ARCHIVE_NIGHTLY_LIMIT_MAX,
   ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX,
   buildNarArchiveOptions,
+  buildOikiriArchiveOptions,
   isArchiveFetchDisabled,
   isArchiveRaceDayRestDisabled,
   parseArchiveMinIntervalMs,
@@ -31,6 +32,7 @@ import {
 } from "./race-archive-fetch-core";
 import type { RaceArchiveFetchStatus } from "./race-archive-fetch-types";
 import { D1RaceArchiveStore, type RaceArchiveBucket, type RaceArchiveDb } from "./race-archive-repository";
+import { D1RaceOikiriStore } from "./race-oikiri-repository";
 import type { GateResult } from "./gate-core";
 
 /** netkeiba への取得の出口(NetkeibaGate)の固定名。handler.ts・race-day-do.ts の GATE_NAME と同じ。 */
@@ -67,6 +69,14 @@ export interface RaceArchiveFetchEnv {
   RACE_ARCHIVE_NAR_MIN_INTERVAL_MS?: string;
   /** 任意(Issue #635。地方用)。1 晩に core の SQL が読む行数の予算。 */
   RACE_ARCHIVE_NAR_NIGHTLY_ROWS_LIMIT?: string;
+  /** 任意(Issue #731。追い切り用の DO `RaceOikiriFetchDO` だけが読む。中央・地方の DO は読まない)。1 晩のリクエスト数を下げる上書き。`"0"` は取得を止める。★binding の名前〈RACE_ARCHIVE_FETCH_OIKIRI〉とは別名。 */
+  RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT?: string;
+  /** 任意(Issue #731。追い切り用)。時間帯の終わり(JST の 0 時からの分。1〜1440。未設定は 1440 = 終日)。 */
+  RACE_ARCHIVE_OIKIRI_WINDOW_END_MIN?: string;
+  /** 任意(Issue #731。追い切り用)。リクエスト間隔(ミリ秒。1500〜60000。未設定は 20 秒)。 */
+  RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS?: string;
+  /** 任意(Issue #731。追い切り用)。1 晩に core の SQL が読む行数の予算。 */
+  RACE_ARCHIVE_OIKIRI_NIGHTLY_ROWS_LIMIT?: string;
 }
 
 export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
@@ -75,6 +85,7 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
   constructor(ctx: DurableObjectState, env: RaceArchiveFetchEnv) {
     super(ctx, env);
     const store = new D1RaceArchiveStore({ db: env.DB, bucket: env.ANALYSIS_DETAIL });
+    const oikiriStore = new D1RaceOikiriStore({ db: env.DB });
     const notifier = createDiscordNotifier(env.DISCORD_WEBHOOK_URL);
     const gate = (): ReturnType<RaceArchiveFetchEnv["NETKEIBA_GATE"]["get"]> => env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
     this.core = new RaceArchiveFetchCore(
@@ -94,6 +105,11 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
         archive: {
           saveRaceArchive: (input) => store.saveRaceArchive(input),
           getCatalogEntry: (raceId) => store.getCatalogEntry(raceId),
+        },
+        // 追い切りの取得(`RaceOikiriFetchDO`。`oikiri: true`)だけが使う。中央・地方の取得は呼ばない。
+        oikiri: {
+          listCatalogPage: (afterRaceId, limit) => store.listCatalogPage(afterRaceId, limit),
+          saveRaceOikiri: (input) => oikiriStore.saveRaceOikiri(input),
         },
         notify: async (notice) => {
           if (notifier === undefined) {
@@ -164,5 +180,17 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
 export class RaceArchiveNarFetchDO extends RaceArchiveFetchDO {
   protected override options(): ArchiveFetchOptions {
     return buildNarArchiveOptions(this.env);
+  }
+}
+
+/**
+ * 過去のレースの追い切りの評価(ランクと評語)の取得の DO(Issue #731)。**中央の DO の子クラス**で、配線(gate・保存・通知)はそのまま使い、設定だけを追い切り用にする
+ * (`oikiri: true`。目録の中央のレースを流し込み → 追い切りのページを gate 経由で取る → D1 の `race_oikiri` に 1 レース 1 行で保存する)。別のクラス・別のインスタンス(固定名 `oikiri`)なので、SQLite・アラーム・停止の状態は中央・地方と混ざらない。
+ * 設定は追い切り用の var(`RACE_ARCHIVE_OIKIRI_*`。中央・地方の var は読まない)。クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v17)に固定される。
+ * 開催日の朝を休む判定を行わない(終日・毎日取る。Issue #731 のユーザーの決定)ので、日単位の DO への呼び出し(`planProgress`)は本番では呼ばれない。
+ */
+export class RaceOikiriFetchDO extends RaceArchiveFetchDO {
+  protected override options(): ArchiveFetchOptions {
+    return buildOikiriArchiveOptions(this.env);
   }
 }

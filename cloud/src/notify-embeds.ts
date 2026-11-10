@@ -547,6 +547,14 @@ const ARCHIVE_STAGE_LABEL = { calendar: "カレンダー", list: "一覧", resul
  */
 export function buildArchiveNoticeEmbed(notice: ArchiveNotice): CloudEmbed {
   const embed = buildArchiveNoticeEmbedBody(notice);
+  if (notice.scope === "oikiri") {
+    // 追い切りの取得(Issue #731)の通知: 題を「追い切りの取得」にし、取っているページの呼び名と、再開の口を追い切り用のパスにする。
+    return fitEmbed({
+      ...embed,
+      title: (embed.title ?? "").replace("過去の結果の取得", "過去のレースの追い切りの取得"),
+      ...(embed.description === undefined ? {} : { description: embed.description.replaceAll("/api/race-archive/resume", "/api/race-archive/oikiri/resume").replaceAll("結果ページ", "追い切りのページ") }),
+    });
+  }
   if (notice.scope !== "nar") {
     return embed;
   }

@@ -811,6 +811,38 @@ describe("runScheduled: 過去の結果の取得の起動(Issue #554)。21 時�
     expect(nar.kicks()).toBe(1);
   });
 
+  it.each([
+    ["21 時(first)", FIRST_0627_2100],
+    ["23 時(retry)", RETRY_0628_2300],
+  ])("%s: 追い切りの取得の DO(固定名 oikiri)の kick も 1 回呼ぶ。中央(main)・地方(nar)の kick とは別(Issue #731)", async (_name, scheduledTime) => {
+    const f = fakeNamespace();
+    const h = harness();
+    const central = fakeArchive(f.events);
+    const nar = fakeArchive(f.events);
+    const oikiri = fakeArchive(f.events);
+    await runScheduled({ scheduledTime }, { ...envOf(f), RACE_ARCHIVE_FETCH: central.namespace, RACE_ARCHIVE_FETCH_NAR: nar.namespace, RACE_ARCHIVE_FETCH_OIKIRI: oikiri.namespace }, { ...h.deps, store: { listUnimportedRacesByDay: async () => [] } });
+    expect(oikiri.kicks()).toBe(1);
+    expect(oikiri.names).toEqual(["oikiri"]);
+    expect(nar.names).toEqual(["nar"]);
+    expect(central.names).toEqual(["main"]);
+  });
+
+  it("追い切りの取得の DO の kick が失敗しても投げない(中央・地方の kick も、ほかの仕事も巻き込まない)。binding が無ければ呼ばない", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const central = fakeArchive(f.events);
+    const nar = fakeArchive(f.events);
+    const oikiri = fakeArchive(f.events, async () => {
+      throw new Error("oikiri DO down");
+    });
+    await expect(runScheduled({ scheduledTime: FIRST_0627_2100 }, { ...envOf(f), RACE_ARCHIVE_FETCH: central.namespace, RACE_ARCHIVE_FETCH_NAR: nar.namespace, RACE_ARCHIVE_FETCH_OIKIRI: oikiri.namespace }, h.deps)).resolves.toBeUndefined();
+    expect(central.kicks()).toBe(1);
+    expect(nar.kicks()).toBe(1);
+    expect(oikiri.kicks()).toBe(1);
+    await expect(runScheduled({ scheduledTime: FIRST_0627_2100 }, { ...envOf(f), RACE_ARCHIVE_FETCH: central.namespace }, h.deps)).resolves.toBeUndefined();
+    expect(oikiri.kicks()).toBe(1);
+  });
+
   it("23 時(retry): 取得の DO の kick は処理の最後(結果の取り込み・結果の補完の kick のあと)。取得の DO の呼び出しが固まっても、先の仕事は済んでいる(Issue #573-17)", async () => {
     const f = fakeNamespace();
     const h = harness();
