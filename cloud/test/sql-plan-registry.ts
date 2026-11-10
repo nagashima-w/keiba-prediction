@@ -48,7 +48,7 @@ export const HERE: Record<string, PlanEntry> = {
     "jra-entries-repository.ts::UPSERT_ENTRIES_SQL",
     // 馬の頁から取った属性の保存と、取る馬の読み出し(Issue #697)。horse_runs の主キーの範囲読み・json_each から horse_profiles の主キーの引き・json_each からの INSERT。
     "jra-horse-repository.ts::LIST_HORSE_IDS_SQL",
-    "jra-horse-repository.ts::FILTER_MISSING_SQL",
+    "jra-horse-repository.ts::FILTER_TARGETS_SQL",
     "jra-horse-repository.ts::INSERT_HORSE_PROFILES_SQL",
     // 過去のレースのブリンカー着用の保存と、取り終えたレースの確認(Issue #698)。json_each から past_blinker_races の主キーの引き・json_each からの INSERT 2 本。
     "past-blinker-repository.ts::FILTER_DONE_SQL",

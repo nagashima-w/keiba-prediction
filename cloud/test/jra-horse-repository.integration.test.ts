@@ -46,12 +46,28 @@ describe("listHorseIdsAfter(horse_runs の馬の ID を、主キーの順に範�
   });
 });
 
-describe("filterMissing(horse_profiles にいない馬だけ)", () => {
+describe("filterTargets(horse_profiles にいない、中央の走がある馬だけ)", () => {
   it("出馬表から入った馬(source=jra)も、すでにいる馬として除く。順序は引数の順", async () => {
+    await addRuns("2018100001", ["202405010101"]);
+    await addRuns("2018100002", ["202405010101"]);
+    await addRuns("2018100003", ["202405010101"]);
     await local.db.prepare("INSERT INTO horse_profiles (horse_id, name, sire, dam, dam_sire, breeder, source, first_seen_on, updated_on) VALUES ('2018100002', 'あ', NULL, NULL, NULL, NULL, 'jra', '20261101', '20261101')").run();
     const store = new D1JraHorseStore({ db: local.db });
-    expect(await store.filterMissing(["2018100001", "2018100002", "2018100003"])).toEqual(["2018100001", "2018100003"]);
-    expect(await store.filterMissing([])).toEqual([]);
+    expect(await store.filterTargets(["2018100003", "2018100002", "2018100001"])).toEqual(["2018100003", "2018100001"]);
+    expect(await store.filterTargets([])).toEqual([]);
+  });
+
+  it("中央の走がある馬は残り、地方だけ・海外(X 形)だけの馬は除く。中央と地方の両方を走った馬は残る(場コード 01〜10 が中央)", async () => {
+    await addRuns("2018100001", ["202405010101", "202410010101"]); // 中央だけ(場コード 05・10)
+    await addRuns("2018100002", ["202444122909", "202454071201"]); // 地方だけ(44・54)
+    await addRuns("2018100003", ["202444122909", "202406010101"]); // 両方
+    await addRuns("2018100004", ["X20240101"]); // 海外・ID 欠損だけ
+    await addRuns("2018100005", ["202411010101"]); // 場コード 11 は地方の側
+    await addRuns("2018100006", ["202401010101"]); // 場コード 01(下の境界)
+    await addRuns("2018100007", ["202400010101"]); // 場コード 00 は中央でない
+    const store = new D1JraHorseStore({ db: local.db });
+    const ids = ["2018100001", "2018100002", "2018100003", "2018100004", "2018100005", "2018100006", "2018100007"];
+    expect(await store.filterTargets(ids)).toEqual(["2018100001", "2018100003", "2018100006"]);
   });
 });
 
