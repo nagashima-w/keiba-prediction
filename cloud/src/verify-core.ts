@@ -22,7 +22,11 @@
  * ## 差分の集計の並走(Issue #628。#616 の段階 3 の前半。`verify-parts.ts`)
  * 画面に出す集計(上の `cache`)は変えず、開催日ごとの部分(kv の `pd:<日>:…`)を別に持ち、同じ時点の `cache` と突き合わせて記録する(診断の `partsCheck`)。部分の更新は**アラームの tick**(`runPartsTick`)で行う:
  * 印(`verify_race_mark`)を先に読み、印の付いた開催日だけを D1 から読み直す。初回・部分の形の版が変わった後の全部の作り直しも同じ道(全日を作り直す対象にして、tick ごとに {@link VERIFY_PARTS_DAYS_PER_TICK} 日ずつ。1 日 20 回の再計算の柵に数えない)。
- * 並走の失敗は握る(警告だけ。画面の集計・補完のアラームには触れない)。突き合わせは、再計算の後に印が動いていないときだけ(動いたら見送りに数える)。後半で、`assembleFromParts` の結果を今の集計の代わりに返す。
+ * 並走の失敗は握る(警告だけ。画面の集計・補完のアラームには触れない)。突き合わせは、再計算の後に印が動いていないときだけ(動いたら見送りに数える)。
+ *
+ * ## 差分の部分から組み立てる再計算(Issue #721。#616 の段階 3b)
+ * 差分の読みを持つ読み取り口では、`recompute` が印を読み、変わった開催日だけ(1 回に最大 4 日)を読み直して `assembleFromParts` で集計を作る(`recomputeFromParts`)。追いつけない回は `runs` に数えず、あれば古い集計を `backfilling` の stale で返して tick に任せる。
+ * 部分も集計も無い完全な初回だけ全件を読み(`recomputeFull`)、別枠 `rebuilds`(1 日 {@link VERIFY_REBUILD_DAILY_LIMIT} 回)で数える。再計算の追いつきと `runPartsTick` は `partsLock` で直列にする。
  *
  * ## 閲覧者の要求(`getViewerReport`。Issue #263)
  * 閲覧者(友人)にも検証画面を見せるが、**閲覧者の要求は集計のやり直しを起こさない**。`getReport` とは別のメソッドにしてあり(`refresh` の引数も無い)、kv のキャッシュを読むだけ:
@@ -358,6 +362,17 @@ export interface GetReportOptions {
   readonly refresh?: boolean;
 }
 
+/** 再計算の結果。`pending`: 差分の部分が追いついていない(残りの日数)。`rebuildLimited`: 全件読みへの切り戻しの 1 日の上限(次に読める時刻)。 */
+type RecomputeResult = CacheEntry | { readonly preparing: number } | { readonly pending: number } | { readonly rebuildLimited: number };
+
+/** 全件読みへの切り戻し(部分も集計も無い完全な初回)の 1 日(JST)の上限(Issue #721。1 日 20 回の再計算とは別枠)。 */
+export const VERIFY_REBUILD_DAILY_LIMIT = 3;
+
+interface Rebuilds {
+  readonly day: string;
+  readonly count: number;
+}
+
 function sameWatermark(a: Watermark, b: Watermark): boolean {
   return a.analyses === b.analyses && a.results === b.results && a.comboPayouts === b.comboPayouts && a.comboImports === b.comboImports;
 }
@@ -374,7 +389,9 @@ export class VerifyCore {
   private readonly dailyLimit: number;
   private readonly tickQueryLimit: number;
   /** 計算中の Promise(同時の要求で再計算を共有する。DO のインスタンスの寿命の間だけ)。 */
-  private inflight: Promise<CacheEntry | { readonly preparing: number }> | null = null;
+  private inflight: Promise<RecomputeResult> | null = null;
+  /** 差分の部分(kv の `pm`・`pd:`)を書く処理の直列化(Issue #721。再計算の追いつきと tick が並行に書かない)。 */
+  private partsLock: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly deps: VerifyCoreDeps,
@@ -432,6 +449,13 @@ export class VerifyCore {
     if ("preparing" in result) {
       await this.armBackfill();
       return { status: "preparing", remaining: result.preparing, blocked: null, resumeAt: null };
+    }
+    if ("pending" in result) {
+      // 差分の部分が追いついていない(Issue #721)。tick に任せ、あれば古い集計を出す(新しい理由は足さず `backfilling` を使う)。
+      return cache !== null ? this.ready(cache, venue, "backfilling", null) : { status: "preparing", remaining: Math.max(1, result.pending), blocked: null, resumeAt: null };
+    }
+    if ("rebuildLimited" in result) {
+      return { status: "throttled", nextAt: new Date(result.rebuildLimited).toISOString(), reason: "daily-limit" };
     }
     return this.ready(result, venue, null, null);
   }
@@ -506,7 +530,102 @@ export class VerifyCore {
     return { ok: true };
   }
 
-  private async recompute(watermark: Watermark): Promise<CacheEntry | { readonly preparing: number }> {
+  private partsPort(): Required<Pick<VerifyStorePort, "readMaxSeq" | "readMarks" | "readDays" | "readDay">> | null {
+    const { store } = this.deps;
+    if (store.readMaxSeq === undefined || store.readMarks === undefined || store.readDays === undefined || store.readDay === undefined) return null;
+    return { readMaxSeq: store.readMaxSeq.bind(store), readMarks: store.readMarks.bind(store), readDays: store.readDays.bind(store), readDay: store.readDay.bind(store) };
+  }
+
+  private withPartsLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.partsLock.then(fn, fn);
+    this.partsLock = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * 再計算(Issue #721)。差分の読みを持つ読み取り口では、変わった開催日だけを D1 から読み直し、部分を合わせて集計を作る({@link recomputeFromParts})。
+   * 持たない読み取り口は、今までどおり全件を読む({@link recomputeFull})。
+   */
+  private async recompute(watermark: Watermark): Promise<RecomputeResult> {
+    const port = this.partsPort();
+    if (port === null) return this.recomputeFull(watermark, "runs");
+    return this.recomputeFromParts(watermark, port);
+  }
+
+  private async recomputeFromParts(watermark: Watermark, port: NonNullable<ReturnType<VerifyCore["partsPort"]>>): Promise<RecomputeResult> {
+    const { kv, now } = this.deps;
+    const outcome = await this.withPartsLock(async (): Promise<RecomputeResult | "full"> => {
+      const cache = this.readCache();
+      const state0 = kv.get<PartsState>("pm");
+      if (state0 === undefined || state0.v !== PARTS_VERSION) {
+        // 部分が無い(初回・版を上げた直後)。集計があればそれを出して tick に作り直しを任せる。集計も無ければ全件読みに切り戻す。
+        if (cache !== null) {
+          await this.armParts(now());
+          return { pending: 0 };
+        }
+        return "full";
+      }
+      const t0 = now();
+      const adv = await this.advanceParts(port, state0);
+      if (adv.unchecked > 0) return { preparing: adv.unchecked };
+      let state = adv.state;
+      if (state.dirty.length > 0 || adv.marksFull) {
+        await this.armParts(now() + VERIFY_TICK_DELAY_MS);
+        return { pending: state.dirty.length };
+      }
+      const t1 = now();
+      const days: DayParts[] = [];
+      for (const day of state.days) {
+        const parts = decodeDay(day, (key) => kv.get(key));
+        if (parts === null) {
+          // 保存が欠けている: 全件読みに落とさず、その日を作り直す。
+          state = { ...state, dirty: [...new Set([...state.dirty, day])].sort() };
+          kv.put("pm", state);
+          await this.armParts(now() + VERIFY_TICK_DELAY_MS);
+          return { pending: state.dirty.length };
+        }
+        days.push(parts);
+      }
+      const assembled = assembleFromParts(days);
+      const t2 = now();
+      const entry: CacheEntry = {
+        v: CACHE_VERSION,
+        computedAt: t2,
+        watermark,
+        reports: assembled.reports,
+        promptVersions: assembled.promptVersions,
+        closeByVenue: assembled.closeByVenue,
+        breakdownByVenue: assembled.breakdownByVenue,
+        diag: { rowsRead: adv.rowsRead, counts: adv.counts, readMs: t1 - t0, computeMs: t2 - t1, promptVersionsMs: 0, closeMs: 0, breakdownMs: 0, startTimeGaps: assembled.startTimeGaps },
+      };
+      kv.put("cache", entry);
+      this.recordRun(t2);
+      return entry;
+    });
+    if (outcome !== "full") return outcome;
+    // 部分も集計も無い完全な初回: 全件読みに切り戻す。1 日 20 回の再計算には数えず、別枠(`rebuilds`)で数える。
+    const t = now();
+    const day = jstIsoDate(t);
+    const rebuilds = kv.get<Rebuilds>("rebuilds");
+    if (rebuilds !== undefined && rebuilds.day === day && rebuilds.count >= VERIFY_REBUILD_DAILY_LIMIT) return { rebuildLimited: nextJstMidnight(t) };
+    return this.recomputeFull(watermark, "rebuilds");
+  }
+
+  private recordRun(t: number): void {
+    const { kv } = this.deps;
+    const prev = kv.get<Runs>("runs");
+    const day = jstIsoDate(t);
+    kv.put("runs", { day, count: prev !== undefined && prev.day === day ? prev.count + 1 : 1, lastAt: t } satisfies Runs);
+  }
+
+  private recordRebuild(t: number): void {
+    const { kv } = this.deps;
+    const prev = kv.get<Rebuilds>("rebuilds");
+    const day = jstIsoDate(t);
+    kv.put("rebuilds", { day, count: prev !== undefined && prev.day === day ? prev.count + 1 : 1 } satisfies Rebuilds);
+  }
+
+  private async recomputeFull(watermark: Watermark, counter: "runs" | "rebuilds"): Promise<CacheEntry | { readonly preparing: number }> {
     const { kv, now, store } = this.deps;
     // 差分の集計(Issue #628)の基準: 再計算の読みの**前**に印の最大値を読む。この後の書き込みは印が進むので、突き合わせは「印が基準のまま」のときだけ行う。失敗しても本体の集計は出す。
     const baseSeq = await this.readBaseSeq();
@@ -576,9 +695,8 @@ export class VerifyCore {
     if (baseSeq !== null) {
       kv.put("partsBase", { seq: baseSeq, computedAt: t3 } satisfies PartsBase);
     }
-    const prev = kv.get<Runs>("runs");
-    const day = jstIsoDate(t3);
-    kv.put("runs", { day, count: prev !== undefined && prev.day === day ? prev.count + 1 : 1, lastAt: t3 } satisfies Runs);
+    if (counter === "runs") this.recordRun(t3);
+    else this.recordRebuild(t3);
     if (baseSeq !== null) {
       await this.armParts(t3);
     }
@@ -625,7 +743,7 @@ export class VerifyCore {
     try {
       const page = await store.listPending(kv.get<number>(CURSOR_KEY) ?? 0, 1);
       if (page.total > 0) return;
-      await this.partsStep(port);
+      await this.withPartsLock(() => this.partsStep(port));
     } catch {
       onWarn?.("検証の差分の部分の更新で例外が起きました(再試行します)");
       const state = kv.get<PartsState>("pm");
@@ -646,8 +764,33 @@ export class VerifyCore {
       state = { v: PARTS_VERSION, partsSeq: seq, dirty: [...days], days: [], fails: 0 };
       kv.put("pm", state);
     }
+    const adv = await this.advanceParts(port, state);
+    state = adv.state;
+    const more = state.dirty.length > 0 || adv.marksFull;
+    if (more) {
+      await this.armParts(now() + VERIFY_TICK_DELAY_MS);
+      return;
+    }
+    await this.compareParts(state, port.readMaxSeq);
+  }
+
+  /**
+   * 印を先に読み、dirty の日を最大 {@link VERIFY_PARTS_DAYS_PER_TICK} 日、データを後に読んで部分を作り直す(tick と再計算が共有する。呼ぶ側が `withPartsLock` で直列にする)。
+   * 補完前の行(発走時刻か条件が NULL)を含む日は部分を作らず dirty から外す(補完の書き込みが印を付けるので、後で拾える)。
+   */
+  private async advanceParts(
+    port: Required<Pick<VerifyStorePort, "readMarks" | "readDay">>,
+    state0: PartsState,
+  ): Promise<{ readonly state: PartsState; readonly rowsRead: number; readonly counts: Record<string, number>; readonly marksFull: boolean; readonly unchecked: number }> {
+    const { kv } = this.deps;
+    let state = state0;
+    const counts: Record<string, number> = { marks: 0, days: 0, analyses: 0, horses: 0, allocationMeta: 0, bets: 0, results: 0, comboPayouts: 0, comboImports: 0 };
+    let rowsRead = 0;
+    let unchecked = 0;
     // ① 印を先に読む(開催日が NULL の印は捨てず、NULL の日を作り直す対象にする)。
-    const { marks } = await port.readMarks(state.partsSeq, VERIFY_PARTS_MARKS_LIMIT);
+    const { marks, rowsRead: markRows } = await port.readMarks(state.partsSeq, VERIFY_PARTS_MARKS_LIMIT);
+    rowsRead += markRows;
+    counts["marks"] = marks.length;
     if (marks.length > 0) {
       const dirty = new Set(state.dirty);
       for (const m of marks) {
@@ -659,11 +802,21 @@ export class VerifyCore {
       state = { ...state, partsSeq: Math.max(...marks.map((m) => m.seq)), dirty: [...dirty].sort() };
       kv.put("pm", state);
     }
-    // ② データを後に読む(1 tick に最大 VERIFY_PARTS_DAYS_PER_TICK 日)。
+    // ② データを後に読む(1 回に最大 VERIFY_PARTS_DAYS_PER_TICK 日)。
     for (const day of state.dirty.slice(0, VERIFY_PARTS_DAYS_PER_TICK)) {
       const read = await port.readDay(day);
+      rowsRead += read.rowsRead;
+      counts["days"] = (counts["days"] ?? 0) + 1;
+      for (const name of ["analyses", "horses", "allocationMeta", "bets", "results", "comboPayouts", "comboImports"] as const) counts[name] = (counts[name] ?? 0) + read.rows[name].length;
+      const bad = read.rows.analyses.filter((a) => a.startTime === null || a.condRead === null).length;
+      if (bad > 0) {
+        unchecked += bad;
+        state = { ...state, dirty: state.dirty.filter((d) => d !== day) };
+        kv.put("pm", state);
+        continue;
+      }
       const stored = read.rows.analyses.length > 0;
-      this.dropDays([day].filter((d) => state!.days.includes(d)));
+      this.dropDays([day].filter((d) => state.days.includes(d)));
       if (stored) {
         for (const [key, value] of encodeDay(day, buildDayParts(read.rows, read.close))) kv.put(key, value);
       }
@@ -674,12 +827,7 @@ export class VerifyCore {
       state = { ...state, dirty: state.dirty.filter((d) => d !== day), days: [...days].sort(), fails: 0 };
       kv.put("pm", state);
     }
-    const more = state.dirty.length > 0 || marks.length === VERIFY_PARTS_MARKS_LIMIT;
-    if (more) {
-      await this.armParts(now() + VERIFY_TICK_DELAY_MS);
-      return;
-    }
-    await this.compareParts(state, port.readMaxSeq);
+    return { state, rowsRead, counts, marksFull: marks.length === VERIFY_PARTS_MARKS_LIMIT, unchecked };
   }
 
   /** 保存してある日の部分(メタと塊)を消す。 */

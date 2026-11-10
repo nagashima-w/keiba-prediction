@@ -4,7 +4,7 @@ import type { VerifyAnalysisRow, VerifyReadRows } from "../src/verify-read";
  * Issue #628: 差分の集計の試験用に、複数の開催日・レース・版・買い目・結果を持つ行を作る(固定の乱数。再現できる)。
  * `days` 日 × 1 日 `racesPerDay` レース(中央と地方が交互)× 1〜2 分析。開催日が NULL の分析のレースも 1 つ入れる。
  */
-export function manyDayRows(days: number, racesPerDay: number, seed = 7): VerifyReadRows {
+export function manyDayRows(days: number, racesPerDay: number, seed = 7, uniqueRaceIds = false): VerifyReadRows {
   let s = seed;
   const rnd = (): number => {
     s = (s * 1664525 + 1013904223) % 4294967296;
@@ -22,7 +22,9 @@ export function manyDayRows(days: number, racesPerDay: number, seed = 7): Verify
     const date = nullDay ? null : `2026${String(1 + Math.floor(d / 28)).padStart(2, "0")}${String(1 + (d % 28)).padStart(2, "0")}`;
     for (let r = 0; r < (nullDay ? 1 : racesPerDay); r++) {
       const central = r % 2 === 0;
-      const raceId = central ? `2026060${(d % 8) + 1}${String(r + 1).padStart(2, "0")}${String(d % 10).padStart(2, "0")}` : `2026440${(d % 8) + 1}${String(r + 1).padStart(2, "0")}${String(d % 10).padStart(2, "0")}`;
+      const raceIdBase = central ? `2026060${(d % 8) + 1}${String(r + 1).padStart(2, "0")}${String(d % 10).padStart(2, "0")}` : `2026440${(d % 8) + 1}${String(r + 1).padStart(2, "0")}${String(d % 10).padStart(2, "0")}`;
+      // 日数が多いと (d % 8, d % 10) が重なり、別の開催日に同じレース ID ができる(本番では 1 レース 1 開催日)。`uniqueRaceIds` は日ごとに末尾へ日の通し番号を足して重ならないようにする。
+      const raceId = uniqueRaceIds ? `${raceIdBase}${String(d).padStart(3, "0")}` : raceIdBase;
       const n = 1 + Math.floor(rnd() * 2);
       for (let k = 0; k < n; k++) {
         id += 1;
