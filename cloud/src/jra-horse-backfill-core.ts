@@ -5,7 +5,7 @@
  * **netkeiba にも gate にも出ない**(JRA の公式サイトと D1 だけ)。
  *
  * ## 何をするか
- *  - 対象は `horse_runs` の馬。馬の ID の順にカーソルで進み(主キーの範囲読み。1 回 {@link HORSE_BACKFILL_PAGE} 頭)、`horse_profiles` にいない馬だけ頁を取る。
+ *  - 対象は `horse_runs` の馬(カーソルは地方だけの馬も通り過ぎる)。馬の ID の順にカーソルで進み(主キーの範囲読み。1 回 {@link HORSE_BACKFILL_PAGE} 頭)、`horse_profiles` にいない、かつ中央の走がある馬だけ頁を取る(地方・海外だけの馬は JRA に頁が無いので取らず、`hb_skip` にも入れない。後で中央の走が入れば次の周で取る。Issue #725)。
  *  - 取れた馬は `horse_profiles` に `source = 'jra_horse'` で書く(既にいる馬は上書きしない。馬主は書かない)。
  *  - 最後まで進んだらカーソルを先頭に戻す(戦績の変換が進むと、前の位置より小さい ID の馬が増えるため)。1 周で取った馬が 1 頭も無ければ、アラームを張らずに休む(次の kick まで)。
  *
@@ -233,7 +233,7 @@ export class JraHorseBackfillCore {
     const cursor = this.metaGet("cursor") ?? "";
     const page = await deps.store.listHorseIdsAfter(cursor, HORSE_BACKFILL_PAGE);
     const atEnd = page.length < HORSE_BACKFILL_PAGE;
-    const missing = await deps.store.filterMissing(page);
+    const missing = await deps.store.filterTargets(page);
     const skipped = this.skippedAmong(missing);
 
     const profiles: SavedHorseProfile[] = [];

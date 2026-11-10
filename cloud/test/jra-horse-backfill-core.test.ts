@@ -29,6 +29,8 @@ const PARAM_ERROR_HTML = "<html><head><title>パラメータエラー　JRA</tit
 class FakeStore implements JraHorseStoreLike {
   runs: string[] = [];
   present = new Set<string>();
+  /** 中央の走が 1 つも無い馬(地方・海外だけ)。 */
+  localOnly = new Set<string>();
   inserted: { profiles: SavedHorseProfile[]; today: string }[] = [];
   listCalls: { cursor: string; limit: number }[] = [];
   failInsert = false;
@@ -36,8 +38,8 @@ class FakeStore implements JraHorseStoreLike {
     this.listCalls.push({ cursor, limit });
     return [...this.runs].sort().filter((id) => id > cursor).slice(0, limit);
   }
-  async filterMissing(ids: readonly string[]): Promise<string[]> {
-    return ids.filter((id) => !this.present.has(id));
+  async filterTargets(ids: readonly string[]): Promise<string[]> {
+    return ids.filter((id) => !this.present.has(id) && !this.localOnly.has(id));
   }
   async insertProfiles(profiles: readonly SavedHorseProfile[], today: string): Promise<number> {
     if (this.failInsert) throw new Error("D1 down");
@@ -308,6 +310,20 @@ describe("飛ばす馬の記録", () => {
     h.fetched.length = 0;
     await h.core.runNextStep();
     expect(h.fetched).toEqual([]);
+  });
+
+  it("中央の走が無い馬(地方だけ)は取らず、hb_skip にも入れない。カーソルは通り過ぎ、あとで中央の走が入れば次の周で取る", async () => {
+    const h = new Harness();
+    h.store.runs = [hid(1), hid(2), hid(3)];
+    h.store.localOnly.add(hid(2));
+    await h.core.runNextStep();
+    expect(h.fetched.map((f) => f.id)).toEqual([hid(1), hid(3)]);
+    expect(h.sql.exec("SELECT horse_id FROM hb_skip").toArray()).toEqual([]);
+    expect(h.sql.exec("SELECT value FROM hb_meta WHERE key = 'cursor'").toArray()).toEqual([{ value: "" }]);
+    h.store.localOnly.delete(hid(2));
+    h.now += 60_000;
+    await h.core.runNextStep();
+    expect(h.fetched.map((f) => f.id)).toEqual([hid(1), hid(3), hid(2)]);
   });
 
   it("計算できない ID(2 桁目が 0/9 以外・5 桁目が 1 以外・10 桁でない)は、取りに行かず記録して飛ばす", async () => {
