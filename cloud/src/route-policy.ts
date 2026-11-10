@@ -106,6 +106,9 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // 地方の交流重賞(Jpn)の過去の結果の取得(Issue #635)。中央と同じ形・同じ認可(管理者だけ)。
   exact("/api/race-archive/nar", ADMIN_ONLY),
   exact("/api/race-archive/nar/resume", ADMIN_ONLY),
+  // 追い切り(過去のレースのランクと評語)の取得(Issue #731)。中央・地方と同じ形・同じ認可(管理者だけ)。
+  exact("/api/race-archive/oikiri", ADMIN_ONLY),
+  exact("/api/race-archive/oikiri/resume", ADMIN_ONLY),
   // 過去の結果の毎晩の変換(Issue #590)。状態(GET だけ)。変換の進み具合・止まった理由が見えるので管理者だけ。netkeiba には出ない(DO の状態を読む)
   exact("/api/race-archive/runs", ADMIN_ONLY),
   exact("/api/reports/run", ADMIN_ONLY), // 日報の手動作成(LLM を呼ぶ)

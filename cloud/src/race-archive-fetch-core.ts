@@ -53,13 +53,15 @@
 import { JST_OFFSET_MS, nextJstMidnight } from "../../packages/core/src/common/jst";
 import { historyCalendarUrl, historyListUrl, parseCalendarKaisaiDates, parseJpnListRaceIds, parseListRaceIds, validateHistoryPage, type HistoryKind, type HistoryStage } from "../../packages/core/src/scraper/history-pages";
 import { parseRaceId } from "../../packages/core/src/scraper/ids";
+import { OikiriParseError, parseOikiri, validateOikiriPage } from "../../packages/core/src/scraper/parse-oikiri";
 import { buildRaceRecord, type BuildResult } from "../../packages/core/src/scraper/race-record";
-import { raceResultUrl } from "../../packages/core/src/scraper/urls";
+import { oikiriUrl, raceResultUrl } from "../../packages/core/src/scraper/urls";
 import { jstKaisaiDate } from "./auto-run-plan";
 import type { GateResult } from "./gate-core";
 import { parseLimitOverride } from "./limit-override";
 import type { RaceArchiveCatalogEntry, SaveRaceArchiveResult } from "./race-archive-repository";
 import type { RaceArchiveFetchStatus } from "./race-archive-fetch-types";
+import type { RaceOikiriInput, SaveRaceOikiriResult } from "./race-oikiri-repository";
 import type { SqlLike } from "./sql-like";
 import { shouldRearm } from "./stale-alarm";
 
@@ -152,6 +154,8 @@ export const ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX = 100_000_000;
 export const ARCHIVE_ROWS_PERSIST_STEP = 10_000;
 /** 取る範囲の最初の月(中央の 2021 年から。#532 の過去 5 年〈2021-11〉を、2021 年を丸ごと入れて年ごとに比べられるよう 2021-01 に広げた。Issue #655)。 */
 export const ARCHIVE_FROM_MONTH = "2021-01";
+/** 追い切りの取得が、目録を 1 回の起床で読む件数(`CATALOG_PAGE_MAX` と同じ。Worker の外向きの呼び出し 50 の内側に収める)。 */
+export const OIKIRI_CATALOG_PAGE = 200;
 /** gate の待ち(進行中 + 待ち)がこの数以上なら出さない。 */
 export const ARCHIVE_GATE_BUSY_PENDING = 2;
 /** gate が混んでいるとき、見直す間隔。 */
@@ -180,6 +184,42 @@ const MAX_SKIPS_PER_STEP = 200;
 const MIN_MS = 60_000;
 const DAY_MS = 86_400_000;
 /** 止められた(アクセス制限の疑い)とみなす HTTP ステータス。 */
+/** 追い切りの取得の DO(`RaceOikiriFetchDO`)の固定名(単一インスタンス)。中央の {@link RACE_ARCHIVE_FETCH_NAME}・地方の {@link RACE_ARCHIVE_NAR_FETCH_NAME} とは別の DO クラス・別の SQLite(Issue #731)。 */
+export const RACE_ARCHIVE_OIKIRI_FETCH_NAME = "oikiri";
+/** 追い切りの取得のリクエスト間隔の既定(ミリ秒。開始から開始まで)。中央の過去の結果の本番の設定(20 秒)と同じ(Issue #731。ユーザーの決定)。 */
+export const OIKIRI_ARCHIVE_REQUEST_INTERVAL_MS = 20_000;
+/** 追い切りの取得の時間帯の終わりの既定(JST の 0 時からの分。1440 = 終日。Issue #731。ユーザーの決定)。 */
+export const OIKIRI_ARCHIVE_WINDOW_END_MIN = 1440;
+
+/** 追い切りの取得の DO が読む var(すべて任意の文字列。★中央・地方の `RACE_ARCHIVE_*` とも binding の名前とも別名にする)。 */
+export interface OikiriArchiveVars {
+  /** 1 晩のリクエスト数を**下げる**上書き(1 以上の整数)。文字列 `"0"` だけは取得を止める。 */
+  readonly RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT?: string;
+  /** 時間帯の終わり(JST の 0 時からの分。1〜1440)。未設定は {@link OIKIRI_ARCHIVE_WINDOW_END_MIN}(終日)。 */
+  readonly RACE_ARCHIVE_OIKIRI_WINDOW_END_MIN?: string;
+  /** リクエスト間隔(ミリ秒。1500〜60000)。未設定は {@link OIKIRI_ARCHIVE_REQUEST_INTERVAL_MS}。 */
+  readonly RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS?: string;
+  /** 1 晩に core の SQL が読む行数の予算(未設定は既定)。 */
+  readonly RACE_ARCHIVE_OIKIRI_NIGHTLY_ROWS_LIMIT?: string;
+}
+
+/**
+ * 追い切りの取得の DO の設定(var → {@link ArchiveFetchOptions})。**中央・地方の var は読まない**(中央を止めても追い切りは止まらず、逆も同じ)。
+ * 開催日の朝を休む設定(`skipCentralRaceDay`)は指定しない: 追い切りの取得は休む判定そのものを行わない(コアの `oikiri` モード。Issue #731 のユーザーの決定: 終日・毎日取る)。
+ */
+export function buildOikiriArchiveOptions(vars: OikiriArchiveVars): ArchiveFetchOptions {
+  const nightlyLimit = parseLimitOverride(vars.RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT, ARCHIVE_NIGHTLY_LIMIT_MAX);
+  const nightlyRowsLimit = parseLimitOverride(vars.RACE_ARCHIVE_OIKIRI_NIGHTLY_ROWS_LIMIT, ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX);
+  return {
+    oikiri: true,
+    intervalMs: parseArchiveMinIntervalMs(vars.RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS) ?? OIKIRI_ARCHIVE_REQUEST_INTERVAL_MS,
+    windowEndMin: parseArchiveWindowEndMin(vars.RACE_ARCHIVE_OIKIRI_WINDOW_END_MIN) ?? OIKIRI_ARCHIVE_WINDOW_END_MIN,
+    ...(nightlyRowsLimit === null ? {} : { nightlyRowsLimit }),
+    ...(isArchiveFetchDisabled(vars.RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT) ? { disabled: true } : {}),
+    ...(nightlyLimit === null ? {} : { nightlyLimit }),
+  };
+}
+
 const RESTRICTED_STATUSES: ReadonlySet<number> = new Set([400, 403, 429]);
 
 export type ArchiveState = "disabled" | "running" | "night-stopped" | "manual-stopped" | "capacity-stopped";
@@ -206,6 +246,12 @@ export interface ArchiveFetchOptions {
    * 地方用の DO(`RaceArchiveNarFetchDO`)は別のインスタンス・別の SQLite なので、`ra_*` の表は中央の DO と同じ定義のまま使う。
    */
   readonly kind?: HistoryKind;
+  /**
+   * 追い切りの取得(Issue #731)。月・日の段(カレンダー・一覧)は使わず、目録(`race_archive`)の中央のレースを `ra_race` に流し込み、
+   * 各レースの追い切りのページ(race.netkeiba.com/race/oikiri.html)を取って `race_oikiri` に保存する。`kind` は中央に固定(指定しても無視)。
+   * 取る対象が「今日より前の開催日」だけ・上限・時間帯・拒否での停止は、結果の取得と同じ。**開催日の朝は休まない**(計画も引かない。地方の取得と同じ分岐)。
+   */
+  readonly oikiri?: boolean;
 }
 
 /** `RaceDay` の `getPlanProgress()` のうち、開催日の判定が使う部分。 */
@@ -242,7 +288,7 @@ export type ArchiveNotice = ArchiveNoticeScope &
   | { readonly kind: "failures"; readonly count: number; readonly lastClass: string; readonly at: number; readonly resumeAt: number });
 
 /** 通知に付く印。地方(交流重賞)の取得の通知だけ `scope: "nar"` を持ち、中央の通知はこのキーを持たない(Issue #635。通知の文面の出し分け用)。 */
-export type ArchiveNoticeScope = { readonly scope?: "nar" };
+export type ArchiveNoticeScope = { readonly scope?: "nar" | "oikiri" };
 
 export interface RaceArchiveFetchDeps {
   /** DO の SQLite(`ctx.storage.sql`)。表 `ra_meta`・`ra_month`・`ra_day`・`ra_race` を `CREATE TABLE IF NOT EXISTS` で作る。 */
@@ -261,6 +307,11 @@ export interface RaceArchiveFetchDeps {
   readonly archive: {
     saveRaceArchive(input: { readonly record: Extract<BuildResult, { ok: true }>["record"]; readonly html: string }): Promise<SaveRaceArchiveResult>;
     getCatalogEntry(raceId: string): Promise<RaceArchiveCatalogEntry | null>;
+  };
+  /** 追い切りの取得(`oikiri: true`)だけが使う。目録の列挙(`D1RaceArchiveStore.listCatalogPage` の全件・主キー順)と、追い切りの保存(`D1RaceOikiriStore.saveRaceOikiri`)。 */
+  readonly oikiri?: {
+    listCatalogPage(afterRaceId: string, limit: number): Promise<RaceArchiveCatalogEntry[]>;
+    saveRaceOikiri(input: RaceOikiriInput): Promise<SaveRaceOikiriResult>;
   };
   /** 通知(Discord)。失敗は throw(10 分後に再送、3 回で諦める)。 */
   readonly notify: (notice: ArchiveNotice) => Promise<void>;
@@ -364,6 +415,7 @@ export class RaceArchiveFetchCore {
   private readonly endMin: number;
   private readonly skipCentralRaceDay: boolean;
   private readonly kind: HistoryKind;
+  private readonly oikiri: boolean;
   private readonly intervalMs: number;
   private readonly fromMonth: string;
   private readonly fetchTimeoutMs: number;
@@ -377,7 +429,8 @@ export class RaceArchiveFetchCore {
     this.startMin = options.windowStartMin ?? ARCHIVE_WINDOW_START_MIN;
     this.endMin = options.windowEndMin ?? ARCHIVE_WINDOW_END_MIN;
     this.skipCentralRaceDay = options.skipCentralRaceDay !== false;
-    this.kind = options.kind ?? "central";
+    this.oikiri = options.oikiri === true;
+    this.kind = this.oikiri ? "central" : (options.kind ?? "central");
     this.intervalMs = options.intervalMs ?? ARCHIVE_REQUEST_INTERVAL_MS;
     this.fromMonth = options.fromMonth ?? ARCHIVE_FROM_MONTH;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? ARCHIVE_FETCH_TIMEOUT_MS;
@@ -620,6 +673,10 @@ export class RaceArchiveFetchCore {
       return;
     }
 
+    if (this.oikiri && (await this.seedOikiri(night, now))) {
+      return;
+    }
+
     if (this.rowsRead > this.nightlyRowsLimit) {
       await this.stopNight("rows-budget", now);
       return;
@@ -653,7 +710,9 @@ export class RaceArchiveFetchCore {
       return;
     }
 
-    this.seedMonths(night);
+    if (!this.oikiri) {
+      this.seedMonths(night);
+    }
     for (let skips = 0; skips <= MAX_SKIPS_PER_STEP; skips += 1) {
       const work = this.nextWork(night);
       if (work === null) {
@@ -661,7 +720,7 @@ export class RaceArchiveFetchCore {
         await this.arm(nextNightStart(now, this.startMin));
         return;
       }
-      if (work.kind === "race") {
+      if (work.kind === "race" && !this.oikiri) {
         const entry = await this.deps.archive.getCatalogEntry(work.id);
         if (entry !== null) {
           this.q("UPDATE ra_race SET status = 'done', last_class = 'existing' WHERE race_id = ?", work.id);
@@ -697,8 +756,8 @@ export class RaceArchiveFetchCore {
 
   /** その晩、取ってよいか(夜ごとに 1 回判定してその晩は使い回す。判定不能は 10 分おきに引き直す)。 */
   private async restDecision(now: number, night: string): Promise<"go" | "kaisai" | "unknown"> {
-    if (this.kind === "nar" || !this.skipCentralRaceDay) {
-      return "go"; // 地方は開催日の朝を休まない(Issue #635)。 // 開催日も取る設定(Issue #655)。判定も補助も飛ばす。取る対象は nextWork の `date < night`(今日より前)のまま。
+    if (this.kind === "nar" || this.oikiri || !this.skipCentralRaceDay) {
+      return "go"; // 追い切りの取得は開催日の朝も休まない(Issue #731。ユーザーの決定: 終日・毎日取る。D1 の書き込みは 1 日約 4,300 行で無料枠の内側)。地方は開催日の朝を休まない(Issue #635)。 // 開催日も取る設定(Issue #655)。判定も補助も飛ばす。取る対象は nextWork の `date < night`(今日より前)のまま。
     }
     if (this.metaGet("rest_date") === night) {
       const cached = this.metaGet("rest_result");
@@ -721,6 +780,38 @@ export class RaceArchiveFetchCore {
     this.metaSet("rest_result", kind);
     this.metaSet("rest_retry_at", String(now + ARCHIVE_PLAN_RECHECK_MS));
     return kind === "not-kaisai" ? "go" : kind;
+  }
+
+  /**
+   * 追い切りの取得: 目録(`race_archive`)の中央のレースを `ra_race` に流し込む(Issue #731)。**晩ごとに全件を 1 回読み直し**(増えたレースを拾う。取り終えたレースは `INSERT OR IGNORE` で変わらない)、
+   * 1 回の起床で読むのは目録の 1 ページ(200 件。Worker の 1 呼び出しあたりの外向きの呼び出しの上限を守る)。地方(`kind = 'nar'`)は入れない。netkeiba には出ない。
+   * 戻り値 true = 目録を 1 ページ読んだ(続きがあるので、すぐ次の起床を張った。取得はまだ行わない)/ false = この晩の流し込みは済んでいる。
+   */
+  private async seedOikiri(night: string, now: number): Promise<boolean> {
+    if (this.metaGet("oikiri_seed_night") === night) {
+      return false;
+    }
+    const oikiri = this.deps.oikiri;
+    if (oikiri === undefined) {
+      throw new Error("追い切りの取得の依存(oikiri)がありません");
+    }
+    this.setWait("seeding");
+    const cursor = this.metaGet("oikiri_seed_cursor") ?? "";
+    const page = await oikiri.listCatalogPage(cursor, OIKIRI_CATALOG_PAGE);
+    for (const entry of page) {
+      if (entry.kind === "central" && /^\d{4}-\d{2}-\d{2}$/.test(entry.raceDate)) {
+        this.q("INSERT OR IGNORE INTO ra_race (race_id, date, seq) VALUES (?, ?, 0)", entry.raceId, entry.raceDate.replaceAll("-", ""));
+      }
+    }
+    const last = page[page.length - 1];
+    if (page.length < OIKIRI_CATALOG_PAGE || last === undefined) {
+      this.metaSet("oikiri_seed_cursor", "");
+      this.metaSet("oikiri_seed_night", night);
+    } else {
+      this.metaSet("oikiri_seed_cursor", last.raceId);
+    }
+    await this.arm(now);
+    return true;
   }
 
   private seedMonths(night: string): void {
@@ -775,7 +866,7 @@ export class RaceArchiveFetchCore {
       case "day":
         return historyListUrl(this.kind, work.id);
       default:
-        return raceResultUrl(parseRaceId(work.id));
+        return this.oikiri ? oikiriUrl(parseRaceId(work.id)) : raceResultUrl(parseRaceId(work.id));
     }
   }
 
@@ -880,6 +971,9 @@ export class RaceArchiveFetchCore {
    * 取れたページの処理。戻り値: `ok` = 完了 / `failed` = そのものの失敗(記録済み)/ `stopped` = 状態が止まり(拒否ではない停止を含む)、アラームも張り済み。
    */
   private async process(work: Work, night: string, text: string, at: number): Promise<"ok" | "failed" | "stopped"> {
+    if (this.oikiri && work.kind === "race") {
+      return this.processOikiri(work, night, text, at);
+    }
     const problem = validateHistoryPage(this.kind, STAGE_OF[work.kind], text);
     if (problem !== null) {
       return (await this.failed(work, night, "invalid-page", at)) ? "stopped" : "failed";
@@ -936,6 +1030,62 @@ export class RaceArchiveFetchCore {
     this.metaSet("db_size", String(saved.dbSizeBytes));
     this.metaSet("fail_streak", "0");
     this.metaSet("fence_notified", "0");
+    return "ok";
+  }
+
+  /**
+   * 追い切りのページの処理(Issue #731)。最後まで届いていないページは失敗(`invalid-page`。3 晩試して駄目なら dead)、追い切りの表が無い・読める行が 0 のページは
+   * 以後取らない(`skipped`。分類 `no-table`・`no-entries`)、読めたら `race_oikiri` に 1 行保存する。評語・ランクが空の馬は null のまま残し、読めずに捨てた行は数だけ添える。
+   */
+  private async processOikiri(work: Extract<Work, { kind: "race" }>, night: string, html: string, at: number): Promise<"ok" | "failed" | "stopped"> {
+    if (validateOikiriPage(html) !== null) {
+      return (await this.failed(work, night, "invalid-page", at)) ? "stopped" : "failed";
+    }
+    let parsed: ReturnType<typeof parseOikiri>;
+    try {
+      parsed = parseOikiri(html);
+    } catch (error) {
+      if (error instanceof OikiriParseError) {
+        return this.skipOikiri(work.id, night, "no-table");
+      }
+      throw error;
+    }
+    if (parsed.entries.length === 0) {
+      return this.skipOikiri(work.id, night, "no-entries");
+    }
+    const oikiri = this.deps.oikiri;
+    if (oikiri === undefined) {
+      throw new Error("追い切りの取得の依存(oikiri)がありません");
+    }
+    let saved: SaveRaceOikiriResult;
+    try {
+      saved = await oikiri.saveRaceOikiri({
+        raceId: work.id,
+        raceDate: `${work.date.slice(0, 4)}-${work.date.slice(4, 6)}-${work.date.slice(6, 8)}`,
+        entries: parsed.entries,
+        skippedRows: parsed.skippedRowCount,
+      });
+    } catch (error) {
+      this.deps.log(`race-archive: save failed error=${errorKind(error)}`, "error");
+      return (await this.failed(work, night, "save-failed", at)) ? "stopped" : "failed";
+    }
+    if (saved.status === "skipped") {
+      await this.stopCapacity(saved.reason, saved.dbSizeBytes, at);
+      return "stopped";
+    }
+    this.q("UPDATE ra_race SET status = 'done', last_class = NULL WHERE race_id = ?", work.id);
+    this.bump("night_saved");
+    if (saved.dbSizeBytes !== null) {
+      this.metaSet("db_size", String(saved.dbSizeBytes));
+    }
+    this.metaSet("fail_streak", "0");
+    return "ok";
+  }
+
+  /** 追い切りのページが読めないと分かったレースに印を付ける(以後は取らない。分類は `skippedByClass` に数える)。 */
+  private skipOikiri(raceId: string, night: string, cls: "no-table" | "no-entries"): "ok" {
+    this.q("UPDATE ra_race SET status = 'skipped', last_class = ?, last_night = ? WHERE race_id = ?", cls, night, raceId);
+    this.metaSet("fail_streak", "0");
     return "ok";
   }
 
@@ -1046,7 +1196,7 @@ export class RaceArchiveFetchCore {
 
   private queueNotice(notice: ArchiveNotice): void {
     // 地方の取得の通知だけ印を付ける(中央の通知の形は変えない)。
-    this.metaSet("pending_notice", JSON.stringify(this.kind === "nar" ? { ...notice, scope: "nar" } : notice));
+    this.metaSet("pending_notice", JSON.stringify(this.oikiri ? { ...notice, scope: "oikiri" } : this.kind === "nar" ? { ...notice, scope: "nar" } : notice));
     this.metaSet("notice_attempts", "0");
     this.metaSet("notice_retry_at", "0");
   }

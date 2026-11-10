@@ -40,7 +40,7 @@ import { monthlyRequestsFor } from "./monthly-report-plan";
 import { buildPlanRequestFailedEmbed } from "./notify-embeds";
 import { classifyNotifyError, createDiscordNotifier, webhookStatus } from "./notify-send";
 import type { DiscordFetchLike } from "../../packages/core/src/notify/discord";
-import { RACE_ARCHIVE_FETCH_NAME, RACE_ARCHIVE_NAR_FETCH_NAME } from "./race-archive-fetch-core";
+import { RACE_ARCHIVE_FETCH_NAME, RACE_ARCHIVE_NAR_FETCH_NAME, RACE_ARCHIVE_OIKIRI_FETCH_NAME } from "./race-archive-fetch-core";
 import { RACE_MARKET_EDGE_NAME } from "./market-edge-core";
 import { JRA_BLINKER_BACKFILL_NAME } from "./jra-blinker-backfill-core";
 import { JRA_HORSE_BACKFILL_NAME } from "./jra-horse-backfill-core";
@@ -65,6 +65,8 @@ export interface ScheduledEnv {
   readonly RACE_ARCHIVE_FETCH?: RaceArchiveNamespaceLike;
   /** 地方の交流重賞の取得の DO(Issue #635)。無ければ kick を呼ばない。 */
   readonly RACE_ARCHIVE_FETCH_NAR?: RaceArchiveNamespaceLike;
+  /** 追い切りの取得の DO(Issue #731)。無ければ kick を呼ばない。 */
+  readonly RACE_ARCHIVE_FETCH_OIKIRI?: RaceArchiveNamespaceLike;
   /** 過去の結果の毎晩の変換の DO(Issue #590)。無い構成では kick を呼ばない。 */
   readonly RACE_ARCHIVE_RUNS?: RaceArchiveRunsNamespaceLike;
   /** 騎手・調教師の指標の DO(Issue #642)。無い構成では kick を呼ばない。 */
@@ -197,6 +199,15 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
         await env.RACE_ARCHIVE_FETCH_NAR.get(env.RACE_ARCHIVE_FETCH_NAR.idFromName(RACE_ARCHIVE_NAR_FETCH_NAME)).kick();
       } catch (error) {
         log(`scheduled: failed class=race-archive-nar-kick-failed error=${errorKind(error)}`, "error");
+      }
+    })(),
+    // 追い切りの取得の起動(Issue #731)。中央・地方と同じ(アラームが無ければ張るだけ。取得は DO が gate 経由で行う)。失敗を握る。
+    (async (): Promise<void> => {
+      if (env.RACE_ARCHIVE_FETCH_OIKIRI === undefined) return;
+      try {
+        await env.RACE_ARCHIVE_FETCH_OIKIRI.get(env.RACE_ARCHIVE_FETCH_OIKIRI.idFromName(RACE_ARCHIVE_OIKIRI_FETCH_NAME)).kick();
+      } catch (error) {
+        log(`scheduled: failed class=race-archive-oikiri-kick-failed error=${errorKind(error)}`, "error");
       }
     })(),
     // 過去の結果の毎晩の変換の起動(Issue #590)。アラームが無ければ張るだけ(変換は JST 1:00〜8:30 に、DO が R2 と D1 だけで行う。netkeiba には出ない)。
