@@ -783,6 +783,34 @@ describe("runScheduled: 過去の結果の取得の起動(Issue #554)。21 時�
     expect(f.events.indexOf("archive-kick")).toBeGreaterThan(f.events.findIndex((e) => e.startsWith("plan:")));
   });
 
+  it.each([
+    ["21 時(first)", FIRST_0627_2100],
+    ["23 時(retry)", RETRY_0628_2300],
+  ])("%s: 地方の交流重賞の取得の DO(固定名 nar)の kick も 1 回呼ぶ。中央の DO(main)の kick とは別(Issue #635)", async (_name, scheduledTime) => {
+    const f = fakeNamespace();
+    const h = harness();
+    const central = fakeArchive(f.events);
+    const nar = fakeArchive(f.events);
+    await runScheduled({ scheduledTime }, { ...envOf(f), RACE_ARCHIVE_FETCH: central.namespace, RACE_ARCHIVE_FETCH_NAR: nar.namespace }, { ...h.deps, store: { listUnimportedRacesByDay: async () => [] } });
+    expect(nar.kicks()).toBe(1);
+    expect(nar.names).toEqual(["nar"]);
+    expect(central.names).toEqual(["main"]);
+  });
+
+  it("地方の取得の DO の kick が失敗しても投げない(中央の kick も、ほかの仕事も巻き込まない)。binding が無ければ呼ばない", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const central = fakeArchive(f.events);
+    const nar = fakeArchive(f.events, async () => {
+      throw new Error("nar DO down");
+    });
+    await expect(runScheduled({ scheduledTime: FIRST_0627_2100 }, { ...envOf(f), RACE_ARCHIVE_FETCH: central.namespace, RACE_ARCHIVE_FETCH_NAR: nar.namespace }, h.deps)).resolves.toBeUndefined();
+    expect(central.kicks()).toBe(1);
+    expect(nar.kicks()).toBe(1);
+    await expect(runScheduled({ scheduledTime: FIRST_0627_2100 }, { ...envOf(f), RACE_ARCHIVE_FETCH: central.namespace }, h.deps)).resolves.toBeUndefined();
+    expect(nar.kicks()).toBe(1);
+  });
+
   it("23 時(retry): 取得の DO の kick は処理の最後(結果の取り込み・結果の補完の kick のあと)。取得の DO の呼び出しが固まっても、先の仕事は済んでいる(Issue #573-17)", async () => {
     const f = fakeNamespace();
     const h = harness();

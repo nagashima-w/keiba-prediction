@@ -20,6 +20,7 @@ import { createDiscordNotifier } from "./notify-send";
 import {
   ARCHIVE_NIGHTLY_LIMIT_MAX,
   ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX,
+  buildNarArchiveOptions,
   isArchiveFetchDisabled,
   isArchiveRaceDayRestDisabled,
   parseArchiveMinIntervalMs,
@@ -58,6 +59,14 @@ export interface RaceArchiveFetchEnv {
   RACE_ARCHIVE_SKIP_RACE_DAY?: string;
   /** 任意(Issue #655)。取得のリクエスト間隔(ミリ秒。開始から開始まで)。1500〜60000 の整数だけ採用し、それ以外・未設定は既定(コードの 5 秒)。gate の間隔は変えず、この DO のアラームの間隔だけに効く。 */
   RACE_ARCHIVE_MIN_INTERVAL_MS?: string;
+  /** 任意(Issue #635。地方用の DO `RaceArchiveNarFetchDO` だけが読む。中央の DO は読まない)。1 晩のリクエスト数を下げる上書き。`"0"` は取得を止める。★binding の名前〈RACE_ARCHIVE_FETCH_NAR〉とは別名。 */
+  RACE_ARCHIVE_NAR_NIGHTLY_LIMIT?: string;
+  /** 任意(Issue #635。地方用)。時間帯の終わり(JST の 0 時からの分。1〜1440)。 */
+  RACE_ARCHIVE_NAR_WINDOW_END_MIN?: string;
+  /** 任意(Issue #635。地方用)。リクエスト間隔(ミリ秒。1500〜60000。未設定は 20 秒)。 */
+  RACE_ARCHIVE_NAR_MIN_INTERVAL_MS?: string;
+  /** 任意(Issue #635。地方用)。1 晩に core の SQL が読む行数の予算。 */
+  RACE_ARCHIVE_NAR_NIGHTLY_ROWS_LIMIT?: string;
 }
 
 export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
@@ -143,5 +152,17 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
   /** アラーム: 次のステップを 1 つ実行する(例外は握る: 失敗は 10 分後の再試行になる)。 */
   async alarm(): Promise<void> {
     await this.core.runNextStep();
+  }
+}
+
+/**
+ * 地方の交流重賞(Jpn1・Jpn2・Jpn3)の過去の結果の取得の DO(Issue #635)。**中央の DO の子クラス**で、配線(gate・保存・通知)はそのまま使い、設定だけを地方用にする
+ * (`kind: "nar"`。地方のホストから、カレンダー → 開催日の一覧 → 一覧の Jpn のレースの結果ページの順に取る)。別のクラス・別のインスタンス(固定名 `nar`)なので、SQLite・アラーム・停止の状態は中央と混ざらない。
+ * 設定は地方用の var(`RACE_ARCHIVE_NAR_*`。中央の var は読まない)。クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v16)に固定される。
+ * 日単位の DO への呼び出し(`planProgress`)は、地方は開催日の朝を休む判定を行わないので、本番では呼ばれない。
+ */
+export class RaceArchiveNarFetchDO extends RaceArchiveFetchDO {
+  protected override options(): ArchiveFetchOptions {
+    return buildNarArchiveOptions(this.env);
   }
 }

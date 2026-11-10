@@ -8,6 +8,8 @@
 import * as cheerio from "cheerio";
 import { parseKaisaiDate, parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "./ids.js";
 import { parseRaceFieldSize } from "./parse-race-result.js";
+import { filterJpnOnlyEntries } from "./jpn-grade.js";
+import { parseRaceList } from "./parse-race-list.js";
 import { PATTERNS, RACE_LIST_SELECTORS } from "./selectors.js";
 import { narRaceListSubUrl, raceListSubUrl } from "./urls.js";
 
@@ -69,6 +71,15 @@ export function parseListRaceIds(html: string, kind: HistoryKind): string[] {
         .filter((id): id is string => id !== undefined && /^\d{12}$/.test(id) && isIdOfKind(kind, id)),
     ),
   ];
+}
+
+/**
+ * 地方の一覧から、**交流重賞(Jpn1・Jpn2・Jpn3。ローマ数字の表記も)のレースだけ**の race_id を文書の順に重複なしで返す(Issue #635)。
+ * 地方の過去の結果は交流重賞に限って取るので、一覧の 1 日 40 件前後のうち Jpn だけを結果ページの取得の対象にする。
+ * Jpn の判定は `parseRaceList` → `filterJpnOnlyEntries`(`isJpnGrade`)に任せ、地方の race_id だけを通す。入れ物が無いページ・Jpn が 0 件のページは空配列。
+ */
+export function parseJpnListRaceIds(html: string): string[] {
+  return [...new Set(filterJpnOnlyEntries(parseRaceList(html)).map((e) => String(e.raceId)).filter((id) => isIdOfKind("nar", id)))];
 }
 
 /**

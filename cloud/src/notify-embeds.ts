@@ -546,6 +546,19 @@ const ARCHIVE_STAGE_LABEL = { calendar: "カレンダー", list: "一覧", resul
  * 再開の方法は管理者の口(`POST /api/race-archive/resume`)をパスだけで示す(サイトの URL は DO の状態に持たない)。
  */
 export function buildArchiveNoticeEmbed(notice: ArchiveNotice): CloudEmbed {
+  const embed = buildArchiveNoticeEmbedBody(notice);
+  if (notice.scope !== "nar") {
+    return embed;
+  }
+  // 地方の交流重賞の取得(Issue #635)の通知: 題に「地方(交流重賞)」を足し、再開の口を地方用のパスにする。
+  return fitEmbed({
+    ...embed,
+    title: (embed.title ?? "").replace("過去の結果の取得", "地方(交流重賞)の過去の結果の取得"),
+    ...(embed.description === undefined ? {} : { description: embed.description.replaceAll("/api/race-archive/resume", "/api/race-archive/nar/resume") }),
+  });
+}
+
+function buildArchiveNoticeEmbedBody(notice: ArchiveNotice): CloudEmbed {
   switch (notice.kind) {
     case "refused": {
       const stage = ARCHIVE_STAGE_LABEL[notice.stage];
