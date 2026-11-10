@@ -13,6 +13,12 @@ import { parseHorseId } from "./ids.js";
 import { OIKIRI_SELECTORS as SEL, PATTERNS } from "./selectors.js";
 import type { OikiriEntry, OikiriResult, OikiriSkippedRow } from "./types.js";
 
+/**
+ * 追い切りの読み取りの版(Issue #731。cloud の `race_oikiri.parser_version` に添える)。読み取りの規則を変えたら上げる
+ * (保存済みの行のうち版が古いものを引いて、読み直しの対象にするため)。
+ */
+export const OIKIRI_PARSER_VERSION = 1;
+
 /** 馬番の上限(1〜18)。 */
 const MAX_UMABAN = 18;
 
@@ -98,4 +104,23 @@ export function parseOikiri(html: string): OikiriResult {
   }
 
   return { entries, skippedRowCount: skipped.length, skipped };
+}
+
+/**
+ * 取得したページが「最後まで読めた追い切りのページ」かの検査(Issue #731。過去の追い切りの取得が、途中で切れた応答を「表が無い」と取り違えて以後取らなくなるのを防ぐ)。
+ * 空・文字化け(U+FFFD)・閉じタグ `</html>` が無い(途中で切れた)ものを不合格にする。合格でも追い切りの表が無いことはある(`parseOikiri` が `OikiriParseError` を投げる)。
+ *
+ * @returns 問題なければ null、あれば理由
+ */
+export function validateOikiriPage(html: string): string | null {
+  if (html.trim() === "") {
+    return "0 バイト(または空白のみ)の応答";
+  }
+  if (html.includes("\uFFFD")) {
+    return "文字化け(U+FFFD を含む)";
+  }
+  if (!/<\/html>/i.test(html)) {
+    return "ページが最後まで届いていません(</html> がありません)";
+  }
+  return null;
 }

@@ -154,6 +154,8 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
     "--var", "RACE_ARCHIVE_NIGHTLY_LIMIT:0",
     // Issue #635: 地方の交流重賞の取得も止める(`RACE_ARCHIVE_NAR_NIGHTLY_LIMIT=0`。[vars] の本番の値〈150〉を --var が上書きする。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_FETCH_NAR`〉にしない)。
     "--var", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT:0",
+    // Issue #731: 追い切りの取得も止める(`RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT=0`。[vars] の本番の値〈30〉を --var が上書きする。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_FETCH_OIKIRI`〉にしない)。
+    "--var", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT:0",
     // Issue #590: 過去の結果の毎晩の変換も止める(`RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT=0`。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_RUNS`〉にしない)。本番のクラスは何もしない。
     // 変換そのものの確認は、smoke 専用の DO(`RACE_ARCHIVE_RUNS_SMOKE`)が行う(netkeiba には出ない)。
     "--var", "RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT:0",
@@ -201,7 +203,7 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const monthly = await req(port, "GET", "/api/monthly-reports");
   check(`${label}: GET /api/monthly-reports は 200(月報は閲覧できる。Issue #279)・POST は 403(admin-only)`, monthly.status === 200 && parseJson(monthly.text)["ok"] === true && (await req(port, "POST", "/api/monthly-reports")).status === 403, `${monthly.status} ${monthly.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/export/allocation-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/results/backfill"], ["GET", "/api/race-archive"], ["GET", "/api/race-archive/nar"], ["POST", "/api/race-archive/resume"], ["POST", "/api/race-archive/nar/resume"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/settings/prompt-preview"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/export/prior-dataset"], ["GET", "/api/export/allocation-dataset"], ["GET", "/api/horse-runs"], ["GET", "/api/results/backfill"], ["GET", "/api/race-archive"], ["GET", "/api/race-archive/nar"], ["GET", "/api/race-archive/oikiri"], ["POST", "/api/race-archive/resume"], ["POST", "/api/race-archive/nar/resume"], ["POST", "/api/race-archive/oikiri/resume"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/settings/prompt-preview"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/reports/run"], ["POST", "/api/monthly-reports/run"], ["GET", "/api/monthly-reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
@@ -371,6 +373,14 @@ async function main(): Promise<void> {
       const narResume = await fetch(`http://127.0.0.1:${port}/api/race-archive/nar/resume`, { method: "POST", headers: { Origin: `http://127.0.0.1:${port}`, "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(30_000) });
       const narResumeJson = parseJson(await narResume.text());
       check(`${label}: POST /api/race-archive/nar/resume は 200 で resumed false・previous disabled(止めている DO は何も変えない)`, narResume.status === 200 && narResumeJson["resumed"] === false && narResumeJson["previous"] === "disabled", `${narResume.status}`);
+      // Issue #731: 追い切りの取得(本物の DO `RaceOikiriFetchDO`)。smoke は止めている(`RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT=0`)ので、中央・地方と同じく disabled・次の実行なし・取得 0 件。
+      const oikiriIdle = await req(port, "GET", "/api/race-archive/oikiri");
+      const oikiriIdleJson = parseJson(oikiriIdle.text);
+      check(`${label}: GET /api/race-archive/oikiri は 200 で state disabled・次の実行なし・取得も保存も 0 件(smoke は追い切りの取得も止めている。Issue #731)`, oikiriIdle.status === 200 && oikiriIdleJson["ok"] === true && oikiriIdleJson["state"] === "disabled" && oikiriIdleJson["nextRunAt"] === null && (oikiriIdleJson["night"] as { requests: number } | undefined)?.requests === 0, `${oikiriIdle.status} ${oikiriIdle.text.slice(0, 300)}`);
+      check(`${label}: POST /api/race-archive/oikiri は 405(GET だけ)・GET /api/race-archive/oikiri/resume は 405(POST だけ)`, (await req(port, "POST", "/api/race-archive/oikiri", { Origin: `http://127.0.0.1:${port}` })).status === 405 && (await req(port, "GET", "/api/race-archive/oikiri/resume")).status === 405);
+      const oikiriResume = await fetch(`http://127.0.0.1:${port}/api/race-archive/oikiri/resume`, { method: "POST", headers: { Origin: `http://127.0.0.1:${port}`, "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(30_000) });
+      const oikiriResumeJson = parseJson(await oikiriResume.text());
+      check(`${label}: POST /api/race-archive/oikiri/resume は 200 で resumed false・previous disabled(止めている DO は何も変えない)`, oikiriResume.status === 200 && oikiriResumeJson["resumed"] === false && oikiriResumeJson["previous"] === "disabled", `${oikiriResume.status}`);
       // Issue #590: 過去の結果の毎晩の変換(本物の DO `RaceArchiveRunsDO`)。smoke は止めている(`RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT=0`)ので、状態は disabled・次の実行なし・変換 0 件。
       const runsIdle = await req(port, "GET", "/api/race-archive/runs");
       const runsIdleJson = parseJson(runsIdle.text);
