@@ -125,6 +125,54 @@ describe("差分の集計の通し(実 D1 + VerifyCore)", () => {
     const again = await c.getReport("all", { refresh: true });
     expect(again.status).toBe("ready");
     await drain();
-    expect(kv.get("partsCheck")).toMatchObject({ checked: 2, matched: 2, mismatched: 0 });
+    // 2 回目は差分の道(部分から組み立てた集計)なので、突き合わせの対象外(1 回目の全件読みの 1 回だけ)。
+    expect(kv.get("partsCheck")).toMatchObject({ checked: 1, matched: 1, mismatched: 0 });
+    if (again.status !== "ready" || res.status !== "ready") throw new Error("ready のはず");
+    expect(again.report).toEqual(res.report);
+  });
+
+  /** 差分の読みを持たない窓口(全件を読む形)で、今の行を集計する。 */
+  async function fullReadReport() {
+    const real = store();
+    const noParts = new Proxy(real, {
+      get: (target, key) => {
+        if (key === "readMaxSeq" || key === "readMarks" || key === "readDays" || key === "readDay") return undefined;
+        const value = Reflect.get(target, key) as unknown;
+        return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    const data = new Map<string, unknown>();
+    const kv: VerifyKv = { get: <T>(k: string) => data.get(k) as T | undefined, put: (k: string, v: unknown) => void data.set(k, JSON.parse(JSON.stringify(v))) };
+    const c = new VerifyCore({ kv, now: () => NOW.getTime(), setAlarm: () => undefined, getAlarm: async () => null, store: noParts }, {});
+    const res = await c.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    return res;
+  }
+
+  it("再計算の diag.rowsRead(その回に読んだ量)は、古い開催日が 2 日でも 10 日でも同じ。値は全件を読む形と一致する(本物の D1 の meta.rows_read)", async () => {
+    const measure = async (oldDays: number): Promise<{ rowsRead: number; analysesRead: number; same: boolean }> => {
+      await local.reset();
+      await local.db.prepare("DELETE FROM sqlite_sequence WHERE name = 'analyses'").run();
+      await seed(oldDays + 1, 3); // 最後の 1 日(20261001 + oldDays)だけを後で変える
+      const { c, drain, clock } = core();
+      await c.getReport("all");
+      await drain();
+      clock.t += 6 * 60_000;
+      const changed = `202610${String(1 + oldDays).padStart(2, "0")}`;
+      await local.db.prepare("UPDATE race_results SET place_payout = place_payout + 50 WHERE race_id IN (SELECT race_id FROM analyses WHERE kaisai_date = ?)").bind(changed).run();
+      const raceId = (await local.db.prepare("SELECT race_id FROM analyses WHERE kaisai_date = ? LIMIT 1").bind(changed).first<{ race_id: string }>())!.race_id;
+      await local.db.batch([verifyRaceMarkStatement(local.db, raceId)]);
+      const res = await c.getReport("all", { refresh: true }); // 結果の行の書き換えは透かしに出ないので、更新の要求(または TTL)で拾う
+      if (res.status !== "ready") throw new Error("ready のはず");
+      const full = await fullReadReport();
+      return { rowsRead: res.diag.rowsRead, analysesRead: res.diag.counts["analyses"] ?? -1, same: JSON.stringify(res.report) === JSON.stringify(full.report) };
+    };
+    const small = await measure(2);
+    const large = await measure(10);
+    expect(small.rowsRead).toBeGreaterThan(0); // 前提: 日を読んだ
+    expect(small.analysesRead).toBe(3); // 前提: 変えた日の分析だけを読んだ(古い日は読まない)
+    expect(large.rowsRead).toBe(small.rowsRead);
+    expect(small.same).toBe(true);
+    expect(large.same).toBe(true);
   });
 });
