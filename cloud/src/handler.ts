@@ -10,6 +10,7 @@
 import type { AccessEnv } from "./access-jwt";
 import { D1AnalysisStore, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { checkD1 } from "./d1-health";
+import { VERIFY_NAME } from "./verify-name";
 import { readHorseRunsStatus, STATUS_DAYS_DEFAULT, STATUS_DAYS_MAX } from "./horse-runs-repository";
 import { webhookStatus } from "./notify-send";
 import { resolveAppBaseUrl } from "./notify-link";
@@ -193,6 +194,8 @@ export interface VerifyStubLike {
   getReport(venue: "all" | "central" | "nar", options?: GetReportOptions): Promise<VerifyResponse>;
   /** 閲覧者向けの集計(Issue #263)。キャッシュを読むだけ(集計のやり直し・D1・R2 を起こさない)。管理者向けの情報は落としてある。 */
   getViewerReport(venue: "all" | "central" | "nar"): Promise<ViewerVerifyResponse>;
+  /** 週 1 回の全件の突き合わせの依頼(Issue #723)。cron の `scheduled` だけが呼ぶ(JST 23 時台で、前回から 7 日以上のときだけアラームを張る。冪等)。本物のスタブは常に持つ(任意にしているのは、画面側の試験の偽物を変えないため)。 */
+  requestWeeklyCheck?(): Promise<void>;
 }
 
 /** 検証の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link VERIFY_NAME})。 */
@@ -200,9 +203,6 @@ export interface VerifyNamespaceLike {
   idFromName(name: string): any;
   get(id: any): VerifyStubLike;
 }
-
-/** 検証の DO の固定名(単一インスタンス)。 */
-const VERIFY_NAME = "main";
 
 /** 統計モデル用の書き出しの DO(PriorExportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #266。 */
 export interface PriorExportStubLike {

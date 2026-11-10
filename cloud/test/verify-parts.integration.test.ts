@@ -105,7 +105,20 @@ describe("差分の集計の通し(実 D1 + VerifyCore)", () => {
         await c.runPartsTick();
       }
     };
-    return { c, kv, drain, warns, clock };
+    const alarms = async (): Promise<void> => {
+      for (let i = 0; i < 50 && alarm !== null; i += 1) {
+        alarm = null;
+        const progressed = await c.runPartsTickWithProgress();
+        await c.runWeeklyCheck({ afterWork: progressed });
+        clock.t += 1_000;
+      }
+    };
+    const night = async (when: string): Promise<void> => {
+      clock.t = Date.parse(`${when}+09:00`);
+      await c.requestWeeklyCheck();
+      await alarms();
+    };
+    return { c, kv, drain, warns, clock, night };
   }
 
   it("全件の集計と、日ごとの部分の集計が一致する(開催日が NULL の分析を含む)。印だけの更新は、その日だけ読み直して一致のまま", async () => {
@@ -129,6 +142,33 @@ describe("差分の集計の通し(実 D1 + VerifyCore)", () => {
     expect(kv.get("partsCheck")).toMatchObject({ checked: 1, matched: 1, mismatched: 0 });
     if (again.status !== "ready" || res.status !== "ready") throw new Error("ready のはず");
     expect(again.report).toEqual(res.report);
+  });
+
+  it("週 1 回の突き合わせ(Issue #723): 実 D1 の全件の読みと部分の集計が一致する。印を付けずに書いた行は、次の週にずれとして見つかり、部分が作り直されて、その次の週は一致する", async () => {
+    await seed(6, 3);
+    const { c, kv, drain, warns, night } = core();
+    expect((await c.getReport("all")).status).toBe("ready");
+    await drain();
+    expect(kv.get("partsCheck")).toMatchObject({ checked: 1, matched: 1, mismatched: 0 }); // 前提: 部分が揃っている
+    const screen = (): string => JSON.stringify(["cache", "runs", "rebuilds", "partsBase"].map((k) => kv.get(k) ?? null));
+    const before = screen();
+    await night("2026-10-12T23:05:00");
+    const w1 = kv.get("partsCheck") as { checked: number; matched: number; mismatched: number; lastFullRowsRead: number; lastFullAt: number };
+    expect(w1).toMatchObject({ checked: 2, matched: 2, mismatched: 0 });
+    expect(w1.lastFullRowsRead).toBeGreaterThan(18); // 前提: 実際に全件(分析 18 行より多い)を読んだ行数が D1 の meta から入っている
+    expect(screen()).toBe(before);
+    expect(warns).toEqual([]);
+    // 印を付けない書き込み(印の文を通さない DELETE。そのレースの結果が消え、全件の集計だけが変わる)
+    await local.db.prepare("DELETE FROM race_results WHERE race_id = (SELECT MIN(race_id) FROM analyses)").run();
+    await night("2026-10-19T23:05:00");
+    const w2 = kv.get("partsCheck") as { checked: number; matched: number; mismatched: number; lastPaths: string[] };
+    expect(w2).toMatchObject({ checked: 3, matched: 2, mismatched: 1 });
+    expect(w2.lastPaths.length).toBeGreaterThan(0);
+    expect(warns.filter((m) => m.includes("突き合わせのずれ"))).toHaveLength(1);
+    expect(screen()).toBe(before);
+    await drain(); // 作り直し
+    await night("2026-10-26T23:05:00");
+    expect(kv.get("partsCheck")).toMatchObject({ checked: 4, matched: 3, mismatched: 1 });
   });
 
   /** 差分の読みを持たない窓口(全件を読む形)で、今の行を集計する。 */

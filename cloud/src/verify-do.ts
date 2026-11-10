@@ -60,6 +60,13 @@ export class VerifyReportDO extends DurableObject<VerifyReportEnv> {
   async alarm(): Promise<void> {
     await this.core.runBackfillTick();
     // 差分の集計の並走(Issue #628)。例外は握る(画面の集計・補完には触れない)。
-    await this.core.runPartsTick();
+    const progressed = await this.core.runPartsTickWithProgress();
+    // 週 1 回の全件の突き合わせ(Issue #723)。依頼があるときだけ動く。部分の tick が進んだ回は、1 呼び出しの文数を抑えるため次のアラームに回す。
+    await this.core.runWeeklyCheck({ afterWork: progressed });
+  }
+
+  /** cron(JST 23 時台)の kick(RPC。Issue #723)。前回から 7 日以上たっていれば週 1 回の突き合わせを依頼する(冪等。失敗は呼び出し側が握る)。 */
+  requestWeeklyCheck(): Promise<void> {
+    return this.core.requestWeeklyCheck();
   }
 }
