@@ -3,6 +3,7 @@ import {
   historyCalendarUrl,
   historyListUrl,
   parseCalendarKaisaiDates,
+  parseJpnListRaceIds,
   parseListRaceIds,
   validateHistoryPage,
 } from "../../src/scraper/history-pages.js";
@@ -81,5 +82,26 @@ describe("validateHistoryPage(保存前の検査。問題があれば理由、�
     expect(validateHistoryPage("central", "result", `<div class="RaceData02"><span>15頭</span></div>${table}`)).toMatch(/頭数 15.*行 1/);
     expect(validateHistoryPage("central", "result", table)).toContain("頭数が読めません");
     expect(validateHistoryPage("central", "result", `<div class="RaceData02"><span>1頭</span></div>${table}`)).toBeNull();
+  });
+});
+
+describe("parseJpnListRaceIds(地方の一覧から交流重賞〈Jpn〉の race_id だけ。Issue #635)", () => {
+  const nar = loadFixture("history_nar_list_20211103.html");
+  it("2021-11-03 の地方の一覧(40 件)から Jpn の 4 件だけを文書の順に返す(Jpn3 の門別 1 件と JBC の Jpn1 3 件)", () => {
+    expect(parseListRaceIds(nar, "nar")).toHaveLength(40);
+    expect(parseJpnListRaceIds(nar)).toEqual(["202130110305", "202146110308", "202146110309", "202146110310"]);
+  });
+  it("ローマ数字の表記(JpnⅠ)も Jpn として拾う", () => {
+    const roman = nar.replaceAll(">Jpn1<", ">JpnⅠ<").replaceAll(">Jpn3<", ">JpnⅢ<");
+    expect(roman).not.toBe(nar);
+    expect(parseJpnListRaceIds(roman)).toHaveLength(4);
+  });
+  it("Jpn の表記を 1 つも含まない一覧(Jpn が 0 件の日)は空配列", () => {
+    const none = nar.replaceAll(">Jpn1<", ">重賞<").replaceAll(">Jpn3<", ">重賞<");
+    expect(none).not.toBe(nar);
+    expect(parseJpnListRaceIds(none)).toEqual([]);
+  });
+  it("レース一覧の入れ物が無いページは空配列(例外にしない)", () => {
+    expect(parseJpnListRaceIds("<html></html>")).toEqual([]);
   });
 });
