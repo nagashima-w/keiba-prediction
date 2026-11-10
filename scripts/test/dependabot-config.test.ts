@@ -177,6 +177,18 @@ describe("dependabot.yml(Issue #310)", () => {
     expect(Math.floor(dependabotMinutes / 60)).toBe(2);
   });
 
+  it("Issue #719: 公開から待つ日数(cooldown)。Actions は default-days 7 だけ(semver の日数に非対応)、npm は default 7・major 14・minor 7・patch 3。項目ごとに正しい値が入っている", () => {
+    expect(entries).toHaveLength(2);
+    // 項目の数と cooldown の行の数が一致する(片方の項目だけに書いて通らない)
+    expect(code.match(/^ {4}cooldown:$/gm)).toHaveLength(2);
+    expect(code.match(/^ {6}default-days: /gm)).toHaveLength(2);
+    expect(entries[0]!).toMatch(/\n {4}cooldown:\n {6}default-days: 7\n(?! {6}semver)/);
+    expect(entries[0]!).not.toContain("semver-");
+    expect(entries[1]!).toMatch(
+      /\n {4}cooldown:\n {6}default-days: 7\n {6}semver-major-days: 14\n {6}semver-minor-days: 7\n {6}semver-patch-days: 3\n/,
+    );
+  });
+
   it("コミットメッセージの接頭辞は付ける(日本語可)が、承認印 [PUBLISH-APPROVED] と『レビュー継続中』は含まない(Dependabot のマージだけで本番へ出ない・出る条件に触れない)", () => {
     expect(entries).toHaveLength(2);
     for (const e of entries) {
