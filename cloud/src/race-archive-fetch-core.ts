@@ -51,7 +51,7 @@
  * アラームの中の失敗は握って、10 分後に再試行する。ログは固定の分類名と数だけ(例外の文面・ページの本文は出さない)。
  */
 import { JST_OFFSET_MS, nextJstMidnight } from "../../packages/core/src/common/jst";
-import { historyCalendarUrl, historyListUrl, parseCalendarKaisaiDates, parseListRaceIds, validateHistoryPage, type HistoryStage } from "../../packages/core/src/scraper/history-pages";
+import { historyCalendarUrl, historyListUrl, parseCalendarKaisaiDates, parseJpnListRaceIds, parseListRaceIds, validateHistoryPage, type HistoryKind, type HistoryStage } from "../../packages/core/src/scraper/history-pages";
 import { parseRaceId } from "../../packages/core/src/scraper/ids";
 import { buildRaceRecord, type BuildResult } from "../../packages/core/src/scraper/race-record";
 import { raceResultUrl } from "../../packages/core/src/scraper/urls";
@@ -96,6 +96,41 @@ export const ARCHIVE_MIN_INTERVAL_OVERRIDE_MAX_MS = 60_000;
 export function parseArchiveMinIntervalMs(value: string | undefined): number | undefined {
   const n = parseLimitOverride(value, ARCHIVE_MIN_INTERVAL_OVERRIDE_MAX_MS);
   return n !== null && n >= ARCHIVE_MIN_INTERVAL_OVERRIDE_MIN_MS ? n : undefined;
+}
+
+/** 地方の交流重賞(Jpn)の取得の DO(`RaceArchiveNarFetchDO`)の固定名(単一インスタンス)。中央の {@link RACE_ARCHIVE_FETCH_NAME} とは別の DO クラス・別の SQLite(Issue #635)。 */
+export const RACE_ARCHIVE_NAR_FETCH_NAME = "nar";
+/** 地方の取得のリクエスト間隔の既定(ミリ秒。開始から開始まで)。中央の既定(5 秒)より長く、本番の中央の取得の設定(20 秒)と同じ(Issue #635。ユーザーの決定)。 */
+export const NAR_ARCHIVE_REQUEST_INTERVAL_MS = 20_000;
+
+/** 地方用の DO が読む var(すべて任意の文字列。★中央の `RACE_ARCHIVE_*` とも binding の名前とも別名にする)。 */
+export interface NarArchiveVars {
+  /** 1 晩のリクエスト数を**下げる**上書き(1 以上の整数)。文字列 `"0"` だけは取得を止める。 */
+  readonly RACE_ARCHIVE_NAR_NIGHTLY_LIMIT?: string;
+  /** 時間帯の終わり(JST の 0 時からの分。1〜1440)。未設定は既定の 8:30。 */
+  readonly RACE_ARCHIVE_NAR_WINDOW_END_MIN?: string;
+  /** リクエスト間隔(ミリ秒。1500〜60000)。未設定は {@link NAR_ARCHIVE_REQUEST_INTERVAL_MS}。 */
+  readonly RACE_ARCHIVE_NAR_MIN_INTERVAL_MS?: string;
+  /** 1 晩に core の SQL が読む行数の予算(未設定は既定)。 */
+  readonly RACE_ARCHIVE_NAR_NIGHTLY_ROWS_LIMIT?: string;
+}
+
+/**
+ * 地方用の DO の設定(var → {@link ArchiveFetchOptions})。**中央の var は読まない**(中央を止めても地方は止まらず、中央の「終日・開催日も取る」の設定が地方に及ばない)。
+ * 開催日の朝を休む設定は持たない(地方は休む判定を行わない。{@link ArchiveFetchOptions.kind})。
+ */
+export function buildNarArchiveOptions(vars: NarArchiveVars): ArchiveFetchOptions {
+  const nightlyLimit = parseLimitOverride(vars.RACE_ARCHIVE_NAR_NIGHTLY_LIMIT, ARCHIVE_NIGHTLY_LIMIT_MAX);
+  const nightlyRowsLimit = parseLimitOverride(vars.RACE_ARCHIVE_NAR_NIGHTLY_ROWS_LIMIT, ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX);
+  const windowEndMin = parseArchiveWindowEndMin(vars.RACE_ARCHIVE_NAR_WINDOW_END_MIN);
+  return {
+    kind: "nar",
+    intervalMs: parseArchiveMinIntervalMs(vars.RACE_ARCHIVE_NAR_MIN_INTERVAL_MS) ?? NAR_ARCHIVE_REQUEST_INTERVAL_MS,
+    ...(windowEndMin === undefined ? {} : { windowEndMin }),
+    ...(nightlyRowsLimit === null ? {} : { nightlyRowsLimit }),
+    ...(isArchiveFetchDisabled(vars.RACE_ARCHIVE_NAR_NIGHTLY_LIMIT) ? { disabled: true } : {}),
+    ...(nightlyLimit === null ? {} : { nightlyLimit }),
+  };
 }
 
 /** 取得を始める時刻(2026-11-04 0:00 JST = 2026-11-03T15:00:00Z)。これより前には gate にも計画にも触れない(ユーザーの決定)。 */
@@ -165,6 +200,12 @@ export interface ArchiveFetchOptions {
   /** 取る範囲の最初の月(`YYYY-MM`)。 */
   readonly fromMonth?: string;
   readonly fetchTimeoutMs?: number;
+  /**
+   * 取る対象の種別(既定は中央)。`"nar"` は**地方の交流重賞(Jpn)だけ**を取る(Issue #635): 地方のホスト(nar.netkeiba.com)から、カレンダー → 開催日の一覧 → 一覧の Jpn のレースの結果ページの順に取り、
+   * 一覧のうち Jpn の race_id だけを `ra_race` に入れる(Jpn が 0 件の日も done に進む)。**開催日の朝を休む判定は行わない**(地方の本番の取得は 9 時以降で、時間帯〈既定 0:00〜8:30〉と重ならない)。
+   * 地方用の DO(`RaceArchiveNarFetchDO`)は別のインスタンス・別の SQLite なので、`ra_*` の表は中央の DO と同じ定義のまま使う。
+   */
+  readonly kind?: HistoryKind;
 }
 
 /** `RaceDay` の `getPlanProgress()` のうち、開催日の判定が使う部分。 */
@@ -182,8 +223,9 @@ export interface ArchiveGateStatus {
 }
 
 /** 通知する出来事。文面は DO 側(`notify-embeds.ts`)で組む。 */
-export type ArchiveNotice =
-  | {
+export type ArchiveNotice = ArchiveNoticeScope &
+  (
+    | {
       readonly kind: "refused";
       readonly httpStatus: number;
       readonly stage: HistoryStage;
@@ -197,7 +239,10 @@ export type ArchiveNotice =
   | { readonly kind: "capacity"; readonly reason: "db-size" | "db-size-unknown"; readonly dbSizeBytes: number | null; readonly at: number; readonly totalDone: number }
   | { readonly kind: "r2-fence"; readonly at: number; readonly resumeAt: number }
   | { readonly kind: "rows-budget"; readonly at: number; readonly resumeAt: number; readonly rowsRead: number; readonly limit: number }
-  | { readonly kind: "failures"; readonly count: number; readonly lastClass: string; readonly at: number; readonly resumeAt: number };
+  | { readonly kind: "failures"; readonly count: number; readonly lastClass: string; readonly at: number; readonly resumeAt: number });
+
+/** 通知に付く印。地方(交流重賞)の取得の通知だけ `scope: "nar"` を持ち、中央の通知はこのキーを持たない(Issue #635。通知の文面の出し分け用)。 */
+export type ArchiveNoticeScope = { readonly scope?: "nar" };
 
 export interface RaceArchiveFetchDeps {
   /** DO の SQLite(`ctx.storage.sql`)。表 `ra_meta`・`ra_month`・`ra_day`・`ra_race` を `CREATE TABLE IF NOT EXISTS` で作る。 */
@@ -221,7 +266,7 @@ export interface RaceArchiveFetchDeps {
   readonly notify: (notice: ArchiveNotice) => Promise<void>;
   readonly log: (line: string, level: "info" | "error") => void;
   /** 結果ページの読み取り。省略は `buildRaceRecord`(テストが差し替える)。 */
-  readonly buildRecord?: (html: string, raceId: string, kind: "central") => BuildResult;
+  readonly buildRecord?: (html: string, raceId: string, kind: HistoryKind) => BuildResult;
   /** カレンダーの開催日の抽出・一覧の race_id の抽出。省略は core の関数(テストが、想定外の例外を投げる読み取りに差し替える)。 */
   readonly parseCalendarDates?: (html: string, month: string) => string[];
   readonly parseListIds?: (html: string) => string[];
@@ -318,6 +363,7 @@ export class RaceArchiveFetchCore {
   private readonly startMin: number;
   private readonly endMin: number;
   private readonly skipCentralRaceDay: boolean;
+  private readonly kind: HistoryKind;
   private readonly intervalMs: number;
   private readonly fromMonth: string;
   private readonly fetchTimeoutMs: number;
@@ -331,6 +377,7 @@ export class RaceArchiveFetchCore {
     this.startMin = options.windowStartMin ?? ARCHIVE_WINDOW_START_MIN;
     this.endMin = options.windowEndMin ?? ARCHIVE_WINDOW_END_MIN;
     this.skipCentralRaceDay = options.skipCentralRaceDay !== false;
+    this.kind = options.kind ?? "central";
     this.intervalMs = options.intervalMs ?? ARCHIVE_REQUEST_INTERVAL_MS;
     this.fromMonth = options.fromMonth ?? ARCHIVE_FROM_MONTH;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? ARCHIVE_FETCH_TIMEOUT_MS;
@@ -650,8 +697,8 @@ export class RaceArchiveFetchCore {
 
   /** その晩、取ってよいか(夜ごとに 1 回判定してその晩は使い回す。判定不能は 10 分おきに引き直す)。 */
   private async restDecision(now: number, night: string): Promise<"go" | "kaisai" | "unknown"> {
-    if (!this.skipCentralRaceDay) {
-      return "go"; // 開催日も取る設定(Issue #655)。判定も補助も飛ばす。取る対象は nextWork の `date < night`(今日より前)のまま。
+    if (this.kind === "nar" || !this.skipCentralRaceDay) {
+      return "go"; // 地方は開催日の朝を休まない(Issue #635)。 // 開催日も取る設定(Issue #655)。判定も補助も飛ばす。取る対象は nextWork の `date < night`(今日より前)のまま。
     }
     if (this.metaGet("rest_date") === night) {
       const cached = this.metaGet("rest_result");
@@ -724,9 +771,9 @@ export class RaceArchiveFetchCore {
   private urlOf(work: Work): string {
     switch (work.kind) {
       case "month":
-        return historyCalendarUrl("central", work.id);
+        return historyCalendarUrl(this.kind, work.id);
       case "day":
-        return historyListUrl("central", work.id);
+        return historyListUrl(this.kind, work.id);
       default:
         return raceResultUrl(parseRaceId(work.id));
     }
@@ -833,7 +880,7 @@ export class RaceArchiveFetchCore {
    * 取れたページの処理。戻り値: `ok` = 完了 / `failed` = そのものの失敗(記録済み)/ `stopped` = 状態が止まり(拒否ではない停止を含む)、アラームも張り済み。
    */
   private async process(work: Work, night: string, text: string, at: number): Promise<"ok" | "failed" | "stopped"> {
-    const problem = validateHistoryPage("central", STAGE_OF[work.kind], text);
+    const problem = validateHistoryPage(this.kind, STAGE_OF[work.kind], text);
     if (problem !== null) {
       return (await this.failed(work, night, "invalid-page", at)) ? "stopped" : "failed";
     }
@@ -847,7 +894,7 @@ export class RaceArchiveFetchCore {
         return "ok";
       }
       case "day": {
-        (this.deps.parseListIds ?? ((html: string) => parseListRaceIds(html, "central")))(text).forEach((id, seq) => {
+        (this.deps.parseListIds ?? ((html: string) => (this.kind === "nar" ? parseJpnListRaceIds(html) : parseListRaceIds(html, "central"))))(text).forEach((id, seq) => {
           this.q("INSERT OR IGNORE INTO ra_race (race_id, date, seq) VALUES (?, ?, ?)", id, work.id, seq);
         });
         this.q("UPDATE ra_day SET status = 'listed', last_class = NULL WHERE date = ?", work.id);
@@ -861,7 +908,7 @@ export class RaceArchiveFetchCore {
   }
 
   private async processResult(work: Extract<Work, { kind: "race" }>, night: string, html: string, at: number): Promise<"ok" | "failed" | "stopped"> {
-    const built = (this.deps.buildRecord ?? buildRaceRecord)(html, work.id, "central");
+    const built = (this.deps.buildRecord ?? buildRaceRecord)(html, work.id, this.kind);
     if (!built.ok) {
       this.q("UPDATE ra_race SET status = 'skipped', last_class = ?, last_night = ? WHERE race_id = ?", built.category, night, work.id);
       this.closeDayIfDone(work.date);
@@ -998,7 +1045,8 @@ export class RaceArchiveFetchCore {
   // ---- 通知 ----
 
   private queueNotice(notice: ArchiveNotice): void {
-    this.metaSet("pending_notice", JSON.stringify(notice));
+    // 地方の取得の通知だけ印を付ける(中央の通知の形は変えない)。
+    this.metaSet("pending_notice", JSON.stringify(this.kind === "nar" ? { ...notice, scope: "nar" } : notice));
     this.metaSet("notice_attempts", "0");
     this.metaSet("notice_retry_at", "0");
   }

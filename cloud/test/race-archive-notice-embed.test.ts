@@ -83,4 +83,19 @@ describe("buildArchiveNoticeEmbed", () => {
       expect(text(buildArchiveNoticeEmbed(n)), n.kind).not.toMatch(/https?:\/\//);
     }
   });
+  it("地方(scope: nar)の通知は、地方の交流重賞の取得であることと、地方用の再開の口を出す。中央の通知にはどちらも出ない(Issue #635)", () => {
+    const central = text(buildArchiveNoticeEmbed({ kind: "refused", httpStatus: 429, stage: "list", at: AT, willAutoResume: false, resumeAt: null, nightSaved: 0, totalDone: 10 }));
+    const nar = buildArchiveNoticeEmbed({ kind: "refused", httpStatus: 429, stage: "list", at: AT, willAutoResume: false, resumeAt: null, nightSaved: 0, totalDone: 10, scope: "nar" });
+    const t = text(nar);
+    expect(nar.title).toContain("地方");
+    expect(t).toContain("/api/race-archive/nar/resume");
+    expect(central).not.toContain("地方");
+    expect(central).not.toContain("/api/race-archive/nar/resume");
+    for (const kind of ["capacity", "r2-fence", "rows-budget", "failures"] as const) {
+      const n = { capacity: { kind: "capacity", reason: "db-size", dbSizeBytes: 1, at: AT, totalDone: 1 }, "r2-fence": { kind: "r2-fence", at: AT, resumeAt: RESUME }, "rows-budget": { kind: "rows-budget", at: AT, resumeAt: RESUME, rowsRead: 1, limit: 1 }, failures: { kind: "failures", count: 10, lastClass: "http-500", at: AT, resumeAt: RESUME } }[kind] as ArchiveNotice;
+      expect(buildArchiveNoticeEmbed({ ...n, scope: "nar" }).title, kind).toContain("地方");
+      expect(buildArchiveNoticeEmbed(n).title, kind).not.toContain("地方");
+    }
+    expect(central).toContain("/api/race-archive/resume");
+  });
 });

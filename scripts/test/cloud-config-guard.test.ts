@@ -101,8 +101,8 @@ describe("wrangler.toml", () => {
     const field = (body: string, key: string): string | null => new RegExp(`^${key} = \\[([^\\]]*)\\]$`, "m").exec(body)?.[1] ?? null;
     const tagOf = (body: string): string | null => /^tag = "(v\d+)"$/m.exec(body)?.[1] ?? null;
     // 前提: migration を実際に読めている(空振りでない)。v1〜v15 の 15 ブロック
-    expect(blocks.length, "migration ブロックの数(v1〜v15)").toBe(15);
-    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"]);
+    expect(blocks.length, "migration ブロックの数(v1〜v16)").toBe(16);
+    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", "v16"]);
     // 追加(new_sqlite_classes)は v1〜v8・v10〜v13 の各 1 クラス。v3 の CloudMigration は残す(v9 の deleted_classes が指す先行の migration。wrangler が同じ toml 内で存在を検査する)
     expect(blocks.map((b) => field(b, "new_sqlite_classes"))).toEqual([
       '"NetkeibaGate"',
@@ -120,9 +120,10 @@ describe("wrangler.toml", () => {
       '"RaceMarketEdgeDO"',
       '"JraHorseBackfillDO"',
       '"JraBlinkerBackfillDO"',
+      '"RaceArchiveNarFetchDO"',
     ]);
     // 削除(deleted_classes)は v9 の 1 回だけで、中身は CloudMigration ちょうど 1 クラス。他のクラスの削除は禁じる
-    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"', null, null, null, null, null, null]);
+    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"', null, null, null, null, null, null, null]);
     expect((tomlCode.match(/deleted_classes/g) ?? []).length, "deleted_classes は toml 全体で 1 回").toBe(1);
     // v9 は削除だけ(同じブロックに追加・改名・移管を混ぜない)
     expect(blocks[8]!.trim().split("\n")).toEqual(['tag = "v9"', 'deleted_classes = ["CloudMigration"]']);
@@ -147,6 +148,8 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "AllocationExportDO"$/m);
     expect(tomlCode).toMatch(/^name = "RACE_ARCHIVE_FETCH"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceArchiveFetchDO"$/m);
+    expect(tomlCode).toMatch(/^name = "RACE_ARCHIVE_FETCH_NAR"$/m); // Issue #635: 地方の交流重賞の取得の DO
+    expect(tomlCode).toMatch(/^class_name = "RaceArchiveNarFetchDO"$/m);
     expect(tomlCode).toMatch(/^name = "RACE_ARCHIVE_RUNS"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceArchiveRunsDO"$/m);
     expect(tomlCode).toMatch(/^name = "RACE_MARKET_EDGE"$/m);
@@ -156,8 +159,8 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^name = "JRA_BLINKER_BACKFILL"$/m);
     expect(tomlCode).toMatch(/^class_name = "JraBlinkerBackfillDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|transferred_classes|new_classes)\s*=/m);
-    // DO のバインディングはちょうど13(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT・ALLOCATION_EXPORT・RACE_ARCHIVE_FETCH〈Issue #554〉・RACE_ARCHIVE_RUNS〈Issue #590〉・RACE_MARKET_EDGE〈Issue #642〉・JRA_HORSE_BACKFILL〈Issue #697〉・JRA_BLINKER_BACKFILL〈Issue #698〉。Issue #394 で CLOUD_MIGRATION を外し、Issue #463 で ALLOCATION_EXPORT を足した)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(13);
+    // DO のバインディングはちょうど14(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT・ALLOCATION_EXPORT・RACE_ARCHIVE_FETCH〈Issue #554〉・RACE_ARCHIVE_RUNS〈Issue #590〉・RACE_MARKET_EDGE〈Issue #642〉・JRA_HORSE_BACKFILL〈Issue #697〉・JRA_BLINKER_BACKFILL〈Issue #698〉。Issue #394 で CLOUD_MIGRATION を外し、Issue #463 で ALLOCATION_EXPORT を足した)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(14); // Issue #635: 14 本目 = RACE_ARCHIVE_FETCH_NAR
     // v10 は追加だけ(同じブロックに削除・改名・移管を混ぜない)
     expect(blocks[9]!.trim().split("\n")).toEqual(['tag = "v10"', 'new_sqlite_classes = ["AllocationExportDO"]']);
     // v11 も追加だけ(Issue #554。過去の結果の取得の DO)
@@ -170,6 +173,8 @@ describe("wrangler.toml", () => {
     expect(blocks[13]!.trim().split("\n")).toEqual(['tag = "v14"', 'new_sqlite_classes = ["JraHorseBackfillDO"]']);
     // v15 も追加だけ(Issue #698。過去のレースのブリンカー着用の埋め戻しの DO)
     expect(blocks[14]!.trim().split("\n")).toEqual(['tag = "v15"', 'new_sqlite_classes = ["JraBlinkerBackfillDO"]']);
+    // v16 も追加だけ(Issue #635。地方の交流重賞の過去の結果の取得の DO)
+    expect(blocks[15]!.trim().split("\n")).toEqual(['tag = "v16"', 'new_sqlite_classes = ["RaceArchiveNarFetchDO"]']);
   });
 
   it("Issue #206・#249: cron はちょうど2本で `0 12 * * *`(UTC 12:00 = JST 21:00)と `0 14 * * *`(UTC 14:00 = JST 23:00)。朝 9 時の定時実行は無い。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -317,13 +322,13 @@ describe("wrangler.toml", () => {
     expect(("await dispatchResultImports(x);\nexport async function dispatchResultImports(i) {}").match(/(?<!function\s)\bdispatchResultImports\(/g)).toHaveLength(1);
   });
 
-  it("Issue #208・#251・#394・#396・#554: 手動の POST を受けるルートは 8 つだけ(/api/settings・/api/settings/prompt-preview〈Issue #396〉・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/reports/run・/api/monthly-reports/run〈Issue #280〉・/api/race-archive/resume〈Issue #554〉。/api/migration/upload は Issue #394 で廃止)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
+  it("Issue #208・#251・#394・#396・#554: 手動の POST を受けるルートは 9 つだけ(/api/settings・/api/settings/prompt-preview〈Issue #396〉・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/reports/run・/api/monthly-reports/run〈Issue #280〉・/api/race-archive/resume〈Issue #554〉・/api/race-archive/nar/resume〈Issue #635〉。/api/migration/upload は Issue #394 で廃止)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
     // POST の分岐は 8 つ(`method === "POST"`。下の path つきの 7 つと、`/api/settings` の pathname の分岐の中で method を見る 1 つ)
-    expect((code.match(/method === "POST"/g) ?? []).length).toBe(8);
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(9);
     const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
-    expect(routes).toEqual(["/api/settings/prompt-preview", "/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/reports/run", "/api/monthly-reports/run", "/api/race-archive/resume"]); // settings は pathname の分岐の中で method を見る
+    expect(routes).toEqual(["/api/settings/prompt-preview", "/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/reports/run", "/api/monthly-reports/run", "/api/race-archive/resume", "/api/race-archive/nar/resume"]); // settings は pathname の分岐の中で method を見る
     expect(code).toMatch(/pathname === "\/api\/settings"/);
     // Issue #396: handlePromptPreview は守りの後で純関数 buildPreviewText を呼ぶだけ。env・D1・DO・R2・netkeiba・LLM・Discord に触れない
     const previewStart = code.indexOf("async function handlePromptPreview(");
@@ -687,14 +692,14 @@ describe("wrangler.toml", () => {
     // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つと、#642 の 1 晩の上限(Issue #669)と、JRA のオッズを使うか(Issue #675)の 5 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
     const varsBody = /^\[vars\]\n((?:[^\[\n][^\n]*\n|\n)*)/m.exec(tomlCode)?.[1] ?? "";
     const varKeys = [...varsBody.matchAll(/^([A-Z_]+)\s*=/gm)].map((m) => m[1]);
-    expect(varKeys.sort()).toEqual(["JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]);
+    expect(varKeys.sort()).toEqual(["JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]); // Issue #635: 地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT)を足した
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);
     expect(tomlCode).not.toMatch(/^\[secrets\]/m);
     expect(tomlCode).not.toMatch(/keep_vars/);
   });
 
   it("Issue #655・#669: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 20000 ミリ秒(書き込みが Free の 1 日 10 万行に迫ったため5000 から広げた)。#642 の 1 晩の上限は 1〜20000 未満の数(止める \"0\" ではない)。取得の止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む・5000)は変えない", () => {
-    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"$/m);
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "150"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"$/m);
     // Issue #669: #642 の上限は、止める "0" ではなく、既定(20000)より小さい正の整数。取得の間隔は parseArchiveMinIntervalMs の範囲(1500〜60000)内
     const edgeLimit = Number(/^RACE_MARKET_EDGE_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1]);
     expect(edgeLimit).toBeGreaterThanOrEqual(1);
@@ -703,6 +708,9 @@ describe("wrangler.toml", () => {
     expect(intervalMs).toBeGreaterThanOrEqual(1500);
     expect(intervalMs).toBeLessThanOrEqual(60_000);
     expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT|RUNS_NIGHTLY_LIMIT)\s*=/m);
+    // Issue #635: 地方の交流重賞の取得の 1 晩の上限は、止める "0" ではなく正の整数(本番の初期値は 150。様子を見てから上げる)。時間帯・間隔の地方用の var は置かず、コードの既定(0:00〜8:30・20 秒)で動く
+    expect(Number(/^RACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(150);
+    expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_NAR_(WINDOW_END_MIN|MIN_INTERVAL_MS|NIGHTLY_ROWS_LIMIT)\s*=/m);
     // Issue #675: JRA のオッズを使う(既定は使う。"0" だけが無効)。DO のラッパは var を見て取得口を渡すかを決め、無効なら渡さない
     expect(Number(/^JRA_ODDS_ENABLED = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(1);
     const raceDayDo = readTextLf("cloud", "src", "race-day-do.ts");
@@ -1375,7 +1383,7 @@ describe("Issue #216・#394・#402: 移行の DO(CloudMigration)は削除済み�
       if (b > 0) bindingSites[f] = b;
     }
     // kick を呼ぶのは scheduled.ts(毎日の起動)と result-backfill-do.ts(DO 自身が getStatus・kick の RPC から core に委譲する 2 つ)だけ
-    expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "jra-horse-backfill-do.ts": 1, "jra-blinker-backfill-do.ts": 1, "scheduled.ts": 6 }); // scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)+ 馬ごとの頁の埋め戻し(Issue #697。21 時・23 時。DO 自身は kick を RPC から core に委譲する 1 つ)+ 過去のブリンカーの埋め戻し(Issue #698。同じ)
+    expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "jra-horse-backfill-do.ts": 1, "jra-blinker-backfill-do.ts": 1, "scheduled.ts": 7 }); // Issue #635: 地方の交流重賞の取得の kick を足して 6 → 7(`grep -o "\.kick()" cloud/src/scheduled.ts | wc -l`)。以下は元の注記: scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)+ 馬ごとの頁の埋め戻し(Issue #697。21 時・23 時。DO 自身は kick を RPC から core に委譲する 1 つ)+ 過去のブリンカーの埋め戻し(Issue #698。同じ)
     // env.RESULT_BACKFILL に触れるのは scheduled.ts(有無の確認・get・idFromName の 3 回)と handler.ts(namespace 変数への代入の 1 回)だけ
     expect(bindingSites).toEqual({ "handler.ts": 1, "scheduled.ts": 3 });
     // handler.ts: 補完の DO は getStatus だけ(kick・start は呼ばない)。GET /api/results/backfill の 1 本
@@ -1468,7 +1476,7 @@ describe("Issue #554: 過去の結果の毎晩の取得(RaceArchiveFetchDO)は�
 
   it("本番の入口(worker.ts)は本番のクラスだけを export し、smoke 専用のサブクラス(RaceArchiveSmokeDO)を import しない。smoke 専用のサブクラスは smoke-worker.ts にだけある", () => {
     const worker = stripCode(readTextLf("cloud", "src", "worker.ts"));
-    expect(worker).toMatch(/export \{ RaceArchiveFetchDO \} from/);
+    expect(worker).toMatch(/export \{ RaceArchiveFetchDO, RaceArchiveNarFetchDO \} from/); // Issue #635: 地方用の子クラスも本番のクラスとして export する
     expect(worker).not.toContain("RaceArchiveSmokeDO");
     expect(smokeWorker).toContain("class RaceArchiveSmokeDO extends RealRaceArchiveFetchDO");
     expect(sites(/RaceArchiveSmokeDO/g)).toEqual({});

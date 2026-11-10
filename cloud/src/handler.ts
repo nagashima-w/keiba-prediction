@@ -40,7 +40,7 @@ import { D1MonthlyStore } from "./monthly-report-repository";
 import { MONTHLY_REPORT_NAME, type MonthlyMode, type MonthlyStatus, type RequestMonthlyResult } from "./monthly-report-core";
 import { isValidMonth, monthRange } from "./monthly-month";
 import { DAILY_REPORT_NAME, type ReportMode, type ReportStatus, type RequestReportResult } from "./daily-report-core";
-import { RACE_ARCHIVE_FETCH_NAME } from "./race-archive-fetch-core";
+import { RACE_ARCHIVE_FETCH_NAME, RACE_ARCHIVE_NAR_FETCH_NAME } from "./race-archive-fetch-core";
 import type { RaceArchiveFetchStatus } from "./race-archive-fetch-types";
 import { RACE_ARCHIVE_RUNS_NAME, type RaceArchiveRunsStatus } from "./race-archive-runs-core";
 import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-core";
@@ -271,6 +271,8 @@ export interface Env extends AccessEnv {
   RESULT_BACKFILL?: BackfillNamespaceLike;
   /** 過去の結果の取得の DO(RaceArchiveFetchDO。wrangler.toml の binding)。Issue #554。本番では常にある。無い構成では `/api/race-archive` が 503 になり、cron は kick を呼ばない。 */
   RACE_ARCHIVE_FETCH?: RaceArchiveNamespaceLike;
+  /** 地方の交流重賞(Jpn)の過去の結果の取得の DO(RaceArchiveNarFetchDO。wrangler.toml の binding)。Issue #635。本番では常にある。無い構成では `/api/race-archive/nar` が 503 になり、cron は kick を呼ばない。 */
+  RACE_ARCHIVE_FETCH_NAR?: RaceArchiveNamespaceLike;
   /** 過去の結果の毎晩の変換の DO(RaceArchiveRunsDO。wrangler.toml の binding)。Issue #590。本番では常にある。無い構成では `/api/race-archive/runs` が 503 になり、cron は kick しない。 */
   RACE_ARCHIVE_RUNS?: RaceArchiveRunsNamespaceLike;
   /** 騎手・調教師の指標の DO(RaceMarketEdgeDO。wrangler.toml の binding)。Issue #642。本番では常にある。無い構成では cron は kick しない。 */
@@ -454,7 +456,11 @@ export async function handle(
   }
   // 過去の結果の取得の手動の再開(Issue #554)。管理者専用(route-policy.ts の表)。netkeiba にも LLM にも出ない(DO の状態を「動いてよい」に戻してアラームを張るだけ)。
   if (method === "POST" && new URL(request.url).pathname === "/api/race-archive/resume") {
-    return handleRaceArchiveResume(request, env);
+    return handleRaceArchiveResume(request, env, false);
+  }
+  // 地方の交流重賞の取得の手動の再開(Issue #635)。中央と同じ形・同じ守り。
+  if (method === "POST" && new URL(request.url).pathname === "/api/race-archive/nar/resume") {
+    return handleRaceArchiveResume(request, env, true);
   }
   if (method !== "GET" && method !== "HEAD") {
     return methodNotAllowed("GET, HEAD");
@@ -612,7 +618,20 @@ export async function handle(
     if (method !== "GET") {
       return methodNotAllowed("GET");
     }
-    return handleRaceArchiveStatus(env);
+    return handleRaceArchiveStatus(env, false);
+  }
+
+  if (pathname === "/api/race-archive/nar") {
+    // 地方の交流重賞の取得の状態(Issue #635)。中央の `/api/race-archive` と同じ形。GET だけ。
+    if (method !== "GET") {
+      return methodNotAllowed("GET");
+    }
+    return handleRaceArchiveStatus(env, true);
+  }
+
+  if (pathname === "/api/race-archive/nar/resume") {
+    // POST だけ(上で処理済み)。GET・HEAD などは 405。
+    return methodNotAllowed("POST");
   }
 
   if (pathname === "/api/race-archive/resume") {
@@ -701,15 +720,16 @@ async function handleBackfillStatus(env: Env): Promise<Response> {
 }
 
 /** `GET /api/race-archive`: 過去の結果の取得の状態(動作・待ちの理由・次の実行・今夜と累計の件数・最後の停止・自動再開の使用状況)。DO の失敗・binding なしは 503(文面は返さない)。Issue #554。 */
-async function handleRaceArchiveStatus(env: Env): Promise<Response> {
+async function handleRaceArchiveStatus(env: Env, nar: boolean): Promise<Response> {
   try {
-    const namespace = env.RACE_ARCHIVE_FETCH;
+    // 地方(Issue #635)は別の binding・別の固定名。中央の DO には触れない。
+    const namespace = nar ? env.RACE_ARCHIVE_FETCH_NAR : env.RACE_ARCHIVE_FETCH;
     if (namespace === undefined) {
-      throw new Error("RACE_ARCHIVE_FETCH binding がありません");
+      throw new Error("取得の DO の binding がありません");
     }
-    return json({ ok: true, ...(await namespace.get(namespace.idFromName(RACE_ARCHIVE_FETCH_NAME)).getStatus()) });
+    return json({ ok: true, ...(await namespace.get(namespace.idFromName(nar ? RACE_ARCHIVE_NAR_FETCH_NAME : RACE_ARCHIVE_FETCH_NAME)).getStatus()) });
   } catch {
-    return json({ ok: false, error: { type: "race-archive-error" } }, 503);
+    return json({ ok: false, error: { type: nar ? "race-archive-nar-error" : "race-archive-error" } }, 503);
   }
 }
 
@@ -735,7 +755,7 @@ const RACE_ARCHIVE_RESUME_BODY_MAX_BYTES = 256;
  * `POST /api/race-archive/resume`(Issue #554): 手で再開する。本文は空のオブジェクト `{}` だけ。止まっていれば(手動待ち・容量・次の晩の待ち)動いてよい状態に戻し、自動再開の権利も戻して、アラームを張る。
  * 止まっていなければ何もしない(`resumed: false`)。順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 413 → 400)→ 入力の検証(400)→ DO(失敗は 503。文面は返さない)。
  */
-async function handleRaceArchiveResume(request: Request, env: Env): Promise<Response> {
+async function handleRaceArchiveResume(request: Request, env: Env, nar: boolean): Promise<Response> {
   const guarded = await readJsonObjectBody(request, RACE_ARCHIVE_RESUME_BODY_MAX_BYTES);
   if (!guarded.ok) {
     return guarded.response;
@@ -744,14 +764,14 @@ async function handleRaceArchiveResume(request: Request, env: Env): Promise<Resp
     return badRequest("本文は空のオブジェクト {} にしてください");
   }
   try {
-    const namespace = env.RACE_ARCHIVE_FETCH;
+    const namespace = nar ? env.RACE_ARCHIVE_FETCH_NAR : env.RACE_ARCHIVE_FETCH;
     if (namespace === undefined) {
-      throw new Error("RACE_ARCHIVE_FETCH binding がありません");
+      throw new Error("取得の DO の binding がありません");
     }
-    const result = await namespace.get(namespace.idFromName(RACE_ARCHIVE_FETCH_NAME)).resume();
+    const result = await namespace.get(namespace.idFromName(nar ? RACE_ARCHIVE_NAR_FETCH_NAME : RACE_ARCHIVE_FETCH_NAME)).resume();
     return json({ ok: true, resumed: result.resumed, previous: result.previous });
   } catch {
-    return json({ ok: false, error: { type: "race-archive-error" } }, 503);
+    return json({ ok: false, error: { type: nar ? "race-archive-nar-error" : "race-archive-error" } }, 503);
   }
 }
 

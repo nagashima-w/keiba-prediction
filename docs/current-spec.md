@@ -1505,6 +1505,19 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **検査**: `cloud/test/race-archive-fetch-core.test.ts`(状態機械。時計・アラーム・gate・計画・保存・通知は偽物で、状態は本物の SQLite)・`race-archive-notice-embed.test.ts`・`handler-race-archive.test.ts`・`scheduled.test.ts`・`route-policy.test.ts`、`scripts/test/cloud-config-guard.test.ts`(binding・migration・fetchRaw の呼び出し箇所・kick の箇所・Discord の箇所・smoke の var)。`cloud/smoke.ts` は、本番のクラスが止まっていること(`state=disabled`)と、**smoke 専用の DO(`RaceArchiveSmokeDO`。smoke の一時設定だけの binding)が、偽ソケットのカレンダー・一覧・結果を gate 経由で取って R2 と D1 の目録に保存する**ところまでを workerd で通す。
 - **まだ確かめていないこと**: 本番の `meta.size_after` の意味(読めなければ `db-size-unknown` で最初の保存で止まり、Discord に出る)/ 本番の gate・netkeiba での 5 秒間隔の取得が止められずに続くか(#532 では 1 晩に 1,000 件取った翌日に 5 件で HTTP 400 になった前例がある。件数の制限の可能性)/ 上の無料枠の見積もり。
 
+### 地方の交流重賞(Jpn)の過去の結果の取得(#635。**版数は 1.44.0 のまま**〈凍結〉)
+地方の交流重賞(Jpn1・Jpn2・Jpn3)の過去の結果を、2021-01 から今月まで、中央と同じ R2 の目録(`race_archive`。`kind = 'nar'`)に取る。地方の交流重賞以外のレースは対象外。
+
+- **担当は `RaceArchiveNarFetchDO`**(`RaceArchiveFetchDO` の子クラス。binding `RACE_ARCHIVE_FETCH_NAR`・migration v16・単一インスタンス `nar`)。別のクラス・別の SQLite・別のアラームなので、中央の取得の表・状態・停止とは混ざらない。純ロジックは中央と同じ `RaceArchiveFetchCore` を `kind: "nar"` で動かす(`cloud/src/race-archive-fetch-core.ts`)。
+- **取り方**: `nar.netkeiba.com` から、カレンダー(月ごと。新しい月から)→ 開催日の一覧(新しい日から)→ **一覧のうち Jpn のレースの結果ページ**の順に取る。一覧の Jpn の判定は `parseJpnListRaceIds`(`packages/core/src/scraper/history-pages.ts`。`parseRaceList` → `filterJpnOnlyEntries`。ローマ数字の表記も受ける)で、Jpn の race_id だけを `ra_race` に入れる(1 日 40 件前後のうち数件)。Jpn が 0 件の日は、結果を取らずに完了にする。地方のカレンダーに Jpn の印は無い。
+- **中央との違い**: 開催日の朝を休む判定を行わない(地方の本番の取得は 9 時以降で、時間帯と重ならない)。時間帯は JST 0:00〜8:30、間隔は 20 秒(`NAR_ARCHIVE_REQUEST_INTERVAL_MS`)。今日以降の開催日は取らない。gate 経由・gate の 3 つの確認・HTTP 400/403/429 で止める流儀・自動再開の権利・R2 の柵・D1 の容量の守りは中央と同じ。通知(Discord)は題に「地方(交流重賞)」が付き、再開の口が `POST /api/race-archive/nar/resume` になる(通知の `scope: "nar"`)。
+- **設定(Worker の var。中央の `RACE_ARCHIVE_*` とは別名で、中央の var は読まない)**: `RACE_ARCHIVE_NAR_NIGHTLY_LIMIT`(1 晩のリクエスト数を下げる。`"0"` で止める。**本番の初期値は 150**。様子を見てから上げる)・`RACE_ARCHIVE_NAR_WINDOW_END_MIN`・`RACE_ARCHIVE_NAR_MIN_INTERVAL_MS`・`RACE_ARCHIVE_NAR_NIGHTLY_ROWS_LIMIT`(後の 3 つは本番の toml には置かない)。
+- **管理者の口**: `GET /api/race-archive/nar`(状態。中央の `/api/race-archive` と同じ形)・`POST /api/race-archive/nar/resume`(手で再開)。どちらも管理者専用。
+- **起動**: cron の `scheduled` が 21:00 と 23:00 の両方で、中央の `kick()` と並べて(`Promise.all`)地方の `kick()` を呼ぶ。失敗しても投げない(分類 `race-archive-nar-kick-failed`)。
+- **horse_runs への変換**: 毎晩の変換(#590)は種別で絞らないので、地方の Jpn もそのまま変換される(`venueKind` は「地方」。地方の結果ページにコーナー通過順の列が無いので、**通過順は空配列**)。初見の馬の判定は戦績 API 由来の行だけで行うので、地方の Jpn の行しか無い馬は初見のままになる。騎手・調教師の指標(#642)の取り込みは `kind = 'central'` だけを読むので、地方は入らない。
+- **規模の見込み(推定。実測は最初の晩のあと)**: カレンダー約 71 件・開催日の一覧約 1,800 件・結果約 300 件で約 2,200 リクエスト。1 晩 150 件なら 15 晩ほど(上限を上げれば縮む)。D1 の書き込みは結果 1 件あたり約 20 行(目録 2〜3 行 + 変換で 1 頭 1 行)で、合計約 6,000 行。
+- **検査**: `cloud/test/race-archive-fetch-core-nar.test.ts`(実物のフィクスチャ `history_nar_*` でカレンダー → 一覧 → 結果 → 保存の通し・Jpn が 0 件の日・時間帯・1 晩の上限・今日以降を取らないこと)・`handler-race-archive-nar.test.ts`・`packages/core/test/scraper/history-pages.test.ts`・`scheduled.test.ts`・`route-policy.test.ts`・`race-archive-notice-embed.test.ts`、`scripts/test/cloud-config-guard.test.ts`(binding・migration v16・var)。smoke は本番のクラスが止まっていること(`state=disabled`)を確かめる(偽ソケットでの取得の通しは中央の DO だけ)。
+
 ### 過去の結果の毎晩の変換(#590〈#549-B3-2〉。**版数は 1.44.0 のまま**〈凍結〉。公開すると、その晩の JST 1:00 から、本番の D1 の `horse_runs` に書き込みが始まる)
 取得(#554)が R2 と目録に保存した過去の結果を、毎晩、`horse_runs` に `source = 'result'` で入れる。取得が進むたびに、未変換のレースを拾って入れ直す。**netkeiba にも gate にも出ない**(R2 と D1 だけを読み書きする)。
 - **担当は新しい DO `RaceArchiveRunsDO`**(binding `RACE_ARCHIVE_RUNS`・migration v12・単一インスタンス `main`)。純ロジックは `cloud/src/race-archive-runs-core.ts`(`RaceArchiveRunsCore`)、変換して書く部品は `race-archive-runs.ts`(#588 の `convertRaceArchives`)。取得の DO とは別のアラームで、止め合わない。
