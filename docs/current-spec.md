@@ -2024,6 +2024,15 @@ exe の検証画面のうち、**累積回収率**と**配分ベースの回収�
 - **【記録】**: (1) 買い目の `ORDER BY` を乱しても集計が変わらない(払戻 × 賭け金/100 が整数のため加算順に依らない。順序は exe と同じにしてあるが、テストでは検出されない)。(2) 本番の DO の CPU・D1 の読み取り行数・買い目の実数は未確認(上のとおり、デプロイ後に `diag` で確認)。(3) `start_time` が '?' の行(詳細を失った旧い行)は、exe と先読み判定が違いうる(件数は画面と `diag` に出る)。(4) 区分ごとの再計算は無い(3 区分を常に同時に計算する)。版別比較は #220 で、同じ DO の再計算の中で別に計算するようにした(下記)。
 - **検査**: `test/verify-read.test.ts`・`verify-store.test.ts`(ローカル workerd の D1・R2)・`verify-core.test.ts`・`handler-verify.test.ts`・`migration-0009.test.ts`・`client-api-verify-contract.test.ts`(本物の `VerifyReport` を通す)・`client-verify-model.test.ts`・`client-verify-screen.test.ts`・`client-view-verify.test.ts`・`client-app-verify.test.ts`・`client-route.test.ts`・`client-bundle.test.ts`、ルートの `scripts/test/cloud-verify-parity.test.ts`・`cloud-config-guard.test.ts`(DO・binding・R2 は get だけ・Worker が D1/R2 に触れない)・`cloud-d1-schema.test.ts`。**実機(スマホ)での見た目と本番の初回の `diag` は自動検査できない**(デプロイ後に確認する)。
 
+- **再計算を開催日ごとの部分から組み立てる(Issue #721。#616 の段階 3b)**: 差分の読みを持つ読み取り口(本番の `D1VerifyStore`)では、再計算が変わった開催日だけを D1 から読み直し、kv の部分(`pd:<日>:…`)を合わせて画面の集計を作る。
+  - **流れ**: 変更の印(`verify_race_mark`)を先に読み、印の付いた開催日(と、開催日が変わったレースの旧い日)を、データを後に読んで作り直す(1 回に最大 4 日)。追いついたら、全部の日を `assembleFromParts` で合わせて `cache` に書く。補完前の行(発走時刻か条件が NULL)を含む日は、これまでの再計算と同じく集計せず `preparing`。
+  - **追いつけないとき**: 4 日を超えて変わった・部分の形の版を上げた直後・保存の欠けは、`cache` があればそれを `backfilling` の `stale` で返し、アラームの tick(`runPartsTick`)に任せる。`cache` が無ければ `preparing`。この回は 1 日 20 回の `runs` に数えない(集計を書いた回だけ数える)。保存の欠けは全件読みに落とさず、その日を作り直し対象に戻す。
+  - **完全な初回**(`cache` も部分も無い)だけ、今までどおり全件を読む。`runs` には数えず、別枠の `rebuilds`(JST の日付ごと。1 日 3 回 = `VERIFY_REBUILD_DAILY_LIMIT`)で数え、超えたら `throttled`(`daily-limit`)。
+  - **tick との直列化**: 再計算の追いつきと `runPartsTick` は、同じ直列化(`partsLock`)の中で部分を書く。
+  - **診断**: `diag.rowsRead` はその回に読んだ量(印 + 読んだ日。全件読みに落ちた回はその値)。`counts` はその回の内訳(`marks`・`days` と読んだ行数)。透かし・補完待ちの読みは含めない。クライアントが読む診断は `startTimeGaps` だけなので、画面の型は変わらない。
+  - **残したもの**: TTL(1 時間)は残す(外すかは段階 4 の後に判断)。全件を読む `readAll` は、完全な初回と段階 4 の突き合わせのために残す。`partsCheck` は、全件読みで作った集計との突き合わせにだけ使う(差分の道の集計は対象外)。印の付かない変更は差分の道の画面には出ない(見つけるのは段階 4 の週 1 の突き合わせ)。
+  - **検査**: `test/verify-core-parts.test.ts`(全件を読む形との一致・`runs`/`rebuilds`・追いつけないとき・並行)、`test/verify-parts.integration.test.ts`(本物の D1 で、古い開催日が 2 日でも 10 日でも再計算の `rowsRead` が同じ)。
+
 ### クラウド版の検証画面(2)(#220〈#167 の洗い出しから〉。v1.35.0)
 exe の検証画面の残りの表を web に持ってきた(#219 の続き): **補正方向×結果**・**キャリブレーション**(5% 刻み 20 帯。過信バイアス付き)・**印別的中率**(◎〇▲△☆注+印なしの 7 群)・**プロンプト版別の比較**(版ごとの累積回収率と、開閉できる版別キャリブレーション)。集計は #219 と同じく **core の関数**(`computeVerifyReport` の `calibration`・`trend`、`computeVerifyReportByPromptVersion`)で、設定も `PRODUCTION_VERIFY_CONFIG`。exe の挙動・数値は変わらない。
 - **画面**: 補正方向・キャリブレーション・印別は、区分(全体/中央のみ/地方のみ)の切替に連動する。表・横スクロールは使わず、行ごとに「名前 値」の項目を折り返して並べる(スマホ幅で横に伸びない)。キャリブレーションの各帯には実複勝率の帯グラフ(`progress`)を付けた。版別比較は版ごとのカード(累積回収率のタイル+集計件数+追加指示の要約〈30 文字〉)で、「キャリブレーションを表示」のボタンで帯を開閉する(開いたときだけ追加指示の全文を出す)。**版別は区分に依らず全体**(exe の版別比較と同じ。core の関数に区分の引数が無い)で、画面にもそう書いてある。「版不明」は版記録導入前の旧データと API キー未設定の分析の両方を含む(区別できない)旨の注記も exe と同じ。
