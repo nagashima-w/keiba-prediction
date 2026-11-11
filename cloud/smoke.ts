@@ -154,7 +154,7 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
     "--var", "RACE_ARCHIVE_NIGHTLY_LIMIT:0",
     // Issue #635: 地方の交流重賞の取得も止める(`RACE_ARCHIVE_NAR_NIGHTLY_LIMIT=0`。[vars] の本番の値〈150〉を --var が上書きする。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_FETCH_NAR`〉にしない)。
     "--var", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT:0",
-    // Issue #731: 追い切りの取得も止める(`RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT=0`。[vars] の本番の値〈30〉を --var が上書きする。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_FETCH_OIKIRI`〉にしない)。
+    // Issue #731: 追い切りの取得も止める(`RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT=0`。[vars] の本番の値〈1000〉を --var が上書きする。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_FETCH_OIKIRI`〉にしない)。
     "--var", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT:0",
     // Issue #590: 過去の結果の毎晩の変換も止める(`RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT=0`。★var の名前を DO の binding の名前〈`RACE_ARCHIVE_RUNS`〉にしない)。本番のクラスは何もしない。
     // 変換そのものの確認は、smoke 専用の DO(`RACE_ARCHIVE_RUNS_SMOKE`)が行う(netkeiba には出ない)。
