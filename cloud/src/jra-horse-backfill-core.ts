@@ -16,15 +16,15 @@
  *  - 間隔は {@link HORSE_BACKFILL_GAP_MS}(開始から開始まで 3 秒)。本番の他の JRA の取得(`createJraPacer` の 1.5 秒)より広い。量が多いため。**ペーサーは通さない**(この DO の中で守る)。
  *
  * ## いつ動くか
- *  - **JST 18:00〜翌 8:00** だけ。8:00〜18:00 は 18:00 にアラームを張り直す。起きている途中で 8:00 を過ぎたら、その先は取らない。
- *  - **1 日(JST)の書き込みは `horse_profiles` の行で {@link HORSE_BACKFILL_DAILY_ROWS_MAX} 行まで**(var で下げることだけできる)。超えたら翌日 18:00 まで休む。
+ *  - **終日**(2026-11-11 のユーザーの指示で、以前の JST 18:00〜翌 8:00 から広げた。理由は {@link HORSE_BACKFILL_WINDOW_START_MIN} の注)。間隔・1 回の起床の頭数・1 日の書き込みの上限は変えていない。
+ *  - **1 日(JST)の書き込みは `horse_profiles` の行で {@link HORSE_BACKFILL_DAILY_ROWS_MAX} 行まで**(var で下げることだけできる)。超えたら翌日 0:00(日付が変わって枠が戻る時刻)まで休む。
  *    起床ごとに取る頭数を「残りの枠」で頭打ちにするので、枠を超えて書かない(1 頭で書く行は高々 1)。
  *  - 無効(var が `"0"`): アラームを張らず、起きても何もしない。
  *
  * ## 失敗
  *  - 誤りの頁・馬名が読めない頁・結果の頁・大きすぎる頁・計算できない ID は、DO の SQLite(`hb_skip`)に記録して飛ばす(繰り返し取りに行かない)。
  *  - timeout・network・redirect・HTTP の失敗は記録せず、次の周で再試行する。
- *  - **連続 {@link HORSE_BACKFILL_FAILURE_LIMIT} 回の起床で 1 頭も読めなかったら止まる**(翌日 18:00 に自動で再開。手での再開の口は無い)。「読めなかった」は、取得を 1 本以上試して、頁が 1 つも馬の頁として読めなかった起床。
+ *  - **連続 {@link HORSE_BACKFILL_FAILURE_LIMIT} 回の起床で 1 頭も読めなかったら止まる**(翌日 0:00 に自動で再開。手での再開の口は無い)。「読めなかった」は、取得を 1 本以上試して、頁が 1 つも馬の頁として読めなかった起床。
  *    誤りの頁ばかりの起床も数える(cname の計算が外れたとき、全馬を飛ばし続けない)。取得を試さなかった起床は、数えもリセットもしない。
  *  - アラームの中の例外(D1 の失敗など): 握って 10 分後に再試行し、同じく連続に数える。書けなかった起床は、カーソルも飛ばす記録も進めない。
  *
@@ -40,9 +40,9 @@ import { shouldRearm } from "./stale-alarm";
 
 /** 単一インスタンスの固定名。cron の `scheduled` が引く。 */
 export const JRA_HORSE_BACKFILL_NAME = "main";
-/** 時間帯の開始(JST の 0 時からの分。含む)18:00 と、終了(含まない)8:00。時間帯は日をまたぐ。 */
-export const HORSE_BACKFILL_WINDOW_START_MIN = 18 * 60;
-export const HORSE_BACKFILL_WINDOW_END_MIN = 8 * 60;
+/** 時間帯(JST の 0 時からの分。開始は含み、終了は含まない)。**終日**(0:00〜24:00)。以前は 18:00〜翌 8:00 だった(ユーザーの指示 2026-11-11: 探索の分析が止まっているので早くそろえたい。残りは約 1 万頭で、1 日 15,000 行の上限から、週末の開催日より前に終わる見込み。JRA への間隔は 3 秒のままで、手元からの調査の決まり〈3 秒以上〉の内側)。 */
+export const HORSE_BACKFILL_WINDOW_START_MIN = 0;
+export const HORSE_BACKFILL_WINDOW_END_MIN = 24 * 60;
 /** 1 回の起床で取る馬の最大数。 */
 export const HORSE_BACKFILL_PER_WAKE = 40;
 /** 馬の頁の取得の間隔(開始から開始まで。ミリ秒)。 */
@@ -95,20 +95,20 @@ function msOfJstDay(ms: number): number {
   return (((ms + JST_OFFSET_MS) % DAY_MS) + DAY_MS) % DAY_MS;
 }
 
-/** 時間帯の中か(JST 18:00 以上、または 8:00 未満)。 */
+/** 時間帯の中か(開始〜終了の分の範囲。終日なので常に true)。 */
 export function inHorseBackfillWindow(ms: number): boolean {
   const t = msOfJstDay(ms);
-  return t >= HORSE_BACKFILL_WINDOW_START_MIN * MIN_MS || t < HORSE_BACKFILL_WINDOW_END_MIN * MIN_MS;
+  return t >= HORSE_BACKFILL_WINDOW_START_MIN * MIN_MS && t < HORSE_BACKFILL_WINDOW_END_MIN * MIN_MS;
 }
 
-/** いま以降で最初に時間帯に入る時刻(中ならいま)。 */
+/** いま以降で最初に時間帯に入る時刻(中ならいま)。終日なので常にいま。 */
 export function nextHorseBackfillStart(ms: number): number {
   if (inHorseBackfillWindow(ms)) return ms;
-  return ms - msOfJstDay(ms) + HORSE_BACKFILL_WINDOW_START_MIN * MIN_MS;
+  return ms - msOfJstDay(ms) + DAY_MS + HORSE_BACKFILL_WINDOW_START_MIN * MIN_MS;
 }
 
-/** 翌日(JST)の 18:00。0 時を過ぎてから呼んでも、その日の翌日。 */
-export function nextDayEvening(ms: number): number {
+/** 翌日(JST)の時間帯の開始(終日なので 0:00)。0 時を過ぎてから呼んでも、その日の翌日。 */
+export function nextDayStart(ms: number): number {
   return ms - msOfJstDay(ms) + DAY_MS + HORSE_BACKFILL_WINDOW_START_MIN * MIN_MS;
 }
 
@@ -199,8 +199,8 @@ export class JraHorseBackfillCore {
 
   private async halt(): Promise<void> {
     this.metaSet("wait_reason", "halted");
-    this.deps.log("jra-horse-backfill: halted (no profile could be read in consecutive wakes); resumes next evening", "error");
-    await this.deps.setAlarm(nextDayEvening(this.deps.now()));
+    this.deps.log("jra-horse-backfill: halted (no profile could be read in consecutive wakes); resumes next day", "error");
+    await this.deps.setAlarm(nextDayStart(this.deps.now()));
   }
 
   private skippedAmong(ids: readonly string[]): Set<string> {
@@ -225,7 +225,7 @@ export class JraHorseBackfillCore {
     const remaining = this.dailyRows - this.metaNum("day_rows");
     if (remaining <= 0) {
       this.metaSet("wait_reason", "daily-limit");
-      await deps.setAlarm(nextDayEvening(start));
+      await deps.setAlarm(nextDayStart(start));
       return;
     }
     const budget = Math.min(HORSE_BACKFILL_PER_WAKE, remaining);

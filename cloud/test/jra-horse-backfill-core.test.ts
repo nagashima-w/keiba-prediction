@@ -189,40 +189,35 @@ describe("起床 1 回: 取って書く", () => {
   });
 });
 
-describe("時間帯(JST 18:00〜翌 8:00)", () => {
-  const cases: [string, number, boolean, number][] = [
-    // 名前, 時刻, 動くか, 動かないときの次のアラーム
-    ["17:59:59 は動かない", jst(10, 17, 59, 59), false, jst(10, 18)],
-    ["18:00:00 は動く", jst(10, 18), true, 0],
-    ["23:59:59 は動く", jst(10, 23, 59, 59), true, 0],
-    ["0:00:00 は動く", jst(11, 0), true, 0],
-    ["7:59:59 は動く", jst(11, 7, 59, 59), true, 0],
-    ["8:00:00 は動かない", jst(11, 8), false, jst(11, 18)],
-    ["12:00 は動かない", jst(11, 12), false, jst(11, 18)],
+describe("時間帯(終日。ユーザーの指示 2026-11-11: 夜だけでなく、早くそろえる)", () => {
+  const cases: [string, number][] = [
+    // 名前, 時刻。以前(JST 18:00〜翌 8:00)は動かなかった境界と昼も含めて、すべて動く
+    ["17:59:59 も動く(以前は動かなかった)", jst(10, 17, 59, 59)],
+    ["18:00:00 は動く", jst(10, 18)],
+    ["23:59:59 は動く", jst(10, 23, 59, 59)],
+    ["0:00:00 は動く", jst(11, 0)],
+    ["7:59:59 は動く", jst(11, 7, 59, 59)],
+    ["8:00:00 も動く(以前は動かなかった)", jst(11, 8)],
+    ["12:00 も動く(以前は動かなかった)", jst(11, 12)],
   ];
-  for (const [name, at, runs, next] of cases) {
+  for (const [name, at] of cases) {
     it(name, async () => {
       h.setRuns(2);
       h.now = at;
       await h.core.runNextStep();
-      expect(h.fetched.length > 0, "前提: 動いたかどうか").toBe(runs);
-      if (!runs) {
-        expect(h.alarm).toBe(next);
-        expect(h.store.listCalls, "D1 も読まない").toEqual([]);
-      }
+      expect(h.fetched.length, "前提: 2 頭とも取った").toBe(2);
+      expect(h.meta("wait_reason")).not.toBe("outside-window");
     });
   }
 
-  it("取っている途中で 8:00 を過ぎたら、その先は取らない(取れた分は書き、カーソルはそこまで)", async () => {
+  it("取っている途中で 8:00 を過ぎても、その先も取る(以前はここで切っていた)", async () => {
     h.setRuns(10);
     h.now = jst(11, 7, 59, 50);
     h.fetchMs = 4000; // 1 本ごとに 4 秒 → 3 本目の前で 8:00 を過ぎる
     await h.core.runNextStep();
-    expect(h.fetched.length).toBeGreaterThanOrEqual(2);
-    expect(h.fetched.length).toBeLessThan(10);
-    expect(h.fetched.every((f) => f.at < jst(11, 8))).toBe(true);
-    expect(h.store.inserted[0]!.profiles).toHaveLength(h.fetched.length);
-    expect(h.meta("cursor")).toBe(h.fetched[h.fetched.length - 1]!.id);
+    expect(h.fetched).toHaveLength(10);
+    expect(h.fetched.some((f) => f.at >= jst(11, 8)), "前提: 8:00 より後に取った分がある").toBe(true);
+    expect(h.store.inserted[0]!.profiles).toHaveLength(10);
   });
 });
 
@@ -239,7 +234,7 @@ describe("1 日の書き込みの枠(horse_profiles の行 15,000 行/JST の日
     expect(h.meta("day")).toBe("20261110");
   });
 
-  it("残り枠が 1 行なら 1 頭だけ取る。枠が 0 になったら取らず、翌日の 18:00 まで休む", async () => {
+  it("残り枠が 1 行なら 1 頭だけ取る。枠が 0 になったら取らず、翌日の 0:00(JST の日付が変わって枠が戻る時刻)まで休む", async () => {
     h.setRuns(5);
     h.sql.exec("CREATE TABLE IF NOT EXISTS hb_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID");
     h.sql.exec("INSERT INTO hb_meta (key, value) VALUES ('day', '20261110'), ('day_rows', '14999')");
@@ -250,7 +245,7 @@ describe("1 日の書き込みの枠(horse_profiles の行 15,000 行/JST の日
     h.now = jst(10, 21);
     await h.core.runNextStep();
     expect(h.fetched).toHaveLength(0);
-    expect(h.alarm).toBe(jst(11, 18));
+    expect(h.alarm).toBe(jst(11, 0));
   });
 
   it("日付(JST)が変わったら枠が戻る。0 時をまたいだ最初の起床から数え直す", async () => {
@@ -264,13 +259,13 @@ describe("1 日の書き込みの枠(horse_profiles の行 15,000 行/JST の日
     expect(h.meta("day_rows")).toBe("5");
   });
 
-  it("翌日の 18:00 は、0 時を過ぎてから超えたときも「その日の翌日」(1:00 に超えたら翌日 18:00)", async () => {
+  it("翌日の 0:00 は、0 時を過ぎてから超えたときも「その日の翌日」(1:00 に超えたら翌々日ではなく 12 日 0:00)", async () => {
     h.setRuns(5);
     h.sql.exec("CREATE TABLE IF NOT EXISTS hb_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID");
     h.sql.exec("INSERT INTO hb_meta (key, value) VALUES ('day', '20261111'), ('day_rows', '15000')");
     h.now = jst(11, 1);
     await h.core.runNextStep();
-    expect(h.alarm).toBe(jst(12, 18));
+    expect(h.alarm).toBe(jst(12, 0));
   });
 
   it("var で枠を下げられる(10 → 10 行で止まる)。上げる指定(15,001 以上)・不正な指定は 15,000 のまま", async () => {
@@ -411,7 +406,7 @@ describe("続けて失敗したら止まる", () => {
     for (const id of x.store.runs) x.outcomes.set(id, { kind: "failed", reason: "network" });
   };
 
-  it("連続 3 回の起床で 1 頭も読めなかったら止まり、翌日 18:00 まで休む(警告のログ)。2 回では止まらない", async () => {
+  it("連続 3 回の起床で 1 頭も読めなかったら止まり、翌日 0:00 まで休む(警告のログ)。2 回では止まらない", async () => {
     h.setRuns(300);
     failAll(h);
     await h.core.runNextStep();
@@ -420,7 +415,7 @@ describe("続けて失敗したら止まる", () => {
     expect(h.meta("wait_reason")).toBe("active");
     await h.core.runNextStep();
     expect(h.meta("wait_reason")).toBe("halted");
-    expect(h.alarm).toBe(jst(11, 18));
+    expect(h.alarm).toBe(jst(11, 0));
     expect(h.logs.some((l) => l.includes("halted"))).toBe(true);
   });
 
@@ -468,7 +463,7 @@ describe("続けて失敗したら止まる", () => {
     await h.core.runNextStep();
     await h.core.runNextStep();
     expect(h.meta("wait_reason")).toBe("halted");
-    expect(h.alarm).toBe(jst(11, 18));
+    expect(h.alarm).toBe(jst(11, 0));
     // 書けなかった馬は、カーソルも進めない(次に取り直す)
     expect(h.meta("cursor")).toBeNull();
     for (const line of h.logs) {
@@ -489,7 +484,7 @@ describe("無効・kick", () => {
     x.sql.close();
   });
 
-  it("kick: アラームが無ければ張る(時間帯の中ならいま、外なら次の 18:00)。あれば触らない", async () => {
+  it("kick: アラームが無ければ張る(終日なので、いつでもいま)。あれば触らない", async () => {
     h.now = jst(10, 21);
     await h.core.kick();
     expect(h.alarm).toBe(jst(10, 21));
@@ -499,7 +494,7 @@ describe("無効・kick", () => {
     h.alarm = null;
     h.now = jst(11, 9);
     await h.core.kick();
-    expect(h.alarm).toBe(jst(11, 18));
+    expect(h.alarm).toBe(jst(11, 9));
   });
 
   it("kick: 残ったまま動かないアラーム(15 分以上前)は張り直す", async () => {
