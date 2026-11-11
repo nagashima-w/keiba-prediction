@@ -228,7 +228,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
         log(`scheduled: failed class=race-market-edge-kick-failed error=${errorKind(error)}`, "error");
       }
     })(),
-    // 馬ごとの頁の埋め戻しの起動(Issue #697)。アラームが無ければ張るだけ(取得は JST 18:00〜翌 8:00 に、DO が JRA の公式サイトと D1 だけで行う。netkeiba には出ない)。
+    // 馬ごとの頁の埋め戻しの起動(Issue #697)。アラームが無ければ張るだけ(取得は終日、DO が JRA の公式サイトと D1 だけで行う。netkeiba には出ない)。
     (async (): Promise<void> => {
       if (env.JRA_HORSE_BACKFILL === undefined) return;
       try {
