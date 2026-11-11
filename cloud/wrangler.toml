@@ -112,7 +112,7 @@ class_name = "RaceArchiveNarFetchDO"
 
 # 過去のレース(2021-01 から)の追い切りの評価(ランクと評語)を取得する Durable Object(Issue #731。探索〈#700〉の材料)。`idFromName("oikiri")` の単一インスタンス。中央の DO の子クラスで、SQLite・アラーム・停止の状態は中央・地方と別。
 # 目録(D1 の race_archive)の中央のレースを流し込み、race.netkeiba.com/race/oikiri.html を終日・20 秒に 1 件、gate 経由で取って、D1 の race_oikiri に 1 レース 1 行で保存する。中央の開催日の朝も休まない(休む判定を行わない)。今日以降の開催日は取らない。元の HTML は R2 に置かない。
-# 止める・件数を下げる var(中央・地方の RACE_ARCHIVE_* とは別名。★binding と同じ名前の var は衝突するので使わない): `RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT`("0" で止める。1 以上の整数で 1 晩のリクエスト数を下げる。本番の値は 1500。30 で始め、2026-11-11 に各年の中身を確かめて上げた)・
+# 止める・件数を下げる var(中央・地方の RACE_ARCHIVE_* とは別名。★binding と同じ名前の var は衝突するので使わない): `RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT`("0" で止める。1 以上の整数で 1 晩のリクエスト数を下げる。本番の値は 1500。30 で始め、2026-11-11 に最初の 60 レース(2026-11 の分。ランクと評語が入り、skipped_rows が 0)を確かめて上げた。古い年のページの読み取りは、フィクスチャ(2021 年)のテストで確かめている)・
 # `RACE_ARCHIVE_OIKIRI_WINDOW_END_MIN`・`RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS`・`RACE_ARCHIVE_OIKIRI_NIGHTLY_ROWS_LIMIT`。管理者の口は `GET /api/race-archive/oikiri`・`POST /api/race-archive/oikiri/resume`。クラス名は migration(v17)に固定される。
 [[durable_objects.bindings]]
 name = "RACE_ARCHIVE_FETCH_OIKIRI"
@@ -138,7 +138,7 @@ RACE_ARCHIVE_SKIP_RACE_DAY = "0"
 RACE_ARCHIVE_MIN_INTERVAL_MS = "20000"
 # 地方の交流重賞の取得(Issue #635)。1 晩 150 件から始め、様子を見てから上げる(ユーザーの決定)。時間帯(0:00〜8:30)と間隔(20 秒)はコードの既定のまま。
 RACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "150"
-# 追い切りの取得(Issue #731)。1 晩 30 件から始め、2026-11-11 に各年の中身(ランクと評語が入り、skipped_rows が 0 であること)を確かめて 1500 に上げた(ユーザーの決定。20 秒間隔で約 8.3 時間)。時間帯(終日)と間隔(20 秒)はコードの既定のまま。
+# 追い切りの取得(Issue #731)。1 晩 30 件から始め、2026-11-11 に最初の 60 レース(2026-11 の分。ランクと評語が入り、skipped_rows が 0)を確かめて 1500 に上げた(20 秒間隔で約 8.3 時間。ユーザーの指示は「無料枠を超えない見込みなら止めずに早くそろえる」で、1500 という値はメインが選んだ)。古い年のページの読み取りは、フィクスチャ(2021 年)のテストで確かめている。時間帯(終日)と間隔(20 秒)はコードの既定のまま。
 RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "1500"
 RACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"
 JRA_ODDS_ENABLED = "1"

@@ -716,7 +716,7 @@ describe("wrangler.toml", () => {
     // Issue #635: 地方の交流重賞の取得の 1 晩の上限は、止める "0" ではなく正の整数(本番の初期値は 150。様子を見てから上げる)。時間帯・間隔の地方用の var は置かず、コードの既定(0:00〜8:30・20 秒)で動く
     expect(Number(/^RACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(150);
     expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_NAR_(WINDOW_END_MIN|MIN_INTERVAL_MS|NIGHTLY_ROWS_LIMIT)\s*=/m);
-    // Issue #731: 追い切りの取得の 1 晩の上限は、止める "0" ではなく正の整数(本番の値は 1500。30 で始め、2026-11-11 に中身を確かめて上げた)。時間帯・間隔の追い切り用の var は置かず、コードの既定(終日・20 秒)で動く
+    // Issue #731: 追い切りの取得の 1 晩の上限は、止める "0" ではなく正の整数(本番の値は 1500。30 で始め、2026-11-11 に最初の 60 レースを確かめて上げた)。時間帯・間隔の追い切り用の var は置かず、コードの既定(終日・20 秒)で動く
     expect(Number(/^RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(1500);
     expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_OIKIRI_(WINDOW_END_MIN|MIN_INTERVAL_MS|NIGHTLY_ROWS_LIMIT)\s*=/m);
     // Issue #675: JRA のオッズを使う(既定は使う。"0" だけが無効)。DO のラッパは var を見て取得口を渡すかを決め、無効なら渡さない
