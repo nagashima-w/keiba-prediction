@@ -197,8 +197,8 @@ describe("audit.yml(毎日の依存の脆弱性の監査)", () => {
       expect(job).not.toMatch(/pnpm install|npm (ci|install)/);
     });
 
-    it("Node は 24.22.1(ci.yml・deploy-cloud.yml と同じ)。pnpm は packageManager に従う(版を指定しない)。キャッシュは使わない(インストールしない)", () => {
-      expect(extractStep(job, STEP.node)).toMatch(/\n {10}node-version: 24\.22\.1\n/);
+    it("Node は 24.22.3(ci.yml・deploy-cloud.yml と同じ)。pnpm は packageManager に従う(版を指定しない)。キャッシュは使わない(インストールしない)", () => {
+      expect(extractStep(job, STEP.node)).toMatch(/\n {10}node-version: 24\.22\.3\n/);
       expect(extractStep(job, STEP.node)).not.toMatch(/cache:/);
       expect(extractStep(job, STEP.pnpm)).not.toMatch(/with:|version:/);
     });

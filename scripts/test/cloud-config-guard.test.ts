@@ -697,14 +697,14 @@ describe("wrangler.toml", () => {
     // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つと、#642 の 1 晩の上限(Issue #669)と、JRA のオッズを使うか(Issue #675)の 5 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
     const varsBody = /^\[vars\]\n((?:[^\[\n][^\n]*\n|\n)*)/m.exec(tomlCode)?.[1] ?? "";
     const varKeys = [...varsBody.matchAll(/^([A-Z_]+)\s*=/gm)].map((m) => m[1]);
-    expect(varKeys.sort()).toEqual(["JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]); // Issue #635: 地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT)を足した
+    expect(varKeys.sort()).toEqual(["JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT", "RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]); // Issue #635: 地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT)を足した
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);
     expect(tomlCode).not.toMatch(/^\[secrets\]/m);
     expect(tomlCode).not.toMatch(/keep_vars/);
   });
 
   it("Issue #655・#669: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 20000 ミリ秒(書き込みが Free の 1 日 10 万行に迫ったため5000 から広げた)。#642 の 1 晩の上限は 1〜20000 未満の数(止める \"0\" ではない)。取得の止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む・5000)は変えない", () => {
-    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "150"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "4000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "1"$/m);
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "150"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "8000"\nRACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "10000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"$/m);
     // Issue #669: #642 の上限は、止める "0" ではなく、既定(20000)より小さい正の整数。取得の間隔は parseArchiveMinIntervalMs の範囲(1500〜60000)内
     const edgeLimit = Number(/^RACE_MARKET_EDGE_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1]);
     expect(edgeLimit).toBeGreaterThanOrEqual(1);
@@ -717,8 +717,10 @@ describe("wrangler.toml", () => {
     expect(Number(/^RACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(150);
     expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_NAR_(WINDOW_END_MIN|MIN_INTERVAL_MS|NIGHTLY_ROWS_LIMIT)\s*=/m);
     // Issue #731: 追い切りの取得の 1 晩の上限は、止める "0" ではなく正の整数(本番の値は 4000。30 で始め、1000 を経て、2026-11-11 に 4000 へ上げた。ユーザーの指示で地方より追い切りを優先)。時間帯・間隔の追い切り用の var は置かず、コードの既定(終日・20 秒)で動く
-    expect(Number(/^RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(4000);
-    expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_OIKIRI_(WINDOW_END_MIN|MIN_INTERVAL_MS|NIGHTLY_ROWS_LIMIT)\s*=/m);
+    expect(Number(/^RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(8000);
+    // 2026-11-12: 追い切りの取得の間隔だけ var で 10 秒にする(ユーザーの指示「ブリンカーより追い切り優先」)。parseArchiveMinIntervalMs の範囲(1500〜60000)内。時間帯・行数の上限の var は置かない
+    expect(Number(/^RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(10_000);
+    expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_OIKIRI_(WINDOW_END_MIN|NIGHTLY_ROWS_LIMIT)\s*=/m);
     // Issue #675: JRA のオッズを使う(既定は使う。"0" だけが無効)。DO のラッパは var を見て取得口を渡すかを決め、無効なら渡さない
     expect(Number(/^JRA_ODDS_ENABLED = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(1);
     const raceDayDo = readTextLf("cloud", "src", "race-day-do.ts");
@@ -1102,8 +1104,8 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     expect([...nodeMajors][0]).toBe(typesMajor);
   });
 
-  it("Issue #441: ワークフローの node-version は、2026-10-21 のセキュリティリリースの修正版(24.22.1)以上に固定されている(`24` だけだとランナーのツールキャッシュにある修正前の版が使われる)", () => {
-    const MIN = [24, 22, 1] as const;
+  it("Issue #441: ワークフローの node-version は、2026-10-21 のセキュリティリリースの修正版(24.22.3)以上に固定されている(`24` だけだとランナーのツールキャッシュにある修正前の版が使われる)", () => {
+    const MIN = [24, 22, 3] as const;
     const versions: string[] = [];
     for (const wf of ["audit.yml", "ci.yml", "deploy-cloud.yml", "research.yml"]) {
       for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\S+)\s*$/gm)) versions.push(m[1]!);
@@ -1115,13 +1117,13 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
       const [maj, min, pat] = [Number(parts![1]), Number(parts![2]), Number(parts![3])];
       expect(maj, `node-version: ${v} のメジャーは 24`).toBe(MIN[0]);
       const atLeast = min > MIN[1] || (min === MIN[1] && pat >= MIN[2]);
-      expect(atLeast, `node-version: ${v} は 24.22.1 以上`).toBe(true);
+      expect(atLeast, `node-version: ${v} は 24.22.3 以上`).toBe(true);
     }
   });
 
-  it("Issue #476: ルートの engines.node は、Brotli の脆弱性(CVE-2026-111497)の修正版(22.23.4・24.22.1・26.12.1)以上に限る。cloud と packages/core には engines を置かない", () => {
+  it("Issue #476: ルートの engines.node は、Brotli の脆弱性(CVE-2026-111497)の修正版(22.23.5・24.22.3・26.13.1)以上に限る。cloud と packages/core には engines を置かない", () => {
     const rootPkg = JSON.parse(readTextLf("package.json")) as { engines?: { node?: string } };
-    expect(rootPkg.engines?.node).toBe("^22.23.4 || ^24.22.1 || >=26.12.1");
+    expect(rootPkg.engines?.node).toBe("^22.23.5 || ^24.22.3 || >=26.13.1");
     // engines を足す先を増やしたときに、この検査の対象も見直す(本番は Workers で Node は動かず、engines は束に入らない)
     for (const segments of [["cloud", "package.json"], ["packages", "core", "package.json"]]) {
       const pkg = JSON.parse(readTextLf(...segments)) as { engines?: unknown };
@@ -1792,7 +1794,7 @@ describe("Issue #698: 過去のブリンカーの埋め戻し(JraBlinkerBackfill
     expect(core).toMatch(/value\.trim\(\) === "0"/);
     expect(doCode).toContain("isJraBlinkerBackfillDisabled(this.env.JRA_BLINKER_BACKFILL_ENABLED)");
     expect(doCode).not.toMatch(/JRA_BLINKER_BACKFILL\?:\s*string/);
-    expect(tomlCode).toMatch(/^JRA_BLINKER_BACKFILL_ENABLED = "1"$/m);
+    expect(tomlCode).toMatch(/^JRA_BLINKER_BACKFILL_ENABLED = "0"$/m); // 2026-11-12: 追い切りが終わる(11/14 ごろ)まで止める。メインが "1" に戻す
     expect((tomlCode.match(/^JRA_BLINKER_BACKFILL_ENABLED\b/gm) ?? []).length).toBe(1);
     expect(stripCode(readTextLf("cloud", "smoke.ts"))).toContain('"--var", "JRA_BLINKER_BACKFILL_ENABLED:0"');
   });
