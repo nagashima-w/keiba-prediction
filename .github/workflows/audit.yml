@@ -62,7 +62,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # ci.yml・deploy-cloud.yml と同じ版(Issue #441)。依存をインストールしないので、cache は使わない。
-          node-version: 24.22.1
+          node-version: 24.22.3
 
       # `set +e` で pnpm audit の終了コードを受け(脆弱性ありでも届かなくても exit 1)、audit-report.ts に分類させる。ステップの結果は、スクリプトの終了コード。
       - name: 依存の脆弱性を監査
@@ -86,7 +86,7 @@ jobs:
       - name: Node.js をセットアップ
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
 
       # cloud/ は別の lockfile(cloud/pnpm-lock.yaml)。cloud/ をルートとして監査する。
       - name: 依存の脆弱性を監査
