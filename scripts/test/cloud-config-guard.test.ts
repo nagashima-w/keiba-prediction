@@ -1104,8 +1104,8 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     expect([...nodeMajors][0]).toBe(typesMajor);
   });
 
-  it("Issue #441: ワークフローの node-version は、2026-10-21 のセキュリティリリースの修正版(24.22.1)以上に固定されている(`24` だけだとランナーのツールキャッシュにある修正前の版が使われる)", () => {
-    const MIN = [24, 22, 1] as const;
+  it("Issue #441: ワークフローの node-version は、2026-10-21 のセキュリティリリースの修正版(24.22.3)以上に固定されている(`24` だけだとランナーのツールキャッシュにある修正前の版が使われる)", () => {
+    const MIN = [24, 22, 3] as const;
     const versions: string[] = [];
     for (const wf of ["audit.yml", "ci.yml", "deploy-cloud.yml", "research.yml"]) {
       for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\S+)\s*$/gm)) versions.push(m[1]!);
@@ -1117,13 +1117,13 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
       const [maj, min, pat] = [Number(parts![1]), Number(parts![2]), Number(parts![3])];
       expect(maj, `node-version: ${v} のメジャーは 24`).toBe(MIN[0]);
       const atLeast = min > MIN[1] || (min === MIN[1] && pat >= MIN[2]);
-      expect(atLeast, `node-version: ${v} は 24.22.1 以上`).toBe(true);
+      expect(atLeast, `node-version: ${v} は 24.22.3 以上`).toBe(true);
     }
   });
 
-  it("Issue #476: ルートの engines.node は、Brotli の脆弱性(CVE-2026-111497)の修正版(22.23.4・24.22.1・26.12.1)以上に限る。cloud と packages/core には engines を置かない", () => {
+  it("Issue #476: ルートの engines.node は、Brotli の脆弱性(CVE-2026-111497)の修正版(22.23.5・24.22.3・26.13.1)以上に限る。cloud と packages/core には engines を置かない", () => {
     const rootPkg = JSON.parse(readTextLf("package.json")) as { engines?: { node?: string } };
-    expect(rootPkg.engines?.node).toBe("^22.23.4 || ^24.22.1 || >=26.12.1");
+    expect(rootPkg.engines?.node).toBe("^22.23.5 || ^24.22.3 || >=26.13.1");
     // engines を足す先を増やしたときに、この検査の対象も見直す(本番は Workers で Node は動かず、engines は束に入らない)
     for (const segments of [["cloud", "package.json"], ["packages", "core", "package.json"]]) {
       const pkg = JSON.parse(readTextLf(...segments)) as { engines?: unknown };
