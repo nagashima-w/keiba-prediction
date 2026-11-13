@@ -352,3 +352,36 @@ describe("parseJraComboOddsWithHeader(頁の見出しを添える。Issue #673 �
     expect(r.result.state).toBe("unavailable");
   });
 });
+
+describe("parseJraWinPlaceOdds(馬の ID。Issue #732)", () => {
+  const horseIdsOf = (file: string): Readonly<Record<number, string>> | undefined => {
+    const result = parseJraWinPlaceOdds(loadShiftJisFixture(file), RACE_DATE);
+    expect(result.state).toBe("available");
+    if (result.state !== "available") throw new Error("unreachable");
+    return result.horseIds;
+  };
+  it("馬の頁へのリンク(CNAME=pw01dud00 + 10 桁 + /検査値)から、馬番 → 馬の ID(10 桁)を読む。全 14 頭が 10 桁で、重複しない", () => {
+    const ids = horseIdsOf("jra_odds_tanpuku_1342_202605050208.html")!;
+    expect(ids[1]).toBe("2023101645"); // 1 番 ヒナノムサシ(リンクの CNAME=pw01dud002023101645/F6)
+    expect(Object.keys(ids)).toHaveLength(14);
+    expect(Object.values(ids).every((id) => /^\d{10}$/.test(id))).toBe(true);
+    expect(new Set(Object.values(ids)).size).toBe(14);
+  });
+  it("確定後の頁・別のレースの頁でも読める(馬番の集合は単勝の馬と同じ)", () => {
+    for (const file of ["jra_odds_tanpuku_final_202605050208.html", "jra_odds_tanpuku_saishu_202605050201.html"]) {
+      const s = snapshotOf(file);
+      const ids = horseIdsOf(file)!;
+      expect(Object.keys(ids).length).toBeGreaterThan(0);
+      expect(Object.keys(ids).sort()).toEqual(Object.keys(s.win).sort());
+    }
+  });
+  it("リンクが無い・形が違う行は、その馬だけ ID を持たない(throw しない。単勝・複勝の値は読める)", () => {
+    const html = loadShiftJisFixture("jra_odds_tanpuku_1342_202605050208.html").replace("pw01dud002023101645/F6", "pw01dud00XXXX/F6");
+    const result = parseJraWinPlaceOdds(html, RACE_DATE);
+    expect(result.state).toBe("available");
+    if (result.state !== "available") throw new Error("unreachable");
+    expect(result.horseIds![1]).toBeUndefined();
+    expect(Object.keys(result.horseIds!)).toHaveLength(13);
+    expect(result.snapshot.win[1]?.odds).toBe(66.2);
+  });
+});

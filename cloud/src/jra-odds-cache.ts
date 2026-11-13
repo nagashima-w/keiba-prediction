@@ -46,7 +46,7 @@ export function parseJraOddsPage(page: JraOddsPage, html: string, raceDate: stri
       if (parsed.state !== "available") {
         return { status: "unavailable" };
       }
-      return { status: "ok", page, json: JSON.stringify({ v: PAYLOAD_VERSION, page, snapshot: parsed.snapshot }) };
+      return { status: "ok", page, json: JSON.stringify({ v: PAYLOAD_VERSION, page, snapshot: parsed.snapshot, horseIds: parsed.horseIds }) };
     }
     if (bet === undefined || JRA_PAGE_FOR_BET[bet] !== page) {
       return { status: "parse-error" };

@@ -354,6 +354,15 @@ describe("アラームの合成: nextAlarmAt の締切の直前の再計算の�
     expect(nextAlarmAt(base)).toBeNull();
   });
 
+  it("oddsSnapAtMs(Issue #732。発走前のオッズの記録)が未来ならその時刻、過去なら now(仕事の有無によらず候補)。null・省略は候補なし", () => {
+    expect(nextAlarmAt({ ...base, oddsSnapAtMs: NOW + 5_000 })).toBe(NOW + 5_000);
+    expect(nextAlarmAt({ ...base, oddsSnapAtMs: NOW - 5_000 })).toBe(NOW);
+    expect(nextAlarmAt({ ...base, oddsSnapAtMs: null })).toBeNull();
+    expect(nextAlarmAt({ ...base })).toBeNull();
+    expect(nextAlarmAt({ ...base, retryWork: true, oddsSnapAtMs: NOW + 1_000 })).toBe(NOW + 1_000); // 再試行待ちの間隔より早ければ、記録の時刻で起きる
+    expect(nextAlarmAt({ ...base, closeAtMs: NOW + 9_000, oddsSnapAtMs: NOW + 4_000 })).toBe(NOW + 4_000);
+  });
+
   it("他の候補と最小を取る: 計画の期限より早ければ closeAtMs、遅ければ計画の期限。仕事(再試行待ち)があっても候補に残る(掃除のように止められない)", () => {
     expect(nextAlarmAt({ ...base, closeAtMs: NOW + 1_000, planNextDueMs: NOW + 9_000 })).toBe(NOW + 1_000);
     expect(nextAlarmAt({ ...base, closeAtMs: NOW + 9_000, planNextDueMs: NOW + 1_000 })).toBe(NOW + 1_000);

@@ -40,6 +40,8 @@ export const HERE: Record<string, PlanEntry> = {
     "daily-report-repository.ts::READ_PERIOD_SQL.combos",
     "daily-report-repository.ts::READ_PERIOD_SQL.imports",
     "kaisai-days-repository.ts::RECORD_SQL",
+    // 発走 5 分前の単勝・複勝の全頭のオッズ(Issue #732)。主キー(race_id)への INSERT だけ(読み取りなし。先着の ON CONFLICT DO NOTHING)。書き込みの行数は odds-snapshot-repository.integration.test.ts が固定する。
+    "odds-snapshot-repository.ts::INSERT_ODDS_SNAPSHOT_SQL",
     "jra-entries-repository.ts::JRA_ENTRY_DONE_SQL",
     "jra-entries-repository.ts::JRA_ENTRY_CLAIM_SQL",
     "jra-entries-repository.ts::JRA_ENTRY_FINISH_SQL",
