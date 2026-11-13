@@ -57,7 +57,15 @@ export interface JraOddsUnavailableReason {
 
 /** 単勝・複勝のパース結果(判別共用体)。 */
 export type JraWinPlaceParseResult =
-  | { readonly state: "available"; readonly snapshot: OddsSnapshot }
+  | {
+      readonly state: "available";
+      readonly snapshot: OddsSnapshot;
+      /**
+       * 馬番 → 馬の ID(10 桁。Issue #732)。馬の名前のリンク(`CNAME=pw01dud00` + 10 桁 + `/検査値`)から読む。リンクが無い・形が違う馬は含まない。
+       * **netkeiba の馬の ID と同じかは、#637 の確認〈18 頭が一致〉だけが根拠**(`docs/investigations/past-blinker-695.md` §10)。`OddsSnapshot` には入れない(netkeiba の頁には無い)。
+       */
+      readonly horseIds: Readonly<Record<number, string>>;
+    }
   | { readonly state: "unavailable"; readonly reason: JraOddsUnavailableReason };
 
 /** 日付 `YYYY-MM-DD` の形を検証する(呼び出し側のバグは throw)。 */
@@ -150,10 +158,15 @@ export function parseJraWinPlaceOdds(html: string, raceDate: string): JraWinPlac
 
   const win: Record<number, WinOdds> = {};
   const place: Record<number, PlaceOdds> = {};
+  const horseIds: Record<number, string> = {};
   let hasOfficialPop = false;
   $("table.tanpuku tbody tr").each((_, tr) => {
     const umaban = toUmaban(cellText($, $(tr).find("td.num").first()));
     if (umaban === null) return;
+    const horseLink = /CNAME=pw01dud00(\d{10})\/[0-9A-F]{2}/.exec($(tr).find("td.horse a").first().attr("href") ?? "");
+    if (horseLink !== null) {
+      horseIds[umaban] = horseLink[1]!;
+    }
     const popText = cellText($, $(tr).find("td.pop").first());
     const pop = popText === "" ? null : toNinki(popText);
     if (pop !== null) hasOfficialPop = true;
@@ -184,6 +197,7 @@ export function parseJraWinPlaceOdds(html: string, raceDate: string): JraWinPlac
   return {
     state: "available",
     snapshot: { officialDatetime: header.officialDatetime, oddsStatus: header.oddsStatus, win, place },
+    horseIds,
   };
 }
 
