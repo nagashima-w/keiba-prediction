@@ -18,6 +18,7 @@ import { D1BabaStore } from "./baba-repository";
 import { D1JockeyNamesStore } from "./jockey-names-repository";
 import { D1KaisaiDaysStore } from "./kaisai-days-repository";
 import { D1TrainerNamesStore } from "./trainer-names-repository";
+import { D1OddsSnapshotStore } from "./odds-snapshot-repository";
 import { createJraEntriesFetcher } from "./jra-entries-fetch";
 import { createJraFetchers } from "./jra-fetchers";
 import { isJraOddsDisabled } from "./race-day-jra-odds";
@@ -153,6 +154,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // JRA のオッズの取得(Issue #675。#668-D)。中央の発走前の分析で、取得ステップの後に別のアラームで頁を取り、計算が券種ごとに JRA を優先する(使えない券種は netkeiba のまま)。secret は要らない。
       // URL は取得口の中にだけある。JRA への 1.5 秒の間隔は、この DO の中で馬場の取得口と共有する(pacer。`jra-fetchers.ts`。Issue #680。出馬表の取得口には渡さない=その動きは変えない)。var JRA_ODDS_ENABLED が "0" のときは渡さない(今までの動き)。
       ...(jraFetchers.fetchJraOdds === undefined ? {} : { fetchJraOdds: jraFetchers.fetchJraOdds }),
+      // 発走 10 分前・5 分前の単勝・複勝の全頭のオッズの保存先(Issue #732。D1 の odds_snapshots〈migration 0046〉。追記だけ)。上の `fetchJraOdds` があるときだけ動く(var JRA_ODDS_ENABLED が "0" のときは何もしない)。
+      // 表が無い間(migration の適用前に Worker が先に出た場合)は、保存が失敗して再試行のあと諦めるだけで、分析は止まらない。
+      oddsSnapshotSink: new D1OddsSnapshotStore({ db: env.DB }),
       jraEntriesStore: new D1JraEntriesStore({ db: env.DB }),
       onInfo: (message) => console.log(message),
       // 開催日ごとの記録(Issue #519。D1 の kaisai_days〈migration 0027〉)。発走前の計算が、中央のレースごとに書き、芝の開催進行の通算・柵の日数を数える過去の行を読む。

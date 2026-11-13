@@ -163,6 +163,9 @@ import { collectTrainerPairs, type TrainerNamesStore } from "./trainer-names-rep
 import type { CloseSavePayload } from "./analysis-close";
 import { CloseStore } from "./race-day-close";
 import { CloseStage, type CloseStepOutcome } from "./race-day-close-stage";
+import type { OddsSnapshotSink } from "./odds-snapshot-repository";
+import { OddsSnapshotStore } from "./race-day-odds-snapshot";
+import { OddsSnapshotStage, type OddsSnapshotStepOutcome } from "./race-day-odds-snapshot-stage";
 import { NotifyStage, type NotifyStepOutcome } from "./race-day-notify-stage";
 import { PlanStage, type PlanStepOutcome } from "./race-day-plan-stage";
 import { RescueStage } from "./race-day-rescue-stage";
@@ -271,6 +274,11 @@ export interface AlarmInputs {
    * 省略・null は候補なし(保存先が `saveClose` を持たない構成・既存の呼び出し・積んだ行が無い)。
    */
   readonly closeAtMs?: number | null;
+  /**
+   * 発走前のオッズの記録(Issue #732)の次の時刻(pending の行の、起こす時刻の最小)。締切の直前の再計算と同じ扱い(仕事の有無によらず候補。過去は now)。
+   * 省略・null は候補なし(取得口か保存先が無い構成・積んだ行が無い)。
+   */
+  readonly oddsSnapAtMs?: number | null;
 }
 
 /**
@@ -281,6 +289,7 @@ export interface AlarmInputs {
  *  - 日報の時刻の下限 → **未来のときだけ**その時刻(過去は候補にしない。Issue #291)
  *  - 下限を過ぎて、その下限での判定が未了(`reportJudgePending`。Issue #298) → now(判定を1回行うと印が付いて消える。呼び出し側が、タスクが無いときだけ真にする)
  *  - 締切の直前の再計算の次の時刻(`closeAtMs`。Issue #338) → `max(それ, now)`(仕事の有無によらず候補。起きたら必ず状態が進む)
+ *  - 発走前のオッズの記録の次の時刻(`oddsSnapAtMs`。Issue #732) → `max(それ, now)`(同上)
  *  - 掃除の期限 → `max(それ, now)`。**ただし、仕事(即時・再試行待ち)があるあいだは候補にしない**: 仕事が終われば `armAlarm` が掃除の期限を延ばして張り直す。
  *    古い掃除の期限を候補に入れると、再試行待ちの間隔を無効にして、すぐ起こしてしまう(今の `armAlarm` もそうしている)。
  */
@@ -318,6 +327,9 @@ export function nextAlarmAt(i: AlarmInputs): number | null {
   }
   if (i.closeAtMs !== undefined && i.closeAtMs !== null) {
     candidates.push(Math.max(i.closeAtMs, i.nowMs));
+  }
+  if (i.oddsSnapAtMs !== undefined && i.oddsSnapAtMs !== null) {
+    candidates.push(Math.max(i.oddsSnapAtMs, i.nowMs));
   }
   if (i.purgeDueMs !== null && !i.immediateWork && !i.retryWork) {
     candidates.push(Math.max(i.purgeDueMs, i.nowMs));
@@ -463,6 +475,11 @@ export interface RaceDayDeps {
    * **渡さなければ従来どおり**(段階に入らず、`oddsSources` も付かない)。var `JRA_ODDS_ENABLED` が `"0"` のとき、ラッパは渡さない。
    */
   readonly fetchJraOdds?: JraOddsFetcher;
+  /**
+   * 発走 10 分前・5 分前の単勝・複勝の全頭のオッズの保存先(Issue #732。本番は D1 の `odds_snapshots`〈migration 0046〉)。`fetchJraOdds` と両方があるときだけ、
+   * 計画の確定が中央のレースごとに予定を積み、時刻が来たら JRA の頁を取って保存する(分析したかどうかによらない)。渡さなければ段階全体が無効。
+   */
+  readonly oddsSnapshotSink?: OddsSnapshotSink;
   /** JRA の出馬表の取得の試み・馬・馬主・出走時の情報の保存先(本番は D1。migration 0038)。 */
   readonly jraEntriesStore?: JraEntriesStoreLike;
   /** 固定の語のログ(JRA の出馬表の取得の所要時間など。観測用)。省略時は出さない。 */
@@ -538,6 +555,8 @@ export type StepOutcome =
   | ResultStepOutcome
   /** 締切の直前の再計算の 1 ステップ(Issue #338。`mode: "close"`。形と各値の意味は {@link CloseStepOutcome})。 */
   | CloseStepOutcome
+  /** 発走 10 分前・5 分前のオッズの記録の 1 ステップ(Issue #732。`mode: "odds-snapshot"`。形と各値の意味は {@link OddsSnapshotStepOutcome})。 */
+  | OddsSnapshotStepOutcome
   /** 馬場の取得(Issue #294。`mode: "baba"`)。`raceId` は開催日。`ok` は当日の競馬場の値を D1 に保存した(その日の分が全部そろっていなくてもよい)、`retry` は試みの記録(D1)の失敗で再試行待ち、`failed` はこの枠は取得しない(同じ枠では再試行しない。次の枠で取り直す。Issue #480)。 */
   | BabaStepOutcome
   /** JRA の出馬表の取得(Issue #639。`mode: "jra-entries"`)。`raceId` は開催日。`ok` はその回の取得が済んだ(失敗がなかった)、`retry` は試みの記録(D1)の失敗、`failed` は一部または全部の失敗(10 分後に取り直す)。形は {@link JraEntriesStepOutcome}。 */
@@ -800,6 +819,12 @@ export class RaceDayCore {
   private readonly close: CloseStore;
   /** 締切の直前の再計算の段階(手順。表は `close`)。コンストラクタの最後に作る。 */
   private readonly closeStage: CloseStage;
+  /**
+   * 発走 10 分前・5 分前のオッズの記録の段階(Issue #732)。JRA の取得口(`fetchJraOdds`)と保存先(`oddsSnapshotSink`)の両方があるときだけ作る(無ければ undefined。表も作らず、アラームの候補にもしない)。
+   * 表は `oddsSnapStore`(新しい表だけ)。計画の確定が予定を積み、時刻が来たら `runNextStep` が 1 行ずつ動かす。
+   */
+  private readonly oddsSnapStore: OddsSnapshotStore | undefined;
+  private readonly oddsSnapStage: OddsSnapshotStage | undefined;
   /** 日報の時刻の下限の段階(Issue #291・#298。Issue #399〈R-9b〉で切り出した。値は meta に持つ)。コンストラクタの最後に作る。 */
   private readonly reportHold: ReportHoldStage;
   /** 通知の表(Issue #205。新しい表だけ)。 */
@@ -876,6 +901,10 @@ export class RaceDayCore {
     this.narTrifecta = new NarTrifectaStore(this.sql);
     // 締切の直前の再計算の表(Issue #338。新しい表だけ。既存の表には ALTER しない)。
     this.close = new CloseStore(this.sql);
+    // 発走前のオッズの記録(Issue #732)。JRA の取得口と保存先があるときだけ、表(新しい表だけ)と段階(取得キャッシュを使うので、下の `cache` を作ったあと)を作る。
+    if (deps.fetchJraOdds !== undefined && deps.oddsSnapshotSink !== undefined) {
+      this.oddsSnapStore = new OddsSnapshotStore(this.sql);
+    }
     // 通知の表(Issue #205。新しい表だけ。既存の表には ALTER しない)。
     this.notifyStore = new NotifyStore(this.sql);
     this.notifier = deps.notifier;
@@ -920,6 +949,9 @@ export class RaceDayCore {
       }),
     });
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
+    if (this.oddsSnapStore !== undefined && deps.fetchJraOdds !== undefined && deps.oddsSnapshotSink !== undefined) {
+      this.oddsSnapStage = new OddsSnapshotStage({ store: this.oddsSnapStore, now: this.now, onWarn, sink: deps.oddsSnapshotSink, fetcher: deps.fetchJraOdds, cache: this.cache, onInfo: deps.onInfo });
+    }
     // JRA のオッズの段階(Issue #675。新しい表だけ。取得口を渡したときだけ動く)。
     this.jraOdds = new JraOddsStageStore(this.sql);
     this.jraOddsEnabled = deps.fetchJraOdds !== undefined;
@@ -1007,6 +1039,7 @@ export class RaceDayCore {
       maxAttempts: MAX_ATTEMPTS,
       retryDelayMs: RETRY_DELAY_MS,
       maxTasksPerDay: MAX_TASKS_PER_DAY,
+      ...(this.oddsSnapStage === undefined ? {} : { registerOddsSnapshot: (raceId: string, kaisaiDate: string, startMs: number) => this.oddsSnapStage!.register(raceId, kaisaiDate, startMs) }),
     });
     // 救済の段階(Issue #399〈R-9e の e3〉。表の作成は上の `PlanStore`・`NotifyStore` だけ)。通知は材料(`putReady`)を積むだけで、送信の口(`notifier`)は渡さず、有無だけを値で渡す。`setAlarm` 系・取得口・キャッシュ系も渡さない。
     this.rescueStage = new RescueStage({
@@ -1544,6 +1577,15 @@ export class RaceDayCore {
       await this.armAlarm();
       return outcome;
     }
+    // 発走 10 分前・5 分前のオッズの記録(Issue #732)。時刻が来た行を 1 つ(5 分前を先に)。**タスクより前**(締切の再計算と同じ理由: 時刻に意味がある。ただし実行中のステップは中断できない)。
+    if (this.oddsSnapStore !== undefined && this.oddsSnapStage !== undefined) {
+      const snapDue = this.oddsSnapStore.nextDue(this.now());
+      if (snapDue !== null) {
+        const outcome = await this.oddsSnapStage.runStep(snapDue);
+        await this.armAlarm();
+        return outcome;
+      }
+    }
     // 馬場の取得(Issue #294)。開催日の 09:00 から 10 分おきに 12:00 まで、当日の値がそろうまで取り直す(Issue #480)。**タスクより前**: 発走前の分析(LLM)に当日の値を間に合わせる。
     // 最初の発走前の分析の期限より後の枠もあるが、その分析は取得を待たずに値なしで進む(分析を遅らせない)。
     // 動けるのは、取得口・保存先があり、中央の開催日で、今日が開催日で、次の枠の時刻が来ていて、まだそろっていないときだけ({@link BabaStage.runnable})。失敗しても例外にせず、次の起床でタスクが進む。
@@ -1748,6 +1790,7 @@ export class RaceDayCore {
       reportHoldAtMs: this.reportHold.pendingAlarmAt(),
       reportJudgePending: rows.length === 0 && this.reportHold.judgePending(),
       closeAtMs: this.close.nextAtMs(),
+      oddsSnapAtMs: this.oddsSnapStore?.nextAtMs() ?? null,
     });
     if (at !== null) {
       await this.setAlarm(at);

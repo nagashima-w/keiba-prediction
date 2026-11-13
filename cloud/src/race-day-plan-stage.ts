@@ -74,6 +74,11 @@ export interface PlanStageDeps {
   readonly retryDelayMs: number;
   /** 1 日に積めるタスクの上限(本体の `MAX_TASKS_PER_DAY`)。 */
   readonly maxTasksPerDay: number;
+  /**
+   * 発走前のオッズの記録(Issue #732)の予定を積む(本体が段階を持つときだけ渡す。省略時は積まない)。**中央のレースごと**(分析するかどうか・計画の行の state によらない)に、発走時刻が読めたものだけ呼ぶ。
+   * 同期。失敗は握る(確定を止めない。段階が警告にする)。発走を過ぎていれば積まない(段階が判断する)。
+   */
+  readonly registerOddsSnapshot?: (raceId: string, kaisaiDate: string, startMs: number) => boolean;
 }
 
 /** 見回し({@link PlanStage.sweepNarMorningDone})の前回の試行の時刻(`race_day_meta`)。 */
@@ -96,6 +101,7 @@ export class PlanStage {
   private readonly maxAttempts: number;
   private readonly retryDelayMs: number;
   private readonly maxTasksPerDay: number;
+  private readonly registerOddsSnapshot: ((raceId: string, kaisaiDate: string, startMs: number) => boolean) | undefined;
 
   constructor(deps: PlanStageDeps) {
     this.plan = deps.plan;
@@ -111,6 +117,7 @@ export class PlanStage {
     this.maxAttempts = deps.maxAttempts;
     this.retryDelayMs = deps.retryDelayMs;
     this.maxTasksPerDay = deps.maxTasksPerDay;
+    this.registerOddsSnapshot = deps.registerOddsSnapshot;
   }
 
   /**
@@ -203,6 +210,10 @@ export class PlanStage {
       }
       if (row.state === "planned" && this.task(entry.raceId, "morning") === null) {
         this.enqueueTask(entry.raceId, "morning", nowMs);
+      }
+      // 発走前のオッズの記録の予定(Issue #732)。中央のレースだけ。計画の行の state(planned・skipped・cap・手動)によらない。発走時刻の無いレースは積まない。
+      if (this.registerOddsSnapshot !== undefined && target.venue === "central" && row.start_ms !== null) {
+        this.registerOddsSnapshot(entry.raceId, kaisaiDate, row.start_ms);
       }
     }
     for (const venue of PLAN_VENUES) {

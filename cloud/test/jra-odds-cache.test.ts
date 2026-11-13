@@ -65,6 +65,16 @@ describe("頁のパース → JSON(生の HTML は置かない)", () => {
     expect(parsed.json).not.toContain("<");
     expect(parsed.json.length).toBeLessThan(20_000);
   });
+  it("単勝・複勝: 馬番 → 馬の ID(10 桁。Issue #732)も JSON に入る。版は 1 のまま(読み手は snapshot だけを読むので、古い JSON も読める)", () => {
+    const parsed = parseJraOddsPage("tanpuku", html(FIXTURE.winPlace), DATE);
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    const payload = JSON.parse(parsed.json) as { v: number; horseIds: Record<string, string>; snapshot: { win: Record<string, unknown> } };
+    expect(payload.v).toBe(1);
+    expect(Object.keys(payload.horseIds).sort()).toEqual(Object.keys(payload.snapshot.win).sort());
+    expect(Object.keys(payload.horseIds)).toHaveLength(14);
+    expect(Object.values(payload.horseIds).every((id) => /^\d{10}$/.test(id))).toBe(true);
+  });
   it("組合せ 6 券種: セル数がパーサの結果と一致し(空振り防止に件数を固定)、三連単でも JSON は 2MiB に十分収まる", () => {
     for (const bet of BETS) {
       const parsed = parseJraOddsPage(JRA_PAGE_FOR_BET[bet], html(FIXTURE[bet]), DATE, bet);
