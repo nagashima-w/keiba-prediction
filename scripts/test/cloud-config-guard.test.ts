@@ -704,7 +704,7 @@ describe("wrangler.toml", () => {
   });
 
   it("Issue #655・#669: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 20000 ミリ秒(書き込みが Free の 1 日 10 万行に迫ったため5000 から広げた)。#642 の 1 晩の上限は 1〜20000 未満の数(止める \"0\" ではない)。取得の止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む・5000)は変えない", () => {
-    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "150"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "8000"\nRACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "10000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"$/m);
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "150"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "8000"\nRACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "10000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "1"$/m);
     // Issue #669: #642 の上限は、止める "0" ではなく、既定(20000)より小さい正の整数。取得の間隔は parseArchiveMinIntervalMs の範囲(1500〜60000)内
     const edgeLimit = Number(/^RACE_MARKET_EDGE_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1]);
     expect(edgeLimit).toBeGreaterThanOrEqual(1);
@@ -1790,11 +1790,11 @@ describe("Issue #698: 過去のブリンカーの埋め戻し(JraBlinkerBackfill
     expect((repo.match(/\.batch\(/g) ?? []).length).toBe(1);
   });
 
-  it("止める var(JRA_BLINKER_BACKFILL_ENABLED=\"0\")は完全一致だけ。var の名前が DO の binding の名前(JRA_BLINKER_BACKFILL)と同じでない。本番の toml の [vars] は \"1\"(2026-11-12 に #697 の取得の完了を確かめて動かした)。smoke は引き続き --var で止める", () => {
+  it("止める var(JRA_BLINKER_BACKFILL_ENABLED=\"0\")は完全一致だけ。var の名前が DO の binding の名前(JRA_BLINKER_BACKFILL)と同じでない。本番の toml の [vars] は \"1\"(2026-11-12 に #697 の取得の完了を確かめて動かし、追い切りを優先して同日 \"0\" にし、11/14 に追い切りの完了を確かめて \"1\" に戻した)。smoke は引き続き --var で止める", () => {
     expect(core).toMatch(/value\.trim\(\) === "0"/);
     expect(doCode).toContain("isJraBlinkerBackfillDisabled(this.env.JRA_BLINKER_BACKFILL_ENABLED)");
     expect(doCode).not.toMatch(/JRA_BLINKER_BACKFILL\?:\s*string/);
-    expect(tomlCode).toMatch(/^JRA_BLINKER_BACKFILL_ENABLED = "0"$/m); // 2026-11-12: 追い切りが終わる(11/14 ごろ)まで止める。メインが "1" に戻す
+    expect(tomlCode).toMatch(/^JRA_BLINKER_BACKFILL_ENABLED = "1"$/m); // 2026-11-14: 追い切りの取得の完了を確かめて "1" に戻した(11/12 から止めていた)
     expect((tomlCode.match(/^JRA_BLINKER_BACKFILL_ENABLED\b/gm) ?? []).length).toBe(1);
     expect(stripCode(readTextLf("cloud", "smoke.ts"))).toContain('"--var", "JRA_BLINKER_BACKFILL_ENABLED:0"');
   });
