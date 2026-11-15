@@ -593,6 +593,12 @@ export class RaceArchiveFetchCore {
     }
     const previous = this.mode();
     if (previous === "running") {
+      // 取り終えて次の晩を待っているだけなら、今すぐ起こす(Issue #748: 範囲を広げて公開した直後に、次の 0:00 を待たず種まきから始める)。ほかの待ち(取得中・間隔待ちなど)は触らない。
+      if (this.metaGet("wait_reason") === "caught-up") {
+        this.deps.log("race-archive: resume from=running wait=caught-up", "info");
+        await this.deps.setAlarm(this.runAt(this.deps.now()));
+        return { resumed: true, previous };
+      }
       return { resumed: false, previous };
     }
     this.metaSet("mode", "running");

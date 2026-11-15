@@ -1588,3 +1588,57 @@ describe("Issue #655・#745: 取る範囲の最初の月(中央は 2016-01。#65
     expect(fetched).not.toContain(calUrl("2026-09")); // 取り終えた月(今月・先月ではない)は取り直さない
   });
 });
+
+describe("Issue #748: 取り終えて新しい開催を待っている(caught-up)ときの手での再開", () => {
+  /** 標準の筋書きを取り切った状態(待ちの理由 caught-up、アラームは次の晩の 0:00)。 */
+  const caughtUp = async (): Promise<World> => {
+    const w = mk({ fromMonth: "2026-11" });
+    standard(w);
+    await w.core.kick();
+    await w.runUntil(T0 + 2 * HOUR);
+    expect((await w.core.getStatus()).waitReason).toBe("caught-up"); // 前提
+    expect(w.alarm).toBe(jst(11, 6, 0)); // 前提: 次の晩まで待っている
+    return w;
+  };
+
+  it("caught-up の running に resume すると resumed: true で、アラームを今に張り直し、範囲を広げた月が種まきされる", async () => {
+    const w = await caughtUp();
+    w.site({ calendars: { "2026-10": [] } });
+    Object.assign(w.options, { fromMonth: "2026-10" }); // 公開で範囲が広がり、DO が作り直される
+    w.core = w.makeCore();
+    const at = w.now;
+    const r = await w.core.resume();
+    expect(r).toEqual({ resumed: true, previous: "running" });
+    expect(w.alarm).toBe(at); // 前提: 今は時間帯の中。runAt(now) = now
+    expect(w.logs).toContain("race-archive: resume from=running wait=caught-up");
+    const before = w.fetchLog.length;
+    await w.fire();
+    const months = (w.sql.exec("SELECT month FROM ra_month ORDER BY month").toArray() as { month: string }[]).map((m) => m.month);
+    expect(months).toEqual(["2026-10", "2026-11"]);
+    expect(w.urls().slice(before)).toContain(calUrl("2026-10"));
+  });
+
+  it("caught-up の resume は、自動再開の権利などの meta を変えない", async () => {
+    const w = await caughtUp();
+    w.sql.exec("INSERT OR REPLACE INTO ra_meta (key, value) VALUES ('auto_resume_used', '1')");
+    await w.core.resume();
+    const used = (w.sql.exec("SELECT value FROM ra_meta WHERE key = 'auto_resume_used'").toArray() as { value: string }[])[0]!.value;
+    expect(used).toBe("1");
+  });
+
+  it("取得中(待ちの理由が caught-up 以外)の running に resume しても、resumed: false でアラームは変わらない", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    standard(w);
+    await w.core.kick();
+    await w.fire(); // 1 ステップだけ(取得の途中)
+    const reason = (await w.core.getStatus()).waitReason;
+    expect(reason).not.toBe("caught-up"); // 前提
+    expect(w.alarm).not.toBeNull(); // 前提
+    const alarm = w.alarm;
+    const logs = w.logs.length;
+    const r = await w.core.resume();
+    expect(r).toEqual({ resumed: false, previous: "running" });
+    expect(w.alarm).toBe(alarm);
+    expect(w.logs).toHaveLength(logs);
+  });
+});
