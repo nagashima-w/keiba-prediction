@@ -104,6 +104,8 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
         planProgress: (kaisaiDate) => this.planProgress(kaisaiDate),
         archive: {
           saveRaceArchive: (input) => store.saveRaceArchive(input),
+          // 追い切り(`oikiri: true`)は結果を保存しない。中央・地方の取得だけが Class A をまとめて足す(Issue #670)。
+          addClassA: (n) => store.addClassA(n),
           getCatalogEntry: (raceId) => store.getCatalogEntry(raceId),
         },
         // 追い切りの取得(`RaceOikiriFetchDO`。`oikiri: true`)だけが使う。中央・地方の取得は呼ばない。
