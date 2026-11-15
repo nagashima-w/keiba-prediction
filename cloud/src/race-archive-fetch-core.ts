@@ -5,7 +5,7 @@
  * アラームの中の失敗は握って 10 分後に再試行する。
  *
  * ## 何をするか
- * 中央の 2021-01〜今月(当初は過去 5 年の 2021-11〜。Issue #655 で 2021 年を丸ごと入れた。{@link ARCHIVE_FROM_MONTH})の結果ページを、**カレンダー → 開催日の一覧 → 結果ページ**の順に、新しい月・新しい開催日から 1 件ずつ取り、
+ * 中央の 2016-01〜今月(当初は過去 5 年の 2021-11〜。Issue #655 で 2021 年を丸ごと、Issue #745 で 2016 年まで広げた。{@link ARCHIVE_FROM_MONTH}。地方は 2021-01〜のまま。{@link NAR_ARCHIVE_FROM_MONTH})の結果ページを、**カレンダー → 開催日の一覧 → 結果ページ**の順に、新しい月・新しい開催日から 1 件ずつ取り、
  * `buildRaceRecord` で読んで `saveRaceArchive`(R2 → D1 の目録)に渡す。取り終えた後は、新しい開催(今日より前の確定済みの開催日)を毎晩追いかける。地方は対象外。
  * 取得は gate(`NetkeibaGate`)の `fetchRaw` だけを通る(許可リスト・直列化・最小間隔 2 秒・ブレーカー)。**そのうえでこの取得はリクエストどうしを {@link ARCHIVE_REQUEST_INTERVAL_MS}(5 秒)以上あける**。
  *
@@ -127,6 +127,7 @@ export function buildNarArchiveOptions(vars: NarArchiveVars): ArchiveFetchOption
   const windowEndMin = parseArchiveWindowEndMin(vars.RACE_ARCHIVE_NAR_WINDOW_END_MIN);
   return {
     kind: "nar",
+    fromMonth: NAR_ARCHIVE_FROM_MONTH,
     intervalMs: parseArchiveMinIntervalMs(vars.RACE_ARCHIVE_NAR_MIN_INTERVAL_MS) ?? NAR_ARCHIVE_REQUEST_INTERVAL_MS,
     ...(windowEndMin === undefined ? {} : { windowEndMin }),
     ...(nightlyRowsLimit === null ? {} : { nightlyRowsLimit }),
@@ -152,8 +153,15 @@ export const ARCHIVE_NIGHTLY_ROWS_LIMIT = 1_000_000;
 export const ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX = 100_000_000;
 /** 数えた読み取り行数を保存する間隔(前回の保存からこれだけ増えたとき)。起床ごとには書かない。DO が追い出されて失う数え漏れの上限でもある。 */
 export const ARCHIVE_ROWS_PERSIST_STEP = 10_000;
-/** 取る範囲の最初の月(中央の 2021 年から。#532 の過去 5 年〈2021-11〉を、2021 年を丸ごと入れて年ごとに比べられるよう 2021-01 に広げた。Issue #655)。 */
-export const ARCHIVE_FROM_MONTH = "2021-01";
+/** 取る範囲の最初の月(中央)。#532 の過去 5 年〈2021-11〉を 2021-01 に広げ(Issue #655)、探索の依頼で 2016-01 に広げた(Issue #745。2016・2018・2020 年のページが今のパーサで読めることはフィクスチャで固定してある)。 */
+export const ARCHIVE_FROM_MONTH = "2016-01";
+/** 地方(Jpn)の最初の月。中央を 2016-01 に広げても、地方は 2021-01 のまま(Issue #745。地方の 2016〜2020 年は取らない)。 */
+export const NAR_ARCHIVE_FROM_MONTH = "2021-01";
+/**
+ * 追い切りの取得が流し込むレースの最初の日(含む。`YYYY-MM-DD`)。目録が 2016 年まで広がっても、追い切りは 2021 年以降のままにする(Issue #745。
+ * 追い切りの取得は 10 秒間隔・D1 の書き込みも大きく、2016〜2020 年の約 17,500 レースぶんは取らないと決めた)。
+ */
+export const OIKIRI_FROM_DATE = "2021-01-01";
 /** 追い切りの取得が、目録を 1 回の起床で読む件数(`CATALOG_PAGE_MAX` と同じ。Worker の外向きの呼び出し 50 の内側に収める)。 */
 export const OIKIRI_CATALOG_PAGE = 200;
 /** gate の待ち(進行中 + 待ち)がこの数以上なら出さない。 */
@@ -799,7 +807,7 @@ export class RaceArchiveFetchCore {
     const cursor = this.metaGet("oikiri_seed_cursor") ?? "";
     const page = await oikiri.listCatalogPage(cursor, OIKIRI_CATALOG_PAGE);
     for (const entry of page) {
-      if (entry.kind === "central" && /^\d{4}-\d{2}-\d{2}$/.test(entry.raceDate)) {
+      if (entry.kind === "central" && /^\d{4}-\d{2}-\d{2}$/.test(entry.raceDate) && entry.raceDate >= OIKIRI_FROM_DATE) {
         this.q("INSERT OR IGNORE INTO ra_race (race_id, date, seq) VALUES (?, ?, 0)", entry.raceId, entry.raceDate.replaceAll("-", ""));
       }
     }

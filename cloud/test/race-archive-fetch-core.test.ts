@@ -1553,17 +1553,17 @@ describe("Issue #655: 取得のリクエスト間隔の var(RACE_ARCHIVE_MIN_INT
   });
 });
 
-describe("Issue #655: 取る範囲の最初の月を 2021-01 に広げる", () => {
-  it("既定の最初の月は 2021-01(2021 年を丸ごと入れる)", () => {
-    expect(ARCHIVE_FROM_MONTH).toBe("2021-01");
+describe("Issue #655・#745: 取る範囲の最初の月(中央は 2016-01。#655 で 2021-01 に広げ、#745 で 2016-01 に広げた)", () => {
+  it("既定の最初の月は 2016-01(中央の 2016 年から)", () => {
+    expect(ARCHIVE_FROM_MONTH).toBe("2016-01");
   });
-  it("既定の最初の月から 2026-11 までの月が、すべて「まだ取っていない月」として入る(2021-01〜2026-11 の 71 か月)", async () => {
+  it("既定の最初の月から 2026-11 までの月が、すべて「まだ取っていない月」として入る(2016-01〜2026-11 の 131 か月)", async () => {
     const w = mk({ notBeforeMs: 0 });
     await w.core.kick();
     await w.fire();
     const months = (w.sql.exec("SELECT month FROM ra_month ORDER BY month").toArray() as { month: string }[]).map((r) => r.month);
-    expect(months).toHaveLength(71);
-    expect(months[0]).toBe("2021-01");
+    expect(months).toHaveLength(131);
+    expect(months[0]).toBe("2016-01");
     expect(months[months.length - 1]).toBe("2026-11");
   });
   it("範囲を広げる前の状態が残っていても、新しく広がる月を見落とさず取りに行く(同じ晩のうちでも。取り終えた月は取り直さない)", async () => {
