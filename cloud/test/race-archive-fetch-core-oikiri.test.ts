@@ -122,6 +122,21 @@ afterEach(() => {
   for (const w of worlds.splice(0)) w.sql.close();
 });
 
+describe("Issue #745: 追い切りは 2021-01-01 以降のレースだけを流し込む(2016〜2020 の結果を目録に入れても追い切りは取らない)", () => {
+  it("2020-12-31 のレースは ra_race に入れず、2021-01-01(境界)のレースは入れる。地方は従来どおり入れない", async () => {
+    const w = mk();
+    const before = cat("202006050810", "central", "2020-12-31");
+    const edge = cat("202101010101", "central", "2021-01-01");
+    const old = cat("201606050910", "central", "2016-12-25");
+    w.catalog = [old, before, edge, NAR_X];
+    await w.core.kick();
+    await w.runUntil(T0 + 2 * HOUR);
+    expect(w.raceRows().map((r) => r.race_id)).toEqual(["202101010101"]);
+    expect(w.fetchLog.some((u) => u.includes("201606050910") || u.includes("202006050810"))).toBe(false);
+    expect(w.fetchLog.some((u) => u.includes("202101010101"))).toBe(true);
+  });
+});
+
 describe("追い切りの取得(oikiri: true)の通し(目録から流し込み → 追い切りのページ → 保存)", () => {
   it("中央の 2 レースだけを流し込み、追い切りの URL を新しい日から取り、race_oikiri 向けに 16 頭ずつ保存する。地方・結果の保存・目録の存在確認は使わない", async () => {
     const w = mk();
