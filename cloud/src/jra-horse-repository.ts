@@ -18,12 +18,13 @@ export const LIST_HORSE_IDS_SQL = "SELECT horse_id FROM horse_runs WHERE horse_i
 /**
  * ?1 = 馬の ID の JSON 配列。取る馬 = `horse_profiles` にいない、かつ**中央の走が 1 つ以上ある**馬(Issue #725)。
  * 中央の走 = race_key が 12 桁で、5〜6 桁目(場コード)が 01〜10(`venueKindOfRaceId` と同じ規則)。地方だけ・海外(`X`+日付)だけの馬は JRA に頁が無いので除く。
+ * **加えて 2021 年以降の走(race_key の先頭 4 桁が '2021' 以上)に限る**(Issue #745。目録を 2016 年まで広げても、2016〜2020 年にだけ走った引退馬の頁は取らない)。海外の形('X2…')は先頭が 'X' で '2021' 以上にならない。
  * どちらの引きも主キーで、`horse_runs` の EXISTS は最初の中央の行で打ち切る(読むのは地方だけの馬の全走が最大。索引は足さない)。
  */
 export const FILTER_TARGETS_SQL =
   "SELECT value AS horse_id FROM json_each(?1) " +
   "WHERE NOT EXISTS (SELECT 1 FROM horse_profiles p WHERE p.horse_id = value) " +
-  "AND EXISTS (SELECT 1 FROM horse_runs r WHERE r.horse_id = value AND length(r.race_key) = 12 AND substr(r.race_key, 5, 2) BETWEEN '01' AND '10')";
+  "AND EXISTS (SELECT 1 FROM horse_runs r WHERE r.horse_id = value AND length(r.race_key) = 12 AND substr(r.race_key, 5, 2) BETWEEN '01' AND '10' AND substr(r.race_key, 1, 4) >= '2021')";
 
 /** ?1 = 馬の JSON の配列、?2 = 取得した日(YYYYMMDD)。既にいる馬は書かない。 */
 export const INSERT_HORSE_PROFILES_SQL =
