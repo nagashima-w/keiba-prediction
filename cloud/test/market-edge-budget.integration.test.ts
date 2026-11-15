@@ -49,21 +49,28 @@ beforeEach(async () => {
 });
 
 describe("毎晩の計算を最後まで通す", () => {
-  it(`目録の ${RACES} レース(窓の中 ${RACES - 6}・窓より古い 6)を取り込み、集計して、書き込み行数が見積もりどおりになる。2 晩目は新しい行が無く、集計の置き換えだけ`, async () => {
+  // 古い 6 件は、(a) 今の保存(Issue #670): 最初から -1 で入る → markSkipped は要らない、(b) 移行前に NULL で入った行 → 従来どおり markSkipped が印を付ける。
+  it.each([[false], [true]])(`目録の ${RACES} レース(窓の中 ${RACES - 6}・窓より古い 6。移行前の NULL の行として読み直す=%s)を取り込み、集計して、書き込み行数が見積もりどおりになる。2 晩目は新しい行が無く、集計の置き換えだけ`, async (legacy) => {
     const archive = new D1RaceArchiveStore({ db: local.db, bucket: local.r2 as never, now: () => new Date("2026-11-01T00:00:00.000Z") });
     for (let i = 0; i < RACES; i++) {
       const date = i < 6 ? "2022-05-01" : "2025-06-01";
       const res = await archive.saveRaceArchive({ record: variant(i, date), html: HTML });
       expect(res.status).toBe("saved");
     }
+    if (legacy) {
+      const reset = await local.db.prepare("UPDATE race_archive SET market_version = NULL WHERE market_version = -1").run(); // 前提: 古い 6 件は -1 で入っていた(ちょうど 6 件)
+      expect(reset.meta.changes).toBe(6);
+    }
     const store = new D1MarketEdgeStore(local.db);
     const sql = openNodeSql();
+    let skipCalls = 0;
     let now = NIGHT;
     let alarm: number | null = null;
     let measured = 0; // コアの外から数える D1 の書き込み行数(取り込みと集計)
     const countingStore = {
       listPendingPage: (a: string, l: number) => store.listPendingPage(a, l),
       markSkipped: async (ids: readonly string[]) => {
+        skipCalls += 1;
         const r = await store.markSkipped(ids);
         measured += r.rowsWritten;
         return r;
@@ -116,7 +123,9 @@ describe("毎晩の計算を最後まで通す", () => {
     expect(edges.length).toBeGreaterThan(0);
     expect(meta.races).toBe(RACES - 6);
     // 集計: 騎手 + 調教師 + 記録 1 行(最初の晩は削除なし)
-    const importRows = (RACES - 6) * 3 + 6 * 1 + 2; // 2 ステップ(20 + 4 レース)の計数 1 行ずつ
+    // 古い 6 件の印: 今の保存では最初から -1(markSkipped を呼ばず 0 行)、移行前の NULL の行は markSkipped で 1 行ずつ。
+    expect(skipCalls).toBe(legacy ? 1 : 0);
+    const importRows = (RACES - 6) * 3 + (legacy ? 6 * 1 : 0) + 2; // 2 ステップ(20 + 4 レース)の計数 1 行ずつ
     expect(status1.night.rows).toBe(importRows + edges.length + trainers.length + 1);
     expect(meta.converged).toBe(true);
 

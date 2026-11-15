@@ -151,6 +151,12 @@ export const ARCHIVE_REQUEST_INTERVAL_MS = 5000;
 export const ARCHIVE_NIGHTLY_ROWS_LIMIT = 1_000_000;
 /** その var の上限(これを超える値は既定に戻す)。 */
 export const ARCHIVE_NIGHTLY_ROWS_LIMIT_MAX = 100_000_000;
+/**
+ * R2 の Class A(put)の計数を D1 の `r2_ops` へまとめて足す間隔(保存の件数。Issue #670)。1 件ごとに足すと D1 の書き込みが 1 行/レース増えるため。
+ * 未反映の数は DO に新しく書かず、すでに毎レース書いている `night_saved` と、反映したときだけ書く `r2_flushed` の差で持つ。
+ * 柵の判定は「D1 の classA + 未反映」。順序は「D1 に +n → DO に r2_flushed」(間で落ちると二重に数える = 過大側)。
+ */
+export const ARCHIVE_CLASS_A_FLUSH_STEP = 20;
 /** 数えた読み取り行数を保存する間隔(前回の保存からこれだけ増えたとき)。起床ごとには書かない。DO が追い出されて失う数え漏れの上限でもある。 */
 export const ARCHIVE_ROWS_PERSIST_STEP = 10_000;
 /** 取る範囲の最初の月(中央)。#532 の過去 5 年〈2021-11〉を 2021-01 に広げ(Issue #655)、探索の依頼で 2016-01 に広げた(Issue #745。2016・2018・2020 年のページが今のパーサで読めることはフィクスチャで固定してある)。 */
@@ -313,7 +319,10 @@ export interface RaceArchiveFetchDeps {
   readonly planProgress: (kaisaiDate: string) => Promise<PlanProgressLike>;
   /** 保存と目録の読み取り(`D1RaceArchiveStore`)。 */
   readonly archive: {
-    saveRaceArchive(input: { readonly record: Extract<BuildResult, { ok: true }>["record"]; readonly html: string }): Promise<SaveRaceArchiveResult>;
+    /** `unflushedClassA`(Issue #670): まだ D1 に足していない Class A の数。渡すと、保存は計数を batch に入れず、柵の判定にこの数を足す。 */
+    saveRaceArchive(input: { readonly record: Extract<BuildResult, { ok: true }>["record"]; readonly html: string; readonly unflushedClassA?: number }): Promise<SaveRaceArchiveResult>;
+    /** 任意(Issue #670)。Class A を n 回ぶん D1 の `r2_ops` に足す。**あれば**、保存の計数はまとめて足す経路になる。無ければ保存が 1 件ごとに数える(従来)。 */
+    addClassA?(n: number): Promise<void>;
     getCatalogEntry(raceId: string): Promise<RaceArchiveCatalogEntry | null>;
   };
   /** 追い切りの取得(`oikiri: true`)だけが使う。目録の列挙(`D1RaceArchiveStore.listCatalogPage` の全件・主キー順)と、追い切りの保存(`D1RaceOikiriStore.saveRaceOikiri`)。 */
@@ -641,6 +650,9 @@ export class RaceArchiveFetchCore {
     }
     await this.flushNotice(now);
     const night = jstKaisaiDate(now);
+    if (this.metaGet("night_date") !== night) {
+      await this.flushClassA(); // 夜が替わる前に、前の夜の未反映を足す(数を 0 に戻すより先)
+    }
     this.rollover(night);
 
     const mode = this.mode();
@@ -761,6 +773,7 @@ export class RaceArchiveFetchCore {
     this.metaSet("night_date", night);
     this.metaSet("night_requests", "0");
     this.metaSet("night_saved", "0");
+    this.metaSet("r2_flushed", "0");
     this.metaSet("night_failed", "0");
     this.metaSet("fail_streak", "0");
     this.metaSet("night_rows_read", "0");
@@ -1025,7 +1038,9 @@ export class RaceArchiveFetchCore {
     }
     let saved: SaveRaceArchiveResult;
     try {
-      saved = await this.deps.archive.saveRaceArchive({ record: built.record, html });
+      saved = await this.deps.archive.saveRaceArchive(
+        this.deps.archive.addClassA === undefined ? { record: built.record, html } : { record: built.record, html, unflushedClassA: this.unflushedClassA() },
+      );
     } catch (error) {
       this.deps.log(`race-archive: save failed error=${errorKind(error)}`, "error");
       return (await this.failed(work, night, "save-failed", at)) ? "stopped" : "failed";
@@ -1044,6 +1059,9 @@ export class RaceArchiveFetchCore {
     this.metaSet("db_size", String(saved.dbSizeBytes));
     this.metaSet("fail_streak", "0");
     this.metaSet("fence_notified", "0");
+    if (this.unflushedClassA() >= ARCHIVE_CLASS_A_FLUSH_STEP) {
+      await this.flushClassA();
+    }
     return "ok";
   }
 
@@ -1103,6 +1121,27 @@ export class RaceArchiveFetchCore {
     return "ok";
   }
 
+  /** まだ D1 に足していない Class A の数(`night_saved − r2_flushed`。Issue #670)。 */
+  private unflushedClassA(): number {
+    return Math.max(0, this.metaNum("night_saved") - this.metaNum("r2_flushed"));
+  }
+
+  /** 未反映の Class A を D1 の `r2_ops` に足し、反映した印を書く(順序は D1 が先)。失敗は握って次の機会に再試行する(未反映は残る)。 */
+  private async flushClassA(): Promise<void> {
+    const add = this.deps.archive.addClassA;
+    const n = this.unflushedClassA();
+    if (add === undefined || n === 0) {
+      return;
+    }
+    try {
+      await add.call(this.deps.archive, n);
+    } catch (error) {
+      this.deps.log(`race-archive: class-a flush failed pending=${n} error=${errorKind(error)}`, "error");
+      return;
+    }
+    this.metaSet("r2_flushed", this.metaGet("night_saved") ?? "0");
+  }
+
   /** その日のレースが残っていなければ、日を完了にする。 */
   private closeDayIfDone(date: string): void {
     if (this.count("SELECT COUNT(*) AS n FROM ra_race WHERE date = ? AND status = 'pending'", date) === 0) {
@@ -1148,6 +1187,7 @@ export class RaceArchiveFetchCore {
 
   /** 止められた(HTTP 400・403・429)。その場で止める。自動再開の権利があれば次の晩に再開、無ければ手で再開するまで動かさない。 */
   private async stopRefused(httpStatus: number, stage: HistoryStage, at: number): Promise<void> {
+    await this.flushClassA();
     const willAutoResume = this.metaGet("auto_resume_used") !== "1";
     const resumeAt = willAutoResume ? this.nightStopResumeAt(at) : null;
     this.recordStop("refused", `http-${httpStatus}`, at, resumeAt);
@@ -1161,6 +1201,7 @@ export class RaceArchiveFetchCore {
 
   /** R2 の柵に達した。次の晩に自動で再開する(自動再開の権利は使わない)。 */
   private async stopNight(kind: "r2-fence" | "rows-budget", at: number): Promise<void> {
+    await this.flushClassA();
     const resumeAt = this.nightStopResumeAt(at);
     this.recordStop(kind, kind, at, resumeAt);
     this.metaSet("mode", "night-stopped");
@@ -1185,6 +1226,7 @@ export class RaceArchiveFetchCore {
 
   /** D1 が上限を超えた・大きさが読めない。手で再開するまで動かさない。 */
   private async stopCapacity(reason: "db-size" | "db-size-unknown", dbSizeBytes: number | null, at: number): Promise<void> {
+    await this.flushClassA();
     this.recordStop("capacity", reason, at, null);
     this.metaSet("mode", "capacity-stopped");
     this.metaSet("resume_at", "0");
