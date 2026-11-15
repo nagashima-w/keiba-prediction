@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { GateResult } from "../src/gate-core";
 import {
+  ARCHIVE_CLASS_A_FLUSH_STEP,
   ARCHIVE_CONSECUTIVE_FAILURE_LIMIT,
   ARCHIVE_FROM_MONTH,
   ARCHIVE_NOT_BEFORE_MS,
@@ -102,7 +103,12 @@ class World {
   private readonly execCounts = new Map<string, number>();
   core!: RaceArchiveFetchCore;
 
-  constructor(readonly options: ArchiveFetchOptions = { fromMonth: "2026-11" }) {
+  /** 計数をまとめる経路(#670): `addClassA` を渡す。反映した数の記録と、保存に渡された未反映の数の記録。 */
+  readonly classAFlushes: number[] = [];
+  readonly unflushedSeen: (number | undefined)[] = [];
+  classAFailures = 0;
+
+  constructor(readonly options: ArchiveFetchOptions = { fromMonth: "2026-11" }, readonly deferClassA = false) {
     this.core = this.makeCore();
   }
 
@@ -150,7 +156,19 @@ class World {
           return this.plan;
         },
         archive: {
-          saveRaceArchive: async ({ record }) => {
+          ...(this.deferClassA
+            ? {
+                addClassA: async (n: number) => {
+                  if (this.classAFailures > 0) {
+                    this.classAFailures -= 1;
+                    throw new Error("d1 down");
+                  }
+                  this.classAFlushes.push(n);
+                },
+              }
+            : {}),
+          saveRaceArchive: async ({ record, unflushedClassA }) => {
+            this.unflushedSeen.push(unflushedClassA);
             if (this.saveThrows > 0) {
               this.saveThrows -= 1;
               throw new Error("r2 down");
@@ -228,8 +246,8 @@ class World {
 }
 
 const worlds: World[] = [];
-const mk = (options?: ArchiveFetchOptions): World => {
-  const w = new World(options);
+const mk = (options?: ArchiveFetchOptions, deferClassA = false): World => {
+  const w = new World(options, deferClassA);
   worlds.push(w);
   return w;
 };
@@ -1640,5 +1658,96 @@ describe("Issue #748: 取り終えて新しい開催を待っている(caught-up
     expect(r).toEqual({ resumed: false, previous: "running" });
     expect(w.alarm).toBe(alarm);
     expect(w.logs).toHaveLength(logs);
+  });
+});
+
+describe("Class A の計数をまとめて D1 に足す(Issue #670)", () => {
+  const ids = (n: number): string[] => Array.from({ length: n }, (_, i) => rid(1, i + 1));
+  const K = ARCHIVE_CLASS_A_FLUSH_STEP;
+  const setup = (n: number, deferClassA = true): World => {
+    const w = mk({ fromMonth: "2026-11", intervalMs: 1500 }, deferClassA);
+    // 1 日 12 レースまで(一覧の 1 ページ)。日を分けて n 件にする。
+    const all = ids(n);
+    const days = Array.from({ length: Math.ceil(n / 12) }, (_, d) => `2026110${d + 1}`);
+    w.site({ calendars: { "2026-11": [...days, "20261105"] }, lists: Object.fromEntries(days.map((d, i) => [d, all.slice(i * 12, i * 12 + 12).map((_, j) => rid(i + 1, j + 1))])) });
+    return w;
+  };
+
+  it("前提: K は 20", () => {
+    expect(K).toBe(20);
+  });
+
+  it.each([
+    [K - 1, [] as number[]],
+    [K, [K]],
+    [K + 1, [K]],
+    [2 * K, [K, K]],
+  ])("%i 件保存したとき、反映は %j(K 件ごとに、その時の未反映の数だけ)", async (n, expected) => {
+    const w = setup(n);
+    await w.core.kick();
+    await w.runUntil(T0 + 4 * HOUR);
+    expect(w.saved).toHaveLength(n); // 前提: 全件保存された
+    expect(w.classAFlushes).toEqual(expected);
+  });
+
+  it("保存へは、その時点の未反映の数(night_saved − r2_flushed)を渡す。反映のたびに 0 に戻る", async () => {
+    const w = setup(K + 3);
+    await w.core.kick();
+    await w.runUntil(T0 + 4 * HOUR);
+    expect(w.unflushedSeen).toEqual([...Array.from({ length: K }, (_, i) => i), 0, 1, 2]);
+  });
+
+  it("反映に失敗しても取得は続き、次の保存で未反映の全部を足す(数を失わない)", async () => {
+    const w = setup(K + 2);
+    w.classAFailures = 1;
+    await w.core.kick();
+    await w.runUntil(T0 + 4 * HOUR);
+    expect(w.saved).toHaveLength(K + 2);
+    expect(w.classAFlushes).toEqual([K + 1]); // K 件目で失敗 → K+1 件目で K+1 を足す
+    expect(w.unflushedSeen[K]).toBe(K); // K 件目の反映が失敗したので、K+1 件目の保存は未反映 K を見る(失敗で捨てていない)
+    expect(w.unflushedSeen.at(-1)).toBe(0); // K+1 件目で反映できたので、K+2 件目の保存の前は 0
+  });
+
+  it("夜が替わるとき、未反映を足してから数を 0 に戻す", async () => {
+    const w = setup(5);
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 0));
+    expect(w.saved).toHaveLength(5);
+    expect(w.classAFlushes).toEqual([]); // 同じ夜のあいだは足さない
+    await w.runUntil(jst(11, 6, 1, 0));
+    expect(w.classAFlushes).toEqual([5]);
+    await w.runUntil(jst(11, 6, 3, 0));
+    expect(w.classAFlushes).toEqual([5]); // 二重に足さない
+  });
+
+  it("夜が替わると r2_flushed も 0 に戻る: 2 晩目の保存は、2 晩目の数だけで K 件ごとに足す(1 晩目の数を引かない)", async () => {
+    const w = setup(5);
+    await w.core.kick();
+    await w.runUntil(jst(11, 6, 1, 0));
+    expect(w.classAFlushes).toEqual([5]); // 前提: 1 晩目の 5 件が反映された(r2_flushed = 5 で夜が替わる)
+    const extra = Array.from({ length: K }, (_, i) => rid(2 + Math.floor(i / 10), (i % 10) + 1));
+    extra.forEach((id, i) => w.sql.exec("INSERT INTO ra_race (race_id, date, seq) VALUES (?, ?, ?)", id, "20261101", 100 + i));
+    w.sql.exec("UPDATE ra_day SET status = 'listed' WHERE date = '20261101'");
+    w.alarm = jst(11, 6, 1, 1); // 2 晩目(1 晩目で取り尽くして次の夜まで待っていたアラームを、新しいレースが入ったことにして起こす)
+    await w.runUntil(jst(11, 6, 5, 0));
+    expect(w.saved).toHaveLength(5 + K); // 前提: 2 晩目に K 件保存された
+    expect(w.classAFlushes).toEqual([5, K]);
+  });
+
+  it("止まるとき(r2-fence)に、未反映を足す", async () => {
+    const w = setup(8);
+    w.saveResults = [...Array.from({ length: 4 }, () => ({ status: "saved", key: "k", dbSizeBytes: 1 }) as SaveRaceArchiveResult), { status: "skipped", reason: "r2-fence", dbSizeBytes: 1 }];
+    await w.core.kick();
+    await w.runUntil(T0 + 30 * MIN);
+    expect(w.notices[0]).toMatchObject({ kind: "r2-fence" }); // 前提: 柵で止まった
+    expect(w.classAFlushes).toEqual([4]);
+  });
+
+  it("addClassA を渡さない経路(従来)では、保存へ未反映の数を渡さず、何も反映しない", async () => {
+    const w = setup(K + 1, false);
+    await w.core.kick();
+    await w.runUntil(T0 + 4 * HOUR);
+    expect(w.classAFlushes).toEqual([]);
+    expect(w.unflushedSeen.every((u) => u === undefined)).toBe(true);
   });
 });

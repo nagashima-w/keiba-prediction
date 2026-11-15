@@ -134,7 +134,7 @@ describe("保存: R2 のオブジェクトの種類", () => {
 });
 
 describe("保存: 新規(R2 → D1)", () => {
-  it("中央の 1 レース: R2 の put 1 回・get 0 回、D1 は読み取りの batch(2 文)と書き込みの batch(2 文)。書き込み行数は目録 3〈行 + 部分索引 2 本〉+ 計数 1。目録の行・r2_ops が期待どおり", async () => {
+  it("中央の 1 レース: R2 の put 1 回・get 0 回、D1 は読み取りの batch(2 文)と書き込みの batch(2 文)。CENTRAL は 2021-10-31 で窓(2024-11-01 以降)より古いので、書き込み行数は目録 2〈行 + 部分索引 `idx_race_archive_runs_pending` 1。市場の索引には入らない〉+ 計数 1。目録の行・r2_ops が期待どおり", async () => {
     const { store, calls, batches } = makeStore();
     const result = await store.saveRaceArchive({ record: CENTRAL, html: CENTRAL_HTML });
     expect(result.status).toBe("saved");
@@ -148,13 +148,13 @@ describe("保存: 新規(R2 → D1)", () => {
     expect(batches[0]!.metas.map((m) => m.rowsWritten)).toEqual([0, 0]); // 読み取りの batch は書かない
     // `SELECT 1`(大きさを得るためだけの文)は表を読まないので、読み取り行数を増やさない(JSDoc の主張。ローカルの D1 の実測で 0)
     expect(batches[0]!.metas[1]!.rowsRead).toBe(0);
-    expect(batches[1]!.metas.map((m) => m.rowsWritten)).toEqual([1, 3]); // 計数 1 行・目録 3 行(行 1 + 部分索引 idx_race_archive_runs_pending の 1〈migration 0036・Issue #613。未変換で入るため〉+ 部分索引 idx_race_archive_market_pending の 1〈migration 0039・Issue #642。未処理で入るため〉)
+    expect(batches[1]!.metas.map((m) => m.rowsWritten)).toEqual([1, 2]); // 計数 1 行・目録 2 行(行 1 + 部分索引 idx_race_archive_runs_pending の 1〈migration 0036・Issue #613。未変換で入るため〉。窓より古いので market_version = -1 で入り、idx_race_archive_market_pending〈migration 0039〉には入らない。Issue #670)
     expect(batches[1]!.metas.map((m) => m.changes)).toEqual([1, 1]);
 
     // 目録の行
     const rows = await catalog();
     const encoded = encodeRaceArchive({ record: CENTRAL, html: CENTRAL_HTML, fetchedAt: T1 });
-    expect(rows).toEqual([{ race_id: "202105040811", kind: "central", race_date: "2021-10-31", parser_version: CENTRAL.parserVersion, r2_key: CENTRAL_KEY, raw_bytes: encoded.rawBytes, fetched_at: T1, runs_version: null, market_version: null }]);
+    expect(rows).toEqual([{ race_id: "202105040811", kind: "central", race_date: "2021-10-31", parser_version: CENTRAL.parserVersion, r2_key: CENTRAL_KEY, raw_bytes: encoded.rawBytes, fetched_at: T1, runs_version: null, market_version: -1 }]);
     // r2_ops: 今月(UTC 2026-11)の Class A が 1、Class B は 0
     expect(await ops()).toEqual({ classA: 1, classB: 0 });
     // 戻り値の大きさは、ローカルの D1 が返した実際の値(ページ単位の正の数)
@@ -231,13 +231,13 @@ describe("保存: 冪等(同じレースを何度保存しても目録は 1 行)
     expect(await ops()).toEqual({ classA: 3, classB: 0 });
   });
 
-  it("HTML が変わった(長さが違う)再保存: saved。raw_bytes と fetched_at が新しくなる。書き込み行数は目録 3〈行 + 部分索引 2 本〉+ 計数 1", async () => {
+  it("HTML が変わった(長さが違う)再保存: saved。raw_bytes と fetched_at が新しくなる。窓より古い CENTRAL は market_version = -1 のまま。書き込み行数は目録 2〈行 + 部分索引 1 本〉+ 計数 1", async () => {
     await makeStore().store.saveRaceArchive({ record: CENTRAL, html: CENTRAL_HTML });
     clock = new Date(T2);
     const changed = `${CENTRAL_HTML}<!-- 追記 -->`;
     const second = makeStore();
     expect((await second.store.saveRaceArchive({ record: CENTRAL, html: changed })).status).toBe("saved");
-    expect(second.batches[1]!.metas.map((m) => [m.changes, m.rowsWritten])).toEqual([[1, 1], [1, 3]]); // 目録は行 1 + 部分索引 2(runs_version・market_version = NULL に戻す更新は索引の行も書く。0036・Issue #613、0039・Issue #642。ローカルの D1 で測った値)
+    expect(second.batches[1]!.metas.map((m) => [m.changes, m.rowsWritten])).toEqual([[1, 1], [1, 2]]); // 目録は行 1 + 部分索引 1(runs_version = NULL に戻す更新は索引の行も書く。0036・Issue #613。窓より古いので market_version は -1 のまま〈据え置き〉で、0039 の索引には入らない。Issue #670。窓の中は下の「窓の境界」で [1, 3])
     const [row] = await catalog();
     expect(row!["fetched_at"]).toBe(T2);
     expect(row!["raw_bytes"]).toBe(encodeRaceArchive({ record: CENTRAL, html: changed, fetchedAt: T2 }).rawBytes);
@@ -471,5 +471,121 @@ describe("目録の 1 行の取得", () => {
     expect(await store.getCatalogEntry("202146110310")).toBeNull();
     expect(calls).toEqual([]); // R2 には触れない
     await expect(store.getCatalogEntry("x")).rejects.toThrow(RangeError);
+  });
+});
+
+describe("窓より古い中央のレースは、最初から market_version = -1(Issue #670)", () => {
+  // T1 = 2026-11-01(UTC 01:02 = JST 10:02)→ 窓の開始日は 2024-11-01。
+  const at = (date: string, kind: "central" | "nar" = "central"): RaceRecord => ({ ...(kind === "central" ? CENTRAL : NAR), date });
+
+  it.each([
+    ["窓の開始日の前日(2024-10-31)", "central", "2024-10-31", -1, 2],
+    ["窓の開始日ちょうど(2024-11-01)は窓の中", "central", "2024-11-01", null, 3],
+    ["窓の開始日の翌日", "central", "2024-11-02", null, 3],
+    ["ずっと古い(2016-01-05)", "central", "2016-01-05", -1, 2],
+    ["地方は日付に関わらず NULL(市場の取り込みの対象外)", "nar", "2016-01-05", null, 2],
+  ] as const)("%s → market_version = %j・目録の書き込み %i 行", async (_name, kind, date, expectedVersion, expectedRows) => {
+    const { store, batches } = makeStore();
+    expect((await store.saveRaceArchive({ record: at(date, kind), html: kind === "central" ? CENTRAL_HTML : NAR_HTML })).status).toBe("saved");
+    expect((await catalog())[0]!["market_version"]).toBe(expectedVersion);
+    expect(batches[1]!.metas[1]!.rowsWritten).toBe(expectedRows); // 地方は市場の索引に入らないので、窓の外でも内でも 2(行 + 変換の索引)
+  });
+
+  it("日が進めば窓も進む: 同じ日付でも、保存する日によって古い(-1)か窓の中(NULL)かが決まる(JST の日で判定)", async () => {
+    const rec = at("2024-11-02");
+    clock = new Date("2026-11-01T14:59:59.000Z"); // JST 2026-11-01 23:59:59 → 窓の開始日 2024-11-01 → 窓の中
+    await makeStore().store.saveRaceArchive({ record: rec, html: CENTRAL_HTML });
+    expect((await catalog())[0]!["market_version"]).toBeNull();
+    await local.reset();
+    clock = new Date("2026-11-02T15:00:00.000Z"); // JST 2026-11-03 0:00 → 窓の開始日 2024-11-03 → 古い
+    await makeStore().store.saveRaceArchive({ record: rec, html: CENTRAL_HTML });
+    expect((await catalog())[0]!["market_version"]).toBe(-1);
+  });
+
+  it("再保存(中身が同じ): 目録は変わらず 0 行。取り込み済み(1)の印も消さない", async () => {
+    await makeStore().store.saveRaceArchive({ record: at("2025-06-01"), html: CENTRAL_HTML });
+    await local.db.prepare("UPDATE race_archive SET market_version = 1").run();
+    clock = new Date(T2);
+    const second = makeStore();
+    expect((await second.store.saveRaceArchive({ record: at("2025-06-01"), html: CENTRAL_HTML })).status).toBe("unchanged");
+    expect(second.batches[1]!.metas[1]!.rowsWritten).toBe(0);
+    expect((await catalog())[0]!["market_version"]).toBe(1);
+  });
+
+  it("再保存(中身が変わる): 窓の中は NULL に戻して取り込みをやり直す(目録 3 行)。古い(-1)は -1 のまま(目録 2 行)", async () => {
+    await makeStore().store.saveRaceArchive({ record: at("2025-06-01"), html: CENTRAL_HTML });
+    await local.db.prepare("UPDATE race_archive SET market_version = 1").run(); // 取り込み済み
+    clock = new Date(T2);
+    const inWin = makeStore();
+    await inWin.store.saveRaceArchive({ record: at("2025-06-01"), html: `${CENTRAL_HTML}<!-- 1 -->` });
+    expect((await catalog())[0]!["market_version"]).toBeNull();
+    expect(inWin.batches[1]!.metas[1]!.rowsWritten).toBe(3);
+    await local.reset();
+    await makeStore().store.saveRaceArchive({ record: at("2020-06-01"), html: CENTRAL_HTML });
+    const old = makeStore();
+    await old.store.saveRaceArchive({ record: at("2020-06-01"), html: `${CENTRAL_HTML}<!-- 1 -->` });
+    expect((await catalog())[0]!["market_version"]).toBe(-1);
+    expect(old.batches[1]!.metas[1]!.rowsWritten).toBe(2);
+  });
+
+  it("以前に NULL で入った古い行(移行前の行)は、中身が変わる再保存で -1 になる(移行の SQL は無い。印は市場の取り込みの markSkipped が付ける)", async () => {
+    await makeStore().store.saveRaceArchive({ record: at("2020-06-01"), html: CENTRAL_HTML });
+    await local.db.prepare("UPDATE race_archive SET market_version = NULL").run();
+    expect((await catalog())[0]!["market_version"]).toBeNull(); // 前提
+    clock = new Date(T2);
+    await makeStore().store.saveRaceArchive({ record: at("2020-06-01"), html: `${CENTRAL_HTML}<!-- 1 -->` });
+    expect((await catalog())[0]!["market_version"]).toBe(-1);
+  });
+});
+
+describe("Class A の計数をまとめる経路(Issue #670)", () => {
+  it("unflushedClassA を渡すと、書き込みの batch は目録 1 文だけ。r2_ops は書かない(書き込み行数は 窓の中 3 行)", async () => {
+    const { store, batches } = makeStore();
+    const rec = { ...CENTRAL, date: "2025-06-01" };
+    expect((await store.saveRaceArchive({ record: rec, html: CENTRAL_HTML, unflushedClassA: 0 })).status).toBe("saved");
+    expect(batches[1]!.size).toBe(1);
+    expect(batches[1]!.metas.map((m) => m.rowsWritten)).toEqual([3]);
+    expect(await ops()).toBeNull(); // r2_ops の行は作られない
+  });
+
+  it("渡さなければ従来どおり、batch は 2 文(計数 +1・目録)", async () => {
+    const { store, batches } = makeStore();
+    await store.saveRaceArchive({ record: CENTRAL, html: CENTRAL_HTML });
+    expect(batches[1]!.size).toBe(2);
+    expect(await ops()).toEqual({ classA: 1, classB: 0 });
+  });
+
+  it("柵の判定は「D1 の classA + 未反映」: D1 だけでは柵の手前でも、未反映を足すと柵に達するなら skipped(R2 に書かない)", async () => {
+    await seedOps(R2_FENCE_LIMITS.classA - 5, 0);
+    const ok = makeStore();
+    expect((await ok.store.saveRaceArchive({ record: CENTRAL, html: CENTRAL_HTML, unflushedClassA: 4 })).status).toBe("saved"); // 合計 limit−1: まだ使う
+    expect(ok.calls.map((c) => c.op)).toEqual(["put"]);
+    await local.reset();
+    await seedOps(R2_FENCE_LIMITS.classA - 5, 0);
+    const blocked = makeStore();
+    const res = await blocked.store.saveRaceArchive({ record: CENTRAL, html: CENTRAL_HTML, unflushedClassA: 5 }); // 合計 limit: 止める
+    expect(res).toMatchObject({ status: "skipped", reason: "r2-fence" });
+    expect(blocked.calls).toEqual([]);
+  });
+
+  it("addClassA(n): 今月の class_a に n を足す(行が無ければ作る)。class_b は変えない。1 未満・非整数は RangeError で何も書かない", async () => {
+    const { store } = makeStore();
+    await store.addClassA(20);
+    expect(await ops()).toEqual({ classA: 20, classB: 0 });
+    await store.addClassA(3);
+    expect(await ops()).toEqual({ classA: 23, classB: 0 });
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      await expect(store.addClassA(bad)).rejects.toThrow(RangeError);
+    }
+    expect(await ops()).toEqual({ classA: 23, classB: 0 });
+  });
+
+  it("まとめた経路で N 件保存して N を足すと、r2_ops の class_a は従来の 1 件ごとの経路と同じ N", async () => {
+    const { store } = makeStore();
+    for (let i = 0; i < 3; i++) {
+      await store.saveRaceArchive({ record: { ...CENTRAL, raceId: `20210504081${i}` }, html: CENTRAL_HTML, unflushedClassA: i });
+    }
+    await store.addClassA(3);
+    expect(await ops()).toEqual({ classA: 3, classB: 0 });
   });
 });

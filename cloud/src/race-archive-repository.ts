@@ -48,6 +48,9 @@
 
 import type { RaceRecord } from "../../packages/core/src/scraper/race-record.js";
 import { assertRaceId, decodeRaceArchive, encodeRaceArchive, raceArchiveKeyOf, type RaceArchivePayload } from "./race-archive-format";
+import { JST_OFFSET_MS } from "../../packages/core/src/common/jst";
+import { marketWindowCutoff } from "./market-edge-calc";
+import { MARKET_ROWS_SKIPPED } from "./market-edge-repository";
 import { isReadAllowed, isWriteAllowed, monthKey, type R2Usage } from "./r2-fence";
 
 /** D1 のうち、ストアが使う部分だけ(テストで記録つきの転送を渡せる)。 */
@@ -133,6 +136,8 @@ const SELECT_R2_USAGE_SQL = "SELECT class_a AS classA, class_b AS classB FROM r2
 const SELECT_SIZE_SQL = "SELECT 1";
 /** Class A(書き込み)の +1。月の行が無ければ作る(他の保存の SQL と同じ形)。 */
 const COUNT_WRITE_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1";
+/** Class A の +N(取得の DO がまとめて足す。Issue #670)。 */
+const COUNT_WRITE_N_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, ?, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + excluded.class_a";
 /** Class B(読み出し)の +1。 */
 const COUNT_READ_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, 1) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + 1";
 /** Class B の +N(一括の読み出し。出した要求の数をまとめて数える)。 */
@@ -142,8 +147,8 @@ const COUNT_READ_N_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0
  * 目録の UPSERT。**比較の対象に `fetched_at` を入れない**(入れると毎回更新になり、同じ中身の再保存で D1 の書き込みが増える)。
  * 更新するときは `fetched_at` も新しくし、変換の済み印 `runs_version` と、市場の行への取り込み印 `market_version`(Issue #642。migration 0039)を NULL に戻す(中身が変わったので、変換と取り込みをやり直す。Issue #588)。WHERE が偽なら、行は変わらず `changes` 0・`rows_written` 0(ローカルの workerd の D1 で実測)。
  */
-const UPSERT_CATALOG_SQL = `INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+const UPSERT_CATALOG_SQL = `INSERT INTO race_archive (race_id, kind, race_date, parser_version, r2_key, raw_bytes, fetched_at, market_version)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(race_id) DO UPDATE SET
   kind = excluded.kind,
   race_date = excluded.race_date,
@@ -152,12 +157,27 @@ ON CONFLICT(race_id) DO UPDATE SET
   raw_bytes = excluded.raw_bytes,
   fetched_at = excluded.fetched_at,
   runs_version = NULL,
-  market_version = NULL
+  market_version = excluded.market_version
 WHERE race_archive.kind IS NOT excluded.kind
   OR race_archive.race_date IS NOT excluded.race_date
   OR race_archive.parser_version IS NOT excluded.parser_version
   OR race_archive.r2_key IS NOT excluded.r2_key
   OR race_archive.raw_bytes IS NOT excluded.raw_bytes`;
+
+/**
+ * 目録に入れるときの `market_version`(Issue #670)。**窓(`marketWindowCutoff`。計算する日から 2 年)より古い中央のレースは、最初から {@link MARKET_ROWS_SKIPPED}**。
+ * 市場の取り込みはそのレースを読まずに印だけ付けるので、最初から印を入れれば、部分索引 `idx_race_archive_market_pending` の行と、あとから印を付ける UPDATE の書き込みが要らない
+ * (INSERT はローカルの D1 で 3 行 → 2 行)。窓は過去へ広がらない(日が進むと新しい側へ動くだけ)ので、一度古いとしたレースが窓に戻ることはない。
+ * 境界: `race_date` が cutoff と同じ日は窓の中(NULL)。窓の中のレースを古いとすると市場の指標から落ちるので、ここを 1 日ずらさないこと(`market-edge-core.ts` の `raceDate < windowFrom` と同じ)。
+ * 地方(`nar`)は市場の取り込みの対象外(部分索引にも入らない)なので、従来どおり NULL。
+ */
+export function initialMarketVersion(kind: "central" | "nar", raceDate: string, now: Date): number | null {
+  if (kind !== "central") {
+    return null;
+  }
+  const today = new Date(now.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
+  return raceDate < marketWindowCutoff(today) ? MARKET_ROWS_SKIPPED : null;
+}
 
 const CATALOG_COLUMNS = "race_id AS raceId, kind, race_date AS raceDate, parser_version AS parserVersion, r2_key AS r2Key, raw_bytes AS rawBytes, fetched_at AS fetchedAt, runs_version AS runsVersion";
 const SELECT_CATALOG_SQL = `SELECT ${CATALOG_COLUMNS} FROM race_archive WHERE race_id = ?`;
@@ -208,8 +228,17 @@ export class D1RaceArchiveStore {
   }
 
   /** 1 レース分(読み取り結果と元の HTML)を R2 → D1 の順で保存する。手順・戻り値・失敗の扱いはファイル先頭の説明。 */
-  async saveRaceArchive(input: { readonly record: RaceRecord; readonly html: string }): Promise<SaveRaceArchiveResult> {
+  async saveRaceArchive(input: {
+    readonly record: RaceRecord;
+    readonly html: string;
+    /**
+     * まだ D1 の `r2_ops` に足していない Class A の数(Issue #670)。**渡すと**、保存は計数を batch に入れず(呼び出し側が {@link addClassA} でまとめて足す)、柵の判定に「D1 の classA + この数」を使う。
+     * 渡さなければ従来どおり、保存の batch の中で 1 を足す。
+     */
+    readonly unflushedClassA?: number;
+  }): Promise<SaveRaceArchiveResult> {
     const { record, html } = input;
+    const deferCount = input.unflushedClassA !== undefined;
     validateRecord(record);
     const now = this.now();
     const fetchedAt = now.toISOString();
@@ -227,7 +256,7 @@ export class D1RaceArchiveStore {
     if (sizeBefore > this.maxDbBytes) {
       return { status: "skipped", reason: "db-size", dbSizeBytes: sizeBefore };
     }
-    if (!isWriteAllowed(usage)) {
+    if (!isWriteAllowed({ ...usage, classA: usage.classA + (input.unflushedClassA ?? 0) })) {
       return { status: "skipped", reason: "r2-fence", dbSizeBytes: sizeBefore };
     }
 
@@ -235,15 +264,25 @@ export class D1RaceArchiveStore {
     await this.bucket.put(key, encoded.body, { httpMetadata: { contentType: "application/gzip" } });
 
     // D1 が後。計数と目録を同じ batch で書く(一緒に成功するか、一緒に落ちる)。
-    const results = await this.db.batch([
-      this.db.prepare(COUNT_WRITE_SQL).bind(ym),
-      this.db.prepare(UPSERT_CATALOG_SQL).bind(record.raceId, record.kind, record.date, record.parserVersion, key, encoded.rawBytes, fetchedAt),
-    ]);
-    const upsert = results[1];
+    const upsertStatement = this.db
+      .prepare(UPSERT_CATALOG_SQL)
+      .bind(record.raceId, record.kind, record.date, record.parserVersion, key, encoded.rawBytes, fetchedAt, initialMarketVersion(record.kind, record.date, now));
+    const results = await this.db.batch(deferCount ? [upsertStatement] : [this.db.prepare(COUNT_WRITE_SQL).bind(ym), upsertStatement]);
+    const upsert = results[deferCount ? 0 : 1];
     if (upsert === undefined) {
       throw new Error("目録の UPSERT の結果を取得できませんでした");
     }
     return { status: upsert.meta.changes > 0 ? "saved" : "unchanged", key, dbSizeBytes: sizeOf(upsert.meta) ?? sizeBefore };
+  }
+
+  /**
+   * Class A を n 回ぶん、今月の `r2_ops` に足す(Issue #670。保存に `unflushedClassA` を渡した呼び出し側が、K 件ごと・夜の替わり目・停止時にまとめて呼ぶ)。n は 1 以上の整数。失敗は例外(呼び出し側が次の機会に再試行する)。
+   */
+  async addClassA(n: number): Promise<void> {
+    if (!Number.isInteger(n) || n < 1) {
+      throw new RangeError(`n は 1 以上の整数でなければなりません: ${String(n)}`);
+    }
+    await this.db.prepare(COUNT_WRITE_N_SQL).bind(monthKey(this.now()), n).run();
   }
 
   /** 1 レース分を R2 から読む。手順・戻り値はファイル先頭の説明。 */
