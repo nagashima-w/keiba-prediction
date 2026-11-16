@@ -24,6 +24,7 @@ export const ALWAYS_RELATED = [
   "test/bundle-guard.integration.test.ts",
   "test/d1-schema.integration.test.ts",
   "test/local-bindings-template.integration.test.ts",
+  "test/person-stats-repository.integration.test.ts",
   "test/r2-binding.integration.test.ts",
   "test/race-archive-runs-index.integration.test.ts",
   "test/result-backfill-state.integration.test.ts",

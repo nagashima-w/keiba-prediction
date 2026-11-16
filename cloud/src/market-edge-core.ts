@@ -23,6 +23,17 @@
  *  - 失敗が連続 {@link MARKET_EDGE_CONSECUTIVE_FAILURE_LIMIT} ステップになったら、その晩は止める(`failures`)。R2 の柵(`r2-fence`)・D1 の大きさ(`capacity`)でも、その晩は止める。
  *  - アラームの中の例外(集計の失敗を含む): 握って 10 分後に再試行する。
  *
+ * ## 人の段(Issue #729 段階 A。Worker の var `PERSON_STATS_ENABLED` が "1" のときだけ。`RaceMarketEdgeDO` が `options.personEnabled` に写す)
+ * 同じ DO・同じアラームに、騎手・調教師の年ごとの集計の取り込みを差し込む(`person-stats-*.ts`)。
+ *  - **1 回の起床で動くのは、市場の段か人の段のどちらか一方**(交互。`ps_turn`)。R2 を読む件数が起床あたり今より増えない。1 ステップの件数は市場と同じ {@link MARKET_EDGE_STEP_RACES}。
+ *    人の段に未処理がなければ、その起床では市場の段が動く(人の目録の確認は {@link MARKET_EDGE_IDLE_MS} に 1 回)。
+ *  - 取り込み: 目録の未処理(`person_version` が NULL の中央・2021-01-01 以降。部分索引)を、市場の段とは別のカーソル(`ps_cursor`)で読み、R2 から読んで人の行(`buildPersonRow`)にして保存し、印を付ける。
+ *    読むレースは窓で絞らない(2021 年以降の全部)。数える馬がなく行を作らないレースにも印だけ付ける。
+ *  - 集計: 人の段の未処理が尽きた周の終わりに、**その日(JST)まだなら 1 回**、取り込みで触れた年(`ps_dirty`)だけ集計する。壊れた行で書かなかった年は触れた年として残り、次の晩に試す。
+ *  - **1 晩の書き込み行数の上限(`night_rows`)は市場の段と合算**。止める条件(連続失敗・容量・R2 の柵)も共通。
+ *  - 失敗の記録は `me_fail` に race_id へ `ps:` を付けて入れる(市場の段の記録と別)。人の段の例外(目録の列挙・集計)は握ってログに残し、その起床では市場の段を動かす(市場の段を巻き込まない)。
+ *  - 無効のとき(依存がない・personEnabled が true でない)は、人の目録にも R2 にも DO の SQLite の `ps_` のキーにも触れない。
+ *
  * ## DO の SQLite の読み取り
  * 起床のたびに表の全部を読む SQL は無い(状態は `me_meta` の主キー引きと、`me_fail` の主キー引きだけ)。表の全体を数える SQL は状態の読み取り(`getStatus`)だけにある。
  */
@@ -31,6 +42,9 @@ import type { RaceRecord } from "../../packages/core/src/scraper/race-record";
 import type { MarketAggregateResult } from "./market-edge-aggregate";
 import { buildMarketRow, marketWindowCutoff, type MarketRow } from "./market-edge-calc";
 import type { MarketPendingEntry } from "./market-edge-repository";
+import type { PersonAggregateResult } from "./person-stats-aggregate";
+import { buildPersonRow, type PersonRow } from "./person-stats-calc";
+import type { PersonPendingEntry } from "./person-stats-repository";
 import { inArchiveWindow, nextArchiveWindowStart } from "./race-archive-fetch-core";
 import { CATALOG_PAGE_MAX, DB_SIZE_LIMIT_BYTES, READ_BATCH_MAX, type ReadRaceArchivesResult } from "./race-archive-repository";
 import type { SqlLike } from "./sql-like";
@@ -82,6 +96,18 @@ export interface MarketEdgeOptions {
   readonly pageSize?: number;
   /** D1 の大きさの上限(バイト)。既定は取得の DO と同じ。 */
   readonly maxDbBytes?: number;
+  /** 人の段(Issue #729)を動かす。**true のときだけ**動く(未設定・false は何もしない。var `PERSON_STATS_ENABLED` が "1" のときだけ DO が true にする)。 */
+  readonly personEnabled?: boolean;
+}
+
+/** 人の段の依存(Issue #729)。`MarketEdgeDeps.person`。 */
+export interface PersonStageDeps {
+  readonly store: {
+    listPendingPage(afterRaceId: string, limit: number): Promise<PersonPendingEntry[]>;
+    saveRows(rows: readonly PersonRow[], doneRaceIds: readonly string[]): Promise<{ rowsWritten: number; dbSizeBytes: number | null }>;
+  };
+  /** 触れた年の人の行から集計を置き換える(`aggregatePersonYearsFor`)。失敗は throw。 */
+  readonly aggregate: (years: readonly number[], today: string) => Promise<PersonAggregateResult>;
 }
 
 export interface MarketEdgeDeps {
@@ -100,6 +126,8 @@ export interface MarketEdgeDeps {
   };
   /** 窓の市場の行から指標を作って置き換える(`aggregateMarketEdges`)。失敗は throw。 */
   readonly aggregate: (today: string) => Promise<MarketAggregateResult>;
+  /** 人の段(Issue #729)。無いか、options.personEnabled が true でなければ、人の段は何もしない。 */
+  readonly person?: PersonStageDeps;
   readonly log: (line: string, level: "info" | "error") => void;
 }
 
@@ -131,6 +159,8 @@ export interface RaceMarketEdgeStatus {
   /** {@link MARKET_EDGE_MAX_NIGHTS} 晩試して諦めたレースの数。 */
   readonly gaveUp: number;
   readonly totals: { readonly races: number; readonly rows: number };
+  /** 人の段(Issue #729)の状態。人の段が有効のときだけ付く。 */
+  readonly person?: { readonly cursor: string; readonly dirtyYears: readonly number[]; readonly totalRaces: number; readonly calcDate: string | null };
   readonly dbSizeBytes: number | null;
   readonly lastCalc: LastCalc | null;
   readonly lastStop: { readonly reason: MarketEdgeStopReason; readonly at: number } | null;
@@ -160,6 +190,7 @@ export class RaceMarketEdgeCore {
   private readonly stepRaces: number;
   private readonly pageSize: number;
   private readonly maxDbBytes: number;
+  private readonly person: PersonStageDeps | null;
 
   constructor(deps: MarketEdgeDeps, options: MarketEdgeOptions = {}) {
     this.deps = deps;
@@ -170,6 +201,7 @@ export class RaceMarketEdgeCore {
     this.stepRaces = Math.min(options.stepRaces ?? MARKET_EDGE_STEP_RACES, READ_BATCH_MAX);
     this.pageSize = Math.min(options.pageSize ?? MARKET_EDGE_PAGE_SIZE, MARKET_EDGE_PAGE_SIZE_MAX, CATALOG_PAGE_MAX);
     this.maxDbBytes = options.maxDbBytes ?? DB_SIZE_LIMIT_BYTES;
+    this.person = options.personEnabled === true && deps.person !== undefined ? deps.person : null;
     deps.sql.exec("CREATE TABLE IF NOT EXISTS me_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID");
     deps.sql.exec("CREATE TABLE IF NOT EXISTS me_fail (race_id TEXT PRIMARY KEY, nights INTEGER NOT NULL, last_night TEXT NOT NULL, last_class TEXT NOT NULL) WITHOUT ROWID");
   }
@@ -286,6 +318,9 @@ export class RaceMarketEdgeCore {
       return;
     }
 
+    // 人の段(Issue #729)。起床ごとに市場の段と交互。人の段に未処理がなければ、同じ起床で市場の段へ進む。
+    if (this.person !== null && (await this.personTurn(now, night))) return;
+
     const take = this.metaGet("solo") === "1" ? 1 : this.stepRaces;
     const cursor = this.metaGet("cursor") ?? "";
     const page = await this.deps.store.listPendingPage(cursor, this.pageSize);
@@ -321,6 +356,153 @@ export class RaceMarketEdgeCore {
       return;
     }
     await this.importStep(candidates, now, night, cursor);
+  }
+
+  // ---- 人の段(Issue #729) ----
+
+  /**
+   * この起床が人の段の番なら人の段を 1 ステップ動かす。動かしたら true(呼び出し側は市場の段を動かさずに戻る)。
+   * 番でない・休み中(未処理が尽きて 1 時間以内)・未処理がない・集計だけで終わったときは false(同じ起床で市場の段が動く)。
+   * 番の印 `ps_turn` は "p"(人の番。未設定も同じ)か "m"(市場の番)。人の段が取り込みをした起床のあと "m" にし、市場の番の起床を 1 回通すと "p" に戻す。
+   * 人の段の例外は握ってログに残し、{@link MARKET_EDGE_ERROR_RETRY_MS} のあいだ人の段を休ませて false を返す(失敗する D1 を市場の段の起床ごとに叩かない)。
+   */
+  private async personTurn(now: number, night: string): Promise<boolean> {
+    if (this.metaGet("ps_turn") === "m") {
+      this.metaSet("ps_turn", "p");
+      return false;
+    }
+    if (now < this.metaNum("ps_next_check")) return false;
+    try {
+      const worked = await this.personStep(now, night);
+      if (worked) this.metaSet("ps_turn", "m");
+      return worked;
+    } catch (error) {
+      this.deps.log(`race-market-edge: person step failed error=${errorKind(error)}`, "error");
+      this.metaSet("ps_next_check", String(now + MARKET_EDGE_ERROR_RETRY_MS));
+      return false;
+    }
+  }
+
+  /** 人の段の 1 ステップ。取り込みをしたら true。未処理が尽きていたら周の終わり(集計)を済ませて false。 */
+  private async personStep(now: number, night: string): Promise<boolean> {
+    const person = this.person!;
+    const take = this.metaGet("ps_solo") === "1" ? 1 : this.stepRaces;
+    const cursor = this.metaGet("ps_cursor") ?? "";
+    const page = await person.store.listPendingPage(cursor, this.pageSize);
+    if (page.length === 0) {
+      await this.personEndOfPass(now, night);
+      return false;
+    }
+    const blocked = this.blockedIds(
+      page.map((e) => `ps:${e.raceId}`),
+      night,
+    );
+    const candidates: PersonPendingEntry[] = [];
+    let lastScanned = cursor;
+    for (const e of page) {
+      lastScanned = e.raceId;
+      if (!blocked.has(`ps:${e.raceId}`)) {
+        candidates.push(e);
+        if (candidates.length >= take) break;
+      }
+    }
+    this.metaSet("ps_cursor", lastScanned);
+    if (candidates.length === 0) {
+      this.setWait("active");
+      await this.deps.setAlarm(now + MARKET_EDGE_SCAN_DELAY_MS);
+      return true;
+    }
+    await this.personImportStep(candidates, now, night, cursor);
+    return true;
+  }
+
+  private async personImportStep(candidates: readonly PersonPendingEntry[], now: number, night: string, cursorBefore: string): Promise<void> {
+    const person = this.person!;
+    const read = await this.deps.archive.readRaceArchives(candidates.map((c) => c.raceId));
+    if (read.status === "skipped") {
+      await this.stop("r2-fence", now);
+      return;
+    }
+    const rows: PersonRow[] = [];
+    const done: PersonPendingEntry[] = [];
+    let readFailures = 0;
+    for (const c of candidates) {
+      const item = read.items.find((i) => i.raceId === c.raceId);
+      if (item === undefined || item.outcome.status !== "found") {
+        readFailures += 1;
+        this.recordFailure(`ps:${c.raceId}`, night, item?.outcome.status === "missing" ? "r2-missing" : "r2-error");
+        continue;
+      }
+      const row = buildPersonRow(item.outcome.archive.record as RaceRecord);
+      if (row !== null) rows.push(row);
+      done.push(c);
+    }
+    if (readFailures > 0) this.metaSet("night_failed", String(this.metaNum("night_failed") + readFailures));
+
+    if (done.length === 0) {
+      await this.afterStep(now, false, readFailures > 0);
+      return;
+    }
+    const doneIds = done.map((d) => d.raceId);
+    let saved: { rowsWritten: number; dbSizeBytes: number | null };
+    try {
+      saved = await person.store.saveRows(rows, doneIds);
+    } catch (error) {
+      this.deps.log(`race-market-edge: person save failed class=save-failed error=${errorKind(error)} races=${done.length}`, "error");
+      if (done.length === 1) {
+        this.recordFailure(`ps:${doneIds[0]!}`, night, "save-failed");
+        this.metaSet("night_failed", String(this.metaNum("night_failed") + 1));
+      } else {
+        // 切り分けのため、同じレースから 1 件ずつやり直す(カーソルを戻す)。
+        this.metaSet("ps_cursor", cursorBefore);
+      }
+      this.metaSet("ps_solo", "1");
+      await this.afterStep(now, false, true);
+      return;
+    }
+    this.metaSet("ps_solo", "0");
+    this.clearFailures(doneIds.map((id) => `ps:${id}`));
+    this.addNightRows(saved.rowsWritten + MARKET_EDGE_READ_COUNT_ROWS);
+    this.metaSet("ps_total_races", String(this.metaNum("ps_total_races") + done.length));
+    this.addDirtyYears(done.map((d) => Number(d.raceDate.slice(0, 4))));
+    if (saved.dbSizeBytes !== null) this.metaSet("db_size", String(saved.dbSizeBytes));
+    if (saved.dbSizeBytes === null || saved.dbSizeBytes > this.maxDbBytes) {
+      await this.stop("capacity", now);
+      return;
+    }
+    await this.afterStep(now, true, readFailures > 0);
+  }
+
+  /** 取り込みで触れた年(集計し直す年)。 */
+  private dirtyYears(): number[] {
+    const raw = this.metaGet("ps_dirty");
+    if (raw === null) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((y): y is number => Number.isInteger(y)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private addDirtyYears(years: readonly number[]): void {
+    const set = new Set([...this.dirtyYears(), ...years]);
+    this.metaSet("ps_dirty", JSON.stringify([...set].sort((a, b) => a - b)));
+  }
+
+  /** 人の段の周の終わり。未処理が尽きた。触れた年があり、その日まだ集計していなければ集計する。次の確認は 1 時間後。 */
+  private async personEndOfPass(now: number, night: string): Promise<void> {
+    this.metaSet("ps_cursor", "");
+    this.metaSet("ps_next_check", String(now + MARKET_EDGE_IDLE_MS));
+    const dirty = this.dirtyYears();
+    if (dirty.length === 0 || this.metaGet("ps_calc_date") === night) return;
+    const result = await this.person!.aggregate(dirty, night);
+    if (result.status !== "written") return;
+    this.metaSet("ps_calc_date", night);
+    this.addNightRows(result.rowsWritten);
+    this.metaSet("ps_dirty", JSON.stringify(result.skippedYears.filter((y) => dirty.includes(y))));
+    this.metaSet("ps_last_calc", JSON.stringify({ date: night, years: result.years, skippedYears: result.skippedYears, rowsWritten: result.rowsWritten, races: result.races, broken: result.broken }));
+    if (result.skippedYears.length > 0) this.deps.log(`race-market-edge: person aggregate skipped years=${result.skippedYears.join(",")} broken=${result.broken}`, "error");
   }
 
   /** 今夜もう失敗した、または諦めたレース(失敗の記録から)。 */
@@ -484,6 +666,7 @@ export class RaceMarketEdgeCore {
       failing: this.count("SELECT COUNT(*) AS n FROM me_fail WHERE nights < ?", MARKET_EDGE_MAX_NIGHTS),
       gaveUp: this.count("SELECT COUNT(*) AS n FROM me_fail WHERE nights >= ?", MARKET_EDGE_MAX_NIGHTS),
       totals: { races: this.metaNum("total_races"), rows: this.metaNum("total_rows") },
+      ...(this.person !== null ? { person: { cursor: this.metaGet("ps_cursor") ?? "", dirtyYears: this.dirtyYears(), totalRaces: this.metaNum("ps_total_races"), calcDate: this.metaGet("ps_calc_date") } } : {}),
       dbSizeBytes: dbSize === null || dbSize === "" ? null : Number(dbSize),
       lastCalc: lastCalcRaw === null ? null : (JSON.parse(lastCalcRaw) as LastCalc),
       lastStop: lastStopRaw === null ? null : (JSON.parse(lastStopRaw) as RaceMarketEdgeStatus["lastStop"]),

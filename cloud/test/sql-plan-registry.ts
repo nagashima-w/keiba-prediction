@@ -84,6 +84,12 @@ export const HERE: Record<string, PlanEntry> = {
     "market-edge-repository.ts::SELECT_MARKET_EDGES_BY_IDS_SQL",
     "market-edge-repository.ts::SELECT_MARKET_EDGE_META_SQL",
     "market-edge-repository.ts::saveMarketRowsSql",
+    // 騎手・調教師の年ごとの集計(Issue #729 段階 A)。未処理の列挙は部分索引 idx_race_archive_person_pending、集計の読みは日付の索引の範囲、置き換えは json_each から主キー。実際の行数は person-stats-repository.integration.test.ts が固定する。
+    "person-stats-repository.ts::SELECT_PERSON_PENDING_PAGE_SQL",
+    "person-stats-repository.ts::MARK_PERSON_VERSION_SQL",
+    "person-stats-repository.ts::SELECT_PERSON_ROWS_PAGE_SQL",
+    "person-stats-repository.ts::UPSERT_PERSON_YEAR_SQL",
+    "person-stats-repository.ts::savePersonRowsSql",
     // 組み立て関数(サンプルの引数 ids=1,2 で SQL にしたもの)
     "targets-repository.ts::targetsSql.bets",
     "targets-repository.ts::targetsSql.marks",
