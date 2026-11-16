@@ -95,11 +95,13 @@ export function renderPage(email: string, role: "admin" | "viewer"): string {
 <style>
 ${paletteCss()}
   * { box-sizing: border-box; }
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; line-height: 1.5; color: var(--fg); background: var(--bg); overflow-wrap: anywhere; }
+  body { font-family: system-ui, sans-serif; font-size: 15px; margin: 0; padding: 16px; line-height: 1.45; color: var(--fg); background: var(--bg); overflow-wrap: anywhere; }
   /* Issue #544: 40rem → 50rem。トップの上の並び(開催日・中央/地方・更新・狙い目・検証・日報・月報・設定)の必要幅は実測で約 740px(46.25rem)で、40rem だと「設定」が 2 段目に落ちた。狭い画面は従来どおり折り返す */
   main { max-width: 50rem; margin: 0 auto; min-width: 0; }
-  h1 { font-size: 1.25rem; margin: 0 0 4px; }
-  h2 { font-size: 1.05rem; margin: 20px 0 8px; }
+  /* Issue #740: 競馬新聞風の紙面(DESIGN.md)。見出しは明朝系(端末にあるものだけ。Web フォントは CSP が許さない。無ければゴシックに落ちる)。h2 は墨の帯。 */
+  h1, h2, h3, .title { font-family: "Hiragino Mincho ProN", "Noto Serif CJK JP", "Noto Serif JP", "Yu Mincho", serif; }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  h2 { font-size: 1rem; margin: 22px 0 8px; padding: 3px 8px; background: var(--fg); color: var(--bg); letter-spacing: 0.08em; }
   /* Issue #191: 見出しのリンク(押すとトップ=一覧の画面。見出しの見た目のまま・タップしやすい高さ) */
   .home { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: inherit; text-decoration: none; }
   /* Issue #244: 見出しの横の画像(装飾。幅・高さを固定して、読み込み中もレイアウトを動かさない) */
@@ -121,9 +123,9 @@ ${paletteCss()}
   /* Issue #572: 一覧の「最終更新 09:48」。上の並びの直後の小さい 1 行(狭い幅でも折り返さない長さ。日付が付いても 1 行に収まる) */
   .list-updated { margin: 0 0 8px; font-size: 0.8rem; color: var(--muted); }
   .date { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--muted); }
-  input[type="date"] { font-size: 1rem; min-height: 44px; padding: 0 8px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  input[type="date"] { font-size: 1rem; min-height: 44px; padding: 0 8px; color: var(--fg); background: var(--card); border: 1px solid var(--fg); }
   .tabs { display: flex; gap: 4px; }
-  .tab, .report-tab { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 64px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .tab, .report-tab { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 64px; padding: 0 14px; border: 1px solid var(--fg); color: var(--fg); text-decoration: none; background: transparent; }
   /* Issue #570: 選んでいるタブは brand(強調の色)。リンクの色(accent)とは別。太字でも示す */
   /* Issue #571: レース画面・結果画面の見出しの上のパンくず(小さい 1 行。狭い幅では折り返す)と、見出しの下の前後のレース(日報の前後のリンクと同じ .tabs .tab) */
   .breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 0 0 4px; font-size: 0.8rem; color: var(--muted); }
@@ -131,56 +133,58 @@ ${paletteCss()}
   .breadcrumb [aria-current="page"] { color: var(--fg); font-weight: bold; }
   .race-neighbors { flex-wrap: wrap; margin: 0 0 8px; }
   .tab[aria-current="page"], .report-tab[aria-current="page"] { border-color: var(--brand); color: var(--brand); font-weight: bold; }
-  button { font-size: 1rem; min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); background: var(--card); }
+  button { font-size: 1rem; min-height: 44px; padding: 0 16px; border: 1px solid var(--fg); color: var(--fg); background: transparent; }
   button[disabled] { opacity: 0.6; }
-  .notice { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); font-size: 0.9rem; }
+  .notice { margin: 8px 0; padding: 6px 2px; border: 0; border-top: 1px solid var(--line); font-size: 0.9rem; }
   .notice.error { border-color: var(--fail); color: var(--fail); }
   .empty { color: var(--muted); }
   /* Issue #187: 場ごとの見出し(開閉のボタン。h2 の中。文字の ▾/▸ でも開閉が分かる) */
+  /* Issue #740: 開閉の見出し(h2 の中のボタン)は、h2 の帯ではなくボタンが墨の帯になる(h2 自体は素のまま) */
+  .venue h2, .settings-section h2 { padding: 0; background: transparent; color: var(--fg); letter-spacing: normal; }
   .venue h2 { margin: 12px 0 8px; font-size: 1.05rem; }
-  .venue-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-size: 1.05rem; font-weight: bold; }
+  .venue-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-size: 1.05rem; font-weight: bold; background: var(--fg); color: var(--bg); }
   .races { list-style: none; margin: 0; padding: 0; }
-  .races li { margin: 0 0 8px; }
+  .races li { margin: 0; }
   /* Issue #251: 場ごとの一括実行(管理者だけ。場を開いたときの上部。ボタンは横に並べ、狭い幅では折り返す。確認画面は枠で囲む) */
   .bulk { margin: 0 0 12px; }
   .bulk-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
   .bulk-run { flex: 1 1 12rem; }
   .bulk-note { margin: 4px 0 0; }
-  .bulk-panel { margin: 8px 0 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .bulk-panel { margin: 8px 0 0; padding: 8px 2px; border: 0; border-top: 1px solid var(--fg); }
   .bulk-panel h3 { margin: 0 0 4px; font-size: 1rem; }
   .bulk-lines { margin: 4px 0; padding-left: 1.2em; font-size: 0.9rem; }
   .bulk-notes { list-style: none; margin: 4px 0; padding: 0; }
   .bulk-notes .notice { margin: 4px 0; }
   .bulk-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
   .bulk-result p { margin: 0 0 8px; }
-  .race { display: block; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); text-decoration: none; }
+  .race { display: block; min-height: 44px; padding: 8px 2px; border: 0; border-top: 1px solid var(--line); color: var(--fg); text-decoration: none; }
   /* Issue #559: 一覧の先頭の「次に発走するレース」。見出しは p、行は div.next-race(h2・li・a.race は使わない)。ボタンはリンクの外 */
   .next-races { margin: 0 0 12px; }
   .next-head { margin: 8px 0 4px; }
-  .next-race { margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .next-race { margin: 0; padding: 8px 2px; border: 0; border-top: 1px solid var(--line); }
   .next-link { display: block; color: var(--fg); text-decoration: none; }
   .race-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
   .race-detail { display: block; font-size: 0.85rem; color: var(--muted); }
   .race-result { font-weight: 600; color: inherit; }
   .result-pending, .result-pending_payout, .result-none, .result-excluded, .result-no_proposal { font-weight: normal; color: var(--muted); }
-  .grade { font-size: 0.75rem; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; }
+  .grade { font-size: 0.75rem; padding: 0 6px; border: 1px solid var(--fg); }
   .badges { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px; font-size: 0.8rem; }
   .badge.ok { color: var(--ok); }
   .badge.wait { color: var(--wait); }
   .badge.fail { color: var(--fail); }
   .badge.none { color: var(--muted); }
   /* Issue #558: 一覧のバッジ(ピル)。ok・wait・fail は tone 色の塗りに --bg の文字、未実行は --line の枠線に --muted の文字(新しい色は足さない=文字と背景の組は palette.test で 4.5 以上の組)。文字(「事前: 完了」)は残す。タスクカードの .badge は変えない(.badges の中だけ) */
-  .badges .badge { display: inline-block; padding: 0 8px; border: 1px solid transparent; border-radius: 999px; font-weight: 600; line-height: 1.6; }
-  .badges .badge.ok { background: var(--ok); border-color: var(--ok); color: var(--bg); }
-  .badges .badge.wait { background: var(--wait); border-color: var(--wait); color: var(--bg); }
-  .badges .badge.fail { background: var(--fail); border-color: var(--fail); color: var(--bg); }
+  .badges .badge { display: inline-block; padding: 0 6px; border: 1px solid currentColor; font-size: 0.75rem; font-weight: normal; line-height: 1.6; }
+  .badges .badge.ok { background: transparent; border-color: var(--ok); color: var(--ok); }
+  .badges .badge.wait { background: transparent; border-color: var(--wait); color: var(--wait); }
+  .badges .badge.fail { background: transparent; border-color: var(--fail); color: var(--fail); }
   .badges .badge.none { background: transparent; border-color: var(--line); color: var(--muted); }
   .back { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
   /* Issue #185: レース画面・結果画面(色だけに頼らない。強調は文字〈EVプラス〉も付ける) */
   .controls .back { margin-right: auto; }
-  .title { font-size: 1.15rem; margin: 4px 0 8px; }
-  .card { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
-  .card h2 { display: inline-block; margin: 0 8px 0 0; }
+  .title { font-size: 1.5rem; margin: 4px 0 8px; padding-bottom: 4px; border-bottom: 3px double var(--fg); }
+  .card { margin: 0 0 12px; padding: 8px 2px; border: 0; border-top: 2px solid var(--fg); }
+  .card h2 { display: inline-block; margin: 0 8px 0 0; padding: 0; background: transparent; color: var(--fg); letter-spacing: normal; }
   .card .badge { font-size: 0.85rem; }
   .card-error { margin: 6px 0 0; font-size: 0.8rem; color: var(--fail); }
   .prior, .past, .horse-list, .bets, .settings { list-style: none; margin: 8px 0 0; padding: 0; }
@@ -192,12 +196,12 @@ ${paletteCss()}
   /* Issue #344: 締切直前の再計算(回ごとの塊。見出しの段落は strong) */
   .close-round { margin: 12px 0 0; }
   .close-round-title { margin: 0 0 4px; }
-  .horse { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
-  .horse.positive { border-color: var(--brand); border-width: 2px; }
+  .horse { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 8px 2px; border: 0; border-top: 1px solid var(--line); }
+  .horse.positive { border-top: 2px solid var(--brand); }
   .horse-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
   .mark { font-weight: bold; }
   /* Issue #317: 印を補修した馬の目印(「直」と元の印→今の印)。色だけに頼らない=文字がある */
-  .mark-fixed { font-size: 0.75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+  .mark-fixed { font-size: 0.75rem; color: var(--muted); border: 1px solid var(--line); padding: 0 4px; white-space: nowrap; }
   .horse-line { font-size: 0.9rem; }
   .horse-reason { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
   .ev-plus { margin-left: 8px; color: var(--brand); }
@@ -219,11 +223,11 @@ ${paletteCss()}
   .card-desc { margin: 6px 0 0; font-size: 0.85rem; color: var(--muted); }
   .race-guide { margin: 8px 0 0; font-size: 0.85rem; color: var(--muted); }
   /* Issue #189: 設定画面(トップの入口のリンク・入力欄。タップしやすい高さ 44px 以上。色だけに頼らない=エラーは文字と role=alert) */
-  .settings-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .settings-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--fg); color: var(--fg); text-decoration: none; background: transparent; }
   /* Issue #219: 検証画面(一覧の入口のリンク・区分の切替・数値のタイル・内訳の行。スマホ幅で横に伸ばさない=タイルは 2 列・行は折り返す。色だけに頼らない=回収率は太字) */
-  .verify-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .verify-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--fg); color: var(--fg); text-decoration: none; background: transparent; }
   /* Issue #336: 今日の狙い目(一覧の入口のリンクは検証の左。行は一覧のレースの行〈.race〉を流用し、残り時間を右端に寄せる。見送りと発走済みは薄く、10 分以内は色+太字で強調する) */
-  .targets-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .targets-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--fg); color: var(--fg); text-decoration: none; background: transparent; }
   /* Issue #570: 見送りと発走済みの行は、opacity ではなく文字の色(muted)で薄く見せる(opacity だと muted の文字のコントラスト比がライトで約 2.5・ダークで約 3.4 まで落ちて、4.5 を割る)。
      色は継承なので二重がけにならない。自前の色を持つ子(.race-detail〈muted〉・.t-left.soon〈wait〉・一覧のバッジ〈.badges .badge.* の tone〉)はそれが勝つ(Issue #558 のバッジは、発走済みでも薄くならない) */
   .race.skipped { color: var(--muted); }
@@ -231,12 +235,12 @@ ${paletteCss()}
   .t-left { margin-left: auto; font-weight: bold; white-space: nowrap; }
   .t-left.soon { color: var(--wait); }
   /* Issue #235: 日報画面(一覧の入口のリンク・レースごとのカード・箇条書き・生の文章。スマホ幅で横に伸ばさない=改行で折り返す) */
-  .report-link, .monthly-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .report-link, .monthly-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--fg); color: var(--fg); text-decoration: none; background: transparent; }
   .report-run { min-height: 44px; margin: 8px 0; }
   .report-list { margin: 4px 0 8px; padding-left: 1.3em; }
   .report-summary { margin: 4px 0 8px; overflow-wrap: anywhere; }
   .report-raw { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
-  .report-race { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .report-race { margin: 10px 0; padding: 8px 2px; border: 0; border-top: 1px solid var(--fg); }
   .report-race h3 { margin: 0 0 4px; font-size: 1rem; }
   /* Issue #279: 月報(日報の画面の中の「月」)。月の見出し・注記・日ごと/版ごとの行(値が長いので、ラベルの下に折り返す。日付のリンクはタップしやすい高さ 44px 以上) */
   .report-month { margin: 8px 0 4px; font-size: 1.1rem; }
@@ -255,17 +259,17 @@ ${paletteCss()}
   .verify-targets { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
   .verify-target { min-width: 64px; }
   .verify-target[aria-pressed="true"] { border-color: var(--brand); color: var(--brand); font-weight: bold; }
-  .verify-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
-  .verify-tile { display: flex; flex-direction: column; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
-  .verify-tile.strong { border-color: var(--accent); }
+  .verify-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; margin: 8px 0; }
+  .verify-tile { display: flex; flex-direction: column; padding: 6px 8px; border: 0; border-top: 1px solid var(--fg); border-left: 1px solid var(--line); }
+  .verify-tile.strong { border-top: 2px solid var(--accent); }
   .verify-tile-label { font-size: 0.8rem; color: var(--muted); }
-  .verify-tile-value { font-size: 1.1rem; }
+  .verify-tile-value { font-size: 1.1rem; font-weight: bold; font-variant-numeric: tabular-nums; }
   /* Issue #579: 日報・月報の回収率のタイル。100% 以上は ok、未満は fail の枠(2px)と値の色。注記の文字(▲▼)でも示す。色は palette の ok・fail だけ(--card 上の文字のコントラスト比は palette.test) */
   .report-screen .verify-tile-value { font-size: 1.5rem; }
   .verify-tile-tone { font-size: 0.8rem; font-weight: bold; }
-  .verify-tile.gain { border: 2px solid var(--ok); }
+  .verify-tile.gain { border-top: 3px solid var(--ok); }
   .verify-tile.gain .verify-tile-value, .verify-tile.gain .verify-tile-tone { color: var(--ok); }
-  .verify-tile.loss { border: 2px solid var(--fail); }
+  .verify-tile.loss { border-top: 3px solid var(--fail); }
   .verify-tile.loss .verify-tile-value, .verify-tile.loss .verify-tile-tone { color: var(--fail); }
   .report-money { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; font-variant-numeric: tabular-nums; text-align: right; }
   .report-net { font-weight: bold; }
@@ -278,7 +282,7 @@ ${paletteCss()}
   .verify-rows li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 12px; row-gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
   .verify-row-label { flex: 0 1 auto; max-width: calc(100% - 5em); overflow-wrap: anywhere; }
   .verify-row-value { flex: 0 1 auto; min-width: 0; margin-left: auto; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-  .verify-screen h3 { font-size: 0.95rem; margin: 16px 0 4px; }
+  .verify-screen h3 { font-size: 0.95rem; margin: 16px 0 4px; padding-bottom: 2px; border-bottom: 2px solid var(--fg); }
   /* Issue #220: 補正方向・キャリブレーション・印別(ラベル+「名前 値」の項目。狭い幅では折り返す=表も横スクロールも使わない)。帯グラフは progress */
   .verify-stats { list-style: none; margin: 4px 0 12px; padding: 0; }
   .verify-stat { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
@@ -287,7 +291,7 @@ ${paletteCss()}
   .verify-stat-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
   .verify-stat-name { margin-right: 4px; color: var(--muted); font-size: 0.8rem; }
   /* Issue #220: 版別比較のカード(タイル+開閉ボタン。開閉のボタンはタップしやすい高さ 44px 以上) */
-  .verify-version { margin: 12px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .verify-version { margin: 12px 0; padding: 8px 2px; border: 0; border-top: 1px solid var(--fg); }
   .verify-version h3 { margin: 0 0 4px; overflow-wrap: anywhere; }
   .verify-version .meta { overflow-wrap: anywhere; }
   .verify-versions-link { display: block; margin: 8px 0; padding: 10px 0; color: var(--accent); }
@@ -299,7 +303,7 @@ ${paletteCss()}
   .field-label { display: flex; flex-direction: column; gap: 4px; font-size: 0.95rem; font-weight: bold; }
   .field-check { display: flex; align-items: flex-start; gap: 8px; min-height: 44px; font-size: 0.95rem; font-weight: bold; }
   .field-check input { width: 24px; height: 24px; margin: 10px 0 0; flex: none; }
-  .field input[type="text"], .field textarea, .field select { width: 100%; min-height: 44px; padding: 8px; font-size: 1rem; font-weight: normal; font-family: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .field input[type="text"], .field textarea, .field select { width: 100%; min-height: 44px; padding: 8px; font-size: 1rem; font-weight: normal; font-family: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--fg); }
   .field textarea { min-height: 120px; resize: vertical; }
   .field [aria-invalid="true"] { border-color: var(--fail); border-width: 2px; }
   .field-help { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); }
@@ -311,7 +315,7 @@ ${paletteCss()}
   .settings-bar .settings-save { margin: 0; }
   .settings-bar-status { margin: 0 0 8px; font-size: 0.9rem; font-weight: bold; }
   /* 既定のバッジと「変更あり」の印は文字で出す(色だけに頼らない)。変えた項目は左に線も引く */
-  .field-badge, .field-changed { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; font-size: 0.75rem; font-weight: normal; color: var(--muted); }
+  .field-badge, .field-changed { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px solid var(--line); font-size: 0.75rem; font-weight: normal; color: var(--muted); }
   .field-changed { border-color: var(--brand); color: var(--brand); font-weight: bold; }
   .field.changed { padding-left: 8px; border-left: 4px solid var(--brand); }
   .field-yen { margin: 4px 0 0; min-height: 1.5em; font-size: 1rem; font-weight: bold; }
@@ -322,8 +326,8 @@ ${paletteCss()}
   /* Issue #581: 設定の節(開閉の見出しは h2 の中のボタン。閉じた節の中身は木に出ない。「変更あり N 件」は文字) */
   .settings-section { margin: 16px 0; }
   .settings-section h2 { margin: 8px 0; font-size: 1.05rem; }
-  .section-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; }
-  .section-changed { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px solid var(--brand); border-radius: 4px; font-size: 0.75rem; color: var(--brand); }
+  .section-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; background: var(--fg); color: var(--bg); }
+  .section-changed { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px solid var(--brand); font-size: 0.75rem; color: var(--brand); }
   .weights-help { margin: 4px 0; font-size: 0.8rem; color: var(--muted); }
   .weights-reset { display: block; width: 100%; min-height: 44px; margin: 8px 0 0; font-weight: bold; }
   /* Issue #201: 設定画面のプロンプトのプレビュー(開閉の見出しは h3 の中のボタン。文面は div。改行・折り返しは CSS。内側のスクロールは付けない=スマホで操作しづらいため、ページのスクロールに任せる) */
@@ -332,7 +336,7 @@ ${paletteCss()}
   .preview-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; }
   .preview-note { margin: 8px 0 0; font-size: 0.8rem; color: var(--muted); }
   .preview-refresh { display: block; width: 100%; min-height: 44px; margin: 12px 0 8px; font-weight: bold; }
-  .prompt-preview { padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .prompt-preview { padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; background: var(--card); border: 1px solid var(--line); }
   .notice.ok { border-color: var(--ok); color: var(--ok); }
   .notice.wait { border-color: var(--wait); color: var(--wait); }
   /* Issue #239: 色だけで状態を伝えない(カラーユニバーサルデザイン)。文字のない所には記号を添える: 失敗・警告=⚠、成功=✓、待機=…。バッジ(未実行・待ち・取得済み・完了・失敗)は文字のラベルがあるので足さない */
@@ -347,7 +351,7 @@ ${paletteCss()}
   .formation-phase { margin: 8px 0; }
   .formation-phase-title { margin: 0 0 2px; }
   .formation-axis { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--muted); }
-  .formation-track { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 3px; align-items: start; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+  .formation-track { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 3px; align-items: start; padding: 6px 0; border: 0; border-top: 1px solid var(--fg); border-bottom: 1px solid var(--line); }
   .formation-chip { box-sizing: border-box; justify-self: center; display: flex; align-items: center; justify-content: center; width: 100%; max-width: 28px; aspect-ratio: 1; border: 1px solid var(--fg); border-radius: 50%; background: var(--card); color: var(--fg); font-size: 0.75rem; line-height: 1; }
   .formation-chip.formation-main { border: 3px solid var(--accent); font-weight: bold; }
   .formation-chip[data-slot="0"] { grid-column: 1; }
@@ -365,8 +369,8 @@ ${paletteCss()}
   .formation-legend li.formation-main { font-weight: bold; }
   .result-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; }
   /* Issue #546: 結果の先頭の要約(印・買い目と合計・発走時刻・分析時刻・締切直前の再計算の 1 行)と、説明文の開閉のボタン(「仕組みを見る」。タップしやすい高さ 44px 以上。開閉は ▾/▸ の文字でも示す) */
-  .summary { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
-  .summary h2, .summary h3 { margin: 0 0 4px; font-size: 1rem; }
+  .summary { margin: 0 0 12px; padding: 8px 2px; border: 0; border-top: 2px solid var(--fg); }
+  .summary h2, .summary h3 { margin: 0 0 4px; padding: 0; font-size: 1rem; background: transparent; color: var(--fg); letter-spacing: normal; }
   .summary-marks { display: flex; flex-wrap: wrap; gap: 2px 14px; list-style: none; margin: 4px 0 0; padding: 0; }
   .summary-marked-mark { font-weight: bold; }
   .summary-bet-line { margin: 6px 0 0; font-weight: bold; }
@@ -375,22 +379,22 @@ ${paletteCss()}
   .summary .meta { margin: 4px 0 0; }
   .notes-toggle { display: block; width: 100%; min-height: 44px; margin: 4px 0; padding: 8px 12px; text-align: left; }
   /* 馬ごとの評価の表(Issue #546-2)。枠が横にスクロールし、ページ全体は横にはみ出さない。列見出しのボタンは見た目を抑え、タップの高さは 44px を保つ。 */
-  .horse-table-wrap { overflow-x: auto; max-width: 100%; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; }
-  .horse-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
-  .horse-table th, .horse-table td { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  .horse-table-wrap { overflow-x: auto; max-width: 100%; margin: 8px 0; border: 0; border-bottom: 1px solid var(--fg); }
+  .horse-table { border-collapse: collapse; width: 100%; font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+  .horse-table th, .horse-table td { padding: 4px 4px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
   /* 馬名の列だけは折り返す(最大幅つき)。375px の幅でも、開いてすぐ 3着内率・AI補正後・EV が枠の中に収まるようにするため(実測は Issue #546-2 のコミットメッセージ)。数字の列は nowrap のまま(「1.40(推定)」を割らない)。 */
   .horse-table th:nth-child(3), .horse-table td:nth-child(3) { text-align: left; }
   .horse-table td:nth-child(3) { white-space: normal; max-width: 6em; min-width: 5em; }
   .horse-table th:nth-child(2), .horse-table td:nth-child(2) { text-align: center; }
-  .horse-table th { padding: 0; font-weight: normal; color: var(--muted); }
+  .horse-table th { padding: 0; font-weight: normal; color: var(--muted); border-top: 2px solid var(--fg); border-bottom: 2px solid var(--fg); }
   .horse-table th:nth-child(2), .horse-table th:nth-child(3) { padding: 6px 4px; }
-  .horse-table .sort-button { width: 100%; min-height: 44px; padding: 0 3px; border: 0; border-radius: 0; background: transparent; color: inherit; font-size: 0.8rem; white-space: nowrap; }
+  .horse-table .sort-button { width: 100%; min-height: 44px; padding: 0 3px; border: 0; background: transparent; color: inherit; font-size: 0.8rem; white-space: nowrap; }
   .horse-table th[aria-sort="ascending"] .sort-button, .horse-table th[aria-sort="descending"] .sort-button { color: var(--fg); font-weight: bold; }
   .horse-table tbody tr:last-child td { border-bottom: 0; }
   .horse-table .eval-marked td { font-weight: bold; }
   .horse-table .eval-positive td { background: var(--card); }
   /* Issue #582: 3着内率の棒(progress。数字の下。色は brand 1 色・地は line。ライト・ダークとも変数) */
-  .horse-bar { display: block; width: 3.5em; height: 6px; margin: 2px 0 0 auto; border: 0; border-radius: 3px; overflow: hidden; background: var(--line); appearance: none; }
+  .horse-bar { display: block; width: 3.5em; height: 6px; margin: 2px 0 0 auto; border: 0; overflow: hidden; background: var(--line); appearance: none; }
   .horse-bar::-webkit-progress-bar { background: var(--line); }
   .horse-bar::-webkit-progress-value { background: var(--brand); }
   .horse-bar::-moz-progress-bar { background: var(--brand); }
@@ -402,7 +406,7 @@ ${paletteCss()}
   .horse-table .market-few-mark { font-weight: bold; }
   .market-note { margin: 4px 0 8px; font-size: 0.8rem; color: var(--muted); }
   /* Issue #644: 騎手・調教師の指標の一覧 */
-  .edges-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .edges-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--fg); color: var(--fg); text-decoration: none; background: transparent; }
   .edges-table-wrap { overflow-x: auto; }
   .edges-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
   .edges-table th, .edges-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }

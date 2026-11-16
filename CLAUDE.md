@@ -305,6 +305,7 @@
 - [`docs/handover-next-session.md`](./docs/handover-next-session.md) — 過去セッションから次セッションへの引き継ぎ(実装済みタスクの仕様記録・技術メモ)。
 - [`docs/versioning.md`](./docs/versioning.md) — 版数運用規約(major/minor/patch の基準、公開1回につき必ず1回上げる運用、`packages/core` 対象外の理由)。**Issue #248 で 1.44.0 に凍結済み(以後は上げない)。** 規約の本文は 1.44.0 までの運用の記録。exe のコードは #285 で削除(最後に残っているコミットは 3c1664e)。
 - [`docs/db-sql-rules.md`](./docs/db-sql-rules.md) — **D1・DO の SQLite に SQL を足すときの決まり**(全走査を入れない・索引の書き込みの見積もり・migration は追加だけ・`json_each` での束縛など)と、実行計画の検査の一覧(Issue #632)。`cloud/test/sql-plan-inventory.test.ts` が、export された SQL の検査漏れを赤にする。
+- [`DESIGN.md`](./DESIGN.md) — **画面の見た目の決まり**(競馬新聞風。色・文字・線・余白・部品・ダーク)。google-labs-code/design.md の形式。色の値の正は `cloud/src/palette.ts` で、食い違いは `cloud/test/design-md.test.ts` が赤にする。
 - [`docs/issue-order.md`](./docs/issue-order.md) — **Issue の着手順**。次に何をやるか、依存関係・前提、着手しないと決めた理由を集約。
 - [`docs/jra-odds-investigation.md`](./docs/jra-odds-investigation.md) — JRA の公式サイトのオッズ・出馬表の取り方の実測調査(ページへの行き方・cname・更新の間隔)。
 - `docs/investigations/` — 個々の調査の計画・結果・報告(当時の記録。推敲の対象外)。

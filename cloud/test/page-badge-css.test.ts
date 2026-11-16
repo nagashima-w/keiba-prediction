@@ -49,19 +49,24 @@ function resolve(value: string | undefined, palette: WebPalette): string | null 
 const FILLED = ["ok", "wait", "fail"] as const;
 
 describe("バッジの CSS(Issue #558): 一覧の `.badges .badge`", () => {
-  it("前提: CSS を読めていて、ピルの基本の規則(丸み・余白)が 1 つある", () => {
+  // Issue #740: 競馬新聞風でピル(丸い塗り)をやめ、細い枠線+tone 色の文字のラベルにした(DESIGN.md)。旧版の保証との対応: ピルの基本の規則 → 枠線のラベルの基本の規則(角丸・塗りが無いことも固定)、
+  // tone 色の塗り+文字 --bg → tone 色の枠と文字(塗りは透明)、塗りの組のコントラスト 4.5 → 文字(tone 色)と紙(bg・card)の両方で 4.5、3 つの塗りが別の変数 → 3 つの tone 色が別の変数、none・`.badge` の限定・opacity の対照は変更なし。
+  it("前提: CSS を読めていて、ラベルの基本の規則(細い枠線・余白)が 1 つあり、角丸も塗りも持たない", () => {
     expect(rules.length).toBeGreaterThan(50);
     const base = ruleFor(".badges .badge");
     expect(base).toHaveLength(1);
-    expect(base[0]!.decls.get("border-radius")).toBeDefined();
+    expect(base[0]!.decls.get("border")).toBe("1px solid currentColor");
     expect(base[0]!.decls.get("padding")).toBeDefined();
+    expect(base[0]!.decls.has("border-radius")).toBe(false);
+    expect(base[0]!.decls.has("background")).toBe(false);
   });
 
-  it.each(FILLED)("%s: tone 色で塗り、文字は --bg(ピル)。新しい色を足さず palette の変数だけを使う", (tone) => {
+  it.each(FILLED)("%s: 枠と文字が tone 色で、塗らない。新しい色を足さず palette の変数だけを使う", (tone) => {
     const found = ruleFor(`.badges .badge.${tone}`);
     expect(found).toHaveLength(1);
-    expect(found[0]!.decls.get("background")).toBe(`var(--${tone})`);
-    expect(found[0]!.decls.get("color")).toBe("var(--bg)");
+    expect(found[0]!.decls.get("background")).toBe("transparent");
+    expect(found[0]!.decls.get("border-color")).toBe(`var(--${tone})`);
+    expect(found[0]!.decls.get("color")).toBe(`var(--${tone})`);
   });
 
   it("未実行(none): 塗らず、--line の枠線と --muted の文字", () => {
@@ -73,13 +78,12 @@ describe("バッジの CSS(Issue #558): 一覧の `.badges .badge`", () => {
   });
 
   describe.each(MODES)("%s: 文字と背景のコントラスト比が 4.5 以上", (_name, palette) => {
-    it.each(FILLED)("%s(塗り=tone 色・文字=--bg)", (tone) => {
+    it.each(FILLED)("%s(文字=tone 色・紙=--bg と --card の両方の上)", (tone) => {
       const rule = ruleFor(`.badges .badge.${tone}`)[0]!;
-      const fill = resolve(rule.decls.get("background"), palette);
       const text = resolve(rule.decls.get("color"), palette);
-      expect(fill, "背景が palette の変数").not.toBeNull();
       expect(text, "文字が palette の変数").not.toBeNull();
-      expect(contrastRatio(text!, fill!)).toBeGreaterThanOrEqual(MIN_CONTRAST);
+      expect(contrastRatio(text!, palette.bg)).toBeGreaterThanOrEqual(MIN_CONTRAST);
+      expect(contrastRatio(text!, palette.card)).toBeGreaterThanOrEqual(MIN_CONTRAST);
     });
 
     it("none(文字=--muted。背景はカードまたはページ背景の上)", () => {
@@ -90,9 +94,9 @@ describe("バッジの CSS(Issue #558): 一覧の `.badges .badge`", () => {
     });
   });
 
-  it("3 つの塗りは互いに別の変数(ok・wait・fail を同じ色にしていない)", () => {
-    const fills = FILLED.map((t) => ruleFor(`.badges .badge.${t}`)[0]!.decls.get("background"));
-    expect(new Set(fills).size).toBe(3);
+  it("3 つの tone 色は互いに別の変数(ok・wait・fail を同じ色にしていない)", () => {
+    const colors = FILLED.map((t) => ruleFor(`.badges .badge.${t}`)[0]!.decls.get("color"));
+    expect(new Set(colors).size).toBe(3);
   });
 
   it("塗り(background)を持つ `.badge` の規則は `.badges .badge` の中だけ(レース画面のタスクカードの `.badge` は変えない)", () => {

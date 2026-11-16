@@ -25,12 +25,12 @@ describe("トップの上の並びの CSS(Issue #544)", () => {
     expect(css).not.toMatch(/max-width:\s*40rem/);
   });
 
-  it("「月報」のリンク(monthly-link)は「日報」(report-link)と同じ 1 つの規則で、同じ見た目(高さ 44px・枠・角丸)になる", () => {
+  it("「月報」のリンク(monthly-link)は「日報」(report-link)と同じ 1 つの規則で、同じ見た目(高さ 44px・墨の枠・角丸なし。Issue #740 で角丸 8px をやめ、枠を --line から --fg にした)になる", () => {
     const shared = bodiesOf(".report-link, .monthly-link");
     expect(shared).toHaveLength(1);
     expect(shared[0]).toMatch(/min-height:\s*44px/);
-    expect(shared[0]).toMatch(/border:\s*1px solid var\(--line\)/);
-    expect(shared[0]).toMatch(/border-radius:\s*8px/);
+    expect(shared[0]).toMatch(/border:\s*1px solid var\(--fg\)/);
+    expect(shared[0]).not.toMatch(/border-radius/);
     // 右寄せ(margin-left: auto)は画面の移動の塊(.list-nav)が担う(Issue #560)。この規則自体は寄せない
     expect(pushesRight(shared[0]!)).toBe(false); // margin-left だけでなく、margin-inline-start・margin の一括指定でも寄せない
     expect(shared[0]).not.toMatch(/margin-left/);
@@ -122,12 +122,12 @@ describe("トップの上の並びを 2 つの塊に分ける CSS(Issue #560)", 
     expect(css).not.toMatch(/\.(verify|targets|monthly)-link\s*\+\s*\.(verify|settings)-link/);
   });
 
-  it("5 つのリンクの共通の見た目(高さ 44px・枠・角丸)は残る", () => {
+  it("5 つのリンクの共通の見た目(高さ 44px・墨の枠・角丸なし。Issue #740)は残る", () => {
     const rule = css.split("}").find((r) => (r.split("{")[0] ?? "").includes(".settings-link"));
     expect(rule).toBeDefined();
     expect(rule).toMatch(/min-height:\s*44px/);
-    expect(rule).toMatch(/border:\s*1px solid var\(--line\)/);
-    expect(rule).toMatch(/border-radius:\s*8px/);
+    expect(rule).toMatch(/border:\s*1px solid var\(--fg\)/);
+    expect(rule).not.toMatch(/border-radius/);
   });
 
   it("狭い画面(max-width: 48.25rem)では、画面の移動が幅いっぱいの専用の段になり、上に区切り線が入る。リンクは幅いっぱいに並び、文字の中では折り返さない", () => {
