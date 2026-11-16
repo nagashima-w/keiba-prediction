@@ -1576,6 +1576,21 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **値の突き合わせ**: 手元の過去の結果 7,718 レース(2024-08-10〜2026-11-01)に同じ式をかけると、係数が [2.857, 0.922, −0.556]、荻野極が +0.041(1,330 騎乗)、松若が +0.031(1,150 騎乗)で、`explore.py` の結果と小数第 3 位まで一致する。
 - **検査**: `cloud/test/market-edge-calc.test.ts`(純関数。Python の参照実装との突き合わせ)・`market-edge-aggregate.test.ts`・`market-edge-core.test.ts`・`market-edge-repository.integration.test.ts`・`market-edge-budget.integration.test.ts`、`scripts/test/cloud-config-guard.test.ts`(#642 の節)、`scripts/test/cloud-d1-schema.test.ts`。
 
+### 結果画面の「騎手・調教師の指標」の列(#643。**版数は 1.44.0 のまま**〈凍結〉)
+馬ごとの評価の表(結果画面と、発走前のカードの中)の末尾に、「騎手(参考)」「調教師(参考)」の列を足す。#642 の指標を見るためのもので、**分析(LLM・配分)には使わない**。まだ時期を分けて確かめていない値なので、画面に「参考(確かめ中)」と書き添える(ユーザーの決定 2026-11-06・11-16)。
+
+- **データ**: `GET /api/analyses/{id}` の応答に足す。馬ごとの `marketEdge`(`jockey`・`trainer` の各 `{name, edge, n}`)と、分析ごとの `marketEdgeNote`(注記の文。サーバが組み立てる)。`cloud/src/analysis-market-edge.ts`。
+  - 騎手・調教師の ID は、分析の記録(`raceSnapshot`)から直接読む(core の `toSafeRaceSnapshot` は ID を捨てるため。core は変えない)。名前も同じ記録の `jockeyName`・`trainerName`(出馬表の書き方)。`market_edge.name`(結果ページの略称)は使わない。**ID の無い馬**(騎手 ID は 2026-10-29、調教師 ID は 2026-10-30 より前の分析)は、**名前での引き当てをしない**。値と件数は null で、画面は名前と「—」を出す。
+  - D1 は `D1MarketEdgeStore.readForRace(騎手 ID の配列, 調教師 ID の配列)`。**1 回の batch で 3 文**(騎手・調教師の主キーの引き `SELECT_MARKET_EDGES_BY_IDS_SQL` が 2 文と、`market_edge_meta` の 1 行)。ID は `json_each` で束縛する。読む行数は出走頭数(最大でも 2 × 頭数 + 1 行)で、表の大きさに依らない(`market-edge-repository.integration.test.ts` が `meta.rows_read` で固定)。`readEdges`(全員を読む)は使わない。
+  - **列を出さない**(`marketEdgeNote` が null、馬の `marketEdge` も null)のは、地方のレース(指標は中央だけ)・詳細が present でない・`market_edge_meta` が無い(計算前)・どの馬にも値が付かない・**読み出しの失敗**(握って null。`close`・`previousDiff` と同じく、本体の応答は壊さない。例外の文面は返さない)。地方・詳細なしのときは D1 を読まない。
+  - 値は**今の指標**(最新の計算の晩の値)で、分析した時点の値ではない(過去の分析を開いても今日の値が出る)。注記の文にもそう書く。
+- **画面**(`client/result.ts`・`view.ts`): 列は既存の列の末尾。並べ替えは付けない。セルは名前(1 段目)・値(2 段目。既存の補正幅と同じ `formatAdjustment` で「+3.0pt」「-1.3pt」、丸めて 0 になる値は「±0.0pt」)・件数(小さく「n=312」)。値と件数が無い人は「—」(件数は出さない)。単位は `pt`(3 着内率どうしの差。「%」だと相対の増えと読まれるため)。
+  - **件数が 50 未満**(定数 `MARKET_EDGE_FEW_N`。ユーザーの決定 2026-11-16)の人は、値は出したまま、薄い字(`market-few`)にして件数の後ろに「少」の文字を付ける(色だけに頼らない)。49 は少ない、50 は少なくない。
+  - 注記は表の枠の下に 1 回(`market-note`)。参考(確かめ中)であること・分析に使っていないこと・期間(窓)・意味(単勝オッズから見込まれる 3 着内の確率より何ポイント多く来たか。+3.0pt は 100 回で約 3 回多い)・件数が少ない人は 0 に寄せてあること・計算した日の値であることを書く。
+  - 名前は外から来る文字列なので、テキストノードだけで入れる(`<b>` は要素にならない)。
+- **束**: 249,758 → 251,260 バイト(+1,502)。上限を 250,000 から 252,000 へ引き上げた(詳細は `cloud/test/client-bundle.test.ts` の追記)。
+- **検査**: `cloud/test/analysis-market-edge.test.ts`(サーバの組み立て)・`handler-analysis-detail.integration.test.ts`(本物の D1 で、値・列なし・読み出しの失敗)・`market-edge-repository.integration.test.ts`(`readForRace`)・`client-api-analysis.test.ts`(応答の検査)・`client-result.test.ts`(列・セル・境界 49/50)・`client-view.test.ts`(セル・「少」・エスケープ・注記)。
+
 ### 統計モデルの並走(影の計算。#649 段階 2・3。**版数は 1.44.0 のまま**〈凍結〉)
 発走前の分析のときだけ、学習済みのロジスティック回帰で各馬の勝率・2着内率・3着内率を計算し、D1 の別の表に記録する。**買い目・配分・EV・画面・LLM のプロンプトのどれにも使わない**(結果が出たあとに、いまのやり方と並べて比べるための記録)。
 - **モデル**(`packages/core/src/ev/stat-shadow.ts`・係数は自動生成の `stat-shadow-coef.ts`): 目的(勝率・2着内率・3着内率)ごとの標準化 + L2 のロジスティック回帰を 2 つ。版の名前は `lr649-odds-2026-11-07`(オッズ入り)と `lr649-noodds-2026-11-07`(オッズなし)。係数は #649 の保留を開けた評価と同じ学習(中央 2025-02〜2026-10、6,113 レース・83,806 頭)。係数を学び直したら新しい名前にして、古い名前の行は書き換えない。

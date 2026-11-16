@@ -1278,3 +1278,71 @@ describe("パンくずと前後のレース(Issue #571)", () => {
     expect(viewer.neighbors).toEqual(admin.neighbors);
   });
 });
+
+/**
+ * Issue #643: 馬ごとの評価の表の「騎手(参考)」「調教師(参考)」の列。サーバが付けた `marketEdge`(名前・指標・件数)と `marketEdgeNote` から作る。
+ * 列は既存の列の末尾。出すのは、注記があり、1 頭でも `marketEdge` を持つときだけ(地方・記録なし・読み出しの失敗は、サーバが注記を null にする)。
+ * 値は `+3.0pt`(既存の補正幅と同じ `formatAdjustment`。0 は「±0.0pt」)、件数は `n=312`、件数が 50 未満なら `few`(「少」の印は画面)。
+ */
+describe("騎手・調教師の指標の列(Issue #643)", () => {
+  const NOTE = "参考の注記の文";
+  const person = (name: string | null, edge: number | null, n: number | null) => ({ name, edge, n });
+  const me = (j: ReturnType<typeof person>, t: ReturnType<typeof person>) => ({ jockey: j, trainer: t });
+  const horses = (marketEdges: (ReturnType<typeof me> | null)[]): AnalysisHorse[] => marketEdges.map((m, i) => horse(i + 1, { marketEdge: m }));
+  const tableOf = (a: AnalysisDetail) => content(a).horseTable!;
+  const withMarket = (marketEdges: (ReturnType<typeof me> | null)[], note: string | null = NOTE) => analysis({ horses: horses(marketEdges), marketEdgeNote: note });
+  const cellOf = (a: AnalysisDetail, i = 0) => tableOf(a).rows[i]!.marketEdge;
+
+  it("列は既存の列の末尾に「騎手(参考)」「調教師(参考)」(並べ替えなし)。注記は表に載る。LLM が効いたときも末尾", () => {
+    const m = [me(person("騎A", 0.03, 312), person("厩A", 0.0449, 80))];
+    const t = tableOf(withMarket(m));
+    expect(t.columns.map((c) => c.key)).toEqual(["umaban", "mark", "name", "prior", "ev", "winOdds", "placeOddsMin", "jockey", "trainer"]);
+    expect(t.columns.slice(-2).map((c) => [c.label, c.sort])).toEqual([["騎手(参考)", null], ["調教師(参考)", null]]);
+    expect(t.marketEdgeNote).toBe(NOTE);
+    const llm = tableOf({ ...withMarket(m), model: "claude-x" });
+    expect(llm.columns.map((c) => c.key)).toEqual(["umaban", "mark", "name", "prior", "adjusted", "ev", "winOdds", "placeOddsMin", "jockey", "trainer"]);
+  });
+
+  it("セルは 名前・値(+3.0pt)・件数(n=312)。名前が無ければ null。値が負・0 のときの書き方は既存の補正幅と同じ(0 は ±0.0pt)", () => {
+    const a = withMarket([me(person("騎A", 0.03, 312), person(null, -0.013, 80)), me(person("騎B", 0, 100), person("厩B", 0.0004, 100))]);
+    expect(cellOf(a, 0)).toEqual({ jockey: { name: "騎A", value: "+3.0pt", n: "n=312", few: false }, trainer: { name: null, value: "-1.3pt", n: "n=80", few: false } });
+    expect(cellOf(a, 1).jockey.value, "ちょうど 0").toBe("±0.0pt");
+    expect(cellOf(a, 1).trainer.value, "0.04pt は丸めて 0.0pt → ±0.0pt").toBe("±0.0pt");
+  });
+
+  it.each([
+    [0, true],
+    [49, true],
+    [50, false],
+    [51, false],
+    [312, false],
+  ])("件数 %i は few=%s(境界は 49 と 50。50 未満が少ない)", (n, few) => {
+    const c = cellOf(withMarket([me(person("騎", 0.01, n), person("厩", 0.01, n))]));
+    expect(c.jockey.n, "前提: 件数の文字が出ている").toBe(`n=${n}`);
+    expect(c.jockey.few).toBe(few);
+    expect(c.trainer.few).toBe(few);
+  });
+
+  it("★値と件数が無い(ID なし・表に無い)人は「—」・件数は空・few は false(名前は残す)。marketEdge が null の馬も同じ「—」で、名前は null", () => {
+    const a = withMarket([me(person("騎A", null, null), person("厩A", 0.02, 60)), null]);
+    expect(cellOf(a, 0)).toEqual({ jockey: { name: "騎A", value: "—", n: "", few: false }, trainer: { name: "厩A", value: "+2.0pt", n: "n=60", few: false } });
+    expect(cellOf(a, 1)).toEqual({ jockey: { name: null, value: "—", n: "", few: false }, trainer: { name: null, value: "—", n: "", few: false } });
+  });
+
+  it("★列を出さない: 注記が null(地方・記録なし・失敗)・全馬 marketEdge が null・キー無し(古いサーバ)。既存の列は変わらない", () => {
+    const m = [me(person("騎A", 0.03, 312), person("厩A", 0.02, 80))];
+    const keys = (a: AnalysisDetail) => tableOf(a).columns.map((c) => c.key);
+    const base = ["umaban", "mark", "name", "prior", "ev", "winOdds", "placeOddsMin"];
+    expect(keys(withMarket(m, null)), "注記なし").toEqual(base);
+    expect(keys(withMarket([null, null])), "全馬 null").toEqual(base);
+    expect(keys(analysis({ horses: [horse(1), horse(2)] })), "キー無し").toEqual(base);
+    expect(tableOf(withMarket(m, null)).marketEdgeNote).toBeNull();
+    expect(keys(withMarket(m)), "前提: 出る条件では出ている").toContain("jockey");
+  });
+
+  it("並べ替えても、馬の行に付いた値は馬について回る(3着内率の大きい順)", () => {
+    const hs = [horse(1, { prior: 0.1, marketEdge: me(person("騎1", 0.01, 100), person("厩1", 0.01, 100)) }), horse(2, { prior: 0.5, marketEdge: me(person("騎2", 0.02, 100), person("厩2", 0.02, 100)) })];
+    const model = buildResultModel({ route: ROUTE, source: ready(analysis({ horses: hs, marketEdgeNote: NOTE })), horseSort: { key: "prior", dir: "desc" } });
+    expect(model.content!.horseTable!.rows.map((r) => [r.umaban, r.marketEdge.jockey.name])).toEqual([[2, "騎2"], [1, "騎1"]]);
+  });
+});

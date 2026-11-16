@@ -80,6 +80,8 @@ export const HERE: Record<string, PlanEntry> = {
     "market-edge-repository.ts::DELETE_STALE_MARKET_EDGES_SQL",
     "market-edge-repository.ts::UPSERT_MARKET_EDGE_META_SQL",
     "market-edge-repository.ts::SELECT_MARKET_EDGES_SQL",
+    // レース詳細の列(Issue #643)。json_each から主キー(person_kind, person_id)の引き。読む行数は出走頭数で決まる(market-edge-repository.integration.test.ts が rows_read で固定)。
+    "market-edge-repository.ts::SELECT_MARKET_EDGES_BY_IDS_SQL",
     "market-edge-repository.ts::SELECT_MARKET_EDGE_META_SQL",
     "market-edge-repository.ts::saveMarketRowsSql",
     // 組み立て関数(サンプルの引数 ids=1,2 で SQL にしたもの)

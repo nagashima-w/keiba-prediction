@@ -3,6 +3,7 @@ import { buildRaceSnapshot } from "../../packages/core/src/analysis/analysis-exp
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { D1AnalysisStore, PREVIOUS_ANALYSIS_SQL, type AnalysisDb } from "../src/analysis-repository";
 import { handle, type Env } from "../src/handler";
+import { D1MarketEdgeStore, SELECT_MARKET_EDGES_BY_IDS_SQL } from "../src/market-edge-repository";
 import { monthKey, R2_FENCE_LIMITS } from "../src/r2-fence";
 import { contractCases } from "./fixtures-contract";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
@@ -455,6 +456,67 @@ describe("GET /api/analyses/{id}: 前の分析との差(Issue #583)", () => {
     expect(status).toBe(200);
     expect(body.analysis.previousDiff).toBeNull();
     expect(body.analysis.horses.length).toBeGreaterThan(1);
+    expect(text).not.toContain("SECRET");
+  });
+});
+
+describe("GET /api/analyses/{id}: 騎手・調教師の指標の列(Issue #643)", () => {
+  const META = { computedOn: "2026-11-16", windowFrom: "2024-11-16", windowTo: "2026-11-15", coef: [1, 1, 1] as const, converged: true, iterations: 7, races: 6929, horses: 95233 };
+
+  /** 出馬表の実物の 1 番と 2 番の騎手・調教師の指標を入れる(1 番は両方あり、2 番は騎手だけ)。 */
+  async function seed() {
+    const { race } = await scrapeFixtureRace();
+    const h1 = race.horses.find((h) => h.shutuba.umaban === 1)!.shutuba;
+    const h2 = race.horses.find((h) => h.shutuba.umaban === 2)!.shutuba;
+    expect(h1.jockeyId, "前提: 出馬表に騎手 ID がある").toBeTruthy();
+    expect(h1.trainerId, "前提: 出馬表に調教師 ID がある").toBeTruthy();
+    const edge = (id: string, n: number, e: number) => ({ id, name: `別名${id}`, n, edge: e, hitRate: 0.3, predMean: 0.25 });
+    await new D1MarketEdgeStore(local.db).replaceEdges({
+      ...META,
+      jockeys: [edge(h1.jockeyId!, 312, 0.03), edge(h2.jockeyId!, 20, -0.0125)],
+      trainers: [edge(h1.trainerId!, 80, 0.0449)],
+    });
+    return { h1, h2 };
+  }
+
+  it("指標の表にある人は、馬ごとの marketEdge(出馬表の名前・値・件数)と marketEdgeNote が付く。market_edge.name は使わない。R2 の GET は 1 回のまま", async () => {
+    const { h1, h2 } = await seed();
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    const spy = spyBucket(local.r2);
+    const { status, text, body } = await getView(saved.id, spy.bucket);
+    expect(status).toBe(200);
+    const me = (u: number) => (body.analysis.horses.find((h) => h.umaban === u) as unknown as { marketEdge: unknown }).marketEdge;
+    expect(me(1)).toEqual({ jockey: { name: h1.jockeyName, edge: 0.03, n: 312 }, trainer: { name: h1.trainerName, edge: 0.0449, n: 80 } });
+    expect(me(2), "2 番は調教師の指標なし").toEqual({ jockey: { name: h2.jockeyName, edge: -0.0125, n: 20 }, trainer: { name: h2.trainerName, edge: null, n: null } });
+    expect(body.analysis["marketEdgeNote"]).toContain("2024-11-16〜2026-11-15");
+    expect(text, "別名(market_edge.name)は応答に出ない").not.toContain("別名");
+    expect(spy.calls.filter((c) => c.op === "get")).toHaveLength(1);
+  });
+
+  it("指標の記録が無い(計算前)ときは、200 で marketEdgeNote が null・馬の marketEdge も null", async () => {
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    const { status, body } = await getView(saved.id, local.r2);
+    expect(status).toBe(200);
+    expect(body.analysis["marketEdgeNote"]).toBeNull();
+    expect(body.analysis.horses.every((h) => (h as unknown as { marketEdge: unknown }).marketEdge === null)).toBe(true);
+    expect(body.analysis.horses.length).toBeGreaterThan(1);
+  });
+
+  it("★指標の読み出しが失敗しても、詳細は 200 で返り(馬・配分は残る)、列だけが出ない(例外の文面は載せない)", async () => {
+    await seed();
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    const failing = {
+      prepare: (sql: string) => {
+        if (sql === SELECT_MARKET_EDGES_BY_IDS_SQL) throw new Error("D1_ERROR: SECRET-market");
+        return local.db.prepare(sql);
+      },
+      batch: (statements: D1PreparedStatement[]) => local.db.batch(statements),
+    } as unknown as AnalysisDb;
+    const { status, text, body } = await getView(saved.id, local.r2, failing);
+    expect(status).toBe(200);
+    expect(body.analysis["marketEdgeNote"]).toBeNull();
+    expect(body.analysis.horses.length).toBeGreaterThan(1);
+    expect(body.analysis.allocation).not.toBeNull();
     expect(text).not.toContain("SECRET");
   });
 });

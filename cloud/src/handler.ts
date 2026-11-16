@@ -20,6 +20,8 @@ import { ANALYSIS_DETAIL_PATTERN, MONTHLY_REPORTS_PREFIX, REPORTS_PREFIX, requir
 import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
 import { runJraCheck, type JraFetchLike } from "./jra-check";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
+import { attachMarketEdge, loadMarketEdge } from "./analysis-market-edge";
+import { D1MarketEdgeStore } from "./market-edge-repository";
 import { allocationViewOf, buildAnalysisView, type AnalysisView } from "./analysis-view";
 import { buildPreviousDiff, type AnalysisViewPreviousDiff } from "./analysis-diff-view";
 import { CLIENT_JS } from "./client-bundle.generated";
@@ -1213,7 +1215,9 @@ async function handleAnalysisDetail(url: URL, idText: string, env: Env): Promise
       close = undefined;
     }
     const view = buildAnalysisView(result, allocation, close);
-    return json({ ok: true, analysis: { ...view, previousDiff: await previousDiffOf(store, view) } });
+    // 騎手・調教師の指標の列(Issue #643)。地方・記録なし・読み出しの失敗は null(列を出さない。本体は壊さない。`loadMarketEdge` が握る)。
+    const marketEdge = await loadMarketEdge(new D1MarketEdgeStore(env.DB), result);
+    return json({ ok: true, analysis: { ...attachMarketEdge(view, marketEdge), previousDiff: await previousDiffOf(store, view) } });
   } catch {
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "d1-error" } }, 503);
