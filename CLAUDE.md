@@ -219,7 +219,7 @@
   コミットメッセージに「レビュー継続中」を含む場合を除外する)。**加えて Issue #43 以降、コミットメッセージに
   承認印 `[PUBLISH-APPROVED]` が無い push もすべて除外される**(既定で非公開)。
   レビュー継続中の間は承認印を付けないため、この2つの条件は独立に機能する。
-  テスト・ビルドの関門(`ci.yml` と、`deploy-cloud.yml` の check・smoke ジョブ)は従来どおり走るため、CIの成否は確認する
+  テスト・ビルドの関門(`ci.yml` と、`deploy-cloud.yml` の check・test・smoke ジョブ)は従来どおり走るため、CIの成否は確認する
 
 ## 報告と承認の方針(ユーザー指定)
 - メインセッションは着手前ゲート(メイン)→実装(tdd-implementer)→レビュー(code-reviewer→メタレビュー)→コミットまで**自律で進めてよい**。各ステップの逐一報告は不要
@@ -240,7 +240,7 @@
   報告する**(ユーザー指定。2026-10-10 に exe の公開を止めた〈Issue #248〉ため、確認の対象を exe の再ビルドから
   本番デプロイに改めた)。**これは手順6で承認印 `[PUBLISH-APPROVED]` を付けて push したことの結果を確認する作業であり、
   印を付け忘れていれば本番は更新されない(下の「例外」参照)。** 確認内容: (1) `ci.yml` の該当 run が
-  `conclusion=success`、(2) `deploy-cloud.yml` の `check` ジョブと `smoke` ジョブが success。承認印付きの最終コミットでは加えて、
+  `conclusion=success`、(2) `deploy-cloud.yml` の `check` ジョブと、`test`・`smoke` の各ジョブ(test は 4 つ、smoke は 3 つに分けて並行に流す。Issue #762)がすべて success。承認印付きの最終コミットでは加えて、
   (3) `deploy` ジョブが**スキップされずに実行され** success になったこと。CI 完了には時間がかかるため、プッシュ直後は
   `in_progress` のことが多い。その場合は完了を待って(self-scheduled な再確認等で)追い、成功を確認してから
   報告する。CI が失敗していたら原因を調べて報告する。**run 全体の conclusion が success でも、deploy ジョブが
@@ -253,7 +253,7 @@
   メッセージ**(`git log -1 --format=%s` 等)を確認する。回復手段は**承認印付きコミットの追加 push**、
   または許可ブランチでの `deploy-cloud.yml` の `workflow_dispatch`(手動実行)。
   一方、**レビュー継続中の中間コミット、または承認印を含まない中間コミット**では、deploy ジョブが
-  スキップされるのが正しい(上記(f)。Issue #43 以降、CI は既定で非公開)。この局面では check・smoke ジョブと
+  スキップされるのが正しい(上記(f)。Issue #43 以降、CI は既定で非公開)。この局面では check・test・smoke ジョブと
   `ci.yml` の成功のみを確認すればよく、deploy ジョブの実行は確認対象にしない
 
 ## exe 版(削除済み)
