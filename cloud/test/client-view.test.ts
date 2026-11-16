@@ -1995,3 +1995,92 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
     });
   }
 });
+
+/**
+ * Issue #643: 馬ごとの評価の表の「騎手(参考)」「調教師(参考)」の列(結果画面と、発走前のカードの中)。セルは 名前・値・件数。
+ * 件数が少ない(50 未満)ときは薄い字(class)と「少」の文字(色だけに頼らない)。注記は表の下に 1 回。名前は外から来る文字列なので、テキストノードだけ。
+ */
+describe("騎手・調教師の指標の列の VNode(Issue #643)", () => {
+  const person = (name: string | null, edge: number | null, n: number | null) => ({ name, edge, n });
+  const MARKET: AnalysisDetail["horses"] = [
+    { umaban: 1, name: "アルファ", prior: 0.3, adjustedProb: 0.2, placeOddsMin: 3.0, ev: 0.9, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: 12.0, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, marketEdge: { jockey: person("騎手A", 0.03, 312), trainer: person("厩舎A", -0.0125, 49) } },
+    { umaban: 2, name: "ブラボー", prior: 0.5, adjustedProb: 0.6, placeOddsMin: null, ev: 1.4, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: 3.5, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, marketEdge: { jockey: person("<b>騎手B</b>", null, null), trainer: person("厩舎B", 0.02, 50) } },
+  ];
+  const NOTE = "注記(<i>外から来ない固定の文</i>)";
+  const mk = (over: Partial<AnalysisDetail> = {}): AnalysisDetail => analysis({ horses: MARKET, marketEdgeNote: NOTE, ...over });
+  const resultOf = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a } }), noopActions);
+  const cardOf = (a: AnalysisDetail): VNode => {
+    const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
+    return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
+  };
+  const screens: readonly [string, (a: AnalysisDetail) => VNode][] = [
+    ["結果画面", resultOf],
+    ["発走前のカードの中", cardOf],
+  ];
+  const rowsOf = (t: VNode): VNode[] => byClass(t, "eval-row");
+  const tds = (r: VNode): VNode[] => findAll(r, (n) => n.tag === "td");
+
+  for (const [name, tree] of screens) {
+    describe(name, () => {
+      it("th は 既存 7 + 2、各行の td も 9。見出しは「騎手(参考)」「調教師(参考)」(並べ替えのボタンにしない)。既存のセルは変わらない", () => {
+        const t = tree(mk());
+        const ths = findAll(t, (n) => n.tag === "th");
+        expect(ths.map(textOf).slice(-2)).toEqual(["騎手(参考)", "調教師(参考)"]);
+        expect(ths).toHaveLength(9);
+        expect(byClass(t, "sort-button")).toHaveLength(5);
+        expect(ths.slice(-2).every((th) => th.attrs?.["aria-sort"] === undefined)).toBe(true);
+        for (const r of rowsOf(t)) expect(tds(r)).toHaveLength(9);
+        expect(tds(rowsOf(t)[0]!).map(rawTextOf).slice(0, 7)).toEqual(["1", "", "アルファ", "30.0%", "0.90", "12.0倍", "3.0"]);
+      });
+
+      it("セルは 名前・値・件数。件数 49 は「少」と薄い字(market-few)、50 は出さない。値が無い人は「—」(件数は出さない)。名前は残す", () => {
+        const t = tree(mk());
+        const [r1, r2] = rowsOf(t);
+        const cell = (r: VNode, i: number) => tds(r)[i]!;
+        expect(rawTextOf(cell(r1!, 7))).toBe("騎手A +3.0pt n=312");
+        expect(byClass(cell(r1!, 7), "market-few")).toHaveLength(0);
+        expect(byClass(cell(r1!, 7), "market-few-mark")).toHaveLength(0);
+        expect(rawTextOf(cell(r1!, 8))).toBe("厩舎A -1.3pt n=49 少");
+        expect(byClass(cell(r1!, 8), "market-few")).toHaveLength(1);
+        expect(textOf(byClass(cell(r1!, 8), "market-few-mark")[0]!), "色に頼らない印は文字").toBe("少");
+        expect(rawTextOf(cell(r2!, 8))).toBe("厩舎B +2.0pt n=50");
+        expect(byClass(cell(r2!, 8), "market-few")).toHaveLength(0);
+        expect(rawTextOf(cell(r2!, 7))).toBe("<b>騎手B</b> —");
+        expect(byClass(cell(r2!, 7), "market-n")).toHaveLength(0);
+      });
+
+      it("★外から来る名前(<b>)はテキストだけ: 要素にならず、そのまま文字。実 DOM のアダプタで作れる", () => {
+        const t = tree(mk());
+        expect(findAll(t, (n) => n.tag === "b")).toHaveLength(0);
+        expect(findAll(t, (n) => n.tag === "i")).toHaveLength(0);
+        const { tags, texts } = mountAll(t);
+        expect(tags).not.toContain("b");
+        expect(texts).toContain("<b>騎手B</b>");
+        expect(texts).toContain(NOTE);
+      });
+
+      it("注記は表の枠の下に 1 回(market-note)。列を出さないとき(注記なし)は注記も無い", () => {
+        const t = tree(mk());
+        const notes = byClass(t, "market-note");
+        expect(notes).toHaveLength(1);
+        expect(textOf(notes[0]!)).toBe(NOTE);
+        const section = byClass(t, "horses")[0]!;
+        const order = (section.children ?? []).filter((x): x is VNode => typeof x !== "string").map((k) => String(k.attrs?.["class"] ?? k.tag));
+        const wrapAt = order.findIndex((c) => c.includes("horse-table-wrap"));
+        expect(order[wrapAt + 1], "枠の直後").toContain("market-note");
+        const none = tree(mk({ marketEdgeNote: null }));
+        expect(byClass(none, "market-note")).toHaveLength(0);
+        expect(findAll(none, (n) => n.tag === "th")).toHaveLength(7);
+        expect(textOf(none)).not.toContain("参考");
+      });
+
+      it("閲覧者にも同じ(木が同じ)", () => {
+        const a = mk();
+        const admin = renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, readOnly: false }), noopActions);
+        const viewer = renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, readOnly: true }), noopActions);
+        expect(JSON.stringify(byClass(viewer, "market-note"))).toBe(JSON.stringify(byClass(admin, "market-note")));
+        expect(JSON.stringify(byClass(viewer, "horse-table-wrap"))).toBe(JSON.stringify(byClass(admin, "horse-table-wrap")));
+      });
+    });
+  }
+});

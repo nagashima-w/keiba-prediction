@@ -12,7 +12,7 @@ import type { Crumb, NeighborLink, RaceNeighbors } from "./neighbors";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
-import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type CloseSection, type DevelopmentSection, type HorseCard, type HorseSortKey, type HorseTable, type MarkedHorse, type ResultContent, type ResultModel, type SortDir, type TopProbHorse } from "./result";
+import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type CloseSection, type DevelopmentSection, type HorseCard, type HorseSortKey, type HorseTable, type MarkedHorse, type MarketEdgeCell, type ResultContent, type ResultModel, type SortDir, type TopProbHorse } from "./result";
 import type { FieldModel, PreviewModel, SectionModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
@@ -404,8 +404,19 @@ function probBar(v: number | null): VNode[] {
  * 強調は文字: 印のある行は印の列に記号(`eval-marked`)、EV プラスの行は EV の下に小さく「EVプラス」(`ev-table-plus`・`eval-positive`)。class は既存の節(`horse`・`marked`・`bet`・`positive`)と重ならない名前。
  * 外から来た文字列(馬名・印)は子の文字列(テキストノード)としてだけ入れる。
  */
-function horseTable(content: ResultContent, table: HorseTable, actions: ViewActions): VNode {
+function marketCell(c: MarketEdgeCell): VNode {
+  // 名前・値・件数の 3 段。件数が少ない(50 未満)人は、薄い字(`market-few`)と「少」の文字(色だけに頼らない)。名前は外から来る文字列(テキストノードだけ)。
+  return h("td", { class: c.few ? "market-cell market-few" : "market-cell" }, [
+    // 要素の間の隙間は、空白のテキストノードで作る(`dom.ts` は子をそのまま appendChild する。無いと実ブラウザの textContent は「騎手A+3.0ptn=312」と詰まる)。
+    ...(c.name === null ? [] : [h("span", { class: "market-name" }, [c.name]), " "]),
+    h("span", { class: "market-value" }, [c.value]),
+    ...(c.n === "" ? [] : [" ", h("small", { class: "market-n" }, [c.n, ...(c.few ? [" ", h("span", { class: "market-few-mark" }, ["少"])] : [])])]),
+  ]);
+}
+
+function horseTable(content: ResultContent, table: HorseTable, actions: ViewActions): VNode[] {
   const hasAdjusted = table.columns.some((c) => c.key === "adjusted");
+  const hasMarket = table.columns.some((c) => c.key === "jockey");
   const head = table.columns.map((c) =>
     c.sort === null
       ? h("th", {}, [c.label])
@@ -430,9 +441,12 @@ function horseTable(content: ResultContent, table: HorseTable, actions: ViewActi
       h("td", {}, [r.ev, ...(r.positive ? [h("small", { class: "ev-table-plus" }, ["EVプラス"])] : [])]),
       h("td", {}, [r.winOdds.actual]),
       h("td", {}, [r.odds]),
+      ...(hasMarket ? [marketCell(r.marketEdge.jockey), marketCell(r.marketEdge.trainer)] : []),
     ]);
   });
-  return h("div", { class: "horse-table-wrap", "data-analysis": String(content.id), role: "region", "aria-label": "馬ごとの評価の表" }, [h("table", { class: "horse-table" }, [h("thead", {}, [h("tr", {}, head)]), h("tbody", {}, rows)])]);
+  const wrap = h("div", { class: "horse-table-wrap", "data-analysis": String(content.id), role: "region", "aria-label": "馬ごとの評価の表" }, [h("table", { class: "horse-table" }, [h("thead", {}, [h("tr", {}, head)]), h("tbody", {}, rows)])]);
+  // 騎手・調教師の列の注記(Issue #643。サーバが組み立てた文。表の枠の下に 1 回)。
+  return [wrap, ...(hasMarket && table.marketEdgeNote !== null ? [h("p", { class: "market-note" }, [table.marketEdgeNote])] : [])];
 }
 
 /** 印を補修した馬の目印(Issue #317)。「直」と、あれば「元の印→今の印」。固定の語彙だけ(LLM の生の文字列は出さない)。 */
@@ -600,7 +614,7 @@ function resultSections(content: ResultContent, heading: "h2" | "h3", actions: V
       ...(!content.notesOpen || content.placeOddsNote === null ? [] : [h("p", { class: "meta place-odds-note" }, [content.placeOddsNote])]),
       ...(!content.notesOpen || content.timeIndexNote === null ? [] : [h("p", { class: "meta time-index-note" }, [content.timeIndexNote])]),
       // 馬ごとの評価の表(Issue #546-2)。説明文の下・カードの一覧より前。カードは残す(根拠・注目点・懸念点は表に入らないため)。
-      ...(content.horseTable === null ? [] : [horseTable(content, content.horseTable, actions)]),
+      ...(content.horseTable === null ? [] : horseTable(content, content.horseTable, actions)),
       h("ul", { class: "horse-list" }, content.horses.map(horseCard)),
     ]),
     h("section", { class: "allocation" }, [
