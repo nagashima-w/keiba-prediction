@@ -57,11 +57,17 @@ function mountAll(tree: VNode): { tags: string[]; texts: string[] } {
   return { tags, texts };
 }
 
+/**
+ * Issue #740: 馬の詳しい中身(旧カード)は、表の馬の行を押すまで閉じている。このファイルの既存のテストは旧カードの中身を検査するので、
+ * 結果の分析を渡す入力(結果画面・レース画面)では、既定で全頭を開いた状態にする(`openHorses` を明示したときはそれを使う)。閉じた状態・開閉の検査は client-horse-toggle.test.ts。
+ */
+const allOpen = (a: AnalysisDetail): number[] => a.horses.map((x) => x.umaban);
 const raceInput = (over: Partial<RaceModelInput> = {}): RaceModelInput => ({
   route: { date: "20260628", venue: "central", race: RACE_ID, analysis: null, settings: false },
   status: { kind: "ready", rows: [], prior: null },
   past: { kind: "ready", analyses: [] },
   listRow: undefined,
+  ...(over.result?.kind === "ready" && over.openHorses === undefined ? { openHorses: allOpen(over.result.analysis) } : {}),
   ...over,
 });
 
@@ -284,7 +290,7 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
       }
     }
     // 空振り防止: 場の見出し(2)・起動のボタン(2+2)・結果の開閉の見出し(1)・設定の入力欄(18〈Issue #470 で的中確率の下限、Issue #533 で点数の上限を足した〉+ 重み 15 = 33)・プレビューの開閉(1)が data-* の対象として数えられ、除外も使われている(保存・再読込・重みを既定値に戻す・プレビューの反映を含む)
-    expect(withData).toBe(7 + 5 + 34 + 1 + 4); // 4 = 設定の節の開閉の見出し(Issue #581。data-section) // 5 = 馬ごとの評価の表の列見出しのボタン(Issue #546-2。馬番・3着内率・EV・単勝・複勝下限)。発走前の結果が ready の木に出る
+    expect(withData).toBe(7 + 5 + 34 + 1 + 4 + 2); // 2 = 馬の行の開閉のボタン(Issue #740。分析の馬 2 頭。data-analysis・data-umaban) // 4 = 設定の節の開閉の見出し(Issue #581。data-section) // 5 = 馬ごとの評価の表の列見出しのボタン(Issue #546-2。馬番・3着内率・EV・単勝・複勝下限)。発走前の結果が ready の木に出る
     expect(exemptCount).toBeGreaterThanOrEqual(4 + 2 + 1 + 1);
   });
 
@@ -318,7 +324,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
   };
 }
 const route = { date: "20260628", venue: "central" as const, race: null, analysis: 7, settings: false };
-const resultTree = (a: AnalysisDetail) => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a } }), noopActions);
+const resultTree = (a: AnalysisDetail) => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a) }), noopActions);
 
 describe("結果画面の VNode", () => {
   it("見出し・分析時刻・分析モデル・戻るリンクを出す。モデルが null なら「LLM 未使用(統計のみ)」", () => {
@@ -396,7 +402,9 @@ describe("結果画面の VNode", () => {
     // 成功の画面のボタンは、馬ごとの評価の表の列見出し(sort-button。Issue #546-2)だけ。「更新」は無い
     const okButtons = findAll(resultTree(analysis()), (n) => n.tag === "button");
     expect(okButtons.length, "前提: 表の列見出しのボタンがある").toBeGreaterThan(0);
-    expect(okButtons.every((b) => String(b.attrs?.["class"]) === "sort-button")).toBe(true);
+    // Issue #740: 表の馬の行の開閉のボタン(horse-toggle)も、成功の画面にある(「更新」ではない)
+    expect(okButtons.every((b) => ["sort-button", "horse-toggle"].includes(String(b.attrs?.["class"])))).toBe(true);
+    expect(okButtons.filter((b) => String(b.attrs?.["class"]) === "horse-toggle")).toHaveLength(2);
     expect(okButtons.map(textOf).filter((t) => t.includes("更新"))).toEqual([]);
   });
 });
@@ -1292,7 +1300,7 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
     return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a }, notesOpen: true })), noopActions);
   };
   const screens: readonly [string, (a: AnalysisDetail) => VNode][] = [
-    ["結果画面", (a) => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, notesOpen: true }), noopActions)], // 説明文は既定で閉じる(Issue #546)ので、説明文の中身を見るこのブロックは開いた状態で描く
+    ["結果画面", (a) => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a), notesOpen: true }), noopActions)], // 説明文は既定で閉じる(Issue #546)ので、説明文の中身を見るこのブロックは開いた状態で描く
     ["発走前のカードの中", cardTree],
   ];
 
@@ -1327,10 +1335,11 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
         expect(textOf(notes[0]!)).not.toMatch(/妙味|お得/);
         expect(textOf(t)).not.toContain("0.093817");
         expect(textOf(t)).not.toContain("9.4%");
-        // 説明文は馬ごとの評価の section の中で、カードの一覧より前
+        // 説明文は馬ごとの評価の section の中で、表より前(Issue #740: 旧カードの一覧〈horse-list〉は無くなり、馬の詳しい中身は表の行の直後に開く)
         const section = byClass(t, "horses")[0]!;
         expect(byClass(section, "win-odds-note")).toHaveLength(1);
-        expect(byClass(section, "horse-list")).toHaveLength(1);
+        expect(byClass(section, "horse-table-wrap")).toHaveLength(1);
+        expect(byClass(section, "horse-list")).toHaveLength(0);
       });
 
       it("全頭が『-』なら説明文は出さない(カードの行は出る)", () => {
@@ -1414,7 +1423,8 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
           expect(byClass(t, "win-odds-note").map(textOf)).toEqual([WIN_ODDS_NOTE]);
           const section = byClass(t, "horses")[0]!;
           expect(byClass(section, "place-odds-note")).toHaveLength(1);
-          expect(byClass(section, "horse-list")).toHaveLength(1);
+          expect(byClass(section, "horse-table-wrap")).toHaveLength(1); // Issue #740: 旧カードの一覧(horse-list)の代わりに表
+          expect(byClass(section, "horse-list")).toHaveLength(0);
           const none = tree(analysis({ race: raceOf("top3"), horses: [placeHorse(1, null, null, null), placeHorse(2, null, null, 2.3)] }));
           expect(byClass(none, "place-odds-note")).toEqual([]);
           expect(byClass(none, "place-odds")).toHaveLength(2);
@@ -1496,7 +1506,7 @@ describe("タイム指数の行と説明の表示(Issue #359。結果画面と�
     const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
     return renderScreen(buildRaceModel(raceInput({ readOnly, status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a }, notesOpen: true })), noopActions);
   };
-  const resultOf = (a: AnalysisDetail, readOnly = false): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, readOnly, notesOpen: true }), noopActions);
+  const resultOf = (a: AnalysisDetail, readOnly = false): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a), readOnly, notesOpen: true }), noopActions);
   const screens: readonly [string, (a: AnalysisDetail, readOnly?: boolean) => VNode][] = [
     ["結果画面", resultOf],
     ["発走前のカードの中", cardTree],
@@ -1529,9 +1539,10 @@ describe("タイム指数の行と説明の表示(Issue #359。結果画面と�
         expect(byClass(section, "time-index-note")).toHaveLength(1);
         const kids = (section.children ?? []).filter((x): x is VNode => typeof x !== "string");
         const noteAt = kids.findIndex((k) => String(k.attrs?.["class"] ?? "").includes("time-index-note"));
-        const listAt = kids.findIndex((k) => String(k.attrs?.["class"] ?? "").includes("horse-list"));
+        const listAt = kids.findIndex((k) => String(k.attrs?.["class"] ?? "").includes("horse-table-wrap")); // Issue #740: 旧カードの一覧(horse-list)の代わりに表
         expect(noteAt).toBeGreaterThan(-1);
         expect(listAt).toBeGreaterThan(noteAt);
+        expect(kids.findIndex((k) => String(k.attrs?.["class"] ?? "").includes("horse-list"))).toBe(-1);
       });
 
       it("null(出さない分析・古いサーバの応答)のときは、行も説明も出さない", () => {
@@ -1583,7 +1594,7 @@ describe("要約のカードと説明文の折りたたみ(Issue #546)", () => {
       ...over,
     });
   const resultOf = (a: AnalysisDetail, over: { readOnly?: boolean; notesOpen?: boolean } = {}, actions: ViewActions = noopActions): VNode =>
-    renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, ...over }), actions);
+    renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a), ...over }), actions);
   const cardOf = (a: AnalysisDetail, over: { readOnly?: boolean; notesOpen?: boolean; resultOpen?: boolean } = {}, actions: ViewActions = noopActions): VNode => {
     const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
     return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a }, ...over })), actions);
@@ -1721,7 +1732,7 @@ describe("要約のカードと説明文の折りたたみ(Issue #546)", () => {
           expect(toggles(t).map((b) => b.attrs?.["aria-expanded"])).toEqual(["true", "true"]);
           const horses = byClass(t, "horses")[0]!;
           const kids = (horses.children ?? []).filter((x): x is VNode => typeof x !== "string").map((k) => String(k.attrs?.["class"] ?? ""));
-          expect(kids.findIndex((c) => c.includes("win-odds-note"))).toBeLessThan(kids.findIndex((c) => c.includes("horse-list")));
+          expect(kids.findIndex((c) => c.includes("win-odds-note"))).toBeLessThan(kids.findIndex((c) => c.includes("horse-table-wrap"))); // Issue #740: 旧カードの一覧(horse-list)の代わりに表
           expect(kids.findIndex((c) => c.includes("notes-toggle"))).toBeLessThan(kids.findIndex((c) => c.includes("win-odds-note")));
         });
 
@@ -1810,7 +1821,7 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
   ];
   const mk = (over: Partial<AnalysisDetail> = {}): AnalysisDetail => analysis({ horses: HORSES_T, ...over });
   const resultOf = (a: AnalysisDetail, over: { readOnly?: boolean; horseSort?: HorseSort } = {}, actions: ViewActions = noopActions): VNode =>
-    renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, ...over }), actions);
+    renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a), ...over }), actions);
   const cardOf = (a: AnalysisDetail, over: { readOnly?: boolean; horseSort?: HorseSort } = {}, actions: ViewActions = noopActions): VNode => {
     const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
     return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a }, ...over })), actions);
@@ -1836,7 +1847,7 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
         const listAt = order.findIndex((c) => c.includes("horse-list"));
         const toggleAt = order.findIndex((c) => c.includes("notes-toggle"));
         expect(wrapAt).toBeGreaterThan(-1);
-        expect(listAt).toBeGreaterThan(wrapAt);
+        expect(listAt, "Issue #740: 旧カードの縦の並び(horse-list)は節の直下に無い(馬の詳しい中身は表の行の直後に開く)").toBe(-1);
         expect(toggleAt, "前提: 説明文のボタンがある").toBeGreaterThan(-1);
         expect(wrapAt).toBeGreaterThan(toggleAt);
         expect(findAll(t, (n) => n.tag === "th")).toHaveLength(7); // LLM なし: 馬番・印・馬名・3着内率・EV・単勝・複勝下限
@@ -1850,7 +1861,7 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
         const llm = tree(mk({ model: "claude-x" }));
         expect(findAll(llm, (n) => n.tag === "th")).toHaveLength(8);
         const first = findAll(rowsOf(llm)[0]!, (n) => n.tag === "td").map(rawTextOf);
-        expect(first).toEqual(["1", "◎", "アルファ", "30.0%", "20.0%", "0.90", "12.0倍", "3.0"]);
+        expect(first).toEqual(["1", "◎", "▾ アルファ", "30.0%", "20.0%", "0.90", "12.0倍", "3.0"]); // Issue #740: 馬名の列は開閉のボタン(全頭を開いた状態なので「▾ 馬名」)
       });
 
       it("列見出しはボタン(馬番・3着内率・EV・単勝・複勝下限。印・馬名は対象外)。aria-sort は今の列だけ ascending/descending、矢印は文字", () => {
@@ -1909,7 +1920,7 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
       it("値の無い馬(EV・単勝・複勝下限)のセルは「-」。推定の EV は『(推定)』付きのまま、補修の『直』は表に出さない", () => {
         const t = tree(mk({ evEstimated: true }));
         const cells = (i: number) => findAll(rowsOf(t)[i]!, (n) => n.tag === "td").map(rawTextOf);
-        expect(cells(2)).toEqual(["3", "▲", "<b>チャーリー</b>", "10.0%", "-", "-", "1.5"]);
+        expect(cells(2)).toEqual(["3", "▲", "▾ <b>チャーリー</b>", "10.0%", "-", "-", "1.5"]); // Issue #740: 馬名の列は開閉のボタン
         expect(cells(0)[4]).toBe("0.90(推定)");
         expect(cells(1)[6]).toBe("-");
         const repaired = tree(analysis({ horses: [{ ...HORSES_T[0]!, mark: "〇", markFrom: "◎" } as AnalysisDetail["horses"][number]] }));
@@ -1921,15 +1932,18 @@ describe("馬ごとの評価の表(Issue #546-2)", () => {
         expect(findAll(t, (n) => n.tag === "b")).toHaveLength(0);
         const { tags, texts } = mountAll(t);
         expect(tags).not.toContain("b");
-        expect(texts).toContain("<b>チャーリー</b>");
+        expect(texts.some((x) => x.includes("<b>チャーリー</b>")), "馬名は文字のまま(開閉のボタンの文字の中)").toBe(true);
         expect(tags, "表の要素が許可リストつきのアダプタで作れる").toEqual(expect.arrayContaining(["table", "thead", "tbody", "tr", "th", "td"]));
       });
 
       it("既存の節の class と重ならない: 表の中に horse・horse-list・marked・bet・positive・ev-plus は無く、カードの数は馬の数のまま", () => {
         const t = tree(mk());
         const wrap = byClass(t, "horse-table-wrap")[0]!;
-        for (const cls of ["horse", "horse-list", "marked", "bet", "positive", "ev-plus", "mark", "top-prob"]) expect(byClass(wrap, cls), cls).toHaveLength(0);
-        expect(byClass(t, "horse"), "カードは残す").toHaveLength(3);
+        // Issue #740: 表の行(eval-row)の中に、既存の節の class は無い。詳しい中身(旧カード=horse)は、開いた馬の行の直後の詳しい行(eval-detail)の中だけにある(全頭を開いた状態で 3)。
+        for (const r of byClass(wrap, "eval-row")) for (const cls of ["horse", "horse-list", "marked", "bet", "positive", "ev-plus", "mark", "top-prob"]) expect(byClass(r, cls), cls).toHaveLength(0);
+        expect(byClass(t, "horse"), "詳しい中身は開いた馬の数").toHaveLength(3);
+        expect(byClass(byClass(wrap, "eval-detail")[0]!, "horse")).toHaveLength(1);
+        expect(byClass(t, "horse").every((x) => byClass(wrap, "eval-detail").some((d) => byClass(d, "horse").includes(x)))).toBe(true);
         expect(byClass(t, "marked")).toHaveLength(2);
         expect(byClass(t, "horse-list").length).toBeGreaterThan(0);
       });
@@ -2008,7 +2022,7 @@ describe("騎手・調教師の指標の列の VNode(Issue #643)", () => {
   ];
   const NOTE = "注記(<i>外から来ない固定の文</i>)";
   const mk = (over: Partial<AnalysisDetail> = {}): AnalysisDetail => analysis({ horses: MARKET, marketEdgeNote: NOTE, ...over });
-  const resultOf = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a } }), noopActions);
+  const resultOf = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a) }), noopActions);
   const cardOf = (a: AnalysisDetail): VNode => {
     const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
     return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
@@ -2030,7 +2044,7 @@ describe("騎手・調教師の指標の列の VNode(Issue #643)", () => {
         expect(byClass(t, "sort-button")).toHaveLength(5);
         expect(ths.slice(-2).every((th) => th.attrs?.["aria-sort"] === undefined)).toBe(true);
         for (const r of rowsOf(t)) expect(tds(r)).toHaveLength(9);
-        expect(tds(rowsOf(t)[0]!).map(rawTextOf).slice(0, 7)).toEqual(["1", "", "アルファ", "30.0%", "0.90", "12.0倍", "3.0"]);
+        expect(tds(rowsOf(t)[0]!).map(rawTextOf).slice(0, 7)).toEqual(["1", "", "▾ アルファ", "30.0%", "0.90", "12.0倍", "3.0"]); // Issue #740: 馬名の列は開閉のボタン
       });
 
       it("セルは 名前・値・件数。件数 49 は「少」と薄い字(market-few)、50 は出さない。値が無い人は「—」(件数は出さない)。名前は残す", () => {
@@ -2076,8 +2090,8 @@ describe("騎手・調教師の指標の列の VNode(Issue #643)", () => {
 
       it("閲覧者にも同じ(木が同じ)", () => {
         const a = mk();
-        const admin = renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, readOnly: false }), noopActions);
-        const viewer = renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, readOnly: true }), noopActions);
+        const admin = renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a), readOnly: false }), noopActions);
+        const viewer = renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a), readOnly: true }), noopActions);
         expect(JSON.stringify(byClass(viewer, "market-note"))).toBe(JSON.stringify(byClass(admin, "market-note")));
         expect(JSON.stringify(byClass(viewer, "horse-table-wrap"))).toBe(JSON.stringify(byClass(admin, "horse-table-wrap")));
       });

@@ -317,7 +317,7 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     // 成功した画面のボタンは、馬ごとの評価の表の列見出し(sort-button。Issue #546-2)だけ。「更新」は無い
     const okButtons = findAll(h.tree(), (n) => n.tag === "button");
     expect(okButtons.length, "前提: 表の列見出しのボタンがある").toBeGreaterThan(0);
-    expect(okButtons.every((b) => String(b.attrs?.["class"]) === "sort-button")).toBe(true);
+    expect(okButtons.every((b) => ["sort-button", "horse-toggle"].includes(String(b.attrs?.["class"])))).toBe(true); // Issue #740: 馬の行の開閉のボタンも成功の画面にある(「更新」ではない)
   });
 
   it("結果が 404(無い id)なら「見つかりません」の文言", async () => {
@@ -714,7 +714,8 @@ describe("発走前の結果をカードの中に出す(Issue #188)", () => {
   const RACE_HASH = `#date=${DATE}&venue=central&race=${RACE_ID}`;
   const analysisGets = (h: Harness): string[] => h.calls.filter((u) => /^\/api\/analyses\/\d+$/.test(u));
   const preRaceCard = (h: Harness): VNode => findAll(h.tree(), (n) => n.attrs?.["class"] === "card")[1]!;
-  const horsesIn = (node: VNode): VNode[] => findAll(node, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("horse"));
+  // Issue #740: 馬の詳しい中身(旧カード=horse)は押すまで閉じている。「この画面に馬が出ている」ことは、馬ごとの評価の表の行(eval-row)で数える(馬 1 頭につき 1 行)。
+  const horsesIn = (node: VNode): VNode[] => findAll(node, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("eval-row"));
   const refreshButton = (h: Harness): VNode => findAll(h.tree(), (n) => n.tag === "button" && String(n.attrs?.["class"]) === "refresh")[0]!;
   const toggleButton = (h: Harness): VNode => findAll(h.tree(), (n) => String(n.attrs?.["class"]) === "result-toggle")[0]!;
   const failResp = { status: 503, json: async () => ({ ok: false, error: { type: "d1-error", message: "秘密の文面" } }) };
@@ -727,8 +728,13 @@ describe("発走前の結果をカードの中に出す(Issue #188)", () => {
     const card = preRaceCard(h);
     expect(horsesIn(card)).toHaveLength(1);
     expect(textOf(card)).toContain("アルファ");
-    expect(textOf(card)).toContain("3着内率 20.0%");
     expect(textOf(card)).toContain("EVプラス");
+    // Issue #740: 馬の詳しい中身(「3着内率 20.0%」の行)は、馬の行を押すまで閉じている。押すとカードの中に開く(取得は増えない)。
+    expect(textOf(card)).not.toContain("3着内率 20.0%");
+    const getsBefore = analysisGets(h).length;
+    findAll(card, (n) => String(n.attrs?.["class"] ?? "") === "horse-toggle")[0]!.on!.click!();
+    expect(textOf(preRaceCard(h))).toContain("3着内率 20.0%");
+    expect(analysisGets(h).length).toBe(getsBefore);
     expect(textOf(card)).toContain("分析時刻: 2026-06-28 14:00");
     expect(textOf(card)).toContain("配分の記録がありません");
     expect(toggleButton(h).attrs?.["aria-expanded"]).toBe("true"); // 既定は開

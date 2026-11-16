@@ -37,6 +37,8 @@ export interface ViewActions {
   readonly onToggleNotes: (analysisId: number, open: boolean) => void;
   /** 馬ごとの評価の表の列見出しのボタン(Issue #546-2)。引数は `data-analysis`(分析 id)・`data-sort-key`(列)・`data-sort-dir`(押したあとの向き)と同じ値。 */
   readonly onSortHorses: (analysisId: number, key: HorseSortKey, dir: SortDir) => void;
+  /** 馬ごとの評価の表の馬の行の開閉のボタン(Issue #740)。引数は `data-analysis`(分析 id)・`data-umaban`(馬番)と同じ値。`open` は押したあとの状態(今の逆)。 */
+  readonly onToggleHorse: (analysisId: number, umaban: number, open: boolean) => void;
   /** 起動のボタン(Issue #186)。引数(開催日・レース・モード)は、ボタンの `data-*` と同じ値。 */
   readonly onRun: (date: string, raceId: string, mode: TaskMode) => void;
   /** 場ごとの一括実行のボタン(Issue #251)。引数(場のキー・モード)は、ボタンの `data-key`・`data-mode` と同じ値。押すと確認画面を開く。 */
@@ -363,8 +365,12 @@ function pointsBlock(kind: "highlights" | "concerns", label: string, items: read
   return h("div", { class: `horse-points ${kind}` }, [h("span", { class: "points-label" }, [label]), h("ul", { class: "points-list" }, items.map((item) => h("li", {}, [item])))]);
 }
 
-function horseCard(horse: HorseCard): VNode {
-  return h("li", { class: horse.positive ? "horse positive" : "horse" }, [
+/**
+ * 馬の詳しい中身(旧「馬のカード」。Issue #740 で縦に 12 枚並べるのをやめ、表の馬の行を押すと開く行の中身にした。文言は旧カードのまま)。
+ * `horse` の class は旧カードのもの(中の `horse-line`・`horse-reason` などの class も同じ)。
+ */
+function horseDetail(horse: HorseCard): VNode {
+  return h("div", { class: horse.positive ? "horse horse-detail positive" : "horse horse-detail" }, [
     h("span", { class: "horse-head" }, [
       h("strong", {}, [`${horse.umaban}`]),
       ...(horse.name === null ? [] : [h("span", { class: "horse-name" }, [horse.name])]),
@@ -418,6 +424,16 @@ function marketCell(c: MarketEdgeCell): VNode {
   ]);
 }
 
+/** 馬の行の開閉のボタン(馬名の列。Issue #740)。`button` なので Enter・Space で操作できる。馬名が無い馬は記号だけ(外から来た馬名は子の文字列=テキストノードだけ)。 */
+function horseToggle(content: ResultContent, r: HorseCard, open: boolean, actions: ViewActions): VNode {
+  return h(
+    "button",
+    { class: "horse-toggle", "aria-expanded": open ? "true" : "false", "aria-controls": `horse-detail-${content.id}-${r.umaban}`, "data-analysis": String(content.id), "data-umaban": String(r.umaban) },
+    [`${open ? "▾" : "▸"}${r.name === null ? "" : ` ${r.name}`}`],
+    { click: () => actions.onToggleHorse(content.id, r.umaban, !open) },
+  );
+}
+
 function horseTable(content: ResultContent, table: HorseTable, actions: ViewActions): VNode[] {
   const hasAdjusted = table.columns.some((c) => c.key === "adjusted");
   const hasMarket = table.columns.some((c) => c.key === "jockey");
@@ -433,13 +449,15 @@ function horseTable(content: ResultContent, table: HorseTable, actions: ViewActi
           ),
         ]),
   );
-  const rows = table.rows.map((r) => {
+  const columnCount = table.columns.length;
+  const rows = table.rows.flatMap((r) => {
     const marked = r.mark !== null;
+    const open = content.openHorses.includes(r.umaban);
     const cls = ["eval-row", ...(marked ? ["eval-marked"] : []), ...(r.positive ? ["eval-positive"] : [])].join(" ");
-    return h("tr", { class: cls }, [
+    const row = h("tr", { class: cls }, [
       h("td", {}, [`${r.umaban}`]),
       h("td", {}, marked ? [h("strong", {}, [r.mark!])] : []),
-      h("td", {}, r.name === null ? [] : [r.name]),
+      h("td", {}, [horseToggle(content, r, open, actions)]),
       h("td", {}, [r.prior, ...probBar(r.sortValues.prior)]),
       ...(hasAdjusted ? [h("td", {}, [r.adjusted ?? "-", ...probBar(r.sortValues.adjusted)])] : []),
       h("td", {}, [r.ev, ...(r.positive ? [h("small", { class: "ev-table-plus" }, ["EVプラス"])] : [])]),
@@ -447,6 +465,8 @@ function horseTable(content: ResultContent, table: HorseTable, actions: ViewActi
       h("td", {}, [r.odds]),
       ...(hasMarket ? [marketCell(r.marketEdge.jockey), marketCell(r.marketEdge.trainer)] : []),
     ]);
+    // 開いている馬は、その行の直後に詳しい行(id は開閉のボタンの aria-controls と同じ。td は全列にまたがる)。
+    return open ? [row, h("tr", { class: "eval-detail", id: `horse-detail-${content.id}-${r.umaban}` }, [h("td", { colspan: String(columnCount) }, [horseDetail(r)])])] : [row];
   });
   const wrap = h("div", { class: "horse-table-wrap", "data-analysis": String(content.id), role: "region", "aria-label": "馬ごとの評価の表" }, [h("table", { class: "horse-table" }, [h("thead", {}, [h("tr", {}, head)]), h("tbody", {}, rows)])]);
   // 騎手・調教師の列の注記(Issue #643。サーバが組み立てた文。表の枠の下に 1 回)。
@@ -617,9 +637,8 @@ function resultSections(content: ResultContent, heading: "h2" | "h3", actions: V
       ...(!content.notesOpen || content.winOddsNote === null ? [] : [h("p", { class: "meta win-odds-note" }, [content.winOddsNote])]),
       ...(!content.notesOpen || content.placeOddsNote === null ? [] : [h("p", { class: "meta place-odds-note" }, [content.placeOddsNote])]),
       ...(!content.notesOpen || content.timeIndexNote === null ? [] : [h("p", { class: "meta time-index-note" }, [content.timeIndexNote])]),
-      // 馬ごとの評価の表(Issue #546-2)。説明文の下・カードの一覧より前。カードは残す(根拠・注目点・懸念点は表に入らないため)。
+      // 馬ごとの評価の表(Issue #546-2)。説明文の下。根拠・注目点・懸念点は表に入らないので、馬の行を押すと、その行の直後に詳しい中身が開く(Issue #740。旧カードの縦の並びをやめた)。
       ...(content.horseTable === null ? [] : horseTable(content, content.horseTable, actions)),
-      h("ul", { class: "horse-list" }, content.horses.map(horseCard)),
     ]),
     h("section", { class: "allocation" }, [
       h(heading, {}, ["配分の提案(分析時点)"]),

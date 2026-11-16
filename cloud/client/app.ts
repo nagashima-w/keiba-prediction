@@ -112,6 +112,8 @@ export function createApp(deps: AppDeps): App {
   const notesOpenChoices = new Map<number, boolean>();
   /** 馬ごとの評価の表の並べ替え(Issue #546-2)。分析 id ごと。既定は馬番の昇順(Map に無い)。メモリだけ(保存しない)。結果画面とカードで共有。 */
   const horseSortChoices = new Map<number, HorseSort>();
+  /** 馬ごとの評価の表で、詳しい中身を開いている馬(Issue #740。分析 id → 馬番の集合。既定は全部閉じる。ハッシュ/localStorage には持たない)。 */
+  const horseOpenChoices = new Map<number, Set<number>>();
 
   const listSource = (): ListSource => data.listSource(route.date, route.venue);
   const boardSource = (): BoardSource => data.boardSource(route.date);
@@ -201,6 +203,7 @@ export function createApp(deps: AppDeps): App {
     onToggleResult,
     onToggleNotes,
     onSortHorses,
+    onToggleHorse,
     onRun: run.onRun,
     onBulkOpen: bulk.onOpen,
     onBulkGo: bulk.onGo,
@@ -244,7 +247,7 @@ export function createApp(deps: AppDeps): App {
         // 前後のレースの元(Issue #571)は、分析の開催日・route の区分の一覧のキャッシュ(分析が届いていなければ無い)。
         const resultDate = resultSource.kind === "ready" ? raceDateOf(route, resultSource.analysis) : route.date;
         const resultSiblings = data.listRowsOf(resultDate, route.venue);
-        deps.render(renderScreen(buildResultModel({ route, source: resultSource, ...(resultSiblings === undefined ? {} : { siblings: resultSiblings }), readOnly: !admin, notesOpen: notesOpenChoices.get(route.analysis!) ?? false, ...horseSortOf(route.analysis!) }), actions), force);
+        deps.render(renderScreen(buildResultModel({ route, source: resultSource, ...(resultSiblings === undefined ? {} : { siblings: resultSiblings }), readOnly: !admin, notesOpen: notesOpenChoices.get(route.analysis!) ?? false, ...horseSortOf(route.analysis!), openHorses: openHorsesOf(route.analysis!) }), actions), force);
         return;
       }
       case "race": {
@@ -268,6 +271,7 @@ export function createApp(deps: AppDeps): App {
               resultOpen: resultOpenChoices.get(key) ?? true,
               notesOpen: latestId !== null && (notesOpenChoices.get(latestId) ?? false),
               ...(latestId === null ? {} : horseSortOf(latestId)),
+              ...(latestId === null ? {} : { openHorses: openHorsesOf(latestId) }),
               readOnly: !admin,
             }),
             actions,
@@ -427,6 +431,19 @@ export function createApp(deps: AppDeps): App {
   function horseSortOf(analysisId: number): { horseSort?: HorseSort } {
     const sort = horseSortChoices.get(analysisId);
     return sort === undefined ? {} : { horseSort: sort };
+  }
+
+  function openHorsesOf(analysisId: number): readonly number[] {
+    return [...(horseOpenChoices.get(analysisId) ?? [])];
+  }
+
+  function onToggleHorse(analysisId: number, umaban: number, open: boolean): void {
+    // 取得は起こさず、描画だけ。
+    const set = new Set(horseOpenChoices.get(analysisId) ?? []);
+    if (open) set.add(umaban);
+    else set.delete(umaban);
+    horseOpenChoices.set(analysisId, set);
+    render();
   }
 
   function onSortHorses(analysisId: number, key: HorseSortKey, dir: SortDir): void {
