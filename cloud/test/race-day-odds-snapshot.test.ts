@@ -129,11 +129,11 @@ describe("予定の表(OddsSnapshotStore)", () => {
 describe("parseOddsSnapshotPayload", () => {
   const ok: OddsSnapshotPayload = {
     raceId: "202605010101", leadMin: 5, kaisaiDate: "20261115", startMs: START, dueMs: DUE5, takenAtMs: START - 290_000,
-    officialDatetime: "2026-11-15 15:40:00", oddsStatus: "middle", status: "ok", reason: null, attempts: 1, horses: [[1, 2.1, 1, 1.2, 1.5, "2023101645"]],
+    officialDatetime: "2026-11-15 15:40:00", oddsStatus: "middle", status: "ok", reason: null, attempts: 1, horses: [[1, 2.1, 1, 1.2, 1.5, "2023101645"]], combos: null,
   };
   it("正しい形はそのまま読める(ok・skipped)。壊れた JSON・形の違い・不整合は null", () => {
     expect(parseOddsSnapshotPayload(JSON.stringify(ok))).toEqual(ok);
-    const skipped: OddsSnapshotPayload = { ...ok, leadMin: 10, officialDatetime: null, oddsStatus: null, status: "skipped", reason: "too-late", horses: null };
+    const skipped: OddsSnapshotPayload = { ...ok, leadMin: 10, officialDatetime: null, oddsStatus: null, status: "skipped", reason: "too-late", horses: null, combos: null };
     expect(parseOddsSnapshotPayload(JSON.stringify(skipped))).toEqual(skipped);
     expect(parseOddsSnapshotPayload("{")).toBeNull();
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, status: "weird" }))).toBeNull();
@@ -144,5 +144,22 @@ describe("parseOddsSnapshotPayload", () => {
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, horses: [[1, 2.1, 1, 1.2, 1.5]] }))).toBeNull(); // 馬の ID の要素が無い(旧い形)
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, horses: [[1, 2.1, 1, 1.2, 1.5, 123]] }))).toBeNull();
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, takenAtMs: null }))).toBeNull(); // 取った時刻は必ず残す
+  });
+  it("#751: combos の無い古い形(デプロイの前に DO に置かれた結果)も受け付け、combos は null として読む。拒まない", () => {
+    const { combos: _omit, ...old } = ok;
+    const parsed = parseOddsSnapshotPayload(JSON.stringify(old));
+    expect(parsed).not.toBeNull();
+    expect(parsed).toEqual({ ...ok, combos: null });
+  });
+  it("#751: combos は 頁ごとの {t,dt,st,o} か {err}。ok の行にだけ持てる。形の違いは null", () => {
+    const page = { t: START - 289_000, dt: "2026-11-15 15:40:00", st: "middle", o: { "0102": 12.3, "0103": null } };
+    const withCombos: OddsSnapshotPayload = { ...ok, combos: { umaren: page, wakuren: { err: "unavailable" } } };
+    expect(parseOddsSnapshotPayload(JSON.stringify(withCombos))).toEqual(withCombos);
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: { umaren: { t: "x", o: {} }, wakuren: { err: "unavailable" } } }))).toBeNull();
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: { umaren: page } }))).toBeNull(); // 枠連が無い
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: { umaren: { ...page, o: { "0102": "x" } }, wakuren: { err: "fetch-failed" } } }))).toBeNull();
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: { umaren: { err: 5 }, wakuren: { err: "fetch-failed" } } }))).toBeNull();
+    const skipped = { ...ok, status: "skipped", reason: "too-late", oddsStatus: null, officialDatetime: null, horses: null };
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...skipped, combos: withCombos.combos }))).toBeNull(); // ok 以外は combos を持たない
   });
 });

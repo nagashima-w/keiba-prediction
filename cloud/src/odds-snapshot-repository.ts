@@ -17,8 +17,8 @@ export interface OddsSnapshotSink {
 
 /** 書き込みの SQL(テストが計画と動作を固定する)。 */
 export const INSERT_ODDS_SNAPSHOT_SQL =
-  "INSERT INTO odds_snapshots (race_id, lead_min, kaisai_date, start_ms, due_ms, taken_at_ms, official_datetime, odds_status, status, reason, attempts, horses_json) " +
-  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (race_id, lead_min) DO NOTHING";
+  "INSERT INTO odds_snapshots (race_id, lead_min, kaisai_date, start_ms, due_ms, taken_at_ms, official_datetime, odds_status, status, reason, attempts, horses_json, combos_json) " +
+  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (race_id, lead_min) DO NOTHING";
 
 export class D1OddsSnapshotStore implements OddsSnapshotSink {
   private readonly db: OddsSnapshotDb;
@@ -30,7 +30,7 @@ export class D1OddsSnapshotStore implements OddsSnapshotSink {
   async save(p: OddsSnapshotPayload): Promise<void> {
     await this.db
       .prepare(INSERT_ODDS_SNAPSHOT_SQL)
-      .bind(p.raceId, p.leadMin, p.kaisaiDate, p.startMs, p.dueMs, p.takenAtMs, p.officialDatetime, p.oddsStatus, p.status, p.reason, p.attempts, p.horses === null ? null : JSON.stringify(p.horses))
+      .bind(p.raceId, p.leadMin, p.kaisaiDate, p.startMs, p.dueMs, p.takenAtMs, p.officialDatetime, p.oddsStatus, p.status, p.reason, p.attempts, p.horses === null ? null : JSON.stringify(p.horses), p.combos === null ? null : JSON.stringify(p.combos))
       .run();
   }
 }
