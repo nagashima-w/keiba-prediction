@@ -162,6 +162,38 @@ describe("ensureD1Template: 1 回だけ作り、完成品だけを見せる", ()
   });
 });
 
+describe("ensureD1Template: 自分が取ったロックだけを外す(Issue #717〈#626 の記録〉)", () => {
+  const key = "k-owner";
+  it("作っている間にロックを奪われ、別の者のロックに差し替わっていたら、終了時にそのロックを消さない", async () => {
+    const lock = path.join(root, `keiba-d1-template-${key}.lock`);
+    const build = async (dir: string): Promise<void> => {
+      // 前提: 自分のロックが今ある(奪われる前)
+      expect(existsSync(lock)).toBe(true);
+      // 別の者が期限切れを理由に奪い、自分のロックを取った状態の再現
+      rmSync(lock, { recursive: true });
+      mkdirSync(lock);
+      writeFileSync(path.join(lock, "owner"), "他者の印");
+      mkdirSync(path.join(dir, "v3"), { recursive: true });
+      writeFileSync(path.join(dir, "v3", "x"), "1");
+    };
+    const dir = await ensureD1Template({ root, key, build, pollMs: 10 });
+    expect(existsSync(path.join(dir, "v3", "x"))).toBe(true);
+    // 他者のロックは残る(消すと、3 者目が同時に作り始められてしまう)
+    expect(readFileSync(path.join(lock, "owner"), "utf8")).toBe("他者の印");
+  });
+
+  it("奪われていなければ、終了時に自分のロックを外す(前のテストと対比)", async () => {
+    const lock = path.join(root, `keiba-d1-template-${key}.lock`);
+    const build = async (dir: string): Promise<void> => {
+      // 前提: 印が書かれている(印の比較が空振りしないこと)
+      expect(readFileSync(path.join(lock, "owner"), "utf8").length).toBeGreaterThan(0);
+      mkdirSync(path.join(dir, "v3"), { recursive: true });
+    };
+    await ensureD1Template({ root, key, build, pollMs: 10 });
+    expect(existsSync(lock)).toBe(false);
+  });
+});
+
 describe("閉じた状態: checkpointSqliteFiles", () => {
   it("書きかけ(-wal・-shm)が残る状態から、チェックポイントで主ファイルだけにし、データを失わない", () => {
     const live = path.join(root, "live");
