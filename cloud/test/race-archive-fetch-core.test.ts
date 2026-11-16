@@ -1743,6 +1743,25 @@ describe("Class A の計数をまとめて D1 に足す(Issue #670)", () => {
     expect(w.classAFlushes).toEqual([4]);
   });
 
+  it("止まるとき(HTTP 403 で止められた)に、未反映を足す", async () => {
+    const w = setup(8);
+    w.site({ results: { [rid(1, 5)]: [httpStatus(403), ok(RESULT_OK)] } });
+    await w.core.kick();
+    await w.runUntil(T0 + 30 * MIN);
+    expect(w.notices[0]).toMatchObject({ kind: "refused", httpStatus: 403 }); // 前提: 止められた
+    expect(w.saved).toHaveLength(4); // 前提: 5 件目で止められるまでに 4 件保存された(K 未満なので通常の反映は未発生)
+    expect(w.classAFlushes).toEqual([4]);
+  });
+
+  it("止まるとき(容量)に、未反映を足す", async () => {
+    const w = setup(8);
+    w.saveResults = [...Array.from({ length: 4 }, () => ({ status: "saved", key: "k", dbSizeBytes: 1 }) as SaveRaceArchiveResult), { status: "skipped", reason: "db-size", dbSizeBytes: 400_000_001 }];
+    await w.core.kick();
+    await w.runUntil(T0 + 30 * MIN);
+    expect(w.notices[0]).toMatchObject({ kind: "capacity", reason: "db-size" }); // 前提: 容量で止まった
+    expect(w.classAFlushes).toEqual([4]);
+  });
+
   it("addClassA を渡さない経路(従来)では、保存へ未反映の数を渡さず、何も反映しない", async () => {
     const w = setup(K + 1, false);
     await w.core.kick();

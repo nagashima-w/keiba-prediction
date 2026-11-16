@@ -186,6 +186,21 @@ describe("計画の確定が予定を積む", () => {
       ["202606040902", 5, jst("10:35") - ODDS_SNAPSHOT_LEAD_MS, jst("10:35"), "pending"],
     ]);
   });
+  it("次のアラームの候補に、記録の予定の時刻(最も早い pending の行)が入る(core のアラームの配線。#756)", async () => {
+    const h = harness([central(1, "09:25"), central(2, "11:35")]); // 1 レース目の 10 分前(9:15)が、他の候補(9:20 ごろ)より早い
+    await planThrough(h);
+    // 時計を進めずに、いま動ける仕事(アラームが now 以前)を片付ける。以降の候補は未来だけになる
+    for (let i = 0; i < 20 && h.alarm.at !== null && h.alarm.at <= h.clock.now; i += 1) {
+      h.alarm.at = null;
+      await h.core.runNextStep();
+    }
+    const pending = snapRows(h).filter((r) => r.state === "pending").map((r) => r.due_ms);
+    expect(pending).toHaveLength(4); // 前提: 予定が積まれている
+    expect(pending).toContain(jst("09:25") - ODDS_SNAPSHOT_EARLY_LEAD_MS);
+    const earliest = Math.min(...pending);
+    expect(earliest, "前提: 予定の時刻は、いま(朝 9 時)より先").toBeGreaterThan(h.clock.now);
+    expect(h.alarm.at, "他に早い候補が無いので、アラームは記録の予定の時刻").toBe(earliest);
+  });
   it("JRA の取得口か保存先が無い構成(JRA_ODDS_ENABLED=0 など)では、何も積まない(表も作らない)", async () => {
     for (const overrides of [{ jra: false }, { sink: false }]) {
       const h = harness(ROWS, overrides);

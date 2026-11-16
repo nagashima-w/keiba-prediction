@@ -19,7 +19,7 @@ import { createJraOddsOverride, jraOddsCacheKey } from "./jra-odds-cache";
 import type { JraOddsFetcher, JraOddsSession } from "./jra-odds-fetch";
 import type { OddsSnapshotSink } from "./odds-snapshot-repository";
 import { MemoryJraOddsStageStore } from "./race-day-jra-odds";
-import { JraOddsStage, type JraOddsStageCache } from "./race-day-jra-odds-stage";
+import { JraOddsStage, type JraOddsPageFailure, type JraOddsStageCache } from "./race-day-jra-odds-stage";
 import {
   comboPageOfCache,
   horsesOfSnapshot,
@@ -209,7 +209,14 @@ export class OddsSnapshotStage {
   }
 
   /** 1 頁だけを取る段(取得キャッシュに JSON を置く)。呼び出しごとに新しい進み具合(締切の再計算と同じ部品)。 */
-  private async runPage(fetcher: JraOddsFetcher, row: OddsSnapshotTaskRow, page: "tanpuku" | "umaren" | "wakuren", stopAt: number, onWarn: (message: string) => void): Promise<void> {
+  private async runPage(
+    fetcher: JraOddsFetcher,
+    row: OddsSnapshotTaskRow,
+    page: "tanpuku" | "umaren" | "wakuren",
+    stopAt: number,
+    onWarn: (message: string) => void,
+    onPageFailure?: (failure: JraOddsPageFailure) => void,
+  ): Promise<void> {
     const stage = new JraOddsStage({
       store: new MemoryJraOddsStageStore([page]),
       fetcher,
@@ -217,6 +224,7 @@ export class OddsSnapshotStage {
       now: this.now,
       onWarn,
       onInfo: this.onInfo,
+      onPageFailure,
     });
     await stage.run(row.race_id, 0, row.kaisai_date, { stopAt });
   }
@@ -239,16 +247,15 @@ export class OddsSnapshotStage {
     return { takenAtMs: entry.fetchedAt, officialDatetime: snapshot.officialDatetime, oddsStatus: snapshot.oddsStatus, horses: horsesOfSnapshot(snapshot, horseIdsOf(entry.value)) };
   }
 
-  /** 組合せの 1 頁。取れなければ {err}(投げない)。理由は固定の語だけ(段の警告の語から、読み取りの失敗だけを引き継ぎ、それ以外は fetch-failed)。 */
+  /** 組合せの 1 頁。取れなければ {err}(投げない)。理由は固定の語だけ(段が構造化して渡す失敗の語から、読み取りの失敗だけを引き継ぎ、それ以外は fetch-failed)。 */
   private async fetchComboPage(fetcher: JraOddsFetcher, row: OddsSnapshotTaskRow, page: "umaren" | "wakuren", startedAt: number, stopAt: number): Promise<OddsSnapshotComboPage> {
     let err: OddsSnapshotComboErr = "fetch-failed";
     try {
-      await this.runPage(fetcher, row, page, stopAt, (message) => {
-        const parseFailure = /読み取りに失敗しました.*: (unavailable|parse-error)$/.exec(message);
-        if (parseFailure !== null) {
-          err = parseFailure[1] as OddsSnapshotComboErr;
+      await this.runPage(fetcher, row, page, stopAt, this.onWarn, (failure) => {
+        // 段が渡す失敗の語(構造化)から、読み取りの失敗だけを引き継ぐ。警告の文面は読まない(#756)。それ以外は fetch-failed のまま。
+        if (failure.kind === "parse-failed" && (failure.word === "unavailable" || failure.word === "parse-error")) {
+          err = failure.word;
         }
-        this.onWarn(message);
       });
       const entry = this.cache.get(jraOddsCacheKey(row.race_id, page));
       if (entry === undefined || entry.fetchedAt < startedAt) {
