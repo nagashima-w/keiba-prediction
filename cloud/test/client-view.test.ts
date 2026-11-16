@@ -339,25 +339,35 @@ describe("結果画面の VNode", () => {
     expect(textOf(resultTree(analysis({ model: "claude-x" })))).toContain("claude-x");
   });
 
-  it("馬のカード: 3着内率・複勝オッズ下限・EV を出し、EV プラスは強調(class と文字の両方。色だけに頼らない)。プラスでない馬は強調しない", () => {
+  it("馬の詳しい中身(Issue #765): 表の列にある値(3着内率・複勝オッズ下限・EV・馬名)は詳しい中身に出さず、表の行に出る。EV プラスは表の行(eval-positive・「EVプラス」の文字)と詳しい中身の class(positive)で強調。想定オッズは詳しい中身に残る", () => {
     const tree = resultTree(analysis());
     const cards = byClass(tree, "horse");
     expect(cards).toHaveLength(2);
-    expect(textOf(cards[0]!)).toContain("1");
-    expect(textOf(cards[0]!)).toContain("アルファ");
-    expect(textOf(cards[0]!)).toContain("3着内率 20.0%");
-    expect(textOf(cards[0]!)).toContain("複勝オッズ下限 1.8");
-    expect(textOf(cards[0]!)).toContain("EV 1.25");
-    expect(textOf(cards[0]!)).toContain("EVプラス");
+    const rows = byClass(tree, "eval-row");
+    expect(rows).toHaveLength(2); // 前提: 表の行が馬の数
+    // 表の行に値が出ている
+    expect(textOf(rows[0]!)).toContain("アルファ");
+    expect(textOf(rows[0]!)).toContain("20.0%");
+    expect(textOf(rows[0]!)).toContain("1.8");
+    expect(textOf(rows[0]!)).toContain("1.25");
+    expect(textOf(rows[0]!)).toContain("EVプラス");
+    expect(textOf(rows[1]!)).not.toContain("EVプラス");
+    expect(textOf(rows[1]!)).toContain("-"); // 複勝下限の欠損
+    // 詳しい中身には、同じ値の行が無い
+    for (const c of cards) for (const s of ["3着内率", "複勝オッズ下限", "EV ", "アルファ", "EVプラス"]) expect(textOf(c), s).not.toContain(s);
     expect(byClass(tree, "positive")).toHaveLength(1);
-    expect(textOf(cards[1]!)).not.toContain("EVプラス");
-    expect(textOf(cards[1]!)).toContain("複勝オッズ下限 -");
+    // 表に無いもの(想定オッズ)は残る
+    expect(textOf(cards[0]!)).toContain("単勝");
+    expect(textOf(cards[0]!)).toContain("複勝");
   });
 
   it("印は mark があるときだけ要素を出す(null の馬に印の要素を出さない)。LLM なし(モデル null)なら「AI補正後」は画面のどこにも出ない", () => {
     const tree = resultTree(analysis({ model: null }));
-    const marks = byClass(tree, "mark");
+    // 印は表の印の列(Issue #765: 詳しい中身の見出しからは外した)。印のある行だけ強調(eval-marked)で、印の無い馬の行に印の要素は無い。
+    const marks = byClass(tree, "eval-row").flatMap((r) => findAll(r, (n) => n.tag === "strong" && ["◎", "○", "▲", "△"].includes(textOf(n))));
     expect(marks.map(textOf)).toEqual(["◎"]);
+    expect(byClass(tree, "eval-marked")).toHaveLength(1);
+    expect(byClass(tree, "mark")).toHaveLength(0);
     expect(textOf(tree)).not.toContain("AI補正後");
     expect(textOf(tree)).not.toContain("18.0%"); // adjustedProb(0.18。prior の 0.2 と違う値)は、LLM なしでは出さない
   });
@@ -456,13 +466,14 @@ describe("発走前のカードの結果(Issue #188)", () => {
     expect(textOf(card)).toContain("分析モデル: LLM 未使用(統計のみ)");
     const horses = byClass(card, "horse");
     expect(horses).toHaveLength(2);
-    expect(textOf(horses[0]!)).toContain("アルファ");
-    expect(textOf(horses[0]!)).toContain("3着内率 20.0%");
-    expect(textOf(horses[0]!)).toContain("複勝オッズ下限 1.8");
-    expect(textOf(horses[0]!)).toContain("EV 1.25");
-    expect(textOf(horses[0]!)).toContain("EVプラス");
+    expect(textOf(byClass(card, "eval-row")[0]!)).toContain("アルファ");
+    expect(textOf(byClass(card, "eval-row")[0]!)).toContain("20.0%");
+    expect(textOf(byClass(card, "eval-row")[0]!)).toContain("1.8");
+    expect(textOf(byClass(card, "eval-row")[0]!)).toContain("1.25");
+    expect(textOf(byClass(card, "eval-row")[0]!)).toContain("EVプラス");
+    expect(textOf(horses[0]!)).not.toContain("3着内率"); // 表にある値は詳しい中身に出さない(Issue #765)
     expect(byClass(card, "positive")).toHaveLength(1);
-    expect(byClass(card, "mark").map(textOf)).toEqual(["◎"]);
+    expect(byClass(card, "eval-marked").map((r) => findAll(r, (n) => n.tag === "strong" && textOf(n) === "◎").length)).toEqual([1]); // 印は表の行(Issue #765)
     expect(textOf(card)).not.toContain("AI補正後");
     expect(byClass(card, "bet")).toHaveLength(1);
     expect(textOf(card)).toContain("配分の提案");
@@ -877,27 +888,34 @@ describe("LLM の結果の表示(Issue #195。結果画面とカードの中の�
 
   for (const [name, tree] of screens) {
     describe(name, () => {
-      it("LLM が効いたとき: 馬のカードに「3着内率」と「AI補正後」の両方と、根拠の行(根拠のある馬だけ)。モデル ID を出す", () => {
+      it("LLM が効いたとき: 「3着内率」と「AI補正後」は表の行に両方出て、詳しい中身には出ない。根拠の行(根拠のある馬だけ)は詳しい中身に出る。モデル ID を出す(Issue #765)", () => {
         const t = tree(analysis({ model: "claude-sonnet-x", horses: llmHorses }));
         const cards = byClass(t, "horse");
+        const rows = byClass(t, "eval-row");
         expect(cards).toHaveLength(2);
-        expect(textOf(cards[0]!)).toContain("3着内率 20.0%");
-        expect(textOf(cards[0]!)).toContain("AI補正後 25.0%");
+        expect(rows).toHaveLength(2);
+        expect(textOf(rows[0]!)).toContain("20.0%");
+        expect(textOf(rows[0]!)).toContain("25.0%");
+        expect(textOf(cards[0]!)).not.toContain("AI補正後 25.0%");
+        expect(textOf(cards[0]!)).not.toContain("3着内率");
         expect(byClass(cards[0]!, "horse-reason").map(textOf)).toEqual(["根拠 調教の動きが良い"]);
-        expect(textOf(cards[1]!)).toContain("3着内率 10.0%");
-        expect(textOf(cards[1]!)).toContain("AI補正後 9.0%");
+        expect(textOf(rows[1]!)).toContain("10.0%");
+        expect(textOf(rows[1]!)).toContain("9.0%");
         expect(byClass(cards[1]!, "horse-reason")).toHaveLength(0); // 根拠が null の馬は、根拠の行を出さない
         expect(textOf(t)).toContain("分析モデル: claude-sonnet-x");
         expect(textOf(t)).not.toContain("LLM 未使用");
       });
 
-      it("Issue #312: LLM が効いたとき、「AI補正後」の行に統計モデル(3着内率)からの変化量を添える(「AI補正後 25.0%(統計比 +5.0pt)」。下がれば -、差が丸めて 0 なら ±0.0pt)。LLM なしでは出ない", () => {
+      it("Issue #312・#765: LLM が効いたとき、詳しい中身に統計モデル(3着内率)からの変化量の行を出す(「補正の差 (統計比 +5.0pt)」。補正後の値そのものは表にあるので出さない。下がれば -、差が丸めて 0 なら ±0.0pt)。LLM なしでは出ない", () => {
         const t = tree(analysis({ model: "claude-sonnet-x", horses: [...llmHorses, { ...llmHorses[1]!, umaban: 3, prior: 0.1, adjustedProb: 0.1 }] }));
-        const lines = (cardIndex: number) => byClass(byClass(t, "horse")[cardIndex]!, "horse-line").map(rawTextOf).filter((x) => x.startsWith("AI補正後"));
+        const lines = (cardIndex: number) => byClass(byClass(t, "horse")[cardIndex]!, "horse-line").map(rawTextOf).filter((x) => x.startsWith("補正の差"));
         expect(byClass(t, "horse")).toHaveLength(3);
-        expect(lines(0)).toEqual(["AI補正後 25.0%(統計比 +5.0pt)"]);
-        expect(lines(1)).toEqual(["AI補正後 9.0%(統計比 -1.0pt)"]);
-        expect(lines(2)).toEqual(["AI補正後 10.0%(統計比 ±0.0pt)"]);
+        expect(lines(0)).toEqual(["補正の差 (統計比 +5.0pt)"]);
+        expect(lines(1)).toEqual(["補正の差 (統計比 -1.0pt)"]);
+        expect(lines(2)).toEqual(["補正の差 (統計比 ±0.0pt)"]);
+        const adjustedCells = (i: number) => textOf(byClass(t, "eval-row")[i]!);
+        expect(adjustedCells(0)).toContain("25.0%"); // 補正後の値そのものは表の行にある
+        expect(byClass(t, "horse").every((c) => !textOf(c).includes("AI補正後"))).toBe(true);
         const none = tree(analysis({ model: null, horses: llmHorses }));
         expect(byClass(none, "horse")).toHaveLength(2); // 前提: 馬のカードは出ている
         expect(textOf(none)).not.toContain("統計比");
@@ -912,7 +930,7 @@ describe("LLM の結果の表示(Issue #195。結果画面とカードの中の�
         expect(textOf(t)).not.toContain("25.0%");
         expect(byClass(t, "horse-reason")).toHaveLength(0);
         expect(textOf(t)).not.toContain("調教の動きが良い");
-        expect(textOf(t)).toContain("3着内率 20.0%");
+        expect(textOf(byClass(t, "eval-row")[0]!)).toContain("20.0%"); // 3着内率は表の行にある
         expect(textOf(t)).toContain("分析モデル: LLM 未使用(統計のみ)");
       });
 

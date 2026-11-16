@@ -65,7 +65,12 @@ describe("結果画面: 馬の行の開閉(Issue #740)", () => {
     expect(toggle.attrs?.["aria-controls"]).toBe("horse-detail-7-2");
     expect(detail.attrs?.["id"]).toBe("horse-detail-7-2");
     const text = textOf(detail);
-    for (const s of ["ブラボー", "3着内率 20.0%", "複勝オッズ下限 1.8", "EV 0.90", "根拠 根拠2", "強調", "懸念"]) expect(text, s).toContain(s);
+    // 表に無いものだけが残る(Issue #765)。
+    for (const s of ["根拠 根拠2", "強調", "懸念", "単勝", "複勝"]) expect(text, s).toContain(s);
+    // 表の列にある値(馬番・馬名・3着内率・EV・複勝下限)は詳しい中身に出さない。同じ値は表の行にある。
+    for (const s of ["ブラボー", "3着内率", "複勝オッズ下限", "EV 0.90"]) expect(text, s).not.toContain(s);
+    const rowText = textOf(rows[1]!);
+    for (const s of ["ブラボー", "20.0%", "0.90", "1.8"]) expect(rowText, `表の行に ${s}`).toContain(s);
     expect(byClass(tree, "eval-detail")).toHaveLength(1); // 前提: 開いていない馬の行は出ない
   });
 
@@ -135,7 +140,7 @@ describe("結果画面: 馬の行の開閉(Issue #740)", () => {
 describe("アプリ: 馬の行の開閉の状態(Issue #740)", () => {
   type Resp = { status: number; json: () => Promise<unknown> };
   const ok = (body: unknown): Resp => ({ status: 200, json: async () => body });
-  function harness(startHash = `#date=${DATE}&venue=central&race=${RACE_ID}&analysis=7`): { app: App; tree: () => VNode; click: (umaban: number) => void; calls: string[] } {
+  function harness(startHash = `#date=${DATE}&venue=central&race=${RACE_ID}&analysis=7`): { app: App; tree: () => VNode; click: (umaban: number) => void; go: (hash: string) => Promise<void>; calls: string[] } {
     const calls: string[] = [];
     let tree: VNode | null = null;
     let hash = startHash;
@@ -152,6 +157,11 @@ describe("アプリ: 馬の行の開閉の状態(Issue #740)", () => {
       app,
       tree: () => tree!,
       calls,
+      go: async (next) => {
+        hash = next;
+        app.onHashChange();
+        await flush();
+      },
       click: (umaban) => {
         const t = byClass(tree!, "horse-toggle").find((n) => n.attrs?.["data-umaban"] === String(umaban))!;
         t.on!.click!();
@@ -194,5 +204,21 @@ describe("アプリ: 馬の行の開閉の状態(Issue #740)", () => {
     expect(byClass(h.tree(), "horse-toggle")).toHaveLength(3); // 前提: レース画面の結果にも開閉のボタンがある
     h.click(3);
     expect(byClass(h.tree(), "eval-detail").map((n) => n.attrs?.["id"])).toEqual(["horse-detail-7-3"]);
+  });
+
+  it("開閉は分析 id ごとに分かれる: 分析 7 で馬 3 を開いても、分析 8 の結果画面では閉じている。7 に戻ると開いたまま(Issue #765。app.ts の horseOpenChoices のキーが分析 id)", async () => {
+    const h = harness();
+    h.app.start();
+    await flush();
+    h.click(3);
+    expect(byClass(h.tree(), "eval-detail").map((n) => n.attrs?.["id"]), "前提: 分析 7 で馬 3 が開いた").toEqual(["horse-detail-7-3"]);
+    await h.go(`#date=${DATE}&venue=central&race=${RACE_ID}&analysis=8`);
+    expect(byClass(h.tree(), "horse-toggle"), "前提: 分析 8 の結果画面に着いた(馬の行がある)").toHaveLength(3);
+    expect(byClass(h.tree(), "horse-toggle").every((n) => n.attrs?.["data-analysis"] === "8")).toBe(true);
+    expect(byClass(h.tree(), "eval-detail"), "分析 8 では閉じている").toHaveLength(0);
+    h.click(1);
+    expect(byClass(h.tree(), "eval-detail").map((n) => n.attrs?.["id"])).toEqual(["horse-detail-8-1"]);
+    await h.go(`#date=${DATE}&venue=central&race=${RACE_ID}&analysis=7`);
+    expect(byClass(h.tree(), "eval-detail").map((n) => n.attrs?.["id"]), "7 に戻ると、7 の状態のまま(8 の馬 1 は混ざらない)").toEqual(["horse-detail-7-3"]);
   });
 });

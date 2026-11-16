@@ -65,6 +65,8 @@ export const UNSET_ALLOCATION_NOTE =
  */
 export const UNSET_ALLOCATION_NOTE_VIEWER =
   "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です。";
+/** 詳しい中身の「補正の差」の行の見出し(Issue #765。補正後の値は表にあるので、統計モデルからの変化量だけの行)。 */
+export const LABEL_ADJUSTED_DIFF = "補正の差";
 /** 変化量の基準の呼び名(Issue #312。「(統計比 +2.0pt)」)。基準は統計モデルの3着内率(prior)。 */
 export const LABEL_SHIFT_BASE = "統計比";
 /** 変化量を画面に添える形(Issue #312。例「(統計比 +2.0pt)」)。カードの「AI補正後」の行と上位5頭の行で共通。 */
