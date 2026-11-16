@@ -1897,18 +1897,19 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     const enclosing = (index: number): string => functionStarts.filter((f) => f.index <= index).at(-1)!.name;
     const siteReaders = [...code.matchAll(/"sec-fetch-site"/g)].map((m) => enclosing(m.index!));
     expect(siteReaders.sort()).toEqual(["crossSiteRejection", "originAllowed"]);
-    // 呼び出し箇所: 10 つで、関数名の一覧が固定(handleRaces を含む)
+    // 【Issue #644で改訂】旧: 10 つ(handleMarketEdges を含まない)。騎手・調教師の指標の一覧 GET /api/market-edges が加わり 11 になった。保証していたことは変わらない(一覧が完全に固定で、検査なしの入口が増えると赤になる)。
+    // 呼び出し箇所: 11 つで、関数名の一覧が固定(handleRaces を含む)
     // 【Issue #463で改訂】旧: 9 つ(handleAllocationExport を含まない)。配分の再計算用の書き出し GET /api/export/allocation-dataset が加わり 10 になった。保証していたことは変わらない
     // (一覧が完全に固定で、検査なしの入口が増えると赤になる)。D1 に触れる前の順序は、下の Issue #463 のテストが持つ。
     // 【Issue #488で改訂】旧: 8 つ(handleJraCheck を含まない)。JRA への到達の確認 GET /api/jra/check が加わり 9 つになった。保証していたことは変わらない
     // (呼び出し箇所の関数名の一覧が完全に固定で、新しい入口が検査なしに増えると赤になる)。handleJraCheck の順序(取得より前)は下の Issue #488 のテストが持つ。
     const callers = [...code.matchAll(/\bcrossSiteRejection\(request\)/g)].map((m) => enclosing(m.index!));
-    expect(callers.sort()).toEqual(["handleAllocationExport", "handleBabaFetch", "handleCheck", "handleHorseRuns", "handleJraCheck", "handlePlan", "handlePriorExport", "handleRaces", "handleTargets", "handleVerify"]);
-    expect(callers).toHaveLength(10);
+    expect(callers.sort()).toEqual(["handleAllocationExport", "handleBabaFetch", "handleCheck", "handleHorseRuns", "handleJraCheck", "handleMarketEdges", "handlePlan", "handlePriorExport", "handleRaces", "handleTargets", "handleVerify"]);
+    expect(callers).toHaveLength(11);
     // handleRaces(GET が netkeiba に出る): DO を呼ぶ前に検査する(他の 9 つは各ハンドラの検査が持つ)
     expectCrossSiteCheckFirst("handleRaces", bodyOf("async function handleRaces("), ["raceDayStub(", ".getRaceList("]);
-    // 対照(検出の確認。空振りでない): 呼び出しを足した本文は 11 に数える(旧: 10)。インラインの検査は「sec-fetch-site を読む関数」に数えられる
-    expect(((code + "\nasync function handleX(request: Request) {\n  crossSiteRejection(request);\n}").match(/\bcrossSiteRejection\(request\)/g) ?? []).length).toBe(11);
+    // 対照(検出の確認。空振りでない): 呼び出しを足した本文は 12 に数える(旧: 11)。インラインの検査は「sec-fetch-site を読む関数」に数えられる
+    expect(((code + "\nasync function handleX(request: Request) {\n  crossSiteRejection(request);\n}").match(/\bcrossSiteRejection\(request\)/g) ?? []).length).toBe(12);
     expect([...(code + '\nfunction handleY(request: Request) {\n  request.headers.get("sec-fetch-site");\n}').matchAll(/"sec-fetch-site"/g)]).toHaveLength(3);
     expect(() => expectCrossSiteCheckFirst("結果を返さない", "async function f(request: Request) {\n  crossSiteRejection(request);\n  env.DB;\n}", ["env.DB"])).toThrow();
   });
