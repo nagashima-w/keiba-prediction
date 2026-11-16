@@ -47,6 +47,8 @@ class FakeDoc implements DomDocument {
 /** 使う 2 形だけの selector 照合: `.horse-table-wrap` と `button.sort-button[data-sort-key="K"][data-analysis="A"]`。 */
 function matches(el: FakeEl, selector: string): boolean {
   if (selector === ".horse-table-wrap") return el.getAttribute("class") === "horse-table-wrap";
+  const t = /^button\.horse-toggle\[data-analysis="([^"]+)"\]\[data-umaban="([^"]+)"\]$/.exec(selector);
+  if (t !== null) return el.tag === "button" && el.getAttribute("class") === "horse-toggle" && el.getAttribute("data-analysis") === t[1] && el.getAttribute("data-umaban") === t[2];
   const m = /^button\.sort-button\[data-sort-key="([^"]+)"\]\[data-analysis="([^"]+)"\]$/.exec(selector);
   if (m === null) throw new Error(`この偽の DOM が扱わない selector: ${selector}`);
   return el.tag === "button" && el.getAttribute("class") === "sort-button" && el.getAttribute("data-sort-key") === m[1] && el.getAttribute("data-analysis") === m[2];
@@ -142,5 +144,30 @@ describe("createMounter: 作り直しのあとに、表の横スクロールと�
     const mount = createMounter({ createElement: (t: string) => new FakeEl(t, new FakeDoc()), createTextNode: (s: string) => ({ s }) }, { replaceChildren: () => {} });
     expect(() => mount(table(5, "umaban"))).not.toThrow();
     expect(() => mount(table(5, "ev"))).not.toThrow();
+  });
+});
+
+describe("createMounter: 作り直しのあとに、馬の行の開閉ボタンのフォーカスを戻す(Issue #740)", () => {
+  const toggles = (analysis: number, open: readonly number[]): VNode =>
+    h("div", {}, [1, 2, 3].map((umaban) => h("button", { class: "horse-toggle", "data-analysis": String(analysis), "data-umaban": String(umaban), "aria-expanded": open.includes(umaban) ? "true" : "false" }, [String(umaban)])));
+  const toggle = (root: FakeRoot, analysis: number, umaban: number): FakeEl => root.querySelector(`button.horse-toggle[data-analysis="${analysis}"][data-umaban="${umaban}"]`)!;
+
+  it("押した馬のボタンが、作り直した木の同じ馬のボタンにフォーカスされる(別の馬のボタンではない)", () => {
+    const { doc, root, mount } = setup();
+    mount(toggles(5, []));
+    toggle(root, 5, 2).focus();
+    const before = toggle(root, 5, 2);
+    mount(toggles(5, [2]));
+    expect(toggle(root, 5, 2), "前提: ボタンは作り直された").not.toBe(before);
+    expect(doc.activeElement).toBe(toggle(root, 5, 2));
+    expect(doc.activeElement).not.toBe(toggle(root, 5, 3));
+  });
+
+  it("別の分析へ移ったときは戻さない", () => {
+    const { doc, root, mount } = setup();
+    mount(toggles(5, []));
+    toggle(root, 5, 2).focus();
+    mount(toggles(6, []));
+    expect(doc.activeElement).not.toBe(toggle(root, 6, 2));
   });
 });

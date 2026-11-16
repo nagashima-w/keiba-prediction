@@ -132,6 +132,14 @@ describe("Issue #239 R1: 意味の割り当て(どの状態にどの色か)を�
     expect({ light: PAGE.light["brand"], dark: PAGE.dark["brand"] }).toEqual({ light: "#b34700", dark: "#ff7803" });
   });
 
+  it("Issue #740: 紙面の配色 = ライトは生成りの紙(bg)・一段濃い紙(card)・墨(fg)・紙色の線、ダークは暖かい黒の夜の紙面(実際に配信される CSS からも読む)", () => {
+    const paper = (v: { bg: string; card: string; fg: string; line: string }) => ({ bg: v.bg, card: v.card, fg: v.fg, line: v.line });
+    expect(paper(WEB_LIGHT)).toEqual({ bg: "#faf6ec", card: "#f6f1e3", fg: "#1d1b16", line: "#cdc5b0" });
+    expect(paper(WEB_DARK)).toEqual({ bg: "#1c1a15", card: "#27241c", fg: "#efe9d8", line: "#4a4536" });
+    expect(paper(PAGE.light as never)).toEqual(paper(WEB_LIGHT));
+    expect(paper(PAGE.dark as never)).toEqual(paper(WEB_DARK));
+  });
+
   it("実際に配信される CSS でも同じ割り当て(palette.ts の定数ではなく、<style> から読んだ値)", () => {
     expect({ ok: PAGE.light["ok"], wait: PAGE.light["wait"], fail: PAGE.light["fail"] }).toEqual({ ok: "#177c55", wait: "#8e6610", fail: "#922b2b" });
     expect({ ok: PAGE.dark["ok"], wait: PAGE.dark["wait"], fail: PAGE.dark["fail"] }).toEqual({ ok: "#7cd9ac", wait: "#e3b548", fail: "#ec7971" });

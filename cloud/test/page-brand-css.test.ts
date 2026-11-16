@@ -94,7 +94,8 @@ describe("Issue #570: 選んでいる状態と EV プラスは brand。リンク
   it("EV プラス: 馬カードの「EVプラス」(.ev-plus)・馬ごとの評価の表の「EVプラス」(.ev-table-plus)の文字と、EV プラスの馬カードの枠(.horse.positive)が --brand", () => {
     expect(declsOf(".ev-plus").get("color")).toBe("var(--brand)");
     expect(declsOf(".horse-table .ev-table-plus").get("color")).toBe("var(--brand)");
-    expect(declsOf(".horse.positive").get("border-color")).toBe("var(--brand)");
+    // Issue #740: 箱の枠をやめたので、EV プラスの強調は上の太い線(2px)が --brand(旧: 枠の色 --brand+太さ 2px。文字「EVプラス」は変えない)
+    expect(declsOf(".horse.positive").get("border-top")).toBe("2px solid var(--brand)");
   });
 
   it("brand の文字は card・bg の上で読める(ライト・ダーク)", () => {

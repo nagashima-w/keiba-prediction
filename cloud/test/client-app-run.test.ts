@@ -770,7 +770,8 @@ describe("日付の入力(段階1【記録】1)", () => {
  * 画面を開いたときの取得・結果画面とのキャッシュ共有・「更新」・開閉は client-app.test.ts。
  */
 describe("発走前の結果の取得(Issue #188): ポーリング・完了への遷移・再実行", () => {
-  const horsesIn = (h: Harness): VNode[] => byClass(cardByTitle(h, "発走前"), "horse");
+  // Issue #740: 馬の詳しい中身(旧カード=horse)は押すまで閉じている。「馬が出ている」ことは、馬ごとの評価の表の行(eval-row)で数える。
+  const horsesIn = (h: Harness): VNode[] => byClass(cardByTitle(h, "発走前"), "eval-row");
   const DETAIL = (id: number): string => `/api/analyses/${id}`;
 
   it("ポーリングの周期では取らない: 完了済みの発走前(id 5)を開いて、別の行(朝)の追跡が続く間、ポーリングを何周しても 1 回のまま。朝の完了(prior の取り直し)でも増えない", async () => {

@@ -431,6 +431,18 @@ describe("mount(Issue #189: 入力欄の許可)", () => {
     }
   });
 
+  it("Issue #740: colspan は td だけに 1〜2 桁の数字で付けられる。id は `horse-detail-{分析 id}-{馬番}` の形だけ(それ以外は投げる)", () => {
+    expect(mounted(h("td", { colspan: "9" }, [])).attrs.get("colspan")).toBe("9");
+    expect(mounted(h("td", { colspan: "10" }, [])).attrs.get("colspan")).toBe("10");
+    for (const bad of ["", "0x", "100", "-1", "1.5", "a", " 5"]) expect(() => mounted(h("td", { colspan: bad }, [])), `colspan=${bad}`).toThrow();
+    for (const tag of ["th", "div", "tr", "button"]) expect(() => mounted(h(tag, { colspan: "9" }, [])), `colspan on ${tag}`).toThrow();
+    expect(mounted(h("tr", { id: "horse-detail-7-2" }, [])).attrs.get("id")).toBe("horse-detail-7-2");
+    expect(mounted(h("tr", { id: "horse-detail-1234567890-18" }, [])).attrs.get("id")).toBe("horse-detail-1234567890-18");
+    for (const bad of ["", "app", "horse-detail-", "horse-detail-7", "horse-detail-7-123", "horse-detail--2", "x horse-detail-7-2", "horse-detail-7-2 ", "horse-detail-12345678901-2", "horse-detail-7-2\n"]) {
+      expect(() => mounted(h("tr", { id: bad }, [])), `id=${bad}`).toThrow();
+    }
+  });
+
   it("足したのは textarea・select・option だけ: form・datalist・optgroup などの要素と、selected・name・pattern・autofocus・for・list の属性は、引き続き作れない(投げる)", () => {
     for (const tag of ["form", "datalist", "optgroup", "textarea ", "SELECT"]) {
       expect(() => mounted(h(tag, {}, [])), tag).toThrow();

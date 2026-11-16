@@ -61,6 +61,8 @@ export interface RaceModelInput {
   readonly notesOpen?: boolean;
   /** 馬ごとの評価の表の並べ替え(Issue #546-2。最新の分析の id ごとの状態〈`app.ts`〉。省略は馬番の昇順)。 */
   readonly horseSort?: HorseSort;
+  /** 詳しい中身を開いている馬の馬番(Issue #740。最新の分析の id ごとの状態〈`app.ts`〉。省略は全部閉じる)。 */
+  readonly openHorses?: readonly number[];
   /** 閲覧者(Issue #238)。分析の実行ボタンを出さない(カードと状態は同じ)。省略は false(管理者)。 */
   readonly readOnly?: boolean;
 }
@@ -216,12 +218,12 @@ export function latestAnalysisIdOf(rows: readonly BoardRow[], raceId: string): n
   return found !== undefined && found.status === "done" ? found.analysisId : null;
 }
 
-function cardResult(route: Route, rows: readonly BoardRow[], result: ResultSource | undefined, open: boolean, readOnly: boolean, notesOpen: boolean, horseSort: HorseSort | undefined): CardResult | null {
+function cardResult(route: Route, rows: readonly BoardRow[], result: ResultSource | undefined, open: boolean, readOnly: boolean, notesOpen: boolean, horseSort: HorseSort | undefined, openHorses: readonly number[]): CardResult | null {
   const raceId = route.race!;
   if (latestAnalysisIdOf(rows, raceId) === null) return null;
   if (result === undefined || result.kind === "loading") return { kind: "loading" };
   if (result.kind === "error") return { kind: "error", message: result.message };
-  return { kind: "ready", content: contentOf(result.analysis, readOnly, notesOpen, horseSort), open, date: route.date, raceId };
+  return { kind: "ready", content: contentOf(result.analysis, readOnly, notesOpen, horseSort, openHorses), open, date: route.date, raceId };
 }
 
 function card(
@@ -236,6 +238,7 @@ function card(
   readOnly: boolean,
   notesOpen: boolean,
   horseSort: HorseSort | undefined,
+  openHorses: readonly number[],
 ): TaskCard {
   const raceId = route.race!;
   const found = pick(rows, raceId, mode);
@@ -252,7 +255,7 @@ function card(
     title: mode === "morning" ? "事前分析" : "発走前",
     badge: badgeOf(found),
     error: failedError,
-    result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen, readOnly, notesOpen, horseSort) : null,
+    result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen, readOnly, notesOpen, horseSort, openHorses) : null,
     prior: showPrior ? prior.rows.map((r) => ({ rank: r.rank, umaban: r.umaban, name: r.horseName, value: formatPercent(r.prior) })) : null,
   };
 }
@@ -262,7 +265,7 @@ export function buildRaceModel(input: RaceModelInput): RaceModel {
   const prior = status.kind === "ready" ? status.prior : null;
   const cards =
     status.kind === "ready"
-      ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true, input.readOnly === true, input.notesOpen === true, input.horseSort))
+      ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true, input.readOnly === true, input.notesOpen === true, input.horseSort, input.openHorses ?? []))
       : null;
   return {
     kind: "race",
