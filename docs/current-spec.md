@@ -1083,10 +1083,10 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     **効果があった(2026-10-16 に確認)**: 作業ブランチに載せたあと、Dependabot の PR #331(cloud の development-dependencies グループ)が `cloud/package.json` と `cloud/pnpm-lock.yaml` を更新して来た
     (`gh api repos/<owner>/<repo>/pulls/331/files` の変更ファイルはこの 2 つだけ)。案 B(`@anthropic-ai/sdk`・`iconv-lite`・`cheerio` を npm の更新から `ignore` して手動で扱う)は不要になった。
     cloud/ の devDependencies(typescript・vitest・`@cloudflare/workers-types` 等)の PR も、これまで一度も来ていなかった。対策後は来るので、メジャー更新も ignore せずレビューして取り込む(ルートはすでに TypeScript 7・vitest 5)。
-    **ただし `@types/node` の semver-major だけは例外で、`dependabot.yml` の `ignore` で提案させない(#332)。** @types/node のメジャーは実行環境の Node(`ci.yml`・`deploy-cloud.yml` の `node-version`。現在 24。**Issue #333 で 22 から 24 に上げた**。さらに **Issue #441 で、メジャーだけの `24` から `24.22.1` に固定した**。「Node の版を上げるとき」の項参照)に合わせるもので、
+    **ただし `@types/node` の semver-major だけは例外で、`dependabot.yml` の `ignore` で提案させない(#332)。** @types/node のメジャーは実行環境の Node(`ci.yml`・`deploy-cloud.yml` の `node-version`。現在 24。**Issue #333 で 22 から 24 に上げた**。さらに **Issue #441 で、メジャーだけの `24` から `24.22.1` に固定した**(その後 **Issue #738 で `24.22.3` に上げた**。今の固定は `24.22.3`)。「Node の版を上げるとき」の項参照)に合わせるもので、
     **Node を上げるときに `cloud/package.json` の @types/node も同じメジャーに手で上げる**(`scripts/test/cloud-config-guard.test.ts` が両者のメジャーの一致を検査)。minor・patch は受ける。
     24 以上へ上げても cloud の型検査が通るよう、`fileURLToPath(new URL(…, import.meta.url))`(グローバルの URL は workers-types のもので、@types/node 24 以上では node:url の URL と型が合わず TS2345)を
-    `cloud/test/meta-path.ts` の `pathFromMeta` に置き換えた(26.6.5 で cloud の typecheck が 0 件になることを実測。Node 22 は 2027-04 に EOL のため、#333 で CI を Node 24・@types/node を ^24.0.0 に上げた。このとき root の `engines`〈`>=22.19`〉は、undici 8 が要求する「サポートする最低版」で CI の版とは別の概念なので変えなかった。その後 #476 で、Brotli の脆弱性〈CVE-2026-111497〉の修正版 22.23.4・24.22.1・26.12.1 以上に限る `^22.23.4 || ^24.22.1 || >=26.12.1` に上げた。`scripts/test/cloud-config-guard.test.ts` が値を固定する。pnpm は既定では、engines を満たさない Node でも警告を出して続行する〈`engine-strict` を有効にしたときだけエラー〉)。
+    `cloud/test/meta-path.ts` の `pathFromMeta` に置き換えた(26.6.5 で cloud の typecheck が 0 件になることを実測。Node 22 は 2027-04 に EOL のため、#333 で CI を Node 24・@types/node を ^24.0.0 に上げた。このとき root の `engines`〈`>=22.19`〉は、undici 8 が要求する「サポートする最低版」で CI の版とは別の概念なので変えなかった。その後 #476 で、Brotli の脆弱性〈CVE-2026-111497〉の修正版 22.23.4・24.22.1・26.12.1 以上に限る `^22.23.4 || ^24.22.1 || >=26.12.1` に上げた。さらに #738 で `^22.23.5 || ^24.22.3 || >=26.13.1` に更新した。`scripts/test/cloud-config-guard.test.ts` が値を固定する。pnpm は既定では、engines を満たさない Node でも警告を出して続行する〈`engine-strict` を有効にしたときだけエラー〉)。
     一時的な失敗(公開直後の依存が最小経過日数〈`minimum-release-age=4320` 分 = 3 日〉に満たず `ERR_PNPM_NO_MATURE_MATCHING_VERSION`)は、日が経てば自然に解ける。
   - **ルートの `pnpm-lock.yaml` が更新されなかった原因と対策(Issue #465)**: 2026-10-22 の PR #453・#454・#455(どれも `packages/core/package.json` を変えたが、ルートの `pnpm-lock.yaml` は変えなかった)で、verify が `ERR_PNPM_OUTDATED_LOCKFILE` で落ちた。lockfile を作り直すコミットを足して取り込んだ(#460)。
     - **実ログ(Dependabot の job。2026-10-22 07:44Z の run)で分かったこと**:
@@ -1685,9 +1685,9 @@ exe の出力は変わらない(`packages/core/test/golden/pipeline-golden.json`
   手順: (1) 赤になった箇所の差が、1ulp 程度の浮動小数点だけであること(整数・文字列・項目の集合・順序の差が無いこと)を確かめる。差が大きい、または整数や項目が変わっているなら、版の差ではなく実装の変更なので、golden を更新してはいけない。
   (2) 確かめられたら `pnpm tsx scripts/gen-pipeline-golden.ts`(リポジトリルート)で golden を再生成し、差分が浮動小数点の末尾の桁だけであることを再確認してからコミットする。(3) ルートの `pnpm test` と、cloud の `pnpm run test:unit`・関係するインテグレーション(`scripts/verify-all.sh`)を通し、全件と `pnpm run smoke` は CI で確かめる。
   なお CI の Node の版は `.github/workflows/ci.yml` の `node-version`(24。#333 で 22 から上げた。Node 24〈V8 13.6〉でも golden は再生成なしで全緑だった)。
-  **CI の Node は `24.22.1` に固定している(Issue #441。`ci.yml`・`deploy-cloud.yml`・`research.yml`・`audit.yml`〈#498〉の `node-version`)。** 2026-10-21 のセキュリティリリースの修正版で、`24` とだけ書くと、ランナーのツールキャッシュにある修正前の版が使われうるため。
-  **`24` に戻すときは、次の 3 つのテストの `node-version: 24\.22\.1` の期待を直す**: `scripts/test/ci-workflow.test.ts`・`scripts/test/cloud-deploy-workflow.test.ts`・`scripts/test/research-workflow.test.ts`
-  (さらに、`24.22.1` 以上であることを求める `scripts/test/cloud-config-guard.test.ts` の「Issue #441」の検査は、固定をやめるなら削除する。同ファイルの #332 の検査は、`24.22.1` のような完全な版でもメジャーだけを見るので、戻しても通る)。
+  **CI の Node は `24.22.3` に固定している(Issue #441 で `24.22.1` に固定し、Issue #738 で上げた。`ci.yml`・`deploy-cloud.yml`・`research.yml`・`audit.yml`〈#498〉の `node-version`)。** 固定の理由: 2026-10-21 のセキュリティリリースの修正版(`24.22.1`)を確実に使うため。`24` とだけ書くと、ランナーのツールキャッシュにある修正前の版が使われうるため。
+  **`24` に戻すときは、次の 3 つのテストの `node-version: 24\.22\.3` の期待を直す**: `scripts/test/ci-workflow.test.ts`・`scripts/test/cloud-deploy-workflow.test.ts`・`scripts/test/research-workflow.test.ts`
+  (さらに、`24.22.3` 以上であることを求める `scripts/test/cloud-config-guard.test.ts` の「Issue #441」の検査は、固定をやめるなら削除する。同ファイルの #332 の検査は、`24.22.3` のような完全な版でもメジャーだけを見るので、戻しても通る)。
 
 ### 日単位の DO `RaceDay`・取得キャッシュ・朝の取得と prior(#177〈#164-b〉。v1.19.12)
 **呼び出す入口は、手動の `POST /api/analyses/run`〈#180〉と、cron の `scheduled`〈#206。`requestPlan`〉**。`worker.ts` が `RaceDay` を export する(wrangler が binding のクラスを要求する)。ローカルの smoke も RPC を呼んで通す。
