@@ -42,6 +42,7 @@ import { createVerifyScreen } from "./verify-screen";
 import { createMonthlyScreen } from "./monthly-screen";
 import { createReportScreen } from "./report-screen";
 import { createTargetsScreen } from "./targets-screen";
+import { createMarketEdgesScreen } from "./market-edges-screen";
 import { buildHash, buildReportHash, parseHash, screenOf, type Route, type Screen } from "./route";
 import { buildAdminOnlyModel, type AppScreen } from "./admin-only";
 import { isAdmin, type Role } from "./role";
@@ -166,6 +167,10 @@ export function createApp(deps: AppDeps): App {
     onChange: () => render(),
   });
 
+  // ---- 騎手・調教師の指標の一覧の画面(Issue #644) ----
+  // 閲覧者にも同じに開く(読み取りだけ)。取得は GET /api/market-edges だけ。タイマー・自動の取り直しは無い(値は毎晩の計算のもの)。
+  const edges = createMarketEdgesScreen({ fetch: deps.fetch, onChange: () => render() });
+
   // ---- 日報画面(Issue #235) ----
   const report = createReportScreen({
     fetch: deps.fetch,
@@ -289,6 +294,11 @@ export function createApp(deps: AppDeps): App {
         if (model !== null) deps.render(renderScreen(model, actions), force);
         return;
       }
+      case "edges": {
+        const model = edges.model(buildHash({ date: route.date, venue: "central" }));
+        if (model !== null) deps.render(renderScreen(model, actions), force);
+        return;
+      }
       case "list": {
         deps.render(
           renderScreen(
@@ -340,6 +350,9 @@ export function createApp(deps: AppDeps): App {
       case "targets":
         targets.enter(route.targets!.date);
         return;
+      case "edges":
+        edges.enter(route.edges!.kind);
+        return;
       case "report":
         // 日報 ⇄ 月報(Issue #279): 出る側を離れてから入る側を開く(`leave` は開いていなければ何も起きない)。同じ画面の中の日付・月の切替も、ここ(重ねて呼んでも同じ日・月の取得は増えない)。
         if (route.report?.month !== undefined) {
@@ -362,10 +375,12 @@ export function createApp(deps: AppDeps): App {
     const wasVerify = currentScreen() === "verify";
     const wasReport = currentScreen() === "report";
     const wasTargets = currentScreen() === "targets";
+    const wasEdges = currentScreen() === "edges";
     route = parseHash(deps.getHash(), todayJst(deps.now()));
     if (wasSettings && currentScreen() !== "settings") settings.leave(); // 画面を離れたら下書きを破棄する
     if (wasVerify && currentScreen() !== "verify") verify.leave(); // 検証の状態(タイマー・遅れて届く応答)を破棄する
     if (wasTargets && currentScreen() !== "targets") targets.leave(); // 狙い目の状態(タイマー・遅れて届く応答)を破棄する
+    if (wasEdges && currentScreen() !== "edges") edges.leave(); // 指標の一覧の状態(遅れて届く応答)を破棄する
     if (wasReport && currentScreen() !== "report") {
       report.leave(); // 日報の状態(タイマー・遅れて届く応答)を破棄する
       monthly.leave(); // 月報の状態(遅れて届く応答)を破棄する
@@ -444,6 +459,9 @@ export function createApp(deps: AppDeps): App {
         // 取得中は何もしない(`onRefresh` が見る)。再計算の要求(refresh=1)。画面の再描画は状態の変化(`onChange`)で行われる。
         verify.onRefresh();
         return;
+      case "edges":
+        edges.onRefresh(); // 取得中は何もしない(`onRefresh` が見る)
+        return;
       case "targets":
         // 取得中は何もしない(`onRefresh` が見る)。取り直しの回数と失敗の数も数え直す。画面の再描画は状態の変化(`onChange`)で行われる。
         targets.onRefresh();
@@ -478,7 +496,7 @@ export function createApp(deps: AppDeps): App {
     },
     async whenIdle() {
       // 取得が終わるたびに新しい取得は始まらない(失敗の自動再試行なし。追跡のタイマーは偽・実物とも待たない)ので、数回の確認で必ず止まる。
-      const pending = () => [...data.pending(), ...run.pending(), ...bulk.pending(), ...settings.pending(), ...verify.pending(), ...report.pending(), ...monthly.pending(), ...targets.pending()];
+      const pending = () => [...data.pending(), ...run.pending(), ...bulk.pending(), ...settings.pending(), ...verify.pending(), ...report.pending(), ...monthly.pending(), ...targets.pending(), ...edges.pending()];
       for (let i = 0; i < 10 && pending().length > 0; i += 1) {
         await Promise.all(pending());
       }

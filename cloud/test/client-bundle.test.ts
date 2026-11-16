@@ -313,7 +313,12 @@ describe("生成物のドリフトと決定性", () => {
     // (追記)Issue #576(一覧の「更新」は前の一覧とバッジを残す。取り直しの失敗の注記): 上限は 250,000 のまま。実測は 248,598(e9841d91 の生成物)→ 249,542(+944。`pnpm run build:client` の出力)。余裕は 250,000 - 249,542 = 458 バイト。計り方は上の #581 の追記と同じ。次の追加は上限の引き上げが要る。
     // (追記)Issue #643(馬ごとの評価の表の「騎手(参考)」「調教師(参考)」の列。文はサーバが組み立て、クライアントは検証・値の整形〈既存の `formatAdjustment`〉・セル 3 段・注記 1 つだけ): 上限は 250,000 から 252,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`)は 249,758(c432523b〈作業ブランチの起点〉の生成物。Issue 本文の「余裕 約 3,400」は #581 の値で、#576 の時点で余裕は 458、起点では 242 だった)→ 251,260(+1,502。`pnpm run build:client` の出力〈「251260 バイト」〉)。
     // 計り方: 起点と今のそれぞれで `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` を実行した。新しい上限 252,000 の余裕は 252,000 - 251,260 = 740 バイト(500 バイト単位に切り上げ)。増えたのは `api-analysis.ts` の応答の検査(`parseMarketPerson`・`parseMarketEdge`)、`result.ts` のセルの作り(`marketCellOf`・件数の閾値 50)、`view.ts` の `marketCell`・注記、列見出しの文言(`\u` エスケープ)。CSS は `src/page.ts` にあり、束には入らない。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(252_000);
+    // (追記)Issue #644(騎手・調教師の指標の一覧の画面 `#edges`。並び・注記の文はサーバが決め、クライアントは検証・値の整形〈既存の `signedPtText`〉・表・切り替えのリンク・一覧のトップの入口だけ): 上限は 252,000 から 255,500 へ引き上げた。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`)は 251,260(a7b949da〈作業ブランチの起点。#643 の公開〉の生成物)→ 254,896(+3,636。`pnpm run build:client` の出力〈「254896 バイト」〉)。
+    // 計り方: 起点と今のそれぞれで `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` を実行した。新しい上限 255,500 の余裕は 255,500 - 254,896 = 604 バイト(500 バイト単位に切り上げ)。
+    // 増えたのは `api-market-edges.ts`(応答の検査)・`market-edges-model.ts`(行の整形)・`market-edges-screen.ts`(取得・世代)・`view.ts` の `edgesScreen`・入口のリンク・`route.ts` の `#edges` の解釈・`app.ts` の配線 5 か所、列見出し 6 本と画面の見出し・「騎手」「調教師」の文言(`\u` エスケープ)。CSS は `src/page.ts` にあり、束には入らない。
+    // 事前の見積もりは +3,500〜6,000(着手前の調査)で、実測は下端の近く。タイマー・自動の取り直し・並べ替えの操作を付けず、注記の文をサーバに置いたため。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(255_500);
   });
 });
 

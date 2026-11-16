@@ -1316,7 +1316,7 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
   - 役割は**検証済みのメールと管理者の一覧の完全一致**だけで決める(JWT のメールは分割も部分一致もしない)。メールが文字列でない・判定中に例外が起きたら viewer。ヘッダ・クッキー・`ctx.access` のどの経路でも同じ判定。
 - **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 32 + パターン 3 = 35 ルート。#244 でアイコン 7 本、#251 で `/api/analyses/run/bulk`、#266 で `/api/export/prior-dataset`、#256 で `/api/horse-runs`、#279・#280 で月報、#336 で `/api/targets`、#360 で `/api/baba-fetch`、#396 で `/api/settings/prompt-preview`、#488 で `/api/jra/check` を足した)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
   **リクエスト本文を読まず・DO/D1/R2/gate に触れず**に 403 `{"ok":false,"error":{"type":"admin-only"}}`(固定。認証の拒否の `forbidden` とは本文で区別する)を返す。**表に無い (method, path) は管理者専用**(フェイルクローズ)。
-  - 閲覧者に許す(20 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/targets`(#336。今日の狙い目)・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`・`GET /api/monthly-reports`・`GET /api/monthly-reports/{month}`(#279)・`GET /api/verify`(#263。下の「閲覧者の検証画面」)、
+  - 閲覧者に許す(21 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/targets`(#336。今日の狙い目)・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`・`GET /api/monthly-reports`・`GET /api/monthly-reports/{month}`(#279)・`GET /api/verify`(#263。下の「閲覧者の検証画面」)、`GET /api/market-edges`(#644。騎手・調教師の指標の一覧)、
     アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/favicon-16.png`・`/icons/favicon-32.png`・`/icons/header-32.png`・`/icons/header-64.png`・`/icons/header-96.png`。#244。下の「アイコン」の節)。
   - 管理者だけ(15 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/settings/prompt-preview`(#396)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/reports/run`・`/api/monthly-reports/run`(#280)・`/api/export/prior-dataset`(#266)・`/api/horse-runs`(#256 段階A。各馬の戦績の蓄積の診断)・`/api/baba-fetch`(#360)・`/api/jra/check`(#488)。
   - 閲覧者が表の外の method(HEAD・POST など)を送ると、405 ではなく 403 になる。`{id}`・`{date}` のパターンは `run` に化けない(`/api/analyses/run`・`/api/reports/run` は管理者専用)。
@@ -1590,6 +1590,23 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
   - 名前は外から来る文字列なので、テキストノードだけで入れる(`<b>` は要素にならない)。
 - **束**: 249,758 → 251,260 バイト(+1,502)。上限を 250,000 から 252,000 へ引き上げた(詳細は `cloud/test/client-bundle.test.ts` の追記)。
 - **検査**: `cloud/test/analysis-market-edge.test.ts`(サーバの組み立て)・`handler-analysis-detail.integration.test.ts`(本物の D1 で、値・列なし・読み出しの失敗)・`market-edge-repository.integration.test.ts`(`readForRace`)・`client-api-analysis.test.ts`(応答の検査)・`client-result.test.ts`(列・セル・境界 49/50)・`client-view.test.ts`(セル・「少」・エスケープ・注記)。
+
+### 騎手・調教師の指標の一覧の画面 `#edges`(#644。**版数は 1.44.0 のまま**〈凍結〉)
+#642 の指標を、騎手・調教師ごとに一覧で見る画面。まだ時期を分けて確かめていない値なので、画面に「参考(確かめ中)」と書き添える。**分析(LLM・配分)には使わない**(ユーザーの決定 2026-11-06)。
+
+- **画面**: 一覧のトップの `list-nav` の末尾「騎手・調教師」から入る。ハッシュは `#edges`(騎手)と `#edges=trainer`(調教師)の**完全一致**だけ(`route.ts`。ほかの値は一覧に落ちる)。騎手/調教師はタブのリンクで切り替える。閲覧者にも開く。
+  - 列は 順位・名前・指標(「+3.0pt」。結果画面と同じ `signedPtText`)・件数・3着内率(%)・市場の予測(%。単勝オッズから見込まれる3着内の確率の平均)。
+  - **全件を出す**(ページ分け・絞り込み・並べ替えの操作は無い)。件数が 50 未満(`MARKET_EDGE_FEW_N`。#643 と共有)の行は、薄い字(`market-few`)にして件数の後ろに「少」を付ける(ユーザーの決定)。49 は少ない、50 は少なくない。
+  - 芝ダ・競馬場別の値は無い(#642 で作っていない)ので、その絞り込みはできない。注記にもそう書く。
+  - 名前は `market_edge.name`(結果ページの略称。無ければ ID)。外から来る文字列なので、テキストノードだけで入れる。
+  - 画面の制御は取得だけ(`market-edges-screen.ts`。タイマー・自動の取り直しは無い。「更新」で取り直す。離れる・kind を変えると、遅れて届く古い応答は捨てる)。
+- **API**: `GET /api/market-edges?kind=jockey|trainer`(`handler.ts` の `handleMarketEdges`。**読み取り専用。閲覧者にも GET だけ開く**。HEAD は管理者専用のまま。route-policy の閲覧者に開くものは 21 ルート)。
+  - `Sec-Fetch-Site` が別サイトなら 403。`kind` が無い・`jockey`/`trainer` の完全一致でない・重複・未知のキーは 400(D1 を呼ばない)。D1 の失敗は 503 の固定の型(`d1-error`。例外の文面は返さない)。
+  - 応答は `{ ok, kind, note, rows: [{ name, edge, n, hit_rate, pred_mean }] }`(`market-edges-view.ts`)。**並びはサーバが決める**: 指標の大きい順、同点は件数の多い順、それも同じなら ID の昇順。注記の文もサーバで組み立てる(参考・分析に使っていない・期間・意味・0 への寄せ・計算日・芝ダ競馬場別が無いこと)。
+  - 計算前(`market_edge_meta` が無い。初回の埋め戻しの間)は `rows: []` と「まだ計算していません」の文。
+  - D1 は既存の `readEdges(kind)` と `readMeta()` だけ(**新しい SQL は無い**)。`SELECT_MARKET_EDGES_SQL` は主キー (person_kind, person_id) の範囲の探索で、読む行は種別の人数だけ(手元の分析で騎手 236 人・調教師 269 人。`market-edge-repository.integration.test.ts` が `meta.rows_read` で、片方の種別の人数だけで他方を読まないことを固定)。1 回の取得で読む行は人数 + 1 行程度で、全件を 1 回で返す。
+- **束**: 251,260 → 254,896 バイト(+3,636)。上限を 252,000 から 255,500 へ引き上げた(詳細は `cloud/test/client-bundle.test.ts` の追記)。
+- **検査**: `cloud/test/market-edges-view.test.ts`(並び・名前の代わり・注記・計算前)・`handler-market-edges.test.ts`(認証・閲覧者・HEAD・クエリ・503)・`route-policy.test.ts`・`client-route-edges.test.ts`・`client-market-edges.test.ts`(応答の検査・行の整形・境界 49/50・名前のエスケープ・画面の制御)・`client-app-edges.test.ts`・`market-edge-repository.integration.test.ts`(読み取り行数)。
 
 ### 統計モデルの並走(影の計算。#649 段階 2・3。**版数は 1.44.0 のまま**〈凍結〉)
 発走前の分析のときだけ、学習済みのロジスティック回帰で各馬の勝率・2着内率・3着内率を計算し、D1 の別の表に記録する。**買い目・配分・EV・画面・LLM のプロンプトのどれにも使わない**(結果が出たあとに、いまのやり方と並べて比べるための記録)。

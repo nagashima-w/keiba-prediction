@@ -26,7 +26,7 @@ interface Expected {
 
 /** ルート × 役割の最終表(手書き)。閲覧者に許すのは GET(と、画面の `/`・`/app.js`・アイコン 7 本〈Issue #244〉の HEAD)だけ。 */
 const EXPECTED: readonly Expected[] = [
-  // ---- 閲覧者にも許す(20。画面と API が 13、アイコン〈Issue #244〉が 7) ----
+  // ---- 閲覧者にも許す(21。画面と API が 14、アイコン〈Issue #244〉が 7) ----
   { name: "/", sample: "/", viewer: ["GET", "HEAD"] },
   { name: "/app.js", sample: "/app.js", viewer: ["GET", "HEAD"] },
   { name: "/api/races", sample: "/api/races", viewer: ["GET"] },
@@ -43,6 +43,8 @@ const EXPECTED: readonly Expected[] = [
   { name: "/api/monthly-reports/{month}", sample: "/api/monthly-reports/202610", viewer: ["GET"] },
   // 検証(Issue #263)。閲覧者の GET は**集計のやり直しを起こさない**(キャッシュを返すだけ。handler.ts・verify-core.ts)。`refresh` は管理者だけが受け付ける
   { name: "/api/verify", sample: "/api/verify", viewer: ["GET"] },
+  // 騎手・調教師の指標の一覧(Issue #644)。D1 の market_edge の読み取りだけ(LLM・netkeiba・R2 に触れない)。#643 の応答にすでに載っている値で、新しい露出は無い。GET だけ(HEAD は管理者専用)
+  { name: "/api/market-edges", sample: "/api/market-edges", viewer: ["GET"] },
   // アイコン(Issue #244。タブの favicon・見出しの画像・apple-touch-icon。読み取りだけの静的な画像なので、閲覧者にも開く)
   { name: "/favicon.ico", sample: "/favicon.ico", viewer: ["GET", "HEAD"] },
   { name: "/apple-touch-icon.png", sample: "/apple-touch-icon.png", viewer: ["GET", "HEAD"] },
@@ -78,12 +80,12 @@ const EXPECTED: readonly Expected[] = [
 ];
 
 describe("ルート × 役割の表(手書きの期待値と、実装の requiredRole を全 method で突き合わせる)", () => {
-  it("前提: 表は 43 ルート(閲覧者に開くもの 20・管理者だけ 23)で、閲覧者に開く method の組は 29 通り(GET が 20・HEAD が 9)", () => {
-    expect(EXPECTED).toHaveLength(43);
-    expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(20);
+  it("前提: 表は 44 ルート(閲覧者に開くもの 21・管理者だけ 23)で、閲覧者に開く method の組は 30 通り(GET が 21・HEAD が 9)", () => {
+    expect(EXPECTED).toHaveLength(44);
+    expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(21);
     expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(23);
-    expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(29);
-    expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(20);
+    expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(30);
+    expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(21);
     expect(EXPECTED.filter((e) => e.viewer.includes("HEAD"))).toHaveLength(9);
     expect(ROUTE_RULES).toHaveLength(EXPECTED.length);
     expect(ROUTE_RULES.map((r) => r.path).sort()).toEqual(EXPECTED.map((e) => e.name).sort());
@@ -94,10 +96,10 @@ describe("ルート × 役割の表(手書きの期待値と、実装の require
     expect(requiredRole(method, sample)).toBe(expected);
   });
 
-  it("method の組み合わせの数: 43 ルート × 7 method = 301 通りのうち、閲覧者でよいのは 29 通りだけ", () => {
-    expect(cases).toHaveLength(301);
-    expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(29);
-    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(272);
+  it("method の組み合わせの数: 44 ルート × 7 method = 308 通りのうち、閲覧者でよいのは 30 通りだけ", () => {
+    expect(cases).toHaveLength(308);
+    expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(30);
+    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(278);
   });
 
   it("リクエストの method が小文字などの未知の表記でも、閲覧者に開かない(完全一致の大文字だけを認める)", () => {
@@ -190,12 +192,12 @@ describe("handler.ts の静的ガード(ルーティングの構文を走査す�
     expect(handleBody.length).toBeGreaterThan(2_000);
   });
 
-  it("pathname と完全一致で比べている path は 33 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(40)と過不足なく一致する", () => {
+  it("pathname と完全一致で比べている path は 34 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(41)と過不足なく一致する", () => {
     const literals = [...new Set([...code.matchAll(/\bpathname === "([^"]+)"/g)].map((m) => m[1]!))].sort();
     const exactRules = ROUTE_RULES.filter((r) => r.exact).map((r) => r.path).sort();
-    expect(literals).toHaveLength(33);
+    expect(literals).toHaveLength(34);
     expect(ICON_PATHS).toHaveLength(7);
-    expect(exactRules).toHaveLength(40);
+    expect(exactRules).toHaveLength(41);
     expect([...literals, ...ICON_PATHS].sort()).toEqual(exactRules);
     // アイコンの path が handler.ts に直書きされていない(表と共有する定数だけで振り分ける)
     for (const iconPath of ICON_PATHS) {

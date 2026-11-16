@@ -22,6 +22,7 @@ import { runJraCheck, type JraFetchLike } from "./jra-check";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { attachMarketEdge, loadMarketEdge } from "./analysis-market-edge";
 import { D1MarketEdgeStore } from "./market-edge-repository";
+import { buildMarketEdgesView, type MarketEdgeKind } from "./market-edges-view";
 import { allocationViewOf, buildAnalysisView, type AnalysisView } from "./analysis-view";
 import { buildPreviousDiff, type AnalysisViewPreviousDiff } from "./analysis-diff-view";
 import { CLIENT_JS } from "./client-bundle.generated";
@@ -682,6 +683,14 @@ export async function handle(
       return methodNotAllowed("GET");
     }
     return handlePlan(request, env);
+  }
+
+  if (pathname === "/api/market-edges") {
+    // 読み取り専用(D1 の market_edge・market_edge_meta を読むだけ。R2・netkeiba・LLM・DO には触れない)。GET だけ(HEAD で D1 を引かない)。Issue #644。
+    if (method !== "GET") {
+      return methodNotAllowed("GET");
+    }
+    return handleMarketEdges(request, env);
   }
 
   if (pathname === "/api/targets") {
@@ -1771,6 +1780,34 @@ async function handlePlan(request: Request, env: Env): Promise<Response> {
   } catch {
     // 例外の文面・SQL は返さない。
     return raceDayError();
+  }
+}
+
+/** `GET /api/market-edges` のクエリの許可リスト(`kind` だけ)。 */
+const MARKET_EDGES_PARAMS: ReadonlySet<string> = new Set(["kind"]);
+
+/**
+ * `GET /api/market-edges?kind=jockey|trainer`(Issue #644): 騎手・調教師の指標の一覧(#642 の `market_edge`)。並びと文はサーバで決める(`market-edges-view.ts`)。
+ * **読み取り専用**: `readEdges`(主キーの範囲。約 250 行)と `readMeta`(1 行)だけ。新しい SQL は無い。閲覧者にも開く(GET だけ。route-policy.ts)。
+ * 順序: `Sec-Fetch-Site`(別サイトなら 403)→ クエリの検証(400。`kind` は必須・`jockey` か `trainer` の完全一致・重複と未知のキーは不正。ここまでで D1 は呼ばない)→ D1(失敗は 503・文面なし)。
+ */
+async function handleMarketEdges(request: Request, env: Env): Promise<Response> {
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
+  }
+  const url = new URL(request.url);
+  const kind = url.searchParams.get("kind");
+  if (hasInvalidQueryKeys(url, MARKET_EDGES_PARAMS) || (kind !== "jockey" && kind !== "trainer")) {
+    return badRequest("kind を jockey か trainer で 1 つ指定してください");
+  }
+  try {
+    const store = new D1MarketEdgeStore(env.DB);
+    const [edges, meta] = await Promise.all([store.readEdges(kind as MarketEdgeKind), store.readMeta()]);
+    return json(buildMarketEdgesView(kind as MarketEdgeKind, edges, meta));
+  } catch {
+    // 例外の文面・SQL は返さない。
+    return json({ ok: false, error: { type: "d1-error" } }, 503);
   }
 }
 

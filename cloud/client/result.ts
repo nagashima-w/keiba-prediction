@@ -424,7 +424,7 @@ function probShiftOf(prior: number, adjusted: number): string | null {
 }
 
 /** 確率の差(0〜1 のスケール)を「+3.0pt」「-1.3pt」にする。丸めて 0.0 になる差は「±0.0pt」(補正幅と同じ)。 */
-function signedPtText(diff: number): string {
+export function signedPtText(diff: number): string {
   const text = formatAdjustment(diff);
   return text === "0.0pt" ? "±0.0pt" : text;
 }

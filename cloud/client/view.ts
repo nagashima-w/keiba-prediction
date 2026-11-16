@@ -20,6 +20,8 @@ import type { MonthlyBodyView, MonthlyModel } from "./monthly-model";
 import type { RaceRowView, ReportBodyView, ReportModel, WhatIfView } from "./report-model";
 import type { AdminOnlyModel } from "./admin-only";
 import type { TargetRow, TargetsModel } from "./targets-model";
+import type { EdgesModel } from "./market-edges-model";
+import { EDGES_HASH } from "./route";
 import type { FormationSection } from "./formation-model";
 import { h, type VNode } from "./vnode";
 
@@ -191,6 +193,8 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
     h("a", { class: "targets-link", href: model.targetsHref }, ["狙い目"]),
     // 検証への入口は閲覧者にも出す(Issue #263。閲覧者の要求は集計のやり直しを起こさない)。設定への入口は管理者だけ(Issue #238。閲覧者は href が null)。日報は閲覧者にも出す。
     h("a", { class: "verify-link", href: model.verifyHref }, ["検証"]),
+    // 騎手・調教師の指標の一覧への入口(Issue #644)。閲覧者にも出す(読み取りだけ)。
+    h("a", { class: "edges-link", href: EDGES_HASH }, ["騎手・調教師"]),
     h("a", { class: "report-link", href: model.reportHref }, ["日報"]),
     // 月報の入口(Issue #544)。日報の直後。閲覧者にも出す。`now` を省いたモデルでは出さない(本番の app.ts は必ず now を渡す)。
     ...(model.monthlyHref === null ? [] : [h("a", { class: "monthly-link", href: model.monthlyHref }, ["月報"])]),
@@ -1183,7 +1187,42 @@ function targetsScreen(model: TargetsModel, actions: ViewActions): VNode {
   return h("div", { class: "screen" }, body);
 }
 
-export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | VerifyModel | ReportModel | MonthlyModel | TargetsModel | AdminOnlyModel, actions: ViewActions): VNode {
+/** 騎手・調教師の指標の一覧(Issue #644)。サーバが並べた順(指標の大きい順)。少ない人(50 未満)は薄い字と「少」。名前は外から来る文字列(テキストノードだけ)。 */
+function edgesScreen(model: EdgesModel, actions: ViewActions): VNode {
+  const body: VNode[] = [
+    h("div", { class: "controls" }, [
+      h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
+      h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+    ]),
+    h("h1", { class: "title" }, ["騎手・調教師の指標(参考・確かめ中)"]),
+    h("nav", { class: "tabs", "aria-label": "騎手・調教師" }, model.tabs.map((t) => h("a", { class: "tab", href: t.href, "aria-current": t.current ? "page" : undefined }, [t.label]))),
+  ];
+  if (model.note === null && model.loading) body.push(h("p", { class: "empty" }, ["読み込み中…"]));
+  if (model.error !== null) body.push(notice("error", model.error));
+  if (model.note !== null) body.push(h("p", { class: "market-note" }, [model.note]));
+  if (model.rows.length > 0) {
+    const th = (label: string): VNode => h("th", {}, [label]);
+    const rows = model.rows.map((r) =>
+      h("tr", { class: r.few ? "market-few" : "" }, [
+        h("td", {}, [String(r.rank)]),
+        h("td", { class: "market-name" }, [r.name]),
+        h("td", { class: "market-value" }, [r.value]),
+        // 要素の間の隙間は、空白のテキストノードで作る(`dom.ts` は子をそのまま appendChild する)。
+        h("td", {}, [r.n, ...(r.few ? [" ", h("span", { class: "market-few-mark" }, ["少"])] : [])]),
+        h("td", {}, [r.hit]),
+        h("td", {}, [r.pred]),
+      ]),
+    );
+    body.push(
+      h("div", { class: "edges-table-wrap", role: "region", "aria-label": "騎手・調教師の指標の一覧" }, [
+        h("table", { class: "edges-table" }, [h("thead", {}, [h("tr", {}, ["順位", "名前", "指標", "件数", "3着内率", "市場の予測"].map(th))]), h("tbody", {}, rows)]),
+      ]),
+    );
+  }
+  return h("div", { class: "screen" }, body);
+}
+
+export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | VerifyModel | ReportModel | MonthlyModel | TargetsModel | EdgesModel | AdminOnlyModel, actions: ViewActions): VNode {
   switch (model.kind) {
     case "list":
       return listScreen(model, actions);
@@ -1201,6 +1240,8 @@ export function renderScreen(model: ListModel | RaceModel | ResultModel | Settin
       return monthlyScreen(model, actions);
     case "targets":
       return targetsScreen(model, actions);
+    case "edges":
+      return edgesScreen(model, actions);
     case "admin-only":
       return adminOnlyScreen(model);
   }
