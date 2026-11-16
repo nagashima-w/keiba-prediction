@@ -17,12 +17,13 @@
 #   全件と smoke      上の全部と cloud/smoke.ts。push 後の CI が確かめる(結果の確認はメインが行う)。
 #
 # 既定で流す段(依存のインストールは含めない):
-#   ルート: pnpm typecheck / pnpm test        (`-r` 無し。scripts/ 配下のテスト・型検査は -r 付きでは走らない。Issue #38)
+#   ルート: pnpm typecheck / pnpm -r test(packages のテスト)/ pnpm exec vitest run(scripts/ 配下のテスト)
+#           (後ろ 2 つは CI の `pnpm test` を 2 段に分けたもの。Issue #630。scripts/ 配下のテスト・型検査は `pnpm -r` では走らない。Issue #38)
 #   cloud : pnpm run typecheck / pnpm run test:unit / 関係するインテグレーション(scripts/verify-related-integration.mjs)
 #           / pnpm run deploy:dry / pnpm exec wrangler d1 migrations apply DB --local
 #   関係するインテグレーションの基点は環境変数 VERIFY_BASE(既定は実装担当の終了時フックと同じ ref)。merge-base から作業ツリー・未追跡までを変更とみなす。
 # --full の段(ci.yml の verify・cloud-verify と、deploy-cloud.yml の check・smoke の run: に対応する):
-#   ルート: pnpm typecheck / pnpm test
+#   ルート: pnpm typecheck / pnpm -r test / pnpm exec vitest run
 #   cloud : pnpm run typecheck / pnpm test / pnpm run deploy:dry / pnpm exec wrangler d1 migrations apply DB --local / pnpm run smoke
 # 依存のインストールは事前に行う: ルートで `pnpm install --frozen-lockfile`、cloud/ で `pnpm install --ignore-workspace --frozen-lockfile`。
 #
@@ -56,9 +57,13 @@ while [ $# -gt 0 ]; do
 done
 
 # 段: id|作業ディレクトリ(ROOT からの相対)|コマンド
+# ルートの `pnpm test` は package.json で `pnpm -r test && vitest run`(packages/core のテスト → scripts/test のテスト)。
+# `&&` のままだと core が落ちたとき scripts/test が流れないので、2 段に分けて、片方が落ちても両方の結果を出す(Issue #630)。
+# 分けた 2 段の合計は CI の `pnpm test` と同じ。scripts/test/verify-all.test.ts が package.json の連結と突き合わせる。
 stages=(
   "root-typecheck|.|pnpm typecheck"
-  "root-test|.|pnpm test"
+  "root-test-packages|.|pnpm -r test"
+  "root-test-scripts|.|pnpm exec vitest run"
 )
 if [ "$research" -eq 1 ]; then
   stages+=("root-test-research|.|pnpm test:research")

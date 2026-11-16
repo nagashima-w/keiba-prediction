@@ -112,6 +112,28 @@ const CI_RUNS = [
   ...extractRuns(readTextLf(".github", "workflows", "ci.yml")),
   ...extractRuns(readTextLf(".github", "workflows", "deploy-cloud.yml")),
 ];
+
+/**
+ * ルートの `pnpm test`(= package.json の scripts.test)は `A && B` の連結で、スクリプトは A と B を別の段に分けて流す
+ * (A が落ちても B を流すため。Issue #630)。突き合わせでは CI のこの 1 行を、連結の各部分(`pnpm` で始まらないものは `pnpm exec` を前に付ける)に展開する。
+ * 展開の元は package.json の実物で、手で書かない(CI の `pnpm test` の中身を変えたらここも追従する)。
+ */
+function rootTestParts(): string[] {
+  const pkg = JSON.parse(readTextLf("package.json")) as { scripts: Record<string, string> };
+  return (pkg.scripts["test"] ?? "")
+    .split("&&")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => (p.startsWith("pnpm ") ? p : `pnpm exec ${p}`));
+}
+
+function expandCiRuns(runs: CiRun[]): CiRun[] {
+  return runs.flatMap((r) =>
+    r.dir === "." && r.cmd === "pnpm test" ? rootTestParts().map((cmd) => ({ ...r, cmd })) : [r],
+  );
+}
+
+const CI_RUNS_EXPANDED = expandCiRuns(CI_RUNS);
 const DRY = parseStages(runScript(["--dry-run", "--full"]).stdout);
 const DRY_DEFAULT = parseStages(runScript(["--dry-run"]).stdout);
 const DRY_RESEARCH = parseStages(runScript(["--dry-run", "--research"]).stdout);
@@ -130,20 +152,21 @@ describe("verify-all.sh は CI の run: を覆う", () => {
   it("CI の run:(インストール以外)は、すべて --full --dry-run の段に現れる", () => {
     const nonInstall = CI_RUNS.filter((r) => !INSTALL.test(r.cmd));
     expect(nonInstall.length).toBeGreaterThanOrEqual(7);
-    expect(missingInScript(CI_RUNS, DRY)).toEqual([]);
+    expect(missingInScript(CI_RUNS_EXPANDED, DRY)).toEqual([]);
   });
 
   it("--full --dry-run の段(--research を除く)は、すべて CI の run: に現れる", () => {
-    expect(DRY.length).toBe(7);
-    expect(DRY_DEFAULT.length).toBe(7);
-    const stray = DRY.filter((s) => !CI_RUNS.some((r) => r.dir === s.dir && r.cmd === s.cmd));
+    expect(DRY.length).toBe(8);
+    expect(DRY_DEFAULT.length).toBe(8);
+    const stray = DRY.filter((s) => !CI_RUNS_EXPANDED.some((r) => r.dir === s.dir && r.cmd === s.cmd));
     expect(stray).toEqual([]);
   });
 
   it("段の順序: ルート → cloud、型検査 → テスト → dry-run → D1 の migration → smoke", () => {
     expect(DRY.map((s) => s.id)).toEqual([
       "root-typecheck",
-      "root-test",
+      "root-test-packages",
+      "root-test-scripts",
       "cloud-typecheck",
       "cloud-test",
       "cloud-deploy-dry",
@@ -155,7 +178,8 @@ describe("verify-all.sh は CI の run: を覆う", () => {
   it("既定(--full 無し)の形: smoke と cloud の全件を流さず、ユニットの全件・関係するインテグレーション・deploy:dry・D1 の migration を流す", () => {
     expect(DRY_DEFAULT.map((s) => s.id)).toEqual([
       "root-typecheck",
-      "root-test",
+      "root-test-packages",
+      "root-test-scripts",
       "cloud-typecheck",
       "cloud-test-unit",
       "cloud-test-integration-related",
@@ -166,7 +190,7 @@ describe("verify-all.sh は CI の run: を覆う", () => {
     expect(DRY_DEFAULT.some((s) => /\bsmoke\b/.test(s.cmd))).toBe(false);
     expect(DRY_DEFAULT.find((s) => s.id === "cloud-test-unit")).toEqual({ id: "cloud-test-unit", dir: "cloud", cmd: "pnpm run test:unit" });
     // CI に無い段は、ユニットの全件と関係するインテグレーションの 2 つだけ(それ以外は CI と同じコマンド)。
-    const notInCi = DRY_DEFAULT.filter((s) => !CI_RUNS.some((r) => r.dir === s.dir && r.cmd === s.cmd)).map((s) => s.id);
+    const notInCi = DRY_DEFAULT.filter((s) => !CI_RUNS_EXPANDED.some((r) => r.dir === s.dir && r.cmd === s.cmd)).map((s) => s.id);
     expect(notInCi).toEqual(["cloud-test-unit", "cloud-test-integration-related"]);
     // --full の段は、既定の段に cloud の全件と smoke を足し、ユニットと関係するインテグレーションを外したもの。
     expect(DRY.map((s) => s.id).filter((id) => !DRY_DEFAULT.some((d) => d.id === id))).toEqual(["cloud-test", "cloud-smoke"]);
@@ -178,6 +202,24 @@ describe("verify-all.sh は CI の run: を覆う", () => {
     expect(pkg.scripts["test:unit"]).toContain("--exclude");
     expect(pkg.scripts["test:integration"]).toContain(".integration.test.ts");
     expect(CI_RUNS.some((r) => /test:(unit|integration)/.test(r.cmd))).toBe(false);
+  });
+
+  it("ルートのテストは 2 段に分かれる(Issue #630): packages(pnpm -r test)と scripts(ルート直下の vitest)。package.json の連結と一致する", () => {
+    expect(rootTestParts()).toEqual(["pnpm -r test", "pnpm exec vitest run"]);
+    for (const dry of [DRY, DRY_DEFAULT]) {
+      expect(dry.filter((s) => s.id.startsWith("root-test-") && s.id !== "root-test-research")).toEqual([
+        { id: "root-test-packages", dir: ".", cmd: "pnpm -r test" },
+        { id: "root-test-scripts", dir: ".", cmd: "pnpm exec vitest run" },
+      ]);
+      expect(dry.some((s) => s.id === "root-test" || (s.dir === "." && s.cmd === "pnpm test"))).toBe(false);
+    }
+  });
+
+  it("packages の段が落ちても scripts の段は流れ、要約の行も別々に出る(Issue #630)", () => {
+    const r = runScript([], { VERIFY_ALL_STUB: "1", VERIFY_ALL_FAIL_STAGE: "root-test-packages" });
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/^root-test-packages\s+終了コード=1 /m);
+    expect(r.stdout).toMatch(/^root-test-scripts\s+終了コード=0 /m);
   });
 
   it("関係するインテグレーションの段のスクリプトが実在する", () => {
