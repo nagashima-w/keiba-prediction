@@ -51,8 +51,8 @@ interface CiRun {
   cmd: string;
 }
 
-/** matrix の shard の引数(Issue #762)。 */
-const SHARD_ARG = / --shard=\$\{\{ matrix\.shard \}\}$/;
+/** matrix の引数(Issue #762): テストの shard と、スモークの設定の組。 */
+const SHARD_ARG = / --(?:shard=\$\{\{ matrix\.shard \}\}|only=\$\{\{ matrix\.group \}\})$/;
 
 /** deploy ジョブ以外の各ジョブの run: を、作業ディレクトリつきで列挙する。複数行の run: は multiline=true で返す。 */
 function extractRuns(yml: string): Array<CiRun & { multiline: boolean }> {
@@ -70,8 +70,8 @@ function extractRuns(yml: string): Array<CiRun & { multiline: boolean }> {
       const run = /^ {8}run:\s*(.*)$/m.exec(step);
       if (!run) continue;
       const wd = /^ {8}working-directory:\s*(\S+)\s*$/m.exec(step);
-      // Issue #762: matrix の shard(`--shard=${{ matrix.shard }}`)は、スクリプトの段(全件)と突き合わせるため外す。
-      // shard の値が 1/N〜N/N をちょうど 1 回ずつ含む(全件になる)ことは、cloud-deploy-workflow.test.ts が固定している。
+      // Issue #762: matrix の引数(テストの `--shard=${{ matrix.shard }}`・スモークの `--only=${{ matrix.group }}`)は、スクリプトの段(全件)と突き合わせるため外す。
+      // shard の値が 1/N〜N/N をちょうど 1 回ずつ含む・スモークの組が全設定をちょうど 1 回ずつ覆う(全件になる)ことは、cloud-deploy-workflow.test.ts が固定している。
       const value = (run[1] ?? "").trim().replace(SHARD_ARG, "");
       out.push({ job, dir: wd?.[1] ?? ".", cmd: value, multiline: value === "|" || value === ">" });
     }
@@ -336,11 +336,15 @@ jobs:
       "      - name: 別の引数",
       "        working-directory: cloud",
       "        run: pnpm test --coverage",
+      "      - name: スモーク",
+      "        working-directory: cloud",
+      "        run: pnpm run smoke --only=${{ matrix.group }}",
     ].join("\n");
-    expect(extractRuns(synthetic).map((r) => r.cmd)).toEqual(["pnpm test", "pnpm test --coverage"]);
+    expect(extractRuns(synthetic).map((r) => r.cmd)).toEqual(["pnpm test", "pnpm test --coverage", "pnpm run smoke"]);
     // 実物: deploy-cloud.yml の test ジョブの run: が、cloud の `pnpm test` として読めている
     expect(CI_RUNS.some((r) => r.job === "test" && r.dir === "cloud" && r.cmd === "pnpm test")).toBe(true);
-    expect(CI_RUNS.some((r) => /--shard/.test(r.cmd))).toBe(false);
+    expect(CI_RUNS.some((r) => r.job === "smoke" && r.dir === "cloud" && r.cmd === "pnpm run smoke")).toBe(true);
+    expect(CI_RUNS.some((r) => /--(shard|only)/.test(r.cmd))).toBe(false);
   });
 
   it("CI に足した段をスクリプトに足し忘れると、突き合わせが検出する", () => {

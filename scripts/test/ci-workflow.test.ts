@@ -279,7 +279,7 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
       const deployCode = withoutComments(readTextLf(path.join(WORKFLOWS_DIR, "deploy-cloud.yml")));
       // Issue #762: deploy-cloud.yml はテストを shard に分けたので、`pnpm test` の後ろに matrix の shard が付く(全 shard で全件。coversAllShards の検査は cloud-deploy-workflow.test.ts)。
       for (const cmd of ["pnpm install --ignore-workspace --frozen-lockfile", "pnpm run typecheck", "pnpm test", "pnpm run smoke"]) {
-        const inDeploy = cmd === "pnpm test" ? "pnpm test --shard=${{ matrix.shard }}" : cmd;
+        const inDeploy = cmd === "pnpm test" ? "pnpm test --shard=${{ matrix.shard }}" : cmd === "pnpm run smoke" ? "pnpm run smoke --only=${{ matrix.group }}" : cmd;
         expect(deployCode, cmd).toContain(`run: ${inDeploy}\n`);
         expect(jobCode, cmd).toContain(`run: ${cmd}\n`);
       }

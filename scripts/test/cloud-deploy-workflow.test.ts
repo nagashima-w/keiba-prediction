@@ -338,10 +338,65 @@ describe("test ジョブ(Issue #762: cloud のテストを vitest の shard に�
   });
 });
 
-describe("smoke ジョブのコマンド(順序つきで完全一致)", () => {
-  it("install → スモークの2つだけを実行する。スモークは cloud/ で実行する", () => {
+/** smoke ジョブのスモークのコマンド(組は matrix の値。Issue #762)。 */
+const SMOKE_COMMAND = "pnpm run smoke --only=${{ matrix.group }}";
+
+/** matrix の `group: [...]` の値(`A,B,C` の形の文字列)を、出現順に読む(コメント行は読まない)。無ければ null。 */
+function smokeGroupsOf(job: string): string[][] | null {
+  const m = /^ {8}group: \[(.*)\]\s*$/m.exec(withoutComments(job));
+  if (m === null) return null;
+  // 値は `"A,B"` のように引用符で囲むので、引用符の対ごとに読む(引用符の中のカンマで分けない)。
+  return [...m[1]!.matchAll(/"([^"]*)"/g)].map((q) => q[1]!.split(",").map((x) => x.trim()).filter((x) => x !== ""));
+}
+
+/** smoke.ts の設定 ID の一覧(`const CONFIG_IDS = [...] as const;`)。 */
+function smokeConfigIds(): string[] {
+  const m = /const CONFIG_IDS = \[([^\]]*)\] as const;/.exec(readTextLf("cloud", "smoke.ts"));
+  expect(m, "smoke.ts に CONFIG_IDS がある").not.toBeNull();
+  return [...m![1]!.matchAll(/"([^"]+)"/g)].map((q) => q[1]!);
+}
+
+/** 組が設定を、抜け・重複なく、ちょうど 1 回ずつ覆うか。 */
+function coversEachOnce(groups: string[][], ids: string[]): boolean {
+  const flat = groups.flat();
+  return flat.length === ids.length && [...flat].sort().join(",") === [...ids].sort().join(",") && groups.every((g) => g.length > 0);
+}
+
+describe("smoke ジョブ(Issue #762: 設定 A〜L を 3 つの組に分けて並行に流す)", () => {
+  it("検出器の確認(空振りでない): coversEachOnce は抜け・重複・空の組・知らない設定を偽にし、smokeGroupsOf は引用符の中のカンマで分けない", () => {
+    expect(coversEachOnce([["A", "B"], ["C"]], ["A", "B", "C"])).toBe(true);
+    expect(coversEachOnce([["A"], ["C"]], ["A", "B", "C"])).toBe(false);
+    expect(coversEachOnce([["A", "B"], ["B", "C"]], ["A", "B", "C"])).toBe(false);
+    expect(coversEachOnce([["A", "B", "C"], []], ["A", "B", "C"])).toBe(false);
+    expect(coversEachOnce([["A", "B"], ["Z"]], ["A", "B", "C"])).toBe(false);
+    expect(smokeGroupsOf('  s:\n        group: ["A,B", "C"]\n')).toEqual([["A", "B"], ["C"]]);
+    expect(smokeGroupsOf('  s:\n        # group: ["A"]\n')).toBeNull();
+  });
+
+  it("smoke.ts の設定 ID は、runConfig(\"X\", ...) の呼び出しにそれぞれちょうど 1 回現れる。main に wrangler dev を直接起動する呼び出し(await withWorker)は無い(設定を足したのに選択の対象から漏れる・選択を素通りする起動を検出する)", () => {
+    const ids = smokeConfigIds();
+    expect(ids.length).toBeGreaterThanOrEqual(12);
+    expect(new Set(ids).size).toBe(ids.length);
+    const code = withoutComments(readTextLf("cloud", "smoke.ts"));
+    const calls = [...code.matchAll(/\bawait runConfig\("([^"]+)",/g)].map((m) => m[1]!);
+    expect([...calls].sort()).toEqual([...ids].sort());
+    expect(code).not.toMatch(/\bawait withWorker\(/);
+  });
+
+  it("matrix の組は 3 つで、smoke.ts の全設定をちょうど 1 回ずつ覆う(抜けるとその設定のスモークが CI で一度も流れない。重複は時間の無駄)。fail-fast は false", () => {
     const smoke = jobBody("smoke");
-    expect(runCommands(smoke)).toEqual([CLOUD_INSTALL, "pnpm run smoke"]);
+    const groups = smokeGroupsOf(smoke);
+    expect(groups, "smoke に matrix の group がある").not.toBeNull();
+    expect(groups).toHaveLength(3);
+    expect(coversEachOnce(groups!, smokeConfigIds())).toBe(true);
+    expect(withoutComments(smoke)).toMatch(/^ {6}fail-fast: false$/m);
+  });
+});
+
+describe("smoke ジョブのコマンド(順序つきで完全一致)", () => {
+  it("install → スモーク(組つき)の2つだけを実行する。スモークは cloud/ で実行する。組は matrix の値をそのまま渡す", () => {
+    const smoke = jobBody("smoke");
+    expect(runCommands(smoke)).toEqual([CLOUD_INSTALL, SMOKE_COMMAND]);
     expect(stepBody(smoke, "スモーク")).toContain("working-directory: cloud");
     expect(stepIndex(smoke, "依存をインストール")).toBeLessThan(stepIndex(smoke, "スモーク"));
   });
@@ -362,7 +417,7 @@ describe("check・test・smoke の分割で、元の6コマンドが1つも落�
       TEST_COMMAND,
       "pnpm run deploy:dry",
       "pnpm exec wrangler d1 migrations apply DB --local",
-      "pnpm run smoke",
+      SMOKE_COMMAND,
     ]) {
       expect(all, c).toContain(c);
     }
