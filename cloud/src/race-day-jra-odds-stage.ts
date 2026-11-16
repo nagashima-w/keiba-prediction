@@ -32,6 +32,15 @@ export interface JraOddsStageDeps {
   readonly now: () => number;
   readonly onWarn: (message: string) => void;
   readonly onInfo?: (message: string) => void;
+  /** 頁ごとの失敗の語(構造化。省略可。#756)。警告の文面を読まずに、失敗の種類を受け取る口。投げても段は止まらない。 */
+  readonly onPageFailure?: (failure: JraOddsPageFailure) => void;
+}
+
+/** 頁の失敗。`fetch-failed` = 取得口の失敗(word は取得口の語) / `parse-failed` = 読み取りの失敗(word は `unavailable`・`parse-error`)。 */
+export interface JraOddsPageFailure {
+  readonly page: JraOddsPage;
+  readonly kind: "fetch-failed" | "parse-failed";
+  readonly word: string;
 }
 
 const BET_FOR_PAGE: Partial<Record<JraOddsPage, ComboBetType>> = Object.fromEntries(
@@ -186,12 +195,14 @@ export class JraOddsStage {
           store.mark(raceId, instance, page, "failed");
           failed += 1;
           this.deps.onWarn(`JRA オッズの取得に失敗しました(${raceId}。頁 ${page}): ${safeWord(result.word)}`);
+          this.reportFailure({ page, kind: "fetch-failed", word: safeWord(result.word) });
           continue;
         }
         if (result.status === "parse-failed") {
           store.mark(raceId, instance, page, "failed");
           failed += 1;
           this.deps.onWarn(`JRA オッズの読み取りに失敗しました(${raceId}。頁 ${page}): ${result.word}`);
+          this.reportFailure({ page, kind: "parse-failed", word: result.word });
           continue;
         }
         store.mark(raceId, instance, page, "done");
@@ -203,6 +214,14 @@ export class JraOddsStage {
       // 取得口・キャッシュ・表の例外。文面は残さない(URL・cname が入りうる)。残りは failed にして計算に進む。
       this.failAll(raceId, instance, "exception");
       this.info(raceId, batch.length, 0, batch.length, sent, startedAt);
+    }
+  }
+
+  private reportFailure(failure: JraOddsPageFailure): void {
+    try {
+      this.deps.onPageFailure?.(failure);
+    } catch {
+      // 受け取り側の例外で、取得を止めない
     }
   }
 

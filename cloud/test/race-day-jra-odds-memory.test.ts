@@ -125,3 +125,71 @@ describe("JraOddsStage: 1 頁ずつ・時間の守り", () => {
     expect(t.events.filter((e) => e.startsWith("fetch:"))).toEqual(["fetch:tanpuku", "fetch:wakuren"]);
   });
 });
+
+describe("JraOddsStage: 頁の失敗の語を構造的に渡す(onPageFailure。#756)", () => {
+  function setup(fetchOdds: (page: string) => { status: string; value?: string }) {
+    const cache = new Map<string, { value: string; fetchedAt: number }>();
+    cache.set(jraLinksCacheKey(RACE), { value: JSON.stringify(links), fetchedAt: 0 });
+    const fetcher: JraOddsFetcher = {
+      open(): JraOddsSession {
+        return {
+          requestCount: 0,
+          async listVenues() {
+            throw new Error("リンクがあるので呼ばれない");
+          },
+          async listRaces() {
+            throw new Error("リンクがあるので呼ばれない");
+          },
+          async fetchOdds(c) {
+            const page = Object.keys(DIGIT).find((p) => c.startsWith(`pw15${DIGIT[p]}`))!;
+            return fetchOdds(page) as never;
+          },
+        };
+      },
+    };
+    const failures: { page: string; kind: string; word: string }[] = [];
+    const warnings: string[] = [];
+    const stage = new JraOddsStage({
+      store: new MemoryJraOddsStageStore(["tanpuku", "umaren"]),
+      fetcher,
+      cache: { get: (k) => cache.get(k), set: (k, v) => void cache.set(k, { value: v, fetchedAt: 1 }) },
+      now: () => 1,
+      onWarn: (m) => warnings.push(m),
+      onPageFailure: (f) => failures.push(f),
+    });
+    return { stage, failures, warnings };
+  }
+
+  it("取得の失敗は kind=fetch-failed と取得口の語、読み取りの失敗は kind=parse-failed と読み取りの語で、頁ごとに渡す。成功した頁は渡さない", async () => {
+    const t = setup((page) => (page === "tanpuku" ? { status: "timeout" } : { status: "ok", value: "<html><body>表なし</body></html>" }));
+    await t.stage.run(RACE, 0, DATE);
+    expect(t.failures).toEqual([
+      { page: "tanpuku", kind: "fetch-failed", word: "timeout" },
+      { page: "umaren", kind: "parse-failed", word: "unavailable" },
+    ]);
+  });
+
+  it("全部成功なら渡さない", async () => {
+    const t = setup((page) => ({ status: "ok", value: jraHtml(FIXTURE[page]!) }));
+    await t.stage.run(RACE, 0, DATE);
+    expect(t.failures).toEqual([]);
+  });
+
+  it("onPageFailure が投げても、段は続けて警告も出す(取得の邪魔をしない)", async () => {
+    const cache = new Map<string, { value: string; fetchedAt: number }>();
+    cache.set(jraLinksCacheKey(RACE), { value: JSON.stringify(links), fetchedAt: 0 });
+    const warnings: string[] = [];
+    const stage = new JraOddsStage({
+      store: new MemoryJraOddsStageStore(["tanpuku", "umaren"]),
+      fetcher: { open: () => ({ requestCount: 0, listVenues: async () => ({ status: "timeout" }), listRaces: async () => ({ status: "timeout" }), fetchOdds: async () => ({ status: "timeout" }) }) as never },
+      cache: { get: (k) => cache.get(k), set: () => undefined },
+      now: () => 1,
+      onWarn: (m) => warnings.push(m),
+      onPageFailure: () => {
+        throw new Error("x");
+      },
+    });
+    await stage.run(RACE, 0, DATE);
+    expect(warnings.filter((m) => m.includes("取得に失敗しました"))).toHaveLength(2); // 前提: 2 頁とも失敗し、警告が 2 件
+  });
+});
