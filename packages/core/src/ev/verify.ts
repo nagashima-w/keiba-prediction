@@ -1382,10 +1382,14 @@ function buildVerifyRacePart(
 
       // キャリブレーション・補正傾向・印別的中率は isInTopThree(3着以内)だけを使う
       // (複勝payout対象〈isPlaceHit〉とは別概念。Issue#70 AC-A1)。
-      // 確率(prior・補正後)が有限でない馬(NaN・±Infinity)は、確率に基づく集計(帯・Brier・補正方向)から外す(Issue #717)。
-      // 帯の番号が決まらず TypeError になるため。着順が確定していない馬を外すのと同じ扱いで、帯の件数の合計と Brier の評価頭数は
-      // 同じ馬の集合のまま。印別の集計と回収率(確率を使わない)には残す。範囲外の有限な値は従来どおり帯の端に入り、Brier だけが null になる。
-      if (Number.isFinite(horse.prior) && Number.isFinite(horse.adjustedProb)) {
+      // 確率(prior・補正後)が NaN の馬は、確率に基づく集計(帯・Brier の評価頭数・補正方向)から外す(Issue #717)。
+      // 帯の番号が決まらず TypeError になるため(±Infinity と範囲外の有限値は帯の端に入る)。着順が確定していない馬を外すのと
+      // 同じ扱いで、帯の件数の合計と Brier の評価頭数は同じ馬の集合のまま。不正な確率を黙って数値にしない慣行に合わせ、
+      // 補正前・補正後の Brier はどちらも null にする。印別の集計と回収率(確率を使わない)には残す。
+      if (Number.isNaN(horse.prior) || Number.isNaN(horse.adjustedProb)) {
+        priorInvalid = true;
+        adjustedInvalid = true;
+      } else {
         // キャリブレーション: 全馬(推定確率帯ごと)に計上する。
         const binIndex = binIndexFor(horse.adjustedProb, calibrationBins);
         bins[binIndex]!.predicted += 1;
