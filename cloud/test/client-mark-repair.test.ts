@@ -62,7 +62,8 @@ function findAll(node: VNode | string, pred: (n: VNode) => boolean): VNode[] {
 }
 const byClass = (tree: VNode, cls: string): VNode[] => findAll(tree, (n) => (n.attrs?.["class"] ?? "").toString().split(" ").includes(cls));
 const rawTextOf = (node: VNode | string): string => (typeof node === "string" ? node : (node.children ?? []).map(rawTextOf).join(""));
-const resultTree = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a } }), noopActions);
+// Issue #740: 馬の詳しい中身(旧カード)は押すまで閉じているので、旧カードの表示を見るこのファイルでは全頭を開いた状態で描く。
+const resultTree = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: a.horses.map((x) => x.umaban) }), noopActions);
 
 // 1番: 補修していない◎、2番: ◎→〇、3番: 印なし→◎ではなく ▲(なし→▲)、4番: ☆→印なし(印が消えた)、5番: 不明な印→印なし
 const HORSES = [horse(1, "◎", null, 0.5), horse(2, "〇", "◎", 0.4), horse(3, "▲", "なし", 0.3), horse(4, null, "☆", 0.2), horse(5, null, "不明", 0.1), horse(6, null, undefined, 0.05)];

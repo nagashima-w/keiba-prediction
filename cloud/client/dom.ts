@@ -10,6 +10,7 @@
  *  - `inputmode`: `numeric`・`decimal`・`text` だけ。`maxlength`: 1〜5桁の数字だけ。それ以外は投げる。
  * Issue #222(移行画面)で足した許可のうち、要素 `progress`(属性 `value`・`max` は数字だけ。`max` は progress だけ)は、検証画面が使うので残している。
  * 属性 `accept` と イベント `on.file`(`input type="file"`)は、移行画面の廃止(Issue #394)で外した。
+ * Issue #740(馬の行の開閉)で足した許可: 属性 `colspan`(`td` の 1〜2 桁の数字だけ)・`id`(`horse-detail-{分析 id}-{馬番} の形だけ)。
  * Issue #311(レース再生)で足した `canvas` は、Issue #362 でレース再生を廃止したので許可から外した(想定隊列図は div・span と `data-*` で描く)。
  */
 import type { VNode } from "./vnode";
@@ -43,7 +44,9 @@ export interface RestorableElement {
 }
 
 const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option", "progress", "table", "thead", "tbody", "tr", "th", "td"]);
-const ALLOWED_ATTRS = new Set(["class", "type", "value", "disabled", "href", "role", "checked", "inputmode", "maxlength", "max"]);
+const ALLOWED_ATTRS = new Set(["class", "type", "value", "disabled", "href", "role", "checked", "inputmode", "maxlength", "max", "colspan", "id"]);
+/** `id` は馬の詳しい行(Issue #740。開閉のボタンの `aria-controls` の相手)の形だけ。分析 id は 1〜10 桁、馬番は 1〜2 桁。 */
+const HORSE_DETAIL_ID = /^horse-detail-[0-9]{1,10}-[0-9]{1,2}$/;
 const ALLOWED_INPUTMODES = new Set(["numeric", "decimal", "text"]);
 
 function attrAllowed(name: string): boolean {
@@ -81,6 +84,12 @@ function build(doc: DomDocument, node: VNode | string): unknown {
     }
     if (name === "maxlength" && !/^[0-9]{1,5}$/.test(String(value))) {
       throw new Error("maxlength は 1〜5 桁の数字だけです");
+    }
+    if (name === "colspan" && (node.tag !== "td" || !/^[0-9]{1,2}$/.test(String(value)))) {
+      throw new Error("colspan は td の 1〜2 桁の数字だけです");
+    }
+    if (name === "id" && !HORSE_DETAIL_ID.test(String(value))) {
+      throw new Error("id は horse-detail-{分析 id}-{馬番} の形だけです");
     }
     if (name === "max" && node.tag !== "progress") {
       throw new Error("max は progress だけです");
@@ -128,10 +137,13 @@ function build(doc: DomDocument, node: VNode | string): unknown {
 const HORSE_TABLE_WRAP = ".horse-table-wrap";
 const SORT_KEY_PATTERN = /^[A-Za-z]+$/;
 const ANALYSIS_ID_PATTERN = /^[0-9]+$/;
+const UMABAN_PATTERN = /^[0-9]{1,2}$/;
 
 interface Restore {
   readonly scroll: { readonly analysis: string; readonly left: number } | null;
   readonly focus: { readonly analysis: string; readonly key: string } | null;
+  /** フォーカス中の馬の行の開閉ボタン(Issue #740)。 */
+  readonly toggleFocus: { readonly analysis: string; readonly umaban: string } | null;
 }
 
 /** 作り直す前に、表の枠の横スクロールと、フォーカス中の並べ替えボタンを控える(Issue #578-2)。 */
@@ -143,7 +155,9 @@ function captureRestore(doc: DomDocument, root: DomRoot): Restore {
   const key = active?.getAttribute?.("data-sort-key") ?? null;
   const analysis = active?.getAttribute?.("data-analysis") ?? null;
   const focus = active?.getAttribute?.("class") === "sort-button" && key !== null && analysis !== null && SORT_KEY_PATTERN.test(key) && ANALYSIS_ID_PATTERN.test(analysis) ? { analysis, key } : null;
-  return { scroll, focus };
+  const umaban = active?.getAttribute?.("data-umaban") ?? null;
+  const toggleFocus = active?.getAttribute?.("class") === "horse-toggle" && umaban !== null && analysis !== null && UMABAN_PATTERN.test(umaban) && ANALYSIS_ID_PATTERN.test(analysis) ? { analysis, umaban } : null;
+  return { scroll, focus, toggleFocus };
 }
 
 /** 作り直したあとの木に、控えた状態を戻す。同じ分析の表・同じ列のボタンがあるときだけ(別の分析・表の無い画面では何もしない)。 */
@@ -153,6 +167,9 @@ function applyRestore(root: DomRoot, restore: Restore): void {
     if (wrap !== null && wrap.getAttribute?.("data-analysis") === restore.scroll.analysis) {
       wrap.scrollLeft = restore.scroll.left;
     }
+  }
+  if (restore.toggleFocus !== null) {
+    root.querySelector?.(`button.horse-toggle[data-analysis="${restore.toggleFocus.analysis}"][data-umaban="${restore.toggleFocus.umaban}"]`)?.focus?.({ preventScroll: true });
   }
   if (restore.focus !== null) {
     root.querySelector?.(`button.sort-button[data-sort-key="${restore.focus.key}"][data-analysis="${restore.focus.analysis}"]`)?.focus?.({ preventScroll: true }); // ブラウザによっては、フォーカスでページ側がスクロールするため

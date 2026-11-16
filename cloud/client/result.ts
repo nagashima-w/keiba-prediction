@@ -318,6 +318,8 @@ export interface ResultContent {
   readonly id: number;
   /** 先頭の要約(Issue #546)。 */
   readonly summary: SummarySection;
+  /** 詳しい中身を開いている馬の馬番(Issue #740。馬ごとの評価の表の行を押すと、その行の直後に旧カードの中身が開く。既定は全部閉じる。分析 id ごとの状態は `app.ts`)。昇順。 */
+  readonly openHorses: readonly number[];
   /** 説明文(単勝・複勝・タイム指数・隊列図の注記)を開いているか(Issue #546。既定は閉じる)。文の中身は開閉に関わらず持つ(出すかどうかは画面が決める)。 */
   readonly notesOpen: boolean;
   /** 馬ごとの評価の表(Issue #546-2。「馬ごとの評価」の節の説明文の下・カードの一覧より前)。馬が 0 頭なら null。 */
@@ -562,7 +564,7 @@ function horseTableOf(horses: readonly HorseCard[], llmEffective: boolean, oddsS
 }
 
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。`readOnly`(閲覧者。Issue #238)は設定への案内を外す。省略は管理者。 */
-export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false, horseSort: HorseSort | undefined = undefined): ResultContent {
+export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false, horseSort: HorseSort | undefined = undefined, openHorses: readonly number[] = []): ResultContent {
   // LLM が効いたか = モデル ID があるか(core の `view/format.ts` の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
   const llmEffective = a.model !== null && a.model !== "";
   const markedHorses = markedHorsesOf(a.horses);
@@ -598,6 +600,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false
   return {
     id: a.id,
     notesOpen,
+    openHorses: [...new Set(openHorses)].sort((x, y) => x - y),
     summary: {
       startLine: startTime === null || startTime.trim() === "" ? null : `発走時刻: ${startTime}`,
       analyzedLine: `分析時刻: ${analyzedAt}`,
@@ -641,7 +644,7 @@ function backToRace(route: Route, a: AnalysisDetail): string {
   return buildHash({ date, venue: route.venue, race });
 }
 
-export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; /** 一覧のキャッシュの全行(Issue #571。前後のレースを決める)。無い(取得中・失敗)ときは省略。 */ readonly siblings?: readonly RaceRow[]; readonly readOnly?: boolean; /** 説明文を開いているか(Issue #546。省略は閉じる)。 */ readonly notesOpen?: boolean; /** 馬ごとの評価の表の並べ替え(Issue #546-2。省略は馬番の昇順)。 */ readonly horseSort?: HorseSort }): ResultModel {
+export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; /** 一覧のキャッシュの全行(Issue #571。前後のレースを決める)。無い(取得中・失敗)ときは省略。 */ readonly siblings?: readonly RaceRow[]; readonly readOnly?: boolean; /** 説明文を開いているか(Issue #546。省略は閉じる)。 */ readonly notesOpen?: boolean; /** 馬ごとの評価の表の並べ替え(Issue #546-2。省略は馬番の昇順)。 */ readonly horseSort?: HorseSort; /** 詳しい中身を開いている馬の馬番(Issue #740。省略は全部閉じる)。 */ readonly openHorses?: readonly number[] }): ResultModel {
   const { route, source } = input;
   const readOnly = input.readOnly === true;
   const listHref = buildHash({ date: route.date, venue: route.venue });
@@ -652,7 +655,7 @@ export function buildResultModel(input: { readonly route: Route; readonly source
       kind: "result",
       loading: false,
       error: null,
-      content: contentOf(a, readOnly, input.notesOpen === true, input.horseSort),
+      content: contentOf(a, readOnly, input.notesOpen === true, input.horseSort, input.openHorses),
       backHref: backToRace(route, a),
       breadcrumb: breadcrumbOf({ date, venue: route.venue, venueName: a.race.venueName, raceId: a.raceId }),
       neighbors: neighborsOf(input.siblings, date, route.venue, a.raceId),

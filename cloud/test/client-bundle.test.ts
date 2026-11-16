@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 250,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 257,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -318,7 +318,10 @@ describe("生成物のドリフトと決定性", () => {
     // 計り方: 起点と今のそれぞれで `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` を実行した。新しい上限 255,500 の余裕は 255,500 - 254,896 = 604 バイト(500 バイト単位に切り上げ)。
     // 増えたのは `api-market-edges.ts`(応答の検査)・`market-edges-model.ts`(行の整形)・`market-edges-screen.ts`(取得・世代)・`view.ts` の `edgesScreen`・入口のリンク・`route.ts` の `#edges` の解釈・`app.ts` の配線 5 か所、列見出し 6 本と画面の見出し・「騎手」「調教師」の文言(`\u` エスケープ)。CSS は `src/page.ts` にあり、束には入らない。
     // 事前の見積もりは +3,500〜6,000(着手前の調査)で、実測は下端の近く。タイマー・自動の取り直し・並べ替えの操作を付けず、注記の文をサーバに置いたため。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(255_500);
+    // (追記)Issue #740(結果画面の馬の行の開閉。馬のカードの縦の並びをやめ、表の行を押すと詳しい中身が開く): 上限は 255,500 から 257,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`)は 254,896(dc70a397 の生成物)→ 256,400(+1,504。`pnpm run build:client` の出力〈「256400 バイト」〉)。
+    // 計り方: 起点と今のそれぞれで `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` を実行した。新しい上限 257,000 の余裕は 257,000 - 256,400 = 600 バイト(500 バイト単位に切り上げ)。
+    // 増えたのは `app.ts` の開閉の状態と `onToggleHorse`・`result.ts` の `openHorses`・`race.ts` の受け渡し・`view.ts` の `horseToggle` と詳しい行・`dom.ts` の `colspan`・`id` の許可とフォーカスの復元、日本語の文言(`\u` エスケープ)。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(257_000);
   });
 });
 
@@ -1020,8 +1023,13 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(calls.map((c) => c.url)).toEqual(["/api/analyses/5", `/api/races?kaisai_date=${DATE}&venue=central`]);
     const text = textOf(root.children[0]!);
     expect(text).toContain("福島11R テストステークス");
-    expect(text).toContain("3着内率 20.0%");
-    expect(text).toContain("組合せ券種にEVプラスの候補が無かったため複勝のみの配分になっています。"); // fallbackReason が exe の注記になる
+    // Issue #740: 馬の詳しい中身は押すまで閉じている。生成物の実行で、馬の行の開閉ボタンを押すと、詳しい行(旧カードの中身)が開く。
+    expect(text).not.toContain("3着内率 20.0%");
+    const toggle = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && n.attrs.get("class") === "horse-toggle")!;
+    expect(toggle.attrs.get("aria-expanded")).toBe("false");
+    toggle.listeners.get("click")![0]!(undefined);
+    expect(textOf(root.children[0]!)).toContain("3着内率 20.0%");
+    expect(textOf(root.children[0]!)).toContain("組合せ券種にEVプラスの候補が無かったため複勝のみの配分になっています。"); // fallbackReason が exe の注記になる
     expect(text).toContain("300円");
     expect(text).not.toContain("AI補正後");
   });

@@ -393,6 +393,10 @@ ${paletteCss()}
   .horse-table tbody tr:last-child td { border-bottom: 0; }
   .horse-table .eval-marked td { font-weight: bold; }
   .horse-table .eval-positive td { background: var(--card); }
+  /* Issue #740: 馬の行の開閉(馬名の列のボタン)と、開いた詳しい行。詳しい行は表の幅いっぱいの 1 セル。表は横にスクロールするので、中身は左端に張り付かせて、画面の幅を超えて折り返さないようにする。 */
+  .horse-toggle { display: block; width: 100%; min-height: 44px; padding: 0 2px; border: 0; background: transparent; color: inherit; font-size: inherit; font-weight: inherit; text-align: left; white-space: normal; }
+  .horse-table .eval-detail td { padding: 0; text-align: left; white-space: normal; }
+  .horse-detail { position: sticky; left: 0; max-width: min(100%, 22rem); padding: 4px 4px 8px; }
   /* Issue #582: 3着内率の棒(progress。数字の下。色は brand 1 色・地は line。ライト・ダークとも変数) */
   .horse-bar { display: block; width: 3.5em; height: 6px; margin: 2px 0 0 auto; border: 0; overflow: hidden; background: var(--line); appearance: none; }
   .horse-bar::-webkit-progress-bar { background: var(--line); }

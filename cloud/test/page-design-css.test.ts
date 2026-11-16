@@ -58,7 +58,7 @@ describe("Issue #740: 箱をやめる", () => {
   });
 
   it("箱だった規則は、四方を囲む枠線(border: 1px solid …)も背景も持たない", () => {
-    const BOXES = [".race", ".next-race", ".card", ".summary", ".notice", ".report-race", ".verify-version", ".bulk-panel", ".verify-tile", ".horse-table-wrap", ".formation-track"];
+    const BOXES = [".race", ".next-race", ".card", ".summary", ".notice", ".report-race", ".verify-version", ".bulk-panel", ".verify-tile", ".horse-table-wrap", ".formation-track", ".horse-detail"];
     for (const sel of BOXES) {
       const d = declsOf(sel);
       expect(d.size, `${sel} の規則がある`).toBeGreaterThan(0);
@@ -85,7 +85,7 @@ describe("Issue #740: 見出し", () => {
 });
 
 describe("Issue #740: タップ 44px と数字", () => {
-  it.each(["button", ".tab", ".report-tab", 'input[type="date"]', ".settings-link", ".verify-link", ".targets-link", ".report-link", ".monthly-link", ".back", ".home", ".past-link"])("%s は高さ 44px 以上", (sel) => {
+  it.each(["button", ".tab", ".report-tab", 'input[type="date"]', ".settings-link", ".verify-link", ".targets-link", ".report-link", ".monthly-link", ".back", ".home", ".past-link", ".horse-toggle"])("%s は高さ 44px 以上", (sel) => {
     const found = rules.filter((r) => r.selectors.includes(sel) && r.decls.has("min-height")).map((r) => r.decls.get("min-height")!);
     expect(found.length, `${sel} に min-height がある`).toBeGreaterThan(0);
     expect(found[found.length - 1]).toMatch(/^(44|4[5-9]|[5-9][0-9])px$/);
