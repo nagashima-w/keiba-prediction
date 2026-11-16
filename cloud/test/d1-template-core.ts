@@ -7,9 +7,10 @@
  * 排他: `<root>/keiba-d1-template-<鍵>.lock` を mkdir(原子的)で取った 1 者だけが、一時ディレクトリに作り、完成したら rename で置く。
  * したがって置き場所が存在すれば常に完成品で、作りかけは読まれない。作る側が死んでロックが残っても、期限(既定 10 分)を過ぎれば奪う。
  * 期限を超えて作り続ける側がいて 2 者が作ったときは、後から rename する側が、既にある完成品を見て自分の作りかけを捨てる(Issue #626)。
+ * ロックの中には持ち主の印(`owner`)を書き、終了時は自分の印があるときだけロックを外す(奪われたあとに他者のロックを消さない。Issue #717)。
  */
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -65,7 +66,11 @@ export async function ensureD1Template(options: EnsureTemplateOptions): Promise<
       await sleep(pollMs);
       continue;
     }
-    // ロックを取った。取る間に他者が完成させていないか確かめてから作る。
+    // ロックを取った。持ち主の印を書く(期限を過ぎて奪われたあと、他者のロックを消さないため。Issue #717)。
+    const ownerMark = `${process.pid}-${randomUUID()}`;
+    const ownerFile = path.join(lockDir, "owner");
+    writeFileSync(ownerFile, ownerMark);
+    // 取る間に他者が完成させていないか確かめてから作る。
     const stage = mkdtempSync(`${finalDir}.tmp-`);
     try {
       if (!existsSync(finalDir)) {
@@ -79,7 +84,14 @@ export async function ensureD1Template(options: EnsureTemplateOptions): Promise<
       }
     } finally {
       rmSync(stage, { recursive: true, force: true });
-      rmSync(lockDir, { recursive: true, force: true });
+      // 自分の印があるときだけロックを外す。奪われて他者のロックに替わっていたら触らない(読めない場合も何もしない)。
+      let current: string | null = null;
+      try {
+        current = readFileSync(ownerFile, "utf8");
+      } catch {
+        current = null;
+      }
+      if (current === ownerMark) rmSync(lockDir, { recursive: true, force: true });
     }
   }
 }
