@@ -3,6 +3,7 @@ import { D1RaceArchiveStore } from "../src/race-archive-repository";
 import type { MarketHorse, MarketRow } from "../src/market-edge-calc";
 import {
   D1MarketEdgeStore,
+  SELECT_MARKET_EDGES_SQL,
   MARKET_ROWS_DONE,
   MARKET_ROWS_SKIPPED,
   SELECT_MARKET_PENDING_PAGE_SQL,
@@ -252,5 +253,20 @@ describe("readForRace(レース詳細の列の読み出し。Issue #643)", () =>
     const spyDb = { prepare: local.db.prepare.bind(local.db), batch: (s: D1PreparedStatement[]) => (calls.push(s.length), local.db.batch(s)) } as unknown as typeof local.db;
     await new D1MarketEdgeStore(spyDb).readForRace(["a"], ["x"]);
     expect(calls).toEqual([3]);
+  });
+});
+
+describe("一覧の画面の読み出し(Issue #644)", () => {
+  it("readEdges の SQL が読む行は、その種別の人数だけ(主キーの範囲。もう一方の種別・表の全部は読まない)", async () => {
+    const store = new D1MarketEdgeStore(local.db);
+    const people = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => ({ id: `${prefix}${String(i).padStart(4, "0")}`, name: `名${i}`, n: 100, edge: 0.01, hitRate: 0.3, predMean: 0.25 }));
+    await store.replaceEdges({ computedOn: "2026-11-16", windowFrom: "2024-11-17", windowTo: "2026-11-15", coef: [1, 2, 3], converged: true, iterations: 5, races: 10, horses: 100, jockeys: people("j", 240), trainers: people("t", 270) });
+    const res = await local.db.prepare(SELECT_MARKET_EDGES_SQL).bind("jockey").all();
+    expect(res.results, "前提: 騎手を全員返す").toHaveLength(240);
+    expect(res.meta.rows_read, "騎手の人数(240)だけ読む。調教師の 270 行は読まない").toBeLessThanOrEqual(240 + 5);
+    const trainers = await local.db.prepare(SELECT_MARKET_EDGES_SQL).bind("trainer").all();
+    expect(trainers.results).toHaveLength(270);
+    expect(trainers.meta.rows_read).toBeLessThanOrEqual(270 + 5);
+    expect(trainers.meta.rows_read, "騎手の読み取りより多い(行数が種別の人数に比例している証拠)").toBeGreaterThan(res.meta.rows_read);
   });
 });

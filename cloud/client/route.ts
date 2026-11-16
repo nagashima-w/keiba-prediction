@@ -37,6 +37,10 @@ export interface Route {
    * 今日の狙い目の画面(Issue #336)。`#targets`(日付は今日)と `#targets=YYYYMMDD`(実在の日付の完全一致)のときだけ付く。**省略は狙い目画面ではない**(`report` と同じ流儀)。
    */
   readonly targets?: { readonly date: string };
+  /**
+   * 騎手・調教師の指標の一覧(Issue #644)。`#edges`(騎手)と `#edges=trainer`(調教師)の**完全一致**のときだけ付く。**省略は一覧ではない**(`targets` と同じ流儀)。
+   */
+  readonly edges?: { readonly kind: "jockey" | "trainer" };
 }
 
 /** 設定画面のハッシュ(Issue #189)。一覧のトップの入口のリンク先。 */
@@ -67,6 +71,14 @@ export const TARGETS_HASH = "#targets";
 /** その日の狙い目のハッシュ(`#targets=YYYYMMDD`)。一覧の入口のリンク先。 */
 export function buildTargetsHash(date: string): string {
   return `${TARGETS_HASH}=${date}`;
+}
+
+/** 騎手・調教師の指標の一覧のハッシュ(Issue #644)。`#edges`(騎手)と `#edges=trainer`(調教師)。 */
+export const EDGES_HASH = "#edges";
+
+/** 種別ごとの一覧のハッシュ(騎手は `#edges`、調教師は `#edges=trainer`)。 */
+export function buildEdgesHash(kind: "jockey" | "trainer"): string {
+  return kind === "trainer" ? `${EDGES_HASH}=trainer` : EDGES_HASH;
 }
 
 const ANALYSIS_ID_MAX = 2_147_483_647;
@@ -111,6 +123,10 @@ export function parseHash(hash: string, today: string): Route {
   if (targetsMatch !== null && isRealYmd(targetsMatch[1]!)) {
     return { date: today, venue: "central", race: null, analysis: null, settings: false, targets: { date: targetsMatch[1]! } };
   }
+  // 騎手・調教師の指標の一覧(Issue #644)は `#edges`・`#edges=trainer` の完全一致だけ。
+  if (hash === EDGES_HASH || hash === `${EDGES_HASH}=trainer`) {
+    return { date: today, venue: "central", race: null, analysis: null, settings: false, edges: { kind: hash === EDGES_HASH ? "jockey" : "trainer" } };
+  }
   let params: URLSearchParams;
   try {
     params = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
@@ -144,7 +160,7 @@ export function buildHash(route: { readonly date: string; readonly venue: Venue;
 }
 
 /** 今の画面(Issue #191)。 */
-export type Screen = "list" | "race" | "result" | "settings" | "verify" | "report" | "targets";
+export type Screen = "list" | "race" | "result" | "settings" | "verify" | "report" | "targets" | "edges";
 
 /**
  * 「今どの画面か」の判定の**唯一の場所**(Issue #191。#188 の申し送り)。`app.ts` は、画面ごとの分岐をすべてこの関数の `switch` で行う
@@ -156,6 +172,7 @@ export function screenOf(route: Route): Screen {
   if (route.verify === true) return "verify";
   if (route.report !== undefined) return "report";
   if (route.targets !== undefined) return "targets";
+  if (route.edges !== undefined) return "edges";
   if (route.analysis !== null) return "result";
   if (route.race !== null) return "race";
   return "list";
