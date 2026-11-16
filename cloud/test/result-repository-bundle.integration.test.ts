@@ -8,7 +8,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 /**
  * Issue #207(#182-A): 結果ストア(`src/result-repository.ts`)と、結果の取込フロー(core の `ev/result-import.ts`)を巻き込む入口を `wrangler deploy --dry-run` で
- * バンドルし、Worker に載せられることを確かめる(**これらはまだ本番の入口〈worker.ts〉から import されていない**ので、`bundle-guard.test.ts` の本番のバンドルには入らない。
+ * バンドルし、Worker に載せられることを確かめる(**これらはまだ本番の入口〈worker.ts〉から import されていない**ので、`bundle-guard.integration.test.ts` の本番のバンドルには入らない。
  * 呼び出しが入る #208 より前に、バンドルできること・better-sqlite3 を巻き込まないこと・Free の大きさ上限に収まることを固定しておく)。
  * 入口の一時ファイルは .gitignore が除外する。
  */
@@ -42,7 +42,7 @@ describe("結果ストアのバンドル(Issue #207)", () => {
           "",
         ].join("\n"),
       );
-      // RaceDay を巻き込まない入口なので、日単位の DO の binding と migration v2 を除く(bundle-guard.test.ts の withoutRaceDay と同じ)。
+      // RaceDay を巻き込まない入口なので、日単位の DO の binding と migration v2 を除く(bundle-guard.integration.test.ts の withoutRaceDay と同じ)。
       const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
       const withoutRaceDay = base
         .replace(/\[\[durable_objects\.bindings\]\]\nname = "RACE_DAY"\nclass_name = "RaceDay"\n/, "")

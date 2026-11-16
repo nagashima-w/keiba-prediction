@@ -5,7 +5,7 @@ import { fetchAnalysis, fetchPastAnalyses, parseAnalysisResponse, parsePastAnaly
 /**
  * Issue #185: レース画面・結果画面の API 応答のパーサと取得関数(`status?race_id=`・`GET /api/analyses`・`GET /api/analyses/{id}`)。純関数・偽の fetch。
  * パーサは応答を信用しない(型違い・キーの欠落は「想定外の応答」。一部だけを黙って落とさない)。サーバの文面は画面に出さない。
- * 応答の形のドリフトは client-api-analysis-contract.test.ts(実際の handle() の応答を通す)が検出する。
+ * 応答の形のドリフトは client-api-analysis-contract.integration.test.ts(実際の handle() の応答を通す)が検出する。
  */
 
 const BOARD_ROW = { race_id: "202603020211", mode: "morning", status: "done", attempts: 1, error: null, queued_at: 1000, updated_at: 2000, prior: true, analysis_id: null, detail: null, children_ok: null };

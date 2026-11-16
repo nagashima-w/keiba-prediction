@@ -154,7 +154,7 @@ describe("Issue #384: 買い目の odds・ev を読みに足す(行数は変え�
     db.close();
   });
 
-  it("1 日ぶんの配分の読み(今日の狙い目が使う)も、全件の読みと同じ列(行の一致は targets-repository.test.ts が固定)", () => {
+  it("1 日ぶんの配分の読み(今日の狙い目が使う)も、全件の読みと同じ列(行の一致は targets-repository.integration.test.ts が固定)", () => {
     const db = openDb();
     seed(db);
     const rows = db.prepare(verifyDayAllocationSql([1]).bets).all();

@@ -7,7 +7,7 @@ import type { RaceComboPayoutsReadResult, RaceResultEntry, StoredAnalysis, Verif
  * Issue #269: 日報の買い目の判定で、枠連の買い目の返還(取消・除外で枠の出走馬が尽きる等)を扱う。
  * 規則は検証画面(core の `computeProposedBetReport`)と同じ関数 `isBracketQuinellaRefund`(規則の表は core の bracket-quinella-refund.test.ts)を共有する。
  * ここは `judgeBets` への配線と、**買い目 1 件ずつ**を core の `computeVerifyReport` に通した突き合わせ(合計の一致では隠れる、誤判定どうしの相殺を検出する)。
- * D1 の行から2つの経路が同じ数になることは bracket-refund-parity.test.ts が固定している。
+ * D1 の行から2つの経路が同じ数になることは bracket-refund-parity.integration.test.ts が固定している。
  */
 
 /** 16頭立て(各枠2頭。枠 = ceil(馬番/2))。5番(枠3)、13番・14番(枠7)が取消・除外。 */

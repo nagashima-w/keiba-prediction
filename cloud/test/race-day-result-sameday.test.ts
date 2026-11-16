@@ -25,7 +25,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
  * Issue #209(#182 から切り出し): 当日中の結果の取り込み(AC-C1〜C3・C6)。計画の確定時に結果の行を積み(発走 + 15 分が最初の試行)、
  * 全頭の着順がそろったページだけを保存し(結果ページ自身の「N頭」と比べる)、今日の DO(期限を待つ planned の行が残る)でも動く。
  * ゲートは偽(一覧と結果ページはフィクスチャ)、保存先は偽(記録つき)、ストレージは `node:sqlite`(本物の SQLite)。実 netkeiba・実 D1 には触れない。
- * 当日傾向を発走前の分析に入れる配線(AC-C4)は `race-day-sameday-trend.test.ts`。
+ * 当日傾向を発走前の分析に入れる配線(AC-C4)は `race-day-sameday-trend.integration.test.ts`。
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");

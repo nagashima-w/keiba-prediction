@@ -10,7 +10,7 @@ import { openLocalBindings, spyBucket, type LocalBindings } from "./local-bindin
 
 /**
  * Issue #588(#549-B3-1): 目録の印 runs_version(migration 0033)・目録の主キー順の列挙・複数レースの一括の読み出し。
- * ローカル(workerd)の本物の D1・R2 で確かめる。変換そのものは race-archive-runs.test.ts。
+ * ローカル(workerd)の本物の D1・R2 で確かめる。変換そのものは race-archive-runs.integration.test.ts。
  */
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "fixtures");

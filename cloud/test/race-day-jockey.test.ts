@@ -354,7 +354,7 @@ describe("j7: 騎手の成績の取得に失敗しても、レースの取得・
 
 // ───────────── 週 1 回の更新(日をまたいで共有する保存先。D1)・計算ステップの取りこぼし・1 ステップの呼び出しの上限 ─────────────
 
-/** 取得日時つきでメモリに持つ偽の保存先(D1 の代わり)。呼び出しを記録し、失敗も模擬できる。D1 の SQL そのものは jockey-results-repository.test.ts が確かめる。 */
+/** 取得日時つきでメモリに持つ偽の保存先(D1 の代わり)。呼び出しを記録し、失敗も模擬できる。D1 の SQL そのものは jockey-results-repository.integration.test.ts が確かめる。 */
 class MemoryJockeyStore implements JockeyResultsStore {
   readonly entries = new Map<string, StoredJockeyResults>();
   loads = 0;

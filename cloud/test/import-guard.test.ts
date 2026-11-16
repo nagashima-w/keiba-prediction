@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
  * 値で import していないことの静的ガード。バレルは `cache.ts`(#287 より前は `analysis-store.ts` も)を値で巻き込み、Worker のバンドルに better-sqlite3(ネイティブ)が入る。
  * `ev/analysis-store.ts` は #287 で src から `packages/core/test/support/` へ移したが、src に戻さないために、下の各検査の禁止の一覧には残してある。
  * 検査: cloud/src の各ファイルが(推移的に)値で import する core のモジュールの閉包を取り、(1)バレルを含まない (2)better-sqlite3 を import するモジュールを含まない。
- * バンドルの実物の検査は bundle-guard.test.ts(wrangler の dry-run)が行う。これは、バンドルの前にソースの段階で理由つきで落とすための検査。
+ * バンドルの実物の検査は bundle-guard.integration.test.ts(wrangler の dry-run)が行う。これは、バンドルの前にソースの段階で理由つきで落とすための検査。
  *
  * 限界: import の抽出は正規表現(動的な import の式・require の変数は拾わない)。`import type` は型だけで消えるので閉包に含めない。
  */

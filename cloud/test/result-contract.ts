@@ -1,6 +1,6 @@
 /**
  * 結果の保存の golden(packages/core/test/golden/race-result-contract.json。Issue #207〈#182-A〉)の読み込み。
- * exe の AnalysisStore(core のテスト `race-result-contract.test.ts`)と、クラウド版のストア(`result-repository.test.ts`)が同じファイルを読み、
+ * exe の AnalysisStore(core のテスト `race-result-contract.test.ts`)と、クラウド版のストア(`result-repository.integration.test.ts`)が同じファイルを読み、
  * 同じ入力から同じ4表のダンプ・同じ復元結果になることで、両実装の保存が食い違わないことを保つ。
  *
  * 型はここで持つ(golden の生成側〈core/test/golden/race-result-scenarios.ts〉を import しない: そのファイルは better-sqlite3 を値で import しており、

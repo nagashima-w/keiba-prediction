@@ -479,7 +479,7 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
   **core のプロンプト文面(`build-prompt.ts` ほか)を変えると、cloud のドリフトの検査が落ちる**(`pnpm run build:client` で再生成する。プレビューが送信の文面とずれないための仕組み)。
 - **型検査の閉包(CI だけで落ちた実績)**: `tsconfig.client.json` は `types: []`(Node の型なし)で、`paths` は `@keiba/core/*` だけ。**esbuild は型だけの import を消して木を刈るが、tsc は閉包の全体を型検査する**。最初のコミットで、`build-prompt.ts` → `grade-winner-trend.ts`(型だけ)→ `fetch-grade-winner.ts` → `http-client.ts`(undici・iconv-lite・`Buffer`)・`parse-grade-winner.ts`(`node:zlib`)に届き、`packages/core/node_modules` の無い CI の配置だけで TS2307・TS2591 になった(手元は通る)。
   対処: 集計結果の型だけを node 依存の無い `core/src/analyzer/grade-winner-trend-types.ts` に切り出し(`grade-winner-trend.ts` から再 export)、`build-prompt.ts` はそちらを import する。**ローカルで捕まえる検査**: `test/import-guard.test.ts` の「cloud/client の閉包」(型だけの import も含めて辿り、相対でない指定子が1つも無いこと・core/app のモジュールが `Buffer` を使わないこと。対照で node 依存に届く入口を拾えることも確認)。**クライアントが core の新しいモジュールを import するときは、CI 相当の配置(リポジトリから `node_modules`・`.git` を除いたコピーで `cd cloud && pnpm install --ignore-workspace --frozen-lockfile && pnpm run typecheck`)でも確かめる**。
-- **検査**: `test/client-prompt-preview.test.ts`・`client-settings-form.test.ts`・`client-view-settings.test.ts`・`client-app-settings.test.ts`・`page.test.ts`・`race-day-llm.test.ts`(e10)・`client-bundle.test.ts`(許可リスト・閉包・実行スモーク)。
+- **検査**: `test/prompt-preview.test.ts`・`client-settings-form.test.ts`・`client-view-settings.test.ts`・`client-app-settings.test.ts`・`page.test.ts`・`race-day-llm.test.ts`(e10)・`client-bundle.test.ts`(許可リスト・閉包・実行スモーク)。
 - **実機(スマホ)で確かめること(自動検査できない)**: プレビューを開いたときの長文の読みやすさ(等幅・折り返し・ページのスクロール)・「入力中の内容を反映」を押したときのスクロール位置(DOM の全置換で位置が飛ばないか)・開閉ボタンのタップのしやすさ。
 
 ## 定時の自動実行(Issue #206〈#166-E〉・#249。**毎晩 JST 21:00 と 23:00 に自動で始まる**。朝 9 時の実行は無い)
