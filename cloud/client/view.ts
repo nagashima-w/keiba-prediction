@@ -12,7 +12,7 @@ import type { Crumb, NeighborLink, RaceNeighbors } from "./neighbors";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
-import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, shiftNote, type CloseSection, type DevelopmentSection, type HorseCard, type HorseSortKey, type HorseTable, type MarkedHorse, type MarketEdgeCell, type ResultContent, type ResultModel, type SortDir, type TopProbHorse } from "./result";
+import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_DIFF, LABEL_CONCERNS, LABEL_HIGHLIGHTS, shiftNote, type CloseSection, type DevelopmentSection, type HorseCard, type HorseSortKey, type HorseTable, type MarkedHorse, type MarketEdgeCell, type ResultContent, type ResultModel, type SortDir, type TopProbHorse } from "./result";
 import type { FieldModel, PreviewModel, SectionModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
@@ -366,23 +366,17 @@ function pointsBlock(kind: "highlights" | "concerns", label: string, items: read
 }
 
 /**
- * 馬の詳しい中身(旧「馬のカード」。Issue #740 で縦に 12 枚並べるのをやめ、表の馬の行を押すと開く行の中身にした。文言は旧カードのまま)。
- * `horse` の class は旧カードのもの(中の `horse-line`・`horse-reason` などの class も同じ)。
+ * 馬の詳しい中身(旧「馬のカード」。Issue #740 で縦に 12 枚並べるのをやめ、表の馬の行を押すと開く行の中身にした)。
+ * Issue #765: 表の列にある値(馬番・馬名・印・3着内率・AI補正後・EV・EVプラス・複勝下限)は、直前の表の行にあるので出さない。残すのは表に無いもの
+ * (印の補修の目印・補正の差・単勝/複勝の想定と実際・タイム指数・根拠・強調材料・懸念事項)。
+ * `horse` の class は旧カードのもの(中の `horse-line`・`horse-reason` などの class も同じ)。`hasAdjusted` は表に補正後の列があるか(無いときだけ、補正後の値を詳しい中身に残す)。
  */
 function horseDetail(horse: HorseCard): VNode {
   return h("div", { class: horse.positive ? "horse horse-detail positive" : "horse horse-detail" }, [
-    h("span", { class: "horse-head" }, [
-      h("strong", {}, [`${horse.umaban}`]),
-      ...(horse.name === null ? [] : [h("span", { class: "horse-name" }, [horse.name])]),
-      ...(horse.mark === null ? [] : [h("span", { class: "mark" }, [horse.mark])]),
-      ...(horse.markRepair === null ? [] : [" ", markFixedBadge(horse.markRepair)]),
-    ]),
-    h("span", { class: "horse-line" }, [`${LABEL_PRIOR} ${horse.prior}`]),
-    // 補正後の3着内率は LLM が効いたときだけ(LLM なしでは 3着内率と同じ値になるので出さない。EV は LLM が効いたとき補正後の確率から計算される)。
-    // 補正後の横に、統計モデル(3着内率)からの変化量(Issue #312。「AI補正後 25.0%(統計比 +5.0pt)」)。1つの文字列にして、行の textContent を 1 続きにする。
-    ...(horse.adjusted === null ? [] : [h("span", { class: "horse-line" }, [`${LABEL_ADJUSTED_PROB} ${horse.adjusted}${horse.adjustedShift === null ? "" : shiftNote(horse.adjustedShift)}`])]),
-    h("span", { class: "horse-line" }, [`複勝オッズ下限 ${horse.odds}`]),
-    h("span", { class: "horse-line" }, [`EV ${horse.ev}`, ...(horse.positive ? [h("strong", { class: "ev-plus" }, ["EVプラス"])] : [])]),
+    // 印の補修の目印は表に無い(印の列は今の印だけ)。補修した馬だけ、先頭に出す。
+    ...(horse.markRepair === null ? [] : [h("span", { class: "horse-head" }, [markFixedBadge(horse.markRepair)])]),
+    // 補正後の値は表の補正後の列にある(補正後の値を持つ馬がいれば、列が出る)。詳しい中身には、統計モデル(3着内率)からの変化量(Issue #312)だけを出す。
+    ...(horse.adjusted === null || horse.adjustedShift === null ? [] : [h("span", { class: "horse-line" }, [`${LABEL_ADJUSTED_DIFF} ${shiftNote(horse.adjustedShift)}`])]),
     // 単勝の想定(目安)と実際(Issue #247)。実際が想定より高いときは文字で示す(色に頼らない)。欠損は「-」。
     h("span", { class: "horse-line win-odds" }, [
       `単勝 ${FAIR_WIN_ODDS_LABEL} ${horse.winOdds.fair} / ${horse.winOdds.actualLabel} ${horse.winOdds.actual}`,

@@ -1024,11 +1024,12 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     const text = textOf(root.children[0]!);
     expect(text).toContain("福島11R テストステークス");
     // Issue #740: 馬の詳しい中身は押すまで閉じている。生成物の実行で、馬の行の開閉ボタンを押すと、詳しい行(旧カードの中身)が開く。
-    expect(text).not.toContain("3着内率 20.0%");
+    const detailRows = () => flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("class") === "eval-detail");
+    expect(detailRows()).toHaveLength(0);
     const toggle = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && n.attrs.get("class") === "horse-toggle")!;
     expect(toggle.attrs.get("aria-expanded")).toBe("false");
     toggle.listeners.get("click")![0]!(undefined);
-    expect(textOf(root.children[0]!)).toContain("3着内率 20.0%");
+    expect(detailRows()).toHaveLength(1); // 詳しい行が開く(Issue #765: 中身は表に無いものだけ)
     expect(textOf(root.children[0]!)).toContain("組合せ券種にEVプラスの候補が無かったため複勝のみの配分になっています。"); // fallbackReason が exe の注記になる
     expect(text).toContain("300円");
     expect(text).not.toContain("AI補正後");
