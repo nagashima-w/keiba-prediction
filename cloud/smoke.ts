@@ -31,6 +31,7 @@ import { gunzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { compareWithFloatTolerance } from "./smoke-compare";
+import { parseSmokeSelection } from "./smoke-select";
 import { DEFAULT_CLOUD_SETTINGS } from "./src/settings";
 
 const BASE_PORT = Number(process.env["SMOKE_PORT"] ?? "8801");
@@ -139,6 +140,25 @@ async function withWorker(
     // ポートが解放されるまで少し待つ。
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
+}
+
+/**
+ * Issue #762: 設定(下の A〜L)の ID。`--only=A,B,...` で流す設定を選ぶ(引数なしは全部=今までと同じ)。
+ * CI(deploy-cloud.yml の smoke ジョブ)は、全設定を 3 つの組に分け、matrix で並行に流す(組の分け方と、その根拠の実測時間は、deploy-cloud.yml の smoke ジョブのコメント)。
+ * 設定を足すときは、ここと、runConfig の呼び出しと、deploy-cloud.yml の matrix の組の 3 つを揃える
+ * (scripts/test/cloud-deploy-workflow.test.ts が、runConfig の ID がここと一致すること・組が全設定をちょうど 1 回ずつ覆うことを固定している)。
+ */
+const CONFIG_IDS = ["A", "B", "H", "C", "J", "K", "L", "D", "E", "F", "G", "I"] as const;
+type ConfigId = (typeof CONFIG_IDS)[number];
+const SELECTED = parseSmokeSelection(process.argv.slice(2), CONFIG_IDS);
+
+/** 選ばれた設定だけ、wrangler dev を起動して fn を実行する。選ばれなかった設定は何もしない(SKIP を出す)。 */
+async function runConfig(id: ConfigId, port: number, args: string[], fn: () => Promise<void>): Promise<void> {
+  if (!SELECTED.has(id)) {
+    console.log(`SKIP: ${id}(--only で選ばれていない)`);
+    return;
+  }
+  return withWorker(port, args, fn);
 }
 
 /** 管理者専用への閲覧者のアクセスの拒否の本文(handler.ts の `adminOnly()`)。 */
@@ -279,7 +299,7 @@ async function main(): Promise<void> {
   try {
     // A. 設定なし。
     // Issue #676: 設定なしの構成にも JRA を使わない指定を付ける(今は DO に届かず JRA に出る経路が無いが、将来この構成から DO に届くようになっても、本物の JRA に出ない)。
-    await withWorker(BASE_PORT, ["--var", "JRA_ODDS_ENABLED:0"], async () => {
+    await runConfig("A", BASE_PORT, ["--var", "JRA_ODDS_ENABLED:0"], async () => {
       await expectAllForbidden(BASE_PORT, "A(設定なし)");
     });
 
@@ -292,7 +312,7 @@ async function main(): Promise<void> {
 
     // B. 正しい構成(ctx.access の aud・メールが secret 相当の設定と一致)。
     writeFileSync(CONFIG_PATH, injected(AUD));
-    await withWorker(BASE_PORT + 1, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+    await runConfig("B", BASE_PORT + 1, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 1;
       const page = await req(port, "GET", "/");
       check("B: GET / が 200 でメールを表示する", page.status === 200 && page.text.includes(EMAIL), `${page.status}`);
@@ -344,7 +364,7 @@ async function main(): Promise<void> {
     //    保存済みの分析・結果を材料にした、本物の D1・R2・DO の確認。入口は smoke-worker.ts(シードの投入口だけを足した入口で、ほかのリクエストは本番の worker.ts にそのまま渡す。この節は取得に出ない=netkeiba・LLM に出る経路を使わない)。
     //    材料は smoke-worker の `/smoke/analyses/seed` が、**本番と同じ保存経路**(`D1AnalysisStore.saveAnalysis`: D1 の batch + R2 の詳細)で入れる 5 件の分析と 2 レースの結果。
     //    移行の API(/api/migration・/api/migration/upload)は廃止したので 404。一覧は分析日時の降順、詳細・今日の狙い目・検証・統計モデル用の書き出しが、その材料を読む。
-    await withWorker(BASE_PORT + 7, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+    await runConfig("H", BASE_PORT + 7, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 7;
       const label = "H(保存済みの分析)";
       const origin = `http://127.0.0.1:${port}`;
@@ -502,32 +522,32 @@ async function main(): Promise<void> {
     });
 
     // C. (Issue #238)ACCESS_ALLOWED_EMAIL と違うアカウントでログインする = 閲覧者。旧: 全リクエストが 403。
-    await withWorker(BASE_PORT + 2, ["--config", CONFIG_PATH, ...vars("stranger@example.com", AUD)], async () => {
+    await runConfig("C", BASE_PORT + 2, ["--config", CONFIG_PATH, ...vars("stranger@example.com", AUD)], async () => {
       await expectViewer(BASE_PORT + 2, "C(ACCESS_ALLOWED_EMAIL と違うアカウント = 閲覧者)", EMAIL);
     });
 
     // J. (Issue #238)ADMIN_USER を別の人に登録する: ACCESS_ALLOWED_EMAIL の人(ログインしているアカウント)は閲覧者になる(フォールバックしない)。
-    await withWorker(BASE_PORT + 8, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD, "admin2@example.com")], async () => {
+    await runConfig("J", BASE_PORT + 8, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD, "admin2@example.com")], async () => {
       await expectViewer(BASE_PORT + 8, "J(ADMIN_USER が別の人 = ACCESS_ALLOWED_EMAIL の人も閲覧者)", EMAIL);
     });
 
     // K. (Issue #238)ADMIN_USER に複数(大文字・空白つき)を登録し、ログインしているアカウントがその 1 人: 管理者(ACCESS_ALLOWED_EMAIL とは別でも)。
-    await withWorker(BASE_PORT + 9, ["--config", CONFIG_PATH, ...vars("stranger@example.com", AUD, " Owner@Example.COM , admin2@example.com")], async () => {
+    await runConfig("K", BASE_PORT + 9, ["--config", CONFIG_PATH, ...vars("stranger@example.com", AUD, " Owner@Example.COM , admin2@example.com")], async () => {
       await expectAdmin(BASE_PORT + 9, "K(ADMIN_USER に複数 = 載っている人が管理者)", EMAIL);
     });
 
     // L. (Issue #238)ADMIN_USER が不正な区切り(登録済みで有効 0 件): 管理者なし。ACCESS_ALLOWED_EMAIL の人も閲覧者(フォールバックしない)。閲覧は止まらない。
-    await withWorker(BASE_PORT + 10, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD, "owner@example.com;admin2@example.com")], async () => {
+    await runConfig("L", BASE_PORT + 10, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD, "owner@example.com;admin2@example.com")], async () => {
       await expectViewer(BASE_PORT + 10, "L(ADMIN_USER が不正な区切り = 管理者なし)", EMAIL);
     });
 
     // D. AUD だけ違う。
-    await withWorker(BASE_PORT + 3, ["--config", CONFIG_PATH, ...vars(EMAIL, "another-aud-0002")], async () => {
+    await runConfig("D", BASE_PORT + 3, ["--config", CONFIG_PATH, ...vars(EMAIL, "another-aud-0002")], async () => {
       await expectAllForbidden(BASE_PORT + 3, "D(AUD が違う)");
     });
 
     // E. 偽ソケットで、確認用エンドポイントを通す(netkeiba へは出ない)。一時設定(FAKE_CONFIG_PATH)は、H の前に作っている。
-    await withWorker(BASE_PORT + 4, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+    await runConfig("E", BASE_PORT + 4, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 4;
       const label = "E(偽ソケット)";
       const page = await req(port, "GET", "/check");
@@ -680,7 +700,7 @@ async function main(): Promise<void> {
     // F. (Issue #177)日単位の DO `RaceDay` を、workerd の実環境で通す: 予約(RPC は予約だけ)→ アラーム(取得 → 計算の2ステップ)→ 朝の prior が DO に残る。
     //    取得は NetkeibaGate の偽ソケット経由(中央16頭・騎手16人の 35 本のあと、調教師は騎手と共有する上限 40 までの 5 本で、計 40 本〈出馬表1・戦績16・調教1・オッズ1・騎手16・調教師5。Issue #226 の前は騎手を取らず 19 本、Issue #354 の前は調教師を取らず 35 本〉。gate の間隔 2 秒で、約 80 秒かかる)。2回目は(調教師の重みを 0 にして)キャッシュで、gate の間隔の待ちが無く速い。3回目は重みを戻し、調教師の取り足し(11 本)を確かめる(Issue #375)。
     //    D1 には何も書かれない(GET /api/analyses が空のまま)。E とは別の起動(E はブレーカーを開くので、その前の別の状態で動かす)。
-    await withWorker(BASE_PORT + 5, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+    await runConfig("F", BASE_PORT + 5, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 5;
       const label = "F(RaceDay)";
       const date = "20260628";
@@ -943,7 +963,7 @@ async function main(): Promise<void> {
     //    Issue #249: cron は 21:00 JST(1 本目。翌日の計画)と 23:00 JST(2 本目。翌日の計画の再実行 + 結果の取り込み + 補完)。計画する開催日は scheduledTime の JST の今日 + 1。
     //    scheduledTime が過去の開催日(2026-06-28)なので、発走時刻はすべて過去: 中央の一覧 36 件は全件 skip(started)になり、morning も pre_race も積まれない
     //    (netkeiba への追加の取得も Claude API の呼び出しも起きない。取得は偽ソケットの一覧 2 本だけ)。Webhook は入れない(外へ出さない)。
-    await withWorker(BASE_PORT + 6, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+    await runConfig("G", BASE_PORT + 6, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 6;
       const label = "G(scheduled)";
       // cron 引数は情報だけ(runScheduled は使わない。scheduledTime の JST の時刻で 21 時 / 23 時を判別する)。
@@ -1010,7 +1030,7 @@ async function main(): Promise<void> {
       ARCHIVE_CONFIG_PATH,
       `${readFileSync(FAKE_CONFIG_PATH, "utf8")}\n[[durable_objects.bindings]]\nname = "RACE_ARCHIVE_SMOKE"\nclass_name = "RaceArchiveSmokeDO"\n\n[[durable_objects.bindings]]\nname = "RACE_ARCHIVE_RUNS_SMOKE"\nclass_name = "RaceArchiveRunsSmokeDO"\n\n[[migrations]]\ntag = "v11-smoke"\nnew_sqlite_classes = ["RaceArchiveSmokeDO"]\n\n[[migrations]]\ntag = "v12-smoke"\nnew_sqlite_classes = ["RaceArchiveRunsSmokeDO"]\n`,
     );
-    await withWorker(BASE_PORT + 11, ["--config", ARCHIVE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+    await runConfig("I", BASE_PORT + 11, ["--config", ARCHIVE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 11;
       const label = "I(過去の結果の取得)";
       let last: Record<string, unknown> = {};

@@ -769,10 +769,10 @@ describe("wrangler.toml", () => {
     expect(body).toContain('"--var", "RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT:0"');
     // Issue #675: JRA のオッズも、すべての構成で使わない(中央の発走前の分析で、本物の JRA に出ない)
     expect(body).toContain('"--var", "JRA_ODDS_ENABLED:0"');
-    // withWorker の呼び出しのうち、設定ファイル(--config)を使うもの(認証の設定を持つ構成)は、すべて ...vars( を含む
-    const calls = [...smoke.matchAll(/await withWorker\([^\n]*\n/g)].map((m) => m[0]);
+    // runConfig(Issue #762 で、設定の選択を挟んだ withWorker の呼び出し)の呼び出しのうち、設定ファイル(--config)を使うもの(認証の設定を持つ構成)は、すべて ...vars( を含む
+    const calls = [...smoke.matchAll(/await runConfig\([^\n]*\n/g)].map((m) => m[0]);
     const withConfig = calls.filter((c) => c.includes("--config"));
-    expect(calls.length).toBeGreaterThanOrEqual(8); // 前提: 検出が空振りでない(構成は 1 つの無設定 + 7 つの設定つき)
+    expect(calls.length).toBe(12); // 前提: 検出が空振りでない(構成は 1 つの無設定 + 11 の設定つき。Issue #762)
     expect(withConfig.length).toBe(calls.length - 1);
     for (const c of withConfig) {
       expect(c, c.trim()).toContain("...vars(");
@@ -782,7 +782,7 @@ describe("wrangler.toml", () => {
     // Issue #676: 無設定の構成にも JRA を使わない指定を付ける(将来この構成から DO に届くようになっても本物の JRA に出ない)
     expect(calls.find((c) => !c.includes("--config")), "無設定の構成").toContain('"--var", "JRA_ODDS_ENABLED:0"');
     // 対照(検出の確認。空振りでない)
-    expect(("await withWorker(1, [\"--config\", P], async () => {\n").includes("...vars(")).toBe(false);
+    expect(("await runConfig(\"X\", 1, [\"--config\", P], async () => {\n").includes("...vars(")).toBe(false);
   });
 
   it("本番の設定に [access.dev](ローカルの ctx.access 注入)を置かない。注入はスモークが一時ファイルで行う", () => {
@@ -1112,7 +1112,7 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     for (const wf of ["audit.yml", "ci.yml", "deploy-cloud.yml", "research.yml"]) {
       for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\S+)\s*$/gm)) versions.push(m[1]!);
     }
-    expect(versions.length, "node-version の指定を実際に読めている(空振り防止。audit 2 + ci 2 + deploy-cloud 3 + research 1)").toBe(8);
+    expect(versions.length, "node-version の指定を実際に読めている(空振り防止。audit 2 + ci 2 + deploy-cloud 4〈check・test・smoke・deploy。Issue #762〉 + research 1)").toBe(9);
     for (const v of versions) {
       const parts = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
       expect(parts, `node-version: ${v} は major.minor.patch の正確な版(メジャーだけだとキャッシュの修正前の版になる)`).not.toBeNull();
