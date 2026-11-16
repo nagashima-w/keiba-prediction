@@ -1,0 +1,14 @@
+-- クラウド版(D1)の migration 0047: odds_snapshots に、馬連・枠連の全組のオッズの列 combos_json を足す(Issue #751。探索〈#700〉の材料)。D1 専用の表。
+-- migration は追加のみ(ADD COLUMN の 1 文だけ。既存の列・行は変わらない。反映までの間は旧 Worker が動くが、旧 Worker の INSERT はこの列を使わないので壊れない)。
+-- ★ここを変えるときは、scripts/test/cloud-d1-schema.test.ts の「宣言した追加分」(D1_EXTRA_TABLES の odds_snapshots)も同時に直す。
+-- ★デプロイの順序: この列を書く新しい Worker は、migration の適用より前に出してはならない(deploy-cloud.yml は migration を wrangler deploy より前に適用する。列が無い間は保存が失敗する)。
+-- 書くのは cloud/src/odds-snapshot-repository.ts だけ。追記だけの決まりは 0046 のまま(INSERT 1 文。UPDATE・DELETE は書かない)。
+--
+-- combos_json: 馬連・枠連の頁ごとの値(JSON)。単勝・複勝(horses_json)と同じ時点・同じ行に残す。status が ok の行だけ入る(それ以外と、0046 までの古い行は NULL)。
+--   形: {"umaren": <頁>, "wakuren": <頁>}。<頁> は次のどちらか。
+--     {"t": その頁を取って取得キャッシュに置いた実際の時刻(エポックミリ秒), "dt": JRA の頁の「N時M分現在」(JST の YYYY-MM-DD HH:MM:00。無ければ null),
+--      "st": 頁の発売状態(middle・result・yoso。odds_status と同じ語。読めなければ null), "o": {組のキー: オッズ}}
+--     {"err": 取れなかった理由(固定の語: fetch-failed = 頁を取れなかった / unavailable = 表が読めない・全組が票数なし / parse-error = 読み取りの失敗)}
+--   組のキーは netkeiba の組合せオッズと同じ形(小さい番号を先にした 2 桁ゼロ埋めの連結。馬連は馬番、枠連は枠番。例: "0102")。値は単一のオッズ(票数なしの組は null のまま)。
+--   JRA の頁が空きにしている組(自分自身との組・1 頭だけの枠の同枠)はキーを作らない。2 頭以上の枠の同枠(例: "0303")は残る。
+ALTER TABLE odds_snapshots ADD COLUMN combos_json TEXT;

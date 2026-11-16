@@ -25,7 +25,7 @@ beforeEach(async () => {
 const ok: OddsSnapshotPayload = {
   raceId: "202605010101", leadMin: 5, kaisaiDate: "20261115", startMs: 1_000_000, dueMs: 700_000, takenAtMs: 712_345,
   officialDatetime: "2026-11-15 15:40:00", oddsStatus: "middle", status: "ok", reason: null, attempts: 2,
-  horses: [[1, 2.1, 1, 1.2, 1.5, "2023101645"], [2, null, null, null, null, null]],
+  horses: [[1, 2.1, 1, 1.2, 1.5, "2023101645"], [2, null, null, null, null, null]], combos: null,
 };
 const rowsOf = async (): Promise<Record<string, unknown>[]> => (await local.db.prepare("SELECT * FROM odds_snapshots ORDER BY race_id").all()).results as Record<string, unknown>[];
 
@@ -40,6 +40,16 @@ describe("save(1 レース・1 時点で 1 行。追記だけ)", () => {
     });
     expect(JSON.parse(rows[0]!["horses_json"] as string)).toEqual([[1, 2.1, 1, 1.2, 1.5, "2023101645"], [2, null, null, null, null, null]]);
   });
+  it("#751: combos は combos_json に JSON で入る(馬連・枠連。{err} も)。combos が null なら NULL。再保存で書き換わらない", async () => {
+    const store = new D1OddsSnapshotStore({ db: local.db });
+    const combos = { umaren: { t: 700_100, dt: "2026-11-15 15:40:00", st: "middle", o: { "0102": 12.3, "0103": null } }, wakuren: { err: "unavailable" as const } };
+    await store.save({ ...ok, combos });
+    await store.save({ ...ok, raceId: "202605010102", combos: null });
+    await store.save({ ...ok, combos: { umaren: { err: "fetch-failed" }, wakuren: { err: "fetch-failed" } } });
+    const rows = await rowsOf();
+    expect(JSON.parse(rows[0]!["combos_json"] as string)).toEqual(combos);
+    expect(rows[1]!["combos_json"]).toBeNull();
+  });
   it("skipped・failed の行: 理由と、取れなかった・取らないと決めた時刻が入り、頁の値・馬は NULL", async () => {
     const store = new D1OddsSnapshotStore({ db: local.db });
     await store.save({ ...ok, raceId: "202605010102", takenAtMs: 5_000, officialDatetime: null, oddsStatus: null, status: "skipped", reason: "too-late", attempts: 0, horses: null });
@@ -53,7 +63,7 @@ describe("save(1 レース・1 時点で 1 行。追記だけ)", () => {
   it("同じレースの再保存は行を増やさず、先に入った値を変えない(changes = 0。書き込みの行を食わない)", async () => {
     const store = new D1OddsSnapshotStore({ db: local.db });
     await store.save(ok);
-    const again = await local.db.prepare(INSERT_ODDS_SNAPSHOT_SQL).bind(ok.raceId, ok.leadMin, ok.kaisaiDate, ok.startMs, ok.dueMs, 1, null, null, "failed", "fetch-failed", 9, null).run();
+    const again = await local.db.prepare(INSERT_ODDS_SNAPSHOT_SQL).bind(ok.raceId, ok.leadMin, ok.kaisaiDate, ok.startMs, ok.dueMs, 1, null, null, "failed", "fetch-failed", 9, null, null).run();
     expect(again.meta.changes).toBe(0);
     await store.save({ ...ok, takenAtMs: 999 });
     const rows = await rowsOf();
@@ -74,7 +84,7 @@ describe("save(1 レース・1 時点で 1 行。追記だけ)", () => {
     expect(INSERT_ODDS_SNAPSHOT_SQL).not.toMatch(/\b(UPDATE|DELETE|REPLACE)\b/i);
   });
   it("1 レースの保存で書き込む行は 1 行(主キーだけの WITHOUT ROWID の表。副索引なし)", async () => {
-    const result = await local.db.prepare(INSERT_ODDS_SNAPSHOT_SQL).bind(ok.raceId, ok.leadMin, ok.kaisaiDate, ok.startMs, ok.dueMs, ok.takenAtMs, ok.officialDatetime, ok.oddsStatus, ok.status, ok.reason, ok.attempts, JSON.stringify(ok.horses)).run();
+    const result = await local.db.prepare(INSERT_ODDS_SNAPSHOT_SQL).bind(ok.raceId, ok.leadMin, ok.kaisaiDate, ok.startMs, ok.dueMs, ok.takenAtMs, ok.officialDatetime, ok.oddsStatus, ok.status, ok.reason, ok.attempts, JSON.stringify(ok.horses), null).run();
     expect(result.meta.changes).toBe(1);
     expect(result.meta.rows_written).toBe(1);
   });

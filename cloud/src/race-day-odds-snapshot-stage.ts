@@ -5,22 +5,23 @@
  * ## 1 ステップ(1 レース・1 時点〈発走の 10 分前か 5 分前〉の 1 回ぶん)
  *  1. 最初に動いた時刻を永続化。
  *  2. DO に結果(`payload_json`)があれば取り直さずに 4 へ。無ければ 3 で決める。
- *  3. その時点の取得が意味を持つ最後の時刻(5 分前は発走、10 分前は 5 分前の時刻。`oddsSnapshotSupersedeMs`)以降なら JRA に出ず skipped(`too-late`)。そうでなければ JRA の単勝・複勝の頁を 1 本取る(`JraOddsStage` を、メモリ上の進み具合で使う。締切の再計算と同じ部品。
+ *  3. その時点の取得が意味を持つ最後の時刻(5 分前は発走、10 分前は 5 分前の時刻。`oddsSnapshotSupersedeMs`)以降なら JRA に出ず skipped(`too-late`)。そうでなければ JRA の単勝・複勝の頁(必須)を取り、取れたら馬連 → 枠連の頁を 1 本ずつ取る(#751。組合せは任意で再試行なし。失敗は頁ごとに {err}。`JraOddsStage` を、メモリ上の進み具合で使う。締切の再計算と同じ部品。
  *     場・レースのリンクは取得キャッシュから読み、無ければ開催選択 → レース選択をたどる)。取得キャッシュに置いた JSON(**この起床より前のものは使わない**)から全頭の値を作る。
  *     取れなかったら、試行が {@link ODDS_SNAPSHOT_FETCH_MAX_ATTEMPTS} 未満で、再試行の時刻がその最後の時刻より前のときだけ {@link ODDS_SNAPSHOT_FETCH_RETRY_DELAY_MS} 後に再試行。それ以外は failed(`fetch-failed`)。
  *     結果は**保存の前に** DO に書く。
  *  4. D1 に保存(先着の INSERT なので再保存は無害)。失敗したら {@link ODDS_SNAPSHOT_SAVE_MAX_ATTEMPTS} まで {@link ODDS_SNAPSHOT_SAVE_RETRY_DELAY_MS} 後に再試行し、尽きたら abandoned(警告だけ残す)。
  * 例外は投げない。警告は固定の語と race_id だけ(URL・cname・本文・例外の文面は出さない。例外の文面は鍵を伏せて 200 文字まで)。通知はしない。
  *
- * JRA への出方: 1 レースにつき頁 1 本(リンクが取得キャッシュに無い最初のレースだけ、開催選択とレース選択の 2 本が足される)。間隔は注入の取得口(DO では他の JRA の取得と共有の `createJraPacer`)が守る。
+ * JRA への出方: 1 レースにつき頁 3 本(単勝・複勝・馬連・枠連。リンクが取得キャッシュに無い最初のレースだけ、開催選択とレース選択の 2 本が足される。単勝・複勝が取れなければ 1 本)。間隔は注入の取得口(DO では他の JRA の取得と共有の `createJraPacer`)が守る。
  */
 import { redactSecrets } from "./llm-run";
 import { createJraOddsOverride, jraOddsCacheKey } from "./jra-odds-cache";
-import type { JraOddsFetcher } from "./jra-odds-fetch";
+import type { JraOddsFetcher, JraOddsSession } from "./jra-odds-fetch";
 import type { OddsSnapshotSink } from "./odds-snapshot-repository";
 import { MemoryJraOddsStageStore } from "./race-day-jra-odds";
 import { JraOddsStage, type JraOddsStageCache } from "./race-day-jra-odds-stage";
 import {
+  comboPageOfCache,
   horsesOfSnapshot,
   ODDS_SNAPSHOT_FETCH_MAX_ATTEMPTS,
   ODDS_SNAPSHOT_FETCH_RETRY_DELAY_MS,
@@ -28,6 +29,9 @@ import {
   ODDS_SNAPSHOT_SAVE_RETRY_DELAY_MS,
   oddsSnapshotSupersedeMs,
   parseOddsSnapshotPayload,
+  type OddsSnapshotComboErr,
+  type OddsSnapshotComboPage,
+  type OddsSnapshotCombos,
   type OddsSnapshotPayload,
   type OddsSnapshotReason,
   type OddsSnapshotStore,
@@ -152,7 +156,7 @@ export class OddsSnapshotStage {
     now: number,
   ): Promise<{ readonly kind: "payload"; readonly payload: OddsSnapshotPayload } | { readonly kind: "retry"; readonly attempts: number; readonly nextTryAt: number }> {
     const base = { raceId: row.race_id, leadMin: row.lead_min, kaisaiDate: row.kaisai_date, startMs: row.start_ms, dueMs: row.due_ms };
-    const empty = { takenAtMs: now, officialDatetime: null, oddsStatus: null, horses: null };
+    const empty = { takenAtMs: now, officialDatetime: null, oddsStatus: null, horses: null, combos: null };
     // この時点の取得が意味を持つ最後の時刻(10 分前は 5 分前の時刻、5 分前は発走)以降に起きた(積んだあとの遅れ)。取りに行かない。
     const supersedeAt = oddsSnapshotSupersedeMs(row.start_ms, row.lead_min);
     if (now >= supersedeAt) {
@@ -172,33 +176,87 @@ export class OddsSnapshotStage {
     return { kind: "payload", payload: { ...base, ...empty, takenAtMs: failedAt, status: "failed", reason: "fetch-failed", attempts } };
   }
 
-  /** 頁を 1 本取って全頭の値を返す。取れなかった・読めなかったときは null(投げない)。 */
+  /**
+   * 頁を取って全頭の値を返す。取れなかった・読めなかったときは null(投げない)。
+   * 単勝・複勝の頁(必須)を先に取り、取れたあとで馬連 → 枠連の頁を 1 本ずつ取る(#751。馬連のほうが組が多いので先。組合せは任意: 失敗は頁ごとに {err} にして、単勝・複勝の記録は落とさない。組合せの再試行はしない)。
+   * 単勝・複勝が取れなかったときは組合せには出ない(再試行の回に取り直す)。
+   */
   private async fetchPage(
     row: OddsSnapshotTaskRow,
     startedAt: number,
     stopAt: number,
-  ): Promise<{ readonly takenAtMs: number; readonly officialDatetime: string | null; readonly oddsStatus: string; readonly horses: NonNullable<OddsSnapshotPayload["horses"]> } | null> {
+  ): Promise<{
+    readonly takenAtMs: number;
+    readonly officialDatetime: string | null;
+    readonly oddsStatus: string;
+    readonly horses: NonNullable<OddsSnapshotPayload["horses"]>;
+    readonly combos: OddsSnapshotCombos;
+  } | null> {
     try {
-      const stage = new JraOddsStage({
-        store: new MemoryJraOddsStageStore(["tanpuku"]),
-        fetcher: this.fetcher,
-        cache: this.cache,
-        now: this.now,
-        onWarn: this.onWarn,
-        onInfo: this.onInfo,
-      });
-      await stage.run(row.race_id, 0, row.kaisai_date, { stopAt });
-      const entry = this.cache.get(jraOddsCacheKey(row.race_id, "tanpuku"));
-      if (entry === undefined || entry.fetchedAt < startedAt) {
-        return null; // 取れていない(古い JSON は、取れなかった記録の代わりに使わない)
-      }
-      const snapshot = await createJraOddsOverride({ cache: this.cache, raceId: row.race_id, oddsSince: startedAt }).winPlace!();
-      if (snapshot === null || Object.keys(snapshot.win).length === 0) {
+      // 3 頁で 1 つの session を使う(session の中の本数と間隔の数え方が、今までの 1 頁の取得と同じ連続になる)。
+      let session: JraOddsSession | null = null;
+      const fetcher: JraOddsFetcher = { open: () => (session ??= this.fetcher.open()) };
+      const winPlace = await this.fetchWinPlace(fetcher, row, startedAt, stopAt);
+      if (winPlace === null) {
         return null;
       }
-      return { takenAtMs: entry.fetchedAt, officialDatetime: snapshot.officialDatetime, oddsStatus: snapshot.oddsStatus, horses: horsesOfSnapshot(snapshot, horseIdsOf(entry.value)) };
+      const umaren = await this.fetchComboPage(fetcher, row, "umaren", startedAt, stopAt);
+      const wakuren = await this.fetchComboPage(fetcher, row, "wakuren", startedAt, stopAt);
+      return { ...winPlace, combos: { umaren, wakuren } };
     } catch {
       return null; // 文面は残さない(URL・cname が入りうる)
+    }
+  }
+
+  /** 1 頁だけを取る段(取得キャッシュに JSON を置く)。呼び出しごとに新しい進み具合(締切の再計算と同じ部品)。 */
+  private async runPage(fetcher: JraOddsFetcher, row: OddsSnapshotTaskRow, page: "tanpuku" | "umaren" | "wakuren", stopAt: number, onWarn: (message: string) => void): Promise<void> {
+    const stage = new JraOddsStage({
+      store: new MemoryJraOddsStageStore([page]),
+      fetcher,
+      cache: this.cache,
+      now: this.now,
+      onWarn,
+      onInfo: this.onInfo,
+    });
+    await stage.run(row.race_id, 0, row.kaisai_date, { stopAt });
+  }
+
+  private async fetchWinPlace(
+    fetcher: JraOddsFetcher,
+    row: OddsSnapshotTaskRow,
+    startedAt: number,
+    stopAt: number,
+  ): Promise<{ readonly takenAtMs: number; readonly officialDatetime: string | null; readonly oddsStatus: string; readonly horses: NonNullable<OddsSnapshotPayload["horses"]> } | null> {
+    await this.runPage(fetcher, row, "tanpuku", stopAt, this.onWarn);
+    const entry = this.cache.get(jraOddsCacheKey(row.race_id, "tanpuku"));
+    if (entry === undefined || entry.fetchedAt < startedAt) {
+      return null; // 取れていない(古い JSON は、取れなかった記録の代わりに使わない)
+    }
+    const snapshot = await createJraOddsOverride({ cache: this.cache, raceId: row.race_id, oddsSince: startedAt }).winPlace!();
+    if (snapshot === null || Object.keys(snapshot.win).length === 0) {
+      return null;
+    }
+    return { takenAtMs: entry.fetchedAt, officialDatetime: snapshot.officialDatetime, oddsStatus: snapshot.oddsStatus, horses: horsesOfSnapshot(snapshot, horseIdsOf(entry.value)) };
+  }
+
+  /** 組合せの 1 頁。取れなければ {err}(投げない)。理由は固定の語だけ(段の警告の語から、読み取りの失敗だけを引き継ぎ、それ以外は fetch-failed)。 */
+  private async fetchComboPage(fetcher: JraOddsFetcher, row: OddsSnapshotTaskRow, page: "umaren" | "wakuren", startedAt: number, stopAt: number): Promise<OddsSnapshotComboPage> {
+    let err: OddsSnapshotComboErr = "fetch-failed";
+    try {
+      await this.runPage(fetcher, row, page, stopAt, (message) => {
+        const parseFailure = /読み取りに失敗しました.*: (unavailable|parse-error)$/.exec(message);
+        if (parseFailure !== null) {
+          err = parseFailure[1] as OddsSnapshotComboErr;
+        }
+        this.onWarn(message);
+      });
+      const entry = this.cache.get(jraOddsCacheKey(row.race_id, page));
+      if (entry === undefined || entry.fetchedAt < startedAt) {
+        return { err }; // 取れていない(古い JSON は使わない)
+      }
+      return comboPageOfCache(entry.value, entry.fetchedAt) ?? { err: "parse-error" };
+    } catch {
+      return { err: "fetch-failed" };
     }
   }
 }

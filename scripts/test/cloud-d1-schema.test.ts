@@ -576,6 +576,7 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
   odds_snapshots: {
     columns: [
       { name: "attempts", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "combos_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
       { name: "due_ms", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
       { name: "horses_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
       { name: "kaisai_date", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
@@ -730,8 +731,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql・0035_race_backfill.sql・0036_race_archive_runs_pending_index.sql・0037_verify_race_mark.sql・0038_horse_profiles.sql・0039_market_edge.sql ・0040_analysis_shadow.sql・0041_market_shrink_weight.sql・0042_analysis_odds_sources.sql・0043_close_odds_sources.sql・0045_race_oikiri.sql・0046_odds_snapshots.sql の46本だけで、番号は 0001 から連続している(後から足すときは 0046 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql", "0036_race_archive_runs_pending_index.sql", "0037_verify_race_mark.sql", "0038_horse_profiles.sql", "0039_market_edge.sql", "0040_analysis_shadow.sql", "0041_market_shrink_weight.sql", "0042_analysis_odds_sources.sql", "0043_close_odds_sources.sql", "0044_past_blinker.sql", "0045_race_oikiri.sql", "0046_odds_snapshots.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql・0035_race_backfill.sql・0036_race_archive_runs_pending_index.sql・0037_verify_race_mark.sql・0038_horse_profiles.sql・0039_market_edge.sql ・0040_analysis_shadow.sql・0041_market_shrink_weight.sql・0042_analysis_odds_sources.sql・0043_close_odds_sources.sql・0045_race_oikiri.sql・0046_odds_snapshots.sql・0047_odds_snapshots_combos.sql の47本だけで、番号は 0001 から連続している(後から足すときは 0047 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql", "0036_race_archive_runs_pending_index.sql", "0037_verify_race_mark.sql", "0038_horse_profiles.sql", "0039_market_edge.sql", "0040_analysis_shadow.sql", "0041_market_shrink_weight.sql", "0042_analysis_odds_sources.sql", "0043_close_odds_sources.sql", "0044_past_blinker.sql", "0045_race_oikiri.sql", "0046_odds_snapshots.sql", "0047_odds_snapshots_combos.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -1176,6 +1177,20 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     expect(statements.map((x) => x.split(/\s+/).slice(0, 3).join(" "))).toEqual(["CREATE TABLE odds_snapshots"]);
     expect(statements.every((x) => x.endsWith("WITHOUT ROWID"))).toBe(true);
     expect(diffSchemas(expectedD1Schema(exe), schemaAfter(sqls.slice(0, 45)))).not.toEqual([]); // 0046 を落とすと差分になる(空振りでない)
+  });
+
+  it("Issue #751: odds_snapshots.combos_json(TEXT・NULL 可)は 0047 だけが足す。ALTER TABLE ADD COLUMN の 1 文だけで、既存の列・表・索引は変わらない", () => {
+    const before = schemaAfter(sqls.slice(0, 46));
+    const after = schemaAfter(sqls);
+    expect(before["odds_snapshots"]!.columns.map((c) => c.name)).not.toContain("combos_json");
+    expect(after["odds_snapshots"]!.columns.find((c) => c.name === "combos_json")).toEqual({ name: "combos_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 });
+    expect(after["odds_snapshots"]!.columns.filter((c) => c.name !== "combos_json")).toEqual(before["odds_snapshots"]!.columns);
+    expect(after["odds_snapshots"]!.indexes).toEqual(before["odds_snapshots"]!.indexes);
+    for (const [table, schema] of Object.entries(before)) if (table !== "odds_snapshots") expect(after[table], table).toEqual(schema);
+    const code = sqls[46]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    const statements = code.split(";").map((x) => x.trim()).filter((x) => x !== "");
+    expect(statements).toEqual(["ALTER TABLE odds_snapshots ADD COLUMN combos_json TEXT"]);
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter(sqls.slice(0, 46)))).not.toEqual([]);
   });
 
   it("Issue #642: race_market_rows・market_edge・market_edge_meta は 0039 だけが足す新しい表で、race_archive.market_version(INTEGER・NULL 可)と部分索引 idx_race_archive_market_pending も 0039 だけが足す。0001〜0038 までには無い。D1 専用(D1_EXTRA_TABLES に宣言した)で、exe には無い。追加のみ", () => {

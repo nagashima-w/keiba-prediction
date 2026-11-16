@@ -89,6 +89,11 @@ describe("頁のパース → JSON(生の HTML は置かない)", () => {
       expect(parsed.json.length, bet).toBeLessThan(1024 * 1024);
     }
   });
+  it("#751: 組合せの JSON に、頁の発売状態 oddsStatus も入る(発売中の頁は middle、確定後は result)。記録の st に使う", () => {
+    const mid = parseJraOddsPage("umaren", html(FIXTURE.quinella), DATE, "quinella");
+    expect(mid.status).toBe("ok");
+    if (mid.status === "ok") expect(JSON.parse(mid.json).oddsStatus).toBe("middle");
+  });
   it("読めない頁(見出しが無い)は unavailable。壊れた構造で例外を投げずに failure の語にする", () => {
     expect(parseJraOddsPage("tanpuku", "<html><body>x</body></html>", DATE)).toEqual({ status: "unavailable" });
     expect(parseJraOddsPage("wide", "<html><body>x</body></html>", DATE, "wide")).toEqual({ status: "unavailable" });
