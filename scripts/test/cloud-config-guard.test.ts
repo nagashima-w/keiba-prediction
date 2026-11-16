@@ -697,14 +697,14 @@ describe("wrangler.toml", () => {
     // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つと、#642 の 1 晩の上限(Issue #669)と、JRA のオッズを使うか(Issue #675)の 5 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
     const varsBody = /^\[vars\]\n((?:[^\[\n][^\n]*\n|\n)*)/m.exec(tomlCode)?.[1] ?? "";
     const varKeys = [...varsBody.matchAll(/^([A-Z_]+)\s*=/gm)].map((m) => m[1]);
-    expect(varKeys.sort()).toEqual(["JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT", "RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]); // Issue #635: 地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT)を足した
+    expect(varKeys.sort()).toEqual(["JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "PERSON_STATS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT", "RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]); // Issue #635: 地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT)を足した
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);
     expect(tomlCode).not.toMatch(/^\[secrets\]/m);
     expect(tomlCode).not.toMatch(/keep_vars/);
   });
 
   it("Issue #655・#669: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 20000 ミリ秒(2026-11-15 の #745 で一度 30000 に広げ、2026-11-16 に #670 で 1 レースあたりの書き込みが減ったので 20000 に戻した)(書き込みが Free の 1 日 10 万行に迫ったため5000 から広げた)。#642 の 1 晩の上限は 1〜20000 未満の数(止める \"0\" ではない)。取得の止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む・5000)は変えない", () => {
-    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "150"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "8000"\nRACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "10000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"$/m);
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "150"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "8000"\nRACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "10000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"\nPERSON_STATS_ENABLED = "0"$/m);
     // Issue #669: #642 の上限は、止める "0" ではなく、既定(20000)より小さい正の整数。取得の間隔は parseArchiveMinIntervalMs の範囲(1500〜60000)内
     const edgeLimit = Number(/^RACE_MARKET_EDGE_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1]);
     expect(edgeLimit).toBeGreaterThanOrEqual(1);
@@ -761,6 +761,8 @@ describe("wrangler.toml", () => {
     expect(body).toContain('"--var", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT:0"');
     // Issue #642: 騎手・調教師の指標の毎晩の計算も、すべての構成で止めて動かす(計算の時間帯〈JST 3:00〜8:30〉に当たっても、本番のクラスが D1 に書かない)
     expect(body).toContain('"--var", "RACE_MARKET_EDGE_NIGHTLY_LIMIT:0"');
+    // Issue #729: 騎手・調教師の年ごとの集計の取り込み(人の段)も、すべての構成で止めて動かす(本番の toml も "0")
+    expect(body).toContain('"--var", "PERSON_STATS_ENABLED:0"');
     // Issue #697: 馬ごとの頁の埋め戻しも、すべての構成で止めて動かす(時間帯〈JST 18:00〜翌 8:00〉に当たっても、本番のクラスが JRA の公式サイトに出ない)
     expect(body).toContain('"--var", "JRA_HORSE_BACKFILL_ENABLED:0"');
     // Issue #590: 過去の結果の毎晩の変換も、すべての構成で止めて動かす(変換の時間帯〈JST 1:00〜8:30〉に当たっても、本番のクラスが D1 に書かない)
@@ -1621,6 +1623,14 @@ describe("Issue #642: 騎手・調教師の指標の毎晩の計算(RaceMarketEd
     expect(doCode).toContain("isMarketEdgeDisabled(this.env.RACE_MARKET_EDGE_NIGHTLY_LIMIT)");
     expect(doCode).not.toMatch(/RACE_MARKET_EDGE\?:\s*string/);
     expect(stripCode(readTextLf("cloud", "smoke.ts"))).not.toMatch(/"--var",\s*"RACE_MARKET_EDGE[:=]/);
+  });
+
+  it("Issue #729: 人の段を動かす var(PERSON_STATS_ENABLED)は文字列 \"1\" の完全一致だけが有効(向きは市場の段の止める var と逆)。本番の toml は \"0\"。var の名前が DO の binding の名前と同じでない", () => {
+    expect(core).toMatch(/value\.trim\(\) === "1"/); // 判定は core の isPersonStatsEnabled(単体テストは market-edge-core-person.test.ts)
+    expect(doCode).toContain("isPersonStatsEnabled(this.env.PERSON_STATS_ENABLED)");
+    expect(tomlCode).toMatch(/^PERSON_STATS_ENABLED = "0"$/m);
+    expect(tomlCode).not.toMatch(/^PERSON_STATS_ENABLED = "1"$/m);
+    expect(tomlCode).not.toMatch(/name = "PERSON_STATS/); // binding の名前にしない(var と衝突する)
   });
 
   it("本番の入口(worker.ts)は本番のクラスを export し、smoke の入口(smoke-worker.ts)も同じ本番のクラスを export する(サブクラスにしない)。binding に触れるのは scheduled.ts(kick)だけ", () => {

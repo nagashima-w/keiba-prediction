@@ -13,12 +13,14 @@
 import { DurableObject } from "cloudflare:workers";
 import { parseLimitOverride } from "./limit-override";
 import { aggregateMarketEdges } from "./market-edge-aggregate";
-import { isMarketEdgeDisabled, MARKET_EDGE_NIGHTLY_ROWS_MAX, RaceMarketEdgeCore, type MarketEdgeOptions, type RaceMarketEdgeStatus } from "./market-edge-core";
+import { isMarketEdgeDisabled, isPersonStatsEnabled, MARKET_EDGE_NIGHTLY_ROWS_MAX, RaceMarketEdgeCore, type MarketEdgeOptions, type RaceMarketEdgeStatus } from "./market-edge-core";
 import { D1MarketEdgeStore, type MarketEdgeDb } from "./market-edge-repository";
+import { aggregatePersonYearsFor } from "./person-stats-aggregate";
+import { D1PersonStatsStore, type PersonStatsDb } from "./person-stats-repository";
 import { D1RaceArchiveStore, type RaceArchiveBucket, type RaceArchiveDb } from "./race-archive-repository";
 
 export interface RaceMarketEdgeEnv {
-  DB: MarketEdgeDb & RaceArchiveDb;
+  DB: MarketEdgeDb & RaceArchiveDb & PersonStatsDb;
   /** R2(目録の読み出しが get だけを使う。Class B の計数と柵は D1 の `r2_ops`)。 */
   ANALYSIS_DETAIL: RaceArchiveBucket;
   /**
@@ -26,6 +28,11 @@ export interface RaceMarketEdgeEnv {
    * ★止める var を `RACE_MARKET_EDGE` にしてはならない: それは DO の binding の名前で、同じ名前の var は binding と衝突する。
    */
   RACE_MARKET_EDGE_NIGHTLY_LIMIT?: string;
+  /**
+   * 任意(var)。騎手・調教師の年ごとの集計の取り込み(人の段。Issue #729 段階 A)を動かすか。**文字列 `"1"`(前後の空白は無視)のときだけ動く**(未設定・"0"・それ以外は動かない)。
+   * 市場の段の止める var(`"0"` だけが止める)とは向きが逆: 新しい書き込み(初回の埋め戻しで約 6 万行)を、公開と別に、メインが `"1"` にして動かすため。
+   */
+  PERSON_STATS_ENABLED?: string;
 }
 
 export class RaceMarketEdgeDO extends DurableObject<RaceMarketEdgeEnv> {
@@ -35,6 +42,7 @@ export class RaceMarketEdgeDO extends DurableObject<RaceMarketEdgeEnv> {
     super(ctx, env);
     const archive = new D1RaceArchiveStore({ db: env.DB, bucket: env.ANALYSIS_DETAIL });
     const store = new D1MarketEdgeStore(env.DB);
+    const personStore = new D1PersonStatsStore(env.DB);
     this.core = new RaceMarketEdgeCore(
       {
         sql: ctx.storage.sql,
@@ -44,6 +52,7 @@ export class RaceMarketEdgeDO extends DurableObject<RaceMarketEdgeEnv> {
         store,
         archive: { readRaceArchives: (ids) => archive.readRaceArchives(ids) },
         aggregate: (today) => aggregateMarketEdges(store, today),
+        person: { store: personStore, aggregate: (years, today) => aggregatePersonYearsFor(personStore, years, today) },
         log: (line, level) => (level === "error" ? console.error(line) : console.log(line)),
       },
       this.options(),
@@ -53,7 +62,11 @@ export class RaceMarketEdgeDO extends DurableObject<RaceMarketEdgeEnv> {
   /** コアの設定。var から決める(止める `"0"`・書き込み行数を下げる上書き)。 */
   protected options(): MarketEdgeOptions {
     const nightlyRows = parseLimitOverride(this.env.RACE_MARKET_EDGE_NIGHTLY_LIMIT, MARKET_EDGE_NIGHTLY_ROWS_MAX);
-    return { ...(isMarketEdgeDisabled(this.env.RACE_MARKET_EDGE_NIGHTLY_LIMIT) ? { disabled: true } : {}), ...(nightlyRows === null ? {} : { nightlyRows }) };
+    return {
+      ...(isMarketEdgeDisabled(this.env.RACE_MARKET_EDGE_NIGHTLY_LIMIT) ? { disabled: true } : {}),
+      ...(nightlyRows === null ? {} : { nightlyRows }),
+      ...(isPersonStatsEnabled(this.env.PERSON_STATS_ENABLED) ? { personEnabled: true } : {}),
+    };
   }
 
   /** アラームが無ければ張る(RPC)。cron の `scheduled` が 21 時と 23 時に呼ぶ。 */

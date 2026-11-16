@@ -161,6 +161,8 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
     "--var", "RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT:0",
     // Issue #642: 騎手・調教師の指標の毎晩の計算も止める(`RACE_MARKET_EDGE_NIGHTLY_LIMIT=0`。★var の名前を DO の binding の名前〈`RACE_MARKET_EDGE`〉にしない)。本番のクラスは何もしない(R2 と D1 だけを触る DO で、netkeiba には出ない)。
     "--var", "RACE_MARKET_EDGE_NIGHTLY_LIMIT:0",
+    // Issue #729: 騎手・調教師の年ごとの集計の取り込み(人の段)も止める(`PERSON_STATS_ENABLED=0`。本番の toml も "0"。文字列 "1" のときだけ動くので、未設定でも動かないが、明示する)。市場の段を止めればコアごと動かないが、人の段の var が将来 "1" になっても smoke が D1 に書かないようにする。
+    "--var", "PERSON_STATS_ENABLED:0",
     // Issue #697: 馬ごとの頁の埋め戻しも止める(`JRA_HORSE_BACKFILL_ENABLED=0`。★var の名前を DO の binding の名前〈`JRA_HORSE_BACKFILL`〉にしない)。本番のクラスは何もしない(JRA の公式サイトと D1 だけの DO)。
     "--var", "JRA_HORSE_BACKFILL_ENABLED:0",
     // Issue #698: 過去のレースのブリンカー着用の埋め戻しも止める(`JRA_BLINKER_BACKFILL_ENABLED=0`。★var の名前を DO の binding の名前〈`JRA_BLINKER_BACKFILL`〉にしない)。本番の toml は "1"(動かしている)なので、smoke では止める。smoke の構成では toml の [vars] より --var が優先されるので明示する。

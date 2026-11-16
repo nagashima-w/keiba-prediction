@@ -333,6 +333,22 @@ describe("走査と変換", () => {
     expect((await h.core.getStatus()).night.rows).toBe(282); // 晩が変わったので数え直す
   });
 
+  it("ちょうど上限に等しいときも止まる(境界。1 ステップ 282 行で、上限 282 なら 1 ステップで止まる。Issue #717)", async () => {
+    h = new Harness({ nightlyRows: 282 });
+    h.seed(200);
+    h.rowsPerRace = 14; // 1 ステップ = 変換 20×14+1 = 281 行 + Class B の計数 1 行 = 282 行
+    h.alarm = NIGHT1;
+    await h.fire();
+    // 前提: ちょうど上限に等しい行数になった(超えても足りなくてもない)
+    expect((await h.core.getStatus()).night.rows).toBe(282);
+    const readsSoFar = h.reads.length;
+    expect(readsSoFar).toBeGreaterThan(0);
+    await h.fire();
+    expect(h.reads.length).toBe(readsSoFar); // 等しいので、もう読まない
+    expect((await h.core.getStatus()).waitReason).toBe("night-limit");
+    expect(h.alarm).toBe(NIGHT2);
+  });
+
   it("上限は下げる方向の上書きだけ: nightlyRows を指定すればそれが上限。指定が無ければ既定", async () => {
     h = new Harness({ nightlyRows: 1 });
     h.seed(100);
