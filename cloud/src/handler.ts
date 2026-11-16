@@ -22,7 +22,7 @@ import { runJraCheck, type JraFetchLike } from "./jra-check";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { attachMarketEdge, loadMarketEdge } from "./analysis-market-edge";
 import { D1MarketEdgeStore } from "./market-edge-repository";
-import { buildMarketEdgesView, type MarketEdgeKind } from "./market-edges-view";
+import { buildMarketEdgesView } from "./market-edges-view";
 import { allocationViewOf, buildAnalysisView, type AnalysisView } from "./analysis-view";
 import { buildPreviousDiff, type AnalysisViewPreviousDiff } from "./analysis-diff-view";
 import { CLIENT_JS } from "./client-bundle.generated";
@@ -1803,8 +1803,8 @@ async function handleMarketEdges(request: Request, env: Env): Promise<Response> 
   }
   try {
     const store = new D1MarketEdgeStore(env.DB);
-    const [edges, meta] = await Promise.all([store.readEdges(kind as MarketEdgeKind), store.readMeta()]);
-    return json(buildMarketEdgesView(kind as MarketEdgeKind, edges, meta));
+    const [edges, meta] = await Promise.all([store.readEdges(kind), store.readMeta()]);
+    return json(buildMarketEdgesView(kind, edges, meta));
   } catch {
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "d1-error" } }, 503);
