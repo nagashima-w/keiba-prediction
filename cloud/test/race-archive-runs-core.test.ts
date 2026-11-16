@@ -18,7 +18,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 /**
  * Issue #590(#549-B3-2): 毎晩の変換の純ロジック `RaceArchiveRunsCore`。偽の目録・偽の読み出し・偽の変換・偽の時計で、
  * 時間帯・1 晩の書き込み行数の上限・走査(カーソル)・失敗の分類・停止と翌晩の自動再開・通知(1 回だけ)・状態を固定する。
- * 本物の D1・R2 の上の動きは race-archive-runs.test.ts(変換)と race-archive-bulk.test.ts(列挙・一括の読み出し)が固定している。
+ * 本物の D1・R2 の上の動きは race-archive-runs.integration.test.ts(変換)と race-archive-bulk.integration.test.ts(列挙・一括の読み出し)が固定している。
  */
 
 const MIN = 60_000;

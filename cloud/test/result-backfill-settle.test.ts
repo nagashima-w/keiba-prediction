@@ -10,7 +10,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
  *  - 写し: DO の記録(`backfill_race`・`backfill_class`・`backfill_payout`)の済み・諦めを、段階ごとの D1 の状態に写す。**写されるまで列挙しない**。失敗したら次のステップが全部を写し直す
  *  - 増分の写し: 取り込み・諦めのたびに、段階ごとの規則(下の表)で写す
  *  - 整合検査: 1 晩 1 回、最初のステップで。食い違いの件数が 0 でなければ警告に出す。失敗しても補完は続ける
- * D1 の側は偽物(呼び出しを記録するだけ)。DO の SQLite は本物の SQLite(`node:sqlite`)。D1 の状態そのものの検証は `result-backfill-state.test.ts`。
+ * D1 の側は偽物(呼び出しを記録するだけ)。DO の SQLite は本物の SQLite(`node:sqlite`)。D1 の状態そのものの検証は `result-backfill-state.integration.test.ts`。
  */
 
 const JST = 9 * 3600_000;

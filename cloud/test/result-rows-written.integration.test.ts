@@ -19,7 +19,7 @@ import { openLocalBindings, type LocalBindings } from "./local-bindings";
  * (オッズか人気を持つ馬。除外などは含まない。複合主キーの索引は更新されないので 2 倍にならない)。したがって新規保存は 2H + O + 2 + 2C + 2M。過去分の補完(`saveWinOdds`)は、この UPDATE の 1 文だけで O 行。
  * 以下の「14 本」の数は、この 6 文目を含む値(旧い値〈38〜62 行〉は 5 文のときの値)。
  *
- * 限界: ローカルの workerd の D1 が報告する値で、本番の D1 が数える行数と同じとは限らない(`rows-written.test.ts` と同じ。最初の本番の実保存で確かめる)。
+ * 限界: ローカルの workerd の D1 が報告する値で、本番の D1 が数える行数と同じとは限らない(`rows-written.integration.test.ts` と同じ。最初の本番の実保存で確かめる)。
  */
 
 let local: LocalBindings;

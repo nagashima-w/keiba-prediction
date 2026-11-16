@@ -107,7 +107,7 @@ describe("AC-b4: 共有フィクスチャ(#168)の期待値と一致する", () 
       // 一覧の要約の馬は、大きな列(contributions)に加えて、強調材料・懸念事項(Issue #197。詳細の画面だけが使う)も持たない。
       horses: horses.map(({ contributions: _c, highlights: _h, concerns: _n, ...h }) => h),
       hasDetail: true,
-      // Issue #194: 一覧の要約に、理由(固定文言。D1 の llm_note)が載る。フィクスチャの保存は理由なしなので null(理由ありの往復は analysis-llm-note.test.ts)。
+      // Issue #194: 一覧の要約に、理由(固定文言。D1 の llm_note)が載る。フィクスチャの保存は理由なしなので null(理由ありの往復は analysis-llm-note.integration.test.ts)。
       llmNote: null,
     };
     expect(list[0]).toStrictEqual(expected);
@@ -756,7 +756,7 @@ describe("listAnalysisSummaries(一覧。D1 だけ。問い合わせは 2 文で
     expect(db.prepared[1]).toMatch(/FROM analysis_horses/);
   });
 
-  it("新しい順(saveMany は分析日時も id と同じ向きに増えるので、id の降順 = 分析日時の降順。向きが逆の場合は analysis-list-order.test.ts)に limit 件。既定は 50 件・上限指定の 200 で全件・小さい limit はその件数の最新", async () => {
+  it("新しい順(saveMany は分析日時も id と同じ向きに増えるので、id の降順 = 分析日時の降順。向きが逆の場合は analysis-list-order.integration.test.ts)に limit 件。既定は 50 件・上限指定の 200 で全件・小さい limit はその件数の最新", async () => {
     const ids = await saveMany(60);
     const byDefault = await store().listAnalysisSummaries({});
     expect(byDefault).toHaveLength(50);

@@ -50,7 +50,7 @@ const HORSES_HEAD = `SELECT analysis_id AS analysisId, umaban, prior, adjusted_p
   FROM analysis_horses`;
 const HORSES_ORDER = `ORDER BY analysis_id, umaban`;
 const ALLOCATION_META_HEAD = `SELECT analysis_id AS analysisId, route, skip_reason_code AS skipReasonCode, include_combo_odds AS includeComboOdds FROM analysis_allocation_meta`;
-/** 買い目の `odds`・`ev`(Issue #384)は、人気帯の内訳が「予想した期待値」(`ev`)と「予想した的中確率」(`ev ÷ odds`)に使う。列を足すだけで読み取り行数は変わらない。1 日ぶんの読み(今日の狙い目)と列を揃える(`targets-repository.test.ts` が行の一致を固定している)。 */
+/** 買い目の `odds`・`ev`(Issue #384)は、人気帯の内訳が「予想した期待値」(`ev`)と「予想した的中確率」(`ev ÷ odds`)に使う。列を足すだけで読み取り行数は変わらない。1 日ぶんの読み(今日の狙い目)と列を揃える(`targets-repository.integration.test.ts` が行の一致を固定している)。 */
 const BETS_HEAD = `SELECT analysis_id AS analysisId, bet_type AS betType, combo_key AS comboKey, stake, odds, ev
   FROM analysis_bets`;
 const BETS_ORDER = `ORDER BY analysis_id, bet_type, combo_key`;
