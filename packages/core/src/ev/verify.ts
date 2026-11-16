@@ -1382,36 +1382,42 @@ function buildVerifyRacePart(
 
       // キャリブレーション・補正傾向・印別的中率は isInTopThree(3着以内)だけを使う
       // (複勝payout対象〈isPlaceHit〉とは別概念。Issue#70 AC-A1)。
-      // キャリブレーション: 全馬(推定確率帯ごと)に計上する。
-      const binIndex = binIndexFor(horse.adjustedProb, calibrationBins);
-      bins[binIndex]!.predicted += 1;
-      bins[binIndex]!.probSum += horse.adjustedProb;
-      if (isInTopThree) {
-        bins[binIndex]!.placed += 1;
-      }
-      // 補正前(prior)の対応表: 帯への振り分けだけが prior の値(Issue #254)。
-      const priorBinIndex = binIndexFor(horse.prior, calibrationBins);
-      priorBins[priorBinIndex]!.predicted += 1;
-      priorBins[priorBinIndex]!.probSum += horse.prior;
-      if (isInTopThree) {
-        priorBins[priorBinIndex]!.placed += 1;
-      }
-      // Brier の観測(Issue #271): キャリブレーションの 2 つの表に入る馬と同じ馬を、同じ結果(3 着以内か)で積む。
-      brierN += 1;
-      priorInvalid = priorInvalid || isInvalidBrierProbability(horse.prior);
-      adjustedInvalid = adjustedInvalid || isInvalidBrierProbability(horse.adjustedProb);
-      priorSquaredSum += (horse.prior - (isInTopThree ? 1 : 0)) ** 2;
-      adjustedSquaredSum += (horse.adjustedProb - (isInTopThree ? 1 : 0)) ** 2;
+      // 確率(prior・補正後)が有限でない馬(NaN・±Infinity)は、確率に基づく集計(帯・Brier・補正方向)から外す(Issue #717)。
+      // 帯の番号が決まらず TypeError になるため。着順が確定していない馬を外すのと同じ扱いで、帯の件数の合計と Brier の評価頭数は
+      // 同じ馬の集合のまま。印別の集計と回収率(確率を使わない)には残す。範囲外の有限な値は従来どおり帯の端に入り、Brier だけが null になる。
+      if (Number.isFinite(horse.prior) && Number.isFinite(horse.adjustedProb)) {
+        // キャリブレーション: 全馬(推定確率帯ごと)に計上する。
+        const binIndex = binIndexFor(horse.adjustedProb, calibrationBins);
+        bins[binIndex]!.predicted += 1;
+        bins[binIndex]!.probSum += horse.adjustedProb;
+        if (isInTopThree) {
+          bins[binIndex]!.placed += 1;
+        }
+        // 補正前(prior)の対応表: 帯への振り分けだけが prior の値(Issue #254)。
+        const priorBinIndex = binIndexFor(horse.prior, calibrationBins);
+        priorBins[priorBinIndex]!.predicted += 1;
+        priorBins[priorBinIndex]!.probSum += horse.prior;
+        if (isInTopThree) {
+          priorBins[priorBinIndex]!.placed += 1;
+        }
+        // Brier の観測(Issue #271): キャリブレーションの 2 つの表に入る馬と同じ馬を、同じ結果(3 着以内か)で積む。
+        brierN += 1;
+        priorInvalid = priorInvalid || isInvalidBrierProbability(horse.prior);
+        adjustedInvalid = adjustedInvalid || isInvalidBrierProbability(horse.adjustedProb);
+        priorSquaredSum += (horse.prior - (isInTopThree ? 1 : 0)) ** 2;
+        adjustedSquaredSum += (horse.adjustedProb - (isInTopThree ? 1 : 0)) ** 2;
 
-      // 補正傾向サマリ(1) 補正方向×結果: diff の符号とεで3群に分類する(Task#26)。
-      const diff = horse.adjustedProb - horse.prior;
-      const direction: AdjustmentDirection =
-        diff > directionEpsilon ? "raised" : diff < -directionEpsilon ? "lowered" : "unchanged";
-      const dCounter = directionCounters[direction];
-      dCounter.count += 1;
-      dCounter.adjustmentSum += diff;
-      if (isInTopThree) {
-        dCounter.placed += 1;
+        // 補正傾向サマリ(1) 補正方向×結果: diff の符号とεで3群に分類する(Task#26)。
+        const diff = horse.adjustedProb - horse.prior;
+        const direction: AdjustmentDirection =
+          diff > directionEpsilon ? "raised" : diff < -directionEpsilon ? "lowered" : "unchanged";
+        const dCounter = directionCounters[direction];
+        dCounter.count += 1;
+        dCounter.adjustmentSum += diff;
+        if (isInTopThree) {
+          dCounter.placed += 1;
+        }
+
       }
 
       // 補正傾向サマリ(3) 印別的中率: mark(印なしのnullを含む)ごとに計上する(Task#26)。
