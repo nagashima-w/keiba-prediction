@@ -112,6 +112,20 @@ describe("saveRows(取り込みの書き込み)", () => {
     expect(await store.listPendingPage("", 100)).toEqual([]);
   });
 
+  it("印を付けるのは未処理(NULL)のレースだけ: 取り込み済みの印のレースには書き込まない。中身が変わる再保存で NULL に戻ったレースだけが、もう一度印を受ける", async () => {
+    const store = new D1PersonStatsStore(local.db);
+    await seedCatalog(1, { person: PERSON_ROWS_DONE }); // 取り込み済み
+    await seedCatalog(2, { person: PERSON_ROWS_DONE });
+    await local.db.prepare("UPDATE race_archive SET person_version = NULL WHERE race_id = ?").bind(idOf(2)).run(); // 中身が変わる再保存(UPSERT)で NULL に戻った
+    expect(await markOf(1)).toBe(PERSON_ROWS_DONE); // 前提
+    expect(await markOf(2)).toBeNull(); // 前提
+    const res = await store.saveRows([], [idOf(1), idOf(2)]);
+    expect(res.rowsWritten).toBe(1); // 書くのは NULL だった 2 だけ(1 は WHERE の `person_version IS NULL` で書かない)
+    expect(await markOf(1)).toBe(PERSON_ROWS_DONE);
+    expect(await markOf(2)).toBe(PERSON_ROWS_DONE);
+    expect((await store.saveRows([], [idOf(1), idOf(2)])).rowsWritten).toBe(0); // もう NULL はない
+  });
+
   it("同じレースの取り込み直しは行を置き換える(重複しない)。コース情報が null の行も書ける", async () => {
     const store = new D1PersonStatsStore(local.db);
     await seedCatalog(1);

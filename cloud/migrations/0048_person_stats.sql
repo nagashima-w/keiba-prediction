@@ -14,6 +14,7 @@
 --   ★索引の WHERE は、cloud/src/person-stats-repository.ts の SELECT_PERSON_PENDING_PAGE_SQL の WHERE と同じ形(日付のリテラルも同じ)でなければならない
 --   (違うと SQLite は部分索引を使わず、目録の全行を読む。cloud/test/person-stats-repository.integration.test.ts が照らす)。
 --   書き込みの増分: 2021-01-01 以降の中央のレースを目録に入れる(新規・中身が変わる再保存)たび +1 行(未処理で入るため)。取り込んだとき索引から外れる(+1 行)。
+--   ★この CREATE INDEX は、適用の時点で既存の未処理の行ぶん(2021-01-01 以降の中央で約 2 万行)を 1 回だけ書く(ローカルの D1 で 1,000 行の目録に作ると rows_written が 1,001)。D1 の無料枠(1 日 10 万行)を使うので、#745 の変換など他の大きい書き込みが動いている日の適用は避ける。
 ALTER TABLE race_archive ADD COLUMN person_version INTEGER;
 CREATE INDEX IF NOT EXISTS idx_race_archive_person_pending ON race_archive (race_id) WHERE person_version IS NULL AND kind = 'central' AND race_date >= '2021-01-01';
 

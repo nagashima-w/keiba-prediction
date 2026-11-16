@@ -1626,7 +1626,7 @@ describe("Issue #642: 騎手・調教師の指標の毎晩の計算(RaceMarketEd
   });
 
   it("Issue #729: 人の段を動かす var(PERSON_STATS_ENABLED)は文字列 \"1\" の完全一致だけが有効(向きは市場の段の止める var と逆)。本番の toml は \"0\"。var の名前が DO の binding の名前と同じでない", () => {
-    expect(doCode).toMatch(/value\.trim\(\) === "1"/);
+    expect(core).toMatch(/value\.trim\(\) === "1"/); // 判定は core の isPersonStatsEnabled(単体テストは market-edge-core-person.test.ts)
     expect(doCode).toContain("isPersonStatsEnabled(this.env.PERSON_STATS_ENABLED)");
     expect(tomlCode).toMatch(/^PERSON_STATS_ENABLED = "0"$/m);
     expect(tomlCode).not.toMatch(/^PERSON_STATS_ENABLED = "1"$/m);

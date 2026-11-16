@@ -84,6 +84,11 @@ export function isMarketEdgeDisabled(value: string | undefined): boolean {
   return value !== undefined && value.trim() === "0";
 }
 
+/** 人の段を動かす設定の判定(Worker の var `PERSON_STATS_ENABLED`。Issue #729)。**文字列 `"1"`(前後の空白は無視)だけ**が有効(未設定・"0"・"true" などは無効。市場の段の止める var とは向きが逆)。 */
+export function isPersonStatsEnabled(value: string | undefined): boolean {
+  return value !== undefined && value.trim() === "1";
+}
+
 export type MarketEdgeStopReason = "failures" | "capacity" | "r2-fence";
 
 export interface MarketEdgeOptions {
@@ -383,6 +388,11 @@ export class RaceMarketEdgeCore {
     }
   }
 
+  /** 人の段が有効で、休み中(未処理が尽きて 1 時間以内・失敗の休み)でないとき true。= 人の段に、まだ確かめていない・残っているかもしれない未処理がある。 */
+  private personWantsWake(now: number): boolean {
+    return this.person !== null && now >= this.metaNum("ps_next_check");
+  }
+
   /** 人の段の 1 ステップ。取り込みをしたら true。未処理が尽きていたら周の終わり(集計)を済ませて false。 */
   private async personStep(now: number, night: string): Promise<boolean> {
     const person = this.person!;
@@ -597,6 +607,13 @@ export class RaceMarketEdgeCore {
       // no-rows: 記録せず、次の見直しでもう一度確かめる。
     }
     if (processed === 0) {
+      // 市場の段が追いついていても、人の段に未処理が残っているなら(休み中でなければ)、1 時間の休みにせず、次のステップを STEP_DELAY で張る(Issue #729。
+      // 休むと、人の埋め戻しが「人が 1 ステップ → 市場の番で 1 時間休み」になり、1 時間に 1 ステップしか進まない)。両方が空のときだけ IDLE。
+      if (this.personWantsWake(now)) {
+        this.setWait("active");
+        await this.deps.setAlarm(now + MARKET_EDGE_STEP_DELAY_MS);
+        return;
+      }
       this.setWait("caught-up");
       await this.deps.setAlarm(now + MARKET_EDGE_IDLE_MS);
       return;
