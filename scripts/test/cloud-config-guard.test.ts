@@ -1112,7 +1112,7 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
     for (const wf of ["audit.yml", "ci.yml", "deploy-cloud.yml", "research.yml"]) {
       for (const m of readTextLf(".github", "workflows", wf).matchAll(/^\s*node-version: (\S+)\s*$/gm)) versions.push(m[1]!);
     }
-    expect(versions.length, "node-version の指定を実際に読めている(空振り防止。audit 2 + ci 2 + deploy-cloud 3 + research 1)").toBe(8);
+    expect(versions.length, "node-version の指定を実際に読めている(空振り防止。audit 2 + ci 2 + deploy-cloud 4〈check・test・smoke・deploy。Issue #762〉 + research 1)").toBe(9);
     for (const v of versions) {
       const parts = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
       expect(parts, `node-version: ${v} は major.minor.patch の正確な版(メジャーだけだとキャッシュの修正前の版になる)`).not.toBeNull();

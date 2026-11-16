@@ -158,13 +158,14 @@ function runCommands(job: string): string[] {
 
 const CLOUD_INSTALL = "pnpm install --ignore-workspace --frozen-lockfile";
 
-describe("ジョブ構成(Issue #288: 型検査・テストの check と、スモークの smoke を並列に走らせ、deploy は両方を待つ)", () => {
-  it("jobs: 直下のジョブは check・smoke・deploy の3つだけ(ジョブの増減・改名を検出する)", () => {
-    expect(jobIds()).toEqual(["check", "smoke", "deploy"]);
+describe("ジョブ構成(Issue #288: 型検査等の check と、スモークの smoke を並列に走らせ、deploy は両方を待つ。Issue #762: テストを test(matrix の shard)に分け、deploy は 3 つを待つ)", () => {
+  it("jobs: 直下のジョブは check・test・smoke・deploy の4つだけ(ジョブの増減・改名を検出する)", () => {
+    expect(jobIds()).toEqual(["check", "test", "smoke", "deploy"]);
   });
 
-  it("check と smoke は needs を持たない(互いを待たない=並列に走る。直列化の退行を検出する)", () => {
+  it("check・test・smoke は needs を持たない(互いを待たない=並列に走る。直列化の退行を検出する)", () => {
     expect(needsOf(jobBody("check"))).toBeNull();
+    expect(needsOf(jobBody("test"))).toBeNull();
     expect(needsOf(jobBody("smoke"))).toBeNull();
   });
 
@@ -177,7 +178,8 @@ describe("ジョブ構成(Issue #288: 型検査・テストの check と、ス�
 });
 
 describe.each([
-  ["check", "型検査・テスト・デプロイの dry-run・D1 の migration(ローカル)"],
+  ["check", "型検査・デプロイの dry-run・D1 の migration(ローカル)"],
+  ["test", "cloud のテスト(vitest の shard。Issue #762)"],
   ["smoke", "ローカルスモーク"],
 ] as const)("%s ジョブ(毎回走る。秘密を持たない): %s", (jobName, _summary) => {
 
@@ -228,6 +230,12 @@ describe("check・smoke ジョブの制限時間(Issue #449)", () => {
     expect(timeoutMinutesOf("  x:\n      timeout-minutes: 99\n")).toBeNull();
   });
 
+  it("Issue #762: test の timeout-minutes は 20 分以上(1 shard の通常は約 4 分。遅い日の 2〜3 倍でも取り消されない)", () => {
+    const minutes = timeoutMinutesOf(jobBody("test"));
+    expect(minutes, "test に timeout-minutes がある").not.toBeNull();
+    expect(minutes!).toBeGreaterThanOrEqual(20);
+  });
+
   it("check の timeout-minutes は 30 分以上(通常は約 7〜13 分。遅い日の倍率 約 2.4 倍でも取り消されない)", () => {
     const minutes = timeoutMinutesOf(jobBody("check"));
     expect(minutes, "check に timeout-minutes がある").not.toBeNull();
@@ -246,17 +254,16 @@ describe("check・smoke ジョブの制限時間(Issue #449)", () => {
 });
 
 describe("check ジョブのコマンド(順序つきで完全一致)", () => {
-  it("install → 型検査 → テスト → デプロイの dry-run → D1 の migration(ローカル)の順に、この5つだけを実行する(smoke は含まない)", () => {
+  it("install → 型検査 → デプロイの dry-run → D1 の migration(ローカル)の順に、この4つだけを実行する(テストは test ジョブ・smoke は smoke ジョブ。Issue #762)", () => {
     const check = jobBody("check");
     expect(runCommands(check)).toEqual([
       CLOUD_INSTALL,
       "pnpm run typecheck",
-      "pnpm test",
       "pnpm run deploy:dry",
       "pnpm exec wrangler d1 migrations apply DB --local",
     ]);
-    // 5つのコマンドは、すべて cloud/ で実行する(各ステップに working-directory: cloud がある)
-    const stepNames = ["依存をインストール", "型検査", "テスト", "dry-run", "D1 の migration をローカルに適用"];
+    // 4つのコマンドは、すべて cloud/ で実行する(各ステップに working-directory: cloud がある)
+    const stepNames = ["依存をインストール", "型検査", "dry-run", "D1 の migration をローカルに適用"];
     for (const n of stepNames) {
       expect(stepBody(check, n), n).toContain("working-directory: cloud");
     }
@@ -278,6 +285,59 @@ describe("check ジョブのコマンド(順序つきで完全一致)", () => {
   });
 });
 
+/** test ジョブのテストのコマンド(shard は matrix の値)。 */
+const TEST_COMMAND = "pnpm test --shard=${{ matrix.shard }}";
+
+/** matrix の `shard: [...]` の値を、出現順に読む(コメント行は読まない)。無ければ null。 */
+function shardValuesOf(job: string): string[] | null {
+  const m = /^ {8}shard: \[(.*)\]\s*$/m.exec(withoutComments(job));
+  if (m === null) return null;
+  return m[1]!
+    .split(",")
+    .map((s) => s.trim().replace(/^"|"$/g, ""))
+    .filter((s) => s !== "");
+}
+
+/** shard の値が `1/N`〜`N/N` をちょうど 1 回ずつ含む(分母が全部同じで、抜け・重複・分母の食い違いが無い)か。 */
+function coversAllShards(values: string[]): boolean {
+  const parsed = values.map((v) => /^(\d+)\/(\d+)$/.exec(v));
+  if (parsed.some((p) => p === null)) return false;
+  const nums = parsed.map((p) => Number(p![1]));
+  const total = Number(parsed[0]![2]);
+  if (total < 2 || parsed.some((p) => Number(p![2]) !== total)) return false;
+  return nums.length === total && [...nums].sort((a, b) => a - b).every((n, i) => n === i + 1);
+}
+
+describe("test ジョブ(Issue #762: cloud のテストを vitest の shard に分けて並行に流す)", () => {
+  it("検出器の確認(空振りでない): coversAllShards は完全な組だけを真にし、抜け・重複・分母の食い違い・分母 1 を偽にする", () => {
+    expect(coversAllShards(["1/4", "2/4", "3/4", "4/4"])).toBe(true);
+    expect(coversAllShards(["2/4", "1/4", "4/4", "3/4"])).toBe(true);
+    expect(coversAllShards(["1/4", "2/4", "3/4"])).toBe(false);
+    expect(coversAllShards(["1/4", "2/4", "2/4", "4/4"])).toBe(false);
+    expect(coversAllShards(["1/4", "2/4", "3/4", "4/5"])).toBe(false);
+    expect(coversAllShards(["1/1"])).toBe(false);
+    expect(coversAllShards(["a", "b"])).toBe(false);
+    expect(shardValuesOf('  t:\n    strategy:\n      matrix:\n        shard: ["1/2", "2/2"]\n')).toEqual(["1/2", "2/2"]);
+    expect(shardValuesOf('  t:\n        # shard: ["1/2"]\n')).toBeNull();
+  });
+
+  it("matrix の shard は 1/N〜N/N をちょうど 1 回ずつ含む(抜けると、そのファイルのテストが CI で一度も流れない)。N は 4。fail-fast は false", () => {
+    const test = jobBody("test");
+    const values = shardValuesOf(test);
+    expect(values, "test に matrix の shard がある").not.toBeNull();
+    expect(coversAllShards(values!)).toBe(true);
+    expect(values).toHaveLength(4);
+    expect(withoutComments(test)).toMatch(/^ {6}fail-fast: false$/m);
+  });
+
+  it("install → テスト(shard つき)の2つだけを実行する。テストは cloud/ で、install の後。shard は matrix の値をそのまま渡す", () => {
+    const test = jobBody("test");
+    expect(runCommands(test)).toEqual([CLOUD_INSTALL, TEST_COMMAND]);
+    expect(stepBody(test, "テスト")).toContain("working-directory: cloud");
+    expect(stepIndex(test, "依存をインストール")).toBeLessThan(stepIndex(test, "テスト"));
+  });
+});
+
 describe("smoke ジョブのコマンド(順序つきで完全一致)", () => {
   it("install → スモークの2つだけを実行する。スモークは cloud/ で実行する", () => {
     const smoke = jobBody("smoke");
@@ -293,21 +353,21 @@ describe("smoke ジョブのコマンド(順序つきで完全一致)", () => {
   });
 });
 
-describe("check と smoke の分割で、元の6コマンドが1つも落ちていない(Issue #288 の対応表: 旧 check ジョブの『6コマンドの順序』の保証)", () => {
-  it("check の5コマンドと smoke の smoke を合わせると、旧 check ジョブの6コマンド(install・型検査・テスト・dry-run・migration・smoke)がそろう。install は2ジョブとも持つ", () => {
-    const all = [...runCommands(jobBody("check")), ...runCommands(jobBody("smoke"))];
+describe("check・test・smoke の分割で、元の6コマンドが1つも落ちていない(Issue #288・#762 の対応表: 旧 check ジョブの『6コマンドの順序』の保証)", () => {
+  it("check の4コマンド・test の shard つきテスト・smoke の smoke を合わせると、旧 check ジョブの6コマンド(install・型検査・テスト・dry-run・migration・smoke)がそろう。install は3ジョブとも持つ", () => {
+    const all = [...runCommands(jobBody("check")), ...runCommands(jobBody("test")), ...runCommands(jobBody("smoke"))];
     for (const c of [
       CLOUD_INSTALL,
       "pnpm run typecheck",
-      "pnpm test",
+      TEST_COMMAND,
       "pnpm run deploy:dry",
       "pnpm exec wrangler d1 migrations apply DB --local",
       "pnpm run smoke",
     ]) {
       expect(all, c).toContain(c);
     }
-    expect(all.filter((c) => c === CLOUD_INSTALL)).toHaveLength(2);
-    expect(all).toHaveLength(7);
+    expect(all.filter((c) => c === CLOUD_INSTALL)).toHaveLength(3);
+    expect(all).toHaveLength(8);
   });
 });
 
@@ -383,8 +443,8 @@ describe("deploy ジョブの条件(許可ブランチの上で、承認印付�
     return needs!.every((n) => results[n] === "success") && conditionHolds;
   }
 
-  it("Issue #288: deploy は check と smoke の両方に依存する(順序は問わない。型検査・テスト・dry-run・migration とスモークの両方を通ったあとだけデプロイする)", () => {
-    expect([...needsOf(jobBody("deploy"))!].sort()).toEqual(["check", "smoke"]);
+  it("Issue #288・#762: deploy は check・test・smoke の3つに依存する(順序は問わない。型検査・dry-run・migration とテスト(全 shard)とスモークを通ったあとだけデプロイする。test は matrix で、全 leg が success のときだけ success になる)", () => {
+    expect([...needsOf(jobBody("deploy"))!].sort()).toEqual(["check", "smoke", "test"]);
   });
 
   it("Issue #288: deploy の if: は状態確認の関数(always・failure・cancelled)を含まない。含むと needs の失敗・スキップ後も deploy が走りうる", () => {
@@ -402,17 +462,19 @@ describe("deploy ジョブの条件(許可ブランチの上で、承認印付�
   });
 
   it.each([
-    ["check も smoke も成功", { check: "success", smoke: "success" }, true],
-    ["smoke だけが失敗", { check: "success", smoke: "failure" }, false],
-    ["check だけが失敗", { check: "failure", smoke: "success" }, false],
-    ["両方が失敗", { check: "failure", smoke: "failure" }, false],
-    ["smoke がスキップ", { check: "success", smoke: "skipped" }, false],
-    ["smoke が取り消し", { check: "success", smoke: "cancelled" }, false],
-    ["check がスキップ", { check: "skipped", smoke: "success" }, false],
-  ] as const)("Issue #288: %s → deploy が実行される: %s", (_name, results, expected) => {
+    ["3つとも成功", { check: "success", test: "success", smoke: "success" }, true],
+    ["smoke だけが失敗", { check: "success", test: "success", smoke: "failure" }, false],
+    ["check だけが失敗", { check: "failure", test: "success", smoke: "success" }, false],
+    ["test(いずれかの shard)だけが失敗", { check: "success", test: "failure", smoke: "success" }, false],
+    ["全部が失敗", { check: "failure", test: "failure", smoke: "failure" }, false],
+    ["smoke がスキップ", { check: "success", test: "success", smoke: "skipped" }, false],
+    ["smoke が取り消し", { check: "success", test: "success", smoke: "cancelled" }, false],
+    ["test が取り消し", { check: "success", test: "cancelled", smoke: "success" }, false],
+    ["check がスキップ", { check: "skipped", test: "success", smoke: "success" }, false],
+  ] as const)("Issue #288・#762: %s → deploy が実行される: %s", (_name, results, expected) => {
     // 前提: 基準(両方成功 + 承認印付きの許可ブランチ push)で deploy が実行される。必要な依存が足りないと偽になる評価器の故障で、否定の行が偶然通らない確認
     expect(evaluate({ ref: REF, event: "push", message: STAMP })).toBe(true);
-    expect(deployRuns({ check: "success", smoke: "success" }, true)).toBe(true);
+    expect(deployRuns({ check: "success", test: "success", smoke: "success" }, true)).toBe(true);
     expect(deployRuns(results, evaluate({ ref: REF, event: "push", message: STAMP }))).toBe(expected);
   });
 });

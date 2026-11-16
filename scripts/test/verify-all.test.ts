@@ -51,6 +51,9 @@ interface CiRun {
   cmd: string;
 }
 
+/** matrix の shard の引数(Issue #762)。 */
+const SHARD_ARG = / --shard=\$\{\{ matrix\.shard \}\}$/;
+
 /** deploy ジョブ以外の各ジョブの run: を、作業ディレクトリつきで列挙する。複数行の run: は multiline=true で返す。 */
 function extractRuns(yml: string): Array<CiRun & { multiline: boolean }> {
   const text = withoutComments(yml);
@@ -67,7 +70,9 @@ function extractRuns(yml: string): Array<CiRun & { multiline: boolean }> {
       const run = /^ {8}run:\s*(.*)$/m.exec(step);
       if (!run) continue;
       const wd = /^ {8}working-directory:\s*(\S+)\s*$/m.exec(step);
-      const value = (run[1] ?? "").trim();
+      // Issue #762: matrix の shard(`--shard=${{ matrix.shard }}`)は、スクリプトの段(全件)と突き合わせるため外す。
+      // shard の値が 1/N〜N/N をちょうど 1 回ずつ含む(全件になる)ことは、cloud-deploy-workflow.test.ts が固定している。
+      const value = (run[1] ?? "").trim().replace(SHARD_ARG, "");
       out.push({ job, dir: wd?.[1] ?? ".", cmd: value, multiline: value === "|" || value === ">" });
     }
   }
@@ -318,6 +323,24 @@ jobs:
       { job: "verify", dir: "cloud", cmd: "pnpm run lint-new", multiline: false },
       { job: "other", dir: ".", cmd: "|", multiline: true },
     ]);
+  });
+
+  it("Issue #762: matrix の shard の引数を外して run: を読む(shard つきの `pnpm test` は、全件の `pnpm test` として突き合わせる)。外すのは末尾の shard の引数だけ", () => {
+    const synthetic = [
+      "jobs:",
+      "  test:",
+      "    steps:",
+      "      - name: テスト",
+      "        working-directory: cloud",
+      "        run: pnpm test --shard=${{ matrix.shard }}",
+      "      - name: 別の引数",
+      "        working-directory: cloud",
+      "        run: pnpm test --coverage",
+    ].join("\n");
+    expect(extractRuns(synthetic).map((r) => r.cmd)).toEqual(["pnpm test", "pnpm test --coverage"]);
+    // 実物: deploy-cloud.yml の test ジョブの run: が、cloud の `pnpm test` として読めている
+    expect(CI_RUNS.some((r) => r.job === "test" && r.dir === "cloud" && r.cmd === "pnpm test")).toBe(true);
+    expect(CI_RUNS.some((r) => /--shard/.test(r.cmd))).toBe(false);
   });
 
   it("CI に足した段をスクリプトに足し忘れると、突き合わせが検出する", () => {

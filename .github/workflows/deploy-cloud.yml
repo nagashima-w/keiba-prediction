@@ -1,11 +1,12 @@
 # クラウド版(Cloudflare Worker。cloud/)の型検査・テスト・本番デプロイ(Issue #161〈#21-C〉)。
 #
-# ★3つのジョブ(Issue #288 で、check から smoke を分けた):
-#   - check: 作業ブランチへの push と手動実行のたびに毎回走る(型検査・テスト・デプロイの dry-run・D1 の migration のローカル適用)。
+# ★4つのジョブ(Issue #288 で check から smoke を分け、Issue #762 で check からテストを test に分けた):
+#   - check: 作業ブランチへの push と手動実行のたびに毎回走る(型検査・デプロイの dry-run・D1 の migration のローカル適用)。
 #            Secrets を持たない。
+#   - test: check と**並列**に、毎回走る(cloud のテストを vitest の --shard で 4 つに分けた matrix)。Secrets を持たない。
 #   - smoke: check と**並列**に、毎回走る(ローカルスモーク〈workerd〉)。Secrets を持たない。自分のジョブで依存をインストールする
 #            (check の成果物を前提にしない。スモークは自前の一時の保存先に D1 の migration を適用してから起動する〈cloud/smoke.ts〉)。
-#   - deploy: **check と smoke の両方**が通ったうえで、下の条件を満たすときだけ本番にデプロイする。
+#   - deploy: **check・test(全 shard)・smoke の全部**が通ったうえで、下の条件を満たすときだけ本番にデプロイする。
 #
 # ★なぜ分けるか(Issue #276・#288): 待ち時間の本体は cloud のテスト(vitest。275〜436 秒)とスモーク(190〜229 秒)で、逐次だと合計になる
 #   (2026-10-13 の run 38346562975・38358399757・38369789300・38379766135 の check ジョブのステップ時間。`gh api repos/<owner>/<repo>/actions/runs/<id>/jobs`)。
@@ -109,10 +110,6 @@ jobs:
         working-directory: cloud
         run: pnpm run typecheck
 
-      - name: テスト
-        working-directory: cloud
-        run: pnpm test
-
       # デプロイせずに、バンドルと設定(DO の migration を含む)を確かめる。認証情報は要らない。
       - name: デプロイの dry-run
         working-directory: cloud
@@ -124,6 +121,45 @@ jobs:
       - name: D1 の migration をローカルに適用
         working-directory: cloud
         run: pnpm exec wrangler d1 migrations apply DB --local
+
+  # Issue #762: cloud のテストを vitest の --shard で 4 つのジョブ(matrix)に分け、check・smoke と並列に流す(needs を持たない)。
+  # 分ける前は check の 1 ジョブで `pnpm test`(全件)を流し、約 576〜691 秒だった(run 43868078257・43831906111・43831629485・43829474181 の check ジョブの「テスト」ステップ。
+  # `gh api repos/<owner>/<repo>/actions/runs/<id>/jobs`)。shard の割り当ては、vitest 5.1 が「ファイルパスの sha1 の順に、ファイル数で均等に」切る(時間では均さない)。
+  # 実測のファイル時間(run 43868078257 のログ。合計 1519 秒)で割り当てを再現すると、4 つの合計は 471・425・248・375 秒で、最大の shard は全体の 0.31 倍(壁時計の概算で約 3 分)。
+  # 分母(4)と shard の値は、全部で 1/4〜4/4 をちょうど 1 回ずつ含む必要がある(抜けるとそのファイルのテストが一度も流れない。scripts/test/cloud-deploy-workflow.test.ts が固定している)。
+  # fail-fast は false: 1 つの shard が落ちても残りを流し、全 shard の失敗を一度に見る。deploy は matrix 全体(全 leg が success のときだけ success)を needs で待つので、どの shard が落ちても取り消されても deploy は走らない。
+  # 依存のインストールも自前で行う(check の成果物を前提にしない)。D1 のひな形(cloud/test/d1-template-core.ts)はランナーの一時ディレクトリに、ジョブごとに作られる(ジョブをまたいで共有しない)。
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/4", "2/4", "3/4", "4/4"]
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # pnpm はバージョン未指定にして、ルートの package.json の packageManager フィールドに従わせる。
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.3
+          cache: pnpm
+          cache-dependency-path: cloud/pnpm-lock.yaml
+
+      - name: 依存をインストール(cloud)
+        working-directory: cloud
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      - name: テスト(cloud。shard)
+        working-directory: cloud
+        run: pnpm test --shard=${{ matrix.shard }}
 
   # Issue #288: check と並列に走る(needs を持たない)。依存のインストールも自前で行う(check の成果物を前提にしない)。
   smoke:
@@ -156,7 +192,7 @@ jobs:
         run: pnpm run smoke
 
   deploy:
-    needs: [check, smoke]
+    needs: [check, test, smoke]
     # ★デプロイの条件(上のヘッダ参照)。条件式をほかの場所に複製しない。
     if: ${{ github.ref == 'refs/heads/claude/issue-order-processing-wjgpdd' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[PUBLISH-APPROVED]') && !contains(github.event.head_commit.message, 'レビュー継続中'))) }}
     runs-on: ubuntu-latest

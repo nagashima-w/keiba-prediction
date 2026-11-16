@@ -277,8 +277,10 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
 
     it("同じ手順が deploy-cloud.yml の check・smoke にもある(コマンドの食い違いを検出する)", () => {
       const deployCode = withoutComments(readTextLf(path.join(WORKFLOWS_DIR, "deploy-cloud.yml")));
+      // Issue #762: deploy-cloud.yml はテストを shard に分けたので、`pnpm test` の後ろに matrix の shard が付く(全 shard で全件。coversAllShards の検査は cloud-deploy-workflow.test.ts)。
       for (const cmd of ["pnpm install --ignore-workspace --frozen-lockfile", "pnpm run typecheck", "pnpm test", "pnpm run smoke"]) {
-        expect(deployCode, cmd).toContain(`run: ${cmd}\n`);
+        const inDeploy = cmd === "pnpm test" ? "pnpm test --shard=${{ matrix.shard }}" : cmd;
+        expect(deployCode, cmd).toContain(`run: ${inDeploy}\n`);
         expect(jobCode, cmd).toContain(`run: ${cmd}\n`);
       }
     });
@@ -351,17 +353,22 @@ describe("app のビルドを外した代わりの守り(Issue #287・#288: ci.y
   // (Issue #288 で check から smoke を別ジョブに分けても、型検査とテストは check に残る。smoke はこの検出に関与しない)
   const deployYml = readTextLf(path.join(WORKFLOWS_DIR, "deploy-cloud.yml"));
 
-  it("deploy-cloud.yml の check ジョブが、cloud の pnpm run typecheck と pnpm test を無条件で走らせる(if: が無く、continue-on-error が無い)", () => {
+  it("deploy-cloud.yml の check ジョブが cloud の pnpm run typecheck を、test ジョブが cloud の pnpm test(shard つき。全 shard で全件)を、無条件で走らせる(if: が無く、continue-on-error が無い。Issue #762 でテストを test ジョブに分けた)", () => {
     const check = extractJob(deployYml, "check");
-    const code = withoutComments(check);
-    const runs = [...code.matchAll(/^\s+run: (.+)$/gm)].map((m) => (m[1] ?? "").trim());
-    expect(runs).toContain("pnpm run typecheck");
-    expect(runs).toContain("pnpm test");
-    expect(code).not.toMatch(/^\s+if:/m);
-    expect(code).not.toMatch(/continue-on-error/);
+    const checkCode = withoutComments(check);
+    const checkRuns = [...checkCode.matchAll(/^\s+run: (.+)$/gm)].map((m) => (m[1] ?? "").trim());
+    expect(checkRuns).toContain("pnpm run typecheck");
+    expect(checkCode).not.toMatch(/^\s+if:/m);
+    expect(checkCode).not.toMatch(/continue-on-error/);
+    const test = extractJob(deployYml, "test");
+    const testCode = withoutComments(test);
+    const testRuns = [...testCode.matchAll(/^\s+run: (.+)$/gm)].map((m) => (m[1] ?? "").trim());
+    expect(testRuns).toContain("pnpm test --shard=${{ matrix.shard }}");
+    expect(testCode).not.toMatch(/^\s+if:/m);
+    expect(testCode).not.toMatch(/continue-on-error/);
     // 型検査・テストは cloud/ で実行する(ルートの tsconfig ではなく、cloud の tsconfig.client.json を含む検査)
     expect(extractJobStep(check, "型検査")).toContain("working-directory: cloud");
-    expect(extractJobStep(check, "テスト")).toContain("working-directory: cloud");
+    expect(extractJobStep(test, "テスト")).toContain("working-directory: cloud");
   });
 
   it("その検出が型検査で働く前提: cloud の typecheck は client 用の tsconfig(Node の型を持たない)を含む", () => {
@@ -369,7 +376,7 @@ describe("app のビルドを外した代わりの守り(Issue #287・#288: ci.y
     expect(pkg.scripts["typecheck"]).toContain("tsc -p tsconfig.client.json");
   });
 
-  it("deploy ジョブは check の成功を待つ(check が失敗した状態で本番へ出ない。needs は単独指定でも配列指定でもよい)", () => {
+  it("deploy ジョブは check と test の成功を待つ(どちらが失敗した状態でも本番へ出ない。needs は単独指定でも配列指定でもよい)", () => {
     const deploy = extractJob(deployYml, "deploy");
     const m = /^ {4}needs:[ \t]*(.+)$/m.exec(withoutComments(deploy));
     expect(m).not.toBeNull();
@@ -378,6 +385,7 @@ describe("app のビルドを外した代わりの守り(Issue #287・#288: ci.y
       .split(",")
       .map((s) => s.trim());
     expect(needs).toContain("check");
+    expect(needs).toContain("test");
   });
 
   it("検出器の確認(空振りでない): extractJob・extractJobStep は job・ステップごとの本文を取り違えない", () => {

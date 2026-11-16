@@ -83,7 +83,7 @@
   2. そこで作業ブランチを `--no-ff` で merge する。merge のコミットの件名の末尾に `[PUBLISH-APPROVED]` を付ける。承認前のコミットが作業ブランチに載っているときは、ブランチの先端ではなく、承認したコミットを指定して merge する。
   3. その merge のコミットを、作業ブランチへ push する(`main` には push しない)。承認印が付いているので、`deploy-cloud.yml` の deploy ジョブが本番へデプロイする。
   4. 作業ブランチから `main` への PR を作る。
-  5. `ci.yml` の verify と、`deploy-cloud.yml` の check・smoke・deploy が、ジョブ単位で success になったことを確かめる(run 全体の success だけでは、deploy が skipped のことがある)。
+  5. `ci.yml` の verify と、`deploy-cloud.yml` の check・test(全 shard)・smoke・deploy が、ジョブ単位で success になったことを確かめる(run 全体の success だけでは、deploy が skipped のことがある)。
   6. PR を merge(merge commit)で `main` に取り込む。
   7. 作業ブランチを `main` に揃える。作業ブランチに `main` に無いコミットが無ければ `git push origin origin/main:refs/heads/claude/issue-order-processing-wjgpdd`、残っていれば作業ブランチに `origin/main` を merge して push する(force push はしない)。
   8. 作業用のディレクトリを `git worktree remove` で消し、手元の作業ブランチを `git merge --ff-only origin/main` で揃える。対象の Issue に根拠(PR の番号・merge のコミット・deploy の成否)を書いて閉じる。
@@ -110,7 +110,7 @@
 - **節目(タスク完了・本番デプロイ等)で軽く進捗報告**する。
 - **コミット・プッシュ後は毎回 CI の結果とクラウド版の本番デプロイを実物で確認して報告**(ユーザー指定。
   2026-10-10 に exe の公開を止めた〈Issue #248〉ため、確認の対象を exe の再ビルドから本番デプロイに改めた):
-  `ci.yml` の該当 run が `conclusion=success`、`deploy-cloud.yml` の `check` ジョブと `smoke` ジョブが success。完了に時間が
+  `ci.yml` の該当 run が `conclusion=success`、`deploy-cloud.yml` の `check` ジョブ・`test` ジョブ(全 shard)・`smoke` ジョブが success。完了に時間が
   かかるため未完なら完了を待って追う。CI 失敗時は原因を調べて報告。(`ci.yml` は作業ブランチ宛ての pull_request でも走り、そのときだけ `cloud-verify` ジョブ〈cloud の型検査・テスト・スモーク〉が加わる。Dependabot の PR の検証用。`ci.yml` 自体は作業ブランチへの push でも走り、そのとき `cloud-verify` は走らない。)
   - **メタレビュー承認後、承認印付きの最終コミットを push した後は deploy ジョブが実行されるのが正しい**
     (唯一「付け忘れ」を検出できる場面であり、この確認は省略しない。**run 全体の conclusion が success でも
@@ -119,7 +119,7 @@
     (`deploy-cloud.yml` のヘッダ参照)を疑い、実物のコミットメッセージを確認する。回復手段は承認印付き
     コミットの追加 push、または許可ブランチでの `workflow_dispatch`(手動実行)。**一方、レビュー継続中の
     中間コミット、または承認印を含まない中間コミットでは**、deploy ジョブが**意図的にスキップ**される
-    (Issue #43。既定で非公開)。この局面では `ci.yml` と check・smoke ジョブの成功のみを確認し、deploy ジョブの
+    (Issue #43。既定で非公開)。この局面では `ci.yml` と check・test・smoke ジョブの成功のみを確認し、deploy ジョブの
     実行は確認対象にしない(スキップされるのが正しい)。詳細は `CLAUDE.md`「レビュー継続中の中間コミット」。
 - ユーザーの同意・承認を捏造しない(「確認して」は検証の意味であって承認ではない)。
 
