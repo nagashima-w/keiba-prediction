@@ -8,7 +8,7 @@ import { noopActions } from "./client-fakes";
 /**
  * Issue #560: 一覧の上の並び(controls)を、役割で 2 つの塊に分ける。
  *  - 一覧の絞り込み(`div.list-filters`): 開催日・中央/地方・更新
- *  - 画面の移動(`nav.list-nav`): 狙い目・検証・日報・月報・設定
+ *  - 画面の移動(`nav.list-nav`): 狙い目・検証・騎手・調教師(Issue #644)・日報・月報・設定
  * リンクのクラス名・href・並び順は変えない(既存のテストが完全一致で探す)。
  */
 
@@ -35,7 +35,7 @@ function only(found: VNode[], what: string): VNode {
 }
 const filtersOf = (t: VNode): VNode => only(findAll(t, (n) => n.tag === "div" && classOf(n) === "list-filters"), "div.list-filters");
 const navOf = (t: VNode): VNode => only(findAll(t, (n) => n.tag === "nav" && classOf(n) === "list-nav"), "nav.list-nav");
-const LINK_CLASSES = ["targets-link", "verify-link", "report-link", "monthly-link", "settings-link"];
+const LINK_CLASSES = ["targets-link", "verify-link", "edges-link", "report-link", "monthly-link", "settings-link"];
 const linksOf = (n: VNode): VNode[] => findAll(n, (x) => x.tag === "a");
 
 describe("一覧の上の並び: 2 つの塊(Issue #560)", () => {
@@ -56,31 +56,32 @@ describe("一覧の上の並び: 2 つの塊(Issue #560)", () => {
     expect(findAll(f, (n) => n.tag === "nav" && n.attrs?.["aria-label"] === "中央・地方").flatMap(linksOf).map(textOf)).toEqual(["中央", "地方"]);
   });
 
-  it("画面の移動: aria-label=画面の移動。リンクは 狙い目・検証・日報・月報・設定 の順で、クラス・href・文言は従来どおり", () => {
+  it("画面の移動: aria-label=画面の移動。リンクは 狙い目・検証・騎手・調教師・日報・月報・設定 の順で、クラス・href・文言は従来どおり", () => {
     const n = navOf(tree());
     expect(n.attrs?.["aria-label"]).toBe("画面の移動");
     expect(linksOf(n).map((a) => [classOf(a), a.attrs?.["href"], textOf(a)])).toEqual([
       ["targets-link", `#targets=${DATE}`, "狙い目"],
       ["verify-link", "#verify", "検証"],
+      ["edges-link", "#edges", "騎手・調教師"], // Issue #644
       ["report-link", "#report", "日報"],
       ["monthly-link", expect.stringMatching(/^#report=\d{6}$/), "月報"],
       ["settings-link", "#settings", "設定"],
     ]);
   });
 
-  it("取り違えがない: 5 つのリンクは絞り込みの中に無く、日付の入力・中央/地方・更新は画面の移動の中に無い", () => {
+  it("取り違えがない: 6 つのリンクは絞り込みの中に無く、日付の入力・中央/地方・更新は画面の移動の中に無い", () => {
     const t = tree();
-    // 前提: 5 つのリンクと、絞り込みの 3 つが、どちらも画面にある
-    expect(findAll(t, (x) => LINK_CLASSES.includes(classOf(x)))).toHaveLength(5);
+    // 前提: 6 つのリンクと、絞り込みの 3 つが、どちらも画面にある
+    expect(findAll(t, (x) => LINK_CLASSES.includes(classOf(x)))).toHaveLength(6);
     expect(findAll(filtersOf(t), (x) => LINK_CLASSES.includes(classOf(x)))).toHaveLength(0);
     expect(findAll(navOf(t), (x) => x.tag === "input" || x.tag === "button" || classOf(x) === "tabs" || classOf(x) === "date")).toHaveLength(0);
   });
 
-  it("閲覧者(readOnly)は設定のリンクが無い 4 つ。月報の行き先が無いモデル(now を省く)は月報が無い。どちらも塊は残る", () => {
+  it("閲覧者(readOnly)は設定のリンクが無い 5 つ。月報の行き先が無いモデル(now を省く)は月報が無い。どちらも塊は残る", () => {
     const viewer = tree({ readOnly: true });
-    expect(linksOf(navOf(viewer)).map(classOf)).toEqual(["targets-link", "verify-link", "report-link", "monthly-link"]);
+    expect(linksOf(navOf(viewer)).map(classOf)).toEqual(["targets-link", "verify-link", "edges-link", "report-link", "monthly-link"]);
     const noNow = tree({ now: undefined });
-    expect(linksOf(navOf(noNow)).map(classOf)).toEqual(["targets-link", "verify-link", "report-link", "settings-link"]);
+    expect(linksOf(navOf(noNow)).map(classOf)).toEqual(["targets-link", "verify-link", "edges-link", "report-link", "settings-link"]);
     filtersOf(noNow); // 塊が残る(ちょうど 1 つ)
   });
 

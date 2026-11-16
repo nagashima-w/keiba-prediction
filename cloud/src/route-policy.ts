@@ -8,10 +8,10 @@
  * **表に無い (method, path) は管理者専用に倒れる(fail-closed)**。新しいルートを足して表に書き忘れても、閲覧者に開く方向には倒れない。
  * 表との突き合わせ(`test/route-policy.test.ts`)は、handler.ts の `pathname` の比較を走査し、表に無いルートが増えたら落とす。
  *
- * 閲覧者に開くもの(20 ルート):
+ * 閲覧者に開くもの(21 ルート):
  *   画面 `GET|HEAD /`・`GET|HEAD /app.js`、一覧 `GET /api/races`(netkeiba への取得を起こしうるが、キャッシュと gate が効く)、
  *   `GET /api/plan`、`GET /api/targets`(今日の狙い目。Issue #336)、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、`GET /api/monthly-reports`・`/api/monthly-reports/{month}`(月報も見せる。Issue #279)、
- *   `GET /api/verify`(検証。Issue #263。閲覧者の要求は集計のやり直しを起こさない〈キャッシュを返すだけ〉、`refresh` は管理者だけ)、
+ *   `GET /api/market-edges`(騎手・調教師の指標の一覧。Issue #644)、`GET /api/verify`(検証。Issue #263。閲覧者の要求は集計のやり直しを起こさない〈キャッシュを返すだけ〉、`refresh` は管理者だけ)、
  *   アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244。{@link ICON_PATHS}。表に無いと閲覧者の画面でアイコンが 403 になる)。
  * それ以外(設定・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・統計モデル用の書き出し〈Issue #266〉・各馬の戦績の蓄積の診断〈Issue #256〉・馬場の API の取得の結果の診断〈Issue #360〉・JRA に Worker から届くかの確認〈Issue #488〉・確認ページと確認 API・health)は管理者だけ。
  * 閲覧者が表の外の method(HEAD・POST など)を送ったときは、405 ではなく 403 になる(副作用の有無に関わらず管理者専用)。
@@ -48,7 +48,7 @@ function exact(path: string, viewerMethods: readonly string[]): RouteRule {
 }
 
 /**
- * 表。完全一致のルートが 35(画面・API・管理者専用が 28、アイコンが 7)、パターンのルートが 3(`/api/analyses/{id}`・`/api/reports/{date}`・`/api/monthly-reports/{month}`)。
+ * 表。完全一致のルートが 36(画面・API・管理者専用が 29、アイコンが 7)、パターンのルートが 3(`/api/analyses/{id}`・`/api/reports/{date}`・`/api/monthly-reports/{month}`)。
  * パターンは、同じ階層の固定の path(`/api/analyses/run`・`/api/reports/run`・`/api/monthly-reports/run`)に化けないよう、`run` を除く。
  */
 export const ROUTE_RULES: readonly RouteRule[] = [
@@ -86,6 +86,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   // 検証(Issue #263)。D1 の集計の読み取りだけで LLM も netkeiba も使わない。**閲覧者の要求は集計のやり直しを起こさない**(handler.ts の `handleVerify` が役割で DO のメソッドを分け、
   // 閲覧者はキャッシュを読むだけの `getViewerReport`。`refresh` は管理者だけ)。柵(最短 5 分・1 日 20 回)を閲覧者が消費しない。GET だけ(HEAD は管理者専用)
   exact("/api/verify", GET),
+  // 騎手・調教師の指標の一覧(Issue #644)。D1 の `market_edge`・`market_edge_meta` の読み取りだけ(R2・netkeiba・LLM に触れない)。同じ値は `GET /api/analyses/{id}`(#643)にすでに載っていて、新しい露出は無い。GET だけ(HEAD は管理者専用)
+  exact("/api/market-edges", GET),
   // アイコン(Issue #244)。handler.ts は `iconAsset(pathname)` で配る。パスの一覧は icons.ts と共有する(ここに直書きしない)
   ...ICON_PATHS.map((iconPath) => exact(iconPath, PAGE)),
   // ---- 管理者だけ(method を問わない) ----

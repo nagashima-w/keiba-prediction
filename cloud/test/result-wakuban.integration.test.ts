@@ -12,7 +12,7 @@ import { openLocalBindings, type LocalBindings } from "./local-bindings";
 
 /**
  * Issue #269: 枠番の記録(`race_results.wakuban`。migration 0016)。D1 への書き込み → 読み出し → 検証の集計まで、
- * ローカル(workerd)の D1 で通す。result-scratched.test.ts(#72)と同じ構成。
+ * ローカル(workerd)の D1 で通す。result-scratched.integration.test.ts(#72)と同じ構成。
  *
  * 書き込み: 枠番(1〜8)がある馬はその値、`null`・キーなしの馬は NULL。移行で入れた行(exe 由来)は列に触れない = NULL(記録なし)。
  * 読み出し: 値はそのまま、NULL はキー自体を付けない(未記録を 0 や null にしない)。

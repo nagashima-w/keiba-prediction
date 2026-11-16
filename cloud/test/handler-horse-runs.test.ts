@@ -5,7 +5,7 @@ import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
  * Issue #256 段階A: 各馬の戦績の蓄積の診断 `GET /api/horse-runs`(管理者専用・読み取り専用)。
- * D1 は偽物(発行された SQL を記録する)。netkeiba・LLM には出ない。SQL の中身の正しさは horse-runs-status.test.ts(ローカルの D1)で確かめる。
+ * D1 は偽物(発行された SQL を記録する)。netkeiba・LLM には出ない。SQL の中身の正しさは horse-runs-status.integration.test.ts(ローカルの D1)で確かめる。
  */
 
 const ORIGIN = "https://cloud.invalid";

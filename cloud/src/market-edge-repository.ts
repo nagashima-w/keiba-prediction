@@ -75,6 +75,28 @@ export const SELECT_MARKET_EDGES_SQL =
 export const SELECT_MARKET_EDGE_META_SQL =
   "SELECT computed_on AS computedOn, window_from AS windowFrom, window_to AS windowTo, coef_json AS coefJson, converged, fit_iterations AS iterations, races, horses FROM market_edge_meta WHERE id = 1";
 
+/**
+ * レース詳細の列(Issue #643)用: 束縛した ID の人だけを主キー(person_kind, person_id)で引く。束縛は (person_kind, ID の JSON 配列)。
+ * 読む行数は ID の数(出走頭数)で決まり、表の大きさに依らない。★騎手と調教師は ID の名前空間が別なので、種別ごとに 1 文にする。
+ */
+export const SELECT_MARKET_EDGES_BY_IDS_SQL = "SELECT person_id AS id, n, edge FROM market_edge WHERE person_kind = ? AND person_id IN (SELECT value FROM json_each(?)) ORDER BY person_id";
+
+/** レース詳細の 1 人分(指標と件数)。 */
+export interface MarketEdgeLite {
+  readonly n: number;
+  readonly edge: number;
+}
+
+/** {@link D1MarketEdgeStore.readForRace} の結果。 */
+export interface MarketEdgeForRace {
+  readonly jockeys: ReadonlyMap<string, MarketEdgeLite>;
+  readonly trainers: ReadonlyMap<string, MarketEdgeLite>;
+  /** 直近の計算の記録。無ければ null。 */
+  readonly meta: MarketEdgeMeta | null;
+  /** 読んだ行数(`meta.rows_read` の合計。テストで固定する)。 */
+  readonly rowsRead: number;
+}
+
 export interface MarketPendingEntry {
   readonly raceId: string;
   /** YYYY-MM-DD */
@@ -136,6 +158,22 @@ function rowsWrittenOf(results: ReadonlyArray<{ meta?: { rows_written?: unknown 
 function sizeOf(meta: { size_after?: unknown } | undefined): number | null {
   const size = meta?.size_after;
   return typeof size === "number" && Number.isFinite(size) && size >= 0 ? size : null;
+}
+
+interface MetaRow {
+  readonly computedOn: string;
+  readonly windowFrom: string;
+  readonly windowTo: string;
+  readonly coefJson: string;
+  readonly converged: number;
+  readonly iterations: number;
+  readonly races: number;
+  readonly horses: number;
+}
+
+function metaOf(row: MetaRow): MarketEdgeMeta {
+  const coef = JSON.parse(row.coefJson) as MarketCoef;
+  return { computedOn: row.computedOn, windowFrom: row.windowFrom, windowTo: row.windowTo, coef, converged: row.converged === 1, iterations: row.iterations, races: row.races, horses: row.horses };
 }
 
 export class D1MarketEdgeStore {
@@ -216,11 +254,28 @@ export class D1MarketEdgeStore {
 
   /** 直近の計算の記録。無ければ null。 */
   async readMeta(): Promise<MarketEdgeMeta | null> {
-    const row = await this.db
-      .prepare(SELECT_MARKET_EDGE_META_SQL)
-      .first<{ computedOn: string; windowFrom: string; windowTo: string; coefJson: string; converged: number; iterations: number; races: number; horses: number }>();
-    if (row === null) return null;
-    const coef = JSON.parse(row.coefJson) as MarketCoef;
-    return { computedOn: row.computedOn, windowFrom: row.windowFrom, windowTo: row.windowTo, coef, converged: row.converged === 1, iterations: row.iterations, races: row.races, horses: row.horses };
+    const row = await this.db.prepare(SELECT_MARKET_EDGE_META_SQL).first<MetaRow>();
+    return row === null ? null : metaOf(row);
+  }
+
+  /**
+   * レース詳細の列(Issue #643)の材料。騎手・調教師の ID の人だけ(主キーの引き)と、直近の計算の記録を、**1 回の batch(3 文)**で読む。
+   * ID が空の種別も文は 1 つ数える(束縛は `[]` で、読む行は 0)。失敗は投げる(呼び出し側が握って列ごと出さない)。
+   */
+  async readForRace(jockeyIds: readonly string[], trainerIds: readonly string[]): Promise<MarketEdgeForRace> {
+    const [jockeys, trainers, meta] = await this.db.batch([
+      this.db.prepare(SELECT_MARKET_EDGES_BY_IDS_SQL).bind("jockey", JSON.stringify([...new Set(jockeyIds)])),
+      this.db.prepare(SELECT_MARKET_EDGES_BY_IDS_SQL).bind("trainer", JSON.stringify([...new Set(trainerIds)])),
+      this.db.prepare(SELECT_MARKET_EDGE_META_SQL),
+    ]);
+    const toMap = (res: { results?: unknown[] } | undefined): Map<string, MarketEdgeLite> =>
+      new Map(((res?.results ?? []) as { id: string; n: number; edge: number }[]).map((r) => [r.id, { n: r.n, edge: r.edge }]));
+    const metaRow = ((meta?.results ?? []) as MetaRow[])[0];
+    return {
+      jockeys: toMap(jockeys),
+      trainers: toMap(trainers),
+      meta: metaRow === undefined ? null : metaOf(metaRow),
+      rowsRead: [jockeys, trainers, meta].reduce((sum, r) => sum + (typeof r?.meta?.rows_read === "number" ? r.meta.rows_read : 0), 0),
+    };
   }
 }

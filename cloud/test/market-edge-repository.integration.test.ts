@@ -3,6 +3,7 @@ import { D1RaceArchiveStore } from "../src/race-archive-repository";
 import type { MarketHorse, MarketRow } from "../src/market-edge-calc";
 import {
   D1MarketEdgeStore,
+  SELECT_MARKET_EDGES_SQL,
   MARKET_ROWS_DONE,
   MARKET_ROWS_SKIPPED,
   SELECT_MARKET_PENDING_PAGE_SQL,
@@ -206,5 +207,66 @@ describe("replaceEdges / pruneBefore / 読み出し", () => {
     const res = await store.pruneBefore("2024-01-01");
     expect(res.rowsWritten).toBe(1); // 1 行(削除は索引の分が rows_written に出ない。ローカルの workerd の実測)
     expect((await local.db.prepare("SELECT race_id AS r FROM race_market_rows ORDER BY race_id").all<{ r: string }>()).results.map((x) => x.r)).toEqual([idOf(2), idOf(3)]);
+  });
+});
+
+describe("readForRace(レース詳細の列の読み出し。Issue #643)", () => {
+  const edge = (id: string, n = 100, edgeV = 0.01) => ({ id, name: `名${id}`, n, edge: edgeV, hitRate: 0.3, predMean: 0.25 });
+  const base = { computedOn: "2026-11-16", windowFrom: "2024-11-16", windowTo: "2026-11-15", coef: [2.857, 0.9216, -0.5561] as const, converged: true, iterations: 7, races: 6929, horses: 95233 };
+  const many = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => edge(`${prefix}${String(i).padStart(4, "0")}`, 100 + i, i / 1000));
+
+  it("束縛した ID の人だけを返す(騎手と調教師は別の表の引き。同じ ID でも混ざらない)。無い ID は返さない。記録(窓)も返る", async () => {
+    const store = new D1MarketEdgeStore(local.db);
+    await store.replaceEdges({ ...base, jockeys: [edge("a", 50, 0.03), edge("b", 60, -0.02), edge("same", 70, 0.05)], trainers: [edge("x", 80, 0.04), edge("same", 90, -0.01)] });
+    const got = await store.readForRace(["a", "same", "nobody"], ["same", "x"]);
+    expect([...got.jockeys.entries()]).toEqual([
+      ["a", { n: 50, edge: 0.03 }],
+      ["same", { n: 70, edge: 0.05 }],
+    ]);
+    expect([...got.trainers.entries()]).toEqual([
+      ["same", { n: 90, edge: -0.01 }],
+      ["x", { n: 80, edge: 0.04 }],
+    ]);
+    expect(got.meta).toEqual({ computedOn: "2026-11-16", windowFrom: "2024-11-16", windowTo: "2026-11-15", coef: [2.857, 0.9216, -0.5561], converged: true, iterations: 7, races: 6929, horses: 95233 });
+  });
+
+  it("ID が空なら、その種別は引かず空の Map。記録が無ければ meta は null", async () => {
+    const store = new D1MarketEdgeStore(local.db);
+    const got = await store.readForRace([], []);
+    expect(got.jockeys.size).toBe(0);
+    expect(got.trainers.size).toBe(0);
+    expect(got.meta).toBeNull();
+  });
+
+  it("読む行数は束縛した ID の数に比例し、表の大きさに依らない(全走査でない): 騎手 400 人・調教師 400 人の表から 3 + 2 人を引いて 20 行以内", async () => {
+    const store = new D1MarketEdgeStore(local.db);
+    await store.replaceEdges({ ...base, jockeys: many("J", 400), trainers: many("T", 400) });
+    const got = await store.readForRace(["J0001", "J0200", "J0399"], ["T0005", "T0300"]);
+    expect(got.jockeys.size).toBe(3);
+    expect(got.trainers.size).toBe(2);
+    expect(got.rowsRead, "前提: 行数を数えている").toBeGreaterThan(0);
+    expect(got.rowsRead).toBeLessThanOrEqual(3 + 2 + 1 + 10); // 引いた人 + 記録 1 行 + 余裕
+  });
+
+  it("D1 の文は 1 回の batch で 3 文(騎手・調教師・記録)", async () => {
+    const calls: number[] = [];
+    const spyDb = { prepare: local.db.prepare.bind(local.db), batch: (s: D1PreparedStatement[]) => (calls.push(s.length), local.db.batch(s)) } as unknown as typeof local.db;
+    await new D1MarketEdgeStore(spyDb).readForRace(["a"], ["x"]);
+    expect(calls).toEqual([3]);
+  });
+});
+
+describe("一覧の画面の読み出し(Issue #644)", () => {
+  it("readEdges の SQL が読む行は、その種別の人数だけ(主キーの範囲。もう一方の種別・表の全部は読まない)", async () => {
+    const store = new D1MarketEdgeStore(local.db);
+    const people = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => ({ id: `${prefix}${String(i).padStart(4, "0")}`, name: `名${i}`, n: 100, edge: 0.01, hitRate: 0.3, predMean: 0.25 }));
+    await store.replaceEdges({ computedOn: "2026-11-16", windowFrom: "2024-11-17", windowTo: "2026-11-15", coef: [1, 2, 3], converged: true, iterations: 5, races: 10, horses: 100, jockeys: people("j", 240), trainers: people("t", 270) });
+    const res = await local.db.prepare(SELECT_MARKET_EDGES_SQL).bind("jockey").all();
+    expect(res.results, "前提: 騎手を全員返す").toHaveLength(240);
+    expect(res.meta.rows_read, "騎手の人数(240)だけ読む。調教師の 270 行は読まない").toBeLessThanOrEqual(240 + 5);
+    const trainers = await local.db.prepare(SELECT_MARKET_EDGES_SQL).bind("trainer").all();
+    expect(trainers.results).toHaveLength(270);
+    expect(trainers.meta.rows_read).toBeLessThanOrEqual(270 + 5);
+    expect(trainers.meta.rows_read, "騎手の読み取りより多い(行数が種別の人数に比例している証拠)").toBeGreaterThan(res.meta.rows_read);
   });
 });

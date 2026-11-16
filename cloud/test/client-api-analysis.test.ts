@@ -5,7 +5,7 @@ import { fetchAnalysis, fetchPastAnalyses, parseAnalysisResponse, parsePastAnaly
 /**
  * Issue #185: レース画面・結果画面の API 応答のパーサと取得関数(`status?race_id=`・`GET /api/analyses`・`GET /api/analyses/{id}`)。純関数・偽の fetch。
  * パーサは応答を信用しない(型違い・キーの欠落は「想定外の応答」。一部だけを黙って落とさない)。サーバの文面は画面に出さない。
- * 応答の形のドリフトは client-api-analysis-contract.test.ts(実際の handle() の応答を通す)が検出する。
+ * 応答の形のドリフトは client-api-analysis-contract.integration.test.ts(実際の handle() の応答を通す)が検出する。
  */
 
 const BOARD_ROW = { race_id: "202603020211", mode: "morning", status: "done", attempts: 1, error: null, queued_at: 1000, updated_at: 2000, prior: true, analysis_id: null, detail: null, children_ok: null };
@@ -174,7 +174,7 @@ const ALLOCATION = {
     { betType: "wide", comboKey: "0102", stake: 200, odds: null, ev: null },
   ],
 };
-const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, latePos: 0.6, legStyle: "差し" as const, timeIndexLine: null };
+const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, latePos: 0.6, legStyle: "差し" as const, timeIndexLine: null, marketEdge: null };
 const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良", oddsStatus: "result", placeBasis: "top3" };
 const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, llmCalls: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
 const wrap = (analysis: unknown) => ({ ok: true, analysis });
@@ -429,6 +429,44 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
       expect(read({ timeIndexLine: 1.2 })).toBeNull();
       expect(read({ timeIndexLine: { text: "x" } })).toBeNull();
       expect(read({ timeIndexLine: ["x"] })).toBeNull();
+    });
+
+    it("Issue #643 marketEdge: 名前・指標・件数を読む。値と件数は有限の数か null。キー無し(古いサーバの応答)・形が不正・件数が負は null(補助の表示なので応答全体は失敗させない。部分的に読み替えない)", () => {
+      const read = (over: Record<string, unknown>, drop = false) => {
+        const horse: Record<string, unknown> = { ...HORSE, ...over };
+        if (drop) delete horse["marketEdge"];
+        const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, horses: [horse] }));
+        return result.ok ? result.analysis.horses[0]!.marketEdge : "unexpected";
+      };
+      const person = (name: unknown, edge: unknown, n: unknown) => ({ name, edge, n });
+      const good = { jockey: person("騎手A", 0.03, 312), trainer: person(null, null, null) };
+      expect(read({ marketEdge: good })).toEqual(good);
+      expect(read({ marketEdge: null })).toBeNull();
+      expect(read({}, true)).toBeNull();
+      expect(read({ marketEdge: "x" })).toBeNull();
+      expect(read({ marketEdge: { jockey: person("a", 0.1, 5) } }), "調教師が無い").toBeNull();
+      expect(read({ marketEdge: { ...good, jockey: person(1, 0.1, 5) } }), "名前が文字列でない").toBeNull();
+      expect(read({ marketEdge: { ...good, jockey: person("a", "0.1", 5) } }), "値が文字列").toBeNull();
+      expect(read({ marketEdge: { ...good, jockey: person("a", Number.NaN, 5) } }), "値が非有限").toBeNull();
+      expect(read({ marketEdge: { ...good, jockey: person("a", 0.1, -1) } }), "件数が負").toBeNull();
+      expect(read({ marketEdge: { ...good, jockey: person("a", 0.1, 1.5) } }), "件数が整数でない").toBeNull();
+      expect(read({ marketEdge: { ...good, jockey: person("a", 0.1, null) } }), "値だけあって件数が無い").toBeNull();
+      expect(read({ marketEdge: { ...good, jockey: person("a", null, 5) } }), "件数だけあって値が無い").toBeNull();
+    });
+
+    it("Issue #643 marketEdgeNote: 文字列はそのまま読む。キー無し(古いサーバの応答)・null・空文字・文字列以外は null(応答全体は失敗させない)", () => {
+      const read = (value: unknown, drop = false) => {
+        const analysis: Record<string, unknown> = { ...ANALYSIS, marketEdgeNote: value };
+        if (drop) delete analysis["marketEdgeNote"];
+        const result = parseAnalysisResponse(200, wrap(analysis));
+        return result.ok ? result.analysis.marketEdgeNote : "unexpected";
+      };
+      expect(read("参考の注記")).toBe("参考の注記");
+      expect(read(null)).toBeNull();
+      expect(read(undefined, true)).toBeNull();
+      expect(read("")).toBeNull();
+      expect(read(3)).toBeNull();
+      expect(read({ text: "x" })).toBeNull();
     });
 
     it("Issue #359 timeIndexNote: 文字列はそのまま読む。キー無し(古いサーバの応答)・null・文字列以外は null(応答全体は失敗させない)", () => {

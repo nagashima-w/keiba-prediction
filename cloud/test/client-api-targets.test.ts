@@ -5,7 +5,7 @@ import { fetchTargets, parseTargetsResponse } from "../client/api-targets";
 /**
  * Issue #336 段階 B: 今日の狙い目の API 応答のパーサと取得関数(`GET /api/targets`)。純関数・偽の fetch。
  * パーサは応答を信用しない(型違い・キーの欠落は「想定外の応答」。一部の行だけを黙って落とさない)。
- * サーバの本物の応答の形のドリフトは `targets-api.test.ts`(実際の `handle()` の応答を通す)が検出する。
+ * サーバの本物の応答の形のドリフトは `targets-api.integration.test.ts`(実際の `handle()` の応答を通す)が検出する。
  */
 
 const RACE = { race_id: "202605050811", analysis_id: 11, start_ms: 1_000_000, start_time: "15:40", place: "東京11R", pick: "◎7", skipped: false, detail: "5点 1,200円 EV 1.42・分析時", bet_count: 5, total_stake: 1200, max_ev: 1.42, source: "analysis", round: null };

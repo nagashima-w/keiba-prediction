@@ -299,7 +299,7 @@ describe("t7: 調教師の成績の取得に失敗しても、レースの取得
 
 // ───────────── 保存先(D1)で日をまたいで共有する・gate の呼び出しの上限 ─────────────
 
-/** 取得日時つきでメモリに持つ偽の保存先(D1 の代わり)。D1 の SQL そのものは trainer-results-repository.test.ts が確かめる。 */
+/** 取得日時つきでメモリに持つ偽の保存先(D1 の代わり)。D1 の SQL そのものは trainer-results-repository.integration.test.ts が確かめる。 */
 class MemoryTrainerStore implements TrainerResultsStore {
   readonly entries = new Map<string, StoredTrainerResults>();
   loads = 0;

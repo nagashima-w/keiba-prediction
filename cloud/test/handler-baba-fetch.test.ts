@@ -5,7 +5,7 @@ import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
  * Issue #360: 馬場の API の取得の結果を管理者が見る入口 `GET /api/baba-fetch`(管理者専用・読み取り専用)。
- * D1 は偽物(発行された SQL を記録する)。外部の API・netkeiba・LLM には出ない。SQL の中身の正しさは baba-repository.test.ts(ローカルの D1)で確かめる。
+ * D1 は偽物(発行された SQL を記録する)。外部の API・netkeiba・LLM には出ない。SQL の中身の正しさは baba-repository.integration.test.ts(ローカルの D1)で確かめる。
  */
 
 const ORIGIN = "https://cloud.invalid";

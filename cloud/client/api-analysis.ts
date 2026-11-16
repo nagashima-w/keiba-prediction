@@ -19,6 +19,19 @@ export interface PastAnalysis {
   readonly model: string | null;
 }
 
+/** 騎手か調教師の 1 人分の指標(Issue #643。サーバが付ける)。値(`edge`。0.03 = 3.0 ポイント)と件数は対で、ID が無い・表に無い人は両方 null。名前は出馬表の書き方(外から来る文字列)。 */
+export interface MarketEdgePerson {
+  readonly name: string | null;
+  readonly edge: number | null;
+  readonly n: number | null;
+}
+
+/** 馬ごとの騎手・調教師の指標(参考。確かめ中)。 */
+export interface HorseMarketEdge {
+  readonly jockey: MarketEdgePerson;
+  readonly trainer: MarketEdgePerson;
+}
+
 export interface AnalysisHorse {
   readonly umaban: number;
   readonly name: string | null;
@@ -64,6 +77,8 @@ export interface AnalysisHorse {
   readonly legStyle?: LegStyle | null;
   /** タイム指数の行(Issue #359。サーバが組み立てた「タイム指数 +1.2(レース内 2位)」。値のない馬は「タイム指数 —」)。出さない分析・キー無し(古いサーバの応答)・文字列以外は null。パーサは常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。 */
   readonly timeIndexLine?: string | null;
+  /** 騎手・調教師の指標(Issue #643)。列を出さない分析(地方・記録なし・失敗)・キー無し(古いサーバの応答)・形が不正な値は null。パーサは常にキーを持つ(型で省略可な理由は `earlyPos` と同じ)。 */
+  readonly marketEdge?: HorseMarketEdge | null;
 }
 
 /** 脚質(Issue #314。core の `LegStyle` と同じ 4 値。クライアントは core のバレルを import しないので、ここに持つ)。 */
@@ -213,6 +228,8 @@ export interface AnalysisDetail {
   readonly development?: AnalysisDevelopment | null;
   /** タイム指数の説明の 1 行(Issue #359。サーバが組み立てた文。馬の一覧の上に 1 回出す)。出さない分析・キー無し(古いサーバの応答)・文字列以外は null(補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。 */
   readonly timeIndexNote?: string | null;
+  /** 騎手・調教師の列の注記(Issue #643。サーバが組み立てた文。表の下に 1 回出す)。列を出さない分析・キー無し(古いサーバの応答)・空文字・文字列以外は null(補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。 */
+  readonly marketEdgeNote?: string | null;
   /**
    * 組合せの券種ごとの行(Issue #296。オッズの取得点数・EV プラスの点数・配分の点数)。組合せの記録が無い・詳細なし・キー無し(古いサーバの応答)・形が不正な値は null にする
    * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
@@ -263,6 +280,23 @@ export function parsePastAnalysesResponse(status: number, body: unknown): PastAn
   return { ok: true, analyses };
 }
 
+/** 1 人分。名前は文字列か null、値と件数は「有限の数と 0 以上の整数」か「どちらも null」(片方だけは不正)。 */
+function parseMarketPerson(value: unknown): MarketEdgePerson | null {
+  if (!isRecord(value)) return null;
+  const { name, edge, n } = value;
+  if (!strOrNull(name)) return null;
+  if (edge === null && n === null) return { name, edge: null, n: null };
+  return isNum(edge) && isNum(n) && Number.isInteger(n) && n >= 0 ? { name, edge, n } : null;
+}
+
+/** 馬ごとの指標(Issue #643)。形が不正なら null(部分的に読み替えない)。 */
+function parseMarketEdge(value: unknown): HorseMarketEdge | null {
+  if (!isRecord(value)) return null;
+  const jockey = parseMarketPerson(value["jockey"]);
+  const trainer = parseMarketPerson(value["trainer"]);
+  return jockey === null || trainer === null ? null : { jockey, trainer };
+}
+
 function parseHorse(row: unknown): AnalysisHorse | null {
   if (!isRecord(row)) return null;
   const { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights, concerns, winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax } = row;
@@ -286,8 +320,10 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   const markFrom = MARK_ORIGIN_VALUES.find((v) => v === row["markFrom"]) ?? null;
   // Issue #359: タイム指数の行は、キー無し・文字列以外は null(補助の表示なので、応答ごと不正にはしない)。
   const timeIndexLine = typeof row["timeIndexLine"] === "string" ? row["timeIndexLine"] : null;
+  // Issue #643: 騎手・調教師の指標は、キー無し・形が不正は null(補助の表示なので、応答ごと不正にはしない)。
+  const marketEdge = parseMarketEdge(row["marketEdge"]);
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, latePos, legStyle, timeIndexLine };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, latePos, legStyle, timeIndexLine, marketEdge };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
@@ -459,6 +495,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     baba: parseLines(value["baba"], BABA_MAX_LINES, BABA_MAX_LINE_LENGTH),
     development: parseDevelopment(value["development"]),
     timeIndexNote: typeof value["timeIndexNote"] === "string" ? value["timeIndexNote"] : null,
+    marketEdgeNote: typeof value["marketEdgeNote"] === "string" && value["marketEdgeNote"] !== "" ? value["marketEdgeNote"] : null,
     combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
     close: parseClose(value["close"]),
     previousDiff: parsePreviousDiff(value["previousDiff"]),
