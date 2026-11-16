@@ -729,11 +729,11 @@ describe("発走前の結果をカードの中に出す(Issue #188)", () => {
     expect(horsesIn(card)).toHaveLength(1);
     expect(textOf(card)).toContain("アルファ");
     expect(textOf(card)).toContain("EVプラス");
-    // Issue #740: 馬の詳しい中身(「3着内率 20.0%」の行)は、馬の行を押すまで閉じている。押すとカードの中に開く(取得は増えない)。
-    expect(textOf(card)).not.toContain("3着内率 20.0%");
+    // Issue #740: 馬の詳しい中身(詳しい行 `eval-detail`。Issue #765 で 3着内率の行は表と重なるので外した)は、馬の行を押すまで閉じている。押すとカードの中に開く(取得は増えない)。
+    expect(findAll(card, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("eval-detail"))).toHaveLength(0);
     const getsBefore = analysisGets(h).length;
     findAll(card, (n) => String(n.attrs?.["class"] ?? "") === "horse-toggle")[0]!.on!.click!();
-    expect(textOf(preRaceCard(h))).toContain("3着内率 20.0%");
+    expect(findAll(preRaceCard(h), (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("eval-detail"))).toHaveLength(1);
     expect(analysisGets(h).length).toBe(getsBefore);
     expect(textOf(card)).toContain("分析時刻: 2026-06-28 14:00");
     expect(textOf(card)).toContain("配分の記録がありません");
