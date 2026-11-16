@@ -4,6 +4,7 @@
  *
  * 考え方: P・D 型の色覚では「赤↔緑」「赤↔茶」の差が縮む。残る手がかりは「青↔黄」の軸と明度なので、状態の3色(ok・wait・fail)は、色相の差だけに頼らず明度も離した。
  * 全体の雰囲気は変えず、緑は青みの緑、赤は朱〜煉瓦色に寄せた。状態は色だけで示さない(バッジ・通知には文字がある。文字のない所には記号を足した)。
+ * Issue #740: 競馬新聞風の紙面。ライトは生成りの紙(bg)・一段濃い紙(card)・墨(fg)・紙色の線(line)、ダークは暖かい黒(夜の紙面)。有彩色(accent・brand・状態の 3 色)と muted の値は変えていない(状態の色差は変わらない)。
  * 強調の色 brand(Issue #570)はロゴのオレンジ。ダークはロゴそのもの(#ff7803)、ライトは文字として 4.5:1 を満たす濃さ(#b34700)。brand と wait・fail は P・D・T 型で近づく組がある(ライトの wait は D 型で 1.7)が、状態は文字でも示す。実測値は test/palette.test.ts と docs/current-spec.md。
  * 採用した色の根拠とテストは docs/current-spec.md の「配色」の節。数値(コントラスト比・色覚シミュレーション後の色差)は test/palette.test.ts が固定する。
  */
@@ -27,11 +28,11 @@ export interface WebPalette {
 }
 
 export const WEB_LIGHT: WebPalette = {
-  fg: "#1c1c1e",
-  bg: "#ffffff",
+  fg: "#1d1b16",
+  bg: "#faf6ec",
   muted: "#6b6b70",
-  line: "#d8d8dc",
-  card: "#f5f5f7",
+  line: "#cdc5b0",
+  card: "#f6f1e3",
   accent: "#0a58ca",
   brand: "#b34700",
   ok: "#177c55",
@@ -40,11 +41,11 @@ export const WEB_LIGHT: WebPalette = {
 };
 
 export const WEB_DARK: WebPalette = {
-  fg: "#f2f2f5",
-  bg: "#151517",
+  fg: "#efe9d8",
+  bg: "#1c1a15",
   muted: "#a0a0a8",
-  line: "#3a3a3f",
-  card: "#212125",
+  line: "#4a4536",
+  card: "#27241c",
   accent: "#7cacf8",
   brand: "#ff7803",
   ok: "#7cd9ac",
