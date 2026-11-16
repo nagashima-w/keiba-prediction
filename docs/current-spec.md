@@ -1608,6 +1608,16 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **束**: 251,260 → 254,896 バイト(+3,636)。上限を 252,000 から 255,500 へ引き上げた(詳細は `cloud/test/client-bundle.test.ts` の追記)。
 - **検査**: `cloud/test/market-edges-view.test.ts`(並び・名前の代わり・注記・計算前)・`handler-market-edges.test.ts`(認証・閲覧者・HEAD・クエリ・503)・`route-policy.test.ts`・`client-route-edges.test.ts`・`client-market-edges.test.ts`(応答の検査・行の整形・境界 49/50・名前のエスケープ・画面の制御)・`client-app-edges.test.ts`・`market-edge-repository.integration.test.ts`(読み取り行数)。
 
+### 騎手・調教師の年ごとの集計(#729 段階 A。**版数は 1.44.0 のまま**〈凍結〉。var `PERSON_STATS_ENABLED` が `"1"` のときだけ動く。公開時は `"0"`)
+netkeiba の集計ページから取っている騎手・調教師の年度別成績(`starts`・`placed`)を、手元の過去の結果から自分で集計する。**段階 A は集計の表を作るだけ**で、分析(`scrape-race` の取得)の置き換えは段階 B(並走の突き合わせのあとに別に決める)。
+- **定義**(`cloud/src/person-stats-calc.ts` の 2 つの純関数だけが持つ): `starts` は取消・除外を除く全頭(中止・失格・着順の表示が空の馬を含む)、`placed` は `finish <= 3`。障害も含める。中央だけ・2021-01-01 以降だけ。取消・除外の判定は戦績への変換と同じ(`finishStatus` の先頭 1 文字が「除」「取」)。netkeiba の年度別成績と同じ数になるかは未確認で、並走の突き合わせで確かめる。合わなければ、直すのはこの 2 つの関数だけ。
+- **表**(migration 0048。追加のみ): `race_person_rows`(レースで 1 行。`[騎手 ID, 調教師 ID, 3 着内なら 1]` の配列と、競馬場コード・芝ダ障・距離。#256 の競馬場別・コース別の集計の材料を兼ねる。集計の表はまだ作らない)、`person_year`(人 × 年で 1 行。`starts`・`placed`・値を最後に変えた日)、`race_archive.person_version`(取り込みの印。NULL = 未処理)と、未処理の中央・2021-01-01 以降だけの部分索引 `idx_race_archive_person_pending`。部分索引の WHERE と `SELECT_PERSON_PENDING_PAGE_SQL` の WHERE は同じ形でなければならない(違うと全行を読む。テストが照らす)。
+- **取り込み**(#642 の DO `RaceMarketEdgeDO` の人の段。`market-edge-core.ts`): JST 3:00〜8:30 に、市場の段と**交互に**(1 回の起床でどちらか一方。R2 を読む件数は起床あたり今と同じ最大 20)、未処理のレースを R2 から読んで人の行にして保存し、印を付ける。数える馬がなく行を作らないレースにも印だけ付ける。1 晩の書き込み行数の上限は市場の段と合算(既定 2 万行。本番の var は 1 万行)。失敗の記録は `me_fail` に `ps:` 付きで入れる。人の段の例外は握って、その起床では市場の段を動かす。
+- **集計**(`person-stats-aggregate.ts`): 人の段の未処理が尽きた周の終わりに、その日(JST)まだなら 1 回、取り込みで触れた年だけを `race_person_rows` から読んで `person_year` を置き換える。値が変わった行だけ書く。壊れた行がある年は書かず、次の晩に試す。消えた人の行は消さない(年の範囲を消す安い SQL が無い)。
+- **書き込み行数の見積もり**(ローカルの workerd の D1 の `meta.rows_written` の実測。`cloud/test/person-stats-repository.integration.test.ts`): 1 レースの取り込みは 3 行(人の行 + 日付の索引 + 目録の印。部分索引から外れる分は数えない)。目録にレースを入れるたびに部分索引で +1 行(`race_archive` の保存が 3 → 4 行。2021 年より前と地方は +0)。`person_year` は新規が 1 行、値が同じなら 0 行。**migration の `CREATE INDEX` は、既存の未処理の行の数ぶん(約 2 万行)を 1 回だけ書く**(1,000 行の目録で `rows_written` が 1,001 の実測)。2021 年以降の約 2 万レースの埋め戻しは約 6 万行で、1 晩 2 万行の上限なら数晩かかる。
+- **動かし方**: 公開は `PERSON_STATS_ENABLED = "0"`(`cloud/wrangler.toml`。smoke も `--var` で `"0"`)。`"1"` のときだけ動く(未設定も動かない。市場の段の止める var とは向きが逆)。#745 の変換が終わってから `"1"` にして公開する。
+- **突き合わせの道具**: `scripts/person-year-compare-729/compare.sql`。本番の `jockey_results`・`trainer_results`(中央・確定年 2021〜2025)と `person_year` を比べる SELECT(一致しない行の詳細と、種別 × 状態の要約)。本番は読むだけ。
+
 ### 統計モデルの並走(影の計算。#649 段階 2・3。**版数は 1.44.0 のまま**〈凍結〉)
 発走前の分析のときだけ、学習済みのロジスティック回帰で各馬の勝率・2着内率・3着内率を計算し、D1 の別の表に記録する。**買い目・配分・EV・画面・LLM のプロンプトのどれにも使わない**(結果が出たあとに、いまのやり方と並べて比べるための記録)。
 - **モデル**(`packages/core/src/ev/stat-shadow.ts`・係数は自動生成の `stat-shadow-coef.ts`): 目的(勝率・2着内率・3着内率)ごとの標準化 + L2 のロジスティック回帰を 2 つ。版の名前は `lr649-odds-2026-11-07`(オッズ入り)と `lr649-noodds-2026-11-07`(オッズなし)。係数は #649 の保留を開けた評価と同じ学習(中央 2025-02〜2026-10、6,113 レース・83,806 頭)。係数を学び直したら新しい名前にして、古い名前の行は書き換えない。

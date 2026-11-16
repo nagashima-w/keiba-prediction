@@ -105,6 +105,16 @@ function describeSchema(db: Db): Schema {
   return out;
 }
 
+/**
+ * race_archive から 0048(Issue #729)が足したもの(person_version の列と idx_race_archive_person_pending)を除いた形。
+ * 0044〜0047 の「既存の表は変わらない」の比較は、0048 を含む最終状態(`schemaAfter(sqls)`)と、それより前の状態を比べるので、race_archive だけは 0048 の追加ぶんを除いて比べる
+ * (0044〜0047 が race_archive を変えていないことの検査は保つ。0048 自身の追加は Issue #729 のテストが固定する)。
+ */
+function sansPersonStats(table: string, schema: TableSchema): TableSchema {
+  if (table !== "race_archive") return schema;
+  return { ...schema, columns: schema.columns.filter((c) => c.name !== "person_version"), indexes: schema.indexes.filter((x) => x.name !== "idx_race_archive_person_pending") };
+}
+
 /** 空の DB に、与えた SQL を順に流して、その構造を返す。 */
 function schemaAfter(sqls: readonly string[]): Schema {
   const db = openEmptyDb();
@@ -380,6 +390,7 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
       { name: "kind", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
       { name: "market_version", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 }, // 0039(Issue #642)
       { name: "parser_version", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "person_version", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 }, // 0048(Issue #729)
       { name: "r2_key", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
       { name: "race_date", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
       { name: "race_id", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
@@ -389,6 +400,7 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     // 0036(Issue #613): 変換の目録の走査のための部分索引(runs_version が NULL の行だけ)。0039(Issue #642): 市場の行への取り込みの走査のための部分索引(market_version が NULL の中央の行だけ)。
     indexes: [
+      { origin: "c", unique: 0, columns: ["race_id"], name: "idx_race_archive_person_pending" }, // 0048(Issue #729): person_version が NULL の中央・2021-01-01 以降の行だけ。PRAGMA index_list は新しい索引から返すので先頭
       { origin: "c", unique: 0, columns: ["race_id"], name: "idx_race_archive_market_pending" },
       { origin: "c", unique: 0, columns: ["race_id"], name: "idx_race_archive_runs_pending" },
       { origin: "pk", unique: 1, columns: ["race_id"], name: null },
@@ -454,6 +466,35 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     ],
     foreignKeys: [],
     indexes: [{ origin: "pk", unique: 1, columns: ["person_kind", "person_id"], name: null }],
+  },
+  // 0048 の中身(Issue #729)。騎手・調教師の年ごとの集計。race_person_rows はレース 1 件 1 行(WITHOUT ROWID。主キーは race_id。race_date の副索引が 1 本)、
+  // person_year は人 × 年で 1 行(WITHOUT ROWID。主キーは (person_kind, person_id, year)。副索引なし)。
+  race_person_rows: {
+    columns: [
+      { name: "course_type", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "distance", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "horses_json", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "race_date", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "race_id", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "venue_code", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [
+      { origin: "c", unique: 0, columns: ["race_date"], name: "idx_race_person_rows_date" },
+      { origin: "pk", unique: 1, columns: ["race_id"], name: null },
+    ],
+  },
+  person_year: {
+    columns: [
+      { name: "computed_on", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "person_id", type: "TEXT", notnull: 1, dflt_value: null, pk: 2 },
+      { name: "person_kind", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "placed", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "starts", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "year", type: "INTEGER", notnull: 1, dflt_value: null, pk: 3 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["person_kind", "person_id", "year"], name: null }],
   },
   market_edge_meta: {
     columns: [
@@ -731,8 +772,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql・0035_race_backfill.sql・0036_race_archive_runs_pending_index.sql・0037_verify_race_mark.sql・0038_horse_profiles.sql・0039_market_edge.sql ・0040_analysis_shadow.sql・0041_market_shrink_weight.sql・0042_analysis_odds_sources.sql・0043_close_odds_sources.sql・0045_race_oikiri.sql・0046_odds_snapshots.sql・0047_odds_snapshots_combos.sql の47本だけで、番号は 0001 から連続している(後から足すときは 0047 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql", "0036_race_archive_runs_pending_index.sql", "0037_verify_race_mark.sql", "0038_horse_profiles.sql", "0039_market_edge.sql", "0040_analysis_shadow.sql", "0041_market_shrink_weight.sql", "0042_analysis_odds_sources.sql", "0043_close_odds_sources.sql", "0044_past_blinker.sql", "0045_race_oikiri.sql", "0046_odds_snapshots.sql", "0047_odds_snapshots_combos.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql・0013_result_scratched.sql・0014_horse_runs.sql・0015_monthly_reports.sql・0016_result_wakuban.sql・0017_baba.sql・0018_mark_repair.sql・0019_close.sql・0020_trainer_results.sql・0021_baba_diagnostics.sql・0022_race_conditions.sql・0023_race_facts.sql・0024_race_class.sql・0025_min_hit_prob.sql・0026_baba_attempts.sql・0027_kaisai_days.sql・0028_jockey_names.sql・0029_max_bets.sql・0030_trainer_names.sql・0031_race_archive.sql・0032_horse_runs_source.sql・0033_race_archive_runs_version.sql・0034_analyses_pending_index.sql・0035_race_backfill.sql・0036_race_archive_runs_pending_index.sql・0037_verify_race_mark.sql・0038_horse_profiles.sql・0039_market_edge.sql ・0040_analysis_shadow.sql・0041_market_shrink_weight.sql・0042_analysis_odds_sources.sql・0043_close_odds_sources.sql・0045_race_oikiri.sql・0046_odds_snapshots.sql・0047_odds_snapshots_combos.sql・0048_person_stats.sql の48本だけで、番号は 0001 から連続している(後から足すときは 0048 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql", "0013_result_scratched.sql", "0014_horse_runs.sql", "0015_monthly_reports.sql", "0016_result_wakuban.sql", "0017_baba.sql", "0018_mark_repair.sql", "0019_close.sql", "0020_trainer_results.sql", "0021_baba_diagnostics.sql", "0022_race_conditions.sql", "0023_race_facts.sql", "0024_race_class.sql", "0025_min_hit_prob.sql", "0026_baba_attempts.sql", "0027_kaisai_days.sql", "0028_jockey_names.sql", "0029_max_bets.sql", "0030_trainer_names.sql", "0031_race_archive.sql", "0032_horse_runs_source.sql", "0033_race_archive_runs_version.sql", "0034_analyses_pending_index.sql", "0035_race_backfill.sql", "0036_race_archive_runs_pending_index.sql", "0037_verify_race_mark.sql", "0038_horse_profiles.sql", "0039_market_edge.sql", "0040_analysis_shadow.sql", "0041_market_shrink_weight.sql", "0042_analysis_odds_sources.sql", "0043_close_odds_sources.sql", "0044_past_blinker.sql", "0045_race_oikiri.sql", "0046_odds_snapshots.sql", "0047_odds_snapshots_combos.sql", "0048_person_stats.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -823,8 +864,8 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
   });
 
   it("Issue #445: WITHOUT ROWID の表の集合が、宣言と一致する(主キーが行の実体になる表。外すと書き込みの行が増える。構造の比較〈列・索引〉には現れないので別に固定する)", () => {
-    // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)・0026(baba_fetch_attempts)・0027(kaisai_days)・0028(jockey_names)・0030(trainer_names)・0031(race_archive)・0035(race_backfill)・0038(horse_profiles・horse_owner_history・race_horse_entries・jra_entry_fetches)・0039(race_market_rows・market_edge。market_edge_meta は rowid の別名の主キーなので対象外)・0040(analysis_shadow_horses・analysis_shadow_probs)・0044(past_blinker_races・past_blinker_horses)・0045(race_oikiri)・0046(odds_snapshots)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
-    const declared = ["baba_conditions", "baba_fetch_attempts", "baba_fetches", "horse_run_saves", "horse_runs", "jockey_names", "kaisai_days", "race_archive", "race_backfill", "race_conditions", "trainer_names", "verify_race_mark"].concat(["horse_profiles", "horse_owner_history", "race_horse_entries", "jra_entry_fetches"]).concat(["race_market_rows", "market_edge"]).concat(["analysis_shadow_horses", "analysis_shadow_probs"]).concat(["past_blinker_races", "past_blinker_horses"]).concat(["race_oikiri", "odds_snapshots"]).sort();
+    // 宣言: 0014(horse_runs・horse_run_saves)・0017(baba_fetches・baba_conditions)・0022(race_conditions)・0026(baba_fetch_attempts)・0027(kaisai_days)・0028(jockey_names)・0030(trainer_names)・0031(race_archive)・0035(race_backfill)・0038(horse_profiles・horse_owner_history・race_horse_entries・jra_entry_fetches)・0039(race_market_rows・market_edge。market_edge_meta は rowid の別名の主キーなので対象外)・0040(analysis_shadow_horses・analysis_shadow_probs)・0044(past_blinker_races・past_blinker_horses)・0045(race_oikiri)・0046(odds_snapshots)・0048(race_person_rows・person_year)。新しく WITHOUT ROWID の表を足したら、ここにも足す。
+    const declared = ["baba_conditions", "baba_fetch_attempts", "baba_fetches", "horse_run_saves", "horse_runs", "jockey_names", "kaisai_days", "race_archive", "race_backfill", "race_conditions", "trainer_names", "verify_race_mark"].concat(["horse_profiles", "horse_owner_history", "race_horse_entries", "jra_entry_fetches"]).concat(["race_market_rows", "market_edge"]).concat(["analysis_shadow_horses", "analysis_shadow_probs"]).concat(["past_blinker_races", "past_blinker_horses"]).concat(["race_oikiri", "odds_snapshots"]).concat(["race_person_rows", "person_year"]).sort();
     const wrTables = (sqlList: readonly string[]): string[] => {
       const db = openEmptyDb();
       try {
@@ -969,8 +1010,8 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     const before = schemaAfter(sqls.slice(0, 30));
     expect(Object.keys(before)).not.toContain("race_archive");
     const after = schemaAfter(sqls.slice(0, 31)); // 0031 までを適用した状態(0032・0033 の列追加と 0036 の索引は含めない)
-    // 宣言(D1_EXTRA_TABLES)は 0033 の runs_version と 0039 の market_version を含むので、それらを除いた形と一致する(0033 の列は Issue #588 のテスト、0039 の列は Issue #642 のテストが固定する)
-    expect(after["race_archive"]).toEqual({ ...D1_EXTRA_TABLES["race_archive"]!, columns: D1_EXTRA_TABLES["race_archive"]!.columns.filter((c) => c.name !== "runs_version" && c.name !== "market_version"), indexes: [{ origin: "pk", unique: 1, columns: ["race_id"], name: null }] }); // 0036 の索引も除く(Issue #613 のテストが固定する)
+    // 宣言(D1_EXTRA_TABLES)は 0033 の runs_version と 0039 の market_version と 0048 の person_version を含むので、それらを除いた形と一致する(0033 の列は Issue #588 のテスト、0039 の列は Issue #642 のテストが固定する)
+    expect(after["race_archive"]).toEqual({ ...D1_EXTRA_TABLES["race_archive"]!, columns: D1_EXTRA_TABLES["race_archive"]!.columns.filter((c) => c.name !== "runs_version" && c.name !== "market_version" && c.name !== "person_version"), indexes: [{ origin: "pk", unique: 1, columns: ["race_id"], name: null }] }); // 0036 の索引も除く(Issue #613 のテストが固定する)
     expect(Object.keys(exe)).not.toContain("race_archive");
     for (const [table, schema] of Object.entries(before)) {
       expect(after[table], table).toEqual(schema); // 既存の表は列も索引も変わらない
@@ -1138,7 +1179,7 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
       expect(exe[table], table).toBeUndefined();
       expect(after[table]!.indexes.map((i) => i.origin), `${table} は主キーの自動索引だけ(副索引なし)`).toEqual(["pk"]);
     }
-    for (const [table, schema] of Object.entries(before)) expect(after[table], table).toEqual(schema); // 既存の表は変わらない
+    for (const [table, schema] of Object.entries(before)) expect(sansPersonStats(table, after[table]!), table).toEqual(schema); // 既存の表は変わらない(race_archive は 0048 の追加ぶんを除く)
     const code = sqls[43]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
     expect(code).not.toMatch(/\b(UPDATE|DELETE|DROP|INSERT|ALTER)\b/i);
     const statements = code.split(";").map((x) => x.trim()).filter((x) => x !== "");
@@ -1154,7 +1195,7 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     expect(after["race_oikiri"]).toEqual(D1_EXTRA_TABLES["race_oikiri"]);
     expect(exe["race_oikiri"]).toBeUndefined();
     expect(after["race_oikiri"]!.indexes.map((i) => i.origin), "主キーの自動索引だけ(副索引なし)").toEqual(["pk"]);
-    for (const [table, schema] of Object.entries(before)) expect(after[table], table).toEqual(schema); // 既存の表は変わらない
+    for (const [table, schema] of Object.entries(before)) expect(sansPersonStats(table, after[table]!), table).toEqual(schema); // 既存の表は変わらない(race_archive は 0048 の追加ぶんを除く)
     const code = sqls[44]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
     expect(code).not.toMatch(/\b(UPDATE|DELETE|DROP|INSERT|ALTER)\b/i);
     const statements = code.split(";").map((x) => x.trim()).filter((x) => x !== "");
@@ -1170,7 +1211,7 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     expect(after["odds_snapshots"]).toEqual(D1_EXTRA_TABLES["odds_snapshots"]);
     expect(exe["odds_snapshots"]).toBeUndefined();
     expect(after["odds_snapshots"]!.indexes.map((i) => i.origin), "主キーの自動索引だけ(副索引なし)").toEqual(["pk"]);
-    for (const [table, schema] of Object.entries(before)) expect(after[table], table).toEqual(schema); // 既存の表は変わらない
+    for (const [table, schema] of Object.entries(before)) expect(sansPersonStats(table, after[table]!), table).toEqual(schema); // 既存の表は変わらない(race_archive は 0048 の追加ぶんを除く)
     const code = sqls[45]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
     expect(code).not.toMatch(/\b(UPDATE|DELETE|DROP|INSERT|ALTER)\b/i);
     const statements = code.split(";").map((x) => x.trim()).filter((x) => x !== "");
@@ -1186,11 +1227,37 @@ describe("AC-a1: 0001〜0011 を流した構造が、exe の最終スキーマ +
     expect(after["odds_snapshots"]!.columns.find((c) => c.name === "combos_json")).toEqual({ name: "combos_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 });
     expect(after["odds_snapshots"]!.columns.filter((c) => c.name !== "combos_json")).toEqual(before["odds_snapshots"]!.columns);
     expect(after["odds_snapshots"]!.indexes).toEqual(before["odds_snapshots"]!.indexes);
-    for (const [table, schema] of Object.entries(before)) if (table !== "odds_snapshots") expect(after[table], table).toEqual(schema);
+    for (const [table, schema] of Object.entries(before)) if (table !== "odds_snapshots") expect(sansPersonStats(table, after[table]!), table).toEqual(schema);
     const code = sqls[46]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
     const statements = code.split(";").map((x) => x.trim()).filter((x) => x !== "");
     expect(statements).toEqual(["ALTER TABLE odds_snapshots ADD COLUMN combos_json TEXT"]);
     expect(diffSchemas(expectedD1Schema(exe), schemaAfter(sqls.slice(0, 46)))).not.toEqual([]);
+  });
+
+  it("Issue #729: race_person_rows・person_year は 0048 だけが足す新しい表(WITHOUT ROWID)で、race_archive.person_version(INTEGER・NULL 可)と部分索引 idx_race_archive_person_pending も 0048 だけが足す。0001〜0047 までには無い。D1 専用(D1_EXTRA_TABLES に宣言した)で、exe には無い。追加のみ", () => {
+    const before = schemaAfter(sqls.slice(0, 47));
+    const after = schemaAfter(sqls);
+    for (const table of ["race_person_rows", "person_year"]) {
+      expect(before[table], table).toBeUndefined();
+      expect(after[table], table).toEqual(D1_EXTRA_TABLES[table]);
+      expect(exe[table], table).toBeUndefined();
+    }
+    expect(before["race_archive"]!.columns.map((c) => c.name)).not.toContain("person_version");
+    expect(after["race_archive"]!.columns.find((c) => c.name === "person_version")).toEqual({ name: "person_version", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 });
+    expect(after["race_archive"]!.columns.filter((c) => c.name !== "person_version")).toEqual(before["race_archive"]!.columns); // 既存の列は変わらない
+    expect(before["race_archive"]!.indexes.map((i) => i.name ?? "")).not.toContain("idx_race_archive_person_pending");
+    expect(after["race_archive"]!.indexes.map((i) => i.name ?? "")).toContain("idx_race_archive_person_pending");
+    expect(after["race_archive"]!.indexes.filter((i) => i.name !== "idx_race_archive_person_pending")).toEqual(before["race_archive"]!.indexes); // 既存の索引は変わらない
+    for (const [table, schema] of Object.entries(before)) {
+      if (table !== "race_archive") expect(after[table], table).toEqual(schema); // ほかの表は変わらない
+    }
+    // 追加のみ: ALTER TABLE ... ADD COLUMN・CREATE INDEX・CREATE TABLE・CREATE INDEX・CREATE TABLE だけ(UPDATE・DELETE・DROP を含まない)
+    const code = sqls[47]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    expect(code).not.toMatch(/\b(UPDATE|DELETE|DROP|INSERT)\b/i);
+    const statements = code.split(";").map((x) => x.trim()).filter((x) => x !== "");
+    expect(statements.map((x) => x.split(/\s+/).slice(0, 3).join(" "))).toEqual(["ALTER TABLE race_archive", "CREATE INDEX IF", "CREATE TABLE race_person_rows", "CREATE INDEX idx_race_person_rows_date", "CREATE TABLE person_year"]);
+    expect(statements[1]).toBe("CREATE INDEX IF NOT EXISTS idx_race_archive_person_pending ON race_archive (race_id) WHERE person_version IS NULL AND kind = 'central' AND race_date >= '2021-01-01'");
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter(sqls.slice(0, 47)))).not.toEqual([]); // 0048 を落とすと差分になる(空振りでない)
   });
 
   it("Issue #642: race_market_rows・market_edge・market_edge_meta は 0039 だけが足す新しい表で、race_archive.market_version(INTEGER・NULL 可)と部分索引 idx_race_archive_market_pending も 0039 だけが足す。0001〜0038 までには無い。D1 専用(D1_EXTRA_TABLES に宣言した)で、exe には無い。追加のみ", () => {

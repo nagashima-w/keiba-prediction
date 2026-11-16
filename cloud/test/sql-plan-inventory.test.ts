@@ -9,6 +9,7 @@ import { settleRaceBackfillSql } from "../src/race-backfill-state";
 import { recordSql as jockeyRecordSql } from "../src/jockey-names-repository";
 import { recordSql as trainerRecordSql } from "../src/trainer-names-repository";
 import { saveMarketRowsSql } from "../src/market-edge-repository";
+import { savePersonRowsSql } from "../src/person-stats-repository";
 import { classifyPlan, collectExportedSql, openMigratedDb, planDetails, SRC_DIR, type PlanKinds } from "./sql-plan";
 import { CHECK_HERE_TEMP_BTREE, EXCEPTIONS, EXCLUDED, EXISTING, HERE, type PlanEntry } from "./sql-plan-registry";
 
@@ -42,6 +43,7 @@ function builtSql(): Map<string, string> {
   out.set("jockey-names-repository.ts::recordSql", jockeyRecordSql(2));
   out.set("trainer-names-repository.ts::recordSql", trainerRecordSql(2));
   out.set("market-edge-repository.ts::saveMarketRowsSql", saveMarketRowsSql(2));
+  out.set("person-stats-repository.ts::savePersonRowsSql", savePersonRowsSql(2));
   return out;
 }
 
