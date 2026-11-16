@@ -126,12 +126,13 @@ describe("loadMarketEdge / attachMarketEdge(Issue #643)", () => {
     expect(await loadMarketEdge(failing, result([snapHorse(1)]))).toBeNull();
   });
 
-  it("注記の文: 参考(確かめ中)・分析に使っていない・窓の期間・計算日・意味(ポイント)・件数が少ない人は 0 に寄せる・分析の時点の値でない", async () => {
+  it("注記の文: 参考(確かめ中)・分析に使っていない・窓の期間・計算日・意味(ポイント)・件数が少ないほど 0 に寄せる・分析の時点の値でない", async () => {
     const r = result([snapHorse(1)]);
     const note = attachMarketEdge(viewOf(r), await loadMarketEdge(reader({ jockeys: [["J1", 100, 0.01]] }), r)).marketEdgeNote!;
-    for (const part of ["参考(確かめ中)", "分析(LLM・配分)には使っていません", "2024-11-16〜2026-11-15", "2026-11-16", "単勝オッズから見込まれる3着内の確率", "ポイント", "0 に寄せ", "分析した時点の値ではありません"]) {
+    for (const part of ["参考(確かめ中)", "分析(LLM・配分)には使っていません", "2024-11-16〜2026-11-15", "2026-11-16", "単勝オッズから見込まれる3着内の確率", "ポイント", "件数が少ないほど 0 に寄せてあります(「少」の印は 50 回未満)。", "分析した時点の値ではありません"]) {
       expect(note, part).toContain(part);
     }
+    expect(note).not.toContain("件数が少ない人(");
   });
 
   it("attachMarketEdge は元の view を変えない。null を渡すと、全馬 marketEdge が null・marketEdgeNote が null", async () => {
