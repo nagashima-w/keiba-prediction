@@ -13,7 +13,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { parseLimitOverride } from "./limit-override";
 import { aggregateMarketEdges } from "./market-edge-aggregate";
-import { isMarketEdgeDisabled, MARKET_EDGE_NIGHTLY_ROWS_MAX, RaceMarketEdgeCore, type MarketEdgeOptions, type RaceMarketEdgeStatus } from "./market-edge-core";
+import { isMarketEdgeDisabled, isPersonStatsEnabled, MARKET_EDGE_NIGHTLY_ROWS_MAX, RaceMarketEdgeCore, type MarketEdgeOptions, type RaceMarketEdgeStatus } from "./market-edge-core";
 import { D1MarketEdgeStore, type MarketEdgeDb } from "./market-edge-repository";
 import { aggregatePersonYearsFor } from "./person-stats-aggregate";
 import { D1PersonStatsStore, type PersonStatsDb } from "./person-stats-repository";
@@ -33,11 +33,6 @@ export interface RaceMarketEdgeEnv {
    * 市場の段の止める var(`"0"` だけが止める)とは向きが逆: 新しい書き込み(初回の埋め戻しで約 6 万行)を、公開と別に、メインが `"1"` にして動かすため。
    */
   PERSON_STATS_ENABLED?: string;
-}
-
-/** 人の段を動かす設定の判定(Worker の var `PERSON_STATS_ENABLED`)。**文字列 `"1"`(前後の空白は無視)だけ**が有効。 */
-export function isPersonStatsEnabled(value: string | undefined): boolean {
-  return value !== undefined && value.trim() === "1";
 }
 
 export class RaceMarketEdgeDO extends DurableObject<RaceMarketEdgeEnv> {

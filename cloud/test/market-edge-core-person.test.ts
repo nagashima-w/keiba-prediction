@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { RaceRecord } from "../../packages/core/src/scraper/race-record";
 import type { MarketAggregateResult } from "../src/market-edge-aggregate";
 import type { MarketRow } from "../src/market-edge-calc";
-import { MARKET_EDGE_MAX_NIGHTS, MARKET_EDGE_READ_COUNT_ROWS, RaceMarketEdgeCore, type MarketEdgeOptions } from "../src/market-edge-core";
+import { MARKET_EDGE_IDLE_MS, MARKET_EDGE_MAX_NIGHTS, MARKET_EDGE_READ_COUNT_ROWS, MARKET_EDGE_STEP_DELAY_MS, RaceMarketEdgeCore, isPersonStatsEnabled, type MarketEdgeOptions } from "../src/market-edge-core";
 import type { MarketPendingEntry } from "../src/market-edge-repository";
 import type { PersonAggregateResult } from "../src/person-stats-aggregate";
 import type { PersonRow } from "../src/person-stats-calc";
@@ -222,6 +222,16 @@ afterEach(() => {
   for (const h of harnesses.splice(0)) h.sql.close();
 });
 
+describe("isPersonStatsEnabled(var PERSON_STATS_ENABLED の判定)", () => {
+  it("文字列 \"1\"(前後の空白は無視)だけが有効。未設定・\"0\"・空・\"true\"・\"11\"・\"on\" などは無効(市場の段の止める var とは向きが逆)", () => {
+    expect(isPersonStatsEnabled("1")).toBe(true);
+    expect(isPersonStatsEnabled(" 1 ")).toBe(true);
+    for (const v of [undefined, "", "0", " 0 ", "true", "TRUE", "11", "on", "yes", "false", "01", "1.0"]) {
+      expect(isPersonStatsEnabled(v), JSON.stringify(v)).toBe(false);
+    }
+  });
+});
+
 describe("無効のとき(PERSON_STATS_ENABLED が \"1\" でない = personEnabled が true でない)は人の段が何もしない", () => {
   it("personEnabled が未設定・false・person の依存なしのどれでも、人の目録の列挙・人の保存・人の集計を呼ばず、DO の SQLite に ps_ のキーも作らない。R2 の読みは市場の段だけ", async () => {
     const runs: Array<{ options: MarketEdgeOptions; withPerson: boolean }> = [
@@ -339,6 +349,62 @@ describe("1 晩の書き込み行数の上限は市場の段と人の段で合�
     await h.drainNight();
     expect(h.marketSaves.flatMap((s) => s.done).length + h.personSaves.flatMap((s) => s.done).length).toBeGreaterThan(doneBefore);
     void MARKET_EDGE_READ_COUNT_ROWS;
+  });
+});
+
+describe("片方の段が空でも、もう片方が止まらない(定常状態で 1 時間に 1 ステップにならない)", () => {
+  /** 起床ごとに「次のアラームまでの間隔」を集める(起床の時刻 → 次のアラーム)。 */
+  async function gaps(h: Harness, wakes: number): Promise<number[]> {
+    const out: number[] = [];
+    for (let i = 0; i < wakes; i++) {
+      await h.wake();
+      if (h.alarm === null) break;
+      out.push(h.alarm - h.now);
+    }
+    return out;
+  }
+
+  it("市場が全件処理済み・人が未処理 100 件: 人が STEP_DELAY の間隔で進み、1 時間の休み(IDLE)に入らない。1 晩の時間帯の中で 100 件すべて取り込む", async () => {
+    const h = make({ personEnabled: true });
+    h.seed(100);
+    h.catalog.forEach((e) => (e.market = 1)); // 市場は追いついている
+    const g = await gaps(h, 8); // 人の取り込みは 5 ステップ(20 件 × 5)。8 回の起床は、市場の番を挟んで人が 4 ステップ進む間
+    expect(g.length).toBeGreaterThan(0);
+    expect(h.personSaves.flatMap((s) => s.done).length, "8 回の起床の間(数秒)に人が 4 ステップ(80 件)進んでいる").toBeGreaterThanOrEqual(80);
+    expect(Math.max(...g), "取り込みが残っている間は IDLE(1 時間)の休みを張らない").toBeLessThan(MARKET_EDGE_IDLE_MS);
+    expect(Math.max(...g)).toBeLessThanOrEqual(MARKET_EDGE_STEP_DELAY_MS);
+    // 1 晩の中で最後まで終わる
+    await h.drainNight();
+    expect(h.personSaves.flatMap((s) => s.done).sort()).toEqual(h.catalog.map((e) => e.raceId).sort());
+    expect(h.reads.every((r) => r.length <= 20)).toBe(true);
+  });
+
+  it("逆向き: 人が全件処理済み・市場が未処理 100 件: 市場が STEP_DELAY の間隔で進み、1 時間の休みに入らない。人の目録の確認は 1 時間に 1 回のまま", async () => {
+    const h = make({ personEnabled: true });
+    h.seed(100);
+    h.catalog.forEach((e) => (e.person = 1)); // 人は追いついている
+    const g = await gaps(h, 4); // 市場の取り込みは 5 ステップ。人は追いついていて休み中なので、毎回の起床で市場が進む
+    expect(h.marketSaves.flatMap((s) => s.done).length).toBeGreaterThanOrEqual(80);
+    expect(Math.max(...g)).toBeLessThanOrEqual(MARKET_EDGE_STEP_DELAY_MS);
+    expect(h.personPages.length, "人の目録は最初の 1 回だけ確かめ、休み(1 時間)の間は確かめない").toBe(1);
+    await h.drainNight();
+    expect(h.marketSaves.flatMap((s) => s.done).sort()).toEqual(h.catalog.map((e) => e.raceId).sort());
+  });
+
+  it("両方が空のときだけ IDLE(1 時間)の休みになる", async () => {
+    const h = make({ personEnabled: true });
+    h.seed(5);
+    h.catalog.forEach((e) => {
+      e.market = 1;
+      e.person = 1;
+    });
+    const g = await gaps(h, 6);
+    expect(g.length).toBeGreaterThan(0);
+    expect(g.every((x) => x === MARKET_EDGE_IDLE_MS || x <= MARKET_EDGE_STEP_DELAY_MS)).toBe(true); // 短い間隔は、1 回ずつの確認の合間だけ
+    expect(Math.max(...g)).toBe(MARKET_EDGE_IDLE_MS);
+    const last = g[g.length - 1]!;
+    expect(last).toBe(MARKET_EDGE_IDLE_MS); // 最後は 1 時間の休みで落ち着く
+    expect(h.reads).toEqual([]); // 何も読まない
   });
 });
 
