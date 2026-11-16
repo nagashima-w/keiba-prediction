@@ -55,7 +55,7 @@ const ORIGIN_MISMATCH = JSON.stringify({ ok: false, error: { type: "origin-misma
 const NO_QUERY = "このパスにクエリは指定できません";
 
 /** 全ルートの許可キーの和集合(最後の describe が、ソースの `*_PARAMS` の和集合と一致することを固定する)。 */
-const ALL_KEYS = ["cells", "days", "kaisai_date", "limit", "race_id", "refresh", "status", "type", "venue"];
+const ALL_KEYS = ["cells", "days", "kaisai_date", "kind", "limit", "race_id", "refresh", "status", "type", "venue"];
 
 interface Route {
   readonly name: string;
@@ -78,6 +78,7 @@ const ROUTES: readonly Route[] = [
   { name: "races", path: "/api/races", constant: "RACES_PARAMS", allowed: ["kaisai_date", "venue"], message: "クエリは kaisai_date(必須)と venue(必須)だけを、それぞれ1つまで指定できます", site: true },
   { name: "plan", path: "/api/plan", constant: "KAISAI_DATE_PARAMS", allowed: ["kaisai_date"], message: "クエリは kaisai_date だけを1つ指定できます", site: true },
   { name: "targets", path: "/api/targets", constant: "KAISAI_DATE_PARAMS", allowed: ["kaisai_date"], message: "クエリは kaisai_date だけを1つ指定できます", site: true },
+  { name: "market-edges", path: "/api/market-edges", constant: "MARKET_EDGES_PARAMS", allowed: ["kind"], message: "kind を jockey か trainer で 1 つ指定してください", site: true },
   { name: "netkeiba/check", path: "/api/netkeiba/check", constant: "CHECK_PARAMS", allowed: ["race_id", "type"], message: "クエリは race_id(必須)と type(省略可。shutuba または grade-winner)だけを、それぞれ1つ指定してください", site: true },
   { name: "jra/check", path: "/api/jra/check", constant: "NO_PARAMS", allowed: [], message: NO_QUERY, site: true },
   { name: "analyses", path: "/api/analyses", constant: "ANALYSES_PARAMS", allowed: ["race_id", "kaisai_date", "limit"], message: "クエリは race_id・kaisai_date・limit だけを、それぞれ1つまで指定できます", site: false },
@@ -89,7 +90,7 @@ const ROUTES: readonly Route[] = [
   { name: "monthly-reports/{month}", path: "/api/monthly-reports/202609", constant: "NO_PARAMS", allowed: [], message: NO_QUERY, site: false },
 ];
 
-describe("許可リストの外のキーは 400(全 17 ルート。ほかのルートで許可されているキー・どのルートにも無いキー・重複・大文字違い)", () => {
+describe("許可リストの外のキーは 400(全 18 ルート。ほかのルートで許可されているキー・どのルートにも無いキー・重複・大文字違い)", () => {
   for (const route of ROUTES) {
     const foreign = [...ALL_KEYS.filter((k) => !route.allowed.includes(k)), "zzz"];
 
@@ -117,11 +118,11 @@ describe("許可リストの外のキーは 400(全 17 ルート。ほかのル�
   }
 });
 
-describe("別サイト(Sec-Fetch-Site が same-origin・none 以外)の検査は、クエリの検査より先(別サイト検査をする 10 ルート)", () => {
+describe("別サイト(Sec-Fetch-Site が same-origin・none 以外)の検査は、クエリの検査より先(別サイト検査をする 11 ルート)", () => {
   const checked = ROUTES.filter((r) => r.site);
 
-  it("前提: 別サイトを検査するルートは 10 本(Issue #488 で jra/check が加わり 8 → 9、Issue #463 で allocation-export が加わり 9 → 10)", () => {
-    expect(checked.map((r) => r.name)).toEqual(["horse-runs", "baba-fetch", "verify", "prior-export", "allocation-export", "races", "plan", "targets", "netkeiba/check", "jra/check"]);
+  it("前提: 別サイトを検査するルートは 11 本(Issue #488 で jra/check が加わり 8 → 9、Issue #463 で allocation-export が加わり 9 → 10、Issue #644 で market-edges が加わり 10 → 11)", () => {
+    expect(checked.map((r) => r.name)).toEqual(["horse-runs", "baba-fetch", "verify", "prior-export", "allocation-export", "races", "plan", "targets", "market-edges", "netkeiba/check", "jra/check"]);
   });
 
   for (const route of checked) {
