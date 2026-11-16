@@ -56,7 +56,7 @@ export function parseJraOddsPage(page: JraOddsPage, html: string, raceDate: stri
       return { status: "unavailable" };
     }
     const cells = [...parsed.result.odds.entries()];
-    return { status: "ok", page, json: JSON.stringify({ v: PAYLOAD_VERSION, page, officialDatetime: parsed.header?.officialDatetime ?? null, cells }) };
+    return { status: "ok", page, json: JSON.stringify({ v: PAYLOAD_VERSION, page, officialDatetime: parsed.header?.officialDatetime ?? null, oddsStatus: parsed.header?.oddsStatus ?? null, cells }) };
   } catch {
     return { status: "parse-error" };
   }

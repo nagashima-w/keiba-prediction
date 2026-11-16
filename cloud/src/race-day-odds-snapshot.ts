@@ -49,6 +49,18 @@ export type OddsSnapshotState = "pending" | "done" | "abandoned";
  */
 export type OddsSnapshotHorse = readonly [number, number | null, number | null, number | null, number | null, string | null];
 
+/** 組合せの頁が取れなかった理由(固定の語。既存の語から選ぶ。新しい語は作らない)。`fetch-failed` = 頁を取れなかった / `unavailable` = 表が読めない・全組が票数なし / `parse-error` = 読み取りの失敗。 */
+export type OddsSnapshotComboErr = "fetch-failed" | "unavailable" | "parse-error";
+/** 組合せの 1 頁(馬連・枠連)。取れたとき = 取った時刻 t・頁の時刻 dt・頁の状態 st・組ごとの値 o(キーは小さい番号を先にした 2 桁連結。票数なしは null)。取れなかったとき = {err}。 */
+export type OddsSnapshotComboPage =
+  | { readonly t: number; readonly dt: string | null; readonly st: string | null; readonly o: Readonly<Record<string, number | null>> }
+  | { readonly err: OddsSnapshotComboErr };
+/** 馬連・枠連の記録(#751)。D1 の `combos_json`。 */
+export interface OddsSnapshotCombos {
+  readonly umaren: OddsSnapshotComboPage;
+  readonly wakuren: OddsSnapshotComboPage;
+}
+
 /** 1 レースの記録(DO の `payload_json` と、D1 の行の元)。 */
 export interface OddsSnapshotPayload {
   readonly raceId: string;
@@ -68,6 +80,8 @@ export interface OddsSnapshotPayload {
   readonly attempts: number;
   /** `ok` のときだけ(馬番の昇順)。 */
   readonly horses: readonly OddsSnapshotHorse[] | null;
+  /** 馬連・枠連の全組(#751)。`ok` のときだけ(それ以外は null。古い形の DO の結果にも無い)。単勝・複勝が取れていれば、組合せが取れなくても `ok`(頁ごとに {err})。 */
+  readonly combos: OddsSnapshotCombos | null;
 }
 
 /** 頁の値から馬ごとの配列を作る(馬番の昇順。単勝・複勝・馬の ID のどれかにだけある馬番も落とさない)。 */
@@ -82,9 +96,52 @@ export function horsesOfSnapshot(snapshot: OddsSnapshot, horseIds: Readonly<Reco
     });
 }
 
+/**
+ * 取得キャッシュの組合せの JSON(`jra-odds-cache.ts` の形。`cells` = [キー, {oddsMin, ...}] の配列)から、記録の 1 頁を作る。形が違えば null。
+ * 値は `oddsMin` だけ(馬連・枠連は単一の値で、`oddsMax`・人気は無い)。票数なしの組は null のまま残す。
+ */
+export function comboPageOfCache(json: string, fetchedAt: number): OddsSnapshotComboPage | null {
+  try {
+    const p = JSON.parse(json) as { officialDatetime?: unknown; oddsStatus?: unknown; cells?: unknown };
+    if (!Array.isArray(p.cells)) {
+      return null;
+    }
+    const o: Record<string, number | null> = {};
+    for (const cell of p.cells as unknown[]) {
+      if (!Array.isArray(cell) || typeof cell[0] !== "string") {
+        return null;
+      }
+      const odds = (cell[1] as { oddsMin?: unknown } | null)?.oddsMin;
+      o[cell[0]] = typeof odds === "number" && Number.isFinite(odds) ? odds : null;
+    }
+    return {
+      t: fetchedAt,
+      dt: typeof p.officialDatetime === "string" ? p.officialDatetime : null,
+      st: typeof p.oddsStatus === "string" ? p.oddsStatus : null,
+      o,
+    };
+  } catch {
+    return null;
+  }
+}
+
 const isNumOrNull = (v: unknown): v is number | null => v === null || (typeof v === "number" && Number.isFinite(v));
 const isHorse = (v: unknown): v is OddsSnapshotHorse =>
   Array.isArray(v) && v.length === 6 && typeof v[0] === "number" && v.slice(1, 5).every(isNumOrNull) && (v[5] === null || typeof v[5] === "string");
+
+const isComboPage = (v: unknown): v is OddsSnapshotComboPage => {
+  if (typeof v !== "object" || v === null) {
+    return false;
+  }
+  const page = v as Record<string, unknown>;
+  if ("err" in page) {
+    return page.err === "fetch-failed" || page.err === "unavailable" || page.err === "parse-error";
+  }
+  return (
+    typeof page.t === "number" && Number.isFinite(page.t) && (page.dt === null || typeof page.dt === "string") && (page.st === null || typeof page.st === "string") &&
+    typeof page.o === "object" && page.o !== null && !Array.isArray(page.o) && Object.values(page.o).every(isNumOrNull)
+  );
+};
 
 /** DO に持つ結果(`payload_json`)を読む。形が違う・整合しないなら null(呼び出し側は、持っていないものとして取り直す)。 */
 export function parseOddsSnapshotPayload(text: string): OddsSnapshotPayload | null {
@@ -102,6 +159,14 @@ export function parseOddsSnapshotPayload(text: string): OddsSnapshotPayload | nu
     if (typeof p.takenAtMs !== "number" || !Number.isFinite(p.takenAtMs) || !(p.officialDatetime === null || typeof p.officialDatetime === "string") || !(p.oddsStatus === null || typeof p.oddsStatus === "string")) {
       return null;
     }
+    // combos は #751 で足した。無い(undefined)古い形も受け付け、null として読む(デプロイの前に DO に置かれた結果を捨てない)。
+    const combos = p.combos ?? null;
+    if (combos !== null) {
+      const c = combos as Record<string, unknown>;
+      if (typeof combos !== "object" || !isComboPage(c.umaren) || !isComboPage(c.wakuren) || p.status !== "ok") {
+        return null;
+      }
+    }
     if (p.status === "ok") {
       if (p.reason !== null || !Array.isArray(p.horses) || !p.horses.every(isHorse)) {
         return null;
@@ -109,7 +174,7 @@ export function parseOddsSnapshotPayload(text: string): OddsSnapshotPayload | nu
     } else if (p.horses !== null || (p.reason !== "too-late" && p.reason !== "fetch-failed")) {
       return null;
     }
-    return p as unknown as OddsSnapshotPayload;
+    return { ...p, combos } as unknown as OddsSnapshotPayload;
   } catch {
     return null;
   }
