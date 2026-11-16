@@ -44,9 +44,10 @@ describe("buildMarketEdgesView(Issue #644)", () => {
     const v = buildMarketEdgesView("jockey", [edge("a", "甲", 100, 0.01)], META);
     expect(v.ok).toBe(true);
     expect(v.kind).toBe("jockey");
-    for (const s of ["参考(確かめ中)", "分析(LLM・配分)には使っていません", "2024-11-17〜2026-11-15", "単勝オッズから見込まれる", "0 に寄せ", "2026-11-16", "芝・ダート別や競馬場別の値はありません"]) {
+    for (const s of ["参考(確かめ中)", "分析(LLM・配分)には使っていません", "2024-11-17〜2026-11-15", "単勝オッズから見込まれる", "件数が少ないほど 0 に寄せてあります(「少」の印は 50 回未満)。", "2026-11-16", "芝・ダート別や競馬場別の値はありません"]) {
       expect(v.note).toContain(s);
     }
+    expect(v.note).not.toContain("件数が少ない人(");
   });
 
   it("meta が無いとき(計算前)は rows が空で、「まだ計算していません」の文。行があっても返さない", () => {
