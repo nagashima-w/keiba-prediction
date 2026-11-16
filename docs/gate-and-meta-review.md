@@ -108,10 +108,10 @@
   ルートの CI(`ci.yml`)は`pnpm typecheck`・`pnpm test` を実行する
   (Issue #248 で exe の公開を止めたあとも、この関門は残してある。`pnpm --filter @keiba/app build` は #285 で
   packages/app を削除したので無くなった。実行しても何もせず exit 0 になるため、検証要件に書かない。
-  cloud の check・smoke ジョブは packages/core・scripts のテストを走らせないので、**cloud に触れない変更でも、ルートの2コマンドは検証要件に入れる**)。
-  `deploy-cloud.yml` の check ジョブは、typecheck・test・deploy:dry・
-  `wrangler d1 migrations apply DB --local` を、smoke ジョブは smoke を実行する(Issue #288 で分けた。2 つは並列に走り、
-  deploy は `needs: [check, smoke]` で両方を待つ)。ブリーフを書く前に
+  cloud の check・test・smoke ジョブは packages/core・scripts のテストを走らせないので、**cloud に触れない変更でも、ルートの2コマンドは検証要件に入れる**)。
+  `deploy-cloud.yml` の check ジョブは、typecheck・deploy:dry・
+  `wrangler d1 migrations apply DB --local` を、test ジョブは test を 4 つに分けて、smoke ジョブは smoke を 3 つの組に分けて実行する(Issue #288・#762 で分けた。どれも並列に走り、
+  deploy は `needs: [check, test, smoke]` で全部を待つ)。ブリーフを書く前に
   ワークフローの `run:` を列挙する。**smoke は固定のポートと同じレースIDを使うので、2つの
   作業ツリーで同時に動かすと互いに干渉する**(#205 で、実装担当とレビュアーの smoke がぶつかった)。
   実行の前に `ps` で、ほかの wrangler・workerd が動いていないことを確かめる
