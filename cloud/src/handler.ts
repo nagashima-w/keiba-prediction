@@ -11,6 +11,8 @@ import type { AccessEnv } from "./access-jwt";
 import { D1AnalysisStore, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { checkD1 } from "./d1-health";
 import { VERIFY_NAME } from "./verify-name";
+import { listBabaPastPdfsByYear } from "./baba-past-repository";
+import { BABA_PAST_FIRST_YEAR, BABA_PAST_LAST_YEAR, JRA_BABA_PAST_BACKFILL_NAME, type BabaPastBackfillStatus } from "./jra-baba-past-backfill-core";
 import { readHorseRunsStatus, STATUS_DAYS_DEFAULT, STATUS_DAYS_MAX } from "./horse-runs-repository";
 import { webhookStatus } from "./notify-send";
 import { resolveAppBaseUrl } from "./notify-link";
@@ -185,6 +187,20 @@ export interface JraBlinkerBackfillNamespaceLike {
   get(id: any): JraBlinkerBackfillStubLike;
 }
 
+/** 過去の馬場の埋め戻しの DO(JraBabaPastBackfillDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #769。 */
+export interface JraBabaPastBackfillStubLike {
+  /** アラームが無ければ張る(cron の `scheduled` から 21 時と 23 時に)。 */
+  kick(): Promise<void>;
+  /** 進み具合(読み取りだけ。管理者の `GET /api/baba-past` が呼ぶ)。 */
+  status(): Promise<BabaPastBackfillStatus>;
+}
+
+/** 過去の馬場の埋め戻しの DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 `JRA_BABA_PAST_BACKFILL_NAME`。jra-baba-past-backfill-core.ts)。 */
+export interface JraBabaPastBackfillNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): JraBabaPastBackfillStubLike;
+}
+
 /** 過去の結果の取得の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link RACE_ARCHIVE_FETCH_NAME})。 */
 export interface RaceArchiveNamespaceLike {
   idFromName(name: string): any;
@@ -286,6 +302,8 @@ export interface Env extends AccessEnv {
   JRA_HORSE_BACKFILL?: JraHorseBackfillNamespaceLike;
   /** 過去のレースのブリンカー着用の埋め戻しの DO(JraBlinkerBackfillDO。wrangler.toml の binding)。Issue #698。本番では常にある。無い構成では cron は kick しない。 */
   JRA_BLINKER_BACKFILL?: JraBlinkerBackfillNamespaceLike;
+  /** 過去の馬場の埋め戻しの DO(JraBabaPastBackfillDO。wrangler.toml の binding)。Issue #769。本番では常にある。無い構成では cron は kick せず、`GET /api/baba-past` の status は null。 */
+  JRA_BABA_PAST_BACKFILL?: JraBabaPastBackfillNamespaceLike;
   /** 検証の集計の DO(VerifyReportDO。wrangler.toml の binding)。Issue #219。本番では常にある。無い構成では `GET /api/verify` が 503 になる。 */
   VERIFY_REPORT?: VerifyNamespaceLike;
   /** 統計モデル用の書き出しの DO(PriorExportDO。wrangler.toml の binding)。Issue #266。本番では常にある。無い構成では `GET /api/export/prior-dataset` が 503 になる。 */
@@ -590,6 +608,13 @@ export async function handle(
     return handleAllocationExport(request, env);
   }
 
+  if (pathname === "/api/baba-past") {
+    // 管理者専用(route-policy.ts)。過去の馬場の埋め戻しの進み具合(DO の status と D1 の baba_past_pdfs の年ごとの範囲読み)を読むだけ。JRA・netkeiba・R2・LLM には出ない。GET だけ。Issue #769。
+    if (method !== "GET") {
+      return methodNotAllowed("GET");
+    }
+    return handleBabaPast(request, env);
+  }
   if (pathname === "/api/horse-runs") {
     // 管理者専用(route-policy.ts)。D1 の horse_runs・horse_run_saves を読むだけ(netkeiba にも LLM にも出ない)。GET だけ。Issue #256 段階A。
     if (method !== "GET") {
@@ -814,6 +839,59 @@ async function handleRaceArchiveResume(request: Request, env: Env, which: RaceAr
 }
 
 const HORSE_RUNS_PARAMS = new Set(["days", "cells"]);
+
+/**
+ * `GET /api/baba-past`(Issue #769。管理者専用): 過去の馬場の埋め戻し(JraBabaPastBackfillDO)の進み具合。DO の `status()`(止まっているか・終わったか・待ちの理由・1 日の書き込み行数・積んだ PDF の数・年の頁の状態)と、
+ * 年ごとの PDF の記録の集計(D1 の `baba_past_pdfs` の主キーの範囲読み。PDF の数・書いた行数・結果の分類別の数)を返す。**PDF の名前・URL・R2 のキーは出さない**(応答は明示の許可リストで作る)。
+ * クエリは受け付けない。読み取り専用。順序は: `Sec-Fetch-Site`(別サイトからなら 403)→ 入力の検証(400。ここまでで D1・DO に触れない)→ DO・D1(失敗は 503 の固定の種類名だけ)。
+ */
+async function handleBabaPast(request: Request, env: Env): Promise<Response> {
+  const crossSite = crossSiteRejection(request);
+  if (crossSite !== null) {
+    return crossSite;
+  }
+  const url = new URL(request.url);
+  if (hasInvalidQueryKeys(url, NO_PARAMS)) {
+    return badRequest("このパスにクエリは指定できません");
+  }
+  try {
+    const ns = env.JRA_BABA_PAST_BACKFILL;
+    const st = ns === undefined ? null : await ns.get(ns.idFromName(JRA_BABA_PAST_BACKFILL_NAME)).status();
+    const first = st?.firstYear ?? BABA_PAST_FIRST_YEAR;
+    const last = st?.lastYear ?? BABA_PAST_LAST_YEAR;
+    const pdfs: Record<string, { total: number; rows: number; results: Record<string, number> }> = {};
+    for (let year = first; year <= last; year++) {
+      const records = await listBabaPastPdfsByYear(env.DB, year);
+      const results: Record<string, number> = {};
+      let rows = 0;
+      for (const r of records) {
+        results[r.result] = (results[r.result] ?? 0) + 1;
+        rows += r.rowsSaved;
+      }
+      pdfs[String(year)] = { total: records.length, rows, results };
+    }
+    return json({
+      ok: true,
+      status:
+        st === null
+          ? null
+          : {
+              enabled: st.enabled,
+              first_year: st.firstYear,
+              last_year: st.lastYear,
+              finished: st.finished,
+              wait_reason: st.waitReason,
+              day: st.day,
+              day_rows: st.dayRows,
+              queued: st.queued,
+              years: st.years,
+            },
+      pdfs,
+    });
+  } catch {
+    return json({ ok: false, error: { type: "baba-past-error" } }, 503);
+  }
+}
 
 /**
  * `GET /api/horse-runs[?days=N][&cells=1]`(Issue #256 段階A。管理者専用): 各馬の戦績の蓄積(D1 の `horse_runs`・`horse_run_saves`)の状態。

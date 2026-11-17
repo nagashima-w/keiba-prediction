@@ -123,6 +123,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/horse-runs", ADMIN_ONLY),
   // 馬場の取得の結果の診断(Issue #360)。取得の時刻・結果の分類・捨てた競馬場の理由を読む(D1 の SELECT だけ。JRA にも出ない)。JRA への取得の利用の記録なので管理者だけ。GET だけ
   exact("/api/baba-fetch", ADMIN_ONLY),
+  // 過去の馬場の埋め戻しの進み具合(Issue #769)。DO の status と D1 の baba_past_pdfs の読み取りだけ(JRA にも出ない)。取得の運用の情報なので管理者だけ。GET だけ
+  exact("/api/baba-past", ADMIN_ONLY),
   // Worker から JRA のページに届くかの確認(Issue #488)。開くたびに JRA へ 2 回出る(取得を起こす)ので管理者だけ。GET だけ
   exact("/api/jra/check", ADMIN_ONLY),
 ];

@@ -52,6 +52,11 @@ export const HERE: Record<string, PlanEntry> = {
     "jra-horse-repository.ts::LIST_HORSE_IDS_SQL",
     "jra-horse-repository.ts::FILTER_TARGETS_SQL",
     "jra-horse-repository.ts::INSERT_HORSE_PROFILES_SQL",
+    // 過去の馬場の公表値の保存と、取り終えた PDF の確認・年ごとの記録の読み出し(Issue #769)。json_each から baba_past_pdfs の主キーの引き・json_each からの UPSERT 2 本(主キーへの書き込みだけ)・source_pdf の主キーの範囲読み(年の先頭で絞る)。
+    "baba-past-repository.ts::FILTER_DONE_SQL",
+    "baba-past-repository.ts::INSERT_PAST_ROWS_SQL",
+    "baba-past-repository.ts::UPSERT_PDF_SQL",
+    "baba-past-repository.ts::LIST_PDFS_BY_YEAR_SQL",
     // 過去のレースのブリンカー着用の保存と、取り終えたレースの確認(Issue #698)。json_each から past_blinker_races の主キーの引き・json_each からの INSERT 2 本。
     "past-blinker-repository.ts::FILTER_DONE_SQL",
     "past-blinker-repository.ts::INSERT_BLINKER_HORSES_SQL",
