@@ -81,6 +81,7 @@ const ROUTES: readonly Route[] = [
   { name: "market-edges", path: "/api/market-edges", constant: "MARKET_EDGES_PARAMS", allowed: ["kind"], message: "kind を jockey か trainer で 1 つ指定してください", site: true },
   { name: "netkeiba/check", path: "/api/netkeiba/check", constant: "CHECK_PARAMS", allowed: ["race_id", "type"], message: "クエリは race_id(必須)と type(省略可。shutuba または grade-winner)だけを、それぞれ1つ指定してください", site: true },
   { name: "jra/check", path: "/api/jra/check", constant: "NO_PARAMS", allowed: [], message: NO_QUERY, site: true },
+  { name: "baba-past", path: "/api/baba-past", constant: "NO_PARAMS", allowed: [], message: NO_QUERY, site: true }, // Issue #769
   { name: "analyses", path: "/api/analyses", constant: "ANALYSES_PARAMS", allowed: ["race_id", "kaisai_date", "limit"], message: "クエリは race_id・kaisai_date・limit だけを、それぞれ1つまで指定できます", site: false },
   { name: "analyses/status", path: "/api/analyses/status", constant: "STATUS_PARAMS", allowed: ["kaisai_date", "race_id"], message: "クエリは kaisai_date(必須)と race_id(任意)だけを、それぞれ1つまで指定できます", site: false },
   { name: "analyses/{id}", path: "/api/analyses/123", constant: "NO_PARAMS", allowed: [], message: NO_QUERY, site: false },
@@ -122,7 +123,7 @@ describe("別サイト(Sec-Fetch-Site が same-origin・none 以外)の検査は
   const checked = ROUTES.filter((r) => r.site);
 
   it("前提: 別サイトを検査するルートは 11 本(Issue #488 で jra/check が加わり 8 → 9、Issue #463 で allocation-export が加わり 9 → 10、Issue #644 で market-edges が加わり 10 → 11)", () => {
-    expect(checked.map((r) => r.name)).toEqual(["horse-runs", "baba-fetch", "verify", "prior-export", "allocation-export", "races", "plan", "targets", "market-edges", "netkeiba/check", "jra/check"]);
+    expect(checked.map((r) => r.name)).toEqual(["horse-runs", "baba-fetch", "verify", "prior-export", "allocation-export", "races", "plan", "targets", "market-edges", "netkeiba/check", "jra/check", "baba-past"]);
   });
 
   for (const route of checked) {

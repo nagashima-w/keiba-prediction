@@ -851,8 +851,8 @@ async function handleBabaPast(request: Request, env: Env): Promise<Response> {
     return crossSite;
   }
   const url = new URL(request.url);
-  if (hasInvalidQueryKeys(url, new Set())) {
-    return badRequest("クエリは受け付けません");
+  if (hasInvalidQueryKeys(url, NO_PARAMS)) {
+    return badRequest("このパスにクエリは指定できません");
   }
   try {
     const ns = env.JRA_BABA_PAST_BACKFILL;
