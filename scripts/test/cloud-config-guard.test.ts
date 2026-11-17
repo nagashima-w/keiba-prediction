@@ -101,8 +101,8 @@ describe("wrangler.toml", () => {
     const field = (body: string, key: string): string | null => new RegExp(`^${key} = \\[([^\\]]*)\\]$`, "m").exec(body)?.[1] ?? null;
     const tagOf = (body: string): string | null => /^tag = "(v\d+)"$/m.exec(body)?.[1] ?? null;
     // 前提: migration を実際に読めている(空振りでない)。v1〜v15 の 15 ブロック
-    expect(blocks.length, "migration ブロックの数(v1〜v17)").toBe(17);
-    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17"]);
+    expect(blocks.length, "migration ブロックの数(v1〜v18)").toBe(18);
+    expect(blocks.map(tagOf)).toEqual(["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18"]);
     // 追加(new_sqlite_classes)は v1〜v8・v10〜v13 の各 1 クラス。v3 の CloudMigration は残す(v9 の deleted_classes が指す先行の migration。wrangler が同じ toml 内で存在を検査する)
     expect(blocks.map((b) => field(b, "new_sqlite_classes"))).toEqual([
       '"NetkeibaGate"',
@@ -122,9 +122,10 @@ describe("wrangler.toml", () => {
       '"JraBlinkerBackfillDO"',
       '"RaceArchiveNarFetchDO"',
       '"RaceOikiriFetchDO"',
+      '"JraBabaPastBackfillDO"',
     ]);
     // 削除(deleted_classes)は v9 の 1 回だけで、中身は CloudMigration ちょうど 1 クラス。他のクラスの削除は禁じる
-    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"', null, null, null, null, null, null, null, null]);
+    expect(blocks.map((b) => field(b, "deleted_classes"))).toEqual([null, null, null, null, null, null, null, null, '"CloudMigration"', null, null, null, null, null, null, null, null, null]);
     expect((tomlCode.match(/deleted_classes/g) ?? []).length, "deleted_classes は toml 全体で 1 回").toBe(1);
     // v9 は削除だけ(同じブロックに追加・改名・移管を混ぜない)
     expect(blocks[8]!.trim().split("\n")).toEqual(['tag = "v9"', 'deleted_classes = ["CloudMigration"]']);
@@ -161,9 +162,11 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "JraHorseBackfillDO"$/m);
     expect(tomlCode).toMatch(/^name = "JRA_BLINKER_BACKFILL"$/m);
     expect(tomlCode).toMatch(/^class_name = "JraBlinkerBackfillDO"$/m);
+    expect(tomlCode).toMatch(/^name = "JRA_BABA_PAST_BACKFILL"$/m); // Issue #769: 過去の馬場の埋め戻しの DO
+    expect(tomlCode).toMatch(/^class_name = "JraBabaPastBackfillDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|transferred_classes|new_classes)\s*=/m);
     // DO のバインディングはちょうど14(NETKEIBA_GATE・RACE_DAY・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT・PRIOR_EXPORT・MONTHLY_REPORT・ALLOCATION_EXPORT・RACE_ARCHIVE_FETCH〈Issue #554〉・RACE_ARCHIVE_RUNS〈Issue #590〉・RACE_MARKET_EDGE〈Issue #642〉・JRA_HORSE_BACKFILL〈Issue #697〉・JRA_BLINKER_BACKFILL〈Issue #698〉。Issue #394 で CLOUD_MIGRATION を外し、Issue #463 で ALLOCATION_EXPORT を足した)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(15); // Issue #635: 14 本目 = RACE_ARCHIVE_FETCH_NAR / Issue #731: 15 本目 = RACE_ARCHIVE_FETCH_OIKIRI
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(16); // Issue #635: 14 本目 = RACE_ARCHIVE_FETCH_NAR / Issue #731: 15 本目 = RACE_ARCHIVE_FETCH_OIKIRI / Issue #769: 16 本目 = JRA_BABA_PAST_BACKFILL
     // v10 は追加だけ(同じブロックに削除・改名・移管を混ぜない)
     expect(blocks[9]!.trim().split("\n")).toEqual(['tag = "v10"', 'new_sqlite_classes = ["AllocationExportDO"]']);
     // v11 も追加だけ(Issue #554。過去の結果の取得の DO)
@@ -180,6 +183,8 @@ describe("wrangler.toml", () => {
     expect(blocks[15]!.trim().split("\n")).toEqual(['tag = "v16"', 'new_sqlite_classes = ["RaceArchiveNarFetchDO"]']);
     // v17 も追加だけ(Issue #731。過去のレースの追い切りの評価の取得の DO)
     expect(blocks[16]!.trim().split("\n")).toEqual(['tag = "v17"', 'new_sqlite_classes = ["RaceOikiriFetchDO"]']);
+    // v18 も追加だけ(Issue #769。過去の馬場の公表値の埋め戻しの DO)
+    expect(blocks[17]!.trim().split("\n")).toEqual(['tag = "v18"', 'new_sqlite_classes = ["JraBabaPastBackfillDO"]']);
   });
 
   it("Issue #206・#249: cron はちょうど2本で `0 12 * * *`(UTC 12:00 = JST 21:00)と `0 14 * * *`(UTC 14:00 = JST 23:00)。朝 9 時の定時実行は無い。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -697,14 +702,14 @@ describe("wrangler.toml", () => {
     // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つと、#642 の 1 晩の上限(Issue #669)と、JRA のオッズを使うか(Issue #675)の 5 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
     const varsBody = /^\[vars\]\n((?:[^\[\n][^\n]*\n|\n)*)/m.exec(tomlCode)?.[1] ?? "";
     const varKeys = [...varsBody.matchAll(/^([A-Z_]+)\s*=/gm)].map((m) => m[1]);
-    expect(varKeys.sort()).toEqual(["JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "PERSON_STATS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT", "RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]); // Issue #635: 地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT)を足した
+    expect(varKeys.sort()).toEqual(["JRA_BABA_PAST_BACKFILL_ENABLED", "JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "PERSON_STATS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT", "RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]); // Issue #635: 地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT)を足した
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);
     expect(tomlCode).not.toMatch(/^\[secrets\]/m);
     expect(tomlCode).not.toMatch(/keep_vars/);
   });
 
   it("Issue #655・#669: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 20000 ミリ秒(2026-11-15 の #745 で一度 30000 に広げ、2026-11-16 に #670 で 1 レースあたりの書き込みが減ったので 20000 に戻した)(書き込みが Free の 1 日 10 万行に迫ったため5000 から広げた)。#642 の 1 晩の上限は 1〜20000 未満の数(止める \"0\" ではない)。取得の止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む・5000)は変えない", () => {
-    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "1000"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "8000"\nRACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "10000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"\nPERSON_STATS_ENABLED = "0"$/m);
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "1000"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "8000"\nRACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "10000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"\nPERSON_STATS_ENABLED = "0"\nJRA_BABA_PAST_BACKFILL_ENABLED = "0"$/m);
     // Issue #669: #642 の上限は、止める "0" ではなく、既定(20000)より小さい正の整数。取得の間隔は parseArchiveMinIntervalMs の範囲(1500〜60000)内
     const edgeLimit = Number(/^RACE_MARKET_EDGE_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1]);
     expect(edgeLimit).toBeGreaterThanOrEqual(1);
@@ -1398,7 +1403,7 @@ describe("Issue #216・#394・#402: 移行の DO(CloudMigration)は削除済み�
       if (b > 0) bindingSites[f] = b;
     }
     // kick を呼ぶのは scheduled.ts(毎日の起動)と result-backfill-do.ts(DO 自身が getStatus・kick の RPC から core に委譲する 2 つ)だけ
-    expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "jra-horse-backfill-do.ts": 1, "jra-blinker-backfill-do.ts": 1, "scheduled.ts": 8 }); // Issue #731: 追い切りの取得の kick を足して 7 → 8。Issue #635: 地方の交流重賞の取得の kick を足して 6 → 7(`grep -o "\.kick()" cloud/src/scheduled.ts | wc -l`)。以下は元の注記: scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)+ 馬ごとの頁の埋め戻し(Issue #697。21 時・23 時。DO 自身は kick を RPC から core に委譲する 1 つ)+ 過去のブリンカーの埋め戻し(Issue #698。同じ)
+    expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "jra-horse-backfill-do.ts": 1, "jra-blinker-backfill-do.ts": 1, "jra-baba-past-backfill-do.ts": 1, "scheduled.ts": 9 }); // Issue #769: 過去の馬場の埋め戻しの kick を足して 8 → 9(DO の 1 つ)。Issue #731: 追い切りの取得の kick を足して 7 → 8。Issue #635: 地方の交流重賞の取得の kick を足して 6 → 7(`grep -o "\.kick()" cloud/src/scheduled.ts | wc -l`)。以下は元の注記: scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)+ 馬ごとの頁の埋め戻し(Issue #697。21 時・23 時。DO 自身は kick を RPC から core に委譲する 1 つ)+ 過去のブリンカーの埋め戻し(Issue #698。同じ)
     // env.RESULT_BACKFILL に触れるのは scheduled.ts(有無の確認・get・idFromName の 3 回)と handler.ts(namespace 変数への代入の 1 回)だけ
     expect(bindingSites).toEqual({ "handler.ts": 1, "scheduled.ts": 3 });
     // handler.ts: 補完の DO は getStatus だけ(kick・start は呼ばない)。GET /api/results/backfill の 1 本
@@ -1829,6 +1834,126 @@ describe("Issue #698: 過去のブリンカーの埋め戻し(JraBlinkerBackfill
   });
 });
 
+describe("Issue #769: 過去の馬場の埋め戻し(JraBabaPastBackfillDO)は、netkeiba にも gate にも出ず、JRA への取得口は 1 箇所で、DO の SQLite の起床の経路で表の全部を読まず、D1 の SQL はリポジトリだけにある。止めて公開する", () => {
+  const srcDir = path.join(ROOT, "cloud", "src");
+  const core = stripCode(readTextLf("cloud", "src", "jra-baba-past-backfill-core.ts"));
+  const doCode = stripCode(readTextLf("cloud", "src", "jra-baba-past-backfill-do.ts"));
+  const fetcher = stripCode(readTextLf("cloud", "src", "jra-baba-past-fetch.ts"));
+  const repo = stripCode(readTextLf("cloud", "src", "baba-past-repository.ts"));
+  const pdf = stripCode(readTextLf("cloud", "src", "jra-baba-past-pdf.ts"));
+  const links = stripCode(readTextLf("cloud", "src", "jra-baba-past-links.ts"));
+  const sites = (pattern: RegExp): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const f of readdirSync(srcDir).filter((x) => x.endsWith(".ts") && x !== "client-bundle.generated.ts")) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(pattern) ?? []).length;
+      if (n > 0) out[f] = n;
+    }
+    return out;
+  };
+  const all = [["jra-baba-past-backfill-core.ts", core], ["jra-baba-past-backfill-do.ts", doCode], ["jra-baba-past-fetch.ts", fetcher], ["baba-past-repository.ts", repo], ["jra-baba-past-pdf.ts", pdf], ["jra-baba-past-links.ts", links]] as const;
+
+  it("前提: 純ロジック・DO・取得口・リポジトリ・PDF の読み取り・リンクの拾い方を読めている", () => {
+    expect(core.length).toBeGreaterThan(5000);
+    expect(doCode.length).toBeGreaterThan(1000);
+    expect(fetcher.length).toBeGreaterThan(500);
+    expect(repo.length).toBeGreaterThan(2000);
+    expect(pdf.length).toBeGreaterThan(8000);
+    expect(links.length).toBeGreaterThan(800);
+  });
+
+  it("6 つのソースに、netkeiba の取得口(gate・fetchRaw・日単位の DO)・socket・LLM・出馬表の表がない。R2 の名前(ANALYSIS_DETAIL)を持つのは DO だけ。純ロジックは cloudflare:* と env. を持たない", () => {
+    for (const [name, code] of all) {
+      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "RESULT_BACKFILL", "createGateHttpClient", "HttpClient", "socket", "ANTHROPIC", "createCloudLlm", "race_horse_entries", "horse_profiles", "horse_owner_history"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      if (name !== "jra-baba-past-backfill-do.ts") expect(code, `${name} に ANALYSIS_DETAIL が無い`).not.toContain("ANALYSIS_DETAIL");
+    }
+    expect(doCode).toContain("ANALYSIS_DETAIL");
+    for (const [name, code] of [["core", core], ["pdf", pdf], ["links", links]] as const) {
+      expect(code, `${name} は cloudflare:* を持たない`).not.toMatch(/cloudflare:/);
+      expect(code, `${name} は env. を持たない`).not.toContain("env.");
+    }
+  });
+
+  it("グローバルの fetch を呼ぶのは jra-baba-past-fetch.ts の 1 箇所(注入できる既定)だけ。取得口を作るのは DO だけ。URL(jra.go.jp)は jra-http.ts にだけある(取得口は URL の組み立てを呼ぶだけ)", () => {
+    expect((fetcher.match(/(^|[^.\w])fetch\(/g) ?? []).length).toBe(1);
+    for (const [name, code] of all.filter(([n]) => n !== "jra-baba-past-fetch.ts")) {
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+    expect(Object.keys(sites(/\bcreateJraBabaPastFetcher\(/g)).sort()).toEqual(["jra-baba-past-backfill-do.ts", "jra-baba-past-fetch.ts"]);
+    expect(fetcher).not.toContain("jra.go.jp");
+    expect(fetcher).toContain("BABA_PAST_MAX_PDF_BYTES"); // PDF は専用の上限(1MB)。年の頁は既定の上限
+    expect(fetcher).not.toMatch(/method:\s*"POST"/); // GET だけ
+  });
+
+  it("D1 の SQL(prepare)は baba-past-repository.ts にだけある(6 本)。DO の SQLite の起床の経路(nextUnit 以降)に GROUP BY・COUNT(*)・DISTINCT が無く、ORDER BY は主キー ord だけ", () => {
+    expect((repo.match(/\.prepare\(/g) ?? []).length).toBe(6);
+    for (const [name, code] of all.filter(([n]) => n !== "baba-past-repository.ts")) {
+      expect(code, `${name} に prepare( が無い`).not.toMatch(/\.prepare\(/);
+    }
+    const start = core.indexOf("private nextUnit(");
+    const stepBody = core.slice(start);
+    expect(stepBody.length).toBeGreaterThan(3000); // 前提: 起床の経路の本体を読めている
+    expect(stepBody).not.toMatch(/GROUP BY|COUNT\(\*\)|DISTINCT/);
+    const orderBys = stepBody.match(/ORDER BY \w+/g) ?? [];
+    expect(orderBys).toEqual(["ORDER BY ord"]);
+  });
+
+  it("書くのは baba_past・baba_past_pdfs・r2_ops の 3 表だけ(INSERT は 3 文)。DELETE をしない。UPDATE は ON CONFLICT DO UPDATE だけ。書き込みは 1 つの batch。R2 は put だけ(get・list・head・delete を使わない)で、1 箇所", () => {
+    expect((repo.match(/INSERT INTO/g) ?? []).length).toBe(3);
+    expect(repo).toMatch(/INSERT INTO baba_past \([^)]*\)[\s\S]*ON CONFLICT \(kaisai_date, venue_code\) DO UPDATE/);
+    expect(repo).toMatch(/INSERT INTO baba_past_pdfs[\s\S]*ON CONFLICT \(source_pdf\) DO UPDATE/);
+    expect(repo).toMatch(/INSERT INTO r2_ops/);
+    expect(repo).not.toMatch(/\bDELETE\b/);
+    expect(repo).not.toMatch(/(?<!DO )\bUPDATE\b/);
+    expect((repo.match(/\.batch\(/g) ?? []).length).toBe(1);
+    expect((repo.match(/\.put\(/g) ?? []).length).toBe(1);
+    for (const forbidden of [".get(", ".list(", ".head(", ".delete("]) expect(repo, `repo に R2 の ${forbidden} が無い`).not.toContain(forbidden);
+    expect(repo).toContain("withPutTimeout(");
+    expect(repo).toContain("isWriteAllowed(");
+  });
+
+  it("止める var(JRA_BABA_PAST_BACKFILL_ENABLED)は **\"1\" だけが動かす**(完全一致)。var の名前が DO の binding の名前(JRA_BABA_PAST_BACKFILL)と同じでない。本番の toml の [vars] は \"0\"(確かめてから \"1\")。smoke も --var で止める", () => {
+    expect(core).toMatch(/value\.trim\(\) === "1"/);
+    expect(doCode).toContain("isJraBabaPastBackfillEnabled(this.env.JRA_BABA_PAST_BACKFILL_ENABLED)");
+    expect(doCode).not.toMatch(/JRA_BABA_PAST_BACKFILL\?:\s*string/);
+    expect(tomlCode).toMatch(/^JRA_BABA_PAST_BACKFILL_ENABLED = "0"$/m);
+    expect((tomlCode.match(/^JRA_BABA_PAST_BACKFILL_ENABLED\b/gm) ?? []).length).toBe(1);
+    expect(stripCode(readTextLf("cloud", "smoke.ts"))).toContain('"--var", "JRA_BABA_PAST_BACKFILL_ENABLED:0"');
+  });
+
+  it("本番の入口(worker.ts)は本番のクラスを export し、smoke の入口(smoke-worker.ts)も同じ本番のクラスを export する。binding に触れるのは handler.ts(型・読み取り)と scheduled.ts(kick)だけ", () => {
+    expect(stripCode(readTextLf("cloud", "src", "worker.ts"))).toMatch(/export \{ JraBabaPastBackfillDO \} from "\.\/jra-baba-past-backfill-do"/);
+    expect(stripCode(readTextLf("cloud", "smoke-worker.ts"))).toMatch(/export \{ JraBabaPastBackfillDO \} from "\.\/src\/jra-baba-past-backfill-do"/);
+    expect(Object.keys(sites(/\bJRA_BABA_PAST_BACKFILL\b/g)).sort()).toEqual(["handler.ts", "scheduled.ts"]);
+  });
+
+  it("管理者の読み取り口(handleBabaPast)は、読み取りだけ(status と listBabaPastPdfsByYear)。kick・保存・取得・R2・netkeiba・LLM に触れない。D1 に触れる前に Sec-Fetch-Site を見る", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = handler.indexOf("async function handleBabaPast(");
+    expect(start).toBeGreaterThan(-1);
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(900);
+    expect((body.match(/\.status\(\)/g) ?? []).length).toBe(1);
+    expect((body.match(/listBabaPastPdfsByYear\(env\.DB/g) ?? []).length).toBe(1);
+    expectCrossSiteCheckFirst("handleBabaPast", body, ["env.DB", ".status()"]);
+    for (const forbidden of [".kick(", ".savePdf(", ".prepare(", ".batch(", ".run(", "ANALYSIS_DETAIL", "NETKEIBA_GATE", "RACE_DAY", "fetch(", "INSERT", "UPDATE", "DELETE", "ANTHROPIC", "DISCORD_WEBHOOK_URL"]) {
+      expect(body, `handleBabaPast に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+  });
+
+  it("間隔は 3 秒以上、1 日の書き込みの上限は 500 行以下、1 PDF の最大は 62 行、取る年の既定は 2021〜2024。時間帯は JST 18:00〜翌 8:00(ブリンカーの埋め戻しと同じ関数)", () => {
+    const num = (name: string): number => Number(new RegExp(`export const ${name} = ([\\d_]+);`).exec(core)?.[1]?.replaceAll("_", ""));
+    expect(num("BABA_PAST_GAP_MS")).toBeGreaterThanOrEqual(3000);
+    expect(num("BABA_PAST_DAILY_ROWS_MAX")).toBeLessThanOrEqual(500);
+    expect(num("BABA_PAST_ROWS_PER_PDF_MAX")).toBe(62);
+    expect(num("BABA_PAST_FIRST_YEAR")).toBe(2021);
+    expect(num("BABA_PAST_LAST_YEAR")).toBe(2024);
+    expect(core).toContain("inBlinkerBackfillWindow");
+    expect(core).toContain("nextBlinkerBackfillStart");
+  });
+});
+
 describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM にも出ず、他の DO・cron と干渉せず、Worker は D1・R2 に触れない", () => {
   const verifySources = ["verify-core.ts", "verify-do.ts", "verify-store.ts", "verify-read.ts", "verify-breakdown.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
 
@@ -1914,12 +2039,12 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     // 【Issue #488で改訂】旧: 8 つ(handleJraCheck を含まない)。JRA への到達の確認 GET /api/jra/check が加わり 9 つになった。保証していたことは変わらない
     // (呼び出し箇所の関数名の一覧が完全に固定で、新しい入口が検査なしに増えると赤になる)。handleJraCheck の順序(取得より前)は下の Issue #488 のテストが持つ。
     const callers = [...code.matchAll(/\bcrossSiteRejection\(request\)/g)].map((m) => enclosing(m.index!));
-    expect(callers.sort()).toEqual(["handleAllocationExport", "handleBabaFetch", "handleCheck", "handleHorseRuns", "handleJraCheck", "handleMarketEdges", "handlePlan", "handlePriorExport", "handleRaces", "handleTargets", "handleVerify"]);
-    expect(callers).toHaveLength(11);
+    expect(callers.sort()).toEqual(["handleAllocationExport", "handleBabaFetch", "handleBabaPast", "handleCheck", "handleHorseRuns", "handleJraCheck", "handleMarketEdges", "handlePlan", "handlePriorExport", "handleRaces", "handleTargets", "handleVerify"]);
+    expect(callers).toHaveLength(12); // Issue #769: handleBabaPast を足して 11 → 12
     // handleRaces(GET が netkeiba に出る): DO を呼ぶ前に検査する(他の 9 つは各ハンドラの検査が持つ)
     expectCrossSiteCheckFirst("handleRaces", bodyOf("async function handleRaces("), ["raceDayStub(", ".getRaceList("]);
-    // 対照(検出の確認。空振りでない): 呼び出しを足した本文は 12 に数える(旧: 11)。インラインの検査は「sec-fetch-site を読む関数」に数えられる
-    expect(((code + "\nasync function handleX(request: Request) {\n  crossSiteRejection(request);\n}").match(/\bcrossSiteRejection\(request\)/g) ?? []).length).toBe(12);
+    // 対照(検出の確認。空振りでない): 呼び出しを足した本文は 13 に数える(旧: 12)。インラインの検査は「sec-fetch-site を読む関数」に数えられる
+    expect(((code + "\nasync function handleX(request: Request) {\n  crossSiteRejection(request);\n}").match(/\bcrossSiteRejection\(request\)/g) ?? []).length).toBe(13);
     expect([...(code + '\nfunction handleY(request: Request) {\n  request.headers.get("sec-fetch-site");\n}').matchAll(/"sec-fetch-site"/g)]).toHaveLength(3);
     expect(() => expectCrossSiteCheckFirst("結果を返さない", "async function f(request: Request) {\n  crossSiteRejection(request);\n  env.DB;\n}", ["env.DB"])).toThrow();
   });
@@ -2497,7 +2622,7 @@ describe("Issue #294・#478: 馬場の取得は JRA のページから、取得�
     expect(code("race-day-do.ts")).toContain("fetchBaba: jraFetchers.fetchBaba");
     expect(code("race-day-do.ts")).toContain("createJraFetchers(");
     expect((code("race-day-do.ts").match(/\bfetchBaba:/g) ?? []).length).toBe(1);
-    expect(tomlCode).not.toMatch(/BABA/);
+    expect(tomlCode).not.toMatch(/BABA(?!_PAST_BACKFILL)/); // Issue #769: 過去の馬場の埋め戻しの binding・var(JRA_BABA_PAST_BACKFILL・JRA_BABA_PAST_BACKFILL_ENABLED)は別の機能
     expect(readTextLf(".github", "workflows", "deploy-cloud.yml")).not.toMatch(/BABA/);
   });
 
@@ -2585,8 +2710,8 @@ describe("Issue #294・#478: 馬場の取得は JRA のページから、取得�
   });
 
   it("他の DO・cron・日報・月報は、馬場の取得を参照しない(アラームは DO ごとに 1 つ。干渉しない)。入口(handler.ts)と ルートの表(route-policy.ts)は診断の入口 /api/baba-fetch だけが例外(次のテスト)", () => {
-    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["jra-http.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-horse-fetch.ts", "jra-result-fetch.ts", "jra-odds-fetch.ts", "jra-fetchers.ts", "race-day-core.ts", "race-day-do.ts", "race-day-plan.ts", "handler.ts", "route-policy.ts"].includes(n))) {
-      expect(code(f), `${f} は馬場の取得を参照しない`).not.toMatch(/baba-(conditions|fetch|repository)|jra-baba|jra-http|race-day-baba|BabaStage|BABA_API_URL|createJraBabaFetcher/);
+    for (const f of srcFiles.filter((n) => !babaSources.includes(n) && !["jra-http.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-horse-fetch.ts", "jra-result-fetch.ts", "jra-baba-past-fetch.ts", "jra-odds-fetch.ts", "jra-fetchers.ts", "race-day-core.ts", "race-day-do.ts", "race-day-plan.ts", "handler.ts", "route-policy.ts"].includes(n))) {
+      expect(code(f), `${f} は馬場の取得を参照しない`).not.toMatch(/baba-(conditions|fetch|repository)|jra-baba(?!-past)|jra-http|race-day-baba|BabaStage|BABA_API_URL|createJraBabaFetcher/);
     }
   });
 
@@ -2606,8 +2731,8 @@ describe("Issue #294・#478: 馬場の取得は JRA のページから、取得�
     const imports = [...handler.matchAll(/import\s*\{([^}]*)\}\s*from\s*"\.\/baba-repository"/g)].map((m) => m[1]!.replace(/\s+/g, " ").trim());
     expect(imports).toEqual(["D1BabaStore, FETCH_LIST_LIMIT_DEFAULT"]);
     const strip = (text: string): string => text.replaceAll("/api/baba-fetch", "").replaceAll("baba-fetch-error", "").replaceAll("./baba-repository", "");
-    expect(strip(handler), "handler.ts は、診断の入口(ルートの文字列・エラーの種類名・baba-repository の import)のほかに取得の部品を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|jra-baba|jra-http|race-day-baba|BabaStage|BABA_API_URL|createJraBabaFetcher/);
-    expect(strip(code("route-policy.ts")), "route-policy.ts は、ルートの文字列のほかに馬場を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|jra-baba|jra-http|race-day-baba|BabaStage|BABA_API_URL/);
+    expect(strip(handler), "handler.ts は、診断の入口(ルートの文字列・エラーの種類名・baba-repository の import)のほかに取得の部品を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|jra-baba(?!-past)|jra-http|race-day-baba|BabaStage|BABA_API_URL|createJraBabaFetcher/);
+    expect(strip(code("route-policy.ts")), "route-policy.ts は、ルートの文字列のほかに馬場を参照しない").not.toMatch(/baba-(conditions|fetch|repository)|jra-baba(?!-past)|jra-http|race-day-baba|BabaStage|BABA_API_URL/);
     // 対照(検出の確認。空振りでない): 検査より後に D1 に触れる本体は「前」の検査を満たさない
     const bad = 'async function handleBabaFetch(request: Request, env: Env) {\n  await new D1BabaStore({ db: env.DB });\n  const crossSite = crossSiteRejection(request);\n  if (crossSite !== null) {\n    return crossSite;\n  }\n}';
     expect(bad.indexOf(CROSS_SITE_CALL) < bad.indexOf("env.DB")).toBe(false);
@@ -2664,14 +2789,14 @@ describe("Issue #488・#478: JRA のページの取得の起点は、管理者�
 
   it("JRA の取得に関わるモジュール(jra-http・jra-check・jra-baba-fetch・jra-baba-parse)を参照するのは、handler.ts・jra-fetchers.ts(#680。race-day-do.ts はその経由)と、それら自身だけ。scheduled・worker・他の DO・core・段階は参照しない", () => {
     // 出馬表の取得口(jra-entries-fetch.ts。#639)も jra-http.ts の部品を使う。それを使う側は race-day-do.ts と core(race-day-core.ts は取得口の型だけ)で、cloud/test/jra-entries-isolation.test.ts が固定している。
-    expect(Object.keys(sites(/jra-(?:http|check|baba-fetch|baba-parse)/g)).sort()).toEqual(["handler.ts", "jra-baba-fetch.ts", "jra-baba-parse.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-fetchers.ts", "jra-horse-fetch.ts", "jra-odds-fetch.ts", "jra-result-fetch.ts"]); // #680: race-day-do.ts は jra-fetchers.ts 経由で、これらを直接は参照しない
+    expect(Object.keys(sites(/jra-(?:http|check|baba-fetch|baba-parse)/g)).sort()).toEqual(["handler.ts", "jra-baba-fetch.ts", "jra-baba-parse.ts", "jra-baba-past-fetch.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-fetchers.ts", "jra-horse-fetch.ts", "jra-odds-fetch.ts", "jra-result-fetch.ts"]); // #680: race-day-do.ts は jra-fetchers.ts 経由で、これらを直接は参照しない
     // jra-http.ts を import するのは取得の 3 つと読み取りの型の 1 つ(順にその 1 回ずつ)
-    expect(sites(/from\s*"\.\/jra-http"/g)).toEqual({ "jra-baba-fetch.ts": 1, "jra-baba-parse.ts": 1, "jra-check.ts": 1, "jra-entries-fetch.ts": 1, "jra-horse-fetch.ts": 1, "jra-odds-fetch.ts": 1, "jra-result-fetch.ts": 1 });
+    expect(sites(/from\s*"\.\/jra-http"/g)).toEqual({ "jra-baba-fetch.ts": 1, "jra-baba-parse.ts": 1, "jra-baba-past-fetch.ts": 1, "jra-check.ts": 1, "jra-entries-fetch.ts": 1, "jra-horse-fetch.ts": 1, "jra-odds-fetch.ts": 1, "jra-result-fetch.ts": 1 });
     // jra-baba-fetch は race-day-do.ts だけが import する。jra-baba-parse は jra-baba-fetch だけが import する(保存の段階・core は読み取りに触れない)
     expect(sites(/from\s*"\.\/jra-baba-fetch"/g)).toEqual({ "jra-fetchers.ts": 1 }); // #680: race-day-do.ts は jra-fetchers.ts 経由
     expect(sites(/from\s*"\.\/jra-baba-parse"/g)).toEqual({ "jra-baba-fetch.ts": 1 });
     // jra-http の関数(fetchOne・jraCourseUrl)を呼ぶのは取得の 2 つだけ
-    expect(Object.keys(sites(/\bfetchOne\(|\bjraCourseUrl\(/g)).sort()).toEqual(["jra-baba-fetch.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-horse-fetch.ts", "jra-http.ts", "jra-odds-fetch.ts", "jra-result-fetch.ts"]);
+    expect(Object.keys(sites(/\bfetchOne\(|\bjraCourseUrl\(/g)).sort()).toEqual(["jra-baba-fetch.ts", "jra-baba-past-fetch.ts", "jra-check.ts", "jra-entries-fetch.ts", "jra-horse-fetch.ts", "jra-http.ts", "jra-odds-fetch.ts", "jra-result-fetch.ts"]);
   });
 
   it("グローバルの fetch を呼ぶのは jra-check.ts の 1 箇所と jra-baba-fetch.ts の 1 箇所と jra-entries-fetch.ts の 1 箇所(#639。どれも注入できる既定)だけ。jra-http.ts・handler.ts は fetch( を呼ばない(注入された関数を渡すだけ)", () => {

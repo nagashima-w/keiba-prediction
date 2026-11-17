@@ -31,7 +31,7 @@
  * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。計画・既存の結果の依頼を失敗させない。
  */
 import { jstKaisaiDate, planTargetDate, scheduledRunKind, type ScheduledRunKind } from "./auto-run-plan";
-import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike, RaceMarketEdgeNamespaceLike, JraHorseBackfillNamespaceLike, JraBlinkerBackfillNamespaceLike, VerifyNamespaceLike } from "./handler";
+import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike, RaceMarketEdgeNamespaceLike, JraHorseBackfillNamespaceLike, JraBlinkerBackfillNamespaceLike, JraBabaPastBackfillNamespaceLike, VerifyNamespaceLike } from "./handler";
 import { VERIFY_NAME } from "./verify-name";
 import { DAILY_REPORT_NAME } from "./daily-report-core";
 import { D1ReportStore } from "./daily-report-repository";
@@ -43,6 +43,7 @@ import type { DiscordFetchLike } from "../../packages/core/src/notify/discord";
 import { RACE_ARCHIVE_FETCH_NAME, RACE_ARCHIVE_NAR_FETCH_NAME, RACE_ARCHIVE_OIKIRI_FETCH_NAME } from "./race-archive-fetch-core";
 import { RACE_MARKET_EDGE_NAME } from "./market-edge-core";
 import { JRA_BLINKER_BACKFILL_NAME } from "./jra-blinker-backfill-core";
+import { JRA_BABA_PAST_BACKFILL_NAME } from "./jra-baba-past-backfill-core";
 import { JRA_HORSE_BACKFILL_NAME } from "./jra-horse-backfill-core";
 import { RACE_ARCHIVE_RUNS_NAME } from "./race-archive-runs-core";
 import { RESULT_BACKFILL_NAME } from "./result-backfill-core";
@@ -73,6 +74,8 @@ export interface ScheduledEnv {
   readonly RACE_MARKET_EDGE?: RaceMarketEdgeNamespaceLike;
   readonly JRA_HORSE_BACKFILL?: JraHorseBackfillNamespaceLike;
   readonly JRA_BLINKER_BACKFILL?: JraBlinkerBackfillNamespaceLike;
+  /** 過去の馬場の埋め戻しの DO(Issue #769)。無い構成では kick を呼ばない。 */
+  readonly JRA_BABA_PAST_BACKFILL?: JraBabaPastBackfillNamespaceLike;
   /** 検証の集計の DO(Issue #723)。週 1 回の全件の突き合わせの依頼にだけ使う。無い構成では呼ばない。 */
   readonly VERIFY_REPORT?: VerifyNamespaceLike;
   /** 日報の DO(Issue #235)。無い構成では日報の取り残しの補完をしない。 */
@@ -244,6 +247,15 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
         await env.JRA_BLINKER_BACKFILL.get(env.JRA_BLINKER_BACKFILL.idFromName(JRA_BLINKER_BACKFILL_NAME)).kick();
       } catch (error) {
         log(`scheduled: failed class=jra-blinker-backfill-kick-failed error=${errorKind(error)}`, "error");
+      }
+    })(),
+    // 過去の馬場の埋め戻しの起動(Issue #769)。アラームが無ければ張るだけ(取得は JST 18:00〜翌 8:00 に、DO が JRA の公式サイトと D1・R2 だけで行う。netkeiba には出ない)。止める var が "1" でない間は、DO が何もしない。
+    (async (): Promise<void> => {
+      if (env.JRA_BABA_PAST_BACKFILL === undefined) return;
+      try {
+        await env.JRA_BABA_PAST_BACKFILL.get(env.JRA_BABA_PAST_BACKFILL.idFromName(JRA_BABA_PAST_BACKFILL_NAME)).kick();
+      } catch (error) {
+        log(`scheduled: failed class=jra-baba-past-backfill-kick-failed error=${errorKind(error)}`, "error");
       }
     })(),
     // 検証の週 1 回の全件の突き合わせの依頼(Issue #723)。DO が「JST 23 時台」「前回から JST の日付で 7 日以上」を判断して、アラームを張るだけ(冪等。突き合わせは D1 だけを読み、netkeiba には出ない)。失敗は握る。
