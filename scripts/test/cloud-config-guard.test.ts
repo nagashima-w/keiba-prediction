@@ -2652,8 +2652,8 @@ describe("Issue #488・#478: JRA のページの取得の起点は、管理者�
     expect(code("handler.ts")).toContain("async function handleJraCheck(");
   });
 
-  it("JRA の URL(jra.go.jp)を持つ cloud/src のファイルは jra-http.ts だけ(取得先の URL 8 本: クッション値・含水率・開催情報・コースの情報と、出馬表の accessD〈#639〉・オッズの accessO〈#673〉・馬ごとの頁の accessU〈#697〉・過去の結果の accessS〈#698〉)", () => {
-    expect(sites(/jra\.go\.jp/g)).toEqual({ "jra-http.ts": 8 });
+  it("JRA の URL(jra.go.jp)を持つ cloud/src のファイルは jra-http.ts だけ(取得先の URL 10 本: クッション値・含水率・開催情報・コースの情報と、出馬表の accessD〈#639〉・オッズの accessO〈#673〉・馬ごとの頁の accessU〈#697〉・過去の結果の accessS〈#698〉・過去の馬場の年の頁と PDF〈#769〉)", () => {
+    expect(sites(/jra\.go\.jp/g)).toEqual({ "jra-http.ts": 10 });
   });
 
   it("確認口の部品(jra-check・runJraCheck・JRA_CHECK)を参照するのは jra-check.ts と handler.ts だけ。runJraCheck の呼び出し(定義は数えない)は handler.ts の 1 箇所だけ", () => {
