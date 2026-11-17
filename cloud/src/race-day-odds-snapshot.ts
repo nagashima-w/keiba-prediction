@@ -51,14 +51,26 @@ export type OddsSnapshotHorse = readonly [number, number | null, number | null, 
 
 /** 組合せの頁が取れなかった理由(固定の語。既存の語から選ぶ。新しい語は作らない)。`fetch-failed` = 頁を取れなかった / `unavailable` = 表が読めない・全組が票数なし / `parse-error` = 読み取りの失敗。 */
 export type OddsSnapshotComboErr = "fetch-failed" | "unavailable" | "parse-error";
-/** 組合せの 1 頁(馬連・枠連)。取れたとき = 取った時刻 t・頁の時刻 dt・頁の状態 st・組ごとの値 o(キーは小さい番号を先にした 2 桁連結。票数なしは null)。取れなかったとき = {err}。 */
+/** 組合せの 1 頁(馬連・枠連・3連複)。取れたとき = 取った時刻 t・頁の時刻 dt・頁の状態 st・組ごとの値 o(キーは小さい番号を先にした 2 桁連結。票数なしは null)。取れなかったとき = {err}。 */
 export type OddsSnapshotComboPage =
   | { readonly t: number; readonly dt: string | null; readonly st: string | null; readonly o: Readonly<Record<string, number | null>> }
   | { readonly err: OddsSnapshotComboErr };
-/** 馬連・枠連の記録(#751)。D1 の `combos_json`。 */
+/**
+ * ワイドの 1 頁。組合せの頁(上の {@link OddsSnapshotComboPage})と同じ形で、`o` の値だけが幅の [下限, 上限](組ごと。票数なしの組は null、上限が読めないときは [下限, null])。
+ * 取れなかったとき = {err}。
+ */
+export type OddsSnapshotWidePage =
+  | { readonly t: number; readonly dt: string | null; readonly st: string | null; readonly o: Readonly<Record<string, readonly [number | null, number | null] | null>> }
+  | { readonly err: OddsSnapshotComboErr };
+/**
+ * 馬連・枠連・ワイド・3連複の記録(#751)。D1 の `combos_json`。
+ * `wide`・`sanrenpuku` は 2 段目で足した(馬連・枠連だけの古い形も有効。デプロイの前に DO に置かれた結果は、この 2 つが無いまま読む)。書くときは 4 つとも書く。
+ */
 export interface OddsSnapshotCombos {
   readonly umaren: OddsSnapshotComboPage;
   readonly wakuren: OddsSnapshotComboPage;
+  readonly wide?: OddsSnapshotWidePage;
+  readonly sanrenpuku?: OddsSnapshotComboPage;
 }
 
 /** 1 レースの記録(DO の `payload_json` と、D1 の行の元)。 */
@@ -80,7 +92,7 @@ export interface OddsSnapshotPayload {
   readonly attempts: number;
   /** `ok` のときだけ(馬番の昇順)。 */
   readonly horses: readonly OddsSnapshotHorse[] | null;
-  /** 馬連・枠連の全組(#751)。`ok` のときだけ(それ以外は null。古い形の DO の結果にも無い)。単勝・複勝が取れていれば、組合せが取れなくても `ok`(頁ごとに {err})。 */
+  /** 馬連・枠連・ワイド・3連複の全組(#751)。`ok` のときだけ(それ以外は null。古い形の DO の結果にも無い)。単勝・複勝が取れていれば、組合せが取れなくても `ok`(頁ごとに {err})。 */
   readonly combos: OddsSnapshotCombos | null;
 }
 
@@ -101,18 +113,38 @@ export function horsesOfSnapshot(snapshot: OddsSnapshot, horseIds: Readonly<Reco
  * 値は `oddsMin` だけ(馬連・枠連は単一の値で、`oddsMax`・人気は無い)。票数なしの組は null のまま残す。
  */
 export function comboPageOfCache(json: string, fetchedAt: number): OddsSnapshotComboPage | null {
+  return pageOfCache(json, fetchedAt, (cell) => finiteOrNull(cell?.oddsMin));
+}
+
+/**
+ * ワイド版(#751 の 2 段目)。値は幅 [下限, 上限]。下限が読めない組(票数なし)は null、上限が読めなければ [下限, null]。形が違えば null。
+ * 馬連・枠連・3連複の {@link comboPageOfCache} は下限だけを単一値にするので、ワイドにそれを使うと上限が落ちる。
+ */
+export function widePageOfCache(json: string, fetchedAt: number): OddsSnapshotWidePage | null {
+  return pageOfCache(json, fetchedAt, (cell) => {
+    const lo = finiteOrNull(cell?.oddsMin);
+    return lo === null ? null : ([lo, finiteOrNull(cell?.oddsMax)] as const);
+  });
+}
+
+const finiteOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+function pageOfCache<V>(
+  json: string,
+  fetchedAt: number,
+  valueOf: (cell: { oddsMin?: unknown; oddsMax?: unknown } | null) => V,
+): { readonly t: number; readonly dt: string | null; readonly st: string | null; readonly o: Readonly<Record<string, V>> } | null {
   try {
     const p = JSON.parse(json) as { officialDatetime?: unknown; oddsStatus?: unknown; cells?: unknown };
     if (!Array.isArray(p.cells)) {
       return null;
     }
-    const o: Record<string, number | null> = {};
+    const o: Record<string, V> = {};
     for (const cell of p.cells as unknown[]) {
       if (!Array.isArray(cell) || typeof cell[0] !== "string") {
         return null;
       }
-      const odds = (cell[1] as { oddsMin?: unknown } | null)?.oddsMin;
-      o[cell[0]] = typeof odds === "number" && Number.isFinite(odds) ? odds : null;
+      o[cell[0]] = valueOf(cell[1] as { oddsMin?: unknown; oddsMax?: unknown } | null);
     }
     return {
       t: fetchedAt,
@@ -129,7 +161,10 @@ const isNumOrNull = (v: unknown): v is number | null => v === null || (typeof v 
 const isHorse = (v: unknown): v is OddsSnapshotHorse =>
   Array.isArray(v) && v.length === 6 && typeof v[0] === "number" && v.slice(1, 5).every(isNumOrNull) && (v[5] === null || typeof v[5] === "string");
 
-const isComboPage = (v: unknown): v is OddsSnapshotComboPage => {
+const isNumPairOrNull = (v: unknown): boolean => v === null || (Array.isArray(v) && v.length === 2 && v.every(isNumOrNull));
+
+/** 頁の形(`err` か、t・dt・st・o)。`o` の値の検査は引数(馬連・枠連・3連複は単一値、ワイドは幅)。 */
+const isPageWith = (v: unknown, valueOk: (x: unknown) => boolean): boolean => {
   if (typeof v !== "object" || v === null) {
     return false;
   }
@@ -139,9 +174,11 @@ const isComboPage = (v: unknown): v is OddsSnapshotComboPage => {
   }
   return (
     typeof page.t === "number" && Number.isFinite(page.t) && (page.dt === null || typeof page.dt === "string") && (page.st === null || typeof page.st === "string") &&
-    typeof page.o === "object" && page.o !== null && !Array.isArray(page.o) && Object.values(page.o).every(isNumOrNull)
+    typeof page.o === "object" && page.o !== null && !Array.isArray(page.o) && Object.values(page.o).every(valueOk)
   );
 };
+const isComboPage = (v: unknown): v is OddsSnapshotComboPage => isPageWith(v, isNumOrNull);
+const isWidePage = (v: unknown): v is OddsSnapshotWidePage => isPageWith(v, isNumPairOrNull);
 
 /** DO に持つ結果(`payload_json`)を読む。形が違う・整合しないなら null(呼び出し側は、持っていないものとして取り直す)。 */
 export function parseOddsSnapshotPayload(text: string): OddsSnapshotPayload | null {
@@ -163,7 +200,15 @@ export function parseOddsSnapshotPayload(text: string): OddsSnapshotPayload | nu
     const combos = p.combos ?? null;
     if (combos !== null) {
       const c = combos as Record<string, unknown>;
-      if (typeof combos !== "object" || !isComboPage(c.umaren) || !isComboPage(c.wakuren) || p.status !== "ok") {
+      // wide・sanrenpuku は 2 段目で足した。無い古い形(馬連・枠連だけ)は有効(undefined は許す)。ある場合は形を検査する。
+      if (
+        typeof combos !== "object" ||
+        !isComboPage(c.umaren) ||
+        !isComboPage(c.wakuren) ||
+        !(c.wide === undefined || isWidePage(c.wide)) ||
+        !(c.sanrenpuku === undefined || isComboPage(c.sanrenpuku)) ||
+        p.status !== "ok"
+      ) {
         return null;
       }
     }

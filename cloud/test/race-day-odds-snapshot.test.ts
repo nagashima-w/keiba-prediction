@@ -162,4 +162,29 @@ describe("parseOddsSnapshotPayload", () => {
     const skipped = { ...ok, status: "skipped", reason: "too-late", oddsStatus: null, officialDatetime: null, horses: null };
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...skipped, combos: withCombos.combos }))).toBeNull(); // ok 以外は combos を持たない
   });
+  it("#751: 古い形(馬連・枠連だけ。デプロイの前に DO に置かれた結果)の combos は拒まず、そのまま読む(wide・sanrenpuku は無いまま)", () => {
+    const page = { t: START - 289_000, dt: "2026-11-15 15:40:00", st: "middle", o: { "0102": 12.3 } };
+    const oldCombos = { umaren: page, wakuren: { err: "unavailable" } };
+    const parsed = parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: oldCombos }));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.combos).toEqual(oldCombos);
+    expect(parsed!.combos).not.toHaveProperty("wide");
+  });
+  it("#751: 新しい形(ワイド = 幅の配列、3連複 = 単一値)を読める。ワイドの値は [下限, 上限] だけ(単一値・長さの違う配列・文字列は null)。3連複は単一値だけ(配列は null)。票数なしの組は null", () => {
+    const wide = { t: START - 288_000, dt: "2026-11-15 15:40:00", st: "middle", o: { "0102": [32.6, 35.2], "0103": [5, null], "0104": null } };
+    const trio = { t: START - 287_000, dt: "2026-11-15 15:40:00", st: "middle", o: { "010203": 1058.5, "010204": null } };
+    const full = { umaren: { t: 1, dt: null, st: null, o: {} }, wakuren: { err: "fetch-failed" }, wide, sanrenpuku: trio };
+    const parsed = parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: full }));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.combos).toEqual(full);
+    const bad = (c: unknown) => parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: { ...full, ...(c as object) } }));
+    expect(bad({ wide: { ...wide, o: { "0102": 32.6 } } })).toBeNull(); // 単一値は幅ではない
+    expect(bad({ wide: { ...wide, o: { "0102": [1, 2, 3] } } })).toBeNull();
+    expect(bad({ wide: { ...wide, o: { "0102": ["x", 2] } } })).toBeNull();
+    expect(bad({ sanrenpuku: { ...trio, o: { "010203": [1, 2] } } })).toBeNull();
+    expect(bad({ umaren: { t: 1, dt: null, st: null, o: { "0102": [1, 2] } } })).toBeNull(); // 馬連は単一値
+    expect(bad({ wide: { err: "fetch-failed" }, sanrenpuku: { err: "parse-error" } })).not.toBeNull();
+    expect(bad({ wide: { err: "weird" } })).toBeNull();
+    expect(bad({ sanrenpuku: 5 })).toBeNull();
+  });
 });

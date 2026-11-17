@@ -40,9 +40,9 @@ describe("save(1 レース・1 時点で 1 行。追記だけ)", () => {
     });
     expect(JSON.parse(rows[0]!["horses_json"] as string)).toEqual([[1, 2.1, 1, 1.2, 1.5, "2023101645"], [2, null, null, null, null, null]]);
   });
-  it("#751: combos は combos_json に JSON で入る(馬連・枠連。{err} も)。combos が null なら NULL。再保存で書き換わらない", async () => {
+  it("#751: combos は combos_json に JSON で入る(馬連・枠連・ワイド〈幅の配列〉・3連複。{err} も)。combos が null なら NULL。再保存で書き換わらない", async () => {
     const store = new D1OddsSnapshotStore({ db: local.db });
-    const combos = { umaren: { t: 700_100, dt: "2026-11-15 15:40:00", st: "middle", o: { "0102": 12.3, "0103": null } }, wakuren: { err: "unavailable" as const } };
+    const combos = { umaren: { t: 700_100, dt: "2026-11-15 15:40:00", st: "middle", o: { "0102": 12.3, "0103": null } }, wakuren: { err: "unavailable" as const }, wide: { t: 700_200, dt: "2026-11-15 15:40:00", st: "middle", o: { "0102": [32.6, 35.2] as const, "0103": null } }, sanrenpuku: { t: 700_300, dt: "2026-11-15 15:40:00", st: "middle", o: { "010203": 1058.5 } } };
     await store.save({ ...ok, combos });
     await store.save({ ...ok, raceId: "202605010102", combos: null });
     await store.save({ ...ok, combos: { umaren: { err: "fetch-failed" }, wakuren: { err: "fetch-failed" } } });
