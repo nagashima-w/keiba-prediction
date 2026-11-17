@@ -30,6 +30,8 @@ const html = (name: string): string => new TextDecoder("shift_jis").decode(new U
 const TANPUKU = html("jra_odds_tanpuku_1342_202605050208.html");
 const UMAREN = html("jra_odds_umaren_202605050208.html"); // 14 頭・91 組。「10 時 37 分現在」
 const WAKUREN = html("jra_odds_wakuren_202605050208.html"); // 34 組(1 頭だけの枠の同枠 2 組は空き)
+const WIDE = html("jra_odds_wide_202605050208.html"); // 14 頭・91 組(値は下限と上限の幅)
+const SANRENPUKU = html("jra_odds_sanrenpuku_202605050208.html"); // 14 頭・364 組
 const DATE = "20261115";
 const RACE = "202605050208";
 const RACE2 = "202605050209";
@@ -82,7 +84,7 @@ function fakeJra(): FakeJra {
         async fetchOdds(cname: string) {
           sent += 1;
           jra.fetchOdds.push(cname);
-          const page = cname.startsWith(`pw15${DIGIT.umaren}`) ? UMAREN : cname.startsWith(`pw15${DIGIT.wakuren}`) ? WAKUREN : TANPUKU;
+          const page = cname.startsWith(`pw15${DIGIT.umaren}`) ? UMAREN : cname.startsWith(`pw15${DIGIT.wakuren}`) ? WAKUREN : cname.startsWith(`pw15${DIGIT.wide}`) ? WIDE : cname.startsWith(`pw15${DIGIT.sanrenpuku}`) ? SANRENPUKU : TANPUKU;
           return jra.oddsResult(jra.fetchOdds.length) ?? { status: "ok", value: page };
         },
       };
@@ -144,11 +146,11 @@ const registerAndRun = async (h: Harness, raceId = RACE, startMs = START) => {
 };
 
 describe("取れたとき(ok)", () => {
-  it("単勝・複勝の頁(必須)と、馬連・枠連の頁を取り、全頭(14 頭)の単勝・人気・複勝の下限と上限、取った時刻・頁の時刻・発走の時刻を D1 の保存先へ渡す。状態は done", async () => {
+  it("単勝・複勝の頁(必須)と、馬連・枠連・ワイド・3連複の頁を取り、全頭(14 頭)の単勝・人気・複勝の下限と上限、取った時刻・頁の時刻・発走の時刻を D1 の保存先へ渡す。状態は done", async () => {
     const h = harness();
     const outcome = await registerAndRun(h);
     expect(outcome).toEqual({ kind: "ran", raceId: RACE, leadMin: 5, mode: "odds-snapshot", step: "record", result: "ok", reason: null });
-    expect(h.jra.fetchOdds).toEqual([linksOf(RACE).cnames.tanpuku, linksOf(RACE).cnames.umaren, linksOf(RACE).cnames.wakuren]); // 取る順は 単勝・複勝 → 馬連 → 枠連(馬連のほうが組が多いので先)
+    expect(h.jra.fetchOdds).toEqual([linksOf(RACE).cnames.tanpuku, linksOf(RACE).cnames.umaren, linksOf(RACE).cnames.wakuren, linksOf(RACE).cnames.wide, linksOf(RACE).cnames.sanrenpuku]); // 取る順は 単勝・複勝 → 馬連 → 枠連 → ワイド → 3連複(小さい頁から)
     expect(h.saved).toHaveLength(1);
     const p = h.saved[0]!;
     expect(p).toMatchObject({
@@ -175,7 +177,7 @@ describe("取れたとき(ok)", () => {
     await registerAndRun(h, RACE2);
     expect(h.jra.listVenues).toBe(1);
     expect(h.jra.fetchOdds.filter((c) => c.startsWith(`pw15${DIGIT.tanpuku}`))).toEqual([linksOf(RACE).cnames.tanpuku, linksOf(RACE2).cnames.tanpuku]);
-    expect(h.jra.fetchOdds).toHaveLength(6); // 2 レース × 3 頁
+    expect(h.jra.fetchOdds).toHaveLength(10); // 2 レース × 5 頁
     expect(h.saved.map((s) => s.raceId)).toEqual([RACE, RACE2]);
   });
 });
@@ -280,7 +282,7 @@ describe("D1 への保存の失敗", () => {
     h.clock.now += ODDS_SNAPSHOT_SAVE_RETRY_DELAY_MS;
     const second = await h.stage.runStep(rowOf(h, 5));
     expect(second).toMatchObject({ result: "ok" });
-    expect(h.jra.fetchOdds).toHaveLength(3); // 取り直していない(1 回の取得の 3 頁だけ)
+    expect(h.jra.fetchOdds).toHaveLength(5); // 取り直していない(1 回の取得の 5 頁だけ)
     expect(h.saved).toHaveLength(1);
     expect(rowOf(h, 5).state).toBe("done");
     for (const w of h.warns) expect(w).not.toMatch(/secret|example\.invalid/);
@@ -298,7 +300,7 @@ describe("D1 への保存の失敗", () => {
     expect(results).toEqual(["retry", "retry", "failed"]);
     expect(rowOf(h, 5)).toMatchObject({ state: "abandoned", save_attempts: 3 });
     expect(h.saved).toEqual([]);
-    expect(h.jra.fetchOdds).toHaveLength(3);
+    expect(h.jra.fetchOdds).toHaveLength(5);
     expect(h.warns.some((w) => w.includes("諦めました"))).toBe(true);
     for (const w of h.warns) expect(w).not.toMatch(/secret|example\.invalid/);
   });
@@ -364,25 +366,50 @@ describe("10 分前(比べるための記録。5 分前が必須)", () => {
   });
 });
 
-describe("馬連・枠連の全組の記録(#751)", () => {
+describe("馬連・枠連・ワイド・3連複の全組の記録(#751)", () => {
   const combosOf = (h: Harness) => h.saved[0]!.combos!;
-  it("取れたら、頁ごとに 取った時刻 t・頁の時刻 dt・頁の状態 st・組ごとの値 o(キーは小さい番号を先にした 2 桁連結)を持つ。単勝・複勝の値は変わらない", async () => {
+  type Page = { t: number; dt: string | null; st: string | null; o: Record<string, unknown> };
+  const TIMEOUT = { status: "timeout" } as unknown as JraOddsResult<string>;
+  const ERR4 = { umaren: { err: "fetch-failed" }, wakuren: { err: "fetch-failed" }, wide: { err: "fetch-failed" }, sanrenpuku: { err: "fetch-failed" } };
+  it("取れたら、頁ごとに 取った時刻 t・頁の時刻 dt・頁の状態 st・組ごとの値 o を持つ。キーは小さい番号を先にした連結(馬連・枠連・ワイドは 2 桁、3連複は 3 頭の 6 桁)。単勝・複勝の値は変わらない", async () => {
     const h = harness(DUE + 3_000);
     await registerAndRun(h);
     const c = combosOf(h);
-    expect(Object.keys(c)).toEqual(["umaren", "wakuren"]);
-    const u = c.umaren as { t: number; dt: string | null; st: string | null; o: Record<string, number | null> };
-    const w = c.wakuren as { t: number; dt: string | null; st: string | null; o: Record<string, number | null> };
+    expect(Object.keys(c)).toEqual(["umaren", "wakuren", "wide", "sanrenpuku"]); // 頁の順(小さい頁から)
+    const u = c.umaren as unknown as Page;
+    const w = c.wakuren as unknown as Page;
+    const wd = c.wide as unknown as Page;
+    const t3 = c.sanrenpuku as unknown as Page;
     expect(Object.keys(u.o)).toHaveLength(91);
     expect(Object.keys(w.o)).toHaveLength(34);
+    expect(Object.keys(wd.o)).toHaveLength(91);
+    expect(Object.keys(t3.o)).toHaveLength(364);
     expect(u).toMatchObject({ t: DUE + 3_000, dt: "2026-11-15 10:37:00", st: "middle" });
     expect(w).toMatchObject({ t: DUE + 3_000, st: "middle" });
+    expect(wd).toMatchObject({ t: DUE + 3_000, dt: "2026-11-15 10:37:00", st: "middle" });
+    expect(t3).toMatchObject({ t: DUE + 3_000, dt: "2026-11-15 10:37:00", st: "middle" });
     expect(u.o["0102"]).toBe(137.5);
     expect(w.o["0102"]).toBe(73.4);
     expect("0303" in w.o).toBe(true);
     expect("0101" in w.o, "1 頭だけの枠の同枠は JRA の頁が空きなのでキーを作らない").toBe(false);
+    expect(t3.o["010203"]).toBe(1058.5);
+    expect(Object.keys(t3.o).every((k) => /^\d{6}$/.test(k))).toBe(true);
     expect(h.saved[0]!.horses).toHaveLength(14);
     expect(parseOddsSnapshotPayload(rowOf(h, 5).payload_json!)).toEqual(h.saved[0]); // DO にも持つ
+  });
+  it("ワイドは値が幅: o の値は [下限, 上限] の配列(下限だけを単一値にしない)。上限は下限以上で、馬連のような単一値の形ではない", async () => {
+    const h = harness();
+    await registerAndRun(h);
+    const wd = combosOf(h).wide as unknown as Page;
+    expect(wd.o["0102"]).toEqual([32.6, 35.2]);
+    expect(wd.o["0103"]).toEqual([211.5, 213.5]);
+    const pairs = Object.values(wd.o) as [number, number][];
+    expect(pairs.every((v) => Array.isArray(v) && v.length === 2)).toBe(true);
+    expect(pairs.some(([lo, hi]) => hi > lo), "幅が 0 でない組がある(下限と上限を取り違えても通らない)").toBe(true);
+    expect(pairs.every(([lo, hi]) => hi >= lo)).toBe(true);
+    // 馬連・3連複は単一値のまま
+    expect(typeof (combosOf(h).umaren as unknown as Page).o["0102"]).toBe("number");
+    expect(typeof (combosOf(h).sanrenpuku as unknown as Page).o["010203"]).toBe("number");
   });
   it("頁ごとの t は、その頁を取って取得キャッシュに置いた実際の時刻(頁ごとに違いうる)", async () => {
     const h = harness(DUE);
@@ -396,17 +423,21 @@ describe("馬連・枠連の全組の記録(#751)", () => {
     expect(h.saved[0]!.takenAtMs).toBe(DUE + 1_500);
     expect(c.umaren!.t).toBe(DUE + 3_000);
     expect(c.wakuren!.t).toBe(DUE + 4_500);
+    expect(c.wide!.t).toBe(DUE + 6_000);
+    expect(c.sanrenpuku!.t).toBe(DUE + 7_500);
   });
-  it("馬連の頁が失敗しても、単勝・複勝は ok で書き、馬連は {err:fetch-failed}、枠連は取る(組合せの再試行はしない)", async () => {
+  it("馬連の頁が失敗しても、単勝・複勝は ok で書き、馬連は {err:fetch-failed}、枠連・ワイド・3連複は取る(組合せの再試行はしない)", async () => {
     const h = harness();
-    h.jra.oddsResult = (n) => (n === 2 ? ({ status: "timeout" } as unknown as JraOddsResult<string>) : null);
+    h.jra.oddsResult = (n) => (n === 2 ? TIMEOUT : null);
     const outcome = await registerAndRun(h);
     expect(outcome).toMatchObject({ result: "ok" });
     expect(h.saved[0]).toMatchObject({ status: "ok", attempts: 1 });
     expect(h.saved[0]!.horses).toHaveLength(14);
     expect(combosOf(h).umaren).toEqual({ err: "fetch-failed" });
     expect("o" in combosOf(h).wakuren!).toBe(true);
-    expect(h.jra.fetchOdds).toHaveLength(3); // 再試行していない
+    expect("o" in combosOf(h).wide!).toBe(true);
+    expect("o" in combosOf(h).sanrenpuku!).toBe(true);
+    expect(h.jra.fetchOdds).toHaveLength(5); // 再試行していない
   });
   it("枠連の頁だけが失敗しても同じ(馬連は残る)。頁が読めない(表が無い)ときは err = unavailable", async () => {
     const h = harness();
@@ -414,24 +445,55 @@ describe("馬連・枠連の全組の記録(#751)", () => {
     await registerAndRun(h);
     expect("o" in combosOf(h).umaren!).toBe(true);
     expect(combosOf(h).wakuren).toEqual({ err: "unavailable" });
+    expect("o" in combosOf(h).wide!).toBe(true);
+    expect("o" in combosOf(h).sanrenpuku!).toBe(true);
     expect(h.saved[0]!.status).toBe("ok");
   });
-  it("組合せが 2 つとも取れなくても単勝・複勝は ok。両方とも {err}。", async () => {
+  it("ワイドの頁が失敗(取得 4 本目)しても、単勝・複勝・馬連・枠連は残り、3連複は取る。ワイドは err", async () => {
     const h = harness();
-    h.jra.oddsResult = (n) => (n >= 2 ? ({ status: "timeout" } as unknown as JraOddsResult<string>) : null);
+    h.jra.oddsResult = (n) => (n === 4 ? TIMEOUT : null);
     expect(await registerAndRun(h)).toMatchObject({ result: "ok" });
-    expect(combosOf(h)).toEqual({ umaren: { err: "fetch-failed" }, wakuren: { err: "fetch-failed" } });
+    expect(h.saved[0]!.horses).toHaveLength(14);
+    expect(combosOf(h).wide).toEqual({ err: "fetch-failed" });
+    expect("o" in combosOf(h).umaren!).toBe(true);
+    expect("o" in combosOf(h).wakuren!).toBe(true);
+    expect("o" in combosOf(h).sanrenpuku!).toBe(true);
+    expect(h.jra.fetchOdds).toHaveLength(5);
   });
-  it("古い取得キャッシュの馬連(この起床より前)は、取れなかった記録の代わりに使わない(err になる)", async () => {
+  it("3連複の頁が失敗(5 本目)しても、単勝・複勝・馬連・枠連・ワイドは残る。3連複は err。表が読めなければ unavailable", async () => {
+    const h = harness();
+    h.jra.oddsResult = (n) => (n === 5 ? TIMEOUT : null);
+    expect(await registerAndRun(h)).toMatchObject({ result: "ok" });
+    expect(h.saved[0]!.horses).toHaveLength(14);
+    expect(combosOf(h).sanrenpuku).toEqual({ err: "fetch-failed" });
+    expect("o" in combosOf(h).wide!).toBe(true);
+    const h2 = harness();
+    h2.jra.oddsResult = (n) => (n === 5 ? { status: "ok", value: TANPUKU } : null);
+    await registerAndRun(h2);
+    expect(h2.saved[0]!.combos!.sanrenpuku).toEqual({ err: "unavailable" });
+    expect("o" in h2.saved[0]!.combos!.wide!).toBe(true);
+  });
+  it("組合せが 4 つとも取れなくても単勝・複勝は ok。4 つとも {err}。", async () => {
+    const h = harness();
+    h.jra.oddsResult = (n) => (n >= 2 ? TIMEOUT : null);
+    expect(await registerAndRun(h)).toMatchObject({ result: "ok" });
+    expect(combosOf(h)).toEqual(ERR4);
+  });
+  it("古い取得キャッシュの馬連・ワイド・3連複(この起床より前)は、取れなかった記録の代わりに使わない(err になる)", async () => {
     const h = harness(DUE);
-    h.cache.set(jraOddsCacheKey(RACE, "umaren"), { value: JSON.stringify({ v: 1, page: "umaren", officialDatetime: null, oddsStatus: "middle", cells: [["0102", { oddsMin: 1, oddsMax: null, ninki: null }]] }), fetchedAt: DUE - 60_000 });
-    h.jra.oddsResult = (n) => (n === 2 ? ({ status: "timeout" } as unknown as JraOddsResult<string>) : null);
+    const old = (page: string, key: string) => ({ value: JSON.stringify({ v: 1, page, officialDatetime: null, oddsStatus: "middle", cells: [[key, { oddsMin: 1, oddsMax: 2, ninki: null }]] }), fetchedAt: DUE - 60_000 });
+    h.cache.set(jraOddsCacheKey(RACE, "umaren"), old("umaren", "0102"));
+    h.cache.set(jraOddsCacheKey(RACE, "wide"), old("wide", "0102"));
+    h.cache.set(jraOddsCacheKey(RACE, "sanrenpuku"), old("sanrenpuku", "010203"));
+    h.jra.oddsResult = (n) => (n === 2 || n === 4 || n === 5 ? TIMEOUT : null);
     await registerAndRun(h);
     expect(combosOf(h).umaren).toEqual({ err: "fetch-failed" });
+    expect(combosOf(h).wide).toEqual({ err: "fetch-failed" });
+    expect(combosOf(h).sanrenpuku).toEqual({ err: "fetch-failed" });
   });
   it("単勝・複勝が取れないときは、組合せの頁には出ず(取る頁は単勝・複勝の 1 本だけ)、従来どおり再試行する。failed の行の combos は null", async () => {
     const h = harness(START - 1_000);
-    h.jra.oddsResult = () => ({ status: "timeout" } as unknown as JraOddsResult<string>);
+    h.jra.oddsResult = () => TIMEOUT;
     await registerAndRun(h);
     expect(h.jra.fetchOdds).toEqual([linksOf(RACE).cnames.tanpuku]);
     expect(h.saved[0]).toMatchObject({ status: "failed", combos: null });
@@ -447,7 +509,7 @@ describe("馬連・枠連の全組の記録(#751)", () => {
     };
     await h.stage.runStep(rowOf(h, 10));
     expect(h.saved[0]).toMatchObject({ leadMin: 10, status: "ok" });
-    expect(combosOf(h)).toEqual({ umaren: { err: "fetch-failed" }, wakuren: { err: "fetch-failed" } });
+    expect(combosOf(h)).toEqual(ERR4);
     expect(h.jra.fetchOdds).toEqual([linksOf(RACE).cnames.tanpuku]);
   });
 });
