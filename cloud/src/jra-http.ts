@@ -29,6 +29,12 @@ export const JRA_ACCESS_S_URL = "https://www.jra.go.jp/JRADB/accessS.html";
 /** コースの情報のページの URL。1 は `index.html`、2 以降は `index2.html`・`index3.html`。 */
 export const jraCourseUrl = (n: number): string => `https://www.jra.go.jp/keiba/baba/index${n <= 1 ? "" : String(n)}.html`;
 
+/** 過去の含水率・クッション値の年の頁の URL(Issue #769。Shift_JIS)。 */
+export const babaPastYearUrl = (year: number): string => `https://www.jra.go.jp/keiba/baba/archive/${year}.html`;
+
+/** 過去の含水率・クッション値の PDF の URL。`path` は年の頁から読んだ `archive/` からの相対(例 `2021pdf/tokyo01.pdf`)。 */
+export const babaPastPdfUrl = (path: string): string => `https://www.jra.go.jp/keiba/baba/archive/${path}`;
+
 /** 1 本ごとのタイムアウト(ミリ秒)。応答の待ちと本文の読み出しの合計。 */
 export const JRA_TIMEOUT_MS = 10_000;
 /** 本文の上限(バイト)。コースの情報のページ(約 75KB)が最大で、その 3 倍以上。 */
