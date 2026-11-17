@@ -33,6 +33,8 @@ export interface BuildOptions {
   readonly corruptContent?: boolean;
   /** 真なら、content stream に加えて、展開すると上限を超える stream を入れる。 */
   readonly addBomb?: boolean;
+  /** 追加の ToUnicode の CMap の本文(爆弾の入力の検査用)。 */
+  readonly extraCmap?: string;
   /** 真なら、文字列を 1 つも持たない(content stream が無い)。 */
   readonly noText?: boolean;
 }
@@ -78,6 +80,9 @@ export function buildPdf(lines: readonly SynthLine[], options: BuildOptions = {}
     }
     cmap += "endcmap\nend\n";
     parts.push(stream(2, "/Filter/FlateDecode", deflateSync(Buffer.from(cmap, "latin1"))));
+  }
+  if (options.extraCmap !== undefined) {
+    parts.push(stream(5, "/Filter/FlateDecode", deflateSync(Buffer.from(options.extraCmap, "latin1"))));
   }
   // フォント本体(展開しない。/Length1 で見分ける)
   parts.push(stream(3, "/Filter/FlateDecode/Length1 9", Buffer.from("not-flate!", "latin1")));

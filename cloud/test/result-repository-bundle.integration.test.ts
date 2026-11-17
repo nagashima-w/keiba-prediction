@@ -86,7 +86,10 @@ describe("結果ストアのバンドル(Issue #207)", () => {
     .replace(/\[\[migrations\]\]\ntag = "v16"\nnew_sqlite_classes = \["RaceArchiveNarFetchDO"\]\n/, "")
     // Issue #731: 追い切りの取得の DO(RACE_ARCHIVE_FETCH_OIKIRI・RaceOikiriFetchDO)と migration v17 も同じく除く。
     .replace(/\[\[durable_objects\.bindings\]\]\nname = "RACE_ARCHIVE_FETCH_OIKIRI"\nclass_name = "RaceOikiriFetchDO"\n/, "")
-    .replace(/\[\[migrations\]\]\ntag = "v17"\nnew_sqlite_classes = \["RaceOikiriFetchDO"\]\n/, "");
+    .replace(/\[\[migrations\]\]\ntag = "v17"\nnew_sqlite_classes = \["RaceOikiriFetchDO"\]\n/, "")
+    // Issue #769: 過去の馬場の埋め戻しの DO(JRA_BABA_PAST_BACKFILL・JraBabaPastBackfillDO)と migration v18 も同じく除く。
+    .replace(/\[\[durable_objects\.bindings\]\]\nname = "JRA_BABA_PAST_BACKFILL"\nclass_name = "JraBabaPastBackfillDO"\n/, "")
+    .replace(/\[\[migrations\]\]\ntag = "v18"\nnew_sqlite_classes = \["JraBabaPastBackfillDO"\]\n/, "");
       expect(withoutRaceDay, "RACE_DAY の binding と migration v2 を除けている").not.toBe(base);
       const config = withoutRaceDay.replace('main = "src/worker.ts"', 'main = "result-store-probe.generated.ts"');
       expect(config).not.toBe(withoutRaceDay);
