@@ -146,6 +146,29 @@ describe("合成の PDF(読めない形は分類して返す。壊れた値を�
     await expectFail(buildPdf(layoutLines(TITLE, [BLOCK_FRI]), { addBomb: true }), "too-large");
   });
 
+  it("ToUnicode の CMap が爆弾(`<0000> <FFFF> <0041>` を 2 万行。展開後 約 420KB)のときは、短い時間(1 秒未満)で too-large を返す(CPU を使い切らない)", async () => {
+    const bomb = `/CIDInit /ProcSet findresource begin\nbegincmap\n1 beginbfrange\n${"<0000> <FFFF> <0041>\n".repeat(20_000)}endbfrange\nendcmap\nend\n`;
+    expect(bomb.length).toBeGreaterThan(400_000);
+    const bytes = buildPdf(layoutLines(TITLE, [BLOCK_FRI]), { extraCmap: bomb });
+    const t0 = performance.now();
+    const r = await parseBabaPastPdf(bytes);
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(r).toEqual({ ok: false, result: "too-large" });
+  });
+
+  it("CMap の項目数の上限: 実物の CMap(39〜43 項目・52〜59 文字)の 100 倍以内(5,000 項目・10,000 文字。実物の CMap の分を含めて)の手前は受け入れ、超えれば too-large", async () => {
+    const entries = (n: number): string => `/CIDInit /ProcSet findresource begin\nbegincmap\n${n} beginbfchar\n${Array.from({ length: n }, (_, i) => `<${(0x8000 + i).toString(16)}> <0041>`).join("\n")}\nendbfchar\nendcmap\nend\n`;
+    expect((await parseBabaPastPdf(buildPdf(layoutLines(TITLE, [BLOCK_FRI]), { extraCmap: entries(4_900) }))).ok).toBe(true);
+    expect(await parseBabaPastPdf(buildPdf(layoutLines(TITLE, [BLOCK_FRI]), { extraCmap: entries(5_001) }))).toEqual({ ok: false, result: "too-large" });
+    const wide = (n: number): string => `begincmap\n1 beginbfrange\n<8000> <${(0x8000 + n - 1).toString(16)}> <0041>\nendbfrange\nendcmap\n`;
+    expect((await parseBabaPastPdf(buildPdf(layoutLines(TITLE, [BLOCK_FRI]), { extraCmap: wide(9_900) }))).ok).toBe(true);
+    expect(await parseBabaPastPdf(buildPdf(layoutLines(TITLE, [BLOCK_FRI]), { extraCmap: wide(10_001) }))).toEqual({ ok: false, result: "too-large" });
+  });
+
+  it("見出しの年と日付の年が違う(見出し 2022・日付 2021)は shape-mismatch", async () => {
+    await expectFail(buildPdf(layoutLines("2022年第1回東京競馬含水率・クッション値", [BLOCK_FRI])), "shape-mismatch");
+  });
+
   it("入力が上限(1MB)を超えるときは too-large(展開する前に断る)", async () => {
     const big = new Uint8Array(1024 * 1024 + 1);
     big.set(new TextEncoder().encode("%PDF-1.5\n"));

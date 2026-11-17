@@ -180,9 +180,17 @@ async function extractStreams(bytes: Uint8Array): Promise<{ streams: PdfStream[]
   return { streams, contentsOrder };
 }
 
-/** ToUnicode の CMap(`bfchar`・`bfrange`)を、グリフ番号 → 文字の表にする。 */
-function parseCMap(text: string): Map<number, string> {
-  const map = new Map<number, string>();
+/** CMap 全体(PDF 1 本)の項目数と、文字の数(範囲の幅の合計)の上限。実物の CMap は 39〜43 項目・52〜59 文字(`fixtures/jra_baba_past_*.pdf` 6 本)で、その約 100 倍。 */
+const MAX_CMAP_ENTRIES = 5_000;
+const MAX_CMAP_CODES = 10_000;
+
+/** ToUnicode の CMap(`bfchar`・`bfrange`)を、グリフ番号 → 文字の表にする。`budget` は PDF 全体で共有する残りの項目数と文字数(上限を超えたら too-large)。 */
+function parseCMap(text: string, budget: { entries: number; codes: number }, map: Map<number, string>): Map<number, string> {
+  const spend = (entries: number, codes: number): void => {
+    budget.entries -= entries;
+    budget.codes -= codes;
+    if (budget.entries < 0 || budget.codes < 0) fail("too-large");
+  };
   const toStr = (hex: string): string => {
     let out = "";
     for (let i = 0; i + 4 <= hex.length; i += 4) out += String.fromCharCode(parseInt(hex.slice(i, i + 4), 16));
@@ -200,6 +208,7 @@ function parseCMap(text: string): Map<number, string> {
       if (sec[1] === "bfchar") {
         const b = tokens[i + 1];
         if (b === undefined || b[1] === undefined) break;
+        spend(1, 1);
         map.set(parseInt(a[1], 16), toStr(b[1]));
         i += 2;
         continue;
@@ -209,6 +218,7 @@ function parseCMap(text: string): Map<number, string> {
       if (hi === undefined || hi[1] === undefined || dst === undefined) break;
       const lo = parseInt(a[1], 16);
       const high = parseInt(hi[1], 16);
+      spend(1, high >= lo ? high - lo + 1 : 0);
       if (dst[2] !== undefined) {
         // 配列の形 `<lo> <hi> [<d1> <d2> …]`
         let j = i + 3;
@@ -445,6 +455,7 @@ const NUMBER = /^\d{1,3}\.\d$/;
 function readBlocks(clusters: readonly Cluster[]): { year: number; kai: number; venueName: string; blocks: Block[] } {
   let title: { year: number; kai: number; venueName: string } | null = null;
   const blocks: Block[] = [];
+  const blockYears: number[] = [];
   let block: Block | null = null;
   let surface: "turf" | "dirt" | null = null;
   for (const cl of clusters) {
@@ -469,6 +480,7 @@ function readBlocks(clusters: readonly Cluster[]): { year: number; kai: number; 
         if (!Number.isInteger(days) || days < 1 || days > 7) return fail("shape-mismatch");
         block = { dates: Array.from({ length: days }, (_, k) => utc(y, m, d) + k * DAY_MS), weekdays: null, values: {} };
         blocks.push(block);
+        blockYears.push(y);
         surface = null;
         continue;
       }
@@ -501,6 +513,8 @@ function readBlocks(clusters: readonly Cluster[]): { year: number; kai: number; 
     block.values[key] = vals;
   }
   if (title === null || blocks.length === 0) return fail("shape-mismatch");
+  // 見出しの年と、塊の最初の日付の年が合うこと(別の年の PDF・日付の読み違いを入れない。開催は暦の年をまたがない)
+  if (blockYears.some((y) => y !== title!.year)) return fail("shape-mismatch");
   return { ...title, blocks };
 }
 
@@ -512,7 +526,8 @@ export async function parseBabaPastPdf(bytes: Uint8Array): Promise<BabaPastPdfRe
     const { streams, contentsOrder } = await extractStreams(bytes);
     const cmaps = streams.filter((s) => /begin(?:bfchar|bfrange)/.test(s.text));
     const glyphs = new Map<number, string>();
-    for (const c of cmaps) for (const [k, v] of parseCMap(c.text)) glyphs.set(k, v);
+    const budget = { entries: MAX_CMAP_ENTRIES, codes: MAX_CMAP_CODES };
+    for (const c of cmaps) parseCMap(c.text, budget, glyphs);
     const isCMap = new Set(cmaps);
     let content: PdfStream[] = [];
     if (contentsOrder !== null) {
