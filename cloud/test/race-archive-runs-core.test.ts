@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RESULT_RUN_VERSION } from "../../packages/core/src/scraper/race-record-to-runs";
 import type { RaceRecord } from "../../packages/core/src/scraper/race-record";
 import { DB_SIZE_LIMIT_BYTES, type RaceArchiveCatalogEntry, type ReadRaceArchivesResult } from "../src/race-archive-repository";
@@ -8,6 +8,8 @@ import {
   ARCHIVE_RUNS_MAX_NIGHTS,
   ARCHIVE_RUNS_NIGHTLY_ROWS_DEFAULT,
   ARCHIVE_RUNS_READ_COUNT_ROWS,
+  ARCHIVE_RUNS_WINDOW_END_MAX_MIN,
+  parseArchiveRunsWindowEndMin,
   RaceArchiveRunsCore,
   isArchiveRunsDisabled,
   type ArchiveRunsOptions,
@@ -748,5 +750,83 @@ describe("目録の走査の範囲(Issue #613。未変換だけを索引から�
       expect(afters[i]! > afters[i - 1]! || afters[i - 1] === "", `${i}`).toBe(true);
     }
     a.h.sql.close();
+  });
+});
+
+describe("変換の時間帯の終わりの上書き(2026-11-18 の一時的な拡張)", () => {
+  beforeEach(() => {
+    h = new Harness(); // 外側の afterEach が閉じる対象を、各テストで開いた状態にする
+  });
+
+  it.each([
+    ["1230", 1230],
+    [" 1230 ", 1230],
+    ["600", 600],
+    ["61", 61],
+    ["1231", undefined], // 21:00 の事前分析に食い込まないよう、20:30 より後は拒否
+    ["1440", undefined],
+    ["60", undefined], // 開始 1:00 以下は時間帯が空
+    ["0", undefined],
+    ["abc", undefined],
+    ["", undefined],
+    ["12.5", undefined],
+    ["-1", undefined],
+    [undefined, undefined],
+  ] as const)("parseArchiveRunsWindowEndMin(%j) は %j", (v, want) => {
+    expect(parseArchiveRunsWindowEndMin(v)).toBe(want);
+  });
+
+  it("上限は 1230(20:30)", () => {
+    expect(ARCHIVE_RUNS_WINDOW_END_MAX_MIN).toBe(20 * 60 + 30);
+  });
+
+  it("windowEndMin=1230 なら 20:29 は動き、20:30 は動かず翌日 1:00 に張る。指定が無ければ 8:30 で外れる", async () => {
+    const day = (hh: number, mm: number) => at(2026, 11, 5, hh, mm);
+    h.sql.close();
+    const wide = new Harness({ windowEndMin: 1230 });
+    wide.seed(100);
+    wide.now = day(20, 29);
+    wide.alarm = wide.now;
+    await wide.fire();
+    expect(wide.reads).toHaveLength(1);
+    wide.now = day(20, 30);
+    wide.alarm = wide.now;
+    await wide.fire();
+    expect(wide.reads).toHaveLength(1);
+    expect((await wide.core.getStatus()).waitReason).toBe("outside-window");
+    expect(wide.alarm).toBe(NIGHT2);
+    wide.sql.close();
+
+    const dflt = new Harness();
+    h = dflt;
+    dflt.seed(100);
+    dflt.now = day(8, 30);
+    dflt.alarm = dflt.now;
+    await dflt.fire();
+    expect(dflt.reads).toHaveLength(0);
+  });
+
+  it("行数の上限は 1 日(1:00〜20:30)の合計で効く: 朝に使った行は昼にも数え続け、翌日 1:00 に数え直す", async () => {
+    h.sql.close();
+    h = new Harness({ windowEndMin: 1230, nightlyRows: 600 });
+    h.seed(300);
+    h.rowsPerRace = 14; // 1 ステップ 282 行
+    h.alarm = NIGHT1;
+    await h.fire();
+    const morning = (await h.core.getStatus()).night.rows;
+    expect(morning).toBe(282);
+    h.now = at(2026, 11, 5, 15, 0); // 同じ日の午後
+    h.alarm = h.now;
+    await h.fire();
+    expect((await h.core.getStatus()).night.rows).toBe(564); // 数え直されず足される
+    await h.fire(); // 564 < 600: もう 1 ステップ
+    expect((await h.core.getStatus()).night.rows).toBe(846);
+    const reads = h.reads.length;
+    await h.fire();
+    expect(h.reads.length).toBe(reads); // 1 日の合計で上限に達した
+    expect((await h.core.getStatus()).waitReason).toBe("night-limit");
+    expect(h.alarm).toBe(NIGHT2);
+    await h.fire();
+    expect((await h.core.getStatus()).night.rows).toBe(282); // 翌日に数え直す
   });
 });

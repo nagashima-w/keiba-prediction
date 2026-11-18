@@ -7,7 +7,7 @@
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v12)に固定される。
  *
- * 動きを変える設定は Worker の var・secret の 1 つだけ(任意): `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT`(1 晩の書き込み行数を**下げる**上書き。未設定は既定の 60,000 行。文字列 `"0"` だけは変換を止める)。
+ * 動きを変える設定は Worker の var・secret の 2 つだけ(任意。2 つ目の `RACE_ARCHIVE_RUNS_WINDOW_END_MIN` は時間帯の終わりを 61〜1230 分に変える、2026-11-18 の一時的な拡張): `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT`(1 晩の書き込み行数を**下げる**上書き。未設定は既定の 60,000 行。文字列 `"0"` だけは変換を止める)。
  * **smoke 専用の `options()` の差し替え**(時間帯を外す)は `smoke-worker.ts` のサブクラスだけが行う。本番のエントリ(`worker.ts`)はそのサブクラスを import しない。
  */
 import { DurableObject } from "cloudflare:workers";
@@ -16,7 +16,7 @@ import { buildArchiveRunsNoticeEmbed } from "./notify-embeds";
 import { createDiscordNotifier } from "./notify-send";
 import { D1RaceArchiveStore, type RaceArchiveBucket } from "./race-archive-repository";
 import { convertRaceArchives, type RaceArchiveRunsDb } from "./race-archive-runs";
-import { ARCHIVE_RUNS_NIGHTLY_ROWS_MAX, isArchiveRunsDisabled, RaceArchiveRunsCore, type ArchiveRunsOptions, type RaceArchiveRunsStatus } from "./race-archive-runs-core";
+import { ARCHIVE_RUNS_NIGHTLY_ROWS_MAX, isArchiveRunsDisabled, parseArchiveRunsWindowEndMin, RaceArchiveRunsCore, type ArchiveRunsOptions, type RaceArchiveRunsStatus } from "./race-archive-runs-core";
 
 export interface RaceArchiveRunsEnv {
   DB: RaceArchiveRunsDb;
@@ -29,6 +29,8 @@ export interface RaceArchiveRunsEnv {
    * ★止める var を `RACE_ARCHIVE_RUNS` にしてはならない: それは DO の binding の名前で、同じ名前の var は binding と衝突する。
    */
   RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT?: string;
+  /** 時間帯の終わりの上書き(JST の 0 時からの分。61〜1230。既定は 8:30)。 */
+  RACE_ARCHIVE_RUNS_WINDOW_END_MIN?: string;
 }
 
 export class RaceArchiveRunsDO extends DurableObject<RaceArchiveRunsEnv> {
@@ -84,7 +86,8 @@ export class RaceArchiveRunsDO extends DurableObject<RaceArchiveRunsEnv> {
    */
   protected options(): ArchiveRunsOptions {
     const nightlyRows = parseLimitOverride(this.env.RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT, ARCHIVE_RUNS_NIGHTLY_ROWS_MAX);
-    return { ...(isArchiveRunsDisabled(this.env.RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT) ? { disabled: true } : {}), ...(nightlyRows === null ? {} : { nightlyRows }) };
+    const windowEndMin = parseArchiveRunsWindowEndMin(this.env.RACE_ARCHIVE_RUNS_WINDOW_END_MIN);
+    return { ...(windowEndMin === undefined ? {} : { windowEndMin }), ...(isArchiveRunsDisabled(this.env.RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT) ? { disabled: true } : {}), ...(nightlyRows === null ? {} : { nightlyRows }) };
   }
 
   /** アラームが無ければ張る(RPC)。cron の `scheduled` が 21 時と 23 時に呼ぶ。 */
