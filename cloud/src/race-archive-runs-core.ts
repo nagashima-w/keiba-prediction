@@ -55,6 +55,18 @@ export const RACE_ARCHIVE_RUNS_NAME = "main";
 export const ARCHIVE_RUNS_WINDOW_START_MIN = 60;
 /** 時間帯の終了(JST の 0 時からの分。含まない)。8:30。 */
 export const ARCHIVE_RUNS_WINDOW_END_MIN = 8 * 60 + 30;
+/** 時間帯の終わりの上書きの最大(20:30)。21:00・23:00 の事前分析と重ならないよう、これより後ろは受けない(2026-11-18 の一時的な拡張)。 */
+export const ARCHIVE_RUNS_WINDOW_END_MAX_MIN = 20 * 60 + 30;
+/**
+ * 時間帯の終わりの上書き(Worker の var `RACE_ARCHIVE_RUNS_WINDOW_END_MIN`。JST の 0 時からの分)。
+ * 開始(1:00)より後で {@link ARCHIVE_RUNS_WINDOW_END_MAX_MIN} 以下の整数だけ採用し、それ以外・未設定は undefined(既定の 8:30)。
+ * 時間帯は 1 つの JST 日の中に収まるので、「晩」の数え直し(JST の日付)は 1 日 1 回のまま、行数の上限が 1 日の合計で効く。
+ */
+export function parseArchiveRunsWindowEndMin(value: string | undefined): number | undefined {
+  if (value === undefined || !/^[1-9][0-9]{0,8}$/.test(value.trim())) return undefined;
+  const n = Number(value.trim());
+  return n > ARCHIVE_RUNS_WINDOW_START_MIN && n <= ARCHIVE_RUNS_WINDOW_END_MAX_MIN ? n : undefined;
+}
 /** 1 晩の書き込み行数の既定の上限(ユーザーの決定。最初は 30,000 で始め、2026-11-09 に 60,000 へ上げた。#704)。 */
 export const ARCHIVE_RUNS_NIGHTLY_ROWS_DEFAULT = 60_000;
 /** 1 晩の書き込み行数の上限の、上書きできる最大(これを超える値は無視して既定)。 */
