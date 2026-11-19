@@ -32,8 +32,10 @@
  *    柵は月単位なので、解けるまで毎晩 1 リクエストを出して確かめる(保存が `skipped` で戻り、また止まる)。**通知は止まった最初の 1 回だけ**(保存に成功すると、次の柵でまた 1 回送る)。
  *  - `manual-stopped`: 自動で再開したあとにまた拒否された。**手で再開するまで動かさない**({@link RaceArchiveFetchCore.resume})。
  *  - `capacity-stopped`: D1 が 400MB を超えた・大きさが読めない(`saveRaceArchive` の `skipped`)。手で再開するまで動かさない。
- *  - 拒否以外の失敗のうち 5xx・network・timeout・bad-response・保存の例外・読み取りの例外(`process-error`)が**その晩に連続 {@link ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件**(9 件では止まらず、10 件で止まる)になったら、その晩だけ止めて通知する
- *    (状態は `running` のまま。止められたとは数えず、次の晩は普通に動く)。**404・検査の不合格・それ以外の 4xx は数えない**(古いページが 404 だらけでも、1 晩 10 件で止まらない。連続回数を増やしも戻しもしない)。
+ *  - 拒否以外の失敗のうち 5xx・network・timeout・bad-response・保存の例外・読み取りの例外(`process-error`)が**連続 {@link ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件**(9 件では止まらず、10 件で止まる)になったら、いったん止めて通知する
+ *    (状態は `running` のまま。止められたとは数えない)。**止まった時刻の 1 時間後に再開する**({@link ARCHIVE_PAUSE_RESUME_MS}。その時刻が時間帯の外なら、次に時間帯に入る時刻。Issue #781)。
+ *    再開したら、**その連続で失敗した行(`streak_ids` → `retry_ids`)から先に取り直す**(新しい行へ失敗を広げない。同じ晩の取り直しなので `nights` は増えず、`dead` の数は止める前と同じ規模に収まる)。
+ *    連続回数は止めるときに 0 に戻す。**通知はその晩の最初の 1 回だけ**(2 回目以降はログだけ。夜が替われば、また 1 回送る)。**404・検査の不合格・それ以外の 4xx は数えない**(古いページが 404 だらけでも、10 件で止まらない。連続回数を増やしも戻しもしない)。
  *  - 自動再開の権利は、**再開したあとの最初のリクエストを出すときに使い**、**その晩を拒否なしで走り切ったら戻る**(別の機会の停止でもう 1 度自動で再開する。オーケストレーターの判断)。
  *    再開した晩が開催日の朝などで 1 件も取らなかったときは、権利は使われないまま、次に取った晩が「再開した晩」になる。手で再開したときも戻す。
  * 通知({@link ArchiveNotice})は状態を書いたあとに送る。送信が失敗したら 10 分後に再送し、3 回で諦める(状態は変わらない)。
@@ -184,8 +186,10 @@ export const ARCHIVE_QUEUE_FULL_DELAY_MS = 60_000;
 export const ARCHIVE_PLAN_RECHECK_MS = 10 * 60_000;
 /** アラームの中の失敗(D1・RPC)のあと、再試行する間隔。通知の再送の間隔も同じ。 */
 export const ARCHIVE_ERROR_RETRY_MS = 10 * 60_000;
-/** その晩に連続でこの件数だけ失敗(拒否以外)したら、その晩は止める。 */
+/** 連続でこの件数だけ失敗(拒否以外)したら、いったん止める(止めたあとは {@link ARCHIVE_PAUSE_RESUME_MS} 後に再開する)。 */
 export const ARCHIVE_CONSECUTIVE_FAILURE_LIMIT = 10;
+/** 連続失敗で止めたとき、再開までに置く時間(止まった時刻から。時間帯の外なら次に時間帯に入る時刻。Issue #781)。 */
+export const ARCHIVE_PAUSE_RESUME_MS = 3_600_000;
 /** 個別のレース・日・月を諦めるまでの晩数。 */
 export const ARCHIVE_MAX_NIGHTS = 3;
 /** 通知の送信を試す回数の上限。 */
@@ -407,7 +411,7 @@ function errorKind(error: unknown): string {
   return error instanceof Error ? error.name.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "Error" : "non-error";
 }
 
-/** 「その晩に連続 {@link ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件」の失敗に数える分類か。 */
+/** 「連続 {@link ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件」の失敗に数える分類か。 */
 function countsTowardPause(cls: string): boolean {
   return /^http-5\d\d$/.test(cls) || cls === "network-error" || cls === "timeout" || cls === "bad-response" || cls === "save-failed" || cls === "process-error";
 }
@@ -687,6 +691,13 @@ export class RaceArchiveFetchCore {
       return;
     }
 
+    const pausedUntil = this.metaNum("paused_until");
+    if (now < pausedUntil) {
+      this.setWait("paused-failures");
+      await this.arm(pausedUntil);
+      return;
+    }
+
     const rest = await this.restDecision(now, night);
     if (rest === "kaisai") {
       this.setWait("kaisai-day");
@@ -775,7 +786,8 @@ export class RaceArchiveFetchCore {
     this.metaSet("night_saved", "0");
     this.metaSet("r2_flushed", "0");
     this.metaSet("night_failed", "0");
-    this.metaSet("fail_streak", "0");
+    this.resetStreak();
+    this.metaSet("retry_ids", "[]");
     this.metaSet("night_rows_read", "0");
     this.rowsRead = 0;
     this.rowsReadSaved = 0;
@@ -855,6 +867,10 @@ export class RaceArchiveFetchCore {
 
   /** 次にやること: 月(カレンダー)→ レース(結果)→ 日(一覧)の順。いずれも新しいものから。その晩に試して駄目だったものは除く。 */
   private nextWork(night: string): Work | null {
+    const retry = this.nextRetry(night);
+    if (retry !== null) {
+      return retry;
+    }
     const cur = monthOfDate(night);
     const prev = previousMonth(cur);
     const month = (
@@ -884,6 +900,52 @@ export class RaceArchiveFetchCore {
         .toArray() as { date: string }[]
     )[0];
     return day === undefined ? null : { kind: "day", id: day.date };
+  }
+
+  /** 連続失敗の記録(`streak_ids`)と連続回数を 0 に戻す(取れたとき・夜が替わったとき・止めたとき)。 */
+  private resetStreak(): void {
+    this.metaSet("fail_streak", "0");
+    this.metaSet("streak_ids", "[]");
+  }
+
+  private metaIds(key: string): string[] {
+    try {
+      const parsed: unknown = JSON.parse(this.metaGet(key) ?? "[]");
+      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 連続失敗で止めたあとの再開で、その晩に失敗した行(`retry_ids`)から先に取り直す(Issue #781)。新しい行へ失敗を広げず、`nights` も増やさない(同じ晩の `last_night` のまま)。
+   * 一覧の ID は 1 件ずつ取り出して書き戻してから実行する(同じ行を続けて引かない)。表の引きは主キーだけ。取り直せない行(取れた・dead・別の晩)は捨てる。
+   */
+  private nextRetry(night: string): Work | null {
+    const ids = this.metaIds("retry_ids");
+    if (ids.length === 0) {
+      return null;
+    }
+    const rest = [...ids];
+    let found: Work | null = null;
+    while (found === null && rest.length > 0) {
+      const entry = rest.shift()!;
+      const sep = entry.indexOf(":");
+      const kind = entry.slice(0, sep);
+      const id = entry.slice(sep + 1);
+      if (kind === "race") {
+        const row = this.q("SELECT date FROM ra_race WHERE race_id = ? AND status = 'pending' AND last_night = ? AND date < ?", id, night, night).toArray()[0] as { date: string } | undefined;
+        found = row === undefined ? null : { kind: "race", id, date: row.date };
+      } else if (kind === "day") {
+        const row = this.q("SELECT date FROM ra_day WHERE date = ? AND status = 'pending' AND last_night = ? AND date < ?", id, night, night).toArray()[0];
+        found = row === undefined ? null : { kind: "day", id };
+      } else if (kind === "month") {
+        const row = this.q("SELECT month FROM ra_month WHERE month = ? AND status <> 'dead' AND last_night = ? AND COALESCE(fetched_on, '') <> ?", id, night, night).toArray()[0];
+        found = row === undefined ? null : { kind: "month", id };
+      }
+    }
+    this.metaSet("retry_ids", JSON.stringify(rest));
+    return found;
   }
 
   private urlOf(work: Work): string {
@@ -1011,7 +1073,7 @@ export class RaceArchiveFetchCore {
           this.q("INSERT OR IGNORE INTO ra_day (date) VALUES (?)", date);
         }
         this.q("UPDATE ra_month SET status = 'done', fetched_on = ?, last_class = NULL WHERE month = ?", night, work.id);
-        this.metaSet("fail_streak", "0");
+        this.resetStreak();
         return "ok";
       }
       case "day": {
@@ -1020,7 +1082,7 @@ export class RaceArchiveFetchCore {
         });
         this.q("UPDATE ra_day SET status = 'listed', last_class = NULL WHERE date = ?", work.id);
         this.closeDayIfDone(work.id);
-        this.metaSet("fail_streak", "0");
+        this.resetStreak();
         return "ok";
       }
       default:
@@ -1033,7 +1095,7 @@ export class RaceArchiveFetchCore {
     if (!built.ok) {
       this.q("UPDATE ra_race SET status = 'skipped', last_class = ?, last_night = ? WHERE race_id = ?", built.category, night, work.id);
       this.closeDayIfDone(work.date);
-      this.metaSet("fail_streak", "0");
+      this.resetStreak();
       return "ok";
     }
     let saved: SaveRaceArchiveResult;
@@ -1057,7 +1119,7 @@ export class RaceArchiveFetchCore {
     this.closeDayIfDone(work.date);
     this.bump("night_saved");
     this.metaSet("db_size", String(saved.dbSizeBytes));
-    this.metaSet("fail_streak", "0");
+    this.resetStreak();
     this.metaSet("fence_notified", "0");
     if (this.unflushedClassA() >= ARCHIVE_CLASS_A_FLUSH_STEP) {
       await this.flushClassA();
@@ -1110,14 +1172,14 @@ export class RaceArchiveFetchCore {
     if (saved.dbSizeBytes !== null) {
       this.metaSet("db_size", String(saved.dbSizeBytes));
     }
-    this.metaSet("fail_streak", "0");
+    this.resetStreak();
     return "ok";
   }
 
   /** 追い切りのページが読めないと分かったレースに印を付ける(以後は取らない。分類は `skippedByClass` に数える)。 */
   private skipOikiri(raceId: string, night: string, cls: "no-table" | "no-entries"): "ok" {
     this.q("UPDATE ra_race SET status = 'skipped', last_class = ?, last_night = ? WHERE race_id = ?", cls, night, raceId);
-    this.metaSet("fail_streak", "0");
+    this.resetStreak();
     return "ok";
   }
 
@@ -1150,7 +1212,7 @@ export class RaceArchiveFetchCore {
   }
 
   /**
-   * 個別の失敗を記録する(その晩はもう取らない。{@link ARCHIVE_MAX_NIGHTS} 晩目で諦める)。連続失敗が上限に達したら、その晩を止めて通知する(戻り値 true = 止めた)。
+   * 個別の失敗を記録する(その晩はもう取らない。{@link ARCHIVE_MAX_NIGHTS} 晩目で諦める)。連続失敗が上限に達したら、止めて(1 時間後に再開。通知はその晩の最初の 1 回だけ)(戻り値 true = 止めた)。
    */
   private async failed(work: Work, night: string, cls: string, at: number): Promise<boolean> {
     const dead = `CASE WHEN status = 'pending' AND nights + (CASE WHEN COALESCE(last_night, '') <> ? THEN 1 ELSE 0 END) >= ${ARCHIVE_MAX_NIGHTS} THEN 'dead' ELSE status END`;
@@ -1165,16 +1227,29 @@ export class RaceArchiveFetchCore {
     this.bump("night_failed");
     // 「連続で失敗」に数えるのは、netkeiba 側の不調か、こちらの処理の失敗だけ(5xx・network・timeout・保存の例外・読み取りの例外)。
     // 404・検査の不合格・それ以外の 4xx は数えない(古いページが 404 だらけでも、1 晩 10 件で止まらない)。数えない失敗は連続回数を増やしも戻しもしない。
-    const streak = countsTowardPause(cls) ? this.bump("fail_streak") : this.metaNum("fail_streak");
+    const counts = countsTowardPause(cls);
+    const streak = counts ? this.bump("fail_streak") : this.metaNum("fail_streak");
+    if (counts) {
+      const key = `${work.kind}:${work.id}`;
+      this.metaSet("streak_ids", JSON.stringify([...this.metaIds("streak_ids").filter((v) => v !== key), key]));
+    }
     this.deps.log(`race-archive: failed stage=${STAGE_OF[work.kind]} class=${cls} streak=${streak}`, "error");
     if (!countsTowardPause(cls) || streak < ARCHIVE_CONSECUTIVE_FAILURE_LIMIT) {
       return false;
     }
-    const resumeAt = Math.max(nextNightStart(at, this.startMin), this.notBefore);
-    this.metaSet("paused_night", night);
+    // 止まった時刻の 1 時間後に再開する(時間帯の外なら、次に時間帯に入る時刻。Issue #781)。再開したら、この連続で失敗した行から先に取り直す。
+    const resumeAt = Math.max(nextArchiveWindowStart(at + ARCHIVE_PAUSE_RESUME_MS, this.startMin, this.endMin), this.notBefore);
+    this.metaSet("retry_ids", JSON.stringify(this.metaIds("streak_ids")));
+    this.resetStreak();
+    this.metaSet("paused_until", String(resumeAt));
     this.setWait("paused-failures");
-    this.queueNotice({ kind: "failures", count: streak, lastClass: cls, at, resumeAt });
-    await this.flushNotice(this.deps.now());
+    if (this.metaGet("failures_notice_night") === night) {
+      this.deps.log(`race-archive: paused-failures notice=skipped night=${night}`, "info"); // 通知はその晩の最初の 1 回だけ
+    } else {
+      this.metaSet("failures_notice_night", night);
+      this.queueNotice({ kind: "failures", count: streak, lastClass: cls, at, resumeAt });
+      await this.flushNotice(this.deps.now());
+    }
     await this.arm(resumeAt);
     return true;
   }

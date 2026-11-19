@@ -59,9 +59,13 @@ describe("buildArchiveNoticeEmbed", () => {
     expect(t).toContain("1,000,000");
     expect(t).toContain("11/06 00:00");
   });
-  it("連続失敗: その晩だけ止めたこと(止められたのではない)・件数・最後の分類・次の晩に普通に動くことを出す", () => {
-    const t = text(buildArchiveNoticeEmbed({ kind: "failures", count: 10, lastClass: "http-500", at: AT, resumeAt: RESUME }));
+  it("連続失敗: 一時停止したこと(止められたのではない)・件数・最後の分類・再開の時刻を出す。「今夜」「次の晩」とは書かない(Issue #781)", () => {
+    const t = text(buildArchiveNoticeEmbed({ kind: "failures", count: 10, lastClass: "http-500", at: AT, resumeAt: AT + 3_600_000 }));
     expect(t).toContain("【一時停止】");
+    expect(t).toContain("一時停止しました");
+    expect(t).toContain("11/05 01:12 に自動で再開");
+    expect(t).not.toContain("今夜");
+    expect(t).not.toContain("次の晩");
     expect(t).toContain("10");
     expect(t).toContain("http-500");
     expect(t).toContain("制限されたのではなく");

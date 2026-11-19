@@ -400,3 +400,21 @@ describe("buildOikiriArchiveOptions(追い切り用の DO の設定)", () => {
     expect(foreign.windowEndMin).toBe(1440);
   });
 });
+
+describe("追い切りの取得でも、連続失敗は 1 時間後に失敗した行から取り直す(Issue #781)", () => {
+  it("5xx が 10 件続いて止まり、1 時間後に同じ 10 件を同じ順で取り直す(11・12 件目へ広がらない)。通知は scope=oikiri で 1 回", async () => {
+    const w = mk();
+    w.catalog = Array.from({ length: 12 }, (_, i) => cat(`2021050101${String(i + 1).padStart(2, "0")}`, "central", "2021-01-30"));
+    w.defaultResponse = { kind: "response", status: 500, contentType: "text/html", body: enc(""), queuedMs: 0, elapsedMs: 1 };
+    await w.core.kick();
+    await w.runUntil(T0 + HOUR / 2);
+    expect(w.fetchLog).toHaveLength(10); // 前提: 10 件で止まった
+    expect(w.notices.map((n) => n.kind)).toEqual(["failures"]);
+    expect(w.notices[0]).toMatchObject({ scope: "oikiri" });
+    const first = w.fetchLog.slice();
+    await w.runUntil(T0 + 3 * HOUR);
+    expect(w.fetchLog.slice(10, 20)).toEqual(first);
+    expect(new Set(w.fetchLog).size).toBe(10);
+    expect(w.notices).toHaveLength(1);
+  });
+});
