@@ -610,7 +610,7 @@ function buildArchiveNoticeEmbedBody(notice: ArchiveNotice): CloudEmbed {
       const cls = notice.lastClass.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40);
       return fitEmbed({
         title: "過去の結果の取得を一時停止しました",
-        description: `【一時停止】失敗が連続 ${notice.count} 件になったため、今夜は止めました(最後の分類: ${cls}。${jstMonthDayTime(notice.at)})。アクセスを制限されたのではなく、netkeiba 側の不調などの可能性があります。${jstMonthDayTime(notice.resumeAt)}(次の晩)から普通に再開します。`,
+        description: `【一時停止】失敗が連続 ${notice.count} 件になったため、一時停止しました(最後の分類: ${cls}。${jstMonthDayTime(notice.at)})。アクセスを制限されたのではなく、netkeiba 側の不調などの可能性があります。${jstMonthDayTime(notice.resumeAt)} に自動で再開します。同じ晩の 2 回目以降の一時停止は知らせません。`,
         color: COLOR_ORANGE,
       });
     }
