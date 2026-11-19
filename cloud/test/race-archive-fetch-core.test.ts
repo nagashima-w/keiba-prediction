@@ -771,18 +771,19 @@ describe("止められたのではない失敗", () => {
   it("連続失敗の上限の定数は 10(境界の値をリテラルで固定する: 9 件で止まらず、10 件で止まる)", () => {
     expect(ARCHIVE_CONSECUTIVE_FAILURE_LIMIT).toBe(10);
   });
-  it(`5xx が連続 ${ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件になったらその晩は止め、Discord に 1 回。止められたとは数えず(状態は running)、次の晩は普通に動く`, async () => {
+  it(`5xx が連続 ${ARCHIVE_CONSECUTIVE_FAILURE_LIMIT} 件になったら止め、Discord に 1 回。止められたとは数えず(状態は running)、止まった 1 時間後に同じ晩のうちに再開する`, async () => {
     const w = mk({ fromMonth: "2026-11" });
     const ids = Array.from({ length: 12 }, (_, i) => rid(1, i + 1));
     w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids }, results: Object.fromEntries(ids.map((id) => [id, [httpStatus(500), ok(RESULT_OK)] as GateResult[]])) });
     await w.core.kick();
-    await w.runUntil(jst(11, 5, 23, 59));
+    await w.runUntil(jst(11, 5, 0, 30));
     expect(w.resultFetches).toHaveLength(10);
     expect(w.notices.map((n) => n.kind)).toEqual(["failures"]);
     expect((await w.core.getStatus()).state).toBe("running");
-    expect(w.alarm).toBe(jst(11, 6, 0));
-    await w.runUntil(jst(11, 6, 3));
-    expect(w.saved.length).toBeGreaterThan(0); // 次の晩は普通に動く
+    expect((await w.core.getStatus()).waitReason).toBe("paused-failures");
+    expect(w.alarm).toBe(w.fetchLog[w.fetchLog.length - 1]!.at + HOUR); // 止まった時刻の 1 時間後(次の晩ではない)
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect(w.saved.length).toBeGreaterThan(0); // 同じ晩のうちに再開して取れている
     expect((await w.core.getStatus()).autoResume.used).toBe(false);
   });
   it("失敗が 9 件続いたあと 1 件成功すれば数え直し、止まらない", async () => {
@@ -950,16 +951,130 @@ describe("読み取りが想定外の例外を投げたとき(同じページを
     expect(w.sql.exec("SELECT status, nights FROM ra_race WHERE race_id = '999999999999'").toArray()[0]).toEqual({ status: "dead", nights: 3 });
     expect((await w.core.getStatus()).state).toBe("running");
   });
-  it("読み取りの例外は「連続失敗」に数える: 10 件続けば、その晩は止めて通知する(状態は running のまま)", async () => {
+  it("読み取りの例外は「連続失敗」に数える: 10 件続けば、止めて通知する(状態は running のまま)", async () => {
     const w = mk({ fromMonth: "2026-11" });
     const ids = Array.from({ length: 12 }, (_, i) => rid(1, i + 1));
     w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids } });
     ids.forEach((id) => w.throwOnRace.add(id));
     await w.core.kick();
-    await w.runUntil(jst(11, 5, 23, 59));
+    await w.runUntil(jst(11, 5, 0, 30));
     expect(w.resultFetches).toHaveLength(10);
     expect(w.notices.map((n) => n.kind)).toEqual(["failures"]);
     expect((await w.core.getStatus()).state).toBe("running");
+  });
+});
+
+describe("連続失敗の一時停止は 1 時間後に、失敗した行から取り直す(Issue #781)", () => {
+  const ids = Array.from({ length: 12 }, (_, i) => rid(1, i + 1));
+  const failing = ids.slice(0, 10);
+  const lastFetchAt = (w: World): number => w.fetchLog[w.fetchLog.length - 1]!.at;
+  const nightsOf = (w: World, id: string): number => w.sql.exec("SELECT nights FROM ra_race WHERE race_id = ?", id).toArray()[0]!.nights as number;
+  const allDay = (extra: ArchiveFetchOptions = {}): World => mk({ fromMonth: "2026-11", windowEndMin: 1440, skipCentralRaceDay: false, ...extra });
+
+  it("止まった 1 時間後に、新しい行ではなく失敗した 10 行を同じ順で取り直し、取れたら done になる(nights は 1 のまま)", async () => {
+    const w = allDay();
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids }, results: Object.fromEntries(failing.map((id) => [id, [httpStatus(500), ok(RESULT_OK)] as GateResult[]])) });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 0, 30));
+    expect(w.resultFetches).toEqual(failing.map(resultUrlOf)); // 前提: 10 件失敗して止まった(11・12 件目は取っていない)
+    await w.runUntil(jst(11, 5, 1, 30));
+    expect(w.resultFetches.slice(10, 20)).toEqual(failing.map(resultUrlOf)); // 取り直しは失敗した行から(順序つき)
+    expect(w.resultFetches.slice(20)).toEqual(ids.slice(10).map(resultUrlOf)); // そのあとで新しい行
+    for (const id of failing) {
+      expect(nightsOf(w, id)).toBe(1);
+      expect(w.sql.exec("SELECT status, last_class FROM ra_race WHERE race_id = ?", id).toArray()[0]).toEqual({ status: "done", last_class: null });
+    }
+  });
+
+  it("不調が続くあいだ、同じ 10 行だけを 1 時間おきに取り直す: 新しい行へ広がらず、nights は 1 のまま、止まり直しも 10 件ずつ(再開直後の 1 件で止まらない)", async () => {
+    const w = allDay();
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids }, results: Object.fromEntries(failing.map((id) => [id, httpStatus(500)])) });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    const fetched = w.resultFetches;
+    expect(fetched.length).toBeGreaterThanOrEqual(50); // 前提: 何度も止まって取り直している(5 周以上)
+    expect(fetched.length % 10).toBe(0); // 10 件ごとに止まる
+    expect(new Set(fetched)).toEqual(new Set(failing.map(resultUrlOf))); // 11・12 件目には広がらない
+    expect(nightsOf(w, failing[0]!)).toBe(1);
+    expect(nightsOf(w, failing[9]!)).toBe(1);
+    expect(nightsOf(w, ids[10]!)).toBe(0);
+    expect(w.sql.exec("SELECT COUNT(*) AS n FROM ra_race WHERE status = 'dead'").toArray()[0]!.n).toBe(0);
+    // 取り直しの間隔は 1 時間(止まった最後の取得 + 1 時間より前には動かない)
+    const firstOfCycle = fetched.length / 10;
+    expect(firstOfCycle).toBeGreaterThanOrEqual(5);
+    const atOfCycle = (n: number): number => w.fetchLog.filter((f) => f.url.includes("/race/result.html"))[n * 10]!.at;
+    const lastOfCycle = (n: number): number => w.fetchLog.filter((f) => f.url.includes("/race/result.html"))[n * 10 + 9]!.at;
+    expect(atOfCycle(1) - lastOfCycle(0)).toBeGreaterThanOrEqual(HOUR);
+    expect(atOfCycle(2) - lastOfCycle(1)).toBeGreaterThanOrEqual(HOUR);
+  });
+
+  it("止まっている間に早く起こされても(通知の再送・cron の起床など)、取らずに再開の時刻へ張り直す", async () => {
+    const w = allDay();
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids }, results: Object.fromEntries(failing.map((id) => [id, httpStatus(500)])) });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 0, 30));
+    expect(w.resultFetches).toHaveLength(10); // 前提: 止まった
+    const resumeAt = w.alarm!;
+    w.now = lastFetchAt(w) + 10 * MIN;
+    await w.core.runNextStep();
+    expect(w.resultFetches).toHaveLength(10);
+    expect(w.alarm).toBe(resumeAt);
+    expect((await w.core.getStatus()).waitReason).toBe("paused-failures");
+  });
+
+  it("通知はその晩の最初の 1 回だけ(2 回目以降はログだけ)。夜が替われば、また 1 回送る", async () => {
+    const w = allDay();
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids }, results: Object.fromEntries(failing.map((id) => [id, httpStatus(500)])) });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect(w.resultFetches.length).toBeGreaterThanOrEqual(50); // 前提: 1 晩に何度も止まった
+    expect(w.notices.map((n) => n.kind)).toEqual(["failures"]);
+    expect(w.logs.filter((l) => l.includes("notice=skipped")).length).toBeGreaterThanOrEqual(4); // 2 回目以降はログだけ
+    await w.runUntil(jst(11, 6, 3));
+    expect(w.notices.map((n) => n.kind)).toEqual(["failures", "failures"]);
+    expect(w.notices[1]!.at).toBeGreaterThanOrEqual(jst(11, 6, 0));
+    expect(nightsOf(w, failing[0]!)).toBe(2); // 夜が替わって取り直した行は 2 晩目になる(同じ晩の取り直しでは増えない)
+  });
+
+  it.each([
+    ["時間帯の中に収まる(7:25 に止まる → 8:25 に再開)", jst(11, 5, 7, 25), false, "plus-hour"],
+    ["時間帯の外になる(7:45 に止まる → 8:45 は外なので次の 0:00)", jst(11, 5, 7, 45), false, "next-midnight"],
+    ["終日の設定では 23:30 に止まっても 1 時間後(日をまたいで 0:30)", jst(11, 5, 23, 30), true, "plus-hour"],
+  ] as const)("再開の時刻: %s", async (_name, start, wholeDay, expected) => {
+    const w = wholeDay ? allDay() : mk({ fromMonth: "2026-11" });
+    w.now = start;
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids }, results: Object.fromEntries(failing.map((id) => [id, httpStatus(500)])) });
+    await w.core.kick();
+    await w.runUntil(start + 30 * MIN);
+    expect(w.resultFetches).toHaveLength(10); // 前提: 10 件失敗して止まった
+    const at = lastFetchAt(w);
+    expect(w.alarm).toBe(expected === "plus-hour" ? at + HOUR : jst(11, 6, 0));
+  });
+
+  it("時間帯の外へ持ち越した止まりは、別の晩の残りとして取り直しの対象にしない(次の晩は、その晩の普通の順序から始める)", async () => {
+    const w = mk({ fromMonth: "2026-11" });
+    w.now = jst(11, 5, 7, 45);
+    // ids[0] は 404(数えない失敗。pending のまま)。ids[1..10] が 5xx で 10 件になって止まる
+    w.site({
+      calendars: { "2026-11": ["20261103"] },
+      lists: { "20261103": ids },
+      results: { [ids[0]!]: [httpStatus(404), ok(RESULT_OK)] as GateResult[], ...Object.fromEntries(ids.slice(1, 11).map((id) => [id, [httpStatus(500), ok(RESULT_OK)] as GateResult[]])) },
+    });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 8, 20));
+    expect(w.resultFetches).toEqual(ids.slice(0, 11).map(resultUrlOf)); // 前提: 404 が 1 件と 5xx が 10 件
+    expect(w.alarm).toBe(jst(11, 6, 0));
+    await w.runUntil(jst(11, 6, 0, 10));
+    expect(w.resultFetches[11]).toBe(resultUrlOf(ids[0]!)); // 前の晩の取り直しの一覧(ids[1])ではなく、普通の順序(ids[0] が先頭)
+  });
+
+  it("実装の誤り(disallowed-url)で止めたときは、これまでどおり次の晩まで動かない(1 時間後に再開しない)", async () => {
+    const w = allDay();
+    w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": ids }, results: { [ids[0]!]: refusedBy("disallowed-url") } });
+    await w.core.kick();
+    await w.runUntil(jst(11, 5, 23, 59));
+    expect(w.resultFetches).toEqual([resultUrlOf(ids[0]!)]);
+    expect(w.alarm).toBe(jst(11, 6, 0));
   });
 });
 
@@ -985,7 +1100,7 @@ describe("「連続失敗」に数えるもの(5xx・network・timeout・保存�
     all.forEach((id, i) => (results[id] = i < 9 ? httpStatus(500) : i < 12 ? httpStatus(404) : httpStatus(500)));
     w.site({ calendars: { "2026-11": ["20261103"] }, lists: { "20261103": all }, results });
     await w.core.kick();
-    await w.runUntil(jst(11, 5, 23, 59));
+    await w.runUntil(jst(11, 5, 0, 30));
     expect(w.resultFetches).toHaveLength(13); // 9 + 3 + 1 件目(5xx の 10 件目)で止まる
     expect(w.notices.map((n) => n.kind)).toEqual(["failures"]);
   });

@@ -268,3 +268,23 @@ describe("buildNarArchiveOptions(地方用の DO の var → 設定。中央の 
     expect(buildNarArchiveOptions(env)).toEqual({ kind: "nar", intervalMs: 20_000, fromMonth: "2021-01" });
   });
 });
+
+describe("地方の取得でも、連続失敗は 1 時間後に失敗した行から取り直す(Issue #781)", () => {
+  it("一覧が 5xx で 10 件続いて止まり、1 時間後に同じ 10 日の一覧を同じ順で取り直す。通知は scope=nar で 1 回", async () => {
+    const w = mk({ windowEndMin: 1440 });
+    w.standardSite();
+    const dates = [...NAR_CAL.matchAll(/kaisai_date=(\d{8})/g)].map((m) => m[1]!);
+    const fail: GateResult = { kind: "response", status: 500, contentType: "text/html", body: enc(""), queuedMs: 0, elapsedMs: 1 };
+    for (const d of dates) w.routes.set(historyListUrl("nar", d), fail);
+    await w.core.kick();
+    await w.runUntil(T0 + HOUR / 2);
+    const lists = (): string[] => w.fetchLog.filter((u) => u.includes("race_list"));
+    expect(lists()).toHaveLength(10); // 前提: 10 件で止まった
+    expect(w.notices.map((n) => n.kind)).toEqual(["failures"]);
+    expect(w.notices[0]).toMatchObject({ kind: "failures", scope: "nar" });
+    const first = lists().slice();
+    await w.runUntil(T0 + 3 * HOUR);
+    expect(lists().slice(10, 20)).toEqual(first); // 取り直しは失敗した行から
+    expect(w.notices).toHaveLength(1); // 同じ晩の 2 回目は通知しない
+  });
+});
