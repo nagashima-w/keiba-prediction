@@ -219,6 +219,168 @@ describe("アラーム・時間帯(JST 1:00〜8:30)", () => {
     h = new Harness(); // afterEach が閉じるもの(前のテストの h を二重に閉じない)
   });
 
+  it("kickNow: 時間帯の中なら、未来のアラームでも無いときでも今に張り直す(印は付けない)", async () => {
+    const now = at(2026, 11, 20, 3, 0);
+    for (const [name, alarm] of [["未来のアラーム", at(2026, 11, 20, 4, 0)], ["アラーム無し", null]] as const) {
+      const x = new Harness();
+      x.now = now;
+      x.alarm = alarm;
+      expect(await x.core.kickNow(), name).toEqual({ result: "armed", previousAlarm: alarm });
+      expect(x.alarm, name).toBe(now);
+      expect((await x.core.getStatus()).manualUntil, name).toBeNull();
+      x.sql.close();
+    }
+    h = new Harness();
+  });
+
+  it("kickNow: 時間帯の外(既定の 8:30 より後)でも、手で起こせば今に張り、変換が進む。印の期限は 3 時間後", async () => {
+    h = new Harness();
+    h.seed(3);
+    h.now = at(2026, 11, 20, 9, 0);
+    h.alarm = at(2026, 11, 21, 1, 0); // 今夜 1:00 に張られている
+    expect(await h.core.kickNow()).toEqual({ result: "armed-manual", previousAlarm: at(2026, 11, 21, 1, 0) });
+    expect(h.alarm).toBe(h.now);
+    expect((await h.core.getStatus()).manualUntil).toBe(at(2026, 11, 20, 12, 0));
+    await h.fire();
+    expect(h.convertedIds()).toEqual([idOf(1), idOf(2), idOf(3)]);
+  });
+
+  it("kickNow: 手で起こさなければ、時間帯の外では動かない(対照。印が無いときの outside-window)", async () => {
+    h = new Harness();
+    h.seed(3);
+    h.now = at(2026, 11, 20, 9, 0);
+    h.alarm = h.now;
+    await h.fire();
+    expect(h.convertedIds()).toEqual([]);
+    expect(h.alarm).toBe(at(2026, 11, 21, 1, 0));
+  });
+
+  it("手で起こした印: 未変換が尽きたら(caught-up)印を消し、次は時間帯の入り(翌 1:00)に張る", async () => {
+    h = new Harness();
+    h.seed(3);
+    h.now = at(2026, 11, 20, 9, 0);
+    await h.core.kickNow();
+    // 3 レースを変換 → 周の終わり(変換あり)→ もう一周(変換なし)で caught-up
+    for (let i = 0; i < 6 && h.alarm !== null && (await h.core.getStatus()).manualUntil !== null; i++) await h.fire();
+    const st = await h.core.getStatus();
+    expect(h.convertedIds()).toEqual([idOf(1), idOf(2), idOf(3)]);
+    expect(st.waitReason).toBe("caught-up");
+    expect(st.manualUntil).toBeNull();
+    expect(h.alarm).toBe(at(2026, 11, 21, 1, 0));
+  });
+
+  it("手で起こした印: 期限(3 時間)が切れたら、次のアラームで通常に戻る(印を消して次の開始に張る。変換しない)", async () => {
+    h = new Harness();
+    h.seed(3);
+    h.now = at(2026, 11, 20, 9, 0);
+    await h.core.kickNow();
+    h.markOnConvert = false; // 変換が終わらず、アラームが続く
+    h.now = at(2026, 11, 20, 12, 0); // 期限ちょうど
+    h.alarm = h.now;
+    await h.fire();
+    expect(h.convertedIds()).toEqual([]);
+    expect((await h.core.getStatus()).manualUntil).toBeNull();
+    expect(h.alarm).toBe(at(2026, 11, 21, 1, 0));
+    // 期限の 1 ミリ秒前は有効
+    const y = new Harness();
+    y.seed(1);
+    y.now = at(2026, 11, 20, 9, 0);
+    await y.core.kickNow();
+    y.now = at(2026, 11, 20, 12, 0) - 1;
+    y.alarm = y.now;
+    await y.fire();
+    expect(y.convertedIds()).toEqual([idOf(1)]);
+    y.sql.close();
+  });
+
+  it("手で起こした印の期限は、20:30(21:00 の事前分析と重ならない)で頭打ち。20:30 以降は印を付けず張らない", async () => {
+    const x = new Harness();
+    x.now = at(2026, 11, 20, 19, 0);
+    expect(await x.core.kickNow()).toEqual({ result: "armed-manual", previousAlarm: null });
+    expect((await x.core.getStatus()).manualUntil).toBe(at(2026, 11, 20, 20, 30));
+    x.sql.close();
+    const late = new Harness();
+    late.now = at(2026, 11, 20, 20, 30);
+    late.alarm = at(2026, 11, 21, 1, 0);
+    expect(await late.core.kickNow()).toEqual({ result: "outside-window", previousAlarm: at(2026, 11, 21, 1, 0) });
+    expect(late.alarm).toBe(at(2026, 11, 21, 1, 0));
+    expect((await late.core.getStatus()).manualUntil).toBeNull();
+    late.sql.close();
+    h = new Harness();
+  });
+
+  it("手で起こした印: 1 日の行数の上限に達したら印を消して次の晩に張る", async () => {
+    h = new Harness({ nightlyRows: 20 });
+    h.seed(100);
+    h.now = at(2026, 11, 20, 9, 0);
+    await h.core.kickNow();
+    await h.fire(); // 20 レース × 14 行 > 20 行
+    await h.fire();
+    const st = await h.core.getStatus();
+    expect(st.waitReason).toBe("night-limit");
+    expect(st.manualUntil).toBeNull();
+    expect(h.alarm).toBe(at(2026, 11, 21, 1, 0));
+    const converted = h.convertedIds().length;
+    await h.fire(); // 翌 1:00 の起床は新しい晩(行数が 0 に戻り、動く)
+    expect(h.convertedIds().length).toBeGreaterThan(converted);
+  });
+
+  it("手で起こした印: 変換中に止まったら(容量)印を消し、止まっているので次の晩まで動かさない", async () => {
+    h = new Harness();
+    h.seed(30);
+    h.convertSize = DB_SIZE_LIMIT_BYTES + 1;
+    h.now = at(2026, 11, 20, 9, 0);
+    await h.core.kickNow();
+    await h.fire();
+    const st = await h.core.getStatus();
+    expect(st.state).toBe("stopped");
+    expect(st.manualUntil).toBeNull();
+    expect(h.alarm).toBe(at(2026, 11, 21, 1, 0));
+  });
+
+  it("kickNow: 止まっている DO・無効の DO は動かさない(アラームも印も触らない)", async () => {
+    const now = at(2026, 11, 20, 9, 0);
+    const off = new Harness({ disabled: true });
+    off.now = now;
+    expect(await off.core.kickNow()).toEqual({ result: "disabled", previousAlarm: null });
+    expect(off.alarm).toBeNull();
+    off.sql.close();
+    const stopped = new Harness();
+    stopped.seed(30);
+    stopped.dbSize = DB_SIZE_LIMIT_BYTES + 1;
+    stopped.convertSize = DB_SIZE_LIMIT_BYTES + 1;
+    stopped.now = at(2026, 11, 20, 1, 0);
+    stopped.alarm = stopped.now;
+    await stopped.fire();
+    expect((await stopped.core.getStatus()).state).toBe("stopped");
+    const armed = stopped.alarm;
+    for (const hour of [3, 9]) {
+      stopped.now = at(2026, 11, 20, hour, 0); // 時間帯の中・外のどちらも
+      expect(await stopped.core.kickNow()).toEqual({ result: "stopped", previousAlarm: armed });
+      expect(stopped.alarm).toBe(armed);
+      expect((await stopped.core.getStatus()).manualUntil).toBeNull();
+    }
+    stopped.sql.close();
+    h = new Harness();
+  });
+
+  it("kickNow: 今にもう張られている(今より前〜15 分以内)なら張り直さない。15 分以上前の残ったアラームは今に張る(時間帯の外でも同じ)", async () => {
+    const now = at(2026, 11, 20, 9, 0);
+    const rows: [string, number, string, number][] = [
+      ["5 分前", now - 5 * MIN, "already-due", now - 5 * MIN],
+      ["16 分前(残った)", now - 16 * MIN, "armed-manual", now],
+    ];
+    for (const [name, alarm, result, after] of rows) {
+      const x = new Harness();
+      x.now = now;
+      x.alarm = alarm;
+      expect((await x.core.kickNow()).result, name).toBe(result);
+      expect(x.alarm, name).toBe(after);
+      x.sql.close();
+    }
+    h = new Harness();
+  });
+
   it("時間帯の外で起きたら、目録にも R2 にも触れず、次の開始に張る(8:30 ちょうどは外、1:00 ちょうどは中)", async () => {
     h = new Harness();
     h.seed(3);

@@ -332,13 +332,13 @@ describe("wrangler.toml", () => {
     expect(("await dispatchResultImports(x);\nexport async function dispatchResultImports(i) {}").match(/(?<!function\s)\bdispatchResultImports\(/g)).toHaveLength(1);
   });
 
-  it("Issue #208・#251・#394・#396・#554: 手動の POST を受けるルートは 10 つだけ(/api/settings・/api/settings/prompt-preview〈Issue #396〉・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/reports/run・/api/monthly-reports/run〈Issue #280〉・/api/race-archive/resume〈Issue #554〉・/api/race-archive/nar/resume〈Issue #635〉・/api/race-archive/oikiri/resume〈Issue #731〉。/api/migration/upload は Issue #394 で廃止)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
+  it("Issue #208・#251・#394・#396・#554: 手動の POST を受けるルートは 11 つだけ(/api/settings・/api/settings/prompt-preview〈Issue #396〉・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/reports/run・/api/monthly-reports/run〈Issue #280〉・/api/race-archive/resume〈Issue #554〉・/api/race-archive/nar/resume〈Issue #635〉・/api/race-archive/oikiri/resume〈Issue #731〉・/api/race-archive/runs/kick。/api/migration/upload は Issue #394 で廃止)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
     // POST の分岐は 8 つ(`method === "POST"`。下の path つきの 7 つと、`/api/settings` の pathname の分岐の中で method を見る 1 つ)
-    expect((code.match(/method === "POST"/g) ?? []).length).toBe(10);
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(11);
     const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
-    expect(routes).toEqual(["/api/settings/prompt-preview", "/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/reports/run", "/api/monthly-reports/run", "/api/race-archive/resume", "/api/race-archive/nar/resume", "/api/race-archive/oikiri/resume"]); // settings は pathname の分岐の中で method を見る
+    expect(routes).toEqual(["/api/settings/prompt-preview", "/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/reports/run", "/api/monthly-reports/run", "/api/race-archive/resume", "/api/race-archive/nar/resume", "/api/race-archive/oikiri/resume", "/api/race-archive/runs/kick"]); // settings は pathname の分岐の中で method を見る
     expect(code).toMatch(/pathname === "\/api\/settings"/);
     // Issue #396: handlePromptPreview は守りの後で純関数 buildPreviewText を呼ぶだけ。env・D1・DO・R2・netkeiba・LLM・Discord に触れない
     const previewStart = code.indexOf("async function handlePromptPreview(");
@@ -702,14 +702,14 @@ describe("wrangler.toml", () => {
     // Issue #655: [vars] に置いてよいのは過去の結果の取得の時間帯・間隔の 3 つと、#642 の 1 晩の上限(Issue #669)と、JRA のオッズを使うか(Issue #675)の 5 つだけ(下のテストが中身を固定する)。それ以外のキーは置かない
     const varsBody = /^\[vars\]\n((?:[^\[\n][^\n]*\n|\n)*)/m.exec(tomlCode)?.[1] ?? "";
     const varKeys = [...varsBody.matchAll(/^([A-Z_]+)\s*=/gm)].map((m) => m[1]);
-    expect(varKeys.sort()).toEqual(["JRA_BABA_PAST_BACKFILL_ENABLED", "JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "PERSON_STATS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT", "RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT", "RACE_ARCHIVE_RUNS_WINDOW_END_MIN", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]); // Issue #635: 地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT)を足した
+    expect(varKeys.sort()).toEqual(["JRA_BABA_PAST_BACKFILL_ENABLED", "JRA_BLINKER_BACKFILL_ENABLED", "JRA_ODDS_ENABLED", "PERSON_STATS_ENABLED", "RACE_ARCHIVE_MIN_INTERVAL_MS", "RACE_ARCHIVE_NAR_NIGHTLY_LIMIT", "RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS", "RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT", "RACE_ARCHIVE_SKIP_RACE_DAY", "RACE_ARCHIVE_WINDOW_END_MIN", "RACE_MARKET_EDGE_NIGHTLY_LIMIT"]); // Issue #635: 地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT)を足した
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);
     expect(tomlCode).not.toMatch(/^\[secrets\]/m);
     expect(tomlCode).not.toMatch(/keep_vars/);
   });
 
   it("Issue #655・#669: 過去の結果の取得の本番の値は、時間帯の終わり 1440(終日)・開催日も取る(\"0\")・間隔 20000 ミリ秒(2026-11-15 の #745 で一度 30000 に広げ、2026-11-16 に #670 で 1 レースあたりの書き込みが減ったので 20000 に戻した)(書き込みが Free の 1 日 10 万行に迫ったため5000 から広げた)。#642 の 1 晩の上限は 1〜20000 未満の数(止める \"0\" ではない)。取得の止める・件数・行数の上限の var は置かない。コードの既定(8:30・休む・5000)は変えない", () => {
-    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "1000"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "8000"\nRACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "10000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"\nPERSON_STATS_ENABLED = "0"\nJRA_BABA_PAST_BACKFILL_ENABLED = "1"\nRACE_ARCHIVE_RUNS_WINDOW_END_MIN = "1230"$/m);
+    expect(tomlCode).toMatch(/^\[vars\]\nRACE_ARCHIVE_WINDOW_END_MIN = "1440"\nRACE_ARCHIVE_SKIP_RACE_DAY = "0"\nRACE_ARCHIVE_MIN_INTERVAL_MS = "20000"\nRACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "1000"\nRACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT = "8000"\nRACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS = "10000"\nRACE_MARKET_EDGE_NIGHTLY_LIMIT = "10000"\nJRA_ODDS_ENABLED = "1"\nJRA_BLINKER_BACKFILL_ENABLED = "0"\nPERSON_STATS_ENABLED = "0"\nJRA_BABA_PAST_BACKFILL_ENABLED = "1"$/m);
     // Issue #669: #642 の上限は、止める "0" ではなく、既定(20000)より小さい正の整数。取得の間隔は parseArchiveMinIntervalMs の範囲(1500〜60000)内
     const edgeLimit = Number(/^RACE_MARKET_EDGE_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1]);
     expect(edgeLimit).toBeGreaterThanOrEqual(1);
@@ -718,12 +718,9 @@ describe("wrangler.toml", () => {
     expect(intervalMs).toBeGreaterThanOrEqual(1500);
     expect(intervalMs).toBeLessThanOrEqual(60_000);
     expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_(NIGHTLY_LIMIT|NIGHTLY_ROWS_LIMIT)\s*=/m);
-    // 変換の行数の上限は、コードの既定(60,000 行)で動かす(var は置かない)
+    // 変換の行数の上限と時間帯の終わりは、コードの既定(60,000 行・8:30)で動かす。2026-11-18 の一時の上書き(80,000・1230)は 11/21 の開催の前に外した。DO が var を読む配線は別のテストが固定する
     expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT\s*=/m);
-    // 2026-11-20 ユーザーの指示で一時的に、変換の時間帯の終わりだけ 20:30(1230 分)。21:00(1260 分)の事前分析に食い込まない。変換が終わったら外す
-    const runsEnd = Number(/^RACE_ARCHIVE_RUNS_WINDOW_END_MIN = "(\d+)"$/m.exec(tomlCode)?.[1]);
-    expect(runsEnd).toBe(1230);
-    expect(runsEnd).toBeLessThan(21 * 60);
+    expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_RUNS_WINDOW_END_MIN\s*=/m);
     // Issue #635: 地方の交流重賞の取得の 1 晩の上限は、止める "0" ではなく正の整数(本番の値は 1000。2026-11-16 に 150 から上げた)。時間帯・間隔の地方用の var は置かず、コードの既定(0:00〜8:30・20 秒)で動く
     expect(Number(/^RACE_ARCHIVE_NAR_NIGHTLY_LIMIT = "(\d+)"$/m.exec(tomlCode)?.[1])).toBe(1000);
     expect(tomlCode).not.toMatch(/^RACE_ARCHIVE_NAR_(WINDOW_END_MIN|MIN_INTERVAL_MS|NIGHTLY_ROWS_LIMIT)\s*=/m);
@@ -1409,7 +1406,7 @@ describe("Issue #216・#394・#402: 移行の DO(CloudMigration)は削除済み�
       if (b > 0) bindingSites[f] = b;
     }
     // kick を呼ぶのは scheduled.ts(毎日の起動)と result-backfill-do.ts(DO 自身が getStatus・kick の RPC から core に委譲する 2 つ)だけ
-    expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "jra-horse-backfill-do.ts": 1, "jra-blinker-backfill-do.ts": 1, "jra-baba-past-backfill-do.ts": 1, "scheduled.ts": 9 }); // Issue #769: 過去の馬場の埋め戻しの kick を足して 8 → 9(DO の 1 つ)。Issue #731: 追い切りの取得の kick を足して 7 → 8。Issue #635: 地方の交流重賞の取得の kick を足して 6 → 7(`grep -o "\.kick()" cloud/src/scheduled.ts | wc -l`)。以下は元の注記: scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)+ 馬ごとの頁の埋め戻し(Issue #697。21 時・23 時。DO 自身は kick を RPC から core に委譲する 1 つ)+ 過去のブリンカーの埋め戻し(Issue #698。同じ)
+    expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-core.ts": 1, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "jra-horse-backfill-do.ts": 1, "jra-blinker-backfill-do.ts": 1, "jra-baba-past-backfill-do.ts": 1, "scheduled.ts": 9 }); // 変換の core の kickNow(時間帯の外のとき、自身の kick に委譲する 1 つ)。Issue #769: 過去の馬場の埋め戻しの kick を足して 8 → 9(DO の 1 つ)。Issue #731: 追い切りの取得の kick を足して 7 → 8。Issue #635: 地方の交流重賞の取得の kick を足して 6 → 7(`grep -o "\.kick()" cloud/src/scheduled.ts | wc -l`)。以下は元の注記: scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)+ 馬ごとの頁の埋め戻し(Issue #697。21 時・23 時。DO 自身は kick を RPC から core に委譲する 1 つ)+ 過去のブリンカーの埋め戻し(Issue #698。同じ)
     // env.RESULT_BACKFILL に触れるのは scheduled.ts(有無の確認・get・idFromName の 3 回)と handler.ts(namespace 変数への代入の 1 回)だけ
     expect(bindingSites).toEqual({ "handler.ts": 1, "scheduled.ts": 3 });
     // handler.ts: 補完の DO は getStatus だけ(kick・start は呼ばない)。GET /api/results/backfill の 1 本
