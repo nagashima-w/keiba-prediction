@@ -7,7 +7,7 @@
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v12)に固定される。
  *
- * 動きを変える設定は Worker の var・secret の 2 つだけ(任意。2 つ目の `RACE_ARCHIVE_RUNS_WINDOW_END_MIN` は時間帯の終わりを 61〜1230 分に変える、2026-11-18 の一時的な拡張): `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT`(1 晩の書き込み行数を**下げる**上書き。未設定は既定の 60,000 行。文字列 `"0"` だけは変換を止める)。
+ * 動きを変える設定は Worker の var の 2 つだけ(どちらも任意。未設定は既定): `RACE_ARCHIVE_RUNS_NIGHTLY_LIMIT`(1 晩の書き込み行数を変える上書き。上限 100,000。未設定は既定の 60,000 行。文字列 `"0"` だけは変換を止める)と、`RACE_ARCHIVE_RUNS_WINDOW_END_MIN`(変換の時間帯の終わりを 61〜1230 分に変える上書き。未設定は既定の 8:30)。
  * **smoke 専用の `options()` の差し替え**(時間帯を外す)は `smoke-worker.ts` のサブクラスだけが行う。本番のエントリ(`worker.ts`)はそのサブクラスを import しない。
  */
 import { DurableObject } from "cloudflare:workers";
