@@ -5,7 +5,7 @@
 #   ユーザーがダッシュボードで登録する。secret は wrangler deploy で消えない
 #   (vars にするとダッシュボードの値は次のデプロイで上書きされる)。
 #   したがって認証の設定には `secrets.required` を置かず、[vars] にも置かない(未設定なら Worker が全リクエストに 403 を返す)。
-#   [vars] に置いてよいのは、過去の結果の取得の時間帯・間隔を変える RACE_ARCHIVE_* の 3 つと、地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT。Issue #635)と、追い切りの取得の 1 晩の上限と間隔(RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT・RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS。Issue #731)と、#642 の 1 晩の上限、変換の時間帯の終わり(RACE_ARCHIVE_RUNS_WINDOW_END_MIN。2026-11-20 から一時的)、JRA のオッズを使うか(JRA_ODDS_ENABLED。Issue #675)、過去のブリンカーの埋め戻しを止めるか(JRA_BLINKER_BACKFILL_ENABLED。Issue #698)だけ(下の [vars])。
+#   [vars] に置いてよいのは、過去の結果の取得の時間帯・間隔を変える RACE_ARCHIVE_* の 3 つと、地方の交流重賞の取得の 1 晩の上限(RACE_ARCHIVE_NAR_NIGHTLY_LIMIT。Issue #635)と、追い切りの取得の 1 晩の上限と間隔(RACE_ARCHIVE_OIKIRI_NIGHTLY_LIMIT・RACE_ARCHIVE_OIKIRI_MIN_INTERVAL_MS。Issue #731)と、#642 の 1 晩の上限、JRA のオッズを使うか(JRA_ODDS_ENABLED。Issue #675)、過去のブリンカーの埋め戻しを止めるか(JRA_BLINKER_BACKFILL_ENABLED。Issue #698)だけ(下の [vars])。
 name = "keiba-cloud"
 main = "src/worker.ts"
 compatibility_date = "2026-10-01"
@@ -170,8 +170,6 @@ PERSON_STATS_ENABLED = "0"
 # 止めたまま("0")で公開し(43303d62。本番の D1 に 0049 の 2 表が 0 行でできたことを確かめた)、2026-11-17 に確かめて "1" にした(別の小さい公開)。戻し方: "0" にして公開する(貯めた表と R2 の PDF はそのまま残る)。★binding と同じ名前〈JRA_BABA_PAST_BACKFILL〉の var は衝突するので使わない。
 # 動かすと、JST 18:00〜翌 8:00 に 3 秒以上あけて PDF を 1 本ずつ取り、1 日の書き込みは 500 行まで(2021〜2024 の約 144 本・数千行が数晩で終わる)。
 JRA_BABA_PAST_BACKFILL_ENABLED = "1"
-# 2026-11-20 ユーザーの指示(残り 73 レースをすぐ変換するため)で一時的。変換が終わったら外す。変換の時間帯の終わりを 20:30(1230 分)にする(既定は 8:30)。21:00・23:00 の事前分析とは重ならない。行数の上限は既定(60,000)のまま。
-RACE_ARCHIVE_RUNS_WINDOW_END_MIN = "1230"
 
 # 過去の結果(R2 の読み取り結果)を horse_runs に入れる毎晩の変換の Durable Object(Issue #590〈#549-B3-2〉)。`idFromName("main")` の単一インスタンス。
 # JST 1:00〜8:30 の間だけ、目録(race_archive)の未変換のレースを 1 ステップ最大 20 件、R2 から読んで horse_runs に書く(1 晩の書き込み行数の既定は 6 万行)。

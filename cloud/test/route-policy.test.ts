@@ -70,6 +70,7 @@ const EXPECTED: readonly Expected[] = [
   { name: "/api/race-archive/oikiri", sample: "/api/race-archive/oikiri", viewer: [] }, // Issue #731: 追い切りの取得の状態(管理者だけ)
   { name: "/api/race-archive/oikiri/resume", sample: "/api/race-archive/oikiri/resume", viewer: [] }, // Issue #731: 追い切りの取得の手動の再開(POST)
   { name: "/api/race-archive/runs", sample: "/api/race-archive/runs", viewer: [] }, // Issue #590: 過去の結果の毎晩の変換の状態(GET だけ。管理者だけ)
+  { name: "/api/race-archive/runs/kick", sample: "/api/race-archive/runs/kick", viewer: [] }, // 過去の結果の毎晩の変換を手で起こす(POST。管理者だけ)
   { name: "/api/reports/run", sample: "/api/reports/run", viewer: [] },
   { name: "/api/monthly-reports/run", sample: "/api/monthly-reports/run", viewer: [] }, // Issue #280: 月報の手動の作成と作り直し(LLM を呼ぶ)
   { name: "/api/export/prior-dataset", sample: "/api/export/prior-dataset", viewer: [] }, // Issue #266
@@ -81,10 +82,10 @@ const EXPECTED: readonly Expected[] = [
 ];
 
 describe("ルート × 役割の表(手書きの期待値と、実装の requiredRole を全 method で突き合わせる)", () => {
-  it("前提: 表は 45 ルート(閲覧者に開くもの 21・管理者だけ 24)で、閲覧者に開く method の組は 30 通り(GET が 21・HEAD が 9)", () => {
-    expect(EXPECTED).toHaveLength(45);
+  it("前提: 表は 46 ルート(閲覧者に開くもの 21・管理者だけ 25)で、閲覧者に開く method の組は 30 通り(GET が 21・HEAD が 9)", () => {
+    expect(EXPECTED).toHaveLength(46);
     expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(21);
-    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(24);
+    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(25);
     expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(30);
     expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(21);
     expect(EXPECTED.filter((e) => e.viewer.includes("HEAD"))).toHaveLength(9);
@@ -97,10 +98,10 @@ describe("ルート × 役割の表(手書きの期待値と、実装の require
     expect(requiredRole(method, sample)).toBe(expected);
   });
 
-  it("method の組み合わせの数: 45 ルート × 7 method = 315 通りのうち、閲覧者でよいのは 30 通りだけ", () => {
-    expect(cases).toHaveLength(315);
+  it("method の組み合わせの数: 46 ルート × 7 method = 322 通りのうち、閲覧者でよいのは 30 通りだけ", () => {
+    expect(cases).toHaveLength(322);
     expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(30);
-    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(285);
+    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(292);
   });
 
   it("リクエストの method が小文字などの未知の表記でも、閲覧者に開かない(完全一致の大文字だけを認める)", () => {
@@ -193,12 +194,12 @@ describe("handler.ts の静的ガード(ルーティングの構文を走査す�
     expect(handleBody.length).toBeGreaterThan(2_000);
   });
 
-  it("pathname と完全一致で比べている path は 35 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(42)と過不足なく一致する", () => {
+  it("pathname と完全一致で比べている path は 36 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(43)と過不足なく一致する", () => {
     const literals = [...new Set([...code.matchAll(/\bpathname === "([^"]+)"/g)].map((m) => m[1]!))].sort();
     const exactRules = ROUTE_RULES.filter((r) => r.exact).map((r) => r.path).sort();
-    expect(literals).toHaveLength(35);
+    expect(literals).toHaveLength(36);
     expect(ICON_PATHS).toHaveLength(7);
-    expect(exactRules).toHaveLength(42);
+    expect(exactRules).toHaveLength(43);
     expect([...literals, ...ICON_PATHS].sort()).toEqual(exactRules);
     // アイコンの path が handler.ts に直書きされていない(表と共有する定数だけで振り分ける)
     for (const iconPath of ICON_PATHS) {

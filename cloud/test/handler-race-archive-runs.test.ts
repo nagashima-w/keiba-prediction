@@ -15,6 +15,7 @@ const STATUS: RaceArchiveRunsStatus = {
   waitReason: "stopped",
   stopReason: "capacity",
   nextRunAt: 1_793_900_000_000,
+  manualUntil: null,
   night: { date: "2026-11-05", rows: 12_345, races: 700, failed: 2 },
   nightlyRowLimit: 30_000,
   cursor: "202105040811",
@@ -58,6 +59,11 @@ function harness(): Harness {
               },
               get: () => ({
                 kick: NOT_CALLED,
+                kickNow: async () => {
+                  h.calls.push("kickNow");
+                  if (h.fails) throw new Error("DO の詳細 SECRET-DO");
+                  return { result: "armed" as const, previousAlarm: 1_793_900_000_000 };
+                },
                 getStatus: async () => {
                   h.calls.push("getStatus");
                   if (h.fails) throw new Error("DO の詳細 SECRET-DO");
@@ -119,5 +125,71 @@ describe("GET /api/race-archive/runs: 過去の結果の毎晩の変換の状態
       expect(res.status, method).toBe(405);
     }
     expect(h.names).toEqual([]);
+  });
+});
+
+const kickReq = (token: string | undefined, body: string | null = "{}", extra: Record<string, string> = {}): Request =>
+  new Request(`${ORIGIN}/api/race-archive/runs/kick`, {
+    method: "POST",
+    headers: { ...(token === undefined ? {} : { "Cf-Access-Jwt-Assertion": token }), origin: ORIGIN, "content-type": "application/json", ...extra },
+    ...(body === null ? {} : { body }),
+  });
+
+describe("POST /api/race-archive/runs/kick: 手で起こす(管理者専用)", () => {
+  it("本文 {} で変換の DO(main)の kickNow を 1 回だけ呼び、結果を返す", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    const res = await handle(kickReq(token), h.env(), {}, deps);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, result: "armed", previousAlarm: 1_793_900_000_000 });
+    expect(h.calls).toEqual(["kickNow"]);
+    expect(h.names).toEqual(["main"]);
+  });
+
+  it.each([
+    ["Origin が無い", { origin: "" }, 403],
+    ["別のサイトの Origin", { origin: "https://evil.example" }, 403],
+    ["Content-Type が JSON でない", { "content-type": "text/plain" }, 415],
+  ] as [string, Record<string, string>, number][])("守り(%s)は DO に触れる前に弾く", async (_name, headers, expected) => {
+    const { deps, token } = await setup();
+    const h = harness();
+    const req = kickReq(token, "{}", headers);
+    if (headers.origin === "") req.headers.delete("origin");
+    expect((await handle(req, h.env(), {}, deps)).status).toBe(expected);
+    expect(h.calls).toEqual([]);
+  });
+
+  it.each([
+    ["JSON でない", "not json"],
+    ["配列", "[]"],
+    ["余計なキーがある", '{"force":true}'],
+  ])("本文が不正(%s)は 400 で DO に触れない", async (_name, body) => {
+    const { deps, token } = await setup();
+    const h = harness();
+    expect((await handle(kickReq(token, body), h.env(), {}, deps)).status).toBe(400);
+    expect(h.calls).toEqual([]);
+  });
+
+  it("認証が無ければ 403。DO の失敗・binding なしは 503(固定の種類名だけ)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    expect((await handle(kickReq(undefined), h.env(), {}, deps)).status).toBe(403);
+    expect(h.calls).toEqual([]);
+    h.fails = true;
+    const failed = await handle(kickReq(token), h.env(), {}, deps);
+    expect(failed.status).toBe(503);
+    expect(JSON.stringify(await failed.json())).toBe(JSON.stringify({ ok: false, error: { type: "race-archive-runs-error" } }));
+    expect((await handle(kickReq(token), harness().env(false), {}, deps)).status).toBe(503);
+  });
+
+  it("POST 以外(GET・PUT・DELETE・HEAD)は 405 で DO に触れない(GET の Allow は POST)", async () => {
+    const { deps, token } = await setup();
+    const h = harness();
+    for (const method of ["GET", "PUT", "DELETE", "HEAD"]) {
+      const res = await handle(new Request(`${ORIGIN}/api/race-archive/runs/kick`, { method, headers: { "Cf-Access-Jwt-Assertion": token, origin: ORIGIN } }), h.env(), {}, deps);
+      expect(res.status, method).toBe(405);
+      if (method === "GET") expect(res.headers.get("allow")).toBe("POST");
+    }
+    expect(h.calls).toEqual([]);
   });
 });
