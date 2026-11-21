@@ -141,6 +141,8 @@ export interface RaceArchiveStubLike {
 export interface RaceArchiveRunsStubLike {
   /** アラームが無ければ張る(cron の `scheduled` から 21 時と 23 時に)。 */
   kick(): Promise<void>;
+  /** 管理者が手で起こす(時間帯の中なら、未来のアラームでも今に張り直す)。 */
+  kickNow(): Promise<{ result: "armed" | "armed-manual" | "already-due" | "outside-window" | "stopped" | "disabled"; previousAlarm: number | null }>;
   /** 進捗の読み取り(アラームが無ければ張り直す)。 */
   getStatus(): Promise<RaceArchiveRunsStatus>;
 }
@@ -469,7 +471,7 @@ export async function handle(
   if (method === "POST" && new URL(request.url).pathname === "/api/results/import") {
     return handleResultsImport(request, env, deps.now ?? (() => new Date()), log);
   }
-  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 7 つだけ**(`/api/settings`・`/api/settings/prompt-preview`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/reports/run`・`/api/monthly-reports/run`)。
+  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 7 つだけ(そのほかに race-archive の手動の口〈resume・runs/kick〉がある。正は cloud-config-guard.test.ts)**(`/api/settings`・`/api/settings/prompt-preview`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/reports/run`・`/api/monthly-reports/run`)。
   if (method === "POST" && new URL(request.url).pathname === "/api/reports/run") {
     return handleReportRun(request, env, deps.now ?? (() => new Date()));
   }
@@ -488,6 +490,10 @@ export async function handle(
   // 追い切りの取得の手動の再開(Issue #731)。中央・地方と同じ形・同じ守り。
   if (method === "POST" && new URL(request.url).pathname === "/api/race-archive/oikiri/resume") {
     return handleRaceArchiveResume(request, env, "oikiri");
+  }
+  // 過去の結果の毎晩の変換を手で起こす。管理者専用(route-policy.ts の表)。netkeiba にも LLM にも出ない(変換の DO のアラームを今に張るだけ)。
+  if (method === "POST" && new URL(request.url).pathname === "/api/race-archive/runs/kick") {
+    return handleRaceArchiveRunsKick(request, env);
   }
   if (method !== "GET" && method !== "HEAD") {
     return methodNotAllowed("GET, HEAD");
@@ -686,6 +692,11 @@ export async function handle(
     return methodNotAllowed("POST");
   }
 
+  if (pathname === "/api/race-archive/runs/kick") {
+    // POST だけ(上で処理済み)。GET・HEAD などは 405。
+    return methodNotAllowed("POST");
+  }
+
   if (pathname === "/api/race-archive/runs") {
     // 読み取り専用(過去の結果の毎晩の変換の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。手で動かす口(POST)は無い。Issue #590。
     if (method !== "GET") {
@@ -835,6 +846,30 @@ async function handleRaceArchiveResume(request: Request, env: Env, which: RaceAr
     return json({ ok: true, resumed: result.resumed, previous: result.previous });
   } catch {
     return json({ ok: false, error: { type: ARCHIVE_ERROR_TYPE_OF[which] } }, 503);
+  }
+}
+
+/**
+ * `POST /api/race-archive/runs/kick`: 過去の結果の毎晩の変換の DO を手で起こす。本文は空のオブジェクト `{}` だけ。時間帯の中なら、未来のアラームでも今に張り直す(結果は `result`・`previousAlarm`)。
+ * 順序は resume と同じ: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 413 → 400)→ 入力の検証(400)→ DO(失敗は 503。文面は返さない)。
+ */
+async function handleRaceArchiveRunsKick(request: Request, env: Env): Promise<Response> {
+  const guarded = await readJsonObjectBody(request, RACE_ARCHIVE_RESUME_BODY_MAX_BYTES);
+  if (!guarded.ok) {
+    return guarded.response;
+  }
+  if (Object.keys(guarded.body).length > 0) {
+    return badRequest("本文は空のオブジェクト {} にしてください");
+  }
+  try {
+    const namespace = env.RACE_ARCHIVE_RUNS;
+    if (namespace === undefined) {
+      throw new Error("RACE_ARCHIVE_RUNS binding がありません");
+    }
+    const result = await namespace.get(namespace.idFromName(RACE_ARCHIVE_RUNS_NAME)).kickNow();
+    return json({ ok: true, result: result.result, previousAlarm: result.previousAlarm });
+  } catch {
+    return json({ ok: false, error: { type: "race-archive-runs-error" } }, 503);
   }
 }
 

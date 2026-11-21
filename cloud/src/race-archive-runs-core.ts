@@ -47,7 +47,7 @@ import { nextArchiveWindowStart, inArchiveWindow } from "./race-archive-fetch-co
 import { CATALOG_PAGE_MAX, DB_SIZE_LIMIT_BYTES, READ_BATCH_MAX, type CatalogScope, type RaceArchiveCatalogEntry, type ReadRaceArchivesResult } from "./race-archive-repository";
 import type { ConvertBatchResult, ConvertTarget } from "./race-archive-runs";
 import type { SqlLike } from "./sql-like";
-import { shouldRearm } from "./stale-alarm";
+import { isStaleAlarm, shouldRearm } from "./stale-alarm";
 
 /** 変換の DO の固定名(単一インスタンス)。cron の `scheduled` と管理者の口が引く。 */
 export const RACE_ARCHIVE_RUNS_NAME = "main";
@@ -67,6 +67,8 @@ export function parseArchiveRunsWindowEndMin(value: string | undefined): number 
   const n = Number(value.trim());
   return n > ARCHIVE_RUNS_WINDOW_START_MIN && n <= ARCHIVE_RUNS_WINDOW_END_MAX_MIN ? n : undefined;
 }
+/** 手で起こした印({@link RaceArchiveRunsCore.kickNow})の有効な長さ。時間帯の外でも、この間は進む。 */
+export const ARCHIVE_RUNS_MANUAL_MS = 3 * 60 * 60_000;
 /** 1 晩の書き込み行数の既定の上限(ユーザーの決定。最初は 30,000 で始め、2026-11-09 に 60,000 へ上げた。#704)。 */
 export const ARCHIVE_RUNS_NIGHTLY_ROWS_DEFAULT = 60_000;
 /** 1 晩の書き込み行数の上限の、上書きできる最大(これを超える値は無視して既定)。 */
@@ -146,6 +148,8 @@ export interface RaceArchiveRunsStatus {
   readonly waitReason: string;
   readonly stopReason: ArchiveRunsStopReason | null;
   readonly nextRunAt: number | null;
+  /** 手で起こした印の期限(ms)。この時刻まで、時間帯の外でも進む。無ければ null。 */
+  readonly manualUntil: number | null;
   readonly night: { readonly date: string | null; readonly rows: number; readonly races: number; readonly failed: number };
   readonly nightlyRowLimit: number;
   readonly cursor: string;
@@ -272,6 +276,57 @@ export class RaceArchiveRunsCore {
     await this.arm(nextArchiveWindowStart(now, this.startMin, this.endMin));
   }
 
+  // ---- 手で起こした印 ----
+
+  /** 印の期限(ms)。印が無い・壊れていれば null。 */
+  private manualUntilValue(): number | null {
+    const raw = this.metaGet("manual_until");
+    const n = raw === null ? Number.NaN : Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  private manualActive(now: number): boolean {
+    const until = this.manualUntilValue();
+    return until !== null && now < until;
+  }
+
+  private clearManual(): void {
+    this.metaDelete("manual_until");
+  }
+
+  /**
+   * 管理者が手で起こす(`POST /api/race-archive/runs/kick`)。`kick` は未来のアラームがあれば何もしないので、次の 1:00 に張られた状態を今へ動かせない。
+   * - 時間帯の中: アラームが無い・未来・残った(15 分以上前)なら、今に張る(`armed`)。
+   * - 時間帯の外: 「手で起こした印」(期限は今 + 3 時間。ただし 20:30 まで。21:00 の事前分析と重ねない)を書いて今に張る(`armed-manual`)。印が有効な間は、時間帯の外でも進む。
+   *   未変換が尽きた・1 日の行数の上限・止まった・期限切れのどれかで印を消し、次は時間帯の入りに張る。20:30 以降は何もしない(`outside-window`。アラームが無いときだけ次の開始へ)。
+   * - `already-due`: 今より前〜15 分以内のアラームがあり、もう起きる途中なので触らない。
+   * - 無効(`disabled`)・止まっている(`stopped`)DO は動かさない(止まりの再開は次の晩の `step` の守りに任せる。1 日の行数の上限も `step` が効かせる)。
+   */
+  async kickNow(): Promise<{ result: "armed" | "armed-manual" | "already-due" | "outside-window" | "stopped" | "disabled"; previousAlarm: number | null }> {
+    if (this.disabled) return { result: "disabled", previousAlarm: null };
+    const now = this.deps.now();
+    const previousAlarm = await this.deps.getAlarm();
+    if (this.stopReason() !== null) return { result: "stopped", previousAlarm };
+    const inWindow = inArchiveWindow(now, this.startMin, this.endMin);
+    let manualUntil: number | null = null;
+    if (!inWindow) {
+      const dayStart = now - ((((now + JST_OFFSET_MS) % DAY_MS) + DAY_MS) % DAY_MS);
+      const cap = dayStart + ARCHIVE_RUNS_WINDOW_END_MAX_MIN * MIN_MS;
+      if (now >= cap) {
+        await this.kick();
+        return { result: "outside-window", previousAlarm };
+      }
+      manualUntil = Math.min(now + ARCHIVE_RUNS_MANUAL_MS, cap);
+    }
+    if (previousAlarm !== null && previousAlarm <= now && !isStaleAlarm(previousAlarm, now)) {
+      if (manualUntil !== null) this.metaSet("manual_until", String(manualUntil));
+      return { result: "already-due", previousAlarm };
+    }
+    if (manualUntil !== null) this.metaSet("manual_until", String(manualUntil));
+    await this.arm(now);
+    return { result: manualUntil === null ? "armed" : "armed-manual", previousAlarm };
+  }
+
   /** アラーム: 次のステップを 1 つ実行する。例外は投げない(失敗は 10 分後の再試行)。 */
   async runNextStep(): Promise<void> {
     if (this.disabled) return;
@@ -304,7 +359,8 @@ export class RaceArchiveRunsCore {
   private async step(): Promise<void> {
     const now = this.deps.now();
     await this.flushNotice(now);
-    if (!inArchiveWindow(now, this.startMin, this.endMin)) {
+    if (!inArchiveWindow(now, this.startMin, this.endMin) && !this.manualActive(now)) {
+      this.clearManual(); // 期限が切れた印は、ここで通常に戻す
       this.setWait("outside-window");
       await this.arm(nextArchiveWindowStart(now, this.startMin, this.endMin));
       return;
@@ -335,6 +391,7 @@ export class RaceArchiveRunsCore {
     }
 
     if (this.metaNum("night_rows") >= this.nightlyRows) {
+      this.clearManual();
       this.setWait("night-limit");
       await this.arm(nextNightStart(now, this.startMin));
       return;
@@ -427,6 +484,13 @@ export class RaceArchiveRunsCore {
     this.metaDelete("pass_all_version", "pass_stale_blocked");
     if (converted === 0) {
       this.setWait("caught-up");
+      if (!inArchiveWindow(now, this.startMin, this.endMin)) {
+        // 手で起こして時間帯の外で動いていた: 印を消して通常に戻る(次は時間帯の入り)。
+        this.clearManual();
+        await this.arm(nextArchiveWindowStart(now, this.startMin, this.endMin));
+        return;
+      }
+      this.clearManual();
       await this.arm(now + ARCHIVE_RUNS_IDLE_MS);
       return;
     }
@@ -537,6 +601,7 @@ export class RaceArchiveRunsCore {
   /** 止める。次の晩の開始に張る。通知は、この理由で前に通知していなければ 1 回だけ。 */
   private async stop(reason: ArchiveRunsStopReason, now: number, dbSizeBytes: number | null, count = 0): Promise<void> {
     const resumeAt = nextNightStart(now, this.startMin);
+    this.clearManual();
     this.metaSet("stop_reason", reason);
     this.metaSet("stop_night", jstDate(now));
     this.metaSet("last_stop", JSON.stringify({ reason, at: now }));
@@ -590,6 +655,7 @@ export class RaceArchiveRunsCore {
       waitReason: this.disabled ? "disabled" : (this.metaGet("wait_reason") ?? "none"),
       stopReason: this.disabled ? null : stopReason,
       nextRunAt: this.disabled ? null : await this.deps.getAlarm(),
+      manualUntil: this.disabled ? null : this.manualUntilValue(),
       night: { date: this.metaGet("night_date"), rows: this.metaNum("night_rows"), races: this.metaNum("night_races"), failed: this.metaNum("night_failed") },
       nightlyRowLimit: this.nightlyRows,
       cursor: this.metaGet("cursor") ?? "",

@@ -1,5 +1,5 @@
 /**
- * 発走 5 分前の単勝・複勝の全頭のオッズの記録の段(Issue #732)。`RaceDayCore.runNextStep` が、時刻が来た予定の行を 1 つずつ渡す。定数・型・DO の表は `race-day-odds-snapshot.ts`。
+ * 発走 5 分前・10 分前(と、前日の夜〈-1〉・当日の朝〈-2〉。#787)の単勝・複勝の全頭のオッズの記録の段(Issue #732)。`RaceDayCore.runNextStep` が、時刻が来た予定の行を 1 つずつ渡す。定数・型・DO の表は `race-day-odds-snapshot.ts`。
  * **純ロジック**: `cloudflare:workers` を import しない。時計・警告の出口・保存先・JRA の取得口・取得キャッシュは注入(`setAlarm` 系には触れない。状態を必ず変えるので、張り直しは本体の `armAlarm`)。
  *
  * ## 1 ステップ(1 レース・1 時点〈発走の 10 分前か 5 分前〉の 1 回ぶん)
@@ -12,7 +12,10 @@
  *  4. D1 に保存(先着の INSERT なので再保存は無害)。失敗したら {@link ODDS_SNAPSHOT_SAVE_MAX_ATTEMPTS} まで {@link ODDS_SNAPSHOT_SAVE_RETRY_DELAY_MS} 後に再試行し、尽きたら abandoned(警告だけ残す)。
  * 例外は投げない。警告は固定の語と race_id だけ(URL・cname・本文・例外の文面は出さない。例外の文面は鍵を伏せて 200 文字まで)。通知はしない。
  *
- * JRA への出方: 1 レースにつき頁 5 本(単勝・複勝・馬連・枠連・ワイド・3連複。リンクが取得キャッシュに無い最初のレースだけ、開催選択とレース選択の 2 本が足される。単勝・複勝が取れなければ 1 本)。間隔は注入の取得口(DO では他の JRA の取得と共有の `createJraPacer`)が守る。
+ * ## #787: 前日の夜(`lead_min = -1`)・当日の朝(`-2`)
+ * 単勝・複勝の頁 1 本だけ(組合せは取らず `combos` は null)。取り方・再試行・保存は 10・5 分前と同じ。最後の時刻は、前日の夜が開催日の 05:00 JST、当日の朝が発走の 10 分前(`oddsSnapshotSupersedeMs`)。
+ *
+ * JRA への出方(10・5 分前): 1 レースにつき頁 5 本(単勝・複勝・馬連・枠連・ワイド・3連複。リンクが取得キャッシュに無い最初のレースだけ、開催選択とレース選択の 2 本が足される。単勝・複勝が取れなければ 1 本)。間隔は注入の取得口(DO では他の JRA の取得と共有の `createJraPacer`)が守る。
  */
 import { redactSecrets } from "./llm-run";
 import { createJraOddsOverride, jraOddsCacheKey } from "./jra-odds-cache";
@@ -34,6 +37,7 @@ import {
   type OddsSnapshotComboPage,
   type OddsSnapshotWidePage,
   type OddsSnapshotCombos,
+  type OddsSnapshotLeadMin,
   type OddsSnapshotPayload,
   type OddsSnapshotReason,
   type OddsSnapshotStore,
@@ -46,7 +50,7 @@ export interface OddsSnapshotStepOutcome {
   readonly kind: "ran";
   readonly raceId: string;
   /** 時点(発走の何分前の予定か)。 */
-  readonly leadMin: 10 | 5;
+  readonly leadMin: OddsSnapshotLeadMin;
   readonly mode: "odds-snapshot";
   readonly step: "record";
   readonly result: "ok" | "retry" | "failed";
@@ -160,7 +164,7 @@ export class OddsSnapshotStage {
     const base = { raceId: row.race_id, leadMin: row.lead_min, kaisaiDate: row.kaisai_date, startMs: row.start_ms, dueMs: row.due_ms };
     const empty = { takenAtMs: now, officialDatetime: null, oddsStatus: null, horses: null, combos: null };
     // この時点の取得が意味を持つ最後の時刻(10 分前は 5 分前の時刻、5 分前は発走)以降に起きた(積んだあとの遅れ)。取りに行かない。
-    const supersedeAt = oddsSnapshotSupersedeMs(row.start_ms, row.lead_min);
+    const supersedeAt = oddsSnapshotSupersedeMs(row.start_ms, row.lead_min, row.kaisai_date);
     if (now >= supersedeAt) {
       return { kind: "payload", payload: { ...base, ...empty, status: "skipped", reason: "too-late", attempts: row.attempts } };
     }
@@ -192,7 +196,7 @@ export class OddsSnapshotStage {
     readonly officialDatetime: string | null;
     readonly oddsStatus: string;
     readonly horses: NonNullable<OddsSnapshotPayload["horses"]>;
-    readonly combos: OddsSnapshotCombos;
+    readonly combos: OddsSnapshotCombos | null;
   } | null> {
     try {
       // 5 頁で 1 つの session を使う(session の中の本数と間隔の数え方が、今までの 1 頁の取得と同じ連続になる)。
@@ -201,6 +205,10 @@ export class OddsSnapshotStage {
       const winPlace = await this.fetchWinPlace(fetcher, row, startedAt, stopAt);
       if (winPlace === null) {
         return null;
+      }
+      // 前日の夜(-1)・当日の朝(-2)は単勝・複勝だけ(#787。組合せは取らない。combos_json は NULL)。
+      if (row.lead_min < 0) {
+        return { ...winPlace, combos: null };
       }
       // 小さい頁から(時間切れや失敗のときに、手前の頁が残るように)。どの頁の失敗も、ほかの頁と単勝・複勝を落とさない。
       const umaren = await this.fetchComboPage(fetcher, row, "umaren", startedAt, stopAt);

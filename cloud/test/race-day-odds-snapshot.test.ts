@@ -6,6 +6,7 @@ import {
   ODDS_SNAPSHOT_LEAD_MS,
   OddsSnapshotStore,
   horsesOfSnapshot,
+  oddsSnapshotDueMs,
   oddsSnapshotSupersedeMs,
   parseOddsSnapshotPayload,
   type OddsSnapshotPayload,
@@ -28,7 +29,8 @@ const store = (): OddsSnapshotStore => {
   sql = openNodeSql();
   return new OddsSnapshotStore(sql);
 };
-const reg = (raceId: string, startMs = START, now = START - 3_600_000) => ({ raceId, kaisaiDate: "20261115", startMs, now });
+// 既定の now は 10 分前の時刻(#787: 前日の夜〈-1〉と当日の朝〈-2〉は、この時刻にはもう積まない。10・5 分前だけを見る既存の検査はそのまま)
+const reg = (raceId: string, startMs = START, now = startMs - ODDS_SNAPSHOT_EARLY_LEAD_MS) => ({ raceId, kaisaiDate: "20261115", startMs, now });
 
 describe("horsesOfSnapshot(頁の値 → 馬ごとの [馬番, 単勝, 人気, 複勝下限, 複勝上限, 馬の ID])", () => {
   const snapshot: OddsSnapshot = {
@@ -60,24 +62,81 @@ describe("時点(10 分前・5 分前)", () => {
   it("5 分前は 5 分、10 分前は 10 分。取得が意味を持つ最後の時刻は、5 分前が発走、10 分前が 5 分前の時刻(5 分前を優先する)", () => {
     expect(ODDS_SNAPSHOT_LEAD_MS).toBe(5 * 60_000);
     expect(ODDS_SNAPSHOT_EARLY_LEAD_MS).toBe(10 * 60_000);
-    expect(oddsSnapshotSupersedeMs(START, 5)).toBe(START);
-    expect(oddsSnapshotSupersedeMs(START, 10)).toBe(DUE5);
+    expect(oddsSnapshotSupersedeMs(START, 5, "20261115")).toBe(START);
+    expect(oddsSnapshotSupersedeMs(START, 10, "20261115")).toBe(DUE5);
+  });
+  it("#787: 前日の夜(-1)は前日 21:00 JST から、最後の時刻は開催日の 05:00 JST。当日の朝(-2)は 09:30 JST から、最後の時刻は発走の 10 分前", () => {
+    expect(oddsSnapshotDueMs(-1, START, "20261115")).toBe(Date.parse("2026-11-14T21:00:00+09:00"));
+    expect(oddsSnapshotDueMs(-2, START, "20261115")).toBe(Date.parse("2026-11-15T09:30:00+09:00"));
+    expect(oddsSnapshotDueMs(10, START, "20261115")).toBe(DUE10);
+    expect(oddsSnapshotDueMs(5, START, "20261115")).toBe(DUE5);
+    expect(oddsSnapshotSupersedeMs(START, -1, "20261115")).toBe(Date.parse("2026-11-15T05:00:00+09:00"));
+    expect(oddsSnapshotSupersedeMs(START, -2, "20261115")).toBe(DUE10);
+    expect(oddsSnapshotDueMs(-1, START, "20261101")).toBe(Date.parse("2026-10-31T21:00:00+09:00")); // 月をまたぐ
   });
 });
 
 describe("予定の表(OddsSnapshotStore)", () => {
-  it("register: 発走の 10 分前と 5 分前の 2 行を pending で積む。2 回積んでも変わらない(既存の行を巻き戻さない)", () => {
+  it("register: 開催日の 14:45 JST(前日の夜の最後の時刻を過ぎ、10 分前より前)に積むと、10 分前・5 分前・当日の朝(-2)の 3 行を pending で積む(前日の夜〈-1〉は最後の時刻を過ぎているので積まない)。2 回積んでも変わらない(既存の行を巻き戻さない)", () => {
     const s = store();
-    expect(s.register(reg("202605010101"))).toBe(true);
+    const now = START - 3_600_000; // 14:45 JST
+    expect(s.register(reg("202605010101", START, now))).toBe(true);
     s.markFired("202605010101", 5, START - 10);
-    expect(s.register(reg("202605010101", START + 999))).toBe(true); // 2 回目は DO NOTHING
+    expect(s.register(reg("202605010101", START + 999, now))).toBe(true); // 2 回目は DO NOTHING
     const rows = s.rows();
     expect(rows.map((r) => [r.lead_min, r.due_ms, r.state, r.start_ms])).toEqual([
       [10, DUE10, "pending", START],
       [5, DUE5, "pending", START],
+      [-2, Date.parse("2026-11-15T09:30:00+09:00"), "pending", START],
     ]);
     expect(rows.find((r) => r.lead_min === 5)).toMatchObject({ race_id: "202605010101", kaisai_date: "20261115", attempts: 0, fired_at: START - 10 });
     expect(rows.find((r) => r.lead_min === 10)!.fired_at).toBeNull(); // 時点ごとに別の行
+  });
+  it("#787 register: 前日の 21:10 JST に積むと 4 行(10・5・前日の夜〈-1〉・当日の朝〈-2〉)。時点ごとに別の行で、-1 の due は前日 21:00 JST", () => {
+    const s = store();
+    const now = Date.parse("2026-11-14T21:10:00+09:00");
+    expect(s.register(reg("A", START, now))).toBe(true);
+    expect(s.rows().map((r) => [r.lead_min, r.due_ms])).toEqual([
+      [10, DUE10],
+      [5, DUE5],
+      [-1, Date.parse("2026-11-14T21:00:00+09:00")],
+      [-2, Date.parse("2026-11-15T09:30:00+09:00")],
+    ]);
+  });
+  it("#787 register: 前日の夜の最後の時刻(開催日 05:00 JST)ちょうど以降は -1 を積まない。当日の朝の最後の時刻(発走の 10 分前)ちょうど以降は -2 を積まない(境界)", () => {
+    const at = (now: number) => {
+      const s = store();
+      s.register(reg("A", START, now));
+      const leads = s.rows().map((r) => r.lead_min);
+      sql?.close();
+      sql = null;
+      return leads;
+    };
+    const five = Date.parse("2026-11-15T05:00:00+09:00");
+    expect(at(five - 1)).toContain(-1);
+    expect(at(five)).not.toContain(-1);
+    expect(at(DUE10 - 1)).toContain(-2);
+    expect(at(DUE10)).not.toContain(-2);
+    expect(at(DUE10)).toEqual([10, 5]); // 前提: 10・5 は積まれている(空振りでない)
+  });
+  it("#787 nextDue: 5 → 10 → 前日の夜(-1)→ 当日の朝(-2)の順に返す(lead_min の昇順では -2 が 5 より先に来る。それを避ける)。同じ優先の中では時刻の早い順", () => {
+    const s = store();
+    s.register(reg("A", START, Date.parse("2026-11-14T21:10:00+09:00")));
+    const late = START + 3_600_000; // 全部の行が動ける時刻
+    const order: [string, number][] = [];
+    for (let i = 0; i < 4; i += 1) {
+      const row = s.nextDue(late)!;
+      order.push([row.race_id, row.lead_min]);
+      s.markDone(row.race_id, row.lead_min);
+    }
+    expect(order.map((o) => o[1])).toEqual([5, 10, -1, -2]);
+    expect(s.nextDue(late)).toBeNull();
+    // 同じ優先の中では時刻の早い順(-2 の 2 レース)
+    const t = store();
+    t.register(reg("B", START + 3_600_000, Date.parse("2026-11-14T21:10:00+09:00")));
+    t.register(reg("A", START, Date.parse("2026-11-14T21:10:00+09:00")));
+    for (const [r, l] of [["A", 5], ["A", 10], ["B", 5], ["B", 10], ["A", -1], ["B", -1]] as const) t.markDone(r, l);
+    expect(t.nextDue(START + 7_200_000)).toMatchObject({ race_id: "A", lead_min: -2 });
   });
   it("register: 発走を過ぎている(startMs <= now)なら積まない(false)", () => {
     const s = store();
@@ -138,6 +197,9 @@ describe("parseOddsSnapshotPayload", () => {
     expect(parseOddsSnapshotPayload("{")).toBeNull();
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, status: "weird" }))).toBeNull();
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, leadMin: 7 }))).toBeNull();
+    // #787: 前日の夜(-1)・当日の朝(-2)も読める(組合せは null)。それ以外の負の値・0 は null
+    for (const leadMin of [-1, -2] as const) expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, leadMin }))).toEqual({ ...ok, leadMin });
+    for (const leadMin of [-3, 0, 1]) expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, leadMin }))).toBeNull();
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, horses: null }))).toBeNull(); // ok なのに馬が無い
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, status: "failed", reason: null, horses: null }))).toBeNull(); // failed なのに理由が無い
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, horses: [[1, 2]] }))).toBeNull();

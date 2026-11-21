@@ -95,6 +95,11 @@ export class RaceArchiveRunsDO extends DurableObject<RaceArchiveRunsEnv> {
     return this.core.kick();
   }
 
+  /** 管理者が手で起こす(RPC。`POST /api/race-archive/runs/kick`)。時間帯の中なら、未来のアラームでも今に張り直す。 */
+  kickNow(): ReturnType<RaceArchiveRunsCore["kickNow"]> {
+    return this.core.kickNow();
+  }
+
   /** 進捗の読み取り(RPC)。状態は変えないが、アラームが無ければ張り直す(自己回復)。 */
   async getStatus(): Promise<RaceArchiveRunsStatus> {
     await this.core.kick();

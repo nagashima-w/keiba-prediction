@@ -332,13 +332,13 @@ describe("wrangler.toml", () => {
     expect(("await dispatchResultImports(x);\nexport async function dispatchResultImports(i) {}").match(/(?<!function\s)\bdispatchResultImports\(/g)).toHaveLength(1);
   });
 
-  it("Issue #208・#251・#394・#396・#554: 手動の POST を受けるルートは 10 つだけ(/api/settings・/api/settings/prompt-preview〈Issue #396〉・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/reports/run・/api/monthly-reports/run〈Issue #280〉・/api/race-archive/resume〈Issue #554〉・/api/race-archive/nar/resume〈Issue #635〉・/api/race-archive/oikiri/resume〈Issue #731〉。/api/migration/upload は Issue #394 で廃止)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
+  it("Issue #208・#251・#394・#396・#554: 手動の POST を受けるルートは 11 つだけ(/api/settings・/api/settings/prompt-preview〈Issue #396〉・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/reports/run・/api/monthly-reports/run〈Issue #280〉・/api/race-archive/resume〈Issue #554〉・/api/race-archive/nar/resume〈Issue #635〉・/api/race-archive/oikiri/resume〈Issue #731〉・/api/race-archive/runs/kick。/api/migration/upload は Issue #394 で廃止)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
     // POST の分岐は 8 つ(`method === "POST"`。下の path つきの 7 つと、`/api/settings` の pathname の分岐の中で method を見る 1 つ)
-    expect((code.match(/method === "POST"/g) ?? []).length).toBe(10);
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(11);
     const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
-    expect(routes).toEqual(["/api/settings/prompt-preview", "/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/reports/run", "/api/monthly-reports/run", "/api/race-archive/resume", "/api/race-archive/nar/resume", "/api/race-archive/oikiri/resume"]); // settings は pathname の分岐の中で method を見る
+    expect(routes).toEqual(["/api/settings/prompt-preview", "/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/reports/run", "/api/monthly-reports/run", "/api/race-archive/resume", "/api/race-archive/nar/resume", "/api/race-archive/oikiri/resume", "/api/race-archive/runs/kick"]); // settings は pathname の分岐の中で method を見る
     expect(code).toMatch(/pathname === "\/api\/settings"/);
     // Issue #396: handlePromptPreview は守りの後で純関数 buildPreviewText を呼ぶだけ。env・D1・DO・R2・netkeiba・LLM・Discord に触れない
     const previewStart = code.indexOf("async function handlePromptPreview(");
@@ -1406,7 +1406,7 @@ describe("Issue #216・#394・#402: 移行の DO(CloudMigration)は削除済み�
       if (b > 0) bindingSites[f] = b;
     }
     // kick を呼ぶのは scheduled.ts(毎日の起動)と result-backfill-do.ts(DO 自身が getStatus・kick の RPC から core に委譲する 2 つ)だけ
-    expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "jra-horse-backfill-do.ts": 1, "jra-blinker-backfill-do.ts": 1, "jra-baba-past-backfill-do.ts": 1, "scheduled.ts": 9 }); // Issue #769: 過去の馬場の埋め戻しの kick を足して 8 → 9(DO の 1 つ)。Issue #731: 追い切りの取得の kick を足して 7 → 8。Issue #635: 地方の交流重賞の取得の kick を足して 6 → 7(`grep -o "\.kick()" cloud/src/scheduled.ts | wc -l`)。以下は元の注記: scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)+ 馬ごとの頁の埋め戻し(Issue #697。21 時・23 時。DO 自身は kick を RPC から core に委譲する 1 つ)+ 過去のブリンカーの埋め戻し(Issue #698。同じ)
+    expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-core.ts": 1, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "jra-horse-backfill-do.ts": 1, "jra-blinker-backfill-do.ts": 1, "jra-baba-past-backfill-do.ts": 1, "scheduled.ts": 9 }); // 変換の core の kickNow(時間帯の外のとき、自身の kick に委譲する 1 つ)。Issue #769: 過去の馬場の埋め戻しの kick を足して 8 → 9(DO の 1 つ)。Issue #731: 追い切りの取得の kick を足して 7 → 8。Issue #635: 地方の交流重賞の取得の kick を足して 6 → 7(`grep -o "\.kick()" cloud/src/scheduled.ts | wc -l`)。以下は元の注記: scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)+ 馬ごとの頁の埋め戻し(Issue #697。21 時・23 時。DO 自身は kick を RPC から core に委譲する 1 つ)+ 過去のブリンカーの埋め戻し(Issue #698。同じ)
     // env.RESULT_BACKFILL に触れるのは scheduled.ts(有無の確認・get・idFromName の 3 回)と handler.ts(namespace 変数への代入の 1 回)だけ
     expect(bindingSites).toEqual({ "handler.ts": 1, "scheduled.ts": 3 });
     // handler.ts: 補完の DO は getStatus だけ(kick・start は呼ばない)。GET /api/results/backfill の 1 本
