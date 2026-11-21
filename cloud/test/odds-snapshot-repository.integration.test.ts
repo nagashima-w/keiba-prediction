@@ -78,6 +78,14 @@ describe("save(1 レース・1 時点で 1 行。追記だけ)", () => {
     const rows = await rowsOf();
     expect(rows.map((r) => [r["lead_min"], r["taken_at_ms"], r["due_ms"]])).toEqual([[5, 712_345, 700_000], [10, 410_000, 400_000]]);
   });
+  it("#787: 前日の夜(lead_min = -1)・当日の朝(-2)は、10・5 分前と別の行として同じレースに並ぶ(主キー (race_id, lead_min))。負の値もそのまま入り、combos_json は NULL", async () => {
+    const store = new D1OddsSnapshotStore({ db: local.db });
+    for (const leadMin of [10, 5, -1, -2] as const) await store.save({ ...ok, leadMin });
+    await store.save({ ...ok, leadMin: -1, takenAtMs: 999_999 }); // 同じ時点の再保存は何もしない
+    const rows = (await local.db.prepare("SELECT lead_min, taken_at_ms, combos_json FROM odds_snapshots WHERE race_id = ? ORDER BY lead_min DESC").bind(ok.raceId).all()).results as { lead_min: number; taken_at_ms: number; combos_json: string | null }[];
+    expect(rows.map((r) => r.lead_min)).toEqual([10, 5, -1, -2]);
+    expect(rows.find((r) => r.lead_min === -1)).toMatchObject({ taken_at_ms: 712_345, combos_json: null });
+  });
   it("追記だけ: UPDATE・DELETE を流さず、INSERT の 1 文だけ(SQL の文面で固定)", () => {
     expect(INSERT_ODDS_SNAPSHOT_SQL).toMatch(/^INSERT INTO odds_snapshots /);
     expect(INSERT_ODDS_SNAPSHOT_SQL).toContain("ON CONFLICT (race_id, lead_min) DO NOTHING");

@@ -137,7 +137,7 @@ function harness(startNow = DUE): Harness {
   Object.assign(h, { stage });
   return h;
 }
-const rowOf = (h: Harness, leadMin: 10 | 5, raceId = RACE) => h.store.rows().find((r) => r.race_id === raceId && r.lead_min === leadMin)!;
+const rowOf = (h: Harness, leadMin: 10 | 5 | -1 | -2, raceId = RACE) => h.store.rows().find((r) => r.race_id === raceId && r.lead_min === leadMin)!;
 const registerAndRun = async (h: Harness, raceId = RACE, startMs = START) => {
   h.stage.register(raceId, DATE, startMs);
   const row = h.store.nextDue(h.clock.now);
@@ -179,6 +179,74 @@ describe("取れたとき(ok)", () => {
     expect(h.jra.fetchOdds.filter((c) => c.startsWith(`pw15${DIGIT.tanpuku}`))).toEqual([linksOf(RACE).cnames.tanpuku, linksOf(RACE2).cnames.tanpuku]);
     expect(h.jra.fetchOdds).toHaveLength(10); // 2 レース × 5 頁
     expect(h.saved.map((s) => s.raceId)).toEqual([RACE, RACE2]);
+  });
+});
+
+describe("#787: 前日の夜(-1)・当日の朝(-2)の行(単勝・複勝だけ)", () => {
+  const EVENING = Date.parse("2026-11-14T21:10:00+09:00");
+  const MORNING = Date.parse("2026-11-15T09:31:00+09:00");
+  it("前日の夜(-1): 単勝・複勝の頁 1 本だけ取り(組合せは取らない)、combos は null。取った時刻は実際の時計、due は前日 21:00 JST、14 頭を残す", async () => {
+    const h = harness(EVENING);
+    h.stage.register(RACE, DATE, START);
+    const row = h.store.nextDue(EVENING);
+    expect(row).toMatchObject({ lead_min: -1 });
+    const outcome = await h.stage.runStep(row!);
+    expect(outcome).toEqual({ kind: "ran", raceId: RACE, leadMin: -1, mode: "odds-snapshot", step: "record", result: "ok", reason: null });
+    expect(h.jra.fetchOdds).toEqual([linksOf(RACE).cnames.tanpuku]); // 1 本だけ
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0]).toMatchObject({ leadMin: -1, status: "ok", combos: null, takenAtMs: EVENING, dueMs: Date.parse("2026-11-14T21:00:00+09:00"), startMs: START, attempts: 1 });
+    expect(h.saved[0]!.horses).toHaveLength(14);
+    expect(rowOf(h, -1).state).toBe("done");
+    expect(parseOddsSnapshotPayload(rowOf(h, -1).payload_json!)).toEqual(h.saved[0]);
+  });
+  it("当日の朝(-2): 単勝・複勝の頁 1 本だけ、combos は null。takenAtMs は予定(09:30)ではなく実際の時刻", async () => {
+    const h = harness(MORNING);
+    h.stage.register(RACE, DATE, START);
+    const row = h.store.nextDue(MORNING);
+    expect(row).toMatchObject({ lead_min: -2 });
+    expect(await h.stage.runStep(row!)).toMatchObject({ leadMin: -2, result: "ok" });
+    expect(h.jra.fetchOdds).toHaveLength(1);
+    expect(h.saved[0]).toMatchObject({ leadMin: -2, combos: null, takenAtMs: MORNING, dueMs: Date.parse("2026-11-15T09:30:00+09:00") });
+    expect(h.saved[0]!.takenAtMs).not.toBe(h.saved[0]!.dueMs);
+  });
+  it("10・5 分前の行は今までどおり組合せまで取る(-1・-2 の変更が波及しない。頁 5 本)", async () => {
+    const h = harness();
+    await registerAndRun(h);
+    expect(h.jra.fetchOdds).toHaveLength(5);
+    expect(h.saved[0]!.combos).not.toBeNull();
+  });
+  it("前日の夜は開催日 05:00 JST ちょうどで too-late(skipped。JRA に出ない)。その 1 ミリ秒前は取る", async () => {
+    const five = Date.parse("2026-11-15T05:00:00+09:00");
+    const late = harness(five);
+    late.store.register({ raceId: RACE, kaisaiDate: DATE, startMs: START, now: EVENING });
+    const out = await late.stage.runStep(rowOf(late, -1));
+    expect(out).toMatchObject({ result: "failed", reason: "too-late", leadMin: -1 });
+    expect(late.jra.fetchOdds).toEqual([]);
+    expect(late.saved[0]).toMatchObject({ status: "skipped", reason: "too-late", horses: null, combos: null });
+    sql?.close();
+    sql = null;
+    const early = harness(five - 1);
+    early.store.register({ raceId: RACE, kaisaiDate: DATE, startMs: START, now: EVENING });
+    expect(await early.stage.runStep(rowOf(early, -1))).toMatchObject({ result: "ok" });
+  });
+  it("当日の朝は、そのレースの発走の 10 分前ちょうどで too-late(skipped)。1 ミリ秒前は取る", async () => {
+    const late = harness(DUE10);
+    late.store.register({ raceId: RACE, kaisaiDate: DATE, startMs: START, now: MORNING });
+    expect(await late.stage.runStep(rowOf(late, -2))).toMatchObject({ result: "failed", reason: "too-late", leadMin: -2 });
+    expect(late.jra.fetchOdds).toEqual([]);
+    sql?.close();
+    sql = null;
+    const early = harness(DUE10 - 1);
+    early.store.register({ raceId: RACE, kaisaiDate: DATE, startMs: START, now: MORNING });
+    expect(await early.stage.runStep(rowOf(early, -2))).toMatchObject({ result: "ok" });
+  });
+  it("前日の夜に頁の値が空(発売前など)なら、既存どおり fetch-failed(再試行の時刻が最後の時刻より前なら retry)。組合せには出ない", async () => {
+    const h = harness(EVENING);
+    h.jra.oddsResult = () => ({ status: "ok", value: "<html><title>x</title></html>" });
+    h.stage.register(RACE, DATE, START);
+    expect(await h.stage.runStep(rowOf(h, -1))).toMatchObject({ result: "retry", leadMin: -1 });
+    expect(h.jra.fetchOdds).toHaveLength(1);
+    expect(rowOf(h, -1)).toMatchObject({ attempts: 1, state: "pending", next_try_at: EVENING + ODDS_SNAPSHOT_FETCH_RETRY_DELAY_MS });
   });
 });
 

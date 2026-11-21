@@ -120,10 +120,10 @@ afterEach(() => {
   for (const sql of opened.splice(0)) sql.close();
 });
 
-function harness(rows: readonly Row[], overrides: { jra?: boolean; sink?: boolean } = {}): Harness {
+function harness(rows: readonly Row[], overrides: { jra?: boolean; sink?: boolean; now?: number } = {}): Harness {
   const sql = openNodeSql();
   opened.push(sql);
-  const clock = { now: JST_0900 };
+  const clock = { now: overrides.now ?? JST_0900 };
   const alarm: { at: number | null } = { at: null };
   const warnings: string[] = [];
   const saved: OddsSnapshotPayload[] = [];
@@ -176,15 +176,29 @@ const snapRows = (h: Harness): { race_id: string; lead_min: number; due_ms: numb
 const ROWS: Row[] = [central(1, "10:05"), central(2, "10:35"), central(3, null), nar(1, "15:00")];
 
 describe("計画の確定が予定を積む", () => {
-  it("中央の発走時刻のあるレースごとに 10 分前・5 分前の 2 行を積む(分析するかどうかによらない)。時刻の無い中央のレース・地方は積まない", async () => {
+  it("中央の発走時刻のあるレースごとに 10 分前・5 分前の行を積む(分析するかどうかによらない)。時刻の無い中央のレース・地方は積まない。開催日の 09:00 に確定したときは、前日の夜(-1)は最後の時刻を過ぎているので積まず、当日の朝(-2。09:30)は積む(#787)", async () => {
     const h = harness(ROWS);
     await planThrough(h);
     expect(snapRows(h).map((r) => [r.race_id, r.lead_min, r.due_ms, r.start_ms, r.state])).toEqual([
       ["202606040901", 10, jst("10:05") - ODDS_SNAPSHOT_EARLY_LEAD_MS, jst("10:05"), "pending"],
       ["202606040901", 5, jst("10:05") - ODDS_SNAPSHOT_LEAD_MS, jst("10:05"), "pending"],
+      ["202606040901", -2, jst("09:30"), jst("10:05"), "pending"],
       ["202606040902", 10, jst("10:35") - ODDS_SNAPSHOT_EARLY_LEAD_MS, jst("10:35"), "pending"],
       ["202606040902", 5, jst("10:35") - ODDS_SNAPSHOT_LEAD_MS, jst("10:35"), "pending"],
+      ["202606040902", -2, jst("09:30"), jst("10:35"), "pending"],
     ]);
+  });
+  it("#787: 前日の 21:10 JST に確定すると、前日の夜(-1。due は 21:00)と当日の朝(-2。due は翌 09:30)も積む。時刻の無い中央のレース・地方は積まない", async () => {
+    const h = harness(ROWS, { now: jst("21:10") - 86_400_000 });
+    await planThrough(h);
+    const rows = snapRows(h);
+    expect(rows.filter((r) => r.lead_min < 0).map((r) => [r.race_id, r.lead_min, r.due_ms])).toEqual([
+      ["202606040901", -1, jst("21:00") - 86_400_000],
+      ["202606040901", -2, jst("09:30")],
+      ["202606040902", -1, jst("21:00") - 86_400_000],
+      ["202606040902", -2, jst("09:30")],
+    ]);
+    expect(new Set(rows.map((r) => r.race_id))).toEqual(new Set(["202606040901", "202606040902"]));
   });
   it("次のアラームの候補に、記録の予定の時刻(最も早い pending の行)が入る(core のアラームの配線。#756)", async () => {
     const h = harness([central(1, "09:25"), central(2, "11:35")]); // 1 レース目の 10 分前(9:15)が、他の候補(9:20 ごろ)より早い
@@ -195,7 +209,7 @@ describe("計画の確定が予定を積む", () => {
       await h.core.runNextStep();
     }
     const pending = snapRows(h).filter((r) => r.state === "pending").map((r) => r.due_ms);
-    expect(pending).toHaveLength(4); // 前提: 予定が積まれている
+    expect(pending).toHaveLength(6); // 前提: 予定が積まれている(2 レース × 10 分前・5 分前・当日の朝〈-2。#787〉)
     expect(pending).toContain(jst("09:25") - ODDS_SNAPSHOT_EARLY_LEAD_MS);
     const earliest = Math.min(...pending);
     expect(earliest, "前提: 予定の時刻は、いま(朝 9 時)より先").toBeGreaterThan(h.clock.now);
@@ -236,7 +250,7 @@ describe("時刻が来たら記録する", () => {
     expect(h.jra.fetched).toHaveLength(10); // 2 時点 × 5 頁
     expect(h.saved[0]!.combos, "この偽の取得口は、どの頁にも単勝・複勝の頁を返す = 組合せの表が読めない").toEqual({ umaren: { err: "unavailable" }, wakuren: { err: "unavailable" }, wide: { err: "unavailable" }, sanrenpuku: { err: "unavailable" } });
     expect(snapRows(h).map((r) => [r.race_id, r.lead_min, r.state])).toEqual([
-      ["202606040901", 10, "done"], ["202606040901", 5, "done"], ["202606040902", 10, "pending"], ["202606040902", 5, "pending"],
+      ["202606040901", 10, "done"], ["202606040901", 5, "done"], ["202606040901", -2, "pending"], ["202606040902", 10, "pending"], ["202606040902", 5, "pending"], ["202606040902", -2, "pending"],
     ]);
   });
   it("5 分前の時刻まで気づかなかったとき、5 分前を先に記録し、10 分前は取らずに too-late で終える", async () => {
@@ -248,5 +262,52 @@ describe("時刻が来たら記録する", () => {
     expect([a, b].map((o) => (o.kind === "ran" && o.mode === "odds-snapshot" ? [o.leadMin, o.result] : "other"))).toEqual([[5, "ok"], [10, "failed"]]);
     expect(h.saved.map((p) => [p.leadMin, p.status, p.reason])).toEqual([[5, "ok", null], [10, "skipped", "too-late"]]);
     expect(h.jra.fetched).toHaveLength(5); // 5 分前の 1 時点 × 5 頁(10 分前は取らない)
+  });
+});
+
+describe("#787: 前日の夜(-1)・当日の朝(-2)の記録", () => {
+  const step = async (h: Harness) => {
+    const o = await h.core.runNextStep();
+    return o.kind === "ran" && o.mode === "odds-snapshot" ? ([o.raceId, o.leadMin, o.result] as const) : (["other"] as const);
+  };
+  it("前日の夜の時刻が来ていれば、事前分析のタスクより前に 1 起床 1 行ずつ記録する(単勝・複勝 1 本。組合せは取らない)。2 レース分が済むまで他の段には進まない", async () => {
+    const h = harness(ROWS, { now: jst("21:10") - 86_400_000 });
+    await planThrough(h);
+    const before = h.saved.length;
+    expect(await step(h)).toEqual(["202606040901", -1, "ok"]);
+    expect(await step(h)).toEqual(["202606040902", -1, "ok"]);
+    expect(h.saved.slice(before).map((p) => [p.raceId, p.leadMin, p.status, p.combos])).toEqual([
+      ["202606040901", -1, "ok", null],
+      ["202606040902", -1, "ok", null],
+    ]);
+    expect(h.jra.fetched.filter((c) => !c.startsWith("pw151"))).toEqual([]); // 単勝・複勝の頁だけ
+    const outcome = await h.core.runNextStep();
+    expect(outcome.kind === "ran" && outcome.mode === "odds-snapshot" && outcome.leadMin === -1, "-1 の行はもう無い").toBe(false);
+  });
+  it("当日の朝(-2)は 09:30 JST から 1 起床 1 行ずつ。5 分前・10 分前の行が同時に動けるなら、そちらが先で -2 は後(lead_min の昇順なら -2 が先に来てしまう)", async () => {
+    const h = harness([central(1, "10:05"), central(2, "10:35")], { now: jst("21:10") - 86_400_000 });
+    await planThrough(h);
+    expect(await step(h)).toEqual(["202606040901", -1, "ok"]);
+    expect(await step(h)).toEqual(["202606040902", -1, "ok"]);
+    h.clock.now = jst("09:30") + 1_000;
+    expect(await step(h)).toEqual(["202606040901", -2, "ok"]);
+    h.clock.now = jst("10:00") + 30_000; // 1R の 5 分前(10:00)が来ている。10 分前(09:55)の最後の時刻(10:00)は過ぎている。2R の -2 はまだ残っている
+    expect(snapRows(h).find((r) => r.race_id === "202606040902" && r.lead_min === -2)!.state, "前提: 2R の -2 は pending").toBe("pending");
+    expect(await step(h)).toEqual(["202606040901", 5, "ok"]);
+    expect(await step(h)).toEqual(["202606040901", 10, "failed"]);
+    expect(await step(h)).toEqual(["202606040902", -2, "ok"]);
+  });
+  it("当日の朝(-2)の時刻に 1R の 10 分前を過ぎていれば、-2 は too-late(skipped)で、JRA に出ない", async () => {
+    const h = harness([central(1, "09:38")], { now: jst("21:10") - 86_400_000 });
+    await planThrough(h);
+    expect(await step(h)).toEqual(["202606040901", -1, "ok"]);
+    h.clock.now = jst("09:35"); // 発走 09:38 の 10 分前は 09:28 を過ぎている
+    const o = await h.core.runNextStep();
+    expect(o).toMatchObject({ mode: "odds-snapshot", leadMin: 5 }); // 5 分前(09:33)が先
+    const fetched = h.jra.fetched.length;
+    expect(await step(h)).toEqual(["202606040901", 10, "failed"]); // 10 分前は too-late
+    expect(await step(h)).toEqual(["202606040901", -2, "failed"]);
+    expect(h.jra.fetched).toHaveLength(fetched);
+    expect(h.saved.filter((p) => p.leadMin === -2)).toMatchObject([{ status: "skipped", reason: "too-late" }]);
   });
 });

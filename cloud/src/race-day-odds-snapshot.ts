@@ -21,15 +21,45 @@ import type { SqlLike } from "./sql-like";
 export const ODDS_SNAPSHOT_LEAD_MS = 5 * 60_000;
 /** 比べるための時点: 発走の 10 分前(ユーザー決定 2026-11-13。探索の要望)。 */
 export const ODDS_SNAPSHOT_EARLY_LEAD_MS = 10 * 60_000;
-/** 時点(発走の何分前か)。D1 の `lead_min`。 */
-export type OddsSnapshotLeadMin = 10 | 5;
-export const ODDS_SNAPSHOT_LEAD_MINS: readonly OddsSnapshotLeadMin[] = [10, 5];
-export const oddsSnapshotLeadMs = (leadMin: OddsSnapshotLeadMin): number => (leadMin === 10 ? ODDS_SNAPSHOT_EARLY_LEAD_MS : ODDS_SNAPSHOT_LEAD_MS);
 /**
- * その時点の取得が意味を持つ最後の時刻(これ以降に起きたら取りに行かない)。**5 分前は発走、10 分前は 5 分前の時刻**(5 分前を優先する)。
- * 再試行も、この時刻より前に限る。
+ * 時点。D1 の `lead_min`。**正の値は発走の何分前か(10・5)。負の値(#787)は発走からの分数ではなく、時点の種類の符号**:
+ * `-1` = 前日の夜(前日 21:00 JST 以降の最初の起床。単勝・複勝だけ)/ `-2` = 当日の朝(09:30 JST 以降。単勝・複勝だけ)。
+ * 実際に取った時刻は `taken_at_ms`、発走までの残りは `start_ms - taken_at_ms`。
  */
-export const oddsSnapshotSupersedeMs = (startMs: number, leadMin: OddsSnapshotLeadMin): number => (leadMin === 10 ? startMs - ODDS_SNAPSHOT_LEAD_MS : startMs);
+export type OddsSnapshotLeadMin = 10 | 5 | -1 | -2;
+/** 前日の夜の時点(`lead_min = -1`)。 */
+export const ODDS_SNAPSHOT_EVENING = -1;
+/** 当日の朝の時点(`lead_min = -2`)。 */
+export const ODDS_SNAPSHOT_MORNING = -2;
+export const ODDS_SNAPSHOT_LEAD_MINS: readonly OddsSnapshotLeadMin[] = [10, 5, -1, -2];
+/** 前日の夜の行を取り始める時刻(前日の JST)と、最後の時刻(開催日の JST)の時。 */
+export const ODDS_SNAPSHOT_EVENING_DUE_HOUR_JST = 21;
+export const ODDS_SNAPSHOT_EVENING_LAST_HOUR_JST = 5;
+/** 当日の朝の行を取り始める時刻(開催日の 09:30 JST)。 */
+export const ODDS_SNAPSHOT_MORNING_DUE_JST = "09:30";
+export const oddsSnapshotLeadMs = (leadMin: 10 | 5): number => (leadMin === 10 ? ODDS_SNAPSHOT_EARLY_LEAD_MS : ODDS_SNAPSHOT_LEAD_MS);
+/** 開催日(YYYYMMDD)の JST の時刻(HH:MM)のエポックミリ秒。 */
+const jstMs = (kaisaiDate: string, hhmm: string): number => Date.parse(`${kaisaiDate.slice(0, 4)}-${kaisaiDate.slice(4, 6)}-${kaisaiDate.slice(6, 8)}T${hhmm}:00+09:00`);
+const DAY_MS = 86_400_000;
+/** 取る予定の時刻(`due_ms`)。10・5 は発走から逆算、-1 は前日 21:00 JST、-2 は開催日 09:30 JST。 */
+export const oddsSnapshotDueMs = (leadMin: OddsSnapshotLeadMin, startMs: number, kaisaiDate: string): number =>
+  leadMin === ODDS_SNAPSHOT_EVENING
+    ? jstMs(kaisaiDate, `${String(ODDS_SNAPSHOT_EVENING_DUE_HOUR_JST).padStart(2, "0")}:00`) - DAY_MS
+    : leadMin === ODDS_SNAPSHOT_MORNING
+      ? jstMs(kaisaiDate, ODDS_SNAPSHOT_MORNING_DUE_JST)
+      : startMs - oddsSnapshotLeadMs(leadMin);
+/**
+ * その時点の取得が意味を持つ最後の時刻(これ以降に起きたら取りに行かない)。**5 分前は発走、10 分前は 5 分前の時刻**(5 分前を優先する)、
+ * **前日の夜は開催日の 05:00 JST、当日の朝は発走の 10 分前**(#787)。再試行も、この時刻より前に限る。
+ */
+export const oddsSnapshotSupersedeMs = (startMs: number, leadMin: OddsSnapshotLeadMin, kaisaiDate: string): number =>
+  leadMin === ODDS_SNAPSHOT_EVENING
+    ? jstMs(kaisaiDate, `${String(ODDS_SNAPSHOT_EVENING_LAST_HOUR_JST).padStart(2, "0")}:00`)
+    : leadMin === ODDS_SNAPSHOT_MORNING
+      ? startMs - ODDS_SNAPSHOT_EARLY_LEAD_MS
+      : leadMin === 10
+        ? startMs - ODDS_SNAPSHOT_LEAD_MS
+        : startMs;
 /** 取得の試行の上限(初回 + 再試行 3 回。ユーザー決定 2026-11-13: 再試行は発走前に限り 3 回まで)。 */
 export const ODDS_SNAPSHOT_FETCH_MAX_ATTEMPTS = 4;
 /** 取得の再試行の間隔(締切の再計算の {@link import("./race-day-close").CLOSE_FETCH_RETRY_DELAY_MS} と同じ 15 秒)。 */
@@ -184,7 +214,7 @@ const isWidePage = (v: unknown): v is OddsSnapshotWidePage => isPageWith(v, isNu
 export function parseOddsSnapshotPayload(text: string): OddsSnapshotPayload | null {
   try {
     const p = JSON.parse(text) as Record<string, unknown>;
-    if (p.leadMin !== 10 && p.leadMin !== 5) {
+    if (p.leadMin !== 10 && p.leadMin !== 5 && p.leadMin !== -1 && p.leadMin !== -2) {
       return null;
     }
     if (typeof p.raceId !== "string" || typeof p.kaisaiDate !== "string" || typeof p.startMs !== "number" || typeof p.dueMs !== "number" || typeof p.attempts !== "number") {
@@ -257,28 +287,37 @@ export class OddsSnapshotStore {
     );
   }
 
-  /** 予定の行(10 分前・5 分前の 2 行)を積む(**同期**)。**発走を過ぎていれば積まない**(false)。既にある行は変えない(確定の再実行で巻き戻さない)。 */
+  /**
+   * 予定の行を積む(**同期**)。**発走を過ぎていれば積まない**(false)。既にある行は変えない(確定の再実行で巻き戻さない)。
+   * 10 分前・5 分前は常に積む。**前日の夜(-1)と当日の朝(-2)は、最後の時刻より前のときだけ**積む(#787。過ぎてから確定した日に、取れない行を残さない)。
+   */
   register(reg: OddsSnapshotRegistration): boolean {
     if (reg.startMs <= reg.now) {
       return false;
     }
     for (const leadMin of ODDS_SNAPSHOT_LEAD_MINS) {
+      if (leadMin < 0 && reg.now >= oddsSnapshotSupersedeMs(reg.startMs, leadMin, reg.kaisaiDate)) {
+        continue;
+      }
       this.sql.exec(
         "INSERT INTO race_day_odds_snap (race_id, lead_min, kaisai_date, start_ms, due_ms, state) VALUES (?, ?, ?, ?, ?, 'pending') ON CONFLICT(race_id, lead_min) DO NOTHING",
         reg.raceId,
         leadMin,
         reg.kaisaiDate,
         reg.startMs,
-        reg.startMs - oddsSnapshotLeadMs(leadMin),
+        oddsSnapshotDueMs(leadMin, reg.startMs, reg.kaisaiDate),
       );
     }
     return true;
   }
 
-  /** 起こす時刻が来ている pending の行のうち、**5 分前の行を先に**、その中で最も早いもの(同じ時刻はレース ID の順。5 分前が必須で、10 分前の遅れが 5 分前を押しのけないため)。 */
+  /**
+   * 起こす時刻が来ている pending の行のうち、**優先は 5 分前 → 10 分前 → 前日の夜(-1)→ 当日の朝(-2)**。その中で最も早いもの(同じ時刻はレース ID の順)。
+   * 5 分前が必須で、10 分前の遅れが 5 分前を押しのけず、#787 の 2 つ(負の値)がどちらも先に動かないため。`ORDER BY lead_min` の昇順では -2 が 5 より先に来るので、明示する。
+   */
   nextDue(now: number): OddsSnapshotTaskRow | null {
     const rows = this.sql
-      .exec("SELECT * FROM race_day_odds_snap WHERE state = 'pending' AND COALESCE(next_try_at, due_ms) <= ? ORDER BY lead_min, COALESCE(next_try_at, due_ms), race_id LIMIT 1", now)
+      .exec("SELECT * FROM race_day_odds_snap WHERE state = 'pending' AND COALESCE(next_try_at, due_ms) <= ? ORDER BY CASE lead_min WHEN 5 THEN 0 WHEN 10 THEN 1 WHEN -1 THEN 2 ELSE 3 END, COALESCE(next_try_at, due_ms), race_id LIMIT 1", now)
       .toArray() as OddsSnapshotTaskRow[];
     return rows[0] ?? null;
   }
