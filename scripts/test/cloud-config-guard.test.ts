@@ -1904,7 +1904,7 @@ describe("Issue #769: 過去の馬場の埋め戻し(JraBabaPastBackfillDO)は�
     expect(orderBys).toEqual(["ORDER BY ord"]);
   });
 
-  it("書くのは baba_past・baba_past_pdfs・r2_ops の 3 表だけ(INSERT は 3 文)。DELETE をしない。UPDATE は ON CONFLICT DO UPDATE だけ。書き込みは 1 つの batch。R2 は put だけ(get・list・head・delete を使わない)で、1 箇所", () => {
+  it("書くのは baba_past・baba_past_pdfs・r2_ops の 3 表だけ(INSERT は 3 文)。DELETE をしない。UPDATE は ON CONFLICT DO UPDATE だけ。書き込みは 1 つの batch。R2 は put 1 箇所と、読み直し用の get 1 箇所(#789 の getPdf)だけ(list・head・delete を使わない)", () => {
     expect((repo.match(/INSERT INTO/g) ?? []).length).toBe(3);
     expect(repo).toMatch(/INSERT INTO baba_past \([^)]*\)[\s\S]*ON CONFLICT \(kaisai_date, venue_code\) DO UPDATE/);
     expect(repo).toMatch(/INSERT INTO baba_past_pdfs[\s\S]*ON CONFLICT \(source_pdf\) DO UPDATE/);
@@ -1913,7 +1913,10 @@ describe("Issue #769: 過去の馬場の埋め戻し(JraBabaPastBackfillDO)は�
     expect(repo).not.toMatch(/(?<!DO )\bUPDATE\b/);
     expect((repo.match(/\.batch\(/g) ?? []).length).toBe(1);
     expect((repo.match(/\.put\(/g) ?? []).length).toBe(1);
-    for (const forbidden of [".get(", ".list(", ".head(", ".delete("]) expect(repo, `repo に R2 の ${forbidden} が無い`).not.toContain(forbidden);
+    // R2 の get は読み直し(#789)の getPdf の 1 箇所だけ(`baba-past/` の控えを読む。書かない)
+    expect((repo.match(/\.get\(/g) ?? []).length).toBe(1);
+    expect(repo).toMatch(/bucket\.get\(`\$\{BABA_PAST_R2_PREFIX\}\$\{path\}`\)/);
+    for (const forbidden of [".list(", ".head(", ".delete("]) expect(repo, `repo に R2 の ${forbidden} が無い`).not.toContain(forbidden);
     expect(repo).toContain("withPutTimeout(");
     expect(repo).toContain("isWriteAllowed(");
   });

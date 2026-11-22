@@ -49,7 +49,7 @@ export const UPSERT_PDF_SQL =
   "r2_key = COALESCE(excluded.r2_key, baba_past_pdfs.r2_key), fetched_at = excluded.fetched_at";
 
 /** ?1 = 範囲の下端(`2021pdf/`)、?2 = 上端(`2021pdf0`。`/` の次の文字)。主キーの範囲読み。 */
-export const LIST_PDFS_BY_YEAR_SQL = "SELECT source_pdf, result, rows_saved FROM baba_past_pdfs WHERE source_pdf >= ?1 AND source_pdf < ?2 ORDER BY source_pdf";
+export const LIST_PDFS_BY_YEAR_SQL = "SELECT source_pdf, result, rows_saved, r2_key FROM baba_past_pdfs WHERE source_pdf >= ?1 AND source_pdf < ?2 ORDER BY source_pdf";
 
 const SELECT_R2_USAGE_SQL = "SELECT class_a AS classA, class_b AS classB FROM r2_ops WHERE ym = ?";
 const COUNT_WRITE_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1";
@@ -81,18 +81,24 @@ export interface BabaPastStoreLike {
   /** 渡した PDF のうち、取り終えているもの(渡した順)。 */
   filterDone(paths: readonly string[]): Promise<string[]>;
   savePdf(input: BabaPastSaveInput): Promise<BabaPastSaved>;
+  /** 年ごとの記録(主キーの範囲読み)。読み直し・取り直しの対象を探す(Issue #789)。 */
+  listPdfsByYear(year: number): Promise<BabaPastPdfRecord[]>;
+  /** R2 の控えの PDF を読む。無ければ null(読み直しで、JRA へは行かない)。 */
+  getPdf(path: string): Promise<Uint8Array | null>;
 }
 
 export interface BabaPastPdfRecord {
   readonly sourcePdf: string;
   readonly result: string;
   readonly rowsSaved: number;
+  /** R2 の控えのキー(控えを置いていなければ null)。 */
+  readonly r2Key: string | null;
 }
 
 /** 年ごとの記録の一覧(管理者の読み取り口。読み取りだけ。バケットは要らない)。主キーの範囲読み。 */
 export async function listBabaPastPdfsByYear(db: Pick<BabaPastDb, "prepare">, year: number): Promise<BabaPastPdfRecord[]> {
-  const rows = await db.prepare(LIST_PDFS_BY_YEAR_SQL).bind(`${year}pdf/`, `${year}pdf0`).all<{ source_pdf: string; result: string; rows_saved: number }>();
-  return rows.results.map((r) => ({ sourcePdf: r.source_pdf, result: r.result, rowsSaved: r.rows_saved }));
+  const rows = await db.prepare(LIST_PDFS_BY_YEAR_SQL).bind(`${year}pdf/`, `${year}pdf0`).all<{ source_pdf: string; result: string; rows_saved: number; r2_key: string | null }>();
+  return rows.results.map((r) => ({ sourcePdf: r.source_pdf, result: r.result, rowsSaved: r.rows_saved, r2Key: r.r2_key }));
 }
 
 export class D1BabaPastStore implements BabaPastStoreLike {
@@ -107,6 +113,11 @@ export class D1BabaPastStore implements BabaPastStoreLike {
 
   listPdfsByYear(year: number): Promise<BabaPastPdfRecord[]> {
     return listBabaPastPdfsByYear(this.deps.db, year);
+  }
+
+  async getPdf(path: string): Promise<Uint8Array | null> {
+    const object = await this.deps.bucket.get(`${BABA_PAST_R2_PREFIX}${path}`);
+    return object === null ? null : new Uint8Array(await object.arrayBuffer());
   }
 
   async savePdf(input: BabaPastSaveInput): Promise<BabaPastSaved> {

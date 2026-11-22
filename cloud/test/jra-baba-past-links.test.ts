@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import iconv from "iconv-lite";
 
 import { babaPastPdfUrl, babaPastYearUrl } from "../src/jra-http";
-import { parseBabaPastYearPage } from "../src/jra-baba-past-links";
+import { parseBabaPastPdfPath, parseBabaPastYearPage } from "../src/jra-baba-past-links";
 import { fixtureText } from "./jra-baba-samples";
 
 /**
@@ -85,5 +85,15 @@ describe("parseBabaPastYearPage(境界・異常)", () => {
 
   it("読める PDF が 1 本も無い(全部が知らない場)なら shape-mismatch", () => {
     expect(parseBabaPastYearPage(page(2021, ["/keiba/baba/archive/2021pdf/obihiro01.pdf"]), 2021)).toEqual({ ok: false, result: "shape-mismatch" });
+  });
+});
+
+describe("parseBabaPastPdfPath(Issue #789。記録済みの PDF の名前から、年・場・回を取る)", () => {
+  it("年の頁の PDF の名前の形から、年・場コード・開催回を取る", () => {
+    expect(parseBabaPastPdfPath("2021pdf/hanshin02.pdf")).toEqual({ path: "2021pdf/hanshin02.pdf", year: 2021, venueCode: "09", kai: 2 });
+    expect(parseBabaPastPdfPath("2022pdf/nakayama05.pdf")).toEqual({ path: "2022pdf/nakayama05.pdf", year: 2022, venueCode: "06", kai: 5 });
+  });
+  it("知らない場・開催回 0・形の違う名前は null", () => {
+    for (const p of ["2021pdf/unknown01.pdf", "2021pdf/tokyo00.pdf", "2021/tokyo01.pdf", "2021pdf/tokyo1.pdf", "../2021pdf/tokyo01.pdf", "2021pdf/tokyo01.pdf?x"]) expect(parseBabaPastPdfPath(p), p).toBeNull();
   });
 });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseBabaPastPdf, type BabaPastRow } from "../src/jra-baba-past-pdf";
 import { pathFromMeta } from "./meta-path";
-import { PAST_EXPECTED } from "./jra-baba-past-samples";
+import { PAST_EXPECTED, PAST_EXPECTED_789 } from "./jra-baba-past-samples";
 import { buildPdf, layoutLines, type SynthBlock } from "./jra-baba-past-synth";
 
 /**
@@ -72,6 +72,75 @@ describe("実物の PDF(書式ごと)", () => {
     const mon = r.rows.filter((x) => x.weekday === "月");
     expect(mon.map((x) => x.kaisaiDate)).toEqual(["20200921"]);
     expect(mon[0]).toMatchObject({ cushion: 9.7, turfGoalMoisture: 11.4, turfCorner4Moisture: 10.8, dirtGoalMoisture: 4.7, dirtCorner4Moisture: 4.3 });
+  });
+});
+
+describe("Issue #789: 読めなかった 5 本の実物(書式の違いごと)", () => {
+  for (const e of PAST_EXPECTED_789) {
+    it(`${e.file}: 年・回・場・全部の行が pdftotext の値と一致する`, async () => {
+      const r = await parseOk(fixture(e.file));
+      expect([r.year, r.kai, r.venueName]).toEqual([e.year, e.kai, e.venue]);
+      expect(dump(r.rows)).toBe(e.table);
+    });
+  }
+
+  it("行数: 2021 阪神2=18(日付の終わりに月が無い「4月2～4日」)・2022 中京2=10(Print To PDF の y 反転・金土日月の 4 列)・2022 阪神1=18(誤植 8..8)・2022 阪神6=14・2022 中山5=14(2 バイト符号のリテラル・TJ の大きな字間・TL/T*。火水の 2 列)", async () => {
+    const counts: number[] = [];
+    for (const e of PAST_EXPECTED_789) counts.push((await parseOk(fixture(e.file))).rows.length);
+    expect(counts).toEqual([18, 10, 18, 14, 14]);
+    expect(PAST_EXPECTED_789.reduce((n, e) => n + e.table.split("\n").length, 0)).toBe(counts.reduce((a, b) => a + b, 0));
+  });
+
+  it("代表値: 4月2～4日は 20210402 金から 3 日・月曜の列は 20220321・火水の列は 20221227・20221228", async () => {
+    const hs = await parseOk(fixture("jra_baba_past_2021_hanshin02.pdf"));
+    expect(hs.rows.slice(3, 6).map((x) => [x.kaisaiDate, x.weekday, x.cushion, x.dirtGoalMoisture])).toEqual([["20210402", "金", 9.8, 10.4], ["20210403", "土", 9.5, 3.7], ["20210404", "日", 10.3, 2.7]]);
+    const cs = await parseOk(fixture("jra_baba_past_2022_chukyo02.pdf"));
+    expect(cs.rows.filter((x) => x.weekday === "月")).toMatchObject([{ kaisaiDate: "20220321", cushion: 8.5, turfGoalMoisture: 13.9, turfCorner4Moisture: 13.6, dirtGoalMoisture: 8.8, dirtCorner4Moisture: 10.2 }]);
+    const nk = await parseOk(fixture("jra_baba_past_2022_nakayama05.pdf"));
+    expect(nk.rows.slice(-2).map((x) => [x.kaisaiDate, x.weekday, x.turfGoalMoisture])).toEqual([["20221227", "火", 11.4], ["20221228", "水", 10.5]]);
+  });
+
+  it("誤植 8..8(2022 阪神1回の第 5・6 日の芝ゴール前の金曜)は、ほかに壊れたセルが無いので 8.8 として読む", async () => {
+    const r = await parseOk(fixture("jra_baba_past_2022_hanshin01.pdf"));
+    const row = r.rows.find((x) => x.kaisaiDate === "20220225")!;
+    expect(row.weekday).toBe("金");
+    expect(row.turfGoalMoisture).toBe(8.8);
+    expect(row.turfCorner4Moisture).toBe(9.8);
+  });
+});
+
+describe("Issue #789: 誤植 `N..N` を直すのは、1 行にちょうど 1 つで、ほかに壊れたセルが無いときだけ", () => {
+  it("合成: 芝ゴール前の 1 つが 8..8 なら 8.8 として読む(ほかの値は変わらない)", async () => {
+    const r = await parseOk(buildPdf(layoutLines(TITLE, [{ ...BLOCK_FRI, turfGoal: ["8..8", "16.2", "14.6"] }])));
+    expect(r.rows.map((x) => x.turfGoalMoisture)).toEqual([8.8, 16.2, 14.6]);
+    expect(r.rows.map((x) => x.turfCorner4Moisture)).toEqual([18.8, 16.8, 14.5]);
+  });
+
+  it("同じ行に 8..8 が 2 つあるときは直さず shape-mismatch", async () => {
+    const r = await parseBabaPastPdf(buildPdf(layoutLines(TITLE, [{ ...BLOCK_FRI, turfGoal: ["8..8", "6..2", "14.6"] }])));
+    expect(r).toEqual({ ok: false, result: "shape-mismatch" });
+  });
+
+  it("8..8 が別の行に 1 つずつ 2 つあるときも、直さず shape-mismatch(PDF 全体で壊れたセルは 1 つまで)", async () => {
+    const r = await parseBabaPastPdf(buildPdf(layoutLines(TITLE, [{ ...BLOCK_FRI, turfGoal: ["8..8", "16.2", "14.6"], dirtGoal: ["12.8", "1..1", "10.2"] }])));
+    expect(r).toEqual({ ok: false, result: "shape-mismatch" });
+  });
+
+  it("8..8 のほかに別の壊れたセル(`abc`)が同じ行にあるときは直さず shape-mismatch", async () => {
+    const r = await parseBabaPastPdf(buildPdf(layoutLines(TITLE, [{ ...BLOCK_FRI, turfGoal: ["8..8", "abc", "14.6"] }])));
+    expect(r).toEqual({ ok: false, result: "shape-mismatch" });
+  });
+
+  it("8..8 のほかに、値でない壊れたセルが別の行にあるときは直さず shape-mismatch", async () => {
+    const lines = layoutLines(TITLE, [{ ...BLOCK_FRI, turfGoal: ["8..8", "16.2", "14.6"] }]);
+    const dirty = lines.map((l) => (l.cells.some((c) => c.text === "ダートコース含水率") ? { ...l, cells: [...l.cells.slice(0, -1), { x: 480, text: "-", lit: true }] } : l));
+    const r = await parseBabaPastPdf(buildPdf(dirty));
+    expect(r).toEqual({ ok: false, result: "shape-mismatch" });
+  });
+
+  it("直した値も範囲の検査を受ける(100..5 は直さない形ではないが、直すと 100.5 で範囲外 → shape-mismatch)", async () => {
+    const r = await parseBabaPastPdf(buildPdf(layoutLines(TITLE, [{ ...BLOCK_FRI, turfGoal: ["100..5", "16.2", "14.6"] }])));
+    expect(r).toEqual({ ok: false, result: "shape-mismatch" });
   });
 });
 

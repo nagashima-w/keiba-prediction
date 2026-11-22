@@ -13,6 +13,16 @@
  *    取得で決まった失敗(404・403・リダイレクト・大きすぎる)は、PDF なしで分類を記録して先へ進む。
  *  - 全部の年を終えて積んだ PDF が空になったら `finished` にして止まる(アラームを張らず、次の kick でも何もしない)。
  *
+ * ## 読み直しと取り直し(Issue #789)
+ *  - コードの**世代 {@link BABA_PAST_GEN}** を DO の `bp_meta` の `gen` と比べ、食い違えば `finished` を解いて、読み直しと取り直しの対象の走査をやり直す(var の操作は要らない。デプロイのあとの cron の kick で動く)。
+ *    パーサを直したときは、この定数を 1 つ上げる。
+ *  - 走査は、世代が変わったあとの最初の起床の頭で(その起床の仕事は消費せず)、年ごとに D1 の記録を読み(`BabaPastStoreLike.listPdfsByYear`。主キーの範囲読み)、`bp_redo` に積む。
+ *    **読み直し**(`reparse`)は結果が shape-mismatch で R2 に控えがあるもの。**取り直し**(`refetch`)は結果が http-403 のもの(一時的な 403 を取り直す)。
+ *  - 読み直しは R2 の控えを読み(`BabaPastStoreLike.getPdf`)、パーサに通して書き直す。**JRA には行かない**・R2 に PUT しない(控えのキーは保たれる)。R2 に控えが無ければ、何も書かずに積みから外す。
+ *  - 取り直しは JRA から取る。200 なら通常どおり読んで書く(R2 に控えを置き、http-403 の記録を上書きする)。403 がまた出たら回数を足し、{@link BABA_PAST_REFETCH_TRIES} 回(3 晩)続いたら積みから外す(D1 は http-403 のまま = 恒久)。
+ *    次の取り直しは、次の 18:00(JST)以降。404 などの恒久の失敗は、その分類で記録を上書きする。一時的な失敗は、記録せず同じ起床の形で取り直す。
+ *  - 順は 読み直し → 取り直し(日が来たもの)→ 積んだ PDF → 年の頁。新しい PDF の取得での 403 は今までどおり恒久として記録する。
+ *
  * ## いつ動くか・上限
  *  - **止める var は "1" だけが有効**({@link isJraBabaPastBackfillEnabled}。`JRA_BABA_PAST_BACKFILL_ENABLED`)。未設定・それ以外は止まっている(アラームを張らず、起きても何もしない)。最初は止めて公開し、確かめてから "1" にする。
  *  - **JST 18:00〜翌 8:00** だけ(`jra-blinker-backfill-core.ts` の時間帯と同じ。JRA の開催日の朝の取得と重ならない)。
@@ -25,7 +35,7 @@
 import { JST_OFFSET_MS } from "../../packages/core/src/common/jst";
 import { inBlinkerBackfillWindow, nextBlinkerBackfillStart, nextBlinkerDayEvening } from "./jra-blinker-backfill-core";
 import { parseBabaPastPdf } from "./jra-baba-past-pdf";
-import { parseBabaPastYearPage, type BabaPastLink } from "./jra-baba-past-links";
+import { parseBabaPastPdfPath, parseBabaPastYearPage, type BabaPastLink } from "./jra-baba-past-links";
 import type { BabaPastStoreLike } from "./baba-past-repository";
 import type { SqlLike } from "./sql-like";
 import { shouldRearm } from "./stale-alarm";
@@ -43,6 +53,13 @@ export const BABA_PAST_ERROR_RETRY_MS = 10 * 60_000;
 /** 取る年の既定の範囲。 */
 export const BABA_PAST_FIRST_YEAR = 2021;
 export const BABA_PAST_LAST_YEAR = 2024;
+/**
+ * コードの世代。DO の `bp_meta` の `gen` と食い違えば、`finished` を解いて読み直し・取り直しの走査をやり直す(Issue #789)。
+ * 1 = #769 の最初の版(`gen` を持たない)、2 = #789(日付・座標・フォントの読み取りの直しと、http-403 の取り直し)。パーサを直して、記録済みの PDF を読み直したいときに上げる。
+ */
+export const BABA_PAST_GEN = 2;
+/** 取り直しで 403 が続いたときの上限(この回数の晩を試して、なお 403 なら恒久)。 */
+export const BABA_PAST_REFETCH_TRIES = 3;
 
 /** 止める var の判定(`JRA_BABA_PAST_BACKFILL_ENABLED`)。**前後の空白を除いて文字列 `"1"` だけ**が有効。未設定・それ以外は止まっている。 */
 export function isJraBabaPastBackfillEnabled(value: string | undefined): boolean {
@@ -91,6 +108,8 @@ export interface BabaPastBackfillStatus {
   readonly dayRows: number;
   /** 積んで、まだ取っていない PDF の数。 */
   readonly queued: number;
+  /** 読み直し・取り直しで、まだ済んでいない PDF の数(#789)。 */
+  readonly redo: number;
   /** 年の頁の状態(`ok` か、飛ばした理由の分類)。 */
   readonly years: Readonly<Record<string, string>>;
 }
@@ -99,6 +118,12 @@ const DAY_MS = 86_400_000;
 
 function errorKind(error: unknown): string {
   return error instanceof Error ? error.name.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "Error" : "non-error";
+}
+
+/** いまより後の、最初の JST 18:00(取り直しの次の日。0:00〜18:00 なら、その日の 18:00)。 */
+function nextEvening(ms: number): number {
+  const evening = ms - (((ms + JST_OFFSET_MS) % DAY_MS) + DAY_MS) % DAY_MS + 18 * 60 * 60_000;
+  return evening > ms ? evening : evening + DAY_MS;
 }
 
 function jstDay(ms: number): string {
@@ -113,7 +138,19 @@ export function isTransientFailure(reason: BabaPastFetchFailure): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
 
-type Unit = { readonly kind: "pdf"; readonly link: BabaPastLink } | { readonly kind: "year"; readonly year: number } | { readonly kind: "finished" };
+interface RedoEntry extends BabaPastLink {
+  readonly kind: "reparse" | "refetch";
+  readonly tries: number;
+}
+
+type Unit =
+  | { readonly kind: "pdf"; readonly link: BabaPastLink }
+  | { readonly kind: "year"; readonly year: number }
+  | { readonly kind: "reparse"; readonly entry: RedoEntry }
+  | { readonly kind: "refetch"; readonly entry: RedoEntry }
+  /** 取り直しが日の来るのを待っている(`until` はその最も早い時刻)。 */
+  | { readonly kind: "wait"; readonly until: number }
+  | { readonly kind: "finished" };
 
 export class JraBabaPastBackfillCore {
   private readonly deps: JraBabaPastBackfillDeps;
@@ -133,6 +170,10 @@ export class JraBabaPastBackfillCore {
     deps.sql.exec("CREATE TABLE IF NOT EXISTS bp_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID");
     deps.sql.exec("CREATE TABLE IF NOT EXISTS bp_years (year INTEGER PRIMARY KEY, state TEXT NOT NULL)");
     deps.sql.exec("CREATE TABLE IF NOT EXISTS bp_queue (ord INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, year INTEGER NOT NULL, venue_code TEXT NOT NULL, kai INTEGER NOT NULL)");
+    // 読み直し(reparse)・取り直し(refetch)の積み。高々 PDF の数(実物では 12 本ほど)。
+    deps.sql.exec(
+      "CREATE TABLE IF NOT EXISTS bp_redo (kind TEXT NOT NULL, path TEXT NOT NULL, year INTEGER NOT NULL, venue_code TEXT NOT NULL, kai INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0, not_before INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (kind, path)) WITHOUT ROWID",
+    );
   }
 
   // ---- 状態の読み書き(主キーの引きだけ) ----
@@ -166,6 +207,7 @@ export class JraBabaPastBackfillCore {
       if (row !== undefined) years[String(y)] = row.state;
     }
     const queued = (this.deps.sql.exec("SELECT COUNT(*) AS n FROM bp_queue").toArray() as { n: number }[])[0]?.n ?? 0;
+    const redo = (this.deps.sql.exec("SELECT COUNT(*) AS n FROM bp_redo").toArray() as { n: number }[])[0]?.n ?? 0;
     return {
       enabled: this.enabled,
       firstYear: this.firstYear,
@@ -175,8 +217,17 @@ export class JraBabaPastBackfillCore {
       day: this.metaGet("day"),
       dayRows: this.metaNum("day_rows"),
       queued,
+      redo,
       years,
     };
+  }
+
+  /** コードの世代が DO の記録と違えば、終わりの印を解いて走査をやり直す(`gen` は最後に書く: 途中で落ちても次にやり直す)。 */
+  private syncGeneration(): void {
+    if (this.metaGet("gen") === String(BABA_PAST_GEN)) return;
+    this.metaSet("finished", "0");
+    this.metaSet("redo_scanned", "0");
+    this.metaSet("gen", String(BABA_PAST_GEN));
   }
 
   // ---- アラーム ----
@@ -184,6 +235,7 @@ export class JraBabaPastBackfillCore {
   /** アラームが無ければ張る(cron の `scheduled` が呼ぶ)。止まっている・終わっていれば張らない。 */
   async kick(): Promise<void> {
     if (!this.enabled) return;
+    this.syncGeneration();
     if (this.metaGet("finished") === "1") return;
     const now = this.deps.now();
     if (!shouldRearm(await this.deps.getAlarm(), now, (iso) => this.deps.log(`jra-baba-past-backfill: stale alarm at=${iso} re-armed`))) return;
@@ -228,19 +280,33 @@ export class JraBabaPastBackfillCore {
 
   // ---- 次にやること ----
 
+  private redoRow(where: string, ...bindings: (string | number)[]): RedoEntry | null {
+    const row = (
+      this.deps.sql.exec(`SELECT kind, path, year, venue_code, kai, tries FROM bp_redo WHERE ${where} ORDER BY path LIMIT 1`, ...bindings).toArray() as { kind: "reparse" | "refetch"; path: string; year: number; venue_code: string; kai: number; tries: number }[]
+    )[0];
+    return row === undefined ? null : { kind: row.kind, path: row.path, year: row.year, venueCode: row.venue_code, kai: row.kai, tries: row.tries };
+  }
+
   private nextUnit(): Unit {
+    const reparse = this.redoRow("kind = 'reparse'");
+    if (reparse !== null) return { kind: "reparse", entry: reparse };
+    const refetch = this.redoRow("kind = 'refetch' AND not_before <= ?", this.deps.now());
+    if (refetch !== null) return { kind: "refetch", entry: refetch };
     const row = (this.deps.sql.exec("SELECT path, year, venue_code, kai FROM bp_queue ORDER BY ord LIMIT 1").toArray() as { path: string; year: number; venue_code: string; kai: number }[])[0];
     if (row !== undefined) return { kind: "pdf", link: { path: row.path, year: row.year, venueCode: row.venue_code, kai: row.kai } };
     for (let year = this.firstYear; year <= this.lastYear; year++) {
       const done = (this.deps.sql.exec("SELECT 1 AS one FROM bp_years WHERE year = ?", year).toArray() as unknown[])[0];
       if (done === undefined) return { kind: "year", year };
     }
+    const waiting = (this.deps.sql.exec("SELECT MIN(not_before) AS at FROM bp_redo WHERE kind = 'refetch'").toArray() as { at: number | null }[])[0]?.at ?? null;
+    if (waiting !== null) return { kind: "wait", until: waiting };
     return { kind: "finished" };
   }
 
   private async step(): Promise<void> {
     const { deps } = this;
     const start = deps.now();
+    this.syncGeneration();
     if (this.metaGet("finished") === "1") return;
     if (!inBlinkerBackfillWindow(start)) {
       this.metaSet("wait_reason", "outside-window");
@@ -258,6 +324,8 @@ export class JraBabaPastBackfillCore {
       return;
     }
 
+    // 世代が変わった直後は、まず読み直し・取り直しの対象を積む(D1 の読み取りだけ。起床は消費せず、同じ起床で次の仕事に進む)
+    if (this.metaGet("redo_scanned") !== "1") await this.runScan();
     const unit = this.nextUnit();
     if (unit.kind === "finished") {
       this.metaSet("finished", "1");
@@ -266,9 +334,20 @@ export class JraBabaPastBackfillCore {
       return; // 最後まで進んだ: アラームを張らず、次の kick でも何もしない。
     }
 
+    if (unit.kind === "wait") {
+      // 取り直しの日が来るまで待つ(終わりにはしない)。次の起床は、その日の時刻。
+      this.metaSet("wait_reason", "redo-wait");
+      await deps.setAlarm(Math.max(unit.until, start + BABA_PAST_GAP_MS));
+      return;
+    }
+
     let failedWake = false;
     if (unit.kind === "year") {
       failedWake = await this.runYear(unit.year);
+    } else if (unit.kind === "reparse") {
+      failedWake = await this.runReparse(unit.entry);
+    } else if (unit.kind === "refetch") {
+      failedWake = await this.runRefetch(unit.entry);
     } else {
       failedWake = await this.runPdf(unit.link);
     }
@@ -319,18 +398,33 @@ export class JraBabaPastBackfillCore {
   private async runPdf(link: BabaPastLink): Promise<boolean> {
     const { deps } = this;
     const outcome = await deps.fetchPdf(link.path);
-    const base = { path: link.path, year: link.year, venueCode: link.venueCode, kai: link.kai };
     if (outcome.kind === "failed") {
       if (isTransientFailure(outcome.reason)) {
         deps.log("jra-baba-past-backfill: wake unit=file outcome=retry");
         return true;
       }
-      const r = await deps.store.savePdf({ ...base, result: outcome.reason, rows: [], pdf: null, nowMs: deps.now() });
+      const r = await this.recordFailure(link, outcome.reason);
       this.finishPdf(link.path, r.written);
       deps.log(`jra-baba-past-backfill: wake unit=file outcome=recorded written=${r.written}`);
       return false;
     }
-    const parsed = await parseBabaPastPdf(outcome.bytes);
+    const saved = await this.parseAndSave(link, outcome.bytes, outcome.bytes);
+    this.finishPdf(link.path, saved.written);
+    deps.log(`jra-baba-past-backfill: wake unit=file outcome=${saved.result === "ok" ? "saved" : "recorded"} written=${saved.written}`);
+    return false;
+  }
+
+  /** 取得で決まった失敗(404・403 など)を、PDF なしの分類として記録する。 */
+  private recordFailure(link: BabaPastLink, reason: BabaPastFetchFailure): Promise<{ written: number }> {
+    return this.deps.store.savePdf({ path: link.path, year: link.year, venueCode: link.venueCode, kai: link.kai, result: reason, rows: [], pdf: null, nowMs: this.deps.now() });
+  }
+
+  /**
+   * PDF のバイト列を読み、結果の分類と行を D1 に書く。`store` は R2 に控えとして置くバイト列(読み直しでは null: R2 にはもうある)。
+   * 見出し(年・回・場)が PDF の名前と食い違う・行が多すぎるときは shape-mismatch(別の PDF の行を保存しない)。
+   */
+  private async parseAndSave(link: BabaPastLink, bytes: Uint8Array, store: Uint8Array | null): Promise<{ result: string; written: number }> {
+    const parsed = await parseBabaPastPdf(bytes);
     let result: string;
     let rows: Awaited<ReturnType<typeof parseBabaPastPdf>> extends infer R ? (R extends { ok: true; rows: infer X } ? X : never) : never = [];
     if (!parsed.ok) {
@@ -341,10 +435,85 @@ export class JraBabaPastBackfillCore {
       result = "ok";
       rows = parsed.rows;
     }
-    const r = await deps.store.savePdf({ ...base, result, rows, pdf: outcome.bytes, nowMs: deps.now() });
-    this.finishPdf(link.path, r.written);
-    deps.log(`jra-baba-past-backfill: wake unit=file outcome=${result === "ok" ? "saved" : "recorded"} written=${r.written}`);
+    const r = await this.deps.store.savePdf({ path: link.path, year: link.year, venueCode: link.venueCode, kai: link.kai, result, rows, pdf: store, nowMs: this.deps.now() });
+    return { result, written: r.written };
+  }
+
+  /** 読み直し・取り直しの対象を、D1 の記録から積む(1 回の起床で全部の年。D1 の主キーの範囲読みが年の数だけ)。 */
+  private async runScan(): Promise<void> {
+    const { deps } = this;
+    let reparse = 0;
+    let refetch = 0;
+    for (let year = this.firstYear; year <= this.lastYear; year++) {
+      for (const record of await deps.store.listPdfsByYear(year)) {
+        const link = parseBabaPastPdfPath(record.sourcePdf);
+        if (link === null) continue;
+        const kind = record.result === "shape-mismatch" && record.r2Key !== null ? "reparse" : record.result === "http-403" ? "refetch" : null;
+        if (kind === null) continue;
+        deps.sql.exec("INSERT INTO bp_redo (kind, path, year, venue_code, kai) VALUES (?, ?, ?, ?, ?) ON CONFLICT(kind, path) DO NOTHING", kind, link.path, link.year, link.venueCode, link.kai);
+        if (kind === "reparse") reparse += 1;
+        else refetch += 1;
+      }
+    }
+    this.metaSet("redo_scanned", "1");
+    deps.log(`jra-baba-past-backfill: wake unit=scan outcome=queued reparse=${reparse} refetch=${refetch}`);
+  }
+
+  /** R2 の控えを読み直して書く(JRA には行かない・R2 に置かない)。 */
+  private async runReparse(entry: RedoEntry): Promise<boolean> {
+    const { deps } = this;
+    const bytes = await deps.store.getPdf(entry.path);
+    if (bytes === null) {
+      // 控えが無い: 読み直せない。記録(D1)はそのまま残し、積みから外す。
+      this.dropRedo(entry);
+      deps.log("jra-baba-past-backfill: wake unit=reparse outcome=missing");
+      return false;
+    }
+    const saved = await this.parseAndSave(entry, bytes, null);
+    this.finishRedo(entry, saved.written);
+    deps.log(`jra-baba-past-backfill: wake unit=reparse outcome=${saved.result === "ok" ? "saved" : "recorded"} written=${saved.written}`);
     return false;
+  }
+
+  /** JRA から取り直す。403 が {@link BABA_PAST_REFETCH_TRIES} 晩続いたら恒久(積みから外す。D1 は http-403 のまま)。 */
+  private async runRefetch(entry: RedoEntry): Promise<boolean> {
+    const { deps } = this;
+    const outcome = await deps.fetchPdf(entry.path);
+    if (outcome.kind === "failed") {
+      if (isTransientFailure(outcome.reason)) {
+        deps.log("jra-baba-past-backfill: wake unit=refetch outcome=retry");
+        return true;
+      }
+      if (outcome.reason === "http-403") {
+        const tries = entry.tries + 1;
+        if (tries >= BABA_PAST_REFETCH_TRIES) {
+          this.dropRedo(entry);
+          deps.log("jra-baba-past-backfill: wake unit=refetch outcome=gave-up");
+        } else {
+          deps.sql.exec("UPDATE bp_redo SET tries = ?, not_before = ? WHERE kind = 'refetch' AND path = ?", tries, nextEvening(deps.now()), entry.path);
+          deps.log(`jra-baba-past-backfill: wake unit=refetch outcome=forbidden tries=${tries}`);
+        }
+        return false;
+      }
+      const r = await this.recordFailure(entry, outcome.reason);
+      this.finishRedo(entry, r.written);
+      deps.log(`jra-baba-past-backfill: wake unit=refetch outcome=recorded written=${r.written}`);
+      return false;
+    }
+    const saved = await this.parseAndSave(entry, outcome.bytes, outcome.bytes);
+    this.finishRedo(entry, saved.written);
+    deps.log(`jra-baba-past-backfill: wake unit=refetch outcome=${saved.result === "ok" ? "saved" : "recorded"} written=${saved.written}`);
+    return false;
+  }
+
+  private dropRedo(entry: RedoEntry): void {
+    this.deps.sql.exec("DELETE FROM bp_redo WHERE kind = ? AND path = ?", entry.kind, entry.path);
+  }
+
+  /** 書き込みが済んだ読み直し・取り直しを積みから外し、1 日の行数に数える。 */
+  private finishRedo(entry: RedoEntry, written: number): void {
+    this.dropRedo(entry);
+    this.metaSet("day_rows", String(this.metaNum("day_rows") + written));
   }
 
   /** 書き込みが済んだ PDF を積みから外し、1 日の行数に数える(書けなかったら呼ばれない: 例外のまま抜ける)。 */
