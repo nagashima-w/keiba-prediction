@@ -21,7 +21,7 @@ const STATUS: BabaPastBackfillStatus = {
   waitReason: "active",
   day: "20261117",
   dayRows: 55,
-  queued: 40,
+  redo: 0, queued: 40,
   years: { "2021": "ok" },
 };
 

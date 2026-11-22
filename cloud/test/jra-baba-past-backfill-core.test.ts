@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   BABA_PAST_DAILY_ROWS_MAX,
   BABA_PAST_FAILURE_LIMIT,
+  BABA_PAST_GEN,
+  BABA_PAST_REFETCH_TRIES,
   BABA_PAST_GAP_MS,
   BABA_PAST_ROWS_PER_PDF_MAX,
   isJraBabaPastBackfillEnabled,
@@ -12,7 +14,7 @@ import {
   type BabaPastYearOutcome,
   type JraBabaPastBackfillOptions,
 } from "../src/jra-baba-past-backfill-core";
-import type { BabaPastSaveInput, BabaPastStoreLike } from "../src/baba-past-repository";
+import type { BabaPastPdfRecord, BabaPastSaveInput, BabaPastStoreLike } from "../src/baba-past-repository";
 import { buildPdf, layoutLines, type SynthBlock } from "./jra-baba-past-synth";
 import { VENUE_BY_TRACK_CODE } from "../../packages/core/src/analysis/venue-codes";
 import { openNodeSql, type NodeSql } from "./node-sql";
@@ -47,6 +49,22 @@ class FakeStore implements BabaPastStoreLike {
   filterCalls: string[][] = [];
   saves: BabaPastSaveInput[] = [];
   failSave = false;
+  /** 記録済み(D1 の `baba_past_pdfs`)。読み直し・取り直しの走査が読む。 */
+  records: BabaPastPdfRecord[] = [];
+  /** R2 の控え(path → バイト列)。 */
+  r2 = new Map<string, Uint8Array>();
+  failGet = false;
+  listCalls: number[] = [];
+  getCalls: string[] = [];
+  async listPdfsByYear(year: number): Promise<BabaPastPdfRecord[]> {
+    this.listCalls.push(year);
+    return this.records.filter((r) => r.sourcePdf.startsWith(`${year}pdf/`));
+  }
+  async getPdf(path: string): Promise<Uint8Array | null> {
+    this.getCalls.push(path);
+    if (this.failGet) throw new Error("R2 down");
+    return this.r2.get(path) ?? null;
+  }
   async filterDone(paths: readonly string[]): Promise<string[]> {
     this.filterCalls.push([...paths]);
     return paths.filter((p) => this.done.has(p));
@@ -538,5 +556,243 @@ describe("ログ", () => {
       expect(line, line).not.toMatch(/pdf|http|D1 down|jra\.go\.jp|tokyo/i);
       expect(line.startsWith("jra-baba-past-backfill:")).toBe(true);
     }
+  });
+});
+
+describe("Issue #789: 世代の食い違いでの再開(読み直し・取り直しの走査)", () => {
+  const rec = (path: string, result: string, r2Key: string | null = null): BabaPastPdfRecord => ({ sourcePdf: path, result, rowsSaved: 0, r2Key });
+
+  it("世代は 2(今回)。最初の起床で bp_meta に書く", async () => {
+    expect(BABA_PAST_GEN).toBe(2);
+    h = new Harness(opts());
+    h.addYear(2021, ["05"]);
+    h.start();
+    await h.wake();
+    const row = h.sql.exec("SELECT value FROM bp_meta WHERE key = 'gen'").toArray() as { value: string }[];
+    expect(row.map((r) => r.value)).toEqual(["2"]);
+  });
+
+  it("finished まで進んだあと、gen が古い(1)・無い DO は、finished を解いて再開する。同じ世代なら、今までどおり動かない", async () => {
+    h = new Harness(opts());
+    h.addYear(2021, ["05"]);
+    h.start();
+    await h.wake();
+    await h.tick(); // PDF
+    await h.tick(); // finished
+    expect((await h.core.status()).finished).toBe(true);
+    h.alarm = null;
+    h.core = h.makeCore(); // 同じ世代: 何も起きない
+    await h.core.kick();
+    expect(h.alarm).toBeNull();
+    for (const sql of ["UPDATE bp_meta SET value = '1' WHERE key = 'gen'", "DELETE FROM bp_meta WHERE key = 'gen'"]) {
+      h.sql.exec(sql);
+      h.alarm = null;
+      h.core = h.makeCore(); // 再起動(世代の記録が古い)
+      await h.core.kick();
+      expect(h.alarm, sql).not.toBeNull();
+      expect((await h.core.status()).finished, sql).toBe(false);
+      h.store.listCalls = [];
+      await h.tick();
+      expect(h.store.listCalls, sql).toEqual([2021]); // 走査をやり直した
+      await h.tick(); // 積むものが無いので、また finished
+      expect((await h.core.status()).finished, sql).toBe(true);
+    }
+  });
+
+  it("走査の対象: shape-mismatch で R2 に控えがあるものは読み直し、http-403 は取り直し。ほかの結果(ok・no-text・http-404)と、控えの無い shape-mismatch は対象にしない", async () => {
+    h = new Harness(opts());
+    h.store.records = [
+      rec("2021pdf/tokyo01.pdf", "shape-mismatch", "baba-past/2021pdf/tokyo01.pdf"),
+      rec("2021pdf/nakayama02.pdf", "shape-mismatch", null),
+      rec("2021pdf/hanshin03.pdf", "http-403"),
+      rec("2021pdf/tokyo04.pdf", "ok", "baba-past/2021pdf/tokyo04.pdf"),
+      rec("2021pdf/nakayama05.pdf", "no-text", "baba-past/2021pdf/nakayama05.pdf"),
+      rec("2021pdf/hanshin06.pdf", "http-404"),
+      rec("2021pdf/unknown07.pdf", "http-403"),
+    ];
+    h.store.r2.set("2021pdf/tokyo01.pdf", pdfOf(2021, "05", 1));
+    h.addYear(2021, ["05"]);
+    h.start();
+    await h.wake();
+    expect(h.logs).toContain("jra-baba-past-backfill: wake unit=scan outcome=queued reparse=1 refetch=1");
+    expect((await h.core.status()).redo).toBe(2 - 1); // 読み直し 1 本は、同じ起床で済む(取り直し 1 本が残る)
+  });
+});
+
+describe("Issue #789: 読み直し(R2 の控え。JRA には行かない)", () => {
+  const rec = (path: string, result: string, r2Key: string | null): BabaPastPdfRecord => ({ sourcePdf: path, result, rowsSaved: 0, r2Key });
+  const PATH = "2021pdf/tokyo01.pdf";
+
+  it("R2 の控えを読み直して書く: 結果と行を保存に渡し、pdf は null(R2 に置かない)。JRA の PDF は取らない。書いた行数を 1 日に数える", async () => {
+    h = new Harness(opts());
+    h.store.records = [rec(PATH, "shape-mismatch", `baba-past/${PATH}`)];
+    h.store.done.add(PATH);
+    h.store.r2.set(PATH, pdfOf(2021, "05", 1));
+    h.addYear(2021, ["05"]);
+    h.start();
+    await h.wake();
+    expect(h.store.getCalls).toEqual([PATH]);
+    expect(h.store.saves).toHaveLength(1);
+    const s = h.store.saves[0]!;
+    expect([s.path, s.year, s.venueCode, s.kai, s.result, s.pdf]).toEqual([PATH, 2021, "05", 1, "ok", null]);
+    expect(s.rows.map((r) => r.kaisaiDate)).toEqual(["20210129", "20210130", "20210131"]);
+    expect((await h.core.status()).dayRows).toBe(3 + 2);
+    expect((await h.core.status()).redo).toBe(0);
+    await h.tick(); // 年の頁(この PDF は保存済みなので積まない)
+    await h.tick(); // finished
+    expect(h.fetchedWhat()).toEqual(["year:2021"]); // JRA の PDF には 1 本も行かない
+    expect((await h.core.status()).finished).toBe(true);
+  });
+
+  it("読み直しても読めないときは、その分類で記録を書き直す(1 回だけ。繰り返さない)。見出しが名前と食い違うときも shape-mismatch", async () => {
+    h = new Harness(opts());
+    h.store.records = [rec(PATH, "shape-mismatch", `baba-past/${PATH}`), rec("2021pdf/nakayama02.pdf", "shape-mismatch", "baba-past/2021pdf/nakayama02.pdf")];
+    h.store.done.add(PATH).add("2021pdf/nakayama02.pdf");
+    h.store.r2.set(PATH, new TextEncoder().encode("<html>not pdf</html>"));
+    h.store.r2.set("2021pdf/nakayama02.pdf", pdfOf(2021, "05", 2)); // 見出しは東京 2 回。名前は中山 02
+    h.addYear(2021, ["05", "06"]);
+    h.start();
+    await h.wake();
+    await h.tick();
+    await h.tick();
+    await h.tick();
+    // 読み直しの順は名前の順(nakayama02 → tokyo01)
+    expect(h.store.saves.map((s) => [s.path, s.result, s.rows.length, s.pdf])).toEqual([["2021pdf/nakayama02.pdf", "shape-mismatch", 0, null], [PATH, "not-pdf", 0, null]]);
+    expect(h.store.getCalls).toEqual(["2021pdf/nakayama02.pdf", PATH]);
+  });
+
+  it("R2 に控えが無いときは、何も書かず・JRA にも行かず、積みから外して先へ進む", async () => {
+    h = new Harness(opts());
+    h.store.records = [rec(PATH, "shape-mismatch", `baba-past/${PATH}`)];
+    h.store.done.add(PATH);
+    h.addYear(2021, ["05"]);
+    h.start();
+    await h.wake();
+    expect(h.store.getCalls).toEqual([PATH]);
+    expect(h.store.saves).toEqual([]);
+    expect((await h.core.status()).redo).toBe(0);
+    expect(h.logs).toContain("jra-baba-past-backfill: wake unit=reparse outcome=missing");
+    await h.tick();
+    await h.tick();
+    expect(h.fetchedWhat()).toEqual(["year:2021"]);
+    expect((await h.core.status()).finished).toBe(true);
+  });
+
+  it("R2 の読み取りが失敗したら例外にせず、10 分後に取り直す。積みは残り、直れば書く", async () => {
+    h = new Harness(opts());
+    h.store.records = [rec(PATH, "shape-mismatch", `baba-past/${PATH}`)];
+    h.store.done.add(PATH);
+    h.store.r2.set(PATH, pdfOf(2021, "05", 1));
+    h.store.failGet = true;
+    h.addYear(2021, ["05"]);
+    h.start();
+    await h.wake();
+    expect(h.alarm).toBe(h.now + 10 * 60_000);
+    expect((await h.core.status()).redo).toBe(1);
+    expect(h.store.saves).toEqual([]);
+    h.store.failGet = false;
+    await h.tick();
+    expect(h.store.saves.map((s) => s.result)).toEqual(["ok"]);
+    expect((await h.core.status()).redo).toBe(0);
+  });
+});
+
+describe("Issue #789: 取り直し(http-403)", () => {
+  const rec = (path: string): BabaPastPdfRecord => ({ sourcePdf: path, result: "http-403", rowsSaved: 0, r2Key: null });
+  const PATH = "2021pdf/tokyo01.pdf";
+  const setup = (outcomes: BabaPastPdfOutcome[]): void => {
+    h = new Harness(opts());
+    h.store.records = [rec(PATH)];
+    h.store.done.add(PATH);
+    h.addYear(2021, ["05"]);
+    h.pdfs.set(PATH, outcomes);
+    h.start();
+  };
+
+  it("取れたら通常どおり読んで書く: R2 に控えを置く(pdf を渡す)・結果は ok・積みから外す", async () => {
+    setup([{ kind: "pdf", bytes: pdfOf(2021, "05", 1) }]);
+    await h!.wake();
+    expect(h!.fetchedWhat()).toEqual([PATH]);
+    expect(h!.store.saves.map((s) => [s.path, s.result, s.rows.length, s.pdf !== null])).toEqual([[PATH, "ok", 3, true]]);
+    expect((await h!.core.status()).redo).toBe(0);
+    expect((await h!.core.status()).dayRows).toBe(5);
+  });
+
+  it("上限は 3 晩(定数 3): 403 のたびに回数を足し、次は次の 18:00(JST)以降。3 回目の 403 で積みから外す(D1 は書かない = http-403 のまま)。そのあとは取らず、finished になる", async () => {
+    expect(BABA_PAST_REFETCH_TRIES).toBe(3);
+    setup([{ kind: "failed", reason: "http-403" }]);
+    await h!.wake(); // 10 日 20:00: 1 回目
+    expect(h!.fetchedWhat()).toEqual([PATH]);
+    expect((await h!.core.status()).redo).toBe(1);
+    await h!.tick(); // 年の頁(次の取り直しは翌 18:00 なので、積んだ PDF の仕事が先)
+    expect(h!.fetchedWhat()).toEqual([PATH, "year:2021"]);
+    await h!.tick(); // 積むものが無い: 取り直しの日を待つ(終わりにしない)
+    expect(h!.alarm).toBe(jst(11, 18));
+    expect((await h!.core.status()).finished).toBe(false);
+    expect((await h!.core.status()).waitReason).toBe("redo-wait");
+    await h!.tick(); // 11 日 18:00: 2 回目
+    expect(h!.fetchedWhat()).toEqual([PATH, "year:2021", PATH]);
+    expect((await h!.core.status()).redo).toBe(1);
+    await h!.tick(); // 待つ
+    expect(h!.alarm).toBe(jst(12, 18));
+    await h!.tick(); // 12 日 18:00: 3 回目 → 恒久
+    expect(h!.fetchedWhat()).toEqual([PATH, "year:2021", PATH, PATH]);
+    expect((await h!.core.status()).redo).toBe(0);
+    await h!.tick();
+    expect((await h!.core.status()).finished).toBe(true);
+    expect(h!.store.saves).toEqual([]);
+    await h!.wake();
+    expect(h!.fetchedWhat()).toHaveLength(4);
+  });
+
+  it("次の日は 18:00 より後: 0:00〜18:00(深夜の起床)の 403 は、その日の 18:00 に取り直す", async () => {
+    setup([{ kind: "failed", reason: "http-403" }]);
+    h!.now = jst(11, 2);
+    await h!.wake();
+    await h!.tick(); // 年の頁
+    await h!.tick(); // 待つ
+    expect(h!.alarm).toBe(jst(11, 18));
+  });
+
+  it("403 の途中で取れたら(2 回目)書いて、積みから外す", async () => {
+    setup([{ kind: "failed", reason: "http-403" }, { kind: "pdf", bytes: pdfOf(2021, "05", 1) }]);
+    await h!.wake();
+    await h!.tick();
+    await h!.tick();
+    await h!.tick(); // 18:00
+    expect(h!.store.saves.map((s) => [s.result, s.pdf !== null])).toEqual([["ok", true]]);
+    expect((await h!.core.status()).redo).toBe(0);
+  });
+
+  it("404 などの恒久の失敗は、その分類で記録を上書きする(PDF なし)。積みから外す", async () => {
+    setup([{ kind: "failed", reason: "http-404" }]);
+    await h!.wake();
+    expect(h!.store.saves.map((s) => [s.path, s.result, s.rows.length, s.pdf])).toEqual([[PATH, "http-404", 0, null]]);
+    expect((await h!.core.status()).redo).toBe(0);
+  });
+
+  it("一時的な失敗(503)は、記録せず回数も足さず、次の起床で同じ PDF を取り直す", async () => {
+    setup([{ kind: "failed", reason: "http-503" }, { kind: "pdf", bytes: pdfOf(2021, "05", 1) }]);
+    await h!.wake();
+    expect(h!.store.saves).toEqual([]);
+    expect(h!.alarm).toBe(h!.now + BABA_PAST_GAP_MS);
+    await h!.tick();
+    expect(h!.fetchedWhat()).toEqual([PATH, PATH]);
+    expect(h!.store.saves.map((s) => s.result)).toEqual(["ok"]);
+  });
+
+  it("読み直し → 取り直し → 新しい PDF の順(読み直しは JRA に行かず、取り直しが先、年の頁から積んだ新しい PDF が最後)", async () => {
+    h = new Harness(opts());
+    const paths = h.addYear(2021, ["05", "06", "09"]); // tokyo01・nakayama02・hanshin03
+    h.store.records = [{ sourcePdf: paths[0]!, result: "shape-mismatch", rowsSaved: 0, r2Key: `baba-past/${paths[0]}` }, rec(paths[2]!)];
+    h.store.done.add(paths[0]!).add(paths[2]!);
+    h.store.r2.set(paths[0]!, pdfOf(2021, "05", 1));
+    h.start();
+    await h.wake(); // 読み直し(tokyo01)
+    await h.tick(); // 取り直し(hanshin03)
+    await h.tick(); // 年の頁
+    await h.tick(); // 新しい PDF(nakayama02)
+    expect(h.store.saves.map((s) => s.path)).toEqual([paths[0], paths[2], paths[1]]);
+    expect(h.fetchedWhat()).toEqual([paths[2], "year:2021", paths[1]]);
   });
 });

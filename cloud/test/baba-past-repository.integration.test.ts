@@ -174,9 +174,40 @@ describe("filterDone・listPdfsByYear", () => {
     const input = await tokyo01();
     await store().savePdf(input);
     await store().savePdf({ ...input, path: "2022pdf/tokyo01.pdf", year: 2022, result: "no-text", rows: [], pdf: null });
-    expect(await store().listPdfsByYear(2021)).toEqual([{ sourcePdf: "2021pdf/tokyo01.pdf", result: "ok", rowsSaved: 12 }]);
-    expect(await store().listPdfsByYear(2022)).toEqual([{ sourcePdf: "2022pdf/tokyo01.pdf", result: "no-text", rowsSaved: 0 }]);
+    expect(await store().listPdfsByYear(2021)).toEqual([{ sourcePdf: "2021pdf/tokyo01.pdf", result: "ok", rowsSaved: 12, r2Key: "baba-past/2021pdf/tokyo01.pdf" }]);
+    expect(await store().listPdfsByYear(2022)).toEqual([{ sourcePdf: "2022pdf/tokyo01.pdf", result: "no-text", rowsSaved: 0, r2Key: null }]);
     expect(await store().listPdfsByYear(2023)).toEqual([]);
+  });
+});
+
+describe("getPdf・読み直し(Issue #789)", () => {
+  it("R2 に置いた PDF をそのまま読む。無ければ null", async () => {
+    const input = await tokyo01();
+    await store().savePdf(input);
+    const got = await store().getPdf("2021pdf/tokyo01.pdf");
+    expect(got).not.toBeNull();
+    expect(Array.from(got!)).toEqual(Array.from(input.pdf!));
+    expect(await store().getPdf("2021pdf/tokyo99.pdf")).toBeNull();
+  });
+
+  it("読み直しの書き込み(pdf: null)は、R2 に置かず(r2_ops を足さず)、r2_key を保ち、行・結果を書き直す(shape-mismatch → ok)", async () => {
+    const input = await tokyo01();
+    await store().savePdf({ ...input, result: "shape-mismatch", rows: [] });
+    expect(await all("SELECT result, rows_saved, r2_key FROM baba_past_pdfs")).toEqual([{ result: "shape-mismatch", rows_saved: 0, r2_key: "baba-past/2021pdf/tokyo01.pdf" }]);
+    const before = await all("SELECT class_a FROM r2_ops");
+    const r = await store().savePdf({ ...input, pdf: null });
+    expect(r.r2Key).toBeNull();
+    expect(await all("SELECT result, rows_saved, r2_key FROM baba_past_pdfs")).toEqual([{ result: "ok", rows_saved: 12, r2_key: "baba-past/2021pdf/tokyo01.pdf" }]);
+    expect(await all("SELECT COUNT(*) AS n FROM baba_past")).toEqual([{ n: 12 }]);
+    expect(await all("SELECT class_a FROM r2_ops")).toEqual(before);
+  });
+
+  it("取り直しの書き込み(http-403 の記録 → ok)は、R2 に控えを置き、r2_key が入る", async () => {
+    const input = await tokyo01();
+    await store().savePdf({ ...input, result: "http-403", rows: [], pdf: null });
+    expect(await all("SELECT result, r2_key FROM baba_past_pdfs")).toEqual([{ result: "http-403", r2_key: null }]);
+    await store().savePdf(input);
+    expect(await all("SELECT result, rows_saved, r2_key FROM baba_past_pdfs")).toEqual([{ result: "ok", rows_saved: 12, r2_key: "baba-past/2021pdf/tokyo01.pdf" }]);
   });
 });
 

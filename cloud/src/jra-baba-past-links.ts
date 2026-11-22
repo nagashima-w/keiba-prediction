@@ -23,6 +23,16 @@ for (const code of Object.values(VENUE_CODE_BY_SLUG)) {
   if (!VENUE_BY_TRACK_CODE.has(code)) throw new Error(`場コードが core の表に無い: ${code}`);
 }
 
+/** 記録済みの PDF の名前(`2021pdf/tokyo01.pdf`)から、年・場コード・開催回を取る。年の頁の PDF の名前の形でなければ null。 */
+export function parseBabaPastPdfPath(path: string): BabaPastLink | null {
+  const m = /^(\d{4})pdf\/([a-z]+)(\d{2})\.pdf$/.exec(path);
+  if (m === null) return null;
+  const venueCode = VENUE_CODE_BY_SLUG[m[2]!];
+  const kai = Number(m[3]);
+  if (venueCode === undefined || kai < 1) return null;
+  return { path, year: Number(m[1]), venueCode, kai };
+}
+
 export interface BabaPastLink {
   /** `archive/` からの相対(例 `2021pdf/tokyo01.pdf`)。 */
   readonly path: string;
