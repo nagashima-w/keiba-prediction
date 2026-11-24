@@ -249,4 +249,23 @@ describe("parseOddsSnapshotPayload", () => {
     expect(bad({ wide: { err: "weird" } })).toBeNull();
     expect(bad({ sanrenpuku: 5 })).toBeNull();
   });
+  it("#794: 馬単・三連単(順序つきのキー。値は単一)を読める。無い古い形も有効。ある場合は形を検査する(幅の配列・文字列は null)", () => {
+    const um = { t: START - 289_000, dt: "2026-11-15 15:40:00", st: "middle", o: { "0102": 485.1, "0201": null } };
+    const tan3 = { t: START - 288_000, dt: "2026-11-15 15:40:00", st: "middle", o: { "010203": 2949, "100809": null } };
+    const base = { umaren: { t: 1, dt: null, st: null, o: {} }, wakuren: { err: "fetch-failed" } };
+    const full = { ...base, umatan: um, sanrentan: tan3 };
+    const parsed = parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: full }));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.combos).toEqual(full);
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: { ...base, umatan: um } }))!.combos, "10 分前の行は三連単のキーが無い").toEqual({ ...base, umatan: um });
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: base }))).not.toBeNull(); // 馬単・三連単が無い古い形
+    const bad = (c: unknown) => parseOddsSnapshotPayload(JSON.stringify({ ...ok, combos: { ...full, ...(c as object) } }));
+    expect(bad({ umatan: { ...um, o: { "0102": [1, 2] } } })).toBeNull();
+    expect(bad({ sanrentan: { ...tan3, o: { "010203": [1, 2] } } })).toBeNull();
+    expect(bad({ sanrentan: { ...tan3, o: { "010203": "x" } } })).toBeNull();
+    expect(bad({ umatan: { t: "x", o: {} } })).toBeNull();
+    expect(bad({ sanrentan: 5 })).toBeNull();
+    expect(bad({ sanrentan: { err: "weird" } })).toBeNull();
+    expect(bad({ umatan: { err: "fetch-failed" }, sanrentan: { err: "unavailable" } })).not.toBeNull();
+  });
 });

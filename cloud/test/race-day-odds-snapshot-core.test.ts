@@ -234,7 +234,7 @@ describe("計画の確定が予定を積む", () => {
 });
 
 describe("時刻が来たら記録する", () => {
-  it("10 分前の時刻に 10 分前の行、5 分前の時刻に 5 分前の行が動き、保存先へ渡る。1 ステップは 1 行だけ。取った頁は 1 レース・1 時点で 5 本(単勝・複勝 → 馬連 → 枠連 → ワイド → 3連複)", async () => {
+  it("10 分前の時刻に 10 分前の行、5 分前の時刻に 5 分前の行が動き、保存先へ渡る。1 ステップは 1 行だけ。取った頁は 10 分前が 6 本・5 分前が 7 本(単勝・複勝 → 馬連 → 枠連 → ワイド → 3連複 → 馬単 → 三連単〔5 分前だけ〕)", async () => {
     const h = harness(ROWS);
     await planThrough(h);
     h.clock.now = jst("09:55") + 1_000; // 1R の 10 分前
@@ -247,8 +247,8 @@ describe("時刻が来たら記録する", () => {
     const second = await h.core.runNextStep();
     expect(second).toMatchObject({ raceId: "202606040901", mode: "odds-snapshot", leadMin: 5, result: "ok" });
     expect(h.saved.map((p) => [p.raceId, p.leadMin])).toEqual([["202606040901", 10], ["202606040901", 5]]);
-    expect(h.jra.fetched).toHaveLength(10); // 2 時点 × 5 頁
-    expect(h.saved[0]!.combos, "この偽の取得口は、どの頁にも単勝・複勝の頁を返す = 組合せの表が読めない").toEqual({ umaren: { err: "unavailable" }, wakuren: { err: "unavailable" }, wide: { err: "unavailable" }, sanrenpuku: { err: "unavailable" } });
+    expect(h.jra.fetched).toHaveLength(13); // 10 分前 6 頁 + 5 分前 7 頁
+    expect(h.saved[0]!.combos, "この偽の取得口は、どの頁にも単勝・複勝の頁を返す = 組合せの表が読めない").toEqual({ umaren: { err: "unavailable" }, wakuren: { err: "unavailable" }, wide: { err: "unavailable" }, sanrenpuku: { err: "unavailable" }, umatan: { err: "unavailable" } }); // 10 分前の行(三連単のキーは無い)
     expect(snapRows(h).map((r) => [r.race_id, r.lead_min, r.state])).toEqual([
       ["202606040901", 10, "done"], ["202606040901", 5, "done"], ["202606040901", -2, "pending"], ["202606040902", 10, "pending"], ["202606040902", 5, "pending"], ["202606040902", -2, "pending"],
     ]);
@@ -261,7 +261,7 @@ describe("時刻が来たら記録する", () => {
     const b = await h.core.runNextStep();
     expect([a, b].map((o) => (o.kind === "ran" && o.mode === "odds-snapshot" ? [o.leadMin, o.result] : "other"))).toEqual([[5, "ok"], [10, "failed"]]);
     expect(h.saved.map((p) => [p.leadMin, p.status, p.reason])).toEqual([[5, "ok", null], [10, "skipped", "too-late"]]);
-    expect(h.jra.fetched).toHaveLength(5); // 5 分前の 1 時点 × 5 頁(10 分前は取らない)
+    expect(h.jra.fetched).toHaveLength(7); // 5 分前の 1 時点 × 7 頁(10 分前は取らない)
   });
 });
 
