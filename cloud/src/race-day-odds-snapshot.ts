@@ -101,6 +101,16 @@ export interface OddsSnapshotCombos {
   readonly wakuren: OddsSnapshotComboPage;
   readonly wide?: OddsSnapshotWidePage;
   readonly sanrenpuku?: OddsSnapshotComboPage;
+  /**
+   * 馬単(#794)。頁の形は馬連と同じ(値は単一)。**キーは順序つき**: 1 着・2 着の順の 2 桁連結(例: "0102" = 1 着 01・2 着 02。"0201" は別の組)。馬連・3連複のように小さい番号を先にしない。
+   * 10 分前・5 分前の両方の行に入る。無い古い形も有効(キーが無いことと {err} は別)。
+   */
+  readonly umatan?: OddsSnapshotComboPage;
+  /**
+   * 三連単(#794)。頁の形は馬連と同じ(値は単一)。**キーは順序つき**: 1 着・2 着・3 着の順の 6 桁連結(例: "010203")。票数なしの組は null のまま残す。
+   * **5 分前の行にだけ**入る(10 分前の行にはキーが無い。D1 の増えを抑えるため。ユーザー決定)。
+   */
+  readonly sanrentan?: OddsSnapshotComboPage;
 }
 
 /** 1 レースの記録(DO の `payload_json` と、D1 の行の元)。 */
@@ -237,6 +247,8 @@ export function parseOddsSnapshotPayload(text: string): OddsSnapshotPayload | nu
         !isComboPage(c.wakuren) ||
         !(c.wide === undefined || isWidePage(c.wide)) ||
         !(c.sanrenpuku === undefined || isComboPage(c.sanrenpuku)) ||
+        !(c.umatan === undefined || isComboPage(c.umatan)) ||
+        !(c.sanrentan === undefined || isComboPage(c.sanrentan)) ||
         p.status !== "ok"
       ) {
         return null;

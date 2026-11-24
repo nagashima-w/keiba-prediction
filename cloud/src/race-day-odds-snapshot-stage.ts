@@ -15,7 +15,7 @@
  * ## #787: 前日の夜(`lead_min = -1`)・当日の朝(`-2`)
  * 単勝・複勝の頁 1 本だけ(組合せは取らず `combos` は null)。取り方・再試行・保存は 10・5 分前と同じ。最後の時刻は、前日の夜が開催日の 05:00 JST、当日の朝が発走の 10 分前(`oddsSnapshotSupersedeMs`)。
  *
- * JRA への出方(10・5 分前): 1 レースにつき頁 5 本(単勝・複勝・馬連・枠連・ワイド・3連複。リンクが取得キャッシュに無い最初のレースだけ、開催選択とレース選択の 2 本が足される。単勝・複勝が取れなければ 1 本)。間隔は注入の取得口(DO では他の JRA の取得と共有の `createJraPacer`)が守る。
+ * JRA への出方(10・5 分前): 1 レースにつき頁 6 本〔10 分前〕・7 本〔5 分前。#794 で 馬単・三連単を足した。三連単は 5 分前だけで最後〕(単勝・複勝・馬連・枠連・ワイド・3連複・馬単〔・三連単〕。リンクが取得キャッシュに無い最初のレースだけ、開催選択とレース選択の 2 本が足される。単勝・複勝が取れなければ 1 本)。間隔は注入の取得口(DO では他の JRA の取得と共有の `createJraPacer`)が守る。
  */
 import { redactSecrets } from "./llm-run";
 import { createJraOddsOverride, jraOddsCacheKey } from "./jra-odds-cache";
@@ -215,7 +215,13 @@ export class OddsSnapshotStage {
       const wakuren = await this.fetchComboPage(fetcher, row, "wakuren", startedAt, stopAt);
       const wide = await this.fetchWidePage(fetcher, row, startedAt, stopAt);
       const sanrenpuku = await this.fetchComboPage(fetcher, row, "sanrenpuku", startedAt, stopAt);
-      return { ...winPlace, combos: { umaren, wakuren, wide, sanrenpuku } };
+      // 馬単は 10 分前・5 分前の両方、三連単は 5 分前だけ(#794。ユーザー決定。D1 の増えを抑える)。三連単は最後の頁(頁が大きく、メモリのピークを最後に回す)。
+      const umatan = await this.fetchComboPage(fetcher, row, "umatan", startedAt, stopAt);
+      if (row.lead_min !== 5) {
+        return { ...winPlace, combos: { umaren, wakuren, wide, sanrenpuku, umatan } };
+      }
+      const sanrentan = await this.fetchComboPage(fetcher, row, "sanrentan", startedAt, stopAt);
+      return { ...winPlace, combos: { umaren, wakuren, wide, sanrenpuku, umatan, sanrentan } };
     } catch {
       return null; // 文面は残さない(URL・cname が入りうる)
     }
@@ -225,7 +231,7 @@ export class OddsSnapshotStage {
   private async runPage(
     fetcher: JraOddsFetcher,
     row: OddsSnapshotTaskRow,
-    page: "tanpuku" | "umaren" | "wakuren" | "wide" | "sanrenpuku",
+    page: "tanpuku" | "umaren" | "wakuren" | "wide" | "sanrenpuku" | "umatan" | "sanrentan",
     stopAt: number,
     onWarn: (message: string) => void,
     onPageFailure?: (failure: JraOddsPageFailure) => void,
@@ -267,7 +273,7 @@ export class OddsSnapshotStage {
   private async fetchPageWith<P extends object>(
     fetcher: JraOddsFetcher,
     row: OddsSnapshotTaskRow,
-    page: "umaren" | "wakuren" | "wide" | "sanrenpuku",
+    page: "umaren" | "wakuren" | "wide" | "sanrenpuku" | "umatan" | "sanrentan",
     startedAt: number,
     stopAt: number,
     read: (json: string, fetchedAt: number) => P | null,
@@ -290,7 +296,7 @@ export class OddsSnapshotStage {
     }
   }
 
-  private fetchComboPage(fetcher: JraOddsFetcher, row: OddsSnapshotTaskRow, page: "umaren" | "wakuren" | "sanrenpuku", startedAt: number, stopAt: number): Promise<OddsSnapshotComboPage> {
+  private fetchComboPage(fetcher: JraOddsFetcher, row: OddsSnapshotTaskRow, page: "umaren" | "wakuren" | "sanrenpuku" | "umatan" | "sanrentan", startedAt: number, stopAt: number): Promise<OddsSnapshotComboPage> {
     return this.fetchPageWith(fetcher, row, page, startedAt, stopAt, comboPageOfCache) as Promise<OddsSnapshotComboPage>;
   }
 
