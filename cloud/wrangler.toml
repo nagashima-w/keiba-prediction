@@ -327,6 +327,15 @@ migrations_dir = "migrations"
 binding = "ANALYSIS_DETAIL"
 bucket_name = "keiba-cloud-r2"
 
+# Issue #796: 別の Worker(keiba-model。同じアカウントの名前つきの入口 ModelApi)への service binding。
+# 分析・オッズの記録の保存後に「計算を頼む口」(POST /hook/card・/hook/odds)と、分析の画面が結果を読む口(GET /v1/races/{race_id})が使う。
+# ★コードは env.MODEL が無ければ何もしない作り(無い構成・相手が居ない構成でも本番の処理は壊れない)。相手が居ないときの fetch は待たずに 503 になる。
+# ★`remote`・`environment`・`namespace` は付けない(ローカルのテスト・開発が本番の別の Worker に繋がってしまう)。
+[[services]]
+binding = "MODEL"
+service = "keiba-model"
+entrypoint = "ModelApi"
+
 # Issue #193(#179-a): `"@anthropic-ai/sdk"`(LLM の呼び出し。core の anthropic-client.ts・model-selection.ts が値で import する)も、cheerio と同じく
 # このディレクトリの node_modules から解決させる(CI には packages/core/node_modules が無い)。`"@keiba/core/llm"` は、その LLM の狭い入口
 # (analyze-race・anthropic-client・model-selection の再 export。better-sqlite3 を経由しない)。

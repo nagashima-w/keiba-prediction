@@ -869,6 +869,31 @@ describe("R2(Issue #174〈#172-a〉: wrangler.toml の設定)", () => {
   });
 });
 
+/** `[[services]]` テーブルの本文(次のテーブルの直前まで。コメント除去済みの tomlCode から)。 */
+function servicesBlock(): string {
+  const m = /^\[\[services\]\]\n((?:(?!\[)[^\n]*\n?)*)/m.exec(tomlCode);
+  return m?.[1] ?? "";
+}
+
+describe("別の Worker への service binding(Issue #796: wrangler.toml の設定)", () => {
+  it("[[services]] はちょうど1つで、binding は MODEL・service は keiba-model・entrypoint は ModelApi", () => {
+    expect((tomlCode.match(/^\[\[services\]\]$/gm) ?? []).length).toBe(1);
+    const block = servicesBlock();
+    // 前提: ブロックを実際に読めている(空振りでない)
+    expect(block).not.toBe("");
+    expect(block).toMatch(/^binding = "MODEL"$/m);
+    expect(block).toMatch(/^service = "keiba-model"$/m);
+    expect(block).toMatch(/^entrypoint = "ModelApi"$/m);
+  });
+
+  it("remote・environment・namespace を付けない(ローカルのテスト・開発が本番の別の Worker に繋がらない。同じアカウントの既定の環境を向く)", () => {
+    expect(servicesBlock()).not.toBe("");
+    expect(servicesBlock()).not.toMatch(/^\s*(remote|environment|namespace)\s*=/m);
+    // 検出の確認(空振りでない): 書かれていれば拾える形
+    expect('[[services]]\nremote = true\n').toMatch(/^\s*(remote|environment|namespace)\s*=/m);
+  });
+});
+
 /** コメント(`--` から行末)を除いた SQL。 */
 function stripSqlComments(sql: string): string {
   return sql.replace(/--[^\n]*/g, "");
