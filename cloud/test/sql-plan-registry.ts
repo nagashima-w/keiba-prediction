@@ -72,6 +72,10 @@ export const HERE: Record<string, PlanEntry> = {
     "race-backfill-state.ts::RECOMPUTE_BY_ANALYSIS_IDS_SQL",
     "race-backfill-state.ts::settleRaceBackfillSql",
     "result-repository.ts::SAVE_RACE_CLASS_SQL",
+    // 出馬表の保存(Issue #799)。レースと馬の UPSERT(json_each から主キーの表への INSERT)と、そのレースの消えた馬の DELETE(主キー先頭 race_id の範囲)。読み取りの SQL は足さない。
+    "race-entries-repository.ts::UPSERT_ENTRY_RACE_SQL",
+    "race-entries-repository.ts::UPSERT_ENTRY_HORSES_SQL",
+    "race-entries-repository.ts::DELETE_GONE_ENTRY_HORSES_SQL",
     "settings.ts::SELECT_SETTINGS_SQL",
     "settings.ts::UPSERT_SETTINGS_SQL",
     "verify-read.ts::VERIFY_DAY_ANALYSES_SQL",
