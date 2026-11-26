@@ -1389,3 +1389,44 @@ describe("別の Worker が計算した確率の列(Issue #796)", () => {
     expect(model.content!.horseTable!.rows.map((r) => [r.umaban, r.model.prob])).toEqual([[2, "22.0%"], [1, "11.0%"]]);
   });
 });
+
+/**
+ * Issue #800: 暫定の見出しと、補助の符号の列。サーバが付けた `modelStage`・`modelSign` から作る。
+ * 符号の列は、1 頭でも符号を持つときだけ出す(第 2 版より前の応答は今までの表のまま)。
+ */
+describe("暫定の確率と補助の符号の列(Issue #800)", () => {
+  const NOTE = "別の Worker の暫定の確率";
+  const tableOf = (a: AnalysisDetail) => content(a).horseTable!;
+  const build = (signs: (string | null)[], stage: unknown = "final") =>
+    analysis({
+      horses: signs.map((s, i) => horse(i + 1, { modelProb: 0.2, modelEv: 1, ...(s === null ? {} : { modelSign: s }) } as never)),
+      modelNote: NOTE,
+      ...(stage === undefined ? {} : { modelStage: stage }),
+    } as never);
+
+  it("符号の列: 符号を持つ馬がいれば、モデルの列の末尾に「補助(別計算)」(並べ替えなし)。セルは ＋ − 0 —", () => {
+    const t = tableOf(build(["+", "-", "0", null]));
+    expect(t.columns.map((c) => c.key).slice(-3)).toEqual(["modelProb", "modelEv", "modelSign"]);
+    expect(t.columns.at(-1)).toMatchObject({ label: "補助(別計算)", sort: null });
+    expect(t.rows.map((r) => r.model.sign)).toEqual(["＋", "−", "0", "—"]);
+  });
+
+  it("符号を持つ馬がいなければ符号の列は出ない(今までの表のまま)", () => {
+    expect(tableOf(build([null, null])).columns.map((c) => c.key)).not.toContain("modelSign");
+  });
+
+  it("暫定(preday・provisional)は見出しに「暫定」を付ける。確定・stage 無しは今までの見出し", () => {
+    for (const stage of ["preday", "provisional"]) {
+      const t = tableOf(build(["+"], stage));
+      expect(t.columns.slice(-3).map((c) => c.label)).toEqual(["確率(暫定)", "確率×単勝(暫定)", "補助(暫定)"]);
+    }
+    expect(tableOf(build(["+"], "final")).columns.slice(-3).map((c) => c.label)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
+    expect(tableOf(build(["+"], undefined)).columns.slice(-3).map((c) => c.label)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
+  });
+
+  it("符号の列だけを持つ馬の符号は、並べ替えても馬について回る", () => {
+    const hs = [horse(1, { prior: 0.1, modelProb: 0.1, modelSign: "+" } as never), horse(2, { prior: 0.5, modelProb: 0.2, modelSign: "-" } as never)];
+    const model = buildResultModel({ route: ROUTE, source: ready(analysis({ horses: hs, modelNote: NOTE } as never)), horseSort: { key: "prior", dir: "desc" } });
+    expect(model.content!.horseTable!.rows.map((r) => [r.umaban, r.model.sign])).toEqual([[2, "−"], [1, "＋"]]);
+  });
+});

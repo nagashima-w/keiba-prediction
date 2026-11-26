@@ -83,6 +83,8 @@ export interface AnalysisHorse {
   readonly modelProb?: number | null;
   /** 確率 × 5 分前の単勝(Issue #796。サーバが掛けた値)。5 分前の単勝が無い馬は null。仕様は `modelProb` と同じ。 */
   readonly modelEv?: number | null;
+  /** 別の Worker が返す、馬ごとの補助の値の符号(Issue #800。符号だけを表示する)。`+`・`-`・`0` 以外・キー無しは null。 */
+  readonly modelSign?: "+" | "-" | "0" | null;
 }
 
 /** 脚質(Issue #314。core の `LegStyle` と同じ 4 値。クライアントは core のバレルを import しないので、ここに持つ)。 */
@@ -236,6 +238,8 @@ export interface AnalysisDetail {
   readonly marketEdgeNote?: string | null;
   /** 別の Worker が計算した確率の列の注記(Issue #796。サーバが組み立てた固定の語彙の文。表の下に 1 回出す)。列を出さない構成(MODEL が無い・地方)・キー無し・空文字・文字列以外は null。省略可なのは、キーの無い応答を表すため。 */
   readonly modelNote?: string | null;
+  /** 別の Worker の確率の段階(Issue #800)。`final` 以外は暫定(見出しに「暫定」を付ける)。表に無い値・キー無しは null。省略可なのは、キーの無い応答を表すため。 */
+  readonly modelStage?: "final" | "preday" | "provisional" | null;
   /**
    * 組合せの券種ごとの行(Issue #296。オッズの取得点数・EV プラスの点数・配分の点数)。組合せの記録が無い・詳細なし・キー無し(古いサーバの応答)・形が不正な値は null にする
    * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
@@ -330,9 +334,10 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   const marketEdge = parseMarketEdge(row["marketEdge"]);
   // Issue #796: 別の Worker が計算した確率とその掛け算は、有限の数以外(キー無しを含む)は null(補助の表示なので、応答ごと不正にはしない)。
   const modelProb = typeof row["modelProb"] === "number" && Number.isFinite(row["modelProb"]) ? row["modelProb"] : null;
+  const modelSign = row["modelSign"] === "+" || row["modelSign"] === "-" || row["modelSign"] === "0" ? row["modelSign"] : null;
   const modelEv = typeof row["modelEv"] === "number" && Number.isFinite(row["modelEv"]) ? row["modelEv"] : null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, latePos, legStyle, timeIndexLine, marketEdge, modelProb, modelEv };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, latePos, legStyle, timeIndexLine, marketEdge, modelProb, modelEv, modelSign };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
@@ -505,6 +510,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     development: parseDevelopment(value["development"]),
     timeIndexNote: typeof value["timeIndexNote"] === "string" ? value["timeIndexNote"] : null,
     marketEdgeNote: typeof value["marketEdgeNote"] === "string" && value["marketEdgeNote"] !== "" ? value["marketEdgeNote"] : null,
+    modelStage: value["modelStage"] === "final" || value["modelStage"] === "preday" || value["modelStage"] === "provisional" ? value["modelStage"] : null,
     modelNote: typeof value["modelNote"] === "string" && value["modelNote"] !== "" ? value["modelNote"] : null,
     combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
     close: parseClose(value["close"]),

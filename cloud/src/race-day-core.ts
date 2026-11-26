@@ -29,6 +29,7 @@
  *    朝の prior(`AnalysisResult`)を **DO のストレージにだけ**置く(**D1・R2 には書かない**。ユーザー判断 2026-10-06: 保存するのは発走前の分析だけ)。
  *    ただし**各馬の戦績**(キャッシュ済みの事実。Issue #256 段階A)は、prior の保存とタスクの完了の後に D1 の `horse_runs` へ貯める(`horseRunsStore`。取得は増やさない。
  *    失敗は警告にして分析を止めない)。保存は事前分析の計算ステップだけで、発走前の分析(pre_race)では貯めない=手動の発走前だけの分析の戦績は貯まらない(段階Aの限界)。
+ *    **出馬表**(Issue #799)も同じ位置で D1 の `race_entry_races`・`race_entry_horses` へ貯める(`raceEntriesStore`。戦績の保存の後に別の try/catch。取得は増やさない・失敗は警告にして続ける・保存するだけで分析には使わない)。
  *    取得のあとで TTL が切れても読めるよう、キャッシュの鮮度を実質無期限にして読む。キャッシュに戦績が無ければ(掃除された等)、netkeiba に出ず失敗にする
  *    (`scrapeRace` は戦績の失敗を警告にして続けるので、戦績なしの prior を黙って作らないよう検出する)。
  *  - 2つのステップは**別々のアラーム呼び出し**で動かす(1呼び出しの中のサブリクエスト数〈Free は 50〉を抑える・再試行でネットワークを撃ち直さない)。
@@ -113,6 +114,7 @@ import type { JockeyResultsStore } from "../../packages/core/src/scraper/jockey-
 import type { TrainerResultsStore } from "../../packages/core/src/scraper/trainer-results-store";
 import type { HorseRunsStore } from "./horse-runs";
 import { toRaceConditionRecord, type RaceConditionsStore } from "./race-conditions";
+import { toRaceEntriesRecord, type RaceEntriesStore } from "./race-entries";
 import type { RaceData, ScrapeWarning } from "../../packages/core/src/scraper/scrape-race";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import { narRaceListSubUrl, narTrifectaOddsAxisUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
@@ -420,6 +422,12 @@ export interface RaceDayDeps {
    * 発走前の分析(pre_race)では呼ばない(朝のキャッシュを使い回すので同じ戦績。手動の発走前だけの分析の戦績は貯まらない=段階Aの限界)。省略時は何もしない。
    */
   readonly horseRunsStore?: HorseRunsStore;
+  /**
+   * 出馬表の保存先(Issue #799。本番は D1 の `race_entry_races`・`race_entry_horses`〈migration 0050〉)。**事前分析(morning)の計算ステップの末尾だけ**で、計算が読んだキャッシュ済みの出馬表
+   * (レースの情報・全頭・取消の馬)を渡す(取得は増やさない)。別の Worker が D1 を読んで前日の夜に出馬表を得るための置き場で、**保存するだけ**(分析・画面・LLM には使わない)。
+   * prior を保存してタスクを done にした**後**(戦績の保存の後)に、戦績とは別の try/catch で呼び、失敗は握って警告にする(分析は止めない。再試行もしない)。発走前の分析(pre_race)では呼ばない。省略時は何もしない。
+   */
+  readonly raceEntriesStore?: RaceEntriesStore;
   /**
    * レースの条件(負担重量の種別・牝馬限定)の記録先(Issue #421 段階 1。本番は D1 の `race_conditions`〈migration 0022〉)。**取得ステップ**(朝の `runFetch`・発走前の `runPreRaceFetch`)で、
    * `scrapeRace` が出馬表を読んだ直後に 1 回渡す(netkeiba への取得は増やさない。計算ステップでは呼ばない)。条件の欄を読めなかったレース(地方・`RaceData02` 無し)は渡さない。
@@ -811,6 +819,7 @@ export class RaceDayCore {
   private readonly jockeyStore: JockeyResultsStore | undefined;
   private readonly trainerStore: TrainerResultsStore | undefined;
   private readonly horseRunsStore: HorseRunsStore | undefined;
+  private readonly raceEntriesStore: RaceEntriesStore | undefined;
   private readonly raceConditionsStore: RaceConditionsStore | undefined;
   private readonly llm: CloudLlm | undefined;
   /** 分析モデルの選択(`analysisModel`)に応じたモデルの自動選択(系統ごとの取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined。Issue #158)。 */
@@ -883,6 +892,7 @@ export class RaceDayCore {
     this.jockeyStore = deps.jockeyStore;
     this.trainerStore = deps.trainerStore;
     this.horseRunsStore = deps.horseRunsStore;
+    this.raceEntriesStore = deps.raceEntriesStore;
     this.raceConditionsStore = deps.raceConditionsStore;
     this.llm = deps.llm;
     this.modelSelectorFor = deps.llm === undefined ? undefined : createCloudModelSelectors(deps.llm, onWarn);
@@ -2106,6 +2116,8 @@ export class RaceDayCore {
       this.registerNarPreRacePlan(task.race_id, scraped, settings.preRaceOffsetMinutes);
       // prior の保存・タスクの完了より後。失敗は握る(分析は止めない)ので、下の catch(計算の失敗)には来ない。
       await this.saveHorseRuns(task.race_id, kaisaiDate, scraped);
+      // 出馬表の保存(Issue #799)。戦績の保存とは別の try/catch(どちらかの失敗がもう一方を飛ばさない)。
+      await this.saveRaceEntries(task.race_id, kaisaiDate, scraped);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "compute", result: "ok" };
     } catch (error) {
       const message = redactSecrets(errorMessage(error)); // 保存する文面は鍵の形を伏せる(閲覧者にも見える。Issue #245)
@@ -2156,6 +2168,24 @@ export class RaceDayCore {
       await this.horseRunsStore.saveRace({ raceId, kaisaiDate, savedAt: this.now(), horses });
     } catch (error) {
       this.onWarn(`各馬の戦績を保存できませんでした(${raceId})。分析は続けます: ${redactSecrets(errorMessage(error))}`);
+    }
+  }
+
+  /**
+   * 計算ステップが読んだ出馬表(レースの情報・全頭・取消の馬)を `raceEntriesStore` へ渡す(Issue #799)。**投げない**: 失敗は警告(鍵の形を伏せる)にして戻る(分析は止めない・再試行しない)。
+   * 保存先が無い構成・出馬表を読めていない回・馬が 1 頭も無いレース(`toRaceEntriesRecord` が null)は何もしない。
+   */
+  private async saveRaceEntries(raceId: string, kaisaiDate: string, scraped: RaceData | undefined): Promise<void> {
+    if (this.raceEntriesStore === undefined || scraped === undefined) {
+      return;
+    }
+    try {
+      const record = toRaceEntriesRecord(raceId, kaisaiDate, scraped, this.now());
+      if (record !== null) {
+        await this.raceEntriesStore.save(record);
+      }
+    } catch (error) {
+      this.onWarn(`出馬表を保存できませんでした(${raceId})。分析は続けます: ${redactSecrets(errorMessage(error))}`);
     }
   }
 

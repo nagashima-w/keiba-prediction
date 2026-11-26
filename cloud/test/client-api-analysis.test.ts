@@ -174,7 +174,7 @@ const ALLOCATION = {
     { betType: "wide", comboKey: "0102", stake: 200, odds: null, ev: null },
   ],
 };
-const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, latePos: 0.6, legStyle: "差し" as const, timeIndexLine: null, marketEdge: null, modelProb: null, modelEv: null };
+const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, latePos: 0.6, legStyle: "差し" as const, timeIndexLine: null, marketEdge: null, modelProb: null, modelEv: null, modelSign: null };
 const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良", oddsStatus: "result", placeBasis: "top3" };
 const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, llmCalls: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
 const wrap = (analysis: unknown) => ({ ok: true, analysis });
@@ -759,5 +759,34 @@ describe("別の Worker が計算した確率の列(Issue #796)のパース", ()
     expect(read(null)).toBeNull();
     expect(read("")).toBeNull();
     expect(read(3)).toBeNull();
+  });
+});
+
+describe("暫定の確率・補助の符号(Issue #800)のパース", () => {
+  const readHorse = (over: Record<string, unknown>) => {
+    const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, horses: [{ ...HORSE, ...over }] }));
+    return result.ok ? result.analysis.horses[0]! : null;
+  };
+  const readStage = (value: unknown, drop = false) => {
+    const analysis: Record<string, unknown> = { ...ANALYSIS, modelStage: value };
+    if (drop) delete analysis["modelStage"];
+    const result = parseAnalysisResponse(200, wrap(analysis));
+    return result.ok ? result.analysis.modelStage : "unexpected";
+  };
+  it("modelSign: + - 0 だけを読む。キー無し・null・ほかの値(数・文字列・<b>)は null", () => {
+    expect(readHorse({ modelSign: "+" })).toMatchObject({ modelSign: "+" });
+    expect(readHorse({ modelSign: "-" })).toMatchObject({ modelSign: "-" });
+    expect(readHorse({ modelSign: "0" })).toMatchObject({ modelSign: "0" });
+    expect(readHorse({})).toMatchObject({ modelSign: null });
+    expect(readHorse({ modelSign: null })).toMatchObject({ modelSign: null });
+    for (const v of [1, -1, 0, "＋", "plus", "<b>+</b>", "+ ", true]) {
+      expect(readHorse({ modelSign: v })).toMatchObject({ modelSign: null });
+    }
+  });
+  it("modelStage: final・preday・provisional だけを読む。キー無し・null・ほかの値は null", () => {
+    for (const v of ["final", "preday", "provisional"]) expect(readStage(v)).toBe(v);
+    expect(readStage(undefined, true)).toBeNull();
+    expect(readStage(null)).toBeNull();
+    for (const v of ["weird", "", 1, "<b>x</b>", "toString"]) expect(readStage(v)).toBeNull();
   });
 });

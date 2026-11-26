@@ -36,6 +36,7 @@ import { D1JockeyResultsStore } from "./jockey-results-repository";
 import { D1TrainerResultsStore } from "./trainer-results-repository";
 import { D1HorseRunsStore } from "./horse-runs-repository";
 import { D1RaceConditionsStore } from "./race-conditions-repository";
+import { D1RaceEntriesStore } from "./race-entries-repository";
 import { D1ResultStore } from "./result-repository";
 import { getTargetsLedgerWire, type TargetsLedgerWire } from "./targets-ledger";
 import { D1TargetsStore } from "./targets-repository";
@@ -146,6 +147,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 各馬の戦績の蓄積先(Issue #256 段階A。D1 の horse_runs・horse_run_saves〈migration 0014〉)。事前分析の計算ステップの末尾だけで保存する(取得は増やさない)。
       // 失敗は握って警告にする(分析は止めない)ので、migration の適用前に Worker が先に出ても動く。
       horseRunsStore: new D1HorseRunsStore({ db: env.DB }),
+      // 出馬表の保存先(Issue #799。D1 の race_entry_races・race_entry_horses〈migration 0050〉)。事前分析の計算ステップの末尾で 1 レース 3 文書く(保存するだけ)。
+      raceEntriesStore: new D1RaceEntriesStore({ db: env.DB }),
       // レースの条件(負担重量の種別・牝馬限定)の記録先(Issue #421 段階 1。D1 の race_conditions〈migration 0022〉)。朝・発走前の取得ステップで、出馬表を読んだ直後に 1 回書く(取得は増やさない)。
       // 失敗は握って警告にする(取得ステップを止めない)ので、migration の適用前に Worker が先に出ても動く。
       raceConditionsStore: new D1RaceConditionsStore({ db: env.DB }),
