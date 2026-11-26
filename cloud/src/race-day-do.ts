@@ -27,6 +27,7 @@ import { createCloudLlm } from "./llm-sender";
 import { createDiscordNotifier, webhookStatus } from "./notify-send";
 import { resolveAppBaseUrl } from "./notify-link";
 import { withPutTimeout } from "./bucket-timeout";
+import { createModelHook } from "./model-hook";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
 import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type PlanProgress, type RaceListResult, type RaceListVenue, type RequestPlanResult, type RequestResultImportResult, type ResultImportProgress, type ScheduleInput, type ScheduleManyInput, type ScheduleManyResult, type ScheduleResult } from "./race-day-core";
@@ -73,6 +74,11 @@ export interface RaceDayEnv {
    * 無効のときは JRA に出ず、計算も netkeiba のオッズだけを使う(今までと同じ動き。D1 の取得元の記録も付かない)。判定は {@link isJraOddsDisabled}。
    */
   JRA_ODDS_ENABLED?: string;
+  /**
+   * 別の Worker(service binding。Issue #796)。分析・オッズの記録を保存した後に、計算を頼む(`createModelHook`。応答は見ない。失敗は警告 1 行で握る)。
+   * **無い構成では何もしない**。wrangler.toml にはまだ足していない(相手の Worker が先にデプロイされてから別に足す)。
+   */
+  MODEL?: Fetcher;
   NETKEIBA_GATE: {
     idFromName(name: string): any;
     get(id: any): Required<GateLike> & { status(): Promise<GateStatus> };
@@ -115,6 +121,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
           };
     // JRA の取得口(馬場・オッズ)。同じ間隔の部品を共有する(Issue #680)。var JRA_ODDS_ENABLED が "0" のときはオッズを渡さない(今までの動き)。
     const jraFetchers = createJraFetchers({ oddsEnabled: !isJraOddsDisabled(env.JRA_ODDS_ENABLED) });
+    const modelHook = createModelHook(env.MODEL, (message) => console.warn(message));
     this.core = new RaceDayCore({
       sql: ctx.storage.sql,
       now: () => Date.now(),
@@ -157,6 +164,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       // 発走 10 分前・5 分前の単勝・複勝の全頭のオッズの保存先(Issue #732。D1 の odds_snapshots〈migration 0046〉。追記だけ)。上の `fetchJraOdds` があるときだけ動く(var JRA_ODDS_ENABLED が "0" のときは何もしない)。
       // 表が無い間(migration の適用前に Worker が先に出た場合)は、保存が失敗して再試行のあと諦めるだけで、分析は止まらない。
       oddsSnapshotSink: new D1OddsSnapshotStore({ db: env.DB }),
+      // 別の Worker への依頼(Issue #796)。MODEL が無い構成では渡さない(何もしない)。
+      ...(modelHook === undefined ? {} : { modelHook }),
       jraEntriesStore: new D1JraEntriesStore({ db: env.DB }),
       onInfo: (message) => console.log(message),
       // 開催日ごとの記録(Issue #519。D1 の kaisai_days〈migration 0027〉)。発走前の計算が、中央のレースごとに書き、芝の開催進行の通算・柵の日数を数える過去の行を読む。

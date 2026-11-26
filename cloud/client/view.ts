@@ -431,6 +431,7 @@ function horseToggle(content: ResultContent, r: HorseCard, open: boolean, action
 function horseTable(content: ResultContent, table: HorseTable, actions: ViewActions): VNode[] {
   const hasAdjusted = table.columns.some((c) => c.key === "adjusted");
   const hasMarket = table.columns.some((c) => c.key === "jockey");
+  const hasModel = table.columns.some((c) => c.key === "modelProb");
   const head = table.columns.map((c) =>
     c.sort === null
       ? h("th", {}, [c.label])
@@ -458,13 +459,19 @@ function horseTable(content: ResultContent, table: HorseTable, actions: ViewActi
       h("td", {}, [r.winOdds.actual]),
       h("td", {}, [r.odds]),
       ...(hasMarket ? [marketCell(r.marketEdge.jockey), marketCell(r.marketEdge.trainer)] : []),
+      ...(hasModel ? [h("td", {}, [r.model.prob]), h("td", {}, [r.model.ev])] : []),
     ]);
     // 開いている馬は、その行の直後に詳しい行(id は開閉のボタンの aria-controls と同じ。td は全列にまたがる)。
     return open ? [row, h("tr", { class: "eval-detail", id: `horse-detail-${content.id}-${r.umaban}` }, [h("td", { colspan: String(columnCount) }, [horseDetail(r)])])] : [row];
   });
   const wrap = h("div", { class: "horse-table-wrap", "data-analysis": String(content.id), role: "region", "aria-label": "馬ごとの評価の表" }, [h("table", { class: "horse-table" }, [h("thead", {}, [h("tr", {}, head)]), h("tbody", {}, rows)])]);
   // 騎手・調教師の列の注記(Issue #643。サーバが組み立てた文。表の枠の下に 1 回)。
-  return [wrap, ...(hasMarket && table.marketEdgeNote !== null ? [h("p", { class: "market-note" }, [table.marketEdgeNote])] : [])];
+  return [
+    wrap,
+    ...(hasMarket && table.marketEdgeNote !== null ? [h("p", { class: "market-note" }, [table.marketEdgeNote])] : []),
+    // 別の Worker が計算した確率の列の注記(Issue #796。サーバが組み立てた固定の語彙の文。テキストノードだけ)。
+    ...(hasModel && table.modelNote !== null ? [h("p", { class: "market-note" }, [table.modelNote])] : []),
+  ];
 }
 
 /** 印を補修した馬の目印(Issue #317)。「直」と、あれば「元の印→今の印」。固定の語彙だけ(LLM の生の文字列は出さない)。 */

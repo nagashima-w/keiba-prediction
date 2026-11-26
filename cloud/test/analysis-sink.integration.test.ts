@@ -169,7 +169,7 @@ describe("DO(RaceDayCore)から保存まで通す(本物の D1・R2。AC-c1・c6
   // 騎手の取得が 1 回の取得の上限(40 本)に当たって警告が 1 件出る(Issue #226。cloud/test/race-day-jockey.test.ts の j12 が固定する)。それとは別の関心にするため外す。
   const SETTINGS: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 1_000_000, perRaceCap: 100_000, includeComboOdds: true, baseScoreWeightJockey: 0, baseScoreWeightTrainer: 0 };
 
-  function setup(extra: { failPut?: (n: number) => boolean } = {}) {
+  function setup(extra: { failPut?: (n: number) => boolean; modelHook?: import("../src/model-hook").ModelHook } = {}) {
     const spiedDb = spyDb(local.db);
     const spiedBucket = spyBucket(local.r2, extra);
     const gateUrls: string[] = [];
@@ -197,6 +197,7 @@ describe("DO(RaceDayCore)から保存まで通す(本物の D1・R2。AC-c1・c6
       onWarn: (m) => warnings.push(m),
       sink: createAnalysisSink(new D1AnalysisStore({ db: spiedDb.db, bucket: spiedBucket.bucket, now: () => new Date(clock.now) })),
       loadSettings: async () => SETTINGS,
+      ...(extra.modelHook === undefined ? {} : { modelHook: extra.modelHook }),
     });
     return { core, sql, clock, alarm, warnings, gateUrls, spiedDb, spiedBucket };
   }
@@ -227,6 +228,20 @@ describe("DO(RaceDayCore)から保存まで通す(本物の D1・R2。AC-c1・c6
     expect(bets).toMatchObject({ d: 1, m: row!.id });
     expect(t.core.getBoard().races[0]).toMatchObject({ status: "done", analysisId: row!.id, detail: "stored", childrenOk: true });
     expect(t.warnings).toEqual([]);
+  });
+
+  it("Issue #796: 別の Worker への依頼(card)を足しても、計算・保存ステップの D1・R2・依頼の合計は 45 未満。依頼は保存後の 1 回だけ", async () => {
+    let cardCalls = 0;
+    const t = setup({ modelHook: { card: async () => void cardCalls++, odds: async () => undefined } });
+    await t.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await t.core.runNextStep();
+    t.spiedDb.prepared.length = 0;
+    t.spiedBucket.calls.length = 0;
+    expect(await t.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+    const total = t.spiedDb.prepared.length + t.spiedBucket.calls.length + cardCalls;
+    expect(cardCalls).toBe(1);
+    expect(total).toBeLessThan(45);
+    console.log(`#796 分析のアラーム: D1 の文 ${t.spiedDb.prepared.length}・R2 ${t.spiedBucket.calls.length}・MODEL ${cardCalls}・合計 ${total}`);
   });
 
   it("AC-c1(本物の D1): 保存のあとにクラッシュして計算ステップが再実行されても、D1 の分析は1件(2件目を作らない)", async () => {

@@ -2116,3 +2116,43 @@ describe("騎手・調教師の指標の列の VNode(Issue #643)", () => {
     });
   }
 });
+
+/** Issue #796: 別の Worker が計算した確率の列の VNode。注記は表の下に 1 回(テキストノードだけ)。値が無い馬は「—」。 */
+describe("別の Worker が計算した確率の列の VNode(Issue #796)", () => {
+  const MODEL: AnalysisDetail["horses"] = [
+    { umaban: 1, name: "アルファ", prior: 0.3, adjustedProb: 0.2, placeOddsMin: 3.0, ev: 0.9, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: 12.0, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, modelProb: 0.25, modelEv: 2 },
+    { umaban: 2, name: "ブラボー", prior: 0.5, adjustedProb: 0.6, placeOddsMin: null, ev: 1.4, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: 3.5, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null, modelProb: null, modelEv: null },
+  ];
+  const NOTE = "注記(<i>タグに見える文字</i>)";
+  const mk = (over: Partial<AnalysisDetail> = {}): AnalysisDetail => analysis({ horses: MODEL, modelNote: NOTE, ...over });
+  const resultOf = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a) }), noopActions);
+  const rowsOf = (t: VNode): VNode[] => byClass(t, "eval-row");
+  const tds = (r: VNode): VNode[] => findAll(r, (n) => n.tag === "td");
+
+  it("th は 既存 7 + 2、各行の td も 9。見出しは並べ替えのボタンにしない。値が無い馬は「—」。既存のセルは変わらない", () => {
+    const t = resultOf(mk());
+    const ths = findAll(t, (n) => n.tag === "th");
+    expect(ths.map(textOf).slice(-2)).toEqual(["確率(別計算)", "確率×5分前単勝"]);
+    expect(ths).toHaveLength(9);
+    expect(byClass(t, "sort-button")).toHaveLength(5);
+    const [r1, r2] = rowsOf(t);
+    expect(tds(r1!)).toHaveLength(9);
+    expect(tds(r1!).map(rawTextOf).slice(-2)).toEqual(["25.0%", "2.00"]);
+    expect(tds(r2!).map(rawTextOf).slice(-2)).toEqual(["—", "—"]);
+    expect(tds(r1!).map(rawTextOf).slice(0, 7)).toEqual(["1", "", "▾ アルファ", "30.0%", "0.90", "12.0倍", "3.0"]);
+  });
+
+  it("注記は表の下に 1 回。外の文字列はテキストノードだけ(タグとして解釈しない)", () => {
+    const t = resultOf(mk());
+    const notes = byClass(t, "market-note");
+    expect(notes).toHaveLength(1);
+    expect(textOf(notes[0]!)).toBe(NOTE);
+    expect(findAll(notes[0]!, (n) => n.tag === "i")).toHaveLength(0);
+  });
+
+  it("注記が無ければ列も注記も出ない(MODEL が無い構成)", () => {
+    const t = resultOf(analysis({ horses: MODEL }));
+    expect(findAll(t, (n) => n.tag === "th")).toHaveLength(7);
+    expect(byClass(t, "market-note")).toHaveLength(0);
+  });
+});

@@ -98,6 +98,8 @@ export const MARKET_EDGE_FEW_N = 50;
 export interface HorseCard {
   /** 騎手・調教師の指標のセル(Issue #643)。 */
   readonly marketEdge: HorseMarketCells;
+  /** 別の Worker が計算した確率と、確率 × 5 分前の単勝のセル(Issue #796)。値が無い馬は「—」。列を出すかは `HorseTable.columns`。 */
+  readonly model: { readonly prob: string; readonly ev: string };
   readonly umaban: number;
   readonly name: string | null;
   /** 印。`mark` が non-null のときだけ。 */
@@ -177,7 +179,7 @@ export function nextHorseSort(current: HorseSort, key: HorseSortKey): HorseSort 
 
 /** 馬ごとの評価の表の列(Issue #546-2)。`sort` が null の列(印・馬名)は並べ替えられない(ボタンにしない)。 */
 export interface HorseTableColumn {
-  readonly key: "mark" | "name" | "jockey" | "trainer" | HorseSortKey;
+  readonly key: "mark" | "name" | "jockey" | "trainer" | "modelProb" | "modelEv" | HorseSortKey;
   readonly label: string;
   readonly sort: {
     readonly ariaSort: "ascending" | "descending" | "none";
@@ -196,6 +198,8 @@ export interface HorseTable {
   readonly rows: readonly HorseCard[];
   /** 騎手・調教師の列の注記(Issue #643。サーバが組み立てた文。表の下に 1 回)。列を出さないとき null。 */
   readonly marketEdgeNote: string | null;
+  /** 別の Worker が計算した確率の列の注記(Issue #796。サーバが組み立てた固定の語彙の文。表の下に 1 回)。列を出さないとき null。 */
+  readonly modelNote: string | null;
 }
 
 /** 印の付いた馬の一覧の1行(Issue #211)。印・馬番・馬名だけ(数値は出さない)。 */
@@ -522,12 +526,13 @@ function finiteOrNull(v: number | null): number | null {
  * 馬ごとの評価の表(Issue #546-2)。列は 馬番・印・馬名・3着内率・(AI補正後)・EV・単勝(実際のラベル付き)・複勝下限。補正後の列は**全頭の補正後が null でないときだけ**(LLM が効いた分析だけ。全頭 null なら列ごと出さない)。
  * 行の並べ替えは、値の無い馬(null)を向きによらず末尾に置き、同点・値の無い馬どうしは馬番の昇順。数値は `HorseCard.sortValues`(整形済みの文字列から読み戻さない)。
  */
-function horseTableOf(horses: readonly HorseCard[], llmEffective: boolean, oddsStatus: string | null, requested: HorseSort | undefined, marketEdgeNote: string | null): HorseTable | null {
+function horseTableOf(horses: readonly HorseCard[], llmEffective: boolean, oddsStatus: string | null, requested: HorseSort | undefined, marketEdgeNote: string | null, modelNote: string | null): HorseTable | null {
   if (horses.length === 0) {
     return null;
   }
   const showAdjusted = llmEffective && horses.some((x) => x.adjusted !== null);
   const showMarket = marketEdgeNote !== null;
+  const showModel = modelNote !== null;
   // 補正後の列が無いのに補正後の並べ替えが残っているときは、既定に戻す。
   const sort = requested === undefined || (requested.key === "adjusted" && !showAdjusted) ? DEFAULT_HORSE_SORT : requested;
   const sortable = (key: HorseSortKey, label: string): HorseTableColumn => ({
@@ -549,6 +554,8 @@ function horseTableOf(horses: readonly HorseCard[], llmEffective: boolean, oddsS
     sortable("placeOddsMin", "複勝下限"),
     // 騎手・調教師の指標(Issue #643。参考・確かめ中)。注記があり、1 頭でも値の材料を持つときだけ。並べ替えは付けない。
     ...(showMarket ? [{ key: "jockey" as const, label: "騎手(参考)", sort: null }, { key: "trainer" as const, label: "調教師(参考)", sort: null }] : []),
+    // 別の Worker が計算した確率と、確率 × 5 分前の単勝(Issue #796)。注記があるときだけ(計算なしでも注記があれば出す=値は全馬「—」)。並べ替えは付けない。
+    ...(showModel ? [{ key: "modelProb" as const, label: "確率(別計算)", sort: null }, { key: "modelEv" as const, label: "確率×5分前単勝", sort: null }] : []),
   ];
   const valueOf = (x: HorseCard): number | null => (sort.key === "umaban" ? x.umaban : x.sortValues[sort.key]);
   const rows = [...horses].sort((a, b) => {
@@ -562,7 +569,7 @@ function horseTableOf(horses: readonly HorseCard[], llmEffective: boolean, oddsS
     }
     return a.umaban - b.umaban;
   });
-  return { sort, columns, rows, marketEdgeNote: showMarket ? marketEdgeNote : null };
+  return { sort, columns, rows, marketEdgeNote: showMarket ? marketEdgeNote : null, modelNote: showModel ? modelNote : null };
 }
 
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。`readOnly`(閲覧者。Issue #238)は設定への案内を外す。省略は管理者。 */
@@ -591,6 +598,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false
     placeOdds: buildPlaceOddsLine(h.fairPlaceOdds, h.actualPlaceOddsMin, h.actualPlaceOddsMax, a.race.oddsStatus, a.race.placeBasis),
     timeIndexLine: h.timeIndexLine ?? null,
     marketEdge: h.marketEdge == null ? { jockey: EMPTY_MARKET_CELL, trainer: EMPTY_MARKET_CELL } : { jockey: marketCellOf(h.marketEdge.jockey), trainer: marketCellOf(h.marketEdge.trainer) },
+    model: { prob: h.modelProb == null ? NO_MARKET_VALUE : formatPercent(h.modelProb), ev: h.modelEv == null ? NO_MARKET_VALUE : formatEv(h.modelEv) },
     sortValues: {
       prior: finiteOrNull(h.prior),
       adjusted: llmEffective ? finiteOrNull(h.adjustedProb) : null,
@@ -628,7 +636,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false
     timeIndexNote: a.timeIndexNote ?? null,
     horses,
     // 騎手・調教師の列(Issue #643)は、注記があり、1 頭でも指標の材料を持つときだけ。
-    horseTable: horseTableOf(horses, llmEffective, a.race.oddsStatus, horseSort, a.horses.some((h) => h.marketEdge != null) ? (a.marketEdgeNote ?? null) : null),
+    horseTable: horseTableOf(horses, llmEffective, a.race.oddsStatus, horseSort, a.horses.some((h) => h.marketEdge != null) ? (a.marketEdgeNote ?? null) : null, a.modelNote ?? null),
     allocation,
     close: closeOf(a, readOnly),
   };

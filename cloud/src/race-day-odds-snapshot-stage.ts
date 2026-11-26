@@ -71,6 +71,11 @@ export interface OddsSnapshotStageDeps {
   readonly cache: JraOddsStageCache;
   /** 固定の語のログ(所要時間・本数)。 */
   readonly onInfo?: (message: string) => void;
+  /**
+   * 保存と `markDone` が済んだあとの依頼(Issue #796。別の Worker への「計算を頼む口」。本番は `ModelHook.odds`)。発走の 10 分前・5 分前の記録が `ok` で保存できたときだけ、1 回呼ぶ。
+   * 失敗は握る(投げても結果・行の状態・再試行に影響しない)。省略時は何もしない。
+   */
+  readonly onSaved?: (raceId: string, minutesBefore: 5 | 10) => Promise<void>;
 }
 
 /** 取得キャッシュの JSON から、馬番 → 馬の ID を読む(形が違えば空)。 */
@@ -94,6 +99,7 @@ export class OddsSnapshotStage {
   private readonly fetcher: JraOddsFetcher;
   private readonly cache: JraOddsStageCache;
   private readonly onInfo: ((message: string) => void) | undefined;
+  private readonly onSaved: ((raceId: string, minutesBefore: 5 | 10) => Promise<void>) | undefined;
 
   constructor(deps: OddsSnapshotStageDeps) {
     this.store = deps.store;
@@ -103,6 +109,7 @@ export class OddsSnapshotStage {
     this.fetcher = deps.fetcher;
     this.cache = deps.cache;
     this.onInfo = deps.onInfo;
+    this.onSaved = deps.onSaved;
   }
 
   /**
@@ -153,6 +160,14 @@ export class OddsSnapshotStage {
       return outcome("retry", null);
     }
     this.store.markDone(raceId, leadMin);
+    // 別の Worker への依頼(Issue #796)。保存と markDone の後。10 分前・5 分前の ok の記録だけ。失敗は結果に影響させない。
+    if (this.onSaved !== undefined && payload.status === "ok" && (leadMin === 5 || leadMin === 10)) {
+      try {
+        await this.onSaved(raceId, leadMin);
+      } catch {
+        // 握る(依頼の口は投げない作りだが、念のため)。
+      }
+    }
     return payload.status === "ok" ? outcome("ok", null) : outcome("failed", payload.reason);
   }
 

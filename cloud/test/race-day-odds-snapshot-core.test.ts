@@ -120,7 +120,7 @@ afterEach(() => {
   for (const sql of opened.splice(0)) sql.close();
 });
 
-function harness(rows: readonly Row[], overrides: { jra?: boolean; sink?: boolean; now?: number } = {}): Harness {
+function harness(rows: readonly Row[], overrides: { jra?: boolean; sink?: boolean; now?: number; modelHook?: RaceDayDeps["modelHook"] } = {}): Harness {
   const sql = openNodeSql();
   opened.push(sql);
   const clock = { now: overrides.now ?? JST_0900 };
@@ -158,6 +158,7 @@ function harness(rows: readonly Row[], overrides: { jra?: boolean; sink?: boolea
     loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
     ...(overrides.jra === false ? {} : { fetchJraOdds: jra }),
     ...(overrides.sink === false ? {} : { oddsSnapshotSink: sink }),
+    ...(overrides.modelHook === undefined ? {} : { modelHook: overrides.modelHook }),
   };
   (h as { core: RaceDayCore }).core = new RaceDayCore(deps);
   return h;
@@ -174,6 +175,30 @@ const snapRows = (h: Harness): { race_id: string; lead_min: number; due_ms: numb
   h.sql.exec("SELECT race_id, lead_min, due_ms, start_ms, state FROM race_day_odds_snap ORDER BY race_id, lead_min DESC").toArray() as never;
 
 const ROWS: Row[] = [central(1, "10:05"), central(2, "10:35"), central(3, null), nar(1, "15:00")];
+
+describe("別の Worker への依頼(odds。Issue #796)", () => {
+  it("core の配線: 10 分前・5 分前の記録を保存した後に、その時点の分数で依頼する(保存より後。前日の夜・当日の朝では呼ばない)", async () => {
+    const calls: { raceId: string; minutes: number; savedAtCall: number }[] = [];
+    let hh!: Harness;
+    const modelHook = {
+      card: async () => undefined,
+      odds: async (raceId: string, minutes: 5 | 10) => void calls.push({ raceId, minutes, savedAtCall: hh.saved.length }),
+    };
+    hh = harness([central(1, "09:25")], { modelHook });
+    await planThrough(hh);
+    for (let i = 0; i < 30; i += 1) {
+      const next = hh.alarm.at;
+      if (next === null) break;
+      hh.clock.now = Math.max(hh.clock.now, next);
+      hh.alarm.at = null;
+      if ((await hh.core.runNextStep()).kind === "idle" && calls.length >= 2) break;
+    }
+    expect(hh.saved.filter((p) => p.status === "ok").map((p) => p.leadMin).sort((a, b) => a - b), "前提: 10・5 分前が ok で保存された").toEqual(expect.arrayContaining([5, 10]));
+    expect(calls.map((c) => c.minutes).sort((a, b) => a - b)).toEqual([5, 10]);
+    expect(calls.every((c) => c.savedAtCall >= 1)).toBe(true);
+    expect(calls.every((c) => c.raceId === hh.saved[0]!.raceId)).toBe(true);
+  });
+});
 
 describe("計画の確定が予定を積む", () => {
   it("中央の発走時刻のあるレースごとに 10 分前・5 分前の行を積む(分析するかどうかによらない)。時刻の無い中央のレース・地方は積まない。開催日の 09:00 に確定したときは、前日の夜(-1)は最後の時刻を過ぎているので積まず、当日の朝(-2。09:30)は積む(#787)", async () => {

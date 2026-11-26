@@ -42,6 +42,8 @@ export const HERE: Record<string, PlanEntry> = {
     "kaisai-days-repository.ts::RECORD_SQL",
     // 発走 5 分前の単勝・複勝の全頭のオッズ(Issue #732)。主キー(race_id)への INSERT だけ(読み取りなし。先着の ON CONFLICT DO NOTHING)。書き込みの行数は odds-snapshot-repository.integration.test.ts が固定する。
     "odds-snapshot-repository.ts::INSERT_ODDS_SNAPSHOT_SQL",
+    // 5 分前の単勝の読み出し(Issue #796)。主キー (race_id, lead_min) の引きで、読む行は多くとも 1。
+    "odds-snapshot-repository.ts::SELECT_ODDS_SNAPSHOT_WIN5_SQL",
     "jra-entries-repository.ts::JRA_ENTRY_DONE_SQL",
     "jra-entries-repository.ts::JRA_ENTRY_CLAIM_SQL",
     "jra-entries-repository.ts::JRA_ENTRY_FINISH_SQL",

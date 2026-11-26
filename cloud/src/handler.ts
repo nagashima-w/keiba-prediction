@@ -23,6 +23,8 @@ import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
 import { runJraCheck, type JraFetchLike } from "./jra-check";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { attachMarketEdge, loadMarketEdge } from "./analysis-market-edge";
+import { attachModel, loadModelColumn } from "./model-result";
+import { readWinOdds5, type OddsSnapshotReadDb } from "./odds-snapshot-repository";
 import { D1MarketEdgeStore } from "./market-edge-repository";
 import { buildMarketEdgesView } from "./market-edges-view";
 import { allocationViewOf, buildAnalysisView, type AnalysisView } from "./analysis-view";
@@ -316,6 +318,11 @@ export interface Env extends AccessEnv {
   DAILY_REPORT?: DailyReportNamespaceLike;
   /** 月報の DO(MonthlyReportDO。wrangler.toml の binding)。Issue #265・#279。本番では常にある。無い構成では cron は月報を依頼しない(一覧・本文の GET は D1 を読むだけなので動く)。 */
   MONTHLY_REPORT?: MonthlyReportNamespaceLike;
+  /**
+   * 別の Worker(service binding。Issue #796)。分析の画面が、別の Worker が計算した確率を `GET /v1/races/{race_id}` で読む。**無い構成では何もしない**(読まず、5 分前の単勝も読まず、応答に列の材料を足さない)。
+   * wrangler.toml にはまだ足していない(相手の Worker が先にデプロイされてから別に足す)。
+   */
+  MODEL?: Fetcher;
   /** D1(分析履歴。wrangler.toml の `[[d1_databases]]` の binding)。Issue #171。 */
   DB: AnalysisDb;
   /** R2(分析の詳細オブジェクト。wrangler.toml の `[[r2_buckets]]` の binding)。Issue #174・#175。get と put だけを使う。 */
@@ -1339,7 +1346,13 @@ async function handleAnalysisDetail(url: URL, idText: string, env: Env): Promise
     const view = buildAnalysisView(result, allocation, close);
     // 騎手・調教師の指標の列(Issue #643)。地方・記録なし・読み出しの失敗は null(列を出さない。本体は壊さない。`loadMarketEdge` が握る)。
     const marketEdge = await loadMarketEdge(new D1MarketEdgeStore(env.DB), result);
-    return json({ ok: true, analysis: { ...attachMarketEdge(view, marketEdge), previousDiff: await previousDiffOf(store, view) } });
+    // 別の Worker が計算した確率の列(Issue #796)。バインディングが無い・地方・失敗は、null(列の材料を足さない)か「計算なし」(200。本体は壊さない。`loadModelColumn` が握る)。
+    const modelColumn = await loadModelColumn(
+      { model: env.MODEL, readWinOdds: (raceId) => readWinOdds5(env.DB as unknown as OddsSnapshotReadDb, raceId) },
+      result.analysis.raceId,
+      (message) => console.warn(message),
+    );
+    return json({ ok: true, analysis: { ...attachModel(attachMarketEdge(view, marketEdge), modelColumn), previousDiff: await previousDiffOf(store, view) } });
   } catch {
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "d1-error" } }, 503);
