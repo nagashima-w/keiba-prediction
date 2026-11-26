@@ -5,6 +5,8 @@
  *    **全体を「計算なし(unavailable)」にする**(一部だけ出さない)。値を作って埋めない。
  *  - 理由の表示は固定の語彙だけ({@link MODEL_NONE_LABELS})。外から来た理由の文字列は、語彙に無ければ「理由不明」にし、HTML に入れない。
  *  - 「確率 × 5 分前の単勝」は、本番の `odds_snapshots`(`lead_min = 5`)の単勝と掛ける。5 分前の単勝が無い馬は掛け算だけ null。
+ *  - 暫定(Issue #800。`status: "none"` に `stage`・`horses` が付く応答)は「暫定」と区別して出し、応答の `odds_win` で掛ける。`stage`・`odds_source` は固定の表に無ければ暫定の列を出さない(計算なし)。
+ *  - 馬ごとの補助の値(`u_mat`)は、別の Worker が返す値で、符号だけを表示する(数値は画面に送らない)。
  *  - バインディングが無い・地方のレースのときは null(何も読まない。応答に足さない)。
  * 純ロジック。`Fetcher`・D1 の読み出し・警告の出口は注入する。
  */
@@ -29,14 +31,66 @@ export type ModelNoneReason = keyof typeof MODEL_NONE_LABELS;
 /** 相手から受け付ける理由(`unavailable`・`unknown` は本番の側の語。相手からは受け付けない)。 */
 const ACCEPTED_REASONS: ReadonlySet<string> = new Set(["not_ready", "no_odds", "no_card", "failed"]);
 
+/** 段階。`final` は確定(5 分前の単勝で掛ける)。`preday`・`provisional` は暫定(応答の単勝で掛ける)。 */
+export type ModelStage = "final" | "preday" | "provisional";
+
+/** 暫定の段階の表示(固定の語彙。外から来た文字列は、この表に無ければ受けない)。 */
+export const MODEL_STAGE_LABELS = { preday: "前日の計算", provisional: "確定前" } as const;
+type ProvisionalStage = keyof typeof MODEL_STAGE_LABELS;
+
+/** 暫定の計算に使ったオッズの出どころ(固定の語彙)。`lead-1`・`lead-2` は odds_snapshots の lead_min の -1(前日の夜)・-2(当日の朝)。 */
+export const MODEL_ODDS_SOURCE_LABELS = {
+  "lead-1": "前日の夜の単勝",
+  "lead-2": "当日の朝の単勝",
+  lead10: "発走10分前の単勝",
+  analysis: "分析時の単勝",
+} as const;
+type ModelOddsSource = keyof typeof MODEL_ODDS_SOURCE_LABELS;
+
+/** 別の Worker が返す、馬ごとの補助の値の符号だけを表示する。0 は "0"。 */
+export type ModelSign = "+" | "-" | "0";
+
+/** 暫定のときだけ持つ材料。`winOdds` は、その計算に使った単勝(正の有限の馬だけ)。 */
+export interface ModelProvisional {
+  readonly stage: ProvisionalStage;
+  readonly oddsSource: ModelOddsSource;
+  readonly takenAtMs: number | null;
+  readonly winOdds: ReadonlyMap<number, number>;
+}
+
 export type ModelParsed =
-  | { readonly kind: "ok"; readonly probs: ReadonlyMap<number, number> }
+  | { readonly kind: "ok"; readonly stage: ModelStage; readonly probs: ReadonlyMap<number, number>; readonly signs: ReadonlyMap<number, ModelSign>; readonly provisional: ModelProvisional | null }
   | { readonly kind: "none"; readonly reason: ModelNoneReason };
 
 const UNAVAILABLE: ModelParsed = { kind: "none", reason: "unavailable" };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function signOf(u: unknown): ModelSign | null {
+  if (typeof u !== "number" || !Number.isFinite(u)) return null;
+  return u > 0 ? "+" : u < 0 ? "-" : "0";
+}
+
+/** 馬の並びを検証する。1 頭でも外れたら null(全体を捨てる)。`withOdds` のときは単勝の表も作る。 */
+function readHorses(horses: unknown[]): { probs: Map<number, number>; signs: Map<number, ModelSign>; winOdds: Map<number, number> } | null {
+  const probs = new Map<number, number>();
+  const signs = new Map<number, ModelSign>();
+  const winOdds = new Map<number, number>();
+  for (const h of horses) {
+    if (!isRecord(h)) return null;
+    const umaban = h["umaban"];
+    const p = h["p_win"];
+    if (typeof umaban !== "number" || !Number.isInteger(umaban) || umaban < 1 || probs.has(umaban)) return null;
+    if (typeof p !== "number" || !Number.isFinite(p) || p < 0 || p > 1) return null;
+    probs.set(umaban, p);
+    const sign = signOf(h["u_mat"]);
+    if (sign !== null) signs.set(umaban, sign);
+    const o = h["odds_win"];
+    if (typeof o === "number" && Number.isFinite(o) && o > 0) winOdds.set(umaban, o);
+  }
+  return { probs, signs, winOdds };
 }
 
 /** HTTP の状態と JSON の本文を検証する。`raceId` は求めたレース(応答の `race_id` と一致しなければ unavailable)。 */
@@ -46,52 +100,85 @@ export function parseModelResponse(httpStatus: number, body: unknown, raceId: st
   }
   if (body["status"] === "none") {
     const reason = body["reason"];
-    return { kind: "none", reason: typeof reason === "string" && ACCEPTED_REASONS.has(reason) ? (reason as ModelNoneReason) : "unknown" };
+    const none: ModelParsed = { kind: "none", reason: typeof reason === "string" && ACCEPTED_REASONS.has(reason) ? (reason as ModelNoneReason) : "unknown" };
+    const stage = body["stage"];
+    const source = body["odds_source"];
+    // 暫定でない(stage 無し)・表に無い stage / odds_source・馬が無い/空は、従来どおり「計算なし(理由)」。
+    if (typeof stage !== "string" || !Object.hasOwn(MODEL_STAGE_LABELS, stage) || typeof source !== "string" || !Object.hasOwn(MODEL_ODDS_SOURCE_LABELS, source)) return none;
+    const horses = body["horses"];
+    if (horses === undefined || (Array.isArray(horses) && horses.length === 0)) return none;
+    if (!Array.isArray(horses)) return UNAVAILABLE;
+    const taken = body["odds_taken_at_ms"];
+    if (taken !== undefined && taken !== null && (typeof taken !== "number" || !Number.isFinite(taken))) return UNAVAILABLE;
+    const read = readHorses(horses);
+    if (read === null) return UNAVAILABLE;
+    return {
+      kind: "ok",
+      stage: stage as ProvisionalStage,
+      probs: read.probs,
+      signs: read.signs,
+      provisional: { stage: stage as ProvisionalStage, oddsSource: source as ModelOddsSource, takenAtMs: typeof taken === "number" ? taken : null, winOdds: read.winOdds },
+    };
   }
-  if (body["status"] !== "ok" || body["odds_minutes_before"] !== 5 || !Array.isArray(body["horses"]) || body["horses"].length === 0) {
+  const stage = body["stage"];
+  if (body["status"] !== "ok" || body["odds_minutes_before"] !== 5 || (stage !== undefined && stage !== "final") || !Array.isArray(body["horses"]) || body["horses"].length === 0) {
     return UNAVAILABLE;
   }
-  const probs = new Map<number, number>();
-  for (const h of body["horses"] as unknown[]) {
-    if (!isRecord(h)) return UNAVAILABLE;
-    const umaban = h["umaban"];
-    const p = h["p_win"];
-    if (typeof umaban !== "number" || !Number.isInteger(umaban) || umaban < 1 || probs.has(umaban)) return UNAVAILABLE;
-    if (typeof p !== "number" || !Number.isFinite(p) || p < 0 || p > 1) return UNAVAILABLE;
-    probs.set(umaban, p);
-  }
-  return { kind: "ok", probs };
+  const read = readHorses(body["horses"]);
+  if (read === null) return UNAVAILABLE;
+  return { kind: "ok", stage: "final", probs: read.probs, signs: read.signs, provisional: null };
 }
 
-/** 馬ごとのセル。`ev` は 確率 × 5 分前の単勝(単勝が無ければ null)。 */
+/** 馬ごとのセル。`ev` は 確率 × 単勝(確定は 5 分前の単勝、暫定は応答の単勝。単勝が無ければ null)。`sign` は補助の値の符号(無ければ null)。 */
 export interface ModelCell {
   readonly prob: number;
   readonly ev: number | null;
+  readonly sign: ModelSign | null;
 }
 
 export interface ModelColumn {
   readonly status: "ok" | "none";
+  /** 段階。`none` のときは null。`final` 以外は暫定(画面は見出しに「暫定」を付ける)。 */
+  readonly stage: ModelStage | null;
   /** 表の下に出す注記(サーバが組み立てた固定の語彙の文)。 */
   readonly note: string;
   /** 馬番 → セル。`none` のときは空。応答に無い馬は載せない(画面は —)。 */
   readonly byUmaban: ReadonlyMap<number, ModelCell>;
 }
 
-/** 確率と 5 分前の単勝(馬番 → 単勝。記録が無ければ null)から列を作る。 */
+/** epoch ミリ秒 → JST の `M/D HH:MM`。 */
+function jstShort(ms: number): string {
+  const d = new Date(ms + 9 * 3600_000);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`;
+}
+
+/** 確率と 5 分前の単勝(馬番 → 単勝。記録が無ければ null)から列を作る。暫定のときは、応答の単勝で掛ける(`win5` は使わない)。 */
 export function buildModelColumn(parsed: ModelParsed, win5: ReadonlyMap<number, number> | null): ModelColumn {
   if (parsed.kind === "none") {
-    return { status: "none", note: `別の Worker の確率: 計算なし(${MODEL_NONE_LABELS[parsed.reason]})`, byUmaban: new Map() };
+    return { status: "none", stage: null, note: `別の Worker の確率: 計算なし(${MODEL_NONE_LABELS[parsed.reason]})`, byUmaban: new Map() };
   }
+  const prov = parsed.provisional;
+  const oddsOf = prov === null ? win5 : prov.winOdds;
   const byUmaban = new Map<number, ModelCell>();
   for (const [umaban, prob] of parsed.probs) {
-    const odds = win5?.get(umaban);
-    byUmaban.set(umaban, { prob, ev: odds === undefined ? null : prob * odds });
+    const odds = oddsOf?.get(umaban);
+    byUmaban.set(umaban, { prob, ev: odds === undefined ? null : prob * odds, sign: parsed.signs.get(umaban) ?? null });
+  }
+  if (prov !== null) {
+    const at = prov.takenAtMs === null ? "" : `(${jstShort(prov.takenAtMs)} 時点)`;
+    return {
+      status: "ok",
+      stage: parsed.stage,
+      note: `別の Worker の暫定の確率(${MODEL_STAGE_LABELS[prov.stage]})。計算に使ったオッズ: ${MODEL_ODDS_SOURCE_LABELS[prov.oddsSource]}${at}。確率 × 単勝は、そのオッズで掛けた値`,
+      byUmaban,
+    };
   }
   const note =
     win5 === null
       ? "別の Worker が計算した勝つ確率。発走5分前の単勝の記録が無いため、確率 × 単勝は —"
       : "別の Worker が計算した勝つ確率と、確率 × 発走5分前の単勝(記録の無い馬は —)";
-  return { status: "ok", note, byUmaban };
+  return { status: "ok", stage: "final", note, byUmaban };
 }
 
 /** 分析の応答に列の材料を足す(元の view は変えない)。列が無い(null)ときは何も足さない(キーも増やさない)。 */
@@ -103,9 +190,10 @@ export function attachModel<V extends Pick<AnalysisView, "horses">>(view: V, col
     ...view,
     horses: view.horses.map((h) => {
       const cell = column.byUmaban.get(h.umaban);
-      return { ...h, modelProb: cell?.prob ?? null, modelEv: cell?.ev ?? null };
+      return { ...h, modelProb: cell?.prob ?? null, modelEv: cell?.ev ?? null, modelSign: cell?.sign ?? null };
     }),
     modelStatus: column.status,
+    modelStage: column.stage,
     modelNote: column.note,
   };
 }

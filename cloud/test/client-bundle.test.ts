@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 257,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 258,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -321,7 +321,9 @@ describe("生成物のドリフトと決定性", () => {
     // (追記)Issue #740(結果画面の馬の行の開閉。馬のカードの縦の並びをやめ、表の行を押すと詳しい中身が開く): 上限は 255,500 から 257,000 へ引き上げた。実測(`Buffer.byteLength(CLIENT_JS)`)は 254,896(dc70a397 の生成物)→ 256,400(+1,504。`pnpm run build:client` の出力〈「256400 バイト」〉)。
     // 計り方: 起点と今のそれぞれで `npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` を実行した。新しい上限 257,000 の余裕は 257,000 - 256,400 = 600 バイト(500 バイト単位に切り上げ)。
     // 増えたのは `app.ts` の開閉の状態と `onToggleHorse`・`result.ts` の `openHorses`・`race.ts` の受け渡し・`view.ts` の `horseToggle` と詳しい行・`dom.ts` の `colspan`・`id` の許可とフォーカスの復元、日本語の文言(`\u` エスケープ)。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(257_000);
+    // (追記)Issue #800(別の Worker の暫定の確率の見出し・補助の符号の列。文言と検証はサーバが持ち、クライアントは固定の 3 値の読み取り・見出しの切り替え・セル 1 つだけ): 上限は 257,000 から 258,000 へ引き上げた。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`)は 256,716(ffad5079 の生成物)→ 257,348(+632。`pnpm run build:client` の出力〈「257348 バイト」〉)。新しい上限 258,000 の余裕は 258,000 - 257,348 = 652 バイト(500 バイト単位に切り上げ)。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(258_000);
   });
 });
 

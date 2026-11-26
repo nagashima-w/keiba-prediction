@@ -2156,3 +2156,34 @@ describe("別の Worker が計算した確率の列の VNode(Issue #796)", () =>
     expect(byClass(t, "market-note")).toHaveLength(0);
   });
 });
+
+/** Issue #800: 補助の符号の列と暫定の見出しの VNode。 */
+describe("補助の符号の列の VNode(Issue #800)", () => {
+  const withSign = (stage?: string): AnalysisDetail =>
+    analysis({
+      horses: [
+        { ...(HORSES_FOR_SIGN[0] as object), modelProb: 0.25, modelEv: 2, modelSign: "+" },
+        { ...(HORSES_FOR_SIGN[1] as object), modelProb: 0.5, modelEv: null, modelSign: null },
+      ],
+      modelNote: "注記",
+      ...(stage === undefined ? {} : { modelStage: stage }),
+    } as never);
+  const resultOf = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a) }), noopActions);
+  it("th・td が 1 つ増えて 10。符号は ＋、無い馬は —。暫定の見出しは「(暫定)」", () => {
+    const t = resultOf(withSign("provisional"));
+    const ths = findAll(t, (n) => n.tag === "th");
+    expect(ths).toHaveLength(10);
+    expect(ths.map(textOf).slice(-3)).toEqual(["確率(暫定)", "確率×単勝(暫定)", "補助(暫定)"]);
+    const rows = byClass(t, "eval-row");
+    expect(findAll(rows[0]!, (n) => n.tag === "td").map(rawTextOf).slice(-3)).toEqual(["25.0%", "2.00", "＋"]);
+    expect(findAll(rows[1]!, (n) => n.tag === "td").map(rawTextOf).slice(-3)).toEqual(["50.0%", "—", "—"]);
+  });
+  it("確定は今までの見出し + 補助(別計算)", () => {
+    const ths = findAll(resultOf(withSign("final")), (n) => n.tag === "th");
+    expect(ths.map(textOf).slice(-3)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
+  });
+});
+const HORSES_FOR_SIGN = [
+  { umaban: 1, name: "アルファ", prior: 0.3, adjustedProb: 0.2, placeOddsMin: 3.0, ev: 0.9, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: 12.0, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
+  { umaban: 2, name: "ブラボー", prior: 0.5, adjustedProb: 0.6, placeOddsMin: null, ev: 1.4, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: 3.5, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
+];
