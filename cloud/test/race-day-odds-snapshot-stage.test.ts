@@ -104,6 +104,9 @@ interface Harness {
   readonly cache: Map<string, { value: string; fetchedAt: number }>;
   clock: { now: number };
   saveFailures: number;
+  /** Issue #796: 保存後のフック(別の Worker への依頼)の呼び出しの記録。呼ばれた時点の行の状態も残す。 */
+  readonly hookCalls: { raceId: string; leadMin: number; stateAtCall: string | undefined }[];
+  hookThrows: boolean;
 }
 let sql: NodeSql | null = null;
 afterEach(() => {
@@ -118,7 +121,7 @@ function harness(startNow = DUE): Harness {
   const cache = new Map<string, { value: string; fetchedAt: number }>();
   const saved: OddsSnapshotPayload[] = [];
   const warns: string[] = [];
-  const h = { jra, saved, warns, cache, clock, store, saveFailures: 0 } as Harness;
+  const h = { jra, saved, warns, cache, clock, store, saveFailures: 0, hookCalls: [], hookThrows: false } as unknown as Harness;
   const sink: OddsSnapshotSink = {
     async save(p) {
       if (h.saveFailures > 0) {
@@ -135,6 +138,12 @@ function harness(startNow = DUE): Harness {
     sink,
     fetcher: jra,
     cache: { get: (k) => cache.get(k), set: (k, v) => void cache.set(k, { value: v, fetchedAt: clock.now }) },
+    onSaved: async (raceId, leadMin) => {
+      h.hookCalls.push({ raceId, leadMin, stateAtCall: store.rows().find((r) => r.race_id === raceId && r.lead_min === leadMin)?.state });
+      if (h.hookThrows) {
+        throw new Error("hook down");
+      }
+    },
   });
   Object.assign(h, { stage });
   return h;
@@ -663,5 +672,77 @@ describe("馬単・三連単の全組の記録(#794)", () => {
     await h.stage.runStep(rowOf(h, -1));
     expect(h.jra.fetchOdds).toEqual([linksOf(RACE).cnames.tanpuku]);
     expect(h.saved[0]!.combos).toBeNull();
+  });
+});
+
+describe("保存後のフック(別の Worker への依頼。Issue #796)", () => {
+  it("5 分前・10 分前が ok で保存できたあと、markDone の後に 1 回だけ呼ぶ(呼ばれた時点で行は done)", async () => {
+    const h = harness();
+    await registerAndRun(h); // 5 分前
+    expect(h.hookCalls).toEqual([{ raceId: RACE, leadMin: 5, stateAtCall: "done" }]);
+    h.clock.now = DUE - 5 * 60_000; // 10 分前の時刻
+    const early = h.store.nextDue(h.clock.now);
+    expect(early?.lead_min, "前提: 10 分前の行が出る").toBe(10);
+    await h.stage.runStep(early!);
+    expect(h.hookCalls.map((c) => c.leadMin)).toEqual([5, 10]);
+    expect(h.hookCalls[1]!.stateAtCall).toBe("done");
+  });
+
+  it("サブリクエストの数(5 分前の 1 回のアラーム): JRA の頁 + D1 の保存 1 + 依頼 1 の合計は 50 未満(開催選択・レース選択の 2 本を足しても)", async () => {
+    const h = harness();
+    await registerAndRun(h);
+    const total = h.jra.fetchOdds.length + h.saved.length + h.hookCalls.length;
+    expect(h.hookCalls).toHaveLength(1);
+    expect(total + 2).toBeLessThan(50);
+    console.log(`#796 オッズのアラーム(5 分前): JRA の頁 ${h.jra.fetchOdds.length}(+リンクが無い最初のレースだけ 2)・D1 の保存 ${h.saved.length}・MODEL ${h.hookCalls.length}・合計 ${total}(リンク込み ${total + 2})`);
+  });
+
+  it("前日の夜(-1)・当日の朝(-2)では呼ばない", async () => {
+    for (const [at, lead] of [[Date.parse("2026-11-14T21:10:00+09:00"), -1], [Date.parse("2026-11-15T09:31:00+09:00"), -2]] as const) {
+      const h = harness(at);
+      h.stage.register(RACE, DATE, START);
+      const row = h.store.nextDue(at);
+      expect(row, "前提: その時点の行が出る").toMatchObject({ lead_min: lead });
+      await h.stage.runStep(row!);
+      expect(h.saved).toHaveLength(1);
+      expect(h.saved[0]).toMatchObject({ leadMin: lead, status: "ok" });
+      expect(h.hookCalls).toEqual([]);
+      sql?.close();
+      sql = null;
+    }
+  });
+
+  it("取らなかった(skipped)記録では呼ばない(オッズが無い)", async () => {
+    const h = harness();
+    h.stage.register(RACE, DATE, START);
+    h.clock.now = START + 1; // 発走を過ぎてから動いた = どちらの行も too-late
+    for (let i = 0; i < 2; i++) {
+      const row = h.store.nextDue(h.clock.now);
+      expect(row, "前提: 行が残っている").not.toBeNull();
+      await h.stage.runStep(row!);
+    }
+    expect(h.saved.map((p) => [p.leadMin, p.status, p.reason]).sort()).toEqual([[10, "skipped", "too-late"], [5, "skipped", "too-late"]]);
+    expect(h.hookCalls).toEqual([]);
+  });
+
+  it("保存に失敗したときは呼ばない(再試行のあとの成功で 1 回だけ)", async () => {
+    const h = harness();
+    h.saveFailures = 1;
+    const first = await registerAndRun(h);
+    expect(first.result).toBe("retry");
+    expect(h.hookCalls).toEqual([]);
+    h.clock.now += ODDS_SNAPSHOT_SAVE_RETRY_DELAY_MS;
+    await h.stage.runStep(h.store.nextDue(h.clock.now)!);
+    expect(h.hookCalls).toHaveLength(1);
+  });
+
+  it("フックが投げても、結果(ok)・行の状態(done)・警告は変わらない(再試行も起きない)", async () => {
+    const h = harness();
+    h.hookThrows = true;
+    const outcome = await registerAndRun(h);
+    expect(outcome).toMatchObject({ result: "ok", reason: null });
+    expect(rowOf(h, 5).state).toBe("done");
+    expect(h.saved).toHaveLength(1);
+    expect(h.hookCalls).toHaveLength(1);
   });
 });

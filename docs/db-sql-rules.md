@@ -56,7 +56,7 @@ DO の SQLite は、SQL を文字列定数で持たず、コアのメソッド�
 
 ## 検査の一覧
 
-数は `cloud/test/sql-plan-registry.ts` の鍵の数である(2026-11-17 時点、#769 の分を含む。`collectExportedSql()` が 105 件、組み立て関数が 17 件で、合計 122 件。それぞれ `Object.keys` で数え直した)。
+数は `cloud/test/sql-plan-registry.ts` の鍵の数である(2026-11-17 時点、#769 の分を含む。`collectExportedSql()` が 105 件、組み立て関数が 17 件で、合計 122 件。それぞれ `Object.keys` で数え直した)。その後 #796 で `odds-snapshot-repository.ts::SELECT_ODDS_SNAPSHOT_WIN5_SQL`(5 分前の単勝の読み出し。主キーの引き)を `HERE` に 1 件足した(合計は数え直していない)。
 
 | 区分 | 件数 |
 |---|---:|

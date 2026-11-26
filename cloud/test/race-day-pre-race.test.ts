@@ -1011,3 +1011,84 @@ describe("朝と発走前の共存・入口(Issue #178)", () => {
     await expect(h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "evening" as never })).rejects.toThrow(/mode/);
   });
 });
+
+describe("別の Worker への依頼(card)(Issue #796)", () => {
+  /** 呼ばれた時点のタスクの状態も残す偽の口。 */
+  function hookOf(h: () => Harness, opts: { throws?: boolean } = {}) {
+    const calls: { raceId: string; statusAtCall: string | undefined; saved: number }[] = [];
+    const modelHook = {
+      async card(raceId: string) {
+        calls.push({ raceId, statusAtCall: h().core.getBoard().races.find((r) => r.mode === "pre_race")?.status, saved: h().sink.saved.length });
+        if (opts.throws === true) throw new Error("hook down");
+      },
+      async odds() {},
+    };
+    return { calls, modelHook };
+  }
+
+  it("分析を保存してタスクが done になった後に、1 回だけ呼ぶ(呼んだ時点で保存済み・done)", async () => {
+    let hh!: Harness;
+    const { calls, modelHook } = hookOf(() => hh);
+    hh = harness({ modelHook });
+    await hh.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await hh.core.runNextStep(); // fetch
+    expect(calls, "取得ステップでは呼ばない").toHaveLength(0);
+    await hh.core.runNextStep(); // compute
+    expect(calls).toEqual([{ raceId: RACE, statusAtCall: "done", saved: 1 }]);
+  });
+
+  it("保存に失敗した計算(retry)では呼ばない。再試行で保存できた回に 1 回だけ呼ぶ", async () => {
+    let hh!: Harness;
+    const { calls, modelHook } = hookOf(() => hh);
+    hh = harness({ modelHook });
+    hh.sink.failBeforeSave = 1;
+    await hh.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await hh.core.runNextStep();
+    expect(await hh.core.runNextStep()).toMatchObject({ step: "compute", result: "retry" });
+    expect(calls).toHaveLength(0);
+    expect(await hh.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("保存後にクラッシュして再実行した回(保存済み)でも、done になれば呼ぶ(相手は冪等。保存は 1 件のまま)", async () => {
+    let hh!: Harness;
+    const { calls, modelHook } = hookOf(() => hh);
+    hh = harness({ modelHook });
+    hh.sink.crashAfterSave = 1;
+    await hh.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await hh.core.runNextStep();
+    expect(await hh.core.runNextStep()).toMatchObject({ step: "compute", result: "retry" });
+    expect(calls).toHaveLength(0);
+    expect(await hh.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+    expect(hh.sink.saved).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("口が投げても、計算ステップは ok・タスクは done のまま(再試行も警告も増えない)", async () => {
+    let hh!: Harness;
+    const { calls, modelHook } = hookOf(() => hh, { throws: true });
+    hh = harness({ modelHook });
+    await hh.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await hh.core.runNextStep();
+    const outcome = await hh.core.runNextStep();
+    expect(outcome).toMatchObject({ step: "compute", result: "ok" });
+    expect(calls).toHaveLength(1);
+    expect(hh.core.getBoard().races.find((r) => r.mode === "pre_race")).toMatchObject({ status: "done" });
+    expect(hh.sink.saved).toHaveLength(1);
+  });
+
+  it("口を渡さない構成(MODEL が無い)では何も起きない", async () => {
+    const h = harness();
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await h.core.runNextStep();
+    expect(await h.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+  });
+
+  it("事前分析(朝。morning)の計算では呼ばない(保存しないため)", async () => {
+    let hh!: Harness;
+    const { calls, modelHook } = hookOf(() => hh);
+    hh = harness({ modelHook });
+    await runMorning(hh);
+    expect(calls).toHaveLength(0);
+  });
+});

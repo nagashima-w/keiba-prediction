@@ -520,3 +520,106 @@ describe("GET /api/analyses/{id}: 騎手・調教師の指標の列(Issue #643)"
     expect(text).not.toContain("SECRET");
   });
 });
+
+describe("GET /api/analyses/{id}: 別の Worker が計算した確率の列(Issue #796)", () => {
+  type ModelView = { modelStatus?: string; modelNote?: string; horses: { umaban: number; modelProb?: number | null; modelEv?: number | null }[] };
+
+  const snapshotRow = (raceId: string, horses: unknown[]) =>
+    local.db
+      .prepare("INSERT INTO odds_snapshots (race_id, lead_min, kaisai_date, start_ms, due_ms, taken_at_ms, official_datetime, odds_status, status, reason, attempts, horses_json, combos_json) VALUES (?, 5, '20260628', 1, 1, 1, NULL, 'middle', 'ok', NULL, 1, ?, NULL)")
+      .bind(raceId, JSON.stringify(horses))
+      .run();
+
+  async function fetchWith(id: number, model: Fetcher | undefined, db: AnalysisDb = local.db) {
+    const { deps, token } = await setup();
+    const response = await handle(get(`/api/analyses/${id}`, { token }), baseEnv({ DB: db as Env["DB"], ANALYSIS_DETAIL: local.r2, ...(model === undefined ? {} : { MODEL: model }) }), {}, deps);
+    const text = await response.text();
+    return { status: response.status, text, analysis: (JSON.parse(text) as { analysis: ModelView }).analysis };
+  }
+  const fakeModel = (handler: (req: Request) => Response | Promise<Response>): { fetcher: Fetcher; calls: string[] } => {
+    const calls: string[] = [];
+    return {
+      calls,
+      fetcher: {
+        async fetch(input: RequestInfo | URL, init?: RequestInit) {
+          const req = new Request(input as string, init);
+          calls.push(`${req.method} ${new URL(req.url).pathname}`);
+          return handler(req);
+        },
+      } as unknown as Fetcher,
+    };
+  };
+  /** D1 の prepare の回数を数える(サブリクエストの見積り)。 */
+  function countingDb() {
+    const counter = { prepares: 0, batches: 0 };
+    const db = {
+      prepare: (sql: string) => (counter.prepares++, local.db.prepare(sql)),
+      batch: (s: D1PreparedStatement[]) => (counter.batches++, local.db.batch(s)),
+    } as unknown as AnalysisDb;
+    return { db, counter };
+  }
+
+  it("MODEL が無いとき: 列の材料を足さず(キーが無い)、5 分前の読み取りもしない", async () => {
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    const sqls: string[] = [];
+    const db = { prepare: (sql: string) => (sqls.push(sql), local.db.prepare(sql)), batch: (s: D1PreparedStatement[]) => local.db.batch(s) } as unknown as AnalysisDb;
+    const { status, analysis } = await fetchWith(saved.id, undefined, db);
+    expect(status).toBe(200);
+    expect(analysis).not.toHaveProperty("modelStatus");
+    expect(analysis).not.toHaveProperty("modelNote");
+    expect(analysis.horses[0]).not.toHaveProperty("modelProb");
+    expect(sqls.filter((s) => s.includes("odds_snapshots"))).toEqual([]);
+  });
+
+  it("計算済み: 馬ごとの確率と 確率 × 5 分前の単勝 が付く(応答に無い馬は null)。MODEL の呼び出しは GET 1 回", async () => {
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    await snapshotRow(RACE_ID, [[1, 8, 3, null, null, null], [2, 3, 1, null, null, null]]);
+    const m = fakeModel(() => Response.json({ race_id: RACE_ID, status: "ok", model_version: "v", computed_at: "t", odds_minutes_before: 5, horses: [{ umaban: 1, p_win: 0.25 }, { umaban: 2, p_win: 0.5 }] }));
+    const { status, analysis } = await fetchWith(saved.id, m.fetcher);
+    expect(status).toBe(200);
+    expect(m.calls).toEqual([`GET /v1/races/${RACE_ID}`]);
+    expect(analysis.modelStatus).toBe("ok");
+    const by = (u: number) => analysis.horses.find((h) => h.umaban === u)!;
+    expect([by(1).modelProb, by(1).modelEv]).toEqual([0.25, 2]);
+    expect([by(2).modelProb, by(2).modelEv]).toEqual([0.5, 1.5]);
+    const third = analysis.horses.find((h) => h.umaban > 2)!;
+    expect([third.modelProb, third.modelEv], "前提: 3 番以降の馬がある").toEqual([null, null]);
+  });
+
+  it("計算なし・誤りでも 200。理由は固定の語彙(外の文字列は出ない)", async () => {
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    const m = fakeModel(() => Response.json({ race_id: RACE_ID, status: "none", reason: "<script>EVIL</script>" }));
+    const { status, text, analysis } = await fetchWith(saved.id, m.fetcher);
+    expect(status).toBe(200);
+    expect(analysis.modelStatus).toBe("none");
+    expect(analysis.modelNote).toContain("理由不明");
+    expect(text).not.toContain("EVIL");
+    expect(analysis.horses.every((h) => h.modelProb === null)).toBe(true);
+  });
+
+  it("MODEL の例外・500 でも 200(unavailable)。例外の文面は出さない", async () => {
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    const m = fakeModel(() => {
+      throw new Error("SECRET-MODEL");
+    });
+    const r1 = await fetchWith(saved.id, m.fetcher);
+    expect(r1.status).toBe(200);
+    expect(r1.analysis.modelStatus).toBe("none");
+    expect(r1.text).not.toContain("SECRET");
+    const r2 = await fetchWith(saved.id, fakeModel(() => new Response("x", { status: 500 })).fetcher);
+    expect(r2.analysis.modelNote).toContain("取得できませんでした");
+  });
+
+  it("サブリクエストの数(D1 の prepare・batch と MODEL): MODEL ありは、なしより D1 が 1 回(5 分前の読み取り)・MODEL が 1 回だけ多い", async () => {
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    const without = countingDb();
+    await fetchWith(saved.id, undefined, without.db);
+    const withModel = countingDb();
+    const m = fakeModel(() => Response.json({ race_id: RACE_ID, status: "none", reason: "not_ready" }));
+    await fetchWith(saved.id, m.fetcher, withModel.db);
+    expect(withModel.counter.batches).toBe(without.counter.batches);
+    expect(withModel.counter.prepares - without.counter.prepares).toBe(1);
+    expect(m.calls).toHaveLength(1);
+    console.log(`#796 画面の GET: D1 prepare ${without.counter.prepares}→${withModel.counter.prepares}・batch ${withModel.counter.batches}・MODEL 1(合計の見積り ${withModel.counter.prepares + withModel.counter.batches + 1}。R2 の GET は別に 1)`);
+  });
+});

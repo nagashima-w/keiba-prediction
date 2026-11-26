@@ -1346,3 +1346,46 @@ describe("騎手・調教師の指標の列(Issue #643)", () => {
     expect(model.content!.horseTable!.rows.map((r) => [r.umaban, r.marketEdge.jockey.name])).toEqual([[2, "騎2"], [1, "騎1"]]);
   });
 });
+
+/**
+ * Issue #796: 馬ごとの評価の表の「確率(別計算)」「確率×5分前単勝」の列。サーバが付けた `modelProb`・`modelEv` と `modelNote` から作る。
+ * 出すのは注記(`modelNote`)があるときだけ(MODEL が無い構成・地方・古いサーバでは注記が無い)。値が無い馬は「—」。確率は 3着内率と同じ書式(小数 1 桁の %)、掛け算は EV と同じ書式(小数 2 桁)。
+ */
+describe("別の Worker が計算した確率の列(Issue #796)", () => {
+  const NOTE = "別の Worker が計算した勝つ確率";
+  const tableOf = (a: AnalysisDetail) => content(a).horseTable!;
+  const withModel = (cells: ({ p: number | null; ev: number | null } | null)[], note: string | null = NOTE) =>
+    analysis({ horses: cells.map((c, i) => horse(i + 1, c === null ? {} : { modelProb: c.p, modelEv: c.ev })), ...(note === null ? {} : { modelNote: note }) });
+
+  it("列は既存の列の末尾に「確率(別計算)」「確率×5分前単勝」(並べ替えなし)。注記は表に載る", () => {
+    const t = tableOf(withModel([{ p: 0.25, ev: 2 }]));
+    expect(t.columns.map((c) => c.key)).toEqual(["umaban", "mark", "name", "prior", "ev", "winOdds", "placeOddsMin", "modelProb", "modelEv"]);
+    expect(t.columns.slice(-2).map((c) => [c.label, c.sort])).toEqual([["確率(別計算)", null], ["確率×5分前単勝", null]]);
+    expect(t.modelNote).toBe(NOTE);
+  });
+
+  it("セルの書式: 確率は 25.0%、掛け算は 2.00。0 も値(「0.0%」「0.00」)で、—(値なし)と区別する", () => {
+    const t = tableOf(withModel([{ p: 0.25, ev: 2 }, { p: 0, ev: 0 }, { p: 0.5, ev: null }, { p: null, ev: null }, null]));
+    expect(t.rows.map((r) => [r.model.prob, r.model.ev])).toEqual([["25.0%", "2.00"], ["0.0%", "0.00"], ["50.0%", "—"], ["—", "—"], ["—", "—"]]);
+  });
+
+  it("列を出さない: 注記なし(MODEL が無い構成・地方・古いサーバ)。既存の列は変わらない。出る条件では出る", () => {
+    const keys = (a: AnalysisDetail) => tableOf(a).columns.map((c) => c.key);
+    expect(keys(withModel([{ p: 0.1, ev: 1 }], null))).toEqual(["umaban", "mark", "name", "prior", "ev", "winOdds", "placeOddsMin"]);
+    expect(tableOf(withModel([{ p: 0.1, ev: 1 }], null)).modelNote).toBeNull();
+    expect(keys(withModel([{ p: 0.1, ev: 1 }]))).toContain("modelProb");
+  });
+
+  it("計算なし(全馬 —)でも注記があれば列は出る(理由は注記に。値を作って埋めない)", () => {
+    const t = tableOf(withModel([null, null], "別の Worker の確率: 計算なし(まだ計算していません)"));
+    expect(t.columns.map((c) => c.key)).toContain("modelProb");
+    expect(t.rows.every((r) => r.model.prob === "—" && r.model.ev === "—")).toBe(true);
+    expect(t.modelNote).toContain("計算なし");
+  });
+
+  it("騎手・調教師の列と同時でも、モデルの列が末尾。並べ替えても値は馬について回る", () => {
+    const hs = [horse(1, { prior: 0.1, modelProb: 0.11, modelEv: 1.1 }), horse(2, { prior: 0.5, modelProb: 0.22, modelEv: 2.2 })];
+    const model = buildResultModel({ route: ROUTE, source: ready(analysis({ horses: hs, modelNote: NOTE })), horseSort: { key: "prior", dir: "desc" } });
+    expect(model.content!.horseTable!.rows.map((r) => [r.umaban, r.model.prob])).toEqual([[2, "22.0%"], [1, "11.0%"]]);
+  });
+});

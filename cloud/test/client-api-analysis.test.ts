@@ -174,7 +174,7 @@ const ALLOCATION = {
     { betType: "wide", comboKey: "0102", stake: 200, odds: null, ev: null },
   ],
 };
-const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, latePos: 0.6, legStyle: "差し" as const, timeIndexLine: null, marketEdge: null };
+const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", markFrom: null, reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4, fairPlaceOdds: 2.1, actualPlaceOddsMin: 1.5, actualPlaceOddsMax: 2.3, earlyPos: 0.25, latePos: 0.6, legStyle: "差し" as const, timeIndexLine: null, marketEdge: null, modelProb: null, modelEv: null };
 const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良", oddsStatus: "result", placeBasis: "top3" };
 const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, llmCalls: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
 const wrap = (analysis: unknown) => ({ ok: true, analysis });
@@ -729,5 +729,35 @@ describe("failureMessage: not-found", () => {
     const messages = failures.map(failureMessage);
     expect(new Set(messages).size).toBe(failures.length);
     expect(failureMessage({ kind: "not-found" })).toContain("見つかりません");
+  });
+});
+
+describe("別の Worker が計算した確率の列(Issue #796)のパース", () => {
+  const readHorse = (over: Record<string, unknown>, drop: string[] = []) => {
+    const horse: Record<string, unknown> = { ...HORSE, ...over };
+    for (const k of drop) delete horse[k];
+    const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, horses: [horse] }));
+    return result.ok ? result.analysis.horses[0]! : null;
+  };
+  it("modelProb・modelEv: 有限の数はそのまま。キー無し(MODEL が無い構成・古いサーバ)・null・数以外・非有限は null(応答全体は失敗させない)", () => {
+    expect(readHorse({ modelProb: 0.25, modelEv: 2 })).toMatchObject({ modelProb: 0.25, modelEv: 2 });
+    expect(readHorse({ modelProb: 0, modelEv: 0 })).toMatchObject({ modelProb: 0, modelEv: 0 });
+    expect(readHorse({})).toMatchObject({ modelProb: null, modelEv: null });
+    expect(readHorse({ modelProb: null, modelEv: null })).toMatchObject({ modelProb: null, modelEv: null });
+    expect(readHorse({ modelProb: "0.2", modelEv: Number.NaN })).toMatchObject({ modelProb: null, modelEv: null });
+    expect(readHorse({ modelProb: { p: 1 }, modelEv: Number.POSITIVE_INFINITY })).toMatchObject({ modelProb: null, modelEv: null });
+  });
+  it("modelNote: 文字列はそのまま読む。キー無し・null・空文字・文字列以外は null", () => {
+    const read = (value: unknown, drop = false) => {
+      const analysis: Record<string, unknown> = { ...ANALYSIS, modelNote: value };
+      if (drop) delete analysis["modelNote"];
+      const result = parseAnalysisResponse(200, wrap(analysis));
+      return result.ok ? result.analysis.modelNote : "unexpected";
+    };
+    expect(read("注記")).toBe("注記");
+    expect(read(undefined, true)).toBeNull();
+    expect(read(null)).toBeNull();
+    expect(read("")).toBeNull();
+    expect(read(3)).toBeNull();
   });
 });

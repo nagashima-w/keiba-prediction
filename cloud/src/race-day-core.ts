@@ -163,6 +163,7 @@ import { collectTrainerPairs, type TrainerNamesStore } from "./trainer-names-rep
 import type { CloseSavePayload } from "./analysis-close";
 import { CloseStore } from "./race-day-close";
 import { CloseStage, type CloseStepOutcome } from "./race-day-close-stage";
+import type { ModelHook } from "./model-hook";
 import type { OddsSnapshotSink } from "./odds-snapshot-repository";
 import { OddsSnapshotStore } from "./race-day-odds-snapshot";
 import { OddsSnapshotStage, type OddsSnapshotStepOutcome } from "./race-day-odds-snapshot-stage";
@@ -480,6 +481,11 @@ export interface RaceDayDeps {
    * 計画の確定が中央のレースごとに予定を積み、時刻が来たら JRA の頁を取って保存する(分析したかどうかによらない)。渡さなければ段階全体が無効。
    */
   readonly oddsSnapshotSink?: OddsSnapshotSink;
+  /**
+   * 別の Worker への「計算を頼む口」(Issue #796。本番は `createModelHook`。バインディングが無い構成では渡さない=何もしない)。
+   * 分析を保存してタスクを done にした後に `card` を、発走の 10 分前・5 分前の記録を保存した後に `odds` を、それぞれ 1 回呼ぶ。口は投げない作りで、投げてもここで握る(アラームの成否・再試行に影響しない)。
+   */
+  readonly modelHook?: ModelHook;
   /** JRA の出馬表の取得の試み・馬・馬主・出走時の情報の保存先(本番は D1。migration 0038)。 */
   readonly jraEntriesStore?: JraEntriesStoreLike;
   /** 固定の語のログ(JRA の出馬表の取得の所要時間など。観測用)。省略時は出さない。 */
@@ -825,6 +831,8 @@ export class RaceDayCore {
    */
   private readonly oddsSnapStore: OddsSnapshotStore | undefined;
   private readonly oddsSnapStage: OddsSnapshotStage | undefined;
+  /** 別の Worker への依頼の口(Issue #796)。無ければ何もしない。 */
+  private readonly modelHook: ModelHook | undefined;
   /** 日報の時刻の下限の段階(Issue #291・#298。Issue #399〈R-9b〉で切り出した。値は meta に持つ)。コンストラクタの最後に作る。 */
   private readonly reportHold: ReportHoldStage;
   /** 通知の表(Issue #205。新しい表だけ)。 */
@@ -902,6 +910,7 @@ export class RaceDayCore {
     // 締切の直前の再計算の表(Issue #338。新しい表だけ。既存の表には ALTER しない)。
     this.close = new CloseStore(this.sql);
     // 発走前のオッズの記録(Issue #732)。JRA の取得口と保存先があるときだけ、表(新しい表だけ)と段階(取得キャッシュを使うので、下の `cache` を作ったあと)を作る。
+    this.modelHook = deps.modelHook;
     if (deps.fetchJraOdds !== undefined && deps.oddsSnapshotSink !== undefined) {
       this.oddsSnapStore = new OddsSnapshotStore(this.sql);
     }
@@ -950,7 +959,17 @@ export class RaceDayCore {
     });
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
     if (this.oddsSnapStore !== undefined && deps.fetchJraOdds !== undefined && deps.oddsSnapshotSink !== undefined) {
-      this.oddsSnapStage = new OddsSnapshotStage({ store: this.oddsSnapStore, now: this.now, onWarn, sink: deps.oddsSnapshotSink, fetcher: deps.fetchJraOdds, cache: this.cache, onInfo: deps.onInfo });
+      const modelHook = deps.modelHook;
+      this.oddsSnapStage = new OddsSnapshotStage({
+        store: this.oddsSnapStore,
+        now: this.now,
+        onWarn,
+        sink: deps.oddsSnapshotSink,
+        fetcher: deps.fetchJraOdds,
+        cache: this.cache,
+        onInfo: deps.onInfo,
+        ...(modelHook === undefined ? {} : { onSaved: (raceId: string, minutesBefore: 5 | 10) => modelHook.odds(raceId, minutesBefore) }),
+      });
     }
     // JRA のオッズの段階(Issue #675。新しい表だけ。取得口を渡したときだけ動く)。
     this.jraOdds = new JraOddsStageStore(this.sql);
@@ -2553,6 +2572,14 @@ export class RaceDayCore {
       this.jraOdds.clear(task.race_id);
       // 完了した(保存済み)ので、LLM の応答の記録は要らない。
       SqlLlmResponseStore.clear(this.sql, task.race_id, task.mode);
+      // 別の Worker への依頼(Issue #796)。分析の保存と、タスクの done・後始末がすべて済んだあと。失敗は握る(結果・再試行に影響させない)。保存済みの再実行でも呼ぶ(相手は冪等)。
+      if (this.modelHook !== undefined && analysisId !== null) {
+        try {
+          await this.modelHook.card(task.race_id);
+        } catch {
+          // 握る(口は投げない作りだが、念のため)。
+        }
+      }
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "compute", result: "ok" };
     } catch (error) {
       const message = redactSecrets(errorMessage(error));
