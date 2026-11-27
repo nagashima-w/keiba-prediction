@@ -575,3 +575,58 @@ describe("共有の間隔(pacer。Issue #680)", () => {
     expect(h.waits).toEqual([JRA_GAP_MS, JRA_GAP_MS, JRA_GAP_MS, JRA_GAP_MS, JRA_GAP_MS]);
   });
 });
+
+describe("Issue #804: 最初に失敗した頁の詳細(outcome.failure。語の分類・result・rawJson.sources は変えない)", () => {
+  const run = (h: Harness) => createJraBabaFetcher({ fetch: h.fetch, wait: h.wait })(NOW_SUNDAY);
+  it("失敗が無ければ failure は無い", async () => {
+    const outcome = await run(harness());
+    expect(outcome.failure).toBeUndefined();
+  });
+  it("クッション値が 403(配信の防御の形): 頁 cushion・種類 blocked・HTTP 403。result は http-403 のまま", async () => {
+    const h = harness({ cushion: () => new Response("x", { status: 403, headers: { server: "AkamaiGHost" } }), moist: () => new Response("x", { status: 500 }) });
+    const outcome = await run(h);
+    expect(outcome.result).toBe("http-403");
+    expect(outcome.failure).toEqual({ page: "cushion", info: { kind: "blocked", http: 403 } });
+  });
+  it("最初に失敗した頁だけが残る: クッション値の失敗の後に含水率も失敗しても cushion", async () => {
+    const h = harness({ cushion: () => new Response("x", { status: 503 }), moist: () => new Response("x", { status: 403, headers: { server: "AkamaiGHost" } }) });
+    const outcome = await run(h);
+    expect(outcome.failure).toEqual({ page: "cushion", info: { kind: "http", http: 503 } });
+  });
+  it("含水率だけが失敗(クッション値で保存できる)なら、頁 moist", async () => {
+    const h = harness({ moist: () => new Response("x", { status: 404 }) });
+    const outcome = await run(h);
+    expect(outcome.failure).toEqual({ page: "moist", info: { kind: "http", http: 404 } });
+  });
+  it("開催情報(POST)が例外(Network connection lost): 頁 access・種類 reset・HTTP なし。result は ok のまま", async () => {
+    const h = harness({
+      access: () => {
+        throw Object.assign(new Error("Network connection lost."), { name: "Error" });
+      },
+    });
+    const outcome = await run(h);
+    expect(outcome.result).toBe("ok");
+    expect(outcome.failure).toEqual({ page: "access", info: { kind: "reset", http: null } });
+    expect(JSON.stringify(outcome)).not.toContain("Network connection lost");
+  });
+  it("コース(index2)の失敗は頁 course。名前の解決の失敗(internal error)は dns", async () => {
+    const h = harness({
+      index2: () => {
+        throw Object.assign(new Error("internal error; reference = abc"), { name: "Error" });
+      },
+    });
+    const outcome = await run(h);
+    expect(outcome.failure).toEqual({ page: "course", info: { kind: "dns", http: null } });
+  });
+  it("読み取りの失敗(ページの形が変わった)は取得の失敗ではないので failure を付けない", async () => {
+    const h = harness({ cushion: () => html(new TextEncoder().encode("<html>変わった</html>")) });
+    const outcome = await run(h);
+    expect(outcome.failure).toBeUndefined();
+  });
+  it("リダイレクト・上限超えも種類が付く(redirect・too-large)", async () => {
+    const r = await run(harness({ cushion: () => new Response(null, { status: 302, headers: { location: "https://x.invalid/" } }) }));
+    expect(r.failure).toEqual({ page: "cushion", info: { kind: "redirect", http: 302 } });
+    const big = await run(harness({ cushion: () => new Response(new Uint8Array(JRA_MAX_BODY_BYTES + 1), { status: 200 }) }));
+    expect(big.failure).toEqual({ page: "cushion", info: { kind: "too-large", http: 200 } });
+  });
+});

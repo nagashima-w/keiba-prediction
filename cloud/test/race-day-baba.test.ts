@@ -146,6 +146,13 @@ afterEach(() => {
   for (const sql of opened.splice(0)) sql.close();
 });
 
+/** Issue #804: 拠点の取得口(省略可)。呼ばれた回数と、馬場の取得口との順序を残す。 */
+interface ColoProbe {
+  calls: number;
+  readonly order: string[];
+}
+const coloProbe: { current: ColoProbe | null } = { current: null };
+
 function build(h: Pick<Harness, "sql" | "gate" | "clock" | "alarm" | "store" | "api" | "warns">, options: { baba: boolean }): RaceDayCore {
   return new RaceDayCore({
     sql: h.sql,
@@ -158,6 +165,15 @@ function build(h: Pick<Harness, "sql" | "gate" | "clock" | "alarm" | "store" | "
     sink: unusedSink,
     loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
     ...(options.baba ? { fetchBaba: h.api.fetcher, babaStore: h.store } : {}),
+    ...(coloProbe.current === null
+      ? {}
+      : {
+          fetchColo: async () => {
+            coloProbe.current!.calls += 1;
+            coloProbe.current!.order.push("colo");
+            return "NRT";
+          },
+        }),
   });
 }
 
@@ -501,5 +517,46 @@ describe("分析を止めない・遅らせない", () => {
     h.alarm.at = null;
     await expect(h.core.runNextStep()).resolves.toMatchObject({ mode: "baba", result: "failed" });
     expect(h.warns.join("\n")).not.toContain("secret.test.invalid");
+  });
+});
+
+
+describe("Issue #804: 拠点(colo)は 1 日 1 回、最初の馬場の取得の前に取り、失敗した枠の詳細に付ける", () => {
+  afterEach(() => {
+    coloProbe.current = null;
+  });
+  it("19 枠すべてが失敗しても拠点の取得は 1 回。最初の取得口の呼び出しより前。失敗の詳細(failDetail)に c が付く", async () => {
+    const probe: ColoProbe = { calls: 0, order: [] };
+    coloProbe.current = probe;
+    const h = harness();
+    h.api.respond = () => {
+      probe.order.push("baba");
+      return { ...notYet(), result: "http-403", failure: { page: "cushion", info: { kind: "blocked", http: 403 } } };
+    };
+    await plan2100(h);
+    expect(probe.calls).toBe(0); // 前夜(計画)では取らない: 馬場の取得の前に 1 回
+    await runDue(h, jst("2026-10-12T23:59:00"));
+    expect(h.api.calls).toBe(BABA_FETCH_SLOTS);
+    expect(probe.calls).toBe(1);
+    expect(probe.order.slice(0, 2)).toEqual(["colo", "baba"]);
+    expect(h.store.finishes.every((f) => f.finish.failDetail === '{"p":"cushion","k":"blocked","h":403,"c":"NRT"}')).toBe(true);
+    expect(h.store.finishes).toHaveLength(BABA_FETCH_SLOTS);
+  });
+  it("拠点の取得口を渡さない構成では、取れず(c なし)、馬場の取得は変わらず動く", async () => {
+    const h = harness();
+    h.api.respond = () => ({ ...notYet(), result: "http-403", failure: { page: "cushion", info: { kind: "blocked", http: 403 } } });
+    await plan2100(h);
+    await tick(h);
+    expect(h.store.finishes[0]!.finish.failDetail).toBe('{"p":"cushion","k":"blocked","h":403}');
+  });
+  it("取った拠点は DO のメタに、日付(JST)つきで残る", async () => {
+    const probe: ColoProbe = { calls: 0, order: [] };
+    coloProbe.current = probe;
+    const h = harness();
+    await plan2100(h);
+    await tick(h); // 09:00 の取得
+    expect(meta(h, "colo_day")).toBe(DATE);
+    expect(meta(h, "colo")).toBe("NRT");
+    expect(probe.calls).toBe(1);
   });
 });

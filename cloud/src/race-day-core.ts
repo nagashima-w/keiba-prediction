@@ -147,6 +147,7 @@ import { NAR_TRIFECTA_AXES_PER_STEP, NarTrifectaStore } from "./race-day-nar-tri
 import { JraOddsStageStore, jraOddsPagesFor } from "./race-day-jra-odds";
 import { createJraOddsOverride } from "./jra-odds-cache";
 import { JraOddsStage } from "./race-day-jra-odds-stage";
+import { ColoOfDay } from "./jra-colo";
 import type { JraOddsFetcher } from "./jra-odds-fetch";
 import { PlanStore, type PlanSkipReason, type PlanVenue } from "./race-day-plan";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
@@ -466,6 +467,11 @@ export interface RaceDayDeps {
    * 渡さなければ取得の段階全体が無効(印も書かず、アラームの候補にもしない。テスト用。本番は常に渡す)。`babaStore` と両方があるときだけ動く。
    */
   readonly fetchBaba?: BabaFetcher;
+  /**
+   * Cloudflare の拠点(3 文字。Issue #804)を取る関数(本番は `fetchTraceColo`)。渡すと、**その日の最初の JRA の取得(馬場・発走前のオッズの記録)の前に 1 回だけ**呼び、
+   * 失敗の詳細(`fail_detail`)に付ける(「その日の最初の取得のときの拠点」。`jra-colo.ts`)。省略時は拠点を付けない。投げてもよい(握る)。
+   */
+  readonly fetchColo?: () => Promise<string | null>;
   /** 馬場の取得の試み・結果の保存先(本番は D1 の `baba_fetch_attempts`〈migration 0026。枠ごと〉・`baba_fetches`・`baba_conditions`〈migration 0017〉)。 */
   readonly babaStore?: BabaStore;
   /**
@@ -840,6 +846,8 @@ export class RaceDayCore {
    */
   private readonly oddsSnapStore: OddsSnapshotStore | undefined;
   private readonly oddsSnapStage: OddsSnapshotStage | undefined;
+  /** Cloudflare の拠点(Issue #804。その日の最初の JRA の取得の前に 1 回取る)。`fetchColo` が無ければ undefined。 */
+  private readonly colo: ColoOfDay | undefined;
   /** 別の Worker への依頼の口(Issue #796)。無ければ何もしない。 */
   private readonly modelHook: ModelHook | undefined;
   /** 日報の時刻の下限の段階(Issue #291・#298。Issue #399〈R-9b〉で切り出した。値は meta に持つ)。コンストラクタの最後に作る。 */
@@ -937,7 +945,13 @@ export class RaceDayCore {
     this.kaisaiDaysStore = deps.kaisaiDaysStore;
     this.jockeyNamesStore = deps.jockeyNamesStore;
     this.trainerNamesStore = deps.trainerNamesStore;
+    // Cloudflare の拠点(Issue #804)。JRA の取得の失敗の詳細に付ける。取得の関数があるときだけ(省略時は付けない)。
+    this.colo =
+      deps.fetchColo === undefined
+        ? undefined
+        : new ColoOfDay({ metaGet: (key) => this.metaGet(key), metaSet: (key, value) => this.metaSet(key, value), now: this.now, fetchColo: deps.fetchColo });
     this.baba = new BabaStage({
+      colo: () => this.colo?.get() ?? null,
       sql: this.sql,
       now: this.now,
       fetcher: deps.fetchBaba,
@@ -978,6 +992,7 @@ export class RaceDayCore {
         fetcher: deps.fetchJraOdds,
         cache: this.cache,
         onInfo: deps.onInfo,
+        colo: () => this.colo?.get() ?? null,
         ...(modelHook === undefined ? {} : { onSaved: (raceId: string, minutesBefore: 5 | 10) => modelHook.odds(raceId, minutesBefore) }),
       });
     }
@@ -1089,6 +1104,10 @@ export class RaceDayCore {
   private metaGet(key: string): string | null {
     const rows = this.sql.exec("SELECT value FROM race_day_meta WHERE key = ?", key).toArray() as { value: string }[];
     return rows[0]?.value ?? null;
+  }
+
+  private metaSet(key: string, value: string): void {
+    this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
   }
 
   private task(raceId: string, mode: TaskMode): TaskRow | null {
@@ -1608,7 +1627,12 @@ export class RaceDayCore {
     }
     // 発走 10 分前・5 分前のオッズの記録(Issue #732)。時刻が来た行を 1 つ(5 分前を先に)。**タスクより前**(締切の再計算と同じ理由: 時刻に意味がある。ただし実行中のステップは中断できない)。
     if (this.oddsSnapStore !== undefined && this.oddsSnapStage !== undefined) {
-      const snapDue = this.oddsSnapStore.nextDue(this.now());
+      let snapDue = this.oddsSnapStore.nextDue(this.now());
+      if (snapDue !== null && this.colo?.isPending() === true) {
+        // その日の最初の JRA の取得の前に 1 回だけ拠点を取る(取れなくても進む)。待った後は、行を引き直す(待つのは 1 日 1 回だけ。ほかの起床の流れは待たない)。
+        await this.colo.ensure();
+        snapDue = this.oddsSnapStore.nextDue(this.now());
+      }
       if (snapDue !== null) {
         const outcome = await this.oddsSnapStage.runStep(snapDue);
         await this.armAlarm();
@@ -1618,7 +1642,11 @@ export class RaceDayCore {
     // 馬場の取得(Issue #294)。開催日の 09:00 から 10 分おきに 12:00 まで、当日の値がそろうまで取り直す(Issue #480)。**タスクより前**: 発走前の分析(LLM)に当日の値を間に合わせる。
     // 最初の発走前の分析の期限より後の枠もあるが、その分析は取得を待たずに値なしで進む(分析を遅らせない)。
     // 動けるのは、取得口・保存先があり、中央の開催日で、今日が開催日で、次の枠の時刻が来ていて、まだそろっていないときだけ({@link BabaStage.runnable})。失敗しても例外にせず、次の起床でタスクが進む。
-    if (this.baba.runnable()) {
+    const babaReady = (): boolean => this.baba.runnable();
+    if (babaReady() && this.colo?.isPending() === true) {
+      await this.colo.ensure(); // その日の最初の JRA の取得の前に 1 回(取れなくても進む)。待った後は、動けるかを引き直す
+    }
+    if (babaReady()) {
       const outcome = await this.baba.run();
       await this.armAlarm();
       return outcome;

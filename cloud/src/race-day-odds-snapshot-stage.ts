@@ -18,6 +18,7 @@
  * JRA への出方(10・5 分前): 1 レースにつき頁 6 本〔10 分前〕・7 本〔5 分前。#794 で 馬単・三連単を足した。三連単は 5 分前だけで最後〕(単勝・複勝・馬連・枠連・ワイド・3連複・馬単〔・三連単〕。リンクが取得キャッシュに無い最初のレースだけ、開催選択とレース選択の 2 本が足される。単勝・複勝が取れなければ 1 本)。間隔は注入の取得口(DO では他の JRA の取得と共有の `createJraPacer`)が守る。
  */
 import { redactSecrets } from "./llm-run";
+import { buildFailDetail } from "./jra-fail-detail";
 import { createJraOddsOverride, jraOddsCacheKey } from "./jra-odds-cache";
 import type { JraOddsFetcher, JraOddsSession } from "./jra-odds-fetch";
 import type { OddsSnapshotSink } from "./odds-snapshot-repository";
@@ -76,6 +77,16 @@ export interface OddsSnapshotStageDeps {
    * 失敗は握る(投げても結果・行の状態・再試行に影響しない)。省略時は何もしない。
    */
   readonly onSaved?: (raceId: string, minutesBefore: 5 | 10) => Promise<void>;
+  /**
+   * 失敗の行の詳細(Issue #804)に付ける拠点(3 文字。取れていなければ null)。本番は DO が 1 日 1 回 `cdn-cgi/trace` から読んだ値で、
+   * **「その日の最初の JRA の取得のときの拠点」**(その後に DO の場所が変わっても、その日のうちは同じ値)。省略時は付けない。
+   */
+  readonly colo?: () => string | null;
+}
+
+/** 1 回の取得で、単勝・複勝の頁(必須)の最後の失敗を受け取る入れ物(Issue #804。試行ごとに作り直す)。 */
+interface FailureCapture {
+  failure: JraOddsPageFailure | null;
 }
 
 /** 取得キャッシュの JSON から、馬番 → 馬の ID を読む(形が違えば空)。 */
@@ -99,6 +110,7 @@ export class OddsSnapshotStage {
   private readonly fetcher: JraOddsFetcher;
   private readonly cache: JraOddsStageCache;
   private readonly onInfo: ((message: string) => void) | undefined;
+  private readonly colo: (() => string | null) | undefined;
   private readonly onSaved: ((raceId: string, minutesBefore: 5 | 10) => Promise<void>) | undefined;
 
   constructor(deps: OddsSnapshotStageDeps) {
@@ -109,6 +121,7 @@ export class OddsSnapshotStage {
     this.fetcher = deps.fetcher;
     this.cache = deps.cache;
     this.onInfo = deps.onInfo;
+    this.colo = deps.colo;
     this.onSaved = deps.onSaved;
   }
 
@@ -185,7 +198,8 @@ export class OddsSnapshotStage {
     }
     const attempts = row.attempts + 1;
     const startedAt = now;
-    const page = await this.fetchPage(row, startedAt, supersedeAt);
+    const capture: FailureCapture = { failure: null };
+    const page = await this.fetchPage(row, startedAt, supersedeAt, capture);
     if (page !== null) {
       return { kind: "payload", payload: { ...base, ...page, status: "ok", reason: null, attempts } };
     }
@@ -194,7 +208,10 @@ export class OddsSnapshotStage {
     if (attempts < ODDS_SNAPSHOT_FETCH_MAX_ATTEMPTS && retryAt < supersedeAt) {
       return { kind: "retry", attempts, nextTryAt: retryAt };
     }
-    return { kind: "payload", payload: { ...base, ...empty, takenAtMs: failedAt, status: "failed", reason: "fetch-failed", attempts } };
+    // 失敗の詳細は最後の試行のぶんだけ(取れなかった理由が、頁か開催選択のどちらか分からないときは unknown)。
+    const failInfo = capture.failure?.failInfo;
+    const failDetail = buildFailDetail({ page: capture.failure?.page ?? "tanpuku", kind: failInfo?.kind ?? "unknown", http: failInfo?.http ?? null, colo: this.colo?.() ?? null });
+    return { kind: "payload", payload: { ...base, ...empty, takenAtMs: failedAt, status: "failed", reason: "fetch-failed", attempts, failDetail } };
   }
 
   /**
@@ -206,6 +223,7 @@ export class OddsSnapshotStage {
     row: OddsSnapshotTaskRow,
     startedAt: number,
     stopAt: number,
+    capture: FailureCapture,
   ): Promise<{
     readonly takenAtMs: number;
     readonly officialDatetime: string | null;
@@ -217,7 +235,7 @@ export class OddsSnapshotStage {
       // 5 頁で 1 つの session を使う(session の中の本数と間隔の数え方が、今までの 1 頁の取得と同じ連続になる)。
       let session: JraOddsSession | null = null;
       const fetcher: JraOddsFetcher = { open: () => (session ??= this.fetcher.open()) };
-      const winPlace = await this.fetchWinPlace(fetcher, row, startedAt, stopAt);
+      const winPlace = await this.fetchWinPlace(fetcher, row, startedAt, stopAt, capture);
       if (winPlace === null) {
         return null;
       }
@@ -268,8 +286,11 @@ export class OddsSnapshotStage {
     row: OddsSnapshotTaskRow,
     startedAt: number,
     stopAt: number,
+    capture: FailureCapture,
   ): Promise<{ readonly takenAtMs: number; readonly officialDatetime: string | null; readonly oddsStatus: string; readonly horses: NonNullable<OddsSnapshotPayload["horses"]> } | null> {
-    await this.runPage(fetcher, row, "tanpuku", stopAt, this.onWarn);
+    await this.runPage(fetcher, row, "tanpuku", stopAt, this.onWarn, (failure) => {
+      capture.failure = failure; // 最後の失敗が残る(たどり直しの後の失敗など)
+    });
     const entry = this.cache.get(jraOddsCacheKey(row.race_id, "tanpuku"));
     if (entry === undefined || entry.fetchedAt < startedAt) {
       return null; // 取れていない(古い JSON は、取れなかった記録の代わりに使わない)

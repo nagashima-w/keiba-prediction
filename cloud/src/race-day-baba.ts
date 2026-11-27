@@ -39,7 +39,8 @@
  * ## 失敗しても分析を止めない・秘匿
  * {@link BabaStage.run} は例外を投げない(DO のアラームは例外で再実行される)。警告は固定の文と分類だけ(例外の文面・URL・応答の本文は出さない・保存しない)。
  */
-import { BabaFetchError, isVenueComplete, type BabaDroppedDetail, type BabaFetcher, type BabaResultClass, type BabaVenueRecord } from "./baba-conditions";
+import { BabaFetchError, isVenueComplete, type BabaDroppedDetail, type BabaFetchOutcome, type BabaFetcher, type BabaResultClass, type BabaVenueRecord } from "./baba-conditions";
+import { buildFailDetail } from "./jra-fail-detail";
 import { startTimeEpochMs } from "./pre-race-time";
 import { jstKaisaiDate } from "./auto-run-plan";
 import type { SqlLike } from "./sql-like";
@@ -102,6 +103,11 @@ export interface BabaFinish {
   readonly dropped: number;
   /** 捨てた競馬場の理由と計測日時の文字列(診断用。`baba_fetch_attempts.dropped_json`)。失敗の分類のときは空。 */
   readonly droppedDetails: readonly BabaDroppedDetail[];
+  /**
+   * 失敗の詳細(Issue #804。`baba_fetch_attempts.fail_detail`。固定の鍵と語だけの短い JSON。`jra-fail-detail.ts` の `buildFailDetail`)。
+   * `result` が ok でなく、取得口が JRA のページの取得の失敗(最初に失敗した頁)を返したときだけ文字列。それ以外は null(省略〈= 旧い呼び出し〉も null と同じ)。
+   */
+  readonly failDetail?: string | null;
 }
 
 /**
@@ -145,6 +151,10 @@ export interface BabaStageDeps {
   readonly retryDelayMs: number;
   /** 1 枠あたりの claim の試行回数の上限。 */
   readonly maxClaimAttempts: number;
+  /**
+   * 失敗の詳細に付ける拠点(3 文字。取れていなければ null。Issue #804)。**その日の最初の JRA の取得のときの拠点**(DO が 1 日 1 回読む)。省略時は付けない。
+   */
+  readonly colo?: () => string | null;
 }
 
 /** 取得ステップの結果(`StepOutcome` の 1 種)。`raceId` は開催日。 */
@@ -302,8 +312,10 @@ export class BabaStage {
     let droppedDetails: readonly BabaDroppedDetail[] = [];
     let apiFetchedAt: string | null = null;
     let listed: readonly string[] = [];
+    let failure: BabaFetchOutcome["failure"];
     try {
       const fetched = await fetcher(this.deps.now());
+      failure = fetched.failure;
       result = fetched.result;
       venues = fetched.venues;
       dropped = fetched.dropped;
@@ -328,7 +340,9 @@ export class BabaStage {
     // 5. 結果の記録。失敗しても同じ枠では再試行しない(JRA への取得は既に使った)。
     let saved = true;
     try {
-      await store.finish(date, { slot, complete, finishedAt: this.deps.now(), result, apiFetchedAt, venues, dropped, droppedDetails });
+      // 失敗の詳細は、保存できなかった(ok でない)枠で、取得の失敗が分かったときだけ。
+      const failDetail = result !== "ok" && failure !== undefined ? buildFailDetail({ page: failure.page, kind: failure.info.kind, http: failure.info.http, colo: this.deps.colo?.() ?? null }) : null;
+      await store.finish(date, { slot, complete, finishedAt: this.deps.now(), result, apiFetchedAt, venues, dropped, droppedDetails, failDetail });
     } catch {
       saved = false;
       this.deps.onWarn(`馬場の取得: 結果(${result})を D1 に保存できませんでした(この枠(${slot})は再取得しません。${isLastSlot ? "最後の枠です" : "次の枠で取り直します"})`);

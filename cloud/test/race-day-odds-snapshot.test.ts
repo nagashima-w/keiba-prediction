@@ -207,6 +207,20 @@ describe("parseOddsSnapshotPayload", () => {
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, horses: [[1, 2.1, 1, 1.2, 1.5, 123]] }))).toBeNull();
     expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, takenAtMs: null }))).toBeNull(); // 取った時刻は必ず残す
   });
+  it("#804: failDetail は failed の行にだけ持てる固定の形(p・k・h・c)。無い古い形も受け付ける。形の違い・ok/skipped の行は null", () => {
+    const failed: OddsSnapshotPayload = { ...ok, status: "failed", reason: "fetch-failed", oddsStatus: null, officialDatetime: null, horses: null, combos: null };
+    for (const failDetail of ['{"p":"tanpuku","k":"blocked","h":403,"c":"NRT"}', '{"p":"discover","k":"dns"}', '{"p":"tanpuku","k":"cf-1016","h":530}', '{"p":"sanrenpuku","k":"too-large","h":200}']) {
+      expect(parseOddsSnapshotPayload(JSON.stringify({ ...failed, failDetail }))).toEqual({ ...failed, failDetail });
+    }
+    expect(parseOddsSnapshotPayload(JSON.stringify(failed))).toEqual(failed); // 無い古い形
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...failed, failDetail: null }))).toEqual({ ...failed, failDetail: null });
+    for (const bad of ['{"p":"tanpuku","k":"http","extra":"x"}', '{"p":"tanpuku","k":"http","h":99}', '{"p":"tanpuku","k":"http","c":"nrt"}', '{"p":"tan puku","k":"x"}', 'x', '{"p":"tanpuku","k":"http"} ', 5]) {
+      expect(parseOddsSnapshotPayload(JSON.stringify({ ...failed, failDetail: bad })), String(bad)).toBeNull();
+    }
+    // ok・skipped の行は詳細を持たない
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...ok, failDetail: '{"p":"tanpuku","k":"http"}' }))).toBeNull();
+    expect(parseOddsSnapshotPayload(JSON.stringify({ ...failed, status: "skipped", reason: "too-late", failDetail: '{"p":"tanpuku","k":"http"}' }))).toBeNull();
+  });
   it("#751: combos の無い古い形(デプロイの前に DO に置かれた結果)も受け付け、combos は null として読む。拒まない", () => {
     const { combos: _omit, ...old } = ok;
     const parsed = parseOddsSnapshotPayload(JSON.stringify(old));

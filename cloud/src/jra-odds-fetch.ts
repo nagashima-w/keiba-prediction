@@ -22,6 +22,7 @@
  * を使う。別の形のエラーなら、パーサ側が `unavailable`(見出しが読めない)にして netkeiba に戻る。
  */
 import { parseJraOddsCname, parseJraOddsRaceListPage, parseJraOddsVenueListPage, type JraOddsPage, type JraOddsRaceLinks, type JraOddsVenueLink } from "../../packages/core/src/scraper/parse-jra-odds-index";
+import type { JraFailInfo } from "./jra-fail-detail";
 import { JRA_ACCESS_O_URL, JRA_GAP_MS, JRA_ODDS_MAX_BODY_BYTES, JRA_TIMEOUT_MS, decodeShiftJis, fetchOne, type JraFailure, type JraFetchLike } from "./jra-http";
 
 /** 開催選択の本文(固定。調査記録 §2.1)。 */
@@ -38,7 +39,8 @@ function isParamErrorPage(html: string): boolean {
 
 /** 1 本の失敗の語。上に、指定の場・レースが開催選択・レース選択に無かった `not-found` を足す。 */
 export type JraOddsFailure = JraPageFailure | "not-found";
-export type JraOddsResult<T> = { readonly status: "ok"; readonly value: T } | { readonly status: JraOddsFailure };
+/** 失敗には、取得の失敗の詳細(種類と HTTP の状態。Issue #804)が付くことがある(通信の失敗・HTTP の失敗のとき。`param-error`・`shape-mismatch`・`not-found` には付かない)。語({@link JraOddsFailure})は変えない。 */
+export type JraOddsResult<T> = { readonly status: "ok"; readonly value: T } | { readonly status: JraOddsFailure; readonly failInfo?: JraFailInfo };
 
 /** 本のあいだの待ちを共有する部品。 */
 export interface JraPacer {
@@ -106,6 +108,11 @@ export interface CreateJraOddsFetcherDeps {
 const DATE_PATTERN = /^\d{8}$/;
 const ORL_CNAME_PATTERN = /^pw15orl\d{2}\d{2}\d{4}\d{2}\d{2}\d{8}\/[0-9A-F]{2}$/;
 
+/** 頁の失敗を、詳細つきのまま結果の失敗に写す(詳細が無ければ付けない)。 */
+function failureOf(p: { readonly status: JraPageFailure; readonly failInfo?: JraFailInfo }): { readonly status: JraOddsFailure; readonly failInfo?: JraFailInfo } {
+  return p.failInfo === undefined ? { status: p.status } : { status: p.status, failInfo: p.failInfo };
+}
+
 /** 取得口を作る。グローバルの `fetch` を呼ぶのは、`deps.fetch` を省いたときの既定の 1 箇所だけ。 */
 export function createJraOddsFetcher(deps: CreateJraOddsFetcherDeps = {}): JraOddsFetcher {
   const fetchFn: JraFetchLike = deps.fetch ?? ((target, init) => fetch(target, init));
@@ -116,7 +123,7 @@ export function createJraOddsFetcher(deps: CreateJraOddsFetcherDeps = {}): JraOd
     open(): JraOddsSession {
       let sent = 0;
       /** 1 本を取って文字列にする。失敗は語に落とす(投げない)。 */
-      const page = async (body: string): Promise<{ readonly status: "ok"; readonly text: string } | { readonly status: JraPageFailure }> => {
+      const page = async (body: string): Promise<{ readonly status: "ok"; readonly text: string } | { readonly status: JraPageFailure; readonly failInfo?: JraFailInfo }> => {
         if (deps.pacer !== undefined) {
           await deps.pacer.beforeRequest();
         } else if (sent > 0) {
@@ -126,11 +133,12 @@ export function createJraOddsFetcher(deps: CreateJraOddsFetcherDeps = {}): JraOd
         const init: RequestInit = { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body };
         const fetched = await fetchOne(fetchFn, JRA_ACCESS_O_URL, init, timeoutMs, JRA_ODDS_MAX_BODY_BYTES);
         const status = fetched.summary.status;
+        const failInfo: JraFailInfo = { kind: fetched.failKind ?? "unknown", http: fetched.summary.httpStatus };
         if (typeof status !== "number") {
-          return { status };
+          return { status, failInfo };
         }
         if (status < 200 || status >= 300 || fetched.body === null) {
-          return { status: `http-${status}` };
+          return { status: `http-${status}`, failInfo };
         }
         let text: string;
         try {
@@ -151,7 +159,7 @@ export function createJraOddsFetcher(deps: CreateJraOddsFetcherDeps = {}): JraOd
           }
           const p = await page(OLI_BODY);
           if (p.status !== "ok") {
-            return { status: p.status };
+            return failureOf(p);
           }
           // 開催の選択の頁には、開催している週のレース選択のリンクが必ずある。1 つも読めなければ形が違う(指定の日だけが無いのとは別)。
           const venues = parseJraOddsVenueListPage(p.text, date);
@@ -163,7 +171,7 @@ export function createJraOddsFetcher(deps: CreateJraOddsFetcherDeps = {}): JraOd
           }
           const p = await page(`cname=${venue.racesCname}`);
           if (p.status !== "ok") {
-            return { status: p.status };
+            return failureOf(p);
           }
           const races = parseJraOddsRaceListPage(p.text, venue.date, venue.venueCode);
           return races.length > 0 ? { status: "ok", value: races } : { status: "shape-mismatch" };
@@ -173,7 +181,7 @@ export function createJraOddsFetcher(deps: CreateJraOddsFetcherDeps = {}): JraOd
             return { status: "shape-mismatch" };
           }
           const p = await page(`cname=${cname}`);
-          return p.status === "ok" ? { status: "ok", value: p.text } : { status: p.status };
+          return p.status === "ok" ? { status: "ok", value: p.text } : failureOf(p);
         },
       };
     },

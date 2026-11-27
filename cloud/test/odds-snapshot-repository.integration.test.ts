@@ -50,6 +50,21 @@ describe("save(1 レース・1 時点で 1 行。追記だけ)", () => {
     expect(JSON.parse(rows[0]!["combos_json"] as string)).toEqual(combos);
     expect(rows[1]!["combos_json"]).toBeNull();
   });
+  it("#804: fail_detail は failed の行に入る(payload.failDetail の文字列そのまま)。ok・skipped・詳細の無い failed(古い形)は NULL", async () => {
+    const store = new D1OddsSnapshotStore({ db: local.db });
+    const failed: OddsSnapshotPayload = { ...ok, takenAtMs: 6_000, officialDatetime: null, oddsStatus: null, status: "failed", reason: "fetch-failed", attempts: 4, horses: null };
+    await store.save(ok);
+    await store.save({ ...failed, raceId: "202605010102", failDetail: '{"p":"tanpuku","k":"blocked","h":403,"c":"NRT"}' });
+    await store.save({ ...failed, raceId: "202605010103" });
+    await store.save({ ...failed, raceId: "202605010104", status: "skipped", reason: "too-late", attempts: 0 });
+    const rows = await rowsOf();
+    expect(rows.map((r) => [r["race_id"], r["status"], r["reason"], r["fail_detail"]])).toEqual([
+      ["202605010101", "ok", null, null],
+      ["202605010102", "failed", "fetch-failed", '{"p":"tanpuku","k":"blocked","h":403,"c":"NRT"}'],
+      ["202605010103", "failed", "fetch-failed", null],
+      ["202605010104", "skipped", "too-late", null],
+    ]);
+  });
   it("skipped・failed の行: 理由と、取れなかった・取らないと決めた時刻が入り、頁の値・馬は NULL", async () => {
     const store = new D1OddsSnapshotStore({ db: local.db });
     await store.save({ ...ok, raceId: "202605010102", takenAtMs: 5_000, officialDatetime: null, oddsStatus: null, status: "skipped", reason: "too-late", attempts: 0, horses: null });
@@ -63,7 +78,7 @@ describe("save(1 レース・1 時点で 1 行。追記だけ)", () => {
   it("同じレースの再保存は行を増やさず、先に入った値を変えない(changes = 0。書き込みの行を食わない)", async () => {
     const store = new D1OddsSnapshotStore({ db: local.db });
     await store.save(ok);
-    const again = await local.db.prepare(INSERT_ODDS_SNAPSHOT_SQL).bind(ok.raceId, ok.leadMin, ok.kaisaiDate, ok.startMs, ok.dueMs, 1, null, null, "failed", "fetch-failed", 9, null, null).run();
+    const again = await local.db.prepare(INSERT_ODDS_SNAPSHOT_SQL).bind(ok.raceId, ok.leadMin, ok.kaisaiDate, ok.startMs, ok.dueMs, 1, null, null, "failed", "fetch-failed", 9, null, null, null).run();
     expect(again.meta.changes).toBe(0);
     await store.save({ ...ok, takenAtMs: 999 });
     const rows = await rowsOf();
@@ -92,7 +107,7 @@ describe("save(1 レース・1 時点で 1 行。追記だけ)", () => {
     expect(INSERT_ODDS_SNAPSHOT_SQL).not.toMatch(/\b(UPDATE|DELETE|REPLACE)\b/i);
   });
   it("1 レースの保存で書き込む行は 1 行(主キーだけの WITHOUT ROWID の表。副索引なし)", async () => {
-    const result = await local.db.prepare(INSERT_ODDS_SNAPSHOT_SQL).bind(ok.raceId, ok.leadMin, ok.kaisaiDate, ok.startMs, ok.dueMs, ok.takenAtMs, ok.officialDatetime, ok.oddsStatus, ok.status, ok.reason, ok.attempts, JSON.stringify(ok.horses), null).run();
+    const result = await local.db.prepare(INSERT_ODDS_SNAPSHOT_SQL).bind(ok.raceId, ok.leadMin, ok.kaisaiDate, ok.startMs, ok.dueMs, ok.takenAtMs, ok.officialDatetime, ok.oddsStatus, ok.status, ok.reason, ok.attempts, JSON.stringify(ok.horses), null, null).run();
     expect(result.meta.changes).toBe(1);
     expect(result.meta.rows_written).toBe(1);
   });

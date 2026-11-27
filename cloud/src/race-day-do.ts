@@ -20,6 +20,7 @@ import { D1KaisaiDaysStore } from "./kaisai-days-repository";
 import { D1TrainerNamesStore } from "./trainer-names-repository";
 import { D1OddsSnapshotStore } from "./odds-snapshot-repository";
 import { createJraEntriesFetcher } from "./jra-entries-fetch";
+import { fetchTraceColo } from "./jra-colo";
 import { createJraFetchers } from "./jra-fetchers";
 import { isJraOddsDisabled } from "./race-day-jra-odds";
 import { D1JraEntriesStore } from "./jra-entries-repository";
@@ -154,6 +155,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       raceConditionsStore: new D1RaceConditionsStore({ db: env.DB }),
       // 馬場の取得(Issue #294。Issue #478 で取得先を JRA のページに替えた)。secret は要らない(JRA のページは素の fetch で届く〈#488〉)。URL は取得口の中にだけあり、core には渡らない。保存先は D1(baba_fetches・baba_conditions〈migration 0017〉)。
       fetchBaba: jraFetchers.fetchBaba,
+      // Cloudflare の拠点(Issue #804)。JRA の取得の失敗の詳細に付ける。cdn-cgi/trace を 1 日 1 回、その日の最初の JRA の取得の前に取る(JRA には出ない。取れなくても取得は止めない)。「その日の最初の取得のときの拠点」。
+      fetchColo: () => fetchTraceColo((target, init) => fetch(target, init)),
       babaStore: new D1BabaStore({ db: env.DB }),
       // 貯めた当日の馬場の値の読み出し(Issue #295)。発走前の分析が、そのレースの開催日 × 場コードの 1 行を D1 から読む(表が無い間は読み出しが失敗して値なしで続ける)。
       babaReader: new D1BabaStore({ db: env.DB }),

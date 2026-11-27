@@ -57,6 +57,8 @@ interface FakeJra extends JraOddsFetcher {
   fetchOdds: string[];
   /** n 回目(1 始まり)の頁の取得の結果。null なら見本の頁。 */
   oddsResult: (nth: number) => JraOddsResult<string> | null;
+  /** 開催選択の結果(Issue #804)。null なら見本。 */
+  venuesResult: () => JraOddsResult<JraOddsVenueLink[]> | null;
   throwOnOpen: boolean;
 }
 function fakeJra(): FakeJra {
@@ -65,6 +67,7 @@ function fakeJra(): FakeJra {
     listVenues: 0,
     fetchOdds: [],
     oddsResult: () => null,
+    venuesResult: () => null,
     throwOnOpen: false,
     open(): JraOddsSession {
       jra.opens += 1;
@@ -77,7 +80,7 @@ function fakeJra(): FakeJra {
         async listVenues() {
           sent += 1;
           jra.listVenues += 1;
-          return { status: "ok", value: [VENUE] };
+          return jra.venuesResult() ?? { status: "ok", value: [VENUE] };
         },
         async listRaces() {
           sent += 1;
@@ -107,6 +110,8 @@ interface Harness {
   /** Issue #796: 保存後のフック(別の Worker への依頼)の呼び出しの記録。呼ばれた時点の行の状態も残す。 */
   readonly hookCalls: { raceId: string; leadMin: number; stateAtCall: string | undefined }[];
   hookThrows: boolean;
+  /** Issue #804: 拠点(段に渡す関数の返り値)。 */
+  colo: string | null;
 }
 let sql: NodeSql | null = null;
 afterEach(() => {
@@ -121,7 +126,7 @@ function harness(startNow = DUE): Harness {
   const cache = new Map<string, { value: string; fetchedAt: number }>();
   const saved: OddsSnapshotPayload[] = [];
   const warns: string[] = [];
-  const h = { jra, saved, warns, cache, clock, store, saveFailures: 0, hookCalls: [], hookThrows: false } as unknown as Harness;
+  const h = { jra, saved, warns, cache, clock, store, saveFailures: 0, hookCalls: [], hookThrows: false, colo: null } as unknown as Harness;
   const sink: OddsSnapshotSink = {
     async save(p) {
       if (h.saveFailures > 0) {
@@ -137,6 +142,7 @@ function harness(startNow = DUE): Harness {
     onWarn: (m) => warns.push(m),
     sink,
     fetcher: jra,
+    colo: () => h.colo,
     cache: { get: (k) => cache.get(k), set: (k, v) => void cache.set(k, { value: v, fetchedAt: clock.now }) },
     onSaved: async (raceId, leadMin) => {
       h.hookCalls.push({ raceId, leadMin, stateAtCall: store.rows().find((r) => r.race_id === raceId && r.lead_min === leadMin)?.state });
@@ -744,5 +750,85 @@ describe("保存後のフック(別の Worker への依頼。Issue #796)", () =>
     expect(rowOf(h, 5).state).toBe("done");
     expect(h.saved).toHaveLength(1);
     expect(h.hookCalls).toHaveLength(1);
+  });
+});
+
+
+describe("Issue #804: 失敗の行の詳細(fail_detail の元。payload.failDetail)", () => {
+  const detailOf = (h: Harness): string | null | undefined => h.saved[0]!.failDetail;
+  const failing = (info: { kind: string; http: number | null }, status = "network"): JraOddsResult<string> => ({ status, failInfo: info } as unknown as JraOddsResult<string>);
+
+  it("単勝・複勝の頁が HTTP 403(配信の防御の形)で failed: 頁・種類・HTTP の状態・拠点を JSON で残す。status・reason は変えない", async () => {
+    const h = harness(START - 1_000);
+    h.colo = "NRT";
+    h.jra.oddsResult = () => failing({ kind: "blocked", http: 403 }, "http-403");
+    await registerAndRun(h);
+    expect(h.saved[0]).toMatchObject({ status: "failed", reason: "fetch-failed" });
+    expect(detailOf(h)).toBe('{"p":"tanpuku","k":"blocked","h":403,"c":"NRT"}');
+  });
+  it("拠点が取れていない(null)ときは c を出さない。応答が来ない失敗は h も出さない", async () => {
+    const h = harness(START - 1_000);
+    h.jra.oddsResult = () => failing({ kind: "dns", http: null });
+    await registerAndRun(h);
+    expect(detailOf(h)).toBe('{"p":"tanpuku","k":"dns"}');
+  });
+  it("試行を重ねたときは最後の試行の詳細(4 回目)。1〜3 回目の詳細は残さない", async () => {
+    const h = harness();
+    const kinds = ["timeout", "reset", "dns", "blocked"];
+    h.jra.oddsResult = (n) => failing({ kind: kinds[n - 1]!, http: n === 4 ? 403 : null }, n === 4 ? "http-403" : "network");
+    h.stage.register(RACE, DATE, START);
+    for (let n = 1; n <= 3; n += 1) {
+      await h.stage.runStep(rowOf(h, 5));
+      h.clock.now += ODDS_SNAPSHOT_FETCH_RETRY_DELAY_MS;
+    }
+    await h.stage.runStep(rowOf(h, 5));
+    expect(detailOf(h)).toBe('{"p":"tanpuku","k":"blocked","h":403}');
+  });
+  it("開催選択の失敗(場・レースのリンクが無い最初のレース)も詳細が届く。頁の語は discover", async () => {
+    const h = harness(START - 1_000);
+    h.jra.venuesResult = () => ({ status: "network", failInfo: { kind: "reset", http: null } });
+    await registerAndRun(h);
+    expect(h.saved[0]).toMatchObject({ status: "failed", reason: "fetch-failed" });
+    expect(detailOf(h)).toBe('{"p":"discover","k":"reset"}');
+    expect(h.jra.fetchOdds).toEqual([]); // 前提: 頁は 1 本も送っていない
+  });
+  it("詳細の無い失敗(頁が読めない)は種類 unknown。HTTP の状態は出さない", async () => {
+    const h = harness(START - 1_000);
+    h.jra.oddsResult = () => ({ status: "ok", value: "<html><title>x</title></html>" });
+    await registerAndRun(h);
+    expect(detailOf(h)).toBe('{"p":"tanpuku","k":"unknown"}');
+  });
+  it("取得口が例外を投げた(段が握る)ときは unknown。例外の文面は入らない", async () => {
+    const h = harness(START - 1_000);
+    h.jra.throwOnOpen = true;
+    await registerAndRun(h);
+    expect(detailOf(h)).toBe('{"p":"tanpuku","k":"unknown"}');
+    expect(JSON.stringify(h.saved[0])).not.toMatch(/secret|example\.invalid|cname/);
+  });
+  it("取れた(ok)行と、取らなかった(skipped・too-late)行には詳細を付けない", async () => {
+    const ok = harness();
+    await registerAndRun(ok);
+    expect(ok.saved[0]!.status).toBe("ok");
+    expect(detailOf(ok)).toBeUndefined();
+    const five = Date.parse("2026-11-15T05:00:00+09:00");
+    const late = harness(five);
+    late.store.register({ raceId: RACE, kaisaiDate: DATE, startMs: START, now: Date.parse("2026-11-14T21:10:00+09:00") });
+    await late.stage.runStep(rowOf(late, -1));
+    expect(late.saved).toHaveLength(1);
+    expect(late.saved[0]).toMatchObject({ status: "skipped", reason: "too-late" });
+    expect(late.saved[0]!.failDetail).toBeUndefined();
+  });
+  it("単勝・複勝が取れて組合せの頁だけ失敗しても、ok の行に詳細は付かない(組合せの失敗は combos の {err} に残る)", async () => {
+    const h = harness();
+    h.jra.oddsResult = (n) => (n >= 2 ? failing({ kind: "blocked", http: 403 }, "http-403") : null);
+    await registerAndRun(h);
+    expect(h.saved[0]).toMatchObject({ status: "ok" });
+    expect(detailOf(h)).toBeUndefined();
+  });
+  it("D1 に保存する形(DO の payload_json)にも詳細が残り、読み戻せる", async () => {
+    const h = harness(START - 1_000);
+    h.jra.oddsResult = () => failing({ kind: "timeout", http: null }, "timeout");
+    await registerAndRun(h);
+    expect(parseOddsSnapshotPayload(rowOf(h, 5).payload_json!)?.failDetail).toBe('{"p":"tanpuku","k":"timeout"}');
   });
 });
