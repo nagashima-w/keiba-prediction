@@ -8,14 +8,14 @@
  * **カードの行は「最新の板」(ポーリング・起動のオーバーレイを反映したもの)から導く**(Issue #186。`race-data.ts` の `raceStatusSource` が `status.rows` に渡す。`status?race_id=` は prior と板の初期値)。
  * 状態(`status?race_id=`)と過去の分析(`GET /api/analyses`)の取得は互いに独立(片方の失敗で、もう片方を隠さない)。
  */
-import { formatPercent } from "../../packages/core/src/view/format";
+import { formatEv, formatPercent, LABEL_PRIOR } from "../../packages/core/src/view/format";
 import type { BoardRow, MorningPriorView, RaceRow, TaskMode, TaskStatus } from "./api";
-import type { PastAnalysis } from "./api-analysis";
+import type { PastAnalysis, RaceModelBlock } from "./api-analysis";
 import { formatJstDateTime } from "./date";
 import { nameWithGrade } from "./grade";
 import { badgeOf, pick, type Badge } from "./badge";
 import { breadcrumbOf, neighborsOf, type Crumb, type RaceNeighbors } from "./neighbors";
-import { contentOf, type HorseSort, type ResultContent, type ResultSource } from "./result";
+import { contentOf, courseFitLinesOf, courseSectionOf, formatModelAux, modelColumnLabels, NO_MARKET_VALUE, type CourseSection, type HorseSort, type ResultContent, type ResultSource } from "./result";
 import { buildHash, type Route } from "./route";
 
 export type RaceStatusSource =
@@ -27,6 +27,8 @@ export type RaceStatusSource =
       readonly prior: MorningPriorView | null;
       /** prior の取り直し(朝の完了のあと)に失敗した注記(カードは残す)。省略は無し。 */
       readonly priorNotice?: string | null;
+      /** 別の Worker の確率の塊(Issue #806。`status?race_id=` の `model`)。無ければ省略(節を出さない)。 */
+      readonly model?: RaceModelBlock;
     };
 
 export type PastSource =
@@ -140,7 +142,40 @@ export interface RaceModel {
   /** 追跡の停止の注記(「状態を更新」つき)。止まっていないとき null。 */
   readonly tracking: string | null;
   readonly past: PastModel;
+  /** 別の Worker の確率の節(Issue #806。事前分析のカードの下)。出さないとき null。 */
+  readonly modelSection: ModelSection | null;
 }
+
+/** 別の Worker の確率の節の列。`key` は列の中身の種類(画面が行の値を引く)。 */
+export interface ModelSectionColumn {
+  readonly key: "umaban" | "name" | "prior" | "prob" | "ev" | "aux";
+  readonly label: string;
+}
+
+/** 別の Worker の確率の節の 1 行(馬番の昇順)。`name`・`prior` は朝の prior があるときだけ(無ければ null)。値の無いセルは「—」。 */
+export interface ModelSectionRow {
+  readonly umaban: number;
+  readonly name: string | null;
+  readonly prior: string | null;
+  readonly prob: string;
+  readonly ev: string;
+  readonly aux: string;
+}
+
+/**
+ * 事前分析のカードの下に出す「別の Worker の確率」の節(Issue #806)。計算なしは注記だけ(`columns`・`rows`・`fits` は空・`course` は null)。
+ * `fits` は「馬番 馬名: 同じコース: … / 似たコース: …」(成績を持つ馬だけ)。
+ */
+export interface ModelSection {
+  readonly heading: string;
+  readonly note: string;
+  readonly columns: readonly ModelSectionColumn[];
+  readonly rows: readonly ModelSectionRow[];
+  readonly fits: readonly string[];
+  readonly course: CourseSection | null;
+}
+
+export const MODEL_SECTION_HEADING = "別の Worker の確率";
 
 const ERROR_MAX = 200;
 
@@ -260,6 +295,48 @@ function card(
   };
 }
 
+/**
+ * 「別の Worker の確率」の節(Issue #806)。発走前の分析が済んでいる(`latestAnalysisIdOf` が非 null。詳しい中身の表に同じ列が出る)ときは出さない。
+ * 馬名・3着内率は、事前分析のカードに出す prior があるときだけ(`priorItems`。無ければ列も名前も出さない。相手の応答の文字列は使わない)。
+ */
+function modelSectionOf(route: Route, rows: readonly BoardRow[], block: RaceModelBlock | undefined, priorItems: readonly PriorItem[] | null): ModelSection | null {
+  if (block === undefined || latestAnalysisIdOf(rows, route.race!) !== null) return null;
+  if (block.status === "none") {
+    return { heading: MODEL_SECTION_HEADING, note: block.note, columns: [], rows: [], fits: [], course: null };
+  }
+  const provisional = block.stage === "preday" || block.stage === "provisional";
+  const labels = modelColumnLabels(provisional);
+  const hasAux = block.horses.some((h) => h.aux !== null);
+  const byUmaban = new Map((priorItems ?? []).map((p) => [p.umaban, p]));
+  const columns: ModelSectionColumn[] = [
+    { key: "umaban", label: "馬番" },
+    { key: "name", label: "馬名" },
+    ...(priorItems === null ? [] : [{ key: "prior" as const, label: LABEL_PRIOR }]),
+    { key: "prob", label: labels.prob },
+    { key: "ev", label: labels.ev },
+    ...(hasAux ? [{ key: "aux" as const, label: labels.aux }] : []),
+  ];
+  const sorted = [...block.horses].sort((a, b) => a.umaban - b.umaban);
+  const tableRows = sorted.map((h) => {
+    const p = byUmaban.get(h.umaban);
+    return {
+      umaban: h.umaban,
+      name: p?.name ?? null,
+      prior: priorItems === null ? null : (p?.value ?? NO_MARKET_VALUE),
+      prob: formatPercent(h.prob),
+      ev: h.ev === null ? NO_MARKET_VALUE : formatEv(h.ev),
+      aux: h.aux === null ? NO_MARKET_VALUE : formatModelAux(h.aux),
+    };
+  });
+  const fits = sorted.flatMap((h) => {
+    const lines = courseFitLinesOf(h.courseFit);
+    if (lines === null) return [];
+    const name = byUmaban.get(h.umaban)?.name;
+    return [`${h.umaban}${name === null || name === undefined ? "" : ` ${name}`}: ${lines.same} / ${lines.similar}${lines.ring === null ? "" : ` / ${lines.ring}`}`];
+  });
+  return { heading: MODEL_SECTION_HEADING, note: block.note, columns, rows: tableRows, fits, course: courseSectionOf(block.course) };
+}
+
 export function buildRaceModel(input: RaceModelInput): RaceModel {
   const { route, status, past, listRow } = input;
   const prior = status.kind === "ready" ? status.prior : null;
@@ -267,6 +344,7 @@ export function buildRaceModel(input: RaceModelInput): RaceModel {
     status.kind === "ready"
       ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true, input.readOnly === true, input.notesOpen === true, input.horseSort, input.openHorses ?? []))
       : null;
+  const modelSection = status.kind === "ready" ? modelSectionOf(route, status.rows, status.model, cards?.[0]?.prior ?? null) : null;
   return {
     kind: "race",
     title: titleOf(route, listRow, prior),
@@ -279,6 +357,7 @@ export function buildRaceModel(input: RaceModelInput): RaceModel {
     cards,
     guide: cards !== null && input.readOnly !== true ? RACE_GUIDE : null,
     tracking: input.tracking ?? null,
+    modelSection,
     past:
       past.kind === "ready"
         ? {

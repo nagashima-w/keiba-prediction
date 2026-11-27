@@ -125,12 +125,12 @@ function courseRecordText(r: AnalysisCourseRecord): string {
   return `${r.runs}走 ${r.wins}勝 3着内${r.top3}${r.best === null ? "" : `(最高${r.best}着)`}`;
 }
 
-function courseFitLinesOf(fit: AnalysisCourseFit | undefined): CourseFitLines | null {
+export function courseFitLinesOf(fit: AnalysisCourseFit | undefined): CourseFitLines | null {
   if (fit === undefined) return null;
   return { same: `同じコース: ${courseRecordText(fit.same)}`, similar: `似たコース: ${courseRecordText(fit.similar)}`, ring: fit.unknownRing >= 1 ? `回りの決まらない過去走: ${fit.unknownRing}` : null };
 }
 
-function courseSectionOf(course: AnalysisCourse | undefined): CourseSection | null {
+export function courseSectionOf(course: AnalysisCourse | undefined): CourseSection | null {
   if (course === undefined) return null;
   const list = (label: string, items: readonly string[] | null): CourseListView | null => (items === null || items.length === 0 ? null : { label, items });
   return {
@@ -495,7 +495,12 @@ export function signedPtText(diff: number): string {
   return text === "0.0pt" ? "±0.0pt" : text;
 }
 
-const NO_MARKET_VALUE = "—";
+export const NO_MARKET_VALUE = "—";
+
+/** 別の Worker の確率の列の見出し(馬ごとの評価の表〈Issue #796・#800・#805〉と、レースの画面の「別の Worker の確率」の節〈Issue #806〉が共有する)。暫定(確定以外の段階)は「暫定」付き。 */
+export function modelColumnLabels(provisional: boolean): { readonly prob: string; readonly ev: string; readonly aux: string } {
+  return provisional ? { prob: "確率(暫定)", ev: "確率×単勝(暫定)", aux: "補助(暫定)" } : { prob: "確率(別計算)", ev: "確率×5分前単勝", aux: "補助(別計算)" };
+}
 
 /** 騎手か調教師の 1 つのセル(Issue #643)。値と件数は対(片方だけは来ない。パーサが保証)。 */
 function marketCellOf(p: MarketEdgePerson): MarketEdgeCell {
@@ -617,9 +622,9 @@ function horseTableOf(horses: readonly HorseCard[], llmEffective: boolean, oddsS
     // 暫定(確定以外の段階。Issue #800)は見出しに「暫定」を付ける。符号の列は、1 頭でも符号を持つときだけ(第 2 版より前の応答は今までの表のまま)。
     ...(showModel
       ? [
-          { key: "modelProb" as const, label: provisional ? "確率(暫定)" : "確率(別計算)", sort: null },
-          { key: "modelEv" as const, label: provisional ? "確率×単勝(暫定)" : "確率×5分前単勝", sort: null },
-          ...(horses.some((x) => x.model.aux !== NO_MARKET_VALUE) ? [{ key: "modelAux" as const, label: provisional ? "補助(暫定)" : "補助(別計算)", sort: null }] : []),
+          { key: "modelProb" as const, label: modelColumnLabels(provisional).prob, sort: null },
+          { key: "modelEv" as const, label: modelColumnLabels(provisional).ev, sort: null },
+          ...(horses.some((x) => x.model.aux !== NO_MARKET_VALUE) ? [{ key: "modelAux" as const, label: modelColumnLabels(provisional).aux, sort: null }] : []),
         ]
       : []),
   ];

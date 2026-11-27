@@ -2187,3 +2187,91 @@ const HORSES_FOR_SIGN = [
   { umaban: 1, name: "アルファ", prior: 0.3, adjustedProb: 0.2, placeOddsMin: 3.0, ev: 0.9, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: 12.0, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
   { umaban: 2, name: "ブラボー", prior: 0.5, adjustedProb: 0.6, placeOddsMin: null, ev: 1.4, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: 3.5, fairPlaceOdds: null, actualPlaceOddsMin: null, actualPlaceOddsMax: null },
 ];
+
+/**
+ * Issue #806: 事前分析のカードの下の「別の Worker の確率」の節の VNode。モデル(`modelSection`。race.test が検証)の写し間違い(出し忘れ・出しすぎ・順序)と、外から来た文字列がテキストノードだけであること。
+ * 新しい部品は足さず、馬ごとの評価の表と同じ枠・注記・コースの欄の class を使う。
+ */
+describe("別の Worker の確率の節の VNode(Issue #806)", () => {
+  const FIT = { same: { runs: 2, wins: 1, top3: 2, best: 1 }, similar: { runs: 0, wins: 0, top3: 0, best: null }, unknownRing: 0 };
+  const BLOCK = {
+    status: "ok" as const,
+    stage: "preday" as const,
+    note: "注記 <b>太字</b>",
+    horses: [
+      { umaban: 3, prob: 0.25, ev: 2, aux: { value: 0.3, rank: 1, of: 2 }, courseFit: FIT },
+      { umaban: 1, prob: 0.05, ev: null, aux: null },
+    ],
+    course: { name: "東京 芝1600", similarShape: [{ name: "中山 芝2000", s: 0.5 }], similarResults: null },
+  };
+  const tree = (model: unknown, rows: unknown[] = [row("morning", "done", { prior: true })], prior: unknown = PRIOR_VIEW): VNode =>
+    renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior, ...(model === undefined ? {} : { model }) } as RaceModelInput["status"] })), noopActions);
+  const sectionOf = (t: VNode): VNode => {
+    const found = byClass(t, "model-section");
+    expect(found, "前提: 節が 1 つ出る").toHaveLength(1);
+    return found[0]!;
+  };
+
+  it("model が無ければ節を出さない", () => {
+    expect(byClass(tree(undefined), "model-section")).toHaveLength(0);
+  });
+
+  it("見出し・表(列は馬番・馬名・3着内率・確率・確率×単勝・補助)・注記・各馬の成績・コースの欄が、この順で出る。表は馬ごとの評価の表の枠と同じ class", () => {
+    const sec = sectionOf(tree(BLOCK));
+    expect(sec.tag).toBe("section");
+    expect(textOf(findAll(sec, (n) => n.tag === "h2")[0]!)).toBe("別の Worker の確率");
+    const ths = findAll(sec, (n) => n.tag === "th").map(textOf);
+    expect(ths).toEqual(["馬番", "馬名", "3着内率", "確率(暫定)", "確率×単勝(暫定)", "補助(暫定)"]);
+    const trs = findAll(sec, (n) => n.tag === "tr" && findAll(n, (c) => c.tag === "td").length > 0);
+    expect(trs.map((r) => findAll(r, (c) => c.tag === "td").map(rawTextOf))).toEqual([
+      ["1", "", "—", "5.0%", "—", "—"],
+      ["3", "アルファ", "52.3%", "25.0%", "2.00", "+0.30(1位/2頭)"],
+    ]);
+    expect(byClass(sec, "horse-table-wrap")).toHaveLength(1);
+    expect(byClass(sec, "horse-table")).toHaveLength(1);
+    expect(byClass(sec, "sort-button"), "並べ替えのボタンは無い").toHaveLength(0);
+    const fits = byClass(sec, "points-list").filter((n) => (n.attrs?.["class"] ?? "").toString().includes("model-fits"));
+    expect(fits).toHaveLength(1);
+    expect(fits[0]!.children!.map(rawTextOf)).toEqual(["3 アルファ: 同じコース: 2走 1勝 3着内2(最高1着) / 似たコース: 0走"]);
+    expect(byClass(sec, "course-ref")).toHaveLength(1);
+    const order = (sec.children ?? []).map((c) => (typeof c === "string" ? "" : `${c.tag}.${c.attrs?.["class"] ?? ""}`));
+    const at = (needle: string): number => order.findIndex((o) => o.includes(needle));
+    expect([at("horse-table-wrap"), at("market-note"), at("model-fits"), at("course-ref")].every((i) => i >= 0), `前提: すべて子にある ${JSON.stringify(order)}`).toBe(true);
+    expect(at("horse-table-wrap")).toBeLessThan(at("market-note"));
+    expect(at("market-note")).toBeLessThan(at("model-fits"));
+    expect(at("model-fits")).toBeLessThan(at("course-ref"));
+  });
+
+  it("事前分析のカードの直後・発走前のカードの前に置く", () => {
+    const t = tree(BLOCK);
+    const kids = (findAll(t, (n) => (n.attrs?.["class"] ?? "").toString() === "screen")[0]!.children ?? []).filter((c): c is VNode => typeof c !== "string");
+    const titles = kids.filter((c) => c.tag === "section" && !(c.attrs?.["class"] ?? "").toString().includes("past-section")).map((c) => (byClass(c, "model-section").length > 0 || (c.attrs?.["class"] ?? "").toString().includes("model-section") ? "model" : textOf(findAll(c, (n) => n.tag === "h2")[0]!)));
+    expect(titles).toEqual(["事前分析", "model", "発走前"]);
+  });
+
+  it("外から来た文字列(注記・馬名・コース名)は、要素にならず文字のまま(実 DOM のアダプタで作れる)", () => {
+    const t = tree({ ...BLOCK, course: { name: "<i>東京</i> 芝1600", similarShape: null, similarResults: null } });
+    expect(findAll(t, (n) => n.tag === "b" || n.tag === "i")).toHaveLength(0);
+    const { tags, texts } = mountAll(t);
+    expect(tags).not.toContain("b");
+    expect(tags).not.toContain("i");
+    expect(texts).toContain("注記 <b>太字</b>");
+    expect(texts.some((x) => x.includes("<i>東京</i>"))).toBe(true);
+  });
+
+  it("計算なしは、見出しと注記だけ(表・成績・コースの欄は出さない)。prior が無くても出る", () => {
+    const sec = sectionOf(tree({ status: "none", stage: null, note: "計算なし(準備中)", horses: [] }, [], null));
+    expect(byClass(sec, "horse-table-wrap")).toHaveLength(0);
+    expect(byClass(sec, "course-ref")).toHaveLength(0);
+    expect(findAll(sec, (n) => n.tag === "table")).toHaveLength(0);
+    expect(textOf(byClass(sec, "market-note")[0]!)).toBe("計算なし(準備中)");
+  });
+
+  it("発走前の分析が済んでいるときは、節を出さない(馬ごとの評価の表と二重にしない)", () => {
+    const t = renderScreen(
+      buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 12 })], prior: null, model: BLOCK }, result: { kind: "ready", analysis: analysis({ id: 12 }) } })),
+      noopActions,
+    );
+    expect(byClass(t, "model-section")).toHaveLength(0);
+  });
+});

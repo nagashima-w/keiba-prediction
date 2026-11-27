@@ -307,6 +307,31 @@ export async function loadModelResult(deps: LoadModelDeps, raceId: string, warn:
   return { column: buildModelColumn(parsed, win5), course };
 }
 
+/**
+ * レースの画面の状態の応答(`GET /api/analyses/status?race_id=`。Issue #806)に足す、検査済みの塊。馬ごとの確率・確率×単勝・補助・コース成績と、コース・段階・注記。
+ * 計算なし(`status: "none"`)は注記だけ(馬の配列は空)。`loadModelResult` が null(地方・バインディングなし)なら null(応答にキーを足さない)。
+ */
+export interface ModelBlock {
+  readonly status: "ok" | "none";
+  readonly stage: ModelStage | null;
+  readonly note: string;
+  readonly horses: readonly { readonly umaban: number; readonly prob: number; readonly ev: number | null; readonly aux: ModelAux | null; readonly courseFit?: CourseFit }[];
+  readonly course?: CourseView;
+}
+
+export function modelBlockOf(result: ModelResult | null): ModelBlock | null {
+  if (result === null) return null;
+  const { column, course } = result;
+  if (column.status === "none") {
+    return { status: "none", stage: null, note: column.note, horses: [] };
+  }
+  const horses = [...column.byUmaban].map(([umaban, cell]) => {
+    const fit = course?.fits.get(umaban);
+    return { umaban, prob: cell.prob, ev: cell.ev, aux: cell.aux, ...(fit === undefined ? {} : { courseFit: fit }) };
+  });
+  return { status: "ok", stage: column.stage, note: column.note, horses, ...(course?.course == null ? {} : { course: course.course }) };
+}
+
 /** 確率の列だけ(従来の入口。{@link loadModelResult} の薄い包み)。 */
 export async function loadModelColumn(deps: LoadModelDeps, raceId: string, warn: (message: string) => void): Promise<ModelColumn | null> {
   return (await loadModelResult(deps, raceId, warn))?.column ?? null;

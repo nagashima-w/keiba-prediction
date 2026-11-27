@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { failureMessage, fetchRaceStatus, parseRaceStatusResponse, type ApiFailure, type FetchLike } from "../client/api";
-import { fetchAnalysis, fetchPastAnalyses, parseAnalysisResponse, parsePastAnalysesResponse } from "../client/api-analysis";
+import { fetchAnalysis, fetchPastAnalyses, fetchRaceStatusWithModel, parseAnalysisResponse, parsePastAnalysesResponse, parseRaceModelBlock } from "../client/api-analysis";
 
 /**
  * Issue #185: レース画面・結果画面の API 応答のパーサと取得関数(`status?race_id=`・`GET /api/analyses`・`GET /api/analyses/{id}`)。純関数・偽の fetch。
@@ -871,5 +871,95 @@ describe("コースの参考情報(Issue #802)のパース", () => {
     expect(h).not.toBeNull();
     expect(h.umaban).toBe(1);
     expect(h).not.toHaveProperty("courseFit");
+  });
+});
+
+describe("#806 parseRaceModelBlock(status?race_id= の model)", () => {
+  const FIT = { same: { runs: 2, wins: 1, top3: 2, best: 1 }, similar: { runs: 0, wins: 0, top3: 0, best: null }, unknownRing: 0 };
+  const GOOD = {
+    status: "ok",
+    stage: "preday",
+    note: "別の Worker の暫定の確率(前日の計算)。",
+    horses: [
+      { umaban: 1, prob: 0.25, ev: 2, aux: { value: 0.3, rank: 1, of: 2 }, courseFit: FIT },
+      { umaban: 2, prob: 0.5, ev: null, aux: null },
+    ],
+    course: { name: "東京 芝1600", similarShape: [{ name: "中山 芝2000", s: 0.5 }], similarResults: [{ name: "阪神 ダ1800", s: 0.25, n: 12 }] },
+  };
+
+  it("正しい塊は、値を保って読む(courseFit・course は任意)", () => {
+    const m = parseRaceModelBlock({ ok: true, model: GOOD });
+    expect(m).not.toBeNull();
+    expect(m!.status).toBe("ok");
+    expect(m!.stage).toBe("preday");
+    expect(m!.horses).toHaveLength(2);
+    expect(m!.horses[0]).toEqual({ umaban: 1, prob: 0.25, ev: 2, aux: { value: 0.3, rank: 1, of: 2 }, courseFit: FIT });
+    expect(m!.horses[1]).toEqual({ umaban: 2, prob: 0.5, ev: null, aux: null });
+    expect(m!.course).toEqual(GOOD.course);
+    const bare = parseRaceModelBlock({ model: { status: "ok", stage: "final", note: "n", horses: [{ umaban: 3, prob: 0.1, ev: null, aux: null }] } });
+    expect(bare).toEqual({ status: "ok", stage: "final", note: "n", horses: [{ umaban: 3, prob: 0.1, ev: null, aux: null }] });
+  });
+
+  it("計算なしは、注記だけ(馬は空)", () => {
+    expect(parseRaceModelBlock({ model: { status: "none", stage: null, note: "計算なし(理由不明)", horses: [] } })).toEqual({ status: "none", stage: null, note: "計算なし(理由不明)", horses: [] });
+  });
+
+  it("model のキーが無い・null・オブジェクトでない本文は null(何も出さない)", () => {
+    expect(parseRaceModelBlock({ ok: true })).toBeNull();
+    expect(parseRaceModelBlock({ model: null })).toBeNull();
+    expect(parseRaceModelBlock(undefined)).toBeNull();
+    expect(parseRaceModelBlock("x")).toBeNull();
+  });
+
+  it.each([
+    ["status が不明", { ...GOOD, status: "maybe" }],
+    ["stage が不明", { ...GOOD, stage: "later" }],
+    ["note が空", { ...GOOD, note: "" }],
+    ["note が文字列でない", { ...GOOD, note: 1 }],
+    ["horses が配列でない", { ...GOOD, horses: "x" }],
+    ["none なのに馬がある", { ...GOOD, status: "none", stage: null }],
+    ["ok なのに馬が空", { ...GOOD, horses: [] }],
+    ["umaban が小数", { ...GOOD, horses: [{ umaban: 1.5, prob: 0.2, ev: null, aux: null }] }],
+    ["umaban が重複", { ...GOOD, horses: [{ umaban: 1, prob: 0.2, ev: null, aux: null }, { umaban: 1, prob: 0.3, ev: null, aux: null }] }],
+    ["prob が 1 を超える", { ...GOOD, horses: [{ umaban: 1, prob: 1.1, ev: null, aux: null }] }],
+    ["prob が文字列", { ...GOOD, horses: [{ umaban: 1, prob: "0.2", ev: null, aux: null }] }],
+    ["ev が文字列", { ...GOOD, horses: [{ umaban: 1, prob: 0.2, ev: "2", aux: null }] }],
+    ["aux の順位が頭数を超える", { ...GOOD, horses: [{ umaban: 1, prob: 0.2, ev: null, aux: { value: 0.1, rank: 3, of: 2 } }] }],
+    ["一部の馬だけ不正(正しい馬があっても全体を捨てる)", { ...GOOD, horses: [GOOD.horses[0], { umaban: 2, prob: 2, ev: null, aux: null }] }],
+  ])("不正(%s)は塊ごと null。一部だけを黙って出さない", (_name, model) => {
+    expect(parseRaceModelBlock({ model })).toBeNull();
+  });
+
+  it("崩れた courseFit は、その馬の欄だけ落とす。崩れた course は course だけ落とす(確率の表は残す)", () => {
+    const m = parseRaceModelBlock({ model: { ...GOOD, horses: [{ ...GOOD.horses[0], courseFit: { same: 1 } }, GOOD.horses[1]], course: { name: "" } } });
+    expect(m).not.toBeNull();
+    expect(m!.horses[0]!.courseFit).toBeUndefined();
+    expect(m!.horses[0]!.prob).toBe(0.25);
+    expect(m!.course).toBeUndefined();
+  });
+});
+
+describe("#806 fetchRaceStatusWithModel", () => {
+  const reply = (body: unknown, status = 200): FetchLike => async () => ({ status, json: async () => body });
+
+  it("fetchRaceStatus と同じ URL・同じ結果に、model を足す。model が無ければキーを足さない", async () => {
+    const calls: string[] = [];
+    const fetchLike: FetchLike = async (url) => {
+      calls.push(url);
+      return { status: 200, json: async () => ({ ok: true, races: [], prior: null, model: { status: "none", stage: null, note: "n", horses: [] } }) };
+    };
+    const got = await fetchRaceStatusWithModel(fetchLike, "20260628", "202603020211");
+    expect(calls).toEqual(["/api/analyses/status?kaisai_date=20260628&race_id=202603020211"]);
+    expect(got).toEqual({ ok: true, rows: [], prior: null, model: { status: "none", stage: null, note: "n", horses: [] } });
+    expect(await fetchRaceStatusWithModel(reply({ ok: true, races: [], prior: null }), "20260628", "202603020211")).toEqual({ ok: true, rows: [], prior: null });
+  });
+
+  it("model だけが壊れていても、板と prior は読む(想定外の応答にしない)。板が壊れていれば unexpected・通信失敗は network", async () => {
+    expect(await fetchRaceStatusWithModel(reply({ ok: true, races: [], prior: null, model: { status: "zzz" } }), "20260628", "202603020211")).toEqual({ ok: true, rows: [], prior: null });
+    expect(await fetchRaceStatusWithModel(reply({ ok: true, races: [] }), "20260628", "202603020211")).toEqual({ ok: false, error: { kind: "unexpected", httpStatus: 200 } });
+    const failing: FetchLike = async () => {
+      throw new TypeError("x");
+    };
+    expect(await fetchRaceStatusWithModel(failing, "20260628", "202603020211")).toEqual({ ok: false, error: { kind: "network" } });
   });
 });

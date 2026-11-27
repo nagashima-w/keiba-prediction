@@ -200,6 +200,28 @@ describe("createRaceData: 取得は冪等で、完了したら再描画を要求
     expect(f.calls).toHaveLength(3);
   });
 
+  it("#806 状態の応答の model を、状態のソース(ready)に載せる。無い・壊れていれば載せない(キーも増やさない)", async () => {
+    const block = { status: "none", stage: null, note: "計算なし", horses: [] };
+    const f = fixture();
+    f.replies.set(STATUS_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], prior: null, model: block }));
+    f.replies.set(PAST_URL, () => ok({ ok: true, analyses: [] }));
+    f.replies.set(RACES_URL, () => ok(racesBody));
+    f.data.ensureRace(DATE, RACE_ID, "central");
+    await Promise.all(f.data.pending());
+    const src = f.data.raceStatusSource(DATE, RACE_ID);
+    expect(src.kind === "ready" && src.model).toEqual(block);
+
+    const g = fixture();
+    g.replies.set(STATUS_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], prior: null, model: { status: "ok" } }));
+    g.replies.set(PAST_URL, () => ok({ ok: true, analyses: [] }));
+    g.replies.set(RACES_URL, () => ok(racesBody));
+    g.data.ensureRace(DATE, RACE_ID, "central");
+    await Promise.all(g.data.pending());
+    const bad = g.data.raceStatusSource(DATE, RACE_ID);
+    expect(bad.kind).toBe("ready");
+    expect(bad.kind === "ready" && "model" in bad).toBe(false);
+  });
+
   it("ensureRace の一覧は一覧の画面と同じキャッシュ・門を使う: ensureList で取ってあれば取らず、ensureRace で取ったあとの ensureList も一覧を取り直さない(板だけ取る)。区分ごとに別", async () => {
     const f = fixture();
     f.replies.set(STATUS_URL, () => ok({ ok: true, kaisai_date: DATE, races: [], prior: null }));

@@ -9,7 +9,7 @@
  */
 import type { StoredAllocationBetView, StoredAllocationView } from "../../packages/core/src/analysis/analysis-types";
 import { MARK_ORIGIN_VALUES } from "../../packages/core/src/view/format";
-import { classify, getJson, isNum, isRecord, isStr, isStrArr, numOrNull, strOrNull, type ApiFailure, type FetchLike } from "./api";
+import { classify, fetchRaceStatus, getJson, isNum, isRecord, isStr, isStrArr, numOrNull, strOrNull, type ApiFailure, type FetchLike, type RaceStatusResult } from "./api";
 
 /** 過去の分析の一覧の 1 件(`GET /api/analyses` の要約から、画面に使う項目だけ)。 */
 export interface PastAnalysis {
@@ -630,4 +630,61 @@ export async function fetchPastAnalyses(fetchLike: FetchLike, date: string, race
 export async function fetchAnalysis(fetchLike: FetchLike, id: number): Promise<AnalysisResult> {
   const got = await getJson(fetchLike, `/api/analyses/${id}`);
   return got === null ? { ok: false, error: { kind: "network" } } : parseAnalysisResponse(got.status, got.body);
+}
+
+/** レースの画面の状態の応答に足される、別の Worker の確率の塊(Issue #806)。馬ごとの値は `AnalysisHorse` の `modelProb`・`modelEv`・`modelAux`・`courseFit` と同じ意味。`none` は注記だけ(馬は空)。 */
+export interface RaceModelBlock {
+  readonly status: "ok" | "none";
+  readonly stage: "final" | "preday" | "provisional" | null;
+  readonly note: string;
+  readonly horses: readonly { readonly umaban: number; readonly prob: number; readonly ev: number | null; readonly aux: { readonly value: number; readonly rank: number; readonly of: number } | null; readonly courseFit?: AnalysisCourseFit }[];
+  readonly course?: AnalysisCourse;
+}
+
+/**
+ * 状態の応答(本文全体)から `model` を読む。無い・形が崩れている・馬の 1 頭でも不正なら null(何も出さない。一部だけを黙って出さない)。
+ * 馬の `courseFit` と `course` は任意で、崩れていればその欄だけ落とす(確率の表は残す)。
+ */
+export function parseRaceModelBlock(body: unknown): RaceModelBlock | null {
+  if (!isRecord(body) || !isRecord(body["model"])) return null;
+  const m = body["model"];
+  const { status, stage, note, horses } = m;
+  if (status !== "ok" && status !== "none") return null;
+  if (stage !== null && stage !== "final" && stage !== "preday" && stage !== "provisional") return null;
+  if (!isStr(note) || note === "" || !Array.isArray(horses)) return null;
+  if ((status === "none") !== (horses.length === 0)) return null;
+  const seen = new Set<number>();
+  const out: RaceModelBlock["horses"][number][] = [];
+  for (const raw of horses as unknown[]) {
+    if (!isRecord(raw)) return null;
+    const { umaban, prob, ev } = raw;
+    if (!isNum(umaban) || !Number.isInteger(umaban) || umaban < 1 || seen.has(umaban)) return null;
+    if (!isNum(prob) || prob < 0 || prob > 1 || (ev !== null && !isNum(ev))) return null;
+    const aux = raw["aux"] === null ? null : parseModelAux(raw["aux"]);
+    if (raw["aux"] !== null && aux === null) return null;
+    seen.add(umaban);
+    const fit = parseCourseFit(raw["courseFit"]);
+    out.push({ umaban, prob, ev: ev === null ? null : (ev as number), aux, ...(fit === null ? {} : { courseFit: fit }) });
+  }
+  const course = parseCourse(m["course"]);
+  return { status, stage, note, horses: out, ...(course === null ? {} : { course }) };
+}
+
+/** `fetchRaceStatus` と同じ GET の結果に、別の Worker の確率の塊(Issue #806)を足す。塊が無い・壊れているときは足さない(板と prior は壊さない)。本文は `fetchRaceStatus` と同じ 1 回の GET。 */
+export async function fetchRaceStatusWithModel(fetchLike: FetchLike, date: string, raceId: string): Promise<RaceStatusResult & { readonly model?: RaceModelBlock }> {
+  let raw: unknown;
+  const tap: FetchLike = async (url, init) => {
+    const res = await fetchLike(url, init);
+    return {
+      status: res.status,
+      json: async () => {
+        raw = await res.json();
+        return raw;
+      },
+    };
+  };
+  const result = await fetchRaceStatus(tap, date, raceId);
+  if (!result.ok) return result;
+  const model = parseRaceModelBlock(raw);
+  return model === null ? result : { ...result, model };
 }
