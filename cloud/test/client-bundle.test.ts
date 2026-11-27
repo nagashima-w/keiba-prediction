@@ -370,6 +370,8 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   "../src/place-odds-format",
   // Issue #272: 日報の「もしも」の型の名前と成績の文(`templateLabel`・`formatTemplateStat`)。Discord の日報・LLM のプロンプト(Worker)と日報の画面が同じ書き方を使うため。取り込むのは `./recovery-format`(上)だけで、下のテストが固定する。
   "../src/whatif-format",
+  // Issue #812: 一覧の「DO の拠点」の都市名の表(`coloLabel`)。表示だけの固定の表で、**import を持たない**(束に入るのは表と 1 関数だけ)。
+  "../src/colo-city",
 ]);
 
 function importAllowed(specifier: string): boolean {

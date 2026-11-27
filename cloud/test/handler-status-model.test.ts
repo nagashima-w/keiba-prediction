@@ -137,10 +137,10 @@ describe("GET /api/analyses/status?race_id= の model(Issue #806)", () => {
     }
   });
 
-  it("既存のキー(ok・kaisai_date・races・prior)は変えない", async () => {
+  it("既存のキー(ok・kaisai_date・races・prior)は変えない(この呼び出しは管理者なので、Issue #812 の colo が加わる)", async () => {
     const m = fakeModel();
     const r = await get(URL_RACE, [boardRace()], m.fetcher);
-    expect(Object.keys(r.body).sort()).toEqual(["kaisai_date", "model", "ok", "prior", "races"]);
+    expect(Object.keys(r.body).sort()).toEqual(["colo", "kaisai_date", "model", "ok", "prior", "races"]);
   });
 
   it("契約: サーバが返した本物の塊を、クライアントのパーサが読める(馬ごとの値・補助・コース成績・コースが保たれる)", async () => {
