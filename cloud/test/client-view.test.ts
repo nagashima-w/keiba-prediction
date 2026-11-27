@@ -2162,20 +2162,20 @@ describe("補助の符号の列の VNode(Issue #800)", () => {
   const withSign = (stage?: string): AnalysisDetail =>
     analysis({
       horses: [
-        { ...(HORSES_FOR_SIGN[0] as object), modelProb: 0.25, modelEv: 2, modelSign: "+" },
-        { ...(HORSES_FOR_SIGN[1] as object), modelProb: 0.5, modelEv: null, modelSign: null },
+        { ...(HORSES_FOR_SIGN[0] as object), modelProb: 0.25, modelEv: 2, modelAux: { value: 0.42, rank: 2, of: 16 } },
+        { ...(HORSES_FOR_SIGN[1] as object), modelProb: 0.5, modelEv: null, modelAux: null },
       ],
       modelNote: "注記",
       ...(stage === undefined ? {} : { modelStage: stage }),
     } as never);
   const resultOf = (a: AnalysisDetail): VNode => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a }, openHorses: allOpen(a) }), noopActions);
-  it("th・td が 1 つ増えて 10。符号は ＋、無い馬は —。暫定の見出しは「(暫定)」", () => {
+  it("th・td が 1 つ増えて 10。補助は +0.42(2位/16頭)、無い馬は —。暫定の見出しは「(暫定)」", () => {
     const t = resultOf(withSign("provisional"));
     const ths = findAll(t, (n) => n.tag === "th");
     expect(ths).toHaveLength(10);
     expect(ths.map(textOf).slice(-3)).toEqual(["確率(暫定)", "確率×単勝(暫定)", "補助(暫定)"]);
     const rows = byClass(t, "eval-row");
-    expect(findAll(rows[0]!, (n) => n.tag === "td").map(rawTextOf).slice(-3)).toEqual(["25.0%", "2.00", "＋"]);
+    expect(findAll(rows[0]!, (n) => n.tag === "td").map(rawTextOf).slice(-3)).toEqual(["25.0%", "2.00", "+0.42(2位/16頭)"]);
     expect(findAll(rows[1]!, (n) => n.tag === "td").map(rawTextOf).slice(-3)).toEqual(["50.0%", "—", "—"]);
   });
   it("確定は今までの見出し + 補助(別計算)", () => {

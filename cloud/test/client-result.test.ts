@@ -4,7 +4,7 @@ import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-respons
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
 import { PLACE_ODDS_NOTE } from "../src/place-odds-format";
 import { WIN_ODDS_NOTE } from "../src/win-odds-format";
-import { buildResultModel, DEFAULT_HORSE_SORT, firstSortDir, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER, nextHorseSort, type HorseSort, type HorseSortKey, type ResultSource } from "../client/result";
+import { buildResultModel, formatModelAux, DEFAULT_HORSE_SORT, firstSortDir, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER, nextHorseSort, type HorseSort, type HorseSortKey, type ResultSource } from "../client/result";
 import { LABEL_CONCERNS as EXE_LABEL_CONCERNS, LABEL_HIGHLIGHTS as EXE_LABEL_HIGHLIGHTS, MARK_LEGEND } from "../../packages/core/src/view/format";
 import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/core/src/view/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../../packages/core/src/view/bet-allocation-view";
@@ -1391,42 +1391,57 @@ describe("別の Worker が計算した確率の列(Issue #796)", () => {
 });
 
 /**
- * Issue #800: 暫定の見出しと、補助の符号の列。サーバが付けた `modelStage`・`modelSign` から作る。
+ * Issue #800: 暫定の見出しと、補助(値と順位)の列。サーバが付けた `modelStage`・`modelAux` から作る。
  * 符号の列は、1 頭でも符号を持つときだけ出す(第 2 版より前の応答は今までの表のまま)。
  */
 describe("暫定の確率と補助の符号の列(Issue #800)", () => {
   const NOTE = "別の Worker の暫定の確率";
   const tableOf = (a: AnalysisDetail) => content(a).horseTable!;
-  const build = (signs: (string | null)[], stage: unknown = "final") =>
+  type Aux = { value: number; rank: number; of: number };
+  const A: Aux = { value: 0.42, rank: 2, of: 16 };
+  const build = (signs: (Aux | null)[], stage: unknown = "final") =>
     analysis({
-      horses: signs.map((s, i) => horse(i + 1, { modelProb: 0.2, modelEv: 1, ...(s === null ? {} : { modelSign: s }) } as never)),
+      horses: signs.map((s, i) => horse(i + 1, { modelProb: 0.2, modelEv: 1, ...(s === null ? {} : { modelAux: s }) } as never)),
       modelNote: NOTE,
       ...(stage === undefined ? {} : { modelStage: stage }),
     } as never);
 
-  it("符号の列: 符号を持つ馬がいれば、モデルの列の末尾に「補助(別計算)」(並べ替えなし)。セルは ＋ − 0 —", () => {
-    const t = tableOf(build(["+", "-", "0", null]));
-    expect(t.columns.map((c) => c.key).slice(-3)).toEqual(["modelProb", "modelEv", "modelSign"]);
+  it("符号の列: 符号を持つ馬がいれば、モデルの列の末尾に「補助(別計算)」(並べ替えなし)。セルは +0.42(2位/16頭)・−0.15(…)・0.00(…)・—", () => {
+    const t = tableOf(build([A, { value: -0.15, rank: 14, of: 16 }, { value: 0.004, rank: 8, of: 16 }, null]));
+    expect(t.columns.map((c) => c.key).slice(-3)).toEqual(["modelProb", "modelEv", "modelAux"]);
     expect(t.columns.at(-1)).toMatchObject({ label: "補助(別計算)", sort: null });
-    expect(t.rows.map((r) => r.model.sign)).toEqual(["＋", "−", "0", "—"]);
+    expect(t.rows.map((r) => r.model.aux)).toEqual(["+0.42(2位/16頭)", "−0.15(14位/16頭)", "0.00(8位/16頭)", "—"]);
   });
 
   it("符号を持つ馬がいなければ符号の列は出ない(今までの表のまま)", () => {
-    expect(tableOf(build([null, null])).columns.map((c) => c.key)).not.toContain("modelSign");
+    expect(tableOf(build([null, null])).columns.map((c) => c.key)).not.toContain("modelAux");
   });
 
   it("暫定(preday・provisional)は見出しに「暫定」を付ける。確定・stage 無しは今までの見出し", () => {
     for (const stage of ["preday", "provisional"]) {
-      const t = tableOf(build(["+"], stage));
+      const t = tableOf(build([A], stage));
       expect(t.columns.slice(-3).map((c) => c.label)).toEqual(["確率(暫定)", "確率×単勝(暫定)", "補助(暫定)"]);
     }
-    expect(tableOf(build(["+"], "final")).columns.slice(-3).map((c) => c.label)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
-    expect(tableOf(build(["+"], undefined)).columns.slice(-3).map((c) => c.label)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
+    expect(tableOf(build([A], "final")).columns.slice(-3).map((c) => c.label)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
+    expect(tableOf(build([A], undefined)).columns.slice(-3).map((c) => c.label)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
   });
 
-  it("符号の列だけを持つ馬の符号は、並べ替えても馬について回る", () => {
-    const hs = [horse(1, { prior: 0.1, modelProb: 0.1, modelSign: "+" } as never), horse(2, { prior: 0.5, modelProb: 0.2, modelSign: "-" } as never)];
+  it("補助の値だけを持つ馬の補助は、並べ替えても馬について回る", () => {
+    const hs = [horse(1, { prior: 0.1, modelProb: 0.1, modelAux: { value: 0.1, rank: 1, of: 2 } } as never), horse(2, { prior: 0.5, modelProb: 0.2, modelAux: { value: -0.1, rank: 2, of: 2 } } as never)];
     const model = buildResultModel({ route: ROUTE, source: ready(analysis({ horses: hs, modelNote: NOTE } as never)), horseSort: { key: "prior", dir: "desc" } });
-    expect(model.content!.horseTable!.rows.map((r) => [r.umaban, r.model.sign])).toEqual([[2, "−"], [1, "＋"]]);
+    expect(model.content!.horseTable!.rows.map((r) => [r.umaban, r.model.aux])).toEqual([[2, "−0.10(2位/2頭)"], [1, "+0.10(1位/2頭)"]]);
+  });
+});
+
+describe("formatModelAux(Issue #805)", () => {
+  it.each([
+    [{ value: 0.42, rank: 2, of: 16 }, "+0.42(2位/16頭)"],
+    [{ value: -0.15, rank: 14, of: 16 }, "−0.15(14位/16頭)"],
+    [{ value: 0, rank: 8, of: 16 }, "0.00(8位/16頭)"],
+    [{ value: -0.004, rank: 8, of: 16 }, "0.00(8位/16頭)"],
+    [{ value: 0.004, rank: 8, of: 16 }, "0.00(8位/16頭)"],
+    [{ value: 3, rank: 1, of: 1 }, "+3.00(1位/1頭)"],
+  ])("%j は %s", (a, text) => {
+    expect(formatModelAux(a)).toBe(text);
   });
 });
