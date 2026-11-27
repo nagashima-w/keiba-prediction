@@ -7,6 +7,7 @@
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v4)に固定される。
  */
+import { doStub, type DoGetOptions } from "./do-stub";
 import { DurableObject } from "cloudflare:workers";
 import type { GateStatus } from "./gate-core";
 import { BACKFILL_NIGHTLY_LIMIT, isBackfillDisabled, ResultBackfillCore, type BackfillDayStub, type BackfillStatus } from "./result-backfill-core";
@@ -19,9 +20,9 @@ const GATE_NAME = "gate";
 export interface ResultBackfillEnv {
   DB: ResultDb;
   /** 日単位の DO(RaceDay)。補完は `requestResultImport` と `getResultImportProgress` だけを呼ぶ。 */
-  RACE_DAY: { idFromName(name: string): any; get(id: any): BackfillDayStub };
+  RACE_DAY: { idFromName(name: string): any; get(id: any, options?: DoGetOptions): BackfillDayStub };
   /** gate。**`status()` だけ**を呼ぶ(ブレーカー・待ちの数を見て、混んでいれば引く)。 */
-  NETKEIBA_GATE: { idFromName(name: string): any; get(id: any): { status(): Promise<GateStatus> } };
+  NETKEIBA_GATE: { idFromName(name: string): any; get(id: any, options?: DoGetOptions): { status(): Promise<GateStatus> } };
   /**
    * 任意(Worker の var・secret)。1 晩に依頼するレースの数の上限を**下げる**ための上書き(1〜150 の整数。それ以外・150 を超える値は無視して既定の 150)。
    * Free の枠を超える値は受け付けない(`parseLimitOverride` の流儀)。**`"0"` は補完を止める**(`isBackfillDisabled`。アラームを張らず、起きても何もしない。state は `disabled`)。
@@ -42,11 +43,11 @@ export class ResultBackfill extends DurableObject<ResultBackfillEnv> {
         setAlarm: (at) => ctx.storage.setAlarm(at),
         getAlarm: () => ctx.storage.getAlarm(),
         gateStatus: async () => {
-          const status = await env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME)).status();
+          const status = await doStub(env.NETKEIBA_GATE, GATE_NAME).status();
           return { blockedUntil: status.blockedUntil, pending: status.pending };
         },
         store: new D1ResultStore({ db: env.DB }),
-        stubFor: (kaisaiDate) => env.RACE_DAY.get(env.RACE_DAY.idFromName(kaisaiDate)),
+        stubFor: (kaisaiDate) => doStub(env.RACE_DAY, kaisaiDate),
         log: (line, level) => (level === "error" ? console.error(line) : console.log(line)),
         onWarn: (message) => console.warn(message),
       },

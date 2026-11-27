@@ -596,16 +596,16 @@ describe("wrangler.toml", () => {
       }
     }
     expect(found).toEqual({
-      // 手動の入口: raceDayStub の 1 行(get と idFromName の 2 回)+ 確認用・health の gate(2 箇所 × 2 回)
-      "handler.ts": { RACE_DAY: 2, NETKEIBA_GATE: 4 },
+      // 手動の入口: raceDayStub の 1 行(doStub の 1 回)+ 確認用・health の gate(2 箇所 × 1 回)。Issue #811 で `get`+`idFromName` の 2 回から `doStub(ns, name)` の 1 回になった
+      "handler.ts": { RACE_DAY: 1, NETKEIBA_GATE: 2 },
       // 定時の入口: DO の stub を 1 行で引く(get と idFromName の 2 回)。NETKEIBA_GATE には触れない
-      "scheduled.ts": { RACE_DAY: 2, NETKEIBA_GATE: 0 },
+      "scheduled.ts": { RACE_DAY: 1, NETKEIBA_GATE: 0 },
       // DO の中: 取得の出口(gate)を引く 1 行(get と idFromName の 2 回)
-      "race-day-do.ts": { RACE_DAY: 0, NETKEIBA_GATE: 2 },
+      "race-day-do.ts": { RACE_DAY: 0, NETKEIBA_GATE: 1 },
       // 結果の補完の DO(Issue #217): 日単位の DO を引く 1 行・gate の状態(status)を読む 1 行(それぞれ get と idFromName の 2 回)。取得(fetchRaw・postRaw)は呼ばない(下の専用の検査)
-      "result-backfill-do.ts": { RACE_DAY: 2, NETKEIBA_GATE: 2 },
+      "result-backfill-do.ts": { RACE_DAY: 1, NETKEIBA_GATE: 1 },
       // 過去の結果の取得の DO(Issue #554): 日単位の DO を引く 1 行(`getPlanProgress` の読み取りだけ)・gate を引く 1 行(`status()` と `fetchRaw()`。それぞれ get と idFromName の 2 回)。専用の検査は下の「Issue #554」
-      "race-archive-fetch-do.ts": { RACE_DAY: 2, NETKEIBA_GATE: 2 },
+      "race-archive-fetch-do.ts": { RACE_DAY: 1, NETKEIBA_GATE: 1 },
     });
     // 対照(検出の確認。空振りでない): 余計な経路を足した本文は拾う
     expect(("const s = env.RACE_DAY.get(x);").match(/\benv\.RACE_DAY\b/g)).toHaveLength(1);
@@ -1432,8 +1432,8 @@ describe("Issue #216・#394・#402: 移行の DO(CloudMigration)は削除済み�
     }
     // kick を呼ぶのは scheduled.ts(毎日の起動)と result-backfill-do.ts(DO 自身が getStatus・kick の RPC から core に委譲する 2 つ)だけ
     expect(kickSites).toEqual({ "market-edge-do.ts": 2, "race-archive-fetch-do.ts": 2, "race-archive-runs-core.ts": 1, "race-archive-runs-do.ts": 2, "result-backfill-do.ts": 2, "jra-horse-backfill-do.ts": 1, "jra-blinker-backfill-do.ts": 1, "jra-baba-past-backfill-do.ts": 1, "scheduled.ts": 9 }); // 変換の core の kickNow(時間帯の外のとき、自身の kick に委譲する 1 つ)。Issue #769: 過去の馬場の埋め戻しの kick を足して 8 → 9(DO の 1 つ)。Issue #731: 追い切りの取得の kick を足して 7 → 8。Issue #635: 地方の交流重賞の取得の kick を足して 6 → 7(`grep -o "\.kick()" cloud/src/scheduled.ts | wc -l`)。以下は元の注記: scheduled.ts の 4 つ = 結果の補完(23 時のみ)+ 過去の結果の取得(Issue #554。21 時・23 時)+ 過去の結果の毎晩の変換(Issue #590。21 時・23 時)+ 騎手・調教師の指標(Issue #642。21 時・23 時)+ 馬ごとの頁の埋め戻し(Issue #697。21 時・23 時。DO 自身は kick を RPC から core に委譲する 1 つ)+ 過去のブリンカーの埋め戻し(Issue #698。同じ)
-    // env.RESULT_BACKFILL に触れるのは scheduled.ts(有無の確認・get・idFromName の 3 回)と handler.ts(namespace 変数への代入の 1 回)だけ
-    expect(bindingSites).toEqual({ "handler.ts": 1, "scheduled.ts": 3 });
+    // env.RESULT_BACKFILL に触れるのは scheduled.ts(有無の確認・doStub の 2 回。Issue #811 前は get・idFromName で 3 回)と handler.ts(namespace 変数への代入の 1 回)だけ
+    expect(bindingSites).toEqual({ "handler.ts": 1, "scheduled.ts": 2 });
     // handler.ts: 補完の DO は getStatus だけ(kick・start は呼ばない)。GET /api/results/backfill の 1 本
     const start = handler.indexOf("async function handleBackfillStatus(");
     expect(start).toBeGreaterThan(-1);
@@ -2172,7 +2172,7 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
     const scheduled = stripCode(readTextLf("cloud", "src", "scheduled.ts"));
     expect(scheduled).not.toMatch(/VerifyReport|verify-core|verify-do|verify-store|\.getReport\(|\.getViewerReport\(/);
     expect((scheduled.match(/\.requestWeeklyCheck\??\.?\(/g) ?? []).length).toBe(1);
-    expect((scheduled.match(/\benv\.VERIFY_REPORT\.get\(/g) ?? []).length).toBe(1);
+    expect((scheduled.match(/\bdoStub\(env\.VERIFY_REPORT,/g) ?? []).length).toBe(1);
   });
 });
 

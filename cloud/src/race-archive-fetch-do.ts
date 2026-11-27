@@ -12,6 +12,7 @@
  * **smoke 専用の `options()` の差し替え**(開始時刻・時間帯・間隔を外す)は `smoke-worker.ts` のサブクラスだけが行う。本番のエントリ(`worker.ts`)はそのサブクラスを import しない
  * (`test/bundle-guard.integration.test.ts` が、本番のバンドルに入らないことを固定している)。
  */
+import { doStub, type DoGetOptions } from "./do-stub";
 import { DurableObject } from "cloudflare:workers";
 import type { GateStatus } from "./gate-core";
 import { parseLimitOverride } from "./limit-override";
@@ -43,9 +44,9 @@ export interface RaceArchiveFetchEnv {
   /** R2(`saveRaceArchive` が get と put だけを使う。Class A・B の計数と柵は D1 の `r2_ops`)。 */
   ANALYSIS_DETAIL: RaceArchiveBucket;
   /** gate。`status()` と `fetchRaw()` だけを呼ぶ。 */
-  NETKEIBA_GATE: { idFromName(name: string): any; get(id: any): { status(): Promise<GateStatus>; fetchRaw(url: string): Promise<GateResult> } };
+  NETKEIBA_GATE: { idFromName(name: string): any; get(id: any, options?: DoGetOptions): { status(): Promise<GateStatus>; fetchRaw(url: string): Promise<GateResult> } };
   /** 日単位の DO。**`getPlanProgress` だけ**を呼ぶ(その日が中央の開催日かの判定。netkeiba には出ない)。 */
-  RACE_DAY: { idFromName(name: string): any; get(id: any): { getPlanProgress(): Promise<PlanProgressLike> } };
+  RACE_DAY: { idFromName(name: string): any; get(id: any, options?: DoGetOptions): { getPlanProgress(): Promise<PlanProgressLike> } };
   /** Discord の Webhook URL(Worker の secret)。未登録・形式不正なら通知しない(状態は変わる)。 */
   DISCORD_WEBHOOK_URL?: string;
   /**
@@ -87,7 +88,7 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
     const store = new D1RaceArchiveStore({ db: env.DB, bucket: env.ANALYSIS_DETAIL });
     const oikiriStore = new D1RaceOikiriStore({ db: env.DB });
     const notifier = createDiscordNotifier(env.DISCORD_WEBHOOK_URL);
-    const gate = (): ReturnType<RaceArchiveFetchEnv["NETKEIBA_GATE"]["get"]> => env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
+    const gate = (): ReturnType<RaceArchiveFetchEnv["NETKEIBA_GATE"]["get"]> => doStub(env.NETKEIBA_GATE, GATE_NAME);
     this.core = new RaceArchiveFetchCore(
       {
         sql: ctx.storage.sql,
@@ -131,7 +132,7 @@ export class RaceArchiveFetchDO extends DurableObject<RaceArchiveFetchEnv> {
    * **smoke 専用のサブクラスだけが差し替える**(smoke の日は計画が無く、判定不能で休んでしまうため。`options()` と同じ理由)。
    */
   protected planProgress(kaisaiDate: string): Promise<PlanProgressLike> {
-    return this.env.RACE_DAY.get(this.env.RACE_DAY.idFromName(kaisaiDate)).getPlanProgress();
+    return doStub(this.env.RACE_DAY, kaisaiDate).getPlanProgress();
   }
 
   /**

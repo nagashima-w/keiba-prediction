@@ -7,6 +7,7 @@
  * **Issue #238**: 認証に通ったアカウントはすべて受け入れ、役割(admin / viewer)を付ける(authenticate.ts)。認証の直後・どのハンドラよりも前に、
  * ルート × 役割の表(route-policy.ts)で 1 回だけ判定し、閲覧者が管理者専用に当たったら 403 `admin-only` で止める(表に無い組み合わせは管理者専用)。
  */
+import { doStub, type DoGetOptions } from "./do-stub";
 import type { AccessEnv } from "./access-jwt";
 import { D1AnalysisStore, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { checkD1 } from "./d1-health";
@@ -75,7 +76,7 @@ export interface GateStubLike {
 /** Durable Object(NetkeibaGate)の名前空間の、使う部分だけの型。 */
 export interface GateNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): GateStubLike;
+  get(id: any, options?: DoGetOptions): GateStubLike;
 }
 
 /** netkeiba への取得の出口の DO の固定名(全取得をこの1つのインスタンスに通す)。smoke(`smoke-worker.ts`)が偽ソケットの記録を読む DO を指すのにも使う。 */
@@ -112,7 +113,7 @@ export interface RaceDayStubLike {
 /** 日単位の DO(RaceDay)の名前空間の、使う部分だけの型。名前は開催日(YYYYMMDD)。 */
 export interface RaceDayNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): RaceDayStubLike;
+  get(id: any, options?: DoGetOptions): RaceDayStubLike;
 }
 
 /** 結果の補完の DO(ResultBackfill)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #217。 */
@@ -126,7 +127,7 @@ export interface BackfillStubLike {
 /** 結果の補完の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link RESULT_BACKFILL_NAME})。 */
 export interface BackfillNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): BackfillStubLike;
+  get(id: any, options?: DoGetOptions): BackfillStubLike;
 }
 
 /** 過去の結果の取得の DO(RaceArchiveFetchDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #554。 */
@@ -152,7 +153,7 @@ export interface RaceArchiveRunsStubLike {
 /** 過去の結果の毎晩の変換の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link RACE_ARCHIVE_RUNS_NAME})。 */
 export interface RaceArchiveRunsNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): RaceArchiveRunsStubLike;
+  get(id: any, options?: DoGetOptions): RaceArchiveRunsStubLike;
 }
 
 /** 騎手・調教師の指標の DO(RaceMarketEdgeDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #642。 */
@@ -164,7 +165,7 @@ export interface RaceMarketEdgeStubLike {
 /** 騎手・調教師の指標の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 `RACE_MARKET_EDGE_NAME`。market-edge-core.ts)。 */
 export interface RaceMarketEdgeNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): RaceMarketEdgeStubLike;
+  get(id: any, options?: DoGetOptions): RaceMarketEdgeStubLike;
 }
 
 /** 馬ごとの頁の埋め戻しの DO(JraHorseBackfillDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #697。 */
@@ -176,7 +177,7 @@ export interface JraHorseBackfillStubLike {
 /** 馬ごとの頁の埋め戻しの DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 `JRA_HORSE_BACKFILL_NAME`。jra-horse-backfill-core.ts)。 */
 export interface JraHorseBackfillNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): JraHorseBackfillStubLike;
+  get(id: any, options?: DoGetOptions): JraHorseBackfillStubLike;
 }
 
 /** 過去のレースのブリンカー着用の埋め戻しの DO(JraBlinkerBackfillDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #698。 */
@@ -188,7 +189,7 @@ export interface JraBlinkerBackfillStubLike {
 /** 過去のレースのブリンカー着用の埋め戻しの DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 `JRA_BLINKER_BACKFILL_NAME`。jra-blinker-backfill-core.ts)。 */
 export interface JraBlinkerBackfillNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): JraBlinkerBackfillStubLike;
+  get(id: any, options?: DoGetOptions): JraBlinkerBackfillStubLike;
 }
 
 /** 過去の馬場の埋め戻しの DO(JraBabaPastBackfillDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #769。 */
@@ -202,13 +203,13 @@ export interface JraBabaPastBackfillStubLike {
 /** 過去の馬場の埋め戻しの DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 `JRA_BABA_PAST_BACKFILL_NAME`。jra-baba-past-backfill-core.ts)。 */
 export interface JraBabaPastBackfillNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): JraBabaPastBackfillStubLike;
+  get(id: any, options?: DoGetOptions): JraBabaPastBackfillStubLike;
 }
 
 /** 過去の結果の取得の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link RACE_ARCHIVE_FETCH_NAME})。 */
 export interface RaceArchiveNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): RaceArchiveStubLike;
+  get(id: any, options?: DoGetOptions): RaceArchiveStubLike;
 }
 
 /** 検証の DO(VerifyReportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #219。 */
@@ -224,7 +225,7 @@ export interface VerifyStubLike {
 /** 検証の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link VERIFY_NAME})。 */
 export interface VerifyNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): VerifyStubLike;
+  get(id: any, options?: DoGetOptions): VerifyStubLike;
 }
 
 /** 統計モデル用の書き出しの DO(PriorExportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #266。 */
@@ -236,7 +237,7 @@ export interface PriorExportStubLike {
 /** 統計モデル用の書き出しの DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link PRIOR_EXPORT_NAME})。 */
 export interface PriorExportNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): PriorExportStubLike;
+  get(id: any, options?: DoGetOptions): PriorExportStubLike;
 }
 
 /** 統計モデル用の書き出しの DO の固定名(単一インスタンス)。 */
@@ -251,7 +252,7 @@ export interface AllocationExportStubLike {
 /** 配分の再計算用の書き出しの DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link ALLOCATION_EXPORT_NAME})。 */
 export interface AllocationExportNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): AllocationExportStubLike;
+  get(id: any, options?: DoGetOptions): AllocationExportStubLike;
 }
 
 /** 配分の再計算用の書き出しの DO の固定名(単一インスタンス)。 */
@@ -268,7 +269,7 @@ export interface DailyReportStubLike {
 /** 日報の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link DAILY_REPORT_NAME})。 */
 export interface DailyReportNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): DailyReportStubLike;
+  get(id: any, options?: DoGetOptions): DailyReportStubLike;
 }
 
 
@@ -283,7 +284,7 @@ export interface MonthlyReportStubLike {
 /** 月報の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 `MONTHLY_REPORT_NAME`)。 */
 export interface MonthlyReportNamespaceLike {
   idFromName(name: string): any;
-  get(id: any): MonthlyReportStubLike;
+  get(id: any, options?: DoGetOptions): MonthlyReportStubLike;
 }
 
 export interface Env extends AccessEnv {
@@ -545,7 +546,7 @@ export async function handle(
     // DO と D1 は独立に確認し、どちらかが駄目でももう一方の結果を報告する(原因の切り分けのため)。理由は返さない。
     let sqlite = false;
     try {
-      const gate = env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
+      const gate = doStub(env.NETKEIBA_GATE, GATE_NAME);
       sqlite = (await gate.ping()).sqlite;
     } catch {
       sqlite = false;
@@ -786,7 +787,7 @@ async function handleBackfillStatus(env: Env): Promise<Response> {
     if (namespace === undefined) {
       throw new Error("RESULT_BACKFILL binding がありません");
     }
-    return json({ ok: true, ...(await namespace.get(namespace.idFromName(RESULT_BACKFILL_NAME)).getStatus()) });
+    return json({ ok: true, ...(await doStub(namespace, RESULT_BACKFILL_NAME).getStatus()) });
   } catch {
     return json({ ok: false, error: { type: "backfill-error" } }, 503);
   }
@@ -800,7 +801,7 @@ async function handleRaceArchiveStatus(env: Env, which: RaceArchiveWhich): Promi
     if (namespace === undefined) {
       throw new Error("取得の DO の binding がありません");
     }
-    return json({ ok: true, ...(await namespace.get(namespace.idFromName(ARCHIVE_NAME_OF[which])).getStatus()) });
+    return json({ ok: true, ...(await doStub(namespace, ARCHIVE_NAME_OF[which]).getStatus()) });
   } catch {
     return json({ ok: false, error: { type: ARCHIVE_ERROR_TYPE_OF[which] } }, 503);
   }
@@ -824,7 +825,7 @@ async function handleRaceArchiveRunsStatus(env: Env): Promise<Response> {
     if (namespace === undefined) {
       throw new Error("RACE_ARCHIVE_RUNS binding がありません");
     }
-    return json({ ok: true, ...(await namespace.get(namespace.idFromName(RACE_ARCHIVE_RUNS_NAME)).getStatus()) });
+    return json({ ok: true, ...(await doStub(namespace, RACE_ARCHIVE_RUNS_NAME).getStatus()) });
   } catch {
     return json({ ok: false, error: { type: "race-archive-runs-error" } }, 503);
   }
@@ -849,7 +850,7 @@ async function handleRaceArchiveResume(request: Request, env: Env, which: RaceAr
     if (namespace === undefined) {
       throw new Error("取得の DO の binding がありません");
     }
-    const result = await namespace.get(namespace.idFromName(ARCHIVE_NAME_OF[which])).resume();
+    const result = await doStub(namespace, ARCHIVE_NAME_OF[which]).resume();
     return json({ ok: true, resumed: result.resumed, previous: result.previous });
   } catch {
     return json({ ok: false, error: { type: ARCHIVE_ERROR_TYPE_OF[which] } }, 503);
@@ -873,7 +874,7 @@ async function handleRaceArchiveRunsKick(request: Request, env: Env): Promise<Re
     if (namespace === undefined) {
       throw new Error("RACE_ARCHIVE_RUNS binding がありません");
     }
-    const result = await namespace.get(namespace.idFromName(RACE_ARCHIVE_RUNS_NAME)).kickNow();
+    const result = await doStub(namespace, RACE_ARCHIVE_RUNS_NAME).kickNow();
     return json({ ok: true, result: result.result, previousAlarm: result.previousAlarm });
   } catch {
     return json({ ok: false, error: { type: "race-archive-runs-error" } }, 503);
@@ -898,7 +899,7 @@ async function handleBabaPast(request: Request, env: Env): Promise<Response> {
   }
   try {
     const ns = env.JRA_BABA_PAST_BACKFILL;
-    const st = ns === undefined ? null : await ns.get(ns.idFromName(JRA_BABA_PAST_BACKFILL_NAME)).status();
+    const st = ns === undefined ? null : await doStub(ns, JRA_BABA_PAST_BACKFILL_NAME).status();
     const first = st?.firstYear ?? BABA_PAST_FIRST_YEAR;
     const last = st?.lastYear ?? BABA_PAST_LAST_YEAR;
     const pdfs: Record<string, { total: number; rows: number; results: Record<string, number> }> = {};
@@ -1092,7 +1093,7 @@ async function handleVerify(request: Request, env: Env, role: "admin" | "viewer"
     if (namespace === undefined) {
       throw new Error("VERIFY_REPORT binding がありません");
     }
-    const stub = namespace.get(namespace.idFromName(VERIFY_NAME));
+    const stub = doStub(namespace, VERIFY_NAME);
     const response =
       role === "admin"
         ? await stub.getReport(venue as "all" | "central" | "nar", { refresh: refreshValue === "1" })
@@ -1140,7 +1141,7 @@ async function handlePriorExport(request: Request, env: Env): Promise<Response> 
     if (namespace === undefined) {
       throw new Error("PRIOR_EXPORT binding がありません");
     }
-    response = await namespace.get(namespace.idFromName(PRIOR_EXPORT_NAME)).request(mode);
+    response = await doStub(namespace, PRIOR_EXPORT_NAME).request(mode);
   } catch {
     return json({ ok: false, error: { type: "export-error" } }, 503);
   }
@@ -1221,7 +1222,7 @@ async function handleAllocationExport(request: Request, env: Env): Promise<Respo
     if (namespace === undefined) {
       throw new Error("ALLOCATION_EXPORT binding がありません");
     }
-    response = await namespace.get(namespace.idFromName(ALLOCATION_EXPORT_NAME)).request(mode);
+    response = await doStub(namespace, ALLOCATION_EXPORT_NAME).request(mode);
   } catch {
     return json({ ok: false, error: { type: "export-error" } }, 503);
   }
@@ -1446,7 +1447,7 @@ function safeText(text: string): string {
 
 /** 日単位の DO を開催日で引く。 */
 function raceDayStub(env: Env, kaisaiDate: string): RaceDayStubLike {
-  return env.RACE_DAY.get(env.RACE_DAY.idFromName(kaisaiDate));
+  return doStub(env.RACE_DAY, kaisaiDate);
 }
 
 /** DO の失敗(例外)の応答。例外の文面・スタック・SQL は返さない。 */
@@ -2183,7 +2184,7 @@ async function handleReportDetail(url: URL, dateText: string, env: Env, role: "a
   const readJob = () =>
     readReportJob(async () => {
       const namespace = env.DAILY_REPORT;
-      return namespace === undefined ? NO_REPORT_BINDING : namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).getStatus(dateText);
+      return namespace === undefined ? NO_REPORT_BINDING : doStub(namespace, DAILY_REPORT_NAME).getStatus(dateText);
     });
   if (report !== null) {
     const { job, jobStatus } = role === "admin" ? await readJob() : { job: null, jobStatus: "ok" as const };
@@ -2254,7 +2255,7 @@ async function handleMonthlyDetail(url: URL, monthText: string, env: Env, role: 
   const readJob = () =>
     readReportJob(async () => {
       const namespace = env.MONTHLY_REPORT;
-      return namespace === undefined ? NO_REPORT_BINDING : namespace.get(namespace.idFromName(MONTHLY_REPORT_NAME)).getStatus(monthText);
+      return namespace === undefined ? NO_REPORT_BINDING : doStub(namespace, MONTHLY_REPORT_NAME).getStatus(monthText);
     });
   const { job, jobStatus } = role === "admin" ? await readJob() : { job: null, jobStatus: "ok" as const };
   return json({
@@ -2320,7 +2321,7 @@ async function handleReportRun(request: Request, env: Env, now: () => Date): Pro
     if (namespace === undefined) {
       throw new Error("DAILY_REPORT binding がありません");
     }
-    const result = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate: date, mode: regenerate ? "regenerate" : "manual" });
+    const result = await doStub(namespace, DAILY_REPORT_NAME).requestReport({ kaisaiDate: date, mode: regenerate ? "regenerate" : "manual" });
     if (!result.accepted) {
       // 断りの写し(作り直しだけが返す理由、検証で弾いたはずの理由が来たら食い違いで 503)は {@link reportRunRefusal}。
       return reportRunRefusal(result.reason, regenerate);
@@ -2368,7 +2369,7 @@ async function handleMonthlyRun(request: Request, env: Env, now: () => Date): Pr
     if (namespace === undefined) {
       throw new Error("MONTHLY_REPORT binding がありません");
     }
-    const result = await namespace.get(namespace.idFromName(MONTHLY_REPORT_NAME)).requestMonthlyReport({ month, mode: regenerate ? "regenerate" : "manual" });
+    const result = await doStub(namespace, MONTHLY_REPORT_NAME).requestMonthlyReport({ month, mode: regenerate ? "regenerate" : "manual" });
     if (!result.accepted) {
       // 断りの写し(作り直しだけが返す理由、検証で弾いたはずの理由やあり得ない理由が来たら食い違いで 503)は {@link reportRunRefusal}。
       return reportRunRefusal(result.reason, regenerate);
@@ -2412,7 +2413,7 @@ async function handleCheck(request: Request, env: Env): Promise<Response> {
     return badRequest(checked.message);
   }
 
-  const gate = env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
+  const gate = doStub(env.NETKEIBA_GATE, GATE_NAME);
   const result =
     target === "grade-winner"
       ? await runGradeWinnerCheck(checked.raceId, (request) => gate.postRaw(request))
