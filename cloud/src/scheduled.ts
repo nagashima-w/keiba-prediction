@@ -30,6 +30,7 @@
  * 呼び出す DO の RPC は、(日報の `requestReport`〈Issue #235〉と月報の `requestMonthlyReport`〈Issue #279〉のほかに)`requestPlan` の 1 つ(ここに直接)と、`dispatchResultImports` 経由の `requestResultImport`、補完の `kick` の 1 つ(`scripts/test/cloud-config-guard.test.ts` が、呼び出し箇所の数と、取得に出る呼び出しが無いことを固定する)。
  * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。計画・既存の結果の依頼を失敗させない。
  */
+import { doStub } from "./do-stub";
 import { jstKaisaiDate, planTargetDate, scheduledRunKind, type ScheduledRunKind } from "./auto-run-plan";
 import type { BackfillNamespaceLike, DailyReportNamespaceLike, MonthlyReportNamespaceLike, RaceArchiveNamespaceLike, RaceArchiveRunsNamespaceLike, RaceDayNamespaceLike, RaceMarketEdgeNamespaceLike, JraHorseBackfillNamespaceLike, JraBlinkerBackfillNamespaceLike, JraBabaPastBackfillNamespaceLike, VerifyNamespaceLike } from "./handler";
 import { VERIFY_NAME } from "./verify-name";
@@ -128,7 +129,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
   const isRetry = kind === "retry";
 
   // 開催日の DO のスタブを引く(requestPlan も結果の依頼も、ここ 1 行)。
-  const stubFor = (date: string) => env.RACE_DAY.get(env.RACE_DAY.idFromName(date));
+  const stubFor = (date: string) => doStub(env.RACE_DAY, date);
 
   // retry(23 時)だけ rescue を渡す(21 時に失敗した分の救済。DO が 1 回だけ行う冪等な動作)。first では rescue のキー自体を渡さない。
   const planInput = isRetry ? { kaisaiDate, rescue: true } : { kaisaiDate };
@@ -162,7 +163,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     // 結果の補完の起動(Issue #217)。アラームが無ければ張るだけ(補完は JST 1:00〜6:00 に、移行の完了後だけ動く。ここでは何も取得しない)。
     if (env.RESULT_BACKFILL !== undefined) {
       try {
-        await env.RESULT_BACKFILL.get(env.RESULT_BACKFILL.idFromName(RESULT_BACKFILL_NAME)).kick();
+        await doStub(env.RESULT_BACKFILL, RESULT_BACKFILL_NAME).kick();
       } catch (error) {
         log(`scheduled: failed class=backfill-kick-failed error=${errorKind(error)}`, "error");
       }
@@ -190,7 +191,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     (async (): Promise<void> => {
       if (env.RACE_ARCHIVE_FETCH === undefined) return;
       try {
-        await env.RACE_ARCHIVE_FETCH.get(env.RACE_ARCHIVE_FETCH.idFromName(RACE_ARCHIVE_FETCH_NAME)).kick();
+        await doStub(env.RACE_ARCHIVE_FETCH, RACE_ARCHIVE_FETCH_NAME).kick();
       } catch (error) {
         log(`scheduled: failed class=race-archive-kick-failed error=${errorKind(error)}`, "error");
       }
@@ -199,7 +200,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     (async (): Promise<void> => {
       if (env.RACE_ARCHIVE_FETCH_NAR === undefined) return;
       try {
-        await env.RACE_ARCHIVE_FETCH_NAR.get(env.RACE_ARCHIVE_FETCH_NAR.idFromName(RACE_ARCHIVE_NAR_FETCH_NAME)).kick();
+        await doStub(env.RACE_ARCHIVE_FETCH_NAR, RACE_ARCHIVE_NAR_FETCH_NAME).kick();
       } catch (error) {
         log(`scheduled: failed class=race-archive-nar-kick-failed error=${errorKind(error)}`, "error");
       }
@@ -208,7 +209,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     (async (): Promise<void> => {
       if (env.RACE_ARCHIVE_FETCH_OIKIRI === undefined) return;
       try {
-        await env.RACE_ARCHIVE_FETCH_OIKIRI.get(env.RACE_ARCHIVE_FETCH_OIKIRI.idFromName(RACE_ARCHIVE_OIKIRI_FETCH_NAME)).kick();
+        await doStub(env.RACE_ARCHIVE_FETCH_OIKIRI, RACE_ARCHIVE_OIKIRI_FETCH_NAME).kick();
       } catch (error) {
         log(`scheduled: failed class=race-archive-oikiri-kick-failed error=${errorKind(error)}`, "error");
       }
@@ -217,7 +218,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     (async (): Promise<void> => {
       if (env.RACE_ARCHIVE_RUNS === undefined) return;
       try {
-        await env.RACE_ARCHIVE_RUNS.get(env.RACE_ARCHIVE_RUNS.idFromName(RACE_ARCHIVE_RUNS_NAME)).kick();
+        await doStub(env.RACE_ARCHIVE_RUNS, RACE_ARCHIVE_RUNS_NAME).kick();
       } catch (error) {
         log(`scheduled: failed class=race-archive-runs-kick-failed error=${errorKind(error)}`, "error");
       }
@@ -226,7 +227,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     (async (): Promise<void> => {
       if (env.RACE_MARKET_EDGE === undefined) return;
       try {
-        await env.RACE_MARKET_EDGE.get(env.RACE_MARKET_EDGE.idFromName(RACE_MARKET_EDGE_NAME)).kick();
+        await doStub(env.RACE_MARKET_EDGE, RACE_MARKET_EDGE_NAME).kick();
       } catch (error) {
         log(`scheduled: failed class=race-market-edge-kick-failed error=${errorKind(error)}`, "error");
       }
@@ -235,7 +236,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     (async (): Promise<void> => {
       if (env.JRA_HORSE_BACKFILL === undefined) return;
       try {
-        await env.JRA_HORSE_BACKFILL.get(env.JRA_HORSE_BACKFILL.idFromName(JRA_HORSE_BACKFILL_NAME)).kick();
+        await doStub(env.JRA_HORSE_BACKFILL, JRA_HORSE_BACKFILL_NAME).kick();
       } catch (error) {
         log(`scheduled: failed class=jra-horse-backfill-kick-failed error=${errorKind(error)}`, "error");
       }
@@ -244,7 +245,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     (async (): Promise<void> => {
       if (env.JRA_BLINKER_BACKFILL === undefined) return;
       try {
-        await env.JRA_BLINKER_BACKFILL.get(env.JRA_BLINKER_BACKFILL.idFromName(JRA_BLINKER_BACKFILL_NAME)).kick();
+        await doStub(env.JRA_BLINKER_BACKFILL, JRA_BLINKER_BACKFILL_NAME).kick();
       } catch (error) {
         log(`scheduled: failed class=jra-blinker-backfill-kick-failed error=${errorKind(error)}`, "error");
       }
@@ -253,7 +254,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     (async (): Promise<void> => {
       if (env.JRA_BABA_PAST_BACKFILL === undefined) return;
       try {
-        await env.JRA_BABA_PAST_BACKFILL.get(env.JRA_BABA_PAST_BACKFILL.idFromName(JRA_BABA_PAST_BACKFILL_NAME)).kick();
+        await doStub(env.JRA_BABA_PAST_BACKFILL, JRA_BABA_PAST_BACKFILL_NAME).kick();
       } catch (error) {
         log(`scheduled: failed class=jra-baba-past-backfill-kick-failed error=${errorKind(error)}`, "error");
       }
@@ -262,7 +263,7 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     (async (): Promise<void> => {
       if (env.VERIFY_REPORT === undefined) return;
       try {
-        await env.VERIFY_REPORT.get(env.VERIFY_REPORT.idFromName(VERIFY_NAME)).requestWeeklyCheck?.();
+        await doStub(env.VERIFY_REPORT, VERIFY_NAME).requestWeeklyCheck?.();
       } catch (error) {
         log(`scheduled: failed class=verify-weekly-check-failed error=${errorKind(error)}`, "error");
       }
@@ -312,7 +313,7 @@ async function requestMonthlyReports(
 ): Promise<void> {
   for (const request of monthlyRequestsFor(today, kind)) {
     try {
-      const result = await namespace.get(namespace.idFromName(MONTHLY_REPORT_NAME)).requestMonthlyReport(request);
+      const result = await doStub(namespace, MONTHLY_REPORT_NAME).requestMonthlyReport(request);
       log(`scheduled: monthly-report month=${request.month} mode=${request.mode} accepted=${String(result.accepted)}${result.accepted ? "" : ` reason=${result.reason}`}`, "info");
     } catch (error) {
       log(`scheduled: failed class=monthly-report-failed month=${request.month} mode=${request.mode} error=${errorKind(error)}`, "error");
@@ -336,7 +337,7 @@ async function requestReportCatchup(
   }
   for (const kaisaiDate of dates) {
     try {
-      const result = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate, mode: "catchup" });
+      const result = await doStub(namespace, DAILY_REPORT_NAME).requestReport({ kaisaiDate, mode: "catchup" });
       log(`scheduled: report-catchup date=${kaisaiDate} accepted=${String(result.accepted)}${result.accepted ? "" : ` reason=${result.reason}`}`, "info");
     } catch (error) {
       log(`scheduled: failed class=report-catchup-failed date=${kaisaiDate} error=${errorKind(error)}`, "error");

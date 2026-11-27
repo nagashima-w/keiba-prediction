@@ -11,6 +11,7 @@
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v2)に固定される。
  */
+import { doStub, type DoGetOptions } from "./do-stub";
 import { DurableObject } from "cloudflare:workers";
 import { D1AnalysisStore, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { createAnalysisSink } from "./analysis-sink";
@@ -83,7 +84,7 @@ export interface RaceDayEnv {
   MODEL?: Fetcher;
   NETKEIBA_GATE: {
     idFromName(name: string): any;
-    get(id: any): Required<GateLike> & { status(): Promise<GateStatus> };
+    get(id: any, options?: DoGetOptions): Required<GateLike> & { status(): Promise<GateStatus> };
   };
   /**
    * 日報の DO(`DailyReportDO`。Issue #235)。その日が静かになったとき(`isDayQuiet`)、`RaceDayCore` が `requestReport` を 1 回呼ぶ。無い構成(binding の設定漏れ)では依頼しない。
@@ -91,7 +92,7 @@ export interface RaceDayEnv {
    */
   DAILY_REPORT?: {
     idFromName(name: string): any;
-    get(id: any): { requestReport(input: { readonly kaisaiDate: string; readonly mode: "auto" }): Promise<RequestReportResult> };
+    get(id: any, options?: DoGetOptions): { requestReport(input: { readonly kaisaiDate: string; readonly mode: "auto" }): Promise<RequestReportResult> };
   };
 }
 
@@ -101,7 +102,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
 
   constructor(ctx: DurableObjectState, env: RaceDayEnv) {
     super(ctx, env);
-    const gate = env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
+    const gate = doStub(env.NETKEIBA_GATE, GATE_NAME);
     if (webhookStatus(env.DISCORD_WEBHOOK_URL) === "invalid") {
       console.warn("DISCORD_WEBHOOK_URL の形式が Discord の Webhook ではないため、通知は送りません(値は出しません)");
     }
@@ -115,7 +116,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       reportNamespace === undefined
         ? undefined
         : async (kaisaiDate: string): Promise<void> => {
-            const result = await reportNamespace.get(reportNamespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate, mode: "auto" });
+            const result = await doStub(reportNamespace, DAILY_REPORT_NAME).requestReport({ kaisaiDate, mode: "auto" });
             // 受理・作成済み・進行中・古すぎる日(too-old)は完了として扱う。日付が不正・未来のとき(日付の食い違い)だけは失敗として扱う(依頼済みにしない)。
             if (!isRequestSettled(result)) {
               throw new Error("日報の依頼が断られました");

@@ -1365,6 +1365,10 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
 - **テストの穴**(いずれも現状のコードは正しく、将来の編集ミスを防ぐ): 日報の VNode(総括・良かった点・改善点・一言・印。`client-view-report.test.ts` 新設)/ 印別の集計(2・3 着以下の馬に印を付けた入力)/ core との的中判定の突き合わせ(枠連・三連単・払戻はあるが取込印なし)/ 配分を読む分析の取り違え / `requested` と running の組み合わせ・今日の強い注意の文言(リテラル)/ `::before` の規則が意図した 5 つだけ / アイコン A(見出し)と C(favicon)の取り違え(PNG を復号して平均輝度で族を比べる。`png-pixels.ts` 新設。**絵を差し替えるときは閾値を見直す**)/ `route-policy` の未知の `/icons/x` / `page.test.ts` の `.role` の検査を CSS の規則の形に限定。
 - **【記録】**: 印別の集計の `hasResult` の絞り込みは、`buildRaceDigest` が作った digest からは到達できない(`hasResult` が false なら `finishPosition` は必ず null)ため、等価な変異として扱い、テストを書いていない。
 
+### Durable Object の置き場所(Issue #811)
+すべての Durable Object は、アジア太平洋に置く希望(`locationHint: "apac"`)を付けて作る。stub を作る箇所は `cloud/src/do-stub.ts` の `doStub` だけで、直接 `get` を呼ぶ箇所が無いことを `cloud/test/do-stub.test.ts` が wrangler.toml の binding 名から検査する。
+希望であって保証ではない。効くのは新しく作られる DO だけで、既にある DO の場所は変わらない。
+
 ### netkeiba の取得の現状(#162 段階2。v1.19.5)
 **netkeiba への全取得は、Durable Object `NetkeibaGate`(SQLite バックエンド)の単一インスタンスを経由する。** Workers の `fetch` は CloudFront から
 HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:sockets`)で HTTP/1.1 の GET を自前で組み立てて取得する。
