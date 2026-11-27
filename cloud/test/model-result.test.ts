@@ -106,6 +106,16 @@ describe("buildModelColumn(確率 × 5 分前の単勝)", () => {
     expect(col.note).toContain("5分前");
   });
 
+  it("Issue #809: 注記の表記は「新モデル」。「別の Worker」は画面に出さない(確定・暫定・計算なしのどれも)", () => {
+    const final = buildModelColumn(ok, new Map([[1, 8]]));
+    const finalNoOdds = buildModelColumn(ok, null);
+    const none = buildModelColumn({ kind: "none", reason: "failed" }, new Map());
+        expect(final.note).toContain("新モデルが計算した勝つ確率");
+    expect(finalNoOdds.note).toContain("新モデルが計算した勝つ確率");
+    expect(none.note.startsWith("新モデルの確率: 計算なし(")).toBe(true);
+    for (const col of [final, finalNoOdds, none]) expect(col.note).not.toContain("別の Worker");
+  });
+
   it("応答に無い馬は表に無い(セルは —)", () => {
     expect(buildModelColumn(ok, new Map()).byUmaban.has(3)).toBe(false);
   });
@@ -429,6 +439,12 @@ describe("#800 buildModelColumn(暫定)", () => {
     for (const [other, otherLabel] of [["lead-1", "前日の夜の単勝"], ["lead-2", "当日の朝の単勝"], ["lead10", "発走10分前の単勝"], ["analysis", "分析時の単勝"]]) {
       if (other !== src) expect(col.note).not.toContain(`計算に使ったオッズ: ${otherLabel}`);
     }
+  });
+
+  it("Issue #809: 暫定の注記の表記は「新モデルの暫定の確率(」で始まる。「別の Worker」は出さない", () => {
+    const col = buildModelColumn(prov(), null);
+    expect(col.note.startsWith("新モデルの暫定の確率(")).toBe(true);
+    expect(col.note).not.toContain("別の Worker");
   });
 
   it("注記: 暫定であることと、取った時刻(JST)を書く", () => {

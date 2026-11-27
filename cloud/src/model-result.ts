@@ -180,7 +180,7 @@ function jstShort(ms: number): string {
 /** 確率と 5 分前の単勝(馬番 → 単勝。記録が無ければ null)から列を作る。暫定のときは、応答の単勝で掛ける(`win5` は使わない)。 */
 export function buildModelColumn(parsed: ModelParsed, win5: ReadonlyMap<number, number> | null): ModelColumn {
   if (parsed.kind === "none") {
-    return { status: "none", stage: null, note: `別の Worker の確率: 計算なし(${MODEL_NONE_LABELS[parsed.reason]})`, byUmaban: new Map() };
+    return { status: "none", stage: null, note: `新モデルの確率: 計算なし(${MODEL_NONE_LABELS[parsed.reason]})`, byUmaban: new Map() };
   }
   const prov = parsed.provisional;
   const oddsOf = prov === null ? win5 : prov.winOdds;
@@ -194,14 +194,14 @@ export function buildModelColumn(parsed: ModelParsed, win5: ReadonlyMap<number, 
     return {
       status: "ok",
       stage: parsed.stage,
-      note: `別の Worker の暫定の確率(${MODEL_STAGE_LABELS[prov.stage]})。計算に使ったオッズ: ${MODEL_ODDS_SOURCE_LABELS[prov.oddsSource]}${at}。確率 × 単勝は、そのオッズで掛けた値`,
+      note: `新モデルの暫定の確率(${MODEL_STAGE_LABELS[prov.stage]})。計算に使ったオッズ: ${MODEL_ODDS_SOURCE_LABELS[prov.oddsSource]}${at}。確率 × 単勝は、そのオッズで掛けた値`,
       byUmaban,
     };
   }
   const note =
     win5 === null
-      ? "別の Worker が計算した勝つ確率。発走5分前の単勝の記録が無いため、確率 × 単勝は —"
-      : "別の Worker が計算した勝つ確率と、確率 × 発走5分前の単勝(記録の無い馬は —)";
+      ? "新モデルが計算した勝つ確率。発走5分前の単勝の記録が無いため、確率 × 単勝は —"
+      : "新モデルが計算した勝つ確率と、確率 × 発走5分前の単勝(記録の無い馬は —)";
   return { status: "ok", stage: "final", note, byUmaban };
 }
 

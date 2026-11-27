@@ -499,7 +499,7 @@ export const NO_MARKET_VALUE = "—";
 
 /** 別の Worker の確率の列の見出し(馬ごとの評価の表〈Issue #796・#800・#805〉と、レースの画面の「別の Worker の確率」の節〈Issue #806〉が共有する)。暫定(確定以外の段階)は「暫定」付き。 */
 export function modelColumnLabels(provisional: boolean): { readonly prob: string; readonly ev: string; readonly aux: string } {
-  return provisional ? { prob: "確率(暫定)", ev: "確率×単勝(暫定)", aux: "補助(暫定)" } : { prob: "確率(別計算)", ev: "確率×5分前単勝", aux: "補助(別計算)" };
+  return provisional ? { prob: "確率(暫定)", ev: "確率×単勝(暫定)", aux: "補助(暫定)" } : { prob: "確率(新モデル)", ev: "確率×5分前単勝", aux: "補助(新モデル)" };
 }
 
 /** 騎手か調教師の 1 つのセル(Issue #643)。値と件数は対(片方だけは来ない。パーサが保証)。 */

@@ -1348,19 +1348,19 @@ describe("騎手・調教師の指標の列(Issue #643)", () => {
 });
 
 /**
- * Issue #796: 馬ごとの評価の表の「確率(別計算)」「確率×5分前単勝」の列。サーバが付けた `modelProb`・`modelEv` と `modelNote` から作る。
+ * Issue #796: 馬ごとの評価の表の「確率(新モデル)」「確率×5分前単勝」の列。サーバが付けた `modelProb`・`modelEv` と `modelNote` から作る。
  * 出すのは注記(`modelNote`)があるときだけ(MODEL が無い構成・地方・古いサーバでは注記が無い)。値が無い馬は「—」。確率は 3着内率と同じ書式(小数 1 桁の %)、掛け算は EV と同じ書式(小数 2 桁)。
  */
 describe("別の Worker が計算した確率の列(Issue #796)", () => {
-  const NOTE = "別の Worker が計算した勝つ確率";
+  const NOTE = "新モデルが計算した勝つ確率";
   const tableOf = (a: AnalysisDetail) => content(a).horseTable!;
   const withModel = (cells: ({ p: number | null; ev: number | null } | null)[], note: string | null = NOTE) =>
     analysis({ horses: cells.map((c, i) => horse(i + 1, c === null ? {} : { modelProb: c.p, modelEv: c.ev })), ...(note === null ? {} : { modelNote: note }) });
 
-  it("列は既存の列の末尾に「確率(別計算)」「確率×5分前単勝」(並べ替えなし)。注記は表に載る", () => {
+  it("列は既存の列の末尾に「確率(新モデル)」「確率×5分前単勝」(並べ替えなし)。注記は表に載る", () => {
     const t = tableOf(withModel([{ p: 0.25, ev: 2 }]));
     expect(t.columns.map((c) => c.key)).toEqual(["umaban", "mark", "name", "prior", "ev", "winOdds", "placeOddsMin", "modelProb", "modelEv"]);
-    expect(t.columns.slice(-2).map((c) => [c.label, c.sort])).toEqual([["確率(別計算)", null], ["確率×5分前単勝", null]]);
+    expect(t.columns.slice(-2).map((c) => [c.label, c.sort])).toEqual([["確率(新モデル)", null], ["確率×5分前単勝", null]]);
     expect(t.modelNote).toBe(NOTE);
   });
 
@@ -1377,7 +1377,7 @@ describe("別の Worker が計算した確率の列(Issue #796)", () => {
   });
 
   it("計算なし(全馬 —)でも注記があれば列は出る(理由は注記に。値を作って埋めない)", () => {
-    const t = tableOf(withModel([null, null], "別の Worker の確率: 計算なし(まだ計算していません)"));
+    const t = tableOf(withModel([null, null], "新モデルの確率: 計算なし(まだ計算していません)"));
     expect(t.columns.map((c) => c.key)).toContain("modelProb");
     expect(t.rows.every((r) => r.model.prob === "—" && r.model.ev === "—")).toBe(true);
     expect(t.modelNote).toContain("計算なし");
@@ -1395,7 +1395,7 @@ describe("別の Worker が計算した確率の列(Issue #796)", () => {
  * 符号の列は、1 頭でも符号を持つときだけ出す(第 2 版より前の応答は今までの表のまま)。
  */
 describe("暫定の確率と補助の符号の列(Issue #800)", () => {
-  const NOTE = "別の Worker の暫定の確率";
+  const NOTE = "新モデルの暫定の確率";
   const tableOf = (a: AnalysisDetail) => content(a).horseTable!;
   type Aux = { value: number; rank: number; of: number };
   const A: Aux = { value: 0.42, rank: 2, of: 16 };
@@ -1406,10 +1406,10 @@ describe("暫定の確率と補助の符号の列(Issue #800)", () => {
       ...(stage === undefined ? {} : { modelStage: stage }),
     } as never);
 
-  it("符号の列: 符号を持つ馬がいれば、モデルの列の末尾に「補助(別計算)」(並べ替えなし)。セルは +0.42(2位/16頭)・−0.15(…)・0.00(…)・—", () => {
+  it("符号の列: 符号を持つ馬がいれば、モデルの列の末尾に「補助(新モデル)」(並べ替えなし)。セルは +0.42(2位/16頭)・−0.15(…)・0.00(…)・—", () => {
     const t = tableOf(build([A, { value: -0.15, rank: 14, of: 16 }, { value: 0.004, rank: 8, of: 16 }, null]));
     expect(t.columns.map((c) => c.key).slice(-3)).toEqual(["modelProb", "modelEv", "modelAux"]);
-    expect(t.columns.at(-1)).toMatchObject({ label: "補助(別計算)", sort: null });
+    expect(t.columns.at(-1)).toMatchObject({ label: "補助(新モデル)", sort: null });
     expect(t.rows.map((r) => r.model.aux)).toEqual(["+0.42(2位/16頭)", "−0.15(14位/16頭)", "0.00(8位/16頭)", "—"]);
   });
 
@@ -1422,8 +1422,8 @@ describe("暫定の確率と補助の符号の列(Issue #800)", () => {
       const t = tableOf(build([A], stage));
       expect(t.columns.slice(-3).map((c) => c.label)).toEqual(["確率(暫定)", "確率×単勝(暫定)", "補助(暫定)"]);
     }
-    expect(tableOf(build([A], "final")).columns.slice(-3).map((c) => c.label)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
-    expect(tableOf(build([A], undefined)).columns.slice(-3).map((c) => c.label)).toEqual(["確率(別計算)", "確率×5分前単勝", "補助(別計算)"]);
+    expect(tableOf(build([A], "final")).columns.slice(-3).map((c) => c.label)).toEqual(["確率(新モデル)", "確率×5分前単勝", "補助(新モデル)"]);
+    expect(tableOf(build([A], undefined)).columns.slice(-3).map((c) => c.label)).toEqual(["確率(新モデル)", "確率×5分前単勝", "補助(新モデル)"]);
   });
 
   it("補助の値だけを持つ馬の補助は、並べ替えても馬について回る", () => {
