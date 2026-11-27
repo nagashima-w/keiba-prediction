@@ -103,4 +103,14 @@ export class ColoOfDay {
     const value = this.deps.metaGet(COLO_KEY);
     return value !== null && COLO_PATTERN.test(value) ? value : null;
   }
+
+  /**
+   * 画面用(Issue #812): 最後に取れた拠点と、取った日(JST の YYYYMMDD)。日が変わっても返す(DO の拠点は作られた場所に固定されるはずなので、前日の値でも拠点の確認には使える)。
+   * 取れなかった日(印)・形違い・日付の形違い・メタ無しは null。
+   */
+  latest(): { readonly colo: string; readonly day: string } | null {
+    const colo = this.deps.metaGet(COLO_KEY);
+    const day = this.deps.metaGet(DAY_KEY);
+    return colo !== null && day !== null && COLO_PATTERN.test(colo) && /^\d{8}$/.test(day) ? { colo, day } : null;
+  }
 }

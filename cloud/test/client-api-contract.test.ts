@@ -117,11 +117,12 @@ describe("契約: GET /api/analyses/status の本物の応答をクライアン�
         { raceId: "202603020211", mode: "pre_race", status: "done", attempts: 0, error: null, queuedAt: 1000, updatedAt: 2000, prior: false, analysisId: 7 },
         { raceId: "202603020212", mode: "morning", status: "failed", attempts: 3, error: "取得に失敗しました", queuedAt: 1000, updatedAt: 2000, prior: false, analysisId: null },
       ],
+      colo: null, // Issue #812: 管理者の応答には colo のキーが加わる(この偽の DO は拠点を持たない=null)。閲覧者の応答に無いことは handler-status-colo.test.ts が固定する
     });
   });
 
   it("板が空の日は成功の空配列。DO の例外は server-error", async () => {
-    expect(await fetchBoard((await connect({})).fetch, DATE)).toEqual({ ok: true, rows: [] });
+    expect(await fetchBoard((await connect({})).fetch, DATE)).toEqual({ ok: true, rows: [], colo: null });
     const { fetch } = await connect({
       board: async () => {
         throw new Error("DO の失敗");

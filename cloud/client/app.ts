@@ -310,6 +310,7 @@ export function createApp(deps: AppDeps): App {
               route,
               list: listSource(),
               board: boardSource(),
+              ...(data.coloOf(route.date) === undefined ? {} : { colo: data.coloOf(route.date) }),
               boardLoading: data.boardLoading(route.date),
               tracking: data.trackingNotice(),
               updatedAt: data.updatedAtOf(route.date, route.venue),

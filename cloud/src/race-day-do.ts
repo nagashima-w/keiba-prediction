@@ -263,8 +263,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
   }
 
   /** その日のレースの状態(RPC)。 */
-  getBoard(): Board {
-    return this.core.getBoard();
+  getBoard(includeColo = false): Board {
+    return this.core.getBoard(includeColo);
   }
 
   /** 朝の prior(RPC。無ければ null)。 */

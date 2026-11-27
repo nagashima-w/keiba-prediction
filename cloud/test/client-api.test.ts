@@ -206,3 +206,22 @@ describe("fetchRaces・fetchBoard", () => {
     expect(await fetchRaces(bad(200).fetch, "20260628", "central")).toEqual({ ok: false, error: { kind: "unexpected", httpStatus: 200 } });
   });
 });
+
+describe("parseStatusResponse の colo(Issue #812。管理者の応答だけにある)", () => {
+  const base = { ok: true, kaisai_date: "20260628", races: [] };
+  it("colo のキーが無い(閲覧者・古いサーバ)ときは、結果にも colo のキーを持たせない", () => {
+    expect(Object.hasOwn(parseStatusResponse(200, base) as object, "colo")).toBe(false);
+  });
+  it("colo が null(取れていない)は null、正しい形は {colo, day} に写す", () => {
+    expect(parseStatusResponse(200, { ...base, colo: null })).toEqual({ ok: true, rows: [], colo: null });
+    expect(parseStatusResponse(200, { ...base, colo: { colo: "NRT", day: "20261128" } })).toEqual({ ok: true, rows: [], colo: { colo: "NRT", day: "20261128" } });
+  });
+  it.each([
+    ["小文字", { colo: "nrt", day: "20261128" }],
+    ["4 文字", { colo: "NRTT", day: "20261128" }],
+    ["日付の形違い", { colo: "NRT", day: "11/28" }],
+    ["文字列", "NRT"],
+  ])("形違い(%s)は null に倒す(板の行は壊さない)", (_n, colo) => {
+    expect(parseStatusResponse(200, { ...base, colo })).toEqual({ ok: true, rows: [], colo: null });
+  });
+});

@@ -629,6 +629,11 @@ export interface BoardRace {
 export interface Board {
   readonly kaisaiDate: string | null;
   readonly races: readonly BoardRace[];
+  /**
+   * DO の拠点(Issue #812。**管理者の要求のときだけ**入る: `getBoard(true)`。閲覧者の経路は `getBoard()` で、キー自体が無く、メタも読まない)。
+   * `day` は取った日(JST の YYYYMMDD)。まだ取れていない・取れなかった・取得口が無いときは null。
+   */
+  readonly colo?: { readonly colo: string; readonly day: string } | null;
 }
 
 export interface MorningPrior {
@@ -1470,7 +1475,7 @@ export class RaceDayCore {
   }
 
   /** その日のレースの状態の一覧(レースID 昇順、同じレースは morning → pre_race)。 */
-  getBoard(): Board {
+  getBoard(includeColo = false): Board {
     const rows = this.sql
       .exec(
         `SELECT t.*, p.computed_at
@@ -1479,6 +1484,7 @@ export class RaceDayCore {
       .toArray() as (TaskRow & { computed_at: number | null })[];
     return {
       kaisaiDate: this.metaGet("kaisai_date"),
+      ...(includeColo ? { colo: this.colo?.latest() ?? null } : {}),
       races: rows.map((r) => ({
         raceId: r.race_id,
         mode: r.mode,
@@ -1592,6 +1598,10 @@ export class RaceDayCore {
    * 仕事が無ければ {@link wakeWithoutWork}。
    */
   async runNextStep(): Promise<StepOutcome> {
+    // DO の拠点(Issue #812)。JRA に出る前でも、起床の最初に JST の日ごとに 1 回だけ取る(最大 3 秒。取れなくても進む)。前夜の計画の起床でも取るので、当日の最初の JRA の取得の前にもう 1 回取りうる。
+    if (this.colo?.isPending() === true) {
+      await this.colo.ensure();
+    }
     // 期限が来た計画の行を昇格する(同期。pre_race を積む)。続けて、同じ起床の中で、積んだ pre_race を処理できる。
     // 事前分析が完了済みで計画の行が無い地方のレースを拾う(Issue #566。公開の時点で完了していた分。該当が無ければ SQL 1 本だけ)。昇格より前(足した行がすぐ実行なら、同じ起床で昇格できる)。
     await this.planStage.sweepNarMorningDone();

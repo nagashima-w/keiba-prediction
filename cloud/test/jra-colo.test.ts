@@ -121,3 +121,41 @@ describe("ColoOfDay(1 日 1 回。日付つきで DO のメタに持つ)", () =>
     expect(again.get()).toBeNull();
   });
 });
+
+describe("ColoOfDay.latest(画面用。日が変わっても、最後に取れた拠点と、取った日を返す。Issue #812)", () => {
+  function setup(fetchColo: () => Promise<string | null>) {
+    const meta = new Map<string, string>();
+    const clock = { now: jst("2026-11-28T21:00:00") };
+    const colo = new ColoOfDay({ metaGet: (k) => meta.get(k) ?? null, metaSet: (k, v) => void meta.set(k, v), now: () => clock.now, fetchColo });
+    return { colo, meta, clock };
+  }
+  it("取る前は null。取った後は {colo, day}。日が変わっても同じ値(get は null になる日でも latest は返す)", async () => {
+    const t = setup(async () => "NRT");
+    expect(t.colo.latest()).toBeNull();
+    await t.colo.ensure();
+    expect(t.colo.latest()).toEqual({ colo: "NRT", day: "20261128" });
+    t.clock.now = jst("2026-11-29T09:00:00");
+    expect(t.colo.get()).toBeNull();
+    expect(t.colo.latest()).toEqual({ colo: "NRT", day: "20261128" });
+  });
+  it("取れなかった日(印 -)・形違い・日付が無いメタは null", async () => {
+    const t = setup(async () => null);
+    await t.colo.ensure();
+    expect(t.colo.latest()).toBeNull();
+    t.meta.set("colo", 'NR"');
+    expect(t.colo.latest()).toBeNull();
+    t.meta.set("colo", "NRT");
+    t.meta.set("colo_day", "2026-11-28");
+    expect(t.colo.latest()).toBeNull();
+    t.meta.delete("colo_day");
+    expect(t.colo.latest()).toBeNull();
+  });
+  it("翌日に取れなかったときは、前の日の拠点を上書きしない扱いではなく null(その日の結果が「取れなかった」)", async () => {
+    let n = 0;
+    const t = setup(async () => (++n === 1 ? "NRT" : null));
+    await t.colo.ensure();
+    t.clock.now = jst("2026-11-29T09:00:00");
+    await t.colo.ensure();
+    expect(t.colo.latest()).toBeNull();
+  });
+});

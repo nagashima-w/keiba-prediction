@@ -225,7 +225,9 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
   }
   // Issue #572: 最終更新の行は controls の直後(「次に発走するレース」のカードの前)。絞り込みの塊の外。
   const updated = model.updatedLabel === null ? [] : [h("p", { class: "list-updated" }, [model.updatedLabel])];
-  return h("div", { class: "screen" }, [controls, ...updated, ...nextRaceCard(model.next, actions), ...trackingNotice(model.tracking, actions), ...notices, ...body]);
+  // Issue #812: DO の拠点(管理者の応答にあるときだけ)。最終更新の行と同じ位置(controls の直後)に、既存の meta の class で小さく。
+  const colo = model.coloLine === null ? [] : [h("p", { class: "meta do-colo" }, [model.coloLine])];
+  return h("div", { class: "screen" }, [controls, ...colo, ...updated, ...nextRaceCard(model.next, actions), ...trackingNotice(model.tracking, actions), ...notices, ...body]);
 }
 
 const loadingLabel = (loading: boolean, label: string): string => (loading ? "読み込み中…" : label);

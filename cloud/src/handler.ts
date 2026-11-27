@@ -87,7 +87,7 @@ export interface RaceDayStubLike {
   schedule(input: ScheduleInput): Promise<ScheduleResult>;
   /** 一括の予約(Issue #251。`POST /api/analyses/run/bulk`。同じ開催日の複数のレースに、同じ種類のタスクを積む。1 日の上限は全か無か)。呼ぶのは `handleRunBulk` だけ(ガードテストが固定)。 */
   scheduleMany(input: ScheduleManyInput): Promise<ScheduleManyResult>;
-  getBoard(): Promise<Board>;
+  getBoard(includeColo?: boolean): Promise<Board>;
   getMorningPrior(raceId: string): Promise<MorningPrior | null>;
   /** 開催日のレース一覧(Issue #183)。 */
   getRaceList(kaisaiDate: string, venue: RaceListVenue): Promise<RaceListResult>;
@@ -718,7 +718,7 @@ export async function handle(
     if (method !== "GET") {
       return methodNotAllowed("GET");
     }
-    return handleStatus(new URL(request.url), env);
+    return handleStatus(new URL(request.url), env, auth.role);
   }
 
   if (pathname === "/api/plan") {
@@ -1746,7 +1746,7 @@ async function handlePromptPreview(request: Request): Promise<Response> {
  * `race_id` つきのときは、別の Worker の確率の塊 `model`(`modelBlockOf`)を足す場合がある(Issue #806。中央・バインディングあり、かつそのレースの発走前の分析が済んでいないとき。呼ぶのは 1 レースにつき 1 回。板だけの取得〈race_id なし〉は呼ばない)。
  * パラメータは kaisai_date(必須)と race_id(任意)を、それぞれ1つまで。不正なら 400(DO を呼ばない)。
  */
-async function handleStatus(url: URL, env: Env): Promise<Response> {
+async function handleStatus(url: URL, env: Env, role: "admin" | "viewer"): Promise<Response> {
   if (hasInvalidQueryKeys(url, STATUS_PARAMS)) {
     return badRequest("クエリは kaisai_date(必須)と race_id(任意)だけを、それぞれ1つまで指定できます");
   }
@@ -1774,7 +1774,10 @@ async function handleStatus(url: URL, env: Env): Promise<Response> {
   }
   try {
     const stub = raceDayStub(env, kaisaiDate);
-    const board = await stub.getBoard();
+    // 管理者だけ DO の拠点を読み、応答に足す(Issue #812。閲覧者は読まず、キーも足さない。役割は認証の結果だけで決める)。
+    const isAdmin = role === "admin";
+    const board = await stub.getBoard(isAdmin);
+    const coloField = isAdmin ? { colo: checkedColo(board.colo) } : {};
     const races = board.races.map((r) => ({
       race_id: r.raceId,
       mode: r.mode,
@@ -1789,7 +1792,7 @@ async function handleStatus(url: URL, env: Env): Promise<Response> {
       children_ok: r.childrenOk,
     }));
     if (raceId === null) {
-      return json({ ok: true, kaisai_date: kaisaiDate, races });
+      return json({ ok: true, kaisai_date: kaisaiDate, races, ...coloField });
     }
     const stored = await stub.getMorningPrior(raceId);
     const prior =
@@ -1816,10 +1819,15 @@ async function handleStatus(url: URL, env: Env): Promise<Response> {
             (message) => console.warn(message),
           ),
         );
-    return json({ ok: true, kaisai_date: kaisaiDate, races, prior, ...(model === null ? {} : { model }) });
+    return json({ ok: true, kaisai_date: kaisaiDate, races, prior, ...coloField, ...(model === null ? {} : { model }) });
   } catch {
     return raceDayError();
   }
+}
+
+/** 板の `colo`(Issue #812)の形の検査。`^[A-Z]{3}$` と JST の日付 8 桁だけを通し、それ以外は null。 */
+function checkedColo(colo: Board["colo"]): { colo: string; day: string } | null {
+  return colo !== undefined && colo !== null && /^[A-Z]{3}$/.test(colo.colo) && /^\d{8}$/.test(colo.day) ? { colo: colo.colo, day: colo.day } : null;
 }
 
 /** 自由文(会場の失敗の理由・自動実行の失敗の文面)を返すとき。`/api/analyses/status` の `error` と同じ窓口 {@link safeText}(鍵の形を伏せてから 200 文字に切る)を通す。 */

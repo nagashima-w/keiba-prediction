@@ -36,7 +36,7 @@
  * **画面の判定は `currentScreen()`(`app.ts` が渡す)だけを使う**(Issue #191・#238)。ここで `screenOf(route)` を直接呼ばない
  * (閲覧者の `admin-only` の判定を素通りしないため。`test/client-route.test.ts` が `app.ts` とこのファイルを静的に読んで固定する)。
  */
-import { failureMessage, fetchBoard, fetchRaces, type BoardRow, type FetchLike, type MorningPriorView, type RaceRow } from "./api";
+import { failureMessage, fetchBoard, fetchRaces, type BoardRow, type ColoView, type FetchLike, type MorningPriorView, type RaceRow } from "./api";
 import { fetchAnalysis, fetchPastAnalyses, fetchRaceStatusWithModel, type AnalysisDetail, type PastAnalysis, type RaceModelBlock } from "./api-analysis";
 import type { AppScreen } from "./admin-only";
 import { createBoardStore, type BoardCompletion, type BoardStore } from "./board-state";
@@ -70,6 +70,8 @@ export interface RaceData {
   /** 一覧のキャッシュの全行(Issue #571。前後のレースの元)。取得前・取得中・失敗は undefined。 */
   listRowsOf(date: string, venue: Venue): readonly RaceRow[] | undefined;
   boardSource(date: string): BoardSource;
+  /** DO の拠点(Issue #812)。板の応答に colo のキーが無い(閲覧者・未取得)は undefined、管理者で取れていなければ null。 */
+  coloOf(date: string): ColoView | null | undefined;
   /**
    * 一覧の「最終更新」の時刻(Issue #572。端末の時計のエポックミリ秒)。一覧(その (開催日, 区分))の取得に成功した時刻と、板(その開催日)が取れているときのその最終成功の時刻の**古いほう**。
    * 一覧が取れていなければ null。板が取れていない(未取得・失敗)ときは一覧の時刻だけ。
@@ -192,6 +194,15 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     return board === undefined || boardSource(date).kind !== "ready" ? listAt : Math.min(listAt, board);
   }
 
+  /** 日付ごとの DO の拠点(板の応答にキーがあったときだけ入る。Issue #812)。 */
+  const colos = new Map<string, ColoView | null>();
+  function noteColo(date: string, result: { readonly colo?: ColoView | null }): void {
+    if (result.colo !== undefined) colos.set(date, result.colo);
+  }
+  function coloOf(date: string): ColoView | null | undefined {
+    return colos.get(date);
+  }
+
   function boardSource(date: string): BoardSource {
     const rows = store.effectiveRows(date);
     if (rows !== null) {
@@ -296,6 +307,7 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
       boardInflight.delete(date);
       if (result.ok) {
         boardErrors.delete(date);
+        noteColo(date, result);
         applyBoard(date, result.rows, seq);
         ensureTracking();
       } else {
@@ -482,6 +494,7 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     const promise = fetchBoard(deps.fetch, date).then((result) => {
       boardInflight.delete(date);
       if (result.ok) {
+        noteColo(date, result);
         applyBoard(date, result.rows, seq); // 追跡の応答のほうが新しければ捨てられる(失敗ではない)
         ensureTracking();
       } else boardRefreshErrors.set(date, failureMessage(result.error));
@@ -503,6 +516,7 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
       const seq = store.nextSeq();
       const result = await fetchBoard(deps.fetch, date);
       if (!result.ok) return false; // 板の注記(boardErrors)には入れない(最後に取れた板を残す)。失敗は追跡が数える
+      noteColo(date, result);
       applyBoard(date, result.rows, seq);
       deps.onChange();
       return true;
@@ -524,6 +538,7 @@ export function createRaceData(deps: RaceDataDeps): RaceData {
     listRowOf: (date, venue, raceId) => races.get(listKey(date, venue))?.find((r) => r.raceId === raceId),
     listRowsOf: (date, venue) => races.get(listKey(date, venue)),
     boardSource,
+    coloOf,
     updatedAtOf,
     boardLoading: (date) => boardInflight.has(date),
     raceStatusSource,

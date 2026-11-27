@@ -2,7 +2,8 @@
  * 一覧の画面の表示用データ(Issue #184。純関数)。場ごとのまとまり・R の並び・板の (race_id, mode) ごとのバッジ・各状態の表示。
  * `view.ts` がこれを VNode にする。
  */
-import type { BoardRow, RaceRow, TaskMode } from "./api";
+import { coloLabel } from "../src/colo-city";
+import type { BoardRow, ColoView, RaceRow, TaskMode } from "./api";
 import { jstEpochMs, jstHm as jstHmOfMs } from "../../packages/core/src/common/jst";
 import { buildBulkModel, hasStarted, jstHm, type BulkModel, type BulkUi } from "./bulk";
 import { previousMonthJst, todayJst, ymdToInput } from "./date";
@@ -88,6 +89,8 @@ export type BoardSource = { readonly kind: "none" } | { readonly kind: "error"; 
 
 export interface ListModelInput {
   readonly route: Route;
+  /** DO の拠点(Issue #812。管理者の板の応答だけ)。省略(キー無し)は出さない・null は「未確認」(ただし板が空で拠点も無いときは出さない)。 */
+  readonly colo?: ColoView | null;
   readonly list: ListSource;
   readonly board: BoardSource;
   /** 板(`status`)を取得中か(Issue #186 段階1)。一覧が取得済みでも、板の取得中は「更新」を押せない。省略は false。 */
@@ -201,6 +204,8 @@ export interface ListModel {
   readonly listLoading: boolean;
   /** 「最終更新 09:48」(Issue #572)。一覧が取れていて `updatedAt` があるときだけ。出さないとき null。 */
   readonly updatedLabel: string | null;
+  /** 「DO の拠点: NRT 成田(11/28 に確認)」(Issue #812)。管理者の応答に colo があるときだけ。出さないとき null。 */
+  readonly coloLine: string | null;
   readonly error: string | null;
   /** 板だけが失敗したときの注記(何の失敗かを示す前置きつき)。 */
   /** 「更新」の取り直しに失敗した注記(前の一覧を残している。Issue #576)。 */
@@ -272,6 +277,16 @@ function nextRacesOf(input: ListModelInput, races: readonly RaceRow[], today: bo
   });
 }
 
+/** 「DO の拠点」の 1 行(Issue #812)。表記は DO の拠点で、JRA の取得元とは書かない。 */
+function coloLineOf(colo: ColoView | null | undefined, board: BoardSource): string | null {
+  if (colo === undefined) return null;
+  if (colo === null) {
+    // DO に何も無い日(過去の日など。板が空・未取得)で拠点も無いときは、「未確認」を出さない。
+    return board.kind === "ready" && board.rows.length > 0 ? "DO の拠点: 未確認" : null;
+  }
+  return `DO の拠点: ${coloLabel(colo.colo)}(${Number(colo.day.slice(4, 6))}/${Number(colo.day.slice(6, 8))} に確認)`;
+}
+
 export function buildListModel(input: ListModelInput): ListModel {
   const { route, list, board } = input;
   const races = list.kind === "ready" ? list.races : [];
@@ -301,6 +316,7 @@ export function buildListModel(input: ListModelInput): ListModel {
     loading: list.kind === "loading" || (list.kind === "ready" && list.refreshing === true) || input.boardLoading === true,
     listLoading: list.kind === "loading",
     updatedLabel: list.kind === "ready" && input.updatedAt != null ? updatedLabel(input.updatedAt, input.now?.getTime() ?? input.updatedAt) : null,
+    coloLine: coloLineOf(input.colo, board),
     error: list.kind === "error" ? list.message : null,
     refreshNotice: list.kind === "ready" && list.refreshNotice !== undefined ? `${REFRESH_NOTICE_PREFIX}${list.refreshNotice}` : null,
     boardNotice: board.kind === "error" ? `${BOARD_NOTICE_PREFIX}${board.message}` : board.kind === "ready" && board.notice !== undefined ? `${BOARD_NOTICE_PREFIX}${board.notice}${KEPT_BOARD_NOTE}` : null,

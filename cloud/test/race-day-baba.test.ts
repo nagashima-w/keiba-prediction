@@ -525,7 +525,7 @@ describe("Issue #804: 拠点(colo)は 1 日 1 回、最初の馬場の取得の�
   afterEach(() => {
     coloProbe.current = null;
   });
-  it("19 枠すべてが失敗しても拠点の取得は 1 回。最初の取得口の呼び出しより前。失敗の詳細(failDetail)に c が付く", async () => {
+  it("前夜(計画)の最初の起床で 1 回(Issue #812)、当日の最初の取得の前にもう 1 回。19 枠すべてが失敗しても、当日の取得は 1 回。最初の取得口の呼び出しより前。失敗の詳細(failDetail)に c が付く", async () => {
     const probe: ColoProbe = { calls: 0, order: [] };
     coloProbe.current = probe;
     const h = harness();
@@ -534,11 +534,12 @@ describe("Issue #804: 拠点(colo)は 1 日 1 回、最初の馬場の取得の�
       return { ...notYet(), result: "http-403", failure: { page: "cushion", info: { kind: "blocked", http: 403 } } };
     };
     await plan2100(h);
-    expect(probe.calls).toBe(0); // 前夜(計画)では取らない: 馬場の取得の前に 1 回
+    expect(probe.calls).toBe(1); // 前夜(10/11 の JST の日)の最初の起床で 1 回。JRA にはまだ出ない
+    expect(probe.order).toEqual(["colo"]);
     await runDue(h, jst("2026-10-12T23:59:00"));
     expect(h.api.calls).toBe(BABA_FETCH_SLOTS);
-    expect(probe.calls).toBe(1);
-    expect(probe.order.slice(0, 2)).toEqual(["colo", "baba"]);
+    expect(probe.calls).toBe(2); // 当日(10/12)の分が 1 回。19 枠で増えない
+    expect(probe.order.slice(0, 3)).toEqual(["colo", "colo", "baba"]);
     expect(h.store.finishes.every((f) => f.finish.failDetail === '{"p":"cushion","k":"blocked","h":403,"c":"NRT"}')).toBe(true);
     expect(h.store.finishes).toHaveLength(BABA_FETCH_SLOTS);
   });
@@ -557,6 +558,26 @@ describe("Issue #804: 拠点(colo)は 1 日 1 回、最初の馬場の取得の�
     await tick(h); // 09:00 の取得
     expect(meta(h, "colo_day")).toBe(DATE);
     expect(meta(h, "colo")).toBe("NRT");
-    expect(probe.calls).toBe(1);
+    expect(probe.calls).toBe(2); // 前夜と当日(JST の日ごとに 1 回)
+  });
+});
+
+describe("Issue #812: 拠点は DO の最初の起床で取り(JRA に出る前でも)、板に管理者だけが読める形で出る", () => {
+  afterEach(() => {
+    coloProbe.current = null;
+  });
+  it("計画の最初の起床で取り、getBoard(true) は最後に取れた拠点と日(JST)を返す。getBoard() と getBoard(false) には colo のキーが無く、メタも読まない", async () => {
+    const probe: ColoProbe = { calls: 0, order: [] };
+    coloProbe.current = probe;
+    const h = harness();
+    await plan2100(h);
+    expect(h.core.getBoard(true).colo).toEqual({ colo: "NRT", day: "20261011" });
+    expect(Object.hasOwn(h.core.getBoard(), "colo")).toBe(false);
+    expect(Object.hasOwn(h.core.getBoard(false), "colo")).toBe(false);
+  });
+  it("拠点の取得口が無い構成では、getBoard(true) の colo は null(キーはある)", async () => {
+    const h = harness();
+    await plan2100(h);
+    expect(h.core.getBoard(true).colo).toBeNull();
   });
 });

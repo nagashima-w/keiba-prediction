@@ -574,3 +574,23 @@ describe("Issue #559: 一覧の先頭の「次に発走するレース」(ListMo
     });
   });
 });
+
+describe("buildListModel の coloLine(Issue #812。DO の拠点。管理者の応答にある値だけ)", () => {
+  const ready = { kind: "ready" as const, rows: [row("202603020211", "morning", "done")] };
+  it("colo が undefined(閲覧者・古いサーバ)なら null(何も出さない)", () => {
+    expect(buildListModel(input({ board: ready })).coloLine).toBeNull();
+  });
+  it("{colo, day} は「DO の拠点: NRT 成田(11/28 に確認)」。表に無いコードは 3 文字だけ", () => {
+    expect(buildListModel(input({ board: ready, colo: { colo: "NRT", day: "20261128" } })).coloLine).toBe("DO の拠点: NRT 成田(11/28 に確認)");
+    expect(buildListModel(input({ board: ready, colo: { colo: "ZZZ", day: "20261201" } })).coloLine).toBe("DO の拠点: ZZZ(12/1 に確認)");
+  });
+  it("null(管理者で、まだ取れていない)は「DO の拠点: 未確認」", () => {
+    expect(buildListModel(input({ board: ready, colo: null })).coloLine).toBe("DO の拠点: 未確認");
+  });
+  it("板が空(過去の日など、DO に何も無い)で拠点も無いときは出さない。拠点が分かっていれば板が空でも出す", () => {
+    const empty = { kind: "ready" as const, rows: [] };
+    expect(buildListModel(input({ board: empty, colo: null })).coloLine).toBeNull();
+    expect(buildListModel(input({ board: { kind: "none" }, colo: null })).coloLine).toBeNull();
+    expect(buildListModel(input({ board: empty, colo: { colo: "NRT", day: "20261128" } })).coloLine).toBe("DO の拠点: NRT 成田(11/28 に確認)");
+  });
+});
