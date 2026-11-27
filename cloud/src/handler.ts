@@ -23,7 +23,7 @@ import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
 import { runJraCheck, type JraFetchLike } from "./jra-check";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { attachMarketEdge, loadMarketEdge } from "./analysis-market-edge";
-import { attachModel, loadModelColumn } from "./model-result";
+import { attachCourse, attachModel, loadModelResult } from "./model-result";
 import { readWinOdds5, type OddsSnapshotReadDb } from "./odds-snapshot-repository";
 import { D1MarketEdgeStore } from "./market-edge-repository";
 import { buildMarketEdgesView } from "./market-edges-view";
@@ -1346,13 +1346,13 @@ async function handleAnalysisDetail(url: URL, idText: string, env: Env): Promise
     const view = buildAnalysisView(result, allocation, close);
     // 騎手・調教師の指標の列(Issue #643)。地方・記録なし・読み出しの失敗は null(列を出さない。本体は壊さない。`loadMarketEdge` が握る)。
     const marketEdge = await loadMarketEdge(new D1MarketEdgeStore(env.DB), result);
-    // 別の Worker が計算した確率の列(Issue #796)。バインディングが無い・地方・失敗は、null(列の材料を足さない)か「計算なし」(200。本体は壊さない。`loadModelColumn` が握る)。
-    const modelColumn = await loadModelColumn(
+    // 別の Worker が計算した確率の列(Issue #796)。バインディングが無い・地方・失敗は、null(列の材料を足さない)か「計算なし」(200。本体は壊さない。`loadModelResult` が握る)。コースの参考情報(Issue #802)は同じ 1 回の GET から足す。
+    const modelResult = await loadModelResult(
       { model: env.MODEL, readWinOdds: (raceId) => readWinOdds5(env.DB as unknown as OddsSnapshotReadDb, raceId) },
       result.analysis.raceId,
       (message) => console.warn(message),
     );
-    return json({ ok: true, analysis: { ...attachModel(attachMarketEdge(view, marketEdge), modelColumn), previousDiff: await previousDiffOf(store, view) } });
+    return json({ ok: true, analysis: { ...attachCourse(attachModel(attachMarketEdge(view, marketEdge), modelResult?.column ?? null), modelResult?.course ?? null), previousDiff: await previousDiffOf(store, view) } });
   } catch {
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "d1-error" } }, 503);

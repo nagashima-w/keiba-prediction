@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  attachCourse,
   attachModel,
   buildModelColumn,
   loadModelColumn,
+  loadModelResult,
+  parseModelCourse,
   MODEL_NONE_LABELS,
   MODEL_READ_TIMEOUT_MS,
   parseModelResponse,
@@ -447,5 +450,149 @@ describe("#800 loadModelColumn(暫定)", () => {
     const col = await loadModelColumn({ model: fetcher, readWinOdds: async () => (read++, new Map([[1, 100], [2, 100]])) }, RACE, () => undefined);
     expect(read).toBe(1);
     expect(col!.byUmaban.get(1)!.ev).toBe(2);
+  });
+});
+
+/**
+ * Issue #802: コースの参考情報(`course`・`course_fit`)の読み取りと、分析の応答への足し方。
+ * 確率の状態とは独立(計算なしでも、course が正しく来ていれば出す)。応答そのものが不正(HTTP が 200 でない・race_id の違い・JSON でない)なら何も出さない。
+ */
+describe("コースの参考情報(Issue #802)", () => {
+  const COURSE = { key: "05-T-1600-out", name: "東京 芝1600", similar_shape: [{ key: "06-T-2000-out", name: "中山 芝2000", s: 0.5 }], similar_results: [{ key: "09-D-1800-in", name: "阪神 ダ1800", s: 0.25, n: 12 }] };
+  const FIT = { runs: 5, wins: 1, top3: 2, best: 1 };
+  const FITS = { same: FIT, similar: { ...FIT, courses: ["x"] }, unknown_ring: 2 };
+  const withCourse = (extra: Record<string, unknown> = {}) => okBody([{ umaban: 1, p_win: 0.25, course_fit: FITS }, { umaban: 2, p_win: 0.5 }], { course: COURSE, ...extra });
+
+  describe("parseModelCourse", () => {
+    it("ok: course と、馬番 → course_fit の表を作る(course_fit の無い馬は載せない)", () => {
+      const info = parseModelCourse(200, withCourse(), RACE)!;
+      expect(info.course!.name).toBe("東京 芝1600");
+      expect([...info.fits.keys()]).toEqual([1]);
+      expect(info.fits.get(1)).toEqual({ same: FIT, similar: FIT, unknownRing: 2 });
+    });
+
+    it("確率の状態とは独立: none(理由つき)・暫定の none でも、course が正しければ出る", () => {
+      expect(parseModelCourse(200, { race_id: RACE, status: "none", reason: "not_ready", course: COURSE }, RACE)!.course!.name).toBe("東京 芝1600");
+      expect(parseModelCourse(200, { race_id: RACE, status: "none", reason: "weird", course: COURSE }, RACE)!.course).not.toBeNull();
+      const prov = { race_id: RACE, status: "none", reason: "not_ready", stage: "preday", odds_source: "lead-1", horses: [{ umaban: 1, p_win: 0.1, course_fit: FITS }], course: COURSE };
+      const info = parseModelCourse(200, prov, RACE)!;
+      expect(info.course).not.toBeNull();
+      expect(info.fits.size).toBe(1);
+    });
+
+    it("確率の馬が崩れていて unavailable でも、course が正しければ出る(欄ごとに独立)", () => {
+      const body = okBody([{ umaban: 1, p_win: 5 }], { course: COURSE });
+      expect(parseModelResponse(200, body, RACE).kind).toBe("none");
+      expect(parseModelCourse(200, body, RACE)!.course).not.toBeNull();
+    });
+
+    it.each([
+      ["HTTP が 200 でない", 500, () => withCourse()],
+      ["404", 404, () => withCourse()],
+      ["race_id が違う", 200, () => withCourse({ race_id: "202603020212" })],
+      ["本文が null(JSON でない)", 200, () => null],
+      ["本文が配列", 200, () => [withCourse()]],
+    ])("応答そのものが不正なら null: %s", (_label, status, body) => {
+      expect(parseModelCourse(status, body(), RACE)).toBeNull();
+    });
+
+    it("course も course_fit も無い応答(今の版)は null", () => {
+      expect(parseModelCourse(200, okBody(), RACE)).toBeNull();
+      expect(parseModelCourse(200, { race_id: RACE, status: "none", reason: "not_ready" }, RACE)).toBeNull();
+    });
+
+    it("course が崩れていても course_fit は残る。course_fit が崩れた馬だけ落ちる", () => {
+      const body = okBody([{ umaban: 1, p_win: 0.2, course_fit: FITS }, { umaban: 2, p_win: 0.2, course_fit: { ...FITS, unknown_ring: -1 } }], { course: { ...COURSE, key: "bad" } });
+      const info = parseModelCourse(200, body, RACE)!;
+      expect(info.course).toBeNull();
+      expect([...info.fits.keys()]).toEqual([1]);
+    });
+
+    it("馬の umaban が不正な要素の course_fit は載せない", () => {
+      const body = okBody([{ umaban: 0, p_win: 0.2, course_fit: FITS }, { umaban: 1.5, course_fit: FITS }, "x"], { course: COURSE });
+      const info = parseModelCourse(200, body, RACE)!;
+      expect(info.fits.size).toBe(0);
+      expect(info.course).not.toBeNull();
+    });
+
+    it("崩れだけで足せるものが何も無ければ null", () => {
+      expect(parseModelCourse(200, okBody([{ umaban: 1, p_win: 0.2, course_fit: { runs: 1 } }], { course: "x" }), RACE)).toBeNull();
+    });
+  });
+
+  describe("attachCourse", () => {
+    const view = { horses: [{ umaban: 1, name: "a" }, { umaban: 2, name: "b" }], other: 1 };
+
+    it("情報が null なら、同じ view をそのまま返す(キーを増やさない)", () => {
+      expect(attachCourse(view, null)).toBe(view);
+    });
+
+    it("course と、course_fit を持つ馬の courseFit だけを足す(元の view は変えない)", () => {
+      const info = parseModelCourse(200, withCourse(), RACE)!;
+      const out = attachCourse(view, info) as unknown as { course: { name: string }; horses: Record<string, unknown>[] };
+      expect(out.course.name).toBe("東京 芝1600");
+      expect(out.horses[0]!["courseFit"]).toEqual({ same: FIT, similar: FIT, unknownRing: 2 });
+      expect(out.horses[1]).not.toHaveProperty("courseFit");
+      expect(view).not.toHaveProperty("course");
+      expect(view.horses[0]).not.toHaveProperty("courseFit");
+    });
+
+    it("course が無く馬の欄だけあるとき: course のキーは足さない", () => {
+      const out = attachCourse(view, parseModelCourse(200, okBody([{ umaban: 1, p_win: 0.1, course_fit: FITS }]), RACE)!);
+      expect(out).not.toHaveProperty("course");
+      expect((out.horses[0] as Record<string, unknown>)["courseFit"]).toBeDefined();
+    });
+  });
+
+  describe("loadModelResult(1 回の GET で、列とコースの両方)", () => {
+    const fetcherOf = (handler: () => Response | Promise<Response>) => {
+      const urls: string[] = [];
+      const fetcher = {
+        async fetch(input: RequestInfo | URL, init?: RequestInit) {
+          urls.push(`${new Request(input as string, init).method} ${new URL(new Request(input as string, init).url).pathname}`);
+          return handler();
+        },
+      } as unknown as Fetcher;
+      return { fetcher, urls };
+    };
+    const winOdds = async () => new Map([[1, 8], [2, 3]]);
+
+    it("GET は 1 回。列(確率 × 単勝)と、コースの両方が返る", async () => {
+      const { fetcher, urls } = fetcherOf(() => Response.json(withCourse()));
+      const r = await loadModelResult({ model: fetcher, readWinOdds: winOdds }, RACE, () => undefined);
+      expect(urls).toEqual([`GET /v1/races/${RACE}`]);
+      expect(r!.column.byUmaban.get(1)).toEqual({ prob: 0.25, ev: 2, sign: null });
+      expect(r!.course!.course!.name).toBe("東京 芝1600");
+    });
+
+    it("計算なしでもコースは出る", async () => {
+      const { fetcher } = fetcherOf(() => Response.json({ race_id: RACE, status: "none", reason: "not_ready", course: COURSE }));
+      const r = await loadModelResult({ model: fetcher, readWinOdds: winOdds }, RACE, () => undefined);
+      expect(r!.column.status).toBe("none");
+      expect(r!.course!.course).not.toBeNull();
+    });
+
+    it("500・例外・JSON でない・時間切れは、コース無し(列は unavailable)", async () => {
+      for (const handler of [() => Response.json(withCourse(), { status: 500 }), () => new Response("<html>"), () => { throw new Error("x"); }]) {
+        const { fetcher } = fetcherOf(handler);
+        const r = await loadModelResult({ model: fetcher, readWinOdds: winOdds }, RACE, () => undefined);
+        expect(r!.column.status).toBe("none");
+        expect(r!.course).toBeNull();
+      }
+    });
+
+    it("MODEL が無い・地方は null(何も呼ばない)", async () => {
+      expect(await loadModelResult({ model: undefined, readWinOdds: winOdds }, RACE, () => undefined)).toBeNull();
+      const { fetcher, urls } = fetcherOf(() => Response.json(withCourse()));
+      expect(await loadModelResult({ model: fetcher, readWinOdds: winOdds }, "202644062911", () => undefined)).toBeNull();
+      expect(urls).toEqual([]);
+    });
+
+    it("欄の無い今の版の応答: course は null(従来と同じ)", async () => {
+      const { fetcher } = fetcherOf(() => Response.json(okBody()));
+      const r = await loadModelResult({ model: fetcher, readWinOdds: winOdds }, RACE, () => undefined);
+      expect(r!.course).toBeNull();
+      expect(r!.column.status).toBe("ok");
+    });
   });
 });

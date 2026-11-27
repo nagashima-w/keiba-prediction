@@ -790,3 +790,83 @@ describe("暫定の確率・補助の符号(Issue #800)のパース", () => {
     for (const v of ["weird", "", 1, "<b>x</b>", "toString"]) expect(readStage(v)).toBeNull();
   });
 });
+
+describe("コースの参考情報(Issue #802)のパース", () => {
+  const FIT = { runs: 5, wins: 1, top3: 2, best: 1 };
+  const COURSE = { name: "東京 芝1600", similarShape: [{ name: "中山 芝2000", s: 0.5 }], similarResults: [{ name: "阪神 ダ1800", s: 0.25, n: 12 }] };
+  const readHorse = (over: Record<string, unknown>) => {
+    const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, horses: [{ ...HORSE, ...over }] }));
+    return result.ok ? result.analysis.horses[0]! : null;
+  };
+  const readCourse = (value: unknown, drop = false) => {
+    const analysis: Record<string, unknown> = { ...ANALYSIS, course: value };
+    if (drop) delete analysis["course"];
+    const result = parseAnalysisResponse(200, wrap(analysis));
+    return result.ok ? result.analysis : null;
+  };
+
+  it("欄が無い応答(今の版)では、course・courseFit のキーを増やさない(応答全体は成功のまま)", () => {
+    const a = readCourse(undefined, true)!;
+    expect(a).not.toBeNull();
+    expect(a).not.toHaveProperty("course");
+    expect(a.horses[0]).not.toHaveProperty("courseFit");
+  });
+
+  it("course: 正しい形はそのまま読む", () => {
+    expect(readCourse(COURSE)!.course).toEqual(COURSE);
+  });
+
+  it.each([
+    ["null", null],
+    ["配列", []],
+    ["名前が空", { ...COURSE, name: "" }],
+    ["名前が数", { ...COURSE, name: 3 }],
+  ])("course が崩れていれば、course だけ無し(応答全体は失敗させない): %s", (_label, value) => {
+    const a = readCourse(value)!;
+    expect(a).not.toBeNull();
+    expect(a).not.toHaveProperty("course");
+  });
+
+  it.each([
+    ["s が範囲外", { similarShape: [{ name: "x", s: 1.5 }] }],
+    ["名前が数", { similarShape: [{ name: 1, s: 0.5 }] }],
+    ["配列でない", { similarShape: "x" }],
+    ["n が小数", { similarResults: [{ name: "x", s: 0.5, n: 1.5 }] }],
+    ["n が負", { similarResults: [{ name: "x", s: 0.5, n: -1 }] }],
+    ["n が無い", { similarResults: [{ name: "x", s: 0.5 }] }],
+    ["1 件でも崩れていれば全体", { similarShape: [{ name: "x", s: 0.5 }, { name: "y", s: -1 }] }],
+  ])("似たコースの配列が崩れていれば、その配列だけ null: %s", (_label, over) => {
+    const a = readCourse({ ...COURSE, ...over })!;
+    expect(a.course!.name).toBe("東京 芝1600");
+    const key = Object.keys(over)[0] as "similarShape" | "similarResults";
+    expect(a.course![key]).toBeNull();
+  });
+
+  it("s の 0 と 1、n の 0 は通る。7 件目以降は先頭 5 件", () => {
+    const edge = { ...COURSE, similarShape: [{ name: "a", s: 0 }, { name: "b", s: 1 }], similarResults: [{ name: "c", s: 0, n: 0 }] };
+    expect(readCourse(edge)!.course).toEqual(edge);
+    const six = Array.from({ length: 6 }, (_, i) => ({ name: `n${i}`, s: 0.5 }));
+    expect(readCourse({ ...COURSE, similarShape: six })!.course!.similarShape).toHaveLength(5);
+  });
+
+  it("courseFit: 正しい形はそのまま読む。runs 0 と best null の境界も通る", () => {
+    const fit = { same: FIT, similar: { runs: 0, wins: 0, top3: 0, best: null }, unknownRing: 2 };
+    expect(readHorse({ courseFit: fit })!.courseFit).toEqual(fit);
+  });
+
+  it.each([
+    ["null", null],
+    ["unknownRing が負", { same: FIT, similar: FIT, unknownRing: -1 }],
+    ["unknownRing が無い", { same: FIT, similar: FIT }],
+    ["wins > top3", { same: { runs: 5, wins: 3, top3: 2, best: 1 }, similar: FIT, unknownRing: 0 }],
+    ["top3 > runs", { same: FIT, similar: { runs: 1, wins: 0, top3: 2, best: 1 }, unknownRing: 0 }],
+    ["runs 0 に best", { same: { runs: 0, wins: 0, top3: 0, best: 1 }, similar: FIT, unknownRing: 0 }],
+    ["best が 0", { same: { ...FIT, best: 0 }, similar: FIT, unknownRing: 0 }],
+    ["runs が小数", { same: { ...FIT, runs: 1.5 }, similar: FIT, unknownRing: 0 }],
+  ])("courseFit が崩れていれば、その馬の欄だけ無し(馬・応答は残す): %s", (_label, value) => {
+    const h = readHorse({ courseFit: value })!;
+    expect(h).not.toBeNull();
+    expect(h.umaban).toBe(1);
+    expect(h).not.toHaveProperty("courseFit");
+  });
+});

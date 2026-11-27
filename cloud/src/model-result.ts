@@ -8,10 +8,12 @@
  *  - 暫定(Issue #800。`status: "none"` に `stage`・`horses` が付く応答)は「暫定」と区別して出し、応答の `odds_win` で掛ける。`stage`・`odds_source` は固定の表に無ければ暫定の列を出さない(計算なし)。
  *  - 馬ごとの補助の値(`u_mat`)は、別の Worker が返す値で、符号だけを表示する(数値は画面に送らない)。
  *  - バインディングが無い・地方のレースのときは null(何も読まない。応答に足さない)。
+ *  - コースの参考情報(Issue #802。`course`・各馬の `course_fit`)は、確率の検査とは独立に読む(`./model-course`)。応答そのものが不正(HTTP が 200 でない・race_id の不一致・JSON でない)ときだけ出さない。
  * 純ロジック。`Fetcher`・D1 の読み出し・警告の出口は注入する。
  */
 import type { AnalysisView } from "./analysis-view";
 import { MODEL_BASE_URL } from "./model-hook";
+import { readCourse, readCourseFit, type CourseFit, type CourseView } from "./model-course";
 
 /** 画面の GET の時間切れ(ミリ秒)。画面の表示を遅らせない長さ。 */
 export const MODEL_READ_TIMEOUT_MS = 2000;
@@ -198,6 +200,43 @@ export function attachModel<V extends Pick<AnalysisView, "horses">>(view: V, col
   };
 }
 
+/** コースの参考情報(Issue #802)。`course` は崩れていれば null。`fits` は馬番 → その馬の欄(崩れた馬・欄の無い馬は載せない)。 */
+export interface ModelCourseInfo {
+  readonly course: CourseView | null;
+  readonly fits: ReadonlyMap<number, CourseFit>;
+}
+
+/** 応答からコースの参考情報を読む。応答そのものが不正・足せるものが何も無い(今の版)ときは null。確率の検査(`parseModelResponse`)には影響しない。 */
+export function parseModelCourse(httpStatus: number, body: unknown, raceId: string): ModelCourseInfo | null {
+  if (httpStatus !== 200 || !isRecord(body) || body["race_id"] !== raceId) return null;
+  const course = readCourse(body["course"]);
+  const fits = new Map<number, CourseFit>();
+  const horses = body["horses"];
+  if (Array.isArray(horses)) {
+    for (const h of horses) {
+      if (!isRecord(h)) continue;
+      const umaban = h["umaban"];
+      if (typeof umaban !== "number" || !Number.isInteger(umaban) || umaban < 1 || fits.has(umaban)) continue;
+      const fit = readCourseFit(h["course_fit"]);
+      if (fit !== null) fits.set(umaban, fit);
+    }
+  }
+  return course === null && fits.size === 0 ? null : { course, fits };
+}
+
+/** 分析の応答にコースの参考情報を足す(元の view は変えない)。足すものが無い(null)ときは同じ view を返す(キーを増やさない)。 */
+export function attachCourse<V extends { horses: readonly object[] }>(view: V, info: ModelCourseInfo | null): V {
+  if (info === null) return view;
+  return {
+    ...view,
+    ...(info.course === null ? {} : { course: info.course }),
+    horses: view.horses.map((h) => {
+      const fit = info.fits.get((h as { umaban: number }).umaban);
+      return fit === undefined ? h : { ...h, courseFit: fit };
+    }),
+  };
+}
+
 export interface LoadModelDeps {
   /** バインディング(無ければ何もしない)。 */
   readonly model: Fetcher | undefined;
@@ -206,14 +245,20 @@ export interface LoadModelDeps {
   readonly timeoutMs?: number;
 }
 
-/** 中央のレースだけ。MODEL が無い・地方なら null(MODEL も D1 も呼ばない)。投げない。 */
-export async function loadModelColumn(deps: LoadModelDeps, raceId: string, warn: (message: string) => void): Promise<ModelColumn | null> {
+export interface ModelResult {
+  readonly column: ModelColumn;
+  /** コースの参考情報(Issue #802)。応答が不正・欄が無いときは null。 */
+  readonly course: ModelCourseInfo | null;
+}
+
+/** 中央のレースだけ。MODEL が無い・地方なら null(MODEL も D1 も呼ばない)。投げない。GET は 1 回で、確率の列とコースの両方を返す(Issue #802)。 */
+export async function loadModelResult(deps: LoadModelDeps, raceId: string, warn: (message: string) => void): Promise<ModelResult | null> {
   if (deps.model === undefined || !/^\d{12}$/.test(raceId) || Number(raceId.slice(4, 6)) > 10) {
     return null;
   }
   const model = deps.model;
   const timeoutMs = deps.timeoutMs ?? MODEL_READ_TIMEOUT_MS;
-  const readParsed = async (): Promise<ModelParsed> => {
+  const readParsed = async (): Promise<{ parsed: ModelParsed; course: ModelCourseInfo | null }> => {
     try {
       const res = await model.fetch(`${MODEL_BASE_URL}/v1/races/${raceId}`, { method: "GET", signal: AbortSignal.timeout(timeoutMs) });
       let body: unknown = null;
@@ -222,10 +267,10 @@ export async function loadModelColumn(deps: LoadModelDeps, raceId: string, warn:
       } catch {
         body = null;
       }
-      return parseModelResponse(res.status, body, raceId);
+      return { parsed: parseModelResponse(res.status, body, raceId), course: parseModelCourse(res.status, body, raceId) };
     } catch {
       warn(`別の Worker の確率を読めませんでした(${raceId}。例外または時間切れ)`);
-      return UNAVAILABLE;
+      return { parsed: UNAVAILABLE, course: null };
     }
   };
   const readOdds = async (): Promise<ReadonlyMap<number, number> | null> => {
@@ -236,6 +281,11 @@ export async function loadModelColumn(deps: LoadModelDeps, raceId: string, warn:
       return null;
     }
   };
-  const [parsed, win5] = await Promise.all([readParsed(), readOdds()]);
-  return buildModelColumn(parsed, win5);
+  const [{ parsed, course }, win5] = await Promise.all([readParsed(), readOdds()]);
+  return { column: buildModelColumn(parsed, win5), course };
+}
+
+/** 確率の列だけ(従来の入口。{@link loadModelResult} の薄い包み)。 */
+export async function loadModelColumn(deps: LoadModelDeps, raceId: string, warn: (message: string) => void): Promise<ModelColumn | null> {
+  return (await loadModelResult(deps, raceId, warn))?.column ?? null;
 }

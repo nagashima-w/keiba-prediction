@@ -12,7 +12,7 @@ import type { Crumb, NeighborLink, RaceNeighbors } from "./neighbors";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { MARK_REPAIRED_BADGE } from "../../packages/core/src/view/format";
 import type { AllocationBetRowView } from "../../packages/core/src/view/allocation-proposal-view";
-import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_DIFF, LABEL_CONCERNS, LABEL_HIGHLIGHTS, shiftNote, type CloseSection, type DevelopmentSection, type HorseCard, type HorseSortKey, type HorseTable, type MarkedHorse, type MarketEdgeCell, type ResultContent, type ResultModel, type SortDir, type TopProbHorse } from "./result";
+import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_DIFF, LABEL_CONCERNS, LABEL_HIGHLIGHTS, shiftNote, type CloseSection, type CourseListView, type CourseSection, type DevelopmentSection, type HorseCard, type HorseSortKey, type HorseTable, type MarkedHorse, type MarketEdgeCell, type ResultContent, type ResultModel, type SortDir, type TopProbHorse } from "./result";
 import type { FieldModel, PreviewModel, SectionModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { CalibrationTarget, StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
@@ -389,6 +389,14 @@ function horseDetail(horse: HorseCard): VNode {
     ]),
     // タイム指数の行(Issue #359)。サーバの文言をそのまま(複勝の行の下・根拠の上)。出さない分析は行ごと出さない。
     ...(horse.timeIndexLine === null ? [] : [h("span", { class: "horse-line time-index" }, [horse.timeIndexLine])]),
+    // コース別の成績(Issue #802。参考の情報)。タイム指数の行の下・根拠の上。回りの決まらない過去走は 1 以上のときだけ。
+    ...(horse.courseFit === null
+      ? []
+      : [
+          h("span", { class: "horse-line course-fit" }, [horse.courseFit.same]),
+          h("span", { class: "horse-line course-fit" }, [horse.courseFit.similar]),
+          ...(horse.courseFit.ring === null ? [] : [h("span", { class: "horse-line course-fit" }, [horse.courseFit.ring])]),
+        ]),
     ...(horse.reason === null ? [] : [h("span", { class: "horse-reason" }, [`根拠 ${horse.reason}`])]),
     // 根拠の下に、強調材料・懸念事項(LLM が効いたときだけ中身がある。空の側は塊ごと出さない)。
     ...(horse.highlights.length === 0 ? [] : [pointsBlock("highlights", LABEL_HIGHLIGHTS, horse.highlights)]),
@@ -416,6 +424,13 @@ function marketCell(c: MarketEdgeCell): VNode {
     h("span", { class: "market-value" }, [c.value]),
     ...(c.n === "" ? [] : [" ", h("small", { class: "market-n" }, [c.n, ...(c.few ? [" ", h("span", { class: "market-few-mark" }, ["少"])] : [])])]),
   ]);
+}
+
+/** 「コースの類似(参考)」の欄(Issue #802)。名前は外から来た(サーバが組んだ)文字列で、子の文字列(テキストノード)としてだけ入れる。新しい部品は足さず、既存の `meta`・`past`(箇条書き)・`market-note` を使う。 */
+function courseSection(c: CourseSection): VNode {
+  const list = (kind: string, v: CourseListView | null): VNode[] =>
+    v === null ? [] : [h("p", { class: "meta" }, [v.label]), h("ul", { class: `points-list course-${kind}` }, v.items.map((item) => h("li", {}, [item])))];
+  return h("div", { class: "course-ref" }, [h("p", { class: "meta" }, [h("strong", {}, [c.heading])]), h("p", { class: "meta" }, [c.todayLine]), ...list("shape", c.shape), ...list("results", c.results), h("p", { class: "market-note" }, [c.note])]);
 }
 
 /** 馬の行の開閉のボタン(馬名の列。Issue #740)。`button` なので Enter・Space で操作できる。馬名が無い馬は記号だけ(外から来た馬名は子の文字列=テキストノードだけ)。 */
@@ -641,6 +656,8 @@ function resultSections(content: ResultContent, heading: "h2" | "h3", actions: V
       ...(!content.notesOpen || content.timeIndexNote === null ? [] : [h("p", { class: "meta time-index-note" }, [content.timeIndexNote])]),
       // 馬ごとの評価の表(Issue #546-2)。説明文の下。根拠・注目点・懸念点は表に入らないので、馬の行を押すと、その行の直後に詳しい中身が開く(Issue #740。旧カードの縦の並びをやめた)。
       ...(content.horseTable === null ? [] : horseTable(content, content.horseTable, actions)),
+      // コースの類似(参考。Issue #802)。表の直後。表が無い分析でも、欄があれば出す。
+      ...(content.course === null ? [] : [courseSection(content.course)]),
     ]),
     h("section", { class: "allocation" }, [
       h(heading, {}, ["配分の提案(分析時点)"]),

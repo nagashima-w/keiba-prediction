@@ -85,6 +85,28 @@ export interface AnalysisHorse {
   readonly modelEv?: number | null;
   /** 別の Worker が返す、馬ごとの補助の値の符号(Issue #800。符号だけを表示する)。`+`・`-`・`0` 以外・キー無しは null。 */
   readonly modelSign?: "+" | "-" | "0" | null;
+  /** その馬のコース別の成績(Issue #802。参考の情報)。サーバが検査して付ける。無い・形が不正な馬は、キーごと無し(パーサは足さない)。 */
+  readonly courseFit?: AnalysisCourseFit;
+}
+
+/** コースの成績の 1 つの集計(Issue #802)。`wins` ≤ `top3` ≤ `runs`。`best` は 1 以上の整数か null(`runs` が 0 なら null)。 */
+export interface AnalysisCourseRecord {
+  readonly runs: number;
+  readonly wins: number;
+  readonly top3: number;
+  readonly best: number | null;
+}
+/** 馬のコース別の成績(Issue #802)。`unknownRing` は、回りの決まらない過去走の数。 */
+export interface AnalysisCourseFit {
+  readonly same: AnalysisCourseRecord;
+  readonly similar: AnalysisCourseRecord;
+  readonly unknownRing: number;
+}
+/** 今日のコースと、似たコース(Issue #802。参考の情報)。名前はサーバが key から組んだもの。配列が崩れていた場合は null(空配列は崩れではない)。 */
+export interface AnalysisCourse {
+  readonly name: string;
+  readonly similarShape: readonly { readonly name: string; readonly s: number }[] | null;
+  readonly similarResults: readonly { readonly name: string; readonly s: number; readonly n: number }[] | null;
 }
 
 /** 脚質(Issue #314。core の `LegStyle` と同じ 4 値。クライアントは core のバレルを import しないので、ここに持つ)。 */
@@ -240,6 +262,8 @@ export interface AnalysisDetail {
   readonly modelNote?: string | null;
   /** 別の Worker の確率の段階(Issue #800)。`final` 以外は暫定(見出しに「暫定」を付ける)。表に無い値・キー無しは null。省略可なのは、キーの無い応答を表すため。 */
   readonly modelStage?: "final" | "preday" | "provisional" | null;
+  /** 今日のコースと似たコース(Issue #802。参考の情報)。無い・形が不正は、キーごと無し(パーサは足さない)。 */
+  readonly course?: AnalysisCourse;
   /**
    * 組合せの券種ごとの行(Issue #296。オッズの取得点数・EV プラスの点数・配分の点数)。組合せの記録が無い・詳細なし・キー無し(古いサーバの応答)・形が不正な値は null にする
    * (補助の表示なので、分析全体の解析は失敗させない)。省略可なのは、キーの無い応答を表すため。
@@ -307,6 +331,48 @@ function parseMarketEdge(value: unknown): HorseMarketEdge | null {
   return jockey === null || trainer === null ? null : { jockey, trainer };
 }
 
+const isCount = (v: unknown): v is number => isNum(v) && Number.isInteger(v) && v >= 0;
+
+/** コースの成績の集計(Issue #802)。サーバと同じ不変条件(wins ≤ top3 ≤ runs、best は null か 1 以上の整数で runs 0 なら null)。崩れていれば null。 */
+function parseCourseRecord(value: unknown): AnalysisCourseRecord | null {
+  if (!isRecord(value)) return null;
+  const { runs, wins, top3, best } = value;
+  if (!isCount(runs) || !isCount(wins) || !isCount(top3) || wins > top3 || top3 > runs) return null;
+  if (best === null) return { runs, wins, top3, best: null };
+  return runs > 0 && isNum(best) && Number.isInteger(best) && best >= 1 ? { runs, wins, top3, best } : null;
+}
+
+function parseCourseFit(value: unknown): AnalysisCourseFit | null {
+  if (!isRecord(value)) return null;
+  const same = parseCourseRecord(value["same"]);
+  const similar = parseCourseRecord(value["similar"]);
+  const ring = value["unknownRing"];
+  return same === null || similar === null || !isCount(ring) ? null : { same, similar, unknownRing: ring };
+}
+
+const COURSE_LIST_MAX = 5;
+
+/** 似たコースの配列。1 つでも崩れていれば null(一部だけ読まない)。5 件を超えたら先頭 5 件。 */
+function parseCourseList<T extends { readonly name: string; readonly s: number }>(value: unknown, withN: boolean): T[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: T[] = [];
+  for (const e of value) {
+    if (!isRecord(e) || !isStr(e["name"]) || e["name"] === "" || !isNum(e["s"]) || e["s"] < 0 || e["s"] > 1) return null;
+    if (withN) {
+      if (!isCount(e["n"])) return null;
+      out.push({ name: e["name"], s: e["s"], n: e["n"] } as unknown as T);
+    } else {
+      out.push({ name: e["name"], s: e["s"] } as unknown as T);
+    }
+  }
+  return out.slice(0, COURSE_LIST_MAX);
+}
+
+function parseCourse(value: unknown): AnalysisCourse | null {
+  if (!isRecord(value) || !isStr(value["name"]) || value["name"] === "") return null;
+  return { name: value["name"], similarShape: parseCourseList(value["similarShape"], false), similarResults: parseCourseList(value["similarResults"], true) };
+}
+
 function parseHorse(row: unknown): AnalysisHorse | null {
   if (!isRecord(row)) return null;
   const { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights, concerns, winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax } = row;
@@ -337,7 +403,9 @@ function parseHorse(row: unknown): AnalysisHorse | null {
   const modelSign = row["modelSign"] === "+" || row["modelSign"] === "-" || row["modelSign"] === "0" ? row["modelSign"] : null;
   const modelEv = typeof row["modelEv"] === "number" && Number.isFinite(row["modelEv"]) ? row["modelEv"] : null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, latePos, legStyle, timeIndexLine, marketEdge, modelProb, modelEv, modelSign };
+  // Issue #802: コースの成績は、形が不正ならキーごと無し(欄が無い応答と区別しない。補助の表示なので応答ごと不正にはしない)。
+  const courseFit = parseCourseFit(row["courseFit"]);
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, markFrom, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds, fairPlaceOdds, actualPlaceOddsMin, actualPlaceOddsMax, earlyPos, latePos, legStyle, timeIndexLine, marketEdge, modelProb, modelEv, modelSign, ...(courseFit === null ? {} : { courseFit }) };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
@@ -496,6 +564,8 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     parsedAllocation = parseAllocation(allocation);
     if (parsedAllocation === null) return null;
   }
+  // Issue #802: コースの参考情報は、形が不正ならキーごと無し。
+  const course = parseCourse(value["course"]);
   return {
     id,
     raceId,
@@ -512,6 +582,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     marketEdgeNote: typeof value["marketEdgeNote"] === "string" && value["marketEdgeNote"] !== "" ? value["marketEdgeNote"] : null,
     modelStage: value["modelStage"] === "final" || value["modelStage"] === "preday" || value["modelStage"] === "provisional" ? value["modelStage"] : null,
     modelNote: typeof value["modelNote"] === "string" && value["modelNote"] !== "" ? value["modelNote"] : null,
+    ...(course === null ? {} : { course }),
     combos: parseLines(value["combos"], COMBOS_MAX_LINES, COMBOS_MAX_LINE_LENGTH),
     close: parseClose(value["close"]),
     previousDiff: parsePreviousDiff(value["previousDiff"]),

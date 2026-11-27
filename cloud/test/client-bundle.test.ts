@@ -323,7 +323,11 @@ describe("生成物のドリフトと決定性", () => {
     // 増えたのは `app.ts` の開閉の状態と `onToggleHorse`・`result.ts` の `openHorses`・`race.ts` の受け渡し・`view.ts` の `horseToggle` と詳しい行・`dom.ts` の `colspan`・`id` の許可とフォーカスの復元、日本語の文言(`\u` エスケープ)。
     // (追記)Issue #800(別の Worker の暫定の確率の見出し・補助の符号の列。文言と検証はサーバが持ち、クライアントは固定の 3 値の読み取り・見出しの切り替え・セル 1 つだけ): 上限は 257,000 から 258,000 へ引き上げた。
     // 実測(`Buffer.byteLength(CLIENT_JS)`)は 256,716(ffad5079 の生成物)→ 257,348(+632。`pnpm run build:client` の出力〈「257348 バイト」〉)。新しい上限 258,000 の余裕は 258,000 - 257,348 = 652 バイト(500 バイト単位に切り上げ)。
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(258_000);
+    // (追記)Issue #802(別の Worker が返すコースの参考情報の欄・馬ごとの成績の行。検査はサーバが先に行い、クライアントは形の再検査・文の組み立て・欄の表示だけ): 上限は 258,000 から 261,000 へ引き上げた。
+    // 実測(`Buffer.byteLength(CLIENT_JS)`)は 257,348(e51d3373 の生成物)→ 260,101(+2,753。`pnpm run build:client` の出力〈「260101 バイト」〉)。
+    // 計り方: 起点と今のそれぞれの生成物を import し、`npx tsx -e "import {CLIENT_JS} from './src/client-bundle.generated'; console.log(Buffer.byteLength(CLIENT_JS))"` と同じ式で測った。新しい上限 261,000 の余裕は 261,000 - 260,101 = 899 バイト。
+    // 増えたのは `api-analysis.ts` の `course`・`courseFit` の検査(集計・一覧・欄)、`result.ts` の文の組み立て(`courseFitLinesOf`・`courseSectionOf`)、`view.ts` の欄と成績の行、日本語の文言(`\u` エスケープ)。
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(261_000);
   });
 });
 
