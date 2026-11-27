@@ -586,6 +586,36 @@ describe("GET /api/analyses/{id}: 別の Worker が計算した確率の列(Issu
     expect([third.modelProb, third.modelEv], "前提: 3 番以降の馬がある").toEqual([null, null]);
   });
 
+  it("Issue #802: コースの参考情報は、同じ 1 回の GET から足す(GET は 2 回にならない)。course・courseFit が付き、外の name は出ない", async () => {
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    const fit = { runs: 5, wins: 1, top3: 2, best: 1 };
+    const m = fakeModel(() =>
+      Response.json({
+        race_id: RACE_ID,
+        status: "none",
+        reason: "not_ready",
+        course: { key: "05-T-1600-out", name: "<script>EVIL</script>", similar_shape: [{ key: "06-T-2000-out", name: "中山 芝2000", s: 0.5 }], similar_results: [] },
+        horses: [{ umaban: 1, p_win: 0.1, course_fit: { same: fit, similar: { ...fit, courses: [] }, unknown_ring: 1 } }],
+      }),
+    );
+    const { status, text, analysis } = await fetchWith(saved.id, m.fetcher);
+    const a = analysis as unknown as { course: unknown; horses: { umaban: number; courseFit?: unknown }[] };
+    expect(status).toBe(200);
+    expect(m.calls).toEqual([`GET /v1/races/${RACE_ID}`]);
+    expect(a.course).toEqual({ name: "東京 芝1600", similarShape: [{ name: "中山 芝2000", s: 0.5 }], similarResults: [] });
+    expect(a.horses.find((h) => h.umaban === 1)!.courseFit).toEqual({ same: fit, similar: fit, unknownRing: 1 });
+    expect(a.horses.find((h) => h.umaban === 2)).not.toHaveProperty("courseFit");
+    expect(text).not.toContain("EVIL");
+  });
+
+  it("Issue #802: 欄の無い今の版の応答では、course・courseFit のキーを足さない", async () => {
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
+    const m = fakeModel(() => Response.json({ race_id: RACE_ID, status: "ok", model_version: "v", computed_at: "t", odds_minutes_before: 5, horses: [{ umaban: 1, p_win: 0.25 }] }));
+    const { analysis } = await fetchWith(saved.id, m.fetcher);
+    expect(analysis).not.toHaveProperty("course");
+    expect(analysis.horses.some((h) => "courseFit" in h)).toBe(false);
+  });
+
   it("計算なし・誤りでも 200。理由は固定の語彙(外の文字列は出ない)", async () => {
     const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(await record());
     const m = fakeModel(() => Response.json({ race_id: RACE_ID, status: "none", reason: "<script>EVIL</script>" }));

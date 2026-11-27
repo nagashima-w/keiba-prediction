@@ -31,7 +31,7 @@ import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/core/src/view/bet-allo
 import { formatEstimatedEvSuffix, formatEv, formatMarkRepair, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, MARK_LEGEND } from "../../packages/core/src/view/format";
 import { markRank, PREDICTION_MARKS } from "../../packages/core/src/common/prediction-marks";
 import type { RaceRow } from "./api";
-import type { AnalysisDetail, MarketEdgePerson } from "./api-analysis";
+import type { AnalysisCourse, AnalysisCourseFit, AnalysisCourseRecord, AnalysisDetail, MarketEdgePerson } from "./api-analysis";
 import { breadcrumbOf, neighborsOf, type Crumb, type RaceNeighbors } from "./neighbors";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { nameWithGrade } from "./grade";
@@ -95,11 +95,60 @@ export interface HorseMarketCells {
 /** 件数がこれ未満の人は「少」(Issue #643。ユーザーの決定。縮み(÷(件数+30))が強く、値が 0 に寄っている)。 */
 export const MARKET_EDGE_FEW_N = 50;
 
+/** 馬のコース別の成績の文(Issue #802)。`ring` は、回りの決まらない過去走が 1 以上のときだけ。 */
+export interface CourseFitLines {
+  readonly same: string;
+  readonly similar: string;
+  readonly ring: string | null;
+}
+
+/** 似たコースの一覧(Issue #802)。 */
+export interface CourseListView {
+  readonly label: string;
+  readonly items: readonly string[];
+}
+
+/** 「コースの類似(参考)」の欄(Issue #802)。名前はサーバが key から組んだ文字列(外から来た文字列は子の文字列だけ)。一覧が無い・空のときは null(その一覧を出さない)。 */
+export interface CourseSection {
+  readonly heading: string;
+  readonly todayLine: string;
+  readonly shape: CourseListView | null;
+  readonly results: CourseListView | null;
+  readonly note: string;
+}
+
+export const COURSE_HEADING = "コースの類似(参考)";
+export const COURSE_NOTE = "参考の情報。モデルの確率には使っていない";
+
+function courseRecordText(r: AnalysisCourseRecord): string {
+  if (r.runs === 0) return "0走";
+  return `${r.runs}走 ${r.wins}勝 3着内${r.top3}${r.best === null ? "" : `(最高${r.best}着)`}`;
+}
+
+function courseFitLinesOf(fit: AnalysisCourseFit | undefined): CourseFitLines | null {
+  if (fit === undefined) return null;
+  return { same: `同じコース: ${courseRecordText(fit.same)}`, similar: `似たコース: ${courseRecordText(fit.similar)}`, ring: fit.unknownRing >= 1 ? `回りの決まらない過去走: ${fit.unknownRing}` : null };
+}
+
+function courseSectionOf(course: AnalysisCourse | undefined): CourseSection | null {
+  if (course === undefined) return null;
+  const list = (label: string, items: readonly string[] | null): CourseListView | null => (items === null || items.length === 0 ? null : { label, items });
+  return {
+    heading: COURSE_HEADING,
+    todayLine: `今日のコース: ${course.name}`,
+    shape: list("形から似たコース", course.similarShape === null ? null : course.similarShape.map((c) => `${c.name} ${c.s.toFixed(2)}`)),
+    results: list("成績から似たコース", course.similarResults === null ? null : course.similarResults.map((c) => `${c.name} ${c.s.toFixed(2)}(根拠の馬 ${c.n}頭)`)),
+    note: COURSE_NOTE,
+  };
+}
+
 export interface HorseCard {
   /** 騎手・調教師の指標のセル(Issue #643)。 */
   readonly marketEdge: HorseMarketCells;
   /** 別の Worker が計算した確率と、確率 × 5 分前の単勝のセル(Issue #796)。値が無い馬は「—」。列を出すかは `HorseTable.columns`。 */
   readonly model: { readonly prob: string; readonly ev: string; /** 補助の値の符号(Issue #800)。＋ − 0、無ければ「—」。 */ readonly sign: string };
+  /** コース別の成績の文(Issue #802。参考の情報)。欄の無い馬は null。画面は詳しい中身のタイム指数の行の下に出す。 */
+  readonly courseFit: CourseFitLines | null;
   readonly umaban: number;
   readonly name: string | null;
   /** 印。`mark` が non-null のときだけ。 */
@@ -330,6 +379,8 @@ export interface ResultContent {
   readonly notesOpen: boolean;
   /** 馬ごとの評価の表(Issue #546-2。「馬ごとの評価」の節の説明文の下・カードの一覧より前)。馬が 0 頭なら null。 */
   readonly horseTable: HorseTable | null;
+  /** 「コースの類似(参考)」の欄(Issue #802。馬ごとの評価の表の直後)。欄が無い応答(今の版)は null。 */
+  readonly course: CourseSection | null;
   /** 想定隊列図の節(Issue #362。AI の展開予想の後・「当日の馬場」の前)。脚質の分かる馬が 2 頭未満の分析は null(節ごと出さない)。 */
   readonly formation: FormationSection | null;
   readonly title: string;
@@ -606,6 +657,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false
     placeOdds: buildPlaceOddsLine(h.fairPlaceOdds, h.actualPlaceOddsMin, h.actualPlaceOddsMax, a.race.oddsStatus, a.race.placeBasis),
     timeIndexLine: h.timeIndexLine ?? null,
     marketEdge: h.marketEdge == null ? { jockey: EMPTY_MARKET_CELL, trainer: EMPTY_MARKET_CELL } : { jockey: marketCellOf(h.marketEdge.jockey), trainer: marketCellOf(h.marketEdge.trainer) },
+    courseFit: courseFitLinesOf(h.courseFit),
     model: { prob: h.modelProb == null ? NO_MARKET_VALUE : formatPercent(h.modelProb), ev: h.modelEv == null ? NO_MARKET_VALUE : formatEv(h.modelEv), sign: h.modelSign === "+" ? "＋" : h.modelSign === "-" ? "−" : h.modelSign === "0" ? "0" : NO_MARKET_VALUE },
     sortValues: {
       prior: finiteOrNull(h.prior),
@@ -645,6 +697,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false, notesOpen = false
     horses,
     // 騎手・調教師の列(Issue #643)は、注記があり、1 頭でも指標の材料を持つときだけ。
     horseTable: horseTableOf(horses, llmEffective, a.race.oddsStatus, horseSort, a.horses.some((h) => h.marketEdge != null) ? (a.marketEdgeNote ?? null) : null, a.modelNote ?? null, a.modelStage ?? null),
+    course: courseSectionOf(a.course),
     allocation,
     close: closeOf(a, readOnly),
   };
